@@ -9,6 +9,7 @@
 #include "world.h"
 #include "movie.h"
 #include "input.h"
+#include "doors.h"
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -159,6 +160,13 @@ int main(int argc,char** argv){
         std::int64_t animation=args.animation_frame*65536;
         bool automatic_camera=bool(player)&&!args.camera_explicit,locomotion=false;
         auto follow=[&](){if(automatic_camera)if(const auto cut=recvx::camera_for_position(scene,actor.position)){camera_index=*cut;camera=recvx::camera_for_actor(scene,camera_index,actor.position);}};
+        recvx::DoorSequence door;bool transition_pending=false;unsigned room_changes=0;
+        auto request_door=[&](const recvx::DoorRequest& request){
+            if(door.active()||transition_pending)return false;
+            const auto target=request.room_name();bool found=false;for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==target)found=true;
+            if(!found)throw std::runtime_error("door room missing: "+target);
+            door.begin(args.data,args.mods,request);transition_pending=true;menu.active=false;return true;
+        };
         auto load=[&](){
             auto room_name=rooms.name(room_index);room_name.replace(room_name.size()-3,3,"RDT");
             const auto override=args.mods/"rooms"/room_name;
@@ -172,7 +180,9 @@ int main(int argc,char** argv){
             origin=actor=scene.spawns.empty()?recvx::SceneSpawn{}:scene.spawns[args.spawn];
             camera_index=0;camera=scene.cameras[0];follow();
             stage_geometry=scene.triangles;stable_textures=scene.textures.size();
-            if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4));events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);
+            if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4));auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);
+                if(previous)events->inherit_progress(*previous);
+                const auto identity=rooms.name(room_index);events->values[0]=unsigned(std::stoul(identity.substr(3,1),nullptr,16));events->values[1]=unsigned(std::stoul(identity.substr(4,2),nullptr,16));events->values[15]=unsigned(args.spawn);events->values[21]=unsigned(std::stoul(identity.substr(6,1),nullptr,16));events->door=request_door;
                 events->binding=[&](const recvx::EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();return true;}return world->bind(c);};events->animation_frame=[&](unsigned k,unsigned i){return world->frame(k,i);};events->audio_active=[&](unsigned slot){return audio.active(slot);};events->movie_active=[&](){return movie.active();};events->initialize();}
             std::cout<<rooms.name(room_index)<<": "<<scene.object_count<<" objects, "<<stage_triangles<<" stage triangles, "<<scene.cameras.size()<<" cameras, "<<scene.spawns.size()<<" spawns\n";
         };
@@ -183,21 +193,27 @@ int main(int argc,char** argv){
         if(player)std::cout<<"Animated SYSTEM/"<<recvx::asset_number(args.player)<<".bin: "<<player->bones()<<" bones, motion "<<motion<<", "<<player->motion_frames(motion)<<" frames\n";
         std::map<unsigned,std::vector<std::string>> replay;
         if(!args.replay.empty()){std::ifstream file(args.replay);if(!file)throw std::runtime_error("replay input missing");std::string line;unsigned previous=0;while(std::getline(file,line)){if(line.empty()||line[0]=='#')continue;std::istringstream row(line);unsigned frame;std::string action;if(!(row>>frame)||frame<previous)throw std::runtime_error("invalid replay frame order");previous=frame;std::getline(row,action);replay[frame].push_back(action);}}
-        recvx::GameplayInput gameplay_input(inventory,menu,dialog,events.get());gameplay_input.interact=[&]{if(events)events->interact(actor.position,actor.yaw);};
+        recvx::GameplayInput gameplay_input(inventory,menu,dialog,events.get());gameplay_input.interact=[&]{if(events)events->interact(actor.position,actor.yaw,world?world->floor_at(actor.position):0);};
+        gameplay_input.transition_active=[&]{return transition_pending;};gameplay_input.confirm_transition=[&]{door.skip();};
+        auto transition_tick=[&](){if(!transition_pending)return false;door.tick();
+            if(door.finished()){const auto destination=door.destination();for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==destination.room_name())room_index=i;
+                movie.stop();audio.stop(1);args.spawn=destination.spawn;motion=42;animation=0;locomotion=false;transition_pending=false;++room_changes;load();gameplay_input.set_events(events.get());follow();}
+            return true;
+        };
         auto input=[&](recvx::MenuInput key){if(ui)gameplay_input.menu_input(key);};
         int replay_move=0,replay_turn=0;bool replay_run=false;
         auto replay_input=[&](unsigned frame){if(const auto found=replay.find(frame);found!=replay.end())for(const auto& line:found->second){std::istringstream row(line);std::string action;row>>action;if(action=="keys"){replay_move=replay_turn=0;replay_run=false;std::string key;while(row>>key){if(key=="forward")replay_move=1;else if(key=="back")replay_move=-1;else if(key=="left")replay_turn=-1;else if(key=="right")replay_turn=1;else if(key=="run")replay_run=true;else if(key!="none")throw std::runtime_error("unknown replay key: "+key);}}else if(action=="skip")events->skip_cinematic();else if(action=="inventory")input(recvx::MenuInput::Open);else if(action=="confirm")input(recvx::MenuInput::Confirm);else if(action=="cancel")input(recvx::MenuInput::Cancel);else if(action=="up")input(recvx::MenuInput::Up);else if(action=="down")input(recvx::MenuInput::Down);else if(action=="left")input(recvx::MenuInput::Left);else if(action=="right")input(recvx::MenuInput::Right);else if(action=="position"){if(!(row>>actor.position.x>>actor.position.y>>actor.position.z>>actor.yaw)||!std::isfinite(actor.position.x)||!std::isfinite(actor.position.y)||!std::isfinite(actor.position.z))throw std::runtime_error("invalid replay position");follow();}else throw std::runtime_error("unknown replay action: "+action);}};
         auto locomote=[&](int move,bool run,int turn){
-            if(!player||menu.active||dialog.active()||(world&&(world->player_scripted||world->player_hidden))||(events&&(events->flags[5][0]&4)))return;
+            if(transition_pending||!player||menu.active||dialog.active()||(world&&(world->player_scripted||world->player_hidden))||(events&&(events->flags[5][0]&4)))return;
             if(move)locomotion=true;
             if(locomotion){const auto from=actor.position;player->locomotion(actor,motion,animation,move,run,turn);if(world)actor.position=world->move(from,actor.position);}
             else{actor.yaw=(actor.yaw+turn*int(182.04445f*4.5f))&65535;advance();}follow();
         };
-        auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}if(!args.state.empty()){if(fs::exists(args.state))throw std::runtime_error("state output already exists");std::ofstream out(args.state);if(!out)throw std::runtime_error("cannot create state output");out<<"{\n  \"weapon\": "<<inventory.weapon()<<", \"hp\": "<<inventory.hp<<", \"inventory_open\": "<<(menu.active?"true":"false")<<", \"dialog_open\": "<<(dialog.active()?"true":"false")<<", \"dialog_index\": "<<dialog.index()<<",\n  \"items\": [";for(unsigned i=0;i<12;++i)out<<(i?",":"")<<inventory.slots()[i];out<<"],\n  \"events\": [";if(events)for(unsigned i=0;i<events->dispatched.size();++i)out<<(i?",":"")<<events->dispatched[i];out<<"], \"pending_world_bindings\": "<<(events?events->pending_bindings.size():0)<<", \"blocked_commands\": "<<(events?events->errors.size():0)<<",\n  \"actor\": ["<<actor.position.x<<","<<actor.position.y<<","<<actor.position.z<<"], \"motion\": "<<motion<<", \"animation_frame\": "<<animation<<", \"player_hidden\": "<<(world&&world->player_hidden?"true":"false")<<", \"player_scripted\": "<<(world&&world->player_scripted?"true":"false")<<", \"cinematic\": "<<(events&&(events->flags[5][0]&4)?"true":"false")<<", \"event_camera\": "<<(world&&world->event_camera?int(world->event_camera_index):-1)<<", \"movie_active\": "<<(movie.active()?"true":"false")<<", \"movie_frame\": "<<movie.frame()<<", \"audio_played\": [";for(unsigned i=0;i<audio.played.size();++i)out<<(i?",":"")<<std::quoted(audio.played[i]);out<<"]\n}\n";}};
+        auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}if(!args.state.empty()){if(fs::exists(args.state))throw std::runtime_error("state output already exists");std::ofstream out(args.state);if(!out)throw std::runtime_error("cannot create state output");out<<"{\n  \"room\": "<<std::quoted(rooms.name(room_index))<<", \"room_changes\": "<<room_changes<<", \"door_active\": "<<(transition_pending?"true":"false")<<", \"door_ticks\": "<<door.ticks()<<", \"door_skipped\": "<<(door.skipped()?"true":"false")<<", \"yaw\": "<<actor.yaw<<",\n  \"weapon\": "<<inventory.weapon()<<", \"hp\": "<<inventory.hp<<", \"inventory_open\": "<<(menu.active?"true":"false")<<", \"dialog_open\": "<<(dialog.active()?"true":"false")<<", \"dialog_index\": "<<dialog.index()<<",\n  \"items\": [";for(unsigned i=0;i<12;++i)out<<(i?",":"")<<inventory.slots()[i];out<<"],\n  \"events\": [";if(events)for(unsigned i=0;i<events->dispatched.size();++i)out<<(i?",":"")<<events->dispatched[i];out<<"], \"pending_world_bindings\": "<<(events?events->pending_bindings.size():0)<<", \"blocked_commands\": "<<(events?events->errors.size():0)<<",\n  \"actor\": ["<<actor.position.x<<","<<actor.position.y<<","<<actor.position.z<<"], \"motion\": "<<motion<<", \"animation_frame\": "<<animation<<", \"player_hidden\": "<<(world&&world->player_hidden?"true":"false")<<", \"player_scripted\": "<<(world&&world->player_scripted?"true":"false")<<", \"cinematic\": "<<(events&&(events->flags[5][0]&4)?"true":"false")<<", \"event_camera\": "<<(world&&world->event_camera?int(world->event_camera_index):-1)<<", \"movie_active\": "<<(movie.active()?"true":"false")<<", \"movie_frame\": "<<movie.frame()<<", \"audio_played\": [";for(unsigned i=0;i<audio.played.size();++i)out<<(i?",":"")<<std::quoted(audio.played[i]);out<<"]\n}\n";}};
         recvx::SoftwareRenderer image(640,480);const auto start=std::chrono::steady_clock::now();
         if(args.headless){
             const int frames=args.frames?args.frames:1;
-            for(int i=0;i<frames;++i){replay_input(unsigned(i));if(events){events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw);events->tick();}if(world)world->tick();follow();movie.tick();audio.mix();locomote(replay_move,replay_run,replay_turn);if(i==frames-1){compose();image.draw(scene,world?world->camera(scene,camera):camera);if(world)world->overlay(image);movie.draw(image);if(ui)ui->draw(image,inventory,menu,dialog,unsigned(i));}}
+            for(int i=0;i<frames;++i){replay_input(unsigned(i));const bool transitioning=transition_tick();if(!transitioning&&events){events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();}if(!transitioning&&world)world->tick();follow();movie.tick();audio.mix();if(!transitioning)locomote(replay_move,replay_run,replay_turn);if(i==frames-1){compose();image.draw(scene,world?world->camera(scene,camera):camera);if(world)world->overlay(image);movie.draw(image);if(ui)ui->draw(image,inventory,menu,dialog,unsigned(i));if(transition_pending)door.draw(image);}}
             if(!args.screenshot.empty())image.save_bmp(args.screenshot);
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
             report();return events&&!events->errors.empty()?1:0;
@@ -254,11 +270,12 @@ int main(int argc,char** argv){
                 const auto physical=devices.tick();
                 if(ui){if(gameplay_input.apply(physical)){running=false;break;}if(physical.hit(recvx::Action::Wireframe))wireframe=!wireframe;}
                 replay_input(input_tick++);
-                if(events){events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw);events->tick();}
-                if(world)world->tick();follow();movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
-                locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());
+                const bool transitioning=transition_tick();
+                if(!transitioning&&events){events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();}
+                if(!transitioning&&world)world->tick();follow();movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
+                if(!transitioning)locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());
             }
-            compose();image.draw(scene,world?world->camera(scene,camera):camera,wireframe);if(world)world->overlay(image);movie.draw(image);if(ui)ui->draw(image,inventory,menu,dialog,unsigned(frame));
+            compose();image.draw(scene,world?world->camera(scene,camera):camera,wireframe);if(world)world->overlay(image);movie.draw(image);if(ui)ui->draw(image,inventory,menu,dialog,unsigned(frame));if(transition_pending)door.draw(image);
             sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);
             sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());
             const std::string title="RECVX native | "+rooms.name(room_index)+" | Camera "+std::to_string(camera_index+1)+(player?" | Motion "+std::to_string(motion):"")+(ui?" | Native development":" | Preview");SDL_SetWindowTitle(window.get(),title.c_str());

@@ -12,10 +12,19 @@ ADX-Musik/Stimmen und die 18 Filme mit ihrem PCM-Ton werden nativ verarbeitet.
 Dialoge verwenden weiße Schrift mit schwarzer Kontur ohne Hintergrundfläche.
 Leere Inventarfelder verwenden den Original-Atlas; die zwei Taschenplätze und
 der längere Rahmen erscheinen erst mit der Tasche. Effekte, Gesichtssystem,
-Soundbanken/Schritte, Kampf, Raumwechsel, Speicherstände und weitere Menüseiten
+Soundbanken/Schritte, Kampf, Speicherstände und weitere Menüseiten
 sind noch unvollständig. Ausführliche Grenzen stehen in der Gameplay-Dokumentation.
 
 ## Starten und bauen
+
+**Vorhandenes Spiel starten:** im Projektordner `Start.command` (macOS) oder
+`Start.cmd` (Windows) doppelklicken. Sie starten die bereits vorhandenen Pakete.
+[Startanleitung mit Tasten und Ressourcen](STARTEN.md).
+
+Türwechsel mit originalen MRY-Modellen und Bewegungsparametern sind eingebaut.
+Ein erneuter Druck auf die Bestätigungstaste (Enter / Controller-A, konfigurierbar)
+überspringt die Türsequenz. Inventar, Ausrüstung, HP, Tasche und globale
+Ereignisflags bleiben über Raumwechsel erhalten.
 
 Voraussetzungen: Python 3.12+, CMake, C/C++-Compiler (Apple Command Line Tools oder
 Visual Studio mit C++); für Windows-Crossbuilds zusätzlich Ninja. SDL2 ist über

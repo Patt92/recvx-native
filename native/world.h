@@ -21,6 +21,7 @@ public:
     bool player_hidden=false,player_scripted=false;
     bool event_camera=false;
     unsigned event_camera_index=0;
+    int floor_at(NJS_POINT3 position)const;
     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f)const;
 private:
     struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;};

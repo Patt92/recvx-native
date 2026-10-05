@@ -34,7 +34,7 @@ External mods do not alter the app signature.
 Texture IDs are zero-based per bundle. The cinematic and playable Claire are
 separate original asset bundles and require their respective overrides. Loose
 original archive records remain under `archives/ARCHIVE_NAME/0000.bin`; playable
-Claire defaults to SYSTEM/0010.bin, and item ID 55 to ITEM1/0054.bin.
+Claire defaults to SYSTEM/0010.bin, and the lighter (item ID 55, inventory slot 1) to ITEM1/0054.bin.
 
 Use uncompressed RGB24/RGBA32 TGA without color maps, 1–8192 pixels per dimension.
 Higher resolution preserves original UVs and asset identities. Original PS2
@@ -79,3 +79,18 @@ providing a boundary for a future importer.
 
 Cooked data and packages are local ignored outputs, not part of source Git.
 Packages include the full manifest and external empty mods directory.
+
+## Door resources
+
+Door type 0 defaults to `archives/MRY/0071.bin`, type 1 to `0072.bin`, etc.
+These MPAC packets contain the original MDL, PVP textures, sound-bank reference
+and PMB camera/door/fade parameters. Native procedures are generated from
+`src/ps2/veronica/prog/door.c` and compiled for the host.
+Use `mods/doors/0000.bin` to override the complete packet for door type 0,
+or `mods/textures/doors/0000/0000.tga` for its first texture. Other types follow
+the same numbering. Original embedded PVP textures provide the base fallback.
+Sound-bank playback, special light procedures and rumble remain pending.
+
+The rotating examination view renders original 3D item geometry. Exported TGA
+files are replaceable original resources; screenshots are not loaded by gameplay.
+Obsolete verification images are stored under ignored `archived/diagnostics/`.

@@ -96,14 +96,15 @@ void InputManager::event(const SDL_Event& e){if(e.type==SDL_CONTROLLERDEVICEADDE
 }
 InputFrame InputManager::tick(){for(auto& item:pads_)refresh(item.second);evaluate();InputFrame frame;frame.held=held_;frame.pressed=pending_;pending_.fill(false);
     for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}return frame;}
-void GameplayInput::menu_input(MenuInput key){if(!events_)return;if(dialog_.active()&&!menu_.active&&(key==MenuInput::Confirm||key==MenuInput::Cancel)){events_->confirm_dialog();return;}
+void GameplayInput::menu_input(MenuInput key){if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;}if(!events_)return;if(dialog_.active()&&!menu_.active&&(key==MenuInput::Confirm||key==MenuInput::Cancel)){events_->confirm_dialog();return;}
     if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4))return;
     if(menu_.active||key==MenuInput::Open){menu_.input(key,inventory_);events_->menu_open=menu_.active;if(menu_.use_item){events_->use(menu_.use_item);menu_.use_item=0;}return;}
     if(key==MenuInput::Confirm&&interact)interact();
 }
-bool GameplayInput::apply(const InputFrame& f){const bool cancel_context=menu_.active||dialog_.active();if(f.hit(Action::Cancel)&&cancel_context)menu_input(MenuInput::Cancel);else if(f.hit(Action::Quit))return true;
+bool GameplayInput::apply(const InputFrame& f){if(transition_active&&transition_active()){if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition();return false;}const bool cancel_context=menu_.active||dialog_.active();if(f.hit(Action::Cancel)&&cancel_context)menu_input(MenuInput::Cancel);else if(f.hit(Action::Quit))return true;
     if(f.hit(Action::Inventory))menu_input(MenuInput::Open);
     if(f.hit(Action::Confirm))menu_input(MenuInput::Confirm);
+    if(transition_active&&transition_active())return false;
     for(auto pair:{std::pair<Action,MenuInput>{Action::Up,MenuInput::Up},{Action::Down,MenuInput::Down},{Action::Left,MenuInput::Left},{Action::Right,MenuInput::Right}})if(f.navigation(pair.first))menu_input(pair.second);
     if(f.hit(Action::Skip)&&events_)events_->skip_cinematic();return false;
 }

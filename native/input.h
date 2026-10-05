@@ -56,7 +56,9 @@ public:
     GameplayInput(Inventory& inventory,StatusMenu& menu,MessageDialog& dialog,EventVm* events):inventory_(inventory),menu_(menu),dialog_(dialog),events_(events){}
     void menu_input(MenuInput key);
     bool apply(const InputFrame& frame); // true means an explicit quit action
-    std::function<void()> interact;
+    std::function<void()> interact,confirm_transition;
+    std::function<bool()> transition_active;
+    void set_events(EventVm* events){events_=events;}
 private:
     Inventory& inventory_;StatusMenu& menu_;MessageDialog& dialog_;EventVm* events_;
 };

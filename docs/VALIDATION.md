@@ -6,8 +6,8 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 |---|---|
 | macOS universal build | arm64 and x86_64 slices present |
 | Windows build | PE32+ x64 executable and bundled SDL2 |
-| CTest | 10/10 on macOS; 10/10 under Wine |
-| ASan + UBSan | 10/10 and original-data opening/controller regressions passed |
+| CTest | 11/11 on macOS; 11/11 under Wine |
+| ASan + UBSan | 11/11 and original-data opening/controller regressions passed |
 | Intel/Rosetta | original-data opening/UI and SDL virtual-controller regressions passed |
 | Disc data manifest | 12,702 files; 6,575,300,120 bytes; both packaged trees verified |
 | Room scene decoder | 205/205, 1,008,630 stage triangles, 470 active camera targets |
@@ -23,14 +23,24 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 | Gamepad opening flow | original cell skip/dialogue/inventory/lighter/Rodrigo/control-return path passed on arm64, Rosetta and Windows/Wine |
 | Physical controller | no mapped controller or joystick detected locally; physical Windows XInput hardware not tested |
 | Backward movement | original clip 16/key 25, advancing pose, signed curve, unchanged facing, return to idle and controller backstep checked |
+| Original doors | 105 MRY parameter cases rendered, completed and skipped; original hinge/camera/fade procedures compiled natively |
+| Room round trip | cell/hall/cell walked without teleport; natural and OK-skipped sequences give identical spawn, retain items/equipment/HP and do not replay opening; arm64, Rosetta, ASan/UBSan and Windows/Wine |
+| Confirm during doors | keyboard Enter and SDL virtual A, held-key suppression and inventory blocking tested; binding remains configurable |
+| Lighter resources | item ID 55 reads ITEM1/0054.bin and original PVP textures; rotated 3D view differs; old diagnostic screenshots archived |
 | Solid wall collision | ATR types 0..5; room-height fallback, original player dimensions, floor attributes, thin walls both directions, signed diagonal walls, circular contacts, sliding and corners checked |
 
 The original-data opening regression passes with 127 known unbound commands.
 Particle effects, lighter/flame object, full MASK/face/lip processing, camera
-interpolation, original SE banks/footsteps, combat, room transitions and complete
+interpolation, original SE banks/footsteps, combat and complete
 puzzle/progression/save systems remain pending. A successful room decode does
 not verify that room's gameplay. Wine validation is not a physical Windows test.
 
 The original ISO, previous Git and obsolete PS2 compiler/CRI/Katana distributions
 are preserved under ignored archived/. The new source Git excludes private data,
 archives and all build/package outputs. No remote was configured or pushed.
+
+Direct root launchers `Start.command` and `Start.cmd` expose the existing packaged
+builds. `STARTEN.md` describes launch, first equipment flow and door controls.
+Door sound banks, special door lighting and rumble are not yet implemented.
+The inventory regression also checks retained poison/HP/side-pack state across
+VM reconstruction; door filters support signed below-ground floor IDs.

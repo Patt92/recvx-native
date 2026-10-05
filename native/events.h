@@ -1,12 +1,13 @@
 #pragma once
 #include "inventory.h"
 #include "messages.h"
+#include "doors.h"
 #include "scene.h"
 #include <functional>
 #include <set>
 namespace recvx {
 struct EventCommand {unsigned opcode=0,task=0,event=0;std::size_t offset=0;std::vector<std::uint8_t> bytes;};
-struct Interaction {unsigned flags=0,type=0,attribute=0,floor=0;NJS_POINT3 position{},extent{};std::array<unsigned,4> parameters{};};
+struct Interaction {unsigned flags=0,type=0,attribute=0;int floor=0;NJS_POINT3 position{},extent{};std::array<unsigned,4> parameters{};};
 class EventVm {
 public:
     EventVm(const std::vector<std::uint8_t>& room,Inventory& inventory,MessageDialog& dialog);
@@ -24,12 +25,14 @@ public:
     std::function<unsigned(unsigned,unsigned)> animation_frame;
     std::function<bool(unsigned)> audio_active;
     std::function<bool()> movie_active;
+    std::function<bool(const DoorRequest&)> door;
+    void inherit_progress(const EventVm& previous);
     void initialize();
     void tick();
     void start(unsigned level,unsigned event);
-    bool interact(NJS_POINT3 position,Angle yaw);
+    bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
     void use(unsigned item);
-    void check_floor(NJS_POINT3 position,Angle yaw,unsigned floor=0);
+    void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);
     void confirm_dialog();
     bool skip_cinematic();
     bool flag(unsigned matrix,unsigned index)const;

@@ -57,6 +57,8 @@ def main():
         if not args.no_test and (data / 'native-data.version').is_file():
             run(binary_dir / ('recvx-game-tests' + suffix), data)
             run(binary_dir / ('recvx-input-tests' + suffix), data)
+            run(binary_dir / ('recvx-door-tests' + suffix), data)
+            run(sys.executable, ROOT / 'tools/verify_doors.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
     if args.package:
         if target == 'linux':
             parser.error('the packaged targets are Windows and macOS')

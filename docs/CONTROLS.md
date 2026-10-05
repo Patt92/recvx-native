@@ -108,3 +108,7 @@ SDL references: [opening controllers](https://wiki.libsdl.org/SDL2/SDL_GameContr
 [XInput detection](https://wiki.libsdl.org/SDL2/SDL_HINT_XINPUT_ENABLED),
 [device-event IDs](https://wiki.libsdl.org/SDL2/SDL_ControllerDeviceEvent),
 [virtual joystick testing](https://wiki.libsdl.org/SDL2/SDL_JoystickAttachVirtual).
+
+During a door transition, a fresh press of configured Confirm (default Enter /
+A) skips directly to the destination spawn. Held Confirm does not immediately
+skip a newly entered door; navigation and inventory inputs are ignored there.

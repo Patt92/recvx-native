@@ -12,15 +12,20 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
     for(std::size_t p=8;p<header;p+=4)scripts_.push_back(v.relative(base_,v.u32(base_+p),1));
     messages_=v.u32(info.room_offset+0x38);v.require(messages_,4);
     const auto count=v.u32(info.room_offset+0x9c),offset=v.u32(info.room_offset+0x1c);if(count>4096)throw std::runtime_error("too many room interactions");v.require(offset,count*36);
-    for(unsigned i=0;i<count;++i){const auto p=offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};for(unsigned j=0;j<4;++j)a.parameters[j]=v.u8(p+32+j);interactions.push_back(a);}
+    for(unsigned i=0;i<count;++i){const auto p=offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};for(unsigned j=0;j<4;++j)a.parameters[j]=v.u8(p+32+j);interactions.push_back(a);}
     const auto floor_count=v.u32(info.room_offset+0xa0),floor_offset=v.u32(info.room_offset+0x20);
     if(floor_count>4096)throw std::runtime_error("too many floor triggers");v.require(floor_offset,floor_count*36);
-    for(unsigned i=0;i<floor_count;++i){const auto p=floor_offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=v.u8(p+3);a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};floors_.push_back(a);}
+    for(unsigned i=0;i<floor_count;++i){const auto p=floor_offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};floors_.push_back(a);}
     values[23]=inventory_.game_mode;values[24]=inventory_.player;flags[6][0]=0xffffffff;flags[13][0]=1;flags[14][0]=0x40000000;if(inventory_.side_pack)flags[11][0]|=0x8000000;
 }
 bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size()||index>=1024)throw std::runtime_error("event flag outside matrix");return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
 void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||index>=1024||mode>5)throw std::runtime_error("invalid event flag operation");auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
 void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<16&&tasks_[level].active)++level;if(level==16)return;}tasks_[level]={};tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
+void EventVm::inherit_progress(const EventVm& previous){
+    // Original global event/key/item/map/game flags outlive a ROM_WORK load.
+    for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
+    values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
+}
 void EventVm::initialize(){Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
 void EventVm::world(Task& task,unsigned op,std::size_t length){
     BinaryView v(room_);v.require(task.pc,length);EventCommand c{op,task.level,task.event,task.pc-base_,{room_.begin()+task.pc,room_.begin()+task.pc+length}};
@@ -80,6 +85,7 @@ int EventVm::instruction(Task& t){
     case 0xa:case 0x13:case 0x3d:case 0x3f:case 0x20:case 0x24:case 0x2f:case 0x35:case 0x3c:case 0x3e:case 0x43:case 0x4b:case 0x65:case 0x91:case 0x9a:case 0xa6:world(t,op,4);return 1;
     case 0x86:world(t,op,16);return 1;
     case 0x23:case 0x44:world(t,op,6);return 1;
+    case 0x33:{v.require(p,8);DoorRequest request{v.u16(p+2),v.u8(p+4),v.u8(p+5),v.u8(p+6),v.u8(p+7),values[21]};if(!door||!door(request))throw std::runtime_error("DoorCall destination unavailable");advance(8);return 2;}
     case 0x32:case 0x53:case 0x34:world(t,op,12);return 1;
     case 0x3b:world(t,op,6);return 1;
     case 0x36:world(t,op,6);return 1;
@@ -100,7 +106,7 @@ void EventVm::run(Task& t,bool scenario){
 void EventVm::tick(){++tick_count;if(dialog_.tick())flags[10][0]|=0x2000;menu_open?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;run(scenario,true);for(auto& t:tasks_)if(t.active)run(t);}
 void EventVm::confirm_dialog(){dialog_.confirm();if(!dialog_.active()){flags[5][0]&=~0x200u;flags[10][0]|=0x2000;}}
 void EventVm::use(unsigned item){values[8]=item;flags[10][0]|=0x400;}
-void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,unsigned floor){
+void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
     flags[10][0]&=~0x200u;if(flags[13][0]&6)return;
     const auto direction=(yaw+8192)&0xc000;
     for(unsigned i=0;i<floors_.size();++i){const auto& a=floors_[i];if(!(a.flags&1)||a.type!=0)continue;
@@ -113,10 +119,12 @@ void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,unsigned floor){
     }
 }
 bool EventVm::skip_cinematic(){if(!(flags[10][0]&0x40))return false;flags[10][0]|=0x10000000;return true;}
-bool EventVm::interact(NJS_POINT3 pos,Angle yaw){
+bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){
     if(flags[5][0]&4)return false;
-    const auto probe=NJS_POINT3{pos.x-2*njSin(yaw),pos.y,pos.z-2*njCos(yaw)};
-    for(unsigned i=0;i<interactions.size();++i){const auto& a=interactions[i];if(!(a.flags&1)||probe.x<a.position.x||probe.x>a.position.x+a.extent.x||probe.z<a.position.z||probe.z>a.position.z+a.extent.z)continue;
+    const auto direction=(yaw+8192)&0xc000;
+    for(unsigned i=0;i<interactions.size();++i){const auto& a=interactions[i];const float distance=a.type==0?4.5f:2.0f;const auto probe=NJS_POINT3{pos.x-distance*njSin(yaw),pos.y,pos.z-distance*njCos(yaw)};if(!(a.flags&1)||probe.x<a.position.x||probe.x>a.position.x+a.extent.x||probe.z<a.position.z||probe.z>a.position.z+a.extent.z)continue;
+        if(a.type==0){if(a.floor!=floor||(direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000)))continue;
+            return door&&door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]});}
         values[20]=i;flags[10][0]|=0x100;if(a.type==3&&(a.attribute&0x8000)){dialog_.show(read_message(room_,messages_,a.parameters[1]),a.parameters[1]);flags[5][0]|=0x200;return true;}
         return true;
     }return false;

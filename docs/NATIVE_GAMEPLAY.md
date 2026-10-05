@@ -77,10 +77,34 @@ trace and advanced; they are not claimed as implemented effects. The opening
 still records over one hundred such dispatches, including effects, linking,
 item speed/motion and some actor subcommands. Unknown commands instead block
 the task at its original PC, report an error and fail headless validation.
-Full original actor/enemy AI, camera transitions, puzzles/item pickups/doors,
-room transitions, combat, saving and progression beyond this room are not
+Full original actor/enemy AI, camera interpolation, puzzles/item pickups,
+combat, saving and progression through all rooms are not
 complete. All disc data being present does not make those systems playable.
 
 Use `tests/native/replays/lighter.txt` for the authentic equipment flow and
 `lighter-walk.txt` for running after it. The old teleport-based diagnostic is
 preserved only under `archived/tests/` and is not a gameplay regression.
+
+## Room transitions and doors
+
+Active original type-0 ATR interactions request the RDT destination and original
+spawn. Facing/floor filters and the original 4.5-unit door probe are applied.
+DoorCall opcode 0x33 uses the same deferred transition path. It never destroys
+the VM while a script is executing.
+
+Original MRY MPAC door packets drive generated FadeProc1, ViewProc1..7 and
+DoorProc1..7 procedures. The model hinge/knob and camera animate at native ticks;
+PT_WORK selects the forward/reverse parameter case. A new Confirm edge skips
+the sequence on keyboard or SDL GameController. Held buttons do not generate a
+second edge. Inventory, movement and dialogs are suspended during the sequence.
+
+Inventory, equipment, health and side pack are owned outside RoomWorld/EventVm;
+the same Inventory instance is retained. Global event/key/item/map/game flags
+are transferred; room/task/dialog state is rebuilt. The cell-to-hall round trip
+is tested using actual locomotion after the original opening, without teleport.
+Both natural completion and skipped transitions return to the same original
+spawn, retain inventory and do not replay the opening.
+
+105 original door parameter cases are rendered and checked through completion
+and skip. This checks door resources; it does not claim complete gameplay in all
+205 rooms. Door sound banks, special lighting and rumble remain pending.
