@@ -28,8 +28,6 @@ SoftwareRenderer::SoftwareRenderer(int width,int height):width_(width),height_(h
     pixels_.resize(std::size_t(width)*height);depth_.resize(pixels_.size());
 }
 void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wireframe){
-    std::fill(pixels_.begin(),pixels_.end(),scene.background);
-    std::fill(depth_.begin(),depth_.end(),0.0f);
     // bhControlCamera order: initial Ninja view, dolly, Z/X/Y, camera translation.
     NJS_MATRIX view;njUnitMatrix(&view);njScale(&view,1,-1,-1);
     njTranslate(&view,0,0,-camera.distance);
@@ -38,10 +36,16 @@ void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wi
     const float focal=(width_*0.5f)/std::tan(0.0000958738f*(camera.perspective/2));
     const float aspect_x=1.174f;
     const float focal_y=focal*(height_/480.0f)/(width_/640.0f);
+    draw_view(scene,view,focal*aspect_x,focal_y,wireframe,camera.hidden_objects);
+}
+void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden){
+    std::fill(pixels_.begin(),pixels_.end(),scene.background);
+    std::fill(depth_.begin(),depth_.end(),0.0f);
+    NJS_MATRIX view;std::copy_n(matrix,16,view);
     constexpr float near=0.05f;
     for(const auto& triangle:scene.triangles){
         // bhCkFlg numbers bits from the most significant bit.
-        if(triangle.camera_mask && triangle.object<512 && (camera.hidden_objects[triangle.object/32] & (0x80000000u>>(triangle.object%32))))continue;
+        if(triangle.camera_mask && triangle.object<512 && (hidden[triangle.object/32] & (0x80000000u>>(triangle.object%32))))continue;
         std::vector<SceneVertex> polygon;polygon.reserve(4);
         for(auto vertex:triangle.vertices){njCalcPoint(&view,&vertex.position,&vertex.position);polygon.push_back(vertex);}
         // Clip in camera space before division; surfaces crossing the near plane remain visible.
@@ -59,7 +63,7 @@ void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wi
             std::array<Projected,3> p;
             const std::array<SceneVertex,3> v{clipped[0],clipped[fan],clipped[fan+1]};
             bool finite=true;
-            for(int i=0;i<3;++i){const auto point=v[i].position;p[i]={width_*0.5f+point.x*focal*aspect_x/point.z,height_*0.5f+point.y*focal_y/point.z,1/point.z,v[i].u/point.z,v[i].v/point.z};finite=finite&&std::isfinite(p[i].x)&&std::isfinite(p[i].y);}
+            for(int i=0;i<3;++i){const auto point=v[i].position;p[i]={width_*0.5f+point.x*focal_x/point.z,height_*0.5f+point.y*focal_y/point.z,1/point.z,v[i].u/point.z,v[i].v/point.z};finite=finite&&std::isfinite(p[i].x)&&std::isfinite(p[i].y);}
             if(!finite)continue;
             float area=edge(p[0],p[1],p[2].x,p[2].y);
             if(std::abs(area)<1e-6f||!std::isfinite(area))continue;

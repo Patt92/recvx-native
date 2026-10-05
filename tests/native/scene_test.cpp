@@ -58,6 +58,9 @@ int main(){try{
     image.draw(scene,scene.cameras[0]);check(image.covered_pixels()>0,"near plane crossing disappears");
     scene.triangles[0].vertices[1].position.z=1;scene.triangles[0].vertices[2].position.z=1;
     image.draw(scene,scene.cameras[0]);check(image.covered_pixels()==0,"geometry behind camera rendered");
+    // DrawSubItem resets to identity rather than the world Y/Z conversion:
+    // positive camera-space depth is visible, negative Y is above the center.
+    recvx::Scene item;recvx::SceneTriangle item_triangle;item_triangle.vertices={recvx::SceneVertex{{-.5f,-1.5f,4}},recvx::SceneVertex{{.5f,-1.5f,4}},recvx::SceneVertex{{0,-.5f,4}}};item.triangles.push_back(item_triangle);NJS_MATRIX item_view;njUnitMatrix(&item_view);image.draw_view(item,item_view,64,48);check(image.covered_pixels()>20,"item camera-space geometry was discarded");unsigned top=0,bottom=0;for(unsigned y=0;y<48;++y)for(unsigned x=0;x<64;++x)if(image.pixels()[y*64+x]!=item.background)(y<24?top:bottom)++;check(top>20&&!bottom,"item display inverted the original screen Y axis");
     data=fixture();data[2048]|=8;check(recvx::decode_scene(data).triangles.empty(),"Ninja hidden-model flag ignored");
     data=fixture();data[2092]=16;data[2093]=data[2094]=data[2095]=0;rejects([&]{recvx::decode_scene(data);},"cyclic node accepted");
     data=fixture();data[2188]=3;rejects([&]{recvx::decode_scene(data);},"unloaded strip vertex accepted");

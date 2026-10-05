@@ -28,6 +28,7 @@ public:
     SceneCamera camera(const Scene& stage,const SceneCamera& active)const;
     void overlay(SoftwareRenderer& image)const;
     unsigned frame(unsigned kind,unsigned index)const;
+    std::optional<NJS_POINT3> position(unsigned kind,unsigned index)const;
     bool player_hidden=false,player_scripted=false;
     bool event_camera=false;
     unsigned event_camera_index=0;

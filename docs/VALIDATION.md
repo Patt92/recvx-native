@@ -1,3 +1,48 @@
+# Item camera-space and spatial event integration — 2026-10-05
+
+This supersedes the previous integration snapshot below.
+
+- The prior handgun-ammunition image was the actual host display, not a debug
+  orientation. `DrawSubItem` uses an identity camera-space basis; the host had
+  incorrectly added the room camera's Y/Z inversion and viewed the back.
+  `SoftwareRenderer::draw_view` now shares clipping/rasterization with the room
+  renderer while accepting the original item-view basis and 500-pixel focal
+  distance (PS2 screen aspect 1.174). Framing still fits the decoded visible mesh;
+  original ModelScaleSet/hoseipos framing is not completely ported.
+- All 156 default rotation matrices are compared independently against the
+  original DSP_WORK X/Y/Z construction. Euler decomposition at Y=±90° uses a
+  stable equivalent pose. Action spin is a separate X/Y/Z matrix multiplication,
+  not addition of Euler angles. All eleven menu transformations retain the
+  original ChangeZoomOut / DrawSubItem subcsr 1/3 result poses through messages.
+- `bhAreaSearchObj` 0x72: original player/enemy/object/item work lookup, two
+  separate sign masks, inclusive minima/exclusive maxima; missing lookup blocks
+  with retained PC. `bhGrdPosSet` 0xb9 mutates the shared ATR_WORK wall positions
+  used by walking, ground probes, shot rays and the camera mod. Parser alignment,
+  all four object kinds, signed bounds and live collision changes are tested.
+- Room scan: **205/205 load; 72 rooms report blocked commands**, down from 81
+  using the same 600-tick scan. Later commands can become visible after a blocker
+  is removed. This is not proof of completed room/game progression.
+- Host, macOS universal arm64 and Intel/Rosetta, Windows/Wine, ASan/UBSan:
+  19 test groups passed, including the parallel HD-content-key test. Five
+  original-data suites (inventory engine, game/events/assets, input, combat,
+  audio) passed on all targets. Original frontend, door and cemetery/Steve
+  runtime replays passed on Host/Mac/sanitizers/Windows-Wine.
+- Both v0.5 starter packages updated and launched with their own data; macOS
+  arm64/Intel and Windows/Wine passed. Real knife-pickup modal was rendered from
+  the package; ammunition examination images are pixel-identical on Mac/Wine.
+  Mac GUI item examination passed through the normal inventory path (no debug
+  menu). App signature verified; user INIs preserved. Previous binaries:
+  `archived/releases/item-view-before-20261005-230857`.
+- Logs and render evidence: `build/validation/item-view-20261005/`.
+  Physical controllers and physical Windows hardware remain untested.
+- Claudes HD-code remains separate uncommitted work. It is compiled into these
+  working-tree builds and passes the lookup test; the 3.4-GB replacement pack
+  is not included/activated in the starter packages. HD matching tools and
+  their reported matching coverage are not revalidated by this integration.
+
+The previous limits remain: enemy AI, helicopter/particle effects, face/lip
+morphs, MIDI sequencer/ADSR/reverb, HD UI, item box, map and save/load.
+
 # Current integration validation — 2026-10-05
 
 This section supersedes older snapshots below. Current sources include Claude's

@@ -12,6 +12,12 @@ Die vorhandenen Pakete enthalten alle lokal exportierten Daten und SDL2.
 Beim Spielen wird keine ISO benötigt. Das aktuelle Spiel ist ein Entwicklungsbuild;
 Kampf, Speichern und zahlreiche spätere Ereignisse sind noch nicht fertig.
 
+Die Itemansicht beim Aufheben und Untersuchen verwendet jetzt den originalen
+Item-Blickraum: Munition steht richtig herum; auch Umwandlungen behalten ihre
+Originalpose. Bereichsabfragen und verschiebbare Kollisionsflächen sind an die
+Engine gebunden. Im 600-Tick-Scan laden 205 Räume; 72 melden noch blockierte
+Befehle. Das ist weiterhin kein vollständig spielbarer Port.
+
 ## Hauptmenü und Einstellungen
 
 Das Standardfenster ist jetzt **1280×960**, mit scharfer ganzzahliger Skalierung.

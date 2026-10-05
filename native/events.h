@@ -28,6 +28,7 @@ public:
     // bhCamCheck: active event camera (cam.flg & 2) with evc_no/keyf_no.
     std::function<bool(unsigned&,unsigned&)> event_camera;
     std::function<unsigned(unsigned,unsigned)> animation_frame;
+    std::function<std::optional<NJS_POINT3>(unsigned,unsigned)> object_position;
     std::function<bool(unsigned)> audio_active;
     std::function<void(unsigned)> audio_stop;
     std::function<Message(unsigned,unsigned)> item_message;

@@ -1,3 +1,9 @@
+Item-/Event-Update 2026-10-05: Der gemeinsame Item-Blickraum entspricht jetzt
+DrawSubItem ohne Raumkamera-Y/Z-Umkehr; ursprüngliche Start- und Resultatposen
+sind geprüft. bhAreaSearchObj und bhGrdPosSet sind gebunden. Im 600-Tick-Scan
+laden 205/205 Räume; 72 melden noch blockierte Befehle. Details und Grenzen:
+[VALIDATION.md](VALIDATION.md). Beide v0.5-Starterpakete sind aktualisiert.
+
 # Native gameplay 0.5
 
 The runtime starts at a native main menu using the original ADV/0002.bin title

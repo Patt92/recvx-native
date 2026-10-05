@@ -91,7 +91,8 @@ void StatusMenu::tick(Inventory& inventory){
     const bool had_message=message.active();message.tick();if(had_message&&!message.active())finish_inspection(inventory);
     if(!inspection.running())return;
     inspection.tick(inventory);opening_frame=inspection.action_frame();opening_item=inspection.running()?inspection.source():0;
-    if(inspection.message_pending()){examine_yaw=examine_pitch=examine_roll=0;show_message(inspection.take_message());}
+    if(const auto angles=inspection.take_display_reset()){examine_pitch=(*angles)[0];examine_yaw=(*angles)[1];examine_roll=(*angles)[2];}
+    if(inspection.message_pending())show_message(inspection.take_message());
 }
 bool StatusMenu::input(MenuInput key,Inventory& inventory){
     // sub1.c sound semantics (CallSystemSe ignores its first argument):
@@ -259,8 +260,11 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
             NJS_POINT3 lo{1e20f,1e20f,1e20f},hi{-1e20f,-1e20f,-1e20f};
             for(const auto& triangle:object.triangles)for(const auto& vertex:triangle.vertices){lo.x=std::min(lo.x,vertex.position.x);lo.y=std::min(lo.y,vertex.position.y);lo.z=std::min(lo.z,vertex.position.z);hi.x=std::max(hi.x,vertex.position.x);hi.y=std::max(hi.y,vertex.position.y);hi.z=std::max(hi.z,vertex.position.z);}
             const NJS_POINT3 center{(lo.x+hi.x)/2,(lo.y+hi.y)/2,(lo.z+hi.z)/2};const float radius=std::max({hi.x-lo.x,hi.y-lo.y,hi.z-lo.z,0.01f});
-            NJS_MATRIX rotation;njUnitMatrix(&rotation);const auto spin=menu.inspection.running()?menu.inspection.spin():std::array<Angle,3>{};njRotateXYZ(&rotation,menu.examine_pitch+spin[0],menu.examine_yaw+spin[1],menu.examine_roll+spin[2]);for(auto& triangle:object.triangles)for(auto& vertex:triangle.vertices){NJS_POINT3 local{vertex.position.x-center.x,vertex.position.y-center.y,vertex.position.z-center.z};njCalcPoint(&rotation,&local,&local);vertex.position={center.x+local.x,center.y+local.y,center.z+local.z};njCalcVector(&rotation,&vertex.normal,&vertex.normal);}
-            object.background=0xff101010;SceneCamera camera;camera.position={center.x,center.y,center.z+radius*(2.8f+20.f*(1.f-menu.inspection.zoom()))};SoftwareRenderer item_view(352,196);item_view.draw(object,camera);
+            NJS_MATRIX rotation;const auto spin=menu.inspection.running()?menu.inspection.spin():std::array<Angle,3>{};inspection_rotation(rotation,{menu.examine_pitch,menu.examine_yaw,menu.examine_roll},spin);
+            // DrawSubItem uses an identity camera-space basis. Applying the
+            // room camera's (1,-1,-1) basis flips the display and views its back.
+            NJS_MATRIX view;njUnitMatrix(&view);njTranslate(&view,0,0,radius*(2.8f+20.f*(1.f-menu.inspection.zoom())));njMultiMatrix(&view,&rotation);njTranslate(&view,-center.x,-center.y,-center.z);
+            object.background=0xff101010;SoftwareRenderer item_view(352,196);item_view.draw_view(object,view,500.f*1.174f,500.f);
             for(int y=0;y<196;++y)std::copy_n(item_view.pixels().begin()+y*352,352,image.canvas().begin()+(y+132)*640+60);
         }
         if(menu.files){

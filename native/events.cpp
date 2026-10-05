@@ -56,6 +56,11 @@ int EventVm::instruction(Task& t){
         if(flags[5][0]&1){unsigned active=0,active_key=0;if(!event_camera)throw std::runtime_error("camera check requires native world binding");if(event_camera(active,active_key)&&active==camera&&(!match_key||active_key==key))return 0;}return 1;}
     // bhCamInfoSet toggles CUT_WORK.flg bit 0 of camera-switch group v1.
     case 0x39:world(t,op,4);return 1;
+    case 0xb9:world(t,op,10);return 1;
+    // bhAreaSearchObj: X/Z minima inclusive, maxima exclusive; signed
+    // magnitudes use separate masks. Byte 8 is padding, not the second mask.
+    case 0x72:{v.require(p,14);if(!object_position)throw std::runtime_error("object area check requires native world binding");const unsigned kind=v.u8(p+2);if(kind>3)throw std::runtime_error("object area check kind outside original table");const auto position=object_position(kind,v.u8(p+1));if(!position)throw std::runtime_error("object area check entity unavailable");
+        const auto first=v.u8(p+3),second=v.u8(p+9);const float x1=v.u16(p+4)/100.f*(first&1?-1:1),z1=v.u16(p+6)/100.f*(first&4?-1:1),x2=v.u16(p+10)/100.f*(second&1?-1:1),z2=v.u16(p+12)/100.f*(second&4?-1:1);advance(14);return x1<=position->x&&position->x<x2&&z1<=position->z&&position->z<z2;}
     // bhDieEventCk: compare the number of set ed_flg bits base..base+count-1.
     case 0x21:{const unsigned count=v.u8(p+1),base=v.u16(p+2),mode=v.u8(p+4),operand=v.u8(p+5);advance(6);unsigned dead=0;for(unsigned i=0;i<count;++i)dead+=flag(3,(base+i)&0x1ff);
         switch(mode){case 0:return dead==operand;case 1:return dead>operand;case 2:return dead>=operand;case 3:return dead<operand;case 4:return dead<=operand;case 5:return dead!=operand;default:return 0;}}

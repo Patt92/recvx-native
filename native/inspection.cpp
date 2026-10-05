@@ -25,7 +25,7 @@ static float ModelScaleSet(SITEM* item,int reset){if(reset){item->mdl.objP->pos=
 }
 struct ItemInspection::State {
     original_inventory::S_WORK work;original_inventory::System system;original_inventory::SITEM item;original_inventory::STCAM_WRK camera;
-    std::array<original_inventory::NJS_CNK_OBJECT,6> nodes{};unsigned* pointer=nullptr;bool message=false;unsigned index=0,source=0,action_frame=0;
+    std::array<original_inventory::NJS_CNK_OBJECT,6> nodes{};unsigned* pointer=nullptr;bool message=false;unsigned index=0,source=0,action_frame=0;std::optional<std::array<Angle,3>> display_reset;
     State(){for(unsigned i=0;i+1<nodes.size();++i)nodes[i].child=&nodes[i+1];item.mdl.objP=nodes.data();}
     void enter(Inventory& inventory){using namespace original_inventory;work.pip=inventory.slots();swork=work;system.st_flg&=~0x200u;original_inventory::system=system;sys=&original_inventory::system;sitem=item;st_cam=camera;wp_=pointer;has_message=false;}
     void leave(){using namespace original_inventory;work=swork;system=original_inventory::system;item=sitem;camera=st_cam;pointer=wp_;if(has_message){message=true;index=original_inventory::message;}}
@@ -36,7 +36,16 @@ void ItemInspection::check(Inventory& inventory,unsigned slot,std::array<Angle,3
 }
 void ItemInspection::answer(Inventory& inventory,bool yes){auto& s=*state_;if(!question())return;s.system.pad_ps=0;s.system.st_flg|=0x4000;s.system.cb_flg|=0x1000;s.system.mes_sel=yes?100:101;s.enter(inventory);original_inventory::ItemModelMessageWait();s.leave();s.system.st_flg&=~0x4000u;}
 void ItemInspection::cancel(Inventory& inventory,unsigned slot){state_=std::make_shared<State>();auto& s=*state_;s.source=s.work.itemid=Inventory::id(inventory.slots()[slot]);s.work.listcsr_0=slot;s.work.testmode=2;s.system.pad_ps=0x1000;s.enter(inventory);original_inventory::ItemModelCheck();s.leave();s.work.testmode=2;}
-void ItemInspection::tick(Inventory& inventory){auto& s=*state_;if(!running())return;s.system.pad_ps=0;s.enter(inventory);switch(s.work.testmode){case 4:++s.action_frame;original_inventory::ItemModelActionSet();break;case 5:original_inventory::ItemModelChangeZoomOut();break;case 1:original_inventory::ItemModelChangeZoomIn();break;default:break;}s.leave();}
+void ItemInspection::tick(Inventory& inventory){auto& s=*state_;if(!running())return;const auto before=phase();s.system.pad_ps=0;s.enter(inventory);switch(s.work.testmode){case 4:++s.action_frame;original_inventory::ItemModelActionSet();break;case 5:original_inventory::ItemModelChangeZoomOut();break;case 1:original_inventory::ItemModelChangeZoomIn();break;default:break;}s.leave();
+    if(before==5&&phase()==1){if(s.work.subcsr==3){
+        // DrawSubItem's original subcsr 3 presets, after ChangeZoomOut has
+        // reset rotmat. Preserve the returned item pose through its message.
+        NJS_MATRIX m;njUnitMatrix(&m);const auto item=s.work.itemid;
+        const std::array<Angle,3> preset=item==105?std::array<Angle,3>{50245,51519,1457}:item==30?std::array<Angle,3>{50245,57709,42235}:std::array<Angle,3>{21846,0,0};
+        njRotateX(&m,preset[0]);njRotateY(&m,preset[1]);njRotateZ(&m,preset[2]);njTransposeMatrix(&m);
+        s.display_reset=std::array<Angle,3>{int(10430.381f*std::atan2(m[6],m[10]))&65535,int(10430.381f*std::asin(std::clamp(-m[2],-1.f,1.f)))&65535,int(10430.381f*std::atan2(m[1],m[0]))&65535};
+    }else s.display_reset=inspection_default_angles(s.work.itemid);}}
+std::optional<std::array<Angle,3>> ItemInspection::take_display_reset(){auto result=state_->display_reset;state_->display_reset.reset();return result;}
 bool ItemInspection::question()const{return state_->work.testmode==6;}
 bool ItemInspection::running()const{return phase()==4||phase()==5||phase()==1;}
 bool ItemInspection::message_pending()const{return state_->message;}
@@ -53,11 +62,19 @@ unsigned inventory_name_id(std::uint32_t item){return original_inventory::item_n
 unsigned inspection_action(unsigned item){if(item>=156)throw std::runtime_error("invalid item action");return itemflg[dsptbl[item].hide][1];}
 std::array<Angle,3> inspection_default_angles(unsigned item){
     if(item>=156)throw std::runtime_error("invalid display item");
-    // ItemDraw subcsr 0/1: the camera starts at the inverse of -DSP_WORK
-    // X/Y/Z rotations. Extract the same Euler angles as ItemDraw.
+    // DrawSubItem subcsr 0/1: transpose the negative DSP_WORK X/Y/Z
+    // rotations. These inspection angles describe rotmat, not a room camera.
     const auto& d=dsptbl[item];NJS_MATRIX m;njUnitMatrix(&m);
     njRotateX(&m,int(-d.ax*182.04445f)&65535);njRotateY(&m,int(-d.ay*182.04445f)&65535);njRotateZ(&m,int(-d.az*182.04445f)&65535);njTransposeMatrix(&m);
+    // At +/-90 degrees Y, X and Z are coupled. Keep a stable equivalent
+    // pose instead of magnifying the PS2 sine table's tiny residual cos(Y).
+    if(std::abs(m[2])>.999999f)return {0,m[2]<0?16384:49152,int(10430.381f*std::atan2(-m[4],m[5]))&65535};
     return {int(10430.381f*std::atan2(m[6],m[10]))&65535,int(10430.381f*std::asin(std::clamp(-m[2],-1.f,1.f)))&65535,int(10430.381f*std::atan2(m[1],m[0]))&65535};
+}
+void inspection_rotation(NJS_MATRIX& matrix,std::array<Angle,3> angles,std::array<Angle,3> spin){
+    njUnitMatrix(&matrix);njRotateXYZ(&matrix,angles[0],angles[1],angles[2]);
+    // DrawSubItem applies the action rotations after rotmat, in X/Y/Z order.
+    njRotateX(&matrix,spin[0]);njRotateY(&matrix,spin[1]);njRotateZ(&matrix,spin[2]);
 }
 unsigned inspection_model_id(unsigned item){if(item>=156)throw std::runtime_error("invalid inspection item");const auto model=itemidtbl[itemflg[dsptbl[item].hide][6]];const auto id=model?model:item;return id==131?5:id==136?33:id;}
 ModelGeometryOptions inspection_geometry(const std::vector<std::uint8_t>& packet,unsigned item,unsigned frame){

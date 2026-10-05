@@ -11,13 +11,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime', type=Path, required=True)
     parser.add_argument('--data', type=Path, required=True)
+    parser.add_argument('--emulator', help='Optional executable such as wine64')
     args = parser.parse_args()
+    prefix = [args.emulator] if args.emulator else []
     with tempfile.TemporaryDirectory(prefix='recvx-frontend-') as folder:
         root = Path(folder)
 
         def run(name, frames, replay=''):
             state = root / (name + '.json')
-            command = [str(args.runtime.resolve()), '--data', str(args.data.resolve()),
+            command = prefix + [str(args.runtime.resolve()), '--data', str(args.data.resolve()),
                        '--headless', '--frames', str(frames), '--state', str(state)]
             if replay:
                 inputs = root / (name + '.txt')
