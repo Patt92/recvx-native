@@ -6,8 +6,8 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 |---|---|
 | macOS universal build | arm64 and x86_64 slices present |
 | Windows build | PE32+ x64 executable and bundled SDL2 |
-| CTest | 9/9 on macOS; 9/9 under Wine |
-| ASan + UBSan | 9/9 and original-data opening/controller regressions passed |
+| CTest | 10/10 on macOS; 10/10 under Wine |
+| ASan + UBSan | 10/10 and original-data opening/controller regressions passed |
 | Intel/Rosetta | original-data opening/UI and SDL virtual-controller regressions passed |
 | Disc data manifest | 12,702 files; 6,575,300,120 bytes; both packaged trees verified |
 | Room scene decoder | 205/205, 1,008,630 stage triangles, 470 active camera targets |
@@ -22,6 +22,8 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 | Configurable input | keyboard/gamepad rebind, axis inversion, deadzone, trigger, short presses, repeat, focus and hot-plug/removal passed with SDL virtual GameControllers |
 | Gamepad opening flow | original cell skip/dialogue/inventory/lighter/Rodrigo/control-return path passed on arm64, Rosetta and Windows/Wine |
 | Physical controller | no mapped controller or joystick detected locally; physical Windows XInput hardware not tested |
+| Backward movement | original clip 16/key 25, advancing pose, signed curve, unchanged facing, return to idle and controller backstep checked |
+| Solid wall collision | ATR types 0..5; room-height fallback, original player dimensions, floor attributes, thin walls both directions, signed diagonal walls, circular contacts, sliding and corners checked |
 
 The original-data opening regression passes with 127 known unbound commands.
 Particle effects, lighter/flame object, full MASK/face/lip processing, camera

@@ -74,7 +74,17 @@ int main(int argc,char** argv){try{
         check(!world.player_hidden&&!world.player_scripted&&!(real.flags[5][0]&4)&&std::abs(actor.position.x-30.6f)<.01f&&std::abs(actor.position.z-33.9f)<.01f,"opening does not restore original actor position/control");
         check(std::find(audio.played.begin(),audio.played.end(),"VOICE1/0016")!=audio.played.end(),"original Rodrigo speech missing");
         auto composed=stage;world.append(composed);check(composed.triangles.size()>stage.triangles.size(),"room actors missing");
-        world.bind({0xa,0,0,0,{0xa,4,0,0}});const auto moved=world.move({0,0,3},{0,0,-4});check(moved.z>1.f,"original rectangular wall is ignored");
+        world.bind({0xa,0,0,0,{0xa,4,0,0}});const auto moved=world.move({5,0,5},{5,0,-6});check(moved.z>=3.49f,"original zero-height wall is ignored");
+        const auto box=world.move({25,0,25},{25,0,15},1);check(box.z>=20.98f,"original type-1 obstacle is ignored");
+        const auto round=world.move({9,0,64},{17,0,64},.5f);check(round.x<10,"original round obstacle is ignored");
+        // Disable only wall 4 using the actual script command and test its area.
+        world.bind({0xa,0,0,0,{0xa,4,1,0}});check(world.move({5,0,5},{5,0,-6}).z<-5.9f,"script cannot disable wall collision");world.bind({0xa,0,0,0,{0xa,4,0,0}});
+        const auto body=PlayerAsset::load(root,10);SceneSpawn walker{{100,0,100},0};std::size_t walk_motion=42;std::int64_t walk_frame=0;
+        const auto start=walker.position;body.locomotion(walker,walk_motion,walk_frame,-1,true,0);check(walk_motion==16&&walker.yaw==0&&walker.position.z>start.z,"backward uses wrong clip, sign or turns player around");
+        check(walk_frame==26*65536,"backward original key 25 not used");auto pose_a=body.sample(walk_motion,walk_frame);for(unsigned i=0;i<8;++i)body.locomotion(walker,walk_motion,walk_frame,-1,false,0);auto pose_b=body.sample(walk_motion,walk_frame);
+        bool changed_pose=false;for(unsigned i=0;i<pose_a.triangles.size();++i)for(unsigned j=0;j<3;++j){const auto a=pose_a.triangles[i].vertices[j].position,b=pose_b.triangles[i].vertices[j].position;changed_pose|=std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>.001f;}check(changed_pose,"backward pose remains static");
+        body.locomotion(walker,walk_motion,walk_frame,0,false,0);check(walk_motion==42,"backward release does not return idle");const auto idle=walker.position;body.locomotion(walker,walk_motion,walk_frame,1,false,0);check(walk_motion==0&&walker.position.z<idle.z,"forward movement shares backward sign");
+        body.locomotion(walker,walk_motion,walk_frame,1,true,0);check(walk_motion==4,"run no longer selects original clip");
         GameUi ui(root);screen.active=true;message=MessageDialog{};SoftwareRenderer render(640,480);ui.draw(render,game,screen,message,0);
         auto atlas=read_tga(root/"textures/menu/0004.tga");const auto source=atlas.pixels[(12*atlas.height/256)*atlas.width+17*atlas.width/256];
         check((source>>24)==255&&render.pixels()[200*640+494]==source,"empty inventory slot does not draw original atlas tile");

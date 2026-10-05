@@ -44,6 +44,9 @@ int main(int argc,char** argv){try{
             button(input,joystick,SDL_CONTROLLER_BUTTON_A,true);tick();for(unsigned i=0;i<30;++i)tick();check(menu.commands&&inventory.weapon()==0,"held A auto-equips or advances multiple actions");button(input,joystick,SDL_CONTROLLER_BUTTON_A,false);tick();press(SDL_CONTROLLER_BUTTON_A);
             check(inventory.weapon()==1&&!menu.active,"A does not equip lighter");for(unsigned i=0;i<3000;++i)tick();check(events.errors.empty()&&!world.player_hidden&&!world.player_scripted&&!(events.flags[5][0]&4),"controller equipment path fails to restore game control");
             press(SDL_CONTROLLER_BUTTON_Y);press(SDL_CONTROLLER_BUTTON_B);check(!menu.active,"B does not cancel inventory");
+            const auto body=PlayerAsset::load(root,10);SceneSpawn walker{{100,0,100},0};std::size_t walker_motion=42;std::int64_t walker_frame=0;
+            axis(input,joystick,SDL_CONTROLLER_AXIS_LEFTY,32767);const auto backward=input.tick();body.locomotion(walker,walker_motion,walker_frame,backward.move(),backward.down(Action::Run),backward.turn());
+            check(walker_motion==16&&walker.position.z>100&&walker.yaw==0,"SDL gamepad backward does not animate original backstep");axis(input,joystick,SDL_CONTROLLER_AXIS_LEFTY,0);input.tick();
             std::cout<<"Original cell skip/dialog/inventory/lighter/control flow verified with SDL virtual gamepad.\n";
         }
         // Disconnect while moving; keyboard input must remain usable.

@@ -182,6 +182,17 @@ float PlayerAsset::translation_speed(std::size_t curve,std::int64_t frame_q16) c
     auto frame=frame_q16%length;if(frame<0)frame+=length;
     return keys[std::size_t(frame/65536)+1];
 }
+void PlayerAsset::locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,int move,bool run,int turn)const {
+    actor.yaw=(actor.yaw+turn*int(182.04445f*4.5f))&65535;
+    const std::size_t next=move>0?(run?4:0):(move<0?16:42);
+    if(!has_motion(next))throw std::runtime_error("player locomotion clip unavailable");
+    if(next!=motion){motion=next;frame=next==0?5*65536:next==16?25*65536:0;}
+    // The dumped backward curve already stores negative deltas. Preserve its
+    // sign instead of reversing the animation or negating it a second time.
+    if(move){const float step=translation_speed(move>0?(run?3:0):6,frame);
+        actor.position.x-=step*njSin(actor.yaw);actor.position.z-=step*njCos(actor.yaw);}
+    frame=(frame+65536)%(std::int64_t(motion_frames(motion))*65536);
+}
 Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,std::vector<BoneMatrix>* matrices_out) const {
     if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");
     return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out);

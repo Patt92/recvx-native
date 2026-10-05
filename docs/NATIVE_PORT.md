@@ -80,9 +80,9 @@ cinematic flags gate movement and inventory access.
 
 ## Verification
 
-Nine CTest groups cover compressed input, archives/rooms, Ninja math/matrices,
+Ten CTest groups cover compressed input, archives/rooms, Ninja math/matrices,
 scene rendering, player motion/skin, inventory/events, audio/movies and
-keyboard/controller input. Real-data
+keyboard/controller input and solid wall collision. Real-data
 `recvx-game-tests data` uses the original RM_0000 scripts to skip the intro,
 acknowledge the in-cell hint, equip the lighter, satisfy its real floor trigger,
 run the Rodrigo event and assert the original return position/control state. It
@@ -94,6 +94,7 @@ including remapping, menu repeats, focus changes and removal while moving.
 ```sh
 build/native/recvx-runtime --data data --headless --replay tests/native/replays/lighter.txt --frames 3000 --state build/native/lighter-state.json
 build/native/recvx-runtime --data data --headless --replay tests/native/replays/lighter-walk.txt --frames 3121 --state build/native/walk-state.json
+build/native/recvx-runtime --data data --headless --replay tests/native/replays/lighter-back.txt --frames 3119 --state build/native/back-state.json
 ```
 
 `tests/native/replays/opening-skip.txt` uses the game's skip flag. An unskipped

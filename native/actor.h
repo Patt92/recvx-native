@@ -21,6 +21,8 @@ public:
     unsigned motion_frames(std::size_t i) const;
     // bhGetTransZ tables: element zero is metadata; speed keys start at one.
     float translation_speed(std::size_t curve,std::int64_t frame_q16) const;
+    // Healthy original idle/walk/run/back clips and signed translation curves.
+    void locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t& frame_q16,int move,bool run,int turn)const;
     const std::vector<SceneTexture>& textures() const {return textures_;}
     // Original keys are sampled on integer frames, selected by a signed 16.16 clock.
     Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr) const;

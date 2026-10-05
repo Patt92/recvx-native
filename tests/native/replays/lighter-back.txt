@@ -1,0 +1,8 @@
+# Original cell/lighter event, then backward movement with unchanged facing.
+1 skip
+50 confirm
+100 inventory
+101 confirm
+102 confirm
+3000 keys back
+3120 keys none

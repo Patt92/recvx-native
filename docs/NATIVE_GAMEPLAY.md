@@ -46,12 +46,16 @@ and its full animations do not yet exist.
 I/K or W/S walks forward/back, J/L or A/D turns and Shift runs. A mapped controller
 uses its left stick/D-pad, with B/right shoulder/right trigger to run. Bindings,
 deadzone and menu repetition are configurable in controls.ini; see [CONTROLS.md](CONTROLS.md).
-Body clips 0/4/9 and original
+Body clips 0/4/16 and original
 translation speed curves 0/3/6 drive locomotion at 60 Hz. Motion is inhibited
-while a menu/dialog/cinematic or script owns Claire. Room rectangular ATR walls
-use their original min corner/extents and script enable flags; swept movement
-prevents tunneling through these rectangles. Diagonal/round walls, full floors,
-stairs, ledges and the original physical/player state machine remain pending.
+while a menu/dialog/cinematic or script owns Claire. Backward movement uses the
+original backstep clip from key 25 and the signed backward curve, without turning
+the actor around. ATR wall types 0..5 use original box/cylinder/triangle geometry,
+script enable flags, vertical extents and floor-specific attributes. Height zero
+inherits the original room height. Claire's 3.5 radius/16.5 height, rounded box
+corners and wall sliding are applied with bounded substeps to prevent tunneling.
+Full floor/slope traversal (types 6/7), stairs, ledges and the original
+physical/player state machine remain pending.
 Room cameras follow original cut areas after scripted repositioning.
 
 ## Events, dialogue and sound

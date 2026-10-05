@@ -40,13 +40,19 @@ last supported room motion; this does not implement the full original NPC AI.
 ## Movement
 
 Gameplay and headless replay share fixed 60 Hz movement. I/K, J/L and Shift use
-healthy unarmed clips 0/4/9 (idle 42) and original speed curves 0/3/6; forward
-walking starts at key 5. Movement uses original sine/cosine directions. Original
+healthy unarmed clips 0/4/16 (idle 42) and original speed curves 0/3/6; forward
+walking starts at key 5 and backward stepping at key 25. The dumped backward
+curve already contains negative deltas; the actor keeps its facing while its
+original backstep pose advances. Movement uses original sine/cosine directions. Original
 cut areas determine active cameras after movement and scripted repositioning.
-Rectangular original ATR collision and script wall flags are implemented.
+Original ATR solid wall types 0/1 (boxes), 2/3 (cylinders) and 4/5 (signed
+triangles) and script wall flags are implemented. Zero-height walls inherit
+ROM_WORK.h. Claire uses the original 3.5 radius and 16.5 height; rounded corners,
+wall sliding, bounded substeps, floor-specific attributes and grand floor indices
+are checked in the shared native movement path.
 
 The full player state machine, weapon/damage variants, motion transitions,
-diagonal/circular collision, floors/stairs, physics, camera interpolation and
+floor/slope traversal (ATR types 6/7), stairs, physics, camera interpolation and
 cut hysteresis remain pending. Host atan2 uses the original angle scale; exact
 SDK rounding has not been established. `--preview` retains free inspection.
 

@@ -3,6 +3,7 @@
 #include "audio.h"
 #include "events.h"
 #include "renderer.h"
+#include "collision.h"
 #include <map>
 #include <memory>
 namespace recvx {
@@ -20,11 +21,10 @@ public:
     bool player_hidden=false,player_scripted=false;
     bool event_camera=false;
     unsigned event_camera_index=0;
-    NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=1.6f)const;
+    NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f)const;
 private:
     struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;};
     struct Context {unsigned kind=0,index=0,node=0;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};};
-    struct Wall {unsigned flags,type,id,floor;NJS_POINT3 position,extent;};
     struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;};
     struct EventCamera {SceneCamera camera;unsigned link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};
     std::vector<std::uint8_t> room_;std::size_t header_;
@@ -33,7 +33,9 @@ private:
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
     std::vector<Model> models_;
     std::vector<MotionClip> room_motions_;
-    std::vector<Wall> walls_;
+    std::vector<CollisionWall> walls_;
+    float room_height_=0;
+    std::array<float,32> floors_{};
     std::vector<std::vector<EventCamera>> event_cameras_;
     unsigned event_camera_key_=0;
     std::vector<Light> lights_,event_lights_;

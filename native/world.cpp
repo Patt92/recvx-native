@@ -27,7 +27,8 @@ WorldEntity& RoomWorld::entity(unsigned kind,unsigned index){if(kind>4||index>40
 RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data,const std::filesystem::path& mods,const std::string& room_name):room_(b),header_(inspect_room(b).room_offset),player_(player),motion_(motion),frame_(frame),audio_(audio){
     BinaryView v(b);for(unsigned i=0;i<4;++i){ambient_[i]={v.f32(header_+0x3bc+i*4),v.f32(header_+0x3cc+i*4),v.f32(header_+0x3dc+i*4)};ambient_slots_[i]=v.u8(header_+0x3b8+i);if(ambient_slots_[i]>=4)throw std::runtime_error("invalid room ambient channel");}
     const auto walls=v.u32(header_+0x18),count=v.u32(header_+0x98);if(count>4096)throw std::runtime_error("too many collision walls");v.require(walls,count*36);
-    for(unsigned i=0;i<count;++i){const auto p=walls+i*36;walls_.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),v.u8(p+3),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)}});}
+    room_height_=v.f32(header_+0x118);for(unsigned i=0;i<32;++i)floors_[i]=v.f32(header_+0x120+i*4);
+    for(unsigned i=0;i<count;++i){const auto p=walls+i*36;walls_.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)}});}
     const auto cameras=v.u32(header_+0x34),camera_count=v.u32(header_+0xac);if(camera_count>1024)throw std::runtime_error("too many event cameras");v.require(cameras,camera_count*0x808);
     for(unsigned i=0;i<camera_count;++i){const auto count=v.u16(cameras+i*0x808+6);if(!count||count>16)throw std::runtime_error("invalid event camera key count");std::vector<EventCamera> keys;
         for(unsigned k=0;k<count;++k){const auto p=cameras+i*0x808+8+k*0x80;EventCamera out;auto& c=out.camera;c.position={v.f32(p+4),v.f32(p+8),v.f32(p+12)};for(unsigned j=0;j<3;++j)c.angles[j]=v.u16(p+16+j*2);c.perspective=v.u16(p+22);for(unsigned j=0;j<8;++j)c.hidden_objects[j]=v.u32(p+24+j*4);for(unsigned j=0;j<4;++j)out.hidden_lights[j]=v.u32(p+56+j*4);
@@ -127,12 +128,7 @@ SceneCamera RoomWorld::camera(const Scene&,const SceneCamera& active)const{if(!e
     const float dx=target.x-camera.position.x,dy=target.y-camera.position.y,dz=target.z-camera.position.z;camera.angles[0]=-int(10430.381f*std::atan2(dy,std::sqrt(dx*dx+dz*dz)));camera.angles[1]=-int(10430.381f*std::atan2(dx,dz))+32768;return camera;
 }
 void RoomWorld::overlay(SoftwareRenderer& image)const{if(fade_<=0)return;for(auto& pixel:image.canvas()){std::uint32_t out=0xff000000;for(unsigned shift:{0u,8u,16u})out|=unsigned(((pixel>>shift)&255)*(1-fade_)+((fade_color_>>shift)&255)*fade_)<<shift;pixel=out;}}
-NJS_POINT3 RoomWorld::move(NJS_POINT3 from,NJS_POINT3 to,float radius)const{
-    const float distance=std::max(std::abs(to.x-from.x),std::abs(to.z-from.z));const unsigned steps=std::max(1u,unsigned(std::ceil(distance/std::max(radius*.5f,.01f))));if(steps>4096)throw std::runtime_error("movement too large");auto pos=from;
-    for(unsigned i=0;i<steps;++i){pos.x+=(to.x-from.x)/steps;pos.z+=(to.z-from.z)/steps;for(const auto& wall:walls_){if(!(wall.flags&1)||wall.type!=0||pos.y+12<wall.position.y||pos.y>wall.position.y+wall.extent.y)continue;const float x0=wall.position.x-radius,x1=wall.position.x+wall.extent.x+radius,z0=wall.position.z-radius,z1=wall.position.z+wall.extent.z+radius;
-        if(pos.x>x0&&pos.x<x1&&pos.z>z0&&pos.z<z1){const float values[]{pos.x-x0,x1-pos.x,pos.z-z0,z1-pos.z};const auto axis=std::min_element(values,values+4)-values;if(axis==0)pos.x=x0;if(axis==1)pos.x=x1;if(axis==2)pos.z=z0;if(axis==3)pos.z=z1;}}
-    }return pos;
-}
+NJS_POINT3 RoomWorld::move(NJS_POINT3 from,NJS_POINT3 to,float radius,float height)const{return move_walls(walls_,room_height_,floors_,from,to,radius,height);}
 }
 
 namespace recvx {
