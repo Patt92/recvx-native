@@ -9,7 +9,7 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 | CTest | 12/12 on macOS; 12/12 under Wine |
 | ASan + UBSan | 12/12 and original-data opening/controller regressions passed |
 | Intel/Rosetta | original-data opening/UI and SDL virtual-controller regressions passed |
-| Disc data manifest | 12,702 files; 6,575,300,120 bytes; both packaged trees verified |
+| Disc data manifest | 12,701 files; 6,574,841,350 bytes; both packaged trees verified |
 | Room scene decoder | 205/205, 1,008,630 stage triangles, 470 active camera targets |
 | Five playable bodies | 272 supported body clips; all 7,901 frames sampled |
 | Opening without skipping | 15,000 simulated ticks, original movie completed, cell hint/camera 37 reached |
@@ -24,7 +24,7 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 | Main menu | original ADV title; idle leaves event VM, film and game audio inactive; new game starts original opening |
 | Settings screen | keyboard/controller pages, live rebind, Confirm/Cancel conflict swap, persistent atomic INI save, default restore, stick thresholds and Escape capture cancel checked |
 | Running film skip | original active film skipped by keyboard Space and SDL virtual A; movie/PCM stop, cell hint/camera 37, fast inventory equip, Rodrigo VOICE1/0016 and control return verified |
-| Rapid inventory after hint | lost Y press reproduced before fix; one request buffered until original cinematic handover finishes; keyboard Tab and controller Y regressions pass |
+| Automatic inventory after hint | original opening/late film skip; OK alone opens inventory; held forward input leaves actor position unchanged |
 | Physical controller | no mapped controller or joystick detected locally; physical Windows XInput hardware not tested |
 | Backward movement | original clip 16/key 25, advancing pose, signed curve, unchanged facing, return to idle and controller backstep checked |
 | Original doors | 105 MRY parameter cases rendered, completed and skipped; original hinge/camera/fade procedures compiled natively |
@@ -53,3 +53,19 @@ The main menu and settings use original title art and font atlases. They provide
 a native development menu; the complete original title/difficulty/load system is
 not yet ported. `tools/verify_frontend.py` verifies real-runtime default idle,
 settings, active movie and the complete late-skip/rapid lighter flow.
+
+## Gameplay corrections, 2026-10-05
+
+Added real-data regressions for automatic hint → inventory ownership, A/D turn
+directions, continuous D-pad item inspection, voice dismissal, animated health
+pulse, knife/ammunition Yes/No, full-inventory rejection and persistent pickup
+flags. RM_0020's shared NPC texture banks now render without a texture-range
+exception; the actual first-stairs door transition from original hall spawn 1
+loads RM_0020 and its initial bytecode has no blocked commands. All eleven COMMON.MLT
+programs decode to non-silent PCM. Original title/menu atlas sprites are used.
+Hands/attachments, ambient/footstep banks, full pickup animation/layout and
+complete scene fidelity remain open; these tests do not certify those systems.
+
+Verification for this revision: 12/12 groups on macOS universal and Windows/Wine;
+12/12 under AddressSanitizer/UndefinedBehaviorSanitizer. Original-data gameplay,
+controller and sound-bank checks passed on arm64, Rosetta and Windows/Wine.

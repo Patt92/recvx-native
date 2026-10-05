@@ -16,6 +16,7 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
     const auto floor_count=v.u32(info.room_offset+0xa0),floor_offset=v.u32(info.room_offset+0x20);
     if(floor_count>4096)throw std::runtime_error("too many floor triggers");v.require(floor_offset,floor_count*36);
     for(unsigned i=0;i<floor_count;++i){const auto p=floor_offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};floors_.push_back(a);}
+    const auto item_count=v.u32(info.room_offset+0x90),item_offset=v.u32(info.room_offset+16);if(item_count>4096)throw std::runtime_error("too many room items");v.require(item_offset,item_count*36);for(unsigned i=0;i<item_count;++i)room_items_.push_back(v.u16(item_offset+i*36+4));
     values[23]=inventory_.game_mode;values[24]=inventory_.player;flags[6][0]=0xffffffff;flags[13][0]=1;flags[14][0]=0x40000000;if(inventory_.side_pack)flags[11][0]|=0x8000000;
 }
 bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size()||index>=1024)throw std::runtime_error("event flag outside matrix");return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
@@ -43,12 +44,18 @@ int EventVm::instruction(Task& t){
     case 5:set_flag(v.u8(p+1),v.u16(p+2),v.u8(p+5));return advance(6);
     case 6:{const unsigned key=v.u8(p+1),mode=v.u8(p+2),operand=v.u8(p+3);advance(4);switch(mode){case 0:return values[key]==operand;case 1:return values[key]>operand;case 2:return values[key]>=operand;case 3:return values[key]<operand;case 4:return values[key]<=operand;case 5:return values[key]!=operand;default:throw std::runtime_error("unsupported event byte comparison");}}
     case 8:{const auto key=v.u8(p+1),value=v.u8(p+2);values[key]=value;if(key==22){if(value>=12)throw std::runtime_error("equipped inventory index outside slots");inventory_.slots()[0]=value;}return advance(4);}
+    case 0xd:world(t,op,4);return 1; // Original bhDieCk bookkeeping; enemy death binding pending.
     case 0xb:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");if(v.u8(p+2))interactions[index].flags&=~1u;else interactions[index].flags|=1;return advance(4);}
     case 0xc:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");if(v.u8(p+2))floors_[index].flags&=~1u;else floors_[index].flags|=1;return advance(4);}
     case 0x38:{const auto kind=v.u8(p+1),index=v.u8(p+2),half=v.u8(p+3);const auto target=unsigned(v.u16(p+4))*65536u+(half?32768u:0);if(!animation_frame)throw std::runtime_error("frame condition requires native actor binding");advance(6);return animation_frame(kind,index)<target;}
     case 0x1b:{const auto slot=v.u8(p+2);if(!audio_active)throw std::runtime_error("audio condition requires native mixer binding");advance(6);return audio_active(slot);}
     case 0x9b:if(!movie_active)throw std::runtime_error("movie condition requires native player binding");advance(6);return movie_active();
-    case 0xe:return advance(6); // Item visibility is governed by pickup flags in world binding.
+    case 0xe:{const unsigned bit=v.u16(p+2),interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);if(values[20]!=interaction)return 1;
+        if(interaction>=interactions.size())throw std::runtime_error("pickup interaction outside room");
+        if(flags[10][0]&0x800){if(!flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(interactions[interaction].parameters[0]);set_flag(7,bit,0);set_flag(9,bit,1);}}
+        else if(!flag(7,bit))set_flag(9,bit,0);flags[10][0]&=~0x800u;return 1;}
+    case 0x23:{const unsigned item=v.u8(p+1),bit=v.u16(p+2),interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);
+        if(interaction>=interactions.size())throw std::runtime_error("pickup interaction outside room");if(flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(item);}else interactions[interaction].flags|=1;return 1;}
     case 0xf:flags[10][0]&=~0x400u;advance(2);return 0;
     case 0x10:{const auto item=v.u8(p+1);advance(2);return bool(flags[10][0]&0x400)&&values[8]==item;}
     case 0x11:{const auto item=v.u8(p+1);advance(2);return inventory_.contains(item);}
@@ -62,11 +69,11 @@ int EventVm::instruction(Task& t){
         default:throw std::runtime_error("invalid CineSet mode");}return 1;}
     case 0x63:{const auto limit=v.u8(p+1);if(!limit)throw std::runtime_error("random modulus zero");random_=random_*1664525u+1013904223u;values[17]=unsigned((std::uint64_t(random_)*100)>>32)%limit;return advance(2);}
     case 0x14:{const auto packed=v.u16(p+2);advance(4);start(packed&255,packed>>8);return 1;}
-    case 0x1f:{const auto mode=v.u8(p+1),index=v.u8(p+2),freeze=v.u8(p+3);advance(4);if(!mode){flags[10][0]&=~0x2000u;dialog_.show(read_message(room_,messages_,index),index);flags[5][0]|=0x200;if(!freeze)flags[6][0]&=~7u;}else flags[6][0]|=7;return 1;}
+    case 0x1f:{const auto mode=v.u8(p+1),index=v.u8(p+2),freeze=v.u8(p+3);advance(4);if(!mode){flags[10][0]&=~0x2000u;dialog_.show(read_message(room_,messages_,index),index);flags[5][0]|=0x200;opening_hint_=t.event==16&&index==4;if(!freeze)flags[6][0]&=~7u;}else flags[6][0]|=7;return 1;}
     case 0x25:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");auto& a=interactions[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);return advance(10);}
     case 0x26:{const auto weapon=v.u8(p+1);advance(2);return inventory_.weapon()==weapon;}
     case 0x27:values[18]=v.u8(p+1);if(!values[18])inventory_.slots()[0]=0;return advance(2);
-    case 0x28:flags[12][0]|=0x200;return advance(2);
+    case 0x28:status_requested=true;flags[12][0]|=0x200;return advance(2);
     case 0x31:{const auto item=v.u8(p+1);for(unsigned i=1;i<12;++i)if(Inventory::id(inventory_.slots()[i])==item){inventory_.consume(i);break;}return advance(2);}
     case 0x5c:dialog_=MessageDialog{};flags[5][0]&=~0x200u;return advance(2);
     case 0x81:{const auto mode=v.u8(p+1);advance(2);return mode==unsigned(!menu_open);}
@@ -82,9 +89,9 @@ int EventVm::instruction(Task& t){
     case 0xfb:if(t.loops.empty()||!t.loops.back().repeat)throw std::runtime_error("event NEXT without FOR");if(t.loops.back().count>1){--t.loops.back().count;t.pc=t.loops.back().body;}else{t.loops.pop_back();advance(2);}return 1;
     // The binary structure is known, but these commands still need native
     // world/audio/cutscene bindings; keep them available for the next port step.
-    case 0xa:case 0x13:case 0x3d:case 0x3f:case 0x20:case 0x24:case 0x2f:case 0x35:case 0x3c:case 0x3e:case 0x43:case 0x4b:case 0x65:case 0x91:case 0x9a:case 0xa6:world(t,op,4);return 1;
+    case 0xad:case 0xd4:case 0x94:case 0xa:case 0x13:case 0x3d:case 0x3f:case 0x20:case 0x24:case 0x2f:case 0x35:case 0x3c:case 0x3e:case 0x43:case 0x4b:case 0x65:case 0x91:case 0x9a:case 0xa6:world(t,op,4);return 1;
     case 0x86:world(t,op,16);return 1;
-    case 0x23:case 0x44:world(t,op,6);return 1;
+    case 0x4c:case 0x44:world(t,op,6);return 1;
     case 0x33:{v.require(p,8);DoorRequest request{v.u16(p+2),v.u8(p+4),v.u8(p+5),v.u8(p+6),v.u8(p+7),values[21]};if(!door||!door(request))throw std::runtime_error("DoorCall destination unavailable");advance(8);return 2;}
     case 0x32:case 0x53:case 0x34:world(t,op,12);return 1;
     case 0x3b:world(t,op,6);return 1;
@@ -99,7 +106,7 @@ int EventVm::instruction(Task& t){
     case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x67:{if(v.u8(p+1)!=0x80&&v.u8(p+1)!=0x8b)throw std::runtime_error("unimplemented Sub_controll command "+std::to_string(v.u8(p+1)));world(t,op,2);return 1;}
     case 0x15:world(t,op,4);return 1;
-    case 0x69:{const unsigned command=v.u8(p+1);unsigned length=0;switch(command){case 2:case 3:case 4:length=4;break;case 5:case 6:length=6;break;case 7:case 8:length=8;break;case 9:case 11:case 12:case 13:length=6;break;case 23:case 41:length=4;break;case 36:case 47:length=2;break;case 24:case 25:length=8;break;case 34:length=10;break;default:throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));}world(t,op,length);return 1;}
+    case 0x69:{const unsigned command=v.u8(p+1);unsigned length=0;switch(command){case 2:case 3:case 4:length=4;break;case 5:case 6:length=6;break;case 7:case 8:length=8;break;case 9:case 11:case 12:case 13:length=6;break;case 23:case 40:case 41:case 42:case 46:length=4;break;case 36:case 47:length=2;break;case 24:case 25:length=8;break;case 34:length=10;break;default:throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));}world(t,op,length);return 1;}
     default:{std::ostringstream s;s<<"unimplemented opcode 0x"<<std::hex<<op;throw std::runtime_error(s.str());}
     }
 }
@@ -107,8 +114,21 @@ void EventVm::run(Task& t,bool scenario){
     if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);if(result==1)continue;if(result==0&&!t.branches.empty()){t.pc=t.branches.back();t.branches.pop_back();continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
     catch(const std::exception& e){t.blocked=true;std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(t.pc-base_)<<": "<<e.what();if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());}
 }
-void EventVm::tick(){++tick_count;if(dialog_.tick())flags[10][0]|=0x2000;menu_open?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;run(scenario,true);for(auto& t:tasks_)if(t.active)run(t);}
-void EventVm::confirm_dialog(){dialog_.confirm();if(!dialog_.active()){flags[5][0]&=~0x200u;flags[10][0]|=0x2000;}}
+void EventVm::tick(){++tick_count;if(dialog_.tick()){flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;}menu_open?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;run(scenario,true);for(auto& t:tasks_)if(t.active)run(t);}
+void EventVm::hide_item(unsigned index){if(index>=room_items_.size())throw std::runtime_error("pickup model outside room");EventCommand command{0x20,0,0,0,{0x20,std::uint8_t(index),3,0}};if(!binding||!binding(command))pending_bindings.push_back(command);}
+void EventVm::choose_dialog(int direction){const auto count=dialog_.choices();if(count)dialog_.selection=(dialog_.selection+count+direction)%count;}
+void EventVm::cancel_dialog(){if(pickup_item_&&dialog_.choices()){dialog_.selection=1;confirm_dialog();}else confirm_dialog();}
+void EventVm::confirm_dialog(){
+    if(pickup_item_&&dialog_.choices()){
+        const auto item=pickup_item_;pickup_item_=0;
+        if(dialog_.selection){dialog_=MessageDialog{};flags[5][0]&=~0x200u;flags[10][0]|=0x2000;return;}
+        const auto count=getbulletmax[item][inventory_.game_mode];
+        if(!inventory_.acquire(item,count)){dialog_.show(item_message(154,item),154);return;}
+        flags[10][0]|=0x800;hide_item(pickup_model_);dialog_.show(item_message(158,item),158);return;
+    }
+    const bool was_active=dialog_.active();dialog_.confirm();if(was_active&&!dialog_.active()&&audio_stop)audio_stop(1);
+    if(!dialog_.active()){flags[5][0]&=~0x200u;flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;}
+}
 void EventVm::use(unsigned item){values[8]=item;flags[10][0]|=0x400;}
 void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
     flags[10][0]&=~0x200u;if(flags[13][0]&6)return;
@@ -124,11 +144,13 @@ void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
 }
 bool EventVm::skip_cinematic(){if(!(flags[10][0]&0x40))return false;flags[10][0]|=0x10000000;return true;}
 bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){
-    if(flags[5][0]&4)return false;
+    if((flags[5][0]&4)||dialog_.active()||menu_open)return false;
     const auto direction=(yaw+8192)&0xc000;
     for(unsigned i=0;i<interactions.size();++i){const auto& a=interactions[i];const float distance=a.type==0?4.5f:2.0f;const auto probe=NJS_POINT3{pos.x-distance*njSin(yaw),pos.y,pos.z-distance*njCos(yaw)};if(!(a.flags&1)||probe.x<a.position.x||probe.x>a.position.x+a.extent.x||probe.z<a.position.z||probe.z>a.position.z+a.extent.z)continue;
         if(a.type==0){if(a.floor!=floor||(direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000)))continue;
             return door&&door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]});}
+        if(a.type==4){const auto model=a.parameters[0];if(model>=room_items_.size())throw std::runtime_error("pickup model outside room");auto id=room_items_[model];if(id==130)id=35;if(!id||id>=156||!item_message)return false;
+            pickup_item_=id;pickup_model_=model;values[20]=i;flags[10][0]|=0x100;dialog_.show(item_message(157,id),157);flags[5][0]|=0x200;return true;}
         values[20]=i;flags[10][0]|=0x100;if(a.type==3&&(a.attribute&0x8000)){dialog_.show(read_message(room_,messages_,a.parameters[1]),a.parameters[1]);flags[5][0]|=0x200;return true;}
         return true;
     }return false;

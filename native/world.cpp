@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <tuple>
 namespace recvx {
 namespace {
 void put(std::vector<std::uint8_t>& b,std::uint32_t n){for(unsigned i=0;i<4;++i)b.push_back(std::uint8_t(n>>(i*8)));}
@@ -39,11 +40,16 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         for(unsigned i=0;i<n;++i){const auto q=p+i*0xe0;Light l;l.flags=v.u32(q);l.type=v.u32(q+4);l.speed=v.u32(q+8);l.link=v.u32(q+12);l.index=v.u32(q+16);l.node=v.u32(q+20);l.source=v.u32(q+24);
             l.position={v.f32(q+28),v.f32(q+32),v.f32(q+36)};l.offset={v.f32(q+40),v.f32(q+44),v.f32(q+48)};l.direction={v.f32(q+52),v.f32(q+56),v.f32(q+60)};l.color={v.f32(q+76),v.f32(q+80),v.f32(q+84)};l.near_range=v.f32(q+88);l.far_range=v.f32(q+92);if(i<4&&pointer==4)l.flags&=~2u;out.push_back(l);}};
     read_lights(4,0x84,lights_);read_lights(0x3c,0xb4,event_lights_);
-    const auto ene_count=v.u32(header_+0x88),model_table=v.u32(20),texture_table=v.u32(32);std::size_t model_slot=1,texture_slot=1;
+    const auto ene_count=v.u32(header_+0x88),model_table=v.u32(20),texture_table=v.u32(32);std::size_t model_slot=1,texture_slot=1;std::map<std::tuple<unsigned,unsigned,unsigned,unsigned>,std::size_t> texture_cache;
     auto load=[&](unsigned kind,unsigned index,std::size_t p,bool actor){auto& e=entity(kind,index);e.transform={{v.f32(p+12),v.f32(p+16),v.f32(p+20)},int(v.u16(p+28))};e.angles={int(v.u16(p+24)),int(v.u16(p+28)),int(v.u16(p+26))};
-        const auto model=v.u32(model_table+model_slot++*4),texture=v.u32(texture_table+4+texture_slot*4);Model out;out.kind=kind;out.index=index;
-        if(actor){out.actor=std::make_unique<PlayerAsset>(actor_packet(b,model,texture));for(std::size_t at=model,n=0;n<64;++n){const auto bytes=v.u32(at);at+=4;if(bytes==0xffffffff)break;if(bytes&&(v.u32(at)&0xffffff)==0x4c444d&&v.u32(at+8)!=0xffffffff)++texture_slot;at+=bytes;}}
-        else {ModelGeometryOptions pose;out.object=decode_model_asset(b,model,texture,pose);if(v.u32(model+8)!=0xffffffff)++texture_slot;}
+        const auto model=v.u32(model_table+model_slot++*4);std::size_t texture=0;
+        const unsigned identity=v.u16(p+4),variant=actor?v.u8(p+9):0;
+        if(actor){unsigned version=0;bool first=true;for(std::size_t at=model,n=0;n<64;++n){const auto bytes=v.u32(at);at+=4;if(bytes==0xffffffff)break;
+            if(bytes&&(v.u32(at)&0xffffff)==0x4c444d){if(v.u32(at+8)!=0xffffffff){const auto key=std::make_tuple(kind,identity,variant,version++);auto it=texture_cache.find(key);if(it==texture_cache.end())it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(first)texture=it->second;}first=false;}at+=bytes;}}
+        else {const auto key=std::make_tuple(kind,identity,0u,0u);auto it=texture_cache.find(key);if(it==texture_cache.end()&&v.u32(model+8)!=0xffffffff)it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(it!=texture_cache.end())texture=it->second;}
+        Model out;out.kind=kind;out.index=index;
+        if(actor){out.actor=std::make_unique<PlayerAsset>(actor_packet(b,model,texture));}
+        else {ModelGeometryOptions pose;out.object=decode_model_asset(b,model,texture,pose);}
         if(actor)out.object.textures=out.actor->textures();if(!data.empty())apply_texture_files(out.object,data,mods,std::filesystem::path(kind==1?"npcs":kind==2?"objects":"room-items")/room_name/asset_number(index));
         models_.push_back(std::move(out));};
     const auto enep=v.u32(header_+8);for(unsigned i=0;i<ene_count;++i)if(v.u32(enep+i*36)&1)load(1,i,enep+i*36,true);
@@ -65,6 +71,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0x44){const auto slot=v.u8(4);if(slot>=4)throw std::runtime_error("ambient slot outside table");ambient_[slot]={v.u8(1)*.1f,v.u8(2)*.1f,v.u8(3)*.1f};return true;}
     if(op==0x36){fade_target_=v.u8(1)/255.f;fade_color_=(unsigned(v.u8(2))<<16)|(unsigned(v.u8(3))<<8)|v.u8(4);const auto ticks=v.u8(5);if(ticks)fade_step_=(fade_target_-fade_)/ticks;else{fade_=fade_target_;fade_step_=0;}return true;}
     if(op==0x15||op==0xa6){audio_.play(0,"BGM1",v.u8(1),std::pow(10.f,(op==0xa6?-float(v.u8(3)):-45.f)/40),true,v.u8(2)*10);return true;}
+    if(op==0xd4){audio_.play_system(v.u16(2));return true;}
     if(op==0x16){audio_.stop(0,v.u8(1)*10);return true;}
     if(op==0x19){audio_.play(1,"VOICE1",v.u16(2),1,false,v.u8(5)*10);return true;}
     if(op==0x1a){audio_.stop(1,v.u8(1)*10);return true;}

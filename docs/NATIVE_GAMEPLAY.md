@@ -1,7 +1,7 @@
 # Native gameplay 0.5
 
 The runtime starts at a native main menu using the original ADV/0002.bin title
-background. New Game starts the event VM; Settings provides persistent live
+background, menu lettering and copyright sprites. New Game starts the event VM; Settings provides persistent live
 keyboard/controller rebinding, deadzone and menu-threshold controls. Save/load,
 difficulty selection and the complete original title transitions remain pending.
 `--in-game` bypasses the main menu for diagnostics.
@@ -19,10 +19,13 @@ film does not leave a cinematic skip flag for the subsequent lighter scene.
 After the intro (or its original skip), event 16 selects event camera 37 and
 message 4: "If I were equipped with a lighter, I could see outside...". Rodrigo
 is rendered in the dark beyond the bars; the hint is not shown with Claire
-standing outside. Acknowledge it with Enter. The original cinematic flags then
-permit opening the inventory. A fast inventory press immediately after the hint
-is retained for up to 60 ticks and opens as soon as those flags release control.
-Tab, Enter and Enter select/equip the lighter. Original face-reset (0x90) and
+standing outside. Acknowledge it with the configured OK button (Enter/A by default). Completing
+this specific hint queues automatic inventory opening after the cinematic handover.
+The request is consumed before locomotion, so held movement cannot move Claire
+between the hint and the inventory. No Tab/Y press is required. Two separate OK
+presses select/equip the lighter. The decoded bhSubStatus command also requests
+the shared inventory UI. The automatic hint handover is an explicit native
+behavior; the raw RM_0000 event-16 bytes do not themselves contain bhSubStatus. Original face-reset (0x90) and
 event-effect-clear (0xca) commands are decoded with their original two-byte
 lengths and retained as pending visual bindings.
 
@@ -37,7 +40,7 @@ No diagnostic position command is needed.
 The scene uses original actors and assets, with partial native lighting/camera
 behavior. It is not pixel-identical to PS2 output: particle effects, the virtual
 lighter/flame object, facial/lip animation, camera key interpolation, specular,
-fog and translucent materials still need complete bindings. The pre-film intro
+fog, hands/attachments and translucent materials still need complete bindings. The pre-film intro
 can therefore have missing visuals. Lighting uses original vertex normals,
 camera masks and light ranges with approximate triangle shading/attenuation.
 
@@ -50,8 +53,12 @@ ten only after the original GM side-pack flag is set. Item selection,
 equip/unequip, two-slot items, quantity/ammunition, health, original C combination
 recipes and item-model examination are implemented. Examination rotates original
 models. The full original menu transition system, map/files, box storage and
-save/load UI remain pending. Health presentation exists; combat-driven damage
-and its full animations do not yet exist.
+save/load UI remain pending. PulseInit/PulseAnim/PulseFadeAnim are generated directly from original sub1.c
+and render the animated condition pulse. Original command-frame sprites, their
+settled position and item-dependent height replace the custom rectangle. Holding
+left/right rotates examined models every simulation tick instead of waiting for
+menu-key repetition. Combat-driven damage and the full heal/poison transition
+animations remain pending.
 
 ## Movement and collision
 
@@ -81,7 +88,9 @@ for confirmation. Dialogue is white text with a black antialiased edge over the 
 background panel. Empty timed messages draw nothing.
 
 BGM1 and VOICE1 ADX playback is native. Film sound is native original stereo PCM.
-Menu sounds, footsteps, weapon/environment sound-bank routing and the full
+System-bank menu, inventory, choice and script sounds play natively. Completing
+a dialogue also stops its active voice so its original playback wait can finish.
+Footsteps, weapon/environment sound-bank routing and the full
 EasySE/MULTSPQ system remain pending. See AUDIO.md for formats and limits.
 
 Known commands without a real native world binding are recorded in the pending
@@ -89,7 +98,21 @@ trace and advanced; they are not claimed as implemented effects. The opening
 still records over one hundred such dispatches, including effects, linking,
 item speed/motion and some actor subcommands. Unknown commands instead block
 the task at its original PC, report an error and fail headless validation.
-Full original actor/enemy AI, camera interpolation, puzzles/item pickups,
+Type-4 item interactions now use the original Take/Yes/No, capacity and acquired
+messages from SYSMES.ALD. FF03's dynamic-item operand and FF04 choices are parsed
+without truncating the text. Yes acquires original RDT item IDs and quantities;
+No or a full inventory preserves the item. Original ItmCk/ItmSetCk commit global
+pickup flags, hide the model and prevent reappearance after room reload. The
+first-room knife and handgun ammunition are checked with original resources.
+The automatic bend/pickup animation and the full original pickup status layout
+remain pending.
+
+Shared NPC texture banks follow bhSetEneMdl's cache identity (enemy/model/texture
+version), instead of consuming a new bank for every actor. This fixes the texture
+range crash in RM_0020 after the first stairs. That room renders and runs its
+initial bytecode without blocked commands; fog/effects and enemy AI remain pending.
+
+Full original actor/enemy AI, camera interpolation, puzzles,
 combat, saving and progression through all rooms are not
 complete. All disc data being present does not make those systems playable.
 

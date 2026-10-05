@@ -59,6 +59,8 @@ class GameplayInput {
 public:
     GameplayInput(Inventory& inventory,StatusMenu& menu,MessageDialog& dialog,EventVm* events):inventory_(inventory),menu_(menu),dialog_(dialog),events_(events){}
     void menu_input(MenuInput key);
+    std::function<void(unsigned)> sound;
+    void synchronize(); // Consume script-owned UI requests before movement.
     bool apply(const InputFrame& frame); // true means an explicit quit action
     std::function<void()> interact,confirm_transition;
     std::function<bool()> transition_active,video_active;

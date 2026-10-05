@@ -16,6 +16,7 @@ public:
     void event(const SDL_Event& event);
     void draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers);
     std::function<void(const InputConfig&)> changed;
+    std::function<void(unsigned)> sound;
 private:
     enum class Screen {Main,Controls,Hidden};
     Screen screen_=Screen::Main;

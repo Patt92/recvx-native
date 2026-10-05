@@ -16,6 +16,7 @@ void Frontend::arm(){capture_=true;status_.clear();neutral_.fill(true);
 }
 FrontendCommand Frontend::input(MenuInput key,bool pad){
     if(!active()||capture_)return FrontendCommand::None;
+    if(sound)sound(key==MenuInput::Cancel?3:key==MenuInput::Confirm?0:2);
     if(screen_==Screen::Main){
         if(key==MenuInput::Up)selected_=(selected_+2)%3;
         if(key==MenuInput::Down)selected_=(selected_+1)%3;
@@ -62,8 +63,7 @@ void Frontend::event(const SDL_Event& event){if(!capture_)return;
     capture_=false;suppress_=true;commit(candidate);
 }
 void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){ui.draw_title(image);
-    if(screen_==Screen::Main){panel(image,175,274,300,134);const char* entries[]={"Neues Spiel","Einstellungen","Beenden"};
-        for(unsigned i=0;i<3;++i){if(i==selected_)for(int y=298+int(i)*36;y<310+int(i)*36;++y)for(int x=203;x<211;++x)image.canvas()[y*640+x]=0xffffffff;ui.label(image,entries[i],226,290+int(i)*36,.9f,i==selected_?0xffffffff:0xffaaaaaa);}
+    if(screen_==Screen::Main){ui.draw_title_options(image,selected_);
         panel(image,0,438,640,42);ui.label(image,"OK: "+config_.describe(Action::Confirm,false)+"   Controller: "+config_.describe(Action::Confirm,true),24,443,.5f);
         ui.label(image,"Auswahl: Pfeiltasten / Stick / Steuerkreuz",24,460,.45f);
     }else{

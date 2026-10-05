@@ -55,6 +55,7 @@ def main():
     if target != 'windows' or platform.system() == 'Windows':
         suffix = '.exe' if target == 'windows' else ''
         if not args.no_test and (data / 'native-data.version').is_file():
+            run(binary_dir / ('recvx-audio-tests' + suffix), data)
             run(binary_dir / ('recvx-game-tests' + suffix), data)
             run(binary_dir / ('recvx-input-tests' + suffix), data)
             run(binary_dir / ('recvx-frontend-tests' + suffix), data)

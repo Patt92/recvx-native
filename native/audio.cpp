@@ -1,10 +1,43 @@
 #include "audio.h"
 #include "asset_io.h"
+#include "binary_view.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
 namespace recvx {
+// Sony HD/BD metadata and SPU-ADPCM format references are listed in docs/AUDIO.md.
+PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate){
+    if(bytes.empty()||bytes.size()%16||bytes.size()>32*1024*1024||rate<8000||rate>96000)throw std::runtime_error("invalid SPU-ADPCM dimensions");
+    static constexpr int coefficients[5][2]={{0,0},{60,0},{115,-52},{98,-55},{122,-60}};
+    PcmClip out;out.rate=rate;out.channels=1;int previous=0,older=0;
+    for(std::size_t p=0;p<bytes.size();p+=16){const unsigned filter=bytes[p]>>4,shift=bytes[p]&15,flags=bytes[p+1];
+        if(filter>4||shift>12||flags>7)throw std::runtime_error("invalid SPU-ADPCM frame");
+        for(unsigned i=0;i<28;++i){int nibble=(bytes[p+2+i/2]>>((i&1)*4))&15;if(nibble>=8)nibble-=16;
+            const int residual=nibble*(1<<(12-shift));const int predictor=coefficients[filter][0]*previous+coefficients[filter][1]*older;
+            const int sample=flags==7?0:std::clamp(residual+(predictor>=0?predictor/64:-((-predictor+63)/64)),-32768,32767);
+            out.samples.push_back(std::int16_t(sample));older=previous;previous=sample;
+        }if(flags&1)break;
+    }return out;
+}
+PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned program){
+    BinaryView v(bytes);v.require(0,24);const auto hd=v.u32(0),hd_size=v.u32(4),bd=v.u32(8),bd_size=v.u32(12);v.require(hd,hd_size);v.require(bd,bd_size);
+    auto magic=[&](std::size_t p,const char* expected){v.require(p,8);if(std::memcmp(bytes.data()+p,expected,8))throw std::runtime_error("invalid Sony sound-bank section");};
+    magic(hd,"IECSsreV");const auto head=hd+v.u32(hd+8);magic(head,"IECSdaeH");
+    auto section=[&](unsigned field,const char* name){const auto p=hd+v.u32(head+field);magic(p,name);const auto length=v.u32(p+8),last=v.u32(p+12);if(last>4096)throw std::runtime_error("Sony sound-bank table too large");v.require(p,length);v.require(p+16,(last+1)*4);return p;};
+    const auto prog=section(0x14,"IECSgorP"),sets=section(0x18,"IECStesS"),samples=section(0x1c,"IECSlpmS"),vags=section(0x20,"IECSigaV");
+    auto entry=[&](std::size_t table,unsigned index,std::size_t size){if(index>v.u32(table+12))throw std::runtime_error("Sony sound-bank index outside table");const auto offset=v.u32(table+16+index*4),length=v.u32(table+8);if(offset>length||size>length-offset)throw std::runtime_error("Sony sound-bank entry outside section");return v.relative(table,offset,size);};
+    const auto pg=entry(prog,program,0x28);const auto zone=v.relative(pg,v.u32(pg),2);const auto set=entry(sets,v.u16(zone),6);
+    if(v.u8(set+3)!=1)throw std::runtime_error("layered system sound unsupported");const auto sample=entry(samples,v.u16(set+4),2);const auto vag=entry(vags,v.u16(sample),8);
+    const auto start=v.u32(vag);std::size_t end=bd_size;for(unsigned i=0;i<=v.u32(vags+12);++i){const auto next=v.u32(entry(vags,i,8));if(next>start)end=std::min(end,std::size_t(next));}
+    if(start>=end||end>bd_size)throw std::runtime_error("invalid Sony sound-bank waveform range");
+    return decode_ps_adpcm(std::vector<std::uint8_t>(bytes.begin()+bd+start,bytes.begin()+bd+end),v.u16(vag+4));
+}
+void AudioMixer::play_system(unsigned program){
+    auto found=system_sounds_.find(program);if(found==system_sounds_.end()){auto file=mods_/"audio/system/COMMON.MLT";if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"files/COMMON.MLT";
+        found=system_sounds_.emplace(program,std::make_shared<PcmClip>(decode_system_sound(read_asset_file(file,8*1024*1024),program))).first;}
+    play_pcm(effect_slot_,found->second);effect_slot_=effect_slot_==2?3:2;played.push_back("COMMON/"+asset_number(program));
+}
 PcmClip decode_adx(const std::vector<std::uint8_t>& b){
     auto need=[&](std::size_t p,std::size_t n){if(p>b.size()||n>b.size()-p)throw std::runtime_error("truncated ADX audio");};
     auto be16=[&](std::size_t p){need(p,2);return unsigned(b[p])*256+b[p+1];};

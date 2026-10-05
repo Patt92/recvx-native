@@ -183,7 +183,7 @@ float PlayerAsset::translation_speed(std::size_t curve,std::int64_t frame_q16) c
     return keys[std::size_t(frame/65536)+1];
 }
 void PlayerAsset::locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,int move,bool run,int turn)const {
-    actor.yaw=(actor.yaw+turn*int(182.04445f*4.5f))&65535;
+    actor.yaw=(actor.yaw-turn*int(182.04445f*4.5f))&65535;
     const std::size_t next=move>0?(run?4:0):(move<0?16:42);
     if(!has_motion(next))throw std::runtime_error("player locomotion clip unavailable");
     if(next!=motion){motion=next;frame=next==0?5*65536:next==16?25*65536:0;}

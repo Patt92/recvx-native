@@ -28,6 +28,15 @@ def main():
     message = (a.root / 'src/ps2/veronica/prog/message.c').read_text()
     m = re.search(r'const unsigned char FontSz\[126\]\s*=\s*\{', message)
     ui.append(message[m.start():block(message, m.start())] + ';\n')
+    # Keep the original pulse timing and fade state machine in the host build.
+    header = (a.root / 'include/ps2/veronica/prog/sub1.h').read_text()
+    start = header.index('typedef struct PULSE_WORK')
+    end = header.index('} PULSE_WORK;', start) + len('} PULSE_WORK;')
+    ui.append('namespace pulse {\nstruct NJS_POINT2 {float x,y;};\nunion NJS_COLOR {std::uint32_t color;struct {std::int16_t u,v;} tex;};\n' + header[start:end] + '\nstruct S_WORK {unsigned hp;};\nstatic thread_local S_WORK swork;\nstatic thread_local PULSE_WORK pulsework;\nvoid PulseFadeAnim();\n')
+    for name in ('PulseInit', 'PulseAnim', 'PulseFadeAnim'):
+        m = re.search(r'^void ' + name + r'\(\)\s*\n\{', sub, re.M)
+        ui.append(sub[m.start():block(sub, m.start())] + '\n')
+    ui.append('}\n')
     (a.output / 'ui_tables.inc').write_text(''.join(ui))
     routines = ['// Generated from original Combi_00 through Combi_05 in sub1.c.\n']
     for i in range(6):

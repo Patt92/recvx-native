@@ -30,8 +30,9 @@ void blit(SoftwareRenderer& image,const SceneTexture& texture,int x,int y,int w,
 std::uint32_t tint(Color c){return (unsigned(std::clamp(c.a,0.f,1.f)*255)<<24)|(unsigned(std::clamp(c.r,0.f,1.f)*255)<<16)|(unsigned(std::clamp(c.g,0.f,1.f)*255)<<8)|unsigned(std::clamp(c.b,0.f,1.f)*255);}
 unsigned last_slot(const Inventory& inv){unsigned cells=0,last=1;for(unsigned slot=2;slot<12&&cells<inv.capacity();++slot){const auto id=Inventory::id(inv.slots()[slot]);cells+=id&&(itemdata[id].type&0x100)?2:1;last=slot;}return last;}
 }
+struct GameUi::PulseState {pulse::PULSE_WORK work{};unsigned tick=0,condition=99;};
 std::vector<std::string> StatusMenu::actions(const Inventory& inventory)const{
-    auto item=Inventory::id(inventory.slots()[selected]);if(!item)return {};if(item==145)return {"File"};return {(itemdata[item].type&1)?"Equip":"Use","Examine","Combine"};
+    auto item=Inventory::id(inventory.slots()[selected]);if(!item)return {};if(item==145)return {"File"};if(itemdata[item].type&1)return {"Equip","Examine","Combine","Use"};return {"Use","Examine","Combine"};
 }
 bool StatusMenu::input(MenuInput key,Inventory& inventory){
     if(key==MenuInput::Open){active=!active;commands=examining=combining=false;selected=1;command=0;return true;}if(!active)return false;
@@ -40,7 +41,7 @@ bool StatusMenu::input(MenuInput key,Inventory& inventory){
     if(commands){auto list=actions(inventory);if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
         if(command==0){if(itemdata[Inventory::id(inventory.slots()[selected])].type&1){inventory.equip(selected);active=false;}else if(Inventory::id(inventory.slots()[selected])==145)examining=true;
             else if(!inventory.heal(selected)){use_item=Inventory::id(inventory.slots()[selected]);active=false;}}
-        else if(command==1)examining=true;else if(command==2){combining=true;combine_from=selected;}
+        else if(command==1)examining=true;else if(command==2){combining=true;combine_from=selected;}else if(command==3){use_item=Inventory::id(inventory.slots()[selected]);active=false;}
         commands=false;
     }return true;}
     const auto last=last_slot(inventory);selected=std::min(selected,last);
@@ -66,25 +67,33 @@ void GameUi::label(SoftwareRenderer& image,const std::string& str,int x,int y,fl
 void GameUi::draw_title(SoftwareRenderer& image){
     if(title_.empty()){
         const auto packet=read_asset_file(data_/"archives/ADV/0002.bin",8*1024*1024);BinaryView view(packet);
-        const auto resource=view.u32(0);const auto offset=view.relative(resource,view.u32(resource+4),256);
-        const auto length=128u+view.u32(offset+128);view.require(offset,length);
-        // ADV resources point directly at extended TIM2. Wrap its existing CLUT
-        // in the PVP/PLI envelope used by the shared native texture decoder.
-        std::vector<std::uint8_t> bundle(44+32+length+4);auto put=[&](std::size_t p,std::uint32_t value){for(unsigned i=0;i<4;++i)bundle[p+i]=std::uint8_t(value>>(i*8));};
-        put(0,0x00494c50);put(4,12);put(32,1);put(44,0x324d4954);put(48,length);std::copy_n(packet.begin()+offset,length,bundle.begin()+76);put(76+length,0xffffffff);
-        title_=decode_texture_bundle(bundle);if(title_.size()!=1)throw std::runtime_error("original title texture missing");
-        for(auto& pixel:title_[0].pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);
+        for(unsigned i=0;i<3;++i){const auto resource=view.u32(i*4);const auto offset=view.relative(resource,view.u32(resource+4),256);
+            const auto length=128u+view.u32(offset+128);view.require(offset,length);
+            // Wrap the existing extended TIM2 in the shared decoder's PVP envelope.
+            std::vector<std::uint8_t> bundle(44+32+length+4);auto put=[&](std::size_t p,std::uint32_t value){for(unsigned j=0;j<4;++j)bundle[p+j]=std::uint8_t(value>>(j*8));};
+            put(0,0x00494c50);put(4,12);put(32,1);put(44,0x324d4954);put(48,length);std::copy_n(packet.begin()+offset,length,bundle.begin()+76);put(76+length,0xffffffff);
+            auto textures=decode_texture_bundle(bundle);if(textures.size()!=1)throw std::runtime_error("original title texture missing");title_.push_back(std::move(textures.front()));
+            for(auto& pixel:title_.back().pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);
+        }
         Scene replacement;replacement.textures=title_;apply_texture_files(replacement,data_,mods_,"title");title_=std::move(replacement.textures);
     }
     std::fill(image.canvas().begin(),image.canvas().end(),0xff000000);
     blit_pixels(image,title_[0],0,0,640,480,0,0,int(title_[0].width)*640/1024,int(title_[0].height)*480/512);
+    blit_pixels(image,title_[2],20,396,352,52,0,460,352,512);
+    blit_pixels(image,title_[2],348,418,240,32,272,432,512,464);
+}
+void GameUi::draw_title_options(SoftwareRenderer& image,unsigned selected){
+    if(title_.empty())draw_title(image);
+    blit_pixels(image,title_[2],64,288,512,32,0,96,512,128,selected==0?0xffffffff:0xff7f7f7f);
+    blit_pixels(image,title_[2],64,320,512,32,0,128,512,160,selected==1?0xffffffff:0xff7f7f7f);
+    label(image,"Beenden",264,352,.9f,selected==2?0xffffffff:0xff7f7f7f);
 }
 Message GameUi::system_message(unsigned i)const{return read_message(messages_,system_table_,i);}
 std::string GameUi::item_name(unsigned id)const{return message_text(read_message(messages_,4,id));}
-void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,float scale,std::uint32_t color,bool dialogue)const{
-    const int start=x;for(std::size_t i=0;i<message.size();++i){const auto c=message[i];if(c==0xffff)break;if(c==0xff00){x=start;y+=int(30*scale);continue;}if(c==0xff01){x+=int(14*scale);continue;}
+void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,float scale,std::uint32_t color,bool dialogue,int selected_choice)const{
+    const int start=x;int choice=0;for(std::size_t i=0;i<message.size();++i){const auto c=message[i];if(c==0xffff)break;if(c==0xff00){x=start;y+=int(30*scale);continue;}if(c==0xff01){x+=int(14*scale);continue;}
         if(c==0xff03){if(i+1>=message.size())break;const auto id=message[++i];auto name=read_message(messages_,4,id);text(image,name,x,y,scale,color,dialogue);x+=int(message_text(name).size()*14*scale);continue;}
-        if(c==0xff04){++i;continue;}if(c>=0xfe00){if(c<0xff00)color=c==0xfe01?0xffffe020:0xffffffff;continue;}if(c/324>=fonts_.size())continue;
+        if(c==0xff04){if(choice++==selected_choice)blit_pixels(image,menu_[0],x,y+int(5*scale),int(18*scale),int(18*scale),0,28,18,46);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=c==0xfe01?0xffffe020:0xffffffff;continue;}if(c/324>=fonts_.size())continue;
         const auto glyph=c%324;blit(image,(dialogue?dialog_fonts_:fonts_)[c/324],x,y,int(28*scale),int(28*scale),(glyph%18)*14,(glyph/18)*14,(glyph%18)*14+14,(glyph/18)*14+14,color);
         x+=int((c<108?FontSz[c]:28)*scale);
     }
@@ -124,10 +133,24 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         unsigned condition=inv.poisoned?4:inv.hp>=120?0:inv.hp>=60?1:inv.hp>=30?2:3;
 
         const int u=condition>=3?216:0,v=condition==0?296:(condition==2||condition==4?440:368);
-        blit_pixels(image,menu_[2],176,234,216,72,u,v,u+216,v+72);
-        ascii(image,std::to_string(inv.hp)+" / "+std::to_string(inv.max_hp),180,309,.55f);
+        if(!pulse_)pulse_=std::make_shared<PulseState>();pulse::swork.hp=condition;
+        if(pulse_->condition!=condition||tick<pulse_->tick){pulse::PulseInit();pulse_->work=pulse::pulsework;pulse_->condition=condition;pulse_->tick=tick-std::min(120u,tick);}
+        pulse::pulsework=pulse_->work;
+        for(unsigned i=0;i<std::min(120u,tick-pulse_->tick);++i)pulse::PulseAnim();
+        pulse_->tick=tick;pulse_->work=pulse::pulsework;
+        // Pulse00's five strips: interpolate the original vertex alpha and additive colour.
+        for(unsigned strip=0;strip<5;++strip){const auto& pw=pulse_->work;const int begin=int(pw.pos_00[strip].x),end=int(pw.pos_01[strip].x);
+            for(int x=begin;x<end;++x){const float fraction=float(x-begin)/std::max(1,end-begin);std::uint32_t color=0;
+                for(unsigned shift:{0u,8u,16u,24u}){const auto left=(pw.col00[strip].color>>shift)&255,right=(pw.col01[strip].color>>shift)&255;unsigned component=unsigned(left+(int(right)-int(left))*fraction);
+                    if(shift!=24){const auto add_left=(pw.ocol00[strip]>>shift)&255,add_right=(pw.ocol01[strip]>>shift)&255;component=std::min(255u,component+unsigned(add_left+(int(add_right)-int(add_left))*fraction));}color|=component<<shift;}
+                blit_pixels(image,menu_[2],176+x,234,1,72,u+x,v,u+x+1,v+72,color);
+            }
+        }
         const auto selected_id=Inventory::id(inv.slots()[menu.selected]);if(selected_id)text(image,read_message(messages_,4,selected_id==145?159:selected_id),44,342,.95f);
-        if(menu.commands){rectangle(image,452,120,144,136,0xff15191d);auto list=menu.actions(inv);for(unsigned i=0;i<list.size();++i){if(list[i]=="File")ascii(image,"File",460,146,.8f);else{const auto& label=parts_10[i==0?(list[0]=="Equip"?7:8):i==1?9:10];blit(image,menu_[label.texid],462,146+int(i)*32,label.sx,label.sy,label.u1,label.v1,label.u2,label.v2,i==menu.command?0xff2080ff:0xffffffff);}}}
+        if(menu.commands){for(unsigned n=0;n<13;++n){auto p=parts_06b[n];const bool weapon=itemdata[selected_id].type&1;const int shrink=weapon?32:64;
+            if(n==2||n==3||n==5||n==7)p.pos[1]-=shrink;if(n==8)p.setnum=weapon?2:1;if(n==9||n==10)p.setnum=weapon?3:2;const auto& part=tables[p.parts_num][p.anim];const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;
+            for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]-96+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
+        }auto list=menu.actions(inv);for(unsigned i=0;i<list.size();++i){if(list[i]=="File")ascii(image,"File",364,146,.8f);else{const auto& label=parts_10[i==0?(list[0]=="Equip"?7:8):i==1?9:i==2?10:8];blit(image,menu_[label.texid],366,146+int(i)*32,label.sx,label.sy,label.u1,label.v1,label.u2,label.v2,i==menu.command?0xff2080ff:0xffffffff);}}}
         if(menu.combining)ascii(image,"Combine",44,400,.8f,0xff50c0ff);
         if(menu.examining&&selected_id&&selected_id<145){
             const auto id=selected_id==131?5:selected_id==136?33:selected_id;
@@ -141,6 +164,6 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         }
         (void)tick;
     }
-    if(dialog.active()&&std::any_of(dialog.page().begin(),dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;}))text(image,dialog.page(),68,374,1,0xffffffff,true);
+    if(dialog.active()&&std::any_of(dialog.page().begin(),dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;}))text(image,dialog.page(),68,374,1,0xffffffff,true,int(dialog.selection));
 }
 }

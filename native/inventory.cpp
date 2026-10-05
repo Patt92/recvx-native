@@ -36,7 +36,9 @@ void Inventory::compact(){
     for(unsigned i=0;i<n;++i){slots()[i+2]=list[i].first;if(list[i].second)slots()[0]=i+2;}
 }
 bool Inventory::acquire(unsigned item,unsigned count,unsigned flags){
-    if(!item||item>=156||!count||count>65535||flags&~0xff00u)return false;
+    if(!item||item>=156||count>65535||flags&~0xff00u)return false;
+    // Original unloaded firearms and knives are valid pickups with zero rounds.
+    if(!count){if(!(itemdata[item].type&1)||occupied()+((itemdata[item].type&0x100)?2:1)>capacity())return false;unsigned slot=2;while(slot<12&&id(slots()[slot]))++slot;if(slot==12)return false;slots()[slot]=pack(item|flags,0);compact();return true;}
     auto saved=items;
     // Stack ammo using the original per-item maxima, never partially accepting a pickup.
     if(itemdata[item].type&0x200)for(unsigned i=2;i<12&&count;++i)if((slots()[i]>>16)==(item|flags)){

@@ -33,9 +33,14 @@ def main():
         assert settings['title_active'] and settings['settings_active'] and not settings['events']
         film = run('film', 600, '0 new_game\n')
         assert not film['title_active'] and film['movie_active'] and film['movie_frame'] > 0
-        # Confirm stops an already running movie. A fast inventory press after
-        # the cell hint must survive the original task's control handover.
-        lighter = run('lighter', 4000, '0 new_game\n500 confirm\n650 confirm\n651 inventory\n700 confirm\n701 confirm\n')
+        # Hint completion owns inventory opening; held movement must never escape it.
+        hint = run('hint-position', 650, '0 new_game\n500 confirm\n')
+        automatic = run('automatic-inventory', 750, '0 new_game\n500 confirm\n650 confirm\n651 keys forward\n')
+        assert automatic['inventory_open'] and automatic['weapon'] == 0
+        assert automatic['actor'] == hint['actor'] and not automatic['blocked_commands']
+        assert 'COMMON/0009' in automatic['audio_played']
+        # Confirm stops an already running movie, followed by original lighter equipment.
+        lighter = run('lighter', 4000, '0 new_game\n500 confirm\n650 confirm\n700 confirm\n701 confirm\n')
         assert not lighter['movie_active'] and not lighter['cinematic'] and not lighter['inventory_open']
         assert lighter['weapon'] == 1 and 0 in lighter['events'] and not lighter['blocked_commands']
         assert 'VOICE1/0016' in lighter['audio_played']

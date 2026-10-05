@@ -13,6 +13,7 @@ public:
     unsigned index()const{return index_;}
     const Message& page()const{return page_;}
     void confirm();
+    unsigned choices()const;
     bool tick();
     unsigned selection=0;
 private:

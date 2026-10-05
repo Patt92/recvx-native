@@ -128,3 +128,5 @@ Rodrigo scene. Video hints display configured keyboard and controller bindings.
 A single inventory press in the first second after dismissing a dialogue is
 buffered across the brief cinematic handover. Inventory still opens only once
 control is released; videos and door transitions discard this buffer.
+
+Completing the initial lighter hint automatically opens the inventory before locomotion. No Inventory button press is required. Holding left/right while examining an item rotates it continuously at 60 Hz. Dialogue choices use navigation and Confirm/Cancel; confirming a completed voice line stops that line.

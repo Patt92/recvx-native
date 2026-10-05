@@ -8,7 +8,7 @@ add_custom_command(OUTPUT "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/do
   DEPENDS tools/generate_door_core.py tools/generate_native_tables.py include/ps2/veronica/prog/door.h src/ps2/veronica/prog/door.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/ui_tables.inc" "${RECVX_TABLES}/combinations.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_native_tables.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
-  DEPENDS tools/generate_native_tables.py src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/message.c)
+  DEPENDS tools/generate_native_tables.py include/ps2/veronica/prog/sub1.h src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/message.c)
 add_library(recvx_game native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp src/ps2/veronica/prog/item.c "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/ui_tables.inc")
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}")
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)

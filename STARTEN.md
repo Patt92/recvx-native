@@ -41,8 +41,9 @@ Die Bestätigungstaste ist über `controls.ini` konfigurierbar, einschließlich
 abweichender Controller-Belegung. Bei Paketstart die Datei neben dem Paket-Starter
 bearbeiten; beim Start eines direkten Builds die Datei im Projektordner.
 
-Am Anfang den Hinweis in der Zelle bestätigen, Tab bzw. Controller-Y drücken,
-dann zweimal Enter bzw. A: Feuerzeug auswählen und **Equip** bestätigen.
+Am Anfang den Hinweis in der Zelle mit Enter bzw. Controller-A bestätigen. Das
+Inventar öffnet sich automatisch; Claire bleibt bis dahin gesperrt. Dann zweimal
+Enter bzw. A: Feuerzeug auswählen und **Equip** bestätigen.
 Ein schneller Inventardruck direkt nach dem Hinweis wird kurz vorgemerkt, bis
 das Originalereignis die Steuerung freigibt. Inventar, Ausrüstung, HP und Tasche bleiben bei Raumwechseln
 im Spielzustand erhalten.

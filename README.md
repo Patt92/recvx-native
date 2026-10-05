@@ -83,3 +83,5 @@ Spieldaten werden weder von Git erfasst noch mit dem Quellcode veröffentlicht.
 
 Die ursprüngliche Projektlizenz bleibt in `LICENSE` erhalten. Drittanbieter-Lizenzen
 liegen bei den jeweiligen Abhängigkeiten und werden den Paketen beigelegt.
+
+Nach dem Feuerzeug-Hinweis öffnet OK (Enter/A) das Inventar automatisch. Zwei weitere einzelne OK-Tastendrücke wählen das Feuerzeug und rüsten es aus.

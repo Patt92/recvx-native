@@ -17,13 +17,15 @@ public:
     std::vector<EventCommand> pending_bindings;
     std::vector<std::string> errors;
     std::vector<unsigned> dispatched;
-    bool menu_open=false;
+    bool menu_open=false,status_requested=false;
     unsigned tick_count=0;
     // Renderer/world bindings are distinct from opcode parsing. Unbound
     // commands are retained with exact operands and reported by the runtime.
     std::function<bool(const EventCommand&)> binding;
     std::function<unsigned(unsigned,unsigned)> animation_frame;
     std::function<bool(unsigned)> audio_active;
+    std::function<void(unsigned)> audio_stop;
+    std::function<Message(unsigned,unsigned)> item_message;
     std::function<bool()> movie_active;
     std::function<bool(const DoorRequest&)> door;
     void inherit_progress(const EventVm& previous);
@@ -34,6 +36,8 @@ public:
     void use(unsigned item);
     void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);
     void confirm_dialog();
+    void cancel_dialog();
+    void choose_dialog(int direction);
     bool skip_cinematic();
     bool flag(unsigned matrix,unsigned index)const;
     void set_flag(unsigned matrix,unsigned index,unsigned mode);
@@ -46,6 +50,10 @@ private:
     std::vector<std::size_t> scripts_;
     std::vector<Interaction> floors_;
     Inventory& inventory_;MessageDialog& dialog_;
+    bool opening_hint_=false;
+    unsigned pickup_item_=0,pickup_model_=0;
+    std::vector<unsigned> room_items_;
+    void hide_item(unsigned index);
     std::array<Task,16> tasks_{};
     std::set<std::pair<unsigned,std::size_t>> reported_;
     void run(Task& task,bool scenario=false);

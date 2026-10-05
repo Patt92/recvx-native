@@ -3,13 +3,12 @@
 # Use the original intro-skip branch, acknowledge the original hint, equip the lighter.
 1 skip
 50 confirm
-100 inventory
 101 confirm
 102 confirm
-3200 keys right
+3200 keys left
 3213 keys forward
 3380 keys none
 3381 confirm
-3700 keys right
+3700 keys left
 3740 keys none
 3741 confirm

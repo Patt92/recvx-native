@@ -29,6 +29,22 @@ References for ADX structure and predictor:
 [FFmpeg adx.c](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/adx.c),
 [adxdec.c](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/adxdec.c).
 
+## System sound bank
+
+The native decoder reads COMMON.MLT's loose Sony HD/BD wrapper, validates the
+Prog → Sset → Smpl → Vagi mapping and decodes the original mono SPU-ADPCM frames.
+All eleven local system programs produce non-silent PCM at 32 kHz. Menu cursor,
+confirm/cancel, inventory opening, pickup choices and bhCallSysSe use these
+programs, with cached clips on mixer slots 2/3. A bank replacement can be placed
+at `mods/audio/system/COMMON.MLT`; no generated beep is substituted.
+
+Format references: [vgmstream HD/BD parser](https://github.com/vgmstream/vgmstream/blob/master/src/meta/hd_bd.c)
+and [SPU-ADPCM decoder](https://github.com/vgmstream/vgmstream/blob/master/src/coding/psx_decoder.c).
+This native decoder uses integer predictor rounding; exact PS2 SPU interpolation,
+envelopes, pitch, pan, layered programs and waveform loop points are pending.
+Dialog confirmation stops slot 1 and clears queued output so the next script
+voice wait can finish. BGM and movie slots are independent.
+
 ## PSS films
 
 All 18 local films are converted to `data/movies/<id>.rvv`, with JSON provenance
@@ -66,12 +82,13 @@ into or required by the packaged runtime.
 
 ## Limits and tests
 
-Footsteps, menu/action/weapon sounds and ambient MULTSPQ/EasySE bank routing are
+Footsteps, world action/weapon sounds and ambient MULTSPQ/EasySE bank routing are
 not yet implemented. Volume mapping and procedural light/audio coordination
 remain approximate. Voice behavior beyond the opening requires checking against
 the original CRI command paths, including language/stereo archive variants.
 
-The audio_movie unit test exercises ADX signed stereo output, truncation/header
+The audio_movie unit test exercises SPU signed nibble order, shift and malformed
+frames; its data mode checks all original system programs and bounds. It also exercises ADX signed stereo output, truncation/header
 rejection, resampling, mixing/clipping/fades, invalid clip rejection and native
 JPEG/PCM film completion. Real-data game tests assert the Rodrigo voice dispatch
 and event playback conditions. A test passing does not imply all game sound

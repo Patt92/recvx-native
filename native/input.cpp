@@ -144,15 +144,16 @@ void InputManager::event(const SDL_Event& e){if(e.type==SDL_CONTROLLERDEVICEADDE
 }
 InputFrame InputManager::tick(){for(auto& item:pads_)refresh(item.second);evaluate();InputFrame frame;frame.gamepad_input=last_gamepad_;frame.held=held_;frame.pressed=pending_;pending_.fill(false);
     for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}return frame;}
-void GameplayInput::menu_input(MenuInput key){if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;}if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;if(dialog_.active()&&!menu_.active&&(key==MenuInput::Confirm||key==MenuInput::Cancel)){events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;return;}
+void GameplayInput::menu_input(MenuInput key){if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;}if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;if(dialog_.active()&&!menu_.active){if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(sound)sound(key==MenuInput::Confirm?0:3);if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;}else if(key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Up||key==MenuInput::Down){if(dialog_.choices()){if(sound)sound(2);events_->choose_dialog(key==MenuInput::Left||key==MenuInput::Up?-1:1);}}return;}
     // The original hint ends before its task releases cinematic control. Keep
     // one inventory request across that short handover, never across a video.
     if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4)){if(inventory_grace_&&!dialog_.active())inventory_pending_=true;return;}
-    if(menu_.active||key==MenuInput::Open){menu_.input(key,inventory_);events_->menu_open=menu_.active;if(menu_.use_item){events_->use(menu_.use_item);menu_.use_item=0;}return;}
+    if(menu_.active||key==MenuInput::Open){if(sound)sound(key==MenuInput::Open?9:key==MenuInput::Cancel?3:key==MenuInput::Confirm?0:2);menu_.input(key,inventory_);events_->menu_open=menu_.active;if(menu_.use_item){events_->use(menu_.use_item);menu_.use_item=0;}return;}
     if(key==MenuInput::Confirm&&(events_->flags[5][0]&4)&&(events_->flags[10][0]&0x40)){events_->skip_cinematic();return;}
     if(key==MenuInput::Confirm&&interact)interact();
 }
-bool GameplayInput::apply(const InputFrame& f){if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
+void GameplayInput::synchronize(){if(events_&&events_->status_requested&&!dialog_.active()&&!(transition_active&&transition_active())&&!(events_->flags[5][0]&4)&&!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(9);menu_.input(MenuInput::Open,inventory_);}events_->menu_open=menu_.active;}}
+bool GameplayInput::apply(const InputFrame& f){synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
     if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
     if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition();return false;}if(video_active&&video_active()){
         inventory_pending_=false;inventory_grace_=0;
@@ -162,6 +163,7 @@ bool GameplayInput::apply(const InputFrame& f){if(inventory_grace_){--inventory_
     if(f.hit(Action::Inventory))menu_input(MenuInput::Open);
     if(f.hit(Action::Confirm))menu_input(MenuInput::Confirm);
     if(transition_active&&transition_active())return false;
+    if(menu_.active&&menu_.examining){const int direction=int(f.down(Action::Right))-int(f.down(Action::Left));menu_.examine_yaw+=direction*512;return false;}
     for(auto pair:{std::pair<Action,MenuInput>{Action::Up,MenuInput::Up},{Action::Down,MenuInput::Down},{Action::Left,MenuInput::Left},{Action::Right,MenuInput::Right}})if(f.navigation(pair.first))menu_input(pair.second);
     if(f.hit(Action::Skip)&&events_)events_->skip_cinematic();return false;
 }
