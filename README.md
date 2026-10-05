@@ -15,8 +15,11 @@ ADX-Musik/Stimmen und die 18 Filme mit ihrem PCM-Ton werden nativ verarbeitet.
 Dialoge verwenden weiße Schrift mit schwarzer Kontur ohne Hintergrundfläche.
 Leere Inventarfelder verwenden den Original-Atlas; die zwei Taschenplätze und
 der längere Rahmen erscheinen erst mit der Tasche. Effekte, Gesichtssystem,
-Soundbanken/Schritte, Kampf, Speicherstände und weitere Menüseiten
-sind noch unvollständig. Ausführliche Grenzen stehen in der Gameplay-Dokumentation.
+Umgebungs-/Waffen-/Türklänge, Kampf, Speicherstände und weitere Menüseiten
+sind noch unvollständig. Schritte beim Gehen, Laufen und Rückwärtsgehen verwenden
+die originalen Raum-Soundbanken und Bodenmaterialien. Skriptgesteuerte Gegenstände
+können an Figurenmodellen angehängt und einzelne Modellteile ausgeblendet werden.
+Ausführliche Grenzen stehen in der Gameplay-Dokumentation.
 
 ## Starten und bauen
 

@@ -39,6 +39,7 @@ def main():
         assert automatic['inventory_open'] and automatic['weapon'] == 0
         assert automatic['actor'] == hint['actor'] and not automatic['blocked_commands']
         assert 'COMMON/0009' in automatic['audio_played']
+        assert not any(sound.startswith('MULTSPQ1/') for sound in automatic['audio_played']), 'inventory plays walking sounds'
         # Confirm stops an already running movie, followed by original lighter equipment.
         lighter = run('lighter', 4000, '0 new_game\n500 confirm\n650 confirm\n700 confirm\n701 confirm\n')
         assert not lighter['movie_active'] and not lighter['cinematic'] and not lighter['inventory_open']

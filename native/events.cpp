@@ -93,7 +93,7 @@ int EventVm::instruction(Task& t){
     case 0x86:world(t,op,16);return 1;
     case 0x4c:case 0x44:world(t,op,6);return 1;
     case 0x33:{v.require(p,8);DoorRequest request{v.u16(p+2),v.u8(p+4),v.u8(p+5),v.u8(p+6),v.u8(p+7),values[21]};if(!door||!door(request))throw std::runtime_error("DoorCall destination unavailable");advance(8);return 2;}
-    case 0x32:case 0x53:case 0x34:world(t,op,12);return 1;
+    case 0x32:case 0x53:case 0x34:case 0xa3:world(t,op,12);return 1;
     case 0x3b:world(t,op,6);return 1;
     case 0x36:world(t,op,6);return 1;
     case 0x16:case 0x18:case 0x1a:case 0x2b:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x6a:case 0x9e:world(t,op,op==0x42?4:2);return 1;

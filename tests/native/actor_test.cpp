@@ -47,7 +47,7 @@ int main(){try{
     _Make_SinTable();auto f=fixture();recvx::PlayerAsset player(f.bytes);
     check(player.bones()==2&&player.motions()==2&&player.has_motion(0)&&!player.has_motion(1),"motion holes/skeleton counts");
     check(player.motion_frames(0)==2&&player.textures().size()==1,"motion frames/PVP terminator");
-    auto first=player.sample(0,0);auto second=player.sample(0,65536);
+    auto first=player.sample(0,0);auto second=player.sample(0,65536);auto bones=player.pose(0,65536);std::vector<recvx::BoneMatrix> drawn_bones;player.sample(0,65536,{},0,&drawn_bones);check(bones.size()==drawn_bones.size(),"pose-only skeleton size differs");for(unsigned i=0;i<bones.size();++i)for(unsigned j=0;j<16;++j)near(bones[i].value[j],drawn_bones[i].value[j],"pose-only matrix differs from rendered geometry");
     check(first.triangles.size()==1&&first.triangles[0].textured&&!first.triangles[0].camera_mask,"animated geometry flags");
     near(first.triangles[0].vertices[0].position.x,14,"bind origin translation");
     near(second.triangles[0].vertices[0].position.x,23,"half-weight vertex X");near(second.triangles[0].vertices[0].position.y,1,"half-weight vertex Y");

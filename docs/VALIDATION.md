@@ -33,9 +33,9 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 | Lighter resources | item ID 55 reads ITEM1/0054.bin and original PVP textures; rotated 3D view differs; old diagnostic screenshots archived |
 | Solid wall collision | ATR types 0..5; room-height fallback, original player dimensions, floor attributes, thin walls both directions, signed diagonal walls, circular contacts, sliding and corners checked |
 
-The original-data opening regression passes with 127 known unbound commands.
+The original-data opening regression passes with 109 known unbound commands.
 Particle effects, lighter/flame object, full MASK/face/lip processing, camera
-interpolation, original SE banks/footsteps, combat and complete
+interpolation, ambient/weapon/door SE routing, combat and complete
 puzzle/progression/save systems remain pending. A successful room decode does
 not verify that room's gameplay. Wine validation is not a physical Windows test.
 
@@ -63,9 +63,23 @@ flags. RM_0020's shared NPC texture banks now render without a texture-range
 exception; the actual first-stairs door transition from original hall spawn 1
 loads RM_0020 and its initial bytecode has no blocked commands. All eleven COMMON.MLT
 programs decode to non-silent PCM. Original title/menu atlas sprites are used.
-Hands/attachments, ambient/footstep banks, full pickup animation/layout and
+Hands/accessory libraries, ambient MIDI routing, full pickup animation/layout and
 complete scene fidelity remain open; these tests do not certify those systems.
 
 Verification for this revision: 12/12 groups on macOS universal and Windows/Wine;
 12/12 under AddressSanitizer/UndefinedBehaviorSanitizer. Original-data gameplay,
 controller and sound-bank checks passed on arm64, Rosetta and Windows/Wine.
+
+## Room audio and attachment extension, 2026-10-05
+
+Real-data tests now decode all five floor programs, select cell/hall sound packs,
+stop room channels on reload, reject missing/invalid programs and verify healthy
+walk/run/backstep contacts with silence between contacts and during idle. Walked
+cell/hall round trips require original sound dispatches in both rooms; the automatic
+hint/inventory test rejects footsteps while gameplay input is blocked.
+
+Attachment tests use original room item geometry and check updated player-bone
+translation, inherited visibility, release and Rodrigo model-node hide/restore.
+Pose-only matrices are compared against geometry-sampling matrices. These tests
+do not establish complete hand/accessory rendering, ambient MIDI or physical
+controller/audio-device fidelity.

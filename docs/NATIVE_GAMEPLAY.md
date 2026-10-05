@@ -90,12 +90,13 @@ background panel. Empty timed messages draw nothing.
 BGM1 and VOICE1 ADX playback is native. Film sound is native original stereo PCM.
 System-bank menu, inventory, choice and script sounds play natively. Completing
 a dialogue also stops its active voice so its original playback wait can finish.
-Footsteps, weapon/environment sound-bank routing and the full
-EasySE/MULTSPQ system remain pending. See AUDIO.md for formats and limits.
+Healthy walking/running/backstep contacts play the original room bank-2 sounds,
+selected by ankle position and ATR floor material. Weapon/environment MIDI routing
+and the full EasySE/MULTSPQ system remain pending. See AUDIO.md for formats and limits.
 
 Known commands without a real native world binding are recorded in the pending
 trace and advanced; they are not claimed as implemented effects. The opening
-still records over one hundred such dispatches, including effects, linking,
+still records over one hundred such dispatches, including effects, object-to-object linking,
 item speed/motion and some actor subcommands. Unknown commands instead block
 the task at its original PC, report an error and fail headless validation.
 Type-4 item interactions now use the original Take/Yes/No, capacity and acquired
@@ -143,3 +144,19 @@ spawn, retain inventory and do not replay the opening.
 105 original door parameter cases are rendered and checked through completion
 and skip. This checks door resources; it does not claim complete gameplay in all
 205 rooms. Door sound banks, special lighting and rumble remain pending.
+
+## Actor attachments and model visibility
+
+Native bindings now handle bhObjLinkSet (0x32), bhObjLinkSetPly (0x34),
+bhObjLinkSetEneItem (0x53) and bhObjLinkSetPlyItem (0xa3). Original signed
+hundredth-unit offsets attach room objects/items to animated NPC/player nodes.
+They inherit the parent transform and visibility; release retains the last linked
+position. Pose sampling for linked camera/light/release points reads current
+script state, even without rendering a frame. bhDefModelSet (0x3b) hides/restores
+an individual model node's geometry while keeping its skeleton active.
+
+These bindings cover room prop attachments, not missing hand geometry. Full
+weapon/accessory model libraries, MASK/face/lip processing, special cloth/hair
+links and object-to-object/enemy links remain pending. The opening regression
+now records 109 supported-length dispatches without native bindings and zero
+blocked commands.

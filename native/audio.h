@@ -17,6 +17,8 @@ public:
     void play(unsigned slot,const std::string& archive,unsigned id,float volume=1,bool loop=false,unsigned fade_ticks=0);
     void play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume=1,bool loop=false);
     void play_system(unsigned program);
+    void load_room_sounds(unsigned stage,unsigned room,unsigned variant=0);
+    bool play_room_sound(unsigned bank,unsigned program,unsigned slot=4);
     void stop(unsigned slot,unsigned fade_ticks=0);
     bool active(unsigned slot)const;
     std::vector<std::int16_t> mix(unsigned frames=800);
@@ -26,6 +28,9 @@ private:
     std::array<Channel,8> slots_{};
     std::map<unsigned,std::shared_ptr<PcmClip>> system_sounds_;
     unsigned effect_slot_=2;
+    std::map<unsigned,std::vector<std::uint8_t>> room_banks_;
+    std::map<std::pair<unsigned,unsigned>,std::shared_ptr<PcmClip>> room_sounds_;
+    unsigned room_pack_=0;
     std::filesystem::path data_,mods_;
 };
 }

@@ -38,6 +38,26 @@ void AudioMixer::play_system(unsigned program){
         found=system_sounds_.emplace(program,std::make_shared<PcmClip>(decode_system_sound(read_asset_file(file,8*1024*1024),program))).first;}
     play_pcm(effect_slot_,found->second);effect_slot_=effect_slot_==2?3:2;played.push_back("COMMON/"+asset_number(program));
 }
+void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant){
+    if(stage>15||room>255||variant>15)throw std::runtime_error("invalid room sound key");
+    stop(4);stop(5);room_banks_.clear();room_sounds_.clear();
+    const auto index=read_asset_file(data_/"files/MULTSPQ1.IDX",4096);BinaryView ids(index);const auto key=stage*1000+room*10+variant;
+    unsigned pack=0;bool found=false;for(;pack<index.size()/2;++pack){const auto id=ids.u16(pack*2);if(id==0xffff)break;if(id==key){found=true;break;}}
+    if(!found)return;
+    auto file=mods_/"audio/MULTSPQ1"/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives/MULTSPQ1"/(asset_number(pack)+".bin");
+    const auto bytes=read_asset_file(file,32*1024*1024);BinaryView v(bytes);bool terminated=false;
+    for(unsigned i=0;i<16;++i){const auto p=i*16,offset=v.u32(p);if(!offset){terminated=true;break;}const auto size=v.u32(p+4),type=v.u32(p+8),bank=v.u32(p+12);v.require(offset,size);
+        // Type 2 is the original SDE shot bank (HD/BD wrapper); type 0/1
+        // MIDI sequence/program and type 5 environment records remain separate.
+        if(type==2){if(bank>15)throw std::runtime_error("invalid room sound bank");room_banks_[bank]={bytes.begin()+offset,bytes.begin()+offset+size};}}
+    if(!terminated)throw std::runtime_error("unterminated room sound pack");room_pack_=pack;
+}
+bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot){
+    if(slot!=4&&slot!=5)throw std::runtime_error("invalid room effect channel");
+    const auto source=room_banks_.find(bank);if(source==room_banks_.end())return false;
+    auto found=room_sounds_.find({bank,program});if(found==room_sounds_.end())found=room_sounds_.emplace(std::make_pair(bank,program),std::make_shared<PcmClip>(decode_system_sound(source->second,program))).first;
+    play_pcm(slot,found->second);played.push_back("MULTSPQ1/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
+}
 PcmClip decode_adx(const std::vector<std::uint8_t>& b){
     auto need=[&](std::size_t p,std::size_t n){if(p>b.size()||n>b.size()-p)throw std::runtime_error("truncated ADX audio");};
     auto be16=[&](std::size_t p){need(p,2);return unsigned(b[p])*256+b[p+1];};

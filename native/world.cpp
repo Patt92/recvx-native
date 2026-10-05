@@ -30,6 +30,9 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     const auto walls=v.u32(header_+0x18),count=v.u32(header_+0x98);if(count>4096)throw std::runtime_error("too many collision walls");v.require(walls,count*36);
     room_height_=v.f32(header_+0x118);for(unsigned i=0;i<32;++i)floors_[i]=v.f32(header_+0x120+i*4);
     for(unsigned i=0;i<count;++i){const auto p=walls+i*36;walls_.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)}});}
+    const auto floor_pointer=v.u32(header_+0x20),floor_count=v.u32(header_+0xa0);if(floor_count>4096)throw std::runtime_error("too many sound floor areas");v.require(floor_pointer,floor_count*36);
+    for(unsigned i=0;i<floor_count;++i){const auto p=floor_pointer+i*36;floor_sounds_.push_back({{v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)}},v.u8(p+32)});}
+    if(!data.empty()){if(room_name.size()!=7||room_name.substr(0,3)!="RM_")throw std::runtime_error("invalid room sound identity");audio_.load_room_sounds(unsigned(std::stoul(room_name.substr(3,1),nullptr,16)),unsigned(std::stoul(room_name.substr(4,2),nullptr,16)),unsigned(std::stoul(room_name.substr(6,1),nullptr,16)));}
     const auto cameras=v.u32(header_+0x34),camera_count=v.u32(header_+0xac);if(camera_count>1024)throw std::runtime_error("too many event cameras");v.require(cameras,camera_count*0x808);
     for(unsigned i=0;i<camera_count;++i){const auto count=v.u16(cameras+i*0x808+6);if(!count||count>16)throw std::runtime_error("invalid event camera key count");std::vector<EventCamera> keys;
         for(unsigned k=0;k<count;++k){const auto p=cameras+i*0x808+8+k*0x80;EventCamera out;auto& c=out.camera;c.position={v.f32(p+4),v.f32(p+8),v.f32(p+12)};for(unsigned j=0;j<3;++j)c.angles[j]=v.u16(p+16+j*2);c.perspective=v.u16(p+22);for(unsigned j=0;j<8;++j)c.hidden_objects[j]=v.u32(p+24+j*4);for(unsigned j=0;j<4;++j)out.hidden_lights[j]=v.u32(p+56+j*4);
@@ -59,7 +62,28 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     if(motions)for(unsigned i=0;i<256;++i){const auto n=v.u32(motions);motions+=4;if(n==0xffffffff)break;room_motions_.push_back(n?decode_motion_asset(section(b,motions,n)):MotionClip{});motions+=n;}
     (void)stage;
 }
+unsigned RoomWorld::floor_sound(NJS_POINT3 position,bool special)const{
+    const auto floor=floor_at(position);unsigned sound=0;
+    for(const auto& record:floor_sounds_){const auto& a=record.area;if(!(a.flags&1)||a.type!=1||a.floor!=floor||position.x<a.position.x||position.x>a.position.x+a.extent.x||position.z<a.position.z||position.z>a.position.z+a.extent.z)continue;
+        if((a.attributes&1)&&special)return record.sound;if(!(a.attributes&1))sound=record.sound;}
+    return sound;
+}
+void RoomWorld::player_footstep(const PlayerAsset& player){
+    // Claire's original PlFootSnd: walk 10/28, run 8/18, backstep 0/16.
+    // Use the current animation frame and original ankle matrices, not a timer.
+    const unsigned frame=unsigned(frame_/65536);unsigned node=0;
+    if(motion_==0){if(frame==10)node=17;else if(frame==28)node=21;}
+    else if(motion_==4){if(frame==8)node=17;else if(frame==18)node=21;}
+    else if(motion_==16){if(frame==0)node=17;else if(frame==16)node=21;}
+    if(!node)return;const auto bones=player.pose(motion_,frame_,player_.position,player_.yaw);if(node>=bones.size())return;
+    const auto& m=bones[node].value;const auto sound=floor_sound({m[12],player_.position.y,m[14]});if(sound>4)return;
+    if(audio_.play_room_sound(2,sound,footstep_slot_))footstep_slot_=footstep_slot_==4?5:4;
+}
 bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=contexts_.at(c.task);const auto op=c.opcode;
+    if(op==0x32||op==0x34||op==0x53||op==0xa3){const unsigned child_kind=(op==0x53||op==0xa3)?3:2,parent_kind=(op==0x34||op==0xa3)?0:1;auto& e=entity(child_kind,v.u8(2));
+        if(v.u8(4)){if(e.linked)e.transform.position=link_point(e.parent_kind,e.parent_index,e.parent_node,e.link_offset);e.linked=false;return true;}
+        e.linked=true;e.parent_kind=parent_kind;e.parent_index=parent_kind?v.u8(1):0;e.parent_node=v.u8(3);const auto signs=v.u8(5);e.link_offset={v.u16(6)/100.f*(signs&1?-1:1),v.u16(8)/100.f*(signs&2?-1:1),v.u16(10)/100.f*(signs&4?-1:1)};return true;}
+    if(op==0x3b){const auto kind=v.u8(1);if(kind>2)return false;entity(kind,v.u8(2)).hidden_nodes[v.u8(3)]=v.u8(4)==0;return true;}
     if(op==0x65){ctx.kind=v.u8(1);ctx.index=v.u8(2);ctx.node=v.u8(3);if(!ctx.kind){player_scripted=true;motion_=42;frame_=0;}else entity(ctx.kind,ctx.index).scripted=true;return true;}
     if(op==0x24||op==0x20){unsigned kind=op==0x24?v.u8(1):v.u8(2),index=op==0x24?v.u8(2):v.u8(1);if(!kind)player_hidden=v.u8(3)==0;else entity(kind,index).hidden=v.u8(3)==0;return true;}
     if(op==0x2b&&ctx.kind){entity(ctx.kind,ctx.index).frozen=v.u8(1)==0;return true;}
@@ -100,9 +124,15 @@ void RoomWorld::tick(){for(auto* table:{&lights_,&event_lights_})for(auto& l:*ta
 unsigned RoomWorld::frame(unsigned kind,unsigned index)const{if(!kind)return unsigned(std::max<std::int64_t>(0,frame_));const auto at=entities_.find({kind,index});return at==entities_.end()?0:unsigned(std::max<std::int64_t>(0,at->second.frame));}
 void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes)const{
     actor_nodes_.clear();if(!player_nodes.empty())actor_nodes_[{0,0}]=player_nodes;
-    for(const auto& model:models_){const auto found=entities_.find({model.kind,model.index});if(found==entities_.end()||found->second.hidden)continue;const auto& e=found->second;Scene object;
-        if(model.actor){if(e.has_motion&&e.motion<room_motions_.size()&&room_motions_[e.motion].positions.size()<=model.actor->bones()){std::vector<unsigned> nodes;if(model.actor->bones()==27&&room_motions_[e.motion].positions.size()==22)for(unsigned n=0;n<27;++n)if(n<6||n>10)nodes.push_back(n);object=model.actor->sample_clip(room_motions_[e.motion],e.frame,e.transform.position,e.transform.yaw,nodes,&actor_nodes_[{model.kind,model.index}]);}else object=model.actor->sample(0,0,e.transform.position,e.transform.yaw);object.textures=model.object.textures;}
-        else {object=model.object;NJS_MATRIX matrix;njUnitMatrix(&matrix);njTranslate(&matrix,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&matrix,e.angles[0],e.angles[1],e.angles[2]);for(auto& t:object.triangles)for(auto& vertex:t.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}}
+    const auto player_state=entities_.find({0,0});if(player_state!=entities_.end())scene.triangles.erase(std::remove_if(scene.triangles.begin(),scene.triangles.end(),[&](const auto& t){const auto at=player_state->second.hidden_nodes.find(t.object);return !t.camera_mask&&at!=player_state->second.hidden_nodes.end()&&at->second;}),scene.triangles.end());
+    for(const auto& model:models_){const auto found=entities_.find({model.kind,model.index});if(found==entities_.end()||entity_hidden(model.kind,model.index))continue;const auto& e=found->second;Scene object;
+        if(model.actor){if(e.has_motion&&e.motion<room_motions_.size()&&room_motions_[e.motion].positions.size()<=model.actor->bones()){std::vector<unsigned> nodes;if(model.actor->bones()==27&&room_motions_[e.motion].positions.size()==22)for(unsigned n=0;n<27;++n)if(n<6||n>10)nodes.push_back(n);object=model.actor->sample_clip(room_motions_[e.motion],e.frame,e.transform.position,e.transform.yaw,nodes,&actor_nodes_[{model.kind,model.index}]);}else object=model.actor->sample(0,0,e.transform.position,e.transform.yaw,&actor_nodes_[{model.kind,model.index}]);object.textures=model.object.textures;}
+        else {object=model.object;NJS_MATRIX matrix;njUnitMatrix(&matrix);
+            if(e.linked){const auto parent=actor_nodes_.find({e.parent_kind,e.parent_index});if(parent!=actor_nodes_.end()&&e.parent_node<parent->second.size())njSetMatrix(&matrix,&parent->second[e.parent_node].value);
+                else{const auto p=link_point(e.parent_kind,e.parent_index,e.parent_node,{});njTranslate(&matrix,p.x,p.y,p.z);if(e.parent_kind==0)njRotateY(&matrix,player_.yaw);else{const auto parent_entity=entities_.find({e.parent_kind,e.parent_index});if(parent_entity!=entities_.end())njRotateXYZ(&matrix,parent_entity->second.angles[0],parent_entity->second.angles[1],parent_entity->second.angles[2]);}}
+                njTranslate(&matrix,e.link_offset.x,e.link_offset.y,e.link_offset.z);}
+            else njTranslate(&matrix,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&matrix,e.angles[0],e.angles[1],e.angles[2]);for(auto& t:object.triangles)for(auto& vertex:t.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}}
+        object.triangles.erase(std::remove_if(object.triangles.begin(),object.triangles.end(),[&](const auto& t){const auto at=e.hidden_nodes.find(t.object);return at!=e.hidden_nodes.end()&&at->second;}),object.triangles.end());
         for(const auto& t:object.triangles)if(t.textured&&t.texture>=object.textures.size())throw std::runtime_error("room entity "+std::to_string(model.kind)+"/"+std::to_string(model.index)+" texture "+std::to_string(t.texture)+" of "+std::to_string(object.textures.size()));
         for(auto& triangle:object.triangles)triangle.light_category=model.kind;
         const auto offset=scene.textures.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
@@ -124,7 +154,17 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes)
         auto tint=[&](unsigned shift,float amount){return unsigned(((t.color>>shift)&255)*std::clamp(amount,0.f,1.f));};t.color=(t.color&0xff000000)|(tint(16,color.x)<<16)|(tint(8,color.y)<<8)|tint(0,color.z);t.world_lit=true;
     }
 }
+bool RoomWorld::entity_hidden(unsigned kind,unsigned index)const{
+    if(!kind)return player_hidden;const auto e=entities_.find({kind,index});if(e==entities_.end())return false;
+    return e->second.hidden||(e->second.linked&&entity_hidden(e->second.parent_kind,e->second.parent_index));
+}
 NJS_POINT3 RoomWorld::link_point(unsigned kind,unsigned index,unsigned node,NJS_POINT3 offset)const{
+    std::vector<BoneMatrix> current;
+    if(!kind&&player_asset_)current=player_asset_->pose(motion_,frame_,player_.position,player_.yaw);
+    else if(kind==1){const auto e=entities_.find({kind,index});if(e!=entities_.end())for(const auto& model:models_)if(model.kind==kind&&model.index==index&&model.actor){const auto& state=e->second;
+        if(state.has_motion&&state.motion<room_motions_.size()&&room_motions_[state.motion].positions.size()<=model.actor->bones()){std::vector<unsigned> nodes;if(model.actor->bones()==27&&room_motions_[state.motion].positions.size()==22)for(unsigned n=0;n<27;++n)if(n<6||n>10)nodes.push_back(n);current=model.actor->pose_clip(room_motions_[state.motion],state.frame,state.transform.position,state.transform.yaw,nodes);}
+        else current=model.actor->pose(0,0,state.transform.position,state.transform.yaw);break;}}
+    if(node<current.size()){NJS_POINT3 out;njCalcPoint(&current[node].value,&offset,&out);return out;}
     const auto bones=actor_nodes_.find({kind,index});if(bones!=actor_nodes_.end()&&node<bones->second.size()){auto m=bones->second[node];NJS_POINT3 out;njCalcPoint(&m.value,&offset,&out);return out;}
     if(kind==0){NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,player_.position.x,player_.position.y,player_.position.z);njRotateY(&m,player_.yaw);NJS_POINT3 out;njCalcPoint(&m,&offset,&out);return out;}
     const auto matrices=actor_nodes_.find({kind,index});if(matrices!=actor_nodes_.end()&&node<matrices->second.size()){auto m=matrices->second[node];NJS_POINT3 out;njCalcPoint(&m.value,&offset,&out);return out;}

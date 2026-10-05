@@ -45,6 +45,27 @@ envelopes, pitch, pan, layered programs and waveform loop points are pending.
 Dialog confirmation stops slot 1 and clears queued output so the next script
 voice wait can finish. BGM and movie slots are independent.
 
+## Room sounds and footsteps
+
+The loose MULTSPQ1.IDX table selects the sound pack with the original
+`stage * 1000 + room * 10 + case` key. Sixteen-byte SPQ_HEADER records identify
+type-2 shot banks; their embedded Sony HD/BD wrappers use the same native decoder
+as COMMON.MLT. The runtime caches decoded programs and alternates step voices
+on slots 4/5. Room loading stops those voices and reloads the correct bank.
+A complete replacement pack uses `mods/audio/MULTSPQ1/<four-digit-pack-id>.bin`.
+
+Healthy Claire uses original bank 2, programs 0–4. Original ATR floor sound areas
+choose the material at her animated ankle position. PlFootSnd contact frames are
+10/28 for walking, 8/18 for running and 0/16 for backward stepping. Pose-only bone
+sampling avoids decoding geometry for sound contacts. The shared keyboard,
+controller and replay locomotion path emits these contacts only while moving;
+menus, dialogs, cinematics and door transitions block that path.
+
+This implements shot-bank loading and floor footsteps. Type-0/1 MIDI sequences,
+EasySE ambient routing, weapon/action/door sound dispatch, original pitch
+variation, program volume/envelopes, 3D pan and reverb remain pending. No ambient
+sequence is represented as a single sample or replaced with a generated effect.
+
 ## PSS films
 
 All 18 local films are converted to `data/movies/<id>.rvv`, with JSON provenance
@@ -82,13 +103,14 @@ into or required by the packaged runtime.
 
 ## Limits and tests
 
-Footsteps, world action/weapon sounds and ambient MULTSPQ/EasySE bank routing are
+World action/weapon sounds and ambient MULTSPQ/EasySE MIDI routing are
 not yet implemented. Volume mapping and procedural light/audio coordination
 remain approximate. Voice behavior beyond the opening requires checking against
 the original CRI command paths, including language/stereo archive variants.
 
 The audio_movie unit test exercises SPU signed nibble order, shift and malformed
-frames; its data mode checks all original system programs and bounds. It also exercises ADX signed stereo output, truncation/header
+frames; its data mode checks all original system programs, five floor materials, sound-pack
+selection, reload/channel cleanup and bounds. It also exercises ADX signed stereo output, truncation/header
 rejection, resampling, mixing/clipping/fades, invalid clip rejection and native
 JPEG/PCM film completion. Real-data game tests assert the Rodrigo voice dispatch
 and event playback conditions. A test passing does not imply all game sound

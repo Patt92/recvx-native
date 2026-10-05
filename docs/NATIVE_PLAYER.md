@@ -27,7 +27,9 @@ drawing hidden model nodes. Complete PS2 material shading still needs verificati
 Signed 16.16 frame clocks wrap by clip length. Fast clips select integer keys;
 slow clips interpolate position and shortest-path angles at fractional frames.
 Motion transition blending is not yet implemented. Bone matrices are exposed
-for original actor-linked camera targets and lights.
+for original actor-linked camera targets, lights, item/object attachments and
+ankle-based floor sound contacts. Pose-only sampling shares the exact pose and
+matrix path with geometry sampling; it also works without a rendered frame.
 
 RM_0000 cinematic Claire and Rodrigo load from the room's original model/PVP
 pointer tables. Their 27-node models receive 22-body-node clips by skipping facial

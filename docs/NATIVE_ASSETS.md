@@ -29,6 +29,8 @@ External mods do not alter the app signature.
 | Player model/motion/skin packet | `players/0010.bin` (override only) |
 | Item model packet | `items/0055.bin` (override only) |
 | Voice or music | `audio/VOICE1/0000.adx`, `audio/BGM1/0000.adx` (override only) |
+| Menu sound bank | `audio/system/COMMON.MLT` (override only) |
+| Room shot sound pack | `audio/MULTSPQ1/0000.bin` (override only; pack ID from MULTSPQ1.IDX) |
 | Native film/audio packet | `movies/0000.rvv` |
 
 Texture IDs are zero-based per bundle. The cinematic and playable Claire are

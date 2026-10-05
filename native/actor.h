@@ -25,6 +25,8 @@ public:
     void locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t& frame_q16,int move,bool run,int turn)const;
     const std::vector<SceneTexture>& textures() const {return textures_;}
     // Original keys are sampled on integer frames, selected by a signed 16.16 clock.
+    std::vector<BoneMatrix> pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0) const;
+    std::vector<BoneMatrix> pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={}) const;
     Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr) const;
     Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr) const;
 private:
@@ -35,6 +37,7 @@ private:
         std::vector<std::uint32_t> weights;
     };
     struct Matrix {NJS_MATRIX value;};
+    std::vector<ModelPose> sampled_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes)const;
     std::vector<std::uint8_t> model_;
     std::vector<ModelPose> bind_pose_;
     std::vector<std::int32_t> children_,siblings_;

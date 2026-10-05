@@ -197,19 +197,30 @@ Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 p
     if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");
     return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out);
 }
-Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out) const {
+std::vector<ModelPose> PlayerAsset::sampled_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes)const{
     if(!clip.frames||clip.positions.size()!=clip.angles.size()||clip.positions.size()>bones())throw std::runtime_error("room motion does not fit actor skeleton");
-    if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
     const auto length=std::int64_t(clip.frames)*65536;
     auto clock=frame_q16%length;if(clock<0)clock+=length;const auto frame=std::size_t(clock/65536);
-    ModelGeometryOptions geometry;geometry.pose=bind_pose_;
+    auto pose=bind_pose_;
     const auto next=(frame+1)%clip.frames;const float blend=clip.interpolate?float(clock&65535)/65536:0;
     if(!nodes.empty()&&nodes.size()!=clip.positions.size())throw std::runtime_error("motion node map size differs");
     for(std::size_t i=0;i<clip.positions.size();++i) {
         const auto node=nodes.empty()?i:nodes[i];if(node>=bones())throw std::runtime_error("motion node map outside actor");
-        if(!clip.positions[i].empty()){const auto a=clip.positions[i].at(frame),b=clip.positions[i].at(next);geometry.pose[node].position={a.x+(b.x-a.x)*blend,a.y+(b.y-a.y)*blend,a.z+(b.z-a.z)*blend};}
-        if(clip.angles[i].empty())geometry.pose[node].angles={};else for(unsigned axis=0;axis<3;++axis){const auto a=clip.angles[i].at(frame)[axis],b=clip.angles[i].at(next)[axis];int delta=(b-a)&65535;if(delta>=32768)delta-=65536;geometry.pose[node].angles[axis]=(a+int(delta*blend))&65535;}
+        if(!clip.positions[i].empty()){const auto a=clip.positions[i].at(frame),b=clip.positions[i].at(next);pose[node].position={a.x+(b.x-a.x)*blend,a.y+(b.y-a.y)*blend,a.z+(b.z-a.z)*blend};}
+        if(clip.angles[i].empty())pose[node].angles={};else for(unsigned axis=0;axis<3;++axis){const auto a=clip.angles[i].at(frame)[axis],b=clip.angles[i].at(next)[axis];int delta=(b-a)&65535;if(delta>=32768)delta-=65536;pose[node].angles[axis]=(a+int(delta*blend))&65535;}
     }
+    return pose;
+}
+std::vector<BoneMatrix> PlayerAsset::pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw)const{
+    if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");return pose_clip(*motions_.at(motion),frame_q16,position,yaw);
+}
+std::vector<BoneMatrix> PlayerAsset::pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes)const{
+    if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
+    const auto matrices_=matrices(sampled_pose(clip,frame_q16,nodes),position,yaw);std::vector<BoneMatrix> result;for(const auto& matrix:matrices_){BoneMatrix bone;std::copy_n(matrix.value,16,bone.value);result.push_back(bone);}return result;
+}
+Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out) const {
+    if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
+    ModelGeometryOptions geometry;geometry.pose=sampled_pose(clip,frame_q16,nodes);
     auto full=matrices(geometry.pose,position,yaw),without_rotation=full;
     if(matrices_out){matrices_out->clear();for(const auto& matrix:full){BoneMatrix copy;std::copy_n(matrix.value,16,copy.value);matrices_out->push_back(copy);}}
     for(std::size_t i=0;i<bones();++i) {
