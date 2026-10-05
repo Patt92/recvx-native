@@ -9,6 +9,7 @@
 #include "world.h"
 #include "movie.h"
 #include "input.h"
+#include "frontend.h"
 #include "doors.h"
 #include <fstream>
 #include <sstream>
@@ -32,7 +33,7 @@ struct Options {
     unsigned player=10;
     std::size_t camera=0,spawn=0,motion=42;
     std::int64_t animation_frame=0;
-    bool preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,camera_explicit=false,list_controllers=false;
+    bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,camera_explicit=false,list_controllers=false;
 };
 Options options(int argc,char** argv){
     Options o;
@@ -48,6 +49,7 @@ Options options(int argc,char** argv){
         else if(arg=="--write-controls")o.write_controls=fs::u8path(value());
         else if(arg=="--controller-mappings")o.controller_mappings=fs::u8path(value());
         else if(arg=="--list-controllers")o.list_controllers=true;
+        else if(arg=="--in-game")o.in_game=true;
         else if(arg=="--preview")o.preview=true;
         else if(arg=="--inventory")o.inventory=true;
         else if(arg=="--room")o.room=value();
@@ -85,6 +87,7 @@ Options options(int argc,char** argv){
                        "--list-controllers: show detected devices without loading the game\n"
                        "--headless --inventory --screenshot <new.bmp> --frames <count>\n"
                        "--replay <input.txt> --state <new.json> for deterministic input verification\n"
+                       "--in-game: bypass main menu for gameplay diagnostics\n"
                        "--preview: legacy room/animation/free-camera inspector without game UI\n"
                        "--player <10..14> --spawn <index> --motion <index> --frame <integer>\n"
                        "--camera <1-based index> --no-player --verify-scenes --verify-players\n"
@@ -120,7 +123,7 @@ int main(int argc,char** argv){
     try{
         auto args=options(argc,argv);if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_controls);std::cout<<args.write_controls<<'\n';return 0;}_Make_SinTable();
         const bool explicit_controls=!args.controls.empty();if(!explicit_controls)args.controls=args.data.parent_path()/"controls.ini";
-        const auto input_config=explicit_controls||fs::exists(args.controls)?recvx::InputConfig::read(args.controls):recvx::InputConfig::defaults();
+        auto input_config=explicit_controls||fs::exists(args.controls)?recvx::InputConfig::read(args.controls):recvx::InputConfig::defaults();
         if(args.list_controllers){SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0);SdlQuit quit;
             if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
             recvx::InputManager devices(input_config);std::cout<<devices.controllers()<<" mapped controller(s), "<<SDL_NumJoysticks()<<" joystick device(s)\n";
@@ -188,39 +191,46 @@ int main(int argc,char** argv){
         };
         auto compose=[&](){scene.triangles=stage_geometry;scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes;if(player&&(!world||!world->player_hidden))recvx::append_actor(scene,player->sample(motion,animation,actor.position,actor.yaw,&nodes),texture_base);if(world)world->append(scene,nodes);};
         auto advance=[&](){if(player)animation=(animation+65536)%(std::int64_t(player->motion_frames(motion))*65536);};
-        load();
-        if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}
+        recvx::Frontend frontend(input_config,args.controls);if(args.preview||args.in_game||args.inventory){frontend.hide();load();}
+        if(!frontend.active()&&args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}
         if(player)std::cout<<"Animated SYSTEM/"<<recvx::asset_number(args.player)<<".bin: "<<player->bones()<<" bones, motion "<<motion<<", "<<player->motion_frames(motion)<<" frames\n";
         std::map<unsigned,std::vector<std::string>> replay;
         if(!args.replay.empty()){std::ifstream file(args.replay);if(!file)throw std::runtime_error("replay input missing");std::string line;unsigned previous=0;while(std::getline(file,line)){if(line.empty()||line[0]=='#')continue;std::istringstream row(line);unsigned frame;std::string action;if(!(row>>frame)||frame<previous)throw std::runtime_error("invalid replay frame order");previous=frame;std::getline(row,action);replay[frame].push_back(action);}}
         recvx::GameplayInput gameplay_input(inventory,menu,dialog,events.get());gameplay_input.interact=[&]{if(events)events->interact(actor.position,actor.yaw,world?world->floor_at(actor.position):0);};
+        gameplay_input.video_active=[&]{return movie.active();};gameplay_input.skip_video=[&]{movie.stop();if(audio_device)SDL_ClearQueuedAudio(audio_device);};
         gameplay_input.transition_active=[&]{return transition_pending;};gameplay_input.confirm_transition=[&]{door.skip();};
         auto transition_tick=[&](){if(!transition_pending)return false;door.tick();
             if(door.finished()){const auto destination=door.destination();for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==destination.room_name())room_index=i;
                 movie.stop();audio.stop(1);args.spawn=destination.spawn;motion=42;animation=0;locomotion=false;transition_pending=false;++room_changes;load();gameplay_input.set_events(events.get());follow();}
             return true;
         };
-        auto input=[&](recvx::MenuInput key){if(ui)gameplay_input.menu_input(key);};
+        bool frontend_quit=false;
+        auto frontend_command=[&](recvx::FrontendCommand command){if(command==recvx::FrontendCommand::Quit)frontend_quit=true;
+            if(command==recvx::FrontendCommand::NewGame){load();gameplay_input.set_events(events.get());if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}}};
+        auto input=[&](recvx::MenuInput key){if(ui){if(frontend.active())frontend_command(frontend.input(key));else gameplay_input.menu_input(key);}};
         int replay_move=0,replay_turn=0;bool replay_run=false;
-        auto replay_input=[&](unsigned frame){if(const auto found=replay.find(frame);found!=replay.end())for(const auto& line:found->second){std::istringstream row(line);std::string action;row>>action;if(action=="keys"){replay_move=replay_turn=0;replay_run=false;std::string key;while(row>>key){if(key=="forward")replay_move=1;else if(key=="back")replay_move=-1;else if(key=="left")replay_turn=-1;else if(key=="right")replay_turn=1;else if(key=="run")replay_run=true;else if(key!="none")throw std::runtime_error("unknown replay key: "+key);}}else if(action=="skip")events->skip_cinematic();else if(action=="inventory")input(recvx::MenuInput::Open);else if(action=="confirm")input(recvx::MenuInput::Confirm);else if(action=="cancel")input(recvx::MenuInput::Cancel);else if(action=="up")input(recvx::MenuInput::Up);else if(action=="down")input(recvx::MenuInput::Down);else if(action=="left")input(recvx::MenuInput::Left);else if(action=="right")input(recvx::MenuInput::Right);else if(action=="position"){if(!(row>>actor.position.x>>actor.position.y>>actor.position.z>>actor.yaw)||!std::isfinite(actor.position.x)||!std::isfinite(actor.position.y)||!std::isfinite(actor.position.z))throw std::runtime_error("invalid replay position");follow();}else throw std::runtime_error("unknown replay action: "+action);}};
+        auto replay_input=[&](unsigned frame){if(const auto found=replay.find(frame);found!=replay.end())for(const auto& line:found->second){std::istringstream row(line);std::string action;row>>action;if(action=="keys"){replay_move=replay_turn=0;replay_run=false;std::string key;while(row>>key){if(key=="forward")replay_move=1;else if(key=="back")replay_move=-1;else if(key=="left")replay_turn=-1;else if(key=="right")replay_turn=1;else if(key=="run")replay_run=true;else if(key!="none")throw std::runtime_error("unknown replay key: "+key);}}else if(action=="new_game")input(recvx::MenuInput::Confirm);else if(action=="skip"){if(movie.active())gameplay_input.skip_video();else if(events)events->skip_cinematic();}else if(action=="inventory")input(recvx::MenuInput::Open);else if(action=="confirm")input(recvx::MenuInput::Confirm);else if(action=="cancel")input(recvx::MenuInput::Cancel);else if(action=="up")input(recvx::MenuInput::Up);else if(action=="down")input(recvx::MenuInput::Down);else if(action=="left")input(recvx::MenuInput::Left);else if(action=="right")input(recvx::MenuInput::Right);else if(action=="position"){if(!(row>>actor.position.x>>actor.position.y>>actor.position.z>>actor.yaw)||!std::isfinite(actor.position.x)||!std::isfinite(actor.position.y)||!std::isfinite(actor.position.z))throw std::runtime_error("invalid replay position");follow();}else throw std::runtime_error("unknown replay action: "+action);}};
         auto locomote=[&](int move,bool run,int turn){
-            if(transition_pending||!player||menu.active||dialog.active()||(world&&(world->player_scripted||world->player_hidden))||(events&&(events->flags[5][0]&4)))return;
+            if(frontend.active()||transition_pending||!player||menu.active||dialog.active()||(world&&(world->player_scripted||world->player_hidden))||(events&&(events->flags[5][0]&4)))return;
             if(move)locomotion=true;
             if(locomotion){const auto from=actor.position;player->locomotion(actor,motion,animation,move,run,turn);if(world)actor.position=world->move(from,actor.position);}
             else{actor.yaw=(actor.yaw+turn*int(182.04445f*4.5f))&65535;advance();}follow();
         };
-        auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}if(!args.state.empty()){if(fs::exists(args.state))throw std::runtime_error("state output already exists");std::ofstream out(args.state);if(!out)throw std::runtime_error("cannot create state output");out<<"{\n  \"room\": "<<std::quoted(rooms.name(room_index))<<", \"room_changes\": "<<room_changes<<", \"door_active\": "<<(transition_pending?"true":"false")<<", \"door_ticks\": "<<door.ticks()<<", \"door_skipped\": "<<(door.skipped()?"true":"false")<<", \"yaw\": "<<actor.yaw<<",\n  \"weapon\": "<<inventory.weapon()<<", \"hp\": "<<inventory.hp<<", \"inventory_open\": "<<(menu.active?"true":"false")<<", \"dialog_open\": "<<(dialog.active()?"true":"false")<<", \"dialog_index\": "<<dialog.index()<<",\n  \"items\": [";for(unsigned i=0;i<12;++i)out<<(i?",":"")<<inventory.slots()[i];out<<"],\n  \"events\": [";if(events)for(unsigned i=0;i<events->dispatched.size();++i)out<<(i?",":"")<<events->dispatched[i];out<<"], \"pending_world_bindings\": "<<(events?events->pending_bindings.size():0)<<", \"blocked_commands\": "<<(events?events->errors.size():0)<<",\n  \"actor\": ["<<actor.position.x<<","<<actor.position.y<<","<<actor.position.z<<"], \"motion\": "<<motion<<", \"animation_frame\": "<<animation<<", \"player_hidden\": "<<(world&&world->player_hidden?"true":"false")<<", \"player_scripted\": "<<(world&&world->player_scripted?"true":"false")<<", \"cinematic\": "<<(events&&(events->flags[5][0]&4)?"true":"false")<<", \"event_camera\": "<<(world&&world->event_camera?int(world->event_camera_index):-1)<<", \"movie_active\": "<<(movie.active()?"true":"false")<<", \"movie_frame\": "<<movie.frame()<<", \"audio_played\": [";for(unsigned i=0;i<audio.played.size();++i)out<<(i?",":"")<<std::quoted(audio.played[i]);out<<"]\n}\n";}};
-        recvx::SoftwareRenderer image(640,480);const auto start=std::chrono::steady_clock::now();
+        auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}if(!args.state.empty()){if(fs::exists(args.state))throw std::runtime_error("state output already exists");std::ofstream out(args.state);if(!out)throw std::runtime_error("cannot create state output");out<<"{\n  \"title_active\": "<<(frontend.active()?"true":"false")<<", \"settings_active\": "<<(frontend.settings()?"true":"false")<<", \"settings_selected\": "<<frontend.selected()<<",\n  \"room\": "<<std::quoted(rooms.name(room_index))<<", \"room_changes\": "<<room_changes<<", \"door_active\": "<<(transition_pending?"true":"false")<<", \"door_ticks\": "<<door.ticks()<<", \"door_skipped\": "<<(door.skipped()?"true":"false")<<", \"yaw\": "<<actor.yaw<<",\n  \"weapon\": "<<inventory.weapon()<<", \"hp\": "<<inventory.hp<<", \"inventory_open\": "<<(menu.active?"true":"false")<<", \"dialog_open\": "<<(dialog.active()?"true":"false")<<", \"dialog_index\": "<<dialog.index()<<",\n  \"items\": [";for(unsigned i=0;i<12;++i)out<<(i?",":"")<<inventory.slots()[i];out<<"],\n  \"events\": [";if(events)for(unsigned i=0;i<events->dispatched.size();++i)out<<(i?",":"")<<events->dispatched[i];out<<"], \"pending_world_bindings\": "<<(events?events->pending_bindings.size():0)<<", \"blocked_commands\": "<<(events?events->errors.size():0)<<",\n  \"actor\": ["<<actor.position.x<<","<<actor.position.y<<","<<actor.position.z<<"], \"motion\": "<<motion<<", \"animation_frame\": "<<animation<<", \"player_hidden\": "<<(world&&world->player_hidden?"true":"false")<<", \"player_scripted\": "<<(world&&world->player_scripted?"true":"false")<<", \"cinematic\": "<<(events&&(events->flags[5][0]&4)?"true":"false")<<", \"event_camera\": "<<(world&&world->event_camera?int(world->event_camera_index):-1)<<", \"movie_active\": "<<(movie.active()?"true":"false")<<", \"movie_frame\": "<<movie.frame()<<", \"audio_played\": [";for(unsigned i=0;i<audio.played.size();++i)out<<(i?",":"")<<std::quoted(audio.played[i]);out<<"]\n}\n";}};
+        recvx::SoftwareRenderer image(640,480);
+        auto draw=[&](unsigned frame,std::size_t controllers=0,bool wireframe=false){if(frontend.active()&&ui){frontend.draw(image,*ui,controllers);return;}
+            compose();image.draw(scene,world?world->camera(scene,camera):camera,wireframe);if(world)world->overlay(image);movie.draw(image);if(ui)ui->draw(image,inventory,menu,dialog,frame);if(ui&&(movie.active()||events&&(events->flags[5][0]&4)&&(events->flags[10][0]&0x40)))recvx::draw_skip_hint(image,*ui,input_config);if(transition_pending)door.draw(image);};
+        const auto start=std::chrono::steady_clock::now();
         if(args.headless){
             const int frames=args.frames?args.frames:1;
-            for(int i=0;i<frames;++i){replay_input(unsigned(i));const bool transitioning=transition_tick();if(!transitioning&&events){events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();}if(!transitioning&&world)world->tick();follow();movie.tick();audio.mix();if(!transitioning)locomote(replay_move,replay_run,replay_turn);if(i==frames-1){compose();image.draw(scene,world?world->camera(scene,camera):camera);if(world)world->overlay(image);movie.draw(image);if(ui)ui->draw(image,inventory,menu,dialog,unsigned(i));if(transition_pending)door.draw(image);}}
+            for(int i=0;i<frames;++i){replay_input(unsigned(i));if(!frontend.active())gameplay_input.apply({});const bool transitioning=transition_tick();if(!transitioning&&events){events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();}if(!transitioning&&world)world->tick();follow();movie.tick();audio.mix();if(!transitioning)locomote(replay_move,replay_run,replay_turn);if(i==frames-1)draw(unsigned(i));if(frontend_quit)break;}
             if(!args.screenshot.empty())image.save_bmp(args.screenshot);
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
             report();return events&&!events->errors.empty()?1:0;
         }
         SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_AUDIO)==0);SdlQuit quit;
         if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
-        recvx::InputManager devices(input_config);
+        recvx::InputManager devices(input_config);frontend.changed=[&](const recvx::InputConfig& config){devices.configure(config);};
         std::cout<<"Input: keyboard and "<<devices.controllers()<<" controller(s); "<<(fs::exists(args.controls)?args.controls.string():"built-in defaults")<<'\n';
         std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)> window(SDL_CreateWindow("RECVX native runtime",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,960,720,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI),SDL_DestroyWindow);sdl_check(bool(window));
         auto* raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
@@ -234,7 +244,7 @@ int main(int argc,char** argv){
         while(running){
             SDL_Event event;
             while(SDL_PollEvent(&event)){
-                devices.event(event);
+                devices.event(event);if(ui&&frontend.active())frontend.event(event);
                 if(event.type==SDL_QUIT)running=false;
                 if(event.type==SDL_KEYDOWN&&!event.key.repeat){
                     if(ui)continue; // Configured gameplay actions are consumed on fixed ticks.
@@ -268,17 +278,17 @@ int main(int argc,char** argv){
             while(accumulator>=1.0/60){
                 accumulator-=1.0/60;
                 const auto physical=devices.tick();
-                if(ui){if(gameplay_input.apply(physical)){running=false;break;}if(physical.hit(recvx::Action::Wireframe))wireframe=!wireframe;}
+                if(ui){if(frontend.active())frontend_command(frontend.apply(physical));else if(gameplay_input.apply(physical)){running=false;break;}if(frontend_quit){running=false;break;}if(physical.hit(recvx::Action::Wireframe))wireframe=!wireframe;}
                 replay_input(input_tick++);
                 const bool transitioning=transition_tick();
                 if(!transitioning&&events){events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();}
                 if(!transitioning&&world)world->tick();follow();movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
                 if(!transitioning)locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());
             }
-            compose();image.draw(scene,world?world->camera(scene,camera):camera,wireframe);if(world)world->overlay(image);movie.draw(image);if(ui)ui->draw(image,inventory,menu,dialog,unsigned(frame));if(transition_pending)door.draw(image);
+            draw(unsigned(frame),devices.controllers(),wireframe);
             sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);
             sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());
-            const std::string title="RECVX native | "+rooms.name(room_index)+" | Camera "+std::to_string(camera_index+1)+(player?" | Motion "+std::to_string(motion):"")+(ui?" | Native development":" | Preview");SDL_SetWindowTitle(window.get(),title.c_str());
+            const std::string title=frontend.active()?"Resident Evil CODE: Veronica X | Hauptmenue":"RECVX native | "+rooms.name(room_index)+" | Camera "+std::to_string(camera_index+1)+(player?" | Motion "+std::to_string(motion):"")+(ui?" | Native development":" | Preview");SDL_SetWindowTitle(window.get(),title.c_str());
             ++frame;if(args.frames&&frame>=args.frames)running=false;
             SDL_Delay(1);
         }

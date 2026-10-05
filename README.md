@@ -5,7 +5,10 @@ Native Portierungsarbeit für Resident Evil CODE: Veronica X (PS2), ausgehend vo
 Der aktuelle Entwicklungsbuild läuft auf Windows x64 und macOS (Intel/Apple Silicon).
 Er ist noch kein vollständig spielbares Spiel.
 
-Der Start verwendet die originalen RM_0000-Ereignisse: Intro/Film, dunkle Zelle,
+Der Start öffnet ein Hauptmenü mit Neues Spiel, Einstellungen und Beenden.
+Einstellungen zeigen und ändern Tastatur- und Controllerbelegung, Stick-Totzone
+und Menüschwelle; Änderungen werden sofort angewendet und gespeichert.
+Neues Spiel verwendet die originalen RM_0000-Ereignisse: Intro/Film, dunkle Zelle,
 Feuerzeughinweis, Inventar/Ausrüsten, Rodrigo-Sequenz und Rückgabe der Steuerung.
 Originale Modelle, Texturen, Animationen, Inventarsymbole, Nachrichten,
 ADX-Musik/Stimmen und die 18 Filme mit ihrem PCM-Ton werden nativ verarbeitet.
@@ -49,11 +52,13 @@ Die Pakete liegen in `build/packages/macos-universal-v0.5` und
 während des Spielstarts wird weder ISO noch AFS gelesen.
 
 Tastatur und SDL-Gamepads werden unterstützt; Windows nutzt auch XInput.
-Die Belegung und Stick-Totzone sind in `controls.ini` konfigurierbar
+Die Belegung und Stick-Totzone sind im Hauptmenü unter Einstellungen oder in `controls.ini` konfigurierbar
 ([Steuerungsdokumentation](docs/CONTROLS.md)).
 Tab öffnet das Inventar, Pfeiltasten wählen, Enter bestätigt/interagiert, Escape
 geht zurück. W/S oder I/K bewegt Claire vor/zurück, A/D oder J/L dreht, Shift läuft schnell.
-Space verwendet den originalen Cinematic-Skip. Diagnosefunktionen sind dokumentiert.
+Laufende Videos lassen sich mit Enter/Space oder Controller-A/Start überspringen;
+die Anzeige berücksichtigt die aktuelle Belegung. Space verwendet außerhalb eines
+Videos den originalen Cinematic-Skip. Diagnosefunktionen sind dokumentiert.
 
 ## Ordner
 

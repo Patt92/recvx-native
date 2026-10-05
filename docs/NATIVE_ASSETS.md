@@ -94,3 +94,7 @@ Sound-bank playback, special light procedures and rumble remain pending.
 The rotating examination view renders original 3D item geometry. Exported TGA
 files are replaceable original resources; screenshots are not loaded by gameplay.
 Obsolete verification images are stored under ignored `archived/diagnostics/`.
+
+The main menu decodes the original title texture from ADV/0002.bin resource 0.
+Its 640x480 visible crop uses the original padded 1024x512 texture. Override it
+with `mods/textures/title/0000.tga`; HD replacements retain the crop proportions.

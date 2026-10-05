@@ -20,9 +20,12 @@ class GameUi {
 public:
     GameUi(const std::filesystem::path& data,const std::filesystem::path& mods={});
     void draw(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick);
+    void draw_title(SoftwareRenderer& image);
+    void label(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=.6f,std::uint32_t color=0xffffffff)const;
     std::string item_name(unsigned id)const;
     Message system_message(unsigned index)const;
 private:
+    std::vector<SceneTexture> title_;
     std::vector<SceneTexture> menu_,fonts_,dialog_fonts_;
     std::vector<std::uint8_t> messages_;
     std::size_t system_table_=0;

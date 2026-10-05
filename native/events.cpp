@@ -90,6 +90,10 @@ int EventVm::instruction(Task& t){
     case 0x3b:world(t,op,6);return 1;
     case 0x36:world(t,op,6);return 1;
     case 0x16:case 0x18:case 0x1a:case 0x2b:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x6a:case 0x9e:world(t,op,op==0x42?4:2);return 1;
+    // bhFaceReSet consumes one enemy index. Retain it as a pending facial
+    // animation binding so the original scene cleanup task can continue.
+    case 0x90:world(t,op,2);return 1;
+    case 0xca:world(t,op,2);return 1; // bhEffClearEvt; event effects remain pending.
     case 0x5e:world(t,op,4);return 1;
     case 0x19:world(t,op,8);return 1;
     case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}

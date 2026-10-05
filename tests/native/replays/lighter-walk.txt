@@ -1,3 +1,4 @@
+0 new_game
 # Follow the original opening event, equip the lighter, then run after control returns.
 1 skip
 50 confirm

@@ -1,2 +1,3 @@
+0 new_game
 # Original cinematic skip flag; no diagnostic movement or direct event dispatch.
 1 skip

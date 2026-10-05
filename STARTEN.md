@@ -12,6 +12,21 @@ Die vorhandenen Pakete enthalten alle lokal exportierten Daten und SDL2.
 Beim Spielen wird keine ISO benötigt. Das aktuelle Spiel ist ein Entwicklungsbuild;
 Kampf, Speichern und zahlreiche spätere Ereignisse sind noch nicht fertig.
 
+## Hauptmenü und Einstellungen
+
+Der Start öffnet jetzt das Hauptmenü mit **Neues Spiel**, **Einstellungen** und
+**Beenden**. Das Intro beginnt erst nach Neues Spiel. Eine bereits laufende alte
+Version schließen und über den Starter neu öffnen.
+
+In Einstellungen mit Links/Rechts zwischen Tastatur und Controller wechseln.
+Aktion auswählen, OK drücken und die gewünschte Taste bzw. Stickrichtung eingeben.
+Escape bricht die Aufnahme ab. Stick-Totzone und Menüschwelle lassen sich ebenfalls
+ändern; die Belegung wird sofort angewendet und in der Paketdatei `controls.ini`
+gespeichert. Die Standardbelegung kann hier wiederhergestellt werden.
+
+Laufende Videos mit **Enter oder Space**, am Controller **A oder Start/Options**,
+überspringen. Die Anzeige im Video zeigt die aktuell konfigurierten Tasten.
+
 ## Bedienung
 
 W/S oder I/K: vor/zurück; A/D oder J/L: drehen; Shift: laufen.
@@ -26,8 +41,10 @@ Die Bestätigungstaste ist über `controls.ini` konfigurierbar, einschließlich
 abweichender Controller-Belegung. Bei Paketstart die Datei neben dem Paket-Starter
 bearbeiten; beim Start eines direkten Builds die Datei im Projektordner.
 
-Am Anfang den Hinweis in der Zelle bestätigen, das Inventar öffnen und das
-Feuerzeug ausrüsten. Inventar, Ausrüstung, HP und Tasche bleiben bei Raumwechseln
+Am Anfang den Hinweis in der Zelle bestätigen, Tab bzw. Controller-Y drücken,
+dann zweimal Enter bzw. A: Feuerzeug auswählen und **Equip** bestätigen.
+Ein schneller Inventardruck direkt nach dem Hinweis wird kurz vorgemerkt, bis
+das Originalereignis die Steuerung freigibt. Inventar, Ausrüstung, HP und Tasche bleiben bei Raumwechseln
 im Spielzustand erhalten.
 
 ## Ressourcen und Mods

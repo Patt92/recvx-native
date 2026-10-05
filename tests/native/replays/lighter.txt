@@ -1,3 +1,4 @@
+0 new_game
 # Use the original intro-skip branch, acknowledge the original hint, equip the lighter.
 1 skip
 50 confirm

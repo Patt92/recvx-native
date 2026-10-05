@@ -1,10 +1,18 @@
 # Native gameplay 0.5
 
+The runtime starts at a native main menu using the original ADV/0002.bin title
+background. New Game starts the event VM; Settings provides persistent live
+keyboard/controller rebinding, deadzone and menu-threshold controls. Save/load,
+difficulty selection and the complete original title transitions remain pending.
+`--in-game` bypasses the main menu for diagnostics.
+
 The opening now follows the original RM_0000 event scripts rather than a manually
 placed Claire and a proximity hint. The normal initial spawn remains in the cell.
 The intro hides the playable actor and restricts controls. Original dialogue,
 ADX music/voices and the first film execute through the VM. The original skip
-branch remains available through Space.
+branch remains available through Space. Active films also accept Confirm/Cancel
+or Skip and show the configured keyboard/controller buttons. Stopping an active
+film does not leave a cinematic skip flag for the subsequent lighter scene.
 
 ## Opening and lighter
 
@@ -12,7 +20,11 @@ After the intro (or its original skip), event 16 selects event camera 37 and
 message 4: "If I were equipped with a lighter, I could see outside...". Rodrigo
 is rendered in the dark beyond the bars; the hint is not shown with Claire
 standing outside. Acknowledge it with Enter. The original cinematic flags then
-permit opening the inventory. Tab, Enter and Enter select/equip the lighter.
+permit opening the inventory. A fast inventory press immediately after the hint
+is retained for up to 60 ticks and opens as soon as those flags release control.
+Tab, Enter and Enter select/equip the lighter. Original face-reset (0x90) and
+event-effect-clear (0xca) commands are decoded with their original two-byte
+lengths and retained as pending visual bindings.
 
 The original floor trigger at the initial spawn sets the VM floor-contact bit.
 Together with the equipped-item condition it starts the lighter/Rodrigo event.

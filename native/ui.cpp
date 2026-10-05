@@ -59,6 +59,26 @@ GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mo
         if(high>low)for(auto& c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});const auto shade=(value-low)*255/(high-low);c=(c&0xff000000)|shade*0x010101;}}
     messages_=read_asset_file(data/"files/SYSMES.ALD",4*1024*1024);BinaryView v(messages_);system_table_=8+v.u32(0);v.require(system_table_,4);
 }
+
+void GameUi::label(SoftwareRenderer& image,const std::string& str,int x,int y,float scale,std::uint32_t color)const{
+    Message message;for(unsigned char c:str)message.push_back(c=='\n'?0xff00:c==' '?0xff01:c>=32&&c<140?c-32:31);message.push_back(0xffff);text(image,message,x,y,scale,color,true);
+}
+void GameUi::draw_title(SoftwareRenderer& image){
+    if(title_.empty()){
+        const auto packet=read_asset_file(data_/"archives/ADV/0002.bin",8*1024*1024);BinaryView view(packet);
+        const auto resource=view.u32(0);const auto offset=view.relative(resource,view.u32(resource+4),256);
+        const auto length=128u+view.u32(offset+128);view.require(offset,length);
+        // ADV resources point directly at extended TIM2. Wrap its existing CLUT
+        // in the PVP/PLI envelope used by the shared native texture decoder.
+        std::vector<std::uint8_t> bundle(44+32+length+4);auto put=[&](std::size_t p,std::uint32_t value){for(unsigned i=0;i<4;++i)bundle[p+i]=std::uint8_t(value>>(i*8));};
+        put(0,0x00494c50);put(4,12);put(32,1);put(44,0x324d4954);put(48,length);std::copy_n(packet.begin()+offset,length,bundle.begin()+76);put(76+length,0xffffffff);
+        title_=decode_texture_bundle(bundle);if(title_.size()!=1)throw std::runtime_error("original title texture missing");
+        for(auto& pixel:title_[0].pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);
+        Scene replacement;replacement.textures=title_;apply_texture_files(replacement,data_,mods_,"title");title_=std::move(replacement.textures);
+    }
+    std::fill(image.canvas().begin(),image.canvas().end(),0xff000000);
+    blit_pixels(image,title_[0],0,0,640,480,0,0,int(title_[0].width)*640/1024,int(title_[0].height)*480/512);
+}
 Message GameUi::system_message(unsigned i)const{return read_message(messages_,system_table_,i);}
 std::string GameUi::item_name(unsigned id)const{return message_text(read_message(messages_,4,id));}
 void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,float scale,std::uint32_t color,bool dialogue)const{

@@ -16,7 +16,7 @@ names. Keyboard and mapped gamepads can be used together without changing modes.
 | Confirm/interact | Enter | A |
 | Cancel menu/dialogue | Escape | B |
 | Menu/item examination | Arrow keys or WASD | Left stick or D-pad |
-| Cinematic skip | Space | Start |
+| Video / cinematic skip | Space; Enter also skips active videos and permitted scenes | Start/Options; A also skips active videos and permitted scenes |
 | Quit | Escape outside menus/dialogue, or F10 | Unbound by default |
 | Wireframe diagnostic | F2 | Unbound by default |
 
@@ -28,7 +28,15 @@ holding a direction repeats menu navigation after a configurable delay.
 
 ## Change bindings
 
-Edit `controls.ini` and restart. Packaged builds keep it next to Start.cmd or
+Start in the main menu and select **Einstellungen**. Left/Right switches between
+keyboard and controller pages, except on deadzone/menu-threshold rows where it
+adjusts the value. Select an action, press configured Confirm, then press a new
+key/button or move a centered stick. Escape cancels capture. Each successful edit
+is saved atomically to controls.ini and applied immediately. Confirm/Cancel
+conflicts swap the previous binding so the menu remains operable. Restoring
+defaults restores both device pages. The connected-controller count is shown.
+
+Alternatively, edit `controls.ini` and restart. Packaged builds keep it next to Start.cmd or
 RECVX Native.app, outside the signed application. Do not edit the internal app
 Resources directory. Development launches look next to the selected data folder.
 An explicit `--controls <path>` selects a different file. If the default file is
@@ -101,7 +109,7 @@ recvx-input-tests data
 Virtual-controller and Wine tests validate the native input path. They do not
 establish that a particular physical USB/Bluetooth/XInput controller has been
 tested on Windows hardware. Use --list-controllers to inspect available devices.
-This implementation does not yet offer an in-game rebinding screen or vibration.
+The main-menu settings screen supports rebinding; vibration remains pending.
 The preview inspector retains its separate diagnostic/free-camera keyboard controls.
 
 SDL references: [opening controllers](https://wiki.libsdl.org/SDL2/SDL_GameControllerOpen),
@@ -112,3 +120,11 @@ SDL references: [opening controllers](https://wiki.libsdl.org/SDL2/SDL_GameContr
 During a door transition, a fresh press of configured Confirm (default Enter /
 A) skips directly to the destination spawn. Held Confirm does not immediately
 skip a newly entered door; navigation and inventory inputs are ignored there.
+
+Active videos accept Confirm, Skip or Cancel without requiring the event cinematic
+skip flag. Movie playback and its PCM audio are stopped; the original script sees
+movie completion. This avoids carrying a cinematic-skip request into the later
+Rodrigo scene. Video hints display configured keyboard and controller bindings.
+A single inventory press in the first second after dismissing a dialogue is
+buffered across the brief cinematic handover. Inventory still opens only once
+control is released; videos and door transitions discard this buffer.

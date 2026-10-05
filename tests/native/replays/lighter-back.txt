@@ -1,3 +1,4 @@
+0 new_game
 # Original cell/lighter event, then backward movement with unchanged facing.
 1 skip
 50 confirm

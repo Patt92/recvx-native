@@ -6,8 +6,8 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 |---|---|
 | macOS universal build | arm64 and x86_64 slices present |
 | Windows build | PE32+ x64 executable and bundled SDL2 |
-| CTest | 11/11 on macOS; 11/11 under Wine |
-| ASan + UBSan | 11/11 and original-data opening/controller regressions passed |
+| CTest | 12/12 on macOS; 12/12 under Wine |
+| ASan + UBSan | 12/12 and original-data opening/controller regressions passed |
 | Intel/Rosetta | original-data opening/UI and SDL virtual-controller regressions passed |
 | Disc data manifest | 12,702 files; 6,575,300,120 bytes; both packaged trees verified |
 | Room scene decoder | 205/205, 1,008,630 stage triangles, 470 active camera targets |
@@ -21,6 +21,10 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 | Packaged launch | own packaged data; Windows replay under Wine; bounded macOS SDL window/audio start |
 | Configurable input | keyboard/gamepad rebind, axis inversion, deadzone, trigger, short presses, repeat, focus and hot-plug/removal passed with SDL virtual GameControllers |
 | Gamepad opening flow | original cell skip/dialogue/inventory/lighter/Rodrigo/control-return path passed on arm64, Rosetta and Windows/Wine |
+| Main menu | original ADV title; idle leaves event VM, film and game audio inactive; new game starts original opening |
+| Settings screen | keyboard/controller pages, live rebind, Confirm/Cancel conflict swap, persistent atomic INI save, default restore, stick thresholds and Escape capture cancel checked |
+| Running film skip | original active film skipped by keyboard Space and SDL virtual A; movie/PCM stop, cell hint/camera 37, fast inventory equip, Rodrigo VOICE1/0016 and control return verified |
+| Rapid inventory after hint | lost Y press reproduced before fix; one request buffered until original cinematic handover finishes; keyboard Tab and controller Y regressions pass |
 | Physical controller | no mapped controller or joystick detected locally; physical Windows XInput hardware not tested |
 | Backward movement | original clip 16/key 25, advancing pose, signed curve, unchanged facing, return to idle and controller backstep checked |
 | Original doors | 105 MRY parameter cases rendered, completed and skipped; original hinge/camera/fade procedures compiled natively |
@@ -44,3 +48,8 @@ builds. `STARTEN.md` describes launch, first equipment flow and door controls.
 Door sound banks, special door lighting and rumble are not yet implemented.
 The inventory regression also checks retained poison/HP/side-pack state across
 VM reconstruction; door filters support signed below-ground floor IDs.
+
+The main menu and settings use original title art and font atlases. They provide
+a native development menu; the complete original title/difficulty/load system is
+not yet ported. `tools/verify_frontend.py` verifies real-runtime default idle,
+settings, active movie and the complete late-skip/rapid lighter flow.

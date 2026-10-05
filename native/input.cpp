@@ -1,5 +1,15 @@
 #include "input.h"
 #include <algorithm>
+#include <chrono>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -76,6 +86,44 @@ InputConfig parse(std::istream& stream){InputConfig out;std::string section,line
 InputConfig InputConfig::defaults(){std::istringstream stream(defaults_text);return parse(stream);}
 InputConfig InputConfig::read(const std::filesystem::path& path){std::ifstream stream(path);if(!stream)throw std::runtime_error("cannot read controls: "+path.string());if(std::filesystem::file_size(path)>65536)throw std::runtime_error("controls file too large");return parse(stream);}
 void InputConfig::write_defaults(const std::filesystem::path& path){if(std::filesystem::exists(path))throw std::runtime_error("controls output already exists");std::ofstream file(path);if(!file)throw std::runtime_error("cannot write controls: "+path.string());file<<defaults_text;file.close();if(!file)throw std::runtime_error("controls write failed");}
+
+std::string InputConfig::describe(Action action,bool gamepad)const{
+    std::string result;
+    for(const auto& binding:bindings[unsigned(action)]){
+        if((binding.kind!=InputBinding::Kind::Key)!=gamepad)continue;
+        std::string label;
+        if(binding.kind==InputBinding::Kind::Key){label=SDL_GetScancodeName(SDL_Scancode(binding.code));if(label=="Return")label="Enter";if(label=="Space")label="Leertaste";}
+        else if(binding.kind==InputBinding::Kind::Button){
+            static const char* buttons[]={"A","B","X","Y","Back","Guide","Start/Options","Stick L","Stick R","LB","RB","D-pad hoch","D-pad runter","D-pad links","D-pad rechts"};
+            label=binding.code<int(sizeof(buttons)/sizeof(*buttons))?buttons[binding.code]:SDL_GameControllerGetStringForButton(SDL_GameControllerButton(binding.code));
+        }else{static const char* axes[]={"Stick X","Stick Y","Stick R X","Stick R Y","LT","RT"};label=std::string(axes[binding.code])+(binding.direction>0?" +":" -");}
+        if(!result.empty())result+=" / ";result+=label;
+    }return result.empty()?"Nicht belegt":result;
+}
+void InputConfig::save(const std::filesystem::path& path)const{
+    std::ostringstream text;text<<"# RECVX keyboard and controller settings. Editable in the main menu.\n";
+    for(const bool gamepad:{false,true}){text<<(gamepad?"\n[gamepad]\n":"\n[keyboard]\n");
+        for(unsigned a=0;a<action_count;++a){text<<names[a]<<" = ";bool any=false;for(const auto& binding:bindings[a]){
+            if((binding.kind!=InputBinding::Kind::Key)!=gamepad)continue;
+            if(any)text<<", ";any=true;
+            if(binding.kind==InputBinding::Kind::Key)text<<SDL_GetScancodeName(SDL_Scancode(binding.code));
+            else if(binding.kind==InputBinding::Kind::Button)text<<"button:"<<SDL_GameControllerGetStringForButton(SDL_GameControllerButton(binding.code));
+            else text<<"axis:"<<SDL_GameControllerGetStringForAxis(SDL_GameControllerAxis(binding.code))<<(binding.direction>0?"+":"-");
+        }if(!any)text<<"none";text<<'\n';}
+    }text<<"\n[settings]\ndeadzone = "<<deadzone<<"\nmenu_threshold = "<<menu_threshold<<"\nrepeat_delay_ticks = "<<repeat_delay<<"\nrepeat_interval_ticks = "<<repeat_interval<<'\n';
+    // Validate before opening an existing user configuration for writing.
+    std::istringstream validation(text.str());parse(validation);
+    auto temporary=path;temporary+=".tmp-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    try{std::ofstream output(temporary);if(!output)throw std::runtime_error("cannot save controls");output<<text.str();output.close();if(!output)throw std::runtime_error("controls save failed");
+#ifdef _WIN32
+        if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("controls replace failed");
+#else
+        std::filesystem::rename(temporary,path);
+#endif
+    }catch(...){std::error_code ignored;std::filesystem::remove(temporary,ignored);throw;}
+
+}
+void InputManager::configure(InputConfig config){config_=std::move(config);pending_.fill(false);age_.fill(0);evaluate(false);}
 InputManager::InputManager(InputConfig config):config_(std::move(config)){for(int i=0;i<SDL_NumJoysticks();++i)open(i);evaluate(false);}
 InputManager::~InputManager(){for(auto& item:pads_)SDL_GameControllerClose(item.second.handle);}
 void InputManager::refresh(Pad& p){for(unsigned a=0;a<p.axes.size();++a)p.axes[a]=SDL_GameControllerGetAxis(p.handle,SDL_GameControllerAxis(a));for(unsigned b=0;b<p.buttons.size();++b)p.buttons[b]=SDL_GameControllerGetButton(p.handle,SDL_GameControllerButton(b));}
@@ -89,19 +137,28 @@ void InputManager::event(const SDL_Event& e){if(e.type==SDL_CONTROLLERDEVICEADDE
     if(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_FOCUS_LOST){focused_=false;keys_.fill(false);pending_.fill(false);held_.fill(false);age_.fill(0);return;}
     if(e.type==SDL_WINDOWEVENT&&e.window.event==SDL_WINDOWEVENT_FOCUS_GAINED){focused_=true;for(auto& p:pads_)refresh(p.second);evaluate(false);return;}
     if(!focused_)return;
-    if((e.type==SDL_KEYDOWN||e.type==SDL_KEYUP)&&!(e.type==SDL_KEYDOWN&&e.key.repeat)&&e.key.keysym.scancode>0&&e.key.keysym.scancode<SDL_NUM_SCANCODES){keys_[e.key.keysym.scancode]=e.type==SDL_KEYDOWN;evaluate();}
-    if(e.type==SDL_CONTROLLERBUTTONDOWN||e.type==SDL_CONTROLLERBUTTONUP){const auto p=pads_.find(e.cbutton.which);if(p!=pads_.end()&&e.cbutton.button<SDL_CONTROLLER_BUTTON_MAX){p->second.buttons[e.cbutton.button]=e.type==SDL_CONTROLLERBUTTONDOWN;evaluate();}}
-    if(e.type==SDL_CONTROLLERAXISMOTION){const auto p=pads_.find(e.caxis.which);if(p!=pads_.end()&&e.caxis.axis<SDL_CONTROLLER_AXIS_MAX){p->second.axes[e.caxis.axis]=e.caxis.value;evaluate();}}
+    if((e.type==SDL_KEYDOWN||e.type==SDL_KEYUP)&&!(e.type==SDL_KEYDOWN&&e.key.repeat)&&e.key.keysym.scancode>0&&e.key.keysym.scancode<SDL_NUM_SCANCODES){last_gamepad_=false;keys_[e.key.keysym.scancode]=e.type==SDL_KEYDOWN;evaluate();}
+    if(e.type==SDL_CONTROLLERBUTTONDOWN||e.type==SDL_CONTROLLERBUTTONUP){const auto p=pads_.find(e.cbutton.which);if(p!=pads_.end()&&e.cbutton.button<SDL_CONTROLLER_BUTTON_MAX){last_gamepad_=true;p->second.buttons[e.cbutton.button]=e.type==SDL_CONTROLLERBUTTONDOWN;evaluate();}}
+    if(e.type==SDL_CONTROLLERAXISMOTION){const auto p=pads_.find(e.caxis.which);if(p!=pads_.end()&&e.caxis.axis<SDL_CONTROLLER_AXIS_MAX){if((e.caxis.axis<SDL_CONTROLLER_AXIS_TRIGGERLEFT?std::abs(int(e.caxis.value)):int(e.caxis.value))>config_.deadzone*32767)last_gamepad_=true;p->second.axes[e.caxis.axis]=e.caxis.value;evaluate();}}
     if(e.type==SDL_CONTROLLERDEVICEREMAPPED){const auto p=pads_.find(e.cdevice.which);if(p!=pads_.end()){refresh(p->second);evaluate(false);}}
 }
-InputFrame InputManager::tick(){for(auto& item:pads_)refresh(item.second);evaluate();InputFrame frame;frame.held=held_;frame.pressed=pending_;pending_.fill(false);
+InputFrame InputManager::tick(){for(auto& item:pads_)refresh(item.second);evaluate();InputFrame frame;frame.gamepad_input=last_gamepad_;frame.held=held_;frame.pressed=pending_;pending_.fill(false);
     for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}return frame;}
-void GameplayInput::menu_input(MenuInput key){if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;}if(!events_)return;if(dialog_.active()&&!menu_.active&&(key==MenuInput::Confirm||key==MenuInput::Cancel)){events_->confirm_dialog();return;}
-    if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4))return;
+void GameplayInput::menu_input(MenuInput key){if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;}if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;if(dialog_.active()&&!menu_.active&&(key==MenuInput::Confirm||key==MenuInput::Cancel)){events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;return;}
+    // The original hint ends before its task releases cinematic control. Keep
+    // one inventory request across that short handover, never across a video.
+    if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4)){if(inventory_grace_&&!dialog_.active())inventory_pending_=true;return;}
     if(menu_.active||key==MenuInput::Open){menu_.input(key,inventory_);events_->menu_open=menu_.active;if(menu_.use_item){events_->use(menu_.use_item);menu_.use_item=0;}return;}
+    if(key==MenuInput::Confirm&&(events_->flags[5][0]&4)&&(events_->flags[10][0]&0x40)){events_->skip_cinematic();return;}
     if(key==MenuInput::Confirm&&interact)interact();
 }
-bool GameplayInput::apply(const InputFrame& f){if(transition_active&&transition_active()){if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition();return false;}const bool cancel_context=menu_.active||dialog_.active();if(f.hit(Action::Cancel)&&cancel_context)menu_input(MenuInput::Cancel);else if(f.hit(Action::Quit))return true;
+bool GameplayInput::apply(const InputFrame& f){if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
+    if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
+    if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition();return false;}if(video_active&&video_active()){
+        inventory_pending_=false;inventory_grace_=0;
+        if(f.hit(Action::Confirm)||f.hit(Action::Skip)||f.hit(Action::Cancel)){if(skip_video)skip_video();return false;}
+        return f.hit(Action::Quit);
+    }const bool cancel_context=menu_.active||dialog_.active();if(f.hit(Action::Cancel)&&cancel_context)menu_input(MenuInput::Cancel);else if(f.hit(Action::Quit))return true;
     if(f.hit(Action::Inventory))menu_input(MenuInput::Open);
     if(f.hit(Action::Confirm))menu_input(MenuInput::Confirm);
     if(transition_active&&transition_active())return false;

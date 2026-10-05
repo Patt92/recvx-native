@@ -23,7 +23,8 @@ network access; subsequent builds can use the cached dependencies.
 ```
 
 `tools/build_native.py` configures, builds and runs unit tests on the host. When
-`data/native-data.version` exists, it also runs the real-data opening regression.
+`data/native-data.version` exists, it also runs the real-data opening, controller, main-menu/video/lighter and door
+regressions.
 Windows cross-builds report that tests must run separately on Windows or Wine.
 `--no-test` explicitly skips host tests. `--data <path>` selects another complete
 cooked tree. `--output <new-directory>` changes the package destination; package
@@ -114,3 +115,7 @@ inspection controls. Diagnostic teleports are not evidence of authentic event
 progression. `--screenshot <new.bmp>` and `--state <new.json>` write review artifacts.
 Output files are never overwritten. CI builds host binaries and runs synthetic
 unit tests without private disc assets; local real-data regressions run separately.
+
+Normal launches show the main menu before loading the first room or playing the
+intro. `--in-game` explicitly bypasses it for diagnostics; `--preview` retains the
+room inspector. Input replays start with `0 new_game`.
