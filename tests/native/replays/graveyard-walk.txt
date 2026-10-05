@@ -1,0 +1,34 @@
+# Original post-stairs spawn; tank movement and wall collision, no teleport.
+# Confirm skips the active original cemetery film; continued OK acknowledges dialogue.
+0 keys none
+60 keys forward
+126 keys right
+145 keys forward right
+146 keys forward
+187 keys right
+207 keys forward
+1000 keys none
+1100 confirm
+1200 confirm
+1300 confirm
+1400 confirm
+1500 confirm
+1600 confirm
+1700 confirm
+1800 confirm
+1900 confirm
+2000 confirm
+2100 confirm
+2200 confirm
+2300 confirm
+2400 confirm
+2500 confirm
+2600 confirm
+2700 confirm
+2800 confirm
+2900 confirm
+3000 confirm
+3100 confirm
+3200 confirm
+3300 confirm
+3400 confirm

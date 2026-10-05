@@ -15,6 +15,38 @@ def block(text, start):
     return end
 
 
+def status_pulse(root, sub):
+    """Original StatusMain condition monitor: PulseMain and its animation/draw routines.
+
+    njDrawTextureH is captured as quads for the host renderer. DrawPoly2D only
+    paints the black panel behind the strips, which the host sprite layer owns.
+    """
+    header = (root / 'include/ps2/veronica/prog/sub1.h').read_text()
+    start = header.index('typedef struct PULSE_WORK')
+    end = header.index('} PULSE_WORK;', start) + len('} PULSE_WORK;')
+    m = re.search(r'^float cen_pos\[12\]\[6\]\s*=\s*\{', sub, re.M)
+    out = ['// Generated from original sub1.c (PulseInit..Pulse00); do not edit.\n',
+           'namespace pulse {\nstruct NJS_POINT2 {float x,y;};\nunion NJS_COLOR {std::uint32_t color;struct {std::int16_t u,v;} tex;};\n',
+           header[start:end] + '\n',
+           'struct S_WORK {unsigned hp;unsigned statusflg;};\n',
+           'struct NJS_TEXTUREH_VTX {float x,y,z,u,v;std::uint32_t bcol,ocol;};\n',
+           'struct PulsePart {int anim;};\n',
+           'static thread_local S_WORK swork;\nstatic thread_local PULSE_WORK pulsework;\nstatic thread_local PulsePart parts_10b[11];\n',
+           'static thread_local std::vector<std::array<NJS_TEXTUREH_VTX,4>>* captured=nullptr;\n',
+           'static void njDrawTextureH(NJS_TEXTUREH_VTX* polygon,int count,int,int){if(captured&&count==4)captured->push_back({polygon[0],polygon[1],polygon[2],polygon[3]});}\n',
+           'static void DrawPoly2D(NJS_POINT2*,NJS_COLOR*,NJS_COLOR*,float,unsigned,int){}\n',
+           'static thread_local ' + sub[m.start():block(sub, m.start())] + ';\n',
+           'void PulseInit();void PulseMain();void PulseAnim();void PulseFadeAnim();\n',
+           'void PulseHealAnim(NJS_POINT2* pos,NJS_COLOR* texuv);void PulsePoisonHealAnim(NJS_POINT2* pos,NJS_COLOR* texuv);void Pulse00(NJS_POINT2* pos,NJS_COLOR* texuv);\n']
+    for name in ('PulseInit', 'PulseMain', 'PulseAnim', 'PulseFadeAnim', 'PulseHealAnim', 'PulsePoisonHealAnim', 'Pulse00'):
+        m = re.search(r'^void ' + name + r'\([^)]*\)[^\n]*\n\{', sub, re.M)
+        routine = sub[m.start():block(sub, m.start())]
+        routine = routine.replace('PulseAnim(st);', 'PulseAnim();')  # K&R-style call in PulseMain
+        out.append(routine + '\n')
+    out.append('}\n')
+    return ''.join(out)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('root', type=Path)
@@ -28,15 +60,10 @@ def main():
     message = (a.root / 'src/ps2/veronica/prog/message.c').read_text()
     m = re.search(r'const unsigned char FontSz\[126\]\s*=\s*\{', message)
     ui.append(message[m.start():block(message, m.start())] + ';\n')
-    # Keep the original pulse timing and fade state machine in the host build.
-    header = (a.root / 'include/ps2/veronica/prog/sub1.h').read_text()
-    start = header.index('typedef struct PULSE_WORK')
-    end = header.index('} PULSE_WORK;', start) + len('} PULSE_WORK;')
-    ui.append('namespace pulse {\nstruct NJS_POINT2 {float x,y;};\nunion NJS_COLOR {std::uint32_t color;struct {std::int16_t u,v;} tex;};\n' + header[start:end] + '\nstruct S_WORK {unsigned hp;};\nstatic thread_local S_WORK swork;\nstatic thread_local PULSE_WORK pulsework;\nvoid PulseFadeAnim();\n')
-    for name in ('PulseInit', 'PulseAnim', 'PulseFadeAnim'):
-        m = re.search(r'^void ' + name + r'\(\)\s*\n\{', sub, re.M)
-        ui.append(sub[m.start():block(sub, m.start())] + '\n')
-    ui.append('}\n')
+    (a.output / 'status_pulse.inc').write_text(status_pulse(a.root, sub))
+    adx = (a.root / 'src/ps2/veronica/prog/adxwrap.c').read_text()
+    m = re.search(r'^short AdxVolTbl\[128\]\s*=\s*\{', adx, re.M)
+    (a.output / 'adx_tables.inc').write_text('// Generated from original adxwrap.c.\n' + adx[m.start():block(adx, m.start())] + ';\n')
     (a.output / 'ui_tables.inc').write_text(''.join(ui))
     routines = ['// Generated from original Combi_00 through Combi_05 in sub1.c.\n']
     for i in range(6):

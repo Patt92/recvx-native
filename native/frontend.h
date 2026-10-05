@@ -1,5 +1,6 @@
 #pragma once
 #include "input.h"
+#include "third_person.h"
 namespace recvx {
 enum class FrontendCommand {None,NewGame,Quit};
 class Frontend {
@@ -17,6 +18,8 @@ public:
     void draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers);
     std::function<void(const InputConfig&)> changed;
     std::function<void(unsigned)> sound;
+    ThirdPersonCamera* third_person=nullptr; // optional camera mod row in the settings screen
+    static constexpr unsigned third_person_row=action_count+3;
 private:
     enum class Screen {Main,Controls,Hidden};
     Screen screen_=Screen::Main;

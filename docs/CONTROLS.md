@@ -150,3 +150,13 @@ Confirm interacts/picks up when Aim is released. It stays a menu/dialogue/door
 confirmation while those contexts own input. Aim/Attack are separately rebindable
 in Settings; legacy controls.ini files gain these defaults without changing old
 bindings. Release Aim and Attack after leaving a blocked context before attacking.
+
+## 3rd-person camera mod
+
+Optional host mod, off by default. Toggle it in the main menu under the
+settings screen (`3rd-Person-Kamera (Mod)`, left/right or OK). The choice is
+saved to `third_person.ini` beside `controls.ini`; `--third-person` enables it
+for one run without saving. The over-the-shoulder camera only replaces the
+fixed room camera while the player has free control; event cameras, FMVs,
+cinematics and door transitions keep the original view. Movement keeps the
+original tank controls.

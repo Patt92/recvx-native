@@ -31,17 +31,18 @@ def main():
         assert not title['events'] and not title['audio_played'] and not title['movie_active']
         settings = run('settings', 120, '0 down\n1 confirm\n')
         assert settings['title_active'] and settings['settings_active'] and not settings['events']
-        film = run('film', 600, '0 new_game\n')
+        film = run('film', 1500, '0 new_game\n')
         assert not film['title_active'] and film['movie_active'] and film['movie_frame'] > 0
+        assert 'ADV/0003' in film['audio_played'], 'original title announcement missing'
         # Hint completion owns inventory opening; held movement must never escape it.
-        hint = run('hint-position', 650, '0 new_game\n500 confirm\n')
-        automatic = run('automatic-inventory', 750, '0 new_game\n500 confirm\n650 confirm\n651 keys forward\n')
+        hint = run('hint-position', 1450, '0 new_game\n1300 confirm\n')
+        automatic = run('automatic-inventory', 1600, '0 new_game\n1300 confirm\n1500 confirm\n1501 keys forward\n')
         assert automatic['inventory_open'] and automatic['weapon'] == 0
         assert automatic['actor'] == hint['actor'] and not automatic['blocked_commands']
-        assert 'COMMON/0009' in automatic['audio_played']
+        assert automatic['audio_played'][-1]=='COMMON/0003', 'automatic inventory uses wrong opening sound'
         assert not any(sound.startswith('MULTSPQ1/') for sound in automatic['audio_played']), 'inventory plays walking sounds'
         # Confirm stops an already running movie, followed by original lighter equipment.
-        lighter = run('lighter', 4000, '0 new_game\n500 confirm\n650 confirm\n700 confirm\n701 confirm\n')
+        lighter = run('lighter', 4000, '0 new_game\n1300 confirm\n1500 confirm\n1550 confirm\n1551 confirm\n')
         assert not lighter['movie_active'] and not lighter['cinematic'] and not lighter['inventory_open']
         assert lighter['weapon'] == 1 and 0 in lighter['events'] and not lighter['blocked_commands']
         assert 'VOICE1/0016' in lighter['audio_played']

@@ -6,6 +6,9 @@
 #include <cstring>
 #include <stdexcept>
 namespace recvx {
+namespace {
+#include "adx_tables.inc"
+}
 // Sony HD/BD metadata and SPU-ADPCM format references are listed in docs/AUDIO.md.
 PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate){
     if(bytes.empty()||bytes.size()%16||bytes.size()>32*1024*1024||rate<8000||rate>96000)throw std::runtime_error("invalid SPU-ADPCM dimensions");
@@ -52,7 +55,7 @@ bool AudioMixer::play_weapon_sound(unsigned bank,unsigned program){
 }
 void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant){
     if(stage>15||room>255||variant>15)throw std::runtime_error("invalid room sound key");
-    stop(4);stop(5);room_banks_.clear();room_sounds_.clear();
+    stop(4);stop(5);for(unsigned slot=14;slot<audio_voice_count;++slot)stop(slot);for(unsigned slot=8;slot<13;++slot)stop(slot);room_banks_.clear();room_sounds_.clear();
     const auto index=read_asset_file(data_/"files/MULTSPQ1.IDX",4096);BinaryView ids(index);const auto key=stage*1000+room*10+variant;
     unsigned pack=0;bool found=false;for(;pack<index.size()/2;++pack){const auto id=ids.u16(pack*2);if(id==0xffff)break;if(id==key){found=true;break;}}
     if(!found)return;
@@ -65,10 +68,33 @@ void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant)
     if(!terminated)throw std::runtime_error("unterminated room sound pack");room_pack_=pack;
 }
 bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot){
-    if(slot!=4&&slot!=5)throw std::runtime_error("invalid room effect channel");
+    if(slot<3||slot>=slots_.size())throw std::runtime_error("invalid room effect channel");
     const auto source=room_banks_.find(bank);if(source==room_banks_.end())return false;
     auto found=room_sounds_.find({bank,program});if(found==room_sounds_.end())found=room_sounds_.emplace(std::make_pair(bank,program),std::make_shared<PcmClip>(decode_system_sound(source->second,program))).first;
     play_pcm(slot,found->second);played.push_back("MULTSPQ1/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
+}
+bool AudioMixer::footstep(unsigned floor,unsigned type,unsigned actor,bool enabled){
+    if(actor>=foot_switch_.size()||type>3||floor>4)return false;
+    static constexpr unsigned pairs[3][2]={{4,5},{14,15},{16,17}};
+    unsigned slot=6;if(type<2){foot_switch_[actor]=!foot_switch_[actor];slot=pairs[actor][foot_switch_[actor]?0:1];}
+    if(!enabled){stop(slot);return true;}
+    return play_room_sound(2,type==2?5:floor,slot);
+}
+void AudioMixer::load_door_sounds(unsigned bank){
+    for(unsigned slot=8;slot<=10;++slot)stop(slot);door_source_.clear();door_sounds_.clear();door_bank_=bank;door_slot_=8;
+    if(data_.empty())return;const auto bytes=read_asset_file(data_/"files/MULTSPQ1.IDX",4096);BinaryView ids(bytes);unsigned pack=0;
+    for(;pack<bytes.size()/2;++pack){if(ids.u16(pack*2)==(0x8000|bank))break;if(ids.u16(pack*2)==0xffff)return;}if(pack==bytes.size()/2)return;
+    auto file=mods_/"audio/MULTSPQ1"/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives/MULTSPQ1"/(asset_number(pack)+".bin");const auto data=read_asset_file(file,32*1024*1024);BinaryView v(data);
+    for(unsigned i=0;i<16;++i){const auto p=i*16,offset=v.u32(p);if(!offset)break;const auto size=v.u32(p+4);v.require(offset,size);if(v.u32(p+8)==1&&v.u32(p+12)==1){door_source_={data.begin()+offset,data.begin()+offset+size};break;}}
+}
+bool AudioMixer::play_door_sound(unsigned program){
+    if(door_source_.empty())return false;
+    // CallDoorSe -> sdMidiPlay has an 8-bit data_num. Door packs supply a
+    // Sony program bank; use its original program/waveform at this trigger.
+    program&=255;BinaryView v(door_source_);const auto hd=v.u32(0),head=hd+v.u32(hd+8),programs=hd+v.u32(head+0x14);
+    if(program>v.u32(programs+12)){unavailable.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return false;}
+    auto found=door_sounds_.find(program);if(found==door_sounds_.end())found=door_sounds_.emplace(program,std::make_shared<PcmClip>(decode_system_sound(door_source_,program))).first;
+    play_pcm(door_slot_,found->second);door_slot_=door_slot_==10?8:door_slot_+1;played.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return true;
 }
 PcmClip decode_adx(const std::vector<std::uint8_t>& b){
     auto need=[&](std::size_t p,std::size_t n){if(p>b.size()||n>b.size()-p)throw std::runtime_error("truncated ADX audio");};
@@ -94,13 +120,13 @@ PcmClip decode_adx(const std::vector<std::uint8_t>& b){
 }
 void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume,bool loop){if(slot>=slots_.size()||!clip||!clip->channels||clip->channels>2||clip->rate<8000||clip->rate>96000||clip->samples.size()%clip->channels||!clip->frames()||!std::isfinite(volume)||volume<0||volume>8)throw std::runtime_error("invalid audio channel/clip");slots_[slot]={std::move(clip),0,volume,1,1,0,loop};}
 void AudioMixer::play(unsigned slot,const std::string& archive,unsigned id,float volume,bool loop,unsigned fade_ticks){
-    if(fade_ticks>600*60)throw std::runtime_error("audio fade too long");
+    if(fade_ticks>600*game_tick_hz)throw std::runtime_error("audio fade too long");
     const auto relative=std::filesystem::path("audio")/archive/(asset_number(id)+".adx");auto file=mods_/relative;
     if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives"/archive/(asset_number(id)+".bin");
     auto clip=std::make_shared<PcmClip>(decode_adx(read_asset_file(file,32*1024*1024)));play_pcm(slot,clip,volume,loop);
-    if(fade_ticks){slots_[slot].gain=0;slots_[slot].fade=fade_ticks*800;}played.push_back(archive+"/"+asset_number(id));
+    if(fade_ticks){slots_[slot].gain=0;slots_[slot].fade=fade_ticks*audio_frames_per_tick;}played.push_back(archive+"/"+asset_number(id));
 }
-void AudioMixer::stop(unsigned slot,unsigned fade_ticks){if(slot>=slots_.size()||fade_ticks>600*60)throw std::runtime_error("invalid audio slot");auto& s=slots_[slot];if(fade_ticks){s.target=0;s.fade=fade_ticks*800;}else s.clip.reset();}
+void AudioMixer::stop(unsigned slot,unsigned fade_ticks){if(slot>=slots_.size()||fade_ticks>600*game_tick_hz)throw std::runtime_error("invalid audio slot");auto& s=slots_[slot];if(fade_ticks){s.target=0;s.fade=fade_ticks*audio_frames_per_tick;}else s.clip.reset();}
 bool AudioMixer::active(unsigned slot)const{return slot<slots_.size()&&bool(slots_[slot].clip);}
 std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)throw std::runtime_error("audio mix too large");std::vector<std::int16_t> out(std::size_t(frames)*2);
     for(unsigned f=0;f<frames;++f){float left=0,right=0;for(auto& channel:slots_){if(!channel.clip)continue;auto& clip=*channel.clip;
@@ -109,5 +135,25 @@ std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)th
         const auto i=std::size_t(channel.position),next=std::min(i+1,clip.frames()-1);const float fraction=float(channel.position-i),gain=channel.volume*channel.gain;
         auto sample=[&](unsigned ch){const float a=clip.samples[i*clip.channels+ch],b=clip.samples[next*clip.channels+ch];return (a+(b-a)*fraction)*gain;};left+=sample(0);right+=sample(clip.channels==1?0:1);channel.position+=double(clip.rate)/48000;
     }out[f*2]=std::int16_t(std::clamp(left,-32768.f,32767.f));out[f*2+1]=std::int16_t(std::clamp(right,-32768.f,32767.f));}return out;
+}
+}
+namespace recvx {
+float AudioMixer::adx_gain(float volume){const int index=std::clamp(int(-volume),0,127);return std::pow(10.f,AdxVolTbl[index]/200.f);}
+unsigned AudioMixer::adx_fade_ticks(int timer){const int count=((timer/100)*30+((timer%100)*6)/10)/2;return unsigned(std::max(count,1));}
+void AudioMixer::fade_gain(unsigned slot,float gain,unsigned ticks){auto& s=slots_.at(slot);if(!s.clip)return;const float target=s.volume>0?gain/s.volume:0;if(!ticks){s.gain=s.target=target;s.fade=0;return;}s.target=target;s.fade=ticks*audio_frames_per_tick;}
+void AudioMixer::play_bgm_ex(int bgm,int fade_in_rate,int volume){
+    // PlayBgmEx2: SetVolumeAdxEx(0,-127,Volume) lifts the limit by 20 below -20.
+    const float limit=volume<-20?float(volume+20):0.f;const unsigned ticks=fade_in_rate+1?adx_fade_ticks(fade_in_rate+1):0;
+    play(0,"BGM1",unsigned(bgm),adx_gain(limit),true,ticks);current_bgm_=bgm;current_bgm_volume_=volume;
+}
+void AudioMixer::request_bgm2(int bgm,int volume){if(current_bgm_!=bgm){current_bgm_=bgm;req_fade_bgm_=8;}else if(current_bgm_volume_!=volume)req_fade_bgm_=2;current_bgm_volume_=volume;}
+void AudioMixer::stop_bgm(int fade_out_rate){stop(0,fade_out_rate?adx_fade_ticks(fade_out_rate):0);current_bgm_=-1;current_bgm_volume_=-127;}
+void AudioMixer::stop_bgm2(){req_fade_bgm_=1;current_bgm_=-1;current_bgm_volume_=-127;}
+// RequestSoundFade(2,0xA3|0x40,400): a pending BGM change fades the current track out.
+void AudioMixer::room_fade_out(){if(req_fade_bgm_&&active(0))stop(0,adx_fade_ticks(400));req_fade_bgm_=0;}
+void AudioMixer::room_fade_in(){
+    if((req_fade_bgm_&8)&&current_bgm_>=0)play_bgm_ex(current_bgm_,120,current_bgm_volume_);
+    else if(req_fade_bgm_&2)fade_gain(0,adx_gain(float(current_bgm_volume_)),42); // RequestAdxFadeFunctionEx(0,-1,vol,42)
+    req_fade_bgm_=0;
 }
 }

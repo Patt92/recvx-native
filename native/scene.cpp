@@ -17,9 +17,14 @@ public:
         view.require(cut_offset,std::size_t(room.counts[0])*0x2a8);
         for(std::size_t i=0;i<room.counts[0];++i) {
             const auto cut=cut_offset+i*0x2a8;
-            if(view.u8(cut)&1) {
-                const auto count=view.u8(cut+3);
-                const auto table=view.u32(cut+4);
+            // CUT_WORK.flg bit 0 is runtime state (bhCamInfoSet). Disabled
+            // groups keep their areas when the original table is present.
+            const bool enabled=view.u8(cut)&1;output.cut_enabled.push_back(enabled);output.cut_tables.push_back(false);
+            const auto count=view.u8(cut+3);const auto table=view.u32(cut+4);
+            bool valid=enabled||(count&&table<data.size()&&std::size_t(count)*32<=data.size()-table);
+            if(valid&&!enabled)for(unsigned j=0;j<count;++j)valid=valid&&view.u8(table+j*32+7)<=4;
+            if(valid) {
+                output.cut_tables.back()=true;
                 view.require(table,std::size_t(count)*32);
                 for(unsigned j=0;j<count;++j) {
                     const auto at=table+j*32;
@@ -81,6 +86,8 @@ private:
         if(output.object_count==0||output.object_count>4096)throw std::runtime_error("invalid model object count");
         if(options && !options->pose.empty() && options->pose.size()!=output.object_count)
             throw std::runtime_error("pose does not match model object count");
+        if(options && !options->evalflags.empty() && options->evalflags.size()!=output.object_count)
+            throw std::runtime_error("flags do not match model object count");
         if(options && !options->world_vertices.empty() && options->world_vertices.size()!=output.object_count)
             throw std::runtime_error("skin does not match model object count");
         if(options && !options->world_normals.empty() && options->world_normals.size()!=output.object_count)
@@ -172,7 +179,7 @@ private:
         if(visited[index])throw std::runtime_error("cyclic or repeated object link");
         visited[index]=true;
         NJS_MATRIX world;njSetMatrix(&world,parent);
-        const auto flags=view.u32(node);
+        const auto flags=options&&!options->evalflags.empty()?options->evalflags.at(index):view.u32(node);
         const auto* pose=options && !options->pose.empty()?&options->pose[index]:nullptr;
         if(pose)njTranslate(&world,pose->position.x,pose->position.y,pose->position.z);
         else if(!(flags&1))njTranslate(&world,view.f32(node+8),view.f32(node+12),view.f32(node+16));
@@ -298,7 +305,7 @@ std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 pos
     // bhCheckCutArea / bhCheckCutAreaInnerTriangle, with its inclusive/exclusive
     // rectangular boundaries and the four diagonal half-rectangle variants.
     for(const auto& cut:scene.cuts) {
-        if(cut.floor!=floor)continue;
+        if(cut.floor!=floor||(cut.camera<scene.cut_enabled.size()&&!scene.cut_enabled[cut.camera]))continue; // CUT_WORK.flg & 1
         const auto x=position.x,z=position.z;
         if(cut.type==0) {
             if(x>=cut.minx&&x<cut.maxx&&z>=cut.minz&&z<cut.maxz)return cut.camera;

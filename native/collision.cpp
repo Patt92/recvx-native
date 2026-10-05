@@ -34,6 +34,26 @@ bool push_wall(const CollisionWall& wall,NJS_POINT3& pos,NJS_POINT3 previous,flo
     const Point vertices[]={{p.x,p.z},{p.x+e.x,p.z},{p.x,p.z+e.z}};return push_polygon(pos,vertices,3,radius);
 }
 }
+float ground_position(const std::vector<CollisionWall>& walls,float room_height,NJS_POINT3 probe){
+    float result=-1000,nearest=10000;
+    for(const auto& w:walls){if(!(w.flags&1))continue;const auto p=w.position,e=w.extent;
+        const float x=probe.x-p.x,z=probe.z-p.z,h=e.y?e.y:room_height;
+        const bool rectangle=x>=0&&x<e.x&&z>=0&&z<e.z;float surface=0;bool inside=false;
+        switch(w.type){
+        case 0:inside=rectangle;surface=p.y+h;break;
+        case 2:inside=std::hypot(x,z)<e.x;surface=p.y+h;break;
+        case 4:inside=e.x&&e.z&&probe.x>=std::min(p.x,p.x+e.x)&&probe.x<std::max(p.x,p.x+e.x)&&probe.z>=std::min(p.z,p.z+e.z)&&probe.z<std::max(p.z,p.z+e.z)&&std::abs((p.z+e.z)-probe.z)>std::abs(e.z*x/e.x);surface=p.y+h;break;
+        case 6:
+            if(!rectangle||probe.y<p.y||!e.x||!e.z)continue;
+            switch(w.id){case 0:surface=p.y+e.y*x/e.x;break;case 1:surface=p.y+e.y-e.y*z/e.z;break;case 2:surface=p.y+e.y*z/e.z;break;case 3:surface=p.y+e.y-e.y*x/e.x;break;default:continue;}
+            inside=true;break;
+        case 7:inside=rectangle;surface=p.y;break;
+        default:continue;
+        }
+        float delta=probe.y-surface;if(w.type==7&&delta<=0&&delta>=-.0001f)delta=0;
+        if(inside&&(delta>=0||w.type==6)&&delta<nearest){nearest=delta;result=surface;}
+    }return result;
+}
 float wall_ray_distance(const std::vector<CollisionWall>& walls,float room_height,NJS_POINT3 origin,NJS_POINT3 direction,float range,int floor){
     float nearest=range;
     for(const auto& w:walls){if(!(w.flags&1)||w.type>5||((w.attributes&1)&&floor!=-32768&&w.floor!=floor))continue;const auto p=w.position,e=w.extent;float lo=0,hi=nearest;

@@ -52,13 +52,19 @@ frame adjustment and cursor bounds expose eight normal cells at new game and
 ten only after the original GM side-pack flag is set. Item selection,
 equip/unequip, two-slot items, quantity/ammunition, health, original C combination
 recipes and item-model examination are implemented. Examination rotates original
-models. The full original menu transition system, map/files, box storage and
-save/load UI remain pending. PulseInit/PulseAnim/PulseFadeAnim are generated directly from original sub1.c
-and render the animated condition pulse. Original command-frame sprites, their
+models. A basic file viewer uses the original 24 files, 167 pages and wallpaper resources.
+The full original menu transitions, map/save UI, book/tag animations and original
+item-box stacking/animations remain pending. The condition monitor runs the
+original sub1.c PulseInit, PulseMain, PulseAnim, PulseFadeAnim, PulseHealAnim,
+PulsePoisonHealAnim and Pulse00 (`native/status_pulse.*`): PulseInit on every
+opening, one PulseMain per 30-Hz tick in `StatusMenu::tick`, Use_00's heal and
+poison-cure sweeps after herbs/spray, and the original input lock while that
+sweep runs. Captured njDrawTextureH quads are drawn as texel*base+offset.
+Menu sounds follow the original CallSystemSe numbers: open/decide 3,
+cancel/close 0, cursor 2 only on actual movement, invalid combination 1. Original command-frame sprites, their
 settled position and item-dependent height replace the custom rectangle. Holding
 left/right rotates examined models every simulation tick instead of waiting for
-menu-key repetition. Combat-driven damage and the full heal/poison transition
-animations remain pending.
+menu-key repetition. Combat-driven damage display remains pending.
 
 ### Combining and opening items
 
@@ -90,12 +96,23 @@ The original UseItemCheck, ItemLost and flag scripts handle successful use and
 consumption. Charged extinguisher use retains the empty extinguisher; the original
 Antarctica rejection checks its remaining charge. bhFlrAtariSet2 (0x7c) now updates those trigger parameters natively.
 
-The PS2 case packets have three nodes (dummy root, body, lid), rather than the
-longer catch hierarchy referenced by MdlAction00/01; the native action applies
-the original lid angular increment to the PS2 hinge. The original zoom-out/in
-transition, separate catch geometry, item-dependent hidden contents, file
-registration and complex multi-item extraction remain pending. Generic table
-questions do not certify every puzzle or room as playable.
+The generator compiles ItemModelCheck, MessageWait, MdlAction00–02, hide masks,
+FlagErase, name changes and both 32-tick zoom phases from the original source.
+Case IDs select composite content models 19/35/30 with their original five/six/four
+node hierarchies. All eleven table-driven transformations are exercised through
+the native menu. Silver Dragonfly 119 → 118 removes its wings, retains model 119
+and hides the original wing nodes. Security File 106 → 105 is a separate action,
+starting directly without a fabricated confirmation. Gold Dragonfly body IDs
+79/122/123/124 combine with Wing Object 120 through Combi_05 to reach 66.
+
+NameChangeSet preserves the examination bit for item 72, the empty extinguisher
+name and manual name. Herb mixing asks original question 155. Shotgun Single/Burst
+changes original event flag 74; shotgun combat itself is still pending. TG-01
+registers file 2 in the original acquired-file word 383.
+
+[INVENTORY-COVERAGE.md](INVENTORY-COVERAGE.md) enumerates all 156 item IDs,
+117 directed recipes, 1,872 differential combination cases and remaining limits.
+This coverage does not certify all puzzles or game progression.
 
 ## Movement and collision
 
@@ -103,15 +120,18 @@ I/K or W/S walks forward/back, J/L or A/D turns and Shift runs. A mapped control
 uses its left stick/D-pad, with B/right shoulder/right trigger to run. Bindings,
 deadzone and menu repetition are configurable in controls.ini; see [CONTROLS.md](CONTROLS.md).
 Body clips 0/4/16 and original
-translation speed curves 0/3/6 drive locomotion at 60 Hz. Motion is inhibited
+translation speed curves 0/3/6 drive locomotion at 30 Hz. Motion is inhibited
 while a menu/dialog/cinematic or script owns Claire. Backward movement uses the
 original backstep clip from key 25 and the signed backward curve, without turning
 the actor around. ATR wall types 0..5 use original box/cylinder/triangle geometry,
 script enable flags, vertical extents and floor-specific attributes. Height zero
 inherits the original room height. Claire's 3.5 radius/16.5 height, rounded box
 corners and wall sliding are applied with bounded substeps to prevent tunneling.
-Full floor/slope traversal (types 6/7), stairs, ledges and the original
-physical/player state machine remain pending.
+Ground queries now include type-6 ramps and type-7 floor surfaces, including
+negative floor thickness, signed triangular bounds and stacked floors. Native
+movement probes near the hip and settles the post-stairs spawn onto y=0, allowing
+zero-height event areas to match. Full original gravity, ramp contact/wall
+response, ledges and the physical/player state machine remain pending.
 Room cameras follow original cut areas after scripted repositioning.
 
 ## Events, dialogue and sound
@@ -128,8 +148,11 @@ BGM1 and VOICE1 ADX playback is native. Film sound is native original stereo PCM
 System-bank menu, inventory, choice and script sounds play natively. Completing
 a dialogue also stops its active voice so its original playback wait can finish.
 Healthy walking/running/backstep contacts play the original room bank-2 sounds,
-selected by ankle position and ATR floor material. Weapon/environment MIDI routing
-and the full EasySE/MULTSPQ system remain pending. See AUDIO.md for formats and limits.
+selected by ankle position and ATR floor material. Event SeOn/SeOff now dispatch the original bank-2 programs on separate event
+voices; UI, feet, weapon and film PCM channels remain independent. Repeated
+queries of an unchanged contact frame do not emit another step. Original pitch,
+envelopes, environmental MIDI and the full EasySE/MULTSPQ system remain pending;
+these checks do not establish the reported running-audio timing on hardware. See AUDIO.md for formats and limits.
 
 Known commands without a real native world binding are recorded in the pending
 trace and advanced; they are not claimed as implemented effects. The opening
@@ -142,13 +165,30 @@ without truncating the text. Yes acquires original RDT item IDs and quantities;
 No or a full inventory preserves the item. Original ItmCk/ItmSetCk commit global
 pickup flags, hide the model and prevent reappearance after room reload. The
 first-room knife and handgun ammunition are checked with original resources.
-The automatic bend/pickup animation and the full original pickup status layout
-remain pending.
+The shared input adapter opens a modal status menu with the found item's original
+model and question. The item remains visible through the acquisition/full-capacity
+message, and acknowledgement returns control to the room. Menu messages use
+original mes_spos mode 1 (44,342), replacing the item-name line; room dialogue
+uses mode 0 (68,374). The automatic bend/pickup animation and exact original
+status transitions remain pending.
 
 Shared NPC texture banks follow bhSetEneMdl's cache identity (enemy/model/texture
 version), instead of consuming a new bank for every actor. This fixes the texture
-range crash in RM_0020 after the first stairs. That room renders and runs its
-initial bytecode without blocked commands; fog/effects and enemy AI remain pending.
+range crash in RM_0020 after the first stairs. The shared player animation path now samples room clips during scripted motions.
+Common 24/25/34 select room or built-in actor libraries with the original 16.16
+speed table, start frame, pause and clip wrapping. Enemy emtp libraries are shared
+by identity and decoded on demand. Original FOR countdowns now feed root position
+and angle interpolation. Node interpolation, segmented enemy motions and complete
+actor driver state machines remain pending.
+
+The original cemetery trigger is reached by walking from the actual post-stairs
+spawn through the original walls, and its task group restores player control.
+The Steve scene also reaches its original final position/control state in a
+separate diagnostic trigger test. BGColorSet's six-byte command and delayed colour
+application are bound; CyodanSet's 22-byte particle command is parsed and retained
+as an explicit pending effect. These tests establish task progress, not complete
+cutscene rendering, enemy AI or every campaign event. See
+`tools/verify_events.py` and `tests/native/replays/graveyard-walk.txt`.
 
 Full original actor/enemy AI, camera interpolation, puzzles,
 projectile/special-weapon combat, saving and progression through all rooms are not
@@ -224,7 +264,9 @@ table entry deterministically by room enemy index.
 Weapon effects read the original ARMS sound-bank keys in MULTSPQ1; handgun shot,
 empty/reload sounds and knife swing play on an independent mixer channel. Modal
 inventory/dialogue/video/door/event control cancels combat and requires release
-of held weapon controls. The equipped mesh is omitted while a script owns Claire.
+of held weapon controls. SYSTEM/0020.bin supplies unarmed hands. The selected weapon remains omitted while
+a script owns Claire; the original bare-hand packet can still attach to her body.
+This does not complete the segmented Rodrigo/cinematic-NPC hand models.
 
 Weapon packet overrides: mods/weapons/0022.bin (Claire knife), 0023.bin (handgun).
 Texture replacements: mods/textures/weapons/0022/right/0000.tga or the analogous
@@ -235,3 +277,23 @@ Original floor-item pickup remains the RDT GetItem/Yes-No/ItmCk/ItmSetCk flow,
 including full inventory rollback and persistence across room changes. Real
 keyboard Enter and SDL virtual-controller A now exercise knife/ammo pickup and
 weapon input routing in the same input regression.
+
+## Shared actor and timing integration (2026-10-05)
+
+The PS2 main loop waits for two VSyncs. Native simulation, movies, menu pulse and
+ADX mixing now use the same 30-Hz clock (rounded NTSC), independently of drawing.
+Item pickup/examination initializes dsptbl angles; New Game plays ADV/0003.
+The default window is 1280×960 with integer nearest scaling of the 640×480
+renderer. Original font atlases remain; high-resolution UI rendering is pending.
+
+ActorNodeLayout reconstructs procedural MASK child insertion and original
+flattening. Script link indices and motion channels are mapped to immutable
+skin nodes; Rodrigo's wrists no longer resolve to an ankle. Face/lip morphs
+are still pending. en01's lower 8 and upper 10 channels (MTN+200) share original
+clocks and are composed; InitType supplies initial poses 2/3/13. This fixes
+partial/T-pose animation, not the missing enemy brain/attacks.
+
+Door sound triggers and FootSeCall are bound through shared original-data paths.
+See AUDIO.md for limits. All 205 rooms load after Claude's loader corrections;
+81 rooms still report blocked commands in the 600-tick scan. Explosion/particle
+rendering, including the cemetery helicopter effect, remains incomplete.

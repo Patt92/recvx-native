@@ -68,5 +68,17 @@ int main(){try{
     bad=f.bytes;u32(bad,f.motion+20,65536);rejects([&]{recvx::PlayerAsset asset(bad);},"truncated motion keys accepted");
     bad=f.bytes;u32(bad,f.motion+44,0x7fc00000);rejects([&]{recvx::PlayerAsset asset(bad);},"NaN motion position accepted");
     for(const auto size:{f.model+20,f.motion+40,f.texture+256,f.bytes.size()-1}){bad=f.bytes;bad.resize(size);rejects([&]{recvx::PlayerAsset asset(bad);},"truncated player packet accepted");}
+    // Face initialization inserts children selected by MASK mesh IDs, not by
+    // a room-specific wrist correction. Script indices move; skin indices do not.
+    Bytes face(16+27*52),mask(64,255);u32(face,0,0x804c444d);u16(face,4,16);u16(face,6,27);u32(face,12,0);u32(mask,0,0x4b53414d);
+    for(unsigned n=0;n<27;++n){const auto p=16+n*52;u32(face,p+4,(n==1||(n>=6&&n<=10))?0:0xffffffff);u32(face,p+44,0xffffffff);u32(face,p+48,n==26?0xffffffff:(n+1)*52);}
+    mask[0x35]=4;mask[0x36]=2;mask[0x37]=3;mask[0x38]=5;
+    const auto layout=recvx::decode_actor_node_layout(face,mask);check(layout.script_to_model.size()==31&&layout.motion_to_model.size()==22,"procedural face nodes not reconstructed");
+    check(layout.script_to_model[18]==14&&layout.script_to_model[22]==18&&layout.model_to_script[14]==18,"original wrist indices still refer to legs");
+    check(layout.motion_to_model[6]==11&&layout.motion_to_model.back()==26,"procedural face consumes body motion keys");
+    check(recvx::decode_actor_node_layout(face,{},true).motion_to_model.size()==22,"unmasked cinematic body consumes procedural channels");
+    mask[0x38]=255;check(recvx::decode_actor_node_layout(face,mask).script_to_model.size()==30,"MASK eye selection ignored");
+    recvx::MotionClip lower,upper;lower.frames=upper.frames=2;lower.positions.resize(8);lower.angles.resize(8);upper.positions.resize(10);upper.angles.resize(10);upper.angles[1]={{{0,0,0}},{{0,16384,0}}};
+    const auto joined=recvx::join_motion_segments(lower,upper);check(joined.positions.size()==18&&joined.angles[9][1][1]==16384,"upper-body segment absent or attached at wrong node");upper.frames=3;rejects([&]{recvx::join_motion_segments(lower,upper);},"different segment clocks silently accepted");
     std::cout<<"Native player motion/skin tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

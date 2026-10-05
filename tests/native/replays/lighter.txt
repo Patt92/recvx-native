@@ -1,6 +1,6 @@
 0 new_game
-# Use the original intro-skip branch, acknowledge the original hint, equip the lighter.
-1 skip
-50 confirm
-101 confirm
-102 confirm
+1300 confirm
+1500 confirm
+1550 confirm
+1551 confirm
+# Skip an active film, acknowledge the hint, then equip the lighter.

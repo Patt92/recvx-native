@@ -23,7 +23,7 @@ void CombatController::hit(RoomWorld& world,NJS_POINT3 origin,NJS_POINT3 directi
 bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio){
     const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){
         if(phase_!=Phase::Idle&&motion>=100&&motion<164&&!(world&&(world->player_hidden||world->player_scripted))){motion=42;frame=0;}phase_=Phase::Idle;weapon_=weapon;player_=inventory.player;asset_.reset();
-        if(weapon&&weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);player.install_weapon_motions(asset_->motions);}
+        if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);bare_hands_=weapon?WeaponAsset::load(data_,inventory.player,0,mods_):asset_;}
     }
     const bool supported=weapon_==2||weapon_==3;
     if(blocked||!supported){if(phase_!=Phase::Idle&&motion>=100&&motion<164&&!(world&&(world->player_hidden||world->player_scripted))){motion=42;frame=0;}phase_=Phase::Idle;clock_=0;if(blocked&&(input.aim||input.attack))inhibited_=true;return false;}
@@ -53,5 +53,5 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     if(phase_==Phase::Reload){if(clock_==unsigned(WpnTab[3].act_ct0))audio.play_weapon_sound(0,1);if(clock_==unsigned(WpnTab[3].act_ct1))audio.play_weapon_sound(0,2);}
     ++clock_;if(clock_>=player.motion_frames(motion)){phase_=input.aim?Phase::Aim:Phase::Idle;pose(phase_==Phase::Aim?PlMtnWpn[1]:42);return phase_!=Phase::Idle;}frame=std::int64_t(clock_)*65536;return true;
 }
-void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted)const{if(asset_&&!scripted)asset_->append(scene,bones);}
+void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted)const{if(scripted){if(bare_hands_)bare_hands_->append(scene,bones);}else if(asset_)asset_->append(scene,bones);}
 }

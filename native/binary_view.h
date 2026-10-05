@@ -23,6 +23,14 @@ public:
         if(!std::isfinite(f))throw std::runtime_error("nonfinite asset coordinate");
         return f;
     }
+    // PS2 EE FPU semantics: no NaN/Inf; exponent 255 is an ordinary value just
+    // beyond IEEE range. Use only for original runtime data the game consumes
+    // as-is (e.g. unused light slots), never to accept misparsed structures.
+    float ee_f32(std::size_t p) const {
+        const auto bits=u32(p);
+        if(((bits>>23)&255)==255)return (bits>>31)?-std::numeric_limits<float>::max():std::numeric_limits<float>::max();
+        float f;std::memcpy(&f,&bits,4);return f;
+    }
     std::size_t relative(std::size_t base,std::uint32_t offset,std::size_t required) const {
         require(base,0);if(offset>data_.size()-base)throw std::runtime_error("binary relative offset outside asset: base "+std::to_string(base)+", offset "+std::to_string(offset)+", asset size "+std::to_string(data_.size()));
         const auto p=base+offset;require(p,required);return p;

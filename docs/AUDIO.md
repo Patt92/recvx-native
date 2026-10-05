@@ -4,6 +4,11 @@ The gameplay runtime needs SDL2 and the packaged loose assets. It does not invok
 FFmpeg, open ISO/AFS containers or emulate PS2 sound hardware. Movie conversion
 uses FFmpeg/ffprobe only at build time on already dumped regular PSS files.
 
+Simulation uses one shared 30-Hz clock (`timing.h`, rounded NTSC rate). Each
+48-kHz stereo mix contains 1,600 frames per tick. Movies and fades share this
+clock; presentation does not advance game logic. New Game plays ADV/0003 on
+independent title voice 13 (original adv.c TitleCall).
+
 ## ADX
 
 `native/audio.cpp` independently decodes unencrypted ADX coding type 3, version 3,
@@ -13,10 +18,17 @@ the same floating-point rounding/scaling as the reference decoder. Version 4,
 encrypted ADX and other codecs are rejected rather than guessed.
 
 Original BGM1 and VOICE1 IDs map to `data/archives/<name>/<four-digit-id>.bin`.
-An ADX replacement can be placed at `mods/audio/<name>/<id>.adx`. The eight-slot
+An ADX replacement can be placed at `mods/audio/<name>/<id>.adx`. The native
 mixer emits 48 kHz signed 16-bit stereo: linear resampling, volume, fades, summed
 clipping and whole-clip looping. Original ADX loop points are not yet applied.
-BGM uses slot 0, dialogue slot 1, and movie PCM slot 7. GUI audio is queued to SDL;
+BGM uses slot 0, dialogue slot 1, and movie PCM slot 7. BGM follows the original sdfunc.c control:
+bhBgmOn/bhBgmOnEx start immediately (PlayBgmEx), while bhBgmOn2/bhBgmOn2Ex/
+bhBgmOff2 only request a change (PlayBgm2/StopBgm2) that is applied when the room
+fades in after its init script (Com_ExecRoomFadeIn) or faded out at the next door
+(Com_ExecRoomFadeOut), so music continues across rooms unless a room asks for a
+different track. Volumes use the original AdxVolTbl (0.1 dB steps) with the
+PlayBgmEx limit shift; fade lengths follow RequestAdxFadeFunction2. Disc 2
+archives (BGM2/VOICE2) are not selected yet. GUI audio is queued to SDL;
 headless runs mix deterministic ticks for playback conditions. A missing output
 device is reported and simulation can continue.
 
@@ -51,7 +63,7 @@ The loose MULTSPQ1.IDX table selects the sound pack with the original
 `stage * 1000 + room * 10 + case` key. Sixteen-byte SPQ_HEADER records identify
 type-2 shot banks; their embedded Sony HD/BD wrappers use the same native decoder
 as COMMON.MLT. The runtime caches decoded programs and alternates step voices
-on slots 4/5. Room loading stops those voices and reloads the correct bank.
+on slots 4/5. Room loading stops those voices, actor foot voices 14–17 and the five event voices, then reloads the correct bank.
 A complete replacement pack uses `mods/audio/MULTSPQ1/<four-digit-pack-id>.bin`.
 
 Healthy Claire uses original bank 2, programs 0–4. Original ATR floor sound areas
@@ -61,8 +73,25 @@ sampling avoids decoding geometry for sound contacts. The shared keyboard,
 controller and replay locomotion path emits these contacts only while moving;
 menus, dialogs, cinematics and door transitions block that path.
 
-This implements shot-bank loading and floor footsteps. Type-0/1 MIDI sequences,
-EasySE ambient routing, weapon/action/door sound dispatch, original pitch
+SeOn/SeOff dispatch bank-2 event programs, mapping original SDE SlotDef 7..3 to
+host voices 12..8. These voices are separate from CRI movie PCM on host slot 7,
+UI 2/3, feet 4/5 and weapon 6; event stop cannot stop film audio. Repeated queries
+of the same integer contact frame emit one footstep.
+
+FootSeCall (0x48) resolves the script context's node/floor and uses the original
+Type/Id/Start-Stop operands. Type 0/1 alternates independent actor pairs; 2/3 uses
+action voice 6. Position/pitch variation and full 3D mixing remain pending.
+
+DoorSequence emits the original status-bit sound requests 0–3 from door.c.
+MPAC section 3 selects the sound bank (cell door: 7); MULTSPQ key 0x8000|bank
+loads its type-1 Sony program bank. Original waveforms use rotating voices 8–10.
+The complete door-data check identifies three requests absent from their program
+tables (type14 bank31/2, type81 bank29/1, type82 bank30/1); these are reported in
+runtime audio_unavailable, without a substitute waveform. This is waveform
+program dispatch, not a complete MIDI sequencer or exact PS2 envelope/reverb.
+
+This implements shot-bank loading, event/door program dispatch and floor footsteps.
+Type-0 sequences, EasySE ambient routing, original pitch
 variation, program volume/envelopes, 3D pan and reverb remain pending. No ambient
 sequence is represented as a single sample or replaced with a generated effect.
 
@@ -103,8 +132,8 @@ into or required by the packaged runtime.
 
 ## Limits and tests
 
-World action/weapon sounds and ambient MULTSPQ/EasySE MIDI routing are
-not yet implemented. Volume mapping and procedural light/audio coordination
+Many world action/door sounds and ambient MULTSPQ/EasySE MIDI routes remain
+unimplemented. Knife/handgun and native event shot programs are dispatched. Volume mapping and procedural light/audio coordination
 remain approximate. Voice behavior beyond the opening requires checking against
 the original CRI command paths, including language/stereo archive variants.
 

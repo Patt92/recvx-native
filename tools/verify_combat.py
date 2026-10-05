@@ -15,7 +15,7 @@ def main():
             absolute=str(p.resolve())
             return 'Z:'+absolute.replace('/','\\') if args.emulator else absolute
         prefix=[args.emulator] if args.emulator else []
-        subprocess.run(prefix+[str(args.runtime.resolve()),'--data',path(args.data),'--headless','--replay',path(ROOT/'tests/native/replays/knife-combat.txt'),'--frames','3380','--state',path(state)],check=True,cwd=ROOT)
+        subprocess.run(prefix+[str(args.runtime.resolve()),'--data',path(args.data),'--headless','--replay',path(ROOT/'tests/native/replays/knife-combat.txt'),'--frames','4380','--state',path(state)],check=True,cwd=ROOT)
         saved=json.loads(state.read_text())
         assert saved['weapon']==2 and saved['combat_attacks']>=1 and not saved['combat_shots']
         assert any((item>>16)&255==8 for item in saved['items'])

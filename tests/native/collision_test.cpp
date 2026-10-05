@@ -33,5 +33,12 @@ int main(){try{
     const CollisionWall other{1,1,0,0,0,{-20,0,0},{40,0,.01f}};
     const auto junction=move_walls({wall,other},100,floors,{-5,0,-5},{5,0,5},1);check(junction.x<=-1&&junction.z<=-1,"adjoining corner contacts crossed");
     bool rejected=false;try{move({0,0,0},{std::numeric_limits<float>::quiet_NaN(),0,0});}catch(const std::runtime_error&){rejected=true;}check(rejected,"nonfinite movement accepted");
+    const CollisionWall ground{1,7,0,0,0,{0,0,0},{20,-5,20}};
+    check(ground_position({ground},100,{10,1,10})==0,"negative floor thickness used as surface height");
+    check(ground_position({ground},100,{10,-.00005f,10})==0,"original ground tolerance missing");
+    check(ground_position({ground},100,{20,1,10})==-1000,"ground upper edge not exclusive");
+    for(unsigned id=0;id<4;++id){CollisionWall ramp{1,6,id,0,0,{0,0,0},{20,10,20}};
+        const float expected=id==0||id==2?2.5f:7.5f;check(std::abs(ground_position({ground,ramp},100,{5,1,5})-expected)<.0001f,"original ramp orientation/ascending surface missing");}
+    auto upper=ground;upper.position.y=8;check(ground_position({ground,upper},100,{5,9,5})==8,"nearest stacked floor not selected");
     std::cout<<"Original box/cylinder/diagonal walls, height/floor flags, sliding, corners and swept substeps passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

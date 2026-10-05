@@ -1,4 +1,5 @@
 #include "movie.h"
+#include "timing.h"
 #include "asset_io.h"
 #include "binary_view.h"
 #include <cstring>
@@ -32,11 +33,11 @@ void MoviePlayer::load(std::vector<std::uint8_t> bytes) {
     if(p!=bytes.size())throw std::runtime_error("trailing cooked movie data");
     // Commit only after every packet has passed validation.
     stop();bytes_=std::move(bytes);frames_=std::move(packets);width_=width;height_=height;numerator_=num;denominator_=den;
-    frame_=0;ticks_=0;end_ticks_=std::max((std::uint64_t(count)*den*60+num-1)/num,(std::uint64_t(samples)*60+rate-1)/rate);decoded_=~0u;active_=true;
+    frame_=0;ticks_=0;end_ticks_=std::max((std::uint64_t(count)*den*game_tick_hz+num-1)/num,(std::uint64_t(samples)*game_tick_hz+rate-1)/rate);decoded_=~0u;active_=true;
     if(clip->frames())audio_.play_pcm(7,std::move(clip));
 }
 void MoviePlayer::stop(){active_=false;audio_.stop(7);bytes_.clear();frames_.clear();pixels_.clear();}
-void MoviePlayer::tick(){if(!active_)return;const auto index=(++ticks_*numerator_)/(60ull*denominator_);
+void MoviePlayer::tick(){if(!active_)return;const auto index=(++ticks_*numerator_)/(std::uint64_t(game_tick_hz)*denominator_);
     if(ticks_>=end_ticks_){stop();return;}frame_=unsigned(std::min<std::uint64_t>(index,frames_.size()-1));
 }
 void MoviePlayer::draw(SoftwareRenderer& image){if(!active_)return;

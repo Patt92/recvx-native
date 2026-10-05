@@ -17,6 +17,7 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     BinaryView v(bytes);if(v.u32(0)!=0x4341504d)throw std::runtime_error("door packet requires MPAC");
     std::size_t p=v.relative(4,v.u32(4),4);std::array<std::size_t,4> offsets{},sizes{};
     for(unsigned i=0;i<4;++i){sizes[i]=v.u32(p);offsets[i]=p+4;v.require(offsets[i],sizes[i]);p=offsets[i]+sizes[i];}
+    sound_bank_=v.u32(offsets[2]);sounds_.clear();
     model_=std::move(bytes);model_offset_=offsets[0];texture_offset_=offsets[1];
     parameters_.assign(model_.begin()+offsets[3],model_.begin()+offsets[3]+sizes[3]);BinaryView param(parameters_);
     if(param.u8(0)!='P'||param.u8(1)!='M'||param.u8(2)!='B'||!param.u8(3))throw std::runtime_error("invalid door parameters");
@@ -40,7 +41,10 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     auto scene=decode_model_asset(model_,model_offset_,texture_offset_);apply_texture_files(scene,data,mods,std::filesystem::path("doors")/asset_number(request.type));textures_=std::move(scene.textures);
     request_=request;active_=true;finished_=skipped_=false;ticks_=0;
 }
-void DoorSequence::tick(){if(!active_)return;recvx_door_step(&core_);++ticks_;if(core_.status&0x40){active_=false;finished_=true;}if(ticks_>3600)throw std::runtime_error("original door sequence exceeded tick budget");}
+void DoorSequence::tick(){if(!active_)return;recvx_door_step(&core_);
+    // door.c bhControlDoorDemo: two sound request groups with the same priority.
+    for(unsigned shift:{0u,4u}){const unsigned bits=unsigned(core_.status)>>(16+shift);if(bits&2)sounds_.push_back(1);else if(bits&8)sounds_.push_back(3);else if(bits&4)sounds_.push_back(2);else if(bits&1)sounds_.push_back(0);core_.status&=~int(0xf0000u<<shift);}
+    ++ticks_;if(core_.status&0x40){active_=false;finished_=true;}if(ticks_>3600)throw std::runtime_error("original door sequence exceeded tick budget");}
 void DoorSequence::skip(){if(active_){skipped_=true;active_=false;finished_=true;core_.status|=0x40;}}
 void DoorSequence::draw(SoftwareRenderer& renderer){
     Scene scene;scene.background=0xff000000;SceneCamera camera;camera.position=core_.vew_pos;for(unsigned i=0;i<3;++i)camera.angles[i]=-core_.vew_ang[i];camera.perspective=12743;

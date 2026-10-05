@@ -36,7 +36,7 @@ left = Left, A
 right = Right, D
 skip = Space
 quit = Escape, F10
-wireframe = F2
+wireframe = F3
 aim = R
 attack = Left Ctrl, Return
 
@@ -133,6 +133,7 @@ void InputConfig::save(const std::filesystem::path& path)const{
 
 }
 void InputManager::configure(InputConfig config){config_=std::move(config);pending_.fill(false);age_.fill(0);evaluate(false);}
+void InputManager::suppress_held(){evaluate(false);suppressed_=held_;pending_.fill(false);age_.fill(0);}
 InputManager::InputManager(InputConfig config):config_(std::move(config)){for(int i=0;i<SDL_NumJoysticks();++i)open(i);evaluate(false);}
 InputManager::~InputManager(){for(auto& item:pads_)SDL_GameControllerClose(item.second.handle);}
 void InputManager::refresh(Pad& p){for(unsigned a=0;a<p.axes.size();++a)p.axes[a]=SDL_GameControllerGetAxis(p.handle,SDL_GameControllerAxis(a));for(unsigned b=0;b<p.buttons.size();++b)p.buttons[b]=SDL_GameControllerGetButton(p.handle,SDL_GameControllerButton(b));}
@@ -152,16 +153,20 @@ void InputManager::event(const SDL_Event& e){if(e.type==SDL_CONTROLLERDEVICEADDE
     if(e.type==SDL_CONTROLLERDEVICEREMAPPED){const auto p=pads_.find(e.cdevice.which);if(p!=pads_.end()){refresh(p->second);evaluate(false);}}
 }
 InputFrame InputManager::tick(){for(auto& item:pads_)refresh(item.second);evaluate();InputFrame frame;frame.gamepad_input=last_gamepad_;frame.held=held_;frame.pressed=pending_;pending_.fill(false);
-    for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}return frame;}
-void GameplayInput::menu_input(MenuInput key){if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;}if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;if(dialog_.active()&&!menu_.active){if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(sound)sound(key==MenuInput::Confirm?0:3);if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;}else if(key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Up||key==MenuInput::Down){if(dialog_.choices()){if(sound)sound(2);events_->choose_dialog(key==MenuInput::Left||key==MenuInput::Up?-1:1);}}return;}
+    for(unsigned a=0;a<action_count;++a){if(!held_[a])suppressed_[a]=false;if(suppressed_[a])frame.held[a]=frame.pressed[a]=false;}
+    for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(!suppressed_[a]&&navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}return frame;}
+void GameplayInput::menu_input(MenuInput key){if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;}if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;if(dialog_.active()&&(!menu_.active||menu_.pickup)){if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(sound)sound(key==MenuInput::Confirm?3:0);if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;synchronize();}else if(key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Up||key==MenuInput::Down){if(dialog_.choices()){if(sound)sound(2);events_->choose_dialog(key==MenuInput::Left||key==MenuInput::Up?-1:1);}}return;}
     // The original hint ends before its task releases cinematic control. Keep
     // one inventory request across that short handover, never across a video.
     if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4)){if(inventory_grace_&&!dialog_.active())inventory_pending_=true;return;}
-    if(menu_.active||key==MenuInput::Open){menu_.input(key,inventory_);if(menu_.use_item){unsigned index=0;if(!events_->use(menu_.use_item,&index)){menu_.active=true;if(index)menu_.show_message(index);menu_.feedback_sound=1;}menu_.use_item=0;}events_->menu_open=menu_.active;if(sound)sound(menu_.feedback_sound!=0xffffffff?menu_.feedback_sound:key==MenuInput::Open?9:key==MenuInput::Cancel?3:key==MenuInput::Confirm?0:2);return;}
+    if(menu_.active||key==MenuInput::Open){menu_.input(key,inventory_);if(menu_.use_item){unsigned index=0;if(!events_->use(menu_.use_item,&index)){menu_.active=true;if(index)menu_.show_message(index);menu_.feedback_sound=1;}menu_.use_item=0;}events_->menu_open=menu_.active;if(sound&&menu_.feedback_sound!=0xffffffff)sound(menu_.feedback_sound);return;}
     if(key==MenuInput::Confirm&&(events_->flags[5][0]&4)&&(events_->flags[10][0]&0x40)){events_->skip_cinematic();return;}
-    if(key==MenuInput::Confirm&&interact)interact();
+    if(key==MenuInput::Confirm&&interact){interact();synchronize();}
 }
-void GameplayInput::synchronize(){if(events_&&events_->status_requested&&!dialog_.active()&&!(transition_active&&transition_active())&&!(events_->flags[5][0]&4)&&!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(9);menu_.input(MenuInput::Open,inventory_);}events_->menu_open=menu_.active;}}
+void GameplayInput::synchronize(){
+    if(events_){const auto found=events_->pickup_display();if(found){if(!menu_.pickup){if(sound)sound(3); /* ItemTaskCheck: CallSystemSe(0,3) when the status task starts */menu_.commands=menu_.examining=menu_.combining=menu_.files=false;menu_.message=MessageDialog{};menu_.inspection=ItemInspection{};const auto angle=inspection_default_angles(found);menu_.examine_pitch=angle[0];menu_.examine_yaw=angle[1];menu_.examine_roll=angle[2];}menu_.pickup=found;menu_.active=true;events_->menu_open=true;}
+        else if(menu_.pickup){menu_.pickup=0;menu_.active=false;events_->menu_open=false;}}
+    if(events_&&events_->status_requested&&!dialog_.active()&&!(transition_active&&transition_active())&&!(events_->flags[5][0]&4)&&!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(3);menu_.input(MenuInput::Open,inventory_);}events_->menu_open=menu_.active;}}
 bool GameplayInput::apply(const InputFrame& f){menu_.tick(inventory_);synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
     if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
     if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition();return false;}if(video_active&&video_active()){

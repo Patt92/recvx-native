@@ -14,6 +14,10 @@ Kampf, Speichern und zahlreiche spätere Ereignisse sind noch nicht fertig.
 
 ## Hauptmenü und Einstellungen
 
+Das Standardfenster ist jetzt **1280×960**, mit scharfer ganzzahliger Skalierung.
+Der interne Renderer und die Original-Fontatlanten bleiben 640×480; HD-UI ist
+noch nicht umgesetzt. Der gemeinsame Spieltakt wurde auf originale 30 Hz umgestellt.
+
 Der Start öffnet jetzt das Hauptmenü mit **Neues Spiel**, **Einstellungen** und
 **Beenden**. Das Intro beginnt erst nach Neues Spiel. Eine bereits laufende alte
 Version schließen und über den Starter neu öffnen.
@@ -27,6 +31,24 @@ gespeichert. Die Standardbelegung kann hier wiederhergestellt werden.
 Laufende Videos mit **Enter oder Space**, am Controller **A oder Start/Options**,
 überspringen. Die Anzeige im Video zeigt die aktuell konfigurierten Tasten.
 
+## Debugmenue
+
+**F2** oeffnet das Debugmenue, auch waehrend eines Videos oder Events.
+Spiel, Events, Animationen und Audio pausieren, solange es offen ist.
+Hoch/Runter waehlt eine Funktion, Links/Rechts einen Wert, **Enter/Controller-A**
+wendet ihn an. **F2 oder Escape/Controller-B** schliesst das Menue.
+PageUp/PageDown oder LB/RB springen bei langen Listen um 20 Werte.
+
+Verfuegbar: Charaktermodell, Equip/Waffe, Raum, Spawn, Itemmenge/Items,
+HP, Tasche und Wireframe. Charakterwechsel laedt den aktuellen Raum neu.
+Ein Raumsprung erhaelt Inventar und globale Eventflags.
+
+Der Hotkey steht in `debug.ini` unter `[debug]`, `hotkey = F2`.
+Im macOS-Paket liegt die Datei neben **RECVX Native.app**, im Windows-Paket
+neben **recvx-runtime.exe**. Aendern und neu starten. Die Datei im Projektordner
+ist die Vorlage und wird beim direkten Build-Fallback des Starters verwendet.
+Details und Erweiterungsschnittstelle: [DEBUG_MENU.md](docs/DEBUG_MENU.md).
+
 ## Bedienung
 
 W/S oder I/K: vor/zurück; A/D oder J/L: drehen; Shift: laufen.
@@ -35,7 +57,7 @@ Controller: linker Stick/Steuerkreuz; Y: Inventar; A: bestätigen;
 B: laufen/zurück.
 Messer oder Pistole im Inventar ausrüsten: **R halten + Enter/Left Ctrl** zum
 Angriff; am Controller **RB halten + A**. Ohne Zielen hebt Enter/A Raumitems
-über den Originaldialog auf. Zielen und Angriff sind in Einstellungen änderbar. Space oder Start überspringt freigegebene Zwischensequenzen.
+über die Statusansicht mit originalem Modell und Aufnahmefrage auf. Zielen und Angriff sind in Einstellungen änderbar. Space oder Start überspringt freigegebene Zwischensequenzen.
 
 An einer Tür **Enter oder Controller-A** drücken. Während der Türsequenz
 überspringt ein **erneuter Druck derselben Bestätigungstaste** die Animation
@@ -80,3 +102,17 @@ der Inhalt ersetzt den Koffer auch bei vollem Inventar. Die Aktentasche mit Knop
 D-pad/Stick drehen die 3D-Ansicht horizontal und vertikal; Escape/B bricht ab.
 
 Details und noch offene Spezialfälle stehen in `docs/NATIVE_GAMEPLAY.md`.
+
+## Aktueller Portstand
+
+Die gemeinsame Event-Ausführung verwendet jetzt Raumclips für geskriptete
+Spielerbewegungen, geteilte Gegner-Motionsbibliotheken und den originalen
+FOR-Zähler für Positions-/Winkelinterpolation. Bodenabfragen erfassen auch
+Rampen und flache Bodenflächen. Friedhof- und Steve-Tasks werden auf Rückgabe
+der Steuerung geprüft; vollständige Gegner-KI, NPC-Modellteile und Effekte
+fehlen noch. Das Spiel ist weiterhin kein vollständig spielbarer Port.
+
+Inventarregeln werden aus dem Originalcode gebaut. Alle elf Untersuchungs-
+umwandlungen, einschließlich der silbernen Libelle, sowie 117 gerichtete
+Kombinationen sind geprüft. Details und Grenzen: `INVENTORY-COVERAGE.md` im
+Paket beziehungsweise `docs/INVENTORY-COVERAGE.md` im Projekt.

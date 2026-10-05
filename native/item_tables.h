@@ -12,6 +12,7 @@ extern const unsigned char curedata[10];
 extern const short c_a[14][6];
 extern const unsigned short mestbl[14],itemidtbl[16],getmestbl[16],idsettbl[16];
 extern const unsigned char itemflg[41][8];
+extern const NJS_POINT3 hoseipos[10];
 extern const DSP_WORK dsptbl[160];
 #ifdef __cplusplus
 }

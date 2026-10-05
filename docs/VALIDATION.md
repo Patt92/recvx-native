@@ -1,3 +1,44 @@
+# Current integration validation — 2026-10-05
+
+This section supersedes older snapshots below. Current sources include Claude's
+27 room-loader corrections and Codex's shared timing/audio/actor/inventory work.
+
+- Host, macOS universal arm64, Intel/Rosetta, Windows x64/Wine and ASan/UBSan:
+  18/18 native test groups passed. Seven original-data suites (inventory engine,
+  inventory UI, input, events/assets, combat, 105 door cases and audio) passed
+  on arm64, Intel/Rosetta, Windows/Wine and ASan/UBSan.
+- Runtime frontend/film/hint/lighter/Rodrigo, physical walking door round trips,
+  OK door skip, original knife pickup/equip/attack, debug actions and both
+  cemetery/Steve task groups passed. The cemetery is walked; Steve's trigger is
+  positioned diagnostically. Windows uses Wine, not physical Windows hardware.
+- 205/205 exported rooms load in the 600-tick scan; 81 still report blocked
+  original event commands. This does not establish full game progression.
+- One audio second produces exactly 48,000 stereo frames over 30 engine ticks;
+  film durations and fades use the same clock. This fixes the doubled host rate.
+- Original MASK-derived node mapping and segmented en01 body motion regression
+  tests passed. Render inspection: Rodrigo's hands at his wrists; cemetery
+  zombies have complete body poses; pickup default angles are oblique and the
+  dialog does not overlap the item name.
+- Render evidence: `build/validation/core30-visual/`; complete target logs:
+  `build/validation/core30-full/`; room scan: `/tmp/recvx-core-roomscan.log`.
+
+- Existing macOS universal and Windows x64 v0.5 packages updated. Root and
+  package starters passed with their own loose data; macOS Intel package also
+  started. Mac GUI launch ran 90 presentation frames with default window/UI.
+  macOS app signature passed deep/strict verification. Existing controls/debug/
+  third-person INIs retained. Backups: archived/releases/core30-before-20261005-
+  224356 and 224819. Final launch logs: build/validation/core30-launch-final.
+  source-snapshot.json in each package records the integrated source hashes.
+- A final input regression checks that automatic inventory opening emits SE 3;
+  keyboard/SDL virtual controller paths passed on all targets after that change.
+
+Limits: enemy AI/attacks, full face/lip morphs, original explosion/particle
+rendering (including helicopter), ambient MIDI/sequencer/envelopes/reverb,
+three absent door-program requests, HD UI, item box/map/save/load remain open.
+The display defaults to 1280×960, integer-scaled from 640×480; this is not
+high-resolution native rendering. Physical controller/audio comparison remains
+unverified. Native tests use original data and SDL virtual controllers.
+
 # Local validation of native 0.5
 
 Validated on 2026-10-05. This records checked behavior, not completion of the port.
@@ -133,3 +174,19 @@ python3 tools/verify_combat.py --runtime build/macos-universal/recvx-runtime --d
 The new original-data combat and input checks passed on arm64, Intel/Rosetta,
 ASan/UBSan and Windows x64 under Wine. Full enemy AI and original damage/death
 animations remain unported; corpse rendering is a documented native fallback.
+
+## Debug menu integration (2026-10-05)
+
+Native host, macOS universal and ASan/UBSan builds: 17 CTest groups passed.
+Windows/Wine: 15 CTest groups passed; Wine service output handles prevented the
+CTest run from completing after child processes exited. The remaining scene and
+actor checks passed separately with output redirected to log files.
+
+Debug-specific unit and original-data runtime checks passed on macOS arm64,
+Intel/Rosetta and Windows/Wine; runtime checks also passed with ASan/UBSan.
+Verified: F2/default file, F6 remap, repeat guards, software/bundle configuration
+paths, action registration/errors, input handover, 180 paused ticks, all five
+original character bodies, equipment/items/HP/bag/wireframe and room/spawn changes.
+Both existing package starters passed debug actions using their own packaged
+data and debug.ini; macOS bundle signature verification passed. Existing user
+controls.ini files were preserved. See DEBUG_MENU.md and tools/verify_debug.py.

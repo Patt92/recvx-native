@@ -1,14 +1,14 @@
 0 new_game
+1300 confirm
+1500 confirm
+1550 confirm
+1551 confirm
 # Walk from the original Rodrigo exit to the cell door; no diagnostic teleport.
-# Use the original intro-skip branch, acknowledge the original hint, equip the lighter.
-1 skip
-50 confirm
-101 confirm
-102 confirm
-3200 keys left
-3213 keys forward
-3380 keys none
-3381 confirm
-3700 keys left
-3740 keys none
-3741 confirm
+# Skip an active film, acknowledge the hint, then equip the lighter.
+4200 keys left
+4213 keys forward
+4380 keys none
+4381 confirm
+4700 keys left
+4740 keys none
+4741 confirm

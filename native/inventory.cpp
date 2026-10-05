@@ -58,19 +58,24 @@ bool Inventory::heal(unsigned slot){
     if(slot<1||slot>=12)return false;const auto item=id(slots()[slot]);if(item<20||item>29)return false;
     // TrigerSet uses curedata for herbs/spray. Blue herbs only cure poison.
     const auto cure=curedata[item-20];const auto heal=cure&15;const bool poison_cure=(cure&0xf0)==0x10;
-    if(!heal&&!(poison_cure&&poisoned))return false;
+    if(!heal&&!poison_cure)return false;
+    if(!heal&&infected)return false;
     if(poison_cure)poisoned=false;
     if(heal>=3)hp=max_hp;else hp=std::min(max_hp,hp+int(heal)*50*(game_mode==2?2:1));return consume(slot);
 }
 std::string Inventory::condition()const{return poisoned?"Poison":hp>=120?"Fine":hp>=60?"Caution":hp>=30?"Caution":"Danger";}
+int Inventory::combination_rule(unsigned first,unsigned second)const{
+    if(first<1||second<1||first>=12||second>=12||first==second)return -1;
+    auto effective=[](std::uint32_t v){auto item=id(v);const auto flags=(v>>16)&0x7000;if(item==6)return flags==0x1000?152u:(flags==0x2000?153u:(flags==0x4000?154u:6u));if(item==7&&flags==0x2000)return 155u;return item;};
+    const auto a=effective(slots()[first]),b=effective(slots()[second]);if(!a||!b||a>=156||b>=156||itemdata[b].cmb<0)return -1;
+    unsigned pos=unsigned(itemdata[b].cmb),count=unsigned(combidata[pos++]);bool found=false;
+    for(unsigned i=0;i<count&&pos+2<410;++i,pos+=3)if(unsigned(combidata[pos])==a){found=true;break;}
+    if(!found)return -1;return int(pos);
+}
 bool Inventory::combine(unsigned first,unsigned second,unsigned* out,unsigned* result_slot){
     if(out)*out=0;if(result_slot)*result_slot=0;
     if(first<1||second<1||first>=12||second>=12||first==second)return false;
-    auto effective=[](std::uint32_t v){auto item=id(v);const auto flags=(v>>16)&0x7000;if(item==6)return flags==0x1000?152u:(flags==0x2000?153u:(flags==0x4000?154u:6u));if(item==7&&flags==0x2000)return 155u;return item;};
-    const auto a=effective(slots()[first]),b=effective(slots()[second]);if(!a||!b||a>=156||b>=156||itemdata[b].cmb<0)return false;
-    unsigned pos=unsigned(itemdata[b].cmb),count=unsigned(combidata[pos++]);bool found=false;
-    for(unsigned i=0;i<count&&pos+2<410;++i,pos+=3)if(unsigned(combidata[pos])==a){found=true;break;}
-    if(!found)return false;const auto op=unsigned(combidata[pos+2])&255;
+    const int rule=combination_rule(first,second);if(rule<0)return false;const auto pos=unsigned(rule),op=unsigned(combidata[pos+2])&255;
     auto saved=items;original::swork={nullptr,slots(),first,second,0};original::system={game_mode,0};original::message=0;
     auto* from=&slots()[first];auto* to=&slots()[second];if(op==1||op==4||op==5||op==8||op==11)std::swap(from,to);
     unsigned result=0;switch(op){case 0:case 1:result=original::Combi_00(short(pos),from,to);break;
@@ -78,7 +83,7 @@ bool Inventory::combine(unsigned first,unsigned second,unsigned* out,unsigned* r
     case 3:case 4:result=original::Combi_02(short(pos),from,to);break;
     case 6:case 9:result=original::Combi_03(short(pos),from,to);break;
     case 7:case 8:result=original::Combi_04(short(pos),from,to);break;
-    case 10:case 11:if(quantity(*from)<1||quantity(*from)>4){items=saved;return false;}result=original::Combi_05(short(pos),from,to);break;
+    case 10:case 11:{const auto body=id(*to);const auto available=body==124?1u:body==123?2u:body==122?3u:4u;if(quantity(*from)<1||quantity(*from)>available){items=saved;return false;}result=original::Combi_05(short(pos),from,to);break;}
     default:items=saved;return false;}
     if(out)*out=original::message;
     // Combi_04 can successfully convert part of a stack while returning zero.

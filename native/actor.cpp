@@ -13,6 +13,35 @@ std::vector<std::uint8_t> slice(const std::vector<std::uint8_t>& data,std::size_
     return {data.begin()+begin,data.begin()+begin+size};
 }
 }
+ActorNodeLayout decode_actor_node_layout(const std::vector<std::uint8_t>& model,const std::vector<std::uint8_t>& mask,bool face_actor){
+    BinaryView v(model);const auto count=v.u16(6),base=v.u16(4);const auto nodes=v.relative(base,v.u32(12),count*52);
+    if(!count||count>256)throw std::runtime_error("invalid face skeleton size");
+    auto link=[&](unsigned offset)->int{if(offset==0xffffffff)return -1;const auto p=v.relative(base,offset,52);if(p<nodes||(p-nodes)%52||(p-nodes)/52>=count)throw std::runtime_error("face hierarchy link outside table");return int((p-nodes)/52);};
+    std::vector<unsigned> order,meshes;std::vector<bool> visited(count);
+    std::function<void(int)> walk=[&](int n){while(n>=0){if(visited[n])throw std::runtime_error("cyclic face hierarchy");visited[n]=true;order.push_back(n);if(v.u32(nodes+n*52+4)!=0xffffffff)meshes.push_back(n);walk(link(v.u32(nodes+n*52+44)));n=link(v.u32(nodes+n*52+48));}};walk(0);
+    if(order.size()!=count)throw std::runtime_error("unreachable face node");
+    std::vector<unsigned> inserted(count);if(!mask.empty()){BinaryView m(mask);m.require(0,64);if(m.u32(0)!=0x4b53414d)throw std::runtime_error("invalid face mask header");
+        // _fmCnkSearchObject counts objects with a mesh and skips the newly
+        // inserted children. Tooth, tongue and each valid eye add one child.
+        for(unsigned field=0x35;field<0x40;++field){const auto id=m.u8(field);if(id!=0xff&&id<meshes.size())++inserted[meshes[id]];}}
+    ActorNodeLayout out;out.model_to_script.resize(count);
+    for(const auto n:order){out.model_to_script[n]=out.script_to_model.size();out.script_to_model.push_back(n);for(unsigned i=0;i<inserted[n];++i)out.script_to_model.push_back(n);}
+    // bhInitMask marks owP[6..14] as procedural. SetMtn* skips those
+    // entries without consuming a motion channel. Skin indices remain raw.
+    for(unsigned logical=0;logical<out.script_to_model.size();++logical)if((mask.empty()&&!face_actor)||logical<6||logical>(mask.empty()?10u:14u))out.motion_to_model.push_back(out.script_to_model[logical]);
+    return out;
+}
+std::vector<unsigned> PlayerAsset::motion_nodes(unsigned channels)const{
+    if(channels==node_layout_.motion_to_model.size()&&channels!=bones())return node_layout_.motion_to_model;
+    return {};
+}
+std::vector<BoneMatrix> PlayerAsset::script_nodes(const std::vector<BoneMatrix>& model_nodes)const{
+    std::vector<BoneMatrix> out;out.reserve(node_layout_.script_to_model.size());for(const auto index:node_layout_.script_to_model)out.push_back(model_nodes.at(index));return out;
+}
+MotionClip join_motion_segments(const MotionClip& lower,const MotionClip& upper){
+    if(!lower.frames||lower.frames!=upper.frames||lower.interpolate!=upper.interpolate||lower.positions.size()!=lower.angles.size()||upper.positions.size()!=upper.angles.size())throw std::runtime_error("incompatible segmented motion clocks");
+    auto out=lower;out.positions.insert(out.positions.end(),upper.positions.begin(),upper.positions.end());out.angles.insert(out.angles.end(),upper.angles.begin(),upper.angles.end());return out;
+}
 MotionClip decode_motion_asset(const std::vector<std::uint8_t>& data) {
     BinaryView v(data);
     if(v.u8(0)!='M'||v.u8(1)!='T'||v.u8(2)!='N'||!(v.u8(3)&0xf0))
@@ -49,12 +78,12 @@ PlayerAsset PlayerAsset::load(const std::filesystem::path& root,unsigned archive
     if(!inspect_archive)throw std::runtime_error("missing cooked player asset: "+loose.string());
     return PlayerAsset(AfsArchive(disc_file(root,"SYSTEM.AFS")).read(archive_entry,8*1024*1024));
 }
-PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data) {
+PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data,bool face_actor) {
     // bhReadPlayerData: sized model/skin section, sized motion list, morph block,
     // then per-model PVP bundles with optional 32-byte alignment.
     BinaryView file(data);
     const auto model_end=file.relative(4,file.u32(0),4);
-    std::size_t p=4;std::vector<std::uint8_t> skin_data;
+    std::size_t p=4;std::vector<std::uint8_t> skin_data,mask_data;
     bool terminated=false;
     for(unsigned record=0;record<256 && p<model_end;++record) {
         if(model_end-p<4)throw std::runtime_error("truncated player model record header");
@@ -64,7 +93,8 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data) {
         if(size) {
             if(size<4)throw std::runtime_error("truncated player model magic");
             const auto magic=file.u32(p);
-            if(magic==0x4e494b53 && model_.empty())skin_data=slice(data,p+4,size-4);
+            if(magic==0x4b53414d)mask_data=slice(data,p,size);
+            else if(magic==0x4e494b53 && model_.empty())skin_data=slice(data,p+4,size-4);
             else if((magic&0xffffff)==0x4c444d && model_.empty())model_=slice(data,p,size);
             else if((magic&0xffffff)!=0x4c444d && magic!=0x4e494b53)throw std::runtime_error("unknown player model record");
         }
@@ -87,10 +117,17 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data) {
         bind_pose_.push_back({{mdl.f32(o+8),mdl.f32(o+12),mdl.f32(o+16)}, {mdl.i32(o+20),mdl.i32(o+24),mdl.i32(o+28)}});
         children_.push_back(link(mdl.u32(o+44)));siblings_.push_back(link(mdl.u32(o+48)));
     }
+    node_layout_=decode_actor_node_layout(model_,mask_data,face_actor);
     const auto bind=matrices(bind_pose_,{},0,true);
     if(!skin_data.empty()) {
         BinaryView sk(skin_data);std::size_t at=0;
-        for(std::size_t bone=0;bone<count;++bone) {
+        // npSkinConvMain: one record per object in hierarchy order (child before
+        // sibling); objects with evalflags 0x20000000 consume no record.
+        std::vector<std::size_t> order;std::vector<bool> seen(count);
+        std::function<void(std::int32_t)> walk=[&](std::int32_t node){while(node>=0){if(seen[std::size_t(node)])throw std::runtime_error("cyclic bone hierarchy");seen[std::size_t(node)]=true;
+            if(!(mdl.u32(nodes+std::size_t(node)*52)&0x20000000))order.push_back(std::size_t(node));walk(children_[std::size_t(node)]);node=siblings_[std::size_t(node)];}};
+        walk(0);
+        for(const auto bone:order) {
             const auto flags=sk.u32(at);at+=4;
             if(flags&~3u)throw std::runtime_error("unsupported skin flags");
             if(!flags)continue;
@@ -120,8 +157,9 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data) {
             }
             skin_.push_back(std::move(mesh));
         }
-        if(at+4==skin_data.size() && sk.u32(at)==0xffffffff)at+=4;
-        if(at!=skin_data.size())throw std::runtime_error("skin records do not match skeleton");
+        // npSkinConvSub stops after the last object; room object tables may carry
+        // words after the 0xffffffff terminator, which the original never reads.
+        if(at!=skin_data.size()&&!(at+4<=skin_data.size()&&sk.u32(at)==0xffffffff))throw std::runtime_error("skin records do not match skeleton");
     }
     p=model_end+4;const auto motion_end=file.relative(p,file.u32(model_end),4);terminated=false;
     for(unsigned index=0;index<1024 && p<motion_end;++index) {
@@ -149,6 +187,7 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data) {
     if(texture_size&0x80000000){p=(p+31)&~std::size_t(31);texture_size&=0x7fffffff;}
     file.require(p,texture_size);
     auto textures=slice(data,p,texture_size);
+    if(!texture_size)return; // room actor without textures (texP NULL); players always carry a bundle
     // Decode texture bundle together with the same model parser; geometry is
     // sampled separately below so textures do not get decoded every frame.
     const auto texture_offset=model_.size();
@@ -257,7 +296,10 @@ Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS
         }
     }
     njTranslate(&geometry.transform,position.x,position.y,position.z);njRotateY(&geometry.transform,yaw);
-    return decode_model_asset(model_,0,0,geometry);
+    auto scene=decode_model_asset(model_,0,0,geometry);
+    // bhSetEneMdl leaves texP NULL for models without a texture list.
+    if(textures_.empty())for(auto& triangle:scene.triangles)triangle.textured=false;
+    return scene;
 }
 void append_actor(Scene& stage,const Scene& actor,std::size_t texture_base) {
     if(texture_base>std::numeric_limits<std::uint16_t>::max())throw std::runtime_error("texture offset exceeds renderer range");

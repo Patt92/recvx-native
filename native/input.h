@@ -40,13 +40,14 @@ public:
     void event(const SDL_Event& event);
     InputFrame tick();
     void configure(InputConfig config);
+    void suppress_held();
     std::size_t controllers()const{return pads_.size();}
 private:
     struct Pad {SDL_GameController* handle=nullptr;std::array<Sint16,SDL_CONTROLLER_AXIS_MAX> axes{};std::array<Uint8,SDL_CONTROLLER_BUTTON_MAX> buttons{};};
     InputConfig config_;
     std::array<bool,SDL_NUM_SCANCODES> keys_{};
     std::map<SDL_JoystickID,Pad> pads_;
-    std::array<bool,action_count> held_{},pending_{};
+    std::array<bool,action_count> held_{},pending_{},suppressed_{};
     std::array<unsigned,action_count> age_{};
     bool focused_=true,last_gamepad_=false;
     void open(int index);

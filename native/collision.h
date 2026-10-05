@@ -8,6 +8,9 @@ struct CollisionWall {
     unsigned flags,type,id;int floor;unsigned attributes;
     NJS_POINT3 position,extent;
 };
+// bhGetGroundPosition: nearest enabled surface below the probe; ramps may
+// return a surface above it. -1000 is the original no-ground sentinel.
+float ground_position(const std::vector<CollisionWall>& walls,float room_height,NJS_POINT3 probe);
 float wall_ray_distance(const std::vector<CollisionWall>& walls,float room_height,
     NJS_POINT3 origin,NJS_POINT3 direction,float range,int floor=-32768);
 NJS_POINT3 move_walls(const std::vector<CollisionWall>& walls,float room_height,

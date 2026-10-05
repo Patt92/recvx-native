@@ -6,8 +6,9 @@
 #include <functional>
 #include <set>
 namespace recvx {
-struct EventCommand {unsigned opcode=0,task=0,event=0;std::size_t offset=0;std::vector<std::uint8_t> bytes;};
+struct EventCommand {unsigned opcode=0,task=0,event=0;std::size_t offset=0;std::vector<std::uint8_t> bytes;unsigned loop_remaining=0,loop_total=0;};
 struct Interaction {unsigned flags=0,type=0,attribute=0;int floor=0;NJS_POINT3 position{},extent{};std::array<unsigned,4> parameters{};};
+struct EventTaskState {unsigned event,level,delay;std::size_t offset;bool blocked;};
 class EventVm {
 public:
     EventVm(const std::vector<std::uint8_t>& room,Inventory& inventory,MessageDialog& dialog);
@@ -23,6 +24,9 @@ public:
     // commands are retained with exact operands and reported by the runtime.
     std::function<bool(const EventCommand&)> binding;
     std::function<bool(unsigned)> enemy_dead;
+    std::function<void(unsigned)> enemy_disable; // bhEneSetCk
+    // bhCamCheck: active event camera (cam.flg & 2) with evc_no/keyf_no.
+    std::function<bool(unsigned&,unsigned&)> event_camera;
     std::function<unsigned(unsigned,unsigned)> animation_frame;
     std::function<bool(unsigned)> audio_active;
     std::function<void(unsigned)> audio_stop;
@@ -40,11 +44,13 @@ public:
     void cancel_dialog();
     void choose_dialog(int direction);
     bool skip_cinematic();
+    unsigned pickup_display()const{return pickup_display_;}
+    std::vector<EventTaskState> task_states()const;
     bool flag(unsigned matrix,unsigned index)const;
     void set_flag(unsigned matrix,unsigned index,unsigned mode);
 private:
     struct Loop {std::size_t condition=0,body=0;unsigned count=0;bool repeat=false;};
-    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;};
+    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;};
     std::vector<std::uint8_t> room_;
     std::uint32_t random_=1; // Deterministic host RNG; PS2 libc sequence is not yet matched.
     std::size_t base_=0,scd0_=0,scd1_=0,messages_=0;
@@ -52,7 +58,7 @@ private:
     std::vector<Interaction> floors_;
     Inventory& inventory_;MessageDialog& dialog_;
     bool opening_hint_=false;
-    unsigned pickup_item_=0,pickup_model_=0;
+    unsigned pickup_item_=0,pickup_model_=0,pickup_display_=0;
     std::vector<unsigned> room_items_;
     void hide_item(unsigned index);
     std::array<Task,16> tasks_{};

@@ -47,6 +47,7 @@ struct Scene {
     std::vector<SceneTexture> textures;
     std::vector<SceneSpawn> spawns;
     std::vector<SceneCutArea> cuts;
+    std::vector<bool> cut_enabled,cut_tables; // per CUT_WORK: flg bit 0, decoded areas
     std::size_t object_count=0;
     std::uint32_t background=0xff101010;
 };
@@ -62,6 +63,7 @@ struct ModelPose {
 struct ModelGeometryOptions {
     NJS_MATRIX transform{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     std::vector<ModelPose> pose;
+    std::vector<std::uint32_t> evalflags;
     std::vector<std::vector<NJS_POINT3>> world_vertices;
     std::vector<std::vector<NJS_VECTOR>> world_normals;
 };

@@ -15,7 +15,7 @@ def main():
     prefix=[args.emulator] if args.emulator else []
     states={}
     with tempfile.TemporaryDirectory(prefix='recvx-door-') as temporary:
-        for name,replay,frames in [('opening','lighter.txt',3200),('natural','door-roundtrip.txt',4100),('skip','door-roundtrip-skip.txt',3500)]:
+        for name,replay,frames in [('opening','lighter.txt',4200),('natural','door-roundtrip.txt',5100),('skip','door-roundtrip-skip.txt',4500)]:
             state=Path(temporary)/(name+'.json')
             subprocess.run(prefix+[str(args.runtime.resolve()),'--data',str(args.data.resolve()),'--headless','--replay',str(ROOT/'tests/native/replays'/replay),'--frames',str(frames),'--state',str(state)],check=True,cwd=ROOT)
             states[name]=json.loads(state.read_text())
@@ -35,6 +35,7 @@ def main():
     for name in ['natural','skip']:
         state=states[name]
         assert state['room']=='RM_0000.RDX' and state['room_changes']==2 and not state['door_active'], (name,'roundtrip',state)
+        if name=='natural':assert any(sound.startswith('DOOR/0007/') for sound in state['audio_played']), (name, 'door audio missing')
         assert state['door_skipped']==(name=='skip'), (name,'skip')
         assert state['items']==opening['items'] and state['weapon']==opening['weapon'] and state['hp']==opening['hp'], (name,'inventory')
         assert not state['cinematic'] and not state['player_hidden'] and not state['player_scripted'] and not state['dialog_open'] and not state['movie_active'], (name,'opening replayed')

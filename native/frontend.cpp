@@ -16,7 +16,7 @@ void Frontend::arm(){capture_=true;status_.clear();neutral_.fill(true);
 }
 FrontendCommand Frontend::input(MenuInput key,bool pad){
     if(!active()||capture_)return FrontendCommand::None;
-    if(sound)sound(key==MenuInput::Cancel?3:key==MenuInput::Confirm?0:2);
+    if(sound)sound(key==MenuInput::Cancel?0:key==MenuInput::Confirm?3:2);
     if(screen_==Screen::Main){
         if(key==MenuInput::Up)selected_=(selected_+2)%3;
         if(key==MenuInput::Down)selected_=(selected_+1)%3;
@@ -24,15 +24,16 @@ FrontendCommand Frontend::input(MenuInput key,bool pad){
         if(key==MenuInput::Cancel)return FrontendCommand::Quit;
     }else{
         if(key==MenuInput::Cancel){screen_=Screen::Main;selected_=1;status_.clear();return FrontendCommand::None;}
-        if(key==MenuInput::Up)selected_=(selected_+action_count+3)%(action_count+4);
-        if(key==MenuInput::Down)selected_=(selected_+1)%(action_count+4);
+        if(key==MenuInput::Up)selected_=(selected_+action_count+4)%(action_count+5);
+        if(key==MenuInput::Down)selected_=(selected_+1)%(action_count+5);
+        if((key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Confirm)&&selected_==third_person_row){if(third_person){third_person->toggle();status_=third_person->status();}return FrontendCommand::None;}
         if(key==MenuInput::Left||key==MenuInput::Right){
             if(selected_==action_count||selected_==action_count+1){auto candidate=config_;const float increment=key==MenuInput::Left?-.05f:.05f;
                 if(selected_==action_count){candidate.deadzone=std::clamp(candidate.deadzone+increment,.05f,.95f);candidate.menu_threshold=std::max(candidate.menu_threshold,candidate.deadzone);}
                 else candidate.menu_threshold=std::clamp(candidate.menu_threshold+increment,candidate.deadzone,.95f);commit(candidate);
             }else gamepad_=!gamepad_;
         }
-        if(key==MenuInput::Confirm){if(selected_<action_count)arm();else if(selected_==action_count+2)commit(InputConfig::defaults());else if(selected_==action_count+3){screen_=Screen::Main;selected_=1;}}
+        if(key==MenuInput::Confirm){if(selected_<action_count)arm();else if(selected_==action_count+2)commit(InputConfig::defaults());else if(selected_==action_count+4){screen_=Screen::Main;selected_=1;}}
     }return FrontendCommand::None;
 }
 FrontendCommand Frontend::apply(const InputFrame& frame){
@@ -69,15 +70,16 @@ void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
     }else{
         panel(image,10,10,620,462);ui.label(image,"Einstellungen",26,18,.9f);ui.label(image,gamepad_?"Controller":"Tastatur",26,52,.65f);
         ui.label(image,std::to_string(controllers)+" Controller verbunden",342,57,.48f);
-        for(unsigned i=0;i<action_count+4;++i){const int y=87+int(i)*16;const auto color=i==selected_?0xffffff70:0xffffffff;
+        for(unsigned i=0;i<action_count+5;++i){const int y=87+int(i)*16;const auto color=i==selected_?0xffffff70:0xffffffff;
             std::string label,value;if(i<action_count){label=labels[i];value=config_.describe(Action(i),gamepad_);}
             else if(i==action_count){label="Stick-Totzone";value=percent(config_.deadzone)+"  links/rechts";}
             else if(i==action_count+1){label="Menue-Stickschwelle";value=percent(config_.menu_threshold)+"  links/rechts";}
-            else if(i==action_count+2)label="Standardbelegung wiederherstellen";else label="Zurueck zum Hauptmenue";
+            else if(i==action_count+2)label="Standardbelegung wiederherstellen";
+            else if(i==third_person_row){label="3rd-Person-Kamera (Mod)";value=third_person?third_person->describe()+"  links/rechts":"Nicht verfuegbar";}else label="Zurueck zum Hauptmenue";
             if(i==selected_)for(int yy=y+5;yy<y+12;++yy)for(int x=20;x<24;++x)image.canvas()[yy*640+x]=0xffffff70;ui.label(image,label,32,y,.48f,color);ui.label(image,value,245,y,.48f,color);
         }
         if(capture_){panel(image,28,188,584,96);ui.label(image,gamepad_?"Controller-Taste druecken oder Stick bewegen":"Neue Tastaturtaste druecken",48,209,.68f);ui.label(image,"Escape: Abbrechen",48,243,.58f);}
-        ui.label(image,status_.empty()?(selected_==action_count||selected_==action_count+1?"Links/Rechts: Wert aendern":"OK: Belegung aendern; Links/Rechts: Tastatur/Controller"):status_,22,436,.45f);
+        ui.label(image,status_.empty()?(selected_==action_count||selected_==action_count+1||selected_==third_person_row?"Links/Rechts: Wert aendern":"OK: Belegung aendern; Links/Rechts: Tastatur/Controller"):status_,22,436,.45f);
         ui.label(image,"Zurueck: "+config_.describe(Action::Cancel,false)+" / "+config_.describe(Action::Cancel,true),22,457,.45f);
     }
 }

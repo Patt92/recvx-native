@@ -10,11 +10,19 @@ struct MotionClip {
     std::vector<std::vector<NJS_POINT3>> positions;
     std::vector<std::vector<std::array<std::int32_t,3>>> angles;
 };
+// fmCnkInitContext inserts procedural face children, then _fmSetObjP flattens
+// the hierarchy. Keep script indices separate from the immutable skin indices.
+struct ActorNodeLayout {std::vector<unsigned> script_to_model,motion_to_model,model_to_script;};
+ActorNodeLayout decode_actor_node_layout(const std::vector<std::uint8_t>& model,const std::vector<std::uint8_t>& mask,bool face_actor=false);
+MotionClip join_motion_segments(const MotionClip& lower,const MotionClip& upper);
 MotionClip decode_motion_asset(const std::vector<std::uint8_t>& data);
 class PlayerAsset {
 public:
-    explicit PlayerAsset(const std::vector<std::uint8_t>& data);
+    explicit PlayerAsset(const std::vector<std::uint8_t>& data,bool face_actor=false);
     static PlayerAsset load(const std::filesystem::path& root,unsigned archive_entry=10,bool inspect_archive=false);
+    std::vector<unsigned> motion_nodes(unsigned channels)const;
+    std::vector<BoneMatrix> script_nodes(const std::vector<BoneMatrix>& model_nodes)const;
+    unsigned script_index(unsigned model_node)const{return node_layout_.model_to_script.at(model_node);}
     std::size_t bones() const {return bind_pose_.size();}
     std::size_t motions() const {return motions_.size();}
     bool has_motion(std::size_t i) const {return i<motions_.size() && motions_[i] && motions_[i]->positions.size()==bones();}
@@ -41,6 +49,7 @@ private:
     std::vector<ModelPose> sampled_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes)const;
     std::vector<std::uint8_t> model_;
     std::vector<ModelPose> bind_pose_;
+    ActorNodeLayout node_layout_;
     std::vector<std::int32_t> children_,siblings_;
     std::vector<SkinMesh> skin_;
     std::vector<std::optional<MotionClip>> motions_;
