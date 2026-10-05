@@ -6,8 +6,8 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 |---|---|
 | macOS universal build | arm64 and x86_64 slices present |
 | Windows build | PE32+ x64 executable and bundled SDL2 |
-| CTest | 13/13 on macOS; 13/13 under Wine |
-| ASan + UBSan | 13/13 and original-data opening/controller/inventory regressions passed |
+| CTest | 14/14 on macOS; 14/14 under Wine |
+| ASan + UBSan | 14/14 and original-data opening/controller/inventory regressions passed |
 | Intel/Rosetta | original-data opening/UI and SDL virtual-controller regressions passed |
 | Disc data manifest | 12,701 files; 6,574,841,350 bytes; both packaged trees verified |
 | Room scene decoder | 205/205, 1,008,630 stage triangles, 470 active camera targets |
@@ -35,7 +35,7 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 
 The original-data opening regression passes with 109 known unbound commands.
 Particle effects, lighter/flame object, full MASK/face/lip processing, camera
-interpolation, ambient/weapon/door SE routing, combat and complete
+interpolation, ambient/door SE routing, full enemy AI/projectile combat and complete
 puzzle/progression/save systems remain pending. A successful room decode does
 not verify that room's gameplay. Wine validation is not a physical Windows test.
 
@@ -112,3 +112,24 @@ build/native/recvx-inventory-tests "$PWD/data" "$PWD/build/validation/inventory"
 ```
 
 The regular build script runs this data regression after CTest.
+
+## Knife, handgun, aim and pickup (2026-10-05)
+
+The combat_weapons_ammunition group checks original constants, target height and
+wall occlusion. The real-data invocation additionally loads original weapon
+models/MTNs, ready/aim/attack/reload clips, sound banks, magazine depletion/empty
+shots, held-fire animation cadence, modal blocking, real RM_0020 zombie damage
+and death, NPC immunity and frame-gated knife hits without ammunition usage.
+The input regression exercises keyboard R/Ctrl/Enter and SDL virtual RB/A,
+original knife/ammo pickups, suppression of pickup while aiming, and migration
+of older customized INI files. verify_combat.py checks the actual runtime through
+the opening, original pickup/equipment, knife attack/sound and return to idle.
+
+```sh
+build/macos-universal/recvx-combat-tests "$PWD/data"
+python3 tools/verify_combat.py --runtime build/macos-universal/recvx-runtime --data "$PWD/data"
+```
+
+The new original-data combat and input checks passed on arm64, Intel/Rosetta,
+ASan/UBSan and Windows x64 under Wine. Full enemy AI and original damage/death
+animations remain unported; corpse rendering is a documented native fallback.

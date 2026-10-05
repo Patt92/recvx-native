@@ -172,6 +172,11 @@ std::vector<PlayerAsset::Matrix> PlayerAsset::matrices(const std::vector<ModelPo
     if(std::find(visited.begin(),visited.end(),false)!=visited.end())throw std::runtime_error("unreachable player bone");
     return result;
 }
+void PlayerAsset::install_weapon_motions(const std::vector<std::optional<MotionClip>>& clips){
+    if(clips.size()>64)throw std::runtime_error("too many weapon motions");
+    for(const auto& clip:clips)if(clip&&clip->positions.size()!=bones())throw std::runtime_error("weapon motion skeleton differs from player");
+    motions_.resize(100+clips.size());std::copy(clips.begin(),clips.end(),motions_.begin()+100);
+}
 unsigned PlayerAsset::motion_frames(std::size_t i) const {
     if(!has_motion(i))throw std::runtime_error("player motion is unavailable");
     return motions_[i]->frames;

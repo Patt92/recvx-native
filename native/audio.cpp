@@ -38,6 +38,18 @@ void AudioMixer::play_system(unsigned program){
         found=system_sounds_.emplace(program,std::make_shared<PcmClip>(decode_system_sound(read_asset_file(file,8*1024*1024),program))).first;}
     play_pcm(effect_slot_,found->second);effect_slot_=effect_slot_==2?3:2;played.push_back("COMMON/"+asset_number(program));
 }
+bool AudioMixer::play_weapon_sound(unsigned bank,unsigned program){
+    if(data_.empty())return false;
+    auto source=weapon_banks_.find(bank);if(source==weapon_banks_.end()){
+        const auto index=read_asset_file(data_/"files/MULTSPQ1.IDX",4096);BinaryView ids(index);unsigned pack=0;bool found=false;
+        for(;pack<index.size()/2;++pack){const auto key=ids.u16(pack*2);if(key==0xffff)break;if(key==(0x4000|bank)){found=true;break;}}if(!found)return false;
+        auto file=mods_/"audio/MULTSPQ1"/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives/MULTSPQ1"/(asset_number(pack)+".bin");const auto bytes=read_asset_file(file,32*1024*1024);BinaryView v(bytes);
+        for(unsigned i=0;i<16;++i){const auto p=i*16,offset=v.u32(p);if(!offset)break;const auto size=v.u32(p+4);v.require(offset,size);if(v.u32(p+8)==2&&v.u32(p+12)==1){source=weapon_banks_.emplace(bank,std::vector<std::uint8_t>(bytes.begin()+offset,bytes.begin()+offset+size)).first;break;}}
+        if(source==weapon_banks_.end())return false;
+    }
+    auto found=weapon_sounds_.find({bank,program});if(found==weapon_sounds_.end())found=weapon_sounds_.emplace(std::make_pair(bank,program),std::make_shared<PcmClip>(decode_system_sound(source->second,program))).first;
+    play_pcm(6,found->second);played.push_back("ARMS/"+asset_number(bank)+"/"+asset_number(program));return true;
+}
 void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant){
     if(stage>15||room>255||variant>15)throw std::runtime_error("invalid room sound key");
     stop(4);stop(5);room_banks_.clear();room_sounds_.clear();

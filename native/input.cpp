@@ -18,7 +18,7 @@
 #include <stdexcept>
 namespace recvx {
 namespace {
-constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","quit","wireframe"};
+constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","quit","wireframe","aim","attack"};
 const char* defaults_text=R"INI(# RECVX controls: edit and restart. SDL scancode names use physical key positions.
 # Multiple alternatives are separated by commas. 'none' disables this device's binding.
 [keyboard]
@@ -37,13 +37,15 @@ right = Right, D
 skip = Space
 quit = Escape, F10
 wireframe = F2
+aim = R
+attack = Left Ctrl, Return
 
 [gamepad]
 forward = axis:lefty-, button:dpup
 back = axis:lefty+, button:dpdown
 turn_left = axis:leftx-, button:dpleft
 turn_right = axis:leftx+, button:dpright
-run = button:b, button:rightshoulder, axis:righttrigger+
+run = button:b, axis:righttrigger+
 inventory = button:y
 confirm = button:a
 cancel = button:b
@@ -54,6 +56,8 @@ right = axis:leftx+, button:dpright
 skip = button:start
 quit = none
 wireframe = none
+aim = button:rightshoulder
+attack = button:a
 
 [settings]
 deadzone = 0.25
@@ -79,7 +83,12 @@ InputConfig parse(std::istream& stream){InputConfig out;std::string section,line
                 else throw std::runtime_error("expected button:name or axis:name+/-");out.bindings[index].push_back(binding);}
             if(value.back()==',')throw std::runtime_error("empty trailing alternative");
         }catch(const std::exception& e){throw std::runtime_error("controls line "+std::to_string(lineno)+": "+e.what());}}
-    for(const auto* device:{"keyboard","gamepad"})for(auto name:names)if(!seen.count(std::string(device)+"/"+name))throw std::runtime_error(std::string("missing controls binding: ")+device+"/"+name);
+    for(const auto* device:{"keyboard","gamepad"})for(auto name:names)if(!seen.count(std::string(device)+"/"+name)){
+        if(std::string(name)=="aim"||std::string(name)=="attack"){
+            const bool pad=std::string(device)=="gamepad";
+            if(std::string(name)=="aim")out.bindings[unsigned(Action::Aim)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER):int(SDL_SCANCODE_R),1});
+            else {out.bindings[unsigned(Action::Attack)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_A):int(SDL_SCANCODE_LCTRL),1});if(!pad)out.bindings[unsigned(Action::Attack)].push_back({InputBinding::Kind::Key,SDL_SCANCODE_RETURN,1});}continue;
+        }throw std::runtime_error(std::string("missing controls binding: ")+device+"/"+name);}
     if(out.menu_threshold<out.deadzone)throw std::runtime_error("menu_threshold must be at least deadzone");return out;
 }
 }
@@ -161,7 +170,7 @@ bool GameplayInput::apply(const InputFrame& f){menu_.tick(inventory_);synchroniz
         return f.hit(Action::Quit);
     }const bool cancel_context=menu_.active||dialog_.active();if(f.hit(Action::Cancel)&&cancel_context)menu_input(MenuInput::Cancel);else if(f.hit(Action::Quit))return true;
     if(f.hit(Action::Inventory))menu_input(MenuInput::Open);
-    if(f.hit(Action::Confirm))menu_input(MenuInput::Confirm);
+    if(f.hit(Action::Confirm)&&(menu_.active||dialog_.active()||!f.down(Action::Aim)||(events_&&(events_->flags[5][0]&4))))menu_input(MenuInput::Confirm);
     if(transition_active&&transition_active())return false;
     if(menu_.active&&menu_.examining&&!menu_.busy()){const int direction=int(f.down(Action::Right))-int(f.down(Action::Left));menu_.examine_yaw+=direction*512;menu_.examine_pitch+=(int(f.down(Action::Up))-int(f.down(Action::Down)))*512;return false;}
     for(auto pair:{std::pair<Action,MenuInput>{Action::Up,MenuInput::Up},{Action::Down,MenuInput::Down},{Action::Left,MenuInput::Left},{Action::Right,MenuInput::Right}})if(f.navigation(pair.first))menu_input(pair.second);

@@ -34,6 +34,19 @@ bool push_wall(const CollisionWall& wall,NJS_POINT3& pos,NJS_POINT3 previous,flo
     const Point vertices[]={{p.x,p.z},{p.x+e.x,p.z},{p.x,p.z+e.z}};return push_polygon(pos,vertices,3,radius);
 }
 }
+float wall_ray_distance(const std::vector<CollisionWall>& walls,float room_height,NJS_POINT3 origin,NJS_POINT3 direction,float range,int floor){
+    float nearest=range;
+    for(const auto& w:walls){if(!(w.flags&1)||w.type>5||((w.attributes&1)&&floor!=-32768&&w.floor!=floor))continue;const auto p=w.position,e=w.extent;float lo=0,hi=nearest;
+        auto half=[&](float value,float slope){if(std::abs(slope)<1e-8f)return value>=0;const float t=-value/slope;if(slope>0)lo=std::max(lo,t);else hi=std::min(hi,t);return lo<=hi;};
+        const float height=e.y==0?room_height:e.y;if(!half(origin.y-p.y,direction.y)||!half(p.y+height-origin.y,-direction.y))continue;
+        if(w.type==2||w.type==3){const float x=origin.x-p.x,z=origin.z-p.z,a=direction.x*direction.x+direction.z*direction.z,b=x*direction.x+z*direction.z,c=x*x+z*z-e.x*e.x;
+            if(a<1e-8f){if(c>0)continue;}else{const float d=b*b-a*c;if(d<0)continue;lo=std::max(lo,(-b-std::sqrt(d))/a);hi=std::min(hi,(-b+std::sqrt(d))/a);}
+        }else{Point points[4]={{p.x,p.z},{p.x+e.x,p.z},{p.x+e.x,p.z+e.z},{p.x,p.z+e.z}};const unsigned n=w.type<=1?4:3;if(n==3){points[2]={p.x,p.z+e.z};}
+            float area=0;for(unsigned i=0;i<n;++i)area+=points[i].x*points[(i+1)%n].z-points[(i+1)%n].x*points[i].z;const float sign=area>=0?1.f:-1.f;bool valid=true;
+            for(unsigned i=0;i<n;++i){const auto a=points[i],b=points[(i+1)%n];if(!half(sign*((b.x-a.x)*(origin.z-a.z)-(b.z-a.z)*(origin.x-a.x)),sign*((b.x-a.x)*direction.z-(b.z-a.z)*direction.x))){valid=false;break;}}if(!valid)continue;
+        }if(lo<=hi&&hi>=0&&lo<=nearest)nearest=std::max(0.f,lo);
+    }return nearest;
+}
 NJS_POINT3 move_walls(const std::vector<CollisionWall>& walls,float room_height,const std::array<float,32>& floors,NJS_POINT3 from,NJS_POINT3 to,float radius,float height){
     for(float n:{from.x,from.y,from.z,to.x,to.y,to.z,radius,height,room_height})if(!std::isfinite(n))throw std::runtime_error("nonfinite collision input");
     if(radius<=0||height<=0||room_height<0)throw std::runtime_error("invalid collision dimensions");

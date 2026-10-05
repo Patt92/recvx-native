@@ -88,3 +88,9 @@ Die ursprüngliche Projektlizenz bleibt in `LICENSE` erhalten. Drittanbieter-Liz
 liegen bei den jeweiligen Abhängigkeiten und werden den Paketen beigelegt.
 
 Nach dem Feuerzeug-Hinweis öffnet OK (Enter/A) das Inventar automatisch. Zwei weitere einzelne OK-Tastendrücke wählen das Feuerzeug und rüsten es aus.
+
+Messer/Pistole: im Inventar ausrüsten, R halten und Enter/Left Ctrl drücken;
+Controller RB + A. Zielen/Angriff sind im Hauptmenü konfigurierbar. Originale
+Modelle, Animationen und Sounds, Munition/Nachladen, erste Zombie-Treffer und
+Raumitem-Pickups sind angebunden. Gegner-KI und Original-Todesanimationen fehlen
+noch; Details und Grenzen stehen in docs/NATIVE_GAMEPLAY.md.

@@ -32,7 +32,10 @@ Laufende Videos mit **Enter oder Space**, am Controller **A oder Start/Options**
 W/S oder I/K: vor/zurück; A/D oder J/L: drehen; Shift: laufen.
 Tab: Inventar; Enter: bestätigen/benutzen; Escape: zurück/beenden.
 Controller: linker Stick/Steuerkreuz; Y: Inventar; A: bestätigen;
-B: laufen/zurück. Space oder Start überspringt freigegebene Zwischensequenzen.
+B: laufen/zurück.
+Messer oder Pistole im Inventar ausrüsten: **R halten + Enter/Left Ctrl** zum
+Angriff; am Controller **RB halten + A**. Ohne Zielen hebt Enter/A Raumitems
+über den Originaldialog auf. Zielen und Angriff sind in Einstellungen änderbar. Space oder Start überspringt freigegebene Zwischensequenzen.
 
 An einer Tür **Enter oder Controller-A** drücken. Während der Türsequenz
 überspringt ein **erneuter Druck derselben Bestätigungstaste** die Animation

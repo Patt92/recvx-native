@@ -7,10 +7,16 @@
 #include <map>
 #include <memory>
 namespace recvx {
-struct WorldEntity {SceneSpawn transform{};std::array<int,3> angles{};bool hidden=false,frozen=false,scripted=false,has_motion=false;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;};
+struct WorldEntity {SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,death_ticks=0;int hp=0;bool dead=false;bool hidden=false,frozen=false,scripted=false,has_motion=false;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;};
 class RoomWorld {
 public:
     RoomWorld(const std::vector<std::uint8_t>& room,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data={},const std::filesystem::path& mods={},const std::string& room_name="RM_0000");
+    struct CombatTarget {unsigned index,identity;NJS_POINT3 position;float radius,height;int hp;};
+    std::vector<CombatTarget> combat_targets()const;
+    void combat_difficulty(unsigned mode);
+    bool damage(unsigned index,int amount);
+    bool enemy_dead(unsigned index)const;
+    float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(walls_,room_height_,origin,direction,range,floor_at(origin));}
     bool bind(const EventCommand& command);
     void set_player_asset(const PlayerAsset* player){player_asset_=player;}
     void tick();

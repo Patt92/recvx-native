@@ -19,6 +19,7 @@ public:
     std::size_t motions() const {return motions_.size();}
     bool has_motion(std::size_t i) const {return i<motions_.size() && motions_[i] && motions_[i]->positions.size()==bones();}
     unsigned motion_frames(std::size_t i) const;
+    void install_weapon_motions(const std::vector<std::optional<MotionClip>>& clips);
     // bhGetTransZ tables: element zero is metadata; speed keys start at one.
     float translation_speed(std::size_t curve,std::int64_t frame_q16) const;
     // Healthy original idle/walk/run/back clips and signed translation curves.

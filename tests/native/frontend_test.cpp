@@ -30,11 +30,11 @@ int main(int argc,char** argv){try{
     SDL_JoystickSetVirtualButton(joystick,SDL_CONTROLLER_BUTTON_X,1);pump();check(devices.tick().hit(Action::Confirm),"new X confirm not live");SDL_JoystickSetVirtualButton(joystick,SDL_CONTROLLER_BUTTON_X,0);pump();devices.tick();
     front.input(MenuInput::Confirm);SDL_JoystickSetVirtualButton(joystick,SDL_CONTROLLER_BUTTON_B,1);pump();tick();
     check(config.describe(Action::Confirm,true)=="B"&&config.describe(Action::Cancel,true)=="X","confirm/cancel conflict does not swap old binding");SDL_JoystickSetVirtualButton(joystick,SDL_CONTROLLER_BUTTON_B,0);pump();tick();
-    for(unsigned i=6;i<15;++i)front.input(MenuInput::Down);front.input(MenuInput::Right);check(config.deadzone>.29f&&InputConfig::read(path).deadzone>.29f,"deadzone adjustment not saved");
+    for(unsigned i=6;i<action_count;++i)front.input(MenuInput::Down);front.input(MenuInput::Right);check(config.deadzone>.29f&&InputConfig::read(path).deadzone>.29f,"deadzone adjustment not saved");
     front.input(MenuInput::Down);front.input(MenuInput::Left);check(config.menu_threshold>=config.deadzone,"threshold below deadzone");
     // Cancel capture must not also exit the settings page.
     for(unsigned i=0;i<4;++i)front.input(MenuInput::Up);front.input(MenuInput::Confirm);press(SDL_SCANCODE_ESCAPE);check(front.settings()&&!front.capturing(),"capture cancel exits settings");
-    for(unsigned i=12;i<17;++i)front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(config.describe(Action::Confirm,false)=="Enter"&&config.describe(Action::Confirm,true)=="A","default restoration failed");
+    for(unsigned i=action_count-3;i<action_count+2;++i)front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(config.describe(Action::Confirm,false)=="Enter"&&config.describe(Action::Confirm,true)=="A","default restoration failed");
     press(SDL_SCANCODE_ESCAPE);check(front.active()&&!front.settings(),"Escape quits instead of returning to main menu");press(SDL_SCANCODE_UP);check(press(SDL_SCANCODE_RETURN)==FrontendCommand::NewGame&&!front.active(),"new game command missing");
     SDL_JoystickClose(joystick);SDL_JoystickDetachVirtual(index);std::filesystem::remove(path);
     // Video routing must work even without the event cinematic-skip flag.

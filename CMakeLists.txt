@@ -9,7 +9,10 @@ add_custom_command(OUTPUT "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/do
 add_custom_command(OUTPUT "${RECVX_TABLES}/ui_tables.inc" "${RECVX_TABLES}/combinations.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_native_tables.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_native_tables.py include/ps2/veronica/prog/sub1.h src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/message.c)
-add_library(recvx_game native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp src/ps2/veronica/prog/item.c "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/ui_tables.inc")
+add_custom_command(OUTPUT "${RECVX_TABLES}/combat_tables.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_combat_tables.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_combat_tables.py tools/generate_native_tables.py src/ps2/veronica/prog/player.c src/ps2/veronica/prog/weapon.c src/ps2/veronica/prog/en01.c)
+add_library(recvx_game native/combat.cpp native/weapon_asset.cpp "${RECVX_TABLES}/combat_tables.inc" native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp src/ps2/veronica/prog/item.c "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/ui_tables.inc")
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}")
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
 target_link_libraries(recvx_game PUBLIC recvx_scene)
@@ -106,6 +109,9 @@ if(BUILD_TESTING)
   add_executable(recvx-audio-tests tests/native/audio_movie_test.cpp)
   target_link_libraries(recvx-audio-tests PRIVATE recvx_game)
   add_test(NAME audio_movie COMMAND recvx-audio-tests)
+  add_executable(recvx-combat-tests tests/native/combat_test.cpp)
+  target_link_libraries(recvx-combat-tests PRIVATE recvx_game)
+  add_test(NAME combat_weapons_ammunition COMMAND recvx-combat-tests)
   add_executable(recvx-game-tests tests/native/game_test.cpp)
   target_link_libraries(recvx-game-tests PRIVATE recvx_game)
   add_test(NAME inventory_events_assets COMMAND recvx-game-tests)

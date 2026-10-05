@@ -73,6 +73,7 @@ int main(int argc,char** argv){try{
     auto door_script=data;const std::vector<std::uint8_t> door_call={0x33,0,6,0,0,1,1,2,0xff,0};std::copy(door_call.begin(),door_call.end(),door_script.begin()+1180);
     MessageDialog scripted_message;EventVm scripted(door_script,bag,scripted_message);scripted.set_flag(4,0,0);scripted.door=door_vm.door;scripted.start(0,0);scripted.tick();
     check(scripted.errors.empty()&&requests==2&&requested.attribute==6&&requested.room==1&&requested.spawn==1&&requested.type==2,"DoorCall operand order incorrect");
+    auto death_script=data;const std::vector<std::uint8_t> die_call={0x0d,2,42,0,0};std::copy(die_call.begin(),die_call.end(),death_script.begin()+1180);MessageDialog death_dialog;EventVm death_vm(death_script,bag,death_dialog);death_vm.enemy_dead=[](unsigned index){return index==2;};death_vm.start(0,0);death_vm.tick();check(death_vm.flag(3,42)&&death_vm.errors.empty(),"original enemy-death flag missing");
     if(argc>1){const auto root=std::filesystem::u8path(argv[1]);auto room=read_asset_file(root/"rooms/RM_0000.RDT",64*1024*1024);auto stage=decode_scene(room);Inventory game;MessageDialog message;
         auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t animation=0;AudioMixer audio(root);RoomWorld world(room,stage,actor,motion,animation,audio,root);MoviePlayer movie(root,{},audio);EventVm real(room,game,message);
         real.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};

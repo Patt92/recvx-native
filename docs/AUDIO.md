@@ -115,3 +115,9 @@ rejection, resampling, mixing/clipping/fades, invalid clip rejection and native
 JPEG/PCM film completion. Real-data game tests assert the Rodrigo voice dispatch
 and event playback conditions. A test passing does not imply all game sound
 systems have been ported.
+
+Weapon effects use RequestArmsSoundBank/CallPlayerWeaponSeEx identities: the
+MULTSPQ1.IDX key is 0x4000 | WpnTab.snd_wpno, shot-pack type 2 bank 1, program
+SeNo & 255. Handgun uses bank 0 programs 5 (shot), 4 (empty), 1/2 (reload at
+original act_ct0/act_ct1); knife uses bank 12 program 20 (original SeNo 276).
+Weapon effects own mixer channel 6, separate from voice, music, UI and footsteps.

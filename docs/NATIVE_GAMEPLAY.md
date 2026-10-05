@@ -151,7 +151,7 @@ range crash in RM_0020 after the first stairs. That room renders and runs its
 initial bytecode without blocked commands; fog/effects and enemy AI remain pending.
 
 Full original actor/enemy AI, camera interpolation, puzzles,
-combat, saving and progression through all rooms are not
+projectile/special-weapon combat, saving and progression through all rooms are not
 complete. All disc data being present does not make those systems playable.
 
 Use `tests/native/replays/lighter.txt` for the authentic equipment flow and
@@ -193,7 +193,45 @@ script state, even without rendering a frame. bhDefModelSet (0x3b) hides/restore
 an individual model node's geometry while keeping its skeleton active.
 
 These bindings cover room prop attachments, not missing hand geometry. Full
-weapon/accessory model libraries, MASK/face/lip processing, special cloth/hair
+accessory model libraries, MASK/face/lip processing, special cloth/hair
 links and object-to-object/enemy links remain pending. The opening regression
 now records 109 supported-length dispatches without native bindings and zero
 blocked commands.
+
+## Native knife and handgun combat
+
+SYSTEM weapon packets supply right/left meshes, PVP textures and body clips
+installed at motion 100. Knife and handgun use original PlMtnWpn ready/aim/attack
+clips, raised/lowered variants, original 9-tick ready handover, turning rate and
+original attack clip duration. Reload uses clip 116 and Combi_00 ammunition rules.
+WpnTab, KnfAtrTab, EneDamNear/Mid/Far and en01_hp_tbl are generated directly from
+the supplied decompiled constants. One handgun round is consumed per shot; an
+infinite-ammunition item flag bypasses consumption. Knife contacts transform the
+original right wrist/forearm nodes only in the original active frame window.
+
+First-room en01 zombies are targetable using original 3.8/18.2 body dimensions.
+Closest targets receive distance-dependent damage; wall volumes stop shots and
+knife segments. The muzzle cannot shoot through a wall between it and Claire.
+NPCs and cinematic actors are excluded. Native HP reaches a latched death state;
+bhDieCk writes the original global death flag for room scripts. A provisional
+30-tick rigid collapse displays the original mesh as a corpse. This is explicitly
+not the original segmented damage/death animation. Enemy AI, attacks against
+Claire, joint-specific damage, blood/muzzle particles, aim assist, personal zombie
+HP modifiers/random initialization, original reactions and other weapon/projectile
+families remain unfinished. Health currently selects an original normal/easy
+table entry deterministically by room enemy index.
+
+Weapon effects read the original ARMS sound-bank keys in MULTSPQ1; handgun shot,
+empty/reload sounds and knife swing play on an independent mixer channel. Modal
+inventory/dialogue/video/door/event control cancels combat and requires release
+of held weapon controls. The equipped mesh is omitted while a script owns Claire.
+
+Weapon packet overrides: mods/weapons/0022.bin (Claire knife), 0023.bin (handgun).
+Texture replacements: mods/textures/weapons/0022/right/0000.tga or the analogous
+0023/right/left path. Existing asset dimension/format validation applies. Packets
+come from loose exported SYSTEM files; runtime never opens the ISO or AFS.
+
+Original floor-item pickup remains the RDT GetItem/Yes-No/ItmCk/ItmSetCk flow,
+including full inventory rollback and persistence across room changes. Real
+keyboard Enter and SDL virtual-controller A now exercise knife/ammo pickup and
+weapon input routing in the same input regression.

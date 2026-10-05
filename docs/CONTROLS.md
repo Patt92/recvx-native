@@ -11,7 +11,9 @@ names. Keyboard and mapped gamepads can be used together without changing modes.
 |---|---|---|
 | Walk forward/back | W/S, I/K or Up/Down | Left stick up/down or D-pad |
 | Turn left/right | A/D, J/L or Left/Right | Left stick left/right or D-pad |
-| Run | Either Shift | Hold B, right shoulder or right trigger |
+| Run | Either Shift | Hold B or right trigger |
+| Aim | Hold R | Hold RB |
+| Attack while aiming | Enter or Left Ctrl | A |
 | Inventory | Tab | Y |
 | Confirm/interact | Enter | A |
 | Cancel menu/dialogue | Escape | B |
@@ -57,7 +59,7 @@ run = Left Shift, Right Shift
 [gamepad]
 confirm = button:x
 forward = axis:lefty-, button:dpup
-run = button:rightshoulder, axis:righttrigger+
+run = button:b, axis:righttrigger+
 
 [settings]
 deadzone = 0.25
@@ -136,3 +138,15 @@ buffered across the brief cinematic handover. Inventory still opens only once
 control is released; videos and door transitions discard this buffer.
 
 Completing the initial lighter hint automatically opens the inventory before locomotion. No Inventory button press is required. Holding left/right while examining an item rotates it continuously at 60 Hz. Dialogue choices use navigation and Confirm/Cancel; confirming a completed voice line stops that line.
+
+## Combat and pickups
+
+Equip Combat Knife or Handgun in the inventory. Hold Aim; left/right turns the
+weapon, up/down selects the original raised/lowered aim clips. Attack repeats
+once per animation while held. Knife attacks use no ammunition. The handgun
+uses its loaded magazine, reloads from pistol ammunition via the original menu
+combination rule when empty, and produces a dry shot if none is available.
+Confirm interacts/picks up when Aim is released. It stays a menu/dialogue/door
+confirmation while those contexts own input. Aim/Attack are separately rebindable
+in Settings; legacy controls.ini files gain these defaults without changing old
+bindings. Release Aim and Attack after leaving a blocked context before attacking.

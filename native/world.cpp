@@ -1,6 +1,7 @@
 #include "world.h"
 #include "binary_view.h"
 #include "room.h"
+#include "weapon_tables.h"
 #include "asset_io.h"
 #include <algorithm>
 #include <cmath>
@@ -46,7 +47,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     const auto ene_count=v.u32(header_+0x88),model_table=v.u32(20),texture_table=v.u32(32);std::size_t model_slot=1,texture_slot=1;std::map<std::tuple<unsigned,unsigned,unsigned,unsigned>,std::size_t> texture_cache;
     auto load=[&](unsigned kind,unsigned index,std::size_t p,bool actor){auto& e=entity(kind,index);e.transform={{v.f32(p+12),v.f32(p+16),v.f32(p+20)},int(v.u16(p+28))};e.angles={int(v.u16(p+24)),int(v.u16(p+28)),int(v.u16(p+26))};
         const auto model=v.u32(model_table+model_slot++*4);std::size_t texture=0;
-        const unsigned identity=v.u16(p+4),variant=actor?v.u8(p+9):0;
+        const unsigned identity=v.u16(p+4),variant=actor?v.u8(p+9):0;e.identity=identity;if(kind==1&&identity==1)e.hp=en01_hp_tbl[0][index%16];
         if(actor){unsigned version=0;bool first=true;for(std::size_t at=model,n=0;n<64;++n){const auto bytes=v.u32(at);at+=4;if(bytes==0xffffffff)break;
             if(bytes&&(v.u32(at)&0xffffff)==0x4c444d){if(v.u32(at+8)!=0xffffffff){const auto key=std::make_tuple(kind,identity,variant,version++);auto it=texture_cache.find(key);if(it==texture_cache.end())it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(first)texture=it->second;}first=false;}at+=bytes;}}
         else {const auto key=std::make_tuple(kind,identity,0u,0u);auto it=texture_cache.find(key);if(it==texture_cache.end()&&v.u32(model+8)!=0xffffffff)it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(it!=texture_cache.end())texture=it->second;}
@@ -62,6 +63,10 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     if(motions)for(unsigned i=0;i<256;++i){const auto n=v.u32(motions);motions+=4;if(n==0xffffffff)break;room_motions_.push_back(n?decode_motion_asset(section(b,motions,n)):MotionClip{});motions+=n;}
     (void)stage;
 }
+std::vector<RoomWorld::CombatTarget> RoomWorld::combat_targets()const{std::vector<CombatTarget> out;for(const auto& pair:entities_){const auto& e=pair.second;if(pair.first.first==1&&e.identity==1&&!e.hidden&&!e.dead&&!e.scripted)out.push_back({pair.first.second,e.identity,e.transform.position,3.8f,18.2f,e.hp});}return out;}
+void RoomWorld::combat_difficulty(unsigned mode){for(auto& pair:entities_)if(pair.first.first==1&&pair.second.identity==1&&!pair.second.dead)pair.second.hp=en01_hp_tbl[mode==2?1:0][pair.first.second%16];}
+bool RoomWorld::damage(unsigned index,int amount){auto it=entities_.find({1,index});if(it==entities_.end()||it->second.identity!=1||it->second.hidden||it->second.dead||amount<=0)return false;auto& e=it->second;e.hp=std::max(0,e.hp-amount);if(!e.hp){e.dead=true;e.frozen=true;}return true;}
+bool RoomWorld::enemy_dead(unsigned index)const{auto it=entities_.find({1,index});return it!=entities_.end()&&it->second.dead;}
 unsigned RoomWorld::floor_sound(NJS_POINT3 position,bool special)const{
     const auto floor=floor_at(position);unsigned sound=0;
     for(const auto& record:floor_sounds_){const auto& a=record.area;if(!(a.flags&1)||a.type!=1||a.floor!=floor||position.x<a.position.x||position.x>a.position.x+a.extent.x||position.z<a.position.z||position.z>a.position.z+a.extent.z)continue;
@@ -118,7 +123,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(cmd==36)return false; // Original root-model translation reset still needs a model-state binding.
     }return false;
 }
-void RoomWorld::tick(){for(auto* table:{&lights_,&event_lights_})for(auto& l:*table)l.clock=(l.clock+(l.speed<<8))&0x7fff;for(auto& pair:entities_){auto& e=pair.second;if(e.has_motion&&!e.frozen)e.frame+=e.step;}if(player_scripted)frame_+=65536;
+void RoomWorld::tick(){for(auto* table:{&lights_,&event_lights_})for(auto& l:*table)l.clock=(l.clock+(l.speed<<8))&0x7fff;for(auto& pair:entities_){auto& e=pair.second;if(e.dead)e.death_ticks=std::min(30u,e.death_ticks+1);if(e.has_motion&&!e.frozen)e.frame+=e.step;}if(player_scripted)frame_+=65536;
     if(fade_step_>0)fade_=std::min(fade_target_,fade_+fade_step_);if(fade_step_<0)fade_=std::max(fade_target_,fade_+fade_step_);
 }
 unsigned RoomWorld::frame(unsigned kind,unsigned index)const{if(!kind)return unsigned(std::max<std::int64_t>(0,frame_));const auto at=entities_.find({kind,index});return at==entities_.end()?0:unsigned(std::max<std::int64_t>(0,at->second.frame));}
@@ -132,6 +137,9 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes)
                 else{const auto p=link_point(e.parent_kind,e.parent_index,e.parent_node,{});njTranslate(&matrix,p.x,p.y,p.z);if(e.parent_kind==0)njRotateY(&matrix,player_.yaw);else{const auto parent_entity=entities_.find({e.parent_kind,e.parent_index});if(parent_entity!=entities_.end())njRotateXYZ(&matrix,parent_entity->second.angles[0],parent_entity->second.angles[1],parent_entity->second.angles[2]);}}
                 njTranslate(&matrix,e.link_offset.x,e.link_offset.y,e.link_offset.z);}
             else njTranslate(&matrix,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&matrix,e.angles[0],e.angles[1],e.angles[2]);for(auto& t:object.triangles)for(auto& vertex:t.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}}
+        // Native fallback corpse until the segmented en01 damage/death MTNs
+        // are mapped. Keep the original mesh; this is not an original death clip.
+        if(e.dead){NJS_MATRIX collapse;njUnitMatrix(&collapse);const auto p=e.transform.position;njTranslate(&collapse,p.x,p.y,p.z);njRotateY(&collapse,e.transform.yaw);njRotateX(&collapse,int(e.death_ticks)*16384/30);njRotateY(&collapse,-e.transform.yaw);njTranslate(&collapse,-p.x,-p.y,-p.z);for(auto& t:object.triangles)for(auto& vertex:t.vertices){njCalcPoint(&collapse,&vertex.position,&vertex.position);njCalcVector(&collapse,&vertex.normal,&vertex.normal);}}
         object.triangles.erase(std::remove_if(object.triangles.begin(),object.triangles.end(),[&](const auto& t){const auto at=e.hidden_nodes.find(t.object);return at!=e.hidden_nodes.end()&&at->second;}),object.triangles.end());
         for(const auto& t:object.triangles)if(t.textured&&t.texture>=object.textures.size())throw std::runtime_error("room entity "+std::to_string(model.kind)+"/"+std::to_string(model.index)+" texture "+std::to_string(t.texture)+" of "+std::to_string(object.textures.size()));
         for(auto& triangle:object.triangles)triangle.light_category=model.kind;

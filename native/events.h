@@ -22,6 +22,7 @@ public:
     // Renderer/world bindings are distinct from opcode parsing. Unbound
     // commands are retained with exact operands and reported by the runtime.
     std::function<bool(const EventCommand&)> binding;
+    std::function<bool(unsigned)> enemy_dead;
     std::function<unsigned(unsigned,unsigned)> animation_frame;
     std::function<bool(unsigned)> audio_active;
     std::function<void(unsigned)> audio_stop;

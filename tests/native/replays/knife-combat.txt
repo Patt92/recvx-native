@@ -1,0 +1,17 @@
+0 new_game
+# Use the original intro-skip branch, acknowledge the original hint, equip the lighter.
+1 skip
+50 confirm
+101 confirm
+102 confirm
+3200 position 19 0 55 0
+3201 confirm
+3210 confirm
+3220 confirm
+3240 inventory
+3241 right
+3242 right
+3243 confirm
+3244 confirm
+3250 keys aim attack
+3290 keys none

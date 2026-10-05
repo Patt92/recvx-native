@@ -59,6 +59,8 @@ def main():
             run(binary_dir / ('recvx-game-tests' + suffix), data)
             run(binary_dir / ('recvx-inventory-tests' + suffix), data)
             run(binary_dir / ('recvx-input-tests' + suffix), data)
+            run(binary_dir / ('recvx-combat-tests' + suffix), data)
+            run(sys.executable, ROOT / 'tools/verify_combat.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
             run(binary_dir / ('recvx-frontend-tests' + suffix), data)
             run(sys.executable, ROOT / 'tools/verify_frontend.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
             run(binary_dir / ('recvx-door-tests' + suffix), data)
