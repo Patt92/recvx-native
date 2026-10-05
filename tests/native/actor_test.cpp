@@ -54,6 +54,13 @@ int main(){try{
     near(second.triangles[0].vertices[1].position.x,20,"full-weight vertex X");near(second.triangles[0].vertices[1].position.y,0,"full-weight vertex Y");
     near(second.triangles[0].vertices[0].normal.x,std::sqrt(.5f),"half-weight normal X");near(second.triangles[0].vertices[0].normal.y,std::sqrt(.5f),"half-weight normal Y");
     near(second.triangles[0].vertices[1].normal.x,0,"full-weight normal X");near(second.triangles[0].vertices[1].normal.y,1,"full-weight normal Y");
+    recvx::ModelNodeOverrides edits;edits[0].position=NJS_POINT3{30,0,0};edits[1].angles=std::array<Angle,3>{0,0,0};
+    const auto edited=player.sample(0,65536,{},0,nullptr,edits);const auto edited_bones=player.pose(0,65536,{},0,edits);
+    near(edited.triangles[0].vertices[0].position.x,34,"model-node overrides do not reach weighted skin");near(edited.triangles[0].vertices[0].position.y,0,"model-node rotation remains in skin");
+    near(edited.triangles[0].vertices[0].normal.x,1,"override normals disagree with skin");near(edited_bones[1].value[12],32,"override bone/link position differs from skin");
+    near(player.sample(0,65536).triangles[0].vertices[0].position.x,23,"model override corrupts immutable motion");
+    check(player.model_index(1)==1,"script node lookup incorrect");rejects([&]{player.model_index(2);},"invalid script node accepted");
+    edits[2].position=NJS_POINT3{};rejects([&]{player.sample(0,0,{},0,nullptr,edits);},"override outside skeleton accepted");
     near(player.sample(0,65535).triangles[0].vertices[0].position.x,14,"integer key sampling");
     near(player.sample(0,131072).triangles[0].vertices[0].position.x,14,"positive frame wrap");
     near(player.sample(0,-1,{5,0,0}).triangles[0].vertices[0].position.x,28,"negative wrap/actor translation");

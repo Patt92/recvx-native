@@ -19,10 +19,11 @@ public:
     std::vector<std::string> errors;
     std::vector<unsigned> dispatched;
     bool menu_open=false,status_requested=false;
-    unsigned tick_count=0;
+    unsigned tick_count=0,event_timer=0;
     // Renderer/world bindings are distinct from opcode parsing. Unbound
     // commands are retained with exact operands and reported by the runtime.
     std::function<bool(const EventCommand&)> binding;
+    std::function<void(unsigned)> task_started; // Event_init resets interpolation keys only.
     std::function<bool(unsigned)> enemy_dead;
     std::function<void(unsigned)> enemy_disable; // bhEneSetCk
     // bhCamCheck: active event camera (cam.flg & 2) with evc_no/keyf_no.

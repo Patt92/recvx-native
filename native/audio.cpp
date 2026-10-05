@@ -73,6 +73,12 @@ bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot){
     auto found=room_sounds_.find({bank,program});if(found==room_sounds_.end())found=room_sounds_.emplace(std::make_pair(bank,program),std::make_shared<PcmClip>(decode_system_sound(source->second,program))).first;
     play_pcm(slot,found->second);played.push_back("MULTSPQ1/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
 }
+bool AudioMixer::enemy_sound(unsigned slot,unsigned sound){
+    if(slot>=6)throw std::runtime_error("enemy sound slot outside original six voices");
+    // sdfunc.c CallEnemySe: force bank 3, preserve the low 8-bit list number.
+    return play_room_sound(3,sound&255,18+slot);
+}
+void AudioMixer::stop_enemy_sound(unsigned slot){if(slot>=6)throw std::runtime_error("enemy sound slot outside original six voices");stop(18+slot);}
 bool AudioMixer::footstep(unsigned floor,unsigned type,unsigned actor,bool enabled){
     if(actor>=foot_switch_.size()||type>3||floor>4)return false;
     static constexpr unsigned pairs[3][2]={{4,5},{14,15},{16,17}};

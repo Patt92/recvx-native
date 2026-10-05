@@ -1,3 +1,9 @@
+World-/Scheduler-Update 2026-10-05: Modellknotensteuerung und Interpolation,
+ObjCtr, Event-Zeitgeber, bewegte Kollisionsflächen, Lichtparameter und sechs
+getrennte Gegner-SE-Stimmen sind jetzt im gemeinsamen Engine-Pfad gebunden.
+20 Testgruppen und Originaldaten-/Event-Replays auf allen Zielarchitekturen
+bestanden. Details und Beleggrenzen: [VALIDATION.md](VALIDATION.md).
+
 Item-/Event-Update 2026-10-05: Der gemeinsame Item-Blickraum entspricht jetzt
 DrawSubItem ohne Raumkamera-Y/Z-Umkehr; ursprüngliche Start- und Resultatposen
 sind geprüft. bhAreaSearchObj und bhGrdPosSet sind gebunden. Im 600-Tick-Scan

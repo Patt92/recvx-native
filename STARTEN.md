@@ -122,3 +122,7 @@ Inventarregeln werden aus dem Originalcode gebaut. Alle elf Untersuchungs-
 umwandlungen, einschließlich der silbernen Libelle, sowie 117 gerichtete
 Kombinationen sind geprüft. Details und Grenzen: `INVENTORY-COVERAGE.md` im
 Paket beziehungsweise `docs/INVENTORY-COVERAGE.md` im Projekt.
+
+Engine-Update 2026-10-05: Gemeinsame Modellknotensteuerung, Event-Zeitgeber,
+bewegte Kollisionsflächen, Lichtparameter und getrennte Gegner-Soundstimmen.
+Prüfprotokolle: `build/validation/world-control-20261005`.

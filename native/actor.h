@@ -2,7 +2,10 @@
 #include "scene.h"
 #include <filesystem>
 #include <optional>
+#include <map>
 namespace recvx {
+struct ModelNodeOverride {std::optional<NJS_POINT3> position;std::optional<std::array<Angle,3>> angles;};
+using ModelNodeOverrides=std::map<unsigned,ModelNodeOverride>;
 struct BoneMatrix {NJS_MATRIX value;};
 struct MotionClip {
     unsigned frames=0;
@@ -23,6 +26,7 @@ public:
     std::vector<unsigned> motion_nodes(unsigned channels)const;
     std::vector<BoneMatrix> script_nodes(const std::vector<BoneMatrix>& model_nodes)const;
     unsigned script_index(unsigned model_node)const{return node_layout_.model_to_script.at(model_node);}
+    unsigned model_index(unsigned script_node)const;
     std::size_t bones() const {return bind_pose_.size();}
     std::size_t motions() const {return motions_.size();}
     bool has_motion(std::size_t i) const {return i<motions_.size() && motions_[i] && motions_[i]->positions.size()==bones();}
@@ -34,10 +38,12 @@ public:
     void locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t& frame_q16,int move,bool run,int turn)const;
     const std::vector<SceneTexture>& textures() const {return textures_;}
     // Original keys are sampled on integer frames, selected by a signed 16.16 clock.
-    std::vector<BoneMatrix> pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0) const;
-    std::vector<BoneMatrix> pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={}) const;
-    Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr) const;
-    Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr) const;
+    std::vector<ModelPose> local_pose(std::size_t motion,std::int64_t frame_q16,const ModelNodeOverrides& overrides={})const;
+    std::vector<ModelPose> local_pose_clip(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes={},const ModelNodeOverrides& overrides={})const;
+    std::vector<BoneMatrix> pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const ModelNodeOverrides& overrides={}) const;
+    std::vector<BoneMatrix> pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},const ModelNodeOverrides& overrides={}) const;
+    Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={}) const;
+    Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={}) const;
 private:
     struct SkinMesh {
         std::size_t object=0;

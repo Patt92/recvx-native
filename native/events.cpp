@@ -23,13 +23,13 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
 }
 bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size()||index>=1024)throw std::runtime_error("event flag outside matrix");return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
 void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||index>=1024||mode>5)throw std::runtime_error("invalid event flag operation");auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
-void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<16&&tasks_[level].active)++level;if(level==16)return;}tasks_[level]={};tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
+void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<16&&tasks_[level].active)++level;if(level==16)return;}if(task_started)task_started(level);tasks_[level]={};tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
 void EventVm::inherit_progress(const EventVm& previous){
     // Original global event/key/item/map/game flags outlive a ROM_WORK load.
     for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
     values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
 }
-void EventVm::initialize(){Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
+void EventVm::initialize(){Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
 void EventVm::world(Task& task,unsigned op,std::size_t length){
     BinaryView v(room_);v.require(task.pc,length);EventCommand c{op,task.level,task.event,task.pc-base_,{room_.begin()+task.pc,room_.begin()+task.pc+length}};
     c.loop_remaining=task.cnt2;c.loop_total=task.cnt3;
@@ -56,6 +56,21 @@ int EventVm::instruction(Task& t){
         if(flags[5][0]&1){unsigned active=0,active_key=0;if(!event_camera)throw std::runtime_error("camera check requires native world binding");if(event_camera(active,active_key)&&active==camera&&(!match_key||active_key==key))return 0;}return 1;}
     // bhCamInfoSet toggles CUT_WORK.flg bit 0 of camera-switch group v1.
     case 0x39:world(t,op,4);return 1;
+    // Original Event_T_timer: one increment per scheduler pass with active work.
+    case 0x60:{const auto limit=v.u16(p+4);advance(6);return event_timer<limit;}
+    case 0x61:event_timer=0;return advance(2);
+    case 0xd0:world(t,op,4);return 1;
+    case 0x79:world(t,op,6);return 1;
+    case 0x7a:world(t,op,2);return 1;
+    case 0x78:world(t,op,14);return 1;
+    case 0xba:world(t,op,16);return 1;
+    case 0xbb:world(t,op,2);return 0;
+    case 0x80:case 0x7e:world(t,op,4);return 1;
+    case 0x4f:world(t,op,6);return 1;
+    case 0x88:case 0xd2:world(t,op,10);return 1;
+    case 0x45:world(t,op,2);return 1;
+    case 0x66:{const unsigned command=v.u8(p+1);if(command!=1&&command!=20)throw std::runtime_error("unimplemented Obj_controll command "+std::to_string(command));world(t,op,command==1?2:4);return 1;}
+
     case 0xb9:world(t,op,10);return 1;
     // bhAreaSearchObj: X/Z minima inclusive, maxima exclusive; signed
     // magnitudes use separate masks. Byte 8 is padding, not the second mask.
@@ -145,7 +160,7 @@ int EventVm::instruction(Task& t){
     case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x67:{unsigned length=0;switch(v.u8(p+1)){case 0:case 0x80:case 0x8b:case 0x90:length=2;break;case 0x8f:length=6;break;case 0x92:case 0x93:length=8;break;case 0x94:case 0x95:length=4;break;default:throw std::runtime_error("unimplemented Sub_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x15:world(t,op,4);return 1;
-    case 0x69:{const unsigned command=v.u8(p+1);unsigned length=0;switch(command){case 2:case 3:case 4:case 17:case 18:case 19:case 28:case 29:case 30:case 31:case 32:case 33:length=3;break;case 5:case 6:length=6;break;case 7:case 8:case 27:length=8;break;case 9:case 11:case 12:case 13:length=6;break;case 23:case 40:case 41:case 42:case 46:case 48:case 49:case 44:case 45:length=4;break;case 36:case 47:length=2;break;case 24:case 25:length=8;break;case 34:case 26:length=10;break;default:throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));}world(t,op,length);return 1;}
+    case 0x69:{const unsigned command=v.u8(p+1);unsigned length=0;switch(command){case 2:case 3:case 4:case 17:case 18:case 19:case 28:case 29:case 30:case 31:case 32:case 33:length=3;break;case 5:case 6:length=6;break;case 7:case 8:case 27:length=8;break;case 9:case 11:case 12:case 13:length=6;break;case 23:case 40:case 41:case 42:case 46:case 48:case 49:length=4;break;case 44:case 45:length=5;break;case 36:case 47:length=2;break;case 24:case 25:length=8;break;case 34:case 26:case 38:length=10;break;case 50:length=4;break;default:throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));}world(t,op,length);return 1;}
     default:{std::ostringstream s;s<<"unimplemented opcode 0x"<<std::hex<<op;throw std::runtime_error(s.str());}
     }
 }
@@ -153,7 +168,7 @@ void EventVm::run(Task& t,bool scenario){
     if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);if(result==1)continue;if(result==0&&!t.branches.empty()){t.pc=t.branches.back();t.branches.pop_back();continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
     catch(const std::exception& e){t.blocked=true;std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(t.pc-base_)<<": "<<e.what();if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());}
 }
-void EventVm::tick(){++tick_count;if(dialog_.tick()){flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;pickup_display_=0;}menu_open?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;run(scenario,true);for(auto& t:tasks_)if(t.active)run(t);}
+void EventVm::tick(){++tick_count;if(dialog_.tick()){flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;pickup_display_=0;}menu_open?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);}
 void EventVm::hide_item(unsigned index){if(index>=room_items_.size())throw std::runtime_error("pickup model outside room");EventCommand command{0x20,0,0,0,{0x20,std::uint8_t(index),3,0}};if(!binding||!binding(command))pending_bindings.push_back(command);}
 std::vector<EventTaskState> EventVm::task_states()const{std::vector<EventTaskState> out;for(const auto& t:tasks_)if(t.active)out.push_back({t.event,t.level,t.delay,t.pc-base_,t.blocked});return out;}
 void EventVm::choose_dialog(int direction){const auto count=dialog_.choices();if(count)dialog_.selection=(dialog_.selection+count+direction)%count;}

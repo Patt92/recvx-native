@@ -35,15 +35,21 @@ def main():
                                     '--controls', str(controls), '--room', room + '.RDX', '--in-game',
                                     '--headless', '--frames', str(args.frames)],
                                     capture_output=True, text=True, cwd=ROOT, timeout=300)
-            return room, result.returncode, result.stderr
+            return room, result.returncode, result.stdout, result.stderr
 
-        failures, blocked = {}, collections.Counter()
+        failures, transitions, blocked = {}, {}, collections.Counter()
         blocked_rooms = set()
         with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-            for room, code, stderr in pool.map(run, rooms):
+            for room, code, stdout, stderr in pool.map(run, rooms):
                 fatal = [line for line in stderr.splitlines() if line.startswith('Native runtime error')]
                 if fatal:
-                    failures[room] = fatal[-1]
+                    if room + '.RDX:' in stdout:
+                        # The initial room loaded; a later runtime operation
+                        # failed. Keep that failure visible as progression evidence.
+                        transitions[room] = fatal[-1]
+                        blocked_rooms.add(room)
+                    else:
+                        failures[room] = fatal[-1]
                     continue
                 for line in stderr.splitlines():
                     if line.startswith('event '):
@@ -54,6 +60,8 @@ def main():
           f'{len(blocked_rooms)} rooms report blocked event commands.')
     for reason, count in blocked.most_common(15):
         print(f'  blocked: {reason} x{count}')
+    for room, reason in transitions.items():
+        print(f'  RUNTIME FAILURE AFTER LOAD {room}: {reason}')
     for room, reason in failures.items():
         print(f'  LOAD FAILURE {room}: {reason}')
     if failures:

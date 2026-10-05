@@ -7,7 +7,7 @@
 #include <map>
 #include <memory>
 namespace recvx {
-struct WorldEntity {SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,death_ticks=0;int hp=0;bool dead=false;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;};
+struct WorldEntity {SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,type=0,death_ticks=0;int hp=0;bool dead=false;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;};
 class RoomWorld {
 public:
     RoomWorld(const std::vector<std::uint8_t>& room,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data={},const std::filesystem::path& mods={},const std::string& room_name="RM_0000");
@@ -20,7 +20,10 @@ public:
     void deactivate_enemy(unsigned index);
     float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(walls_,room_height_,origin,direction,range,floor_at(origin));}
     bool bind(const EventCommand& command);
+    const WorldEntity* state(unsigned kind,unsigned index)const;
+    ModelPose model_pose(unsigned kind,unsigned index,unsigned script_node=0)const;
     void set_player_asset(const PlayerAsset* player){player_asset_=player;}
+    void start_task(unsigned level);
     void tick();
     Scene sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes=nullptr)const;
     void append(Scene& scene,const std::vector<BoneMatrix>& player_nodes={})const;
@@ -38,8 +41,8 @@ public:
     void player_footstep(const PlayerAsset& player);
     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f)const;
 private:
-    struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;};
-    struct Context {unsigned kind=0,index=0,node=0;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};};
+    struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;};
+    struct Context {unsigned kind=0,index=0,node=0,mode1=0;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
     struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;};
     struct EventCamera {SceneCamera camera;unsigned link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};
     std::vector<std::uint8_t> room_;std::size_t header_;
@@ -72,7 +75,12 @@ private:
     float fade_=0,fade_target_=0,fade_step_=0;unsigned fade_color_=0;
     std::uint32_t background_=0,background_target_=0;unsigned background_delay_=0;bool background_pending_=false;
     WorldEntity& entity(unsigned kind,unsigned index);
+    const Model& model(unsigned kind,unsigned index)const;
+    unsigned model_index(unsigned kind,unsigned index,unsigned script_node)const;
+    const ModelNodeOverrides& overrides(unsigned kind,unsigned index)const;
     bool entity_hidden(unsigned kind,unsigned index)const;
+    std::vector<BoneMatrix> object_matrices(const Model& model,const WorldEntity& entity,const NJS_MATRIX& transform)const;
+    std::optional<BoneMatrix> link_matrix(unsigned kind,unsigned index,unsigned node,unsigned depth=0)const;
     NJS_POINT3 link_point(unsigned kind,unsigned index,unsigned node,NJS_POINT3 offset)const;
 };
 }

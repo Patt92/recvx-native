@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 namespace recvx {
-inline constexpr unsigned audio_voice_count=18;
+inline constexpr unsigned audio_voice_count=24;
 struct PcmClip {unsigned rate=0,channels=0;std::vector<std::int16_t> samples;std::size_t frames()const{return channels?samples.size()/channels:0;}};
 PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate);
 PcmClip decode_system_sound(const std::vector<std::uint8_t>& bank,unsigned program);
@@ -22,6 +22,8 @@ public:
     bool play_weapon_sound(unsigned weapon_bank,unsigned program);
     void load_room_sounds(unsigned stage,unsigned room,unsigned variant=0);
     bool play_room_sound(unsigned bank,unsigned program,unsigned slot=4);
+    bool enemy_sound(unsigned slot,unsigned sound);
+    void stop_enemy_sound(unsigned slot);
     bool footstep(unsigned floor,unsigned type,unsigned actor,bool enabled=true);
     void load_door_sounds(unsigned bank);
     bool play_door_sound(unsigned program);

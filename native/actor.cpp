@@ -237,9 +237,9 @@ void PlayerAsset::locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t&
         actor.position.x-=step*njSin(actor.yaw);actor.position.z-=step*njCos(actor.yaw);}
     frame=(frame+65536)%(std::int64_t(motion_frames(motion))*65536);
 }
-Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,std::vector<BoneMatrix>* matrices_out) const {
+Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides) const {
     if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");
-    return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out);
+    return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out,overrides);
 }
 std::vector<ModelPose> PlayerAsset::sampled_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes)const{
     if(!clip.frames||clip.positions.size()!=clip.angles.size()||clip.positions.size()>bones())throw std::runtime_error("room motion does not fit actor skeleton");
@@ -255,16 +255,19 @@ std::vector<ModelPose> PlayerAsset::sampled_pose(const MotionClip& clip,std::int
     }
     return pose;
 }
-std::vector<BoneMatrix> PlayerAsset::pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw)const{
-    if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");return pose_clip(*motions_.at(motion),frame_q16,position,yaw);
+unsigned PlayerAsset::model_index(unsigned script_node)const{if(script_node>=node_layout_.script_to_model.size()||node_layout_.script_to_model[script_node]>=bones())throw std::runtime_error("model control addresses a procedural or missing node");return node_layout_.script_to_model[script_node];}
+std::vector<ModelPose> PlayerAsset::local_pose(std::size_t motion,std::int64_t frame,const ModelNodeOverrides& overrides)const{if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");return local_pose_clip(*motions_.at(motion),frame,{},overrides);}
+std::vector<ModelPose> PlayerAsset::local_pose_clip(const MotionClip& clip,std::int64_t frame,const std::vector<unsigned>& nodes,const ModelNodeOverrides& overrides)const{auto pose=sampled_pose(clip,frame,nodes);for(const auto& pair:overrides){if(pair.first>=pose.size())throw std::runtime_error("model control node outside skeleton");const auto& o=pair.second;if(o.position){const auto p=*o.position;if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))throw std::runtime_error("nonfinite model control position");pose[pair.first].position=p;}if(o.angles)pose[pair.first].angles=*o.angles;}return pose;}
+std::vector<BoneMatrix> PlayerAsset::pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const ModelNodeOverrides& overrides)const{
+    if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");return pose_clip(*motions_.at(motion),frame_q16,position,yaw,{},overrides);
 }
-std::vector<BoneMatrix> PlayerAsset::pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes)const{
+std::vector<BoneMatrix> PlayerAsset::pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,const ModelNodeOverrides& overrides)const{
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
-    const auto matrices_=matrices(sampled_pose(clip,frame_q16,nodes),position,yaw);std::vector<BoneMatrix> result;for(const auto& matrix:matrices_){BoneMatrix bone;std::copy_n(matrix.value,16,bone.value);result.push_back(bone);}return result;
+    const auto matrices_=matrices(local_pose_clip(clip,frame_q16,nodes,overrides),position,yaw);std::vector<BoneMatrix> result;for(const auto& matrix:matrices_){BoneMatrix bone;std::copy_n(matrix.value,16,bone.value);result.push_back(bone);}return result;
 }
-Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out) const {
+Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides) const {
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
-    ModelGeometryOptions geometry;geometry.pose=sampled_pose(clip,frame_q16,nodes);
+    ModelGeometryOptions geometry;geometry.pose=local_pose_clip(clip,frame_q16,nodes,overrides);
     auto full=matrices(geometry.pose,position,yaw),without_rotation=full;
     if(matrices_out){matrices_out->clear();for(const auto& matrix:full){BoneMatrix copy;std::copy_n(matrix.value,16,copy.value);matrices_out->push_back(copy);}}
     for(std::size_t i=0;i<bones();++i) {

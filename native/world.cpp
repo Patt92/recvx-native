@@ -7,6 +7,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <tuple>
+#include <functional>
 namespace recvx {
 namespace {
 void put(std::vector<std::uint8_t>& b,std::uint32_t n){for(unsigned i=0;i<4;++i)b.push_back(std::uint8_t(n>>(i*8)));}
@@ -74,7 +75,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     const auto ene_count=v.u32(header_+0x88),model_table=v.u32(20),texture_table=v.u32(32);std::size_t model_slot=1,texture_slot=1;std::map<std::tuple<unsigned,unsigned,unsigned,unsigned>,std::size_t> texture_cache;
     auto load=[&](unsigned kind,unsigned index,std::size_t p,bool actor){auto& e=entity(kind,index);e.transform={{v.f32(p+12),v.f32(p+16),v.f32(p+20)},int(v.u16(p+28))};e.angles={int(v.u16(p+24)),int(v.u16(p+28)),int(v.u16(p+26))};
         const auto model=v.u32(model_table+model_slot++*4);std::size_t texture=0;
-        const unsigned identity=v.u16(p+4),variant=actor?v.u8(p+9):0;e.identity=identity;if(kind==1&&identity==1)e.hp=en01_hp_tbl[0][index%16];
+        const unsigned identity=v.u16(p+4),variant=actor?v.u8(p+9):0;e.identity=identity;e.type=v.u16(p+6);if(kind==1&&identity==1)e.hp=en01_hp_tbl[0][index%16];
         if(actor){unsigned version=0;bool first=true;for(std::size_t at=model,n=0;n<64;++n){const auto bytes=v.u32(at);at+=4;if(bytes==0xffffffff)break;
             if(bytes&&(v.u32(at)&0xffffff)==0x4c444d){if(v.u32(at+8)!=0xffffffff){const auto key=std::make_tuple(kind,identity,variant,version++);auto it=texture_cache.find(key);if(it==texture_cache.end())it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(first)texture=it->second;}first=false;}at+=bytes;}}
         else {const auto mdl=skinned_object(v,model)?model+8+v.u32(model):model;const auto key=std::make_tuple(kind,identity,0u,0u);auto it=texture_cache.find(key);if(it==texture_cache.end()&&v.u32(mdl+8)!=0xffffffff)it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(it!=texture_cache.end())texture=it->second;}
@@ -82,7 +83,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         if(actor&&!actor_has_objects(v,model))return;
         if(actor){out.actor=std::make_unique<PlayerAsset>(actor_packet(b,model,texture),identity>90);}
         else if(skinned_object(v,model)){out.actor=std::make_unique<PlayerAsset>(skinned_object_packet(b,model,texture));actor=true;}
-        else {ModelGeometryOptions pose;out.object=decode_model_asset(b,model,texture,pose);}
+        else {ModelGeometryOptions pose;out.source_model=model;const auto base=v.relative(model,v.u16(model+4),0),nodes=v.relative(base,v.u32(model+12),v.u16(model+6)*52);for(unsigned i=0;i<v.u16(model+6);++i){const auto p=nodes+i*52;out.rest_pose.push_back({{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.i32(p+20),v.i32(p+24),v.i32(p+28)}});}out.object=decode_model_asset(b,model,texture,pose);}
         if(actor)out.object.textures=out.actor->textures();if(!data.empty())apply_texture_files(out.object,data,mods,std::filesystem::path(kind==1?"npcs":kind==2?"objects":"room-items")/room_name/asset_number(index));
         models_.push_back(std::move(out));};
     const auto enep=v.u32(header_+8);for(unsigned i=0;i<ene_count;++i)if(v.u32(enep+i*36)&1)load(1,i,enep+i*36,true);
@@ -134,11 +135,30 @@ void RoomWorld::player_footstep(const PlayerAsset& player){
     if(motion_==0){if(frame==10)node=17;else if(frame==28)node=21;}
     else if(motion_==4){if(frame==8)node=17;else if(frame==18)node=21;}
     else if(motion_==16){if(frame==0)node=17;else if(frame==16)node=21;}
-    if(!node)return;const auto bones=player.pose(motion_,frame_,player_.position,player_.yaw);if(node>=bones.size())return;
+    if(!node)return;const auto bones=player.pose(motion_,frame_,player_.position,player_.yaw,overrides(0,0));if(node>=bones.size())return;
     const auto& m=bones[node].value;const auto sound=floor_sound({m[12],player_.position.y,m[14]});if(sound>4)return;
     if(audio_.play_room_sound(2,sound,footstep_slot_))footstep_slot_=footstep_slot_==4?5:4;
 }
+const WorldEntity* RoomWorld::state(unsigned kind,unsigned index)const{const auto at=entities_.find({kind,index});return at==entities_.end()?nullptr:&at->second;}
+const ModelNodeOverrides& RoomWorld::overrides(unsigned kind,unsigned index)const{static const ModelNodeOverrides empty;const auto* e=state(kind,index);return e?e->node_overrides:empty;}
+const RoomWorld::Model& RoomWorld::model(unsigned kind,unsigned index)const{for(const auto& m:models_)if(m.kind==kind&&m.index==index)return m;throw std::runtime_error("model control has no realized model");}
+unsigned RoomWorld::model_index(unsigned kind,unsigned index,unsigned node)const{if(!kind){if(!player_asset_)throw std::runtime_error("player model control requires player asset");return player_asset_->model_index(node);}const auto& m=model(kind,index);if(m.actor)return m.actor->model_index(node);if(node>=m.rest_pose.size())throw std::runtime_error("object model control node outside hierarchy");return node;}
+ModelPose RoomWorld::model_pose(unsigned kind,unsigned index,unsigned node)const{const auto physical=model_index(kind,index,node);const auto& edits=overrides(kind,index);if(!kind)return (player_room_motion_?player_asset_->local_pose_clip(room_motions_.at(motion_),frame_,{},edits):player_asset_->local_pose(motion_,frame_,edits)).at(physical);const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(m.actor){if(e->has_motion){const auto& clip=entity_motion(*e);return m.actor->local_pose_clip(clip,e->frame,m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=m.rest_pose.at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
+void RoomWorld::start_task(unsigned level){auto& task=contexts_.at(level);task.mode1=0;task.positions={};task.angles={};}
+std::vector<BoneMatrix> RoomWorld::object_matrices(const Model& model,const WorldEntity& state,const NJS_MATRIX& transform)const{
+    BinaryView v(room_);const auto base=v.relative(model.source_model,v.u16(model.source_model+4),0),nodes=v.relative(base,v.u32(model.source_model+12),model.rest_pose.size()*52);
+    std::vector<BoneMatrix> result(model.rest_pose.size());std::vector<bool> visited(result.size());
+    std::function<void(std::size_t,const NJS_MATRIX&,unsigned)> visit=[&](std::size_t p,const NJS_MATRIX& parent,unsigned depth){if(depth>256||p<nodes||(p-nodes)%52||(p-nodes)/52>=result.size())throw std::runtime_error("object link outside model hierarchy");const auto index=(p-nodes)/52;if(visited[index])throw std::runtime_error("cyclic object model hierarchy");visited[index]=true;auto& m=result[index].value;std::copy(parent,parent+16,m);const auto flags=v.u32(p);auto pose=model.rest_pose[index];const auto edit=state.node_overrides.find(index);const bool edited=!state.node_overrides.empty();if(edit!=state.node_overrides.end()){if(edit->second.position)pose.position=*edit->second.position;if(edit->second.angles)pose.angles=*edit->second.angles;}if(edited||!(flags&1))njTranslate(&m,pose.position.x,pose.position.y,pose.position.z);if(edited||!(flags&2)){if(flags&32){njRotateY(&m,pose.angles[1]);njRotateX(&m,pose.angles[0]);njRotateZ(&m,pose.angles[2]);}else njRotateXYZ(&m,pose.angles[0],pose.angles[1],pose.angles[2]);}if(!(flags&4))njScale(&m,v.f32(p+32),v.f32(p+36),v.f32(p+40));const auto child=v.u32(p+44),sibling=v.u32(p+48);if(child!=0xffffffff&&(edited||!(flags&16)))visit(v.relative(base,child,52),m,depth+1);if(sibling!=0xffffffff)visit(v.relative(base,sibling,52),parent,depth);};if(!result.empty())visit(nodes,transform,0);return result;
+}
 bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=contexts_.at(c.task);const auto op=c.opcode;
+    if(op==0x7a){audio_.stop_enemy_sound(v.u8(1));return true;}
+    if(op==0x78){auto& lights=v.u8(2)?event_lights_:lights_;auto& light=lights.at(v.u8(1));light.color={v.u16(4)/100.f,v.u16(6)/100.f,v.u16(8)/100.f};light.near_range=v.u16(10)/100.f;light.far_range=v.u16(12)/100.f;return true;}
+    if(op==0xba){for(unsigned key=0;key<2;++key)for(unsigned axis=0;axis<3;++axis)ctx.ground[key][axis]=v.u16(2+key*8+axis*2)/100.f*(v.u8(1+key*8)&(1u<<axis)?-1:1);return true;}
+    if(op==0xbb){if(!c.loop_total)throw std::runtime_error("ground interpolation requires original FOR clock");float keys[12],out[3];for(unsigned key=0;key<4;++key)for(unsigned axis=0;axis<3;++axis)keys[key*3+axis]=ctx.ground[key<2?1:0][axis];njOverhauserSpline(keys,out,nullptr,float(c.loop_remaining)/c.loop_total);walls_.at(v.u8(1)).position={out[0],out[1],out[2]};return true;}
+    if(op==0xd0){auto& e=entity(1,v.u8(1));e.hp=v.u16(2);return true;}
+    if(op==0x79){if(v.u8(1)>=6)return false;(void)model_pose(1,v.u8(2),v.u8(3));return audio_.enemy_sound(v.u8(1),v.u16(4));}
+    if(op==0x66){if(v.u8(1)==1){ctx.mode1=0;return true;}if(v.u8(1)==20){const auto& source=contexts_.at(v.u8(2));const auto root=model_pose(source.kind,source.index).position;auto& p=ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;p.x+=root.x;p.z+=root.z;return true;}return false;}
+
     // bhGrdPosSet addresses rom->walp (not the separate floor-sound table).
     // Updating this shared table changes walking, ground probes and shot rays.
     if(op==0xb9){const auto index=v.u8(1);if(index>=walls_.size())throw std::runtime_error("script ground position outside wall table");const auto signs=v.u8(3);walls_[index].position={v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};return true;}
@@ -176,15 +196,23 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0x18){if(v.u8(1)>4)return false;audio_.stop(12-v.u8(1));return true;}
     if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};return true;case 0x80:player_scripted=false;player_room_motion_=false;player_frozen_=false;motion_=42;frame_=0;return true;case 0x34:player_room_motion_=false;motion_=42;frame_=0;return true;default:return false;}}
     if(op==0x67&&v.u8(1)==0x80){entity(ctx.kind,ctx.index).scripted=false;return true;}
-    if(op==0x69){const auto cmd=v.u8(1);if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign)[i]=v.u8(i+2);return true;}
+    if(op==0x69){const auto cmd=v.u8(1);
+        if(cmd==48||cmd==49){const auto key=v.u8(2);if(key>=4)throw std::runtime_error("captured interpolation key outside original task table");if(cmd==48){const auto pos=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;ctx.positions[key]={pos.x,pos.y,pos.z};}else{auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:entity(ctx.kind,ctx.index).angles;if(!ctx.node&&!ctx.kind)angles[1]=player_.yaw;for(unsigned axis=0;axis<3;++axis){float n=std::int16_t(angles[axis])*0.005493164f;if(axis!=1||!v.u8(3)){if(n<0)n+=360;}else if(n>180)n-=360;ctx.angles[key][axis]=n;}}return true;}
+        if(cmd==50){auto& e=entity(ctx.kind,ctx.index);e.type=(e.type&0xff00)|v.u8(2);return true;}
+        if(cmd==36||cmd==38||cmd==17||cmd==18||cmd==19){const auto node=cmd==38?v.u8(2):cmd==36?0:ctx.node;const auto physical=model_index(ctx.kind,ctx.index,node);auto pose=model_pose(ctx.kind,ctx.index,node);auto& edit=entity(ctx.kind,ctx.index).node_overrides[physical];
+            if(cmd==36)edit.position=NJS_POINT3{};
+            if(cmd==38){const auto signs=v.u8(3);edit.position=NJS_POINT3{v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};}
+            if(cmd==17||cmd==19){pose.position.x+=ctx.increment.x*(ctx.pos_sign[0]?-1:1);pose.position.y+=ctx.increment.y*(ctx.pos_sign[1]?-1:1);pose.position.z+=ctx.increment.z*(ctx.pos_sign[2]?-1:1);edit.position=pose.position;}
+            if(cmd==18||cmd==19){for(unsigned a=0;a<3;++a)pose.angles[a]+=ctx.angle_increment[a]*(ctx.ang_sign[a]?-1:1);edit.angles=pose.angles;}
+            actor_nodes_.clear();return true;}
+if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign)[i]=v.u8(i+2);return true;}
         if(cmd==26||cmd==27){const auto key=v.u8(2),signs=v.u8(3);if(key>=4)throw std::runtime_error("interpolation key outside original task table");for(unsigned i=0;i<3;++i)(cmd==26?ctx.positions:ctx.angles)[key][i]=(cmd==26?v.u16(4+i*2)/100.f:float(v.u8(4+i)))*(signs&(1u<<i)?-1:1);return true;}
         if(cmd>=28&&cmd<=33||cmd==44||cmd==45){
-            if(ctx.node)return false; // Model-node interpolation is still pending.
             if(!c.loop_total)throw std::runtime_error("interpolation requires original FOR clock");
             const float clock=float(c.loop_remaining)/c.loop_total;
             auto interpolate=[&](const auto& keys){float input[12],out[3];const bool four=cmd==29||cmd==32||cmd==33;for(unsigned i=0;i<4;++i)for(unsigned a=0;a<3;++a)input[i*3+a]=keys[four?3-i:i<2?1:0][a];if(!four&&v.u8(2))njLinear(input+3,out,nullptr,clock);else njOverhauserSpline(input,out,nullptr,clock);return std::array<float,3>{out[0],out[1],out[2]};};
-            if(cmd==28||cmd==29||cmd==30||cmd==32||cmd==44){const auto out=interpolate(ctx.positions);auto& pos=ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;const auto mask=cmd==44?v.u8(3):7;if(mask&1)pos.x=out[0];if(mask&2)pos.y=out[1];if(mask&4)pos.z=out[2];}
-            if(cmd==28||cmd==29||cmd==31||cmd==33||cmd==45){const auto out=interpolate(ctx.angles);auto& e=entity(ctx.kind,ctx.index);const auto mask=cmd==45?v.u8(3):7;for(unsigned i=0;i<3;++i)if(mask&(1u<<i))e.angles[i]=int(out[i]*182.04445f);if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];}return true;
+            if(cmd==28||cmd==29||cmd==30||cmd==32||cmd==44){const auto out=interpolate(ctx.positions);auto local=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:NJS_POINT3{};auto& pos=ctx.node?local:ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;const auto mask=cmd==44?v.u8(3):7;if(mask&1)pos.x=out[0];if(mask&2)pos.y=out[1];if(mask&4)pos.z=out[2];if(ctx.node)entity(ctx.kind,ctx.index).node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].position=pos;}
+            if(cmd==28||cmd==29||cmd==31||cmd==33||cmd==45){const auto out=interpolate(ctx.angles);auto& e=entity(ctx.kind,ctx.index);const auto mask=cmd==45?v.u8(3):7;auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:e.angles;for(unsigned i=0;i<3;++i)if(mask&(1u<<i))angles[i]=int(out[i]*182.04445f);if(ctx.node)e.node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].angles=angles;else {e.angles=angles;if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];}}actor_nodes_.clear();return true;
         }
         if(cmd==5){ctx.increment={v.u8(2)*.1f,v.u8(3)*.1f,v.u8(4)*.1f};return true;}
         if(cmd==6){for(unsigned i=0;i<3;++i)ctx.angle_increment[i]=int(v.u8(2+i)*(65536.f/360))>>1;return true;}
@@ -204,7 +232,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         }
         if(cmd==41)return false; // Original bit 0x40000 controls model linking, not display visibility.
         if(cmd==47)return true; // Matrices are rebuilt when sampling geometry.
-        if(cmd==36)return false; // Original root-model translation reset still needs a model-state binding.
+
     }return false;
 }
 void RoomWorld::tick(){for(auto* table:{&lights_,&event_lights_})for(auto& l:*table)l.clock=(l.clock+(l.speed<<8))&0x7fff;for(auto& pair:entities_){auto& e=pair.second;if(e.dead)e.death_ticks=std::min(30u,e.death_ticks+1);if(e.has_motion&&!e.frozen)e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);}if(player_scripted&&!player_frozen_){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
@@ -213,7 +241,7 @@ void RoomWorld::tick(){for(auto* table:{&lights_,&event_lights_})for(auto& l:*ta
     if(fade_step_>0)fade_=std::min(fade_target_,fade_+fade_step_);if(fade_step_<0)fade_=std::max(fade_target_,fade_+fade_step_);
 }
 Scene RoomWorld::sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes)const{
-    return player_room_motion_?player.sample_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw,{},nodes):player.sample(motion_,frame_,player_.position,player_.yaw,nodes);
+    return player_room_motion_?player.sample_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw,{},nodes,overrides(0,0)):player.sample(motion_,frame_,player_.position,player_.yaw,nodes,overrides(0,0));
 }
 unsigned RoomWorld::frame(unsigned kind,unsigned index)const{if(!kind)return unsigned(std::max<std::int64_t>(0,frame_));const auto at=entities_.find({kind,index});return at==entities_.end()?0:unsigned(std::max<std::int64_t>(0,at->second.frame));}
 std::optional<NJS_POINT3> RoomWorld::position(unsigned kind,unsigned index)const{if(!kind)return player_.position;const auto at=entities_.find({kind,index});if(at==entities_.end())return {};return at->second.transform.position;}
@@ -222,12 +250,10 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes)
     actor_nodes_.clear();if(!player_nodes.empty())actor_nodes_[{0,0}]=player_nodes;
     const auto player_state=entities_.find({0,0});if(player_state!=entities_.end())scene.triangles.erase(std::remove_if(scene.triangles.begin(),scene.triangles.end(),[&](const auto& t){const auto at=player_state->second.hidden_nodes.find(t.object);return !t.camera_mask&&at!=player_state->second.hidden_nodes.end()&&at->second;}),scene.triangles.end());
     for(const auto& model:models_){const auto found=entities_.find({model.kind,model.index});if(found==entities_.end()||entity_hidden(model.kind,model.index))continue;const auto& e=found->second;Scene object;
-        if(model.actor){if(e.has_motion&&entity_motion(e).positions.size()<=model.actor->bones()){const auto& clip=entity_motion(e);const auto nodes=model.actor->motion_nodes(clip.positions.size());object=model.actor->sample_clip(clip,e.frame,e.transform.position,e.transform.yaw,nodes,&actor_nodes_[{model.kind,model.index}]);}else object=model.actor->sample(0,0,e.transform.position,e.transform.yaw,&actor_nodes_[{model.kind,model.index}]);object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=model.actor->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=model.actor->script_index(t.object);}
-        else {object=model.object;NJS_MATRIX matrix;njUnitMatrix(&matrix);
-            if(e.linked){const auto parent=actor_nodes_.find({e.parent_kind,e.parent_index});if(parent!=actor_nodes_.end()&&e.parent_node<parent->second.size())njSetMatrix(&matrix,&parent->second[e.parent_node].value);
-                else{const auto p=link_point(e.parent_kind,e.parent_index,e.parent_node,{});njTranslate(&matrix,p.x,p.y,p.z);if(e.parent_kind==0)njRotateY(&matrix,player_.yaw);else{const auto parent_entity=entities_.find({e.parent_kind,e.parent_index});if(parent_entity!=entities_.end())njRotateXYZ(&matrix,parent_entity->second.angles[0],parent_entity->second.angles[1],parent_entity->second.angles[2]);}}
-                njTranslate(&matrix,e.link_offset.x,e.link_offset.y,e.link_offset.z);}
-            else njTranslate(&matrix,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&matrix,e.angles[0],e.angles[1],e.angles[2]);for(auto& t:object.triangles)for(auto& vertex:t.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}}
+        if(model.actor){if(e.has_motion&&entity_motion(e).positions.size()<=model.actor->bones()){const auto& clip=entity_motion(e);const auto nodes=model.actor->motion_nodes(clip.positions.size());object=model.actor->sample_clip(clip,e.frame,e.transform.position,e.transform.yaw,nodes,&actor_nodes_[{model.kind,model.index}],e.node_overrides);}else object=model.actor->sample(0,0,e.transform.position,e.transform.yaw,&actor_nodes_[{model.kind,model.index}],e.node_overrides);object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=model.actor->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=model.actor->script_index(t.object);}
+        else {object=model.object;if(!e.node_overrides.empty()){ModelGeometryOptions edited;edited.pose=model.rest_pose;for(const auto& pair:e.node_overrides){auto& pose=edited.pose.at(pair.first);if(pair.second.position)pose.position=*pair.second.position;if(pair.second.angles)pose.angles=*pair.second.angles;}object=decode_model_asset(room_,model.source_model,0,edited);object.textures=model.object.textures;}NJS_MATRIX matrix;njUnitMatrix(&matrix);
+            if(e.linked){if(const auto parent=link_matrix(e.parent_kind,e.parent_index,e.parent_node))std::copy(parent->value,parent->value+16,matrix);njTranslate(&matrix,e.link_offset.x,e.link_offset.y,e.link_offset.z);}
+            else njTranslate(&matrix,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&matrix,e.angles[0],e.angles[1],e.angles[2]);actor_nodes_[{model.kind,model.index}]=object_matrices(model,e,matrix);for(auto& t:object.triangles)for(auto& vertex:t.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}}
         // Native fallback corpse until the segmented en01 damage/death MTNs
         // are mapped. Keep the original mesh; this is not an original death clip.
         if(e.dead){NJS_MATRIX collapse;njUnitMatrix(&collapse);const auto p=e.transform.position;njTranslate(&collapse,p.x,p.y,p.z);njRotateY(&collapse,e.transform.yaw);njRotateX(&collapse,int(e.death_ticks)*16384/30);njRotateY(&collapse,-e.transform.yaw);njTranslate(&collapse,-p.x,-p.y,-p.z);for(auto& t:object.triangles)for(auto& vertex:t.vertices){njCalcPoint(&collapse,&vertex.position,&vertex.position);njCalcVector(&collapse,&vertex.normal,&vertex.normal);}}
@@ -257,18 +283,23 @@ bool RoomWorld::entity_hidden(unsigned kind,unsigned index)const{
     if(!kind)return player_hidden;const auto e=entities_.find({kind,index});if(e==entities_.end())return false;
     return e->second.hidden||e->second.inactive||(e->second.linked&&entity_hidden(e->second.parent_kind,e->second.parent_index));
 }
-NJS_POINT3 RoomWorld::link_point(unsigned kind,unsigned index,unsigned node,NJS_POINT3 offset)const{
-    std::vector<BoneMatrix> current;
-    if(!kind&&player_asset_)current=player_room_motion_?player_asset_->pose_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw):player_asset_->pose(motion_,frame_,player_.position,player_.yaw);
-    else if(kind==1){const auto e=entities_.find({kind,index});if(e!=entities_.end())for(const auto& model:models_)if(model.kind==kind&&model.index==index&&model.actor){const auto& state=e->second;
-        if(state.has_motion&&entity_motion(state).positions.size()<=model.actor->bones()){const auto& clip=entity_motion(state);const auto nodes=model.actor->motion_nodes(clip.positions.size());current=model.actor->pose_clip(clip,state.frame,state.transform.position,state.transform.yaw,nodes);}
-        else current=model.actor->pose(0,0,state.transform.position,state.transform.yaw);current=model.actor->script_nodes(current);break;}}
-    if(node<current.size()){NJS_POINT3 out;njCalcPoint(&current[node].value,&offset,&out);return out;}
-    const auto bones=actor_nodes_.find({kind,index});if(bones!=actor_nodes_.end()&&node<bones->second.size()){auto m=bones->second[node];NJS_POINT3 out;njCalcPoint(&m.value,&offset,&out);return out;}
-    if(kind==0){NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,player_.position.x,player_.position.y,player_.position.z);njRotateY(&m,player_.yaw);NJS_POINT3 out;njCalcPoint(&m,&offset,&out);return out;}
-    const auto matrices=actor_nodes_.find({kind,index});if(matrices!=actor_nodes_.end()&&node<matrices->second.size()){auto m=matrices->second[node];NJS_POINT3 out;njCalcPoint(&m.value,&offset,&out);return out;}
-    const auto e=entities_.find({kind,index});if(e==entities_.end())return offset;NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,e->second.transform.position.x,e->second.transform.position.y,e->second.transform.position.z);njRotateXYZ(&m,e->second.angles[0],e->second.angles[1],e->second.angles[2]);NJS_POINT3 out;njCalcPoint(&m,&offset,&out);return out;
+std::optional<BoneMatrix> RoomWorld::link_matrix(unsigned kind,unsigned index,unsigned node,unsigned depth)const{
+    if(depth>32)throw std::runtime_error("cyclic entity attachment");
+    if(!kind&&player_asset_){auto matrices=player_asset_->script_nodes(player_room_motion_?player_asset_->pose_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw,{},overrides(0,0)):player_asset_->pose(motion_,frame_,player_.position,player_.yaw,overrides(0,0)));if(node<matrices.size())return matrices[node];}
+    const auto* e=state(kind,index);
+    if(kind&&e)for(const auto& m:models_)if(m.kind==kind&&m.index==index){
+        if(m.actor){auto matrices=e->has_motion?m.actor->pose_clip(entity_motion(*e),e->frame,e->transform.position,e->transform.yaw,m.actor->motion_nodes(entity_motion(*e).positions.size()),e->node_overrides):m.actor->pose(0,0,e->transform.position,e->transform.yaw,e->node_overrides);matrices=m.actor->script_nodes(matrices);if(node<matrices.size())return matrices[node];}
+        else {BoneMatrix transform;njUnitMatrix(&transform.value);if(e->linked){if(const auto parent=link_matrix(e->parent_kind,e->parent_index,e->parent_node,depth+1))std::copy(parent->value,parent->value+16,transform.value);njTranslate(&transform.value,e->link_offset.x,e->link_offset.y,e->link_offset.z);}else njTranslate(&transform.value,e->transform.position.x,e->transform.position.y,e->transform.position.z);njRotateXYZ(&transform.value,e->angles[0],e->angles[1],e->angles[2]);const auto matrices=object_matrices(m,*e,transform.value);if(node<matrices.size())return matrices[node];}
+    }
+    const auto cached=actor_nodes_.find({kind,index});if(cached!=actor_nodes_.end()&&node<cached->second.size())return cached->second[node];
+    BoneMatrix transform;njUnitMatrix(&transform.value);
+    if(!kind){njTranslate(&transform.value,player_.position.x,player_.position.y,player_.position.z);njRotateY(&transform.value,player_.yaw);return transform;}
+    if(!e)return {};njTranslate(&transform.value,e->transform.position.x,e->transform.position.y,e->transform.position.z);njRotateXYZ(&transform.value,e->angles[0],e->angles[1],e->angles[2]);return transform;
 }
+NJS_POINT3 RoomWorld::link_point(unsigned kind,unsigned index,unsigned node,NJS_POINT3 offset)const{
+    auto matrix=link_matrix(kind,index,node);if(!matrix)return offset;NJS_POINT3 out;njCalcPoint(&matrix->value,&offset,&out);return out;
+}
+
 SceneCamera RoomWorld::camera(const Scene&,const SceneCamera& active)const{if(!event_camera)return active;const auto& key=event_cameras_.at(event_camera_index).at(event_camera_key_);auto camera=key.camera;if(!key.link)return camera;
     NJS_POINT3 target;if(key.link==6){if(key.index>=positions_.size())throw std::runtime_error("camera target outside position table");target=positions_[key.index];target.x+=key.offset.x;target.y+=key.offset.y;target.z+=key.offset.z;}else target=link_point(key.link-1,key.index,key.node,key.offset);
     const float dx=target.x-camera.position.x,dy=target.y-camera.position.y,dz=target.z-camera.position.z;camera.angles[0]=-int(10430.381f*std::atan2(dy,std::sqrt(dx*dx+dz*dz)));camera.angles[1]=-int(10430.381f*std::atan2(dx,dz))+32768;return camera;

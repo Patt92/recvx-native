@@ -1,3 +1,51 @@
+# World controls and scheduler integration — 2026-10-05
+
+This supersedes the older scan/build counts below.
+
+- Original `event.c::Common_controll` model-node changes (17–19, 36, 38),
+  model-node position/angle interpolation (28–33, 44–45), key capture (48/49),
+  low-byte type assignment (50) and `Obj_controll` 1/20 are bound. Overrides feed
+  the same weighted vertices, normals and matrices. Object/item attachments
+  preserve full parent-node orientation, including static MDL hierarchies;
+  player link lookup resolves original MASK script indices. Complete enemy AI
+  and every possible linked actor animation are not established by these checks.
+- `Event_init` resets interpolation keys without discarding work selection or
+  movement increments. Common 44/45 consume five bytes, including their trailing
+  padding; 38 consumes ten. Tests verify subsequent opcode alignment.
+- `Event_T_timer` advances once per active scheduler pass, including multiple
+  tasks and an in-pass clear. `bhTFrameCheck`, `bhEventTimerClr`, `bhEvtKill`,
+  `bhEneLifeSetM`, `bhLightParameterSet`, `bhGrdPosMoveCSet/Start` are bound.
+  Spline countdown keys change the actual walls used by movement and ray checks.
+- Enemy SE uses six independent voices and original MULTSPQ bank 3; actual room
+  0002 sound PCM, stop isolation and room reload are checked. Spatial pan/volume,
+  Sony sequencing, ADSR and reverb are not fully implemented by this change.
+- Pony reset, shadow switch, vertex-morph setup, effect UV/local offsets and
+  object-SE deletion now parse exact operands but retain `pending_bindings`;
+  parser progress is not evidence these effects are rendered or sounded.
+- **20/20** unit groups passed on Host, Mac arm64, Intel/Rosetta, Windows/Wine,
+  ASan/UBSan. Original-data suites inventory-engine, game, input, combat and
+  audio passed on each; frontend/doors/cemetery/Steve replays passed. Logs:
+  `build/validation/world-control-20261005`. No physical controller/Windows PC.
+- **205/205 initial rooms load; 38 report blocked commands**, previously 72.
+  Newly reached RM_3180 DoorCall requests RM_3100 spawn 2, whereas this dump has
+  only two POS entries. The shared destination preflight reports that condition
+  in the event task and preserves the current room; no guessed spawn is used.
+  This exact failure path was checked on all target architectures and sanitizer.
+  The room scanner distinguishes initial load failures from runtime failures
+  after a successful load. No complete-playthrough claim.
+- Claude's concurrent HD/filter/supersampling changes are compiled and tested,
+  preserved in the working tree, and excluded from the engine commit.
+
+
+Both v0.5 package binaries were updated and their project/package starters checked
+with their own data, preserving user INIs. Mac arm64 and Intel/Rosetta launch;
+Windows/Wine root and package launch; full opening/lighter replay passed.
+Mac codesign deep/strict validation passed. Backup: archived/releases/world-control-before-20261005-233728.
+Package cemetery replay renders the original NPC meshes/motions and restores
+control; this is not evidence of complete zombie AI. Handgun ammo view inspected
+at room 0010; normal Mac SDL GUI inventory/examine ran for 90 frames.
+Manifests retain source hashes and list Claude's concurrent compiled sources.
+
 # Item camera-space and spatial event integration — 2026-10-05
 
 This supersedes the previous integration snapshot below.
