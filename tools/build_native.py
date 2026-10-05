@@ -56,6 +56,7 @@ def main():
         suffix = '.exe' if target == 'windows' else ''
         if not args.no_test and (data / 'native-data.version').is_file():
             run(binary_dir / ('recvx-game-tests' + suffix), data)
+            run(binary_dir / ('recvx-input-tests' + suffix), data)
     if args.package:
         if target == 'linux':
             parser.error('the packaged targets are Windows and macOS')

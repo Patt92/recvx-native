@@ -43,7 +43,10 @@ and its full animations do not yet exist.
 
 ## Movement and collision
 
-I/K walks forward/back, J/L turns and Shift+I runs. Body clips 0/4/9 and original
+I/K or W/S walks forward/back, J/L or A/D turns and Shift runs. A mapped controller
+uses its left stick/D-pad, with B/right shoulder/right trigger to run. Bindings,
+deadzone and menu repetition are configurable in controls.ini; see [CONTROLS.md](CONTROLS.md).
+Body clips 0/4/9 and original
 translation speed curves 0/3/6 drive locomotion at 60 Hz. Motion is inhibited
 while a menu/dialog/cinematic or script owns Claire. Room rectangular ATR walls
 use their original min corner/extents and script enable flags; swept movement

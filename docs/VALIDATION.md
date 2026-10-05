@@ -6,9 +6,9 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 |---|---|
 | macOS universal build | arm64 and x86_64 slices present |
 | Windows build | PE32+ x64 executable and bundled SDL2 |
-| CTest | 8/8 on macOS; 8/8 under Wine |
-| ASan + UBSan | 8/8 and original-data opening regression passed |
-| Intel/Rosetta | original-data opening/UI regression passed |
+| CTest | 9/9 on macOS; 9/9 under Wine |
+| ASan + UBSan | 9/9 and original-data opening/controller regressions passed |
+| Intel/Rosetta | original-data opening/UI and SDL virtual-controller regressions passed |
 | Disc data manifest | 12,702 files; 6,575,300,120 bytes; both packaged trees verified |
 | Room scene decoder | 205/205, 1,008,630 stage triangles, 470 active camera targets |
 | Five playable bodies | 272 supported body clips; all 7,901 frames sampled |
@@ -19,6 +19,9 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 | Side pack | original GM flag switches 8/10 normal cells and cursor bounds; frame row changes |
 | Native skin normals | weighted influence rotation tested separately from positions |
 | Packaged launch | own packaged data; Windows replay under Wine; bounded macOS SDL window/audio start |
+| Configurable input | keyboard/gamepad rebind, axis inversion, deadzone, trigger, short presses, repeat, focus and hot-plug/removal passed with SDL virtual GameControllers |
+| Gamepad opening flow | original cell skip/dialogue/inventory/lighter/Rodrigo/control-return path passed on arm64, Rosetta and Windows/Wine |
+| Physical controller | no mapped controller or joystick detected locally; physical Windows XInput hardware not tested |
 
 The original-data opening regression passes with 127 known unbound commands.
 Particle effects, lighter/flame object, full MASK/face/lip processing, camera

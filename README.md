@@ -39,8 +39,11 @@ Die Pakete liegen in `build/packages/macos-universal-v0.5` und
 über `Start.cmd`. Jeder Build enthält den vollständigen lokalen Datenexport;
 während des Spielstarts wird weder ISO noch AFS gelesen.
 
+Tastatur und SDL-Gamepads werden unterstützt; Windows nutzt auch XInput.
+Die Belegung und Stick-Totzone sind in `controls.ini` konfigurierbar
+([Steuerungsdokumentation](docs/CONTROLS.md)).
 Tab öffnet das Inventar, Pfeiltasten wählen, Enter bestätigt/interagiert, Escape
-geht zurück. I/K bewegt Claire vor/zurück, J/L dreht, Shift+I läuft schnell.
+geht zurück. W/S oder I/K bewegt Claire vor/zurück, A/D oder J/L dreht, Shift läuft schnell.
 Space verwendet den originalen Cinematic-Skip. Diagnosefunktionen sind dokumentiert.
 
 ## Ordner

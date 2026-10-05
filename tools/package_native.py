@@ -44,7 +44,7 @@ def main():
         if zig:
             shutil.copy2(zig / "lib/libcxx/LICENSE.TXT", output / "LLVM-LICENSE.txt")
             shutil.copy2(zig / "lib/libc/mingw/COPYING", output / "MinGW-LICENSE.txt")
-        (output / "Start.cmd").write_text('@echo off\r\n"%~dp0recvx-runtime.exe" --data "%~dp0data" --mods "%~dp0mods" %*\r\nif errorlevel 1 pause\r\n')
+        (output / "Start.cmd").write_text('@echo off\r\n"%~dp0recvx-runtime.exe" --data "%~dp0data" --mods "%~dp0mods" --controls "%~dp0controls.ini" %*\r\nif errorlevel 1 pause\r\n')
         data_destination = output / "data"
     else:
         contents = output / "RECVX Native.app/Contents"
@@ -62,7 +62,7 @@ def main():
         run("install_name_tool", "-change", linked, f"@executable_path/../Frameworks/{library_name}", str(binaries / "recvx-runtime"))
         run("install_name_tool", "-id", f"@rpath/{library_name}", str(frameworks / library_name))
         launcher = binaries / "Start"
-        launcher.write_text('#!/bin/sh\nrecvx_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$recvx_dir/recvx-runtime" --data "$recvx_dir/../Resources/data" --mods "$recvx_dir/../../../mods" "$@"\n')
+        launcher.write_text('#!/bin/sh\nrecvx_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$recvx_dir/recvx-runtime" --data "$recvx_dir/../Resources/data" --mods "$recvx_dir/../../../mods" --controls "$recvx_dir/../../../controls.ini" "$@"\n')
         launcher.chmod(0o755)
         with (contents / "Info.plist").open("wb") as info:
             plistlib.dump({"CFBundleExecutable": "Start", "CFBundleIdentifier": "org.recvx.native", "CFBundleName": "RECVX Native",
@@ -79,8 +79,10 @@ def main():
     shutil.copy2(ROOT / "native/third_party/stb/LICENSE", output / "STB-LICENSE.txt")
     shutil.copy2(ROOT / "docs/AUDIO.md", output / "AUDIO.md")
     shutil.copy2(ROOT / "docs/VALIDATION.md", output / "VALIDATION.md")
+    shutil.copy2(ROOT / "docs/CONTROLS.md", output / "CONTROLS.md")
+    shutil.copy2(ROOT / "controls.ini", output / "controls.ini")
     shutil.copy2(sdl_license, output / "SDL2-LICENSE.txt")
-    (output / "README.txt").write_text("RECVX native development build 0.5.0\n\nIncludes the complete locally cooked disc data: no ISO or AFS files are read by this build.\nOriginal room/player graphics, inventory/status sprites, item models and dialogs run natively.\nThe inventory has item management, equipment, combination routines and health.\nThe event interpreter executes original conditions, tasks and messages and reports pending world bindings.\nOriginal FMVs with stereo PCM, ADX music/voices, first-room actor motions/cameras and rectangular wall collision are integrated.\nFull effects, face animation, footsteps/sound banks, combat, room transitions, file/map screens and saves remain incomplete. This is not yet a complete playable game.\n\nWindows: open Start.cmd. macOS: open RECVX Native.app.\nTab: inventory; arrows: select; Enter: confirm/action; Escape: cancel/quit.\nI/K: forward/back; J/L: turn; Shift+I: run; Space: original cinematic skip; F2: wireframe.\nExamine: left/right rotate an original item model; Escape returns.\nUse --preview for the existing room/free-camera inspector.\n\nSee ASSETS-AND-MODS.md for replaceable TGA textures and model packets.\nSee GAMEPLAY-STATUS.md for the exact implemented and pending event/gameplay features.\nAI-assisted native port. Windows x64 and universal Intel/Apple Silicon macOS.\n")
+    (output / "README.txt").write_text("RECVX native development build 0.5.0\n\nIncludes the complete locally cooked disc data: no ISO or AFS files are read by this build.\nOriginal room/player graphics, inventory/status sprites, item models and dialogs run natively.\nThe inventory has item management, equipment, combination routines and health.\nThe event interpreter executes original conditions, tasks and messages and reports pending world bindings.\nOriginal FMVs with stereo PCM, ADX music/voices, first-room actor motions/cameras and rectangular wall collision are integrated.\nFull effects, face animation, footsteps/sound banks, combat, room transitions, file/map screens and saves remain incomplete. This is not yet a complete playable game.\n\nWindows: open Start.cmd. macOS: open RECVX Native.app.\nTab: inventory; arrows: select; Enter: confirm/action; Escape: cancel/quit.\nW/S or I/K: forward/back; A/D or J/L: turn; Shift: run; Space: cinematic skip; F2: wireframe.\nGamepad: left stick/D-pad; A: action; B: run/cancel; Y: inventory; Start: skip.\nEdit controls.ini and restart to change keyboard/gamepad bindings and deadzone. See CONTROLS.md.\nExamine: left/right rotate an original item model; Escape returns.\nUse --preview for the existing room/free-camera inspector.\n\nSee ASSETS-AND-MODS.md for replaceable TGA textures and model packets.\nSee GAMEPLAY-STATUS.md for the exact implemented and pending event/gameplay features.\nAI-assisted native port. Windows x64 and universal Intel/Apple Silicon macOS.\n")
     if args.platform == "macos":
         run("codesign", "--force", "--sign", "-", str(output / "RECVX Native.app"))
     print(output)

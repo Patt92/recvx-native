@@ -8,6 +8,7 @@
 #include "events.h"
 #include "world.h"
 #include "movie.h"
+#include "input.h"
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -24,13 +25,13 @@ namespace {
 void sdl_check(bool ok){if(!ok)throw std::runtime_error(SDL_GetError());}
 struct SdlQuit{~SdlQuit(){SDL_Quit();}};
 struct Options {
-    fs::path data="data",mods,screenshot,replay,state;
+    fs::path data="data",mods,screenshot,replay,state,controls,write_controls,controller_mappings;
     std::string room="RM_0000.RDX";
     int frames=0;
     unsigned player=10;
     std::size_t camera=0,spawn=0,motion=42;
     std::int64_t animation_frame=0;
-    bool preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,camera_explicit=false;
+    bool preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,camera_explicit=false,list_controllers=false;
 };
 Options options(int argc,char** argv){
     Options o;
@@ -42,6 +43,10 @@ Options options(int argc,char** argv){
         else if(arg=="--mods")o.mods=fs::u8path(value());
         else if(arg=="--replay")o.replay=fs::u8path(value());
         else if(arg=="--state")o.state=fs::u8path(value());
+        else if(arg=="--controls")o.controls=fs::u8path(value());
+        else if(arg=="--write-controls")o.write_controls=fs::u8path(value());
+        else if(arg=="--controller-mappings")o.controller_mappings=fs::u8path(value());
+        else if(arg=="--list-controllers")o.list_controllers=true;
         else if(arg=="--preview")o.preview=true;
         else if(arg=="--inventory")o.inventory=true;
         else if(arg=="--room")o.room=value();
@@ -74,6 +79,9 @@ Options options(int argc,char** argv){
                        "--data <exported-native-data> --mods <mod-directory> --room <RM_0000.RDX>\n"
                        "Tab: inventory | Arrows: selection | Enter: confirm/action | Esc: cancel/quit\n"
                        "I/K: forward/back | J/L: turn | Shift+I: run | Space: cinematic skip | F2: wireframe\n"
+                       "Gamepad: left stick/D-pad, A: action, B: run/cancel, Y: inventory, Start: skip\n"
+                       "--controls <controls.ini> --write-controls <new.ini> --controller-mappings <SDL mappings.txt>\n"
+                       "--list-controllers: show detected devices without loading the game\n"
                        "--headless --inventory --screenshot <new.bmp> --frames <count>\n"
                        "--replay <input.txt> --state <new.json> for deterministic input verification\n"
                        "--preview: legacy room/animation/free-camera inspector without game UI\n"
@@ -109,7 +117,13 @@ int verify_players(const fs::path& data){
 }
 int main(int argc,char** argv){
     try{
-        auto args=options(argc,argv);_Make_SinTable();
+        auto args=options(argc,argv);if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_controls);std::cout<<args.write_controls<<'\n';return 0;}_Make_SinTable();
+        const bool explicit_controls=!args.controls.empty();if(!explicit_controls)args.controls=args.data.parent_path()/"controls.ini";
+        const auto input_config=explicit_controls||fs::exists(args.controls)?recvx::InputConfig::read(args.controls):recvx::InputConfig::defaults();
+        if(args.list_controllers){SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0);SdlQuit quit;
+            if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
+            recvx::InputManager devices(input_config);std::cout<<devices.controllers()<<" mapped controller(s), "<<SDL_NumJoysticks()<<" joystick device(s)\n";
+            for(int i=0;i<SDL_NumJoysticks();++i)std::cout<<i<<": "<<SDL_JoystickNameForIndex(i)<<" ("<<(SDL_IsGameController(i)?"gamepad mapped":"mapping required")<<")\n";return 0;}
         if(args.mods.empty())args.mods=args.data.parent_path()/"mods";
         if(args.verify_players)return verify_players(args.data);
         if(!args.preview&&!args.verify&&(!fs::is_regular_file(args.data/"native-data.version")||!fs::is_directory(args.data/"rooms")))throw std::runtime_error("exported native data missing: run recvx-assets on the extracted disc, or use --preview for archive inspection");
@@ -169,7 +183,8 @@ int main(int argc,char** argv){
         if(player)std::cout<<"Animated SYSTEM/"<<recvx::asset_number(args.player)<<".bin: "<<player->bones()<<" bones, motion "<<motion<<", "<<player->motion_frames(motion)<<" frames\n";
         std::map<unsigned,std::vector<std::string>> replay;
         if(!args.replay.empty()){std::ifstream file(args.replay);if(!file)throw std::runtime_error("replay input missing");std::string line;unsigned previous=0;while(std::getline(file,line)){if(line.empty()||line[0]=='#')continue;std::istringstream row(line);unsigned frame;std::string action;if(!(row>>frame)||frame<previous)throw std::runtime_error("invalid replay frame order");previous=frame;std::getline(row,action);replay[frame].push_back(action);}}
-        auto input=[&](recvx::MenuInput key){if(!ui)return;if(dialog.active()&&!menu.active&&(key==recvx::MenuInput::Confirm||key==recvx::MenuInput::Cancel)){events->confirm_dialog();return;}if(key==recvx::MenuInput::Open&&!menu.active&&events&&(events->flags[5][0]&4))return;if(menu.active||key==recvx::MenuInput::Open){menu.input(key,inventory);events->menu_open=menu.active;if(menu.use_item){events->use(menu.use_item);menu.use_item=0;}return;}if(key==recvx::MenuInput::Confirm)events->interact(actor.position,actor.yaw);};
+        recvx::GameplayInput gameplay_input(inventory,menu,dialog,events.get());gameplay_input.interact=[&]{if(events)events->interact(actor.position,actor.yaw);};
+        auto input=[&](recvx::MenuInput key){if(ui)gameplay_input.menu_input(key);};
         int replay_move=0,replay_turn=0;bool replay_run=false;
         auto replay_input=[&](unsigned frame){if(const auto found=replay.find(frame);found!=replay.end())for(const auto& line:found->second){std::istringstream row(line);std::string action;row>>action;if(action=="keys"){replay_move=replay_turn=0;replay_run=false;std::string key;while(row>>key){if(key=="forward")replay_move=1;else if(key=="back")replay_move=-1;else if(key=="left")replay_turn=-1;else if(key=="right")replay_turn=1;else if(key=="run")replay_run=true;else if(key!="none")throw std::runtime_error("unknown replay key: "+key);}}else if(action=="skip")events->skip_cinematic();else if(action=="inventory")input(recvx::MenuInput::Open);else if(action=="confirm")input(recvx::MenuInput::Confirm);else if(action=="cancel")input(recvx::MenuInput::Cancel);else if(action=="up")input(recvx::MenuInput::Up);else if(action=="down")input(recvx::MenuInput::Down);else if(action=="left")input(recvx::MenuInput::Left);else if(action=="right")input(recvx::MenuInput::Right);else if(action=="position"){if(!(row>>actor.position.x>>actor.position.y>>actor.position.z>>actor.yaw)||!std::isfinite(actor.position.x)||!std::isfinite(actor.position.y)||!std::isfinite(actor.position.z))throw std::runtime_error("invalid replay position");follow();}else throw std::runtime_error("unknown replay action: "+action);}};
         auto locomote=[&](int move,bool run,int turn){
@@ -188,7 +203,10 @@ int main(int argc,char** argv){
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
             report();return events&&!events->errors.empty()?1:0;
         }
-        SDL_SetMainReady();sdl_check(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_AUDIO)==0);SdlQuit quit;
+        SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_AUDIO)==0);SdlQuit quit;
+        if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
+        recvx::InputManager devices(input_config);
+        std::cout<<"Input: keyboard and "<<devices.controllers()<<" controller(s); "<<(fs::exists(args.controls)?args.controls.string():"built-in defaults")<<'\n';
         std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)> window(SDL_CreateWindow("RECVX native runtime",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,960,720,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI),SDL_DestroyWindow);sdl_check(bool(window));
         auto* raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
         if(!raw_renderer)raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_SOFTWARE);
@@ -201,17 +219,10 @@ int main(int argc,char** argv){
         while(running){
             SDL_Event event;
             while(SDL_PollEvent(&event)){
+                devices.event(event);
                 if(event.type==SDL_QUIT)running=false;
                 if(event.type==SDL_KEYDOWN&&!event.key.repeat){
-                    if(ui){bool handled=true;switch(event.key.keysym.sym){
-                        case SDLK_TAB:input(recvx::MenuInput::Open);break;
-                        case SDLK_RETURN:input(recvx::MenuInput::Confirm);break;
-                        case SDLK_ESCAPE:if(menu.active||dialog.active())input(recvx::MenuInput::Cancel);else running=false;break;
-                        case SDLK_UP:input(recvx::MenuInput::Up);break;case SDLK_DOWN:input(recvx::MenuInput::Down);break;
-                        case SDLK_LEFT:input(recvx::MenuInput::Left);break;case SDLK_RIGHT:input(recvx::MenuInput::Right);break;
-                        case SDLK_F2:wireframe=!wireframe;break;case SDLK_SPACE:events->skip_cinematic();break;default:handled=false;break;}if(handled)continue;
-                        if(event.key.keysym.sym!=SDLK_HOME&&event.key.keysym.sym!=SDLK_f)continue;
-                    }
+                    if(ui)continue; // Configured gameplay actions are consumed on fixed ticks.
                     switch(event.key.keysym.sym){
                     case SDLK_ESCAPE:running=false;break;
                     case SDLK_TAB:wireframe=!wireframe;break;
@@ -241,10 +252,12 @@ int main(int argc,char** argv){
             if(!paused)accumulator+=dt;
             while(accumulator>=1.0/60){
                 accumulator-=1.0/60;
+                const auto physical=devices.tick();
+                if(ui){if(gameplay_input.apply(physical)){running=false;break;}if(physical.hit(recvx::Action::Wireframe))wireframe=!wireframe;}
                 replay_input(input_tick++);
                 if(events){events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw);events->tick();}
                 if(world)world->tick();follow();movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
-                locomote(replay_move?replay_move:keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K],replay_run||keys[SDL_SCANCODE_LSHIFT],replay_turn?replay_turn:keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]);
+                locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());
             }
             compose();image.draw(scene,world?world->camera(scene,camera):camera,wireframe);if(world)world->overlay(image);movie.draw(image);if(ui)ui->draw(image,inventory,menu,dialog,unsigned(frame));
             sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);

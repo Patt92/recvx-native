@@ -69,6 +69,8 @@ A source-only clone does not contain the game assets.
 - `recvx_scene`: original model/texture decoding, motion/skin and CPU rendering.
 - `recvx_game`: original item-combination C, inventory, messages, event VM,
   first-room actor/camera/light bindings, ADX mixer and native movie playback.
+- `recvx_input`: configurable keyboard/SDL GameController actions and shared
+  cinematic/dialogue/inventory routing; see [CONTROLS.md](CONTROLS.md).
 - `recvx-runtime`: SDL window/input/audio and fixed 60 Hz simulation.
 
 The GUI and deterministic headless replays use the same movement and event path.
@@ -78,13 +80,16 @@ cinematic flags gate movement and inventory access.
 
 ## Verification
 
-Eight CTest groups cover compressed input, archives/rooms, Ninja math/matrices,
-scene rendering, player motion/skin, inventory/events and audio/movies. Real-data
+Nine CTest groups cover compressed input, archives/rooms, Ninja math/matrices,
+scene rendering, player motion/skin, inventory/events, audio/movies and
+keyboard/controller input. Real-data
 `recvx-game-tests data` uses the original RM_0000 scripts to skip the intro,
 acknowledge the in-cell hint, equip the lighter, satisfy its real floor trigger,
 run the Rodrigo event and assert the original return position/control state. It
 also checks a wall and the original empty-slot atlas pixel. It does not teleport
 Claire or dispatch the lighter event directly.
+`recvx-input-tests data` checks the same opening with SDL's virtual GameController,
+including remapping, menu repeats, focus changes and removal while moving.
 
 ```sh
 build/native/recvx-runtime --data data --headless --replay tests/native/replays/lighter.txt --frames 3000 --state build/native/lighter-state.json
