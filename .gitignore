@@ -1,0 +1,24 @@
+# Private disc data, old history and obsolete builds
+/archived/
+/data/
+/build/
+
+# Local tools and OS/editor caches
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+venv/
+.wineprefix/
+.idea/
+.vscode/
+
+# Proprietary SDKs and generated decompilation artifacts
+/include/recvx-decomp-*/
+/context/
+*.iso
+*.afs
+*.AFS
+dwarfdump.txt
+objdiff.exe
+objdiff.json

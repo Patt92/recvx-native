@@ -1,0 +1,5 @@
+0 inventory
+1 confirm
+2 down
+3 confirm
+4 right

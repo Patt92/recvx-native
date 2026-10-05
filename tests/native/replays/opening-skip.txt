@@ -1,0 +1,2 @@
+# Original cinematic skip flag; no diagnostic movement or direct event dispatch.
+1 skip

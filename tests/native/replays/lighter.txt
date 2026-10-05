@@ -1,0 +1,6 @@
+# Use the original intro-skip branch, acknowledge the original hint, equip the lighter.
+1 skip
+50 confirm
+100 inventory
+101 confirm
+102 confirm

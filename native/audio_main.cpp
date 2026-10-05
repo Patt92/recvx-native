@@ -1,0 +1,5 @@
+#include "audio.h"
+#include "asset_io.h"
+#include <fstream>
+#include <iostream>
+int main(int argc,char** argv){try{if(argc!=3)throw std::runtime_error("usage: recvx-audio input.adx new.wav");const auto pcm=recvx::decode_adx(recvx::read_asset_file(argv[1],32*1024*1024));if(std::filesystem::exists(argv[2]))throw std::runtime_error("output exists");std::ofstream out(argv[2],std::ios::binary);auto word=[&](unsigned n){out.put(char(n));out.put(char(n>>8));};auto number=[&](unsigned n){word(n);word(n>>16);};out.write("RIFF",4);number(36+pcm.samples.size()*2);out.write("WAVEfmt ",8);number(16);word(1);word(pcm.channels);number(pcm.rate);number(pcm.rate*pcm.channels*2);word(pcm.channels*2);word(16);out.write("data",4);number(pcm.samples.size()*2);for(auto v:pcm.samples)word(std::uint16_t(v));out.close();if(!out)throw std::runtime_error("audio output failed");std::cout<<pcm.frames()<<" frames, "<<pcm.channels<<" channels, "<<pcm.rate<<" Hz\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

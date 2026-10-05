@@ -1,0 +1,90 @@
+#include "inventory.h"
+#include "ui.h"
+#include "events.h"
+#include "world.h"
+#include "movie.h"
+#include "asset_io.h"
+#include "binary_view.h"
+#include <iostream>
+#include <stdexcept>
+#include <algorithm>
+#include <cstring>
+using namespace recvx;
+static void check(bool v,const char* message){if(!v)throw std::runtime_error(message);}
+static void put(std::vector<std::uint8_t>& b,std::size_t p,unsigned n){for(unsigned i=0;i<4;++i)b.at(p+i)=std::uint8_t(n>>(8*i));}
+static std::vector<std::uint8_t> fixture(){
+    std::vector<std::uint8_t> b(1500);float version=1.73f;std::memcpy(b.data(),&version,4);put(b,16,64);put(b,28,1100);put(b,64+0x38,1400);
+    put(b,1100,16);put(b,1104,18);put(b,1108,80);put(b,1112,110); // init, scan, two events.
+    // scan starts event 0 exactly once, after lighter equipment.
+    const std::vector<std::uint8_t> scan={1,22,4,4,0,0,0,1,0x26,1,5,4,0,0,0,0,0x14,0,0,0,3,0,0,0};
+    std::copy(scan.begin(),scan.end(),b.begin()+1118);
+    const std::vector<std::uint8_t> event={0xf8,0xf9,3,0,0x1f,0,0,1,0xff,0};std::copy(event.begin(),event.end(),b.begin()+1180);
+    b[1210]=0x7f; // Unknown commands must block with their PC retained.
+    put(b,1400,1);put(b,1404,8);b[1408]='A'-32;b[1410]=255;b[1411]=255;return b;
+}
+int main(int argc,char** argv){try{
+    _Make_SinTable();Inventory inv;check(inv.slots()[1]==0x370001&&inv.slots()[2]==0x910001,"new-game items differ");
+    check(inv.equip(1)&&inv.weapon()==1,"lighter equip");check(inv.equip(1)&&!inv.weapon(),"lighter unequip");check(!inv.equip(2),"manual equipped as weapon");
+    check(inv.acquire(21,1)&&inv.acquire(22,1),"herb pickup");unsigned green=0,red=0;for(unsigned i=2;i<12;++i){if(Inventory::id(inv.slots()[i])==21)green=i;if(Inventory::id(inv.slots()[i])==22)red=i;}
+    check(inv.combine(green,red),"original herb recipe");unsigned mixed=0;for(unsigned i=2;i<12;++i)if(Inventory::id(inv.slots()[i])==25)mixed=i;check(mixed!=0,"green/red result differs");inv.hp=12;check(inv.heal(mixed)&&inv.hp==160,"mixed-herb healing");
+    check(inv.acquire(5,18)&&inv.acquire(12,30),"weapon/ammo pickup");unsigned gun=0,ammo=0;for(unsigned i=2;i<12;++i){if(Inventory::id(inv.slots()[i])==5)gun=i;if(Inventory::id(inv.slots()[i])==12)ammo=i;}
+    inv.slots()[gun]=Inventory::pack(5,7);check(inv.combine(ammo,gun),"original handgun reload");gun=0;for(unsigned i=2;i<12;++i)if(Inventory::id(inv.slots()[i])==5)gun=i;check(Inventory::quantity(inv.slots()[gun])==18,"handgun magazine limit");check(inv.equip(gun)&&inv.weapon()==3,"handgun weapon mapping");check(inv.deposit(gun)&&!inv.weapon(),"equipped box deposit");check(inv.withdraw(0),"box withdrawal");
+    Inventory full;full.slots()[2]=0;for(unsigned i=0;i<8;++i)check(full.acquire(20,1),"filling inventory");auto saved=full.items;check(!full.acquire(20,1)&&full.items==saved,"full pickup must roll back");
+    Inventory big;big.slots()[2]=0;check(big.acquire(1,1)&&big.occupied()==2,"large weapon slot accounting");
+    MessageDialog dialog;Inventory lighter;auto data=fixture();EventVm vm(data,lighter,dialog);vm.initialize();vm.menu_open=true;vm.tick();check(vm.dispatched.empty(),"event before equip");StatusMenu menu;
+    menu.input(MenuInput::Open,lighter);menu.input(MenuInput::Confirm,lighter);menu.input(MenuInput::Confirm,lighter);check(lighter.weapon()==1&&!menu.active,"menu equip must close");
+    vm.menu_open=false;vm.tick();check(vm.dispatched==std::vector<unsigned>{0},"equipment-driven script dispatch");vm.tick();vm.tick();vm.tick();check(dialog.active()&&message_text(dialog.page())=="A","sleep/resume/message");
+    vm.confirm_dialog();check(!dialog.active(),"confirm dialog");vm.start(1,1);vm.tick();check(vm.errors.size()==1,"unknown command did not block");vm.tick();check(vm.errors.size()==1,"blocked command retried");
+    vm.set_flag(1,33,0);check(vm.flag(1,33)&&!vm.flag(1,32),"MSB flag order");vm.set_flag(1,33,2);check(!vm.flag(1,33),"flag toggle");
+    auto broken=data;broken[1118]=3;MessageDialog d;EventVm bad(broken,lighter,d);bad.tick();check(!bad.errors.empty(),"unbalanced conditional accepted");
+    for(unsigned mode=0;mode<6;++mode){auto compare=data;compare[1118]=1;compare[1119]=12;compare[1120]=6;compare[1121]=23;compare[1122]=mode;compare[1123]=0;compare[1124]=5;compare[1125]=4;compare[1126]=1;compare[1127]=0;compare[1128]=0;compare[1129]=0;compare[1130]=3;compare[1131]=0;compare[1132]=0;
+        MessageDialog msg;EventVm conditional(compare,lighter,msg);conditional.tick();const bool expected=mode==0||mode==2||mode==4;check(conditional.flag(4,1)==expected,"original byte-comparison operands/order");}
+    // TGA orientation and exported PS2 alpha normalization.
+    const auto directory=std::filesystem::temp_directory_path()/"recvx-asset-test";std::filesystem::create_directories(directory);const auto file=directory/"roundtrip.tga";if(std::filesystem::exists(file))std::filesystem::remove(file);
+    SceneTexture texture{2,2,{0x80112233,0x40445566,0x00778899,0x80aabbcc}};write_tga(file,texture);auto loaded=read_tga(file);check(loaded.pixels==std::vector<std::uint32_t>({0xff112233,0x80445566,0x00778899,0xffaabbcc}),"TGA color/orientation/alpha");std::filesystem::remove(file);
+    const auto base=directory/"data",mods=directory/"mods",relative=std::filesystem::path("textures/rooms/RM_0000/0000.tga");
+    if(std::filesystem::exists(base/relative))std::filesystem::remove(base/relative);if(std::filesystem::exists(mods/relative))std::filesystem::remove(mods/relative);
+    write_tga(base/relative,texture);SceneTexture hd{4,4,std::vector<std::uint32_t>(16,0x80abcdef)};write_tga(mods/relative,hd);
+    Scene mod_scene;mod_scene.textures={texture};apply_texture_files(mod_scene,base,mods,"rooms/RM_0000");check(mod_scene.textures[0].width==4&&mod_scene.textures[0].pixels[0]==0xffabcdef,"HD texture override precedence");
+    std::filesystem::remove(mods/relative);apply_texture_files(mod_scene,base,mods,"rooms/RM_0000");check(mod_scene.textures[0].width==2,"base texture fallback");std::filesystem::remove(base/relative);
+    // Common 5 is six bytes, including padding; following commands must run.
+    auto common=data;const std::vector<std::uint8_t> commands={0x69,5,1,2,3,0,5,4,7,0,0,0,0xff,0};std::copy(commands.begin(),commands.end(),common.begin()+1180);
+    MessageDialog cm;EventVm parsed(common,lighter,cm);std::vector<EventCommand> bound;parsed.binding=[&](const EventCommand& c){bound.push_back(c);return true;};parsed.start(0,0);parsed.tick();
+    check(parsed.errors.empty()&&bound.size()==1&&bound[0].bytes.size()==6&&parsed.flag(4,7),"Common 5 length desynchronized next opcode");
+    auto cinematic=data;cinematic[1180]=0x12;cinematic[1181]=3;cinematic[1182]=0xff;cinematic[1183]=0;MessageDialog cd;EventVm cine(cinematic,lighter,cd);cine.start(0,0);cine.tick();
+    check((cine.flags[5][0]&4)&&cine.skip_cinematic(),"original CineSet/skip flags");check(!cine.interact({0,0,0},0),"interaction during cinematic");
+    MessageDialog timed;timed.show({0xff02,2,0xffff},0);check(!timed.tick()&&timed.active()&&timed.tick()&&!timed.active(),"original timed empty message");
+    Inventory bag;MessageDialog bag_message;EventVm bag_vm(data,bag,bag_message);StatusMenu bag_menu;bag_menu.input(MenuInput::Open,bag);
+    for(unsigned i=0;i<20;++i)bag_menu.input(MenuInput::Right,bag);check(bag_menu.selected==9&&bag.capacity()==8,"cursor enters unavailable bag slots");
+    bag_vm.set_flag(11,4,0);for(unsigned i=0;i<20;++i)bag_menu.input(MenuInput::Right,bag);check(bag_menu.selected==11&&bag.capacity()==10,"original bag flag does not unlock slots");
+    bag_vm.set_flag(11,4,1);bag_menu.input(MenuInput::Down,bag);check(bag_menu.selected==9&&bag.capacity()==8,"cursor remains on a locked slot");
+    if(argc>1){const auto root=std::filesystem::u8path(argv[1]);auto room=read_asset_file(root/"rooms/RM_0000.RDT",64*1024*1024);auto stage=decode_scene(room);Inventory game;MessageDialog message;
+        auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t animation=0;AudioMixer audio(root);RoomWorld world(room,stage,actor,motion,animation,audio,root);MoviePlayer movie(root,{},audio);EventVm real(room,game,message);
+        real.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};
+        real.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};real.audio_active=[&](unsigned i){return audio.active(i);};real.movie_active=[&]{return movie.active();};
+        auto tick=[&](){real.check_floor(actor.position,actor.yaw);real.tick();world.tick();movie.tick();audio.mix();};
+        real.initialize();tick();check(world.player_hidden&&(real.flags[5][0]&4),"opening exposes freely moving preview Claire");
+        check(real.skip_cinematic(),"original opening is not skippable");for(unsigned i=0;i<60;++i)tick();
+        check(real.errors.empty()&&message.active()&&message.index()==4&&world.event_camera&&world.event_camera_index==37,"original cell hint/camera event failed");
+        check(message_text(message.page()).find("lighter")!=std::string::npos,"original hint text");check(!real.interact({33,0,33},0),"outside-cell hint interaction accepted during opening");
+        real.confirm_dialog();for(unsigned i=0;i<40;++i)tick();check(!(real.flags[5][0]&4),"hint confirmation does not return control");
+        StatusMenu screen;screen.input(MenuInput::Open,game);screen.input(MenuInput::Confirm,game);screen.input(MenuInput::Confirm,game);check(game.weapon()==1&&!screen.active,"real inventory lighter equipment");
+        tick();check(real.flag(1,99)&&std::find(real.dispatched.begin(),real.dispatched.end(),0)!=real.dispatched.end(),"equipment/floor-driven Rodrigo event not dispatched");
+        for(unsigned i=0;i<3000;++i)tick();check(real.errors.empty(),"opening original bytecode blocked");
+        check(!world.player_hidden&&!world.player_scripted&&!(real.flags[5][0]&4)&&std::abs(actor.position.x-30.6f)<.01f&&std::abs(actor.position.z-33.9f)<.01f,"opening does not restore original actor position/control");
+        check(std::find(audio.played.begin(),audio.played.end(),"VOICE1/0016")!=audio.played.end(),"original Rodrigo speech missing");
+        auto composed=stage;world.append(composed);check(composed.triangles.size()>stage.triangles.size(),"room actors missing");
+        world.bind({0xa,0,0,0,{0xa,4,0,0}});const auto moved=world.move({0,0,3},{0,0,-4});check(moved.z>1.f,"original rectangular wall is ignored");
+        GameUi ui(root);screen.active=true;message=MessageDialog{};SoftwareRenderer render(640,480);ui.draw(render,game,screen,message,0);
+        auto atlas=read_tga(root/"textures/menu/0004.tga");const auto source=atlas.pixels[(12*atlas.height/256)*atlas.width+17*atlas.width/256];
+        check((source>>24)==255&&render.pixels()[200*640+494]==source,"empty inventory slot does not draw original atlas tile");
+        const auto no_bag=render.pixels()[333*640+494];game.side_pack=true;ui.draw(render,game,screen,message,0);
+        check(render.pixels()[333*640+494]==source&&no_bag!=source,"ninth/tenth slot row is visible before getting the bag");game.side_pack=false;
+        screen.active=false;std::fill(render.canvas().begin(),render.canvas().end(),0xffd04090);message.show({'A'-32,0xffff},0);ui.draw(render,game,screen,message,0);
+        check(render.pixels()[365*640+55]==0xffd04090,"dialogue paints a background panel");unsigned white=0,black=0;
+        for(unsigned y=374;y<402;++y)for(unsigned x=68;x<96;++x){white+=render.pixels()[y*640+x]==0xffffffff;black+=render.pixels()[y*640+x]==0xff000000;}
+        check(white&&black,"dialogue glyph does not have a white core and black edge");
+        std::cout<<"Original RM_0000 skip/hint/equipment/Rodrigo/control flow verified without teleporting; "<<real.pending_bindings.size()<<" effects/other bindings remain pending.\n";
+    }
+    std::cout<<"Inventory, original combination routines, dialogs, event waits/branches and asset tests passed.\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -1,0 +1,8 @@
+# Follow the original opening event, equip the lighter, then run after control returns.
+1 skip
+50 confirm
+100 inventory
+101 confirm
+102 confirm
+3000 keys forward run
+3120 keys none

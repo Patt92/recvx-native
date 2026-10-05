@@ -1,0 +1,81 @@
+# Native assets and mods 0.5
+
+The productive tree is `data/`. Runtime and packages read regular loose files,
+not ISO/AFS containers. All original dumped files and split archive entries are
+included, including assets whose gameplay systems are still pending. Room,
+playable-player, menu, font and item textures are cooked; the opening room also
+has 53 exported NPC/object/room-item textures. All 18 movies have native packets.
+`archived/` is historical storage, not an input to normal builds or launches.
+
+## Overrides
+
+Put replacements under the same relative texture path in external `mods/`.
+Windows places it beside Start.cmd; macOS places it beside RECVX Native.app.
+`--mods <directory>` selects another location. Reload/restart after changes.
+External mods do not alter the app signature.
+
+| Asset | Path in data/mods |
+|---|---|
+| Stage texture | `textures/rooms/RM_0000/0000.tga` |
+| Playable Claire texture | `textures/players/0010/0000.tga` |
+| Opening cinematic Claire texture | `textures/npcs/RM_0000/0000/0000.tga` |
+| Rodrigo texture | `textures/npcs/RM_0000/0001/0000.tga` |
+| Room object texture | `textures/objects/RM_0000/0004/0000.tga` |
+| Room item texture | `textures/room-items/RM_0000/0000/0000.tga` |
+| Lighter examination texture | `textures/items/0055/0000.tga` |
+| Menu atlases | `textures/menu/0000.tga` through `0004.tga` |
+| Glyph atlases | `textures/fonts/0000.tga` through `0003.tga` |
+| Stage geometry/events | `rooms/RM_0000.RDT` |
+| Player model/motion/skin packet | `players/0010.bin` (override only) |
+| Item model packet | `items/0055.bin` (override only) |
+| Voice or music | `audio/VOICE1/0000.adx`, `audio/BGM1/0000.adx` (override only) |
+| Native film/audio packet | `movies/0000.rvv` |
+
+Texture IDs are zero-based per bundle. The cinematic and playable Claire are
+separate original asset bundles and require their respective overrides. Loose
+original archive records remain under `archives/ARCHIVE_NAME/0000.bin`; playable
+Claire defaults to SYSTEM/0010.bin, and item ID 55 to ITEM1/0054.bin.
+
+Use uncompressed RGB24/RGBA32 TGA without color maps, 1–8192 pixels per dimension.
+Higher resolution preserves original UVs and asset identities. Original PS2
+palette/alpha rules are applied during export; TGA uses ordinary 0–255 alpha.
+The 2D renderer blends alpha. The 3D renderer currently discards fully transparent
+pixels and draws other pixels opaque; material transparency/filtering/mipmaps
+remain incomplete. Invalid overrides fail with a diagnostic.
+
+## Cooking and integrity
+
+The existing complete export can be checked without any historical source:
+
+```sh
+python3 tools/prepare_native_data.py --output data --verify
+```
+
+To rebuild the manifest after intentional cooking changes:
+
+```sh
+python3 tools/prepare_native_data.py --output data --refresh
+```
+
+Refresh records the new tree; use verify for integrity checking. It does not
+validate new files against the disc. A separate fresh export from an already
+extracted directory is supported explicitly with `--source <dump-directory>
+--output <new-directory>`; it is not required for the current build.
+`recvx-world-assets data RM_0000` exports the supported opening actor/object
+textures and refuses overwrites. `python3 tools/cook_movies.py --data data`
+converts loose dumped PSS movies with build-time FFmpeg/ffprobe; existing outputs
+are skipped. The game itself needs neither FFmpeg nor the dumped PSS files.
+See AUDIO.md for conversion format and synchronization.
+
+## Model import boundary
+
+The current model override accepts the supported original Ninja packet format,
+including compatible skeleton, skin and motion records. glTF/FBX/RE Engine model
+import and automatic retargeting are not implemented. Importing a RE2 Remake
+model will require geometry/material conversion, rest-pose conversion, mapping
+to Claire's 22-bone body skeleton and compatible weights. Merely renaming an FBX
+file to .bin cannot work. PlayerAsset is separated from inventory/event state,
+providing a boundary for a future importer.
+
+Cooked data and packages are local ignored outputs, not part of source Git.
+Packages include the full manifest and external empty mods directory.
