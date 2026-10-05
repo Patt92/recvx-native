@@ -4,6 +4,7 @@
 #include "movie.h"
 #include "asset_io.h"
 #include <fstream>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 using namespace recvx;
@@ -39,6 +40,22 @@ int main(int argc,char** argv){try{
             key(input,SDL_SCANCODE_RETURN,true);gameplay.apply(input.tick());check(skips==1,"keyboard OK does not skip door");for(unsigned i=0;i<30;++i)gameplay.apply(input.tick());check(skips==1,"held keyboard OK skips repeatedly");key(input,SDL_SCANCODE_RETURN,false);input.tick();
             button(input,joystick,SDL_CONTROLLER_BUTTON_A,true);gameplay.apply(input.tick());check(skips==2,"controller OK does not skip door");for(unsigned i=0;i<30;++i)gameplay.apply(input.tick());check(skips==2,"held controller OK skips repeatedly");button(input,joystick,SDL_CONTROLLER_BUTTON_A,false);input.tick();
             key(input,SDL_SCANCODE_TAB,true);gameplay.apply(input.tick());check(!menu.active,"inventory opens during door transition");key(input,SDL_SCANCODE_TAB,false);input.tick();}
+        for(const bool controller:{false,true}){
+            Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(21,1);inv.slots()[3]=Inventory::pack(22,1);StatusMenu menu;menu.active=true;menu.selected=2;MessageDialog room;
+            std::unique_ptr<GameUi> ui;if(argc>1)ui=std::make_unique<GameUi>(std::filesystem::u8path(argv[1]));menu.message_source=[&](unsigned index){return ui?ui->system_message(index):Message{'L'-32,0xff02,0,'?'-32,0xff04,'Y'-32,0xff04,'N'-32,0xffff};};
+            std::vector<std::uint8_t> bytes(1500);float version=1.73f;std::memcpy(bytes.data(),&version,4);auto put=[&](unsigned p,unsigned n){for(unsigned i=0;i<4;++i)bytes.at(p+i)=std::uint8_t(n>>(8*i));};put(16,64);put(28,1100);put(64+0x38,1400);put(1100,12);put(1104,14);put(1108,30);EventVm events(bytes,inv,room);
+            GameplayInput gameplay(inv,menu,room,&events);std::vector<unsigned> sounds;gameplay.sound=[&](unsigned sound){sounds.push_back(sound);};auto tick=[&]{check(!gameplay.apply(input.tick()),"inventory control quits game");};
+            auto held=[&](SDL_Scancode code,SDL_GameControllerButton b,bool down){if(controller)button(input,joystick,b,down);else key(input,code,down);};
+            auto press=[&](SDL_Scancode code,SDL_GameControllerButton b){held(code,b,true);tick();held(code,b,false);tick();};
+            auto ok=[&]{press(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A);};auto down=[&]{press(SDL_SCANCODE_DOWN,SDL_CONTROLLER_BUTTON_DPAD_DOWN);};
+            ok();down();down();ok();press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);ok();check(inv.contains(25)&&!menu.combining&&menu.active,"keyboard/gamepad herb Combine failed");
+            inv.slots()[2]=Inventory::pack(128,1);inv.slots()[3]=Inventory::pack(50,1);menu.selected=2;ok();down();ok();check(menu.examining,"keyboard/gamepad cannot examine case");ok();check(menu.message.index()==181,"keyboard/gamepad lockpick question missing");
+            held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,true);tick();for(unsigned i=0;i<30;++i)tick();check(menu.message.active()&&!menu.opening_item&&inv.contains(128),"held OK answers its own new question");held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,false);tick();
+            while(menu.message.active()&&!menu.message.choices())ok();press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);ok();check(inv.contains(128)&&!menu.opening_item,"keyboard/gamepad No opens case");
+            ok();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);check(!menu.message.active()&&menu.examining&&inv.contains(128),"keyboard/gamepad cancel closes inventory or consumes case");
+            ok();while(menu.message.active()&&!menu.message.choices())ok();ok();for(unsigned i=0;i<23;++i)tick();check(inv.contains(35)&&inv.contains(50)&&menu.active&&menu.message.index()==164,"keyboard/gamepad case Yes does not retain lockpick or show contents");
+            while(menu.message.active())ok();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);menu.selected=3;ok();ok();check(menu.active&&events.menu_open&&inv.contains(50)&&menu.message.index()==161&&!(events.flags[10][0]&0x400),"invalid keyboard/gamepad key Use leaves inventory or dispatches event");check(!sounds.empty()&&sounds.back()==1&&std::find(sounds.begin(),sounds.end(),2)!=sounds.end(),"inventory failure/navigation misses common sound dispatch");
+        }
         if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto room=read_asset_file(root/"rooms/RM_0000.RDT",64*1024*1024);const auto stage=decode_scene(room);Inventory inventory;StatusMenu menu;MessageDialog dialog;auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t clock=0;
             AudioMixer audio(root);RoomWorld world(room,stage,actor,motion,clock,audio,root);MoviePlayer movie(root,{},audio);EventVm events(room,inventory,dialog);GameplayInput gameplay(inventory,menu,dialog,&events);
             events.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};events.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};events.audio_active=[&](unsigned slot){return audio.active(slot);};events.audio_stop=[&](unsigned slot){audio.stop(slot);};events.movie_active=[&]{return movie.active();};

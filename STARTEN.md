@@ -62,3 +62,18 @@ sind noch nicht vollständig portiert.
 
 Siehe [Ressourcen und Mods](docs/NATIVE_ASSETS.md),
 [Steuerung](docs/CONTROLS.md) und [Build-Anleitung](docs/NATIVE_PORT.md).
+
+## Items kombinieren und Koffer öffnen
+
+Ein Kraut auswählen → **Combine** → zweites Kraut auswählen → OK. Die originalen
+Mischrezepte funktionieren in beiden Reihenfolgen. Bei einer ungültigen Mischung
+bleiben beide Items erhalten; Abbrechen kehrt zum Ausgangsitem zurück.
+
+Verschlossene Koffer: Dietrich im Inventar behalten, Koffer → **Examine** → zur
+Schlossseite drehen → OK → „Use the lockpick?“ mit **Yes** bestätigen. Mehrseitige
+Dialoge mit einzelnen OK-Drücken weiterblättern. Der Dietrich bleibt erhalten;
+der Inhalt ersetzt den Koffer auch bei vollem Inventar. Die Aktentasche mit Knopf
+öffnet sich über ihre originale Knopffrage ohne Dietrich. Pfeile beziehungsweise
+D-pad/Stick drehen die 3D-Ansicht horizontal und vertikal; Escape/B bricht ab.
+
+Details und noch offene Spezialfälle stehen in `docs/NATIVE_GAMEPLAY.md`.

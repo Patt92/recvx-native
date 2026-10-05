@@ -33,7 +33,7 @@ public:
     void tick();
     void start(unsigned level,unsigned event);
     bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
-    void use(unsigned item);
+    bool use(unsigned item,unsigned* message=nullptr);
     void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);
     void confirm_dialog();
     void cancel_dialog();

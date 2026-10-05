@@ -148,12 +148,12 @@ void GameplayInput::menu_input(MenuInput key){if(transition_active&&transition_a
     // The original hint ends before its task releases cinematic control. Keep
     // one inventory request across that short handover, never across a video.
     if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4)){if(inventory_grace_&&!dialog_.active())inventory_pending_=true;return;}
-    if(menu_.active||key==MenuInput::Open){if(sound)sound(key==MenuInput::Open?9:key==MenuInput::Cancel?3:key==MenuInput::Confirm?0:2);menu_.input(key,inventory_);events_->menu_open=menu_.active;if(menu_.use_item){events_->use(menu_.use_item);menu_.use_item=0;}return;}
+    if(menu_.active||key==MenuInput::Open){menu_.input(key,inventory_);if(menu_.use_item){unsigned index=0;if(!events_->use(menu_.use_item,&index)){menu_.active=true;if(index)menu_.show_message(index);menu_.feedback_sound=1;}menu_.use_item=0;}events_->menu_open=menu_.active;if(sound)sound(menu_.feedback_sound!=0xffffffff?menu_.feedback_sound:key==MenuInput::Open?9:key==MenuInput::Cancel?3:key==MenuInput::Confirm?0:2);return;}
     if(key==MenuInput::Confirm&&(events_->flags[5][0]&4)&&(events_->flags[10][0]&0x40)){events_->skip_cinematic();return;}
     if(key==MenuInput::Confirm&&interact)interact();
 }
 void GameplayInput::synchronize(){if(events_&&events_->status_requested&&!dialog_.active()&&!(transition_active&&transition_active())&&!(events_->flags[5][0]&4)&&!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(9);menu_.input(MenuInput::Open,inventory_);}events_->menu_open=menu_.active;}}
-bool GameplayInput::apply(const InputFrame& f){synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
+bool GameplayInput::apply(const InputFrame& f){menu_.tick(inventory_);synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
     if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
     if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition();return false;}if(video_active&&video_active()){
         inventory_pending_=false;inventory_grace_=0;
@@ -163,7 +163,7 @@ bool GameplayInput::apply(const InputFrame& f){synchronize();if(inventory_grace_
     if(f.hit(Action::Inventory))menu_input(MenuInput::Open);
     if(f.hit(Action::Confirm))menu_input(MenuInput::Confirm);
     if(transition_active&&transition_active())return false;
-    if(menu_.active&&menu_.examining){const int direction=int(f.down(Action::Right))-int(f.down(Action::Left));menu_.examine_yaw+=direction*512;return false;}
+    if(menu_.active&&menu_.examining&&!menu_.busy()){const int direction=int(f.down(Action::Right))-int(f.down(Action::Left));menu_.examine_yaw+=direction*512;menu_.examine_pitch+=(int(f.down(Action::Up))-int(f.down(Action::Down)))*512;return false;}
     for(auto pair:{std::pair<Action,MenuInput>{Action::Up,MenuInput::Up},{Action::Down,MenuInput::Down},{Action::Left,MenuInput::Left},{Action::Right,MenuInput::Right}})if(f.navigation(pair.first))menu_input(pair.second);
     if(f.hit(Action::Skip)&&events_)events_->skip_cinematic();return false;
 }

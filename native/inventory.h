@@ -24,11 +24,12 @@ public:
     bool acquire(unsigned item,unsigned quantity,unsigned flags=0);
     bool consume(unsigned slot);
     bool heal(unsigned slot);
-    bool combine(unsigned first,unsigned second,unsigned* message=nullptr);
+    bool combine(unsigned first,unsigned second,unsigned* message=nullptr,unsigned* result_slot=nullptr);
+    bool transform(unsigned slot,unsigned expected,unsigned replacement);
     bool deposit(unsigned slot,unsigned box=64);
     bool withdraw(unsigned index,unsigned box=64);
     std::string condition()const;
 private:
-    void compact();
+    void compact(unsigned* tracked_slot=nullptr);
 };
 }

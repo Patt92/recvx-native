@@ -26,6 +26,12 @@ original animation curves. Menu/cinematic/dialogue restrictions apply equally
 to keyboard and controller. Confirm, inventory and skip trigger once per press;
 holding a direction repeats menu navigation after a configurable delay.
 
+In item examination, Left/Right rotates horizontally and Up/Down vertically;
+Confirm inspects the facing surface. Confirm advances original text pages and
+answers Yes/No; directions choose the answer. Cancel dismisses the question
+without changing the item. For locked cases, carry a lockpick and choose Examine
+rather than Combine. Combine selects a second item for the original recipe.
+
 ## Change bindings
 
 Start in the main menu and select **Einstellungen**. Left/Right switches between

@@ -60,6 +60,43 @@ left/right rotates examined models every simulation tick instead of waiting for
 menu-key repetition. Combat-driven damage and the full heal/poison transition
 animations remain pending.
 
+### Combining and opening items
+
+Choose **Combine**, select the second inventory item, then confirm. All eight
+herb recipes use the original combidata/Combi routines in either selection order.
+The source stays highlighted; failed combinations retain both items and the
+selection with the original COMMON error sound. A fully loaded weapon shows
+original message 156. Partial bowgun powder conversion now retains both the
+explosive arrows and the remaining ordinary arrows, including the result cursor.
+
+Locked cases open through **Examine**, facing the lock, then Confirm. The original
+c_a/itemflg/mestbl tables select the question, check for lockpick ID 50 and load
+SYSMES.ALD pages/Yes/No. Missing lockpick, No and Cancel leave the case intact.
+A confirmed opening animates the original ITEM1 lid, then replaces the case
+in its existing slot; no spare slot is required and the lockpick remains.
+
+| Source ID | Original contents | Contents message |
+|---|---|---|
+| 63 | Handgun Parts (19) | 162 |
+| 128 | Bow Gun Powder (35) | 164 |
+| 129 | Magnum Bullets model (30, normalized to ammo 13 on exit) | 163 |
+| 83, Briefcase button | TG-01 (85), no lockpick needed | 165 |
+
+Inspection rotates vertically and horizontally. Menu messages are owned by the
+inventory and do not advance or stop room dialogue/voice. Use validates original
+floor-trigger item parameters before returning control to the room; invalid
+keys/ammo retain the menu and show original messages 160/161/174/175/176/195/197.
+The original UseItemCheck, ItemLost and flag scripts handle successful use and
+consumption. Charged extinguisher use retains the empty extinguisher; the original
+Antarctica rejection checks its remaining charge. bhFlrAtariSet2 (0x7c) now updates those trigger parameters natively.
+
+The PS2 case packets have three nodes (dummy root, body, lid), rather than the
+longer catch hierarchy referenced by MdlAction00/01; the native action applies
+the original lid angular increment to the PS2 hinge. The original zoom-out/in
+transition, separate catch geometry, item-dependent hidden contents, file
+registration and complex multi-item extraction remain pending. Generic table
+questions do not certify every puzzle or room as playable.
+
 ## Movement and collision
 
 I/K or W/S walks forward/back, J/L or A/D turns and Shift runs. A mapped controller

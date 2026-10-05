@@ -15,7 +15,7 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
     for(unsigned i=0;i<count;++i){const auto p=offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};for(unsigned j=0;j<4;++j)a.parameters[j]=v.u8(p+32+j);interactions.push_back(a);}
     const auto floor_count=v.u32(info.room_offset+0xa0),floor_offset=v.u32(info.room_offset+0x20);
     if(floor_count>4096)throw std::runtime_error("too many floor triggers");v.require(floor_offset,floor_count*36);
-    for(unsigned i=0;i<floor_count;++i){const auto p=floor_offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};floors_.push_back(a);}
+    for(unsigned i=0;i<floor_count;++i){const auto p=floor_offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};for(unsigned j=0;j<4;++j)a.parameters[j]=v.u8(p+32+j);floors_.push_back(a);}
     const auto item_count=v.u32(info.room_offset+0x90),item_offset=v.u32(info.room_offset+16);if(item_count>4096)throw std::runtime_error("too many room items");v.require(item_offset,item_count*36);for(unsigned i=0;i<item_count;++i)room_items_.push_back(v.u16(item_offset+i*36+4));
     values[23]=inventory_.game_mode;values[24]=inventory_.player;flags[6][0]=0xffffffff;flags[13][0]=1;flags[14][0]=0x40000000;if(inventory_.side_pack)flags[11][0]|=0x8000000;
 }
@@ -71,6 +71,7 @@ int EventVm::instruction(Task& t){
     case 0x14:{const auto packed=v.u16(p+2);advance(4);start(packed&255,packed>>8);return 1;}
     case 0x1f:{const auto mode=v.u8(p+1),index=v.u8(p+2),freeze=v.u8(p+3);advance(4);if(!mode){flags[10][0]&=~0x2000u;dialog_.show(read_message(room_,messages_,index),index);flags[5][0]|=0x200;opening_hint_=t.event==16&&index==4;if(!freeze)flags[6][0]&=~7u;}else flags[6][0]|=7;return 1;}
     case 0x25:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");auto& a=interactions[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);return advance(10);}
+    case 0x7c:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");auto& a=floors_[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);return advance(10);}
     case 0x26:{const auto weapon=v.u8(p+1);advance(2);return inventory_.weapon()==weapon;}
     case 0x27:values[18]=v.u8(p+1);if(!values[18])inventory_.slots()[0]=0;return advance(2);
     case 0x28:status_requested=true;flags[12][0]|=0x200;return advance(2);
@@ -129,7 +130,20 @@ void EventVm::confirm_dialog(){
     const bool was_active=dialog_.active();dialog_.confirm();if(was_active&&!dialog_.active()&&audio_stop)audio_stop(1);
     if(!dialog_.active()){flags[5][0]&=~0x200u;flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;}
 }
-void EventVm::use(unsigned item){values[8]=item;flags[10][0]|=0x400;}
+bool EventVm::use(unsigned item,unsigned* message){
+    if(message)*message=0;if(!item||item>=156||!inventory_.contains(item))return false;
+    const auto type=itemdata[item].type&0x5f;const Interaction* area=nullptr;
+    if((flags[10][0]&0x200)&&values[16]<floors_.size())area=&floors_[values[16]];
+    if((type==1||type==2||type==0x40)&&area&&std::find(area->parameters.begin(),area->parameters.end(),item)!=area->parameters.end()){
+        if(item==82&&!Inventory::quantity(*std::find_if(inventory_.slots()+1,inventory_.slots()+12,[&](auto value){return Inventory::id(value)==item;}))&&values[0]==9&&values[1]==8){if(message)*message=195;return false;}
+        auto* slot=std::find_if(inventory_.slots()+1,inventory_.slots()+12,[&](auto value){return Inventory::id(value)==item;});
+        if(item==82&&Inventory::quantity(*slot))--*slot; // Keep the empty extinguisher, as ItemUse does.
+        if(item==4)inventory_.items[224]=Inventory::quantity(*slot)&255;
+        values[8]=item;flags[10][0]|=0x400;return true;}
+    unsigned index=161;if(type==2)index=(item==18||item==36)?197:160;
+    if(area&&(area->parameters[0]==59||area->parameters[0]==85)){index=174;if(type!=2){if(area->parameters[0]==59&&item==85)index=175;else if(area->parameters[0]==85&&item==59)index=176;}}
+    if(message)*message=index;return false;
+}
 void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
     flags[10][0]&=~0x200u;if(flags[13][0]&6)return;
     const auto direction=(yaw+8192)&0xc000;

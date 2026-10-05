@@ -34,20 +34,56 @@ struct GameUi::PulseState {pulse::PULSE_WORK work{};unsigned tick=0,condition=99
 std::vector<std::string> StatusMenu::actions(const Inventory& inventory)const{
     auto item=Inventory::id(inventory.slots()[selected]);if(!item)return {};if(item==145)return {"File"};if(itemdata[item].type&1)return {"Equip","Examine","Combine","Use"};return {"Use","Examine","Combine"};
 }
+void StatusMenu::show_message(unsigned index){if(!message_source)throw std::runtime_error("inventory message source is not bound");message.show(message_source(index),index);}
+void StatusMenu::close_examine(Inventory& inventory){
+    if(Inventory::id(inventory.slots()[selected])==30)inventory.transform(selected,30,13);
+    examining=false;pending_item_=pending_group_=pending_slot_=0;
+}
+void StatusMenu::inspect(Inventory& inventory){
+    const auto item=Inventory::id(inventory.slots()[selected]);if(!item||item>=156)return;
+    const auto group=unsigned(dsptbl[item].hide);if(group>=41)throw std::runtime_error("invalid item inspection group");
+    const auto directions=itemflg[group][4];const unsigned first=directions&15,count=directions>>4;
+    unsigned match=count;const Angle angles[]={examine_pitch,examine_yaw,examine_roll};
+    for(unsigned i=0;i<count;++i){if(first+i>=14)throw std::runtime_error("invalid item inspection direction");bool valid=true;for(unsigned a=0;a<3;++a){const auto tolerance=c_a[first+i][a*2],target=c_a[first+i][a*2+1];if(tolerance&&unsigned((angles[a]+tolerance-target)&65535)>unsigned(tolerance*2))valid=false;}if(valid){match=i;break;}}
+    if(match==count||item==19||item==33||item==34||item==136||item==142){show_message(item==82&&!Inventory::quantity(inventory.slots()[selected])?140:item);return;}
+    const unsigned code=mestbl[itemflg[group][5]+match],index=code&0xfff;
+    if(index==181&&!inventory.contains(50)){show_message(188);return;}
+    if((code&0xf000)==0x1000&&idsettbl[itemflg[group][6]]){pending_item_=item;pending_group_=itemflg[group][6];pending_slot_=selected;}
+    // Other examination text is still useful without claiming unported file or
+    // multi-item extraction animations as completed inventory operations.
+    show_message(index);
+    if(index==72)inventory.slots()[selected]|=0x80000000;
+}
+void StatusMenu::tick(Inventory& inventory){
+    message.tick();if(!opening_item)return;
+    if(++opening_frame<23)return;
+    const auto result=idsettbl[pending_group_];const auto description=getmestbl[pending_group_];
+    if(!inventory.transform(pending_slot_,pending_item_,result)){feedback_sound=1;opening_item=0;pending_item_=pending_group_=pending_slot_=0;return;}
+    selected=pending_slot_;opening_item=0;pending_item_=pending_group_=pending_slot_=0;examine_yaw=examine_pitch=examine_roll=0;show_message(description);
+}
 bool StatusMenu::input(MenuInput key,Inventory& inventory){
-    if(key==MenuInput::Open){active=!active;commands=examining=combining=false;selected=1;command=0;return true;}if(!active)return false;
-    if(key==MenuInput::Cancel){if(examining)examining=false;else if(commands)commands=false;else if(combining){combining=false;selected=combine_from;}else active=false;return true;}
-    if(examining){if(key==MenuInput::Left)examine_yaw-=2048;if(key==MenuInput::Right)examine_yaw+=2048;return true;}
-    if(commands){auto list=actions(inventory);if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
-        if(command==0){if(itemdata[Inventory::id(inventory.slots()[selected])].type&1){inventory.equip(selected);active=false;}else if(Inventory::id(inventory.slots()[selected])==145)examining=true;
-            else if(!inventory.heal(selected)){use_item=Inventory::id(inventory.slots()[selected]);active=false;}}
-        else if(command==1)examining=true;else if(command==2){combining=true;combine_from=selected;}else if(command==3){use_item=Inventory::id(inventory.slots()[selected]);active=false;}
+    feedback_sound=0xffffffff;
+    if(active&&message.active()){
+        if(key==MenuInput::Open)return true;
+        if(key==MenuInput::Cancel){message=MessageDialog{};pending_item_=pending_group_=pending_slot_=0;return true;}
+        if(message.choices()&&(key==MenuInput::Left||key==MenuInput::Up||key==MenuInput::Right||key==MenuInput::Down)){const int step=key==MenuInput::Left||key==MenuInput::Up?-1:1;message.selection=(message.selection+message.choices()+step)%message.choices();return true;}
+        if(key==MenuInput::Confirm){const bool choice=message.choices(),yes=message.selection==0;message.confirm();if(!message.active()&&pending_item_){if(choice&&yes){opening_item=pending_item_;opening_frame=0;}else pending_item_=pending_group_=pending_slot_=0;}}return true;
+    }
+    if(opening_item)return true;
+    if(key==MenuInput::Open){if(examining)close_examine(inventory);active=!active;commands=examining=combining=false;selected=1;command=0;return true;}if(!active)return false;
+    if(key==MenuInput::Cancel){if(examining)close_examine(inventory);else if(commands)commands=false;else if(combining){combining=false;selected=combine_from;}else active=false;return true;}
+    if(examining){if(key==MenuInput::Left)examine_yaw-=2048;if(key==MenuInput::Right)examine_yaw+=2048;if(key==MenuInput::Up)examine_pitch+=2048;if(key==MenuInput::Down)examine_pitch-=2048;if(key==MenuInput::Confirm)inspect(inventory);return true;}
+    if(commands){auto list=actions(inventory);if(list.empty()){commands=false;return true;}if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
+        if(command==0){const auto item=Inventory::id(inventory.slots()[selected]);if(itemdata[item].type&1){inventory.equip(selected);active=false;}else if(item==145)examining=true;
+            else if(item>=20&&item<=29){if(!inventory.heal(selected)){show_message(161);feedback_sound=1;}}
+            else{use_item=item;active=false;}}
+        else if(command==1){examining=true;examine_yaw=examine_pitch=examine_roll=0;}else if(command==2){combining=true;combine_from=selected;}else if(command==3){use_item=Inventory::id(inventory.slots()[selected]);active=false;}
         commands=false;
     }return true;}
     const auto last=last_slot(inventory);selected=std::min(selected,last);
     if(key==MenuInput::Up){if(selected<=3)selected=1;else selected-=2;}if(key==MenuInput::Down){selected=selected==1?2:std::min(last,selected+2);}
     if(key==MenuInput::Left&&selected>1)--selected;if(key==MenuInput::Right)selected=std::min(last,selected+1);
-    if(key==MenuInput::Confirm&&Inventory::id(inventory.slots()[selected])){if(combining){inventory.combine(selected,combine_from);combining=false;}else{commands=true;command=0;}}
+    if(key==MenuInput::Confirm){if(combining){unsigned index=0,destination=0;if(inventory.combine(selected,combine_from,&index,&destination)){combining=false;selected=destination;}else{feedback_sound=1;if(index)show_message(index);}}else if(Inventory::id(inventory.slots()[selected])){commands=true;command=0;}}
     return true;
 }
 GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mods):data_(data),mods_(mods){
@@ -124,8 +160,9 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         }
         // ItemSet, personal slot + the two-column normal inventory; large weapons span a row.
         unsigned cell=0;for(unsigned slot=1;slot<12;++slot){const auto id=Inventory::id(inv.slots()[slot]);const int x=slot==1?528:460+int(cell&1)*68,y=slot==1?48:128+int(cell/2)*48;
+            if(menu.combining&&slot==menu.combine_from){rectangle(image,x-1,y-1,(id&&(itemdata[id].type&0x100))?138:70,50,0xffd9ab47);rectangle(image,x+1,y+1,(id&&(itemdata[id].type&0x100))?134:66,46,0xff111f22);}
             if(slot==menu.selected){rectangle(image,x-1,y-1,(id&&(itemdata[id].type&0x100))?138:70,50,0xff238699);rectangle(image,x+1,y+1,(id&&(itemdata[id].type&0x100))?134:66,46,0xff111f22);}
-            icon(image,id,x,y);if(id){if(Inventory::quantity(inv.slots()[slot])>1)ascii(image,std::to_string(Inventory::quantity(inv.slots()[slot])),x+42,y+27,.6f,0xffffe020);if(inv.slots()[0]==slot)ascii(image,"E",x+2,y+2,.6f,0xff50d090);}
+            icon(image,id,x,y);if(id){if((itemdata[id].type&0x3800)&&Inventory::quantity(inv.slots()[slot])>1)ascii(image,std::to_string(Inventory::quantity(inv.slots()[slot])),x+42,y+27,.6f,0xffffe020);if(inv.slots()[0]==slot)ascii(image,"E",x+2,y+2,.6f,0xff50d090);}
             if(slot>1)cell+=id&&(itemdata[id].type&0x100)?2:1;if(cell>=inv.capacity())break;
         }
         if(inv.slots()[0])icon(image,Inventory::id(inv.slots()[inv.slots()[0]]),376,48);
@@ -153,17 +190,18 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         }auto list=menu.actions(inv);for(unsigned i=0;i<list.size();++i){if(list[i]=="File")ascii(image,"File",364,146,.8f);else{const auto& label=parts_10[i==0?(list[0]=="Equip"?7:8):i==1?9:i==2?10:8];blit(image,menu_[label.texid],366,146+int(i)*32,label.sx,label.sy,label.u1,label.v1,label.u2,label.v2,i==menu.command?0xff2080ff:0xffffffff);}}}
         if(menu.combining)ascii(image,"Combine",44,400,.8f,0xff50c0ff);
         if(menu.examining&&selected_id&&selected_id<145){
-            const auto id=selected_id==131?5:selected_id==136?33:selected_id;
-            if(!item_models_.count(id)){auto file=mods_/"items"/(asset_number(id)+".bin");if(!std::filesystem::is_regular_file(file))file=data_/"archives/ITEM1"/(asset_number(id-1)+".bin");auto object=decode_item_asset(read_asset_file(file,8*1024*1024));apply_texture_files(object,data_,mods_,std::filesystem::path("items")/asset_number(id));item_models_[id]=std::move(object);}
-            auto object=item_models_[id];NJS_POINT3 lo{1e20f,1e20f,1e20f},hi{-1e20f,-1e20f,-1e20f};
+            const auto id=menu.opening_item?menu.opening_item:selected_id==131?5:selected_id==136?33:selected_id;
+            if(!item_models_.count(id)){auto file=mods_/"items"/(asset_number(id)+".bin");if(!std::filesystem::is_regular_file(file))file=data_/"archives/ITEM1"/(asset_number(id-1)+".bin");item_packets_[id]=read_asset_file(file,8*1024*1024);auto object=decode_item_asset(item_packets_[id],0,id);apply_texture_files(object,data_,mods_,std::filesystem::path("items")/asset_number(id));item_models_[id]=std::move(object);}
+            auto object=menu.opening_item?decode_item_asset(item_packets_[id],menu.opening_frame,id):item_models_[id];if(menu.opening_item)object.textures=item_models_[id].textures;NJS_POINT3 lo{1e20f,1e20f,1e20f},hi{-1e20f,-1e20f,-1e20f};
             for(const auto& triangle:object.triangles)for(const auto& vertex:triangle.vertices){lo.x=std::min(lo.x,vertex.position.x);lo.y=std::min(lo.y,vertex.position.y);lo.z=std::min(lo.z,vertex.position.z);hi.x=std::max(hi.x,vertex.position.x);hi.y=std::max(hi.y,vertex.position.y);hi.z=std::max(hi.z,vertex.position.z);}
             const NJS_POINT3 center{(lo.x+hi.x)/2,(lo.y+hi.y)/2,(lo.z+hi.z)/2};const float radius=std::max({hi.x-lo.x,hi.y-lo.y,hi.z-lo.z,0.01f});
-            for(auto& triangle:object.triangles)for(auto& vertex:triangle.vertices){const float x=vertex.position.x-center.x,z=vertex.position.z-center.z;vertex.position.x=center.x+x*njCos(menu.examine_yaw)+z*njSin(menu.examine_yaw);vertex.position.z=center.z-x*njSin(menu.examine_yaw)+z*njCos(menu.examine_yaw);}
+            NJS_MATRIX rotation;njUnitMatrix(&rotation);njRotateXYZ(&rotation,menu.examine_pitch,menu.examine_yaw,menu.examine_roll);for(auto& triangle:object.triangles)for(auto& vertex:triangle.vertices){NJS_POINT3 local{vertex.position.x-center.x,vertex.position.y-center.y,vertex.position.z-center.z};njCalcPoint(&rotation,&local,&local);vertex.position={center.x+local.x,center.y+local.y,center.z+local.z};njCalcVector(&rotation,&vertex.normal,&vertex.normal);}
             object.background=0xff101010;SceneCamera camera;camera.position={center.x,center.y,center.z+radius*2.8f};SoftwareRenderer item_view(352,196);item_view.draw(object,camera);
             for(int y=0;y<196;++y)std::copy_n(item_view.pixels().begin()+y*352,352,image.canvas().begin()+(y+132)*640+60);
         }
         (void)tick;
     }
-    if(dialog.active()&&std::any_of(dialog.page().begin(),dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;}))text(image,dialog.page(),68,374,1,0xffffffff,true,int(dialog.selection));
+    const auto& visible_dialog=menu.active&&menu.message.active()?menu.message:dialog;
+    if(visible_dialog.active()&&std::any_of(visible_dialog.page().begin(),visible_dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;}))text(image,visible_dialog.page(),68,374,1,0xffffffff,true,int(visible_dialog.selection));
 }
 }

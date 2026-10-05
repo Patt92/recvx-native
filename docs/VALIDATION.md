@@ -6,8 +6,8 @@ Validated on 2026-10-05. This records checked behavior, not completion of the po
 |---|---|
 | macOS universal build | arm64 and x86_64 slices present |
 | Windows build | PE32+ x64 executable and bundled SDL2 |
-| CTest | 12/12 on macOS; 12/12 under Wine |
-| ASan + UBSan | 12/12 and original-data opening/controller regressions passed |
+| CTest | 13/13 on macOS; 13/13 under Wine |
+| ASan + UBSan | 13/13 and original-data opening/controller/inventory regressions passed |
 | Intel/Rosetta | original-data opening/UI and SDL virtual-controller regressions passed |
 | Disc data manifest | 12,701 files; 6,574,841,350 bytes; both packaged trees verified |
 | Room scene decoder | 205/205, 1,008,630 stage triangles, 470 active camera targets |
@@ -83,3 +83,32 @@ translation, inherited visibility, release and Rodrigo model-node hide/restore.
 Pose-only matrices are compared against geometry-sampling matrices. These tests
 do not establish complete hand/accessory rendering, ambient MIDI or physical
 controller/audio-device fidelity.
+
+## Inventory combinations and item checks, 2026-10-05
+
+The new inventory_combine_inspect group verifies all eight herb recipes in both
+orders, invalid recipes, cancel/result cursor, full capacity, red-herb rejection,
+healing, partial powder conversion and full-magazine dialogue/rollback. Four
+original cases/briefcase variants use real SYSMES.ALD questions and contents,
+missing-lockpick checks, wrong facing, Yes/No/Cancel, replacement at full capacity
+and retained lockpick. Real ITEM1 packets render closed/opening/content views;
+PS2 hinge geometry moves without losing model parts. Contents IDs are read from
+idsettbl, including handgun parts 63→19 and magnum case 129→30→13.
+
+Keyboard and SDL virtual GameController regressions exercise Combine and case
+opening through GameplayInput, hold suppression, No/Cancel, error sounds and
+invalid key Use keeping inventory ownership. A bounded event fixture checks
+original floor parameters, UseItemCheck/ItemLost/flag commitment, 0x7c parameter
+changes, TG-01/ammunition rejection messages and retained empty extinguisher. This is not verification of all
+world puzzles, physical gamepads, original zoom/catch animation, hidden contents,
+file registration or complex multi-item extraction.
+
+Reproduce the additional real-data check with:
+
+```sh
+build/native/recvx-inventory-tests "$PWD/data"
+# Optional rendered diagnostic fixtures; the output folder must contain no old BMPs.
+build/native/recvx-inventory-tests "$PWD/data" "$PWD/build/validation/inventory"
+```
+
+The regular build script runs this data regression after CTest.
