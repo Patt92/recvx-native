@@ -4,6 +4,12 @@
 #include <string>
 #include <memory>
 namespace recvx {
+// system.c formats stg_no/rom_no/rcase with %1d%02d%1d, never hexadecimal.
+struct RoomIdentity {
+    unsigned stage=0,room=0,variant=0;
+    static RoomIdentity parse(const std::string& name);
+    std::string name()const;
+};
 struct RoomInfo {
     float version;
     std::uint32_t room_offset;

@@ -17,6 +17,7 @@ public:
     bool skipped()const{return skipped_;}
     unsigned sound_bank()const{return sound_bank_;}
     std::vector<unsigned> take_sounds(){auto out=std::move(sounds_);sounds_.clear();return out;}
+    std::vector<unsigned> take_sound_commands(){auto out=std::move(sound_commands_);sound_commands_.clear();return out;}
     unsigned ticks()const{return ticks_;}
     const DoorRequest& destination()const{return request_;}
     const RECVX_DOOR_STATE& state()const{return core_;}
@@ -30,6 +31,7 @@ private:
     std::size_t model_offset_=0,texture_offset_=0,objects_=0,count_=0;
     bool active_=false,finished_=false,skipped_=false;
     unsigned ticks_=0,sound_bank_=0;
-    std::vector<unsigned> sounds_;
+    std::vector<unsigned> sounds_,sound_commands_;
+    std::array<int,11> sound_timing_{};
 };
 }

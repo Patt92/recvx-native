@@ -6,12 +6,17 @@
 #include <memory>
 #include <map>
 #include <string>
+#include <tuple>
 #include <vector>
 namespace recvx {
-inline constexpr unsigned audio_voice_count=24;
-struct PcmClip {unsigned rate=0,channels=0;std::size_t loop_start=0,loop_end=0;std::vector<std::int16_t> samples;std::size_t frames()const{return channels?samples.size()/channels:0;}};
+inline constexpr unsigned audio_voice_count=30; // 24..26: CallBackGroundSe slots 0..2, 27..29: CallDoorSe
+inline constexpr unsigned door_voice_first=27,door_voice_last=29;
+// volume/pan: original Sony HD program (+6/+7) and split (+0x10/+0x11) values,
+// 0..127 each; ADX clips keep 127/64 (unity, centre).
+struct PcmClip {unsigned rate=0,channels=0;std::size_t loop_start=0,loop_end=0;std::vector<std::int16_t> samples;float volume=1;unsigned pan=64;std::size_t frames()const{return channels?samples.size()/channels:0;}};
 PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate);
-PcmClip decode_system_sound(const std::vector<std::uint8_t>& bank,unsigned program);
+// key<0 selects the first split; otherwise the split whose key range holds `key`.
+PcmClip decode_system_sound(const std::vector<std::uint8_t>& bank,unsigned program,int key=-1);
 PcmClip decode_adx(const std::vector<std::uint8_t>& bytes);
 class AudioMixer {
 public:
@@ -21,12 +26,30 @@ public:
     void play_system(unsigned program);
     bool play_weapon_sound(unsigned weapon_bank,unsigned program);
     void load_room_sounds(unsigned stage,unsigned room,unsigned variant=0);
-    bool play_room_sound(unsigned bank,unsigned program,unsigned slot=4);
+    // sdfunc.c Set/GetRoomSoundCaseNo: consumed once by the next room bank request.
+    void set_room_sound_case(unsigned variant){room_sound_case_=variant;}
+    unsigned take_room_sound_case(){const auto value=room_sound_case_;room_sound_case_=0;return value;}
+    bool play_room_sound(unsigned bank,unsigned program,unsigned slot=4,bool loop=false);
+    // CallBackGroundSeEx/StopBackGroundSeEx: bank 3, original slots 0..2 (looping ambience).
+    bool background_sound(unsigned slot,unsigned sound,unsigned timer=0);
+    void begin_room_init(){room_initializing_=true;custom_midi_slots(1,4);} // Com_StartInitScript
+    void request_background_sound(unsigned slot,int sound);
+    // ExPlayMidi: Sony SQ transport, tempo/PPQN, running status, shortened
+    // note-offs and NRPN loops. Notes resolve through the original program bank.
+    // Pitch/ADSR/reverb are still incomplete; this is not a bit-exact IOP synth.
+    bool play_room_sequence(unsigned bank,unsigned list,unsigned slot,bool loop=false);
+    void custom_midi_slots(unsigned objects,unsigned events);
+    bool event_sound(unsigned slot,unsigned sound);
+    bool stop_event_sound(unsigned slot);
+    std::vector<std::string> sequence_unavailable;
+    void stop_background_sound(unsigned slot,unsigned fade_ticks=0);
+    bool user_sound_volume(unsigned type,unsigned slot,int start,int target,unsigned frames);
     bool enemy_sound(unsigned slot,unsigned sound);
     void stop_enemy_sound(unsigned slot);
     bool footstep(unsigned floor,unsigned type,unsigned actor,bool enabled=true);
     void load_door_sounds(unsigned bank);
     bool play_door_sound(unsigned program);
+    void finish_door_sound(); // original MIDI slot 2: fade after the destination is visible
     void stop(unsigned slot,unsigned fade_ticks=0);
     bool active(unsigned slot)const;
     std::vector<std::int16_t> mix(unsigned frames=audio_frames_per_tick);
@@ -46,20 +69,34 @@ public:
     static unsigned adx_fade_ticks(int timer);    // RequestAdxFadeFunction2 count
     std::vector<std::string> played,unavailable;
 private:
-    struct Channel {std::shared_ptr<PcmClip> clip;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;};
+    // A voice slot plays one or more layers (simultaneous SQ notes); fades act on the slot.
+    struct Layer {std::shared_ptr<PcmClip> clip;double position=0;float left=1,right=1;};
+    struct SequenceNote {Layer layer;unsigned channel=0,key=0;};
+    struct SequenceEvent {double delay=0;unsigned status=0,key=0,value=0;Layer layer;};
+    struct SequenceLoop {unsigned number=0;std::size_t next=0;unsigned remaining=0;bool counted=false;};
+    struct Sequence {std::vector<SequenceEvent> events;std::vector<SequenceNote> notes;std::vector<SequenceLoop> loops;std::size_t next=0;double until=0;unsigned nrpn=0;};
+    struct Channel {std::shared_ptr<PcmClip> clip;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1;std::vector<Layer> layers;std::shared_ptr<Sequence> sequence;};
+    void sequence_step(Channel& channel);
+    void play_layers(unsigned slot,std::vector<Layer> layers,float volume,bool loop);
     // Native shot/event voices are separate from CRI movie/ADX channels.
     std::array<Channel,audio_voice_count> slots_{};
     std::map<unsigned,std::shared_ptr<PcmClip>> system_sounds_;
     unsigned effect_slot_=2;
+    unsigned max_object_slots_=1,max_event_slots_=4;
     int current_bgm_=-1,current_bgm_volume_=-127,req_fade_bgm_=0;
     void fade_gain(unsigned slot,float gain,unsigned ticks);
-    std::map<unsigned,std::vector<std::uint8_t>> room_banks_;
-    std::map<std::pair<unsigned,unsigned>,std::shared_ptr<PcmClip>> room_sounds_;
+    std::map<unsigned,std::vector<std::uint8_t>> room_banks_,midi_programs_,midi_sequences_; // type 2 SE / type 1 program / type 0 SQ
+    std::map<std::tuple<unsigned,unsigned,int>,std::shared_ptr<PcmClip>> room_sounds_; // bank (0x100|bank: MIDI), program, key
     unsigned room_pack_=0;
+    unsigned room_sound_case_=0;
+    bool room_initializing_=false;
+    std::array<int,3> current_background_{{-1,-1,-1}};
+    std::array<unsigned,3> request_background_{};
+    struct BackgroundRequest {bool active=false;unsigned sound=0,timer=0;};
+    std::array<BackgroundRequest,3> background_init_{};
     std::array<bool,3> foot_switch_{};
-    unsigned door_bank_=0,door_slot_=8;
+    unsigned door_bank_=0,door_slot_=door_voice_first;
     std::vector<std::uint8_t> door_source_;
-    std::map<unsigned,std::shared_ptr<PcmClip>> door_sounds_;
     std::map<unsigned,std::vector<std::uint8_t>> weapon_banks_;
     std::map<std::pair<unsigned,unsigned>,std::shared_ptr<PcmClip>> weapon_sounds_;
     std::filesystem::path data_,mods_;

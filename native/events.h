@@ -36,6 +36,7 @@ public:
     std::function<void(unsigned)> audio_stop;
     std::function<Message(unsigned,unsigned)> item_message;
     std::function<bool()> movie_active;
+    std::function<unsigned()> movie_time; // GetMwPlayTimeEx, centiseconds.
     std::function<bool(const DoorRequest&)> door;
     void inherit_progress(const EventVm& previous);
     void initialize();
@@ -43,29 +44,35 @@ public:
     void advance_game_clock(unsigned vertical_blanks=2);
     void start(unsigned level,unsigned event);
     bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
-    bool use(unsigned item,unsigned* message=nullptr);
+    bool use(unsigned item,unsigned* message=nullptr,unsigned slot=~0u);
+    void begin_status(); // StatusMain clears the previous ItemUse request.
     void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);
     void confirm_dialog();
     void cancel_dialog();
     void choose_dialog(int direction);
     bool skip_cinematic();
+    void service_item_request(); // bhCheckSubTask cb_flg 0x4010 -> GetItem
     unsigned pickup_display()const{return pickup_display_;}
     std::vector<EventTaskState> task_states()const;
     bool flag(unsigned matrix,unsigned index)const;
     void set_flag(unsigned matrix,unsigned index,unsigned mode);
 private:
     struct Loop {std::size_t condition=0,body=0;unsigned count=0;bool repeat=false;};
-    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;};
+    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;std::array<unsigned,32> loop_counts{};};
     std::vector<std::uint8_t> room_;
     std::uint32_t random_=1; // Deterministic host RNG; PS2 libc sequence is not yet matched.
     std::size_t base_=0,scd0_=0,scd1_=0,messages_=0;
     std::vector<std::size_t> scripts_;
     std::vector<Interaction> floors_;
     Inventory& inventory_;MessageDialog& dialog_;
-    bool opening_hint_=false;
-    unsigned pickup_item_=0,pickup_model_=0,pickup_display_=0;
+    bool opening_hint_=false,status_use_pending_=false;
+    unsigned pickup_item_=0,pickup_model_=~0u,pickup_display_=0,pickup_mode_=0;
     std::vector<unsigned> room_items_;
     void hide_item(unsigned index);
+    void begin_pickup(unsigned item,unsigned model=~0u);
+    void pickup_result(const PickupResult& result);
+    void finish_pickup();
+    void show_dialog(Message message,unsigned index); // bhSetMessage resets response work
     std::array<Task,16> tasks_{};
     std::set<std::pair<unsigned,std::size_t>> reported_;
     void run(Task& task,bool scenario=false);

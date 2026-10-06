@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string>
 namespace recvx {
+struct FloorUseResult {bool closing=false;unsigned message=0;};
+struct PickupResult {unsigned mode=0,message=0;bool granted=false,used=false;};
 class Inventory {
 public:
     Inventory();
@@ -23,6 +25,9 @@ public:
     unsigned weapon()const;
     bool equip(unsigned slot);
     bool acquire(unsigned item,unsigned quantity,unsigned flags=0);
+    // sub1.c GetItem: mode 0 begins, modes 1/4 consume a menu answer 100/101.
+    PickupResult pickup(unsigned item,unsigned& control,unsigned stage,unsigned room,unsigned mode=0,int answer=-1);
+    FloorUseResult use_on_floor(unsigned slot,const std::array<unsigned,4>* parameters,unsigned& control,unsigned stage,unsigned room);
     bool consume(unsigned slot);
     bool heal(unsigned slot);
     int combination_rule(unsigned first,unsigned second)const;

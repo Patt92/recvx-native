@@ -6,7 +6,8 @@
 #include <optional>
 #include <memory>
 namespace recvx {
-struct SceneVertex { NJS_POINT3 position; float u=0,v=0; NJS_VECTOR normal{}; };
+// light: per-vertex lighting factor (r,g,b), used when the triangle is gouraud-lit.
+struct SceneVertex { NJS_POINT3 position; float u=0,v=0; NJS_VECTOR normal{}; NJS_POINT3 light{1,1,1}; };
 // Texture samples are immutable during scene composition. Copies share storage;
 // resource edits detach so mods/atlas edits cannot alter another decoded asset.
 class TexturePixels {
@@ -48,7 +49,9 @@ struct SceneTexture {
         return h;
     }
 };
-enum class SceneBlend {Opaque,Additive};
+// Ninja: NJD_FST_UA strip, original GS ALPHA register from chunk/material bits.
+// Alpha/Additive are explicit host sprite operations; all draw after opaque geometry.
+enum class SceneBlend {Opaque,Additive,Alpha,Ninja};
 struct SceneTriangle {
     std::array<SceneVertex,3> vertices;
     std::uint32_t color=0xffb2b2b2;
@@ -57,21 +60,40 @@ struct SceneTriangle {
     bool textured=false;
     bool camera_mask=true;
     bool world_lit=false;
+    bool gouraud=false; // color is the unlit base; vertices carry light factors (Ninja per-vertex lighting)
     SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
     unsigned light_category=1;
+    std::uint64_t blend_register=0x44; // original GS source-alpha/inverse-source-alpha
 };
 struct SceneCamera {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};
     float distance=0;
     std::int32_t perspective=8192;
+    float clip_near=0.05f,clip_far=0; // njClipZ (bhChangeViewClip*), set by the runtime; far 0 = unlimited
     std::array<std::uint32_t,16> hidden_objects{};
     std::uint16_t flags=0;
+    // Original CAM_WRK spd, am_spd and aa_spd; control runs at 30 Hz.
+    int transition_speed=0,angle_speed=0;float move_speed=0;
     NJS_POINT3 cut_origin{},cut_extent{};
     float follow_x=0,follow_z=0,target_height=0;
     std::array<float,4> y_offsets{};
     std::array<std::int32_t,2> angle_limits{};
     std::array<float,4> roll_offsets{},perspectives{};
+};
+// bhSetCut / bhControlActiveCamera state, independent of render calls.
+class ActiveCameraMotion {
+public:
+    void reset(const SceneCamera& view,std::size_t cut);
+    void select(const SceneCamera& target,std::size_t cut,bool force=false);
+    void tick(const SceneCamera& target);
+    const SceneCamera& view()const{return view_;}
+    bool ready()const{return cut_.has_value();}
+    bool transitioning()const{return blending_;}
+    unsigned clock()const{return clock_;}
+private:
+    SceneCamera view_{};std::optional<std::size_t> cut_;
+    bool blending_=false;unsigned clock_=0;
 };
 struct SceneSpawn {NJS_POINT3 position{};Angle yaw=0;};
 struct SceneCutArea {
@@ -95,7 +117,7 @@ Scene decode_scene(const std::vector<std::uint8_t>& room);
 std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>& data,std::size_t offset=0);
 std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 position,std::int8_t floor=0);
 // bhInitActiveCamera target evaluation (no transition/event-camera state).
-SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 position,std::int8_t floor=0);
+SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 position,std::int8_t floor=0,const NJS_POINT3* eye=nullptr);
 struct ModelPose {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};

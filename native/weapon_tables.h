@@ -10,6 +10,8 @@ struct WPN_TAB {
     float hrate,ef_scale;short snd_wpno,hiteff;unsigned short seno0,seno1;
     char vib_tp,vib_ct,reserve1,reserve2;
 };
+struct EF_WORK {unsigned flg;unsigned short id,type;short flr_no;unsigned short mdlver;float px,py,pz,sx,sy,sz;short ay,ax;};
+extern EF_WORK WpnEffTab[23][4];
 extern const WPN_TAB WpnTab[23];
 extern const unsigned short PlMtnWpn[5];
 extern const int KnfAtrTab[4],en01_hp_tbl[2][16];

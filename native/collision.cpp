@@ -54,9 +54,9 @@ float ground_position(const std::vector<CollisionWall>& walls,float room_height,
         if(inside&&(delta>=0||w.type==6)&&delta<nearest){nearest=delta;result=surface;}
     }return result;
 }
-float wall_ray_distance(const std::vector<CollisionWall>& walls,float room_height,NJS_POINT3 origin,NJS_POINT3 direction,float range,int floor){
+float wall_ray_distance(const std::vector<CollisionWall>& walls,float room_height,NJS_POINT3 origin,NJS_POINT3 direction,float range,int floor,unsigned query_flags){
     float nearest=range;
-    for(const auto& w:walls){if(!(w.flags&1)||w.type>5||((w.attributes&1)&&floor!=-32768&&w.floor!=floor))continue;const auto p=w.position,e=w.extent;float lo=0,hi=nearest;
+    for(const auto& w:walls){if(!(w.flags&1)||w.type>5||((query_flags&0x400)&&(w.type&1))||((query_flags&0x40000000)&&(w.attributes&0x2000000))||((w.attributes&1)&&floor!=-32768&&w.floor!=floor))continue;const auto p=w.position,e=w.extent;float lo=0,hi=nearest;
         auto half=[&](float value,float slope){if(std::abs(slope)<1e-8f)return value>=0;const float t=-value/slope;if(slope>0)lo=std::max(lo,t);else hi=std::min(hi,t);return lo<=hi;};
         const float height=e.y==0?room_height:e.y;if(!half(origin.y-p.y,direction.y)||!half(p.y+height-origin.y,-direction.y))continue;
         if(w.type==2||w.type==3){const float x=origin.x-p.x,z=origin.z-p.z,a=direction.x*direction.x+direction.z*direction.z,b=x*direction.x+z*direction.z,c=x*x+z*z-e.x*e.x;
@@ -67,7 +67,7 @@ float wall_ray_distance(const std::vector<CollisionWall>& walls,float room_heigh
         }if(lo<=hi&&hi>=0&&lo<=nearest)nearest=std::max(0.f,lo);
     }return nearest;
 }
-NJS_POINT3 move_walls(const std::vector<CollisionWall>& walls,float room_height,const std::array<float,32>& floors,NJS_POINT3 from,NJS_POINT3 to,float radius,float height){
+NJS_POINT3 move_walls(const std::vector<CollisionWall>& walls,float room_height,const std::array<float,32>& floors,NJS_POINT3 from,NJS_POINT3 to,float radius,float height,unsigned actor_flags,unsigned actor_status){
     for(float n:{from.x,from.y,from.z,to.x,to.y,to.z,radius,height,room_height})if(!std::isfinite(n))throw std::runtime_error("nonfinite collision input");
     if(radius<=0||height<=0||room_height<0)throw std::runtime_error("invalid collision dimensions");
     const float distance=std::hypot(to.x-from.x,to.z-from.z),step_count=std::ceil(distance/(radius*.25f));if(step_count>4096)throw std::runtime_error("movement too large");
@@ -77,7 +77,7 @@ NJS_POINT3 move_walls(const std::vector<CollisionWall>& walls,float room_height,
         // Several adjoining volumes may push into each other. Revisit contacts
         // within each bounded substep so diagonal running cannot tunnel through.
         for(unsigned pass=0;pass<8;++pass){bool changed=false;for(const auto& wall:walls){
-            if(!(wall.flags&1)||wall.type>5||((wall.attributes&1)&&wall.floor!=floor))continue;
+            if(!(wall.flags&1)||wall.type>5||((wall.type&1)&&(actor_flags&0x400))||((wall.attributes&1)&&wall.floor!=floor)||((wall.attributes&2)&&(actor_flags&0x4000))||((wall.attributes&4)&&(actor_status&0x40000000u)))continue;
             const float wall_height=wall.extent.y==0?room_height:wall.extent.y;
             if(pos.y+height<wall.position.y||pos.y>wall.position.y+wall_height)continue;
             changed=push_wall(wall,pos,previous,radius)||changed;

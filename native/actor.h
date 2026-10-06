@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <map>
+#include <memory>
 namespace recvx {
 struct ModelNodeOverride {std::optional<NJS_POINT3> position;std::optional<std::array<Angle,3>> angles;};
 using ModelNodeOverrides=std::map<unsigned,ModelNodeOverride>;
@@ -44,6 +45,14 @@ public:
     std::vector<BoneMatrix> pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const ModelNodeOverrides& overrides={}) const;
     std::vector<BoneMatrix> pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},const ModelNodeOverrides& overrides={}) const;
     Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={}) const;
+    // bhReadPlayerData: further plp->mdl[n] (n >= 1) with their SKIN/texture bundle, e.g. Claire's
+    // ponytail mdl[4] used by obwp[2] (bhResetPlayer). nullptr when the model has no objects.
+    const PlayerAsset* model(unsigned index)const{return index>0&&index<=models_.size()?models_[index-1].get():nullptr;}
+    std::size_t model_count()const{return models_.size()+1;}
+    // Bind pose, posed into world space by `root` (object world matrix incl. link offset).
+    // `angles` overrides the X/Y rotation of the first nodes (bhObjClpn writes objP[i].ang[0..1]).
+    Scene sample_rest(const NJS_MATRIX& root,const std::vector<std::array<std::int32_t,2>>& angles={})const;
+    NJS_POINT3 bind_position(std::size_t node)const{return bind_pose_.at(node).position;}
     Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={}) const;
 private:
     struct SkinMesh {
@@ -62,6 +71,8 @@ private:
     std::vector<std::optional<MotionClip>> motions_;
     std::vector<SceneTexture> textures_;
     std::vector<std::vector<float>> translations_;
+    std::vector<std::shared_ptr<PlayerAsset>> models_;
+    void load_models(const std::vector<std::uint8_t>& data,std::size_t model_end,std::size_t morph_end);
     std::vector<Matrix> matrices(const std::vector<ModelPose>& pose,NJS_POINT3 position,Angle yaw,bool translations_only=false) const;
 };
 // Appends character geometry without applying stage-object camera masks.

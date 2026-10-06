@@ -15,7 +15,7 @@ struct ThirdPersonSettings {
     float distance=26,height=17,shoulder=5.5f;          // explore pose, world units
     float aim_distance=12,aim_height=14.5f,aim_shoulder=6.5f;
     float fov=62,aim_fov=48;                             // horizontal degrees
-    float smoothing=.16f;                                // 0..1 per 60-Hz tick
+    float smoothing=.16f;                                // 0..1 per 60-Hz step (converted to the 30-Hz game tick)
 };
 struct ThirdPersonState {
     bool free=false;    // player owns movement this tick
@@ -34,7 +34,7 @@ public:
     std::string describe()const{return enabled()?"An":"Aus";}
     const std::string& status()const{return status_;}
     std::function<void(const ThirdPersonSettings&)> changed;
-    // Advance once per fixed 60-Hz tick after locomotion.
+    // Advance once per original 30-Hz game tick after locomotion.
     void tick(const SceneSpawn& actor,ThirdPersonState state,const RoomWorld* world);
     // Returns the chase camera when active, otherwise `original` unchanged.
     SceneCamera view(const SceneCamera& original)const;

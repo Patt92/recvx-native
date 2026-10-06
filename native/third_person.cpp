@@ -1,5 +1,6 @@
 #include "third_person.h"
 #include "world.h"
+#include "timing.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -10,6 +11,10 @@ namespace recvx {
 namespace {
 constexpr float pi=3.14159265358979f;
 constexpr float angle_to_radians=2*pi/65536,radians_to_angle=65536/(2*pi);
+// Rates are tuned per 60-Hz step (third_person.ini keeps that unit); tick() runs
+// once per original 30-Hz game tick (timing.h), so convert the per-step factor.
+constexpr float steps_per_tick=60.f/float(game_tick_hz);
+float per_tick(float rate){return 1-std::pow(1-std::min(1.f,rate),steps_per_tick);}
 std::string trim(std::string s){const auto first=s.find_first_not_of(" \t\r\n");if(first==s.npos)return {};return s.substr(first,s.find_last_not_of(" \t\r\n")-first+1);}
 float mix(float a,float b,float t){return a+(b-a)*t;}
 NJS_POINT3 mix(NJS_POINT3 a,NJS_POINT3 b,float t){return {mix(a.x,b.x,t),mix(a.y,b.y,t),mix(a.z,b.z,t)};}
@@ -66,11 +71,11 @@ void ThirdPersonCamera::tick(const SceneSpawn& actor,ThirdPersonState state,cons
     if(!valid_){yaw_=heading;anchor_=actor.position;}
     else{
         // Lagging heading and anchor give the RE4/RE2-remake style trailing shoulder view.
-        const float k=settings_.smoothing,aim_k=std::min(1.f,k*2.5f);
+        const float k=per_tick(settings_.smoothing),aim_k=per_tick(std::min(1.f,settings_.smoothing*2.5f));
         yaw_=wrap(yaw_+wrap(heading-yaw_)*(state.aiming?aim_k:k));
-        anchor_=mix(anchor_,actor.position,std::min(1.f,k*2.f));
+        anchor_=mix(anchor_,actor.position,per_tick(std::min(1.f,settings_.smoothing*2.f)));
     }
-    blend_=std::clamp(blend_+(state.aiming?1.f:-1.f)/8,0.f,1.f);
+    blend_=std::clamp(blend_+(state.aiming?1.f:-1.f)*steps_per_tick/8,0.f,1.f);
     const auto& s=settings_;const float side=s.left_shoulder?-1.f:1.f;
     const float distance=mix(s.distance,s.aim_distance,blend_),height=mix(s.height,s.aim_height,blend_),shoulder=mix(s.shoulder,s.aim_shoulder,blend_)*side;
     const NJS_POINT3 head{anchor_.x,anchor_.y+height,anchor_.z};
@@ -96,7 +101,7 @@ void ThirdPersonCamera::tick(const SceneSpawn& actor,ThirdPersonState state,cons
     for(const float lift:{0.f,9.f})for(const float step:{25.f,50.f,75.f,100.f,130.f,160.f,180.f}){if(found)break;for(const float sign:{1.f,-1.f})if(!found&&consider(sign*step*degree,lift))found=true;}
     swing_target_=wanted_swing;lift_target_=wanted_lift;
     if(!valid_){swing_=wanted_swing;lift_=wanted_lift;}
-    else{swing_=wrap(swing_+wrap(wanted_swing-swing_)*.12f);lift_=mix(lift_,wanted_lift,.12f);}
+    else{swing_=wrap(swing_+wrap(wanted_swing-swing_)*per_tick(.12f));lift_=mix(lift_,wanted_lift,per_tick(.12f));}
     const auto chosen=rig(swing_,lift_);
     eye_=chosen.eye;
     target_={chosen.pivot.x+chosen.forward.x*40,head.y-mix(4.5f,1.5f,blend_),chosen.pivot.z+chosen.forward.z*40};

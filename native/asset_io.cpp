@@ -1,5 +1,6 @@
 #include "asset_io.h"
 #include "binary_view.h"
+#include "md5.h"
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -39,9 +40,14 @@ void write_tga(const std::filesystem::path& path,const SceneTexture& t){
     write_asset_file(path,bytes);
 }
 void apply_texture_files(Scene& scene,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity){
+    // Precedence: explicit per-asset mod file > content-keyed HD replacement
+    // (mods/textures/hd/<md5 of the cooked data TGA>.tga) > cooked data file > decoded original.
     for(std::size_t i=0;i<scene.textures.size();++i){const auto relative=std::filesystem::path("textures")/identity/(asset_number(unsigned(i))+".tga");
-        if(!mods.empty()&&std::filesystem::is_regular_file(mods/relative))scene.textures[i]=read_tga(mods/relative);
-        else if(std::filesystem::is_regular_file(data/relative))scene.textures[i]=read_tga(data/relative);
+        if(!mods.empty()&&std::filesystem::is_regular_file(mods/relative)){scene.textures[i]=read_tga(mods/relative);continue;}
+        if(!std::filesystem::is_regular_file(data/relative))continue;
+        if(!mods.empty()){const auto hd=mods/"textures"/"hd"/(md5_hex(read_asset_file(data/relative,256*1024*1024+65536))+".tga");
+            if(std::filesystem::is_regular_file(hd)){scene.textures[i]=read_tga(hd);continue;}}
+        scene.textures[i]=read_tga(data/relative);
     }
 }
 }

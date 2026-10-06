@@ -8,7 +8,8 @@ public:
     void draw(const Scene& scene,const SceneCamera& camera,bool wireframe=false);
     // Already prepared camera-space matrix, including the original item-view
     // path which bypasses njSetView's world Y/Z conversion.
-    void draw_view(const Scene& scene,const NJS_MATRIX& view,float focal_x,float focal_y,bool wireframe=false,const std::array<std::uint32_t,16>& hidden={});
+    // near/far: njClipZ distances in view space (far 0 = unlimited).
+    void draw_view(const Scene& scene,const NJS_MATRIX& view,float focal_x,float focal_y,bool wireframe=false,const std::array<std::uint32_t,16>& hidden={},float near=0.05f,float far=0);
     const std::vector<std::uint32_t>& pixels() const {return pixels_;}
     std::vector<std::uint32_t>& canvas(){return pixels_;}
     // Trilinear mipmapping with up to 4x anisotropic taps (removes texture

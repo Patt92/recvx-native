@@ -172,6 +172,7 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data,bool face_actor) 
     }
     if(!terminated||motions_.empty())throw std::runtime_error("missing player motion list");
     const auto morph_end=file.relative(motion_end+4,file.u32(motion_end),4);
+    load_models(data,model_end,morph_end);
     p=motion_end+4;terminated=false;
     for(unsigned index=0;index<1024 && p<morph_end;++index) {
         if(morph_end-p<4)throw std::runtime_error("truncated translation curve header");
@@ -242,7 +243,7 @@ Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 p
     return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out,overrides);
 }
 std::vector<ModelPose> PlayerAsset::sampled_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes)const{
-    if(!clip.frames||clip.positions.size()!=clip.angles.size()||clip.positions.size()>bones())throw std::runtime_error("room motion does not fit actor skeleton");
+    if(!clip.frames||clip.positions.size()!=clip.angles.size()||clip.positions.size()>bones())throw std::runtime_error("room motion does not fit actor skeleton: channels="+std::to_string(clip.positions.size())+", bones="+std::to_string(bones())+", mapped="+std::to_string(nodes.size()));
     const auto length=std::int64_t(clip.frames)*65536;
     auto clock=frame_q16%length;if(clock<0)clock+=length;const auto frame=std::size_t(clock/65536);
     auto pose=bind_pose_;
@@ -312,4 +313,34 @@ void append_actor(Scene& stage,const Scene& actor,std::size_t texture_base) {
         stage.triangles.push_back(triangle);
     }
 }
+void PlayerAsset::load_models(const std::vector<std::uint8_t>& data,std::size_t model_end,std::size_t morph_end){
+    // Same record walk as bhReadPlayerData: SKIN applies to the next MLB; every MLB is mdl[mdl_n++].
+    BinaryView file(data);struct Record{std::vector<std::uint8_t> skin,mdl;bool textured;};std::vector<Record> records;std::vector<std::uint8_t> skin;
+    for(std::size_t p=4;p+4<=model_end;){const auto size=file.u32(p);p+=4;if(size==0xffffffff)break;if(!size)continue;if(size>model_end-p||size<16)return;
+        const auto magic=file.u32(p);if(magic==0x4e494b53)skin=slice(data,p,size);
+        else if((magic&0xffffff)==0x4c444d){records.push_back({skin,slice(data,p,size),file.u32(p+8)!=0xffffffff});skin.clear();}
+        p+=size;}
+    if(records.size()<2)return;
+    // Texture bundles follow the morph block for every model with texP (bit 31: 32-byte alignment).
+    std::vector<std::vector<std::uint8_t>> bundles(records.size());std::size_t p=morph_end;
+    for(std::size_t i=0;i<records.size();++i){if(!records[i].textured)continue;if(p+4>data.size())break;auto size=file.u32(p);p+=4;if(size&0x80000000u){p=(p+31)&~std::size_t(31);size&=0x7fffffffu;}if(size>data.size()-p)break;bundles[i]=slice(data,p,size);p+=size;}
+    models_.resize(records.size()-1);
+    for(std::size_t i=1;i<records.size();++i){const auto& r=records[i];if(BinaryView(r.mdl).u16(6)==0)continue;
+        std::vector<std::uint8_t> out(4);auto put=[&](std::uint32_t v){for(int k=0;k<4;++k)out.push_back(std::uint8_t(v>>(8*k)));};
+        auto append=[&](const std::vector<std::uint8_t>& block){put(std::uint32_t(block.size()));out.insert(out.end(),block.begin(),block.end());};
+        if(!r.skin.empty())append(r.skin);append(r.mdl);put(0xffffffffu);
+        const std::uint32_t models_size=std::uint32_t(out.size()-4);for(int k=0;k<4;++k)out[std::size_t(k)]=std::uint8_t(models_size>>(8*k));
+        put(8);put(0);put(0xffffffffu);   // one empty motion slot
+        put(4);put(0xffffffffu);          // no translation curves
+        put(std::uint32_t(bundles[i].size()));out.insert(out.end(),bundles[i].begin(),bundles[i].end());
+        try{models_[i-1]=std::make_shared<PlayerAsset>(out);}catch(const std::exception&){models_[i-1].reset();}}
 }
+Scene PlayerAsset::sample_rest(const NJS_MATRIX& root,const std::vector<std::array<std::int32_t,2>>& angles)const{
+    MotionClip rest;rest.frames=1;for(std::size_t i=0;i<bind_pose_.size();++i){const auto& node=bind_pose_[i];auto a=node.angles;if(i<angles.size()){a[0]=angles[i][0];a[1]=angles[i][1];}rest.positions.push_back({node.position});rest.angles.push_back({a});}
+    auto scene=sample_clip(rest,0,{0,0,0},0);
+    NJS_MATRIX m;std::copy_n(root,16,m);
+    for(auto& t:scene.triangles)for(auto& v:t.vertices){njCalcPoint(&m,&v.position,&v.position);njCalcVector(&m,&v.normal,&v.normal);}
+    return scene;
+}
+}
+

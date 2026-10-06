@@ -1,14 +1,14 @@
 #include "doors.h"
 #include "asset_io.h"
 #include "binary_view.h"
+#include "room.h"
 #include <algorithm>
 #include <cstring>
 #include <iomanip>
 #include <sstream>
 namespace recvx {
 std::string DoorRequest::room_name()const{
-    if(stage>15||room>255||room_case>15)throw std::runtime_error("invalid door destination");
-    std::ostringstream out;out<<"RM_"<<std::hex<<std::uppercase<<stage<<std::setw(2)<<std::setfill('0')<<room<<room_case<<".RDX";return out.str();
+    return RoomIdentity{stage,room,room_case}.name();
 }
 void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem::path& mods,const DoorRequest& request){
     if(active_)throw std::runtime_error("door transition already active");
@@ -17,7 +17,8 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     BinaryView v(bytes);if(v.u32(0)!=0x4341504d)throw std::runtime_error("door packet requires MPAC");
     std::size_t p=v.relative(4,v.u32(4),4);std::array<std::size_t,4> offsets{},sizes{};
     for(unsigned i=0;i<4;++i){sizes[i]=v.u32(p);offsets[i]=p+4;v.require(offsets[i],sizes[i]);p=offsets[i]+sizes[i];}
-    sound_bank_=v.u32(offsets[2]);sounds_.clear();
+    sound_bank_=v.u32(offsets[2]);sounds_.clear();sound_commands_.clear();
+    sound_timing_={0,0,0,0,0,0x1000000,0x2000000,0x4000000,0x10,0x20,-1};
     model_=std::move(bytes);model_offset_=offsets[0];texture_offset_=offsets[1];
     parameters_.assign(model_.begin()+offsets[3],model_.begin()+offsets[3]+sizes[3]);BinaryView param(parameters_);
     if(param.u8(0)!='P'||param.u8(1)!='M'||param.u8(2)!='B'||!param.u8(3))throw std::runtime_error("invalid door parameters");
@@ -43,7 +44,13 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
 }
 void DoorSequence::tick(){if(!active_)return;recvx_door_step(&core_);
     // door.c bhControlDoorDemo: two sound request groups with the same priority.
-    for(unsigned shift:{0u,4u}){const unsigned bits=unsigned(core_.status)>>(16+shift);if(bits&2)sounds_.push_back(1);else if(bits&8)sounds_.push_back(3);else if(bits&4)sounds_.push_back(2);else if(bits&1)sounds_.push_back(0);core_.status&=~int(0xf0000u<<shift);}
+    for(unsigned shift:{0u,4u}){
+        // bhControlDoorDemo retains the second group until FadeProc1 sets
+        // 0x20. These are deferred closing sounds, not immediate door sounds.
+        if(shift&&!(core_.status&0x20))continue;
+        const unsigned bits=unsigned(core_.status)>>(16+shift);if(bits&2)sounds_.push_back(1);else if(bits&8)sounds_.push_back(3);else if(bits&4)sounds_.push_back(2);else if(bits&1)sounds_.push_back(0);core_.status&=~int(0xf0000u<<shift);
+    }
+    for(unsigned command=0;command<10;++command)if(core_.status&sound_timing_[command]){sound_commands_.push_back(command);sound_timing_[command]=0;}
     ++ticks_;if(core_.status&0x40){active_=false;finished_=true;}if(ticks_>3600)throw std::runtime_error("original door sequence exceeded tick budget");}
 void DoorSequence::skip(){if(active_){skipped_=true;active_=false;finished_=true;core_.status|=0x40;}}
 void DoorSequence::draw(SoftwareRenderer& renderer){

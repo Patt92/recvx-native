@@ -5,10 +5,21 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <iomanip>
+#include <sstream>
 extern "C" {
 #include "ps2_dvd_image.h"
 }
 namespace recvx {
+RoomIdentity RoomIdentity::parse(const std::string& name){
+    if((name.size()!=7&&name.size()!=11)||name.substr(0,3)!="RM_"||(name.size()==11&&name.substr(7)!=".RDX"&&name.substr(7)!=".RDT"))throw std::runtime_error("invalid decimal room identity");
+    for(unsigned i=3;i<7;++i)if(name[i]<'0'||name[i]>'9')throw std::runtime_error("invalid decimal room identity");
+    return {unsigned(name[3]-'0'),unsigned((name[4]-'0')*10+name[5]-'0'),unsigned(name[6]-'0')};
+}
+std::string RoomIdentity::name()const{
+    if(stage>9||room>99||variant>9)throw std::runtime_error("room identity outside original filename fields");
+    std::ostringstream out;out<<"RM_"<<stage<<std::setw(2)<<std::setfill('0')<<room<<variant<<".RDX";return out.str();
+}
 static std::uint32_t u32(const std::vector<std::uint8_t>& data, std::size_t offset) {
     if (offset > data.size() || data.size()-offset < 4)
         throw std::runtime_error("RDT field outside buffer");

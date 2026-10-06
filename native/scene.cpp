@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "chunk_blend.h"
 #include "binary_view.h"
 #include "room.h"
 #include <algorithm>
@@ -38,6 +39,8 @@ public:
             const auto cam=cut_offset+i*0x2a8+0x20;
             SceneCamera camera;
             camera.flags=view.u16(cam);
+            camera.transition_speed=std::int8_t(view.u8(cam+3));
+            camera.move_speed=view.f32(cam+0x30);camera.angle_speed=std::int8_t(view.u8(cam+0x50));
             camera.cut_origin={view.f32(cut+8),view.f32(cut+12),view.f32(cut+16)};
             camera.cut_extent={view.f32(cut+20),view.f32(cut+24),view.f32(cut+28)};
             camera.follow_x=view.f32(cam+20);camera.target_height=view.f32(cam+24);camera.follow_z=view.f32(cam+28);
@@ -240,17 +243,23 @@ private:
         throw std::runtime_error("unterminated vertex list");
     }
     void decode_polygons(std::size_t chunk) {
-        std::uint32_t material=0xffb2b2b2;std::uint16_t texture=0;
+        std::uint32_t material=0xffb2b2b2;std::uint16_t texture=0;unsigned blend_src=4,blend_dst=5; // NJD_CB_BA default SA/ISA
         for(unsigned iteration=0;iteration<65536;++iteration) {
             const auto type=view.u8(chunk);
             if(type==255)return;
+            if(type==1){const auto f=view.u8(chunk+1);blend_src=(f>>3)&7;blend_dst=f&7;}
             if(type<8){chunk+=2;continue;}
             if(type<16){if(type==8)texture=view.u16(chunk+2)&0xfff;view.require(chunk,4);chunk+=4;continue;}
             const auto end=view.relative(chunk,std::uint32_t(view.u16(chunk+2)+2)*2,0);
+            // njCnkCmD/A/Da/S/Ds/As/Das all update the blend mode, even
+            // ambient-only materials. NJD_CB_BA is not its only writer.
+            if(type>=17&&type<=23){const auto f=view.u8(chunk+1);blend_src=(f>>3)&7;blend_dst=f&7;}
             if((type&1) && type>=17 && type<=23)material=view.u32(chunk+4);
             if(type>=64 && type<=66) {
                 auto at=chunk+4;
                 const auto flags=view.u16(at);at+=2;
+                // Strip head bits (chunk byte 1): NJD_FST_UA 0x08 enables GS alpha blending (ps2_NinjaCnk.c).
+                const bool use_alpha=view.u8(chunk+1)&0x08;
                 const unsigned strips=flags&0x3fff,user_words=flags>>14;
                 auto read=[&]() {
                     if(at>end||end-at<2)throw std::runtime_error("strip data outside polygon chunk");
@@ -278,6 +287,7 @@ private:
                         if(i>=2) {
                             SceneTriangle triangle{{strip[i-2],strip[i-1],strip[i]},material,texture,current_object,type!=64};
                             triangle.camera_mask=camera_mask;
+                            if(use_alpha){triangle.blend=SceneBlend::Ninja;triangle.blend_register=chunk_blend_register(blend_src,blend_dst);}
                             if(((i&1)!=0)^reverse)std::swap(triangle.vertices[0],triangle.vertices[1]);
                             if(output.triangles.size()>=2000000)throw std::runtime_error("room triangle limit exceeded");
                             output.triangles.push_back(triangle);
@@ -325,7 +335,7 @@ std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 pos
     }
     return std::nullopt;
 }
-SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 position,std::int8_t floor) {
+SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 position,std::int8_t floor,const NJS_POINT3* eye) {
     if(index>=scene.cameras.size())throw std::runtime_error("active camera outside table");
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("invalid camera target");
     const auto& original=scene.cameras[index];auto camera=original;
@@ -357,9 +367,9 @@ SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 pos
     // angle convention and limits are those of bhInitActiveCamera.
     auto signed_angle=[](int value){const int bits=value&65535;return bits<32768?bits:bits-65536;};
     auto look=[&](unsigned axis){
-        const auto p=target(axis==0?4:2);const float dx=p.x-camera.position.x,dz=p.z-camera.position.z;
+        const auto p=target(axis==0?4:2);const auto origin=eye?*eye:camera.position;const float dx=p.x-origin.x,dz=p.z-origin.z;
         constexpr double units=65536.0/6.2831853071795864769;
-        return axis==0?-int(std::atan2(double(p.y+original.target_height-camera.position.y),double(njSqrt(dx*dx+dz*dz)))*units):32768-int(std::atan2(double(dx),double(dz))*units);
+        return axis==0?-int(std::atan2(double(p.y+original.target_height-origin.y),double(njSqrt(dx*dx+dz*dz)))*units):32768-int(std::atan2(double(dx),double(dz))*units);
     };
     for(unsigned axis=0;axis<2;++axis){
         const int limit=signed_angle(original.angle_limits[axis]);
@@ -378,4 +388,37 @@ SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 pos
     if(camera.perspective<=0||camera.perspective>=32768)camera.perspective=8192;
     return camera;
 }
+void ActiveCameraMotion::reset(const SceneCamera& view,std::size_t cut){view_=view;cut_=cut;blending_=false;clock_=0;}
+void ActiveCameraMotion::select(const SceneCamera& target,std::size_t cut,bool force){
+    if(!cut_||force){reset(target,cut);return;}
+    if(*cut_==cut)return;
+    // bhSetCut(flg=0): either the outgoing or incoming CAM_WRK bit 2
+    // retains the current pose. bhSetFixedCut and bhCheckCut(1) snap instead.
+    blending_=((target.flags|view_.flags)&2)!=0;clock_=0;cut_=cut;
+    const auto old=view_;view_=target;
+    if(blending_){view_.position=old.position;view_.angles=old.angles;view_.distance=old.distance;view_.perspective=old.perspective;}
+}
+void ActiveCameraMotion::tick(const SceneCamera& target){
+    if(!cut_)return;
+    // cut.c bhControlActiveCamera: recursive hct/(spd+1), then ordinary
+    // am_spd/aa_spd following. This is not a linear host tween or a timer.
+    const float hkn=1.0f/(target.transition_speed+1);
+    const float move=blending_?float(clock_)*hkn:target.move_speed;
+    const float angle=blending_&&!(target.flags&4)?float(clock_)*hkn:0.01f*target.angle_speed;
+    view_.position.x+=move*(target.position.x-view_.position.x);
+    view_.position.y+=move*(target.position.y-view_.position.y);
+    view_.position.z+=move*(target.position.z-view_.position.z);
+    view_.distance+=move*(target.distance-view_.distance);
+    auto turn=[](int current,int wanted,float rate,bool wrap){
+        const auto from=std::int16_t(current),to=std::int16_t(wanted);
+        const int delta=wrap?int(std::int16_t(to-from)):int(to)-from;
+        // Preserve the original degree conversions and truncation to short.
+        const float degrees=float(from)*(360.0f/65536.0f)+float(delta)*(360.0f/65536.0f)*rate;
+        return int(std::int16_t(int(degrees*(65536.0f/360.0f))));
+    };
+    for(unsigned axis=0;axis<3;++axis)view_.angles[axis]=turn(view_.angles[axis],target.angles[axis],angle,axis!=2);
+    view_.perspective=turn(view_.perspective,target.perspective,blending_?float(clock_)*hkn:0.01f*target.angle_speed,false);
+    if(blending_&&++clock_>=unsigned(target.transition_speed+1))blending_=false;
+}
+
 }

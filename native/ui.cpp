@@ -53,6 +53,8 @@ void pulse_quad(SoftwareRenderer& image,const SceneTexture& texture,const PulseQ
         out=color;
     }
 }
+// Grid cell (listcsr_2) of pip index `slot`: wide items fill a row and sit on its odd cell.
+unsigned grid_cell(const Inventory& inv,unsigned slot){if(slot<=1)return 1;unsigned cell=2;for(unsigned i=2;i<12;++i){const auto id=Inventory::id(inv.slots()[i]);const bool wide=id&&(itemdata[id].type&0x100);if(i==slot)return wide?cell+1:cell;cell+=wide?2:1;}return cell;}
 unsigned last_slot(const Inventory& inv){unsigned cells=0,last=1;for(unsigned slot=2;slot<12&&cells<inv.capacity();++slot){const auto id=Inventory::id(inv.slots()[slot]);cells+=id&&(itemdata[id].type&0x100)?2:1;last=slot;}return last;}
 }
 std::vector<std::string> StatusMenu::actions(const Inventory& inventory)const{
@@ -85,6 +87,7 @@ void StatusMenu::combine(Inventory& inventory,unsigned first,unsigned second){
     else{feedback_sound=1;if(index)show_message(index);}
 }
 void StatusMenu::tick(Inventory& inventory){
+    if(commands&&command_frames<4)++command_frames;else if(erase_frames)--erase_frames;
     // StatusInit runs PulseInit on every opening; StatusMain then runs PulseMain once per frame.
     const auto condition=StatusPulse::condition(inventory.hp,inventory.poisoned);
     if(!active)pulse_open_=false;else{if(!pulse_open_||(!pulse.healing()&&pulse.condition()!=condition)){pulse.open(condition);pulse_open_=true;}pulse.tick();}
@@ -103,9 +106,15 @@ bool StatusMenu::input(MenuInput key,Inventory& inventory){
     auto snap=[&]{return Snapshot{active,commands,examining,combining,files,file_list,message.active(),selected,command,file_number,file_page,combine_from,message.index()};};
     const auto before=snap();const bool was_examining=examining&&!message.active();
     feedback_sound=0xffffffff;
+    if(active&&command_window_moving()&&key!=MenuInput::Open)return true;
     // CursorMove/MainCommand ignore directions and decide while the cure sweep owns statusflg 0x20.
     if(active&&pulse.healing()&&!message.active()&&key!=MenuInput::Cancel&&key!=MenuInput::Open)return true;
+    const auto actions_before=commands?actions(inventory):std::vector<std::string>{};
+    const unsigned item_before=selected<12?Inventory::id(inventory.slots()[selected]):0;
     const bool handled=apply_input(key,inventory);
+    if(!before.commands&&commands)command_frames=0;                       // ItemCommand testmode 0: slide in
+    if(before.commands&&!commands&&active){erase_frames=4;erase_item=item_before;erase_actions=actions_before;erase_command=before.command;} // ItemCommandErase
+    if(!active){command_frames=0;erase_frames=0;}
     if(feedback_sound!=0xffffffff)return handled;
     const auto after=snap();
     auto key_of=[](const Snapshot& s){return std::make_tuple(s.active,s.commands,s.examining,s.combining,s.files,s.file_list,s.message,s.selected,s.command,s.file_number,s.file_page,s.combine_from,s.message_index);};
@@ -141,7 +150,7 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     if(examining){if(key==MenuInput::Left)examine_yaw-=2048;if(key==MenuInput::Right)examine_yaw+=2048;if(key==MenuInput::Up)examine_pitch+=2048;if(key==MenuInput::Down)examine_pitch-=2048;if(key==MenuInput::Confirm)inspect(inventory);return true;}
     if(commands){auto list=actions(inventory);if(list.empty()){commands=false;return true;}if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
         const auto item=Inventory::id(inventory.slots()[selected]);
-        if(command==0){if(itemdata[item].type&1){inventory.equip(selected);active=false;}else if(item==145)open_file(inventory,0,true);
+        if(command==0){if(itemdata[item].type&1){inventory.equip(selected);}else if(item==145)open_file(inventory,0,true);
             else if(item>=20&&item<=29){const auto cure=unsigned(curedata[item-20]);if(!inventory.heal(selected))show_message(inventory.infected&&item==23?198:161);else pulse.cured(StatusPulse::condition(inventory.hp,inventory.poisoned),cure,inventory.infected);}
             else{use_item=item;active=false;}}
         else if(command==1){if(item==145)open_file(inventory,0,true);else{examining=true;inspection=ItemInspection{};const auto angle=inspection_default_angles(item);examine_pitch=angle[0];examine_yaw=angle[1];examine_roll=angle[2];}}
@@ -149,9 +158,16 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
         else if(command==4&&toggle_shotgun_burst)toggle_shotgun_burst();
         commands=false;
     }return true;}
-    const auto last=last_slot(inventory);selected=std::min(selected,last);
-    if(key==MenuInput::Up){if(selected<=3)selected=1;else selected-=2;}if(key==MenuInput::Down){selected=selected==1?2:std::min(last,selected+2);}
-    if(key==MenuInput::Left&&selected>1)--selected;if(key==MenuInput::Right)selected=std::min(last,selected+1);
+    // sub1.c CursorMove: listcsr_0 = selected (pip index, 1 = equipment), listcsr_2 = grid cell.
+    // ItemSort keeps wide items first; sakai is the pip index of the first narrow/empty entry.
+    {unsigned sakai=2;while(sakai<12){const auto id=Inventory::id(inventory.slots()[sakai]);if(!(id&&(itemdata[id].type&0x100)))break;++sakai;}
+     const unsigned max=inventory.side_pack?10:8;unsigned& l0=selected;unsigned l2=grid_cell(inventory,selected);
+     if(key==MenuInput::Up&&l2!=1){if(l2>=3){if(l0<=sakai){l0--;l2-=2;}else{l0-=2;l2-=2;}}else{l2--;l0--;}}
+     else if(key==MenuInput::Down&&l2<max){if(l0<sakai){if((l2&1)&&l0==sakai-1)l0+=2;else l0++;l2+=2;}else{l0+=2;l2+=2;}}
+     if(key==MenuInput::Right&&l2<max+1){if(l0<sakai){if(l2<max){if(l2&1)l2++;else l2+=2;l0++;}}else{l0++;l2++;}}
+     else if(key==MenuInput::Left&&l2>2){if(l0<sakai){if(l0>2){l0--;l2-=2;}}else{l0--;l2--;}}
+     selected=std::clamp(l0,1u,11u);
+     while(selected>1&&grid_cell(inventory,selected)>max+1)--selected;} // host: a bag removed while open leaves no locked cell
     if(key==MenuInput::Confirm){if(combining){const auto rule=inventory.combination_rule(selected,combine_from);
         if(rule>=0&&(combidata[rule+2]&255)==6){pending_combine_first_=selected;pending_combine_second_=combine_from;show_message(155);}else combine(inventory,selected,combine_from);
     }else if(Inventory::id(inventory.slots()[selected])){commands=true;command=0;}}
@@ -211,11 +227,76 @@ void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,flo
     };write(message,0);
 }
 void GameUi::ascii(SoftwareRenderer& image,const std::string& str,int x,int y,float scale,std::uint32_t color)const{Message m;for(unsigned char c:str)m.push_back(c=='\n'?0xff00:c==' '?0xff01:c>=32&&c<140?c-32:31);m.push_back(0xffff);text(image,m,x,y,scale,color);}
-void GameUi::icon(SoftwareRenderer& image,unsigned id,int x,int y)const{
+void GameUi::icon(SoftwareRenderer& image,unsigned id,int x,int y,int height,int narrow_width)const{
     unsigned n=id;switch(id){case 30:n=13;break;case 63:case 128:case 129:n=41;break;case 130:n=35;break;case 136:n=47;break;case 138:n=48;break;case 142:n=128;break;case 143:n=49;break;case 144:n=102;break;case 145:n=133;break;}
     const auto item=n;if(item>63)n-=64;if(item<64){if(n&&n<4)n=n*2-1;else if(n<33){if(n)n+=4;}else if(n==33||n==34)n+=n-33+4;else n+=6;}
-    const int width=(itemdata[id].type&0x100)?136:68,u=int(n%7)*34,v=int(n/7)*24;
-    blit(image,menu_[item<64?4:3],x,y,width,48,u,v,u+width/2,v+24);
+    const bool wide=itemdata[id].type&0x100;const int width=narrow_width*(wide?2:1),u=int(n%7)*34,v=int(n/7)*24;
+    blit(image,menu_[item<64?4:3],x,y,width,height,u,v,u+(wide?68:34),v+(height==19?12:24));
+}
+BoxSlide::BoxSlide(){for(unsigned c=0;c<12;++c)for(unsigned i=0;i<6;++i)pos_[c][i]=i<2?cen_pos99[c][i+2]:0.f;}
+void BoxSlide::open(){
+    // CenterPositionInit: start at cen_pos99[0..1], delta to the settled [2..3]; BgColorInit zeroes the fade.
+    for(unsigned c=0;c<12;++c){for(unsigned i=0;i<6;++i)pos_[c][i]=cen_pos99[c][i];pos_[c][4]=cen_pos99[c][2]-cen_pos99[c][0];pos_[c][5]=cen_pos99[c][3]-cen_pos99[c][1];}
+    phase_=Phase::Opening;count_=0;fade_=0;
+}
+void BoxSlide::cancel(){
+    // StatusCancel: every center except 0 and 7 slides to its off-screen target.
+    pos_[1][3]=-80;pos_[2][2]=-448;pos_[3][2]=640;pos_[4][2]=808;pos_[5][2]=644;pos_[6][3]=484;pos_[8][2]=-380;pos_[9][2]=644;pos_[10][3]=-384;pos_[11][2]=660;
+    for(unsigned c=1;c<12;++c){auto& p=pos_[c];if(c!=3){p[4]=p[2]-p[0];p[5]=p[3]-p[1];}else p[4]=p[2]-352.f;}
+    phase_=Phase::Closing;count_=0;
+}
+BoxSlide::Event BoxSlide::tick(){
+    if(phase_==Phase::Settled)return Event::None;
+    constexpr float step=0.057142857f;
+    // SpriteH: movement happens on every call except the finishing one (cnt==8).
+    if(count_!=8)for(auto& p:pos_){p[0]+=p[4]/8.f;p[1]+=p[5]/8.f;}
+    if(count_==8){const bool opening=phase_==Phase::Opening;phase_=Phase::Settled;count_=0;return opening?Event::Opened:Event::Closed;}
+    ++count_;
+    fade_=std::clamp(fade_+(phase_==Phase::Opening?step:-step),0.f,1.f); // BGFadeIn/BGFadeOut
+    return Event::None;
+}
+float BoxSlide::x(unsigned center)const{return pos_[center][0];}
+float BoxSlide::y(unsigned center)const{return pos_[center][1];}
+void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const BoxSlide* slide)const{
+    rectangle(image,0,0,640,480,0xff101010);
+    // Slide offsets of the original cen_pos centers relative to the settled layout (sub1.c SpriteH).
+    auto dx=[&](unsigned c){return slide?int(std::lround(slide->x(c)))-centers[c][0]:0;};
+    auto dy=[&](unsigned c){return slide?int(std::lround(slide->y(c)))-centers[c][1]:0;};
+    std::vector<PARTS> sprites;
+    auto group=[&](const auto& table){for(const auto& p:table){if(p.anim==-1||p.anim==255)break;sprites.push_back(p);}};
+    // ItemBoxInit's settled sprite groups. Security boxes retain parts03b at
+    // center 9; normal boxes show parts18b. No host rectangle or caption.
+    for(unsigned i=0;parts_04b[i].anim!=-1&&parts_04b[i].anim!=255;++i){auto p=parts_04b[i];if(!inv.side_pack&&(i==6||i==8||i==9||i==13||i==14))p.pos[1]-=48;sprites.push_back(p);}
+    group(parts_05b);
+    for(auto p:parts_07b){if(p.anim==-1||p.anim==255)break;if(slide)p.col.r=p.col.g=p.col.b=slide->fade();sprites.push_back(p);} // BGFadeIn/Out
+    group(parts_11b);
+    // CursorInit disables the second/third cursor sprites. CursorSet positions
+    // the first over the selected pip cell; never draw the uninitialised
+    // 364-pixel second cursor through the security list.
+    if(!selecting){auto p=parts_09b[0];const auto cell=grid_cell(inv,menu.selected);const bool wide=itemdata[Inventory::id(inv.slots()[menu.selected])].type&0x100;
+        p.pos[0]=cell>=2?20+int((cell&~unsigned(wide))%2)*68:base==64?88:4;p.pos[1]=cell>=2?4+int((cell/2)-1)*48:-76;
+        p.atr|=0x20;sprites.push_back(p);}
+
+    for(unsigned i=0;i<std::size(parts_15b)&&parts_15b[i].anim!=-1&&parts_15b[i].anim!=255;++i){if(base==64&&i>=31)continue;auto p=parts_15b[i];if(i==22){p.anim=0;p.parts_num=10;}if(i==18||i==19)p.anim=std::any_of(inv.items.begin()+base,inv.items.begin()+base+(base==64?128:32),[](auto item){return item!=0;})?17:16;if(i==27||i==28)p.pos[1]=68+int((base==64?1.59375f:6.375f)*index);sprites.push_back(p);}
+    for(unsigned i=0;i<std::size(parts_16b)&&parts_16b[i].anim!=-1&&parts_16b[i].anim!=255;++i){auto p=parts_16b[i];if(!i){p.anim=0;p.parts_num=0;}sprites.push_back(p);}group(parts_17b);
+    if(base==64)group(parts_18b);else for(auto p:parts_03b){if(p.anim==-1||p.anim==255)break;p.cen_no=9;sprites.push_back(p);}
+    std::stable_sort(sprites.begin(),sprites.end(),[](const auto& a,const auto& b){return a.pos[2]>b.pos[2];});
+    for(const auto& p:sprites){if(p.parts_num>=23||!tables[p.parts_num]||p.cen_no>=12)continue;auto t=tables[p.parts_num][p.anim];if(p.parts_num==15&&p.anim==0)t.sx=(itemdata[Inventory::id(inv.slots()[menu.selected])].type&0x100)?144:76;if(t.texid<0||unsigned(t.texid)>=menu_.size())continue;
+        const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[t.texid],int(p.pos[0])+centers[p.cen_no][0]+dx(p.cen_no)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+dy(p.cen_no)+int(std::min(i,ny-1)*p.move),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,tint(p.col),bool(p.atr&8),p.ang);
+    }
+    const int count=base==64?128:32;
+    // ItemBoxIconSet/SpriteOnOff: 38-pixel rows; only 31 < y < 259
+    // displayed, bottom row clipped to 19 pixels. Original item-name states.
+    for(int row=1;row<6;++row){const auto packed=inv.items[base+(int(index)+count+row-3)%count];const auto id=Inventory::id(packed);const int y=40+31+38*row+dy(10),x0=dx(10);
+        if(selecting&&row==3){rectangle(image,43+x0,y-2,348,2,0xff9f9f80);rectangle(image,43+x0,y+36,348,2,0xff9f9f80);}
+        if(id){text(image,read_message(messages_,4,inventory_name_id(packed)),44+x0,y,.95f);icon(image,id,324+x0,y,row==5?19:38,42);if((itemdata[id].type&0x3800)&&Inventory::quantity(packed)>1)ascii(image,std::to_string(Inventory::quantity(packed)),375+x0,y+20,.6f,0xffffe020);}
+    }
+    unsigned cell=0;for(unsigned slot=1;slot<12;++slot){const auto id=Inventory::id(inv.slots()[slot]);const unsigned center=slot==1?(base==64?4:9):5;const int x=(slot==1?(base==64?528:444):460+int(cell&1)*68)+dx(center),y=(slot==1?48:128+int(cell/2)*48)+dy(center);
+        if(!selecting&&slot==menu.selected){rectangle(image,x-1,y-1,id&&(itemdata[id].type&0x100)?138:70,50,0xff238699);rectangle(image,x+1,y+1,id&&(itemdata[id].type&0x100)?134:66,46,0xff111f22);}
+        icon(image,id,x,y);if(id&&(itemdata[id].type&0x3800)&&Inventory::quantity(inv.slots()[slot])>1)ascii(image,std::to_string(Inventory::quantity(inv.slots()[slot])),x+42,y+27,.6f,0xffffe020);
+        if(slot>1)cell+=id&&(itemdata[id].type&0x100)?2:1;if(cell>=inv.capacity())break;
+    }
+    const auto packed=selecting?inv.items[base+index]:inv.slots()[menu.selected];if(menu.message.active())text(image,menu.message.page(),44+dx(6),342+dy(6),1,0xffffffff,true,int(menu.message.selection));else if(Inventory::id(packed))text(image,read_message(messages_,4,inventory_name_id(packed)),44+dx(6),342+dy(6),.95f);
 }
 void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick){
     if(menu.active){
@@ -245,10 +326,14 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         // Quads captured from the original Pulse00/PulseHealAnim/PulsePoisonHealAnim.
         for(const auto& quad:menu.pulse.quads())pulse_quad(image,menu_[2],quad);
         const auto selected_id=menu.pickup?menu.pickup:Inventory::id(inv.slots()[menu.selected]);if(selected_id&&!menu.message.active()&&!(menu.pickup&&dialog.active()))text(image,read_message(messages_,4,menu.pickup?menu.pickup:inventory_name_id(inv.slots()[menu.selected])),44,342,.95f);
-        if(menu.commands){for(unsigned n=0;n<13;++n){auto p=parts_06b[n];const bool weapon=itemdata[selected_id].type&1;const int shrink=selected_id==10?0:weapon?32:64;
-            if(n==2||n==3||n==5||n==7)p.pos[1]-=shrink;if(n==8)p.setnum=selected_id==10?3:weapon?2:1;if(n==9||n==10)p.setnum=selected_id==10?4:weapon?3:2;const auto& part=tables[p.parts_num][p.anim];const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;
-            for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]-96+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
-        }auto list=menu.actions(inv);for(unsigned i=0;i<list.size();++i){if(list[i]=="File")ascii(image,"File",364,146,.8f);else{const auto& label=parts_10[i==0?(list[0]=="Equip"?7:8):i==1?9:i==2?10:i==4?(list[i]=="Single"?11:12):8];blit(image,menu_[label.texid],366,146+int(i)*32,label.sx,label.sy,label.u1,label.v1,label.u2,label.v2,i==menu.command?0xff2080ff:0xffffffff);}}}
+        if(menu.commands||menu.erase_frames){
+            // cen_pos[11] slides 24 px per frame; 96 px is the fully opened window.
+            const bool erasing=!menu.commands;const int slide=(4-int(erasing?menu.erase_frames:menu.command_frames))*24;
+            const unsigned command_item=erasing?menu.erase_item:selected_id;const auto list=erasing?menu.erase_actions:menu.actions(inv);const unsigned cursor=erasing?menu.erase_command:menu.command;
+            for(unsigned n=0;n<13;++n){auto p=parts_06b[n];const bool weapon=itemdata[command_item].type&1;const int shrink=command_item==10?0:weapon?32:64;
+            if(n==2||n==3||n==5||n==7)p.pos[1]-=shrink;if(n==8)p.setnum=command_item==10?3:weapon?2:1;if(n==9||n==10)p.setnum=command_item==10?4:weapon?3:2;const auto& part=tables[p.parts_num][p.anim];const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;
+            for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]-96+(p.cen_no==11?slide:0)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
+        }for(unsigned i=0;i<list.size();++i){if(list[i]=="File")ascii(image,"File",364+slide,146,.8f);else{const auto& label=parts_10[i==0?(list[0]=="Equip"?7:8):i==1?9:i==2?10:i==4?(list[i]=="Single"?11:12):8];blit(image,menu_[label.texid],366+slide,146+int(i)*32,label.sx,label.sy,label.u1,label.v1,label.u2,label.v2,i==cursor?0xff2080ff:0xffffffff);}}}
         if(menu.combining)ascii(image,"Combine",44,400,.8f,0xff50c0ff);
         if((menu.examining||menu.pickup)&&selected_id&&selected_id<145){
             const auto source=menu.pickup?menu.pickup:menu.inspection.running()?menu.inspection.item():selected_id;

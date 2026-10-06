@@ -24,6 +24,11 @@ public:
     unsigned feedback_sound=0xffffffff,opening_item=0,opening_frame=0;
     ItemInspection inspection;
     StatusPulse pulse; // original condition monitor, advanced by tick()
+    // Command window slide (sub1.c ItemCommand testmode 0 / ItemCommandErase):
+    // cen_pos[11] moves 24 px per frame for 4 frames in and out; no input meanwhile.
+    unsigned command_frames=0,erase_frames=0,erase_item=0,erase_command=0;
+    std::vector<std::string> erase_actions;
+    bool command_window_moving()const{return (commands&&command_frames<4)||erase_frames;}
     bool files=false,file_list=false;
     unsigned file_number=0,file_page=0,stage=0,room=0;
     std::function<bool()> shotgun_burst;
@@ -49,10 +54,32 @@ private:
     bool apply_input(MenuInput input,Inventory& inventory);
 
 };
+// ItemBox screen slide (sub1.c SpriteH/StatusCancel): the twelve sprite centers
+// (cen_pos) move 1/8 of their delta for eight ticks, then one finishing tick;
+// parts_07b fades with BGFadeIn/BGFadeOut by 0.057142857 per moving tick.
+class BoxSlide {
+public:
+    enum class Event {None,Opened,Closed};
+    void open();                // ItemBoxInit + CenterPositionInit: slide in
+    void cancel();              // StatusCancel: slide out
+    Event tick();               // one SpriteH + BGFade pass
+    BoxSlide();
+    bool moving()const{return phase_!=Phase::Settled;}
+    float x(unsigned center)const;
+    float y(unsigned center)const;
+    float fade()const{return fade_;}
+private:
+    enum class Phase {Settled,Opening,Closing};
+    Phase phase_=Phase::Settled;
+    float pos_[12][6]{};
+    unsigned count_=0;
+    float fade_=0.457142857f;
+};
 class GameUi {
 public:
     GameUi(const std::filesystem::path& data,const std::filesystem::path& mods={});
     void draw(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick);
+    void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const BoxSlide* slide=nullptr)const;
     void draw_title(SoftwareRenderer& image);
     void draw_title_options(SoftwareRenderer& image,unsigned selected);
     void label(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=.6f,std::uint32_t color=0xffffffff)const;
@@ -69,6 +96,6 @@ private:
     std::map<unsigned,std::vector<std::uint8_t>> item_packets_;
     void text(SoftwareRenderer& image,const Message& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff,bool dialogue=false,int selected_choice=-1)const;
     void ascii(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff)const;
-    void icon(SoftwareRenderer& image,unsigned item,int x,int y)const;
+    void icon(SoftwareRenderer& image,unsigned item,int x,int y,int height=48,int narrow_width=68)const;
 };
 }

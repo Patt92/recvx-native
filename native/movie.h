@@ -13,6 +13,7 @@ public:
     void tick();
     void draw(SoftwareRenderer& image);
     bool active() const { return active_; }
+    unsigned time_centiseconds() const { return active_?unsigned(ticks_*100/30):0; }
     unsigned frame() const { return frame_; }
     unsigned frames() const { return frames_.size(); }
 private:

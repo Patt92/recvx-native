@@ -15,9 +15,10 @@ public:
     void confirm();
     unsigned choices()const;
     bool tick();
+    bool timed()const{return timed_;} // page advances on its own (FF02 wait), e.g. voiced cinematic lines
     unsigned selection=0;
 private:
-    bool active_=false;
+    bool active_=false,timed_=false;
     unsigned index_=0,auto_ticks_=0;
     std::size_t position_=0;
     Message text_,page_;

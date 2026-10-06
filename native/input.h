@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 namespace recvx {
-enum class Action {Forward,Back,TurnLeft,TurnRight,Run,Inventory,Confirm,Cancel,Up,Down,Left,Right,Skip,Quit,Wireframe,Aim,Attack,Count};
+enum class Action {Forward,Back,TurnLeft,TurnRight,Run,Inventory,Confirm,Cancel,Up,Down,Left,Right,Skip,Quit,Wireframe,Aim,Attack,NextTarget,Count};
 constexpr unsigned action_count=unsigned(Action::Count);
 struct InputFrame {
     bool gamepad_input=false;
