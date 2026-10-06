@@ -62,6 +62,7 @@ int EventVm::instruction(Task& t){
     case 0x62:{const unsigned camera=v.u8(p+1),key=v.u8(p+2),match_key=v.u8(p+3);advance(6);if(!(flags[6][0]&0x40))return 1;
         if(flags[5][0]&1){unsigned active=0,active_key=0;if(!event_camera)throw std::runtime_error("camera check requires native world binding");if(event_camera(active,active_key)&&active==camera&&(!match_key||active_key==key))return 0;}return 1;}
     // bhCamInfoSet toggles CUT_WORK.flg bit 0 of camera-switch group v1.
+    case 0x2a:{const auto mode=v.u8(p+1);world(t,op,4);if(!mode){flags[5][0]|=1;flags[11][0]|=0x1000;}else if(mode==1){flags[5][0]&=~1u;flags[11][0]&=~0x1000u;}return 1;}
     case 0x39:world(t,op,4);return 1;
     // Original Event_T_timer: one increment per scheduler pass with active work.
     case 0x60:{const auto limit=v.u16(p+4);advance(6);return event_timer<limit;}
@@ -87,7 +88,7 @@ int EventVm::instruction(Task& t){
     case 0x21:{const unsigned count=v.u8(p+1),base=v.u16(p+2),mode=v.u8(p+4),operand=v.u8(p+5);advance(6);unsigned dead=0;for(unsigned i=0;i<count;++i)dead+=flag(3,(base+i)&0x1ff);
         switch(mode){case 0:return dead==operand;case 1:return dead>operand;case 2:return dead>=operand;case 3:return dead<operand;case 4:return dead<=operand;case 5:return dead!=operand;default:return 0;}}
     case 0xb:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");if(v.u8(p+2))interactions[index].flags&=~1u;else interactions[index].flags|=1;return advance(4);}
-    case 0xc:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");if(v.u8(p+2))floors_[index].flags&=~1u;else floors_[index].flags|=1;return advance(4);}
+    case 0xc:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");if(v.u8(p+2))floors_[index].flags&=~1u;else floors_[index].flags|=1;world(t,op,4);return 1;}
     case 0x38:{const auto kind=v.u8(p+1),index=v.u8(p+2),half=v.u8(p+3);const auto target=unsigned(v.u16(p+4))*65536u+(half?32768u:0);if(!animation_frame)throw std::runtime_error("frame condition requires native actor binding");advance(6);return animation_frame(kind,index)<target;}
     case 0x1b:{const auto slot=v.u8(p+2);if(!audio_active)throw std::runtime_error("audio condition requires native mixer binding");advance(6);return audio_active(slot);}
     case 0x9b:if(!movie_active)throw std::runtime_error("movie condition requires native player binding");advance(6);return movie_active();
@@ -99,7 +100,10 @@ int EventVm::instruction(Task& t){
         if(interaction>=interactions.size())throw std::runtime_error("pickup interaction outside room");if(flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(item);}else interactions[interaction].flags|=1;return 1;}
     case 0xf:flags[10][0]&=~0x400u;advance(2);return 0;
     case 0x10:{const auto item=v.u8(p+1);advance(2);return bool(flags[10][0]&0x400)&&values[8]==item;}
-    case 0x11:{const auto item=v.u8(p+1);advance(2);return inventory_.contains(item);}
+    case 0x11:{const auto item=v.u8(p+1);advance(2);for(unsigned slot=1;slot<12;++slot){const auto packed=inventory_.slots()[slot];if(Inventory::id(packed)==item){if(item==72&&(packed>>16)!=72)flags[4][0]|=0x10000;return 1;}}return 0;}
+    case 0x4d:{const auto mode=v.u8(p+1),operand=v.u8(p+2);std::uint32_t empty=0,wide=0;for(unsigned slot=2;slot<inventory_.capacity()+2;++slot){const auto packed=inventory_.slots()[slot];if(!packed)++empty;switch(Inventory::id(packed)){case 1:case 2:case 3:case 33:case 34:case 142:++wide;break;}}const auto available=empty-wide;advance(4);switch(mode){case 0:return available==operand;case 1:return available>operand;case 2:return available>=operand;case 3:return available<operand;case 4:return available<=operand;case 5:return available!=operand;default:return 1;}}
+    case 0xb7:{const auto player=v.u8(p+1);if(player>=4)throw std::runtime_error("security deposit player outside original inventory");std::fill(inventory_.items.begin()+192,inventory_.items.begin()+256,0);for(unsigned slot=2;slot<16;++slot){inventory_.items[192+slot-2]=inventory_.items[player*16+slot];inventory_.items[player*16+slot]=0;}return advance(2);}
+    case 0xb8:{auto items=inventory_.items;unsigned source=192;for(unsigned target=64;target<192&&source<208;++target){if(!items[source])break;if(!items[target]){items[target]=items[source];items[source++]=0;}}if(source<208&&items[source])throw std::runtime_error("original security transfer exceeds item-box capacity");inventory_.items=items;return advance(2);}
     case 0x12:{const auto mode=v.u8(p+1);advance(2);
         switch(mode){
         case 0:case 5:flags[10][0]=(flags[10][0]&~0x40u)|4;flags[5][0]|=4;break;
@@ -131,7 +135,8 @@ int EventVm::instruction(Task& t){
     case 0xfb:if(t.loops.empty()||!t.loops.back().repeat)throw std::runtime_error("event NEXT without FOR");if(t.loops.back().count>1){t.cnt2=--t.loops.back().count;t.pc=t.loops.back().body;}else{t.loops.pop_back();advance(2);}return 1;
     // The binary structure is known, but these commands still need native
     // world/audio/cutscene bindings; keep them available for the next port step.
-    case 0xad:case 0xd4:case 0x94:case 0xa:case 0x13:case 0x3d:case 0x3f:case 0x20:case 0x24:case 0x2f:case 0x35:case 0x3c:case 0x3e:case 0x43:case 0x4b:case 0x65:case 0x91:case 0x9a:case 0xa6:world(t,op,4);return 1;
+    case 0x13:{const auto mode=v.u8(p+1);world(t,op,4);if(mode==1)flags[5][0]&=~1u;return 1;}
+    case 0xad:case 0xd4:case 0x94:case 0xa:case 0x3d:case 0x3f:case 0x20:case 0x24:case 0x2f:case 0x35:case 0x3c:case 0x3e:case 0x43:case 0x4b:case 0x65:case 0x91:case 0x9a:case 0xa6:world(t,op,4);return 1;
     case 0x75:world(t,op,4);return 1;
     case 0x8b:world(t,op,12);return 1;
     case 0x8e:case 0x5a:case 0x1d:world(t,op,4);return 1;
@@ -208,6 +213,10 @@ bool EventVm::use(unsigned item,unsigned* message){
     if(message)*message=index;return false;
 }
 void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
+    // bhControlPlayer does not run bhCheckFloorP while sp_flg bit 0 is
+    // disabled (bhMessageSet/Cinematic scripts). Preserve the last floor
+    // work instead of retriggering a paused player's area every host tick.
+    if(!(flags[6][0]&1))return;
     flags[10][0]&=~0x200u;if(flags[13][0]&6)return;
     const auto direction=(yaw+8192)&0xc000;
     for(unsigned i=0;i<floors_.size();++i){const auto& a=floors_[i];if(!(a.flags&1)||a.type!=0)continue;

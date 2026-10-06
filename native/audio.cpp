@@ -37,6 +37,7 @@ PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned prog
     return decode_ps_adpcm(std::vector<std::uint8_t>(bytes.begin()+bd+start,bytes.begin()+bd+end),v.u16(vag+4));
 }
 void AudioMixer::play_system(unsigned program){
+    if(data_.empty())return; // Resource-free engine fixtures have no system bank.
     auto found=system_sounds_.find(program);if(found==system_sounds_.end()){auto file=mods_/"audio/system/COMMON.MLT";if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"files/COMMON.MLT";
         found=system_sounds_.emplace(program,std::make_shared<PcmClip>(decode_system_sound(read_asset_file(file,8*1024*1024),program))).first;}
     play_pcm(effect_slot_,found->second);effect_slot_=effect_slot_==2?3:2;played.push_back("COMMON/"+asset_number(program));
@@ -112,6 +113,8 @@ PcmClip decode_adx(const std::vector<std::uint8_t>& b){
     PcmClip out;out.channels=b[7];out.rate=be32(8);const auto frames=be32(12),cutoff=be16(16);
     if(!out.channels||out.channels>2||out.rate<8000||out.rate>96000||frames>out.rate*600u||cutoff>=out.rate/2)throw std::runtime_error("invalid ADX audio dimensions");
     const auto blocks=(std::size_t(frames)+31)/32;need(start,blocks*out.channels*18);
+    // ADX v3 embedded loop points, as consumed by ADXT_StartAfs.
+    if(start>=50&&be32(24)){out.loop_start=be32(28);out.loop_end=be32(36);if(out.loop_start>=out.loop_end||out.loop_end>frames)throw std::runtime_error("invalid ADX loop points");}
     // Independent implementation of the ADX second-order high-pass predictor.
     // Format reference: FFmpeg libavcodec/adx.c and adxdec.c (see docs/AUDIO.md).
     const double root=std::sqrt(2.0),angle=6.283185307179586*cutoff/out.rate;
@@ -124,21 +127,21 @@ PcmClip decode_adx(const std::vector<std::uint8_t>& b){
             const int sample=int(std::clamp<std::int64_t>(std::int64_t(residual)*scale+rounded,-32768,32767));older[ch]=previous[ch];previous[ch]=sample;out.samples[(block*32+k)*out.channels+ch]=std::int16_t(sample);}
     }return out;
 }
-void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume,bool loop){if(slot>=slots_.size()||!clip||!clip->channels||clip->channels>2||clip->rate<8000||clip->rate>96000||clip->samples.size()%clip->channels||!clip->frames()||!std::isfinite(volume)||volume<0||volume>8)throw std::runtime_error("invalid audio channel/clip");slots_[slot]={std::move(clip),0,volume,1,1,0,loop};}
+void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume,bool loop){if(slot>=slots_.size()||!clip||!clip->channels||clip->channels>2||clip->rate<8000||clip->rate>96000||clip->samples.size()%clip->channels||!clip->frames()||!std::isfinite(volume)||volume<0||volume>8||(clip->loop_end&&(clip->loop_start>=clip->loop_end||clip->loop_end>clip->frames())))throw std::runtime_error("invalid audio channel/clip");slots_[slot]={std::move(clip),0,volume,1,1,0,loop};}
 void AudioMixer::play(unsigned slot,const std::string& archive,unsigned id,float volume,bool loop,unsigned fade_ticks){
     if(fade_ticks>600*game_tick_hz)throw std::runtime_error("audio fade too long");
     const auto relative=std::filesystem::path("audio")/archive/(asset_number(id)+".adx");auto file=mods_/relative;
     if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives"/archive/(asset_number(id)+".bin");
-    auto clip=std::make_shared<PcmClip>(decode_adx(read_asset_file(file,32*1024*1024)));play_pcm(slot,clip,volume,loop);
+    auto clip=std::make_shared<PcmClip>(decode_adx(read_asset_file(file,32*1024*1024)));play_pcm(slot,clip,volume,loop&&clip->loop_end>clip->loop_start);
     if(fade_ticks){slots_[slot].gain=0;slots_[slot].fade=fade_ticks*audio_frames_per_tick;}played.push_back(archive+"/"+asset_number(id));
 }
 void AudioMixer::stop(unsigned slot,unsigned fade_ticks){if(slot>=slots_.size()||fade_ticks>600*game_tick_hz)throw std::runtime_error("invalid audio slot");auto& s=slots_[slot];if(fade_ticks){s.target=0;s.fade=fade_ticks*audio_frames_per_tick;}else s.clip.reset();}
 bool AudioMixer::active(unsigned slot)const{return slot<slots_.size()&&bool(slots_[slot].clip);}
 std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)throw std::runtime_error("audio mix too large");std::vector<std::int16_t> out(std::size_t(frames)*2);
     for(unsigned f=0;f<frames;++f){float left=0,right=0;for(auto& channel:slots_){if(!channel.clip)continue;auto& clip=*channel.clip;
-        if(channel.position>=clip.frames()){if(channel.loop)channel.position=std::fmod(channel.position,double(clip.frames()));else{channel.clip.reset();continue;}}
+        const auto end=channel.loop&&clip.loop_end?clip.loop_end:clip.frames();if(channel.position>=end){if(channel.loop){const auto begin=clip.loop_end?clip.loop_start:0;channel.position=begin+std::fmod(channel.position-end,double(end-begin));}else{channel.clip.reset();continue;}}
         if(channel.fade){channel.gain+=(channel.target-channel.gain)/channel.fade;if(!--channel.fade&&channel.target==0){channel.clip.reset();continue;}}
-        const auto i=std::size_t(channel.position),next=std::min(i+1,clip.frames()-1);const float fraction=float(channel.position-i),gain=channel.volume*channel.gain;
+        const auto i=std::size_t(channel.position),next=channel.loop&&i+1>=end?(clip.loop_end?clip.loop_start:0):std::min(i+1,clip.frames()-1);const float fraction=float(channel.position-i),gain=channel.volume*channel.gain;
         auto sample=[&](unsigned ch){const float a=clip.samples[i*clip.channels+ch],b=clip.samples[next*clip.channels+ch];return (a+(b-a)*fraction)*gain;};left+=sample(0);right+=sample(clip.channels==1?0:1);channel.position+=double(clip.rate)/48000;
     }out[f*2]=std::int16_t(std::clamp(left,-32768.f,32767.f));out[f*2+1]=std::int16_t(std::clamp(right,-32768.f,32767.f));}return out;
 }

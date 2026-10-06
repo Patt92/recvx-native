@@ -1,3 +1,11 @@
+Effekt-Update 2026-10-06: Flammen und Funken verwenden die originalen
+EF_WRK-/Atlasressourcen aus losen Raum-RDTs, keine Ersatzbilder. Overrides:
+`mods/textures/effects/RM_0020/0070/0000.tga` (entsprechend Atlas 58/59/70–79,
+jeweils tatsächlichen Raum/Index einsetzen). Daten-TGAs am selben relativen
+Pfad haben Vorrang vor der dekodierten RDT-Textur; HD-Content-Key bleibt erhalten.
+Framekopien teilen Pixel und Mips. Bearbeitete Texturen werden abgetrennt und
+invalidieren den Cache. Eff200/201/218 gebunden; kein vollständiger Effektrenderer.
+
 # Native assets and mods 0.5
 
 The productive tree is `data/`. Runtime and packages read regular loose files,

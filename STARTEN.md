@@ -16,8 +16,15 @@ Die Itemansicht beim Aufheben und Untersuchen verwendet jetzt den originalen
 Item-Blickraum: Munition steht richtig herum; auch Umwandlungen behalten ihre
 Originalpose. Bereichsabfragen und verschiebbare Kollisionsflächen sind an die
 Engine gebunden. Originale HP-/Dialog-/Zeitbedingungen verwenden den gemeinsamen
-Spielzustand; Fragen übernehmen die Standardauswahl aus ihren Ressourcen. Im 600-Tick-Scan laden 205 Räume; 37 melden noch blockierte
+Spielzustand; Fragen übernehmen die Standardauswahl aus ihren Ressourcen. Im 600-Tick-Scan laden 205 Räume; 38 melden noch blockierte
 Befehle. Das ist weiterhin kein vollständig spielbarer Port.
+
+Aktualisierung 2026-10-06: Flammen-/Raumbewegungen, Steve-Musik, Metalldetektor
+und Security-Box-Austausch sowie geringere Renderlast sind im neuen Build.
+In der Security Box: Inventarplatz wählen → OK → Boxplatz wählen → OK.
+Zurück wechselt zur Inventarwahl; dort Zurück oder Start schließt die Box.
+Grafikqualität ist über Einstellungen bzw. F2 einstellbar; „Niedrig“ spart
+Supersampling. Vollständige Hunde-KI und Explosionsemitter fehlen weiterhin.
 
 ## Hauptmenü und Einstellungen
 

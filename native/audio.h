@@ -9,7 +9,7 @@
 #include <vector>
 namespace recvx {
 inline constexpr unsigned audio_voice_count=24;
-struct PcmClip {unsigned rate=0,channels=0;std::vector<std::int16_t> samples;std::size_t frames()const{return channels?samples.size()/channels:0;}};
+struct PcmClip {unsigned rate=0,channels=0;std::size_t loop_start=0,loop_end=0;std::vector<std::int16_t> samples;std::size_t frames()const{return channels?samples.size()/channels:0;}};
 PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate);
 PcmClip decode_system_sound(const std::vector<std::uint8_t>& bank,unsigned program);
 PcmClip decode_adx(const std::vector<std::uint8_t>& bytes);

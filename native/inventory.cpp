@@ -4,14 +4,19 @@
 #include <tuple>
 namespace recvx {
 namespace original {
-struct S_WORK {unsigned int* gb=nullptr;unsigned int* pip=nullptr;unsigned listcsr_0=0,listcsr_1=0;unsigned statusflg=0;};
-struct System {unsigned gm_mode=0,st_flg=0;};
+struct S_WORK {unsigned int* gb=nullptr;unsigned int* pip=nullptr;unsigned listcsr_0=0,listcsr_1=0;unsigned statusflg=0;unsigned int* bxp=nullptr;unsigned listcsr_2=0;};
+struct System {unsigned gm_mode=0,st_flg=0,gm_flg=0,ply_id=0,stg_no=0,rom_no=0,mn_mode0=0;};
+struct Player {unsigned mode3=0,wpnr_no=0;};
+struct Part {unsigned atr=0,anim=0;};
+static thread_local Player player;static thread_local Player* plp=&player;
+static thread_local Part parts_14b[1],parts_15b[20];static thread_local unsigned sakai=2;
 static thread_local S_WORK swork;
 static thread_local System system;
 static thread_local System* sys=&system;
 static thread_local unsigned message=0;
 static void bhSetMessage(int,unsigned index){message=index;sys->st_flg|=0x200;}
 #include "combinations.inc"
+#include "box_engine.inc"
 }
 Inventory::Inventory(){
     // AllItemInit, normal new game, no bonus unlocks.
@@ -102,4 +107,14 @@ bool Inventory::transform(unsigned slot,unsigned expected,unsigned replacement){
 }
 bool Inventory::deposit(unsigned slot,unsigned box){if(slot<2||slot>=12||box!=64||!id(slots()[slot]))return false;unsigned i=0;while(i<128&&items[box+i])++i;if(i==128)return false;items[box+i]=slots()[slot];slots()[slot]=0;if(slots()[0]==slot)slots()[0]=0;compact();return true;}
 bool Inventory::withdraw(unsigned index,unsigned box){if(box!=64||index>=128||!items[box+index])return false;auto item=items[box+index];if(!acquire(id(item),quantity(item),(item>>16)&0xff00))return false;items[box+index]=0;return true;}
+bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* out){
+    if(out)*out=0;const unsigned count=box==64?128:(box==192||box==224)?32:0;
+    if(!count||slot<1||slot>=capacity()+2||index>=count||player>=3)return false;
+    for(unsigned i=1;i<12;++i)if(id(slots()[i])>=156)return false;
+    if(id(items[box+index])>=156)return false;
+    const auto saved=items;original::system={};original::system.gm_mode=game_mode;original::system.gm_flg=side_pack?0x8000000:0;original::system.ply_id=player;original::system.stg_no=stage;original::system.rom_no=room;original::message=0;original::swork={};original::swork.pip=slots();original::swork.bxp=items.data()+box;original::swork.listcsr_0=slot;original::swork.listcsr_2=slot;original::sakai=2;while(original::sakai<12&&(itemdata[id(slots()[original::sakai])].type&0x100))++original::sakai;
+    original::ItemBoxChange(&original::swork,std::uint16_t(index));if(out)*out=original::message;
+    if(original::message||items==saved||occupied()>capacity()){items=saved;return false;}compact();return true;
+}
+
 }

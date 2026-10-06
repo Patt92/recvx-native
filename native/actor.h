@@ -29,6 +29,7 @@ public:
     unsigned model_index(unsigned script_node)const;
     std::size_t bones() const {return bind_pose_.size();}
     std::size_t motions() const {return motions_.size();}
+    const MotionClip& motion_clip(std::size_t i)const{return motions_.at(i).value();}
     bool has_motion(std::size_t i) const {return i<motions_.size() && motions_[i] && motions_[i]->positions.size()==bones();}
     unsigned motion_frames(std::size_t i) const;
     void install_weapon_motions(const std::vector<std::optional<MotionClip>>& clips);

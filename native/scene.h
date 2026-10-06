@@ -4,12 +4,51 @@
 #include <cstdint>
 #include <vector>
 #include <optional>
+#include <memory>
 namespace recvx {
 struct SceneVertex { NJS_POINT3 position; float u=0,v=0; NJS_VECTOR normal{}; };
+// Texture samples are immutable during scene composition. Copies share storage;
+// resource edits detach so mods/atlas edits cannot alter another decoded asset.
+class TexturePixels {
+    std::shared_ptr<std::vector<std::uint32_t>> storage_=std::make_shared<std::vector<std::uint32_t>>();
+    std::uint64_t revision_=0;
+    const std::vector<std::uint32_t>& read()const{static const std::vector<std::uint32_t> empty;return storage_?*storage_:empty;}
+    std::vector<std::uint32_t>& write(){++revision_;if(!storage_)storage_=std::make_shared<std::vector<std::uint32_t>>();else if(storage_.use_count()!=1)storage_=std::make_shared<std::vector<std::uint32_t>>(*storage_);return *storage_;}
+public:
+    TexturePixels()=default;
+    TexturePixels(std::vector<std::uint32_t> data):storage_(std::make_shared<std::vector<std::uint32_t>>(std::move(data))){}
+    TexturePixels(std::initializer_list<std::uint32_t> data):TexturePixels(std::vector<std::uint32_t>(data)){}
+    std::size_t size()const{return read().size();}bool empty()const{return read().empty();}
+    std::uint64_t revision()const{return revision_;}
+    const std::uint32_t* data()const{return read().data();}std::uint32_t* data(){return write().data();}
+    const std::uint32_t& operator[](std::size_t i)const{return read()[i];}std::uint32_t& operator[](std::size_t i){return write()[i];}
+    auto begin()const{return read().begin();}auto end()const{return read().end();}
+    auto begin(){return write().begin();}auto end(){return write().end();}
+    void resize(std::size_t n){write().resize(n);}void reserve(std::size_t n){write().reserve(n);}
+    void clear(){write().clear();}void push_back(std::uint32_t n){write().push_back(n);}
+    void assign(std::size_t n,std::uint32_t value){write().assign(n,value);}
+    friend bool operator==(const TexturePixels& a,const TexturePixels& b){return a.read()==b.read();}
+    friend bool operator==(const TexturePixels& a,const std::vector<std::uint32_t>& b){return a.read()==b;}
+    friend bool operator==(const std::vector<std::uint32_t>& a,const TexturePixels& b){return a==b.read();}
+};
+struct TextureFilterCache {
+    bool ready=false,cutout=false,uniform_alpha=false;
+    std::uint64_t fingerprint=0;std::uint32_t max_alpha=0;
+    std::vector<std::vector<std::uint32_t>> mips;
+};
 struct SceneTexture {
     unsigned width=0,height=0;
-    std::vector<std::uint32_t> pixels;
+    TexturePixels pixels;
+    mutable std::shared_ptr<TextureFilterCache> filter_cache=std::make_shared<TextureFilterCache>();
+    void invalidate_mips()const{filter_cache=std::make_shared<TextureFilterCache>();}
+    std::uint64_t fingerprint()const{
+        std::uint64_t h=1469598103934665603ull^(std::uint64_t(width)<<32|height);h*=1099511628211ull;
+        h^=reinterpret_cast<std::uintptr_t>(pixels.data());h*=1099511628211ull;h^=pixels.size();h*=1099511628211ull;
+        h^=pixels.revision();h*=1099511628211ull;
+        return h;
+    }
 };
+enum class SceneBlend {Opaque,Additive};
 struct SceneTriangle {
     std::array<SceneVertex,3> vertices;
     std::uint32_t color=0xffb2b2b2;
@@ -18,6 +57,7 @@ struct SceneTriangle {
     bool textured=false;
     bool camera_mask=true;
     bool world_lit=false;
+    SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
     unsigned light_category=1;
 };
 struct SceneCamera {

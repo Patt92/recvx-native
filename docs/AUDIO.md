@@ -20,7 +20,11 @@ encrypted ADX and other codecs are rejected rather than guessed.
 Original BGM1 and VOICE1 IDs map to `data/archives/<name>/<four-digit-id>.bin`.
 An ADX replacement can be placed at `mods/audio/<name>/<id>.adx`. The native
 mixer emits 48 kHz signed 16-bit stereo: linear resampling, volume, fades, summed
-clipping and whole-clip looping. Original ADX loop points are not yet applied.
+clipping and embedded ADX-v3 loop regions. The intro plays once; interpolation
+wraps at loop_end to loop_start. BGM resources without an embedded loop flag
+end naturally, including the Steve event cue BGM1/0048 (~22.38 seconds).
+Explicit play_pcm loops can still repeat an entire non-ADX clip. Loop-header
+layout reference: [vgmstream ADX reader](https://github.com/vgmstream/vgmstream/blob/master/src/meta/adx.c).
 BGM uses slot 0, dialogue slot 1, and movie PCM slot 7. BGM follows the original sdfunc.c control:
 bhBgmOn/bhBgmOnEx start immediately (PlayBgmEx), while bhBgmOn2/bhBgmOn2Ex/
 bhBgmOff2 only request a change (PlayBgm2/StopBgm2) that is applied when the room

@@ -4,6 +4,8 @@
 #include "events.h"
 #include "renderer.h"
 #include "collision.h"
+#include "effect_sprites.h"
+#include "enemy_spawn.h"
 #include <map>
 #include <memory>
 namespace recvx {
@@ -26,8 +28,9 @@ public:
     void set_player_asset(const PlayerAsset* player){player_asset_=player;}
     void start_task(unsigned level);
     void tick();
+    unsigned take_enemy_room_flags(){const auto flags=enemy_spawn_.room_flags;enemy_spawn_.room_flags=0;return flags;}
     Scene sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes=nullptr)const;
-    void append(Scene& scene,const std::vector<BoneMatrix>& player_nodes={})const;
+    void append(Scene& scene,const std::vector<BoneMatrix>& player_nodes={},const SceneCamera& active={})const;
     std::size_t export_textures(const std::filesystem::path& output,const std::string& room_name)const;
     SceneCamera camera(const Scene& stage,const SceneCamera& active)const;
     void overlay(SoftwareRenderer& image)const;
@@ -36,6 +39,7 @@ public:
     bool player_hidden=false,player_scripted=false;
     bool event_camera=false;
     unsigned event_camera_index=0;
+    std::optional<unsigned> fixed_camera;
     unsigned event_camera_key()const{return event_camera_key_;}
     int floor_at(NJS_POINT3 position)const;
     unsigned floor_sound(NJS_POINT3 position,bool special=false)const;
@@ -54,13 +58,17 @@ private:
     std::array<Context,16> contexts_{};
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
     std::vector<Model> models_;
+    struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};};
+    std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;
     std::vector<MotionClip> room_motions_;
+    mutable std::map<unsigned,MotionClip> room_motion_segments_;
     struct MotionLibrary {std::vector<std::pair<std::size_t,unsigned>> entries;mutable std::map<unsigned,MotionClip> decoded,segmented;};
     std::map<unsigned,MotionLibrary> enemy_motions_;
     const MotionClip& entity_motion(const WorldEntity& entity)const;
     std::vector<CollisionWall> walls_;
     struct FloorSound {CollisionWall area;unsigned sound;};
     std::vector<FloorSound> floor_sounds_;
+    std::vector<EnemyArea> enemy_areas_;EnemySpawnContext enemy_spawn_;
     unsigned footstep_slot_=4;
     std::size_t footstep_motion_=~std::size_t(0);
     std::int64_t footstep_frame_=-1;

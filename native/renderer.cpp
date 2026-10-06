@@ -1,6 +1,9 @@
 #include "renderer.h"
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -17,6 +20,63 @@ std::uint32_t shade(const SceneTriangle& t){
     auto channel=[&](unsigned shift){return static_cast<unsigned>(((t.color>>shift)&255)*light);};
     return 0xff000000|(channel(16)<<16)|(channel(8)<<8)|channel(0);
 }
+// ---- Texture filtering -------------------------------------------------
+// Mip chain: 2x2 box filter weighted by alpha so transparent texels never darken
+// the colour of cut-outs. Alpha of the chain is the plain average (coverage).
+void build_mips(const SceneTexture& t){
+    if(t.filter_cache->ready)t.invalidate_mips();auto& cache=*t.filter_cache;
+    cache.mips.clear();cache.max_alpha=0;std::uint32_t min_alpha=255;
+    for(const auto p:t.pixels){const auto a=p>>24;cache.max_alpha=std::max(cache.max_alpha,a);min_alpha=std::min(min_alpha,a);}
+    cache.cutout=min_alpha==0&&cache.max_alpha>0;cache.uniform_alpha=min_alpha==cache.max_alpha&&cache.max_alpha>0; // fully transparent textures take the weighted path and draw nothing
+    const std::uint32_t* src=t.pixels.data();unsigned w=t.width,h=t.height;
+    while(w>1||h>1){
+        const unsigned nw=std::max(1u,w/2),nh=std::max(1u,h/2);std::vector<std::uint32_t> next(std::size_t(nw)*nh);
+        for(unsigned y=0;y<nh;++y)for(unsigned x=0;x<nw;++x){
+            unsigned sum_a=0;float r=0,g=0,b=0;
+            for(unsigned dy=0;dy<2;++dy)for(unsigned dx=0;dx<2;++dx){
+                const auto p=src[std::size_t(std::min(h-1,y*2+dy))*w+std::min(w-1,x*2+dx)];const unsigned a=p>>24;
+                sum_a+=a;r+=float(p&255)*a;g+=float((p>>8)&255)*a;b+=float((p>>16)&255)*a;}
+            std::uint32_t out=0;
+            if(sum_a){const float inv=1.f/float(sum_a);out=(std::uint32_t(sum_a/4)<<24)|(std::uint32_t(b*inv+.5f)<<16)|(std::uint32_t(g*inv+.5f)<<8)|std::uint32_t(r*inv+.5f);}
+            next[std::size_t(y)*nw+x]=out;
+        }
+        cache.mips.push_back(std::move(next));src=cache.mips.back().data();w=nw;h=nh;
+    }
+    cache.fingerprint=t.fingerprint();cache.ready=true;
+}
+// Fast log2 for mip selection: exponent + quadratic fit of the mantissa (|error| < 0.01).
+inline float fast_log2(float x){
+    std::uint32_t bits;std::memcpy(&bits,&x,4);const float e=float(int(bits>>23)-127);
+    bits=(bits&0x7fffffu)|0x3f800000u;float m;std::memcpy(&m,&bits,4);
+    return e+(-0.34484843f*m+2.02466578f)*m-0.67487759f;
+}
+struct Level {const std::uint32_t* pixels;unsigned w,h;};
+Level level_of(const SceneTexture& t,unsigned level){
+    if(level==0)return {t.pixels.data(),t.width,t.height};
+    return {t.filter_cache->mips[level-1].data(),std::max(1u,t.width>>level),std::max(1u,t.height>>level)};
+}
+// Premultiplied accumulation: acc = {r*a, g*a, b*a, a} scaled by weight.
+template<bool Weighted>
+void bilinear(const Level& l,float u,float v,float weight,float* acc){
+    const float fx=u*float(l.w)-.5f,fy=v*float(l.h)-.5f;
+    const int ix=int(fx)-(fx<0),iy=int(fy)-(fy<0);const float tx=fx-float(ix),ty=fy-float(iy);
+    const int w=int(l.w),h=int(l.h);
+    // Power-of-two sizes wrap with a mask; other sizes fall back to modulo.
+    auto wrap=[](int i,int n){return (n&(n-1))==0?(i&(n-1)):(((i%n)+n)%n);};
+    const int x0=wrap(ix,w),x1=wrap(ix+1,w),y0=wrap(iy,h),y1=wrap(iy+1,h);
+    const std::uint32_t* r0=l.pixels+std::size_t(y0)*l.w;const std::uint32_t* r1=l.pixels+std::size_t(y1)*l.w;
+    const std::uint32_t texel[4]={r0[x0],r0[x1],r1[x0],r1[x1]};
+    const float k[4]={weight*(1-tx)*(1-ty),weight*tx*(1-ty),weight*(1-tx)*ty,weight*tx*ty};
+    for(int i=0;i<4;++i){
+        const auto p=texel[i];float c=k[i];
+        if constexpr(Weighted){const float a=float(p>>24);acc[3]+=c*a;c*=a;}else{c*=255.f;acc[3]+=c;} // opaque: alpha is 255 everywhere
+        acc[0]+=c*float(p&255);acc[1]+=c*float((p>>8)&255);acc[2]+=c*float((p>>16)&255);
+    }
+}
+struct Setup {
+    std::array<Projected,3> p;float area;int minx,maxx,miny,maxy;std::uint32_t color;const SceneTexture* texture;
+    float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
+};
 std::uint32_t modulate(std::uint32_t texture,std::uint32_t light) {
     unsigned result=0xff000000;
     for(unsigned shift:{0u,8u,16u})result|=((((texture>>shift)&255)*((light>>shift)&255))/255)<<shift;
@@ -39,10 +99,14 @@ void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wi
     draw_view(scene,view,focal*aspect_x,focal_y,wireframe,camera.hidden_objects);
 }
 void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden){
-    std::fill(pixels_.begin(),pixels_.end(),scene.background);
-    std::fill(depth_.begin(),depth_.end(),0.0f);
+    // Supersampling renders into a larger buffer and box-filters it down (steadier edges).
+    const int S=std::clamp(ss_,1,4),W=width_*S,H=height_*S;
+    std::uint32_t* color=pixels_.data();float* depth=depth_.data();
+    if(S>1){hi_pixels_.assign(std::size_t(W)*H,scene.background);hi_depth_.assign(std::size_t(W)*H,0.0f);color=hi_pixels_.data();depth=hi_depth_.data();}
+    else{std::fill(pixels_.begin(),pixels_.end(),scene.background);std::fill(depth_.begin(),depth_.end(),0.0f);}
     NJS_MATRIX view;std::copy_n(matrix,16,view);
     constexpr float near=0.05f;
+    std::vector<Setup> setups;setups.reserve(scene.triangles.size());
     for(const auto& triangle:scene.triangles){
         // bhCkFlg numbers bits from the most significant bit.
         if(triangle.camera_mask && triangle.object<512 && (hidden[triangle.object/32] & (0x80000000u>>(triangle.object%32))))continue;
@@ -63,40 +127,121 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             std::array<Projected,3> p;
             const std::array<SceneVertex,3> v{clipped[0],clipped[fan],clipped[fan+1]};
             bool finite=true;
-            for(int i=0;i<3;++i){const auto point=v[i].position;p[i]={width_*0.5f+point.x*focal_x/point.z,height_*0.5f+point.y*focal_y/point.z,1/point.z,v[i].u/point.z,v[i].v/point.z};finite=finite&&std::isfinite(p[i].x)&&std::isfinite(p[i].y);}
+            for(int i=0;i<3;++i){const auto point=v[i].position;p[i]={W*0.5f+point.x*(focal_x*float(S))/point.z,H*0.5f+point.y*(focal_y*float(S))/point.z,1/point.z,v[i].u/point.z,v[i].v/point.z};finite=finite&&std::isfinite(p[i].x)&&std::isfinite(p[i].y);}
             if(!finite)continue;
             float area=edge(p[0],p[1],p[2].x,p[2].y);
             if(std::abs(area)<1e-6f||!std::isfinite(area))continue;
             if(area<0){std::swap(p[1],p[2]);area=-area;}
             const float minxf=std::max(0.0f,std::min({p[0].x,p[1].x,p[2].x}));
-            const float maxxf=std::min(float(width_-1),std::max({p[0].x,p[1].x,p[2].x}));
+            const float maxxf=std::min(float(W-1),std::max({p[0].x,p[1].x,p[2].x}));
             const float minyf=std::max(0.0f,std::min({p[0].y,p[1].y,p[2].y}));
-            const float maxyf=std::min(float(height_-1),std::max({p[0].y,p[1].y,p[2].y}));
+            const float maxyf=std::min(float(H-1),std::max({p[0].y,p[1].y,p[2].y}));
             if(minxf>maxxf||minyf>maxyf)continue;
             const int minx=int(minxf),maxx=int(maxxf),miny=int(minyf),maxy=int(maxyf);
-            for(int y=miny;y<=maxy;++y)for(int x=minx;x<=maxx;++x){
-                const float a=edge(p[1],p[2],x+0.5f,y+0.5f)/area;
-                const float b=edge(p[2],p[0],x+0.5f,y+0.5f)/area;
-                const float c=1-a-b;if(a<0||b<0||c<0)continue;
-                const float invz=a*p[0].invz+b*p[1].invz+c*p[2].invz;
-                const auto index=std::size_t(y)*width_+x;
-                if(invz<=depth_[index])continue;
-                auto pixel=color;
-                if(texture && !texture->pixels.empty()) {
-                    float u=(a*p[0].u_over_z+b*p[1].u_over_z+c*p[2].u_over_z)/invz;
-                    float v=(a*p[0].v_over_z+b*p[1].v_over_z+c*p[2].v_over_z)/invz;
-                    u-=std::floor(u);v-=std::floor(v);
-                    const auto tx=std::min(texture->width-1,unsigned(u*texture->width));
-                    const auto ty=std::min(texture->height-1,unsigned(v*texture->height));
-                    const auto texel=texture->pixels[std::size_t(ty)*texture->width+tx];
-                    if((texel>>24)==0)continue;
-                    pixel=modulate(texel,color);
-                }
-                depth_[index]=invz;
-                pixels_[index]=wireframe && std::min({a,b,c})>0.025f?scene.background:pixel;
-            }
+            // Screen-space gradients of the barycentric weights (constant per triangle),
+            // used to derive perspective-correct texture derivatives per pixel.
+            const float dax=-(p[2].y-p[1].y)/area,day=(p[2].x-p[1].x)/area,dbx=-(p[0].y-p[2].y)/area,dby=(p[0].x-p[2].x)/area,dcx=-(dax+dbx),dcy=-(day+dby);
+            Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
+            setup.Ux=dax*p[0].u_over_z+dbx*p[1].u_over_z+dcx*p[2].u_over_z;setup.Uy=day*p[0].u_over_z+dby*p[1].u_over_z+dcy*p[2].u_over_z;
+            setup.Vx=dax*p[0].v_over_z+dbx*p[1].v_over_z+dcx*p[2].v_over_z;setup.Vy=day*p[0].v_over_z+dby*p[1].v_over_z+dcy*p[2].v_over_z;
+            setup.Wx=dax*p[0].invz+dbx*p[1].invz+dcx*p[2].invz;setup.Wy=day*p[0].invz+dby*p[1].invz+dcy*p[2].invz;
+            // Mip pyramids are built here, serially, so the band workers only read them.
+            if(filter_&&setup.texture&&(!setup.texture->filter_cache->ready||setup.texture->filter_cache->fingerprint!=setup.texture->fingerprint()))build_mips(*setup.texture);
+            setups.push_back(setup);
         }
     }
+    // Stage 2: rasterize horizontal bands, possibly on several threads. Every band visits the
+    // setups in submission order, so the result does not depend on the thread count.
+    const auto rasterize=[&](const Setup& s,int y0,int y1){
+        const auto& p=s.p;const auto* texture=s.texture;
+            int setup_y=-1,setup_x=0,setup_taps=1,setup_l0=0;float setup_du=0,setup_dv=0,setup_frac=0;
+            for(int y=std::max(s.miny,y0);y<=std::min(s.maxy,y1-1);++y)for(int x=s.minx;x<=s.maxx;++x){
+                const float a=edge(p[1],p[2],x+0.5f,y+0.5f)/s.area;
+                const float b=edge(p[2],p[0],x+0.5f,y+0.5f)/s.area;
+                const float c=s.blend==SceneBlend::Additive?edge(p[0],p[1],x+0.5f,y+0.5f)/s.area:1-a-b;if(a<0||b<0||c<0)continue;
+                // A transparent quad's shared edge belongs to one triangle.
+                // Without the top-left fill rule its diagonal is blended twice.
+                if(s.blend==SceneBlend::Additive){const auto inclusive=[](const Projected& from,const Projected& to){return to.y<from.y||(to.y==from.y&&to.x>from.x);};if((a==0&&!inclusive(p[1],p[2]))||(b==0&&!inclusive(p[2],p[0]))||(c==0&&!inclusive(p[0],p[1])))continue;}
+                const float invz=a*p[0].invz+b*p[1].invz+c*p[2].invz;
+                const auto index=std::size_t(y)*W+x;
+                if(invz<=depth[index])continue;
+                auto pixel=s.color;float coverage=1;
+                if(texture) {
+                    const float rz=1.f/invz;
+                    float u=(a*p[0].u_over_z+b*p[1].u_over_z+c*p[2].u_over_z)*rz;
+                    float v=(a*p[0].v_over_z+b*p[1].v_over_z+c*p[2].v_over_z)*rz;
+                    if(!filter_) {
+                        u-=std::floor(u);v-=std::floor(v);
+                        const auto tx=std::min(texture->width-1,unsigned(u*texture->width));
+                        const auto ty=std::min(texture->height-1,unsigned(v*texture->height));
+                        const auto texel=texture->pixels[std::size_t(ty)*texture->width+tx];
+                        if((texel>>24)==0)continue;
+                        pixel=modulate(texel,s.color);if(s.blend==SceneBlend::Additive)coverage=float(texel>>24)/255.f;
+                    } else {
+                                                const float tw=float(texture->width),th=float(texture->height);
+                        // Mip level, anisotropy and footprint axis change slowly across a span:
+                        // derive them every fourth pixel of a row and reuse in between.
+                        if(y!=setup_y||x-setup_x>=4||x<setup_x){
+                            setup_y=y;setup_x=x;
+                            // Derivatives of (u,v) per screen pixel: d(U/W)=(dU-u*dW)/W.
+                            const float dudx=(s.Ux-u*s.Wx)*rz,dudy=(s.Uy-u*s.Wy)*rz,dvdx=(s.Vx-v*s.Wx)*rz,dvdy=(s.Vy-v*s.Wy)*rz;
+                            const float lx=std::sqrt(dudx*dudx*tw*tw+dvdx*dvdx*th*th),ly=std::sqrt(dudy*dudy*tw*tw+dvdy*dvdy*th*th);
+                            const bool major_x=lx>=ly;const float major=major_x?lx:ly,minor=major_x?ly:lx;
+                            int taps=1;if(major>1e-6f&&minor>1e-6f)taps=std::clamp(int(major/minor+.99f),1,4);else if(major>1e-6f)taps=4;
+                            setup_taps=taps;setup_du=major_x?dudx:dudy;setup_dv=major_x?dvdx:dvdy;
+                            const float lod=std::clamp(fast_log2(std::max(major/float(taps),1e-6f)),0.f,float(texture->filter_cache->mips.size()));
+                            setup_l0=int(lod);setup_frac=lod-float(setup_l0);
+                        }
+                        const int taps=setup_taps,top=int(texture->filter_cache->mips.size());
+                        const float du=setup_du,dv=setup_dv;const int l0=setup_l0,l1=std::min(l0+1,top);const float frac=setup_frac;
+                        u-=std::floor(u);v-=std::floor(v);
+                        const Level a0=level_of(*texture,unsigned(l0)),a1=level_of(*texture,unsigned(l1));
+                        float acc[4]={0,0,0,0};
+                        const bool second=frac>1e-3f&&l1!=l0;const float inv_taps=1.f/float(taps);
+                        for(int tap=0;tap<taps;++tap){
+                            const float t=(float(tap)+.5f)*inv_taps-.5f,su=u+t*du,sv=v+t*dv;
+                            if(texture->filter_cache->uniform_alpha){bilinear<false>(a0,su,sv,(1-frac)*inv_taps,acc);if(second)bilinear<false>(a1,su,sv,frac*inv_taps,acc);}
+                            else{bilinear<true>(a0,su,sv,(1-frac)*inv_taps,acc);if(second)bilinear<true>(a1,su,sv,frac*inv_taps,acc);}
+                        }
+                        // Cut-out textures keep their coverage: partly covered pixels blend with
+                        // what is already drawn instead of flipping on/off at a threshold.
+                        if(acc[3]<=0.f)continue;
+                        if(s.blend==SceneBlend::Additive)coverage=acc[3]/255.f;
+                        else if(texture->filter_cache->cutout){coverage=std::min(1.f,acc[3]/float(texture->filter_cache->max_alpha));if(coverage<1.f/32)continue;}
+                        const float inv=1.f/acc[3];
+                        auto channel=[&](float value){return std::uint32_t(std::clamp(value*inv+.5f,0.f,255.f));};
+                        pixel=modulate(0xff000000|(channel(acc[2])<<16)|(channel(acc[1])<<8)|channel(acc[0]),s.color);
+                    }
+                }
+                if(s.blend==SceneBlend::Additive){
+                    const auto below=color[index];std::uint32_t mixed=0xff000000;
+                    const float alpha=coverage*float(s.color>>24)/255.f;
+                    for(unsigned shift:{0u,8u,16u})mixed|=std::min(255u,unsigned((below>>shift)&255)+unsigned(float((pixel>>shift)&255)*alpha+.5f))<<shift;
+                    color[index]=mixed;continue;
+                }
+                if(coverage<.999f){
+                    const auto below=color[index];std::uint32_t mixed=0xff000000;
+                    for(unsigned shift:{0u,8u,16u})mixed|=std::uint32_t(float((below>>shift)&255)*(1-coverage)+float((pixel>>shift)&255)*coverage+.5f)<<shift;
+                    pixel=mixed;if(coverage<.5f){color[index]=pixel;continue;} // too thin to occlude later geometry
+                }
+                if(s.depth_write)depth[index]=invz;
+                color[index]=wireframe && std::min({a,b,c})>0.025f?scene.background:pixel;
+            }
+    };
+    constexpr int band_rows=8; // base-resolution rows per work item
+    const int bands=(height_+band_rows-1)/band_rows;
+    std::atomic<int> next_band{0};
+    const auto worker=[&]{for(int band=next_band++;band<bands;band=next_band++){
+        const int by0=band*band_rows,by1=std::min(height_,by0+band_rows),y0=by0*S,y1=by1*S;
+        for(const auto& s:setups)if(s.maxy>=y0&&s.miny<y1)rasterize(s,y0,y1);
+        if(S>1)for(int y=by0;y<by1;++y)for(int x=0;x<width_;++x){
+            unsigned r=0,g=0,b=0;float nearest=0;
+            for(int sy=0;sy<S;++sy)for(int sx=0;sx<S;++sx){const auto at=std::size_t(y*S+sy)*W+x*S+sx;const auto c=color[at];r+=c&255;g+=(c>>8)&255;b+=(c>>16)&255;nearest=std::max(nearest,depth[at]);}
+            const unsigned n=unsigned(S*S);pixels_[std::size_t(y)*width_+x]=0xff000000|(((b+n/2)/n)<<16)|(((g+n/2)/n)<<8)|((r+n/2)/n);depth_[std::size_t(y)*width_+x]=nearest;}
+    }};
+    const unsigned workers=std::min<unsigned>(threads_?threads_:std::min(4u,std::max(1u,std::thread::hardware_concurrency())),std::max(1,bands));
+    if(workers<=1||setups.size()<64)worker();
+    else{std::vector<std::thread> pool;for(unsigned i=1;i<workers;++i)pool.emplace_back(worker);worker();for(auto& t:pool)t.join();}
 }
 std::size_t SoftwareRenderer::covered_pixels() const{return std::count_if(depth_.begin(),depth_.end(),[](float d){return d>0;});}
 void SoftwareRenderer::save_bmp(const std::filesystem::path& path)const{

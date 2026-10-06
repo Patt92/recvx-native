@@ -15,7 +15,16 @@ add_custom_command(OUTPUT "${RECVX_TABLES}/combat_tables.inc"
 add_custom_command(OUTPUT "${RECVX_TABLES}/inventory_engine.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_inventory_engine.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_inventory_engine.py tools/generate_native_tables.py src/ps2/veronica/prog/itemview.c src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/fileview.c)
-add_library(recvx_game native/inspection.cpp "${RECVX_TABLES}/inventory_engine.inc" native/combat.cpp native/weapon_asset.cpp "${RECVX_TABLES}/combat_tables.inc" native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp src/ps2/veronica/prog/item.c "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/ui_tables.inc" native/status_pulse.cpp "${RECVX_TABLES}/status_pulse.inc" "${RECVX_TABLES}/adx_tables.inc")
+add_custom_command(OUTPUT "${RECVX_TABLES}/effect_sprites.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_effect_sprites.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_effect_sprites.py src/ps2/veronica/prog/effsub5.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/box_engine.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_box_engine.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_box_engine.py tools/generate_native_tables.py src/ps2/veronica/prog/sub1.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/enemy_spawn.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_enemy_spawn.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_enemy_spawn.py tools/generate_native_tables.py src/ps2/veronica/prog/en04.c src/ps2/veronica/prog/zonzon.c)
+add_library(recvx_game native/enemy_spawn.cpp "${RECVX_TABLES}/enemy_spawn.inc" native/effect_sprites.cpp "${RECVX_TABLES}/effect_sprites.inc" native/inspection.cpp "${RECVX_TABLES}/inventory_engine.inc" native/combat.cpp native/weapon_asset.cpp "${RECVX_TABLES}/combat_tables.inc" native/box_menu.cpp native/inventory.cpp "${RECVX_TABLES}/box_engine.inc" native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp src/ps2/veronica/prog/item.c "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/ui_tables.inc" native/status_pulse.cpp "${RECVX_TABLES}/status_pulse.inc" "${RECVX_TABLES}/adx_tables.inc")
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}")
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
 target_link_libraries(recvx_game PUBLIC recvx_scene)
@@ -38,7 +47,8 @@ target_include_directories(recvx_disc PRIVATE include/ps2/veronica/prog)
 target_include_directories(recvx_data PUBLIC include/ps2/veronica/prog)
 target_link_libraries(recvx_data PUBLIC recvx_disc)
 add_library(recvx_scene native/scene.cpp native/renderer.cpp native/actor.cpp native/item_asset.cpp)
-target_link_libraries(recvx_scene PUBLIC recvx_data recvx_math)
+find_package(Threads REQUIRED)
+target_link_libraries(recvx_scene PUBLIC recvx_data recvx_math Threads::Threads)
 if(MSVC)
   target_compile_options(recvx_scene PRIVATE /W4)
 else()
@@ -128,6 +138,9 @@ if(BUILD_TESTING)
   add_executable(recvx-combat-tests tests/native/combat_test.cpp)
   target_link_libraries(recvx-combat-tests PRIVATE recvx_game)
   add_test(NAME combat_weapons_ammunition COMMAND recvx-combat-tests)
+  add_executable(recvx-progression-tests tests/native/progression_test.cpp)
+  target_link_libraries(recvx-progression-tests PRIVATE recvx_game)
+  add_test(NAME engine_progression_resources COMMAND recvx-progression-tests)
   add_executable(recvx-game-tests tests/native/game_test.cpp)
   target_link_libraries(recvx-game-tests PRIVATE recvx_game)
   add_test(NAME inventory_events_assets COMMAND recvx-game-tests)
@@ -145,6 +158,9 @@ if(BUILD_TESTING)
   target_link_libraries(recvx-matrix-tests PRIVATE recvx_math)
   target_compile_features(recvx-matrix-tests PRIVATE cxx_std_17)
   add_test(NAME matrix COMMAND recvx-matrix-tests)
+  add_executable(recvx-texture-filter-tests tests/native/texture_filter_test.cpp)
+  target_link_libraries(recvx-texture-filter-tests PRIVATE recvx_scene)
+  add_test(NAME texture_filtering COMMAND recvx-texture-filter-tests)
   add_executable(recvx-scene-tests tests/native/scene_test.cpp)
   target_link_libraries(recvx-scene-tests PRIVATE recvx_scene)
   add_test(NAME scene_renderer COMMAND recvx-scene-tests)

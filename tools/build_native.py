@@ -57,6 +57,8 @@ def main():
         if not args.no_test and (data / 'native-data.version').is_file():
             run(binary_dir / ('recvx-audio-tests' + suffix), data)
             run(binary_dir / ('recvx-game-tests' + suffix), data)
+            run(binary_dir / ('recvx-progression-tests' + suffix), data)
+            run(sys.executable, ROOT / 'tools/verify_progression.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
             run(binary_dir / ('recvx-inventory-tests' + suffix), data)
             run(binary_dir / ('recvx-inventory-engine-tests' + suffix), data)
             run(binary_dir / ('recvx-debug-tests' + suffix), data)

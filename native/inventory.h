@@ -30,6 +30,7 @@ public:
     bool transform(unsigned slot,unsigned expected,unsigned replacement);
     bool deposit(unsigned slot,unsigned box=64);
     bool withdraw(unsigned index,unsigned box=64);
+    bool box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* message=nullptr);
     std::string condition()const;
 private:
     void compact(unsigned* tracked_slot=nullptr);

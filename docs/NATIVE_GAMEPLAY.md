@@ -1,3 +1,15 @@
+Progressionsupdate 2026-10-06: Originale Flammen/Funken (Eff200/201/218),
+segmentierte en01-Raumbewegungen und der ursprüngliche Abschluss der
+Metalldetektor-Ansage sind gebunden. Security Box: Inventaritem auswählen,
+OK, Boxplatz auswählen, OK zum Tauschen; Zurück kehrt zur Inventarwahl zurück,
+erneutes Zurück/Start schließt. Austausch/Stacking/Restriktionen verwenden
+ItemBoxChange, die linke Liste ist eine vorläufige Host-Oberfläche.
+Hunde werden über originale Bereichs-/Trapregeln aktiviert; ihre vollständige
+Verfolgungs-/Angriffs-KI ist noch nicht vorhanden. Explosionsemitter/Rauch sind
+nicht vollständig portiert. Steve-Musik endet gemäß ihrer ADX-Ressource.
+Texturen/Filtercaches werden geteilt; das Bild wird nur bei Änderung neu gerendert.
+Scan 205/205 lädt, 38 blockieren; Belege/Grenzen: [VALIDATION.md](VALIDATION.md).
+
 Event-Zustandsupdate 2026-10-06: Originale Wortbedingungen für HP,
 Dialogauswahl und Spielzeit greifen auf den gemeinsamen Zustand zu.
 Standardantworten und Menüresultate folgen Message-Control; Raumvarianten

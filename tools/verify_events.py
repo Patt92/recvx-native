@@ -42,6 +42,7 @@ def main():
             assert all(abs(a - b) < .02 for a, b in zip(result['actor'], position)), (name, result['actor'])
             assert 0 in result['events'], (name, 'original task never dispatched')
             if name == 'steve-trigger':
+                assert not result['bgm_active'], 'non-looping Steve cue still plays after original end'
                 assert any(command['opcode'] == 0x6d for command in result['pending_commands']), 'missing particle binding hidden'
     print('Original cemetery trigger walked with tank controls/collision; Steve trigger placed diagnostically. Both task groups restore control. Enemy AI, facial morphs and effects remain incomplete.')
 

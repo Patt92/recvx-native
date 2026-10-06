@@ -1,3 +1,72 @@
+# Flammen, Bewegungen, Security-Progression und Renderlast — 2026-10-06
+
+Dieser Abschnitt ersetzt frühere Integrations-/Scanangaben weiter unten.
+Logs und echte Ansichten: `build/validation/progression-20261006`.
+
+- **Originaleffekte:** Generator übernimmt bhEff200/201/218 aus effsub5.c.
+  EF_WRK, originale Atlasgruppen 58/59/70–79, Bildfolgen und Bodenanker laufen
+  im gemeinsamen World-/Rendererpfad. Additive Polygone beachten die Tiefe,
+  schreiben keine Tiefe und verdoppeln ihre gemeinsame Kante nicht.
+  RM_0020 erzeugt elf Feuerquads und einen Funkenquad (24 Dreiecke).
+  `cemetery-fire-runtime.png` zeigt die wirklichen Flammen nach dem originalen
+  Friedhofereignis, nicht nur einen registrierten Effekt. Explosionsemitter,
+  Rauch, andere Effekttypen und Linktyp 5 bleiben ungebunden; ihre Befehle
+  bleiben als pending sichtbar. Die RNG-Startphase ist ein Host-LCG.
+- **Animation:** en01-Raum-MTNs verbinden die originalen acht unteren mit den
+  zehn oberen Kanälen (mtn_no+1). Fünf echte Raumressourcen geprüft.
+  Common-Knotenänderungen enden erst beim nächsten tatsächlichen Schreiben
+  durch die Motion (Position nur mit Key, Winkel auch bei leerem Key).
+  Keine dauerhafte Null-Wurzel mehr; Claire/Rodrigo im Prolog wieder sichtbar.
+  LoadWork selektiert NPC-Work ohne künstliche Steuerungssperre; SubCtr 0x80
+  gibt die Animation an die originale InitType-Pose zurück. Keine vollständige KI.
+- **Steve-Musik:** ADX-v3-Loopflag/Start/Ende werden gelesen. BGM1/0048 hat
+  keinen Loop und endet nach rund 22,38 Sekunden, ohne künstliche Wiederholung.
+  BGM1/0000 erhält sein Intro und die eingebettete Loop-Teilsequenz.
+- **Metalldetektor:** bhCamSet2 schaltet die originale feste Kamera.
+  bhCheckFloorP wird wie durch bhControlPlayer nur bei sp_flg Bit 0 ausgeführt.
+  Zuvor startete die Bodenprüfung während der Ansage Event 11 erneut und
+  verdrängte Event 2 im selben Tasklevel. Jetzt laufen VOICE1/0455, Kamera 9
+  und der originale Abschluss. Nachricht 16 ist im Dump FF02/1/FFFF: bewusst
+  leer, keine erfundene Untertitelzeile. `verify_progression.py` prüft Ansage,
+  Kamera, Freigabe, Boxeingabe, Ablegen, erneutes Passieren und Zurückholen.
+  Triggerpositionen sind diagnostisch gesetzt, kein Laufweg-Durchspielnachweis.
+- **Security Box:** bhPlItemBlockCk, SecurityItemSet/Back und originales
+  ItemBoxChange aus sub1.c (Quelle als 67,97 % matching kommentiert).
+  Verwendet die originalen Inventarbereiche und Typ-/Schlüsselrestriktionen;
+  Platzmangel rollt die Transaktion zurück. Tastatur/Controller nutzen den
+  gemeinsamen modal_input-Hook. Das originale System-Boxflag öffnet das Menü.
+  Linke Boxliste ist ausdrücklich eine Host-Ansicht; originale Fensteranimation
+  und Spriteoberfläche sind noch nicht portiert. `security-box-final.png`
+  wurde auf überlappende Texte geprüft.
+- **Hunde:** Originale Bereichs-/Trap-Routinen aus zonzon.c/en04.c aktivieren
+  Cerberus nach Floor/Gruppe, setzen originale Spawnposition/Richtung, Lauf-MTN
+  und rm_flg. Zwei echte RM_0050-Traps und der wartende Hund geprüft.
+  Verfolgung, Angriffe und die vollständige en04-Zustandsmaschine fehlen;
+  eine aktivierte Laufanimation ist kein Beleg vollständiger Hund-KI.
+- **CPU:** Texturpixel und Mipcache werden zwischen Framekopien geteilt;
+  Änderungen lösen Copy-on-write und Cacheinvalidierung aus (auch Änderungen
+  außerhalb der früheren Fingerprint-Stichprobe). Default höchstens vier Worker.
+  GUI rastert/lädt nur bei neuem 30-Hz-Tick oder Eingabe, Präsentation bleibt
+  VSync. Gleicher RM_0050-Lauf mit Mods, 180 Präsentationen: vorher 19,92 s
+  User-CPU, jetzt 6,70 s (−66 %), 74 Neuzeichnungen; Laufzeit 2,93 → 3,34 s,
+  RSS 271 → 275 MB. Kurze Messung auf diesem Host, kein allgemeiner M4-Benchmark.
+  Software-Rendering/HD/Supersampling kosten weiterhin Rechenzeit.
+
+Arbeitsbaum-Prüfung: **22 CTest-Gruppen**, sechs Originaldaten-Suiten
+(Inventar-Engine, Game, Input, Combat, Audio, Progression), Frontend-/Tür-/
+Cemetery-/Steve-/Security-/Snapshot-Replays auf Host, Mac arm64, Intel/Rosetta,
+Windows/Wine und ASan/UBSan. Intel zusätzlich alle Unit-/Datentests; keine
+physische Windows-Hardware oder Controller geprüft.
+Raumscan: **205/205 laden; 38 blockieren** (vorher 37). Vergleich mit dem alten
+Paket zeigt ausschließlich RM_9301 neu: Event 10 erreicht jetzt bhGameOverSet
+0xc6, dessen Oberfläche nicht implementiert ist. Kein stilles Überspringen.
+600 Ticks/Spawn 0 ohne Eingaben beweisen keine vollständige Progression.
+
+Renderer/Filter/Threads werden wegen der gemeinsam geprüften CPU-/Effektarbeit
+gezielt in diesen Engine-Commit integriert. Claudes HD-/Titel-/Equip-/Snapshot-/
+Grafiksettings-/3rd-Person-Erweiterungen bleiben im Arbeitsbaum und den gemeinsam
+geprüften Builds erhalten; das Paketmanifest nennt ihre zusätzlichen Quellen.
+
 # Original event word state and game clock — 2026-10-06
 
 This supersedes the earlier scan and package counts below.
