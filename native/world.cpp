@@ -117,6 +117,7 @@ const MotionClip& RoomWorld::entity_motion(const WorldEntity& e)const{
 std::vector<RoomWorld::CombatTarget> RoomWorld::combat_targets()const{std::vector<CombatTarget> out;for(const auto& pair:entities_){const auto& e=pair.second;if(pair.first.first==1&&e.identity==1&&!e.hidden&&!e.inactive&&!e.dead&&!e.scripted)out.push_back({pair.first.second,e.identity,e.transform.position,3.8f,18.2f,e.hp});}return out;}
 void RoomWorld::combat_difficulty(unsigned mode){for(auto& pair:entities_)if(pair.first.first==1&&pair.second.identity==1&&!pair.second.dead)pair.second.hp=en01_hp_tbl[mode==2?1:0][pair.first.second%16];}
 bool RoomWorld::damage(unsigned index,int amount){auto it=entities_.find({1,index});if(it==entities_.end()||it->second.identity!=1||it->second.hidden||it->second.inactive||it->second.dead||amount<=0)return false;auto& e=it->second;e.hp=std::max(0,e.hp-amount);if(!e.hp){e.dead=true;e.frozen=true;}return true;}
+void RoomWorld::set_enemy_health(unsigned index,int hp){auto at=entities_.find({1,index});if(at==entities_.end())throw std::runtime_error("script HP assignment enemy unavailable");at->second.hp=hp;}
 void RoomWorld::deactivate_enemy(unsigned index){entity(1,index).inactive=true;}
 bool RoomWorld::enemy_dead(unsigned index)const{auto it=entities_.find({1,index});return it!=entities_.end()&&it->second.dead;}
 unsigned RoomWorld::floor_sound(NJS_POINT3 position,bool special)const{

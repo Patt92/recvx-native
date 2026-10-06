@@ -1,3 +1,46 @@
+# Original event word state and game clock — 2026-10-06
+
+This supersedes the earlier scan and package counts below.
+
+- `event.c::bhCmpW` 0x07 reads signed player/enemy HP, live or latched
+  `mes_sel`, and `stv_tm`. All six operators and unsigned 16-bit operands
+  are tested independently. `bhSvW` 0x09 updates actual shared work state;
+  fields 11–15 assign negative HP to enemies 0–4 as the original does.
+  Missing enemy work blocks at the original PC. Real RM_0000 actor work
+  confirms assignments and conditions reach the same entity, not a byte register.
+- `bhRoomCaseNo` consumes two bytes and passes the variant through DoorCall.
+  Message marker 0xfe09 sets the default question choice; page changes reset
+  selection. Confirmed status-menu answers keep the original 100/101 offset,
+  including after the question closes. This does not complete the original
+  status-screen transition animation or item-box interface.
+- `sync.c::bhControlVSync` game time is room-independent and advances two
+  VSync units per 30-Hz game tick, gated by event flag 3, capped at 216000000.
+  Title/debug pause do not advance it. `tools/verify_event_state.py` uses real
+  exported room geometry with an isolated event-table fixture to verify this
+  runtime contract; it is not a campaign script or playthrough test.
+- Host, Mac arm64, Intel/Rosetta, Windows/Wine and ASan/UBSan passed **20 test
+  groups**, five original-data suites, and original frontend/doors/events
+  replays. All five architectures passed the extra clock/pause runtime check.
+  No physical Windows hardware or controller was used.
+- Same 600-tick scan: **205/205 rooms load; 37 report blocked commands**,
+  previously 38. Later unbound commands remain visible; this scan does not
+  prove full progression or enemy AI. Logs: `build/validation/event-conditions-20261006`.
+- The 4-byte asset error reported in the older renderer handoff did not
+  reproduce in baseline commit 1978aa0: original door/lighter replay passed
+  before this change. No speculative audio/resource repair was added.
+- Claude's HD/filter/supersampling/parallel-renderer work is preserved and
+  included in tested working-tree binaries; those sources stay outside this
+  engine commit. Source manifests distinguish committed and working-tree code.
+
+Both v0.5 packages updated; root/package starters passed with their own data
+on Mac arm64/Intel and Windows/Wine, including the full opening/lighter replay.
+The normal Mac SDL inventory/examine path ran for 90 frames; screenshot:
+`build/validation/event-conditions-20261006/package-gui.png`.
+Mac app signature passed deep/strict verification and user INIs were preserved.
+Backup: `archived/releases/event-conditions-before-20261006-083827`.
+The packages include Claude's tested parallel-renderer sources; HD-pack files
+remain unbundled. Binary/source SHA-256 manifests record the integration.
+
 # World controls and scheduler integration — 2026-10-05
 
 This supersedes the older scan/build counts below.

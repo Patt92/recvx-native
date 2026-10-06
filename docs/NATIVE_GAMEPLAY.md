@@ -1,3 +1,10 @@
+Event-Zustandsupdate 2026-10-06: Originale Wortbedingungen für HP,
+Dialogauswahl und Spielzeit greifen auf den gemeinsamen Zustand zu.
+Standardantworten und Menüresultate folgen Message-Control; Raumvarianten
+gehen in Türanforderungen ein. Spielzeit folgt dem originalen VSync-Zähler
+und bleibt über Raumwechsel erhalten. Tests/Beleggrenzen: [VALIDATION.md](VALIDATION.md).
+Aktueller Scan: 205 Räume laden, 37 mit blockierten Befehlen.
+
 World-/Scheduler-Update 2026-10-05: Modellknotensteuerung und Interpolation,
 ObjCtr, Event-Zeitgeber, bewegte Kollisionsflächen, Lichtparameter und sechs
 getrennte Gegner-SE-Stimmen sind jetzt im gemeinsamen Engine-Pfad gebunden.

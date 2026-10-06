@@ -10,6 +10,7 @@ public:
     std::array<std::uint32_t,384> items{};
     unsigned player=0,game_mode=0;
     int hp=160,max_hp=160;
+    std::uint32_t play_time=0; // sync.c stv_tm, 60-Hz VSync units, room-independent.
     bool poisoned=false,side_pack=false,infected=false;
     std::uint32_t* slots(){return items.data()+player*16;}
     const std::uint32_t* slots()const{return items.data()+player*16;}

@@ -16,6 +16,7 @@ public:
     void combat_difficulty(unsigned mode);
     bool damage(unsigned index,int amount);
     bool enemy_dead(unsigned index)const;
+    void set_enemy_health(unsigned index,int hp);
     // bhEneSetCk: original BH_PWORK stflg 0x1000000 (not drawn, no hit/sight checks).
     void deactivate_enemy(unsigned index);
     float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(walls_,room_height_,origin,direction,range,floor_at(origin));}

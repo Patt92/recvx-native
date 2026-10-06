@@ -25,6 +25,8 @@ public:
     std::function<bool(const EventCommand&)> binding;
     std::function<void(unsigned)> task_started; // Event_init resets interpolation keys only.
     std::function<bool(unsigned)> enemy_dead;
+    std::function<std::optional<int>(unsigned)> enemy_health;
+    std::function<void(unsigned,int)> set_enemy_health;
     std::function<void(unsigned)> enemy_disable; // bhEneSetCk
     // bhCamCheck: active event camera (cam.flg & 2) with evc_no/keyf_no.
     std::function<bool(unsigned&,unsigned&)> event_camera;
@@ -38,6 +40,7 @@ public:
     void inherit_progress(const EventVm& previous);
     void initialize();
     void tick();
+    void advance_game_clock(unsigned vertical_blanks=2);
     void start(unsigned level,unsigned event);
     bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
     bool use(unsigned item,unsigned* message=nullptr);

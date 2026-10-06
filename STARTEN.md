@@ -15,7 +15,8 @@ Kampf, Speichern und zahlreiche spätere Ereignisse sind noch nicht fertig.
 Die Itemansicht beim Aufheben und Untersuchen verwendet jetzt den originalen
 Item-Blickraum: Munition steht richtig herum; auch Umwandlungen behalten ihre
 Originalpose. Bereichsabfragen und verschiebbare Kollisionsflächen sind an die
-Engine gebunden. Im 600-Tick-Scan laden 205 Räume; 72 melden noch blockierte
+Engine gebunden. Originale HP-/Dialog-/Zeitbedingungen verwenden den gemeinsamen
+Spielzustand; Fragen übernehmen die Standardauswahl aus ihren Ressourcen. Im 600-Tick-Scan laden 205 Räume; 37 melden noch blockierte
 Befehle. Das ist weiterhin kein vollständig spielbarer Port.
 
 ## Hauptmenü und Einstellungen
