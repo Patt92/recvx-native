@@ -67,6 +67,24 @@ gezielt in diesen Engine-Commit integriert. Claudes HD-/Titel-/Equip-/Snapshot-/
 Grafiksettings-/3rd-Person-Erweiterungen bleiben im Arbeitsbaum und den gemeinsam
 geprüften Builds erhalten; das Paketmanifest nennt ihre zusätzlichen Quellen.
 
+Beide v0.5-Starterpakete sind mit den Zielbinaries aktualisiert. Root-/Paketstarter
+Mac arm64/Intel und Windows/Wine starten mit eigenen Daten; aktueller kompletter
+Lighter-Replay, Security-Box-/Event-Replays der Pakete bestanden. Die erste
+Lighter-Starterprüfung verwendete einen alten Replay mit zu schnellen Equip-
+Eingaben; mit dem aktuellen Replay (4-Tick-Kommandofenster) bestanden. Keine
+Änderung an Eventlogik/Tempo für diese Prüfung. Normale Mac-SDL-Ausgabe 90
+Präsentationen/42 Renderings geprüft. App deep/strict signiert; Benutzer-INIs
+unverändert. Backup: `archived/releases/progression-before-20261006-095700`. Originaldatenmanifest: 21.227 Dateien geprüft.
+Der selektive Engine-Commit eb38b42 wurde zusätzlich separat aus HEAD plus
+seinen Quellen gebaut: 20/20 Gruppen, Originalressourcen und Security-Replay
+bestanden, unabhängig von Claudes uncommitteten Erweiterungen.
+
+Szenenbilder bei Tick 500/520/540 zeigen den Zombie mit gebeugtem Oberkörper und
+Armen beim Herausklettern/Fallen statt T-Pose. Das beweist nicht die komplette
+Filmsequenz: Kamera 4 liefert bei 560–600 eine fast einfarbige Nahansicht;
+Kamera-/Schnittprogression ist deshalb weiterhin nicht vollständig verifiziert.
+Keine Kamerapositionen oder Eventzeiten passend zu einzelnen Screens ersetzt.
+
 # Original event word state and game clock — 2026-10-06
 
 This supersedes the earlier scan and package counts below.
