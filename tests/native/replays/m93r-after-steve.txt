@@ -1,0 +1,9 @@
+# Walk the original Steve event, acknowledge the M93R, aim and fire once.
+# No positions, flag edits, debug inventory or cinematic skips.
+0 keys forward
+90 keys none
+3200 confirm
+3400 keys aim
+3420 keys aim attack
+3421 keys aim
+3450 keys none

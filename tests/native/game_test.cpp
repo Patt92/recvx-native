@@ -279,10 +279,10 @@ int main(int argc,char** argv){try{
         bool changed_pose=false;for(unsigned i=0;i<pose_a.triangles.size();++i)for(unsigned j=0;j<3;++j){const auto a=pose_a.triangles[i].vertices[j].position,b=pose_b.triangles[i].vertices[j].position;changed_pose|=std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>.001f;}check(changed_pose,"backward pose remains static");
         body.locomotion(walker,walk_motion,walk_frame,0,false,0);check(walk_motion==42,"backward release does not return idle");const auto idle=walker.position;body.locomotion(walker,walk_motion,walk_frame,1,false,0);check(walk_motion==0&&walker.position.z<idle.z,"forward movement shares backward sign");
         body.locomotion(walker,walk_motion,walk_frame,1,true,0);check(walk_motion==4,"run no longer selects original clip");
-        GameUi ui(root);screen.active=true;message=MessageDialog{};SoftwareRenderer render(640,480);ui.draw(render,game,screen,message,0);
+        GameUi ui(root);StatusMenu inventory_screen;inventory_screen.active=true;inventory_screen.skip_slide();message=MessageDialog{};SoftwareRenderer render(640,480);ui.draw(render,game,inventory_screen,message,0);
         auto atlas=read_tga(root/"textures/menu/0004.tga");const auto source=atlas.pixels[(12*atlas.height/256)*atlas.width+17*atlas.width/256];
         check((source>>24)==255&&render.pixels()[200*640+494]==source,"empty inventory slot does not draw original atlas tile");
-        const auto no_bag=render.pixels()[333*640+494];game.side_pack=true;ui.draw(render,game,screen,message,0);
+        const auto no_bag=render.pixels()[333*640+494];game.side_pack=true;ui.draw(render,game,inventory_screen,message,0);
         check(render.pixels()[333*640+494]==source&&no_bag!=source,"ninth/tenth slot row is visible before getting the bag");game.side_pack=false;
         screen.active=false;std::fill(render.canvas().begin(),render.canvas().end(),0xffd04090);message.show({'A'-32,0xffff},0);ui.draw(render,game,screen,message,0);
         check(render.pixels()[365*640+55]==0xffd04090,"dialogue paints a background panel");unsigned white=0,black=0;

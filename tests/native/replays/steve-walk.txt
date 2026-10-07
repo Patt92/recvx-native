@@ -1,0 +1,5 @@
+# RM_0030 spawn 0: walk from the door into the original floor trigger.
+# No teleport, event flag change or cinematic skip. Acknowledge the gift.
+0 keys forward
+90 keys none
+3200 confirm

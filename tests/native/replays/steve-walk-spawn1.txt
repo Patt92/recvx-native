@@ -1,0 +1,6 @@
+# RM_0030 spawn 1: walk across the courtyard, turn left, then approach.
+0 keys forward
+120 keys left
+140 keys forward
+250 keys none
+3200 confirm

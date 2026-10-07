@@ -1,0 +1,56 @@
+#include "world.h"
+#include "asset_io.h"
+#include "room.h"
+#include "binary_view.h"
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+using namespace recvx;
+static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+static EventCommand command(std::initializer_list<std::uint8_t> bytes){EventCommand c;c.bytes=bytes;c.opcode=*bytes.begin();return c;}
+int main(int argc,char** argv){try{
+    if(argc<2){std::cout<<"Supply cooked data for original script motion regression.\n";return 0;}
+    _Make_SinTable();const std::filesystem::path data=argv[1];
+    const auto bytes=read_asset_file(data/"rooms/RM_0050.RDT",64*1024*1024);
+    const auto scene=decode_scene(bytes);auto player=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;
+    AudioMixer sound(data);RoomWorld world(bytes,scene,player,motion,frame,sound,data,{},"RM_0050");
+    auto asset=PlayerAsset::load(data);world.set_player_asset(&asset);
+    Inventory inventory;MessageDialog dialog;EventVm vm(bytes,inventory,dialog);
+    std::vector<unsigned> starts;bool active=false,wrapped_visible=false,hidden=false;float previous=0;unsigned samples=0;
+    vm.binding=[&](const EventCommand& c){if(c.event==12&&c.opcode==0x69&&(c.bytes[1]==24||c.bytes[1]==34)){starts.push_back(c.bytes.size()==10?unsigned(c.bytes[8])|(unsigned(c.bytes[9])<<8):0);active=true;previous=0;}return world.bind(c);};
+    vm.task_started=[&](unsigned level){world.start_task(level);};
+    vm.animation_frame=[&](unsigned kind,unsigned index){return world.frame(kind,index);};
+    vm.initialize();player.position={-248,0,54}; // Diagnostic placement inside the original trigger, no event/flag rewrites.
+    for(unsigned tick=0;tick<220;++tick){
+        vm.check_floor(player.position,player.yaw,world.floor_at(player.position));vm.tick();world.tick();sound.mix();
+        const auto& e=*world.state(1,2);
+        if(active&&!e.hidden){const auto root=world.model_pose(1,2).position;check(root.x<-220&&root.x>-250,"drag leaves the original motion's position range");
+            if(previous)check(root.x>=previous-.001f,"drag returns towards its starting position within a motion section");
+            previous=root.x;++samples;
+            if(e.frame==0){check(e.pose_frame()==84*65536,"visible wrap sampled frame zero instead of final frame 84");check(root.x>-231,"last visible drag frame flashes back to the ground position");wrapped_visible=true;}
+        }
+        if(active&&e.hidden)hidden=true;
+    }
+    check(vm.errors.empty(),"original drag trigger/script is blocked");check(starts==std::vector<unsigned>{0,60,64},"Common 34 lost the original frame 60/64 offsets or restarted the event");
+    check(samples>90&&wrapped_visible&&hidden,"original drag/hide sequence not fully exercised");
+    // Same shared mechanism: start frame, fractional slow sampling, pause, and
+    // loop boundary must work without room-specific rules.
+    world.bind(command({0x65,1,2,0}));world.bind(command({0x69,23,0,0}));
+    world.bind(command({0x69,34,3,1,0,1,5,6,65,0}));world.tick();
+    const auto a=world.model_pose(1,2).position.x;world.tick();const auto half=world.model_pose(1,2).position.x;
+    world.bind(command({0x69,40,66,0}));const auto b=world.model_pose(1,2).position.x;
+    check(std::abs(half-(a+b)*.5f)<.0001f,"mtn_md bit 8 does not interpolate half-frame root motion");
+    world.bind(command({0x69,23,1,0}));world.tick();check(world.model_pose(1,2).position.x==b,"paused script changes its sampled pose");
+    world.bind(command({0x69,23,0,0}));world.bind(command({0x69,34,1,1,0,1,5,6,84,0}));world.tick();
+    check(world.frame(1,2)==0&&world.state(1,2)->pose_frame()==84*65536,"next loop clock and last rendered pose are not independent");
+    world.tick();check(world.state(1,2)->pose_frame()==0,"intentional animation loop does not resume frame zero on the next tick");
+    {const auto other=read_asset_file(data/"rooms/RM_0070.RDT",64*1024*1024);const auto stage=decode_scene(other);auto spawn=stage.spawns.at(0);std::size_t m=42;std::int64_t f=0;RoomWorld actors(other,stage,spawn,m,f,sound);
+        BinaryView v(other);const auto h=inspect_room(other).room_offset,table=v.u32(h+8);unsigned enemy=0;
+        while(enemy<v.u32(h+0x88)&&v.u16(table+enemy*36+4)!=1)++enemy;
+        check(enemy<v.u32(h+0x88),"second room has no original zombie");
+        actors.bind(command({0x65,1,std::uint8_t(enemy),0}));actors.bind(command({0x69,34,1,1,1,1,5,6,20,0}));
+        bool loop=false;for(unsigned tick=0;tick<500;++tick){const auto before=actors.frame(1,enemy);actors.tick();check(actors.state(1,enemy)->pose_frame()==before,"second room samples the advanced clock");if(actors.frame(1,enemy)==0){loop=true;break;}}
+        check(loop,"second original room motion did not reach its loop boundary");Scene rendered;actors.append(rendered,{},stage.cameras[0]);check(!rendered.triangles.empty(),"last pose in second room is not drawable");
+    }
+    std::cout<<"Original RM_0050 trigger/event 12, frame 60/64 offsets, final pose before hide, fractional sampling, pause and loop passed.\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
