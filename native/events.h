@@ -6,7 +6,7 @@
 #include <functional>
 #include <set>
 namespace recvx {
-struct EventCommand {unsigned opcode=0,task=0,event=0;std::size_t offset=0;std::vector<std::uint8_t> bytes;unsigned loop_remaining=0,loop_total=0;};
+struct EventCommand {unsigned opcode=0,task=0,event=0;std::size_t offset=0;std::vector<std::uint8_t> bytes;unsigned loop_remaining=0,loop_total=0;unsigned simulation_flags=~0u;};
 struct Interaction {unsigned flags=0,type=0,attribute=0;int floor=0;NJS_POINT3 position{},extent{};std::array<unsigned,4> parameters{};};
 struct EventTaskState {unsigned event,level,delay;std::size_t offset;bool blocked;};
 class EventVm {

@@ -14,6 +14,6 @@ struct EF_WORK {unsigned flg;unsigned short id,type;short flr_no;unsigned short 
 extern EF_WORK WpnEffTab[23][4];
 extern const WPN_TAB WpnTab[23];
 extern const unsigned short PlMtnWpn[5];
-extern const int KnfAtrTab[4],en01_hp_tbl[2][16];
+extern const int KnfAtrTab[4],en01_hp_tbl[2][16],en04_hp_tbl[2][16];
 extern const short EneDamNear[31][22],EneDamMid[31][22],EneDamFar[31][22];
 }

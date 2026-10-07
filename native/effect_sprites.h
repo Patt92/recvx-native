@@ -10,7 +10,7 @@ namespace recvx {
 struct EffectSprite {
     unsigned id=0,type=0,mode0=0,mode1=0,flg=0,ani_ct=0;
     int ayp=0;float yn=0;void* func=nullptr;
-    int ax=0,ay=0,az=0,lkono=0,ct0=0,tex_id=-1,bl_src=8,bl_dst=6;
+    int ax=0,ay=0,az=0,lkono=0,ct0=0,ct1=0,tex_id=-1,bl_src=8,bl_dst=6;
     // bhSetEffectTb/bhSetEffect fields used by the generated procedures (px..pz must stay contiguous).
     unsigned mdlver=0;int flr_no=0;float px=0,py=0,pz=0,lox=0,loy=0,loz=0,sx=1,sy=1,sz=1,sxb=1,syb=1,szb=1,spd=0;
     struct Vertex {float x=0,y=0,z=0,u=0,v=0;std::uint32_t col=0;};

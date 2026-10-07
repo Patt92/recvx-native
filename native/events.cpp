@@ -42,6 +42,7 @@ void EventVm::initialize(){Task scenario;scenario.pc=scd0_;run(scenario,true);fl
 void EventVm::world(Task& task,unsigned op,std::size_t length){
     BinaryView v(room_);v.require(task.pc,length);EventCommand c{op,task.level,task.event,task.pc-base_,{room_.begin()+task.pc,room_.begin()+task.pc+length}};
     c.loop_remaining=task.cnt2;c.loop_total=task.cnt3;
+    c.simulation_flags=flags[6][0];
     if((!binding||!binding(c))&&reported_.insert({op,task.pc}).second)pending_bindings.push_back(c);
     task.pc+=length;
 }
@@ -201,7 +202,8 @@ int EventVm::instruction(Task& t){
     case 0x3b:world(t,op,6);return 1;
     case 0x36:world(t,op,6);return 1;
     case 0x6a:if(!v.u8(p+1))flags[11][0]|=0x40000000u;else flags[11][0]&=~0x40000000u;return advance(2);
-    case 0x16:case 0x18:case 0x1a:case 0x2b:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,op,op==0x42?4:2);return 1;
+    case 0x2b:world(t,op,4);return 1; // event.c case 43 interpolates work position and angles
+    case 0x16:case 0x18:case 0x1a:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,op,op==0x42?4:2);return 1;
     // bhFaceReSet: one enemy index; facial control is bound in RoomWorld.
     case 0x90:world(t,op,2);return 1;
     case 0xca:world(t,op,2);return 1; // bhEffClearEvt; event effects remain pending.

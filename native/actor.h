@@ -10,7 +10,8 @@ struct ModelNodeOverride {std::optional<NJS_POINT3> position;std::optional<std::
 using ModelNodeOverrides=std::map<unsigned,ModelNodeOverride>;
 struct BoneMatrix {NJS_MATRIX value;};
 struct MotionClip {
-    unsigned frames=0;
+    unsigned frames=0,flags=0;
+    std::vector<std::uint16_t> attributes;
     bool interpolate=false;
     std::vector<std::vector<NJS_POINT3>> positions;
     std::vector<std::vector<std::array<std::int32_t,3>>> angles;
@@ -37,6 +38,7 @@ public:
     unsigned motion_frames(std::size_t i) const;
     void install_weapon_motions(const std::vector<std::optional<MotionClip>>& clips);
     // bhGetTransZ tables: element zero is metadata; speed keys start at one.
+    const std::vector<float>& translation_curve(std::size_t i)const{return translations_.at(i);}
     float translation_speed(std::size_t curve,std::int64_t frame_q16) const;
     // Healthy original idle/walk/run/back clips and signed translation curves.
     void locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t& frame_q16,int move,bool run,int turn)const;

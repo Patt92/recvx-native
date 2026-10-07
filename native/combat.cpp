@@ -1,4 +1,6 @@
 #include "combat.h"
+#include "player_combat_core.h"
+#include <functional>
 #include "weapon_tables.h"
 #include <algorithm>
 #include <cmath>
@@ -27,24 +29,43 @@ void CombatController::hit(RoomWorld& world,NJS_POINT3 origin,NJS_POINT3 directi
         const unsigned comb=distance<15?0x10u:distance<40?0x20u:0x40u;const NJS_POINT3 at{origin.x+direction.x*closest,origin.y+direction.y*closest,origin.z+direction.z*closest};
         if(world.damage(selected,int(weapon_),damage,comb,selected_joint>=0?selected_point:at,direction,selected_joint)){++hits;struck_.insert(selected);}}
 }
-void CombatController::select_target(PlayerAsset& player,const SceneSpawn& actor,std::size_t motion,std::int64_t frame,RoomWorld* world,bool next){
-    if(!world){aim_={};return;}
-    aim_=targeting_.select(actor,world->combat_targets(),player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw)),WpnTab[weapon_].flg&0x800,next,world);
-    yaw_ticks_=next?4:8;arm_ticks_=8;
-}
-ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset& player,std::size_t motion,std::int64_t frame)const{
-    if(phase_==Phase::Idle||!(WpnTab[weapon_].flg&0x800))return {};
-    return Targeting::arms(player,motion,frame,right_arm_,left_arm_);
+struct CombatOriginal {
+    RECVX_COMBAT_CORE* core=nullptr;RECVX_COMBAT_STATE state{};unsigned pad=0;
+    std::vector<RECVX_PUSH_MOTION> motions;std::vector<std::vector<RECVX_PUSH_CHANNEL>> channels;
+    std::vector<std::vector<std::vector<RECVX_PUSH_ANGLE>>> angles;std::vector<RECVX_PUSH_POSE> poses;
+    std::vector<unsigned> models;std::set<std::string> unavailable;
+    std::function<int()> reload;std::function<int(const RECVX_GUN_HIT&)> hit,knife;
+    std::function<int(const float*,const float*,float,unsigned)> wall;
+    std::function<void(unsigned)> sound;std::function<void(int,int,int,int,const float*)> muzzle;
+    explicit CombatOriginal(const PlayerAsset& asset){
+        RECVX_COMBAT_HOST host{};host.user=this;
+        host.search_bullet=[](void* p){return static_cast<CombatOriginal*>(p)->reload();};
+        host.knife_hit=[](void* p,const RECVX_GUN_HIT* g){return static_cast<CombatOriginal*>(p)->knife(*g);};
+        host.gun_hit=[](void* p,const RECVX_GUN_HIT* g){return static_cast<CombatOriginal*>(p)->hit(*g);};
+        host.wall_hit=[](void* p,const float* a,const float* b,float r,unsigned f){return static_cast<CombatOriginal*>(p)->wall(a,b,r,f);};
+        host.sound=[](void* p,const float*,unsigned se){static_cast<CombatOriginal*>(p)->sound(se);};
+        host.muzzle=[](void* p,int w,int j,int hand,int yaw,const float* matrix){static_cast<CombatOriginal*>(p)->muzzle(w,j,hand,yaw,matrix);};
+        host.unbound=[](void* p,const char* name){static_cast<CombatOriginal*>(p)->unavailable.insert(name);};
+        core=recvx_combat_create(&host);if(!core)throw std::bad_alloc();
+        motions.resize(asset.motions());channels.resize(asset.motions());angles.resize(asset.motions());poses.resize(asset.bones());
+        models=asset.motion_nodes(unsigned(asset.bones()));if(models.empty()){for(unsigned i=0;i<asset.bones();++i)models.push_back(i);}
+        for(unsigned i=0;i<asset.motions();++i)if(asset.has_motion(i)){const auto& clip=asset.motion_clip(i);auto& ch=channels[i];auto& ak=angles[i];ch.resize(clip.positions.size());ak.resize(ch.size());
+            for(unsigned n=0;n<ch.size();++n){for(const auto& angle:clip.angles[n])ak[n].push_back({{(unsigned short)angle[0],(unsigned short)angle[1],(unsigned short)angle[2]}});ch[n].p[0]=clip.positions[n].empty()?nullptr:(void*)clip.positions[n].data();ch[n].p[1]=ak[n].empty()?nullptr:ak[n].data();}
+            motions[i]={clip.flags,int(ch.size()),int(clip.frames),(void*)&clip,ch.data(),clip.attributes.empty()?nullptr:(unsigned short*)clip.attributes.data()};}
+    }
+    ~CombatOriginal(){recvx_combat_destroy(core);}
+    void seed(const PlayerAsset& asset,unsigned motion,std::int64_t frame){const auto pose=asset.local_pose(motion,frame);for(unsigned n=0;n<poses.size();++n){const auto& p=pose.at(models[n]);poses[n]={{p.position.x,p.position.y,p.position.z},{p.angles[0],p.angles[1],p.angles[2]}};}recvx_combat_motions(core,motions.data(),unsigned(motions.size()),poses.data(),unsigned(poses.size()));recvx_combat_seed(core,motion,int(frame));}
+};
+unsigned CombatController::original_mode()const{return original_?unsigned(original_->state.mode):0;}
+unsigned CombatController::original_phase()const{return original_?unsigned(original_->state.phase):0;}
+bool CombatController::aiming()const{return original_&&original_->state.active;}
+bool CombatController::attacking()const{return original_&&(original_->state.mode==69||original_->state.mode==169||original_->state.mode==72);}
+ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset&,std::size_t,std::int64_t)const{
+    if(!aiming())return {};ModelNodeOverrides out;for(unsigned n=0;n<original_->poses.size();++n){const auto& p=original_->poses[n];out[original_->models[n]]={NJS_POINT3{p.pos[0],p.pos[1],p.pos[2]},std::array<Angle,3>{p.ang[0],p.ang[1],p.ang[2]}};}return out;
 }
 void CombatController::fire(Inventory& inventory,const SceneSpawn& actor,RoomWorld* world,AudioMixer& audio,PlayerAsset& player,std::size_t motion,std::int64_t frame,bool left){
     const auto& w=WpnTab[weapon_];
-    // playpch: the left shot follows the right shot by gun_delay, sharing one ammo decrement.
-    if(!left){if(!inventory.count_bullet())return;++shots;audio.play_weapon_sound(unsigned(w.snd_wpno),w.seno0&255);}
-    const int angle=actor.yaw+((w.flg&0x800)?(left?left_arm_:right_arm_):0);
-    const float yaw=angle*6.28318530718f/65536,pitch=vertical_*0.7853981634f;
-    NJS_POINT3 dir{-std::sin(yaw)*std::cos(pitch),std::sin(pitch),-std::cos(yaw)*std::cos(pitch)};
-    NJS_POINT3 origin{actor.position.x-std::sin(yaw)*(3+w.r),actor.position.y+11,actor.position.z-std::cos(yaw)*(3+w.r)};
-    if(world){const NJS_POINT3 chest{actor.position.x,actor.position.y+11,actor.position.z};const NJS_POINT3 flat{-std::sin(yaw),0,-std::cos(yaw)};if(world->combat_wall_distance(chest,flat,5)>=5){struck_.clear();hit(*world,origin,dir,w.l,w.r,false);}}
+    // The original state machine owns hit assignment and ammo; this callback only emits the muzzle.
     const auto bones=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));const unsigned hand=left?13:9;
     const auto& effect=WpnEffTab[weapon_][0];if(effect.flg&&effect.id==3&&effect.type==0&&hand<bones.size()){
         WeaponFlash flash;flash.flg=effect.flg;flash.flr_no=effect.flr_no;flash.mdlver=effect.mdlver;flash.sx=effect.sx;flash.sy=effect.sy;flash.sz=effect.sz;
@@ -52,56 +73,29 @@ void CombatController::fire(Inventory& inventory,const SceneSpawn& actor,RoomWor
         if(weapon_==8||weapon_==12){flash.mdlver=shots%3==0;njRotateX(&flash.matrix,weapon_==8||flash.mdlver?8192:5461);}
         flash.tick();flashes_.push_back(flash);
     }
-    if(!left&&(w.flg&0x800))left_delay_=2;
 }
-bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio){
+bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio,EventVm* events){
     body_=&player;for(auto& flash:flashes_)flash.tick();flashes_.erase(std::remove_if(flashes_.begin(),flashes_.end(),[](const auto& f){return !f.flg;}),flashes_.end());
-    const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){
-        if(phase_!=Phase::Idle&&motion>=100&&motion<164&&!(world&&(world->player_hidden||world->player_scripted))){motion=42;frame=0;}phase_=Phase::Idle;targeting_.reset();aim_={};right_arm_=left_arm_=0;left_delay_=-1;trigger_latched_=false;weapon_=weapon;player_=inventory.player;asset_.reset();flashes_.clear();
-        if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);bare_hands_=weapon?WeaponAsset::load(data_,inventory.player,0,mods_):asset_;}
-    }
+    const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){original_.reset();weapon_=weapon;player_=inventory.player;asset_.reset();flashes_.clear();
+        if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);bare_hands_=weapon?WeaponAsset::load(data_,inventory.player,0,mods_):asset_;}}
     const bool supported=weapon_==2||weapon_==3||weapon_==4||weapon_==5||weapon_==6||weapon_==7||weapon_==8||weapon_==9||weapon_==12||weapon_==13;
-    if(blocked||!supported){if(phase_!=Phase::Idle&&motion>=100&&motion<164&&!(world&&(world->player_hidden||world->player_scripted))){motion=42;frame=0;}phase_=Phase::Idle;clock_=0;flashes_.clear();targeting_.reset();aim_={};right_arm_=left_arm_=0;left_delay_=-1;if(blocked&&(input.aim||input.attack))inhibited_=true;return false;}
+    if(blocked||!supported){original_.reset();flashes_.clear();aim_={};if(blocked&&(input.aim||input.attack))inhibited_=true;return false;}
     if(inhibited_){if(input.aim||input.attack)return false;inhibited_=false;}
-    auto pose=[&](unsigned clip){if(!player.has_motion(clip))throw std::runtime_error("original weapon motion unavailable");motion=clip;frame=0;clock_=0;};
-    if(!input.attack)trigger_latched_=false;
-    if(phase_==Phase::Idle){if(!input.aim)return false;targeting_.reset();manual_aim_=false;phase_=Phase::Ready;pose(PlMtnWpn[0]);select_target(player,actor,motion,frame,world);}
-    if(input.aim&&world&&(phase_==Phase::Ready||phase_==Phase::Aim||phase_==Phase::Attack)){
-        const auto available=world->combat_targets();const auto missing=[&](unsigned index){return index!=~0u&&std::none_of(available.begin(),available.end(),[&](const auto& t){return t.index==index;});};const bool lost=missing(aim_.right)||missing(aim_.left);
-        if(input.next_target)manual_aim_=false;
-        if(input.next_target||lost||(!manual_aim_&&!input.turn&&aim_.right==~0u))select_target(player,actor,motion,frame,world,input.next_target);
-    }
-    if(input.turn){manual_aim_=true;yaw_ticks_=0;aim_.right=aim_.left=~0u;}
-    if(yaw_ticks_>0&&aim_.right!=~0u){actor.yaw=(actor.yaw+short(aim_.yaw-actor.yaw)/yaw_ticks_)&65535;--yaw_ticks_;}
-    if(arm_ticks_>0){right_arm_+=short(aim_.right_angle-right_arm_)/arm_ticks_;left_arm_+=short(aim_.left_angle-left_arm_)/arm_ticks_;--arm_ticks_;}
-    if(left_delay_==0){fire(inventory,actor,world,audio,player,motion,frame,true);left_delay_=-1;}else if(left_delay_>0)--left_delay_;
-    if(phase_==Phase::Ready||phase_==Phase::Aim){if(!input.aim){phase_=Phase::Idle;motion=42;frame=0;return false;}actor.yaw=(actor.yaw-input.turn*int(182.04445f*2.4f))&65535;}
-    if(phase_==Phase::Ready){frame=std::min<std::int64_t>(++clock_,player.motion_frames(motion)-1)*65536;if(clock_>=9){phase_=Phase::Aim;pose(PlMtnWpn[1]);}return true;}
-    if(phase_==Phase::Aim){vertical_=(WpnTab[weapon_].flg&1)?0:input.vertical;const unsigned aim=PlMtnWpn[vertical_>0?2:vertical_<0?3:1];if(motion!=aim)pose(aim);frame=std::int64_t(std::min(1u,player.motion_frames(motion)-1))*65536;
-        if(!input.attack||((WpnTab[weapon_].flg&0x200)&&trigger_latched_))return true;
-        auto& item=inventory.slots()[inventory.slots()[0]];const bool infinite=((item>>16)&0x800)!=0;
-        if(weapon_!=2&&!Inventory::quantity(item)&&!infinite){
-            // Reload uses the original item combination table, including upgraded pistols.
-            const bool reloaded=inventory.reload();
-            if(reloaded&&player.has_motion(116)){phase_=Phase::Reload;pose(116);}else{++empty;audio.play_weapon_sound(0,4);phase_=Phase::Attack;pose(101);}return true;
-        }
-        phase_=Phase::Attack;pose(PlMtnWpn[4]+(vertical_>0?5:vertical_<0?10:0));struck_.clear();++attacks;
-        burst_=1;fire_clock_=0;trigger_latched_=true;
-        if(weapon_!=2)fire(inventory,actor,world,audio,player,motion,frame);
-        return true;
-    }
-    if(phase_==Phase::Attack&&weapon_!=2&&(WpnTab[weapon_].flg&0x40)){
-        const auto& w=WpnTab[weapon_];++fire_clock_;
-        if(fire_clock_>=w.fend_ct&&input.aim&&input.attack&&(!(w.flg&0x200)||burst_<3)&&(Inventory::quantity(inventory.slots()[inventory.slots()[0]])||(inventory.slots()[inventory.slots()[0]]&0x08000000))){
-            fire(inventory,actor,world,audio,player,motion,frame);fire_clock_=0;++burst_;
-        }
-    }
-    if(phase_==Phase::Attack&&weapon_==2&&int(clock_)>KnfAtrTab[std::min(player_,3u)]&&int(clock_)<WpnTab[2].ef_yct){
-        if(int(clock_)==KnfAtrTab[std::min(player_,3u)]+1)audio.play_weapon_sound(12,20);
-        const auto bones=player.pose(motion,frame,actor.position,actor.yaw);if(world&&bones.size()>9){NJS_MATRIX matrix;std::copy(std::begin(bones[9].value),std::end(bones[9].value),std::begin(matrix));auto end=WpnTab[2].wp_fps1;njCalcPoint(&matrix,&end,&end);const auto& b=bones[8].value;const NJS_POINT3 start{b[12],b[13],b[14]};NJS_POINT3 dir{end.x-start.x,end.y-start.y,end.z-start.z};const float length=std::sqrt(dir.x*dir.x+dir.y*dir.y+dir.z*dir.z);if(length>0){dir={dir.x/length,dir.y/length,dir.z/length};hit(*world,start,dir,length,WpnTab[2].r,true);}}
-    }
-    if(phase_==Phase::Reload){if(clock_==unsigned(WpnTab[weapon_].act_ct0))audio.play_weapon_sound(0,1);if(clock_==unsigned(WpnTab[weapon_].act_ct1))audio.play_weapon_sound(0,2);}
-    ++clock_;if(clock_>=player.motion_frames(motion)){phase_=input.aim?Phase::Aim:Phase::Idle;pose(phase_==Phase::Aim?PlMtnWpn[1]:42);return phase_!=Phase::Idle;}frame=std::int64_t(clock_)*65536;return true;
+    if(!original_){if(!input.aim)return false;original_=std::make_shared<CombatOriginal>(player);original_->seed(player,unsigned(motion),frame);}
+    auto& engine=*original_;engine.reload=[&]{return inventory.reload()?1:0;};
+    engine.hit=[&](const RECVX_GUN_HIT& g){if(!world)return 0;NJS_POINT3 dir{g.vx,g.vy,g.vz};const float length=njUnitVector(&dir);struck_.clear();const auto before=hits;hit(*world,{g.px,g.py,g.pz},dir,length,g.r,false);return int(hits>before);};
+    engine.knife=[&](const RECVX_GUN_HIT& g){if(!world)return 0;NJS_POINT3 dir{g.vx,g.vy,g.vz};const float length=njUnitVector(&dir);const auto before=hits;hit(*world,{g.gx,g.gy,g.gz},dir,length,g.r,true);return int(hits>before);};
+    engine.wall=[&](const float* a,const float* b,float,unsigned flags)->int{if(!world)return 0;NJS_POINT3 dir{b[0]-a[0],b[1]-a[1],b[2]-a[2]};const float length=njUnitVector(&dir);return length>0&&world->combat_wall_distance({a[0],a[1],a[2]},dir,length,flags)<length;};
+    engine.sound=[&](unsigned se){audio.play_weapon_sound(unsigned(WpnTab[weapon_].snd_wpno),se&255);if(se==260)++empty;};
+    engine.muzzle=[&](int,int,int hand,int,const float*){fire(inventory,actor,world,audio,player,motion,frame,hand!=0);};
+    std::vector<RECVX_COMBAT_ENEMY> targets;if(world)for(const auto& t:world->combat_targets())targets.push_back({t.index,t.position.x,t.position.y,t.position.z,t.radius,t.height});recvx_combat_enemies(engine.core,targets.data(),unsigned(targets.size()));
+    const auto bones=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));std::vector<float> matrices;for(const auto& bone:bones)matrices.insert(matrices.end(),bone.value,bone.value+16);recvx_combat_nodes(engine.core,matrices.data(),unsigned(bones.size()));
+    const unsigned pad=(input.aim?0x10u:0)|(input.attack?0x100u:0)|(input.vertical>0?0x20u:input.vertical<0?0x40u:0)|(input.turn>0?8u:input.turn<0?4u:0)|(input.next_target?0x80u:0);
+    const unsigned old_shots=engine.state.shots;const bool was_attacking=attacking();recvx_combat_tick(engine.core,&engine.state,pad,pad&~engine.pad,inventory.slots(),int(weapon_),int(player_),actor.position.x,actor.position.y,actor.position.z,actor.yaw,events?&events->flags[11][0]:nullptr,events?events->flags[1].data():nullptr);engine.pad=pad;
+    shots+=engine.state.shots-old_shots;if(!was_attacking&&attacking()){++attacks;struck_.clear();}actor.yaw=engine.state.yaw;motion=engine.state.motion;frame=engine.state.pose_frame;vertical_=input.vertical;
+    if(world){const auto posed=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));matrices.clear();for(const auto& bone:posed)matrices.insert(matrices.end(),bone.value,bone.value+16);recvx_combat_nodes(engine.core,matrices.data(),unsigned(posed.size()));recvx_combat_after_model(engine.core);}
+    aim_.yaw=actor.yaw;aim_.right=engine.state.target_right<0?~0u:unsigned(engine.state.target_right);aim_.left=engine.state.target_left<0?~0u:unsigned(engine.state.target_left);aim_.right_angle=engine.state.arm_right;aim_.left_angle=engine.state.arm_left;
+    if(!engine.state.active){motion=42;frame=0;original_.reset();return false;}return true;
 }
 void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld* world)const{if(bones.empty())return;const auto hands=body_?body_->script_nodes(bones):bones;if(scripted){if(bare_hands_)bare_hands_->append(scene,hands);}else if(asset_){asset_->append(scene,hands);if(world&&!flashes_.empty())if(const auto* atlas=world->weapon_flash_textures()){const unsigned base=scene.textures.size();scene.textures.insert(scene.textures.end(),atlas->begin(),atlas->end());for(const auto& flash:flashes_)if(flash.ct0&&flash.ct0<=atlas->size())flash.append(scene,base);}}}
 }

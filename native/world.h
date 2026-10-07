@@ -1,4 +1,5 @@
 #pragma once
+#include "player_push.h"
 #include "actor.h"
 #include "audio.h"
 #include "events.h"
@@ -17,13 +18,14 @@ namespace recvx {
 struct WorldEntity {
     std::vector<FaceParameter> face_keys;unsigned face_frame=0,face_flags=0;
     std::optional<FaceParameter> facial;std::vector<std::uint8_t> lip_stream;unsigned lip_bank=0,lip_pos=0,lip_count=0,lip_time=0,lip_cur=0,lip_next=0;bool lip_active=false;
-RECVX_SUBPLAYER subplayer{};bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,type=0,death_ticks=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
+RECVX_SUBPLAYER subplayer{};bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,type=0,death_ticks=0,object_flags=0,object_parameter=0;int object_floor=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
     // bhEneLookFlgSet (event.c): original BH_PWORK flg bit 0x8000. Enemy AI
     // consumers (en01.c) are still pending; the state itself is exact.
     bool look=false;
     // bhSetMotion samples frm_no before advancing it. Event conditions read
     // the advanced clock; rendering and joint controls use the sampled pose.
     std::optional<std::int64_t> sampled_frame;
+    unsigned motion_mode3=0; // O_WRK: only bhSetObj/ItmMotion advances mode 1.
     bool motion_slow=false; // Common 24/25/34 mtn_md bit 8, separate from MTN flags.
     std::int64_t pose_frame()const{return scripted&&sampled_frame?*sampled_frame:frame;}
     // bhObjAspdSet: object work aspd, a light parameter in objitm.c
@@ -35,7 +37,7 @@ RECVX_SUBPLAYER subplayer{};bool subplayer_bound=false,subplayer_no_motion=false
     bool morph=false;float morph_shape=0;unsigned morph_obj_a=0,morph_obj_b=0;};
 class RoomWorld {
 public:
-    RoomWorld(const std::vector<std::uint8_t>& room,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data={},const std::filesystem::path& mods={},const std::string& room_name="RM_0000");
+    RoomWorld(const std::vector<std::uint8_t>& room,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data={},const std::filesystem::path& mods={},const std::string& room_name="RM_0000",unsigned game_mode=0);
     struct CombatTarget {unsigned index,identity;NJS_POINT3 position;float radius,height;int hp;};
     std::vector<CombatTarget> combat_targets()const;
     void combat_difficulty(unsigned mode);
@@ -51,10 +53,11 @@ public:
     // bhEneSetCk: original BH_PWORK stflg 0x1000000 (not drawn, no hit/sight checks).
     void deactivate_enemy(unsigned index);
     bool step_clear(NJS_POINT3 probe,float radius=3.5f,float height=16.5f)const;
-    float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(walls_,room_height_,origin,direction,range,floor_at(origin));}
-    float combat_wall_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,unsigned flags=0x400)const{return wall_ray_distance(walls_,room_height_,origin,direction,range,-32768,flags);}
+    float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,floor_at(origin));}
+    float combat_wall_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,unsigned flags=0x400)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,-32768,flags);}
     const std::vector<SceneTexture>* weapon_flash_textures()const{const auto at=effect_textures_.find(3);return at==effect_textures_.end()?nullptr:&at->second;}
     bool bind(const EventCommand& command);
+    void set_simulation_flags(unsigned flags){simulation_flags_=flags;}
     const WorldEntity* state(unsigned kind,unsigned index)const;
     // bhGameOverSet: the room script requested the death sequence (original
     // gov_md0 driver of gameover.c is pending).
@@ -74,6 +77,7 @@ public:
     void set_enemy_ai(bool enabled){enemy_ai_=enabled;}
     bool enemy_ai()const{return enemy_ai_;}
     // The hp the host shows is clamped at 0; a negative plp->hp (the original death condition) stays until the host revives the player.
+    void set_player_poisoned(bool poisoned){player_poisoned_=poisoned;}
     void set_player_hp(int hp){if(player_killed_&&hp<=0)return;if(hp>0){player_killed_=false;player_dead_=false;}player_hp_=hp;}
     // Zombie grab/bite (needs the AI). Default off; the debug menu switches it.
     void set_enemy_grab(bool enabled){enemy_grab_=enabled;}
@@ -106,17 +110,29 @@ public:
     bool camera_transitioning()const{return active_camera_.transitioning();}
     unsigned camera_clock()const{return active_camera_.clock();}
     int floor_at(NJS_POINT3 position)const;
+    const RECVX_PUSH_STATE* push_state()const{return push_?&push_->state():nullptr;}
+    bool pushing()const{return push_&&push_->active();}
+    bool tick_push(bool forward);
     void initialize_player_spawn(); // bhSetRoom: POS height selects rom->grand
     const std::array<float,32>& floor_heights()const{return floors_;} // rom->grand
     unsigned floor_sound(NJS_POINT3 position,bool special=false)const;
     void player_footstep(const PlayerAsset& player);
-    NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f)const;
+    NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f,std::optional<bool> walking={});
 private:
     struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;};
     struct Context {unsigned kind=0,index=0,node=0,mode1=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
     struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;};
     struct EventCamera {SceneCamera camera;unsigned link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};
-    std::vector<std::uint8_t> room_;std::size_t header_;
+    std::vector<std::uint8_t> room_;std::size_t header_;unsigned simulation_flags_=~0u;
+    std::unique_ptr<PlayerPush> push_;
+    std::vector<unsigned> push_objects_;
+    bool push_pose_=false,player_poisoned_=false;
+    int push_health()const{return player_hp_>=120?(player_poisoned_?1:0):player_hp_>=30?1:2;}
+    bool push_pose_current()const{return push_&&push_pose_&&!player_scripted&&!player_enemy_motion_&&motion_==std::size_t(push_->state().motion)&&frame_==push_->state().frame;}
+    void ensure_push();
+    void sync_push_objects();
+    void update_push();
+    std::vector<CollisionWall> collision_geometry()const;
     const PlayerAsset* player_asset_=nullptr;
     bool player_room_motion_=false,player_frozen_=false;
     std::int64_t player_step_=65536;
@@ -124,6 +140,7 @@ private:
     std::array<Context,16> contexts_{};
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
     std::set<std::string> unbound_enemy_;
+    unsigned enemy_game_mode_=0;
     // bhSetEffectTb from game code: `link_kind` 0 = world position, 2 = enemy joint (WorldEntity index/joint).
     void spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
     void process_effect_output();
@@ -138,7 +155,7 @@ private:
     void init_barrels();
     std::vector<Model> models_;
     struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;};
-    bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=false,enemy_grab_=false,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::map<unsigned,std::size_t> barrel_walls_;
+    bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=false,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::map<unsigned,std::size_t> barrel_walls_;
     unsigned player_weapon_=0;bool lighter_=false; // plp->flg 0x1000000
     bool lighter_fire_=false; // sys->st_flg 0x20000000 (bhSetLighterFire)
     void control_player_effects();

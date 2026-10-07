@@ -11,16 +11,20 @@ void panel(SoftwareRenderer& image,int x,int y,int w,int h,unsigned color){for(i
 DebugConfig DebugConfig::read(const std::filesystem::path& path){
     if(!std::filesystem::exists(path)){write_defaults(path);return {};}
     if(std::filesystem::file_size(path)>4096)throw std::runtime_error("debug.ini exceeds 4096 bytes");
-    std::ifstream input(path);if(!input)throw std::runtime_error("cannot read debug.ini: "+path.string());DebugConfig result;bool seen=false;std::string line,section;
+    std::ifstream input(path);if(!input)throw std::runtime_error("cannot read debug.ini: "+path.string());DebugConfig result;std::set<std::string> seen;std::string line,section;
     while(std::getline(input,line)){line=trim(line);if(line.empty()||line[0]=='#'||line[0]==';')continue;
         if(line.front()=='['&&line.back()==']'){section=line.substr(1,line.size()-2);if(section!="debug")throw std::runtime_error("unknown debug.ini section: "+section);continue;}
-        const auto equals=line.find('=');if(section!="debug"||equals==line.npos||trim(line.substr(0,equals))!="hotkey"||seen)throw std::runtime_error("invalid or duplicate debug.ini setting: "+line);
-        const auto name=trim(line.substr(equals+1));result.hotkey=SDL_GetScancodeFromName(name.c_str());if(result.hotkey==SDL_SCANCODE_UNKNOWN)throw std::runtime_error("unknown debug hotkey: "+name);seen=true;
+        const auto equals=line.find('=');if(section!="debug"||equals==line.npos)throw std::runtime_error("invalid debug.ini setting: "+line);
+        const auto key=trim(line.substr(0,equals)),name=trim(line.substr(equals+1));
+        if(!seen.insert(key).second)throw std::runtime_error("duplicate debug.ini setting: "+key);
+        if(key=="hotkey"){result.hotkey=SDL_GetScancodeFromName(name.c_str());if(result.hotkey==SDL_SCANCODE_UNKNOWN)throw std::runtime_error("unknown debug hotkey: "+name);}
+        else if(key=="enemy_grab"){if(name!="on"&&name!="off")throw std::runtime_error("debug enemy_grab expects on or off");result.enemy_grab=name=="on";}
+        else throw std::runtime_error("unknown debug.ini setting: "+key);
     }return result;
 }
 void DebugConfig::write_defaults(const std::filesystem::path& path){
     if(std::filesystem::exists(path))throw std::runtime_error("debug.ini already exists");std::ofstream output(path);if(!output)throw std::runtime_error("cannot create debug.ini: "+path.string());
-    output<<"# RECVX debug menu. SDL key names; change hotkey and restart.\n[debug]\nhotkey = F2\n";output.close();if(!output)throw std::runtime_error("cannot write debug.ini");
+    output<<"# RECVX debug menu. SDL key names; change hotkey and restart.\n[debug]\nhotkey = F2\nenemy_grab = off\n";output.close();if(!output)throw std::runtime_error("cannot write debug.ini");
 }
 std::filesystem::path DebugConfig::software_directory(const std::filesystem::path& executable){
     const auto directory=executable.parent_path();if(directory.filename()=="MacOS"&&directory.parent_path().filename()=="Contents"&&directory.parent_path().parent_path().extension()==".app")return directory.parent_path().parent_path().parent_path();return directory;

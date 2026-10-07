@@ -49,11 +49,11 @@ MotionClip decode_motion_asset(const std::vector<std::uint8_t>& data) {
     const auto base=v.relative(0,v.u16(4),0),count=std::size_t(v.u16(6));
     if(!count||count>256)throw std::runtime_error("invalid motion skeleton size");
     const auto header=v.relative(base,v.u32(8),12);
-    MotionClip clip;clip.frames=v.u32(header+4);clip.interpolate=bool(v.u8(3)&0x20);
+    MotionClip clip;clip.flags=v.u8(3);clip.frames=v.u32(header+4);clip.interpolate=bool(v.u8(3)&0x20);
     if(!clip.frames||clip.frames>65536||v.u16(header+8)!=3)throw std::runtime_error("unsupported player motion keys");
     const auto channels=v.relative(base,v.u32(header),count*8);
     const auto attribute=v.u32(12);
-    if(attribute!=0xffffffff)v.relative(base,attribute,clip.frames*2);
+    if(attribute!=0xffffffff){const auto at=v.relative(base,attribute,clip.frames*2);for(unsigned f=0;f<clip.frames;++f)clip.attributes.push_back(v.u16(at+f*2));}
     clip.positions.resize(count);clip.angles.resize(count);
     for(std::size_t i=0;i<count;++i) {
         auto offset=v.u32(channels+i*8);

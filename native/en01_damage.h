@@ -63,7 +63,6 @@ void recvx_en01_set_player(const RECVX_EN01_PLAYER* player);
 // Zombie AI on/off (debug menu). Off: idle zombies stand; damage reactions and MV04 recovery still run.
 void recvx_en01_set_ai(int enabled);
 // Zombie grab/bite (EatCheck, Nage, PlyDG, PlayerLink). Off: EatCheck finds nothing, as before.
-void recvx_en01_set_grab(int enabled);
 void recvx_en01_set_terrain(const unsigned char* etc,unsigned etc_count,const unsigned char* flr,unsigned flr_count);
 void recvx_en01_player_tick(void);
 void recvx_en01_player_state(RECVX_EN01_PLAYER_STATE* state);
@@ -71,7 +70,7 @@ void recvx_en01_player_reset(void);
 // rom->rutp (ATR_WORK records, 36 bytes each) and rom->ruttp (count*count bytes) used by bhCheckRoute.
 void recvx_en01_set_routes(const unsigned char* records,unsigned count,const unsigned char* table);
 // bhEne01_Init without the linked child actors; `joints` is mlwP->obj_num.
-void recvx_en01_init(RECVX_EN01* work,unsigned type,unsigned mdlver,int hp_roll,int hard,unsigned joints,int flr_no,float px,float py,float pz,int ay,const RECVX_EN01* const* previous,unsigned previous_count);
+void recvx_en01_init(RECVX_EN01* work,unsigned type,unsigned mdlver,int hard,unsigned joints,int flr_no,float px,float py,float pz,int ay,const RECVX_EN01* const* previous,unsigned previous_count);
 // Joint matrices (mlwP->owP[i].mtx, 16 floats each) used for the nearest-joint rule of weapon.c.
 void recvx_en01_set_joints(RECVX_EN01* work,const float* matrices,unsigned count);
 void recvx_en01_set_hp(RECVX_EN01* work,int hp);
@@ -85,7 +84,7 @@ void recvx_en01_hit(RECVX_EN01* work,int weapon,int joint,int damage,unsigned co
 void recvx_en01_bomb(RECVX_EN01* work,const float* position,float radius,int damage_max,int damage_min,const float* contact,float distance);
 void recvx_en01_tick(RECVX_EN01* work);
 void recvx_en04_set_frame_counts(const unsigned* counts,unsigned count);
-void recvx_en04_init(RECVX_EN01* work,unsigned type,int hp_roll,int hard,int floor,float x,float y,float z,int ay);
+void recvx_en04_init(RECVX_EN01* work,unsigned type,int hard,int floor,float x,float y,float z,int ay);
 void recvx_en04_tick(RECVX_EN01* work);
 void recvx_enemy_modes(RECVX_EN01* work,int mode0,int mode1,int mode2,int mode3,unsigned type);
 void recvx_enemy_release(RECVX_EN01* work,int mode0,int mode1,int mode2,int mode3,unsigned type);

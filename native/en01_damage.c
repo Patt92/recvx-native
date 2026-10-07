@@ -14,7 +14,7 @@ _Static_assert(sizeof(EN01_STORE)<=sizeof(RECVX_EN01),"RECVX_EN01 storage too sm
 static RECVX_EN01_HOST host;
 static MN_WORK motion_table[1024],dog_motion_table[1024];
 static BH_PWORK player_work;
-static ML_WORK player_ml;static O_WORK player_ow[32];static unsigned char player_exp0[0x100];static MN_WORK player_own_table[1];static int player_ready;static int grab_enabled;
+static ML_WORK player_ml;static O_WORK player_ow[32];static unsigned char player_exp0[0x100];static MN_WORK player_own_table[1];static int player_ready;
 static int ai_enabled;
 static int player_exp1[16];
 static float player_pos[3];
@@ -28,7 +28,6 @@ static struct {float grand[34];ATR_WORK* rutp;unsigned char* ruttp;int rut_n;int
 static ATR_WORK terrain_etc[4096],terrain_flr[4096];
 static ATR_WORK** recvx_stair(BH_PWORK* epw){return &((EN01_STORE*)epw)->stair;}
 static BH_PWORK ene[256];
-static int hp_roll_value;
 #define sys (&sys_state)
 #define plp (&player_work)
 static void unbound(const char* name){if(host.unbound)host.unbound(name);}
@@ -39,8 +38,6 @@ static int recvx_wpn_flg(int weapon){return host.weapon_flg?host.weapon_flg(weap
    original takes when its query finds nothing (no leg to cut, no stairs, no grab). */
 #define EN01_UNBOUND(name,value) {unbound(name);return value;}
 static int bhEne01_CutLeg(BH_PWORK* epw){(void)epw;EN01_UNBOUND("bhEne01_CutLeg",0)}
-static int bhEne01_EatCheckOriginal(BH_PWORK* epw,int rng,float dist,int mode);
-static int bhEne01_EatCheck(BH_PWORK* epw,int rng,float dist,int mode){if(!grab_enabled){(void)epw;(void)rng;(void)dist;(void)mode;unbound("bhEne01_EatCheck (grab switched off)");return 0;}return bhEne01_EatCheckOriginal(epw,rng,dist,mode);}
 static int bhEne01_WormCheck(BH_PWORK* epw){if(epw->mdlver==21||epw->mdlver==22)unbound("bhEne01_WormCheck");return 0;} /* original: 0 unless the model owns a worm child */
 static void bhEne01_FlyingCap(BH_PWORK* epw,int mode){(void)epw;(void)mode;unbound("bhEne01_FlyingCap");}
 static void bhEne01_LinkFireEffect(BH_PWORK* epw,int no){(void)epw;(void)no;unbound("bhEne01_LinkFireEffect");}
@@ -110,8 +107,7 @@ static int njArcTan2(float y,float x){(void)y;(void)x;return (int)(10430.381f*at
 #include "en01_damage.inc"
 static int en04_contact_flg,en04_atari_flg;
 #include "en04_damage.inc"
-/* bhEne01_Init rolls rand() % 16 for the hp table; the host passes the roll it always used
-   (entity index % 16) so room replays stay deterministic. */
+/* HP selection remains the original rand() % 16 call in en01/en04 Init. */
 
 static EN01_STORE* store(RECVX_EN01* work){return (EN01_STORE*)work;}
 void recvx_en01_set_host(const RECVX_EN01_HOST* h){host=*h;}
@@ -127,12 +123,12 @@ void recvx_en01_set_terrain(const unsigned char* etc,unsigned etc_count,const un
     if(etc)memcpy(terrain_etc,etc,etc_count*sizeof(ATR_WORK));if(flr)memcpy(terrain_flr,flr,flr_count*sizeof(ATR_WORK));
     rom->etcp=terrain_etc;rom->etc_n=etc_count;rom->flrp=terrain_flr;rom->flr_n=flr_count;
 }
-void recvx_en01_set_grab(int enabled){grab_enabled=enabled;}
 /* The player work is persistent: the grab routines (NG00..02, PlyDG00/01, PlayerLink) own its mode, motion, position and
    flags while mode0 is 4 or 6; the host only refreshes what the original reads from the live player. */
 void recvx_en01_set_player(const RECVX_EN01_PLAYER* p){
     const int grabbed=player_work.mode0==4||player_work.mode0==6;
     if(!player_ready){player_ready=1;player_work.mode0=1;player_work.flg=8;player_work.ar=3.5f;player_work.ah=16.5f;player_work.mnwP=player_own_table;player_work.mnwPb=player_own_table;player_work.mtn_no=42;}
+    player_work.flg=(player_work.flg&~2u)|(p->flg&2u);
     player_work.exp0=player_exp0;player_work.exp1=(unsigned char*)player_exp1;player_work.mtx=(float(*)[16])player_work.mtxbuf;
     if(!grabbed){player_work.px=p->px;player_work.pz=p->pz;player_work.ay=p->ay;}
     player_work.py=p->py;player_work.hp=p->hp;player_work.flr_no=(char)p->flr_no;player_work.at_flg=p->at_flg;player_work.way=(short)p->way;
@@ -157,10 +153,10 @@ void recvx_en01_player_state(RECVX_EN01_PLAYER_STATE* out){
 void recvx_en01_player_reset(void){memset(&player_work,0,sizeof player_work);memset(player_exp1,0,sizeof player_exp1);memset(player_exp0,0,sizeof player_exp0);player_ready=0;}
 static void bind(EN01_STORE* s){if(s->has_child){s->w.exp1=(unsigned char*)&s->child;s->child.exp0=s->cexp0;s->child.mnwP=motion_table;s->child.mnwPb=motion_table;s->child.mlwP=&s->child.mdl[0];s->child.lkwkp=(unsigned char*)&s->w;}
     s->w.exp0=s->exp0;s->w.mlwP=&s->w.mdl[0];s->w.mdl[0].owP=s->ow;s->w.mdl[0].objP=s->obj;s->w.mbp[0]=s->obj;s->w.mbp[1]=s->obj;s->w.mnwP=s->dog?dog_motion_table:motion_table;s->w.mnwPb=s->w.mnwP;}
-void recvx_en01_init(RECVX_EN01* work,unsigned type,unsigned mdlver,int hp_roll,int hard,unsigned joints,int flr_no,float px,float py,float pz,int ay,const RECVX_EN01* const* previous,unsigned previous_count){
+void recvx_en01_init(RECVX_EN01* work,unsigned type,unsigned mdlver,int hard,unsigned joints,int flr_no,float px,float py,float pz,int ay,const RECVX_EN01* const* previous,unsigned previous_count){
     EN01_STORE* s=store(work);memset(s,0,sizeof *s);bind(s);
     BH_PWORK* epw=&s->w;epw->id=1;epw->type=(unsigned short)type;epw->mdlver=(unsigned char)mdlver;epw->flr_no=(char)flr_no;epw->px=px;epw->py=py;epw->pz=pz;epw->ay=ay;
-    epw->flg=1;epw->mdl[0].obj_num=joints;epw->mdl[0].owP=s->ow;sys->gm_mode=hard?2:0;hp_roll_value=hp_roll&15;
+    epw->flg=1;epw->mdl[0].obj_num=joints;epw->mdl[0].owP=s->ow;sys->gm_mode=hard?2:0;
     sys->ewk_n=0;for(unsigned i=0;i<previous_count&&i<255;++i){const EN01_STORE* p=(const EN01_STORE*)previous[i];ene[sys->ewk_n]=p->w;ene[sys->ewk_n].exp0=(unsigned char*)p->exp0;++sys->ewk_n;}
     bhEne01_Init(epw);
     /* The original runs the lower body and a linked upper-body work (exp1, motion + 200). The host actor is one
@@ -285,10 +281,10 @@ int recvx_en00_wall(const RECVX_EN01* work,RECVX_EN00_WALL* out){
 }
 
 void recvx_en04_set_frame_counts(const unsigned* counts,unsigned count){memset(dog_motion_table,0,sizeof dog_motion_table);for(unsigned i=0;i<count&&i<1024;++i)dog_motion_table[i].frm_num=counts[i];}
-void recvx_en04_init(RECVX_EN01* work,unsigned type,int hp_roll,int hard,int floor,float x,float y,float z,int ay){
+void recvx_en04_init(RECVX_EN01* work,unsigned type,int hard,int floor,float x,float y,float z,int ay){
     EN01_STORE* s=store(work);memset(s,0,sizeof *s);s->dog=1;bind(s);BH_PWORK* epw=&s->w;
     epw->id=4;epw->type=type;epw->flr_no=floor;epw->px=x;epw->py=y;epw->pz=z;epw->ay=ay;
-    epw->mdl[0].obj_num=20;epw->flg=1;sys->gm_mode=hard?2:0;hp_roll_value=hp_roll&15;
+    epw->mdl[0].obj_num=20;epw->flg=1;sys->gm_mode=hard?2:0;
     bhEne04_Init(epw);epw->cpcl_no=17;
 
 }
