@@ -20,7 +20,7 @@ def function(source, name):
     return source[start:end].replace('rand()', 'effect_random()')
 
 
-for file, names in (('effsub1.c', ('bhEff005', 'bhEff009', 'bhEff016', 'bhEff023', 'bhEff024', 'bhEff025', 'bhDraw024', 'bhDraw025', 'bhEff122')), ('effsub5.c', ('bhEff200', 'bhEff201', 'bhEff218', 'bhEff230'))):
+for file, names in (('effsub1.c', ('bhEff005', 'bhEff009', 'bhEff016', 'bhEff023', 'bhEff024', 'bhEff025', 'bhDraw024', 'bhDraw025', 'bhEff122')), ('effsub5.c', ('bhEff200', 'bhEff201', 'bhEff218', 'bhEff230', 'bhEff231', 'bhEff232'))):
     source = (prog / file).read_text()
     parts += [function(source, name) for name in names]
 
