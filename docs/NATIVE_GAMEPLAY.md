@@ -269,35 +269,53 @@ links and object-to-object/enemy links remain pending. The opening regression
 now records 109 supported-length dispatches without native bindings and zero
 blocked commands.
 
-## Native knife and handgun combat
+## Native shooting and lock-on (2026-10-06)
 
-SYSTEM weapon packets supply right/left meshes, PVP textures and body clips
-installed at motion 100. Knife and handgun use original PlMtnWpn ready/aim/attack
-clips, raised/lowered variants, original 9-tick ready handover, turning rate and
-original attack clip duration. Reload uses clip 116 and Combi_00 ammunition rules.
-WpnTab, KnfAtrTab, EneDamNear/Mid/Far and en01_hp_tbl are generated directly from
-the supplied decompiled constants. One handgun round is consumed per shot; an
-infinite-ammunition item flag bypasses consumption. Knife contacts transform the
-original right wrist/forearm nodes only in the original active frame window.
+SYSTEM packets supply original weapon meshes, textures and body clips installed
+at motion 100. The shared combat path now supports knife, Handgun, Steve's M93R,
+Custom Handgun, Magnum, M-100P, dual Submachine Guns, Assault Rifle
+and Sniper Rifle. Shotgun, bowgun, grenade/projectile and other special weapon
+behavior remain pending; the sniper scope itself is not yet ported.
 
-First-room en01 zombies are targetable using original 3.8/18.2 body dimensions.
-Closest targets receive distance-dependent damage; wall volumes stop shots and
-knife segments. The muzzle cannot shoot through a wall between it and Claire.
-NPCs and cinematic actors are excluded. Native HP reaches a latched death state;
-bhDieCk writes the original global death flag for room scripts. A provisional
-30-tick rigid collapse displays the original mesh as a corpse. This is explicitly
-not the original segmented damage/death animation. Enemy AI, attacks against
-Claire, joint-specific damage, blood/muzzle particles, aim assist, personal zombie
-HP modifiers/random initialization, original reactions and other weapon/projectile
-families remain unfinished. Health currently selects an original normal/easy
-table entry deterministically by room enemy index.
+`tools/generate_targeting.py` extracts bhSearchNearEnemy/bhSearchNextEnemy,
+bhCalcLockEneYR (pwksub.c), bhSearchEnemy/SetLockOnDirection and MixSetToJointRot
+(playpch.c). Host adapters bind live eligible enemy work, player joint matrices
+and the shared wall query. Single guns choose the nearest visible enemy and use
+the original visited-target/distance cycle; dual weapons use the original
+split/concentrated toggle, body direction and independent arm angles. Dead,
+hidden, disabled and collision-disabled enemies and NPCs are excluded. Common 46
+binds the original flg 0x20; script-owned animation alone no longer disables hits.
+Unoccupied auto aim retries live acquisition while aim is held; manual turning
+keeps manual aim until release or target switching. The adapter currently
+uses the bound en01 target volume and native wall geometry; it is not a full
+port of original joint capsules or every bhCheckC2WallN attribute rule.
 
-Weapon effects read the original ARMS sound-bank keys in MULTSPQ1; handgun shot,
-empty/reload sounds and knife swing play on an independent mixer channel. Modal
-inventory/dialogue/video/door/event control cancels combat and requires release
-of held weapon controls. SYSTEM/0020.bin supplies unarmed hands. The selected weapon remains omitted while
-a script owns Claire; the original bare-hand packet can still attach to her body.
-This does not complete the segmented Rodrigo/cinematic-NPC hand models.
+Steve's M93R is weapon 4 and fires single shots. Custom Handgun is weapon 5:
+WpnTab bits 0x40/0x200 and fend_ct control its three-shot cadence/release latch.
+Dual fire follows the original gun_delay of 2; the left hand shares the right
+hand's ammo decrement. Other rapid weapons use fend_ct. The common path preserves
+inventory quantities, infinite-ammo flags, reload combinations, empty sounds,
+modal cancellation and held-input inhibition. Readiness and body motion sampling
+retain the existing native handover; the complete original interpolation/state
+machine, rapid-weapon recovery and sniper scope remain incomplete.
+
+The primary type-0 muzzle effect uses original WpnEffTab, bhEff003 and the type-0
+bhDrawWeaponEffect branch, including its UV table, three quads, two-frame lifetime,
+SYSTEM common texture group 3 and original 8/10 blending. Both hands use the
+original wrist offsets and MASK script indices. Other muzzle variants (including the SMG-specific effect 229), smoke, ejected shells, bullet
+impact/blood effects, weapon lights and physical controller vibration remain
+pending. ARMS shot/reload/empty sounds play through the existing Sony transport.
+
+Bound en01 zombies receive distance-dependent original damage. Walls stop shots;
+HP reaches a latched death state and room scripts observe bhDieCk. The native rigid
+collapse remains provisional; original joint-specific damage/reactions/death,
+enemy attacks/AI and other enemy families are not completed by this change.
+
+Validation: nearest/cyclic/occluded/dead targets, dual arm geometry and distinct
+zombie hits with one ammo decrement, real weapon assets for owners 0–3, burst
+release/cadence, infinite/empty/reload and modal controls. The walked original
+Steve event grants 12 rounds; aiming/shooting afterward leaves 11 and returns to
+idle without teleports, flag edits or debug inventory. See tools/verify_combat.py.
 
 Weapon packet overrides: mods/weapons/0022.bin (Claire knife), 0023.bin (handgun).
 Texture replacements: mods/textures/weapons/0022/right/0000.tga or the analogous
@@ -328,3 +346,104 @@ Door sound triggers and FootSeCall are bound through shared original-data paths.
 See AUDIO.md for limits. All 205 rooms load after Claude's loader corrections;
 81 rooms still report blocked commands in the 600-tick scan. Explosion/particle
 rendering, including the cemetery helicopter effect, remains incomplete.
+
+Live-target regression (2026-10-06): real room motions in RM_0020/0070/0080/0090,
+Common 46 disable/release, hide/reveal, held-aim acquisition and manual aiming.
+Original RM_0080 event 40 restores collision even while the native scripted
+motion marker remains set. This does not establish the reported shutter/barrel
+sequence as fully working. Destructible barrels/explosion damage and complete
+enemy joint capsules remain unbound.
+
+## Enemy damage, death, blood and barrels (Claude, 2026-10-06)
+
+Hits no longer subtract HP and tip the mesh over. The original en01 damage path runs
+through `tools/generate_en01_damage.py` → `native/en01_damage.c` (generated `en01_damage.inc`):
+`bhEne01_DmgCheck`, `DamageAdd`, `PartsDamageCheck`, `DmgCheckType00/02`, `DmgModeJumpCheck`,
+`bhEne_CalcDamage`/`InitDamage`, the reactions `DG00..04/16`, the death states `DD00..03`, MV04
+(downed/get-up and the hp<0 hand-over to death), `bhEne01_Init`/`InitType*`, the weapon tables
+(`En01_WpnDamageTbl`, `CombWepTbl`, `chg_mtn_tbl`) and the damage flinch of `bhEne01_SetMtn`
+(object 8, `rot_tbl`). `weapon.c` assignment (joint = nearest joint matrix, near/mid/far `comb_flg`,
+shot direction) is `CombatController::hit` → `RoomWorld::damage` → `recvx_en01_hit`.
+What a pistol does is therefore the original: one hit = flinch (`nm_act` 0), three near hits inside the
+timeout reach `CombWepTbl` crit 25 → knockback (DG03/DG04), lethal → MV04 → DD00 with the original
+death MTN and blood pool. Explosions use `wpnr_no` 20 (`En01_WpnDamageTbl[20]`).
+
+Blood: `bhEne_SetBlood/2/3/4` and `bhDGCdirCheck2` are transcribed; effect 5 (hit sprite) uses the original
+`bhEff005`. Particle sprays are the original emitter (`generate_effect_particles.py`:
+`bhSetEffParticle`, `bhEff302`, `PtclTbl`, `Eff302Prm`) drawn like `bhEff_PtclSpriteDrawB`
+(effect texture category 4, blend 8/6). Floor pools are `bhSetBloodPoolLnk`/`bhEff300` (category 17).
+Barrels are enemy id 0: `bhEne00` is transcribed (movable wall → collision wall, hit flag 0x4 →
+`bhSetExplosion`: sound 534, flash light slot 0, effects 16/23/24). Effect 16 runs the original
+`bhCheckBombAtari` blast (radius 20, 150/100) against en01 works, other barrels (chain) and the player.
+
+Still unbound (reported by `RoomWorld::unbound_enemy_routines()` and printed by
+`recvx-enemy-damage-tests`): zombie AI (MV00/MV01 walk/brain, `bhEne01_MVType` prelude), `bhEne01_SePlay`
+(enemy hit voices), stairs/ledge helpers (`DansaCheck`, `KaidanAtrCheck`, `ZulzulCheck`), head/limb
+removal, fire, `FlyingCap`, effect 24 debris and 25 smoke, SetBlood3 skin chunks (effect 370), the spark
+line draw (`bhEff_PtclLineDraw`), per-joint capsules for weapons with `WpnTab.flg & 8`, other enemy
+families, and a game-over on player death (blast damage only lowers HP, minimum 1).
+After a reaction the zombie holds its last pose until the walk AI is ported.
+Verification: `recvx-enemy-damage-tests <data> [out-dir]` (RM_0020 zombie: flinch, combo, lethal, blood,
+RM_3160 barrel blast; frames written to `out-dir`), `recvx-combat-tests`, `verify_combat/events/progression`.
+Effect sprites bound in this change (5, 23) use their original `njColorBlendingMode` pair; the older atlas
+sprites keep their additive approximation until their pairs are compared with the original look.
+
+### Zombie AI, hit voices and the debug switch (Claude, 2026-10-07)
+
+The en01 chase AI is the original code, transcribed by `generate_en01_damage.py`: `bhEne01_EneSearch`
+(`bhSearchPlayer2` view cone, memory timer EXP0 0x28/0x29), `Brain00/02` (`bhCheckRoute`/`bhCheckRouteID`
+over `rom->rutp/ruttp`), `ActionModeCheck`, `MVType00/02`, `MV00..03`, `MV05` (reach/attack), `ChgWalkMtn`,
+`FastWalkCheck`, `ikou/ikou3/NitenDir_ck`, `bhEne_CheckDirWall/SideWall`, `bhEne01_Move` (player distance
+EXP0 0x54) and `bhEne01_SetMtn`'s tail `CheckMtnTbl`. Walking is the original foot lock: `bhCalcFixOffset`
+compares where the new local pose puts the planted foot chain (`en01_tree`) with the previous pose's joint
+matrix and shifts px/pz by the difference. The host supplies those poses (`RoomWorld::tick_en01`), the
+wall probe/move (`step_clear`, `move_walls`), line of sight (`shot_distance`) and the player state.
+The upper-body work (`exp1`) is kept as real state so the routines address both works; its motion
+(`upper_mtn`) pairs with the lower clip when the frame counts match (otherwise motion + 200).
+`bhEne01_SePlay` is original code too; `AudioMixer::request_enemy_se/exec_enemy_se` follow
+`RequestEnemySeBasic`/`ExecEnemySeManager` (six voices 18..23, priority, same-SE limit, bank (SeNo>>8)&0xF).
+Programs the Sony decoder rejects are listed in `audio_unavailable` instead of stopping the game.
+
+Debug menu entry "Gegner-KI" (`enemy_ai`) and `--enemy-ai on|off` switch it. Default: on for interactive play,
+off for `--headless`/`--replay` and in `RoomWorld` itself (unit tests), so test zombies stand. With the AI off
+idle zombies stay put; hit reactions, knockdown recovery (MV04) and death still run.
+Not ported: the grab/bite (`EatCheck`, `bhEne01_Nage`, player `PlyDG*` states), stairs (`KaidanCheck`), poison,
+neck turning (`SearchNeck`), `CollCheckWall` limb sub-checks and crawler branches, the push of zombies by other
+zombies (`bhCheckEnemies`; only the player capsule is kept apart), jump-down/ledge states. Zombies therefore
+walk to the player and swing but cannot hurt them yet.
+Still open: effect 24 debris/25 smoke after explosions, spark line draw, per-joint capsules for WpnTab flg&8
+(only weapon 13 of the supported guns), player death/game over.
+
+### Zombie grab/bite, player damage and death (Claude, 2026-10-07)
+
+Switched off by default; debug menu "Gegner-Angriff" (`enemy_grab`) or `--enemy-grab on` enables it (the AI must be on).
+With it off `EatCheck` finds nothing, exactly as before. The code is original (generator): `EatCheck`, `bhEne01_Nage`
+(`NG00` bite, `NG01`, `NG02` crawler), `PlyDG00/01` (the grabbed player's states), `bhEne01_PlayerControl`,
+`bhEne01_PlayerLink` (the player follows the zombie, wall-checked), `EnemyPushChk`, `bhEne_LeverCheck`,
+the `ply_pos` tables and `En01_PlyMtn_OffsetTbl` (grab clips 400+ in the zombie MTN list).
+The player is a persistent work (`player_work`) that these routines own while mode0 is 4/6; the host mirrors it:
+`RoomWorld::sync_player_grab` sets `player_scripted`, plays the clip from the enemy library through
+`PlayerAsset::sample_clip`, moves the actor and frees it again after the release (idle motion 42). hp lost in a grab
+reaches `take_blast_damage()`; a negative hp (death condition) is remembered until the host revives the player.
+Mashing: the runtime derives sys->pad_ps from newly pressed direction/button edges (`set_player_lever`).
+Verified (`recvx-enemy-damage-tests`): off = no grab; on = clips 406/410, release after mashing, hp 200 -> 170;
+fatal bite = clip 412, `player_dead()`; frames in `build/validation/enemy-damage-20261006/grab5`.
+Host placeholders: game over (gameover.c is not ported) fades to black and returns to the title menu with full hp.
+Player voices now load the original CORE sound pack and play through SE bank 4, slot 7 (Codex, 2026-10-07). Not ported: crawler head cutting effects, stairs/ledge grabs,
+`bhEne01_EatCheck` mode 2 (needs `npCollisionCheckSC`), the second player (`ply_id` follows the character index only).
+
+### Original player voice banks (Codex, 2026-10-07)
+
+`RequestPlayerVoiceSoundBank` selects `ply_id | 0xfff0` in the current disc's MULTSPQ index.
+The runtime loads its CORE SE bank 4 after the room bank, including debug character changes
+and snapshot room reconstruction; SYSTEM entry maps to `(entry - 10) % 4`, including costume 14.
+`CallPlayerVoice` uses the existing bank/list route and independent slot 7. Replacing CORE
+invalidates decoded bank-4 samples and stops the previous voice. Audio diagnostics now retain
+the originating pack for each SE bank across room changes.
+
+Targeted checks: four original character banks on each disc, audible bite/death PCM,
+character cache replacement and CORE retention across room-bank loads. Original RM_0020
+grab/mash and fatal-bite cases also generate Claire voice PCM. This verifies decoding/routing,
+not perceived in-game timing or the original room volume, pitch and SPU processing.
+Enemy attacks remain off by default; original gameover.c and the other grab gaps remain open.
+Logs: `build/validation/player-voice-20261007`.

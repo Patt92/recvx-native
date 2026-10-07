@@ -23,6 +23,6 @@ void StatusPulse::tick(float center_x,float center_y){
     if(!opened_)return;
     std::vector<std::array<pulse::NJS_TEXTUREH_VTX,4>> raw;
     run([&]{pulse::cen_pos[2][0]=center_x;pulse::cen_pos[2][1]=center_y;pulse::captured=&raw;pulse::PulseMain();pulse::captured=nullptr;});
-    quads_.clear();for(const auto& q:raw){PulseQuad out;for(unsigned i=0;i<4;++i)out[i]={q[i].x,q[i].y,q[i].u,q[i].v,q[i].bcol,q[i].ocol};quads_.push_back(out);}
+    quads_.clear();for(const auto& q:raw){PulseQuad out;for(unsigned i=0;i<4;++i)out[i]={q[i].x,q[i].y,q[i].u,q[i].v,q[i].bcol,q[i].ocol,q[i].z};quads_.push_back(out);}
 }
 }

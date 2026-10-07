@@ -286,6 +286,24 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     const unsigned workers=std::min<unsigned>(threads_?threads_:std::min(4u,std::max(1u,std::thread::hardware_concurrency())),std::max(1,bands));
     if(workers<=1||setups.size()<64)worker();
     else{std::vector<std::thread> pool;for(unsigned i=1;i<workers;++i)pool.emplace_back(worker);worker();for(auto& t:pool)t.join();}
+    // njDrawLine3D: finite 3D segments, endpoint colours, depth test, no depth write.
+    for(const auto& line:scene.lines){NJS_POINT3 a=line.points[0],b=line.points[1];njCalcPoint(&view,&a,&a);njCalcPoint(&view,&b,&b);float lo=0,hi=1;
+        const float dz=b.z-a.z;if(std::abs(dz)<1e-8f){if(a.z<near||(far>near&&a.z>far))continue;}
+        else{float t=(near-a.z)/dz;if(dz>0)lo=std::max(lo,t);else hi=std::min(hi,t);if(far>near){t=(far-a.z)/dz;if(dz>0)hi=std::min(hi,t);else lo=std::max(lo,t);}}
+        if(lo>hi)continue;auto lerp=[](float x,float y,float t){return x+(y-x)*t;};
+        const NJS_POINT3 c{lerp(a.x,b.x,lo),lerp(a.y,b.y,lo),lerp(a.z,b.z,lo)},d{lerp(a.x,b.x,hi),lerp(a.y,b.y,hi),lerp(a.z,b.z,hi)};
+        float x0=width_*.5f+c.x*focal_x/c.z,y0=height_*.5f+c.y*focal_y/c.z,x1=width_*.5f+d.x*focal_x/d.z,y1=height_*.5f+d.y*focal_y/d.z;
+        const float dx=x1-x0,dy=y1-y0;float first=0,last=1;
+        auto clip=[&](float p,float q){if(std::abs(p)<1e-8f)return q>=0;const float r=q/p;if(p<0)first=std::max(first,r);else last=std::min(last,r);return first<=last;};
+        if(!clip(-dx,x0)||!clip(dx,width_-1-x0)||!clip(-dy,y0)||!clip(dy,height_-1-y0))continue;
+        const int steps=std::max(1,int(std::ceil(std::max(std::abs(dx),std::abs(dy))*(last-first))));
+        for(int n=0;n<=steps;++n){const float t=lerp(first,last,float(n)/steps),original=lerp(lo,hi,t);const int x=int(std::lround(x0+dx*t)),y=int(std::lround(y0+dy*t));if(x<0||y<0||x>=width_||y>=height_)continue;
+            const auto at=std::size_t(y)*width_+x;const float invz=lerp(1/c.z,1/d.z,t);if(invz<depth_[at])continue;
+            unsigned pixel=0;for(unsigned shift:{0u,8u,16u,24u})pixel|=unsigned(std::clamp(lerp(float((line.colors[0]>>shift)&255),float((line.colors[1]>>shift)&255),original),0.f,255.f))<<shift;
+            pixels_[at]=blend_gs(0x44,pixel,pixels_[at],std::min(1.f,float(pixel>>24)/128.f));
+        }
+    }
+
 }
 std::size_t SoftwareRenderer::covered_pixels() const{return std::count_if(depth_.begin(),depth_.end(),[](float d){return d>0;});}
 void SoftwareRenderer::save_bmp(const std::filesystem::path& path)const{

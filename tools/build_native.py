@@ -41,10 +41,10 @@ def main():
     else:
         if target == 'macos' and platform.system() != 'Darwin':
             parser.error('macOS builds require a macOS host')
-        build = ROOT / 'build' / ('macos-universal' if target == 'macos' else 'windows-native' if target == 'windows' else 'native')
+        build = ROOT / 'build' / ('macos-arm64' if target == 'macos' else 'windows-native' if target == 'windows' else 'native')
         configure = ['cmake', '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', '-DBUILD_TESTING=ON']
         if target == 'macos':
-            configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
+            configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
         run(*configure)
         run('cmake', '--build', build, '--config', 'Release', '--parallel', args.jobs)
         if not args.no_test:
@@ -59,11 +59,13 @@ def main():
             run(binary_dir / ('recvx-game-tests' + suffix), data)
             run(binary_dir / ('recvx-progression-tests' + suffix), data)
             run(sys.executable, ROOT / 'tools/verify_progression.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
+            run(sys.executable, ROOT / 'tools/verify_detector.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
             run(binary_dir / ('recvx-inventory-tests' + suffix), data)
             run(binary_dir / ('recvx-inventory-engine-tests' + suffix), data)
             run(binary_dir / ('recvx-debug-tests' + suffix), data)
             run(sys.executable, ROOT / 'tools/verify_debug.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
             run(sys.executable, ROOT / 'tools/verify_events.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
+            run(sys.executable, ROOT / 'tools/verify_audio_state.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
             run(binary_dir / ('recvx-input-tests' + suffix), data)
             run(binary_dir / ('recvx-combat-tests' + suffix), data)
             run(sys.executable, ROOT / 'tools/verify_combat.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
@@ -74,7 +76,7 @@ def main():
     if args.package:
         if target == 'linux':
             parser.error('the packaged targets are Windows and macOS')
-        output = args.output or ROOT / 'build/packages' / (f'macos-universal-v{VERSION}' if target == 'macos' else f'windows-x64-v{VERSION}')
+        output = args.output or ROOT / 'build/packages' / (f'macos-arm64-v{VERSION}' if target == 'macos' else f'windows-x64-v{VERSION}')
         run(sys.executable, ROOT / 'tools/package_native.py', '--platform', target, '--build', binary_dir, '--data', data, '--output', output)
     print(f'Build ready: {binary_dir}', flush=True)
 

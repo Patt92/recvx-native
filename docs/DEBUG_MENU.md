@@ -45,6 +45,8 @@ Attacke im Hintergrund ausloest.
 | Itemmenge / Item geben | Menge 1–999 und Originalitem 1–145. Originale Inventarkapazitaet/Stapellogik gelten; fehlgeschlagene Aufnahme veraendert die Items nicht. |
 | Gesundheit | HP innerhalb des derzeitigen Maximums setzen. |
 | Tasche | 8/10 Slots, einschliesslich originalem Taschenflag. Entfernen wird bei mehr als acht belegten Slots abgelehnt. |
+| Gegner-Angriff | Zombie-Greifen/Beissen ein/aus (Standard aus, braucht die Gegner-KI); `--enemy-grab on/off`. |
+| Gegner-KI | Zombie-KI ein/aus (aus: Gegner bleiben stehen; Treffer-Reaktionen laufen weiter). `--enemy-ai on/off` setzt den Start. |
 | Wireframe | Drahtgitterdarstellung umschalten. |
 | Weiter spielen | Debugmenue schliessen. |
 

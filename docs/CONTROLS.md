@@ -141,15 +141,26 @@ Completing the initial lighter hint automatically opens the inventory before loc
 
 ## Combat and pickups
 
-Equip Combat Knife or Handgun in the inventory. Hold Aim; left/right turns the
-weapon, up/down selects the original raised/lowered aim clips. Attack repeats
-once per animation while held. Knife attacks use no ammunition. The handgun
-uses its loaded magazine, reloads from pistol ammunition via the original menu
-combination rule when empty, and produces a dry shot if none is available.
+Equip the weapon in the inventory. Hold **R / R1 (RB)** to aim;
+**Enter or Left Ctrl / controller A** fires. **Q / L1 (LB)** changes the target.
+All three actions are configurable in Settings. Existing INIs receive the missing
+`next_target` default in memory; custom bindings and explicit `none` are preserved.
+
+Aim acquires the nearest eligible visible enemy. Single weapons cycle through
+visible targets by distance; the original dual-weapon routine toggles between
+split and concentrated fire. Dual Submachine Guns can point at two
+different enemies, with separate animated arm angles and a delayed left shot.
+Left/right turns manually; up/down selects raised/lowered aim where the weapon
+allows it. Knife attacks use no ammunition. Handgun, Steve's M93R, Custom Handgun,
+Magnum, M-100P, dual weapons, Assault Rifle and Sniper Rifle use their original
+weapon resources. The M93R fires single shots; Custom Handgun fires up to three
+shots per trigger and requires release before the next burst. Loaded ammo,
+infinite ammo, available reserve reload and dry shots share the inventory state.
+
 Confirm interacts/picks up when Aim is released. It stays a menu/dialogue/door
-confirmation while those contexts own input. Aim/Attack are separately rebindable
-in Settings; legacy controls.ini files gain these defaults without changing old
-bindings. Release Aim and Attack after leaving a blocked context before attacking.
+confirmation while those contexts own input. Release Aim and Attack after leaving
+a blocked context before attacking. Combat enemies are currently the bound en01
+zombies; other enemy combat and projectile/special weapons remain incomplete.
 
 ## 3rd-person camera mod
 

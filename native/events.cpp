@@ -2,6 +2,7 @@
 #include "binary_view.h"
 #include "room.h"
 #include "ninja_math.h"
+#include "inspection.h"
 #include <algorithm>
 #include <sstream>
 namespace recvx {
@@ -107,11 +108,14 @@ int EventVm::instruction(Task& t){
         const unsigned time=movie_time();int result=0;switch(mode){case 0:result=time!=limit;break;case 1:result=time<=limit;break;case 2:result=time<limit;break;case 3:result=time>=limit;break;case 4:result=time>limit;break;case 5:result=time==limit;break;default:throw std::runtime_error("invalid movie time comparison");}advance(6);return result;}
     case 0x9b:if(!movie_active)throw std::runtime_error("movie condition requires native player binding");advance(6);return movie_active();
     case 0xe:{const unsigned bit=v.u16(p+2),interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);if(values[20]!=interaction)return 1;
-        if(interaction>=interactions.size())throw std::runtime_error("pickup interaction outside room");
+        if(interaction>=interactions.size())throw std::runtime_error("pickup interaction "+std::to_string(interaction)+" outside room table of "+std::to_string(interactions.size()));
         if(flags[10][0]&0x800){if(!flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(interactions[interaction].parameters[0]);set_flag(7,bit,0);set_flag(9,bit,1);}}
         else if(!flag(7,bit))set_flag(9,bit,0);flags[10][0]&=~0x800u;return 1;}
     case 0x23:{const unsigned item=v.u8(p+1),bit=v.u16(p+2),interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);
-        if(interaction>=interactions.size())throw std::runtime_error("pickup interaction outside room");if(flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(item);}else interactions[interaction].flags|=1;return 1;}
+        // bhItmSetCk indexes rom->etcp[interaction] unchecked. Some original scripts name an entry beyond the table
+        // (the PS2 would touch unrelated room memory); the ATR flag write is skipped and reported, the item part stays.
+        if(interaction>=interactions.size()){pending_bindings.push_back(EventCommand{op,t.level,t.event,p-base_,{room_.begin()+p,room_.begin()+p+6}});if(flag(7,bit))hide_item(item);return 1;}
+        if(flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(item);}else interactions[interaction].flags|=1;return 1;}
     case 0xf:flags[10][0]&=~0x400u;advance(2);return 0;
     case 0x10:{const auto item=v.u8(p+1);advance(2);return bool(flags[10][0]&0x400)&&values[8]==item;}
     case 0x11:{const auto item=v.u8(p+1);advance(2);for(unsigned slot=1;slot<12;++slot){const auto packed=inventory_.slots()[slot];if(Inventory::id(packed)==item){if(item==72&&(packed>>16)!=72)flags[4][0]|=0x10000;return 1;}}return 0;}
@@ -179,6 +183,7 @@ int EventVm::instruction(Task& t){
     case 0x6c:world(t,op,8);return 1;
     case 0x49:world(t,op,10);return 1;
     case 0xa2:world(t,op,4);return 1; // bhEvtLighterFireSet
+    case 0x8d:flags[10][0]|=0x400000;com_number=v.u8(p+1);return advance(2); // bhEvtComSet: cb_flg 0x400000 starts bhSysCall's computer task
     case 0x4a:world(t,op,8);return 1;
     case 0x1c:world(t,op,6);return 1;
     case 0x6e:world(t,op,22);return 1;
@@ -191,17 +196,16 @@ int EventVm::instruction(Task& t){
     case 0x48:world(t,op,6);return 1;
     case 0x86:world(t,op,16);return 1;
     case 0x4c:case 0x44:world(t,op,6);return 1;
-    case 0x33:{v.require(p,8);DoorRequest request{v.u16(p+2),v.u8(p+4),v.u8(p+5),v.u8(p+6),v.u8(p+7),values[21]};if(!door||!door(request))throw std::runtime_error("DoorCall destination unavailable");advance(8);return 2;}
+    case 0x33:{v.require(p,8);DoorRequest request{v.u16(p+2),v.u8(p+4),v.u8(p+5),v.u8(p+6),v.u8(p+7),values[21]};if(!request_door(request))throw std::runtime_error("DoorCall destination unavailable");return advance(8);}
     case 0x32:case 0x34:case 0x51:case 0x52:case 0x53:case 0x54:case 0x59:case 0xa3:world(t,op,12);return 1;
     case 0x3b:world(t,op,6);return 1;
     case 0x36:world(t,op,6);return 1;
     case 0x6a:if(!v.u8(p+1))flags[11][0]|=0x40000000u;else flags[11][0]&=~0x40000000u;return advance(2);
     case 0x16:case 0x18:case 0x1a:case 0x2b:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,op,op==0x42?4:2);return 1;
-    // bhFaceReSet consumes one enemy index. Retain it as a pending facial
-    // animation binding so the original scene cleanup task can continue.
+    // bhFaceReSet: one enemy index; facial control is bound in RoomWorld.
     case 0x90:world(t,op,2);return 1;
     case 0xca:world(t,op,2);return 1; // bhEffClearEvt; event effects remain pending.
-    case 0x5e:world(t,op,4);return 1;
+    case 0x8f:case 0x5e:world(t,op,4);return 1;
     case 0x95:case 0xa7:world(t,op,4);return 1; // bhBgmOn2/bhBgmOn2Ex
     case 0x92:world(t,op,2);return 1; // bhBGSeOff2
     case 0x93:world(t,op,2);return 1;            // bhBgmOff2
@@ -211,24 +215,86 @@ int EventVm::instruction(Task& t){
     case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x67:{unsigned length=0;switch(v.u8(p+1)){case 0:case 0x80:case 0x8b:case 0x90:length=2;break;case 0x8f:length=6;break;case 0x92:case 0x93:length=8;break;case 0x94:case 0x95:length=4;break;default:throw std::runtime_error("unimplemented Sub_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x15:world(t,op,4);return 1;
+    // bhCyoutenHenkeiStart/StartEX: task work morph step inside the FOR clock
+    // (shp_ct recomputed per pass). Return 0 ends the pass like the original.
+    case 0x55:world(t,op,2);return 0;
+    case 0x84:world(t,op,8);return 1; // bhCyoutenHenkeiSetEX
+    case 0x85:world(t,op,4);return 0;
+    case 0x7d:world(t,op,4);return 1; // bhMotionPosSetEnePly
+    case 0x9d:world(t,op,4);return 1; // bhObjAspdSet (object light parameter)
+    case 0xa4:world(t,op,4);return 1; // bhPlayerKaidanMotion
+    case 0xbd:world(t,op,2);return 1; // bhReTryPointSet
+    case 0xcc:world(t,op,4);return 1; // bhEneLookFlgSet
+    // Exact operand lengths from event.c. Pure system-state changes are applied
+    // here; effects needing world/audio/player services are reported as pending
+    // world bindings with their exact operands.
+    case 0x68:world(t,op,6);return 1; // bhLoadWork2
+    case 0xbe:{ // bhPlyDposCk: turn the player yaw towards a target by a fixed step each pass
+        if(!player_yaw||!set_player_yaw)throw std::runtime_error("player yaw check requires native player binding");
+        int target=v.u8(p+2);const unsigned flags_byte=v.u8(p+1);const int step=v.u8(p+3);advance(6);
+        if((flags_byte&2)&&target)target-=360;
+        const int eay=int(target*(65536.0f/360.0f)),eay2=int(step*(65536.0f/360.0f));
+        int ay=int(std::int16_t(player_yaw()&0xffff));const unsigned current=unsigned(ay)&0xffff;
+        if(eay!=int(current)){
+            if(eay<int(current)){ay=int(std::int16_t(ay-std::int16_t(eay2)));if(eay>=int(unsigned(ay)&0xffff)){set_player_yaw(unsigned(eay)&0xffff);return 0;}set_player_yaw(unsigned(ay)&0xffff);return 1;}
+            ay=int(std::int16_t(ay+std::int16_t(eay2)));if(eay<=int(unsigned(ay)&0xffff)){set_player_yaw(unsigned(eay)&0xffff);return 0;}set_player_yaw(unsigned(ay)&0xffff);return 1;}
+        return 0;}
+    case 0x83:return advance(2); // bhSoundFadeOut: the original body only skips its operands
+    case 0x89:change_player=v.u8(p+1);flags[10][0]|=0x80;advance(2);return 1; // bhPlayerChangeSet: cng_pid + cb_flg 0x80 (consumer pending)
+    case 0xae:inventory_.poisoned=false;return advance(2); // bhPlayerPoison2Cr: ply_stflg[0] &= ~0x200000
+    case 0xa0:map_parameters={v.u8(p+1),v.u8(p+2),v.u8(p+4),v.u8(p+3)};flags[10][0]|=0x10000;advance(6);return 1; // bhMapSystemOn: mp_prm[0..3] (consumer pending)
+    case 0x3a:case 0xa1:case 0xce:case 0xcf:case 0xc5:case 0x87:world(t,op,2);return 1;
+    case 0x76:world(t,op,4);return 1; // bh3dSoundFlagSet
+    case 0xa5:world(t,op,4);return 1; // bhEneRenderSet: mdflg 0x200 (renderer binding pending)
+    case 0x58:world(t,op,14);return 1; // bhEffBloodPoolSet2 (effect spawn pending)
+    case 0x7f:world(t,op,6);return 1; // bhSoundPanSet
+    case 0x46:world(t,op,8);return 1; // bhSetNextRoomBgm
+    case 0x47:world(t,op,10);return 1; // bhSetNextRoomBgSe
+    // bhGameOverSet clears ts_flg bit 0x4000; the runtime starts gameover.c gov_md0.
+    case 0xc6:flags[12][0]&=~0x4000u;world(t,op,2);return 1;
+    // bhPadCheck: pad_ps holds newly pressed logical bits of this pass,
+    // pad_on the held ones (bhSetPad). The 0xE000 mask (Select/Start/extra)
+    // suppresses every check; ts_flg 0x80 hands the pad to the save screen.
+    case 0x5d:{v.require(p,6);const unsigned bit=v.u8(p+1),mode=v.u8(p+2);advance(6);
+        if(flags[12][0]&0x80u)return 1;
+        if(!pad_state)throw std::runtime_error("pad condition requires native input binding");
+        const auto state=pad_state();const unsigned ps=state.first,on=state.second;const unsigned mask=1u<<(bit&31u);const bool quiet=(ps&0xE000u)!=0;
+        bool hit=false;switch(mode){
+        case 0:hit=!quiet&&(ps&mask)!=0;break;
+        case 1:hit=!quiet&&(on&mask)!=0;break;
+        case 2:hit=!quiet&&((ps&mask)!=0||(on&mask)!=0);break;
+        case 3:hit=!quiet&&ps!=0;break;
+        case 4:hit=!quiet&&on!=0;break;
+        case 5:hit=!quiet&&(ps!=0||on!=0);break;
+        case 6:hit=!quiet&&(ps&0x200u)!=0&&(on&0x10u)==0;break;
+        default:throw std::runtime_error("invalid bhPadCheck mode");}
+        return hit?0:1;}
     case 0x69:{const unsigned command=v.u8(p+1);unsigned length=0;switch(command){case 2:case 3:case 4:case 17:case 18:case 19:case 28:case 29:case 30:case 31:case 32:case 33:length=3;break;case 5:case 6:length=6;break;case 7:case 8:case 27:length=8;break;case 9:case 11:case 12:case 13:case 15:case 16:length=6;break;case 14:case 21:case 23:case 40:case 41:case 42:case 46:case 48:case 49:length=4;break;case 44:case 45:length=5;break;case 36:case 47:length=2;break;case 24:case 25:length=8;break;case 34:case 26:case 38:length=10;break;case 50:length=4;break;default:throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));}world(t,op,length);return 1;}
     default:{std::ostringstream s;s<<"unimplemented opcode 0x"<<std::hex<<op;throw std::runtime_error(s.str());}
     }
 }
 void EventVm::run(Task& t,bool scenario){
     if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);if(result==1)continue;if(result==0&&!t.branches.empty()){t.pc=t.branches.back();t.branches.pop_back();continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
-    catch(const std::exception& e){t.blocked=true;std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(t.pc-base_)<<": "<<e.what();if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());}
+    catch(const std::exception& e){t.blocked=true;std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(t.pc-base_)<<" (opcode 0x"<<unsigned(room_.at(t.pc))<<"): "<<e.what();if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());}
 }
 void EventVm::advance_game_clock(unsigned vertical_blanks){if(flag(1,3))inventory_.play_time+=std::min(vertical_blanks,216000000u-std::min(inventory_.play_time,216000000u));}
 void EventVm::tick(){++tick_count;const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
     // ItemUse/Use_01/05 call StatusCancel, whose animated exit keeps st_flg
     // 8 for bhControlEvent. The host closes visually at once; retain that
     // handover through one complete scenario/scheduler pass.
-    status_use_pending_=false;if(!menu_open)flags[5][0]&=~8u;
+    status_use_pending_=false;if(!menu_open)flags[5][0]&=~8u;door_scenario_pending_=false;
     // game.c consumes the interaction response after the scenario/scheduler pass.
     if(!(flags[10][0]&1))flags[10][0]&=~0x1000u;
     // bhSysCall after bhControlEvent: a finished cinematic drops its skip request.
     if(cinematic&&!(flags[10][0]&4))flags[10][0]&=~0x10000000u;}
+Message EventVm::room_message(unsigned index)const{return read_message(room_,messages_,index);}
+bool EventVm::request_door(const DoorRequest& request){
+    if(!door||!door(request))return false;
+    // bhSetDoorDemo / bhCheckExmAtari signal the request now; game.c starts
+    // its fade on the following main pass, after bhControlEvent has run.
+    flags[10][0]|=1;flags[5][0]|=4;door_scenario_pending_=true;return true;
+}
+void EventVm::finish_room_exit(){if(door_scenario_pending_)tick();}
 void EventVm::hide_item(unsigned index){if(index>=room_items_.size())throw std::runtime_error("pickup model outside room");EventCommand command{0x20,0,0,0,{0x20,std::uint8_t(index),3,0}};if(!binding||!binding(command))pending_bindings.push_back(command);}
 std::vector<EventTaskState> EventVm::task_states()const{std::vector<EventTaskState> out;for(const auto& t:tasks_)if(t.active)out.push_back({t.event,t.level,t.delay,t.pc-base_,t.blocked});return out;}
 void EventVm::choose_dialog(int direction){const auto count=dialog_.choices();if(count)dialog_.selection=(dialog_.selection+count+direction)%count;values[7]=dialog_.selection;}
@@ -253,19 +319,29 @@ void EventVm::begin_pickup(unsigned item,unsigned model){
     begin_status();flags[10][0]=(flags[10][0]&~0x800u)|0x10;
     pickup_result(inventory_.pickup(item,flags[10][0],values[0],values[1]));
 }
+void EventVm::begin_file(unsigned item,unsigned model){
+    // StatusMain/GetFile: FILE requests acknowledge the room pickup, but only
+    // set itm[383]. They never pass through GetItem's inventory-slot insertion.
+    values[8]=item;begin_status();acquired_file_=original_file_number(item,values[0],values[1]);
+    inventory_.items[383]|=1u<<acquired_file_;flags[10][0]|=0x20800;
+    if(model!=~0u)hide_item(model);
+}
 void EventVm::service_item_request(){
     // bhCheckSubTask accepts scripted acquisition even while CineSet is active.
     // It waits for existing modal/system tasks, never for the room identity.
-    if(!(flags[10][0]&0x4010)||pickup_display_||menu_open||dialog_.active()||(flags[5][0]&0x1c040008u)||(flags[10][0]&3)||!item_message)return;
+    if(!(flags[10][0]&0x24010)||pickup_display_||acquired_file_!=~0u||menu_open||dialog_.active()||(flags[5][0]&0x1c040008u)||(flags[10][0]&3)||!item_message)return;
     // bhCheckSubTask opens the status task for cb_flg 0x64010; StatusMain then picks the screen:
     // 0x10 = GetItem (sb_id), anything else without box/file bits = the normal status screen.
     // GetItem consumes 0x4000 itself (sub1.c ~3857); a plain script request is consumed here.
+    if(flags[10][0]&0x20000){begin_file(values[8]);return;}
     if(flags[10][0]&0x10){begin_pickup(values[8]);flags[10][0]&=~0x4000u;return;}
     flags[10][0]&=~0x4000u;status_requested=true;
 }
 void EventVm::cancel_dialog(){if(pickup_item_&&dialog_.choices()){dialog_.selection=1;confirm_dialog();}else confirm_dialog();}
 void EventVm::confirm_dialog(){
-    const bool interaction_answer=dialog_.active()&&dialog_.choices()&&!menu_open&&(flags[5][0]&0x2000);
+    // bhDispMessage also acknowledges script-owned questions (st_flg 0x2000
+    // clear). Padlock disposal waits for this same cb_flg 0x1000 response.
+    const bool interaction_answer=dialog_.active()&&dialog_.choices()&&!menu_open;
     if(dialog_.active())values[7]=dialog_.selection+(dialog_.choices()&&menu_open?100:0);
     if(pickup_item_&&dialog_.choices()){
         pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1],pickup_mode_,100+dialog_.selection));return;
@@ -320,10 +396,12 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){
     const auto direction=(yaw+8192)&0xc000;
     for(unsigned i=0;i<interactions.size();++i){const auto& a=interactions[i];const float distance=(a.type==0||a.type==2)?4.5f:a.type==3?6.0f:2.0f;const auto probe=NJS_POINT3{pos.x-distance*njSin(yaw),pos.y,pos.z-distance*njCos(yaw)};if(!(a.flags&1)||a.floor!=floor||a.type==1||a.type==2||probe.x<a.position.x||probe.x>a.position.x+a.extent.x||probe.z<a.position.z||probe.z>a.position.z+a.extent.z)continue;
         if(a.type==0){if(a.floor!=floor||(direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000)))continue;
-            return door&&door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]});}
+            values[20]=i;flags[10][0]|=0x100; // original etc_idx / cb_flg, also for doors
+            if(request_door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]}))return true;
+            flags[10][0]&=~0x100u;return false;}
         if((a.type==3||a.type==4)&&((direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000))))continue;
         if(a.type==4){const auto model=a.parameters[0];if(model>=room_items_.size())throw std::runtime_error("pickup model outside room");auto id=room_items_[model];if(id==130)id=35;if(!id||id>=156||!item_message)return false;
-            values[20]=i;flags[10][0]|=0x100;begin_pickup(id,model);return true;}
+            values[20]=i;flags[10][0]|=0x100;if(a.attribute&0x10)begin_file(id,model);else begin_pickup(id,model);return true;}
         values[20]=i;flags[10][0]|=0x100;if(a.type==3&&(a.attribute&0x8000)){
             // hitchk.c bhCheckExmAtari -> bhSetMessage: interaction work,
             // response/end bits and page selection start afresh.

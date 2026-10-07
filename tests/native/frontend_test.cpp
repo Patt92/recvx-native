@@ -35,7 +35,7 @@ int main(int argc,char** argv){try{
     // Cancel capture must not also exit the settings page.
     for(unsigned i=0;i<4;++i)front.input(MenuInput::Up);front.input(MenuInput::Confirm);press(SDL_SCANCODE_ESCAPE);check(front.settings()&&!front.capturing(),"capture cancel exits settings");
     for(unsigned i=action_count-3;i<action_count+2;++i)front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(config.describe(Action::Confirm,false)=="Enter"&&config.describe(Action::Confirm,true)=="A","default restoration failed");
-    press(SDL_SCANCODE_ESCAPE);check(front.active()&&!front.settings(),"Escape quits instead of returning to main menu");press(SDL_SCANCODE_UP);check(press(SDL_SCANCODE_RETURN)==FrontendCommand::NewGame&&!front.active(),"new game command missing");
+    press(SDL_SCANCODE_ESCAPE);check(front.active()&&!front.settings(),"Escape quits instead of returning to main menu");press(SDL_SCANCODE_UP);check(press(SDL_SCANCODE_RETURN)==FrontendCommand::TitleCall&&front.starting(),"new game must start the title call");{FrontendCommand r=FrontendCommand::None;for(int i=0;i<200&&r!=FrontendCommand::NewGame;++i)r=tick();check(r==FrontendCommand::NewGame&&!front.active(),"new game command missing after title fade");}
     SDL_JoystickClose(joystick);SDL_JoystickDetachVirtual(index);std::filesystem::remove(path);
     // Video routing must work even without the event cinematic-skip flag.
     Inventory inventory;StatusMenu menu;MessageDialog dialog;GameplayInput gameplay(inventory,menu,dialog,nullptr);bool video=true;unsigned skips=0;gameplay.video_active=[&]{return video;};gameplay.skip_video=[&]{video=false;++skips;};InputFrame frame;frame.pressed[unsigned(Action::Confirm)]=true;
@@ -53,7 +53,7 @@ int main(int argc,char** argv){try{
             press_game(SDL_SCANCODE_RETURN);check(!dialog.active(),"hint confirmation failed");
             check(!menu.active,"inventory bypasses original cinematic handover");
             for(unsigned i=0;i<40;++i){gameplay.apply(devices.tick());tick();}check(menu.active,"inventory does not open automatically after cell hint");
-            press_game(SDL_SCANCODE_RETURN);press_game(SDL_SCANCODE_RETURN);check(inventory.weapon()==1&&!menu.active,"keyboard lighter equipment failed");
+            press_game(SDL_SCANCODE_RETURN);for(unsigned i=0;i<8&&menu.command_window_moving();++i)tick(); /* ItemCommand slide ignores input */press_game(SDL_SCANCODE_RETURN);check(inventory.weapon()==1&&!menu.active,"keyboard lighter equipment failed");
             check(events.flag(1,99),"lighter equipment did not start Rodrigo event");
             for(unsigned i=0;i<3000;++i){gameplay.apply(devices.tick());tick();}
             if(!events.errors.empty()||world.player_hidden||world.player_scripted||(events.flags[5][0]&4)){std::cerr<<"mode="<<mode<<" hidden="<<world.player_hidden<<" scripted="<<world.player_scripted<<" cinematic="<<events.flags[5][0]<<" dialog="<<dialog.active()<<" index="<<dialog.index()<<" movie="<<movie.active()<<"\n";for(const auto& e:events.errors)std::cerr<<e<<"\n";}check(events.errors.empty()&&!world.player_hidden&&!world.player_scripted&&!(events.flags[5][0]&4),"late-skip/light equipment flow did not restore control");
@@ -62,5 +62,12 @@ int main(int argc,char** argv){try{
         GameUi ui(root);SoftwareRenderer image(640,480);ui.draw_title(image);check(std::any_of(image.pixels().begin(),image.pixels().end(),[](auto c){return (c&0xffffff)!=0;}),"original title art missing");
         std::cout<<"Original running film skipped by OK/Skip; audio stopped and original cell hint restored.\n";
     }
+    {// adv.c TitleCall/Mode 17: New Game starts the voice and a 138-frame fade; buttons are ignored until black.
+        auto title_config=InputConfig::defaults();Frontend title(title_config,path);
+        check(title.input(MenuInput::Confirm)==FrontendCommand::TitleCall&&title.starting()&&title.active(),"New Game must start TitleCall");
+        check(title.input(MenuInput::Cancel)==FrontendCommand::None&&title.starting(),"title fade accepted input");
+        unsigned ticks=0;FrontendCommand result=FrontendCommand::None;while(result==FrontendCommand::None&&ticks<400){result=title.apply({});++ticks;}
+        check(result==FrontendCommand::NewGame&&ticks==139&&!title.active(),"title fade length differs from GetSamurai(430)"); // float32 sum of 1/138 reaches 1 after 139 frames
+        Frontend flash(title_config,path);flash.input(MenuInput::Confirm);for(int i=0;i<60;++i)flash.apply({});check(flash.flush()==0&&flash.fade()>.4f&&flash.fade()<.45f,"FlushCount/fade rate per frame");}
     std::cout<<"Main menu, keyboard/controller settings, live rebinding, persistence and video routing passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<" SDL: "<<SDL_GetError()<<'\n';return 1;}}

@@ -15,8 +15,9 @@ static Message fixture_message(unsigned index){
     return {'T'-32,0xffff};
 }
 static void select_action(StatusMenu& menu,Inventory& inv,unsigned slot,unsigned action){
-    if(!menu.active)menu.input(MenuInput::Open,inv);menu.selected=slot;menu.input(MenuInput::Confirm,inv);
-    for(unsigned i=0;i<action;++i)menu.input(MenuInput::Down,inv);menu.input(MenuInput::Confirm,inv);
+    // ItemCommand slides the command window in and ItemCommandErase out (4 frames each).
+    if(!menu.active)menu.input(MenuInput::Open,inv);menu.skip_slide();menu.selected=slot;menu.input(MenuInput::Confirm,inv);for(int f=0;f<4;++f)menu.tick(inv);
+    for(unsigned i=0;i<action;++i)menu.input(MenuInput::Down,inv);menu.input(MenuInput::Confirm,inv);for(int f=0;f<4;++f)menu.tick(inv);
 }
 static void acknowledge(StatusMenu& menu,Inventory& inv){for(unsigned i=0;i<20&&menu.message.active();++i)menu.input(MenuInput::Confirm,inv);check(!menu.message.active(),"message cannot be dismissed");}
 static void yes(StatusMenu& menu,Inventory& inv){while(menu.message.active()&&!menu.message.choices())menu.input(MenuInput::Confirm,inv);if(menu.message.active())menu.input(MenuInput::Confirm,inv);}

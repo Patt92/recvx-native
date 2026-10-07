@@ -163,20 +163,24 @@ void GameplayInput::menu_input(MenuInput key){if(modal_input&&modal_input(key))r
     // The original hint ends before its task releases cinematic control. Keep
     // one inventory request across that short handover, never across a video.
     if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4)){if(inventory_grace_&&!dialog_.active())inventory_pending_=true;return;}
-    if(menu_.active||key==MenuInput::Open){const bool was_active=menu_.active;menu_.input(key,inventory_);if(!was_active&&menu_.active)events_->begin_status();if(menu_.use_item){unsigned index=0;if(!events_->use(menu_.use_item,&index,menu_.selected)){menu_.active=true;if(index)menu_.show_message(index);menu_.feedback_sound=1;}menu_.use_item=0;}events_->menu_open=menu_.active;if(sound&&menu_.feedback_sound!=0xffffffff)sound(menu_.feedback_sound);return;}
+    if(menu_.active||key==MenuInput::Open){const bool was_active=menu_.active;menu_.input(key,inventory_);if(!was_active&&menu_.active)events_->begin_status();if(menu_.use_item){unsigned index=0;if(!events_->use(menu_.use_item,&index,menu_.selected)){menu_.active=true;menu_.abort_close();if(index)menu_.show_message(index);menu_.feedback_sound=1;}menu_.use_item=0;}events_->menu_open=menu_.active;if(sound&&menu_.feedback_sound!=0xffffffff)sound(menu_.feedback_sound);return;}
     // Host: OK also requests the original cinematic skip (bhSysCallGame pad bit 0x10000, Select).
     if(key==MenuInput::Confirm&&(events_->flags[10][0]&4)){events_->skip_cinematic();return;}
     if(key==MenuInput::Confirm&&interact){interact();synchronize();}
 }
 void GameplayInput::synchronize(){
     if(events_&&!(transition_active&&transition_active())&&!(video_active&&video_active()))events_->service_item_request();
+    if(events_&&events_->acquired_file()!=~0u){
+        if(!file_open_){if(sound)sound(3);menu_.acquire_file(inventory_,events_->acquired_file());events_->menu_open=true;file_open_=true;}
+        else if(!menu_.active){events_->finish_file();events_->menu_open=false;file_open_=false;}
+    }else file_open_=false;
     // bhSysCall: cb_flg 0x40000 requests ItemBox via the same status task as
     // keyboard/Pad inventory. Room scripts need no separate SubStatus opcode.
     if(events_&&!menu_.active&&(events_->flags[10][0]&0x40000))events_->status_requested=true;
     if(events_){const auto found=events_->pickup_display();if(found){if(!menu_.pickup){if(sound)sound(3); /* ItemTaskCheck: CallSystemSe(0,3) when the status task starts */menu_.commands=menu_.examining=menu_.combining=menu_.files=false;menu_.message=MessageDialog{};menu_.inspection=ItemInspection{};const auto angle=inspection_default_angles(found);menu_.examine_pitch=angle[0];menu_.examine_yaw=angle[1];menu_.examine_roll=angle[2];}menu_.pickup=found;menu_.active=true;events_->menu_open=true;}
-        else if(menu_.pickup){menu_.pickup=0;menu_.active=false;events_->menu_open=false;}}
+        else if(menu_.pickup){menu_.pickup=0;menu_.begin_close();events_->menu_open=menu_.active;}}
     if(events_&&events_->status_requested&&!dialog_.active()&&!(transition_active&&transition_active())&&!(events_->flags[5][0]&4)&&!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(3);menu_.input(MenuInput::Open,inventory_);events_->begin_status();}if(events_->flags[10][0]&0x40000)events_->flags[12][0]&=~0x200u;events_->menu_open=menu_.active;}}
-bool GameplayInput::apply(const InputFrame& f){menu_.tick(inventory_);synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
+bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))return f.hit(Action::Quit);menu_.tick(inventory_);if(menu_.slide_sound!=0xffffffff){if(sound)sound(menu_.slide_sound);menu_.slide_sound=0xffffffff;}synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
     if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
     if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition();return false;}if(video_active&&video_active()){
         inventory_pending_=false;inventory_grace_=0;

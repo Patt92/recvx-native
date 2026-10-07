@@ -4,12 +4,43 @@
 #include "inspection.h"
 #include "messages.h"
 #include "status_pulse.h"
+#include "file_folder.h"
 #include <filesystem>
 #include <map>
 #include <functional>
 #include <memory>
 namespace recvx {
 enum class MenuInput {Open,Cancel,Confirm,Up,Down,Left,Right};
+// Status/ItemBox screen slide (sub1.c SpriteH, SpriteUV, StatusCancel, BGFadeIn/Out):
+// the twelve sprite centers (cen_pos) move 1/8 of their delta for eight ticks plus
+// one finishing tick (SE 7). The status screen then retracts the view-window
+// shutters (parts_08, open1/open2) and settles center 3 at x=332; cancelling
+// closes the shutters (SE 9) before the sprites slide out. Bits are the
+// original swork.statusflg bits.
+class StatusSlide {
+public:
+    StatusSlide();
+    void open(bool box);        // StatusInit/ItemBoxInit + CenterPositionInit
+    void cancel();              // StatusCancel
+    void file_out();            // StatusToFileView, keeps the status task alive
+    void change_view();         // MainCommand FILE: close shutters, load, reopen
+    bool tick();                // one StatusMain pass; true once SpriteH set statusflg 0x80000
+    bool moving()const{return flg_&0x44;} // 0x40 blocks the pad; 0x4 = closing
+    unsigned take_sound(){const auto s=sound_;sound_=0xffffffff;return s;}
+    float x(unsigned center)const{return pos_[center][0];}
+    float y(unsigned center)const{return pos_[center][1];}
+    float fade()const{return fade_;}
+    int open1()const{return open1_;}
+    int open2()const{return open2_;}
+private:
+    void sprite_h();
+    void sprite_uv();
+    bool box_=false,closed_=false;
+    unsigned flg_=0,cnt_=0,sound_=0xffffffff;
+    int open1_=0,open2_=0;
+    float pos_[12][6]{};
+    float fade_=0.457142857f;
+};
 class StatusMenu {
 public:
     bool active=false,commands=false,examining=false,combining=false;
@@ -24,12 +55,36 @@ public:
     unsigned feedback_sound=0xffffffff,opening_item=0,opening_frame=0;
     ItemInspection inspection;
     StatusPulse pulse; // original condition monitor, advanced by tick()
+    // Status screen slide in/out (StatusMain SpriteH/SpriteUV). While closing the
+    // menu stays active until SpriteH reports 0x80000, like the original task.
+    // MainCommand (sub1.c mode 2): the EXIT/FILE/MAP/ITEM bar above the item list.
+    bool nav=false,nav_pressed=false;
+    unsigned maincsr=3,nav_wait=0;
+    StatusSlide slide;
+    bool closing=false;
+    unsigned slide_sound=0xffffffff;
+    void begin_close(); // StatusCancel; plain close when no slide is running
+    void abort_close(); // item use refused: leave the screen open
+    void skip_slide();  // screen owned by another mode (ItemBox) or reset
     // Command window slide (sub1.c ItemCommand testmode 0 / ItemCommandErase):
     // cen_pos[11] moves 24 px per frame for 4 frames in and out; no input meanwhile.
     unsigned command_frames=0,erase_frames=0,erase_item=0,erase_command=0;
     std::vector<std::string> erase_actions;
     bool command_window_moving()const{return (commands&&command_frames<4)||erase_frames;}
     bool files=false,file_list=false;
+    bool file_acquisition=false;
+    bool file_item_source=false;
+    FileFolder file_folder;
+    bool file_transition=false;
+    bool file_entering=false;
+    std::function<unsigned()> file_progress;
+    std::function<bool()> file_bonus;
+    std::function<void()> file_manual_read;
+    unsigned file_pages()const{return original_file_pages(file_number)-(file_number==0&&file_progress?file_progress():0);}
+    bool file_exit_selected=false;
+    unsigned file_scroll=0,file_move=10,file_wait=0,file_display_page=0;
+    int file_x=68;
+    void acquire_file(Inventory& inventory,unsigned file);
     unsigned file_number=0,file_page=0,stage=0,room=0;
     std::function<bool()> shotgun_burst;
     std::function<void()> toggle_shotgun_burst;
@@ -42,10 +97,11 @@ public:
     // Sets feedback_sound to the original CallSystemSe number for this input,
     // or 0xffffffff when the original stays silent (no cursor movement).
     bool input(MenuInput input,Inventory& inventory);
+    bool input_unslid(MenuInput key,Inventory& inventory);
     std::vector<std::string> actions(const Inventory& inventory)const;
 private:
     unsigned pending_combine_first_=0,pending_combine_second_=0;
-    bool pulse_open_=false;
+    bool pulse_open_=false,slide_open_=false;
     void finish_inspection(Inventory& inventory);
     void combine(Inventory& inventory,unsigned first,unsigned second);
     void open_file(Inventory& inventory,unsigned file,bool list=false);
@@ -54,38 +110,21 @@ private:
     bool apply_input(MenuInput input,Inventory& inventory);
 
 };
-// ItemBox screen slide (sub1.c SpriteH/StatusCancel): the twelve sprite centers
-// (cen_pos) move 1/8 of their delta for eight ticks, then one finishing tick;
-// parts_07b fades with BGFadeIn/BGFadeOut by 0.057142857 per moving tick.
-class BoxSlide {
-public:
-    enum class Event {None,Opened,Closed};
-    void open();                // ItemBoxInit + CenterPositionInit: slide in
-    void cancel();              // StatusCancel: slide out
-    Event tick();               // one SpriteH + BGFade pass
-    BoxSlide();
-    bool moving()const{return phase_!=Phase::Settled;}
-    float x(unsigned center)const;
-    float y(unsigned center)const;
-    float fade()const{return fade_;}
-private:
-    enum class Phase {Settled,Opening,Closing};
-    Phase phase_=Phase::Settled;
-    float pos_[12][6]{};
-    unsigned count_=0;
-    float fade_=0.457142857f;
-};
 class GameUi {
 public:
     GameUi(const std::filesystem::path& data,const std::filesystem::path& mods={});
     void draw(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick);
-    void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const BoxSlide* slide=nullptr)const;
+    void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0)const;
     void draw_title(SoftwareRenderer& image);
     void draw_title_options(SoftwareRenderer& image,unsigned selected);
     void label(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=.6f,std::uint32_t color=0xffffffff)const;
+    // bhDispMessage: a message at the given pixel origin in the dialogue font.
+    void show_message(SoftwareRenderer& image,const Message& message,int x,int y)const{text(image,message,x,y,1,0xffffffff,true);}
+    void show_gameover_message(SoftwareRenderer& image,const Message& message,int x,int y,unsigned color)const{text(image,message,x,y,1,color,true);}
     std::string item_name(unsigned id)const;
     Message system_message(unsigned index)const;
 private:
+    void quantity(SoftwareRenderer&,std::uint32_t packed,int x,int y,bool box=false)const;
     std::vector<SceneTexture> title_;
     std::map<unsigned,std::vector<SceneTexture>> file_textures_;
     std::vector<SceneTexture> menu_,fonts_,dialog_fonts_;

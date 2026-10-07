@@ -1,8 +1,10 @@
+# Status screen: ItemCommand slides the command window in/out over 4 frames; equipping keeps the screen open.
 0 new_game
 1300 confirm
 1500 confirm
 1550 confirm
-1551 confirm
+1555 confirm
+1560 inventory
 # Same physical walk, skip doors with separate confirmation presses.
 # Skip an active film, acknowledge the hint, then equip the lighter.
 4200 keys left

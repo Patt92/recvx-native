@@ -62,15 +62,16 @@ public:
     void menu_input(MenuInput key);
     std::function<void(unsigned)> sound;
     std::function<bool(MenuInput)> modal_input;
+    std::function<bool(const InputFrame&)> frame_input; // raw-pad task (computer terminal); true = frame consumed
     void synchronize(); // Consume script-owned UI requests before movement.
     bool apply(const InputFrame& frame); // true means an explicit quit action
     std::function<void()> interact,confirm_transition;
     std::function<bool()> transition_active,video_active;
     std::function<void()> skip_video;
-    void set_events(EventVm* events){events_=events;inventory_grace_=0;inventory_pending_=false;}
+    void set_events(EventVm* events){events_=events;inventory_grace_=0;inventory_pending_=false;file_open_=false;}
 private:
     Inventory& inventory_;StatusMenu& menu_;MessageDialog& dialog_;EventVm* events_;
     unsigned inventory_grace_=0;
-    bool inventory_pending_=false;
+    bool inventory_pending_=false,file_open_=false;
 };
 }

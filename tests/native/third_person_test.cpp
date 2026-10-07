@@ -49,6 +49,15 @@ int main(){try{
     for(unsigned i=0;i<Frontend::third_person_row;++i)front.input(MenuInput::Down);check(front.selected()==Frontend::third_person_row,"camera row not selectable");
     front.input(MenuInput::Right);check(camera.enabled()&&ThirdPersonCamera::read(path).enabled,"menu toggle on failed");
     front.input(MenuInput::Confirm);check(!camera.enabled()&&!ThirdPersonCamera::read(path).enabled,"menu toggle off failed");
+    // Host render quality row follows the camera row and persists video.ini.
+    const auto video_path=path.parent_path()/"recvx-video-test.ini";std::filesystem::remove(video_path);VideoConfig video(video_path);front.video=&video;
+    int applied=-1;front.video_changed=[&](const VideoSettings& s){applied=s.supersampling();};
+    check(video.settings().quality==RenderQuality::High&&video.settings().supersampling()==2&&video.settings().filtering(),"video defaults");
+    front.input(MenuInput::Down);check(front.selected()==Frontend::video_row,"video row not selectable");
+    front.input(MenuInput::Right);check(video.settings().quality==RenderQuality::Ultra&&applied==3&&VideoSettings::read(video_path).quality==RenderQuality::Ultra,"quality up");
+    front.input(MenuInput::Right);check(video.settings().quality==RenderQuality::Original&&!video.settings().filtering()&&applied==1,"quality wrap");
+    front.input(MenuInput::Right);front.input(MenuInput::Left);front.input(MenuInput::Left);check(VideoSettings::read(video_path).quality==RenderQuality::Ultra&&applied==3,"quality down");
+    std::filesystem::remove(video_path);
     front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.active()&&!front.settings(),"back row moved");
     std::cout<<"Third-person camera mod: defaults, persistence, chase/aim pose, smoothing, scripted handover and menu row verified.\n";return 0;
 }catch(const std::exception& e){std::cerr<<"Third-person test failed: "<<e.what()<<'\n';return 1;}}

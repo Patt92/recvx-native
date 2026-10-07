@@ -5,6 +5,7 @@
 #include <vector>
 #include <optional>
 #include <memory>
+#include <map>
 namespace recvx {
 // light: per-vertex lighting factor (r,g,b), used when the triangle is gouraud-lit.
 struct SceneVertex { NJS_POINT3 position; float u=0,v=0; NJS_VECTOR normal{}; NJS_POINT3 light{1,1,1}; };
@@ -40,6 +41,7 @@ struct TextureFilterCache {
 struct SceneTexture {
     unsigned width=0,height=0;
     TexturePixels pixels;
+    std::map<unsigned,TexturePixels> palette_banks; // njSetPaletteBankNum, PLI TEXflag palette-only records
     mutable std::shared_ptr<TextureFilterCache> filter_cache=std::make_shared<TextureFilterCache>();
     void invalidate_mips()const{filter_cache=std::make_shared<TextureFilterCache>();}
     std::uint64_t fingerprint()const{
@@ -65,6 +67,7 @@ struct SceneTriangle {
     unsigned light_category=1;
     std::uint64_t blend_register=0x44; // original GS source-alpha/inverse-source-alpha
 };
+struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;};
 struct SceneCamera {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};
@@ -105,6 +108,7 @@ struct SceneCutArea {
 };
 struct Scene {
     std::vector<SceneTriangle> triangles;
+    std::vector<SceneLine> lines;
     std::vector<SceneCamera> cameras;
     std::vector<SceneTexture> textures;
     std::vector<SceneSpawn> spawns;

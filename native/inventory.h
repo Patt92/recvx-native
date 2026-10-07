@@ -24,6 +24,8 @@ public:
     bool contains(unsigned item)const;
     unsigned weapon()const;
     bool equip(unsigned slot);
+    bool reload(); // sub1.c bhSearchBullet / Combi_99 / ItemSort.
+    bool count_bullet(); // weapon.c bhCountBullet; signed 16-bit count, preserves ID/flags.
     bool acquire(unsigned item,unsigned quantity,unsigned flags=0);
     // sub1.c GetItem: mode 0 begins, modes 1/4 consume a menu answer 100/101.
     PickupResult pickup(unsigned item,unsigned& control,unsigned stage,unsigned room,unsigned mode=0,int answer=-1);

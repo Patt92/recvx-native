@@ -1,8 +1,10 @@
+# Status screen: ItemCommand slides the command window in/out over 4 frames; equipping keeps the screen open.
 0 new_game
 # Follow the original opening event, equip the lighter, then run after control returns.
 1 skip
 50 confirm
 101 confirm
-102 confirm
+106 confirm
+111 inventory
 3000 keys forward run
 3120 keys none

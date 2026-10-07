@@ -76,7 +76,21 @@ def check(runtime, data, folder, prefix):
         if name == 'withdraw':
             assert result['items'][1] == 3604481 and result['items'][3] == 327681, 'withdrawal'
             assert not any(result['security_items_2']), 'storage not emptied'
-    print('Original detector announcement/camera, control handover, box deposit, pass and withdrawal verified. Trigger positions are diagnostic; box drawing remains a host view.')
+    # ItemBox: a refused withdrawal into the wrong slot is a non-modal note; one back press returns to the
+    # item cursor, Up from the STANDARD cell reaches EXIT, and EXIT closes through StatusCancel.
+    wrong = folder / 'wrong-slot.txt'
+    wrong.write_text(REPLAY.split('321 confirm')[0] + '321 confirm\n340 confirm\n345 cancel\n350 up\n355 confirm\n360 confirm\n'
+                     '370 down\n372 confirm\n376 confirm\n380 cancel\n384 up\n388 confirm\n392 confirm\n400 up\n403 up\n406 confirm\n')
+    for frames, closed in [(396, False), (420, True)]:
+        state = folder / ('wrong-slot-%d.json' % frames)
+        with (folder / ('wrong-slot-%d.log' % frames)).open('w') as log:
+            subprocess.run(prefix + [str(runtime.resolve()), '--data', str(data.resolve()),
+                '--headless', '--in-game', '--room', 'RM_0090.RDX', '--frames', str(frames),
+                '--replay', str(wrong), '--state', str(state)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
+        result = json.loads(state.read_text())
+        assert result['items'][1] == 3604481 and not any(result['security_items_2']), ('wrong-slot recovery', frames)
+        assert result['box_open'] != closed, ('EXIT', frames)
+    print('Original detector announcement/camera, control handover, box deposit, pass and withdrawal verified. Trigger positions are diagnostic; box drawing is a separate visual check.')
 
 
 def main():

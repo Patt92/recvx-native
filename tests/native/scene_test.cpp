@@ -31,6 +31,12 @@ template<class F>static void rejects(F f,const char* message){bool rejected=fals
 int main(){try{
     _Make_SinTable();auto data=fixture();auto scene=recvx::decode_scene(data);
     check(scene.triangles.size()==1&&scene.cameras.size()==1&&scene.textures.size()==1,"decoded scene counts");
+    // A material writes blend state after an earlier NJD_CB_BA. Test the
+    // original chunks, not a manually constructed host triangle.
+    {auto chunk=fixture();std::vector<std::uint8_t> commands={1,33,17,37,2,0,0xb2,0xb2,0xb2,255};
+     commands.insert(commands.end(),chunk.begin()+2180,chunk.begin()+2195);commands[11]=8;
+     std::copy(commands.begin(),commands.end(),chunk.begin()+2180);
+     auto decoded=recvx::decode_scene(chunk);check(decoded.triangles[0].blend==recvx::SceneBlend::Ninja&&decoded.triangles[0].blend_register==0x44,"material blend bits do not override earlier NJD_CB_BA");}
     check(scene.textures[0].pixels[1]==0x80100010&&scene.textures[0].pixels[2]==0x80080008,"CSM1 palette permutation");
     // Real PLI/TIM2 loading color-keys black and halves ARGB8888 alpha.
     std::vector<std::uint8_t> bank(44);auto word=[&](std::size_t p,unsigned x){for(unsigned i=0;i<4;++i)bank.at(p+i)=std::uint8_t(x>>(8*i));};word(0,0x00494c50);word(4,12);word(32,1);word(40,0x00010000);

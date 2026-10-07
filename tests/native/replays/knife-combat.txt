@@ -1,17 +1,21 @@
+# Status screen: ItemCommand slides the command window in/out over 4 frames; equipping keeps the screen open.
 0 new_game
 1300 confirm
 1500 confirm
 1550 confirm
-1551 confirm
+1555 confirm
+1560 inventory
 # Skip an active film, acknowledge the hint, then equip the lighter.
 4200 position 23.5 0 58.5 16384
 4201 confirm
 4210 confirm
 4220 confirm
 4240 inventory
-4241 right
-4242 right
-4243 confirm
-4244 confirm
-4250 keys aim attack
-4290 keys none
+# StatusMain ignores the pad until the 16-tick slide-in/shutter phase ends (statusflg 0x40).
+4260 right
+4261 right
+4262 confirm
+4267 confirm
+4272 inventory
+4310 keys aim attack
+4340 keys none

@@ -15,6 +15,7 @@ public:
     bool active()const{return active_;}
     bool finished()const{return finished_;}
     bool skipped()const{return skipped_;}
+    bool direct()const{return direct_;} // no door demo (attr 0x80000000 / type 255)
     unsigned sound_bank()const{return sound_bank_;}
     std::vector<unsigned> take_sounds(){auto out=std::move(sounds_);sounds_.clear();return out;}
     std::vector<unsigned> take_sound_commands(){auto out=std::move(sound_commands_);sound_commands_.clear();return out;}
@@ -29,7 +30,7 @@ private:
     std::vector<RECVX_DOOR_NODE> nodes_;
     std::vector<SceneTexture> textures_;
     std::size_t model_offset_=0,texture_offset_=0,objects_=0,count_=0;
-    bool active_=false,finished_=false,skipped_=false;
+    bool active_=false,finished_=false,skipped_=false,direct_=false;
     unsigned ticks_=0,sound_bank_=0;
     std::vector<unsigned> sounds_,sound_commands_;
     std::array<int,11> sound_timing_{};

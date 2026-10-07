@@ -19,7 +19,9 @@ public:
     std::vector<std::string> errors;
     std::vector<unsigned> dispatched;
     bool menu_open=false,status_requested=false;
-    unsigned tick_count=0,event_timer=0;
+    unsigned change_player=0; // sys->cng_pid (bhPlayerChangeSet, cb_flg 0x80)
+    std::array<unsigned,4> map_parameters{}; // sys->mp_prm (bhMapSystemOn, cb_flg 0x10000)
+    unsigned tick_count=0,event_timer=0,com_number=0; // sys->com_num
     // Renderer/world bindings are distinct from opcode parsing. Unbound
     // commands are retained with exact operands and reported by the runtime.
     std::function<bool(const EventCommand&)> binding;
@@ -37,10 +39,16 @@ public:
     std::function<Message(unsigned,unsigned)> item_message;
     std::function<bool()> movie_active;
     std::function<unsigned()> movie_time; // GetMwPlayTimeEx, centiseconds.
+    // bhPadCheck: (pad_ps, pad_on) of the current 30 Hz pass. pad_ps holds the
+    // newly pressed logical bits (edge), pad_on the held ones (bhSetPad).
+    std::function<std::pair<unsigned,unsigned>()> pad_state;
+    std::function<unsigned()> player_yaw; // plp->ay
+    std::function<void(unsigned)> set_player_yaw;
     std::function<bool(const DoorRequest&)> door;
     void inherit_progress(const EventVm& previous);
     void initialize();
     void tick();
+    void finish_room_exit(); // final bhControlEvent pass before bhStartDoorDemo
     void advance_game_clock(unsigned vertical_blanks=2);
     void start(unsigned level,unsigned event);
     bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
@@ -52,11 +60,16 @@ public:
     void choose_dialog(int direction);
     bool skip_cinematic();
     void service_item_request(); // bhCheckSubTask cb_flg 0x4010 -> GetItem
+    Message room_message(unsigned index)const; // rom->mesp[index]
     unsigned pickup_display()const{return pickup_display_;}
+    unsigned acquired_file()const{return acquired_file_;}
+    void finish_file(){acquired_file_=~0u;flags[10][0]&=~0x20000u;}
     std::vector<EventTaskState> task_states()const;
     bool flag(unsigned matrix,unsigned index)const;
     void set_flag(unsigned matrix,unsigned index,unsigned mode);
 private:
+    bool door_scenario_pending_=false;
+    bool request_door(const DoorRequest& request);
     struct Loop {std::size_t condition=0,body=0;unsigned count=0;bool repeat=false;};
     struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;std::array<unsigned,32> loop_counts{};};
     std::vector<std::uint8_t> room_;
@@ -67,9 +80,11 @@ private:
     Inventory& inventory_;MessageDialog& dialog_;
     bool opening_hint_=false,status_use_pending_=false;
     unsigned pickup_item_=0,pickup_model_=~0u,pickup_display_=0,pickup_mode_=0;
+    unsigned acquired_file_=~0u;
     std::vector<unsigned> room_items_;
     void hide_item(unsigned index);
     void begin_pickup(unsigned item,unsigned model=~0u);
+    void begin_file(unsigned item,unsigned model=~0u);
     void pickup_result(const PickupResult& result);
     void finish_pickup();
     void show_dialog(Message message,unsigned index); // bhSetMessage resets response work

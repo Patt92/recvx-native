@@ -3,29 +3,79 @@ project(recvx_native VERSION 0.5.0 LANGUAGES C CXX)
 include(CTest)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
+add_custom_command(OUTPUT "${RECVX_TABLES}/chunk_blend.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_chunk_blend.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_chunk_blend.py src/ps2/veronica/prog/ps2_NinjaCnk.c src/ps2/veronica/prog/ps2_NaSystem.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_door_core.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_door_core.py tools/generate_native_tables.py include/ps2/veronica/prog/door.h src/ps2/veronica/prog/door.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/ui_tables.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/status_pulse.inc" "${RECVX_TABLES}/adx_tables.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_native_tables.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_native_tables.py include/ps2/veronica/prog/sub1.h src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/message.c src/ps2/veronica/prog/adxwrap.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/player_hair.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_player_hair.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_player_hair.py tools/generate_native_tables.py src/ps2/veronica/prog/objitm.c src/ps2/veronica/prog/player.c include/ps2/veronica/prog/objitm.h)
+add_custom_command(OUTPUT "${RECVX_TABLES}/effect_particles.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_effect_particles.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_effect_particles.py tools/generate_native_tables.py include/ps2/veronica/prog/effsub3.h src/ps2/veronica/prog/effsub3.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/en04_damage.inc" "${RECVX_TABLES}/en01_damage.inc" "${RECVX_TABLES}/en01_damage_types.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_en01_damage.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS src/ps2/veronica/prog/en04.c tools/generate_en01_damage.py tools/generate_native_tables.py include/ps2/veronica/prog/types.h include/ps2/veronica/prog/en01.h include/ps2/veronica/prog/zonzon.h include/ps2/veronica/prog/zonzon1.h include/ps2/veronica/prog/macros.h src/ps2/veronica/prog/en01.c src/ps2/veronica/prog/zonzon.c src/ps2/veronica/prog/zonzon1.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/subplayer.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_subplayer.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_subplayer.py tools/generate_native_tables.py src/ps2/veronica/prog/subpl.c src/ps2/veronica/prog/eneset.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/player_stairs.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_player_stairs.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools"
+  DEPENDS tools/generate_player_stairs.py tools/generate_native_tables.py src/ps2/veronica/prog/player.c include/ps2/veronica/prog/player.h)
+add_custom_command(OUTPUT "${RECVX_TABLES}/view_clip.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_view_clip.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_view_clip.py src/ps2/veronica/prog/event.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/weapon_flash.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_weapon_flash.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_weapon_flash.py tools/generate_native_tables.py src/ps2/veronica/prog/effsub1.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/targeting.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_targeting.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_targeting.py tools/generate_native_tables.py src/ps2/veronica/prog/pwksub.c src/ps2/veronica/prog/playpch.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/combat_tables.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_combat_tables.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_combat_tables.py tools/generate_native_tables.py src/ps2/veronica/prog/player.c src/ps2/veronica/prog/weapon.c src/ps2/veronica/prog/en01.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/file_folder.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_file_folder.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_file_folder.py tools/generate_native_tables.py src/ps2/veronica/prog/itemview.c src/ps2/veronica/prog/fileview.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/inventory_engine.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_inventory_engine.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_inventory_engine.py tools/generate_native_tables.py src/ps2/veronica/prog/itemview.c src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/fileview.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/effect_sprites.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_effect_sprites.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
-  DEPENDS tools/generate_effect_sprites.py src/ps2/veronica/prog/effsub5.c)
+  DEPENDS tools/generate_effect_sprites.py src/ps2/veronica/prog/effsub1.c src/ps2/veronica/prog/effsub5.c src/ps2/veronica/prog/player.c src/ps2/veronica/prog/light.c src/ps2/veronica/prog/effect.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/pickup_engine.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_pickup_engine.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_pickup_engine.py tools/generate_native_tables.py src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/weapon.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/item_use.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_item_use.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_item_use.py tools/generate_native_tables.py src/ps2/veronica/prog/sub1.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/event_inventory.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_event_inventory.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_event_inventory.py tools/generate_native_tables.py src/ps2/veronica/prog/event.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/computer.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_computer.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_computer.py tools/generate_native_tables.py src/ps2/veronica/prog/sp_evt.c include/ps2/veronica/prog/sp_evt.h include/ps2/veronica/prog/types.h)
 add_custom_command(OUTPUT "${RECVX_TABLES}/box_engine.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_box_engine.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_box_engine.py tools/generate_native_tables.py src/ps2/veronica/prog/sub1.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/enemy_spawn.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_enemy_spawn.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_enemy_spawn.py tools/generate_native_tables.py src/ps2/veronica/prog/en04.c src/ps2/veronica/prog/zonzon.c)
-add_library(recvx_game native/enemy_spawn.cpp "${RECVX_TABLES}/enemy_spawn.inc" native/effect_sprites.cpp "${RECVX_TABLES}/effect_sprites.inc" native/inspection.cpp "${RECVX_TABLES}/inventory_engine.inc" native/combat.cpp native/weapon_asset.cpp "${RECVX_TABLES}/combat_tables.inc" native/box_menu.cpp native/inventory.cpp "${RECVX_TABLES}/box_engine.inc" native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp src/ps2/veronica/prog/item.c "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/ui_tables.inc" native/status_pulse.cpp "${RECVX_TABLES}/status_pulse.inc" "${RECVX_TABLES}/adx_tables.inc")
+add_custom_command(OUTPUT "${RECVX_TABLES}/gameover.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_gameover.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_gameover.py src/ps2/veronica/prog/gameover.c include/ps2/veronica/prog/gameover.h src/ps2/veronica/prog/screen.c src/ps2/veronica/prog/player.c tools/generate_native_tables.py)
+add_custom_command(OUTPUT "${RECVX_TABLES}/effect_collision.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_effect_collision.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_effect_collision.py tools/generate_native_tables.py src/ps2/veronica/prog/hitchk.c)
+add_library(recvx_game native/file_folder.cpp "${RECVX_TABLES}/file_folder.inc" native/effect_collision.cpp "${RECVX_TABLES}/effect_collision.inc" native/gameover.cpp "${RECVX_TABLES}/gameover.inc" native/effect_particles.cpp "${RECVX_TABLES}/effect_particles.inc" native/computer.cpp native/computer_core.c "${RECVX_TABLES}/computer.inc" native/subplayer.c "${RECVX_TABLES}/subplayer.inc" native/en01_damage.c "${RECVX_TABLES}/en01_damage.inc" "${RECVX_TABLES}/en01_damage_types.inc" native/enemy_spawn.cpp "${RECVX_TABLES}/enemy_spawn.inc" native/effect_sprites.cpp "${RECVX_TABLES}/effect_sprites.inc" native/inspection.cpp "${RECVX_TABLES}/inventory_engine.inc" native/combat.cpp native/weapon_flash.cpp "${RECVX_TABLES}/weapon_flash.inc" native/targeting.cpp "${RECVX_TABLES}/targeting.inc" native/weapon_asset.cpp "${RECVX_TABLES}/combat_tables.inc" native/box_menu.cpp native/inventory.cpp "${RECVX_TABLES}/box_engine.inc" native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp src/ps2/veronica/prog/item.c "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/ui_tables.inc" native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp "${RECVX_TABLES}/view_clip.inc" native/player_stairs.c "${RECVX_TABLES}/player_stairs.inc" native/player_hair.c "${RECVX_TABLES}/player_hair.inc" "${RECVX_TABLES}/status_pulse.inc" "${RECVX_TABLES}/adx_tables.inc")
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}")
+target_sources(recvx_game PRIVATE "${RECVX_TABLES}/pickup_engine.inc" "${RECVX_TABLES}/event_inventory.inc" "${RECVX_TABLES}/item_use.inc")
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
 target_link_libraries(recvx_game PUBLIC recvx_scene)
 if(POLICY CMP0135)
@@ -46,9 +96,12 @@ add_library(recvx_disc src/ps2/veronica/prog/ps2_dvd_image.c)
 target_include_directories(recvx_disc PRIVATE include/ps2/veronica/prog)
 target_include_directories(recvx_data PUBLIC include/ps2/veronica/prog)
 target_link_libraries(recvx_data PUBLIC recvx_disc)
-add_library(recvx_scene native/scene.cpp native/renderer.cpp native/actor.cpp native/item_asset.cpp)
+add_library(recvx_scene native/scene.cpp native/renderer.cpp native/actor.cpp native/face.cpp native/item_asset.cpp native/chunk_blend.cpp "${RECVX_TABLES}/chunk_blend.inc")
+target_include_directories(recvx_scene PRIVATE "${RECVX_TABLES}")
 find_package(Threads REQUIRED)
 target_link_libraries(recvx_scene PUBLIC recvx_data recvx_math Threads::Threads)
+add_executable(recvx-render-benchmark EXCLUDE_FROM_ALL tools/benchmark_renderer.cpp)
+target_link_libraries(recvx-render-benchmark PRIVATE recvx_scene)
 if(MSVC)
   target_compile_options(recvx_scene PRIVATE /W4)
 else()
@@ -70,7 +123,7 @@ if(RECVX_BUILD_RUNTIME)
     find_package(SDL2 2.0.18 CONFIG REQUIRED)
   endif()
   add_executable(recvx-runtime native/runtime.cpp)
-  add_library(recvx_input native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp)
+  add_library(recvx_input native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp)
   target_link_libraries(recvx_input PUBLIC recvx_game SDL2::SDL2)
   if(BUILD_TESTING)
     add_executable(recvx-debug-tests tests/native/debug_menu_test.cpp)
@@ -116,16 +169,31 @@ else()
   target_compile_options(recvx-native PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 if(BUILD_TESTING)
+  add_executable(recvx-chunk-blend-tests tests/native/chunk_blend_test.cpp)
+  target_link_libraries(recvx-chunk-blend-tests PRIVATE recvx_scene)
+  add_test(NAME original_chunk_blend COMMAND recvx-chunk-blend-tests)
   add_executable(recvx-inventory-engine-tests tests/native/inventory_engine_test.cpp)
   target_include_directories(recvx-inventory-engine-tests PRIVATE "${RECVX_TABLES}")
   target_link_libraries(recvx-inventory-engine-tests PRIVATE recvx_game)
   add_test(NAME original_inventory_table_coverage COMMAND recvx-inventory-engine-tests)
+  add_executable(recvx-hd-texture-tests tests/native/hd_texture_test.cpp)
+  target_link_libraries(recvx-hd-texture-tests PRIVATE recvx_data)
+  add_test(NAME hd_texture_content_key COMMAND recvx-hd-texture-tests)
   add_executable(recvx-status-pulse-tests tests/native/status_pulse_test.cpp)
   target_link_libraries(recvx-status-pulse-tests PRIVATE recvx_game)
   add_test(NAME status_condition_pulse COMMAND recvx-status-pulse-tests)
+  add_executable(recvx-snapshot-tests tests/native/snapshot_test.cpp)
+  target_link_libraries(recvx-snapshot-tests PRIVATE recvx_game)
+  add_test(NAME snapshot_savefile_roundtrip COMMAND recvx-snapshot-tests)
+  add_executable(recvx-view-clip-tests tests/native/view_clip_test.cpp)
+  target_link_libraries(recvx-view-clip-tests PRIVATE recvx_game)
+  add_test(NAME original_view_clip COMMAND recvx-view-clip-tests)
   add_executable(recvx-inventory-tests tests/native/inventory_menu_test.cpp)
   target_link_libraries(recvx-inventory-tests PRIVATE recvx_game)
   add_test(NAME inventory_combine_inspect COMMAND recvx-inventory-tests)
+  add_executable(recvx-file-reader-tests tests/native/file_reader_test.cpp)
+  target_link_libraries(recvx-file-reader-tests PRIVATE recvx_game)
+  add_test(NAME original_file_reader COMMAND recvx-file-reader-tests)
   add_executable(recvx-door-tests tests/native/door_test.cpp)
   target_link_libraries(recvx-door-tests PRIVATE recvx_game)
   add_test(NAME door_transition COMMAND recvx-door-tests)
@@ -135,9 +203,46 @@ if(BUILD_TESTING)
   add_executable(recvx-audio-tests tests/native/audio_movie_test.cpp)
   target_link_libraries(recvx-audio-tests PRIVATE recvx_game)
   add_test(NAME audio_movie COMMAND recvx-audio-tests)
+  add_executable(recvx-bgm-room-tests tests/native/bgm_room_test.cpp)
+  target_link_libraries(recvx-bgm-room-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
+    add_test(NAME bgm_room_transition COMMAND recvx-bgm-room-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  add_executable(recvx-computer-tests tests/native/computer_test.cpp)
+  target_link_libraries(recvx-computer-tests PRIVATE recvx_game)
+  add_test(NAME computer_terminal COMMAND recvx-computer-tests)
+  add_executable(recvx-ammunition-tests tests/native/ammunition_test.cpp)
+  target_link_libraries(recvx-ammunition-tests PRIVATE recvx_game)
+  add_test(NAME ammunition_pickup_zero COMMAND recvx-ammunition-tests)
   add_executable(recvx-combat-tests tests/native/combat_test.cpp)
   target_link_libraries(recvx-combat-tests PRIVATE recvx_game)
   add_test(NAME combat_weapons_ammunition COMMAND recvx-combat-tests)
+  add_executable(recvx-effect-debris-tests tests/native/effect_debris_test.cpp)
+  target_link_libraries(recvx-effect-debris-tests PRIVATE recvx_game)
+  add_test(NAME effect_collision_debris COMMAND recvx-effect-debris-tests)
+  add_executable(recvx-effect-pool-tests tests/native/effect_pool_test.cpp)
+  target_link_libraries(recvx-effect-pool-tests PRIVATE recvx_game)
+  add_test(NAME effect_pool_lifetime COMMAND recvx-effect-pool-tests)
+  add_executable(recvx-gameover-tests tests/native/gameover_test.cpp)
+  target_link_libraries(recvx-gameover-tests PRIVATE recvx_game)
+  add_test(NAME gameover_original COMMAND recvx-gameover-tests)
+  add_executable(recvx-enemy-damage-tests tests/native/enemy_damage_test.cpp)
+  target_link_libraries(recvx-enemy-damage-tests PRIVATE recvx_game)
+  add_test(NAME enemy_damage_original_en01 COMMAND recvx-enemy-damage-tests)
+  add_executable(recvx-gameplay-bindings-tests tests/native/gameplay_bindings_test.cpp)
+  target_link_libraries(recvx-gameplay-bindings-tests PRIVATE recvx_game)
+if(TARGET recvx_input)
+ target_link_libraries(recvx-gameplay-bindings-tests PRIVATE recvx_input)
+ target_compile_definitions(recvx-gameplay-bindings-tests PRIVATE RECVX_TEST_INPUT)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
+  add_test(NAME native-gameplay-bindings COMMAND recvx-gameplay-bindings-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+endif()
+  add_executable(recvx-script-motion-tests tests/native/script_motion_test.cpp)
+  target_link_libraries(recvx-script-motion-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
+    add_test(NAME script_motion COMMAND recvx-script-motion-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   add_executable(recvx-progression-tests tests/native/progression_test.cpp)
   target_link_libraries(recvx-progression-tests PRIVATE recvx_game)
   add_test(NAME engine_progression_resources COMMAND recvx-progression-tests)
@@ -161,11 +266,23 @@ if(BUILD_TESTING)
   add_executable(recvx-texture-filter-tests tests/native/texture_filter_test.cpp)
   target_link_libraries(recvx-texture-filter-tests PRIVATE recvx_scene)
   add_test(NAME texture_filtering COMMAND recvx-texture-filter-tests)
+  add_executable(recvx-camera-return-tests tests/native/camera_return_test.cpp)
+  target_link_libraries(recvx-camera-return-tests PRIVATE recvx_game)
+  add_test(NAME active_camera_return COMMAND recvx-camera-return-tests)
   add_executable(recvx-scene-tests tests/native/scene_test.cpp)
   target_link_libraries(recvx-scene-tests PRIVATE recvx_scene)
   add_test(NAME scene_renderer COMMAND recvx-scene-tests)
+  add_executable(recvx-face-tests tests/native/face_test.cpp)
+  target_link_libraries(recvx-face-tests PRIVATE recvx_game)
+  add_test(NAME original_face_geometry COMMAND recvx-face-tests)
   add_executable(recvx-actor-tests tests/native/actor_test.cpp)
   target_link_libraries(recvx-actor-tests PRIVATE recvx_scene)
   add_test(NAME player_motion_skin COMMAND recvx-actor-tests)
 endif()
 install(TARGETS recvx-native RUNTIME DESTINATION bin)
+
+if(BUILD_TESTING)
+  add_executable(recvx-continuity-tests tests/native/continuity_test.cpp)
+  target_link_libraries(recvx-continuity-tests PRIVATE recvx_game)
+  add_test(NAME core_continuity COMMAND recvx-continuity-tests)
+endif()

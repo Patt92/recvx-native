@@ -56,9 +56,9 @@ void AudioMixer::play_system(unsigned program){
 bool AudioMixer::play_weapon_sound(unsigned bank,unsigned program){
     if(data_.empty())return false;
     auto source=weapon_banks_.find(bank);if(source==weapon_banks_.end()){
-        const auto index=read_asset_file(data_/"files/MULTSPQ1.IDX",4096);BinaryView ids(index);unsigned pack=0;bool found=false;
+        const auto index=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(index);unsigned pack=0;bool found=false;
         for(;pack<index.size()/2;++pack){const auto key=ids.u16(pack*2);if(key==0xffff)break;if(key==(0x4000|bank)){found=true;break;}}if(!found)return false;
-        auto file=mods_/"audio/MULTSPQ1"/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives/MULTSPQ1"/(asset_number(pack)+".bin");const auto bytes=read_asset_file(file,32*1024*1024);BinaryView v(bytes);
+        auto file=mods_/("audio/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/("archives/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");const auto bytes=read_asset_file(file,32*1024*1024);BinaryView v(bytes);
         for(unsigned i=0;i<16;++i){const auto p=i*16,offset=v.u32(p);if(!offset)break;const auto size=v.u32(p+4);v.require(offset,size);if(v.u32(p+8)==2&&v.u32(p+12)==1){source=weapon_banks_.emplace(bank,std::vector<std::uint8_t>(bytes.begin()+offset,bytes.begin()+offset+size)).first;break;}}
         if(source==weapon_banks_.end())return false;
     }
@@ -68,10 +68,10 @@ bool AudioMixer::play_weapon_sound(unsigned bank,unsigned program){
 void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant){
     if(stage>15||room>255||variant>15)throw std::runtime_error("invalid room sound key");
     stop(4);stop(5);for(unsigned slot=14;slot<24;++slot)stop(slot);for(unsigned slot=8;slot<13;++slot)stop(slot); /* CallDoorSe (MIDI slot 2) survives the room load */
-    const auto index=read_asset_file(data_/"files/MULTSPQ1.IDX",4096);BinaryView ids(index);const auto key=stage*1000+room*10+variant;
+    const auto index=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(index);const auto key=stage*1000+room*10+variant;
     unsigned pack=0;bool found=false;for(;pack<index.size()/2;++pack){const auto id=ids.u16(pack*2);if(id==0xffff)break;if(id==key){found=true;break;}}
     if(!found)return;
-    auto file=mods_/"audio/MULTSPQ1"/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives/MULTSPQ1"/(asset_number(pack)+".bin");
+    auto file=mods_/("audio/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/("archives/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");
     const auto bytes=read_asset_file(file,32*1024*1024);BinaryView v(bytes);bool terminated=false;
     for(unsigned i=0;i<16;++i){const auto p=i*16,offset=v.u32(p);if(!offset){terminated=true;break;}const auto size=v.u32(p+4),type=v.u32(p+8),bank=v.u32(p+12);v.require(offset,size);
         // Type 2 is the original SDE shot bank (HD/BD wrapper); type 0/1
@@ -86,14 +86,34 @@ void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant)
         const unsigned cached=type==2?bank:type==1?0x100u|bank:~0u;
         for(auto it=room_sounds_.begin();it!=room_sounds_.end();)it=std::get<0>(it->first)==cached?room_sounds_.erase(it):std::next(it);
         std::vector<std::uint8_t> section(bytes.begin()+offset,bytes.begin()+offset+size);
-        if(type==2)room_banks_[bank]=std::move(section);else if(type==1)midi_programs_[bank]=std::move(section);else midi_sequences_[bank]=std::move(section);}
+        if(type==2){room_banks_[bank]=std::move(section);sound_bank_packs_[bank]=pack;}else if(type==1)midi_programs_[bank]=std::move(section);else midi_sequences_[bank]=std::move(section);}
     if(!terminated)throw std::runtime_error("unterminated room sound pack");room_pack_=pack;
+}
+bool AudioMixer::load_player_sounds(unsigned player){
+    if(player>3)throw std::runtime_error("invalid player voice bank");
+    // Replacing the character must not retain a voice or a decoded sample from the old CORE pack.
+    stop(7);room_banks_.erase(4);sound_bank_packs_.erase(4);
+    for(auto it=room_sounds_.begin();it!=room_sounds_.end();)it=std::get<0>(it->first)==4?room_sounds_.erase(it):std::next(it);
+    if(data_.empty())return false;
+    const auto index=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(index);
+    unsigned pack=0;bool found=false;
+    for(;pack<index.size()/2;++pack){const auto key=ids.u16(pack*2);if(key==0xffff)break;if(key==(0xfff0u|player)){found=true;break;}}
+    if(!found){unavailable.push_back("CORE/"+asset_number(player)+": pack missing");return false;}
+    auto file=mods_/("audio/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");
+    if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/("archives/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");
+    const auto bytes=read_asset_file(file,32*1024*1024);BinaryView v(bytes);bool loaded=false,terminated=false;
+    for(unsigned i=0;i<16;++i){const auto p=i*16,offset=v.u32(p);if(!offset){terminated=true;break;}
+        const auto size=v.u32(p+4);v.require(offset,size);
+        if(v.u32(p+8)==2&&v.u32(p+12)==4){room_banks_[4]=std::vector<std::uint8_t>(bytes.begin()+offset,bytes.begin()+offset+size);sound_bank_packs_[4]=pack;loaded=true;}}
+    if(!terminated)throw std::runtime_error("unterminated player sound pack");
+    if(!loaded)unavailable.push_back("CORE/"+asset_number(player)+": SE bank 4 missing");
+    return loaded;
 }
 bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot,bool loop){
     if(slot<3||slot>=slots_.size())throw std::runtime_error("invalid room effect channel");
     const auto source=room_banks_.find(bank);if(source==room_banks_.end())return false;
     const auto id=std::make_tuple(bank,program,-1);auto found=room_sounds_.find(id);if(found==room_sounds_.end())found=room_sounds_.emplace(id,std::make_shared<PcmClip>(decode_system_sound(source->second,program))).first;
-    play_pcm(slot,found->second,1,loop);played.push_back("MULTSPQ1/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
+    play_pcm(slot,found->second,1,loop);played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(sound_bank_packs_.at(bank))+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
 }
 bool AudioMixer::background_sound(unsigned slot,unsigned sound,unsigned timer){
     if(slot>2)throw std::runtime_error("background sound slot outside original three");
@@ -110,7 +130,7 @@ void AudioMixer::request_background_sound(unsigned slot,int sound){
 }
 bool AudioMixer::play_room_sequence(unsigned bank,unsigned list,unsigned slot,bool loop){
     const auto sq=midi_sequences_.find(bank);const auto programs=midi_programs_.find(bank);
-    auto fail=[&](const char* why){sequence_unavailable.push_back("MULTSPQ1/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/seq"+std::to_string(list)+": "+why);return false;};
+    auto fail=[&](const char* why){sequence_unavailable.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/seq"+std::to_string(list)+": "+why);return false;};
     if(sq==midi_sequences_.end()||programs==midi_programs_.end())return fail("bank missing");
     const auto& s=sq->second;auto u32=[&](std::size_t at)->std::uint32_t{if(at+4>s.size())throw std::runtime_error("SQ truncated");return std::uint32_t(s[at])|s[at+1]<<8|s[at+2]<<16|std::uint32_t(s[at+3])<<24;};
     try{
@@ -160,12 +180,19 @@ bool AudioMixer::play_room_sequence(unsigned bank,unsigned list,unsigned slot,bo
         if(programs_played.empty())return fail("no program/note");
         Channel channel;channel.sequence=std::move(sequence);channel.sequence->until=channel.sequence->events.front().delay;channel.loop=loop;
         slots_.at(slot)=std::move(channel);
-        played.push_back("MULTSPQ1/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/seq"+std::to_string(list)+programs_played);return true;
+        played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/seq"+std::to_string(list)+programs_played);return true;
     }catch(const std::exception& e){return fail(e.what());}
 }
 void AudioMixer::custom_midi_slots(unsigned objects,unsigned events){
     if(objects>3||objects+events>5){objects=1;events=4;}
     max_object_slots_=objects;max_event_slots_=events;
+}
+bool AudioMixer::play_system_midi(unsigned se){
+    // StopFadeMidi(2) then PlayMidi(2, bank, (char)list); host slot 13 stands for MIDI slot 2.
+    stop(13);
+    const auto bank=(se>>8)&15,list=se&255;
+    if(!play_room_sequence(bank,list,13)){unavailable.push_back("SYSTEM/MIDI/0x"+std::to_string(se));return false;}
+    played.push_back("SYSTEM/MIDI/"+std::to_string(bank)+"/"+std::to_string(list));return true;
 }
 bool AudioMixer::event_sound(unsigned slot,unsigned sound){
     // Original CallNativeEventSe's upper-bound comparison includes SlotNo==MaxSlotEventSe.
@@ -224,6 +251,36 @@ bool AudioMixer::enemy_sound(unsigned slot,unsigned sound){
     // sdfunc.c CallEnemySe: force bank 3, preserve the low 8-bit list number.
     return play_room_sound(3,sound&255,18+slot);
 }
+void AudioMixer::request_enemy_se(unsigned enemy,int se_no,int fade_rate){
+    auto& r=enemy_requests_[enemy];r.fade=fade_rate;const int prio=(se_no&0xF0000)>>16;if(r.prio>prio)r.prio=prio;
+    if(!(se_no&0xF000000)){r.se=se_no;r.req=true;}else{r.se_v=se_no;r.req_v=true;}
+}
+bool AudioMixer::enemy_se_playing(unsigned enemy,int se_no)const{
+    for(const auto& v:enemy_voices_)if(v.flag&&v.enemy==enemy){if(se_no>0)return true;if(v.se==se_no)return true;}return false;
+}
+void AudioMixer::play_player_voice(int se_no){
+    try{if(!play_room_sound((unsigned(se_no)>>8)&0xF,unsigned(se_no)&255,7))unavailable.push_back("player voice "+std::to_string(se_no));}
+    catch(const std::exception& error){unavailable.push_back("player voice "+std::to_string(se_no)+": "+error.what());}
+}
+void AudioMixer::exec_enemy_se(){
+    // Free voices whose sound ended, then serve the requests by priority (lower first), as ExecEnemySeManager does.
+    for(unsigned i=0;i<6;++i)if(enemy_voices_[i].flag&&!active(18+i))enemy_voices_[i]={};
+    std::vector<unsigned> order;for(const auto& pair:enemy_requests_)if(pair.second.req||pair.second.req_v)order.push_back(pair.first);
+    std::stable_sort(order.begin(),order.end(),[&](unsigned a,unsigned b){return enemy_requests_[a].prio<enemy_requests_[b].prio;});
+    auto serve=[&](unsigned enemy,int se,int attrib){
+        int same=0;for(const auto& v:enemy_voices_)if(v.flag&&v.se==se&&v.enemy!=enemy)++same;
+        if(same&&same>=((se>>12)&0xF))return; // CheckPlaySameSe
+        int slot=-1;for(unsigned i=0;i<6;++i)if(enemy_voices_[i].flag&&enemy_voices_[i].enemy==enemy&&enemy_voices_[i].attrib==attrib){slot=int(i);break;}
+        if(slot<0)for(unsigned i=0;i<6;++i)if(!enemy_voices_[i].flag){slot=int(i);break;}
+        if(slot<0)return;
+        enemy_voices_[slot]={true,enemy,se,(se&0xF000000)>>24,(se&0xF0000)>>16};
+        stop(18+slot);
+        // CallEnemySeMain: bank (SeNo>>8)&0xF, list SeNo. A program the host cannot decode is reported, never fatal.
+        try{if(!play_room_sound((unsigned(se)>>8)&0xF,unsigned(se)&255,18+unsigned(slot)))unavailable.push_back("enemy SE "+std::to_string(se));}
+        catch(const std::exception& error){unavailable.push_back("enemy SE "+std::to_string(se)+": "+error.what());}
+    };
+    for(const auto enemy:order){auto& r=enemy_requests_[enemy];if(r.req){serve(enemy,r.se,0);r.req=false;}if(r.req_v){serve(enemy,r.se_v,1);r.req_v=false;}r.prio=3;}
+}
 void AudioMixer::stop_enemy_sound(unsigned slot){if(slot>=6)throw std::runtime_error("enemy sound slot outside original six voices");stop(18+slot);}
 bool AudioMixer::footstep(unsigned floor,unsigned type,unsigned actor,bool enabled){
     if(actor>=foot_switch_.size()||type>3||floor>4)return false;
@@ -235,9 +292,9 @@ bool AudioMixer::footstep(unsigned floor,unsigned type,unsigned actor,bool enabl
 void AudioMixer::load_door_sounds(unsigned bank){
     for(unsigned slot=door_voice_first;slot<=door_voice_last;++slot)stop(slot);door_source_.clear();
     for(auto it=room_sounds_.begin();it!=room_sounds_.end();)it=std::get<0>(it->first)==0x101u?room_sounds_.erase(it):std::next(it);door_bank_=bank;door_slot_=door_voice_first;
-    if(data_.empty())return;const auto bytes=read_asset_file(data_/"files/MULTSPQ1.IDX",4096);BinaryView ids(bytes);unsigned pack=0;
+    if(data_.empty())return;const auto bytes=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(bytes);unsigned pack=0;
     for(;pack<bytes.size()/2;++pack){if(ids.u16(pack*2)==(0x8000|bank))break;if(ids.u16(pack*2)==0xffff)return;}if(pack==bytes.size()/2)return;
-    auto file=mods_/"audio/MULTSPQ1"/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives/MULTSPQ1"/(asset_number(pack)+".bin");const auto data=read_asset_file(file,32*1024*1024);BinaryView v(data);
+    auto file=mods_/("audio/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/("archives/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");const auto data=read_asset_file(file,32*1024*1024);BinaryView v(data);
     for(unsigned i=0;i<16;++i){const auto p=i*16,offset=v.u32(p);if(!offset)break;const auto size=v.u32(p+4);v.require(offset,size);if(v.u32(p+8)==1&&v.u32(p+12)==1){door_source_={data.begin()+offset,data.begin()+offset+size};break;}}
     // InitSoundDriver downloads COMMON.MLT once. Its third block is MIDI
     // sequence bank 1 (four door lists), retained when DOOR SPQ replaces only
@@ -317,7 +374,7 @@ void AudioMixer::fade_gain(unsigned slot,float gain,unsigned ticks){auto& s=slot
 void AudioMixer::play_bgm_ex(int bgm,int fade_in_rate,int volume){
     // PlayBgmEx2: SetVolumeAdxEx(0,-127,Volume) lifts the limit by 20 below -20.
     const float limit=volume<-20?float(volume+20):0.f;const unsigned ticks=fade_in_rate+1?adx_fade_ticks(fade_in_rate+1):0;
-    play(0,"BGM1",unsigned(bgm),adx_gain(limit),true,ticks);current_bgm_=bgm;current_bgm_volume_=volume;
+    play(0,set_name("BGM"),unsigned(bgm),adx_gain(limit),true,ticks);current_bgm_=bgm;current_bgm_volume_=volume;
 }
 void AudioMixer::request_bgm2(int bgm,int volume){if(current_bgm_!=bgm){current_bgm_=bgm;req_fade_bgm_=8;}else if(current_bgm_volume_!=volume)req_fade_bgm_=2;current_bgm_volume_=volume;}
 void AudioMixer::stop_bgm(int fade_out_rate){stop(0,fade_out_rate?adx_fade_ticks(fade_out_rate):0);current_bgm_=-1;current_bgm_volume_=-127;}

@@ -21,7 +21,7 @@ static void bhSetMessage(int,unsigned index){message=index;sys->st_flg|=0x200;}
 namespace pickup_original {
 struct S_WORK {unsigned int* gb=nullptr;unsigned int* pip=nullptr;unsigned testmode=0,statusflg=0,flgchk=0;};
 struct System {unsigned gm_mode=0,gm_flg=0,cb_flg=0,st_flg=0,pad_ps=0,mes_sel=0,sb_id=0,ply_id=0,rom_no=0,stg_no=0,mn_mode0=0;unsigned* itm=nullptr;};
-struct Player {unsigned mode3=0,wpnr_no=0;};
+struct Player {unsigned mode3=0,wpnr_no=0,at_flg=0;};
 static thread_local S_WORK swork;
 static thread_local System system;static thread_local System* sys=&system;
 static thread_local Player player;static thread_local Player* plp=&player;
@@ -83,6 +83,19 @@ PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,un
     ItemSort();
     control=sys.cb_flg;
     return {swork.testmode,message,granted,used};
+}
+bool Inventory::reload(){
+    if(!slots()[0]||slots()[0]>=12||!weapon())return false;
+    pickup_original::swork={};pickup_original::swork.pip=slots();
+    pickup_original::system={};pickup_original::system.gm_mode=game_mode;
+    pickup_original::system.st_flg=side_pack?0x8000000u:0;
+    return pickup_original::bhSearchBullet()!=0;
+}
+bool Inventory::count_bullet(){
+    if(!slots()[0]||slots()[0]>=12||!weapon())return false;
+    pickup_original::swork={};pickup_original::swork.pip=slots();
+    pickup_original::player={};pickup_original::system={};
+    return pickup_original::bhCountBullet()!=0;
 }
 Inventory::Inventory(){
     // AllItemInit, normal new game, no bonus unlocks.

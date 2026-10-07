@@ -17,13 +17,15 @@ float CombatController::target_distance(NJS_POINT3 origin,NJS_POINT3 direction,f
     return result;
 }
 void CombatController::hit(RoomWorld& world,NJS_POINT3 origin,NJS_POINT3 direction,float range,float radius,bool knife){
-    const float limit=world.combat_wall_distance(origin,direction,range,knife?0:0x400);float closest=limit;unsigned selected=~0u;float distance=0;
+    const float limit=world.combat_wall_distance(origin,direction,range,knife?0:0x400);float closest=limit;unsigned selected=~0u,identity=0;float distance=0;int selected_joint=-1;NJS_POINT3 selected_point{};
     for(const auto& target:world.combat_targets()){if(struck_.count(target.index))continue;const float d=std::hypot(target.position.x-origin.x,target.position.z-origin.z);const auto& w=WpnTab[weapon_];const float spread=knife?0:std::min(w.rn*d,w.rmax);
-        const float t=target_distance(origin,direction,limit,target.position,target.radius+radius+spread,target.height);if(t<closest){closest=t;selected=target.index;distance=d;}}
-    if(selected!=~0u){const int damage=distance<15?EneDamNear[1][weapon_]:distance<40?EneDamMid[1][weapon_]:EneDamFar[1][weapon_];
+        float t=target_distance(origin,direction,limit,target.position,target.radius+radius+spread,target.height);int joint=-1;NJS_POINT3 point{};
+        if(w.flg&8){const auto hit=world.enemy_capsule_hit(target.index,origin,{origin.x+direction.x*limit,origin.y+direction.y*limit,origin.z+direction.z*limit},radius+spread);if(!hit)continue;joint=hit->joint;point=hit->point;t=(point.x-origin.x)*direction.x+(point.y-origin.y)*direction.y+(point.z-origin.z)*direction.z;}
+        if(t>=0&&t<closest){closest=t;selected=target.index;identity=target.identity;distance=d;selected_joint=joint;selected_point=point;}}
+    if(selected!=~0u){const int damage=distance<15?EneDamNear[identity][weapon_]:distance<40?EneDamMid[identity][weapon_]:EneDamFar[identity][weapon_];
         // weapon.c: comb_flg 0x10/0x20/0x40 = near/mid/far hit; the direction is the shot vector.
         const unsigned comb=distance<15?0x10u:distance<40?0x20u:0x40u;const NJS_POINT3 at{origin.x+direction.x*closest,origin.y+direction.y*closest,origin.z+direction.z*closest};
-        if(world.damage(selected,int(weapon_),damage,comb,at,direction)){++hits;struck_.insert(selected);}}
+        if(world.damage(selected,int(weapon_),damage,comb,selected_joint>=0?selected_point:at,direction,selected_joint)){++hits;struck_.insert(selected);}}
 }
 void CombatController::select_target(PlayerAsset& player,const SceneSpawn& actor,std::size_t motion,std::int64_t frame,RoomWorld* world,bool next){
     if(!world){aim_={};return;}
@@ -35,9 +37,9 @@ ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset& player,st
     return Targeting::arms(player,motion,frame,right_arm_,left_arm_);
 }
 void CombatController::fire(Inventory& inventory,const SceneSpawn& actor,RoomWorld* world,AudioMixer& audio,PlayerAsset& player,std::size_t motion,std::int64_t frame,bool left){
-    auto& item=inventory.slots()[inventory.slots()[0]];const auto& w=WpnTab[weapon_];
+    const auto& w=WpnTab[weapon_];
     // playpch: the left shot follows the right shot by gun_delay, sharing one ammo decrement.
-    if(!left){if(!Inventory::quantity(item)&&!(item&0x08000000))return;if(!(item&0x08000000))--item;++shots;audio.play_weapon_sound(unsigned(w.snd_wpno),w.seno0&255);}
+    if(!left){if(!inventory.count_bullet())return;++shots;audio.play_weapon_sound(unsigned(w.snd_wpno),w.seno0&255);}
     const int angle=actor.yaw+((w.flg&0x800)?(left?left_arm_:right_arm_):0);
     const float yaw=angle*6.28318530718f/65536,pitch=vertical_*0.7853981634f;
     NJS_POINT3 dir{-std::sin(yaw)*std::cos(pitch),std::sin(pitch),-std::cos(yaw)*std::cos(pitch)};
@@ -80,7 +82,7 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
         auto& item=inventory.slots()[inventory.slots()[0]];const bool infinite=((item>>16)&0x800)!=0;
         if(weapon_!=2&&!Inventory::quantity(item)&&!infinite){
             // Reload uses the original item combination table, including upgraded pistols.
-            bool reloaded=false;for(unsigned slot=2;slot<12;++slot)if((itemdata[Inventory::id(inventory.slots()[slot])].type&2)&&inventory.combine(slot,inventory.slots()[0])){reloaded=true;break;}
+            const bool reloaded=inventory.reload();
             if(reloaded&&player.has_motion(116)){phase_=Phase::Reload;pose(116);}else{++empty;audio.play_weapon_sound(0,4);phase_=Phase::Attack;pose(101);}return true;
         }
         phase_=Phase::Attack;pose(PlMtnWpn[4]+(vertical_>0?5:vertical_<0?10:0));struck_.clear();++attacks;

@@ -1,3 +1,487 @@
+## Originaler 3D-Dateiordner (Codex, 2026-10-07)
+
+Die Host-Dateiliste wurde im gemeinsamen Statusmenü ersetzt. SearchTag,
+SelectFile, SelectTag und FileSyu werden direkt aus fileview.c/itemview.c
+extrahiert; eigene FV-/S_WORK-Bindung hält die originale Ordnerrotation,
+Öffnen/Schließen, Eingabesperre und SE 0/3/6. Echtes ITEM1-Modell 139
+(0138.bin), drei Ordner, Originalknotenpositionen und DrawSubItems Sonderpfad
+(gedrehte Positionen, separate ang00, .58-Skalierung, Kamera-Z 8).
+MakeTags originale Registergeometrie, Besitzbits und Graustufen 128/192;
+Originalpfeile einschließlich Rotation und Helligkeit. FILE schließt die
+Fensterblenden vor dem Ordnerwechsel; StatusToFileView nutzt SpriteH's
+separaten Ausfahrzweig 0x1000000 und hält den Status-Task aktiv.
+Der Bildschirm-Seitenwechsel wird im Software-Renderer aus derselben
+Wallpapergrafik und Textlage zusammengesetzt, ohne PS2-Framebuffer-Upload.
+
+Rechts/Links wählen die drei Ordner (originale Richtung), Bestätigen öffnet
+zuerst den Ordner; Oben/Unten wählen nur vorhandene Register. Register-Cancel
+schließt den Ordner, Ordner-Cancel führt zur FILE-Leiste. Nach dem Lesen
+kehrt FileExit01 ebenfalls zur FILE-Leiste zurück, nicht in eine Host-Liste.
+Direktes File/Examine des Handbuch-Items 145 nutzt die originale automatische
+Ordneröffnung (0x40000000). Das Handbuch wird beim Verlassen wie original aus
+itm[0..191] entfernt und ic_flg[15] 0x80000000 gesetzt. Originales
+PlayPageCheck bestimmt 7–14 Seiten über ev_flg; MakeTag schaltet die
+Handbuchdatei und optional Datei 11 über ssd_flg 0x1000 frei.
+
+Gezielt: drei CTest-Gruppen, echte Ordner-/Dateiressourcen 0/2/17,
+Registerbesitz/-farben, leere Ordner, Dreh-/Öffnungs-/Schließpfade und sechs
+Handbuch-Fortschrittszustände bestanden. tools/verify_file_folder.py prüft
+in RM_0060 beide Einstiege mit normalen Menütasten, Seitenwechsel, Rückkehr,
+Handbuchentfernung/Leseflag und Status-Ende; keine Positionierung oder
+Fortschrittsflags im Runtime-Replay. Ressourcenfixture schaltet für die
+Ansichten alle Dateibesitzbits ein. Ansichten einschließlich echten
+Runtime-Handbuchs visuell geprüft. Mac arm64 gebaut/signiert; Windows x64 nur
+crossgebaut. Beide Starter aktualisiert, Paketdaten/-Runtime ebenfalls geprüft,
+Runtime/SDL nur arm64 und sieben Benutzerdateien per SHA-256 unverändert.
+Logs: build/validation/file-folder-20261007; Backup:
+archived/releases/file-folder-before-20261007-154445.
+Keine bitgenaue PS2-GS-/Licht-/vollständige Statusmenü-Zusage und kein
+physischer Controller-/Durchspielnachweis. Kein Commit/Push.
+
+## Inventar: Datei-Leseansicht und Ausrüstung (Codex, 2026-10-07)
+
+Gemeinsame GameUi-Dateiansicht ersetzt den kleinen Host-Dialog: originale
+parts_22-Wallpapergeometrie/UVs, bhDispMessage-Position (68/64), Schriftgröße,
+Pfeile und EXIT aus ITEM1. Kein zusätzlicher Seitenzähler. Seitenwechsel nutzt
+PageScrolls beschleunigte Bewegung, acht Warteframes und zwei Eingabewarteframes.
+FileScrollSet-Steuerung: Links/Rechts blättern; Rechts auf der letzten Seite
+wählt EXIT, Links wählt es zuerst ab, Bestätigen beendet nur mit gewähltem EXIT.
+Cancel führt zurück zur Dateiauswahl, bei Aufnahme ins Spiel und beim
+Item-Report zum Itemcursor. Leere Dateiliste öffnet keine unbesessene Datei.
+MainCommand-Cancel schließt original direkt; CursorMove-Cancel wählt ITEM (3),
+nicht EXIT. Keine Änderung auf ein vom Original abweichendes EXIT-first-Verhalten.
+ArmsSet positioniert schmale Ausrüstung bei Center 3 +58, breite bei +24;
+der originale breite Rahmen bleibt erhalten (Center 3 verschiebt sich beim Öffnen).
+
+Gezielt: drei CTest-Gruppen bestanden; recvx-file-reader-tests mit echten
+Dateien 0/2/17, Seiten-/EXIT-/Cancelpfaden und Pixelgrenzen schmaler/breiter
+Ausrüstung. Ansichten der Pistole und Butler-Briefseite visuell geprüft.
+Paketdaten bestanden; Mac arm64 gebaut/signiert, Windows x64 nur crossgebaut.
+Beide Starter aktualisiert; Runtime/SDL nur arm64, sieben Benutzerdateien per
+SHA-256 unverändert. Logs: build/validation/inventory-read-20261007; Backup:
+archived/releases/inventory-read-before-20261007-152353.
+Dateiauswahl bleibt Host-Liste: originaler animierter 3D-Ordner, Übergangs-
+Capture und spezielle Fortschrittskürzung des Spielhandbuchs sind damit nicht
+vollständig portiert. Keine vollständige 1:1-Inventarmenü-Zusage, kein
+Durchspiel-/Controllernachweis, kein Commit/Push.
+
+## Inventory EKG layers — 2026-10-07
+
+Preserved original pulse vertex depth and sorted captured EKG quads with status
+sprites, using ps2_NaDraw.c reciprocal z and SpriteDisp priorities. Trace 10 /
+cure band 5 sit behind closing shutters 1. The old final overlay ignored depth.
+Targeted status_condition_pulse passed; actual SYSTEM-resource pixel comparison
+covers normal/heal/poison-cure across all 15 closing frames, visible when open,
+fully covered after six shutter ticks. Package-data version passed too.
+Mac arm64 / Windows x64 built (Windows not run); both starter binaries updated,
+Mac app signed, INI/snapshot hashes preserved. Logs:
+`build/validation/pulse-layer-20261007`; backup `archived/releases/pulse-layer-before-20261007-150605`.
+No broad gameplay retest or full status-menu fidelity claim; no commit/push.
+
+## BGM room exits — 2026-10-07
+
+Fixed the shared door/event handover: original interaction index/flags and final
+scenario pass precede room fade-out; DoorCall continues with return value 1.
+Targeted Mac arm64 CTest: audio_movie, door_transition, bgm_room_transition and
+native-gameplay-bindings passed. Actual room data: RM_0050 dog events 15/16
+explicitly started, BGM 49, all three exits stop at 60 ticks; RM_0060 exit 9,
+retained music without requests, track replacement/identical requests and
+independent SFX passed. Runtime with diagnostic positions and original scripts:
+RM_0060 → RM_0050 → RM_0080, normal and first door skipped, BGM stays stopped;
+RM_0050 scripted exit → RM_0030 also passed without blocked commands.
+No natural dog-fight or full playthrough claim. Windows x64 crossbuild only.
+Logs: `build/validation/bgm-room-20261007`; no commit/push or broad room scan.
+Both v0.5 starter binaries updated; signed Mac app and runtime/SDL arm64 only.
+Packaged original data passed the BGM tests and normal/skipped runtime paths.
+Seven INI/snapshot files unchanged by SHA-256; backup
+`archived/releases/bgm-room-before-20261007-145630`.
+
+## RM_0050: geskriptete Animationspose (Codex, 2026-10-07)
+
+Gemeinsame Actor-Skriptbindung trennt die von bhSetMotion gesampelte Pose vom
+anschließend weitergestellten frm_no. Rendering, Modellknoten und Linkmatrizen
+verwenden die Pose vor dem Zählerfortschritt. Der echte RM_0050-Event 12 zeigte
+zuvor nach Frame 84 noch einmal Frame 0, bevor der nächste Schedulerpass den
+Zombie ausblendete; dieser End-Flackerfall ist gezielt reproduziert und behoben.
+Common 24/25/34 berücksichtigt jetzt auch mtn_md-Bit 8 beim Fractional-Sampling,
+nicht nur das MTN-Dateiflag. Common 34 behält originale Startframes 60/64.
+Der gemeldete vollständige Rücksprung während des zweiten Ziehens wurde im
+aktuellen Quellstand nicht reproduziert; keine vollständige Behebung dieses
+zusätzlichen Symptoms behaupten. Das Originalskript selbst bleibt unverändert.
+Neue Regression: tests/native/script_motion_test.cpp, echter Raumtrigger und
+Event 12, letztes sichtbares Bild, Startframes, Halbframes, Pause und bewusster
+Loop; zusätzliche Original-RM_0070-Motion. Mac arm64 bestanden, Actor-Test
+bestanden. Windows x64 crossgebaut, kein Windows-Lauf. Beide Runtime-Binaries
+im v0.5-Paket ersetzt; Mac-App signiert, arm64 geprüft. Projektstarter mit
+Paketdaten: 160 Ticks/--validate-poses, keine Blockade, Zombie anschließend
+versteckt. Sieben vorhandene Paket-INI-/Snapshot-Dateien per SHA-256 unverändert.
+Logs: build/validation/script-motion-20261007. Backup: archived/releases/script-motion-before-20261007-104936.
+Keine breite Neuprüfung, kein Commit/Push. Parallele fremde Portarbeit erhalten.
+
+
+## Schießen / Zielwahl — 2026-10-06
+
+Steves M93R (Weapon 4) kann im gemeinsamen Kampfpfad zielen und schießen.
+Originale Einzel-/Dual-Suchroutinen und Armrotationen beim Build extrahiert;
+L1/LB oder Q wechselt das Ziel. Custom Handgun hat den originaltabellengesteuerten
+Dreischussmodus, Doppel-SMGs getrennte Armziele und verzögerten linken Schuss.
+Typ-0-Mündungsfeuer mit originaler SYSTEM-Textur, UVs/Geometrie/Lebensdauer und
+Ninja-Blend 8/10. Schuss-/Sichtabfragen berücksichtigen die ursprünglichen
+0x400-/0x40000000-Filter für Wandtypen/Sichtattribute.
+
+Mac arm64 und ASan/UBSan: 25 CTest-Gruppen sowie echte Combat- und SDL-Input-
+Datensuiten bestanden. Combat-Datensuite prüft nächste/zyklische/verdeckte Ziele,
+Wandfilter, zwei getrennte Treffer bei gemeinsamem Ammo-Abzug, Burst/Trigger-
+freigabe, Leer-/Nachlade-/Infinite-/Modalzustand, Originalmodelle und Posen für
+Spieler 0–3 sowie Mündungsgeometrie/Lebensdauer. SDL-Controller ist virtuell;
+kein physischer Controller-Test. Windows x64 erfolgreich crossgebaut, keine
+Windows-Ausführung oder Hardwareprüfung. Kein neuer vollständiger Raumscan.
+
+Runtime: tools/verify_combat.py besteht auf Mac arm64 und ASan/UBSan.
+Auch mit eigenen Mac-Paketdaten bestanden; Projektstarter SDL-Dummy-GUI:
+60 Presents/81 Ticks, keine blockierten Befehle. Der natürliche Steve-
+Replay läuft ohne Teleport, Flags, Debugitems oder Skip: Geschenk 12 Patronen,
+Zielen, ein Schuss, 11 Patronen und Idle/Steuerungsfreigabe. Die bestehenden
+Event-Replays einschließlich beider Steve-Spawns bestanden ebenfalls. Zwei
+Dual-Ziele und Wechsel auf konzentriertes Ziel zusätzlich im echten RM_0020
+mit diagnostischer Aufstellung geprüft: rechts/links 2/1 → 2/2.
+Ansichten `m93r-shot.png` und `dual-aim.png` visuell geprüft.
+
+Begrenzungen: Trefferadapter weiterhin en01-Zombies und Host-Wandvolumen;
+keine vollständigen originalen Gelenkkapseln, Gegner-KI, Treffer-/Todesreaktionen,
+alle Mündungsvarianten (u. a. 229), Rauch/Hülsen/Blut/Licht/Vibration,
+Scope oder Projektil-/Spezialwaffen. Vollständige Originalinterpolation/Recovery
+bleibt offen. Die Tests belegen keinen vollständigen Kampf-/Durchspiel-Port.
+
+Logs: `build/validation/combat-20261006/`. Beide Starter-Runtimes aktualisiert,
+Mac arm64-only samt SDL und neu geprüfter App-Signatur. Benutzer-INIs und
+Snapshots per SHA-256 unverändert. Backup:
+`archived/releases/combat-before-20261006-215740`. Kein Commit/Push.
+
+## Tür-Schließphase und Original-ItemSort (Codex, 2026-10-06)
+
+`bhControlDoorDemo` hält Statusbits 20–23 bis `FadeProc1` Bit 0x20 setzt.
+Der Host konsumierte diese zweite Gruppe bereits beim Öffnen. Jetzt bleibt
+sie bis zur Abblendphase erhalten: Schließ-SE 1 liegt bei Türtyp 0/5 auf Tick
+163 vor Ende 164, bei Typ 4 auf 147 vor Ende 148. Keine Ersatz-SFX und keine
+Raumregel. Voice-/Movie-Stop löscht nicht mehr die gesamte bereits gemischte
+SDL-Queue; Tür, BGM und übrige Stimmen werden nicht zusammen mit einer Stimme
+abgeschnitten. Vollständiger Audioreset beim Debug-Raumwechsel bleibt getrennt.
+
+`ItemSort` aus sub1.c wird zusammen mit `GetItem` generiert. Der ILP32-Zugriff
+über NJS_TEXNAME.texaddr wird zu pip[num1+2] übersetzt. Die originale Sortierphase
+zwischen GetItem und ItemSet (StatusMain → SpriteOnOff → ItemSort) ist nach
+jeder Aufnahme gebunden; GetItems vorweggenommene Equip-Korrektur wird nicht
+doppelt angewandt.
+Auch andere Inventarmutationen verwenden die Originalsortierung. Alle sechs
+breiten Itemtypen, 0–6 vorherige schmale Items und weitere breite Aufnahmen
+geprüft; Sonder-flgchk des gesamten StatusMain bleibt nicht vollständig gebunden.
+
+Gemeinsame `bhSetMessage`-Startflags löschen jetzt alte Antwort-/End-/Seitenbits
+bei Raum-, Skript- und Itemdialogen. RM_0060: Ja/Nein, Wiederholung nach Nein,
+Erwerbsflag it_flg 133, Steuerungsfreigabe, natürliche Raumrückkehr und Snapshot-
+Laden geprüft. Die Gefängniskarte belegt original keinen Inventarslot. Der
+ursprünglich gemeldete Hänger ist im geprüften aktuellen Ablauf nicht
+reproduziert; kein vollständiger Map-Renderer durch diesen Erwerbscheck.
+RM_0070: Calico-Aufnahme nach drei schmalen Items, Original-ACK it_flg 136,
+Sortierung, Equip und Screenshot geprüft. Diagnosefixture setzt ausschließlich
+für den Test evflag 116 (Steves Handel abgeschlossen); keine Freigabe im Runtime.
+
+Mac arm64: 25 Testgruppen, zehn Originaldaten-Suiten (inklusive 105 Türfälle
+und Itemmenü), zwölf Runtime-Suiten bestanden. Feste Binary-Kopien verhindern
+Änderungen während der Prüfung. Parallel ergänzte Targeting-/Waffen-/Muzzle-
+Arbeit ist im geprüften Paketbuild enthalten; spätere Testergänzungen bleiben
+im Arbeitsbaum. Windows x64 cross-gebaut, keine Windows-Hardware/Wine- oder
+physische Controller-Prüfung. Kein vollständiger Durchspielnachweis.
+Logs/Ansichten: build/validation/inventory-door-20261006; Repro:
+`tools/verify_pickups.py`, originale Tür-PCM in `recvx-door-tests data`.
+
+Beide Starterpakete aktualisiert; Mac-Binary und SDL ausschließlich arm64,
+App signiert. Paketdaten-Aufnahmen und normaler Projektstarter über SDL-Dummy
+geprüft; Benutzer-INIs/Snapshots erhalten. Backup:
+archived/releases/inventory-door-before-20261006-215426.
+Die zusätzlichen ASan/UBSan-Läufe wurden auf Nutzerhinweis abgebrochen; kein
+vollständiger Sanitizer-Nachweis dieses Paketstands behauptet. Bereits erfolgte
+Einzelprüfungen bleiben in den Logs. Künftig nur geänderte Mechanismen und ihre
+konkreten Abhängigkeiten prüfen; bereits funktionierende Rodrigo-/Prolog-
+Szenen nicht ohne neue Fehlerhinweise wiederholen.
+
+## Event-Port 2026-10-06
+
+Zehn bisher fehlende Eventbefehle ergänzt, bhPlItemLost durch extrahiertes
+Original ersetzt; gemeinsame Flagmasken und WHILE/NEXT-/FOR-Zähler korrigiert.
+25 Mac-arm64-Testgruppen und Game-Datensuite, Event-/Kontinuitäts-/Detector-
+Replays bestanden. Vollständiger neuer Scan: 205/205 Berichte, 28 blockierte
+Räume (600 Ticks, Spawn 0, keine Eingaben/Mods). Parserpräsenz und Pending-
+Wirkung getrennt; keine vollständige Event-/Progressions- oder Durchspielzusage.
+Details und offene Prioritäten: [EVENT-COVERAGE.md](EVENT-COVERAGE.md).
+Logs: `build/validation/events-20261006/`.
+
+Zusätzliche Zielprüfung: ASan/UBSan ebenfalls 25 Testgruppen und Game-Datensuite
+bestanden; Windows x64 erfolgreich crossgebaut, kein Windows-Laufzeittest.
+Die zwischenzeitlichen parallelen Combat-Buildfehler waren im danach geprüften
+Gesamtstand behoben. Beide Starter-Binaries aktualisiert; Mac-App signiert.
+
+
+# Metalldetektor, SQ-Transport und Security-Cursor — 2026-10-06
+
+Gemeinsame Engine-Bindungen: vollständiger unkomprimierter Sony-SQ-Zeitstrom
+mit Noten/Schleifen/Stop/Fade, originale Event-Slotkonfiguration; extrahierte
+bhEff122/230, Texturgruppen 41/414 und Common-Typzustand; Common-9-Knotenwinkel;
+Interaktionsantwort über cb_flg 0x1000 und bhFixEventCamPly 0x57. Disabled
+CursorInit-Sprites werden in der Box nicht mehr gezeichnet. Keine geänderten
+Raumskripte, künstlichen Alarmloops oder Ersatzgrafiken.
+
+`tools/verify_detector.py` startet RM_0090 mit echten Ressourcen und prüft:
+Alarm nach Metallkontakt, wechselnde rote UV-Animation, Ja/Nein am Schalter,
+beide Rolltorbewegungen mit originalen Bewegungs-/Rastsequenzen, Audio-Stopp,
+Kamera-/Steuerungsfreigabe, erneuten Alarm und metallfreien Durchgang nach
+Einlagern. Der Lauf prüft jede Zwischenpose mit `--validate-poses`. Ergänzte
+Originaldaten-Tests mischen fünf Alarmdurchläufe, vergleichen Tür-PCM inklusive
+300-Sample-Anlauf, überprüfen Lampen und beide Rolltore sowie den fehlenden
+orangen Cursorstreifen. Generische VM-Tests prüfen den einmaligen Antwort-ACK.
+Diagnostische Positionsbefehle ersetzen keinen tatsächlichen Durchspieltest.
+
+Logs und Ansichten: `build/validation/detector-20261006/`, darunter
+`final-detector/{alarm,box}.png`. Boxansicht ohne orange Welle und rotes
+Lampensprite visuell geprüft. Linke Boxliste und vollständige Originalfenster-
+animation bleiben Host-Oberfläche bzw. unvollständig. SQ-Transport ist kein
+bitgenauer Sony-Synthesizer: komprimierte SQ/Pitch/ADSR/Reverb/mehrschichtige
+Programme/live CC-Modulation bleiben unvollständig. Innenraum-Regen und der
+nicht reproduzierte RM_0070-Crash werden hier nicht als behoben ausgewiesen.
+
+Mac arm64: 25 CTest-Gruppen, acht Originaldaten-Suiten und elf Runtime-Suiten
+bestanden. ASan/UBSan: 25 Gruppen, acht Datensuiten und Event-/Kontinuitäts-/
+Audio-Zustands-/Detector-Replays bestanden. Windows x64 cross-gebaut; kein
+Windows-Laufzeit-/Hardware- oder physischer Controller-Test. Beide Starterpakete
+aktualisiert; Mac-Runtime/SDL ausschließlich arm64, Signatur geprüft,
+Benutzer-INIs und Snapshots unverändert. Kein Commit/Push oder neuer Raumscan.
+
+Zusätzlich bestanden: vollständiger Detektor-Replay mit den eigenen Mac-Paketdaten
+und Projektstarter im SDL-Dummy-GUI-Modus (90 Präsentationen, acht Renderbilder,
+sieben Simulationstakte, Hauptmenü aktiv). Kein WindowServer-/physischer
+Controller-Test. Paket-INIs und Snapshots nach diesen Starts erneut hashgeprüft.
+Backup: `archived/releases/detector-before-20261006-211708`.
+
+# Skriptgeschenke, Fenster-Repro und Tür-/Raumaudio — 2026-10-06
+
+Dieser Abschnitt ergänzt den gemeinsamen Arbeitsbaum und hat für die unten
+beschriebenen Änderungen Vorrang vor älteren Paketangaben. `GetItem` wird beim
+Build vollständig aus `sub1.c` extrahiert. Raum-Items und Skriptgeschenke nutzen
+seine Inventarmutation und Zustände: Fragen 157/153, Vollmeldung 154 und
+Empfangsbestätigung 158, Original-Mengen/Stacks/zweibreite Slots/Personal-Items.
+Das erste Steve-Ereignis vergibt M93R (Item 9), zwölf Patronen und Weapon 4,
+wartet modal auf Bestätigung und vergibt das Geschenk auch nach Skip genau einmal.
+Kein zusätzlicher M93R-Kampfport: Kampf unterstützt weiterhin Messer/Handgun.
+Die Host-Oberfläche entspricht noch nicht der vollständigen Originalfensteranimation.
+Claudes cam.ncut/Floor- und cb_flg-0x4000-Korrekturen bleiben erhalten.
+
+Tür-SPQ ersetzt die MIDI-Programmbank 1; die zugehörigen vier SQ-Listen liegen
+im dritten Block von COMMON.MLT. Tür-Audio löst jetzt Programm, Key 60 und
+Velocity über diese originalen Sequenzen auf. Getrennte Stimmen 27–29 überleben
+den Raumload und werden bei Zielraumfreigabe mit dem Originaltimer 250 ausgeblendet.
+SoundTiming-Anforderungen werden einmalig weitergereicht; die originalen
+Handler 5–9 sind leer und erzeugen selbst keine zusätzlichen Schließ-Samples.
+PCM-Vergleich für Banken 2/7 einschließlich Raumload und Schließ-Fade bestanden.
+105 Türvarianten beendet, dargestellt und übersprungen; keine Behauptung einer
+vollständigen Sony-Sequencer-/Pitch-/ADSR-/Reverb-Emulation.
+
+Regen: Die zusätzliche Host-Regel „kein BG im Zielpaket → Ambient stoppen“
+ist auf Nutzervorgabe **entfernt**. Die früheren Innenraum-Stumm-Logs in diesem
+Ordner beziehen sich auf den verworfenen Versuch, nicht den ausgelieferten Stand.
+Keine nachträgliche Umschreibung dieser Belege. CheckSpecialBank/StopThePsgSound,
+Originalanforderungen und Com_ExecRoomFadeIn enthalten keinen solchen Stop.
+VolBgSe0/1 sind in RM_0060/0070 null und werden im Original-C nicht gelesen.
+Der Regenfehler ist damit noch nicht als originalgetreu behoben nachgewiesen.
+
+Belegter gemeinsamer Ladefehler korrigiert: RoomWorld lädt/consumiert keine
+Soundbank mehr im Konstruktor. Runtime führt erst bhInitEvent aus und fragt dann
+wie system.c bhSysCallSndMonitor RoomSoundCaseNo ab und lädt den Raum-SPQ, danach
+RoomFadeIn. Dadurch gelten Sound-Varianten aus dem aktuellen Init für den
+aktuellen Raum. `tools/verify_audio_state.py` prüft Cases 0/1 mit echten
+SPQ/SQ/HD/BD-Ressourcen und isolierter Eventtabelle. Soundbank-Reihenfolge und Regenstopp sind unterschiedliche
+Sachverhalte; die Korrektur wird nicht als unbelegter Regenfix ausgegeben.
+Der Original-Türweg 0050 → 0060 → 0070 → 0060 → 0050 läuft weiterhin durch;
+Ambient bleibt ohne originale Stop-Anforderung bestehen.
+
+RM_0070: gemeldeter Crash während des Fenstersprungs bisher nicht reproduziert.
+700-Tick-Replay mit jeder Zwischenpose, vorhandener Snapshot, Steve-Geschenk
+vor dem Raumwechsel und normaler SDL-Renderlauf sowie produktiver Mac-Starter mit 1047 Simulationsticks
+bestehen ohne Skeletonfehler. `--validate-poses` prüft auch im Headless-Modus
+jede Zwischenpose statt nur das Schlussbild. Diagnosen enthalten Channel-/Bone-
+Anzahl und beim Entity-Rendering Work-Art/Index, Identität, Motionquelle und Frame.
+Keine Motion-Trunkierung, keine Ersatzpose und kein entfernter Gegner. Diese
+Prüfungen sind ausdrücklich kein Nachweis, dass der Nutzercrash behoben ist.
+
+Prüfungen: Mac arm64 25 CTest-Gruppen, acht Originaldaten-Suiten und zehn Runtime-
+Suiten; ASan/UBSan 25 Gruppen, acht Datensuiten sowie Event-/Pickup-, Kontinuitäts-
+und Audio-Zustands-Replays. Windows x64 erfolgreich cross-kompiliert; in dieser Änderung kein
+Wine-/Windows-Hardware-Lauf. SDL-dummy prüft den normalen GUI-Simulations-/Render-
+Pfad, jedoch kein physisches Fenster oder Controller. Logs/States:
+`build/validation/room-audio-20261006/original-order`; frühere Versuche unter
+`build/validation/room-audio-20261006`, frühere Pickup-Vergleiche zusätzlich
+`build/validation/scripted-pickup-20261006`. Kein neuer vollständiger Raumscan
+oder Durchspielnachweis. Beide produktiven Pakete aus diesem Arbeitsbaum aktualisiert, Mac-Runtime/SDL
+ausschließlich arm64 und Signatur geprüft. Paketdaten-Event-/Pickup-Replays und
+Audio-Zustandsprüfung bestanden. Start.command-SDL-dummy-Fensterreplay vollständig
+abgeschlossen; INI-/Snapshot-Checksummen unverändert. Backup: `archived/releases/pickup-audio-before-20261006-202844`.
+
+# Engine: Rasterkosten und frühe Progression — 2026-10-06
+
+Dieser Abschnitt hat Vorrang vor älteren Scan-/Paketangaben. Renderer nutzt
+konservative Scanline-Spannen und bei konstantem Texturalpha einen vereinfachten
+Filterpfad, ohne Auflösung/Qualitätsstufe zu reduzieren. Kontrollierter Raster-
+Vergleich: drei originale Räume, SS 1/2/3, je 90 identische Frames, ohne HD/NPCs:
+18–26 % weniger Renderzeit. RM_0050 SS2: 23,74 → 18,03 ms; SS3: 50,67 → 38,56 ms.
+Das ist kein vollständiger Gameplay-FPS-Vergleich. Software-Rendering bleibt
+bei Ultra teuer. Pixelvergleich RM_0020 SS1: zwei von 921600 RGB-Kanälen weichen
+um maximal eine Stufe ab (Rundung). GUI-Ultra-Lauf: 300 Renderbilder/380 Ticks,
+13,67 s real/45,81 s User-CPU, 294 MB RSS; andere Szenen nicht gleich schnell.
+
+Originale Raumnamen sind dezimal (system.c sprintf %1d%02d%1d), keine Hexwerte.
+Gemeinsame RoomIdentity korrigiert Türziele, VM-Raumwerte und Soundbank-Schlüssel.
+RoomSoundCase 0xb6, SoundVolumeSet 0x77 und BGSeOn2/Off2-Anforderungen laufen
+im gemeinsamen Audiozustand. Init-Anforderungen werden nach Init abgespielt;
+Ambient-PCM bleibt beim Bankwechsel erhalten. SQ CC11 wird berücksichtigt.
+Sony-Programm-/Samplelautstärke, Pitch/ADSR/Pan/Sequencer sind nicht vollständig.
+Keine reine Pegelkorrektur speziell für Regen oder einzelne Türen.
+
+Steve RM_0040: fehlendes bhDelYakkyou 0x6b (zwei Bytes) hielt das Skript vor der
+Figurenszene an. Gemeinsame Freigabe aktiver Effekt-IDs 0/7 ist gebunden. Common
+14/15/16/21 und Sub_controll 80/8f/90/92/93 sowie die originalen subpl.c-
+Bewegungs-/Dispatchroutinen sind angebunden. Leere Original-MN_WORK-Tabellen
+behalten bei Szenenfreigabe die letzte Pose; sie dürfen nicht dekodiert werden.
+Noch keine vollständige Ninja-Motion-Interpolation oder komplette Gegner-KI.
+Originaler Sicherheitsraum-Dialog bis VOICE1/0075 und Steuerungsfreigabe bestanden.
+
+Interaktionsreichweiten/Orientierungsmasken aus bhCheckExmAtari; player.c-
+Initstatus 0x40000000 fließt in die gemeinsamen Kollisionsfilter ein. Hip-gpy ist
+im Original eine Bodenschattenabfrage, kein automatischer Sprung auf Plattformen.
+Host-Bodenanpassung überspringt dadurch die geskriptete Treppe nicht mehr.
+Originale kurze Auf-/Abstiegaktionen dnu/dnd und vorhandene Treppen-/Leiterroutinen
+gebunden. RM_0050: laufende MTN 35/36, beide Höhen, anschließend freigegebene
+Steuerung geprüft. Rückweg RM_0050 → RM_0030 → RM_0020 läuft durch Originalskripte.
+Prüfungen nutzen diagnostische Positionierung, kein Nachweis eines vollständigen
+natürlichen Durchlaufens. Ungebundene Wasser-/Partikeldienste bleiben diagnostiziert.
+
+Security Box nutzt originale ItemBoxInit-Spritegruppen, Icons, Namen, Reihen-
+Geometrie und Restriktionsdialoge. Originale Einfahr-/Scroll-/Cursoranimationen
+sind noch nicht vollständig übertragen; keine 1:1-Zusage für das ganze Statusmenü.
+
+Mac arm64: 25 CTest-Gruppen, acht Daten-Suiten und bestehende Runtime-Replays
+bestanden; zusätzliche Security-/Treppen-/Rücktürprüfung bestanden. ASan/UBSan:
+25 Gruppen und neue Daten-/Runtime-/Box-Zeichenprüfungen bestanden. Windows x64
+crossgebaut; kein Windows-/Wine-/physischer Controllerlauf in dieser Änderung.
+Scan: 205/205 laden, 35 Räume blockieren bei 600 Ticks ohne Eingaben; kein
+Durchspielnachweis. Pakete Mac arm64 und Windows aktualisiert, INIs erhalten.
+Logs/Ansichten: build/validation/core-performance-20261006; docs/VALIDATION.md.
+
+Reproduzierbare neue Prüfungen:
+
+```sh
+build/macos-arm64/recvx-continuity-tests data
+python3 tools/verify_continuity.py --runtime build/macos-arm64/recvx-runtime --data data
+cmake --build build/macos-arm64 --target recvx-render-benchmark
+build/macos-arm64/recvx-render-benchmark data RM_0050.RDX 90 2
+```
+
+Raster-Baseline in raster-benchmark.log ist der gleiche Renderer mit den beiden
+Optimierungen zurückgenommen, nicht ein unverändert ausgeführtes altes Paket.
+GUI-Vorher/Nachher-Skripte haben unterschiedliche Engine-Fortschritte; ihre
+User-CPU-/RSS-Werte sind deshalb keine kontrollierte Prozentmessung.
+Original-Box-Bild: security-box-v2.png; Steve-Szene: steve-security.png.
+Runtime-Prüfungen: continuity-animation, final-checks, sanitize-continuity-replays.
+Fehlversuche mit bereits vorhandenen State-Dateien sowie ältere Zwischenstände
+bleiben zur Nachvollziehbarkeit im selben Logordner; ready-checks.log und die
+Sanitizer-Paketlogs benennen die abschließend erfolgreichen Läufe.
+
+Aktualisierte Starter: Mac arm64 + Windows x64. Mac-Paket mit eigenen Daten:
+verify_continuity und verify_doors bestanden. Start.command-GUI: 90 Presents,
+36 Renderbilder/37 Ticks; keine Titel-Tastenleiste. Mac-Signatur geprüft,
+Runtime + SDL ausschließlich arm64; INI-Hashes vor/nach Install und GUI identisch.
+Windows wurde nur crossgebaut. Paketbackup: /Users/patrickhoffmann/Projects/recvx-decomp/archived/releases/core-performance-before-20261006-160800.
+
+# Titelmenü ohne Host-Tastenleiste — 2026-10-06
+
+Die zusätzlich gezeichnete OK-/Controller-/Auswahl-Leiste samt schwarzem Panel
+ist aus Frontend::draw(Main) entfernt. Originale Titelressourcen und Menüauswahl
+bleiben erhalten; Einstellungen und Beenden sind weiterhin Host-Erweiterungen.
+Der Spiel-Skip-Hinweis prüft jetzt dieselben sp_flg-Sperrbits 0x1c040008 wie
+EventVm::skip_cinematic. Frontend zeichnet vor diesem Spielpfad und kehrt zurück.
+
+Mac arm64: Build, bestehender Frontend-Test und Frontend-Ressourcen-Replay
+bestanden; aktualisiertes Paket mit eigenen Daten ebenfalls geprüft. Tatsächlicher
+Start.command-Fensterlauf (90 Presents) und Bild main-gui.png zeigen keine untere
+Tastenleiste. Signatur gültig und Benutzer-INIs erhalten. Windows x64 neu gebaut
+und Paket aktualisiert; für diese Änderung kein erneuter Wine-/Hardwarelauf.
+Logs/Bild: build/validation/title-clean-20261006. Diese kleine UI-Änderung
+belegt keine vollständige Originaltreue des übrigen Titelmenüs oder Spiels.
+Backup: archived/releases/title-clean-before-20261006-151332.
+
+# Aktueller Mac-Stand: ausschließlich arm64 — 2026-10-06
+
+Auf ausdrücklichen Nutzerauftrag sind Intel-/Rosetta-Mac-Builds abgelöst.
+`Start.command` startet `build/packages/macos-arm64-v0.5/RECVX Native.app`;
+Fallback nur `build/macos-arm64/recvx-runtime`. Buildwrapper erzeugt arm64,
+Paketer prüft Runtime **und SDL2** auf ausschließlich arm64. Alte Universal-
+Artefakte liegen im ignorierten Archiv: `/Users/patrickhoffmann/Projects/recvx-decomp/archived/releases/arm64-before-20261006-150523`.
+
+Der neue arm64-Build besteht 24 Gruppen, sieben echte Datensuiten und alle acht
+Runtime-Suiten. Dasselbe gilt gegen die **eigenen Paketdaten**. Projektstarter
+headless und tatsächlicher SDL-Fensterstart (90 Presents) bestanden; keine
+arch-/Rosetta-Aufrufe. App-Signatur und erhaltene Benutzer-INIs geprüft.
+Ein anfänglich parallel doppelt gestarteter CTest kollidierte am gemeinsamen
+Snapshot-Testfile; danach einzeln vollständig bestanden (Logs erhalten).
+GUI innerhalb der Sandbox brach am Fensterdienst ab; erlaubter GUI-Lauf bestanden.
+Frühere Intel-/Rosetta-Ergebnisse weiter unten sind historische Prüfungen.
+
+Beide Starterpakete enthalten die Claude-Übernahme und den neuen Blendpfad.
+Windows/Wine besteht 24 Gruppen/sieben Daten-/acht Runtime-Suiten einschließlich
+Paketdaten und Start.cmd. Vorige Integration: `/Users/patrickhoffmann/Projects/recvx-decomp/archived/releases/handoff-before-20261006-145909`.
+Die Mac-Umstellung ändert die Windows-x64-Binaries nicht.
+
+# Claude-Übergabe und gemeinsamer Transparenzpfad — 2026-10-06
+
+Dieser Abschnitt ersetzt ältere Integrationsangaben unten. Arbeitsbaum enthält
+Claudes Änderungen plus die Übernahme durch Codex; kein neuer Commit/Push.
+Logs/Ansichten: `build/validation/handoff-20261006`.
+
+- Übernommen: originaler View-Clip, Vertex-Gouraud, Cinematic-Skip für getaktete
+  Sprechdialoge, Feuerzeug-Effekt/-Licht, zusätzliche Spieler-Modelle/Pferdeschwanz,
+  Treppen-/Leiterbrücke, SQ-Programm/Note, separate BG-/Tür-Voices, Snapshot,
+  Grafikqualität, Inventarcursor und 30-Hz-3rd-Person. Scope/Lücken der Brücken
+  bleiben wie in CLAUDE.md beschrieben; beispielsweise ersetzt eine einzelne
+  SQ-Note noch keinen vollständigen Sony-Sequencer.
+- Codex: `generate_chunk_blend.py` übernimmt `lNaCnkSrcAlphaMode`,
+  `lNaCnkDstAlphaMode` und `njColorBlendingModeSys::alpha_tbl` direkt aus den
+  Originalquellen. UA-Strips verwenden ihren GS-ALPHA-Wert (RGB=(A−B)*C+D),
+  einschließlich FIX-Addition/-Subtraktion. Nicht unterstützte Originalpaare
+  melden einen Fehler. Material-Chunks 17–23 schreiben Blendbits wie NJD_CB_BA.
+  Texturalpha wirkt nun bei Nearest und Filterung; der bisherige ungewichtete
+  Filterpfad behandelte auch einheitlich teiltransparente Texturen als deckend.
+  Gemeinsame Kanten aller transparenten Dreiecke werden nur einmal überblendet.
+  Host-Float-/Alpha-Normalisierung ist kein bitgenauer GS-Quantisierungsnachweis.
+- Tatsächliche RM_0090-Fenster 32/49 mit Register 0x44 geprüft. Bilder
+  `window-before.png` (voriges Paket) und `window-alpha.png` zeigen denselben
+  Schnitt mit denselben Ressourcen; die Figur hinter der Scheibe ist jetzt
+  sichtbar. `window-hd.bmp` prüft den Lauf mit den lokalen Mods. Keine extra
+  Raum-Transparenzregel, andere Modelle/Items verwenden denselben Decoder.
+- Steve: normale Wege aus **beiden** RM_0030-Tür-Spawns lösen alle zehn Tasks
+  aus und geben die Steuerung frei. `steve-walk*.txt` enthält keine Position-
+  oder Flagänderung und keine OK-Eingaben. Diagnose-/Skip-Prüfung bleibt separat.
+  Dieser aktuelle Fehler war nicht reproduzierbar; kein neues Raumskript erfunden.
+- Türen: beide natürlichen Durchgänge liefern 1/0/2 aus Originalbank 7.
+  Drei separate Voices 27–29 bleiben beim Nachladen der Raum-Soundbank aktiv;
+  neuer Ressourcencheck schützt insbesondere den Schließton vor Abschneiden.
+- Host, macOS arm64/Intel-Rosetta, Windows/Wine und ASan/UBSan: jeweils
+  **24 Testgruppen**, **sieben Datensuiten** sowie Events/Doors/Frontend/
+  Progression/Snapshot/Combat/Debug/Event-State bestanden. Intel-Combat musste
+  zunächst wegen eines Prüfskript-Pfadfehlers neu gestartet werden: --emulator
+  bedeutete dort pauschal Windows-Z:-Pfade. Pfadkonvertierung jetzt nur für .exe;
+  danach erfolgreich. Wine brauchte einen erlaubten lokalen wineserver-Socket.
+- Raumscan: **205/205 laden, 38 blockieren**, unverändert. Begrenzte Replays,
+  kein vollständiger Durchspiel-, physischer Controller- oder Windows-PC-Test.
+
 # Flammen, Bewegungen, Security-Progression und Renderlast — 2026-10-06
 
 Dieser Abschnitt ersetzt frühere Integrations-/Scanangaben weiter unten.
@@ -318,6 +802,12 @@ a native development menu; the complete original title/difficulty/load system is
 not yet ported. `tools/verify_frontend.py` verifies real-runtime default idle,
 settings, active movie and the complete late-skip/rapid lighter flow.
 
+Mac-Paket mit eigenen Daten: Event-/Steve-Geschenk-/RM_0070-Replays bestanden;
+Paketstarter RM_9070 mit SDL-Dummy-GUI: 60 Presents, 61 Ticks, keine Blockade.
+Mac-Runtime und SDL nur arm64, Signatur geprüft. Benutzer-INIs/Snapshots
+per SHA-256 unverändert. Backup: archived/releases/events-before-20261006-214742.
+Keine physische Controller-/Windows-Hardware-Prüfung, kein Commit/Push.
+
 ## Gameplay corrections, 2026-10-05
 
 Added real-data regressions for automatic hint → inventory ownership, A/D turn
@@ -413,3 +903,153 @@ original character bodies, equipment/items/HP/bag/wireframe and room/spawn chang
 Both existing package starters passed debug actions using their own packaged
 data and debug.ini; macOS bundle signature verification passed. Existing user
 controls.ini files were preserved. See DEBUG_MENU.md and tools/verify_debug.py.
+
+## Claude grab handoff / original player voices — 2026-10-07
+
+Claudes uncommitted grab/bite/player damage/death work is retained. Attack default
+remains off and Game Over remains the host placeholder. Continued the missing
+player voice bank binding from sdfunc.c RequestPlayerVoiceSoundBank: CORE key
+ply_id|0xfff0 on the active disc, bank 4/slot 7; bank replacement invalidates PCM
+and source-pack diagnostics now follow each independently loaded SE bank.
+
+Targeted Mac arm64 checks passed: audio suite with original data (four character
+banks on both discs, nonzero bite/death PCM, character replacement and retention
+across room banks); enemy-damage suite with original RM_0020 grab/escape/death
+and Claire voice PCM. Escape HP 200 → 170; fatal bite clip 412. The two related
+CTest groups pass but skip data checks when invoked without data; the explicit
+data runs provide the resource evidence. Runtime and package runtime using their
+own data complete 300 ticks RM_0020 without blocked commands or unavailable
+audio; no grab from this door spawn, so these runs do not prove a natural bite.
+Project Start.command SDL dummy smoke test: 15 presents, 1 simulation tick,
+no blocked commands. No new broad verify_* run, room scan or sanitizer campaign.
+
+Windows x64 crossbuild passed; Windows/Wine execution was not performed. Both
+v0.5 runtime packages updated. Mac runtime/SDL are arm64 only; app signature
+passed deep/strict verification. SHA-256 checks preserve 21 INI/snapshot files.
+Backup: `archived/releases/player-voice-before-20261007-084428`. Logs: `build/validation/player-voice-20261007`.
+No subjective gameplay/timing check, full playthrough, physical controller check,
+commit or push. Room voice volume, pitch/ADSR/reverb remain incomplete.
+
+
+## Raumwechsel: Spielerhöhe vor erstem Frame (2026-10-07)
+
+Ursache: Der Host übernahm POS.py als endgültige Körperhöhe. `room.c:bhSetRoom`
+führt stattdessen `bhSetFloorNum` aus und setzt unmittelbar danach
+`plp->py = plp->gpy = rom->grand[plp->flr_no + 2]`, vor
+`bhInitRoomChangePlayer` und dem späteren `bhInitEvent` (`system.c`, Modus 10).
+Der gemeinsame Ladepfad ergänzt diese Phase; Restore behält wie der Originalzweig
+`cb_flg 0x800000` die gespeicherte Höhe. Es gibt keine Raumregel, Wartezeit oder
+vorgezogenen vollständigen Welt-/Eventtick. Bewegung/Bodenkollision unverändert.
+
+Beleg unter `build/validation/room-spawn-20261007`: originaler Türübergang
+RM_0040 → RM_0090, diagnostische Aufstellung vor der Tür. Bei 225 Ticks ist die
+Tür noch aktiv; bei 226 ist der Zielraum sichtbar. Alter Build: Y=1 bei 226,
+Y=0 bei 227. Korrigierter Build: Y=0 bei 226/227/240. Kein Nachweis eines
+vollständig natürlichen Laufwegs. `tools/verify_room_spawn.py` prüft diese Grenze
+und die erhaltene Snapshot-Höhe vor dem nächsten Simulationstick. Continuity-
+Datensuite prüft zehn originale Spawns in RM_0040/0090/0050/0020/0070 inklusive
+oberer Etagen und ersten Welttick. Mac arm64 und Paket mit eigenen Daten bestanden.
+Windows x64 crossgebaut, kein Windows-Laufzeittest. Beide Starter-Binaries
+aktualisiert, Mac-App signiert; Konfigurations-/Snapshot-Hashes und Backup stehen
+in `package.json` im Logordner. Keine breite Suite oder neuer Raumscan, kein Commit/Push.
+
+Zusätzlicher Buildblocker im aktuellen Arbeitsbaum: En01-Funktionsextraktion
+scheiterte an einem Originalkommentar zwischen Signatur und `{` bei
+`bhEne01_CutHead`. Kommentarbereinigung im Generator ergänzt; keine Änderung
+der Originalroutine.
+
+## Blutlachen: Raumübergreifender Effektspeicher (2026-10-07)
+
+`EffectParticles` verwendete einen globalen Blockpool. Destruktion eines
+RoomWorld gab dessen Effekte nicht frei. `spawn_pool` registrierte alle aktiven
+id-300-Blöcke, die der neuen Instanz noch unbekannt waren; alte Lachen wurden
+mit ursprünglicher Position/Höhe übernommen. Original `effect.c:bhInitEffect`
+leert dagegen `eff[512]` und setzt `bl_ct` zurück. Blockpool und Systemzustand
+gehören jetzt zur Instanz; die extrahierten Routinen werden mit einem Scoped-
+Kontext gebunden. Originale Blutposition, BP_WORK-Offset, Wachstum und Zeichnung
+bleiben unverändert. Keine Raumsonderregel oder künstliche Bodenprojektion.
+
+Logs unter `build/validation/blood-pool-20261007`. Neue Gegenprobe schlug zuvor
+mit `world adopted another world's blood pool` fehl. Nachher: zwei gleichzeitige
+Effektwelten (Y=20/0), Partikel ohne Querübernahme und 300 Raum-Lebenszyklen
+bestanden; der erste Lachenoffset ist in jedem neuen Raum wieder 0.11.
+`recvx-enemy-damage-tests data OUTPUT blood-only` führt echte RM_0020-
+Pistolen-/Todesroutinen aus und prüft genau 14 Pooldreiecke auf Y=0.11;
+Projekt-/Mac-Paketdaten bestanden. Dieser Prüfmodus beendet sich vor den
+übrigen KI-/Biss-/Explosionsfällen. Screenshot aus Kamera 0 zeigt den
+Leichenbereich nicht und wird ausdrücklich nicht als visueller Beleg benutzt.
+Die konkrete Vorgeschichte des Nutzer-Screenshots ist unbekannt; der Mechanismus
+für eine zusätzlich übernommene schwebende Lache ist reproduziert.
+
+Mac arm64 gebaut, gezielter CTest `effect_pool_lifetime` bestanden. Windows x64
+crossgebaut, kein Windows-Laufzeittest. Beide Starter-Binaries aktualisiert,
+Mac-App signiert/arm64 geprüft; INI-/Snapshot-Hashes und Backup in `package.json`.
+Keine breite Neuprüfung, kein Commit/Push.
+
+
+## Empty pistol and RM_0070 shelf ammunition (2026-10-07)
+
+`recvx-ammunition-tests data` and `tools/verify_ammunition.py` passed on Mac arm64.
+The room fixture places an equipped empty handgun in pip[2], then uses the actual
+room camera gating, pickup question and acknowledgement. The gun remains packed
+as 0x00050000; 15 rounds appear in pip[3] as 0x000c000f. Repeated empty triggers
+leave the inventory unchanged. Screenshots show the original zero glyph.
+The same initial reproduction also preserved ammunition and showed zero in the
+previously distributed Mac package. The reported disappearance is **not reproduced**.
+
+The previous unsigned host decrement is replaced by generated weapon.c
+`bhCountBullet`, preserving the original signed short guard, packed ID and flags.
+Automatic reload now calls generated sub1.c `bhSearchBullet` / `Combi_99` / `ItemSort`.
+Tests cover four owners, four modes, occupied/full/wide inventory, stack overflow,
+0/1/signed boundary and infinite counts, three pistol variants, reserve ordering,
+partial stacks and equipment identity. A 15-round stack legitimately disappears
+when transferred completely into an empty pistol; the next shot leaves 14 rounds
+in its magazine. This is not proof of complete 1:1 combat: host attack/reload phases,
+input timing and the original gm_flg reload-animation latch remain adapters.
+Corrupt saved counts are not silently repaired by this change.
+
+The existing combat original-resource suite passed; Windows x64 crossbuild passed
+without a Windows execution test. No unrelated progression scenes or sanitizers
+were rerun. Logs and images: `build/validation/ammo-20261007`.
+
+## Gegnerfreigabe, Hunde, Fräse, Dateien und Padlock (Codex, 2026-10-07)
+
+Sub_controll 80/90/8f/92 übergibt en01/en04 wieder an die originale Work-
+Zustandsmaschine (Modi/Typ/ct2, stflg/flg und Bibliothek). 93 behält seine
+abweichende reine Moduszuweisung. Treffer lösen zusätzlich die Host-Pause;
+keine Zombie-Knoten-Flinchkorrektur mehr auf Hunde. RM_0080 Event 40 hatte
+seine Freigabe zuvor nur als pending Binding, damit blieb der Gegner nach
+Common 23 eingefroren. Bewegung und Blut nach originaler Freigabe geprüft.
+En04 Init/Schaden/DG00/DG01/DD00/Erholung und Tabellen aus en04.c generiert;
+Hunde sind in Zielwahl/Treffer-/Kapselpfad gebunden. Schüsse wählen jetzt
+EneDamNear/Mid/Far nach originaler Gegner-ID statt fest en01. Beide RM_0050-
+Hunde mit echter Pistole, Originalmodell/MTNs, Blut und Tod geprüft; Aufstellung
+ist diagnostisch, Wände bleiben aktiv. Keine vollständige Hunde-Verfolgungs-/
+Angriffs-KI, Treppen-/Feuer-/Säuredienste bleiben teilweise ungebunden.
+
+Statische MDL-Objekte werten Raum-MTN bei Geometrie, lokalen Knoten und
+Linkmatrizen aus; gemeinsamer Positions-/Winkelsampler mit Actors. Originales
+RM_0090 Event 22 setzt Objekt 8 / MTN 6: gezeichnete Fräsmaschinenknoten bewegen
+sich jetzt. Zusätzliche Frässpäne/Emitter sind damit nicht vollständig portiert.
+Dateiaufnahmen (Exm attr 0x10 / cb_flg 0x20000) benutzen originales
+FileNumberSwitch und itm[383], ACK 0x800 und vorhandenen Dateibetrachter;
+kein GetItem-Slot. Echtes RM_6040 Memo 132 / Datei 17, Öffnen/Schließen ohne
+Wiederöffnung geprüft. Vorhandene falsche Inventareinträge werden nicht migriert.
+
+Padlock-Frage RM_0050: vorhandener Antwortpfad war auf Interaktionsdialoge
+(st_flg 0x2000) begrenzt. message.c setzt auch bei Skriptfragen cb_flg 0x1000 /
+st_flg 0x4000. Gemeinsame Rückmeldung korrigiert; originale Schlüsselbenutzung,
+Frage/Ja, PlItemLost 84 und Steuerungsfreigabe bestanden. Kein Beleg für eine
+Autorzuordnung vorhandener Teiländerungen an Gemini. Die Blutlachen-
+Raumlebensdauer war bereits korrigiert: bestehende Isolation und zusätzliche
+RM_0020-Todes-/Wiedereintrittsprüfung bestätigen null alte Lachen im neuen Raum.
+
+Gezielt: sechs CTest-Gruppen, neue Originaldaten-Regressionsgruppe,
+Kampf-Datensuite und Friedhof-Blut-/Wiedereintritt bestanden. Mac arm64 und
+Windows x64 gebaut (Windows nur crossgebaut). Beide v0.5-Runtimes ersetzt;
+Mac-App signiert, Runtime/SDL nur arm64. Paketdaten-Regressionsgruppe und
+RM_0050-Paketlauf 160 Ticks / --validate-poses ohne Blockade bestanden.
+Sieben Benutzer-INI-/Snapshot-Dateien per SHA-256 unverändert. Logs:
+build/validation/gameplay-fixes-20261007; Backup:
+archived/releases/gameplay-fixes-before-20261007-143421.
+Keine breite Prologprüfung, kein Durchspielnachweis, kein Commit/Push.

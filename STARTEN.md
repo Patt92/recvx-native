@@ -3,7 +3,8 @@
 Die Starter liegen direkt hier im Projektordner:
 
 - **macOS:** `Start.command` doppelklicken. Alternativ die App
-  `build/packages/macos-universal-v0.5/RECVX Native.app` öffnen.
+  `build/packages/macos-arm64-v0.5/RECVX Native.app` öffnen.
+  Der Mac-Build läuft ausschließlich nativ auf Apple Silicon (arm64).
 - **Windows:** `Start.cmd` doppelklicken. Der gesamte Windows-Paketordner
   `build/packages/windows-x64-v0.5` kann auf den Windows-Rechner kopiert werden;
   darin ebenfalls `Start.cmd` öffnen.

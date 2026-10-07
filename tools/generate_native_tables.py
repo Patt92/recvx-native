@@ -57,6 +57,8 @@ def main():
     ui = ['// Generated from original sub1.c; edit the original tables, not this file.\n']
     for m in re.finditer(r'^(?:NJS_TEXANIM|PARTS) parts_\d\d(?:b)?\[\d+\]\s*=\s*\{', sub, re.M):
         ui.append(sub[m.start():block(sub, m.start())] + ';\n')
+    m = re.search(r'^float cen_pos99\[12\]\[6\]\s*=\s*\{', sub, re.M)
+    ui.append(sub[m.start():block(sub, m.start())] + ';\n')
     message = (a.root / 'src/ps2/veronica/prog/message.c').read_text()
     m = re.search(r'const unsigned char FontSz\[126\]\s*=\s*\{', message)
     ui.append(message[m.start():block(message, m.start())] + ';\n')
@@ -64,6 +66,8 @@ def main():
     adx = (a.root / 'src/ps2/veronica/prog/adxwrap.c').read_text()
     m = re.search(r'^short AdxVolTbl\[128\]\s*=\s*\{', adx, re.M)
     (a.output / 'adx_tables.inc').write_text('// Generated from original adxwrap.c.\n' + adx[m.start():block(adx, m.start())] + ';\n')
+    m = re.search(r'^PARTS\* BulletSet\([^\n]+\)[^\n]*\n\{', sub, re.M)
+    ui.append(sub[m.start():block(sub, m.start())] + '\n')
     (a.output / 'ui_tables.inc').write_text(''.join(ui))
     routines = ['// Generated from original Combi_00 through Combi_05 in sub1.c.\n']
     for i in range(6):

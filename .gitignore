@@ -22,3 +22,6 @@ venv/
 dwarfdump.txt
 objdiff.exe
 objdiff.json
+
+# Local HD/texture mods (large)
+/mods/

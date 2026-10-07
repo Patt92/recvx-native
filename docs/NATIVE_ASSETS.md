@@ -11,8 +11,9 @@ invalidieren den Cache. Eff200/201/218 gebunden; kein vollständiger Effektrende
 The productive tree is `data/`. Runtime and packages read regular loose files,
 not ISO/AFS containers. All original dumped files and split archive entries are
 included, including assets whose gameplay systems are still pending. Room,
-playable-player, menu, font and item textures are cooked; the opening room also
-has 53 exported NPC/object/room-item textures. All 18 movies have native packets.
+playable-player, menu, font and item textures are cooked, and so are the NPC, enemy,
+object and room-item textures of all 205 rooms (`recvx-world-assets`, 8,526 files
+added; 18,253 TGA in total, 6,178 unique by content). All 18 movies have native packets.
 `archived/` is historical storage, not an input to normal builds or launches.
 
 ## Overrides
@@ -49,9 +50,56 @@ Claire defaults to SYSTEM/0010.bin, and the lighter (item ID 55, inventory slot 
 Use uncompressed RGB24/RGBA32 TGA without color maps, 1–8192 pixels per dimension.
 Higher resolution preserves original UVs and asset identities. Original PS2
 palette/alpha rules are applied during export; TGA uses ordinary 0–255 alpha.
-The 2D renderer blends alpha. The 3D renderer currently discards fully transparent
-pixels and draws other pixels opaque; material transparency/filtering/mipmaps
-remain incomplete. Invalid overrides fail with a diagnostic.
+The 2D renderer blends alpha. The 3D renderer filters textures trilinearly with up to 4x anisotropic taps
+(alpha-weighted mip chains), blends partly covered cut-out pixels by their coverage
+and renders with 2x2 supersampling on all CPU cores (`--ss 1..4`, `--nearest` for the
+old point sampling); material transparency modes beyond cut-outs remain incomplete. Invalid overrides fail with a diagnostic.
+
+## HD texture packs (content-keyed)
+
+Besides per-asset paths, `<mods>/textures/hd/<md5>.tga` replaces every texture
+whose cooked data file (`data/textures/...`) has that MD5, in any room or asset.
+One file therefore serves all rooms that share a texture (5,130 unique cooked
+textures behind 9,727 files). Precedence: per-asset mod file > HD file > cooked
+data > decoded original. Alpha comes from the cooked texture; RGB from the pack.
+
+Building a pack from a Dolphin GameCube HD pack (`GCDE08`, DDS BC7, 4x):
+
+```sh
+python3 -m venv build/texvenv && build/texvenv/bin/pip install pillow numpy
+build/texvenv/bin/python tools/match_hd_textures.py --pack <.../Load/Textures/GCDE08> --output build/hd-matches.json
+build/texvenv/bin/python tools/build_hd_textures.py --matches build/hd-matches.json --output build/hd-textures --scale 2
+build/native/recvx-runtime --data data --mods build/hd-textures
+```
+
+The runtime looks in `<mods>` first; without `--mods` it uses `mods/` beside `data/`
+(the app/Start scripts do the same), so a pack placed in `mods/textures/hd/` is
+picked up automatically. Delete the folder to go back to the original look.
+
+Matching decodes each DDS, box-downsamples it to the GameCube size in its file
+name and compares luma correlation (NCC) with PS2 textures of the same size.
+Tier A: NCC >= 0.90 and >= 0.05 ahead of the runner-up; tier B: 0.80..0.90 and
+>= 0.15 ahead. Everything else keeps the original. With the GCDE08 pack and the
+complete export:
+
+| Category | unique | matched |
+|---|---|---|
+| rooms | 4,893 | 3,341 (68 %) |
+| npcs/enemies | 453 | 301 (66 %) |
+| objects | 524 | 238 (45 %) |
+| players | 32 | 25 (78 %) |
+| items | 135 | 17 (13 %) |
+| menu | 5 | 2 |
+| fonts | 39 | 4 |
+| room-items | 97 | 2 |
+| total | 6,178 | 3,930 (64 %), covering 10,330 of 18,253 files |
+
+2x output is 3.7 GB uncompressed TGA (4x would be about 18 GB). Sampled pairs were
+all correct (rooms tier A 24/24, tier B 12/12, actors/objects/players 18/18), but
+this is statistical matching, not a proof. Remaining gap: items, menu, fonts and
+room-items match poorly because the pack covers them sparsely or their atlas
+layout differs; the mipmap/filter limits of the software renderer still apply.
+Exact matching through the GameCube dump is possible (see AGENTS.md) but not built.
 
 ## Cooking and integrity
 

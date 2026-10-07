@@ -35,7 +35,9 @@ def main():
     for name in ['natural','skip']:
         state=states[name]
         assert state['room']=='RM_0000.RDX' and state['room_changes']==2 and not state['door_active'], (name,'roundtrip',state)
-        if name=='natural':assert any(sound.startswith('DOOR/0007/') for sound in state['audio_played']), (name, 'door audio missing')
+        if name=='natural':
+            door_sounds=[sound for sound in state['audio_played'] if sound.startswith('DOOR/0007/')]
+            assert door_sounds==['DOOR/0007/0000','DOOR/0007/0002','DOOR/0007/0001']*2, (name, 'opening/closing trigger sequence', door_sounds)
         assert state['door_skipped']==(name=='skip'), (name,'skip')
         assert state['items']==opening['items'] and state['weapon']==opening['weapon'] and state['hp']==opening['hp'], (name,'inventory')
         assert not state['cinematic'] and not state['player_hidden'] and not state['player_scripted'] and not state['dialog_open'] and not state['movie_active'], (name,'opening replayed')

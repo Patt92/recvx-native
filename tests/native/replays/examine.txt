@@ -1,5 +1,6 @@
+# Status screen: ItemCommand slides the command window in/out over 4 frames; equipping keeps the screen open.
 0 inventory
 1 confirm
-2 down
-3 confirm
-4 right
+6 down
+7 confirm
+12 right

@@ -1,5 +1,6 @@
 #pragma once
 #include "scene.h"
+#include "face.h"
 #include <filesystem>
 #include <optional>
 #include <map>
@@ -19,6 +20,7 @@ struct MotionClip {
 struct ActorNodeLayout {std::vector<unsigned> script_to_model,motion_to_model,model_to_script;};
 ActorNodeLayout decode_actor_node_layout(const std::vector<std::uint8_t>& model,const std::vector<std::uint8_t>& mask,bool face_actor=false);
 MotionClip join_motion_segments(const MotionClip& lower,const MotionClip& upper);
+std::vector<ModelPose> sample_motion_pose(const MotionClip& clip,std::int64_t frame,const std::vector<ModelPose>& rest,const std::vector<unsigned>& nodes={});
 MotionClip decode_motion_asset(const std::vector<std::uint8_t>& data);
 class PlayerAsset {
 public:
@@ -38,13 +40,14 @@ public:
     float translation_speed(std::size_t curve,std::int64_t frame_q16) const;
     // Healthy original idle/walk/run/back clips and signed translation curves.
     void locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t& frame_q16,int move,bool run,int turn)const;
+    const FaceAsset* face()const{return face_.get();}
     const std::vector<SceneTexture>& textures() const {return textures_;}
     // Original keys are sampled on integer frames, selected by a signed 16.16 clock.
     std::vector<ModelPose> local_pose(std::size_t motion,std::int64_t frame_q16,const ModelNodeOverrides& overrides={})const;
     std::vector<ModelPose> local_pose_clip(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes={},const ModelNodeOverrides& overrides={})const;
     std::vector<BoneMatrix> pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const ModelNodeOverrides& overrides={}) const;
     std::vector<BoneMatrix> pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},const ModelNodeOverrides& overrides={}) const;
-    Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={}) const;
+    Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr) const;
     // bhReadPlayerData: further plp->mdl[n] (n >= 1) with their SKIN/texture bundle, e.g. Claire's
     // ponytail mdl[4] used by obwp[2] (bhResetPlayer). nullptr when the model has no objects.
     const PlayerAsset* model(unsigned index)const{return index>0&&index<=models_.size()?models_[index-1].get():nullptr;}
@@ -53,7 +56,7 @@ public:
     // `angles` overrides the X/Y rotation of the first nodes (bhObjClpn writes objP[i].ang[0..1]).
     Scene sample_rest(const NJS_MATRIX& root,const std::vector<std::array<std::int32_t,2>>& angles={})const;
     NJS_POINT3 bind_position(std::size_t node)const{return bind_pose_.at(node).position;}
-    Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={}) const;
+    Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr) const;
 private:
     struct SkinMesh {
         std::size_t object=0;
@@ -64,6 +67,7 @@ private:
     struct Matrix {NJS_MATRIX value;};
     std::vector<ModelPose> sampled_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes)const;
     std::vector<std::uint8_t> model_;
+    std::shared_ptr<FaceAsset> face_;
     std::vector<ModelPose> bind_pose_;
     ActorNodeLayout node_layout_;
     std::vector<std::int32_t> children_,siblings_;

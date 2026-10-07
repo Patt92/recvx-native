@@ -30,7 +30,7 @@ Windows cross-builds report that tests must run separately on Windows or Wine.
 cooked tree. `--output <new-directory>` changes the package destination; package
 creation refuses to overwrite a previous release.
 
-macOS outputs a universal arm64/x86_64 binary (deployment target 11.0). Windows
+macOS outputs an arm64-only Apple Silicon binary (deployment target 11.0), with arm64-only SDL2 and no Rosetta fallback. Windows
 outputs x64. SDL2 2.32.10 and the cross-build Zig 0.16.0 are pinned by checksums.
 The app includes SDL2 and the full `data/` tree. Local ad-hoc signing is used on
 macOS; this is not an Apple-notarized release. Windows hardware testing remains

@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <vector>
 namespace recvx {
-// One njDrawTextureH vertex from the original routines: screen position,
+// One njDrawTextureH vertex from the original routines: screen position/depth,
 // UV normalised to the 512x512 status atlas (gbix 200004), base colour
 // (modulates the texel, alpha included) and offset colour (added to RGB).
-struct PulseVertex {float x,y,u,v;std::uint32_t base,offset;};
+struct PulseVertex {float x,y,u,v;std::uint32_t base,offset;float z;};
 using PulseQuad=std::array<PulseVertex,4>;
 // Host owner of the original StatusMain condition monitor (sub1.c PulseInit,
 // PulseMain, PulseAnim, PulseFadeAnim, PulseHealAnim, PulsePoisonHealAnim and

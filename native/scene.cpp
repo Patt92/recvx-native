@@ -143,7 +143,6 @@ private:
                 const std::size_t palette_count=banked?palettes.size():1;
                 if(!palette_count)throw std::runtime_error("TIM2 palette list missing");
                 for(std::size_t palette=0;palette<palette_count;++palette){
-                if(banked&&(palettes[palette]&255))continue;
                 texture.pixels.clear();texture.pixels.reserve(count);
                 const auto palette_offset=banked?palette*(type==4?128:1024):0;
                 for(std::size_t i=0;i<count;++i) {
@@ -165,7 +164,13 @@ private:
                     }
                     texture.pixels.push_back((rgba&0xff00ff00)|((rgba&255)<<16)|((rgba>>16)&255));
                 }
-                output.textures.push_back(texture);
+                if(banked&&(palettes[palette]&255)){
+                    if(output.textures.empty())throw std::runtime_error("palette bank without texture");
+                    output.textures.back().palette_banks[palettes[palette]>>8]=texture.pixels;
+                }else{
+                    if(banked)texture.palette_banks[palettes[palette]>>8]=texture.pixels;
+                    output.textures.push_back(texture);
+                }
                 }
             } else if(code==0x00494c50){
                 const auto count=view.u32(payload);if(count>64||size<4+count*8)throw std::runtime_error("invalid PLI palette list");
