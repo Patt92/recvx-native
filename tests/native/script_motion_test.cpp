@@ -64,5 +64,16 @@ int main(int argc,char** argv){try{
         bool loop=false;for(unsigned tick=0;tick<500;++tick){const auto before=actors.frame(1,enemy);actors.tick();check(actors.state(1,enemy)->pose_frame()==before,"second room samples the advanced clock");if(actors.frame(1,enemy)==0){loop=true;break;}}
         check(loop,"second original room motion did not reach its loop boundary");Scene rendered;actors.append(rendered,{},stage.cameras[0]);check(!rendered.triangles.empty(),"last pose in second room is not drawable");
     }
+    // bhMotionPosSetEnePly (0x7d, event.c:5844) on the real RM_0050 zombie: yaw is the original signed-16 node sum + 0x8000,
+    // Y is rom->grand[v1+1], the player root Y angle is cleared and a missing enemy work keeps the task at the command.
+    {auto stage=decode_scene(bytes);auto spawn=stage.spawns.at(0);std::size_t m=0;std::int64_t f=0;AudioMixer s2(data);RoomWorld w(bytes,stage,spawn,m,f,s2,data,{},"RM_0050");
+        auto player_asset=PlayerAsset::load(data);w.set_player_asset(&player_asset);
+        check(!w.bind(command({0x7d,60,0,0})),"bhMotionPosSetEnePly without enemy work must stay pending");
+        w.bind(command({0x65,1,2,0}));w.tick();
+        int sum=w.model_pose(1,2,0).angles[1];for(unsigned n=1;n<5;++n)sum-=w.model_pose(1,2,n).angles[1];
+        check(w.bind(command({0x7d,2,0,0})),"bhMotionPosSetEnePly must bind");
+        check(spawn.yaw==std::int16_t(std::int16_t(sum)+32768),"bhMotionPosSetEnePly yaw must be sum of node Y angles + 0x8000");
+        check(w.model_pose(0,0,0).angles[1]==0,"bhMotionPosSetEnePly must clear the player root Y angle");
+        check(spawn.position.y==w.floor_heights()[1],"bhMotionPosSetEnePly Y must be rom->grand[v1+1]");}
     std::cout<<"Original RM_0050 trigger/event 12, frame 60/64 offsets, final pose before hide, fractional sampling, pause and loop passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -225,6 +225,7 @@ private:
     bool entity_hidden(unsigned kind,unsigned index)const;
     std::vector<ModelPose> object_pose(const Model& model,const WorldEntity& state)const;
     std::vector<BoneMatrix> object_matrices(const Model& model,const WorldEntity& entity,const NJS_MATRIX& transform)const;
+    ModelPose model_pose_physical(unsigned kind,unsigned index,unsigned physical)const; // objP[physical] of the original model
     std::optional<BoneMatrix> link_matrix(unsigned kind,unsigned index,unsigned node,unsigned depth=0)const;
     NJS_POINT3 link_point(unsigned kind,unsigned index,unsigned node,NJS_POINT3 offset)const;
 };

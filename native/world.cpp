@@ -313,7 +313,8 @@ const WorldEntity* RoomWorld::state(unsigned kind,unsigned index)const{const aut
 const ModelNodeOverrides& RoomWorld::overrides(unsigned kind,unsigned index)const{static const ModelNodeOverrides empty;const auto* e=state(kind,index);return e?e->node_overrides:empty;}
 const RoomWorld::Model& RoomWorld::model(unsigned kind,unsigned index)const{for(const auto& m:models_)if(m.kind==kind&&m.index==index)return m;throw std::runtime_error("model control has no realized model");}
 unsigned RoomWorld::model_index(unsigned kind,unsigned index,unsigned node)const{if(!kind){if(!player_asset_)throw std::runtime_error("player model control requires player asset");return player_asset_->model_index(node);}const auto& m=model(kind,index);if(m.actor)return m.actor->model_index(node);if(node>=m.rest_pose.size())throw std::runtime_error("object model control node outside hierarchy");return node;}
-ModelPose RoomWorld::model_pose(unsigned kind,unsigned index,unsigned node)const{const auto physical=model_index(kind,index,node);auto edits=overrides(kind,index);if(!kind&&push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;if(!kind)return (player_room_motion_?player_asset_->local_pose_clip(room_motions_.at(motion_),frame_,{},edits):player_asset_->local_pose(motion_,frame_,edits)).at(physical);const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(m.actor){if(e->has_motion){const auto& clip=entity_motion(*e);return m.actor->local_pose_clip(clip,e->pose_frame(),m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=object_pose(m,*e).at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
+ModelPose RoomWorld::model_pose(unsigned kind,unsigned index,unsigned node)const{return model_pose_physical(kind,index,model_index(kind,index,node));}
+ModelPose RoomWorld::model_pose_physical(unsigned kind,unsigned index,unsigned physical)const{auto edits=overrides(kind,index);if(!kind&&push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;if(!kind)return (player_room_motion_?player_asset_->local_pose_clip(room_motions_.at(motion_),frame_,{},edits):player_asset_->local_pose(motion_,frame_,edits)).at(physical);const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(m.actor){if(e->has_motion){const auto& clip=entity_motion(*e);return m.actor->local_pose_clip(clip,e->pose_frame(),m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=object_pose(m,*e).at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
 void RoomWorld::start_task(unsigned level){auto& task=contexts_.at(level);task.mode1=0;task.positions={};task.angles={};}
 std::vector<ModelPose> RoomWorld::object_pose(const Model& model,const WorldEntity& state)const{
     auto pose=state.has_motion?sample_motion_pose(entity_motion(state),state.pose_frame(),model.rest_pose):model.rest_pose;
@@ -380,16 +381,18 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0x84){const unsigned typ=v.u8(1);if(typ>1)throw std::runtime_error("bhCyoutenHenkeiSetEX type outside original switch");
         auto& e=typ?entity(1,v.u8(2)):player_morph_;
         e.morph_obj_a=v.u8(3);e.morph_obj_b=v.u8(4);e.morph_shape=float(v.u16(6));e.morph=true;return true;}
-    // bhMotionPosSetEnePly: place the player at the enemy model root with the
-    // grand floor height. The original also sums model node Y angles 0..4
-    // into the yaw and resets the player root Y before bhCalcModel; the
-    // native player pose is rebuilt from (motion, frame) each tick and the
-    // floor is recomputed by check_floor on the next pass.
+    // bhMotionPosSetEnePly (event.c:5844): px/pz from the enemy root matrix (e_workp->mlwP->owP->mtx[12]/[14]),
+    // py = rom->grand[v1+1], ay = (short)(objP[0].ang[1]-objP[1..4].ang[1]) + 0x8000, then plp->mdl->objP->ang[1] = 0
+    // and bhCalcModel(plp). The native pose is rebuilt from (motion, frame, overrides), so the root Y reset is an override.
     if(op==0x7d){const auto& floors=floor_heights();const unsigned grand=unsigned(v.u8(2))+1;
         if(grand>=floors.size())throw std::runtime_error("bhMotionPosSetEnePly grand floor outside table");
-        const auto& source=entity(1,v.u8(1));
-        player_.position.x=source.transform.position.x;player_.position.z=source.transform.position.z;
-        player_.position.y=floors[grand];player_.yaw=source.transform.yaw+32768;return true;}
+        const unsigned work=v.u8(1);if(!state(1,work))return false;
+        const auto root=link_matrix(1,work,0);if(!root)return false;
+        int sum=model_pose_physical(1,work,0).angles[1];for(unsigned node=1;node<5;++node)sum-=model_pose_physical(1,work,node).angles[1];
+        player_.position.x=root->value[12];player_.position.z=root->value[14];player_.position.y=floors[grand];
+        player_.yaw=std::int16_t(std::int16_t(sum)+32768);
+        if(player_asset_){auto& edit=entity(0,0).node_overrides[0];auto angles=model_pose_physical(0,0,0).angles;angles[1]=0;edit.angles=angles;}
+        actor_nodes_.clear();return true;}
     if(op==0x9d){entity(2,v.u8(1)).aspd=v.u8(2);return true;} // objitm.c light parameter; consumers pending
     if(op==0xcc){entity(1,v.u8(1)).look=v.u8(2)!=0;return true;} // en01.c AI consumer pending
     if(op==0xc6){game_over_=true;return true;} // runtime owns the original gameover.c dispatcher
