@@ -13,9 +13,16 @@
 #define npDistanceP2C core_np_distance_p2c
 #define npSetMemory core_np_set_memory
 #define npSetMemoryL core_np_set_memory_l
+#define npPushMdlstr core_np_push_mdlstr
+#define npPopMdlstr core_np_pop_mdlstr
+#define npPushMdlstr2 core_np_push_mdlstr2
+#define npPopMdlstr2 core_np_pop_mdlstr2
+#define npGetMatColor core_np_get_mat_color
+#define npSetAllMatColor core_np_set_all_mat_color
 
 #define njTranslateEx core_nj_translate_ex
 #define njRotateEx core_nj_rotate_ex
 #define njScaleEx core_nj_scale_ex
+#define njMemCopy4 core_nj_mem_copy4
 
 #endif

@@ -19,12 +19,18 @@ int main(int argc,char** argv){try{
         check(restarted,"pulse loop never restarts");
     }
     // Use_00 heal sweep: 16 px per frame, then normal trace resumes.
-    StatusPulse heal;heal.open(3);heal.tick();heal.cured(0,1);check(heal.healing()&&heal.heal_mode()==1&&heal.condition()==0,"heal sweep not started");
+    StatusPulse heal;heal.open(3);heal.tick();heal.begin_cure(0,0x40);check(heal.healing()&&heal.heal_mode()==1&&heal.condition()==0,"heal sweep not started");
     heal.tick();check(heal.quads()[0][0].z==.2f,"original heal depth lost");check(heal.quads().size()==1&&heal.quads()[0][2].base==0xff00ff00u,"heal sweep must replace the trace with the green band");
     unsigned frames=0;while(heal.healing()&&frames<100){heal.tick();++frames;}check(!heal.healing()&&frames>=14&&frames<=20,"heal sweep length");
     heal.tick();heal.tick();check(heal.quads().size()==5,"trace does not resume after heal");
-    StatusPulse cure;cure.open(4);cure.cured(0,16);check(cure.heal_mode()==2,"poison cure sweep not started");cure.tick();check(cure.quads().size()==1&&cure.quads()[0][0].base==0xff0000ffu,"poison sweep colour");
-    StatusPulse resistant;resistant.open(4);resistant.cured(4,16,true);check(!resistant.healing(),"resistant poison must not animate");
+    StatusPulse cure;cure.open(4);cure.begin_cure(0,0x80);check(cure.heal_mode()==2,"poison cure sweep not started");cure.tick();check(cure.quads().size()==1&&cure.quads()[0][0].base==0xff0000ffu,"poison sweep colour");
+    // Use_00 with poison2 (stflg 0x200000): blue herb clears 0x80000, shows 198 and is not consumed
+    // (herbuse stays 0, see generate_item_use.py); no sweep starts.
+    {Inventory r;std::fill(r.slots()+2,r.slots()+12,0);r.slots()[2]=Inventory::pack(23,1);r.poisoned=r.infected=true;unsigned control=0;
+     const auto u=r.use_item(2,nullptr,control,0,0,4);check(u.message==198&&!u.pulse&&u.condition==4&&!r.poisoned&&r.infected&&r.slots()[2]==Inventory::pack(23,1),"poison2 blue herb differs from Use_00");}
+    // First aid spray raises sys->spray_ct and restores full health; the last one empties its slot.
+    {Inventory r;std::fill(r.slots()+2,r.slots()+12,0);r.slots()[2]=Inventory::pack(20,1);r.hp=10;unsigned control=0;
+     const auto u=r.use_item(2,nullptr,control,0,0,3);check(u.pulse==0x40&&u.condition==0&&r.hp==160&&r.spray_count==1&&r.slots()[2]==0&&!(control&0x400),"spray differs from Use_00/ItemUse");}
     // Menu integration: using a herb from the status screen starts the original sweep.
     Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(21,1);inv.hp=40;
     StatusMenu menu;menu.message_source=[](unsigned){return Message{'T'-32,0xffff};};
@@ -48,7 +54,7 @@ int main(int argc,char** argv){try{
         m.input(MenuInput::Cancel,s);check(m.nav&&m.active&&!m.closing&&m.feedback_sound==0,"first back selects the navigation bar");m.input(MenuInput::Cancel,s);check(m.active&&m.closing&&m.feedback_sound==0,"close SE");unsigned ticks=0;while(m.active&&ticks<40){m.tick(s);++ticks;}check(!m.active&&ticks==15,"StatusCancel: six shutter ticks, then nine slide ticks");}
     if(argc>1)for(unsigned cure:{0u,1u,16u}){
         GameUi ui(std::filesystem::u8path(argv[1]));Inventory inv;StatusMenu menu;MessageDialog dialog;
-        menu.input(MenuInput::Open,inv);menu.skip_slide();for(unsigned i=0;i<20;++i)menu.tick(inv);if(cure){menu.pulse.cured(0,cure);menu.tick(inv);}
+        menu.input(MenuInput::Open,inv);menu.skip_slide();for(unsigned i=0;i<20;++i)menu.tick(inv);if(cure){menu.pulse.begin_cure(0,cure==1?0x40u:0x80u);menu.tick(inv);}
         auto difference=[&](unsigned frame){SoftwareRenderer shown(640,480),without(640,480);ui.draw(shown,inv,menu,dialog,frame);auto blank=menu;blank.pulse=StatusPulse{};ui.draw(without,inv,blank,dialog,frame);
             unsigned changed=0;for(unsigned i=0;i<shown.pixels().size();++i)changed+=shown.pixels()[i]!=without.pixels()[i];
             if(argc>2&&(frame==0||frame==3||frame==6||frame==12)){std::filesystem::create_directories(argv[2]);shown.save_bmp(std::filesystem::u8path(argv[2])/("pulse-"+std::to_string(cure)+"-close-"+std::to_string(frame)+".bmp"));}return changed;};

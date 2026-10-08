@@ -8,9 +8,10 @@
 using namespace recvx;
 static void check(bool b,const char* why){if(!b)throw std::runtime_error(why);}
 struct Room {
- std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn player;std::size_t motion=42;std::int64_t frame=0;
+ std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn player;PlayerAsset player_asset;std::size_t motion=42;std::int64_t frame=0;
  RoomWorld world;Inventory inventory;MessageDialog dialog;EventVm vm;AudioMixer& audio;
- Room(const std::filesystem::path& data,const char* name,AudioMixer& mixer):bytes(read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024)),scene(decode_scene(bytes)),player(scene.spawns.at(0)),world(bytes,scene,player,motion,frame,mixer,data),vm(bytes,inventory,dialog),audio(mixer){
+ Room(const std::filesystem::path& data,const char* name,AudioMixer& mixer):bytes(read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024)),scene(decode_scene(bytes)),player(scene.spawns.at(0)),player_asset(PlayerAsset::load(data)),world(bytes,scene,player,motion,frame,mixer,data),vm(bytes,inventory,dialog),audio(mixer){
+  world.set_player_asset(&player_asset);
   const auto id=RoomIdentity::parse(std::string(name)+".RDX");vm.values[0]=id.stage;vm.values[1]=id.room;
   vm.binding=[&](const EventCommand& c){return world.bind(c);};vm.task_started=[&](unsigned l){world.start_task(l);};vm.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};
   vm.door=[](const DoorRequest&){return true;};audio.begin_room_init();vm.initialize();audio.load_room_sounds(id.stage,id.room,audio.take_room_sound_case());audio.room_fade_in();

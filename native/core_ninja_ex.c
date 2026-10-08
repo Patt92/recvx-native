@@ -27,3 +27,15 @@ void core_nj_scale_ex(NJS_VECTOR* vector)
 {
     njScale(NULL, vector->x, vector->y, vector->z);
 }
+
+/* ps2_NaMem.c:19-32 */
+void core_nj_mem_copy4(void* dst, const void* src, Sint32 num)
+{
+    int* lpSrc = (int*)src;
+    int* lpDst = (int*)dst;
+
+    for (; num != 0; num--)
+    {
+        *lpDst++ = *lpSrc++;
+    }
+}
