@@ -1,88 +1,132 @@
-# RECVX Native 0.5
+# RECVX Native
 
-Native Portierungsarbeit für Resident Evil CODE: Veronica X (PS2), ausgehend von
+Native Portierung von *Resident Evil CODE: Veronica X* (PS2) auf **macOS arm64**
+und **Windows x64** – aufgebaut auf der Decompilation von
 [AshfordFamily/recvx-decomp](https://github.com/AshfordFamily/recvx-decomp).
-Der aktuelle Entwicklungsbuild läuft auf Windows x64 und macOS (Intel/Apple Silicon).
-Er ist noch kein vollständig spielbares Spiel.
 
-Der Start öffnet ein Hauptmenü mit Neues Spiel, Einstellungen und Beenden.
-Einstellungen zeigen und ändern Tastatur- und Controllerbelegung, Stick-Totzone
-und Menüschwelle; Änderungen werden sofort angewendet und gespeichert.
-Neues Spiel verwendet die originalen RM_0000-Ereignisse: Intro/Film, dunkle Zelle,
-Feuerzeughinweis, Inventar/Ausrüsten, Rodrigo-Sequenz und Rückgabe der Steuerung.
-Originale Modelle, Texturen, Animationen, Inventarsymbole, Nachrichten,
-ADX-Musik/Stimmen und die 18 Filme mit ihrem PCM-Ton werden nativ verarbeitet.
-Dialoge verwenden weiße Schrift mit schwarzer Kontur ohne Hintergrundfläche.
-Leere Inventarfelder verwenden den Original-Atlas; die zwei Taschenplätze und
-der längere Rahmen erscheinen erst mit der Tasche. Effekte, Gesichtssystem,
-Umgebungs-/Waffen-/Türklänge, Kampf, Speicherstände und weitere Menüseiten
-sind noch unvollständig. Schritte beim Gehen, Laufen und Rückwärtsgehen verwenden
-die originalen Raum-Soundbanken und Bodenmaterialien. Skriptgesteuerte Gegenstände
-können an Figurenmodellen angehängt und einzelne Modellteile ausgeblendet werden.
-Ausführliche Grenzen stehen in der Gameplay-Dokumentation.
+Das Ziel ist die originale Engine, nicht ein Remake: Spiellogik, Zustands-
+maschinen, Tabellen und Berechnungen werden aus dem Originalcode übernommen,
+meist direkt per Generator aus den C-Quellen extrahiert. Der Host ersetzt nur
+das, was die PS2-Hardware bereitgestellt hat – Fenster, Eingabe, Audioausgabe,
+Rendering und Dateizugriff.
 
-## Starten und bauen
+> **Status:** Entwicklungsbuild. Der Prolog und die ersten Spielbereiche laufen
+> über die originalen Raumskripte; viele Systeme (Effekte, Gegnerfamilien,
+> Speichern, Karte) sind noch offen. Ein vollständiges Durchspielen ist nicht
+> möglich.
 
-**Vorhandenes Spiel starten:** im Projektordner `Start.command` (macOS) oder
-`Start.cmd` (Windows) doppelklicken. Sie starten die bereits vorhandenen Pakete.
-[Startanleitung mit Tasten und Ressourcen](STARTEN.md).
+## Was bereits läuft
 
-Türwechsel mit originalen MRY-Modellen und Bewegungsparametern sind eingebaut.
-Ein erneuter Druck auf die Bestätigungstaste (Enter / Controller-A, konfigurierbar)
-überspringt die Türsequenz. Inventar, Ausrüstung, HP, Tasche und globale
-Ereignisflags bleiben über Raumwechsel erhalten.
+- **Originaldaten nativ:** Räume, Modelle, Texturen, Animationen, Nachrichten,
+  ADX-Musik und -Stimmen, Sony-Soundbanken und alle 18 Filme – ohne ISO- oder
+  AFS-Zugriff zur Laufzeit.
+- **Event-VM:** originaler Szenario-Interpreter mit Tasks, Bedingungen, Kameras,
+  Dialogen und Türanforderungen; alle 205 Räume laden.
+- **Spieler:** Bewegung, Treppen, Kisten und Kollision über die originalen
+  Routinen aus `player.c` und `hitchk.c`; Nahkampf- und Schusswaffen mit
+  originaler Zielwahl.
+- **Inventar:** Statusbildschirm mit originalen Sprites, Kombinationen,
+  Untersuchen, Dateiordner, Item-Box und Aufnahme-Ablauf.
+- **Gegner:** Zombie-KI, Trefferreaktionen, Tod und Greifen nach `en01.c`.
+- **Türen und Musik:** originale Türsequenzen, BGM-Wechsel und Raumklänge.
 
-Voraussetzungen: Python 3.12+, CMake, C/C++-Compiler (Apple Command Line Tools oder
-Visual Studio mit C++); für Windows-Crossbuilds zusätzlich Ninja. SDL2 ist über
-Version und SHA256 festgelegt und wird beim ersten Build geladen. Der Spielstart
-benötigt keine Netzwerkverbindung.
+## Portierungsstand
+
+Abdeckung der Originalfunktionen nach Kategorie, gemessen mit
+`python3 tools/port_check.py`. *Gewichtet* zählt teilweise portierte
+Funktionen anteilig, *streng* nur vollständig belegte. Die Zahlen messen
+Abdeckung, nicht semantische Vollständigkeit.
+
+<!-- port-status:begin -->
+<!-- Automatisch erzeugt: python3 tools/port_check.py --readme README.md -->
+
+| Kategorie | Fortschritt | Gewichtet | Streng | Funktionen | Stand |
+|---|---|---:|---:|---:|---|
+| Spieler/Kampf | `██████████` | 95,2 % | 90,8 % | 159/166 | Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen. |
+| Events/Skript | `█████████░` | 91,7 % | 90,7 % | 251/272 | Event-VM und Befehle portiert; Common-Control und restliche Befehle offen. |
+| Menü/Items/Text | `███████░░░` | 69,2 % | 63,4 % | 130/241 | Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen. |
+| Effekte | `█████░░░░░` | 52,0 % | 51,7 % | 175/361 | Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen. |
+| Raum/Kamera/Tür | `█████░░░░░` | 50,3 % | 39,5 % | 64/188 | Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen. |
+| Modelle/Animation | `████░░░░░░` | 40,7 % | 16,9 % | 11/88 | Ressourcen und ausgewählte Animationspfade; Skin/Morph/Chunk-Renderer offen. |
+| Gegner/KI | `███░░░░░░░` | 26,2 % | 25,9 % | 342/1357 | Zombie/Hund teilweise; die meisten enXX-Zustandsroutinen fehlen. |
+| Audio | `██░░░░░░░░` | 16,4 % | 0,0 % | 0/164 | Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt. |
+| Ablauf/Speichern | `█░░░░░░░░░` | 11,5 % | 0,1 % | 3/331 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
+| **Engine gesamt** | `█████░░░░░` | **47,3 %** | **43,9 %** | **1135/3168** | 147/223 Event-Befehle gebunden. |
+
+<!-- port-status:end -->
+
+Die Tabelle wird von `python3 tools/port_check.py --readme README.md`
+erzeugt (nicht von Hand ändern) und ersetzt kein Semantik-Audit. Sie muss
+vor jedem Commit neu erzeugt werden.
+
+Einzelheiten und die größten offenen Funktionen: [docs/PORT_STATUS.md](docs/PORT_STATUS.md).
+
+## Schnellstart
+
+Spielen (vorhandene Pakete mit lokalen Spieldaten):
+
+- **macOS:** `Start.command`
+- **Windows:** `Start.cmd`
+
+Bedienung, Tasten und Spieldaten: [STARTEN.md](STARTEN.md).
+
+Selbst bauen (Python 3.12+, CMake, C/C++-Compiler):
 
 ```sh
-# macOS: Universal-Build, Tests und vollständiges lokales App-Paket
 ./build.sh --platform macos --verify-data --package
-# Windows-Crossbuild auf macOS/Linux
+```
+
+```sh
 ./build.sh --platform windows --verify-data --package
 ```
 
-```powershell
-# Windows: nativer Release-Build, Tests und Paket
-./build.ps1 --platform windows --verify-data --package
-```
+`--test` baut und startet zusätzlich die Regressionstests. Details:
+[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 
-Die Pakete liegen in `build/packages/macos-universal-v0.5` und
-`build/packages/windows-x64-v0.5`. macOS startet über `RECVX Native.app`, Windows
-über `Start.cmd`. Jeder Build enthält den vollständigen lokalen Datenexport;
-während des Spielstarts wird weder ISO noch AFS gelesen.
+Spieldaten werden nicht mit dem Quellcode veröffentlicht; ein reiner
+Quellcode-Clone ist ohne lokalen `data/`-Ordner nicht lauffähig.
 
-Tastatur und SDL-Gamepads werden unterstützt; Windows nutzt auch XInput.
-Die Belegung und Stick-Totzone sind im Hauptmenü unter Einstellungen oder in `controls.ini` konfigurierbar
-([Steuerungsdokumentation](docs/CONTROLS.md)).
-Tab öffnet das Inventar, Pfeiltasten wählen, Enter bestätigt/interagiert, Escape
-geht zurück. W/S oder I/K bewegt Claire vor/zurück, A/D oder J/L dreht, Shift läuft schnell.
-Laufende Videos lassen sich mit Enter/Space oder Controller-A/Start überspringen;
-die Anzeige berücksichtigt die aktuelle Belegung. Space verwendet außerhalb eines
-Videos den originalen Cinematic-Skip. Diagnosefunktionen sind dokumentiert.
+## Prinzipien
 
-## Ordner
+- **Original vor Nachbau.** Originalcode, Originaldaten und Disassembly sind
+  die Referenz. Wo möglich wird Originalcode per Generator übernommen statt
+  nachprogrammiert.
+- **Keine Ersatzlogik.** Keine Heuristiken, keine Raum-Sonderfälle, keine
+  „ungefähr passenden“ Platzhalter. Fehlt ein Mechanismus, bleibt er als Lücke
+  sichtbar.
+- **Plattformcode bleibt Plattformcode.** Host-Anpassungen betreffen nur
+  Schnittstellen und Datenformate, nie Spielentscheidungen.
 
-| Ordner | Zweck |
+Die verbindliche Prüfmethode steht in [QUALITY.md](QUALITY.md).
+
+## Dokumentation
+
+| Seite | Inhalt |
 |---|---|
-| `native/`, `src/`, `include/` | Native Implementierung und erhaltene Decompilation |
-| `tools/`, `tests/`, `docs/` | Build-/Asset-Werkzeuge, Prüfungen, Dokumentation |
-| `data/` | Vollständige lose Originaldaten und konvertierte Laufzeit-Assets, lokal ignoriert |
-| `mods/` | Optionale austauschbare Texturen, Audio-/Filmdaten und unterstützte Modellpakete |
-| `build/` | Erzeugte Binärdateien, Abhängigkeiten und Pakete, lokal ignoriert |
-| `archived/` | ISO, alter PS2-Build, alte Exporte/Versionen und frühere Git-Historie; ignoriert, keine produktive Abhängigkeit |
+| [STARTEN.md](STARTEN.md) | Start, Bedienung, Diagnose |
+| [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md) | Build, Pakete, Architektur |
+| [docs/NATIVE_GAMEPLAY.md](docs/NATIVE_GAMEPLAY.md) | Portstand der Spielsysteme und offene Lücken |
+| [docs/NATIVE_PLAYER.md](docs/NATIVE_PLAYER.md) | Spielermodell, Skinning, Animation |
+| [docs/AUDIO.md](docs/AUDIO.md) | Musik, Soundbanken, Filme |
+| [docs/NATIVE_ASSETS.md](docs/NATIVE_ASSETS.md) | Ressourcen, Mods, HD-Texturen |
+| [docs/CONTROLS.md](docs/CONTROLS.md) | Tastatur- und Controllerbelegung |
+| [docs/DEBUG_MENU.md](docs/DEBUG_MENU.md) | Debugmenü |
+| [docs/VALIDATION.md](docs/VALIDATION.md) | Testgruppen und Prüfwerkzeuge |
+| [docs/INVENTORY-COVERAGE.md](docs/INVENTORY-COVERAGE.md) | Generierte Item-/Rezeptabdeckung |
 
-Das Repository wurde als neues Git initialisiert. Die vorherige Historie und deren
-HEAD sind unter `archived/upstream-git` und `archived/relocations.json` erhalten.
-Spieldaten werden weder von Git erfasst noch mit dem Quellcode veröffentlicht.
+## Projektstruktur
 
-- [Build, Architektur und Validierung](docs/NATIVE_PORT.md)
-- [Gameplay, Startsequenz und offene Funktionen](docs/NATIVE_GAMEPLAY.md)
-- [Assets, HD-Texturen und Modellgrenzen](docs/NATIVE_ASSETS.md)
-- [Originalmodelle und Bewegung](docs/NATIVE_PLAYER.md)
-- [Audio und Filme](docs/AUDIO.md)
+| Pfad | Inhalt |
+|---|---|
+| `native/` | Native Engine und Host-Schicht |
+| `src/`, `include/` | Erhaltene Original-Decompilation |
+| `tools/` | Generatoren, Extraktion, Build und Prüfwerkzeuge |
+| `tests/` | Regressionstests und Replays |
+| `docs/` | Dokumentation |
+| `mods/` | Optionale austauschbare Ressourcen |
+| `data/`, `build/`, `archived/` | Lokal, nicht im Repository |
 
-Die ursprüngliche Projektlizenz bleibt in `LICENSE` erhalten. Drittanbieter-Lizenzen
-liegen bei den jeweiligen Abhängigkeiten und werden den Paketen beigelegt.
+## Lizenz
+
+Die ursprüngliche Projektlizenz liegt in [LICENSE](LICENSE). Lizenzen der
+Abhängigkeiten werden den Paketen beigelegt.
