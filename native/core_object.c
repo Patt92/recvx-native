@@ -34,11 +34,11 @@ O_WRK* core_bh_set_object(ETTY_WORK* otp, int no, unsigned char* lkp)
     return opp;
 }
 
-/* objitm.c:119-124 */
+/* objitm.c:119-124: 39936 = 32 * 0x4E0 (PS2 sizeof(O_WRK)); host O_WRK is larger, clear the whole 32-entry table. */
 void core_bh_init_obj_itm(void)
 {
-    core_np_set_memory((unsigned char*)sys->obwp, 39936, 0);
-    core_np_set_memory((unsigned char*)sys->itwp, 39936, 0);
+    core_np_set_memory((unsigned char*)sys->obwp, 32 * sizeof(O_WRK), 0);
+    core_np_set_memory((unsigned char*)sys->itwp, 32 * sizeof(O_WRK), 0);
 }
 
 /* objitm.c:225-294 */

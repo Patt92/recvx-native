@@ -361,6 +361,19 @@ def host_linkage(path, flags, report):
         path.write_text('\n'.join(text), errors='surrogateescape')
         report['linkage'] = ch
 
+def host_sizes(path, report):
+    """Feste PS2-Tabellengroessen -> sizeof (Host-Layout).
+
+    eneset.c:166 `npSetMemory(ene, 180224, 0)`: 180224 = 128 * 0x580 ist die
+    PS2-Groesse von `BH_PWORK ene[128]` (main.h). Mit 64-Bit-Zeigern ist
+    sizeof(BH_PWORK) groesser; geloescht wird weiterhin genau die ganze Tabelle.
+    """
+    text = path.read_text(errors='surrogateescape')
+    old = 'npSetMemory((unsigned char*)ene, 180224, 0)'
+    if old in text:
+        path.write_text(text.replace(old, 'npSetMemory((unsigned char*)ene, sizeof(ene), 0)'), errors='surrogateescape')
+        report['sizes'] = 1
+
 def main():
     root = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser()
@@ -390,6 +403,9 @@ def main():
         host_linkage(out / p.name, flags, rep)
         if rep.get('linkage'):
             print('%s: Linkage %s' % (p.name, ' '.join(rep['linkage'])))
+        host_sizes(out / p.name, rep)
+        if rep.get('sizes'):
+            print('%s: feste Tabellengroesse -> sizeof' % p.name)
         pointer_slots(out / p.name, flags, rep)  # nach add_includes: Zeilennummern stabil
         if rep.get('p32'):
             print('%s: %d Zeigerslots -> Handle' % (p.name, rep['p32']))
