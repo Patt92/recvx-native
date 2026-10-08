@@ -11,6 +11,7 @@
 #include "subplayer.h"
 #include "en01_damage.h"
 #include "effect_particles.h"
+#include "object_itmbox.h"
 #include <set>
 #include <string>
 #include <map>
@@ -78,7 +79,12 @@ public:
     void set_player_asset(const PlayerAsset* player){player_asset_=player;}
     void set_player_character(unsigned character){player_character_=int(character&3);}
     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
-    void spawn_player_effect(const EffectSpawn& effect){spawn_effect(effect,1,0);}
+    int spawn_player_effect(const EffectSpawn& effect){return spawn_effect(effect,1,0);}
+    // hitchk.c bhCheckExmAtari, type 4 with attr 0x2: obwp[object] with flg 1
+    // becomes type 100 (mode0..mode3 cleared). Returns false when flg 1 is clear.
+    bool start_item_box(unsigned object);
+    // bhControlObject for every type-100 room object: bhJumpObject[100] = bhObjItmBox.
+    void control_item_boxes(unsigned& cb_flg,unsigned& player_stflg);
     // bhSetExplosion: the effect works, flash light and sound; `view` is the camera direction (cam.vx/vy/vz).
     void explode(NJS_POINT3 position,NJS_POINT3 view);
     // Blast damage dealt to the player by bhCheckBombAtari since the last call (hp points).
@@ -163,7 +169,7 @@ private:
     std::set<std::string> unbound_enemy_;
     unsigned enemy_game_mode_=0;
     // bhSetEffectTb from game code: `link_kind` 0 = world position, 2 = enemy joint (WorldEntity index/joint).
-    void spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
+    int spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
     void process_effect_output();
     void bomb_damage(const BombRequest& bomb);
     EffectParticles particles_;
@@ -211,6 +217,7 @@ private:
     std::array<unsigned,4> ambient_slots_{};
     float fade_=0,fade_target_=0,fade_step_=0;unsigned fade_color_=0;
     std::uint32_t background_=0,background_target_=0;unsigned background_delay_=0;bool background_pending_=false;
+    std::map<unsigned,ItemBoxObjectWork> item_boxes_; // O_WRK mode0/ct0 of type-100 objects
     WorldEntity& entity(unsigned kind,unsigned index);
     const Model& model(unsigned kind,unsigned index)const;
     unsigned model_index(unsigned kind,unsigned index,unsigned script_node)const;

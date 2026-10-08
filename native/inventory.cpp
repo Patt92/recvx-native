@@ -1,5 +1,6 @@
 #include "inventory.h"
 #include "inspection.h"
+#include "status_pulse.h"
 #include <algorithm>
 #include <stdexcept>
 #include <tuple>
@@ -20,61 +21,82 @@ static void bhSetMessage(int,unsigned index){message=index;sys->st_flg|=0x200;}
 #include "box_engine.inc"
 }
 namespace pickup_original {
-struct S_WORK {unsigned int* gb=nullptr;unsigned int* pip=nullptr;unsigned testmode=0,statusflg=0,flgchk=0;};
-struct System {unsigned gm_mode=0,gm_flg=0,cb_flg=0,st_flg=0,pad_ps=0,mes_sel=0,sb_id=0,ply_id=0,rom_no=0,stg_no=0,mn_mode0=0;unsigned* itm=nullptr;};
-struct Player {unsigned mode3=0,wpnr_no=0,at_flg=0;};
+struct S_WORK {unsigned int* gb=nullptr;unsigned int* pip=nullptr;unsigned testmode=0,statusflg=0,flgchk=0;unsigned char hp=0,abc=0;};
+struct System {unsigned gm_mode=0,gm_flg=0,cb_flg=0,st_flg=0,pad_ps=0,mes_sel=0,sb_id=0,ply_id=0,rom_no=0,stg_no=0,mn_mode0=0;unsigned* itm=nullptr;short spray_ct=0;};
+struct Player {unsigned mode3=0,wpnr_no=0,at_flg=0;int hp=0;unsigned stflg=0;};
+struct PULSE_WORK {unsigned pulseflg=0;};
 static thread_local S_WORK swork;
 static thread_local System system;static thread_local System* sys=&system;
 static thread_local Player player;static thread_local Player* plp=&player;
-static thread_local unsigned message=0;static thread_local bool used=false;
+static thread_local unsigned message=0;
+static thread_local PULSE_WORK pulsework;static thread_local bool pulse_init=false;
+static void PulseInit(){pulsework={};pulse_init=true;}
 static thread_local unsigned sakai=2;
 static void bhSetMessage(int,unsigned index){message=index;sys->st_flg|=0x200;}
 // Window/audio transitions are driven by the host status task. GetItem still
 // decides which question, mutation and equipment transition to perform.
 static void StatusCancel(S_WORK*){}
 static void CallSystemSe(int,int){}
-static void Use_00(S_WORK*){used=true;}
 static void WeaponSet(unsigned slot,unsigned){swork.pip[0]=slot;}
+#include "item_use00.inc"
 #include "pickup_engine.inc"
 }
 namespace item_use_original {
-struct S_WORK {unsigned* pip=nullptr;unsigned listcsr_0=0,itemid=0,statusflg=0,flgchk=0,testmode=0;};
-struct System {unsigned* itm=nullptr;unsigned ply_id=0,sb_id=0,cb_flg=0,st_flg=0,flr_idx=0,stg_no=0,rom_no=0;};
+struct S_WORK {unsigned* pip=nullptr;unsigned listcsr_0=0,itemid=0,statusflg=0,flgchk=0,testmode=0;unsigned char hp=0,abc=0;};
+struct System {unsigned* itm=nullptr;unsigned ply_id=0,sb_id=0,cb_flg=0,st_flg=0,flr_idx=0,stg_no=0,rom_no=0;int gm_mode=0;short spray_ct=0;};
+struct Player {int hp=0;unsigned stflg=0;};
+struct PULSE_WORK {unsigned pulseflg=0;};
 struct ATR_WORK {unsigned prm0=0,prm1=0,prm2=0,prm3=0;};
 struct Room {ATR_WORK* flrp;};
 static thread_local S_WORK swork;
 static thread_local System system;static thread_local System* sys=&system;
+static thread_local Player player;static thread_local Player* plp=&player;
 static thread_local ATR_WORK area;static thread_local Room room{&area};static thread_local Room* rom=&room;
 static thread_local unsigned message=0;static thread_local bool closing=false;
+// PULSE_WORK belongs to the status screen (StatusPulse). Use_00 calls the
+// original PulseInit and then sets pulseflg; the host replays exactly that
+// sequence on the live monitor with the captured bits.
+static thread_local PULSE_WORK pulsework;static thread_local bool pulse_init=false;
+static void PulseInit(){pulsework={};pulse_init=true;}
 static void bhSetMessage(int,unsigned index){message=index;sys->st_flg|=0x200;}
 static void StatusCancel(S_WORK*){closing=true;}
-static unsigned char Use_00(S_WORK*){throw std::runtime_error("floor-bound ItemUse cannot dispatch a herb");}
+#include "item_use00.inc"
 #include "item_use.inc"
 }
-FloorUseResult Inventory::use_on_floor(unsigned slot,const std::array<unsigned,4>* parameters,unsigned& control,unsigned stage,unsigned room_number){
-    if(player>=4||!slot||slot>=12||!id(slots()[slot])||id(slots()[slot])>=156)throw std::runtime_error("invalid original floor-use slot");
-    const auto type=itemdata[id(slots()[slot])].type&0x5f;
-    if(type!=1&&type!=2&&type!=0x40)throw std::runtime_error("item outside original floor-use dispatch");
+ItemUseResult Inventory::use_item(unsigned slot,const std::array<unsigned,4>* parameters,unsigned& control,unsigned stage,unsigned room_number,unsigned condition,bool message_active){
+    if(player>=4||!slot||slot>=12||!id(slots()[slot])||id(slots()[slot])>=156||condition>4)throw std::runtime_error("invalid original ItemUse slot");
     using namespace item_use_original;
     item_use_original::system={};auto& sys=item_use_original::system;sys.itm=items.data();sys.ply_id=player;sys.cb_flg=control;sys.stg_no=stage;sys.rom_no=room_number;
+    sys.gm_mode=int(game_mode);sys.spray_ct=spray_count;sys.st_flg=message_active?0x200u:0u;
     if(parameters){area={(*parameters)[0],(*parameters)[1],(*parameters)[2],(*parameters)[3]};sys.cb_flg|=0x200;}else sys.cb_flg&=~0x200u;
-    swork={};swork.pip=slots();swork.listcsr_0=slot;swork.itemid=id(slots()[slot]);message=0;closing=false;
-    ItemUse(&swork);control=closing?sys.cb_flg:(sys.cb_flg&~0x400u);
-    return {closing,message};
+    item_use_original::player={hp,player_stflg()};
+    // ItemCommand sets st->itemid from the cursor; StatusInit/Use_00 keep st->hp == st->abc.
+    swork={};swork.pip=slots();swork.listcsr_0=slot;swork.itemid=id(slots()[slot]);swork.hp=swork.abc=std::uint8_t(condition);
+    message=0;closing=false;pulsework={};pulse_init=false;
+    const unsigned useon=ItemUse(&swork);
+    hp=item_use_original::player.hp;set_player_stflg(item_use_original::player.stflg);spray_count=sys.spray_ct;
+    // StatusMain clears cb_flg 0x400 on its next frame; only StatusCancel lets
+    // the event VM observe the used item.
+    control=closing?sys.cb_flg:(sys.cb_flg&~0x400u);
+    return {closing,message,useon,pulse_init?pulsework.pulseflg:0u,swork.hp};
 }
 PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,unsigned room,unsigned mode,int answer){
     if(!item||item>=156||player>=4||game_mode>=4||mode>5||answer < -1||answer>101)throw std::runtime_error("invalid original pickup state");
     using namespace pickup_original;
     pickup_original::system={};auto& sys=pickup_original::system;
     sys.gm_mode=game_mode;sys.gm_flg=side_pack?0x8000000:0;sys.cb_flg=control;sys.sb_id=item;sys.ply_id=player;sys.itm=items.data();sys.stg_no=stage;sys.rom_no=room;
-    swork={};swork.pip=slots();swork.testmode=mode;message=0;used=false;
+    sys.spray_ct=spray_count;pickup_original::player={};pickup_original::player.hp=hp;pickup_original::player.stflg=player_stflg();
+    swork={};swork.pip=slots();swork.testmode=mode;swork.hp=swork.abc=std::uint8_t(StatusPulse::condition(hp,(player_stflg()&0x280000u)!=0));message=0;pulsework={};pulse_init=false;
     // Host debug actions can alter inventory while a question is displayed.
     // Re-run the original capacity branch before its unchecked insertion loop.
     if(mode==1&&answer==100){sys.cb_flg&=~0x5800u;swork.testmode=0;GetItem(&swork);if(swork.testmode!=1){control=sys.cb_flg;return {swork.testmode,message,false,false};}message=0;}
     if(answer>=0){sys.pad_ps=0x800;sys.st_flg=0x4200;sys.cb_flg|=0x1000;sys.mes_sel=answer;}
+    const unsigned before=sys.cb_flg;
     GetItem(&swork);
     const bool granted=swork.statusflg&0x100;
-    if(used){const auto cure=curedata[sys.sb_id-20];if((cure&0xf0)==0x10)poisoned=false;const unsigned heal=cure&15;if(heal>=3)hp=max_hp;else hp=std::min(max_hp,hp+int(heal)*50*(game_mode==2?2:1));}
+    // Only GetItem's immediate-use answer (mode 4, mes_sel 100) sets cb_flg 0x400 and calls Use_00.
+    const bool used=(sys.cb_flg&~before)&0x400;
+    hp=pickup_original::player.hp;set_player_stflg(pickup_original::player.stflg);spray_count=sys.spray_ct;
     // GetItem mode 2 emits the received-item message on its next pass after
     // the question has closed; preserve that same state transition.
     if(swork.testmode==2){GetItem(&swork);}
@@ -83,7 +105,7 @@ PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,un
     // a newly inserted wide item; do not remap that index a second time here.
     ItemSort();
     control=sys.cb_flg;
-    return {swork.testmode,message,granted,used};
+    return {swork.testmode,message,granted,used,pulse_init?pulsework.pulseflg:0u};
 }
 bool Inventory::reload(){
     if(!slots()[0]||slots()[0]>=12||!weapon())return false;
@@ -159,16 +181,6 @@ void Inventory::erase_read_manual(bool automatic){
     else for(unsigned i=0;i<192;++i)if(items[i]==0x910001){items[i]=0;break;}
     // StatusMain -> SpriteOnOff calls ItemSort for the current player's list.
     pickup_original::ItemSort();
-}
-bool Inventory::consume(unsigned slot){if(slot<1||slot>=12||!id(slots()[slot]))return false;if(quantity(slots()[slot])>1)--slots()[slot];else{slots()[slot]=0;if(slots()[0]==slot)slots()[0]=0;}compact();return true;}
-bool Inventory::heal(unsigned slot){
-    if(slot<1||slot>=12)return false;const auto item=id(slots()[slot]);if(item<20||item>29)return false;
-    // TrigerSet uses curedata for herbs/spray. Blue herbs only cure poison.
-    const auto cure=curedata[item-20];const auto heal=cure&15;const bool poison_cure=(cure&0xf0)==0x10;
-    if(!heal&&!poison_cure)return false;
-    if(!heal&&infected)return false;
-    if(poison_cure)poisoned=false;
-    if(heal>=3)hp=max_hp;else hp=std::min(max_hp,hp+int(heal)*50*(game_mode==2?2:1));return consume(slot);
 }
 std::string Inventory::condition()const{return poisoned?"Poison":hp>=120?"Fine":hp>=60?"Caution":hp>=30?"Caution":"Danger";}
 int Inventory::combination_rule(unsigned first,unsigned second)const{

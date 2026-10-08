@@ -619,15 +619,15 @@ void RoomWorld::apply_en01_flinch(){
         for(const auto& m:models_)if(m.kind==1&&m.index==pair.first.second&&m.actor){const auto& clip=entity_motion(e);const auto nodes=m.actor->motion_nodes(clip.positions.size());
             const auto pose=m.actor->local_pose_clip(clip,e.pose_frame(),nodes);const unsigned node=m.actor->model_index(8);if(e.flinch&&node<pose.size())e.node_overrides[node].angles=std::array<Angle,3>{Angle(e.flinch_angles[0]),Angle(e.flinch_angles[1]),pose[node].angles[2]};const unsigned neck=m.actor->model_index(11);if(neck<pose.size())e.node_overrides[neck].angles=std::array<Angle,3>{pose[neck].angles[0],Angle(e.neck_angle),pose[neck].angles[2]};break;}}
 }
-// bhSetEffectTb: first free entry of the shared original eff[512] table.
-void RoomWorld::spawn_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index){
-    if(!supported_effect_sprite(spawn.id)){unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));return;}
+// bhSetEffectTb/bhSetEffect: first free entry of the shared original eff[512] table.
+int RoomWorld::spawn_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index){
+    if(!supported_effect_sprite(spawn.id)){unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));return -1;}
     SpriteWork work;initialize_effect_sprite(work.sprite,spawn);work.scale=spawn.scale;work.dynamic=true;work.queued=false;
     if(link_kind){work.sprite.flg|=0x80;work.link=link_kind;work.index=link_index;work.node=unsigned(spawn.lkono);work.offset=spawn.offset;}
     std::vector<unsigned> flags;flags.reserve(sprites_.size());for(const auto& slot:sprites_)flags.push_back(slot.sprite.flg);
-    const int free_slot=original_effect_slot(flags);if(free_slot<0)return;const unsigned index=unsigned(free_slot);
+    const int free_slot=original_effect_slot(flags);if(free_slot<0)return -1;const unsigned index=unsigned(free_slot);
     if(index<sprites_.size())sprites_[index]=work;else{entity(4,index);sprites_.push_back(work);}
-    auto& e=entity(4,index);e.transform.position=spawn.position;e.angles={spawn.ax,spawn.ay,0};e.hidden=false;
+    auto& e=entity(4,index);e.transform.position=spawn.position;e.angles={spawn.ax,spawn.ay,0};e.hidden=false;return free_slot;
 }
 // Drains what the original effect procedures requested through bhSetEffectTb/bhSetEffect/CallPlayerActionSe/bhCheckBombAtari.
 void RoomWorld::process_effect_output(){
@@ -729,7 +729,10 @@ void RoomWorld::tick(){
     apply_en01_flinch();
     sync_player_grab();
     if(background_pending_){if(background_delay_)--background_delay_;else{background_=background_target_;background_pending_=false;}}
-    if(!player_scripted&&!player_hidden&&!player_action)player_.position=move(player_.position,player_.position);
+    // Room/event-only worlds may intentionally omit the player asset. They
+    // have no bhInitPlayer work to pass to bhCheckWall; explicit movement in
+    // that state still fails in move() instead of inventing host collision.
+    if(player_asset_&&!player_scripted&&!player_hidden&&!player_action)player_.position=move(player_.position,player_.position);
     if(fade_step_>0)fade_=std::min(fade_target_,fade_+fade_step_);if(fade_step_<0)fade_=std::max(fade_target_,fade_+fade_step_);
 }
 Scene RoomWorld::sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes,const ModelNodeOverrides& combat)const{
@@ -852,7 +855,7 @@ void RoomWorld::ensure_push(){
     if(push_||!player_asset_)return;
     std::vector<RECVX_PUSH_OBJECT> objects;
     for(const auto& pair:entities_){const auto& e=pair.second;if(pair.first.first!=2||(e.type&255)!=1||!(e.object_flags&1)||(e.object_flags&0x100000))continue;push_objects_.push_back(pair.first.second);objects.push_back({int(pair.first.second),e.object_flags,int(e.aspd),int(e.object_parameter),e.object_floor,e.transform.position.x,e.transform.position.y,e.transform.position.z});}
-    RECVX_PUSH_HOST host{};host.user=this;host.ply_id=player_character_;host.sound=[](void* u,int sound){auto& w=*static_cast<RoomWorld*>(u);w.audio_.play_room_sound(2,unsigned(sound)&255u,6);};
+    RECVX_PUSH_HOST host{};host.user=this;host.ply_id=player_character_;host.sound=[](void* u,int sound){auto& w=*static_cast<RoomWorld*>(u);w.audio_.play_room_sound(2,unsigned(sound)&255u,6);};host.set_effect=[](void* u,int id,const float* point,void* link,int node){auto& w=*static_cast<RoomWorld*>(u);EffectSpawn spawn;spawn.id=unsigned(id);spawn.position={point[0],point[1],point[2]};spawn.has_offset=true;spawn.offset={point[3],point[4],point[5]};spawn.linked_work=link;spawn.lkono=node;return w.spawn_effect(spawn);};
     push_=std::make_unique<PlayerPush>(walls_,room_height_,floors_,objects,*player_asset_,host);
     // Original rom->etcp/flrp remain distinct from bhObj001's mobile areas.
     BinaryView v(room_);auto areas=[&](unsigned offset,unsigned count_offset){std::vector<RECVX_STAIR_AREA> out;const auto base=v.u32(header_+offset),n=v.u32(header_+count_offset);v.require(base,n*36);for(unsigned i=0;i<n;++i){const auto p=base+i*36;out.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),std::int8_t(v.u8(p+3)),v.u32(p+4),v.f32(p+8),v.f32(p+12),v.f32(p+16),v.f32(p+20),v.f32(p+24),v.f32(p+28),v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)});}return out;};

@@ -135,7 +135,7 @@ int EventVm::instruction(Task& t){
     case 0x10:{const auto item=v.u8(p+1);advance(2);return bool(flags[10][0]&0x400)&&values[8]==item;}
     case 0x11:{const auto item=v.u8(p+1);advance(2);for(unsigned slot=1;slot<12;++slot){const auto packed=inventory_.slots()[slot];if(Inventory::id(packed)==item){if(item==72&&(packed>>16)!=72)flags[4][0]|=0x10000;return 1;}}return 0;}
     case 0x4d:{const auto mode=v.u8(p+1),operand=v.u8(p+2);std::uint32_t empty=0,wide=0;for(unsigned slot=2;slot<inventory_.capacity()+2;++slot){const auto packed=inventory_.slots()[slot];if(!packed)++empty;switch(Inventory::id(packed)){case 1:case 2:case 3:case 33:case 34:case 142:++wide;break;}}const auto available=empty-wide;advance(4);switch(mode){case 0:return available==operand;case 1:return available>operand;case 2:return available>=operand;case 3:return available<operand;case 4:return available<=operand;case 5:return available!=operand;default:return 1;}}
-    case 0x8a:{const auto mode=v.u8(p+1);advance(2);return inventory_.poisoned==(mode==0);}
+    case 0x8a:{const auto mode=v.u8(p+1);advance(2);return inventory_.infected==(mode==0);} // bhPlayerPoisonCk tests plp->stflg 0x200000
     // bhEnemyHpUp deliberately divides before multiplying (integer HP).
     case 0x99:{v.require(p,4);const unsigned index=v.u8(p+1),percent=v.u8(p+2);
         if(!enemy_health||!set_enemy_health)throw std::runtime_error("enemy HP increase requires native enemy binding");
@@ -261,7 +261,7 @@ int EventVm::instruction(Task& t){
         return 0;}
     case 0x83:return advance(2); // bhSoundFadeOut: the original body only skips its operands
     case 0x89:change_player=v.u8(p+1);flags[10][0]|=0x80;advance(2);return 1; // bhPlayerChangeSet: cng_pid + cb_flg 0x80 (consumer pending)
-    case 0xae:inventory_.poisoned=false;return advance(2); // bhPlayerPoison2Cr: ply_stflg[0] &= ~0x200000
+    case 0xae:inventory_.infected=false;return advance(2); // bhPlayerPoison2Cr: ply_stflg[0] &= ~0x200000
     case 0xa0:map_parameters={v.u8(p+1),v.u8(p+2),v.u8(p+4),v.u8(p+3)};flags[10][0]|=0x10000;advance(6);return 1; // bhMapSystemOn: mp_prm[0..3] (consumer pending)
     case 0x3a:case 0xa1:case 0xce:case 0xcf:case 0xc5:case 0x87:world(t,op,2);return 1;
     case 0x76:world(t,op,4);return 1; // bh3dSoundFlagSet
@@ -421,16 +421,13 @@ bool EventVm::use(unsigned item,unsigned* message,unsigned slot){
     if(message)*message=0;if(!item||item>=156||!inventory_.contains(item))return false;
     if(slot==~0u){slot=1;while(slot<12&&Inventory::id(inventory_.slots()[slot])!=item)++slot;}
     if(!slot||slot>=12||Inventory::id(inventory_.slots()[slot])!=item)return false;
-    const auto type=itemdata[item].type&0x5f;const Interaction* area=nullptr;
+    const Interaction* area=nullptr;
     if((flags[10][0]&0x200)&&values[16]<floors_.size())area=&floors_[values[16]];
-    if(type==1||type==2||type==0x40){
-        const auto result=inventory_.use_on_floor(slot,area?&area->parameters:nullptr,flags[10][0],values[0],values[1]);
-        if(message)*message=result.message;
-        if(!result.closing)return false;
-        values[8]=item;status_use_pending_=true;return true;}
-    unsigned index=161;if(type==2)index=(item==18||item==36)?197:160;
-    if(area&&(area->parameters[0]==59||area->parameters[0]==85)){index=174;if(type!=2){if(area->parameters[0]==59&&item==85)index=175;else if(area->parameters[0]==85&&item==59)index=176;}}
-    if(message)*message=index;return false;
+    // ItemCommand -> original ItemUse for every item type, including its messages.
+    const auto result=inventory_.use_item(slot,area?&area->parameters:nullptr,flags[10][0],values[0],values[1],0);
+    if(message)*message=result.message;
+    if(!result.closing)return false;
+    values[8]=item;status_use_pending_=true;return true;
 }
 void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
     // bhControlPlayer does not run bhCheckFloorP while sp_flg bit 0 is
@@ -460,6 +457,14 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){
             if(request_door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]}))return true;
             flags[10][0]&=~0x100u;return false;}
         if((a.type==3||a.type==4)&&((direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000))))continue;
+        if(a.type==4&&(a.attribute&2)){ // hitchk.c bhCheckExmAtari type 4, attr 0x2: item box
+            values[20]=i;flags[10][0]|=0x100;
+            if(a.attribute&0xc)flags[10][0]|=(a.attribute&4)?0x80000u:0x100000u;
+            if(a.parameters[0]==0xff)flags[10][0]|=0x40000;
+            else{if(!item_box_object)throw std::runtime_error("item box object requires native world binding");
+                // op->type = 100; pp->flg |= 0x10000; pp->stflg |= 0x18000; sys->st_flg |= 0x4
+                if(item_box_object(a.parameters[0])){flags[14][0]|=0x18000;flags[5][0]|=4;}}
+            return true;}
         if(a.type==4){const auto model=a.parameters[0];if(model>=room_items_.size())throw std::runtime_error("pickup model outside room");auto id=room_items_[model];if(id==130)id=35;if(!id||id>=156||!item_message)return false;
             values[20]=i;flags[10][0]|=0x100;if(a.attribute&0x10)begin_file(id,model);else begin_pickup(id,model);return true;}
         values[20]=i;flags[10][0]|=0x100;if(a.type==3&&(a.attribute&0x8000)){

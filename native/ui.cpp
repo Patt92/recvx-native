@@ -130,7 +130,7 @@ void StatusMenu::tick(Inventory& inventory){
     }
     if(commands&&command_frames<4)++command_frames;else if(erase_frames)--erase_frames;
     // StatusInit runs PulseInit on every opening; StatusMain then runs PulseMain once per frame.
-    const auto condition=StatusPulse::condition(inventory.hp,inventory.poisoned);
+    const auto condition=StatusPulse::condition(inventory.hp,(inventory.player_stflg()&0x280000u)!=0);
     if(!active)pulse_open_=false;else{if(!pulse_open_||(!pulse.healing()&&pulse.condition()!=condition)){pulse.open(condition);pulse_open_=true;}pulse.tick();}
     const bool had_message=message.active();message.tick();if(had_message&&!message.active())finish_inspection(inventory);
     if(!inspection.running())return;
@@ -219,7 +219,9 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     if(commands){auto list=actions(inventory);if(list.empty()){commands=false;return true;}if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
         const auto item=Inventory::id(inventory.slots()[selected]);
         if(command==0){if(itemdata[item].type&1){inventory.equip(selected);}else if(item==145)open_file(inventory,0,true);
-            else if((itemdata[item].type&0x5f)==8){const auto cure=unsigned(curedata[item-20]);if(!inventory.heal(selected))show_message(inventory.infected&&item==23?198:161);else pulse.cured(StatusPulse::condition(inventory.hp,inventory.poisoned),cure,inventory.infected);}
+            else if((itemdata[item].type&0x5f)==8){ // ItemCommand -> ItemUse -> Use_00; the status screen stays open
+                unsigned control=0;const auto result=inventory.use_item(selected,nullptr,control,stage,room,pulse.condition(),message.active());
+                if(result.message)show_message(result.message);if(result.pulse)pulse.begin_cure(result.condition,result.pulse);}
             else{use_item=item;active=false;}}
         else if(command==1){if(item==145)open_file(inventory,0,true);else{examining=true;inspection=ItemInspection{};const auto angle=inspection_default_angles(item);examine_pitch=angle[0];examine_yaw=angle[1];examine_roll=angle[2];}}
         else if(command==2){combining=true;combine_from=selected;}else if(command==3){use_item=item;active=false;}

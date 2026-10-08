@@ -11,7 +11,7 @@ typedef struct {float px,py,pz,vx,vy,vz;} NJS_LINE;
 typedef struct {NJS_POINT3 v[8];} NJS_BOX;
 typedef struct {NJS_POINT3 c;float r;} NJS_SPHERE;
 typedef struct {NJS_POINT3 c1,c2;float r;} NJS_CAPSULE;
-typedef NJS_POINT3 POINT;
+typedef struct {float px,py,pz,ox,oy,oz;} POINT;
 typedef RECVX_PUSH_ANGLE NJS_MKEY_A_MOD;
 typedef RECVX_PUSH_POSITION NJS_MKEY_F_MOD;
 typedef RECVX_PUSH_CHANNEL NJS_MDATA2_MOD;
@@ -24,6 +24,7 @@ typedef struct {
  int idx_ct,aspd,param,pn,ct0,ct1,ct2,ct3,ani_ct,psh_ct,psh_idx;
  unsigned mtn_no,mtn_md,hokan_count,mtn_attr;int frm_no,frm_mode,mtn_add,hokan_rate;
  ATR_WORK* dan_ap;int flr_snd,footeff;void* exp0;void* exp1;MN_WORK* mnwP;ML_WORK* mlwP;
+ void* lkwkp;int id;
 } BH_PWORK;
 static void PushModeAssign(BH_PWORK* p,unsigned v){p->mode0=v;p->mode1=v>>8;p->mode2=v>>16;p->mode3=v>>24;}
 typedef BH_PWORK O_WRK;
@@ -41,10 +42,16 @@ static _Thread_local const float* translation;
 static float* bhGetTransZ(int n){assert(n==9);return (float*)translation;}
 static void CallPlayerActionSe(int n,int flag){if(flag&&host->sound)host->sound(host->user,n);}
 static void StartVibrationEx(int p,int n){if(host->vibration)host->vibration(host->user,p,n);}
-static int bhSetEffect(int id,POINT* p,void* link,int n){(void)id;(void)p;(void)link;(void)n;++*unsupported_services;return -1;}
+static int bhSetEffect(int id,POINT* p,void* link,int n){
+ if(!host->set_effect){++*unsupported_services;return -1;}
+ int slot=host->set_effect(host->user,id,&p->px,link,n);
+ if(slot<0||slot>=512)return -1;
+ eff[slot].flg=0x81;eff[slot].id=id;eff[slot].lkwkp=link;
+ return slot;
+}
 #include "player_push.inc"
-struct RECVX_PUSH_CORE {PUSH_SYS system;PUSH_ROOM room;BH_PWORK player,*objects;unsigned count,sp_flg;int position_bound;EXP_WORK exp;int exp1[32];RECVX_PUSH_HOST host;ML_WORK model;O_WORK nodes[256];const float* translation;unsigned unsupported;};
-static void bind(RECVX_PUSH_CORE* c){sys=&c->system;rom=&c->room;plp=&c->player;host=&c->host;translation=c->translation;unsupported_services=&c->unsupported;}
+struct RECVX_PUSH_CORE {PUSH_SYS system;PUSH_ROOM room;BH_PWORK player,*objects,effects[512];unsigned count,sp_flg;int position_bound;EXP_WORK exp;int exp1[32];RECVX_PUSH_HOST host;ML_WORK model;O_WORK nodes[256];const float* translation;unsigned unsupported;};
+static void bind(RECVX_PUSH_CORE* c){sys=&c->system;rom=&c->room;plp=&c->player;eff=c->effects;host=&c->host;translation=c->translation;unsupported_services=&c->unsupported;}
 static void export_state(RECVX_PUSH_STATE* s){s->unsupported_services=*unsupported_services;s->active=plp->mode2==18;s->phase=plp->mode3;s->contact=plp->psh_ct;s->wall=plp->psh_idx;s->ay=plp->ay&65535;s->motion=plp->mtn_no;s->frame=plp->frm_no;s->mode0=plp->mode0;s->flags=plp->flg;s->status=plp->stflg;s->x=plp->px;s->y=plp->py;s->z=plp->pz;s->speed=plp->spd;}
 static void objects_tick(RECVX_PUSH_CORE* c){if(!(c->sp_flg&4))return;for(unsigned i=0;i<c->count;++i){O_WRK* o=c->objects+i;if(!(o->flg&1)||(o->stflg&0x1000000)||(o->flg&0x100000 && o->mode0==0))continue;o->pxb=o->px;o->pyb=o->py;o->pzb=o->pz;sys->onow=o->idx_ct;bhObj001(o);}}
 RECVX_PUSH_CORE* recvx_push_create(const ATR_WORK* walls,unsigned n,float height,const float* grand,const RECVX_PUSH_OBJECT* objects,unsigned count,const RECVX_PUSH_HOST* h){

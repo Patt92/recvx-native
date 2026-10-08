@@ -9,14 +9,10 @@ template<class F> void StatusPulse::run(F&& routine){
     std::memcpy(work_.data(),&pulse::pulsework,sizeof(pulse::PULSE_WORK));hp_=pulse::swork.hp;statusflg_=pulse::swork.statusflg;
 }
 void StatusPulse::open(unsigned condition){hp_=condition;statusflg_=0;opened_=true;quads_.clear();run([]{pulse::PulseInit();});}
-void StatusPulse::cured(unsigned condition,unsigned cure,bool resistant_poison){
+void StatusPulse::begin_cure(unsigned condition,unsigned pulseflg){
     if(!opened_)open(condition);
-    // Use_00: st->hp follows st->abc, then the heal or poison-cure sweep starts.
-    hp_=condition;const unsigned heal=cure&15,poison=cure&0xf0;
-    run([&]{
-        if(heal){pulse::PulseInit();pulse::pulsework.pulseflg|=0x40;pulse::swork.statusflg|=0x20;}
-        else if(poison&&!resistant_poison){pulse::PulseInit();pulse::pulsework.pulseflg|=0x80;pulse::swork.statusflg|=0x20;}
-    });
+    hp_=condition;
+    run([&]{pulse::PulseInit();pulse::pulsework.pulseflg|=pulseflg;pulse::swork.statusflg|=0x20;});
 }
 unsigned StatusPulse::heal_mode()const{if(!healing())return 0;pulse::PULSE_WORK w;std::memcpy(&w,work_.data(),sizeof w);return w.pulseflg&0x40?1:w.pulseflg&0x80?2:0;}
 void StatusPulse::tick(float center_x,float center_y){

@@ -67,7 +67,7 @@ void njDrawTexture3DEx(NJS_TEXTURE_VTX* vertices,int count,int){
     if(!drawing||count!=4)return;NJS_MATRIX matrix;njGetMatrix(&matrix);EffectSprite::Quad q;q.center={matrix[12],matrix[13],matrix[14]};q.category=draw_texture;q.source=draw_source;q.destination=draw_destination;
     for(unsigned n=0;n<4;++n){q.vertices[n]=vertices[n];q.vertices[n].x*=matrix[0];q.vertices[n].y*=matrix[5];q.vertices[n].z*=matrix[10];}drawing->quads.push_back(q);
 }
-void bhDraw024(O_WRK*);void bhDraw025(O_WRK*);
+void bhDraw024(O_WRK*);void bhDraw025(O_WRK*);void bhEff029(O_WRK*);
 #include "effect_sprites.inc"
 const LGT_WK& lighter_light_table(){return lighter_light;}
 }
@@ -85,15 +85,16 @@ std::size_t common_effect_textures_offset(const std::vector<std::uint8_t>& data)
     return (dp+31)&~std::size_t(31);
 }
 std::vector<std::pair<unsigned,unsigned>> common_effect_categories(){std::vector<std::pair<unsigned,unsigned>> out;unsigned first=0;for(std::size_t i=0;effect_info_flags[i]!=-1;++i){out.push_back({first,unsigned(effect_info_anims[i])});first+=unsigned(effect_info_anims[i]);}return out;}
-namespace {bool effect_bound(unsigned id){return id==0||id==15||id==24||id==25||id==5||id==9||id==16||id==23||id==122||id==200||id==201||id==218||id==230||id==231||id==232;}}
+namespace {bool effect_bound(unsigned id){return id==0||id==15||id==24||id==25||id==5||id==9||id==16||id==23||id==29||id==122||id==200||id==201||id==218||id==230||id==231||id==232;}}
 bool supported_effect_sprite(unsigned id){return effect_bound(id);}
 int original_effect_slot(const std::vector<unsigned>& flags){for(unsigned i=0;i<512;++i)if(i>=flags.size()||!(flags[i]&3u))return int(i);return -1;}
-bool step_effect_sprite(EffectSprite& sprite,bool* queued){queue.ef_trsn=0;queue.ef_pncn=0;queue.ef_poln=0;queue.ef_fncn=0;drawing=&sprite;sprite.quads.clear();sprite.polygon_queued=false;if(sprite.id==0){bind_effect_link();sprite.lkwkp=&effect_link_work;bhEff000(&sprite);sprite.polygon_queued=queue.ef_poln!=0;}else if(sprite.id==15)bhEff015(&sprite);else if(sprite.id==24)bhEff024(&sprite);else if(sprite.id==25)bhEff025(&sprite);else if(sprite.id==5)bhEff005(&sprite);else if(sprite.id==16)bhEff016(&sprite);else if(sprite.id==23)bhEff023(&sprite);else if(sprite.id==9)bhEff009(&sprite);else if(sprite.id==122)bhEff122(&sprite);else if(sprite.id==200)bhEff200(&sprite);else if(sprite.id==201)bhEff201(&sprite);else if(sprite.id==218)bhEff218(&sprite);else if(sprite.id==230)bhEff230(&sprite);else if(sprite.id==231)bhEff231(&sprite);else if(sprite.id==232)bhEff232(&sprite);else return false;if(queue.ef_fncn&&sprite.flg){njUnitMatrix(&draw_camera);for(unsigned i=0;i<512;++i)queue.ef_tn[i]=int(i);if(sprite.id==24)bhDraw024(&sprite);else if(sprite.id==25)bhDraw025(&sprite);}
+bool step_effect_sprite(EffectSprite& sprite,bool* queued){queue.ef_trsn=0;queue.ef_pncn=0;queue.ef_poln=0;queue.ef_fncn=0;drawing=&sprite;sprite.quads.clear();sprite.polygon_queued=false;if(sprite.id==0){bind_effect_link();sprite.lkwkp=&effect_link_work;bhEff000(&sprite);sprite.polygon_queued=queue.ef_poln!=0;}else if(sprite.id==15)bhEff015(&sprite);else if(sprite.id==24)bhEff024(&sprite);else if(sprite.id==25)bhEff025(&sprite);else if(sprite.id==5)bhEff005(&sprite);else if(sprite.id==16)bhEff016(&sprite);else if(sprite.id==23)bhEff023(&sprite);else if(sprite.id==29)bhEff029(&sprite);else if(sprite.id==9)bhEff009(&sprite);else if(sprite.id==122)bhEff122(&sprite);else if(sprite.id==200)bhEff200(&sprite);else if(sprite.id==201)bhEff201(&sprite);else if(sprite.id==218)bhEff218(&sprite);else if(sprite.id==230)bhEff230(&sprite);else if(sprite.id==231)bhEff231(&sprite);else if(sprite.id==232)bhEff232(&sprite);else return false;if(queue.ef_fncn&&sprite.flg){njUnitMatrix(&draw_camera);for(unsigned i=0;i<512;++i)queue.ef_tn[i]=int(i);if(sprite.id==24)bhDraw024(&sprite);else if(sprite.id==25)bhDraw025(&sprite);}
     drawing=nullptr;if(queued)*queued=queue.ef_trsn>0||queue.ef_pncn>0||queue.ef_fncn>0||queue.ef_poln>0;return true;}
 // bhSetEffectTb: copy flg/id/type/mdlver/flr_no, position, scale (also kept in sxb..), angles and the joint offset.
 void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
     s=EffectSprite{};s.flg=e.flg;s.id=e.id;s.type=e.type;s.tex_id=-1;s.mdlver=e.mdlver;s.flr_no=e.flr_no;s.px=e.position.x;s.py=e.position.y;s.pz=e.position.z;
     s.sx=s.sxb=e.scale.x;s.sy=s.syb=e.scale.y;s.sz=s.szb=e.scale.z;s.ax=e.ax;s.ay=e.ay;s.az=0;s.lkono=e.lkono;
+    s.lkwkp=e.linked_work;
     if(e.has_offset){s.lox=e.offset.x;s.loy=e.offset.y;s.loz=e.offset.z;}
 }
 void set_explosion(NJS_POINT3 position,NJS_POINT3 view){

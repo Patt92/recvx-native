@@ -45,6 +45,8 @@ public:
     // CallSystemVoice (ADV/PatId[3], VoiceNo + 16) for timer mode 3.
     std::function<void(unsigned)> system_voice;
     std::function<Message(unsigned,unsigned)> item_message;
+    // RoomWorld::start_item_box: obwp[object] becomes type 100 (bhObjItmBox).
+    std::function<bool(unsigned)> item_box_object;
     std::function<bool()> movie_active;
     std::function<unsigned()> movie_time; // GetMwPlayTimeEx, centiseconds.
     // bhPadCheck: (pad_ps, pad_on) of the current 30 Hz pass. pad_ps holds the

@@ -9,7 +9,7 @@ typedef struct {void* p[2];} RECVX_PUSH_CHANNEL;
 typedef struct {unsigned flg;int obj_num,frm_num;void* datP;RECVX_PUSH_CHANNEL* md2P;unsigned short* atrP;} RECVX_PUSH_MOTION;
 typedef struct {float pos[3];int ang[3];} RECVX_PUSH_POSE;
 typedef struct {int index;unsigned flags;int aspd,param,floor;float x,y,z;} RECVX_PUSH_OBJECT;
-typedef struct {void* user;void (*sound)(void*,int);void (*vibration)(void*,int,int);int ply_id;} RECVX_PUSH_HOST;
+typedef struct {void* user;void (*sound)(void*,int);void (*vibration)(void*,int,int);int (*set_effect)(void*,int,const float*,void*,int);int ply_id;} RECVX_PUSH_HOST;
 typedef struct RECVX_PUSH_CORE RECVX_PUSH_CORE;
 typedef struct {int active,phase,contact,wall,ay,motion,frame,mode0;unsigned flags,status,unsupported_services;float x,y,z,speed;} RECVX_PUSH_STATE;
 RECVX_PUSH_CORE* recvx_push_create(const RECVX_STAIR_AREA*,unsigned,float,const float*,const RECVX_PUSH_OBJECT*,unsigned,const RECVX_PUSH_HOST*);

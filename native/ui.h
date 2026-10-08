@@ -27,6 +27,7 @@ public:
     void change_view();         // MainCommand FILE: close shutters, load, reopen
     bool tick();                // one StatusMain pass; true once SpriteH set statusflg 0x80000
     bool moving()const{return flg_&0x44;} // 0x40 blocks the pad; 0x4 = closing
+    bool pad_locked()const{return flg_&0x40;} // statusflg 0x40: GetItem/CursorMove ignore the pad
     unsigned take_sound(){const auto s=sound_;sound_=0xffffffff;return s;}
     float x(unsigned center)const{return pos_[center][0];}
     float y(unsigned center)const{return pos_[center][1];}
