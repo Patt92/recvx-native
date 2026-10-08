@@ -42,6 +42,15 @@ int main(int argc,char** argv){try{
         check(vm.errors.empty()&&announced&&returned&&intermediate&&!world.camera_transitioning(),"announcement camera sequence incomplete");
         check(distance(world.camera(scene,target).position,target.position)<.001f,"return does not converge to gameplay position");
         check(!world.player_hidden&&!(vm.flags[5][0]&4),"camera return did not release gameplay");
+        // RM_1020 camera 20 is the original manor-establishing event path:
+        // two 60-frame travelling keys followed by its final hold.  bhCamSet
+        // must drive the CAM_KEYF_WORK spline rather than leave key 0 static.
+        auto manor=rooms.load("RM_1020.RDX",64*1024*1024);auto manor_scene=decode_scene(manor);auto manor_actor=manor_scene.spawns.at(0);std::size_t manor_motion=42;std::int64_t manor_frame=0;AudioMixer manor_audio(data);RoomWorld manor_world(manor,manor_scene,manor_actor,manor_motion,manor_frame,manor_audio,data);
+        check(manor_world.bind({0x13,0,0,0,{0x13,0,20,0}}),"RM_1020 original bhCamSet is unbound");const auto manor_start=manor_world.camera(manor_scene,manor_scene.cameras.at(0));
+        for(unsigned tick=0;tick<30;++tick)manor_world.tick_camera(manor_scene,manor_scene.cameras.at(0),0);
+        const auto manor_mid=manor_world.camera(manor_scene,manor_scene.cameras.at(0));check(distance(manor_start.position,manor_mid.position)>1,"RM_1020 event camera keyframe remains static");
+        for(unsigned tick=30;tick<180;++tick)manor_world.tick_camera(manor_scene,manor_scene.cameras.at(0),0);
+        const auto manor_final=manor_world.camera(manor_scene,manor_scene.cameras.at(0));check(manor_world.event_camera&&manor_world.event_camera_key()==2&&distance(manor_final.position,{9.5907059f,61.725918f,60.876106f})<.01f,"RM_1020 event camera does not reach its original final key");
     }
     std::cout<<"Original active-camera return verified\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

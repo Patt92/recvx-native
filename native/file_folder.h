@@ -21,6 +21,7 @@ public:
     unsigned folder()const;
     unsigned file()const;
     unsigned clock()const;
+    bool automatic()const;
     Scene scene(const std::vector<std::uint8_t>& packet,const Inventory& inventory)const;
 private:
     struct State;

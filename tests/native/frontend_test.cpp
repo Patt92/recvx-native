@@ -44,18 +44,26 @@ int main(int argc,char** argv){try{
         for(unsigned mode=0;mode<2;++mode){const auto bytes=read_asset_file(root/"rooms/RM_0000.RDT",64*1024*1024);const auto scene=decode_scene(bytes);Inventory inventory;StatusMenu menu;MessageDialog dialog;auto actor=scene.spawns[0];std::size_t motion=42;std::int64_t animation=0;AudioMixer audio(root);MoviePlayer movie(root,{},audio);RoomWorld world(bytes,scene,actor,motion,animation,audio,root);EventVm events(bytes,inventory,dialog);GameplayInput gameplay(inventory,menu,dialog,&events);
             events.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};events.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};events.audio_active=[&](unsigned slot){return audio.active(slot);};events.movie_active=[&]{return movie.active();};
             gameplay.video_active=[&]{return movie.active();};gameplay.skip_video=[&]{movie.stop();};
-            auto tick=[&]{events.check_floor(actor.position,actor.yaw);events.tick();gameplay.synchronize();world.tick();movie.tick();audio.mix();};events.initialize();unsigned ticks=0;while(!movie.active()&&ticks++<5000)tick();check(movie.active()&&audio.active(7),"original film did not start");for(unsigned i=0;i<90;++i)tick();check(movie.active(),"film not playing at skip point");
+            auto tick=[&]{gameplay.apply(devices.tick());events.check_floor(actor.position,actor.yaw);events.tick();gameplay.synchronize();world.tick();movie.tick();audio.mix();};events.initialize();unsigned ticks=0;while(!movie.active()&&ticks++<5000)tick();check(movie.active()&&audio.active(7),"original film did not start");for(unsigned i=0;i<90;++i)tick();check(movie.active(),"film not playing at skip point");
             if(mode==0){devices.event(key(SDL_SCANCODE_SPACE,true));gameplay.apply(devices.tick());devices.event(key(SDL_SCANCODE_SPACE,false));devices.tick();}
             else{const int pad_index=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);check(pad_index>=0,"late-skip controller attach");auto* pad=SDL_JoystickOpen(pad_index);check(pad,"late-skip controller open");pump();devices.tick();SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_A,1);pump();gameplay.apply(devices.tick());SDL_JoystickSetVirtualButton(pad,SDL_CONTROLLER_BUTTON_A,0);pump();devices.tick();SDL_JoystickClose(pad);SDL_JoystickDetachVirtual(pad_index);pump();devices.tick();}
             check(!movie.active()&&!audio.active(7),"late skip retains movie/audio");
             for(unsigned i=0;i<1000&&!dialog.active();++i)tick();check(events.errors.empty()&&dialog.active()&&dialog.index()==4&&world.event_camera_index==37,"late film skip desynchronizes original cell hint");
-            auto press_game=[&](SDL_Scancode code){devices.event(key(code,true));gameplay.apply(devices.tick());tick();devices.event(key(code,false));gameplay.apply(devices.tick());tick();};
+            auto press_game=[&](SDL_Scancode code){devices.event(key(code,true));tick();devices.event(key(code,false));tick();};
             press_game(SDL_SCANCODE_RETURN);check(!dialog.active(),"hint confirmation failed");
             check(!menu.active,"inventory bypasses original cinematic handover");
-            for(unsigned i=0;i<40;++i){gameplay.apply(devices.tick());tick();}check(menu.active,"inventory does not open automatically after cell hint");
-            press_game(SDL_SCANCODE_RETURN);for(unsigned i=0;i<8&&menu.command_window_moving();++i)tick(); /* ItemCommand slide ignores input */press_game(SDL_SCANCODE_RETURN);check(inventory.weapon()==1&&!menu.active,"keyboard lighter equipment failed");
+            for(unsigned i=0;i<40;++i){tick();}check(menu.active,"inventory does not open automatically after cell hint");
+            // SpriteH locks input during the opening; ItemCommand and its erase
+            // animation also ignore input. Advance each frame through GameplayInput.
+            for(unsigned i=0;i<120&&menu.slide.moving();++i)tick();check(!menu.slide.moving(),"status opening does not finish");
+            press_game(SDL_SCANCODE_RETURN);check(menu.commands,"Enter does not open the lighter commands");
+            for(unsigned i=0;i<8&&menu.command_window_moving();++i)tick();
+            press_game(SDL_SCANCODE_RETURN);check(inventory.weapon()==1,"Enter does not equip the lighter");
+            for(unsigned i=0;i<8&&menu.command_window_moving();++i)tick();
+            press_game(SDL_SCANCODE_ESCAPE);press_game(SDL_SCANCODE_ESCAPE);
+            for(unsigned i=0;i<40&&menu.active;++i)tick();check(!menu.active&&!events.menu_open,"status close does not finish after equipping");
             check(events.flag(1,99),"lighter equipment did not start Rodrigo event");
-            for(unsigned i=0;i<3000;++i){gameplay.apply(devices.tick());tick();}
+            for(unsigned i=0;i<3000;++i){tick();}
             if(!events.errors.empty()||world.player_hidden||world.player_scripted||(events.flags[5][0]&4)){std::cerr<<"mode="<<mode<<" hidden="<<world.player_hidden<<" scripted="<<world.player_scripted<<" cinematic="<<events.flags[5][0]<<" dialog="<<dialog.active()<<" index="<<dialog.index()<<" movie="<<movie.active()<<"\n";for(const auto& e:events.errors)std::cerr<<e<<"\n";}check(events.errors.empty()&&!world.player_hidden&&!world.player_scripted&&!(events.flags[5][0]&4),"late-skip/light equipment flow did not restore control");
             check(std::find(audio.played.begin(),audio.played.end(),"VOICE1/0016")!=audio.played.end(),"Rodrigo speech absent after fast inventory input");
         }

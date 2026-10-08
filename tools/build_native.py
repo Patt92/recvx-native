@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 import sys
 
@@ -13,6 +14,32 @@ VERSION = '0.5'
 
 def run(*args):
     subprocess.run([str(a) for a in args], cwd=ROOT, check=True)
+
+
+def sync_macos_start_package(build: Path) -> None:
+    """Refresh the existing app that the root Start.command launches.
+
+    A normal development build must not leave Start.command pointing at a stale
+    package runtime.  This deliberately replaces only the executable: cooked
+    package data and user-adjacent package files are retained.
+    """
+    app = ROOT / 'build/packages' / f'macos-arm64-v{VERSION}' / 'RECVX Native.app'
+    if not app.is_dir():
+        return
+    source = build / 'recvx-runtime'
+    runtime = app / 'Contents/MacOS/recvx-runtime'
+    if not source.is_file() or not runtime.is_file():
+        raise RuntimeError(f'cannot refresh Start.command package runtime: {runtime}')
+    if subprocess.check_output(['lipo', '-archs', str(source)], text=True).split() != ['arm64']:
+        raise RuntimeError('macOS starter package requires an arm64-only runtime')
+    shutil.copy2(source, runtime)
+    dependencies = subprocess.check_output(['otool', '-L', str(source)], text=True)
+    linked = next(line.strip().split(' (', 1)[0] for line in dependencies.splitlines()[1:] if 'libSDL2' in line)
+    subprocess.run(['install_name_tool', '-change', linked, '@executable_path/../Frameworks/' + Path(linked).name, str(runtime)], check=True)
+    subprocess.run(['codesign', '--force', '--sign', '-', str(runtime)], check=True)
+    subprocess.run(['codesign', '--force', '--sign', '-', str(app)], check=True)
+    subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
+    print(f'Updated Start.command package: {app}', flush=True)
 
 
 def main():
@@ -84,6 +111,8 @@ def main():
             parser.error('the packaged targets are Windows and macOS')
         output = args.output or ROOT / 'build/packages' / (f'macos-arm64-v{VERSION}' if target == 'macos' else f'windows-x64-v{VERSION}')
         run(sys.executable, ROOT / 'tools/package_native.py', '--platform', target, '--build', binary_dir, '--data', data, '--output', output)
+    elif target == 'macos':
+        sync_macos_start_package(binary_dir)
     print(f'Build ready: {binary_dir}', flush=True)
 
 

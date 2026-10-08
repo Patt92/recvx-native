@@ -98,7 +98,19 @@ static int npCollisionCheckSC(NJS_SPHERE* sphere,NJS_CAPSULE* capsule){float a[3
 static int npCollisionCheckCCEx(NJS_CAPSULE* a,NJS_CAPSULE* b,NJS_POINT3* out){float p[3],q[3];const float radius=a->r+b->r;const float distance=recvx_segment_closest(&a->c1.x,&a->c2.x,&b->c1.x,&b->c2.x,p,q);out->x=p[0];out->y=p[1];out->z=p[2];return distance<=radius*radius;}
 static float njDistanceP2L(NJS_POINT3* p,NJS_LINE* line,NJS_POINT3* out){const float length=line->vx*line->vx+line->vy*line->vy+line->vz*line->vz;const float t=length?((p->x-line->px)*line->vx+(p->y-line->py)*line->vy+(p->z-line->pz)*line->vz)/length:0;out->x=line->px+t*line->vx;out->y=line->py+t*line->vy;out->z=line->pz+t*line->vz;return njScalor(&(NJS_VECTOR){p->x-out->x,p->y-out->y,p->z-out->z});}
 
-static void bhCheckDansa(BH_PWORK* epw){(void)epw;} /* step/ledge adjustment of the wall check: not ported */
+/* hitchk.c bhCheckDansa.  ETC entries are intentionally split between the
+   immutable room list and bhObj001's sys->metcp list, in that original order. */
+static void bhCheckDansa(BH_PWORK* pp){
+    ATR_WORK* exp;float px=pp->px,pz=pp->pz;int i, etc_n;
+    pp->stflg&=~0x20000u;
+    etc_n=rom->etc_n+sys->metc_n;
+    for(i=0;i<etc_n;i++){
+        if(i<rom->etc_n)exp=rom->etcp+i;else exp=&sys->metcp[i-rom->etc_n];
+        if((exp->flg&1)&&exp->px<=px&&exp->px+exp->w>=px&&exp->pz<=pz&&exp->pz+exp->d>=pz&&exp->flr_no==pp->flr_no){
+            switch(exp->type){case 2:if(!(pp->stflg&0x30)&&exp->prm0!=0)pp->stflg|=0x20000u;break;}
+        }
+    }
+}
 static int bhDGCdirCheck(NJS_VECTOR* v,int ay){(void)v;(void)ay;EN01_UNBOUND("bhDGCdirCheck",0)}
 static int bhSetMotion(BH_PWORK* epw,int add,int mode,void* data){(void)epw;(void)add;(void)mode;(void)data;return 0;}
 static void bhEne01_CalcEnemy(BH_PWORK* epw){(void)epw;}
@@ -122,6 +134,12 @@ void recvx_en01_set_terrain(const unsigned char* etc,unsigned etc_count,const un
     memset(terrain_etc,0,sizeof terrain_etc);memset(terrain_flr,0,sizeof terrain_flr);
     if(etc)memcpy(terrain_etc,etc,etc_count*sizeof(ATR_WORK));if(flr)memcpy(terrain_flr,flr,flr_count*sizeof(ATR_WORK));
     rom->etcp=terrain_etc;rom->etc_n=etc_count;rom->flrp=terrain_flr;rom->flr_n=flr_count;
+}
+void recvx_en01_set_mobile_terrain(const unsigned char* etc,unsigned etc_count,const unsigned char* flr,unsigned flr_count){
+    if(etc_count>64)etc_count=64;if(flr_count>64)flr_count=64;
+    memset(sys->metcp,0,sizeof sys->metcp);memset(sys->mflrp,0,sizeof sys->mflrp);
+    if(etc)memcpy(sys->metcp,etc,etc_count*sizeof(ATR_WORK));if(flr)memcpy(sys->mflrp,flr,flr_count*sizeof(ATR_WORK));
+    sys->metc_n=(int)etc_count;sys->mflr_n=(int)flr_count;
 }
 /* The player work is persistent: the grab routines (NG00..02, PlyDG00/01, PlayerLink) own its mode, motion, position and
    flags while mode0 is 4 or 6; the host only refreshes what the original reads from the live player. */
@@ -301,6 +319,10 @@ void recvx_en04_tick(RECVX_EN01* work){
     if(total>0){epw->frm_no+=epw->mtn_add;if(epw->frm_no>=total){epw->frm_no-=total;epw->flg|=0x2000000;}else epw->flg&=~0x2000000;}
     if(EXP0_I(0x14)>0)--EXP0_I(0x14);if(EXP0_I(0x18)>0)--EXP0_I(0x18);
     epw->flg&=~4;bhEne_InitDamage(epw);
+}
+void recvx_enemy_motion_mode(RECVX_EN01* work,unsigned mode3){
+    EN01_STORE* s=store(work);s->w.mode3=mode3;
+    if(s->w.id==1&&s->has_child)s->child.mode3=mode3;
 }
 void recvx_enemy_modes(RECVX_EN01* work,int mode0,int mode1,int mode2,int mode3,unsigned type){
     EN01_STORE* s=store(work);bind(s);BH_PWORK* w=&s->w;

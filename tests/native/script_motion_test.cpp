@@ -44,6 +44,18 @@ int main(int argc,char** argv){try{
     world.bind(command({0x69,23,0,0}));world.bind(command({0x69,34,1,1,0,1,5,6,84,0}));world.tick();
     check(world.frame(1,2)==0&&world.state(1,2)->pose_frame()==84*65536,"next loop clock and last rendered pose are not independent");
     world.tick();check(world.state(1,2)->pose_frame()==0,"intentional animation loop does not resume frame zero on the next tick");
+    // event.c bhMotionPauseSet is distinct from Common 23's work flags.
+    // Check both the advanced event clock and the already sampled render pose.
+    const auto before_pause=world.frame(1,2);const auto pose_before_pause=world.state(1,2)->pose_frame();
+    check(world.bind(command({0x2b,0})),"actor motion pause is unbound");
+    for(unsigned i=0;i<7;++i)world.tick();
+    check(world.frame(1,2)==before_pause&&world.state(1,2)->pose_frame()==pose_before_pause,"MotionPauseSet changes the actor clock or displayed pose");
+    world.bind(command({0x2b,2}));world.tick();check(world.frame(1,2)==before_pause,"undefined pause mode resumes motion");
+    world.bind(command({0x2b,1}));world.tick();check(world.frame(1,2)!=before_pause,"MotionPauseSet does not resume the actor");
+    world.bind(command({0x65,0,0,0}));world.bind(command({0x69,34,1,0,0,0,0,6,1,0}));
+    world.tick();const auto player_clock=frame;
+    world.bind(command({0x2b,0}));for(unsigned i=0;i<7;++i)world.tick();check(frame==player_clock,"MotionPauseSet ignores the player work");
+    world.bind(command({0x2b,1}));world.tick();check(frame!=player_clock,"MotionPauseSet does not resume the player");
     {const auto other=read_asset_file(data/"rooms/RM_0070.RDT",64*1024*1024);const auto stage=decode_scene(other);auto spawn=stage.spawns.at(0);std::size_t m=42;std::int64_t f=0;RoomWorld actors(other,stage,spawn,m,f,sound);
         BinaryView v(other);const auto h=inspect_room(other).room_offset,table=v.u32(h+8);unsigned enemy=0;
         while(enemy<v.u32(h+0x88)&&v.u16(table+enemy*36+4)!=1)++enemy;

@@ -21,7 +21,7 @@ static struct {int pe_ax,pe_pers,ax,axp,ppers;} cam;
 typedef struct {unsigned gm_flg,st_flg,pt_flg,ef_flg,ev_flg[32],pad_on,pad_ps;int ply_id,gm_mode,ewk_n,eor_ct,yk_ct,mg_ct;float pad_ax,pad_dx,pad_dy,pad_ay;BH_PWORK* obwp;EF_WORK ef;ML_WORK efm[512];NJS_POINT3 apos;ATR_WORK* ahtp;} COMBAT_SYS;
 static _Thread_local COMBAT_SYS* sys;
 
-typedef BH_PWORK O_WRK;
+// O_WRK is generated from the original types.h; effect.c uses its own fields.
 typedef struct {int idx;float ln;} SC_WORK;
 static _Thread_local O_WRK* eff;
 static _Thread_local struct {LGT_WORK* lgtp;} room;
@@ -62,11 +62,19 @@ void recvx_combat_tick(RECVX_COMBAT_CORE* c,RECVX_COMBAT_STATE* out,unsigned pad
  for(unsigned i=0;i<c->pose_count;++i){memcpy(c->poses[i].pos,c->objects[i].pos,sizeof c->poses[i].pos);memcpy(c->poses[i].ang,c->objects[i].ang,sizeof c->poses[i].ang);}
  if(!(plp->flg&0x10000)){plp->mode1=plp->mode2=plp->mode3=0;}
  *out=(RECVX_COMBAT_STATE){.active=plp->mode1!=0,.mode=plp->mode2,.phase=plp->mode3,.motion=plp->mtn_no,.frame=plp->frm_no,.pose_frame=c->pose_frame,.yaw=plp->ay&65535,.pitch=plp->wax,.flags=plp->flg,.status=plp->stflg,.at_flags=plp->at_flg,.hokan_count=plp->hokan_count,.shots=c->shots,.gm_flags=sys->gm_flg,.target_right=plp->src_no,.target_left=plp->src_no,.arm_right=c->pair.arm_ar,.arm_left=c->pair.arm_al};
- for(unsigned i=0;i<512;++i)if((eff[i].flg&3)&&!eff[i].func){host->effect(host->user,i,eff+i);eff[i].func=(void*)1;}
+ // Report newly spawned original effect works once, with the fields the host consumes.
+ for(unsigned i=0;i<512;++i)if((eff[i].flg&3)&&!eff[i].func){
+  const O_WRK* o=eff+i;
+  RECVX_COMBAT_EFFECT e={o->flg,o->id,o->type,o->mdlver,o->flr_no,o->px,o->py,o->pz,o->sx,o->sy,o->sz,o->ax,o->ay,o->az,o->lkono,o->mtx?*o->mtx:NULL};
+  host->effect(host->user,i,&e);eff[i].func=(void*)1;}
  host->light(host->user,&c->light);
  if(gm_flags)*gm_flags=sys->gm_flg;
  if(ev_flags)memcpy(ev_flags,sys->ev_flg,sizeof sys->ev_flg);
+ // bhCPM2_SearchPch clears sch_hed and rebuilds it from the currently visible
+ // works, returning NULL when nothing qualifies. An empty list therefore has no
+ // lock at all; src_no still holds the previous index and must not leak through.
  if(c->pair.sch_hed.nextP){search* t=c->pair.sch_hed.nextP;out->target_right=out->target_left=t->idx;if(c->pair.arm_dl||c->pair.arm_dr)for(search* n=t->nextP;n;n=n->nextP)if((short)(n->dir-t->dir)>=-16384&&(short)(n->dir-t->dir)<=16384){out->target_right=(c->pair.mode&8)?n->idx:t->idx;out->target_left=(c->pair.mode&8)?t->idx:n->idx;break;}}
+ else out->target_right=out->target_left=-1;
 }
 
 void recvx_combat_after_model(RECVX_COMBAT_CORE* c){bind(c);CombatKnife();}

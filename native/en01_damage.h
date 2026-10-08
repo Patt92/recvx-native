@@ -64,6 +64,9 @@ void recvx_en01_set_player(const RECVX_EN01_PLAYER* player);
 void recvx_en01_set_ai(int enabled);
 // Zombie grab/bite (EatCheck, Nage, PlyDG, PlayerLink). Off: EatCheck finds nothing, as before.
 void recvx_en01_set_terrain(const unsigned char* etc,unsigned etc_count,const unsigned char* flr,unsigned flr_count);
+// objitm.c bhObj001 publishes its mobile ETC/FLR records in sys->metcp/mflrp.
+// Keep them separate from rom terrain: hitchk.c scans ROM first, then mobile work.
+void recvx_en01_set_mobile_terrain(const unsigned char* etc,unsigned etc_count,const unsigned char* flr,unsigned flr_count);
 void recvx_en01_player_tick(void);
 void recvx_en01_player_state(RECVX_EN01_PLAYER_STATE* state);
 void recvx_en01_player_reset(void);
@@ -86,6 +89,8 @@ void recvx_en01_tick(RECVX_EN01* work);
 void recvx_en04_set_frame_counts(const unsigned* counts,unsigned count);
 void recvx_en04_init(RECVX_EN01* work,unsigned type,int hard,int floor,float x,float y,float z,int ay);
 void recvx_en04_tick(RECVX_EN01* work);
+// event.c bhMotionPauseSet writes only mode3, including the id-1 linked work.
+void recvx_enemy_motion_mode(RECVX_EN01* work,unsigned mode3);
 void recvx_enemy_modes(RECVX_EN01* work,int mode0,int mode1,int mode2,int mode3,unsigned type);
 void recvx_enemy_release(RECVX_EN01* work,int mode0,int mode1,int mode2,int mode3,unsigned type);
 void recvx_enemy_motion(RECVX_EN01* work,unsigned motion,int frame,int add);

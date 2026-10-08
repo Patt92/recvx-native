@@ -31,7 +31,7 @@ static void bhAddSpeed(BH_PWORK* pp,int r){int angle=(pp->ay+r)&0xFFFF;pp->px-=p
 static int bhCheckFloorNum(float py){int i,fno=2;for(i=0;i<31;i++)if((rom->grand[i]&&py>=rom->grand[i])||(i==2&&py>=rom->grand[i]))fno=i;return fno-2;}
 static void bhSetFloorNum(BH_PWORK* pp){int fnow=pp->flr_no;pp->flr_no=(char)bhCheckFloorNum(pp->py);if(pp->flr_no!=fnow)pp->flr_nob=(char)fnow;}
 static void bhGetObjMotion(BH_PWORK* ewP,int obj_no,float* pos,int* ang){(void)obj_no;ang[0]=ang[1]=ang[2]=0;if(!host_now->motion_root(host_now->user,ewP->mtn_no,ewP->frm_no/65536,pos))pos[0]=pos[1]=pos[2]=0;}
-static int bhCheckFloorSound(BH_PWORK* pp,int floor,float x,float z){(void)pp;(void)x;(void)z;return floor;}
+static int bhCheckFloorSound(BH_PWORK* pp,int floor,float x,float z){return host_now->floor_sound(host_now->user,floor,x,z,(pp->stflg&0x10)!=0);}
 static void CallPlayerFootStepSe(int floor_sound,int a,int b){(void)a;(void)b;if(host_now->footstep)host_now->footstep(host_now->user,floor_sound);}
 static void bhClrUseKaidanFlag(BH_PWORK* pp){(void)pp;area_work.attr&=~0x400000u;} // area copy only; the room table is untouched
 // Water particles and rumble are separate host services. No water flags are

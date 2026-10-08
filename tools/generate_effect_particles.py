@@ -45,6 +45,9 @@ parts.append('static O_WRK* AllocOwork();\nstatic O_WRK* AllocOworkOne();')
 parts.append(function('bhSetBloodPoolLnk'))
 parts.append(function('bhEff300'))
 parts.append(function('bhSetEffParticle'))
+# bhSetEffParticleMk2 is the same emitter with an explicit destination colour
+# (bhEne_SetBloodEffect4/5 and the enemy mince effects call it).
+parts.append(function('bhSetEffParticleMk2'))
 parts.append(function('bhEff302'))
 parts.append(function('bhEff_PtclLineDraw'))
 text = '\n'.join(parts).replace('njSetMatrix(NULL, cam.mtx);','njSetMatrix(NULL, &cam.mtx);')

@@ -21,6 +21,9 @@ add_custom_command(OUTPUT "${RECVX_TABLES}/effect_particles.inc"
 add_custom_command(OUTPUT "${RECVX_TABLES}/en04_damage.inc" "${RECVX_TABLES}/en01_damage.inc" "${RECVX_TABLES}/en01_damage_types.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_en01_damage.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS src/ps2/veronica/prog/en04.c tools/generate_en01_damage.py tools/generate_native_tables.py include/ps2/veronica/prog/types.h include/ps2/veronica/prog/en01.h include/ps2/veronica/prog/zonzon.h include/ps2/veronica/prog/zonzon1.h include/ps2/veronica/prog/macros.h src/ps2/veronica/prog/en01.c src/ps2/veronica/prog/zonzon.c src/ps2/veronica/prog/zonzon1.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/en07_bat.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_en07_bat.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_en07_bat.py tools/generate_native_tables.py src/ps2/veronica/prog/en07.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/subplayer.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_subplayer.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_subplayer.py tools/generate_native_tables.py src/ps2/veronica/prog/subpl.c src/ps2/veronica/prog/eneset.c)
@@ -39,7 +42,7 @@ add_custom_command(OUTPUT "${RECVX_TABLES}/targeting.inc"
   DEPENDS tools/generate_targeting.py tools/generate_native_tables.py src/ps2/veronica/prog/pwksub.c src/ps2/veronica/prog/playpch.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/combat_tables.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_combat_tables.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
-  DEPENDS tools/generate_combat_tables.py tools/generate_native_tables.py src/ps2/veronica/prog/player.c src/ps2/veronica/prog/weapon.c src/ps2/veronica/prog/en01.c)
+  DEPENDS tools/generate_combat_tables.py tools/generate_native_tables.py src/ps2/veronica/prog/player.c src/ps2/veronica/prog/weapon.c src/ps2/veronica/prog/en01.c src/ps2/veronica/prog/en04.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/file_folder.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_file_folder.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_file_folder.py tools/generate_native_tables.py src/ps2/veronica/prog/itemview.c src/ps2/veronica/prog/fileview.c)
@@ -135,6 +138,11 @@ if(RECVX_BUILD_RUNTIME)
     add_executable(recvx-frontend-tests tests/native/frontend_test.cpp)
     target_link_libraries(recvx-frontend-tests PRIVATE recvx_input)
     add_test(NAME main_menu_settings_video_skip COMMAND recvx-frontend-tests)
+    add_executable(recvx-event-lifecycle-tests tests/native/event_lifecycle_test.cpp)
+    target_link_libraries(recvx-event-lifecycle-tests PRIVATE recvx_input)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
+      add_test(NAME event_lifecycle_control_release COMMAND recvx-event-lifecycle-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
     add_executable(recvx-input-tests tests/native/input_test.cpp)
     target_link_libraries(recvx-input-tests PRIVATE recvx_input)
     add_test(NAME keyboard_controller_config COMMAND recvx-input-tests)
@@ -225,7 +233,7 @@ if(BUILD_TESTING)
   add_test(NAME effect_pool_lifetime COMMAND recvx-effect-pool-tests)
   add_executable(recvx-gameover-tests tests/native/gameover_test.cpp)
   target_link_libraries(recvx-gameover-tests PRIVATE recvx_game)
-  add_test(NAME gameover_original COMMAND recvx-gameover-tests)
+  add_test(NAME gameover_original COMMAND recvx-gameover-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_executable(recvx-enemy-damage-tests tests/native/enemy_damage_test.cpp)
   target_link_libraries(recvx-enemy-damage-tests PRIVATE recvx_game)
   add_test(NAME enemy_damage_original_en01 COMMAND recvx-enemy-damage-tests)
@@ -285,4 +293,27 @@ if(BUILD_TESTING)
   add_executable(recvx-continuity-tests tests/native/continuity_test.cpp)
   target_link_libraries(recvx-continuity-tests PRIVATE recvx_game)
   add_test(NAME core_continuity COMMAND recvx-continuity-tests)
+endif()
+
+# Original crate/player push state and Motion.c sampling.
+add_custom_command(OUTPUT "${RECVX_TABLES}/player_push.inc"
+ COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_player_push.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+ DEPENDS tools/generate_player_push.py tools/generate_native_tables.py src/ps2/veronica/prog/player.c src/ps2/veronica/prog/objitm.c src/ps2/veronica/prog/hitchk.c src/ps2/veronica/prog/Motion.c src/ps2/veronica/prog/pwksub.c src/ps2/veronica/prog/ps2_NaColi.c include/ps2/veronica/prog/player.h)
+target_sources(recvx_game PRIVATE native/player_push.cpp native/player_push_core.c "${RECVX_TABLES}/player_push.inc")
+
+if(BUILD_TESTING)
+ add_executable(recvx-push-tests tests/native/push_test.cpp)
+ target_link_libraries(recvx-push-tests PRIVATE recvx_game)
+ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0010.bin")
+  add_test(NAME player_push COMMAND recvx-push-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+ endif()
+endif()
+
+add_custom_command(OUTPUT "${RECVX_TABLES}/player_combat.inc" "${RECVX_TABLES}/player_combat_types.inc"
+ COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_player_combat.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+ DEPENDS tools/generate_player_combat.py tools/generate_native_tables.py src/ps2/veronica/prog/player.c src/ps2/veronica/prog/playpch.c src/ps2/veronica/prog/playpch2.c src/ps2/veronica/prog/pwksub.c src/ps2/veronica/prog/weapon.c src/ps2/veronica/prog/Motion.c include/ps2/veronica/prog/player.h include/ps2/veronica/prog/playpch.h include/ps2/veronica/prog/types.h)
+target_sources(recvx_game PRIVATE native/player_combat_core.c "${RECVX_TABLES}/player_combat.inc" "${RECVX_TABLES}/player_combat_types.inc")
+# Preserve original C field aliasing and separate float multiply/add evaluation.
+if(NOT MSVC)
+ set_source_files_properties(native/player_push_core.c PROPERTIES COMPILE_OPTIONS "-fno-strict-aliasing;-ffp-contract=off")
 endif()

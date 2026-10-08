@@ -37,6 +37,16 @@ struct CombatOriginal {
     std::function<int()> reload;std::function<int(const RECVX_GUN_HIT&)> hit,knife;
     std::function<int(const float*,const float*,float,unsigned)> wall;
     std::function<void(unsigned)> sound;std::function<void(int,int,int,int,const float*)> muzzle;
+    // Remaining original services consumed by pwksub.c/player.c during an attack.
+    std::function<int(int,float,float,float)> floor_sound;
+    std::function<void(int,int,int)> footstep;
+    std::function<void(int,int)> vibration;
+    std::function<void(const float*,const float*,unsigned,unsigned,int)> spark;
+    std::function<int(const float*,const float*,unsigned,float*,float*,void*)> line;
+    std::function<float(const float*)> ground;
+    std::function<int(const float*,void*)> water;
+    std::function<void(unsigned,const RECVX_COMBAT_EFFECT*)> effect;
+    std::function<void(const void*)> light;
     explicit CombatOriginal(const PlayerAsset& asset){
         RECVX_COMBAT_HOST host{};host.user=this;
         host.search_bullet=[](void* p){return static_cast<CombatOriginal*>(p)->reload();};
@@ -46,6 +56,17 @@ struct CombatOriginal {
         host.sound=[](void* p,const float*,unsigned se){static_cast<CombatOriginal*>(p)->sound(se);};
         host.muzzle=[](void* p,int w,int j,int hand,int yaw,const float* matrix){static_cast<CombatOriginal*>(p)->muzzle(w,j,hand,yaw,matrix);};
         host.unbound=[](void* p,const char* name){static_cast<CombatOriginal*>(p)->unavailable.insert(name);};
+        // Bind every remaining original service. An unbound pointer would be
+        // called straight from the extracted code and crash on the first shot.
+        host.floor=[](void* p,int f,float x,float y,float z){auto* s=static_cast<CombatOriginal*>(p);return s->floor_sound?s->floor_sound(f,x,y,z):0;};
+        host.footstep=[](void* p,int s,int a,int b){auto* c=static_cast<CombatOriginal*>(p);if(c->footstep)c->footstep(s,a,b);};
+        host.vibration=[](void* p,int port,int n){auto* c=static_cast<CombatOriginal*>(p);if(c->vibration)c->vibration(port,n);};
+        host.spark=[](void* p,const float* a,const float* b,unsigned s,unsigned e,int t){auto* c=static_cast<CombatOriginal*>(p);if(c->spark)c->spark(a,b,s,e,t);};
+        host.line=[](void* p,const float* a,const float* b,unsigned f,float* d,float* out,void* w){auto* c=static_cast<CombatOriginal*>(p);return c->line?c->line(a,b,f,d,out,w):0;};
+        host.ground=[](void* p,const float* a){auto* c=static_cast<CombatOriginal*>(p);return c->ground?c->ground(a):0.f;};
+        host.water=[](void* p,const float* a,void* w){auto* c=static_cast<CombatOriginal*>(p);return c->water?c->water(a,w):0;};
+        host.effect=[](void* p,unsigned i,const RECVX_COMBAT_EFFECT* e){auto* c=static_cast<CombatOriginal*>(p);if(c->effect)c->effect(i,e);};
+        host.light=[](void* p,const void* w){auto* c=static_cast<CombatOriginal*>(p);if(c->light)c->light(w);};
         core=recvx_combat_create(&host);if(!core)throw std::bad_alloc();
         motions.resize(asset.motions());channels.resize(asset.motions());angles.resize(asset.motions());poses.resize(asset.bones());
         models=asset.motion_nodes(unsigned(asset.bones()));if(models.empty()){for(unsigned i=0;i<asset.bones();++i)models.push_back(i);}
@@ -88,6 +109,28 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     engine.wall=[&](const float* a,const float* b,float,unsigned flags)->int{if(!world)return 0;NJS_POINT3 dir{b[0]-a[0],b[1]-a[1],b[2]-a[2]};const float length=njUnitVector(&dir);return length>0&&world->combat_wall_distance({a[0],a[1],a[2]},dir,length,flags)<length;};
     engine.sound=[&](unsigned se){audio.play_weapon_sound(unsigned(WpnTab[weapon_].snd_wpno),se&255);if(se==260)++empty;};
     engine.muzzle=[&](int,int,int hand,int,const float*){fire(inventory,actor,world,audio,player,motion,frame,hand!=0);};
+    // bhCheckFloorSound / CallPlayerFootStepSe: original surface lookup and step bank.
+    engine.floor_sound=[&](int,float x,float y,float z)->int{return world?int(world->floor_sound({x,y,z})):0;};
+    engine.footstep=[&](int surface,int type,int){if(world&&surface>=0&&surface<=4)audio.footstep(unsigned(surface),unsigned(type!=0),0);};
+    // StartVibrationEx has no physical driver bound; report it instead of faking it.
+    engine.vibration=[&](int,int){engine.unavailable.insert("StartVibrationEx");};
+    engine.spark=[&](const float*,const float*,unsigned,unsigned,int){engine.unavailable.insert("bhSetEffGunSpark");};
+    // bhCheckL2Wall: original line/wall probe against the room collision set.
+    engine.line=[&](const float* p,const float* v,unsigned flags,float* distance,float* out,void*)->int{
+        if(!world)return 0;NJS_POINT3 dir{v[0],v[1],v[2]};const float length=njUnitVector(&dir);if(length<=0)return 0;
+        const float reach=world->combat_wall_distance({p[0],p[1],p[2]},dir,length,flags);
+        if(reach>=length)return 0;if(distance)*distance=reach;
+        if(out){out[0]=p[0]+dir.x*reach;out[1]=p[1]+dir.y*reach;out[2]=p[2]+dir.z*reach;}return 1;};
+    engine.ground=[&](const float* p)->float{return world?world->combat_ground({p[0],p[1],p[2]}):0.f;};
+    // bhCheckWater has no ported water surface table for the combat path.
+    engine.water=[&](const float*,void*)->int{engine.unavailable.insert("bhCheckWater");return 0;};
+    // bhSetGunFire routes the muzzle through bhSetEffectTb, which spawns an
+    // original O_WRK. Effect id 3 / type 0 is the type-0 muzzle flash
+    // (bhEff003); anything else has no ported consumer yet.
+    engine.effect=[&](unsigned,const RECVX_COMBAT_EFFECT* e){
+        if(e->id!=3||e->type!=0){engine.unavailable.insert("bhSetEffect id "+std::to_string(e->id));return;}
+        fire(inventory,actor,world,audio,player,motion,frame,e->lkono==13);};
+    engine.light=[&](const void*){engine.unavailable.insert("bhLightSet");};
     std::vector<RECVX_COMBAT_ENEMY> targets;if(world)for(const auto& t:world->combat_targets())targets.push_back({t.index,t.position.x,t.position.y,t.position.z,t.radius,t.height});recvx_combat_enemies(engine.core,targets.data(),unsigned(targets.size()));
     const auto bones=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));std::vector<float> matrices;for(const auto& bone:bones)matrices.insert(matrices.end(),bone.value,bone.value+16);recvx_combat_nodes(engine.core,matrices.data(),unsigned(bones.size()));
     const unsigned pad=(input.aim?0x10u:0)|(input.attack?0x100u:0)|(input.vertical>0?0x20u:input.vertical<0?0x40u:0)|(input.turn>0?8u:input.turn<0?4u:0)|(input.next_target?0x80u:0);
@@ -95,7 +138,9 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     shots+=engine.state.shots-old_shots;if(!was_attacking&&attacking()){++attacks;struck_.clear();}actor.yaw=engine.state.yaw;motion=engine.state.motion;frame=engine.state.pose_frame;vertical_=input.vertical;
     if(world){const auto posed=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));matrices.clear();for(const auto& bone:posed)matrices.insert(matrices.end(),bone.value,bone.value+16);recvx_combat_nodes(engine.core,matrices.data(),unsigned(posed.size()));recvx_combat_after_model(engine.core);}
     aim_.yaw=actor.yaw;aim_.right=engine.state.target_right<0?~0u:unsigned(engine.state.target_right);aim_.left=engine.state.target_left<0?~0u:unsigned(engine.state.target_left);aim_.right_angle=engine.state.arm_right;aim_.left_angle=engine.state.arm_left;
-    if(!engine.state.active){motion=42;frame=0;original_.reset();return false;}return true;
+    // Leaving the original attack state clears the search list (bhCPM2_SearchPch
+    // rebuilds it per aiming pass), so no stale lock survives the release.
+    if(!engine.state.active){motion=42;frame=0;original_.reset();aim_={};return false;}return true;
 }
 void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld* world)const{if(bones.empty())return;const auto hands=body_?body_->script_nodes(bones):bones;if(scripted){if(bare_hands_)bare_hands_->append(scene,hands);}else if(asset_){asset_->append(scene,hands);if(world&&!flashes_.empty())if(const auto* atlas=world->weapon_flash_textures()){const unsigned base=scene.textures.size();scene.textures.insert(scene.textures.end(),atlas->begin(),atlas->end());for(const auto& flash:flashes_)if(flash.ct0&&flash.ct0<=atlas->size())flash.append(scene,base);}}}
 }

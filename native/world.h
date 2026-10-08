@@ -55,6 +55,8 @@ public:
     bool step_clear(NJS_POINT3 probe,float radius=3.5f,float height=16.5f)const;
     float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,floor_at(origin));}
     float combat_wall_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,unsigned flags=0x400)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,-32768,flags);}
+    // bhGetGroundPosition for the original attack path; same collision set as movement.
+    float combat_ground(NJS_POINT3 probe)const{return ground_position(collision_geometry(),room_height_,probe);}
     const std::vector<SceneTexture>* weapon_flash_textures()const{const auto at=effect_textures_.find(3);return at==effect_textures_.end()?nullptr:&at->second;}
     bool bind(const EventCommand& command);
     void set_simulation_flags(unsigned flags){simulation_flags_=flags;}
@@ -113,16 +115,22 @@ public:
     const RECVX_PUSH_STATE* push_state()const{return push_?&push_->state():nullptr;}
     bool pushing()const{return push_&&push_->active();}
     bool tick_push(bool forward);
+    // bhObj001 stores climb / descend ETC records in sys->metcp.  Unlike the
+    // room ETC table, these records move with their O_WRK.
+    std::vector<RECVX_STAIR_AREA> push_steps();
+    std::vector<RECVX_STAIR_AREA> push_floors();
     void initialize_player_spawn(); // bhSetRoom: POS height selects rom->grand
     const std::array<float,32>& floor_heights()const{return floors_;} // rom->grand
     unsigned floor_sound(NJS_POINT3 position,bool special=false)const;
+    unsigned floor_sound(int floor,float x,float z,bool special=false)const;
     void player_footstep(const PlayerAsset& player);
     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f,std::optional<bool> walking={});
 private:
     struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;};
     struct Context {unsigned kind=0,index=0,node=0,mode1=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
     struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;};
-    struct EventCamera {SceneCamera camera;unsigned link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};
+    struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};
+    struct EventCameraTrack {std::vector<EventCamera> keys;unsigned next=0;};
     std::vector<std::uint8_t> room_;std::size_t header_;unsigned simulation_flags_=~0u;
     std::unique_ptr<PlayerPush> push_;
     std::vector<unsigned> push_objects_;
@@ -177,8 +185,10 @@ private:
     std::int64_t footstep_frame_=-1;
     float room_height_=0;
     std::array<float,32> floors_{};
-    std::vector<std::vector<EventCamera>> event_cameras_;
-    unsigned event_camera_key_=0;
+    std::vector<EventCameraTrack> event_cameras_;
+    unsigned event_camera_key_=0,event_camera_clock_=0;
+    bool event_camera_finished_=false;
+    SceneCamera event_camera_pose_{};
     ActiveCameraMotion active_camera_;std::vector<SceneCamera> room_cameras_;
     bool camera_force_=false;
     std::vector<Light> lights_,event_lights_;

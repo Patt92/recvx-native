@@ -22,13 +22,16 @@ network access; subsequent builds can use the cached dependencies.
 ./build.ps1 --platform windows --verify-data --package
 ```
 
-`tools/build_native.py` configures, builds and runs unit tests on the host. When
-`data/native-data.version` exists, it also runs the real-data opening, controller, main-menu/video/lighter and door
-regressions.
+`tools/build_native.py` configures and builds by default. Test targets are excluded
+from the normal build, so a stale or optional regression check cannot prevent
+launching the current runtime. Add `--test` to build the test targets and run
+CTest. Add `--verify-runtime` to run the longer original-data replay suite. These
+checks are opt-in and can be combined. `--no-test` remains accepted for older
+commands. `--data <path>` selects another cooked tree; `--verify-data` checks its
+manifest independently.
 Windows cross-builds report that tests must run separately on Windows or Wine.
-`--no-test` explicitly skips host tests. `--data <path>` selects another complete
-cooked tree. `--output <new-directory>` changes the package destination; package
-creation refuses to overwrite a previous release.
+`--output <new-directory>` changes the package destination; package creation
+refuses to overwrite a previous release.
 
 macOS outputs an arm64-only Apple Silicon binary (deployment target 11.0), with arm64-only SDL2 and no Rosetta fallback. Windows
 outputs x64. SDL2 2.32.10 and the cross-build Zig 0.16.0 are pinned by checksums.
@@ -45,6 +48,10 @@ ctest --test-dir build/native --output-on-failure
 build/native/recvx-game-tests data
 build/native/recvx-runtime --data data
 ```
+
+The equivalent scripted test build is `./build.sh --test`; the default
+`./build.sh` only prepares the runtime binary. Use
+`./build.sh --test --verify-runtime` when both test layers are wanted.
 
 ## Data and history
 

@@ -91,6 +91,7 @@ ModelGeometryOptions inspection_geometry(const std::vector<std::uint8_t>& packet
     for(const auto& o:objects){result.pose.push_back({o.pos,{o.ang[0],o.ang[1],o.ang[2]}});result.evalflags.push_back(o.evalflags);}return result;
 }
 unsigned original_file_number(unsigned item,unsigned stage,unsigned room){original_inventory::system.stg_no=stage;original_inventory::system.rom_no=room;return original_inventory::FileNumberSwitch(item);}
+unsigned original_file_model_mask(unsigned item){return original_inventory::file_model_mask(item);}
 unsigned original_file_pages(unsigned file){if(file>=24)throw std::runtime_error("file outside table");return original_inventory::fstbl[file]+1;}
 unsigned original_file_message(unsigned file,unsigned page){if(page>=original_file_pages(file))throw std::runtime_error("file page outside table");return 280+original_inventory::fsheader[file]+page;}
 unsigned original_file_wallpaper(unsigned file){if(file>=24)throw std::runtime_error("file outside table");return original_inventory::wallpaper[file];}

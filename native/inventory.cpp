@@ -1,4 +1,5 @@
 #include "inventory.h"
+#include "inspection.h"
 #include <algorithm>
 #include <stdexcept>
 #include <tuple>
@@ -137,6 +138,27 @@ bool Inventory::acquire(unsigned item,unsigned count,unsigned flags){
         slots()[slot]=pack(item|flags,take);count-=take;
     }
     compact();return true;
+}
+bool Inventory::debug_acquire(unsigned choice,unsigned count){
+    if(choice>=256&&choice<280){items[383]|=1u<<(choice-256);return true;}
+    if(!choice||choice>=156||original_file_model_mask(choice))return false;
+    return acquire(choice,(itemdata[choice].type&1)&&!itemdata[choice].max?0:count);
+}
+unsigned Inventory::repair_owned_file_items(){
+    const auto owner=player;unsigned removed=0;
+    for(player=0;player<4;++player){bool changed=false;
+        for(unsigned slot=1;slot<12;++slot){const auto item=id(slots()[slot]);
+            if(original_file_model_mask(item)&items[383]){slots()[slot]=0;if(slots()[0]==slot)slots()[0]=0;++removed;changed=true;}}
+        if(changed)compact();
+    }
+    player=owner;return removed;
+}
+void Inventory::erase_read_manual(bool automatic){
+    pickup_original::swork={};pickup_original::swork.pip=slots();
+    if(automatic){if(auto* item=pickup_original::ItemSearch(145))pickup_original::EraseItem(item);}
+    else for(unsigned i=0;i<192;++i)if(items[i]==0x910001){items[i]=0;break;}
+    // StatusMain -> SpriteOnOff calls ItemSort for the current player's list.
+    pickup_original::ItemSort();
 }
 bool Inventory::consume(unsigned slot){if(slot<1||slot>=12||!id(slots()[slot]))return false;if(quantity(slots()[slot])>1)--slots()[slot];else{slots()[slot]=0;if(slots()[0]==slot)slots()[0]=0;}compact();return true;}
 bool Inventory::heal(unsigned slot){

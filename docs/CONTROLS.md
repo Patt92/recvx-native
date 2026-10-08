@@ -19,6 +19,7 @@ names. Keyboard and mapped gamepads can be used together without changing modes.
 | Cancel menu/dialogue | Escape | B |
 | Menu/item examination | Arrow keys or WASD | Left stick or D-pad |
 | Video / cinematic skip | Space; Enter also skips active videos and permitted scenes | Start/Options; A also skips active videos and permitted scenes |
+| Pause | P | Back/Select; resume with Start/Options |
 | Quit | Escape outside menus/dialogue, or F10 | Unbound by default |
 | Wireframe diagnostic | F2 | Unbound by default |
 

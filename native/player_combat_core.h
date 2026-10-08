@@ -5,6 +5,8 @@ extern "C" {
 #endif
 typedef struct RECVX_COMBAT_CORE RECVX_COMBAT_CORE;
 typedef struct {float px,py,pz,vx,vy,vz,gx,gy,gz;unsigned at_flg;int wpn_no;float r,l,rn,rmax;int ax,ay;} RECVX_GUN_HIT;
+// Original O_WRK fields an effect consumer needs; bhSetEffect/bhSetEffectTb fill them.
+typedef struct {unsigned flg;unsigned id,type,mdlver;int flr_no;float px,py,pz,sx,sy,sz;int ax,ay,az;unsigned lkono;const float* matrix;} RECVX_COMBAT_EFFECT;
 typedef struct {
  void* user;
  int (*search_bullet)(void*);
@@ -21,7 +23,7 @@ typedef struct {
  int (*line)(void*,const float*,const float*,unsigned,float*,float*,void*);
  float (*ground)(void*,const float*);
  int (*water)(void*,const float*,void*);
- void (*effect)(void*,unsigned,const void*);
+ void (*effect)(void*,unsigned,const RECVX_COMBAT_EFFECT*);
  void (*light)(void*,const void*);
 } RECVX_COMBAT_HOST;
 typedef struct {unsigned index;float x,y,z,radius,height;} RECVX_COMBAT_ENEMY;

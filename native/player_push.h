@@ -14,8 +14,11 @@ public:
  const RECVX_PUSH_STATE& state()const{return state_;}
  void enabled(unsigned flags){recvx_push_enabled(core_,flags);}
  void update_object(unsigned i,NJS_POINT3 p,bool hidden);
+ void terrain(const std::vector<RECVX_STAIR_AREA>&,const std::vector<RECVX_STAIR_AREA>&);
  void update_walls(const std::vector<CollisionWall>&);
  std::vector<CollisionWall> walls()const;
+ std::vector<RECVX_STAIR_AREA> steps()const;
+ std::vector<RECVX_STAIR_AREA> floors()const;
  NJS_POINT3 object(unsigned i)const;
  ModelNodeOverrides pose()const;
 private:

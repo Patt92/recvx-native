@@ -27,6 +27,13 @@ public:
     bool reload(); // sub1.c bhSearchBullet / Combi_99 / ItemSort.
     bool count_bullet(); // weapon.c bhCountBullet; signed 16-bit count, preserves ID/flags.
     bool acquire(unsigned item,unsigned quantity,unsigned flags=0);
+    // Host debug catalog: 256 + file index grants itm[383], normal IDs grant
+    // items. File-only room models cannot be injected into inventory slots.
+    bool debug_acquire(unsigned choice,unsigned quantity);
+    // Compatibility for the old host's duplicate file pickups, only when an
+    // associated file is already owned. Never invents file ownership.
+    unsigned repair_owned_file_items();
+    void erase_read_manual(bool automatic); // FileExit01 -> ItemSearch/EraseItem -> ItemSort
     // sub1.c GetItem: mode 0 begins, modes 1/4 consume a menu answer 100/101.
     PickupResult pickup(unsigned item,unsigned& control,unsigned stage,unsigned room,unsigned mode=0,int answer=-1);
     FloorUseResult use_on_floor(unsigned slot,const std::array<unsigned,4>* parameters,unsigned& control,unsigned stage,unsigned room);

@@ -68,6 +68,19 @@ def main():
     (a.output / 'adx_tables.inc').write_text('// Generated from original adxwrap.c.\n' + adx[m.start():block(adx, m.start())] + ';\n')
     m = re.search(r'^PARTS\* BulletSet\([^\n]+\)[^\n]*\n\{', sub, re.M)
     ui.append(sub[m.start():block(sub, m.start())] + '\n')
+    # Original ItemCommand's type-dependent sprite initialization and TrigerSet.
+    start=sub.index('void TrigerSet(S_WORK* st)')
+    ui.append(sub[start:block(sub,start)]+'\n')
+    start=sub.index('void ItemCommand(S_WORK* st)')
+    command=sub[start:block(sub,start)]
+    init=command[command.index('        for (x = 0; x < 18; x++)'):command.index('        swork.statusflg &= ~0x100000;')]
+    selection=command[command.index('    for (num1 = 0; num1 < (max + 1); num1++)'):command.rfind('}')]
+    ui.append('std::array<PARTS,18> original_command_parts(unsigned item,unsigned cursor,bool burst){\n'
+              'static const std::array<PARTS,24> initial=[](){std::array<PARTS,24> r;std::copy_n(parts_06b,24,r.begin());return r;}();\n'
+              'std::copy(initial.begin(),initial.end(),parts_06b);unsigned flags[3]{};if(burst)flags[2]=0x80000000u>>(74%32);UiSystem system{flags};sys=&system;\n'
+              'S_WORK work{item,cursor};S_WORK* st=&work;unsigned char x;unsigned short num1;\n'+init+
+              'st->maincsr=cursor;const unsigned max=(itemdata[item].type&1)?(item==10?4:3):2;\n'+selection+
+              'std::array<PARTS,18> result;std::copy_n(parts_06b,18,result.begin());sys=nullptr;return result;}\n')
     (a.output / 'ui_tables.inc').write_text(''.join(ui))
     routines = ['// Generated from original Combi_00 through Combi_05 in sub1.c.\n']
     for i in range(6):

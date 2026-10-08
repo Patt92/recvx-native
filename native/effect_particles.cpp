@@ -69,6 +69,15 @@ void EffectParticles::spawn(unsigned type,const ParticleLink& link,NJS_POINT3 of
     // bhSetEffParticle starts one O_WRK per PtclDat entry (id 302); register every new one.
     for(auto& block:impl_->blocks){auto* o=reinterpret_cast<O_WRK*>(block->data);if((o->flg&3)&&o->id==302&&!before.count(o)&&o->exp0)impl_->emitters.push_back({o,link,offset});}
 }
+// bhSetEffParticleMk2: identical emitter, but the destination colour is passed
+// in instead of being derived from the source colour (bhEne_SetBloodEffect4).
+void EffectParticles::spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color){
+    if(type>=19)throw std::runtime_error("particle type outside PtclTbl");
+    EffectScope scope(impl_->system,impl_->blocks);
+    std::set<O_WRK*> before;for(auto& e:impl_->emitters)before.insert(e.op);
+    bhSetEffParticleMk2(link.linked?reinterpret_cast<BH_PWORK*>(1):nullptr,int(link.node),&offset,&direction,source_color,destination_color,int(type));
+    for(auto& block:impl_->blocks){auto* o=reinterpret_cast<O_WRK*>(block->data);if((o->flg&3)&&o->id==302&&!before.count(o)&&o->exp0)impl_->emitters.push_back({o,link,offset});}
+}
 void EffectParticles::tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall){
     EffectScope scope(impl_->system,impl_->blocks);
     sys->ef_fncn=0;wall_probe=wall;

@@ -27,8 +27,12 @@ struct Room {
 int main(int argc,char** argv){try{
  if(argc<2)return 0;_Make_SinTable();const std::filesystem::path data=argv[1];
  for(unsigned event:{15u,16u})for(unsigned exit:{0u,1u,2u}){
-  {AudioMixer dog_audio(data);Room dog(data,"RM_0050",dog_audio);dog.vm.start(0,event);dog.step(100);
-   check(dog_audio.current_bgm()==49&&dog_audio.active(0),"original dog event did not start combat BGM 49");check(dog.vm.flag(4,4),"dog event did not set combat music state");}
+  {AudioMixer dog_audio(data);Room dog(data,"RM_0050",dog_audio);dog.vm.start(0,event);
+   // The original event sets rm_flg 4 on entry and clears it before ending.
+   // Wait for that state instead of assuming it survives 100 host ticks.
+   for(unsigned tick=0;tick<100&&!dog.vm.flag(4,4)&&dog.vm.errors.empty();++tick)dog.step(1);
+   check(dog.vm.errors.empty(),"original dog BGM event is blocked");
+   check(dog_audio.current_bgm()==49&&dog_audio.active(0),"original dog event did not start combat BGM 49");check(dog.vm.flag(4,4),"dog event did not set combat music state");dog.step(100);check(dog.vm.errors.empty()&&!dog.vm.flag(4,4),"dog event did not clear its original music state at completion");}
   AudioMixer audio(data);audio.play_bgm_ex(49,0,-45);Room room(data,"RM_0050",audio);room.vm.set_flag(4,4,0);
   check(room.door(exit),"original RM_0050 door interaction failed");check(room.vm.values[20]==exit&&(room.vm.flags[10][0]&0x100),"door omits original interaction index/flags");
   if(exit==0)room.vm.tick();check(room.vm.flags[10][0]&1,"DoorCall omits cb_flg 1");room.vm.finish_room_exit();

@@ -10,6 +10,33 @@
 using namespace recvx;
 static void check(bool b,const char* s){if(!b)throw std::runtime_error(s);}
 int main(int argc,char**argv){try{_Make_SinTable();check(argc==2,"data path required");const auto data=std::filesystem::path(argv[1]);auto asset=PlayerAsset::load(data);std::array<float,32> floors{};floors[0]=-10000;floors[1]=-1000;floors[3]=1000;
+ // objitm.c bhObj001: only aspd 0 and 6 set pn and allocate the two mobile
+ // type-2 ETC records used by bhCheckExmAtari/bhCheckDansa.  The lower one
+ // starts DNU (prm0 0); the upper one starts DND (prm0 1).
+ {for(int aspd=0;aspd<8;++aspd){std::vector<RECVX_PUSH_OBJECT> objects{{4,1,aspd,3,0,10,0,20}};PlayerPush push({},100,floors,objects,asset,{});const auto areas=push.steps(),floor_areas=push.floors();const bool climbable=aspd==0||aspd==6;check(areas.size()==(climbable?2u:0u)&&floor_areas.size()==(climbable?1u:0u),"bhObj001 climb ETC/floor allocation differs by aspd");if(climbable){check(areas[0].type==2&&areas[0].prm0==0&&areas[0].flr_no==0,"crate lower ascent ETC differs from bhObj001");check(areas[1].type==2&&areas[1].prm0==1&&areas[1].flr_no==0,"crate upper descent ETC differs from bhObj001");check(floor_areas[0].type==1&&floor_areas[0].prm0==3&&floor_areas[0].flr_no==0&&floor_areas[0].px==1.5f&&floor_areas[0].pz==11.5f,"crate mflrp sound area differs from bhObj001");check(areas[0].px==5.5f&&areas[0].pz==15.5f&&areas[1].px==5.5f&&areas[1].pz==15.5f,"crate ETC does not follow original footprint");push.update_object(0,{30,0,40},false);push.contact({0,0,0},{0,0,0},0,0,false,0,0,0,0);const auto moved=push.steps(),moved_floors=push.floors();check(moved[0].px==25.5f&&moved[0].pz==35.5f&&moved[1].px==25.5f&&moved[1].pz==35.5f&&moved_floors[0].px==21.5f&&moved_floors[0].pz==31.5f,"mobile crate ETC/mflrp does not follow O_WRK position");}}}
+ // bhCheckWallType: negative type-7 h is a plane threshold, not a box.
+ {RECVX_STAIR_AREA wall{1,7,0,0,1,-4.5f,9,-4.5f,9,-1,9,0,0,0,0};unsigned attr=0;
+  check(!recvx_push_probe(&wall,1,100,0,9.1f,0,3.5f,16.5f,0x119,&attr),"upper climb probe treated type7 as a volume");
+  check(recvx_push_probe(&wall,1,100,0,7.9f,0,3.5f,16.5f,0x119,&attr)&&attr==1,"type7 plane intersection lost");
+  wall.type=1;wall.h=1;check(!recvx_push_probe(&wall,1,100,0,9,0,3.5f,16.5f,0x400,&attr),"original odd-type 0x400 skip lost");}
+ // Original floor state -> temporary Dansa walls -> removal after collision.
+ // Both walk and run must stay on the upper surface; contiguous upper ETCs
+ // remain traversable and do not acquire an artificial barrier at the seam.
+ {auto heights=floors;heights[3]=9;heights[4]=1000;
+  for(bool walking:{false,true})for(int yaw:{0,16384,32768,49152}){PlayerPush push({},100,heights,{{4,1,0,0,0,0,0,0}},asset,{});NJS_POINT3 pos{0,9,0};
+   for(unsigned t=0;t<100;++t){auto to=pos;to.x-=.5f*njSin(yaw);to.z-=.5f*njCos(yaw);pos=push.contact(pos,to,yaw,1,walking,0,0,42,0);check(pos.y==9&&std::abs(pos.x)<=4.5f&&std::abs(pos.z)<=4.5f,"walk/run falls off original upper ETC");check(push.walls().size()==2,"temporary Dansa walls leaked into mobile wall table");}
+   check(push.state().status&0x20000,"upper floor state not retained");check(!push.state().unsupported_services,"Dansa limit service remains unbound");}
+  PlayerPush joined({},100,heights,{{4,1,0,0,0,0,0,0},{5,1,0,0,0,9,0,0}},asset,{});NJS_POINT3 pos{0,9,0};
+  for(unsigned t=0;t<22;++t){auto to=pos;to.x+=.5f;pos=joined.contact(pos,to,49152,1,true,0,0,42,0);}
+  check(pos.x>9&&pos.y==9,"adjacent original upper ETCs were blocked at their seam");
+ }
+ // Actual RM0100 objects 5/6/7: floor 2 / height 13, four directions.
+ {auto bytes=read_asset_file(data/"rooms/RM_0100.RDT",64*1024*1024);auto scene=decode_scene(bytes);
+  for(unsigned box:{5u,6u,7u})for(int yaw:{0,16384,32768,49152}){SceneSpawn actor=scene.spawns.at(0);std::size_t m=42;std::int64_t f=0;AudioMixer audio(data);RoomWorld world(bytes,scene,actor,m,f,audio,data);world.set_player_asset(&asset);const auto center=world.position(2,box).value();actor.position={center.x,13,center.z};actor.yaw=yaw;
+   for(unsigned t=0;t<100;++t){world.tick();auto from=actor.position,to=from;to.x-=.5f*njSin(yaw);to.z-=.5f*njCos(yaw);actor.position=world.move(from,to,3.5f,16.5f,true);check(actor.position.y==13,"RM0100 crate walk drops to room ground");}
+  }
+ }
+ std::cout<<"Original Dansa edge / run / adjacent ETC / RM0100 three crates passed\n";
  for(int yaw:{0,16384,32768,49152}){std::vector<RECVX_PUSH_OBJECT> objects{{4,1,0,0,0,0,0,0}};PlayerPush push({},100,floors,objects,asset,{});SceneSpawn actor;actor.yaw=yaw;actor.position={njSin(yaw)*8.3f,0,njCos(yaw)*8.3f};std::size_t motion=0;std::int64_t frame=5*65536;bool began=false;const auto initial=push.object(0);
  for(int t=0;t<30&&!push.active();++t){auto from=actor.position;asset.locomotion(actor,motion,frame,1,false,0);actor.position=push.contact(from,actor.position,yaw,0,true,0,0,motion,frame);check(std::hypot(push.object(0).x-initial.x,push.object(0).z-initial.z)<1e-6,"crate moved before MTN50");began=push.active();}
  check(began,"original contact count did not start push");

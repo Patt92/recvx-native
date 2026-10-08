@@ -16,6 +16,10 @@ import re
 sort, count = re.subn(r'\(\(NJS_TEXNAME\s*\*\)\s*&st->pip\[num1\]\)->texaddr',
                       'st->pip[num1 + 2]', sort)
 assert count == 6, count
+erase_routines=[]
+for signature in ('unsigned int* ItemSearch(', 'void EraseItem('):
+    start=source.index(signature)
+    erase_routines.append(source[start:block(source,start)])
 weapon = (root / 'src/ps2/veronica/prog/weapon.c').read_text()
 start = weapon.index('int bhCountBullet()')
 count_bullet = weapon[start:block(weapon, start)]
@@ -25,4 +29,4 @@ for signature in ('unsigned char Combi_99(', 'int bhSearchBullet()'):
     routine = source[start:block(source, start)]
     routine = re.sub(r'(itemid1|itemid2) << 16', r'std::uint32_t(\1) << 16', routine)
     reload_routines.append(routine)
-(output / 'pickup_engine.inc').write_text('// Generated from original sub1.c and weapon.c; do not edit.\n' + pickup + '\n' + sort + '\n' + count_bullet + '\n' + '\n'.join(reload_routines) + '\n')
+(output / 'pickup_engine.inc').write_text('// Generated from original sub1.c and weapon.c; do not edit.\n' + pickup + '\n' + sort + '\n' + '\n'.join(erase_routines) + '\n' + count_bullet + '\n' + '\n'.join(reload_routines) + '\n')

@@ -163,6 +163,20 @@ negative floor thickness, signed triangular bounds and stacked floors. Native
 movement probes near the hip and settles the post-stairs spawn onto y=0, allowing
 zero-height event areas to match. Full original gravity, ramp contact/wall
 response, ledges and the physical/player state machine remain pending.
+Type-1 room objects use the extracted `bhObj001` with its original mobile
+ATR walls, work indices, side probes and eight aspd dimensions. Player contact
+uses original `bhCheckWallEx`; box movement uses original `bhCheckWall2Box`.
+The original `bhCPM2_act_psh` owns alignment, MTN49 entry, MTN50 loop, translation
+curve 9, and reverse MTN49 exit at -32768. Motion.c supplies the four-frame
+Hokan transitions and the sampled pose before clock advancement. The runtime
+runs the push action before normal combat/locomotion and releases control at
+original state completion. No per-room pushing rule or direct contact displacement.
+Targeted tests include all four directions, all eight footprints, blockers,
+a second box, release during entry, Hokan sampling and actual RM_2070 runtime
+input/poses/sound. Test placement is diagnostic; no progress flags are injected.
+Controller rumble output and unrelated collision effect/stair-limit services
+are not implemented by this bridge; unresolved collision service calls are
+reported in `push.unsupported`, and are zero in the verified push replay.
 Room cameras follow original cut areas after scripted repositioning.
 
 ## Events, dialogue and sound

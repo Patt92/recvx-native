@@ -11,7 +11,9 @@ namespace {
 struct NJS_TEXANIM {int sx,sy,cx,cy,u1,v1,u2,v2,texid,attr;};
 struct Color {float a,r,g,b;};
 struct PARTS {float pos[3];int ang,atr,anim,cen_no,parts_num;float move;int setnum;Color col;int color;};
-struct S_WORK {}; // BulletSet does not access its status-work argument
+struct S_WORK {unsigned itemid=0,maincsr=0;}; // BulletSet does not access it
+struct UiSystem {const unsigned* ev_flg;};static thread_local UiSystem* sys=nullptr;
+static bool bhCkFlg(const unsigned* flags,unsigned bit){return (flags[bit/32]&(0x80000000u>>(bit%32)))!=0;}
 #include "ui_tables.inc"
 const NJS_TEXANIM* const tables[]={parts_00,parts_01,parts_02,parts_03,parts_04,parts_05,parts_11,parts_07,parts_08,parts_09,parts_10,parts_11,parts_12,parts_13,parts_14,parts_15,parts_16,parts_11,nullptr,parts_19,parts_20,nullptr,parts_22};
 constexpr int centers[12][2]={{0,0},{28,40},{0,100},{352,40},{520,40},{436,120},{28,332},{328,120},{60,132},{436,40},{28,40},{452,120}};
@@ -60,7 +62,6 @@ unsigned last_slot(const Inventory& inv){unsigned cells=0,last=1;for(unsigned sl
 }
 std::vector<std::string> StatusMenu::actions(const Inventory& inventory)const{
     const auto item=Inventory::id(inventory.slots()[selected]);if(!item)return {};
-    if(item==145)return {"File","Examine","Combine"};
     if(itemdata[item].type&1){std::vector<std::string> list={"Equip","Examine","Combine","Use"};if(item==10)list.push_back(shotgun_burst&&shotgun_burst()?"Single":"Burst");return list;}
     return {"Use","Examine","Combine"};
 }
@@ -188,7 +189,7 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     if(inspection.running())return true;
     if(files){
         if(!file_list&&(file_scroll||file_wait))return true;
-        auto leave_reader=[&]{if(file_number==0&&file_manual_read)file_manual_read();if(file_acquisition){files=file_acquisition=false;begin_close();}else{files=file_list=false;nav=!file_item_source;maincsr=1;file_item_source=false;slide.open(false);}};
+        auto leave_reader=[&]{if(file_number==0&&file_manual_read)file_manual_read(file_folder.automatic());if(file_acquisition){files=file_acquisition=false;begin_close();}else{files=file_list=false;nav=!file_item_source;maincsr=1;file_item_source=false;slide.open(false);}};
         if(file_list){
             if(file_folder.moving())return true;
             const unsigned pad=key==MenuInput::Up?1:key==MenuInput::Down?2:key==MenuInput::Left?4:key==MenuInput::Right?8:key==MenuInput::Confirm?0x800:(key==MenuInput::Cancel||key==MenuInput::Open)?0x1000:0;
@@ -217,7 +218,7 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     if(commands){auto list=actions(inventory);if(list.empty()){commands=false;return true;}if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
         const auto item=Inventory::id(inventory.slots()[selected]);
         if(command==0){if(itemdata[item].type&1){inventory.equip(selected);}else if(item==145)open_file(inventory,0,true);
-            else if(item>=20&&item<=29){const auto cure=unsigned(curedata[item-20]);if(!inventory.heal(selected))show_message(inventory.infected&&item==23?198:161);else pulse.cured(StatusPulse::condition(inventory.hp,inventory.poisoned),cure,inventory.infected);}
+            else if((itemdata[item].type&0x5f)==8){const auto cure=unsigned(curedata[item-20]);if(!inventory.heal(selected))show_message(inventory.infected&&item==23?198:161);else pulse.cured(StatusPulse::condition(inventory.hp,inventory.poisoned),cure,inventory.infected);}
             else{use_item=item;active=false;}}
         else if(command==1){if(item==145)open_file(inventory,0,true);else{examining=true;inspection=ItemInspection{};const auto angle=inspection_default_angles(item);examine_pitch=angle[0];examine_yaw=angle[1];examine_roll=angle[2];}}
         else if(command==2){combining=true;combine_from=selected;}else if(command==3){use_item=item;active=false;}
@@ -283,16 +284,33 @@ void GameUi::draw_title_options(SoftwareRenderer& image,unsigned selected){
     label(image,"Beenden",264,352,.9f,selected==2?0xffffffff:0xff7f7f7f);
 }
 Message GameUi::system_message(unsigned i)const{return read_message(messages_,system_table_,i);}
+void GameUi::draw_pause(SoftwareRenderer& image,bool controller_present)const{
+    // screen.c bhDrawScreenSaver: mode 8/6, a black 640x480 polygon with
+    // sys->ssv_an=64.  With black source that is dest * (255-64)/255.
+    for(auto& pixel:image.canvas()){std::uint32_t out=0xff000000;for(unsigned shift:{0u,8u,16u})out|=unsigned(((pixel>>shift)&255u)*(255u-64u)/255u)<<shift;pixel=out;}
+    // system.c: pause_mes at (280,188), then EasyDispMessage(244,493/492).
+    show_message(image,Message{0x30,0x41,0x55,0x53,0x45,0xffff},280,188);
+    const auto message=system_message(controller_present?493:492);
+    // EasyDispMessage centers every 0xff00-delimited line independently at
+    // x=320. The no-controller branch calls bhFontScaleSet(.71,1,1).
+    const float sx=controller_present?1.f:.71f;std::size_t begin=0;int y=244;
+    while(begin<message.size()){
+        std::size_t end=begin;float width=0;for(;end<message.size()&&message[end]!=0xff00&&message[end]!=0xffff;++end){const auto c=message[end];width+=(c==0xff01?14.f:(c<std::size(FontSz)?FontSz[c]:28))*sx;}
+        Message line(message.begin()+begin,message.begin()+end);line.push_back(0xffff);
+        text(image,line,int(320.f-width/2.f),y,sx,0xffffffff,true,-1,1.f);
+        if(end==message.size()||message[end]==0xffff)break;begin=end+1;y+=30;
+    }
+}
 std::string GameUi::item_name(unsigned id)const{return message_text(read_message(messages_,4,id));}
-void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,float scale,std::uint32_t color,bool dialogue,int selected_choice)const{
+void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,float scale,std::uint32_t color,bool dialogue,int selected_choice,float yscale)const{
     const int start=x;int choice=0;
     std::function<void(const Message&,unsigned)> write=[&](const Message& part,unsigned depth){
-      for(std::size_t i=0;i<part.size();++i){const auto c=part[i];if(c==0xffff)break;if(c==0xff00){x=start;y+=int(30*scale);continue;}if(c==0xff01){x+=int(14*scale);continue;}
+      for(std::size_t i=0;i<part.size();++i){const auto c=part[i];if(c==0xffff)break;if(c==0xff00){x=start;y+=int(30*yscale);continue;}if(c==0xff01){x+=int(14*scale);continue;}
         // bhDispItemName advances the actual font cursor, including variable
         // glyph widths. Character-count estimates overlap the following '?' .
         if(c==0xff03){if(i+1>=part.size())break;if(depth>=4)throw std::runtime_error("recursive item-name message");write(read_message(messages_,4,part[++i]),depth+1);continue;}
-        if(c==0xff04){if(choice++==selected_choice)blit_pixels(image,menu_[0],x,y+int(5*scale),int(18*scale),int(18*scale),0,28,18,46);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=c==0xfe01?0xffffe020:0xffffffff;continue;}if(c/324>=fonts_.size())continue;
-        const auto glyph=c%324;blit(image,(dialogue?dialog_fonts_:fonts_)[c/324],x,y,int(28*scale),int(28*scale),(glyph%18)*14,(glyph/18)*14,(glyph%18)*14+14,(glyph/18)*14+14,color);
+        if(c==0xff04){if(choice++==selected_choice)blit_pixels(image,menu_[0],x,y+int(5*yscale),int(18*scale),int(18*yscale),0,28,18,46);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=c==0xfe01?0xffffe020:0xffffffff;continue;}if(c/324>=fonts_.size())continue;
+        const auto glyph=c%324;blit(image,(dialogue?dialog_fonts_:fonts_)[c/324],x,y,int(28*scale),int(28*yscale),(glyph%18)*14,(glyph/18)*14,(glyph%18)*14+14,(glyph/18)*14+14,color);
         x+=int((c<std::size(FontSz)?FontSz[c]:28)*scale);
       }
     };write(message,0);
@@ -479,11 +497,11 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         if(menu.commands||menu.erase_frames){
             // cen_pos[11] slides 24 px per frame; 96 px is the fully opened window.
             const bool erasing=!menu.commands;const int slide=(4-int(erasing?menu.erase_frames:menu.command_frames))*24;
-            const unsigned command_item=erasing?menu.erase_item:selected_id;const auto list=erasing?menu.erase_actions:menu.actions(inv);const unsigned cursor=erasing?menu.erase_command:menu.command;
-            for(unsigned n=0;n<13;++n){auto p=parts_06b[n];const bool weapon=itemdata[command_item].type&1;const int shrink=command_item==10?0:weapon?32:64;
-            if(n==2||n==3||n==5||n==7)p.pos[1]-=shrink;if(n==8)p.setnum=command_item==10?3:weapon?2:1;if(n==9||n==10)p.setnum=command_item==10?4:weapon?3:2;const auto& part=tables[p.parts_num][p.anim];const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;
-            for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]-96+(p.cen_no==11?slide:0)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
-        }for(unsigned i=0;i<list.size();++i){if(list[i]=="File")ascii(image,"File",364+slide,146,.8f);else{const auto& label=parts_10[i==0?(list[0]=="Equip"?7:8):i==1?9:i==2?10:i==4?(list[i]=="Single"?11:12):8];blit(image,menu_[label.texid],366+slide,146+int(i)*32,label.sx,label.sy,label.u1,label.v1,label.u2,label.v2,i==cursor?0xff2080ff:0xffffffff);}}}
+            const unsigned command_item=erasing?menu.erase_item:selected_id;const unsigned cursor=erasing?menu.erase_command:menu.command;
+            const auto command_parts=original_command_parts(command_item,cursor,menu.shotgun_burst&&menu.shotgun_burst());
+            for(const auto& p:command_parts){if(!(p.atr&0x20))continue;const auto& part=tables[p.parts_num][p.anim];const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;
+                for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]-96+(p.cen_no==11?slide:0)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
+            }}
         if(menu.combining)ascii(image,"Combine",44,400,.8f,0xff50c0ff);
         if((menu.examining||menu.pickup)&&selected_id&&selected_id<145){
             const auto source=menu.pickup?menu.pickup:menu.inspection.running()?menu.inspection.item():selected_id;

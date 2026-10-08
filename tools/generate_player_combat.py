@@ -30,6 +30,13 @@ for name in ['EXP_WORK','WPN_TAB']:parts.append(struct('player.h',name))
 parts.append(struct('playpch.h','search'));parts.append(struct('playpch.h','PP_WORK'))
 parts.append(struct('types.h','GA_WORK'))
 parts.append(struct('types.h','LGT_WORK').replace('NJS_LIGHT_PTR* light','void* light'))
+# effect.c drives O_WRK, a separate original work type. Ninja's low-level vertex
+# records (ninjastr.h) and the texture list it embeds are declared with the
+# original field order; only pointers widen for the 64-bit host.
+parts.append('typedef struct {float x,y,z;unsigned col;} NJS_POLYGON_VTX;')
+parts.append('typedef struct {float x,y,z,u,v;unsigned col;} NJS_TEXTURE_VTX;')
+parts.append('typedef struct {void* textures;unsigned nbTexture;} NJS_TEXLIST;')
+parts.append(struct('types.h','O_WRK'))
 parts.append('static EXP_WORK* combat_exp;')
 functions=[]
 for file,names in [('pwksub.c',['bhCalcLockEneYR','bhSearchNearEnemy','bhSearchNextEnemy','bhSetGunFire','bhSetYakkyou','bhSetMagazine','bhSetWaterSplash','bhSetWaterSplash3']),('playpch.c',['MixSetToJointRot','GetOneObjectMotion','SetOneObjectMotion','bhSearchEnemy','SetLockOnDirection','PlyPchMain','bhCPM2_act_suw_pch','bhCPM2_act_wsc_pch','bhCPM2_act_atk_pch','CheckGunHit','bhCPM2_SearchPch']),('player.c',['bhCPM1_act_atk','bhCPM2_act_suw','bhCPM2_act_wpn','bhCPM2_act_wre','bhCPM2_act_atk','bhCPM2_act_rld','bhCPM2_act_knf']),('playpch2.c',['bhCPM2_act_scp']),('weapon.c',['bhCheckBullet','bhCountBullet']),('effect.c',['bhSetEffect','bhSetEffectTb']),('Motion.c',['AngZyxToYzx','AngYzxToZyx','SetMtnNormal','SetMtnNormalHokan','SetMtnFast','SetMtnFastHokan','SetMtnSlow','SetMtnSlowHokan','bhSetMotion'])]:

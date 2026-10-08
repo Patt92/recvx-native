@@ -211,6 +211,11 @@ int main(int argc,char** argv){
         std::vector<recvx::EventCommand> script_stairs;
         std::optional<recvx::Snapshot> retry_point; // bhPushGameData / bhReTryPointSet
         int stair_etc_marked=-1; // bhSetUseKaidanFlag: area index carrying attr 0x400000
+        // bhSetRDT replaces the room-local player work before bhInitEvent.
+        // Keep the generated kaidan work at that same lifetime boundary: a
+        // door demo owns the intervening frames and no stair state may reach
+        // the destination room.
+        RECVX_STAIR_STATE stairs{};
         // bhPadCheck (bhSetPad): pad_on = held logical bits, pad_ps = newly
         // pressed edges of the current 30 Hz pass. The 0xE000 mask
         // (Select/Start/extra) is handled inside the VM.
@@ -253,12 +258,12 @@ int main(int argc,char** argv){
             origin=actor=scene.spawns.empty()?recvx::SceneSpawn{}:scene.spawns[args.spawn];
             hair_reset=true; // bhObjClpn: flg2 0x2 after a room load
             if(restoring){const auto saved=recvx::snapshot_player(*restoring);actor.position=saved.position;actor.yaw=saved.yaw;} // room.c cb_flg 0x800000: ply_pos/ply_ang
-            world.reset();camera_index=0;camera=scene.cameras[0];follow();stair_etc_marked=-1;script_stairs.clear(); // the room table belongs to the new room (bhSetRoom)
+            world.reset();camera_index=0;camera=scene.cameras[0];follow();stairs={};stair_etc_marked=-1;script_stairs.clear(); // bhSetRDT replaces the room-local player/stair work before bhInitEvent
             stage_geometry=scene.triangles;stable_textures=scene.textures.size();
             if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4),inventory.game_mode);if(!restoring&&!scene.spawns.empty())world->initialize_player_spawn(); /* bhSetRoom before player setup/Event_init; saved positions retain Y. */origin=actor;follow();world->set_player_asset(player.get());world->set_player_character((args.player-10)%4);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);
                 if(previous)events->inherit_progress(*previous);
                 if(restoring)recvx::restore_events(*restoring,*events); // before Event_init, like sys flags after bhPopGameData
-                const auto identity=recvx::RoomIdentity::parse(rooms.name(room_index));events->values[0]=identity.stage;events->values[1]=identity.room;menu.stage=events->values[0];menu.room=events->values[1];menu.file_progress=[&](){return events?recvx::file_page_reduction(events->flags[1]):7u;};menu.file_bonus=[&](){return events&&(events->flags[16][0]&0x1000);};menu.file_manual_read=[&](){if(!events||events->flag(9,480))return;for(unsigned i=0;i<192;++i)if(inventory.items[i]==0x910001){inventory.items[i]=0;break;}events->set_flag(9,480,0);};menu.shotgun_burst=[&](){return events&&events->flag(1,74);};menu.toggle_shotgun_burst=[&](){if(events)events->set_flag(1,74,2);};events->values[15]=unsigned(args.spawn);events->values[2]=unsigned(camera_index);events->values[21]=identity.variant;events->door=request_door;
+                const auto identity=recvx::RoomIdentity::parse(rooms.name(room_index));events->values[0]=identity.stage;events->values[1]=identity.room;menu.stage=events->values[0];menu.room=events->values[1];menu.file_progress=[&](){return events?recvx::file_page_reduction(events->flags[1]):7u;};menu.file_bonus=[&](){return events&&(events->flags[16][0]&0x1000);};menu.file_manual_read=[&](bool automatic){if(!events||(!automatic&&events->flag(9,480)))return;inventory.erase_read_manual(automatic);events->set_flag(9,480,0);};menu.shotgun_burst=[&](){return events&&events->flag(1,74);};menu.toggle_shotgun_burst=[&](){if(events)events->set_flag(1,74,2);};events->values[15]=unsigned(args.spawn);events->values[2]=unsigned(camera_index);events->values[21]=identity.variant;events->door=request_door;
                 events->task_started=[&](unsigned level){world->start_task(level);};events->player_yaw=[&]{return unsigned(actor.yaw)&65535u;};events->set_player_yaw=[&](unsigned yaw){actor.yaw=yaw&65535;};events->pad_state=[&]{return std::pair<unsigned,unsigned>{pad_ps,pad_on};};events->binding=[&](const recvx::EventCommand& c){if(c.opcode==0x39){const unsigned group=c.bytes.at(2);if(group>=scene.cut_enabled.size()||!scene.cut_tables[group])throw std::runtime_error("bhCamInfoSet camera group without cut table");scene.cut_enabled[group]=c.bytes.at(1)==0;follow();return true;}if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();return true;}
                     if(c.opcode==0xa4){script_stairs.push_back(c);return true;} // bhPlayerKaidanMotion: same stair driver as the interaction path
                     if(c.opcode==0xc6){game_over_requested=true;return true;} // bhGameOverSet
@@ -341,7 +346,7 @@ int main(int argc,char** argv){
         debug.add({"room","Raum / Teleport","OK: Zielraum an Spawn 0 laden; Inventar und globale Flags bleiben.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=0;i<rooms.size();++i)result.push_back({i,rooms.name(i)});return result;},[&]{return unsigned(room_index);},[&](unsigned value){debug_room(value,0);return std::string("Raum geladen: ")+rooms.name(value);}});
         debug.add({"spawn","Spawn / Position","OK: Original-Spawn im aktuellen Raum; laufende Events bleiben aktiv.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=0;i<scene.spawns.size();++i)result.push_back({i,"Spawn "+std::to_string(i)});return result;},[&]{return unsigned(args.spawn);},[&](unsigned value){actor=scene.spawns.at(value);args.spawn=value;follow();return std::string("Position angewendet");}});
         debug.add({"give_count","Itemmenge","Links/Rechts: Menge einstellen. OK uebernimmt die Menge fuer Item geben.",[]{std::vector<recvx::DebugChoice> result;for(unsigned i=1;i<=999;++i)result.push_back({i,std::to_string(i)});return result;},[&]{return give_count;},[&](unsigned value){give_count=value;return std::string("Itemmenge gesetzt");}});
-        debug.add({"give","Item geben","OK: Originalitem hinzufuegen; bei vollem Inventar bleibt alles erhalten.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned id=1;id<=145;++id)result.push_back({id,std::to_string(id)+" "+(ui?ui->item_name(id):"")});return result;},[]{return 21;},[&](unsigned value){auto candidate=inventory;auto status=menu;status.reset(candidate);const auto count=(itemdata[value].type&1)&&!itemdata[value].max?0:give_count;if(!candidate.acquire(value,count))throw std::runtime_error("Inventar voll oder Menge ungueltig");inventory=std::move(candidate);menu=std::move(status);if(events)events->menu_open=false;return std::string("Item hinzugefuegt");}});
+        debug.add({"give","Item / File geben","OK: Item ins Inventar oder Datei nach FILE; Originaltypen und Dateititel.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned id=1;id<=145;++id)if(!recvx::original_file_model_mask(id)){std::ostringstream label;label<<id<<" "<<(ui?ui->item_name(id):"")<<" [0x"<<std::hex<<itemdata[id].type<<"]";result.push_back({id,label.str()});}for(unsigned file=0;file<24;++file)result.push_back({256+file,"FILE "+std::to_string(file)+" "+(ui?recvx::message_text(ui->system_message(159+file)):"")});return result;},[]{return 21;},[&](unsigned value){auto candidate=inventory;auto status=menu;status.reset(candidate);if(!candidate.debug_acquire(value,give_count))throw std::runtime_error("Inventar voll oder ungueltiger Item-/Dateieintrag");candidate.repair_owned_file_items();inventory=std::move(candidate);menu=std::move(status);if(events)events->menu_open=false;return std::string(value>=256?"Datei unter FILE hinzugefuegt":"Item hinzugefuegt");}});
         debug.add({"hp","Gesundheit / HP","OK: HP auf gewaehlten Wert setzen.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=1;i<=unsigned(inventory.max_hp);++i)result.push_back({i,std::to_string(i)});return result;},[&]{return unsigned(std::max(1,inventory.hp));},[&](unsigned value){inventory.hp=int(value);return std::string("HP gesetzt");}});
         debug.add({"side_pack","Tasche / Slots","OK: 8 oder 10 Slots; Tasche mit belegten Extras wird nicht entfernt.",[]{return std::vector<recvx::DebugChoice>{{0,"8 Slots"},{1,"10 Slots"}};},[&]{return unsigned(inventory.side_pack);},[&](unsigned value){if(!value&&inventory.occupied()>8)throw std::runtime_error("Mehr als 8 Slots belegt");inventory.side_pack=bool(value);if(events)events->set_flag(11,4,value?0:1);return std::string("Tasche gesetzt");}});
         debug.add({"enemy_ai","Gegner-KI","OK: Zombie-KI ein/aus. Aus: Gegner bleiben stehen (Reaktionen auf Treffer laufen weiter).",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(enemy_ai);},[&](unsigned value){enemy_ai=value!=0;if(world)world->set_enemy_ai(enemy_ai);return std::string("Gegner-KI: ")+(enemy_ai?"an":"aus");}});
@@ -366,11 +371,11 @@ int main(int argc,char** argv){
             const auto previous_inventory=inventory;const auto previous_body=args.player;std::unique_ptr<recvx::PlayerAsset> previous_player;
             if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto body=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
                 previous_player=std::move(player);player=std::move(body);args.player=snap.host.body;}
-            recvx::restore_inventory(snap,inventory);restoring=snap;
+            recvx::restore_inventory(snap,inventory);const auto repaired_file_items=inventory.repair_owned_file_items();restoring=snap;
             try{debug_room(*target,unsigned(std::uint8_t(snap.save.pos_no)));}
             catch(...){restoring.reset();inventory=previous_inventory;if(previous_player){player=std::move(previous_player);args.player=previous_body;}throw;}
             restoring.reset();if(previous_player)combat=recvx::CombatController(args.data,args.mods);
-            return "Snapshot "+std::to_string(slot+1)+" geladen: "+snap.host.room;
+            return "Snapshot "+std::to_string(slot+1)+" geladen: "+snap.host.room+(repaired_file_items?" / doppelte Dateiitems entfernt: "+std::to_string(repaired_file_items):"");
         };
         auto snapshot_slots=[]{return std::vector<recvx::DebugChoice>{{0,"Slot 1 (F5/F9)"},{1,"Slot 2"},{2,"Slot 3"}};};
         debug.add({"snapshot_save","Snapshot speichern","OK: Spielstand an dieser Position sichern; ohne Schreibmaschine, Farbband und Speicherzaehler.",snapshot_slots,[]{return 0;},[&](unsigned slot){return save_snapshot(slot);}});
@@ -386,7 +391,6 @@ int main(int argc,char** argv){
             if(replay_turn<0)replay_pad|=0x4;if(replay_turn>0)replay_pad|=0x8;
             if(combat_input.attack)replay_pad|=0x10;if(combat_input.next_target)replay_pad|=0x80;if(combat_input.aim)replay_pad|=0x100;}else if(action=="debug_key"){std::string name;row>>name;SDL_Event event{};event.type=SDL_KEYDOWN;event.key.keysym.scancode=SDL_GetScancodeFromName(name.c_str());debug.event(event);}else if(action=="debug_select"){std::string id;unsigned value;if(!(row>>id>>value))throw std::runtime_error("invalid debug selection");debug.select(id,value);}else if(action=="new_game"){input(recvx::MenuInput::Confirm);frontend_command(frontend.skip_transition());} /* replay shortcut; "confirm" runs the real title fade */else if(action=="skip"){if(movie.active())gameplay_input.skip_video();else if(events)events->skip_cinematic();}else if(action=="inventory")input(recvx::MenuInput::Open),replay_pad|=0x4000;else if(action=="confirm")input(recvx::MenuInput::Confirm),replay_pad|=0x200|0x800;else if(action=="cancel")input(recvx::MenuInput::Cancel),replay_pad|=0x1000;else if(action=="up")input(recvx::MenuInput::Up),replay_pad|=0x1;else if(action=="down")input(recvx::MenuInput::Down),replay_pad|=0x2;else if(action=="left")input(recvx::MenuInput::Left),replay_pad|=0x4;else if(action=="right")input(recvx::MenuInput::Right),replay_pad|=0x8;else if(action=="position"){if(!(row>>actor.position.x>>actor.position.y>>actor.position.z>>actor.yaw)||!std::isfinite(actor.position.x)||!std::isfinite(actor.position.y)||!std::isfinite(actor.position.z))throw std::runtime_error("invalid replay position");follow();}else throw std::runtime_error("unknown replay action: "+action);}};
         // bhCheckExmAtari type 1 + bhCPM2_act_kdu/kdd/hsu/hsd (stairs and ladders), via native/player_stairs.c.
-        RECVX_STAIR_STATE stairs{};
         // bhSetUseKaidanFlag/bhClrUseKaidanFlag (hitchk.c): the used stair area
         // and its partner carry attr 0x400000, so bhCheckExmAtari skips them
         // while the stair run owns the player. Partner: prm3==0xFF selects the
@@ -399,7 +403,14 @@ int main(int argc,char** argv){
         auto begin_stairs=[&]()->bool{
             if(!player||!world||!events||stairs.active)return false;
             const int floor=world->floor_at(actor.position);
-            for(unsigned i=0;i<events->interactions.size();++i){const auto& a=events->interactions[i];
+            // bhCheckExmAtari and bhCheckDansa scan rom->etcp followed by
+            // sys->metcp.  bhObj001 creates the latter only for crate aspd 0
+            // and 6; retain that table order and do not manufacture areas for
+            // the other crate shapes.
+            auto areas=events->interactions;
+            const auto crate_areas=world->push_steps();
+            for(const auto& a:crate_areas)areas.push_back({a.flg,a.type,a.attr,a.flr_no,{a.px,a.py,a.pz},{a.w,a.h,a.d},{a.prm0,a.prm1,a.prm2,a.prm3}});
+            for(unsigned i=0;i<areas.size();++i){const auto& a=areas[i];
                 if(!(a.flags&1)||(a.type!=1&&a.type!=2)||(a.attribute&0x400000)||a.floor!=floor)continue;
                 const float reach=a.type==1?.75f:4.5f;
                 const float px=actor.position.x-reach*njSin(actor.yaw),pz=actor.position.z-reach*njCos(actor.yaw);
@@ -414,14 +425,18 @@ int main(int argc,char** argv){
                     if(!world->step_clear({actor.position.x-5.5f*njSin(facing),actor.position.y+9.1f,actor.position.z-5.5f*njCos(facing)}))continue;
                 }
                 RECVX_STAIR_AREA area{std::uint8_t(a.flags),std::uint8_t(a.type),0,std::int8_t(a.floor),a.attribute,a.position.x,a.position.y,a.position.z,a.extent.x,a.extent.y,a.extent.z,std::uint8_t(a.parameters[0]),std::uint8_t(a.parameters[1]),std::uint8_t(a.parameters[2]),std::uint8_t(a.parameters[3])};
-                stair_etc_marked=int(i);mark_stair_etc(int(i),true); // bhSetUseKaidanFlag marks the room table too
+                // Type 2 (Dansa) does not call bhSetUseKaidanFlag.  A
+                // generated metcp entry consequently has no room-table
+                // marker to mutate.
+                stair_etc_marked=i<events->interactions.size()?int(i):-1;
+                if(stair_etc_marked>=0)mark_stair_etc(stair_etc_marked,true); // bhSetUseKaidanFlag marks the room table too
                 const auto condition=recvx::StatusPulse::condition(inventory.hp,false);const int dmlvl=condition>=3?2:condition>=1?1:0;
                 recvx_stairs_begin(&stairs,&area,world->floor_heights().data(),actor.position.x,actor.position.y,actor.position.z,actor.yaw,floor,dmlvl,0);
                 world->player_action=true;events->flags[5][0]|=4;locomotion=false;return true;}
             // bhCheckDansa / bhCheckExmAtari: upper area at player or one of
             // its four radius probes, with the action probe outside that area.
             const recvx::Interaction* upper=nullptr;bool danf=false;
-            for(const auto& a:events->interactions){if(!(a.flags&1)||a.type!=2||!a.parameters[0]||a.floor!=floor)continue;
+            for(const auto& a:areas){if(!(a.flags&1)||a.type!=2||!a.parameters[0]||a.floor!=floor)continue;
                 auto inside=[&](float x,float z){return x>=a.position.x&&x<=a.position.x+a.extent.x&&z>=a.position.z&&z<=a.position.z+a.extent.z;};
                 if(inside(actor.position.x,actor.position.z)||inside(actor.position.x-3.5f,actor.position.z)||inside(actor.position.x+3.5f,actor.position.z)||inside(actor.position.x,actor.position.z-3.5f)||inside(actor.position.x,actor.position.z+3.5f))upper=&a;
                 danf|=inside(actor.position.x-4.5f*njSin(actor.yaw),actor.position.z-4.5f*njCos(actor.yaw));}
@@ -440,7 +455,8 @@ int main(int argc,char** argv){
                 [](void* u,unsigned m,int f,float pos[3])->int{auto& b=*static_cast<Host*>(u)->body;if(!b.has_motion(m))return 0;const auto& c=b.motion_clip(m);if(c.positions.empty()||c.positions[0].empty())return 0;const auto& k=c.positions[0][std::min<std::size_t>(std::size_t(std::max(f,0)),c.positions[0].size()-1)];pos[0]=k.x;pos[1]=k.y;pos[2]=k.z;return 1;},
                 [](void* u,unsigned m)->unsigned{auto& b=*static_cast<Host*>(u)->body;return b.has_motion(m)?b.motion_frames(m):0;},
                 [](void* u,unsigned n,float out[3]){const auto& h=*static_cast<Host*>(u);if(n<h.nodes.size()){out[0]=h.nodes[n].value[12];out[1]=h.nodes[n].value[13];out[2]=h.nodes[n].value[14];}else{out[0]=h.at.x;out[1]=h.at.y;out[2]=h.at.z;}},
-                [](void* u,int){const auto& h=*static_cast<Host*>(u);h.audio->footstep(h.world->floor_sound(h.at),0,0);},
+                [](void* u,int floor,float x,float z,int special)->int{const auto& h=*static_cast<Host*>(u);return int(h.world->floor_sound(floor,x,z,special!=0));},
+                [](void* u,int sound){const auto& h=*static_cast<Host*>(u);h.audio->footstep(unsigned(sound),0,0);},
                 [](void* u,unsigned m,int f,float px,float py,float pz,int ay,unsigned n,float out[3]){auto& b=*static_cast<Host*>(u)->body;if(!b.has_motion(m)){out[0]=px;out[1]=py;out[2]=pz;return;}const auto nodes=b.script_nodes(b.pose(m,f,{px,py,pz},ay));if(n<nodes.size()){out[0]=nodes[n].value[12];out[1]=nodes[n].value[13];out[2]=nodes[n].value[14];}else{out[0]=px;out[1]=py;out[2]=pz;}},
                 world->floor_heights().data(),int(inventory.player)};
             const bool running=recvx_stairs_tick(&stairs,&host)!=0;
@@ -496,6 +512,11 @@ int main(int argc,char** argv){
                 if(world)world->set_player_lever((direction?0xfu:0u)|(button?0x100u:0u));
                 lever_move=move;lever_turn=turn;lever_attack=combat_input.attack;lever_aim=combat_input.aim;lever_run=run;}
             if(game_over.active())return;
+            // bhSysCallDoordemo owns the player between bhStartDoorDemo and
+            // the subsequent bhSetRDT/bhResetPlayer.  In particular, a
+            // bhPlayerKaidanMotion action must neither advance nor emit more
+            // footstep calls while the door demo is active.
+            if(transition_pending)return;
             if(stairs.active&&player&&world){if(debug.active()||frontend.active()||menu.active||dialog.active()||movie.active()||computer.active())return;tick_stairs();return;}
             if(player&&world&&world->pushing()){
                 if(debug.active()||frontend.active()||transition_pending||computer.active()||menu.active||dialog.active()||movie.active()||world->player_scripted||world->player_hidden)return;
@@ -543,8 +564,10 @@ int main(int argc,char** argv){
         auto third_person_tick=[&](){third_person.tick(actor,{!args.preview&&!frontend.active()&&!transition_pending&&bool(player)&&!movie.active()&&!(world&&(world->event_camera||world->fixed_camera||world->player_scripted||world->player_hidden))&&!(events&&(events->flags[5][0]&4)),combat.aiming()},world.get());};
         recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);
         frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());};
+        bool pause_active=false;
+        auto pause_allowed=[&]{return world&&!frontend.active()&&!game_over.active()&&!debug.active()&&!transition_pending&&!computer.active()&&!menu.active&&!dialog.active()&&!movie.active()&&!stairs.active&&!world->player_scripted&&!world->player_hidden&&!(events&&(events->flags[5][0]&4));};
         auto draw=[&](unsigned frame,std::size_t controllers=0){if(game_over.active()&&ui){if(game_over.phase()==0){compose();image.draw(scene,view_camera(),wireframe);}game_over.draw(image,*ui);debug.draw(image,*ui);return;}if(frontend.active()&&ui){frontend.draw(image,*ui,controllers);debug.draw(image,*ui);return;}
-            compose();image.draw(scene,view_camera(),wireframe);if(world)world->overlay(image);movie.draw(image);if(ui){ui->draw(image,inventory,menu,dialog,frame);box_menu.draw(image,*ui,inventory,menu);if(events)computer.draw(image,*ui,*events);}if(ui&&(movie.active()||events&&(events->flags[10][0]&4)&&!(events->flags[5][0]&0x1C040008u)&&!(events->flags[10][0]&0x10000000)&&!menu.active))recvx::draw_skip_hint(image,*ui,input_config); /* same condition as bhSysCallGame skip */if(transition_pending)door.draw(image);if(ui)debug.draw(image,*ui);};
+            compose();image.draw(scene,view_camera(),wireframe);if(world)world->overlay(image);movie.draw(image);if(ui){ui->draw(image,inventory,menu,dialog,frame);box_menu.draw(image,*ui,inventory,menu);if(events)computer.draw(image,*ui,*events);if(pause_active)ui->draw_pause(image,controllers!=0);}if(ui&&(movie.active()||events&&(events->flags[10][0]&4)&&!(events->flags[5][0]&0x1C040008u)&&!(events->flags[10][0]&0x10000000)&&!menu.active))recvx::draw_skip_hint(image,*ui,input_config); /* same condition as bhSysCallGame skip */if(transition_pending)door.draw(image);if(ui)debug.draw(image,*ui);};
         const auto start=std::chrono::steady_clock::now();
         if(args.headless){
             const int frames=args.frames?args.frames:1;
@@ -612,7 +635,27 @@ int main(int argc,char** argv){
             while(accumulator>=recvx::game_tick_seconds){
                 accumulator-=recvx::game_tick_seconds;render_dirty=true;
                 const auto physical=devices.tick();
-                if(ui){if(debug.active()){debug.apply(physical);if(!debug.active()){devices.suppress_held();if(audio_device)SDL_PauseAudioDevice(audio_device,0);}continue;}if(frontend.active())frontend_command(frontend.apply(physical));else if(!game_over.active()&&gameplay_input.apply(physical)){running=false;break;}if(frontend_quit){running=false;break;}if(physical.hit(recvx::Action::Wireframe))wireframe=!wireframe;}
+                if(ui){if(debug.active()){debug.apply(physical);if(!debug.active()){devices.suppress_held();if(audio_device)SDL_PauseAudioDevice(audio_device,0);}continue;}
+                    // game.c reads button edges (sys->pad_ps), so a button still
+                    // held when the title task hands over must not count as a
+                    // fresh press in the first game frame (skip, action, menu).
+                    const bool was_frontend=frontend.active();
+                    if(was_frontend)frontend_command(frontend.apply(physical));
+                    if(was_frontend&&!frontend.active()){devices.suppress_held();accumulator=0;render_dirty=false;continue;}
+                    if(pause_active){
+                        // system.c bhSysCallEvent: while ss_flg 0x80000000 is
+                        // set only Start's newly pressed bit releases PAUSE.
+                        if(physical.hit(recvx::Action::Skip)){pause_active=false;devices.suppress_held();}
+                        audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
+                        continue;
+                    }
+                    if(!was_frontend&&!game_over.active()&&physical.hit(recvx::Action::Pause)&&pause_allowed()){
+                        // bhSysCallEvent saves pad state, clears sp_flg, then
+                        // enters bhSysCallScreenSaver mode 10.
+                        pause_active=true;devices.suppress_held();continue;
+                    }
+                    if(!was_frontend&&!game_over.active()&&gameplay_input.apply(physical)){running=false;break;}
+                    if(frontend_quit){running=false;break;}if(physical.hit(recvx::Action::Wireframe))wireframe=!wireframe;}
                 replay_input(input_tick++);update_pad(logical_pad(physical)|replay_pad);
                 if(game_over_tick()){audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);continue;}
                 if(debug.active()){if(audio_device)SDL_PauseAudioDevice(audio_device,1);continue;}

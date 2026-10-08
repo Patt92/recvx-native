@@ -212,7 +212,12 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         const auto ty=std::min(texture->height-1,unsigned(v*texture->height));
                         const auto texel=texture->pixels[std::size_t(ty)*texture->width+tx];
                         if((texel>>24)==0)continue;
-                        pixel=modulate(texel,pixel);if(s.blend!=SceneBlend::Opaque)coverage=float(texel>>24)/255.f;
+                        pixel=modulate(texel,pixel);
+                        if(s.blend!=SceneBlend::Opaque){
+                            // TIM2 alpha has already been translated into the
+                            // PS2 GS 0..128 range; see the filtered path below.
+                            coverage=std::min(1.f,float(texel>>24)/(s.blend==SceneBlend::Ninja?128.f:255.f));
+                        }
                     } else {
                                                 const float tw=float(texture->width),th=float(texture->height);
                         // Mip level, anisotropy and footprint axis change slowly across a span:
@@ -244,7 +249,20 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         if(acc[3]<=0.f)continue;
                         // Constant alpha cancels out of RGB interpolation. Keep
                         // its actual coverage separately (GS textures often use 128).
-                        if(s.blend!=SceneBlend::Opaque)coverage=texture->filter_cache->uniform_alpha?float(texture->filter_cache->max_alpha)/255.f:acc[3]/255.f;
+                        if(s.blend!=SceneBlend::Opaque){
+                            // Ps2CheckTextureAlpha converts TIM2 alpha to the GS
+                            // 0..128 domain.  CNK's VU1 path preserves that
+                            // domain: vu1SetAlphaRatio supplies a separate
+                            // 0..128 material ratio, and textured strips combine
+                            // it with the texel alpha before GS ALPHA.  Treating
+                            // a CNK texel as 0..255 makes the normal GS value
+                            // 128 half-transparent (notably on NPC/player
+                            // strips using NJD_FST_UA).  Host Alpha/Additive
+                            // sprites retain their conventional 0..255 alpha.
+                            const float alpha_domain=s.blend==SceneBlend::Ninja?128.f:255.f;
+                            coverage=texture->filter_cache->uniform_alpha?float(texture->filter_cache->max_alpha)/alpha_domain:acc[3]/alpha_domain;
+                            coverage=std::min(1.f,coverage);
+                        }
                         else if(texture->filter_cache->cutout){coverage=std::min(1.f,acc[3]/float(texture->filter_cache->max_alpha));if(coverage<1.f/32)continue;}
                         const float inv=1.f/acc[3];
                         auto channel=[&](float value){return std::uint32_t(std::clamp(value*inv+.5f,0.f,255.f));};

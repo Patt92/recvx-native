@@ -79,7 +79,7 @@ public:
     bool file_entering=false;
     std::function<unsigned()> file_progress;
     std::function<bool()> file_bonus;
-    std::function<void()> file_manual_read;
+    std::function<void(bool)> file_manual_read;
     unsigned file_pages()const{return original_file_pages(file_number)-(file_number==0&&file_progress?file_progress():0);}
     bool file_exit_selected=false;
     unsigned file_scroll=0,file_move=10,file_wait=0,file_display_page=0;
@@ -121,6 +121,8 @@ public:
     // bhDispMessage: a message at the given pixel origin in the dialogue font.
     void show_message(SoftwareRenderer& image,const Message& message,int x,int y)const{text(image,message,x,y,1,0xffffffff,true);}
     void show_gameover_message(SoftwareRenderer& image,const Message& message,int x,int y,unsigned color)const{text(image,message,x,y,1,color,true);}
+    // system.c bhSysCallScreenSaver case 10: the Select pause overlay.
+    void draw_pause(SoftwareRenderer& image,bool controller_present)const;
     std::string item_name(unsigned id)const;
     Message system_message(unsigned index)const;
 private:
@@ -133,7 +135,7 @@ private:
     std::filesystem::path data_,mods_;
     std::map<unsigned,Scene> item_models_;
     std::map<unsigned,std::vector<std::uint8_t>> item_packets_;
-    void text(SoftwareRenderer& image,const Message& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff,bool dialogue=false,int selected_choice=-1)const;
+    void text(SoftwareRenderer& image,const Message& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff,bool dialogue=false,int selected_choice=-1,float yscale=1)const;
     void ascii(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=1,std::uint32_t tint=0xffffffff)const;
     void icon(SoftwareRenderer& image,unsigned item,int x,int y,int height=48,int narrow_width=68)const;
 };

@@ -16,6 +16,9 @@ public:
     EffectParticles& operator=(EffectParticles&&) noexcept;
     // `offset` is relative to the linked joint (or a world position when unlinked); `color` is the ARGB blood tint.
     void spawn(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color);
+    // bhSetEffParticleMk2: the same emitter with an explicit destination colour
+    // (bhEne_SetBloodEffect4 passes BloodCol[col][0] and BloodCol[col][1]).
+    void spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color);
     // resolve(link, offset) = joint matrix * offset, as bhControlEffect does before calling the procedure.
     void tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall);
     // bhSetBloodPoolLnk: `table` is an original BP_WORK (en01_BldTbl); the pool spreads on the floor at `position`.

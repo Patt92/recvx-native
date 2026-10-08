@@ -18,7 +18,7 @@
 #include <stdexcept>
 namespace recvx {
 namespace {
-constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","quit","wireframe","aim","attack","next_target"};
+constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","pause","quit","wireframe","aim","attack","next_target"};
 const char* defaults_text=R"INI(# RECVX controls: edit and restart. SDL scancode names use physical key positions.
 # Multiple alternatives are separated by commas. 'none' disables this device's binding.
 [keyboard]
@@ -35,6 +35,7 @@ down = Down, S
 left = Left, A
 right = Right, D
 skip = Space
+pause = P
 quit = Escape, F10
 wireframe = F3
 aim = R
@@ -55,6 +56,7 @@ down = axis:lefty+, button:dpdown
 left = axis:leftx-, button:dpleft
 right = axis:leftx+, button:dpright
 skip = button:start
+pause = button:back
 quit = none
 wireframe = none
 aim = button:rightshoulder
@@ -86,8 +88,9 @@ InputConfig parse(std::istream& stream){InputConfig out;std::string section,line
             if(value.back()==',')throw std::runtime_error("empty trailing alternative");
         }catch(const std::exception& e){throw std::runtime_error("controls line "+std::to_string(lineno)+": "+e.what());}}
     for(const auto* device:{"keyboard","gamepad"})for(auto name:names)if(!seen.count(std::string(device)+"/"+name)){
-        if(std::string(name)=="aim"||std::string(name)=="attack"||std::string(name)=="next_target"){
+        if(std::string(name)=="aim"||std::string(name)=="attack"||std::string(name)=="next_target"||std::string(name)=="pause"){
             const bool pad=std::string(device)=="gamepad";
+            if(std::string(name)=="pause"){out.bindings[unsigned(Action::Pause)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_BACK):int(SDL_SCANCODE_P),1});continue;}
             if(std::string(name)=="aim")out.bindings[unsigned(Action::Aim)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER):int(SDL_SCANCODE_R),1});
             else if(std::string(name)=="next_target")out.bindings[unsigned(Action::NextTarget)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_LEFTSHOULDER):int(SDL_SCANCODE_Q),1});
             else {out.bindings[unsigned(Action::Attack)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_A):int(SDL_SCANCODE_LCTRL),1});if(!pad)out.bindings[unsigned(Action::Attack)].push_back({InputBinding::Kind::Key,SDL_SCANCODE_RETURN,1});}continue;
@@ -169,6 +172,7 @@ void GameplayInput::menu_input(MenuInput key){if(modal_input&&modal_input(key))r
     if(key==MenuInput::Confirm&&interact){interact();synchronize();}
 }
 void GameplayInput::synchronize(){
+    if(events_)events_->menu_open=menu_.active;
     if(events_&&!(transition_active&&transition_active())&&!(video_active&&video_active()))events_->service_item_request();
     if(events_&&events_->acquired_file()!=~0u){
         if(!file_open_){if(sound)sound(3);menu_.acquire_file(inventory_,events_->acquired_file());events_->menu_open=true;file_open_=true;}

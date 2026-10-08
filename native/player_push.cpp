@@ -17,7 +17,10 @@ bool PlayerPush::tick(bool forward,int character,int health,int weapon,SceneSpaw
 NJS_POINT3 PlayerPush::object(unsigned i)const{float p[3];recvx_push_object(core_,i,p);return {p[0],p[1],p[2]};}
 ModelNodeOverrides PlayerPush::pose()const{ModelNodeOverrides out;const auto nodes=asset_.motion_nodes(poses_.size());for(unsigned n=0;n<poses_.size();++n)out[nodes.empty()?n:nodes[n]]={NJS_POINT3{poses_[n].pos[0],poses_[n].pos[1],poses_[n].pos[2]},std::array<Angle,3>{poses_[n].ang[0],poses_[n].ang[1],poses_[n].ang[2]}};return out;}
 void PlayerPush::update_object(unsigned i,NJS_POINT3 p,bool hidden){recvx_push_update_object(core_,i,p.x,p.y,p.z,hidden);}
+void PlayerPush::terrain(const std::vector<RECVX_STAIR_AREA>& etc,const std::vector<RECVX_STAIR_AREA>& flr){recvx_push_terrain(core_,etc.data(),etc.size(),flr.data(),flr.size());}
 void PlayerPush::update_walls(const std::vector<CollisionWall>& w){std::vector<RECVX_STAIR_AREA> atr;for(const auto& v:w)atr.push_back(atr_wall(v));recvx_push_update_walls(core_,atr.data(),atr.size());}
 std::vector<CollisionWall> PlayerPush::walls()const{const RECVX_STAIR_AREA* atr;const unsigned n=recvx_push_walls(core_,&atr);std::vector<CollisionWall> out;for(unsigned i=0;i<n;++i){const auto& a=atr[i];out.push_back({a.flg,a.type,a.id,a.flr_no,a.attr,{a.px,a.py,a.pz},{a.w,a.h,a.d},{a.prm0,a.prm1,a.prm2,a.prm3}});}return out;}
+std::vector<RECVX_STAIR_AREA> PlayerPush::steps()const{const RECVX_STAIR_AREA* areas;const unsigned n=recvx_push_steps(core_,&areas);return {areas,areas+n};}
+std::vector<RECVX_STAIR_AREA> PlayerPush::floors()const{const RECVX_STAIR_AREA* areas;const unsigned n=recvx_push_floors(core_,&areas);return {areas,areas+n};}
 
 }

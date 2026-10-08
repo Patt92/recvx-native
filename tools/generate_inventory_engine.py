@@ -20,4 +20,15 @@ code=sub[a:b].replace('st->pip[st->listcsr_0]','packed');parts.append('unsigned 
 for name in ['fstbl','fsheader','wallpaper']:
  m=re.search(r'^unsigned int '+name+r'\[24\]\s*=\s*\{',files,re.M);parts.append('const '+files[m.start():block(files,m.start())]+';\n')
 m=re.search(r'^unsigned int FileNumberSwitch\([^\n]*\)\s*\n\{',files,re.M);parts.append(files[m.start():block(files,m.start())]+'\n')
+# Room-bound file models are metadata from the original switch, not a new
+# itemdata type. The subsequent TG-01 override is intentionally outside it:
+# TG-01 remains an inventory object after ItemModelChangeZoomIn opens file 2.
+fn=files[m.start():block(files,m.start())]
+switch_at=fn.index('switch (sys->rom_no')
+switch=fn[switch_at:block(fn,switch_at)]
+models={}
+for match in re.finditer(r'if\s*\(num == (\d+)\)\s*\{\s*filenum = (\d+);\s*\}',switch):
+ item,file=map(int,match.groups());models[item]=models.get(item,0)|(1<<file)
+if not models:raise RuntimeError('original room file mappings not found')
+parts.append('unsigned file_model_mask(unsigned item){switch(item){\n'+''.join(f'case {item}:return 0x{mask:08x}u;\n' for item,mask in sorted(models.items()))+'default:return 0;}}\n')
 (out/'inventory_engine.inc').write_text(''.join(parts))

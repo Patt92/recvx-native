@@ -30,8 +30,10 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
     const auto item_count=v.u32(info.room_offset+0x90),item_offset=v.u32(info.room_offset+16);if(item_count>4096)throw std::runtime_error("too many room items");v.require(item_offset,item_count*36);for(unsigned i=0;i<item_count;++i)room_items_.push_back(v.u16(item_offset+i*36+4));
     values[23]=inventory_.game_mode;values[24]=inventory_.player;flags[6][0]=0xffffffff;flags[13][0]=1;flags[14][0]=0x40000000;if(inventory_.side_pack)flags[11][0]|=0x8000000;
 }
-bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size()||index>=1024)throw std::runtime_error("event flag outside matrix");return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
-void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||index>=1024||mode>5)throw std::runtime_error("invalid event flag operation");auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
+// bhCk/bhSet define matrices 1..16; no original storage is defined for 0.
+// Keep undefined selectors visible instead of inventing a scratch flag bank.
+bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size())throw std::runtime_error("event flag outside matrix");index&=0x3ff;return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
+void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||mode>5)throw std::runtime_error("invalid event flag operation");index&=0x3ff;auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
 void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<16&&tasks_[level].active)++level;if(level==16)return;}if(task_started)task_started(level);const auto counts=tasks_[level].loop_counts;const auto cnt2=tasks_[level].cnt2,cnt3=tasks_[level].cnt3;tasks_[level]={};tasks_[level].loop_counts=counts;tasks_[level].cnt2=cnt2;tasks_[level].cnt3=cnt3;tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
 void EventVm::inherit_progress(const EventVm& previous){
     // Original global event/key/item/map/game flags outlive a ROM_WORK load.
@@ -65,7 +67,8 @@ int EventVm::instruction(Task& t){
     case 0x37:values[21]=v.u8(p+1);return advance(2); // bhRoomCaseNo
     case 0x57:if(!v.u8(p+1))flags[11][0]|=0x20000;else flags[11][0]&=~0x20000u;return advance(2); // bhFixEventCamPly
     case 8:{const auto key=v.u8(p+1),value=v.u8(p+2);values[key]=value;if(key==22){if(value>=12)throw std::runtime_error("equipped inventory index outside slots");inventory_.slots()[0]=value;}return advance(4);}
-    case 0xd:{if(enemy_dead&&enemy_dead(v.u8(p+1)))set_flag(3,v.u16(p+2),0);advance(4);return 1;}
+    // bhDieCk masks the flag index with 0x3ff before touching sys->ed_flg.
+    case 0xd:{if(enemy_dead&&enemy_dead(v.u8(p+1)))set_flag(3,v.u16(p+2)&0x3ff,0);advance(4);return 1;}
     // bhEneSetCk: an enemy whose ed_flg bit is already set stays deactivated.
     case 0x22:{const unsigned enemy=v.u8(p+1),bit=v.u16(p+2)&0x1ff;advance(4);if(flag(3,bit)){if(!enemy_disable)throw std::runtime_error("enemy set check requires native world binding");enemy_disable(enemy);}return 1;}
     // bhCamCheck: only after an original skip (sp_flg 0x40) does an active
@@ -108,11 +111,11 @@ int EventVm::instruction(Task& t){
         if(!movie_active())return advance(6);
         const unsigned time=movie_time();int result=0;switch(mode){case 0:result=time!=limit;break;case 1:result=time<=limit;break;case 2:result=time<limit;break;case 3:result=time>=limit;break;case 4:result=time>limit;break;case 5:result=time==limit;break;default:throw std::runtime_error("invalid movie time comparison");}advance(6);return result;}
     case 0x9b:if(!movie_active)throw std::runtime_error("movie condition requires native player binding");advance(6);return movie_active();
-    case 0xe:{const unsigned bit=v.u16(p+2),interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);if(values[20]!=interaction)return 1;
+    case 0xe:{const unsigned bit=v.u16(p+2)&0x3ff,interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);if(values[20]!=interaction)return 1;
         if(interaction>=interactions.size())throw std::runtime_error("pickup interaction "+std::to_string(interaction)+" outside room table of "+std::to_string(interactions.size()));
         if(flags[10][0]&0x800){if(!flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(interactions[interaction].parameters[0]);set_flag(7,bit,0);set_flag(9,bit,1);}}
         else if(!flag(7,bit))set_flag(9,bit,0);flags[10][0]&=~0x800u;return 1;}
-    case 0x23:{const unsigned item=v.u8(p+1),bit=v.u16(p+2),interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);
+    case 0x23:{const unsigned item=v.u8(p+1),bit=v.u16(p+2)&0x3ff,interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);
         // bhItmSetCk indexes rom->etcp[interaction] unchecked. Some original scripts name an entry beyond the table
         // (the PS2 would touch unrelated room memory); the ATR flag write is skipped and reported, the item part stays.
         if(interaction>=interactions.size()){pending_bindings.push_back(EventCommand{op,t.level,t.event,p-base_,{room_.begin()+p,room_.begin()+p+6}});if(flag(7,bit))hide_item(item);return 1;}
@@ -202,7 +205,7 @@ int EventVm::instruction(Task& t){
     case 0x3b:world(t,op,6);return 1;
     case 0x36:world(t,op,6);return 1;
     case 0x6a:if(!v.u8(p+1))flags[11][0]|=0x40000000u;else flags[11][0]&=~0x40000000u;return advance(2);
-    case 0x2b:world(t,op,4);return 1; // event.c case 43 interpolates work position and angles
+    case 0x2b:world(t,op,2);return 1; // bhMotionPauseSet: length 2 (opcode + mode)
     case 0x16:case 0x18:case 0x1a:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,op,op==0x42?4:2);return 1;
     // bhFaceReSet: one enemy index; facial control is bound in RoomWorld.
     case 0x90:world(t,op,2);return 1;

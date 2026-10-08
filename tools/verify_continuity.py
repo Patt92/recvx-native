@@ -58,9 +58,9 @@ def main():
         assert 'VOICE1/0056' in s['audio_played'] and 'VOICE1/0075' in s['audio_played'],'security-room original dialogue not completed'
         assert abs(results['up']['actor'][1]-8)<.01 and abs(results['down']['actor'][1])<.01,'original stairs did not traverse both floors'
         assert results['return']['room']=='RM_0020.RDX' and results['return']['room_changes']==2,'return doors not completed'
-        for name,room,changes in [('ambient-inside6','RM_0060.RDX',1),('ambient-inside7','RM_0070.RDX',2),('ambient-back6','RM_0060.RDX',3),('ambient-outside5','RM_0050.RDX',4)]:
+        for name,room,changes,background in [('ambient-inside6','RM_0060.RDX',1,[0,0,0]),('ambient-inside7','RM_0070.RDX',2,[0,0,0]),('ambient-back6','RM_0060.RDX',3,[0,0,0]),('ambient-outside5','RM_0050.RDX',4,[1,0,0])]:
             r=results[name];assert r['room']==room and r['room_changes']==changes,(name,'ambient room traversal failed')
-            assert r['background_active']==[1,0,0],(name,'unrequested ambient stop added to original bank/request path')
+            assert r['background_active']==background,(name,'background state differs from original BGSeOn2/BGSeOff2 room script')
             assert r['audio_played'].count('DOOR/0002/0001')>0 and r['audio_played'].count('DOOR/0002/0000')>0,(name,'door opening/closing sequence absent')
         print('Original Steve security-room dialogue/control release, both stairs directions and dog-area/cemetery return doors passed; original ambient retention without an explicit stop passed (indoor rain still unresolved) (diagnostic placements).')
 if __name__=='__main__':main()

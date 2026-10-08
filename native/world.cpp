@@ -7,6 +7,7 @@
 #include "effect_collision.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <tuple>
 #include <functional>
@@ -109,10 +110,10 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     for(unsigned i=0;i<floor_count;++i){const auto p=floor_pointer+i*36;floor_sounds_.push_back({{v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)}},v.u8(p+32)});}
     for(unsigned i=0;i<floor_count;++i){const auto p=floor_pointer+i*36;enemy_areas_.push_back({v.u8(p),v.u8(p+1),int(std::int8_t(v.u8(p+3))),v.f32(p+8),v.f32(p+16),v.f32(p+20),v.f32(p+28),v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)});}
     const auto cameras=v.u32(header_+0x34),camera_count=v.u32(header_+0xac);if(camera_count>1024)throw std::runtime_error("too many event cameras");v.require(cameras,camera_count*0x808);
-    for(unsigned i=0;i<camera_count;++i){const auto count=v.u16(cameras+i*0x808+6);if(!count||count>16)throw std::runtime_error("invalid event camera key count");std::vector<EventCamera> keys;
+    for(unsigned i=0;i<camera_count;++i){const auto count=v.u16(cameras+i*0x808+6);if(!count||count>16)throw std::runtime_error("invalid event camera key count");EventCameraTrack track;track.next=v.u16(cameras+i*0x808+4);
         for(unsigned k=0;k<count;++k){const auto p=cameras+i*0x808+8+k*0x80;EventCamera out;auto& c=out.camera;c.position={v.f32(p+4),v.f32(p+8),v.f32(p+12)};for(unsigned j=0;j<3;++j)c.angles[j]=v.u16(p+16+j*2);c.perspective=v.u16(p+22);for(unsigned j=0;j<8;++j)c.hidden_objects[j]=v.u32(p+24+j*4);for(unsigned j=0;j<4;++j)out.hidden_lights[j]=v.u32(p+56+j*4);
-            out.link=v.u16(p+0x54);out.index=v.u16(p+0x56);out.node=v.u16(p+0x58);out.offset={v.f32(p+0x5c),v.f32(p+0x60),v.f32(p+0x64)};keys.push_back(out);}
-        event_cameras_.push_back(std::move(keys));}
+            out.frame=v.u16(p+2);out.link=v.u16(p+0x54);out.index=v.u16(p+0x56);out.node=v.u16(p+0x58);out.offset={v.f32(p+0x5c),v.f32(p+0x60),v.f32(p+0x64)};track.keys.push_back(out);}
+        event_cameras_.push_back(std::move(track));}
     for(const auto& spawn:stage.spawns)positions_.push_back(spawn.position);
     auto read_lights=[&](unsigned pointer,unsigned counter,std::vector<Light>& out){const auto p=v.u32(header_+pointer),n=v.u32(header_+counter);if(n>(pointer==0x3c?128u:1024u))throw std::runtime_error("too many room lights");v.require(p,n*0xe0);
         for(unsigned i=0;i<n;++i){const auto q=p+i*0xe0;Light l;l.flags=v.u32(q);l.type=v.u32(q+4);l.speed=v.u32(q+8);l.link=v.u32(q+12);l.index=v.u32(q+16);l.node=v.u32(q+20);l.source=v.u32(q+24);
@@ -226,6 +227,7 @@ void RoomWorld::init_en01(bool hard){
     {const auto rut_n=v.u32(header_+0xA8);if(rut_n&&rut_n<=256){const auto rutp=v.u32(header_+0x28),ruttp=v.u32(header_+0x2C);v.require(rutp,rut_n*36);v.require(ruttp,rut_n*rut_n);
         recvx_en01_set_routes(room_.data()+rutp,rut_n,room_.data()+ruttp);}else recvx_en01_set_routes(nullptr,0,nullptr);} // rom->rutp / ruttp for bhCheckRoute
     {const auto ec=v.u32(header_+0x9c),fc=v.u32(header_+0xa0),ep=v.u32(header_+0x1c),fp=v.u32(header_+0x20);v.require(ep,ec*36);v.require(fp,fc*36);recvx_en01_set_terrain(room_.data()+ep,ec,room_.data()+fp,fc);}
+    recvx_en01_set_mobile_terrain(nullptr,0,nullptr,0);
     for(unsigned i=0;i<ene_count;++i){auto found=entities_.find({1,i});if(found==entities_.end()||found->second.identity!=1)continue;auto& e=found->second;if(e.dead||e.scripted)continue;
         const auto variant=v.u8(enep+i*36+9);if(!e.en01)e.en01=std::make_shared<RECVX_EN01>();
         recvx_en01_init(e.en01.get(),e.type,variant,hard?1:0,18,floor_at(e.transform.position),e.transform.position.x,e.transform.position.y,e.transform.position.z,e.transform.yaw,previous.data(),unsigned(previous.size()));
@@ -272,24 +274,21 @@ void RoomWorld::set_enemy_health(unsigned index,int hp){auto at=entities_.find({
 void RoomWorld::deactivate_enemy(unsigned index){entity(1,index).inactive=true;}
 bool RoomWorld::enemy_dead(unsigned index)const{auto it=entities_.find({1,index});return it!=entities_.end()&&it->second.dead;}
 bool RoomWorld::step_clear(NJS_POINT3 probe,float radius,float height)const{
-    // bhCheckWallType returns the first enabled contact; short steps accept
-    // a surface marked attr 4. The ordinary push test already covers polygons.
-    for(const auto& wall:collision_geometry()){if(!(wall.flags&1))continue;
-        const float top=wall.position.y+(wall.extent.y?wall.extent.y:room_height_);
-        if(probe.y+height<wall.position.y||probe.y>top)continue;
-        bool contact=false;
-        if(wall.type<=1||wall.type==6||wall.type==7){const float margin=wall.type==6?0:radius;contact=probe.x>=wall.position.x-margin&&probe.x<wall.position.x+wall.extent.x+margin&&probe.z>=wall.position.z-margin&&probe.z<wall.position.z+wall.extent.z+margin;}
-        else if(wall.type<=3)contact=std::hypot(probe.x-wall.position.x,probe.z-wall.position.z)<radius+wall.extent.x;
-        else if(wall.type<=5){const std::vector<CollisionWall> one{wall};const auto displaced=move_walls(one,room_height_,floors_,probe,probe,radius,height);contact=displaced.x!=probe.x||displaced.z!=probe.z;}
-        if(contact)return bool(wall.attributes&4);
-    }return true;
+    // bhCheckExmAtari accepts no contact or the first contact's attr 4.
+    // Preserve the original shape tests, type-7 height test and table order.
+    std::vector<RECVX_STAIR_AREA> areas;for(const auto& w:collision_geometry())areas.push_back({(unsigned char)w.flags,(unsigned char)w.type,(unsigned char)w.id,(signed char)w.floor,w.attributes,w.position.x,w.position.y,w.position.z,w.extent.x,w.extent.y,w.extent.z,(unsigned char)w.parameters[0],(unsigned char)w.parameters[1],(unsigned char)w.parameters[2],(unsigned char)w.parameters[3]});
+    unsigned attr=0;const int hit=recvx_push_probe(areas.data(),areas.size(),room_height_,probe.x,probe.y,probe.z,radius,height,0x119,&attr);
+    return !hit||(attr&4);
 }
-unsigned RoomWorld::floor_sound(NJS_POINT3 position,bool special)const{
-    const auto floor=floor_at(position);unsigned sound=0;
-    for(const auto& record:floor_sounds_){const auto& a=record.area;if(!(a.flags&1)||a.type!=1||a.floor!=floor||position.x<a.position.x||position.x>a.position.x+a.extent.x||position.z<a.position.z||position.z>a.position.z+a.extent.z)continue;
+
+unsigned RoomWorld::floor_sound(int floor,float x,float z,bool special)const{
+    unsigned sound=0;
+    for(const auto& record:floor_sounds_){const auto& a=record.area;if(!(a.flags&1)||a.type!=1||a.floor!=floor||x<a.position.x||x>a.position.x+a.extent.x||z<a.position.z||z>a.position.z+a.extent.z)continue;
         if((a.attributes&1)&&special)return record.sound;if(!(a.attributes&1))sound=record.sound;}
+    if(push_)for(const auto& a:push_->floors()){if(!(a.flg&1)||a.type!=1||a.flr_no!=floor||x<a.px||x>a.px+a.w||z<a.pz||z>a.pz+a.d)continue;if((a.attr&1)&&special)return a.prm0;if(!(a.attr&1))sound=a.prm0;}
     return sound;
 }
+unsigned RoomWorld::floor_sound(NJS_POINT3 position,bool special)const{return floor_sound(floor_at(position),position.x,position.z,special);}
 void RoomWorld::player_footstep(const PlayerAsset& player){
     // Claire's original PlFootSnd: walk 10/28, run 8/18, backstep 0/16.
     // Use the current animation frame and original ankle matrices, not a timer.
@@ -319,11 +318,23 @@ std::vector<BoneMatrix> RoomWorld::object_matrices(const Model& model,const Worl
     const auto poses=object_pose(model,state);std::vector<BoneMatrix> result(poses.size());std::vector<bool> visited(result.size());
     std::function<void(std::size_t,const NJS_MATRIX&,unsigned)> visit=[&](std::size_t p,const NJS_MATRIX& parent,unsigned depth){if(depth>256||p<nodes||(p-nodes)%52||(p-nodes)/52>=result.size())throw std::runtime_error("object link outside model hierarchy");const auto index=(p-nodes)/52;if(visited[index])throw std::runtime_error("cyclic object model hierarchy");visited[index]=true;auto& m=result[index].value;std::copy(parent,parent+16,m);const auto flags=v.u32(p);auto pose=model.rest_pose[index];const auto edit=state.node_overrides.find(index);const bool edited=!state.node_overrides.empty();if(edit!=state.node_overrides.end()){if(edit->second.position)pose.position=*edit->second.position;if(edit->second.angles)pose.angles=*edit->second.angles;}if(edited||!(flags&1))njTranslate(&m,pose.position.x,pose.position.y,pose.position.z);if(edited||!(flags&2)){if(flags&32){njRotateY(&m,pose.angles[1]);njRotateX(&m,pose.angles[0]);njRotateZ(&m,pose.angles[2]);}else njRotateXYZ(&m,pose.angles[0],pose.angles[1],pose.angles[2]);}if(!(flags&4))njScale(&m,v.f32(p+32),v.f32(p+36),v.f32(p+40));const auto child=v.u32(p+44),sibling=v.u32(p+48);if(child!=0xffffffff&&(edited||!(flags&16)))visit(v.relative(base,child,52),m,depth+1);if(sibling!=0xffffffff)visit(v.relative(base,sibling,52),parent,depth);};if(!result.empty())visit(nodes,transform,0);return result;
 }
+// event.c evaluates division before multiplication (cnt2/cnt3 are signed).
+// EE Core User's Manual 6.0, section 8.5/table 8-4: division by zero and
+// overflow produce signed Fmax, not IEEE infinity. Keep the original order;
+// in particular (numerator / 0) * 0 is zero, not NaN on the host.
+// https://docs.alexrp.com/mips/ee.pdf (printed page 162).
+static float event_div_product(float numerator,unsigned remaining,unsigned total){
+    const float count=float(std::int32_t(remaining)),denominator=float(std::int32_t(total));
+    const float quotient=denominator==0?std::copysign(std::numeric_limits<float>::max(),numerator):numerator/denominator;
+    const float product=quotient*count;
+    return std::isinf(product)?std::copysign(std::numeric_limits<float>::max(),product):product;
+}
+static float event_clock(unsigned remaining,unsigned total){return event_div_product(1.f,remaining,total);}
 bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=contexts_.at(c.task);const auto op=c.opcode;
     if(op==0x7a){audio_.stop_enemy_sound(v.u8(1));return true;}
     if(op==0x78){auto& lights=v.u8(2)?event_lights_:lights_;auto& light=lights.at(v.u8(1));light.color={v.u16(4)/100.f,v.u16(6)/100.f,v.u16(8)/100.f};light.near_range=v.u16(10)/100.f;light.far_range=v.u16(12)/100.f;return true;}
     if(op==0xba){for(unsigned key=0;key<2;++key)for(unsigned axis=0;axis<3;++axis)ctx.ground[key][axis]=v.u16(2+key*8+axis*2)/100.f*(v.u8(1+key*8)&(1u<<axis)?-1:1);return true;}
-    if(op==0xbb){if(!c.loop_total)throw std::runtime_error("ground interpolation requires original FOR clock");float keys[12],out[3];for(unsigned key=0;key<4;++key)for(unsigned axis=0;axis<3;++axis)keys[key*3+axis]=ctx.ground[key<2?1:0][axis];njOverhauserSpline(keys,out,nullptr,float(c.loop_remaining)/c.loop_total);walls_.at(v.u8(1)).position={out[0],out[1],out[2]};return true;}
+    if(op==0xbb){float keys[12],out[3];for(unsigned key=0;key<4;++key)for(unsigned axis=0;axis<3;++axis)keys[key*3+axis]=ctx.ground[key<2?1:0][axis];njOverhauserSpline(keys,out,nullptr,event_clock(c.loop_remaining,c.loop_total));walls_.at(v.u8(1)).position={out[0],out[1],out[2]};return true;}
     if(op==0xd0){auto& e=entity(1,v.u8(1));e.hp=v.u16(2);return true;}
     if(op==0x79){if(v.u8(1)>=6)return false;(void)model_pose(1,v.u8(2),v.u8(3));return audio_.enemy_sound(v.u8(1),v.u16(4));}
     if(op==0x66){if(v.u8(1)==1){ctx.mode1=0;return true;}if(v.u8(1)==20){const auto& source=contexts_.at(v.u8(2));const auto root=model_pose(source.kind,source.index).position;auto& p=ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;p.x+=root.x;p.z+=root.z;return true;}return false;}
@@ -349,14 +360,14 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         ctx.kind=kind;ctx.index=kind?v.u8(2):0;ctx.node=0;ctx.work=true;if(!kind)player_scripted=true;return true;}
     if(op==0x65){ctx.kind=v.u8(1);ctx.index=v.u8(2);ctx.node=v.u8(3);ctx.work=true;if(!ctx.kind){player_scripted=true;}return true;}
     // bhCyoutenHenkeiStart/StartEX: morph step of the task work driven by the
-    // FOR clock (cnt2/cnt3 -> loop_remaining/loop_total). Without a clock the
-    // original would reuse stale task counters; the native keeps the last
-    // shape instead. Vertex interpolation/rendering stays pending.
+    // FOR clock (cnt2/cnt3 -> loop_remaining/loop_total), using the same
+    // saturating EE arithmetic as every other interpolation command.
+    // Vertex interpolation/rendering stays pending.
     if(op==0x55||op==0x85){if(!ctx.work)return false; // bhCetask->work == NULL
         auto& e=ctx.kind?entity(ctx.kind,ctx.index):player_morph_;
-        if(c.loop_total){e.morph= true;
-            if(op==0x55)e.morph_shape=1000.0f-(1000.0f/float(c.loop_total))*float(c.loop_remaining);
-            else{const float frm0=float(v.u16(2)),frm1=1000.0f-frm0;e.morph_shape=frm0+frm1-float(c.loop_remaining)*(frm1/float(c.loop_total));}}
+        e.morph=true;
+        if(op==0x55)e.morph_shape=1000.0f-event_div_product(1000.0f,c.loop_remaining,c.loop_total);
+        else{const float frm0=float(v.u16(2)),frm1=1000.0f-frm0;e.morph_shape=frm0+(frm1-event_div_product(frm1,c.loop_remaining,c.loop_total));}
         return true;}
     // bhCyoutenHenkeiSetEX addresses the player or enemy work directly
     // (no task work). obj_a/obj_b keep the original mbp indices.
@@ -380,13 +391,16 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     // objitm.c never ticks room-object motions. The scenario explicitly samples
     // them through bhSetObjMotion / bhSetItmMotion, including the sp_flg gate.
     if(op==0x50||op==0x9c){auto& e=entity(op==0x50?2:3,v.u8(1));if(e.has_motion&&e.motion_mode3==1&&(c.simulation_flags&4)){e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);actor_nodes_.clear();}return true;}
-    if(op==0x2b){ // event.c case 43: interpolate captured work position and angles.
-        if(!c.loop_total)throw std::runtime_error("event interpolation requires original FOR clock");
-        const float clock=float(c.loop_remaining)/c.loop_total;const bool linear=v.u8(1)!=0;
-        auto interpolate=[&](const auto& keys){float input[12],out[3];for(unsigned i=0;i<4;++i)for(unsigned a=0;a<3;++a)input[i*3+a]=keys[i<2?1:0][a];if(linear)njLinear(input+3,out,nullptr,clock);else njOverhauserSpline(input,out,nullptr,clock);return std::array<float,3>{out[0],out[1],out[2]};};
-        if(v.u8(2)){const auto out=interpolate(ctx.positions);auto& e=entity(ctx.kind,ctx.index);auto pos=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:ctx.kind?e.transform.position:player_.position;const auto mask=v.u8(2);if(mask&1)pos.x=out[0];if(mask&2)pos.y=out[1];if(mask&4)pos.z=out[2];if(ctx.node)e.node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].position=pos;else if(ctx.kind)e.transform.position=pos;else player_.position=pos;}
-        if(v.u8(3)){const auto out=interpolate(ctx.angles);auto& e=entity(ctx.kind,ctx.index);auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:e.angles;const auto mask=v.u8(3);for(unsigned a=0;a<3;++a)if(mask&(1u<<a))angles[a]=int(out[a]*182.04445f);if(ctx.node)e.node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].angles=angles;else {e.angles=angles;if(ctx.kind)e.transform.yaw=angles[1];else player_.yaw=angles[1];}}
-        actor_nodes_.clear();return true;
+    if(op==0x2b){ // event.c bhMotionPauseSet: pause (mode3=4) or resume (mode3=1) motion on task work
+        const auto mode=v.u8(1);if(mode>1)return true; // Original switch has no default action.
+        if(!ctx.work)return false; // No original work pointer has been bound.
+        const unsigned mode3=mode==0?4:1;
+        if(!ctx.kind)player_morph_.motion_mode3=mode3;
+        else{auto& e=entity(ctx.kind,ctx.index);e.motion_mode3=mode3;
+            if(e.subplayer_bound)e.subplayer.mode3=mode3;
+            if(e.en01)recvx_enemy_motion_mode(e.en01.get(),mode3); // Also writes id-1 exp1.
+        }
+        return true;
     }
     if(op==0xa){const auto index=v.u8(1);if(index>=walls_.size())throw std::runtime_error("script wall outside table");if(v.u8(2))walls_[index].flags&=~1u;else walls_[index].flags|=1;return true;}
     // event.c bhMaskSet/Start, bhFacePauseSet/ReSet/Rep, bhControlMask.
@@ -398,7 +412,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(op==0x8f){if(!v.u8(2))e.face_flags|=16;else e.face_flags&=~16u;}
         if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;}
         if(op==0x91){if(!v.u8(2))e.face_flags|=2;else e.face_flags&=~2u;}return true;}
-    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;return true;}event_camera_index=v.u8(2);if(event_camera_index>=event_cameras_.size())throw std::runtime_error("event camera outside table");event_camera_key_=v.u8(3);if(event_camera_key_>=event_cameras_[event_camera_index].size())throw std::runtime_error("event camera key outside table");event_camera=true;return true;}
+    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;return true;}event_camera_index=v.u8(2);if(event_camera_index>=event_cameras_.size())throw std::runtime_error("event camera outside table");event_camera_key_=v.u8(3);if(event_camera_key_>=event_cameras_[event_camera_index].keys.size())throw std::runtime_error("event camera key outside table");event_camera_clock_=0;event_camera_finished_=false;event_camera_pose_=event_cameras_[event_camera_index].keys[event_camera_key_].camera;event_camera=true;return true;}
     if(op==0x2a){event_camera=false;const auto mode=v.u8(1);if(mode==0){fixed_camera=v.u8(2);active_camera_.reset(room_cameras_.at(*fixed_camera),*fixed_camera);}else if(mode==1)fixed_camera.reset();else throw std::runtime_error("invalid fixed camera mode");return true;}
     if(op==0x5b){event_camera=false;fixed_camera.reset();camera_force_=true;return true;}
     // effect.c bhDeleteYakkyou: release enabled shell works (IDs 0 and 7).
@@ -475,8 +489,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
 if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign)[i]=v.u8(i+2);return true;}
         if(cmd==26||cmd==27){const auto key=v.u8(2),signs=v.u8(3);if(key>=4)throw std::runtime_error("interpolation key outside original task table");for(unsigned i=0;i<3;++i)(cmd==26?ctx.positions:ctx.angles)[key][i]=(cmd==26?v.u16(4+i*2)/100.f:float(v.u8(4+i)))*(signs&(1u<<i)?-1:1);return true;}
         if(cmd>=28&&cmd<=33||cmd==44||cmd==45){
-            if(!c.loop_total)throw std::runtime_error("interpolation requires original FOR clock");
-            const float clock=float(c.loop_remaining)/c.loop_total;
+            const float clock=event_clock(c.loop_remaining,c.loop_total);
             auto interpolate=[&](const auto& keys){float input[12],out[3];const bool four=cmd==29||cmd==32||cmd==33;for(unsigned i=0;i<4;++i)for(unsigned a=0;a<3;++a)input[i*3+a]=keys[four?3-i:i<2?1:0][a];if(!four&&v.u8(2))njLinear(input+3,out,nullptr,clock);else njOverhauserSpline(input,out,nullptr,clock);return std::array<float,3>{out[0],out[1],out[2]};};
             if(cmd==28||cmd==29||cmd==30||cmd==32||cmd==44){const auto out=interpolate(ctx.positions);auto local=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:NJS_POINT3{};auto& pos=ctx.node?local:ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;const auto mask=cmd==44?v.u8(3):7;if(mask&1)pos.x=out[0];if(mask&2)pos.y=out[1];if(mask&4)pos.z=out[2];if(ctx.node)entity(ctx.kind,ctx.index).node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].position=pos;}
             if(cmd==28||cmd==29||cmd==31||cmd==33||cmd==45){const auto out=interpolate(ctx.angles);auto& e=entity(ctx.kind,ctx.index);const auto mask=cmd==45?v.u8(3):7;auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:e.angles;for(unsigned i=0;i<3;++i)if(mask&(1u<<i))angles[i]=int(out[i]*182.04445f);if(ctx.node)e.node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].angles=angles;else {e.angles=angles;if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];}}actor_nodes_.clear();return true;
@@ -496,7 +509,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
         if(cmd==24||cmd==34||cmd==25){
             const auto index=v.u8(4);const auto start=cmd==34?std::int64_t(v.u16(8))*65536:0;
             if(!ctx.kind){if(v.u8(3)!=0)return false;if(cmd==25){if(!player_asset_||!player_asset_->has_motion(index))return false;}else if(index>=room_motions_.size()||!room_motions_[index].frames)return true; /* empty original MN_WORK (room.c zeroes rmthp): the player keeps the last pose */
-                motion_=index;frame_=start;player_step_=motion_step(v.u8(2));player_room_motion_=cmd!=25;player_scripted=true;return true;}
+                player_morph_.motion_mode3=v.u8(3)<=1?0:1;motion_=index;frame_=start;player_step_=motion_step(v.u8(2));player_room_motion_=cmd!=25;player_scripted=true;return true;}
             auto& e=entity(ctx.kind,ctx.index);if(cmd==25&&ctx.kind!=1)return false;e.room_motion=cmd!=25;e.motion=index;if(!entity_motion(e).frames)throw std::runtime_error("script entity motion unavailable");e.frame=start;e.sampled_frame=start;e.step=motion_step(v.u8(2));e.scripted=true;e.has_motion=true;e.motion_slow=(v.u8(2)!=1&&v.u8(2)!=2)||v.u8(7)==6;e.motion_mode3=v.u8(3)<=1?0:1;
             if(e.subplayer_bound){
                 e.subplayer_no_motion=false;auto& w=e.subplayer;w.mtn_no=index;w.mtn_add=int(e.step);w.mtn_md=0x20|(v.u8(2)==1||v.u8(2)==2?0:8);w.frm_no=start;w.frm_mode=0;w.hokan_count=0;w.hokan_rate=0;
@@ -663,6 +676,12 @@ void RoomWorld::sync_player_grab(){
     }
 }
 void RoomWorld::tick(){
+    // objitm.c runs its object work before enemy movement; make the same
+    // sys->metcp/mflrp snapshot visible to hitchk.c/en01 for this frame.
+    update_push();
+    if(push_){const auto etc=push_->steps(),flr=push_->floors();
+        recvx_en01_set_mobile_terrain(reinterpret_cast<const unsigned char*>(etc.data()),unsigned(etc.size()),reinterpret_cast<const unsigned char*>(flr.data()),unsigned(flr.size()));
+    }else recvx_en01_set_mobile_terrain(nullptr,0,nullptr,0);
     for(auto& pair:entities_){auto& e=pair.second;if(!(simulation_flags_&2u)||pair.first.first!=1||e.identity!=4||e.scripted||e.hidden||e.inactive||e.dead||!e.type)continue;EnemySpawn spawn;spawn.id=4;spawn.flr_no=floor_at(e.transform.position);spawn.px=e.transform.position.x;spawn.py=e.transform.position.y;spawn.pz=e.transform.position.z;spawn.ay=e.transform.yaw;spawn.type=e.type;if(activate_enemy_spawn(spawn,player_.position,floor_at(player_.position),enemy_areas_,enemy_spawn_)){e.transform.position={spawn.px,spawn.py,spawn.pz};e.transform.yaw=spawn.ay;e.type=spawn.type;if(e.en01){recvx_enemy_release(e.en01.get(),1,0,0,0,e.type);recvx_enemy_motion(e.en01.get(),1,0,65536);}e.motion=1;e.room_motion=false;e.frame=0;e.step=65536;e.has_motion=true;entity_motion(e);}}
 
     tick_en01();
@@ -696,8 +715,8 @@ void RoomWorld::tick(){
             if(!recvx_subplayer_tick(&w))throw std::runtime_error("unbound original Subpl dispatch mode");
             e.transform.position.x=w.px;e.transform.position.z=w.pz;e.transform.yaw=w.ay;if(!e.subplayer_no_motion)e.motion=w.mtn_no;e.step=w.mtn_add;advance=w.advanced&&!e.subplayer_no_motion;
         }
-        if(advance&&(!(e.scripted||e.subplayer_bound)||pair.first.first!=1||(simulation_flags_&2u))){if(e.scripted)e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);}
-    }}if(player_scripted&&!player_frozen_&&!player_enemy_motion_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
+        if(advance&&(!e.scripted||e.motion_mode3!=4)&&(!(e.scripted||e.subplayer_bound)||pair.first.first!=1||(simulation_flags_&2u))){if(e.scripted)e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);}
+    }}if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
     apply_en01_flinch();
     sync_player_grab();
     if(background_pending_){if(background_delay_)--background_delay_;else{background_=background_target_;background_pending_=false;}}
@@ -734,7 +753,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     auto add=[&](const Light& l,bool enabled){if(!(l.flags&1)||!enabled)return;if(l.source==2&&directional)return;if(l.source==4&&std::count_if(active.begin(),active.end(),[](const auto& a){return a.source==4;})>=3)return;
         if(l.source!=2&&l.source!=4)return;const float flicker=l.type==1||l.type==4?.75f+.25f*njSin(l.clock):1.f;
         const auto p=l.link?link_point(l.link-1,l.index,l.node,l.offset):l.position;active.push_back({p,{l.color.x*flicker,l.color.y*flicker,l.color.z*flicker},l.direction,l.near_range,l.far_range,l.source});if(l.source==2)directional=true;};
-    if(event_camera){for(unsigned i=0;i<std::min<std::size_t>(4,lights_.size());++i)add(lights_[i],bool(lights_[i].flags&2));const auto& mask=event_cameras_.at(event_camera_index).at(event_camera_key_).hidden_lights;
+    if(event_camera){for(unsigned i=0;i<std::min<std::size_t>(4,lights_.size());++i)add(lights_[i],bool(lights_[i].flags&2));const auto& mask=event_cameras_.at(event_camera_index).keys.at(event_camera_key_).hidden_lights;
         for(unsigned i=0;i<event_lights_.size();++i)add(event_lights_[i],!(mask[i/32]&(0x80000000u>>(i%32))));}
     else for(const auto& l:lights_)add(l,bool(l.flags&2));
     // Ninja chunk lighting is evaluated per vertex (vertex normal and position) and
@@ -775,7 +794,24 @@ NJS_POINT3 RoomWorld::link_point(unsigned kind,unsigned index,unsigned node,NJS_
 }
 
 void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking){
-    if(event_camera){active_camera_.reset(camera(stage,target),cut);return;}
+    if(event_camera){
+        // bhControlEventCamera: each CAM_KEYF_WORK owns the interval leading
+        // to its successor.  The original builds 20 Overhauser control keys
+        // in bhInitEventCamera; clamping the two ends gives the same four
+        // controls for ordinary in-track keys (K0,K0,K1,K2 at key zero).
+        auto& track=event_cameras_.at(event_camera_index);auto& key=track.keys.at(event_camera_key_);
+        if(!event_camera_finished_){
+            auto sample=[&](auto member){float input[12],out[3];for(unsigned point=0;point<4;++point){const int unbounded=int(event_camera_key_)+int(point)-1;const unsigned index=unsigned(std::clamp(unbounded,0,int(track.keys.size()-1)));const auto value=member(track.keys[index]);for(unsigned axis=0;axis<3;++axis)input[point*3+axis]=value[axis];}njOverhauserSpline(input,out,nullptr,key.frame?float(event_camera_clock_)/key.frame:0.f);return std::array<float,3>{out[0],out[1],out[2]};};
+            const auto position=sample([](const EventCamera& value){return std::array<float,3>{value.camera.position.x,value.camera.position.y,value.camera.position.z};});
+            // bhInitEventCamera stores event angles in 360/65536 units before
+            // the spline and bhControlEventCamera converts them back.
+            const auto angles=sample([](const EventCamera& value){constexpr float degree=360.f/65536.f;return std::array<float,3>{value.camera.angles[0]*degree,value.camera.angles[1]*degree,value.camera.angles[2]*degree};});
+            const auto perspective=sample([](const EventCamera& value){return std::array<float,3>{value.camera.perspective*(360.f/65536.f),0,0};});
+            event_camera_pose_=key.camera;event_camera_pose_.position={position[0],position[1],position[2]};for(unsigned axis=0;axis<3;++axis)event_camera_pose_.angles[axis]=int(angles[axis]*182.04445f);event_camera_pose_.perspective=int(perspective[0]*182.04445f);
+            if(++event_camera_clock_>=key.frame){event_camera_clock_=0;++event_camera_key_;if(event_camera_key_>=track.keys.size()-1){if(track.next&&event_camera_key_>=track.keys.size()){event_camera_index=track.next-1;event_camera_key_=0;}else{event_camera_key_=std::min<unsigned>(event_camera_key_,track.keys.size()-1);event_camera_finished_=true;}}}
+        }
+        active_camera_.reset(camera(stage,target),cut);return;
+    }
     if(fixed_camera){active_camera_.reset(stage.cameras.at(*fixed_camera),*fixed_camera);return;}
     active_camera_.select(target,cut,camera_force_);camera_force_=false;
     // bhControlActiveCamera aims from the current travelling camera, not
@@ -783,7 +819,7 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
     const auto controlled=tracking?camera_for_actor(stage,cut,player_.position,std::int8_t(floor_at(player_.position)),&active_camera_.view().position):target;
     active_camera_.tick(controlled);
 }
-SceneCamera RoomWorld::camera(const Scene& stage,const SceneCamera& active)const{if(!event_camera){if(fixed_camera){if(*fixed_camera>=stage.cameras.size())throw std::runtime_error("fixed camera outside room cut table");return stage.cameras[*fixed_camera];}return active_camera_.ready()?active_camera_.view():active;}const auto& key=event_cameras_.at(event_camera_index).at(event_camera_key_);auto camera=key.camera;if(!key.link)return camera;
+SceneCamera RoomWorld::camera(const Scene& stage,const SceneCamera& active)const{if(!event_camera){if(fixed_camera){if(*fixed_camera>=stage.cameras.size())throw std::runtime_error("fixed camera outside room cut table");return stage.cameras[*fixed_camera];}return active_camera_.ready()?active_camera_.view():active;}const auto& key=event_cameras_.at(event_camera_index).keys.at(event_camera_key_);auto camera=event_camera_pose_;if(!key.link)return camera;
     NJS_POINT3 target;if(key.link==6){if(key.index>=positions_.size())throw std::runtime_error("camera target outside position table");target=positions_[key.index];target.x+=key.offset.x;target.y+=key.offset.y;target.z+=key.offset.z;}else target=link_point(key.link-1,key.index,key.node,key.offset);
     const float dx=target.x-camera.position.x,dy=target.y-camera.position.y,dz=target.z-camera.position.z;camera.angles[0]=-int(10430.381f*std::atan2(dy,std::sqrt(dx*dx+dz*dz)));camera.angles[1]=-int(10430.381f*std::atan2(dx,dz))+32768;return camera;
 }
@@ -799,14 +835,18 @@ void RoomWorld::ensure_push(){
     if(push_||!player_asset_)return;
     std::vector<RECVX_PUSH_OBJECT> objects;
     for(const auto& pair:entities_){const auto& e=pair.second;if(pair.first.first!=2||(e.type&255)!=1||!(e.object_flags&1)||(e.object_flags&0x100000))continue;push_objects_.push_back(pair.first.second);objects.push_back({int(pair.first.second),e.object_flags,int(e.aspd),int(e.object_parameter),e.object_floor,e.transform.position.x,e.transform.position.y,e.transform.position.z});}
-    if(objects.empty())return;
     RECVX_PUSH_HOST host{};host.user=this;host.ply_id=player_character_;host.sound=[](void* u,int sound){auto& w=*static_cast<RoomWorld*>(u);w.audio_.play_room_sound(2,unsigned(sound)&255u,6);};
     push_=std::make_unique<PlayerPush>(walls_,room_height_,floors_,objects,*player_asset_,host);
+    // Original rom->etcp/flrp remain distinct from bhObj001's mobile areas.
+    BinaryView v(room_);auto areas=[&](unsigned offset,unsigned count_offset){std::vector<RECVX_STAIR_AREA> out;const auto base=v.u32(header_+offset),n=v.u32(header_+count_offset);v.require(base,n*36);for(unsigned i=0;i<n;++i){const auto p=base+i*36;out.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),std::int8_t(v.u8(p+3)),v.u32(p+4),v.f32(p+8),v.f32(p+12),v.f32(p+16),v.f32(p+20),v.f32(p+24),v.f32(p+28),v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)});}return out;};
+    push_->terrain(areas(0x1c,0x9c),areas(0x20,0xa0));
 }
 std::vector<CollisionWall> RoomWorld::collision_geometry()const{auto out=walls_;if(push_){const auto mobile=push_->walls();out.insert(out.end(),mobile.begin(),mobile.end());}return out;}
 void RoomWorld::update_push(){if(push_){push_->enabled(simulation_flags_);push_->update_walls(walls_);for(unsigned i=0;i<push_objects_.size();++i){const auto& e=entity(2,push_objects_[i]);push_->update_object(i,e.transform.position,e.hidden||e.inactive);}}}
 void RoomWorld::sync_push_objects(){if(push_)for(unsigned i=0;i<push_objects_.size();++i)entity(2,push_objects_[i]).transform.position=push_->object(i);}
 bool RoomWorld::tick_push(bool forward){if(!pushing())return false;update_push();push_->tick(forward,player_character_,push_health(),player_weapon_<10?0:1,player_,motion_,frame_);push_pose_=true;player_action=push_->active();sync_push_objects();return true;}
+std::vector<RECVX_STAIR_AREA> RoomWorld::push_steps(){ensure_push();update_push();return push_?push_->steps():std::vector<RECVX_STAIR_AREA>{};}
+std::vector<RECVX_STAIR_AREA> RoomWorld::push_floors(){ensure_push();update_push();return push_?push_->floors():std::vector<RECVX_STAIR_AREA>{};}
 NJS_POINT3 RoomWorld::move(NJS_POINT3 from,NJS_POINT3 to,float radius,float height,std::optional<bool> walking){
     ensure_push();
     update_push();
@@ -814,11 +854,9 @@ NJS_POINT3 RoomWorld::move(NJS_POINT3 from,NJS_POINT3 to,float radius,float heig
     if(push_&&(simulation_flags_&4u)&&!player_action&&walking.has_value()){position=push_->contact(from,to,player_.yaw,floor_at(from),*walking,push_health(),player_weapon_<10?0:1,motion_,frame_);player_action=push_->active();push_pose_=false;sync_push_objects();return position;}
     else position=move_walls(collision_geometry(),room_height_,floors_,from,to,radius,height,0x119,0x40000000u);
 
-    // gpy is a shadow/ground query in bhControlPlayer, not permission to
-    // snap the body up to every platform below its hip. Probe at the feet;
-    // ground_position explicitly admits rising type-6 slopes.
-    auto probe=position;const float ground=ground_position(collision_geometry(),room_height_,probe);
-    if(ground!=-1000&&std::abs(ground-position.y)<=height)position.y=ground;
+    // player.c stores bhGetGroundPosition() in plp->gpy after movement; it
+    // does not write that query result back to plp->py. Vertical movement is
+    // owned by the original player state routines (bhCPM2_act_kdu/kdd).
     return position;
 }
 }

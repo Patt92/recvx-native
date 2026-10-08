@@ -63,7 +63,9 @@ public:
     Message room_message(unsigned index)const; // rom->mesp[index]
     unsigned pickup_display()const{return pickup_display_;}
     unsigned acquired_file()const{return acquired_file_;}
-    void finish_file(){acquired_file_=~0u;flags[10][0]&=~0x20000u;}
+    // sub1.c ItemTaskCheck (~3116): completing the status task consumes both
+    // GetItem and GetFile requests. Scripts may set both for a file pickup.
+    void finish_file(){acquired_file_=~0u;flags[10][0]&=~0x20010u;}
     std::vector<EventTaskState> task_states()const;
     bool flag(unsigned matrix,unsigned index)const;
     void set_flag(unsigned matrix,unsigned index,unsigned mode);

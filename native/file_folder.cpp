@@ -39,6 +39,7 @@ struct FileFolder::State {
     void leave(){using namespace original_file_folder;work=fvwork;status=swork;for(unsigned i=0;i<2;++i)arrow[i]=parts_10b[13+i].col.r;sound=original_file_folder::sound;reader=original_file_folder::reader;navigation=status.mode==2;}
 };
 FileFolder::FileFolder():state_(std::make_shared<State>()){}
+bool FileFolder::automatic()const{return (state_->status.statusflg&0x40000000u)!=0;}
 unsigned file_page_reduction(const std::array<std::uint32_t,32>& flags){original_file_folder::system.ev_flg=flags.data();return unsigned(original_file_folder::PlayPageCheck());}
 void FileFolder::open(Inventory& inv,bool bonus,bool automatic){state_=std::make_shared<State>();inv.items[383]|=1;if(bonus)inv.items[383]|=0x800;auto& s=*state_;if(automatic)s.status.statusflg|=0x40000000;s.enter(inv,0);original_file_folder::SearchTag(1);s.leave();}
 void FileFolder::step(Inventory& inv,unsigned pad){auto& s=*state_;s.enter(inv,pad);if(s.status.testmode==9)original_file_folder::SelectTag();else{original_file_folder::SelectFile();if(original_file_folder::fvwork.z==0)original_file_folder::SearchTag(1);}s.leave();++s.clock;}

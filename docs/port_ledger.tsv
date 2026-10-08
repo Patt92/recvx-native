@@ -1,0 +1,39 @@
+# Geprüfte Portierungsstände für tools/port_check.py (TAB-getrennt).
+# Spalten: <datei.c | datei.c:Funktion | Funktion> <TAB> <done|partial|missing|skip> <TAB> <Beleg/Notiz>
+# Nur eintragen, was am nativen Code nachgeprüft ist. Ohne Eintrag gilt die automatische
+# Evidenz (original/opcode/verweis/fehlt). done = Verhalten vollständig wie im Original,
+# partial = nativer Nachbau mit bekannten Lücken, skip = im Port nicht nötig (z. B. Debug).
+objitm.c:bhObj001	partial	Original function extracted; mobile walls/side probes/work indices, original speed/box collision tested; auxiliary metc/mflr consumers for crate climbing not fully bound
+hitchk.c:bhCheckWall	partial	native/collision.cpp move_walls: eigene Wandauflösung auf Original-ATR_WORK-Daten, nicht der Originalalgorithmus
+sub1.c:GetItem	partial	Original GetItem extrahiert inkl. Zweig 153, danach originale ItemSort-Phase; StatusCancel/Sprite-Ein-/Ausfahren und ganzer StatusMain nicht vollständig gebunden
+sub1.c:ItemCombination	partial	Regeln über Original Combi_00/01 und combidata; Menüablauf/Animation nativ
+system.c:bhSysCallMonitor	partial	Raumladen/-wechsel nativ in runtime/world, nicht als mn_md-Zustandsmaschine
+hitchk.c:bhCheckFloorP	partial	native/events.cpp check_floor: Original-ATR_WORK und bhControlPlayer sp_flg-Bit-0-Pause; Metalldetektor-Replay mit echter Ansage/Kamera geprüft; übriger Spieler-Hitpfad unvollständig
+sub1.c:ItemBox	partial	Original ItemBoxChange generiert, Tauschen/Stack/Restriktionen und Security-Raumskript geprüft; Host-Liste statt originaler Fenster/Sprites
+system.c:bhSysCall	partial	cb_flg 0x40000 führt über GameplayInput::synchronize zur Box; übrige Systemzustände nicht vollständig
+en04.c:bhEne04_MV00	partial	Originale Bereichs-/Trap-Routinen und Warte-/Lauf-MTN an RoomWorld gebunden; Verfolgung/Angriffe/gesamte MV-Zustandsmaschine fehlen
+effect.c:bhDrawTrsEffect3D	partial	Billboard/Atlas/additive Tiefe für Eff200/201/218; übrige Blendarten/Emitter/Linktyp 5 nicht vollständig
+ps2_NaSystem.c:njColorBlendingModeSys	partial	Originale alpha_tbl[13][12] + Ninja-Indextabellen generiert; native/chunk_blend.cpp RGB=(A-B)*C+D, normalisierte Alpha-Floats; kein vollständiger GS-Zustands-/Quantisierungsport
+ps2_NinjaCnk.c:njCnkCbBa	partial	Chunk-Blendbits im gemeinsamen Modelldecoder; Originaltabellen und UA-Renderer, keine vollständige PS2-Renderzustandsmaschine
+ps2_NinjaCnk.c:njCnkCmD	partial	Materialfarbe/Alpha und Blendbits im Modelldecoder; ursprüngliche Ninja-GS-Blendtabelle gebunden
+ps2_NinjaCnk.c:njCnkCmA	partial	Ambient-Material aktualisiert Blendbits wie im Original; komplette Ninja-Materiallichtzustände fehlen
+event.c:bhItemGetGet	partial	Originalroutine extrahiert; Inventarbank/Flags/Menge/Equip-Slot geprüft; unabhängiges ply_wno/Monitorverhalten im Host nicht vollständig
+event.c:bhItemGetGetEx	partial	Originalroutine extrahiert; freie Slots/Shotgun/Equip geprüft; unabhängiges ply_wno/Monitorverhalten nicht vollständig
+event.c:bhPlItemLost	partial	Originalroutine extrahiert; feste Slotbereiche/Ersttreffer/Kompaktierung; komplette WeaponSet/Monitor-Zustandsmaschine fehlt
+event.c:bhPlItemLostEx	partial	Originalroutine extrahiert; Transfer in Bank 14 und feste Kompaktierung; komplette WeaponSet/Monitor-Zustandsmaschine fehlt
+event.c:bhArmsItemSet	partial	Originalroutine extrahiert; Ersttreffer/Taschenbereich/Equip-Slot; komplette WeaponSet/Monitor-Zustandsmaschine fehlt
+event.c:bhPlItemChangeM	done	Originalroutine extrahiert; Ersttreffer, gepackte ID und originale Mengen/Flag-Löschung geprüft
+event.c:bhPlItemTamaSet	done	Originalroutine extrahiert; Ersttreffer und u16 Little-Endian-Menge geprüft
+event.c:bhPlayerPoisonCk	partial	Bedingung auf gemeinsamen Inventory.poisoned; alle Modi geprüft; vollständiger plp/ply_stflg-Pfad fehlt
+event.c:bhEnemyHpUp	done	Originale Integerdivision vor Prozentmultiplikation, tatsächliche gemeinsame Gegner-HP, signed HP geprüft
+event.c:bhMovieTimeCk	done	Sechs invertierte Originalvergleiche, GetMwPlayTimeEx-Hundertstelsekunden, inaktiver Film und Padding geprüft
+event.c:bhWalAtariSet2	partial	Originale Attribute/Parameter/Typ im gemeinsamen CollisionWall gespeichert; Kollisionsalgorithmen bleiben native Nachbauten
+event.c:bhNext	partial	Gemeinsamer WHILE/NEXT-Stack, signierter FOR-Zähler, Nullcountdown/Task-Reuse geprüft; ursprünglicher Loop/Sleep-Stack nicht vollständig übernommen
+
+sub1.c:ItemSort	partial	Originalfunktion extrahiert, pip-ILP32-Zugriff hostgerecht; Standardinventar nach Pickup und Mutationen sortiert/geprüft; Sonder-flgchk des ganzen StatusMain noch unvollständig
+sp_evt.c:bhDrawSpEvtComCharacter	missing	Generator ersetzt den Körper durch einen Zähler: 3D-Figur im Terminal (Skriptbefehl 0xee) ist nicht gezeichnet; Scanner-Skript 4 und Passwort-Terminal nutzen sie nicht. Kein Test.
+
+player.c:bhCPM2_act_psh	partial	Original function extracted verbatim (packed mode-byte ABI write adapted); MTN49/50/reverse49, original Hokan and curve9 bound and tested; physical vibration callback not bound
+hitchk.c:bhCheckWall2Box	done	Original function and geometry helpers extracted, static/mobile ATR walls and per-object old position bound; wall/second crate tests
+hitchk.c:bhCheckWallEx	partial	Original function extracted and actual push contact/body/front block bound; unrelated effect29/stair-limit services unresolved and counted
+Motion.c:bhSetMotion	partial	Original function and six SetMtn routines extracted for push; original decoded keys/flags/attributes, Hokan and fractional exit sampled; full other actor/player binding pending

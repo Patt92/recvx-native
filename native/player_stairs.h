@@ -11,7 +11,10 @@ typedef struct {
     int (*motion_root)(void* user,unsigned motion,int frame,float pos[3]); // key of object 0, 0 when the motion has none
     unsigned (*motion_frames)(void* user,unsigned motion);
     void (*node_position)(void* user,unsigned node,float out[3]);           // plp->mlwP->owP[node].mtx[12..14]
-    void (*footstep)(void* user,int floor);                                   // CallPlayerFootStepSe(bhCheckFloorSound(...))
+    // bhCheckFloorSound scans room flrp followed by bhObj001's mflrp; the
+    // host receives its exact query operands rather than a synthesized floor.
+    int (*floor_sound)(void* user,int floor,float x,float z,int special);
+    void (*footstep)(void* user,int sound);                                    // CallPlayerFootStepSe
     // World position of `node` for motion/frame at (px,py,pz,ay): bhCalcFixOffset with the new objP pose.
     void (*pose_node)(void* user,unsigned motion,int frame,float px,float py,float pz,int ay,unsigned node,float out[3]);
     const float* grand;                                                       // rom->grand[32]
