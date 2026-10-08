@@ -4,11 +4,12 @@
 # Evidenz (original/opcode/verweis/fehlt). done = Verhalten vollständig wie im Original,
 # partial = nativer Nachbau mit bekannten Lücken, skip = im Port nicht nötig (z. B. Debug).
 objitm.c:bhObj001	partial	Original function extracted; mobile walls/side probes/work indices, original speed/box collision tested; auxiliary metc/mflr consumers for crate climbing not fully bound
-hitchk.c:bhCheckWall	partial	native/collision.cpp move_walls: eigene Wandauflösung auf Original-ATR_WORK-Daten, nicht der Originalalgorithmus
+hitchk.c:bhCheckWall	partial	Generated original routine bound to the player candidate through persistent player work/room/mobile ATR tables; type branches, filters, vertical/floor side effects and temporary Dansa geometry tested. Original bhSetEffect(29) allocates in shared eff[512], preserves linked wall ATR work, and bhEff029 applies type |= 0x40 after 32 frames. General bhControlPlayer dispatch and other callers remain open.
 sub1.c:GetItem	partial	Original GetItem extrahiert inkl. Zweig 153, danach originale ItemSort-Phase; StatusCancel/Sprite-Ein-/Ausfahren und ganzer StatusMain nicht vollständig gebunden
 sub1.c:ItemCombination	partial	Regeln über Original Combi_00/01 und combidata; Menüablauf/Animation nativ
 system.c:bhSysCallMonitor	partial	Raumladen/-wechsel nativ in runtime/world, nicht als mn_md-Zustandsmaschine
 hitchk.c:bhCheckFloorP	partial	native/events.cpp check_floor: Original-ATR_WORK und bhControlPlayer sp_flg-Bit-0-Pause; Metalldetektor-Replay mit echter Ansage/Kamera geprüft; übriger Spieler-Hitpfad unvollständig
+hitchk.c:bhGetGroundPosition	partial	Generated original query; room-owned htp retains room/mobile index and live ATR work; player.c:1743-1762 bound only where push/stair state exists; player shot caller creates linked bhEff000 with ground/water/wall/audio dispatch, ef_pol state and SYSTEM model/texture draw; EE libc rand/srand and bhRandTest/RandamSet are bound from executable disassembly and bhSetEffectTb first-free eff[512] allocation is mapped; other random consumers, exact EasyLight, full effect lifecycle and general player work remain open
 sub1.c:ItemBox	partial	Original ItemBoxChange generiert, Tauschen/Stack/Restriktionen und Security-Raumskript geprüft; Host-Liste statt originaler Fenster/Sprites
 system.c:bhSysCall	partial	cb_flg 0x40000 führt über GameplayInput::synchronize zur Box; übrige Systemzustände nicht vollständig
 en04.c:bhEne04_MV00	partial	Originale Bereichs-/Trap-Routinen und Warte-/Lauf-MTN an RoomWorld gebunden; Verfolgung/Angriffe/gesamte MV-Zustandsmaschine fehlen
@@ -35,5 +36,6 @@ sp_evt.c:bhDrawSpEvtComCharacter	missing	Generator ersetzt den Körper durch ein
 
 player.c:bhCPM2_act_psh	partial	Original function extracted verbatim (packed mode-byte ABI write adapted); MTN49/50/reverse49, original Hokan and curve9 bound and tested; physical vibration callback not bound
 hitchk.c:bhCheckWall2Box	done	Original function and geometry helpers extracted, static/mobile ATR walls and per-object old position bound; wall/second crate tests
-hitchk.c:bhCheckWallEx	partial	Original function extracted and actual push contact/body/front block bound; unrelated effect29/stair-limit services unresolved and counted
+hitchk.c:bhCheckWallEx	partial	Original function extracted and push contact/body/front block bound; full bhControlPlayer state dispatch and non-player callers remain open
 Motion.c:bhSetMotion	partial	Original function and six SetMtn routines extracted for push; original decoded keys/flags/attributes, Hokan and fractional exit sampled; full other actor/player binding pending
+effsub1.c:bhEff029	done	Original lifecycle extracted verbatim; 32-frame wrap, linked wall-work type-bit side effect and slot release tested; hitchk.c clears wall attr 0x40 only after successful shared-slot allocation

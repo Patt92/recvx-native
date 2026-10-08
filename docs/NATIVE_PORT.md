@@ -1,20 +1,28 @@
-# Native port 0.5
+# Build, Pakete und Architektur
 
-This is an in-progress Windows/macOS port of the local PS2 decompilation. It runs
-host C/C++ code and reads loose cooked assets. It does not execute an emulated
-PS2 CPU, open the ISO, or open AFS containers at gameplay runtime. It is not yet
-a complete playable game. The original sources remain available for tracing
-native behavior back to the game.
+RECVX Native führt Host-C/C++-Code aus und liest vorbereitete lose
+Spieldateien. Es gibt keine PS2-CPU-Emulation; ISO und AFS-Container werden
+zur Laufzeit nicht geöffnet. Die Originalquellen unter `src/` bleiben die
+Referenz, aus der Generatoren Routinen in den nativen Code übernehmen.
 
-## Build and package
+## Voraussetzungen
 
-Use Python 3.12+, CMake and a C/C++ compiler. macOS needs Apple Command Line Tools;
-Windows needs Visual Studio C++ (CMake can select the generator). Cross-building
-Windows from macOS/Linux also needs Ninja. The initial dependency download needs
-network access; subsequent builds can use the cached dependencies.
+- Python 3.12+, CMake, C/C++-Compiler
+- macOS: Apple Command Line Tools
+- Windows: Visual Studio mit C++-Workload
+- Windows-Crossbuild von macOS/Linux: zusätzlich Ninja
+
+Der erste Build lädt festgelegte Abhängigkeiten (SDL2 2.32.10, für den
+Crossbuild Zig 0.16.0; beide per Prüfsumme fixiert). Danach braucht weder der
+Build noch das Spiel eine Netzwerkverbindung.
+
+## Bauen und Pakete erzeugen
 
 ```sh
 ./build.sh --platform macos --verify-data --package
+```
+
+```sh
 ./build.sh --platform windows --verify-data --package
 ```
 
@@ -22,107 +30,101 @@ network access; subsequent builds can use the cached dependencies.
 ./build.ps1 --platform windows --verify-data --package
 ```
 
-`tools/build_native.py` configures and builds by default. Test targets are excluded
-from the normal build, so a stale or optional regression check cannot prevent
-launching the current runtime. Add `--test` to build the test targets and run
-CTest. Add `--verify-runtime` to run the longer original-data replay suite. These
-checks are opt-in and can be combined. `--no-test` remains accepted for older
-commands. `--data <path>` selects another cooked tree; `--verify-data` checks its
-manifest independently.
-Windows cross-builds report that tests must run separately on Windows or Wine.
-`--output <new-directory>` changes the package destination; package creation
-refuses to overwrite a previous release.
+| Option | Wirkung |
+|---|---|
+| *(keine)* | Nur Laufzeit-Binary bauen |
+| `--test` | Testziele bauen und CTest ausführen |
+| `--verify-runtime` | Längere Replay-Suite mit Originaldaten |
+| `--verify-data` | Manifest der Spieldaten prüfen |
+| `--data <pfad>` | Anderen Datenbaum verwenden |
+| `--package` | Startfähiges Paket unter `build/packages/` erzeugen |
+| `--output <neu>` | Anderes Paketziel; vorhandene Ziele werden nie überschrieben |
 
-macOS outputs an arm64-only Apple Silicon binary (deployment target 11.0), with arm64-only SDL2 and no Rosetta fallback. Windows
-outputs x64. SDL2 2.32.10 and the cross-build Zig 0.16.0 are pinned by checksums.
-The app includes SDL2 and the full `data/` tree. Local ad-hoc signing is used on
-macOS; this is not an Apple-notarized release. Windows hardware testing remains
-necessary even when Wine checks pass.
+macOS-Builds sind ausschließlich arm64 (Deployment Target 11.0, SDL2 arm64,
+kein Rosetta) und lokal ad hoc signiert, nicht notarisiert. Windows-Builds
+sind x64; Crossbuilds müssen auf Windows oder unter Wine getestet werden.
 
-Direct development commands:
+Direkte Entwicklungsbefehle:
 
 ```sh
 cmake -S . -B build/native -DRECVX_FETCH_SDL2=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+```
+
+```sh
 cmake --build build/native --parallel 8
+```
+
+```sh
 ctest --test-dir build/native --output-on-failure
-build/native/recvx-game-tests data
+```
+
+```sh
 build/native/recvx-runtime --data data
 ```
 
-The equivalent scripted test build is `./build.sh --test`; the default
-`./build.sh` only prepares the runtime binary. Use
-`./build.sh --test --verify-runtime` when both test layers are wanted.
+## Spieldaten
 
-## Data and history
-
-`data/` is the productive complete export. It contains all dumped files, separately
-split AFS entries, 205 expanded rooms, decoded textures and 18 native film packets.
-`asset-manifest.json` contains file sizes and SHA256. Validate it with:
+`data/` ist der vollständige lokale Export: alle Disc-Dateien, aufgeteilte
+AFS-Einträge, 205 expandierte Räume, dekodierte Texturen und native
+Filmpakete. `asset-manifest.json` enthält Größen und SHA-256 jeder Datei.
 
 ```sh
 python3 tools/prepare_native_data.py --output data --verify
 ```
 
-`archived/` holds the original ISO, source extraction, obsolete PS2 toolchain,
-old binaries, superseded exports, historical research and previous `.git`.
-`archived/relocations.json` records moves. No normal build, packaging or launch
-command depends on it. The new Git history excludes `archived/`, `data/` and
-`build/`. Preserve local `data/` when transferring the project to another machine.
-A source-only clone does not contain the game assets.
+`archived/` enthält ISO, Quellenextraktion, alte Toolchains, historische
+Arbeitsstände und Belege. Kein normaler Build oder Start hängt davon ab.
+`data/`, `build/` und `archived/` sind nicht im Git-Repository.
 
-## Architecture
+## Architektur
 
-- `recvx_data`: bounded binary input, room expansion and archive/export tools.
-- `recvx_math`: original selected Ninja math plus native matrices.
-- `recvx_scene`: original model/texture decoding, motion/skin and CPU rendering.
-- `recvx_game`: original item-combination C, inventory, messages, event VM,
-  first-room actor/camera/light bindings, ADX mixer and native movie playback.
-- `recvx_input`: configurable keyboard/SDL GameController actions and shared
-  cinematic/dialogue/inventory routing; see [CONTROLS.md](CONTROLS.md).
-- `recvx-runtime`: SDL window/input/audio and fixed 60 Hz simulation.
+| Bibliothek / Programm | Aufgabe |
+|---|---|
+| `recvx_data` | Begrenztes Binärlesen, Raumexpansion, Archiv- und Exportwerkzeuge |
+| `recvx_math` | Ninja-Mathematik und Matrizen |
+| `recvx_scene` | Modell-/Texturdekodierung, Motion, Skinning, Software-Renderer |
+| `recvx_game` | Event-VM, Inventar, Nachrichten, Welt, Kampf, Gegner, Audio, Filme |
+| `recvx_input` | Tastatur/Controller, Menü- und Cinematic-Weiterleitung |
+| `recvx-runtime` | SDL-Fenster, Eingabe, Audioausgabe, Spielschleife |
 
-The GUI and deterministic headless replays use the same movement and event path.
-Headless rendering draws only the final requested frame; every simulation tick
-still executes. Menus, dialogue, hidden/script-controlled actors and original
-cinematic flags gate movement and inventory access.
+### Originalcode im Port
 
-## Verification
+Der Großteil der Spiellogik stammt nicht aus Nachbauten, sondern aus
+Generatoren unter `tools/generate_*.py`. Sie extrahieren Funktionen,
+Tabellen und Strukturen aus `src/ps2/veronica/prog/*.c` und erzeugen
+`.inc`-Dateien, die in dünne C-Brücken (`native/*_core.c`) eingebunden werden.
+Die Brücken liefern nur die Dienste, die im Original die Engine bereitstellt
+(Arbeitsspeicher, Ninja-Aufrufe, Zeichnen, Sound). Welche Originalfunktionen
+so gebunden sind, erfasst `docs/port_ledger.tsv`; `tools/port_check.py`
+wertet das aus.
 
-Ten CTest groups cover compressed input, archives/rooms, Ninja math/matrices,
-scene rendering, player motion/skin, inventory/events, audio/movies and
-keyboard/controller input and solid wall collision. Real-data
-`recvx-game-tests data` uses the original RM_0000 scripts to skip the intro,
-acknowledge the in-cell hint, equip the lighter, satisfy its real floor trigger,
-run the Rodrigo event and assert the original return position/control state. It
-also checks a wall and the original empty-slot atlas pixel. It does not teleport
-Claire or dispatch the lighter event directly.
-`recvx-input-tests data` checks the same opening with SDL's virtual GameController,
-including remapping, menu repeats, focus changes and removal while moving.
+### Takt
 
-```sh
-build/native/recvx-runtime --data data --headless --replay tests/native/replays/lighter.txt --frames 3000 --state build/native/lighter-state.json
-build/native/recvx-runtime --data data --headless --replay tests/native/replays/lighter-walk.txt --frames 3121 --state build/native/walk-state.json
-build/native/recvx-runtime --data data --headless --replay tests/native/replays/lighter-back.txt --frames 3119 --state build/native/back-state.json
-```
+Das Original wartet pro Spielschritt zwei VSyncs. Der Port läuft mit einem
+festen 30-Hz-Spieltakt (`native/timing.h`); Filme, ADX-Fades und der
+48-kHz-Mixer (1600 Stereo-Frames pro Tick) folgen derselben Uhr. Gezeichnet
+wird nur bei neuem Tick. Die getrennte 60-Hz-VSync-Zeit des Originals
+(`sys->time`) wird für Ereigniszeitgeber in VSync-Einheiten mitgeführt.
 
-`tests/native/replays/opening-skip.txt` uses the game's skip flag. An unskipped
-15,000-tick run also reaches the cell hint after the original opening film.
-Unit success and zero unknown-opcode errors do not mean all opcode effects are
-implemented: known unbound commands are recorded as pending, as described in
-NATIVE_GAMEPLAY.md. Asset manifests establish completeness of copied files,
-not completeness of the ported game logic.
+### Darstellung
 
-Detailed local results: [VALIDATION.md](VALIDATION.md).
+Software-Renderer mit interner Auflösung 640×480, ganzzahlig skaliert (Fenster
+standardmäßig 1280×960). Optional Supersampling und Texturfilter
+(`video.ini`). Material- und Blendmodi folgen den originalen Chunk-/GS-Tabellen.
 
-## Diagnostics
+## Diagnose
 
-`--preview` selects the room/model inspector. `--room`, `--player`, `--motion`,
-`--frame`, `--inventory`, camera/wireframe options and replay `position` are
-inspection controls. Diagnostic teleports are not evidence of authentic event
-progression. `--screenshot <new.bmp>` and `--state <new.json>` write review artifacts.
-Output files are never overwritten. CI builds host binaries and runs synthetic
-unit tests without private disc assets; local real-data regressions run separately.
+| Option | Zweck |
+|---|---|
+| `--in-game` | Hauptmenü überspringen |
+| `--preview` | Raum-/Modellinspektor mit freier Kamera |
+| `--room`, `--player`, `--motion`, `--frame`, `--inventory` | Inspektion |
+| `--headless --replay <datei> --frames <n>` | Deterministischer Lauf ohne Fenster |
+| `--state <neu.json>`, `--screenshot <neu.bmp>` | Zustand bzw. Bild ausgeben |
+| `--snapshots <ordner>` | Snapshot-Ordner (F5/F9) |
+| `--enemy-ai on\|off`, `--enemy-grab on` | Gegner-Schalter |
 
-Normal launches show the main menu before loading the first room or playing the
-intro. `--in-game` explicitly bypasses it for diagnostics; `--preview` retains the
-room inspector. Input replays start with `0 new_game`.
+Headless-Läufe führen jeden Simulationsschritt aus und zeichnen nur das
+angeforderte letzte Bild. Ausgabedateien werden nie überschrieben.
+Diagnostische Positionierung ist kein Nachweis eines echten Spielverlaufs.
+Replays beginnen mit `0 new_game`.

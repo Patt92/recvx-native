@@ -1,12 +1,4 @@
-Effekt-Update 2026-10-06: Flammen und Funken verwenden die originalen
-EF_WRK-/Atlasressourcen aus losen Raum-RDTs, keine Ersatzbilder. Overrides:
-`mods/textures/effects/RM_0020/0070/0000.tga` (entsprechend Atlas 58/59/70–79,
-jeweils tatsächlichen Raum/Index einsetzen). Daten-TGAs am selben relativen
-Pfad haben Vorrang vor der dekodierten RDT-Textur; HD-Content-Key bleibt erhalten.
-Framekopien teilen Pixel und Mips. Bearbeitete Texturen werden abgetrennt und
-invalidieren den Cache. Eff200/201/218 gebunden; kein vollständiger Effektrenderer.
-
-# Native assets and mods 0.5
+# Native assets and mods
 
 The productive tree is `data/`. Runtime and packages read regular loose files,
 not ISO/AFS containers. All original dumped files and split archive entries are
@@ -41,6 +33,7 @@ External mods do not alter the app signature.
 | Menu sound bank | `audio/system/COMMON.MLT` (override only) |
 | Room shot sound pack | `audio/MULTSPQ1/0000.bin` (override only; pack ID from MULTSPQ1.IDX) |
 | Native film/audio packet | `movies/0000.rvv` |
+| Room effect atlas | `textures/effects/RM_0020/0070/0000.tga` (room and atlas index of the effect) |
 
 Texture IDs are zero-based per bundle. The cinematic and playable Claire are
 separate original asset bundles and require their respective overrides. Loose
@@ -147,7 +140,7 @@ and PMB camera/door/fade parameters. Native procedures are generated from
 Use `mods/doors/0000.bin` to override the complete packet for door type 0,
 or `mods/textures/doors/0000/0000.tga` for its first texture. Other types follow
 the same numbering. Original embedded PVP textures provide the base fallback.
-Sound-bank playback, special light procedures and rumble remain pending.
+Special light procedures and rumble remain pending; door sounds are described in AUDIO.md.
 
 The rotating examination view renders original 3D item geometry. Exported TGA
 files are replaceable original resources; screenshots are not loaded by gameplay.

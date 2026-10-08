@@ -19,6 +19,13 @@
 #define npPopMdlstr2 core_np_pop_mdlstr2
 #define npGetMatColor core_np_get_mat_color
 #define npSetAllMatColor core_np_set_all_mat_color
+#define npInitCalcSkin core_np_init_calc_skin
+#define npCalcSkin core_np_calc_skin
+#define npInitCalcSkinFM core_np_init_calc_skin_fm
+#define npCalcSkinFM core_np_calc_skin_fm
+#define npCutSkin core_np_cut_skin
+#define npTransform core_np_transform
+#define npCalcMorphing core_np_calc_morphing
 
 #define njTranslateEx core_nj_translate_ex
 #define njRotateEx core_nj_rotate_ex
