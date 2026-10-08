@@ -272,6 +272,8 @@ int EventVm::instruction(Task& t){
     case 0x47:world(t,op,10);return 1; // bhSetNextRoomBgSe
     // bhGameOverSet clears ts_flg bit 0x4000; the runtime starts gameover.c gov_md0.
     case 0xc6:flags[12][0]&=~0x4000u;world(t,op,2);return 1;
+    // bhReturnTitleEvt (event.c:8859): two bytes; the runtime performs RequestAllStopSoundEx + bhReturnTitle.
+    case 0xcd:world(t,op,2);return 1;
     // bhPadCheck: pad_ps holds newly pressed logical bits of this pass,
     // pad_on the held ones (bhSetPad). The 0xE000 mask (Select/Start/extra)
     // suppresses every check; ts_flg 0x80 hands the pad to the save screen.

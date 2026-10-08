@@ -20,7 +20,7 @@ public:
     bool gamepad_page()const{return gamepad_;}
     unsigned selected()const{return selected_;}
     void hide(){screen_=Screen::Hidden;}
-    void show_main(){screen_=Screen::Main;selected_=0;} // host game-over placeholder: back to the title menu
+    void show_main(){screen_=Screen::Main;selected_=0;} // Adv_BioCvTitle Mode 0 after bhReturnTitle (FromTitle 0: cursor on first entry)
     FrontendCommand apply(const InputFrame& input);
     FrontendCommand input(MenuInput input,bool gamepad=false);
     void event(const SDL_Event& event);

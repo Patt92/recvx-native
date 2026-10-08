@@ -1,137 +1,47 @@
-# Spiel starten
+# Starten und Bedienung
 
-Die Starter liegen direkt hier im Projektordner:
+RECVX Native ist ein Entwicklungsbuild. Er benötigt lokal exportierte
+Originaldaten und ist noch kein vollständiger, spielbarer Port.
 
-- **macOS:** `Start.command` doppelklicken. Alternativ die App
-  `build/packages/macos-arm64-v0.5/RECVX Native.app` öffnen.
-  Der Mac-Build läuft ausschließlich nativ auf Apple Silicon (arm64).
-- **Windows:** `Start.cmd` doppelklicken. Der gesamte Windows-Paketordner
-  `build/packages/windows-x64-v0.5` kann auf den Windows-Rechner kopiert werden;
-  darin ebenfalls `Start.cmd` öffnen.
+## Starten
 
-Die vorhandenen Pakete enthalten alle lokal exportierten Daten und SDL2.
-Beim Spielen wird keine ISO benötigt. Das aktuelle Spiel ist ein Entwicklungsbuild;
-Kampf, Speichern und zahlreiche spätere Ereignisse sind noch nicht fertig.
+Im Projektordner:
 
-Die Itemansicht beim Aufheben und Untersuchen verwendet jetzt den originalen
-Item-Blickraum: Munition steht richtig herum; auch Umwandlungen behalten ihre
-Originalpose. Bereichsabfragen und verschiebbare Kollisionsflächen sind an die
-Engine gebunden. Originale HP-/Dialog-/Zeitbedingungen verwenden den gemeinsamen
-Spielzustand; Fragen übernehmen die Standardauswahl aus ihren Ressourcen. Im 600-Tick-Scan laden 205 Räume; 38 melden noch blockierte
-Befehle. Das ist weiterhin kein vollständig spielbarer Port.
+- **macOS (Apple Silicon):** `Start.command` öffnen.
+- **Windows x64:** `Start.cmd` öffnen.
 
-Aktualisierung 2026-10-06: Flammen-/Raumbewegungen, Steve-Musik, Metalldetektor
-und Security-Box-Austausch sowie geringere Renderlast sind im neuen Build.
-In der Security Box: Inventarplatz wählen → OK → Boxplatz wählen → OK.
-Zurück wechselt zur Inventarwahl; dort Zurück oder Start schließt die Box.
-Grafikqualität ist über Einstellungen bzw. F2 einstellbar; „Niedrig“ spart
-Supersampling. Vollständige Hunde-KI und Explosionsemitter fehlen weiterhin.
+Die Paketstarter verwenden die jeweils mitgelieferten Laufzeitdaten. Beim
+Spielen wird keine ISO eingelegt oder gelesen. Ein Quellcode-Clone ohne den
+lokalen Ordner `data/` kann nicht gestartet werden.
 
-## Hauptmenü und Einstellungen
+Nach einem eigenen Paketbuild liegen die Ausgaben unter `build/packages/`.
+Details zu Build, Datenprüfung und Plattformen stehen in
+[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 
-Das Standardfenster ist jetzt **1280×960**, mit scharfer ganzzahliger Skalierung.
-Der interne Renderer und die Original-Fontatlanten bleiben 640×480; HD-UI ist
-noch nicht umgesetzt. Der gemeinsame Spieltakt wurde auf originale 30 Hz umgestellt.
+## Standardbedienung
 
-Der Start öffnet jetzt das Hauptmenü mit **Neues Spiel**, **Einstellungen** und
-**Beenden**. Das Intro beginnt erst nach Neues Spiel. Eine bereits laufende alte
-Version schließen und über den Starter neu öffnen.
+| Aktion | Tastatur | Controller |
+|---|---|---|
+| Bewegen | W/S oder I/K | Linker Stick oder Steuerkreuz |
+| Drehen | A/D oder J/L | Linker Stick oder Steuerkreuz |
+| Laufen | Shift | B |
+| Bestätigen / Interagieren | Enter | A |
+| Zurück | Escape | B |
+| Inventar | Tab | Y |
+| Zwischensequenz überspringen | Space | Start |
+| Debugmenü | F2 | – |
 
-In Einstellungen mit Links/Rechts zwischen Tastatur und Controller wechseln.
-Aktion auswählen, OK drücken und die gewünschte Taste bzw. Stickrichtung eingeben.
-Escape bricht die Aufnahme ab. Stick-Totzone und Menüschwelle lassen sich ebenfalls
-ändern; die Belegung wird sofort angewendet und in der Paketdatei `controls.ini`
-gespeichert. Die Standardbelegung kann hier wiederhergestellt werden.
+Tastaturbelegung, Controllerbelegung, Stick-Totzone und Menütasten lassen sich
+im Hauptmenü unter **Einstellungen** ändern. Die vollständige Beschreibung
+steht in [docs/CONTROLS.md](docs/CONTROLS.md).
 
-Laufende Videos mit **Enter oder Space**, am Controller **A oder Start/Options**,
-überspringen. Die Anzeige im Video zeigt die aktuell konfigurierten Tasten.
+## Diagnose
 
-## Debugmenue
+Das Debugmenü ist ein Entwicklungswerkzeug, kein normaler Spielfortschritt.
+Es kann Räume, Positionen und Zustände gezielt inspizieren; solche Sprünge sind
+kein Nachweis eines authentischen Spielverlaufs. Konfiguration und Funktionen
+sind in [docs/DEBUG_MENU.md](docs/DEBUG_MENU.md) dokumentiert.
 
-**F2** oeffnet das Debugmenue, auch waehrend eines Videos oder Events.
-Spiel, Events, Animationen und Audio pausieren, solange es offen ist.
-Hoch/Runter waehlt eine Funktion, Links/Rechts einen Wert, **Enter/Controller-A**
-wendet ihn an. **F2 oder Escape/Controller-B** schliesst das Menue.
-PageUp/PageDown oder LB/RB springen bei langen Listen um 20 Werte.
-
-Verfuegbar: Charaktermodell, Equip/Waffe, Raum, Spawn, Itemmenge/Items,
-HP, Tasche und Wireframe. Charakterwechsel laedt den aktuellen Raum neu.
-Ein Raumsprung erhaelt Inventar und globale Eventflags.
-
-Der Hotkey steht in `debug.ini` unter `[debug]`, `hotkey = F2`.
-Im macOS-Paket liegt die Datei neben **RECVX Native.app**, im Windows-Paket
-neben **recvx-runtime.exe**. Aendern und neu starten. Die Datei im Projektordner
-ist die Vorlage und wird beim direkten Build-Fallback des Starters verwendet.
-Details und Erweiterungsschnittstelle: [DEBUG_MENU.md](docs/DEBUG_MENU.md).
-
-## Bedienung
-
-W/S oder I/K: vor/zurück; A/D oder J/L: drehen; Shift: laufen.
-Tab: Inventar; Enter: bestätigen/benutzen; Escape: zurück/beenden.
-Controller: linker Stick/Steuerkreuz; Y: Inventar; A: bestätigen;
-B: laufen/zurück.
-Messer oder Pistole im Inventar ausrüsten: **R halten + Enter/Left Ctrl** zum
-Angriff; am Controller **RB halten + A**. Ohne Zielen hebt Enter/A Raumitems
-über die Statusansicht mit originalem Modell und Aufnahmefrage auf. Zielen und Angriff sind in Einstellungen änderbar. Space oder Start überspringt freigegebene Zwischensequenzen.
-
-An einer Tür **Enter oder Controller-A** drücken. Während der Türsequenz
-überspringt ein **erneuter Druck derselben Bestätigungstaste** die Animation
-und lädt den Zielraum. Gedrückthalten überspringt sie nicht automatisch.
-Die Bestätigungstaste ist über `controls.ini` konfigurierbar, einschließlich
-abweichender Controller-Belegung. Bei Paketstart die Datei neben dem Paket-Starter
-bearbeiten; beim Start eines direkten Builds die Datei im Projektordner.
-
-Am Anfang den Hinweis in der Zelle mit Enter bzw. Controller-A bestätigen. Das
-Inventar öffnet sich automatisch; Claire bleibt bis dahin gesperrt. Dann zweimal
-Enter bzw. A: Feuerzeug auswählen und **Equip** bestätigen.
-Ein schneller Inventardruck direkt nach dem Hinweis wird kurz vorgemerkt, bis
-das Originalereignis die Steuerung freigibt. Inventar, Ausrüstung, HP und Tasche bleiben bei Raumwechseln
-im Spielzustand erhalten.
-
-## Ressourcen und Mods
-
-Das untersuchbare Feuerzeug ist das originale 3D-Modell aus `ITEM1/0054.bin`
-(Item-ID 55, Inventarplatz 1). Inventarsymbole stammen aus dem originalen Atlas. Die TGA-Dateien
-sind exportierte Originaltexturen für Austausch/HD-Mods; BMP/PNG-Prüfbilder
-unter `build/` sind keine Spielressourcen.
-
-Türmodelle, Texturen und Bewegungsparameter kommen aus den originalen
-`MRY/0071.bin` und folgenden Paketen. Es werden originale Tür-, Kamera- und
-Fade-Routinen nativ kompiliert. Tür-Soundbanken und spezielle Türbeleuchtung
-sind noch nicht vollständig portiert.
-
-Siehe [Ressourcen und Mods](docs/NATIVE_ASSETS.md),
-[Steuerung](docs/CONTROLS.md) und [Build-Anleitung](docs/NATIVE_PORT.md).
-
-## Items kombinieren und Koffer öffnen
-
-Ein Kraut auswählen → **Combine** → zweites Kraut auswählen → OK. Die originalen
-Mischrezepte funktionieren in beiden Reihenfolgen. Bei einer ungültigen Mischung
-bleiben beide Items erhalten; Abbrechen kehrt zum Ausgangsitem zurück.
-
-Verschlossene Koffer: Dietrich im Inventar behalten, Koffer → **Examine** → zur
-Schlossseite drehen → OK → „Use the lockpick?“ mit **Yes** bestätigen. Mehrseitige
-Dialoge mit einzelnen OK-Drücken weiterblättern. Der Dietrich bleibt erhalten;
-der Inhalt ersetzt den Koffer auch bei vollem Inventar. Die Aktentasche mit Knopf
-öffnet sich über ihre originale Knopffrage ohne Dietrich. Pfeile beziehungsweise
-D-pad/Stick drehen die 3D-Ansicht horizontal und vertikal; Escape/B bricht ab.
-
-Details und noch offene Spezialfälle stehen in `docs/NATIVE_GAMEPLAY.md`.
-
-## Aktueller Portstand
-
-Die gemeinsame Event-Ausführung verwendet jetzt Raumclips für geskriptete
-Spielerbewegungen, geteilte Gegner-Motionsbibliotheken und den originalen
-FOR-Zähler für Positions-/Winkelinterpolation. Bodenabfragen erfassen auch
-Rampen und flache Bodenflächen. Friedhof- und Steve-Tasks werden auf Rückgabe
-der Steuerung geprüft; vollständige Gegner-KI, NPC-Modellteile und Effekte
-fehlen noch. Das Spiel ist weiterhin kein vollständig spielbarer Port.
-
-Inventarregeln werden aus dem Originalcode gebaut. Alle elf Untersuchungs-
-umwandlungen, einschließlich der silbernen Libelle, sowie 117 gerichtete
-Kombinationen sind geprüft. Details und Grenzen: `INVENTORY-COVERAGE.md` im
-Paket beziehungsweise `docs/INVENTORY-COVERAGE.md` im Projekt.
-
-Engine-Update 2026-10-05: Gemeinsame Modellknotensteuerung, Event-Zeitgeber,
-bewegte Kollisionsflächen, Lichtparameter und getrennte Gegner-Soundstimmen.
-Prüfprotokolle: `build/validation/world-control-20261005`.
+Den aktuellen Portstand und bekannte Lücken beschreibt
+[docs/NATIVE_GAMEPLAY.md](docs/NATIVE_GAMEPLAY.md). Prüfergebnisse und ihre
+jeweilige Aussagegrenze stehen in [docs/VALIDATION.md](docs/VALIDATION.md).

@@ -247,6 +247,52 @@ def summarize(records):
     return groups
 
 
+README_BEGIN = '<!-- port-status:begin -->'
+README_END = '<!-- port-status:end -->'
+
+# Kurzbeschreibung je Kategorie fuer die README-Tabelle (Bereichsname -> Text).
+README_NOTES = {
+    'Spieler/Kampf': 'Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen.',
+    'Events/Skript': 'Event-VM und Befehle portiert; Common-Control und restliche Befehle offen.',
+    'Menü/Items/Text': 'Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen.',
+    'Modelle/Animation': 'Ressourcen und ausgewählte Animationspfade; Skin/Morph/Chunk-Renderer offen.',
+    'Raum/Kamera/Tür': 'Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen.',
+    'Gegner/KI': 'Zombie/Hund teilweise; die meisten enXX-Zustandsroutinen fehlen.',
+    'Audio': 'Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt.',
+    'Effekte': 'Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen.',
+    'Ablauf/Speichern': 'Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen.',
+}
+
+def bar(value, width=10):
+    filled = round(width * value / 100.0)
+    return '█' * filled + '░' * (width - filled)
+
+def readme_block(groups, engine, opcode_done, opcode_total):
+    de = lambda v: f'{v:.1f}'.replace('.', ',')
+    lines = [README_BEGIN,
+             '<!-- Automatisch erzeugt: python3 tools/port_check.py --readme README.md -->',
+             '',
+             '| Kategorie | Fortschritt | Gewichtet | Streng | Funktionen | Stand |',
+             '|---|---|---:|---:|---:|---|']
+    for label, g in sorted(((l, g) for l, g in groups.items() if l != PLATFORM and g['weight']),
+                           key=lambda x: -percent(x[1]['weighted'], x[1]['weight'])):
+        w = percent(g['weighted'], g['weight'])
+        lines.append(f'| {label} | `{bar(w)}` | {de(w)} % | {de(percent(g["strict"], g["weight"]))} % | '
+                     f'{g["done_functions"]}/{g["functions"]} | {README_NOTES.get(label, "")} |')
+    w = percent(engine['weighted'], engine['weight'])
+    lines.append(f'| **Engine gesamt** | `{bar(w)}` | **{de(w)} %** | **{de(percent(engine["strict"], engine["weight"]))} %** | '
+                 f'**{engine["done_functions"]}/{engine["functions"]}** | '
+                 f'{opcode_done}/{opcode_total} Event-Befehle gebunden. |')
+    lines += ['', README_END]
+    return '\n'.join(lines)
+
+def update_readme(path, block):
+    text = path.read_text()
+    pattern = re.compile(re.escape(README_BEGIN) + r'.*?' + re.escape(README_END), re.S)
+    if not pattern.search(text):
+        raise SystemExit(f'{path}: Marker {README_BEGIN} / {README_END} fehlen')
+    path.write_text(pattern.sub(lambda _: block, text, count=1))
+
 def percent(part, whole):
     return 100.0 * part / whole if whole else 0.0
 
@@ -255,6 +301,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--json', type=Path, help='vollständige Funktionsliste als JSON schreiben')
     parser.add_argument('--markdown', type=Path, help='Bericht als Markdown schreiben (z. B. docs/PORT_STATUS.md)')
+    parser.add_argument('--readme', type=Path, help='Prozenttabelle zwischen den port-status-Markern in dieser README aktualisieren')
     parser.add_argument('--top', type=int, default=15, help='größte fehlende Funktionen anzeigen')
     parser.add_argument('--domain', help='nur diesen Bereich auflisten (Teilstring)')
     parser.add_argument('--fail-under', type=float, help='Exit 1, wenn der gewichtete Engine-Wert darunter liegt')
@@ -309,6 +356,8 @@ def main():
     print(report)
     if args.markdown:
         args.markdown.write_text(report + '\n\nErzeugt mit `python3 tools/port_check.py --markdown ' + str(args.markdown) + '`.\n')
+    if args.readme:
+        update_readme(args.readme, readme_block(groups, engine, opcode_done, opcode_total))
     if args.json:
         args.json.write_text(json.dumps({'engine_weighted': percent(engine['weighted'], engine['weight']),
                                          'engine_strict': percent(engine['strict'], engine['weight']),

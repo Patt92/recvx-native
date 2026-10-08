@@ -24,6 +24,82 @@ add_custom_command(OUTPUT "${RECVX_TABLES}/en04_damage.inc" "${RECVX_TABLES}/en0
 add_custom_command(OUTPUT "${RECVX_TABLES}/en07_bat.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_en07_bat.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_en07_bat.py tools/generate_native_tables.py src/ps2/veronica/prog/en07.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/core_njplus_collision.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_core_njplus.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}/core_njplus_collision.inc"
+  DEPENDS tools/generate_core_njplus.py src/ps2/veronica/prog/njplus.c)
+add_library(recvx_core_njplus STATIC native/core_njplus_collision.c native/core_njplus_memory.c native/core_njplus_modelstate.c "${RECVX_TABLES}/core_njplus_collision.inc")
+target_include_directories(recvx_core_njplus PRIVATE native build-tools/ninja include/ps2/veronica/prog "${RECVX_TABLES}" src/ps2/veronica/prog)
+target_compile_definitions(recvx_core_njplus PRIVATE RECVX_NATIVE=1)
+target_compile_options(recvx_core_njplus PRIVATE -w -include "${RECVX_TABLES}/types/types.h" -Wno-return-mismatch)
+add_library(recvx_core_ninja STATIC native/core_ninja_ex.c)
+target_include_directories(recvx_core_ninja PRIVATE native build-tools/ninja include/ps2/veronica/prog)
+target_link_libraries(recvx_core_ninja PRIVATE recvx_math)
+add_library(recvx_core_model STATIC native/core_model.c)
+target_include_directories(recvx_core_model PRIVATE native build-tools/ninja include/ps2/veronica/prog "${RECVX_TABLES}" src/ps2/veronica/prog)
+target_compile_options(recvx_core_model PRIVATE -include "${RECVX_TABLES}/types/types.h")
+target_link_libraries(recvx_core_model PRIVATE recvx_math)
+add_library(recvx_core_effect STATIC native/core_effect.c)
+target_include_directories(recvx_core_effect PRIVATE native build-tools/ninja include/ps2/veronica/prog "${RECVX_TABLES}" src/ps2/veronica/prog)
+target_compile_options(recvx_core_effect PRIVATE -include "${RECVX_TABLES}/types/types.h")
+target_link_libraries(recvx_core_effect PRIVATE recvx_core_njplus)
+add_library(recvx_core_object STATIC native/core_object.c)
+target_include_directories(recvx_core_object PRIVATE native build-tools/ninja include/ps2/veronica/prog "${RECVX_TABLES}" src/ps2/veronica/prog)
+target_compile_options(recvx_core_object PRIVATE -include "${RECVX_TABLES}/types/types.h")
+target_link_libraries(recvx_core_object PRIVATE recvx_core_njplus)
+# Originale Gegnerschicht (en*.c + abhaengige Module), 1:1 aus src/ uebersetzt.
+# Noch nicht in recvx-native eingehaengt (EXCLUDE_FROM_ALL); dient dem Link-Check.
+file(GLOB RECVX_EN_SRC RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/src/ps2/veronica/prog" "${CMAKE_CURRENT_SOURCE_DIR}/src/ps2/veronica/prog/en[0-9]*.c")
+set(RECVX_ORIG_MODULES eneset.c zonzon.c zonzon1.c hitchk.c hitchkl.c pwksub.c Motion.c weapon.c subpl.c rutchk.c flag.c effsub2.c effsub3.c effsub4.c light.c player.c message.c ps2_NaColi.c MdlPut.c)
+set(RECVX_ORIG_ENGINE_SRC ${RECVX_EN_SRC} ${RECVX_ORIG_MODULES})
+set(RECVX_ORIG_DIR "${RECVX_TABLES}/enemy")
+set(RECVX_ORIG_OUT "")
+foreach(f ${RECVX_ORIG_ENGINE_SRC})
+  list(APPEND RECVX_ORIG_OUT "${RECVX_ORIG_DIR}/${f}")
+endforeach()
+add_custom_command(OUTPUT "${RECVX_TABLES}/types/types.h"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_types.py" --out "${RECVX_TABLES}/types/types.h"
+  DEPENDS tools/generate_types.py include/ps2/veronica/prog/types.h build-tools/ninja/ninjadef.h build-tools/ninja/ninjastr.h build-tools/ninja/ninjacnk.h build-tools/ninja/sg_xpt.h build-tools/ninja/ninjaapi.h)
+add_custom_command(OUTPUT ${RECVX_ORIG_OUT}
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_enemy_sources.py" --out "${RECVX_ORIG_DIR}" ${RECVX_ORIG_ENGINE_SRC}
+  DEPENDS tools/generate_enemy_sources.py "${RECVX_TABLES}/types/types.h")
+add_library(recvx_original_engine STATIC EXCLUDE_FROM_ALL ${RECVX_ORIG_OUT} native/main_globals.c native/recvx_ptr32.c)
+target_include_directories(recvx_original_engine PRIVATE build-tools/ninja native include/ps2/veronica/prog "${RECVX_TABLES}" src/ps2/veronica/prog)
+target_compile_definitions(recvx_original_engine PRIVATE RECVX_NATIVE=1
+  npPlusInit=core_np_plus_init npCollisionCheckCC=core_np_collision_check_cc
+  npCollisionCheckCCEx=core_np_collision_check_cc_ex npCollisionCheckSC=core_np_collision_check_sc
+  npDistanceP2C=core_np_distance_p2c npSetMemory=core_np_set_memory npSetMemoryL=core_np_set_memory_l
+  npPushMdlstr=core_np_push_mdlstr npPopMdlstr=core_np_pop_mdlstr
+  npPushMdlstr2=core_np_push_mdlstr2 npPopMdlstr2=core_np_pop_mdlstr2
+  npGetMatColor=core_np_get_mat_color npSetAllMatColor=core_np_set_all_mat_color
+  npInitCalcSkin=core_np_init_calc_skin npCalcSkin=core_np_calc_skin
+  npInitCalcSkinFM=core_np_init_calc_skin_fm npCalcSkinFM=core_np_calc_skin_fm
+  npCutSkin=core_np_cut_skin
+  npTransform=core_np_transform npCalcMorphing=core_np_calc_morphing
+  bhGetGidx=core_bh_get_gidx bhSetExtraEffectWork=core_bh_set_extra_effect_work
+  bhSetEffect=core_bh_set_effect bhSetEffectTb=core_bh_set_effect_tb
+  bhSetEffectEvt=core_bh_set_effect_evt bhDeleteYakkyou=core_bh_delete_yakkyou
+  bhSetShadow=core_bh_set_shadow bhLinkBlood=core_bh_link_blood
+  bhSetObject=core_bh_set_object bhSetItem=core_bh_set_item bhInitObjItm=core_bh_init_obj_itm
+  njTranslateEx=core_nj_translate_ex
+  njRotate=core_nj_rotate njRotateEx=core_nj_rotate_ex njScaleEx=core_nj_scale_ex njMemCopy4=core_nj_mem_copy4
+  njGetSystemAttr=core_nj_get_system_attr njSetSystemAttr=core_nj_set_system_attr
+  bhPutModel=core_bh_put_model bhCalcModel=core_bh_calc_model bhCalcTree=core_bh_calc_tree)
+target_compile_options(recvx_original_engine PRIVATE -w -include "${RECVX_TABLES}/types/types.h" -Wno-return-mismatch)
+target_link_libraries(recvx_original_engine INTERFACE recvx_core_njplus recvx_core_ninja recvx_core_model recvx_core_effect recvx_core_object)
+set(RECVX_STATUS_DIR "${RECVX_TABLES}/status")
+set(RECVX_STATUS_OUT "${RECVX_STATUS_DIR}/sub1.c" "${RECVX_STATUS_DIR}/itemview.c" "${RECVX_STATUS_DIR}/fileview.c" "${RECVX_STATUS_DIR}/message.c" "${RECVX_STATUS_DIR}/flag.c" "${RECVX_STATUS_DIR}/ninja2d.c")
+add_custom_command(OUTPUT ${RECVX_STATUS_OUT}
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_status_sources.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_status_sources.py tools/generate_native_tables.py tools/generate_types.py
+    src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/itemview.c src/ps2/veronica/prog/fileview.c
+    src/ps2/veronica/prog/message.c src/ps2/veronica/prog/flag.c
+    src/ps2/veronica/prog/ps2_dummy.c src/ps2/veronica/prog/ps2_NaSystem.c
+    include/ps2/veronica/prog/types.h build-tools/ninja/ninjadef.h build-tools/ninja/ninjastr.h
+  VERBATIM)
+add_library(recvx_original_status STATIC EXCLUDE_FROM_ALL ${RECVX_STATUS_OUT} native/core_gs.cpp native/core_gs_glue.c)
+target_include_directories(recvx_original_status PRIVATE native "${RECVX_STATUS_DIR}" build-tools/ninja include/ps2/veronica/prog src/ps2/veronica/prog)
+target_compile_options(recvx_original_status PRIVATE -w -Wno-return-mismatch)
+target_compile_features(recvx_original_status PRIVATE cxx_std_17)
 add_custom_command(OUTPUT "${RECVX_TABLES}/subplayer.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_subplayer.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_subplayer.py tools/generate_native_tables.py src/ps2/veronica/prog/subpl.c src/ps2/veronica/prog/eneset.c)
@@ -55,9 +131,12 @@ add_custom_command(OUTPUT "${RECVX_TABLES}/effect_sprites.inc"
 add_custom_command(OUTPUT "${RECVX_TABLES}/pickup_engine.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_pickup_engine.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_pickup_engine.py tools/generate_native_tables.py src/ps2/veronica/prog/sub1.c src/ps2/veronica/prog/weapon.c)
-add_custom_command(OUTPUT "${RECVX_TABLES}/item_use.inc"
+add_custom_command(OUTPUT "${RECVX_TABLES}/item_use.inc" "${RECVX_TABLES}/item_use00.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_item_use.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_item_use.py tools/generate_native_tables.py src/ps2/veronica/prog/sub1.c)
+add_custom_command(OUTPUT "${RECVX_TABLES}/object_itmbox.inc"
+  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_object_itmbox.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
+  DEPENDS tools/generate_object_itmbox.py tools/generate_native_tables.py src/ps2/veronica/prog/objitm.c)
 add_custom_command(OUTPUT "${RECVX_TABLES}/event_inventory.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_event_inventory.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_event_inventory.py tools/generate_native_tables.py src/ps2/veronica/prog/event.c)
@@ -77,8 +156,9 @@ add_custom_command(OUTPUT "${RECVX_TABLES}/effect_collision.inc"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_effect_collision.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${RECVX_TABLES}"
   DEPENDS tools/generate_effect_collision.py tools/generate_native_tables.py src/ps2/veronica/prog/hitchk.c)
 add_library(recvx_game native/file_folder.cpp "${RECVX_TABLES}/file_folder.inc" native/effect_collision.cpp "${RECVX_TABLES}/effect_collision.inc" native/gameover.cpp "${RECVX_TABLES}/gameover.inc" native/effect_particles.cpp "${RECVX_TABLES}/effect_particles.inc" native/computer.cpp native/computer_core.c "${RECVX_TABLES}/computer.inc" native/subplayer.c "${RECVX_TABLES}/subplayer.inc" native/en01_damage.c "${RECVX_TABLES}/en01_damage.inc" "${RECVX_TABLES}/en01_damage_types.inc" native/enemy_spawn.cpp "${RECVX_TABLES}/enemy_spawn.inc" native/effect_sprites.cpp "${RECVX_TABLES}/effect_sprites.inc" native/inspection.cpp "${RECVX_TABLES}/inventory_engine.inc" native/combat.cpp native/weapon_flash.cpp "${RECVX_TABLES}/weapon_flash.inc" native/targeting.cpp "${RECVX_TABLES}/targeting.inc" native/weapon_asset.cpp "${RECVX_TABLES}/combat_tables.inc" native/box_menu.cpp native/inventory.cpp "${RECVX_TABLES}/box_engine.inc" native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp src/ps2/veronica/prog/item.c "${RECVX_TABLES}/door_structs.inc" "${RECVX_TABLES}/door_procedures.inc" "${RECVX_TABLES}/combinations.inc" "${RECVX_TABLES}/ui_tables.inc" native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp "${RECVX_TABLES}/view_clip.inc" native/player_stairs.c "${RECVX_TABLES}/player_stairs.inc" native/player_hair.c "${RECVX_TABLES}/player_hair.inc" "${RECVX_TABLES}/status_pulse.inc" "${RECVX_TABLES}/adx_tables.inc")
+target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp "${RECVX_TABLES}/object_itmbox.inc")
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}")
-target_sources(recvx_game PRIVATE "${RECVX_TABLES}/pickup_engine.inc" "${RECVX_TABLES}/event_inventory.inc" "${RECVX_TABLES}/item_use.inc")
+target_sources(recvx_game PRIVATE "${RECVX_TABLES}/pickup_engine.inc" "${RECVX_TABLES}/event_inventory.inc" "${RECVX_TABLES}/item_use.inc" "${RECVX_TABLES}/item_use00.inc")
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
 target_link_libraries(recvx_game PUBLIC recvx_scene)
 if(POLICY CMP0135)
@@ -147,7 +227,13 @@ if(RECVX_BUILD_RUNTIME)
     target_link_libraries(recvx-input-tests PRIVATE recvx_input)
     add_test(NAME keyboard_controller_config COMMAND recvx-input-tests)
   endif()
-  target_link_libraries(recvx-runtime PRIVATE recvx_input)
+  # Die aus dem Original erzeugte Engine-Schicht ist verlinkt, aber noch nicht
+  # vom Host-Dispatcher aufgerufen. `world.cpp` bleibt bis zur gemeinsamen
+  # Global-/Dispatch-Umstellung unverändert.
+  target_link_libraries(recvx-runtime PRIVATE recvx_input recvx_original_engine)
+  # Das Archiv wird erst bei der Dispatcher-Umstellung extrahiert. Ein
+  # force-load ist absichtlich noch nicht gesetzt: der Original-Linkcheck
+  # weist derzeit noch unportierte Ninja-/Audio-/Effekt-Symbole aus.
   if(WIN32)
     add_custom_command(TARGET recvx-runtime POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL2::SDL2> $<TARGET_FILE_DIR:recvx-runtime>)
     if(BUILD_TESTING)
@@ -290,6 +376,26 @@ endif()
 install(TARGETS recvx-native RUNTIME DESTINATION bin)
 
 if(BUILD_TESTING)
+  add_executable(recvx-core-njplus-tests tests/native/core_njplus_test.cpp)
+  target_include_directories(recvx-core-njplus-tests PRIVATE build-tools/ninja include/ps2/veronica/prog)
+  target_compile_options(recvx-core-njplus-tests PRIVATE -include "${RECVX_TABLES}/types/types.h")
+  target_link_libraries(recvx-core-njplus-tests PRIVATE recvx_core_njplus recvx_original_engine recvx_math)
+  add_test(NAME core_njplus_collision COMMAND recvx-core-njplus-tests)
+  add_executable(recvx-core-model-tests tests/native/core_model_test.cpp)
+  target_include_directories(recvx-core-model-tests PRIVATE native build-tools/ninja include/ps2/veronica/prog)
+  target_compile_options(recvx-core-model-tests PRIVATE -include "${RECVX_TABLES}/types/types.h")
+  target_link_libraries(recvx-core-model-tests PRIVATE recvx_core_model recvx_math)
+  add_test(NAME core_model_matrices COMMAND recvx-core-model-tests)
+  add_executable(recvx-core-effect-tests tests/native/core_effect_test.cpp)
+  target_include_directories(recvx-core-effect-tests PRIVATE native build-tools/ninja include/ps2/veronica/prog)
+  target_compile_options(recvx-core-effect-tests PRIVATE -include "${RECVX_TABLES}/types/types.h")
+  target_link_libraries(recvx-core-effect-tests PRIVATE recvx_core_effect recvx_original_engine recvx_core_njplus)
+  add_test(NAME core_effect_pool COMMAND recvx-core-effect-tests)
+  add_executable(recvx-core-object-tests tests/native/core_object_test.cpp)
+  target_include_directories(recvx-core-object-tests PRIVATE native build-tools/ninja include/ps2/veronica/prog)
+  target_compile_options(recvx-core-object-tests PRIVATE -include "${RECVX_TABLES}/types/types.h")
+  target_link_libraries(recvx-core-object-tests PRIVATE recvx_core_object recvx_original_engine recvx_core_njplus)
+  add_test(NAME core_object_setup COMMAND recvx-core-object-tests)
   add_executable(recvx-continuity-tests tests/native/continuity_test.cpp)
   target_link_libraries(recvx-continuity-tests PRIVATE recvx_game)
   add_test(NAME core_continuity COMMAND recvx-continuity-tests)

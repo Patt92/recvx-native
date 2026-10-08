@@ -656,4 +656,6 @@ Sint8	*njOpenBinary(const char *fname);
 void	njCloseBinary(Sint8 *wbuff);
 void	*njReadBinary(Sint8 *wbuff, Uint32 *fpos, Uint32 *ptype);
 
+extern	Uint32		_nj_control_3d_flag_;	/* Name aus ninjaval.h:24 */
+
 #endif /* _NINJA_API_H_ */

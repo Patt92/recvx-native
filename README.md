@@ -44,14 +44,14 @@ Abdeckung, nicht semantische Vollständigkeit.
 |---|---|---:|---:|---:|---|
 | Spieler/Kampf | `██████████` | 95,2 % | 90,8 % | 159/166 | Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen. |
 | Events/Skript | `█████████░` | 91,7 % | 90,7 % | 251/272 | Event-VM und Befehle portiert; Common-Control und restliche Befehle offen. |
-| Menü/Items/Text | `███████░░░` | 69,2 % | 63,4 % | 130/241 | Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen. |
+| Menü/Items/Text | `███████░░░` | 70,3 % | 63,4 % | 130/241 | Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen. |
 | Effekte | `█████░░░░░` | 52,0 % | 51,7 % | 175/361 | Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen. |
 | Raum/Kamera/Tür | `█████░░░░░` | 50,3 % | 39,5 % | 64/188 | Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen. |
-| Modelle/Animation | `████░░░░░░` | 40,7 % | 16,9 % | 11/88 | Ressourcen und ausgewählte Animationspfade; Skin/Morph/Chunk-Renderer offen. |
+| Modelle/Animation | `████░░░░░░` | 42,8 % | 16,9 % | 11/88 | Ressourcen und ausgewählte Animationspfade; Skin/Morph/Chunk-Renderer offen. |
 | Gegner/KI | `███░░░░░░░` | 26,2 % | 25,9 % | 342/1357 | Zombie/Hund teilweise; die meisten enXX-Zustandsroutinen fehlen. |
 | Audio | `██░░░░░░░░` | 16,4 % | 0,0 % | 0/164 | Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt. |
-| Ablauf/Speichern | `█░░░░░░░░░` | 11,5 % | 0,1 % | 3/331 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
-| **Engine gesamt** | `█████░░░░░` | **47,3 %** | **43,9 %** | **1135/3168** | 147/223 Event-Befehle gebunden. |
+| Ablauf/Speichern | `█░░░░░░░░░` | 11,9 % | 0,1 % | 3/331 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
+| **Engine gesamt** | `█████░░░░░` | **47,5 %** | **43,9 %** | **1135/3168** | 148/223 Event-Befehle gebunden. |
 
 <!-- port-status:end -->
 
