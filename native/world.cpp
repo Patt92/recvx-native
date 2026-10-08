@@ -107,7 +107,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     room_height_=v.f32(header_+0x118);for(unsigned i=0;i<32;++i)floors_[i]=v.f32(header_+0x120+i*4);
     for(unsigned i=0;i<count;++i){const auto p=walls+i*36;walls_.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)},{v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)}});}
     const auto floor_pointer=v.u32(header_+0x20),floor_count=v.u32(header_+0xa0);if(floor_count>4096)throw std::runtime_error("too many sound floor areas");v.require(floor_pointer,floor_count*36);
-    for(unsigned i=0;i<floor_count;++i){const auto p=floor_pointer+i*36;floor_sounds_.push_back({{v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)}},v.u8(p+32)});}
+    for(unsigned i=0;i<floor_count;++i){const auto p=floor_pointer+i*36;floor_sounds_.push_back({{v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)}},v.u8(p+32)});effect_water_room_.push_back(floor_sounds_.back().area);}
     for(unsigned i=0;i<floor_count;++i){const auto p=floor_pointer+i*36;enemy_areas_.push_back({v.u8(p),v.u8(p+1),int(std::int8_t(v.u8(p+3))),v.f32(p+8),v.f32(p+16),v.f32(p+20),v.f32(p+28),v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)});}
     const auto cameras=v.u32(header_+0x34),camera_count=v.u32(header_+0xac);if(camera_count>1024)throw std::runtime_error("too many event cameras");v.require(cameras,camera_count*0x808);
     for(unsigned i=0;i<camera_count;++i){const auto count=v.u16(cameras+i*0x808+6);if(!count||count>16)throw std::runtime_error("invalid event camera key count");EventCameraTrack track;track.next=v.u16(cameras+i*0x808+4);
@@ -144,13 +144,19 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)){auto atlas=decode_texture_bundle(b,texture);for(auto& image:atlas)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
     }
     // bhInitEffect: common effect textures (ef_tlist, tex_id 0..29) from SYSTEM entry 1.
-    if(!data.empty()){const auto system=data/"archives/SYSTEM/0001.bin";if(std::filesystem::is_regular_file(system)){const auto bytes=read_asset_file(system,8*1024*1024);auto common=decode_texture_bundle(bytes,common_effect_textures_offset(bytes));
+    if(!data.empty()){const auto system=data/"archives/SYSTEM/0001.bin";if(std::filesystem::is_regular_file(system)){const auto bytes=read_asset_file(system,8*1024*1024);const auto common_offset=common_effect_textures_offset(bytes);auto common=decode_texture_bundle(bytes,common_offset);
+        effect_model0_=decode_model_asset(bytes,4,common_offset);
         const auto categories=common_effect_categories();
         for(unsigned id=0;id<categories.size();++id){const auto [first,frames]=categories[id];if(!frames||first+frames>common.size()||effect_textures_.count(id))continue;std::vector<SceneTexture> atlas;
             for(unsigned f=0;f<frames;++f){auto image=common[first+f];std::uint32_t top=0;for(auto pixel:image.pixels)top=std::max(top,pixel>>24);
                 if(top<=0x80)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24); // GS alpha 0x80 = 1.0
                 atlas.push_back(std::move(image));}
-            effect_textures_[id]=std::move(atlas);}}}
+            effect_textures_[id]=std::move(atlas);}
+        // bhEff015 addresses the original ungrouped SYSTEM texture indices.
+        // Preserve those absolute starts and their following animation frames.
+        for(const unsigned first:{31u,33u,34u,36u})if(first<common.size()&&!effect_textures_.count(first)){std::vector<SceneTexture> atlas;
+            for(auto it=common.begin()+first;it!=common.end();++it){auto image=*it;std::uint32_t top=0;for(auto pixel:image.pixels)top=std::max(top,pixel>>24);if(top<=0x80)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);atlas.push_back(std::move(image));}
+            effect_textures_[first]=std::move(atlas);}}}
     const auto motion_table=v.u32(24);auto motions=v.u32(motion_table+ene_count*4);
     if(motions)for(unsigned i=0;i<256;++i){const auto n=v.u32(motions);motions+=4;if(n==0xffffffff)break;room_motions_.push_back(n?decode_motion_asset(section(b,motions,n)):MotionClip{});motions+=n;}
     // room.c: room motions are followed by mspp (sized PARAM_WORK sequences).
@@ -334,7 +340,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0x7a){audio_.stop_enemy_sound(v.u8(1));return true;}
     if(op==0x78){auto& lights=v.u8(2)?event_lights_:lights_;auto& light=lights.at(v.u8(1));light.color={v.u16(4)/100.f,v.u16(6)/100.f,v.u16(8)/100.f};light.near_range=v.u16(10)/100.f;light.far_range=v.u16(12)/100.f;return true;}
     if(op==0xba){for(unsigned key=0;key<2;++key)for(unsigned axis=0;axis<3;++axis)ctx.ground[key][axis]=v.u16(2+key*8+axis*2)/100.f*(v.u8(1+key*8)&(1u<<axis)?-1:1);return true;}
-    if(op==0xbb){float keys[12],out[3];for(unsigned key=0;key<4;++key)for(unsigned axis=0;axis<3;++axis)keys[key*3+axis]=ctx.ground[key<2?1:0][axis];njOverhauserSpline(keys,out,nullptr,event_clock(c.loop_remaining,c.loop_total));walls_.at(v.u8(1)).position={out[0],out[1],out[2]};return true;}
+    if(op==0xbb){float keys[12],out[3];for(unsigned key=0;key<4;++key)for(unsigned axis=0;axis<3;++axis)keys[key*3+axis]=ctx.ground[key<2?1:0][axis];njOverhauserSpline(keys,out,nullptr,event_clock(c.loop_remaining,c.loop_total));walls_.at(v.u8(1)).position={out[0],out[1],out[2]};update_ground_geometry();return true;}
     if(op==0xd0){auto& e=entity(1,v.u8(1));e.hp=v.u16(2);return true;}
     if(op==0x79){if(v.u8(1)>=6)return false;(void)model_pose(1,v.u8(2),v.u8(3));return audio_.enemy_sound(v.u8(1),v.u16(4));}
     if(op==0x66){if(v.u8(1)==1){ctx.mode1=0;return true;}if(v.u8(1)==20){const auto& source=contexts_.at(v.u8(2));const auto root=model_pose(source.kind,source.index).position;auto& p=ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;p.x+=root.x;p.z+=root.z;return true;}return false;}
@@ -342,8 +348,8 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     // bhGrdPosSet addresses rom->walp (not the separate floor-sound table).
     // Updating this shared table changes walking, ground probes and shot rays.
     if(op==0xc){const auto index=v.u8(1);if(index>=enemy_areas_.size())throw std::runtime_error("world floor outside original room table");if(v.u8(2)){enemy_areas_[index].flg&=~1u;floor_sounds_[index].area.flags&=~1u;}else{enemy_areas_[index].flg|=1;floor_sounds_[index].area.flags|=1;}return true;}
-    if(op==0x7b){auto& wall=walls_.at(v.u8(1));wall.attributes=v.u16(2);for(unsigned i=0;i<4;++i)wall.parameters[i]=v.u8(4+i);wall.type=v.u8(8);return true;}
-    if(op==0xb9){const auto index=v.u8(1);if(index>=walls_.size())throw std::runtime_error("script ground position outside wall table");const auto signs=v.u8(3);walls_[index].position={v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};return true;}
+    if(op==0x7b){auto& wall=walls_.at(v.u8(1));wall.attributes=v.u16(2);for(unsigned i=0;i<4;++i)wall.parameters[i]=v.u8(4+i);wall.type=v.u8(8);update_ground_geometry();return true;}
+    if(op==0xb9){const auto index=v.u8(1);if(index>=walls_.size())throw std::runtime_error("script ground position outside wall table");const auto signs=v.u8(3);walls_[index].position={v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};update_ground_geometry();return true;}
     if(op==0x48){const auto point=link_point(ctx.kind,ctx.index,v.u8(5),{});return audio_.footstep(floor_sound(point),v.u8(4),v.u8(3),v.u8(1)==0);}
     if(op==0xab){background_target_=0xff000000u|(unsigned(v.u8(2))<<16)|(unsigned(v.u8(3))<<8)|v.u8(4);background_delay_=v.u8(5);background_pending_=true;return true;}
     // event.c bhObjLinkSet* family: byte 1 parent index, 2 child, 3 node, 4 release,
@@ -402,7 +408,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         }
         return true;
     }
-    if(op==0xa){const auto index=v.u8(1);if(index>=walls_.size())throw std::runtime_error("script wall outside table");if(v.u8(2))walls_[index].flags&=~1u;else walls_[index].flags|=1;return true;}
+    if(op==0xa){const auto index=v.u8(1);if(index>=walls_.size())throw std::runtime_error("script wall outside table");if(v.u8(2))walls_[index].flags&=~1u;else walls_[index].flags|=1;update_ground_geometry();return true;}
     // event.c bhMaskSet/Start, bhFacePauseSet/ReSet/Rep, bhControlMask.
     if(op==0x3c||op==0x3d||op==0x3e||op==0x3f||op==0x8f||op==0x90||op==0x91){const auto index=v.u8(op==0x90||op==0x8f||op==0x91?1:2);auto& e=entity(1,index);const auto& m=model(1,index);if(!m.actor||!m.actor->face())return false;
         if(op==0x3c){const auto seq=v.u8(3);if(seq>=face_sequences_.size())return true;if(!face_sequence_ids_[seq]||face_sequence_ids_[seq]==e.identity){e.face_keys=face_sequences_[seq];e.face_frame=0;}}
@@ -613,13 +619,14 @@ void RoomWorld::apply_en01_flinch(){
         for(const auto& m:models_)if(m.kind==1&&m.index==pair.first.second&&m.actor){const auto& clip=entity_motion(e);const auto nodes=m.actor->motion_nodes(clip.positions.size());
             const auto pose=m.actor->local_pose_clip(clip,e.pose_frame(),nodes);const unsigned node=m.actor->model_index(8);if(e.flinch&&node<pose.size())e.node_overrides[node].angles=std::array<Angle,3>{Angle(e.flinch_angles[0]),Angle(e.flinch_angles[1]),pose[node].angles[2]};const unsigned neck=m.actor->model_index(11);if(neck<pose.size())e.node_overrides[neck].angles=std::array<Angle,3>{pose[neck].angles[0],Angle(e.neck_angle),pose[neck].angles[2]};break;}}
 }
-// bhSetEffectTb: one effect work in the first free slot (hidden dynamic slots are the free ones).
+// bhSetEffectTb: first free entry of the shared original eff[512] table.
 void RoomWorld::spawn_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index){
     if(!supported_effect_sprite(spawn.id)){unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));return;}
     SpriteWork work;initialize_effect_sprite(work.sprite,spawn);work.scale=spawn.scale;work.dynamic=true;work.queued=false;
     if(link_kind){work.sprite.flg|=0x80;work.link=link_kind;work.index=link_index;work.node=unsigned(spawn.lkono);work.offset=spawn.offset;}
-    auto slot=std::find_if(sprites_.begin(),sprites_.end(),[](const SpriteWork& s){return s.dynamic&&s.hidden;});
-    unsigned index;if(slot!=sprites_.end()){index=unsigned(slot-sprites_.begin());*slot=work;}else{if(sprites_.size()>=512)return;index=unsigned(sprites_.size());entity(4,index);sprites_.push_back(work);}
+    std::vector<unsigned> flags;flags.reserve(sprites_.size());for(const auto& slot:sprites_)flags.push_back(slot.sprite.flg);
+    const int free_slot=original_effect_slot(flags);if(free_slot<0)return;const unsigned index=unsigned(free_slot);
+    if(index<sprites_.size())sprites_[index]=work;else{entity(4,index);sprites_.push_back(work);}
     auto& e=entity(4,index);e.transform.position=spawn.position;e.angles={spawn.ax,spawn.ay,0};e.hidden=false;
 }
 // Drains what the original effect procedures requested through bhSetEffectTb/bhSetEffect/CallPlayerActionSe/bhCheckBombAtari.
@@ -628,6 +635,7 @@ void RoomWorld::process_effect_output(){
     for(const auto& spawn:out.spawns)spawn_effect(spawn);
     for(const auto id:out.unsupported)unbound_enemy_.insert("bhEff"+std::to_string(id));
     for(const auto se:out.sounds)audio_.play_room_sound((se>>8)&15,se&255,6); // CallPlayerActionSe: bank (SeNo/256)&0xF, list SeNo
+    for(const auto& se:out.room_sounds)audio_.play_room_sound(se.bank,se.program,se.slot); // sdfunc.c CallYakkyouSe, slot 10
     if(out.light){if(lights_.empty())lights_.resize(1,Light{});const auto& l=*out.light;lights_[0]=Light{l.flg,l.type,unsigned(l.aspd),unsigned(l.lkflg),unsigned(l.lkno),unsigned(l.lkono),unsigned(l.lsrc),0,l.position,l.offset,l.direction,l.color,l.near_range,l.far_range};}
     for(const auto& bomb:out.bombs)bomb_damage(bomb);
 }
@@ -685,9 +693,10 @@ void RoomWorld::tick(){
     for(auto& pair:entities_){auto& e=pair.second;if(!(simulation_flags_&2u)||pair.first.first!=1||e.identity!=4||e.scripted||e.hidden||e.inactive||e.dead||!e.type)continue;EnemySpawn spawn;spawn.id=4;spawn.flr_no=floor_at(e.transform.position);spawn.px=e.transform.position.x;spawn.py=e.transform.position.y;spawn.pz=e.transform.position.z;spawn.ay=e.transform.yaw;spawn.type=e.type;if(activate_enemy_spawn(spawn,player_.position,floor_at(player_.position),enemy_areas_,enemy_spawn_)){e.transform.position={spawn.px,spawn.py,spawn.pz};e.transform.yaw=spawn.ay;e.type=spawn.type;if(e.en01){recvx_enemy_release(e.en01.get(),1,0,0,0,e.type);recvx_enemy_motion(e.en01.get(),1,0,65536);}e.motion=1;e.room_motion=false;e.frame=0;e.step=65536;e.has_motion=true;entity_motion(e);}}
 
     tick_en01();
+    update_player_ground_work(); // player.c:1743-1762, immediately before bhControlEffect
     control_player_effects();
-    set_effect_walls(&walls_,room_height_);
-    if(simulation_flags_&8u)for(unsigned i=0;i<sprites_.size();++i){auto& work=sprites_[i];if(work.hidden||!(work.sprite.flg&1))continue;if(work.link&&work.link<=4){const auto pos=link_point(work.link-1,work.index,work.node,work.offset);work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;}if(supported_effect_sprite(work.sprite.id)){step_effect_sprite(work.sprite,&work.queued);auto& e=entity(4,i);e.type=work.sprite.type;
+    set_effect_walls(&walls_,room_height_);set_effect_ground(&ground_,&effect_water_room_,&effect_water_mobile_);
+    if(simulation_flags_&8u)for(unsigned i=0;i<sprites_.size();++i){auto& work=sprites_[i];if(work.hidden||!(work.sprite.flg&1))continue;if(work.link&&work.link<=4){const auto pos=link_point(work.link-1,work.index,work.node,work.offset);work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;if(work.sprite.id==0&&work.link==1)if(const auto matrix=link_matrix(0,work.index,work.node))set_effect_link_matrix(work.node,matrix->value);}if(supported_effect_sprite(work.sprite.id)){step_effect_sprite(work.sprite,&work.queued);auto& e=entity(4,i);e.type=work.sprite.type;
         if(work.dynamic){work.scale={work.sprite.sx,work.sprite.sy,work.sprite.sz};e.transform.position={work.sprite.px,work.sprite.py,work.sprite.pz};e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};}}}
     if(simulation_flags_&8u){process_effect_output();
     particles_.tick([this](const ParticleLink& link,NJS_POINT3 offset){return link_point(link.kind,link.index,link.node,offset);},[this](NJS_POINT3 probe){return !step_clear(probe,0.2f,0.01f);});}
@@ -766,6 +775,14 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
             vertex.light={std::clamp(color.x,0.f,1.f),std::clamp(color.y,0.f,1.f),std::clamp(color.z,0.f,1.f)};}
         t.gouraud=true;t.world_lit=true;
     }
+    // bhDrawPolEffect draws the original effect model through the common
+    // texture list, after building O_WRK.mtx from the linked actor node.
+    if(effect_model0_)for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];const auto& s=work.sprite;if(work.hidden||s.id!=0||!s.polygon_queued||s.flg&0x1000000||s.stflg&0x1000000)continue;
+        const auto atlas=effect_textures_.find(unsigned(s.tex_id));if(atlas==effect_textures_.end()||s.ani_ct>=atlas->second.size())continue;const unsigned texture=unsigned(scene.textures.size());scene.textures.push_back(atlas->second[s.ani_ct]);
+        NJS_MATRIX matrix;if((s.flg&0x200000)||!(s.flg&0x80)){njUnitMatrix(&matrix);njTranslate(&matrix,s.px,s.py,s.pz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
+        else {njUnitMatrix(&matrix);if(work.link&&work.link<=4)if(const auto parent=link_matrix(work.link-1,work.index,work.node))std::copy(parent->value,parent->value+16,matrix);njTranslate(&matrix,s.lox,s.loy,s.loz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
+        njScale(&matrix,s.sx,s.sy,s.sz);
+        for(auto triangle:effect_model0_->triangles){if(triangle.textured)triangle.texture=std::uint16_t(texture);for(auto& vertex:triangle.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}triangle.camera_mask=false;triangle.world_lit=false;triangle.gouraud=false;scene.triangles.push_back(std::move(triangle));}}
     for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];if(work.hidden||!work.queued||work.sprite.flg&0x1000000)continue;const auto atlas=effect_textures_.find(work.sprite.tex_id);if(atlas==effect_textures_.end()||work.sprite.ani_ct>=atlas->second.size())continue;const auto base=scene.textures.size();scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());auto position=entities_.at({4,i}).transform.position;if(work.link&&work.link<=4)position=link_point(work.link-1,work.index,work.node,work.offset);auto sprite=work.sprite;const auto& e=entities_.at({4,i});sprite.ax=e.angles[0];sprite.ay=e.angles[1];sprite.az=e.angles[2]+work.sprite.az;append_effect_sprite(scene,sprite,position,work.scale,effect_camera,unsigned(base+sprite.ani_ct));}
     {std::map<unsigned,unsigned> bases;for(const auto& work:sprites_)if(!work.hidden&&work.queued)for(const auto& q:work.sprite.quads)if(!bases.count(q.category)){const auto atlas=effect_textures_.find(q.category);if(atlas!=effect_textures_.end()){bases[q.category]=unsigned(scene.textures.size());scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());}}
      for(const auto& work:sprites_)if(!work.hidden&&work.queued&&!work.sprite.quads.empty())append_custom_effect(scene,work.sprite,effect_camera,bases);}
@@ -842,8 +859,41 @@ void RoomWorld::ensure_push(){
     push_->terrain(areas(0x1c,0x9c),areas(0x20,0xa0));
 }
 std::vector<CollisionWall> RoomWorld::collision_geometry()const{auto out=walls_;if(push_){const auto mobile=push_->walls();out.insert(out.end(),mobile.begin(),mobile.end());}return out;}
-void RoomWorld::update_push(){if(push_){push_->enabled(simulation_flags_);push_->update_walls(walls_);for(unsigned i=0;i<push_objects_.size();++i){const auto& e=entity(2,push_objects_[i]);push_->update_object(i,e.transform.position,e.hidden||e.inactive);}}}
-void RoomWorld::sync_push_objects(){if(push_)for(unsigned i=0;i<push_objects_.size();++i)entity(2,push_objects_[i]).transform.position=push_->object(i);}
+float RoomWorld::combat_ground(NJS_POINT3 probe){
+    ensure_push();update_push();
+    return ground_.query(probe);
+}
+void RoomWorld::update_ground_geometry(){const auto mobile_walls=push_?push_->walls():std::vector<CollisionWall>{};ground_.update(walls_,room_height_,mobile_walls);effect_water_mobile_.clear();if(push_)for(const auto& a:push_->floors())effect_water_mobile_.push_back({a.flg,a.type,a.id,a.flr_no,a.attr,{a.px,a.py,a.pz},{a.w,a.h,a.d},{a.prm0,a.prm1,a.prm2,a.prm3}});}
+void RoomWorld::update_player_ground_work(){
+    player_ground_ready_=false;
+    if(!player_asset_||!(simulation_flags_&1u))return;
+    ensure_push();update_push();
+    // The host does not yet own the general bhControlPlayer BH_PWORK. Only
+    // consume status/mode values while an original push or stair work supplies
+    // them; treating PlayerPush's idle initialization as the general work
+    // would invent the missing player-state lifecycle.
+    if(!stair_ground_state_&&!push_->active())return;
+    const unsigned status=stair_ground_state_?stair_ground_state_->first:push_->state().status;
+    const int mode0=stair_ground_state_?stair_ground_state_->second:push_->state().mode0;
+    if((status&0x1000000u)||player_hidden)return;
+    std::vector<BoneMatrix> model_nodes;
+    (void)sample_player(*player_asset_,&model_nodes);
+    const auto nodes=player_asset_->script_nodes(model_nodes);
+    if(nodes.size()<=4)throw std::runtime_error("player model lacks original bhControlPlayer ground/water nodes 0, 1, 4");
+    const auto& root=nodes[0].value;const auto& hip=nodes[1].value;const auto& water=nodes[4].value;
+    const bool root_position=(status&0x30u)||mode0==7;
+    const float gx=root_position?root[12]:player_.position.x;
+    const float gz=root_position?root[14]:player_.position.z;
+    player_ground_.ground={gx,hip[13],gz};
+    player_ground_.ground.y=ground_.query(player_ground_.ground); // original plp->gpy assignment only
+    player_ground_.water_c1={water[12],water[13],water[14]};
+    player_ground_.water_c2={root[12],root[13],root[14]};
+    player_ground_.water_radius=2.5f;
+    player_ground_.hit=ground_.hit();
+    player_ground_ready_=true;
+}
+void RoomWorld::update_push(){if(push_){push_->enabled(simulation_flags_);push_->update_walls(walls_);for(unsigned i=0;i<push_objects_.size();++i){const auto& e=entity(2,push_objects_[i]);push_->update_object(i,e.transform.position,e.hidden||e.inactive);}}update_ground_geometry();}
+void RoomWorld::sync_push_objects(){if(push_)for(unsigned i=0;i<push_objects_.size();++i)entity(2,push_objects_[i]).transform.position=push_->object(i);update_ground_geometry();}
 bool RoomWorld::tick_push(bool forward){if(!pushing())return false;update_push();push_->tick(forward,player_character_,push_health(),player_weapon_<10?0:1,player_,motion_,frame_);push_pose_=true;player_action=push_->active();sync_push_objects();return true;}
 std::vector<RECVX_STAIR_AREA> RoomWorld::push_steps(){ensure_push();update_push();return push_?push_->steps():std::vector<RECVX_STAIR_AREA>{};}
 std::vector<RECVX_STAIR_AREA> RoomWorld::push_floors(){ensure_push();update_push();return push_?push_->floors():std::vector<RECVX_STAIR_AREA>{};}
@@ -852,7 +902,7 @@ NJS_POINT3 RoomWorld::move(NJS_POINT3 from,NJS_POINT3 to,float radius,float heig
     update_push();
     NJS_POINT3 position;
     if(push_&&(simulation_flags_&4u)&&!player_action&&walking.has_value()){position=push_->contact(from,to,player_.yaw,floor_at(from),*walking,push_health(),player_weapon_<10?0:1,motion_,frame_);player_action=push_->active();push_pose_=false;sync_push_objects();return position;}
-    else position=move_walls(collision_geometry(),room_height_,floors_,from,to,radius,height,0x119,0x40000000u);
+    else {if(!push_)throw std::runtime_error("original bhCheckWall player work unavailable before player asset binding");position=push_->resolve_wall(to,player_.yaw,floor_at(from),radius,height);}
 
     // player.c stores bhGetGroundPosition() in plp->gpy after movement; it
     // does not write that query result back to plp->py. Vertical movement is
@@ -880,6 +930,6 @@ void RoomWorld::control_player_effects(){
             light.flags|=2;}
         else if(!(light.flags&2)){light.flags|=2;light.link=1;light.index=0;light.node=9;}
     }else if(lighter_){lighter_=false;if(lights_.size()>1)lights_[1].flags&=~2u;}
-    set_effect_context({lighter_fire_?0x20000000u:0u,1,lighter_?0x1000000u:0u,player_hidden?0x1000000u:0u,0,0,simulation_flags_});
+    set_effect_context({lighter_fire_?0x20000000u:0u,1,lighter_?0x1000000u:0u,player_hidden?0x1000000u:0u,0,0,simulation_flags_,effect_yk_ct_});
 }
 }

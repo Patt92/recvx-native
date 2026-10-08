@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 namespace recvx {
+class EventVm;
 enum class MenuInput {Open,Cancel,Confirm,Up,Down,Left,Right};
 // Status/ItemBox screen slide (sub1.c SpriteH, SpriteUV, StatusCancel, BGFadeIn/Out):
 // the twelve sprite centers (cen_pos) move 1/8 of their delta for eight ticks plus
@@ -123,6 +124,7 @@ public:
     void show_gameover_message(SoftwareRenderer& image,const Message& message,int x,int y,unsigned color)const{text(image,message,x,y,1,color,true);}
     // system.c bhSysCallScreenSaver case 10: the Select pause overlay.
     void draw_pause(SoftwareRenderer& image,bool controller_present)const;
+    void draw_event_timer(SoftwareRenderer& image,const EventVm& events)const;
     std::string item_name(unsigned id)const;
     Message system_message(unsigned index)const;
 private:

@@ -20,7 +20,7 @@ typedef struct {
     const float* grand;                                                       // rom->grand[32]
     int ply_id;
 } RECVX_STAIR_HOST;
-typedef struct {int active;float px,py,pz;int ay;unsigned motion;int frame;int floor;unsigned unsupported_services;} RECVX_STAIR_STATE;
+typedef struct {int active;float px,py,pz;int ay;unsigned motion;int frame;int floor;unsigned unsupported_services,status;int mode0;} RECVX_STAIR_STATE;
 // bhCheckExmAtari type 1: starts kdu/kdd (stairs, attr&1 == 0) or hsu/hsd (ladders, attr&1).
 int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,const float* grand,float px,float py,float pz,int ay,int floor,int dmlvl,int wpntp);
 // One original 30-Hz player frame: action routine, then bhSetMotion's frame advance.

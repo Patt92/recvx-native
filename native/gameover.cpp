@@ -85,7 +85,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
     if(i.frame.stop_ticks>=0)for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,unsigned(i.frame.stop_ticks));
     for(auto sound:i.frame.sounds)audio.play_system(sound);
     if(i.frame.dead_voice>=0)audio.play(0,"ADV",unsigned(i.frame.dead_voice+8),AudioMixer::adx_gain(-45),false,AudioMixer::adx_fade_ticks(2));
-    events.flags[10][0]=sys->cb_flg;events.flags[11][0]=sys->gm_flg;events.flags[12][0]=sys->ts_flg;events.flags[5][0]=sys->st_flg;events.flags[6][0]=sys->sp_flg;std::copy(sys->ev_flg,sys->ev_flg+32,events.flags[1].begin());events.event_timer=sys->evt_tim;
+    events.flags[10][0]=sys->cb_flg;events.flags[11][0]=sys->gm_flg;events.flags[12][0]=sys->ts_flg;events.flags[5][0]=sys->st_flg;events.flags[6][0]=sys->sp_flg;std::copy(sys->ev_flg,sys->ev_flg+32,events.flags[1].begin());events.event_deadline_mode=0;events.event_deadline_ticks=0;
     if(i.frame.result)i.running=false;
     return i.frame.result==1?Result::Retry:i.frame.result==2?Result::Title:Result::Running;
 }

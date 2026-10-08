@@ -6,13 +6,14 @@
 #include <map>
 #include "collision.h"
 namespace recvx {
+struct EffectModelWork;
 // Fields consumed by the original bhEff200/201/218 procedures and draw path.
 struct EffectSprite {
-    unsigned id=0,type=0,mode0=0,mode1=0,flg=0,ani_ct=0;
+    unsigned id=0,type=0,mode0=0,mode1=0,flg=0,stflg=0,ani_ct=0;bool polygon_queued=false;
     int ayp=0;float yn=0;void* func=nullptr;
     int ax=0,ay=0,az=0,lkono=0,ct0=0,ct1=0,tex_id=-1,bl_src=8,bl_dst=6;
     // bhSetEffectTb/bhSetEffect fields used by the generated procedures (px..pz must stay contiguous).
-    unsigned mdlver=0;int flr_no=0;float px=0,py=0,pz=0,lox=0,loy=0,loz=0,sx=1,sy=1,sz=1,sxb=1,syb=1,szb=1,spd=0;
+    unsigned mdlver=0;int flr_no=0;float px=0,py=0,pz=0,gpx=0,gpy=0,gpz=0,lox=0,loy=0,loz=0,xn=0,zn=0,sx=1,sy=1,sz=1,sxb=1,syb=1,szb=1,spd=0;void* lkwkp=nullptr;EffectModelWork* mlwP=nullptr;
     struct Vertex {float x=0,y=0,z=0,u=0,v=0;std::uint32_t col=0;};
     std::array<Vertex,4> tv{{{-1,-1,0},{1,-1,0},{-1,1,0},{1,1,0}}};
     struct Quad {NJS_POINT3 center;std::array<Vertex,4> vertices;unsigned category,source,destination;};
@@ -20,9 +21,11 @@ struct EffectSprite {
     unsigned char* exp0=nullptr; // original UV table pointer (bhEff009)
 };
 // Globals read by the original procedures (sys->st_flg/pt_flg, plp->flg/stflg/mdflg).
-struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,player_mdflg=0,cb_flg=0,sp_flg=8;};
+struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,player_mdflg=0,cb_flg=0,sp_flg=8,yk_ct=0;};
 void set_effect_context(const EffectContext& context);
 void set_effect_walls(const std::vector<CollisionWall>* walls,float room_height);
+void set_effect_ground(class GroundCollision* ground,const std::vector<CollisionWall>* water_room,const std::vector<CollisionWall>* water_mobile);
+void set_effect_link_matrix(unsigned node,const float* matrix);
 void set_explosion_effect(NJS_POINT3 position,NJS_POINT3 view);
 void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,unsigned>& texture_bases);
 // bhControlPlayer lighter (wpnr_no 1): WpnEffTab[1][0] and lgttab[1].
@@ -33,7 +36,8 @@ OriginalLight lighter_light();
 // bhSetEffectTb / bhSetEffect: a request to start one effect work (the host owns the slots).
 struct EffectSpawn {unsigned flg=1,id=0,type=0;int flr_no=0;unsigned mdlver=0;NJS_POINT3 position{},scale{1,1,1};int ax=0,ay=0,lkono=0;bool has_offset=false;NJS_POINT3 offset{};};
 struct BombRequest {NJS_POINT3 position;float radius;int damage_max,damage_min;}; // bhCheckBombAtari
-struct EffectOutput {std::vector<EffectSpawn> spawns;std::vector<unsigned> sounds;std::vector<BombRequest> bombs;std::optional<OriginalLight> light;std::set<unsigned> unsupported;};
+struct EffectRoomSound {unsigned bank,program,slot;};
+struct EffectOutput {std::vector<EffectSpawn> spawns;std::vector<unsigned> sounds;std::vector<EffectRoomSound> room_sounds;std::vector<BombRequest> bombs;std::optional<OriginalLight> light;std::set<unsigned> unsupported;};
 // Fills the effect work exactly as bhSetEffectTb copies an EF_WORK.
 void initialize_effect_sprite(EffectSprite& sprite,const EffectSpawn& spawn);
 // bhSetExplosion (weapon.c): sound 534, flash light, effects 16/23/24. `view` is cam.vx/vy/vz.
@@ -47,6 +51,9 @@ std::vector<std::pair<unsigned,unsigned>> common_effect_categories(); // {first 
 // (bhDrawTrsEffect3D only draws queued work).
 bool step_effect_sprite(EffectSprite& sprite,bool* queued=nullptr);
 bool supported_effect_sprite(unsigned id);
+// effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
+// slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
+int original_effect_slot(const std::vector<unsigned>& flags);
 
 void append_effect_sprite(Scene& scene,const EffectSprite& sprite,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture);
 }

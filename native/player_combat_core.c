@@ -1,4 +1,5 @@
 #include "player_combat_core.h"
+#include "core_random.h"
 #include "ninja_matrix.h"
 #include <stdlib.h>
 #include <string.h>
@@ -46,7 +47,9 @@ static int bhCheckFloorSound(BH_PWORK* p,int floor,float x,float z){return host-
 static void CallPlayerFootStepSe(int s,int a,int b){host->footstep(host->user,s,a,b);}
 static void StartVibrationEx(int p,int n){host->vibration(host->user,p,n);}
 static int bhCountBullet(void);
+#define rand recvx_core_random_next
 #include "player_combat.inc"
+#undef rand
 static int bhCountBullet(void){int result=bhCountBulletOriginal();if(result)++*shot_count;return result;}
 struct RECVX_COMBAT_CORE {COMBAT_SYS system;LGT_WORK light;ATR_WORK wall;O_WRK effects[512];BH_PWORK player,enemies[128],weapon;EXP_WORK exp;int exp1[32];PP_WORK pair;RECVX_COMBAT_HOST host;ML_WORK model,weapon_model;O_WORK nodes[256];NJS_CNK_OBJECT objects[256],weapon_objects[8];MN_WORK* motions;unsigned motion_count;RECVX_PUSH_POSE* poses;unsigned pose_count,shots;int pose_frame;};
 static void bind(RECVX_COMBAT_CORE* c){sys=&c->system;plp=&c->player;ene=c->enemies;host=&c->host;shot_count=&c->shots;eff=c->effects;room.lgtp=&c->light;sys->ahtp=&c->wall;}
@@ -61,11 +64,11 @@ void recvx_combat_tick(RECVX_COMBAT_CORE* c,RECVX_COMBAT_STATE* out,unsigned pad
  if(plp->mode1){assert(plp->mtn_no<c->motion_count&&plp->mnwP[plp->mtn_no].datP);bhSetMotion(plp,plp->mtn_add,plp->mtn_md,plp->mtn_tp);if(plp->frm_no/65536>=(int)plp->mnwP[plp->mtn_no].frm_num-1)plp->flg|=0x400000;else plp->flg&=~0x400000;}
  for(unsigned i=0;i<c->pose_count;++i){memcpy(c->poses[i].pos,c->objects[i].pos,sizeof c->poses[i].pos);memcpy(c->poses[i].ang,c->objects[i].ang,sizeof c->poses[i].ang);}
  if(!(plp->flg&0x10000)){plp->mode1=plp->mode2=plp->mode3=0;}
- *out=(RECVX_COMBAT_STATE){.active=plp->mode1!=0,.mode=plp->mode2,.phase=plp->mode3,.motion=plp->mtn_no,.frame=plp->frm_no,.pose_frame=c->pose_frame,.yaw=plp->ay&65535,.pitch=plp->wax,.flags=plp->flg,.status=plp->stflg,.at_flags=plp->at_flg,.hokan_count=plp->hokan_count,.shots=c->shots,.gm_flags=sys->gm_flg,.target_right=plp->src_no,.target_left=plp->src_no,.arm_right=c->pair.arm_ar,.arm_left=c->pair.arm_al};
+ *out=(RECVX_COMBAT_STATE){.active=plp->mode1!=0,.mode=plp->mode2,.phase=plp->mode3,.motion=plp->mtn_no,.frame=plp->frm_no,.pose_frame=c->pose_frame,.yaw=plp->ay&65535,.pitch=plp->wax,.flags=plp->flg,.status=plp->stflg,.at_flags=plp->at_flg,.hokan_count=plp->hokan_count,.shots=c->shots,.gm_flags=sys->gm_flg,.yk_ct=sys->yk_ct,.target_right=plp->src_no,.target_left=plp->src_no,.arm_right=c->pair.arm_ar,.arm_left=c->pair.arm_al};
  // Report newly spawned original effect works once, with the fields the host consumes.
  for(unsigned i=0;i<512;++i)if((eff[i].flg&3)&&!eff[i].func){
   const O_WRK* o=eff+i;
-  RECVX_COMBAT_EFFECT e={o->flg,o->id,o->type,o->mdlver,o->flr_no,o->px,o->py,o->pz,o->sx,o->sy,o->sz,o->ax,o->ay,o->az,o->lkono,o->mtx?*o->mtx:NULL};
+  RECVX_COMBAT_EFFECT e={o->flg,o->id,o->type,o->mdlver,o->flr_no,o->px,o->py,o->pz,o->sx,o->sy,o->sz,o->ax,o->ay,o->az,o->lkono,o->lox,o->loy,o->loz,o->mtx?*o->mtx:NULL};
   host->effect(host->user,i,&e);eff[i].func=(void*)1;}
  host->light(host->user,&c->light);
  if(gm_flags)*gm_flags=sys->gm_flg;

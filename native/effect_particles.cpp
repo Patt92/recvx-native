@@ -1,4 +1,5 @@
 #include "effect_particles.h"
+#include "core_random.h"
 #include "effect_sprites.h"
 #include "chunk_blend.h"
 #include <algorithm>
@@ -42,7 +43,7 @@ O_WRK* AllocOwork(){
     pool.push_back(std::make_unique<Block>());auto* o=reinterpret_cast<O_WRK*>(pool.back()->data);o->flg=2;return o;
 }
 O_WRK* AllocOworkOne(){return AllocOwork();}
-int rand(){static unsigned state=7;state=state*1103515245+12345;return int((state>>1)&0x7fffffff);}
+int rand(){return recvx_core_random_next();}
 struct {NJS_MATRIX mtx;} cam;
 Scene* line_scene=nullptr;
 void njDrawLine3D(void*,int,unsigned);

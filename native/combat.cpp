@@ -126,15 +126,16 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     engine.water=[&](const float*,void*)->int{engine.unavailable.insert("bhCheckWater");return 0;};
     // bhSetGunFire routes the muzzle through bhSetEffectTb, which spawns an
     // original O_WRK. Effect id 3 / type 0 is the type-0 muzzle flash
-    // (bhEff003); anything else has no ported consumer yet.
+    // (bhEff003); id 0 / type 10 is the casing work consumed by bhEff000.
     engine.effect=[&](unsigned,const RECVX_COMBAT_EFFECT* e){
+        if(e->id==0&&e->type==10){EffectSpawn spawn;spawn.flg=e->flg;spawn.id=e->id;spawn.type=e->type;spawn.flr_no=e->flr_no;spawn.mdlver=e->mdlver;spawn.position={e->px,e->py,e->pz};spawn.scale={e->sx,e->sy,e->sz};spawn.ax=e->ax;spawn.ay=e->ay;spawn.lkono=e->lkono;spawn.has_offset=true;spawn.offset={e->lox,e->loy,e->loz};if(world){world->set_effect_counter(engine.state.yk_ct);world->spawn_player_effect(spawn);}return;}
         if(e->id!=3||e->type!=0){engine.unavailable.insert("bhSetEffect id "+std::to_string(e->id));return;}
         fire(inventory,actor,world,audio,player,motion,frame,e->lkono==13);};
     engine.light=[&](const void*){engine.unavailable.insert("bhLightSet");};
     std::vector<RECVX_COMBAT_ENEMY> targets;if(world)for(const auto& t:world->combat_targets())targets.push_back({t.index,t.position.x,t.position.y,t.position.z,t.radius,t.height});recvx_combat_enemies(engine.core,targets.data(),unsigned(targets.size()));
     const auto bones=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));std::vector<float> matrices;for(const auto& bone:bones)matrices.insert(matrices.end(),bone.value,bone.value+16);recvx_combat_nodes(engine.core,matrices.data(),unsigned(bones.size()));
     const unsigned pad=(input.aim?0x10u:0)|(input.attack?0x100u:0)|(input.vertical>0?0x20u:input.vertical<0?0x40u:0)|(input.turn>0?8u:input.turn<0?4u:0)|(input.next_target?0x80u:0);
-    const unsigned old_shots=engine.state.shots;const bool was_attacking=attacking();recvx_combat_tick(engine.core,&engine.state,pad,pad&~engine.pad,inventory.slots(),int(weapon_),int(player_),actor.position.x,actor.position.y,actor.position.z,actor.yaw,events?&events->flags[11][0]:nullptr,events?events->flags[1].data():nullptr);engine.pad=pad;
+    const unsigned old_shots=engine.state.shots;const bool was_attacking=attacking();recvx_combat_tick(engine.core,&engine.state,pad,pad&~engine.pad,inventory.slots(),int(weapon_),int(player_),actor.position.x,actor.position.y,actor.position.z,actor.yaw,events?&events->flags[11][0]:nullptr,events?events->flags[1].data():nullptr);engine.pad=pad;if(world)world->set_effect_counter(engine.state.yk_ct);
     shots+=engine.state.shots-old_shots;if(!was_attacking&&attacking()){++attacks;struck_.clear();}actor.yaw=engine.state.yaw;motion=engine.state.motion;frame=engine.state.pose_frame;vertical_=input.vertical;
     if(world){const auto posed=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));matrices.clear();for(const auto& bone:posed)matrices.insert(matrices.end(),bone.value,bone.value+16);recvx_combat_nodes(engine.core,matrices.data(),unsigned(posed.size()));recvx_combat_after_model(engine.core);}
     aim_.yaw=actor.yaw;aim_.right=engine.state.target_right<0?~0u:unsigned(engine.state.target_right);aim_.left=engine.state.target_left<0?~0u:unsigned(engine.state.target_left);aim_.right_angle=engine.state.arm_right;aim_.left_angle=engine.state.arm_left;

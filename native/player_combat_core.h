@@ -6,7 +6,7 @@ extern "C" {
 typedef struct RECVX_COMBAT_CORE RECVX_COMBAT_CORE;
 typedef struct {float px,py,pz,vx,vy,vz,gx,gy,gz;unsigned at_flg;int wpn_no;float r,l,rn,rmax;int ax,ay;} RECVX_GUN_HIT;
 // Original O_WRK fields an effect consumer needs; bhSetEffect/bhSetEffectTb fill them.
-typedef struct {unsigned flg;unsigned id,type,mdlver;int flr_no;float px,py,pz,sx,sy,sz;int ax,ay,az;unsigned lkono;const float* matrix;} RECVX_COMBAT_EFFECT;
+typedef struct {unsigned flg;unsigned id,type,mdlver;int flr_no;float px,py,pz,sx,sy,sz;int ax,ay,az;unsigned lkono;float lox,loy,loz;const float* matrix;} RECVX_COMBAT_EFFECT;
 typedef struct {
  void* user;
  int (*search_bullet)(void*);
@@ -27,7 +27,7 @@ typedef struct {
  void (*light)(void*,const void*);
 } RECVX_COMBAT_HOST;
 typedef struct {unsigned index;float x,y,z,radius,height;} RECVX_COMBAT_ENEMY;
-typedef struct {int active,mode,phase,motion,frame,pose_frame,yaw,pitch;unsigned flags,status,at_flags,hokan_count,shots,gm_flags;int target_right,target_left,arm_right,arm_left;} RECVX_COMBAT_STATE;
+typedef struct {int active,mode,phase,motion,frame,pose_frame,yaw,pitch;unsigned flags,status,at_flags,hokan_count,shots,gm_flags,yk_ct;int target_right,target_left,arm_right,arm_left;} RECVX_COMBAT_STATE;
 RECVX_COMBAT_CORE* recvx_combat_create(const RECVX_COMBAT_HOST*);
 void recvx_combat_destroy(RECVX_COMBAT_CORE*);
 void recvx_combat_motions(RECVX_COMBAT_CORE*,const RECVX_PUSH_MOTION*,unsigned,RECVX_PUSH_POSE*,unsigned);

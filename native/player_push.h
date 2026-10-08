@@ -9,6 +9,7 @@ public:
  ~PlayerPush();
  PlayerPush(const PlayerPush&)=delete;PlayerPush& operator=(const PlayerPush&)=delete;
  NJS_POINT3 contact(NJS_POINT3 from,NJS_POINT3 to,int yaw,int floor,bool walking,int health,int weapon,std::size_t motion,std::int64_t frame);
+ NJS_POINT3 resolve_wall(NJS_POINT3 candidate,int yaw,int floor,float radius,float height);
  bool tick(bool forward,int character,int health,int weapon,SceneSpawn&,std::size_t&,std::int64_t&);
  bool active()const{return state_.active;}
  const RECVX_PUSH_STATE& state()const{return state_;}

@@ -56,7 +56,7 @@ int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,con
     if(area->type==2)player.mode2=area->prm0?17:16;
     else if(area->prm0==0)player.mode2=(area->attr&1)?20:14;
     else{player.mode2=(area->attr&1)?21:15;player.flr_no=(char)bhCheckFloorNum(player.py-2.0f*area->prm2);}
-    state->active=1;state->px=px;state->py=py;state->pz=pz;state->ay=ay;state->motion=0;state->frame=0;state->floor=floor;
+    state->active=1;state->px=px;state->py=py;state->pz=pz;state->ay=ay;state->motion=0;state->frame=0;state->floor=floor;state->status=player.stflg;state->mode0=player.mode0;
     return 1;
 }
 int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host){
@@ -74,6 +74,6 @@ int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host){
     if(player.flg&0x40000u){static const unsigned feet[2]={17,21};const unsigned foot=feet[(player.flg&0x80000u)?1:0];float now[3];
         host->pose_node(host->user,player.mtn_no,sampled,player.px,player.py,player.pz,player.ay,foot,now);
         player.px-=now[0]-nodes[foot].mtx[12];player.pz-=now[2]-nodes[foot].mtx[14];if(player.flg&0x8000000u)player.py-=now[1]-nodes[foot].mtx[13];}}
-    state->unsupported_services=unsupported_services;state->px=player.px;state->py=player.py;state->pz=player.pz;state->ay=player.ay&0xFFFF;state->motion=player.mtn_no;state->frame=player.frm_no;state->floor=player.flr_no;
+    state->unsupported_services=unsupported_services;state->px=player.px;state->py=player.py;state->pz=player.pz;state->ay=player.ay&0xFFFF;state->motion=player.mtn_no;state->frame=player.frm_no;state->floor=player.flr_no;state->status=player.stflg;state->mode0=player.mode0;
     return state->active;
 }

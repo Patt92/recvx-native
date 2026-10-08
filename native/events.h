@@ -8,7 +8,7 @@
 namespace recvx {
 struct EventCommand {unsigned opcode=0,task=0,event=0;std::size_t offset=0;std::vector<std::uint8_t> bytes;unsigned loop_remaining=0,loop_total=0;unsigned simulation_flags=~0u;};
 struct Interaction {unsigned flags=0,type=0,attribute=0;int floor=0;NJS_POINT3 position{},extent{};std::array<unsigned,4> parameters{};};
-struct EventTaskState {unsigned event,level,delay;std::size_t offset;bool blocked;};
+struct EventTaskState {unsigned event,level,delay;std::size_t offset;bool blocked;unsigned wpnl_no=0;};
 class EventVm {
 public:
     EventVm(const std::vector<std::uint8_t>& room,Inventory& inventory,MessageDialog& dialog);
@@ -22,6 +22,12 @@ public:
     unsigned change_player=0; // sys->cng_pid (bhPlayerChangeSet, cb_flg 0x80)
     std::array<unsigned,4> map_parameters{}; // sys->mp_prm (bhMapSystemOn, cb_flg 0x10000)
     unsigned tick_count=0,event_timer=0,com_number=0; // sys->com_num
+    // sys->evt_tmd/evt_tim/evt_tdg/evt_fcd/evt_fcdct.  This is distinct
+    // from Event_T_timer above: it is the visible, gameplay-critical timer
+    // installed by bhEvtTimerSet.
+    unsigned event_deadline_mode=0,event_deadline_ticks=0,event_deadline_danger=0;
+    unsigned event_deadline_voice_tick=0,event_deadline_voice_count=0;
+    unsigned player_flags=0; // plp->flg, used by bhCheckEvtTimer modes 2/3
     // Renderer/world bindings are distinct from opcode parsing. Unbound
     // commands are retained with exact operands and reported by the runtime.
     std::function<bool(const EventCommand&)> binding;
@@ -36,6 +42,8 @@ public:
     std::function<std::optional<NJS_POINT3>(unsigned,unsigned)> object_position;
     std::function<bool(unsigned)> audio_active;
     std::function<void(unsigned)> audio_stop;
+    // CallSystemVoice (ADV/PatId[3], VoiceNo + 16) for timer mode 3.
+    std::function<void(unsigned)> system_voice;
     std::function<Message(unsigned,unsigned)> item_message;
     std::function<bool()> movie_active;
     std::function<unsigned()> movie_time; // GetMwPlayTimeEx, centiseconds.
@@ -50,6 +58,9 @@ public:
     void tick();
     void finish_room_exit(); // final bhControlEvent pass before bhStartDoorDemo
     void advance_game_clock(unsigned vertical_blanks=2);
+    // bhCheckEvtTimer, called by bhMainSequence after the VSync countdown.
+    void check_event_deadline();
+    bool event_deadline_visible()const;
     void start(unsigned level,unsigned event);
     bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
     bool use(unsigned item,unsigned* message=nullptr,unsigned slot=~0u);
@@ -73,9 +84,8 @@ private:
     bool door_scenario_pending_=false;
     bool request_door(const DoorRequest& request);
     struct Loop {std::size_t condition=0,body=0;unsigned count=0;bool repeat=false;};
-    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;std::array<unsigned,32> loop_counts{};};
+    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0,wpnl_no=0;float addpx=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;std::array<unsigned,32> loop_counts{};};
     std::vector<std::uint8_t> room_;
-    std::uint32_t random_=1; // Deterministic host RNG; PS2 libc sequence is not yet matched.
     std::size_t base_=0,scd0_=0,scd1_=0,messages_=0;
     std::vector<std::size_t> scripts_;
     std::vector<Interaction> floors_;

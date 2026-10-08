@@ -3,7 +3,9 @@
 #include "room.h"
 #include "ninja_math.h"
 #include "inspection.h"
+#include "core_random.h"
 #include <algorithm>
+#include <cstring>
 #include <sstream>
 namespace recvx {
 namespace event_inventory_original {
@@ -81,6 +83,15 @@ int EventVm::instruction(Task& t){
     // Original Event_T_timer: one increment per scheduler pass with active work.
     case 0x60:{const auto limit=v.u16(p+4);advance(6);return event_timer<limit;}
     case 0x61:event_timer=0;return advance(2);
+    // bhEvtTimerSet: sys->evt_tmd is mode+1 even for an otherwise unused
+    // mode.  The three defined modes also arm their original event flag and
+    // fixed VSync-unit deadline in bhSetEventTimer (system.c).
+    case 0xcb:{const unsigned mode=v.u8(p+1);event_deadline_mode=mode+1;
+        switch(mode){
+        case 0:set_flag(1,69,0);event_deadline_ticks=2700;event_deadline_danger=900;break;
+        case 1:set_flag(1,67,0);event_deadline_ticks=18000;event_deadline_danger=3600;break;
+        case 2:set_flag(1,70,0);event_deadline_ticks=18000;event_deadline_danger=3600;event_deadline_voice_tick=900;event_deadline_voice_count=0;break;
+        }return advance(2);}
     case 0xd0:world(t,op,4);return 1;
     case 0x79:world(t,op,6);return 1;
     case 0x7a:world(t,op,2);return 1;
@@ -140,7 +151,11 @@ int EventVm::instruction(Task& t){
         case 3:flags[10][0]|=0x44;flags[5][0]|=4;break;
         case 4:flags[10][0]&=~0x44u;flags[5][0]&=~4u;flags[6][0]=0xffffffff;break;
         default:throw std::runtime_error("invalid CineSet mode");}return 1;}
-    case 0x63:{const auto limit=v.u8(p+1);if(!limit)throw std::runtime_error("random modulus zero");random_=random_*1664525u+1013904223u;values[17]=unsigned((std::uint64_t(random_)*100)>>32)%limit;return advance(2);}
+    // event.c bhRandamSet: single shared EE rand(), float scaling, then modulo.
+    case 0x63:{const unsigned limit=v.u8(p+1);if(!limit)throw std::runtime_error("bhRandamSet modulus zero");const int scaled=int(100.0f*(float(recvx_core_random_next())/2147483648.0f));t.wpnl_no=unsigned(scaled)%limit;return advance(2);}
+    // event.c bhRandTest (opcode 0x8c): optional global srand(seed), then
+    // one original rand() stored both as float bits and wpnl_no.
+    case 0x8c:{const unsigned mode=v.u8(p+1),seed=(v.u16(p+2)<<16)|v.u16(p+4);advance(6);if(mode==0)recvx_core_random_seed(seed);t.addpx=float(recvx_core_random_next())/2147483648.0f;std::memcpy(&t.wpnl_no,&t.addpx,sizeof t.wpnl_no);return 1;}
     case 0x14:{const auto packed=v.u16(p+2);advance(4);start(packed&255,packed>>8);return 1;}
     case 0x1f:{const auto mode=v.u8(p+1),index=v.u8(p+2),freeze=v.u8(p+3);advance(4);if(!mode){show_dialog(read_message(room_,messages_,index),index);opening_hint_=t.event==16&&index==4;if(!freeze)flags[6][0]&=~7u;}else flags[6][0]|=7;return 1;}
     case 0x25:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");auto& a=interactions[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);return advance(10);}
@@ -282,7 +297,47 @@ void EventVm::run(Task& t,bool scenario){
     if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);if(result==1)continue;if(result==0&&!t.branches.empty()){t.pc=t.branches.back();t.branches.pop_back();continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
     catch(const std::exception& e){t.blocked=true;std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(t.pc-base_)<<" (opcode 0x"<<unsigned(room_.at(t.pc))<<"): "<<e.what();if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());}
 }
-void EventVm::advance_game_clock(unsigned vertical_blanks){if(flag(1,3))inventory_.play_time+=std::min(vertical_blanks,216000000u-std::min(inventory_.play_time,216000000u));}
+void EventVm::advance_game_clock(unsigned vertical_blanks){
+    if(flag(1,3))inventory_.play_time+=std::min(vertical_blanks,216000000u-std::min(inventory_.play_time,216000000u));
+    // bhControlVSync: the host's 30-Hz game pass accounts for its two VSyncs
+    // through vertical_blanks, just like stv_tm above.  The original timers
+    // are configured in even VSync units, so their subtraction cannot cross
+    // zero in ordinary gameplay.
+    if((flags[6][0]&0x200u)&&event_deadline_ticks){
+        event_deadline_ticks-=vertical_blanks;
+        const unsigned keep=event_deadline_mode==1?69:event_deadline_mode==2?67:event_deadline_mode==3?70:~0u;
+        if(keep!=~0u&&!flag(1,keep)){event_deadline_mode=0;event_deadline_ticks=0;}
+    }
+    // bhMainSequence calls bhCheckEvtTimer after the VSync service.
+    check_event_deadline();
+}
+bool EventVm::event_deadline_visible()const{return event_deadline_ticks&&(flags[6][0]&0x200u)&&!flag(3,349);}
+void EventVm::check_event_deadline(){
+    // system.c draws mode 3's deadline and dispatches its warning voices from
+    // the same game pass.  The countdown itself was already advanced by
+    // bhControlVSync above.
+    if(event_deadline_ticks&&event_deadline_mode==3&&(flags[6][0]&0x200u)&&event_deadline_voice_tick>=event_deadline_ticks){
+        event_deadline_voice_tick=event_deadline_voice_count?event_deadline_voice_tick-60:600;
+        if(!(flags[12][0]&0x80u)&&!(flags[10][0]&1u)&&system_voice)system_voice(event_deadline_voice_count);
+        ++event_deadline_voice_count;
+    }
+    // bhCheckEvtTimer (player.c): it deliberately leaves a zero evt_tim and
+    // the mode installed until the normal failure/game-over lifecycle clears
+    // them.  All gating flags are retained, rather than treating a host tick
+    // as an unconditional timeout.
+    if(event_deadline_mode==0||event_deadline_ticks!=0||(flags[6][0]&0x200u)==0||(flags[11][0]&0x20000000u)==0||(flags[12][0]&0x80u)||(flags[12][0]&0x11e00u)!=0x11e00u||(flags[10][0]&1u))return;
+    if(flag(1,69)){
+        if(flags[5][0]&0x200u){flags[5][0]|=0x400000u;flags[10][0]|=0x2000u;flags[10][0]&=~0x1000u;}
+        inventory_.hp=-1;set_flag(1,69,1);
+    }
+    if(flag(1,67)){
+        flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;set_flag(1,67,1);
+    }
+    if(flag(1,70)){
+        if(system_voice)system_voice(11);
+        flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;set_flag(1,70,1);
+    }
+}
 void EventVm::tick(){++tick_count;const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
     // ItemUse/Use_01/05 call StatusCancel, whose animated exit keeps st_flg
     // 8 for bhControlEvent. The host closes visually at once; retain that
@@ -301,7 +356,7 @@ bool EventVm::request_door(const DoorRequest& request){
 }
 void EventVm::finish_room_exit(){if(door_scenario_pending_)tick();}
 void EventVm::hide_item(unsigned index){if(index>=room_items_.size())throw std::runtime_error("pickup model outside room");EventCommand command{0x20,0,0,0,{0x20,std::uint8_t(index),3,0}};if(!binding||!binding(command))pending_bindings.push_back(command);}
-std::vector<EventTaskState> EventVm::task_states()const{std::vector<EventTaskState> out;for(const auto& t:tasks_)if(t.active)out.push_back({t.event,t.level,t.delay,t.pc-base_,t.blocked});return out;}
+std::vector<EventTaskState> EventVm::task_states()const{std::vector<EventTaskState> out;for(const auto& t:tasks_)if(t.active)out.push_back({t.event,t.level,t.delay,t.pc-base_,t.blocked,t.wpnl_no});return out;}
 void EventVm::choose_dialog(int direction){const auto count=dialog_.choices();if(count)dialog_.selection=(dialog_.selection+count+direction)%count;values[7]=dialog_.selection;}
 void EventVm::finish_pickup(){if(pickup_display_)flags[10][0]&=~0x10u;pickup_item_=pickup_display_=pickup_mode_=0;pickup_model_=~0u;}
 void EventVm::show_dialog(Message message,unsigned index){

@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "events.h"
 #include "asset_io.h"
 #include "binary_view.h"
 #include "item_asset.h"
@@ -300,6 +301,18 @@ void GameUi::draw_pause(SoftwareRenderer& image,bool controller_present)const{
         text(image,line,int(320.f-width/2.f),y,sx,0xffffffff,true,-1,1.f);
         if(end==message.size()||message[end]==0xffff)break;begin=end+1;y+=30;
     }
+}
+void GameUi::draw_event_timer(SoftwareRenderer& image,const EventVm& events)const{
+    if(!events.event_deadline_visible())return;
+    // bhDispTime(&pos, 7, sys->evt_tim, colour, -.9): minutes, seconds and
+    // centiseconds.  An omitted leading minute digit still advances 20 px.
+    const unsigned time=events.event_deadline_ticks,min=(time/3600)%60,sec=(time/60)%60,msc=((time%60)*10)/6;
+    const auto colour=time<events.event_deadline_danger?0xffff2020u:0xff20ff20u;
+    float x=222,y=76;
+    auto glyph=[&](unsigned code){if(code/324>=fonts_.size())return;blit(image,fonts_[code/324],int(x),int(y),28,28,(code%18)*14,(code/18)*14,(code%18)*14+14,(code/18)*14+14,colour);};
+    if(min/10)glyph(16+min/10);x+=20;glyph(16+min%10);x+=20;glyph(7);x+=FontSz[7];
+    glyph(16+sec/10);x+=20;glyph(16+sec%10);x+=20;glyph(2);x+=FontSz[2];
+    glyph(16+msc/10);x+=20;glyph(16+msc%10);
 }
 std::string GameUi::item_name(unsigned id)const{return message_text(read_message(messages_,4,id));}
 void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,float scale,std::uint32_t color,bool dialogue,int selected_choice,float yscale)const{

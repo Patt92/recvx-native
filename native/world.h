@@ -5,6 +5,7 @@
 #include "events.h"
 #include "renderer.h"
 #include "collision.h"
+#include "effect_collision.h"
 #include "effect_sprites.h"
 #include "enemy_spawn.h"
 #include "subplayer.h"
@@ -15,6 +16,7 @@
 #include <map>
 #include <memory>
 namespace recvx {
+struct PlayerGroundWork {NJS_POINT3 ground{};NJS_POINT3 water_c1{},water_c2{};float water_radius=0;std::optional<GroundHit> hit;};
 struct WorldEntity {
     std::vector<FaceParameter> face_keys;unsigned face_frame=0,face_flags=0;
     std::optional<FaceParameter> facial;std::vector<std::uint8_t> lip_stream;unsigned lip_bank=0,lip_pos=0,lip_count=0,lip_time=0,lip_cur=0,lip_next=0;bool lip_active=false;
@@ -56,7 +58,11 @@ public:
     float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,floor_at(origin));}
     float combat_wall_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,unsigned flags=0x400)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,-32768,flags);}
     // bhGetGroundPosition for the original attack path; same collision set as movement.
-    float combat_ground(NJS_POINT3 probe)const{return ground_position(collision_geometry(),room_height_,probe);}
+    float combat_ground(NJS_POINT3 probe);
+    std::optional<GroundHit> ground_hit()const{return ground_.hit();}
+    const PlayerGroundWork* player_ground_work()const{return player_ground_ready_?&player_ground_:nullptr;}
+    void player_stair_ground_state(unsigned status,int mode0){stair_ground_state_=std::make_pair(status,mode0);}
+    void clear_player_stair_ground_state(){stair_ground_state_.reset();}
     const std::vector<SceneTexture>* weapon_flash_textures()const{const auto at=effect_textures_.find(3);return at==effect_textures_.end()?nullptr:&at->second;}
     bool bind(const EventCommand& command);
     void set_simulation_flags(unsigned flags){simulation_flags_=flags;}
@@ -71,6 +77,8 @@ public:
     ModelPose model_pose(unsigned kind,unsigned index,unsigned script_node=0)const;
     void set_player_asset(const PlayerAsset* player){player_asset_=player;}
     void set_player_character(unsigned character){player_character_=int(character&3);}
+    void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
+    void spawn_player_effect(const EffectSpawn& effect){spawn_effect(effect,1,0);}
     // bhSetExplosion: the effect works, flash light and sound; `view` is the camera direction (cam.vx/vy/vz).
     void explode(NJS_POINT3 position,NJS_POINT3 view);
     // Blast damage dealt to the player by bhCheckBombAtari since the last call (hp points).
@@ -133,6 +141,9 @@ private:
     struct EventCameraTrack {std::vector<EventCamera> keys;unsigned next=0;};
     std::vector<std::uint8_t> room_;std::size_t header_;unsigned simulation_flags_=~0u;
     std::unique_ptr<PlayerPush> push_;
+    GroundCollision ground_; // room-owned original sys->htp, shared by ground consumers
+    PlayerGroundWork player_ground_{};bool player_ground_ready_=false;
+    std::optional<std::pair<unsigned,int>> stair_ground_state_;
     std::vector<unsigned> push_objects_;
     bool push_pose_=false,player_poisoned_=false;
     int push_health()const{return player_hp_>=120?(player_poisoned_?1:0):player_hp_>=30?1:2;}
@@ -140,6 +151,8 @@ private:
     void ensure_push();
     void sync_push_objects();
     void update_push();
+    void update_ground_geometry();
+    void update_player_ground_work();
     std::vector<CollisionWall> collision_geometry()const;
     const PlayerAsset* player_asset_=nullptr;
     bool player_room_motion_=false,player_frozen_=false;
@@ -164,10 +177,10 @@ private:
     std::vector<Model> models_;
     struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;};
     bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=false,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::map<unsigned,std::size_t> barrel_walls_;
-    unsigned player_weapon_=0;bool lighter_=false; // plp->flg 0x1000000
+    unsigned player_weapon_=0,effect_yk_ct_=0;bool lighter_=false; // plp->flg 0x1000000, sys->yk_ct
     bool lighter_fire_=false; // sys->st_flg 0x20000000 (bhSetLighterFire)
     void control_player_effects();
-    std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;
+    std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;
     std::vector<MotionClip> room_motions_;
     std::vector<std::vector<FaceParameter>> face_sequences_;std::vector<unsigned> face_sequence_ids_;std::vector<std::vector<std::uint8_t>> lip_sequences_;
     mutable std::map<unsigned,MotionClip> room_motion_segments_;
@@ -178,7 +191,7 @@ private:
     const MotionClip& entity_motion_data(const WorldEntity& entity)const;
     std::vector<CollisionWall> walls_;
     struct FloorSound {CollisionWall area;unsigned sound;};
-    std::vector<FloorSound> floor_sounds_;
+    std::vector<FloorSound> floor_sounds_;std::vector<CollisionWall> effect_water_room_,effect_water_mobile_;
     std::vector<EnemyArea> enemy_areas_;EnemySpawnContext enemy_spawn_;
     unsigned footstep_slot_=4;
     std::size_t footstep_motion_=~std::size_t(0);
