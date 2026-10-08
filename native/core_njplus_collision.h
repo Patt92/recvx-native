@@ -26,6 +26,17 @@
 #define npCutSkin core_np_cut_skin
 #define npTransform core_np_transform
 #define npCalcMorphing core_np_calc_morphing
+#define npCnkFlatOff core_np_cnk_flat_off
+#define npClrTranslate core_np_clr_translate
+#define npCopyMemory core_np_copy_memory
+#define npGetWHDSizeSub core_np_get_whd_size_sub
+#define npGetWHDSize core_np_get_whd_size
+#define npSkinConvPreparation core_np_skin_conv_preparation
+#define npSkinConvSub core_np_skin_conv_sub
+#define npSkinConvMain core_np_skin_conv_main
+#define npSkinConvert core_np_skin_convert
+#define npRetSkinConvMain core_np_ret_skin_conv_main
+#define npRetSkinConvert core_np_ret_skin_convert
 
 #define njTranslateEx core_nj_translate_ex
 #define njRotateEx core_nj_rotate_ex

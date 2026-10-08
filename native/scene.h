@@ -119,6 +119,9 @@ struct Scene {
 };
 Scene decode_scene(const std::vector<std::uint8_t>& room);
 std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>& data,std::size_t offset=0);
+// One NJS_CNK_MODEL (vlist + plist) from raw memory with absolute addresses,
+// transformed by `world` (njCnk*DrawModel through the host renderer).
+Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint32_t model,const NJS_MATRIX& world);
 std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 position,std::int8_t floor=0);
 // bhInitActiveCamera target evaluation (no transition/event-camera state).
 SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 position,std::int8_t floor=0,const NJS_POINT3* eye=nullptr);

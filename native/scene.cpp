@@ -11,6 +11,11 @@ struct CachedVertex {NJS_POINT3 position{};NJS_VECTOR normal{};bool valid=false;
 class Decoder {
 public:
     explicit Decoder(const std::vector<std::uint8_t>& input):data(input),view(input),cache(65536){}
+    // Chunk models that live in the linear memory of the ILP32 original-engine
+    // module: pointers there are absolute module addresses (base 0).
+    Decoder(const std::uint8_t* memory,std::size_t size):data(empty_input()),view(memory,size),cache(65536){}
+    static const std::vector<std::uint8_t>& empty_input(){static const std::vector<std::uint8_t> none;return none;}
+    Scene decode_memory_model(std::uint32_t model,const NJS_MATRIX& world){NJS_MATRIX matrix;std::copy(std::begin(world),std::end(world),std::begin(matrix));camera_mask=false;base=0;memory_mode=true;decode_model(view.relative(0,model,24),&matrix);return std::move(output);}
     Scene decode() {
         const auto room=inspect_room(data);
         output.background=room.background_color|0xff000000;
@@ -109,6 +114,7 @@ private:
     std::vector<CachedVertex> cache;
     std::vector<bool> visited;
     std::size_t base=0,objects=0;
+    bool memory_mode=false; // NULL is 0 in module memory, 0xffffffff in files
     std::uint16_t current_object=0;
     void decode_textures(std::size_t chunk) {
         std::vector<std::uint32_t> palettes;
@@ -205,8 +211,9 @@ private:
     }
     void decode_model(std::size_t model,NJS_MATRIX* world) {
         const auto vertices=view.u32(model),polygons=view.u32(model+4);
-        if(vertices!=0xffffffff)decode_vertices(view.relative(base,vertices,4),world);
-        if(polygons!=0xffffffff)decode_polygons(view.relative(base,polygons,2));
+        const auto present=[&](std::uint32_t p){return p!=0xffffffff&&!(memory_mode&&p==0);};
+        if(present(vertices))decode_vertices(view.relative(base,vertices,4),world);
+        if(present(polygons))decode_polygons(view.relative(base,polygons,2));
     }
     void decode_vertices(std::size_t chunk,NJS_MATRIX* world) {
         for(unsigned iteration=0;iteration<65536;++iteration) {
@@ -312,6 +319,7 @@ Scene decode_scene(const std::vector<std::uint8_t>& room) {
     return Decoder(room).decode();
 }
 std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>& data,std::size_t offset){return Decoder(data).decode_bundle(offset);}
+Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint32_t model,const NJS_MATRIX& world){return Decoder(memory,size).decode_memory_model(model,world);}
 Scene decode_model_asset(const std::vector<std::uint8_t>& data,std::size_t model_offset,
                          std::size_t texture_offset,const ModelGeometryOptions& options) {
     return Decoder(data).decode_asset(model_offset,texture_offset,options);

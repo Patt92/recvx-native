@@ -305,34 +305,74 @@ UNDECL = re.compile(r"call to undeclared function '(\w+)'")
 
 
 def prototype_headers(inc):
-    """Funktionsname -> Header mit dem Original-Prototyp."""
+    """Funktionsname -> (Header mit dem Original-Prototyp, Deklarationszeile)."""
     table = {}
     pat = re.compile(r'^[A-Za-z_][\w \*]*?[ \*](\w+)\s*\(')
     for h in sorted(inc.glob('*.h')):
         for line in h.read_text(errors='surrogateescape').split('\n'):
             m = pat.match(line)
             if m and not line.startswith(('static', 'typedef', 'return', 'extern "')):
-                table.setdefault(m.group(1), h.name)
+                table.setdefault(m.group(1), (h.name, line.rstrip()))
     return table
 
 
-def add_includes(path, flags, table, report):
-    """Fuegt fuer implizit deklarierte Funktionen den Original-Header hinzu."""
+def errors_of(path, flags):
+    """Fehlerausgabe von clang fuer diese Datei (Syntaxpruefung, alle Fehler)."""
     cmd = ['clang', '-fsyntax-only', '-w', '-ferror-limit=0'] + flags + [str(path)]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+    return r.stderr
+
+
+def add_includes(path, flags, table, report):
+    """Fuegt fuer implizit deklarierte Funktionen den Original-Header hinzu.
+
+    Einige Original-Header sind selbst nicht host-uebersetzbar (z. B. ps2_loadtim2.h
+    verlangt die SCE-Typen TIM2_PICTUREHEADER/u_long128). Ein Header wird deshalb nur
+    behalten, wenn er die Fehlerzahl der Datei tatsaechlich senkt."""
+    base = errors_of(path, flags)
     need = []
-    for m in UNDECL.finditer(r.stderr):
-        h = table.get(m.group(1))
-        if h and h not in need:
-            need.append(h)
+    decls = {}
+    for m in UNDECL.finditer(base):
+        entry = table.get(m.group(1))
+        if not entry:
+            continue
+        header, decl = entry
+        if header not in need:
+            need.append(header)
+        decls.setdefault(header, []).append(decl)
     if not need:
         return
-    text = path.read_text(errors='surrogateescape').split('\n')
+    original = path.read_text(errors='surrogateescape')
+    text = original.split('\n')
     last = max((i for i, l in enumerate(text) if l.startswith('#include')), default=-1)
-    ins = ['#include "%s" /* Host: Prototyp statt impliziter int-Deklaration */' % h for h in need]
-    text[last + 1:last + 1] = ins
+    kept = []
+    count = base.count('error:')
+    for header in need:
+        line = '#include "%s" /* Host: Prototyp statt impliziter int-Deklaration */' % header
+        trial = list(text)
+        trial[last + 1:last + 1] = kept + [line]
+        path.write_text('\n'.join(trial), errors='surrogateescape')
+        n = errors_of(path, flags).count('error:')
+        if n < count:
+            kept.append(line)
+            count = n
+            continue
+        # Der Header selbst ist host-seitig nicht uebersetzbar (z. B. ps2_loadtim2.h braucht
+        # die SCE-Typen TIM2_PICTUREHEADER/u_long128). Dann nur die betroffenen
+        # Original-Deklarationen uebernehmen, unveraendert aus dem Header.
+        lines = ['%s /* Host: Original-Prototyp aus %s */' % (d, header)
+                 for d in dict.fromkeys(decls[header])]
+        trial = list(text)
+        trial[last + 1:last + 1] = kept + lines
+        path.write_text('\n'.join(trial), errors='surrogateescape')
+        n = errors_of(path, flags).count('error:')
+        if n < count:
+            kept.extend(lines)
+            count = n
+    text[last + 1:last + 1] = kept
     path.write_text('\n'.join(text), errors='surrogateescape')
-    report['includes'] = need
+    if kept:
+        report['includes'] = kept
 
 
 
@@ -374,6 +414,26 @@ def host_sizes(path, report):
         path.write_text(text.replace(old, 'npSetMemory((unsigned char*)ene, sizeof(ene), 0)'), errors='surrogateescape')
         report['sizes'] = 1
 
+# Funktionen, deren dekompilierter Rumpf das Ende ohne `return` erreicht, obwohl
+# der Aufrufer den Wert verwendet. Der Rueckgabewert ist der Inhalt von v0 am
+# `jr ra` des Originals (SLUS_201.84, rabbitizer):
+#   bhEne01_SetLinkEnemy 0x00176A70: v0 = Ergebnis von bhSetEnemy, danach nur
+#   noch Basis der Stores -> `return epp;`. Aufrufer: bhEne01_Init (exp0/exp1).
+IMPLICIT_RETURNS = {
+    'en01.c': [("\tepp->id = id;\n}\n", "\tepp->id = id;\n\treturn epp; /* v0 = epp (0x00176A70) */\n}\n")],
+}
+
+
+def implicit_returns(path, report):
+    text = path.read_text(errors='surrogateescape')
+    for old, new in IMPLICIT_RETURNS.get(path.name, []):
+        if text.count(old) != 1:
+            sys.exit('%s: Rueckgabestelle nicht eindeutig: %r' % (path.name, old))
+        text = text.replace(old, new)
+        report['returns'] = report.get('returns', 0) + 1
+    path.write_text(text, errors='surrogateescape')
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser()
@@ -403,6 +463,7 @@ def main():
         host_linkage(out / p.name, flags, rep)
         if rep.get('linkage'):
             print('%s: Linkage %s' % (p.name, ' '.join(rep['linkage'])))
+        implicit_returns(out / p.name, rep)
         host_sizes(out / p.name, rep)
         if rep.get('sizes'):
             print('%s: feste Tabellengroesse -> sizeof' % p.name)

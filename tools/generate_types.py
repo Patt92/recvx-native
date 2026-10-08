@@ -6,7 +6,10 @@ Ausgabe: build/native/generated/types/types.h (Build-Artefakt, nicht im Git).
 
 Es wird nichts umgeschrieben oder ergaenzt. Entfernt werden ausschliesslich
   * die PS2-SDK-/CRI-Includes (ersetzt durch build-tools/ninja/),
-  * die PDS_PERIPHERAL-Felder von SYS_WORK (Pad-Treiber),
+  * die PDS_PERIPHERAL-Felder von SYS_WORK (Pad-Treiber); mit --exact-layout
+    (ILP32-Build der Original-Engine) bleiben die Zeigerfelder als Zeiger auf
+    den unvollstaendigen Typ stehen und das Wertfeld ms_per wird zu einem
+    gleich grossen Bytefeld, sodass alle SYS_WORK-Offsets original bleiben,
   * reine PS2-Hardware-/Video-Strukturen, die kein Gegner/Spielobjekt nutzt.
 Zeilenweise Verarbeitung, kein Regex ueber Blockgrenzen.
 """
@@ -33,6 +36,7 @@ def main():
     ap.add_argument('--out', default=str(root / 'build/native/generated/types/types.h'))
     ap.add_argument('--ninja', default=str(root / 'build-tools/ninja'))
     ap.add_argument('--no-check', action='store_true')
+    ap.add_argument('--exact-layout', action='store_true')
     a = ap.parse_args()
 
     lines = Path(a.types).read_text().split('\n')
@@ -61,6 +65,12 @@ def main():
         if INCLUDE_DROP.match(l.strip()):
             continue
         if REMOVE_FIELD_TYPE in l:
+            if a.exact_layout:
+                m = re.match(r'^(\s*)(?:const\s+)?PDS_PERIPHERAL\s+(\w+)\s*;\s*//\s*offset\s*0x[0-9A-Fa-f]+,\s*size\s*(0x[0-9A-Fa-f]+)', l)
+                if m:
+                    out.append('%sunsigned char %s[%s]; /* PDS_PERIPHERAL (Pad-Treiber), Originalgroesse */' % m.groups())
+                else:
+                    out.append(l)
             continue
         out.append(l)
         if not inserted and l.startswith('#define _TYPES_H_'):

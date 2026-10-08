@@ -9,9 +9,11 @@
 namespace recvx {
 class BinaryView {
 public:
-    explicit BinaryView(const std::vector<std::uint8_t>& data) : data_(data) {}
+    explicit BinaryView(const std::vector<std::uint8_t>& data) : data_(data.data()), size_(data.size()) {}
+    // Raw byte range, e.g. the linear memory of the ILP32 original-engine module.
+    BinaryView(const std::uint8_t* data,std::size_t size) : data_(data), size_(size) {}
     void require(std::size_t offset,std::size_t count) const {
-        if(offset>data_.size()||count>data_.size()-offset)throw std::runtime_error("binary field outside asset: offset "+std::to_string(offset)+", bytes "+std::to_string(count)+", asset size "+std::to_string(data_.size()));
+        if(offset>size_||count>size_-offset)throw std::runtime_error("binary field outside asset: offset "+std::to_string(offset)+", bytes "+std::to_string(count)+", asset size "+std::to_string(size_));
     }
     std::uint8_t u8(std::size_t p) const {require(p,1);return data_[p];}
     std::uint16_t u16(std::size_t p) const {require(p,2);return std::uint16_t(data_[p])|(std::uint16_t(data_[p+1])<<8);}
@@ -32,10 +34,11 @@ public:
         float f;std::memcpy(&f,&bits,4);return f;
     }
     std::size_t relative(std::size_t base,std::uint32_t offset,std::size_t required) const {
-        require(base,0);if(offset>data_.size()-base)throw std::runtime_error("binary relative offset outside asset: base "+std::to_string(base)+", offset "+std::to_string(offset)+", asset size "+std::to_string(data_.size()));
+        require(base,0);if(offset>size_-base)throw std::runtime_error("binary relative offset outside asset: base "+std::to_string(base)+", offset "+std::to_string(offset)+", asset size "+std::to_string(size_));
         const auto p=base+offset;require(p,required);return p;
     }
 private:
-    const std::vector<std::uint8_t>& data_;
+    const std::uint8_t* data_;
+    std::size_t size_;
 };
 }

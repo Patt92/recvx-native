@@ -23,9 +23,17 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#if UINTPTR_MAX == 0xffffffffu
+/* ILP32-Build der Original-Engine (wasm32): Zeiger passen wie auf der PS2 in
+ * den Slot, das Handle ist die Adresse selbst. */
+static inline uint32_t recvx_p32_intern(const void* p) { return (uint32_t)(uintptr_t)p; }
+static inline void* recvx_p32_resolve(uint32_t handle) { return (void*)(uintptr_t)handle; }
+static inline void recvx_p32_reset(void) {}
+#else
 uint32_t recvx_p32_intern(const void* p);   /* Zeiger -> Handle */
 void* recvx_p32_resolve(uint32_t handle);   /* Handle -> Zeiger */
 void recvx_p32_reset(void);                 /* nur fuer Tests */
+#endif
 
 /* Slot lesen/schreiben (unausgerichteter 4-Byte-Zugriff wie im Original). */
 static inline void* recvx_p32_get(const void* slot)
