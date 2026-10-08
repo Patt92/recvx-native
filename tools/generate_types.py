@@ -14,7 +14,7 @@ import argparse, re, subprocess, sys
 from pathlib import Path
 
 REMOVE_STRUCTS = [
-    'NODE', 'SCISSOR_NODE', 'SCISSOR', 'PS2_PLANE',
+    'NODE', 'SCISSOR_NODE', 'SCISSOR',
     'TIM2_PICTUREHEADER', 'TIM2_PICTUREHEADER_EX',
     'StrFile', 'VoData', 'VoTag', 'QWORD', 'ViBuf', 'VideoDec', 'AudioDec',
 ]
@@ -74,6 +74,10 @@ def main():
             # PDS_PERIPHERAL). Keine PS2-Header, keine Strukturinhalte.
             out.append('typedef unsigned char u_char; typedef unsigned short u_short;')
             out.append('typedef unsigned int u_int; typedef unsigned long long u_long;')
+            # libvu0.h: reine Datentypen (16-Byte-ausgerichtete Vektoren/Matrizen), ohne SDK-Funktionen
+            out.append('typedef float sceVu0FVECTOR[4] __attribute__((aligned(16)));')
+            out.append('typedef int sceVu0IVECTOR[4] __attribute__((aligned(16)));')
+            out.append('typedef float sceVu0FMATRIX[4][4] __attribute__((aligned(16)));')
             out.append('typedef struct sceGsDBuffDc sceGsDBuffDc;')
             out.append('typedef struct PDS_PERIPHERAL PDS_PERIPHERAL;')
             out.append('typedef struct PDS_PERIPHERALINFO PDS_PERIPHERALINFO;')

@@ -1,5 +1,5 @@
-/* Host side of platform interfaces used by generated original Ninja/GS routines
- * (status/ninja2d.c, tools/generate_status_sources.py). Only SDK macros, VU0
+/* Host core boundary for generated original graphics routines
+ * (status/ninja2d.c, tools/generate_status_sources.py). SDK macros, VU0
  * intrinsics and the scratchpad are supplied here; the routines themselves are
  * the original engine sources. Bit layouts follow the GS/GIF register formats
  * that the original libgraph macros encode. */

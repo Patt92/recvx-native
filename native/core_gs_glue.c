@@ -39,3 +39,14 @@ void loadImage(void* tags)
 
 void D2_SyncTag(void) {}
 void SyncPath(void) {}
+
+void CoreZbuffOffI(void)
+{
+    recvx_core_gs_scratchpad[0] = 0x70000002ull;
+    recvx_core_gs_scratchpad[1] = 0;
+    recvx_core_gs_scratchpad[2] = SCE_GIF_SET_TAG(1, 1, 0, 0, SCE_GIF_PACKED, 1);
+    recvx_core_gs_scratchpad[3] = SCE_GIF_PACKED_AD;
+    recvx_core_gs_scratchpad[4] = SCE_GS_SET_TEST_1(1, SCE_GS_ALPHA_GEQUAL, 128, SCE_GS_AFAIL_KEEP, 0, 0, 1, SCE_GS_DEPTH_GEQUAL);
+    recvx_core_gs_scratchpad[5] = SCE_GS_TEST_1;
+    loadImage((void*)0xF0000000);
+}

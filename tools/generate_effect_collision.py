@@ -4,8 +4,8 @@ import re,sys
 from pathlib import Path
 from generate_native_tables import block
 root,out=map(Path,sys.argv[1:]);src=(root/'src/ps2/veronica/prog/hitchk.c').read_text();parts=[]
-for name in ['bhCheckInnerP4','bhCheckInnerTriangle','bhCheckBox','bhCheckWallType','bhSetWallRefAngle']:
- m=re.search(r'^(?:int|void|ATR_WORK\*) '+name+r'\(',src,re.M);parts.append(src[m.start():block(src,m.start())])
+for name in ['bhCheckInnerP4','bhCheckInnerTriangle','bhCheckInnerTriangle3','bhCheckBox','bhCheckWallType','bhSetWallRefAngle','bhGetGroundPosition']:
+ m=re.search(r'^(?:int|void|float|ATR_WORK\*) '+name+r'\(',src,re.M);parts.append(src[m.start():block(src,m.start())])
 line=(root/'src/ps2/veronica/prog/hitchkl.c').read_text()
 extra=[]
 for name in ['bhCollisionCheckLine','bhCollisionCheckLine2','bhCollisionCheckLineMain','bhCollisionCheckL2PL','bhInOutCheck','bhCollisionCheckL2XZPL','bhCollisionCheckL2XYPL','bhCollisionCheckL2YZPL','bhGetHitCollisionNormal']:

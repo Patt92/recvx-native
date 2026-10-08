@@ -17,12 +17,17 @@ def function(source, name):
     while depth:
         depth += (source[end] == '{') - (source[end] == '}')
         end += 1
-    return source[start:end].replace('rand()', 'effect_random()')
+    return source[start:end].replace('rand()', 'recvx_core_random_next()')
 
 
 for file, names in (('effsub1.c', ('bhEff005', 'bhEff009', 'bhEff016', 'bhEff023', 'bhEff024', 'bhEff025', 'bhDraw024', 'bhDraw025', 'bhEff122')), ('effsub5.c', ('bhEff200', 'bhEff201', 'bhEff218', 'bhEff230', 'bhEff231', 'bhEff232'))):
     source = (prog / file).read_text()
     parts += [function(source, name) for name in names]
+
+# These routines use the same original EE libc state as player.c and event.c.
+parts.append(function((prog / 'effsub1.c').read_text(), 'bhEff000'))
+parts.append(function((prog / 'effsub1.c').read_text(), 'bhEff015'))
+parts.append(function((prog / 'effsub1.c').read_text(), 'bhEff029'))
 
 # weapon.c bhSetExplosion: barrel/grenade explosion (sound, flash light, effects 16/23/24).
 parts.append(function((prog / 'weapon.c').read_text(), 'bhSetExplosion'))

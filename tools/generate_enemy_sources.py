@@ -207,11 +207,25 @@ def rewrite_line(s, flagged):
             continue
         new = '((%s*)recvx_p32_get((void*)&%s))' % (t, s[mac_start:e])
         return s[:m.start()] + new + s[e:], True
+    # (i) *(int*)ADDR = (int)RHS;  Zeiger in Rohpuffer-Slot (Ziel ist der Slot, nicht ein Index in ADDR)
+    m = re.match(r'(\s*)\*\s*\(\s*int\s*\*\s*\)', s)
+    if m:
+        a, e = operand_end(s, m.end())
+        if e > 0:
+            k = e
+            while k < len(s) and s[k] == ' ':
+                k += 1
+            m2 = re.compile(r'\s*\(\s*(?:unsigned\s+)?int\s*\)\s*').match(s, k + 1) if s.startswith('=', k) and not s.startswith('==', k) else None
+            if m2:
+                r = rhs_end(s, m2.end())
+                if r > 0:
+                    new = 'recvx_p32_put((void*)(%s), (%s))' % (s[a:e], s[m2.end():r].strip())
+                    return s[:m.start(0)] + m.group(1) + new + s[r:], True
     # (e) (*(int*)ADDR + M): Basis ist ein Zeigerslot
     m = re.search(r'(\(\s*)\*\s*\(\s*int\s*\*\s*\)', s)
     if m:
         a, e = operand_end(s, m.end())
-        if e > 0:
+        if e > 0 and s[e:].lstrip().startswith(('+', '-')):  # Basis nur bei Zeigerarithmetik
             new = m.group(1) + '(char*)recvx_p32_get((void*)(%s))' % s[a:e]
             return s[:m.start()] + new + s[e:], True
     # (d) SLOTMACRO(N) = (int)RHS;
@@ -232,6 +246,11 @@ def rewrite_line(s, flagged):
 
 
 def pointer_int_truncation(line):
+    # `*(int*)((char*)epw + 0x2EC)` ist im PS2-Layout das Feld lkwkp (types.h: offset 0x2EC).
+    # Auf arm64 verschiebt sich lkwkp (8-Byte-Zeiger); der Zugriff erfolgt daher ueber den Feldnamen.
+    if '*(int*)((char*)epw + 0x2EC)' in line:
+        return line.replace('(BH_PWORK*)*(int*)((char*)epw + 0x2EC)', '(BH_PWORK*)epw->lkwkp') + ' /* Host(arm64): Feld lkwkp (PS2-Offset 0x2EC) */', True
+
     """Zeiger-int-Cast, der auf arm64 Adressbits verliert (markiert).
     - `return (int)ptr;`   -> Handle (nur Null/Nichtnull wird ausgewertet)
     - `(unsigned int)ptr + 63) & ~0x3F` (bhEne_CallocWork, Speicherausrichtung)
@@ -263,7 +282,7 @@ def pointer_slots(path, flags, report):
     for i, l in enumerate(text):
         if l.lstrip().startswith(('#', '//')):
             continue
-        if (i + 1) in flag:
+        if (i + 1) in flag or '(char*)epw + 0x2EC' in l:
             l2, ch = pointer_int_truncation(l)
             if ch:
                 l = l2
@@ -316,6 +335,32 @@ def add_includes(path, flags, table, report):
     report['includes'] = need
 
 
+
+STATIC_CONFLICT = re.compile(r":(\d+):\d+: error: static declaration of '(\w+)' follows non-static declaration")
+SECTION_ATTR = re.compile(r'\s*__attribute__\(\(section\("[^"]*"\)\)\)')
+
+def host_linkage(path, flags, report):
+    """Host(Mach-O/clang): (1) `static` einer Definition entfernen, deren Original-Header
+    sie nicht-static deklariert (mwcc akzeptiert das, clang nicht); (2) PS2-Section-Attribute
+    (.vutext) entfernen, die Mach-O nicht kennt. Semantik unveraendert."""
+    text = path.read_text(errors='surrogateescape').split('\n')
+    ch = []
+    for i, l in enumerate(text):
+        if '__attribute__((section(' in l:
+            text[i] = SECTION_ATTR.sub('', l) + ' /* Host(Mach-O): PS2-Section-Attribut entfernt */'
+            ch.append('section@%d' % (i + 1))
+    path.write_text('\n'.join(text), errors='surrogateescape')
+    r = subprocess.run(['clang', '-fsyntax-only', '-w', '-ferror-limit=0'] + flags + [str(path)],
+                       capture_output=True, text=True, timeout=300)
+    for m in STATIC_CONFLICT.finditer(r.stderr):
+        i = int(m.group(1)) - 1
+        if text[i].startswith('static '):
+            text[i] = text[i][len('static '):] + ' /* Host(clang): static entfernt, Header deklariert nicht-static */'
+            ch.append('static:' + m.group(2))
+    if ch:
+        path.write_text('\n'.join(text), errors='surrogateescape')
+        report['linkage'] = ch
+
 def main():
     root = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser()
@@ -327,10 +372,10 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     R = root
-    flags = ['-DRECVX_NATIVE=1', '-include', str(R / 'build/native/generated/types/types.h'),
+    flags = ['-DRECVX_NATIVE=1', '-include', str(out.parent / 'types/types.h'),
              '-I' + str(R / 'build-tools/ninja'), '-I' + str(R / 'native'),
              '-I' + str(R / 'include/ps2/veronica/prog'),
-             '-I' + str(R / 'build/native/generated'), '-I' + str(Path(a.src))]
+             '-I' + str(out.parent), '-I' + str(Path(a.src))]
     table = prototype_headers(R / 'include/ps2/veronica/prog')
     srcs = [Path(a.src) / f for f in a.files] if a.files else sorted(Path(a.src).glob('en*.c'))
     for p in srcs:
@@ -342,6 +387,9 @@ def main():
             add_includes(out / p.name, flags, table, rep)
             if rep.get('includes'):
                 print('%s: + %s' % (p.name, ' '.join(rep['includes'])))
+        host_linkage(out / p.name, flags, rep)
+        if rep.get('linkage'):
+            print('%s: Linkage %s' % (p.name, ' '.join(rep['linkage'])))
         pointer_slots(out / p.name, flags, rep)  # nach add_includes: Zeilennummern stabil
         if rep.get('p32'):
             print('%s: %d Zeigerslots -> Handle' % (p.name, rep['p32']))

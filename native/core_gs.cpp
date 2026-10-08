@@ -14,13 +14,13 @@ extern "C" unsigned int palbuf[4096];
 namespace {
 struct Vertex {float x=0,y=0;std::uint32_t z=0;float s=0,t=0,q=1;float u=0,v=0;std::uint8_t r=0,g=0,b=0,a=0,f=255;};
 struct Gs {
-    std::vector<std::uint32_t> frame=std::vector<std::uint32_t>(RECVX_GS_WIDTH*RECVX_GS_HEIGHT,0);
-    std::vector<std::uint16_t> depth=std::vector<std::uint16_t>(RECVX_GS_WIDTH*RECVX_GS_HEIGHT,0);
+    std::vector<std::uint32_t> frame=std::vector<std::uint32_t>(RECVX_CORE_GS_WIDTH*RECVX_CORE_GS_HEIGHT,0);
+    std::vector<std::uint16_t> depth=std::vector<std::uint16_t>(RECVX_CORE_GS_WIDTH*RECVX_CORE_GS_HEIGHT,0);
     std::uint64_t prim=0,test=0,alpha=0,fogcol=0,tex1=0,clamp=0,zbuf=0;unsigned pabe=0,fba=0;
     std::uint8_t r=0x80,g=0x80,b=0x80,a=0x80;float q=1,s=0,t=0;float u=0,v=0;std::uint8_t f=255;
     std::array<Vertex,3> queue{};unsigned count=0,fan_first=0;bool have_fan=false;
     const std::uint8_t* tim2=nullptr;unsigned bank=0;
-    int sx0=0,sy0=0,sx1=RECVX_GS_WIDTH-1,sy1=RECVX_GS_HEIGHT-1;
+    int sx0=0,sy0=0,sx1=RECVX_CORE_GS_WIDTH-1,sy1=RECVX_CORE_GS_HEIGHT-1;
     struct Ot {const std::uint8_t* tim2;unsigned bank;std::uint64_t alpha;std::vector<std::uint64_t> data;};
     std::array<std::vector<Ot>,4096> ot;
 } gs;
@@ -71,8 +71,8 @@ bool alpha_pass(unsigned value){
     switch(atst){case 0:return false;case 1:return true;case 2:return value<aref;case 3:return value<=aref;case 4:return value==aref;case 5:return value>=aref;case 6:return value>aref;default:return value!=aref;}
 }
 void plot(int x,int y,std::uint32_t z,int r,int g,int b,int a){
-    if(x<gs.sx0||x>gs.sx1||y<gs.sy0||y>gs.sy1||x<0||y<0||x>=RECVX_GS_WIDTH||y>=RECVX_GS_HEIGHT)return;
-    const std::size_t at=std::size_t(y)*RECVX_GS_WIDTH+std::size_t(x);
+    if(x<gs.sx0||x>gs.sx1||y<gs.sy0||y>gs.sy1||x<0||y<0||x>=RECVX_CORE_GS_WIDTH||y>=RECVX_CORE_GS_HEIGHT)return;
+    const std::size_t at=std::size_t(y)*RECVX_CORE_GS_WIDTH+std::size_t(x);
     bool write_frame=true,write_z=!field(gs.zbuf,32,1),write_alpha=true;
     if(field(gs.test,0,1)&&!alpha_pass(unsigned(a))){
         switch(field(gs.test,12,2)){case 0:return;case 1:write_z=false;break;case 2:write_frame=false;break;default:write_alpha=false;write_z=false;break;}
@@ -173,8 +173,8 @@ void write_register(unsigned address,std::uint64_t data){
     case 0x42:gs.alpha=data;break;case 0x47:gs.test=data;break;case 0x49:gs.pabe=unsigned(data&1);break;
     case 0x4a:gs.fba=unsigned(data&1);break;case 0x4e:gs.zbuf=data;break;
     // SCISSOR_1: SCAX0 0-10, SCAX1 16-26, SCAY0 32-42, SCAY1 48-58 (window coordinates, inclusive).
-    case 0x40:gs.sx0=int(field(data,0,11));gs.sx1=std::min(int(field(data,16,11)),RECVX_GS_WIDTH-1);
-        gs.sy0=int(field(data,32,11));gs.sy1=std::min(int(field(data,48,11)),RECVX_GS_HEIGHT-1);break;
+    case 0x40:gs.sx0=int(field(data,0,11));gs.sx1=std::min(int(field(data,16,11)),RECVX_CORE_GS_WIDTH-1);
+        gs.sy0=int(field(data,32,11));gs.sy1=std::min(int(field(data,48,11)),RECVX_CORE_GS_HEIGHT-1);break;
     // TEX0_1: the image is bound by handle (recvx_core_gs_bind_texture); palette bank follows from the
     // CLUT address (CBP 0x3FF0 + bank/16 quarter) and CSA as encoded by the original texture path.
     case 0x06:{const unsigned psm=field(data,20,6);
@@ -219,7 +219,7 @@ void recvx_core_gs_execute(const std::uint64_t* packet){
 }
 void recvx_core_gs_bind_texture(const void* tim2,unsigned bank){gs.tim2=static_cast<const std::uint8_t*>(tim2);gs.bank=bank;}
 void recvx_core_gs_scissor(int x0,int y0,int x1,int y1){gs.sx0=x0;gs.sy0=y0;gs.sx1=x1;gs.sy1=y1;}
-void recvx_core_gs_scissor_reset(void){gs.sx0=0;gs.sy0=0;gs.sx1=RECVX_GS_WIDTH-1;gs.sy1=RECVX_GS_HEIGHT-1;}
+void recvx_core_gs_scissor_reset(void){gs.sx0=0;gs.sy0=0;gs.sx1=RECVX_CORE_GS_WIDTH-1;gs.sy1=RECVX_CORE_GS_HEIGHT-1;}
 void recvx_core_gs_clear(std::uint32_t argb){std::fill(gs.frame.begin(),gs.frame.end(),argb);std::fill(gs.depth.begin(),gs.depth.end(),std::uint16_t(0));}
 void recvx_core_gs_ot_add(unsigned otz,const void* tim2,unsigned bank,std::uint64_t alpha,const std::uint64_t* data,unsigned qwords){
     gs.ot[std::min(otz,4095u)].push_back({static_cast<const std::uint8_t*>(tim2),bank,alpha,std::vector<std::uint64_t>(data,data+std::size_t(qwords)*2)});

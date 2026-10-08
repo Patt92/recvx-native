@@ -20,7 +20,7 @@ p=(prog/'player.c').read_text();h=(root/'include/ps2/veronica/prog/player.h').re
 for table in ('PlMtnAct','PlyInfo','PlyTrsZ'):
  m=re.search(r'^(?:const )?(?:unsigned short|float|char) '+table+r'\[.*?=\s*\{',p,re.M);parts.append('static '+p[m.start():block(p,m.start())]+';')
 for name in ('njDistanceP2P','njDistanceP2L','njCollisionCheckSC','njCollisionCheckBS'):parts.append(function('ps2_NaColi.c',name))
-for name in ('bhCheckDansaAtari','bhSetDansaLimitAtari','bhCheckFloorP','bhCheckInnerP4','bhCheckInnerTriangle','bhCheckInnerTriangle2','bhCheckBox','bhCheckBox2Box','bhCheckWallType','bhCheckWallType2','bhCheckWall2Box','bhCheckWallEx'):parts.append(function('hitchk.c',name))
+for name in ('bhCheckDansaAtari','bhSetDansaLimitAtari','bhCheckFloorP','bhCheckInnerP4','bhCheckInnerTriangle','bhCheckInnerTriangle2','bhCheckBox','bhCheckBox2Box','bhCheckWallType','bhCheckWallType2','bhCheckWall2Box','bhCheckWallEx','bhCheckWall'):parts.append(function('hitchk.c',name))
 for name in ('bhCheckFloorNum','bhAddSpeed'):parts.append(function('pwksub.c',name))
 # Player collision block, unchanged from bhControlPlayer. The surrounding host
 # driver provides saved body/front positions and does not duplicate the physics.

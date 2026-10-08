@@ -8,7 +8,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-enum {RECVX_GS_WIDTH = 640, RECVX_GS_HEIGHT = 480};
+enum {RECVX_CORE_GS_WIDTH = 640, RECVX_CORE_GS_HEIGHT = 480};
 /* Executes a DMA-tag-prefixed GIF packet (as built in the EE scratchpad). */
 void recvx_core_gs_execute(const uint64_t* packet);
 /* Texture binding for TME primitives: TIM2 picture in EE memory (NULL none) and palette bank. */

@@ -8,6 +8,19 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 
+PACKAGE_README = """RECVX Native - Entwicklungsbuild
+
+Native Portierung von Resident Evil CODE: Veronica X (PS2). Das Paket enthaelt
+die lokal vorbereiteten Spieldaten; ISO- oder AFS-Dateien werden nicht gelesen.
+Noch kein vollstaendig spielbares Spiel.
+
+Start: macOS "RECVX Native.app", Windows Start.cmd.
+Bedienung und Tasten: STARTEN.md, CONTROLS.md.
+Portstand der Spielsysteme: GAMEPLAY-STATUS.md.
+Austauschbare Ressourcen: ASSETS-AND-MODS.md.
+Debugmenue (F2): DEBUG_MENU.md.
+"""
+
 
 def run(*args):
     subprocess.run(args, check=True)
@@ -91,7 +104,7 @@ def main():
     shutil.copy2(ROOT / "docs/INVENTORY-COVERAGE.md", output / "INVENTORY-COVERAGE.md")
     shutil.copy2(ROOT / "controls.ini", output / "controls.ini")
     shutil.copy2(sdl_license, output / "SDL2-LICENSE.txt")
-    (output / "README.txt").write_text("RECVX native development build 0.5.0\n\nIncludes the complete locally cooked disc data: no ISO or AFS files are read by this build.\nF2 opens the extensible debug menu; hotkey is configured in debug.ini beside the software. See DEBUG_MENU.md.\nOriginal room/player graphics, inventory/status sprites, item models and dialogs run natively.\nThe inventory has item management, equipment, original combination/inspection routines, basic file reading and health.\nThe event interpreter executes original conditions, tasks and messages and reports pending world bindings.\nOriginal FMVs with stereo PCM, ADX music/voices, first-room actor motions/cameras and box/cylinder/diagonal wall collision are integrated.\nOriginal MRY door model/camera/fade transitions, OK-button skip and persistent inventory are integrated.\nOriginal menu sounds, automatic opening-hint inventory and modal status-menu item pickups are integrated.\nOriginal floor-dependent walk/run/backstep contacts are deduplicated; the shared 30-Hz original engine clock also drives movies and 48-kHz audio. Physical audio/controller comparison remains unverified. Animated room item/object attachments are integrated.\nKnife/handgun aim, attacks, ammo/reload, original weapon models/motions/sounds and first zombie hit/death flags are integrated.\nR + Enter/Left Ctrl, or RB + A: aim and attack with equipped knife/handgun.\nMASK-based script wrist indices and segmented zombie body motions are integrated. New Game plays ADV/0003. Default window: 1280x960 integer scaling of the 640x480 renderer.\nOriginal door waveform timing and scripted footstep dispatch are integrated; some requested bank programs are unavailable.\nFull effects, facial/lip morphs, MIDI/ambient sound routing, enemy AI, original death animations, projectile weapons, full progression, original file-view animations, maps and saves remain incomplete. This is not yet a complete playable game.\n\nWindows: open Start.cmd. macOS: open RECVX Native.app.\nEnter/Space or controller A/Start skips active videos; current bindings are displayed.\nAfter the lighter hint, OK opens inventory automatically; two more OK presses equip it.\nTab: inventory; arrows: select; Enter: confirm/action; Escape: cancel/quit.\nW/S or I/K: forward/back; A/D or J/L: turn; Shift: run; Space: cinematic skip; F3: wireframe.\nGamepad: left stick/D-pad; A: action; B: run/cancel; Y: inventory; Start: skip.\nStart opens the main menu. Settings edits keyboard/controller bindings and deadzone live, with automatic saving to controls.ini. See CONTROLS.md.\nExamine: directions rotate the original model; OK inspects and answers original questions; Escape cancels.\nLocked cases need the lockpick in inventory; choose Examine, face the lock and answer Yes.\nCombine: select another item and confirm the original recipe; failures retain both items.\nUse --preview for the existing room/free-camera inspector.\n\nSee ASSETS-AND-MODS.md for replaceable TGA textures and model packets.\nSee GAMEPLAY-STATUS.md for the exact implemented and pending event/gameplay features.\nAI-assisted native port. Windows x64 and native Apple Silicon macOS (arm64 only).\n")
+    (output / "README.txt").write_text(PACKAGE_README)
     if args.platform == "macos":
         run("codesign", "--force", "--sign", "-", str(output / "RECVX Native.app"))
     print(output)
