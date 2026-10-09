@@ -10,6 +10,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Protection contracts
+        run: python tests/port_policy_test.py
+      - name: Native-port policy (no original core)
+        run: python tools/check_no_original_core.py
       - name: Configure
         run: cmake -S . -B build/native -DBUILD_TESTING=ON -DRECVX_FETCH_SDL2=ON -DCMAKE_BUILD_TYPE=Release
       - name: Build

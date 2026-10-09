@@ -52,15 +52,17 @@ int main(int argc,char** argv){
         check(cure.quads().size()==1&&cure.quads()[0][0].base==0xff0000ffu&&cure.quads()[0][1].base==0x800000ffu,"poison sweep colour");
         check(cure.quads()[0][0].y==306-16&&cure.quads()[0][2].x==176+216,"poison band position (cen_pos[2] + 206, 216 px wide)");
         unsigned ticks=1;while(cure.healing()&&ticks<100){cure.tick();++ticks;}check(ticks==8,"poison sweep must end after exactly 8 ticks, got "+std::to_string(ticks));});
-    // Use_00 mit poison2 (stflg 0x200000): blaues Kraut löscht 0x80000, Meldung
-    // 198, kein Durchlauf. Ob das Kraut verbraucht wird, ist NICHT belegt: in
-    // diesem Zweig gibt Use_00 das unveränderte $s3 des äußeren Aufrufers
-    // zurück (Disassembly 0x2a3548/0x2a35b8, herbuse uninitialisiert; ItemUse,
-    // ItemCommand und StatusMain setzen $s3 vor dem Aufruf nicht). Daher keine
-    // Zusicherung auf den Slot.
+    // Use_00 mit poison2 (stflg 0x200000): blaues Kraut löscht 0x80000, meldet
+    // 198, startet keinen Durchlauf und wird NICHT verbraucht. Die
+    // dekompilierte Quelle lässt den Rückgabewert dieses Zweigs offen; im
+    // Original liefert er 0, weil der Statusbildschirm ihn vor dem Aufruf
+    // löscht (Beleg in work/native_port_inventory_tests.result.md). Ohne
+    // Verbrauchssignal lässt ItemUse den Slot unberührt.
     section("D07 Use_00 poison2",[]{
         Inventory r;std::fill(r.slots()+2,r.slots()+12,0);r.slots()[2]=Inventory::pack(23,1);r.poisoned=r.infected=true;unsigned control=0;
-        const auto u=r.use_item(2,nullptr,control,0,0,4);check(u.message==198&&!u.pulse&&u.condition==4&&!r.poisoned&&r.infected,"poison2 blue herb differs from Use_00");});
+        const auto u=r.use_item(2,nullptr,control,0,0,4);
+        check(u.message==198&&!u.pulse&&u.condition==4&&!r.poisoned&&r.infected,"poison2 blue herb differs from Use_00");
+        check(r.slots()[2]==Inventory::pack(23,1),"poison2 blue herb must stay in the pocket (no consumption signal)");});
     // Spray (Item 20): spray_ct++, volle HP, letzter Slot leer.
     section("D07 Use_00 Spray",[]{
         Inventory r;std::fill(r.slots()+2,r.slots()+12,0);r.slots()[2]=Inventory::pack(20,1);r.hp=10;unsigned control=0;
@@ -70,11 +72,17 @@ int main(int argc,char** argv){
         Inventory r;r.game_mode=2;std::fill(r.slots()+2,r.slots()+12,0);r.slots()[2]=Inventory::pack(21,1);r.hp=100;unsigned control=0;
         const auto u=r.use_item(2,nullptr,control,0,0,2);check(r.hp==200&&u.pulse==0x40&&u.condition==0,"green herb on gm_mode 2 must heal 100");
         r.slots()[2]=Inventory::pack(25,1);r.hp=10;r.use_item(2,nullptr,control,0,0,3);check(r.hp==320,"full heal on gm_mode 2 must reach 320");});
-    // Rotes Kraut allein: curedata 0 -> Meldung 161, kein Puls, HP bleiben.
-    // Verbrauch wie oben nicht belegt (herbuse = $s3 des Aufrufers).
+    // Rotes Kraut allein: curedata 0 -> Meldung 161, kein Puls, HP bleiben, kein
+    // Verbrauch (gleicher Beleg wie bei poison2).
     section("D07 Use_00 ohne Wirkung",[]{
         Inventory r;std::fill(r.slots()+2,r.slots()+12,0);r.slots()[2]=Inventory::pack(22,1);r.hp=50;unsigned control=0;
-        const auto u=r.use_item(2,nullptr,control,0,0,2);check(u.message==161&&!u.pulse&&r.hp==50,"red herb alone differs from Use_00 (161, no sweep)");});
+        const auto u=r.use_item(2,nullptr,control,0,0,2);
+        check(u.message==161&&!u.pulse&&r.hp==50,"red herb alone differs from Use_00 (161, no sweep)");
+        check(r.slots()[2]==Inventory::pack(22,1),"red herb alone must stay in the pocket (no consumption signal)");
+        // Dagegen verbraucht ein wirksames Kraut: grün heilt und leert den Slot.
+        Inventory g;std::fill(g.slots()+2,g.slots()+12,0);g.slots()[2]=Inventory::pack(21,1);g.hp=50;unsigned c2=0;
+        const auto h=g.use_item(2,nullptr,c2,0,0,2);
+        check(h.pulse==0x40&&g.hp==100&&!g.slots()[2],"an effective herb must heal and clear its slot");});
     // Menüintegration: Kraut aus dem Statusbildschirm startet das Heilband;
     // während des Durchlaufs ist der Cursor gesperrt (statusflg 0x20).
     section("D07/D08 Kraut aus dem Menü",[]{

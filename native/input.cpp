@@ -173,6 +173,8 @@ void GameplayInput::menu_input(MenuInput key){if(modal_input&&modal_input(key))r
 }
 void GameplayInput::synchronize(){
     if(events_)events_->menu_open=menu_.active;
+    // swork.statusflg 0x40 für GetItem: die Einfahrt des Aufnahmebildschirms.
+    if(events_&&!events_->status_busy)events_->status_busy=[this]{return menu_.active&&menu_.slide.pad_locked();};
     if(events_&&!(transition_active&&transition_active())&&!(video_active&&video_active()))events_->service_item_request();
     if(events_&&events_->acquired_file()!=~0u){
         if(!file_open_){if(sound)sound(3);menu_.acquire_file(inventory_,events_->acquired_file());events_->menu_open=true;file_open_=true;}

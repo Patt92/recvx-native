@@ -15,7 +15,48 @@ struct PARTS {float pos[3];int ang,atr,anim,cen_no,parts_num;float move;int setn
 struct S_WORK {unsigned itemid=0,maincsr=0;}; // BulletSet does not access it
 struct UiSystem {const unsigned* ev_flg;};static thread_local UiSystem* sys=nullptr;
 static bool bhCkFlg(const unsigned* flags,unsigned bit){return (flags[bit/32]&(0x80000000u>>(bit%32)))!=0;}
-#include "ui_tables.inc"
+// Reine Statusmenü-Datentabellen (NJS_TEXANIM/PARTS/Font). Die zugehörigen
+// Mechaniken sind hier eigenständig nativ: Mengenanzeige (GameUi::quantity,
+// Semantik BulletSet) und Befehlsfenster (item_command_parts, Semantik
+// ItemCommand testmode 0 + TrigerSet + Cursorschleife).
+#include "ui_tables_data.inc"
+// Befehlsfenster parts_06b nach ItemCommand testmode 0: alle 18 Teile
+// sichtbar (atr |= 0x20), dann je Itemtyp wieder aus. Waffen: Beschriftung 13
+// = Ausrüsten (anim 7); außer der Schrotflinte (Item 10) entfällt Teil 17
+// (Salvenmarke). Andere Items: Beschriftung 13 = Benutzen (anim 8), Teile 16
+// und 17 entfallen. TrigerSet setzt Rahmenhöhe und Wiederholzahl; bei Item 10
+// zeigt Teil 17 je nach ev_flg 74 anim 12 (Salve an) oder 11. Die Zeilen
+// 13..13+max färbt die Cursorschleife: ausgewählt atr|4, color|8, Farbe
+// (0.125,0.5,1), sonst weiß.
+std::array<PARTS,18> item_command_parts(unsigned item,unsigned cursor,bool burst){
+    std::array<PARTS,18> parts;std::copy_n(parts_06b,18,parts.begin());
+    for(auto& p:parts)p.atr|=0x20;
+    const bool weapon=item<156&&(itemdata[item].type&1);
+    if(weapon){parts[13].anim=7;if(item!=10)parts[17].atr&=~0x20;}
+    else{parts[13].anim=8;parts[16].atr&=~0x20;parts[17].atr&=~0x20;}
+    if(weapon){
+        if(item==10){
+            parts[2].pos[1]=parts[3].pos[1]=148;parts[5].pos[1]=184;parts[7].pos[1]=180;
+            parts[8].setnum=3;parts[9].setnum=parts[10].setnum=4;
+            parts[17].anim=burst?12:11;
+        }else{
+            parts[2].pos[1]=parts[3].pos[1]=116;parts[5].pos[1]=152;parts[7].pos[1]=148;
+            parts[8].setnum=2;parts[9].setnum=parts[10].setnum=3;
+            parts[11].atr&=~0x20;parts[12].atr&=~0x20;
+        }
+    }else{
+        parts[2].pos[1]=parts[3].pos[1]=84;parts[5].pos[1]=120;parts[7].pos[1]=116;
+        parts[8].setnum=1;parts[9].setnum=parts[10].setnum=2;
+        parts[11].atr&=~0x20;parts[12].atr&=~0x20;
+    }
+    const unsigned max=weapon?(item==10?4u:3u):2u;
+    for(unsigned n=0;n<=max&&13+n<18;++n){
+        auto& p=parts[13+n];
+        if(n!=cursor){p.atr&=~0x4;p.color&=~0x8;p.col={1,1,1,1};}
+        else{p.atr|=0x4;p.color|=0x8;p.col={1,0.125f,0.5f,1};}
+    }
+    return parts;
+}
 const NJS_TEXANIM* const tables[]={parts_00,parts_01,parts_02,parts_03,parts_04,parts_05,parts_11,parts_07,parts_08,parts_09,parts_10,parts_11,parts_12,parts_13,parts_14,parts_15,parts_16,parts_11,nullptr,parts_19,parts_20,nullptr,parts_22};
 constexpr int centers[12][2]={{0,0},{28,40},{0,100},{352,40},{520,40},{436,120},{28,332},{328,120},{60,132},{436,40},{28,40},{452,120}};
 void rectangle(SoftwareRenderer& image,int x,int y,int w,int h,std::uint32_t color){auto& p=image.canvas();for(int j=std::max(0,y);j<std::min(image.height(),y+h);++j)for(int i=std::max(0,x);i<std::min(image.width(),x+w);++i)p[j*image.width()+i]=color;}
@@ -390,17 +431,55 @@ bool StatusSlide::tick(){
     fade_=std::clamp(fade_,0.f,1.f);
     return closed_;
 }
+// Mengenanzeige (D09), eigenständig nativ nach der Semantik von BulletSet
+// (sub1.c). Zwei Anzeigeklassen über itemdata[].type & 0x1800:
+//   0x800  dreistellige Stückzahl (Hunderter, Zehner, Einer),
+//   0x1000 Prozentanzeige: Wert / (max/100), danach dieselbe Zifferntrennung
+//          plus das Prozentzeichen (Glyphe 10) als vierte Stelle.
+// Das gepackte Flagbit 0x800 (unendlich) zeigt statt Ziffern die Glyphe 11.
+// Führende Nullen entfallen, die letzte Stelle wird immer gezeichnet; bei der
+// Prozentklasse bleibt ab der vorletzten Stelle alles sichtbar, damit "0 %"
+// nicht auf das Zeichen allein zusammenfällt.
+// Farbbank: Munition (type & 1) wählt über die Flagbits 0x7000 die Variante
+// (Item 6 vier Sorten, Item 7 zwei, sonst Standard); die Verbrauchsklassen
+// (type & 0x56) haben feste Banken für 16, 17/36 und 37. Die Bankindizes
+// stammen aus den Originalpaletten der Statusgrafik.
 void GameUi::quantity(SoftwareRenderer& image,std::uint32_t packed,int x,int y,bool box)const{
-    if(!(itemdata[Inventory::id(packed)].type&0x1800))return;
-    PARTS digits[4]{},icon{};icon.pos[0]=float(x);icon.pos[1]=float(y);icon.pos[2]=4;
-    const auto end=BulletSet(nullptr,digits,&icon,packed,box?1:0);
-    for(auto p=digits;p!=end;++p){
-        const auto& t=parts_20[p->anim];unsigned bank=5;
-        switch(p->color&0xdf){case 1:bank=6;break;case 2:bank=7;break;case 4:bank=10;break;case 16:bank=9;break;}
-        auto texture=menu_[0];const auto palette=texture.palette_banks.find(bank);
-        if(palette==texture.palette_banks.end())throw std::runtime_error("missing original UI palette bank");
-        texture.pixels=palette->second;
-        blit(image,texture,int(p->pos[0]),int(p->pos[1]),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,tint(p->col));
+    const unsigned id=Inventory::id(packed);
+    const unsigned kind=itemdata[id].type&0x1800;
+    if(!kind)return;
+    const unsigned flags=(packed>>16)&0xff00;
+    const bool endless=(flags&0x800)!=0;
+    const unsigned amount=packed&0xffff;
+    unsigned glyph[4]{};unsigned count=0;
+    if(endless){glyph[0]=0;glyph[1]=0;glyph[2]=11;count=3;}
+    else if(kind==0x800){
+        glyph[0]=amount/100;glyph[1]=(amount%100)/10;glyph[2]=amount%10;count=3;
+    }else{
+        const unsigned step=itemdata[id].max/100;
+        unsigned percent=step?amount/step:0;
+        if(amount&&!percent)percent=1; // angefangene Ladung zeigt mindestens 1 %
+        glyph[0]=percent/100;glyph[1]=(percent%100)/10;glyph[2]=percent%10;glyph[3]=10;count=4;
+    }
+    unsigned bank=5;
+    if(itemdata[id].type&1){
+        if(id==6)switch(flags&0x7000){case 0x1000:bank=9;break;case 0x2000:bank=6;break;case 0x4000:bank=7;break;default:bank=10;break;}
+        else if(id==7)bank=(flags&0x7000)==0x2000?6u:10u;
+        else bank=10;
+    }else if(itemdata[id].type&0x56){
+        bank=id==16?9u:(id==17||id==36)?6u:id==37?7u:10u;
+    }
+    auto texture=menu_[0];const auto palette=texture.palette_banks.find(bank);
+    if(palette==texture.palette_banks.end())throw std::runtime_error("missing original UI palette bank");
+    texture.pixels=palette->second;
+    unsigned column=0;bool drawn=false;
+    for(unsigned i=0;i<count;++i){
+        const bool last=i+1==count;
+        const bool percent_tail=kind==0x1000&&!endless&&i+2>=count;
+        if(!glyph[i]&&!drawn&&!last&&!percent_tail)continue;
+        const auto& t=parts_20[glyph[i]];
+        blit(image,texture,x+int(column*10),y+(box?19:32),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2);
+        ++column;drawn=true;
     }
 }
 void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide,unsigned exit_state,unsigned note)const{
@@ -513,7 +592,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
             // cen_pos[11] slides 24 px per frame; 96 px is the fully opened window.
             const bool erasing=!menu.commands;const int slide=(4-int(erasing?menu.erase_frames:menu.command_frames))*24;
             const unsigned command_item=erasing?menu.erase_item:selected_id;const unsigned cursor=erasing?menu.erase_command:menu.command;
-            const auto command_parts=original_command_parts(command_item,cursor,menu.shotgun_burst&&menu.shotgun_burst());
+            const auto command_parts=item_command_parts(command_item,cursor,menu.shotgun_burst&&menu.shotgun_burst());
             for(const auto& p:command_parts){if(!(p.atr&0x20))continue;const auto& part=tables[p.parts_num][p.anim];const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;
                 for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]-96+(p.cen_no==11?slide:0)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
             }}

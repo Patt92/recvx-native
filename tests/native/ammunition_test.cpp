@@ -32,7 +32,13 @@ int main(){
             const auto no=inv.pickup(12,control,0,7,q.mode,101);
             check(no.mode==3&&!no.granted&&inv.items==before&&!(control&0x800),"No answer granted, mutated or acknowledged"+at);
             control=0;const auto q2=inv.pickup(12,control,0,7);const auto yes=inv.pickup(12,control,0,7,q2.mode,100);
-            check(yes.granted&&yes.message==158&&(control&0x800),"Yes answer did not grant with 158 / cb_flg 0x800"+at);
+            // GetItem: Ja setzt cb_flg 0x800 und fügt im selben Durchlauf ein
+            // (testmode 2); Meldung 158 und testmode 3 folgen im nächsten.
+            check(yes.granted&&yes.mode==2&&!yes.message&&(control&0x800),"Yes answer did not grant in testmode 2 with cb_flg 0x800"+at);
+            const auto busy=inv.pickup(12,control,0,7,yes.mode,-1,true);
+            check(!busy.message&&busy.mode==2,"testmode 2 reported 158 while the status screen was still sliding"+at);
+            const auto ack=inv.pickup(12,control,0,7,yes.mode);
+            check(ack.message==158&&ack.mode==3,"the pass after the insertion must report 158 and testmode 3"+at);
             check(inv.slots()[2]==Inventory::pack(5,rounds)&&inv.slots()[3]==Inventory::pack(95,1)&&inv.slots()[4]==Inventory::pack(12,getbulletmax[12][mode])&&inv.slots()[0]==2,"ammo overwrote an occupied slot, wrong amount or moved pip[0]"+at);
             const auto loaded=inv.slots()[4];
             for(unsigned i=0;i<rounds;++i){inv.chamber_empty=false;check(inv.count_bullet(),"bhCountBullet rejected a loaded round"+at);

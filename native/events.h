@@ -73,6 +73,16 @@ public:
     void choose_dialog(int direction);
     bool skip_cinematic();
     void service_item_request(); // bhCheckSubTask cb_flg 0x4010 -> GetItem
+    // swork.statusflg 0x40: the status screen is still sliding, so GetItem's
+    // testmode 1..4 wait. The runtime binds this to the status slide.
+    std::function<bool()> status_busy;
+    // Host debug menu: an inventory change from outside GetItem drops a pending
+    // acquisition instead of letting GetItem decide twice on a changed stock.
+    void cancel_item_request();
+    // sub1.c StatusMain: GetItem runs once per status pass. Call it per frame
+    // while an acquisition screen is up (message 158 and testmode 3 land in the
+    // pass after the insertion).
+    void service_pickup();
     Message room_message(unsigned index)const; // rom->mesp[index]
     unsigned pickup_display()const{return pickup_display_;}
     unsigned acquired_file()const{return acquired_file_;}

@@ -11,7 +11,7 @@
  * Bedeutung einzelner Felder ist damit nicht geklaert: wer eine Tabelle neu
  * auswertet, muss ihre Semantik eigenstaendig belegen.
  */
-#include "item.h"
+#include "item_tables.h"
 
 const short combidata[410] = 
 {

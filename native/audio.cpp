@@ -7,7 +7,7 @@
 #include <stdexcept>
 namespace recvx {
 namespace {
-#include "adx_tables.inc"
+#include "adx_tables.h"
 // Host balance for the original 0..127 pan (64 = centre): the far side falls
 // linearly to silence. modhsyn's exact SPU pan curve is in the closed IOP module.
 void pan_gains(unsigned pan,float& left,float& right){left=pan<=64?1.f:float(127-std::min(pan,127u))/63.f;right=pan>=64?1.f:float(pan)/64.f;}

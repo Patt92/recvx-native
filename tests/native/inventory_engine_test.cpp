@@ -171,6 +171,30 @@ int main(){try{
             check(inv.slots()[0]==2&&inv.slots()[2]==Inventory::pack(5,1)&&!inv.slots()[3]&&inv.slots()[4]==Inventory::pack(95,1),"EraseItem behind pip[0] must return before ItemSort"+dump(inv));}
         {auto inv=clean();inv.slots()[2]=Inventory::pack(145,1);inv.slots()[3]=Inventory::pack(95,1);inv.erase_read_manual(true);
             check(!inv.slots()[2]&&inv.slots()[3]==Inventory::pack(95,1)&&!inv.slots()[0],"EraseItem without equipment must not sort"+dump(inv));}});
+    // D01 B: WeaponSet vergleicht mit plp->wpnr_no von vor der Mutation. Die
+    // Kombination ruft WeaponSet erst nach dem Tausch; die ausgerüstete Waffe
+    // bleibt dadurch ausgerüstet, statt abgelegt zu werden.
+    section("D01 WeaponSet nach Kombination behält die Ausrüstung",[&]{
+        {auto inv=clean();inv.slots()[2]=Inventory::pack(19,1);inv.slots()[3]=Inventory::pack(9,5);inv.slots()[0]=3;unsigned m=0,s=0;
+         check(inv.combine(2,3,&m,&s),"19 + 9 refused");
+         check(inv.slots()[2]==Inventory::pack(10,5)&&inv.slots()[0]==2&&inv.weapon()==5,"Combi_00 ok 129 must keep the upgraded bowgun equipped"+dump(inv));
+         const auto change=inv.take_weapon_change();check(change.changed&&change.wpnr_no==5,"WeaponSet result not reported to the weapon owner");}
+        {auto inv=clean();inv.slots()[2]=Inventory::pack(16,10);inv.slots()[3]=Inventory::pack(6,4);inv.slots()[0]=3;unsigned m=0,s=0;
+         check(inv.combine(2,3,&m,&s),"16 -> equipped launcher refused");
+         check(inv.slots()[3]==Inventory::pack(6|0x1000,10)&&inv.slots()[0]==3&&inv.weapon()==15,"Combi_02 ok 128 must re-equip the launcher with its new round type"+dump(inv));
+         const auto change=inv.take_weapon_change();check(change.changed&&change.wpnr_no==15,"Combi_02 WeaponSet not reported");}
+        // Gleiche Waffe erneut am selben Slot: WeaponSet rüstet ab.
+        {auto inv=clean();inv.slots()[2]=Inventory::pack(5,18);check(inv.equip(2)&&inv.slots()[0]==2&&inv.weapon()==3,"equip failed");
+         check(inv.equip(2)&&!inv.slots()[0]&&!inv.weapon(),"equipping the same slot twice must unequip");}});
+    // D02 C: EraseItem endet bei wp >= pip + pip[0] ohne pip[0]-Änderung und
+    // ohne ItemSort; nur davor rückt pip[0] nach und es wird sortiert.
+    section("D02 EraseItem Abbruch und Sortierreihenfolge",[&]{
+        {auto inv=clean();inv.slots()[2]=Inventory::pack(5,1);inv.slots()[3]=Inventory::pack(145,1);inv.slots()[4]=Inventory::pack(95,1);inv.slots()[0]=2;inv.erase_read_manual(true);
+         check(inv.slots()[0]==2&&inv.slots()[2]==Inventory::pack(5,1)&&!inv.slots()[3]&&inv.slots()[4]==Inventory::pack(95,1),"EraseItem behind pip[0] must return before ItemSort"+dump(inv));}
+        {auto inv=clean();inv.slots()[2]=Inventory::pack(145,1);inv.slots()[3]=Inventory::pack(95,1);inv.erase_read_manual(true);
+         check(!inv.slots()[2]&&inv.slots()[3]==Inventory::pack(95,1)&&!inv.slots()[0],"EraseItem without equipment must not sort"+dump(inv));}
+        {auto inv=clean();inv.slots()[2]=Inventory::pack(145,1);inv.slots()[3]=Inventory::pack(95,1);inv.slots()[4]=Inventory::pack(5,1);inv.slots()[0]=4;inv.erase_read_manual(true);
+         check(inv.slots()[0]==3&&inv.slots()[2]==Inventory::pack(95,1)&&inv.slots()[3]==Inventory::pack(5,1)&&!inv.slots()[4],"EraseItem before pip[0] must lower it and sort"+dump(inv));}});
     section("D02 ItemSearch",[&]{
         auto inv=clean();inv.slots()[1]=Inventory::pack(55,1);inv.slots()[4]=Inventory::pack(21,1)|0x08000000u;inv.slots()[6]=Inventory::pack(21,1);
         check(inv.search(55)==1&&inv.search(21)==4&&inv.search(22)==0,"ItemSearch range pip[1..11] / first hit / low byte differs");});

@@ -61,7 +61,7 @@ int npCollisionCheckSC(NJS_SPHERE* sa, NJS_CAPSULE* cpb);
 void npDistanceP2C(NJS_POINT3* pos, NJS_CAPSULE* cap, NJS_POINT3* htp);
 void npDrawPlane(NJS_POINT3* ps0, NJS_POINT3* ps1, NJS_POINT3* ps2, NJS_POINT3* ps3, unsigned int argb);
 void npCalcMorphing(NJS_CNK_OBJECT* obj_a, NJS_CNK_OBJECT* obj_b, float no, int obj_n);
-void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, register float no, int ono);
+void npTransform(NJS_CNK_OBJECT* srcobj, NJS_CNK_OBJECT* dstobj, float no, int ono);
 void npPushMdlstr(NJS_CNK_OBJECT* objp, int obj_n);
 void npPopMdlstr(NJS_CNK_OBJECT* objp, int obj_n);
 void npPushMdlstr2(NJS_CNK_OBJECT* objp, int obj_n);

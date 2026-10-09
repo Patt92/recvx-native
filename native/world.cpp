@@ -146,7 +146,12 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)){auto atlas=decode_texture_bundle(b,texture);for(auto& image:atlas)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
     }
     // bhInitEffect: common effect textures (ef_tlist, tex_id 0..29) from SYSTEM entry 1.
-    if(!data.empty()){const auto system=data/"archives/SYSTEM/0001.bin";if(std::filesystem::is_regular_file(system)){const auto bytes=read_asset_file(system,8*1024*1024);const auto common_offset=common_effect_textures_offset(bytes);auto common=decode_texture_bundle(bytes,common_offset);
+    // common_effect_textures_offset meldet size_t(-1), solange die originale
+    // ef_info-Tabelle nicht ausgewertet wird (Portierungslücke in
+    // effect_sprites.cpp). Das ist kein Offset: ohne diese Prüfung liefe der
+    // Wert als Position in das Asset und brächte das Raumladen zum Abbruch.
+    // Folge der Lücke: die gemeinsamen Effekttexturen fehlen, der Raum lädt.
+    if(!data.empty()){const auto system=data/"archives/SYSTEM/0001.bin";if(std::filesystem::is_regular_file(system)){const auto bytes=read_asset_file(system,8*1024*1024);const auto common_offset=common_effect_textures_offset(bytes);if(common_offset!=std::size_t(-1)){auto common=decode_texture_bundle(bytes,common_offset);
         effect_model0_=decode_model_asset(bytes,4,common_offset);
         const auto categories=common_effect_categories();
         for(unsigned id=0;id<categories.size();++id){const auto [first,frames]=categories[id];if(!frames||first+frames>common.size()||effect_textures_.count(id))continue;std::vector<SceneTexture> atlas;
@@ -158,7 +163,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         // Preserve those absolute starts and their following animation frames.
         for(const unsigned first:{31u,33u,34u,36u})if(first<common.size()&&!effect_textures_.count(first)){std::vector<SceneTexture> atlas;
             for(auto it=common.begin()+first;it!=common.end();++it){auto image=*it;std::uint32_t top=0;for(auto pixel:image.pixels)top=std::max(top,pixel>>24);if(top<=0x80)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);atlas.push_back(std::move(image));}
-            effect_textures_[first]=std::move(atlas);}}}
+            effect_textures_[first]=std::move(atlas);}}}}
     const auto motion_table=v.u32(24);auto motions=v.u32(motion_table+ene_count*4);
     if(motions)for(unsigned i=0;i<256;++i){const auto n=v.u32(motions);motions+=4;if(n==0xffffffff)break;room_motions_.push_back(n?decode_motion_asset(section(b,motions,n)):MotionClip{});motions+=n;}
     // room.c: room motions are followed by mspp (sized PARAM_WORK sequences).

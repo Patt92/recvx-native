@@ -8,14 +8,10 @@
 #include <cstring>
 #include <sstream>
 namespace recvx {
-namespace event_inventory_original {
-struct System {unsigned* itm;unsigned ply_id,gm_flg;unsigned ply_wno[4]{};};
-static thread_local System system;
-static thread_local System* sys=&system;
-static thread_local const std::uint8_t* bhScePtr=nullptr;
-static unsigned read_u16(const std::uint8_t* p){return unsigned(p[0])|(unsigned(p[1])<<8);}
-#include "event_inventory.inc"
-}
+// Die sieben Event-Inventarmutationen (bhPlItemLost, bhItemGetGet,
+// bhPlItemLostEx, bhArmsItemSet, bhItemGetGetEx, bhPlItemChangeM,
+// bhPlItemTamaSet) laufen auf Inventory::script_* (D06). Die frühere
+// generierte Brücke event_inventory.inc bleibt Quarantäne.
 EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDialog& dialog):room_(room),inventory_(inv),dialog_(dialog){
     BinaryView v(room_);const auto info=inspect_room(room_);base_=info.event_offset;if(!base_)throw std::runtime_error("room event section missing");
     // EVT_WORK: scd0, scd1, then the Event_init offset table up to scd0. Rooms
@@ -164,19 +160,16 @@ int EventVm::instruction(Task& t){
     case 0x26:{const auto weapon=v.u8(p+1);advance(2);return inventory_.weapon()==weapon;}
     case 0x27:values[18]=v.u8(p+1);if(!values[18])inventory_.slots()[0]=0;return advance(2);
     case 0x28:status_requested=true;flags[12][0]|=0x200;return advance(2);
-    // Execute the original inventory mutations, including first-match order,
-    // fixed slot ranges, flags and the unusual shotgun equipment increment.
-    case 0x31:case 0xb2:case 0xbf:case 0xc1:case 0xc2:case 0xc7:case 0xc9:{
-        const unsigned length=op==0xc2?6:(op==0x31||op==0xc1?2:4);v.require(p,length);
-        if(inventory_.player>=4)throw std::runtime_error("event inventory owner outside original player table");
-        if((op==0xb2||op==0xc2)&&v.u8(p+1)>=4)throw std::runtime_error("event inventory target outside original player table");
-        if(op==0xbf&&v.u8(p+2)>=16)throw std::runtime_error("event inventory deposit outside original security slots");
-        using namespace event_inventory_original;
-        event_inventory_original::system={inventory_.items.data(),inventory_.player,flags[11][0],{}};
-        bhScePtr=room_.data()+p;
-        switch(op){case 0x31:bhPlItemLost();break;case 0xb2:bhItemGetGet();break;case 0xbf:bhPlItemLostEx();break;case 0xc1:bhArmsItemSet();break;case 0xc2:bhItemGetGetEx();break;case 0xc7:bhPlItemChangeM();break;case 0xc9:bhPlItemTamaSet();break;}
-        if(bhScePtr!=room_.data()+p+length)throw std::runtime_error("original event inventory operand length mismatch");
-        return advance(length);}
+    // event.c Inventarmutationen auf dem einzigen Bestandsbesitzer Inventory
+    // (native/inventory.cpp, Vertrag work/native_port_inventory_contract.md).
+    // Operandenlängen aus dem bhScePtr-Vorschub; Rückgabe 1 wie im Original.
+    case 0x31:inventory_.script_item_lost(v.u8(p+1));values[22]=inventory_.slots()[0];return advance(2);            // bhPlItemLost
+    case 0xb2:inventory_.script_item_give(v.u8(p+1),v.u8(p+2),v.u8(p+3));values[22]=inventory_.slots()[0];return advance(4); // bhItemGetGet
+    case 0xbf:inventory_.script_item_lost_ex(v.u8(p+1),v.u8(p+2));values[22]=inventory_.slots()[0];return advance(4); // bhPlItemLostEx
+    case 0xc1:inventory_.script_arms_set(v.u8(p+1));values[22]=inventory_.slots()[0];return advance(2);              // bhArmsItemSet
+    case 0xc2:inventory_.script_item_give_ex(v.u8(p+1),v.u8(p+2),v.u8(p+3),v.u16(p+4));values[22]=inventory_.slots()[0];return advance(6); // bhItemGetGetEx
+    case 0xc7:inventory_.script_item_change(v.u8(p+1),v.u8(p+2));return advance(4);                                 // bhPlItemChangeM
+    case 0xc9:inventory_.script_item_amount(v.u8(p+1),v.u16(p+2));return advance(4);                                // bhPlItemTamaSet
 
     case 0x5c:dialog_=MessageDialog{};flags[5][0]&=~0x200u;return advance(2);
     case 0x81:{const auto mode=v.u8(p+1);advance(2);return mode==unsigned(!menu_open);}
@@ -340,7 +333,7 @@ void EventVm::check_event_deadline(){
         flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;set_flag(1,70,1);
     }
 }
-void EventVm::tick(){++tick_count;const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
+void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
     // ItemUse/Use_01/05 call StatusCancel, whose animated exit keeps st_flg
     // 8 for bhControlEvent. The host closes visually at once; retain that
     // handover through one complete scenario/scheduler pass.
@@ -399,6 +392,13 @@ void EventVm::service_item_request(){
     if(flags[10][0]&0x10){begin_pickup(values[8]);flags[10][0]&=~0x4000u;return;}
     flags[10][0]&=~0x4000u;status_requested=true;
 }
+void EventVm::cancel_item_request(){
+    // Kein Originalzweig: der Hostschutz für Bestandsänderungen aus dem
+    // Debugmenü. GetItem selbst entscheidet unverändert nur einmal.
+    if(!pickup_display_&&acquired_file_==~0u)return;
+    dialog_=MessageDialog{};flags[5][0]&=~0x200u;flags[10][0]&=~0x1000u;
+    finish_pickup();finish_file();
+}
 void EventVm::cancel_dialog(){if(pickup_item_&&dialog_.choices()){dialog_.selection=1;confirm_dialog();}else confirm_dialog();}
 void EventVm::confirm_dialog(){
     // bhDispMessage also acknowledges script-owned questions (st_flg 0x2000
@@ -406,7 +406,12 @@ void EventVm::confirm_dialog(){
     const bool interaction_answer=dialog_.active()&&dialog_.choices()&&!menu_open;
     if(dialog_.active())values[7]=dialog_.selection+(dialog_.choices()&&menu_open?100:0);
     if(pickup_item_&&dialog_.choices()){
-        pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1],pickup_mode_,100+dialog_.selection));return;
+        // GetItem testmode 1/4 löschen mit der Antwort cb_flg 0x1000 und
+        // st_flg 0x200; die Frage verschwindet also, bevor der nächste
+        // Durchlauf 158 meldet.
+        const unsigned answer=100+dialog_.selection;
+        dialog_=MessageDialog{};flags[5][0]&=~0x200u;
+        pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1],pickup_mode_,int(answer),status_busy&&status_busy()));return;
     }
     const bool was_active=dialog_.active();dialog_.confirm();if(dialog_.active())values[7]=dialog_.selection;if(was_active&&!dialog_.active()&&audio_stop)audio_stop(1);
     if(!dialog_.active()){
@@ -417,6 +422,13 @@ void EventVm::confirm_dialog(){
         if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;}
         finish_pickup();flags[5][0]&=~0x200u;flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;
     }
+}
+void EventVm::service_pickup(){
+    // StatusMain ruft GetItem in jedem Durchlauf. Nach der Einfügung (testmode
+    // 2) folgt dort die Meldung 158 und testmode 3; beides passiert erst im
+    // nächsten Durchlauf und wartet auf statusflg 0x40 / st_flg 0x200.
+    if(!pickup_item_||pickup_mode_!=2||dialog_.active())return;
+    pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1],2,-1,status_busy&&status_busy()));
 }
 void EventVm::begin_status(){flags[10][0]&=~0x400u;} // sub1.c StatusMain entry
 bool EventVm::use(unsigned item,unsigned* message,unsigned slot){

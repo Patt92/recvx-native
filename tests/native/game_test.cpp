@@ -63,7 +63,8 @@ int main(int argc,char** argv){try{
     // den Zweig ohne Abzug und ohne WeaponSet. 0x4000/0x8000 werden gelöscht.
     section("D02 GetItem Skriptgeschenke",[]{
         for(unsigned mode=0;mode<4;++mode){Inventory gift;gift.game_mode=mode;unsigned control=0xc000;const auto result=gift.pickup(9,control,0,3);
-            check(result.granted&&result.message==158&&gift.slots()[3]==Inventory::pack(9,getbulletmax[9][mode]-3)&&gift.slots()[0]==3&&gift.weapon()==4&&!(control&0xc000)&&(control&0x800),"script gift lost original ammo adjustment/equipment, mode "+std::to_string(mode));
+            check(result.granted&&result.mode==2&&!result.message&&gift.slots()[3]==Inventory::pack(9,getbulletmax[9][mode]-3)&&gift.slots()[0]==3&&gift.weapon()==4&&!(control&0xc000)&&(control&0x800),"script gift lost original ammo adjustment/equipment, mode "+std::to_string(mode));
+            const auto ack=gift.pickup(9,control,0,3,result.mode);check(ack.message==158&&ack.mode==3,"script gift lacks 158 in the pass after the insertion, mode "+std::to_string(mode));
             const auto change=gift.take_weapon_change();check(change.changed&&change.wpnr_no==4,"WeaponSet of the gift not reported to the weapon owner");}
         {Inventory gift;unsigned control=0x4000;const auto result=gift.pickup(3,control,7,4);check(result.granted&&Inventory::quantity(gift.slots()[2])==getbulletmax[3][0]&&gift.slots()[0]==0,"ordinary scripted gift inherits cinematic ammo/equip rule");}
         {Inventory gift;unsigned control=0xc000;const auto result=gift.pickup(3,control,7,4);check(result.granted&&Inventory::quantity(gift.slots()[2])==getbulletmax[3][0]&&!gift.weapon()&&!(control&0x8000),"wide shotgun cinematic gift takes the narrow -2/WeaponSet branch");}});
@@ -85,7 +86,7 @@ int main(int argc,char** argv){try{
             if(narrow<=4){control=0x4000;result=pickup.pickup(142,control,0,7);check(result.granted&&Inventory::id(pickup.slots()[3])==142&&(!narrow||pickup.slots()[0]==4),"second wide pickup moves an equipped wide/narrow item incorrectly"+at);}
         }});
     section("D02 GetItem Frage, Nein, Ja, Überlauf",[]{
-        {Inventory pickup;unsigned control=0;const auto saved=pickup.items;auto question=pickup.pickup(12,control,0,0);check(question.mode==1&&question.message==157&&!question.granted&&pickup.items==saved,"ordinary pickup skips its question");auto no=pickup.pickup(12,control,0,0,question.mode,101);check(!no.granted&&no.mode==3&&pickup.items==saved,"No grants ordinary pickup");auto yes=pickup.pickup(12,control,0,0,question.mode,100);check(yes.granted&&yes.message==158&&pickup.slots()[3]==Inventory::pack(12,getbulletmax[12][0]),"confirmed original pickup amount wrong");}
+        {Inventory pickup;unsigned control=0;const auto saved=pickup.items;auto question=pickup.pickup(12,control,0,0);check(question.mode==1&&question.message==157&&!question.granted&&pickup.items==saved,"ordinary pickup skips its question");auto no=pickup.pickup(12,control,0,0,question.mode,101);check(!no.granted&&no.mode==3&&pickup.items==saved,"No grants ordinary pickup");auto yes=pickup.pickup(12,control,0,0,question.mode,100);check(yes.granted&&yes.mode==2&&pickup.slots()[3]==Inventory::pack(12,getbulletmax[12][0]),"confirmed original pickup amount wrong");check(pickup.pickup(12,control,0,0,yes.mode).message==158,"confirmed pickup lacks 158 one pass later");}
         {Inventory pickup;pickup.slots()[2]=Inventory::pack(12,990);unsigned control=0x4000;auto r=pickup.pickup(12,control,0,0);check(r.granted&&Inventory::quantity(pickup.slots()[2])==999&&Inventory::quantity(pickup.slots()[3])==getbulletmax[12][0]-9,"original GetItem stack overflow loses rounds");}});
     section("D02 GetItem volle Tasche, Seitentasche",[]{
         Inventory pickup;for(unsigned i=2;i<10;++i)pickup.slots()[i]=Inventory::pack(20,1);const auto saved=pickup.items;unsigned control=0xc000;auto r=pickup.pickup(9,control,0,3);
@@ -107,7 +108,7 @@ int main(int argc,char** argv){try{
     // ausgerüstet, wird pip[0] 0 (plp->wpnr_no 0).
     section("D02 GetItem Sonderslot",[]{
         Inventory pickup;pickup.equip(1);unsigned control=0x1000000;auto r=pickup.pickup(18,control,0,0);
-        check(r.granted&&r.message==158&&Inventory::id(pickup.slots()[1])==18&&!pickup.weapon()&&!(control&0x1000000),"personal-item replacement retains stale equipment");
+        check(r.granted&&Inventory::id(pickup.slots()[1])==18&&!pickup.weapon()&&!(control&0x1000000),"personal-item replacement retains stale equipment");
         const auto change=pickup.take_weapon_change();check(change.changed&&change.wpnr_no==0,"personal-item replacement did not clear plp->wpnr_no");});
     // Einzelregeln des Einfügens: 130 -> 35, Item 11 und 37 (Raum 551) mit
     // Flag 0x8000000, Item 31 in Raum 1 genau 1 Stück, Item 4 in 926/706 aus
@@ -130,7 +131,8 @@ int main(int argc,char** argv){try{
     // Anforderung, und die Ausrüstung überlebt den Raumwechsel.
     section("D02 Skriptgeschenk über EventVm",[]{
         auto bytes=fixture();bytes[1118]=0;Inventory gift;MessageDialog text;EventVm request(bytes,gift,text);request.item_message=[](unsigned,unsigned){return Message{'A'-32,0xffff};};request.values[8]=9;request.flags[10][0]=0xc014; /* scripts set 0x10 (GetItem) with 0x4000 (auto-take) */request.flags[5][0]=4;
-        request.service_item_request();check(gift.contains(9)&&request.pickup_display()==9&&text.index()==158,"shared subtask gate rejects cinematic gift");
+        request.service_item_request();check(gift.contains(9)&&request.pickup_display()==9&&!text.active(),"shared subtask gate rejects cinematic gift");
+        request.service_pickup();check(text.index()==158,"GetItem must report 158 in the status pass after the insertion");
         const auto saved=gift.items;request.service_item_request();check(gift.items==saved,"repeated subtask polling duplicates gift");
         request.confirm_dialog();check(!request.pickup_display()&&!(request.flags[10][0]&0x10)&&gift.items==saved,"gift acknowledgement loses item or retains request");
         request.service_item_request();check(!request.pickup_display()&&gift.items==saved,"closed gift reopens");
@@ -165,15 +167,32 @@ int main(int argc,char** argv){try{
             state.items.fill(0);state.partner_weapon={};state.slots()[2]=Inventory::pack(20,1);state.slots()[0]=5;state.script_item_give(owner,9,1);
             check(state.slots()[2]==Inventory::pack(9,0)&&state.slots()[0]==5&&state.partner_weapon[owner]==0,"bhItemGetGet mode 1 equipped or kept the old entry"+at);
         }
-        // bhPlItemLost: pip[0] wird mit dem absoluten itm-Index verglichen. Für
+        // bhPlItemLost: die Nachführung vergleicht pip[0] mit dem Slotindex, das
+        // Lösen aber mit dem absoluten itm-Index (ply_id*16 + slot). Für
         // ply_id 0 löst das Entfernen des ausgerüsteten Slots pip[0] (0), für
-        // ply_id > 0 trifft der Vergleich nie und pip[0] sinkt um eins.
+        // ply_id > 0 trifft der zweite Vergleich nie und pip[0] sinkt um eins.
         for(unsigned owner=0;owner<4;++owner){Inventory state;state.player=owner;state.items.fill(0);
             for(unsigned slot=2;slot<6;++slot)state.slots()[slot]=Inventory::pack(90+slot,1);state.slots()[0]=3;
             state.script_item_lost(93);check(state.slots()[0]==(owner?2u:0u)&&state.slots()[2]==Inventory::pack(92,1)&&state.slots()[3]==Inventory::pack(94,1)&&state.slots()[4]==Inventory::pack(95,1)&&!state.slots()[5],"bhPlItemLost equipped-slot comparison/shift differs, owner "+std::to_string(owner));
             state.slots()[0]=2;state.script_item_lost(95);check(state.slots()[0]==2&&state.slots()[2]==Inventory::pack(92,1)&&state.slots()[3]==Inventory::pack(94,1),"bhPlItemLost behind the equipped slot moved pip[0], owner "+std::to_string(owner));}
         // bhPlItemTamaSet verwirft vorhandene Flags.
-        {Inventory state;state.items.fill(0);state.slots()[2]=Inventory::pack(12,3)|0x08000000u;state.script_item_amount(12,40);check(state.slots()[2]==Inventory::pack(12,40),"bhPlItemTamaSet kept packed flags");}});
+        {Inventory state;state.items.fill(0);state.slots()[2]=Inventory::pack(12,3)|0x08000000u;state.script_item_amount(12,40);check(state.slots()[2]==Inventory::pack(12,40),"bhPlItemTamaSet kept packed flags");}
+        // Besitzeroperand: das Original rechnet itm[owner*16 + k] ohne Prüfung.
+        // 4..23 liegen damit in den Kisten-/Sonderbereichen von itm[384] und
+        // wirken dort; ply_wno hat nur vier Einträge, die Partnerwaffe gilt also
+        // nur für 0..3. Ab Besitzer 24 verlässt der Zugriff itm — der Port
+        // meldet das als Fehler, statt Speicher zu überschreiben.
+        {Inventory state;state.items.fill(0);state.script_item_give(4,9,1);
+         check(state.items[66]==Inventory::pack(9,0),"owner 4 must write itm[4*16+2] like the original");
+         for(unsigned i=0;i<64;++i)check(!state.items[i],"owner 4 touched a player bank");}
+        {Inventory state;state.items.fill(0);state.script_item_give_ex(23,9,1,7);
+         check(state.items[23*16+2]==Inventory::pack(9,7),"owner 23 must still land inside itm");}
+        {Inventory state;state.items.fill(0);const auto saved=state.items;bool threw=false;
+         try{state.script_item_give(24,9,1);}catch(const std::exception&){threw=true;}
+         check(threw&&state.items==saved,"owner 24 leaves itm and must be refused without a write");}
+        {Inventory state;state.items.fill(0);bool threw=false;
+         try{state.script_item_give(4,34,0);}catch(const std::exception&){threw=true;}
+         check(threw,"item 34 for owner 4 leaves ply_wno and must be refused");}});
     // D06 über die Event-VM. ACHTUNG: der Anschluss-Patch
     // work/native_port_D06_events.patch ist NICHT in native/events.cpp
     // integriert (Integrator). Dieser Abschnitt fordert die Originalwirkung

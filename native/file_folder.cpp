@@ -13,12 +13,12 @@ namespace recvx {
 // FV_WORK/S_WORK/SITEM, CallSystemSe, NameChangeSet, StatusToFileView,
 // bhCkFlg, FileFlagInit und der enter/leave-Austausch).
 //
-// Zu leisten: Ordnerauswahl, Drehung, Registerc‌ursor, der Übergang in den
+// Zu leisten: Ordnerauswahl, Drehung, Registercursor, der Übergang in den
 // Leser und die Seitenreduktion des Handbuchs als eigenen nativen Mechanismus
 // bestimmen — nicht über einen Generator auf die Originalquellen.
 //
 // Solange das offen ist:
-// - step() bewegt nichts: kein C‌ursor, keine Ordnerdrehung (ang00 bleibt 0),
+// - step() bewegt nichts: kein Cursor, keine Ordnerdrehung (ang00 bleibt 0),
 //   kein Moduswechsel, kein SE und keine Leseranforderung. Nur der reine
 //   Host-Zähler clock() läuft weiter, damit die aufrufende UI ihren eigenen
 //   Takt behält.

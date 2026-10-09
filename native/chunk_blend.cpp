@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <stdexcept>
 namespace recvx {
-#include "chunk_blend.inc"
+#include "chunk_blend_data.inc"
 std::uint64_t ninja_blend_register(unsigned source,unsigned destination){
     if(source>12||destination>11)throw std::runtime_error("Ninja blend index outside platform table");
     const auto mode=alpha_tbl[source][destination];if(mode==0xffffffffull)throw std::runtime_error("unsupported original Ninja blend pair");return mode;
