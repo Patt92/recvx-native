@@ -18,7 +18,8 @@ struct EffectSprite {
     std::array<Vertex,4> tv{{{-1,-1,0},{1,-1,0},{-1,1,0},{1,1,0}}};
     struct Quad {NJS_POINT3 center;std::array<Vertex,4> vertices;unsigned category,source,destination;};
     std::shared_ptr<std::array<unsigned,312>> extra;std::vector<Quad> quads;
-    unsigned char* exp0=nullptr; // original UV table pointer (bhEff009)
+    unsigned char* exp0=nullptr;
+    bool flame_compact_uv=false; // bhEff009 latches its UV bank at initialization.
 };
 // Globals read by the original procedures (sys->st_flg/pt_flg, plp->flg/stflg/mdflg).
 struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,player_mdflg=0,cb_flg=0,sp_flg=8,yk_ct=0;};
@@ -50,10 +51,14 @@ std::vector<std::pair<unsigned,unsigned>> common_effect_categories(); // {first 
 // Runs the original procedure; `queued` reports whether it entered sys->ef_trs this frame
 // (bhDrawTrsEffect3D only draws queued work).
 bool step_effect_sprite(EffectSprite& sprite,bool* queued=nullptr);
+// Per-pass view of authoritative native flags, not a stored sys/player copy.
+bool step_effect_sprite(EffectSprite& sprite,const EffectContext& context,bool* queued=nullptr);
+// light.c types 1..6: working RGB is sampled before advancing the clock.
+void step_light_color(unsigned type,unsigned speed,unsigned& clock,NJS_POINT3 color,NJS_POINT3& working,bool running);
 bool supported_effect_sprite(unsigned id);
 // effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
 int original_effect_slot(const std::vector<unsigned>& flags);
 
-void append_effect_sprite(Scene& scene,const EffectSprite& sprite,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture);
+void append_effect_sprite(Scene& scene,const EffectSprite& sprite,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix=nullptr);
 }

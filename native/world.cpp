@@ -146,23 +146,18 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)){auto atlas=decode_texture_bundle(b,texture);for(auto& image:atlas)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
     }
     // bhInitEffect: common effect textures (ef_tlist, tex_id 0..29) from SYSTEM entry 1.
-    // common_effect_textures_offset meldet size_t(-1), solange die originale
-    // ef_info-Tabelle nicht ausgewertet wird (Portierungslücke in
-    // effect_sprites.cpp). Das ist kein Offset: ohne diese Prüfung liefe der
-    // Wert als Position in das Asset und brächte das Raumladen zum Abbruch.
-    // Folge der Lücke: die gemeinsamen Effekttexturen fehlen, der Raum lädt.
+    // Keep the -1 sentinel guard: absence is not a valid asset offset.
+    // E03 follows the four ef_info model blocks before the common PVP list.
     if(!data.empty()){const auto system=data/"archives/SYSTEM/0001.bin";if(std::filesystem::is_regular_file(system)){const auto bytes=read_asset_file(system,8*1024*1024);const auto common_offset=common_effect_textures_offset(bytes);if(common_offset!=std::size_t(-1)){auto common=decode_texture_bundle(bytes,common_offset);
         effect_model0_=decode_model_asset(bytes,4,common_offset);
         const auto categories=common_effect_categories();
         for(unsigned id=0;id<categories.size();++id){const auto [first,frames]=categories[id];if(!frames||first+frames>common.size()||effect_textures_.count(id))continue;std::vector<SceneTexture> atlas;
-            for(unsigned f=0;f<frames;++f){auto image=common[first+f];std::uint32_t top=0;for(auto pixel:image.pixels)top=std::max(top,pixel>>24);
-                if(top<=0x80)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24); // GS alpha 0x80 = 1.0
-                atlas.push_back(std::move(image));}
+            for(unsigned f=0;f<frames;++f)atlas.push_back(common[first+f]); // Ninja blend consumes the decoded 0..128 alpha unchanged.
             effect_textures_[id]=std::move(atlas);}
         // bhEff015 addresses the original ungrouped SYSTEM texture indices.
         // Preserve those absolute starts and their following animation frames.
         for(const unsigned first:{31u,33u,34u,36u})if(first<common.size()&&!effect_textures_.count(first)){std::vector<SceneTexture> atlas;
-            for(auto it=common.begin()+first;it!=common.end();++it){auto image=*it;std::uint32_t top=0;for(auto pixel:image.pixels)top=std::max(top,pixel>>24);if(top<=0x80)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);atlas.push_back(std::move(image));}
+            for(auto it=common.begin()+first;it!=common.end();++it)atlas.push_back(*it);
             effect_textures_[first]=std::move(atlas);}}}}
     const auto motion_table=v.u32(24);auto motions=v.u32(motion_table+ene_count*4);
     if(motions)for(unsigned i=0;i<256;++i){const auto n=v.u32(motions);motions+=4;if(n==0xffffffff)break;room_motions_.push_back(n?decode_motion_asset(section(b,motions,n)):MotionClip{});motions+=n;}
@@ -507,8 +502,13 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0x17){return audio_.event_sound(v.u8(1),v.u16(4));} // ExPlayMidi
     if(op==0x18){return audio_.stop_event_sound(v.u8(1));}
     // bhEvtLighterFireSet → bhSetLighterFire(obwp[v0], flg): flg 0 lights (st_flg 0x20000000, room light 1 on).
-    // Its own Eff009 type-3 spawn at obwp[v0] is not created here, so the command stays reported.
-    if(op==0xa2){lighter_fire_=v.u8(2)==0;if(lights_.size()>1){if(lighter_fire_)lights_[1].flags|=2;else lights_[1].flags&=~2u;}return false;}
+    if(op==0xa2){auto& system=collision_events_?collision_events_->flags[5][0]:collision_system_;
+        if(v.u8(2)==0){const unsigned object=v.u8(1);const auto* owner=state(2,object);if(!owner)return false;
+            EffectSpawn spawn;spawn.id=9;spawn.type=3;spawn.flg=0x4100001;spawn.position=owner->transform.position;spawn.scale={.5f,.5f,.5f};spawn.has_offset=true;spawn.offset=weapon_fire_offset(1);spawn.lkono=0;
+            spawn_effect(spawn,3,object);if(lights_.size()<2)lights_.resize(2,Light{});const auto l=lighter_light();
+            lights_[1]=Light{l.flg|2u,l.type,unsigned(l.aspd),3,object,0,unsigned(l.lsrc),0,l.position,l.offset,l.direction,l.color,l.near_range,l.far_range};system|=0x20000000;
+        }else{if(lights_.size()>1)lights_[1].flags&=~2u;system&=~0x20000000u;}
+        return true;}
     // bhEasySESet → PlayGameSe4Event(Type, SlotNo, ..., SeNo at +14). Volume/pan ramps are not modelled.
     if(op==0x86){const unsigned type=v.u8(1),slot=v.u8(2),se=v.u16(14);switch(type){
         case 7:return audio_.event_sound(slot,se); // CallNativeEventSe (ExPlayMidi)
@@ -759,7 +759,7 @@ void RoomWorld::tick(){
     update_player_ground_work(); // player.c:1743-1762, immediately before bhControlEffect
     control_player_effects();
     set_effect_walls(&walls_,room_height_);set_effect_ground(&ground_,&effect_water_room_,&effect_water_mobile_);
-    if(simulation_flags_&8u)for(unsigned i=0;i<sprites_.size();++i){auto& work=sprites_[i];if(work.hidden||!(work.sprite.flg&1))continue;if(work.link&&work.link<=4){const auto pos=link_point(work.link-1,work.index,work.node,work.offset);work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;if(work.sprite.id==0&&work.link==1)if(const auto matrix=link_matrix(0,work.index,work.node))set_effect_link_matrix(work.node,matrix->value);}if(supported_effect_sprite(work.sprite.id)){step_effect_sprite(work.sprite,&work.queued);auto& e=entity(4,i);e.type=work.sprite.type;
+    if(simulation_flags_&8u)for(unsigned i=0;i<sprites_.size();++i){auto& work=sprites_[i];work.queued=false;if(work.hidden||!(work.sprite.flg&1)||(work.sprite.stflg&0x1000000u))continue;if(work.link&&work.link<=4){const auto pos=link_point(work.link-1,work.index,work.node,work.offset);work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;if(work.sprite.id==0&&work.link==1)if(const auto matrix=link_matrix(0,work.index,work.node))set_effect_link_matrix(work.node,matrix->value);}if(supported_effect_sprite(work.sprite.id)){step_effect_sprite(work.sprite,effect_context(),&work.queued);auto& e=entity(4,i);e.type=work.sprite.type;
         if(work.dynamic){work.scale={work.sprite.sx,work.sprite.sy,work.sprite.sz};e.transform.position={work.sprite.px,work.sprite.py,work.sprite.pz};e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};}}}
     if(simulation_flags_&8u){process_effect_output();
     particles_.tick([this](const ParticleLink& link,NJS_POINT3 offset){return link_point(link.kind,link.index,link.node,offset);},[this](NJS_POINT3 probe){return !step_clear(probe,0.2f,0.01f);});}
@@ -784,7 +784,13 @@ void RoomWorld::tick(){
         }else e.lip_active=false;e.facial=param;
         if((e.face_flags&1)&&!(e.face_flags&16)){++e.face_frame;const auto last=unsigned(keys.back().frame);if(e.face_frame>=last){if(e.face_flags&2)e.face_frame=0;else {e.face_frame=last?last-1:0;e.face_flags&=~1u;}}}
     }
-    actor_nodes_.clear();for(auto* table:{&lights_,&event_lights_})for(auto& l:*table)l.clock=(l.clock+(l.speed<<8))&0x7fff;for(auto& pair:entities_){auto& e=pair.second;if(e.dead)e.death_ticks=std::min(30u,e.death_ticks+1);if(pair.first.first!=2&&pair.first.first!=3&&(pair.first.first!=1||(!(e.scripted||e.subplayer_bound))||(simulation_flags_&2u))&&(e.has_motion||e.subplayer_bound)&&!e.frozen&&!(e.en01&&!e.scripted)){
+    actor_nodes_.clear();auto animate_light=[&](Light& l,bool enabled){if(!(l.flags&1u)||!enabled)return;
+        if(!l.color_sampled){l.working_color=l.color;l.color_sampled=true;}
+        step_light_color(l.type,l.speed,l.clock,l.color,l.working_color,bool(simulation_flags_&0x80u));
+    };for(unsigned i=0;i<lights_.size();++i)if(!event_camera||i<4)animate_light(lights_[i],bool(lights_[i].flags&2u));
+    if(event_camera){const auto& mask=event_cameras_.at(event_camera_index).keys.at(event_camera_key_).hidden_lights;
+        for(unsigned i=0;i<event_lights_.size();++i)animate_light(event_lights_[i],!(mask[i/32]&(0x80000000u>>(i%32))));}
+    for(auto& pair:entities_){auto& e=pair.second;if(e.dead)e.death_ticks=std::min(30u,e.death_ticks+1);if(pair.first.first!=2&&pair.first.first!=3&&(pair.first.first!=1||(!(e.scripted||e.subplayer_bound))||(simulation_flags_&2u))&&(e.has_motion||e.subplayer_bound)&&!e.frozen&&!(e.en01&&!e.scripted)){
         bool advance=true;
         if(e.subplayer_bound){auto& w=e.subplayer;w.px=e.transform.position.x;w.pz=e.transform.position.z;w.ay=e.transform.yaw;w.frm_no=e.frame;
             if(!recvx_subplayer_tick(&w))throw std::runtime_error("unbound original Subpl dispatch mode");
@@ -831,8 +837,8 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     // Specular is pending.
     struct SampleLight {NJS_POINT3 position,color,direction;float near_range,far_range;unsigned source;};std::vector<SampleLight> active;bool directional=false;
     auto add=[&](const Light& l,bool enabled){if(!(l.flags&1)||!enabled)return;if(l.source==2&&directional)return;if(l.source==4&&std::count_if(active.begin(),active.end(),[](const auto& a){return a.source==4;})>=3)return;
-        if(l.source!=2&&l.source!=4)return;const float flicker=l.type==1||l.type==4?.75f+.25f*njSin(l.clock):1.f;
-        const auto p=l.link?link_point(l.link-1,l.index,l.node,l.offset):l.position;active.push_back({p,{l.color.x*flicker,l.color.y*flicker,l.color.z*flicker},l.direction,l.near_range,l.far_range,l.source});if(l.source==2)directional=true;};
+        if(l.source!=2&&l.source!=4)return;
+        const auto p=l.link?link_point(l.link-1,l.index,l.node,l.offset):l.position;active.push_back({p,l.color_sampled?l.working_color:l.color,l.direction,l.near_range,l.far_range,l.source});if(l.source==2)directional=true;};
     if(event_camera){for(unsigned i=0;i<std::min<std::size_t>(4,lights_.size());++i)add(lights_[i],bool(lights_[i].flags&2));const auto& mask=event_cameras_.at(event_camera_index).keys.at(event_camera_key_).hidden_lights;
         for(unsigned i=0;i<event_lights_.size();++i)add(event_lights_[i],!(mask[i/32]&(0x80000000u>>(i%32))));}
     else for(const auto& l:lights_)add(l,bool(l.flags&2));
@@ -854,7 +860,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         else {njUnitMatrix(&matrix);if(work.link&&work.link<=4)if(const auto parent=link_matrix(work.link-1,work.index,work.node))std::copy(parent->value,parent->value+16,matrix);njTranslate(&matrix,s.lox,s.loy,s.loz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
         njScale(&matrix,s.sx,s.sy,s.sz);
         for(auto triangle:effect_model0_->triangles){if(triangle.textured)triangle.texture=std::uint16_t(texture);for(auto& vertex:triangle.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}triangle.camera_mask=false;triangle.world_lit=false;triangle.gouraud=false;scene.triangles.push_back(std::move(triangle));}}
-    for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];if(work.hidden||!work.queued||work.sprite.flg&0x1000000)continue;const auto atlas=effect_textures_.find(work.sprite.tex_id);if(atlas==effect_textures_.end()||work.sprite.ani_ct>=atlas->second.size())continue;const auto base=scene.textures.size();scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());auto position=entities_.at({4,i}).transform.position;if(work.link&&work.link<=4)position=link_point(work.link-1,work.index,work.node,work.offset);auto sprite=work.sprite;const auto& e=entities_.at({4,i});sprite.ax=e.angles[0];sprite.ay=e.angles[1];sprite.az=e.angles[2]+work.sprite.az;append_effect_sprite(scene,sprite,position,work.scale,effect_camera,unsigned(base+sprite.ani_ct));}
+    for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];if(!effect_visible(i))continue;const auto atlas=effect_textures_.find(work.sprite.tex_id);const auto base=scene.textures.size();scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());auto position=entities_.at({4,i}).transform.position;std::optional<BoneMatrix> parent;if(work.link&&work.link<=4){position=link_point(work.link-1,work.index,work.node,work.offset);parent=link_matrix(work.link-1,work.index,work.node);}auto sprite=work.sprite;const auto& e=entities_.at({4,i});sprite.ax=e.angles[0];sprite.ay=e.angles[1];sprite.az=e.angles[2];append_effect_sprite(scene,sprite,position,work.scale,effect_camera,unsigned(base+sprite.ani_ct),parent?parent->value:nullptr);}
     {std::map<unsigned,unsigned> bases;for(const auto& work:sprites_)if(!work.hidden&&work.queued)for(const auto& q:work.sprite.quads)if(!bases.count(q.category)){const auto atlas=effect_textures_.find(q.category);if(atlas!=effect_textures_.end()){bases[q.category]=unsigned(scene.textures.size());scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());}}
      for(const auto& work:sprites_)if(!work.hidden&&work.queued&&!work.sprite.quads.empty())append_custom_effect(scene,work.sprite,effect_camera,bases);}
     if(particles_.active()){const auto atlas=effect_textures_.find(4);if(atlas!=effect_textures_.end()&&atlas->second.size()>=4){const unsigned base=unsigned(scene.textures.size());scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());particles_.append(scene,effect_camera,base);}}
@@ -1071,18 +1077,41 @@ namespace recvx {
 // player.c bhControlPlayer: while wpnr_no is 1 the lighter keeps WpnEffTab[1] (bhEff009, type 2)
 // at hand node 9 + WpnTab[1].wp_fps1 and room light 1 from lgttab[1] linked to node 9.
 void RoomWorld::control_player_effects(){
+    const auto context=effect_context();
+    if(!(simulation_flags_&1u)||(context.player_stflg&0x1000000u)){
+        // player.c:1768: hidden status stops player control; an object-owned
+        // flame must not have its light disabled by this player branch.
+        if((context.player_stflg&0x1000000u)&&player_weapon_==1&&!(context.st_flg&0x20000000u)&&lights_.size()>1)lights_[1].flags&=~2u;
+        return;
+    }
+    auto& flags=collision_events_?collision_events_->flags[13][0]:collision_flags_;
     if(player_weapon_==1&&player_asset_){
         if(lights_.size()<2)lights_.resize(2,Light{});
         auto& light=lights_[1];
-        if(!lighter_){lighter_=true;
-            const auto made=lighter_sprite();SpriteWork work;work.sprite=made.sprite;work.scale=made.scale;work.link=1;work.index=0;work.node=9;work.offset=weapon_fire_offset(1);work.player_effect=true;
-            auto slot=std::find_if(sprites_.begin(),sprites_.end(),[](const SpriteWork& s){return s.player_effect&&s.hidden;});
-            if(slot!=sprites_.end())*slot=work;else{entity(4,unsigned(sprites_.size()));sprites_.push_back(work);}
+        if(!(flags&0x1000000u)){flags|=0x1000000u;
+            const auto made=lighter_sprite();EffectSpawn spawn;spawn.id=made.sprite.id;spawn.type=made.sprite.type;spawn.flg=made.sprite.flg;spawn.scale=made.scale;spawn.has_offset=true;spawn.offset=weapon_fire_offset(1);spawn.lkono=9;
+            const int slot=spawn_effect(spawn,1,0);if(slot>=0)sprites_[unsigned(slot)].player_effect=true;
             const auto l=lighter_light(); // bhSetLightTab(&lgttab[1],1)
             light=Light{l.flg,l.type,unsigned(l.aspd),unsigned(l.lkflg),unsigned(l.lkno),unsigned(l.lkono),unsigned(l.lsrc),0,l.position,l.offset,l.direction,l.color,l.near_range,l.far_range};
             light.flags|=2;}
         else if(!(light.flags&2)){light.flags|=2;light.link=1;light.index=0;light.node=9;}
-    }else if(lighter_){lighter_=false;if(lights_.size()>1)lights_[1].flags&=~2u;}
-    set_effect_context({lighter_fire_?0x20000000u:0u,1,lighter_?0x1000000u:0u,player_hidden?0x1000000u:0u,0,0,simulation_flags_,effect_yk_ct_});
+    }else if(flags&0x1000000u){flags&=~0x1000000u;if(lights_.size()>1)lights_[1].flags&=~2u;}
+    if(collision_events_)collision_events_->player_flags=flags;
+}
+EffectContext RoomWorld::effect_context()const{
+    const auto system=collision_events_?collision_events_->flags[5][0]:collision_system_;
+    const auto flags=collision_events_?collision_events_->flags[13][0]:collision_flags_;
+    const auto status=collision_events_?collision_events_->flags[14][0]:collision_status_;
+    return {system,presentation_flags_,flags,status,player_hidden?1u:0u,0,simulation_flags_,effect_yk_ct_};
+}
+bool RoomWorld::effect_visible(unsigned index)const{
+    if(index>=sprites_.size())return false;const auto& w=sprites_[index];const auto& s=w.sprite;
+    if(w.hidden||!w.queued||((s.flg|s.stflg)&0x1000000u))return false;
+    if(!(simulation_flags_&8u)&&s.id==9&&s.type==2){const auto c=effect_context();if((c.player_stflg&0x1000000u)||(c.player_mdflg&1u))return false;}
+    const auto atlas=effect_textures_.find(s.tex_id);return atlas!=effect_textures_.end()&&s.ani_ct<atlas->second.size();
+}
+std::optional<RoomWorld::LightState> RoomWorld::light_state(unsigned index)const{
+    if(index>=lights_.size())return {};const auto& l=lights_[index];
+    return LightState{l.flags,l.type,l.clock,l.link,l.index,l.node,l.link?link_point(l.link-1,l.index,l.node,l.offset):l.position,l.color_sampled?l.working_color:l.color,l.near_range,l.far_range};
 }
 }

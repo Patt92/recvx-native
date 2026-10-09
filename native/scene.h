@@ -54,6 +54,7 @@ struct SceneTexture {
 // Ninja: NJD_FST_UA strip, original GS ALPHA register from chunk/material bits.
 // Alpha/Additive are explicit host sprite operations; all draw after opaque geometry.
 enum class SceneBlend {Opaque,Additive,Alpha,Ninja};
+enum class SceneTextureFilter {Default,Point,Linear};
 struct SceneTriangle {
     std::array<SceneVertex,3> vertices;
     std::uint32_t color=0xffb2b2b2;
@@ -66,6 +67,7 @@ struct SceneTriangle {
     SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
     unsigned light_category=1;
     std::uint64_t blend_register=0x44; // original GS source-alpha/inverse-source-alpha
+    SceneTextureFilter texture_filter=SceneTextureFilter::Default;
 };
 struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;};
 struct SceneCamera {

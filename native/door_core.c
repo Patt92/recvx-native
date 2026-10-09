@@ -1,12 +1,9 @@
 /* Door demo (door.c semantics) as a native mechanism: the fade procedure, the
    seven camera procedures, the seven door procedures and the pass driver of
-   bhControlDoor. The MPAC parameter blocks are data layouts of the packet
-   format, so they are declared here; no original procedure is linked and no
-   generator is involved.
-
-   Not driven here: the light procedures (LightProc1/2, DokiProcLgt) and the
-   PuruProc shake. Their procedure numbers are parsed and reported through
-   RECVX_DOOR_STATE::lgt_type / pru_type instead of being dropped. */
+   bhControlDoor, together with the two light procedures, the shake light of
+   DokiProcLgt and the PuruProc shake. The MPAC parameter blocks are data
+   layouts of the packet format, so they are declared here; no original
+   procedure is linked and no generator is involved. */
 #include "door_core.h"
 #include "ninja_math.h"
 #include <math.h>
@@ -74,6 +71,17 @@ typedef struct { /* 0x34 */
     int dor1_wait,dor1_speed,dor1_accel,dor1_goal_angle,dor1_cmp,dor1_decel;
     int snd_wait;
 } DOOR5_PARAM;
+/* LGT_WRK of the shared light tables: mode 0 keeps the light where the packet
+   put it, anything else adds the camera position so it travels with the view. */
+typedef struct { /* 0x24 */
+    unsigned lgt_mod;float col_r,col_g,col_b;DPOINT pos;float n_rang,f_rang;
+} LIGHT_WRK;
+typedef struct { /* 0x7C; view type 2 of the family uses two of them */
+    float amb_r,amb_g,amb_b;int lgt_num;LIGHT_WRK lgt_dat[3];
+} LIGHT_PARAM;
+typedef struct { /* 0x14 */
+    int wait_time,loop_time,snd_no,pru_no,pru_wait;
+} PURU_PARAM;
 
 /* ---- helpers ---------------------------------------------------------- */
 static int compare_int(int a,int type,int b){
@@ -124,9 +132,44 @@ size_t recvx_door_parameter_size(unsigned family,unsigned type){
     /* Door type 6 only raises an evalflag and carries no block. */
     static const size_t door[8]={0,sizeof(DOOR1_PARAM),sizeof(DOOR2_PARAM),sizeof(DOOR3_PARAM),
                                  sizeof(DOOR4_PARAM),sizeof(DOOR5_PARAM),0,sizeof(DOOR1_PARAM)};
+    /* LightProc2 steps to a second block when the demo runs from the pull
+       side, so its parameters are twice a LIGHT_PARAM. */
+    static const size_t light[3]={0,sizeof(LIGHT_PARAM),2*sizeof(LIGHT_PARAM)};
+    static const size_t shake[2]={0,sizeof(PURU_PARAM)};
     if(family==0)return type<2?fade[type]:0;
     if(family==1)return type<8?view[type]:0;
     if(family==2)return type<8?door[type]:0;
+    if(family==3)return type<3?light[type]:0;
+    if(family==4)return type<2?shake[type]:0;
+    return 0;
+}
+size_t recvx_door_light_extent(const unsigned char* block,size_t bytes,unsigned type){
+    const size_t header=offsetof(LIGHT_PARAM,lgt_dat);
+    size_t base=0,extent;int count;
+    if(!block||type==0||type>2)return 0;
+    if(type==2)base=sizeof(LIGHT_PARAM);   /* LightProc2 steps a whole block */
+    if(bytes<base+header)return 0;
+    count=((const LIGHT_PARAM*)(block+base))->lgt_num;
+    if(count<0||count>3)return 0;
+    extent=base+header+(size_t)count*sizeof(LIGHT_WRK);
+    return extent<=bytes?extent:0;
+}
+int recvx_door_clip(int door_type,int partition,int view_type,float* near_clip,float* far_clip){
+    /* bhSetDoor dmo_clip: one case, then the terminator that carries the
+       gameplay default. Ninja clips on negative z; both are reported as
+       positive view-space distances like view_clip.h does. */
+    static const struct {int dmo_typ,prti_no,vew_no;float near_clip,far_clip;} dmo_clip[1]={
+        {1,RECVX_DOOR_MRY_PARTITION,4,10.0f,34.0f}
+    };
+    unsigned i;
+    if(near_clip)*near_clip=2.0f;
+    if(far_clip)*far_clip=20000.0f;
+    for(i=0;i<sizeof dmo_clip/sizeof dmo_clip[0];++i){
+        if(door_type!=dmo_clip[i].dmo_typ||partition!=dmo_clip[i].prti_no||view_type!=dmo_clip[i].vew_no)continue;
+        if(near_clip)*near_clip=dmo_clip[i].near_clip;
+        if(far_clip)*far_clip=dmo_clip[i].far_clip;
+        return 1;
+    }
     return 0;
 }
 static int chained_view(unsigned type,const unsigned char* block,int* next){
@@ -741,30 +784,168 @@ static void door_proc7(RECVX_DOOR_STATE* s){
     }
 }
 
+/* ---- light ------------------------------------------------------------- */
+/* LightSubAmb: the ambient of the block plus the offset DokiProcLgt writes,
+   with every channel capped at 0.4 before it reaches the multi ambient. */
+static void light_sub_amb(RECVX_DOOR_STATE* s,const float* ambient,const NJS_POINT3* offset){
+    NJS_VECTOR amb;
+    amb.x=ambient[0];amb.y=ambient[1];amb.z=ambient[2];
+    if(offset){
+        NJS_VECTOR add;add.x=offset->x;add.y=offset->y;add.z=offset->z;
+        njAddVector(&amb,&add);
+        if(amb.x>0.4f)amb.x=0.4f;
+        if(amb.y>0.4f)amb.y=0.4f;
+        if(amb.z>0.4f)amb.z=0.4f;
+    }
+    s->lgt_amb[0]=amb.x;s->lgt_amb[1]=amb.y;s->lgt_amb[2]=amb.z;
+    s->lgt_on=1;
+}
+/* LightSubPnt: slot lgt_no+2 takes the position (shifted by the camera when
+   lgt_mod is set), the colour scaled by the rate and the packet's ranges. */
+static void light_sub_pnt(RECVX_DOOR_STATE* s,int slot,const LIGHT_WRK* light,const NJS_POINT3* rate){
+    RECVX_DOOR_POINT* out;
+    if(slot<0||slot>=3)return;
+    out=&s->lgt_pnt[slot];
+    out->pos.x=light->pos.x;out->pos.y=light->pos.y;out->pos.z=light->pos.z;
+    if(light->lgt_mod!=0){
+        out->pos.x+=s->vew_pos.x;out->pos.y+=s->vew_pos.y;out->pos.z+=s->vew_pos.z;
+    }
+    out->col[0]=light->col_r*rate->x;out->col[1]=light->col_g*rate->y;out->col[2]=light->col_b*rate->z;
+    out->n_rang=light->n_rang;out->f_rang=light->f_rang;
+    out->on=1;
+}
+static void light_run(RECVX_DOOR_STATE* s,const LIGHT_PARAM* p){
+    int i,count;
+    switch(s->lgt_mode){
+    case 0:
+        light_sub_amb(s,&p->amb_r,&s->lgt_amb_off);
+        s->lgt_mode++;
+        /* fall through: the first pass sets the ambient and the lights */
+    case 1:
+        count=p->lgt_num;
+        if(count<0)count=0;
+        if(count>3)count=3;              /* LIGHTPROC_WORK carries three */
+        for(i=0;i<count;++i)light_sub_pnt(s,i,&p->lgt_dat[i],&s->lgt_pnt_rte);
+        break;
+    default:break;
+    }
+}
+static void light_proc1(RECVX_DOOR_STATE* s){
+    if(!s->lpP)return;
+    light_run(s,(const LIGHT_PARAM*)s->lpP);
+}
+static void light_proc2(RECVX_DOOR_STATE* s){
+    const LIGHT_PARAM* p;
+    if(!s->lpP)return;
+    p=(const LIGHT_PARAM*)s->lpP;
+    if(s->status&0x4000)p++;             /* the pull side has its own block */
+    light_run(s,p);
+}
+/* DokiProcLgt: dmo_atr 0x20. The rectified sine over time*1024 pulses the
+   point-light rate; the ambient offset is a flat half. */
+static void doki_proc_lgt(RECVX_DOOR_STATE* s){
+    int ang;
+    switch(s->dki_mode){
+    case 0:
+        s->dki_mode++;
+        /* fall through */
+    case 1:
+        ang=s->time*1024;
+        if(ang&0x8000)ang=~ang+1;
+        s->lgt_amb_off.x=0.5f;s->lgt_amb_off.y=0.5f;s->lgt_amb_off.z=0.5f;
+        s->lgt_pnt_rte.x=0.5f+njSin(ang);
+        s->lgt_pnt_rte.y=0.5f;
+        s->lgt_pnt_rte.z=0.5f;
+        break;
+    default:break;
+    }
+}
+
+/* ---- shake ------------------------------------------------------------- */
+static const int pru_snd_tbl[1]={10};
+/* PuruProc1: wait_time passes of silence, then a pattern every pru_wait
+   passes for loop_time passes. The pass that rearms the counter raises the
+   vibration twice -- the second check sees the counter already back at
+   pru_wait. */
+static void puru_proc1(RECVX_DOOR_STATE* s){
+    const PURU_PARAM* p;
+    if(!s->ppP)return;
+    p=(const PURU_PARAM*)s->ppP;
+    switch(s->pru_mode){
+    case 0:
+        s->pru_reg=p->wait_time;
+        s->pru_tim=p->loop_time;
+        s->pru_mode++;
+        /* fall through */
+    case 1:
+        if(s->pru_reg==0)s->pru_mode++;
+        else {s->pru_reg--;break;}
+        /* fall through */
+    case 2:
+        if(s->pru_tim!=0){
+            s->pru_tim--;
+            if(s->pru_reg==0){
+                s->pru_reg=p->pru_wait;
+                s->pru_se++;
+                s->pru_se_no=(p->snd_no>=0&&p->snd_no<(int)(sizeof pru_snd_tbl/sizeof pru_snd_tbl[0]))
+                             ?pru_snd_tbl[p->snd_no]:-1;
+                s->pru_vib++;s->pru_vib_atrb=2;s->pru_vib_no=p->pru_no;
+            }
+            else s->pru_reg--;
+            if(s->pru_reg==p->pru_wait){
+                s->pru_vib++;s->pru_vib_atrb=2;s->pru_vib_no=p->pru_no;
+            }
+        }
+        break;
+    default:break;
+    }
+}
+
 /* ---- dispatcher --------------------------------------------------------- */
 typedef void (*DOOR_PROC)(RECVX_DOOR_STATE*);
 static const DOOR_PROC fade_table[2]={0,fade_proc1};
 static const DOOR_PROC view_table[8]={0,view_proc1,view_proc2,view_proc3,view_proc4,view_proc5,view_proc6,view_proc7};
 static const DOOR_PROC door_table[8]={0,door_proc1,door_proc2,door_proc3,door_proc4,door_proc5,door_proc6,door_proc7};
+static const DOOR_PROC light_table[3]={0,light_proc1,light_proc2};
+static const DOOR_PROC shake_table[2]={0,puru_proc1};
 
 static void set_view_proc(RECVX_DOOR_STATE* state,int type){
     state->vew_prcP=(type>=0&&type<8)?view_table[type]:0;
 }
-int recvx_door_configure(RECVX_DOOR_STATE* state,unsigned fade,unsigned view,unsigned door){
+int recvx_door_configure(RECVX_DOOR_STATE* state,unsigned fade,unsigned view,unsigned door,
+                         unsigned light,unsigned shake){
     if(!state)return 0;
     state->fde_prcP=fade<2?fade_table[fade]:0;
     state->vew_prcP=view<8?view_table[view]:0;
     state->dor_prcP=door<8?door_table[door]:0;
+    state->lgt_prcP=light<3?light_table[light]:0;
+    state->pru_prcP=shake<2?shake_table[shake]:0;
     /* Door type 6 has no block and type 0 no procedure at all; the fade and the
-       camera must both resolve or the demo would never finish. */
+       camera must both resolve or the demo would never finish. Light and shake
+       are optional, but a number outside their tables is a broken packet. */
+    if(light>=3||shake>=2)return 0;
+    if((light&&!state->lgt_prcP)||(shake&&!state->pru_prcP))return 0;
     return state->fde_prcP!=0&&state->vew_prcP!=0&&(door==0||state->dor_prcP!=0);
+}
+void recvx_door_select_doki_shake(RECVX_DOOR_STATE* state){
+    /* bhSetDoor DkiPru: no lead-in, 768 passes of loop, sound 0, pattern 13,
+       one pattern every 20 passes. */
+    static const PURU_PARAM doki={0,768,0,13,20};
+    if(!state)return;
+    state->pru_prcP=shake_table[1];
+    state->ppP=(void*)&doki;
+    state->pru_type=1;
+    state->pru_mode=0;
 }
 
 void recvx_door_step(RECVX_DOOR_STATE* s){
     if(!s||(s->status&0x40))return;
     if(s->status&0x80)return;            /* bhControlDoor holds the demo */
+    if(s->status&0x40000000)doki_proc_lgt(s);
     if((s->status&0x1)&&s->fde_prcP)s->fde_prcP(s);
     if((s->status&0x2)&&s->vew_prcP)s->vew_prcP(s);
     if((s->status&0x4)&&s->dor_prcP)s->dor_prcP(s);
+    if((s->status&0x8)&&s->lgt_prcP)s->lgt_prcP(s);
+    if((s->status&0x10000000)&&s->pru_prcP)s->pru_prcP(s);
     s->time++;
 }

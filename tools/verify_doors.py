@@ -80,6 +80,35 @@ def main():
                                             running['door_ticks'])
         assert running['room'] == 'RM_0020.RDX', ('running', 'the room changed before the demo ended')
         assert not running['door_skipped'], ('running', 'the demo reported a skip')
+        state = running['door']
+        # FadeProc1 is running, so the fade status is up and its rate is in the
+        # open interval the parameter block walks through.
+        assert state['status'] & 0x100, ('running', 'the fade status was never raised')
+        assert 0 < state['fade_rate'] <= 1, ('running', 'the fade rate stands outside its ramp',
+                                             state['fade_rate'])
+        # ViewProc has moved the camera away from the origin, and the door
+        # model is on screen.
+        assert state['camera'][:3] != [0, 0, 0], ('running', 'the camera never left the origin')
+        assert state['status'] & 0x200, ('running', 'the door model is not being drawn')
+        # LightProc1 put its ambient in and switched its own point lights on.
+        assert state['light'] == 1, ('running', 'the packet did not select LightProc1', state['light'])
+        assert state['light_on'], ('running', 'the light procedure never ran')
+        assert state['points'], ('running', 'no point light was switched on')
+        # bhInitDoor leaves the rate at one; DokiProcLgt is not requested here.
+        assert state['light_rate'] == [1, 1, 1], ('running', 'the point-light rate was moved without DokiProcLgt',
+                                                  state['light_rate'])
+        for point in state['points']:
+            assert point['range'][1] > point['range'][0], ('running', 'a point light has no falloff range')
+            assert any(c > 0 for c in point['color']), ('running', 'a point light came on black')
+        # This packet has no shake procedure, so nothing may shake.
+        assert state['shake'] == 0 and not state['shake_sounds'] and not state['shake_patterns'], \
+            ('running', 'the demo shook without a shake procedure')
+        # dmo_clip has no entry for this door, so the gameplay range applies.
+        assert not state['clip_case'] and state['clip'] == [2, 20000], \
+            ('running', 'the door demo reported another clip range', state['clip'])
+        # DoorProc1 has moved a node of the model.
+        assert any(node[:6] != [0, 0, 0, 0, 0, 0] for node in state['nodes']), \
+            ('running', 'no door node moved')
         sounds = [s for s in running['audio_played'] if s.startswith('DOOR/')]
         assert sounds and sounds[0].endswith('/0000'), ('running', 'no opening door sound', sounds)
         bank = sounds[0].rsplit('/', 1)[0]  # the packet names its own sound bank
@@ -114,6 +143,48 @@ def main():
         assert not skipped['door_active'], ('skipped', 'the skipped demo stayed active')
         for field in ['cinematic', 'player_hidden', 'player_scripted']:
             assert not skipped[field], ('skipped', field, 'the controls were not handed back')
+
+        # --- the heartbeat light and the heartbeat shake ---------------------
+        # dmo_atr 0x20 runs DokiProcLgt, 0x40 replaces the packet's shake by
+        # DkiPru. Both ride on the same original DoorCall, only the attribute
+        # differs, so the comparison isolates the two procedures.
+        door_call_room(args.data / 'rooms/RM_0020.RDT', mods / 'rooms/RM_0020.RDT',
+                       attribute=0x60, stage=0, room=1, spawn=0, door_type=7)
+        doki = run('doki', 60)
+        shaken = doki['door']
+        assert shaken['status'] & 0x40000000, ('doki', 'the heartbeat light status is missing')
+        assert shaken['status'] & 0x20000000, ('doki', 'the heartbeat shake status is missing')
+        # DokiProcLgt drives the rate off the steady one and lifts the ambient
+        # offset into the 0.4 clamp of LightSubAmb.
+        assert shaken['light_rate'] != [1, 1, 1], ('doki', 'DokiProcLgt never moved the point-light rate')
+        assert abs(shaken['ambient'][0] - 0.4) < 1e-5, ('doki', 'the heartbeat ambient did not reach the clamp',
+                                                        shaken['ambient'])
+        assert abs(state['ambient'][0] - 0.1) < 1e-5, ('running', 'the steady ambient is not the packet value',
+                                                       state['ambient'])
+        # The same point light, now scaled by the pulsing rate.
+        assert shaken['points'] and shaken['points'][0]['color'] != state['points'][0]['color'], \
+            ('doki', 'the heartbeat rate did not reach the point-light colour')
+        # DkiPru: pattern 13 with PruSndTbl sound 10, one request every 21
+        # passes from the first one.
+        assert shaken['shake'] == 1, ('doki', 'the heartbeat shake procedure was not selected')
+        assert shaken['shake_sounds'] >= 2, ('doki', 'the heartbeat shake requested too few sounds',
+                                             shaken['shake_sounds'])
+        assert shaken['shake_patterns'] == 2 * shaken['shake_sounds'], \
+            ('doki', 'the heartbeat shake lost a vibration pattern')
+        assert shaken['shake_sounds'] == 1 + (doki['door_ticks'] - 1) // 21, \
+            ('doki', 'the heartbeat shake lost its interval', shaken['shake_sounds'], doki['door_ticks'])
+        assert 'COMMON/0010' in doki['audio_played'], ('doki', 'PruSndTbl sound 10 was not played',
+                                                       [s for s in doki['audio_played'] if s.startswith('COMMON/')])
+        # pdVibMxStart has no native driver; the request is reported, not faked.
+        assert 'StartVibrationEx(2, 13)' in doki['audio_unavailable'], \
+            ('doki', 'the vibration request was dropped instead of reported')
+        # The attribute changes the two procedures, not the sequence itself.
+        done_doki = run('doki-finished', 400)
+        assert done_doki['room'] == 'RM_0010.RDX' and done_doki['door_ticks'] == done['door_ticks'], \
+            ('doki', 'the heartbeat attribute changed the length of the sequence',
+             done_doki['door_ticks'], done['door_ticks'])
+        door_call_room(args.data / 'rooms/RM_0020.RDT', mods / 'rooms/RM_0020.RDT',
+                       attribute=0, stage=0, room=1, spawn=0, door_type=7)
 
         # --- a direct transition has no demo at all -------------------------
         stairs = run('stairs', 180, use_mods=False, room='RM_0010.RDX',

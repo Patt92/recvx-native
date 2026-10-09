@@ -38,7 +38,7 @@ int main(int argc,char** argv){try{
     // Prozedur gebunden ist, nichts in die Zeichenliste eingereiht wird und
     // die Effektarbeit unverändert bleibt - kein geratener Atlas, kein
     // geratener Zustand.
-    for(const unsigned id:{9u,24u,122u,200u,201u,218u,230u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
+    for(const unsigned id:{24u,122u,200u,201u,218u,230u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
         check(!supported_effect_sprite(id),"effect gap reports a bound procedure");
         check(!step_effect_sprite(sprite,&queued)&&!queued,"effect gap executed a procedure or queued a draw");
         check(sprite.tex_id==-1&&!sprite.ct0&&!sprite.ani_ct&&!sprite.flg&&sprite.type==14&&sprite.tv[0].y==-1,"effect gap changed the sprite work");}

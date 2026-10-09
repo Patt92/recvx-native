@@ -3,7 +3,9 @@
 #include "binary_view.h"
 #include "room.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <utility>
 #include <iomanip>
 #include <sstream>
 namespace recvx {
@@ -30,11 +32,22 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     // number and an offset relative to the parameter block.
     const auto table=4+selected*20;param.require(table,20);std::array<unsigned,5> types{};std::array<std::size_t,5> po{};
     for(unsigned i=0;i<5;++i){types[i]=param.u16(table+i*4);po[i]=param.u16(table+i*4+2);}
-    for(unsigned i=0;i<3;++i){
-        if(types[i]>(i==0?1u:7u))throw std::runtime_error("unsupported door procedure");
+    // Highest procedure number of each family: fade 1, camera 7, door 7,
+    // light 2, shake 1.
+    static const unsigned highest[5]={1,7,7,2,1};
+    for(unsigned i=0;i<5;++i){
+        if(types[i]>highest[i])throw std::runtime_error("unsupported door procedure");
         if(po[i]%4)throw std::runtime_error("unaligned door parameters");
-        param.require(po[i],recvx_door_parameter_size(i,types[i]));
+        // A light block is only as long as the lights it declares, so its
+        // extent has to be measured instead of assumed.
+        if(i!=3)param.require(po[i],recvx_door_parameter_size(i,types[i]));
     }
+    // Both blocks of LightProc2 are reachable: the push side reads the first,
+    // the pull side the second.
+    if(types[3])param.require(po[3],1);
+    for(unsigned block=1;block<=types[3];++block)
+        if(!recvx_door_light_extent(parameters_.data()+po[3],parameters_.size()-po[3],block))
+            throw std::runtime_error("door light block does not fit its parameter section");
     if(!types[0]||!recvx_door_validate_view(types[1],parameters_.data()+po[1],parameters_.size()-po[1],0))throw std::runtime_error("invalid door camera/fade parameters");
     BinaryView mdl(model_);count_=mdl.u16(model_offset_+6);if(!count_||count_>128)throw std::runtime_error("invalid door node count");
     const auto base=mdl.relative(model_offset_,mdl.u16(model_offset_+4),0);objects_=mdl.relative(base,mdl.u32(model_offset_+12),count_*52);
@@ -42,17 +55,25 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     nodes_.assign(std::max<std::size_t>(count_,64),{});
     for(unsigned i=0;i<count_;++i){const auto o=objects_+i*52;auto& n=nodes_[i];n.evalflags=mdl.u32(o);n.model=mdl.u32(o+4);for(unsigned k=0;k<3;++k){n.pos[k]=mdl.f32(o+8+k*4);n.ang[k]=mdl.i32(o+20+k*4);}}
     if((types[2]==2&&count_<51)||(types[2]==4&&count_<4)||(types[2]==6&&count_<4)||(types[2]==7&&count_<4))throw std::runtime_error("door procedure does not match model nodes");
-    core_={};core_.dmo_atr=int(request.attribute);core_.objP=nodes_.data();core_.nodes=unsigned(count_);
+    // bhInitDoor clears the work and then puts the point-light rate at one and
+    // the ambient offset at zero; DokiProcLgt is what moves them afterwards.
+    core_={};core_.lgt_pnt_rte={1,1,1};core_.lgt_amb_off={0,0,0};
+    core_.dmo_atr=int(request.attribute);core_.objP=nodes_.data();core_.nodes=unsigned(count_);
     core_.fpP=parameters_.data()+po[0];core_.vpP=parameters_.data()+po[1];core_.dpP=parameters_.data()+po[2];
-    // light.c LightProc1/2 and the PuruProc shake are not driven here; their
-    // numbers are kept so the gap is visible instead of silent.
+    core_.lpP=parameters_.data()+po[3];core_.ppP=parameters_.data()+po[4];
     core_.lgt_type=int(types[3]);core_.pru_type=int(types[4]);
-    if(!recvx_door_configure(&core_,types[0],types[1],types[2]))throw std::runtime_error("door packet selects an undefined procedure");
+    if(!recvx_door_configure(&core_,types[0],types[1],types[2],types[3],types[4]))throw std::runtime_error("door packet selects an undefined procedure");
+    // bhSetDoor njClipZ: the dmo_clip table narrows the demo of door type 1
+    // reading from the MRY partition when its case runs ViewProc4.
+    clip_case_=recvx_door_clip(int(request.type),RECVX_DOOR_MRY_PARTITION,int(types[1]),&clip_near_,&clip_far_)!=0;
     if(request.attribute&1)core_.status|=0x4000;if(request.attribute&4)core_.status|=0x4800;if(request.attribute&16)core_.status|=0xa000;if(request.attribute&8)core_.status|=0x1000;
     if(count_<5)core_.status&=~0x3000;
     if(request.attribute&2){core_.status^=0xc00;if(count_>=5)core_.status^=0x2000;else core_.status&=~0x2000;}
     if(request.attribute&32)core_.status|=0x40000000;if(request.attribute&64)core_.status|=0x20000000;
     core_.status|=0x1000001f;
+    // dmo_atr 0x40 replaces the packet's shake by the built-in heartbeat one.
+    if(core_.status&0x20000000)recvx_door_select_doki_shake(&core_);
+    shake_sounds_.clear();shake_patterns_.clear();
     auto scene=decode_model_asset(model_,model_offset_,texture_offset_);apply_texture_files(scene,data,mods,std::filesystem::path("doors")/asset_number(request.type));textures_=std::move(scene.textures);
     request_=request;active_=true;finished_=skipped_=false;ticks_=0;
 }
@@ -65,13 +86,51 @@ void DoorSequence::tick(){if(!active_)return;recvx_door_step(&core_);
         const unsigned bits=unsigned(core_.status)>>(16+shift);if(bits&2)sounds_.push_back(1);else if(bits&8)sounds_.push_back(3);else if(bits&4)sounds_.push_back(2);else if(bits&1)sounds_.push_back(0);core_.status&=~int(0xf0000u<<shift);
     }
     for(unsigned command=0;command<10;++command)if(core_.status&sound_timing_[command]){sound_commands_.push_back(command);sound_timing_[command]=0;}
+    // PuruProc1 raises CallSystemSe(0, PruSndTbl[snd_no]) and
+    // StartVibrationEx(2, pru_no); the pass that rearms raises the pattern twice.
+    for(int i=0;i<core_.pru_se;++i)shake_sounds_.push_back(core_.pru_se_no);
+    for(int i=0;i<core_.pru_vib;++i)shake_patterns_.push_back({core_.pru_vib_atrb,core_.pru_vib_no});
+    core_.pru_se=core_.pru_vib=0;
     ++ticks_;if(core_.status&0x40){active_=false;finished_=true;}if(ticks_>3600)throw std::runtime_error("original door sequence exceeded tick budget");}
 void DoorSequence::skip(){if(active_){skipped_=true;active_=false;finished_=true;core_.status|=0x40;}}
+// njCnkSetEasyMultiAmbient plus the point lights of slots 2..4, evaluated the
+// way Ninja chunk lighting does it: per vertex over its own normal and
+// position, with the linear near/far falloff of njCnkSetEasyMultiLightRange.
+// Without a light procedure the demo keeps the drawing it had.
+void DoorSequence::light_scene(Scene& scene)const{
+    if(!core_.lgt_on)return;
+    const NJS_POINT3 ambient{core_.lgt_amb[0],core_.lgt_amb[1],core_.lgt_amb[2]};
+    for(auto& t:scene.triangles){
+        NJS_VECTOR a{t.vertices[1].position.x-t.vertices[0].position.x,t.vertices[1].position.y-t.vertices[0].position.y,t.vertices[1].position.z-t.vertices[0].position.z},
+                   b{t.vertices[2].position.x-t.vertices[0].position.x,t.vertices[2].position.y-t.vertices[0].position.y,t.vertices[2].position.z-t.vertices[0].position.z},face;
+        njOuterProduct(&a,&b,&face);njUnitVector(&face);
+        for(auto& vertex:t.vertices){
+            auto normal=vertex.normal;
+            if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);
+            auto colour=ambient;
+            for(const auto& light:core_.lgt_pnt){
+                if(!light.on)continue;
+                NJS_VECTOR direction{light.pos.x-vertex.position.x,light.pos.y-vertex.position.y,light.pos.z-vertex.position.z};
+                const float distance=std::sqrt(direction.x*direction.x+direction.y*direction.y+direction.z*direction.z);
+                const float attenuation=light.f_rang>light.n_rang?std::clamp((light.f_rang-distance)/(light.f_rang-light.n_rang),0.f,1.f):0.f;
+                njUnitVector(&direction);
+                const float diffuse=std::max(0.f,direction.x*normal.x+direction.y*normal.y+direction.z*normal.z)*attenuation;
+                colour.x+=light.col[0]*diffuse;colour.y+=light.col[1]*diffuse;colour.z+=light.col[2]*diffuse;
+            }
+            vertex.light={std::clamp(colour.x,0.f,1.f),std::clamp(colour.y,0.f,1.f),std::clamp(colour.z,0.f,1.f)};
+        }
+        t.gouraud=true;t.world_lit=true;
+    }
+}
 void DoorSequence::draw(SoftwareRenderer& renderer){
     Scene scene;scene.background=0xff000000;SceneCamera camera;camera.position=core_.vew_pos;for(unsigned i=0;i<3;++i)camera.angles[i]=-core_.vew_ang[i];camera.perspective=12743;
+    // bhSetDoor njClipZ. njSetAspect(1.174, 1) equals BHD_ASPECT_X/Y, which the
+    // renderer already uses, so only the clip range differs from gameplay.
+    camera.clip_near=clip_near_;camera.clip_far=clip_far_;
     if(core_.status&0x200){ModelGeometryOptions options;options.pose.resize(count_);if(core_.status&0x400)njRotateY(&options.transform,32768);
         for(unsigned i=0;i<count_;++i){const auto& n=nodes_[i];options.pose[i]={{n.pos[0],n.pos[1],n.pos[2]},{n.ang[0],n.ang[1],n.ang[2]}};std::memcpy(model_.data()+objects_+i*52,&n.evalflags,4);std::memcpy(model_.data()+objects_+i*52+4,&n.model,4);}
         scene=decode_model_asset(model_,model_offset_,0,options);scene.textures=textures_;scene.background=0xff000000;
+        light_scene(scene);
     }renderer.draw(scene,camera);
     if(core_.status&0x100){const float opacity=std::clamp(core_.fde_rate,0.0f,1.0f);for(auto& pixel:renderer.canvas()){std::uint32_t mixed=0xff000000;for(unsigned shift:{0u,8u,16u})mixed|=unsigned(((pixel>>shift)&255)*(1-opacity)+((unsigned(core_.fde_col)>>shift)&255)*opacity)<<shift;pixel=mixed;}}
 }

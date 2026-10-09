@@ -79,6 +79,7 @@ struct Setup {
     bool gouraud=false;std::array<NJS_POINT3,3> light{};
     float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
     std::uint64_t blend_register=0x44;
+    bool filtered=false,linear_only=false;
 };
 SceneVertex lerp_vertex(const SceneVertex& a,const SceneVertex& b,float t){
     auto mix=[t](float x,float y){return x+(y-x)*t;};
@@ -161,12 +162,14 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             const float dax=-(p[2].y-p[1].y)/area,day=(p[2].x-p[1].x)/area,dbx=-(p[0].y-p[2].y)/area,dby=(p[0].x-p[2].x)/area,dcx=-(dax+dbx),dcy=-(day+dby);
             Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
             setup.blend_register=triangle.blend_register;
+            setup.filtered=triangle.texture_filter==SceneTextureFilter::Linear||(triangle.texture_filter==SceneTextureFilter::Default&&filter_);
+            setup.linear_only=triangle.texture_filter==SceneTextureFilter::Linear;
             if(triangle.gouraud&&triangle.world_lit){setup.gouraud=true;setup.light={v[0].light,v[1].light,v[2].light};if(area_swapped)std::swap(setup.light[1],setup.light[2]);}
             setup.Ux=dax*p[0].u_over_z+dbx*p[1].u_over_z+dcx*p[2].u_over_z;setup.Uy=day*p[0].u_over_z+dby*p[1].u_over_z+dcy*p[2].u_over_z;
             setup.Vx=dax*p[0].v_over_z+dbx*p[1].v_over_z+dcx*p[2].v_over_z;setup.Vy=day*p[0].v_over_z+dby*p[1].v_over_z+dcy*p[2].v_over_z;
             setup.Wx=dax*p[0].invz+dbx*p[1].invz+dcx*p[2].invz;setup.Wy=day*p[0].invz+dby*p[1].invz+dcy*p[2].invz;
             // Mip pyramids are built here, serially, so the band workers only read them.
-            if(filter_&&setup.texture&&(!setup.texture->filter_cache->ready||setup.texture->filter_cache->fingerprint!=setup.texture->fingerprint()))build_mips(*setup.texture);
+            if(setup.filtered&&setup.texture&&(!setup.texture->filter_cache->ready||setup.texture->filter_cache->fingerprint!=setup.texture->fingerprint()))build_mips(*setup.texture);
             setups.push_back(setup);
         }
     }
@@ -206,7 +209,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                     const float rz=1.f/invz;
                     float u=(a*p[0].u_over_z+b*p[1].u_over_z+c*p[2].u_over_z)*rz;
                     float v=(a*p[0].v_over_z+b*p[1].v_over_z+c*p[2].v_over_z)*rz;
-                    if(!filter_) {
+                    if(!s.filtered) {
                         u-=std::floor(u);v-=std::floor(v);
                         const auto tx=std::min(texture->width-1,unsigned(u*texture->width));
                         const auto ty=std::min(texture->height-1,unsigned(v*texture->height));
@@ -234,12 +237,13 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                             setup_l0=int(lod);setup_frac=lod-float(setup_l0);
                         }
                         const int taps=setup_taps,top=int(texture->filter_cache->mips.size());
-                        const float du=setup_du,dv=setup_dv;const int l0=setup_l0,l1=std::min(l0+1,top);const float frac=setup_frac;
+                        const float du=s.linear_only?0:setup_du,dv=s.linear_only?0:setup_dv;const int l0=s.linear_only?0:setup_l0,l1=s.linear_only?0:std::min(l0+1,top);const float frac=s.linear_only?0:setup_frac;
                         u-=std::floor(u);v-=std::floor(v);
                         const Level a0=level_of(*texture,unsigned(l0)),a1=level_of(*texture,unsigned(l1));
                         float acc[4]={0,0,0,0};
-                        const bool second=frac>1e-3f&&l1!=l0;const float inv_taps=1.f/float(taps);
-                        for(int tap=0;tap<taps;++tap){
+                        const int draw_taps=s.linear_only?1:taps;
+                        const bool second=frac>1e-3f&&l1!=l0;const float inv_taps=1.f/float(draw_taps);
+                        for(int tap=0;tap<draw_taps;++tap){
                             const float t=(float(tap)+.5f)*inv_taps-.5f,su=u+t*du,sv=v+t*dv;
                             if(texture->filter_cache->uniform_alpha){bilinear<false>(a0,su,sv,(1-frac)*inv_taps,acc);if(second)bilinear<false>(a1,su,sv,frac*inv_taps,acc);}
                             else{bilinear<true>(a0,su,sv,(1-frac)*inv_taps,acc);if(second)bilinear<true>(a1,su,sv,frac*inv_taps,acc);}

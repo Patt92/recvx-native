@@ -98,7 +98,11 @@ public:
     // bhCyoutenHenkei family on the player work (bhCyoutenHenkeiSetEX type 0).
     bool player_morph()const{return player_morph_.morph;}float player_morph_shape()const{return player_morph_.morph_shape;}
     const EffectSprite* effect_state(unsigned index)const{return index<sprites_.size()?&sprites_[index].sprite:nullptr;}
-    bool effect_visible(unsigned index)const{if(index>=sprites_.size())return false;const auto& w=sprites_[index];const auto atlas=effect_textures_.find(w.sprite.tex_id);return !w.hidden&&w.queued&&!(w.sprite.flg&0x1000000)&&atlas!=effect_textures_.end()&&w.sprite.ani_ct<atlas->second.size();}
+    bool effect_visible(unsigned index)const;
+    EffectContext effect_context()const;
+    void set_presentation_flags(unsigned flags){presentation_flags_=flags;} // sys->pt_flg, native draw owner
+    struct LightState {unsigned flags,type,clock,link,index,node;NJS_POINT3 position,color;float near_range,far_range;};
+    std::optional<LightState> light_state(unsigned index)const;
     ModelPose model_pose(unsigned kind,unsigned index,unsigned script_node=0)const;
     // sp_evt.c bhDrawSpEvtComCharacter: the special-event computer draws
     // rom->enep[chr_no] into its character window. The original writes the
@@ -177,7 +181,7 @@ public:
 private:
     struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;};
     struct Context {unsigned kind=0,index=0,node=0,mode1=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
-    struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;};
+    struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;};
     struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};
     struct EventCameraTrack {std::vector<EventCamera> keys;unsigned next=0;};
     std::vector<std::uint8_t> room_;std::size_t header_;unsigned simulation_flags_=~0u;
@@ -234,8 +238,7 @@ private:
     std::vector<Model> models_;
     struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;};
     bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=false,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::map<unsigned,std::size_t> barrel_walls_;
-    unsigned player_weapon_=0,effect_yk_ct_=0;bool lighter_=false; // plp->flg 0x1000000, sys->yk_ct
-    bool lighter_fire_=false; // sys->st_flg 0x20000000 (bhSetLighterFire)
+    unsigned player_weapon_=0,effect_yk_ct_=0,presentation_flags_=~0u; // system.c initializes pt_flg to ~0u
     void control_player_effects();
     std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;
     std::vector<MotionClip> room_motions_;

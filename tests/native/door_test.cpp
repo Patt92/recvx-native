@@ -2,6 +2,8 @@
 #include "asset_io.h"
 #include "binary_view.h"
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -21,9 +23,18 @@ struct Run {
     float travel=0;
     int node_motion=0,flag_motion=0;
     std::vector<std::pair<unsigned,unsigned>> sounds,commands; // pass, value
+    // LightProc1/2: the ambient after the clamp, the point lights that came
+    // on, and how far the rate pulled the first light's colour apart.
+    bool lit=false;unsigned lights=0;
+    std::array<float,3> ambient{};float light_colour=0,light_colour_low=0;
+    float light_travel=0;
+    // PuruProc1: the system sound numbers and the {attribute, pattern} pairs.
+    std::vector<std::pair<unsigned,int>> shake_sounds;
+    std::vector<std::pair<unsigned,std::pair<int,int>>> shake_patterns;
 };
 Run play(DoorSequence& door,unsigned limit=1200){
     Run run;
+    bool first_colour=true;
     const auto* nodes=door.state().objP;
     std::vector<int> before,flags_before;
     for(unsigned i=0;i<door.state().nodes;++i){
@@ -40,6 +51,21 @@ Run play(DoorSequence& door,unsigned limit=1200){
         if(door.state().status&0x20)run.deferred=true;
         for(const auto sound:door.take_sounds())run.sounds.push_back({run.ticks,sound});
         for(const auto command:door.take_sound_commands())run.commands.push_back({run.ticks,command});
+        for(const auto sound:door.take_shake_sounds())run.shake_sounds.push_back({run.ticks,sound});
+        for(const auto pattern:door.take_shake_patterns())run.shake_patterns.push_back({run.ticks,pattern});
+        const auto& s=door.state();
+        if(s.lgt_on){
+            run.lit=true;run.ambient={s.lgt_amb[0],s.lgt_amb[1],s.lgt_amb[2]};
+            unsigned on=0;for(const auto& light:s.lgt_pnt)if(light.on)++on;
+            run.lights=std::max(run.lights,on);
+            if(s.lgt_pnt[0].on){
+                const float colour=s.lgt_pnt[0].col[0];
+                if(first_colour){run.light_colour=run.light_colour_low=colour;first_colour=false;}
+                run.light_colour=std::max(run.light_colour,colour);
+                run.light_colour_low=std::min(run.light_colour_low,colour);
+                run.light_travel+=std::abs(s.lgt_pnt[0].pos.x)+std::abs(s.lgt_pnt[0].pos.y)+std::abs(s.lgt_pnt[0].pos.z);
+            }
+        }
     }
     run.finished=door.finished();
     std::vector<int> after,flags_after;
@@ -64,10 +90,46 @@ int main(int argc,char** argv){try{_Make_SinTable();
     {const std::size_t fade[2]={0,0x34};
      const std::size_t view[8]={0,0x50,0x5C,0x94,0x38,0x5C,0x58,0x50};
      const std::size_t door[8]={0,0x50,0x1C,0x40,0x30,0x34,0,0x50};
+     // LIGHTPROC_WORK is 0x7C; LightProc2 reads a second block on the pull
+     // side. PURUPROC_WORK is 0x14.
+     const std::size_t light[3]={0,0x7C,0xF8};
+     const std::size_t shake[2]={0,0x14};
      for(unsigned t=0;t<2;++t)check(recvx_door_parameter_size(0,t)==fade[t],"fade block size");
      for(unsigned t=0;t<8;++t)check(recvx_door_parameter_size(1,t)==view[t],"camera block size");
      for(unsigned t=0;t<8;++t)check(recvx_door_parameter_size(2,t)==door[t],"door block size");
-     check(!recvx_door_parameter_size(1,8)&&!recvx_door_parameter_size(3,1),"size reported outside the tables");}
+     for(unsigned t=0;t<3;++t)check(recvx_door_parameter_size(3,t)==light[t],"light block size");
+     for(unsigned t=0;t<2;++t)check(recvx_door_parameter_size(4,t)==shake[t],"shake block size");
+     check(!recvx_door_parameter_size(1,8)&&!recvx_door_parameter_size(3,3)&&!recvx_door_parameter_size(4,2)
+           &&!recvx_door_parameter_size(5,1),"size reported outside the tables");
+     // A light block is only as long as the lights it declares; the second
+     // block of LightProc2 still sits a whole 0x7C behind the first.
+     std::vector<unsigned char> block(0x7C+0x7C,0);
+     *reinterpret_cast<int*>(block.data()+12)=2;
+     check(recvx_door_light_extent(block.data(),block.size(),1)==0x10+2*0x24,"a two-light block was not measured");
+     *reinterpret_cast<int*>(block.data()+12)=0;
+     check(recvx_door_light_extent(block.data(),block.size(),1)==0x10,"an empty light block was not measured");
+     check(recvx_door_light_extent(block.data(),0x0F,1)==0,"a light block shorter than its header was accepted");
+     *reinterpret_cast<int*>(block.data()+12)=1;
+     check(recvx_door_light_extent(block.data(),0x10+0x24-1,1)==0,"a light block cut off inside its light was accepted");
+     *reinterpret_cast<int*>(block.data()+12)=4;
+     check(recvx_door_light_extent(block.data(),block.size(),1)==0,"a block claiming four lights was accepted");
+     *reinterpret_cast<int*>(block.data()+12)=1;
+     *reinterpret_cast<int*>(block.data()+0x7C+12)=3;
+     check(recvx_door_light_extent(block.data(),block.size(),2)==0x7C+0x10+3*0x24,"the second light block was not measured");
+     check(recvx_door_light_extent(block.data(),0x7C+0x10,2)==0,"a cut-off second light block was accepted");
+     check(!recvx_door_light_extent(block.data(),block.size(),0)&&!recvx_door_light_extent(block.data(),block.size(),3),
+           "a light block outside the two procedures was measured");}
+
+    // --- njClipZ of bhSetDoor ----------------------------------------------
+    {float near_clip=0,far_clip=0;
+     // dmo_clip holds one case: door type 1 out of the MRY partition whose
+     // case runs ViewProc4.
+     check(recvx_door_clip(1,RECVX_DOOR_MRY_PARTITION,4,&near_clip,&far_clip),"the dmo_clip case was not found");
+     check(near_clip==10.0f&&far_clip==34.0f,"the dmo_clip case did not report its own range");
+     check(!recvx_door_clip(1,RECVX_DOOR_MRY_PARTITION,3,&near_clip,&far_clip),"another camera type matched the dmo_clip case");
+     check(near_clip==2.0f&&far_clip==20000.0f,"the gameplay default range is not reported");
+     check(!recvx_door_clip(2,RECVX_DOOR_MRY_PARTITION,4,&near_clip,&far_clip),"another door type matched the dmo_clip case");
+     check(!recvx_door_clip(1,4,4,&near_clip,&far_clip),"another partition matched the dmo_clip case");}
 
     // --- the chg_vew chain -------------------------------------------------
     {std::vector<unsigned char> block(0x38+0x50,0);
@@ -88,20 +150,32 @@ int main(int argc,char** argv){try{_Make_SinTable();
 
     // --- procedure binding --------------------------------------------------
     {RECVX_DOOR_STATE state{};
-     check(recvx_door_configure(&state,1,1,1),"the original fade/camera/door types did not bind");
-     check(state.fde_prcP&&state.vew_prcP&&state.dor_prcP,"a procedure stayed unbound");
-     check(!recvx_door_configure(&state,0,1,1),"fade type 0 has no procedure and must not report success");
+     check(recvx_door_configure(&state,1,1,1,1,1),"the original fade/camera/door types did not bind");
+     check(state.fde_prcP&&state.vew_prcP&&state.dor_prcP&&state.lgt_prcP&&state.pru_prcP,"a procedure stayed unbound");
+     check(!recvx_door_configure(&state,0,1,1,1,1),"fade type 0 has no procedure and must not report success");
      // Type 6 only raises an evalflag, so it has a procedure but no block.
-     check(recvx_door_configure(&state,1,1,6)&&state.dor_prcP,"door type 6 did not bind its procedure");
+     check(recvx_door_configure(&state,1,1,6,1,1)&&state.dor_prcP,"door type 6 did not bind its procedure");
      check(!recvx_door_parameter_size(2,6),"door type 6 reported a parameter block");
-     check(recvx_door_configure(&state,1,1,0)&&!state.dor_prcP,"door type 0 bound a procedure");
-     check(!recvx_door_configure(&state,1,8,1),"camera type outside the table reported success");}
+     check(recvx_door_configure(&state,1,1,0,1,1)&&!state.dor_prcP,"door type 0 bound a procedure");
+     check(!recvx_door_configure(&state,1,8,1,1,1),"camera type outside the table reported success");
+     // Both light procedures and the one shake procedure have to resolve, and
+     // a packet may leave either family at zero.
+     check(recvx_door_configure(&state,1,1,1,2,0)&&state.lgt_prcP&&!state.pru_prcP,"light type 2 without a shake did not bind");
+     check(recvx_door_configure(&state,1,1,1,0,1)&&!state.lgt_prcP&&state.pru_prcP,"a shake without a light procedure did not bind");
+     check(!recvx_door_configure(&state,1,1,1,3,0),"light type outside the table reported success");
+     check(!recvx_door_configure(&state,1,1,1,0,2),"shake type outside the table reported success");
+     // dmo_atr 0x40 swaps the packet's shake for the built-in heartbeat one.
+     {RECVX_DOOR_STATE doki{};
+      check(recvx_door_configure(&doki,1,1,1,1,0),"the heartbeat case did not configure");
+      check(!doki.pru_prcP,"the packet already carried a shake procedure");
+      recvx_door_select_doki_shake(&doki);
+      check(doki.pru_prcP&&doki.pru_type==1,"the heartbeat shake was not selected");}}
 
     if(argc<2){std::cout<<"No cooked data supplied: the original packets were not played.\n";return 0;}
     const auto root=std::filesystem::u8path(argv[1]);
 
     // --- every original packet runs its own sequence -----------------------
-    unsigned packets=0,with_travel=0,with_motion=0,with_sound=0,with_procedure=0;
+    unsigned packets=0,with_travel=0,with_motion=0,with_sound=0,with_procedure=0,with_light=0,with_shake=0;
     unsigned shortest=~0u,longest=0;
     for(unsigned type=0;type<105;++type){
         const auto file=root/"archives/MRY"/(asset_number(type+71)+".bin");
@@ -112,8 +186,11 @@ int main(int argc,char** argv){try{_Make_SinTable();
         for(unsigned i=0;i<4;++i){const auto size=view.u32(p);if(i==0)model=bytes.at(p+4)=='M'&&bytes.at(p+5)=='D'&&bytes.at(p+6)=='L';if(i==3)parameter=p+4;p+=4+size;}
         if(!model)continue;
         for(unsigned c=0;c<view.u8(parameter+3);++c){
-            // PT_WORK slot 2 names the door procedure of this case.
+            // PT_WORK slots 2, 3 and 4 name the door, light and shake
+            // procedures of this case, each followed by its block offset.
             const unsigned door_type=view.u16(parameter+4+c*20+8);
+            const unsigned light_type=view.u16(parameter+4+c*20+12),light_off=view.u16(parameter+4+c*20+14);
+            const unsigned shake_type=view.u16(parameter+4+c*20+16),shake_off=view.u16(parameter+4+c*20+18);
             DoorSequence door;door.begin(root,{},DoorRequest{c<<7,0,1,0,type,0});
             check(door.active(),"an original door packet did not start a sequence");
             const auto run=play(door);
@@ -137,6 +214,47 @@ int main(int argc,char** argv){try{_Make_SinTable();
             // every other procedure has to move its own nodes.
             if(door_type==6)check(run.flag_motion>0,(what+" did not raise the leaf evalflag").c_str());
             else if(door_type)check(run.node_motion>0,(what+" moved no door node").c_str());
+            // LightProc1/2: the ambient of the block capped at 0.4, and every
+            // light the block declares switched on with its own colour. The
+            // rate bhInitDoor leaves behind is one, so the colour is the
+            // packet's own value.
+            if(light_type){
+                check(run.lit,(what+" never set its multi ambient").c_str());
+                const unsigned lights=view.u32(parameter+light_off+12);
+                check(run.lights==lights,(what+" switched on a different number of point lights").c_str());
+                for(unsigned k=0;k<3;++k)
+                    check(run.ambient[k]==std::min(view.f32(parameter+light_off+k*4),0.4f),
+                          (what+" put in an ambient the block does not hold").c_str());
+                if(lights)check(run.light_colour==view.f32(parameter+light_off+16+4)&&run.light_colour_low==run.light_colour,
+                                (what+" scaled its first light away from the packet colour").c_str());
+                ++with_light;
+            }
+            else check(!run.lit,(what+" lit itself without a light procedure").c_str());
+            // PuruProc1: one system sound and two vibration patterns per
+            // trigger, the first after wait_time passes and then every
+            // pru_wait+1 passes while loop_time lasts.
+            if(shake_type){
+                const int wait_time=view.i32(parameter+shake_off),loop_time=view.i32(parameter+shake_off+4);
+                const int pattern=view.i32(parameter+shake_off+12),pru_wait=view.i32(parameter+shake_off+16);
+                check(!run.shake_sounds.empty(),(what+" requested no shake sound").c_str());
+                check(run.shake_patterns.size()==2*run.shake_sounds.size(),
+                      (what+" did not raise two vibration patterns per trigger").c_str());
+                check(run.shake_sounds.front().first==unsigned(wait_time)+1,
+                      (what+" started its shake outside its own wait time").c_str());
+                for(const auto& entry:run.shake_sounds)
+                    check(entry.second==10,(what+" used a sound outside PruSndTbl").c_str());
+                for(const auto& entry:run.shake_patterns)
+                    check(entry.second.first==2&&entry.second.second==pattern,
+                          (what+" used another vibration attribute or pattern").c_str());
+                for(std::size_t i=1;i<run.shake_sounds.size();++i)
+                    check(run.shake_sounds[i].first-run.shake_sounds[i-1].first==unsigned(pru_wait)+1,
+                          (what+" did not keep its own shake interval").c_str());
+                check(int(run.shake_sounds.back().first)<=wait_time+loop_time,
+                      (what+" shook after its loop time had run out").c_str());
+                ++with_shake;
+            }
+            else check(run.shake_sounds.empty()&&run.shake_patterns.empty(),
+                       (what+" shook without a shake procedure").c_str());
             ++packets;
             if(run.travel>0.5f)++with_travel;
             if(run.node_motion||run.flag_motion)++with_motion;
@@ -149,6 +267,9 @@ int main(int argc,char** argv){try{_Make_SinTable();
     check(with_travel==packets,"a packet moved its camera nowhere");
     check(with_motion>=with_procedure,"a packet with a door procedure changed nothing on its model");
     check(with_sound==packets,"a packet requested no door sound");
+    // Every original case selects a light procedure; the shake is rarer.
+    check(with_light==packets,"a packet drew without the light procedure its own case selects");
+    check(with_shake>0,"no original packet ran its shake procedure");
     // The lengths come from the packets themselves; they are reported, not
     // asserted against an invented range.
     check(shortest>30,"a packet finished before it could run a demo");
@@ -197,16 +318,92 @@ int main(int argc,char** argv){try{_Make_SinTable();
      check(door.skipped()&&door.finished()&&!door.active(),"the skip did not end the demo");
      check(door.state().status&0x40,"the skip left the completion status clear");}
 
-    // --- the sequence is actually drawn ------------------------------------
+    // --- the heartbeat light and the heartbeat shake ------------------------
+    // dmo_atr 0x20 switches DokiProcLgt on: the rectified sine over time*1024
+    // pulls the point-light rate between 0.5 and 1.5, and the ambient offset
+    // of a half lifts the clamped ambient to 0.4.
+    {DoorSequence plain,doki;
+     plain.begin(root,{},DoorRequest{0,0,1,0,0,0});
+     doki.begin(root,{},DoorRequest{0x20,0,1,0,0,0});
+     check(doki.state().status&0x40000000,"the heartbeat attribute did not reach the status");
+     const auto a=play(plain),b=play(doki);
+     check(a.light_colour==a.light_colour_low,"the steady demo pulsed its light anyway");
+     check(b.light_colour>b.light_colour_low,"the heartbeat light never pulsed the point light");
+     // The packet colour is 0.5 and the rate runs 0.5..1.5 around it.
+     check(b.light_colour>a.light_colour&&b.light_colour_low<a.light_colour_low,
+           "the heartbeat rate did not reach past the steady colour");
+     check(a.ambient[0]==0.0f&&b.ambient[0]==0.4f,"the heartbeat ambient offset did not reach the clamp");
+     check(b.ticks==a.ticks,"the heartbeat light changed the length of the sequence");}
+    // dmo_atr 0x40 replaces the packet shake by DkiPru: pattern 13 every 20+1
+    // passes from the first one, for 768 passes.
+    {DoorSequence door;door.begin(root,{},DoorRequest{0x40,0,1,0,0,0});
+     check(door.state().status&0x20000000,"the heartbeat shake attribute did not reach the status");
+     check(door.state().status&0x10000000,"the shake pass was not switched on");
+     const auto run=play(door);
+     check(!run.shake_sounds.empty(),"the heartbeat shake requested no sound");
+     check(run.shake_sounds.front().first==1,"the heartbeat shake did not start on the first pass");
+     for(const auto& entry:run.shake_sounds)check(entry.second==10,"the heartbeat shake used another sound");
+     for(const auto& entry:run.shake_patterns)
+         check(entry.second.first==2&&entry.second.second==13,"the heartbeat shake used another pattern");
+     for(std::size_t i=1;i<run.shake_sounds.size();++i)
+         check(run.shake_sounds[i].first-run.shake_sounds[i-1].first==21,"the heartbeat shake lost its interval");
+     check(run.shake_patterns.size()==2*run.shake_sounds.size(),"the heartbeat shake lost a vibration pattern");
+     // Door type 0 has no shake of its own, so this one can only be DkiPru.
+     DoorSequence plain;plain.begin(root,{},DoorRequest{0,0,1,0,0,0});
+     check(play(plain).shake_sounds.empty(),"door type 0 shook without the heartbeat attribute");}
+
+    // --- njClipZ reaches the drawn demo ------------------------------------
+    // Door type 1 case 1 is the one original case that runs ViewProc4, so it
+    // is the dmo_clip entry; its case 0 runs ViewProc3 and stays at default.
+    {DoorSequence narrow,wide;
+     narrow.begin(root,{},DoorRequest{0x80,0,1,0,1,0});
+     wide.begin(root,{},DoorRequest{0,0,1,0,1,0});
+     check(narrow.clip_case(),"the original dmo_clip case did not match its own packet");
+     check(narrow.clip_near()==10.0f&&narrow.clip_far()==34.0f,"the dmo_clip case did not narrow the demo");
+     check(!wide.clip_case()&&wide.clip_near()==2.0f&&wide.clip_far()==20000.0f,
+           "the other case of the same packet was narrowed as well");
+     DoorSequence other;other.begin(root,{},DoorRequest{0,0,1,0,0,0});
+     check(!other.clip_case(),"another door type matched the dmo_clip case");}
+
+    // --- the sequence is actually drawn, and the light reaches the image ---
     {DoorSequence door;door.begin(root,{},DoorRequest{0,0,1,0,0,0});
      for(unsigned i=0;i<60;++i)door.tick();
      SoftwareRenderer image(160,120);
      std::fill(image.canvas().begin(),image.canvas().end(),0xff123456u);
      door.draw(image);
      check(std::any_of(image.canvas().begin(),image.canvas().end(),[](std::uint32_t p){return p!=0xff123456u;}),
-           "the door demo drew nothing");}
+           "the door demo drew nothing");
+     // The same pass under the heartbeat light has to come out differently:
+     // its rate and ambient are not the steady ones.
+     DoorSequence lit;lit.begin(root,{},DoorRequest{0x20,0,1,0,0,0});
+     for(unsigned i=0;i<60;++i)lit.tick();
+     SoftwareRenderer other(160,120);
+     std::fill(other.canvas().begin(),other.canvas().end(),0xff123456u);
+     lit.draw(other);
+     check(image.canvas()!=other.canvas(),"the heartbeat light did not change the drawn demo");}
+
+    // --- the dmo_clip range is effective in the native drawing path ---------
+    // A quad at z 60 lies inside the gameplay range and outside the narrowed
+    // one, so the range the packet hands over decides whether it is drawn.
+    {DoorSequence narrow,wide;
+     narrow.begin(root,{},DoorRequest{0x80,0,1,0,1,0});
+     wide.begin(root,{},DoorRequest{0,0,1,0,1,0});
+     // The renderer flips z into the Ninja view, so a point in front of the
+     // camera has negative world z.
+     Scene probe;SceneTriangle t{};probe.background=0xff000000;
+     t.vertices[0].position={-20,-20,-60};t.vertices[1].position={20,-20,-60};t.vertices[2].position={0,20,-60};
+     t.color=0xffffffff;probe.triangles.push_back(t);
+     auto shot=[&](const DoorSequence& door){
+         SceneCamera camera;camera.clip_near=door.clip_near();camera.clip_far=door.clip_far();
+         SoftwareRenderer image(160,120);image.draw(probe,camera);
+         return std::count_if(image.canvas().begin(),image.canvas().end(),
+                              [](std::uint32_t p){return p!=0xff000000u;});
+     };
+     check(shot(wide)>0,"the gameplay range clipped a quad inside it away");
+     check(shot(narrow)==0,"the narrowed dmo_clip range did not clip a quad behind it");}
 
     std::cout<<packets<<" original door packets play their own sequence ("<<shortest<<".."<<longest
-             <<" passes): camera, door motion, sounds and completion verified.\n";
+             <<" passes): camera, door motion, light, sounds and completion verified; "
+             <<with_light<<" ran a light procedure, "<<with_shake<<" a shake procedure.\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<"Door test failed: "<<e.what()<<'\n';return 1;}}
