@@ -1,4 +1,5 @@
 #include "world.h"
+#include "en07_bat.h"
 #include "binary_view.h"
 #include "room.h"
 #include "weapon_tables.h"
@@ -12,6 +13,8 @@
 #include <tuple>
 #include <functional>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 namespace recvx {
 namespace {
 thread_local std::set<std::string>* en01_unbound_log=nullptr;
@@ -28,6 +31,15 @@ thread_local std::function<void(RECVX_EN01*,const char*,const float*,float*)> en
 thread_local std::function<void(RECVX_EN01*,int,const float*,const float*,unsigned,int)> en01_particle_hook;
 thread_local std::function<void(const char*,int,const float*,int,const void*)> en01_blood_hook;
 void en01_note(const std::string& name){if(en01_unbound_log)en01_unbound_log->insert(name);}
+static std::set<std::string>* en07_unbound_log = nullptr;
+void en07_note(const std::string& name) { if (en07_unbound_log) en07_unbound_log->insert(name); }
+void en07_host_install(std::set<std::string>* log) {
+    en07_unbound_log = log;
+    static const RECVX_EN07_HOST host {
+        [](const char* name) { en07_note(name); }
+    };
+    recvx_en07_set_host(&host);
+}
 // Services the original en01 damage/death routines call. Unbound ones are recorded by name.
 void en01_host_install(std::set<std::string>* log){
     en01_unbound_log=log;
@@ -179,6 +191,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     // en04 Init / MV00: waiting trap dogs use clip 49; ordinary idle clip 47.
     for(auto& pair:entities_)if(pair.first.first==1&&pair.second.identity==4&&enemy_motions_.count(4)){auto& e=pair.second;e.room_motion=false;e.motion=e.type?49:47;e.step=65536;e.has_motion=true;entity_motion(e);e.en01=std::make_shared<RECVX_EN01>();recvx_en04_init(e.en01.get(),e.type,game_mode==2,floor_at(e.transform.position),e.transform.position.x,e.transform.position.y,e.transform.position.z,e.transform.yaw);recvx_enemy_motion(e.en01.get(),e.motion,0,65536);RECVX_EN01_STATE st;recvx_en01_state(e.en01.get(),&st);e.hp=st.hp;}
     if(const auto dog=enemy_motions_.find(4);dog!=enemy_motions_.end()){std::vector<unsigned> frames;for(const auto& entry:dog->second.entries)frames.push_back(entry.second?en01_motion_frames(section(room_,entry.first,entry.second)):0);recvx_en04_set_frame_counts(frames.data(),unsigned(frames.size()));}
+    for(auto& pair:entities_)if(pair.first.first==1&&pair.second.identity==7&&enemy_motions_.count(7)){auto& e=pair.second;e.room_motion=false;e.motion=e.type?7:2;e.step=65536;e.has_motion=true;entity_motion(e);e.en01=std::make_shared<RECVX_EN01>();recvx_en07_set_transform((RECVX_ENEMY*)e.en01.get(),e.transform.position.x,e.transform.position.y,e.transform.position.z,e.transform.yaw);recvx_en07_init((RECVX_ENEMY*)e.en01.get());RECVX_ENEMY_STATE es;recvx_en07_state((RECVX_ENEMY*)e.en01.get(),&es);e.hp=es.hp;}
     // bhJumpEnemy dispatches cinematic characters through subpl.c, including
     // their built-in idle pose. A rest mesh is not a character initialization.
     for(auto& pair:entities_)if(pair.first.first==1&&recvx_is_subplayer(pair.second.identity)){
@@ -338,6 +351,9 @@ static float event_div_product(float numerator,unsigned remaining,unsigned total
 }
 static float event_clock(unsigned remaining,unsigned total){return event_div_product(1.f,remaining,total);}
 bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=contexts_.at(c.task);const auto op=c.opcode;
+    // event.c:6985 bhEneRenderSet toggles only BH_PWORK.mdflg bit 0x200.
+    // Native rendering has the same draw gate on the common WorldEntity.
+    if(op==0xa5){entity(1,v.u8(1)).hidden=v.u8(2)==0;return true;}
     if(op==0x7a){audio_.stop_enemy_sound(v.u8(1));return true;}
     if(op==0x78){auto& lights=v.u8(2)?event_lights_:lights_;auto& light=lights.at(v.u8(1));light.color={v.u16(4)/100.f,v.u16(6)/100.f,v.u16(8)/100.f};light.near_range=v.u16(10)/100.f;light.far_range=v.u16(12)/100.f;return true;}
     if(op==0xba){for(unsigned key=0;key<2;++key)for(unsigned axis=0;axis<3;++axis)ctx.ground[key][axis]=v.u16(2+key*8+axis*2)/100.f*(v.u8(1+key*8)&(1u<<axis)?-1:1);return true;}
@@ -540,6 +556,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
 }
 void RoomWorld::tick_en01(){
     en01_host_install(&unbound_enemy_);
+    en07_host_install(&unbound_enemy_);
     en01_spawn_hook=[this](RECVX_EN01* work,const RECVX_EN01_EFFECT* effect,const float* offset,int node){
         for(const auto& pair:entities_)if(pair.first.first==1&&pair.second.en01.get()==work){EffectSpawn spawn;spawn.flg=effect->flg;spawn.id=effect->id;spawn.type=effect->type;spawn.flr_no=effect->flr_no;spawn.mdlver=effect->mdlver;
             spawn.position={effect->px,effect->py,effect->pz};spawn.scale={effect->sx,effect->sy,effect->sz};spawn.ax=effect->ax;spawn.ay=effect->ay;spawn.lkono=node;if(offset){spawn.has_offset=true;spawn.offset={offset[0],offset[1],offset[2]};}
@@ -593,11 +610,18 @@ void RoomWorld::tick_en01(){
             const auto wall=barrel_walls_.find(pair.first.second);RECVX_EN00_WALL w;if(wall!=barrel_walls_.end()&&recvx_en00_wall(e.en01.get(),&w))walls_[wall->second].flags=w.flg;
             continue;}
         if(e.hidden)continue;
-        {const auto bones=pose_of(e,pair.first.second);if(!bones.empty()){std::vector<float> matrices;const auto count=std::min<std::size_t>(bones.size(),32);for(std::size_t j=0;j<count;++j)matrices.insert(matrices.end(),bones[j].value,bones[j].value+16);recvx_en01_set_joints(e.en01.get(),matrices.data(),unsigned(count));}}
-        recvx_en01_set_transform(e.en01.get(),e.transform.position.x,e.transform.position.y,e.transform.position.z,e.transform.yaw);
+        {const auto bones=pose_of(e,pair.first.second);if(!bones.empty()){std::vector<float> matrices;const auto count=std::min<std::size_t>(bones.size(),32);for(std::size_t j=0;j<count;++j)matrices.insert(matrices.end(),bones[j].value,bones[j].value+16);if(e.identity==7)recvx_en07_set_joints((RECVX_ENEMY*)e.en01.get(),matrices.data(),unsigned(count));else recvx_en01_set_joints(e.en01.get(),matrices.data(),unsigned(count));}}
+        if(e.identity==7)recvx_en07_set_transform((RECVX_ENEMY*)e.en01.get(),e.transform.position.x,e.transform.position.y,e.transform.position.z,e.transform.yaw);else recvx_en01_set_transform(e.en01.get(),e.transform.position.x,e.transform.position.y,e.transform.position.z,e.transform.yaw);
         recvx_en01_set_enemy_no(e.en01.get(),int(pair.first.second));
-        if(e.identity==4)recvx_en04_tick(e.en01.get());else recvx_en01_tick(e.en01.get());
-        RECVX_EN01_STATE st;recvx_en01_state(e.en01.get(),&st);
+        if(e.identity==4)recvx_en04_tick(e.en01.get());else if(e.identity==7)recvx_en07_tick((RECVX_ENEMY*)e.en01.get());else recvx_en01_tick(e.en01.get());
+        RECVX_EN01_STATE st;
+        if(e.identity==7){
+            RECVX_ENEMY_STATE es;recvx_en07_state((RECVX_ENEMY*)e.en01.get(),&es);
+            st.hp=es.hp;st.dead=(es.flg&2)!=0;st.flinch=0;st.flinch_angle[0]=0;st.flinch_angle[1]=0;st.neck_angle=0;
+            st.px=es.px;st.py=es.py;st.pz=es.pz;st.ay=es.ay;st.mtn_no=es.mtn_no;st.pose_frame=es.pose_frame;st.upper_mtn=0;
+        }else{
+            recvx_en01_state(e.en01.get(),&st);
+        }
         e.flinch=st.flinch!=0;e.flinch_angles={st.flinch_angle[0],st.flinch_angle[1]};e.neck_angle=st.neck_angle;
         e.hp=st.hp;e.dead=st.dead!=0;e.transform.position={st.px,st.py,st.pz};e.transform.yaw=st.ay;
         if(enemy_ai_&&!e.dead&&!player_hidden){ // bhCheckPlayer: a walking zombie does not stand inside the player's capsule
@@ -939,3 +963,76 @@ void RoomWorld::control_player_effects(){
     set_effect_context({lighter_fire_?0x20000000u:0u,1,lighter_?0x1000000u:0u,player_hidden?0x1000000u:0u,0,0,simulation_flags_,effect_yk_ct_});
 }
 }
+
+// Historical ILP32/wasm2c audit kept recoverably as source reference only.
+// It is excluded from the native game build: its separate BH_PWORK table
+// cannot be a second actor/event/pose authority.
+#if 0
+// ---- original enemy layer (ILP32 module) ---------------------------------------
+namespace recvx {
+namespace {
+// njCnk*DrawModel: decoded at the call, while bhPutModel's npCalcSkin output is
+// installed (npPopMdlstr restores the bind-pose vertex list right after).
+struct OriginalDraw {std::uint32_t model;NJS_MATRIX matrix;std::uint32_t texlist;int mode;Scene object;};
+// bhControlCamera's cam.mtx (same order as SoftwareRenderer::draw) and the
+// njSetPerspective distance for the 640-pixel original screen.
+void original_camera(const SceneCamera& camera,NJS_MATRIX& view,float& dist){
+    njUnitMatrix(&view);njScale(&view,1,-1,-1);njTranslate(&view,0,0,-camera.distance);
+    njRotateZ(&view,camera.angles[2]);njRotateX(&view,camera.angles[0]);njRotateY(&view,camera.angles[1]);
+    njTranslate(&view,-camera.position.x,-camera.position.y,-camera.position.z);
+    dist=(640.0f/2.0f)/std::tan(0.0000958738f*float(camera.perspective/2));
+}
+std::vector<OriginalDraw>* original_draws=nullptr;
+AudioMixer* original_audio=nullptr;
+}
+void RoomWorld::set_original_enemies(bool enabled){
+    original_enemies_=enabled;if(!enabled||original_loaded_)return;
+    RECVX_ORIGINAL_HOST host{};
+    host.draw_model=[](void*,std::uint32_t model,const float* matrix,std::uint32_t texlist,int mode){if(!original_draws)return;OriginalDraw d{model,{},texlist,mode,{}};std::copy(matrix,matrix+16,d.matrix);
+        std::size_t size=0;const auto* memory=recvx_original_memory(&size);
+        try{d.object=decode_memory_model(memory,size,model,d.matrix);}catch(const std::exception& error){throw std::runtime_error(std::string("original enemy model: ")+error.what());}
+        original_draws->push_back(std::move(d));};
+    // sdfunc.c RequestEnemySe(EnemyNo, pPos, SeNo) / CallSystemSe(param, SeNo).
+    host.request_enemy_se=[](void*,std::uint32_t enemy,std::uint32_t,int se){if(original_audio)original_audio->request_enemy_se(enemy,se);};
+    recvx_original_init(&host);
+    original_audio=&audio_;
+    // system.c room load: bhInitReadRDT, expanded RDT at sys->memp, bhSetRDT, textures, bhFinishRoom.
+    if(recvx_original_load_room(room_.data(),room_.size())<0)throw std::runtime_error("original bhSetRoom rejected the room (sys->error & 1)");
+    const std::uint32_t rdt=recvx_original_rdt();std::uint32_t list=0,data=0;
+    // sys->txlp[i]/sys->txdp[i]: texture list and its PVP data inside the RDT copy
+    // (system.c:1708 hands each pair to bhSetMemPvpTexture).
+    for(int i=0;i<recvx_original_texture_count();++i){recvx_original_texture(i,&list,&data);
+        if(data>=rdt&&data-rdt<room_.size())original_textures_[list]=decode_texture_bundle(room_,data-rdt);}
+    original_loaded_=true;
+}
+void RoomWorld::tick_original_enemies(){
+    original_audio=&audio_;
+    recvx_original_set_player(player_.position.x,player_.position.y,player_.position.z,player_.yaw,floor_at(player_.position),player_hp_);
+    // sys->sp_flg is the host simulation mask (bit 1: enemies, game.c:223); pt_flg as bhInitSystem (all set).
+    recvx_original_set_system_flags(simulation_flags_,0xffffffffu,0,0);
+    {NJS_MATRIX view;float dist;original_camera(original_camera_,view,dist);recvx_original_set_camera(view,dist);}
+    recvx_original_control_enemy(); // game.c:48
+}
+void RoomWorld::append_original_enemies(Scene& scene,const SceneCamera& camera)const{
+    original_camera_=camera;
+    NJS_MATRIX view,inverse;float dist;original_camera(camera,view,dist);recvx_original_set_camera(view,dist);
+    std::copy(std::begin(view),std::end(view),std::begin(inverse));njInvertMatrix(&inverse);
+    std::vector<OriginalDraw> draws;original_draws=&draws;
+    recvx_original_draw_enemy(); // game.c:354 bhDrawEnemy
+    original_draws=nullptr;
+    // The Ninja current matrix is cam.mtx * node; the host renderer applies its
+    // own camera, so each node is drawn with inverse(cam.mtx) * current.
+    for(auto& d:draws){NJS_MATRIX world;std::copy(std::begin(inverse),std::end(inverse),std::begin(world));njMultiMatrix(&world,&d.matrix);std::copy(std::begin(world),std::end(world),std::begin(d.matrix));
+        for(auto& t:d.object.triangles)for(auto& v:t.vertices){njCalcPoint(&inverse,&v.position,&v.position);njCalcVector(&inverse,&v.normal,&v.normal);njUnitVector(&v.normal);}}
+    static const bool trace=std::getenv("RECVX_ORIGINAL_TRACE")!=nullptr;
+    if(trace){std::fprintf(stderr,"[original] %zu draw calls\n",draws.size());for(int i=0;i<recvx_original_enemy_slots();++i){RECVX_ORIGINAL_ENEMY e;recvx_original_enemy(i,&e);if(e.flg&1)std::fprintf(stderr,"[original] ene[%d] id=%u hp=%d flg=%x mdflg=%x stflg=%x pos=%.1f %.1f %.1f mtn=%u mode=%d/%d\n",i,e.id,e.hp,e.flg,e.mdflg,e.stflg,e.px,e.py,e.pz,e.mtn_no,e.mode0,e.mode1);}}
+    for(auto& d:draws){Scene& object=d.object;
+        const auto textures=original_textures_.find(d.texlist);if(textures!=original_textures_.end())object.textures=textures->second;
+        object.triangles.erase(std::remove_if(object.triangles.begin(),object.triangles.end(),[&](const auto& t){return t.textured&&t.texture>=object.textures.size();}),object.triangles.end());
+        for(auto& triangle:object.triangles)triangle.light_category=1;
+        if(trace&&!object.triangles.empty()){float lo[3]={1e9f,1e9f,1e9f},hi[3]={-1e9f,-1e9f,-1e9f};for(const auto& t:object.triangles)for(const auto& v:t.vertices){const float p[3]={v.position.x,v.position.y,v.position.z};for(int k=0;k<3;++k){lo[k]=std::min(lo[k],p[k]);hi[k]=std::max(hi[k],p[k]);}}
+            std::fprintf(stderr,"[original] model %x: %zu triangles, %zu textures, at %.1f %.1f %.1f box %.1f..%.1f %.1f..%.1f %.1f..%.1f\n",d.model,object.triangles.size(),object.textures.size(),d.matrix[12],d.matrix[13],d.matrix[14],lo[0],hi[0],lo[1],hi[1],lo[2],hi[2]);}
+        const auto offset=scene.textures.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);}
+}
+}
+#endif
