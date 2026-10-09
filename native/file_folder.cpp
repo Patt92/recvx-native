@@ -1,37 +1,14 @@
 #include "file_folder.h"
 #include "binary_view.h"
 #include "item_asset.h"
+#include <cstdint>
 #include <stdexcept>
 namespace recvx {
-// PORTIERUNGSLÜCKE (Policy 2026-10-09): Die Dateiordner-Routinen aus
-// fileview.c / itemview.c (SearchTag, SelectFile, SelectTag, FileSyu,
-// PlayPageCheck mit der Fortschrittsreihenfolge des Handbuchs) kamen aus
-// file_folder.inc, erzeugt von tools/generate_file_folder.py. Generator und
-// Include sind Quarantäne (archived/FORBIDDEN_DONTUSE/) und dürfen weder
-// gelesen noch ausgeführt werden. Mit den Routinen entfällt auch die
-// Host-Brücke, die nur für sie existierte (die thread_local-Spiegel von
-// FV_WORK/S_WORK/SITEM, CallSystemSe, NameChangeSet, StatusToFileView,
-// bhCkFlg, FileFlagInit und der enter/leave-Austausch).
-//
-// Zu leisten: Ordnerauswahl, Drehung, Registercursor, der Übergang in den
-// Leser und die Seitenreduktion des Handbuchs als eigenen nativen Mechanismus
-// bestimmen — nicht über einen Generator auf die Originalquellen.
-//
-// Solange das offen ist:
-// - step() bewegt nichts: kein Cursor, keine Ordnerdrehung (ang00 bleibt 0),
-//   kein Moduswechsel, kein SE und keine Leseranforderung. Nur der reine
-//   Host-Zähler clock() läuft weiter, damit die aufrufende UI ihren eigenen
-//   Takt behält.
-// - file_page_reduction liefert 0, weil PlayPageCheck fehlt. Das ist kein
-//   geratener Seitenstand, sondern "keine Seite bestimmbar".
-// - Die Datenstrukturen FV_WORK/S_WORK und die Knotenwinkel bleiben als
-//   Zustand erhalten, damit scene() die drei Ordner weiter aus den
-//   Originaldaten aufbaut — allerdings in Ruhelage, weil FileSyu die
-//   Startwinkel nicht mehr setzt.
-//
-// Sichtbare Folge: Der Dateiordner lässt sich nicht bedienen. Die drei Ordner
-// stehen unbewegt in ihrer Ausgangslage, Register lassen sich nicht wählen,
-// kein Dokument öffnet sich, und das Handbuch meldet keine Seiten.
+// Dateiordner und Seitenreduktion, eigenständig nativ (D03).
+// Semantikreferenz: fileview.c (SearchTag, SelectFile, SelectTag,
+// PlayPageCheck) und itemview.c (FileSyu, MakeTag). Kein Funktionskörper
+// übernommen, kein Originalkern. Die Werke unten tragen die Originalfeldnamen,
+// damit die Zustandsübergänge nachvollziehbar bleiben.
 namespace original_file_folder {
 // Feldnamengleiche Teilmengen der Originalwerke; von scene() und den
 // Abfragen unten gelesen.
@@ -49,12 +26,117 @@ struct FileFolder::State {
 };
 FileFolder::FileFolder():state_(std::make_shared<State>()){}
 bool FileFolder::automatic()const{return (state_->status.statusflg&0x40000000u)!=0;}
-unsigned file_page_reduction(const std::array<std::uint32_t,32>& flags){(void)flags;return 0;}
+unsigned file_page_reduction(const std::array<std::uint32_t,32>& flags){
+    // PlayPageCheck: der Fortschritt im Szenario kürzt das Handbuch von hinten.
+    // Die Reihenfolge ist die des Originals, der erste gesetzte Marker gewinnt.
+    auto set=[&](unsigned bit){return (flags.at(bit/32)&(0x80000000u>>(bit%32)))!=0;};
+    if(set(0x199))return 0;
+    if(set(0x2b))return 1;
+    if(set(0x129))return 2;
+    if(set(0xe0))return 4;
+    if(set(0x96))return 6;
+    return 7;
+}
 void FileFolder::open(Inventory& inv,bool bonus,bool automatic){
+    // MakeTag: Datei 0 (Handbuch) ist immer vorhanden, ssd_flg 0x1000 aus Raum
+    // 551 zeigt zusätzlich Datei 11. FileSyu dreht die drei Ordner in ihre
+    // Startlage, und der gewählte Ordner steht nach vorn (SelectFile z 1).
     state_=std::make_shared<State>();inv.items[383]|=1;if(bonus)inv.items[383]|=0x800;
     if(automatic)state_->status.statusflg|=0x40000000;
+    auto& s=*state_;
+    for(unsigned n=1;n<4;++n){s.nodes[n].ang[0]=32768;s.nodes[n].ang[1]=32768;}
+    for(unsigned n=1;n<4;++n)s.nodes[n].ang[1]=std::int16_t(s.work.filecsr*21845-32768);
+    s.work.afsmode|=0x20;
+    s.status.testmode=8;
+    search_tag(inv,1);
 }
-void FileFolder::step(Inventory& inv,unsigned pad){(void)inv;(void)pad;++state_->clock;}
+bool FileFolder::search_tag(const Inventory& inv,int direction){
+    // SearchTag: das nächste belegte Register des aktuellen Ordners suchen.
+    auto& s=*state_;const int start=s.work.tag;
+    for(;;){
+        if(inv.items[383]&(1u<<unsigned(s.work.tag+s.work.filecsr*8)))return true;
+        s.work.tag=(s.work.tag+direction)&0x7;
+        if(s.work.tag==start)return false;
+    }
+}
+void FileFolder::step(Inventory& inv,unsigned pad){
+    auto& s=*state_;++s.clock;
+    const bool decide=(pad&0x800)||(s.status.statusflg&0x40000000u);
+    const bool cancel=(pad&0x1000)!=0;
+    s.arrow={{.7f,.7f}};
+    if(s.status.testmode==8){
+        // SelectFile: links/rechts drehen den Ordnerstapel, Bestätigen fährt den
+        // gewählten Ordner heraus und wechselt in die Registerauswahl,
+        // Abbrechen geht zurück in die Statusleiste.
+        if(s.work.z==0&&s.work.roll==0){
+            if(!decide&&!cancel){
+                if(pad&0x4){s.arrow[1]=1.f;s.work.tag=0;if(++s.work.filecsr>2)s.work.filecsr=0;s.work.roll=1;for(auto& k:s.work.koma)k=2730;s.work.z=1;s.sound=6;}
+                else if(pad&0x8){s.arrow[0]=1.f;s.work.tag=0;if(--s.work.filecsr<0)s.work.filecsr=2;s.work.roll=1;for(auto& k:s.work.koma)k=-2730;s.work.z=1;s.sound=6;}
+            }else if(decide){
+                if(search_tag(inv,1)){s.work.z=2;s.sound=3;for(unsigned i=0;i<6;++i)s.work.koma2[i]=1820;s.status.statusflg|=0x20000000;}
+                else s.status.statusflg&=~0x20000000u;
+            }else{s.navigation=true;s.status.statusflg|=0x20000;s.sound=0;}
+        }
+        switch(s.work.z){
+        case 1:
+            // Die zwölf Teilschritte der Stapeldrehung; danach stehen alle drei
+            // Ordner auf dem Winkel des gewählten Faches.
+            if(s.work.j<16&&s.work.koma[s.work.j]!=0){for(unsigned n=1;n<4;++n)s.nodes[n].ang[1]+=s.work.koma[s.work.j];++s.work.j;break;}
+            for(unsigned n=1;n<4;++n)s.nodes[n].ang[1]=std::int16_t(s.work.filecsr*21845-32768);
+            s.work.roll=0;s.work.z=0;s.work.j=0;for(auto& k:s.work.koma)k=0;break;
+        case 2:
+            // Der gewählte Ordner schwenkt heraus, die beiden anderen weichen.
+            if(s.work.j<16&&s.work.koma2[s.work.j]!=0){rotate_selected(s.work.koma2[s.work.j]);++s.work.j;break;}
+            s.work.j=0;for(unsigned i=0;i<6;++i)s.work.koma2[i]=1820;s.work.z=3;s.work.afsmode|=0x20;break;
+        case 3:
+            // Das Register dreht sich zum Leser hin; danach steht der Cursor auf
+            // dem ersten belegten Register.
+            if(s.work.j<16&&s.work.koma2[s.work.j]!=0){s.work.ang00-=s.work.koma2[s.work.j];++s.work.j;break;}
+            s.work.j=0;for(auto& k:s.work.koma2)k=0;s.work.z=0;s.status.testmode=9;search_tag(inv,1);break;
+        default:break;
+        }
+        return;
+    }
+    // SelectTag: hoch/runter wählt ein belegtes Register, Bestätigen öffnet den
+    // Leser, Abbrechen dreht den Ordner zurück in den Stapel.
+    if(s.work.z==0&&!(s.work.afsmode&0x40)){
+        if(!decide&&!cancel){
+            const int direction=(pad&0x1)?-1:(pad&0x2)?1:0;
+            if(direction){
+                const int start=s.work.tag;
+                for(;;){
+                    s.work.tag=(s.work.tag+direction)&0x7;
+                    if(s.work.tag==start)break;
+                    if(inv.items[383]&(1u<<unsigned(s.work.tag+s.work.filecsr*8))){s.sound=3;break;}
+                }
+            }
+        }else if(decide){
+            if(inv.items[383]&(1u<<unsigned(s.work.tag+s.work.filecsr*8))){
+                s.sound=3;s.reader=true;s.work.afsmode|=0x60;s.status.statusflg|=0x40;s.work.page=0;s.work.pagewait01=0;
+            }
+        }else{s.sound=0;for(unsigned i=0;i<6;++i)s.work.koma2[i]=1820;s.work.z=1;}
+        return;
+    }
+    if(s.work.z==1){
+        if(s.work.j<16&&s.work.koma2[s.work.j]!=0){s.work.ang00+=s.work.koma2[s.work.j];++s.work.j;return;}
+        s.work.j=0;for(unsigned i=0;i<6;++i)s.work.koma2[i]=1820;s.work.z=2;s.work.afsmode&=~0x20u;return;
+    }
+    if(s.work.z==2){
+        if(s.work.j<16&&s.work.koma2[s.work.j]!=0){rotate_selected(-s.work.koma2[s.work.j]);++s.work.j;return;}
+        s.work.j=0;for(auto& k:s.work.koma2)k=0;s.status.testmode=8;s.work.z=0;return;
+    }
+}
+void FileFolder::rotate_selected(int step){
+    // SelectFile z 2 / SelectTag z 2: je Fach dreht ein anderes Paar der drei
+    // Ordnerknoten gegeneinander.
+    auto& s=*state_;
+    switch(s.work.filecsr){
+    case 0:s.nodes[2].ang[1]+=step;s.nodes[3].ang[1]-=step;break;
+    case 1:s.nodes[1].ang[1]+=step;s.nodes[2].ang[1]-=step;break;
+    case 2:s.nodes[1].ang[1]-=step;s.nodes[3].ang[1]+=step;break;
+    default:break;
+    }
+}
 void FileFolder::return_from_reader(){auto& s=*state_;s.work.afsmode=(s.work.afsmode&~0xB80u)|0x20;s.status.statusflg&=~0x40u;s.reader=false;s.status.testmode=9;}
 unsigned FileFolder::take_sound(){auto n=state_->sound;state_->sound=~0u;return n;}
 bool FileFolder::take_reader(){bool n=state_->reader;state_->reader=false;return n;}

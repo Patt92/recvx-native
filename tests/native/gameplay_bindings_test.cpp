@@ -79,20 +79,15 @@ int main(int argc,char** argv){try{
  std::cout<<"RM_0050 dogs: weapon selection, hit distance and wall query against real room data passed; aiming, firing, damage, blood and death are documented gaps.\n";
  }
  {auto bytes=read_asset_file(data/"rooms/RM_6040.RDT",64*1024*1024);Inventory inv;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.values[0]=6;vm.values[1]=4;vm.item_message=[](unsigned,unsigned){return Message{0xffff};};const auto a=vm.interactions.at(13);NJS_POINT3 pos{a.position.x+a.extent.x*.5f,a.position.y,a.position.z+a.extent.z*.5f+2};check(vm.interact(pos,0,a.floor),"original Memo file interaction failed");
-// PORTIERUNGSLÜCKE (Policy 2026-10-09): Die Zuordnung Item/Raum -> Datei (fstbl
-// aus inventory_engine.inc) ist gesperrt, siehe native/inspection.cpp;
-// original_file_number meldet "keine Datei". Entfallen ist damit die
-// Zusicherung auf Datei 17 und ihr Besitzbit. Geprüft bleibt der Host-Teil:
-// die Raumaufnahme wird quittiert und das Memo landet nicht im Inventar.
-check(!inv.contains(132),"Memo entered inventory instead of the file list");
-check(vm.acquired_file()==0&&!(inv.items[383]&~1u),"file number gap registered a guessed file");
+// D03: FileNumberSwitch ordnet Raum 604 mit Item 132 die Datei 17 zu.
+check(!inv.contains(132)&&vm.acquired_file()==17&&(inv.items[383]&(1u<<17)),"Memo entered inventory instead of original file 17");
 check(vm.flags[10][0]&0x800,"file pickup did not acknowledge room event");
 #ifdef RECVX_TEST_INPUT
 StatusMenu menu;GameplayInput controls(inv,menu,dialog,&vm);controls.synchronize();menu.tick(inv);menu.skip_slide();menu.input_unslid(MenuInput::Cancel,inv);check(!menu.file_acquisition,"acquired file cannot close");for(unsigned tick=0;tick<120;++tick){menu.tick(inv);controls.synchronize();}check(!menu.active,"file acquisition reopened after close");
 #else
 vm.finish_file();
 #endif
-check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<<"Original RM_6040 Memo: no inventory slot, room acknowledgement and close passed; the item/room to file mapping is a documented gap.\n";}
+check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<<"Original RM_6040 Memo: file 17, no inventory slot, room acknowledgement and close passed.\n";}
 #ifdef RECVX_TEST_INPUT
  // RM_0070 scd1 requests both cb_flg 0x10 and 0x20000 for Director's Memo.
  // Closing GetFile must consume both, as sub1.c ItemTaskCheck does; otherwise
@@ -100,17 +95,12 @@ check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<
  {auto bytes=read_asset_file(data/"rooms/RM_0070.RDT",64*1024*1024);auto scene=decode_scene(bytes);auto player=scene.spawns.at(0);std::size_t m=42;std::int64_t f=0;RoomWorld world(bytes,scene,player,m,f,audio,data);auto body=PlayerAsset::load(data);world.set_player_asset(&body);Inventory inv;const auto slots_before=inv.items;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.values[0]=0;vm.values[1]=7;vm.binding=[&](const auto& c){return world.bind(c);};vm.task_started=[&](unsigned l){world.start_task(l);};vm.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};vm.item_message=[](unsigned,unsigned){return Message{0xffff};};StatusMenu menu;GameplayInput controls(inv,menu,dialog,&vm);vm.initialize();
  check(vm.interact({25,0,41},49152,0),"Director Memo original scripted interaction failed");
  for(unsigned t=0;t<80&&!menu.file_acquisition;++t){vm.tick();world.tick();controls.synchronize();menu.tick(inv);}
- // PORTIERUNGSLÜCKE (Policy 2026-10-09): fstbl fehlt (siehe
- // native/inspection.cpp), die Dateinummer ist nicht bestimmbar. Entfallen ist
- // die Zusicherung auf Datei 8 und ihr Besitzbit. Geprüft bleibt, dass das
- // Skript beide Anforderungen stellt und der Dateibildschirm als Aufnahme
- // startet - genau das, was der folgende Schließtest braucht.
- check(menu.file_acquisition,"Director Memo did not open the original file task");
- check(vm.acquired_file()==0&&!(inv.items[383]&~1u),"file number gap registered a guessed file");
+ // D03: Raum 7 mit Item 48 ist Datei 8 (FileNumberSwitch).
+ check(menu.file_acquisition&&menu.file_number==8&&(inv.items[383]&(1u<<8)),"Director Memo did not open original file 8");
  check((vm.flags[10][0]&0x20010)==0x20010,"fixture did not exercise simultaneous file/item request");
  menu.skip_slide();menu.input_unslid(MenuInput::Cancel,inv);
  for(unsigned t=0;t<160;++t){menu.tick(inv);controls.synchronize();if(vm.acquired_file()==~0u)check(!(vm.flags[10][0]&0x20010),"file close retained an acquisition request");check(!vm.pickup_display(),"file close started a second GetItem acquisition");vm.tick();world.tick();}
- check(!menu.active&&!dialog.active()&&!inv.contains(48),"closing Director Memo inserted an inventory item or reopened a modal");check(!(vm.flags[10][0]&0x20010),"file close retained original acquisition request flags");check(vm.flag(7,97),"Director Memo original room pickup acknowledgement missing");for(unsigned i=0;i<383;++i)check(inv.items[i]==slots_before[i],"Director Memo changed an inventory slot");check(vm.errors.empty(),"Director Memo original room script blocked");std::cout<<"Original RM_0070 scripted Director Memo: close consumes both requests, no inventory slot; the file number itself is a documented gap.\n";}
+ check(!menu.active&&!dialog.active()&&!inv.contains(48),"closing Director Memo inserted an inventory item or reopened a modal");check(!(vm.flags[10][0]&0x20010),"file close retained original acquisition request flags");check(vm.flag(7,97),"Director Memo original room pickup acknowledgement missing");for(unsigned i=0;i<383;++i)check(inv.items[i]==slots_before[i],"Director Memo changed an inventory slot");check(vm.errors.empty(),"Director Memo original room script blocked");std::cout<<"Original RM_0070 scripted Director Memo: file 8, close consumes both requests, no inventory slot.\n";}
 #endif
  {auto bytes=read_asset_file(data/"rooms/RM_0090.RDT",64*1024*1024);auto scene=decode_scene(bytes);auto player=scene.spawns.at(0);std::size_t m=42;std::int64_t f=0;RoomWorld world(bytes,scene,player,m,f,audio,data);auto body=PlayerAsset::load(data);world.set_player_asset(&body);Inventory inv;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.binding=[&](const auto& c){return world.bind(c);};vm.task_started=[&](unsigned l){world.start_task(l);};vm.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};vm.start(0,22);for(unsigned t=0;t<35;++t){vm.tick();world.tick();}check(world.state(2,8)->has_motion&&world.state(2,8)->motion==6,"original milling event did not bind room MTN 6");BinaryView v(bytes);const auto h=inspect_room(bytes).room_offset;for(unsigned i=4;i<v.u32(h+0x8c);++i)if(i!=8)world.bind(cmd({0x24,2,std::uint8_t(i),0}));
  Scene first=scene;world.append(first,{},scene.cameras[0]);for(unsigned t=0;t<40;++t){vm.tick();world.tick();}check(vm.errors.empty(),"original milling event blocked");Scene second=scene;world.append(second,{},scene.cameras[0]);for(auto* sample:{&first,&second})sample->triangles.erase(std::remove_if(sample->triangles.begin(),sample->triangles.end(),[](const auto& t){return t.light_category!=2;}),sample->triangles.end());check(!first.triangles.empty(),"milling machine not rendered");check(first.triangles.size()==second.triangles.size(),"milling geometry changed topology");bool moved=false;for(unsigned i=0;i<first.triangles.size();++i)for(unsigned j=0;j<3;++j){const auto a=first.triangles[i].vertices[j].position,b=second.triangles[i].vertices[j].position;if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>.01f)moved=true;}check(moved,"original milling motion does not change rendered vertices");std::cout<<"RM_0090 object 8 / original room MTN 6 changes rendered machine geometry.\n";}

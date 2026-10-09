@@ -29,7 +29,7 @@ int main(int argc,char** argv){try{
     // StatusMenu::reset (Zustand verwerfen, gebundene Quellen behalten) plus
     // die Zusicherung, dass die Lücke den Slot unverändert lässt statt einen
     // geratenen Ersatzwert zu schreiben.
-    {Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(30,6);StatusMenu status;status.active=status.examining=true;status.selected=2;status.message_source=[](unsigned){return Message{0xffff};};status.reset(inv);check(!status.active&&!status.examining&&bool(status.message_source),"debug status reset loses source or transient state");check(inv.slots()[2]==Inventory::pack(30,6),"examination gap invented a case exit conversion");}
+    {Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(30,6);StatusMenu status;status.active=status.examining=true;status.selected=2;status.message_source=[](unsigned){return Message{0xffff};};status.reset(inv);check(!status.active&&!status.examining&&inv.slots()[2]==Inventory::pack(13,6)&&bool(status.message_source),"debug status reset loses source or the original case exit rule");}
     if(argc>1){GameUi ui(std::filesystem::u8path(argv[1]));SoftwareRenderer image(640,480);ui.draw_title(image);menu.draw(image,ui);if(argc>2)image.save_bmp(std::filesystem::u8path(argv[2]));check(image.pixels()[24*640+24]==0xff52c9dd,"debug overlay absent");}
     std::filesystem::remove_all(dir);SDL_Quit();std::cout<<"Default/remapped hotkey, bundle paths, repeat guard, registry extension, failures and modal input suppression passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';SDL_Quit();return 1;}}

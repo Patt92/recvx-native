@@ -401,7 +401,12 @@ unsigned Inventory::repair_owned_file_items(){
     const auto owner=player;unsigned removed=0;
     for(player=0;player<4;++player){bool changed=false;
         for(unsigned slot=1;slot<12;++slot){const auto item=id(slots()[slot]);
-            if(original_file_model_mask(item)&items[383]){slots()[slot]=0;if(slots()[0]==slot)slots()[0]=0;++removed;changed=true;}}
+            // Entfernt wird über dieselbe Regel wie EraseItem, damit der
+            // Ausrüstungsindex genauso nachrückt wie bei jeder originalen
+            // Entnahme; nur die Auswahl der Einträge ist Host-Kompatibilität.
+            if(original_file_model_mask(item)&items[383]){
+                if(slots()[0]==slot)slots()[0]=0;
+                erase(slot);++removed;changed=true;}}
         if(changed)compact();
     }
     player=owner;return removed;

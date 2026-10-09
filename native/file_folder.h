@@ -24,6 +24,9 @@ public:
     bool automatic()const;
     Scene scene(const std::vector<std::uint8_t>& packet,const Inventory& inventory)const;
 private:
+    // SearchTag and the two rotation phases of SelectFile/SelectTag.
+    bool search_tag(const Inventory& inventory,int direction);
+    void rotate_selected(int step);
     struct State;
     std::shared_ptr<State> state_;
 };

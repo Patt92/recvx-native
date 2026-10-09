@@ -1,5 +1,7 @@
 #include "inspection.h"
+#include "inventory.h"
 #include "ninja_math.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <functional>
@@ -8,21 +10,11 @@
 #include <iostream>
 #include <stdexcept>
 using namespace recvx;
-// PORTIERUNGSLÜCKE (Policy 2026-10-09): Dieser Test war die Abdeckung der
-// erzeugten Originalmodule inventory_engine.inc, pickup_engine.inc,
-// item_use.inc/item_use00.inc, box_engine.inc und combinations.inc — alle 156
-// Untersuchungsfälle, die Umwandlungen, die Aufnahmefragen, die
-// Dateitabellen und der Differenzvergleich aller Kombinationsregeln gegen
-// einen zweiten Aufruf derselben Originalroutinen. Generatoren und Includes
-// sind Quarantäne, siehe native/inspection.cpp und native/inventory.cpp.
-//
-// Diese Abdeckung muss zurückkehren, sobald Untersuchung, Aufnahme,
-// Gebrauch, Kiste und Kombination eigenständig nativ nachgebaut sind.
-// Geprüft bleibt hier:
-//  - die weiterhin eigenständig portierte Posen-/Matrixarbeit der
-//    Itemansicht und die reinen Tabellenabfragen (Aktion, Modell-ID),
-//  - dass jede Lücke sich wie dokumentiert verhält und keinen geratenen
-//    Ersatzwert liefert.
+// Inventarabdeckung: Anzeigeposen und Tabellen, die Untersuchung aller 156
+// Items mit ihren Umwandlungen (D03), ItemUse-Klassen, alle zwölf
+// Kombinationsselektoren, ItemSearch/EraseItem/ItemSort und die Dateitabellen.
+// Alle Mechanismen liegen eigenständig nativ vor (native/inspection.cpp,
+// native/inventory.cpp); dieser Test fordert ihre Originalwirkung ein.
 static void check(bool ok,const std::string& why){if(!ok)throw std::runtime_error(why);}
 int main(){try{
     _Make_SinTable();
@@ -41,26 +33,73 @@ int main(){try{
         check(inspection_action(item)<4,"item action index outside the original table: "+std::to_string(item));
         check(inspection_model_id(item)<160,"item model id outside the original table: "+std::to_string(item));
     }
-    // Lücke: der Untersuchungsautomat startet nicht.
-    {Inventory inv;inv.slots()[2]=Inventory::pack(63,1);inv.slots()[3]=Inventory::pack(50,1);
+    // D03 Untersuchung: Richtungsfenster, Dietrichsperre, Frage, Aktion, beide
+    // Zoomphasen, Umwandlung und Ergebnismeldung für jedes Item mit einem
+    // Untersuchungsfall. Erwartungswerte aus itemflg/c_a/mestbl/idsettbl/
+    // getmestbl (reine Datentabellen).
+    {unsigned inspections=0,transformations=0;
+     auto fixture=[](unsigned item){Inventory inv;std::fill(inv.slots()+1,inv.slots()+12,0);inv.slots()[1]=Inventory::pack(55,1);inv.slots()[2]=Inventory::pack(item,itemdata[item].max);inv.slots()[3]=Inventory::pack(50,1);return inv;};
+     for(unsigned item=0;item<156;++item){
+        const auto group=unsigned(dsptbl[item].hide);const auto first=itemflg[group][4]&15,count=itemflg[group][4]>>4;
+        if(!item)continue;
+        for(unsigned direction=0;direction<std::max(1u,unsigned(count));++direction){
+            std::array<Angle,3> angles{};if(first)for(unsigned a=0;a<3;++a)angles[a]=c_a[first+direction][a*2+1];
+            auto inv=fixture(item);const auto before=inv.items;ItemInspection state;state.check(inv,2,angles);++inspections;
+            if(state.message_pending())(void)state.take_message();
+            if(state.question()){state.answer(inv,false);check(!state.running()&&inv.items==before,"No modifies item "+std::to_string(item));
+                state.check(inv,2,angles);if(state.message_pending())(void)state.take_message();state.answer(inv,true);}
+            if(state.running()){unsigned frames=0;
+                while(state.running()&&frames<130){const auto unchanged=inv.items;const auto phase=state.phase();state.tick(inv);
+                    if(state.running())check(inv.items==unchanged,"early inspection commit "+std::to_string(item)+" phase "+std::to_string(phase));++frames;}
+                check(!state.running(),"inspection stalls for item "+std::to_string(item));
+                const auto replacement=idsettbl[itemflg[group][6]];
+                check(Inventory::id(inv.slots()[2])==replacement&&Inventory::quantity(inv.slots()[2])==itemdata[replacement].max,"wrong transformation "+std::to_string(item));
+                check(inv.contains(50),"transformation consumes lockpick");
+                check(state.message_pending()&&state.take_message()==getmestbl[itemflg[group][6]],"wrong result message "+std::to_string(item));++transformations;}
+        }
+     }
+     check(inspections>=156&&transformations==11,"inspection/transformation coverage incomplete: "+std::to_string(inspections)+"/"+std::to_string(transformations));}
+    // Dietrichsperre: ohne Item 50 meldet der Behälter 188 und startet nichts.
+    for(unsigned item:{63u,128u,129u}){Inventory inv;std::fill(inv.slots()+1,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(item,1);
      const auto before=inv.items;ItemInspection state;state.check(inv,2,{});
-     check(!state.running()&&!state.question()&&!state.message_pending(),"inspection gap started a state machine");
-     check(state.phase()==2&&state.completed_file()==24&&state.zoom()==1.f,"inspection gap does not report its documented rest state");
-     state.answer(inv,true);state.tick(inv);
-     check(inv.items==before&&!state.running()&&!state.take_display_reset(),"inspection gap mutated the inventory or the display pose");
-     bool rejected=false;try{state.check(inv,4,{});}catch(const std::exception&){rejected=true;}
-     check(rejected,"inspection gap lost the host slot validation");}
-    // Lücke: keine Knotenüberschreibungen, also keine Sichtbarkeitsmaske und
-    // keine Aktionspose.
-    {const std::vector<std::uint8_t> packet(64,0);const auto options=inspection_geometry(packet,63,22);
-     check(options.pose.empty()&&options.evalflags.empty()&&options.world_matrices.empty(),"geometry gap invented node overrides");}
-    // Lücke: Namensauswahl und Dateizuordnung.
-    check(!inventory_name_id(Inventory::pack(82,0))&&!inventory_name_id(Inventory::pack(145,1)),"name gap returned a message index");
-    check(!original_file_number(85)&&!original_file_number(48,0,7),"file number gap returned a file");
-    for(unsigned item=0;item<156;++item)check(!original_file_model_mask(item),"file model mask gap classified an item");
-    for(unsigned file=0;file<24;++file)check(!original_file_pages(file),"file page gap reported pages");
-    {bool threw=false;try{(void)original_file_message(0,0);}catch(const std::exception&){threw=true;}check(threw,"file message gap returned a guessed index");}
-    {bool threw=false;try{(void)original_file_wallpaper(0);}catch(const std::exception&){threw=true;}check(threw,"file wallpaper gap returned a guessed asset");}
+     check(state.message_pending()&&state.take_message()==188&&!state.running()&&!state.question()&&inv.items==before,"lockpick gate failed for "+std::to_string(item));}
+    // Item 106 startet direkt ohne Frage und ohne Meldung.
+    {Inventory inv;std::fill(inv.slots()+1,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(106,1);inv.slots()[3]=Inventory::pack(50,1);
+     ItemInspection state;state.check(inv,2,{0,16384,0});
+     check(state.running()&&!state.question()&&!state.message_pending(),"security file must start directly, without question");}
+    // Item 72: Abbrechen identifiziert nichts, die Untersuchung schon.
+    {Inventory inv;std::fill(inv.slots()+1,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(72,1);
+     ItemInspection state;state.cancel(inv,2);check(inv.slots()[2]==Inventory::pack(72,1),"cancel identifies unknown object");
+     state.check(inv,2,{});check(inventory_name_id(inv.slots()[2])==158,"inspection does not reveal original name");}
+    // Item 30: Abbrechen normalisiert die Magnummunition auf Item 13.
+    {Inventory inv;std::fill(inv.slots()+1,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(30,6);
+     ItemInspection state;state.cancel(inv,2);check(inv.slots()[2]==Inventory::pack(13,6),"magnum case ammo exit failed");}
+    // Namensauswahl des Statusbildschirms.
+    check(inventory_name_id(Inventory::pack(82,0))==149&&inventory_name_id(Inventory::pack(82,1))==82&&inventory_name_id(Inventory::pack(145,1))==159,"dynamic inventory names failed");
+    // Sichtbarkeitsmaske und Aktionspose brauchen ein echtes Paket; ohne
+    // Datenpfad bleibt die reine Eingangsprüfung.
+    {bool rejected=false;try{(void)inspection_geometry(std::vector<std::uint8_t>(64,0),63,22);}catch(const std::exception&){rejected=true;}
+     check(rejected,"geometry must reject a packet without a model");}
+    // Dateitabellen: 24 Dateien, 167 Seiten, Hintergrund und Zuordnung.
+    {unsigned pages=0;for(unsigned file=0;file<24;++file){pages+=original_file_pages(file);
+        check(original_file_wallpaper(file)>=146&&original_file_wallpaper(file)<=159,"file wallpaper outside the original ITEM range");
+        for(unsigned page=0;page<original_file_pages(file);++page)check(original_file_message(file,page)>=280,"file page message below the original base");
+        bool rejected=false;try{(void)original_file_message(file,original_file_pages(file));}catch(const std::exception&){rejected=true;}
+        check(rejected,"file page beyond the original count was accepted");}
+     check(pages==167,"original file page total differs: "+std::to_string(pages));}
+    check(original_file_number(85)==2&&original_file_number(48,0,7)==8&&original_file_number(47,1,8)==10&&original_file_number(133,9,18)==23,"contextual file-number mapping failed");
+    check(original_file_number(132,6,4)==17&&original_file_number(0,5,51)==11,"room-bound file mapping failed");
+    check(!original_file_number(48,0,0),"file number invented outside its room");
+    // Reine Raummodelle einer Datei kommen nicht ins Inventar; TG-01 und das
+    // Handbuch schon.
+    for(unsigned item=1;item<156;++item){Inventory inv;const auto before=inv.items;const auto mask=original_file_model_mask(item);
+     if(mask)check(!inv.debug_acquire(item,1)&&inv.items==before,"file-only room model inserted by debug catalog: "+std::to_string(item));
+     else if(item<=145)check(inv.debug_acquire(item,1),"original item type rejected by debug catalog: "+std::to_string(item));}
+    check(!original_file_model_mask(85)&&!original_file_model_mask(145),"TG-01/manual must stay inventory items");
+    check(original_file_model_mask(132)==((1u<<17)|(1u<<1)|(1u<<4)|(1u<<7)),"item 132 file set differs");
+    {Inventory inv;inv.items[383]=0;for(unsigned file=0;file<24;++file){const auto before=inv.items;check(inv.debug_acquire(256+file,999),"file catalog grant failed");
+        for(unsigned i=0;i<383;++i)check(inv.items[i]==before[i],"file grant consumed an inventory/box slot");}
+     check(inv.items[383]==0xffffff,"catalog does not cover every original file");}
     // Ab hier: positive Originalwirkung des Inventarpakets. Jeder Abschnitt
     // läuft einzeln, Fehlschläge werden gesammelt.
     std::vector<std::string> failures;
@@ -203,6 +242,6 @@ int main(){try{
         auto inv=clean();check(inv.acquire(95,1)&&inv.acquire(3,0),"host acquire path broken");
         check(Inventory::id(inv.slots()[2])==3&&Inventory::id(inv.slots()[3])==95&&inv.wide_boundary()==3,"ItemSort must place the wide weapon first (sakai 3)");});
     if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory engine section(s) failed.\n";return 1;}
-    std::cout<<"Item display poses and table lookups ported; ItemUse classes, all twelve combination selectors, ItemSearch/EraseItem and ItemSort passed. Inspection and file tables remain documented gaps outside this package.\n";
+    std::cout<<"Item display poses, all 156 inspection cases with their 11 transformations, file tables (167 pages) and name selection passed; ItemUse classes, all twelve combination selectors, ItemSearch/EraseItem and ItemSort passed.\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

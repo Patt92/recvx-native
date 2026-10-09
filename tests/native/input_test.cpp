@@ -74,13 +74,19 @@ int main(int argc,char** argv){try{
                 while(menu.message.active()&&!menu.message.choices())ok();ok();
                 check(inv.contains(25)&&!inv.contains(21)&&!inv.contains(22)&&!menu.combining&&menu.active,"keyboard/gamepad herb Combine failed");});
             if(menu.combining)press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);
-            section("Untersuchung (außerhalb des Pakets, Lücke)",[&]{
-                inv.slots()[2]=Inventory::pack(128,1);inv.slots()[3]=Inventory::pack(50,1);menu.selected=2;ok();settle();down();ok();settle();check(menu.examining,"keyboard/gamepad cannot examine case");menu.examine_pitch=menu.examine_yaw=menu.examine_roll=0;ok();
-                check(!menu.message.active()&&!menu.opening_item&&inv.contains(128)&&inv.contains(50),"examination gap asked the lockpick question or changed the inventory");
-                held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,true);tick();for(unsigned i=0;i<30;++i)tick();check(!menu.message.active()&&!menu.opening_item&&menu.examining&&inv.contains(128),"held OK drives the examination gap");held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,false);tick();
-                press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);check(!menu.examining&&menu.active&&inv.contains(128)&&inv.contains(50),"keyboard/gamepad cancel closes inventory or consumes case");});
+            // D03 Untersuchung über denselben Eingabeweg: Dietrichfrage 181,
+            // Halte-Sperre, Nein, Abbrechen und Ja bis zum Inhalt (Item 35,
+            // Meldung 164) mit erhaltenem Dietrich.
+            section(controller?"D03 Untersuchung (Controller)":"D03 Untersuchung (Tastatur)",[&]{
+                inv.slots()[2]=Inventory::pack(128,1);inv.slots()[3]=Inventory::pack(50,1);menu.selected=2;ok();settle();down();ok();settle();check(menu.examining,"keyboard/gamepad cannot examine case");menu.examine_pitch=menu.examine_yaw=menu.examine_roll=0;ok();check(menu.message.index()==181,"keyboard/gamepad lockpick question missing");
+                held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,true);tick();for(unsigned i=0;i<30;++i)tick();check(menu.message.active()&&!menu.opening_item&&inv.contains(128),"held OK answers its own new question");held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,false);tick();
+                while(menu.message.active()&&!menu.message.choices())ok();press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);ok();check(inv.contains(128)&&!menu.opening_item,"keyboard/gamepad No opens case");
+                ok();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);check(!menu.message.active()&&menu.examining&&inv.contains(128),"keyboard/gamepad cancel closes inventory or consumes case");
+                ok();while(menu.message.active()&&!menu.message.choices())ok();ok();for(unsigned i=0;i<100;++i)tick();check(inv.contains(35)&&inv.contains(50)&&menu.active&&menu.message.index()==164,"keyboard/gamepad case Yes does not retain lockpick or show contents");
+                while(menu.message.active())ok();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);});
             section(controller?"D07 Gebrauch ohne Trigger (Controller)":"D07 Gebrauch ohne Trigger (Tastatur)",[&]{
-                inv.slots()[3]=Inventory::pack(50,1);menu.selected=3;const auto before_use=sounds.size();ok();settle();ok();settle();
+                unsigned key_slot=0;for(unsigned i=2;i<12;++i)if(Inventory::id(inv.slots()[i])==50)key_slot=i;
+                check(key_slot,"lockpick lost before the use check");menu.selected=key_slot;const auto before_use=sounds.size();ok();settle();ok();settle();
                 check(menu.active&&events.menu_open&&inv.contains(50)&&menu.message.index()==161&&!(events.flags[10][0]&0x400),"invalid keyboard/gamepad key Use leaves inventory, lacks 161 or dispatches event");
                 check(std::find(sounds.begin()+before_use,sounds.end(),1u)!=sounds.end()&&std::find(sounds.begin(),sounds.end(),2u)!=sounds.end()&&std::find(sounds.begin(),sounds.end(),3u)!=sounds.end(),"inventory failure/navigation misses common sound dispatch");});
         }

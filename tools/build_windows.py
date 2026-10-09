@@ -75,6 +75,12 @@ def main():
         wrapper.chmod(0o755)
         compilers[name] = wrapper.as_posix()
     toolchain = toolchains / "windows-zig.cmake"
+    # Dieser Werkzeugsatz kann keine auditierbare Symboltabelle in die PE legen:
+    # llvm-nm/llvm-objdump finden in der von zig/LLD erzeugten Datei weder eine
+    # COFF-Symboltabelle noch .debug-Abschnitte, und -g, -fno-strip,
+    # -Wl,--no-strip, -Wl,-Map sowie -Wl,--no-insert-timestamp werden
+    # abgewiesen. Der Linkeingangs-/Binärnachweis ist deshalb offen; siehe
+    # work/native_port_windows_audit.md. Keine Lockerung des Prüfers.
     toolchain.write_text('set(CMAKE_SYSTEM_NAME Windows)\nset(CMAKE_SYSTEM_PROCESSOR AMD64)\n' + "".join(
         f'set({key} "{compilers[name]}" CACHE FILEPATH "" FORCE)\n' for key, name in
         [("CMAKE_C_COMPILER", "cc"), ("CMAKE_CXX_COMPILER", "cxx"), ("CMAKE_AR", "ar"), ("CMAKE_RANLIB", "ranlib")]))

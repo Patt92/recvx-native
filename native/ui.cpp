@@ -604,13 +604,19 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
             if(!item_models_.count(source)){auto object=decode_item_asset(item_packets_[id],inspection_geometry(item_packets_[id],source));apply_texture_files(object,data_,mods_,std::filesystem::path("items")/asset_number(id));item_models_[source]=std::move(object);}
             auto object=menu.inspection.running()?decode_item_asset(item_packets_[id],inspection_geometry(item_packets_[id],source,source==menu.inspection.source()?menu.opening_frame:0)):item_models_[source];
             if(menu.inspection.running())object.textures=item_models_[source].textures;
-            NJS_POINT3 lo{1e20f,1e20f,1e20f},hi{-1e20f,-1e20f,-1e20f};
-            for(const auto& triangle:object.triangles)for(const auto& vertex:triangle.vertices){lo.x=std::min(lo.x,vertex.position.x);lo.y=std::min(lo.y,vertex.position.y);lo.z=std::min(lo.z,vertex.position.z);hi.x=std::max(hi.x,vertex.position.x);hi.y=std::max(hi.y,vertex.position.y);hi.z=std::max(hi.z,vertex.position.z);}
-            const NJS_POINT3 center{(lo.x+hi.x)/2,(lo.y+hi.y)/2,(lo.z+hi.z)/2};const float radius=std::max({hi.x-lo.x,hi.y-lo.y,hi.z-lo.z,0.01f});
+            // npGetWHDSize: grösste Absolutkoordinate je Achse über die
+            // gezeichneten Knoten; daraus ModelScaleSet.
+            NJS_VECTOR whd{0,0,0};
+            for(const auto& triangle:object.triangles)for(const auto& vertex:triangle.vertices){whd.x=std::max(whd.x,std::abs(vertex.position.x));whd.y=std::max(whd.y,std::abs(vertex.position.y));whd.z=std::max(whd.z,std::abs(vertex.position.z));}
+            const float scale=inspection_model_scale(source,whd);
             NJS_MATRIX rotation;const auto spin=menu.inspection.running()?menu.inspection.spin():std::array<Angle,3>{};inspection_rotation(rotation,{menu.examine_pitch,menu.examine_yaw,menu.examine_roll},spin);
-            // DrawSubItem uses an identity camera-space basis. Applying the
-            // room camera's (1,-1,-1) basis flips the display and views its back.
-            NJS_MATRIX view;njUnitMatrix(&view);njTranslate(&view,0,0,radius*(2.8f+20.f*(1.f-menu.inspection.zoom())));njMultiMatrix(&view,&rotation);njTranslate(&view,-center.x,-center.y,-center.z);
+            // DrawSubItem: Kameramatrix (CameraSet) x rotmat x Zoomdrehung x
+            // mw.pos x Modellskalierung. Die Kamera steht auf der originalen
+            // Entfernung 20 - pos_0.z + pos_1.z, nicht auf einem Faktor.
+            const bool animated=menu.inspection.running();
+            const float distance=animated?menu.inspection.camera_distance():inspection_rest_camera_distance();
+            const auto offset=animated?menu.inspection.model_offset():inspection_model_offset(source);
+            NJS_MATRIX view;njUnitMatrix(&view);njTranslate(&view,0,0,distance);njMultiMatrix(&view,&rotation);njTranslate(&view,offset.x,offset.y,offset.z);njScale(&view,scale,scale,scale);
             object.background=0xff101010;SoftwareRenderer item_view(352,196);item_view.draw_view(object,view,500.f*1.174f,500.f);
             for(int y=0;y<196;++y){const int oy=y+132+dy(2),ox=60+dx(2);if(oy<0||oy>=480)continue;const int from=std::max(0,-ox),to=std::min(352,640-ox);if(to>from)std::copy(item_view.pixels().begin()+y*352+from,item_view.pixels().begin()+y*352+to,image.canvas().begin()+oy*640+ox+from);}
         }
