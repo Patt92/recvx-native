@@ -1,64 +1,81 @@
 #include "inspection.h"
-#include "binary_view.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 namespace recvx {
-namespace original_inventory {
-struct NJS_CNK_OBJECT {unsigned evalflags=0;NJS_POINT3 pos{};int ang[3]{};NJS_CNK_OBJECT* child=nullptr;NJS_CNK_OBJECT* sibling=nullptr;};
-struct S_WORK {unsigned* pip=nullptr;unsigned listcsr_0=0,itemid=0,mesid=0,ips1=0,testmode=2,maincsr=0,mode=8,wn=1,subcsr=0,statusflg=0,dnum=0,wn_num=0;int actioncount=0;};
-struct System {unsigned st_flg=0,pad_ps=0,pad_on=0,cb_flg=0,mes_sel=0,rom_no=0,stg_no=0,ssd_flg=0;};
-struct SITEM {struct {NJS_CNK_OBJECT* objP=nullptr;} mdl;struct {NJS_POINT3 pos{};int ax1=0,ay1=0,az1=0;unsigned rdid=0;std::array<Angle,3> ang{};}mw;};
-struct STCAM_WRK {int cax=0,cay=0,caz=0;NJS_POINT3 pos_0{},pos_1{};NJS_MATRIX rotmat{};};
-static thread_local S_WORK swork;static thread_local System system;static thread_local System* sys=&system;static thread_local SITEM sitem;static thread_local STCAM_WRK st_cam;
-static thread_local unsigned* wp_=nullptr;static thread_local unsigned char flg[3]{};static thread_local float testf=1;static thread_local bool has_message=false;static thread_local unsigned message=0;
-void MdlHideCheck(NJS_CNK_OBJECT*,unsigned char,unsigned char);unsigned char MdlAction00(SITEM*);unsigned char MdlAction01(SITEM*);unsigned char MdlAction02(SITEM*);
-struct Part {struct {float r=1,g=1,b=1;} col;};
-static thread_local Part parts_10b[16];
-static unsigned char (*actionprg[3])(SITEM*)={MdlAction00,MdlAction01,MdlAction02};
-static void bhSetMessage(int,unsigned index){has_message=true;message=index;sys->st_flg|=0x200;}
-static void MdlEvalflagsSet(unsigned group){MdlHideCheck(sitem.mdl.objP,itemflg[group][0],1);}
-// Host framing measures the decoded visible mesh; retain original scale-reset
-// side effects here. No item identity/action rule is implemented in this binding.
-static float ModelScaleSet(SITEM* item,int reset){if(reset){item->mdl.objP->pos={};if(item->mdl.objP->child)item->mdl.objP->child->pos={};}return 1;}
-#include "inventory_engine.inc"
-}
+// PORTIERUNGSLÜCKE (Policy 2026-10-09): Diese Datei band ItemModelCheck,
+// ItemModelMessageWait, ItemModelActionSet, ItemModelChangeZoomIn/Out,
+// MdlHideCheck, FlagErase, MdlAction00/01/02, item_name_id, FileNumberSwitch,
+// file_model_mask sowie die Dateitabellen (fstbl/fsheader/wallpaper) ein, die
+// tools/generate_inventory_engine.py als inventory_engine.inc aus itemview.c,
+// sub1.c und fileview.c erzeugt hat. Generator und Include liegen in
+// archived/FORBIDDEN_DONTUSE/ und dürfen weder gelesen noch ausgeführt
+// werden.
+//
+// Zu leisten (jeweils als eigene native Mechanik, nicht aus einem Generator
+// über die Originalquellen):
+//  - der Untersuchungsautomat eines Items: Richtungsprüfung, Dietrich-Sperre,
+//    Bestätigungsfrage, die drei Aktionsroutinen, beide 32-Tick-Zoomphasen,
+//    die Umwandlung in das Ergebnis-Item und die zugehörigen Meldungen,
+//  - die Sichtbarkeitsmasken der Teilknoten (MdlHideCheck/FlagErase) und die
+//    Posen der Aktionsframes,
+//  - die Namensauswahl eines Inventareintrags (unbekanntes Objekt, leere
+//    Waffe, gelesenes Handbuch) aus dem gepackten Slotwert,
+//  - die Datei-Zuordnung: welches Item/welcher Raum welche Datei liefert,
+//    welche Items reine Raummodelle sind, und die Seitenzahl-, Meldungs- und
+//    Hintergrundtabellen der 24 Dateien.
+//
+// Solange das offen ist, melden die betroffenen Funktionen den dokumentierten
+// Neutralwert: der Untersuchungsautomat startet nie (phase bleibt auf dem
+// Ruhewert 2, running/question bleiben falsch, es wird keine Meldung und
+// keine Inventaränderung erzeugt), inspection_geometry liefert keine
+// Knotenüberschreibungen (das Paket wird unverändert gezeichnet),
+// inventory_name_id liefert 0, und die Dateizuordnung meldet "keine Datei".
+// Für die beiden Dateitabellen, bei denen jeder Zahlenwert sofort als echter
+// Originalindex gezeichnet bzw. geladen würde (Seitentext und Hintergrund),
+// wird bewusst ein Fehler gemeldet statt ein falscher Index geliefert.
+//
+// Sichtbare Folge: Items lassen sich nicht mehr untersuchen — Koffer, Kästen
+// und die Silberlibelle öffnen sich nicht, es gibt keine Frage, keine
+// Öffnungsanimation und keine Umwandlung. Versteckte Teilknoten der
+// Itemmodelle werden mitgezeichnet, weil die Sichtbarkeitsmaske fehlt.
+// Itemnamen im Inventar werden nicht mehr richtig ausgewählt. Der
+// Dateibildschirm hat keine Seiten und ist nicht darstellbar; aufgenommene
+// Items lösen keine Dateiaufnahme aus. Kein geratener Ersatzwert.
 struct ItemInspection::State {
-    original_inventory::S_WORK work;original_inventory::System system;original_inventory::SITEM item;original_inventory::STCAM_WRK camera;
-    std::array<original_inventory::NJS_CNK_OBJECT,6> nodes{};unsigned* pointer=nullptr;bool message=false;unsigned index=0,source=0,action_frame=0;std::optional<std::array<Angle,3>> display_reset;
-    State(){for(unsigned i=0;i+1<nodes.size();++i)nodes[i].child=&nodes[i+1];item.mdl.objP=nodes.data();}
-    void enter(Inventory& inventory){using namespace original_inventory;work.pip=inventory.slots();swork=work;system.st_flg&=~0x200u;original_inventory::system=system;sys=&original_inventory::system;sitem=item;st_cam=camera;wp_=pointer;has_message=false;}
-    void leave(){using namespace original_inventory;work=swork;system=original_inventory::system;item=sitem;camera=st_cam;pointer=wp_;if(has_message){message=true;index=original_inventory::message;}}
+    // S_WORK testmode: 2 ist der Ruhewert, den der Originalautomat außerhalb
+    // eines laufenden Vorgangs hält.
+    unsigned phase=2,source=0,item=0,index=0,action_frame=0;
+    bool message=false;
+    std::optional<std::array<Angle,3>> display_reset;
 };
 ItemInspection::ItemInspection():state_(std::make_shared<State>()){}
 void ItemInspection::check(Inventory& inventory,unsigned slot,std::array<Angle,3> angles){
-    if(slot<1||slot>=12||!Inventory::id(inventory.slots()[slot]))throw std::runtime_error("invalid examination slot");state_=std::make_shared<State>();auto& s=*state_;s.source=s.work.itemid=Inventory::id(inventory.slots()[slot]);s.work.listcsr_0=slot;s.item.mw.ang=angles;s.item.mw.rdid=inspection_model_id(s.source);s.system.pad_ps=0x800;s.enter(inventory);original_inventory::ItemModelCheck();s.leave();
+    // Eingangsprüfung des Hosts bleibt erhalten; der Originalautomat
+    // ItemModelCheck selbst fehlt, es passiert also nichts weiter.
+    if(slot<1||slot>=12||!Inventory::id(inventory.slots()[slot]))throw std::runtime_error("invalid examination slot");
+    (void)angles;
+    state_=std::make_shared<State>();
 }
-void ItemInspection::answer(Inventory& inventory,bool yes){auto& s=*state_;if(!question())return;s.system.pad_ps=0;s.system.st_flg|=0x4000;s.system.cb_flg|=0x1000;s.system.mes_sel=yes?100:101;s.enter(inventory);original_inventory::ItemModelMessageWait();s.leave();s.system.st_flg&=~0x4000u;}
-void ItemInspection::cancel(Inventory& inventory,unsigned slot){state_=std::make_shared<State>();auto& s=*state_;s.source=s.work.itemid=Inventory::id(inventory.slots()[slot]);s.work.listcsr_0=slot;s.work.testmode=2;s.system.pad_ps=0x1000;s.enter(inventory);original_inventory::ItemModelCheck();s.leave();s.work.testmode=2;}
-void ItemInspection::tick(Inventory& inventory){auto& s=*state_;if(!running())return;const auto before=phase();s.system.pad_ps=0;s.enter(inventory);switch(s.work.testmode){case 4:++s.action_frame;original_inventory::ItemModelActionSet();break;case 5:original_inventory::ItemModelChangeZoomOut();break;case 1:original_inventory::ItemModelChangeZoomIn();break;default:break;}s.leave();
-    if(before==5&&phase()==1){if(s.work.subcsr==3){
-        // DrawSubItem's original subcsr 3 presets, after ChangeZoomOut has
-        // reset rotmat. Preserve the returned item pose through its message.
-        NJS_MATRIX m;njUnitMatrix(&m);const auto item=s.work.itemid;
-        const std::array<Angle,3> preset=item==105?std::array<Angle,3>{50245,51519,1457}:item==30?std::array<Angle,3>{50245,57709,42235}:std::array<Angle,3>{21846,0,0};
-        njRotateX(&m,preset[0]);njRotateY(&m,preset[1]);njRotateZ(&m,preset[2]);njTransposeMatrix(&m);
-        s.display_reset=std::array<Angle,3>{int(10430.381f*std::atan2(m[6],m[10]))&65535,int(10430.381f*std::asin(std::clamp(-m[2],-1.f,1.f)))&65535,int(10430.381f*std::atan2(m[1],m[0]))&65535};
-    }else s.display_reset=inspection_default_angles(s.work.itemid);}}
+void ItemInspection::answer(Inventory& inventory,bool yes){(void)inventory;(void)yes;}
+void ItemInspection::cancel(Inventory& inventory,unsigned slot){(void)inventory;(void)slot;state_=std::make_shared<State>();}
+void ItemInspection::tick(Inventory& inventory){(void)inventory;}
 std::optional<std::array<Angle,3>> ItemInspection::take_display_reset(){auto result=state_->display_reset;state_->display_reset.reset();return result;}
-bool ItemInspection::question()const{return state_->work.testmode==6;}
+bool ItemInspection::question()const{return state_->phase==6;}
 bool ItemInspection::running()const{return phase()==4||phase()==5||phase()==1;}
 bool ItemInspection::message_pending()const{return state_->message;}
 unsigned ItemInspection::take_message(){state_->message=false;return state_->index;}
 unsigned ItemInspection::source()const{return state_->source;}
 unsigned ItemInspection::action_frame()const{return state_->action_frame;}
-unsigned ItemInspection::item()const{return state_->work.itemid;}
-unsigned ItemInspection::model()const{return inspection_model_id(state_->work.itemid);}
-unsigned ItemInspection::phase()const{return state_->work.testmode;}
+unsigned ItemInspection::item()const{return state_->item;}
+unsigned ItemInspection::model()const{return inspection_model_id(state_->item);}
+unsigned ItemInspection::phase()const{return state_->phase;}
 unsigned ItemInspection::completed_file()const{return phase()==7?2u:24u;}
-float ItemInspection::zoom()const{return phase()==5?1.f-float(32-state_->work.actioncount)/32:phase()==1?float(32-state_->work.actioncount)/32:1.f;}
-std::array<Angle,3> ItemInspection::spin()const{return {state_->item.mw.ax1,state_->item.mw.ay1,state_->item.mw.az1};}
-unsigned inventory_name_id(std::uint32_t item){return original_inventory::item_name_id(item);}
+// Die beiden Zoomphasen (1/5) treten ohne den Originalautomaten nicht auf,
+// die Ansicht bleibt deshalb auf voller Größe.
+float ItemInspection::zoom()const{return 1.f;}
+std::array<Angle,3> ItemInspection::spin()const{return {0,0,0};}
+// --- Weiterhin eigenständig portierte Teile: reine Tabellen-/Matrixarbeit ---
 unsigned inspection_action(unsigned item){if(item>=156)throw std::runtime_error("invalid item action");return itemflg[dsptbl[item].hide][1];}
 std::array<Angle,3> inspection_default_angles(unsigned item){
     if(item>=156)throw std::runtime_error("invalid display item");
@@ -77,22 +94,20 @@ void inspection_rotation(NJS_MATRIX& matrix,std::array<Angle,3> angles,std::arra
     njRotateX(&matrix,spin[0]);njRotateY(&matrix,spin[1]);njRotateZ(&matrix,spin[2]);
 }
 unsigned inspection_model_id(unsigned item){if(item>=156)throw std::runtime_error("invalid inspection item");const auto model=itemidtbl[itemflg[dsptbl[item].hide][6]];const auto id=model?model:item;return id==131?5:id==136?33:id;}
+// --- Lücken ---
 ModelGeometryOptions inspection_geometry(const std::vector<std::uint8_t>& packet,unsigned item,unsigned frame){
-    BinaryView v(packet);const auto base=v.relative(4,v.u16(8),0);const auto count=v.u16(10);const auto nodes=v.relative(base,v.u32(16),count*52);if(!count||count>256)throw std::runtime_error("invalid item model count");
-    std::vector<original_inventory::NJS_CNK_OBJECT> objects(count);ModelGeometryOptions result;
-    auto link=[&](unsigned offset)->original_inventory::NJS_CNK_OBJECT*{if(offset==0xffffffff)return nullptr;const auto p=v.relative(base,offset,52);if(p<nodes||(p-nodes)%52||(p-nodes)/52>=count)throw std::runtime_error("invalid item model link");return &objects[(p-nodes)/52];};
-    for(unsigned i=0;i<count;++i){const auto p=nodes+i*52;auto& o=objects[i];o.evalflags=v.u32(p);o.pos={v.f32(p+8),v.f32(p+12),v.f32(p+16)};for(unsigned a=0;a<3;++a)o.ang[a]=v.i32(p+20+a*4);o.child=link(v.u32(p+44));o.sibling=link(v.u32(p+48));}
-    // Validate the packet's graph before invoking original recursive functions.
-    (void)decode_model_asset(packet,4,0);original_inventory::FlagErase(objects.data());original_inventory::MdlHideCheck(objects.data(),itemflg[dsptbl[item].hide][0],1);
-    const auto action=inspection_action(item);if(frame&&action){unsigned depth=action==2?(item==128?5:item==63?4:3):3;auto* node=objects.data();for(unsigned i=0;i<depth;++i){if(!node->child)throw std::runtime_error("item action hierarchy is incomplete");node=node->child;}
-        original_inventory::SITEM si;si.mdl.objP=objects.data();const auto saved=original_inventory::swork;original_inventory::swork={};original_inventory::swork.itemid=item;
-        for(unsigned i=0;i<std::min(frame,64u);++i)if(original_inventory::actionprg[action-1](&si))break;original_inventory::swork=saved;
-    }
-    for(const auto& o:objects){result.pose.push_back({o.pos,{o.ang[0],o.ang[1],o.ang[2]}});result.evalflags.push_back(o.evalflags);}return result;
+    (void)packet;(void)frame;
+    if(item>=156)throw std::runtime_error("invalid inspection item");
+    // Ohne MdlHideCheck/FlagErase und die drei Aktionsroutinen gibt es weder
+    // eine Sichtbarkeitsmaske noch eine Aktionspose. Leere Felder bedeuten im
+    // Szenendekoder "keine Überschreibung", das Paket wird also unverändert
+    // gezeichnet.
+    return {};
 }
-unsigned original_file_number(unsigned item,unsigned stage,unsigned room){original_inventory::system.stg_no=stage;original_inventory::system.rom_no=room;return original_inventory::FileNumberSwitch(item);}
-unsigned original_file_model_mask(unsigned item){return original_inventory::file_model_mask(item);}
-unsigned original_file_pages(unsigned file){if(file>=24)throw std::runtime_error("file outside table");return original_inventory::fstbl[file]+1;}
-unsigned original_file_message(unsigned file,unsigned page){if(page>=original_file_pages(file))throw std::runtime_error("file page outside table");return 280+original_inventory::fsheader[file]+page;}
-unsigned original_file_wallpaper(unsigned file){if(file>=24)throw std::runtime_error("file outside table");return original_inventory::wallpaper[file];}
+unsigned original_file_number(unsigned item,unsigned stage,unsigned room){(void)item;(void)stage;(void)room;return 0;}
+unsigned original_file_model_mask(unsigned item){(void)item;return 0;}
+unsigned original_file_pages(unsigned file){if(file>=24)throw std::runtime_error("file outside table");return 0;}
+unsigned original_file_message(unsigned,unsigned){throw std::runtime_error("original file page message table is not ported (inventory_engine.inc quarantined)");}
+unsigned original_file_wallpaper(unsigned){throw std::runtime_error("original file wallpaper table is not ported (inventory_engine.inc quarantined)");}
+unsigned inventory_name_id(std::uint32_t item){(void)item;return 0;}
 }

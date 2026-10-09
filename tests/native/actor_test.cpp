@@ -59,6 +59,15 @@ int main(){try{
     near(edited.triangles[0].vertices[0].position.x,34,"model-node overrides do not reach weighted skin");near(edited.triangles[0].vertices[0].position.y,0,"model-node rotation remains in skin");
     near(edited.triangles[0].vertices[0].normal.x,1,"override normals disagree with skin");near(edited_bones[1].value[12],32,"override bone/link position differs from skin");
     near(player.sample(0,65536).triangles[0].vertices[0].position.x,23,"model override corrupts immutable motion");
+    // The native Work owns mutable vertex streams (e.g. original EN13 mesh
+    // deformation). Rendering must read that stream without a second bind-
+    // origin conversion or replacing its inherited texture material.
+    auto live_model=player.encoded_model();f32(live_model,208,4);f32(live_model,224,0);f32(live_model,228,1);
+    const auto live=player.sample_work(player.local_pose(0,0),player.pose(0,0),{7,7},nullptr,nullptr,&live_model);
+    near(live.triangles[0].vertices[0].position.x,16,"native vertex mutation missing from skin renderer");
+    near(live.triangles[0].vertices[0].normal.y,1,"native normal mutation missing from skin renderer");
+    check(live.triangles[0].textured,"native material texture gate changed");
+    near(player.sample(0,0).triangles[0].vertices[0].position.x,14,"native rendering mutated immutable source");
     check(player.model_index(1)==1,"script node lookup incorrect");rejects([&]{player.model_index(2);},"invalid script node accepted");
     edits[2].position=NJS_POINT3{};rejects([&]{player.sample(0,0,{},0,nullptr,edits);},"override outside skeleton accepted");
     near(player.sample(0,65535).triangles[0].vertices[0].position.x,14,"integer key sampling");

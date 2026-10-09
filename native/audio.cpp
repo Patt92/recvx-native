@@ -36,7 +36,10 @@ PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned prog
     // Program: +0 split offset, +4 split count, +5 split size, +6 volume, +7 pan.
     // Split: +0 sample set, +2..+4 key low/centre/high, +0x10 volume, +0x11 pan.
     const auto pg=entry(prog,program,0x28);const unsigned splits=v.u8(pg+4),split_size=v.u8(pg+5);
-    if(!splits||split_size<0x12)throw std::runtime_error("invalid Sony program split table");
+    // A program without splits keys no waveform, so its note-on starts no voice (RM_9340 bank 3
+    // programs 60..67: the en01 voice variant add_seno 40 of the mdlver-38 zombie).
+    if(!splits)return {};
+    if(split_size<0x12)throw std::runtime_error("invalid Sony program split table");
     auto zone=v.relative(pg,v.u32(pg),std::size_t(splits)*split_size);
     if(key>=0){unsigned i=0;for(;i<splits;++i){const auto z=zone+std::size_t(i)*split_size;if(key>=v.u8(z+2)&&key<=v.u8(z+4)){zone=z;break;}}if(i==splits)throw std::runtime_error("Sony program has no split for key");}
     const auto set=entry(sets,v.u16(zone),6);
@@ -51,7 +54,7 @@ void AudioMixer::play_system(unsigned program){
     if(data_.empty())return; // Resource-free engine fixtures have no system bank.
     auto found=system_sounds_.find(program);if(found==system_sounds_.end()){auto file=mods_/"audio/system/COMMON.MLT";if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"files/COMMON.MLT";
         found=system_sounds_.emplace(program,std::make_shared<PcmClip>(decode_system_sound(read_asset_file(file,8*1024*1024),program))).first;}
-    play_pcm(effect_slot_,found->second);effect_slot_=effect_slot_==2?3:2;played.push_back("COMMON/"+asset_number(program));
+    if(found->second->frames())play_pcm(effect_slot_,found->second);effect_slot_=effect_slot_==2?3:2;played.push_back("COMMON/"+asset_number(program));
 }
 bool AudioMixer::play_weapon_sound(unsigned bank,unsigned program){
     if(data_.empty())return false;
@@ -63,7 +66,7 @@ bool AudioMixer::play_weapon_sound(unsigned bank,unsigned program){
         if(source==weapon_banks_.end())return false;
     }
     auto found=weapon_sounds_.find({bank,program});if(found==weapon_sounds_.end())found=weapon_sounds_.emplace(std::make_pair(bank,program),std::make_shared<PcmClip>(decode_system_sound(source->second,program))).first;
-    play_pcm(6,found->second);played.push_back("ARMS/"+asset_number(bank)+"/"+asset_number(program));return true;
+    if(found->second->frames())play_pcm(6,found->second);played.push_back("ARMS/"+asset_number(bank)+"/"+asset_number(program));return true;
 }
 void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant){
     if(stage>15||room>255||variant>15)throw std::runtime_error("invalid room sound key");
@@ -113,7 +116,7 @@ bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot,bo
     if(slot<3||slot>=slots_.size())throw std::runtime_error("invalid room effect channel");
     const auto source=room_banks_.find(bank);if(source==room_banks_.end())return false;
     const auto id=std::make_tuple(bank,program,-1);auto found=room_sounds_.find(id);if(found==room_sounds_.end())found=room_sounds_.emplace(id,std::make_shared<PcmClip>(decode_system_sound(source->second,program))).first;
-    play_pcm(slot,found->second,1,loop);played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(sound_bank_packs_.at(bank))+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
+    if(found->second->frames())play_pcm(slot,found->second,1,loop);played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(sound_bank_packs_.at(bank))+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
 }
 bool AudioMixer::background_sound(unsigned slot,unsigned sound,unsigned timer){
     if(slot>2)throw std::runtime_error("background sound slot outside original three");
@@ -170,8 +173,8 @@ bool AudioMixer::play_room_sequence(unsigned bank,unsigned list,unsigned slot,bo
                     if(part.program<0)return fail("note without program");
                     const auto id=std::make_tuple(0x100u|bank,unsigned(part.program),int(data[0]));auto found=room_sounds_.find(id);
                     if(found==room_sounds_.end())found=room_sounds_.emplace(id,std::make_shared<PcmClip>(decode_system_sound(programs->second,unsigned(part.program),int(data[0])))).first;
-                    auto& layer=event.layer;layer.clip=found->second;pan_gains(unsigned(std::clamp(int(layer.clip->pan)+int(part.pan)-64,0,127)),layer.left,layer.right);
-                    const float gain=layer.clip->volume*float(data[1])/127.f*float(part.volume)/127.f*float(part.expression)/127.f;layer.left*=gain;layer.right*=gain;
+                    if(found->second->frames()){auto& layer=event.layer;layer.clip=found->second;pan_gains(unsigned(std::clamp(int(layer.clip->pan)+int(part.pan)-64,0,127)),layer.left,layer.right);
+                    const float gain=layer.clip->volume*float(data[1])/127.f*float(part.volume)/127.f*float(part.expression)/127.f;layer.left*=gain;layer.right*=gain;}
                     if(programs_played.find("/prog"+std::to_string(part.program))==std::string::npos)programs_played+="/prog"+std::to_string(part.program);
                 }break;
                 default:break;}

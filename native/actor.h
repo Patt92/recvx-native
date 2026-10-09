@@ -59,6 +59,10 @@ public:
     Scene sample_rest(const NJS_MATRIX& root,const std::vector<std::array<std::int32_t,2>>& angles={})const;
     NJS_POINT3 bind_position(std::size_t node)const{return bind_pose_.at(node).position;}
     Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr) const;
+    Scene sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& matrices,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out=nullptr,const FaceParameter* face_param=nullptr,const std::vector<std::uint8_t>* live_model=nullptr)const;
+    const std::vector<std::uint8_t>& encoded_model()const{return model_;}
+    const std::vector<std::uint8_t>& encoded_skin()const{return encoded_skin_;}
+    const std::vector<std::vector<std::uint8_t>>& encoded_motions()const{return encoded_motions_;}
 private:
     struct SkinMesh {
         std::size_t object=0;
@@ -69,17 +73,20 @@ private:
     struct Matrix {NJS_MATRIX value;};
     std::vector<ModelPose> sampled_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes)const;
     std::vector<std::uint8_t> model_;
+    std::vector<std::uint8_t> encoded_skin_;
     std::shared_ptr<FaceAsset> face_;
     std::vector<ModelPose> bind_pose_;
     ActorNodeLayout node_layout_;
     std::vector<std::int32_t> children_,siblings_;
     std::vector<SkinMesh> skin_;
     std::vector<std::optional<MotionClip>> motions_;
+    std::vector<std::vector<std::uint8_t>> encoded_motions_;
     std::vector<SceneTexture> textures_;
     std::vector<std::vector<float>> translations_;
     std::vector<std::shared_ptr<PlayerAsset>> models_;
     void load_models(const std::vector<std::uint8_t>& data,std::size_t model_end,std::size_t morph_end);
     std::vector<Matrix> matrices(const std::vector<ModelPose>& pose,NJS_POINT3 position,Angle yaw,bool translations_only=false) const;
+    Scene render_pose(ModelGeometryOptions geometry,std::vector<Matrix> full,std::vector<BoneMatrix>* matrices_out,const FaceParameter* face_param,const std::vector<std::uint8_t>* live_model=nullptr)const;
 };
 // Appends character geometry without applying stage-object camera masks.
 void append_actor(Scene& stage,const Scene& actor,std::size_t texture_base);

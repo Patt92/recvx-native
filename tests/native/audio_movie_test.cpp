@@ -28,6 +28,19 @@ int main(int argc,char** argv){try{
                 check(voices.active(7)&&voices.played.back().substr(0,voices.played.back().rfind('/'))==route.substr(0,route.rfind('/')),"room change loses CORE bank/provenance");
                 const auto death=voices.mix(800);check(std::any_of(death.begin(),death.end(),[](auto n){return n!=0;}),"CORE death voice silent");}
             check(voices.unavailable.empty(),"CORE voices reported unavailable");}
+        // system.c:1602 hands over to the disc change task whenever the mounted
+        // sound set does not match the stage, so stages 6..9 always run from the
+        // disc-2 archives. BGM ids 121, 122 and 124 exist only there.
+        {AudioMixer mount(root);
+            for(unsigned stage=0;stage<10;++stage){mount.mount_sound_afs(stage);
+                check(mount.disc()==(stage>=6?1u:0u),"original stage/disc rule lost");}
+            mount.mount_sound_afs(9);check(mount.set_name("BGM")=="BGM2","stage 9 does not mount the disc-2 BGM set");
+            for(const unsigned bgm:{121u,122u,124u}){
+                mount.play(0,mount.set_name("BGM"),bgm,1,true,0);
+                check(mount.active(0),"disc-2 BGM entry did not play");
+                check(mount.played.back()=="BGM2/"+asset_number(bgm),"disc-2 BGM came from the wrong archive");
+                mount.stop(0);}
+            mount.mount_sound_afs(0);check(mount.set_name("BGM")=="BGM1","stage 0 does not mount the disc-1 BGM set");}
     }
     // adxwrap.c units: AdxVolTbl is 0.1 dB; RequestAdxFadeFunction2 counts.
     check(std::abs(AudioMixer::adx_gain(0)-1)<1e-6f&&std::abs(AudioMixer::adx_gain(-25)-std::pow(10.f,-50/200.f))<1e-5f&&AudioMixer::adx_gain(-200)<AudioMixer::adx_gain(-126),"AdxVolTbl gain");
@@ -38,6 +51,12 @@ int main(int argc,char** argv){try{
     if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto bank=read_asset_file(root/"files/COMMON.MLT",8*1024*1024);for(unsigned id=0;id<11;++id){const auto sound=decode_system_sound(bank,id);check(sound.rate==32000&&sound.frames()>0&&std::any_of(sound.samples.begin(),sound.samples.end(),[](auto value){return value!=0;}),"original system sound silent/invalid");}reject([&]{decode_system_sound(bank,11);});auto truncated=bank;truncated.resize(256);reject([&]{decode_system_sound(truncated,0);});AudioMixer effects(root);effects.play_system(2);check(effects.active(2)&&effects.played.back()=="COMMON/0002","original cursor sound not routed");effects.load_room_sounds(0,0);for(unsigned id=0;id<5;++id){check(effects.play_room_sound(2,id,4),"original floor bank missing");const auto output=effects.mix(800);check(std::any_of(output.begin(),output.end(),[](auto value){return value!=0;}),"original floor sound silent");}check(effects.played.back()=="MULTSPQ1/0000/2/0004","floor sound route mismatch");effects.load_room_sounds(0,1);check(!effects.active(4)&&effects.play_room_sound(2,2,5)&&effects.played.back()=="MULTSPQ1/0001/2/0002","room sound reload incorrect");check(!effects.play_room_sound(15,0),"missing bank fabricated");reject([&]{effects.play_room_sound(2,100);});}
 
     if(argc>1){AudioMixer enemies(std::filesystem::u8path(argv[1]));enemies.load_room_sounds(0,2);for(unsigned slot=0;slot<6;++slot)check(enemies.enemy_sound(slot,0)&&enemies.active(18+slot),"original enemy bank or independent slot missing");check(enemies.played.back()=="MULTSPQ1/0002/3/0000","enemy bank/list selection incorrect");enemies.stop_enemy_sound(2);for(unsigned slot=0;slot<6;++slot)check(enemies.active(18+slot)==(slot!=2),"enemy sound stop steals another voice");const auto samples=enemies.mix(100);check(std::any_of(samples.begin(),samples.end(),[](auto n){return n!=0;}),"enemy PCM silent");enemies.load_room_sounds(0,0);check(!enemies.active(18),"enemy voice survives room reload");reject([&]{enemies.enemy_sound(6,0);});}
+    // RM_9340 bank 3 programs 60..67 carry no split. The mdlver-38 zombie (ene01_typ_tbl type 18,
+    // add_seno 40) requests list 63 there: an original silent voice, not an unavailable sound.
+    if(argc>1){AudioMixer silent(std::filesystem::u8path(argv[1]));silent.set_disc(1);silent.load_room_sounds(9,34);
+        silent.request_enemy_se(3,0x0101131c);silent.exec_enemy_se();check(silent.active(18),"RM_9340 zombie voice 28 missing");
+        silent.request_enemy_se(1,0x0101133f);silent.exec_enemy_se();check(silent.unavailable.empty(),"split-less enemy program reported unavailable");
+        check(silent.played.back()=="MULTSPQ2/0083/3/0063"&&!silent.active(19),"split-less enemy program not served silently");}
 
     if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto index=read_asset_file(root/"files/MULTSPQ1.IDX",4096);BinaryView ids(index);
         // COMMON SQ bank 1 uses key 60 and velocities 120/110/120/120.

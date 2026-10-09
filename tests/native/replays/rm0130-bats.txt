@@ -1,0 +1,8 @@
+# RM_0130, Spawn 1: walk into the vaulted corridor the five original EN07
+# works hang in. No teleport, no scripted enemy change and no equipped lighter,
+# so the bats stay in their original bhEne07_MV00 rest state while the normal
+# render chain draws them.
+# recvx-runtime --data data --room RM_0130.RDX --in-game --spawn 1 \
+#   --replay tests/native/replays/rm0130-bats.txt --frames 130
+0 keys forward
+100 keys none

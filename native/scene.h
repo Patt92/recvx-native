@@ -133,6 +133,9 @@ struct ModelGeometryOptions {
     NJS_MATRIX transform{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     std::vector<ModelPose> pose;
     std::vector<std::uint32_t> evalflags;
+    // Authoritative native O_WORK matrices: rendering must not resample a
+    // motion or rebuild a second pose after original procedural joint edits.
+    std::vector<std::array<float,16>> world_matrices;
     std::vector<std::vector<NJS_POINT3>> world_vertices;
     std::vector<std::vector<NJS_VECTOR>> world_normals;
 };

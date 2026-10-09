@@ -102,7 +102,6 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data,bool face_actor) 
     }
     if(!terminated||model_.empty())throw std::runtime_error("missing player model/terminator");
     BinaryView mdl(model_);
-    if(!(mdl.u8(3)&0x80))throw std::runtime_error("player model is not Ninja Chunk");
     const auto base=mdl.relative(0,mdl.u16(4),0),count=std::size_t(mdl.u16(6));
     if(!count||count>256)throw std::runtime_error("invalid player bone count");
     const auto nodes=mdl.relative(base,mdl.u32(12),count*52);
@@ -118,6 +117,7 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data,bool face_actor) 
         children_.push_back(link(mdl.u32(o+44)));siblings_.push_back(link(mdl.u32(o+48)));
     }
     node_layout_=decode_actor_node_layout(model_,mask_data,face_actor);
+    encoded_skin_=skin_data;
     if(!mask_data.empty())face_=std::make_shared<FaceAsset>(model_,mask_data);
     const auto bind=matrices(bind_pose_,{},0,true);
     if(!skin_data.empty()) {
@@ -169,6 +169,7 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data,bool face_actor) 
         if(size==0xffffffff){terminated=true;break;}
         if(size>motion_end-p)throw std::runtime_error("player motion block outside section");
         motions_.push_back(size?std::optional<MotionClip>(decode_motion_asset(slice(data,p,size))):std::nullopt);
+        encoded_motions_.push_back(size?slice(data,p,size):std::vector<std::uint8_t>{});
         p+=size;
     }
     if(!terminated||motions_.empty())throw std::runtime_error("missing player motion list");
@@ -190,12 +191,9 @@ PlayerAsset::PlayerAsset(const std::vector<std::uint8_t>& data,bool face_actor) 
     file.require(p,texture_size);
     auto textures=slice(data,p,texture_size);
     if(!texture_size)return; // room actor without textures (texP NULL); players always carry a bundle
-    // Decode texture bundle together with the same model parser; geometry is
-    // sampled separately below so textures do not get decoded every frame.
-    const auto texture_offset=model_.size();
-    auto combined=model_;combined.insert(combined.end(),textures.begin(),textures.end());
-    ModelGeometryOptions options;options.pose=bind_pose_;
-    textures_=decode_model_asset(combined,0,texture_offset,options).textures;
+    // Loading a texture list must not draw an inactive alternate model (e.g.
+    // a modifier volume or morph target). Geometry follows the selected Work.
+    textures_=decode_texture_bundle(textures,0);
     if(textures_.empty())throw std::runtime_error("player texture bundle is empty");
 }
 std::vector<PlayerAsset::Matrix> PlayerAsset::matrices(const std::vector<ModelPose>& pose,NJS_POINT3 position,Angle yaw,bool translations_only) const {
@@ -271,10 +269,27 @@ std::vector<BoneMatrix> PlayerAsset::pose_clip(const MotionClip& clip,std::int64
 Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param) const {
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
     ModelGeometryOptions geometry;geometry.pose=local_pose_clip(clip,frame_q16,nodes,overrides);
-    std::vector<std::uint8_t> deformed;if(face_){deformed=model_;}if(face_){const auto param=face_param?*face_param:sample_face_parameters(face_->keys(),0);face_->deform(deformed,param);}
-    const auto& rendered=face_?deformed:model_;
-    BinaryView source(model_),changed(rendered);const auto base=source.u16(4);const auto objects=source.relative(base,source.u32(12),bones()*52);
-    auto full=matrices(geometry.pose,position,yaw),without_rotation=full;
+    njTranslate(&geometry.transform,position.x,position.y,position.z);njRotateY(&geometry.transform,yaw);
+    auto full=matrices(geometry.pose,position,yaw);
+    return render_pose(std::move(geometry),std::move(full),matrices_out,face_param);
+}
+Scene PlayerAsset::sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& work,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out,const FaceParameter* face_param,const std::vector<std::uint8_t>* live_model)const{
+    if(pose.size()!=bones()||work.size()!=bones()||flags.size()!=bones())throw std::runtime_error("native actor work skeleton differs from model");
+    ModelGeometryOptions geometry;geometry.pose=pose;geometry.evalflags=flags;
+    std::vector<Matrix> full(work.size());geometry.world_matrices.resize(work.size());
+    for(std::size_t i=0;i<work.size();++i){
+        for(unsigned k=0;k<16;++k){if(!std::isfinite(work[i].value[k]))throw std::runtime_error("nonfinite native actor work matrix");full[i].value[k]=geometry.world_matrices[i][k]=work[i].value[k];}
+    }
+    return render_pose(std::move(geometry),std::move(full),matrices_out,face_param,live_model);
+}
+Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix> full,std::vector<BoneMatrix>* matrices_out,const FaceParameter* face_param,const std::vector<std::uint8_t>* live_model)const{
+    // Native enemy routines deform the owned vertex streams in place. That
+    // stream is the renderer's source too; never resample an immutable asset.
+    const auto& encoded=live_model?*live_model:model_;
+    std::vector<std::uint8_t> deformed;if(face_&&!live_model){deformed=encoded;const auto param=face_param?*face_param:sample_face_parameters(face_->keys(),0);face_->deform(deformed,param);}
+    const auto& rendered=deformed.empty()?encoded:deformed;
+    BinaryView source(encoded),changed(rendered);const auto base=source.u16(4);const auto objects=source.relative(base,source.u32(12),bones()*52);
+    auto without_rotation=full;
     if(matrices_out){matrices_out->clear();for(const auto& matrix:full){BoneMatrix copy;std::copy_n(matrix.value,16,copy.value);matrices_out->push_back(copy);}}
     for(std::size_t i=0;i<bones();++i) {
         const auto& a=geometry.pose[i].angles;
@@ -289,8 +304,14 @@ Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS
         auto& normals=geometry.world_normals[mesh.object];normals.reserve(mesh.weights.size());
         for(std::size_t i=0;i<mesh.weights.size();++i) {
             const auto word=mesh.weights[i],bone=word>>24,level=(word>>16)&255;
-            auto point=mesh.local_vertices[i];NJS_POINT3 a,b;
-            if(face_){const auto mdl=source.relative(base,source.u32(objects+mesh.object*52+4),24),chunk=source.relative(base,source.u32(mdl),64),p=chunk+64+i*32;point.x+=changed.f32(p)-source.f32(p);point.y+=changed.f32(p+4)-source.f32(p+4);point.z+=changed.f32(p+8)-source.f32(p+8);}
+            auto point=mesh.local_vertices[i];auto normal=mesh.local_normals[i];NJS_POINT3 a,b;
+            if(live_model||!deformed.empty()){
+                const auto mdl=source.relative(base,source.u32(objects+mesh.object*52+4),24),chunk=source.relative(base,source.u32(mdl),64),p=chunk+64+i*32;
+                // npSkinConvert has already moved live points to their
+                // influencing bone's origin. Do not convert them twice.
+                if(live_model){point={changed.f32(p),changed.f32(p+4),changed.f32(p+8)};normal={changed.f32(p+16),changed.f32(p+20),changed.f32(p+24)};}
+                else{point.x+=changed.f32(p)-source.f32(p);point.y+=changed.f32(p+4)-source.f32(p+4);point.z+=changed.f32(p+8)-source.f32(p+8);}
+            }
             njCalcPoint(&full[bone].value,&point,&b);
             if(level==9)vertices.push_back(b);
             else {
@@ -301,14 +322,13 @@ Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS
             }
             // npCalcSkin transforms and blends the normal using the same two
             // influencing-bone matrices, with no translation component.
-            NJS_VECTOR na,nb;auto normal=mesh.local_normals[i];njCalcVector(&full[bone].value,&normal,&nb);
+            NJS_VECTOR na,nb;njCalcVector(&full[bone].value,&normal,&nb);
             if(level==9)normals.push_back(nb);else{njCalcVector(&without_rotation[bone].value,&normal,&na);const float weight=(level+1)*.1f;normals.push_back({na.x+(nb.x-na.x)*weight,na.y+(nb.y-na.y)*weight,na.z+(nb.z-na.z)*weight});}
         }
     }
-    njTranslate(&geometry.transform,position.x,position.y,position.z);njRotateY(&geometry.transform,yaw);
     auto scene=decode_model_asset(rendered,0,0,geometry);
-    // bhSetEneMdl leaves texP NULL for models without a texture list.
-    if(textures_.empty())for(auto& triangle:scene.triangles)triangle.textured=false;
+    // Texture ownership comes from the selected Work's texP. Linked models
+    // can use another model's atlas without changing their material flags.
     return scene;
 }
 void append_actor(Scene& stage,const Scene& actor,std::size_t texture_base) {
@@ -349,4 +369,3 @@ Scene PlayerAsset::sample_rest(const NJS_MATRIX& root,const std::vector<std::arr
     return scene;
 }
 }
-

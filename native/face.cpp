@@ -6,11 +6,15 @@
 #include <functional>
 #include <stdexcept>
 namespace recvx {
-std::vector<FaceParameter> decode_face_parameters(const std::vector<std::uint8_t>& b,std::size_t p,unsigned n,bool lip){
+std::vector<FaceParameter> decode_face_parameters(const std::vector<std::uint8_t>& b,std::size_t p,unsigned n,bool lip,bool mask_lip_bank){
     BinaryView v(b);if(n>65536)throw std::runtime_error("too many facial keys");v.require(p,std::size_t(n)*164);std::vector<FaceParameter> out(n);
     for(auto& k:out){for(unsigned j=0;j<32;++j)k.muscle[j]=v.f32(p+j*4);
-        k.jawang=lip?v.i32(p+128)*0.005493164f:v.f32(p+128);k.jawtrans=v.f32(p+132);k.eye={v.f32(p+136),v.f32(p+140),v.f32(p+144)};
-        k.tangx=lip?v.i32(p+148)*0.005493164f:v.f32(p+148);k.tangy=lip?v.i32(p+152)*0.005493164f:v.f32(p+152);k.tangz=v.f32(p+156);k.frame=short(v.u16(p+160));k.flag=short(v.u16(p+162));p+=164;}
+        // MASK lip angles retain signed angle bits in PARAM_WORK's float
+        // fields (face_bh.c fmCnkSetParamLip). Negative angles can have IEEE
+        // NaN bits. Preserve them until the lip consumer converts them.
+        auto angle=[&](std::size_t at){if(lip)return v.i32(at)*0.005493164f;if(mask_lip_bank){const auto bits=v.u32(at);float raw;std::memcpy(&raw,&bits,4);return raw;}return v.f32(at);};
+        k.jawang=angle(p+128);k.jawtrans=v.f32(p+132);k.eye={v.f32(p+136),v.f32(p+140),v.f32(p+144)};
+        k.tangx=angle(p+148);k.tangy=angle(p+152);k.tangz=v.f32(p+156);k.frame=short(v.u16(p+160));k.flag=short(v.u16(p+162));p+=164;}
     return out;
 }
 FaceParameter sample_face_parameters(const std::vector<FaceParameter>& keys,unsigned frame){
@@ -49,7 +53,7 @@ FaceAsset::FaceAsset(const std::vector<std::uint8_t>& model,const std::vector<st
     if(connection!=nc)throw std::runtime_error("MASK unused connections");
     for(unsigned i=0;i<nj;++i){const auto id=m.u32(p);if(id>=face_.count)throw std::runtime_error("MASK jaw vertex outside face");jaw_.push_back({id,m.f32(p+4)});p+=8;}
     for(unsigned i=0;i<nt;++i){const auto id=m.u32(p);if(!tongue||id>=tongue_.count)throw std::runtime_error("MASK tongue vertex outside mesh");tang_.push_back({id,m.f32(p+4)});p+=8;}
-    keys_=decode_face_parameters(mask,p,m.u32(32));if(keys_.empty())throw std::runtime_error("MASK has no parameters");
+    keys_=decode_face_parameters(mask,p,m.u32(32),false,true);if(keys_.empty())throw std::runtime_error("MASK has no parameters");
     const auto a=m.u16(8),b=m.u16(10);if(a>=face_.count||b>=face_.count)throw std::runtime_error("MASK jaw axis outside face");const auto origin=point(model,face_.payload+a*face_.stride),end=point(model,face_.payload+b*face_.stride);const float x=end.x-origin.x,y=end.y-origin.y,z=end.z-origin.z;
     const int ry=int(10430.378f*std::atan(y/x)),rz=int(10430.378f*std::atan(z/std::sqrt(x*x+y*y)));
     njUnitMatrix(&jaw_to_);njRotateY(&jaw_to_,-rz);njRotateZ(&jaw_to_,-ry);njTranslate(&jaw_to_,-origin.x,-origin.y,-origin.z);

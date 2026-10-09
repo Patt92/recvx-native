@@ -1,21 +1,27 @@
 # Engine-Portierungsstand
 
-Engine gesamt: **47.5 %** gewichtet, **43.9 %** streng (1135/3168 Funktionen voll belegt, 158946 Originalzeilen ohne Plattformschicht).
+> Historischer Abdeckungsstand, keine aktuelle Freigabe. Seit dem Cleanup vom
+> 2026-10-09 zählen kompilierte Originalquellen und generierte Funktionskörper
+> nicht als native Implementierungen; sie sperren den Build. Zahlen unten sind
+> noch nicht nach dieser Regel neu berechnet. Aktuelle Aufgaben:
+> [Native Reimplementation Roadmap](NATIVE_REIMPLEMENTATION_ROADMAP.md).
 
-Event-Befehle (bhScenarioJmpT): 148/223 gebunden, 46 nur konsumiert, 29 fehlen.
+Engine gesamt: **46.6 %** gewichtet, **42.7 %** streng (1098/3168 Funktionen voll belegt, 158946 Originalzeilen ohne Plattformschicht).
+
+Event-Befehle (bhScenarioJmpT): 150/223 gebunden, 44 nur konsumiert, 29 fehlen.
 
 | Bereich | Funktionen | Zeilen | gewichtet | streng | original | opcode | verweis/teilw. | fehlt |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Gegner/KI | 342/1357 | 62910 | 26.2 % | 25.9 % | 16319 | 0 | 351 | 46240 |
+| Gegner/KI | 305/1357 | 62910 | 23.4 % | 22.9 % | 14416 | 0 | 616 | 47878 |
 | Effekte | 175/361 | 27671 | 52.0 % | 51.7 % | 14301 | 0 | 202 | 13168 |
 | Events/Skript | 251/272 | 12358 | 91.7 % | 90.7 % | 11206 | 0 | 258 | 894 |
 | Spieler/Kampf | 159/166 | 15830 | 95.2 % | 90.8 % | 14381 | 0 | 1379 | 70 |
-| Raum/Kamera/Tür | 64/188 | 9931 | 50.3 % | 39.5 % | 3920 | 0 | 2151 | 3860 |
-| Menü/Items/Text | 130/241 | 14026 | 70.3 % | 63.4 % | 8888 | 0 | 1957 | 3181 |
-| Modelle/Animation | 11/88 | 4212 | 42.8 % | 16.9 % | 713 | 0 | 2179 | 1320 |
-| Audio | 0/164 | 3013 | 16.4 % | 0.0 % | 0 | 0 | 987 | 2026 |
-| Ablauf/Speichern | 3/331 | 8995 | 11.9 % | 0.1 % | 12 | 0 | 2108 | 6875 |
-| Plattform (Host-ersetzt) | 97/704 | 17856 | 25.6 % | 19.4 % | 3460 | 0 | 2238 | 12158 |
+| Raum/Kamera/Tür | 64/188 | 9931 | 51.2 % | 39.5 % | 3920 | 0 | 2333 | 3678 |
+| Menü/Items/Text | 130/241 | 14026 | 70.4 % | 63.4 % | 8888 | 0 | 1980 | 3158 |
+| Modelle/Animation | 11/88 | 4212 | 48.7 % | 16.9 % | 713 | 0 | 2675 | 824 |
+| Audio | 0/164 | 3013 | 16.8 % | 0.0 % | 0 | 0 | 1011 | 2002 |
+| Ablauf/Speichern | 3/331 | 8995 | 11.9 % | 0.1 % | 12 | 0 | 2120 | 6863 |
+| Plattform (Host-ersetzt) | 97/704 | 17856 | 27.8 % | 19.4 % | 3460 | 0 | 3024 | 11372 |
 
 Spalten original…fehlt in Originalzeilen. Plattformschicht zählt nicht zum Engine-Wert.
 
@@ -31,11 +37,6 @@ Spalten original…fehlt in Originalzeilen. Plattformschicht zählt nicht zum En
 - `effsub3.c:404` bhEff301 (310 Zeilen, fehlt)
 - `en03.c:6366` bhEne03_DamageInit (302 Zeilen, fehlt)
 - `effsub1b.c:220` bhEff134 (296 Zeilen, fehlt)
-- `effsub1b.c:1258` bhDraw138 (273 Zeilen, fehlt)
-- `effsub4.c:2722` bhEff_Sub398 (265 Zeilen, fehlt)
-- `effsub0.c:1953` bhEff182 (264 Zeilen, fehlt)
-- `effsub2.c:2595` bhEff_E12_Fire (260 Zeilen, fehlt)
-- `hitchk.c:641` bhCheckWallEx (520 Zeilen, partial, Original function extracted and push contact/body/front block bound; full bhControlPlayer state dispatch and non-player callers remain open)
 
 Ledger-Einträge ohne passende Funktion: system.c:bhSysCall
 

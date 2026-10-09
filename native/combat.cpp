@@ -88,10 +88,12 @@ void CombatController::fire(Inventory& inventory,const SceneSpawn& actor,RoomWor
     const auto& w=WpnTab[weapon_];
     // The original state machine owns hit assignment and ammo; this callback only emits the muzzle.
     const auto bones=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));const unsigned hand=left?13:9;
-    const auto& effect=WpnEffTab[weapon_][0];if(effect.flg&&effect.id==3&&effect.type==0&&hand<bones.size()){
-        WeaponFlash flash;flash.flg=effect.flg;flash.flr_no=effect.flr_no;flash.mdlver=effect.mdlver;flash.sx=effect.sx;flash.sy=effect.sy;flash.sz=effect.sz;
+    const auto& effect=WpnEffTab[weapon_][0];if(effect.flg&&effect.id==3&&hand<bones.size()){
+        WeaponFlash flash;flash.flg=effect.flg;flash.type=effect.type;flash.flr_no=effect.flr_no;flash.mdlver=effect.mdlver;flash.sx=effect.sx;flash.sy=effect.sy;flash.sz=effect.sz;
+        flash.offset={left?-w.wp_fps1.x:w.wp_fps1.x,w.wp_fps1.y,w.wp_fps1.z};flash.angles={effect.ax,left?-32768:0,0};
+        flash.linked_node=hand;auto muzzle=flash.offset;auto matrix=bones[hand];njCalcPoint(&matrix.value,&muzzle,&flash.position);
         std::copy_n(bones[hand].value,16,flash.matrix);njTranslate(&flash.matrix,left?-w.wp_fps1.x:w.wp_fps1.x,w.wp_fps1.y,w.wp_fps1.z);if(left)njRotateY(&flash.matrix,32768);if(weapon_==13)njRotateY(&flash.matrix,8192);
-        if(weapon_==8||weapon_==12){flash.mdlver=shots%3==0;njRotateX(&flash.matrix,weapon_==8||flash.mdlver?8192:5461);}
+        if(weapon_==8||weapon_==12){flash.mdlver=shots%3==0;flash.angles[0]=weapon_==8||flash.mdlver?8192:5461;njRotateX(&flash.matrix,flash.angles[0]);}
         flash.tick();flashes_.push_back(flash);
     }
 }
@@ -143,5 +145,21 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // rebuilds it per aiming pass), so no stale lock survives the release.
     if(!engine.state.active){motion=42;frame=0;original_.reset();aim_={};return false;}return true;
 }
-void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld* world)const{if(bones.empty())return;const auto hands=body_?body_->script_nodes(bones):bones;if(scripted){if(bare_hands_)bare_hands_->append(scene,hands);}else if(asset_){asset_->append(scene,hands);if(world&&!flashes_.empty())if(const auto* atlas=world->weapon_flash_textures()){const unsigned base=scene.textures.size();scene.textures.insert(scene.textures.end(),atlas->begin(),atlas->end());for(const auto& flash:flashes_)if(flash.ct0&&flash.ct0<=atlas->size())flash.append(scene,base);}}}
+void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld* world)const{
+    if(bones.empty())return;
+    const auto hands=body_?body_->script_nodes(bones):bones;
+    if(scripted){if(bare_hands_)bare_hands_->append(scene,hands);}
+    else if(asset_){
+        asset_->append(scene,hands);
+        if(world&&!flashes_.empty())if(const auto* atlas=world->weapon_flash_textures()){
+            const unsigned base=scene.textures.size();
+            scene.textures.insert(scene.textures.end(),atlas->begin(),atlas->end());
+            for(const auto& flash:flashes_)if(flash.queued&&flash.ct0){
+                if(flash.texture_count()>atlas->size())throw std::runtime_error("original weapon-flash texture frame missing");
+                const auto* node=flash.linked_node<hands.size()?&hands[flash.linked_node].value:nullptr;
+                flash.append(scene,base,0,{},node);
+            }
+        }
+    }
+}
 }

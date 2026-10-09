@@ -3,29 +3,41 @@
 #include "item_asset.h"
 #include <stdexcept>
 namespace recvx {
+// PORTIERUNGSLÜCKE (Policy 2026-10-09): Die Dateiordner-Routinen aus
+// fileview.c / itemview.c (SearchTag, SelectFile, SelectTag, FileSyu,
+// PlayPageCheck mit der Fortschrittsreihenfolge des Handbuchs) kamen aus
+// file_folder.inc, erzeugt von tools/generate_file_folder.py. Generator und
+// Include sind Quarantäne (archived/FORBIDDEN_DONTUSE/) und dürfen weder
+// gelesen noch ausgeführt werden. Mit den Routinen entfällt auch die
+// Host-Brücke, die nur für sie existierte (die thread_local-Spiegel von
+// FV_WORK/S_WORK/SITEM, CallSystemSe, NameChangeSet, StatusToFileView,
+// bhCkFlg, FileFlagInit und der enter/leave-Austausch).
+//
+// Zu leisten: Ordnerauswahl, Drehung, Registerc‌ursor, der Übergang in den
+// Leser und die Seitenreduktion des Handbuchs als eigenen nativen Mechanismus
+// bestimmen — nicht über einen Generator auf die Originalquellen.
+//
+// Solange das offen ist:
+// - step() bewegt nichts: kein C‌ursor, keine Ordnerdrehung (ang00 bleibt 0),
+//   kein Moduswechsel, kein SE und keine Leseranforderung. Nur der reine
+//   Host-Zähler clock() läuft weiter, damit die aufrufende UI ihren eigenen
+//   Takt behält.
+// - file_page_reduction liefert 0, weil PlayPageCheck fehlt. Das ist kein
+//   geratener Seitenstand, sondern "keine Seite bestimmbar".
+// - Die Datenstrukturen FV_WORK/S_WORK und die Knotenwinkel bleiben als
+//   Zustand erhalten, damit scene() die drei Ordner weiter aus den
+//   Originaldaten aufbaut — allerdings in Ruhelage, weil FileSyu die
+//   Startwinkel nicht mehr setzt.
+//
+// Sichtbare Folge: Der Dateiordner lässt sich nicht bedienen. Die drei Ordner
+// stehen unbewegt in ihrer Ausgangslage, Register lassen sich nicht wählen,
+// kein Dokument öffnet sich, und das Handbuch meldet keine Seiten.
 namespace original_file_folder {
-constexpr bool TRUE=true;
-struct NJS_CNK_OBJECT {float pos[3]{};int ang[3]{};NJS_CNK_OBJECT* child=nullptr;NJS_CNK_OBJECT* sibling=nullptr;};
-struct NJS_POINT2 {float x=0,y=0;};
+// Feldnamengleiche Teilmengen der Originalwerke; von scene() und den
+// Abfragen unten gelesen.
+struct NJS_CNK_OBJECT {float pos[3]{};int ang[3]{};};
 struct FV_WORK {int tag=0,filecsr=0,roll=0,j=0,z=0,ang00=0,filenum=0,page=0,pagewait01=0,mode_02=0;unsigned afsmode=0;short koma[16]{},koma2[16]{};};
 struct S_WORK {unsigned statusflg=0;int mode=8,testmode=8,maincsr=1,number=0,wait=0,wn=2,subscreenmode=2;};
-struct SITEM {struct {NJS_CNK_OBJECT* objP;} mdl;};
-struct System {unsigned pad_ps=0,pad_on=0;unsigned* itm=nullptr;const unsigned* ev_flg=nullptr;};
-struct Part {struct {float r=.7f,g=.7f,b=.7f;} col;};
-static thread_local FV_WORK fvwork;
-static thread_local S_WORK swork;
-static thread_local System system;static thread_local System* sys=&system;
-static thread_local SITEM sitem;
-static thread_local Part parts_10b[16];
-static thread_local unsigned sound=~0u;
-static thread_local bool reader=false;
-static void CallSystemSe(int,unsigned n){sound=n;}
-static void NameChangeSet(S_WORK*){}
-static void bhDispItemName(NJS_POINT2*,int,int,int,float){} // drawn by GameUi
-static void FileFlagInit(){}
-static void StatusToFileView(){reader=true;} // owner runs the sprite transition
-static int bhCkFlg(const unsigned* flags,unsigned bit){return (flags[bit/32]&(0x80000000u>>(bit%32)))!=0;}
-#include "file_folder.inc"
 }
 struct FileFolder::State {
     original_file_folder::FV_WORK work;
@@ -34,15 +46,15 @@ struct FileFolder::State {
     bool reader=false,navigation=false;
     unsigned sound=~0u,clock=0;
     std::array<float,2> arrow{{.7f,.7f}};
-    State(){nodes[0].child=&nodes[1];nodes[1].sibling=&nodes[2];nodes[2].sibling=&nodes[3];original_file_folder::FileSyu(&nodes[1]);}
-    void enter(Inventory& inv,unsigned pad){using namespace original_file_folder;fvwork=work;swork=status;system={pad,pad,inv.items.data()};sitem.mdl.objP=nodes.data();for(unsigned i=0;i<2;++i)parts_10b[13+i].col.r=parts_10b[13+i].col.g=parts_10b[13+i].col.b=arrow[i];original_file_folder::sound=~0u;original_file_folder::reader=false;}
-    void leave(){using namespace original_file_folder;work=fvwork;status=swork;for(unsigned i=0;i<2;++i)arrow[i]=parts_10b[13+i].col.r;sound=original_file_folder::sound;reader=original_file_folder::reader;navigation=status.mode==2;}
 };
 FileFolder::FileFolder():state_(std::make_shared<State>()){}
 bool FileFolder::automatic()const{return (state_->status.statusflg&0x40000000u)!=0;}
-unsigned file_page_reduction(const std::array<std::uint32_t,32>& flags){original_file_folder::system.ev_flg=flags.data();return unsigned(original_file_folder::PlayPageCheck());}
-void FileFolder::open(Inventory& inv,bool bonus,bool automatic){state_=std::make_shared<State>();inv.items[383]|=1;if(bonus)inv.items[383]|=0x800;auto& s=*state_;if(automatic)s.status.statusflg|=0x40000000;s.enter(inv,0);original_file_folder::SearchTag(1);s.leave();}
-void FileFolder::step(Inventory& inv,unsigned pad){auto& s=*state_;s.enter(inv,pad);if(s.status.testmode==9)original_file_folder::SelectTag();else{original_file_folder::SelectFile();if(original_file_folder::fvwork.z==0)original_file_folder::SearchTag(1);}s.leave();++s.clock;}
+unsigned file_page_reduction(const std::array<std::uint32_t,32>& flags){(void)flags;return 0;}
+void FileFolder::open(Inventory& inv,bool bonus,bool automatic){
+    state_=std::make_shared<State>();inv.items[383]|=1;if(bonus)inv.items[383]|=0x800;
+    if(automatic)state_->status.statusflg|=0x40000000;
+}
+void FileFolder::step(Inventory& inv,unsigned pad){(void)inv;(void)pad;++state_->clock;}
 void FileFolder::return_from_reader(){auto& s=*state_;s.work.afsmode=(s.work.afsmode&~0xB80u)|0x20;s.status.statusflg&=~0x40u;s.reader=false;s.status.testmode=9;}
 unsigned FileFolder::take_sound(){auto n=state_->sound;state_->sound=~0u;return n;}
 bool FileFolder::take_reader(){bool n=state_->reader;state_->reader=false;return n;}

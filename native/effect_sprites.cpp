@@ -1,95 +1,79 @@
 #include "effect_sprites.h"
 #include "chunk_blend.h"
-#include "effect_collision.h"
-#include "core_random.h"
 #include <stdexcept>
 namespace recvx {
+// Host-Typen der Effektverknüpfung; EffectSprite hält nur Zeiger darauf.
 struct EffectLinkNode {NJS_MATRIX mtx{};};
 struct EffectModelWork {EffectLinkNode* owP=nullptr;};
+// PORTIERUNGSLÜCKE (Policy 2026-10-09): Alle Effektprozeduren aus effsub1.c /
+// effsub5.c / effect.c (bhEff000, 005, 009, 015, 016, 023, 024, 025, 029, 122,
+// 200, 201, 218, 230, 231, 232, bhDraw024/025, bhEff_Sub356, bhSetExplosion,
+// bhSetExplosionEffect) und die zugehörigen Originaldaten (die ef_info-Tabelle
+// mit Flags und Animationslängen, WpnEffTab[1][0], lgttab[1], die EFF5UV-
+// Atlastabellen) kamen aus effect_sprites.inc, erzeugt von
+// tools/generate_effect_sprites.py. Generator und Include sind Quarantäne
+// (archived/FORBIDDEN_DONTUSE/) und dürfen weder gelesen noch ausgeführt
+// werden. Mit den Prozeduren entfällt auch die Host-Brücke, die nur für sie
+// existierte (das sys-Teilwerk mit ef_trs/ef_pnc/ef_pol/ef_fnc, der
+// Spieler-Teilsatz, die ATR-Umschrift, die Wand-/Boden-/Wasserdienste,
+// bhSetEffectTb/bhSetEffect als Slotanforderung, CallYakkyouSe).
+//
+// Zu leisten: die Effektprozeduren, ihre UV-Atlanten und die ef_info-Tabelle
+// als eigenen nativen Mechanismus bestimmen — nicht über einen Generator auf
+// die Originalquellen.
+//
+// Solange das offen ist:
+// - step_effect_sprite führt nichts aus und meldet mit false, dass für diese
+//   Effekt-ID keine Prozedur gebunden ist; supported_effect_sprite ist für
+//   jede ID false.
+// - set_explosion / set_explosion_effect fordern nichts an; take_effect_output
+//   bleibt leer (keine Spawns, keine Töne, keine Bombenanfrage, kein Licht).
+// - lighter_sprite / lighter_light liefern leere Originaldatensätze, weil
+//   WpnEffTab/lgttab fehlen. flg bleibt 0, der Host startet also keinen Effekt
+//   und das Raumlicht 1 trägt nichts bei. Keine geratenen Skalen oder Farben.
+// - common_effect_categories ist leer, und common_effect_textures_offset
+//   liefert std::size_t(-1) als dokumentiertes "nicht bestimmbar": ohne die
+//   ef_info-Flags lässt sich die Kette der Modellblöcke in SYSTEM/0001 nicht
+//   überspringen. Aufrufer müssen diesen Wert als "keine gemeinsamen
+//   Effekttexturen" behandeln und das Laden überspringen; ein geratener Offset
+//   würde die PVP-Liste falsch dekodieren.
+// - set_effect_context / set_effect_walls / set_effect_ground /
+//   set_effect_link_matrix haben keinen Abnehmer mehr und verwerfen ihre
+//   Eingaben.
+//
+// Erhalten bleibt ausschließlich Host-Code, der nicht aus dem Generator kam:
+// initialize_effect_sprite (die Feldübernahme einer EffectSpawn-Anfrage),
+// original_effect_slot (die Slotwahl über flg & 3) und der Zeichenpfad
+// append_effect_sprite / append_custom_effect.
+//
+// Sichtbare Folge: Es werden keine Effekte mehr dargestellt oder gestartet —
+// keine Feuerzeugflamme, keine Explosion mit Trümmern und Rauch, keine
+// Mündungs-/Treffereffekte, keine Flammen auf Rodrigos Tisch, keine
+// Metalldetektor-Lampen. Raumskripte, die Effekte anfordern, laufen weiter,
+// bewirken aber nichts.
 namespace {
-using O_WRK=EffectSprite;
-struct EFF5UV {int u,v;};
-struct EFF5UVTBL {EFF5UV* pTblTop;int lTblMax,lTexID,lAniCt,pad,w,h;};
-struct EF_WORK {unsigned flg;unsigned short id,type;short flr_no;unsigned short mdlver;float px,py,pz,sx,sy,sz;short ay,ax;};
-struct ATR_WORK {unsigned flg=0,type=0,id=0;int flr_no=0;unsigned attr=0;float px=0,py=0,pz=0,w=0,h=0,d=0;unsigned prm0=0,prm1=0,prm2=0,prm3=0;};
-struct OriginalSpriteQueue {unsigned ef_trsn=0,ef_pncn=0,ef_poln=0;O_WRK* ef_trs[512]{};O_WRK* ef_pnc[512]{};O_WRK* ef_pol[512]{};ATR_WORK* htp=nullptr;unsigned yk_ct=0,st_flg=0,pt_flg=1,cb_flg=0,sp_flg=8,ef_fncn=0;O_WRK* ef_fnc[512]{};int ef_tlist=0;int ef_tn[512]{};EF_WORK ef{};} queue;
-auto* sys=&queue;
-struct OriginalPlayer {unsigned flg=0,stflg=0,mdflg=0;} player_work;
-auto* plp=&player_work;
-struct UV_WORK {float u,v,xs,ys;};
-struct LGT_WK {unsigned flg,type;int aspd,lkflg,lkno,lkono,lsrc;float px,py,pz,lx,ly,lz,vx,vy,vz,spc,dif,amb,r,g,b,nr,fr;int iang,oang,ax,ay,az;};
-struct POINT {float px,py,pz,ox,oy,oz;};
-// bhSetEffect/bhSetEffectTb are requests the host fulfils from its effect slots; only effects with a bound procedure start.
 EffectOutput pending;
-bool effect_bound(unsigned id);
-int bhSetEffectTb(EF_WORK* ef,NJS_POINT3* offset,unsigned char*,int lkono){
-    if(!effect_bound(ef->id)){pending.unsupported.insert(ef->id);return -1;}
-    EffectSpawn spawn;spawn.flg=ef->flg;spawn.id=ef->id;spawn.type=ef->type;spawn.flr_no=ef->flr_no;spawn.mdlver=ef->mdlver;spawn.position={ef->px,ef->py,ef->pz};spawn.scale={ef->sx,ef->sy,ef->sz};spawn.ax=ef->ax;spawn.ay=ef->ay;spawn.lkono=lkono;
-    if(offset){spawn.has_offset=true;spawn.offset=*offset;}pending.spawns.push_back(spawn);return int(pending.spawns.size())-1;
 }
-int bhSetEffect(int effno,POINT* point,unsigned char*,int lkono){
-    if(!effect_bound(unsigned(effno))){pending.unsupported.insert(unsigned(effno));return -1;}
-    EffectSpawn spawn;spawn.id=unsigned(effno);spawn.position={point->px,point->py,point->pz};spawn.has_offset=true;spawn.offset={point->ox,point->oy,point->oz};spawn.lkono=lkono;pending.spawns.push_back(spawn);return int(pending.spawns.size())-1;
-}
-void CallPlayerActionSe(int se,int){pending.sounds.push_back(unsigned(se));}
-void bhCheckBombAtari(NJS_POINT3* position,float radius,int dmax,int dmin){pending.bombs.push_back({*position,radius,dmax,dmin});}
-// rom->lgtp[0] is the effect light slot bhSetExplosion fills; cam is the view direction passed to set_explosion.
-struct EffectLight {unsigned flg,type;int aspd,lkflg,lkno,lkono,mode,lsrc;float r,g,b,nr,fr,px,py,pz,lx,ly,lz;int ct0;void* light;} effect_light{};
-using LGT_WORK=EffectLight;
-struct {EffectLight* lgtp=&effect_light;} room_state;
-auto* rom=&room_state;
-NJS_MATRIX draw_camera;
-struct {float vx=0,vy=0,vz=1;NJS_MATRIX* mtx=&draw_camera;} camera_state;
-auto& cam=camera_state;
-using NJS_TEXTURE_VTX=EffectSprite::Vertex;
-struct EXP_DRAW022_WORK {unsigned short flg;short ct;float px,py,pz;};
-struct EXP_EFF025_WORK {unsigned short flg;short ct;float scl,px,py,pz,xn,yn,zn;};
-const std::vector<CollisionWall>* effect_walls=nullptr;float effect_room_height=0;ATR_WORK wall_hit,ground_hit,water_hit;
-GroundCollision* effect_ground=nullptr;const std::vector<CollisionWall>* effect_water_room=nullptr;const std::vector<CollisionWall>* effect_water_mobile=nullptr;
-EffectSprite effect_link_work{};EffectModelWork effect_link_model{};EffectLinkNode effect_link_node[256]{};
-O_WRK* drawing=nullptr;unsigned draw_texture=0,draw_source=8,draw_destination=6;
-void* bhSetExtraEffectWork(){drawing->extra=std::make_shared<std::array<unsigned,312>>();(*drawing->extra)[0]=2;return drawing->extra->data();}
-static ATR_WORK atr_record(const CollisionWall& r){return {r.flags,r.type,r.id,r.floor,r.attributes,r.position.x,r.position.y,r.position.z,r.extent.x,r.extent.y,r.extent.z,r.parameters[0],r.parameters[1],r.parameters[2],r.parameters[3]};}
-ATR_WORK* bhCheckWallType(NJS_POINT3* position,unsigned flags,float radius,float height){if(!effect_walls)return nullptr;const auto hit=effect_wall(*effect_walls,effect_room_height,*position,flags,radius,height);if(!hit)return nullptr;wall_hit=atr_record(*hit);return &wall_hit;}
-void bhSetWallRefAngle(ATR_WORK* wall,NJS_POINT3* position,float radius,float height,int* angle){CollisionWall record{wall->flg,wall->type,wall->id,wall->flr_no,wall->attr,{wall->px,wall->py,wall->pz},{wall->w,wall->h,wall->d},{wall->prm0,wall->prm1,wall->prm2,wall->prm3}};reflect_effect_wall(record,effect_room_height,*position,radius,height,*angle);}
-float bhGetGroundPosition(NJS_POINT3* position){queue.htp=nullptr;if(!effect_ground)return -1000.0f;const float value=effect_ground->query(*position);if(const auto hit=effect_ground->hit()){const auto* r=hit->record;ground_hit={r->flg,r->type,r->id,r->flr_no,r->attr,r->px,r->py,r->pz,r->w,r->h,r->d,r->prm0,r->prm1,r->prm2,r->prm3};queue.htp=&ground_hit;}return value;}
-ATR_WORK* bhCheckWater(NJS_POINT3* position){auto scan=[&](const std::vector<CollisionWall>* records)->ATR_WORK*{if(!records)return nullptr;for(const auto& source:*records){const auto r=atr_record(source);if((r.flg&1u)&&r.type==3&&r.prm0==1&&r.px<=position->x&&r.px+r.w>=position->x&&r.pz<=position->z&&r.pz+r.d>=position->z&&r.py<=position->y&&r.py+r.h>=position->y){water_hit=r;return &water_hit;}}return nullptr;};if(auto* hit=scan(effect_water_room))return hit;return scan(effect_water_mobile);}
-void CallYakkyouSe(NJS_POINT3*,int se){const unsigned code=(unsigned(se)&0xffff00ffu)|0x100u;pending.room_sounds.push_back({(code>>8)&15u,code&255u,10});}
-void bind_effect_link(){effect_link_work.mlwP=&effect_link_model;effect_link_model.owP=effect_link_node;}
-void njSetTexture(void*){}
-void njSetTextureNum(int number){draw_texture=unsigned(number);}
-void njControl3D(int){}
-void njTextureFilterMode(int){}
-void njColorBlendingMode(int which,int value){(which?draw_destination:draw_source)=unsigned(value);}
-void njTranslateEx(NJS_VECTOR* p){njTranslateV(nullptr,p);}
-void njScaleEx(NJS_VECTOR* p){njScaleV(nullptr,p);}
-void njDrawTexture3DEx(NJS_TEXTURE_VTX* vertices,int count,int){
-    if(!drawing||count!=4)return;NJS_MATRIX matrix;njGetMatrix(&matrix);EffectSprite::Quad q;q.center={matrix[12],matrix[13],matrix[14]};q.category=draw_texture;q.source=draw_source;q.destination=draw_destination;
-    for(unsigned n=0;n<4;++n){q.vertices[n]=vertices[n];q.vertices[n].x*=matrix[0];q.vertices[n].y*=matrix[5];q.vertices[n].z*=matrix[10];}drawing->quads.push_back(q);
-}
-void bhDraw024(O_WRK*);void bhDraw025(O_WRK*);void bhEff029(O_WRK*);
-#include "effect_sprites.inc"
-const LGT_WK& lighter_light_table(){return lighter_light;}
-}
-void set_effect_context(const EffectContext& c){queue.st_flg=c.st_flg;queue.pt_flg=c.pt_flg;queue.cb_flg=c.cb_flg;queue.sp_flg=c.sp_flg;queue.yk_ct=c.yk_ct;player_work={c.player_flg,c.player_stflg,c.player_mdflg};}
-LighterSprite lighter_sprite(){
-    // bhSetEffectTb: copy flg/id/type and the scale; the procedure initializes the rest.
-    LighterSprite out;out.sprite.flg=lighter_effect.flg;out.sprite.id=lighter_effect.id;out.sprite.type=lighter_effect.type;out.sprite.ax=lighter_effect.ax;
-    out.scale={lighter_effect.sx,lighter_effect.sy,lighter_effect.sz};return out;
-}
-OriginalLight lighter_light(){const auto& l=lighter_light_table();return {l.flg,l.type,l.aspd,l.lkflg,l.lkno,l.lkono,l.lsrc,{l.px,l.py,l.pz},{l.lx,l.ly,l.lz},{l.vx,l.vy,l.vz},l.spc,l.dif,l.amb,{l.r,l.g,l.b},l.nr,l.fr};}
+void set_effect_context(const EffectContext& context){(void)context;}
+LighterSprite lighter_sprite(){return {};}
+OriginalLight lighter_light(){return {};}
 std::size_t common_effect_textures_offset(const std::vector<std::uint8_t>& data){
-    auto u32=[&](std::size_t at){if(at+4>data.size())throw std::runtime_error("effect data truncated");return std::uint32_t(data[at])|data[at+1]<<8|data[at+2]<<16|std::uint32_t(data[at+3])<<24;};
-    std::size_t dp=4;std::uint32_t sz=u32(0);
-    for(const int flg:effect_info_flags){if(flg==-1)break;if(flg&1){if(sz>data.size()-dp)throw std::runtime_error("effect model outside data");dp+=sz;sz=u32(dp);dp+=4;}}
-    return (dp+31)&~std::size_t(31);
+    (void)data;return std::size_t(-1);
 }
-std::vector<std::pair<unsigned,unsigned>> common_effect_categories(){std::vector<std::pair<unsigned,unsigned>> out;unsigned first=0;for(std::size_t i=0;effect_info_flags[i]!=-1;++i){out.push_back({first,unsigned(effect_info_anims[i])});first+=unsigned(effect_info_anims[i]);}return out;}
-namespace {bool effect_bound(unsigned id){return id==0||id==15||id==24||id==25||id==5||id==9||id==16||id==23||id==29||id==122||id==200||id==201||id==218||id==230||id==231||id==232;}}
-bool supported_effect_sprite(unsigned id){return effect_bound(id);}
-int original_effect_slot(const std::vector<unsigned>& flags){for(unsigned i=0;i<512;++i)if(i>=flags.size()||!(flags[i]&3u))return int(i);return -1;}
-bool step_effect_sprite(EffectSprite& sprite,bool* queued){queue.ef_trsn=0;queue.ef_pncn=0;queue.ef_poln=0;queue.ef_fncn=0;drawing=&sprite;sprite.quads.clear();sprite.polygon_queued=false;if(sprite.id==0){bind_effect_link();sprite.lkwkp=&effect_link_work;bhEff000(&sprite);sprite.polygon_queued=queue.ef_poln!=0;}else if(sprite.id==15)bhEff015(&sprite);else if(sprite.id==24)bhEff024(&sprite);else if(sprite.id==25)bhEff025(&sprite);else if(sprite.id==5)bhEff005(&sprite);else if(sprite.id==16)bhEff016(&sprite);else if(sprite.id==23)bhEff023(&sprite);else if(sprite.id==29)bhEff029(&sprite);else if(sprite.id==9)bhEff009(&sprite);else if(sprite.id==122)bhEff122(&sprite);else if(sprite.id==200)bhEff200(&sprite);else if(sprite.id==201)bhEff201(&sprite);else if(sprite.id==218)bhEff218(&sprite);else if(sprite.id==230)bhEff230(&sprite);else if(sprite.id==231)bhEff231(&sprite);else if(sprite.id==232)bhEff232(&sprite);else return false;if(queue.ef_fncn&&sprite.flg){njUnitMatrix(&draw_camera);for(unsigned i=0;i<512;++i)queue.ef_tn[i]=int(i);if(sprite.id==24)bhDraw024(&sprite);else if(sprite.id==25)bhDraw025(&sprite);}
-    drawing=nullptr;if(queued)*queued=queue.ef_trsn>0||queue.ef_pncn>0||queue.ef_fncn>0||queue.ef_poln>0;return true;}
+std::vector<std::pair<unsigned,unsigned>> common_effect_categories(){return {};}
+bool supported_effect_sprite(unsigned id){(void)id;return false;}
+bool step_effect_sprite(EffectSprite& sprite,bool* queued){
+    (void)sprite;if(queued)*queued=false;return false;
+}
+void set_effect_walls(const std::vector<CollisionWall>* walls,float height){(void)walls;(void)height;}
+void set_effect_ground(GroundCollision* ground,const std::vector<CollisionWall>* room,const std::vector<CollisionWall>* mobile){(void)ground;(void)room;(void)mobile;}
+void set_effect_link_matrix(unsigned node,const float* matrix){
+    // Die Knotenmatrix hat ohne Effektprozeduren keinen Abnehmer.
+    (void)node;(void)matrix;
+}
+void set_explosion(NJS_POINT3 position,NJS_POINT3 view){(void)position;(void)view;}
+void set_explosion_effect(NJS_POINT3 position,NJS_POINT3 view){(void)position;(void)view;}
+EffectOutput take_effect_output(){EffectOutput out=std::move(pending);pending=EffectOutput{};return out;}
 // bhSetEffectTb: copy flg/id/type/mdlver/flr_no, position, scale (also kept in sxb..), angles and the joint offset.
 void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
     s=EffectSprite{};s.flg=e.flg;s.id=e.id;s.type=e.type;s.tex_id=-1;s.mdlver=e.mdlver;s.flr_no=e.flr_no;s.px=e.position.x;s.py=e.position.y;s.pz=e.position.z;
@@ -97,18 +81,10 @@ void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
     s.lkwkp=e.linked_work;
     if(e.has_offset){s.lox=e.offset.x;s.loy=e.offset.y;s.loz=e.offset.z;}
 }
-void set_explosion(NJS_POINT3 position,NJS_POINT3 view){
-    camera_state={view.x,view.y,view.z};effect_light=EffectLight{};bhSetExplosion(&position);
-    // rom->lgtp[0] after bhSetExplosion: exported through the output (the host installs it in its light slot 0).
-    OriginalLight light{effect_light.flg,effect_light.type,effect_light.aspd,effect_light.lkflg,effect_light.lkno,effect_light.lkono,effect_light.lsrc,{effect_light.px,effect_light.py,effect_light.pz},{0,0,0},{effect_light.lx,effect_light.ly,effect_light.lz},0,0,0,{effect_light.r,effect_light.g,effect_light.b},effect_light.nr,effect_light.fr};
-    pending.light=light;
-}
-void set_effect_walls(const std::vector<CollisionWall>* walls,float height){effect_walls=walls;effect_room_height=height;}
-void set_effect_ground(GroundCollision* ground,const std::vector<CollisionWall>* room,const std::vector<CollisionWall>* mobile){effect_ground=ground;effect_water_room=room;effect_water_mobile=mobile;}
-void set_effect_link_matrix(unsigned node,const float* matrix){if(!matrix||node>=256)return;std::copy(matrix,matrix+16,effect_link_node[node].mtx);}
-void set_explosion_effect(NJS_POINT3 position,NJS_POINT3 view){camera_state.vx=view.x;camera_state.vy=view.y;camera_state.vz=view.z;bhSetExplosionEffect(&position);}
+// effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
+// slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
+int original_effect_slot(const std::vector<unsigned>& flags){for(unsigned i=0;i<512;++i)if(i>=flags.size()||!(flags[i]&3u))return int(i);return -1;}
 void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,unsigned>& bases){for(const auto& q:sprite.quads){const auto base=bases.find(q.category);if(base==bases.end())throw std::runtime_error("original custom-effect texture missing");EffectSprite quad;quad.id=302;quad.flg=0x100000;quad.tv=q.vertices;quad.bl_src=int(q.source);quad.bl_dst=int(q.destination);append_effect_sprite(scene,quad,q.center,{1,1,1},camera,base->second);}}
-EffectOutput take_effect_output(){EffectOutput out=std::move(pending);pending=EffectOutput{};return out;}
 void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture){
     if(s.flg&0x1000000)return;
     // bhDrawTrsEffect3D: translation, UnitRotPortion for flag 0x100000,

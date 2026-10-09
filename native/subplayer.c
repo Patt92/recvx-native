@@ -1,21 +1,32 @@
 #include "subplayer.h"
-#include "ninja_math.h"
-#include <math.h>
-#include <stdlib.h>
-#include <stddef.h>
-typedef RECVX_SUBPLAYER BH_PWORK;
-typedef void (*Mv00Subpl_proc)(BH_PWORK*);
-typedef void (*Mv01Subpl_proc)(BH_PWORK*);
-static void bhSetMotion(BH_PWORK* work,int add,int mode,void* data){(void)add;(void)mode;(void)data;work->advanced=1;}
-static void bhAddSpeed(BH_PWORK* work,int r){work->px-=work->spd*njSin(work->ay+r);work->pz-=work->spd*njCos(work->ay+r);}
-#include "subplayer.inc"
-int recvx_is_subplayer(unsigned identity){return identity<100&&subplayer_ids[identity];}
-void recvx_subplayer_init(RECVX_SUBPLAYER* work){work->mode0=1;em60_init(work);}
+/* PORTIERUNGSLÜCKE (Policy 2026-10-09): Diese Datei band die Tabelle
+ * subplayer_ids sowie em60_init, subpl_mv00_tbl und subpl_mv01_tbl ein, die
+ * tools/generate_subplayer.py als subplayer.inc aus subpl.c/eneset.c erzeugt
+ * hat. Generator und Include liegen in archived/FORBIDDEN_DONTUSE/ und dürfen
+ * weder gelesen noch ausgeführt werden.
+ *
+ * Zu leisten: die Begleitfiguren-Steuerung (Sub_controll) als eigene native
+ * Mechanik bestimmen — welche Gegner-IDs überhaupt Begleitfiguren sind, ihre
+ * Initialisierung und die beiden Bewegungs-Dispatchtabellen für mode0 1
+ * (mode2 0) und mode0 5/6, jeweils mit den 15 ct2-Zuständen. Nicht aus einem
+ * Generator über die Originalquellen.
+ *
+ * Solange das offen ist, melden alle drei Funktionen den dokumentierten
+ * Neutralwert: keine Figur wird als Begleitfigur erkannt (recvx_is_subplayer
+ * liefert 0), weshalb world.cpp auch keine Begleit-Arbeit mehr bindet und die
+ * Dispatch-Diagnose nicht erreicht wird. Kein geratener Ersatzwert.
+ *
+ * Sichtbare Folge: Begleitfiguren (z. B. Steve als Mitläufer) bewegen sich
+ * nicht mehr eigenständig. Sie werden wie gewöhnliche Raumfiguren behandelt
+ * und bleiben stehen, solange kein Skript sie animiert. */
+int recvx_is_subplayer(unsigned identity){
+    (void)identity;
+    return 0;
+}
+void recvx_subplayer_init(RECVX_SUBPLAYER* work){
+    (void)work;
+}
 int recvx_subplayer_tick(RECVX_SUBPLAYER* work){
-    work->advanced=0;work->flg|=0x8100;work->flg&=~2u;
-    if(work->ct2<0||work->ct2>=15)return 0;
-    if(work->mode0==0){recvx_subplayer_init(work);return 1;}
-    if(work->mode0==1&&work->mode2==0){subpl_mv00_tbl[work->ct2](work);return 1;}
-    if(work->mode0==5||work->mode0==6){subpl_mv01_tbl[work->ct2](work);return 1;}
+    (void)work;
     return 0;
 }

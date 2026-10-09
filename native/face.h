@@ -5,7 +5,7 @@ struct FaceParameter {
     float muscle[32]{};float jawang=0,jawtrans=0;NJS_POINT3 eye{};
     float tangx=0,tangy=0,tangz=0;short frame=0,flag=0;
 };
-std::vector<FaceParameter> decode_face_parameters(const std::vector<std::uint8_t>& bytes,std::size_t offset,unsigned count,bool lip=false);
+std::vector<FaceParameter> decode_face_parameters(const std::vector<std::uint8_t>& bytes,std::size_t offset,unsigned count,bool lip=false,bool mask_lip_bank=false);
 FaceParameter interpolate_face_parameters(const FaceParameter&,const FaceParameter&,float t,float level=1,unsigned mask=0xffffffffu);
 FaceParameter lip_face_parameter(FaceParameter);
 FaceParameter sample_face_parameters(const std::vector<FaceParameter>& keys,unsigned frame);

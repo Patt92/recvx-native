@@ -23,6 +23,16 @@ public:
     explicit AudioMixer(std::filesystem::path data={},std::filesystem::path mods={}):data_(std::move(data)),mods_(std::move(mods)){}
     // MountSoundAfs: sys->ss_flg bit 0 selects the disc-1 or disc-2 sound archive set.
     void set_disc(unsigned disc){disc_=disc&1;}
+    // system.c:1602 — before a room loads, bhSysCallMonitor hands over to the
+    // disc change task whenever the mounted set does not match the stage
+    // (`!(ss_flg & 1) && stg_no >= 6` or `(ss_flg & 1) && stg_no < 6`).
+    // bhSysCallDiscChange -> Adv_ChangeDiscScreen (adv.c:3715) flips bit 0 and
+    // MountSoundAfs (sdfunc.c:362) swaps the digit in BGM?.AFS, VOICE?.AFS,
+    // MULTSPQ?.AFS and ITEM?.AFS. ss_flg 0x400000, the only suppression, is
+    // never set in the original sources, so the mounted set always matches the
+    // stage by the time the room's scripts request a BGM.
+    static unsigned original_disc_for_stage(unsigned stage){return stage>=6?1u:0u;}
+    void mount_sound_afs(unsigned stage){set_disc(original_disc_for_stage(stage));}
     unsigned disc()const{return disc_;}
     std::string disc_digit()const{return disc_?"2":"1";}
     std::string set_name(const std::string& base)const{return base+disc_digit();}

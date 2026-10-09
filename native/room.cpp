@@ -8,7 +8,7 @@
 #include <iomanip>
 #include <sstream>
 extern "C" {
-#include "ps2_dvd_image.h"
+#include "room_table.h"
 }
 namespace recvx {
 RoomIdentity RoomIdentity::parse(const std::string& name){
@@ -64,13 +64,13 @@ RoomInfo inspect_room(const std::vector<std::uint8_t>& data) {
 RoomArchive::RoomArchive(const std::filesystem::path& root):root_(root) {
     if(std::filesystem::is_directory(root/"rooms"))return;
     archive_=std::make_unique<AfsArchive>(disc_file(root,"RDX_LNK.AFS"));
-    if (archive_->entries().size() != static_cast<std::size_t>(rdx_image_data_max))
+    if (archive_->entries().size() != static_cast<std::size_t>(RECVX_ROOM_COUNT))
         throw std::runtime_error("room archive does not match the US game's room table");
 }
-std::size_t RoomArchive::size() const { return static_cast<std::size_t>(rdx_image_data_max); }
+std::size_t RoomArchive::size() const { return static_cast<std::size_t>(RECVX_ROOM_COUNT); }
 std::string RoomArchive::name(std::size_t index) const {
     if (index >= size()) throw std::runtime_error("room index out of range");
-    return rdx_files[index];
+    return recvx_room_names[index];
 }
 std::vector<std::uint8_t> RoomArchive::load(std::size_t index, std::size_t output_limit) const {
     if(index>=size())throw std::runtime_error("room index out of range");

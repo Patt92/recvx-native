@@ -87,8 +87,9 @@ public:
 private:
     void read_model(std::size_t model) {
         view.require(model,16);
-        if(view.u8(model)!='M'||view.u8(model+1)!='D'||view.u8(model+2)!='L'||!(view.u8(model+3)&0x80))
-            throw std::runtime_error("unsupported room model format (expected Ninja Chunk MDL)");
+        if(view.u8(model)!='M'||view.u8(model+1)!='D'||view.u8(model+2)!='L')
+            throw std::runtime_error("unsupported room model format (expected MDL)");
+        chunk_model=bool(view.u8(model+3)&0x80);
         base=view.relative(model,view.u16(model+4),0);
         output.object_count=view.u16(model+6);
         if(output.object_count==0||output.object_count>4096)throw std::runtime_error("invalid model object count");
@@ -96,6 +97,8 @@ private:
             throw std::runtime_error("pose does not match model object count");
         if(options && !options->evalflags.empty() && options->evalflags.size()!=output.object_count)
             throw std::runtime_error("flags do not match model object count");
+        if(options && !options->world_matrices.empty() && options->world_matrices.size()!=output.object_count)
+            throw std::runtime_error("work matrices do not match model object count");
         if(options && !options->world_vertices.empty() && options->world_vertices.size()!=output.object_count)
             throw std::runtime_error("skin does not match model object count");
         if(options && !options->world_normals.empty() && options->world_normals.size()!=output.object_count)
@@ -110,6 +113,7 @@ private:
     BinaryView view;
     const ModelGeometryOptions* options=nullptr;
     bool camera_mask=true;
+    bool chunk_model=true;
     Scene output;
     std::vector<CachedVertex> cache;
     std::vector<bool> visited;
@@ -202,9 +206,11 @@ private:
             if(flags&32){njRotateY(&world,y);njRotateX(&world,x);njRotateZ(&world,z);}
             else njRotateXYZ(&world,x,y,z);
         }
-        if(!(flags&4))njScale(&world,view.f32(node+32),view.f32(node+36),view.f32(node+40));
+        if(options && !options->world_matrices.empty())
+            std::copy_n(options->world_matrices[index].begin(),16,world);
+        else if(!(flags&4))njScale(&world,view.f32(node+32),view.f32(node+36),view.f32(node+40));
         const auto model=view.u32(node+4);
-        if(model!=0xffffffff && !(flags&8)) {current_object=static_cast<std::uint16_t>(index);decode_model(view.relative(base,model,24),&world);}
+        if(model!=0xffffffff && !(flags&8)) {current_object=static_cast<std::uint16_t>(index);const auto at=view.relative(base,model,chunk_model?24:40);if(chunk_model)decode_model(at,&world);else decode_basic_model(at,&world);}
         const auto child=view.u32(node+44),sibling=view.u32(node+48);
         if(child!=0xffffffff && (pose || !(flags&16)))visit(view.relative(base,child,52),&world,depth+1);
         if(sibling!=0xffffffff)visit(view.relative(base,sibling,52),parent,depth);
@@ -214,6 +220,34 @@ private:
         const auto present=[&](std::uint32_t p){return p!=0xffffffff&&!(memory_mode&&p==0);};
         if(present(vertices))decode_vertices(view.relative(base,vertices,4),world);
         if(present(polygons))decode_polygons(view.relative(base,polygons,2));
+    }
+    // binfunc.c bhBscBinRealize and ninjastr.h NJS_MODEL/NJS_MESHSET:
+    // pointer records stay file-relative; the native renderer consumes their
+    // points, normals, materials and polygon/strip arrays directly.
+    void decode_basic_model(std::size_t model,NJS_MATRIX* world){
+        const auto count=view.u32(model+8)&0x7fffffffu;
+        const auto points=view.relative(base,view.u32(model),std::size_t(count)*12);
+        const auto normals=view.u32(model+4);
+        const auto sets=view.relative(base,view.u32(model+12),std::size_t(view.u16(model+20))*24);
+        const auto materials=view.u32(model+16);const auto material_count=view.u16(model+22);
+        for(unsigned s=0;s<view.u16(model+20);++s){const auto set=sets+s*24;const unsigned type=view.u16(set),kind=type&0xc000,mat=type&0x3fff;
+            if(mat>=material_count)throw std::runtime_error("Basic mesh material outside table");
+            const auto material=view.relative(base,materials+mat*20,20);const auto attrs=view.u32(material+16);
+            std::size_t mesh=view.relative(base,view.u32(set+4),2),uv=0;const auto uv_offset=view.u32(set+20);if(uv_offset!=0xffffffff)uv=view.relative(base,uv_offset,4);
+            for(unsigned polygon=0;polygon<view.u16(set+2);++polygon){bool reverse=false;unsigned vertices=kind==0?3:4;
+                if(kind>=0x8000){const auto bits=view.u16(mesh);mesh+=2;reverse=bits&0x8000;vertices=reverse?0x10000u-bits:bits;}
+                if(vertices<3)throw std::runtime_error("invalid Basic polygon length");
+                std::vector<SceneVertex> face;face.reserve(vertices);
+                for(unsigned v=0;v<vertices;++v){const auto index=view.u16(mesh);mesh+=2;if(index>=count)throw std::runtime_error("Basic polygon vertex outside table");const auto p=points+index*12;
+                    NJS_POINT3 local{view.f32(p),view.f32(p+4),view.f32(p+8)};SceneVertex vertex;njCalcPoint(world,&local,&vertex.position);
+                    if(normals!=0xffffffff){const auto n=view.relative(base,normals+index*12,12);NJS_VECTOR normal{view.f32(n),view.f32(n+4),view.f32(n+8)};njCalcVector(world,&normal,&vertex.normal);njUnitVector(&vertex.normal);}
+                    if(uv){vertex.u=float(std::int16_t(view.u16(uv)))/255.f;vertex.v=float(std::int16_t(view.u16(uv+2)))/255.f;uv+=4;}
+                    face.push_back(vertex);}
+                for(unsigned v=2;v<vertices;++v){SceneTriangle triangle;triangle.vertices=kind==0xc000?std::array<SceneVertex,3>{face[v-2],face[v-1],face[v]}:std::array<SceneVertex,3>{face[0],face[v-1],face[v]};
+                    if(kind==0xc000&&(((v&1)!=0)^reverse))std::swap(triangle.vertices[0],triangle.vertices[1]);triangle.color=view.u32(material);triangle.texture=view.u32(material+12)&0xffff;triangle.textured=bool(attrs&0x200000);triangle.camera_mask=camera_mask;triangle.object=current_object;if(attrs&0x100000)triangle.blend=SceneBlend::Alpha;
+                    output.triangles.push_back(triangle);}
+            }
+        }
     }
     void decode_vertices(std::size_t chunk,NJS_MATRIX* world) {
         for(unsigned iteration=0;iteration<65536;++iteration) {
