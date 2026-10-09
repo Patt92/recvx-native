@@ -49,6 +49,8 @@ def main():
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()
+    import sys
+    subprocess.run([sys.executable, str(ROOT / 'tools/check_no_original_core.py'), str(ROOT)], check=True)
     arch = {"arm64": "aarch64", "AMD64": "x86_64"}.get(platform.machine(), platform.machine())
     system = {"Darwin": "macos", "Linux": "linux"}.get(platform.system())
     host = f"{arch}-{system}"

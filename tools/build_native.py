@@ -28,7 +28,11 @@ def sync_macos_start_package(build: Path) -> None:
         return
     source = build / 'recvx-runtime'
     runtime = app / 'Contents/MacOS/recvx-runtime'
-    if not source.is_file() or not runtime.is_file():
+    if not runtime.is_file():
+        # A quarantined starter is not silently restored by a normal build.
+        print('Retired starter package remains disabled; create a new verified package with --package.', flush=True)
+        return
+    if not source.is_file():
         raise RuntimeError(f'cannot refresh Start.command package runtime: {runtime}')
     if subprocess.check_output(['lipo', '-archs', str(source)], text=True).split() != ['arm64']:
         raise RuntimeError('macOS starter package requires an arm64-only runtime')
@@ -54,6 +58,7 @@ def main():
     parser.add_argument('--verify-runtime', action='store_true', help='Run the opt-in original-data runtime regression suite')
     parser.add_argument('--no-test', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT)
     if not 1 <= args.jobs <= 256:
         parser.error('--jobs must be between 1 and 256')
     target = args.platform
@@ -83,6 +88,9 @@ def main():
         if run_checks:
             run('ctest', '--test-dir', build, '-C', 'Release', '--output-on-failure')
     binary_dir = build / 'Release' if (build / 'Release').is_dir() else build
+    suffix = '.exe' if target == 'windows' else ''
+    run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT,
+        '--build-dir', build, '--binary', binary_dir / ('recvx-runtime' + suffix))
     if args.verify_data:
         run(sys.executable, ROOT / 'tools/prepare_native_data.py', '--output', data, '--verify')
     if target != 'windows' or platform.system() == 'Windows':

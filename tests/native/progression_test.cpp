@@ -4,6 +4,9 @@
 #include "room.h"
 #include "box_menu.h"
 #include <algorithm>
+#include <functional>
+#include <string>
+#include <vector>
 #include <iostream>
 #include <cstring>
 #include <stdexcept>
@@ -26,10 +29,21 @@ int main(int argc,char** argv){try{
     renderer.draw_view(scene,view,16,16);check(renderer.pixels()[16*32+16]==0xff606060&&renderer.covered_pixels()==0,"additive sprite blend or depth write incorrect");
     {auto quad=scene;auto a=quad.triangles[0],b=a;a.vertices={SceneVertex{{-4,-4,2},0,0},SceneVertex{{4,-4,2},1,0},SceneVertex{{4,4,2},1,1}};b.vertices={a.vertices[0],a.vertices[2],SceneVertex{{-4,4,2},0,1}};quad.triangles={a,b};renderer.draw_view(quad,view,16,16);check(std::all_of(renderer.pixels().begin(),renderer.pixels().end(),[](auto pixel){return pixel==0xff606060;}),"additive quad has a doubled or missing shared diagonal");}
     auto occluder=triangle;for(auto& v:occluder.vertices)v.position.z=1;occluder.textured=false;occluder.color=0xff101010;scene.triangles.insert(scene.triangles.begin(),occluder);renderer.draw_view(scene,view,16,16);check(renderer.pixels()[16*32+16]==0xff101010,"sprite appears through an opaque wall");
-    // Original procedures: dormant type, mode-triggered activation, 16 atlas frames.
-    EffectSprite ground;ground.id=218;ground.type=14;step_effect_sprite(ground);check(ground.tex_id==77&&ground.tv[0].y==-2&&ground.tv[2].y==0,"original flame type/atlas/ground anchor lost");const auto ground_frame=ground.ct0;for(unsigned i=0;i<12;++i)step_effect_sprite(ground);check(ground.ct0==ground_frame,"original flame frame cycle differs");
-    EffectSprite fire;fire.id=201;check(step_effect_sprite(fire)&&fire.flg&0x1000000,"dormant flame displayed");fire.mode1=1;step_effect_sprite(fire);check(fire.tex_id==59&&fire.type==1&&!(fire.flg&0x1000000),"original flame trigger/texture group missing");const auto first=fire.ct0;for(unsigned tick=0;tick<16;++tick)step_effect_sprite(fire);check(fire.ct0==first,"flame atlas not advancing once per tick");
-    fire.type=0;fire.mode1=0;step_effect_sprite(fire);check(fire.flg&0x1000000,"flame cannot be disabled");
+    // PORTIERUNGSLÜCKE (Policy 2026-10-09): Hier wurden die originalen
+    // Effektprozeduren geprüft (bhEff218 Bodenflamme mit Atlas 77 und
+    // Bodenanker, bhEff201 ruhender bzw. über mode1 ausgelöster Funkenflug,
+    // Atlasvorschub je Tick und das Abschalten über flg 0x1000000). Sie kamen
+    // aus effect_sprites.inc; Generator und Include sind Quarantäne, siehe
+    // native/effect_sprites.cpp. Geprüft bleibt, dass für keine Effekt-ID eine
+    // Prozedur gebunden ist, nichts in die Zeichenliste eingereiht wird und
+    // die Effektarbeit unverändert bleibt - kein geratener Atlas, kein
+    // geratener Zustand.
+    for(const unsigned id:{9u,24u,122u,200u,201u,218u,230u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
+        check(!supported_effect_sprite(id),"effect gap reports a bound procedure");
+        check(!step_effect_sprite(sprite,&queued)&&!queued,"effect gap executed a procedure or queued a draw");
+        check(sprite.tex_id==-1&&!sprite.ct0&&!sprite.ani_ct&&!sprite.flg&&sprite.type==14&&sprite.tv[0].y==-1,"effect gap changed the sprite work");}
+    set_explosion({0,0,0},{0,0,-1});set_explosion_effect({0,0,0},{0,0,-1});
+    {const auto out=take_effect_output();check(out.spawns.empty()&&out.sounds.empty()&&out.bombs.empty()&&!out.light,"explosion gap requested effects, sounds, a light or a bomb");}
     // PCM loop boundaries preserve the intro and loop subsection, not the outro.
     AudioMixer audio;auto pcm=std::make_shared<PcmClip>();pcm->rate=48000;pcm->channels=1;pcm->samples={100,200,300,400,500};pcm->loop_start=1;pcm->loop_end=4;audio.play_pcm(0,pcm,1,true);const auto sound=audio.mix(8);const int expected[]={100,200,300,400,200,300,400,200};for(unsigned i=0;i<8;++i)check(sound[i*2]==expected[i],"PCM loop loses intro or uses whole file");
     // Item checks include empty slots and inspected-ID state, as event.c does.
@@ -37,11 +51,78 @@ int main(int argc,char** argv){try{
     for(bool bag:{false,true})for(bool wide:{false,true})for(unsigned mode=0;mode<6;++mode){Inventory inv;inv.side_pack=bag;std::fill(inv.slots()+2,inv.slots()+12,0);if(wide)inv.slots()[2]=Inventory::pack(1,1);const unsigned count=inv.capacity()-(wide?2:0),operand=7;const bool expected[]={count==operand,count>operand,count>=operand,count<operand,count<=operand,count!=operand};auto bytes=event_fixture({1,12,0x4d,std::uint8_t(mode),std::uint8_t(operand),0xa5,5,4,12,0,0,0,3,0,0xff,0});MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.start(0,0);vm.tick();check(vm.errors.empty()&&vm.flag(4,12)==expected[mode],"inventory block comparison/width or instruction padding differs");}
     {Inventory inv;inv.player=1;inv.slots()[0]=3;inv.slots()[1]=Inventory::pack(18,1);inv.slots()[2]=Inventory::pack(5,18);inv.slots()[3]=0x80480001;const auto personal=inv.slots()[1];inv.items[200]=123;MessageDialog dialog;auto bytes=event_fixture({0xb7,1,0xff,0});EventVm vm(bytes,inv,dialog);vm.start(0,0);vm.tick();check(vm.errors.empty()&&inv.slots()[1]==personal&&inv.items[192]==Inventory::pack(5,18)&&inv.items[193]==0x80480001&&inv.items[200]==0&&inv.slots()[2]==0,"security deposit loses player selection/personal item/raw item state");auto transfer=event_fixture({0xb8,0,0xff,0});EventVm box(transfer,inv,dialog);box.start(0,0);box.tick();check(box.errors.empty()&&inv.items[64]==Inventory::pack(5,18)&&inv.items[65]==0x80480001&&!inv.items[192],"security-to-item-box transfer wrong range/order");}
     {Inventory inv;std::fill(inv.items.begin()+64,inv.items.begin()+192,Inventory::pack(20,1));inv.items[70]=0;inv.items[192]=Inventory::pack(5,18);inv.items[193]=Inventory::pack(12,30);const auto saved=inv.items;MessageDialog dialog;auto bytes=event_fixture({0xb8,0,0xff,0});EventVm vm(bytes,inv,dialog);vm.start(0,0);vm.tick();check(!vm.errors.empty()&&inv.items==saved,"overflow transfer partially loses security inventory");}
-    // ItemBoxChange is the original exchange routine, including security rules.
-    {Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(5,18);inv.slots()[0]=2;unsigned message=0;check(inv.box_change(2,0,192,0,9,&message)&&inv.items[192]==Inventory::pack(5,18)&&inv.slots()[0]==0&&!inv.contains(5),"security deposit/equipment not updated by original routine");check(inv.box_change(2,0,192,0,9,&message)&&inv.contains(5)&&!inv.items[192],"security withdrawal failed");inv.slots()[2]=Inventory::pack(145,1);const auto saved=inv.items;check(!inv.box_change(2,1,192,0,9,&message)&&message==200&&inv.items==saved,"nonmetal item accepted by security box");inv.slots()[2]=Inventory::pack(105,1);check(!inv.box_change(2,1,64,0,0,&message)&&message==150,"original key restriction lost");inv.slots()[2]=Inventory::pack(12,30);inv.items[64]=Inventory::pack(12,25);check(inv.box_change(2,0,64,0,0,&message)&&Inventory::quantity(inv.slots()[2])==55&&!inv.items[64],"original ammo stacking in box missing");}
-    {Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(5,18);MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);StatusMenu menu;menu.active=true;menu.stage=0;menu.room=9;vm.flags[10][0]|=0x80000;BoxMenu box;box.synchronize(inv,menu,&vm);check(box.active()&&box.base()==192&&box.moving(),"security script did not enter modal box");box.input(MenuInput::Confirm,inv,menu,&vm,audio);check(!inv.items[192],"pad accepted while the box slides in");for(int i=0;i<9&&box.moving();++i)box.synchronize(inv,menu,&vm);check(!box.moving(),"box slide-in did not finish after nine ticks");box.input(MenuInput::Confirm,inv,menu,&vm,audio);box.input(MenuInput::Confirm,inv,menu,&vm,audio);check(inv.items[192]==Inventory::pack(5,18),"modal security confirm did not deposit");box.input(MenuInput::Cancel,inv,menu,&vm,audio);check(box.active()&&box.moving()&&menu.active&&!(vm.flags[12][0]&0x200),"security close skipped the slide-out");for(int i=0;i<9;++i)box.synchronize(inv,menu,&vm);check(!box.active()&&!menu.active&&!(vm.flags[10][0]&0x1c0000)&&vm.flags[12][0]&0x200,"security close leaves original script/menu flags stuck");}
-    // Original dog areas include floor and inclusive edges, plus one-use traps.
-    {std::vector<EnemyArea> areas{{1,2,0,0,0,10,10,4,1,0,2},{1,2,0,30,0,10,10,4,2,0,2}};EnemySpawn enemy;enemy.id=4;enemy.type=1;enemy.px=35;enemy.pz=5;EnemySpawnContext context;check(!activate_enemy_spawn(enemy,{5,0,5},1,areas,context),"dog activation ignores floor");check(activate_enemy_spawn(enemy,{10,0,10},0,areas,context)&&!enemy.type,"dog matching area/inclusive edge not activated");enemy.type=1;areas[1].prm3=3;check(!activate_enemy_spawn(enemy,{5,0,5},0,areas,context),"dog activated from a different area group");}
+    // D02 ItemBoxChange (sub1.c; tragende Zweige nach Disassembly, siehe
+    // work/native_port_inventory_contract.md): Einlagern/Entnehmen, Lösen der
+    // Ausrüstung, Restriktionen 150/151/200, Stapeln über Combi_01, Kapazität
+    // 159, pip[0]-Nachführung und Sonderslot. Abschnitte einzeln gesammelt.
+    std::vector<std::string> failures;
+    auto section=[&](const char* name,const std::function<void()>& body){try{body();}catch(const std::exception& e){failures.push_back(std::string(name)+": "+e.what());}};
+    auto pocket=[]{Inventory inv;std::fill(inv.slots(),inv.slots()+12,0);return inv;};
+    section("D02 ItemBoxChange Sicherheitsbox",[&]{
+        auto inv=pocket();inv.slots()[2]=Inventory::pack(5,18);inv.slots()[0]=2;unsigned message=0;
+        check(inv.box_change(2,0,192,0,9,&message)&&inv.items[192]==Inventory::pack(5,18)&&inv.slots()[0]==0&&!inv.contains(5),"security deposit/equipment not updated by original routine");
+        const auto change=inv.take_weapon_change();check(change.changed&&change.wpnr_no==0,"depositing the equipped gun did not clear plp->wpnr_no");
+        check(inv.box_change(2,0,192,0,9,&message)&&inv.contains(5)&&!inv.items[192],"security withdrawal failed");
+        inv.slots()[2]=Inventory::pack(145,1);const auto saved=inv.items;message=0;check(!inv.box_change(2,1,192,0,9,&message)&&message==200&&inv.items==saved,"nonmetal item accepted by security box (200)");});
+    section("D02 ItemBoxChange Restriktionen 150/151",[&]{
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(105,1);const auto saved=inv.items;unsigned message=0;check(!inv.box_change(2,1,64,0,0,&message)&&message==150&&inv.items==saved,"original key restriction 150 lost");}
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(95,1);inv.items[64]=Inventory::pack(84,1);const auto saved=inv.items;unsigned message=0;check(!inv.box_change(2,0,64,9,26,&message)&&message==151&&inv.items==saved,"original 926 restriction 151 lost");}
+        {auto inv=pocket();inv.player=1;inv.slots()[2]=Inventory::pack(105,1);unsigned message=0;check(inv.box_change(2,1,64,0,0,&message)&&!message&&inv.items[65]==Inventory::pack(105,1),"restrictions must only apply to ply_id 0");}});
+    section("D02 ItemBoxChange Stapeln",[&]{
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(12,30);inv.items[64]=Inventory::pack(12,25);unsigned message=0;check(inv.box_change(2,0,64,0,0,&message)&&Inventory::quantity(inv.slots()[2])==55&&!inv.items[64],"original ammo stacking in box missing");}
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(12,990);inv.items[64]=Inventory::pack(12,25);unsigned message=0;check(inv.box_change(2,0,64,0,0,&message)&&inv.slots()[2]==Inventory::pack(12,999)&&inv.items[64]==Inventory::pack(12,16),"Combi_01 999 remainder must stay in the box");}
+        // Leerer Cursor bei vorhandenem Stapel: chk2 2 mit num1 = Stapelslot,
+        // aber Combi_01 sucht in cmb(id2) eine Regel mit combidata == id1 = 0;
+        // keine existiert, also geschieht nichts (auch keine Meldung 159).
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(95,1);inv.slots()[3]=Inventory::pack(12,10);inv.items[64]=Inventory::pack(12,25);const auto saved=inv.items;unsigned message=0;inv.box_change(4,0,64,0,0,&message);
+            check(inv.items==saved&&!message,"empty cursor with a matching pocket stack must leave both unchanged (no rule for id1 0)");}});
+    section("D02 ItemBoxChange Tausch und Ausrüstung",[&]{
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(95,1);inv.items[64]=Inventory::pack(21,1);unsigned message=0;check(inv.box_change(2,0,64,0,0,&message)&&inv.slots()[2]==Inventory::pack(21,1)&&inv.items[64]==Inventory::pack(95,1),"narrow swap differs");}
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(5,18);inv.slots()[3]=Inventory::pack(95,1);inv.slots()[0]=2;inv.items[64]=Inventory::pack(21,1);unsigned message=0;
+            check(inv.box_change(2,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(5,18)&&inv.slots()[0]==0&&inv.contains(21),"swapping out the equipped gun must clear pip[0]");}
+        // Item vor der ausgerüsteten Waffe einlagern: pip[0] sinkt, ItemSort.
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(95,1);inv.slots()[3]=Inventory::pack(21,1);inv.slots()[4]=Inventory::pack(5,18);inv.slots()[0]=4;unsigned message=0;
+            check(inv.box_change(2,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(95,1)&&inv.slots()[2]==Inventory::pack(21,1)&&inv.slots()[3]==Inventory::pack(5,18)&&inv.slots()[0]==3&&inv.weapon()==3,"deposit before the equipped gun must lower pip[0] and sort");}});
+    section("D02 ItemBoxChange Kapazität (breit) 159",[&]{
+        {auto inv=pocket();for(unsigned i=2;i<10;++i)inv.slots()[i]=Inventory::pack(95,1);inv.items[64]=Inventory::pack(3,7);const auto saved=inv.items;unsigned message=0;
+            check(!inv.box_change(2,0,64,0,0,&message)&&message==159&&inv.items==saved,"wide box item into a full pocket must answer 159");}
+        {auto inv=pocket();for(unsigned i=2;i<9;++i)inv.slots()[i]=Inventory::pack(95,1);inv.items[64]=Inventory::pack(3,7);unsigned message=0;
+            check(inv.box_change(2,0,64,0,0,&message)&&inv.slots()[2]==Inventory::pack(3,7)&&inv.items[64]==Inventory::pack(95,1)&&inv.occupied()==8,"wide box item with one free unit must swap and sort first");}});
+    section("D02 ItemBoxChange Sonderslot pip[1]",[&]{
+        // Grundwaffe aus der Kiste in den leeren Sonderslot: normaler Tausch.
+        {auto inv=pocket();inv.items[64]=Inventory::pack(55,1);unsigned message=0;check(inv.box_change(1,0,64,0,0,&message)&&inv.slots()[1]==Inventory::pack(55,1)&&!inv.items[64],"standard weapon into pip[1] differs");}
+        // Keine Grundwaffe am Sonderslot (Disassembly 0x2A57A8/0x2A592C): der
+        // Boxeintrag landet in pip[max+1] (kein Wert 2), pip[1] wird 0, die Kiste
+        // erhält das Messer; ItemSort holt das Item nach vorn.
+        {auto inv=pocket();inv.slots()[1]=Inventory::pack(55,1);inv.slots()[2]=Inventory::pack(95,1);inv.slots()[3]=Inventory::pack(95,1);inv.items[64]=Inventory::pack(21,1);unsigned message=0;
+            check(inv.box_change(1,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(55,1)&&!inv.slots()[1]&&inv.slots()[4]==Inventory::pack(21,1)&&inv.occupied()==3,"non-standard box item at pip[1] must go to pip[max+1] and sort in");}
+        // Grundwaffe aus der Kiste auf einen Taschenslot (Disassembly 0x2A5834:
+        // chk2 bleibt 1, lt_c3 = lt_c, lt_c2 = 1, $v1 = 0): die Kiste erhält das
+        // Taschenitem, das Messer geht nach pip[1], der Taschenslot wird leer.
+        // Die Decomp setzt hier fälschlich chk2 = 0 (Ablehnung).
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(145,1);inv.slots()[3]=Inventory::pack(5,1);inv.items[224]=Inventory::pack(55,1);unsigned message=0;
+            check(inv.box_change(3,0,224,0,9,&message)&&!message&&inv.items[224]==Inventory::pack(5,1)&&inv.slots()[1]==Inventory::pack(55,1)&&!inv.contains(5),"standard weapon from the box onto a pocket slot must swap via pip[1] (0x2A5834)");}});
+    // Modaler Sicherheitsbox-Weg: Einfahren sperrt die Eingabe, danach lagert
+    // Bestätigen über ItemBoxChange ein; Schließen fährt aus und gibt die
+    // Skript-/Menüflags frei.
+    section("D02 ItemBoxChange über das modale Boxmenü",[&]{
+        Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(5,18);MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);StatusMenu menu;menu.active=true;menu.stage=0;menu.room=9;vm.flags[10][0]|=0x80000;BoxMenu box;box.synchronize(inv,menu,&vm);check(box.active()&&box.base()==192&&box.moving(),"security script did not enter modal box");box.input(MenuInput::Confirm,inv,menu,&vm,audio);check(!inv.items[192],"pad accepted while the box slides in");for(int i=0;i<9&&box.moving();++i)box.synchronize(inv,menu,&vm);check(!box.moving(),"box slide-in did not finish after nine ticks");box.input(MenuInput::Confirm,inv,menu,&vm,audio);box.input(MenuInput::Confirm,inv,menu,&vm,audio);
+        check(inv.items[192]==Inventory::pack(5,18),"modal security confirm did not deposit");
+        box.input(MenuInput::Cancel,inv,menu,&vm,audio);check(box.active()&&box.moving()&&menu.active&&!(vm.flags[12][0]&0x200),"security close skipped the slide-out");for(int i=0;i<9;++i)box.synchronize(inv,menu,&vm);check(!box.active()&&!menu.active&&!(vm.flags[10][0]&0x1c0000)&&vm.flags[12][0]&0x200,"security close leaves original script/menu flags stuck");});
+    // PORTIERUNGSLÜCKE (Policy 2026-10-09): Die Spawn-/Fallenbereiche
+    // (bhEne_EnemyAtariCheck, bhEne04_AtariCheck/2) kamen aus
+    // enemy_spawn.inc; Generator und Include sind Quarantäne, siehe
+    // native/enemy_spawn.cpp. Entfallen sind Etagenwahl, einschließende
+    // Bereichskanten, die Fallenplatzierung und die Einmalfallen. Geprüft
+    // bleibt, dass nichts scharf geschaltet wird und weder Gegner noch
+    // Bereiche noch Kontext verändert werden - kein geratener Auslöseradius.
+    {std::vector<EnemyArea> areas{{1,2,0,0,0,10,10,4,1,0,2},{1,2,0,30,0,10,10,4,2,0,2}};const auto saved_areas=areas;
+     for(const int floor:{0,1})for(const auto at:{NJS_POINT3{5,0,5},NJS_POINT3{10,0,10},NJS_POINT3{35,0,5}}){
+        EnemySpawn enemy;enemy.id=4;enemy.type=1;enemy.px=35;enemy.pz=5;EnemySpawnContext context;
+        check(!activate_enemy_spawn(enemy,at,floor,areas,context),"enemy spawn gap activated an enemy");
+        check(enemy.type==1&&enemy.px==35&&enemy.pz==5,"enemy spawn gap changed the enemy work or placed a trap");
+        check(!context.contact&&!context.areas&&!context.room_flags&&context.random==1,"enemy spawn gap changed the activation context or random progress");}
+     check(areas[0].prm3==saved_areas[0].prm3&&areas[1].prm3==saved_areas[1].prm3,"enemy spawn gap consumed a one-use trap area");}
     // A v3 ADX loop header is before the CRI marker and data offset.
     {std::vector<std::uint8_t> adx(50+18);adx[0]=0x80;adx[3]=46;adx[4]=3;adx[5]=18;adx[6]=4;adx[7]=1;adx[10]=0xbb;adx[11]=0x80;adx[15]=32;adx[18]=3;adx[27]=1;adx[31]=4;adx[39]=28;std::copy_n("(c)CRI",6,adx.begin()+44);auto decoded=decode_adx(adx);check(decoded.loop_start==4&&decoded.loop_end==28,"ADX v3 loop marker/ranges not parsed");adx[39]=40;bool rejected=false;try{decode_adx(adx);}catch(const std::exception&){rejected=true;}check(rejected,"ADX loop outside waveform accepted");}
     if(argc>1){const auto data=std::filesystem::u8path(argv[1]);
@@ -59,8 +140,19 @@ int main(int argc,char** argv){try{
             check(world.bind(command(0x65,{0x65,1,std::uint8_t(enemy),0})),"original enemy work selection missing");check(world.bind(command(0x69,{0x69,24,1,0,std::uint8_t(clip),0,0,0})),"paired room motion unavailable");world.bind(command(0x69,{0x69,40,20,0}));const auto animated=world.model_pose(1,enemy,10);check(animated.angles!=std::array<int,3>{},"upper-body room motion remains in rest pose");
             world.bind(command(0x69,{0x69,36}));check(world.model_pose(1,enemy).position.x==0,"root control was ignored before motion update");world.tick();const auto refreshed=world.model_pose(1,enemy).position;check(refreshed.x!=0||refreshed.y!=0||refreshed.z!=0,"root override survives next keyed motion update");
             Scene composed;world.append(composed,{},stage.cameras[0]);check(!composed.triangles.empty(),"paired room motion discarded entire actor");
-            if(std::string(name)=="RM_0020"){const auto flames=std::count_if(composed.triangles.begin(),composed.triangles.end(),[](const auto& t){return t.blend==SceneBlend::Additive;});check(flames==24,"original cemetery flame/spark atlases not bound");}
-            if(std::string(name)=="RM_0050"){SceneSpawn trap_player;std::size_t trap_motion=42;std::int64_t trap_frame=0;RoomWorld dogs(bytes,stage,trap_player,trap_motion,trap_frame,silent);check(dogs.state(1,0)->type==2&&dogs.state(1,1)->type==1,"original dogs not initialized in waiting types");trap_player.position={-142,0,0};dogs.tick();check(!dogs.state(1,1)->type,"original matching dog areas not connected to shared world");const bool second_trap=dogs.state(1,0)->type!=0;if(second_trap){trap_player.position={-194,0,0};dogs.tick();}const auto dog=dogs.state(1,0);check(!dog->type&&std::abs(dog->transform.position.x+(second_trap?174.005f:131.005f))<.02f&&std::abs(dog->transform.position.z-24.995f)<.02f&&dog->motion==1&&!dog->room_motion,"original random trap choice/placement/run motion unavailable");check(dogs.take_enemy_room_flags()&(second_trap?0x20000:0x10000),"dog trap did not notify original room script");}
+            // Lücke Effektprozeduren (siehe oben): ohne bhEff* reiht sich kein
+            // Effekt in sys->ef_trs ein, also werden die Friedhofsflammen und
+            // Funken nicht mehr zusammengesetzt. Die Raumfigur selbst wird
+            // weiter gezeichnet (Zusicherung direkt darüber).
+            if(std::string(name)=="RM_0020"){const auto flames=std::count_if(composed.triangles.begin(),composed.triangles.end(),[](const auto& t){return t.blend==SceneBlend::Additive;});check(flames==0,"effect gap composed additive effect geometry");}
+            // Lücke bhEne_EnemyAtariCheck (siehe oben): die Wartezustände der
+            // beiden Hunde kommen weiter aus den Originaldaten, aber das
+            // Betreten der Bereiche schaltet keinen Hund scharf, platziert ihn
+            // nicht und meldet nichts an das Raumskript.
+            if(std::string(name)=="RM_0050"){SceneSpawn trap_player;std::size_t trap_motion=42;std::int64_t trap_frame=0;RoomWorld dogs(bytes,stage,trap_player,trap_motion,trap_frame,silent);check(dogs.state(1,0)->type==2&&dogs.state(1,1)->type==1,"original dogs not initialized in waiting types");
+                for(const float x:{-142.f,-194.f}){trap_player.position={x,0,0};dogs.tick();}
+                check(dogs.state(1,0)->type==2&&dogs.state(1,1)->type==1,"enemy spawn gap armed a dog trap");
+                check(!(dogs.take_enemy_room_flags()&0x30000u),"enemy spawn gap notified the original room script");}
         }
         {GameUi ui(data);Inventory inv;inv.items[224]=Inventory::pack(5,1);inv.items[225]=Inventory::pack(55,1);StatusMenu menu;menu.active=true;menu.selected=1;SoftwareRenderer box(640,480);ui.draw_box(box,inv,menu,224,0,false);
             unsigned orange=0;for(unsigned y=190;y<216;++y)for(unsigned x=60;x<310;++x){const auto pixel=box.pixels()[y*640+x];const unsigned r=(pixel>>16)&255,g=(pixel>>8)&255,b=pixel&255;if(r>170&&g>70&&g<180&&b<70)++orange;}check(!orange,"disabled box cursor crosses item list");}
@@ -69,10 +161,26 @@ int main(int argc,char** argv){try{
             // Actual room scripts, not a copied detector rule: event 40 sets
             // the green lamp pair, event 41 swaps to the red atlas animation.
             vm.start(0,40);vm.tick();world.tick();check(vm.errors.empty()&&world.effect_state(60)->type==1&&world.effect_state(61)->type==0,"original green detector lamp script not bound");
-            Scene green;world.append(green,{},stage.cameras[0]);const auto green_count=std::count_if(green.triangles.begin(),green.triangles.end(),[](const auto& t){return t.blend==SceneBlend::Additive;});check(green_count>=4,"original detector lamp/indicator atlases not composed");
-            vm.start(0,41);vm.tick();world.tick();const auto lamp=world.effect_state(61);check(vm.errors.empty()&&lamp->type==3&&lamp->ani_ct==2&&lamp->tex_id==414&&world.effect_state(60)->flg&0x1000000,"original red detector lamp type/atlas/off state lost");
-            const auto phase=lamp->ct0;world.tick();check(world.effect_state(61)->ct0!=phase,"red detector lamp animation remains static");Scene red;world.append(red,{},stage.cameras[0]);check(std::any_of(red.triangles.begin(),red.triangles.end(),[&](const auto& t){return t.blend==SceneBlend::Additive&&t.texture<red.textures.size();}),"red detector lamp has no drawable texture");
-            vm.start(0,40);vm.tick();world.tick();check(world.effect_state(61)->flg&0x1000000&&world.effect_state(60)->type==1,"reset script leaves alarm lamp active");
+            // Lücke Effektprozeduren (siehe oben): das Raumskript schaltet die
+            // Lampentypen weiter, aber ohne bhEff122/bhEff230 reiht sich kein
+            // Effekt in sys->ef_trs ein, also wird keine Lampenfläche
+            // zusammengesetzt und auch kein Atlas gewählt.
+            Scene green;world.append(green,{},stage.cameras[0]);const auto green_count=std::count_if(green.triangles.begin(),green.triangles.end(),[](const auto& t){return t.blend==SceneBlend::Additive;});check(green_count==0,"effect gap composed detector lamp geometry");
+            // Das Raumskript setzt weiter den Lampentyp (Event-Bindung im
+            // gemeinsamen World-Pfad). Atlaswahl (tex_id 414), der
+            // Animationszähler ani_ct, der Phasenvorschub ct0 und das
+            // Abschalten der grünen Lampe über flg 0x1000000 gehören dagegen
+            // zu bhEff122/bhEff230 und finden nicht mehr statt.
+            vm.start(0,41);vm.tick();world.tick();const auto lamp=world.effect_state(61);
+            check(vm.errors.empty()&&lamp->type==3,"original red detector lamp script not bound");
+            check(lamp->tex_id==-1&&!lamp->ani_ct&&!(world.effect_state(60)->flg&0x1000000),"effect gap chose an atlas, animated or switched off a lamp");
+            const auto phase=lamp->ct0;world.tick();check(world.effect_state(61)->ct0==phase,"effect gap advanced the lamp animation phase");
+            Scene red;world.append(red,{},stage.cameras[0]);check(std::none_of(red.triangles.begin(),red.triangles.end(),[](const auto& t){return t.blend==SceneBlend::Additive;}),"effect gap composed red lamp geometry");
+            // Das Rücksetz-Skript stellt den grünen Lampentyp wieder her; das
+            // Abschalten der roten Lampe über flg 0x1000000 gehört wieder zur
+            // Effektprozedur und bleibt deshalb aus.
+            vm.start(0,40);vm.tick();world.tick();check(world.effect_state(60)->type==1,"reset script does not restore the original green lamp type");
+            check(!(world.effect_state(61)->flg&0x1000000),"effect gap switched off the alarm lamp");
             // The original shutter event drives both entity and local nodes,
             // plays movement list 0 then latch list 19, and restores its pose.
             sound.played.clear();vm.start(0,3);for(unsigned i=0;i<70;++i){vm.tick();world.tick();sound.mix();}
@@ -83,5 +191,6 @@ int main(int argc,char** argv){try{
 
         }
     }
-    std::cout<<"Shared texture lifetime, additive effect depth, original flame procedure, room motion segments and cue loops passed.\n";return 0;
+    if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" ItemBoxChange section(s) failed; the remaining progression checks passed.\n";return 1;}
+    std::cout<<"Shared texture lifetime, additive effect depth, ItemBoxChange, room motion segments and cue loops passed; effect procedures and enemy spawn activation are documented gaps.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

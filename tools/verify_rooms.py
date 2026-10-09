@@ -6,6 +6,7 @@ import argparse
 import collections
 import concurrent.futures
 import re
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -20,6 +21,7 @@ def main():
     parser.add_argument('--frames', type=int, default=600)
     parser.add_argument('--jobs', type=int, default=8)
     parser.add_argument('--emulator')
+    parser.add_argument('--report',type=Path,help='retain per-room exit status, output and enemy gaps as JSON')
     args = parser.parse_args()
     rooms = sorted(p.stem for p in (args.data / 'rooms').glob('RM_*.RDT'))
     if not rooms:
@@ -38,9 +40,12 @@ def main():
             return room, result.returncode, result.stdout, result.stderr
 
         failures, transitions, blocked = {}, {}, collections.Counter()
+        results=[]
         blocked_rooms = set()
         with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
             for room, code, stdout, stderr in pool.map(run, rooms):
+                gaps=[line for line in stdout.splitlines()+stderr.splitlines() if 'Enemy gaps' in line]
+                results.append(dict(room=room,code=code,stdout=stdout,stderr=stderr,enemy_gaps=gaps))
                 fatal = [line for line in stderr.splitlines() if line.startswith('Native runtime error')]
                 if fatal:
                     if room + '.RDX:' in stdout:
@@ -51,11 +56,21 @@ def main():
                     else:
                         failures[room] = fatal[-1]
                     continue
+                if code:
+                    reason=f'process exited with {code}: '+stderr[-500:]
+                    if room+'.RDX:' in stdout:
+                        transitions[room]=reason;blocked_rooms.add(room)
+                    else:
+                        failures[room]=reason
+                    continue
                 for line in stderr.splitlines():
                     if line.startswith('event '):
                         blocked_rooms.add(room)
                         match = re.search(r'opcode (0x[0-9a-f]+)|Common_controll command \d+', line)
                         blocked[match.group(0) if match else line.split(': ', 1)[-1]] += 1
+    if args.report:
+        args.report.parent.mkdir(parents=True,exist_ok=True)
+        args.report.write_text(json.dumps(results,indent=2))
     print(f'{len(rooms) - len(failures)}/{len(rooms)} rooms load; '
           f'{len(blocked_rooms)} rooms report blocked event commands.')
     for reason, count in blocked.most_common(15):
@@ -64,7 +79,7 @@ def main():
         print(f'  RUNTIME FAILURE AFTER LOAD {room}: {reason}')
     for room, reason in failures.items():
         print(f'  LOAD FAILURE {room}: {reason}')
-    if failures:
+    if failures or transitions:
         raise SystemExit(1)
 
 

@@ -83,7 +83,16 @@ def main():
             # (en04.c u_char/u_int, ps2_dummy.h sceGsDBuffDc, ps2_sg_pad.h
             # PDS_PERIPHERAL). Keine PS2-Header, keine Strukturinhalte.
             out.append('typedef unsigned char u_char; typedef unsigned short u_short;')
-            out.append('typedef unsigned int u_int; typedef unsigned long long u_long;')
+            out.append('typedef unsigned int u_int;')
+            # LP64 libc declares u_long as unsigned long. It is the same
+            # original 64-bit quantity, while spelling it long long conflicts
+            # with sys/types.h when native C++ asset owners include the STL.
+            # LLP64/ILP32 still need long long to retain the original width.
+            out.append('#if defined(__LP64__)')
+            out.append('typedef unsigned long u_long;')
+            out.append('#else')
+            out.append('typedef unsigned long long u_long;')
+            out.append('#endif')
             # libvu0.h: reine Datentypen (16-Byte-ausgerichtete Vektoren/Matrizen), ohne SDK-Funktionen
             out.append('typedef float sceVu0FVECTOR[4] __attribute__((aligned(16)));')
             out.append('typedef int sceVu0IVECTOR[4] __attribute__((aligned(16)));')

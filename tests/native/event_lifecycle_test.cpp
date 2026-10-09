@@ -4,10 +4,17 @@
 #include "movie.h"
 #include "asset_io.h"
 #include <cmath>
+#include <cstdio>
+#include <string>
+#include <vector>
 #include <iostream>
 #include <stdexcept>
 using namespace recvx;
 static void check(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
+// Weiche Prüfung für die Inventarwirkung (D07/D06): meldet und läuft weiter,
+// damit Türen und frühe Eingaben dahinter geprüft bleiben.
+static std::vector<std::string> failures;
+static void expect(bool ok,const std::string& why){if(!ok)failures.push_back(why);}
 struct Room {
  std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn actor;std::size_t motion=42;std::int64_t frame=0;
  Inventory inventory;StatusMenu menu;MessageDialog dialog;AudioMixer audio;MoviePlayer movie;PlayerAsset body;RoomWorld world;EventVm vm;GameplayInput input;
@@ -32,9 +39,14 @@ int main(int argc,char** argv){try{
   check(!(r.vm.flags[5][0]&4)&&!r.world.player_scripted,"dog event retains player control");
   // Same VM/world after the dog event, unlike the old BGM test's fresh room.
   r.actor.position={-50,0,63};r.actor.yaw=0;r.vm.check_floor(r.actor.position,r.actor.yaw,0);check(r.vm.values[16]==27&&(r.vm.flags[10][0]&0x200),"padlock fixture misses original floor");
+  // D07 ItemUse am originalen Bodentrigger 27: Use_05 schließt den
+  // Statusbildschirm, das Raumskript fragt nach dem Wegwerfen, Ja verbraucht den
+  // Schlüssel (Skriptbefehl) und gibt die Steuerung frei.
   check(r.vm.use(84),"padlock refused after dog event");bool question=false;
   for(unsigned t=0;t<400;++t){r.tick();if(r.dialog.active()){if(r.dialog.choices()){question=true;r.dialog.selection=0;}r.vm.confirm_dialog();}}
-  check(question&&!r.inventory.contains(84)&&!r.dialog.active()&&!(r.vm.flags[5][0]&4),"padlock question/use fails after dog event");
+  expect(question,"D07 padlock discard question missing after dog event, exit "+std::to_string(exit));
+  expect(!r.inventory.contains(84),std::string("D07/D06 padlock Yes did not discard the key (pending opcodes: ")+[&]{std::string o;for(const auto& c:r.vm.pending_bindings){char b[8];std::snprintf(b,sizeof b,"%02x ",c.opcode);o+=b;}return o;}()+")");
+  expect(!r.dialog.active()&&!(r.vm.flags[5][0]&4),"D07 padlock use retains the dialog or control lock after dog event, exit "+std::to_string(exit));
   const auto& a=r.vm.interactions.at(exit);bool requested=false;
   for(unsigned yaw=0;yaw<65536&&!requested;yaw+=16384){float rad=yaw*6.28318530718f/65536;float probe=a.type==0?4.5f:6.f;r.actor.position={a.position.x+a.extent.x*.5f+probe*std::sin(rad),a.position.y,a.position.z+a.extent.z*.5f+probe*std::cos(rad)};requested=r.vm.interact(r.actor.position,yaw,a.floor);}
   check(requested,"door refused after dog event and padlock");if(exit==0)r.vm.tick();r.vm.finish_room_exit();check(r.vm.flags[10][0]&1,"door scenario fails after dog event and padlock");check(r.vm.errors.empty(),"door exit blocked");
@@ -52,5 +64,6 @@ int main(int argc,char** argv){try{
   if(r.inventory.weapon()!=1||r.menu.active||r.dialog.active()||r.world.player_scripted||r.world.player_hidden||(r.vm.flags[5][0]&4)){std::cerr<<"end press="<<press<<" weapon="<<r.inventory.weapon()<<" menu="<<r.menu.active<<" dialog="<<r.dialog.index()<<" st="<<r.vm.flags[5][0]<<" cb="<<r.vm.flags[10][0]<<" tasks=";for(auto t:r.vm.task_states())std::cerr<<t.event<<":"<<t.offset<<",";std::cerr<<"\n";}
   check(r.inventory.weapon()==1&&!r.menu.active&&!r.dialog.active()&&!r.world.player_scripted&&!r.world.player_hidden&&!(r.vm.flags[5][0]&4),"early Enter / lighter / Rodrigo retains control lock");
  }
+ if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory expectation(s) failed; doors and early-Enter timings passed.\n";return 1;}
  std::cout<<"Both original dog events -> padlock -> all three exits, and 14 early Enter timings -> hint/lighter/Rodrigo passed. Diagnostic event starts/floor placement; no campaign proof.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -13,9 +13,14 @@ header = (root / 'include/ps2/veronica/prog/player.h').read_text()
 parts = ['// Generated from player.c/player.h; do not edit.\n']
 start = header.index('typedef struct EXP_WORK')
 parts.append(header[start:header.index('} EXP_WORK;', start)] + '} EXP_WORK;\n')
+# The same original tables are also compiled from the complete player.c into
+# recvx_original_engine. This extract keeps the verbatim definitions but gives
+# them internal linkage, like the extracted bhCPM2_act_* functions below, so
+# both translation units can coexist in one link without a second copy
+# claiming external linkage.
 for table in ('PlMtnAct', 'PlFootSnd', 'PlKDU'):
     m = re.search(r'const [a-z ]+ ' + table + r'(\[\d+\])+ =\s*\{', player)
-    parts.append(player[m.start():block(player, m.start())] + ';\n')
+    parts.append('static ' + player[m.start():block(player, m.start())] + ';\n')
 for name in ('bhCPM2_act_kdu', 'bhCPM2_act_kdd', 'bhCPM2_act_hsu', 'bhCPM2_act_hsd', 'bhCPM2_act_dnu', 'bhCPM2_act_dnd'):
     m = re.search(r'void ' + name + r'\(\)\s*\{', player)
     parts.append('static ' + player[m.start():block(player, m.start())] + '\n')

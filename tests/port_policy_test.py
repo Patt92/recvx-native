@@ -52,6 +52,40 @@ class PolicyTest(unittest.TestCase):
         self.cmake.write_text('add_custom_command(OUTPUT output.inc\nCOMMAND python generate_player_combat.py)\n')
         self.assertTrue(self.errors())
 
+    def test_mixed_generator_is_not_data_only(self):
+        # generate_native_tables.py lieferte ADX-Datenwerte, schrieb daneben
+        # aber gesperrte Funktionsdateien. Ein Datenanteil macht einen
+        # Erzeuger nicht zulaessig (R02).
+        self.cmake.write_text('add_custom_command(OUTPUT adx_tables.inc\n'
+                              'COMMAND python generate_native_tables.py)\n')
+        self.assertTrue(self.errors())
+
+    def test_generate_then_delete_is_not_a_safeguard(self):
+        # Negativfall: ein Erzeuger schreibt kopierte Funktionsdateien und eine
+        # nachgeschaltete Loeschung soll das heilen. Die Koerper entstehen
+        # trotzdem; der Pfad bleibt gesperrt.
+        self.cmake.write_text('add_custom_command(OUTPUT clean.inc\n'
+                              'COMMAND python tools/some_tool.py\n'
+                              'COMMAND cmake -E rm -f out/status_pulse.inc out/ui_tables.inc)\n')
+        problems = self.errors()
+        self.assertTrue(any("generates then deletes" in problem for problem in problems), problems)
+
+    def test_pure_data_generator_allowed(self):
+        # Klarstellung 2026-10-09: ein Generator, der ausschliesslich
+        # Daten-/Layouttabellen ausgibt, ist zulaessig. Gesperrt bleiben
+        # Funktionskoerper, Mischgeneratoren und Kernbindungen.
+        self.cmake.write_text('add_custom_command(OUTPUT combat_tables.inc\n'
+                              'COMMAND python tools/generate_combat_tables.py\n'
+                              'DEPENDS src/ps2/veronica/prog/weapon.c)\n')
+        self.assertEqual(self.errors(), [])
+
+    def test_frozen_native_data_module_allowed(self):
+        # Positivfall: eingefrorene Datenwerte als native Quelle im Baum, ohne
+        # jeden Erzeugungsschritt beim Build.
+        (self.root / "native/adx_tables.c").write_text('const short AdxVolTbl[2] = { 0, -2 };\n')
+        self.cmake.write_text('add_library(recvx_game native/adx_tables.c)\n')
+        self.assertEqual(self.errors(), [])
+
     def test_nested_cmake_not_a_bypass(self):
         directory = self.root / "native/component"
         directory.mkdir()

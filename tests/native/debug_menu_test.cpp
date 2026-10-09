@@ -20,7 +20,16 @@ int main(int argc,char** argv){try{
     rejected=false;try{menu.select("character",99);}catch(...){rejected=true;}check(rejected,"invalid target accepted");
     // Suppress gameplay edges/held movement on modal handover; release re-arms it.
     InputManager input(InputConfig::defaults());input.event(key(SDL_SCANCODE_RETURN,true));input.event(key(SDL_SCANCODE_W,true));input.suppress_held();auto physical=input.tick();check(!physical.hit(Action::Confirm)&&!physical.down(Action::Forward),"modal handover leaks input");input.event(key(SDL_SCANCODE_RETURN,false));input.event(key(SDL_SCANCODE_W,false));input.tick();input.event(key(SDL_SCANCODE_RETURN,true));check(input.tick().hit(Action::Confirm),"release does not re-arm input");
-    {Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(30,6);StatusMenu status;status.active=status.examining=true;status.selected=2;status.message_source=[](unsigned){return Message{0xffff};};status.reset(inv);check(!status.active&&!status.examining&&inv.slots()[2]==Inventory::pack(13,6)&&bool(status.message_source),"debug status reset loses source or case exit rule");}
+    // PORTIERUNGSLÜCKE (Policy 2026-10-09): Die alte Zusicherung erwartete hier
+    // zusätzlich die Austrittsregel des Untersuchungsautomaten (Item 30 wird
+    // beim Verlassen zu Item 13). Diese Umwandlung steckt in ItemModelCheck /
+    // ItemModelActionSet und kam aus inventory_engine.inc; Generator und
+    // Include sind Quarantäne, siehe native/inspection.cpp. ItemInspection::
+    // cancel ist damit wirkungslos. Geprüft bleibt der eigene Host-Teil von
+    // StatusMenu::reset (Zustand verwerfen, gebundene Quellen behalten) plus
+    // die Zusicherung, dass die Lücke den Slot unverändert lässt statt einen
+    // geratenen Ersatzwert zu schreiben.
+    {Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(30,6);StatusMenu status;status.active=status.examining=true;status.selected=2;status.message_source=[](unsigned){return Message{0xffff};};status.reset(inv);check(!status.active&&!status.examining&&bool(status.message_source),"debug status reset loses source or transient state");check(inv.slots()[2]==Inventory::pack(30,6),"examination gap invented a case exit conversion");}
     if(argc>1){GameUi ui(std::filesystem::u8path(argv[1]));SoftwareRenderer image(640,480);ui.draw_title(image);menu.draw(image,ui);if(argc>2)image.save_bmp(std::filesystem::u8path(argv[2]));check(image.pixels()[24*640+24]==0xff52c9dd,"debug overlay absent");}
     std::filesystem::remove_all(dir);SDL_Quit();std::cout<<"Default/remapped hotkey, bundle paths, repeat guard, registry extension, failures and modal input suppression passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';SDL_Quit();return 1;}}

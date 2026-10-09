@@ -5,6 +5,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,6 +40,8 @@ def main():
     source = build / ("recvx-runtime.exe" if args.platform == "windows" else "recvx-runtime")
     if not source.is_file():
         raise RuntimeError(f"missing runtime: {source}")
+    run(sys.executable, str(ROOT / 'tools/check_no_original_core.py'), str(ROOT),
+        '--binary', str(source))
     data_root = args.data.resolve()
     if not (data_root / "native-data.version").is_file() or not (data_root / "asset-manifest.json").is_file():
         raise RuntimeError("complete cooked data and its manifest are required")

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Engine-Portierungscheck: wie viel der Originalengine (src/ps2/veronica/prog)
-steckt nachweisbar im nativen Runtime?
+"""Engine-Portierungsübersicht: Evidenz für eigenständige native Mechanismen.
 
 Einheit ist die Originalfunktion, gewichtet mit ihren nicht-leeren Zeilen.
 Jede Funktion bekommt genau einen Status aus der stärksten verfügbaren Evidenz:
 
-  original   Originalcode wird direkt kompiliert (CMake) oder per Generator
-             übernommen (tools/generate_*.py)                       -> 100 %
+  forbidden  Direkt kompilierter Originalcode: verboten, keine Port-Evidenz
+             Generierte Funktionskörper werden nicht angerechnet.   ->   0 %
   opcode     Event-Befehl (bhScenarioJmpT) im nativen EventVm/World gebunden
                                                                     -> 100 %
   pending    Event-Befehl wird nur konsumiert, Wirkung laut Code offen -> 50 %
@@ -19,17 +18,16 @@ Die Plattformschicht (PS2-SDK, VU1, Memory Card, CRI-Middleware) ersetzt der
 Host durch eigene Schichten; sie wird getrennt ausgewiesen und zählt nicht in
 den Engine-Prozentwert. "streng" zählt nur 100-%-Evidenz, "gewichtet" auch die
 50-%-Stufen. Das Ergebnis ist ein Nachweis-Maß, kein Qualitätsurteil: auch
-"original"-Code kann falsch angebunden sein; Laufzeitprüfungen bleiben
-tools/verify_*.py.
+ein als erledigt geführter Port kann falsch angebunden sein. Diese Übersicht
+ersetzt weder tools/check_no_original_core.py noch produktive Laufzeitprüfungen.
 """
 import argparse
 import collections
 import json
 import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
+from check_no_original_core import cmake_statements
 
 ROOT = Path(__file__).resolve().parents[1]
 PROG = ROOT / 'src/ps2/veronica/prog'
@@ -126,23 +124,14 @@ def functions(path):
 
 def compiled_files():
     text = (ROOT / 'CMakeLists.txt').read_text()
-    return set(re.findall(r'src/ps2/veronica/prog/(\w+\.c)\b', text.split('add_library', 1)[1]))
+    return {source for command, arguments in cmake_statements(text)
+            if command in {'add_library', 'add_executable', 'target_sources'}
+            for source in re.findall(r'src/ps2/veronica/prog/(\w+\.c)\b', arguments)}
 
 
 def generated_functions():
-    """Namen der Funktionen, die die Generatoren wörtlich aus dem Original übernehmen."""
-    names = set()
-    with tempfile.TemporaryDirectory(prefix='recvx-portcheck-') as folder:
-        for script in sorted((ROOT / 'tools').glob('generate_*.py')):
-            result = subprocess.run([sys.executable, str(script), str(ROOT), folder],
-                                    capture_output=True, text=True, cwd=ROOT / 'tools')
-            if result.returncode:
-                print(f'Warnung: {script.name} fehlgeschlagen: {result.stderr.strip()[-200:]}', file=sys.stderr)
-        for inc in Path(folder).glob('*.inc'):
-            text = strip_code(inc.read_text(errors='replace'))
-            names.update(re.findall(r'(?:^|[\s;}])(?:static\s+)?(?:const\s+)?(?:unsigned\s+)?[A-Za-z_]\w*[\s\*]+'
-                                    r'([A-Za-z_]\w*)\s*\([^;{}()]*\)\s*\{', text, re.M))
-    return names
+    """Never execute generators or count copied original bodies as a native port."""
+    return set()
 
 
 def event_opcodes():
@@ -214,12 +203,16 @@ def classify():
         for name, line, weight in functions(path):
             key = f'{path.name}:{name}'
             rule = next((r for r in (key, name, path.name) if r in ledger), None)
-            if rule:
+            if path.name in compiled:
+                status, note, source = 'missing', 'Verbotener Originalcode ist kein nativer Portnachweis', 'forbidden'
+                if rule:
+                    used_rules.add(rule)
+            elif rule:
                 used_rules.add(rule)
                 status, note = ledger[rule]
                 source = 'ledger'
             elif path.name in compiled or (name in generated and len(name) > 3):
-                status, note, source = 'original', '', 'original'
+                status, note, source = 'missing', 'Verbotener Originalcode ist kein nativer Portnachweis', 'forbidden'
             elif path.name == 'event.c' and name in opcodes:
                 status, note, source = opcodes[name][1], f'opcode 0x{opcodes[name][0]:02x}', 'opcode'
             elif len(name) > 4 and re.search(r'\b' + re.escape(name) + r'\b', native):
@@ -253,11 +246,11 @@ README_END = '<!-- port-status:end -->'
 # Kurzbeschreibung je Kategorie fuer die README-Tabelle (Bereichsname -> Text).
 README_NOTES = {
     'Spieler/Kampf': 'Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen.',
-    'Events/Skript': 'Event-VM und Befehle portiert; Common-Control und restliche Befehle offen.',
+    'Events/Skript': 'Originale Event-VM, gemeinsame Actor-Control-Fälle und 150/223 Befehle gebunden; weitere Befehle/Abläufe offen.',
     'Menü/Items/Text': 'Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen.',
-    'Modelle/Animation': 'Ressourcen und ausgewählte Animationspfade; Skin/Morph/Chunk-Renderer offen.',
+    'Modelle/Animation': 'Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen.',
     'Raum/Kamera/Tür': 'Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen.',
-    'Gegner/KI': 'Zombie/Hund teilweise; die meisten enXX-Zustandsroutinen fehlen.',
+    'Gegner/KI': 'Original-Dispatcher entfernt; vollständige eigenständige Gegnerabläufe und Bindungen noch offen.',
     'Audio': 'Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt.',
     'Effekte': 'Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen.',
     'Ablauf/Speichern': 'Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen.',

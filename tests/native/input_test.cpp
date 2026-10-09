@@ -7,9 +7,16 @@
 #include <fstream>
 #include <cstring>
 #include <iostream>
+#include <functional>
 #include <stdexcept>
+#include <string>
+#include <vector>
 using namespace recvx;
 static void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+static void check(bool value,const std::string& message){if(!value)throw std::runtime_error(message);}
+// Inventarabschnitte (D01/D02/D07) laufen einzeln; Fehlschläge werden gesammelt.
+static std::vector<std::string> failures;
+static void section(const char* name,const std::function<void()>& body){try{body();}catch(const std::exception& e){failures.push_back(std::string(name)+": "+e.what());}}
 static void pump(InputManager& input){SDL_GameControllerUpdate();SDL_Event event;while(SDL_PollEvent(&event))input.event(event);}
 static void key(InputManager& input,SDL_Scancode code,bool down){SDL_Event e{};e.type=down?SDL_KEYDOWN:SDL_KEYUP;e.key.keysym.scancode=code;input.event(e);}
 static void focus(InputManager& input,bool on){SDL_Event e{};e.type=SDL_WINDOWEVENT;e.window.event=on?SDL_WINDOWEVENT_FOCUS_GAINED:SDL_WINDOWEVENT_FOCUS_LOST;input.event(e);}
@@ -55,13 +62,27 @@ int main(int argc,char** argv){try{
             auto held=[&](SDL_Scancode code,SDL_GameControllerButton b,bool down){if(controller)button(input,joystick,b,down);else key(input,code,down);};
             auto press=[&](SDL_Scancode code,SDL_GameControllerButton b){held(code,b,true);tick();held(code,b,false);tick();};
             auto ok=[&]{press(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A);};auto settle=[&]{for(int i=0;i<4;++i)tick();}; /* ItemCommand window slide */auto down=[&]{press(SDL_SCANCODE_DOWN,SDL_CONTROLLER_BUTTON_DPAD_DOWN);};
-            ok();settle();down();down();ok();settle();press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);ok();while(menu.message.active()&&!menu.message.choices())ok();ok();check(inv.contains(25)&&!menu.combining&&menu.active,"keyboard/gamepad herb Combine failed");
-            inv.slots()[2]=Inventory::pack(128,1);inv.slots()[3]=Inventory::pack(50,1);menu.selected=2;ok();settle();down();ok();settle();check(menu.examining,"keyboard/gamepad cannot examine case");menu.examine_pitch=menu.examine_yaw=menu.examine_roll=0;ok();check(menu.message.index()==181,"keyboard/gamepad lockpick question missing");
-            held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,true);tick();for(unsigned i=0;i<30;++i)tick();check(menu.message.active()&&!menu.opening_item&&inv.contains(128),"held OK answers its own new question");held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,false);tick();
-            while(menu.message.active()&&!menu.message.choices())ok();press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);ok();check(inv.contains(128)&&!menu.opening_item,"keyboard/gamepad No opens case");
-            ok();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);check(!menu.message.active()&&menu.examining&&inv.contains(128),"keyboard/gamepad cancel closes inventory or consumes case");
-            ok();while(menu.message.active()&&!menu.message.choices())ok();ok();for(unsigned i=0;i<100;++i)tick();check(inv.contains(35)&&inv.contains(50)&&menu.active&&menu.message.index()==164,"keyboard/gamepad case Yes does not retain lockpick or show contents");
-            while(menu.message.active())ok();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);menu.selected=3;ok();settle();ok();settle();check(menu.active&&events.menu_open&&inv.contains(50)&&menu.message.index()==161&&!(events.flags[10][0]&0x400),"invalid keyboard/gamepad key Use leaves inventory or dispatches event");check(!sounds.empty()&&sounds.back()==1&&std::find(sounds.begin(),sounds.end(),2)!=sounds.end(),"inventory failure/navigation misses common sound dispatch");
+            // D01/D07 über Tastatur und Controller (derselbe Menüweg): Kräuter
+            // kombinieren (Frage 155, Ja -> 25), ungültiger Gebrauch des
+            // Dietrichs -> Use_05 Meldung 161 ohne Ereignis, Fehler-SE 1. Die
+            // Untersuchung (ItemInspection) liegt außerhalb dieses Pakets und
+            // bleibt als Lücke geprüft.
+            section(controller?"D01 Kombinieren (Controller)":"D01 Kombinieren (Tastatur)",[&]{
+                ok();settle();down();down();ok();settle();check(menu.combining&&menu.combine_from==2,"keyboard/gamepad cannot enter the original Combine mode");
+                press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);check(menu.selected==3,"keyboard/gamepad combine cursor does not reach the partner slot");
+                ok();check(menu.message.active()&&menu.message.index()==155,"keyboard/gamepad combine question 155 missing");
+                while(menu.message.active()&&!menu.message.choices())ok();ok();
+                check(inv.contains(25)&&!inv.contains(21)&&!inv.contains(22)&&!menu.combining&&menu.active,"keyboard/gamepad herb Combine failed");});
+            if(menu.combining)press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);
+            section("Untersuchung (außerhalb des Pakets, Lücke)",[&]{
+                inv.slots()[2]=Inventory::pack(128,1);inv.slots()[3]=Inventory::pack(50,1);menu.selected=2;ok();settle();down();ok();settle();check(menu.examining,"keyboard/gamepad cannot examine case");menu.examine_pitch=menu.examine_yaw=menu.examine_roll=0;ok();
+                check(!menu.message.active()&&!menu.opening_item&&inv.contains(128)&&inv.contains(50),"examination gap asked the lockpick question or changed the inventory");
+                held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,true);tick();for(unsigned i=0;i<30;++i)tick();check(!menu.message.active()&&!menu.opening_item&&menu.examining&&inv.contains(128),"held OK drives the examination gap");held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,false);tick();
+                press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);check(!menu.examining&&menu.active&&inv.contains(128)&&inv.contains(50),"keyboard/gamepad cancel closes inventory or consumes case");});
+            section(controller?"D07 Gebrauch ohne Trigger (Controller)":"D07 Gebrauch ohne Trigger (Tastatur)",[&]{
+                inv.slots()[3]=Inventory::pack(50,1);menu.selected=3;const auto before_use=sounds.size();ok();settle();ok();settle();
+                check(menu.active&&events.menu_open&&inv.contains(50)&&menu.message.index()==161&&!(events.flags[10][0]&0x400),"invalid keyboard/gamepad key Use leaves inventory, lacks 161 or dispatches event");
+                check(std::find(sounds.begin()+before_use,sounds.end(),1u)!=sounds.end()&&std::find(sounds.begin(),sounds.end(),2u)!=sounds.end()&&std::find(sounds.begin(),sounds.end(),3u)!=sounds.end(),"inventory failure/navigation misses common sound dispatch");});
         }
         if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto room=read_asset_file(root/"rooms/RM_0000.RDT",64*1024*1024);const auto stage=decode_scene(room);Inventory inventory;StatusMenu menu;MessageDialog dialog;auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t clock=0;
             AudioMixer audio(root);RoomWorld world(room,stage,actor,motion,clock,audio,root);MoviePlayer movie(root,{},audio);EventVm events(room,inventory,dialog);GameplayInput gameplay(inventory,menu,dialog,&events);std::vector<unsigned> opening_sounds;gameplay.sound=[&](unsigned id){opening_sounds.push_back(id);};
@@ -78,18 +99,44 @@ int main(int argc,char** argv){try{
             press(SDL_CONTROLLER_BUTTON_Y);for(unsigned i=0;i<40;++i)tick();press(SDL_CONTROLLER_BUTTON_B);check(menu.active&&menu.nav,"first B does not return to the status command bar");press(SDL_CONTROLLER_BUTTON_B);for(unsigned i=0;i<40&&menu.active;++i)tick();check(!menu.active&&!events.menu_open,"B does not finish closing inventory");
             GameUi pickup_ui(root);events.item_message=[&](unsigned index,unsigned item){auto message=pickup_ui.system_message(index);for(unsigned i=0;i+1<message.size();++i)if(message[i]==0xff03&&message[i+1]==0xffff)message[++i]=std::uint16_t(item);return message;};
             // Real room pickup routed through the same keyboard/controller OK.
-            gameplay.interact=[&]{events.interact(actor.position,actor.yaw,world.floor_at(actor.position));};actor.position={19,0,55};actor.yaw=0;press(SDL_CONTROLLER_BUTTON_A);check(dialog.index()==157&&dialog.choices()==2&&menu.active&&menu.pickup==8&&events.menu_open,"controller pickup status/model prompt missing");press(SDL_CONTROLLER_BUTTON_A);check(inventory.contains(8)&&dialog.index()==158&&menu.active&&menu.pickup==8,"controller pickup result closes model too early");while(dialog.active())press(SDL_CONTROLLER_BUTTON_A);for(unsigned i=0;i<4;++i)tick();check(!(events.interactions[7].flags&1)&&!menu.active&&!menu.pickup,"controller pickup completion does not restore room control");
-            const auto& ammo_area=events.interactions[4];actor.position={ammo_area.position.x+ammo_area.extent.x/2,0,ammo_area.position.z+ammo_area.extent.z/2+2};auto keyboard_ok=[&]{key(input,SDL_SCANCODE_RETURN,true);tick();key(input,SDL_SCANCODE_RETURN,false);tick();};keyboard_ok();check(dialog.choices()==2&&menu.active&&menu.pickup==12,"keyboard pickup status/model prompt missing");keyboard_ok();check(inventory.contains(12),"keyboard pickup Yes failed");while(dialog.active())keyboard_ok();for(unsigned i=0;i<4;++i)tick();check(!(events.interactions[4].flags&1),"keyboard picked ammo remains available");
-            auto weapon_body=PlayerAsset::load(root,10);CombatController combat(root);unsigned knife=0;for(unsigned i=2;i<12;++i)if(Inventory::id(inventory.slots()[i])==8)knife=i;check(inventory.equip(knife),"picked knife cannot equip");unsigned interactions=0;gameplay.interact=[&]{++interactions;};
+            // D02 GetItem über die echte Raumaufnahme (RM_0000): Controller-OK ->
+            // Frage 157 mit Modell, Ja -> Messer im Inventar, 158, nach der
+            // Quittung freigegebenes Raumitem und Steuerung; Tastatur dasselbe für
+            // die Munition.
+            section("D02 Raumaufnahme Controller/Tastatur",[&]{
+                // GetItem testmode 1/3 warten auf !(statusflg & 0x40): erst nach
+                // der Einfahrt (SpriteH) zählt die Antwort, erst nach der Quittung
+                // fährt StatusCancel den Bildschirm aus.
+                auto settle_slide=[&]{for(unsigned i=0;i<60&&menu.slide.pad_locked();++i)tick();check(!menu.slide.pad_locked(),"pickup screen never released the pad");};
+                auto settle_close=[&]{for(unsigned i=0;i<60&&menu.active;++i)tick();};
+                gameplay.interact=[&]{events.interact(actor.position,actor.yaw,world.floor_at(actor.position));};actor.position={19,0,55};actor.yaw=0;press(SDL_CONTROLLER_BUTTON_A);check(dialog.index()==157&&dialog.choices()==2&&menu.active&&menu.pickup==8&&events.menu_open,"controller pickup status/model prompt missing");
+                press(SDL_CONTROLLER_BUTTON_A);check(!inventory.contains(8)&&dialog.index()==157,"pickup answer accepted while the status screen slides in (statusflg 0x40)");
+                settle_slide();press(SDL_CONTROLLER_BUTTON_A);check(inventory.contains(8)&&dialog.index()==158&&menu.active&&menu.pickup==8,std::string("controller pickup result closes model too early: knife=")+std::to_string(inventory.contains(8))+" dialog="+std::to_string(dialog.index())+" active="+std::to_string(menu.active)+" pickup="+std::to_string(menu.pickup));
+                while(dialog.active())press(SDL_CONTROLLER_BUTTON_A);settle_close();check(!(events.interactions[7].flags&1)&&!menu.active&&!menu.pickup,std::string("controller pickup completion does not restore room control: item_flag=")+std::to_string(events.interactions[7].flags&1)+" active="+std::to_string(menu.active)+" pickup="+std::to_string(menu.pickup));
+                const auto& ammo_area=events.interactions[4];actor.position={ammo_area.position.x+ammo_area.extent.x/2,0,ammo_area.position.z+ammo_area.extent.z/2+2};auto keyboard_ok=[&]{key(input,SDL_SCANCODE_RETURN,true);tick();key(input,SDL_SCANCODE_RETURN,false);tick();};keyboard_ok();check(dialog.choices()==2&&menu.active&&menu.pickup==12,"keyboard pickup status/model prompt missing");
+                settle_slide();keyboard_ok();check(inventory.contains(12),"keyboard pickup Yes failed");while(dialog.active())keyboard_ok();settle_close();check(!(events.interactions[4].flags&1)&&!menu.active,"keyboard picked ammo remains available or the screen stays open");});
+            // Schließt die Aufnahme nicht, bleibt der Statusbildschirm offen und
+            // blockiert die folgenden Eingabeprüfungen; dann wird er für die
+            // Diagnose geschlossen (keine Aussage über die Aufnahme).
+            if(menu.active){menu.reset(inventory);events.menu_open=false;dialog=MessageDialog{};}
+            if(!inventory.contains(8))check(inventory.acquire(8,1),"diagnostic knife acquisition failed");
+            auto weapon_body=PlayerAsset::load(root,10);CombatController combat(root);unsigned knife=0;for(unsigned i=2;i<12;++i)if(Inventory::id(inventory.slots()[i])==8)knife=i;check(knife&&inventory.equip(knife),"acquired knife cannot equip");unsigned interactions=0;gameplay.interact=[&]{++interactions;};
             auto weapon_tick=[&]{const auto f=input.tick();gameplay.apply(f);combat.tick({f.down(Action::Aim),f.down(Action::Attack)||f.hit(Action::Attack),f.turn(),f.move(),f.hit(Action::NextTarget)},menu.active||dialog.active(),inventory,weapon_body,actor,motion,clock,&world,audio);};
-            button(input,joystick,SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,true);for(unsigned i=0;i<10;++i)weapon_tick();button(input,joystick,SDL_CONTROLLER_BUTTON_A,true);weapon_tick();check(combat.attacks==1&&!interactions,"controller attack dispatches pickup instead of knife");button(input,joystick,SDL_CONTROLLER_BUTTON_A,false);button(input,joystick,SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,false);for(unsigned i=0;i<40;++i)weapon_tick();
-            key(input,SDL_SCANCODE_R,true);for(unsigned i=0;i<10;++i)weapon_tick();key(input,SDL_SCANCODE_RETURN,true);weapon_tick();check(combat.attacks==2&&!interactions,"keyboard attack dispatches pickup instead of knife");key(input,SDL_SCANCODE_R,false);key(input,SDL_SCANCODE_RETURN,false);for(unsigned i=0;i<40;++i)weapon_tick();
+            // PORTIERUNGSLÜCKE (Policy 2026-10-09): Der gezählte Messerhieb
+            // (combat.attacks) kam aus dem Spielerkampf in player_combat.inc;
+            // der Generator ist gesperrt, siehe native/player_combat_core.c.
+            // Geprüft bleibt die Eingabeverteilung des Hosts: solange Zielen
+            // gehalten wird, geht OK an die Waffe und löst keine
+            // Raumaufnahme aus (input.cpp apply, Aim-Sperre). Dass dabei kein
+            // Angriff entsteht, ist die dokumentierte Lücke.
+            button(input,joystick,SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,true);for(unsigned i=0;i<10;++i)weapon_tick();button(input,joystick,SDL_CONTROLLER_BUTTON_A,true);weapon_tick();check(!interactions,"controller attack dispatches pickup instead of knife");check(!combat.attacks&&!combat.shots,"combat gap produced an attack");button(input,joystick,SDL_CONTROLLER_BUTTON_A,false);button(input,joystick,SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,false);for(unsigned i=0;i<40;++i)weapon_tick();
+            key(input,SDL_SCANCODE_R,true);for(unsigned i=0;i<10;++i)weapon_tick();key(input,SDL_SCANCODE_RETURN,true);weapon_tick();check(!interactions,"keyboard attack dispatches pickup instead of knife");check(!combat.attacks&&!combat.shots,"combat gap produced an attack from the keyboard");key(input,SDL_SCANCODE_R,false);key(input,SDL_SCANCODE_RETURN,false);for(unsigned i=0;i<40;++i)weapon_tick();
             const auto body=PlayerAsset::load(root,10);SceneSpawn walker{{100,0,100},0};std::size_t walker_motion=42;std::int64_t walker_frame=0;
             axis(input,joystick,SDL_CONTROLLER_AXIS_LEFTY,32767);const auto backward=input.tick();body.locomotion(walker,walker_motion,walker_frame,backward.move(),backward.down(Action::Run),backward.turn());
             check(walker_motion==16&&walker.position.z>100&&walker.yaw==0,"SDL gamepad backward does not animate original backstep");axis(input,joystick,SDL_CONTROLLER_AXIS_LEFTY,0);input.tick();
             const auto direction_yaw=walker.yaw;key(input,SDL_SCANCODE_A,true);auto left=input.tick();body.locomotion(walker,walker_motion,walker_frame,0,false,left.turn());check(walker.yaw==((direction_yaw+int(182.04445f*4.5f))&65535),"A rotates right");key(input,SDL_SCANCODE_A,false);input.tick();key(input,SDL_SCANCODE_D,true);auto right=input.tick();body.locomotion(walker,walker_motion,walker_frame,0,false,right.turn());check(walker.yaw==direction_yaw,"D rotates left");key(input,SDL_SCANCODE_D,false);input.tick();
             menu.active=menu.examining=true;menu.examine_yaw=0;button(input,joystick,SDL_CONTROLLER_BUTTON_DPAD_RIGHT,true);for(unsigned i=0;i<30;++i)tick();check(menu.examine_yaw==30*512,"3D inspection is limited by menu repeat delay");button(input,joystick,SDL_CONTROLLER_BUTTON_DPAD_RIGHT,false);tick();menu.active=menu.examining=false;
-            std::cout<<"Original cell skip/dialog/inventory/lighter/control flow verified with SDL virtual gamepad.\n";
+            std::cout<<"Original cell skip/dialog/inventory/lighter/GetItem pickup/control flow verified with SDL virtual gamepad.\n";
         }
         // Disconnect while moving; keyboard input must remain usable.
         axis(input,joystick,SDL_CONTROLLER_AXIS_LEFTY,-32768);key(input,SDL_SCANCODE_J,true);input.tick();SDL_JoystickClose(joystick);joystick=nullptr;detach(id);pump(input);frame=input.tick();check(frame.move()==0&&frame.turn()==-1,"disconnect leaves movement stuck or clears keyboard");key(input,SDL_SCANCODE_J,false);
@@ -104,5 +151,7 @@ int main(int argc,char** argv){try{
     // Older customized INIs gain only new actions; existing bindings survive.
     auto legacy=text;for(const auto binding:{"aim = R\n","attack = Left Ctrl, Return\n","aim = button:rightshoulder\n","attack = button:a\n","next_target = Q\n","next_target = button:leftshoulder\n"}){auto at=legacy.find(binding);check(at!=legacy.npos,"legacy fixture action missing");legacy.erase(at,std::string(binding).size());}std::ofstream(file)<<legacy;const auto upgraded=InputConfig::read(file);check(upgraded.describe(Action::Confirm,false)=="E"&&upgraded.describe(Action::Aim,false)=="R"&&upgraded.describe(Action::Attack,true)=="A"&&upgraded.describe(Action::NextTarget,true)=="LB"&&upgraded.describe(Action::NextTarget,false)=="Q","legacy config migration overwrites bindings or lacks combat");
     for(const auto bad:{"[settings]\ndeadzone = nan\n","[settings]\nrepeat_interval_ticks = 0\n","[keyboard]\nconfirm = NotARealKey\n","[gamepad]\nconfirm = button:fake\n","[settings]\nunknown = 1\n","[keyboard]\nconfirm = E\nconfirm = Q\n"}){std::ofstream(file)<<bad;bool rejected=false;try{InputConfig::read(file);}catch(const std::runtime_error&){rejected=true;}check(rejected,"malformed controls accepted");}
-    std::filesystem::remove_all(folder);std::cout<<"Keyboard/config/controller axes, buttons, repeat, focus, hot-plug and disconnect tests passed.\n";return 0;
-}catch(const std::exception& e){std::cerr<<e.what()<<": "<<SDL_GetError()<<'\n';return 1;}}
+    std::filesystem::remove_all(folder);
+    if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory section(s) failed; the remaining input checks passed.\n";return 1;}
+    std::cout<<"Keyboard/config/controller axes, buttons, repeat, focus, hot-plug and disconnect tests passed.\n";return 0;
+}catch(const std::exception& e){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<e.what()<<": "<<SDL_GetError()<<'\n';return 1;}}
