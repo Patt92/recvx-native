@@ -58,11 +58,12 @@ int main(){try{
     check(!recvx_en00_wall(&barrel,&wall),"barrel gap reports a movable wall");
     recvx_en01_state(&barrel,&state);check(!state.dead&&!state.mdflg,"barrel gap exploded without bhEne00");
 
-    // Das Spielerwerk gehoert nicht mehr dieser Datei; sein Zustand ist leer.
+    // A missing player owner is not an authoritative HP-0 or release state.
     RECVX_EN01_PLAYER player{};player.px=1;player.hp=100;recvx_en01_set_player(&player);
     recvx_en01_player_tick();
-    RECVX_EN01_PLAYER_STATE ply{};recvx_en01_player_state(&ply);
-    check(!ply.mode0&&!ply.hp&&ply.px==0&&!ply.enemy_clip,"player grab gap keeps a separate original player work");
+    RECVX_EN01_PLAYER_STATE ply{};ply.hp=100;ply.px=7;ply.mode0=4;
+    check(!recvx_en01_player_state(&ply)&&ply.hp==100&&ply.px==7&&ply.mode0==4,
+          "unavailable player state fabricates damage or a released grab");
     recvx_en01_player_reset();
     check(!unbound_calls,"enemy gap reported an unbound original routine it never calls");
     std::cout<<"Enemy damage, AI, death, grab and barrel are documented gaps; only host writes are echoed.\n";return 0;

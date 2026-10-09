@@ -2,6 +2,7 @@
 #include "effect_collision.h"
 #include "effect_sprites.h"
 #include "ninja_math.h"
+#include "geometry_atr.h"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -37,24 +38,102 @@ int main(){try{
     const CollisionWall other{1,1,0,0,0,{-20,0,0},{40,0,.01f}};
     const auto junction=move_walls({wall,other},100,floors,{-5,0,-5},{5,0,5},1);check(junction.x<=-1&&junction.z<=-1,"adjoining corner contacts crossed");
     bool rejected=false;try{move({0,0,0},{std::numeric_limits<float>::quiet_NaN(),0,0});}catch(const std::runtime_error&){rejected=true;}check(rejected,"nonfinite movement accepted");
-    // PORTIERUNGSLÜCKE (Policy 2026-10-09): Ab hier prüfte dieser Test
-    // bhGetGroundPosition samt Rampen, Dreiecken, Toleranz und der
-    // htp-Identität über Raum- und bewegliche Tabelle sowie bhEff000 Modus 3.
-    // Diese Routinen kamen aus effect_collision.inc bzw. effect_sprites.inc;
-    // Generatoren und Includes sind Quarantäne, siehe
-    // native/effect_collision.cpp und native/effect_sprites.cpp. Auch
-    // collision.cpp::ground_position leitet nur dorthin weiter und ist damit
-    // ebenfalls eine Lücke. Die Wandbewegung oben (move_walls) ist eigener
-    // Host-Code und bleibt vollständig geprüft. Hier bleibt nur noch, dass die
-    // Bodenabfrage keinen geratenen Wert liefert.
+    // Positive native ATR tests. The host movement tests above are legacy
+    // host-code checks, NOT evidence for the missing bhCheckWall mechanism.
     const CollisionWall ground{1,7,0,0,0,{0,0,0},{20,-5,20}};
     std::size_t ground_hit=0;
-    check(original_ground_position({ground},100,{10,1,10},&ground_hit)==-1000&&ground_hit==std::size_t(-1),
-          "ground gap does not report the original no-ground sentinel and clear htp");
-    check(ground_position({ground},100,{10,1,10})==-1000,"collision.cpp ground query invents a height");
-    for(unsigned id=0;id<4;++id){CollisionWall ramp{1,6,id,0,0,{0,0,0},{20,10,20}};
-        check(ground_position({ground,ramp},100,{5,1,5})==-1000,"ramp gap invents an ascending surface");}
-    {GroundCollision shared;shared.update({ground},100,{ground});
-     check(shared.query({5,9,5})==-1000&&!shared.hit(),"persistent ground gap reports a height or an htp entry");}
-    std::cout<<"Original box/cylinder/diagonal walls, height/floor flags, sliding and corners passed; the ground/htp query is a documented gap.\n";return 0;
+    check(original_ground_position({ground},100,{10,1,10},&ground_hit)==0&&ground_hit==0,
+          "floor surface must use py, not its negative thickness");
+    check(ground_position({ground},100,{10,1,10})==0,"shared collision.cpp ground consumer not bound");
+    check(ground_position({ground},100,{0,0,0})==0&&ground_position({ground},100,{20,0,10})==-1000,
+          "rectangular ground edges are not lower-inclusive/upper-exclusive");
+    check(ground_position({ground},100,{5,-.0001f,5})==0&&
+          ground_position({ground},100,{5,-.000101f,5})==-1000,
+          "floor tolerance differs from the original 0.0001");
+    check(ground_position({ground},100,{5,10000,5})==-1000,
+          "ground query accepted a gap at the original strict 10000 limit");
+    auto zero_floor=ground;zero_floor.extent.y=0;
+    check(!effect_wall({zero_floor},100,{5,1,5},0,0,1),"floor contact invents room height for zero thickness");
+    CollisionWall box{1,0,11,3,0xf,{0,0,0},{20,5,20},{1,2,3,4}};
+    check(ground_position({box},100,{5,5,5})==5&&ground_position({box},100,{5,4.99f,5})==-1000,
+          "solid ground height or below-top gate incorrect");
+    box.extent.y=0;check(ground_position({box},10,{5,10,5})==10,"box room-height fallback missing");
+    box.extent.y=-5;check(ground_position({box},10,{5,-4,5})==-5,"signed solid height lost");
+    box.extent.y=5;
+    auto upper=box;upper.position.y=2;
+    check(original_ground_position({box,upper},100,{5,9,5},&ground_hit)==7&&ground_hit==1,
+          "stacked floors do not choose the nearest surface");
+    for(unsigned type:{1u,3u,5u}){auto odd=box;odd.type=type;
+        check(ground_position({odd},100,{5,20,5})==-1000,"odd solid type incorrectly contributes ground");}
+    auto disabled=box;disabled.flags=0;
+    check(ground_position({disabled},100,{5,20,5})==-1000,"disabled ATR contributes ground");
+    CollisionWall cylinder{1,2,0,0,0,{0,0,0},{10,5,0}};
+    check(ground_position({cylinder},100,{0,5,0})==5&&
+          ground_position({cylinder},100,{10,5,0})==-1000&&
+          ground_position({cylinder},100,{8,5,8})==-1000,"cylinder ground radius or strict edge incorrect");
+    for(unsigned id=0;id<4;++id){
+        const float sx=id<2?1.f:-1.f,sz=(id&1)?-1.f:1.f;
+        CollisionWall tri{1,4,id,0,0,{0,0,0},{10*sx,5,10*sz}};
+        check(ground_position({tri},100,{2*sx,6,2*sz})==5,"signed triangle interior ground missing");
+        check(ground_position({tri},100,{8*sx,6,8*sz})==-1000&&
+              ground_position({tri},100,{5*sx,6,5*sz})==-1000,"triangle empty half or diagonal accepted");
+        check(effect_wall({tri},100,{2*sx,1,2*sz},0,0,0).has_value(),"triangle point contact missing");
+        check(!effect_wall({tri},100,{5.25f*sx,1,5.25f*sz},0,0,0)&&
+              effect_wall({tri},100,{5.25f*sx,1,5.25f*sz},0,1,0).has_value(),
+              "expanded triangle diagonal strip missing");
+        check(!effect_wall({tri},100,{9*sx,1,9*sz},0,1,0),"expanded triangle fills its empty half");
+        tri.type=5;check(!effect_wall({tri},100,{2*sx,1,2*sz},0x400,1,0),"odd triangle filter ignored");
+    }
+    const float ramps[4]={2.5f,7.5f,2.5f,7.5f};
+    for(unsigned id=0;id<4;++id){CollisionWall ramp{1,6,id,0,0,{0,0,0},{20,10,40}};
+        check(ground_position({ground,ramp},100,{5,1,10})==ramps[id],"ramp direction or above-probe selection incorrect");
+        check(ground_position({ramp},100,{5,-.001f,10})==-1000,"ramp accepted probe below its base");
+        check(!effect_wall({ramp},100,{-.1f,1,10},0,1,1),"ramp contact incorrectly expands footprint");
+        ramp.extent.y=0;check(ground_position({ramp},100,{5,1,10})==0,"ramp uses room height instead of its actual zero height");}
+    for(unsigned type:{0u,1u}){auto solid=box;solid.type=type;
+        check(effect_wall({solid},100,{-1,0,5},0,1,0).has_value()&&
+              !effect_wall({solid},100,{21,0,5},0,1,0),"box contact expanded edge semantics wrong");
+        check(effect_wall({solid},100,{5,-1,5},0,0,1).has_value()&&
+              !effect_wall({solid},100,{5,-1.01f,5},0,0,1)&&
+              !effect_wall({solid},100,{5,5.01f,5},0,0,1),"box contact vertical overlap wrong");
+        check(bool(effect_wall({solid},100,{5,1,5},0x400,0,0))==!(type&1),"odd solid suppression wrong");}
+    for(unsigned type:{2u,3u}){cylinder.type=type;
+        check(effect_wall({cylinder},100,{10.5f,0,0},0,1,0).has_value()&&
+              !effect_wall({cylinder},100,{11,0,0},0,1,0),"cylinder contact radius wrong");
+        check(bool(effect_wall({cylinder},100,{0,0,0},0x400,1,0))==!(type&1),"odd cylinder filter wrong");}
+    check(effect_wall({ground},100,{5,-5,5},0,0,0).has_value()&&
+          !effect_wall({ground},100,{5,0,5},0,0,1),"floor underside normal contact wrong");
+    check(effect_wall({ground},100,{5,-5,5},0x400,0,0).has_value(),"odd-solid suppression incorrectly skips floor type 7");
+    check(effect_wall({ground},100,{5,-6,5},0x100,0,2).has_value()&&
+          !effect_wall({ground},100,{5,-6,5},0x100,0,1)&&
+          !effect_wall({ground},100,{5,-5,5},0x100,0,1),"floor special crossing must be strict at both ends");
+    const auto first=effect_wall({box,upper},100,{5,3,5},0,0,0);
+    check(first&&first->id==box.id&&first->position.y==0&&first->attributes==0xf,
+          "contact does not preserve first table entry or invents floor/attribute filters");
+    {GroundCollision shared;shared.update({box},100,{box});
+        check(shared.query({5,9,5})==5&&shared.hit()&&shared.hit()->table==GroundHit::Table::Room&&
+              shared.hit()->index==0,"equal room/mobile floor tie not stable");
+        check(shared.hit()->record->flr_no==3&&shared.hit()->record->prm3==4,
+              "selected ATR view dropped floor or parameters");
+        shared.update({box},100,{upper});
+        check(shared.query({5,9,5})==7&&shared.hit()->table==GroundHit::Table::Mobile,"nearest mobile ground not selected");
+        const auto* view=shared.hit()->record;upper.position.y=3;upper.parameters[2]=7;
+        shared.update({box},100,{upper});
+        check(shared.hit()->index==0&&shared.hit()->record==view&&view->py==3&&view->prm2==7,
+              "selected native ATR view lost identity during geometry update");
+        upper.extent.x=upper.extent.z=10;shared.update({box},100,{upper});
+        check(shared.query({15,9,15})==5&&shared.hit()->table==GroundHit::Table::Room&&view->py==3,
+              "another ground query overwrites an earlier consumer's ATR pointer");
+        check(shared.query({30,9,30})==-1000&&!shared.hit(),"miss does not clear previous hit identity");
+        shared.update({box},100,{upper});shared.query({5,9,5});shared.update({box},100);
+        check(!shared.hit(),"removed mobile table leaves a stale hit");}
+    {const atr_geometry::Point2 strip[4]={{0,0},{2,2},{-2,4},{0,6}};
+        check(atr_geometry::strip({0,1},strip)&&atr_geometry::strip({0,3},strip)&&
+              atr_geometry::strip({0,5},strip)&&!atr_geometry::strip({0,6},strip),
+              "three scanline-strip regions or exclusive upper end incorrect");}
+    {const atr_geometry::Point2 strip[4]={{0,0},{-2,2},{2,4},{0,6}};
+        check(atr_geometry::strip({0,1},strip)&&atr_geometry::strip({0,3},strip)&&
+              atr_geometry::strip({0,5},strip)&&!atr_geometry::strip({0,-.01f},strip),
+              "reversed strip orientation or lower end incorrect");}
+    std::cout<<"Native ATR ground/contact predicates and selected-entry identity passed. Player wall resolution, lines, reflection and effect procedures remain separate gaps.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

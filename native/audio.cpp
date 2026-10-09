@@ -379,6 +379,12 @@ void AudioMixer::play_bgm_ex(int bgm,int fade_in_rate,int volume){
     const float limit=volume<-20?float(volume+20):0.f;const unsigned ticks=fade_in_rate+1?adx_fade_ticks(fade_in_rate+1):0;
     play(0,set_name("BGM"),unsigned(bgm),adx_gain(limit),true,ticks);current_bgm_=bgm;current_bgm_volume_=volume;
 }
+void AudioMixer::play_dead_voice(int player){
+    // Same PlayBgmEx2 path as a BGM request, with PatId[3] (ADV) and the
+    // original volume -45; the voice's ADX carries no loop marker.
+    play(0,"ADV",unsigned(player+8),adx_gain(-25.f),false,adx_fade_ticks(2));
+    current_bgm_=-1;current_bgm_volume_=-45;
+}
 void AudioMixer::request_bgm2(int bgm,int volume){if(current_bgm_!=bgm){current_bgm_=bgm;req_fade_bgm_=8;}else if(current_bgm_volume_!=volume)req_fade_bgm_=2;current_bgm_volume_=volume;}
 void AudioMixer::stop_bgm(int fade_out_rate){stop(0,fade_out_rate?adx_fade_ticks(fade_out_rate):0);current_bgm_=-1;current_bgm_volume_=-127;}
 void AudioMixer::stop_bgm2(){req_fade_bgm_=1;current_bgm_=-1;current_bgm_volume_=-127;}

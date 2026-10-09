@@ -11,6 +11,9 @@ public:
     // near/far: njClipZ distances in view space (far 0 = unlimited).
     void draw_view(const Scene& scene,const NJS_MATRIX& view,float focal_x,float focal_y,bool wireframe=false,const std::array<std::uint32_t,16>& hidden={},float near=0.05f,float far=0);
     const std::vector<std::uint32_t>& pixels() const {return pixels_;}
+    // 1/z of the nearest surface per pixel; 0 where nothing was drawn. Lets a
+    // caller composite an off-screen pass without a colour key.
+    const std::vector<float>& depth() const {return depth_;}
     std::vector<std::uint32_t>& canvas(){return pixels_;}
     // Trilinear mipmapping with up to 4x anisotropic taps (removes texture
     // shimmer). Off reproduces the previous nearest-neighbour sampling.

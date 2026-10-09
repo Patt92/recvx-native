@@ -8,23 +8,27 @@ using namespace recvx;
 // Kollisionstypen 0..7 aus effect_collision.inc und die Trümmer-/Rauchspur
 // (bhSetExplosionEffect, bhEff024/025) aus effect_sprites.inc. Beide
 // Generatoren und Includes sind Quarantäne, siehe
-// native/effect_collision.cpp und native/effect_sprites.cpp. Geprüft bleibt
-// nur, dass die Lücken sich wie dokumentiert verhalten: keine Treffer, keine
-// Reflexion, keine Effektanforderung und keine gebundene Prozedur.
+// native/effect_collision.cpp und native/effect_sprites.cpp. Boden und
+// Wandkontakt, Linien und Reflexion sind jetzt positiv geprüft. Effekt-
+// prozeduren bleiben getrennte Lückenverträge, kein Wirkungsnachweis.
 static void check(bool b,const char* s){if(!b)throw std::runtime_error(s);}
 int main(){try{_Make_SinTable();
     const std::vector<CollisionWall> walls{{1,0,0,0,0,{0,0,0},{10,10,10},{}}};
-    check(!effect_wall(walls,20,{.01f,2,5},0x400,.1f,.1f),"wall probe gap reports a guessed hit");
+    check(effect_wall(walls,20,{.01f,2,5},0x400,.1f,.1f).has_value(),"native even wall contact missing");
     NJS_POINT3 pos{.01f,2,5};int ay=8192;
     reflect_effect_wall(walls[0],20,pos,.1f,.1f,ay);
-    check(pos.x==.01f&&pos.y==2&&pos.z==5&&ay==8192,"wall reflection gap moved the position or angle");
+    check(pos.x==-.1f&&pos.y==2&&pos.z==5&&ay==-8192,"native box reflection did not project and reflect x");
     NJS_POINT3 end{5,0,5},normal{};
-    check(!effect_line(walls,20,{-5,0,5},end,normal,0,-1),"line query gap reports a guessed hit");
+    check(effect_line(walls,20,{-5,0,5},end,normal,0,-1).has_value()&&end.x==0&&normal.x==-1,
+          "native line query did not clip at the box's left face");
     std::size_t index=0;
     check(original_ground_position(walls,20,{5,5,5},&index)==-1000&&index==std::size_t(-1),
-          "ground query gap does not report the original no-ground sentinel");
+          "probe below box top incorrectly reports ground");
+    check(original_ground_position(walls,20,{5,11,5},&index)==10&&index==0,
+          "native box-top ground or hit index missing");
     {GroundCollision ground;ground.update(walls,20);
-     check(ground.query({5,5,5})==-1000&&!ground.hit(),"persistent ground gap reports a height or htp");}
+     check(ground.query({5,5,5})==-1000&&!ground.hit(),"below-top ground incorrectly reports a hit");
+     check(ground.query({5,11,5})==10&&ground.hit(),"persistent native ground not bound");}
     set_effect_walls(&walls,20);set_effect_context({0,1,0,0,0,0,8});
     set_explosion_effect({-2,2,5},{0,0,1});set_explosion({-2,2,5},{0,0,1});
     const auto request=take_effect_output();
@@ -39,5 +43,5 @@ int main(){try{_Make_SinTable();
     check(common_effect_categories().empty(),"effect categories gap invented ef_info entries");
     check(common_effect_textures_offset({})==std::size_t(-1),"effect texture offset gap returns a guessed offset");
     set_effect_walls(nullptr,0);
-    std::cout<<"Collision and effect procedures report their documented gaps; no substitute hits or spawns.\n";return 0;
+    std::cout<<"Native ground/contact/line/reflection passed; explosion/effect procedures remain documented gaps.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

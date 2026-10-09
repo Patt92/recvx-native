@@ -26,8 +26,15 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     parameters_.assign(model_.begin()+offsets[3],model_.begin()+offsets[3]+sizes[3]);BinaryView param(parameters_);
     if(param.u8(0)!='P'||param.u8(1)!='M'||param.u8(2)!='B'||!param.u8(3))throw std::runtime_error("invalid door parameters");
     const unsigned requested_case=(request.attribute&0x180)>>7,selected=requested_case<param.u8(3)?requested_case:0;
-    const auto table=4+selected*20;param.require(table,20);std::array<unsigned,3> types{};std::array<std::size_t,3> po{};
-    for(unsigned i=0;i<3;++i){types[i]=param.u16(table+i*4);po[i]=param.u16(table+i*4+2);if(types[i]>(i==0?1u:7u))throw std::runtime_error("unsupported door procedure");if(po[i]%4)throw std::runtime_error("unaligned door parameters");param.require(po[i],recvx_door_parameter_size(i,types[i]));}
+    // PT_WORK: five procedure slots (fade, camera, door, light, shake), each a
+    // number and an offset relative to the parameter block.
+    const auto table=4+selected*20;param.require(table,20);std::array<unsigned,5> types{};std::array<std::size_t,5> po{};
+    for(unsigned i=0;i<5;++i){types[i]=param.u16(table+i*4);po[i]=param.u16(table+i*4+2);}
+    for(unsigned i=0;i<3;++i){
+        if(types[i]>(i==0?1u:7u))throw std::runtime_error("unsupported door procedure");
+        if(po[i]%4)throw std::runtime_error("unaligned door parameters");
+        param.require(po[i],recvx_door_parameter_size(i,types[i]));
+    }
     if(!types[0]||!recvx_door_validate_view(types[1],parameters_.data()+po[1],parameters_.size()-po[1],0))throw std::runtime_error("invalid door camera/fade parameters");
     BinaryView mdl(model_);count_=mdl.u16(model_offset_+6);if(!count_||count_>128)throw std::runtime_error("invalid door node count");
     const auto base=mdl.relative(model_offset_,mdl.u16(model_offset_+4),0);objects_=mdl.relative(base,mdl.u32(model_offset_+12),count_*52);
@@ -35,8 +42,12 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     nodes_.assign(std::max<std::size_t>(count_,64),{});
     for(unsigned i=0;i<count_;++i){const auto o=objects_+i*52;auto& n=nodes_[i];n.evalflags=mdl.u32(o);n.model=mdl.u32(o+4);for(unsigned k=0;k<3;++k){n.pos[k]=mdl.f32(o+8+k*4);n.ang[k]=mdl.i32(o+20+k*4);}}
     if((types[2]==2&&count_<51)||(types[2]==4&&count_<4)||(types[2]==6&&count_<4)||(types[2]==7&&count_<4))throw std::runtime_error("door procedure does not match model nodes");
-    core_={};core_.dmo_atr=int(request.attribute);core_.objP=nodes_.data();core_.fpP=parameters_.data()+po[0];core_.vpP=parameters_.data()+po[1];core_.dpP=parameters_.data()+po[2];
-    recvx_door_configure(&core_,types[0],types[1],types[2]);
+    core_={};core_.dmo_atr=int(request.attribute);core_.objP=nodes_.data();core_.nodes=unsigned(count_);
+    core_.fpP=parameters_.data()+po[0];core_.vpP=parameters_.data()+po[1];core_.dpP=parameters_.data()+po[2];
+    // light.c LightProc1/2 and the PuruProc shake are not driven here; their
+    // numbers are kept so the gap is visible instead of silent.
+    core_.lgt_type=int(types[3]);core_.pru_type=int(types[4]);
+    if(!recvx_door_configure(&core_,types[0],types[1],types[2]))throw std::runtime_error("door packet selects an undefined procedure");
     if(request.attribute&1)core_.status|=0x4000;if(request.attribute&4)core_.status|=0x4800;if(request.attribute&16)core_.status|=0xa000;if(request.attribute&8)core_.status|=0x1000;
     if(count_<5)core_.status&=~0x3000;
     if(request.attribute&2){core_.status^=0xc00;if(count_>=5)core_.status^=0x2000;else core_.status&=~0x2000;}

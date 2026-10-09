@@ -206,8 +206,10 @@ const MotionClip& RoomWorld::enemy_library_clip(unsigned identity,unsigned index
     const auto library=enemy_motions_.find(identity);if(library==enemy_motions_.end()||index>=library->second.entries.size()||!library->second.entries[index].second)throw std::runtime_error("enemy library motion unavailable");
     auto& decoded=library->second.decoded;auto at=decoded.find(index);if(at==decoded.end()){const auto entry=library->second.entries.at(index);at=decoded.emplace(index,decode_motion_asset(section(room_,entry.first,entry.second))).first;}return at->second;
 }
-const MotionClip& RoomWorld::entity_motion(const WorldEntity& e)const{
-    const auto& clip=entity_motion_data(e);
+const MotionClip& RoomWorld::entity_motion(const WorldEntity& e)const{return motion_clip(e,e.motion,e.room_motion);}
+const MotionClip& RoomWorld::posed_motion_clip(const WorldEntity& e)const{return motion_clip(e,e.posed_motion(),e.posed_room_motion());}
+const MotionClip& RoomWorld::motion_clip(const WorldEntity& e,unsigned motion,bool room_motion)const{
+    const auto& clip=entity_motion_data(e,motion,room_motion);
     // bhSetMotion selects SetMtnSlow from either mtn_md bit 8 or MN_WORK
     // flag 0x20. The file flag alone misses script-requested fractional poses.
     if(!e.scripted||!e.motion_slow||clip.interpolate)return clip;
@@ -215,19 +217,19 @@ const MotionClip& RoomWorld::entity_motion(const WorldEntity& e)const{
     if(at==slow_motion_clips_.end()){auto slow=clip;slow.interpolate=true;at=slow_motion_clips_.emplace(&clip,std::move(slow)).first;}
     return at->second;
 }
-const MotionClip& RoomWorld::entity_motion_data(const WorldEntity& e)const{
-    if(e.room_motion){const auto& lower=room_motions_.at(e.motion);if(e.identity==1&&lower.positions.size()==8){auto at=room_motion_segments_.find(e.motion);if(at==room_motion_segments_.end()){const auto& upper=room_motions_.at(e.motion+1);if(upper.positions.size()!=10)throw std::runtime_error("room segmented upper motion missing");at=room_motion_segments_.emplace(e.motion,join_motion_segments(lower,upper)).first;}return at->second;}return lower;}
-    const auto library=enemy_motions_.find(e.identity);if(library==enemy_motions_.end()||e.motion>=library->second.entries.size())throw std::runtime_error("built-in enemy motion unavailable");
+const MotionClip& RoomWorld::entity_motion_data(const WorldEntity& e,unsigned e_motion,bool e_room_motion)const{
+    if(e_room_motion){const auto& lower=room_motions_.at(e_motion);if(e.identity==1&&lower.positions.size()==8){auto at=room_motion_segments_.find(e_motion);if(at==room_motion_segments_.end()){const auto& upper=room_motions_.at(e_motion+1);if(upper.positions.size()!=10)throw std::runtime_error("room segmented upper motion missing");at=room_motion_segments_.emplace(e_motion,join_motion_segments(lower,upper)).first;}return at->second;}return lower;}
+    const auto library=enemy_motions_.find(e.identity);if(library==enemy_motions_.end()||e_motion>=library->second.entries.size())throw std::runtime_error("built-in enemy motion unavailable");
     auto decode=[&](unsigned index)->const MotionClip&{auto& decoded=library->second.decoded;auto at=decoded.find(index);if(at==decoded.end()){const auto entry=library->second.entries.at(index);if(!entry.second)throw std::runtime_error("empty built-in enemy motion");at=decoded.emplace(index,decode_motion_asset(section(room_,entry.first,entry.second))).first;}return at->second;};
-    const auto& lower=decode(e.motion);
+    const auto& lower=decode(e_motion);
     // Common_controll 25 sets the linked en01 actor to mtn_no + 0xc8.
     // bhEne01_SetMtn samples it at objP + 8. All dumped paired clips have
     // matching clocks; cache the complete 18-channel body, shared by identity.
-    if(e.identity==1&&e.motion<200&&lower.positions.size()==8){auto index=e.motion+200;
+    if(e.identity==1&&e_motion<200&&lower.positions.size()==8){auto index=e_motion+200;
         // The linked upper-body work (exp1) may play a clip other than motion+200 (e.g. 118 while walking, 119 running).
         if(e.upper_motion&&e.upper_motion<library->second.entries.size()&&library->second.entries[e.upper_motion].second&&decode(e.upper_motion).positions.size()==10&&decode(e.upper_motion).frames==lower.frames)index=e.upper_motion;
         if(index>=library->second.entries.size()||!library->second.entries[index].second)throw std::runtime_error("segmented enemy upper motion missing");
-        auto& cache=library->second.segmented;const unsigned key=e.motion*1024+index;auto at=cache.find(key);if(at==cache.end()){const auto& upper=decode(index);if(upper.positions.size()!=10)throw std::runtime_error("segmented enemy upper skeleton differs");at=cache.emplace(key,join_motion_segments(lower,upper)).first;}return at->second;}
+        auto& cache=library->second.segmented;const unsigned key=e_motion*1024+index;auto at=cache.find(key);if(at==cache.end()){const auto& upper=decode(index);if(upper.positions.size()!=10)throw std::runtime_error("segmented enemy upper skeleton differs");at=cache.emplace(key,join_motion_segments(lower,upper)).first;}return at->second;}
     return lower;
 }
 std::vector<RoomWorld::CombatTarget> RoomWorld::combat_targets()const{std::vector<CombatTarget> out;for(const auto& pair:entities_){const auto& e=pair.second;if(pair.first.first==1&&(e.identity==1||e.identity==0||e.identity==4)&&e.combat_enabled&&!e.hidden&&!e.inactive&&!e.dead&&!entity_hidden(1,pair.first.second)){
@@ -284,7 +286,7 @@ bool RoomWorld::damage(unsigned index,int weapon,int amount,unsigned comb_flg,NJ
 }
 std::optional<RoomWorld::JointHit> RoomWorld::enemy_capsule_hit(unsigned index,NJS_POINT3 start,NJS_POINT3 end,float radius){
     auto it=entities_.find({1,index});if(it==entities_.end()||!it->second.en01||(it->second.identity!=1&&it->second.identity!=4))return {};
-    auto& e=it->second;for(const auto& model:models_)if(model.kind==1&&model.index==index&&model.actor){const auto& clip=entity_motion(e);const auto bones=model.actor->script_nodes(model.actor->pose_clip(clip,e.pose_frame(),e.transform.position,e.transform.yaw,model.actor->motion_nodes(clip.positions.size())));std::vector<float> matrices;for(const auto& bone:bones)matrices.insert(matrices.end(),bone.value,bone.value+16);recvx_en01_set_joints(e.en01.get(),matrices.data(),unsigned(bones.size()));break;}
+    auto& e=it->second;for(const auto& model:models_)if(model.kind==1&&model.index==index&&model.actor){const auto& clip=posed_motion_clip(e);const auto bones=model.actor->script_nodes(model.actor->pose_clip(clip,e.posed_frame(),e.transform.position,e.transform.yaw,model.actor->motion_nodes(clip.positions.size())));std::vector<float> matrices;for(const auto& bone:bones)matrices.insert(matrices.end(),bone.value,bone.value+16);recvx_en01_set_joints(e.en01.get(),matrices.data(),unsigned(bones.size()));break;}
     float point[3];const int joint=recvx_en01_capsule_hit(e.en01.get(),&start.x,&end.x,radius,point);if(joint<0)return {};return JointHit{joint,{point[0],point[1],point[2]}};
 }
 void RoomWorld::set_enemy_health(unsigned index,int hp){auto at=entities_.find({1,index});if(at==entities_.end())throw std::runtime_error("script HP assignment enemy unavailable");at->second.hp=hp;if(at->second.en01)recvx_en01_set_hp(at->second.en01.get(),hp);}
@@ -293,9 +295,8 @@ bool RoomWorld::enemy_dead(unsigned index)const{auto it=entities_.find({1,index}
 bool RoomWorld::step_clear(NJS_POINT3 probe,float radius,float height)const{
     // bhCheckExmAtari accepts no contact or the first contact's attr 4.
     // Preserve the original shape tests, type-7 height test and table order.
-    std::vector<RECVX_STAIR_AREA> areas;for(const auto& w:collision_geometry())areas.push_back({(unsigned char)w.flags,(unsigned char)w.type,(unsigned char)w.id,(signed char)w.floor,w.attributes,w.position.x,w.position.y,w.position.z,w.extent.x,w.extent.y,w.extent.z,(unsigned char)w.parameters[0],(unsigned char)w.parameters[1],(unsigned char)w.parameters[2],(unsigned char)w.parameters[3]});
-    unsigned attr=0;const int hit=recvx_push_probe(areas.data(),areas.size(),room_height_,probe.x,probe.y,probe.z,radius,height,0x119,&attr);
-    return !hit||(attr&4);
+    const auto hit=collision_contact(probe,0x119,radius,height);
+    return !hit||(hit->attributes&4);
 }
 
 unsigned RoomWorld::floor_sound(int floor,float x,float z,bool special)const{
@@ -325,10 +326,55 @@ const ModelNodeOverrides& RoomWorld::overrides(unsigned kind,unsigned index)cons
 const RoomWorld::Model& RoomWorld::model(unsigned kind,unsigned index)const{for(const auto& m:models_)if(m.kind==kind&&m.index==index)return m;throw std::runtime_error("model control has no realized model");}
 unsigned RoomWorld::model_index(unsigned kind,unsigned index,unsigned node)const{if(!kind){if(!player_asset_)throw std::runtime_error("player model control requires player asset");return player_asset_->model_index(node);}const auto& m=model(kind,index);if(m.actor)return m.actor->model_index(node);if(node>=m.rest_pose.size())throw std::runtime_error("object model control node outside hierarchy");return node;}
 ModelPose RoomWorld::model_pose(unsigned kind,unsigned index,unsigned node)const{return model_pose_physical(kind,index,model_index(kind,index,node));}
-ModelPose RoomWorld::model_pose_physical(unsigned kind,unsigned index,unsigned physical)const{auto edits=overrides(kind,index);if(!kind&&push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;if(!kind)return (player_room_motion_?player_asset_->local_pose_clip(room_motions_.at(motion_),frame_,{},edits):player_asset_->local_pose(motion_,frame_,edits)).at(physical);const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(m.actor){if(e->has_motion){const auto& clip=entity_motion(*e);return m.actor->local_pose_clip(clip,e->pose_frame(),m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=object_pose(m,*e).at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
+ModelPose RoomWorld::model_pose_physical(unsigned kind,unsigned index,unsigned physical)const{auto edits=overrides(kind,index);if(!kind&&push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;if(!kind)return (player_room_motion_?player_asset_->local_pose_clip(room_motions_.at(motion_),frame_,{},edits):player_asset_->local_pose(motion_,frame_,edits)).at(physical);const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(m.actor){if(e->posed_has_motion()){const auto& clip=posed_motion_clip(*e);return m.actor->local_pose_clip(clip,e->posed_frame(),m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=object_pose(m,*e).at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
+std::optional<Scene> RoomWorld::computer_character(unsigned chr_no,unsigned motion,unsigned frame_no){
+    const auto found=entities_.find({1,chr_no});
+    if(found==entities_.end())return {};
+    auto& e=found->second;
+    // bhDrawSpEvtComCharacter writes the work of rom->enep[chr_no]: mtn_no,
+    // frm_no and a zero position/angle. It does NOT pose the object tree --
+    // bhSetMotion belongs to the enemy control pass, and that pass is off
+    // while the terminal owns the screen (sp_flg bit 0x2 clear). The scene
+    // below therefore comes from the committed pose, so the figure keeps the
+    // pose it already had; the new motion takes effect on the first control
+    // pass after the terminal exits.
+    e.room_motion=false;e.motion=motion;e.frame=std::int64_t(frame_no)*65536;e.step=65536;e.has_motion=true;
+    e.transform.position={0,0,0};e.transform.yaw=0;e.angles={0,0,0};
+    for(const auto& model:models_){
+        if(model.kind!=1||model.index!=chr_no||!model.actor)continue;
+        try{
+            Scene object;
+            if(e.posed_has_motion()){
+                const auto& clip=posed_motion_clip(e);
+                object=model.actor->sample_clip(clip,e.posed_frame(),{0,0,0},0,
+                                                model.actor->motion_nodes(clip.positions.size()));
+            } else object=model.actor->sample(0,0,{0,0,0},0);
+            object.textures=model.object.textures;
+            for(auto& t:object.triangles)t.object=model.actor->script_index(t.object);
+            object.triangles.erase(std::remove_if(object.triangles.begin(),object.triangles.end(),
+                [&](const auto& t){const auto at=e.hidden_nodes.find(t.object);return at!=e.hidden_nodes.end()&&at->second;}),object.triangles.end());
+            // njCnkSetEasyLightColor(1,1,1) / njCnkSetEasyLightIntensity(1, 0.2)
+            // / njCnkSetEasyLight(4, 6, 10): one white directional light plus a
+            // flat ambient, evaluated per vertex like the room pass.
+            NJS_VECTOR light{4,6,10};njUnitVector(&light);
+            for(auto& t:object.triangles){
+                for(auto& vertex:t.vertices){
+                    auto normal=vertex.normal;njUnitVector(&normal);
+                    const float level=std::clamp(0.2f+std::max(0.f,light.x*normal.x+light.y*normal.y+light.z*normal.z),0.f,1.f);
+                    vertex.light={level,level,level};
+                }
+                t.gouraud=true;t.world_lit=true;t.camera_mask=false;
+            }
+            return object;
+        }catch(const std::runtime_error&){
+            return {};
+        }
+    }
+    return {};
+}
 void RoomWorld::start_task(unsigned level){auto& task=contexts_.at(level);task.mode1=0;task.positions={};task.angles={};}
 std::vector<ModelPose> RoomWorld::object_pose(const Model& model,const WorldEntity& state)const{
-    auto pose=state.has_motion?sample_motion_pose(entity_motion(state),state.pose_frame(),model.rest_pose):model.rest_pose;
+    auto pose=state.posed_has_motion()?sample_motion_pose(posed_motion_clip(state),state.posed_frame(),model.rest_pose):model.rest_pose;
     for(const auto& pair:state.node_overrides){auto& node=pose.at(pair.first);if(pair.second.position)node.position=*pair.second.position;if(pair.second.angles)node.angles=*pair.second.angles;}return pose;
 }
 std::vector<BoneMatrix> RoomWorld::object_matrices(const Model& model,const WorldEntity& state,const NJS_MATRIX& transform)const{
@@ -567,14 +613,13 @@ void RoomWorld::tick_en01(){
     recvx_en01_set_player(&player);recvx_en01_set_ai(enemy_ai_?1:0);
     // The joint matrices of the pose the enemy had at the end of the last tick (mlwP->owP), computed from its own motion state.
     auto pose_of=[this](const WorldEntity& e,unsigned index)->std::vector<BoneMatrix>{
-        if(!e.has_motion)return {};for(const auto& m:models_)if(m.kind==1&&m.index==index&&m.actor){const auto& clip=entity_motion(e);return m.actor->script_nodes(m.actor->pose_clip(clip,e.pose_frame(),e.transform.position,e.transform.yaw,m.actor->motion_nodes(clip.positions.size())));}
+        if(!e.posed_has_motion())return {};for(const auto& m:models_)if(m.kind==1&&m.index==index&&m.actor){const auto& clip=posed_motion_clip(e);return m.actor->script_nodes(m.actor->pose_clip(clip,e.posed_frame(),e.transform.position,e.transform.yaw,m.actor->motion_nodes(clip.positions.size())));}
         return {};};
-    en01_wall_probe_hook=[this](const float* p,float r,float h,unsigned)->int{return step_clear({p[0],p[1],p[2]},r>0?r:0.2f,h>0?h:0.01f)?0:1;};
+    en01_wall_probe_hook=[this](const float* p,float r,float h,unsigned flags)->int{return collision_contact({p[0],p[1],p[2]},flags,r,h)?1:0;};
     en01_wall_move_hook=[this](float* pos,const float* prev,float r,float h,unsigned flg,unsigned stflg)->int{
         auto to=move_walls(walls_,room_height_,floors_,{prev[0],prev[1],prev[2]},{pos[0],pos[1],pos[2]},r>0?r:3.5f,h>0?h:16.5f,flg,stflg);pos[0]=to.x;pos[1]=to.y;pos[2]=to.z;return 1;};
-    en01_line_hook=[this](const float* a,const float* b)->int{const NJS_POINT3 d{b[0]-a[0],b[1]-a[1],b[2]-a[2]};const float length=std::sqrt(d.x*d.x+d.y*d.y+d.z*d.z);if(length<=0.01f)return 0;
-        return shot_distance({a[0],a[1],a[2]},{d.x/length,d.y/length,d.z/length},length)<length-0.01f?1:0;};
-    en01_line_hit=[this](const float* a,float* b,float* normal,unsigned char* record){NJS_POINT3 end{b[0],b[1],b[2]},n;const auto hit=effect_line(walls_,room_height_,{a[0],a[1],a[2]},end,n);if(!hit)return 0;b[0]=end.x;b[1]=end.y;b[2]=end.z;normal[0]=n.x;normal[1]=n.y;normal[2]=n.z;std::fill(record,record+36,0);record[0]=hit->flags;record[1]=hit->type;record[2]=hit->id;record[3]=hit->floor;std::memcpy(record+4,&hit->attributes,4);return 1;};
+    en01_line_hook=[this](const float* a,const float* b)->int{NJS_POINT3 end{b[0],b[1],b[2]},normal{};return collision_line({a[0],a[1],a[2]},end,normal)?1:0;};
+    en01_line_hit=[this](const float* a,float* b,float* normal,unsigned char* record){NJS_POINT3 end{b[0],b[1],b[2]},n{};const auto hit=collision_line({a[0],a[1],a[2]},end,n);if(!hit)return 0;b[0]=end.x;b[1]=end.y;b[2]=end.z;normal[0]=n.x;normal[1]=n.y;normal[2]=n.z;const auto atr=collision_record(*hit);std::memcpy(record,&atr,sizeof atr);return 1;};
     en01_fix_hook=[this,pose_of](RECVX_EN01* work,const char* tree,const float* offset,float* out){
         // bhCalcFixOffset: where the new local pose puts the foot joint chain vs. where the previous pose left it.
         for(const auto& pair:entities_)if(pair.first.first==1&&pair.second.en01.get()==work){const auto& e=pair.second;
@@ -623,18 +668,18 @@ void RoomWorld::tick_en01(){
     }
     en01_spawn_hook=nullptr;en01_explode_hook=nullptr;en01_particle_hook=nullptr;en01_blood_hook=nullptr;
     if(simulation_flags_&1u)recvx_en01_player_tick();
-    {RECVX_EN01_PLAYER_STATE state;recvx_en01_player_state(&state); // hp lost in a grab (the original lowers plp->hp)
+    {RECVX_EN01_PLAYER_STATE state;if(recvx_en01_player_state(&state)){ // hp lost in a bound grab (the original lowers plp->hp)
      if(state.hp<player_hp_){blast_damage_+=player_hp_-state.hp;player_hp_=state.hp;}
      if(state.hp<0)player_killed_=true;
-     if(state.mode0==6&&(state.flg&2))player_dead_=true;}
+     if(state.mode0==6&&(state.flg&2))player_dead_=true;}}
     audio_.exec_enemy_se(); // ExecEnemySeManager
     en01_wall_probe_hook=nullptr;en01_wall_move_hook=nullptr;en01_line_hook=nullptr;en01_line_hit=nullptr;en01_fix_hook=nullptr;en01_se_request=nullptr;en01_se_playing=nullptr;en01_player_voice=nullptr;
 }
 // bhEne01_SetMtn writes object 8's X/Y angles after bhSetMotion (the Z angle keeps the motion value).
 void RoomWorld::apply_en01_flinch(){
     for(auto& pair:entities_){auto& e=pair.second;if(pair.first.first!=1||e.identity!=1||!e.en01||!e.has_motion||e.scripted)continue;
-        for(const auto& m:models_)if(m.kind==1&&m.index==pair.first.second&&m.actor){const auto& clip=entity_motion(e);const auto nodes=m.actor->motion_nodes(clip.positions.size());
-            const auto pose=m.actor->local_pose_clip(clip,e.pose_frame(),nodes);const unsigned node=m.actor->model_index(8);if(e.flinch&&node<pose.size())e.node_overrides[node].angles=std::array<Angle,3>{Angle(e.flinch_angles[0]),Angle(e.flinch_angles[1]),pose[node].angles[2]};const unsigned neck=m.actor->model_index(11);if(neck<pose.size())e.node_overrides[neck].angles=std::array<Angle,3>{pose[neck].angles[0],Angle(e.neck_angle),pose[neck].angles[2]};break;}}
+        for(const auto& m:models_)if(m.kind==1&&m.index==pair.first.second&&m.actor){const auto& clip=posed_motion_clip(e);const auto nodes=m.actor->motion_nodes(clip.positions.size());
+            const auto pose=m.actor->local_pose_clip(clip,e.posed_frame(),nodes);const unsigned node=m.actor->model_index(8);if(e.flinch&&node<pose.size())e.node_overrides[node].angles=std::array<Angle,3>{Angle(e.flinch_angles[0]),Angle(e.flinch_angles[1]),pose[node].angles[2]};const unsigned neck=m.actor->model_index(11);if(neck<pose.size())e.node_overrides[neck].angles=std::array<Angle,3>{pose[neck].angles[0],Angle(e.neck_angle),pose[neck].angles[2]};break;}}
 }
 // bhSetEffectTb/bhSetEffect: first free entry of the shared original eff[512] table.
 int RoomWorld::spawn_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index){
@@ -687,7 +732,8 @@ std::vector<BoneMatrix> RoomWorld::player_joints_now()const{
     }catch(const std::exception&){return {};}
 }
 void RoomWorld::sync_player_grab(){
-    RECVX_EN01_PLAYER_STATE state;recvx_en01_player_state(&state);const bool grabbed=state.mode0==4||state.mode0==6;
+    RECVX_EN01_PLAYER_STATE state;if(!recvx_en01_player_state(&state))return;
+    const bool grabbed=state.mode0==4||state.mode0==6;
     if(grabbed){
         if(!grab_driving_){grab_driving_=true;}
         player_scripted=true;player_enemy_motion_=state.enemy_clip!=0;player_room_motion_=false;
@@ -722,7 +768,7 @@ void RoomWorld::tick(){
 
     auto refresh=[](ModelNodeOverrides& edits,const MotionClip& clip,const std::vector<unsigned>& nodes){for(unsigned channel=0;channel<clip.positions.size();++channel){const auto node=nodes.empty()?channel:nodes.at(channel);const auto at=edits.find(node);if(at==edits.end())continue;if(!clip.positions[channel].empty())at->second.position.reset();at->second.angles.reset();if(!at->second.position&&!at->second.angles)edits.erase(at);}};
     for(auto& pair:entities_){auto& e=pair.second;if(pair.first.first==0){if(player_asset_&&player_scripted&&!player_enemy_motion_){const auto& clip=player_room_motion_?room_motions_.at(motion_):player_asset_->motion_clip(motion_);refresh(e.node_overrides,clip,player_asset_->motion_nodes(clip.positions.size()));}}
-        else if(e.has_motion)for(const auto& m:models_)if(m.kind==pair.first.first&&m.index==pair.first.second&&m.actor){const auto& clip=entity_motion(e);refresh(e.node_overrides,clip,m.actor->motion_nodes(clip.positions.size()));break;}}
+        else if(e.posed_has_motion())for(const auto& m:models_)if(m.kind==pair.first.first&&m.index==pair.first.second&&m.actor){const auto& clip=posed_motion_clip(e);refresh(e.node_overrides,clip,m.actor->motion_nodes(clip.positions.size()));break;}}
     // bhControlMask/fmSetLipSyncParam: sample before advancing, two VSync units
     // for each lip tick; face motion uses its independent one-frame clock.
     for(const auto& m:models_)if(m.actor&&m.actor->face()){auto& e=entity(m.kind,m.index);const auto& base=m.actor->face()->keys();const auto& keys=e.face_keys.empty()?base:e.face_keys;auto param=sample_face_parameters(keys,e.face_frame);
@@ -745,14 +791,16 @@ void RoomWorld::tick(){
             e.transform.position.x=w.px;e.transform.position.z=w.pz;e.transform.yaw=w.ay;if(!e.subplayer_no_motion)e.motion=w.mtn_no;e.step=w.mtn_add;advance=w.advanced&&!e.subplayer_no_motion;
         }
         if(advance&&(!e.scripted||e.motion_mode3!=4)&&(!(e.scripted||e.subplayer_bound)||pair.first.first!=1||(simulation_flags_&2u))){if(e.scripted)e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);}
-    }}if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
+    }
+    // bhSetMotion/bhCalcModel write the object tree inside the control pass.
+    // Committing here, and only here, is what makes a work written while the
+    // pass is paused invisible until the pass runs again.
+    e.commit_pose();}if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
     apply_en01_flinch();
     sync_player_grab();
     if(background_pending_){if(background_delay_)--background_delay_;else{background_=background_target_;background_pending_=false;}}
-    // Room/event-only worlds may intentionally omit the player asset. They
-    // have no bhInitPlayer work to pass to bhCheckWall; explicit movement in
-    // that state still fails in move() instead of inventing host collision.
-    if(player_asset_&&!player_scripted&&!player_hidden&&!player_action)player_.position=move(player_.position,player_.position);
+    // Free locomotion owns its collision pass in move_player after selecting
+    // the candidate. Do not run a second neutral/input-free pass here.
     if(fade_step_>0)fade_=std::min(fade_target_,fade_+fade_step_);if(fade_step_<0)fade_=std::max(fade_target_,fade_+fade_step_);
 }
 Scene RoomWorld::sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes,const ModelNodeOverrides& combat)const{
@@ -767,7 +815,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     actor_nodes_.clear();if(!player_nodes.empty())actor_nodes_[{0,0}]=player_nodes;
     const auto player_state=entities_.find({0,0});if(player_state!=entities_.end())scene.triangles.erase(std::remove_if(scene.triangles.begin(),scene.triangles.end(),[&](const auto& t){const auto at=player_state->second.hidden_nodes.find(t.object);return !t.camera_mask&&at!=player_state->second.hidden_nodes.end()&&at->second;}),scene.triangles.end());
     for(const auto& model:models_){const auto found=entities_.find({model.kind,model.index});if(found==entities_.end()||entity_hidden(model.kind,model.index))continue;const auto& e=found->second;Scene object;
-        if(model.actor){FaceParameter facial;const FaceParameter* fp=nullptr;if(model.actor->face()){facial=e.facial?*e.facial:sample_face_parameters(e.face_keys.empty()?model.actor->face()->keys():e.face_keys,e.face_frame);fp=&facial;}if(e.has_motion){const auto& clip=entity_motion(e);const auto nodes=model.actor->motion_nodes(clip.positions.size());try{object=model.actor->sample_clip(clip,e.pose_frame(),e.transform.position,e.transform.yaw,nodes,&actor_nodes_[{model.kind,model.index}],e.node_overrides,fp);}catch(const std::runtime_error& error){throw std::runtime_error(std::string(error.what())+"; entity="+std::to_string(model.kind)+"/"+std::to_string(model.index)+", identity="+std::to_string(e.identity)+", motion="+(e.room_motion?"room/":"builtin/")+std::to_string(e.motion)+", frame="+std::to_string(e.frame));}}else object=model.actor->sample(0,0,e.transform.position,e.transform.yaw,&actor_nodes_[{model.kind,model.index}],e.node_overrides,fp);object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=model.actor->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=model.actor->script_index(t.object);}
+        if(model.actor){FaceParameter facial;const FaceParameter* fp=nullptr;if(model.actor->face()){facial=e.facial?*e.facial:sample_face_parameters(e.face_keys.empty()?model.actor->face()->keys():e.face_keys,e.face_frame);fp=&facial;}if(e.posed_has_motion()){const auto& clip=posed_motion_clip(e);const auto nodes=model.actor->motion_nodes(clip.positions.size());try{object=model.actor->sample_clip(clip,e.posed_frame(),e.transform.position,e.transform.yaw,nodes,&actor_nodes_[{model.kind,model.index}],e.node_overrides,fp);}catch(const std::runtime_error& error){throw std::runtime_error(std::string(error.what())+"; entity="+std::to_string(model.kind)+"/"+std::to_string(model.index)+", identity="+std::to_string(e.identity)+", motion="+(e.posed_room_motion()?"room/":"builtin/")+std::to_string(e.posed_motion())+", frame="+std::to_string(e.posed_frame()));}}else object=model.actor->sample(0,0,e.transform.position,e.transform.yaw,&actor_nodes_[{model.kind,model.index}],e.node_overrides,fp);object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=model.actor->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=model.actor->script_index(t.object);}
         else {object=model.object;if(e.has_motion||!e.node_overrides.empty()){ModelGeometryOptions edited;edited.pose=object_pose(model,e);object=decode_model_asset(room_,model.source_model,0,edited);object.textures=model.object.textures;}NJS_MATRIX matrix;njUnitMatrix(&matrix);
             if(e.linked){if(const auto parent=link_matrix(e.parent_kind,e.parent_index,e.parent_node))std::copy(parent->value,parent->value+16,matrix);njTranslate(&matrix,e.link_offset.x,e.link_offset.y,e.link_offset.z);}
             else njTranslate(&matrix,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&matrix,e.angles[0],e.angles[1],e.angles[2]);actor_nodes_[{model.kind,model.index}]=object_matrices(model,e,matrix);for(auto& t:object.triangles)for(auto& vertex:t.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}}
@@ -821,7 +869,7 @@ std::optional<BoneMatrix> RoomWorld::link_matrix(unsigned kind,unsigned index,un
     if(!kind&&player_asset_){auto edits=overrides(0,0);if(push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;auto matrices=player_asset_->script_nodes(player_room_motion_?player_asset_->pose_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw,{},edits):player_asset_->pose(motion_,frame_,player_.position,player_.yaw,edits));if(node<matrices.size())return matrices[node];}
     const auto* e=state(kind,index);
     if(kind&&e)for(const auto& m:models_)if(m.kind==kind&&m.index==index){
-        if(m.actor){auto matrices=e->has_motion?m.actor->pose_clip(entity_motion(*e),e->pose_frame(),e->transform.position,e->transform.yaw,m.actor->motion_nodes(entity_motion(*e).positions.size()),e->node_overrides):m.actor->pose(0,0,e->transform.position,e->transform.yaw,e->node_overrides);matrices=m.actor->script_nodes(matrices);if(node<matrices.size())return matrices[node];}
+        if(m.actor){auto matrices=e->posed_has_motion()?m.actor->pose_clip(posed_motion_clip(*e),e->posed_frame(),e->transform.position,e->transform.yaw,m.actor->motion_nodes(posed_motion_clip(*e).positions.size()),e->node_overrides):m.actor->pose(0,0,e->transform.position,e->transform.yaw,e->node_overrides);matrices=m.actor->script_nodes(matrices);if(node<matrices.size())return matrices[node];}
         else {BoneMatrix transform;njUnitMatrix(&transform.value);if(e->linked){if(const auto parent=link_matrix(e->parent_kind,e->parent_index,e->parent_node,depth+1))std::copy(parent->value,parent->value+16,transform.value);njTranslate(&transform.value,e->link_offset.x,e->link_offset.y,e->link_offset.z);}else njTranslate(&transform.value,e->transform.position.x,e->transform.position.y,e->transform.position.z);njRotateXYZ(&transform.value,e->angles[0],e->angles[1],e->angles[2]);const auto matrices=object_matrices(m,*e,transform.value);if(node<matrices.size())return matrices[node];}
     }
     const auto cached=actor_nodes_.find({kind,index});if(cached!=actor_nodes_.end()&&node<cached->second.size())return cached->second[node];
@@ -882,6 +930,9 @@ void RoomWorld::ensure_push(){
     push_->terrain(areas(0x1c,0x9c),areas(0x20,0xa0));
 }
 std::vector<CollisionWall> RoomWorld::collision_geometry()const{auto out=walls_;if(push_){const auto mobile=push_->walls();out.insert(out.end(),mobile.begin(),mobile.end());}return out;}
+std::optional<CollisionWall> RoomWorld::collision_contact(NJS_POINT3 probe,unsigned flags,float radius,float height)const{return effect_wall(collision_geometry(),room_height_,probe,flags,radius,height);}
+std::optional<CollisionWall> RoomWorld::collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal)const{return effect_line(collision_geometry(),room_height_,start,end,normal);}
+std::optional<CollisionWall> RoomWorld::collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,bool omit_attribute4)const{return effect_line(collision_geometry(),room_height_,start,end,normal,flags,floor,omit_attribute4);}
 float RoomWorld::combat_ground(NJS_POINT3 probe){
     ensure_push();update_push();
     return ground_.query(probe);
@@ -921,16 +972,95 @@ bool RoomWorld::tick_push(bool forward){if(!pushing())return false;update_push()
 std::vector<RECVX_STAIR_AREA> RoomWorld::push_steps(){ensure_push();update_push();return push_?push_->steps():std::vector<RECVX_STAIR_AREA>{};}
 std::vector<RECVX_STAIR_AREA> RoomWorld::push_floors(){ensure_push();update_push();return push_?push_->floors():std::vector<RECVX_STAIR_AREA>{};}
 NJS_POINT3 RoomWorld::move(NJS_POINT3 from,NJS_POINT3 to,float radius,float height,std::optional<bool> walking){
-    ensure_push();
-    update_push();
-    NJS_POINT3 position;
-    if(push_&&(simulation_flags_&4u)&&!player_action&&walking.has_value()){position=push_->contact(from,to,player_.yaw,floor_at(from),*walking,push_health(),player_weapon_<10?0:1,motion_,frame_);player_action=push_->active();push_pose_=false;sync_push_objects();return position;}
-    else {if(!push_)throw std::runtime_error("original bhCheckWall player work unavailable before player asset binding");position=push_->resolve_wall(to,player_.yaw,floor_at(from),radius,height);}
-
-    // player.c stores bhGetGroundPosition() in plp->gpy after movement; it
-    // does not write that query result back to plp->py. Vertical movement is
-    // owned by the original player state routines (bhCPM2_act_kdu/kdd).
-    return position;
+    (void)walking;return resolve_player_motion(from,to,radius,height,{});
+}
+void RoomWorld::bind_player_collision(EventVm& events){
+    collision_events_=&events;
+    // bhSetPlayer / bhInitRoomChangePlayer's enabled collision/draw bits.
+    events.flags[13][0]|=0x918u;
+    events.player_flags=events.flags[13][0];
+    collision_previous_probe_={player_.position.x,player_.position.y+12.5f,player_.position.z};
+    collision_safe_=player_.position;collision_probe_ready_=true;
+    collision_floor_=floor_at(player_.position);
+    events.floor_binding=[this](NJS_POINT3 p,Angle ay,int floor){check_player_floor(p,ay,floor);};
+}
+MotionActor RoomWorld::motion_actor(){
+    auto& flags=collision_events_?collision_events_->flags[13][0]:collision_flags_;
+    auto& status=collision_events_?collision_events_->flags[14][0]:collision_status_;
+    auto& control=collision_events_?collision_events_->flags[10][0]:collision_control_;
+    auto& system=collision_events_?collision_events_->flags[5][0]:collision_system_;
+    return {flags,status,collision_flags2_,control,system,collision_mode_,collision_floor_,
+        collision_push_count_,collision_push_index_,collision_floor_sound_,collision_foot_effect_,
+        collision_step_,player_.yaw,true,[this](CollisionWall&){
+            // The existing effect owner rejects id29 explicitly. Do not
+            // clear attr0x40 or fabricate a rendered wall action on failure.
+            unbound_enemy_.insert("player wall attr0x40: effect29 and hurt-state continuation unported");
+            return false;
+        }};
+}
+std::vector<CollisionWall> RoomWorld::motion_steps()const{
+    std::vector<CollisionWall> result;
+    if(collision_events_){for(const auto& a:collision_events_->interactions)
+        result.push_back({a.flags,a.type,0,a.floor,a.attribute,a.position,a.extent,a.parameters});}
+    else{BinaryView v(room_);const auto base=v.u32(header_+0x1c),count=v.u32(header_+0x9c);v.require(base,count*36);
+        for(unsigned i=0;i<count;++i){const auto p=base+i*36;result.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),
+            {v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)},
+            {v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)}});}}
+    if(push_)for(const auto& a:push_->steps())result.push_back({a.flg,a.type,a.id,a.flr_no,a.attr,{a.px,a.py,a.pz},{a.w,a.h,a.d},{a.prm0,a.prm1,a.prm2,a.prm3}});
+    return result;
+}
+std::vector<CollisionWall> RoomWorld::motion_floors()const{
+    std::vector<CollisionWall> result;
+    if(collision_events_)for(const auto& a:collision_events_->floor_areas())result.push_back({a.flags,a.type,0,a.floor,a.attribute,a.position,a.extent,a.parameters});
+    else for(const auto& a:floor_sounds_)result.push_back(a.area);
+    if(push_)for(const auto& a:push_->floors())result.push_back({a.flg,a.type,a.id,a.flr_no,a.attr,{a.px,a.py,a.pz},{a.w,a.h,a.d},{a.prm0,a.prm1,a.prm2,a.prm3}});
+    return result;
+}
+void RoomWorld::check_player_floor(NJS_POINT3 position,Angle yaw,int floor){
+    if(!(simulation_flags_&1u)||(collision_events_&&!(collision_events_->flags[6][0]&1u)))return;
+    const auto steps=motion_steps(),flr=motion_floors();auto actor=motion_actor();actor.yaw=yaw;collision_floor_=floor;
+    if(!collision_probe_ready_)collision_safe_=position;
+    check_motion_floor({walls_,steps,flr,floors_,room_height_},actor,position,collision_safe_,collision_front_offset_,3.5f,collision_floor_index_);
+    if(collision_events_){collision_events_->values[16]=unsigned(collision_floor_index_);collision_events_->player_flags=actor.flags;}
+}
+NJS_POINT3 RoomWorld::move_player(NJS_POINT3 from,NJS_POINT3 to,int movement,bool run,int turn){
+    // bhCPM1_act_bas retains psh_ct only in straight walking mode2==3.
+    if(movement<=0||run||turn)collision_push_count_=0;
+    // bhCPM2_act_std/wlk/run/bak's actual arp values, not a probe heuristic.
+    const float target=movement>0?(run?3.f:2.f):movement<0?-1.f:0.f;
+    return resolve_player_motion(from,to,3.5f,player_character_?17.5f:16.5f,target);
+}
+NJS_POINT3 RoomWorld::resolve_player_motion(NJS_POINT3 from,NJS_POINT3 to,float radius,float height,std::optional<float> front_target){
+    ensure_push();update_push();
+    auto geometry=collision_geometry();const auto steps=motion_steps(),flr=motion_floors();
+    MotionTerrain terrain{geometry,steps,flr,floors_,room_height_};auto actor=motion_actor();collision_floor_=floor_at(from);
+    if(!(simulation_flags_&1u)||(collision_events_&&!(collision_events_->flags[6][0]&1u))||(actor.status&0x1000000))return to;
+    if(!collision_probe_ready_){collision_safe_=from;collision_previous_probe_={from.x,from.y+12.5f,from.z};collision_probe_ready_=true;}
+    if(front_target){
+        if(collision_front_offset_!=*front_target)collision_front_offset_+=.5f*(*front_target-collision_front_offset_);
+        float sine,cosine;njSinCos(player_.yaw,&sine,&cosine);
+        NJS_POINT3 probe{to.x-sine*collision_front_offset_,collision_mode_==3?to.y:to.y+12.5f,to.z-cosine*collision_front_offset_};
+        if(!(actor.flags&0x10)){
+            collision_previous_probe_=probe;
+            check_motion_floor(terrain,actor,to,collision_safe_,collision_front_offset_,radius,collision_floor_index_);
+            if(collision_events_){collision_events_->values[16]=unsigned(collision_floor_index_);collision_events_->player_flags=actor.flags;}
+            return to;
+        }
+        const unsigned saved_flags=actor.flags,saved_status=actor.status;
+        actor.flags&=~0x100u;actor.status&=~0x20001u;
+        const bool hit=resolve_motion_wall(terrain,actor,probe,collision_previous_probe_,radius,1.f);
+        if(hit)collision_safe_={probe.x,to.y,probe.z};
+        to.x+=probe.x-(to.x-sine*collision_front_offset_);to.z+=probe.z-(to.z-cosine*collision_front_offset_);
+        collision_previous_probe_=probe;
+        actor.flags=saved_flags;actor.status=saved_status&~1u;
+        resolve_motion_wall(terrain,actor,to,from,radius,height);
+        if(!hit)collision_safe_={probe.x,to.y,probe.z};
+    }else{actor.status&=~1u;resolve_motion_wall(terrain,actor,to,from,radius,height);collision_safe_=to;}
+    // Preserve mutable room ATR attributes changed by a push contact.
+    for(std::size_t i=0;i<walls_.size();++i)walls_[i].attributes=geometry[i].attributes;
+    check_motion_floor(terrain,actor,to,collision_safe_,collision_front_offset_,radius,collision_floor_index_);
+    if(collision_events_){collision_events_->values[16]=unsigned(collision_floor_index_);collision_events_->player_flags=actor.flags;}
+    return to;
 }
 }
 

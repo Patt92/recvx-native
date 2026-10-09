@@ -6,6 +6,7 @@ content must not be consumed at all. Data/layout-only generation is distinct
 from copied function bodies. There is no waiver, source whitelist or bypass.
 """
 import argparse
+import sys
 import json
 import os
 import re
@@ -223,7 +224,35 @@ def check_build(directory):
     return problems
 
 
-def check_binary(path, nm=None):
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def forbidden_symbols(names):
+    """Die Verbotsliste auf eine Symbolmenge angewandt."""
+    return sorted(name for name in names
+                  if DISPATCH.fullmatch(name) or name in {"sys", "plp", "rom", "ene", "eff"})
+
+
+def check_windows_binary(path, build_dir, nm, cache_dir=None):
+    """PE ohne Symboltabelle: Linkeingaben pruefen und Vergleichslink stellen.
+
+    Keine Ausnahme fuer das fehlende Symbolverzeichnis - der Nachweis wird
+    vollstaendig ueber die tatsaechlichen Linkeingaben und die Bytegleichheit
+    mit einem Vergleichslink gefuehrt (tools/windows_link_audit.py).
+    """
+    import windows_link_audit
+    if build_dir is None:
+        return [f"{path}: Windows binary without its build directory cannot be audited"]
+    cache = cache_dir or Path(build_dir).resolve().parents[0] / "toolchains/zig-cache"
+    try:
+        return [f"{path}: {problem}" for problem in windows_link_audit.audit(
+            Path(path).resolve(), Path(build_dir).resolve(), Path(path).name, Path(cache), nm,
+            forbidden_symbols)]
+    except Exception as error:  # fail closed
+        return [f"{path}: Windows link audit failed: {error}"]
+
+
+def check_binary(path, nm=None, build_dir=None):
     if not path.is_file() or forbidden_path(path.resolve()):
         return [f"{path}: missing or quarantined binary"]
     command = nm or shutil.which("llvm-nm") or shutil.which("nm")
@@ -232,10 +261,14 @@ def check_binary(path, nm=None):
     # Include local symbols too: static linkage must not hide a retired engine.
     result = subprocess.run([command, str(path)], capture_output=True, text=True)
     if result.returncode or not result.stdout.strip():
+        # Ein PE ohne Symbolverzeichnis ist kein Nachweis - und keine Ausnahme.
+        # Der Nachweis laeuft dann ueber Linkeingaben und Vergleichslink.
+        if path.suffix.lower() == ".exe":
+            return check_windows_binary(path, build_dir, command)
         return [f"{path}: symbol audit failed/empty (stripped binary is not evidence of absence)"]
     # Strip the object-symbol ABI underscore, not the original symbol itself.
     names = {line.split()[-1].lstrip("_") for line in result.stdout.splitlines() if line.split()}
-    forbidden = sorted(name for name in names if DISPATCH.fullmatch(name) or name in {"sys", "plp", "rom", "ene", "eff"})
+    forbidden = forbidden_symbols(names)
     return [f"{path}: forbidden linked symbols: {', '.join(forbidden)}"] if forbidden else []
 
 
@@ -246,7 +279,7 @@ def audit(root, build=None, binaries=(), nm=None):
     if build is not None:
         problems += check_build(build)
     for binary in binaries:
-        problems += check_binary(binary, nm)
+        problems += check_binary(binary, nm, build)
     return sorted(set(problems))
 
 

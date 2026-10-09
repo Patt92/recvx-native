@@ -14,7 +14,16 @@ Die Paketstarter verwenden die jeweils mitgelieferten Laufzeitdaten. Beim
 Spielen wird keine ISO eingelegt oder gelesen. Ein Quellcode-Clone ohne den
 lokalen Ordner `data/` kann nicht gestartet werden.
 
-Nach einem eigenen Paketbuild liegen die Ausgaben unter `build/packages/`.
+`./build.sh` erzeugt auf macOS die Entwicklungs-App unter
+`build/start/macos-arm64/RECVX Native.app`. `Start.command` bevorzugt diese
+App; sie nutzt die aktuellen Daten, Mods und Einstellungen im Projektordner.
+Auch ohne vorhandenes Paket wird die App erstellt. Ein fehlgeschlagener Build
+aktualisiert den Starter nicht.
+
+Eigenständige Pakete mit kopierten Laufzeitdaten erzeugt zusätzlich
+`./build.sh --platform macos --package --output <neuer-Paketordner>`.
+Die Standardausgaben für Pakete liegen unter `build/packages/`; vorhandene
+Pakete werden nicht überschrieben.
 Details zu Build, Datenprüfung und Plattformen stehen in
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 

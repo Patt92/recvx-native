@@ -4,11 +4,11 @@
 # Evidenz (original/opcode/verweis/fehlt). done = Verhalten vollständig wie im Original,
 # partial = nativer Nachbau mit bekannten Lücken, skip = im Port nicht nötig (z. B. Debug).
 objitm.c:bhObj001	partial	Original function extracted; mobile walls/side probes/work indices, original speed/box collision tested; auxiliary metc/mflr consumers for crate climbing not fully bound
-hitchk.c:bhCheckWall	partial	Generated original routine bound to the player candidate through persistent player work/room/mobile ATR tables; type branches, filters, vertical/floor side effects and temporary Dansa geometry tested. Original bhSetEffect(29) allocates in shared eff[512], preserves linked wall ATR work, and bhEff029 applies type |= 0x40 after 32 frames. General bhControlPlayer dispatch and other callers remain open.
+hitchk.c:bhCheckWall	partial	Eigenstaendige native direkte ATR-Aufloesung in geometry_motion.cpp: Y-Rundung, Typzweige, Filter, Rundungen, Rampenprojektion und grand-Seiteneffekte positiv geprueft; der freie Spielerweg verwendet stattdessen den belegten Ex-Doppelpass. Effekt29/Hurt-State und weitere Aufrufer bleiben offen. work/native_port_B00_motion.result.md
 sub1.c:GetItem	partial	Original GetItem extrahiert inkl. Zweig 153, danach originale ItemSort-Phase; StatusCancel/Sprite-Ein-/Ausfahren und ganzer StatusMain nicht vollständig gebunden
 sub1.c:ItemCombination	partial	Regeln über Original Combi_00/01 und combidata; Menüablauf/Animation nativ
 system.c:bhSysCallMonitor	partial	Raumladen/-wechsel nativ in runtime/world, nicht als mn_md-Zustandsmaschine
-hitchk.c:bhCheckFloorP	partial	native/events.cpp check_floor: Original-ATR_WORK und bhControlPlayer sp_flg-Bit-0-Pause; Metalldetektor-Replay mit echter Ansage/Kamera geprüft; übriger Spieler-Hitpfad unvollständig
+hitchk.c:bhCheckFloorP	partial	Eigenstaendige native Bodenfelder auf World-/Eventbesitzern: sicherer Vorfuehler/arn, Richtungsfilter, Floorindex, Wasser/footeff/Trittschall, fuenf Stufenkontakte; native_motion_collision und realer Worldtest. Vollstaendige Spielerzustandsmaschine und nachgelagerte Verbraucher offen. work/native_port_B00_motion.result.md
 hitchk.c:bhGetGroundPosition	partial	Generated original query; room-owned htp retains room/mobile index and live ATR work; player.c:1743-1762 bound only where push/stair state exists; player shot caller creates linked bhEff000 with ground/water/wall/audio dispatch, ef_pol state and SYSTEM model/texture draw; EE libc rand/srand and bhRandTest/RandamSet are bound from executable disassembly and bhSetEffectTb first-free eff[512] allocation is mapped; other random consumers, exact EasyLight, full effect lifecycle and general player work remain open
 sub1.c:ItemBox	partial	Original ItemBoxChange generiert, Tauschen/Stack/Restriktionen und Security-Raumskript geprüft; Host-Liste statt originaler Fenster/Sprites
 system.c:bhSysCall	partial	cb_flg 0x40000 führt über GameplayInput::synchronize zur Box; übrige Systemzustände nicht vollständig
@@ -32,10 +32,40 @@ event.c:bhWalAtariSet2	partial	Originale Attribute/Parameter/Typ im gemeinsamen 
 event.c:bhNext	partial	Gemeinsamer WHILE/NEXT-Stack, signierter FOR-Zähler, Nullcountdown/Task-Reuse geprüft; ursprünglicher Loop/Sleep-Stack nicht vollständig übernommen
 
 sub1.c:ItemSort	partial	Originalfunktion extrahiert, pip-ILP32-Zugriff hostgerecht; Standardinventar nach Pickup und Mutationen sortiert/geprüft; Sonder-flgchk des ganzen StatusMain noch unvollständig
-sp_evt.c:bhDrawSpEvtComCharacter	missing	Generator ersetzt den Körper durch einen Zähler: 3D-Figur im Terminal (Skriptbefehl 0xee) ist nicht gezeichnet; Scanner-Skript 4 und Passwort-Terminal nutzen sie nicht. Kein Test.
+gameover.c:bhControlGameOver	done	Vierphasen-Dispatcher (bhSelectContinue/Init/Main/Exit), je Durchlauf genau eine Phase; gameover_original und tools/verify_gameover.py
+gameover.c:bhSelectContinue	done	Frisches Werk je Tod: cont_x/count/cur_ct 0, gov_md0 1
+gameover.c:bhInitGameOver	done	ts_flg 0x100, cb_flg 0x4, ev_flg 69/67/70 geloescht, evt_tmd/evt_tim 0, Fade 0xFFE0E0E0 ueber 60, 16x16-Punktnetz mit normalisiertem cp und die acht Ring-UVs (126-14 in 14er-Schritten); Passzahlen im Test
+gameover.c:bhMainGameOver	done	Modi 0/1/2/3/10 mit den Originalzaehlern (70 Pass Vorlauf, Prompt bei gov_ct 50, Fade ab 120, Ausgang bei 170), Netzwelle aus cp/op/gov_yn, Prompt mit 16er-Alpharampe und Auswahl, Todesszene mit gov_etb
+gameover.c:bhExitGameOver	done	gm_mode < 3 kehrt zum Titel zurueck, sonst ts_flg 0x4000 und bhPopGameData
+gameover.c:bhDrawGameOver	done	15 Streifen zu 30 Dreiecken aus dem 16x16-Netz, Texturseite 4 der SYSTEM/0001-Liste, Perspektive 11832; gerendert in tools/verify_gameover.py
+screen.c:bhSetScreenFade	partial	Fuer den Game-Over-Task portiert (Zielfarbe, 1+ct Dauer, cb_flg 0x2); der globale Bildschirmfade des Hosts bleibt getrennt
+screen.c:bhControlScreenFade	partial	Lineare Fortschreibung mit dem Originalvorlauf (fade_ct 0 ueberspringt einen Pass) und Abschluss auf die Zielfarbe; nur im Game-Over-Task
+adv.c:CallPlayerDeadVoice	done	PlayBgmEx2(PatId[3], player + 8, 1, -45) als AudioMixer::play_dead_voice; ADV/0008 bzw. 0009 im Test belegt
+sp_evt.c:bhControlSpEvtComputer	done	Nativer Dreipass (init/main/exit) auf einem Werk, wie bhCtrSpEvtCom_mode0; computer_terminal und tools/verify_computer.py
+sp_evt.c:bhInitSpEvtComputer	done	Werk genullt, Skriptvorlauf, Fade 1->0 über 10 Pässe, drei Balkenstartwerte aus rand, com_flg 0x4/0x100; computer_terminal
+sp_evt.c:bhMainSpEvtComputer	done	Alle Moden 0-6/10/18-24/30 mit njSin-Rampen (2048 je Pass bis 16384), 9 Boxlinien je Fenster, SE 0x8000026A; computer_terminal prüft die Passzahlen
+sp_evt.c:bhExitSpEvtComputer	done	st_flg 0x4000000, cb_flg 0x400000, sp_flg -1, gm_flg 0x4/0x8000, ts_flg 0x20000 ohne 0x80, bhStandPlayerMotion; verify_scanner/verify_computer
+sp_evt.c:bhInitComEvtScript	done	Vorlauf sammelt die 32 Sprungmarken (235) mit den Originaloperandenlängen; alle acht Skripte laufen bis 0xFF
+sp_evt.c:bhControlComEvtScript	done	Opcodes 224-245, 254 und 0xFF, ein Opcode je Pass, Zeichenausgabe mit SE 0x8000026E; computer_terminal prüft Vergleich, Sprung, ev_flg und Abbruchsperre
+sp_evt.c:bhControlComEvtKeyboard	done	Acht Richtungen mit khk/krep-Wiederholsperre, Randwege an der hohen Entertaste, Zeichen/Löschen/Bestätigen und SE 0x8000026B-F; computer_terminal
+sp_evt.c:bhEntrySpEvtComputer	done	Quadliste in Originalreihenfolge: Hintergrundhälfte, Fenster, Tastatur, Figurenfenster, Textgitter mit Alpharampe, Cursor, Zubehörtabelle
+sp_evt.c:bhDrawSpEvtComputer	done	Originale Prioritäten 0.1-0.31, Texturseiten 0/1/2 und die Balkenfortschreibung; gerenderte Bilder in tools/verify_computer.py
+sp_evt.c:bhDrawSpEvtComTime	done	syRtc-Uhr an sieben Originalpositionen, Rückfall 21:35:12 ohne Uhr
+sp_evt.c:bhDrawSpEvtComVal	done	Zifferstreifen der Seite 2 (16x24, acht Zellen je Reihe)
+sp_evt.c:bhDrawSpEvtComBar	done	Drei Balken mit Spitzenwert, 0x3F-Zähler und den Originalfarbreihen
+sp_evt.c:bhSetSpEvtComFade	done	fcal = (fdst - fsrc) / fcnt, com_flg 0x2
+sp_evt.c:bhCalcSpEvtComFade	done	Lineare Fortschreibung, Klemmung 0..255, Abschluss auf fdst
+sp_evt.c:bhDrawSpEvtComFade	done	Vollbildpolygon auf Priorität -0.8
+sp_evt.c:bhEntrySpEvtBoxLine	done	128 Plätze, Lebensdauer 240 in 30er-Schritten
+sp_evt.c:bhDrawSpEvtBoxLine	done	Graustufe aus der Restlebensdauer in allen vier Kanälen, Priorität -0.85
+sp_evt.c:bhClearComEvtText	done	Textgitter 11x29 genullt (Modus 24)
+sp_evt.c:bhKeepSpEvtComputer	skip	Speicherreservierung des Originals; das native Werk liegt fest im Modul
+sp_evt.c:bhDrawSpEvtComCharacter	done	Werk, Transform (0/0.1/-1.4, cax 16384 + Skriptschritt, Skalierung 0.05), njSetScreen(600,608,416,528,336) und die Fensterbeschneidung im Kern; die Figur kommt ueber RoomWorld::computer_character aus dem Actor-Besitzer (Easy-Light 1.0/0.2 aus (4,6,10)). Der Objektbaum wird nur vom Steuerungsdurchlauf posiert (WorldEntity::commit_pose in RoomWorld::tick), das geschriebene mtn_no/frm_no wirkt daher erst nach der Rueckkehr - geprueft in computer_terminal und tools/verify_computer.py
 
 player.c:bhCPM2_act_psh	partial	Original function extracted verbatim (packed mode-byte ABI write adapted); MTN49/50/reverse49, original Hokan and curve9 bound and tested; physical vibration callback not bound
 hitchk.c:bhCheckWall2Box	done	Original function and geometry helpers extracted, static/mobile ATR walls and per-object old position bound; wall/second crate tests
-hitchk.c:bhCheckWallEx	partial	Original function extracted and push contact/body/front block bound; full bhControlPlayer state dispatch and non-player callers remain open
+hitchk.c:bhCheckWallEx	partial	Eigenstaendige native Aufloesung auf Raum-/Mobil-ATR, alte Quadranten/Abstaende, Rundungen, Typfilter, Kontaktzaehler, temporare Stufenlimits und Spieler-Vorfuehler/Korper-Doppelpass. RM_0050 Runtime stoppt walk/run/back und gleitet tangential; neutrales Vorherbinary durchquert dieselbe Wand. Effekt29/Hurt-State, Pushaktion und weitere Aufrufer offen. work/native_port_B00_motion.result.md
+player.c:bhControlPlayer	partial	Nativer freier Bewegungsweg bindet den originalen arp/arn-Vorfuehler und Ex-Korperpass auf vorhandene SceneSpawn/Eventflags, kein zweiter Playerwork. Allgemeiner Dispatch, Angriff, Schaden und geskriptete Bewegungsphasen bleiben offen. work/native_port_B00_motion.result.md
+hitchk.c:bhSetDansaLimitAtari	partial	Eigenstaendige native vier Richtungsproben, ETC-Identitaet und temporaere ATR-Limits; nur im Query, keine persistente zweite mwal-Welt. Positive Front-/Rueckseiten- und Cache-Tests; mobile Kistenproduzenten und weitere Aufrufer offen. work/native_port_B00_motion.result.md
 Motion.c:bhSetMotion	partial	Original function and six SetMtn routines extracted for push; original decoded keys/flags/attributes, Hokan and fractional exit sampled; full other actor/player binding pending
 effsub1.c:bhEff029	done	Original lifecycle extracted verbatim; 32-frame wrap, linked wall-work type-bit side effect and slot release tested; hitchk.c clears wall attr 0x40 only after successful shared-slot allocation

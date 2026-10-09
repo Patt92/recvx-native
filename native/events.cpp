@@ -444,6 +444,7 @@ bool EventVm::use(unsigned item,unsigned* message,unsigned slot){
     values[8]=item;status_use_pending_=true;return true;
 }
 void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
+    if(floor_binding){floor_binding(pos,yaw,floor);return;}
     // bhControlPlayer does not run bhCheckFloorP while sp_flg bit 0 is
     // disabled (bhMessageSet/Cinematic scripts). Preserve the last floor
     // work instead of retriggering a paused player's area every host tick.

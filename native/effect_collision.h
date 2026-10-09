@@ -11,8 +11,8 @@ struct GroundHit {
     enum class Table { Room, Mobile };
     Table table;
     std::size_t index;
-    // Read again after a room-table update: the host may relocate its storage,
-    // but table/index identity and the internal original htp remain bound.
+    // Native ATR view, stable across queries but not geometry updates. Read
+    // hit() again after update: table/index identifies any relocated storage.
     const RECVX_STAIR_AREA* record;
 };
 class GroundCollision {
@@ -28,9 +28,17 @@ private:
     struct Work;
     std::unique_ptr<Work> work_;
 };
-// Original bhCheckWallType and bhSetWallRefAngle, including box/cylinder/triangle/ramp/floor cases.
+// Native bhCheckWallType predicate, including box/cylinder/triangle/ramp/floor cases.
 std::optional<CollisionWall> effect_wall(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 position,unsigned flags,float radius,float actor_height);
-std::optional<CollisionWall> effect_line(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags=0,int floor=-1);
+// Complete native ATR layout view for host services, not a partial header.
+RECVX_STAIR_AREA collision_record(const CollisionWall& wall);
+// No query operands: bhCollisionCheckLine. Explicit flags/floor:
+// bhCollisionCheckLine2; omit_attribute4 selects Line3's additional gate.
+// Downward cylinder queries are a documented semantic gap and throw rather
+// than fabricating the original's uninitialized cap polygon. Outputs remain
+// untouched on a miss or unsupported query; normals retain original scale.
+std::optional<CollisionWall> effect_line(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal);
+std::optional<CollisionWall> effect_line(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor=-1,bool omit_attribute4=false);
 void reflect_effect_wall(const CollisionWall& wall,float room_height,NJS_POINT3& position,float radius,float height,int& angle);
 // Original hitchk.c bhGetGroundPosition; hit_index receives sys->htp's table index,
 // or size_t(-1) when the original query finds no floor.

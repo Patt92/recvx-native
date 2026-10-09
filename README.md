@@ -9,72 +9,95 @@ Mechanismen werden eigenständig auf den vorhandenen nativen Besitzern
 implementiert. Originalquellen sind nur Semantikreferenz; Originalkern,
 generierte Funktionskörper und PS2-/VU-/GS-Nachbildung sind verboten.
 
-> **Status (9. Oktober 2026):** Cleanup und eigenständige native Ablösung.
-> Verbotene unproduktive Kern-/Hardwarepfade sind quarantiniert; Build,
-> Packaging und Start sind bis zur Ablösung der verbliebenen produktiven
-> Alt-Teilports durch den Schutzprüfer gesperrt. Die untenstehenden alten
-> Abdeckungs-/Sweepzahlen sind keine Freigabe des erlaubten nativen Ports.
-> Aufgaben und Parallelaufteilung: [Roadmap](docs/NATIVE_REIMPLEMENTATION_ROADMAP.md).
+> **Status (9. Oktober 2026): stabil baubar, aber noch nicht vollständig spielbar.**
+> Inventar, Itembefehle, EKG, Untersuchung und Dateiordner sind eigenständig
+> nativ umgesetzt und mit positiven Teilabläufen geprüft. macOS arm64:
+> **44/44 CTest**, **205/205 Räume laden**, **0 blockierte Eventbefehle**.
+> Windows x64: Binary gebaut und laut Prüfbericht auditiert; ein tatsächlicher
+> Windows-Lauf fehlt. Kampf, Kollision, Treppen, Effekte und vollständige
+> Gegnerabläufe bleiben offen. Nächster Gameplay-Auftrag: **D04 Computerterminal**.
+> Aufgaben und Zuständigkeiten: [Roadmap](docs/NATIVE_REIMPLEMENTATION_ROADMAP.md).
 
-## Vorhandene Funktionen (noch keine aktuelle Freigabe)
+## Vorhandene native Teile
 
 - **Originaldaten nativ:** Räume, Modelle, Texturen, Animationen, Nachrichten,
   ADX-Musik und -Stimmen, Sony-Soundbanken und alle 18 Filme – ohne ISO- oder
   AFS-Zugriff zur Laufzeit.
 - **Event-VM:** originaler Szenario-Interpreter mit Tasks, Bedingungen, Kameras,
-  Dialogen und Türanforderungen; alle 205 Räume laden. Die native
-  Actor-Control bindet zusätzlich originale Motion-/Morph-Fälle.
-- **Spieler:** Bewegung, Treppen, Kisten und Kollision über die originalen
-  Routinen aus `player.c` und `hitchk.c`; Nahkampf- und Schusswaffen mit
-  originaler Zielwahl.
-- **Inventar:** Statusbildschirm mit originalen Sprites, Kombinationen,
-  Untersuchen, Dateiordner, Item-Box und Aufnahme-Ablauf.
-- **Gegner:** Der verbotene Original-Dispatcher ist entfernt. Vollständige
-  eigenständige native Gegnerabläufe einschließlich EN07 sind offen;
-  verbleibende Alt-Teilports müssen auf die gemeinsamen Besitzer übertragen werden.
-- **Türen und Musik:** originale Türsequenzen, BGM-Wechsel und Raumklänge.
+  Dialogen und Türanforderungen. Alle sieben D06-Inventarbefehle sind im
+  produktiven Eventpfad angeschlossen, einschließlich Skriptgeschenk und
+  Schlüsselverbrauch. Weitere Eventwirkungen bleiben unvollständig.
+- **Inventar und Status:** Aufnahmefrage, Sortierung, Ausrüstung,
+  inventarseitiges Nachladen/Munitionszählen, Kombinationen, Itemgebrauch,
+  Kistentransfer, Mengenanzeige, Befehlsfenster und Heil-/Gift-EKG. Das ist
+  kein Nachweis des noch fehlenden Spielerkampfs oder Itembox-Deckelablaufs.
+- **Untersuchung und Dateien:** originale Aktions-/Umwandlungsabläufe,
+  Sichtbarkeitsmasken, Versatz, Kameradistanzen und Skalierung der Itemansicht;
+  Dateiaufnahme, Leser und Ordner mit **24 Dateien / 167 Seiten**.
+- **Actor/Rendering/Audio:** native Modell-, Textur-, Skin-/Pose- und
+  Zeichengrundlagen, eigenständiger Face/Lip-Port, Math und Waffenblitze;
+  BGM-Discregel an beiden Raumladewegen. Vollständige Actor-/Gegnerbindungen,
+  Face-Korrekturen, Morph, Shadow und weitere Effekt-/Soundpfade bleiben offen.
 
 ## Portierungsstand
 
-Abdeckung der Originalfunktionen nach Kategorie, gemessen mit
-`python3 tools/port_check.py`. *Gewichtet* zählt teilweise portierte
-Funktionen anteilig, *streng* nur vollständig belegte. Die Zahlen messen
-Codeabdeckung, nicht semantische Vollständigkeit oder erfolgreiches Durchspielen.
+Fortschritt nach tatsächlichen Paketen und Prüfgrenzen, nicht nach historischen
+Generatorausgaben. **Portiert** bezeichnet den genannten Bereich, nicht das
+gesamte Spiel oder sämtliche abhängigen Abläufe.
 
-Historische Prüfung vor dem verbindlichen Cleanup: 205/205 Räume mit je 600 Ticks, ohne Abbruch
-oder blockierte Eventbefehle. macOS arm64: 48/48 CTest. Windows x64:
-`recvx_game` kompiliert; Runtime-Link und Laufzeitprüfung stehen noch aus.
+<!-- native-progress:begin -->
 
-<!-- port-status:begin -->
-<!-- Automatisch erzeugt: python3 tools/port_check.py --readme README.md -->
+| Bereich | Stand | Nachweis / verbleibende Grenze |
+|---|---|---|
+| Schutz / Build | PASS | macOS-Quellen, Build und Runtime-Binary geprüft. Alle 22 gelisteten Funktionskörper-Generatoren quarantiniert; Build verwendet native Datenmodule. |
+| Inventar / Kiste / Inventar-Events (D01/D02/D06/D07) | Portiert, positive Teilabläufe geprüft | Aufnahme, Gebrauch, Kombination, Transfer und sieben Eventmutationen wirken auf derselben Inventory. Vollständige Aufnahme-Replays hängen teilweise an Kollision/Kampf; Itembox-Objektablauf B05 bleibt offen. |
+| EKG / Mengen / Befehlsfenster (D08/D09) | Portiert, Ausgabe geprüft | Heil-/Giftverlauf, sichtbare EKG-Ausgabe, Mengen/Farbbanken und Itembefehle. |
+| Untersuchung / Dateien (D03) | Portiert, Runtime-Abläufe geprüft | 156 Untersuchungsfälle mit 11 Umwandlungen; Itemansicht mit originalen Größen. Dateiaufnahme, Katalog und Ordner-Replays bestanden. |
+| Computerterminal (D04) | In Arbeit, produktiv noch Lücke | Plan vorhanden; Fensterautomat, Interpreter, Tastatur, Darstellung und Scanner-/Passwortabläufe noch nicht integriert. |
+| Spielerbewegung / Kampf (A/B) | Wesentliche Mechanismen offen | Wand-/Bodenauflösung, Push, Treppen/Leitern, Zielwahl und vollständige Angriffs-/Trefferabläufe fehlen. Inventar-Nachladen ist kein Kampfport. |
+| Gegner / Actor (C/F) | Grundlagen vorhanden, Gesamtpaket offen | Kein Original-Dispatcher. Vollständige native KI/Kampf-/Spawnbindungen, Face-Korrekturen, Morph und Shadow fehlen. EN07-Abnahme RM_0130 im erlaubten nativen Pfad bleibt offen. |
+| Raum / Kamera / Türen (G/P04) | Raumladen geprüft, Sequenzen offen | 205/205 Räume laden; originale Türdemos und kamerabezogene Clipbereiche fehlen. |
+| Effekte / Audio (E) | Teilweise portiert | Native Audio-/Zeichengrundlagen und BGM-Discregel vorhanden; Effektzustände, gemeinsame Effekttexturen, Kollisionsabfragen und weitere SFX-Bindungen offen. |
+| Gameover / System / Speichern (D05) | Unvollständig | Snapshot-Replay geprüft; Tod/Retry und vollständige originale System-/Saveabläufe nicht abgeschlossen. |
+| Windows x64 | Gebaut, laut Bericht auditiert | Linkeingänge und PE-Vergleichslink geprüft. Tatsächlicher Windows-Lauf und unabhängige Prüfung des neuen Auditwegs stehen aus. |
 
-| Kategorie | Fortschritt | Gewichtet | Streng | Funktionen | Stand |
-|---|---|---:|---:|---:|---|
-| Spieler/Kampf | `██████████` | 95,2 % | 90,8 % | 159/166 | Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen. |
-| Events/Skript | `█████████░` | 91,7 % | 90,7 % | 251/272 | Originale Event-VM, gemeinsame Actor-Control-Fälle und 150/223 Befehle gebunden; weitere Befehle/Abläufe offen. |
-| Menü/Items/Text | `███████░░░` | 70,4 % | 63,4 % | 130/241 | Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen. |
-| Effekte | `█████░░░░░` | 52,0 % | 51,7 % | 175/361 | Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen. |
-| Raum/Kamera/Tür | `█████░░░░░` | 51,2 % | 39,5 % | 64/188 | Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen. |
-| Modelle/Animation | `█████░░░░░` | 48,7 % | 16,9 % | 11/88 | Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen. |
-| Gegner/KI | `██░░░░░░░░` | 23,4 % | 22,9 % | 305/1357 | Original-Dispatcher entfernt; vollständige eigenständige Gegnerabläufe und Bindungen noch offen. |
-| Audio | `██░░░░░░░░` | 16,8 % | 0,0 % | 0/164 | Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt. |
-| Ablauf/Speichern | `█░░░░░░░░░` | 11,9 % | 0,1 % | 3/331 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
-| **Engine gesamt** | `█████░░░░░` | **46,6 %** | **42,7 %** | **1098/3168** | 150/223 Event-Befehle gebunden. |
+<!-- native-progress:end -->
 
-<!-- port-status:end -->
+**Prüfstand:** Im vorhandenen macOS-Testprotokoll bestehen **44/44 CTest**;
+die Suite enthält auch Lückenverträge, deren Erfolg keine Spielfunktion
+beweist. Die Berichte dokumentieren **24/24 Policy-Tests**, neun Windows-
+Auditprüfungen und **205/205 ladende Räume mit 0 blockierten Befehlen**.
+Bestandene native Runtime-Teilabläufe: `verify_events`, `verify_pickup_slide`,
+`verify_progression`, `verify_snapshot`, `verify_item_catalog`,
+`verify_file_pickup` und `verify_file_folder`.
 
-Die Zahlen sind ein historischer Stand, der noch generierte Funktionskörper
-anrechnete. Der Prüfer zählt diese nicht mehr als nativen Port; eine neue
-Abdeckung ist erst nach Prüfung der verbleibenden Evidenz sinnvoll. Die
-Tabelle wird mit `python3 tools/port_check.py --readme README.md` erzeugt
-und ersetzt kein Semantik-Audit.
+**Noch blockiert:** vollständige `verify_pickups` (Kollision),
+`verify_ammunition`/`verify_combat` (Spielerkampf), `verify_detector`
+(Effekte) und `verify_continuity` (Treppenmotion). Direkt gestartete
+Aufnahmen sind nur Teilnachweise. Der statische Besitzer-Skriptscan ist
+unvollständig; ein Raumsweep deckt nicht alle Skriptpfade ab. Es gibt keinen
+Durchspielnachweis und keinen tatsächlichen Windows-Runtime-Nachweis.
 
-Einzelheiten und die größten offenen Funktionen: [docs/PORT_STATUS.md](docs/PORT_STATUS.md).
+Eine belastbare Gesamt-Prozentzahl ist derzeit nicht ausgewiesen:
+`tools/port_check.py` und das [historische Funktionsledger](docs/port_ledger.tsv)
+enthalten noch alte Portbelege beziehungsweise Kommentarverweise. Sie müssen
+vor einer neuen Prozentbewertung an den aktuellen nativen Wirkungen geprüft
+werden. Die früheren Prozentbalken und Erfolge über den verbotenen Kern sind
+keine aktuelle Portabnahme. Diese Statusübersicht wird anhand von Code,
+Testprotokollen und Berichten gepflegt, nicht vom alten README-Prozentexport.
+
+Belege: [Inventar](work/native_port_inventory_tests.result.md),
+[Untersuchung/Dateien](work/native_port_D03_files_inspection.result.md),
+[Windows-Audit](work/native_port_windows_audit.md) und aktuelle Ergänzungen in
+[AGENTS.md](AGENTS.md). Nächster Auftrag: [D04-Plan](work/native_port_D04_computer.plan.md).
 
 ## Schnellstart
 
-Start und Build sind derzeit durch die verbindliche Port-Policy gesperrt.
-Nach vollständiger Ablösung der verbotenen Altpfade:
+Der lokale Build ist wieder möglich, solange die verbindliche Schutzprüfung
+besteht. Die Startskripte prüfen ebenfalls die Policy und benötigen ein
+passendes natives Binary sowie lokale Spieldaten. Ein aktualisierter
+Paketstand ist für die jüngsten Änderungen noch nicht belegt; alte Pakete
+nicht mit dem aktuellen Quell-/Buildstand verwechseln.
 
 - **macOS:** `Start.command`
 - **Windows:** `Start.cmd`
@@ -118,13 +141,13 @@ Die verbindliche Prüfmethode steht in [QUALITY.md](QUALITY.md).
 | [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md) | Build, Pakete, Architektur |
 | [docs/NATIVE_GAMEPLAY.md](docs/NATIVE_GAMEPLAY.md) | Portstand der Spielsysteme und offene Lücken |
 | [docs/NATIVE_PLAYER.md](docs/NATIVE_PLAYER.md) | Spielermodell, Skinning, Animation |
-| [docs/PS2_HARDWARE.md](docs/PS2_HARDWARE.md) | Hardwaregrenze: VU-Mikrocode, GS-Register, Disassembly |
+| [docs/PS2_HARDWARE.md](docs/PS2_HARDWARE.md) | Historische Hardware-/Disassembly-Referenz, keine Runtime-Architektur |
 | [docs/AUDIO.md](docs/AUDIO.md) | Musik, Soundbanken, Filme |
 | [docs/NATIVE_ASSETS.md](docs/NATIVE_ASSETS.md) | Ressourcen, Mods, HD-Texturen |
 | [docs/CONTROLS.md](docs/CONTROLS.md) | Tastatur- und Controllerbelegung |
 | [docs/DEBUG_MENU.md](docs/DEBUG_MENU.md) | Debugmenü |
 | [docs/VALIDATION.md](docs/VALIDATION.md) | Testgruppen und Prüfwerkzeuge |
-| [docs/INVENTORY-COVERAGE.md](docs/INVENTORY-COVERAGE.md) | Generierte Item-/Rezeptabdeckung |
+| [docs/INVENTORY-COVERAGE.md](docs/INVENTORY-COVERAGE.md) | Historische Item-/Rezeptabdeckung, kein aktueller Portnachweis |
 
 ## Projektstruktur
 
@@ -132,11 +155,12 @@ Die verbindliche Prüfmethode steht in [QUALITY.md](QUALITY.md).
 |---|---|
 | `native/` | Native Engine und Host-Schicht |
 | `src/`, `include/` | Erhaltene Original-Decompilation |
-| `tools/` | Generatoren, Extraktion, Build und Prüfwerkzeuge |
+| `tools/` | Datenwerkzeuge, Extraktion, Build und Schutz-/Prüfwerkzeuge |
 | `tests/` | Regressionstests und Replays |
 | `docs/` | Dokumentation |
 | `mods/` | Optionale austauschbare Ressourcen |
-| `data/`, `build/`, `archived/` | Lokal, nicht im Repository |
+| `data/`, `build/` | Lokale Spieldaten und Buildartefakte |
+| `archived/FORBIDDEN_DONTUSE/` | Gesperrte, recoverable Quarantäne; nicht lesen oder verwenden |
 
 ## Lizenz
 

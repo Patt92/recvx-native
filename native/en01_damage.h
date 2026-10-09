@@ -68,7 +68,10 @@ void recvx_en01_set_terrain(const unsigned char* etc,unsigned etc_count,const un
 // Keep them separate from rom terrain: hitchk.c scans ROM first, then mobile work.
 void recvx_en01_set_mobile_terrain(const unsigned char* etc,unsigned etc_count,const unsigned char* flr,unsigned flr_count);
 void recvx_en01_player_tick(void);
-void recvx_en01_player_state(RECVX_EN01_PLAYER_STATE* state);
+// Returns 1 only for a bound, authoritative player state. An unavailable
+// enemy/player mechanism returns 0 and leaves the output untouched; its
+// absence is not player HP 0, a release pose, or an actual damage event.
+int recvx_en01_player_state(RECVX_EN01_PLAYER_STATE* state);
 void recvx_en01_player_reset(void);
 // rom->rutp (ATR_WORK records, 36 bytes each) and rom->ruttp (count*count bytes) used by bhCheckRoute.
 void recvx_en01_set_routes(const unsigned char* records,unsigned count,const unsigned char* table);

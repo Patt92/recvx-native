@@ -1,4 +1,5 @@
 #include "asset_io.h"
+#include <cstring>
 #include "binary_view.h"
 #include "md5.h"
 #include <fstream>
@@ -20,6 +21,17 @@ void write_asset_file(const std::filesystem::path& path,const std::vector<std::u
     if(!stream)throw std::runtime_error("cannot write asset: "+path.string());
 }
 std::string asset_number(unsigned i){std::ostringstream s;s<<std::setfill('0')<<std::setw(4)<<i;return s.str();}
+std::size_t system_texture_bundle_offset(const std::vector<std::uint8_t>& entry){
+    std::size_t p=0;
+    for(unsigned block=0;block<256;++block){
+        if(p+4>entry.size())return std::size_t(-1);
+        std::uint32_t size=0;std::memcpy(&size,entry.data()+p,4);p+=4;
+        if(size&0x80000000u){p=(p+31)&~std::size_t(31);return p<entry.size()?p:std::size_t(-1);}
+        if(size>entry.size()||p+size>entry.size())return std::size_t(-1);
+        p+=size;
+    }
+    return std::size_t(-1);
+}
 SceneTexture read_tga(const std::filesystem::path& path){
     const auto bytes=read_asset_file(path,256*1024*1024+65536);BinaryView v(bytes);v.require(0,18);
     if(v.u8(1)!=0||v.u8(2)!=2||(v.u8(16)!=24&&v.u8(16)!=32))throw std::runtime_error("texture must be uncompressed RGB/RGBA TGA: "+path.string());

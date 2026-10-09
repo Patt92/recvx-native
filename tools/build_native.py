@@ -4,9 +4,12 @@ import argparse
 import os
 from pathlib import Path
 import platform
+import plistlib
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = '0.5'
@@ -17,33 +20,72 @@ def run(*args):
 
 
 def sync_macos_start_package(build: Path) -> None:
-    """Refresh the existing app that the root Start.command launches.
+    """Create a verified development app, independently of retired packages.
 
-    A normal development build must not leave Start.command pointing at a stale
-    package runtime.  This deliberately replaces only the executable: cooked
-    package data and user-adjacent package files are retained.
+    Development uses the current loose data and settings in the project. The
+    separate --package workflow still creates standalone copies of the data.
+    No files are restored from a retired app or from quarantine.
     """
-    app = ROOT / 'build/packages' / f'macos-arm64-v{VERSION}' / 'RECVX Native.app'
-    if not app.is_dir():
-        return
     source = build / 'recvx-runtime'
-    runtime = app / 'Contents/MacOS/recvx-runtime'
-    if not runtime.is_file():
-        # A quarantined starter is not silently restored by a normal build.
-        print('Retired starter package remains disabled; create a new verified package with --package.', flush=True)
-        return
     if not source.is_file():
-        raise RuntimeError(f'cannot refresh Start.command package runtime: {runtime}')
+        raise RuntimeError(f'cannot create development app: missing {source}')
     if subprocess.check_output(['lipo', '-archs', str(source)], text=True).split() != ['arm64']:
         raise RuntimeError('macOS starter package requires an arm64-only runtime')
-    shutil.copy2(source, runtime)
     dependencies = subprocess.check_output(['otool', '-L', str(source)], text=True)
     linked = next(line.strip().split(' (', 1)[0] for line in dependencies.splitlines()[1:] if 'libSDL2' in line)
-    subprocess.run(['install_name_tool', '-change', linked, '@executable_path/../Frameworks/' + Path(linked).name, str(runtime)], check=True)
-    subprocess.run(['codesign', '--force', '--sign', '-', str(runtime)], check=True)
-    subprocess.run(['codesign', '--force', '--sign', '-', str(app)], check=True)
-    subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
-    print(f'Updated Start.command package: {app}', flush=True)
+    library_name = Path(linked).name
+    library = build / '_deps/sdl2-build' / library_name
+    if not library.is_file():
+        raise RuntimeError(f'development app requires the built SDL2 library: {library}')
+    if subprocess.check_output(['lipo', '-archs', str(library.resolve())], text=True).split() != ['arm64']:
+        raise RuntimeError('macOS starter requires an arm64-only SDL2 library')
+    parent = ROOT / 'build/start/macos-arm64'
+    parent.mkdir(parents=True, exist_ok=True)
+    app = parent / 'RECVX Native.app'
+    if app.is_symlink():
+        raise RuntimeError('refusing to replace a symlinked development app')
+    with tempfile.TemporaryDirectory(prefix='.staging-', dir=parent) as temporary:
+        candidate = Path(temporary) / app.name
+        contents = candidate / 'Contents'
+        binaries = contents / 'MacOS'
+        frameworks = contents / 'Frameworks'
+        binaries.mkdir(parents=True)
+        frameworks.mkdir()
+        runtime = binaries / 'recvx-runtime'
+        bundled_library = frameworks / library_name
+        shutil.copy2(source, runtime)
+        shutil.copy2(library.resolve(), bundled_library)
+        run('install_name_tool', '-change', linked, '@executable_path/../Frameworks/' + library_name, runtime)
+        run('install_name_tool', '-id', '@rpath/' + library_name, bundled_library)
+        launcher = binaries / 'Start'
+        options = ' '.join(shlex.quote(str(value)) for value in (
+            '--data', ROOT / 'data', '--mods', ROOT / 'mods',
+            '--controls', ROOT / 'controls.ini', '--debug-config', ROOT / 'debug.ini'))
+        launcher.write_text('#!/bin/sh\nrecvx_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+                            f'exec "$recvx_dir/recvx-runtime" {options} "$@"\n')
+        launcher.chmod(0o755)
+        with (contents / 'Info.plist').open('wb') as info:
+            plistlib.dump({'CFBundleExecutable': 'Start', 'CFBundleIdentifier': 'org.recvx.native.development',
+                          'CFBundleName': 'RECVX Native', 'CFBundlePackageType': 'APPL',
+                          'CFBundleVersion': VERSION, 'LSMinimumSystemVersion': '11.0',
+                          'NSHighResolutionCapable': True}, info)
+        run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT, '--binary', runtime)
+        run('codesign', '--force', '--sign', '-', bundled_library)
+        run('codesign', '--force', '--sign', '-', runtime)
+        run('codesign', '--force', '--sign', '-', candidate)
+        run('codesign', '--verify', '--deep', '--strict', candidate)
+        # Publish only after all checks; retain the previous development app.
+        backup = None
+        if app.exists():
+            backup = Path(tempfile.mkdtemp(prefix='.previous-', dir=parent)) / app.name
+            app.rename(backup)
+        try:
+            candidate.rename(app)
+        except OSError:
+            if backup is not None:
+                backup.rename(app)
+            raise
+    print(f'Updated Start.command development app: {app}', flush=True)
 
 
 def main():
@@ -119,7 +161,7 @@ def main():
             parser.error('the packaged targets are Windows and macOS')
         output = args.output or ROOT / 'build/packages' / (f'macos-arm64-v{VERSION}' if target == 'macos' else f'windows-x64-v{VERSION}')
         run(sys.executable, ROOT / 'tools/package_native.py', '--platform', target, '--build', binary_dir, '--data', data, '--output', output)
-    elif target == 'macos':
+    if target == 'macos':
         sync_macos_start_package(binary_dir)
     print(f'Build ready: {binary_dir}', flush=True)
 

@@ -17,6 +17,10 @@ public:
     bool active()const;
     unsigned phase()const;
     unsigned count()const;
+    // gov_etb explosions requested so far, and how many of those the effect
+    // package could not place (bhSetExplosionEffect is still a gap there).
+    unsigned blasts()const;
+    unsigned unsupported_blasts()const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

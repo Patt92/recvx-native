@@ -68,6 +68,8 @@ public:
     bool use(unsigned item,unsigned* message=nullptr,unsigned slot=~0u);
     void begin_status(); // StatusMain clears the previous ItemUse request.
     void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);
+    std::function<void(NJS_POINT3,Angle,int)> floor_binding;
+    const std::vector<Interaction>& floor_areas()const{return floors_;}
     void confirm_dialog();
     void cancel_dialog();
     void choose_dialog(int direction);

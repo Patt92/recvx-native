@@ -38,7 +38,9 @@ int main(int argc,char** argv){try{
     world.bind(command({0x65,1,2,0}));world.bind(command({0x69,23,0,0}));
     world.bind(command({0x69,34,3,1,0,1,5,6,65,0}));world.tick();
     const auto a=world.model_pose(1,2).position.x;world.tick();const auto half=world.model_pose(1,2).position.x;
-    world.bind(command({0x69,40,66,0}));const auto b=world.model_pose(1,2).position.x;
+    // A script command writes the work; the object tree follows in the next
+    // control pass (bhSetMotion), which samples frm_no before advancing it.
+    world.bind(command({0x69,40,66,0}));world.tick();const auto b=world.model_pose(1,2).position.x;
     check(std::abs(half-(a+b)*.5f)<.0001f,"mtn_md bit 8 does not interpolate half-frame root motion");
     world.bind(command({0x69,23,1,0}));world.tick();check(world.model_pose(1,2).position.x==b,"paused script changes its sampled pose");
     world.bind(command({0x69,23,0,0}));world.bind(command({0x69,34,1,1,0,1,5,6,84,0}));world.tick();

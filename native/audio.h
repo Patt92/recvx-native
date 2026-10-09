@@ -82,6 +82,9 @@ public:
     // Com_ExecRoomFadeOut/In; adxwrap.c volume and fade units) on ADX slot 0.
     // The request state persists across rooms like the original globals.
     void play_bgm_ex(int bgm,int fade_in_rate,int volume);
+    // adv.c CallPlayerDeadVoice: PlayBgmEx2(PatId[3], player + 8, 1, -45) --
+    // the ADV archive on the BGM slot, not a looping track.
+    void play_dead_voice(int player);
     void request_bgm2(int bgm,int volume);
     void stop_bgm(int fade_out_rate);
     void stop_bgm2();

@@ -15,6 +15,13 @@ add_custom_target(recvx-native-policy ALL
 if(BUILD_TESTING)
   add_test(NAME native_port_policy_contracts
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_policy_test.py")
+  add_test(NAME native_port_status_contracts
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_check_test.py")
+  # Negativpruefungen des Windows-PE-Audits; brauchen den Zig-Werkzeugsatz.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/toolchains/zig-cxx")
+    add_test(NAME windows_link_audit
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/windows_audit_test.py")
+  endif()
 endif()
 set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # tools/generate_chunk_blend.py ist aus dem Build entfernt (Policy 2026-10-09, R02):
@@ -89,10 +96,14 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # Retry-Abfrage und Bildblende fehlen bis zur nativen Neubestimmung, siehe
 # native/gameover.cpp.
 # tools/generate_effect_collision.py ist Quarantaene (Policy 2026-10-09):
-# Boden-, Wand- und Linienabfrage der ATR-Geometrie fehlen bis zur nativen
-# Neubestimmung, siehe native/effect_collision.cpp.
-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/subplayer.c native/en01_damage.c native/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/adx_tables.c)
-target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp)
+# ATR-Boden/Wandkontakt, Reflexion und Linienabfrage sind eigenstaendig nativ;
+# der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
+add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/en01_damage.c native/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/adx_tables.c)
+target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
+if(NOT MSVC)
+  # Preserve separate float multiply/add steps also in production-only builds.
+  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+endif()
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}" build-tools/ninja)
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
 target_link_libraries(recvx_game PUBLIC recvx_scene)
@@ -256,6 +267,23 @@ if(BUILD_TESTING)
   add_executable(recvx-collision-tests tests/native/collision_test.cpp)
   target_link_libraries(recvx-collision-tests PRIVATE recvx_game)
   add_test(NAME wall_collision COMMAND recvx-collision-tests)
+  add_executable(recvx-line-reflection-tests tests/native/line_reflection_test.cpp)
+  target_link_libraries(recvx-line-reflection-tests PRIVATE recvx_game)
+  if(NOT MSVC)
+    target_compile_options(recvx-line-reflection-tests PRIVATE -ffp-contract=off)
+  endif()
+  add_test(NAME native_line_reflection COMMAND recvx-line-reflection-tests)
+  add_executable(recvx-motion-collision-tests tests/native/motion_collision_test.cpp)
+  target_link_libraries(recvx-motion-collision-tests PRIVATE recvx_game)
+  if(NOT MSVC)
+    target_compile_options(recvx-motion-collision-tests PRIVATE -ffp-contract=off)
+  endif()
+  add_test(NAME native_motion_collision COMMAND recvx-motion-collision-tests)
+  add_executable(recvx-ground-world-tests tests/native/ground_world_test.cpp)
+  target_link_libraries(recvx-ground-world-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
+    add_test(NAME native_ground_world COMMAND recvx-ground-world-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   add_executable(recvx-audio-tests tests/native/audio_movie_test.cpp)
   target_link_libraries(recvx-audio-tests PRIVATE recvx_game)
   add_test(NAME audio_movie COMMAND recvx-audio-tests)
@@ -266,7 +294,11 @@ if(BUILD_TESTING)
   endif()
   add_executable(recvx-computer-tests tests/native/computer_test.cpp)
   target_link_libraries(recvx-computer-tests PRIVATE recvx_game)
-  add_test(NAME computer_terminal COMMAND recvx-computer-tests)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0020.RDT")
+    add_test(NAME computer_terminal COMMAND recvx-computer-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  else()
+    add_test(NAME computer_terminal COMMAND recvx-computer-tests)
+  endif()
   add_executable(recvx-ammunition-tests tests/native/ammunition_test.cpp)
   target_link_libraries(recvx-ammunition-tests PRIVATE recvx_game)
   add_test(NAME ammunition_pickup_zero COMMAND recvx-ammunition-tests)

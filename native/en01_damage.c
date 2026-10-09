@@ -68,7 +68,13 @@ void recvx_en01_set_mobile_terrain(const unsigned char* etc,unsigned etc_count,c
 void recvx_en01_set_player(const RECVX_EN01_PLAYER* player){(void)player;}
 void recvx_en01_player_tick(void){}
 void recvx_en01_player_reset(void){}
-void recvx_en01_player_state(RECVX_EN01_PLAYER_STATE* out){if(out)memset(out,0,sizeof *out);}
+int recvx_en01_player_state(RECVX_EN01_PLAYER_STATE* out){
+    /* No player-state owner is bound here after removal of the separate
+       original work. Report absence instead of inventing HP 0, which the
+       world previously consumed as damage every tick. Do not introduce a
+       second player store to supply a plausible replacement state. */
+    (void)out;return 0;
+}
 
 void recvx_en01_init(RECVX_EN01* work,unsigned type,unsigned mdlver,int hard,unsigned joints,int flr_no,float px,float py,float pz,int ay,const RECVX_EN01* const* previous,unsigned previous_count){
     EN01_STORE* s;

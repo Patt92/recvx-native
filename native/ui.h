@@ -121,7 +121,7 @@ public:
     void draw_title_options(SoftwareRenderer& image,unsigned selected);
     void label(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=.6f,std::uint32_t color=0xffffffff)const;
     // bhDispMessage: a message at the given pixel origin in the dialogue font.
-    void show_message(SoftwareRenderer& image,const Message& message,int x,int y)const{text(image,message,x,y,1,0xffffffff,true);}
+    void show_message(SoftwareRenderer& image,const Message& message,int x,int y,std::uint32_t tint=0xffffffff)const{text(image,message,x,y,1,tint,true);}
     void show_gameover_message(SoftwareRenderer& image,const Message& message,int x,int y,unsigned color)const{text(image,message,x,y,1,color,true);}
     // system.c bhSysCallScreenSaver case 10: the Select pause overlay.
     void draw_pause(SoftwareRenderer& image,bool controller_present)const;

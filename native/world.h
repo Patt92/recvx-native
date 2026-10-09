@@ -6,6 +6,7 @@
 #include "renderer.h"
 #include "collision.h"
 #include "effect_collision.h"
+#include "geometry_motion.h"
 #include "effect_sprites.h"
 #include "enemy_spawn.h"
 #include "subplayer.h"
@@ -34,6 +35,20 @@ RECVX_SUBPLAYER subplayer{};bool subplayer_bound=false,subplayer_no_motion=false
     unsigned motion_mode3=0; // O_WRK: only bhSetObj/ItmMotion advances mode 1.
     bool motion_slow=false; // Common 24/25/34 mtn_md bit 8, separate from MTN flags.
     std::int64_t pose_frame()const{return scripted&&sampled_frame?*sampled_frame:frame;}
+    // objP of the original work. motion/room_motion/frame/has_motion above are
+    // mtn_no/frm_no, the state the control pass will sample next;
+    // bhSetMotion/bhCalcModel write the object tree, and they only run while
+    // that pass is enabled. Everything that draws or reads a pose therefore
+    // uses the committed values, so a work written while the pass is paused
+    // (sp_flg bit 0x2 clear, e.g. the special-event computer) leaves the
+    // drawn tree alone until the pass returns.
+    bool pose_set=false,pose_room=true,pose_motion_valid=false;
+    unsigned pose_mtn=0;std::int64_t pose_frm=0;
+    void commit_pose(){pose_set=true;pose_mtn=motion;pose_room=room_motion;pose_motion_valid=has_motion;pose_frm=pose_frame();}
+    unsigned posed_motion()const{return pose_set?pose_mtn:motion;}
+    bool posed_room_motion()const{return pose_set?pose_room:room_motion;}
+    bool posed_has_motion()const{return pose_set?pose_motion_valid:has_motion;}
+    std::int64_t posed_frame()const{return pose_set?pose_frm:pose_frame();}
     // bhObjAspdSet: object work aspd, a light parameter in objitm.c
     // (emissive intensity 0.1*aspd and ob_spc/special object selection).
     unsigned aspd=0;
@@ -59,6 +74,12 @@ public:
     // bhEneSetCk: original BH_PWORK stflg 0x1000000 (not drawn, no hit/sight checks).
     void deactivate_enemy(unsigned index);
     bool step_clear(NJS_POINT3 probe,float radius=3.5f,float height=16.5f)const;
+    // Native bhCheckWallType / bhCollisionCheckLine/2/3 over the existing
+    // room-then-mobile geometry. These are not bhCheckWall movement or
+    // bhCheckL2Wall (which has a different capsule/inset contract).
+    std::optional<CollisionWall> collision_contact(NJS_POINT3 probe,unsigned flags,float radius,float height)const;
+    std::optional<CollisionWall> collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal)const;
+    std::optional<CollisionWall> collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,bool omit_attribute4=false)const;
     float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,floor_at(origin));}
     float combat_wall_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,unsigned flags=0x400)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,-32768,flags);}
     // bhGetGroundPosition for the original attack path; same collision set as movement.
@@ -79,6 +100,14 @@ public:
     const EffectSprite* effect_state(unsigned index)const{return index<sprites_.size()?&sprites_[index].sprite:nullptr;}
     bool effect_visible(unsigned index)const{if(index>=sprites_.size())return false;const auto& w=sprites_[index];const auto atlas=effect_textures_.find(w.sprite.tex_id);return !w.hidden&&w.queued&&!(w.sprite.flg&0x1000000)&&atlas!=effect_textures_.end()&&w.sprite.ani_ct<atlas->second.size();}
     ModelPose model_pose(unsigned kind,unsigned index,unsigned script_node=0)const;
+    // sp_evt.c bhDrawSpEvtComCharacter: the special-event computer draws
+    // rom->enep[chr_no] into its character window. The original writes the
+    // script's mtn_no/frm_no and a zero position/angle into that enemy work
+    // and draws the object tree with njCnkEasyDraw (white light from
+    // (4,6,10), diffuse 1.0, ambient 0.2). Returns nothing when the room has
+    // no such enemy or its motion library lacks the clip; the caller reports
+    // that as a gap instead of drawing a substitute.
+    std::optional<Scene> computer_character(unsigned chr_no,unsigned motion,unsigned frame_no);
     void set_player_asset(const PlayerAsset* player){player_asset_=player;}
     void set_player_character(unsigned character){player_character_=int(character&3);}
     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
@@ -142,6 +171,9 @@ public:
     unsigned floor_sound(int floor,float x,float z,bool special=false)const;
     void player_footstep(const PlayerAsset& player);
     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f,std::optional<bool> walking={});
+    void bind_player_collision(EventVm&);
+    NJS_POINT3 move_player(NJS_POINT3 from,NJS_POINT3 to,int movement,bool run,int turn=0);
+    void check_player_floor(NJS_POINT3 position,Angle yaw,int floor);
 private:
     struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;};
     struct Context {unsigned kind=0,index=0,node=0,mode1=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
@@ -151,6 +183,22 @@ private:
     std::vector<std::uint8_t> room_;std::size_t header_;unsigned simulation_flags_=~0u;
     std::unique_ptr<PlayerPush> push_;
     GroundCollision ground_; // room-owned original sys->htp, shared by ground consumers
+    // Collision-owned fields of the existing native player, not another
+    // player position/work. In production, flags/status/control/system refer
+    // directly to EventVm's existing banks. Fallbacks serve World-only users.
+    EventVm* collision_events_=nullptr;
+    unsigned collision_flags_=0x919,collision_status_=0x40000000,collision_flags2_=0;
+    unsigned collision_control_=0,collision_system_=0,collision_mode_=1;
+    unsigned collision_floor_sound_=0,collision_foot_effect_=0;
+    int collision_floor_=0,collision_push_count_=0,collision_push_index_=0,collision_floor_index_=0;
+    float collision_front_offset_=0;
+    NJS_POINT3 collision_previous_probe_{},collision_safe_{};
+    bool collision_probe_ready_=false;
+    std::optional<std::size_t> collision_step_;
+    MotionActor motion_actor();
+    std::vector<CollisionWall> motion_steps()const;
+    std::vector<CollisionWall> motion_floors()const;
+    NJS_POINT3 resolve_player_motion(NJS_POINT3,NJS_POINT3,float,float,std::optional<float>);
     PlayerGroundWork player_ground_{};bool player_ground_ready_=false;
     std::optional<std::pair<unsigned,int>> stair_ground_state_;
     std::vector<unsigned> push_objects_;
@@ -196,8 +244,12 @@ private:
     mutable std::map<const MotionClip*,MotionClip> slow_motion_clips_;
     struct MotionLibrary {std::vector<std::pair<std::size_t,unsigned>> entries;mutable std::map<unsigned,MotionClip> decoded,segmented;};
     std::map<unsigned,MotionLibrary> enemy_motions_;
+    // Work clip (mtn_no): what the control pass samples next.
     const MotionClip& entity_motion(const WorldEntity& entity)const;
-    const MotionClip& entity_motion_data(const WorldEntity& entity)const;
+    // Object-tree clip (objP): what the last control pass actually wrote.
+    const MotionClip& posed_motion_clip(const WorldEntity& entity)const;
+    const MotionClip& motion_clip(const WorldEntity& entity,unsigned motion,bool room_motion)const;
+    const MotionClip& entity_motion_data(const WorldEntity& entity,unsigned motion,bool room_motion)const;
     std::vector<CollisionWall> walls_;
     struct FloorSound {CollisionWall area;unsigned sound;};
     std::vector<FloorSound> floor_sounds_;std::vector<CollisionWall> effect_water_room_,effect_water_mobile_;

@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
-"""Engine-Portierungsübersicht: Evidenz für eigenständige native Mechanismen.
+"""Status des eigenständigen nativen Ports.
 
-Einheit ist die Originalfunktion, gewichtet mit ihren nicht-leeren Zeilen.
-Jede Funktion bekommt genau einen Status aus der stärksten verfügbaren Evidenz:
+Der Check bewertet ausschliesslich explizit belegte native Mechanismen aus
+``docs/port_ledger.tsv`` und die im nativen EventVm gebundenen Opcodes. Die
+Decompilation bleibt eine Semantikreferenz, ist aber *kein* Fortschrittsnenner:
+eine fehlende native Entsprechung zu jeder Referenzfunktion bedeutet nicht,
+dass der Port einen Originalkern erwartet oder ihn kompilieren soll.
 
-  forbidden  Direkt kompilierter Originalcode: verboten, keine Port-Evidenz
-             Generierte Funktionskörper werden nicht angerechnet.   ->   0 %
-  opcode     Event-Befehl (bhScenarioJmpT) im nativen EventVm/World gebunden
-                                                                    -> 100 %
-  pending    Event-Befehl wird nur konsumiert, Wirkung laut Code offen -> 50 %
-  ledger     Status aus docs/port_ledger.tsv (done/partial/missing/skip)
-  verweis    Name kommt im nativen Code vor (Nachbau/Kommentar), ungeprüft
-                                                                    -> 50 %
-  fehlt      keine Evidenz                                          ->  0 %
+Eine Namenssuche im nativen Baum ist ebenfalls kein Beleg. Alte Ledgernotizen,
+die einen extrahierten/generierten/originalen Funktionskoerper beanspruchen,
+werden als ``unbestaetigt`` ausgegeben und nicht gewertet. Damit kann der
+Bericht den sauberen Port nicht durch historische Kern- oder Generatorarbeit
+aufwerten.
 
-Die Plattformschicht (PS2-SDK, VU1, Memory Card, CRI-Middleware) ersetzt der
-Host durch eigene Schichten; sie wird getrennt ausgewiesen und zählt nicht in
-den Engine-Prozentwert. "streng" zählt nur 100-%-Evidenz, "gewichtet" auch die
-50-%-Stufen. Das Ergebnis ist ein Nachweis-Maß, kein Qualitätsurteil: auch
-ein als erledigt geführter Port kann falsch angebunden sein. Diese Übersicht
-ersetzt weder tools/check_no_original_core.py noch produktive Laufzeitprüfungen.
+Die Kennzahl beschreibt nur den explizit abgegrenzten Belegumfang, niemals den
+Fertigstellungsgrad des ganzen Spiels. ``check_no_original_core.py`` bleibt der
+verbindliche Schutzpruefer; produktive Laufzeitpruefungen bleiben zusaetzlich
+erforderlich.
 """
 import argparse
 import collections
@@ -27,15 +24,20 @@ import json
 import re
 import sys
 from pathlib import Path
-from check_no_original_core import cmake_statements
-
 ROOT = Path(__file__).resolve().parents[1]
 PROG = ROOT / 'src/ps2/veronica/prog'
 NATIVE = ROOT / 'native'
 LEDGER = ROOT / 'docs/port_ledger.tsv'
 
-SCORE = {'original': 1.0, 'opcode': 1.0, 'done': 1.0, 'pending': 0.5, 'partial': 0.5,
-         'verweis': 0.5, 'missing': 0.0, 'fehlt': 0.0}
+SCORE = {'opcode': 1.0, 'done': 1.0, 'pending': 0.5, 'partial': 0.5,
+         'missing': 0.0}
+PORT_SCOPE = frozenset(SCORE)
+# Diese Formulierungen belegen einen inzwischen verbotenen Extraktionsweg,
+# nicht eine eigenstaendige Implementierung.  Die Begriffe sind bewusst eng:
+# "originale Reihenfolge" bleibt eine zulaessige Semantikreferenz.
+RETIRED_EVIDENCE = re.compile(
+    r'\b(?:extrahiert|extracted|generiert|generated|verbatim|wasm2c|ilp32|'
+    r'original(?:e|en|er|es)?\s+(?:function|routine|funktionskoerper))\b', re.I)
 
 # Reihenfolge zählt: erster Treffer bestimmt den Bereich.
 DOMAINS = [
@@ -122,18 +124,6 @@ def functions(path):
     return found
 
 
-def compiled_files():
-    text = (ROOT / 'CMakeLists.txt').read_text()
-    return {source for command, arguments in cmake_statements(text)
-            if command in {'add_library', 'add_executable', 'target_sources'}
-            for source in re.findall(r'src/ps2/veronica/prog/(\w+\.c)\b', arguments)}
-
-
-def generated_functions():
-    """Never execute generators or count copied original bodies as a native port."""
-    return set()
-
-
 def event_opcodes():
     """{funktionsname: (opcode, status)} aus bhScenarioJmpT gegen native Bindungen."""
     source = (PROG / 'event.c').read_text()
@@ -171,14 +161,6 @@ def event_opcodes():
     return result, len([n for n in table if not n.startswith('dm')])
 
 
-def native_text():
-    parts = []
-    for path in NATIVE.rglob('*'):
-        if path.suffix in ('.cpp', '.h', '.c', '.inc') and 'third_party' not in path.parts:
-            parts.append(path.read_text(errors='replace'))
-    return '\n'.join(parts)
-
-
 def read_ledger():
     rules = {}
     if LEDGER.exists():
@@ -192,43 +174,38 @@ def read_ledger():
     return rules
 
 
+def ledger_evidence_valid(note):
+    """True only when a ledger note does not rely on retired body extraction."""
+    return not RETIRED_EVIDENCE.search(note)
+
+
+def ledger_location(key):
+    """Turn a ledger key into a stable display location without reading a core."""
+    if ':' in key:
+        filename, function = key.split(':', 1)
+        return filename, function
+    return '(native mechanism)', key
+
+
 def classify():
-    compiled, generated = compiled_files(), generated_functions()
     opcodes, opcode_total = event_opcodes()
-    native = native_text()
     ledger = read_ledger()
-    used_rules = set()
     records = []
-    for path in sorted(PROG.glob('*.c')):
-        for name, line, weight in functions(path):
-            key = f'{path.name}:{name}'
-            rule = next((r for r in (key, name, path.name) if r in ledger), None)
-            if path.name in compiled:
-                status, note, source = 'missing', 'Verbotener Originalcode ist kein nativer Portnachweis', 'forbidden'
-                if rule:
-                    used_rules.add(rule)
-            elif rule:
-                used_rules.add(rule)
-                status, note = ledger[rule]
-                source = 'ledger'
-            elif path.name in compiled or (name in generated and len(name) > 3):
-                status, note, source = 'missing', 'Verbotener Originalcode ist kein nativer Portnachweis', 'forbidden'
-            elif path.name == 'event.c' and name in opcodes:
-                status, note, source = opcodes[name][1], f'opcode 0x{opcodes[name][0]:02x}', 'opcode'
-            elif len(name) > 4 and re.search(r'\b' + re.escape(name) + r'\b', native):
-                status, note, source = 'verweis', '', 'verweis'
-            else:
-                status, note, source = 'fehlt', '', 'fehlt'
-            records.append({'file': path.name, 'function': name, 'line': line, 'weight': weight,
-                            'domain': domain_of(path.name), 'status': status, 'source': source, 'note': note})
-    unused = sorted(set(ledger) - used_rules)
-    return records, opcodes, opcode_total, unused
+    for key, (status, note) in sorted(ledger.items()):
+        filename, function = ledger_location(key)
+        if status != 'skip' and not ledger_evidence_valid(note):
+            status = 'unbestaetigt'
+            note = ('Historischer Extraktions-/Generatorbeleg ist im nativen Port nicht '
+                    'zulaessig: ' + note)
+        records.append({'file': filename, 'function': function, 'line': 0, 'weight': 1,
+                        'domain': domain_of(filename), 'status': status, 'source': 'ledger', 'note': note})
+    return records, opcodes, opcode_total
 
 
 def summarize(records):
     groups = collections.OrderedDict((label, collections.Counter()) for label, _ in DOMAINS)
     for r in records:
-        if r['status'] == 'skip':
+        if r['status'] not in PORT_SCOPE:
             continue
         g = groups[r['domain']]
         g['weight'] += r['weight']
@@ -265,7 +242,7 @@ def readme_block(groups, engine, opcode_done, opcode_total):
     lines = [README_BEGIN,
              '<!-- Automatisch erzeugt: python3 tools/port_check.py --readme README.md -->',
              '',
-             '| Kategorie | Fortschritt | Gewichtet | Streng | Funktionen | Stand |',
+             '| Kategorie | Belegumfang | Gewichtet | Voll belegt | Mechanismen | Stand |',
              '|---|---|---:|---:|---:|---|']
     for label, g in sorted(((l, g) for l, g in groups.items() if l != PLATFORM and g['weight']),
                            key=lambda x: -percent(x[1]['weighted'], x[1]['weight'])):
@@ -273,9 +250,9 @@ def readme_block(groups, engine, opcode_done, opcode_total):
         lines.append(f'| {label} | `{bar(w)}` | {de(w)} % | {de(percent(g["strict"], g["weight"]))} % | '
                      f'{g["done_functions"]}/{g["functions"]} | {README_NOTES.get(label, "")} |')
     w = percent(engine['weighted'], engine['weight'])
-    lines.append(f'| **Engine gesamt** | `{bar(w)}` | **{de(w)} %** | **{de(percent(engine["strict"], engine["weight"]))} %** | '
+    lines.append(f'| **Expliziter nativer Belegumfang** | `{bar(w)}` | **{de(w)} %** | **{de(percent(engine["strict"], engine["weight"]))} %** | '
                  f'**{engine["done_functions"]}/{engine["functions"]}** | '
-                 f'{opcode_done}/{opcode_total} Event-Befehle gebunden. |')
+                 f'{opcode_done}/{opcode_total} Event-Befehle gebunden; kein Gesamtfortschritt. |')
     lines += ['', README_END]
     return '\n'.join(lines)
 
@@ -300,7 +277,7 @@ def main():
     parser.add_argument('--fail-under', type=float, help='Exit 1, wenn der gewichtete Engine-Wert darunter liegt')
     args = parser.parse_args()
 
-    records, opcodes, opcode_total, unused = classify()
+    records, opcodes, opcode_total = classify()
     groups = summarize(records)
     engine = collections.Counter()
     for label, g in groups.items():
@@ -310,41 +287,47 @@ def main():
     opcode_done = sum(1 for _, s in opcodes.values() if s == 'opcode')
 
     lines = []
-    lines.append('# Engine-Portierungsstand')
+    unconfirmed = [r for r in records if r['status'] == 'unbestaetigt']
+    lines.append('# Nativer Portstatus')
     lines.append('')
-    lines.append(f'Engine gesamt: **{percent(engine["weighted"], engine["weight"]):.1f} %** gewichtet, '
-                 f'**{percent(engine["strict"], engine["weight"]):.1f} %** streng '
-                 f'({engine["done_functions"]}/{engine["functions"]} Funktionen voll belegt, '
-                 f'{engine["weight"]} Originalzeilen ohne Plattformschicht).')
+    lines.append('Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige '
+                 'Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.')
+    lines.append('')
+    lines.append(f'Expliziter Belegumfang: **{percent(engine["weighted"], engine["weight"]):.1f} %** gewichtet, '
+                 f'**{percent(engine["strict"], engine["weight"]):.1f} %** voll belegt '
+                 f'({engine["done_functions"]}/{engine["functions"]} Mechanismen; kein Gesamtfortschritt).')
     lines.append('')
     lines.append(f'Event-Befehle (bhScenarioJmpT): {opcode_done}/{opcode_total} gebunden, '
                  f'{opcode_counts["pending"]} nur konsumiert, {opcode_counts["fehlt"]} fehlen.')
     lines.append('')
-    lines.append('| Bereich | Funktionen | Zeilen | gewichtet | streng | original | opcode | verweis/teilw. | fehlt |')
-    lines.append('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+    lines.append('| Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |')
+    lines.append('|---|---:|---:|---:|---:|---:|')
     for label, g in groups.items():
         if not g['weight']:
             continue
-        half = g['status:verweis'] + g['status:partial'] + g['status:pending']
-        lines.append(f'| {label} | {g["done_functions"]}/{g["functions"]} | {g["weight"]} | '
+        half = g['status:partial'] + g['status:pending']
+        lines.append(f'| {label} | {g["done_functions"]}/{g["functions"]} | '
                      f'{percent(g["weighted"], g["weight"]):.1f} % | {percent(g["strict"], g["weight"]):.1f} % | '
-                     f'{g["status:original"] + g["status:done"]} | {g["status:opcode"]} | {half} | '
-                     f'{g["status:fehlt"] + g["status:missing"]} |')
+                     f'{half} | {g["status:missing"]} |')
     lines.append('')
-    lines.append('Spalten original…fehlt in Originalzeilen. Plattformschicht zählt nicht zum Engine-Wert.')
+    lines.append('Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichheit, '
+                 'Originalquellen und quarantänierte Generatoren zählen nie als Portbeleg.')
     lines.append('')
-    selection = [r for r in records if SCORE.get(r['status'], 1) < 1.0 and r['domain'] != PLATFORM]
+    selection = [r for r in records if r['status'] in {'partial', 'missing'} and r['domain'] != PLATFORM]
     if args.domain:
         selection = [r for r in selection if args.domain.lower() in r['domain'].lower()]
     selection.sort(key=lambda r: -r['weight'] * (1 - SCORE[r['status']]))
     lines.append(f'## Größte offene Funktionen{" (" + args.domain + ")" if args.domain else ""}')
     lines.append('')
     for r in selection[:args.top]:
-        lines.append(f'- `{r["file"]}:{r["line"]}` {r["function"]} ({r["weight"]} Zeilen, {r["status"]}'
+        lines.append(f'- `{r["file"]}{":" + str(r["line"]) if r["line"] else ""}` {r["function"]} ({r["status"]}'
                      f'{", " + r["note"] if r["note"] else ""})')
-    if unused:
+    if unconfirmed:
         lines.append('')
-        lines.append('Ledger-Einträge ohne passende Funktion: ' + ', '.join(unused))
+        lines.append('## Unbestätigte historische Ledger-Einträge')
+        lines.append('')
+        for r in unconfirmed:
+            lines.append(f'- `{r["file"]}` {r["function"]}: {r["note"]}')
     report = '\n'.join(lines)
     print(report)
     if args.markdown:
@@ -352,7 +335,8 @@ def main():
     if args.readme:
         update_readme(args.readme, readme_block(groups, engine, opcode_done, opcode_total))
     if args.json:
-        args.json.write_text(json.dumps({'engine_weighted': percent(engine['weighted'], engine['weight']),
+        args.json.write_text(json.dumps({'scope': 'explicit_native_evidence_only',
+                                         'engine_weighted': percent(engine['weighted'], engine['weight']),
                                          'engine_strict': percent(engine['strict'], engine['weight']),
                                          'opcodes': {'total': opcode_total, **opcode_counts},
                                          'functions': records}, indent=1))

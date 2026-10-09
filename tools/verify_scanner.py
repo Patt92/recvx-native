@@ -42,9 +42,19 @@ def check(runtime, data, folder):
     assert 20 in terminal['events'], 'scanner event 20 not started'
     assert 'SYSTEM/MIDI/2/106' in terminal['audio_played'] and 'SYSTEM/MIDI/2/110' in terminal['audio_played'], 'terminal MIDI sounds missing'
     assert not terminal['audio_unavailable'] and not terminal['sequence_unavailable'], 'terminal sound unresolved'
+    # The task itself: script 4 of sp_evt.c on screen, not just its request flags.
+    screen = terminal['computer']
+    assert screen and screen['active'] and screen['number'] == 4, ('terminal task not running', screen)
+    assert screen['text'][0] == 'Activating the enhanced', ('terminal text', screen['text'])
+    assert screen['draws'] > 20 and not screen['draw_overflow'], ('terminal drew nothing', screen['draws'])
+    assert not screen['unknown_opcodes'], 'the terminal interpreter met an undefined opcode'
+    assert screen['message'] == 5, ('command 241 did not request room message 5', screen['message'])
+    assert screen['flg'] & 0x200, 'command 245 did not lock the cancel button of the scanner'
     done = run('finished', 900)
     flags = done['work_flags']
     assert not flags[10] & 0x400000 and not flags[5] & 0x4000000 and flags[6] == 0xffffffff, ('terminal did not exit', flags)
+    assert flags[11] & 0x4 and flags[11] & 0x8000 and flags[12] & 0x20000, ('bhExitSpEvtComputer gm_flg/ts_flg', flags)
+    assert done['computer'] and not done['computer']['active'], 'the terminal task is still running'
     assert 25 in done['events'], 'script did not continue after the terminal (lid animation)'
     for field in ['dialog_open', 'cinematic', 'player_scripted', 'player_hidden']:
         assert not done[field], (field, 'scanner sequence did not return control')

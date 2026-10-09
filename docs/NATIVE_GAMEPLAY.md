@@ -5,10 +5,16 @@ sind und was noch fehlt. Fundstellen beziehen sich auf
 `src/ps2/veronica/prog/`. Prozentwerte je Bereich stehen in
 [PORT_STATUS.md](PORT_STATUS.md), Prüfwerkzeuge in [VALIDATION.md](VALIDATION.md).
 
-„Portiert“ heißt: Die Originalroutine läuft (meist per Generator extrahiert)
-mit ihren Tabellen, Flags und Aufrufreihenfolgen. „Offen“ heißt: Der
+„Portiert“ heißt: Eine eigenständige native Implementierung erhält die
+originalen Tabellen, Flags und Aufrufreihenfolgen. Originalkörper oder daraus
+generierte Funktionen dürfen nicht gebaut oder gelinkt werden. „Offen“ heißt: Der
 Mechanismus fehlt oder ist nur teilweise gebunden. Fehlende Dienste werden
 gemeldet, nicht stillschweigend als erledigt behandelt.
+
+Ältere Aufzählungen außerhalb des folgenden Kollisionsabschnitts enthalten
+noch Nachweise aus der Zeit vor dem Kernrückbau. Sie sind keine aktuelle
+Gameplay-Freigabe; der aktuelle Lückenplan steht in
+[NATIVE_REIMPLEMENTATION_ROADMAP.md](NATIVE_REIMPLEMENTATION_ROADMAP.md).
 
 ## Spielstart und Ablauf
 
@@ -56,32 +62,52 @@ gemeldet, nicht stillschweigend als erledigt behandelt.
 
 ## Spieler, Bewegung und Kollision
 
-**Portiert**
+**Vorhandene native Mechanismen und Teilports**
+
 - Bewegung mit originalen Clips und Geschwindigkeitskurven bei 30 Hz,
   Rückwärtsschritt und 180°-Wende.
-- Spieler-Kandidatenkollision über originales `bhCheckWall` und der gebundene
-  Schiebe-/Kontaktpfad über `bhCheckWallEx` (`hitchk.c`), ATR-Typen 0–7,
-  Flag-/Etagenfilter und temporäre Kantenwände (`bhSetDansaLimitAtari`,
-  `bhCheckDansaAtari`, `bhCheckFloorP`).
-- Wandkontakt-Effekt 29: gemeinsamer `eff[512]`-Slotallocator, Link auf die
-  originale Wand-ATR-Work, Attributlöschung nur nach erfolgreicher Belegung
-  und `bhEff029` mit dem `type |= 0x40`-Seiteneffekt nach 32 Effektframes.
-- Bodenabfrage `bhGetGroundPosition` inklusive Rampen, Dreiecksböden und
-  gestapelter Böden; das Ergebnis geht wie im Original nur nach `plp->gpy`,
-  nicht in die Körperhöhe.
-- Treppen und Leitern (`bhCPM2_act_kdu/kdd/hsu/hsd`), Auf-/Abstieg an Kanten,
-  automatischer Treppenschritt `bhPlayerKaidanMotion`.
-- Schiebbare Kisten: `bhCPM2_act_psh`, `bhObj001`, `bhCheckWall2Box` mit
-  Motion-Übergängen aus `Motion.c`.
+- Eigenständige ATR-Bodenabfrage nach `bhGetGroundPosition`: Boxen,
+  Zylinder, vorzeichenbehaftete Dreiecke, alle vier Rampenrichtungen und
+  Flächen. Raum- und mobile Tabelle werden in Originalreihenfolge geprüft;
+  die getroffene ATR-Identität bleibt über Tabelle/Index nachvollziehbar.
+  Der vorhandene `RoomWorld::combat_ground`-Pfad verwendet diesen Dienst.
+- Eigenständige Wandkontaktabfrage nach `bhCheckWallType`: alle acht
+  ATR-Typen, Radius-/Höhenüberlappung und originale Abfrageflags.
+  Sie erkennt einen Kontakt, löst aber keine Spielerbewegung auf.
+- Eigenständige Wandreflexion nach `bhSetWallRefAngle` für alle acht
+  ATR-Typen und Linienabfragen nach `bhCollisionCheckLine/2/3`: originale
+  Filter, Seitenreihenfolge, Segmentverkürzung und unnormierte Polygonnormalen.
+  Zylinderseiten sind Achtecke, keine analytischen Kreisstrahlen. Der
+  abwärts gerichtete Zylinderdeckeltest bleibt ausdrücklich unportiert:
+  das Original liest dort uninitialisierte Polygonpunkte. Solche Abfragen
+  melden die Lücke, ohne Teilergebnisse an den Aufrufer zu schreiben.
+  Die bestehenden World-Liniendienste verwenden dieselbe Raum-/Mobilgeometrie;
+  ein echter Raumtest prüft auch Änderungen durch Eventbefehl 0x0a.
 - Interaktionsreichweiten und Richtungsmasken aus `bhCheckExmAtari`.
+- Eigenständige Spieler-Wandauflösung nach `bhCheckWallEx` im freien
+  Bewegungsweg: erst geglätteter Vorfühler, danach Körper, mit Originalradius,
+  Höhen, Flags, Vorpositionsregeln und Rundungen. Raum-/Mobil-ATR und
+  temporäre Stufenkanten werden in Originalreihenfolge geprüft. Wandänderungen
+  durch Events wirken auf denselben Besitzer. `bhCheckFloorP` verwendet den
+  sicheren Fühlerpunkt für gerichtete Trigger und setzt Boden-/Wasser-/
+  Trittschallfelder; die eigenständige direkte `bhCheckWall`-Abfrage enthält
+  auch deren gesonderten Rampen- und Y-Rundungszweig.
 - Zufallsfolge des EE-libc (`state * 0x41C64E6D + 0x3039`).
-- Pferdeschwanz (`bhObjClpn`, `bhCalcHair`) und Feuerzeugflamme (`bhEff009`
-  mit Raumlicht).
 
 **Offen**
+
 - Die allgemeine `bhControlPlayer`-Work mit allen Zustandsflags und Modi.
-- Vollständige übrige `bhCheckWallEx`-Aufrufer sowie Vibration und Arm-IK
-  (`bhArmIkMdk`).
+- Vollständige Spielerzustandsmaschine, Schiebe-/Treppen-/Leiteraktionen und
+  deren mobile Geometrieproduzenten. Die freie Spieler-Wandauflösung ist
+  angebunden, nicht sämtliche geskripteten, Kampf- und Gegner-Bewegungspfade.
+- Die Semantik des abwärts gerichteten Zylinderdeckeltests und die echte
+  `bhCheckL2Wall`-Bindung (anderer Kapsel-/Inset-Vertrag als die Linienabfrage).
+  Die weiterhin analytischen Kampfstrahl-/Gegnerbewegungspfade sind damit nicht
+  portiert und ersetzen diese Mechanismen nicht.
+- Vollständige Spieler-Bodenwork und alle effekt-/gegnerseitigen Verbraucher.
+  Eine gültige Bodenabfrage allein erzeugt noch keine Partikel oder Effekte.
+- Wandkontakt-Effekt 29, Pferdeschwanz und Feuerzeugflamme mit Raumlicht.
+- Vibration und Arm-IK (`bhArmIkMdk`).
 
 ## Kampf
 
