@@ -13,6 +13,7 @@
 #include "en01_damage.h"
 #include "enemy_work.h"
 #include "enemy_dispatch.h"
+#include "en03_collision.h"
 #include "effect_particles.h"
 #include "object_itmbox.h"
 #include "view_clip.h"
@@ -253,6 +254,13 @@ private:
     // the room-load half (room.c:114 bhSetEneMdl -> bhSetEnemy).
     RECVX_ENEMY_TABLE enemy_table_{};RECVX_ENEMY_DISPATCH enemy_dispatch_{};RECVX_ENEMY_SERVICES enemy_services_{};
     std::vector<std::unique_ptr<unsigned char[]>> enemy_exp_blocks_;std::size_t enemy_exp_used_=0;
+    // sys->mwalp entries an enemy allocated (bhEne00 eneset.c:427, en25.c:58 ...).
+    // game.c:48-51 runs bhControlEnemy before bhControlObjItm, so the first
+    // pass puts them ahead of the bhObj001 entries PlayerPush owns.
+    std::vector<CollisionWall> enemy_mobile_walls_;
+    // T3 service supplement (en03_lib.h RECVX_ENEMY_EXT): the original
+    // rom->walp + sys->mwalp order for the shared en03.c:5220 wall pass.
+    RECVX_ENEMY_EXT enemy_ext_{};std::vector<CollisionWall> enemy_wall_cache_;
     void bind_enemy_services();
     void init_enemy_works();
     void control_enemy_works();

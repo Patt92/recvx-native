@@ -107,10 +107,11 @@ target_sources(recvx_game PRIVATE native/world_enemies.cpp native/motion_set.cpp
   native/enemies/enemy_work.c native/enemies/enemy_dispatch.c
   native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c
   native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c
-  native/enemies/en56.c native/enemies/en71.c)
+  native/enemies/en56.c native/enemies/en71.c
+  native/enemies/en03_lib.c native/enemies/en03_collision.c)
 if(NOT MSVC)
   # Preserve separate float multiply/add steps also in production-only builds.
-  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c native/enemies/en03_lib.c native/enemies/en03_collision.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
 endif()
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}" build-tools/ninja)
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
@@ -285,6 +286,11 @@ if(BUILD_TESTING)
   add_executable(recvx-item-box-object-tests tests/native/item_box_object_test.cpp)
   target_link_libraries(recvx-item-box-object-tests PRIVATE recvx_game)
   add_test(NAME item_box_object COMMAND recvx-item-box-object-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  # C02: gemeinsamer Gegnerwork, bhSetMotion des Besitzers und Raumbindung
+  # mit Originaldaten (RM_0130 fuenf ID-7-Works, RM_0080 Sprengfass).
+  add_executable(recvx-enemy-work-tests tests/native/enemy_work_test.cpp)
+  target_link_libraries(recvx-enemy-work-tests PRIVATE recvx_game)
+  add_test(NAME enemy_work_contract COMMAND recvx-enemy-work-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   target_link_libraries(recvx-collision-tests PRIVATE recvx_game)
   add_test(NAME wall_collision COMMAND recvx-collision-tests)
   add_executable(recvx-line-reflection-tests tests/native/line_reflection_test.cpp)
@@ -347,7 +353,7 @@ if(BUILD_TESTING)
   # Apparat braucht nur bhSetMotion/bhCalcModel als Zeiger (setzt der Test
   # selbst) und njSin/njCos. Aus enemy_work.h kommen nur Typen, keine Koerper.
   add_executable(recvx-subplayer-tests tests/native/subplayer_test.cpp native/subplayer.c)
-  target_include_directories(recvx-subplayer-tests PRIVATE native)
+  target_include_directories(recvx-subplayer-tests PRIVATE native native/enemies)
   target_compile_features(recvx-subplayer-tests PRIVATE cxx_std_17)
   target_link_libraries(recvx-subplayer-tests PRIVATE recvx_math)
   add_test(NAME subplayer_apparatus COMMAND recvx-subplayer-tests)
@@ -358,7 +364,7 @@ if(BUILD_TESTING)
   # RNG-Fortschritt. native/enemies/enemy_spawn.cpp haengt nur an ninja_math, deshalb
   # wie oben isoliert und ohne recvx_game.
   add_executable(recvx-enemy-spawn-tests tests/native/enemy_spawn_test.cpp native/enemies/enemy_spawn.cpp)
-  target_include_directories(recvx-enemy-spawn-tests PRIVATE native)
+  target_include_directories(recvx-enemy-spawn-tests PRIVATE native native/enemies)
   target_compile_features(recvx-enemy-spawn-tests PRIVATE cxx_std_17)
   target_link_libraries(recvx-enemy-spawn-tests PRIVATE recvx_math)
   add_test(NAME enemy_spawn_activation COMMAND recvx-enemy-spawn-tests)
