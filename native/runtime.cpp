@@ -239,11 +239,15 @@ int main(int argc,char** argv){
                  * the work position - the original's lok_jno == 0 branch (pwksub.c:447-452).
                  * Reported as a missing contract; no substitute joint is invented. */
                 c.look_node=0;
-                /* The test is epw->flg and epw->stflg of the enemy work itself.  Only the enemy
-                 * core owns those bits (bhEne01_Init/bhEne_SetWork set flg 0x1, bhEneSetCk sets
-                 * 0x8000); native/en01_damage.c is a declared porting gap and reports flg 0, so a
-                 * faithful read finds no searchable work.  No host field is substituted for the
-                 * bit: an enemy without an en01 work has no bearer for it at all. */
+                /* The test is epw->flg and epw->stflg of the enemy work itself.  Bit 0 is set by
+                 * the work creation, bhSetEnemy, which copies the EGG_WORK template's flg
+                 * (eneset.c:183) - the room's ene_n entry, or a per-enemy static such as
+                 * `static EGG_WORK child = { 0x8001, 31, 0 }` (en02.c:223).  bhEne01_Init adds
+                 * 0x178 and clears 2 (en01.c:2712-2713) without touching bit 0; bhEne00 case 0
+                 * adds 0x8120 and clears 6 (eneset.c:401-402).  bhEneSetCk writes stflg 0x1000000
+                 * (event.c:2738), never flg.  native/en01_damage.c is a declared porting gap and
+                 * reports flg 0, so a faithful read finds no searchable work.  No host field is
+                 * substituted for the bit: an enemy without an en01 work has no bearer for it. */
                 c.eligible=0;
                 if(e->en01){RECVX_EN01_STATE st;recvx_en01_state(e->en01.get(),&st);
                     c.eligible=(st.flg&1)&&!(st.flg&0x8000)&&!(st.stflg&0x41000000u);

@@ -150,6 +150,27 @@ def check_cmake(root):
     return problems
 
 
+def original_header_shadow(root, native, include):
+    """Flag an include that silently resolves to an original header.
+
+    A quoted include first searches the including file's own directory, so a
+    name that also exists under native/ resolves natively. A name that does NOT
+    exist under native/ falls through to the -I search path, and the native
+    build carries -I include/ps2/veronica/prog. Such a name pulls original
+    declarations into a native translation unit, which the policy forbids even
+    though the include text itself names no forbidden path.
+    """
+    name = Path(include).name
+    if name != include:
+        return False  # keep this check to bare header names
+    if (native / include).exists():
+        return False
+    for other in ("build-tools/ninja", "build-tools", "include"):
+        if (root / other / include).exists():
+            return False
+    return (root / "include/ps2/veronica/prog" / include).exists()
+
+
 def check_native(root):
     problems = []
     native = root / "native"
@@ -167,6 +188,10 @@ def check_native(root):
             include = match.group(1)
             if QUARANTINE in include or Path(include).name in BODY_INCLUDES or forbidden_path(include):
                 problems.append(f"{label}: copied/forbidden function include {include}")
+            elif original_header_shadow(root, native, include):
+                problems.append(
+                    f"{label}: include {include} has no native header and resolves to"
+                    " the original include/ps2/veronica/prog header")
         symbols = sorted(set(DISPATCH.findall(code)))
         if symbols:
             problems.append(f"{label}: forbidden engine/hardware symbols: {', '.join(symbols)}")
