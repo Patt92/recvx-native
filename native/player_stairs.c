@@ -39,6 +39,13 @@ static const signed char PlKDU[4][2][3]={
     {{19,6,15},{19,6,15}},{{21,10,15},{24,18,15}},
     {{21,10,15},{21,14,15}},{{24,18,15},{24,18,15}}};
 
+/* player.c:214, unveraenderte Originaldaten: die Knotenkette vom Wurzelknoten
+ * bis zum rechten bzw. linken Fuss, mit der bhFixPosition die Figur an ihrem
+ * aufgesetzten Fuss festhaelt. */
+static const signed char PlyLegRoute[2][7]={
+    {0,1,14,15,16,17,-1},
+    {0,1,18,19,20,21,-1}};
+
 /* ABS() ist im Original ein ganzzahliges Betrags-Makro. */
 static int stair_abs(int value){return value<0?-value:value;}
 
@@ -204,6 +211,62 @@ static void stair_root_carry(RECVX_STAIR_STATE* s,const NJS_POINT3* pos,float* o
     *out_x=world.x;
     *out_y=world.y;
     *out_z=world.z;
+}
+
+/* bhCalcTree (MdlPut.c:267): owP[n].mtx ist das Produkt von T(px,py,pz),
+ * R(ax,ay,az) und je Knoten der Kette T(objP.pos) R(objP.ang).  Die Kette
+ * `route` ist im Original der Weg von der Wurzel zum Fuss, also genau dieser
+ * Weg.  `motion`/`frame` waehlen die Pose, die SetMtn* in objP geschrieben
+ * hat.  Rueckgabe 0, wenn ein Kettenknoten im nativen Modell fehlt. */
+static int stair_chain_point(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,const signed char* route,
+                             unsigned motion,int frame,float px,float py,float pz,int ax,int ay,int az,
+                             NJS_POINT3* out)
+{
+    NJS_MATRIX matrix;
+    NJS_POINT3 zero;
+    const signed char* node;
+    zero.x=zero.y=zero.z=0.0f;
+    njUnitMatrix(&matrix);
+    njTranslate(&matrix,px,py,pz);
+    njRotateXYZ(&matrix,ax,ay,az);
+    for(node=route;*node!=-1;++node)
+    {
+        float pos[3];
+        int ang[3];
+        if(!h->local_node||!h->local_node(h->user,motion,frame,(unsigned)*node,pos,ang))
+        {
+            s->unsupported_services|=RECVX_STAIR_UNBOUND_FIXPOS;
+            return 0;
+        }
+        njTranslate(&matrix,pos[0],pos[1],pos[2]);
+        njRotateXYZ(&matrix,ang[0],ang[1],ang[2]);
+    }
+    njCalcPoint(&matrix,&zero,out);
+    return 1;
+}
+
+/* bhFixPosition (Motion.c:857) und bhFixPositionXYZ (player.c:1216) ueber
+ * bhCalcFixOffset mit offP == NULL: der Versatz ist die Verschiebung des
+ * Kettenendes zwischen der jetzt abgetasteten Pose und der Pose, mit der
+ * owP zuletzt berechnet wurde.  Er wird von der Figurenlage abgezogen, der
+ * Fuss bleibt also stehen und die Wurzelbewegung der Motion wandert in
+ * plp->px/py/pz. */
+static void stair_fix_position(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,int sample,int xyz)
+{
+    const signed char* route=PlyLegRoute[(s->flg&0x80000u)?1:0];
+    NJS_POINT3 dst,src;
+    /* Vor dem ersten eigenen bhCalcModel gibt es kein owP dieser Aktion.  Der
+     * Fall tritt nicht auf, weil case 0 aller sechs Routinen plp->flg
+     * 0x28C0008 und damit auch 0x40000 loescht (player.c:2880/3143/3357/
+     * 3516/3942/4137); der Riegel steht nur, damit hier nie eine fremde Pose
+     * als Vorgaenger einfliesst. */
+    if(!s->draw_valid)return;
+    if(!stair_chain_point(h,s,route,s->motion,sample,s->px,s->py,s->pz,s->ax,s->ay,s->az,&dst))return;
+    if(!stair_chain_point(h,s,route,s->draw_motion,s->draw_frame,s->draw_px,s->draw_py,s->draw_pz,
+                          s->draw_ax,s->draw_ay,s->draw_az,&src))return;
+    s->px-=dst.x-src.x;
+    if(xyz)s->py-=dst.y-src.y;
+    s->pz-=dst.z-src.z;
 }
 
 /* ---------------------------------------------------------------- kdu (14) */
@@ -801,7 +864,7 @@ int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,int
 int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host)
 {
     unsigned frm_num;
-    int total;
+    int total,sample;
     if(!state||!host||!state->active)return 0;
     state->st_flg|=0x4u;
     switch(state->mode2)
@@ -817,7 +880,13 @@ int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host)
         state->active=0;
         return 0;
     }
-    if(!state->active)return 0;
+    if(!state->active)
+    {
+        /* Der Abschlussblock hat die Ruhemotion mit frm_no 0 aufgesetzt; das
+         * Original tastet sie im selben Durchlauf noch ab und zeichnet sie. */
+        state->sample_frame=state->frame;
+        return 0;
+    }
     /* bhSetMotion: die Aktionsroutine ist gelaufen, jetzt der Bildvorlauf und
      * die Berechnung von plp->flg 0x400000 fuer den naechsten Durchlauf. */
     frm_num=host->motion_frames?host->motion_frames(host->user,state->motion):0u;
@@ -826,6 +895,10 @@ int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host)
         state->unsupported_services|=RECVX_STAIR_UNBOUND_MOTION;
         return 1;
     }
+    /* SetMtn* tastet objP am aktuellen plp->frm_no ab und schiebt erst danach
+     * vor (Motion.c:70-108); diese Bildnummer gehoert zur jetzt gueltigen
+     * Pose und damit zu bhCalcFixOffset und zum gezeichneten Bild. */
+    sample=state->frame;
     total=(int)(frm_num<<16);
     if((state->mtn_md&0x1)&&state->frm_mode!=0)state->frame-=state->mtn_add;
     else state->frame+=state->mtn_add;
@@ -840,5 +913,16 @@ int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host)
     }
     if(stair_frame(state)>=(int)frm_num-1)state->flg|=0x400000u;
     else state->flg&=~0x400000u;
+    /* player.c:1538-1558: die Fussfixierung laeuft nach dem Bildvorschub.
+     * plp->flg 0x80000 waehlt das Bein, 0x8000000 den XYZ-Zweig. */
+    if(state->flg&0x40000u)stair_fix_position(host,state,sample,(state->flg&0x8000000u)!=0);
+    state->sample_frame=sample;
+    /* bhCalcModel (player.c:1684) am Ende des Durchlaufs: owP gehoert ab jetzt
+     * zu dieser Pose und dieser Lage. */
+    state->draw_motion=state->motion;
+    state->draw_frame=sample;
+    state->draw_px=state->px;state->draw_py=state->py;state->draw_pz=state->pz;
+    state->draw_ax=state->ax;state->draw_ay=state->ay;state->draw_az=state->az;
+    state->draw_valid=1;
     return 1;
 }

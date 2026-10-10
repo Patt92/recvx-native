@@ -284,7 +284,13 @@ int EventVm::instruction(Task& t){
         case 6:hit=!quiet&&(ps&0x200u)!=0&&(on&0x10u)==0;break;
         default:throw std::runtime_error("invalid bhPadCheck mode");}
         return hit?0:1;}
-    case 0x69:{const unsigned command=v.u8(p+1);unsigned length=0;switch(command){case 2:case 3:case 4:case 17:case 18:case 19:case 28:case 29:case 30:case 31:case 32:case 33:length=3;break;case 5:case 6:length=6;break;case 7:case 8:case 27:length=8;break;case 9:case 11:case 12:case 13:case 15:case 16:length=6;break;case 14:case 21:case 23:case 40:case 41:case 42:case 46:case 48:case 49:length=4;break;case 44:case 45:length=5;break;case 36:case 47:length=2;break;case 24:case 25:length=8;break;case 34:case 26:case 38:length=10;break;case 50:length=4;break;default:throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));}world(t,op,length);return 1;}
+    case 0x69:{const unsigned command=v.u8(p+1);unsigned length=0;switch(command){case 2:case 3:case 4:case 17:case 18:case 19:case 28:case 29:case 30:case 31:case 32:case 33:length=3;break;case 5:case 6:length=6;break;case 7:case 8:case 27:length=8;break;case 9:case 11:case 12:case 13:case 15:case 16:length=6;break;
+        /* Common_controll 132/140/141 steuern den Begleitfiguren-Bewegungsapparat
+           an (event.c:12495/12517/12561). Laengen aus dem Vorschub des
+           Originalzeigers: 132 liest mode1, die Modusauswahl, ct1 und ct2 (vier
+           Bytes), 140 mode1, die Auswahl und zwei u16 (sechs Bytes), 141 mode1,
+           ct0, ct1 und ct2 (vier Bytes). */
+        case 132:case 141:length=6;break;case 140:length=8;break;case 14:case 21:case 23:case 40:case 41:case 42:case 46:case 48:case 49:length=4;break;case 44:case 45:length=5;break;case 36:case 47:length=2;break;case 24:case 25:length=8;break;case 34:case 26:case 38:length=10;break;case 50:length=4;break;default:throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));}world(t,op,length);return 1;}
     default:{std::ostringstream s;s<<"unimplemented opcode 0x"<<std::hex<<op;throw std::runtime_error(s.str());}
     }
 }

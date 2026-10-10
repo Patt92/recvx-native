@@ -16,16 +16,16 @@
                        Subplayer-Apparat; 53..56, 71 und 0..30 nicht.
      eneset.c:372      nur Identitaeten > 90 bekommen vorher bhControlMask.
      subpl.c:12        Subpl_tbl[7]       mode0-Dispatch, Index 2/3/4 = NULL
-     subpl.c:23        subpl_init_tbl[120] (Index id-40), alle Eintraege gleich
-     subpl.c:38        subpl_mv_tbl[1]    mode2-Dispatch
-     subpl.c:39        subpl_mv00_tbl[15] ct2-Dispatch fuer mode0 1
-     subpl.c:58        subpl_mv01_tbl[15] ct2-Dispatch fuer mode0 5/6
-     subpl.c:77        Rahmen eines Passes (flg-Bits, Dispatch, bhCalcModel)
+     subpl.c:22        subpl_init_tbl[120] (Index id-40), alle Eintraege gleich
+     subpl.c:37        subpl_mv_tbl[1]    mode2-Dispatch
+     subpl.c:38        subpl_mv00_tbl[15] ct2-Dispatch fuer mode0 1
+     subpl.c:56        subpl_mv01_tbl[15] ct2-Dispatch fuer mode0 5/6
+     subpl.c:76        Rahmen eines Passes (flg-Bits, Dispatch, bhCalcModel)
      subpl.c:87        Init-Einstieg, :95 gemeinsame Initialisierung
-     subpl.c:131/137/143/150  mode0-Zweige und die beiden ct2-Weichen
-     subpl.c:153/172/190/215/232/249/273/297/324/348  die elf Bewegungszweige
-     subpl.c:371       Zielwinkelbegrenzung, auch von pl_evt.c:577/624 benutzt
-     subpl.c:392       mv00_subpl10
+     subpl.c:131/137/143/149  mode0-Zweige und die beiden ct2-Weichen
+     subpl.c:155/177/198/226/245/264/287/310/332/357  die elf Bewegungszweige
+     subpl.c:376       Zielwinkelbegrenzung, auch von pl_evt.c:577/624 benutzt
+     subpl.c:393       mv00_subpl10
      subpl.c:410       die leere Routine der Identitaet 28
      Motion.c:21       bhSetMotion (Frameabtastung/Fortschritt) — Fremddienst
      MdlPut.c:240      bhCalcModel — Fremddienst des Objektbaum-Besitzers
@@ -92,7 +92,7 @@ typedef struct RECVX_SUBPLAYER {
        `add` weiter, Rueckgabe -1/0/+1. NULL -> `gap` wird gesetzt und der
        Pass meldet nur `advanced`. */
     int (*set_motion)(struct RECVX_SUBPLAYER* work, int add, unsigned mode, void* datP);
-    /* MdlPut.c:240 bhCalcModel(work) — Abschluss jedes Passes (subpl.c:84).
+    /* MdlPut.c:240 bhCalcModel(work) — Abschluss jedes Passes (subpl.c:83).
        NULL -> `gap`. Im vorhandenen Host uebernimmt das die Rueckschreibung
        in die WorldEntity; siehe Bericht, Abschnitt (b). */
     void (*calc_model)(struct RECVX_SUBPLAYER* work);
@@ -103,7 +103,7 @@ typedef struct RECVX_SUBPLAYER {
    (native/enemy_dispatch.h), hier ohne Abhaengigkeit auf diesen Header. */
 int recvx_is_subplayer(unsigned identity);
 
-/* subpl.c:23 — der Index in subpl_init_tbl[120]. Rueckgabe -1, wenn
+/* subpl.c:22 — der Index in subpl_init_tbl[120]. Rueckgabe -1, wenn
    `identity - 40` ausserhalb der 120 Originaleintraege liegt; das Original
    liest dort ueber das Tabellenende hinaus (Identitaeten 31..39 und > 159).
    Kein Raum der 205 Originaldateien erreicht diesen Fall. */
@@ -113,13 +113,13 @@ int recvx_subplayer_init_index(unsigned identity);
    Initialisierung (subpl.c:95) aus. Entspricht Subpl_tbl[0]. */
 void recvx_subplayer_init(RECVX_SUBPLAYER* work);
 
-/* subpl.c:77 — ein vollstaendiger Pass: Statusbits, mode0-Dispatch,
+/* subpl.c:76 — ein vollstaendiger Pass: Statusbits, mode0-Dispatch,
    Abschluss. Rueckgabe RECVX_SUBPL_HANDLED, wenn der gewaehlte Zweig im
    Original belegt ist; RECVX_SUBPL_UNHANDLED fuer mode0 2/3/4 (dort steht
    NULL in der Tabelle) sowie fuer mode0 > 6 und ct2 >= 15. */
 int recvx_subplayer_tick(RECVX_SUBPLAYER* work);
 
-/* subpl.c:371 — Zielwinkelbegrenzung. Getrennt nutzbar, weil pl_evt.c:577
+/* subpl.c:376 — Zielwinkelbegrenzung. Getrennt nutzbar, weil pl_evt.c:577
    und :624 sie mit dem Spielerwork und Grenze 910 aufrufen. */
 int recvx_subplayer_dir_target(float px, float pz, int ay, float x, float z, int limit);
 
@@ -132,8 +132,8 @@ int recvx_subplayer_dir_target(float px, float pz, int ay, float x, float z, int
    `recvx_subplayer_enemy_event` ist der Dienst, den native/enemy_work.h als
    `sv->event` fuehrt. */
 void recvx_subplayer_enemy_event(struct RECVX_ENEMY_WORK* work);   /* subpl.c:143 */
-void recvx_subplayer_enemy_event2(struct RECVX_ENEMY_WORK* work);  /* subpl.c:150 */
-/* subpl.c:77 als Gegnerroutine fuer die Identitaeten 31..52/57..70/72..99. */
+void recvx_subplayer_enemy_event2(struct RECVX_ENEMY_WORK* work);  /* subpl.c:149 */
+/* subpl.c:76 als Gegnerroutine fuer die Identitaeten 31..52/57..70/72..99. */
 void recvx_subplayer_enemy(struct RECVX_ENEMY_WORK* work);
 /* subpl.c:410 — die Originalroutine der Identitaet 28 ist leer. Sie bleibt
    leer; das ist kein Versehen und wird nicht ergaenzt. */

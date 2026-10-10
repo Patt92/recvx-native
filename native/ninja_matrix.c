@@ -65,6 +65,40 @@ void njRotateX(NJS_MATRIX* m,Angle angle) { rotate(m,1,2,angle,0); }
 void njRotateY(NJS_MATRIX* m,Angle angle) { rotate(m,0,2,angle,1); }
 void njRotateZ(NJS_MATRIX* m,Angle angle) { rotate(m,0,1,angle,0); }
 void njRotateXYZ(NJS_MATRIX* m,Angle x,Angle y,Angle z) { njRotateZ(m,z);njRotateY(m,y);njRotateX(m,x); }
+/* ps2_NaMatrix.c:737 — Drehung um eine freie Achse. Die Originalroutine
+   rechnet in der VU0, der Mechanismus ist aber reine Quaternionenmathematik
+   und wird hier eigenstaendig nativ gefuehrt; es wird keine VU nachgebildet.
+   Aus der Originalfolge belegt und hier erhalten:
+     :745  ang &= 0xFFFF, DANN ang /= 2 — der HALBE Winkel, auf dem gemaskten
+           positiven Wert. Ein negativer Winkel wird also erst in seine
+           16-Bit-Darstellung gebracht und dann halbiert.
+     :762  vrsqrt auf x*x+y*y+z*z: die Achse WIRD normiert, der Aufrufer muss
+           keinen Einheitsvektor liefern. Eine Achse der Laenge null laeuft
+           wie im Original ungeschuetzt durch njInvertSqrt (ninja_math.c:27).
+     :774  der Vektorteil ist Achse*sin(ang/2), der Skalarteil cos(ang/2).
+     :787ff die drei Spalten der Drehmatrix in genau dieser Form, also mit
+           c*c statt der Vereinfachung 1-2y*y-2z*z: beide sind nur fuer einen
+           exakten Einheitsquaternion gleich.
+     :813  die Verkettung ist eine Rechtsmultiplikation m = m * R, wie bei
+           njRotateX/Y/Z. Sie schreibt mit vmul/vadd.xyz NUR die Komponenten
+           x,y,z der drei Spalten: die vierte Zeile (p[3], p[7], p[11]) und
+           die Translationsspalte bleiben unberuehrt. Das ist hier genauso. */
+void njRotate(NJS_MATRIX* m,NJS_VECTOR* v,Angle ang) {
+    Float* p=resolve(m);Float s,c,q,x,y,z,col[3][3];int i,r;
+    njSinCos((ang&0xFFFF)/2,&s,&c);
+    q=njInvertSqrt(v->x*v->x+v->y*v->y+v->z*v->z)*s;
+    x=v->x*q;y=v->y*q;z=v->z*q;
+    col[0][0]=c*c+x*x-y*y-z*z; col[0][1]=2*(x*y+c*z);     col[0][2]=2*(x*z-c*y);
+    col[1][0]=2*(x*y-c*z);     col[1][1]=c*c-x*x+y*y-z*z; col[1][2]=2*(y*z+c*x);
+    col[2][0]=2*(x*z+c*y);     col[2][1]=2*(y*z-c*x);     col[2][2]=c*c-x*x-y*y+z*z;
+    for (i=0;i<3;++i) {
+        Float out[3];
+        for (r=0;r<3;++r)
+            out[r]=(p[r]*col[i][0]+p[4+r]*col[i][1])+p[8+r]*col[i][2];
+        col[i][0]=out[0];col[i][1]=out[1];col[i][2]=out[2];
+    }
+    for (i=0;i<3;++i) for (r=0;r<3;++r) p[i*4+r]=col[i][r];
+}
 void njRotXYZ(NJS_MATRIX* m,int x,int y,int z) { njRotateX(m,x);njRotateY(m,y);njRotateZ(m,z); }
 void njCalcPoint4(NJS_MATRIX* m,NJS_POINT4* source,NJS_POINT4* dest) {
     Float* p=resolve(m);NJS_POINT4 a=*source,b;

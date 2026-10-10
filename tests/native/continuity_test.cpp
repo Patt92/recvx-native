@@ -12,16 +12,23 @@ int main(int argc,char** argv){try{
     _Make_SinTable();
     const auto id=RoomIdentity::parse("RM_5820.RDX");check(id.stage==5&&id.room==82&&id.variant==0&&id.name()=="RM_5820.RDX","decimal room identity roundtrip");
     bool rejected=false;try{RoomIdentity::parse("RM_21B1.RDX");}catch(const std::exception&){rejected=true;}check(rejected,"hexadecimal name accepted");
-    // PORTIERUNGSLÜCKE (Policy 2026-10-09): Hier wurde die Begleitfiguren-
-    // Steuerung aus subplayer.inc geprüft (Erkennung der Begleit-IDs,
-    // em60_init und beide Bewegungs-Dispatchtabellen). Generator und Include
-    // sind Quarantäne, siehe native/subplayer.c. Geprüft bleibt nur, dass die
-    // Lücke sich wie dokumentiert verhält: keine Figur wird als Begleitfigur
-    // erkannt, Init und Tick verändern die Arbeit nicht.
-    check(!recvx_is_subplayer(91)&&!recvx_is_subplayer(93)&&!recvx_is_subplayer(54),"subplayer gap must not classify any identity");
+    // Die Begleitfiguren-Steuerung ist jetzt nativ bestimmt (T5, native/subplayer.c):
+    // der Apparat aus subpl.c, nicht mehr das Quarantäne-Includes von
+    // generate_subplayer.py. Die drei früheren Lücken-Erwartungen ("keine Figur
+    // wird erkannt, Init und Tick verändern nichts") galten dem leeren Platzhalter
+    // und sind mit der Portierung überholt. Geprüft wird jetzt das belegte
+    // Originalverhalten: eneset.c:84-152 leitet 91/93 auf den Apparat, 54 bleibt
+    // eigene Gegnerroutine; subpl.c:87 setzt mode0 auf 1 und subpl.c:95 die
+    // gemeinsame Initialisierung (mtn_add 32768, mode3 3); subpl.c:77 setzt die
+    // Statusbits 0x8100 und kehrt aus dem Dispatch zurück. Die Fremddienste
+    // Motion.c:21 und MdlPut.c:240 sind in diesem Test nicht angebunden und
+    // müssen sich namentlich als Lücke melden, statt still wegzufallen.
+    check(recvx_is_subplayer(91)&&recvx_is_subplayer(93)&&!recvx_is_subplayer(54),"subplayer identity ranges (eneset.c:84-152)");
     {RECVX_SUBPLAYER sub{};sub.id=93;recvx_subplayer_init(&sub);
-     check(!sub.mode0&&!sub.mtn_no&&!sub.mtn_add&&!sub.mode3,"subplayer gap initialized a work");
-     check(!recvx_subplayer_tick(&sub)&&!sub.advanced,"subplayer gap dispatched a routine");}
+     check(sub.mode0==1&&sub.mtn_add==32768&&sub.mode3==3&&!sub.mtn_no,"subplayer init state (subpl.c:87/95)");
+     check(sub.gap&&std::string(sub.gap)=="subpl:motion-step (Motion.c:21)","unbound motion service not reported");
+     check(recvx_subplayer_tick(&sub)==RECVX_SUBPL_HANDLED&&(sub.flg&0x8100u)==0x8100u,"subplayer pass bits and dispatch (subpl.c:77)");
+     check(sub.gap&&std::string(sub.gap)=="subpl:publish-model (MdlPut.c:240)","unbound model service not reported");}
     AudioMixer mixer;auto clip=std::make_shared<PcmClip>();clip->rate=48000;clip->channels=1;clip->samples.assign(32000,10000);mixer.play_pcm(24,clip,.5f,true);check(mixer.user_sound_volume(6,0,0,-64,0),"BG volume category unbound");auto samples=mixer.mix(1);check(std::abs(samples[0]-2519)<=1,"fade erased note velocity/program gain");check(mixer.user_sound_volume(6,0,-1,-127,2),"BG fade missing");mixer.mix(3200);check(!mixer.active(24),"fade does not release the voice");mixer.set_room_sound_case(1);check(mixer.take_room_sound_case()==1&&mixer.take_room_sound_case()==0,"sound variant not consumed once");
     // Treppen-, Leiter- und Stufenaktionen (Auftrag B01, native/player_stairs.c):
     // die sechs Originalroutinen kdu/kdd/dnu/dnd/hsu/hsd werden je einmal
@@ -47,6 +54,19 @@ int main(int argc,char** argv){try{
            data/archives/SYSTEM/0010..0014.bin. */
         [](void*,unsigned){return 27u;},
         [](void* p,unsigned node,float out[3]){static_cast<Host*>(p)->last_node=node;out[0]=5;out[1]=0;out[2]=7;},
+        /* objP-Fixture fuer bhCalcFixOffset (Motion.c:868): der Wurzelknoten 0
+           traegt bei den Stufenmotionen 31..38 die Hub- und Vorwaertskurve, die
+           Beinkette dahinter steht still.  Das Kettenende ist damit genau die
+           Wurzelbewegung, sodass die Fussfixierung sie vollstaendig in
+           plp->px/py/pz uebernehmen muss.  `frame` ist wie bei bhGetObjMotion
+           der 16.16-Zaehler der Spielerarbeit. */
+        [](void*,unsigned motion,int frame,unsigned node,float pos[3],int ang[3]){
+            const bool step=motion>=31u&&motion<=38u;
+            const bool down=step&&(motion%2u)==0u;
+            const float f=float(frame)/65536.0f/26.0f;
+            pos[0]=pos[1]=pos[2]=0.0f;ang[0]=ang[1]=ang[2]=0;
+            if(node==0&&step){pos[1]=(down?-16.0f:16.0f)*f;pos[2]=-24.0f*f;}
+            return 1;},
         [](void*,int floor,float,float,int){return floor;},
         [](void* p,int sound,int type,int flag){auto& h=*static_cast<Host*>(p);++h.feet;if(type>=2){++h.actions;h.sound=sound;}if(!flag)++h.badflag;},
         [](void* p,const float*,float* top){auto& h=*static_cast<Host*>(p);++h.water;h.probe_node=h.last_node;*top=1.5f;return 1;},
@@ -134,6 +154,32 @@ int main(int argc,char** argv){try{
         for(int ticks=0;s.active&&h.splash_up==0&&ticks<40;++ticks)recvx_stairs_tick(&s,&services);
         check(h.splash_up==1&&h.bits==1.0f,"dnu effect offset is not the raw plp->ax bit pattern");}
     check(!h.badflag,"stair action requested a step sound with ListNo -1");
+    // (5) kdu-Abschluss: player.c:3033 setzt plp->flg 0x8040000 und loescht
+    // 0x80000, womit player.c:1538-1558 fuer jedes Bild der Abschlussphase
+    // bhFixPositionXYZ mit PlyLegRoute[0] laeuft.  Ohne diesen Zweig blieb die
+    // Figur an der Stufenkante stehen, weil die Wurzelbewegung der Steigmotion
+    // nie in die Arbeitslage wanderte (RM_0050: Rueckstoss auf die untere
+    // Flaeche bei beibehaltener Hoehe 8).  Erwartet wird genau der Versatz des
+    // Kettenendes zwischen der jetzt abgetasteten Pose und der Pose, mit der
+    // owP zuletzt berechnet wurde; die ungebundene HOKAN-Mischung aendert ihn
+    // nicht, weil die Summe der Bildversaetze nur von Anfangs- und Endpose
+    // abhaengt.
+    {RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};a.type=1;a.py=0;a.prm2=8;a.w=40;a.d=40;
+        seed(s);
+        recvx_stairs_begin(&s,&a,14,floors.data(),0,0,0,0,0,0,0);
+        float px=0,py=0,pz=0;int previous=0;bool entered=false;
+        for(int ticks=0;s.active&&ticks<400;++ticks){
+            const int before=s.mode3;previous=s.sample_frame;px=s.px;py=s.py;pz=s.pz;
+            recvx_stairs_tick(&s,&services);
+            if(before==5&&s.mode3==6){entered=true;break;}
+        }
+        check(entered,"kdu never reached its finishing phase");
+        check((s.flg&0x8040000u)==0x8040000u&&!(s.flg&0x80000u),"kdu finish does not request bhFixPositionXYZ on leg route 0");
+        const float travel=float(previous)/65536.0f/26.0f;
+        check(std::fabs(s.px-px)<0.001f,"kdu foot fixing moved the figure sideways");
+        check(std::fabs(s.pz-(pz-24.0f*travel))<0.001f,"kdu finish did not carry the planted foot forward");
+        check(std::fabs(s.py-(py+16.0f*travel))<0.001f,"kdu finish did not carry the planted foot upward (XYZ branch)");
+        check(!(s.unsupported_services&RECVX_STAIR_UNBOUND_FIXPOS),"kdu reported a missing bhCalcFixOffset route node");}
 
     if(argc>1){const auto data=std::filesystem::path(argv[1]);
         // bhSetRoom normalizes POS.py before the player/event initialization.
@@ -155,6 +201,38 @@ int main(int argc,char** argv){try{
         auto bytes=read_asset_file(data/"rooms/RM_0040.RDT",64*1024*1024);auto scene=decode_scene(bytes);auto player=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio;RoomWorld world(bytes,scene,player,motion,frame,audio);
         for(unsigned npc=0;npc<2;++npc){const auto* state=world.state(1,npc);check(state&&state->subplayer_bound&&!state->has_motion&&!state->room_motion&&state->motion==0,"zeroed original NPC motion work not retained");}
         EventCommand select{0x65,0,0,0,{0x65,1,0,0}};world.bind(select);world.bind({0x69,0,0,0,{0x69,24,1,1,0,0,0,0}});world.tick();check(world.frame(1,0)==65536,"shared NPC event motion did not advance");world.bind({0x67,0,0,0,{0x67,0x90}});const auto frozen=world.frame(1,0);world.tick();check(world.frame(1,0)==frozen&&!world.state(1,0)->scripted,"NPC scene release changes its retained pose");
+        // Common_controll 132/140/141 (event.c:12495/12517/12561) sind die drei
+        // Befehle, die den Begleitfiguren-Bewegungsapparat ansteuern. Ohne sie
+        // bekam der Work nie ein ct0 und jede laufende Figur zielte auf den
+        // Weltursprung (subpl.c:201/260/284 lesen das gepackte Ziel aus ct0).
+        {
+            world.bind(select);
+            /* Befehl 12 setzt die Vorzeichenflags, die 140 als bpx/bpz liest. */
+            world.bind({0x69,0,0,0,{0x69,12,0,0,0,0}});
+            check(world.bind({0x69,0,0,0,{0x69,140,7,0,0xB0,0x04,0x48,0x0D}}),"Common_controll 140 unbound");
+            {const auto& w=world.state(1,0)->subplayer;
+             check(w.mode0==1&&w.mode1==7&&w.mode2==0&&w.mode3==0,"Common 140 mode fields");
+             /* :12527 die Auswahl schreibt ct2 nur im untersten Byte. */
+             check((w.ct2&0xff)==1,"Common 140 ct2 low byte");
+             /* 12.00/34.00 Einheiten als Hundertstel, gepackt wie subpl.c liest. */
+             check(unsigned(w.ct0)==0x04B00D48u,"Common 140 packed ct0 target");}
+            world.bind({0x69,0,0,0,{0x69,132,7,0,3,0x7F}});
+            check(world.state(1,0)->subplayer.ct2==0x7F,"Common 132 writes the full ct2 int");
+            world.bind({0x69,0,0,0,{0x69,140,7,1,0xB0,0x04,0x48,0x0D}});
+            check(world.state(1,0)->subplayer.mode0==5&&world.state(1,0)->subplayer.ct2==3,"Common 140 selection byte");
+            world.bind({0x69,0,0,0,{0x69,141,9,4,5,6}});
+            {const auto& w=world.state(1,0)->subplayer;
+             check(w.mode0==5&&w.mode1==9&&w.ct0==4&&w.ct1==5&&w.ct2==6,"Common 141 fields");}
+            world.bind({0x69,0,0,0,{0x69,132,11,0,12,13}});
+            {const auto& w=world.state(1,0)->subplayer;
+             check(w.mode0==1&&w.mode1==11&&w.ct1==12&&w.ct2==13,"Common 132 fields");}
+            /* :12553 negatives z wird als `0u - z` verodert und setzt dabei auch
+               die oberen 16 Bit, der x-Teil geht also verloren. Originalverhalten,
+               hier festgehalten statt korrigiert. */
+            world.bind({0x69,0,0,0,{0x69,12,0,0,1,0}});
+            world.bind({0x69,0,0,0,{0x69,140,7,0,0xB0,0x04,0x48,0x0D}});
+            check(unsigned(world.state(1,0)->subplayer.ct0)==0xFFFFF2B8u,"Common 140 negative z keeps the original OR");
+        }
         // bhInitEvent runs before the platform requests the soundbank. Decoding
         // the world must not consume a case number intended for that request.
         AudioMixer ordered_audio(data);ordered_audio.set_room_sound_case(1);RoomWorld decoded(bytes,scene,player,motion,frame,ordered_audio,data,{},"RM_0040");check(ordered_audio.take_room_sound_case()==1,"world constructor consumes sound case before Event_init");

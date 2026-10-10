@@ -31,6 +31,9 @@ void njRotateX(NJS_MATRIX* m, Angle angle);
 void njRotateY(NJS_MATRIX* m, Angle angle);
 void njRotateZ(NJS_MATRIX* m, Angle angle);
 void njRotateXYZ(NJS_MATRIX* m, Angle x, Angle y, Angle z);
+/* ps2_NaMatrix.c:737 — Drehung um die freie Achse v. Die Achse wird in der
+   Routine normiert; v darf jede Laenge haben. Siehe Beleg im Koerper. */
+void njRotate(NJS_MATRIX* m, NJS_VECTOR* v, Angle ang);
 void njRotXYZ(NJS_MATRIX* m, int x, int y, int z);
 void njCalcPoint(NJS_MATRIX* m, NJS_POINT3* source, NJS_POINT3* dest);
 void njCalcPoint4(NJS_MATRIX* m, NJS_POINT4* source, NJS_POINT4* dest);

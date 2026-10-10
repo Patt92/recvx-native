@@ -645,6 +645,21 @@ int main(int argc,char** argv){
                 [](void* u,unsigned m,int f,float pos[3])->int{auto& b=*static_cast<Host*>(u)->body;if(!b.has_motion(m))return 0;const auto& c=b.motion_clip(m);if(c.positions.empty()||c.positions[0].empty())return 0;const std::size_t key=std::size_t(std::min<int>(std::max(f/65536,0),int(c.positions[0].size())-1));const auto& k=c.positions[0][key];pos[0]=k.x;pos[1]=k.y;pos[2]=k.z;return 1;},
                 [](void* u,unsigned m)->unsigned{auto& b=*static_cast<Host*>(u)->body;return b.has_motion(m)?b.motion_frames(m):0;},
                 [](void* u,unsigned n,float out[3]){const auto& h=*static_cast<Host*>(u);if(n<h.nodes.size()){out[0]=h.nodes[n].value[12];out[1]=h.nodes[n].value[13];out[2]=h.nodes[n].value[14];}else{out[0]=h.at.x;out[1]=h.at.y;out[2]=h.at.z;}},
+                // objP[node] der von SetMtn* abgetasteten Pose. Der Skriptknoten
+                // der Originalroute wird auf seinen Modellknoten abgebildet, weil
+                // die MASK-Toechter die Modellindizes verschieben.
+                [](void* u,unsigned m,int f,unsigned node,float pos[3],int ang[3])->int{
+                    auto& b=*static_cast<Host*>(u)->body;
+                    if(!b.has_motion(m))return 0;
+                    try{
+                        const auto index=b.model_index(node);
+                        const auto local=b.local_pose(m,f);
+                        if(index>=local.size())return 0;
+                        pos[0]=local[index].position.x;pos[1]=local[index].position.y;pos[2]=local[index].position.z;
+                        ang[0]=local[index].angles[0];ang[1]=local[index].angles[1];ang[2]=local[index].angles[2];
+                        return 1;
+                    }catch(const std::exception&){return 0;}
+                },
                 [](void* u,int floor,float x,float z,int special)->int{const auto& h=*static_cast<Host*>(u);return int(h.world->floor_sound(floor,x,z,special!=0));},
                 // CallPlayerFootStepSeEx(FloorType,Type,Flag,0,&PlayerPos): Bank 2,
                 // Liste FootDef[FloorType] bzw. 5, Slot aus GetPlayerActionSeSlotNo.
@@ -684,7 +699,11 @@ int main(int argc,char** argv){
             // eine Sicht darauf und wird nach jedem Bild zurueckgeschrieben.
             if(events){events->flags[14][0]=stairs.status;events->flags[13][0]=stairs.flg;events->flags[5][0]=stairs.st_flg;}
             world->player_stair_ground_state(stairs.status,stairs.mode0);
-            actor.position={stairs.px,stairs.py,stairs.pz};actor.yaw=stairs.ay;if(player->has_motion(stairs.motion)){motion=stairs.motion;animation=stairs.frame;}
+            // bhCalcModel zeichnet die Pose, die SetMtn* in diesem Durchlauf
+            // abgetastet hat (plp->frm_no vor dem Vorschub), nicht den schon
+            // vorgeschobenen Zaehler. Dieselbe Pose liest die Aktionsroutine im
+            // naechsten Bild als owP.
+            actor.position={stairs.px,stairs.py,stairs.pz};actor.yaw=stairs.ay;if(player->has_motion(stairs.motion)){motion=stairs.motion;animation=stairs.sample_frame;}
             if(!running){world->clear_player_stair_ground_state();world->player_action=false;if(events)events->flags[5][0]&=~4u;if(stair_etc_marked>=0)mark_stair_etc(stair_etc_marked,false);stair_etc_marked=-1; /* bhClrUseKaidanFlag(plp) am Ende (player.c:1737) */locomotion=false;}follow();};
         // bhPlayerKaidanMotion (event.c 0xa4 -> bhKaidanPlayerMotion): der
         // Raumskript startet denselben Stufentreiber mit dem ATR-Satz
@@ -764,7 +783,7 @@ int main(int argc,char** argv){
                 world->tick_push(move>0);if(events){if(world->pushing())events->flags[5][0]|=4;else events->flags[5][0]&=~4u;}turnaround_timer=0;combat_input.next_target=false;locomotion=true;follow();return;
             }
             head_push_owned=false;
-            const bool blocked=debug.active()||frontend.active()||transition_pending||computer.active()||menu.active||dialog.active()||movie.active()||(world&&(world->player_scripted||world->player_hidden))||(events&&(events->flags[5][0]&4));
+            const bool blocked=debug.active()||frontend.active()||transition_pending||computer.active()||menu.active||dialog.active()||movie.active()||(world&&(world->player_scripted||world->player_hidden))||(events&&(events->flags[5][0]&4)&&!combat.aiming());
             
             if (move < 0 && run_pressed && !turnaround_timer && !blocked && !combat_input.aim) {
                 turnaround_timer = 8;

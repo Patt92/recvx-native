@@ -44,7 +44,7 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # siehe native/effect_particles.cpp.
 # tools/generate_en01_damage.py ist Quarantaene (Policy 2026-10-09): Gegner-KI,
 # Trefferreaktion, Tod, Greifen und das Sprengfass fehlen bis zur nativen
-# Neubestimmung, siehe native/en01_damage.c. Damit entfaellt auch
+# Neubestimmung, siehe native/enemies/en01_damage.c. Damit entfaellt auch
 # en01_damage_types.inc, weil es aus demselben Generator stammt.
 # Retired engine/console component targets are quarantined, never build inputs.
 # Only independently ported native mechanisms belong in the production graph.
@@ -91,18 +91,26 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # native/inventory.cpp.
 # tools/generate_enemy_spawn.py ist Quarantaene (Policy 2026-10-09): die
 # Spawn-/Fallenaktivierung fehlt bis zur nativen Neubestimmung, siehe
-# native/enemy_spawn.cpp.
+# native/enemies/enemy_spawn.cpp.
 # tools/generate_gameover.py ist Quarantaene (Policy 2026-10-09): Todesszene,
 # Retry-Abfrage und Bildblende fehlen bis zur nativen Neubestimmung, siehe
 # native/gameover.cpp.
 # tools/generate_effect_collision.py ist Quarantaene (Policy 2026-10-09):
 # ATR-Boden/Wandkontakt, Reflexion und Linienabfrage sind eigenstaendig nativ;
 # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/en01_damage.c native/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/player_head.c native/adx_tables.c)
+add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/player_head.c native/adx_tables.c)
 target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
+# C02: gemeinsamer Gegnerwork am WorldEntity-Besitzer, native Dispatchkette,
+# bhSetMotion/bhCalcModel des Besitzers und alle nativ vorhandenen Gegner-
+# routinen. en54/en55 fehlen bis zum Port von en17.c (Kettenwerk-Besitzer).
+target_sources(recvx_game PRIVATE native/world_enemies.cpp native/motion_set.cpp
+  native/enemies/enemy_work.c native/enemies/enemy_dispatch.c
+  native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c
+  native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c
+  native/enemies/en56.c native/enemies/en71.c)
 if(NOT MSVC)
   # Preserve separate float multiply/add steps also in production-only builds.
-  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
 endif()
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}" build-tools/ninja)
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
@@ -111,7 +119,10 @@ if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
 endif()
 add_library(recvx_data native/expand.cpp native/archive.cpp native/room.cpp native/asset_io.cpp)
-target_include_directories(recvx_data PUBLIC native)
+# native/enemies: Gegnerroutinen (enNN*, enemy_*) liegen in eigenem
+# Unterordner. Der Pfad wird mit "native" zusammen weitergegeben, damit die
+# vorhandenen kurzen #include-Namen der Gegnerheader gueltig bleiben.
+target_include_directories(recvx_data PUBLIC native native/enemies)
 target_compile_features(recvx_data PUBLIC cxx_std_17)
 add_library(recvx_math native/ninja_math.c native/ninja_matrix.c)
 target_compile_definitions(recvx_math PRIVATE RECVX_NATIVE=1)
@@ -329,6 +340,28 @@ if(BUILD_TESTING)
   add_executable(recvx-enemy-damage-tests tests/native/enemy_damage_test.cpp)
   target_link_libraries(recvx-enemy-damage-tests PRIVATE recvx_game)
   add_test(NAME enemy_damage_original_en01 COMMAND recvx-enemy-damage-tests)
+  # Der Test zu native/subplayer.c stand bisher in keinem Ziel und lief nie
+  # (tools/check_build_coverage.py). Er prueft beide ct2-Tabellen, alle elf
+  # Bewegungszweige an ihrer Feldsignatur und die Bereichsgrenzen.
+  # Wie recvx-weapon-flash-tests bewusst OHNE recvx_game/recvx_scene: der
+  # Apparat braucht nur bhSetMotion/bhCalcModel als Zeiger (setzt der Test
+  # selbst) und njSin/njCos. Aus enemy_work.h kommen nur Typen, keine Koerper.
+  add_executable(recvx-subplayer-tests tests/native/subplayer_test.cpp native/subplayer.c)
+  target_include_directories(recvx-subplayer-tests PRIVATE native)
+  target_compile_features(recvx-subplayer-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-subplayer-tests PRIVATE recvx_math)
+  add_test(NAME subplayer_apparatus COMMAND recvx-subplayer-tests)
+  # Auch tests/native/enemy_spawn_test.cpp stand in keinem Ziel und lief nie.
+  # Es prueft die Fallenaktivierung gegen zonzon.c (bhEne_EnemyAtariCheck,
+  # bhEne_PosCheck) und en04.c (MVType01/MVType02/AtariCheck*) an echten
+  # Nachschlagen: Feldaenderung, Bereichsverbrauch, Kontaktbit, Raumflag und
+  # RNG-Fortschritt. native/enemies/enemy_spawn.cpp haengt nur an ninja_math, deshalb
+  # wie oben isoliert und ohne recvx_game.
+  add_executable(recvx-enemy-spawn-tests tests/native/enemy_spawn_test.cpp native/enemies/enemy_spawn.cpp)
+  target_include_directories(recvx-enemy-spawn-tests PRIVATE native)
+  target_compile_features(recvx-enemy-spawn-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-enemy-spawn-tests PRIVATE recvx_math)
+  add_test(NAME enemy_spawn_activation COMMAND recvx-enemy-spawn-tests)
   add_executable(recvx-gameplay-bindings-tests tests/native/gameplay_bindings_test.cpp)
   target_link_libraries(recvx-gameplay-bindings-tests PRIVATE recvx_game)
 if(TARGET recvx_input)
@@ -337,6 +370,11 @@ if(TARGET recvx_input)
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
   add_test(NAME native-gameplay-bindings COMMAND recvx-gameplay-bindings-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  # A01-A04 Spielerkampf: Komponententest des Waffenzustandsautomaten.
+  add_executable(recvx-combat-state-tests tests/native/combat_state_test.cpp)
+  target_link_libraries(recvx-combat-state-tests PRIVATE recvx_game recvx_math)
+  target_include_directories(recvx-combat-state-tests PRIVATE native native/enemies "${RECVX_TABLES}")
+  add_test(NAME combat_player_state COMMAND recvx-combat-state-tests)
 endif()
   # Das ILP32-Originalkern-Audit ist entfernt; Quellen in
   # der gesperrten Quarantaene. Kein historischer Audit-Build ist erlaubt.
@@ -419,6 +457,10 @@ endif()
 # bis zur nativen Neubestimmung, siehe native/player_combat_core.c. Damit
 # entfällt auch sein Typ-Include, das ohne denselben Generator nicht entsteht.
 target_sources(recvx_game PRIVATE native/player_combat_core.c)
+# A01-A04: native/combat_geometry.c traegt die Kollisionsprimitive des
+# Spielerkampfs. Solange es hier fehlt, uebersetzt player_combat_core.c die
+# Einheit mit; mit diesem Eintrag entfaellt das #include "combat_geometry.c".
+target_sources(recvx_game PRIVATE native/combat_geometry.c)
 # Preserve original C field aliasing and separate float multiply/add evaluation.
 if(NOT MSVC)
  set_source_files_properties(native/player_push_core.c PROPERTIES COMPILE_OPTIONS "-fno-strict-aliasing;-ffp-contract=off")

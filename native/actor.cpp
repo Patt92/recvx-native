@@ -211,6 +211,25 @@ std::vector<PlayerAsset::Matrix> PlayerAsset::matrices(const std::vector<ModelPo
     if(std::find(visited.begin(),visited.end(),false)!=visited.end())throw std::runtime_error("unreachable player bone");
     return result;
 }
+std::vector<BoneMatrix> PlayerAsset::tree_matrices(const std::vector<ModelPose>& pose,const NJS_MATRIX& root,const std::vector<std::uint32_t>& owp_flg,const std::vector<BoneMatrix>& owp_mtx)const{
+    if(pose.size()!=bones())throw std::runtime_error("native object tree differs from model");
+    std::vector<BoneMatrix> result(pose.size());std::vector<bool> visited(pose.size());
+    std::function<void(std::int32_t,const NJS_MATRIX&,unsigned)> visit=[&](std::int32_t node,const NJS_MATRIX& parent,unsigned depth){
+        if(node<0)return;
+        if(depth>256||std::size_t(node)>=pose.size()||visited[node])throw std::runtime_error("invalid/cyclic skeleton hierarchy");
+        visited[node]=true;auto& world=result[node].value;
+        if(std::size_t(node)<owp_flg.size()&&(owp_flg[node]&1)){if(std::size_t(node)>=owp_mtx.size())throw std::runtime_error("owP flg 0x1 without a kept matrix");std::copy_n(owp_mtx[node].value,16,world);}
+        else {std::copy_n(parent,16,world);const auto& t=pose[node];njTranslate(&world,t.position.x,t.position.y,t.position.z);njRotateXYZ(&world,t.angles[0],t.angles[1],t.angles[2]);}
+        visit(children_[node],world,depth+1);visit(siblings_[node],parent,depth);
+    };
+    visit(0,root,0);
+    if(std::find(visited.begin(),visited.end(),false)!=visited.end())throw std::runtime_error("unreachable model node");
+    return result;
+}
+std::vector<std::uint32_t> PlayerAsset::node_evalflags()const{
+    BinaryView v(model_);const auto base=v.u16(4);const auto objects=v.relative(base,v.u32(12),bones()*52);
+    std::vector<std::uint32_t> out(bones());for(std::size_t i=0;i<out.size();++i)out[i]=v.u32(objects+i*52);return out;
+}
 void PlayerAsset::install_weapon_motions(const std::vector<std::optional<MotionClip>>& clips){
     if(clips.size()>64)throw std::runtime_error("too many weapon motions");
     for(const auto& clip:clips)if(clip&&clip->positions.size()!=bones())throw std::runtime_error("weapon motion skeleton differs from player");

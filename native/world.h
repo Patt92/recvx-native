@@ -11,6 +11,8 @@
 #include "enemy_spawn.h"
 #include "subplayer.h"
 #include "en01_damage.h"
+#include "enemy_work.h"
+#include "enemy_dispatch.h"
 #include "effect_particles.h"
 #include "object_itmbox.h"
 #include "view_clip.h"
@@ -56,7 +58,18 @@ RECVX_SUBPLAYER subplayer{};bool subplayer_bound=false,subplayer_no_motion=false
     // bhCyoutenHenkei family: mdflg bit 2 plus shp_ct (0..1000) and, for
     // bhCyoutenHenkeiSetEX, the original mbp model indices obj_a/obj_b.
     // Vertex interpolation/rendering is pending; the shape clock is exact.
-    bool morph=false;float morph_shape=0;unsigned morph_obj_a=0,morph_obj_b=0;};
+    bool morph=false;float morph_shape=0;unsigned morph_obj_a=0,morph_obj_b=0;
+    // C02: the original BH_PWORK of a room enemy (eneset.c:170 bhSetEnemy).
+    // It lives here; RoomWorld's enemy table only points at it. enemy_native:
+    // bhJumpEnemy[id] has a native routine, so this work (not the fields
+    // above) is the authority during the enemy pass (enemy_work.h, B).
+    RECVX_ENEMY_WORK enemy{};bool enemy_bound=false,enemy_native=false;const PlayerAsset* enemy_asset=nullptr; // mlwP source (models_ is fixed after load)
+    // mlwP of that work: objP pos/ang (bhSetMotion), objP evalflags, owP
+    // flg/mtx (bhCalcTree). enemy_calculated: bhCalcModel has run once.
+    std::vector<ModelPose> enemy_obj;std::vector<std::uint32_t> enemy_evalflags,enemy_owp_flg;std::vector<BoneMatrix> enemy_owp_mtx;bool enemy_calculated=false;
+    // Entity values as the last publish left them; a difference before the
+    // next pass is a script write that recvx_enemy_adopt takes over.
+    struct EnemyMirror {NJS_POINT3 position{};std::array<int,3> angles{};int yaw=0,floor=0;unsigned motion=0;bool room_motion=false;std::int64_t frame=0,step=0;int hp=0;bool hidden=false,inactive=false,look=false;} enemy_mirror{};};
 class RoomWorld {
 public:
     RoomWorld(const std::vector<std::uint8_t>& room,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data={},const std::filesystem::path& mods={},const std::string& room_name="RM_0000",unsigned game_mode=0);
@@ -236,6 +249,17 @@ private:
     void bomb_damage(const BombRequest& bomb);
     EffectParticles particles_;
     void tick_en01();
+    // C02 enemy pass on the native works (eneset.c:344 bhControlEnemy) and
+    // the room-load half (room.c:114 bhSetEneMdl -> bhSetEnemy).
+    RECVX_ENEMY_TABLE enemy_table_{};RECVX_ENEMY_DISPATCH enemy_dispatch_{};RECVX_ENEMY_SERVICES enemy_services_{};
+    std::vector<std::unique_ptr<unsigned char[]>> enemy_exp_blocks_;std::size_t enemy_exp_used_=0;
+    void bind_enemy_services();
+    void init_enemy_works();
+    void control_enemy_works();
+    void adopt_enemy_script(WorldEntity& e);
+    void publish_enemy(WorldEntity& e);
+    const MotionClip* enemy_mn_work(const WorldEntity& e,std::uint32_t mtn_no)const;
+    void calc_enemy_model(WorldEntity& e);
     void sync_player_grab();
     std::vector<BoneMatrix> player_joints_now()const;
     const MotionClip& enemy_library_clip(unsigned identity,unsigned index)const;

@@ -6,6 +6,7 @@ content must not be consumed at all. Data/layout-only generation is distinct
 from copied function bodies. There is no waiver, source whitelist or bypass.
 """
 import argparse
+import functools
 import sys
 import json
 import os
@@ -150,6 +151,12 @@ def check_cmake(root):
     return problems
 
 
+@functools.lru_cache(maxsize=None)
+def native_header_names(native):
+    """Bare names of every header under native/, including subdirectories."""
+    return {p.name for p in native.rglob("*.h")} | {p.name for p in native.rglob("*.hpp")}
+
+
 def original_header_shadow(root, native, include):
     """Flag an include that silently resolves to an original header.
 
@@ -159,11 +166,16 @@ def original_header_shadow(root, native, include):
     build carries -I include/ps2/veronica/prog. Such a name pulls original
     declarations into a native translation unit, which the policy forbids even
     though the include text itself names no forbidden path.
+
+    native/ has subdirectories (native/enemies since 2026-10-10), so the search
+    is recursive: a header next to its own source resolves natively by the rule
+    above, and CMake passes every native subdirectory it compiles from. The
+    check still fires for a bare name that has no native header anywhere.
     """
     name = Path(include).name
     if name != include:
         return False  # keep this check to bare header names
-    if (native / include).exists():
+    if native_header_names(native) & {include}:
         return False
     for other in ("build-tools/ninja", "build-tools", "include"):
         if (root / other / include).exists():

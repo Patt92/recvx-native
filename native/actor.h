@@ -58,6 +58,13 @@ public:
     // `angles` overrides the X/Y rotation of the first nodes (bhObjClpn writes objP[i].ang[0..1]).
     Scene sample_rest(const NJS_MATRIX& root,const std::vector<std::array<std::int32_t,2>>& angles={})const;
     NJS_POINT3 bind_position(std::size_t node)const{return bind_pose_.at(node).position;}
+    // bhMlbBinRealize: the initial mlwP->objP pos/ang and evalflags of every physical node.
+    const std::vector<ModelPose>& bind_pose()const{return bind_pose_;}
+    std::vector<std::uint32_t> node_evalflags()const;
+    // MdlPut.c:262 bhCalcTree over a native objP pose below `root`. A node with
+    // owP flg 0x1 keeps the matrix the caller passes in `owp_mtx` (njSetMatrix)
+    // and its subtree continues from it.
+    std::vector<BoneMatrix> tree_matrices(const std::vector<ModelPose>& pose,const NJS_MATRIX& root,const std::vector<std::uint32_t>& owp_flg={},const std::vector<BoneMatrix>& owp_mtx={})const;
     Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr) const;
     Scene sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& matrices,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out=nullptr,const FaceParameter* face_param=nullptr,const std::vector<std::uint8_t>* live_model=nullptr)const;
     const std::vector<std::uint8_t>& encoded_model()const{return model_;}

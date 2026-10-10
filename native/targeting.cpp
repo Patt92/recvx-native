@@ -1,30 +1,26 @@
 #include "targeting.h"
 namespace recvx {
-// PORTIERUNGSLÜCKE (Policy 2026-10-09): Diese Datei band bhSearchNearEnemy,
-// bhSearchNextEnemy, bhCalcLockEneYR, SetLockOnDirection und MixSetToJointRot
-// ein, die tools/generate_targeting.py als targeting.inc aus pwksub.c und
-// playpch.c erzeugt hat. Generator und Include liegen in
-// archived/FORBIDDEN_DONTUSE/ und dürfen weder gelesen noch ausgeführt
-// werden. Mit dem Include ist auch der hier gehaltene eigene Spieler-/
-// Gegner-Arbeitssatz (BH_PWORK/PP_WORK/Suchliste) entfallen, den die Policy
-// zusätzlich als separaten Work-Owner verbietet.
+// Die Zielaufschaltung ist portiert — aber NICHT hier. Sie liegt im
+// Spielerkampfkern (native/player_combat_core.c, Paket A01-A04) auf der einen
+// Kampfsicht des Spielerworks und auf den RECVX_ENEMY_WORKs der gemeinsamen
+// Gegnertabelle:
+//   playpch.c:318  bhSearchEnemy        sortierte Sichtliste in pp.sch_lst
+//   playpch.c:401  SetLockOnDirection   pp.lck_tbl, Armwinkel arm_dl/arm_dr
+//   playpch.c:1174 bhCPM2_SearchPch     Zielwechsel der Doppelwaffe
+//   playpch.c:150  MixSetToJointRot     Gelenkkette 1/2/6/7 bzw. 1/2/10/11
+//   pwksub.c:170   bhCalcLockEneYR      Nachdrehen mit Schulterversatz
+//   pwksub.c:218   bhSearchNearEnemy    :506 bhSearchNextEnemy
 //
-// Zu leisten (als eigene native Mechanik, nicht aus einem Generator über die
-// Originalquellen): die Zielsuche über die Gegnerarbeiten einschließlich
-// Sichtprüfung gegen Wände, Entfernungs- und Winkelfenster, die
-// Weiterschaltung auf das nächste Ziel samt der bereits besuchten Gegner, die
-// Blickrichtung zum aufgeschalteten Ziel und die Aufteilung auf zwei Ziele
-// für Doppelwaffen; dazu die Armwinkelverteilung über die Gelenkkette
-// (Knoten 1/2/6/7 bzw. 1/2/10/11).
+// Diese Hostklasse ist der Rest der frueheren, aus einem Generator gespeisten
+// Zielauswahl. Sie hat keinen produktiven Aufrufer mehr und haelt bewusst
+// KEINE zweite Ziel- oder Besuchtliste: eine zweite Zielquelle ist genau der
+// Fehler, den die Policy verbietet. Sie bleibt nur stehen, weil
+// tests/native/combat_test.cpp ihre Rueckgabe prueft; der Integrator-Patch
+// (work/native_port_A01_A04_combat.patch, Abschnitt 8) entfernt beides.
 //
-// Solange das offen ist, meldet select den dokumentierten Neutralwert: kein
-// Ziel (right/left bleiben ~0u), keine Armwinkel und die unveränderte
-// Blickrichtung des Akteurs. arms liefert keine Knotenüberschreibungen.
-//
-// Sichtbare Folge: Die automatische Zielaufschaltung fehlt vollständig. Beim
-// Zielen wird kein Gegner markiert, der Spieler dreht sich nicht zum Gegner,
-// und Doppelwaffen richten ihre Arme nicht auf zwei Ziele aus. Kein
-// geratener Ersatzwert und keine nachgebaute Zielheuristik.
+// Das aufgeschaltete Ziel steht im Kampf: CombatController::targets() liefert
+// AimSelection aus pp.lck_tbl (Hostindex ueber RECVX_ENEMY_WORK.owner_index)
+// und den Armwinkeln pp.obj_r_ang/obj_l_ang.
 AimSelection Targeting::select(const SceneSpawn& actor,const std::vector<RoomWorld::CombatTarget>& targets,const std::vector<BoneMatrix>& nodes,bool dual,bool next,const RoomWorld* world){
     (void)targets;(void)nodes;(void)dual;(void)next;(void)world;
     AimSelection out;out.yaw=actor.yaw;return out;

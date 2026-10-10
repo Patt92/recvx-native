@@ -52,16 +52,18 @@ int main(int argc,char** argv){try{
    bool shooting_position=false;const auto& weapon=WpnTab[armed.weapon()];
    for(unsigned yaw=0;yaw<65536&&!shooting_position;yaw+=4096)for(float distance=9;distance<25&&!shooting_position;distance+=1){const float r=yaw*6.28318530718f/65536;const NJS_POINT3 forward{-std::sin(r),0,-std::cos(r)};SceneSpawn candidate{{at.x-forward.x*distance,at.y,at.z-forward.z*distance},int(yaw)};const NJS_POINT3 chest{candidate.position.x,at.y+11,candidate.position.z},origin{chest.x+forward.x*(3+weapon.r),chest.y,chest.z+forward.z*(3+weapon.r)},direction{forward.x*.70710678f,-.70710678f,forward.z*.70710678f};const float hit=CombatController::target_distance(origin,direction,weapon.l,at,3+weapon.r,4);if(world.combat_wall_distance(chest,forward,5)>=5&&hit<world.combat_wall_distance(origin,direction,weapon.l)){player=candidate;shooting_position=true;}}
    check(shooting_position,"no unobstructed dog shot fixture");CombatController gun(data);
-   // Lücke Spielerkampf: der Automat bleibt inaktiv. Auch wenn Zielen und
-   // Angriff weit über die originale Bereitschafts- und Schussdauer gehalten
-   // werden, entsteht kein Zielmodus, kein Schuss und kein Munitionsverbrauch.
-   // Die früheren Grenzen aus asset.motion_frames(100/114/111) sind hier nicht
-   // mehr abfragbar, weil erst der Kampf die Waffenmotionen nachlädt; deshalb
-   // ein fester, deutlich größerer Tickvorrat statt eines geratenen Werts.
+   // Spielerkampf ist portiert (native/player_combat_core.c, A01-A04): mit
+   // gehaltener Zieltaste, gehaltenem Abzug und pad 0x40 laeuft bhCPM0_action
+   // -> bhCPM2_act_suw -> bhCPM2_act_atk und endet in bhCPM2_act_wpn mit
+   // mode2 67 (Tiefzielen). Der Abzug ist halbautomatisch: at_flg 0x40 bleibt
+   // verriegelt, solange pad 0x100 gehalten wird (player.c:4940), also genau
+   // ein Schuss und genau eine Patrone. Treffer bleiben 0, solange world die
+   // Gegnertabelle (RECVX_ENEMY_TABLE) nicht exponiert.
    for(unsigned t=0;t<240;++t)gun.tick({true,true,0,-1},false,armed,asset,player,motion,frame,&world,audio);
-   check(!gun.original_mode()&&!gun.original_phase(),"combat gap entered an original weapon mode");
-   check(!gun.shots&&!gun.hits&&!gun.attacks,"combat gap fired or hit");
-   check(Inventory::quantity(armed.slots()[slot])==12,"combat gap consumed ammunition");
+   check(gun.original_mode()==67&&gun.original_phase()==1,"combat did not reach the original aim-down hold");
+   check(gun.shots==1&&gun.attacks==1,"the semi-automatic trigger did not fire exactly once while held");
+   check(Inventory::quantity(armed.slots()[slot])==11,"bhCountBullet did not consume one round");
+   check(!gun.hits,"no hit may be booked before world exposes the enemy table");
    // Lücke Gegnerkern/Partikel: der Hund ist nicht verwundbar, behält seine
    // Original-HP, blutet nicht und stirbt nicht.
    const auto hp=world.state(1,i)->hp;

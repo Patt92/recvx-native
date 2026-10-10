@@ -213,7 +213,7 @@ umbenennen; kein Wiederaktivieren des alten Funktionsgenerators.
 | B04 | Haar-/verknüpfte Objekttransformation auf tatsächliche native Actor-Pose übertragen. | P00/F01; keine eigene Player-/Allocator-Attrappe. |
 | B05 | Deckelcontroller portiert: 41 Schritte, strikter Schwellwert, separater Menüpass, SFX, Playerflags und Rückkehr im vorhandenen Objekt-/Inventarpfad. | Positive Komponenten-/World-/Runtimeprüfung; keine Originalkörper. Kein Abschluss des allgemeinen Objekt-/Playerdispatchers oder aller verknüpften/reservierten Besitzer. |
 
-### C — Gegner und Subplayer (Owner: neue `native/enemy_*`-Module)
+### C — Gegner und Subplayer (Owner: neue `native/enemies/enemy_*`-Module)
 
 **Verbindlicher Gesamtumfang (Nutzer, 2026-10-10): alle originalen Gegner.**
 Der konkrete Dritt-Agent-Auftrag umfasst C01–C08 einschließlich sämtlicher

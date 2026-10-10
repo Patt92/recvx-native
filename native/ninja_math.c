@@ -22,6 +22,9 @@ Float njCos(Angle n) {
 void njSinCos(int angle,float* sine,float* cosine) {
     *sine=njSin(angle);*cosine=njCos(angle);
 }
+/* macros.h:102/108 — PI_2 ist dort (3.141592f * 2.0f), nicht 2*M_PI. */
+#define RECVX_NJ_RAD_ANG (65536.0f/(3.141592f*2.0f))
+Angle njArcSin(Float n) {return (Angle)(asinf(n)*RECVX_NJ_RAD_ANG);}
 Float njFraction(Float n) {return n-floorf(n);}
 Float njSqrt(Float n) {return sqrtf(fabsf(n));}
 Float njInvertSqrt(Float n) {

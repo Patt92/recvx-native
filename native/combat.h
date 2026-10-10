@@ -29,7 +29,11 @@ public:
     const AimSelection& targets()const{return aim_;}
     ModelNodeOverrides pose_overrides(const PlayerAsset& player,std::size_t motion,std::int64_t frame)const;
     static float target_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,NJS_POINT3 position,float radius,float height);
+    // Originalroutinen, die der Kampfkern in diesem Raum gemeldet hat, weil
+    // ihr Dienst keinen gebundenen Besitzer hat (nie verdeckt).
+    const std::set<std::string>& unbound_routines()const;
 private:
+    void publish_pose(PlayerAsset& player,std::size_t motion,std::int64_t frame,const SceneSpawn& actor);
     std::shared_ptr<CombatOriginal> original_;
     std::filesystem::path data_,mods_;std::optional<WeaponAsset> asset_,bare_hands_;
     unsigned weapon_=~0u,player_=~0u;int vertical_=0;bool inhibited_=false;
@@ -38,6 +42,5 @@ private:
     std::vector<WeaponFlash> flashes_;
     AimSelection aim_;
     void fire(Inventory& inventory,const SceneSpawn& actor,RoomWorld* world,AudioMixer& audio,PlayerAsset& player,std::size_t motion,std::int64_t frame,bool left=false);
-    void hit(RoomWorld& world,NJS_POINT3 origin,NJS_POINT3 direction,float range,float radius,bool knife);
 };
 }

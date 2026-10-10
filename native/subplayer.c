@@ -60,7 +60,7 @@ static void subpl_add_speed(RECVX_SUBPLAYER* w, int r)
     w->pz -= w->spd * njCos(angle);
 }
 
-/* subpl.c:371 — Zielwinkelbegrenzung.
+/* subpl.c:376 — Zielwinkelbegrenzung.
    10430.381 ist 65536/(2*PI) (macros.h:102): der Bogenwinkel wird in die
    16-Bit-Winkeleinheit umgerechnet und auf int abgeschnitten. Die Differenz
    zum eigenen Blickwinkel laeuft als 16-Bit-Wert ueber, damit der kuerzere
@@ -77,10 +77,10 @@ int recvx_subplayer_dir_target(float px, float pz, int ay, float x, float z, int
     return ang;
 }
 
-/* Die beiden Zielkoordinaten stecken gepackt in ct0 (subpl.c:201/260/284):
+/* Die beiden Zielkoordinaten stecken gepackt in ct0 (subpl.c:214/277/300):
    das obere Halbwort ist X, das untere Z, beide in Hundertsteln.
    Der Unterschied zwischen den Zweigen ist belegt und bleibt erhalten:
-   subpl.c:201 liest das untere Halbwort VORZEICHENLOS (0..65535), subpl.c:260
+   subpl.c:214 liest das untere Halbwort VORZEICHENLOS (0..65535), subpl.c:277
    und :284 lesen es VORZEICHENBEHAFTET. Ein negatives Z-Ziel ist damit nur
    ueber die Zweige mv3/mv3_0 erreichbar.
 
@@ -102,7 +102,7 @@ static float subpl_target_z_signed(int ct0)
 }
 
 /* ---------------------------------------------------------------------------
-   Die elf Bewegungszweige (subpl.c:153..405)
+   Die elf Bewegungszweige (subpl.c:155..407)
    ---------------------------------------------------------------------------
    Alle haben dieselbe Form: mode3 0 ist der Eintrittszustand, der die Motion
    waehlt, mode3 1 der laufende Zustand. Wo das Original den Eintritt OHNE
@@ -116,7 +116,7 @@ static float subpl_target_z_signed(int ct0)
    laufen. Keine zwei Zweige werden zusammengefasst, obwohl einige nur in
    einem Feld abweichen: die Tabellen waehlen sie einzeln aus. */
 
-/* subpl.c:153 — Index 0 von subpl_mv00_tbl und Standardeintrag beider
+/* subpl.c:155 — Index 0 von subpl_mv00_tbl und Standardeintrag beider
    Tabellen. Eintritt mit Interpolation ueber acht Schritte, Interpolations-
    rate zurueckgesetzt, Motionbit 0x100 geloescht; danach Durchfallen. */
 static void subpl_mv00(RECVX_SUBPLAYER* w)
@@ -141,7 +141,7 @@ static void subpl_mv00(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:172 — Index 10 von subpl_mv00_tbl. Gleich wie subpl_mv00, aber OHNE
+/* subpl.c:177 — Index 10 von subpl_mv00_tbl. Gleich wie subpl_mv00, aber OHNE
    hokan_count: die zuvor gesetzte Schrittzahl bleibt stehen. */
 static void subpl_mv00_ex(RECVX_SUBPLAYER* w)
 {
@@ -161,7 +161,7 @@ static void subpl_mv00_ex(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:190 — Index 1 und 9 von subpl_mv00_tbl, Index 9 von subpl_mv01_tbl.
+/* subpl.c:198 — Index 1 und 9 von subpl_mv00_tbl, Index 9 von subpl_mv01_tbl.
    Laufender Zustand: zum gepackten Ziel drehen (Schrittgrenze 182, also eine
    Grad pro Pass), Geschwindigkeit aus ct3 in Hundertsteln, Motion fortsetzen,
    dann versetzen. Reihenfolge ist tragend: bhAddSpeed liest den in diesem
@@ -190,7 +190,7 @@ static void subpl_mv01(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:215 — Index 2 von subpl_mv00_tbl, Index 0 und 2 von subpl_mv01_tbl.
+/* subpl.c:226 — Index 2 von subpl_mv00_tbl, Index 0 und 2 von subpl_mv01_tbl.
    Stillstand: Geschwindigkeit auf null, Interpolation ueber acht Schritte,
    KEIN bhSetMotion und KEIN Durchfallen. Der Frame bleibt damit stehen. */
 static void subpl_mv02(RECVX_SUBPLAYER* w)
@@ -208,7 +208,7 @@ static void subpl_mv02(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:232 — Index 6 von subpl_mv01_tbl. Wie subpl_mv02, aber ohne
+/* subpl.c:245 — Index 6 von subpl_mv01_tbl. Wie subpl_mv02, aber ohne
    Interpolationsschritte: der Wechsel schneidet hart. */
 static void subpl_mv02_0(RECVX_SUBPLAYER* w)
 {
@@ -225,7 +225,7 @@ static void subpl_mv02_0(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:249 — Index 3 von subpl_mv00_tbl, Index 1 und 3 von subpl_mv01_tbl.
+/* subpl.c:264 — Index 3 von subpl_mv00_tbl, Index 1 und 3 von subpl_mv01_tbl.
    Drehen und versetzen OHNE bhSetMotion: der Frame wird in diesem Zweig nicht
    fortgeschaltet, die Figur gleitet in ihrer gehaltenen Pose. Das untere
    Halbwort von ct0 wird hier vorzeichenbehaftet gelesen. */
@@ -250,7 +250,7 @@ static void subpl_mv03(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:273 — Index 7 von subpl_mv01_tbl. Wie subpl_mv03 ohne
+/* subpl.c:287 — Index 7 von subpl_mv01_tbl. Wie subpl_mv03 ohne
    Interpolationsschritte. */
 static void subpl_mv03_0(RECVX_SUBPLAYER* w)
 {
@@ -273,7 +273,7 @@ static void subpl_mv03_0(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:297 — Index 4 beider Tabellen. Erzwingt den vollen Framevorschub
+/* subpl.c:310 — Index 4 beider Tabellen. Erzwingt den vollen Framevorschub
    (65536 = ein Frame je Pass) und loest die Motionquelle, ohne zu
    interpolieren. */
 static void subpl_mv05(RECVX_SUBPLAYER* w)
@@ -295,7 +295,7 @@ static void subpl_mv05(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:324 — Index 5 beider Tabellen. Wie subpl_mv05, aber mit sechzehn
+/* subpl.c:332 — Index 5 beider Tabellen. Wie subpl_mv05, aber mit sechzehn
    Interpolationsschritten und GESETZTEM Motionbit 0x100 — genau das Bit, das
    subpl_mv00/subpl_mv00_ex wieder loeschen. */
 static void subpl_mv06(RECVX_SUBPLAYER* w)
@@ -318,7 +318,7 @@ static void subpl_mv06(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:348 — Index 6 von subpl_mv00_tbl. Wie subpl_mv00, aber ohne
+/* subpl.c:357 — Index 6 von subpl_mv00_tbl. Wie subpl_mv00, aber ohne
    Interpolationsschritte, ohne Ruecksetzen der Interpolationsrate und ohne
    Eingriff in mtn_md. */
 static void subpl_mv00_1(RECVX_SUBPLAYER* w)
@@ -338,7 +338,7 @@ static void subpl_mv00_1(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:392 — Index 10 von subpl_mv01_tbl. Stillstand wie subpl_mv02, aber
+/* subpl.c:393 — Index 10 von subpl_mv01_tbl. Stillstand wie subpl_mv02, aber
    OHNE jeden Eingriff in hokan_count: die zuvor gesetzte Schrittzahl bleibt. */
 static void subpl_mv10(RECVX_SUBPLAYER* w)
 {
@@ -359,7 +359,7 @@ static void subpl_mv10(RECVX_SUBPLAYER* w)
    --------------------------------------------------------------------------- */
 
 /* Alle 120 Eintraege von subpl_init_tbl verweisen auf diese eine Routine
-   (subpl.c:23-37). Sie waehlt Motion 0 mit halbem Framevorschub (32768, also
+   (subpl.c:22-36). Sie waehlt Motion 0 mit halbem Framevorschub (32768, also
    ein halber Frame je Pass), setzt den Motionmodus auf 0x20 und bringt den
    Bewegungszustand auf 3 — einen Wert, den keiner der elf Zweige behandelt.
    Die Figur haelt danach ihre Pose, bis ein Raumskript mode3 auf 0 setzt. */
@@ -375,7 +375,7 @@ static void subpl_shared_init(RECVX_SUBPLAYER* w)
     w->frm_mode = 0;
     w->mode3 = 3;
 
-    /* subpl.c:114-126: fuer genau eine Identitaet (199) blendet das Original
+    /* subpl.c:112-125: fuer genau eine Identitaet (199) blendet das Original
        die ersten acht Knoten des Modells aus, ruft bhSetMotion auf dieser
        verkuerzten Knotenliste und stellt sie danach wieder her — und ruft
        anschliessend bhSetMotion ein ZWEITES Mal auf dem vollen Baum. Der
@@ -399,12 +399,12 @@ static void subpl_shared_init(RECVX_SUBPLAYER* w)
 }
 
 /* ---------------------------------------------------------------------------
-   Die fuenf Dispatchtabellen (subpl.c:12/23/38/39/58)
+   Die fuenf Dispatchtabellen (subpl.c:12/22/37/38/56)
    --------------------------------------------------------------------------- */
 
 typedef void (*SUBPL_PROC)(RECVX_SUBPLAYER*);
 
-/* subpl.c:39 — ct2-Weiche fuer mode0 1. Reihenfolge und Mehrfachbelegung sind
+/* subpl.c:38 — ct2-Weiche fuer mode0 1. Reihenfolge und Mehrfachbelegung sind
    die der Originaltabelle; die Indizes 7, 8 und 11..14 zeigen auf denselben
    Zweig wie Index 0. */
 static const SUBPL_PROC subpl_mv00_tbl[15] = {
@@ -425,7 +425,7 @@ static const SUBPL_PROC subpl_mv00_tbl[15] = {
     subpl_mv00      /* 14 */
 };
 
-/* subpl.c:58 — ct2-Weiche fuer mode0 5 und 6. Dieselben fuenfzehn Plaetze,
+/* subpl.c:56 — ct2-Weiche fuer mode0 5 und 6. Dieselben fuenfzehn Plaetze,
    aber eine andere Belegung: die Plaetze 0..3 sind hier die Stillstands- und
    Gleitzweige, 6/7 ihre hartschneidenden Varianten, 10 der haltende Zweig. */
 static const SUBPL_PROC subpl_mv01_tbl[15] = {
@@ -446,7 +446,7 @@ static const SUBPL_PROC subpl_mv01_tbl[15] = {
     subpl_mv00      /* 14 */
 };
 
-/* subpl.c:150 — die ct2-Weiche von mode0 1. */
+/* subpl.c:149 — die ct2-Weiche von mode0 1. */
 static int subpl_event2(RECVX_SUBPLAYER* w)
 {
     const int ct2 = w->ct2;
@@ -454,7 +454,7 @@ static int subpl_event2(RECVX_SUBPLAYER* w)
         /* Das Original indiziert ungeprueft in eine Tabelle mit fuenfzehn
            Eintraegen. Ein Wert daneben ist kein Zustand, sondern ein Fehler
            im Aufrufer; er wird gemeldet statt fremden Speicher zu lesen. */
-        subpl_gap(w, "subpl:ct2-out-of-range (subpl.c:150)");
+        subpl_gap(w, "subpl:ct2-out-of-range (subpl.c:149)");
         return RECVX_SUBPL_UNHANDLED;
     }
     subpl_mv00_tbl[ct2](w);
@@ -475,12 +475,12 @@ static int subpl_event(RECVX_SUBPLAYER* w)
     return RECVX_SUBPL_HANDLED;
 }
 
-/* subpl.c:38 — mode2-Weiche von mode0 1. Die Originaltabelle hat GENAU EINEN
+/* subpl.c:37 — mode2-Weiche von mode0 1. Die Originaltabelle hat GENAU EINEN
    Eintrag; jeder andere mode2 liest ueber ihr Ende hinaus. */
 static int subpl_move(RECVX_SUBPLAYER* w)
 {
     if (SUBPL_BYTE(w->mode2) != 0u) {
-        subpl_gap(w, "subpl:mode2-out-of-range (subpl.c:38)");
+        subpl_gap(w, "subpl:mode2-out-of-range (subpl.c:37)");
         return RECVX_SUBPL_UNHANDLED;
     }
     return subpl_event2(w);
@@ -490,7 +490,7 @@ static int subpl_move(RECVX_SUBPLAYER* w)
    DANN laeuft die identitaetsabhaengige Initialisierung. */
 int recvx_subplayer_init_index(unsigned identity)
 {
-    /* subpl.c:23: subpl_init_tbl hat 120 Eintraege und wird mit `id - 40`
+    /* subpl.c:22: subpl_init_tbl hat 120 Eintraege und wird mit `id - 40`
        indiziert. Identitaeten unter 40 ergeben im Original einen negativen
        Index, Identitaeten ab 160 einen zu grossen. */
     const long index = (long)identity - 40L;
@@ -502,10 +502,10 @@ static int subpl_init_entry(RECVX_SUBPLAYER* w)
 {
     w->mode0 = 1;
     if (recvx_subplayer_init_index(w->id) < 0) {
-        subpl_gap(w, "subpl:init-table-index (subpl.c:89)");
+        subpl_gap(w, "subpl:init-table-index (subpl.c:91)");
         return RECVX_SUBPL_UNHANDLED;
     }
-    /* Alle 120 Eintraege zeigen auf dieselbe Routine (subpl.c:23-37); die
+    /* Alle 120 Eintraege zeigen auf dieselbe Routine (subpl.c:22-36); die
        Tabelle unterscheidet die Identitaeten also nicht. Sie wird deshalb
        nicht als Zeigerfeld wiederholt, sondern ueber ihren Index geprueft. */
     subpl_shared_init(w);
@@ -532,7 +532,7 @@ static int subpl_dispatch_mode0(RECVX_SUBPLAYER* w)
     case 2:
     case 3:
     case 4:
-        subpl_gap(w, "subpl:mode0-null-slot (subpl.c:15)");
+        subpl_gap(w, "subpl:mode0-null-slot (subpl.c:16)");
         return RECVX_SUBPL_UNHANDLED;
     case 5:
     case 6:
@@ -543,7 +543,7 @@ static int subpl_dispatch_mode0(RECVX_SUBPLAYER* w)
     }
 }
 
-/* subpl.c:77 — ein vollstaendiger Pass.
+/* subpl.c:76 — ein vollstaendiger Pass.
    Die drei Statusbits sind belegt wirksam:
      0x8000  nimmt die Figur aus dem Zielbarkeitsfilter (pwksub.c:445), sie
              kann also nicht angezielt werden;
@@ -567,7 +567,7 @@ int recvx_subplayer_tick(RECVX_SUBPLAYER* work)
 
     handled = subpl_dispatch_mode0(work);
 
-    /* subpl.c:84 — der Abschluss laeuft nur, wenn der Dispatch ueberhaupt
+    /* subpl.c:83 — der Abschluss laeuft nur, wenn der Dispatch ueberhaupt
        zurueckkehrt. Bei einem NULL-Platz oder einem Index daneben kommt das
        Original hier nicht an; der Abschluss bleibt dann aus. */
     if (handled == RECVX_SUBPL_HANDLED) {
@@ -630,7 +630,7 @@ static int subpl_bridge_set_motion(RECVX_SUBPLAYER* view, int add, unsigned mode
     if (sv && sv->set_motion) {
         /* Der Vertrag fuehrt bhSetMotion ohne den vierten Parameter (datP).
            subpl.c uebergibt dort immer mtn_tp; in diesem Apparat ist das Feld
-           an jeder Stelle, die es setzt, NULL (subpl.c:106/197/312/336). Ein
+           an jeder Stelle, die es setzt, NULL (subpl.c:106/210/322/347). Ein
            von aussen gesetztes mtn_tp waere damit nicht uebertragbar und wird
            gemeldet statt verworfen. */
         if (datP) subpl_gap(view, "subpl:motion-data-parameter (Motion.c:21)");
