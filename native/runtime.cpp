@@ -21,6 +21,8 @@
 #include "view_clip.h"
 #include "player_stairs.h"
 #include "player_hair.h"
+#include "player_head.h"
+#include <random>
 #include <cstdio>
 #include <optional>
 #include <fstream>
@@ -200,6 +202,75 @@ int main(int argc,char** argv){
         recvx::Scene scene;recvx::SceneCamera camera;recvx::SceneSpawn origin,actor;
         recvx::CombatController combat(args.data,args.mods);recvx::CombatControls combat_input;
         recvx::BoxMenu box_menu;recvx::ComputerTerminal computer(args.data);recvx::GameOver game_over(args.data,args.mods);recvx::AudioMixer audio(args.data,args.mods);audio.set_disc(args.disc-1);recvx::MoviePlayer movie(args.data,args.mods,audio);std::unique_ptr<recvx::RoomWorld> world;
+        // bhControlPlayerHead state (plp->exp1) and the services it calls.
+        RECVX_HEAD_STATE head{};recvx_head_begin(&head,int((args.player-10)%4)); // bhSetPlayer: exp1[0]=1, exp1[34]=-1
+        // bhCPM1_act_bas (player.c:1994-2048) dispatches the action by plp->mode2; each of the
+        // seven normal locomotion routines sets EXP1_I(0) |= 0x4 in its own mode3-0 entry block
+        // (std 2112, srt 2176, sta 2237, wlk 2312, run 2438, bak 2575, bk2 2727) and assigns in
+        // that same block the motion PlMtnAct[wpntp][dmlvl][n].  The entry is therefore marked by
+        // the player work being driven with a new PlMtnAct motion; the host reaches four of the
+        // seven: 42 = [0] act_std, 0 = [2] act_wlk, 4 = [3] act_run, 16 = [4] act_bak
+        // (player.c:226).  bhResetPlayer closes with *(int*)&plp->mode0 = 1 (player.c:1152), so
+        // mode2/mode3 are 0 and the first dispatch after a room load runs act_std's entry - the
+        // sentinel start value reproduces that first pass.  The special actions do the opposite in
+        // their own entry blocks: the six stair routines through RECVX_STAIR_HOST::release_head_look,
+        // bhCPM2_act_psh (player.c:3741) and bhCPM0_action's attack entry (player.c:1793) below.
+        std::size_t head_action_motion=~std::size_t(0);
+        bool head_push_owned=false,head_combat_owned=false;
+        auto head_locomotion_entry=[&]{if(motion==head_action_motion)return;
+            if(motion!=42&&motion!=0&&motion!=4&&motion!=16)return; /* not a PlMtnAct entry motion */
+            head_action_motion=motion;recvx_head_enable_look(&head);};
+        // Another action machine took plp->mode2 out of the locomotion set, so its next return
+        // is a fresh mode3-0 entry no matter which motion it lands on.
+        auto head_other_action=[&]{head_action_motion=~std::size_t(0);};
+        recvx::ModelNodeOverrides head_pose; // nodes 4/5 after the head control, for the draw pass
+        std::mt19937 head_rng(12345);        // stands in for the original rand() sequence; see the report
+        auto head_random=[&]{return float(head_rng()%2147483648u)/2147483648.0f;};
+        std::vector<RECVX_HEAD_CANDIDATE> head_list;
+        std::set<std::string> head_unbound; // original services the head control called without a native owner
+        // bhSearchNearEnemy2 (pwksub.c:443-477) walks ene[0..ewk_n-1] in order and keeps the
+        // works with flg 0x1, without flg 0x8000 and without stflg 0x41000000.
+        auto head_candidates=[&]()->const std::vector<RECVX_HEAD_CANDIDATE>&{
+            head_list.clear();if(!world)return head_list;
+            for(unsigned i=0;i<128;++i){const auto* e=world->state(1,i);if(!e)continue;
+                RECVX_HEAD_CANDIDATE c{};c.index=int(i);
+                /* bhEne01_Init sets epw->lok_jno = 0xa, so the original aims at joint 10.  The
+                 * host has no public accessor for an enemy joint's world matrix, so this takes
+                 * the work position - the original's lok_jno == 0 branch (pwksub.c:447-452).
+                 * Reported as a missing contract; no substitute joint is invented. */
+                c.look_node=0;
+                /* The test is epw->flg and epw->stflg of the enemy work itself.  Only the enemy
+                 * core owns those bits (bhEne01_Init/bhEne_SetWork set flg 0x1, bhEneSetCk sets
+                 * 0x8000); native/en01_damage.c is a declared porting gap and reports flg 0, so a
+                 * faithful read finds no searchable work.  No host field is substituted for the
+                 * bit: an enemy without an en01 work has no bearer for it at all. */
+                c.eligible=0;
+                if(e->en01){RECVX_EN01_STATE st;recvx_en01_state(e->en01.get(),&st);
+                    c.eligible=(st.flg&1)&&!(st.flg&0x8000)&&!(st.stflg&0x41000000u);
+                    if(!(st.flg&1))head_unbound.insert("bhSearchNearEnemy2: epw->flg bit 0 has no native owner (en01_damage.c gap), so no enemy is searchable");}
+                else head_unbound.insert("bhSearchNearEnemy2: enemy work without an en01 state carries no epw->flg/stflg");
+                c.point[0]=e->transform.position.x;c.point[1]=e->transform.position.y;c.point[2]=e->transform.position.z;
+                if(c.eligible)head_unbound.insert("bhSearchNearEnemy2/bhSetHeadRotation: enemy lok_jno 10 world matrix has no public accessor");
+                head_list.push_back(c);}
+            return head_list;};
+        struct HeadHostUser {std::unique_ptr<recvx::RoomWorld>* world;std::set<std::string>* unbound;};
+        HeadHostUser head_user{&world,&head_unbound};
+        RECVX_HEAD_HOST head_host{};head_host.user=&head_user;
+        head_host.wall_clear=[](void* user,const float from[3],const float to[3])->int{
+            auto& w=*static_cast<HeadHostUser*>(user)->world;if(!w)return 0;
+            // bhCheckC2WallN(&cap, 0x400) == 0 means nothing blocks the line.
+            NJS_POINT3 origin{from[0],from[1],from[2]},delta{to[0]-from[0],to[1]-from[1],to[2]-from[2]};
+            const float range=njSqrt(delta.x*delta.x+delta.y*delta.y+delta.z*delta.z);
+            if(range<1e-4f)return 1;
+            NJS_VECTOR direction{delta.x/range,delta.y/range,delta.z/range};
+            return w->combat_wall_distance(origin,direction,range,0x400)>=range;};
+        head_host.target_node_point=[](void* user,int kind,int index,int node,float out[3])->int{
+            auto& w=*static_cast<HeadHostUser*>(user)->world;if(!w)return 0;
+            if(kind!=int(RECVX_HEAD_TARGET_ENEMY))return 0; /* object/item/effect/room targets: see the report */
+            (void)node; /* no public accessor for a joint world matrix; the work position is used */
+            const auto* e=w->state(1,unsigned(index));if(!e)return 0;
+            out[0]=e->transform.position.x;out[1]=e->transform.position.y;out[2]=e->transform.position.z;return 1;};
+        head_host.unbound=[](void* user,const char* name){static_cast<HeadHostUser*>(user)->unbound->insert(name);};
         std::vector<recvx::SceneTriangle> stage_geometry;std::size_t stable_textures=0;
         std::vector<std::int16_t> audio_frame;SDL_AudioDeviceID audio_device=0;
         std::int64_t animation=args.animation_frame*65536;
@@ -258,7 +329,7 @@ int main(int argc,char** argv){
                 attachment_base=scene.textures.size();if(const auto* tail=player_attachment())scene.textures.insert(scene.textures.end(),tail->textures().begin(),tail->textures().end());}
             if(player&&!scene.spawns.empty()&&args.spawn>=scene.spawns.size())throw std::runtime_error("spawn "+std::to_string(args.spawn)+" outside "+room_name+" position table ("+std::to_string(scene.spawns.size())+")");
             origin=actor=scene.spawns.empty()?recvx::SceneSpawn{}:scene.spawns[args.spawn];
-            hair_reset=true;hair_variant=recvx_hair_begin(&hair,int((args.player-10)%4));hair_angles.clear(); // bhResetPlayer rebinds obwp[2]; flg2 0x2 after a room load
+            hair_reset=true;hair_variant=recvx_hair_begin(&hair,int((args.player-10)%4));hair_angles.clear();recvx_head_begin(&head,int((args.player-10)%4));head_pose.clear();head_action_motion=~std::size_t(0);head_push_owned=head_combat_owned=false; // bhResetPlayer rebinds obwp[2]; flg2 0x2 after a room load, mode2/mode3 fall back to act_std
             if(restoring){const auto saved=recvx::snapshot_player(*restoring);actor.position=saved.position;actor.yaw=saved.yaw;} // room.c cb_flg 0x800000: ply_pos/ply_ang
             world.reset();camera_index=0;camera=scene.cameras[0];follow();stairs={};stair_etc_marked=-1;script_stairs.clear(); // bhSetRDT replaces the room-local player/stair work before bhInitEvent
             stage_geometry=scene.triangles;stable_textures=scene.textures.size();
@@ -289,15 +360,48 @@ int main(int argc,char** argv){
         auto player_link=[&]()->std::optional<Link>{const unsigned ply=(args.player-10)%4;if(ply==0)return Link{4,5,{0,1.5869f,.7747f}};if(ply==3)return Link{4,5,{0,.85f,-1.03f}};return std::nullopt;};
         player_attachment=[&]()->const recvx::PlayerAsset*{const auto link=player_link();return player&&link?player->model(link->model):nullptr;};
         // bhObjClpn runs once per original frame (object task), independent of presentation.
-        auto hair_step=[&](){const auto* tail=player_attachment();if(!tail||!world||world->player_hidden)return;const auto link=*player_link();
-            std::vector<recvx::BoneMatrix> nodes;if(world->player_scripted)(void)world->sample_player(*player,&nodes);else nodes=player->pose(motion,animation,actor.position,actor.yaw);if(link.node>=nodes.size())return;
+        // game.c:52-53 inside bhControlPlayer/bhControlObjItm: the motion is advanced, then
+        // bhControlPlayerHead rewrites nodes 4/5 (player.c:1685), then bhCalcModel builds the
+        // matrices (player.c:1688), and only then does bhObjClpn read owP[5].  Head and hair
+        // therefore share one pose; the head overrides feed the very matrices the hair samples.
+        auto head_hair_step=[&](){
+            if(!player||!world||world->player_hidden)return;
+            std::vector<recvx::ModelPose> pose;
+            try{pose=player->local_pose(motion,animation);}catch(const std::exception&){return;}
+            if(pose.size()<6)return; /* no head chain on this body */
+            RECVX_HEAD_INPUT hin{};
+            for(unsigned i=0;i<6;++i)for(unsigned j=0;j<3;++j)hin.angles[i][j]=pose[i].angles[j];
+            hin.ax=actor.pitch;hin.ay=actor.yaw;hin.az=actor.roll; /* plp->ax/ay/az */
+            hin.position[0]=actor.position.x;hin.position[1]=actor.position.y;hin.position[2]=actor.position.z;
+            head.mode0=world->pushing()?3:1; /* plp->mode0: only 4 (damage) suppresses the blink start */
+            hin.random=head_random();
+            /* owP[5].mtx of the previous frame: bhSearchNearEnemy2 and bhLookNearEnemy read
+             * EXP1_F(12..20), which bhControlPlayerHead only refreshes at its own end. */
+            recvx::ModelNodeOverrides head_overrides;
+            std::int32_t hout[6][3];
+            {const auto list=head_candidates();
+             hin.enemy_count=int(list.size()); /* sys->ewk_n */
+             recvx_head_tick(&head,&hin,list.data(),unsigned(list.size()),&head_host,hout);}
+            for(unsigned n=4;n<6;++n){std::array<Angle,3> a{hout[n][0],hout[n][1],hout[n][2]};
+                if(a[0]!=pose[n].angles[0]||a[1]!=pose[n].angles[1]||a[2]!=pose[n].angles[2])head_overrides[n].angles=a;}
+            head_pose=head_overrides; /* the draw pass uses the same head angles */
+            std::vector<recvx::BoneMatrix> nodes;
+            if(world->player_scripted)(void)world->sample_player(*player,&nodes,head_overrides);
+            else nodes=player->pose(motion,animation,actor.position,actor.yaw,head_overrides);
+            if(nodes.size()>5){head.head[0]=nodes[5].value[12];head.head[1]=nodes[5].value[13];head.head[2]=nodes[5].value[14];}
+            const auto* tail=player_attachment();if(!tail)return;const auto link=*player_link();
+            if(link.node>=nodes.size())return;
             RECVX_HAIR_INPUT in{};std::copy_n(nodes[link.node].value,16,in.head); /* pp->mlwP->owP[5].mtx */
-            try{const auto pose=player->local_pose(motion,animation);for(unsigned i=0;i<6&&i<pose.size();++i)for(unsigned j=0;j<3;++j)in.angles[i][j]=pose[i].angles[j];}catch(const std::exception&){}
+            for(unsigned i=0;i<6;++i)for(unsigned j=0;j<3;++j)in.angles[i][j]=hout[i][j]; /* post-head pose */
             in.ax=actor.pitch;in.ay=actor.yaw;in.az=actor.roll; /* plp->ax/ay/az of the one player work */
             in.offset[0]=link.offset.x;in.offset[1]=link.offset.y;in.offset[2]=link.offset.z; /* obwp[2].lox/loy/loz */
             in.reset=hair_reset?1:0;hair_reset=false;
             std::int32_t out[RECVX_HAIR_SEGMENTS][2];if(recvx_hair_tick(&hair,hair_variant,&in,out)){hair_angles.assign(RECVX_HAIR_SEGMENTS,{0,0});for(unsigned i=0;i<RECVX_HAIR_SEGMENTS;++i)hair_angles[i]={out[i][0],out[i][1]};}};
-        auto compose=[&](){scene.triangles=stage_geometry;scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes;if(player&&(!world||!world->player_hidden))recvx::append_actor(scene,world?world->sample_player(*player,&nodes,combat.pose_overrides(*player,motion,animation)):player->sample(motion,animation,actor.position,actor.yaw,&nodes,combat.pose_overrides(*player,motion,animation)),texture_base);
+        // bhControlPlayerHead has already rewritten nodes 4/5 this frame; the draw pass must use
+        // the same angles the hair sampled, so the head overrides are merged over the combat ones.
+        auto head_draw_overrides=[&]{auto out=combat.pose_overrides(*player,motion,animation);
+            for(const auto& node:head_pose)out[node.first]=node.second;return out;};
+        auto compose=[&](){scene.triangles=stage_geometry;scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes;if(player&&(!world||!world->player_hidden))recvx::append_actor(scene,world?world->sample_player(*player,&nodes,head_draw_overrides()):player->sample(motion,animation,actor.position,actor.yaw,&nodes,head_draw_overrides()),texture_base);
             if(player&&(!world||!world->player_hidden))if(const auto* tail=player_attachment()){const auto link=*player_link();if(link.node<nodes.size()){
                 NJS_MATRIX head;std::copy_n(nodes[link.node].value,16,head);NJS_POINT3 at;auto lo=link.offset;njCalcPoint(&head,&lo,&at); // linked object: position only
                 NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,at.x,at.y,at.z);recvx::append_actor(scene,tail->sample_rest(root,hair_angles),attachment_base);}}combat.append(scene,nodes,world&&(world->player_hidden||world->player_scripted)||events&&(events->flags[5][0]&4),world.get());if(world)world->append(scene,nodes,world->camera(scene,camera));};
@@ -526,8 +630,8 @@ int main(int argc,char** argv){
              * Originals liest sys->pad_ax/pad_dx; InputFrame fuehrt keine
              * Achsenbetraege, die Luecke bleibt gemeldet. */
             stairs.rtspd=stairs.dmlvl==2?0.8f:1.0f;
-            struct Host{recvx::PlayerAsset* body;std::vector<recvx::BoneMatrix> nodes;recvx::RoomWorld* world;recvx::AudioMixer* audio;NJS_POINT3 at;RECVX_STAIR_STATE* state;std::function<void(int,bool)>* kaidan;int* etc_idx;bool foot_switch;int vib_type;int vib_pattern;};
-            Host h{player.get(),player->script_nodes(player->pose(motion,animation,actor.position,actor.yaw)),world.get(),&audio,actor.position,&stairs,&mark_stair_etc,&stair_etc_marked,false,-1,-1};
+            struct Host{recvx::PlayerAsset* body;std::vector<recvx::BoneMatrix> nodes;recvx::RoomWorld* world;recvx::AudioMixer* audio;NJS_POINT3 at;RECVX_STAIR_STATE* state;std::function<void(int,bool)>* kaidan;int* etc_idx;bool foot_switch;int vib_type;int vib_pattern;RECVX_HEAD_STATE* head;};
+            Host h{player.get(),player->script_nodes(player->pose(motion,animation,actor.position,actor.yaw)),world.get(),&audio,actor.position,&stairs,&mark_stair_etc,&stair_etc_marked,false,-1,-1,&head};
             RECVX_STAIR_HOST host{&h,
                 // bhGetObjMotion (Motion.c:919): mkfP += ewP->frm_no / 65536.
                 // `frame` ist der 16.16-Bildzaehler der Spielerarbeit, kein
@@ -567,6 +671,8 @@ int main(int argc,char** argv){
                     if(h.world->spawn_player_effect(spawn)<0)h.state->unsupported_services|=RECVX_STAIR_UNBOUND_EFFECT;},
                 [](void* u,int type,int pattern){auto& h=*static_cast<Host*>(u);h.vib_type=type;h.vib_pattern=pattern;h.state->unsupported_services|=RECVX_STAIR_UNBOUND_VIBRATION;},
                 [](void* u,int used){const auto& h=*static_cast<Host*>(u);if(*h.etc_idx>=0)(*h.kaidan)(*h.etc_idx,used!=0);},
+                /* bhCPM2_act_* case 0: EXP1_I(0) &= ~0x4; |= 0x1E0 on the one head work. */
+                [](void* u){const auto& h=*static_cast<Host*>(u);recvx_head_release_look(h.head);},
                 [](void* u,float py)->int{const auto& h=*static_cast<Host*>(u);return h.world->floor_at({0.0f,py,0.0f});},
                 world->floor_heights().data(),int(inventory.player)};
             const bool running=recvx_stairs_tick(&stairs,&host)!=0;
@@ -646,11 +752,14 @@ int main(int argc,char** argv){
             // bhPlayerKaidanMotion action must neither advance nor emit more
             // footstep calls while the door demo is active.
             if(transition_pending)return;
-            if(stairs.active&&player&&world){if(debug.active()||frontend.active()||menu.active||dialog.active()||movie.active()||computer.active())return;tick_stairs();return;}
+            if(stairs.active&&player&&world){if(debug.active()||frontend.active()||menu.active||dialog.active()||movie.active()||computer.active())return;head_other_action();tick_stairs();return;}
             if(player&&world&&world->pushing()){
                 if(debug.active()||frontend.active()||transition_pending||computer.active()||menu.active||dialog.active()||movie.active()||world->player_scripted||world->player_hidden)return;
+                // bhCPM2_act_psh case 0 (player.c:3741): EXP1_I(0) &= ~0x4; |= 0x1E0.
+                if(!head_push_owned){head_push_owned=true;head_other_action();recvx_head_release_look(&head);}
                 world->tick_push(move>0);if(events){if(world->pushing())events->flags[5][0]|=4;else events->flags[5][0]&=~4u;}turnaround_timer=0;combat_input.next_target=false;locomotion=true;follow();return;
             }
+            head_push_owned=false;
             const bool blocked=debug.active()||frontend.active()||transition_pending||computer.active()||menu.active||dialog.active()||movie.active()||(world&&(world->player_scripted||world->player_hidden))||(events&&(events->flags[5][0]&4));
             
             if (move < 0 && run_pressed && !turnaround_timer && !blocked && !combat_input.aim) {
@@ -659,7 +768,14 @@ int main(int argc,char** argv){
             }
 
             const bool next_target=combat_input.next_target;combat_input.next_target=false;
-            if(player&&!args.preview&&combat.tick({combat_input.aim,combat_input.attack,turn,move,next_target},blocked,inventory,*player,actor,motion,animation,world.get(),audio,events.get())){turnaround_timer=0;follow();return;}
+            if(player&&!args.preview&&combat.tick({combat_input.aim,combat_input.attack,turn,move,next_target},blocked,inventory,*player,actor,motion,animation,world.get(),audio,events.get())){
+                // bhCPM0_action (player.c:1793): the attack entry sets mode1/mode2/mode3 = 1/0x40/0
+                // and gives the look up with EXP1_I(0) &= ~0x4; |= 0x1E0.  bhControlPlayerPch then
+                // owns nodes 4/5 (playpch.c:46/73); that part lives in the quarantined combat core
+                // and stays reported, see work/native_port_B06_head.result.md.
+                if(!head_combat_owned){head_combat_owned=true;head_other_action();recvx_head_release_look(&head);}
+                turnaround_timer=0;follow();return;}
+            head_combat_owned=false;
             if(blocked){turnaround_timer=0;return;}
 
             if(turnaround_timer > 0) {
@@ -670,6 +786,12 @@ int main(int argc,char** argv){
                 locomotion = true;
                 const std::size_t next = 4;
                 if (next != motion) { motion = next; animation = 0; }
+                // The host's quick turn is the original's run turn: bhCPM2_act_bak (player.c:2610-2620)
+                // and bhCPM2_act_bk2 (player.c:2745-2755) set ayp = ay + 32768, mode2 = 6 (act_run),
+                // mode3 = 1, EXP1_I(0) |= 0x4 and mtn_no = PlMtnAct[..][3] - motion 4, the same clip
+                // the host drives here.  mode3 is 1, so act_run's own case 0 does not run; this
+                // explicit set is the one that applies.
+                head_locomotion_entry();
                 animation = (animation + 65536) % (std::int64_t(player->motion_frames(motion)) * 65536);
                 if (world) world->player_footstep(*player);
                 follow();
@@ -680,7 +802,9 @@ int main(int argc,char** argv){
             
             if(move)locomotion=true;
             if(locomotion){const auto from=actor.position;player->locomotion(actor,motion,animation,move,run,turn);if(world){actor.position=world->move_player(from,actor.position,move,run,turn);if(world->pushing()&&events)events->flags[5][0]|=4;if(move)world->player_footstep(*player);}}
-            else{actor.yaw=(actor.yaw-turn*int(182.04445f*4.5f))&65535;advance();}follow();
+            else{actor.yaw=(actor.yaw-turn*int(182.04445f*4.5f))&65535;advance();}
+            head_locomotion_entry(); // bhCPM2_act_std/wlk/run/bak case 0, before bhControlPlayerHead
+            follow();
         };
         recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);
         auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}
@@ -701,6 +825,7 @@ int main(int argc,char** argv){
                 out<<", \"render_clip\": ["<<image.last_clip()[0]<<","<<image.last_clip()[1]<<"]";
                 out<<", \"yaw\": "<<actor.yaw<<",\n  \"combat_shots\": "<<combat.shots<<", \"combat_hits\": "<<combat.hits<<", \"combat_attacks\": "<<combat.attacks<<", \"weapon\": "<<inventory.weapon()<<", \"hp\": "<<inventory.hp<<", \"play_time\": "<<inventory.play_time<<", \"message_selection\": "<<(events?events->values[7]:0)<<", \"box_open\": "<<(box_menu.active()?"true":"false")<<", \"box_base\": "<<box_menu.base()<<", \"inventory_open\": "<<(menu.active?"true":"false")<<", \"files_open\": "<<(menu.files?"true":"false")<<", \"file_folder_open\": "<<(menu.files&&menu.file_list?"true":"false")<<", \"file_registers\": "<<(menu.file_folder.registers()?"true":"false")<<", \"file_number\": "<<menu.file_number<<", \"file_page\": "<<menu.file_page<<", \"file_pages\": "<<menu.file_pages()<<", \"file_flags\": "<<inventory.items[383]<<", \"main_cursor\": "<<menu.maincsr<<", \"menu_navigation\": "<<(menu.nav?"true":"false")<<", \"file_transition\": "<<(menu.file_transition?"true":"false")<<", \"file_scroll\": "<<menu.file_scroll<<", \"manual_read\": "<<(events&&events->flag(9,480)?"true":"false")<<", \"dialog_open\": "<<(dialog.active()?"true":"false")<<", \"dialog_index\": "<<dialog.index()<<",\n  \"items\": [";for(unsigned i=0;i<12;++i)out<<(i?",":"")<<inventory.slots()[i];out<<"], \"security_items\": [";for(unsigned i=192;i<224;++i)out<<(i>192?",":"")<<inventory.items[i];out<<"], \"security_items_2\": [";for(unsigned i=224;i<256;++i)out<<(i>224?",":"")<<inventory.items[i];out<<"], \"work_flags\": [";for(unsigned i=0;i<17;++i)out<<(i?",":"")<<(events?events->flags[i][0]:0);out<<"], \"item_flags\": [";for(unsigned i=0;i<32;++i)out<<(i?",":"")<<(events?events->flags[7][i]:0);out<<"], \"event_flags\": [";for(unsigned i=0;i<32;++i)out<<(i?",":"")<<(events?events->flags[1][i]:0);const auto pose=world?world->camera(scene,camera):camera;out<<"], \"camera_pose\": ["<<pose.position.x<<","<<pose.position.y<<","<<pose.position.z<<","<<pose.angles[0]<<","<<pose.angles[1]<<","<<pose.angles[2]<<","<<pose.distance<<","<<pose.perspective<<"], \"camera_transition\": "<<(world&&world->camera_transitioning()?"true":"false")<<", \"camera_clock\": "<<(world?world->camera_clock():0)<<", \"fixed_camera\": "<<(world&&world->fixed_camera?int(*world->fixed_camera):-1);out<<",\n  \"events\": [";if(events)for(unsigned i=0;i<events->dispatched.size();++i)out<<(i?",":"")<<events->dispatched[i];out<<"], \"pending_world_bindings\": "<<(events?events->pending_bindings.size():0)<<", \"blocked_commands\": "<<(events?events->errors.size():0)<<",\n  \"actor\": ["<<actor.position.x<<","<<actor.position.y<<","<<actor.position.z<<"], \"motion\": "<<motion<<", \"animation_frame\": "<<animation<<", \"player_hidden\": "<<(world&&world->player_hidden?"true":"false")<<", \"player_scripted\": "<<(world&&world->player_scripted?"true":"false")<<", \"cinematic\": "<<(events&&(events->flags[5][0]&4)?"true":"false")<<", \"event_camera\": "<<(world&&world->event_camera?int(world->event_camera_index):-1)<<", \"movie_active\": "<<(movie.active()?"true":"false")<<", \"movie_frame\": "<<movie.frame()<<", \"bgm_active\": "<<(audio.active(0)?"true":"false")<<", \"bgm_id\": "<<audio.current_bgm()<<", \"bgm_request\": "<<audio.bgm_request()<<", \"background_active\": ["<<audio.active(24)<<", "<<audio.active(25)<<", "<<audio.active(26)<<"], \"audio_played\": [";for(unsigned i=0;i<audio.played.size();++i)out<<(i?",":"")<<std::quoted(audio.played[i]);out<<"], \"audio_unavailable\": [";for(unsigned i=0;i<audio.unavailable.size();++i)out<<(i?",":"")<<std::quoted(audio.unavailable[i]);out<<"], \"event_tasks\": [";if(events){const auto tasks=events->task_states();for(unsigned i=0;i<tasks.size();++i){const auto& t=tasks[i];out<<(i?",":"")<<"{\"event\":"<<t.event<<",\"level\":"<<t.level<<",\"offset\":"<<t.offset<<",\"delay\":"<<t.delay<<",\"blocked\":"<<(t.blocked?"true":"false")<<"}";}}out<<"], \"event_sound_active\": [";for(unsigned slot=0;slot<5;++slot)out<<(slot?",":"")<<audio.active(12-slot);out<<"], \"effects\": [";if(world){bool first=true;for(unsigned i=0;const auto* e=world->effect_state(i);++i)if(recvx::supported_effect_sprite(e->id)){out<<(first?"":",")<<"{\"slot\":"<<i<<",\"id\":"<<e->id<<",\"type\":"<<e->type<<",\"texture\":"<<e->tex_id<<",\"atlas\":"<<e->ani_ct<<",\"phase\":"<<e->ct0<<",\"visible\":"<<(world->effect_visible(i)?"true":"false")<<"}";first=false;}}out<<"], \"enemies\": [";if(world){bool first=true;for(unsigned i=0;i<128;++i)if(const auto* e=world->state(1,i)){out<<(first?"":",")<<"{\"index\":"<<i<<",\"identity\":"<<e->identity<<",\"motion\":"<<e->motion<<",\"posed_motion\":"<<e->posed_motion()<<",\"hp\":"<<e->hp<<",\"hidden\":"<<(e->hidden?"true":"false")<<",\"inactive\":"<<(e->inactive?"true":"false")<<",\"scripted\":"<<(e->scripted?"true":"false")<<",\"position\":["<<e->transform.position.x<<","<<e->transform.position.y<<","<<e->transform.position.z<<"]}";first=false;}}out<<"], \"sequence_unavailable\": [";for(unsigned i=0;i<audio.sequence_unavailable.size();++i)out<<(i?",":"")<<std::quoted(audio.sequence_unavailable[i]);out<<"], \"gameover_active\": "<<(game_over.active()?"true":"false")<<", \"gameover_phase\": "<<game_over.phase()<<", \"gameover_count\": "<<game_over.count()<<", \"gameover_blasts\": "<<game_over.blasts()<<", \"retry_count\": "<<(retry_point?retry_point->save.retry_ct:0)<<", \"combat_target_right\": "<<int(combat.targets().right)<<", \"combat_target_left\": "<<int(combat.targets().left)<<", \"stairs\": ";if(stairs.active||stairs.mode2){out<<"{\"active\":"<<(stairs.active?"true":"false")<<",\"mode0\":"<<stairs.mode0<<",\"mode2\":"<<stairs.mode2<<",\"mode3\":"<<stairs.mode3<<",\"motion\":"<<stairs.motion<<",\"frame\":"<<stairs.frame<<",\"floor\":"<<stairs.floor<<",\"ay\":"<<stairs.ay<<",\"status\":"<<stairs.status<<",\"flg\":"<<stairs.flg<<",\"flg2\":"<<stairs.flg2<<",\"st_flg\":"<<stairs.st_flg<<",\"etc_idx\":"<<stair_etc_marked<<",\"area_type\":"<<unsigned(stairs.area.type)<<",\"area_valid\":"<<stairs.area_valid<<",\"unsupported\":"<<stairs.unsupported_services<<"}";}else out<<"null";
                  out<<", \"hair\": ";if(hair_variant!=RECVX_HAIR_VARIANT_NONE){out<<"{\"variant\":"<<unsigned(hair_variant)<<",\"mode0\":"<<hair.mode0<<",\"cursor\":"<<hair.ct0<<",\"fall\":"<<hair.spd<<",\"velocity\":["<<hair.hair.spx<<","<<hair.hair.spy<<","<<hair.hair.spz<<"],\"filtered\":["<<hair.xn<<","<<hair.yn<<","<<hair.zn<<"],\"root\":["<<hair.hair.ox<<","<<hair.hair.oy<<","<<hair.hair.oz<<"],\"yaw_sum\":"<<hair.hair.ay<<",\"angles\":[";for(unsigned i=0;i<RECVX_HAIR_SEGMENTS;++i)out<<(i?",":"")<<"["<<hair.angles[i][0]<<","<<hair.angles[i][1]<<"]";out<<"],\"segments\":[";for(unsigned i=0;i<RECVX_HAIR_SEGMENTS;++i)out<<(i?",":"")<<"["<<hair.pv[i][0]<<","<<hair.pv[i][1]<<","<<hair.pv[i][2]<<"]";out<<"]}";}else out<<"null";
+                 out<<", \"head\": {\"flags\":"<<head.flags<<",\"locked\":"<<(head.flags&RECVX_HEAD_LOCKED?"true":"false")<<",\"target_kind\":"<<head.target_kind<<",\"target\":"<<head.target_index<<",\"target_node\":"<<head.target_node<<",\"look_timer\":"<<head.look_timer<<",\"node4\":["<<head.node4[0]<<","<<head.node4[1]<<"],\"node5\":["<<head.node5[0]<<","<<head.node5[1]<<"],\"sum\":["<<head.sum[0]<<","<<head.sum[1]<<","<<head.sum[2]<<"],\"point\":["<<head.head[0]<<","<<head.head[1]<<","<<head.head[2]<<"],\"blink\":"<<head.blink_frame<<",\"blink_timer\":"<<head.blink_timer<<",\"eye\":"<<head.eye_texture<<",\"overrides\":"<<head_pose.size()<<",\"unbound\":[";{bool first=true;for(const auto& name:head_unbound){out<<(first?"":",")<<std::quoted(name);first=false;}}out<<"]}";
                  out<<", \"push\": ";if(world&&world->push_state()){const auto& p=*world->push_state();out<<"{\"active\":"<<(p.active?"true":"false")<<",\"phase\":"<<p.phase<<",\"contact\":"<<p.contact<<",\"wall\":"<<p.wall<<",\"unsupported\":"<<p.unsupported_services<<"}";}else out<<"null";out<<", \"push_objects\": [";if(world){bool first=true;for(unsigned i=4;i<256;++i)if(const auto* e=world->state(2,i);e&&(e->type&255)==1){out<<(first?"":",")<<"{\"index\":"<<i<<",\"position\":["<<e->transform.position.x<<","<<e->transform.position.y<<","<<e->transform.position.z<<"]}";first=false;}}out<<"], \"computer\": ";{const auto* cf=computer.frame();if(cf){out<<"{\"active\": "<<(computer.active()?"true":"false")<<", \"number\": "<<cf->number<<", \"md0\": "<<cf->com_md0<<", \"md1\": "<<cf->com_md1<<", \"flg\": "<<cf->com_flg<<", \"txflg\": "<<cf->txflg<<", \"lcflg\": "<<cf->lcflg<<", \"draws\": "<<cf->draw_count<<", \"draw_overflow\": "<<cf->draw_overflow<<", \"unknown_opcodes\": "<<cf->unknown_opcode<<", \"character_gaps\": "<<computer.character_gaps()<<", \"message_gaps\": "<<computer.message_gaps()<<", \"character\": "<<(cf->character.active?cf->character.chr_no:-1)<<", \"message\": "<<(cf->message_visible?cf->message_number:-1)<<", \"cursor\": ["<<cf->tx<<", "<<cf->ty<<"], \"key\": ["<<cf->kx<<", "<<cf->ky<<"], \"words\": [";out<<std::quoted(computer.words()[0])<<", "<<std::quoted(computer.words()[1]);out<<"], \"text\": [";const auto& rows=computer.text();for(std::size_t i=0;i<rows.size();++i)out<<(i?", ":"")<<std::quoted(rows[i]);out<<"]}";}else out<<"null";}out<<", \"pending_commands\": [";if(events)for(unsigned i=0;i<events->pending_bindings.size();++i){const auto& c=events->pending_bindings[i];out<<(i?",":"")<<"{\"opcode\":"<<c.opcode<<",\"event\":"<<c.event<<",\"offset\":"<<c.offset<<",\"bytes\":[";for(unsigned j=0;j<c.bytes.size();++j)out<<(j?",":"")<<unsigned(c.bytes[j]);out<<"]}";}out<<"]\n}\n";}};
         // The camera mod only owns the view while the player has free control.
         // njClipZ per camera: bhChangeViewClip for event cameras, bhChangeViewClipRM for room cuts.
@@ -721,7 +846,7 @@ int main(int argc,char** argv){
         const auto start=std::chrono::steady_clock::now();
         if(args.headless){
             const int frames=args.frames?args.frames:1;
-            for(int i=0;i<frames;++i){replay_input(unsigned(i));update_pad(replay_pad);if(game_over_tick()){audio.mix();if(i==frames-1)draw(unsigned(i));continue;}if(debug.active()){if(i==frames-1)draw(unsigned(i));continue;}if(!frontend.active())gameplay_input.apply({});else if(ui)frontend_command(frontend.apply({}));if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio.mix();locomote(replay_move,replay_run,replay_turn);hair_step(); /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp) */third_person_tick();if(args.validate_poses)compose();if(i==frames-1)draw(unsigned(i));if(frontend_quit)break;}
+            for(int i=0;i<frames;++i){replay_input(unsigned(i));update_pad(replay_pad);if(game_over_tick()){audio.mix();if(i==frames-1)draw(unsigned(i));continue;}if(debug.active()){if(i==frames-1)draw(unsigned(i));continue;}if(!frontend.active())gameplay_input.apply({});else if(ui)frontend_command(frontend.apply({}));if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio.mix();locomote(replay_move,replay_run,replay_turn);head_hair_step(); /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp) */third_person_tick();if(args.validate_poses)compose();if(i==frames-1)draw(unsigned(i));if(frontend_quit)break;}
             if(!args.screenshot.empty())image.save_bmp(args.screenshot);
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
             report();return events&&!events->errors.empty()?1:0;
@@ -813,7 +938,7 @@ int main(int argc,char** argv){
                 if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}
                 if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
                 if(!args.preview&&args.replay.empty())combat_input={physical.down(recvx::Action::Aim),physical.down(recvx::Action::Attack)||physical.hit(recvx::Action::Attack),physical.turn(),physical.move(),physical.hit(recvx::Action::NextTarget)};
-                locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());hair_step(); /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp) */third_person_tick();if(args.validate_poses)compose();
+                locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());head_hair_step(); /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp) */third_person_tick();if(args.validate_poses)compose();
             }
             if(render_dirty){draw(input_tick,devices.controllers());++rendered_frames;render_dirty=false;
             sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);}

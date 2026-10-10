@@ -28,7 +28,7 @@ int main(int argc,char** argv){try{
     // vollstaendig durchlaufen.  Der Host liefert wie die Laufzeit
     // Motionlaengen, Knotenlagen, Grundhoehen und die Schrittdienste.
     std::array<float,32> floors{};floors[2]=0;floors[3]=9;
-    struct Host {unsigned feet=0,actions=0,effects=0,water=0,vibration=0,kaidan=0,badflag=0,last_node=0,probe_node=0;
+    struct Host {unsigned feet=0,actions=0,effects=0,water=0,vibration=0,kaidan=0,head_release=0,badflag=0,last_node=0,probe_node=0;
                  int burst=0,splash_up=0,splash_dn=0,sound=-1;float bits=0;};
     Host h;
     RECVX_STAIR_HOST services{&h,
@@ -54,6 +54,8 @@ int main(int argc,char** argv){try{
             if(e->id==108){if(e->lkono==10){++h.splash_up;h.bits=e->offset[0];}else ++h.splash_dn;}else if(e->id==11)++h.burst;},
         [](void* p,int,int){++static_cast<Host*>(p)->vibration;},
         [](void* p,int){++static_cast<Host*>(p)->kaidan;},
+        /* bhCPM2_act_* case 0: EXP1_I(0) &= ~0x4; |= 0x1E0 (B06 head control). */
+        [](void* p){++static_cast<Host*>(p)->head_release;},
         [](void*,float py){return py<4.5f?0:1;},
         floors.data(),0};
     /* recvx_stairs_tick liefert genau in dem Bild 0, in dem der originale
@@ -79,7 +81,10 @@ int main(int argc,char** argv){try{
         check(recvx_stairs_begin(&s,&a,action,floors.data(),0,py,0,0,int(py),0,0)==1,"stair begin refused a type-1 area");
         check(s.active&&s.mode0==1&&s.mode2==action&&(s.status&0x80010010u)==0x80010010u,"stair begin does not match bhCheckExmAtari case 1/2");
         check((s.flg&0x10400u)==0x10400u&&!(s.flg&0x110u)&&(s.st_flg&4u),"stair begin does not set the original player switches");
-        check((s.unsupported_services&0x380u)==0x380u,"stair begin stopped reporting its unbound services");}
+        // HOKAN|MTN_ATTR bleiben offen; HEADWORK ist seit B06 gebunden und wird
+        // nur noch gemeldet, wenn der Host release_head_look nicht stellt.
+        check((s.unsupported_services&0x280u)==0x280u,"stair begin stopped reporting its unbound services");
+        check(!(s.unsupported_services&RECVX_STAIR_UNBOUND_HEADWORK),"stair begin must not pre-seed the bound head work");}
     for(int action:{16,17}){
         RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};const float py=action==16?0.f:9.f;
         a.type=2;a.py=py;
@@ -97,11 +102,14 @@ int main(int argc,char** argv){try{
         RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};a.type=1;a.py=e.area_py;a.prm2=8;a.w=40;a.d=40;
         seed(s);
         recvx_stairs_begin(&s,&a,e.action,floors.data(),0,e.area_py,0,0,int(e.area_py),0,0);
-        h.feet=0;h.actions=0;h.kaidan=0;
+        h.feet=0;h.actions=0;h.kaidan=0;h.head_release=0;
         run_stairs(s);
         check(s.mode0==1&&s.motion==42&&s.floor==e.floor&&s.py==e.end_py&&s.py==floors[e.floor+2],"stair action did not return to the original floor table");
         check((s.flg&0x118u)==0x118u&&!(s.flg&0xD0400u)&&!(s.status&0x80010030u),"stair action did not release its original switches");
         check((s.flg2&1u)&&h.kaidan,"stair action did not open its hokan work or clear the kaidan mark");
+        // B06: der mode3-0-Block gibt das Blickziel auf (EXP1_I(0) &= ~0x4; |= 0x1E0).
+        check(h.head_release==1,"stair action did not release the head look target");
+        check(!(s.unsupported_services&RECVX_STAIR_UNBOUND_HEADWORK),"head work still reported unbound with a bound service");
         check((h.feet>0)==e.steps,"stair action changed its original step sounds");}
     // (3) Danf-Stufe mit gesetztem st_flg 0x40: bhCheckWater an Knoten 19
     // (ply_id 0), bhSetEffect 108 mit lkono 15 und sechs bhSetEffectTb 11

@@ -5,14 +5,21 @@ und Raumladen. Stabil, aber spielmechanisch unvollständig.
 Diese Roadmap ist ein Arbeitsplan, kein Fertigstellungsnachweis. Task-IDs
 bleiben stabil; bestehende native Teile erhalten, nicht erneut portieren.
 
+Orchestrator-Übergabe 2026-10-10: `ORCHESTRATOR_HANDOVER.md` fasst neuere
+Paketstände, Grenzen und Zuständigkeiten zusammen. Historische Rückbau-
+Offenmeldungen unten vor erneuter Beauftragung mit aktuellen Berichten und
+Code abgleichen. Der Drittauftrag umfasst inzwischen alle Gegner C01–C08,
+nicht nur die C01-Fallenaktivierung.
+
 Fortsetzung 2026-10-10: P04 installiert Clipbereiche jetzt bei den belegten
 Kameraaufrufen, nicht pro Renderbild. Flag-/Rcase-Retention, Fixkamera-
 Schlüssel und Rückgabestandards sind mit zwölf Runtimefällen geprüft.
 Eff137, vollständiger Kameraautomat und Eisraum-Materialsortierung bleiben
 offen; kein Hardwarekern als Lösung. B04 läuft separat. Der nächste
-konfliktfreie Drittauftrag ist C01 gemäß `THIRD_AGENT_C01_TASK.md`:
-Fallenaktivierung in `enemy_spawn.*`, gemeinsame Anschlussdateien nur per
-abgestimmtem Patch. Ergebnisse: `work/native_port_P04_camera_invocations.result.md`.
+konfliktfreie Einstieg des Drittauftrags ist C01 gemäß `THIRD_AGENT_C01_TASK.md`:
+Fallenaktivierung in `enemy_spawn.*` als Teil des vollständigen Gegnerpakets,
+gemeinsame Anschlussdateien nur per abgestimmtem Patch. Ergebnisse:
+`work/native_port_P04_camera_invocations.result.md`.
 
 ## Aktueller Stand — Datenport, Rückbau und Gameplay getrennt
 

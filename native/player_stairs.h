@@ -35,6 +35,9 @@ typedef struct {
     void (*effect)(void* user,const RECVX_STAIR_EFFECT* effect);
     void (*vibration)(void* user,int type,int pattern);                      // StartVibrationEx
     void (*kaidan_flag)(void* user,int used);                                // bhSetUseKaidanFlag/bhClrUseKaidanFlag
+    // bhCPM2_act_* case 0: EXP1_I(0) &= ~0x4; EXP1_I(0) |= 0x1E0 — the head control gives up
+    // its look target and runs its four return paths (player.c:2891/3153/3360/3522/3948/4143).
+    void (*release_head_look)(void* user);
     int (*floor_num)(void* user,float py);                                   // bhCheckFloorNum
     const float* grand;                                                      // rom->grand[32]
     int ply_id;

@@ -98,7 +98,7 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # tools/generate_effect_collision.py ist Quarantaene (Policy 2026-10-09):
 # ATR-Boden/Wandkontakt, Reflexion und Linienabfrage sind eigenstaendig nativ;
 # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/en01_damage.c native/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/adx_tables.c)
+add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/en01_damage.c native/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/player_head.c native/adx_tables.c)
 target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
 if(NOT MSVC)
   # Preserve separate float multiply/add steps also in production-only builds.
@@ -392,6 +392,11 @@ if(BUILD_TESTING)
   add_executable(recvx-player-hair-tests tests/native/player_hair_test.cpp)
   target_link_libraries(recvx-player-hair-tests PRIVATE recvx_game)
   add_test(NAME player_hair COMMAND recvx-player-hair-tests)
+
+  # Kopfsteuerung des Spielers (bhControlPlayerHead/bhLookNearEnemy/bhSetHeadRotation).
+  add_executable(recvx-player-head-tests tests/native/player_head_test.cpp)
+  target_link_libraries(recvx-player-head-tests PRIVATE recvx_game)
+  add_test(NAME player_head COMMAND recvx-player-head-tests)
 endif()
 
 # Original crate/player push state and Motion.c sampling.

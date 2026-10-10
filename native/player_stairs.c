@@ -80,12 +80,14 @@ static int stair_approach(RECVX_STAIR_STATE* s)
 
 /* bhCPM2_act_* case 0: in allen sechs Routinen gleich bis auf die Hokanrate
  * und die ayp-Formel. */
-static void stair_open(RECVX_STAIR_STATE* s,int hokan_rate,int ayp)
+static void stair_open(RECVX_STAIR_STATE* s,const RECVX_STAIR_HOST* host,int hokan_rate,int ayp)
 {
     int ayn;
     s->flg&=~0x28C0008u;
-    /* EXP1_I(0) &= ~0x4; EXP1_I(0) |= 0x1E0; — Kopfarbeit des Spielermodells,
-     * siehe RECVX_STAIR_UNBOUND_HEADWORK. */
+    /* EXP1_I(0) &= ~0x4; EXP1_I(0) |= 0x1E0: die Kopfsteuerung gibt ihr Blickziel
+     * auf und laesst die vier Rueckfuehrungen laufen. */
+    if(host&&host->release_head_look)host->release_head_look(host->user);
+    else s->unsupported_services|=RECVX_STAIR_UNBOUND_HEADWORK;
     s->flg2|=0x1u;
     s->motion=PlMtnAct[s->wpntp][s->dmlvl][1];
     s->hokan_rate=hokan_rate;
@@ -212,7 +214,7 @@ static void kdu(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
     switch(s->mode3)
     {
     case 0:
-        stair_open(s,42598,-((int)(182.04445f*(s->area.prm1*90))&0xFFFF));
+        stair_open(s,h,42598,-((int)(182.04445f*(s->area.prm1*90))&0xFFFF));
         break;
     case 1:
     case 2:
@@ -304,7 +306,7 @@ static void kdd(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
     switch(s->mode3)
     {
     case 0:
-        stair_open(s,42598,-((int)(182.04445f*(s->area.prm1*90))&0xFFFF));
+        stair_open(s,h,42598,-((int)(182.04445f*(s->area.prm1*90))&0xFFFF));
         break;
     case 1:
     case 2:
@@ -394,7 +396,7 @@ static void dnu(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
     switch(s->mode3)
     {
     case 0:
-        stair_open(s,42598,(s->ay+8192)&~0x3FFF);
+        stair_open(s,h,42598,(s->ay+8192)&~0x3FFF);
         break;
     case 1:
     case 2:
@@ -489,7 +491,7 @@ static void dnd(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
     switch(s->mode3)
     {
     case 0:
-        stair_open(s,42598,(s->ay+8192)&~0x3FFF);
+        stair_open(s,h,42598,(s->ay+8192)&~0x3FFF);
         break;
     case 1:
     case 2:
@@ -609,7 +611,7 @@ static void hsu(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
     switch(s->mode3)
     {
     case 0:
-        stair_open(s,32768,-((int)(182.04445f*(s->area.prm1*90))&0xFFFF));
+        stair_open(s,h,32768,-((int)(182.04445f*(s->area.prm1*90))&0xFFFF));
         break;
     case 1:
     case 2:
@@ -681,7 +683,7 @@ static void hsd(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
     switch(s->mode3)
     {
     case 0:
-        stair_open(s,32768,32768-((int)(182.04445f*(s->area.prm1*90))&0xFFFF));
+        stair_open(s,h,32768,32768-((int)(182.04445f*(s->area.prm1*90))&0xFFFF));
         break;
     case 1:
     case 2:
@@ -788,7 +790,10 @@ int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,int
     /* hitchk.c case 1 (4686) und case 2 (4757) setzen sys->st_flg 0x4, die
      * danf-Sonde (4952) nicht; nur der Danf-Zweig laesst das Bit stehen. */
     if(action!=17)state->st_flg|=0x4u;
-    state->unsupported_services=RECVX_STAIR_UNBOUND_HOKAN|RECVX_STAIR_UNBOUND_HEADWORK|RECVX_STAIR_UNBOUND_MTN_ATTR;
+    /* RECVX_STAIR_UNBOUND_HEADWORK wird nicht mehr vorbelegt: der mode3-0-Block
+     * ruft release_head_look und meldet das Bit nur, wenn der Host den Dienst
+     * nicht stellt.  Hokan und mtn_attr bleiben offen. */
+    state->unsupported_services=RECVX_STAIR_UNBOUND_HOKAN|RECVX_STAIR_UNBOUND_MTN_ATTR;
     state->active=1;
     return 1;
 }
