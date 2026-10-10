@@ -3,6 +3,7 @@
 # Nur eintragen, was am nativen Code nachgeprüft ist. Ohne Eintrag gilt die automatische
 # Evidenz (original/opcode/verweis/fehlt). done = Verhalten vollständig wie im Original,
 # partial = nativer Nachbau mit bekannten Lücken, skip = im Port nicht nötig (z. B. Debug).
+objitm.c:bhObjItmBox	done	Eigenstaendiger nativer vierphasiger Deckelcontroller auf vorhandenem RoomWorld-Objekt; 41 Schritte, separater Menuepass, SFX/Playerflags und Rueckkehr. Fuenf Ressourcen-Worldtests und RM_1080 Runtime-Oeffnen/Abbruch/Wiederoeffnung; kein allgemeiner Objekt-/Playerdispatcherabschluss. work/native_port_B05_item_box_object.result.md
 objitm.c:bhObj001	partial	Original function extracted; mobile walls/side probes/work indices, original speed/box collision tested; auxiliary metc/mflr consumers for crate climbing not fully bound
 hitchk.c:bhCheckWall	partial	Eigenstaendige native direkte ATR-Aufloesung in geometry_motion.cpp: Y-Rundung, Typzweige, Filter, Rundungen, Rampenprojektion und grand-Seiteneffekte positiv geprueft; der freie Spielerweg verwendet stattdessen den belegten Ex-Doppelpass. Effekt29/Hurt-State und weitere Aufrufer bleiben offen. work/native_port_B00_motion.result.md
 sub1.c:GetItem	partial	Original GetItem extrahiert inkl. Zweig 153, danach originale ItemSort-Phase; StatusCancel/Sprite-Ein-/Ausfahren und ganzer StatusMain nicht vollständig gebunden
@@ -13,7 +14,11 @@ hitchk.c:bhGetGroundPosition	partial	Generated original query; room-owned htp re
 sub1.c:ItemBox	partial	Original ItemBoxChange generiert, Tauschen/Stack/Restriktionen und Security-Raumskript geprüft; Host-Liste statt originaler Fenster/Sprites
 system.c:bhSysCall	partial	cb_flg 0x40000 führt über GameplayInput::synchronize zur Box; übrige Systemzustände nicht vollständig
 en04.c:bhEne04_MV00	partial	Originale Bereichs-/Trap-Routinen und Warte-/Lauf-MTN an RoomWorld gebunden; Verfolgung/Angriffe/gesamte MV-Zustandsmaschine fehlen
-effect.c:bhDrawTrsEffect3D	partial	Billboard/Atlas/additive Tiefe für Eff200/201/218; übrige Blendarten/Emitter/Linktyp 5 nicht vollständig
+effect.c:bhDrawTrsEffect3D	partial	Eigenstaendiger nativer Eff009-Zeichenweg: Hand-/Objektanker, Billboard bzw. verknuepfte Matrix, unveraendertes Atlasalpha, Ninja-Blendpaar, Point/Linear je Draw und Tiefe positiv geprueft. Andere Effekte/Drawgates/Linktyp 5 bleiben offen. work/native_port_E03_lighter.result.md
+effect.c:bhInitEffect	partial	Eigenstaendige ef_info-Auswertung der vier Modellblöcke, PVP an Offset 8448 und 40 gemeinsame Texturen auf dem bestehenden nativen Assetbesitzer positiv geprueft; kein Generator. Vollstaendige Modellwork-Initialisierung fuer andere Effekte bleibt offen. work/native_port_E03_lighter.result.md
+effsub1.c:bhEff009	partial	Eigenstaendige Flammensteuerung mit gelatchter UV-Bank, acht Schritten, Originaltypen/Flags und Queue-/Freigabegates; echte Eröffnung und normales Ausruesten/Ablegen mit unveraendertem HP/Fortschritt positiv geprueft. Vollstaendige Spieler-Armhaltung/pt_flg-Integration bleibt F01/P00. work/native_port_E03_lighter.result.md
+pwksub.c:bhSetLighterFire	partial	Event 0xa2 startet/loescht Eff009 Typ3 und Raumlicht1 auf vorhandenem Objekt-/Systembesitzer; mit realem Raumobjekt ueber produktive Bindung positiv geprueft. Keine gesamte Originalskriptfolge behauptet. work/native_port_E03_lighter.result.md
+light.c:bhControlLight	partial	Licht-RGB-Typen 1..6: Sample vor Clockvorschub, Originalformel und gemeinsamer RNG, aktive Licht-/Simulationgates auf vorhandenen World-Lichtern geprueft. Restliche Lichttypen, Clip-/Specular-/vollstaendige Cache- und Rendersemantik bleiben offen. work/native_port_E03_lighter.result.md
 ps2_NaSystem.c:njColorBlendingModeSys	partial	Originale alpha_tbl[13][12] + Ninja-Indextabellen generiert; native/chunk_blend.cpp RGB=(A-B)*C+D, normalisierte Alpha-Floats; kein vollständiger GS-Zustands-/Quantisierungsport
 ps2_NinjaCnk.c:njCnkCbBa	partial	Chunk-Blendbits im gemeinsamen Modelldecoder; Originaltabellen und UA-Renderer, keine vollständige PS2-Renderzustandsmaschine
 ps2_NinjaCnk.c:njCnkCmD	partial	Materialfarbe/Alpha und Blendbits im Modelldecoder; ursprüngliche Ninja-GS-Blendtabelle gebunden

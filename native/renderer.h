@@ -14,6 +14,8 @@ public:
     // 1/z of the nearest surface per pixel; 0 where nothing was drawn. Lets a
     // caller composite an off-screen pass without a colour key.
     const std::vector<float>& depth() const {return depth_;}
+    // Passive evidence of the last geometry pass, not another camera owner.
+    const std::array<float,2>& last_clip()const{return last_clip_;}
     std::vector<std::uint32_t>& canvas(){return pixels_;}
     // Trilinear mipmapping with up to 4x anisotropic taps (removes texture
     // shimmer). Off reproduces the previous nearest-neighbour sampling.
@@ -34,6 +36,7 @@ private:
     bool filter_=true;
     unsigned threads_=0;
     int ss_=2;
+    std::array<float,2> last_clip_{{0.05f,0.f}};
     std::vector<std::uint32_t> hi_pixels_;
     std::vector<float> hi_depth_;
     std::vector<std::uint32_t> pixels_;

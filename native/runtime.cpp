@@ -193,6 +193,7 @@ int main(int argc,char** argv){
         if(!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(args.player)+".bin");player=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,args.player,args.preview));if(!player->has_motion(args.motion))throw std::runtime_error("requested body motion is unavailable");}
         std::size_t room_index=rooms.size(),camera_index=0,stage_triangles=0,texture_base=0,attachment_base=0,motion=args.motion;
         bool hair_reset=true;std::vector<std::array<std::int32_t,2>> hair_angles; // obwp[2] bhObjClpn state
+        RECVX_HAIR_STATE hair{};RECVX_HAIR_VARIANT hair_variant=recvx_hair_begin(&hair,int((args.player-10)%4)); // bhSetObject + bhSetPlayer
         std::function<const recvx::PlayerAsset*()> player_attachment=[]{return static_cast<const recvx::PlayerAsset*>(nullptr);};
         for(std::size_t i=0;i<rooms.size();++i){auto name=args.room;for(auto& c:name)if(c>='a'&&c<='z')c=char(c-'a'+'A');if(rooms.name(i)==name)room_index=i;}
         if(room_index==rooms.size())throw std::runtime_error("unknown room: "+args.room);
@@ -257,7 +258,7 @@ int main(int argc,char** argv){
                 attachment_base=scene.textures.size();if(const auto* tail=player_attachment())scene.textures.insert(scene.textures.end(),tail->textures().begin(),tail->textures().end());}
             if(player&&!scene.spawns.empty()&&args.spawn>=scene.spawns.size())throw std::runtime_error("spawn "+std::to_string(args.spawn)+" outside "+room_name+" position table ("+std::to_string(scene.spawns.size())+")");
             origin=actor=scene.spawns.empty()?recvx::SceneSpawn{}:scene.spawns[args.spawn];
-            hair_reset=true; // bhObjClpn: flg2 0x2 after a room load
+            hair_reset=true;hair_variant=recvx_hair_begin(&hair,int((args.player-10)%4));hair_angles.clear(); // bhResetPlayer rebinds obwp[2]; flg2 0x2 after a room load
             if(restoring){const auto saved=recvx::snapshot_player(*restoring);actor.position=saved.position;actor.yaw=saved.yaw;} // room.c cb_flg 0x800000: ply_pos/ply_ang
             world.reset();camera_index=0;camera=scene.cameras[0];follow();stairs={};stair_etc_marked=-1;script_stairs.clear(); // bhSetRDT replaces the room-local player/stair work before bhInitEvent
             stage_geometry=scene.triangles;stable_textures=scene.textures.size();
@@ -269,8 +270,12 @@ int main(int argc,char** argv){
                 events->flags[12][0]=(events->flags[12][0]|0x11e00u)&~0x80u;
                 if(restoring)recvx::restore_events(*restoring,*events); // before Event_init, like sys flags after bhPopGameData
                 world->bind_player_collision(*events);
+                const auto clip_room=recvx::RoomIdentity::parse(rooms.name(room_index));
+                events->values[0]=clip_room.stage;events->values[1]=clip_room.room;
+                world->initialize_camera_clip(unsigned(camera_index)); // before Event_init can install an event-camera range
                 const auto identity=recvx::RoomIdentity::parse(rooms.name(room_index));audio.mount_sound_afs(identity.stage); /* system.c:1602 disc change task before the room loads */events->values[0]=identity.stage;events->values[1]=identity.room;menu.stage=events->values[0];menu.room=events->values[1];menu.file_progress=[&](){return events?recvx::file_page_reduction(events->flags[1]):7u;};menu.file_bonus=[&](){return events&&(events->flags[16][0]&0x1000);};menu.file_manual_read=[&](bool automatic){if(!events||(!automatic&&events->flag(9,480)))return;inventory.erase_read_manual(automatic);events->set_flag(9,480,0);};menu.shotgun_burst=[&](){return events&&events->flag(1,74);};menu.toggle_shotgun_burst=[&](){if(events)events->set_flag(1,74,2);};events->values[15]=unsigned(args.spawn);events->values[2]=unsigned(camera_index);events->values[21]=identity.variant;events->door=request_door;
                 events->task_started=[&](unsigned level){world->start_task(level);};events->player_yaw=[&]{return unsigned(actor.yaw)&65535u;};events->set_player_yaw=[&](unsigned yaw){actor.yaw=yaw&65535;};events->pad_state=[&]{return std::pair<unsigned,unsigned>{pad_ps,pad_on};};events->binding=[&](const recvx::EventCommand& c){if(c.opcode==0x39){const unsigned group=c.bytes.at(2);if(group>=scene.cut_enabled.size()||!scene.cut_tables[group])throw std::runtime_error("bhCamInfoSet camera group without cut table");scene.cut_enabled[group]=c.bytes.at(1)==0;follow();return true;}if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();return true;}
+                    if(c.opcode==0x13&&c.bytes.at(1)==1){const bool bound=world->bind(c);follow();world->tick_camera(scene,camera,camera_index,automatic_camera);return bound;} // bhCamSet: bhCheckCut(1), then njClipZ, before the next script command
                     if(c.opcode==0xa4){script_stairs.push_back(c);return true;} // bhPlayerKaidanMotion: same stair driver as the interaction path
                     if(c.opcode==0xc6){game_over_requested=true;return true;} // bhGameOverSet
                     if(c.opcode==0xcd){return_title_requested=true;return true;} // bhReturnTitleEvt: RequestAllStopSoundEx(1,1,0); bhReturnTitle()
@@ -286,10 +291,12 @@ int main(int argc,char** argv){
         // bhObjClpn runs once per original frame (object task), independent of presentation.
         auto hair_step=[&](){const auto* tail=player_attachment();if(!tail||!world||world->player_hidden)return;const auto link=*player_link();
             std::vector<recvx::BoneMatrix> nodes;if(world->player_scripted)(void)world->sample_player(*player,&nodes);else nodes=player->pose(motion,animation,actor.position,actor.yaw);if(link.node>=nodes.size())return;
-            RECVX_HAIR_INPUT in{};std::copy_n(nodes[link.node].value,16,in.head);NJS_MATRIX head;std::copy_n(nodes[link.node].value,16,head);NJS_POINT3 at;auto lo=link.offset;njCalcPoint(&head,&lo,&at);
-            try{const auto pose=player->local_pose(motion,animation);for(unsigned i=0;i<6&&i<pose.size();++i)for(unsigned j=0;j<3;++j)in.player_angles[i][j]=pose[i].angles[j];}catch(const std::exception&){}
-            in.ay=actor.yaw;const auto base=tail->bind_position(0);in.root[0]=at.x+base.x;in.root[1]=at.y+base.y;in.root[2]=at.z+base.z;in.reset=hair_reset;hair_reset=false;
-            int out[4][2];if(recvx_hair_tick(&in,out)){hair_angles.assign(4,{0,0});for(unsigned i=0;i<4;++i)hair_angles[i]={out[i][0],out[i][1]};}};
+            RECVX_HAIR_INPUT in{};std::copy_n(nodes[link.node].value,16,in.head); /* pp->mlwP->owP[5].mtx */
+            try{const auto pose=player->local_pose(motion,animation);for(unsigned i=0;i<6&&i<pose.size();++i)for(unsigned j=0;j<3;++j)in.angles[i][j]=pose[i].angles[j];}catch(const std::exception&){}
+            in.ax=actor.pitch;in.ay=actor.yaw;in.az=actor.roll; /* plp->ax/ay/az of the one player work */
+            in.offset[0]=link.offset.x;in.offset[1]=link.offset.y;in.offset[2]=link.offset.z; /* obwp[2].lox/loy/loz */
+            in.reset=hair_reset?1:0;hair_reset=false;
+            std::int32_t out[RECVX_HAIR_SEGMENTS][2];if(recvx_hair_tick(&hair,hair_variant,&in,out)){hair_angles.assign(RECVX_HAIR_SEGMENTS,{0,0});for(unsigned i=0;i<RECVX_HAIR_SEGMENTS;++i)hair_angles[i]={out[i][0],out[i][1]};}};
         auto compose=[&](){scene.triangles=stage_geometry;scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes;if(player&&(!world||!world->player_hidden))recvx::append_actor(scene,world?world->sample_player(*player,&nodes,combat.pose_overrides(*player,motion,animation)):player->sample(motion,animation,actor.position,actor.yaw,&nodes,combat.pose_overrides(*player,motion,animation)),texture_base);
             if(player&&(!world||!world->player_hidden))if(const auto* tail=player_attachment()){const auto link=*player_link();if(link.node<nodes.size()){
                 NJS_MATRIX head;std::copy_n(nodes[link.node].value,16,head);NJS_POINT3 at;auto lo=link.offset;njCalcPoint(&head,&lo,&at); // linked object: position only
@@ -414,81 +421,167 @@ int main(int argc,char** argv){
         // and its partner carry attr 0x400000, so bhCheckExmAtari skips them
         // while the stair run owns the player. Partner: prm3==0xFF selects the
         // adjacent area by the prm0 sign, else the referenced one.
-        auto mark_stair_etc=[&](int idx,bool used){
+        std::function<void(int,bool)> mark_stair_etc=[&](int idx,bool used){
             if(!events||idx<0||std::size_t(idx)>=events->interactions.size())return;
             auto& a=events->interactions[std::size_t(idx)];used?a.attribute|=0x400000u:a.attribute&=~0x400000u;
             const int partner=a.parameters[3]==0xFF?int(a.parameters[0])==0?idx+1:idx-1:int(a.parameters[3]);
             if(partner>=0&&std::size_t(partner)<events->interactions.size()){auto& p=events->interactions[std::size_t(partner)];used?p.attribute|=0x400000u:p.attribute&=~0x400000u;}};
+        // hitchk.c bhCheckExmAtari: eine geordnete Suche ueber rom->etcp und
+        // danach sys->metcp mit der fuenfstelligen Sondentabelle, den beiden
+        // Stufenzweigen (Typ 1 Treppe/Leiter, Typ 2 Dansa) und der
+        // abschliessenden danf-Sonde auf stflg 0x20000.  Jeder Treffer setzt
+        // cb_flg 0x100 und sys->etc_idx; case 0/1/2 und die danf-Sonde enden
+        // jeweils mit return, die uebrigen Eintraege werden nicht mehr geprueft.
+        // Die Sonden der Typen 0/3/4 stuetzen sich auf EXP_WORK fpx/arn, das
+        // keinen nativen Besitzer hat; diese Eintraege bedient weiterhin
+        // EventVm::interact.  Die Stufensuche lief dort schon zuerst.
         auto begin_stairs=[&]()->bool{
             if(!player||!world||!events||stairs.active)return false;
             const int floor=world->floor_at(actor.position);
-            // bhCheckExmAtari and bhCheckDansa scan rom->etcp followed by
-            // sys->metcp.  bhObj001 creates the latter only for crate aspd 0
-            // and 6; retain that table order and do not manufacture areas for
-            // the other crate shapes.
+            const float radius=3.5f,height=int(inventory.player)?17.5f:16.5f; // plp->ar/plp->ah aus PlyInfo[sys->ply_id]
+            // rom->etcp zuerst, dann die beweglichen Bereiche von bhObj001: der
+            // mobile Atr bleibt in der Reihenfolge rom->etcp, sys->metcp.
             auto areas=events->interactions;
-            const auto crate_areas=world->push_steps();
-            for(const auto& a:crate_areas)areas.push_back({a.flg,a.type,a.attr,a.flr_no,{a.px,a.py,a.pz},{a.w,a.h,a.d},{a.prm0,a.prm1,a.prm2,a.prm3}});
-            for(unsigned i=0;i<areas.size();++i){const auto& a=areas[i];
-                if(!(a.flags&1)||(a.type!=1&&a.type!=2)||(a.attribute&0x400000)||a.floor!=floor)continue;
-                const float reach=a.type==1?.75f:4.5f;
-                const float px=actor.position.x-reach*njSin(actor.yaw),pz=actor.position.z-reach*njCos(actor.yaw);
+            for(const auto& a:world->push_steps())areas.push_back({a.flg,a.type,a.attr,int(a.flr_no),{a.px,a.py,a.pz},{a.w,a.h,a.d},{a.prm0,a.prm1,a.prm2,a.prm3}});
+            float sine,cosine;njSinCos(actor.yaw,&sine,&cosine);
+            events->flags[10][0]&=~0x100u;
+            // `matched` ist der Index des ATR-Satzes, der als htp in die
+            // Spielerarbeit geht; `mark` zusaetzlich der Eintrag, den
+            // bhSetUseKaidanFlag sperrt.  Nur der Typ-1-Zweig setzt `mark`;
+            // der danf-Zweig hat gar keinen ATR-Satz.
+            int action=0,action_floor=floor,matched=-1,mark=-1,danf=0;bool ended=false;
+            for(std::size_t i=0;i<areas.size();++i){const auto& a=areas[i];
+                if(!(a.flags&1)||(a.type!=1&&a.type!=2)||a.floor!=floor)continue;
+                const float reach=a.type==1?0.75f:4.5f; // pxn[1]/pzn[1] und pxn[2]/pzn[2]
+                const float px=actor.position.x-reach*sine,pz=actor.position.z-reach*cosine;
                 if(!(a.position.x<=px&&a.position.x+a.extent.x>=px&&a.position.z<=pz&&a.position.z+a.extent.z>=pz))continue;
-                if(a.type==2){
-                    // hitchk.c case 2: cardinal facing, inset target at six units,
-                    // then a clearance probe at the upper surface (+9.1).
-                    if(a.parameters[0]!=0)continue;
-                    const int facing=(actor.yaw+8192)&~0x3fff;
-                    const auto x=actor.position.x-6*njSin(facing),z=actor.position.z-6*njCos(facing);
-                    if(x<a.position.x+1||x>a.position.x+a.extent.x-1||z<a.position.z+1||z>a.position.z+a.extent.z-1)continue;
-                    if(!world->step_clear({actor.position.x-5.5f*njSin(facing),actor.position.y+9.1f,actor.position.z-5.5f*njCos(facing)}))continue;
+                // hitchk.c 4644f setzt sys->cb_flg 0x100 und sys->etc_idx fuer
+                // JEDEN Treffer, bevor der Typ unterschieden wird.  Der Raum-
+                // skript wertet beide aus; ohne etc_idx lief das Skript auf dem
+                // alten Wert weiter und oeffnete einen fremden Raumausgang.
+                events->flags[10][0]|=0x100u;
+                events->values[20]=unsigned(i);
+                if(a.type==1){
+                    // Die Sperre steht im Original vor jedem Schreiben und
+                    // beendet die ganze Funktion; der bereits gesetzte Wert von
+                    // cb_flg 0x100 bleibt stehen.
+                    if((events->flags[14][0]&0x10u)||(a.attribute&0x400000u)){ended=true;break;}
+                    if(a.parameters[0]==0)action=(a.attribute&1)?20:14;
+                    else{action=(a.attribute&1)?21:15;action_floor=world->floor_at({0.0f,actor.position.y-2.0f*float(a.parameters[2]),0.0f});}
+                    // bhSetUseKaidanFlag, nur in diesem Zweig des Originals.
+                    matched=int(i);
+                    mark=i<events->interactions.size()?int(i):-1;
+                    if(mark>=0)mark_stair_etc(mark,true);
+                    ended=true;break;
                 }
-                RECVX_STAIR_AREA area{std::uint8_t(a.flags),std::uint8_t(a.type),0,std::int8_t(a.floor),a.attribute,a.position.x,a.position.y,a.position.z,a.extent.x,a.extent.y,a.extent.z,std::uint8_t(a.parameters[0]),std::uint8_t(a.parameters[1]),std::uint8_t(a.parameters[2]),std::uint8_t(a.parameters[3])};
-                // Type 2 (Dansa) does not call bhSetUseKaidanFlag.  A
-                // generated metcp entry consequently has no room-table
-                // marker to mutate.
-                stair_etc_marked=i<events->interactions.size()?int(i):-1;
-                if(stair_etc_marked>=0)mark_stair_etc(stair_etc_marked,true); // bhSetUseKaidanFlag marks the room table too
-                const auto condition=recvx::StatusPulse::condition(inventory.hp,false);const int dmlvl=condition>=3?2:condition>=1?1:0;
-                recvx_stairs_begin(&stairs,&area,world->floor_heights().data(),actor.position.x,actor.position.y,actor.position.z,actor.yaw,floor,dmlvl,0);
-                world->player_stair_ground_state(stairs.status,stairs.mode0);
-                world->player_action=true;events->flags[5][0]|=4;locomotion=false;return true;}
-            // bhCheckDansa / bhCheckExmAtari: upper area at player or one of
-            // its four radius probes, with the action probe outside that area.
-            const recvx::Interaction* upper=nullptr;bool danf=false;
-            for(const auto& a:areas){if(!(a.flags&1)||a.type!=2||!a.parameters[0]||a.floor!=floor)continue;
-                auto inside=[&](float x,float z){return x>=a.position.x&&x<=a.position.x+a.extent.x&&z>=a.position.z&&z<=a.position.z+a.extent.z;};
-                if(inside(actor.position.x,actor.position.z)||inside(actor.position.x-3.5f,actor.position.z)||inside(actor.position.x+3.5f,actor.position.z)||inside(actor.position.x,actor.position.z-3.5f)||inside(actor.position.x,actor.position.z+3.5f))upper=&a;
-                danf|=inside(actor.position.x-4.5f*njSin(actor.yaw),actor.position.z-4.5f*njCos(actor.yaw));}
-            if(upper&&!danf){const int facing=(actor.yaw+8192)&~0x3fff;
-                if(world->step_clear({actor.position.x-6.5f*njSin(facing),actor.position.y-8.9f,actor.position.z-6.5f*njCos(facing)})){
-                    const auto& a=*upper;RECVX_STAIR_AREA area{std::uint8_t(a.flags),2,0,std::int8_t(a.floor),a.attribute,a.position.x,a.position.y,a.position.z,a.extent.x,a.extent.y,a.extent.z,std::uint8_t(a.parameters[0]),std::uint8_t(a.parameters[1]),std::uint8_t(a.parameters[2]),std::uint8_t(a.parameters[3])};
-                    const auto condition=recvx::StatusPulse::condition(inventory.hp,false);recvx_stairs_begin(&stairs,&area,world->floor_heights().data(),actor.position.x,actor.position.y,actor.position.z,actor.yaw,floor,condition>=3?2:condition>=1?1:0,0);world->player_stair_ground_state(stairs.status,stairs.mode0);
-                    world->player_action=true;events->flags[5][0]|=4;locomotion=false;return true;
-                }}
-            return false;};
+                if((events->flags[14][0]&0x20u)||a.parameters[0]!=0){
+                    if(!(events->flags[14][0]&0x20u)&&a.parameters[0]!=0)danf=1;
+                    continue;
+                }
+                // case 2: Einrueckung um sechs Einheiten in Blickrichtung, dann
+                // die Wandsonde auf der oberen Flaeche.  Der Zweig ruft kein
+                // bhSetUseKaidanFlag; ein erzeugter metcp-Eintrag hat deshalb
+                // keine Raumtabellenmarke.
+                const int facing=(actor.yaw+8192)&~0x3fff;
+                const float ix=actor.position.x-6.0f*njSin(facing),iz=actor.position.z-6.0f*njCos(facing);
+                if(1.0f+a.position.x<=ix&&(a.position.x+a.extent.x)-1.0f>=ix&&1.0f+a.position.z<=iz&&(a.position.z+a.extent.z)-1.0f>=iz){
+                    const float wx=actor.position.x-(2.0f+radius)*njSin(facing),wz=actor.position.z-(2.0f+radius)*njCos(facing);
+                    const auto hit=world->collision_contact({wx,9.1f+actor.position.y,wz},events->flags[13][0],radius,height);
+                    if(!hit||(hit->attributes&4u)){action=16;matched=int(i);ended=true;break;}
+                }
+                ended=true;break; // beide Zweige des case 2 enden mit return
+            }
+            if(!ended&&!(events->flags[14][0]&0x20u)&&(events->flags[14][0]&0x20000u)&&danf==0){
+                // danf-Zweig: die Sonde laeuft 3.0 + ar nach vorn und 8.9 unter
+                // die Figur.  stflg 0x20000 hat bhCheckFloorP im selben
+                // Durchlauf gesetzt (player.c 1664 vor 1678).
+                const int facing=(actor.yaw+8192)&~0x3fff;
+                const float wx=actor.position.x-(3.0f+radius)*njSin(facing),wz=actor.position.z-(3.0f+radius)*njCos(facing);
+                const auto hit=world->collision_contact({wx,actor.position.y-8.9f,wz},events->flags[13][0],radius,height);
+                if(!hit||(hit->attributes&4u)){action=17;action_floor=floor;ended=true;}
+            }
+            if(action==0)return false;
+            RECVX_STAIR_AREA area{};
+            if(matched>=0){const auto& a=areas[std::size_t(matched)];
+                area.flg=std::uint8_t(a.flags);area.type=std::uint8_t(a.type);area.id=0;area.flr_no=std::int8_t(a.floor);
+                area.attr=a.attribute;area.px=a.position.x;area.py=a.position.y;area.pz=a.position.z;
+                area.w=a.extent.x;area.h=a.extent.y;area.d=a.extent.z;
+                area.prm0=std::uint8_t(a.parameters[0]);area.prm1=std::uint8_t(a.parameters[1]);area.prm2=std::uint8_t(a.parameters[2]);area.prm3=std::uint8_t(a.parameters[3]);}
+            // Aktionen 16/17 lesen den ATR-Satz nicht; fuer sie bleibt er leer.
+            stair_etc_marked=mark;
+            const auto condition=recvx::StatusPulse::condition(inventory.hp,false);
+            stairs.status=events->flags[14][0];stairs.flg=events->flags[13][0];stairs.st_flg=events->flags[5][0];
+            recvx_stairs_begin(&stairs,&area,action,world->floor_heights().data(),actor.position.x,actor.position.y,actor.position.z,actor.yaw,action_floor,condition>=3?2:condition>=1?1:0,inventory.weapon()<10?0:1);
+            events->flags[14][0]=stairs.status;events->flags[13][0]=stairs.flg;events->flags[5][0]=stairs.st_flg;
+            world->player_stair_ground_state(stairs.status,stairs.mode0);
+            world->player_action=true;locomotion=false;return true;};
         begin_stairs_hook=begin_stairs;
         auto tick_stairs=[&](){
-            struct Host{recvx::PlayerAsset* body;std::vector<recvx::BoneMatrix> nodes;recvx::RoomWorld* world;recvx::AudioMixer* audio;NJS_POINT3 at;};
-            Host h{player.get(),player->script_nodes(player->pose(motion,animation,actor.position,actor.yaw)),world.get(),&audio,actor.position};
+            /* bhCPM1_act_bas (player.c:1957-1991) setzt rtspd vor dem mode2-
+             * Dispatch.  Waehrend einer Stufenaktion traegt plp->stflg
+             * 0x80010010 bzw. 0x80010020, der erste Zweig gilt also immer:
+             * dmlvl 2 faellt auf 0.8, jede andere Stufe auf 1.0.  Ohne diesen
+             * Wert bliebe die Giernaeherung (mode3 1/2) stehen, weil sie ay
+             * nur um 7.2*rtspd Grad je Bild dreht.  Der Analogzweig des
+             * Originals liest sys->pad_ax/pad_dx; InputFrame fuehrt keine
+             * Achsenbetraege, die Luecke bleibt gemeldet. */
+            stairs.rtspd=stairs.dmlvl==2?0.8f:1.0f;
+            struct Host{recvx::PlayerAsset* body;std::vector<recvx::BoneMatrix> nodes;recvx::RoomWorld* world;recvx::AudioMixer* audio;NJS_POINT3 at;RECVX_STAIR_STATE* state;std::function<void(int,bool)>* kaidan;int* etc_idx;bool foot_switch;int vib_type;int vib_pattern;};
+            Host h{player.get(),player->script_nodes(player->pose(motion,animation,actor.position,actor.yaw)),world.get(),&audio,actor.position,&stairs,&mark_stair_etc,&stair_etc_marked,false,-1,-1};
             RECVX_STAIR_HOST host{&h,
-                [](void* u,unsigned m,int f,float pos[3])->int{auto& b=*static_cast<Host*>(u)->body;if(!b.has_motion(m))return 0;const auto& c=b.motion_clip(m);if(c.positions.empty()||c.positions[0].empty())return 0;const auto& k=c.positions[0][std::min<std::size_t>(std::size_t(std::max(f,0)),c.positions[0].size()-1)];pos[0]=k.x;pos[1]=k.y;pos[2]=k.z;return 1;},
+                // bhGetObjMotion (Motion.c:919): mkfP += ewP->frm_no / 65536.
+                // `frame` ist der 16.16-Bildzaehler der Spielerarbeit, kein
+                // Index; ohne die Division las der Zweig immer den letzten
+                // Schluessel und die Hoehensonde von kdd sah sofort das Ende
+                // der Motion.
+                [](void* u,unsigned m,int f,float pos[3])->int{auto& b=*static_cast<Host*>(u)->body;if(!b.has_motion(m))return 0;const auto& c=b.motion_clip(m);if(c.positions.empty()||c.positions[0].empty())return 0;const std::size_t key=std::size_t(std::min<int>(std::max(f/65536,0),int(c.positions[0].size())-1));const auto& k=c.positions[0][key];pos[0]=k.x;pos[1]=k.y;pos[2]=k.z;return 1;},
                 [](void* u,unsigned m)->unsigned{auto& b=*static_cast<Host*>(u)->body;return b.has_motion(m)?b.motion_frames(m):0;},
                 [](void* u,unsigned n,float out[3]){const auto& h=*static_cast<Host*>(u);if(n<h.nodes.size()){out[0]=h.nodes[n].value[12];out[1]=h.nodes[n].value[13];out[2]=h.nodes[n].value[14];}else{out[0]=h.at.x;out[1]=h.at.y;out[2]=h.at.z;}},
                 [](void* u,int floor,float x,float z,int special)->int{const auto& h=*static_cast<Host*>(u);return int(h.world->floor_sound(floor,x,z,special!=0));},
-                [](void* u,int sound){const auto& h=*static_cast<Host*>(u);h.audio->footstep(unsigned(sound),0,0);},
-                [](void* u,unsigned m,int f,float px,float py,float pz,int ay,unsigned n,float out[3]){auto& b=*static_cast<Host*>(u)->body;if(!b.has_motion(m)){out[0]=px;out[1]=py;out[2]=pz;return;}const auto nodes=b.script_nodes(b.pose(m,f,{px,py,pz},ay));if(n<nodes.size()){out[0]=nodes[n].value[12];out[1]=nodes[n].value[13];out[2]=nodes[n].value[14];}else{out[0]=px;out[1]=py;out[2]=pz;}},
+                // CallPlayerFootStepSeEx(FloorType,Type,Flag,0,&PlayerPos): Bank 2,
+                // Liste FootDef[FloorType] bzw. 5, Slot aus GetPlayerActionSeSlotNo.
+                // Typ 3 ist CallPlayerActionSe und traegt die SeNo als Liste.
+                // Abweichung von AudioMixer::footstep (Codex' Datei, nur gemeldet):
+                // dort 6/4+5 bzw. 14/15/16/17 statt SlotDef {11,12},{13,14},{15,16},
+                // und der floor>4-Riegel schliesst die Aktionsstimmen aus.  Der
+                // Originalaufruf geht deshalb direkt ueber play_room_sound.
+                // Nicht portiert: Pitch aus WalkPitchTbl/RunPitchTbl und
+                // PitchDelayTime -2 fuer Typ 2/3.
+                [](void* u,int sound,int type,int flag){auto& h=*static_cast<Host*>(u);
+                    if(flag==0)return; // ListNo = -1, ExPlaySe spielt nichts
+                    unsigned list,slot;
+                    if(type>=2){list=type==2?5u:unsigned(sound);slot=6u;}
+                    else{h.foot_switch=!h.foot_switch;list=unsigned(sound);slot=h.foot_switch?12u:11u;}
+                    if(!h.audio->play_room_sound(2u,list,slot))h.state->unsupported_services|=type>=2?RECVX_STAIR_UNBOUND_ACTION_SE:RECVX_STAIR_UNBOUND_FOOTSTEP;},
+                // bhCheckWater: der Originalaufruf traegt keine Fehlermeldung, ein
+                // fehlender Bereich ist einfach 0.  Ein Treffer ohne natives
+                // Wassergebiet kann nicht unterschieden werden; der Dienst ist
+                // deshalb gebunden, ohne einen unbound-Bit zu setzen.
+                [](void* u,const float position[3],float* top)->int{const auto& h=*static_cast<Host*>(u);return h.world->water_top({position[0],position[1],position[2]},*top)?1:0;},
+                [](void* u,const RECVX_STAIR_EFFECT* e){auto& h=*static_cast<Host*>(u);
+                    recvx::EffectSpawn spawn;
+                    spawn.flg=e->flg;spawn.id=e->id;spawn.type=e->type;spawn.flr_no=e->flr_no;spawn.mdlver=e->mdlver;
+                    spawn.position={e->px,e->py,e->pz};spawn.scale={e->sx,e->sy,e->sz};
+                    spawn.ax=e->ax;spawn.ay=e->ay;spawn.lkono=e->lkono;
+                    if(e->has_offset){spawn.has_offset=true;spawn.offset={e->offset[0],e->offset[1],e->offset[2]};}
+                    if(h.world->spawn_player_effect(spawn)<0)h.state->unsupported_services|=RECVX_STAIR_UNBOUND_EFFECT;},
+                [](void* u,int type,int pattern){auto& h=*static_cast<Host*>(u);h.vib_type=type;h.vib_pattern=pattern;h.state->unsupported_services|=RECVX_STAIR_UNBOUND_VIBRATION;},
+                [](void* u,int used){const auto& h=*static_cast<Host*>(u);if(*h.etc_idx>=0)(*h.kaidan)(*h.etc_idx,used!=0);},
+                [](void* u,float py)->int{const auto& h=*static_cast<Host*>(u);return h.world->floor_at({0.0f,py,0.0f});},
                 world->floor_heights().data(),int(inventory.player)};
             const bool running=recvx_stairs_tick(&stairs,&host)!=0;
-            if(stairs.unsupported_services)throw std::runtime_error("original step action reached an unbound water/effect/audio service");
+            // stflg/flg/st_flg sind die eine Spielerarbeit; der C-Teil haelt nur
+            // eine Sicht darauf und wird nach jedem Bild zurueckgeschrieben.
+            if(events){events->flags[14][0]=stairs.status;events->flags[13][0]=stairs.flg;events->flags[5][0]=stairs.st_flg;}
             world->player_stair_ground_state(stairs.status,stairs.mode0);
             actor.position={stairs.px,stairs.py,stairs.pz};actor.yaw=stairs.ay;if(player->has_motion(stairs.motion)){motion=stairs.motion;animation=stairs.frame;}
-            if(!running){world->clear_player_stair_ground_state();world->player_action=false;if(events)events->flags[5][0]&=~4u;if(stair_etc_marked>=0)mark_stair_etc(stair_etc_marked,false);stair_etc_marked=-1; /* bhClrUseKaidanFlag(plp) at the stair end (player.c:1737) */motion=42;animation=0;locomotion=false;}follow();};
-        // bhPlayerKaidanMotion (event.c 0xa4): the room script starts the same
-        // stair driver with the ETC area of bhSetUseKaidanFlag; the script flg
-        // (not the area prm0) selects descend. Areas beyond rom->etc_n live in
-        // sys->metcp and are not loaded by the native room, so those requests
-        // stay pending with their exact operands.
+            if(!running){world->clear_player_stair_ground_state();world->player_action=false;if(events)events->flags[5][0]&=~4u;if(stair_etc_marked>=0)mark_stair_etc(stair_etc_marked,false);stair_etc_marked=-1; /* bhClrUseKaidanFlag(plp) am Ende (player.c:1737) */locomotion=false;}follow();};
+        // bhPlayerKaidanMotion (event.c 0xa4 -> bhKaidanPlayerMotion): der
+        // Raumskript startet denselben Stufentreiber mit dem ATR-Satz
+        // rom->etcp[idx].  Der Skriptwert flg waehlt auf/ab, die Laufrichtung
+        // kommt aus attr&1 - nicht aus prm0.  ATR-Saetze jenseits rom->etc_n
+        // liegen in sys->metcp, das der native Raum nicht laedt; solche
+        // Anfragen bleiben mit ihren genauen Operanden offen.
         auto drain_script_stairs=[&](){
             if(script_stairs.empty())return;const auto requests=std::move(script_stairs);script_stairs.clear();
             for(const auto& request:requests){
@@ -497,15 +590,19 @@ int main(int argc,char** argv){
                 if(!runnable){
                     for(const auto& existing:events->pending_bindings)if(existing.opcode==request.opcode&&existing.offset==request.offset&&existing.task==request.task)goto recorded;
                     events->pending_bindings.push_back(request);recorded:;continue;}
-                recvx::Interaction area=events->interactions[idx];
-                area.type=1; // bhKaidanPlayerMotion always runs the kaidan cascade
-                area.parameters[0]=flg?1:0; // script flg selects descend, not the area prm0
+                const recvx::Interaction& area=events->interactions[idx];
+                const int action=flg?((area.attribute&1u)?21:15):((area.attribute&1u)?20:14);
                 stair_etc_marked=int(idx);mark_stair_etc(int(idx),true);
                 const auto condition=recvx::StatusPulse::condition(inventory.hp,false);const int dmlvl=condition>=3?2:condition>=1?1:0;
                 RECVX_STAIR_AREA native{std::uint8_t(area.flags),std::uint8_t(area.type),0,std::int8_t(area.floor),area.attribute,area.position.x,area.position.y,area.position.z,area.extent.x,area.extent.y,area.extent.z,std::uint8_t(area.parameters[0]),std::uint8_t(area.parameters[1]),std::uint8_t(area.parameters[2]),std::uint8_t(area.parameters[3])};
-                recvx_stairs_begin(&stairs,&native,world->floor_heights().data(),actor.position.x,actor.position.y,actor.position.z,actor.yaw,world->floor_at(actor.position),dmlvl,0);
+                stairs.status=events->flags[14][0];stairs.flg=events->flags[13][0];stairs.st_flg=events->flags[5][0];
+                recvx_stairs_begin(&stairs,&native,action,world->floor_heights().data(),actor.position.x,actor.position.y,actor.position.z,actor.yaw,world->floor_at(actor.position),dmlvl,inventory.weapon()<10?0:1);
+                // bhKaidanPlayerMotion setzt sys->st_flg 0x4 nicht; begin hat
+                // es fuer den hitchk-Pfad gesetzt, hier also wieder weg.
+                stairs.st_flg&=~4u;
+                events->flags[14][0]=stairs.status;events->flags[13][0]=stairs.flg;events->flags[5][0]=stairs.st_flg;
                 world->player_stair_ground_state(stairs.status,stairs.mode0);
-                world->player_action=true;events->flags[5][0]|=4;locomotion=false;
+                world->player_action=true;locomotion=false;
             }};
         // bhReturnTitle (system.c:2389): bhExitGame/bhInitSystem clear the whole SYS_WORK
         // (flags, inventory, retry copy) and tk_flg 0x300008 selects Adv_BioCvTitle Mode 0
@@ -585,6 +682,7 @@ int main(int argc,char** argv){
             if(locomotion){const auto from=actor.position;player->locomotion(actor,motion,animation,move,run,turn);if(world){actor.position=world->move_player(from,actor.position,move,run,turn);if(world->pushing()&&events)events->flags[5][0]|=4;if(move)world->player_footstep(*player);}}
             else{actor.yaw=(actor.yaw-turn*int(182.04445f*4.5f))&65535;advance();}follow();
         };
+        recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);
         auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}
         // Original enemy routines that were reached but are not bound yet.
         if(world&&!world->unbound_enemy_routines().empty()){std::cout<<"Enemy gaps: "<<world->unbound_enemy_routines().size()<<'\n';for(const auto& gap:world->unbound_enemy_routines())std::cout<<"  "<<gap<<'\n';}if(!args.state.empty()){if(fs::exists(args.state))throw std::runtime_error("state output already exists");std::ofstream out(args.state);if(!out)throw std::runtime_error("cannot create state output");out<<"{\n  \"debug_open\": "<<(debug.active()?"true":"false")<<", \"debug_selected\": "<<debug.selected()<<", \"debug_status\": "<<std::quoted(debug.status())<<", \"player_entry\": "<<args.player<<", \"player_owner\": "<<inventory.player<<", \"wireframe\": "<<(wireframe?"true":"false")<<",\n  \"title_active\": "<<(frontend.active()?"true":"false")<<", \"settings_active\": "<<(frontend.settings()?"true":"false")<<", \"settings_selected\": "<<frontend.selected()<<",\n  \"room\": "<<std::quoted(rooms.name(room_index))<<", \"room_changes\": "<<room_changes<<", \"door_active\": "<<(transition_pending?"true":"false")<<", \"door_ticks\": "<<door.ticks()<<", \"door_skipped\": "<<(door.skipped()?"true":"false")<<", \"door\": ";
@@ -600,16 +698,17 @@ int main(int argc,char** argv){
                  out<<"], \"shake\": "<<d.pru_type<<", \"shake_sounds\": "<<door_shake_sounds<<", \"shake_patterns\": "<<door_shake_patterns<<", \"nodes\": [";
                  for(unsigned i=0;i<d.nodes&&i<6;++i)out<<(i?",":"")<<"["<<d.objP[i].pos[0]<<","<<d.objP[i].pos[1]<<","<<d.objP[i].pos[2]<<","<<d.objP[i].ang[0]<<","<<d.objP[i].ang[1]<<","<<d.objP[i].ang[2]<<","<<d.objP[i].evalflags<<"]";
                  out<<"]}";}
-                out<<", \"yaw\": "<<actor.yaw<<",\n  \"combat_shots\": "<<combat.shots<<", \"combat_hits\": "<<combat.hits<<", \"combat_attacks\": "<<combat.attacks<<", \"weapon\": "<<inventory.weapon()<<", \"hp\": "<<inventory.hp<<", \"play_time\": "<<inventory.play_time<<", \"message_selection\": "<<(events?events->values[7]:0)<<", \"box_open\": "<<(box_menu.active()?"true":"false")<<", \"box_base\": "<<box_menu.base()<<", \"inventory_open\": "<<(menu.active?"true":"false")<<", \"files_open\": "<<(menu.files?"true":"false")<<", \"file_folder_open\": "<<(menu.files&&menu.file_list?"true":"false")<<", \"file_registers\": "<<(menu.file_folder.registers()?"true":"false")<<", \"file_number\": "<<menu.file_number<<", \"file_page\": "<<menu.file_page<<", \"file_pages\": "<<menu.file_pages()<<", \"file_flags\": "<<inventory.items[383]<<", \"main_cursor\": "<<menu.maincsr<<", \"menu_navigation\": "<<(menu.nav?"true":"false")<<", \"file_transition\": "<<(menu.file_transition?"true":"false")<<", \"file_scroll\": "<<menu.file_scroll<<", \"manual_read\": "<<(events&&events->flag(9,480)?"true":"false")<<", \"dialog_open\": "<<(dialog.active()?"true":"false")<<", \"dialog_index\": "<<dialog.index()<<",\n  \"items\": [";for(unsigned i=0;i<12;++i)out<<(i?",":"")<<inventory.slots()[i];out<<"], \"security_items\": [";for(unsigned i=192;i<224;++i)out<<(i>192?",":"")<<inventory.items[i];out<<"], \"security_items_2\": [";for(unsigned i=224;i<256;++i)out<<(i>224?",":"")<<inventory.items[i];out<<"], \"work_flags\": [";for(unsigned i=0;i<17;++i)out<<(i?",":"")<<(events?events->flags[i][0]:0);out<<"], \"item_flags\": [";for(unsigned i=0;i<32;++i)out<<(i?",":"")<<(events?events->flags[7][i]:0);out<<"], \"event_flags\": [";for(unsigned i=0;i<32;++i)out<<(i?",":"")<<(events?events->flags[1][i]:0);const auto pose=world?world->camera(scene,camera):camera;out<<"], \"camera_pose\": ["<<pose.position.x<<","<<pose.position.y<<","<<pose.position.z<<","<<pose.angles[0]<<","<<pose.angles[1]<<","<<pose.angles[2]<<","<<pose.distance<<","<<pose.perspective<<"], \"camera_transition\": "<<(world&&world->camera_transitioning()?"true":"false")<<", \"camera_clock\": "<<(world?world->camera_clock():0)<<", \"fixed_camera\": "<<(world&&world->fixed_camera?int(*world->fixed_camera):-1);out<<",\n  \"events\": [";if(events)for(unsigned i=0;i<events->dispatched.size();++i)out<<(i?",":"")<<events->dispatched[i];out<<"], \"pending_world_bindings\": "<<(events?events->pending_bindings.size():0)<<", \"blocked_commands\": "<<(events?events->errors.size():0)<<",\n  \"actor\": ["<<actor.position.x<<","<<actor.position.y<<","<<actor.position.z<<"], \"motion\": "<<motion<<", \"animation_frame\": "<<animation<<", \"player_hidden\": "<<(world&&world->player_hidden?"true":"false")<<", \"player_scripted\": "<<(world&&world->player_scripted?"true":"false")<<", \"cinematic\": "<<(events&&(events->flags[5][0]&4)?"true":"false")<<", \"event_camera\": "<<(world&&world->event_camera?int(world->event_camera_index):-1)<<", \"movie_active\": "<<(movie.active()?"true":"false")<<", \"movie_frame\": "<<movie.frame()<<", \"bgm_active\": "<<(audio.active(0)?"true":"false")<<", \"bgm_id\": "<<audio.current_bgm()<<", \"bgm_request\": "<<audio.bgm_request()<<", \"background_active\": ["<<audio.active(24)<<", "<<audio.active(25)<<", "<<audio.active(26)<<"], \"audio_played\": [";for(unsigned i=0;i<audio.played.size();++i)out<<(i?",":"")<<std::quoted(audio.played[i]);out<<"], \"audio_unavailable\": [";for(unsigned i=0;i<audio.unavailable.size();++i)out<<(i?",":"")<<std::quoted(audio.unavailable[i]);out<<"], \"event_tasks\": [";if(events){const auto tasks=events->task_states();for(unsigned i=0;i<tasks.size();++i){const auto& t=tasks[i];out<<(i?",":"")<<"{\"event\":"<<t.event<<",\"level\":"<<t.level<<",\"offset\":"<<t.offset<<",\"delay\":"<<t.delay<<",\"blocked\":"<<(t.blocked?"true":"false")<<"}";}}out<<"], \"event_sound_active\": [";for(unsigned slot=0;slot<5;++slot)out<<(slot?",":"")<<audio.active(12-slot);out<<"], \"effects\": [";if(world){bool first=true;for(unsigned i=0;const auto* e=world->effect_state(i);++i)if(recvx::supported_effect_sprite(e->id)){out<<(first?"":",")<<"{\"slot\":"<<i<<",\"id\":"<<e->id<<",\"type\":"<<e->type<<",\"texture\":"<<e->tex_id<<",\"atlas\":"<<e->ani_ct<<",\"phase\":"<<e->ct0<<",\"visible\":"<<(world->effect_visible(i)?"true":"false")<<"}";first=false;}}out<<"], \"enemies\": [";if(world){bool first=true;for(unsigned i=0;i<128;++i)if(const auto* e=world->state(1,i)){out<<(first?"":",")<<"{\"index\":"<<i<<",\"identity\":"<<e->identity<<",\"motion\":"<<e->motion<<",\"posed_motion\":"<<e->posed_motion()<<",\"hp\":"<<e->hp<<",\"hidden\":"<<(e->hidden?"true":"false")<<",\"inactive\":"<<(e->inactive?"true":"false")<<",\"scripted\":"<<(e->scripted?"true":"false")<<",\"position\":["<<e->transform.position.x<<","<<e->transform.position.y<<","<<e->transform.position.z<<"]}";first=false;}}out<<"], \"sequence_unavailable\": [";for(unsigned i=0;i<audio.sequence_unavailable.size();++i)out<<(i?",":"")<<std::quoted(audio.sequence_unavailable[i]);out<<"], \"gameover_active\": "<<(game_over.active()?"true":"false")<<", \"gameover_phase\": "<<game_over.phase()<<", \"gameover_count\": "<<game_over.count()<<", \"gameover_blasts\": "<<game_over.blasts()<<", \"retry_count\": "<<(retry_point?retry_point->save.retry_ct:0)<<", \"combat_target_right\": "<<int(combat.targets().right)<<", \"combat_target_left\": "<<int(combat.targets().left)<<", \"push\": ";if(world&&world->push_state()){const auto& p=*world->push_state();out<<"{\"active\":"<<(p.active?"true":"false")<<",\"phase\":"<<p.phase<<",\"contact\":"<<p.contact<<",\"wall\":"<<p.wall<<",\"unsupported\":"<<p.unsupported_services<<"}";}else out<<"null";out<<", \"push_objects\": [";if(world){bool first=true;for(unsigned i=4;i<256;++i)if(const auto* e=world->state(2,i);e&&(e->type&255)==1){out<<(first?"":",")<<"{\"index\":"<<i<<",\"position\":["<<e->transform.position.x<<","<<e->transform.position.y<<","<<e->transform.position.z<<"]}";first=false;}}out<<"], \"computer\": ";{const auto* cf=computer.frame();if(cf){out<<"{\"active\": "<<(computer.active()?"true":"false")<<", \"number\": "<<cf->number<<", \"md0\": "<<cf->com_md0<<", \"md1\": "<<cf->com_md1<<", \"flg\": "<<cf->com_flg<<", \"txflg\": "<<cf->txflg<<", \"lcflg\": "<<cf->lcflg<<", \"draws\": "<<cf->draw_count<<", \"draw_overflow\": "<<cf->draw_overflow<<", \"unknown_opcodes\": "<<cf->unknown_opcode<<", \"character_gaps\": "<<computer.character_gaps()<<", \"message_gaps\": "<<computer.message_gaps()<<", \"character\": "<<(cf->character.active?cf->character.chr_no:-1)<<", \"message\": "<<(cf->message_visible?cf->message_number:-1)<<", \"cursor\": ["<<cf->tx<<", "<<cf->ty<<"], \"key\": ["<<cf->kx<<", "<<cf->ky<<"], \"words\": [";out<<std::quoted(computer.words()[0])<<", "<<std::quoted(computer.words()[1]);out<<"], \"text\": [";const auto& rows=computer.text();for(std::size_t i=0;i<rows.size();++i)out<<(i?", ":"")<<std::quoted(rows[i]);out<<"]}";}else out<<"null";}out<<", \"pending_commands\": [";if(events)for(unsigned i=0;i<events->pending_bindings.size();++i){const auto& c=events->pending_bindings[i];out<<(i?",":"")<<"{\"opcode\":"<<c.opcode<<",\"event\":"<<c.event<<",\"offset\":"<<c.offset<<",\"bytes\":[";for(unsigned j=0;j<c.bytes.size();++j)out<<(j?",":"")<<unsigned(c.bytes[j]);out<<"]}";}out<<"]\n}\n";}};
+                out<<", \"render_clip\": ["<<image.last_clip()[0]<<","<<image.last_clip()[1]<<"]";
+                out<<", \"yaw\": "<<actor.yaw<<",\n  \"combat_shots\": "<<combat.shots<<", \"combat_hits\": "<<combat.hits<<", \"combat_attacks\": "<<combat.attacks<<", \"weapon\": "<<inventory.weapon()<<", \"hp\": "<<inventory.hp<<", \"play_time\": "<<inventory.play_time<<", \"message_selection\": "<<(events?events->values[7]:0)<<", \"box_open\": "<<(box_menu.active()?"true":"false")<<", \"box_base\": "<<box_menu.base()<<", \"inventory_open\": "<<(menu.active?"true":"false")<<", \"files_open\": "<<(menu.files?"true":"false")<<", \"file_folder_open\": "<<(menu.files&&menu.file_list?"true":"false")<<", \"file_registers\": "<<(menu.file_folder.registers()?"true":"false")<<", \"file_number\": "<<menu.file_number<<", \"file_page\": "<<menu.file_page<<", \"file_pages\": "<<menu.file_pages()<<", \"file_flags\": "<<inventory.items[383]<<", \"main_cursor\": "<<menu.maincsr<<", \"menu_navigation\": "<<(menu.nav?"true":"false")<<", \"file_transition\": "<<(menu.file_transition?"true":"false")<<", \"file_scroll\": "<<menu.file_scroll<<", \"manual_read\": "<<(events&&events->flag(9,480)?"true":"false")<<", \"dialog_open\": "<<(dialog.active()?"true":"false")<<", \"dialog_index\": "<<dialog.index()<<",\n  \"items\": [";for(unsigned i=0;i<12;++i)out<<(i?",":"")<<inventory.slots()[i];out<<"], \"security_items\": [";for(unsigned i=192;i<224;++i)out<<(i>192?",":"")<<inventory.items[i];out<<"], \"security_items_2\": [";for(unsigned i=224;i<256;++i)out<<(i>224?",":"")<<inventory.items[i];out<<"], \"work_flags\": [";for(unsigned i=0;i<17;++i)out<<(i?",":"")<<(events?events->flags[i][0]:0);out<<"], \"item_flags\": [";for(unsigned i=0;i<32;++i)out<<(i?",":"")<<(events?events->flags[7][i]:0);out<<"], \"event_flags\": [";for(unsigned i=0;i<32;++i)out<<(i?",":"")<<(events?events->flags[1][i]:0);const auto pose=world?world->camera(scene,camera):camera;out<<"], \"camera_pose\": ["<<pose.position.x<<","<<pose.position.y<<","<<pose.position.z<<","<<pose.angles[0]<<","<<pose.angles[1]<<","<<pose.angles[2]<<","<<pose.distance<<","<<pose.perspective<<"], \"camera_transition\": "<<(world&&world->camera_transitioning()?"true":"false")<<", \"camera_clock\": "<<(world?world->camera_clock():0)<<", \"fixed_camera\": "<<(world&&world->fixed_camera?int(*world->fixed_camera):-1);out<<",\n  \"events\": [";if(events)for(unsigned i=0;i<events->dispatched.size();++i)out<<(i?",":"")<<events->dispatched[i];out<<"], \"pending_world_bindings\": "<<(events?events->pending_bindings.size():0)<<", \"blocked_commands\": "<<(events?events->errors.size():0)<<",\n  \"actor\": ["<<actor.position.x<<","<<actor.position.y<<","<<actor.position.z<<"], \"motion\": "<<motion<<", \"animation_frame\": "<<animation<<", \"player_hidden\": "<<(world&&world->player_hidden?"true":"false")<<", \"player_scripted\": "<<(world&&world->player_scripted?"true":"false")<<", \"cinematic\": "<<(events&&(events->flags[5][0]&4)?"true":"false")<<", \"event_camera\": "<<(world&&world->event_camera?int(world->event_camera_index):-1)<<", \"movie_active\": "<<(movie.active()?"true":"false")<<", \"movie_frame\": "<<movie.frame()<<", \"bgm_active\": "<<(audio.active(0)?"true":"false")<<", \"bgm_id\": "<<audio.current_bgm()<<", \"bgm_request\": "<<audio.bgm_request()<<", \"background_active\": ["<<audio.active(24)<<", "<<audio.active(25)<<", "<<audio.active(26)<<"], \"audio_played\": [";for(unsigned i=0;i<audio.played.size();++i)out<<(i?",":"")<<std::quoted(audio.played[i]);out<<"], \"audio_unavailable\": [";for(unsigned i=0;i<audio.unavailable.size();++i)out<<(i?",":"")<<std::quoted(audio.unavailable[i]);out<<"], \"event_tasks\": [";if(events){const auto tasks=events->task_states();for(unsigned i=0;i<tasks.size();++i){const auto& t=tasks[i];out<<(i?",":"")<<"{\"event\":"<<t.event<<",\"level\":"<<t.level<<",\"offset\":"<<t.offset<<",\"delay\":"<<t.delay<<",\"blocked\":"<<(t.blocked?"true":"false")<<"}";}}out<<"], \"event_sound_active\": [";for(unsigned slot=0;slot<5;++slot)out<<(slot?",":"")<<audio.active(12-slot);out<<"], \"effects\": [";if(world){bool first=true;for(unsigned i=0;const auto* e=world->effect_state(i);++i)if(recvx::supported_effect_sprite(e->id)){out<<(first?"":",")<<"{\"slot\":"<<i<<",\"id\":"<<e->id<<",\"type\":"<<e->type<<",\"texture\":"<<e->tex_id<<",\"atlas\":"<<e->ani_ct<<",\"phase\":"<<e->ct0<<",\"visible\":"<<(world->effect_visible(i)?"true":"false")<<"}";first=false;}}out<<"], \"enemies\": [";if(world){bool first=true;for(unsigned i=0;i<128;++i)if(const auto* e=world->state(1,i)){out<<(first?"":",")<<"{\"index\":"<<i<<",\"identity\":"<<e->identity<<",\"motion\":"<<e->motion<<",\"posed_motion\":"<<e->posed_motion()<<",\"hp\":"<<e->hp<<",\"hidden\":"<<(e->hidden?"true":"false")<<",\"inactive\":"<<(e->inactive?"true":"false")<<",\"scripted\":"<<(e->scripted?"true":"false")<<",\"position\":["<<e->transform.position.x<<","<<e->transform.position.y<<","<<e->transform.position.z<<"]}";first=false;}}out<<"], \"sequence_unavailable\": [";for(unsigned i=0;i<audio.sequence_unavailable.size();++i)out<<(i?",":"")<<std::quoted(audio.sequence_unavailable[i]);out<<"], \"gameover_active\": "<<(game_over.active()?"true":"false")<<", \"gameover_phase\": "<<game_over.phase()<<", \"gameover_count\": "<<game_over.count()<<", \"gameover_blasts\": "<<game_over.blasts()<<", \"retry_count\": "<<(retry_point?retry_point->save.retry_ct:0)<<", \"combat_target_right\": "<<int(combat.targets().right)<<", \"combat_target_left\": "<<int(combat.targets().left)<<", \"stairs\": ";if(stairs.active||stairs.mode2){out<<"{\"active\":"<<(stairs.active?"true":"false")<<",\"mode0\":"<<stairs.mode0<<",\"mode2\":"<<stairs.mode2<<",\"mode3\":"<<stairs.mode3<<",\"motion\":"<<stairs.motion<<",\"frame\":"<<stairs.frame<<",\"floor\":"<<stairs.floor<<",\"ay\":"<<stairs.ay<<",\"status\":"<<stairs.status<<",\"flg\":"<<stairs.flg<<",\"flg2\":"<<stairs.flg2<<",\"st_flg\":"<<stairs.st_flg<<",\"etc_idx\":"<<stair_etc_marked<<",\"area_type\":"<<unsigned(stairs.area.type)<<",\"area_valid\":"<<stairs.area_valid<<",\"unsupported\":"<<stairs.unsupported_services<<"}";}else out<<"null";
+                 out<<", \"hair\": ";if(hair_variant!=RECVX_HAIR_VARIANT_NONE){out<<"{\"variant\":"<<unsigned(hair_variant)<<",\"mode0\":"<<hair.mode0<<",\"cursor\":"<<hair.ct0<<",\"fall\":"<<hair.spd<<",\"velocity\":["<<hair.hair.spx<<","<<hair.hair.spy<<","<<hair.hair.spz<<"],\"filtered\":["<<hair.xn<<","<<hair.yn<<","<<hair.zn<<"],\"root\":["<<hair.hair.ox<<","<<hair.hair.oy<<","<<hair.hair.oz<<"],\"yaw_sum\":"<<hair.hair.ay<<",\"angles\":[";for(unsigned i=0;i<RECVX_HAIR_SEGMENTS;++i)out<<(i?",":"")<<"["<<hair.angles[i][0]<<","<<hair.angles[i][1]<<"]";out<<"],\"segments\":[";for(unsigned i=0;i<RECVX_HAIR_SEGMENTS;++i)out<<(i?",":"")<<"["<<hair.pv[i][0]<<","<<hair.pv[i][1]<<","<<hair.pv[i][2]<<"]";out<<"]}";}else out<<"null";
+                 out<<", \"push\": ";if(world&&world->push_state()){const auto& p=*world->push_state();out<<"{\"active\":"<<(p.active?"true":"false")<<",\"phase\":"<<p.phase<<",\"contact\":"<<p.contact<<",\"wall\":"<<p.wall<<",\"unsupported\":"<<p.unsupported_services<<"}";}else out<<"null";out<<", \"push_objects\": [";if(world){bool first=true;for(unsigned i=4;i<256;++i)if(const auto* e=world->state(2,i);e&&(e->type&255)==1){out<<(first?"":",")<<"{\"index\":"<<i<<",\"position\":["<<e->transform.position.x<<","<<e->transform.position.y<<","<<e->transform.position.z<<"]}";first=false;}}out<<"], \"computer\": ";{const auto* cf=computer.frame();if(cf){out<<"{\"active\": "<<(computer.active()?"true":"false")<<", \"number\": "<<cf->number<<", \"md0\": "<<cf->com_md0<<", \"md1\": "<<cf->com_md1<<", \"flg\": "<<cf->com_flg<<", \"txflg\": "<<cf->txflg<<", \"lcflg\": "<<cf->lcflg<<", \"draws\": "<<cf->draw_count<<", \"draw_overflow\": "<<cf->draw_overflow<<", \"unknown_opcodes\": "<<cf->unknown_opcode<<", \"character_gaps\": "<<computer.character_gaps()<<", \"message_gaps\": "<<computer.message_gaps()<<", \"character\": "<<(cf->character.active?cf->character.chr_no:-1)<<", \"message\": "<<(cf->message_visible?cf->message_number:-1)<<", \"cursor\": ["<<cf->tx<<", "<<cf->ty<<"], \"key\": ["<<cf->kx<<", "<<cf->ky<<"], \"words\": [";out<<std::quoted(computer.words()[0])<<", "<<std::quoted(computer.words()[1]);out<<"], \"text\": [";const auto& rows=computer.text();for(std::size_t i=0;i<rows.size();++i)out<<(i?", ":"")<<std::quoted(rows[i]);out<<"]}";}else out<<"null";}out<<", \"pending_commands\": [";if(events)for(unsigned i=0;i<events->pending_bindings.size();++i){const auto& c=events->pending_bindings[i];out<<(i?",":"")<<"{\"opcode\":"<<c.opcode<<",\"event\":"<<c.event<<",\"offset\":"<<c.offset<<",\"bytes\":[";for(unsigned j=0;j<c.bytes.size();++j)out<<(j?",":"")<<unsigned(c.bytes[j]);out<<"]}";}out<<"]\n}\n";}};
         // The camera mod only owns the view while the player has free control.
         // njClipZ per camera: bhChangeViewClip for event cameras, bhChangeViewClipRM for room cuts.
         auto view_camera=[&](){auto view=world?world->camera(scene,camera):camera;
-            if(events&&world&&world->event_camera){const auto clip=recvx::event_view_clip(events->values[0],events->values[1],events->values[21],world->event_camera_index);view.clip_near=clip.near;view.clip_far=clip.far;}
-            else if(events){const auto clip=recvx::room_view_clip(events->values[0],events->values[1],world&&world->fixed_camera?*world->fixed_camera:unsigned(camera_index));view.clip_near=clip.near;view.clip_far=clip.far;}
+            if(events&&world){const auto clip=world->camera_clip();view.clip_near=clip.near;view.clip_far=clip.far;}
             auto out=third_person.view(view);if(third_person.active())out.clip_near=1.0f; /* host chase camera keeps the Ninja game minimum */
             return out;};
         auto third_person_tick=[&](){third_person.tick(actor,{!args.preview&&!frontend.active()&&!transition_pending&&bool(player)&&!movie.active()&&!(world&&(world->event_camera||world->fixed_camera||world->player_scripted||world->player_hidden))&&!(events&&(events->flags[5][0]&4)),combat.aiming()},world.get());};
-        recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);
         frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());};
         bool pause_active=false;
         auto pause_allowed=[&]{return world&&!frontend.active()&&!game_over.active()&&!debug.active()&&!transition_pending&&!computer.active()&&!menu.active&&!dialog.active()&&!movie.active()&&!stairs.active&&!world->player_scripted&&!world->player_hidden&&!(events&&(events->flags[5][0]&4));};
@@ -622,7 +721,7 @@ int main(int argc,char** argv){
         const auto start=std::chrono::steady_clock::now();
         if(args.headless){
             const int frames=args.frames?args.frames:1;
-            for(int i=0;i<frames;++i){replay_input(unsigned(i));update_pad(replay_pad);if(game_over_tick()){audio.mix();if(i==frames-1)draw(unsigned(i));continue;}if(debug.active()){if(i==frames-1)draw(unsigned(i));continue;}if(!frontend.active())gameplay_input.apply({});else if(ui)frontend_command(frontend.apply({}));if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;hair_step();if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio.mix();locomote(replay_move,replay_run,replay_turn);third_person_tick();if(args.validate_poses)compose();if(i==frames-1)draw(unsigned(i));if(frontend_quit)break;}
+            for(int i=0;i<frames;++i){replay_input(unsigned(i));update_pad(replay_pad);if(game_over_tick()){audio.mix();if(i==frames-1)draw(unsigned(i));continue;}if(debug.active()){if(i==frames-1)draw(unsigned(i));continue;}if(!frontend.active())gameplay_input.apply({});else if(ui)frontend_command(frontend.apply({}));if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio.mix();locomote(replay_move,replay_run,replay_turn);hair_step(); /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp) */third_person_tick();if(args.validate_poses)compose();if(i==frames-1)draw(unsigned(i));if(frontend_quit)break;}
             if(!args.screenshot.empty())image.save_bmp(args.screenshot);
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
             report();return events&&!events->errors.empty()?1:0;
@@ -712,9 +811,9 @@ int main(int argc,char** argv){
                 if(debug.active()){if(audio_device)SDL_PauseAudioDevice(audio_device,1);continue;}
                 if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */
                 if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}
-                if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;hair_step();if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
+                if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
                 if(!args.preview&&args.replay.empty())combat_input={physical.down(recvx::Action::Aim),physical.down(recvx::Action::Attack)||physical.hit(recvx::Action::Attack),physical.turn(),physical.move(),physical.hit(recvx::Action::NextTarget)};
-                locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());third_person_tick();if(args.validate_poses)compose();
+                locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());hair_step(); /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp) */third_person_tick();if(args.validate_poses)compose();
             }
             if(render_dirty){draw(input_tick,devices.controllers());++rendered_frames;render_dirty=false;
             sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);}

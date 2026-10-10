@@ -119,6 +119,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     else{std::fill(pixels_.begin(),pixels_.end(),scene.background);std::fill(depth_.begin(),depth_.end(),0.0f);}
     NJS_MATRIX view;std::copy_n(matrix,16,view);
     near=std::max(near,0.001f);
+    last_clip_={{near,far}};
     std::vector<Setup> setups;setups.reserve(scene.triangles.size());
     for(const auto& triangle:scene.triangles){
         // bhCkFlg numbers bits from the most significant bit.

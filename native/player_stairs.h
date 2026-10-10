@@ -5,25 +5,91 @@ extern "C" {
 #endif
 // Original ATR_WORK etc record (types.h, 0x24 bytes) of a stair/ladder area.
 typedef struct {unsigned char flg,type,id;signed char flr_no;unsigned attr;float px,py,pz,w,h,d;unsigned char prm0,prm1,prm2,prm3;} RECVX_STAIR_AREA;
-// Host services for the original routines (bhGetObjMotion, owP world nodes, foot sounds).
+// One bhSetEffect/bhSetEffectTb request. The host owns the effect slots.
+typedef struct {
+    unsigned flg,id,type,mdlver;
+    int flr_no;
+    float px,py,pz;
+    float sx,sy,sz;
+    int ax,ay,az,lkono;
+    int has_offset;
+    float offset[3];
+} RECVX_STAIR_EFFECT;
+// Host services for the original routines (bhGetObjMotion, owP world nodes,
+// foot sounds, bhCheckWater, bhSetEffect, vibration, kaidan flag, floors).
 typedef struct {
     void* user;
-    int (*motion_root)(void* user,unsigned motion,int frame,float pos[3]); // key of object 0, 0 when the motion has none
+    // bhGetObjMotion(ewP, 0, pos, ang): object 0's key at `frame` (16.16) of
+    // `motion`. 0 when the motion has no such key; the caller then zeroes pos.
+    int (*motion_root)(void* user,unsigned motion,int frame,float pos[3]);
     unsigned (*motion_frames)(void* user,unsigned motion);
     void (*node_position)(void* user,unsigned node,float out[3]);           // plp->mlwP->owP[node].mtx[12..14]
     // bhCheckFloorSound scans room flrp followed by bhObj001's mflrp; the
     // host receives its exact query operands rather than a synthesized floor.
     int (*floor_sound)(void* user,int floor,float x,float z,int special);
-    void (*footstep)(void* user,int sound);                                    // CallPlayerFootStepSe
-    // World position of `node` for motion/frame at (px,py,pz,ay): bhCalcFixOffset with the new objP pose.
-    void (*pose_node)(void* user,unsigned motion,int frame,float px,float py,float pz,int ay,unsigned node,float out[3]);
-    const float* grand;                                                       // rom->grand[32]
+    // CallPlayerFootStepSeEx(list, type, flag, 0, &PlayerPos).
+    void (*footstep)(void* user,int sound,int type,int flag);
+    // bhCheckWater: 1 when the probe is inside an original type-3 water area
+    // with prm0 == 1; `top` then receives fp->py + fp->h.
+    int (*water)(void* user,const float position[3],float* top);
+    void (*effect)(void* user,const RECVX_STAIR_EFFECT* effect);
+    void (*vibration)(void* user,int type,int pattern);                      // StartVibrationEx
+    void (*kaidan_flag)(void* user,int used);                                // bhSetUseKaidanFlag/bhClrUseKaidanFlag
+    int (*floor_num)(void* user,float py);                                   // bhCheckFloorNum
+    const float* grand;                                                      // rom->grand[32]
     int ply_id;
 } RECVX_STAIR_HOST;
-typedef struct {int active;float px,py,pz;int ay;unsigned motion;int frame;int floor;unsigned unsupported_services,status;int mode0;} RECVX_STAIR_STATE;
-// bhCheckExmAtari type 1: starts kdu/kdd (stairs, attr&1 == 0) or hsu/hsd (ladders, attr&1).
-int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,const float* grand,float px,float py,float pz,int ay,int floor,int dmlvl,int wpntp);
-// One original 30-Hz player frame: action routine, then bhSetMotion's frame advance.
+// Bits of unsupported_services: an original branch reached a service with no
+// native counterpart. Reported by the runtime, never silently dropped.
+#define RECVX_STAIR_UNBOUND_EFFECT      0x0001u // effect id outside the native effect pool
+#define RECVX_STAIR_UNBOUND_EFFECT_OFF  0x0002u // bhSetEffect(108,...) reads past owP[0].mtx[16]
+#define RECVX_STAIR_UNBOUND_VIBRATION   0x0004u // StartVibrationEx has no driver
+#define RECVX_STAIR_UNBOUND_WATER       0x0008u // bhCheckWater found no native water area
+#define RECVX_STAIR_UNBOUND_FOOTSTEP    0x0010u // CallPlayerFootStepSe list not playable
+#define RECVX_STAIR_UNBOUND_ACTION_SE   0x0020u // CallPlayerActionSe 522/523 not playable
+#define RECVX_STAIR_UNBOUND_MOTION      0x0040u // a requested motion is not in the native asset
+#define RECVX_STAIR_UNBOUND_HOKAN       0x0080u // SetMtnNormalHokan blend has no native owner
+#define RECVX_STAIR_UNBOUND_HEADWORK    0x0100u // EXP1_I(0) head-work flags have no native owner
+#define RECVX_STAIR_UNBOUND_MTN_ATTR    0x0200u // per-frame mtn_attr has no native consumer
+// The running action state. `status` is plp->stflg, `flg`/`flg2` are plp->flg/
+// flg2; the runtime seeds flg/status from the live player work before begin and
+// writes them back after every tick, so this stays a view of the one native
+// player work rather than a second one.
+typedef struct {
+    int active;
+    float px,py,pz;
+    int ay;
+    int ax,az;                    // plp->ax / plp->az (body pitch/roll); dnu hands
+                                  // (POINT*)&plp->px to bhSetEffect, whose
+                                  // ox/oy/oz are exactly these three angles
+    int frm_mode;                 // plp->frm_mode (bhSetMotion reverse branch)
+    unsigned motion;              // plp->mtn_no
+    int frame;                    // plp->frm_no, 16.16
+    int floor;                    // plp->flr_no
+    unsigned unsupported_services;
+    unsigned status;              // plp->stflg
+    int mode0;
+    unsigned flg,flg2;            // plp->flg / plp->flg2
+    int mode2,mode3;              // action routine (14..21) and its sub state
+    int mtn_add,mtn_md,mtn_tp;
+    int hokan_rate,hokan_count;
+    int ayp;
+    int ct0,ct1,ct2,ct3;
+    float spd,rtspd,yn,kdn_py,arp;
+    int kdn_fr,floor_b,flr_snd;
+    int wpntp,dmlvl,ply_id;
+    unsigned st_flg;             // sys->st_flg bits this action maintains (0x4)
+    RECVX_STAIR_AREA area;        // htp: the area bhCheckExmAtari selected
+    int area_valid;
+} RECVX_STAIR_STATE;
+// hitchk.c bhCheckExmAtari: starts one of the six original step actions.
+// `action` is the mode2 the caller selected (14 kdu, 15 kdd, 16 dnu, 17 dnd,
+// 20 hsu, 21 hsd). The caller has already applied the probe table (type 1 at
+// 0.75, type 2 at 4.5 then 6.0/9.1) and bhSetUseKaidanFlag.
+int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,int action,const float* grand,float px,float py,float pz,int ay,int floor,int dmlvl,int wpntp);
+// One original 30-Hz player frame: the whole action routine, then bhSetMotion's
+// frame advance and the plp->flg 0x400000 last-frame update. Returns 0 on the
+// frame whose termination block handed the player back.
 int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host);
 #ifdef __cplusplus
 }

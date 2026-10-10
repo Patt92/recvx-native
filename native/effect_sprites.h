@@ -21,7 +21,7 @@ struct EffectSprite {
     unsigned char* exp0=nullptr;
     bool flame_compact_uv=false; // bhEff009 latches its UV bank at initialization.
 };
-// Globals read by the original procedures (sys->st_flg/pt_flg, plp->flg/stflg/mdflg).
+// Read-only per-pass values from native owners; never persisted as a sys/plp work.
 struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,player_mdflg=0,cb_flg=0,sp_flg=8,yk_ct=0;};
 void set_effect_context(const EffectContext& context);
 void set_effect_walls(const std::vector<CollisionWall>* walls,float room_height);
@@ -48,7 +48,7 @@ EffectOutput take_effect_output();
 std::size_t common_effect_textures_offset(const std::vector<std::uint8_t>& system_entry);
 // sys->ef_tn: first texture of each ef_info category (bhDrawTrsEffect3D uses ef_tn[tex_id]+ani_ct).
 std::vector<std::pair<unsigned,unsigned>> common_effect_categories(); // {first texture, frames}
-// Runs the original procedure; `queued` reports whether it entered sys->ef_trs this frame
+// Runs the independent native procedure; `queued` reports whether it entered the translucent list this frame
 // (bhDrawTrsEffect3D only draws queued work).
 bool step_effect_sprite(EffectSprite& sprite,bool* queued=nullptr);
 // Per-pass view of authoritative native flags, not a stored sys/player copy.

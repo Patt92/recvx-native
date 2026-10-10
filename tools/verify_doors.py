@@ -73,23 +73,38 @@ def main():
             assert not value['blocked_commands'], (name, 'blocked event commands')
             return value
 
+        # --- the fade ramp of the demo ----------------------------------
+        # The packet fades out over its first ramp and then holds for a long
+        # wait before the second one, so this sample sits inside the ramp:
+        # FadeProc1 clears status 0x100 for the whole hold.
+        ramp = run('ramp', 20)
+        assert ramp['door_active'], ('ramp', 'the DoorCall started no door demo')
+        assert ramp['door_ticks'] >= 10, ('ramp', 'the demo finished in a handful of passes',
+                                         ramp['door_ticks'])
+        assert not ramp['door_skipped'], ('ramp', 'the demo reported a skip')
+        # FadeProc1 is running, so the fade status is up and its rate is inside
+        # the open ramp the parameter block walks through.
+        assert ramp['door']['status'] & 0x100, ('ramp', 'the fade status was never raised')
+        assert 0 < ramp['door']['fade_rate'] < 1, ('ramp', 'the fade rate stands outside its ramp',
+                                                   ramp['door']['fade_rate'])
+        # The hold after the ramp has not ended, so the second group of sound
+        # requests is still held back.
+        assert not ramp['door']['status'] & 0x20, ('ramp', 'the fade released the closing sounds early')
+
         # --- the demo while it runs -------------------------------------
         running = run('running', 60)
         assert running['door_active'], ('running', 'the DoorCall started no door demo')
-        assert running['door_ticks'] > 20, ('running', 'the demo finished in a handful of passes',
-                                            running['door_ticks'])
+        assert running['door_ticks'] > 40, ('running', 'the demo finished in a handful of passes',
+                                           running['door_ticks'])
         assert running['room'] == 'RM_0020.RDX', ('running', 'the room changed before the demo ended')
         assert not running['door_skipped'], ('running', 'the demo reported a skip')
         state = running['door']
-        # FadeProc1 is running, so the fade status is up and its rate is in the
-        # open interval the parameter block walks through.
-        assert state['status'] & 0x100, ('running', 'the fade status was never raised')
-        assert 0 < state['fade_rate'] <= 1, ('running', 'the fade rate stands outside its ramp',
-                                             state['fade_rate'])
+        # The fade out is over and the demo is holding before the fade back in.
+        assert not state['status'] & 0x100, ('running', 'the fade out never ended')
+        assert state['status'] & 0x200, ('running', 'the door stopped being drawn')
         # ViewProc has moved the camera away from the origin, and the door
         # model is on screen.
         assert state['camera'][:3] != [0, 0, 0], ('running', 'the camera never left the origin')
-        assert state['status'] & 0x200, ('running', 'the door model is not being drawn')
         # LightProc1 put its ambient in and switched its own point lights on.
         assert state['light'] == 1, ('running', 'the packet did not select LightProc1', state['light'])
         assert state['light_on'], ('running', 'the light procedure never ran')

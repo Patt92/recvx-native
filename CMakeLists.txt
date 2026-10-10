@@ -54,8 +54,8 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # tools/generate_player_stairs.py ist Quarantäne (Policy 2026-10-09): die
 # Treppen-/Leiter-/Stufenaktionen fehlen bis zur nativen Neubestimmung, siehe
 # native/player_stairs.c.
-# tools/generate_view_clip.py ist Quarantäne (Policy 2026-10-09): der Clip-
-# Bereich fehlt bis zur nativen Neubestimmung, siehe native/view_clip.cpp.
+# tools/generate_view_clip.py ist Quarantäne (Policy 2026-10-09): die Clip-
+# Bereiche sind jetzt direkt aus event.c in native/view_clip.cpp übernommen.
 # tools/generate_targeting.py ist Quarantäne (Policy 2026-10-09): die
 # Zielaufschaltung und die Armwinkel fehlen bis zur nativen Neubestimmung,
 # siehe native/targeting.cpp.
@@ -271,6 +271,9 @@ if(BUILD_TESTING)
     add_test(NAME door_transition COMMAND recvx-door-tests)
   endif()
   add_executable(recvx-collision-tests tests/native/collision_test.cpp)
+  add_executable(recvx-item-box-object-tests tests/native/item_box_object_test.cpp)
+  target_link_libraries(recvx-item-box-object-tests PRIVATE recvx_game)
+  add_test(NAME item_box_object COMMAND recvx-item-box-object-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   target_link_libraries(recvx-collision-tests PRIVATE recvx_game)
   add_test(NAME wall_collision COMMAND recvx-collision-tests)
   add_executable(recvx-line-reflection-tests tests/native/line_reflection_test.cpp)
@@ -384,6 +387,11 @@ if(BUILD_TESTING)
   add_executable(recvx-continuity-tests tests/native/continuity_test.cpp)
   target_link_libraries(recvx-continuity-tests PRIVATE recvx_game)
   add_test(NAME core_continuity COMMAND recvx-continuity-tests)
+
+  # Haarkette des angehaengten Spielerobjekts obwp[2] (bhObjClpn/bhCalcHair).
+  add_executable(recvx-player-hair-tests tests/native/player_hair_test.cpp)
+  target_link_libraries(recvx-player-hair-tests PRIVATE recvx_game)
+  add_test(NAME player_hair COMMAND recvx-player-hair-tests)
 endif()
 
 # Original crate/player push state and Motion.c sampling.

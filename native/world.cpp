@@ -302,6 +302,18 @@ unsigned RoomWorld::floor_sound(int floor,float x,float z,bool special)const{
     return sound;
 }
 unsigned RoomWorld::floor_sound(NJS_POINT3 position,bool special)const{return floor_sound(floor_at(position),position.x,position.z,special);}
+bool RoomWorld::water_top(NJS_POINT3 position,float& top)const{
+    // bhCheckWater walks rom->flrp and then sys->mflrp in that order and takes
+    // the first containing area; FloorSound::sound is the record's prm0, the
+    // byte the original compares against 1.
+    for(const auto& record:floor_sounds_){const auto& a=record.area;if(!(a.flags&1)||a.type!=3||record.sound!=1)continue;
+        if(position.x<a.position.x||position.x>a.position.x+a.extent.x||position.z<a.position.z||position.z>a.position.z+a.extent.z||position.y<a.position.y||position.y>a.position.y+a.extent.y)continue;
+        top=a.position.y+a.extent.y;return true;}
+    if(push_)for(const auto& a:push_->floors()){if(!(a.flg&1)||a.type!=3||a.prm0!=1)continue;
+        if(position.x<a.px||position.x>a.px+a.w||position.z<a.pz||position.z>a.pz+a.d||position.y<a.py||position.y>a.py+a.h)continue;
+        top=a.py+a.h;return true;}
+    return false;
+}
 void RoomWorld::player_footstep(const PlayerAsset& player){
     // Claire's original PlFootSnd: walk 10/28, run 8/18, backstep 0/16.
     // Use the current animation frame and original ankle matrices, not a timer.
@@ -476,8 +488,8 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(op==0x8f){if(!v.u8(2))e.face_flags|=16;else e.face_flags&=~16u;}
         if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;}
         if(op==0x91){if(!v.u8(2))e.face_flags|=2;else e.face_flags&=~2u;}return true;}
-    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;return true;}event_camera_index=v.u8(2);if(event_camera_index>=event_cameras_.size())throw std::runtime_error("event camera outside table");event_camera_key_=v.u8(3);if(event_camera_key_>=event_cameras_[event_camera_index].keys.size())throw std::runtime_error("event camera key outside table");event_camera_clock_=0;event_camera_finished_=false;event_camera_pose_=event_cameras_[event_camera_index].keys[event_camera_key_].camera;event_camera=true;return true;}
-    if(op==0x2a){event_camera=false;const auto mode=v.u8(1);if(mode==0){fixed_camera=v.u8(2);active_camera_.reset(room_cameras_.at(*fixed_camera),*fixed_camera);}else if(mode==1)fixed_camera.reset();else throw std::runtime_error("invalid fixed camera mode");return true;}
+    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;restore_camera_clip_=true;return true;}event_camera_index=v.u8(2);if(event_camera_index>=event_cameras_.size())throw std::runtime_error("event camera outside table");event_camera_key_=v.u8(3);if(event_camera_key_>=event_cameras_[event_camera_index].keys.size())throw std::runtime_error("event camera key outside table");event_camera_clock_=0;event_camera_finished_=false;event_camera_pose_=event_cameras_[event_camera_index].keys[event_camera_key_].camera;event_camera=true;restore_camera_clip_=false;if(collision_events_){const auto& e=*collision_events_;installed_clip_=event_view_clip(e.values[0],e.values[1],e.values[21],event_camera_index,e.flags[12][0]);}return true;}
+    if(op==0x2a){event_camera=false;const auto mode=v.u8(1);if(mode==0){fixed_camera=v.u8(2);active_camera_.reset(room_cameras_.at(*fixed_camera),*fixed_camera);if(collision_events_)initialize_camera_clip(clip_cut_.value_or(collision_events_->values[2]));}else if(mode==1)fixed_camera.reset();else throw std::runtime_error("invalid fixed camera mode");return true;}
     if(op==0x5b){event_camera=false;fixed_camera.reset();camera_force_=true;return true;}
     // effect.c bhDeleteYakkyou: release enabled shell works (IDs 0 and 7).
     if(op==0x6b){for(auto& work:sprites_)if((work.sprite.flg&1)&&(work.sprite.id==0||work.sprite.id==7)){work.sprite.flg=0;work.queued=false;}return true;}
@@ -887,7 +899,23 @@ NJS_POINT3 RoomWorld::link_point(unsigned kind,unsigned index,unsigned node,NJS_
     auto matrix=link_matrix(kind,index,node);if(!matrix)return offset;NJS_POINT3 out;njCalcPoint(&matrix->value,&offset,&out);return out;
 }
 
+void RoomWorld::initialize_camera_clip(unsigned cut){
+    clip_cut_=cut;
+    if(collision_events_&&(collision_events_->flags[12][0]&0x200u)){
+        room_clip_=room_view_clip(collision_events_->values[0],collision_events_->values[1],cut);
+        installed_clip_=room_clip_;
+    }
+}
 void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking){
+    // bhCheckCut invokes bhSetCut only on a new cut or forced return.
+    // bhSetFixedCut's clip invocation uses cam.ncut, not its cno argument.
+    if(!event_camera&&!fixed_camera&&(!clip_cut_||*clip_cut_!=cut||camera_force_)){
+        initialize_camera_clip(unsigned(cut));
+    }
+    if(restore_camera_clip_&&collision_events_){
+        installed_clip_=restored_view_clip(room_clip_,collision_events_->flags[12][0],collision_events_->flags[11][0]);
+        restore_camera_clip_=false;
+    }
     if(event_camera){
         // bhControlEventCamera: each CAM_KEYF_WORK owns the interval leading
         // to its successor.  The original builds 20 Overhauser control keys

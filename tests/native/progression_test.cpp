@@ -34,7 +34,8 @@ int main(int argc,char** argv){try{
     // Bodenanker, bhEff201 ruhender bzw. über mode1 ausgelöster Funkenflug,
     // Atlasvorschub je Tick und das Abschalten über flg 0x1000000). Sie kamen
     // aus effect_sprites.inc; Generator und Include sind Quarantäne, siehe
-    // native/effect_sprites.cpp. Geprüft bleibt, dass für keine Effekt-ID eine
+    // native/effect_sprites.cpp. Eff009 ist separat positiv portiert/geprüft;
+    // für die hier verbleibenden Effekt-IDs ist weiterhin keine
     // Prozedur gebunden ist, nichts in die Zeichenliste eingereiht wird und
     // die Effektarbeit unverändert bleibt - kein geratener Atlas, kein
     // geratener Zustand.

@@ -100,7 +100,13 @@ private:
     SceneCamera view_{};std::optional<std::size_t> cut_;
     bool blending_=false;unsigned clock_=0;
 };
-struct SceneSpawn {NJS_POINT3 position{};Angle yaw=0;};
+// BH_PWORK px/py/pz and ax/ay/az (types.h:94-96) for the one player work.
+// pitch/roll are the work's ax/az: bhSetObject zeroes them and no original
+// routine ever writes plp->ax or plp->az - map.c:1074, player.c:1375/1377,
+// bhControlPlayerHead (player.c:6760) and bhCalcHair (player.c:7219) only read
+// them.  They are carried here so every consumer reads the same work instead
+// of assuming a value locally.
+struct SceneSpawn {NJS_POINT3 position{};Angle yaw=0;Angle pitch=0,roll=0;};
 struct SceneCutArea {
     std::size_t camera=0;
     std::int8_t floor=0;

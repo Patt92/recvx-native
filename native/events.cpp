@@ -478,7 +478,7 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){
             if(a.parameters[0]==0xff)flags[10][0]|=0x40000;
             else{if(!item_box_object)throw std::runtime_error("item box object requires native world binding");
                 // op->type = 100; pp->flg |= 0x10000; pp->stflg |= 0x18000; sys->st_flg |= 0x4
-                if(item_box_object(a.parameters[0])){flags[14][0]|=0x18000;flags[5][0]|=4;}}
+                if(item_box_object(a.parameters[0])){flags[13][0]|=0x10000;player_flags=flags[13][0];flags[14][0]|=0x18000;flags[5][0]|=4;}}
             return true;}
         if(a.type==4){const auto model=a.parameters[0];if(model>=room_items_.size())throw std::runtime_error("pickup model outside room");auto id=room_items_[model];if(id==130)id=35;if(!id||id>=156||!item_message)return false;
             values[20]=i;flags[10][0]|=0x100;if(a.attribute&0x10)begin_file(id,model);else begin_pickup(id,model);return true;}

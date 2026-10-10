@@ -5,6 +5,15 @@ und Raumladen. Stabil, aber spielmechanisch unvollständig.
 Diese Roadmap ist ein Arbeitsplan, kein Fertigstellungsnachweis. Task-IDs
 bleiben stabil; bestehende native Teile erhalten, nicht erneut portieren.
 
+Fortsetzung 2026-10-10: P04 installiert Clipbereiche jetzt bei den belegten
+Kameraaufrufen, nicht pro Renderbild. Flag-/Rcase-Retention, Fixkamera-
+Schlüssel und Rückgabestandards sind mit zwölf Runtimefällen geprüft.
+Eff137, vollständiger Kameraautomat und Eisraum-Materialsortierung bleiben
+offen; kein Hardwarekern als Lösung. B04 läuft separat. Der nächste
+konfliktfreie Drittauftrag ist C01 gemäß `THIRD_AGENT_C01_TASK.md`:
+Fallenaktivierung in `enemy_spawn.*`, gemeinsame Anschlussdateien nur per
+abgestimmtem Patch. Ergebnisse: `work/native_port_P04_camera_invocations.result.md`.
+
 ## Aktueller Stand — Datenport, Rückbau und Gameplay getrennt
 
 Der Abgleich erfolgte an den aktiven Dateien und CMake, nicht an Quarantäne-
@@ -18,7 +27,7 @@ und keine zulässige 1:1-Implementierung, auch wenn sie einen Task beenden.
 | P02 Raumindex | `native/room_table.c/.h` und `RoomArchive::name` ersetzen die direkte `ps2_dvd_image.c`-Quelle. Alle 205 RDX-Namen sind in Originalreihenfolge identisch. | Quellenablösung erledigt. Kein neues Disc-/ISO-Subsystem erfinden; Index-/Archivregression nachtragen. |
 | A01–A05 Kampf/Zielwahl | `targeting.cpp` und `player_combat_core.c` sind stillgelegt: keine automatische Zielwahl, kein aktiver Kampf/Schuss/Messer, keine Armsteuerung. | Mechanismen eigenständig neu implementieren; nicht nur Includes/zweite Works entfernen. WeaponFlash und reine Waffendaten erhalten. |
 | B00–B04 Bewegung | `player_push_core.c`, `player_stairs.c`, `player_hair.c` sind stillgelegt: keine dortige Wand-/Bodenauflösung, Push-, Treppen-/Leiteraktion oder Haarsimulation. | Gemeinsame Geometrie/Kollision zuerst, danach vollständige Zustandsabläufe. Neutrale Positionsrückgabe ist kein Kollisionsport. |
-| B05/D01 Itembox | `control_item_box_object` ist No-op; der Welt-Deckel öffnet kein Menü. Der Itembox-Transfer in `inventory.cpp` ist inzwischen ebenfalls stillgelegt. | Weltobjekt und Inventarmenü getrennt bearbeiten, dann auf denselben Bestand binden. |
+| B05/D01 Itembox | B05-Deckelsteuerung eigenständig nativ: Öffnungswinkel, einmaliger Klang, folgender Menüpass und Rückkehr. Bestehender D01-Transfer bleibt angebunden. | Fünf Originalraum-Worldtests und Runtime-Öffnen/Abbruch/Wiederöffnung mit unverändertem Bestand. Allgemeine Objekt-/Playerbesitzer bleiben getrennte Aufgaben. |
 | C01/C05 Spawn/Subplayer | `activate_enemy_spawn` liefert immer false; `recvx_is_subplayer` immer 0, Init/Tick tun nichts. | Fallenaktivierung und tatsächliche Subplayer-ID-/Statebindung wieder vollständig portieren. Normale Raumplatzierung ist nicht derselbe Mechanismus. |
 | C03/C04 EN01/EN04/EN00 | Auch `en01_damage.c` ist inzwischen stillgelegt: nur Hostwerte werden in `EN01_STORE` gespeichert/zurückgespiegelt. KI, Kapselhit, Schaden, Tod, Griff/Biss und Sprengfass fehlen. | Keine funktionierenden Zombies/Hunde behaupten. Gemeinsame native Enemy-Statequelle statt Durchleitung schaffen, alle Abläufe einschließlich EN00 portieren. |
 | D02/D03/D05/D06 Inventar | Auch Pickup/Use/Box, Filefolder, Gameover und Event-Inventarmutationen sind jetzt stillgelegt. Die Event-VM meldet die fehlenden Mutationen als pending; übrige APIs sind weitgehend neutral. Native Tabellen-/Matrix-/Darstellungshelfer bestehen weiter. | Aufnahme, Gebrauch, Sortierung, Reload, Untersuchung, Leser, Tod/Retry und Eventmutationen vollständig implementieren. Keine Tests an die Neutralantworten anpassen. |
@@ -27,7 +36,7 @@ und keine zulässige 1:1-Implementierung, auch wenn sie einen Task beenden.
 | P05/D09 Item-UI | Daten aus dem gemischten 1160-Zeilen-Include liegen als `native/ui_tables_data.inc` im Baum. `BulletSet`, `TrigerSet` und `original_command_parts` fehlen: keine Mengenanzeige und leeres gezeichnetes Itembefehlsfenster. | Datenaufteilung erhalten, nicht erneut extrahieren. D09 implementiert Ziffern/Farbbank und originale Befehlsausgabe; vorhandene Menüeingabe ist kein Nachweis der fehlenden Darstellung. |
 | D04 Computer | `computer_core.c` liefert leeren Frame und sofort `finished`; Terminalskripte, Tastatur, Scanner-/Passwortflags und SFX fehlen. | Vollständigen Ablauf neu portieren; sofortige Taskfreigabe nicht als erfolgreichen Computerablauf zählen. |
 | E01–E03 Effekte | Ground/Wall/Line-Abfragen sind leer bzw. liefern -1000; Partikel werden nicht erzeugt; Sprite-/Explosions-/Feuerzeugsteuerung ist stillgelegt. Native Feldübernahme/Slotwahl/Zeichenausgabe bestehen teilweise weiter. | Gemeinsame ATR-Abfragen, Effektdaten/Atlasbindung und vollständige State-Machines portieren; bestehende native Ausgabe erhalten. |
-| P04/G01 Clip/Tür | Beide Clip-Abfragen liefern nur den Ninja-Standard (near 2, far 20000, ts_flg 0x200), kamerabezogene Bereiche fehlen. `door_core.c` hat keine Parametergrößen/Prozeduren und meldet sofort Abschluss 0x40. | Clip- und MPAC-/Türabläufe einschließlich Zeitpunkten/SFX implementieren, keine neuen Abschluss-Stubs. |
+| P04/G01 Clip/Tür | Clip-Abfragen verwenden die originalen Stage-Tabellen und Erstrefferregeln. Event-Fehltreffer hängen von den vorhandenen Displayflags ab (2/20000 oder 1/99); der Monitor-Abfragezweig überspringt Raumtabellen (1/20000). GameOver behält seine ausdrücklich installierten 2/20000; ein Kameraflag allein ist kein Clip-Aufruf. `door_core.c` hat Parametergrößen/Prozeduren und meldet Abschluss 0x40 erst am Ablaufende. | Clip-Abfragen und gezielte Runtime-Wechsel geprüft. Monitor-Aufrufketten einschließlich unportiertem Eff137 bleiben offen; vollständiger Kamerazustandsautomat und sichtbare Tiefensortierwirkung im Eisraum sind nicht abgenommen. Kein PS2-ICE-/OT-Kern als Lösung. |
 | F01–F05 Actor/Face/Morph | Native Actor-/Basic-/Skin-/Pose-Schicht vorhanden. Morph-Events schreiben Felder, Vertexinterpolation/Draw bleibt offen; aktive Lip-Streamquelle liegt getrennt vom neu gewählten Stream auf `WorldEntity`. | Bestehende Decoder und Lip-Cursor-Semantik behalten; produktive Besitzer-/Vertex-/Face-/Shadowbindungen vervollständigen. Alte Core-Morph-Erfolge gelten nicht. |
 | Math/WeaponFlash/BGM | Native Math und sechs WeaponFlash-Typen bestehen. BGM-Discregel ist an beiden Raumladewegen gebunden. | Nicht neu anfangen. Typ-3-Wandbindung, Point-Filter und Enemy-SFX-Reihenfolge bleiben Abnahme-/Integrationsaufgaben. |
 
@@ -129,7 +138,7 @@ ist wieder belegt, nicht mehr als unerledigter Rückbauauftrag führen.
 | P01 | Bereits vorhanden: `native/item_tables.c/.h` samt Verbrauchern behalten. Regression für zwölf Tabellen, gepackte Werte sowie native ITEM_WORK-/DSP_WORK-/NJS_POINT3-Größen, Alignment und Feldoffsets hinzufügen. | Erneuter Quellvergleich bestanden; eigenen Header nicht durch `item.h`/fehlende PS2-Ninja-Header ersetzen. macOS-arm64/Windows-x64-Layout prüfen; Itemmechanismen bleiben D02/D03/D07. |
 | P02 | Bereits vorhanden: `native/room_table.c/.h` und `RoomArchive` behalten. Regression der 205 Namen/Indizes, Bereichsfehler und tatsächlich zugeordneten Raumdaten hinzufügen. | Geordneter Quellvergleich bestanden. Keine unbelegte Behauptung eines Disc-/Dateimechanismusports und kein neues ISO-System. |
 | P03 | Native Geometrieprimitiven für folgende Pakete: zuerst benötigte Box-/Kapsel-/Linien-/Dreiecksoperationen in `native/geometry_*.*`. | P00. Originalfälle und Randfälle, keine neu erfundene Kollision. `ps2_NaColi.c` wird nicht kompiliert. |
-| P04 | `bhChangeViewClip` / `bhChangeViewClipRM` aus Originalreferenz als eigene native Kamera-Clipmechanismen in `native/view_clip.cpp` implementieren. | Sofort parallel zu P00/P03 möglich. Der alte Include ist bereits entfernt, Verhalten aber nicht portiert. Opcode-Semantik, Grenzen und Reihenfolge; keine geratenen Kamera-Sonderwerte. |
+| P04 | Clip-Abfragen nativ portiert: 113 Event-/51 Raumzeilen, Erstreffer, Rcase-Asymmetrie, beide Displaystandards und Monitor-Tabellenbypass. Bestehende Runtime-Displayflags angebunden; Clipgrenzen und sichtbare Near/Far-Wirkung positiv geprüft. GameOver-Ausnahmepfad behält ausdrücklich 2/20000. | Kein vollständiger Kamera-/Gameplay-Abschluss: Monitor-Aufrufketten mit unportiertem Eff137 (E03), weitere Kameraübergänge und Eisraum-Tiefensortierung sind nicht vollständig abgenommen. Keine PS2-Hardwareflags oder OT-Engine nachbilden. |
 | P05 | Bereits vorhandene UI-Daten `native/ui_tables_data.inc` erhalten; PARTS-/NJS_TEXANIM-/Font-/Positionsinitialisierer und native Deklarationen gegen Originalreferenz prüfen und Datenregression nachtragen. | Keine erneute Extraktion und keine Funktionen in die Datei einsetzen. Werte/Reihenfolge/Dimensionen sind Datenabnahme, nicht BulletSet-/Befehls- oder EKG-Abnahme. |
 
 ## Nächste konfliktarme Arbeitswelle
@@ -195,9 +204,19 @@ umbenennen; kein Wiederaktivieren des alten Funktionsgenerators.
 | B02 | Pushkontakt-/Objektinitialisierung und mobile Raumkollision direkt auf WorldEntity-Objekten implementieren. | P00/P03/B00; Reihenfolge und originale Tabellen; keine PUSH_SYS/PUSH_ROOM-Kopie. |
 | B03 | Push-State-Machine, Motionwurzel und Move-/Releasepfad eigenständig implementieren. | B00/B02; vorhandenen inaktiven `player_push_core.c`-Aufrufvertrag auf dieselbe native Quelle binden oder geordnet ersetzen. Keine zweite Positionsbuchführung als Spiellogik. |
 | B04 | Haar-/verknüpfte Objekttransformation auf tatsächliche native Actor-Pose übertragen. | P00/F01; keine eigene Player-/Allocator-Attrappe. |
-| B05 | Fehlenden Itembox-Objektablauf/Deckel-/Motionzustände, Playerflags, Menüanforderung und SFX direkt an native Objekt-/Inventar-Statequelle binden. | P00/D01; `control_item_box_object` ist No-op, der Include bereits entfernt. Keine unnötige Abhängigkeit von der kompletten Push-Kiste. |
+| B05 | Deckelcontroller portiert: 41 Schritte, strikter Schwellwert, separater Menüpass, SFX, Playerflags und Rückkehr im vorhandenen Objekt-/Inventarpfad. | Positive Komponenten-/World-/Runtimeprüfung; keine Originalkörper. Kein Abschluss des allgemeinen Objekt-/Playerdispatchers oder aller verknüpften/reservierten Besitzer. |
 
 ### C — Gegner und Subplayer (Owner: neue `native/enemy_*`-Module)
+
+**Verbindlicher Gesamtumfang (Nutzer, 2026-10-10): alle originalen Gegner.**
+Der konkrete Dritt-Agent-Auftrag umfasst C01–C08 einschließlich sämtlicher
+C07+-IDs; C01-Fallenaktivierung für Hunde/Zombies ist nur ein Teil davon.
+Vollständige ID-/Variantenliste aus Originaldispatcher und Raumdaten ableiten,
+gemeinsame native Besitzerverträge abstimmen, zuerst alle Gegner/Assets
+portieren, danach gesammelt testen und Ursachen global beheben. Das erste
+produktive Abnahmeziel bleibt EN07/RM_0130; es ersetzt nicht alle anderen
+Gegner. Keine Abschlussbehauptung allein aus Spawn, Link oder Ladescan.
+Aktualisierter Auftrag: `docs/THIRD_AGENT_C01_TASK.md`.
 
 | ID | Aufgabe | Abhängigkeit / Nachweis |
 |---|---|---|
@@ -245,7 +264,7 @@ der Integrator besitzt `events.cpp` und integriert sie ohne Schattenbestände.
 |---|---|---|
 | E01 | Fehlende gemeinsame ATR-Wall-/Ground-/Line-/Reflexionsmechanismen einschließlich echter `bhCheckL2Wall`-Semantik und Hit-Eintragsidentität implementieren. | P00/P03; `effect_collision.inc` ist bereits entfernt. ROM/mobile Reihenfolge, Typen 0..7/Rampen und Flagfälle; keine vereinfachte Strahlheuristik. |
 | E02 | Fehlende Partikelemitter, Stufenverlauf, Zufall, Bewegung, Farbe/Atlas, Line-/Billboardausgabe und Blutlache auf bestehender nativer Effekt-Statequelle implementieren. | P00/E01; `effect_particles.inc` ist entfernt. Bestehenden Besitzer zuerst in P00 bestimmen, keinen zusätzlichen O_WRK-/Effect-Pool voraussetzen oder erfinden. |
-| E03 | Fehlende Sprite-/Custom-/Explosion-/Blood-/Linked-Effectfälle, Effekt-ID-/Atlasdaten, gemeinsame Texturblockwahl und Feuerzeuglicht auf vorhandener Scene/Effekt-Statequelle implementieren. | E01/E02/F01; `effect_sprites.inc` ist entfernt. Native Feldübernahme/Slot-/Drawhelfer erhalten, vorhandene additive Näherungen anhand Originalsemantik prüfen; keine sys/plp/rom-Attrappen. |
+| E03 | **Basis nativ angeschlossen:** ef_info, vier Modellblock-Schritte, 40 gemeinsame Texturen, Eff009 mit beiden UV-Banken und Typen, Spieler-/Objektverknüpfung und Feuerzeuglicht. Offen bleiben die übrigen Sprite-/Custom-/Explosion-/Blood-Fälle. | Positivtest native_lighter_effect und echte Eröffnung/Inventar mit verify_lighter.py. Armhaltung bhArmIkMdk und vollständige pt_flg-/Modelldraw-Gates bleiben F01/P00; keine vollständige Feuerzeug-Pose behauptet. Lichtanimation 1..6 nativ, vollständiges Lichtsystem weiterhin E04. Siehe work/native_port_E03_lighter.result.md. |
 | E04 | Gemeinsame originale Enemy-/Player-SFX-/Voice-/Light-Reihenfolge an AudioMixer/OriginalLight binden. | C02/E03; keine fehlenden Aufrufe durch Null-/No-op-Rückgaben verdecken. |
 | E05 | Waffen-Typ-3-Wandbindung und native per-Draw-Samplerwahl schließen. | E01; vorhandene WeaponFlash-Implementierung behalten, keine GS-/GIF-Transportschicht. |
 

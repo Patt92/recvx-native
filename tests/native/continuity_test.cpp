@@ -23,6 +23,110 @@ int main(int argc,char** argv){try{
      check(!sub.mode0&&!sub.mtn_no&&!sub.mtn_add&&!sub.mode3,"subplayer gap initialized a work");
      check(!recvx_subplayer_tick(&sub)&&!sub.advanced,"subplayer gap dispatched a routine");}
     AudioMixer mixer;auto clip=std::make_shared<PcmClip>();clip->rate=48000;clip->channels=1;clip->samples.assign(32000,10000);mixer.play_pcm(24,clip,.5f,true);check(mixer.user_sound_volume(6,0,0,-64,0),"BG volume category unbound");auto samples=mixer.mix(1);check(std::abs(samples[0]-2519)<=1,"fade erased note velocity/program gain");check(mixer.user_sound_volume(6,0,-1,-127,2),"BG fade missing");mixer.mix(3200);check(!mixer.active(24),"fade does not release the voice");mixer.set_room_sound_case(1);check(mixer.take_room_sound_case()==1&&mixer.take_room_sound_case()==0,"sound variant not consumed once");
+    // Treppen-, Leiter- und Stufenaktionen (Auftrag B01, native/player_stairs.c):
+    // die sechs Originalroutinen kdu/kdd/dnu/dnd/hsu/hsd werden je einmal
+    // vollstaendig durchlaufen.  Der Host liefert wie die Laufzeit
+    // Motionlaengen, Knotenlagen, Grundhoehen und die Schrittdienste.
+    std::array<float,32> floors{};floors[2]=0;floors[3]=9;
+    struct Host {unsigned feet=0,actions=0,effects=0,water=0,vibration=0,kaidan=0,badflag=0,last_node=0,probe_node=0;
+                 int burst=0,splash_up=0,splash_dn=0,sound=-1;float bits=0;};
+    Host h;
+    RECVX_STAIR_HOST services{&h,
+        /* Testfixture fuer die Wurzelbewegung: die Originalmotionen 31/33/35/37
+           heben und 32/34/36/38 senken die Figur ueber ihre Laenge um die
+           doppelte Stufentiefe (2*prm2 = 16 bei den geprueften Flaechen).  Das
+           ist nicht die Originalkurve, sondern nur ihre Form; die echten
+           Schluessel liest die Laufzeit aus dem MTN-Bundle.  Eine feste Hoehe
+           waere falsch: kdd beendet sich ueber py <= area.py - 2*prm2. */
+        [](void*,unsigned motion,int frame,float pos[3]){
+            const bool down=motion>=32u&&motion<=38u&&(motion%2u)==0u;
+            pos[0]=0.0f;pos[1]=(down?-16.0f:16.0f)*(float(frame)/26.0f);pos[2]=0.0f;return 1;},
+        /* Originallaenge, nicht geschaetzt: die Ruhe-/Stufenmotionen 31/33/35/37
+           haben in allen fuenf Spielerkoerpern 27 Bilder, 33/37 haben 31; alle
+           PlKDU-Schwellen (6..24) liegen darunter.  Gemessen aus
+           data/archives/SYSTEM/0010..0014.bin. */
+        [](void*,unsigned){return 27u;},
+        [](void* p,unsigned node,float out[3]){static_cast<Host*>(p)->last_node=node;out[0]=5;out[1]=0;out[2]=7;},
+        [](void*,int floor,float,float,int){return floor;},
+        [](void* p,int sound,int type,int flag){auto& h=*static_cast<Host*>(p);++h.feet;if(type>=2){++h.actions;h.sound=sound;}if(!flag)++h.badflag;},
+        [](void* p,const float*,float* top){auto& h=*static_cast<Host*>(p);++h.water;h.probe_node=h.last_node;*top=1.5f;return 1;},
+        [](void* p,const RECVX_STAIR_EFFECT* e){auto& h=*static_cast<Host*>(p);++h.effects;
+            if(e->id==108){if(e->lkono==10){++h.splash_up;h.bits=e->offset[0];}else ++h.splash_dn;}else if(e->id==11)++h.burst;},
+        [](void* p,int,int){++static_cast<Host*>(p)->vibration;},
+        [](void* p,int){++static_cast<Host*>(p)->kaidan;},
+        [](void*,float py){return py<4.5f?0:1;},
+        floors.data(),0};
+    /* recvx_stairs_tick liefert genau in dem Bild 0, in dem der originale
+       Abschlussblock die Arbeit zurueckgegeben hat; jedes andere Bild laeuft
+       weiter.  Ein 0 ohne Freigabe waere ein Fehler. */
+    /* player.c bhCPM1_act_bas (1957-1991) setzt rtspd vor jedem Actionbild.
+       Waehrend der Aktion traegt plp->stflg 0x80010010 bzw. 0x80010020, also
+       gilt der erste Zweig: dmlvl 2 -> 0.8, sonst 1.0.  Die Laufzeit setzt den
+       Wert genauso (native/runtime.cpp); der Host muss ihn wie status/flg
+       vorhalten, sonst dreht die Giernaeherung nie. */
+    auto seed=[&](RECVX_STAIR_STATE& s){s.rtspd=s.dmlvl==2?0.8f:1.0f;};
+    auto run_stairs=[&](RECVX_STAIR_STATE& s){int ticks=0;
+        while(s.active&&ticks<400){if(recvx_stairs_tick(&s,&services)==0){check(!s.active,"stair routine stopped without releasing the player work");break;}++ticks;}
+        check(!s.active&&ticks<400,"stair action never handed the player back");};
+    // (1) Einsprungszustand nach hitchk.c bhCheckExmAtari: case 1 (4682)
+    // setzt 0x80010010, case 2 (4750) und die danf-Sonde (4949) setzen
+    // 0x80010020; sys->st_flg 0x4 setzen nur case 1 (4686) und case 2
+    // (4757), die danf-Sonde nicht.
+    for(int action:{14,15,20,21}){
+        RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};const float py=(action==15||action==21)?9.f:0.f;
+        a.type=1;a.py=py;a.prm2=8;a.w=40;a.d=40;
+        seed(s);
+        check(recvx_stairs_begin(&s,&a,action,floors.data(),0,py,0,0,int(py),0,0)==1,"stair begin refused a type-1 area");
+        check(s.active&&s.mode0==1&&s.mode2==action&&(s.status&0x80010010u)==0x80010010u,"stair begin does not match bhCheckExmAtari case 1/2");
+        check((s.flg&0x10400u)==0x10400u&&!(s.flg&0x110u)&&(s.st_flg&4u),"stair begin does not set the original player switches");
+        check((s.unsupported_services&0x380u)==0x380u,"stair begin stopped reporting its unbound services");}
+    for(int action:{16,17}){
+        RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};const float py=action==16?0.f:9.f;
+        a.type=2;a.py=py;
+        seed(s);
+        recvx_stairs_begin(&s,&a,action,floors.data(),0,py,0,0,int(py),0,0);
+        check(s.active&&(s.status&0x80010020u)==0x80010020u,"stair begin does not match the danf branch");
+        check((s.st_flg&4u)==(action==17?0u:4u),"danf branch does not leave sys->st_flg 0x4 alone");
+        RECVX_STAIR_STATE first=s;
+        check(recvx_stairs_tick(&first,&services)!=0&&(first.st_flg&4u),"stair tick does not maintain sys->st_flg 0x4");}
+    // (2) Vollstaendiger Ablauf.  Aufwaerts enden kdu/hsu auf der oberen
+    // Grundhoehe, abwaerts kdd/hsd auf der unteren; alle vier setzen die
+    // Ruhemotion PlMtnAct[wpntp][dmlvl][0] und geben die Arbeit frei.
+    struct Expected {int action,floor;float area_py,end_py;bool steps;};
+    for(const Expected& e:{Expected{14,1,0.f,9.f,true},Expected{20,1,0.f,9.f,false},Expected{15,0,9.f,0.f,true},Expected{21,0,9.f,0.f,false}}){
+        RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};a.type=1;a.py=e.area_py;a.prm2=8;a.w=40;a.d=40;
+        seed(s);
+        recvx_stairs_begin(&s,&a,e.action,floors.data(),0,e.area_py,0,0,int(e.area_py),0,0);
+        h.feet=0;h.actions=0;h.kaidan=0;
+        run_stairs(s);
+        check(s.mode0==1&&s.motion==42&&s.floor==e.floor&&s.py==e.end_py&&s.py==floors[e.floor+2],"stair action did not return to the original floor table");
+        check((s.flg&0x118u)==0x118u&&!(s.flg&0xD0400u)&&!(s.status&0x80010030u),"stair action did not release its original switches");
+        check((s.flg2&1u)&&h.kaidan,"stair action did not open its hokan work or clear the kaidan mark");
+        check((h.feet>0)==e.steps,"stair action changed its original step sounds");}
+    // (3) Danf-Stufe mit gesetztem st_flg 0x40: bhCheckWater an Knoten 19
+    // (ply_id 0), bhSetEffect 108 mit lkono 15 und sechs bhSetEffectTb 11
+    // (zwei Haelften a drei Drehungen), danach CallPlayerActionSe 522.
+    {RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};a.type=2;a.py=9;a.prm2=8;a.w=40;a.d=40;
+        seed(s);
+        recvx_stairs_begin(&s,&a,17,floors.data(),0,9,0,0,1,0,0);
+        s.st_flg|=0x40u;
+        h.water=0;h.vibration=0;h.effects=0;h.burst=0;h.splash_dn=0;h.actions=0;h.sound=-1;h.probe_node=0;
+        run_stairs(s);
+        check(h.vibration==1&&h.water==1&&h.probe_node==19,"danf step did not probe the original water node");
+        check(h.splash_dn==1&&h.burst==6&&h.effects==7,"danf splash does not carry the original effect set");
+        check(h.actions==1&&h.sound==522,"danf splash did not request CallPlayerActionSe 522");
+        check((s.unsupported_services&RECVX_STAIR_UNBOUND_EFFECT_OFF)!=0,"danf splash stopped reporting the unbound effect offset");}
+    // (4) dnu reicht plp->ax/ay/az als Bitmuster an bhSetEffect 108 weiter
+    // ((POINT*)&plp->px ueberlagert ax/ay/az), nicht als Winkel.
+    {RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};a.type=1;a.prm2=4;
+        seed(s);
+        recvx_stairs_begin(&s,&a,16,floors.data(),0,0,0,0,0,0,0);
+        s.status|=0x100000u;s.ax=0x3F800000;
+        h.splash_up=0;h.bits=0;
+        for(int ticks=0;s.active&&h.splash_up==0&&ticks<40;++ticks)recvx_stairs_tick(&s,&services);
+        check(h.splash_up==1&&h.bits==1.0f,"dnu effect offset is not the raw plp->ax bit pattern");}
+    check(!h.badflag,"stair action requested a step sound with ListNo -1");
+
     if(argc>1){const auto data=std::filesystem::path(argv[1]);
         // bhSetRoom normalizes POS.py before the player/event initialization.
         // Exercise offset POS heights and upper floors using original resources.
@@ -58,21 +162,6 @@ int main(int argc,char** argv){try{
         // original player loop records it in gpy after bhCheckWallEx; normal
         // movement must not lift py while crossing the ramp.
         auto ramp_bytes=read_asset_file(data/"rooms/RM_1000.RDT",64*1024*1024);auto ramp_scene=decode_scene(ramp_bytes);auto ramp_player=ramp_scene.spawns.at(2);RoomWorld ramp_world(ramp_bytes,ramp_scene,ramp_player,motion,frame,audio,data,{},"RM_1000");const auto ramp_crossing=ramp_world.move({110,0,81},{110,0,79});check(ramp_crossing.y==0,"bhGetGroundPosition ramp query incorrectly changes player height");
-        // PORTIERUNGSLÜCKE (Policy 2026-10-09): Hier liefen die originalen
-        // Typ-2-Stufenaktionen (dnu/dnd) aus player_stairs.inc mit echten
-        // Claire-Motionlängen. Generator und Include sind Quarantäne, siehe
-        // native/player_stairs.c. Geprüft bleibt nur, dass der Treppen-Task
-        // die Lücke wie dokumentiert meldet: der Spieler bleibt auf seiner
-        // Position und Etage, es wird keine Motion und kein Schritt erzeugt,
-        // und die Steuerung ist nach einem Tick wieder frei.
-        std::array<float,32> floors{};floors[3]=9;
-        struct Host {unsigned feet=0;} h;
-        RECVX_STAIR_HOST services{&h,[](void*,unsigned,int,float*){return 0;},[](void*,unsigned){return 0u;},[](void*,unsigned,float* pos){pos[0]=pos[1]=pos[2]=0;},[](void*,int floor,float,float,int){return floor;},[](void* p,int){++static_cast<Host*>(p)->feet;},nullptr,floors.data(),0};
-        for(unsigned down=0;down<2;++down){RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};a.type=2;a.prm0=std::uint8_t(down);
-            recvx_stairs_begin(&s,&a,floors.data(),0,down?9.f:0.f,0,0,down?1:0,0,0);
-            check(s.active&&s.py==(down?9.f:0.f)&&s.floor==(down?1:0),"stair gap moved the player or changed its floor");
-            check(!recvx_stairs_tick(&s,&services)&&!s.active&&!s.unsupported_services,"stair gap did not release control on its first tick");}
-        check(!h.feet,"stair gap requested a footstep sound");
     }
-    std::cout<<"Decimal rooms, original Subpl dispatch, sound-case/fades and short-step actions passed.\n";return 0;
+    std::cout<<"Decimal rooms, original Subpl dispatch, sound-case/fades and the six stair/ladder/step actions passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

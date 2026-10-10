@@ -13,6 +13,7 @@
 #include "en01_damage.h"
 #include "effect_particles.h"
 #include "object_itmbox.h"
+#include "view_clip.h"
 #include <set>
 #include <string>
 #include <map>
@@ -158,6 +159,8 @@ public:
     unsigned event_camera_index=0;
     std::optional<unsigned> fixed_camera;
     unsigned event_camera_key()const{return event_camera_key_;}
+    void initialize_camera_clip(unsigned cut);
+    ViewClip camera_clip()const{return installed_clip_;}
     void tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking=true);
     bool camera_transitioning()const{return active_camera_.transitioning();}
     unsigned camera_clock()const{return active_camera_.clock();}
@@ -173,6 +176,10 @@ public:
     const std::array<float,32>& floor_heights()const{return floors_;} // rom->grand
     unsigned floor_sound(NJS_POINT3 position,bool special=false)const;
     unsigned floor_sound(int floor,float x,float z,bool special=false)const;
+    // hitchk.c bhCheckWater: the first original type-3 water area with prm0 == 1
+    // that contains the probe, room flrp before bhObj001's mflrp. `top` then
+    // receives fp->py + fp->h, the surface the original splash is placed on.
+    bool water_top(NJS_POINT3 position,float& top)const;
     void player_footstep(const PlayerAsset& player);
     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f,std::optional<bool> walking={});
     void bind_player_collision(EventVm&);
@@ -266,6 +273,11 @@ private:
     unsigned event_camera_key_=0,event_camera_clock_=0;
     bool event_camera_finished_=false;
     SceneCamera event_camera_pose_{};
+    // Native camera owner's installed njClipZ and last GameNear/GameFar.
+    // Flag/key mutations alone do not invoke either original clip routine.
+    ViewClip installed_clip_{},room_clip_{};
+    std::optional<unsigned> clip_cut_;
+    bool restore_camera_clip_=false;
     ActiveCameraMotion active_camera_;std::vector<SceneCamera> room_cameras_;
     bool camera_force_=false;
     std::vector<Light> lights_,event_lights_;

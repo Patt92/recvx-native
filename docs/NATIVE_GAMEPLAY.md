@@ -160,6 +160,10 @@ Gameplay-Freigabe; der aktuelle Lückenplan steht in
 - Item-Box: Öffnen über `bhCheckExmAtari` (Typ 4, Kistenbit) mit
   Deckelanimation `bhObjItmBox`; Tauschen, Stapeln, Restriktionen
   (`ItemBoxChange`), Ein-/Ausfahren und EXIT-Knopf.
+  Der Deckelcontroller ist eigenständig nativ: 41 Öffnungsschritte,
+  Menüanforderung im folgenden Durchlauf, einmaliger Klang und Rückkehr
+  auf demselben Objekt. Pause-/Playerflags und Wiederöffnung sind geprüft;
+  allgemeine reservierte/verknüpfte Objektbesitzer bleiben getrennt offen.
 - Benutzen über `ItemUse` für alle Itemtypen, Heilen und Entgiften über
   `Use_00` (inklusive Sprayzähler und Gift-Statusbits).
 - Aufnahme vom Boden und durch Skripte mit Ja/Nein, voller Tasche und
@@ -182,7 +186,10 @@ Die vollständige Item-, Untersuchungs- und Rezeptabdeckung erzeugt
 **Portiert**
 - Raumnamen und -identität nach `system.c` (dezimal), Spawns, Kameraschnitte
   mit Etagenvergleich (`bhCheckCut`), Clip-Ebenen (`bhChangeViewClip`).
-- Türsequenzen aus MRY-Paketen über generierte `FadeProc1`, `ViewProc1–7`
+- Native Clip-Abfragen mit originalen Event-/Raumtabellen, Erstrefferregeln,
+  Displayflag-abhängigen Eventstandards und Monitor-Tabellenbypass. GameOver
+  behält seinen ausdrücklich installierten Bereich, unabhängig vom Kameraflag.
+- Türsequenzen aus MRY-Paketen über eigenständige native `FadeProc1`, `ViewProc1–7`
   und `DoorProc1–7`; Überspringen mit OK; Abschluss der Raumskripte vor
   `bhStartDoorDemo`.
 - Inventar, Flags, HP und Spielzeit bleiben über Raumwechsel erhalten.
@@ -191,6 +198,8 @@ Die vollständige Item-, Untersuchungs- und Rezeptabdeckung erzeugt
 **Offen**
 - Spezielle Türbeleuchtung, Vibration.
 - 3D-Figur im Terminal (`bhDrawSpEvtComCharacter`).
+- Eff137 als weiterer Monitor-Erzeuger, vollständige Kamerazustandsübergänge
+  und Abnahme der sichtbaren Eisraum-Tiefensortierung; keine PS2-OT-Nachbildung.
 
 ## Modelle und Effekte
 

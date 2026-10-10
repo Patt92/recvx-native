@@ -118,6 +118,13 @@ int main(int argc,char** argv){try{
      check(s.events.flags[6][0]==0x6Cu,"the death scene did not take sp_flg 0x6C");
      check((s.events.flags[5][0]&0x5u)==0x5u,"the death scene did not set st_flg 0x1/0x4");
      check(s.events.flags[11][0]&0x200080u,"the death scene did not set gm_flg 0x200080");
+     if(!data.empty()){
+         GameUi ui(data);SoftwareRenderer image(320,240);s.over.draw(image,ui);
+         // gameover.c:244 explicitly installs 2/20000. Setting cam.flg 0x40
+         // later is not itself a call of bhChangeViewClipRM.
+         check(image.last_clip()[0]==2.f&&image.last_clip()[1]==20000.f,
+               "death scene lost the explicitly installed original clip range");
+     }
      // gov_etb fires at 40, 54, 68, 82, 96 and 110; the fifth one starts the
      // dying motion, its voice and the white flash. The scene hands back after
      // pass 150.
