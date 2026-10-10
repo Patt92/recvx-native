@@ -763,6 +763,7 @@ int main(int argc,char** argv){
         };
         int lever_move=0,lever_turn=0;bool lever_attack=false,lever_aim=false,lever_run=false;
         int turnaround_timer=0;std::uint16_t turnaround_target=0;
+        float damage_arp=0;bool damage_pad_release=false; // EXP_WORK arp of bhCPM0_damage; bhControlPlayerPad pending
         auto locomote=[&](int move,bool run,int turn){
             bool run_pressed = run && !lever_run;
             { // sys->pad_ps: newly pressed direction/buttons shake a grabbing zombie off (bhEne_LeverCheck)
@@ -776,6 +777,49 @@ int main(int argc,char** argv){
             // footstep calls while the door demo is active.
             if(transition_pending)return;
             if(stairs.active&&player&&world){if(debug.active()||frontend.active()||menu.active||dialog.active()||movie.active()||computer.active())return;head_other_action();tick_stairs();return;}
+            // bhCtrPly_mode0[2] = bhCPM0_damage (player.c:6214). bhCheckWallEx
+            // enters it through *(int*)&plp->mode0 = 2/0x102 at an attr-0x40
+            // fire wall (hitchk.c:259); mode1 0 = hit from the front.
+            if(player&&world&&events&&(world->player_mode()&0xffu)==2u){
+                if(debug.active()||frontend.active()||menu.active||dialog.active()||movie.active()||computer.active())return;
+                auto& st_flg=events->flags[5][0];auto& flg=events->flags[13][0];auto& stflg=events->flags[14][0];
+                const unsigned mode=world->player_mode(),mode1=(mode>>8)&0xffu,mode2=(mode>>16)&0xffu,mode3=mode>>24;
+                st_flg|=4u;flg|=0x200000u;bool finished=false;
+                if(mode1>1u)throw std::runtime_error("bhCPM0_damage: mode1 outside the original switch");
+                if(mode3==0){
+                    flg|=0x10000u;flg&=~0x36940000u;stflg&=~0x80u;stflg|=0x10000u;
+                    head_other_action();recvx_head_release_look(&head); /* EXP1_I(0) &= ~0x4; |= 0x1E0 */
+                    motion=std::size_t(mode2*2u+71u+mode1);animation=0;
+                    if(!player->has_motion(motion))throw std::runtime_error("bhCPM0_damage: player motion "+std::to_string(motion)+" missing");
+                    /* hokan_rate 49152 / hokan_count 4: the host player pose has no hokan blend yet (F01). */
+                    damage_arp=mode1?1.f+float(mode2):-(1.f+float(mode2));
+                    audio.play_player_voice(mode1?1024:(mode2<2?1026:1027));
+                    world->set_player_mode((mode&0x00ffffffu)|(1u<<24));
+                }else if(mode3==1){
+                    if(flg&0x400000u){flg&=~0x10004u;stflg&=~0x10000u;world->set_player_mode(1);finished=true;}
+                    else{
+                        // bhGetTransZ(mode2*2 + 11/12)[frm_no / 65536], then bhAddSpeed(plp, 0).
+                        const auto& trsz=player->translation_curve(mode2*2u+11u+mode1);const auto at=std::size_t(animation/65536);
+                        if(at>=trsz.size())throw std::runtime_error("bhCPM0_damage: frame outside translation curve");
+                        float sine,cosine;njSinCos(actor.yaw&65535,&sine,&cosine);const auto from=actor.position;auto to=from;to.x-=trsz[at]*sine;to.z-=trsz[at]*cosine;
+                        actor.position=world->move_player_arp(from,to,damage_arp);
+                    }
+                }
+                if(!finished){auto& gm_flg=events->flags[11][0];
+                    if(gm_flg&0x40u){gm_flg&=~0x40u;if(!(gm_flg&0x1000000u))gm_flg&=~0x80u;gm_flg|=0x800u;
+                        /* pt_flg |= 1: the native pt_flg owner keeps its system.c start value ~0u, bit 1 is already set. */
+                        if(st_flg&0x800000u){st_flg&=~0x800000u;gm_flg&=~0x80000u;}}}
+                // bhControlPlayer: bhSetMotion after the mode routine, then flg 0x400000 = last frame reached.
+                animation=(animation+65536)%(std::int64_t(player->motion_frames(motion))*65536);
+                if(animation/65536>=std::int64_t(player->motion_frames(motion))-1)flg|=0x400000u;else flg&=~0x400000u;
+                if(finished)damage_pad_release=true;
+                follow();return;
+            }
+            // First bhCPM0_action pass after the damage: flg 0x10000 is clear, so
+            // bhControlPlayerPad (player.c:1820) runs; its else branch ends st_flg 0x4.
+            if(damage_pad_release&&events&&world){damage_pad_release=false;auto& flg=events->flags[13][0];auto& stflg=events->flags[14][0];
+                if(!(flg&0x10000u)){if(!(pad_on&1u)&&(stflg&0x80u)){flg|=0x200000u;if((world->player_mode()>>24)==5u)world->set_player_mode((world->player_mode()&0x00ffffffu)|(6u<<24));}
+                    else{world->set_player_mode(world->player_mode()&~0xff00u);flg&=~0x200000u;stflg&=~0x400u;events->flags[5][0]&=~4u;}}}
             if(player&&world&&world->pushing()){
                 if(debug.active()||frontend.active()||transition_pending||computer.active()||menu.active||dialog.active()||movie.active()||world->player_scripted||world->player_hidden)return;
                 // bhCPM2_act_psh case 0 (player.c:3741): EXP1_I(0) &= ~0x4; |= 0x1E0.

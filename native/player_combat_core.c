@@ -252,17 +252,22 @@ static void cb_ang_zyx_to_yzx(const int32_t* zyx, int32_t* yzx) {
     yzx[1] = (int32_t)(10430.381f * atan2f(s1, c2 * c1));
     yzx[2] = (int32_t)(10430.381f * asinf(s2 * c1));
 }
-/* Motion.c:991 AngYzxToZyx */
+/* Motion.c:991 AngYzxToZyx. Disassembly SLUS_201.84 0x1311b0: b = s1*s2,
+   MULA/MADD c1*s0 + b*c0 und MULA/MSUB c1*c0 - b*s0 fuer [0], asinf(s1*c2)
+   fuer [1], atan2f(s2, c1*c2) fuer [2]; nicht die Rollen von AngZyxToYzx. */
 static void cb_ang_yzx_to_zyx(const int32_t* yzx, int32_t* zyx) {
     float s0, s1, s2, c0, c1, c2, b;
     njSinCos(yzx[0], &s0, &c0);
     njSinCos(yzx[1], &s1, &c1);
     njSinCos(yzx[2], &s2, &c2);
-    b = s2 * s1;
-    zyx[0] = (int32_t)(10430.381f * atan2f((c2 * s0) + (b * c0), (c2 * c0) - (b * s0)));
-    zyx[1] = (int32_t)(10430.381f * asinf(s2 * c1));
-    zyx[2] = (int32_t)(10430.381f * atan2f(s1, c2 * c1));
+    b = s1 * s2;
+    zyx[0] = (int32_t)(10430.381f * atan2f((c1 * s0) + (b * c0), (c1 * c0) - (b * s0)));
+    zyx[1] = (int32_t)(10430.381f * asinf(s1 * c2));
+    zyx[2] = (int32_t)(10430.381f * atan2f(s2, c1 * c2));
 }
+
+void recvx_combat_ang_zyx_to_yzx(const int32_t zyx[3], int32_t yzx[3]) { cb_ang_zyx_to_yzx(zyx, yzx); }
+void recvx_combat_ang_yzx_to_zyx(const int32_t yzx[3], int32_t zyx[3]) { cb_ang_yzx_to_zyx(yzx, zyx); }
 
 static void cb_mark_obj(RECVX_COMBAT_CORE* c, uint32_t node) {
     if (node < RECVX_CB_NODES) c->player.obj_dirty[node >> 5] |= 1u << (node & 31);

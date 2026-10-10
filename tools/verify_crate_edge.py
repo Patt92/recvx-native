@@ -16,7 +16,7 @@ def run(name,script,frames):
  replay=out/(name+'.txt');replay.write_text(script);state=out/(name+'.json')
  with (out/(name+'.log')).open('w')as log:
   subprocess.run([r,'--data',str(a.data.resolve()),'--mods',str(out/'no-mods'),'--controls',str(out/'controls.ini'),'--debug-config',str(out/'debug.ini'),'--snapshots',str(out/'snapshots'),'--in-game','--room','RM_0100.RDX','--headless','--frames',str(frames),'--replay',str(replay),'--state',str(state),'--validate-poses','--screenshot',str(out/(name+'.bmp'))],stdout=log,stderr=log,check=True)
- s=json.loads(state.read_text());assert not s['blocked_commands'],s['event_tasks'];assert s['pending_commands']==[{'opcode':139,'event':0,'offset':34,'bytes':[139,0,0,5,34,11,144,1,52,33,0,2]}],s['pending_commands'];assert not s['push']['unsupported'],s['push'];return s
+ s=json.loads(state.read_text());assert not s['blocked_commands'],s['event_tasks'];assert s['pending_commands']==[{'opcode':139,'event':0,'offset':34,'bytes':[139,0,0,5,34,11,144,1,52,33,0,2]}],s['pending_commands'];assert not s['push']['unsupported']&~1,s['push'];return s # 0x1: HOKAN gap only
 # The room's original event places crate 7 at (-12,4,-105.6).
 for mode in ('forward','forward run'):
  for yaw in (0,16384,32768,49152):

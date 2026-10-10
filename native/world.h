@@ -199,6 +199,12 @@ public:
     void bind_player_collision(EventVm&);
     NJS_POINT3 move_player(NJS_POINT3 from,NJS_POINT3 to,int movement,bool run,int turn=0);
     void check_player_floor(NJS_POINT3 position,Angle yaw,int floor);
+    // *(int*)&plp->mode0 of the collision-owned player work (mode0..mode3,
+    // little endian). bhCheckWallEx writes 2/0x102 for a fire wall.
+    unsigned player_mode()const{return collision_mode_;}
+    void set_player_mode(unsigned mode){collision_mode_=mode;}
+    // Free player motion with an explicit EXP_WORK arp (bhCPM0_damage).
+    NJS_POINT3 move_player_arp(NJS_POINT3 from,NJS_POINT3 to,float arp){return resolve_player_motion(from,to,3.5f,player_character_?17.5f:16.5f,arp);}
 private:
     struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;};
     struct Context {unsigned kind=0,index=0,node=0,mode1=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
@@ -275,7 +281,9 @@ private:
     void init_en01(bool hard);
     void init_barrels();
     std::vector<Model> models_;
-    struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;};
+    struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
+        // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
+        std::optional<std::size_t> atr_link;};
     bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=false,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::map<unsigned,std::size_t> barrel_walls_;
     unsigned player_weapon_=0,effect_yk_ct_=0,presentation_flags_=~0u; // system.c initializes pt_flg to ~0u
     void control_player_effects();

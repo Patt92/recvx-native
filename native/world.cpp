@@ -791,7 +791,11 @@ void RoomWorld::sync_player_grab(){
 void RoomWorld::tick(){
     // objitm.c runs its object work before enemy movement; make the same
     // sys->metcp/mflrp snapshot visible to hitchk.c/en01 for this frame.
-    update_push();
+    ensure_push();update_push();
+    // bhControlObjItm -> bhObj001 (game.c:51): after the previous player pass,
+    // so the crate sees plp->psh_idx/stflg/mode3/spd of that pass.
+    if(push_){const unsigned cb_flg=collision_events_?collision_events_->flags[10][0]:0u,stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+        push_->control(cb_flg,collision_push_index_,stflg);sync_push_objects();}
     if(push_){const auto etc=push_->steps(),flr=push_->floors();
         recvx_en01_set_mobile_terrain(reinterpret_cast<const unsigned char*>(etc.data()),unsigned(etc.size()),reinterpret_cast<const unsigned char*>(flr.data()),unsigned(flr.size()));
     }else recvx_en01_set_mobile_terrain(nullptr,0,nullptr,0);
@@ -803,7 +807,9 @@ void RoomWorld::tick(){
     update_player_ground_work(); // player.c:1743-1762, immediately before bhControlEffect
     control_player_effects();
     set_effect_walls(&walls_,room_height_);set_effect_ground(&ground_,&effect_water_room_,&effect_water_mobile_);
-    if(simulation_flags_&8u)for(unsigned i=0;i<sprites_.size();++i){auto& work=sprites_[i];work.queued=false;if(work.hidden||!(work.sprite.flg&1)||(work.sprite.stflg&0x1000000u))continue;if(work.link&&work.link<=4){const auto pos=link_point(work.link-1,work.index,work.node,work.offset);work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;if(work.sprite.id==0&&work.link==1)if(const auto matrix=link_matrix(0,work.index,work.node))set_effect_link_matrix(work.node,matrix->value);}if(supported_effect_sprite(work.sprite.id)){step_effect_sprite(work.sprite,effect_context(),&work.queued);auto& e=entity(4,i);e.type=work.sprite.type;
+    if(simulation_flags_&8u)for(unsigned i=0;i<sprites_.size();++i){auto& work=sprites_[i];work.queued=false;if(work.hidden||!(work.sprite.flg&1)||(work.sprite.stflg&0x1000000u))continue;if(work.link&&work.link<=4){const auto pos=link_point(work.link-1,work.index,work.node,work.offset);work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;if(work.sprite.id==0&&work.link==1)if(const auto matrix=link_matrix(0,work.index,work.node))set_effect_link_matrix(work.node,matrix->value);}if(work.sprite.id==29&&work.atr_link){ // effsub1.c:5908 bhEff029: after 32 passes ((int*)lkwkp)[1] = ATR attr |= 0x40, slot freed
+            work.sprite.ct0=(work.sprite.ct0+1)&0x1f;if(!work.sprite.ct0){const auto at=*work.atr_link;if(at<walls_.size())walls_[at].attributes|=0x40u;else if(at-walls_.size()<enemy_mobile_walls_.size())enemy_mobile_walls_[at-walls_.size()].attributes|=0x40u;work.sprite.flg=0;}continue;}
+        if(supported_effect_sprite(work.sprite.id)){step_effect_sprite(work.sprite,effect_context(),&work.queued);auto& e=entity(4,i);e.type=work.sprite.type;
         if(work.dynamic){work.scale={work.sprite.sx,work.sprite.sy,work.sprite.sz};e.transform.position={work.sprite.px,work.sprite.py,work.sprite.pz};e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};}}}
     if(simulation_flags_&8u){process_effect_output();
     particles_.tick([this](const ParticleLink& link,NJS_POINT3 offset){return link_point(link.kind,link.index,link.node,offset);},[this](NJS_POINT3 probe){return !step_clear(probe,0.2f,0.01f);});}
@@ -999,11 +1005,12 @@ void RoomWorld::ensure_push(){
     if(push_||!player_asset_)return;
     std::vector<RECVX_PUSH_OBJECT> objects;
     for(const auto& pair:entities_){const auto& e=pair.second;if(pair.first.first!=2||(e.type&255)!=1||!(e.object_flags&1)||(e.object_flags&0x100000))continue;push_objects_.push_back(pair.first.second);objects.push_back({int(pair.first.second),e.object_flags,int(e.aspd),int(e.object_parameter),e.object_floor,e.transform.position.x,e.transform.position.y,e.transform.position.z});}
-    RECVX_PUSH_HOST host{};host.user=this;host.ply_id=player_character_;host.sound=[](void* u,int sound){auto& w=*static_cast<RoomWorld*>(u);w.audio_.play_room_sound(2,unsigned(sound)&255u,6);};host.set_effect=[](void* u,int id,const float* point,void* link,int node){auto& w=*static_cast<RoomWorld*>(u);EffectSpawn spawn;spawn.id=unsigned(id);spawn.position={point[0],point[1],point[2]};spawn.has_offset=true;spawn.offset={point[3],point[4],point[5]};spawn.linked_work=link;spawn.lkono=node;return w.spawn_effect(spawn);};
-    push_=std::make_unique<PlayerPush>(walls_,room_height_,floors_,objects,*player_asset_,host);
-    // Original rom->etcp/flrp remain distinct from bhObj001's mobile areas.
-    BinaryView v(room_);auto areas=[&](unsigned offset,unsigned count_offset){std::vector<RECVX_STAIR_AREA> out;const auto base=v.u32(header_+offset),n=v.u32(header_+count_offset);v.require(base,n*36);for(unsigned i=0;i<n;++i){const auto p=base+i*36;out.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),std::int8_t(v.u8(p+3)),v.u32(p+4),v.f32(p+8),v.f32(p+12),v.f32(p+16),v.f32(p+20),v.f32(p+24),v.f32(p+28),v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)});}return out;};
-    push_->terrain(areas(0x1c,0x9c),areas(0x20,0xa0));
+    // CallPlayerActionSe(sys->psh_snd, 1): bank (n>>8)&15, list n&255.
+    RECVX_PUSH_HOST host{};host.user=this;host.ply_id=player_character_;host.sound=[](void* u,int sound){auto& w=*static_cast<RoomWorld*>(u);w.audio_.play_room_sound(2,unsigned(sound)&255u,6);};
+    // StartVibrationEx has no native driver; report it like door.c's shake.
+    host.vibration=[](void* u,int type,int pattern){auto& w=*static_cast<RoomWorld*>(u);const auto why="StartVibrationEx("+std::to_string(type)+", "+std::to_string(pattern)+")";
+        if(std::find(w.audio_.unavailable.begin(),w.audio_.unavailable.end(),why)==w.audio_.unavailable.end())w.audio_.unavailable.push_back(why);};
+    push_=std::make_unique<PlayerPush>(room_height_,floors_,objects,*player_asset_,host);
 }
 std::vector<CollisionWall> RoomWorld::collision_geometry()const{auto out=walls_;out.insert(out.end(),enemy_mobile_walls_.begin(),enemy_mobile_walls_.end());if(push_){const auto mobile=push_->walls();out.insert(out.end(),mobile.begin(),mobile.end());}return out;}
 std::optional<CollisionWall> RoomWorld::collision_contact(NJS_POINT3 probe,unsigned flags,float radius,float height)const{return effect_wall(collision_geometry(),room_height_,probe,flags,radius,height);}
@@ -1042,9 +1049,22 @@ void RoomWorld::update_player_ground_work(){
     player_ground_.hit=ground_.hit();
     player_ground_ready_=true;
 }
-void RoomWorld::update_push(){if(push_){push_->enabled(simulation_flags_);push_->update_walls(walls_);for(unsigned i=0;i<push_objects_.size();++i){const auto& e=entity(2,push_objects_[i]);push_->update_object(i,e.transform.position,e.hidden||e.inactive);}}update_ground_geometry();}
+// Draw state (mdflg 1, `hidden`) does not stop bhControlObjItm: only flg 1
+// and stflg 0x1000000 do, and both stay with the crate work.
+void RoomWorld::update_push(){if(push_){push_->enabled(simulation_flags_);auto prefix=walls_;prefix.insert(prefix.end(),enemy_mobile_walls_.begin(),enemy_mobile_walls_.end());push_->update_walls(prefix);for(unsigned i=0;i<push_objects_.size();++i)push_->update_object(i,entity(2,push_objects_[i]).transform.position);}update_ground_geometry();}
 void RoomWorld::sync_push_objects(){if(push_)for(unsigned i=0;i<push_objects_.size();++i)entity(2,push_objects_[i]).transform.position=push_->object(i);update_ground_geometry();}
-bool RoomWorld::tick_push(bool forward){if(!pushing())return false;update_push();push_->tick(forward,player_character_,push_health(),player_weapon_<10?0:1,player_,motion_,frame_);push_pose_=true;player_action=push_->active();sync_push_objects();return true;}
+bool RoomWorld::tick_push(bool forward){
+    if(!pushing())return false;
+    update_push();
+    auto actor=motion_actor();const auto from=player_.position;
+    push_->tick(forward,actor.flags,actor.status,actor.system,collision_flags2_,player_,motion_,frame_);
+    collision_push_count_=0; // bhCPM1_act_bas: mode2 != 3
+    // bhControlPlayer's bhCheckWallEx probe/body pass and bhCheckFloorP after
+    // the action; bhCPM2_act_psh case 0 set exp0->arp = 0.
+    if(collision_events_)collision_events_->player_flags=collision_events_->flags[13][0];
+    player_.position=resolve_player_motion(from,player_.position,3.5f,player_character_?17.5f:16.5f,0.f);
+    push_pose_=true;player_action=push_->active();return true;
+}
 std::vector<RECVX_STAIR_AREA> RoomWorld::push_steps(){ensure_push();update_push();return push_?push_->steps():std::vector<RECVX_STAIR_AREA>{};}
 std::vector<RECVX_STAIR_AREA> RoomWorld::push_floors(){ensure_push();update_push();return push_?push_->floors():std::vector<RECVX_STAIR_AREA>{};}
 NJS_POINT3 RoomWorld::move(NJS_POINT3 from,NJS_POINT3 to,float radius,float height,std::optional<bool> walking){
@@ -1067,11 +1087,17 @@ MotionActor RoomWorld::motion_actor(){
     auto& system=collision_events_?collision_events_->flags[5][0]:collision_system_;
     return {flags,status,collision_flags2_,control,system,collision_mode_,collision_floor_,
         collision_push_count_,collision_push_index_,collision_floor_sound_,collision_foot_effect_,
-        collision_step_,player_.yaw,true,[this](CollisionWall&){
-            // The existing effect owner rejects id29 explicitly. Do not
-            // clear attr0x40 or fabricate a rendered wall action on failure.
-            unbound_enemy_.insert("player wall attr0x40: effect29 and hurt-state continuation unported");
-            return false;
+        collision_step_,player_.yaw,true,[this](CollisionWall&,std::size_t index){
+            // hitchk.c:287 bhSetEffect(29, &plp->px, &hp->flg, 0): first slot
+            // with !(flg & 3); the caller then clears flg 0x80 and attr 0x40.
+            // bhObj001 ATR works are PlayerPush's; their link is not bound.
+            if(index>=walls_.size()+enemy_mobile_walls_.size()){unbound_enemy_.insert("bhEff029: Link auf bhObj001-ATR (PlayerPush)");return false;}
+            std::vector<unsigned> flags;flags.reserve(sprites_.size());for(const auto& slot:sprites_)flags.push_back(slot.sprite.flg);
+            const int free_slot=original_effect_slot(flags);if(free_slot<0)return false;
+            SpriteWork work;work.sprite.id=29;work.sprite.flg=1;work.sprite.tex_id=-1;work.sprite.px=player_.position.x;work.sprite.py=player_.position.y;work.sprite.pz=player_.position.z;
+            work.scale={1,1,1};work.dynamic=true;work.queued=false;work.atr_link=index;
+            const unsigned slot=unsigned(free_slot);if(slot<sprites_.size())sprites_[slot]=work;else{entity(4,slot);sprites_.push_back(work);}
+            auto& e=entity(4,slot);e.transform.position=player_.position;e.angles={};e.hidden=false;return true;
         }};
 }
 std::vector<CollisionWall> RoomWorld::motion_steps()const{
@@ -1100,6 +1126,13 @@ void RoomWorld::check_player_floor(NJS_POINT3 position,Angle yaw,int floor){
     if(collision_events_){collision_events_->values[16]=unsigned(collision_floor_index_);collision_events_->player_flags=actor.flags;}
 }
 NJS_POINT3 RoomWorld::move_player(NJS_POINT3 from,NJS_POINT3 to,int movement,bool run,int turn){
+    // bhCPM2_act_wlk (player.c:2403): psh_ct of the earlier passes > 5 and
+    // no stflg 0x80 enters bhCPM2_act_psh; the walk step of this frame and its
+    // wall pass still run.  bhCPM1_act_bas then clears psh_ct (mode2 != 3).
+    if(movement>0&&!run&&!turn&&player_asset_&&(simulation_flags_&1u)){ensure_push();
+        auto actor=motion_actor();
+        if(push_&&push_->begin(collision_push_count_,player_,push_health(),player_weapon_<10?0:1,actor.flags,actor.status,actor.system)){
+            collision_push_count_=0;if(collision_events_)collision_events_->player_flags=collision_events_->flags[13][0];}}
     // bhCPM1_act_bas retains psh_ct only in straight walking mode2==3.
     if(movement<=0||run||turn)collision_push_count_=0;
     // bhCPM2_act_std/wlk/run/bak's actual arp values, not a probe heuristic.
@@ -1132,8 +1165,10 @@ NJS_POINT3 RoomWorld::resolve_player_motion(NJS_POINT3 from,NJS_POINT3 to,float 
         resolve_motion_wall(terrain,actor,to,from,radius,height);
         if(!hit)collision_safe_={probe.x,to.y,probe.z};
     }else{actor.status&=~1u;resolve_motion_wall(terrain,actor,to,from,radius,height);collision_safe_=to;}
-    // Preserve mutable room ATR attributes changed by a push contact.
+    // Preserve mutable room ATR attributes changed by a push contact, and the
+    // attr 0x20000 the pass put on a bhObj001 wall (read by the crate).
     for(std::size_t i=0;i<walls_.size();++i)walls_[i].attributes=geometry[i].attributes;
+    if(push_)push_->store_walls(geometry,walls_.size()+enemy_mobile_walls_.size());
     check_motion_floor(terrain,actor,to,collision_safe_,collision_front_offset_,radius,collision_floor_index_);
     if(collision_events_){collision_events_->values[16]=unsigned(collision_floor_index_);collision_events_->player_flags=actor.flags;}
     return to;

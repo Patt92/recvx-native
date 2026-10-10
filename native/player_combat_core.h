@@ -303,6 +303,10 @@ void recvx_combat_tick(RECVX_COMBAT_CORE* core, RECVX_COMBAT_SYS* sys, RECVX_COM
 /* Nach bhCalcModel (owp_mtx neu): Messerabfrage player.c:1689-1724,
    st_flg 0x4 bei flg 0x4 (player.c:1726) und bhObjWpn. */
 void recvx_combat_after_model(RECVX_COMBAT_CORE* core, RECVX_COMBAT_SYS* sys, RECVX_COMBAT_RESULT* out);
+/* Motion.c:969 AngZyxToYzx / :991 AngYzxToZyx, wie SetOneObjectMotion
+   (playpch.c:231) sie fuer die Knotenblende nutzt; fuer Regressionstests. */
+void recvx_combat_ang_zyx_to_yzx(const int32_t zyx[3], int32_t yzx[3]);
+void recvx_combat_ang_yzx_to_zyx(const int32_t yzx[3], int32_t zyx[3]);
 
 #ifdef __cplusplus
 }
