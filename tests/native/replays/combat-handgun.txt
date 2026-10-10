@@ -1,0 +1,17 @@
+# A01-A04 Spielerkampf in der Runtime: originaler Steve-Ablauf laeuft durch,
+# der M93R wird per Skript uebergeben und automatisch ausgeruestet, danach
+# Zieltaste halten (bhCPM0_action -> bhCPM2_act_suw -> bhCPM2_act_wpn),
+# zweimal abdruecken (bhCPM2_act_atk) und wieder wegstecken (bhCPM2_act_wre).
+# Keine Positionssetzung, keine Flagbearbeitung, kein Debug-Inventar und
+# keine Cinematic-Abkuerzung.
+0 keys forward
+90 keys none
+3200 confirm
+# Zieltaste halten; das Ziehen braucht die vollen Frames der Motion
+# PlMtnWpn[0], erst danach gilt at_flg 0x10.
+3400 keys aim
+3500 keys aim attack
+3503 keys aim
+3560 keys aim attack
+3563 keys aim
+3640 keys none

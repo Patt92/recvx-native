@@ -1,0 +1,11 @@
+# RM_0021: walk into the burning helicopter wreck (ATR wall 9, type 3, attr 0x48).
+# Diagnostic position. Expected: bhCPM0_damage (motion 71, voice, push back),
+# afterwards free control; the wall burns again after bhEff029 (32 passes).
+# recvx-runtime --data data --room RM_0021.RDX --in-game --replay tests/native/replays/rm0021-fire.txt --frames 300
+5 position 52 0 152 0
+10 keys forward
+60 keys none
+70 keys back
+150 keys none
+160 inventory
+200 inventory

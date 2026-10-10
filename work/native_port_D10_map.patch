@@ -1,0 +1,161 @@
+D10 - Kartenbildschirm: Anschluesse fuer den Integrator
+=======================================================
+
+Eigene, fertige Dateien (nicht in diesem Patch, liegen im Arbeitsbaum):
+  native/map_tables.h, native/map_tables.c   Originaldatentabellen aus map.c
+  native/map_screen.h, native/map_screen.cpp Mechanismus (bhInitMap/bhControlMap/
+                                             bhExitMap, Tasks, Code-Interpreter,
+                                             Tag-/Verbindungsgraph, Zeichenliste)
+  tests/native/map_screen_test.cpp           Komponententest
+  tools/verify_map.py                        Runtime-Pruefung
+
+Dieser Patch enthaelt nur die Anschluesse an fremde Dateien. Teil A sind
+anwendbare Diff-Hunks (CMakeLists.txt, native/ui.h, native/ui.cpp), Teil B ist
+der Schnittstellenvertrag fuer native/runtime.cpp: dort bestehen die
+betreffenden Anweisungen aus einzelnen, ueber 2000 Zeichen langen Zeilen, an
+denen ein Kontext-Diff nicht zuverlaessig anwendbar bleibt, solange Peers in
+derselben Datei arbeiten.
+
+Stand der Kontextzeilen: Arbeitsbaum vom 2026-10-10. Vor dem Anwenden pruefen,
+ob Peers die Ankerzeilen veraendert haben.
+
+
+Teil A - anwendbare Hunks
+=========================
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -100,3 +100,3 @@
+ # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
+-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/en01_damage.c native/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/player_head.c native/adx_tables.c)
++add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/en01_damage.c native/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/player_head.c native/adx_tables.c native/map_screen.cpp native/map_tables.c)
+ target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
+@@ -241,4 +241,8 @@
+   add_executable(recvx-view-clip-tests tests/native/view_clip_test.cpp)
+   target_link_libraries(recvx-view-clip-tests PRIVATE recvx_game)
+   add_test(NAME original_view_clip COMMAND recvx-view-clip-tests)
++  add_executable(recvx-map-tests tests/native/map_screen_test.cpp)
++  target_link_libraries(recvx-map-tests PRIVATE recvx_game recvx_math)
++  add_test(NAME original_map_screen COMMAND recvx-map-tests
++    "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/data")
+   add_executable(recvx-inventory-tests tests/native/inventory_menu_test.cpp)
+
+--- a/native/ui.h
++++ b/native/ui.h
+@@ -63,3 +63,6 @@
+     bool nav=false,nav_pressed=false;
+     unsigned maincsr=3,nav_wait=0;
++    // MainCommand MAP (maincsr 2): the status screen asks the runtime for the
++    // map task, as system.c:853 enters bhInitMap(MP_SET_SUB) from the sub screen.
++    bool map_requested=false;
+     StatusSlide slide;
+
+--- a/native/ui.cpp
++++ b/native/ui.cpp
+@@ -256,3 +256,3 @@
+         if(key==MenuInput::Left&&maincsr){--maincsr;feedback_sound=2;}else if(key==MenuInput::Right&&maincsr<3){++maincsr;feedback_sound=2;}
+-        else if(key==MenuInput::Confirm){if(maincsr==2)feedback_sound=1;else{nav_wait=4;nav_pressed=true;feedback_sound=3;}} // MAP needs the map screen (not ported): error SE
++        else if(key==MenuInput::Confirm){if(maincsr==2){map_requested=true;nav_wait=4;nav_pressed=true;feedback_sound=3;}else{nav_wait=4;nav_pressed=true;feedback_sound=3;}} // MAP raises the map task (map.c), confirm SE like the other buttons
+         return true;}
+
+
+Teil B - Schnittstellenvertrag native/runtime.cpp
+=================================================
+
+Die vier Eingriffe sind klein, liegen aber in sehr langen Einzelzeilen. Anker
+und einzufuegender Code:
+
+B1. Kopf und Objekt
+    Anker: `#include "computer.h"` (Zeile 12) und die Objektzeile 204
+    (`recvx::BoxMenu box_menu;recvx::ComputerTerminal computer(args.data);...`).
+
+        #include "map_screen.h"
+        ...
+        recvx::MapScreen map_screen;bool map_active=false;
+
+B2. Dienste und Host binden (einmalig, bei den anderen Bindungen um Zeile 465)
+
+        recvx::MapServices map_services;
+        map_services.flag_check=[&](unsigned group,unsigned index){
+            return events&&events->flag(group,index);};
+        map_services.flag_set=[&](unsigned group,unsigned index,unsigned mode){
+            if(events)events->set_flag(group,index,mode);};
+        map_services.inventory_slots=[&]{return inventory.slots();};
+        map_services.read_inside_file=[&](unsigned partition,unsigned file){
+            /* sys->dor_partid == 5 == MRY.AFS (sdfunc.c:441). */
+            return archive_read(partition,file);};
+        map_services.call_system_se=[&](int type,int number){
+            audio.play_system_se(type,number);};
+        map_services.set_screen_fade=[&](std::uint32_t color,float speed){
+            set_screen_fade(color,speed);};
+
+        auto map_host=[&]{
+            recvx::MapHost h;
+            h.ply_id=inventory.player;h.stg_no=stage_no;h.rom_no=room_no;
+            h.player_x=actor.position.x;h.player_y=actor.position.y;h.player_z=actor.position.z;
+            h.player_ay=actor.yaw;
+            h.pad_ps=pad_ps;h.pad_al=pad_al;h.pad_ar=pad_ar;h.pad_ax=pad_ax;h.pad_ay=pad_ay;
+            h.keytype=input_config.keytype;
+            h.st_flg=events?events->flags[5][0]:0u;
+            h.cb_flg=events?events->flags[10][0]:0u;
+            h.fade_pbk=fade_pbk;h.dor_partid=5;h.screen_dist=500.0f;
+            return h;};
+
+    `archive_read(partition,file)` ist der vorhandene AFS-Leser fuer
+    data/archives/MRY/<file>.bin; er muss die ganze Datei liefern oder einen
+    leeren Vektor, wenn die Datei nicht geoeffnet werden kann (Originalpfad
+    fil_mode 1).
+
+B3. Eintritt, Tick und Austritt
+    Anker: der Block um `computer.begin(*events);` (Zeilen 853 und 942) sowie
+    die `terminal`-Vorrangbedingung in derselben Zeile. Der Kartentask verhaelt
+    sich genau wie der Terminaltask: solange er laeuft, besitzt er den Pass.
+
+        /* system.c:853 - der Statusbildschirm ruft bhInitMap(MP_SET_SUB). */
+        if(ui&&ui->map_requested&&!map_active&&events){
+            ui->map_requested=false;
+            events->flags[11][0]|=0x80000u;          /* sys->gm_flg |= 0x80000 */
+            map_screen.init(RECVX_MP_SET_SUB,map_host(),map_services);
+            map_screen.set_map(); map_active=true;}
+
+        if(map_active){
+            if(!map_screen.control(map_host())){
+                map_screen.exit();
+                if(map_screen.game_map_flag_cleared())
+                    events->flags[11][0]&=~0x80000u;  /* bhExitMap, map.c:243 */
+                map_active=false;}
+            else decode_map_assets();}
+
+    `terminal`/`computer.active()` in den beiden grossen Tick-Zeilen um
+    `|| map_active` erweitern, damit Events, Welt, Kamera und Spielerlogik
+    waehrend der Karte ruhen (wie bei `computer.active()`).
+
+B4. Modelle, Texturen und Zeichnen
+    `decode_map_assets()` uebergibt die geladenen Pakete an die vorhandenen
+    Dekoder und meldet die Objekte zurueck:
+
+        for(const auto& chunk:map_screen.marker_models()) /* bhMlbBinRealize */
+        map_screen.stage_model()  /* MDL der Etagenkarte */
+        map_screen.stage_texture(), map_screen.map_texture() /* bhSetMemPvpTexture */
+        map_screen.set_map_objects(objects); /* fuehrt MapPurgeTree aus */
+
+    Gezeichnet wird aus `map_screen.draw_list()`. Die Satzarten sind
+    MapDraw::Kind::Fill (njDrawPolygon2D, Attribut 0x60), Line (njDrawLine2D,
+    Attribut 0 bzw. 0x40), Sprite (njDrawSprite2D, Attribut 0x22, TexAnm-Index
+    und Konstantmaterial), Marker und MapObject (njCnkEasyMultiDrawObject mit
+    Weltmatrix und Konstantmaterial) sowie Compass (njDrawPolygon3DEx mit
+    recvx_map_cmp_arw). Fuer Fill, Line und Sprite fehlen in native/scene.h
+    (scene.h:58 SceneTriangle, scene.h:72 SceneLine) ein 2D-Sprite, eine
+    Bildschirmflaeche und ein Konstantmaterial-Modellaufruf; das ist die
+    offene Luecke, nicht Teil dieses Pakets.
+
+B5. Zustandsausgabe fuer tools/verify_map.py
+    In der `--state`-Ausgabe (Zeile 833) eine `"map"`-Sektion ergaenzen:
+
+        "map": {"active":<bool>, "status":<int>, "mode":<int>, "no_map":<bool>,
+                "draws":<int>, "tags":<int>, "partition":<int>,
+                "requested_files":[<int>,...], "item_flags":{"96":<bool>,...}}
+
+    Quellen: MapScreen::status/mode/no_map, draw_list().size(), tags().size(),
+    requested_files(), und fuer item_flags die Gruppe 9 aus EventVm fuer jede
+    flg_no in recvx_map_itm_dat.

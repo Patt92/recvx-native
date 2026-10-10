@@ -1,0 +1,2003 @@
+{
+  "date": "2026-10-09",
+  "quarantine": "archived/FORBIDDEN_DONTUSE",
+  "policy": "No reading, reuse, restoration, generation, compilation, linking or execution by agents. Recovery only after a new explicit user authorization.",
+  "moves": [
+    {
+      "source": "native/core_chunk_vu.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_chunk_vu.h"
+    },
+    {
+      "source": "native/core_effect.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_effect.c"
+    },
+    {
+      "source": "native/core_enemy_arena.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_enemy_arena.c"
+    },
+    {
+      "source": "native/core_enemy_arena.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_enemy_arena.h"
+    },
+    {
+      "source": "native/core_enemy_interaction.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_enemy_interaction.c"
+    },
+    {
+      "source": "native/core_enemy_interaction.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_enemy_interaction.h"
+    },
+    {
+      "source": "native/core_gs.cpp",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_gs.cpp"
+    },
+    {
+      "source": "native/core_gs.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_gs.h"
+    },
+    {
+      "source": "native/core_gs_glue.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_gs_glue.c"
+    },
+    {
+      "source": "native/core_model.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_model.c"
+    },
+    {
+      "source": "native/core_model.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_model.h"
+    },
+    {
+      "source": "native/core_ninja_ex.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_ninja_ex.c"
+    },
+    {
+      "source": "native/core_njplus_collision.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_njplus_collision.c"
+    },
+    {
+      "source": "native/core_njplus_collision.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_njplus_collision.h"
+    },
+    {
+      "source": "native/core_njplus_memory.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_njplus_memory.c"
+    },
+    {
+      "source": "native/core_njplus_modelstate.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_njplus_modelstate.c"
+    },
+    {
+      "source": "native/core_njplus_skin.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_njplus_skin.c"
+    },
+    {
+      "source": "native/core_object.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_object.c"
+    },
+    {
+      "source": "native/core_platform.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_platform.h"
+    },
+    {
+      "source": "native/core_vu0.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_vu0.c"
+    },
+    {
+      "source": "native/core_vu0.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/core_vu0.h"
+    },
+    {
+      "source": "native/main_globals.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/main_globals.c"
+    },
+    {
+      "source": "native/recvx_ptr32.c",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/recvx_ptr32.c"
+    },
+    {
+      "source": "native/recvx_ptr32.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/recvx_ptr32.h"
+    },
+    {
+      "source": "native/enemy_ai.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/enemy_ai.h"
+    },
+    {
+      "source": "native/status_platform.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/status_platform.h"
+    },
+    {
+      "source": "tools/generate_enemy_sources.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_enemy_sources.py"
+    },
+    {
+      "source": "tools/generate_enemy_ai.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_enemy_ai.py"
+    },
+    {
+      "source": "tools/generate_status_sources.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_status_sources.py"
+    },
+    {
+      "source": "tools/generate_core_njplus.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_core_njplus.py"
+    },
+    {
+      "source": "tools/generate_core_njplus_skin.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_core_njplus_skin.py"
+    },
+    {
+      "source": "tools/generate_weapon_flash.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_weapon_flash.py"
+    },
+    {
+      "source": "tests/native/core_enemy_layout_test.cpp",
+      "destination": "archived/FORBIDDEN_DONTUSE/tests/native/core_enemy_layout_test.cpp"
+    },
+    {
+      "source": "tests/native/core_model_test.cpp",
+      "destination": "archived/FORBIDDEN_DONTUSE/tests/native/core_model_test.cpp"
+    },
+    {
+      "source": "tests/native/core_enemy_interaction_test.cpp",
+      "destination": "archived/FORBIDDEN_DONTUSE/tests/native/core_enemy_interaction_test.cpp"
+    },
+    {
+      "source": "tests/native/core_effect_test.cpp",
+      "destination": "archived/FORBIDDEN_DONTUSE/tests/native/core_effect_test.cpp"
+    },
+    {
+      "source": "tests/native/core_njplus_test.cpp",
+      "destination": "archived/FORBIDDEN_DONTUSE/tests/native/core_njplus_test.cpp"
+    },
+    {
+      "source": "tests/native/core_object_test.cpp",
+      "destination": "archived/FORBIDDEN_DONTUSE/tests/native/core_object_test.cpp"
+    },
+    {
+      "source": "tests/native/vu_oracle.h",
+      "destination": "archived/FORBIDDEN_DONTUSE/tests/native/vu_oracle.h"
+    },
+    {
+      "source": "tests/native/vu_oracle.cpp",
+      "destination": "archived/FORBIDDEN_DONTUSE/tests/native/vu_oracle.cpp"
+    },
+    {
+      "source": "archived/core32-20261008",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/core32-20261008"
+    },
+    {
+      "source": "archived/core-enemy-world-20261009",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/core-enemy-world-20261009"
+    },
+    {
+      "source": "archived/en07-bat-draft-20261008",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/en07-bat-draft-20261008"
+    },
+    {
+      "source": "archived/handoff-20261009",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/handoff-20261009"
+    },
+    {
+      "source": "archived/references/VeronicaRecomp",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/references/VeronicaRecomp"
+    },
+    {
+      "source": "build/macos-arm64/recvx-core-model-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-core-model-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-core-njplus-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-core-njplus-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-core-enemy-interaction-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-core-enemy-interaction-tests"
+    },
+    {
+      "source": "build/native/librecvx_original_status.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_original_status.a"
+    },
+    {
+      "source": "build/native/recvx-core-enemy-arena-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-core-enemy-arena-tests"
+    },
+    {
+      "source": "build/native/librecvx_core_view.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_view.a"
+    },
+    {
+      "source": "build/native/recvx-core-model-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-core-model-tests"
+    },
+    {
+      "source": "build/native/librecvx_original_engine.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_original_engine.a"
+    },
+    {
+      "source": "build/native/recvx-core-njplus-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-core-njplus-tests"
+    },
+    {
+      "source": "build/native/recvx-core-enemy-interaction-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-core-enemy-interaction-tests"
+    },
+    {
+      "source": "build/native/librecvx_core_enemy_arena.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_enemy_arena.a"
+    },
+    {
+      "source": "build/native/recvx-core-enemy-layout-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-core-enemy-layout-tests"
+    },
+    {
+      "source": "build/native/recvx-core-actor-assets-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-core-actor-assets-tests"
+    },
+    {
+      "source": "build/native/librecvx_core_enemy_interaction.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_enemy_interaction.a"
+    },
+    {
+      "source": "build/native/librecvx_core_ninja.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_ninja.a"
+    },
+    {
+      "source": "build/native/recvx-core-effect-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-core-effect-tests"
+    },
+    {
+      "source": "build/native/librecvx_core_enemy_world.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_enemy_world.a"
+    },
+    {
+      "source": "build/native/librecvx_core_model.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_model.a"
+    },
+    {
+      "source": "build/native/librecvx_core_njplus.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_njplus.a"
+    },
+    {
+      "source": "build/native/librecvx_core_effect.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_effect.a"
+    },
+    {
+      "source": "build/native/librecvx_core_actor_assets.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_actor_assets.a"
+    },
+    {
+      "source": "build/native/librecvx_core_object.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/librecvx_core_object.a"
+    },
+    {
+      "source": "build/macos-arm64/recvx-core-effect-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-core-effect-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-core-object-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-core-object-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-core-enemy-layout-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-core-enemy-layout-tests"
+    },
+    {
+      "source": "build/native/recvx-core-object-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-core-object-tests"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_enemy_interaction.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_enemy_interaction.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx-core-actor-assets-tests.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx-core-actor-assets-tests.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_enemy_arena.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_enemy_arena.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_original_status.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_original_status.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx-core-model-tests.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx-core-model-tests.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_ninja.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_ninja.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx-core-enemy-arena-tests.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx-core-enemy-arena-tests.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx-core-enemy-interaction-tests.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx-core-enemy-interaction-tests.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_actor_assets.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_actor_assets.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_effect.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_effect.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_object.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_object.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_original_core32.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_original_core32.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx-core-njplus-tests.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx-core-njplus-tests.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_njplus.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_njplus.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx-core-object-tests.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx-core-object-tests.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx-core-enemy-layout-tests.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx-core-enemy-layout-tests.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx-core-effect-tests.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx-core-effect-tests.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_enemy_world.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_enemy_world.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_original_engine.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_original_engine.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_view.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_view.dir"
+    },
+    {
+      "source": "build/native/CMakeFiles/recvx_core_model.dir",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/CMakeFiles/recvx_core_model.dir"
+    },
+    {
+      "source": "build/native/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/recvx-runtime"
+    },
+    {
+      "source": "build/native/generated/enemy",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/generated/enemy"
+    },
+    {
+      "source": "build/native/generated/status",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native/generated/status"
+    },
+    {
+      "source": "build/packages/macos-arm64-v0.5/RECVX Native.app/Contents/MacOS/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/packages/macos-arm64-v0.5/RECVX Native.app/Contents/MacOS/recvx-runtime"
+    },
+    {
+      "source": "build/packages/macos-arm64-v0.5/RECVX Native.app/Contents/MacOS/Start",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/packages/macos-arm64-v0.5/RECVX Native.app/Contents/MacOS/Start"
+    },
+    {
+      "source": "tools/check_no_original_core.py (snapshot before rewrite)",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/check_no_original_core.pre-cleanup.py"
+    },
+    {
+      "source": "build/native (remaining stale cache after individual quarantine moves)",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native_remaining_cache"
+    },
+    {
+      "source": "archived/builds",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/builds"
+    },
+    {
+      "source": "archived/releases/arm64-before-20261006-150523/macos-universal-build",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/arm64-before-20261006-150523/macos-universal-build"
+    },
+    {
+      "source": "archived/releases/progression-before-20261006-095700/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/progression-before-20261006-095700/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/progression-before-20261006-095700/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/progression-before-20261006-095700/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/progression-before-20261006-095700/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/progression-before-20261006-095700/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/title-clean-before-20261006-151332/macos-arm64-v0.5/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/title-clean-before-20261006-151332/macos-arm64-v0.5/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/title-clean-before-20261006-151332/windows-x64-v0.5/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/title-clean-before-20261006-151332/windows-x64-v0.5/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/windows-x64/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64/Start.cmd"
+    },
+    {
+      "source": "archived/releases/windows-x64/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/windows-x64/recvx-native.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64/recvx-native.exe"
+    },
+    {
+      "source": "archived/releases/claude-package-before-20261006-140806/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/claude-package-before-20261006-140806/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/inventory-read-before-20261007-152353/recvx-runtime-arm64",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/inventory-read-before-20261007-152353/recvx-runtime-arm64"
+    },
+    {
+      "source": "archived/releases/inventory-read-before-20261007-152353/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/inventory-read-before-20261007-152353/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/scanner-before-20261006-231151/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/scanner-before-20261006-231151/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/movement-before-20261005/macos/RECVX Native.app/Contents/MacOS/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/movement-before-20261005/macos/RECVX Native.app/Contents/MacOS/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/movement-before-20261005/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/movement-before-20261005/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.5-before-ui-corrections/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.5-before-ui-corrections/Start.cmd"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.5-before-ui-corrections/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.5-before-ui-corrections/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.5-before-ui-corrections/recvx-native.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.5-before-ui-corrections/recvx-native.exe"
+    },
+    {
+      "source": "archived/releases/status-nav-before-20261006-231850/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/status-nav-before-20261006-231850/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/audio-attachments-before-20261005-133817/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/audio-attachments-before-20261005-133817/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/audio-attachments-before-20261005-133817/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/audio-attachments-before-20261005-133817/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/file-pickup-before-20261008/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/file-pickup-before-20261008/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/file-pickup-before-20261008/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/file-pickup-before-20261008/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/macos-universal-v0.4/RECVX Native.app/Contents/MacOS/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/macos-universal-v0.4/RECVX Native.app/Contents/MacOS/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/macos-universal-v0.4/RECVX Native.app/Contents/MacOS/Start",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/macos-universal-v0.4/RECVX Native.app/Contents/MacOS/Start"
+    },
+    {
+      "source": "archived/releases/rebuild-before-20261007-082529/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/rebuild-before-20261007-082529/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/rebuild-before-20261007-082529/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/rebuild-before-20261007-082529/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/rebuild-before-20261007-082529/windows/recvx-native.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/rebuild-before-20261007-082529/windows/recvx-native.exe"
+    },
+    {
+      "source": "archived/releases/core-performance-before-20261006-160800/macos-arm64-v0.5/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/core-performance-before-20261006-160800/macos-arm64-v0.5/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/core-performance-before-20261006-160800/windows-x64-v0.5/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/core-performance-before-20261006-160800/windows-x64-v0.5/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/input-before-20261005/macos/RECVX Native.app/Contents/MacOS/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/input-before-20261005/macos/RECVX Native.app/Contents/MacOS/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/input-before-20261005/macos/RECVX Native.app/Contents/MacOS/Start",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/input-before-20261005/macos/RECVX Native.app/Contents/MacOS/Start"
+    },
+    {
+      "source": "archived/releases/input-before-20261005/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/input-before-20261005/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/input-before-20261005/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/input-before-20261005/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/macos-universal-v0.3/RECVX Native.app/Contents/MacOS/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/macos-universal-v0.3/RECVX Native.app/Contents/MacOS/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/macos-universal-v0.3/RECVX Native.app/Contents/MacOS/Start",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/macos-universal-v0.3/RECVX Native.app/Contents/MacOS/Start"
+    },
+    {
+      "source": "archived/releases/gameplay-fixes-before-20261007-143421/recvx-runtime-windows-x64.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/gameplay-fixes-before-20261007-143421/recvx-runtime-windows-x64.exe"
+    },
+    {
+      "source": "archived/releases/gameplay-fixes-before-20261007-143421/recvx-runtime-macos-arm64",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/gameplay-fixes-before-20261007-143421/recvx-runtime-macos-arm64"
+    },
+    {
+      "source": "archived/releases/pickup-slide-before-20261008-134109/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/pickup-slide-before-20261008-134109/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/pickup-slide-before-20261008-134109/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/pickup-slide-before-20261008-134109/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/enemy-se-split-before-20261009-103049/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/enemy-se-split-before-20261009-103049/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/world-control-before-20261005-233728/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/world-control-before-20261005-233728/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/world-control-before-20261005-233728/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/world-control-before-20261005-233728/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/world-control-before-20261005-233728/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/world-control-before-20261005-233728/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/box-slide-before-20261006-223620/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/box-slide-before-20261006-223620/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/core30-before-20261005-224356/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/core30-before-20261005-224356/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/core30-before-20261005-224356/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/core30-before-20261005-224356/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/core30-before-20261005-224356/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/core30-before-20261005-224356/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/claude-package-before-20261006-133658/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/claude-package-before-20261006-133658/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/debug-before-20261005-164349/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/debug-before-20261005-164349/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/debug-before-20261005-164349/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/debug-before-20261005-164349/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/debug-before-20261005-164349/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/debug-before-20261005-164349/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/combat-before-20261006-215740/windows-x64/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/combat-before-20261006-215740/windows-x64/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/combat-before-20261006-215740/macos-arm64/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/combat-before-20261006-215740/macos-arm64/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/combat-before-20261005-152523/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/combat-before-20261005-152523/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/combat-before-20261005-152523/recvx-runtime-windows.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/combat-before-20261005-152523/recvx-runtime-windows.exe"
+    },
+    {
+      "source": "archived/releases/menu-before-20261005/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/menu-before-20261005/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/menu-before-20261005/recvx-runtime-windows.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/menu-before-20261005/recvx-runtime-windows.exe"
+    },
+    {
+      "source": "archived/releases/item-view-before-20261005-230857/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/item-view-before-20261005-230857/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/item-view-before-20261005-230857/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/item-view-before-20261005-230857/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/item-view-before-20261005-230857/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/item-view-before-20261005-230857/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/doors-before-20261005/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/doors-before-20261005/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/doors-before-20261005/recvx-runtime-windows.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/doors-before-20261005/recvx-runtime-windows.exe"
+    },
+    {
+      "source": "archived/releases/gemini-fix-before-20261008/macos-arm64-v0.5/RECVX Native.app/Contents/MacOS/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/gemini-fix-before-20261008/macos-arm64-v0.5/RECVX Native.app/Contents/MacOS/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/gemini-fix-before-20261008/windows-x64-v0.5/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/gemini-fix-before-20261008/windows-x64-v0.5/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/macos-universal/RECVX Native.app/Contents/MacOS/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/macos-universal/RECVX Native.app/Contents/MacOS/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/macos-universal/RECVX Native.app/Contents/MacOS/Start",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/macos-universal/RECVX Native.app/Contents/MacOS/Start"
+    },
+    {
+      "source": "archived/releases/crate-edge-before-20261008/recvx-runtime-windows-x64.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/crate-edge-before-20261008/recvx-runtime-windows-x64.exe"
+    },
+    {
+      "source": "archived/releases/crate-edge-before-20261008/recvx-runtime-macos-arm64",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/crate-edge-before-20261008/recvx-runtime-macos-arm64"
+    },
+    {
+      "source": "archived/releases/claude-package-before-20261006-131214/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/claude-package-before-20261006-131214/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/arm64-before-20261006-150523/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/arm64-before-20261006-150523/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/damage-before-20261006-232315/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/damage-before-20261006-232315/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/claude-package-before-20261006-174814/recvx-runtime-macos-arm64",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/claude-package-before-20261006-174814/recvx-runtime-macos-arm64"
+    },
+    {
+      "source": "archived/releases/detector-before-20261006-211708/macos-arm64-v0.5/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/detector-before-20261006-211708/macos-arm64-v0.5/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/detector-before-20261006-211708/windows-x64-v0.5/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/detector-before-20261006-211708/windows-x64-v0.5/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/events-before-20261007-075606/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/events-before-20261007-075606/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/item-catalog-before-20261008/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/item-catalog-before-20261008/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/item-catalog-before-20261008/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/item-catalog-before-20261008/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/event-freeze-before-20261008/mac-recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/event-freeze-before-20261008/mac-recvx-runtime"
+    },
+    {
+      "source": "archived/releases/event-freeze-before-20261008/windows-recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/event-freeze-before-20261008/windows-recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/debug-before-20261005-165759/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/debug-before-20261005-165759/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/debug-before-20261005-165759/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/debug-before-20261005-165759/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/debug-before-20261005-165759/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/debug-before-20261005-165759/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/pickup-audio-before-20261006-202844/macos-arm64-v0.5/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/pickup-audio-before-20261006-202844/macos-arm64-v0.5/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/pickup-audio-before-20261006-202844/windows-x64-v0.5/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/pickup-audio-before-20261006-202844/windows-x64-v0.5/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/scanner-sound-before-20261007-080115/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/scanner-sound-before-20261007-080115/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/handoff-before-20261006-145909/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/handoff-before-20261006-145909/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/handoff-before-20261006-145909/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/handoff-before-20261006-145909/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/macos-universal-v0.5-before-ui-corrections/RECVX Native.app/Contents/MacOS/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/macos-universal-v0.5-before-ui-corrections/RECVX Native.app/Contents/MacOS/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/macos-universal-v0.5-before-ui-corrections/RECVX Native.app/Contents/MacOS/Start",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/macos-universal-v0.5-before-ui-corrections/RECVX Native.app/Contents/MacOS/Start"
+    },
+    {
+      "source": "archived/releases/bgm-room-before-20261007-145630/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/bgm-room-before-20261007-145630/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/bgm-room-before-20261007-145630/recvx-runtime-windows.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/bgm-room-before-20261007-145630/recvx-runtime-windows.exe"
+    },
+    {
+      "source": "archived/releases/grab-before-20261007-083632/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/grab-before-20261007-083632/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/grab-before-20261007-083632/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/grab-before-20261007-083632/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/grab-before-20261007-083632/windows/recvx-native.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/grab-before-20261007-083632/windows/recvx-native.exe"
+    },
+    {
+      "source": "archived/releases/status-slide-before-20261006-225644/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/status-slide-before-20261006-225644/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/events-before-20261007-080413/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/events-before-20261007-080413/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/event-conditions-before-20261006-083827/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/event-conditions-before-20261006-083827/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/event-conditions-before-20261006-083827/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/event-conditions-before-20261006-083827/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/event-conditions-before-20261006-083827/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/event-conditions-before-20261006-083827/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/item-box-before-20261008-133426/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/item-box-before-20261008-133426/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/item-box-before-20261008-133426/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/item-box-before-20261008-133426/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/item-box-before-20261008-133426/recvx-native.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/item-box-before-20261008-133426/recvx-native.exe"
+    },
+    {
+      "source": "archived/releases/file-folder-before-20261007-154445/recvx-runtime-arm64",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/file-folder-before-20261007-154445/recvx-runtime-arm64"
+    },
+    {
+      "source": "archived/releases/file-folder-before-20261007-154445/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/file-folder-before-20261007-154445/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/player-voice-before-20261007-084428/macos-recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/player-voice-before-20261007-084428/macos-recvx-runtime"
+    },
+    {
+      "source": "archived/releases/player-voice-before-20261007-084428/windows-recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/player-voice-before-20261007-084428/windows-recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/en07-before-20261009-0010/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/en07-before-20261009-0010/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/inventory-before-20261005-145337/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/inventory-before-20261005-145337/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/inventory-before-20261005-145337/recvx-runtime-windows.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/inventory-before-20261005-145337/recvx-runtime-windows.exe"
+    },
+    {
+      "source": "archived/releases/core30-before-20261005-224819/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/core30-before-20261005-224819/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/core30-before-20261005-224819/windows/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/core30-before-20261005-224819/windows/Start.cmd"
+    },
+    {
+      "source": "archived/releases/core30-before-20261005-224819/windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/core30-before-20261005-224819/windows/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/claude-package-before-20261006-132403/recvx-runtime-macos",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/claude-package-before-20261006-132403/recvx-runtime-macos"
+    },
+    {
+      "source": "archived/releases/events-before-20261006-214742/recvx-runtime-arm64",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/events-before-20261006-214742/recvx-runtime-arm64"
+    },
+    {
+      "source": "archived/releases/events-before-20261006-214742/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/events-before-20261006-214742/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/ai-before-20261007-081400/macos/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/ai-before-20261007-081400/macos/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/inventory-door-before-20261006-215426/macos-arm64-v0.5/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/inventory-door-before-20261006-215426/macos-arm64-v0.5/recvx-runtime"
+    },
+    {
+      "source": "archived/releases/inventory-door-before-20261006-215426/windows-x64-v0.5/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/inventory-door-before-20261006-215426/windows-x64-v0.5/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.3/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.3/Start.cmd"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.3/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.3/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.3/recvx-native.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.3/recvx-native.exe"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.4/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.4/Start.cmd"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.4/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.4/recvx-runtime.exe"
+    },
+    {
+      "source": "archived/releases/windows-x64-v0.4/recvx-native.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/releases/windows-x64-v0.4/recvx-native.exe"
+    },
+    {
+      "source": "tools/generate_view_clip.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_view_clip.py"
+    },
+    {
+      "source": "native/world.cpp (disabled core32 block only)",
+      "destination": "archived/FORBIDDEN_DONTUSE/native/world_core32_dead_block.cpp"
+    },
+    {
+      "source": "build/macos-arm64/recvx-archive-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-archive-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-face-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-face-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-world-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-world-assets"
+    },
+    {
+      "source": "build/macos-arm64/recvx-third-person-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-third-person-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-gameplay-bindings-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-gameplay-bindings-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-ammunition-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-ammunition-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-bgm-room-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-bgm-room-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-math-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-math-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-script-motion-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-script-motion-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-runtime"
+    },
+    {
+      "source": "build/macos-arm64/recvx-camera-return-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-camera-return-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-data-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-data-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-game-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-game-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-hd-texture-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-hd-texture-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-progression-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-progression-tests"
+    },
+    {
+      "source": "build/macos-arm64/CMakeFiles",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/CMakeFiles"
+    },
+    {
+      "source": "build/macos-arm64/recvx-inventory-engine-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-inventory-engine-tests"
+    },
+    {
+      "source": "build/macos-arm64/Makefile",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/Makefile"
+    },
+    {
+      "source": "build/macos-arm64/recvx-event-lifecycle-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-event-lifecycle-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-effect-pool-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-effect-pool-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-computer-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-computer-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-assets"
+    },
+    {
+      "source": "build/macos-arm64/.ninja_deps",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/.ninja_deps"
+    },
+    {
+      "source": "build/macos-arm64/cmake_install.cmake",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/cmake_install.cmake"
+    },
+    {
+      "source": "build/macos-arm64/build.ninja",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/build.ninja"
+    },
+    {
+      "source": "build/macos-arm64/recvx-audio",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-audio"
+    },
+    {
+      "source": "build/macos-arm64/recvx-push-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-push-tests"
+    },
+    {
+      "source": "build/macos-arm64/CTestTestfile.cmake",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/CTestTestfile.cmake"
+    },
+    {
+      "source": "build/macos-arm64/recvx-enemy-damage-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-enemy-damage-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-scene-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-scene-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-original-engine-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-original-engine-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-native",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-native"
+    },
+    {
+      "source": "build/macos-arm64/recvx-combat-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-combat-tests"
+    },
+    {
+      "source": "build/macos-arm64/Testing",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/Testing"
+    },
+    {
+      "source": "build/macos-arm64/recvx-view-clip-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-view-clip-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-matrix-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-matrix-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-continuity-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-continuity-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-frontend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-frontend-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-audio-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-audio-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-file-reader-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-file-reader-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-collision-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-collision-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-status-pulse-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-status-pulse-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-actor-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-actor-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-debug-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-debug-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-door-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-door-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-weapon-flash-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-weapon-flash-tests"
+    },
+    {
+      "source": "build/macos-arm64/CMakeCache.txt",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/CMakeCache.txt"
+    },
+    {
+      "source": "build/macos-arm64/recvx-snapshot-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-snapshot-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-chunk-blend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-chunk-blend-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-input-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-input-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-effect-debris-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-effect-debris-tests"
+    },
+    {
+      "source": "build/macos-arm64/DartConfiguration.tcl",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/DartConfiguration.tcl"
+    },
+    {
+      "source": "build/macos-arm64/recvx-texture-filter-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-texture-filter-tests"
+    },
+    {
+      "source": "build/macos-arm64/.ninja_log",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/.ninja_log"
+    },
+    {
+      "source": "build/macos-arm64/recvx-gameover-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-gameover-tests"
+    },
+    {
+      "source": "build/macos-arm64/recvx-inventory-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/macos-arm64/recvx-inventory-tests"
+    }
+    ,
+    {
+      "source": "build/core32",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/core32"
+    },
+    {
+      "source": "build/claude-snapshot",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/claude-snapshot"
+    },
+    {
+      "source": "build/generated",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/generated"
+    },
+    {
+      "source": "build/native-sanitize",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/native-sanitize"
+    },
+    {
+      "source": "build/source-check",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/source-check"
+    },
+    {
+      "source": "build/third-person",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/third-person"
+    },
+    {
+      "source": "build/windows-x64",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/windows-x64"
+    },
+    {
+      "source": "build/door_core_source.txt",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/door_core_source.txt"
+    },
+    {
+      "source": "build/zig-cache",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/zig-cache"
+    },
+    {
+      "source": "build/zig-global-cache",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/zig-global-cache"
+    },
+    {
+      "source": "build/zig-local-cache",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/zig-local-cache"
+    },
+    {
+      "source": "build/packages/windows-x64-v0.5/Start.cmd",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/packages/windows-x64-v0.5/Start.cmd"
+    },
+    {
+      "source": "build/packages/windows-x64-v0.5/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/packages/windows-x64-v0.5/recvx-runtime.exe"
+    },
+    {
+      "source": "build/packages/windows-x64-v0.5/recvx-native.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/packages/windows-x64-v0.5/recvx-native.exe"
+    }
+    ,
+    {
+      "source": "build/validation/script-motion-20261007/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/script-motion-20261007/recvx-runtime"
+    },
+    {
+      "source": "build/validation/script-motion-20261007/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/script-motion-20261007/recvx-runtime.exe"
+    },
+    {
+      "source": "build/validation/player-push-20261007/frozen/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/player-push-20261007/frozen/recvx-runtime"
+    },
+    {
+      "source": "build/validation/player-push-20261007/frozen/recvx-push-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/player-push-20261007/frozen/recvx-push-tests"
+    },
+    {
+      "source": "build/validation/player-push-20261007/frozen/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/player-push-20261007/frozen/recvx-runtime.exe"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-archive-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-archive-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-world-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-world-assets"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-third-person-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-third-person-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-math-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-math-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-runtime"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-data-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-data-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-game-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-game-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-hd-texture-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-hd-texture-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-progression-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-progression-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-inventory-engine-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-inventory-engine-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-assets"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-render-benchmark",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-render-benchmark"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-audio",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-audio"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-scene-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-scene-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-native",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-native"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-combat-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-combat-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-view-clip-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-view-clip-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-matrix-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-matrix-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-continuity-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-continuity-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-frontend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-frontend-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-audio-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-audio-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-collision-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-collision-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-status-pulse-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-status-pulse-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-actor-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-actor-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-debug-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-debug-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-door-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-door-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-snapshot-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-snapshot-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-chunk-blend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-chunk-blend-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-input-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-input-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-texture-filter-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-texture-filter-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/package-mac/recvx-inventory-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/package-mac/recvx-inventory-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-archive-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-archive-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-world-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-world-assets"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-third-person-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-third-person-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-math-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-math-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-runtime"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-data-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-data-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-game-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-game-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-hd-texture-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-hd-texture-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-progression-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-progression-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-inventory-engine-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-inventory-engine-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-assets"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-render-benchmark",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-render-benchmark"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-audio",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-audio"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-scene-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-scene-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-native",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-native"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-combat-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-combat-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-view-clip-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-view-clip-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-matrix-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-matrix-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-continuity-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-continuity-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-frontend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-frontend-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-audio-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-audio-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-collision-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-collision-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-status-pulse-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-status-pulse-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-actor-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-actor-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-debug-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-debug-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-door-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-door-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-snapshot-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-snapshot-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-chunk-blend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-chunk-blend-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-input-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-input-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-texture-filter-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-texture-filter-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/frozen-mac/recvx-inventory-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/frozen-mac/recvx-inventory-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-archive-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-archive-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-world-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-world-assets"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-third-person-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-third-person-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-math-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-math-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-runtime"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-data-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-data-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-game-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-game-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-hd-texture-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-hd-texture-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-progression-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-progression-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-inventory-engine-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-inventory-engine-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-assets"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-audio",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-audio"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-scene-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-scene-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-native",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-native"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-combat-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-combat-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-view-clip-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-view-clip-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-matrix-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-matrix-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-continuity-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-continuity-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-frontend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-frontend-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-audio-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-audio-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-collision-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-collision-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-status-pulse-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-status-pulse-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-actor-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-actor-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-debug-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-debug-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-door-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-door-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-snapshot-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-snapshot-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-chunk-blend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-chunk-blend-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-input-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-input-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-texture-filter-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-texture-filter-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-sanitize/recvx-inventory-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-sanitize/recvx-inventory-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-archive-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-archive-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-world-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-world-assets"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-third-person-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-third-person-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-math-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-math-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-runtime"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-data-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-data-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-game-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-game-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-hd-texture-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-hd-texture-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-progression-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-progression-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-inventory-engine-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-inventory-engine-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-assets"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-render-benchmark",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-render-benchmark"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-audio",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-audio"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-scene-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-scene-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-native",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-native"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-combat-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-combat-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-view-clip-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-view-clip-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-matrix-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-matrix-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-continuity-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-continuity-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-frontend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-frontend-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-audio-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-audio-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-collision-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-collision-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-status-pulse-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-status-pulse-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-actor-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-actor-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-debug-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-debug-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-door-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-door-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-snapshot-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-snapshot-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-chunk-blend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-chunk-blend-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-input-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-input-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-texture-filter-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-texture-filter-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-mac/recvx-inventory-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-mac/recvx-inventory-tests"
+    },
+    {
+      "source": "build/validation/inventory-door-20261006/release-windows/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/inventory-door-20261006/release-windows/recvx-runtime.exe"
+    },
+    {
+      "source": "build/validation/item-catalog-20261008/frozen/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/item-catalog-20261008/frozen/recvx-runtime"
+    },
+    {
+      "source": "build/validation/item-catalog-20261008/frozen/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/item-catalog-20261008/frozen/recvx-runtime.exe"
+    },
+    {
+      "source": "build/validation/item-face-20261007/recvx-runtime-verified",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/item-face-20261007/recvx-runtime-verified"
+    },
+    {
+      "source": "build/validation/file-pickup-20261008/frozen/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/file-pickup-20261008/frozen/recvx-runtime"
+    },
+    {
+      "source": "build/validation/file-pickup-20261008/frozen/recvx-runtime.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/file-pickup-20261008/frozen/recvx-runtime.exe"
+    },
+    {
+      "source": "build/validation/event-freeze-20261008/frozen/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/event-freeze-20261008/frozen/recvx-runtime"
+    },
+    {
+      "source": "build/validation/event-freeze-20261008/frozen/recvx-event-lifecycle-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/event-freeze-20261008/frozen/recvx-event-lifecycle-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/generated",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/generated"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/CMakeFiles",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/CMakeFiles"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-archive-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-archive-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-face-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-face-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-world-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-world-assets"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-third-person-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-third-person-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-gameplay-bindings-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-gameplay-bindings-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-ammunition-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-ammunition-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-bgm-room-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-bgm-room-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-math-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-math-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/librecvx_scene.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/librecvx_scene.a"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-script-motion-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-script-motion-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-runtime",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-runtime"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-camera-return-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-camera-return-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-data-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-data-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-game-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-game-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/librecvx_data.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/librecvx_data.a"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-hd-texture-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-hd-texture-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-progression-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-progression-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-inventory-engine-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-inventory-engine-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-event-lifecycle-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-event-lifecycle-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-effect-pool-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-effect-pool-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-computer-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-computer-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-assets",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-assets"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-audio",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-audio"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-push-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-push-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-enemy-damage-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-enemy-damage-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-scene-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-scene-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-native",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-native"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-combat-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-combat-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/librecvx_disc.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/librecvx_disc.a"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-view-clip-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-view-clip-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-matrix-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-matrix-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-continuity-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-continuity-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-frontend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-frontend-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-audio-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-audio-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-file-reader-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-file-reader-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-collision-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-collision-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-status-pulse-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-status-pulse-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-actor-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-actor-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-debug-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-debug-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-door-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-door-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/librecvx_math.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/librecvx_math.a"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-snapshot-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-snapshot-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-chunk-blend-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-chunk-blend-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-input-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-input-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/librecvx_game.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/librecvx_game.a"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-effect-debris-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-effect-debris-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-texture-filter-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-texture-filter-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/librecvx_input.a",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/librecvx_input.a"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-gameover-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-gameover-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/macos-arm64/recvx-inventory-tests",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/macos-arm64/recvx-inventory-tests"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/frozen/recvx-runtime-windows-x64.exe",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/frozen/recvx-runtime-windows-x64.exe"
+    },
+    {
+      "source": "build/validation/crate-edge-20261008/frozen/recvx-runtime-macos-arm64",
+      "destination": "archived/FORBIDDEN_DONTUSE/build/validation/crate-edge-20261008/frozen/recvx-runtime-macos-arm64"
+    },
+    {
+      "source": "archived/validation/rosetta-retired-20261006/recvx-run-intel",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/validation/rosetta-retired-20261006/recvx-run-intel"
+    },
+    {
+      "source": "archived/validation/rosetta-retired-20261006/recvx-progression-intel-replays.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/validation/rosetta-retired-20261006/recvx-progression-intel-replays.py"
+    },
+    {
+      "source": "archived/validation/rosetta-retired-20261006/recvx-handoff-intel-replays.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/archived/validation/rosetta-retired-20261006/recvx-handoff-intel-replays.py"
+    },
+    {
+      "source": "tools/generate_item_use.py",
+      "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_item_use.py"
+    },
+    {"source": "tools/generate_box_engine.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_box_engine.py"},
+    {"source": "tools/generate_computer.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_computer.py"},
+    {"source": "tools/generate_door_core.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_door_core.py"},
+    {"source": "tools/generate_effect_collision.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_effect_collision.py"},
+    {"source": "tools/generate_effect_particles.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_effect_particles.py"},
+    {"source": "tools/generate_effect_sprites.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_effect_sprites.py"},
+    {"source": "tools/generate_en01_damage.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_en01_damage.py"},
+    {"source": "tools/generate_enemy_spawn.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_enemy_spawn.py"},
+    {"source": "tools/generate_event_inventory.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_event_inventory.py"},
+    {"source": "tools/generate_file_folder.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_file_folder.py"},
+    {"source": "tools/generate_gameover.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_gameover.py"},
+    {"source": "tools/generate_inventory_engine.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_inventory_engine.py"},
+    {"source": "tools/generate_native_tables.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_native_tables.py"},
+    {"source": "tools/generate_object_itmbox.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_object_itmbox.py"},
+    {"source": "tools/generate_pickup_engine.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_pickup_engine.py"},
+    {"source": "tools/generate_player_combat.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_player_combat.py"},
+    {"source": "tools/generate_player_hair.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_player_hair.py"},
+    {"source": "tools/generate_player_push.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_player_push.py"},
+    {"source": "tools/generate_player_stairs.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_player_stairs.py"},
+    {"source": "tools/generate_subplayer.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_subplayer.py"},
+    {"source": "tools/generate_targeting.py", "destination": "archived/FORBIDDEN_DONTUSE/tools/generate_targeting.py"}
+  ],
+  "productive_legacy_files_retained_for_native_reimplementation": true,
+  "notes": [
+    "Only confirmed retired core/console sources, generators, component tests and artifacts moved. No cooked assets or user data removed.",
+    "Current productive legacy wrappers remain in native as blocked reimplementation tasks; the last macOS runtime and mixed cache are quarantined after a local-symbol audit exposed sys/plp/rom/ene/eff. SDL dependencies and local debug settings remain outside quarantine.",
+    "Quarantine is agent-policy-protected, not an OS filesystem access-control boundary.",
+    "2026-10-09 Nachtrag: tools/generate_item_use.py (Funktionskoerper-Generator fuer ItemUse/Use_01..05 und Use_00) blieb beim Rueckbau im Arbeitsbaum und ist jetzt ebenfalls Quarantaene. Der Mechanismus liegt eigenstaendig nativ in native/inventory.cpp; die Verschiebung lief per git mv und ist rueckholbar.",
+    "2026-10-09 Nachtrag 2: die restlichen 21 unter BODY_GENERATORS gelisteten Funktionskoerper-Generatoren liegen jetzt ebenfalls in der Quarantaene. Beleg je Datei: sie lesen src/ps2/veronica/prog/*.c und schreiben .inc/.c mit Originalfunktionen; kein Build und kein anderes Werkzeug ruft sie auf. Die Verschiebung lief per git mv und ist rueckholbar.",
+    "Reine Datenwerkzeuge bleiben ausdruecklich im Arbeitsbaum: Tabellen-, Paket-, Scan- und Pruefwerkzeuge sind nicht gesperrt. Gesperrt ist nur, was Originalfunktionskoerper erzeugt oder mischt."
+  ]
+}

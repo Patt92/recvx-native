@@ -1,0 +1,2 @@
+# Also exclude quarantined content when explicitly searching archived/.
+archived/FORBIDDEN_DONTUSE/

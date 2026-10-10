@@ -1,0 +1,6 @@
+Debug config: "/Users/patrickhoffmann/Projects/recvx-decomp/build/doors-claude-20261009/debug.ini"
+RM_0010.RDX: 58 objects, 4366 stage triangles, 3 cameras, 2 spawns
+Animated SYSTEM/0010.bin: 22 bones, motion 42, 45 frames
+RM_0020.RDX: 85 objects, 5795 stage triangles, 5 cameras, 2 spawns
+Rendered 180 frames, 296716 visible pixels in 0.382477 seconds.
+Event VM: 1 dispatches, 18 pending world bindings, 0 blocked commands.

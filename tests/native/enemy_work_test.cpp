@@ -1,0 +1,134 @@
+// C02: the shared enemy work at its owner. Component checks against the
+// semantics references (eneset.c:170/325/344/797, zonzon1.c:806,
+// Motion.c:21) and the production binding in RoomWorld with original room
+// data. Positive effects are checked, not only the absence of errors.
+#include "world.h"
+#include "motion_set.h"
+#include "asset_io.h"
+#include <cmath>
+#include <cstring>
+#include <iostream>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <vector>
+using namespace recvx;
+static void check(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
+
+namespace {
+std::vector<std::string> gaps;std::vector<std::uint32_t> order;unsigned clears=0;
+RECVX_ENEMY_TABLE* table=nullptr;
+void record_gap(const char* name){gaps.push_back(name);}
+void clear_offset(){++clears;}
+std::uint32_t objects(const RECVX_ENEMY_WORK*){return 3;}
+void proc(RECVX_ENEMY_WORK* w){order.push_back(table->enow);check(w->pxb==1.f&&w->axb==7,"pass backup taken after the routine");w->px=5;w->dam[0]=9;w->dam[3]=4;w->comb_timeout=2;w->comb_flg=0x7f;w->flg2|=0x4;}
+RECVX_ENEMY_TEMPLATE tmpl(std::uint16_t id,std::uint32_t flg=1){RECVX_ENEMY_TEMPLATE t{};t.flg=flg;t.id=id;t.type=3;t.flr_no=0;t.mdlver=2;t.px=1;t.py=0;t.pz=2;t.ay=-16384;return t;}
+
+void work_contract(){
+    RECVX_ENEMY_SERVICES sv{};sv.gap=record_gap;sv.player_clear_offset=clear_offset;sv.obj_num=objects;
+    RECVX_ENEMY_TABLE t;recvx_enemy_table_init(&t);table=&t;
+    static RECVX_ENEMY_WORK w[130];
+    auto a=tmpl(7);auto* first=recvx_enemy_set(&t,&w[0],&a,&w[0],0,&sv);
+    check(first==&w[0]&&w[0].idx_ct==0&&t.ewk_n==1,"bhSetEnemy: first slot / ewk_n");
+    check(w[0].ay==-16384&&w[0].ax==0&&w[0].mtn_add==65536&&w[0].sx==1.f&&w[0].clp_jno[0]==1&&w[0].clp_jno[1]==-1,"bhSetEnemy: field initialisation");
+    auto b=tmpl(45);recvx_enemy_set(&t,&w[1],&b,&w[1],1,&sv);
+    // eneset.c:302 overwrites the id-41..48 set after the switch.
+    check((w[1].mdflg&0x20)&&(w[1].flg&0x8000)&&w[1].clp_jno[0]==1&&w[1].clp_jno[1]==-1&&w[1].clp_jno[2]==5&&w[1].clp_jno[6]==19,"bhSetEnemy: id>40 flags and clp_jno quirk");
+    auto c=tmpl(95);recvx_enemy_set(&t,&w[2],&c,&w[2],2,&sv);
+    check((w[2].mdflg&0x120)==0x120&&w[2].clp_jno[3]==17,"bhSetEnemy: id>90 mdflg 0x100");
+    // A released slot is reused before the end; ewk_n keeps the gap.
+    w[1].flg=0;recvx_enemy_check_work_num(&t);check(t.ewk_n==3,"bhCheckEneWorkNum stops at a gap");
+    auto d=tmpl(8);check(recvx_enemy_set(&t,&w[3],&d,&w[3],3,&sv)==&w[3]&&w[3].idx_ct==1&&t.slot[1]==&w[3],"bhSetEnemy does not take the first free slot");
+    for(unsigned i=3;i<128;++i){auto f=tmpl(0);check(recvx_enemy_set(&t,&w[i+1],&f,&w[i+1],i+1,&sv)!=nullptr,"table fills early");}
+    auto full=tmpl(0);check(!recvx_enemy_set(&t,&w[129],&full,&w[129],129,&sv)&&t.ewk_n==128,"full ene[128] not reported or ewk_n stale");
+
+    // eneset.c:344 order: offset clear before the sp_flg test.
+    RECVX_ENEMY_TABLE p;recvx_enemy_table_init(&p);table=&p;static RECVX_ENEMY_WORK v[6];
+    for(unsigned i=0;i<6;++i){auto x=tmpl(std::uint16_t(i==3?60:i==4?2:7));recvx_enemy_set(&p,&v[i],&x,&v[i],i,&sv);v[i].px=1;v[i].ax=7;}
+    v[1].stflg|=0x1000000;v[2].flg|=0x80000000u;v[5].flg|=0x80;v[5].lkwkp=&v[1];
+    RECVX_ENEMY_DISPATCH dsp;std::memset(&dsp,0,sizeof dsp);recvx_enemy_set_call_func(&dsp,7,proc);
+    gaps.clear();order.clear();clears=0;
+    check(recvx_enemy_control(&p,&dsp,0,&sv)==0&&clears==1&&order.empty(),"sp_flg 0x2 clear still ran routines or skipped the offset clear");
+    const auto ran=recvx_enemy_control(&p,&dsp,2,&sv);
+    check(ran==2&&order==std::vector<std::uint32_t>({0,2}),"routine order / filter differs");
+    check(p.enow==5,"sys->enow not set for every slot");
+    check(v[0].px==5&&v[0].dam[0]==0&&v[0].dam[2]==0&&v[0].dam[3]==4&&v[0].comb_timeout==1&&v[0].comb_flg==0x0f&&!(v[0].flg2&4),"bhEne_InitDamage after the routine differs");
+    check(p.en_objn==1&&p.en_obj[0]==&v[2],"flg 0x80000000 not collected into en_obj");
+    std::set<std::string> named(gaps.begin(),gaps.end());
+    check(named.count("bhEne02")&&!named.count("bhSubpl"),"missing routine hidden or subplayer reported as missing");
+    check(v[1].pxb==0&&v[5].pxb==0,"filtered works touched");
+    // Draw/target filters.
+    check(!recvx_enemy_draw_enabled(&v[2],0)&&recvx_enemy_draw_enabled(&v[0],0),"draw filter for en_obj works");
+    v[0].mdflg|=0x200;check(!recvx_enemy_draw_enabled(&v[0],0)&&recvx_enemy_draw_enabled(&v[0],0x20),"bhEneRenderSet gate ignores st_flg 0x20");
+    v[0].flg|=0x8000;check(!recvx_enemy_targetable(&v[0]),"flg 0x8000 still targetable");
+}
+
+MotionClip clip3(bool slow){MotionClip c;c.frames=4;c.flags=slow?0x20:0;c.positions.resize(3);c.angles.resize(3);
+    for(unsigned f=0;f<4;++f){c.positions[0].push_back({float(f),10.f+f,0});c.positions[1].push_back({100.f+f,0,0});c.positions[2].push_back({200.f+f,0,0});
+        for(unsigned ch=0;ch<3;++ch)c.angles[ch].push_back({std::int32_t(1000*f+ch),std::int32_t(2000*f),std::int32_t(3000*f)});}
+    c.attributes={11,12,13,14};return c;}
+
+void motion_contract(){
+    const auto clip=clip3(false);std::vector<ModelPose> obj(4);std::vector<std::uint32_t> owp(4,0);
+    MotionWork m{};m.frm_no=65536;
+    check(set_motion(m,65536,0,&clip,nullptr,obj,owp)==0&&m.frm_no==131072&&m.mtn_attr==12,"bhSetMotion: advance/attribute");
+    // Fast: root position from channel 0, angles per channel; samples before advancing.
+    check(obj[0].position.x==1&&obj[0].position.y==11&&obj[1].angles[0]==1001&&obj[2].angles[1]==2000,"SetMtnFast pose");
+    m.frm_no=3*65536;check(set_motion(m,65536,0,&clip,nullptr,obj,owp)==1&&m.frm_no==0,"forward wrap");
+    m.frm_no=0;check(set_motion(m,-65536,0,&clip,nullptr,obj,owp)==-1&&m.frm_no==3*65536,"backward wrap");
+    // Ping-pong (mode 0x1): direction flips at the ends.
+    m.frm_no=2*65536;m.frm_mode=0;set_motion(m,65536,1,&clip,nullptr,obj,owp);check(m.frm_mode!=0&&m.frm_no==3*65536,"mode 1 flip at end");
+    set_motion(m,65536,1,&clip,nullptr,obj,owp);check(m.frm_no==2*65536,"mode 1 runs backwards after the flip");
+    // owP flg 0x4 skips a node without consuming a channel (Fast).
+    owp={0,4,0,0};obj.assign(4,ModelPose{});m=MotionWork{};set_motion(m,0,0,&clip,nullptr,obj,owp);
+    check(obj[1].angles[0]==0&&obj[2].angles[0]==1&&obj[3].angles[0]==2,"owP 0x4 consumed a channel");
+    // Slow: fractional key blend.
+    const auto slow=clip3(true);obj.assign(4,ModelPose{});owp.assign(4,0);m=MotionWork{};m.frm_no=65536+32768;set_motion(m,0,0,&slow,nullptr,obj,owp);
+    check(std::fabs(obj[1].position.x-101.5f)<1e-5f&&obj[0].angles[0]==1500,"SetMtnSlow blend");
+    // Hokan: rate 1-hokan_rate/65536 towards the key; counter decrements.
+    obj.assign(4,ModelPose{});m=MotionWork{};m.frm_no=65536;m.hokan_count=2;m.hokan_rate=32768;set_motion(m,0,0x100,&clip,nullptr,obj,owp);
+    check(m.hokan_count==1&&obj[1].angles[0]==500&&obj[0].position.x==1,"SetMtnFastHokan blend/0x100 root");
+    // A datP == NULL motion leaves everything untouched.
+    m=MotionWork{};m.frm_no=7;check(set_motion(m,65536,0,nullptr,nullptr,obj,owp)==0&&m.frm_no==7,"empty MN_WORK advanced");
+}
+
+void room(const std::filesystem::path& data,const char* name,unsigned id,unsigned expected){
+    const auto bytes=read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024);
+    const auto scene=decode_scene(bytes);auto actor=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(bytes,scene,actor,motion,frame,audio,data,{},name);
+    Inventory inventory;MessageDialog dialog;EventVm events(bytes,inventory,dialog);world.bind_player_collision(events);
+    unsigned bound=0;
+    for(unsigned i=0;i<64;++i)if(const auto* e=world.state(1,i);e&&e->enemy_bound&&e->identity==id){
+        ++bound;check(e->enemy_native&&e->enemy.owner==e&&e->enemy.owner_index==i&&e->enemy.idx_ct>=0,"work not a member of its entity");}
+    check(bound==expected,"room enemies not bound in room order");
+    world.set_simulation_flags(~0u);
+    Scene before=scene;world.append(before);
+    for(unsigned pass=0;pass<30;++pass)world.tick();
+    Scene after=scene;world.append(after);
+    check(after.triangles.size()>before.triangles.size(),"native enemy works are not drawn after their pass");
+    for(unsigned i=0;i<64;++i)if(const auto* e=world.state(1,i);e&&e->enemy_native){
+        check(e->enemy_calculated&&e->enemy.mode0!=0,"routine did not initialise / bhCalcModel did not run");
+        check(e->transform.position.x==e->enemy.px&&e->motion==e->enemy.mtn_no&&e->hp==e->enemy.hp,"publish Work -> Entity differs");
+        if(id==7)check(e->enemy.hp==1&&e->enemy.mtn_no==3&&e->enemy.mode0==1&&(e->enemy.flg&0x68)==0x68,"bhEne07_Init state differs");
+        if(id==0){NJS_POINT3 probe{e->enemy.px,e->enemy.py+5,e->enemy.pz};check(world.collision_contact(probe,0,1,10).has_value(),"barrel sys->mwalp surface missing from collision");}
+    }
+    if(id==7){
+        // The frame clock is the work's: bhSetMotion advanced it in every pass.
+        const auto* e=world.state(1,0);check(e->enemy.frm_no!=0||e->enemy.mtn_add==0,"bhSetMotion did not advance the bat clock");
+        // bhEneSetCk through the entity write is taken over before the next pass.
+        world.deactivate_enemy(0);world.tick();check(e->enemy.stflg&0x1000000u,"script stflg write not adopted");
+        Scene hidden=scene;world.append(hidden);check(hidden.triangles.size()<after.triangles.size(),"inactive work still drawn");
+    }
+}
+}
+
+int main(int argc,char** argv){try{
+    _Make_SinTable();
+    work_contract();
+    motion_contract();
+    check(argc==2,"original data directory required");
+    const std::filesystem::path data(argv[1]);
+    room(data,"RM_0130",7,5);   // five original ID-7 entries
+    room(data,"RM_0080",0,1);   // the room's one barrel next to five zombies
+    std::cout<<"Enemy work contract, bhSetMotion and the RoomWorld binding passed.\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
