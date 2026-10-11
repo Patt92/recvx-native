@@ -11,7 +11,9 @@ struct EffectModelWork;
 struct EffectSprite {
     unsigned id=0,type=0,mode0=0,mode1=0,flg=0,stflg=0,ani_ct=0;bool polygon_queued=false;
     int ayp=0;float yn=0;void* func=nullptr;
-    int ax=0,ay=0,az=0,lkono=0,ct0=0,ct1=0,tex_id=-1,bl_src=8,bl_dst=6;
+    int ax=0,ay=0,az=0,lkono=0,ct0=0,ct1=0,ct2=0,tex_id=-1,bl_src=8,bl_dst=6;
+    // O_WRK.exp0 as the room procedures use it: the UV table latched at init.
+    const void* uv=nullptr;
     // bhSetEffectTb/bhSetEffect fields used by the generated procedures (px..pz must stay contiguous).
     unsigned mdlver=0;int flr_no=0;float px=0,py=0,pz=0,gpx=0,gpy=0,gpz=0,lox=0,loy=0,loz=0,xn=0,zn=0,sx=1,sy=1,sz=1,sxb=1,syb=1,szb=1,spd=0;void* lkwkp=nullptr;EffectModelWork* mlwP=nullptr;
     struct Vertex {float x=0,y=0,z=0,u=0,v=0;std::uint32_t col=0;};
@@ -22,7 +24,9 @@ struct EffectSprite {
     bool flame_compact_uv=false; // bhEff009 latches its UV bank at initialization.
 };
 // Read-only per-pass values from native owners; never persisted as a sys/plp work.
-struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,player_mdflg=0,cb_flg=0,sp_flg=8,yk_ct=0;};
+// gm_flg: bhSetRoom (room.c:471) clears bit 0 on every room load and no other
+// original game source writes it, so the bhEff125 gate stays open after a load.
+struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,player_mdflg=0,cb_flg=0,sp_flg=8,yk_ct=0,gm_flg=0;};
 void set_effect_context(const EffectContext& context);
 void set_effect_walls(const std::vector<CollisionWall>* walls,float room_height);
 void set_effect_ground(class GroundCollision* ground,const std::vector<CollisionWall>* water_room,const std::vector<CollisionWall>* water_mobile);
@@ -56,6 +60,10 @@ bool step_effect_sprite(EffectSprite& sprite,const EffectContext& context,bool* 
 // light.c types 1..6: working RGB is sampled before advancing the clock.
 void step_light_color(unsigned type,unsigned speed,unsigned& clock,NJS_POINT3 color,NJS_POINT3& working,bool running);
 bool supported_effect_sprite(unsigned id);
+// Room texture groups (room.c:305-329 ef_tn) a ported procedure addresses
+// through tex_id. Their atlases keep the decoded Ninja alpha, because the
+// ported effects draw with their own njColorBlendingMode pair.
+bool ported_effect_atlas(unsigned group);
 // effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
 int original_effect_slot(const std::vector<unsigned>& flags);

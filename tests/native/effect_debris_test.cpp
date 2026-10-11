@@ -34,12 +34,17 @@ int main(){try{_Make_SinTable();
     const auto request=take_effect_output();
     check(request.spawns.empty()&&request.sounds.empty()&&request.bombs.empty()&&!request.light,
           "explosion gap requested effects, sounds, blast damage or a light");
-    for(const unsigned id:{0u,5u,15u,16u,23u,24u,25u,29u,122u,200u,201u,218u,230u,231u,232u}){
+    // Noch nicht portierte Prozeduren: sie duerfen weder laufen noch zeichnen.
+    for(const unsigned id:{0u,5u,15u,16u,23u,24u,25u,29u,200u,201u,231u,232u}){
         check(!supported_effect_sprite(id),"an effect procedure claims to be bound");
         EffectSprite sprite;EffectSpawn spawn;spawn.id=id;initialize_effect_sprite(sprite,spawn);
         bool queued=true;
         check(!step_effect_sprite(sprite,&queued)&&!queued,"effect gap ran a procedure or queued geometry");
     }
+    // Portiert (siehe tests/native/effect_room_sprites_test.cpp): diese
+    // Prozeduren muessen gebunden melden, damit die Luecke nicht zurueckfaellt.
+    for(const unsigned id:{122u,123u,125u,126u,181u,182u,218u,230u})
+        check(supported_effect_sprite(id),"a ported room effect procedure reports itself unbound");
     check(common_effect_categories().size()==20&&common_effect_categories()[8]==std::pair<unsigned,unsigned>{25,1},"native ef_info mapping differs from the original table");
     check(common_effect_textures_offset({})==std::size_t(-1),"effect texture offset gap returns a guessed offset");
     set_effect_walls(nullptr,0);

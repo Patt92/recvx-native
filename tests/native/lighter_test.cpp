@@ -92,6 +92,12 @@ static void resources(const std::filesystem::path& data){
     world.set_player_weapon(0);world.tick();unsigned object=4;while(object<256&&(!world.state(2,object)||!(world.state(2,object)->object_flags&1u)))++object;
     check(object<256,"real room contains no enabled object for object-linked flame test");
     check(world.bind({0xa2,0,0,0,{0xa2,std::uint8_t(object),0,0}}),"object lighter event remains unbound");world.tick();
+    // Der eff[512]-Pool ist geteilt: seit die Raumprozeduren dieses Raumes
+    // laufen (bhEff181 fordert bhEff182 an), kann der zuvor benutzte Platz
+    // schon wieder vergeben sein. Die Objektflamme wird deshalb an ihrer
+    // Originalkennung gesucht, nicht an einem festen Index.
+    {unsigned found=0;while(world.effect_state(found)&&!(world.effect_state(found)->id==9&&world.effect_state(found)->type==3))++found;
+     check(world.effect_state(found),"object lighter event allocated no original flame work");slot=found;}
     check((events.flags[5][0]&0x20000000u)&&world.effect_state(slot)->type==3&&world.effect_visible(slot)&&world.light_state(1)->link==3&&world.light_state(1)->index==object,"object flame/light do not share native object/system owners");
     check(world.bind({0xa2,0,0,0,{0xa2,std::uint8_t(object),1,0}}),"object flame disable unbound");world.tick();
     check(!(events.flags[5][0]&0x20000000u)&&!world.effect_state(slot)->flg&&!world.effect_visible(slot)&&!(world.light_state(1)->flags&2u),"object flame/light do not release on original event flag");

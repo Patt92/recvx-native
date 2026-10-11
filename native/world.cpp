@@ -143,7 +143,10 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     const auto effectp=v.u32(header_+0x14),effect_count=v.u32(header_+0x94);if(effect_count>512)throw std::runtime_error("too many original room effects");v.require(effectp,effect_count*68);
     std::set<unsigned> effect_ids;
     for(unsigned i=0;i<effect_count;++i){const auto p=effectp+i*68;const unsigned id=v.u16(p+4);SpriteWork work;work.sprite.id=id;work.sprite.type=v.u16(p+6);work.sprite.flg=v.u32(p);work.sprite.ay=v.u16(p+36);work.sprite.ax=v.u16(p+38);work.sprite.lkono=v.u32(p+48);work.scale={v.f32(p+24),v.f32(p+28),v.f32(p+32)};work.link=v.u32(p+40);work.index=v.u32(p+44);work.node=v.u32(p+48);work.offset={v.f32(p+52),v.f32(p+56),v.f32(p+60)};work.sprite.px=v.f32(p+12);work.sprite.py=v.f32(p+16);work.sprite.pz=v.f32(p+20);work.sprite.sx=work.sprite.sxb=work.scale.x;work.sprite.sy=work.sprite.syb=work.scale.y;work.sprite.sz=work.sprite.szb=work.scale.z;sprites_.push_back(work);auto& e=entity(4,i);e.identity=id;e.type=work.sprite.type;e.angles={work.sprite.ax,work.sprite.ay,0};e.transform.position={v.f32(p+12),v.f32(p+16),v.f32(p+20)};
-        if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)){auto atlas=decode_texture_bundle(b,texture);for(auto& image:atlas)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
+        if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)||ported_effect_atlas(id)){auto atlas=decode_texture_bundle(b,texture);
+            // Eine Gruppe, die eine portierte Prozedur anspricht, behaelt das dekodierte Ninja-Alpha;
+            // nur die noch unportierten Sprites halten ihre additive Annaeherung.
+            if(!ported_effect_atlas(id))for(auto& image:atlas)for(auto& pixel:image.pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
     }
     // bhInitEffect: common effect textures (ef_tlist, tex_id 0..29) from SYSTEM entry 1.
     // Keep the -1 sentinel guard: absence is not a valid asset offset.
@@ -810,7 +813,10 @@ void RoomWorld::tick(){
     if(simulation_flags_&8u)for(unsigned i=0;i<sprites_.size();++i){auto& work=sprites_[i];work.queued=false;if(work.hidden||!(work.sprite.flg&1)||(work.sprite.stflg&0x1000000u))continue;if(work.link&&work.link<=4){const auto pos=link_point(work.link-1,work.index,work.node,work.offset);work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;if(work.sprite.id==0&&work.link==1)if(const auto matrix=link_matrix(0,work.index,work.node))set_effect_link_matrix(work.node,matrix->value);}if(work.sprite.id==29&&work.atr_link){ // effsub1.c:5908 bhEff029: after 32 passes ((int*)lkwkp)[1] = ATR attr |= 0x40, slot freed
             work.sprite.ct0=(work.sprite.ct0+1)&0x1f;if(!work.sprite.ct0){const auto at=*work.atr_link;if(at<walls_.size())walls_[at].attributes|=0x40u;else if(at-walls_.size()<enemy_mobile_walls_.size())enemy_mobile_walls_[at-walls_.size()].attributes|=0x40u;work.sprite.flg=0;}continue;}
         if(supported_effect_sprite(work.sprite.id)){step_effect_sprite(work.sprite,effect_context(),&work.queued);auto& e=entity(4,i);e.type=work.sprite.type;
-        if(work.dynamic){work.scale={work.sprite.sx,work.sprite.sy,work.sprite.sz};e.transform.position={work.sprite.px,work.sprite.py,work.sprite.pz};e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};}}}
+        // Die Prozedur besitzt op->ax/ay/az (bhEff123 dreht die Lampe je Bild);
+        // Lage und Skalierung schreibt nur eine selbst bewegte Arbeit zurueck.
+        e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};
+        if(work.dynamic){work.scale={work.sprite.sx,work.sprite.sy,work.sprite.sz};e.transform.position={work.sprite.px,work.sprite.py,work.sprite.pz};}}}
     if(simulation_flags_&8u){process_effect_output();
     particles_.tick([this](const ParticleLink& link,NJS_POINT3 offset){return link_point(link.kind,link.index,link.node,offset);},[this](NJS_POINT3 probe){return !step_clear(probe,0.2f,0.01f);});}
     // An original effect that clears its own flg is released (O_WRK slot free).
