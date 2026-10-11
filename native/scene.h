@@ -137,10 +137,18 @@ struct ModelPose {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};
 };
+// njplus.c npCalcMorphing: obj_b's realized model string plus shp_ct. The
+// renderer blends the selected model's own object streams toward it for this
+// draw, the span npPushMdlstr2/npCalcMorphing/npPopMdlstr2 brackets bhPutModel.
+struct MorphSource {
+    const std::vector<std::uint8_t>* model=nullptr;
+    float shape=0;
+};
 struct ModelGeometryOptions {
     NJS_MATRIX transform{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     std::vector<ModelPose> pose;
     std::vector<std::uint32_t> evalflags;
+    MorphSource morph{};
     // Authoritative native O_WORK matrices: rendering must not resample a
     // motion or rebuild a second pose after original procedural joint edits.
     std::vector<std::array<float,16>> world_matrices;

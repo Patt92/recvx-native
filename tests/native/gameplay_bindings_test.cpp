@@ -66,9 +66,14 @@ int main(int argc,char** argv){try{
    check(!gun.hits,"no hit may be booked before world exposes the enemy table");
    // Lücke Gegnerkern/Partikel: der Hund ist nicht verwundbar, behält seine
    // Original-HP, blutet nicht und stirbt nicht.
+   std::cout<<"Dog i="<<i<<" hp_initial="<<world.state(1,i)->hp<<std::endl;
+   world.tick();
    const auto hp=world.state(1,i)->hp;
+   std::cout<<"Dog i="<<i<<" hp_before="<<hp<<std::endl;
    check(!world.damage(i,3,500,0x10,{at.x,at.y+2,at.z},{0,0,-1}),"enemy gap accepted damage");
-   world.tick();check(world.state(1,i)->hp==hp,"enemy gap changed the original HP");
+   world.tick();
+   std::cout<<"Dog i="<<i<<" hp_after="<<world.state(1,i)->hp<<std::endl;
+   check(world.state(1,i)->hp==hp,"enemy gap changed the original HP");
    check(!world.blood_particles(),"particle gap produced blood");
    for(unsigned t=0;t<200;++t)world.tick();check(!world.enemy_dead(i),"enemy gap ran a death motion");
  }

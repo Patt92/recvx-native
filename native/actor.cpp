@@ -2,6 +2,7 @@
 #include "archive.h"
 #include "binary_view.h"
 #include "asset_io.h"
+#include "morph.h"
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -256,9 +257,9 @@ void PlayerAsset::locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t&
         actor.position.x-=step*njSin(actor.yaw);actor.position.z-=step*njCos(actor.yaw);}
     frame=(frame+65536)%(std::int64_t(motion_frames(motion))*65536);
 }
-Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param) const {
+Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param,const MorphSource* morph) const {
     if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");
-    return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out,overrides,face_param);
+    return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out,overrides,face_param,morph);
 }
 std::vector<ModelPose> sample_motion_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<ModelPose>& rest,const std::vector<unsigned>& nodes){
     if(!clip.frames||clip.positions.size()!=clip.angles.size()||clip.positions.size()>rest.size())throw std::runtime_error("room motion does not fit actor skeleton: channels="+std::to_string(clip.positions.size())+", bones="+std::to_string(rest.size())+", mapped="+std::to_string(nodes.size()));
@@ -285,16 +286,18 @@ std::vector<BoneMatrix> PlayerAsset::pose_clip(const MotionClip& clip,std::int64
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
     const auto matrices_=matrices(local_pose_clip(clip,frame_q16,nodes,overrides),position,yaw);std::vector<BoneMatrix> result;for(const auto& matrix:matrices_){BoneMatrix bone;std::copy_n(matrix.value,16,bone.value);result.push_back(bone);}return result;
 }
-Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param) const {
+Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param,const MorphSource* morph) const {
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
     ModelGeometryOptions geometry;geometry.pose=local_pose_clip(clip,frame_q16,nodes,overrides);
+    if(morph)geometry.morph=*morph;
     njTranslate(&geometry.transform,position.x,position.y,position.z);njRotateY(&geometry.transform,yaw);
     auto full=matrices(geometry.pose,position,yaw);
     return render_pose(std::move(geometry),std::move(full),matrices_out,face_param);
 }
-Scene PlayerAsset::sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& work,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out,const FaceParameter* face_param,const std::vector<std::uint8_t>* live_model)const{
+Scene PlayerAsset::sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& work,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out,const FaceParameter* face_param,const std::vector<std::uint8_t>* live_model,const MorphSource* morph)const{
     if(pose.size()!=bones()||work.size()!=bones()||flags.size()!=bones())throw std::runtime_error("native actor work skeleton differs from model");
     ModelGeometryOptions geometry;geometry.pose=pose;geometry.evalflags=flags;
+    if(morph)geometry.morph=*morph;
     std::vector<Matrix> full(work.size());geometry.world_matrices.resize(work.size());
     for(std::size_t i=0;i<work.size();++i){
         for(unsigned k=0;k<16;++k){if(!std::isfinite(work[i].value[k]))throw std::runtime_error("nonfinite native actor work matrix");full[i].value[k]=geometry.world_matrices[i][k]=work[i].value[k];}
@@ -308,6 +311,10 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
     std::vector<std::uint8_t> deformed;if(face_&&!live_model){deformed=encoded;const auto param=face_param?*face_param:sample_face_parameters(face_->keys(),0);face_->deform(deformed,param);}
     const auto& rendered=deformed.empty()?encoded:deformed;
     BinaryView source(encoded),changed(rendered);const auto base=source.u16(4);const auto objects=source.relative(base,source.u32(12),bones()*52);
+    // npCalcMorphing pairs obj_a with obj_b object by object; npPushMdlstr2 has
+    // already excluded the evalflags 0x8 objects both walk past.
+    MorphStreams morph_a,morph_b;float morph_factor=0;
+    if(geometry.morph.model){morph_a=morph_streams(encoded,bones());morph_b=morph_streams(*geometry.morph.model,bones());morph_factor=geometry.morph.shape*0.001f;}
     auto without_rotation=full;
     if(matrices_out){matrices_out->clear();for(const auto& matrix:full){BoneMatrix copy;std::copy_n(matrix.value,16,copy.value);matrices_out->push_back(copy);}}
     for(std::size_t i=0;i<bones();++i) {
@@ -330,6 +337,16 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
                 // influencing bone's origin. Do not convert them twice.
                 if(live_model){point={changed.f32(p),changed.f32(p+4),changed.f32(p+8)};normal={changed.f32(p+16),changed.f32(p+20),changed.f32(p+24)};}
                 else{point.x+=changed.f32(p)-source.f32(p);point.y+=changed.f32(p+4)-source.f32(p+4);point.z+=changed.f32(p+8)-source.f32(p+8);}
+            }
+            if(geometry.morph.model){
+                float sp[3],sn[3],bp[3],bn[3];
+                morph_a.vertex(mesh.object,i,sp,sn);
+                // npTransform blends the source stream itself, so the skin pass
+                // consumes the blended object and not a post-skin correction.
+                if(morph_blend(morph_a,morph_b,mesh.object,i,morph_factor,bp,bn)){
+                    point.x+=bp[0]-sp[0];point.y+=bp[1]-sp[1];point.z+=bp[2]-sp[2];
+                    normal.x+=bn[0]-sn[0];normal.y+=bn[1]-sn[1];normal.z+=bn[2]-sn[2];
+                }
             }
             njCalcPoint(&full[bone].value,&point,&b);
             if(level==9)vertices.push_back(b);

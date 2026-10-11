@@ -35,6 +35,13 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // bhEneLookFlgSet (event.c): original BH_PWORK flg bit 0x8000. Enemy AI
     // consumers (en01.c) are still pending; the state itself is exact.
     bool look=false;
+    // Common_controll 41 (event.c:10346): original BH_PWORK flg bit 0x40000.
+    // Its readers are family-specific (en01.c:10498, en05.c:4877, en09.c:7574,
+    // en12.c:1601, en17.c:681, en26.c:1270) and the player foot-fix gate
+    // (player.c:1539, ported in player_stairs.c:918); there is no generic
+    // model-link reader in MdlPut.c/objitm.c. The bit is stored exactly here;
+    // the per-family consumer is the open contract (see work report).
+    bool model_link=false;
     // bhSetMotion samples frm_no before advancing it. Event conditions read
     // the advanced clock; rendering and joint controls use the sampled pose.
     std::optional<std::int64_t> sampled_frame;
@@ -227,6 +234,15 @@ public:
     NJS_POINT3 move_player_arp(NJS_POINT3 from,NJS_POINT3 to,float arp){return resolve_player_motion(from,to,3.5f,player_character_?17.5f:16.5f,arp);}
 private:
     struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;};
+    // bhSetEneMdl realizes one model string per MDL block of the entity's asset
+    // list; that order is the mbp[] the morph opcodes index. mbp[0] is the Work's
+    // own model, the blocks load_models kept follow as mbp[1..].
+    // nullptr when the entity has no such variant, which the original would read
+    // as a NULL mlwP->objP.
+    static const PlayerAsset* model_variant(const Model& model,unsigned index){
+        if(!model.actor)return nullptr;
+        return index==0?model.actor.get():model.actor->model(index);
+    }
     struct Context {unsigned kind=0,index=0,node=0,mode1=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
     struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;};
     struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};

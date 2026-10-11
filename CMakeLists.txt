@@ -15,6 +15,8 @@ add_custom_target(recvx-native-policy ALL
 if(BUILD_TESTING)
   add_test(NAME native_port_policy_contracts
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_policy_test.py")
+  add_test(NAME build_coverage
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_build_coverage_test.py")
   add_test(NAME native_port_status_contracts
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_check_test.py")
   # Negativpruefungen des Windows-PE-Audits; brauchen den Zig-Werkzeugsatz.
@@ -141,7 +143,7 @@ add_library(recvx_disc native/room_table.c)
 target_include_directories(recvx_disc PUBLIC native)
 target_include_directories(recvx_data PUBLIC include/ps2/veronica/prog)
 target_link_libraries(recvx_data PUBLIC recvx_disc)
-add_library(recvx_scene native/scene.cpp native/renderer.cpp native/actor.cpp native/face.cpp native/item_asset.cpp native/chunk_blend.cpp)
+add_library(recvx_scene native/scene.cpp native/renderer.cpp native/actor.cpp native/morph.cpp native/face.cpp native/item_asset.cpp native/chunk_blend.cpp)
 target_include_directories(recvx_scene PRIVATE "${RECVX_TABLES}")
 find_package(Threads REQUIRED)
 target_link_libraries(recvx_scene PUBLIC recvx_data recvx_math Threads::Threads)
@@ -466,6 +468,9 @@ endif()
   add_executable(recvx-actor-tests tests/native/actor_test.cpp)
   target_link_libraries(recvx-actor-tests PRIVATE recvx_scene)
   add_test(NAME player_motion_skin COMMAND recvx-actor-tests)
+  add_executable(recvx-morph-tests tests/native/morph_test.cpp)
+  target_link_libraries(recvx-morph-tests PRIVATE recvx_scene)
+  add_test(NAME actor_morph_blend COMMAND recvx-morph-tests)
 endif()
 install(TARGETS recvx-native RUNTIME DESTINATION bin)
 

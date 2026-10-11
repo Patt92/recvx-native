@@ -8,6 +8,7 @@
 #include "en03_lib.h"
 #include "../ninja_matrix.h"
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #include <math.h>
 
@@ -425,7 +426,8 @@ void recvx_en04_main_loop(RECVX_ENEMY_WORK* w) { /* :558 */
     default:gap(w,"bhEne04_Mode0 index");return;
     }
     if(!w->exp0){gap(w,"EN04 exp0");return;}
-    recvx_en04_player_control(w);if(!(ex(w)->flg&0x40))recvx_en04_set_mtn(w);
+    recvx_en04_player_control(w);
+    if(!(ex(w)->flg&0x40))recvx_en04_set_mtn(w);
     if(w->mode0==5)return;
     RECVX_EN04_EXP0* e=ex(w);
     if(e->flg&0x80) {recvx_en04_search_neck(w);return;}
@@ -583,8 +585,12 @@ int recvx_en04_escape(RECVX_ENEMY_WORK* w,int res,int step) {
         w->ay+=w->wax;d=w->wax;if(e->esc_ct>8)e->esc_ct=8;break;
     case 3:
         if(!dir_wall(w,w->waz*16384,3,&hit))return -1;
-        d=0;if((!hit&&!e->esc_turn)||(e->wall_hist&1)) {e->u48.esc_mode=4;w->wax=w->waz;e->esc_turn=16384;}
-        else e->esc_turn-=e->esc_turn>0;
+        d=0;
+        if((!hit&&!e->esc_turn)||(e->wall_hist&1)) {
+            e->u48.esc_mode=4;w->wax=w->waz;e->esc_turn=16384;
+        } else {
+            e->esc_turn-=e->esc_turn>0;
+        }
         break;
     case 4:
         w->ay+=w->wax*step;e->esc_turn-=step;if(e->esc_turn<=0){e->u48.esc_mode=3;e->esc_turn=4;}d=w->wax;break;
@@ -603,7 +609,7 @@ static int teleport_area(RECVX_ENEMY_WORK* w,const RECVX_ENEMY_ATR* a,int room_b
     if(a->prm2>=4){gap(w,"kaidan_ang[ATR.prm2]");return 0;}
     if(room_bit&&(!w->sv||!w->sv->system_flags_or)){gap(w,"sys->rm_flg");return 0;}
     w->px=a->px+a->w/2;w->pz=a->pz+a->d/2;w->ay=recvx_en04_stair_angle[a->prm2];
-    if(room_bit)w->sv->system_flags_or(8,area_bit(a->prm3+16));return 1;
+    if(room_bit)w->sv->system_flags_or(1,area_bit(a->prm3+16));return 1;
 }
 static int activation_check(RECVX_ENEMY_WORK* w,int alternate) {
     RECVX_ENEMY_PLAYER p;RECVX_ENEMY_ATR trigger,dest,chosen;int source,r,hit;unsigned count=0;
@@ -640,7 +646,7 @@ static int activation_check(RECVX_ENEMY_WORK* w,int alternate) {
     /* Original schreibt Lage vor dem dritten Zufallsaufruf. */
     if(!teleport_area(w,&dest,0))return 0;
     if(!random_value(w,&r))return 0;
-    if(r%3==0){NEEDI(system_flags_or,"sys->rm_flg");w->sv->system_flags_or(8,area_bit(dest.prm3+16));}
+    if(r%3==0){NEEDI(system_flags_or,"sys->rm_flg");w->sv->system_flags_or(1,area_bit(dest.prm3+16));}
     return 1;
 }
 int recvx_en04_atari_check(RECVX_ENEMY_WORK* w){return activation_check(w,0);}
