@@ -26,7 +26,7 @@ MAP_ITEM = 59
 
 # Diagnostic setup, then the ordinary status-menu path:
 #   inventory  -> StatusMenu slides in (SpriteH, about 16 ticks)
-#   back       -> MainCommand bar, maincsr 3 = ITEM
+#   cancel     -> MainCommand bar, maincsr 3 = ITEM (CursorMove 0x1000)
 #   left       -> maincsr 2 = MAP
 #   confirm    -> press MAP (4 + 1 ticks) and raise the map task
 REPLAY = f'''0 debug_key F2
@@ -34,12 +34,14 @@ REPLAY = f'''0 debug_key F2
 4 confirm
 8 debug_key F2
 40 inventory
-80 back
+80 cancel
 88 left
 96 confirm
 '''
 
-CLOSE = ''.join(f'{frame} cancel\n' for frame in range(240, 300, 6))
+# Ein Abbruch verlaesst die Karte (FtskMapExit). Weitere Abbrueche wuerden den
+# danach wieder geoeffneten Statusbildschirm sofort schliessen, system.c case 6.
+CLOSE = '240 cancel\n'
 
 
 def run(runtime, data, folder, name, room, frames, replay):
@@ -66,7 +68,7 @@ def require_binding(result, name):
 
 def check(runtime, data, folder):
     # 1. Status menu -> MAP in an original room, with the map item owned.
-    opened = run(runtime, data, folder, 'status-map', 'RM_0000.RDX', 240, REPLAY)
+    opened = run(runtime, data, folder, 'status-map', 'RM_0020.RDX', 240, REPLAY)
     assert not opened['blocked_commands'], ('blocked event commands', opened['event_tasks'])
     screen = require_binding(opened, 'status-map')
 
@@ -89,11 +91,11 @@ def check(runtime, data, folder):
     assert screen['mode'] in (7, 8), ('map not in a view mode', screen['mode'])
 
     # 2. Closing returns to the status menu and releases gm_flg 0x80000.
-    closed = run(runtime, data, folder, 'status-map-close', 'RM_0000.RDX', 320, REPLAY + CLOSE)
+    closed = run(runtime, data, folder, 'status-map-close', 'RM_0020.RDX', 320, REPLAY + CLOSE)
     after = require_binding(closed, 'status-map-close')
     assert not after['active'], 'the map screen did not close'
     assert not (closed["work_flags"][11] & 0x80000), 'gm_flg 0x80000 was not released'
-    assert closed['status_menu']['active'], 'closing the map did not return to the status menu'
+    assert closed['inventory_open'], 'closing the map did not return to the status menu'
 
     # 3. Event entry: the room that hands out a map (RM_0060, it_flg 133).
     #    Entered through the room's own script, not by forcing the task.

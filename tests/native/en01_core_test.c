@@ -148,6 +148,22 @@ static void reset_logs(void)
     g_rand_n = g_rand_i = 0;
 }
 
+/* plp->mlwP->owP[joint].mtx — bhEne01_Move braucht owP[0], um den
+   Spielerabstand zu bilden (en01.c:2840-2846). Einheitsmatrix mit der
+   Spielerposition in der Translationsspalte. */
+static int t_player_joint_matrix(uint32_t joint, float* out16)
+{
+    int i;
+    (void)joint;
+    if (!g_player_bound || !out16) return 0;
+    for (i = 0; i < 16; ++i) out16[i] = 0.0f;
+    out16[0] = out16[5] = out16[10] = out16[15] = 1.0f;
+    out16[12] = g_player.pos.x;
+    out16[13] = g_player.pos.y;
+    out16[14] = g_player.pos.z;
+    return 1;
+}
+
 static void bind_services(unsigned game_mode, int with_data)
 {
     memset(&g_sv, 0, sizeof(g_sv));
@@ -160,6 +176,7 @@ static void bind_services(unsigned game_mode, int with_data)
     g_sv.vibration         = t_vibration;
     g_sv.player_get        = t_player_get;
     g_sv.player_set        = t_player_set;
+    g_sv.player_joint_matrix = t_player_joint_matrix;
     g_en.calc_fix_offset   = t_calc_fix_offset;
     g_en.player_link_pose  = t_player_link_pose;
 
@@ -234,7 +251,8 @@ static void test_init_hp(void)
     check_eq(w.mtn_no, 2, "InitType00 ohne flg 0x80: mtn_no = 2");
 
     /* gm_mode 2 -> Zeile 1; rand() % 16 == 5 -> en01_hp_tbl[1][5] == 40.
-       mdlver 5 -> Subtyp 10, add_hp 20 -> 40 + 8 = 48. */
+       mdlver 5 -> Subtyp 10, und en01_PersonalType[10] hat add_hp 0
+       (en01.c:1072), also bleibt es bei 40. Nur Subtyp 9 traegt dort 20. */
     bind_services(2u, 1);
     reset_logs();
     g_rand_seq[0] = 5; g_rand_n = 1;
@@ -242,7 +260,7 @@ static void test_init_hp(void)
     w.mdlver = 5; w.type = 0;
     recvx_en01_init(&w, &p);
     check_eq(p.personal_type, 10, "mdlver 5 -> Subtyp 10");
-    check_eq(w.hp, 48, "gm_mode 2, rand%16=5: 40 + 20% = 48");
+    check_eq(w.hp, 40, "gm_mode 2, rand%16=5: 40, Subtyp 10 ohne add_hp");
 
     /* Negativer add_hp (Subtyp 19, -20 Prozent): mdlver 9, Zeile 0,
        rand%16 = 0 -> 60 - 12 = 48. Die Originalformel rundet zur Null. */
@@ -471,13 +489,29 @@ static void test_check_mtn_tbl(void)
     recvx_en01_check_mtn_tbl(&w, 45);
     check_eq(g_se_n, 1, "MTN 0 Frame 45 loest den zweiten Schritt aus");
 
-    /* Vibration aus en01_mtn_tbl3 nur fuer mode0 < 5 (en01.c:10714).
-       MTN 50, Frame 0 hat dort einen Eintrag. */
+    /* Vibration aus en01_mtn_tbl3 nur fuer mode0 < 5 (en01.c:10709).
+       Die Tabelle hat 15 Zeilen (8, 85, 120, 121, 9, 43, 86, 36, 6, 35, 5,
+       7, 34, 46, 111); MTN 50 steht NICHT darin. MTN 7 hat genau einen
+       Eintrag, Frame 13 mit act 1 (en01.c:797). */
+    reset_logs();
+    work_init(&w, &p);
+    w.mtn_no = 7u; w.mode0 = 4;
+    recvx_en01_check_mtn_tbl(&w, 13);
+    check(g_vib_n > 0, "mode0 = 4: Vibration aus en01_mtn_tbl3 laeuft");
+
+    /* mode0 >= 5 sperrt genau diese Tabelle (en01.c:10709). */
+    reset_logs();
+    work_init(&w, &p);
+    w.mtn_no = 7u; w.mode0 = 5;
+    recvx_en01_check_mtn_tbl(&w, 13);
+    check_eq(g_vib_n, 0, "mode0 = 5: en01_mtn_tbl3 bleibt still");
+
+    /* MTN 50 loest dort nichts aus, weil die Zeile fehlt. */
     reset_logs();
     work_init(&w, &p);
     w.mtn_no = 50u; w.mode0 = 4;
     recvx_en01_check_mtn_tbl(&w, 0);
-    check(g_vib_n > 0, "mode0 = 4: Vibration aus en01_mtn_tbl3 laeuft");
+    check_eq(g_vib_n, 0, "MTN 50 steht nicht in en01_mtn_tbl3");
     reset_logs();
     work_init(&w, &p);
     w.mtn_no = 50u; w.mode0 = 5;
@@ -648,12 +682,346 @@ static void test_move_dispatch_hole(void)
     memset(&g_player, 0, sizeof(g_player));
 
     /* bhEne01_MoveMode2W[13] ist NULL (en01.c:2270). Das Original springt
-       dorthin und stuerzt ab; der Port meldet die Stelle namentlich. */
+       dorthin und stuerzt ab; der Port meldet die Stelle namentlich.
+       Typ 8 ist dafuer die einzige brauchbare Wahl: MoveTypeW[8] ist
+       MVType00 (en01.c:2245), und MVType00 ueberspringt fuer type == 8
+       Brain00 und ActionModeCheck (en01.c:4873). Bei jedem anderen Typ
+       setzt ActionModeCheck mode2 vorher um und der NULL-Platz wird nie
+       erreicht. */
     reset_logs();
     work_init(&w, &p);
-    w.type = 0; w.mode0 = 1; w.mode2 = 13;
+    w.type = 8; w.mode0 = 1; w.mode2 = 13;
     recvx_en01_move(&w);
     check(gap_seen("MoveMode2W[13]"), "NULL-Eintrag 13 wird namentlich gemeldet");
+}
+
+/* ===========================================================================
+   9 — Trefferreaktion: Motionwahl, Oberkoerperkopplung, Kappenwurf
+   ===========================================================================
+   bhEne01_DG00 (en01.c:8143), DG02 (:8255), DG16 (:9837). exp0 Bit 0x2000
+   ist in allen drei die Weiche vordere/hintere Treffermotion. */
+static void test_damage_states(void)
+{
+    RECVX_ENEMY_WORK w, cepw;
+    RECVX_EN01_EXP0  p, cp;
+
+    bind_services(0u, 1);
+    g_player_bound = 1;
+    memset(&g_player, 0, sizeof(g_player));
+
+    /* DG00 vorne: MTN 20 am Hauptkoerper, 220 am Oberkoerper. */
+    reset_logs();
+    work_init(&w, &p);
+    work_init(&cepw, &cp);
+    w.exp1 = &cepw;
+    p.flags = 0x2000u | 0x3000000u;
+    cp.flags = 0x3000000u;
+    recvx_en01_dg00(&w);
+    check_eq((int)w.mtn_no, 20, "DG00 mit 0x2000: MTN 20");
+    check_eq((int)cepw.mtn_no, 220, "DG00 mit 0x2000: Oberkoerper MTN 220");
+    check_eq((int)(p.flags & 0x3000000u), 0, "DG00 loescht exp0 0x3000000");
+    check_eq((int)(cp.flags & 0x3000000u), 0, "DG00 loescht es auch am Oberkoerper");
+    check((w.flg & 0x40000u) != 0, "DG00 setzt flg 0x40000");
+    check_eq((int)w.mode3, 1, "DG00 geht nach mode3 1");
+
+    /* DG00 hinten: MTN 21/221. */
+    reset_logs();
+    work_init(&w, &p);
+    work_init(&cepw, &cp);
+    w.exp1 = &cepw;
+    recvx_en01_dg00(&w);
+    check_eq((int)w.mtn_no, 21, "DG00 ohne 0x2000: MTN 21");
+    check_eq((int)cepw.mtn_no, 221, "DG00 ohne 0x2000: Oberkoerper MTN 221");
+
+    /* DG00 ohne Oberkoerper darf nicht abbrechen (cepw == NULL, :8169). */
+    reset_logs();
+    work_init(&w, &p);
+    recvx_en01_dg00(&w);
+    check_eq((int)w.mtn_no, 21, "DG00 ohne Oberkoerper laeuft weiter");
+
+    /* DG02 wirft die Kappe: ohne 0x2000 auf Frame 5 (:8303), mit 0x2000 auf
+       Frame 2 (:8298). Ohne Kappen-Kindwork bleibt FlyingCap still
+       (en01.c:11904), also pruefen wir die Modusgruppe aus :8290. */
+    reset_logs();
+    work_init(&w, &p);
+    work_init(&cepw, &cp);
+    w.exp1 = &cepw;
+    recvx_en01_dg02(&w);
+    check_eq((int)w.mtn_no, 17, "DG02 ohne 0x2000: MTN 17");
+    check_eq((int)(p.flags & 0xFu), 1, "DG02 zwingt die Modusgruppe auf 1");
+
+    /* DG16 benutzt den anderen Motionwechsel: nur 0x2000000 loeschen,
+       0x1000000 setzen (en01.c:9864). */
+    reset_logs();
+    work_init(&w, &p);
+    work_init(&cepw, &cp);
+    w.exp1 = &cepw;
+    p.flags = 0x2000000u;
+    cp.flags = 0x2000000u;
+    recvx_en01_dg16(&w);
+    check_eq((int)w.mtn_no, 130, "DG16 ohne 0x2000: MTN 130");
+    check_eq((int)(p.flags & 0x2000000u), 0, "DG16 loescht nur 0x2000000");
+    check((p.flags & 0x1000000u) != 0, "DG16 setzt 0x1000000");
+    check_eq((int)(p.flags & 0xFu), 6, "DG16 setzt die Modusgruppe auf 6");
+
+    /* DG10/DG11 waehlen die Sturzmotion nach der laufenden Motion
+       (en01.c:9483 / :9603); nur DG10 kennt mtn_no 37. */
+    reset_logs();
+    work_init(&w, &p);
+    w.mtn_no = 37u;
+    recvx_en01_dg10(&w);
+    check_eq((int)w.mtn_no, 25, "DG10 aus MTN 37: MTN 25");
+    reset_logs();
+    work_init(&w, &p);
+    w.mtn_no = 37u;
+    recvx_en01_dg11(&w);
+    check_eq((int)w.mtn_no, 27, "DG11 kennt MTN 37 nicht: MTN 27");
+
+    /* DG10 mit hp < 0 springt sofort auf mode3 2 (en01.c:9504), laeuft aber
+       trotzdem durch den textuell folgenden case 1 (:9510). */
+    reset_logs();
+    work_init(&w, &p);
+    w.hp = -1;
+    recvx_en01_dg10(&w);
+    check_eq((int)w.mode3, 2, "DG10 mit hp < 0 geht nach mode3 2");
+
+    /* Der Verteiler kennt jetzt jeden Platz ausser den beiden echten
+       NULL-Stellen 12 und 13 (en01.c:2340-2341). */
+    reset_logs();
+    work_init(&w, &p);
+    w.type = 0; w.mode2 = 12;
+    recvx_en01_dg_type00(&w);
+    check(gap_seen("DamageMode2W[12] == NULL"), "DamageMode2W[12] meldet NULL");
+    reset_logs();
+    work_init(&w, &p);
+    w.type = 0; w.mode2 = 13;
+    recvx_en01_dg_type00(&w);
+    check(gap_seen("DamageMode2W[13] == NULL"), "DamageMode2W[13] meldet NULL");
+
+    /* DGType02 verschiebt den Index um 10 (en01.c:8139): mode2 2 trifft
+       damit DG12, also den NULL-Platz. */
+    reset_logs();
+    work_init(&w, &p);
+    w.type = 0; w.mode2 = 2;
+    recvx_en01_dg_type02(&w);
+    check(gap_seen("DamageMode2W[12] == NULL"),
+          "DGType02 mode2 2 trifft Platz 12");
+}
+
+/* ===========================================================================
+   10 — B-Familie: der verknuepfte Oberkoerper (en01b.c)
+   =========================================================================== */
+static void test_b_family(void)
+{
+    RECVX_ENEMY_WORK w, main_w;
+    RECVX_EN01_EXP0  p, mp;
+
+    bind_services(0u, 1);
+    g_player_bound = 1;
+    memset(&g_player, 0, sizeof(g_player));
+
+    /* bhEne01_MV13B (en01b.c:211): MTN 42, 0x1000000 weg, 0x2000000 hin,
+       way 256. */
+    reset_logs();
+    work_init(&w, &p);
+    p.flags = 0x1000000u;
+    recvx_en01_mv13_b(&w);
+    check_eq((int)w.mtn_no, 42, "MV13B: MTN 42");
+    check_eq((int)(p.flags & 0x1000000u), 0, "MV13B loescht 0x1000000");
+    check((p.flags & 0x2000000u) != 0, "MV13B setzt 0x2000000");
+    check_eq((int)w.way, 256, "MV13B setzt way 256");
+    check_eq((int)w.mode3, 1, "MV13B geht nach mode3 1");
+
+    /* bhEne01_DG12B (en01b.c:656): hp >= 0 -> mode3 1 und Treffer-SE,
+       hp < 0 -> mode3 2 und Todes-SE. Die SE-Nummern sind 16786196/97
+       (en01b.c:672/679) und laufen ueber den HAUPTKOERPER epp = lkwkp. */
+    reset_logs();
+    work_init(&w, &p);
+    work_init(&main_w, &mp);
+    w.lkwkp = &main_w;
+    recvx_en01_dg12_b(&w);
+    check_eq((int)w.mtn_no, 26, "DG12B: MTN 26");
+    check_eq((int)w.mode3, 1, "DG12B mit hp >= 0: mode3 1");
+    check_eq((int)(p.flags & 0x3000000u), 0, "DG12B loescht exp0 0x3000000");
+    /* Der SE laeuft ueber bhEne01_SePlay auf dem HAUPTKOERPER. Seine
+       Nummern 16786196/97 haben das Low-Byte 20 bzw. 21 und fallen damit
+       in die Zufallssperre der persoenlichen Stimme (en01.c:11387); ob ein
+       Ton herauskommt, gehoert zu test_se_play, nicht hierher. Dass der
+       Aufruf am Hauptkoerper und nicht am Oberkoerper landet, zeigt die
+       fehlende Luecke: ein exp0-loser Hauptkoerper wuerde melden. */
+    check_eq(g_gap_n, 0, "DG12B meldet mit gebundenem Hauptkoerper nichts");
+
+    reset_logs();
+    work_init(&w, &p);
+    work_init(&main_w, &mp);
+    w.lkwkp = &main_w;
+    w.hp = -1;
+    recvx_en01_dg12_b(&w);
+    check_eq((int)w.mode3, 2, "DG12B mit hp < 0: mode3 2");
+
+    /* Ohne lkwkp meldet DG12B die Luecke und ruehrt nichts an
+       (das Original dereferenziert dort ungeschuetzt). */
+    reset_logs();
+    work_init(&w, &p);
+    recvx_en01_dg12_b(&w);
+    check(gap_seen("DG12B: lkwkp == NULL"), "DG12B ohne lkwkp meldet die Luecke");
+    check_eq((int)w.mtn_no, 0, "DG12B ohne lkwkp wechselt keine Motion");
+
+    /* bhEne01_DG13B (en01b.c:707) ist immer toedlich und immer SE 16786196. */
+    reset_logs();
+    work_init(&w, &p);
+    work_init(&main_w, &mp);
+    w.lkwkp = &main_w;
+    w.hp = -1;
+    recvx_en01_dg13_b(&w);
+    check_eq((int)w.mtn_no, 26, "DG13B: MTN 26");
+    check_eq((int)w.mode3, 1, "DG13B geht immer nach mode3 1");
+    /* DG13B hat keinen hp-Zweig: auch bei hp < 0 bleibt es mode3 1
+       (en01b.c:722), anders als DG12B. */
+    check_eq((int)(p.flags & 0x3000000u), 0, "DG13B loescht exp0 0x3000000");
+
+    /* bhEne01_DG05B (en01b.c:402) loest den Oberkoerper: flg 0x80 weg,
+       stflg 0x8 weg, Lage vom Hauptkoerper, exp0+0x7C = -1. */
+    reset_logs();
+    work_init(&w, &p);
+    work_init(&main_w, &mp);
+    w.lkwkp = &main_w;
+    w.flg = 0x80u; w.stflg = 0x8u;
+    main_w.px = 3.0f; main_w.py = 4.0f; main_w.pz = 5.0f;
+    main_w.ay = 1234; main_w.flr_no = 2;
+    recvx_en01_dg05_b(&w);
+    check_eq((int)w.mtn_no, 224, "DG05B: MTN 224");
+    check_eq((int)(w.flg & 0x80u), 0, "DG05B loest flg 0x80");
+    check_eq((int)(w.stflg & 0x8u), 0, "DG05B loescht stflg 0x8");
+    check((w.flg & 0x20u) != 0, "DG05B setzt flg 0x20");
+    check((w.flg & 0x8u) != 0, "DG05B setzt flg 0x8");
+    check(w.px == 3.0f && w.py == 4.0f && w.pz == 5.0f,
+          "DG05B uebernimmt die Lage des Hauptkoerpers");
+    check_eq((int)w.ay, 1234, "DG05B uebernimmt den Winkel");
+    check_eq((int)w.flr_no, 2, "DG05B uebernimmt die Etage");
+    check_eq((int)p.word7C, -1, "DG05B setzt exp0+0x7C auf -1");
+    check_eq((int)(p.flags & 0xFu), 4, "DG05B setzt die Modusgruppe auf 4");
+
+    /* Die B-Verteiler fuehren fuer jeden uebrigen Platz bhEne01_Dummy
+       (en01b.c:144) aus und melden NICHTS. */
+    reset_logs();
+    work_init(&w, &p);
+    p.flags = 0x80000000u;
+    w.mode2 = 0;
+    recvx_en01_mv_type00_b(&w);
+    check_eq(g_gap_n, 0, "MoveMode2B[0] ist Dummy und meldet nichts");
+}
+
+/* ===========================================================================
+   11 — Griff: Spielerzustand, Kopfabtrennung, Vertragsluecken
+   =========================================================================== */
+static void test_grab_states(void)
+{
+    RECVX_ENEMY_WORK w, cepw;
+    RECVX_EN01_EXP0  p, cp;
+
+    bind_services(0u, 1);
+
+    /* bhEne01_NG02 (en01.c:7325) setzt den Spieler in den Griffzustand und
+       haengt den Gegner auf den festen Abstand hinter ihn. */
+    reset_logs();
+    g_player_bound = 1;
+    memset(&g_player, 0, sizeof(g_player));
+    work_init(&w, &p);
+    work_init(&cepw, &cp);
+    w.exp1 = &cepw;
+    w.mtn_no = 15u;
+    recvx_en01_ng02(&w);
+    check_eq((int)w.mtn_no, 9, "NG02: MTN 9");
+    check_eq((int)cepw.mtn_no, 209, "NG02: Oberkoerper MTN 209");
+    check_eq((int)w.frm_no, 0, "NG02 aus MTN 15 startet bei Frame 0");
+    check_eq((int)g_player.mode0, 4, "NG02 setzt plp->mode0 = 4");
+    check_eq((int)g_player.mode2, 1, "NG02 setzt plp->mode2 = 1");
+    check((p.flags & 0x20000u) != 0, "NG02 setzt exp0 0x20000");
+    check((w.flg2 & 1u) != 0, "NG02 setzt flg2 Bit 0");
+    check_eq((int)(w.flg & 0x40u), 0, "NG02 loescht flg 0x40");
+    check_eq((int)w.mode3, 1, "NG02 geht nach mode3 1");
+
+    /* Aus einer anderen Motion startet der Biss bei Frame 10 (en01.c:7345). */
+    reset_logs();
+    work_init(&w, &p);
+    w.mtn_no = 3u;
+    recvx_en01_ng02(&w);
+    check_eq((int)w.frm_no, 655360, "NG02 aus anderer Motion startet bei Frame 10");
+
+    /* mode3 3, MTN 36, Frame 25: Kopf ab, hp -1, flg 0x20 weg
+       (en01.c:7452-7458). */
+    reset_logs();
+    work_init(&w, &p);
+    w.mode3 = 3; w.mtn_no = 36u; w.frm_no = 25 << 16;
+    w.flg = 0x20u;
+    recvx_en01_ng02(&w);
+    check_eq((int)w.hp, -1, "NG02 Frame 25: hp = -1");
+    check_eq((int)(w.flg & 0x20u), 0, "NG02 Frame 25: flg 0x20 weg");
+    check_eq((int)p.hit_voice, -1, "CutHead setzt exp0+0x78 auf -1");
+    check_eq(g_se[0], 4877, "NG02 MTN 36 nimmt SE 4877");
+
+    /* MTN 35 Frame 34 ist die Kopfexplosion mit SE 4869 (en01.c:7472). */
+    reset_logs();
+    work_init(&w, &p);
+    w.mode3 = 3; w.mtn_no = 35u; w.frm_no = 34 << 16;
+    recvx_en01_ng02(&w);
+    check_eq(g_se[0], 4869, "NG02 MTN 35 nimmt SE 4869");
+    check_eq((int)w.hp, -1, "NG02 MTN 35 Frame 34: hp = -1");
+
+    /* plp->ct1 fehlt in RECVX_ENEMY_PLAYER; der Zustand meldet das statt es
+       zu ersetzen (en01.c:7432). ct0 == 0 beim Eintritt erfuellt die
+       Abbruchbedingung :7404 sofort. */
+    reset_logs();
+    work_init(&w, &p);
+    w.mode3 = 2; w.ct0 = 0;
+    recvx_en01_ng02(&w);
+    check(gap_seen("plp->ct1"), "NG02 meldet das fehlende plp->ct1");
+
+    /* NageMode2W[3] ist im Original NULL (en01.c:2303). */
+    reset_logs();
+    work_init(&w, &p);
+    w.type = 0; w.mode2 = 3;
+    recvx_en01_ng_type00(&w);
+    check(gap_seen("NageMode2W[3] == NULL"), "NageMode2W[3] meldet NULL");
+
+    /* bhEne01_PlyDG00 (en01.c:7509): mode3 0 dreht den Spieler in den Griff.
+       plp->ayp fehlt im Vertrag und wird gemeldet; waxp am GEGNER ist
+       dagegen vorhanden und wird gesetzt (en01.c:7546). */
+    reset_logs();
+    work_init(&w, &p);
+    memset(&g_player, 0, sizeof(g_player));
+    p.flags = 0x4000u;
+    w.ay = 0;
+    recvx_en01_ply_dg00(&w, &g_player);
+    check(gap_seen("plp->ayp"), "PlyDG00 meldet das fehlende plp->ayp");
+    check_eq((int)g_player.mode3, 1, "PlyDG00 geht nach mode3 1");
+    check_eq((int)(g_player.flg & 0x40000u), 0, "PlyDG00 loescht plp->flg 0x40000");
+    check((g_player.exp1_flags & 0x1E0u) != 0, "PlyDG00 setzt exp1 0x1E0");
+    check_eq((int)(g_player.exp1_flags & 4u), 0, "PlyDG00 loescht exp1 Bit 2");
+
+    /* mode3 2 haengt den Spieler auf die Motion des Gegners um und nimmt
+       die Griffbindung zurueck (en01.c:7613-7627). */
+    reset_logs();
+    work_init(&w, &p);
+    memset(&g_player, 0, sizeof(g_player));
+    g_player.mode3 = 2;
+    p.flags = 0x80000u;
+    recvx_en01_ply_dg00(&w, &g_player);
+    check((g_player.exp1_flags & 4u) != 0, "PlyDG00 mode3 2 setzt exp1 Bit 2");
+    check_eq((int)g_player.hokan_rate, 32768, "PlyDG00 mode3 2: hokan_rate 32768");
+    check_eq((int)(p.flags & 0x80000u), 0, "PlyDG00 mode3 2 loescht exp0 0x80000");
+    check_eq((int)g_player.mode3, 3, "PlyDG00 mode3 2 geht nach mode3 3");
+
+    /* Ein ply_id ausserhalb der vier Zeilen von En01_PlyMtn_OffsetTbl wird
+       gemeldet und nicht indiziert (en01.c:7593). */
+    reset_logs();
+    work_init(&w, &p);
+    memset(&g_player, 0, sizeof(g_player));
+    g_player.ply_id = 9u;
+    recvx_en01_ply_dg00(&w, &g_player);
+    check(gap_seen("En01_PlyMtn_OffsetTbl[ply_id] ausserhalb"),
+          "PlyDG00 meldet ply_id ausserhalb der Tabelle");
 }
 
 int main(void)
@@ -670,6 +1038,9 @@ int main(void)
     test_player_link_table();
     test_table_shape();
     test_move_dispatch_hole();
+    test_damage_states();
+    test_b_family();
+    test_grab_states();
 
     printf("en01_core_test: %d Pruefungen, %d Fehler\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

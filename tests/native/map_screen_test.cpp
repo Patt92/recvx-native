@@ -386,8 +386,8 @@ static void test_floor_table(const std::string& data_root){
     std::uint32_t slots[16]={};
     auto services=services_for(flags,slots);
     services.read_inside_file=[&](unsigned,unsigned id){
-        char name[64];std::snprintf(name,sizeof name,"%s/archives/MRY/%04u.bin",data_root.c_str(),id);
-        return read_bytes(name);};
+        char index[8];std::snprintf(index,sizeof index,"%04u",id);
+        return read_bytes(data_root+"/archives/MRY/"+index+".bin");};
     MapHost host;
     host.ply_id=0;host.stg_no=0;host.rom_no=0;host.player_y=0;
     MapScreen screen;
@@ -418,8 +418,8 @@ static void test_task_sequence(const std::string& data_root){
     services.read_inside_file=[&](unsigned partition,unsigned id){
         requested.push_back(id);
         equal("Partition ist dor_partid (MRY.AFS)",partition,5u);
-        char name[64];std::snprintf(name,sizeof name,"%s/archives/MRY/%04u.bin",data_root.c_str(),id);
-        return read_bytes(name);};
+        char index[8];std::snprintf(index,sizeof index,"%04u",id);
+        return read_bytes(data_root+"/archives/MRY/"+index+".bin");};
     std::vector<std::pair<int,int>> sounds;
     services.call_system_se=[&](int type,int number){sounds.push_back({type,number});};
     std::vector<std::pair<std::uint32_t,float>> fades;

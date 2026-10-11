@@ -7731,7 +7731,7 @@ void recvx_en01_link_fire_effect(RECVX_ENEMY_WORK* w, int type)
 
    Die B-Tabellen sind im Original fast vollstaendig mit bhEne01_Dummy
    belegt (en01b.c:31/70/96/135); nur einzelne Slots tragen echte Zustaende.
-   Noch nicht portierte Einzelzustaende melden ihren Originalnamen ueber
+   Einzelzustaende ohne eigenen Rumpf melden ihren Originalnamen ueber
    en01_gap(); echte NULL-Eintraege des Originals sind davon im Wortlaut
    unterschieden. Kein Verteiler setzt einen Ersatzzustand.
    =========================================================================== */
@@ -7883,16 +7883,652 @@ void recvx_en01_brain02_b(RECVX_ENEMY_WORK* w)
     }
 }
 
+/* ===========================================================================
+   Block M — die sieben echten Zustaende der B-Familie
+   ===========================================================================
+   MV13B (en01b.c:211), NG03B (:247), DG05B (:402), DG09B (:510),
+   DG12B (:656), DG13B (:707), DD02B (:739). Alle uebrigen Eintraege der
+   vier B-Tabellen sind bhEne01_Dummy (en01b.c:144, leerer Rumpf).
+
+   `w` ist in der B-Familie der verknuepfte OBERKOERPER-Work: bhEne01_Move
+   waehlt die B-Variante genau dann, wenn exp0 Bit 0x80000000 an DIESEM Work
+   steht (en01.c:2848). `w->lkwkp` ist der Hauptkoerper (en01.c:2822), im
+   Original `epp`. bhEne01_SePlay nimmt im Original zwar eine Position
+   entgegen, benutzt sie aber nicht (en01.c:11368); die nativen Aufrufe
+   lassen sie darum weg, wie ueberall sonst in dieser Datei.
+
+   npCutSkin (njplus.c:1746) hat im Original einen LEEREN Rumpf. Die beiden
+   Aufrufe in DG05B/DG09B bleiben deshalb als Kommentar stehen und sind
+   KEINE Portierungsluecke. */
+
+/* --- bhEne01_MV13B (en01b.c:211) ---------------------------------------- */
+void recvx_en01_mv13_b(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_MV13B: exp0"); return; }
+
+    switch (w->mode3) {
+    case 0:
+        recvx_enemy_chg_mtn(w, 42u, 0, 15);                          /* :216 */
+        p->flags &= ~0x1000000u;                                     /* :217 */
+        p->flags |=  0x2000000u;                                     /* :218 */
+        w->way = 256;                                                /* :219 */
+        w->mode3++;                                                  /* :220 */
+        /* Kein break im Original (en01b.c:221): mode3 0 laeuft im selben
+           Pass in mode3 1 weiter. */
+
+    case 1:
+        en01_ikou(w, &p->ikou_target, w->way);                       /* :223 */
+        break;                                                       /* :224 */
+    default:
+        en01_gap(w, "bhEne01_MV13B: mode3 ausserhalb (en01b.c:213)");
+        break;
+    }
+}
+
+/* --- bhEne01_NG03B (en01b.c:247) ----------------------------------------
+   Der Oberkoerper haelt den Spieler fest; Hebelruetteln oder Ablauf von ct0
+   beendet den Griff. Danach laeuft je Spielerfigur eine andere Abtrenn-
+   motion (ply_id 0: MTN 6 mit Halsblut und Kopfabtrennung, sonst MTN 5 mit
+   Kopfexplosion). */
+void recvx_en01_ng03_b(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_EN01_EXP0* pp;
+    const RECVX_ENEMY_SERVICES* sv;
+    RECVX_ENEMY_WORK* epp;
+    RECVX_ENEMY_WORK* sepw;
+    RECVX_ENEMY_PLAYER pl;
+    uint32_t frm;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_NG03B: exp0"); return; }
+
+    epp = w->lkwkp;                                                  /* :253 */
+    if (!epp) {
+        /* Das Original dereferenziert lkwkp hier ohne Pruefung. */
+        en01_gap(w, "bhEne01_NG03B: lkwkp == NULL (en01b.c:253)");
+        return;
+    }
+    sv = en01_sv(w);
+    if (!sv || !sv->player_get || !sv->player_get(&pl)) {            /* :254 */
+        en01_gap(w, "plp (en01b.c:254)");
+        return;
+    }
+
+    switch (w->mode3) {
+    case 0:
+        recvx_enemy_chg_mtn(w, 43u, 655360, 10);                     /* :259 */
+        p->flags &= ~0x3000000u;                                     /* :261 */
+        w->ay = (int16_t)en01_niten_dir(w->px, w->pz,
+                                        pl.pos.x, pl.pos.z);         /* :263 */
+        w->flg &= ~0x40u;                                            /* :265 */
+
+        pl.mode0 = 4;                                                /* :267-270 */
+        pl.mode1 = 0;
+        pl.mode2 = 1;
+        pl.mode3 = 0;
+        if (sv->player_set) sv->player_set(&pl);
+        else en01_gap(w, "plp->mode0..3 (en01b.c:267)");
+
+        p->flags |= 0x20000u;                                        /* :272 */
+        w->mode3++;                                                  /* :274 */
+        /* Kein break im Original (en01b.c:275). */
+
+    case 1:
+        if ((w->frm_no >> 16) == 10) {                               /* :276 */
+            w->ct0 = 80;                                             /* :278 */
+            w->mode3++;                                              /* :280 */
+        }
+        break;                                                       /* :283 */
+
+    case 2:
+        if (!sv->lever_check) {
+            en01_gap(w, "bhEne_LeverCheck (zonzon1.c)");
+            break;
+        }
+        w->ct0 -= sv->lever_check() + 1;                             /* :285 */
+
+        if ((w->flg & 0x2000000u) || w->ct0 < 0) {                   /* :287 */
+            /* Beide Zweige loeschen 0x3000000; nur die Motion
+               unterscheidet sich (en01b.c:289-302). */
+            if (pl.ply_id == 0u) {
+                recvx_enemy_chg_mtn(w, 6u, 0, 5);                    /* :291 */
+            } else {
+                recvx_enemy_chg_mtn(w, 5u, 0, 5);                    /* :299 */
+            }
+            p->flags &= ~0x3000000u;                                 /* :293/:301 */
+
+            pl.mode3 = 2;                                            /* :304 */
+            if (sv->player_set) sv->player_set(&pl);
+            else en01_gap(w, "plp->mode3 = 2 (en01b.c:304)");
+
+            w->mode3++;                                              /* :305 */
+            w->ct0 = 0;                                              /* :307 */
+        }
+        break;                                                       /* :310 */
+
+    case 3:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :312 */
+
+        if (w->mtn_no == 6u) {                                       /* :314 */
+            if (frm == 24u) {                                        /* :316 */
+                recvx_en01_neck_blood_effect(epp, 0);                /* :318 */
+            } else if (frm == 25u) {                                 /* :320 */
+                recvx_en01_cut_head(epp, 0);                         /* :322 */
+
+                pp = recvx_en01_exp0(epp);                           /* :324 */
+                if (!pp) {
+                    en01_gap(w, "bhEne01_NG03B: lkwkp->exp0 (en01b.c:324)");
+                    break;
+                }
+                sepw = pp->head;
+                if (sepw) {                                          /* :326 */
+                    /* Das Original legt in sepw->exp0+0 und +4 ZEIGER auf
+                       epp->mlwP->objP[11].evalflags bzw. owP[11].flg ab
+                       (en01b.c:328-329); das Kopf-Kindwork schaltet damit
+                       spaeter die Sichtbarkeit des Halsknotens am
+                       Hauptkoerper. Der Vertrag hat dafuer nur
+                       model_node_hidden und keinen Weg, eine fremde
+                       Feldadresse zu uebergeben. Ohne diesen Anschluss
+                       wird hier nichts ersetzt. */
+                    en01_gap(w, "sepw->exp0[0/4] = &objP[11].evalflags / "
+                                "&owP[11].flg (en01b.c:328)");
+
+                    sepw->ay = (int16_t)((w->ay + 32768) & 0xFFFF);  /* :331 */
+                    sepw->mode0 = 3;                                 /* :333 */
+                }
+
+                /* bhEne01_SePlay(epp, &owP[11].mtx[12], 4877) — die
+                   Position bleibt im Original unbenutzt. */
+                recvx_en01_se_play(epp, 4877);                       /* :336 */
+            }
+        } else if (w->mtn_no == 5u) {                                /* :338 */
+            if (frm == 33u) {                                        /* :340 */
+                epp->dvx = 0.0f;                                     /* :342-344 */
+                epp->dvy = 0.0f;
+                epp->dvz = 0.0f;
+                recvx_en01_exp_head_effect(epp, 1);                  /* :346 */
+            } else if (frm == 34u) {                                 /* :348 */
+                recvx_en01_cut_head(epp, 1);                         /* :350 */
+                recvx_en01_se_play(epp, 4869);                       /* :352 */
+            } else if (frm == 35u) {                                 /* :354 */
+                recvx_en01_neck_blood_effect(epp, 0);                /* :356 */
+            }
+        }
+
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :360 */
+            w->mtn_add = 0;                                          /* :362 */
+            p->flags &= ~0x80u;                                      /* :364 */
+            w->hp = -1;                                              /* :366 */
+            w->mode0 = 4;                                            /* :368-371 */
+            w->mode1 = 0;
+            w->mode2 = 2;
+            w->mode3 = 0;
+        }
+        break;                                                       /* :374 */
+    default:
+        en01_gap(w, "bhEne01_NG03B: mode3 ausserhalb (en01b.c:255)");
+        break;
+    }
+}
+
+/* Die beiden Blutspritzer, die DG05B und DG09B gleich aufbauen
+   (en01b.c:449-460 / :576-587 / :586-597): derselbe Zufallsversatz auf x,
+   danach Gelenk 9 und Gelenk 1 des Hauptkoerpers. `type` ist 1 (Dauerblutung)
+   bzw. 0 (Einzelspritzer). */
+static void en01_b_spray_blood(RECVX_ENEMY_WORK* w, RECVX_ENEMY_WORK* epp,
+                               uint8_t type)
+{
+    const RECVX_EN01_SERVICES* en = en01_en();
+    RECVX_ENEMY_VEC ps;
+
+    /* `2.0f - (4.0f * (-rand() / -2.1474836E9f))` (en01b.c:451): die beiden
+       Minuszeichen heben sich auf, der Nenner ist die Originalkonstante. */
+    ps.x = 2.0f - (4.0f * (-(float)en01_rand(w) / -2.1474836E9f));
+    ps.y = 0.0f;
+    ps.z = 0.0f;
+
+    if (!en || !en->set_blood2) {
+        en01_gap(w, "bhEne_SetBlood2 (zonzon.c:466)");
+        return;
+    }
+    epp->djnt_no = 9;                                                /* :456 */
+    en->set_blood2(epp, type, &ps, 0);                               /* :457 */
+    epp->djnt_no = 1;                                                /* :459 */
+    en->set_blood2(epp, type, &ps, 0);                               /* :460 */
+}
+
+/* Der gemeinsame Ausgang von DG05B und DG09B (en01b.c:485-504 / :624-648):
+   solange ct0 nicht abgelaufen ist, geht es je nach hp in den Tod oder
+   zurueck in den Oberkoerper-Laufzustand. Das Original prueft
+   `ct0-- != 0`, also beim ersten Pass sofort wahr. */
+static void en01_b_damage_exit(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p = recvx_en01_exp0(w);
+
+    if (w->ct0-- == 0) return;                                       /* :487 */
+
+    if (w->hp < 0) {                                                 /* :489 */
+        w->mode0 = 4;                                                /* :491-494 */
+        w->mode1 = 0;
+        w->mode2 = 2;
+        w->mode3 = 0;
+        return;
+    }
+
+    w->mode0 = 1;                                                    /* :498-501 */
+    w->mode1 = 1;
+    w->mode2 = 3;
+    w->mode3 = 0;
+    w->type  = 2;                                                    /* :503 */
+    if (p) {
+        p->flags &= ~0xFu;                                           /* :505 */
+        p->flags |=  0x4u;                                           /* :506 */
+    }
+    w->flg |= 0x20u;                                                 /* :508 */
+}
+
+/* --- bhEne01_DG05B (en01b.c:402) ----------------------------------------
+   Der Oberkoerper loest sich vom Hauptkoerper (flg 0x80 weg) und spielt die
+   lange Abtrennmotion 224. */
+void recvx_en01_dg05_b(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* epp;
+    RECVX_ENEMY_VEC node8;
+    uint32_t frm;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG05B: exp0"); return; }
+
+    epp = w->lkwkp;                                                  /* :409 */
+    if (!epp) {
+        en01_gap(w, "bhEne01_DG05B: lkwkp == NULL (en01b.c:409)");
+        return;
+    }
+
+    switch (w->mode3) {
+    case 0:
+        recvx_enemy_chg_mtn(w, 224u, 2293760, 0);                    /* :414 */
+        p->flags &= ~0x3000000u;                                     /* :416 */
+        /* npCutSkin(epp, 1/0, 1, 9, 0, 0, 0) (en01b.c:418-419) hat im
+           Original einen leeren Rumpf (njplus.c:1746) und bleibt wirkungslos. */
+
+        w->flg   &= ~0x80u;                                          /* :421 */
+        w->stflg &= ~0x8u;                                           /* :422 */
+        w->flg   |=  0x20u;                                          /* :424 */
+
+        w->px = epp->px;                                             /* :426-428 */
+        w->py = epp->py;
+        w->pz = epp->pz;
+        w->ay = epp->ay;                                             /* :430 */
+        w->flr_no = epp->flr_no;                                     /* :432 */
+
+        p->word7C = -1;                                              /* :434 */
+        w->flg |= 0x8u;                                              /* :436 */
+        p->flags &= ~0xFu;                                           /* :438 */
+        p->flags |=  0x4u;                                           /* :439 */
+        w->mode3++;                                                  /* :441 */
+        /* Kein break im Original (en01b.c:442). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :443 */
+
+        if (frm == 55u || frm == 58u) {                              /* :445 */
+            /* bhEne01_SePlay(epp, &owP[9].mtx[12], 8963). */
+            recvx_en01_se_play(epp, 8963);                           /* :447 */
+        }
+
+        /* `((frm <= 36) == 0) && ((frm % 2) == 0)` (en01b.c:449): erst ab
+           Frame 37 und nur auf geraden Frames. Die doppelte Negation bleibt
+           als Originalform erhalten. */
+        if (((frm <= 36u) == 0) && (frm % 2u) == 0u) {               /* :449 */
+            en01_b_spray_blood(w, epp, 1);                           /* :451-460 */
+        }
+
+        if (frm == en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) { /* :463 */
+            if (en01_joint_translation(w, 8u, &node8)) {             /* :465 */
+                w->px = node8.x;                                     /* :467 */
+                w->pz = node8.z;                                     /* :468 */
+            }
+            recvx_enemy_chg_mtn(w, 39u, 0, 0);                       /* :470 */
+            p->flags &= ~0x3000000u;                                 /* :472 */
+            w->ct0 = 20;                                             /* :474 */
+            w->mode3++;                                              /* :476 */
+        }
+        break;                                                       /* :479 */
+
+    case 2:
+        en01_b_damage_exit(w);                                       /* :485-508 */
+        break;                                                       /* :510 */
+    default:
+        en01_gap(w, "bhEne01_DG05B: mode3 ausserhalb (en01b.c:411)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG09B (en01b.c:510) ----------------------------------------
+   Wie DG05B, aber ohne eigenen Motionwechsel: die Motion (350..353) steht
+   schon, dazu kommen Kopf-Partikel im ersten Frame. MTN 352 endet toedlich. */
+void recvx_en01_dg09_b(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_EN01_SERVICES* en;
+    RECVX_ENEMY_WORK* epp;
+    RECVX_ENEMY_VEC ps, node8;
+    uint32_t frm, mtn;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG09B: exp0"); return; }
+    en = en01_en();
+
+    epp = w->lkwkp;                                                  /* :517 */
+    if (!epp) {
+        en01_gap(w, "bhEne01_DG09B: lkwkp == NULL (en01b.c:517)");
+        return;
+    }
+
+    switch (w->mode3) {
+    case 0:
+        /* npCutSkin (en01b.c:522-523) — leerer Originalrumpf. */
+        w->flg   &= ~0x80u;                                          /* :525 */
+        w->stflg &= ~0x8u;                                           /* :526 */
+        w->flg   |=  0x20u;                                          /* :528 */
+
+        w->px = epp->px;                                             /* :530-532 */
+        w->py = epp->py;
+        w->pz = epp->pz;
+        w->ay = epp->ay;                                             /* :534 */
+
+        p->word7C = -1;                                              /* :536 */
+        w->flg |= 0x8u;                                              /* :538 */
+        p->flags &= ~0xFu;                                           /* :540 */
+        p->flags |=  0x4u;                                           /* :541 */
+
+        ps.x = 0.0f;                                                 /* :543-545 */
+        ps.y = 1.0f;
+        ps.z = 0.0f;
+        epp->djnt_no = 9;                                            /* :547 */
+        if (en && en->set_blood2) en->set_blood2(epp, 2, &ps, 0);    /* :549 */
+        else en01_gap(w, "bhEne_SetBlood2 (zonzon.c:466)");
+
+        w->mode3++;                                                  /* :551 */
+        /* Kein break im Original (en01b.c:552). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :553 */
+        mtn = (uint32_t)w->mtn_no;
+
+        if (frm == 1u) {                                             /* :555 */
+            w->dvx = -njSin(w->ay);                                  /* :559 */
+            w->dvy =  njSin(10922);                                  /* :560 */
+            w->dvz = -njCos(w->ay);                                  /* :561 */
+            w->djnt_no = 9;                                          /* :563 */
+            /* bhSetEffParticle(epw, djnt_no, {0,0,0}, &epw->dvx,
+               0xFF800000, 5) — zweimal (en01b.c:565-566). Die Routine ist
+               effsub3.c; der EN01-Vertrag hat dafuer keinen Dienst. Die
+               Feldschreibungen darueber sind originalgetreu ausgefuehrt. */
+            en01_gap(w, "bhSetEffParticle (effsub3.c) x2 (en01b.c:565)");
+        }
+
+        /* Die vier Motionfenster mit dichter Dauerblutung (en01b.c:569). */
+        if ((mtn == 350u && frm < 28u) || (mtn == 351u && frm <= 20u) ||
+            (mtn == 352u && frm <= 20u) || (mtn == 353u && frm <= 20u)) {
+            if ((frm % 4u) == 0u) {                                  /* :571 */
+                en01_b_spray_blood(w, epp, 1);                       /* :573-584 */
+            }
+        } else if ((frm % 3u) == 0u) {                               /* :586 */
+            en01_b_spray_blood(w, epp, 0);                           /* :588-595 */
+        }
+
+        if (frm == en01_motion_frames(w, mtn) - 1u) {                /* :597 */
+            if (en01_joint_translation(w, 8u, &node8)) {             /* :599 */
+                w->px = node8.x;                                     /* :601 */
+                w->pz = node8.z;                                     /* :602 */
+            }
+            if (mtn == 352u) {                                       /* :604 */
+                recvx_enemy_chg_mtn(w, 166u, 0, 0);                  /* :606 */
+                p->flags &= ~0x3000000u;                             /* :608 */
+                w->hp = -1;                                          /* :610 */
+            } else {
+                recvx_enemy_chg_mtn(w, 39u, 0, 0);                   /* :615 */
+                p->flags &= ~0x3000000u;                             /* :617 */
+            }
+            w->ct0 = 20;                                             /* :620 */
+            w->mode3++;                                              /* :622 */
+        }
+        break;                                                       /* :625 */
+
+    case 2:
+        en01_b_damage_exit(w);                                       /* :627-648 */
+        break;                                                       /* :650 */
+    default:
+        en01_gap(w, "bhEne01_DG09B: mode3 ausserhalb (en01b.c:519)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG12B (en01b.c:656) ----------------------------------------
+   Kurzes Taumeln des Oberkoerpers (MTN 26). Bei hp < 0 fuehrt derselbe
+   Zweig ueber mode3 2 in den Tod. */
+void recvx_en01_dg12_b(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* epp;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG12B: exp0"); return; }
+
+    epp = w->lkwkp;                                                  /* :661 */
+    if (!epp) {
+        en01_gap(w, "bhEne01_DG12B: lkwkp == NULL (en01b.c:661)");
+        return;
+    }
+
+    switch (w->mode3) {
+    case 0:
+        recvx_enemy_chg_mtn(w, 26u, 0, 5);                           /* :666 */
+        p->flags &= ~0x3000000u;                                     /* :668 */
+
+        if (w->hp < 0) {                                             /* :670 */
+            /* bhEne01_SePlay(epp, &epw->px, 16786197). */
+            recvx_en01_se_play(epp, 16786197);                       /* :672 */
+            w->mode3 = 2;                                            /* :674 */
+        } else {
+            recvx_en01_se_play(epp, 16786196);                       /* :679 */
+            w->mode3++;                                              /* :681 */
+        }
+        /* Kein break im Original (en01b.c:683). Der Durchfall geht auf den
+           TEXTUELL naechsten case, also immer auf case 1 — auch wenn der
+           hp-Zweig mode3 gerade auf 2 gesetzt hat. Dort ist die Bedingung
+           direkt nach dem Motionwechsel (frm_no == 0) nie erfuellt, der
+           Pass bleibt also wirkungslos. Das bleibt erhalten. */
+
+    case 1:
+        if (w->mtn_no == 26u && (w->frm_no >> 16) > 10) {            /* :684 */
+            w->mode0 = 1;                                            /* :686-689 */
+            w->mode1 = 1;
+            w->mode2 = 3;
+            w->mode3 = 0;
+        }
+        break;                                                       /* :692 */
+
+    case 2:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :694 */
+            w->mode0 = 4;                                            /* :696-699 */
+            w->mode1 = 0;
+            w->mode2 = 2;
+            w->mode3 = 0;
+            w->mtn_add = 0;                                          /* :701 */
+        }
+        break;                                                       /* :704 */
+    default:
+        en01_gap(w, "bhEne01_DG12B: mode3 ausserhalb (en01b.c:663)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG13B (en01b.c:707) ----------------------------------------
+   Wie DG12B, aber immer toedlich und immer mit dem Treffer-SE 16786196. */
+void recvx_en01_dg13_b(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* epp;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG13B: exp0"); return; }
+
+    epp = w->lkwkp;                                                  /* :711 */
+    if (!epp) {
+        en01_gap(w, "bhEne01_DG13B: lkwkp == NULL (en01b.c:711)");
+        return;
+    }
+
+    switch (w->mode3) {
+    case 0:
+        recvx_enemy_chg_mtn(w, 26u, 0, 5);                           /* :716 */
+        p->flags &= ~0x3000000u;                                     /* :718 */
+        recvx_en01_se_play(epp, 16786196);                           /* :720 */
+        w->mode3++;                                                  /* :722 */
+        /* Kein break im Original (en01b.c:723). */
+
+    case 1:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :724 */
+            w->mode0 = 4;                                            /* :726-729 */
+            w->mode1 = 0;
+            w->mode2 = 2;
+            w->mode3 = 0;
+            w->mtn_add = 0;                                          /* :731 */
+        }
+        break;                                                       /* :734 */
+    default:
+        en01_gap(w, "bhEne01_DG13B: mode3 ausserhalb (en01b.c:713)");
+        break;
+    }
+}
+
+/* --- bhEne01_DD02B (en01b.c:739) ----------------------------------------
+   Der Tod des abgetrennten Oberkoerpers. Gleicher Aufbau wie DD02
+   (en01.c:10132): Lache auf trockenem Boden, im Wasser stattdessen die
+   Absinkbahn mit den drei Sprungphasen. Unterschiede zu DD02: der
+   Lachenpunkt kommt aus njCalcPoint auf Knoten 10 mit lokalem Versatz
+   z = 3.0, bhSetBloodPoolLnk bekommt als Work NULL statt epw, und der
+   Wasserversatz ist -1.0 statt -1.7. */
+void recvx_en01_dd02_b(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_EN01_SERVICES* en;
+    RECVX_ENEMY_VEC ps, pd, from, vec;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DD02B: exp0"); return; }
+    en = en01_en();
+
+    switch (w->mode3) {
+    case 0:
+        w->flg |=  0x2u;                                             /* :746 */
+        w->flg &= ~0x28u;                                            /* :747 */
+
+        if (!(w->stflg & 0x100000u)) {                               /* :749 */
+            ps.x = 0.0f;                                             /* :753-755 */
+            ps.y = 0.0f;
+            ps.z = 3.0f;
+            if (en01_joint_point(w, 10u, &ps, &pd)) {                /* :757 */
+                pd.y = w->py;                                        /* :759 */
+                /* bhSetBloodPoolLnk(NULL, &pd, epw->ay, &en01_BldTbl, 0)
+                   (en01b.c:761). Der EN01-Vertrag kennt nur bhLinkBlood,
+                   bhEne_SetBlood3 und bhEne_SetBlood4 — andere
+                   Originalroutinen. Ohne den Dienst entsteht hier keine
+                   Ersatzlache. */
+                en01_gap(w, "bhSetBloodPoolLnk (effsub3.c:145)");
+            }
+        }
+
+        if (!(p->flags & 0x100000u) && (w->stflg & 0x100000u)) {     /* :764 */
+            from.x = w->px; from.y = w->py; from.z = w->pz;          /* :766-768 */
+            vec.x = 0.0f; vec.y = 18.2f; vec.z = 0.0f;               /* :770-772 */
+            pd.y = 0.0f;
+            if (!en || !en->water_line) {
+                en01_gap(w, "bhCheckL2Water (hitchk.c:5561)");
+                return;
+            }
+            /* `if (&pd == NULL)` (en01b.c:776) ist die Adresse einer
+               lokalen Variablen und damit nie NULL — Originaldefekt, der
+               Zweig bleibt unerreichbar. */
+            en->water_line(&from, &vec, &pd);                        /* :774 */
+
+            w->xn = pd.y - 1.0f;                                     /* :781 */
+            w->yn = w->py;                                           /* :782 */
+            w->ct0 = (en01_rand(w) % 30) + 60;                       /* :784 */
+            w->mode3 = 2;                                            /* :786 */
+            break;                                                   /* :787 */
+        }
+        w->mode3++;                                                  /* :790 */
+        break;                                                       /* :791 */
+
+    case 1:
+        break;                                                       /* :793 */
+
+    case 2:
+        if (--w->ct0 >= 0) break;                                    /* :795 */
+        p->slot94.f = 0.0f;                                          /* :800 */
+        w->ct0 = 0;                                                  /* :802 */
+        w->mode3++;                                                  /* :804 */
+        break;                                                       /* :805 */
+
+    case 3:
+        w->py = w->yn + ((0.001f * (float)(w->ct0 * w->ct0)) / 2.0f); /* :807 */
+        w->ct0++;                                                    /* :809 */
+        if (w->xn < w->py) {                                         /* :811 */
+            p->slot94.f = (float)(0.5 * (-0.001f * (float)w->ct0));  /* :813 */
+            w->ct0 = 0;                                              /* :815 */
+            w->py = w->xn;                                           /* :817 */
+            w->mode3++;                                              /* :819 */
+        }
+        break;                                                       /* :822 */
+
+    case 4:
+        w->py = (w->xn + (p->slot94.f * (float)w->ct0)) +
+                ((0.001f * (float)(w->ct0 * w->ct0)) / 2.0f);        /* :824 */
+        w->ct0++;                                                    /* :826 */
+        if (w->xn < w->py) {                                         /* :828 */
+            p->slot94.f = (float)(-(0.5 * ((double)p->slot94.f -
+                (-0.001f * (float)w->ct0))));                        /* :830 */
+            if (p->slot94.f > -0.04f) {                              /* :832 */
+                p->slot94.f = -0.04f;                                /* :834 */
+            }
+            w->ct0 = 0;                                              /* :837 */
+            w->py = w->xn;                                           /* :839 */
+        }
+        break;                                                       /* :842 */
+    default:
+        en01_gap(w, "bhEne01_DD02B: mode3 ausserhalb (en01b.c:744)");
+        break;
+    }
+}
+
 /* --- B-Familie: mode2-Verteiler -----------------------------------------
    bhEne01_MoveMode2B[17] (en01b.c:31), NageMode2B[4] (:70),
-   DamageMode2B[17] (:96), DieMode2B[4] (:135). Die echten Zustaende der
-   B-Familie (MV13B, NG03B, DG05B/09B/12B/13B, DD02B) sind noch nicht
-   portiert und melden ihren Originalnamen. */
+   DamageMode2B[17] (:96), DieMode2B[4] (:135). Alle Eintraege ausser den
+   oben portierten sieben sind bhEne01_Dummy (en01b.c:144). */
 static void en01_move_mode2_b(RECVX_ENEMY_WORK* w, uint32_t index)
 {
     switch (index) {
     case 13:
-        en01_gap(w, "bhEne01_MV13B (en01b.c:211) nicht portiert");
+        recvx_en01_mv13_b(w);
         break;
     case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7:
     case 8: case 9: case 10: case 11: case 12:
@@ -7909,7 +8545,7 @@ static void en01_nage_mode2_b(RECVX_ENEMY_WORK* w, uint32_t index)
 {
     switch (index) {
     case 3:
-        en01_gap(w, "bhEne01_NG03B (en01b.c:247) nicht portiert");
+        recvx_en01_ng03_b(w);
         break;
     case 0: case 1: case 2:
         recvx_en01_dummy(w);
@@ -7924,16 +8560,16 @@ static void en01_damage_mode2_b(RECVX_ENEMY_WORK* w, uint32_t index)
 {
     switch (index) {
     case 5:
-        en01_gap(w, "bhEne01_DG05B (en01b.c:402) nicht portiert");
+        recvx_en01_dg05_b(w);
         break;
     case 9:
-        en01_gap(w, "bhEne01_DG09B (en01b.c:510) nicht portiert");
+        recvx_en01_dg09_b(w);
         break;
     case 12:
-        en01_gap(w, "bhEne01_DG12B (en01b.c:656) nicht portiert");
+        recvx_en01_dg12_b(w);
         break;
     case 13:
-        en01_gap(w, "bhEne01_DG13B (en01b.c:707) nicht portiert");
+        recvx_en01_dg13_b(w);
         break;
     case 0: case 1: case 2: case 3: case 4: case 6: case 7: case 8:
     case 10: case 11: case 14: case 15: case 16:
@@ -7949,7 +8585,7 @@ static void en01_die_mode2_b(RECVX_ENEMY_WORK* w, uint32_t index)
 {
     switch (index) {
     case 2:
-        en01_gap(w, "bhEne01_DD02B (en01b.c:739) nicht portiert");
+        recvx_en01_dd02_b(w);
         break;
     case 0: case 1: case 3:
         recvx_en01_dummy(w);
@@ -8057,31 +8693,2720 @@ void recvx_en01_dd_type02_b(RECVX_ENEMY_WORK* w)
     en01_die_mode2_b(w, (uint32_t)w->mode2);                         /* :398 */
 }
 
+/* ===========================================================================
+   Block N — Trefferreaktion der W-Familie, DG00..DG04
+   ===========================================================================
+   bhEne01_DG00 (en01.c:8143), DG01 (:8192), DG02 (:8255), DG03 (:8342),
+   DG04 (:8570). Jeder Zustand schaltet eine Treffermotion am Hauptkoerper
+   und dieselbe Motion + 200 am verknuepften Oberkoerper, loescht dort das
+   Translationspaar 0x3000000 und uebertraegt am Ende die vier Modusbytes.
+   exp0 Bit 0x2000 (Spiegel von comb_flg Bit 2, en01.c:3255) waehlt in
+   DG00/DG01/DG02 die vordere statt der hinteren Treffermotion. */
+
+/* Motionwechsel fuer Haupt- und Oberkoerper zugleich — in DG00..DG16 steht
+   dieses Paar mehr als dreissigmal wortgleich (z.B. en01.c:8167). */
+static void en01_dg_chg_pair(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p,
+                             RECVX_ENEMY_WORK* cepw, uint32_t mtn1,
+                             uint32_t mtn2, int32_t frm, int32_t rate)
+{
+    recvx_enemy_chg_mtn(w, mtn1, frm, rate);
+    p->flags &= ~0x3000000u;
+    if (cepw) en01_chg_mtn_upper(w, cepw, mtn2, frm, rate);
+}
+
+/* Der Ruecklauf in den Nachzustand mode2 4, der in DG03 und DG04 achtmal
+   wortgleich steht (z.B. en01.c:8427): Motionvorschub beider Koerper
+   stoppen, mode 1/0/4/0, exp0 0x40000 setzen, Modusbytes kopieren.
+   `flags2_40` ist das an drei Stellen zusaetzlich gesetzte Bit 0x40 in
+   exp0+0x44 (en01.c:8431/8690/8770). */
+static void en01_dg_resume_mode4(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p,
+                                 RECVX_ENEMY_WORK* cepw, int flags2_40)
+{
+    w->mtn_add = 0;
+    if (cepw) cepw->mtn_add = 0;
+    w->mode0 = 1;
+    w->mode1 = 0;
+    w->mode2 = 4;
+    w->mode3 = 0;
+    p->flags |= 0x40000u;
+    if (flags2_40) p->flags2 |= 0x40u;
+    if (cepw) en01_copy_modes(cepw, w);
+}
+
+/* Der Ausgang von DG01 und DG02 (en01.c:8225 / :8318): steht der
+   Spieler auf derselben Etage weiter als 15 Einheiten entfernt und muss der
+   Gegner sich dafuer drehen, folgt der Renn-/Dreh-Zustand mode2 7, sonst
+   der normale Laufzustand mode2 1. */
+static void en01_dg_hit_recover(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p,
+                                RECVX_ENEMY_WORK* cepw)
+{
+    const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+    RECVX_ENEMY_PLAYER pl;
+    RECVX_ENEMY_VEC ppos;
+
+    if (!sv || !sv->player_get || !sv->player_get(&pl)) {
+        en01_gap(w, "plp (en01.c:8228)");
+        return;
+    }
+    ppos.x = pl.pos.x; ppos.y = pl.pos.y; ppos.z = pl.pos.z;
+
+    if (w->flr_no == pl.flr_no && p->player_distance > 15.0f &&
+            en01_ikou3(w, &ppos, 24576) != 0) {                      /* :8228 */
+        w->mode0 = 1;                                                /* :8230 */
+        w->mode1 = 0;
+        w->mode2 = 7;
+        w->mode3 = 0;
+    } else {
+        w->mode0 = 1;                                                /* :8237 */
+        w->mode1 = 1;
+        w->mode2 = 1;
+        w->mode3 = 0;
+    }
+    if (cepw) en01_copy_modes(cepw, w);
+}
+
+/* --- bhEne01_DG00 (en01.c:8143) ----------------------------------------- */
+void recvx_en01_dg00(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t mtn_no1, mtn_no2;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG00: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :8149 */
+
+    switch (w->mode3) {
+    case 0:
+        if (p->flags & 0x2000u) {                                    /* :8155 */
+            mtn_no1 = 20u; mtn_no2 = 220u;                           /* :8157 */
+        } else {
+            mtn_no1 = 21u; mtn_no2 = 221u;                           /* :8162 */
+        }
+        en01_dg_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0, 10);       /* :8166 */
+        w->flg |= 0x40000u;                                          /* :8168 */
+        w->mode3++;                                                  /* :8175 */
+        /* Kein break im Original (en01b-Stil, en01.c:8176). */
+
+    case 1:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 2u) {   /* :8178 */
+            w->mode0 = 1;                                            /* :8180 */
+            w->mode1 = 0;
+            w->mode2 = 3;
+            w->mode3 = 0;
+            if (cepw) en01_copy_modes(cepw, w);                      /* :8184 */
+        }
+        break;                                                       /* :8189 */
+    default:
+        en01_gap(w, "bhEne01_DG00: mode3 ausserhalb (en01.c:8151)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG01 (en01.c:8192) ----------------------------------------- */
+void recvx_en01_dg01(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t mtn_no1, mtn_no2, frm;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG01: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :8198 */
+
+    switch (w->mode3) {
+    case 0:
+        if (p->flags & 0x2000u) {                                    /* :8204 */
+            mtn_no1 = 18u; mtn_no2 = 218u;                           /* :8206 */
+        } else {
+            mtn_no1 = 19u; mtn_no2 = 219u;                           /* :8211 */
+        }
+        en01_dg_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0, 10);       /* :8214 */
+        w->flg |= 0x40000u;                                          /* :8216 */
+        w->mode3++;                                                  /* :8222 */
+        /* Kein break im Original (en01.c:8223). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);
+        if ((frm == 13u && w->mtn_no == 18u) ||
+                (frm == 20u && w->mtn_no == 19u)) {                  /* :8225 */
+            en01_dg_hit_recover(w, p, cepw);                         /* :8228 */
+            p->flags &= ~0x200u;                                     /* :8243 */
+            break;                                                   /* :8249 */
+        }
+        /* Kein break ausserhalb des if (en01.c:8250): der Zustand faellt in
+           diesem Pass einfach aus dem switch. */
+        break;
+    default:
+        en01_gap(w, "bhEne01_DG01: mode3 ausserhalb (en01.c:8200)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG02 (en01.c:8255) -----------------------------------------
+   Wie DG01, zusaetzlich fliegt die Kappe (bhEne01_FlyingCap) und der
+   Zustand zwingt die Modusgruppe in exp0 0xF auf 1. */
+void recvx_en01_dg02(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t mtn_no1, mtn_no2, frm;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG02: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :8262 */
+
+    switch (w->mode3) {
+    case 0:
+        if (p->flags & 0x2000u) {                                    /* :8268 */
+            mtn_no1 = 16u; mtn_no2 = 216u;                           /* :8270 */
+        } else {
+            mtn_no1 = 17u; mtn_no2 = 217u;                           /* :8275 */
+        }
+        en01_dg_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0, 5);        /* :8278 */
+        w->flg |= 0x40000u;                                          /* :8282 */
+        p->flags &= ~0xFu;                                           /* :8290 */
+        p->flags |=  0x1u;                                           /* :8291 */
+        w->mode3++;                                                  /* :8292 */
+        /* Kein break im Original (en01.c:8293). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :8295 */
+        if (p->flags & 0x2000u) {                                    /* :8296 */
+            if (frm == 2u) recvx_en01_flying_cap(w, 3);              /* :8298 */
+        } else if (frm == 5u) {                                      /* :8303 */
+            recvx_en01_flying_cap(w, 2);                             /* :8305 */
+        }
+
+        if ((frm == 28u && w->mtn_no == 16u) ||
+                (frm == 30u && w->mtn_no == 17u)) {                  /* :8308 */
+            en01_dg_hit_recover(w, p, cepw);                         /* :8311 */
+            p->flags &= ~0x200u;                                     /* :8330 */
+            p->flags &= ~0xFu;                                       /* :8331 */
+            p->flags |=  0x1u;                                       /* :8332 */
+            break;                                                   /* :8334 */
+        }
+        break;
+    default:
+        en01_gap(w, "bhEne01_DG02: mode3 ausserhalb (en01.c:8264)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG03 (en01.c:8342) -----------------------------------------
+   Der Rueckwaertstaumel mit Sturzpruefung: faellt bhEne01_ZulzulCheck
+   waehrend der ersten 22 Frames an, geht es je nach hp in die Sturz- (48)
+   oder die Fangmotion (53); dabei wird der Restdrehwinkel ayp auf die
+   fuenf Nachlaufframes verteilt. */
+void recvx_en01_dg03(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t frm;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG03: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :8347 */
+
+    switch (w->mode3) {
+    case 0:
+        p->flags &= ~0xFu;                                           /* :8352 */
+        p->flags |=  0x6u;                                           /* :8353 */
+        w->spd = 0.0f;                                               /* :8354 */
+        en01_dg_chg_pair(w, p, cepw, 11u, 211u, 0, 10);              /* :8355 */
+
+        /* Nur wenn BEIDE Wasserkapselmarker gesetzt sind, laeuft die
+           Wandkollision mit (en01.c:8364). */
+        if (p->water_state[0] != -1 && p->water_state[1] != -1) {    /* :8364 */
+            w->flg |= 0x40000u;                                      /* :8366 */
+        }
+        w->ct1 = 0;                                                  /* :8368 */
+        w->mode3++;                                                  /* :8369 */
+        /* Kein break im Original (en01.c:8370). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :8372 */
+
+        if (frm == 14u || frm == 26u) {                              /* :8374 */
+            if (w->stflg & 0x100000u) {                              /* :8376 */
+                recvx_en01_se_play(w, 8964);                         /* :8378 */
+            }
+        }
+        if (frm == 30u) recvx_en01_flying_cap(w, 0);                 /* :8382 */
+
+        if (p->water_state[0] != -1 && p->water_state[1] != -1 &&
+                (uint32_t)(w->frm_no >> 16) < 22u &&
+                recvx_en01_zulzul_check(w, 0, 4.5f, &p->grab_point,
+                                        &w->ayp) != 0) {             /* :8387 */
+            if (w->hp < 0) {                                         /* :8389 */
+                en01_dg_chg_pair(w, p, cepw, 48u, 248u, w->frm_no, 10); /* :8391 */
+                w->mode3 = 3;                                        /* :8399 */
+            } else {
+                en01_dg_chg_pair(w, p, cepw, 53u, 253u, w->frm_no, 10); /* :8403 */
+                w->mode3 = 2;                                        /* :8411 */
+            }
+            p->flags &= ~0xFu;                                       /* :8414 */
+            p->flags |=  0x1u;                                       /* :8415 */
+            w->ct0 = 5;                                              /* :8416 */
+            w->ayp = w->ayp / w->ct0;                                /* :8417 */
+            break;                                                   /* :8418 */
+        }
+
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 2u) {   /* :8420 */
+            p->flags &= ~0xFu;                                       /* :8422 */
+            p->flags |=  0x6u;                                       /* :8423 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :8424 */
+        }
+        break;                                                       /* :8445 */
+
+    case 2:
+        if (w->ct0 != 0) {                                           /* :8448 */
+            if (w->ct0 < 5) w->ay += (int16_t)w->ayp;                /* :8450 */
+            w->ct0 -= 1;                                             /* :8454 */
+        }
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :8457 */
+            p->flags &= ~0xFu;                                       /* :8459 */
+            p->flags |=  0x1u;                                       /* :8460 */
+            w->mtn_add = 0;                                          /* :8461 */
+            if (cepw) cepw->mtn_add = 0;                             /* :8463 */
+
+            if (w->hp < 0) {                                         /* :8468 */
+                en01_dg_chg_pair(w, p, cepw, 48u, 248u, 3080192, 10); /* :8470 */
+                w->ct0 = 0;                                          /* :8478 */
+                w->mode3 = 3;                                        /* :8479 */
+                break;                                               /* :8480 */
+            }
+            /* mtn_add ist hier schon 0; der Ruecklauf setzt es erneut, wie
+               das Original (en01.c:8482). */
+            en01_dg_resume_mode4(w, p, cepw, 0);                     /* :8482 */
+        }
+        break;                                                       /* :8492 */
+
+    case 3:
+        if (w->ct0 != 0) {                                           /* :8495 */
+            if (w->ct0 < 5) w->ay += (int16_t)w->ayp;                /* :8497 */
+            w->ct0 -= 1;                                             /* :8501 */
+        }
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :8504 */
+            p->flags &= ~0xFu;                                       /* :8506 */
+            p->flags |=  0x1u;                                       /* :8507 */
+            w->mtn_add = 0;                                          /* :8509 */
+            if (cepw) cepw->mtn_add = 0;                             /* :8510 */
+            p->flags |= 0x100000u;                                   /* :8515 */
+            w->mode0 = 4;                                            /* :8516 */
+            w->mode1 = 0;
+            w->mode2 = 0;
+            w->mode3 = 0;
+            /* Das Original setzt mode1 direkt danach noch einmal auf 5
+               (en01.c:8520); die 0 aus :8517 ist damit wirkungslos. Beides
+               bleibt erhalten. */
+            w->mode1 = 5;                                            /* :8520 */
+            if (cepw) en01_copy_modes(cepw, w);                      /* :8521 */
+        }
+        break;                                                       /* :8526 */
+
+    /* Im Original gibt es keinen case 4 (en01.c:8528). */
+    case 5:
+        if (w->frm_no == 65536) {                                    /* :8529 */
+            en01_dg_resume_mode4(w, p, cepw, 0);                     /* :8531 */
+        }
+        break;                                                       /* :8547 */
+
+    case 6:
+        if (w->frm_no == 32768) {                                    /* :8550 */
+            w->frm_no = 0;                                           /* :8552 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :8553 */
+        }
+        break;                                                       /* :8571 */
+    default:
+        en01_gap(w, "bhEne01_DG03: mode3 ausserhalb (en01.c:8349)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG04 (en01.c:8570) -----------------------------------------
+   Der Vorwaertstaumel. Zusaetzlich zu DG03: die Drehung auf die
+   Trefferrichtung aus dvx/dvz in den ersten zehn Frames, der Klippensturz
+   (bhEne01_GakeotiCheck, Motion 124) und die Schubphasen ueber bhAddSpeed.
+   Das Original hat hier keinen case 2. */
+void recvx_en01_dg04(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_EN01_SERVICES* en;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t frm;
+    int32_t h_cnt, ang;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG04: exp0"); return; }
+    en = en01_en();
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :8577 */
+
+    switch (w->mode3) {
+    case 0:
+        p->flags &= ~0xFu;                                           /* :8582 */
+        p->flags |=  0x6u;                                           /* :8583 */
+        en01_dg_chg_pair(w, p, cepw, 12u, 212u, 0, 10);              /* :8584 */
+        w->flg |= 0x40000u;                                          /* :8586 */
+
+        if (!(p->flags & 0x200u)) {                                  /* :8593 */
+            w->ayp = (int32_t)(10430.381f * atan2f(w->dvx, w->dvz)); /* :8595 */
+        }
+        w->ct1 = 0;                                                  /* :8597 */
+        w->mode3++;                                                  /* :8598 */
+        /* Kein break im Original (en01.c:8600). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :8601 */
+
+        if (!(p->flags & 0x200u)) {                                  /* :8602 */
+            if (frm < 10u) {                                         /* :8604 */
+                ang = (int32_t)(uint16_t)(w->ayp - w->ay);           /* :8606 */
+                if (ang > EN01_DEG_ANG(180.0f)) {                    /* :8608 */
+                    ang = (ang - EN01_DEG_ANG(180.0f))
+                        - EN01_DEG_ANG(180.0f);                      /* :8609 */
+                }
+                w->ay += (int16_t)(ang / 2);                         /* :8611 */
+            }
+        }
+
+        if (frm == 19u) {                                            /* :8615 */
+            if (w->stflg & 0x100000u) recvx_en01_se_play(w, 8964);   /* :8617 */
+        }
+        if (frm == 10u) p->flags &= ~0x100u;                         /* :8623 */
+        if (frm == 7u)  recvx_en01_flying_cap(w, 1);                 /* :8629 */
+
+        if (frm < 18u) {                                             /* :8634 */
+            if (recvx_en01_zulzul_check(w, 32768, 4.5f, &p->grab_point,
+                                        &w->ayp) != 0) {             /* :8636 */
+                p->flags &= ~0x100u;                                 /* :8638 */
+                w->ct0 = 5;                                          /* :8639 */
+                w->ayp = w->ayp / w->ct0;                            /* :8641 */
+
+                if (recvx_en01_gakeoti_check(w) != 0) {              /* :8642 */
+                    en01_dg_chg_pair(w, p, cepw, 124u, 324u, 0, 2);  /* :8644 */
+                    w->flg &= ~0x20u;                                /* :8651 */
+                    p->flags &= ~0xFu;                               /* :8652 */
+                    w->mode3 = 7;                                    /* :8653 */
+                    break;                                           /* :8654 */
+                }
+                en01_dg_chg_pair(w, p, cepw, 50u, 250u, 0, 4);       /* :8656 */
+                p->flags &= ~0xFu;                                   /* :8663 */
+                p->flags |=  0x3u;                                   /* :8664 */
+                w->mode3 = 3;                                        /* :8665 */
+                break;                                               /* :8666 */
+            }
+        }
+
+        if (frm >= 16u && frm < 21u) {                               /* :8670 */
+            w->spd = 0.49733332f;                                    /* :8672 */
+            if (en && en->add_speed) en->add_speed(w, 32768);        /* :8673 */
+            else en01_gap(w, "bhAddSpeed (zonzon.c)");
+        }
+
+        if (frm == en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) { /* :8676 */
+            p->flags &= ~0xFu;                                       /* :8678 */
+            p->flags |=  0x6u;                                       /* :8679 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :8680 */
+        }
+        break;                                                       /* :8697 */
+
+    /* Im Original gibt es keinen case 2 (en01.c:8699). */
+    case 3:
+        if (w->ct0 != 0) {                                           /* :8700 */
+            if (w->ct0 < 5) w->ay += (int16_t)w->ayp;                /* :8702 */
+            w->px += p->grab_point.x / 5.0f;                         /* :8706 */
+            w->pz += p->grab_point.z / 5.0f;                         /* :8707 */
+            w->ct0 -= 1;                                             /* :8708 */
+        }
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :8710 */
+            w->mtn_add = 0;                                          /* :8712 */
+            if (cepw) cepw->mtn_add = 0;                             /* :8713 */
+            p->flags &= ~0x200u;                                     /* :8717 */
+            en01_dg_resume_mode4(w, p, cepw, 0);                     /* :8718 */
+        }
+        break;                                                       /* :8728 */
+
+    case 4:
+        if (w->hokan_count == 0u) {                                  /* :8731 */
+            en01_dg_resume_mode4(w, p, cepw, 0);                     /* :8733 */
+        }
+        break;                                                       /* :8748 */
+
+    case 5:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :8751 */
+        /* `(frm >= 0) && (frm < 22)` (en01.c:8752): frm ist vorzeichenlos,
+           die linke Haelfte ist immer wahr. Originalform bleibt. */
+        if (frm < 22u) h_cnt = 8;                                    /* :8754 */
+        else           h_cnt = 5;                                    /* :8758 */
+
+        /* Dieser Zweig loescht nur 0x2000000 und setzt 0x1000000 — nicht
+           das Paar, das en01_dg_chg_pair loescht (en01.c:8770). */
+        recvx_enemy_chg_mtn(w, 116u, 0, h_cnt);                      /* :8761 */
+        p->flags &= ~0x2000000u;                                     /* :8762 */
+        p->flags |=  0x1000000u;                                     /* :8763 */
+        if (cepw) {                                                  /* :8764 */
+            RECVX_EN01_EXP0* cp;
+            recvx_enemy_chg_mtn(cepw, 316u, 0, h_cnt);               /* :8766 */
+            cp = recvx_en01_exp0(cepw);
+            if (cp) {
+                cp->flags &= ~0x2000000u;                            /* :8767 */
+                cp->flags |=  0x1000000u;                            /* :8768 */
+            } else {
+                en01_gap(w, "en01:Oberkoerper ohne exp0 (en01.c:8767)");
+            }
+        }
+        w->ayp = 0;                                                  /* :8770 */
+        /* Kein break im Original (en01.c:8771). */
+
+    case 6:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :8773 */
+            p->flags &= ~0xFu;                                       /* :8775 */
+            p->flags |=  0x6u;                                       /* :8776 */
+            en01_dg_resume_mode4(w, p, cepw, 0);                     /* :8777 */
+        }
+        break;                                                       /* :8792 */
+
+    case 7:
+        if (w->ct0 != 0) {                                           /* :8795 */
+            if (w->ct0 < 5) w->ay += (int16_t)w->ayp;                /* :8797 */
+            w->px += p->grab_point.x / 5.0f;                         /* :8801 */
+            w->pz += p->grab_point.z / 5.0f;                         /* :8802 */
+            w->ct0--;                                                /* :8803 */
+        }
+
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :8806 */
+        if (frm >= 5u && frm < 32u) {                                /* :8807 */
+            w->spd = 0.5f;                                           /* :8809 */
+            if (en && en->add_speed) en->add_speed(w, 32768);        /* :8810 */
+            else en01_gap(w, "bhAddSpeed (zonzon.c)");
+        }
+
+        if (frm == en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) { /* :8813 */
+            w->mtn_add = 0;                                          /* :8815 */
+            if (cepw) cepw->mtn_add = 0;                             /* :8816 */
+            w->hp = -1;                                              /* :8820 */
+            w->mode0 = 4;                                            /* :8821 */
+            w->mode1 = 0;
+            w->mode2 = 3;
+            w->mode3 = 0;
+            if (cepw) en01_copy_modes(cepw, w);                      /* :8825 */
+        }
+        break;                                                       /* :8830 */
+
+    case 8:
+        /* Wieder nur 0x2000000/0x1000000 (en01.c:8833). */
+        recvx_enemy_chg_mtn(w, 123u, 0, 0);                          /* :8833 */
+        p->flags &= ~0x2000000u;                                     /* :8834 */
+        p->flags |=  0x1000000u;                                     /* :8835 */
+        if (cepw) {                                                  /* :8836 */
+            RECVX_EN01_EXP0* cp;
+            recvx_enemy_chg_mtn(cepw, 323u, 0, 0);                   /* :8838 */
+            cp = recvx_en01_exp0(cepw);
+            if (cp) {
+                cp->flags &= ~0x2000000u;                            /* :8839 */
+                cp->flags |=  0x1000000u;                            /* :8840 */
+            } else {
+                en01_gap(w, "en01:Oberkoerper ohne exp0 (en01.c:8839)");
+            }
+        }
+        w->mode3++;                                                  /* :8842 */
+        /* Kein break im Original (en01.c:8843). */
+
+    case 9:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :8845 */
+            w->mtn_add = 0;                                          /* :8847 */
+            w->mode0 = 4;                                            /* :8848 */
+            w->mode1 = 0;
+            w->mode2 = 1;
+            w->mode3 = 0;
+            if (cepw) {                                              /* :8852 */
+                en01_copy_modes(cepw, w);                            /* :8854 */
+                cepw->mtn_add = 0;                                   /* :8855 */
+            }
+        }
+        /* Das Original schliesst case 9 ohne break ab (en01.c:8858); es ist
+           der letzte case. */
+        break;
+    default:
+        en01_gap(w, "bhEne01_DG04: mode3 ausserhalb (en01.c:8579)");
+        break;
+    }
+}
+
+/* ===========================================================================
+   Block O — Trefferreaktion der W-Familie, DG05..DG09
+   ===========================================================================
+   bhEne01_DG05 (en01.c:8865), DG06 (:8912), DG07 (:9006), DG08 (:9145),
+   DG09 (:9381).
+
+   DG05 und DG09 greifen beide auf den Schattenslot zu: `opp = eff;
+   opp += EXP0_I(0x24); opp->jno[3] = -1` (en01.c:8878 / :9437) loest die
+   vierte Gelenkbindung des Schattens. Der Vertrag kennt nur
+   ENEMY_SERVICES.set_shadow (effect.c:644) und keinen Schreibweg in einen
+   bestehenden eff[]-Slot. Das Original rechnet dabei ausserdem ohne Pruefung
+   mit shadow_slot == -1 und schreibt dann VOR den Pool. Beides wird hier
+   gemeldet statt nachgebaut. */
+
+/* bhClrUseKaidanFlag(epw) (hitchk.c:4965) ueber den Dienst; der Index steht
+   in exp0+0x74 (en01.c:9125 / :9342). */
+static void en01_clr_use_kaidan(RECVX_ENEMY_WORK* w, const RECVX_EN01_EXP0* p)
+{
+    const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+    if (sv && sv->stair_use) sv->stair_use(p->word74, 0);
+    else en01_gap(w, "bhClrUseKaidanFlag (hitchk.c:4965)");
+}
+
+/* rom->grand[flr_no + 2] (en01.c:9035 u.a.) ueber den Dienst. `ok` bleibt 0,
+   wenn der Dienst fehlt; der Aufrufer rechnet dann nicht. */
+static int en01_grand_of_floor(RECVX_ENEMY_WORK* w, float* out)
+{
+    const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+    if (sv && sv->grand) {
+        *out = sv->grand((uint32_t)(w->flr_no + 2));
+        return 1;
+    }
+    en01_gap(w, "rom->grand[flr_no + 2]");
+    return 0;
+}
+
+/* Der Schattenslot-Zugriff von DG05/DG09 (en01.c:8878 / :9437). */
+static void en01_clr_shadow_jno3(RECVX_ENEMY_WORK* w, const RECVX_EN01_EXP0* p)
+{
+    if (p->shadow_slot < 0) {
+        /* Das Original rechnet hier mit eff[-1]; nativ wird nicht vor den
+           Pool geschrieben. */
+        en01_gap(w, "en01:Schattenslot -1 (en01.c:8878)");
+        return;
+    }
+    en01_gap(w, "eff[shadow_slot].jno[3] = -1 (en01.c:8878)");
+}
+
+/* --- bhEne01_DG05 (en01.c:8865) -----------------------------------------
+   Der Oberkoerper wird abgetrennt: der Hauptkoerper laeuft die Rumpfmotion
+   24 ab dem Frame 35 und uebergibt den Oberkoerper an DG05B (mode2 5). */
+void recvx_en01_dg05(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG05: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :8871 */
+
+    switch (w->mode3) {
+    case 0:
+        recvx_enemy_chg_mtn(w, 24u, 2293760, 0);                     /* :8876 */
+        p->flags &= ~0x3000000u;                                     /* :8877 */
+        en01_clr_shadow_jno3(w, p);                                  /* :8878 */
+        w->flg &= ~8u;                                               /* :8880 */
+        p->word7C = -1;                                              /* :8881 */
+        p->flags &= ~0xFu;                                           /* :8882 */
+        p->flags |=  0x5u;                                           /* :8883 */
+        p->flags |=  0x40000000u;                                    /* :8884 */
+
+        if (cepw) {                                                  /* :8885 */
+            RECVX_EN01_EXP0* cp;
+            if (w->stflg & 0x100000u) cepw->hp = -1;                 /* :8887 */
+            cepw->mode2 = 5;                                         /* :8891 */
+            cepw->mode3 = 0;                                         /* :8892 */
+            cp = recvx_en01_exp0(cepw);
+            if (cp) cp->flags |= 0x40000000u;                        /* :8893 */
+            else en01_gap(w, "en01:Oberkoerper ohne exp0 (en01.c:8893)");
+        }
+        w->mode3++;                                                  /* :8895 */
+        /* Kein break im Original (en01.c:8896). */
+
+    case 1:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 2u) {   /* :8898 */
+            w->hp = -1;                                              /* :8900 */
+            w->mtn_add = 0;                                          /* :8901 */
+            w->mode0 = 4;                                            /* :8902 */
+            w->mode1 = 0;                                            /* :8903 */
+            w->mode2 = 2;                                            /* :8904 */
+            w->mode3 = 0;                                            /* :8905 */
+        }
+        break;                                                       /* :8907 */
+    default:
+        en01_gap(w, "bhEne01_DG05: mode3 ausserhalb (en01.c:8873)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG06 (en01.c:8912) -----------------------------------------
+   Der Konterbiss: der Gegner dreht sich auf den Spieler und greift auf
+   Frame 26 zu. Ist er dabei schon toedlich getroffen, bricht er statt des
+   Griffs in mode2 10 ab und gibt die Spielersteuerung frei. */
+void recvx_en01_dg06(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_ENEMY_SERVICES* sv;
+    RECVX_ENEMY_WORK* cepw;
+    RECVX_ENEMY_PLAYER pl;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG06: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :8917 */
+
+    sv = en01_sv(w);
+    if (!sv || !sv->player_get || !sv->player_get(&pl)) {            /* :8918 */
+        en01_gap(w, "plp (en01.c:8918)");
+        return;
+    }
+
+    switch (w->mode3) {
+    case 0:
+        en01_dg_chg_pair(w, p, cepw, 33u, 233u, 0, 8);               /* :8923 */
+        w->ay = (int16_t)en01_niten_dir(w->px, w->pz,
+                                        pl.pos.x, pl.pos.z);         /* :8932 */
+        p->grab_point.y = 0.0f;                                      /* :8934 */
+        p->grab_point.x = w->px;                                     /* :8935 */
+        p->grab_point.z = w->pz;                                     /* :8936 */
+        w->mode3++;                                                  /* :8938 */
+        /* Kein break im Original (en01.c:8939). */
+
+    case 1:
+        if ((w->frm_no >> 16) == 26) {                               /* :8941 */
+            if (w->hp < 0) {                                         /* :8943 */
+                p->flags &= ~0x8000u;                                /* :8945 */
+                w->mode0 = 3;                                        /* :8946 */
+                w->mode1 = 0;                                        /* :8947 */
+                w->mode2 = 10;                                       /* :8948 */
+                w->mode3 = 0;                                        /* :8949 */
+                if (cepw) en01_copy_modes(cepw, w);                  /* :8953 */
+
+                /* sys->pad_on &= ~0xF (en01.c:8956): der Vertrag hat dafuer
+                   nur player_hurt_state als Bundle, keinen eigenen Weg auf
+                   das Padwort. Hier wird nichts erfunden. */
+                en01_gap(w, "sys->pad_on &= ~0xF (en01.c:8956)");
+
+                pl.flg   &= ~0x10004u;                               /* :8957 */
+                pl.stflg &= ~0x10000u;                               /* :8958 */
+                pl.at_flg = 0;                                       /* :8959 */
+                if (sv->player_set) sv->player_set(&pl);
+                else en01_gap(w, "plp->flg/stflg/at_flg (en01.c:8957)");
+
+                p->flags &= ~0x80u;                                  /* :8960 */
+                break;                                              /* :8961 */
+            }
+
+            w->hp = 0;                                               /* :8964 */
+            w->flg &= ~0x40u;                                        /* :8965 */
+
+            /* `*(int*)&pl->mode0 = 4` (en01.c:8966) setzt auf dem
+               Little-Endian-Ziel mode0 = 4 und mode1..3 = 0; die beiden
+               Zeilen danach ueberschreiben mode2 und mode3. */
+            pl.mode0 = 4;                                            /* :8966 */
+            pl.mode1 = 0;
+            pl.mode2 = 1;                                            /* :8968 */
+            pl.mode3 = 4;                                            /* :8969 */
+
+            p->flags |= 0x20000u;                                    /* :8971 */
+            p->flags |= 0x4000u;                                     /* :8972 */
+            en01_dg_chg_pair(w, p, cepw, 86u, 286u, 0, 0);           /* :8973 */
+
+            p->flags &= ~0xFu;                                       /* :8982 */
+            p->flags |=  0x5u;                                       /* :8983 */
+            p->flags |=  0x80u;                                      /* :8984 */
+
+            pl.flg |= 0x10004u;                                      /* :8986 */
+            if (sv->player_set) sv->player_set(&pl);
+            else en01_gap(w, "plp->mode0..3 / flg (en01.c:8966)");
+
+            w->mode0 = 2;                                            /* :8988 */
+            w->mode1 = 0;                                            /* :8989 */
+            w->mode2 = 2;                                            /* :8990 */
+            w->mode3 = 2;                                            /* :8991 */
+            if (cepw) en01_copy_modes(cepw, w);                      /* :8995 */
+            w->ct0 = 70;                                             /* :8998 */
+        }
+        break;                                                       /* :9000 */
+    default:
+        en01_gap(w, "bhEne01_DG06: mode3 ausserhalb (en01.c:8920)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG07 (en01.c:9006) -----------------------------------------
+   Der Treppensturz. exp0 Bit 0x800000 unterscheidet aufwaerts (Motion 95)
+   von abwaerts (96); daraus kommen Anfangsgeschwindigkeit (0x94), Bremswert
+   (0x9C) und Schubrichtung (0x98). Die Etage wird aus der Sturzhoehe neu
+   bestimmt und der Treppenbelegungsmarker am Ende freigegeben. */
+void recvx_en01_dg07(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_EN01_SERVICES* en;
+    const RECVX_ENEMY_SERVICES* sv;
+    RECVX_ENEMY_WORK* cepw;
+    RECVX_ENEMY_VEC root;
+    uint32_t mtn_no1, mtn_no2;
+    float grand;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG07: exp0"); return; }
+    en = en01_en();
+    sv = en01_sv(w);
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :9013 */
+
+    switch (w->mode3) {
+    case 0:
+        p->flags &= ~0xFu;                                           /* :9018 */
+
+        /* owk = epw->mlwP->owP; die Wurzelmatrix setzt die Sturzposition
+           (en01.c:9019-9022). */
+        if (!en01_joint_translation(w, 0u, &root)) return;
+        w->px = root.x;                                              /* :9020 */
+        w->py = root.y - 3.5f;                                       /* :9021 */
+        w->pz = root.z;                                              /* :9022 */
+
+        if (!sv || !sv->floor_num) {
+            en01_gap(w, "bhCheckFloorNum (pwksub.c)");
+            return;
+        }
+
+        if (p->flags & 0x800000u) {                                  /* :9024 */
+            p->word98 = 32768;                                       /* :9026 */
+            p->float9C = 0.05f;                                      /* :9027 */
+            mtn_no1 = 0x5Fu;                                         /* :9028 */
+            mtn_no2 = 0x127u;                                        /* :9029 */
+            if (p->byte2D != (int8_t)w->flr_no) {                    /* :9030 */
+                w->yn = w->py - (float)(p->byte2E * 2);              /* :9032 */
+                w->flr_no = sv->floor_num(w->yn);                    /* :9033 */
+            }
+            if (!en01_grand_of_floor(w, &grand)) return;
+            p->slot94.f = root.y - grand;                            /* :9035 */
+            p->slot94.f = 1.1f + (0.033333335f * (1.5f * p->slot94.f)); /* :9036 */
+        } else {
+            p->word98 = 0;                                           /* :9040 */
+            mtn_no1 = 96u;                                           /* :9041 */
+            p->float9C = 0.065f;                                     /* :9042 */
+            mtn_no2 = 296u;                                          /* :9043 */
+            if (p->byte2D == (int8_t)w->flr_no) {                    /* :9045 */
+                w->flr_no = sv->floor_num(w->yn);                    /* :9047 */
+            }
+            if (!en01_grand_of_floor(w, &grand)) return;
+            p->slot94.f = root.y - grand;                            /* :9050 */
+            p->slot94.f = 1.0f + (0.033333335f * (1.5f * p->slot94.f)); /* :9051 */
+        }
+
+        en01_dg_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0, 5);        /* :9055 */
+        w->mtn_md |= 0x100u;                                         /* :9057 */
+        w->flg    |= 0x40000u;                                       /* :9058 */
+        w->ct0 = 0;                                                  /* :9066 */
+        w->ct1 = 5;                                                  /* :9067 */
+        w->mode3++;                                                  /* :9068 */
+        /* Kein break im Original (en01.c:9069). */
+
+    case 1:
+        if (w->ct1-- > 0) w->ay += (int16_t)w->ayp;                  /* :9071 */
+
+        /* Beide Zweige rechnen dieselbe Sturzbahn; sie unterscheiden sich
+           nur in der Startbedingung (en01.c:9076 / :9096). */
+        if ((p->flags & 0x800000u) || (w->frm_no >> 16) >= 15) {
+            if (!en01_grand_of_floor(w, &grand)) break;
+            w->py = w->py - (float)((double)w->ct0 * 0.12);          /* :9078 */
+            if (w->py < grand) w->py = grand;                        /* :9080 */
+
+            w->spd = p->slot94.f - (p->float9C * (float)w->ct0);     /* :9085 */
+            if (w->spd < 0.0f) w->spd = 0.0f;                        /* :9087 */
+
+            if (en && en->add_speed) en->add_speed(w, p->word98);    /* :9092 */
+            else en01_gap(w, "bhAddSpeed (zonzon.c)");
+            w->ct0++;                                                /* :9093 */
+        }
+
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :9113 */
+            w->mtn_add = 0;                                          /* :9115 */
+            if (cepw) cepw->mtn_add = 0;                             /* :9118 */
+            /* Das Original setzt mtn_add hier ein zweites Mal
+               (en01.c:9121); der Wert ist derselbe. */
+            w->mtn_add = 0;                                          /* :9121 */
+            w->mtn_md &= ~0x100u;                                    /* :9122 */
+            p->flags &= 0xFFBFFFFFu;                                 /* :9124 */
+            en01_clr_use_kaidan(w, p);                               /* :9125 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :9127 */
+        }
+        break;                                                       /* :9140 */
+    default:
+        en01_gap(w, "bhEne01_DG07: mode3 ausserhalb (en01.c:9015)");
+        break;
+    }
+}
+
+/* Die Wahl der Landemotion am Ende des Treppensturzes (en01.c:9237 und
+   :9289 wortgleich): jedes dritte Mal bricht der Gegner dabei toedlich
+   zusammen (Motion 99/100 statt 75/76), und die Hoehe wird in jedem Fall
+   auf den Etagenboden gesetzt. Aufwaerts- und Abwaertssturz unterscheiden
+   sich nur in den Motionnummern. */
+static void en01_dg08_pick_land(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p,
+                                uint32_t* mtn_no1, uint32_t* mtn_no2)
+{
+    float grand;
+
+    if (p->flags & 0x800000u) {                                      /* :9237 */
+        if ((en01_rand(w) % 3) == 0) {                               /* :9240 */
+            *mtn_no1 = 99u; *mtn_no2 = 299u;                         /* :9242 */
+            w->hp = -1;                                              /* :9244 */
+        } else {
+            *mtn_no1 = 75u; *mtn_no2 = 275u;                         /* :9248 */
+        }
+    } else {
+        if ((en01_rand(w) % 3) == 0) {                               /* :9255 */
+            *mtn_no1 = 100u; *mtn_no2 = 300u;                        /* :9257 */
+            w->hp = -1;                                              /* :9259 */
+        } else {
+            *mtn_no1 = 76u; *mtn_no2 = 276u;                         /* :9263 */
+        }
+    }
+    if (en01_grand_of_floor(w, &grand)) w->py = grand;               /* :9251 */
+}
+
+/* Der Motionwechsel von DG08: anders als en01_dg_chg_pair loescht er NUR
+   0x2000000 und setzt 0x1000000 (en01.c:9176, :9271, :9321). */
+static void en01_dg08_chg_pair(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p,
+                               RECVX_ENEMY_WORK* cepw, uint32_t mtn1,
+                               uint32_t mtn2, int32_t rate)
+{
+    recvx_enemy_chg_mtn(w, mtn1, 0, rate);                           /* :9271 */
+    p->flags &= ~0x2000000u;                                         /* :9272 */
+    p->flags |=  0x1000000u;                                         /* :9273 */
+    if (cepw) {                                                      /* :9274 */
+        RECVX_EN01_EXP0* cp;
+        recvx_enemy_chg_mtn(cepw, mtn2, 0, rate);                    /* :9276 */
+        cp = recvx_en01_exp0(cepw);
+        if (cp) {
+            cp->flags &= ~0x2000000u;                                /* :9277 */
+            cp->flags |=  0x1000000u;                                /* :9278 */
+        } else {
+            en01_gap(w, "en01:Oberkoerper ohne exp0 (en01.c:9277)");
+        }
+    }
+}
+
+/* --- bhEne01_DG08 (en01.c:9145) -----------------------------------------
+   Der lange Treppensturz ueber mehrere Stufen: Anlauf (mode3 1), Flugphase
+   mit bhAddSpeed (mode3 2) und Landung (mode3 3). exp0 Bit 0x800000
+   unterscheidet wieder aufwaerts von abwaerts. */
+void recvx_en01_dg08(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_EN01_SERVICES* en;
+    const RECVX_ENEMY_SERVICES* sv;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t mtn_no1, mtn_no2;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG08: exp0"); return; }
+    en = en01_en();
+    sv = en01_sv(w);
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :9151 */
+
+    switch (w->mode3) {
+    case 0:
+        if (!sv || !sv->floor_num) {
+            en01_gap(w, "bhCheckFloorNum (pwksub.c)");
+            return;
+        }
+        if (p->flags & 0x800000u) {                                  /* :9156 */
+            mtn_no1 = 62u; mtn_no2 = 262u;                           /* :9158 */
+            if (p->byte2D != (int8_t)w->flr_no) {                    /* :9160 */
+                w->yn = w->py - (float)(p->byte2E * 2);              /* :9162 */
+                w->flr_no = sv->floor_num(w->yn);                    /* :9163 */
+            }
+        } else {
+            mtn_no1 = 63u; mtn_no2 = 263u;                           /* :9168 */
+            if (p->byte2D == (int8_t)w->flr_no) {                    /* :9170 */
+                w->flr_no = sv->floor_num(w->yn);                    /* :9172 */
+            }
+        }
+
+        en01_dg08_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 5);         /* :9176 */
+        w->flg |= 0x40000u;                                          /* :9179 */
+
+        /* Der Griffpunkt wird hier zum Versatz, der in mode3 1 auf fuenf
+           Frames verteilt wird (en01.c:9188-9189). */
+        p->grab_point.x -= w->px;                                    /* :9188 */
+        p->grab_point.z -= w->pz;                                    /* :9189 */
+        p->flags &= ~0xFu;                                           /* :9190 */
+        w->ct0 = 5;                                                  /* :9192 */
+        w->spd = 0.0f;                                               /* :9193 */
+        w->mode3++;                                                  /* :9194 */
+        /* Kein break im Original (en01.c:9195). */
+
+    case 1:
+        if (w->ct0-- > 0) {                                          /* :9197 */
+            w->ay += (int16_t)w->ayp;                                /* :9199 */
+            w->px += p->grab_point.x / 5.0f;                         /* :9200 */
+            w->pz += p->grab_point.z / 5.0f;                         /* :9201 */
+        }
+
+        if (w->flg & 0x2000000u) {                                   /* :9204 */
+            w->ct0 = p->byte2E - 5;                                  /* :9206 */
+            if (w->ct0 > 0) {                                        /* :9207 */
+                if (p->flags & 0x800000u) {                          /* :9209 */
+                    p->slot94.i = 0x8000;                            /* :9211 */
+                    /* Doppelte Zuweisung im Original; die zweite gilt
+                       (en01.c:9212-9213). */
+                    w->spd = 0.41f;                                  /* :9212 */
+                    w->spd = 0.375f;                                 /* :9213 */
+                    mtn_no1 = 64u; mtn_no2 = 264u;                   /* :9214 */
+                } else {
+                    p->slot94.i = 0;                                 /* :9219 */
+                    w->spd = 0.45f;                                  /* :9220 */
+                    w->spd = 0.34444442f;                            /* :9221 */
+                    mtn_no1 = 65u; mtn_no2 = 265u;                   /* :9222 */
+                }
+                en01_dg_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0, 0); /* :9226 */
+                w->mode3++;                                          /* :9233 */
+            } else {
+                en01_dg08_pick_land(w, p, &mtn_no1, &mtn_no2);       /* :9237 */
+                w->mode3 = 3;                                        /* :9268 */
+            }
+
+            /* :9271 steht AUSSERHALB des if/else und laeuft in beiden
+               Zweigen: im ct0 > 0-Fall wechselt das Original die Motion
+               damit ein zweites Mal auf denselben Index, diesmal nur mit
+               0x2000000/0x1000000 statt 0x3000000. Das bleibt erhalten. */
+            en01_dg08_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0);     /* :9271 */
+        }
+        break;                                                       /* :9281 */
+
+    case 2:
+        if (en && en->add_speed) en->add_speed(w, p->slot94.i);      /* :9284 */
+        else en01_gap(w, "bhAddSpeed (zonzon.c)");
+
+        if (w->flg & 0x2000000u) {                                   /* :9285 */
+            if (--w->ct0 <= 0) {                                     /* :9287 */
+                en01_dg08_pick_land(w, p, &mtn_no1, &mtn_no2);       /* :9289 */
+                en01_dg08_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0); /* :9321 */
+                w->mode3++;                                          /* :9331 */
+                break;                                               /* :9332 */
+            }
+            w->py -= 2.0f;                                           /* :9334 */
+        }
+        break;                                                       /* :9336 */
+
+    case 3:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :9339 */
+            p->flags &= ~0x400000u;                                  /* :9341 */
+            en01_clr_use_kaidan(w, p);                               /* :9342 */
+            w->mtn_add = 0;                                          /* :9343 */
+            if (cepw) cepw->mtn_add = 0;                             /* :9346 */
+
+            if (w->hp < 0) {                                         /* :9349 */
+                w->mode0 = 4;                                        /* :9351 */
+                w->mode1 = 0;                                        /* :9352 */
+                w->mode2 = 1;                                        /* :9353 */
+                w->mode3 = 0;                                        /* :9354 */
+                if (cepw) en01_copy_modes(cepw, w);                  /* :9358 */
+            } else {
+                w->mode0 = 1;                                        /* :9363 */
+                w->mode1 = 0;                                        /* :9364 */
+                w->mode2 = 15;                                       /* :9365 */
+                w->mode3 = 0;                                        /* :9366 */
+                p->flags |= 0x40000u;                                /* :9368 */
+                if (cepw) en01_copy_modes(cepw, w);                  /* :9372 */
+            }
+        }
+        break;                                                       /* :9376 */
+    default:
+        en01_gap(w, "bhEne01_DG08: mode3 ausserhalb (en01.c:9153)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG09 (en01.c:9381) -----------------------------------------
+   Der Oberkoerper wird im Lauf abgetrennt. Die Rumpfmotion haengt davon ab,
+   welche Motion gerade lief (51 -> 153, 15 -> 151, 14 -> 152, sonst 150);
+   der Oberkoerper geht nach DG09B (mode2 9). */
+void recvx_en01_dg09(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t frm;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG09: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :9388 */
+
+    switch (w->mode3) {
+    case 0:
+        /* frm ist hier die FRAMEZAHL der laufenden Motion, nicht der
+           aktuelle Frame (en01.c:9394). */
+        frm = en01_motion_frames(w, (uint32_t)w->mtn_no);            /* :9394 */
+
+        if (w->mtn_no == 51u) {                                      /* :9396 */
+            en01_dg_chg_pair(w, p, cepw, 153u, 353u, 0, 0);          /* :9398 */
+        } else if (w->mtn_no == 15u && frm == 0u) {                  /* :9406 */
+            en01_dg_chg_pair(w, p, cepw, 151u, 351u, 0, 0);          /* :9408 */
+        } else if (w->mtn_no == 14u && frm == 0u) {                  /* :9416 */
+            en01_dg_chg_pair(w, p, cepw, 152u, 352u, 0, 0);          /* :9418 */
+        } else {
+            en01_dg_chg_pair(w, p, cepw, 150u, 350u, 0, 0);          /* :9428 */
+        }
+
+        en01_clr_shadow_jno3(w, p);                                  /* :9437 */
+        w->flg &= ~8u;                                               /* :9439 */
+        p->word7C = -1;                                              /* :9440 */
+        p->flags &= ~0xFu;                                           /* :9441 */
+        p->flags |=  0x5u;                                           /* :9442 */
+        p->flags |=  0x40000000u;                                    /* :9443 */
+
+        if (cepw) {                                                  /* :9444 */
+            RECVX_EN01_EXP0* cp;
+            cepw->mode2 = 9;                                         /* :9446 */
+            cepw->mode3 = 0;                                         /* :9447 */
+            cp = recvx_en01_exp0(cepw);
+            if (cp) cp->flags |= 0x40000000u;                        /* :9448 */
+            else en01_gap(w, "en01:Oberkoerper ohne exp0 (en01.c:9448)");
+        }
+        w->mode3++;                                                  /* :9450 */
+        /* Kein break im Original (en01.c:9451). */
+
+    case 1:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 2u) {   /* :9453 */
+            w->hp = -1;                                              /* :9455 */
+            w->mtn_add = 0;                                          /* :9456 */
+            w->mode0 = 4;                                            /* :9457 */
+            w->mode1 = 0;                                            /* :9458 */
+            w->mode2 = 2;                                            /* :9459 */
+            w->mode3 = 0;                                            /* :9460 */
+        }
+        break;                                                       /* :9462 */
+    default:
+        en01_gap(w, "bhEne01_DG09: mode3 ausserhalb (en01.c:9390)");
+        break;
+    }
+}
+
+/* ===========================================================================
+   Block P — Trefferreaktion der W-Familie, DG10/DG11/DG14/DG15/DG16
+   ===========================================================================
+   bhEne01_DG10 (en01.c:9467), DG11 (:9587), DG14 (:9657), DG15 (:9807),
+   DG16 (:9837). Die Tabellenplaetze 12 und 13 sind im Original NULL
+   (en01.c:2340-2341) und bleiben es. */
+
+/* Der gemeinsame Ausgang von DG10 (mode3 2) und DG11 (mode3 1)
+   (en01.c:9555 / :9625 wortgleich): der Gegner geht in den Tod und waehlt
+   mode1 nach der gerade gelaufenen Treffermotion. */
+static void en01_dg_fall_by_motion(RECVX_ENEMY_WORK* w,
+                                   RECVX_ENEMY_WORK* cepw)
+{
+    w->mode0 = 4;                                                    /* :9557 */
+    w->mode1 = 0;                                                    /* :9558 */
+    w->mode2 = 0;                                                    /* :9559 */
+    w->mode3 = 0;                                                    /* :9560 */
+    w->mtn_add = 0;                                                  /* :9561 */
+
+    /* mode1 wird hier je Motion neu gesetzt; die 0 von oben gilt nur fuer
+       alle uebrigen Motionen (en01.c:9563-9574). */
+    if (w->mtn_no == 27u)      w->mode1 = 2;                         /* :9565 */
+    else if (w->mtn_no == 28u) w->mode1 = 1;                         /* :9569 */
+    else if (w->mtn_no == 25u) w->mode1 = 0;                         /* :9573 */
+
+    if (cepw) {                                                      /* :9576 */
+        en01_copy_modes(cepw, w);                                    /* :9578 */
+        cepw->mtn_add = 0;                                           /* :9579 */
+    }
+}
+
+/* --- bhEne01_DG10 (en01.c:9467) -----------------------------------------
+   Der Niederschlag. exp0 Bit 0x8000 erzwingt die Rueckwaertsvariante (28);
+   lief gerade die Fress- oder Greifmotion, folgt 25, sonst 27. Ist der
+   Gegner schon toedlich getroffen, geht es direkt in mode3 2. */
+void recvx_en01_dg10(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t mtn_no1, mtn_no2, frm;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG10: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :9473 */
+
+    switch (w->mode3) {
+    case 0:
+        if (p->flags & 0x8000u) {                                    /* :9478 */
+            mtn_no1 = 28u; mtn_no2 = 228u;                           /* :9480 */
+        } else if (w->mtn_no == 37u ||
+                   (w->mtn_no == 15u && (w->frm_no >> 16) < 30)) {   /* :9483 */
+            mtn_no1 = 25u; mtn_no2 = 225u;                           /* :9485 */
+        } else {
+            mtn_no1 = 27u; mtn_no2 = 227u;                           /* :9490 */
+        }
+        en01_dg_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0, 5);        /* :9494 */
+
+        if (w->hp < 0) w->mode3 = 2;                                 /* :9504 */
+        else           w->mode3++;                                   /* :9508 */
+        /* Kein break im Original (en01.c:9510); der Durchfall geht auf den
+           textuell naechsten case 1, auch wenn mode3 gerade 2 wurde. Dort
+           ist die Framebedingung direkt nach dem Motionwechsel nicht
+           erfuellt, der Pass bleibt also wirkungslos. */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);
+        if ((w->mtn_no == 27u && 10 < frm) ||
+                (w->mtn_no == 28u && 15 < frm) ||
+                (w->mtn_no == 25u && 10 < frm)) {                    /* :9512 */
+            if (w->type == 2 || w->type == 3) {                      /* :9516 */
+                if (w->hp < 0) {                                     /* :9518 */
+                    w->mode3 = 2;                                    /* :9520 */
+                } else if (p->flags2 & 0x10u) {                      /* :9522 */
+                    w->mode0 = 1;                                    /* :9524 */
+                    w->mode1 = 1;                                    /* :9525 */
+                    w->mode2 = 4;                                    /* :9526 */
+                    w->mode3 = 0;                                    /* :9527 */
+                } else {
+                    w->mode0 = 1;                                    /* :9531 */
+                    w->mode1 = 1;                                    /* :9532 */
+                    w->mode2 = 2;                                    /* :9533 */
+                    w->mode3 = 0;                                    /* :9534 */
+                }
+            } else {
+                w->mode0 = 1;                                        /* :9539 */
+                w->mode1 = 0;                                        /* :9540 */
+                w->mode2 = 4;                                        /* :9541 */
+                w->mode3 = 0;                                        /* :9542 */
+                p->flags  |= 0x40000u;                               /* :9543 */
+                p->flags2 |= 0x40u;                                  /* :9544 */
+            }
+            if (cepw) en01_copy_modes(cepw, w);                      /* :9549 */
+        }
+        break;                                                       /* :9552 */
+
+    case 2:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :9555 */
+            en01_dg_fall_by_motion(w, cepw);                         /* :9557 */
+        }
+        break;                                                       /* :9582 */
+    default:
+        en01_gap(w, "bhEne01_DG10: mode3 ausserhalb (en01.c:9475)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG11 (en01.c:9587) -----------------------------------------
+   Wie DG10, aber immer toedlich: der Zustand hat nur den Niederschlag und
+   den Sturz, keine Erholung. Die Motionwahl kennt den Fall mtn_no 37 nicht. */
+void recvx_en01_dg11(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t mtn_no1, mtn_no2;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG11: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :9593 */
+
+    switch (w->mode3) {
+    case 0:
+        if (p->flags & 0x8000u) {                                    /* :9598 */
+            mtn_no1 = 28u; mtn_no2 = 228u;                           /* :9600 */
+        } else if (w->mtn_no == 15u && (w->frm_no >> 16) < 30) {     /* :9603 */
+            mtn_no1 = 25u; mtn_no2 = 225u;                           /* :9605 */
+        } else {
+            mtn_no1 = 27u; mtn_no2 = 227u;                           /* :9610 */
+        }
+        en01_dg_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0, 5);        /* :9614 */
+        w->flg |= 0x40000u;                                          /* :9616 */
+        w->mode3++;                                                  /* :9622 */
+        /* Kein break im Original (en01.c:9623). */
+
+    case 1:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :9625 */
+            en01_dg_fall_by_motion(w, cepw);                         /* :9627 */
+        }
+        break;                                                       /* :9652 */
+    default:
+        en01_gap(w, "bhEne01_DG11: mode3 ausserhalb (en01.c:9595)");
+        break;
+    }
+}
+
+/* Die Etagensuche von DG14 (en01.c:9687 und :9710 wortgleich): der
+   Fallbogen wird Schritt fuer Schritt abgetastet, bis ein Punkt gefunden
+   ist, dessen Bodenhoehe zwischen der aktuellen Koerperhoehe und der
+   Bogenhoehe liegt.
+
+   Das Original hat hier `for (i = 0; TRUE; i++)` OHNE eigene Obergrenze;
+   die Schleife endet allein ueber die Bodendaten des Raums. Dieser Port
+   uebernimmt das unveraendert — eine erfundene Obergrenze waere ein
+   Sonderfall-Fix. Fehlt einer der beiden Dienste, wird gemeldet und gar
+   nicht gesucht, damit der Lauf nicht auf einem fehlenden Dienst dreht. */
+static void en01_dg14_find_floor(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p)
+{
+    const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+    RECVX_ENEMY_VEC ps, pd;
+    float y_len;
+    int i;
+
+    if (!sv || !sv->ground || !sv->floor_num || !sv->joint_point) {
+        en01_gap(w, "bhGetGroundPosition / bhCheckFloorNum (hitchk.c)");
+        return;
+    }
+    for (i = 0; ; i++) {                                             /* :9687 */
+        ps.x = 0.0f;                                                 /* :9689 */
+        ps.y = -(0.12f * (float)i);                                  /* :9690 */
+        ps.z = p->slot94.f - (p->float9C * (float)i);                /* :9691 */
+        if (!sv->joint_point(w, 0u, &ps, &pd)) {                     /* :9692 */
+            en01_gap(w, "njCalcPoint(owP[0].mtx) (en01.c:9692)");
+            return;
+        }
+        y_len = sv->ground(&pd);                                     /* :9693 */
+        if (w->py > y_len && y_len > pd.y) {                         /* :9694 */
+            w->flr_no = sv->floor_num(y_len);                        /* :9696 */
+            break;                                                   /* :9697 */
+        }
+    }
+}
+
+/* --- bhEne01_DG14 (en01.c:9657) -----------------------------------------
+   Der Sturz von einer Kante. exp0 Bit 0x2000 waehlt vorwaerts (Motion 12)
+   oder rueckwaerts (11); die Zieletage kommt aus der Abtastung des
+   Fallbogens. In mode3 1 laeuft der Bogen mit bhAddSpeed ab. */
+void recvx_en01_dg14(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_EN01_SERVICES* en;
+    const RECVX_ENEMY_SERVICES* sv;
+    RECVX_ENEMY_WORK* cepw;
+    RECVX_ENEMY_VEC self;
+    uint32_t mtn_no1, mtn_no2;
+    float grand;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG14: exp0"); return; }
+    en = en01_en();
+    sv = en01_sv(w);
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :9668 */
+
+    switch (w->mode3) {
+    case 0:
+        p->flags &= ~0xFu;                                           /* :9673 */
+        p->flags |=  0x1u;                                           /* :9674 */
+        p->flags |=  0x4000000u;                                     /* :9675 */
+        w->flg   &= ~0x100u;                                         /* :9677 */
+
+        /* Beide Zweige sind bis auf die Motionnummern und word98 gleich
+           (en01.c:9679-9724). */
+        if (p->flags & 0x2000u) {                                    /* :9679 */
+            p->word98 = 32768;                                       /* :9681 */
+            mtn_no1 = 12u;                                           /* :9682 */
+            p->float9C = 0.065f;                                     /* :9683 */
+            p->slot94.f = 1.4f;                                      /* :9684 */
+            mtn_no2 = 212u;                                          /* :9685 */
+        } else {
+            p->word98 = 0;                                           /* :9703 */
+            mtn_no1 = 11u;                                           /* :9704 */
+            p->float9C = 0.065f;                                     /* :9705 */
+            mtn_no2 = 211u;                                          /* :9706 */
+            p->slot94.f = 1.4f;                                      /* :9707 */
+        }
+        en01_dg14_find_floor(w, p);                                  /* :9687 */
+
+        en01_dg_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 0, 5);        /* :9725 */
+        w->flg |= 0x40000u;                                          /* :9727 */
+        w->ct0 = 0;                                                  /* :9733 */
+        w->ct1 = 5;                                                  /* :9734 */
+        w->mode3++;                                                  /* :9735 */
+        /* Kein break im Original (en01.c:9736). */
+
+    case 1:
+        if (p->flags & 0x2000u) {                                    /* :9738 */
+            if ((w->frm_no >> 16) >= 10) {                           /* :9740 */
+                w->flg &= ~0x40000u;                                 /* :9742 */
+                w->spd = p->slot94.f - (p->float9C * (float)w->ct0); /* :9744 */
+                if (w->spd < 0.0f) w->spd = 0.0f;                    /* :9745 */
+                if (en && en->add_speed) en->add_speed(w, p->word98); /* :9749 */
+                else en01_gap(w, "bhAddSpeed (zonzon.c)");
+
+                /* Der Vorwaertssturz senkt nur, solange der Koerper noch
+                   ueber dem Boden steht (en01.c:9750). */
+                self.x = w->px; self.y = w->py; self.z = w->pz;
+                if (!sv || !sv->ground) {
+                    en01_gap(w, "bhGetGroundPosition (hitchk.c)");
+                } else if (w->py > sv->ground(&self)) {              /* :9750 */
+                    w->py -= (float)((double)w->ct0 * 0.12);         /* :9752 */
+                    if (en01_grand_of_floor(w, &grand) &&
+                            w->py < grand) {                         /* :9754 */
+                        w->py = grand;                               /* :9756 */
+                    }
+                }
+                w->ct0++;                                            /* :9759 */
+            }
+        } else if ((w->frm_no >> 16) >= 20) {                        /* :9762 */
+            w->flg &= ~0x40000u;                                     /* :9764 */
+            w->py -= (float)((double)w->ct0 * 0.12);                 /* :9765 */
+            if (en01_grand_of_floor(w, &grand) && w->py < grand) {   /* :9766 */
+                w->py = grand;                                       /* :9768 */
+            }
+            w->spd = p->slot94.f - (p->float9C * (float)w->ct0);     /* :9771 */
+            if (w->spd < 0.0f) w->spd = 0.0f;                        /* :9772 */
+            if (en && en->add_speed) en->add_speed(w, p->word98);    /* :9776 */
+            else en01_gap(w, "bhAddSpeed (zonzon.c)");
+            w->ct0++;                                                /* :9777 */
+        }
+
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :9780 */
+            w->mtn_add = 0;                                          /* :9782 */
+            if (cepw) cepw->mtn_add = 0;                             /* :9785 */
+            /* Zweite, gleichwertige Zuweisung des Originals (:9787). */
+            w->mtn_add = 0;                                          /* :9787 */
+            w->mtn_md &= ~0x100u;                                    /* :9788 */
+            w->flg    |=  0x100u;                                    /* :9789 */
+            p->flags  &= ~0xFu;                                      /* :9790 */
+            p->flags  |=  0x1u;                                      /* :9791 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :9792 */
+        }
+        /* Das Original schliesst case 1 ohne break ab (en01.c:9803); es ist
+           der letzte case. */
+        break;
+    default:
+        en01_gap(w, "bhEne01_DG14: mode3 ausserhalb (en01.c:9670)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG15 (en01.c:9807) -----------------------------------------
+   Das kurze Weiterlaufen nach dem Treppensturz: die Laufmotion aus
+   en01_walk_mtn laeuft 20..39 Takte, danach uebernimmt mode2 3. */
+void recvx_en01_dg15(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t idx;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG15: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :9809 */
+
+    switch (w->mode3) {
+    case 0:
+        /* en01_walk_mtn[walk_index] und [walk_index + 1] (en01.c:9814/9818);
+           die Tabelle hat sechs Eintraege. */
+        idx = (uint32_t)p->walk_index;
+        if (idx + 1u >= 6u) {
+            en01_gap(w, "en01_walk_mtn[walk_index + 1] ausserhalb (en01.c:9818)");
+            return;
+        }
+        recvx_enemy_chg_mtn(w, (uint32_t)recvx_en01_walk_mtn[idx], 0, 10); /* :9814 */
+        p->flags &= ~0x3000000u;                                     /* :9815 */
+        if (cepw) {                                                  /* :9816 */
+            en01_chg_mtn_upper(w, cepw,
+                (uint32_t)recvx_en01_walk_mtn[idx + 1u], 0, 10);     /* :9818 */
+        }
+        w->flg |= 0x40000u;                                          /* :9821 */
+        w->way = 256;                                                /* :9822 */
+        w->ct0 = (en01_rand(w) % 20) + 20;                           /* :9823 */
+        w->ct1 = 0;                                                  /* :9824 */
+        w->mode3++;                                                  /* :9825 */
+        /* Kein break im Original (en01.c:9826). */
+
+    case 1:
+        w->ct1++;                                                    /* :9827 */
+        if (--w->ct0 < 0) {                                          /* :9828 */
+            w->mode2 = 3;                                            /* :9830 */
+            w->mode3 = 0;                                            /* :9831 */
+        }
+        /* Kein break im Original (en01.c:9833); letzter case. */
+        break;
+    default:
+        en01_gap(w, "bhEne01_DG15: mode3 ausserhalb (en01.c:9811)");
+        break;
+    }
+}
+
+/* --- bhEne01_DG16 (en01.c:9837) -----------------------------------------
+   Der kurze Treffer im Stehen (Motion 129 vorne / 130 hinten). Anders als
+   DG04 zieht die Drehkorrektur hier NJM_DEG_ANG(360) in einem Schritt ab. */
+void recvx_en01_dg16(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t mtn_no1, mtn_no2, frm;
+    int32_t ang;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DG16: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :9845 */
+
+    switch (w->mode3) {
+    case 0:
+        if (p->flags & 0x2000u) {                                    /* :9850 */
+            mtn_no1 = 129u; mtn_no2 = 329u;                          /* :9852 */
+            w->ayp = (int32_t)(10430.381f * atan2f(w->dvx, w->dvz)); /* :9854 */
+        } else {
+            mtn_no1 = 130u; mtn_no2 = 330u;                          /* :9858 */
+        }
+        /* Nur 0x2000000 loeschen, 0x1000000 setzen (en01.c:9864-9871). */
+        en01_dg08_chg_pair(w, p, cepw, mtn_no1, mtn_no2, 5);         /* :9862 */
+        p->flags &= ~0xFu;                                           /* :9872 */
+        p->flags |=  0x6u;                                           /* :9873 */
+        w->mode3++;                                                  /* :9874 */
+        /* Kein break im Original (en01.c:9875). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :9877 */
+        if ((p->flags & 0x2000u) && frm < 8u) {                      /* :9878 */
+            ang = (int32_t)(uint16_t)(w->ayp - w->ay);               /* :9880 */
+            if (ang > EN01_DEG_ANG(180.0f)) {                        /* :9881 */
+                ang -= EN01_DEG_ANG(360.0f);                         /* :9883 */
+            }
+            w->ay += (int16_t)(ang / 2);                             /* :9885 */
+        }
+
+        if (p->flags & 0x2000u) {                                    /* :9888 */
+            if (frm == 2u) recvx_en01_flying_cap(w, 3);              /* :9890 */
+        } else if (frm == 5u) {                                      /* :9895 */
+            recvx_en01_flying_cap(w, 2);                             /* :9897 */
+        }
+
+        if (frm == en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) { /* :9899 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :9901 */
+        }
+        break;                                                       /* :9917 */
+    default:
+        en01_gap(w, "bhEne01_DG16: mode3 ausserhalb (en01.c:9847)");
+        break;
+    }
+}
+
+/* ===========================================================================
+   Block R — Spielerseite des Griffs: PlyDG00, PlyDG01, EnemyPushChk
+   ===========================================================================
+   bhEne01_PlyDG00 (en01.c:7509), bhEne01_PlyDG01 (:7784),
+   bhEne01_EnemyPushChk (:8008). bhEne01_PlyDmgMode[2] (:2374) ruft die
+   ersten beiden mit (plp, epw); nativ ist `w` der Gegner und `pl` die
+   Sicht auf den Spielerbesitzer.
+
+   OFFENER SCHNITTSTELLENBEDARF — plp->ayp
+   ---------------------------------------
+   Im Original ist der Spieler derselbe BH_PWORK wie ein Gegner und hat
+   darum axp/ayp/azp. RECVX_ENEMY_WORK fuehrt diese Felder
+   (enemy_work.h:183); die Spielersicht RECVX_ENEMY_PLAYER noch nicht.
+   PlyDG00/PlyDG01 brauchen plp->ayp als Drehraten-Speicher UEBER FRAMES
+   HINWEG (en01.c:7545/7559/7566 und :7851/7883/7903). Solange das Feld
+   fehlt, melden die beiden Zugriffe unten die Luecke und der Drehanteil
+   bleibt aus; alles andere dieser Zustaende ist vollstaendig portiert.
+   Der Bedarf ist bei der C02-Sitzung eingereiht (enemy_work.h gehoert
+   dort hin, nicht hierher). Ein zweites Spielerwerk wird NICHT gebaut. */
+
+static int32_t en01_ply_ayp_get(RECVX_ENEMY_WORK* w)
+{
+    en01_gap(w, "plp->ayp lesen (en01.c:7559)");
+    return 0;
+}
+
+static void en01_ply_ayp_set(RECVX_ENEMY_WORK* w, int32_t v)
+{
+    (void)v;
+    en01_gap(w, "plp->ayp schreiben (en01.c:7545)");
+}
+
+/* pl->mnwP[pl->mtn_no].frm_num (en01.c:7641/:7752): je nach mtn_enemy die
+   eingehaengte Gegnerbibliothek oder die eigene des Spielers. */
+static uint32_t en01_player_motion_frames(RECVX_ENEMY_WORK* w,
+                                          const RECVX_ENEMY_PLAYER* pl)
+{
+    const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+    if (sv && sv->player_motion_frames) {
+        return sv->player_motion_frames(pl->mtn_no, pl->mtn_enemy ? 1 : 0);
+    }
+    en01_gap(w, "plp->mnwP[mtn_no].frm_num");
+    return 0u;
+}
+
+/* bhEne_PlayerSePlay (zonzon1.c) ueber den Spielerstimmen-Dienst. */
+static void en01_player_se_play(RECVX_ENEMY_WORK* w, int se)
+{
+    const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+    if (sv && sv->player_voice) sv->player_voice(se);
+    else en01_gap(w, "bhEne_PlayerSePlay (zonzon1.c)");
+}
+
+/* `sys->pad_on &= ~0xF` (en01.c:7643/7755/7767/7928) — der Vertrag hat
+   dafuer nur das Bundle player_hurt_state und keinen eigenen Weg auf das
+   Padwort. */
+static void en01_clear_pad_on(RECVX_ENEMY_WORK* w)
+{
+    en01_gap(w, "sys->pad_on &= ~0xF (en01.c:7643)");
+}
+
+/* --- bhEne01_PlyDG00 (en01.c:7509) --------------------------------------
+   Der gegriffene Spieler: mode3 0/1 dreht ihn in den Griff und haengt ihn
+   an die Motionbibliothek des Gegners, 2/3 ist das Losreissen, 4..7 der
+   Biss mit Blutstoss, 8 der Abbruch. exp0 Bit 0x4000 ist die Weiche
+   vorne/hinten. */
+void recvx_en01_ply_dg00(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
+{
+    /* ply_ofs_pos (en01.c:7511) und ply_ofs_pos2 (:7523) — lokale
+       Datentabellen der Routine, je zwei Zeilen pro Spielerfigur. */
+    static const RECVX_ENEMY_VEC ply_ofs_pos[8] = {
+        { 0.0f,      0.0f, -6.326351f  },
+        { 0.0f,      0.0f, -6.326351f  },
+        { 0.0f,      0.0f, -5.0f       },
+        { 0.0f,      0.0f, -6.019392f  },
+        { 0.167357f, 0.0f, -5.7556629f },
+        { 0.0f,      0.0f, -5.9214029f },
+        { 0.0f,      0.0f, -5.0f       },
+        { 0.0f,      0.0f, -6.019392f  }
+    };
+    static const RECVX_ENEMY_VEC ply_ofs_pos2[8] = {
+        { 0.469302f, 0.0f, -5.826981f  },
+        { 0.469231f, 0.0f, -5.499186f  },
+        { 0.2f,      0.0f, -4.5f       },
+        { 0.4f,      0.0f, -5.1999998f },
+        { 0.469302f, 0.0f, -5.0f       },
+        { 0.469231f, 0.0f, -4.9f       },
+        { 0.2f,      0.0f, -4.5f       },
+        { 0.4f,      0.0f, -5.1999998f }
+    };
+    RECVX_EN01_EXP0* p;
+    uint32_t frm, row;
+    int32_t ayp;
+
+    if (!w || !pl) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_PlyDG00: exp0"); return; }
+
+    if (pl->ply_id >= 4u) {
+        en01_gap(w, "En01_PlyMtn_OffsetTbl[ply_id] ausserhalb (en01.c:7593)");
+        return;
+    }
+    row = pl->ply_id * 2u;
+
+    switch (pl->mode3) {
+    case 0:
+        pl->flg &= ~0x40000u;                                        /* :7540 */
+        pl->exp1_flags |= 0x1E0u;                                    /* :7541 */
+        pl->exp1_flags &= ~4u;                                       /* :7542 */
+
+        if (p->flags & 0x4000u) {                                    /* :7543 */
+            ayp = (int32_t)(uint16_t)((w->ay + EN01_DEG_ANG(180.0f))
+                                      - pl->ay);                     /* :7545 */
+            w->waxp = (int16_t)-32768;                               /* :7546 */
+        } else {
+            ayp = (int32_t)(uint16_t)(w->ay - pl->ay);               /* :7550 */
+            w->waxp = 0;                                             /* :7551 */
+        }
+        if (ayp > EN01_DEG_ANG(180.0f)) {                            /* :7554 */
+            ayp = (ayp - EN01_DEG_ANG(180.0f)) - EN01_DEG_ANG(180.0f); /* :7556 */
+        }
+        w->waxp -= (int16_t)ayp;                                     /* :7558 */
+        en01_ply_ayp_set(w, ayp / 5);                                /* :7559 */
+        pl->ct0 = 0;                                                 /* :7560 */
+        pl->mode3++;                                                 /* :7561 */
+        /* Kein break im Original (en01.c:7562). */
+
+    case 1:
+        if (pl->ct0 < 5) {                                           /* :7564 */
+            w->waxp += (int16_t)en01_ply_ayp_get(w);                 /* :7566 */
+        } else if (pl->ct0 == 5) {                                   /* :7568 */
+            if (p->flags & 0x4000u) {
+                w->waxp = (int16_t)-EN01_DEG_ANG(180.0f);            /* :7572 */
+            } else {
+                w->waxp = 0;                                         /* :7576 */
+            }
+        }
+        pl->ct0++;                                                   /* :7580 */
+
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :7581 */
+        if (frm == 1u) {                                             /* :7582 */
+            /* pl->mnwP = epw->mnwP (en01.c:7584): die Motionbibliothek des
+               Gegners uebernimmt; der Vertrag bildet das ueber
+               mtn_enemy/mtn_enemy_owner ab. */
+            pl->mtn_enemy = 1;                                       /* :7584 */
+            pl->frm_no = 0;                                          /* :7585 */
+            pl->hokan_count = 5;                                     /* :7586 */
+            pl->hokan_rate = 42598;                                  /* :7587 */
+            pl->mtn_add = 65536;                                     /* :7588 */
+            pl->mtn_md = 0;                                          /* :7589 */
+
+            if (p->flags & 0x4000u) {                                /* :7591 */
+                pl->mtn_no = (uint32_t)
+                    (recvx_en01_ply_mtn_offset[pl->ply_id] + 6);     /* :7593 */
+                p->grab_point = ply_ofs_pos[row];                    /* :7594 */
+                p->flags |= 0x80000u;                                /* :7597 */
+                break;                                               /* :7598 */
+            }
+            pl->mtn_no = (uint32_t)
+                (recvx_en01_ply_mtn_offset[pl->ply_id] + 7);         /* :7600 */
+            p->grab_point = ply_ofs_pos[row + 1u];                   /* :7601 */
+            p->flags |= 0x80000u;                                    /* :7604 */
+        } else if (frm == 12u) {                                     /* :7606 */
+            en01_player_se_play(w, 1026);                            /* :7608 */
+        }
+        break;                                                       /* :7610 */
+
+    case 2:
+        pl->exp1_flags |= 4u;                                        /* :7613 */
+        pl->frm_no = 0;                                              /* :7614 */
+        pl->hokan_count = 0;                                         /* :7615 */
+        pl->hokan_rate = 32768;                                      /* :7616 */
+        pl->mtn_add = 65536;                                         /* :7617 */
+        pl->mtn_no = (uint32_t)(recvx_en01_ply_mtn_offset[pl->ply_id]
+                                + ((p->flags & 0x4000u) ? 10 : 11)); /* :7620/:7624 */
+        p->flags &= ~0x80000u;                                       /* :7627 */
+        pl->mode3++;                                                 /* :7628 */
+        /* Kein break im Original (en01.c:7629). */
+
+    case 3:
+        frm = (uint32_t)(pl->frm_no >> 16);                           /* :7631 */
+        if (frm == 14u)      recvx_en01_enemy_push_chk(w, 1);        /* :7634 */
+        else if (frm == 17u) recvx_en01_enemy_push_chk(w, 0);        /* :7638 */
+
+        if (frm >= en01_player_motion_frames(w, pl) - 1u) {           /* :7641 */
+            en01_clear_pad_on(w);                                    /* :7643 */
+            pl->flg   &= ~0x10000u;                                  /* :7644 */
+            pl->flg   |=  8u;                                        /* :7645 */
+            pl->stflg &= ~0x10000u;                                  /* :7646 */
+            pl->at_flg = 0;                                          /* :7647 */
+            pl->mtn_enemy = 0;                                       /* :7648 */
+            /* `*(int*)&pl->mode0 = 1` (en01.c:7649) setzt mode0 = 1 und
+               mode1..3 = 0. */
+            pl->mode0 = 1;                                           /* :7649 */
+            pl->mode1 = 0;
+            pl->mode2 = 0;
+            pl->mode3 = 0;
+            pl->flg &= ~4u;                                          /* :7650 */
+            p->flags &= ~0x24080u;                                   /* :7651 */
+        }
+        break;                                                       /* :7653 */
+
+    case 4:
+        pl->flg &= ~0x40000u;                                        /* :7656 */
+        pl->exp1_flags |= 0x1E0u;                                    /* :7657 */
+        pl->exp1_flags &= ~4u;                                       /* :7658 */
+
+        if (p->flags & 0x4000u) {                                    /* :7659 */
+            pl->mtn_no = (uint32_t)
+                (recvx_en01_ply_mtn_offset[pl->ply_id] + 8);         /* :7661 */
+            p->grab_point = ply_ofs_pos2[row];                       /* :7662 */
+            p->flags |= 0x80000u;                                    /* :7665 */
+            ayp = (int32_t)(uint16_t)((w->ay + EN01_DEG_ANG(180.0f))
+                                      - pl->ay);                     /* :7666 */
+            w->waxp = (int16_t)-EN01_DEG_ANG(180.0f);                /* :7667 */
+        } else {
+            pl->mtn_no = (uint32_t)
+                (recvx_en01_ply_mtn_offset[pl->ply_id] + 9);         /* :7671 */
+            p->grab_point = ply_ofs_pos2[row + 1u];                  /* :7672 */
+            p->flags |= 0x80000u;                                    /* :7675 */
+            ayp = (int32_t)(uint16_t)(w->ay - pl->ay);               /* :7676 */
+            w->waxp = 0;                                             /* :7677 */
+        }
+
+        pl->mtn_enemy = 1;                                           /* :7680 */
+        pl->frm_no = 0;                                              /* :7681 */
+        pl->hokan_count = 5;                                         /* :7682 */
+        pl->hokan_rate = 42598;                                      /* :7683 */
+        pl->mtn_add = 65536;                                         /* :7684 */
+        pl->mtn_md = 0;                                              /* :7685 */
+        en01_player_se_play(w, 1026);                                /* :7687 */
+
+        if (ayp > EN01_DEG_ANG(180.0f)) {                            /* :7689 */
+            ayp = (ayp - EN01_DEG_ANG(180.0f)) - EN01_DEG_ANG(180.0f); /* :7691 */
+        }
+        w->waxp -= (int16_t)ayp;                                     /* :7693 */
+        en01_ply_ayp_set(w, ayp / 5);                                /* :7694 */
+        pl->ct0 = 0;                                                 /* :7695 */
+        pl->mode3++;                                                 /* :7696 */
+        /* Kein break im Original (en01.c:7697). */
+
+    case 5:
+        if (pl->ct0 < 5) {                                           /* :7699 */
+            w->waxp += (int16_t)en01_ply_ayp_get(w);                 /* :7701 */
+        } else if (pl->ct0 == 5) {                                   /* :7703 */
+            /* Hier steht -32768 statt -NJM_DEG_ANG(180.0f) wie in mode3 1;
+               derselbe Wert, andere Schreibweise (en01.c:7707). */
+            w->waxp = (p->flags & 0x4000u) ? (int16_t)-32768 : 0;    /* :7707 */
+        }
+        pl->ct0++;                                                   /* :7714 */
+        break;                                                       /* :7715 */
+
+    case 6:
+        pl->frm_no = 0;                                              /* :7718 */
+        pl->hokan_count = 0;                                         /* :7719 */
+        pl->hokan_rate = 32768;                                      /* :7720 */
+        pl->mtn_add = 65536;                                         /* :7721 */
+        pl->flg &= ~0x10u;                                           /* :7722 */
+        pl->mtn_no = (uint32_t)(recvx_en01_ply_mtn_offset[pl->ply_id]
+                                + ((p->flags & 0x4000u) ? 12 : 13)); /* :7725/:7729 */
+        en01_player_se_play(w, 1025);                                /* :7731 */
+        pl->mode3++;                                                 /* :7732 */
+        /* Kein break im Original (en01.c:7733). */
+
+    case 7:
+        frm = (uint32_t)(pl->frm_no >> 16);                           /* :7735 */
+        if (p->flags & 0x4000u) {                                    /* :7737 */
+            if (frm == 22u || frm == 30u) recvx_en01_se_play(w, 8963); /* :7741 */
+        } else {
+            if (frm == 16u || frm == 22u) recvx_en01_se_play(w, 8963); /* :7748 */
+        }
+
+        if (frm >= en01_player_motion_frames(w, pl) - 1u) {           /* :7752 */
+            pl->mtn_add = 0;                                         /* :7754 */
+            en01_clear_pad_on(w);                                    /* :7755 */
+            pl->flg   &= ~0x10000u;                                  /* :7756 */
+            pl->stflg &= ~0x10000u;                                  /* :7757 */
+            pl->at_flg = 0;                                          /* :7758 */
+            pl->flg   |=  2u;                                        /* :7759 */
+            p->flags  &= ~0xA4080u;                                  /* :7760 */
+            pl->flg   &= ~4u;                                        /* :7761 */
+        }
+        break;                                                       /* :7763 */
+
+    case 8:
+        pl->exp1_flags |= 4u;                                        /* :7766 */
+        en01_clear_pad_on(w);                                        /* :7767 */
+        pl->flg   &= ~0x10000u;                                      /* :7768 */
+        pl->flg   |=  8u;                                            /* :7769 */
+        pl->stflg &= ~0x10000u;                                      /* :7770 */
+        pl->at_flg = 0;                                              /* :7771 */
+        pl->mtn_enemy = 0;                                           /* :7772 */
+        pl->mode0 = 2;                                               /* :7773 */
+        pl->mode1 = 1;                                               /* :7774 */
+        pl->mode2 = 1;                                               /* :7775 */
+        pl->mode3 = 0;                                               /* :7776 */
+        pl->flg |= 4u;                                               /* :7777 */
+        p->flags &= ~0xA4080u;                                       /* :7778 */
+        /* Das Original schliesst case 8 ohne break ab (en01.c:7780). */
+        break;
+    default:
+        en01_gap(w, "bhEne01_PlyDG00: mode3 ausserhalb (en01.c:7537)");
+        break;
+    }
+}
+
+/* --- bhEne01_PlyDG01 (en01.c:7784) --------------------------------------
+   Der Nackenbiss aus Spielersicht. Hier fuehrt plp->ayp keinen Restwinkel,
+   sondern bei jedem Pass die ZIELRICHTUNG (epw->ay + epw->waxp); fuer
+   Claire (ply_id 0) kommt waehrend des Zurueckbiegens ein Zuschlag von
+   546 Einheiten je Frame hinzu (en01.c:7851). */
+void recvx_en01_ply_dg01(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
+{
+    /* ply_ofs_pos (en01.c:7786) — acht Zeilen, je zwei pro Spielerfigur. */
+    static const RECVX_ENEMY_VEC ply_ofs_pos[8] = {
+        { 0.0f, 0.0f, -8.0f       },
+        { 0.0f, 0.0f, -8.8444757f },
+        { 0.0f, 0.0f, -8.0f       },
+        { 0.0f, 0.0f, -8.8444757f },
+        { 0.0f, 0.0f, -8.0f       },
+        { 0.0f, 0.0f, -8.8444757f },
+        { 0.0f, 0.0f, -8.0f       },
+        { 0.0f, 0.0f, -8.8444757f }
+    };
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_VEC root;
+    uint32_t frm, row;
+
+    if (!w || !pl) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_PlyDG01: exp0"); return; }
+
+    if (pl->ply_id >= 4u) {
+        en01_gap(w, "En01_PlyMtn_OffsetTbl[ply_id] ausserhalb (en01.c:7823)");
+        return;
+    }
+    row = pl->ply_id * 2u;
+
+    switch (pl->mode3) {
+    case 0:
+        pl->flg |=  0x1000u;                                         /* :7804 */
+        pl->flg &= ~0x40000u;                                        /* :7805 */
+        pl->ct0 = 0;                                                 /* :7806 */
+        pl->mode3++;                                                 /* :7807 */
+        /* Kein break im Original (en01.c:7808). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :7810 */
+
+        if (frm == 11u) {                                            /* :7812 */
+            pl->mtn_enemy = 1;                                       /* :7814 */
+            pl->frm_no = 0;                                          /* :7815 */
+            pl->hokan_count = 5;                                     /* :7816 */
+            pl->hokan_rate = 42598;                                  /* :7817 */
+            pl->mtn_add = 65536;                                     /* :7818 */
+            pl->mtn_md = 0;                                          /* :7819 */
+
+            if (p->flags & 0x4000u) {                                /* :7821 */
+                pl->mtn_no = (uint32_t)
+                    (recvx_en01_ply_mtn_offset[pl->ply_id] + 1);     /* :7823 */
+                p->grab_point = ply_ofs_pos[row];                    /* :7824 */
+                w->waxp = (int16_t)-EN01_DEG_ANG(180.0f);            /* :7827 */
+                p->flags |= 0x80000u;                                /* :7828 */
+            } else {
+                pl->mtn_no = (uint32_t)
+                    (recvx_en01_ply_mtn_offset[pl->ply_id] + 2);     /* :7832 */
+                p->grab_point = ply_ofs_pos[row + 1u];               /* :7833 */
+                w->waxp = (int16_t)EN01_DEG_ANG(0.0f);               /* :7836 */
+                p->flags |= 0x80000u;                                /* :7837 */
+                /* Nur der vordere Zweig zaehlt ct0 hoch; ct0 ist damit die
+                   Weiche fuer den 546er-Zuschlag unten (en01.c:7838). */
+                pl->ct0++;                                           /* :7838 */
+            }
+        } else if (frm == 19u) {                                     /* :7842 */
+            en01_player_se_play(w, 1026);                            /* :7844 */
+        }
+
+        if (pl->ply_id == 0u && pl->ct0 != 0) {                      /* :7847 */
+            en01_ply_ayp_set(w,
+                (int32_t)(uint16_t)(w->ay + w->waxp)
+                + (int32_t)((pl->frm_no >> 16) * 546));              /* :7851 */
+        } else {
+            en01_ply_ayp_set(w, (int32_t)(uint16_t)(w->ay + w->waxp)); /* :7855 */
+        }
+        break;                                                       /* :7862 */
+
+    case 2:
+        pl->frm_no = 0;                                              /* :7865 */
+        pl->hokan_count = 0;                                         /* :7866 */
+        pl->hokan_rate = 32768;                                      /* :7867 */
+        pl->mtn_add = 65536;                                         /* :7868 */
+        pl->mtn_no = (uint32_t)(recvx_en01_ply_mtn_offset[pl->ply_id]
+                                + ((p->flags & 0x4000u) ? 4 : 5));   /* :7872/:7876 */
+
+        /* Nur Claire dreht sich beim Losreissen um 180 Grad weiter
+           (en01.c:7879-7888). */
+        if (pl->ply_id == 0u && !(p->flags & 0x4000u)) {
+            en01_ply_ayp_set(w, (int32_t)(uint16_t)
+                (w->ay + w->waxp + EN01_DEG_ANG(180.0f)));           /* :7887 */
+        } else {
+            en01_ply_ayp_set(w, (int32_t)(uint16_t)(w->ay + w->waxp)); /* :7883 */
+        }
+        pl->mode3++;                                                 /* :7895 */
+        break;                                                       /* :7896 */
+
+    case 3:
+        if (pl->ply_id == 0u && !(p->flags & 0x4000u)) {             /* :7899 */
+            en01_ply_ayp_set(w, (int32_t)(uint16_t)
+                (w->ay + w->waxp + EN01_DEG_ANG(180.0f)));           /* :7907 */
+        } else {
+            en01_ply_ayp_set(w, (int32_t)(uint16_t)(w->ay + w->waxp)); /* :7903 */
+        }
+
+        if ((pl->frm_no >> 16) == 0) {                               /* :7915 */
+            /* owk = pl->mlwP->owP (en01.c:7917-7919): die WURZELMATRIX DES
+               SPIELERS, nicht des Gegners. */
+            const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+            float mtx[16];
+            if (sv && sv->player_joint_matrix &&
+                    sv->player_joint_matrix(0u, mtx)) {
+                root.x = mtx[12];
+                root.z = mtx[14];
+                pl->pos.x = root.x;                                  /* :7918 */
+                pl->pos.z = root.z;                                  /* :7919 */
+                /* PEXP0_F(0x48)/PEXP0_F(0x50) (en01.c:7920-7921) sind
+                   Felder des SPIELER-exp0. Der Vertrag hat dafuer keinen
+                   Weg; hier wird nichts erfunden. */
+                en01_gap(w, "plp->exp0+0x48/+0x50 = px/pz (en01.c:7920)");
+            } else {
+                en01_gap(w, "plp->mlwP->owP[0] (en01.c:7917)");
+            }
+
+            if (pl->ply_id == 0u && !(p->flags & 0x4000u)) {         /* :7923 */
+                pl->ay = (int32_t)(uint16_t)
+                    (pl->ay + EN01_DEG_ANG(180.0f));                 /* :7925 */
+            }
+
+            en01_clear_pad_on(w);                                    /* :7928 */
+            pl->flg   &= ~0x1000u;                                   /* :7929 */
+            pl->flg   &= ~0x10000u;                                  /* :7930 */
+            pl->flg   |=  8u;                                        /* :7931 */
+            pl->stflg &= ~0x10000u;                                  /* :7932 */
+            pl->at_flg = 0;                                          /* :7933 */
+            pl->mtn_enemy = 0;                                       /* :7934 */
+            pl->mode0 = 1;                                           /* :7935 */
+            pl->mode1 = 0;
+            pl->mode2 = 0;
+            pl->mode3 = 0;
+            p->flags &= ~0xA4080u;                                   /* :7936 */
+            pl->frm_no = 0;                                          /* :7937 */
+            pl->mtn_no = 42;                                         /* :7938 */
+            pl->hokan_rate = 49152;                                  /* :7939 */
+            pl->hokan_count = 8;                                     /* :7940 */
+            pl->mtn_add = 0;                                         /* :7941 */
+            pl->mtn_md |= 0x100u;                                    /* :7942 */
+            /* bhSetMotion(pl, pl->mtn_add, pl->mtn_md, pl->mtn_tp)
+               (en01.c:7943): set_motion des Vertrags nimmt einen
+               GEGNER-Work, nicht die Spielersicht. */
+            en01_gap(w, "bhSetMotion(plp, ...) (en01.c:7943)");
+            pl->flg &= ~4u;                                          /* :7944 */
+        }
+        break;                                                       /* :7946 */
+
+    case 4:
+        pl->flg |=  0x1000u;                                         /* :7949 */
+        pl->flg &= ~0x40000u;                                        /* :7950 */
+        pl->ct0 = 0;                                                 /* :7951 */
+        pl->mtn_enemy = 1;                                           /* :7952 */
+        pl->frm_no = 0;                                              /* :7953 */
+        pl->hokan_count = 5;                                         /* :7954 */
+        pl->hokan_rate = 42598;                                      /* :7955 */
+        pl->mtn_add = 65536;                                         /* :7956 */
+        pl->mtn_md = 0;                                              /* :7957 */
+
+        if (p->flags & 0x4000u) {                                    /* :7959 */
+            pl->mtn_no = (uint32_t)
+                (recvx_en01_ply_mtn_offset[pl->ply_id] + 1);         /* :7961 */
+            p->grab_point = ply_ofs_pos[row];                        /* :7962 */
+            w->waxp = (int16_t)-EN01_DEG_ANG(180.0f);                /* :7965 */
+            p->flags |= 0x80000u;                                    /* :7966 */
+            pl->ay = (int32_t)(uint16_t)
+                (w->ay + EN01_DEG_ANG(180.0f));                      /* :7967 */
+        } else {
+            pl->mtn_no = (uint32_t)
+                (recvx_en01_ply_mtn_offset[pl->ply_id] + 2);         /* :7971 */
+            p->grab_point = ply_ofs_pos[row + 1u];                   /* :7972 */
+            w->waxp = 0;                                             /* :7975 */
+            p->flags |= 0x80000u;                                    /* :7976 */
+            pl->ay = w->ay;                                          /* :7977 */
+        }
+        pl->mode3++;                                                 /* :7980 */
+        /* Kein break im Original (en01.c:7981). */
+
+    case 5:
+        if ((w->frm_no >> 16) == 19) en01_player_se_play(w, 1026);   /* :7983 */
+
+        if (pl->ply_id == 0u && pl->ct0 != 0) {                      /* :7988 */
+            en01_ply_ayp_set(w,
+                (int32_t)(uint16_t)(w->ay + w->waxp)
+                + (int32_t)((pl->frm_no >> 16) * 546));              /* :7992 */
+        } else {
+            en01_ply_ayp_set(w, (int32_t)(uint16_t)(w->ay + w->waxp)); /* :7996 */
+        }
+        /* Das Original schliesst case 5 ohne break ab (en01.c:8004). */
+        break;
+    default:
+        en01_gap(w, "bhEne01_PlyDG01: mode3 ausserhalb (en01.c:7801)");
+        break;
+    }
+}
+
+/* --- bhEne01_EnemyPushChk (en01.c:8008) ---------------------------------
+   Beim Losreissen schiebt der Spieler umstehende Zombies weg. Geprueft
+   wird die gesamte ene-Liste auf id 1 oder 26, aktiv (flg 1), nicht
+   sterbend (flg 2), nicht verknuepft (flg 0x80), nicht der greifende
+   Gegner selbst, in einem der acht freien Typen, mode0 1, ohne die
+   exp0-Bits 0x400000/0x40000/0x200 und naeher als 10 Einheiten.
+   `mode == 1` laesst nur jeden dritten Aufruf durch und bricht dann die
+   GANZE Schleife ab, nicht nur den Eintrag (en01.c:8031-8034). */
+void recvx_en01_enemy_push_chk(RECVX_ENEMY_WORK* w, int mode)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_ENEMY_SERVICES* sv;
+    RECVX_ENEMY_PLAYER pl;
+    RECVX_ENEMY_WORK* ep;
+    RECVX_EN01_EXP0* epp;
+    RECVX_ENEMY_VEC vec;
+    uint32_t n, i;
+    int hit;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_EnemyPushChk: exp0"); return; }
+
+    sv = en01_sv(w);
+    if (!sv || !sv->player_get || !sv->player_get(&pl)) {            /* :8016 */
+        en01_gap(w, "plp (en01.c:8016)");
+        return;
+    }
+    if (!sv->enemy_count || !sv->enemy_at) {                         /* :8017 */
+        en01_gap(w, "ene / sys->ewk_n (en01.c:8019)");
+        return;
+    }
+    n = sv->enemy_count();
+
+    for (i = 0; i < n; ++i) {                                        /* :8019 */
+        ep = sv->enemy_at(i);
+        if (!ep) continue;
+        if (ep->id != 1u && ep->id != 26u) continue;                 /* :8021 */
+        if (!(ep->flg & 1u) || (ep->flg & 2u) || (ep->flg & 0x80u) ||
+                ep == w) continue;                                   /* :8023 */
+        if (ep->type == 2 || ep->type == 3 || ep->type == 6 ||
+                ep->type == 7 || ep->type == 9 || ep->type == 10 ||
+                ep->mode0 != 1u) continue;                           /* :8025 */
+
+        epp = recvx_en01_exp0(ep);                                   /* :8027 */
+        if (!epp) continue;
+        if ((epp->flags & 0x400000u) || (epp->flags & 0x40000u) ||
+                (epp->flags & 0x200u)) continue;                     /* :8029 */
+
+        /* return, nicht continue: das Original verlaesst die Routine
+           (en01.c:8033). */
+        if (mode == 1 && (en01_rand(w) % 3) != 0) return;            /* :8031 */
+
+        if (en01_distance_p2p(&pl.pos, ep->px, ep->py, ep->pz) >= 10.0f) {
+            continue;                                                /* :8036 */
+        }
+
+        vec.x = ep->px - pl.pos.x;                                   /* :8038 */
+        vec.y = 0.0f;                                                /* :8039 */
+        vec.z = ep->pz - pl.pos.z;                                   /* :8040 */
+
+        if (recvx_en01_dgc_dir_check(&vec, ep->ay) == 0) {           /* :8042 */
+            hit = 1;                                                 /* :8044 */
+            epp->flags |= 0x2000u;                                   /* :8045 */
+        } else {
+            hit = 0;                                                 /* :8048 */
+            epp->flags &= ~0x2000u;                                  /* :8050 */
+        }
+
+        ep->mode0 = 3;                                               /* :8053 */
+        ep->mode1 = 0;                                               /* :8054 */
+        ep->mode3 = 0;                                               /* :8055 */
+
+        /* EPW_EXP1_UC(0xC) = 3 (en01.c:8059): exp1 des GREIFENDEN Works,
+           Offset 0xC ist mode0 des BH_PWORK. */
+        if (w->exp1) ((RECVX_ENEMY_WORK*)w->exp1)->mode0 = 3;        /* :8059 */
+
+        /* Beide Zweige sind gleich aufgebaut, nur die Weiche aus
+           bhDGCdirCheck(vec, plp->ay) und exp0 0x4000 ist getauscht
+           (en01.c:8062-8119). */
+        if (recvx_en01_dgc_dir_check(&vec, pl.ay) != 0) {            /* :8062 */
+            if (!(p->flags & 0x4000u) || ep->id == 26u) {             /* :8064/:8066 */
+                ep->mode2 = 2;                                       /* :8068/:8088 */
+            } else {
+                ep->dvx = -njSin(ep->ay);                            /* :8072 */
+                ep->dvz = -njCos(ep->ay);                            /* :8073 */
+                ep->dvy = 0.0f;                                      /* :8074 */
+                ep->mode2 = (hit != 0) ? 4 : 3;                      /* :8078/:8082 */
+            }
+        } else {
+            if ((p->flags & 0x4000u) || ep->id == 26u) {             /* :8093/:8099 */
+                ep->mode2 = 2;                                       /* :8095/:8101 */
+            } else {
+                ep->dvx = -njSin(ep->ay);                            /* :8105 */
+                ep->dvz = -njCos(ep->ay);                            /* :8106 */
+                ep->dvy = 0.0f;                                      /* :8107 */
+                ep->mode2 = (hit != 0) ? 4 : 3;                      /* :8111/:8115 */
+            }
+        }
+        epp->flags |= 0x200u;                                        /* :8120 */
+    }
+}
+
+/* ===========================================================================
+   Block Q — Griff und Biss der W-Familie, NG00..NG02
+   ===========================================================================
+   bhEne01_NG00 (en01.c:6753), NG01 (:7125), NG02 (:7325). Platz 3 der
+   NageMode2W-Tabelle ist im Original NULL (en01.c:2303).
+
+   Alle drei Zustaende setzen den Gegner mit der Weltmatrix
+   njUnitMatrix/njTranslate(Spielerlage)/njRotateY auf einen festen Abstand
+   vor oder hinter den Spieler (en01.c:6813, :7380). exp0 Bit 0x4000 ist die
+   Weiche vorne/hinten, die bhEne01_NGType00 aus bhCdirCheck setzt
+   (en01b.c:231 fuer die B-Variante, en01.c:6745 fuer W).
+
+   OFFEN (Schnittstellenbedarf): NG00 und NG02 schreiben plp->ct1
+   (en01.c:6876, :7432/:7436). RECVX_ENEMY_PLAYER fuehrt nur ct0; das Feld
+   wird gemeldet statt ersetzt — zusammen mit plp->ayp fuer PlyDG00/01 der
+   zweite Spielerfeld-Bedarf dieses Pakets. */
+
+/* Die Spielerlage + Drehung als Weltmatrix, daraus die Gegnerposition
+   (en01.c:6813-6816 und :7380-7383 wortgleich). */
+static void en01_ng_place_at_player(RECVX_ENEMY_WORK* w,
+                                    const RECVX_ENEMY_PLAYER* pl,
+                                    float ofs_z, int32_t ang)
+{
+    NJS_POINT3 src, dst;
+
+    njUnitMatrix(NULL);                                              /* :6813 */
+    njTranslate(NULL, pl->pos.x, pl->pos.y, pl->pos.z);              /* :6814 */
+    njRotateY(NULL, ang);                                            /* :6815 */
+    src.x = 0.0f;                                                    /* :6799 */
+    src.y = 0.0f;                                                    /* :6800 */
+    src.z = ofs_z;                                                   /* :6804/:6809 */
+    njCalcPoint(NULL, &src, &dst);                                   /* :6816 */
+    w->px = dst.x;
+    w->py = dst.y;
+    w->pz = dst.z;
+}
+
+/* Der Anlauf-Schub von NG00 mode3 3 und NG01 mode3 1 (en01.c:6890 / :7154
+   wortgleich); 1.5 und 0.14 sind im Original double. */
+static void en01_ng_lunge(RECVX_ENEMY_WORK* w)
+{
+    const RECVX_EN01_SERVICES* en = en01_en();
+
+    w->spd = (float)(1.5 - (double)w->ct0 * 0.14);                   /* :6890 */
+    if (w->spd < 0.0f) w->spd = 0.05f;                               /* :6891 */
+    if (en && en->add_speed) en->add_speed(w, 32768);                /* :6894 */
+    else en01_gap(w, "bhAddSpeed (zonzon.c)");
+    w->ct0++;                                                        /* :6895 */
+}
+
+/* Der Nachlauf der Sturzzustaende: Restdrehung und Restversatz auf fuenf
+   Takte verteilt (en01.c:7003, :7062, :7248, :7280 wortgleich). */
+static void en01_ng_slide_out(RECVX_ENEMY_WORK* w, const RECVX_EN01_EXP0* p)
+{
+    if (w->ct0 == 0) return;                                         /* :7003 */
+    if (w->ct0 < 5) w->ay += (int16_t)w->ayp;                        /* :7005 */
+    w->px += p->grab_point.x / 5.0f;                                 /* :7009 */
+    w->pz += p->grab_point.z / 5.0f;                                 /* :7010 */
+    w->ct0--;                                                        /* :7011 */
+}
+
+/* Der Klippensturz, den NG00 (mode3 8) und NG01 (mode3 4) gemeinsam haben
+   (en01.c:6914 / :7168 wortgleich): Motion 124, Modusgruppe geloescht,
+   Kollision aus. Rueckgabe 1 = der Aufrufer bricht ab. */
+static int en01_ng_gakeoti(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p,
+                           RECVX_ENEMY_WORK* cepw, uint8_t next_mode3)
+{
+    if (recvx_en01_gakeoti_check(w) == 0) return 0;                  /* :6914 */
+    en01_dg_chg_pair(w, p, cepw, 124u, 324u, 0, 2);                  /* :6916 */
+    w->flg &= ~0x20u;                                                /* :6923 */
+    p->flags &= ~0xFu;                                               /* :6924 */
+    w->mode3 = next_mode3;                                           /* :6925 */
+    return 1;                                                        /* :6926 */
+}
+
+/* Der toedliche Abschluss des Klippensturzes (en01.c:7080 / :7298
+   wortgleich). */
+static void en01_ng_gakeoti_end(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p,
+                                RECVX_ENEMY_WORK* cepw)
+{
+    const RECVX_EN01_SERVICES* en = en01_en();
+    uint32_t frm = (uint32_t)(w->frm_no >> 16);                      /* :7073 */
+
+    if (frm >= 5u && frm < 32u) {                                    /* :7074 */
+        w->spd = 0.5f;                                               /* :7076 */
+        if (en && en->add_speed) en->add_speed(w, 32768);            /* :7077 */
+        else en01_gap(w, "bhAddSpeed (zonzon.c)");
+    }
+    (void)p;
+
+    if (frm == en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {    /* :7080 */
+        w->mtn_add = 0;                                              /* :7082 */
+        if (cepw) cepw->mtn_add = 0;                                 /* :7085 */
+        w->hp = -1;                                                  /* :7087 */
+        w->mode0 = 4;                                                /* :7088 */
+        w->mode1 = 0;                                                /* :7089 */
+        w->mode2 = 3;                                                /* :7090 */
+        w->mode3 = 0;                                                /* :7091 */
+        if (cepw) en01_copy_modes(cepw, w);                          /* :7094 */
+    }
+}
+
+/* --- bhEne01_NG00 (en01.c:6753) -----------------------------------------
+   Der Griff von vorne/hinten mit anschliessendem Biss: mode3 0 setzt den
+   Gegner an den Spieler, mode3 2 zieht pro Treffer HP ab und zaehlt das
+   Hebelruetteln herunter, mode3 3/4 ist der Rueckstoss, mode3 6 der
+   Todesbiss, mode3 5/8/9 sind die Sturzvarianten. */
+void recvx_en01_ng00(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_ENEMY_SERVICES* sv;
+    RECVX_ENEMY_WORK* cepw;
+    RECVX_ENEMY_PLAYER pl;
+    RECVX_ENEMY_VEC root;
+    uint32_t frm;
+    int32_t ang;
+    float ofs_z;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_NG00: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :6763 */
+
+    sv = en01_sv(w);
+    if (!sv || !sv->player_get || !sv->player_get(&pl)) {            /* :6762 */
+        en01_gap(w, "plp (en01.c:6762)");
+        return;
+    }
+
+    switch (w->mode3) {
+    case 0:
+        /* Spieler 1 und 3 haben eine eigene Griffmotion (en01.c:6768). */
+        if (pl.ply_id == 1u || pl.ply_id == 3u) {
+            en01_dg_chg_pair(w, p, cepw, 120u, 320u, 0, 0);          /* :6770 */
+        } else {
+            en01_dg_chg_pair(w, p, cepw, 8u, 208u, 0, 0);            /* :6780 */
+        }
+
+        w->ay = (int16_t)en01_niten_dir(w->px, w->pz,
+                                        pl.pos.x, pl.pos.z);         /* :6789 */
+        w->flg &= ~0x40u;                                            /* :6790 */
+        p->flags &= ~0xFu;                                           /* :6791 */
+        p->flags |=  0x5u;                                           /* :6792 */
+        p->flags &= ~0x4000000u;                                     /* :6793 */
+
+        pl.mode0 = 4;                                                /* :6794 */
+        pl.mode1 = 0;                                                /* :6795 */
+        pl.mode2 = 0;                                                /* :6796 */
+        pl.mode3 = 0;                                                /* :6797 */
+        if (sv->player_set) sv->player_set(&pl);
+        else en01_gap(w, "plp->mode0..3 (en01.c:6794)");
+
+        w->flg2 |= 1u;                                               /* :6798 */
+
+        if (p->flags & 0x4000u) {                                    /* :6802 */
+            ofs_z = -6.442887f;                                      /* :6804 */
+            ang = (int32_t)(uint16_t)(w->ay + EN01_DEG_ANG(180.0f)); /* :6805 */
+        } else {
+            ofs_z = 6.290813f;                                       /* :6809 */
+            ang = w->ay;                                             /* :6810 */
+        }
+        en01_ng_place_at_player(w, &pl, ofs_z, ang);                 /* :6813 */
+
+        if (w->hp < 0) w->hp = 0;                                    /* :6817 */
+        p->flags |= 0x20000u;                                        /* :6821 */
+        w->mode3++;                                                  /* :6822 */
+        /* Kein break im Original (en01.c:6823). */
+
+    case 1:
+        if ((w->frm_no >> 16) == 20) {                               /* :6825 */
+            w->ct0 = 60;                                             /* :6827 */
+            w->mode3++;                                              /* :6828 */
+        }
+        break;                                                       /* :6830 */
+
+    case 2:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :6833 */
+        if (frm == 25u || frm == 60u) {                              /* :6834 */
+            if ((uint32_t)p->personal_type >= RECVX_EN01_PERSONAL_COUNT) {
+                en01_gap(w, "en01_PersonalType[personal_type] ausserhalb (en01.c:6836)");
+                return;
+            }
+            pl.hp -= recvx_en01_personal[p->personal_type].add_atk + 10; /* :6836 */
+            if (pl.hp < 0) pl.stflg |= 0x40000u;                     /* :6837 */
+            if (sv->player_set) sv->player_set(&pl);
+            else en01_gap(w, "plp->hp/stflg (en01.c:6836)");
+        }
+
+        if (!sv->lever_check) {
+            en01_gap(w, "bhEne_LeverCheck (zonzon1.c)");
+            break;
+        }
+        w->ct0 -= sv->lever_check() + 1;                             /* :6843 */
+
+        if (w->ct0 <= 0 || (w->flg & 0x2000000u)) {                  /* :6845 */
+            if (pl.hp < 0) {                                         /* :6847 */
+                en01_dg_chg_pair(w, p, cepw, 34u, 234u, 0, 0);       /* :6849 */
+                p->flags &= ~0xFu;                                   /* :6858 */
+                p->flags |=  0x5u;                                   /* :6859 */
+                w->mode3 = 6;                                        /* :6860 */
+                pl.mode0 = 6;                                        /* :6861 */
+                pl.mode3 = 6;                                        /* :6862 */
+                if (sv->player_set) sv->player_set(&pl);
+                else en01_gap(w, "plp->mode0/mode3 (en01.c:6861)");
+            } else {
+                en01_dg_chg_pair(w, p, cepw, 7u, 207u, 0, 5);        /* :6866 */
+                w->flg |= 0x40000u;                                  /* :6868 */
+                w->mode3++;                                          /* :6874 */
+                pl.mode3 = 2;                                        /* :6875 */
+                if (sv->player_set) sv->player_set(&pl);
+                else en01_gap(w, "plp->mode3 = 2 (en01.c:6875)");
+                /* plp->ct1 = 0 (en01.c:6876): RECVX_ENEMY_PLAYER fuehrt
+                   kein ct1. */
+                en01_gap(w, "plp->ct1 = 0 (en01.c:6876)");
+                p->flags &= ~0xFu;                                   /* :6877 */
+                p->flags |=  0x6u;                                   /* :6878 */
+                w->ct0 = 0;                                          /* :6879 */
+                w->flg2 &= ~1u;                                      /* :6880 */
+            }
+            w->flg |= 0x20u;                                         /* :6882 */
+        }
+        break;                                                       /* :6884 */
+
+    case 3:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :6887 */
+        if (frm > 17u && frm < 31u) en01_ng_lunge(w);                /* :6888 */
+
+        /* Dieselbe Bedingung zweimal im Original (en01.c:6898 und :6903). */
+        if (frm == 20u) p->flags |= 0x100u;                          /* :6898 */
+        if (frm == 20u) recvx_en01_flying_cap(w, 4);                 /* :6903 */
+
+        if (frm > 17u &&
+                recvx_en01_zulzul_check(w, EN01_DEG_ANG(180.0f), 4.5f,
+                                        &p->grab_point, &w->ayp) != 0) { /* :6908 */
+            p->flags &= ~0x100u;                                     /* :6910 */
+            w->ct0 = 5;                                              /* :6911 */
+            w->ayp = w->ayp / w->ct0;                                /* :6912 */
+            w->flg |= 0x40u;                                         /* :6913 */
+
+            if (en01_ng_gakeoti(w, p, cepw, 8)) break;               /* :6914 */
+
+            /* Der Oberkoerper bekommt hier 0xFA = 250 (en01.c:6933). */
+            en01_dg_chg_pair(w, p, cepw, 50u, 0xFAu, 0, 4);          /* :6929 */
+            p->flags &= ~0xFu;                                       /* :6937 */
+            p->flags |=  0x3u;                                       /* :6938 */
+            w->mode3 = 5;                                            /* :6939 */
+            break;                                                   /* :6940 */
+        }
+
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :6943 */
+            en01_dg_chg_pair(w, p, cepw, 12u, 212u, 458752, 0);      /* :6945 */
+            w->flg |= 0x40000u;                                      /* :6947 */
+            w->flg |= 0x40u;                                         /* :6953 */
+            p->flags &= ~0xFu;                                       /* :6954 */
+            p->flags |=  0x6u;                                       /* :6955 */
+            w->mode3++;                                              /* :6956 */
+        }
+        break;                                                       /* :6958 */
+
+    case 4:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :6961 */
+        if (frm == 19u) {                                            /* :6962 */
+            if (w->stflg & 0x100000u) recvx_en01_se_play(w, 8964);   /* :6966 */
+        }
+        if (frm == 10u) p->flags &= ~0x100u;                         /* :6972 */
+
+        if (frm == en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) { /* :6975 */
+            w->flg2 &= ~1u;                                          /* :6977 */
+            p->flags &= ~0xFu;                                       /* :6979 */
+            p->flags |=  0x6u;                                       /* :6980 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :6981 */
+        }
+        break;                                                       /* :7000 */
+
+    case 5:
+        en01_ng_slide_out(w, p);                                     /* :7003 */
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :7014 */
+            w->mtn_add = 0;                                          /* :7016 */
+            if (cepw) cepw->mtn_add = 0;                             /* :7019 */
+            p->flags &= ~0x200u;                                     /* :7022 */
+            en01_dg_resume_mode4(w, p, cepw, 0);                     /* :7023 */
+        }
+        break;                                                       /* :7035 */
+
+    case 6:
+        if ((w->frm_no >> 16) == 15 && (w->stflg & 0x100000u)) {     /* :7038 */
+            recvx_en01_se_play(w, 8964);                             /* :7040 */
+        }
+
+        if (w->flg & 0x2000000u) {                                   /* :7043 */
+            /* owk = epw->mlwP->owP (en01.c:7045-7047). */
+            if (en01_joint_translation(w, 0u, &root)) {
+                w->px = root.x;                                      /* :7046 */
+                w->pz = root.z;                                      /* :7047 */
+            }
+            p->flags &= ~0x80000u;                                   /* :7048 */
+            en01_dg_chg_pair(w, p, cepw, 111u, 311u, 0, 0);          /* :7049 */
+            p->flags &= ~0xFu;                                       /* :7056 */
+            w->mode3++;                                              /* :7057 */
+        }
+        break;                                                       /* :7059 */
+
+    /* Im Original gibt es keinen case 7 (en01.c:7060). */
+    case 8:
+        en01_ng_slide_out(w, p);                                     /* :7062 */
+        en01_ng_gakeoti_end(w, p, cepw);                             /* :7073 */
+        break;                                                       /* :7097 */
+
+    case 9:
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :7100 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :7102 */
+        }
+        /* Das Original schliesst case 9 ohne break ab (en01.c:7122). */
+        break;
+    default:
+        en01_gap(w, "bhEne01_NG00: mode3 ausserhalb (en01.c:6765)");
+        break;
+    }
+}
+
+/* --- bhEne01_NG01 (en01.c:7125) -----------------------------------------
+   Der abgebrochene Griff: der Gegner startet direkt im Rueckstoss von
+   Motion 7 (Frame 16) und hat dieselben Sturzvarianten wie NG00, nur mit
+   anderen mode3-Nummern. */
+void recvx_en01_ng01(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    RECVX_ENEMY_WORK* cepw;
+    uint32_t frm;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_NG01: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :7130 */
+
+    switch (w->mode3) {
+    case 0:
+        en01_dg_chg_pair(w, p, cepw, 7u, 207u, 1048576, 5);          /* :7135 */
+        w->flg |= 0x40000u;                                          /* :7137 */
+        p->flags &= ~0xFu;                                           /* :7145 */
+        p->flags |=  0x6u;                                           /* :7146 */
+        w->ct0 = 0;                                                  /* :7147 */
+        w->mode3++;                                                  /* :7148 */
+        /* Kein break im Original (en01.c:7149). */
+
+    case 1:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :7151 */
+        if (frm > 17u && frm < 31u) en01_ng_lunge(w);                /* :7152 */
+
+        /* Anders als NG00 prueft NG01 den Sturz mit Winkel 32768 statt
+           NJM_DEG_ANG(180) — derselbe Wert, andere Schreibweise
+           (en01.c:7163). */
+        if (frm > 17u &&
+                recvx_en01_zulzul_check(w, 32768, 4.5f,
+                                        &p->grab_point, &w->ayp) != 0) { /* :7163 */
+            w->ct0 = 5;                                              /* :7165 */
+            w->ayp = w->ayp / w->ct0;                                /* :7166 */
+
+            if (en01_ng_gakeoti(w, p, cepw, 4)) break;               /* :7168 */
+
+            en01_dg_chg_pair(w, p, cepw, 50u, 250u, 0, 4);           /* :7184 */
+            p->flags &= ~0xFu;                                       /* :7193 */
+            p->flags |=  0x3u;                                       /* :7194 */
+            w->mode3 = 3;                                            /* :7195 */
+            break;                                                   /* :7196 */
+        }
+
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :7199 */
+            en01_dg_chg_pair(w, p, cepw, 12u, 212u, 458752, 0);      /* :7201 */
+            w->flg |= 0x40000u;                                      /* :7203 */
+            p->flags &= ~0xFu;                                       /* :7209 */
+            p->flags |=  0x6u;                                       /* :7210 */
+            w->mode3++;                                              /* :7211 */
+        }
+        break;                                                       /* :7213 */
+
+    case 2:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :7216 */
+        /* NG00 prueft hier Frame 19, NG01 Frame 20 (en01.c:7217). */
+        if (frm == 20u && (w->stflg & 0x100000u)) {                  /* :7217 */
+            recvx_en01_se_play(w, 8964);                             /* :7219 */
+        }
+        if (frm == en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) { /* :7222 */
+            p->flags &= ~0xFu;                                       /* :7224 */
+            p->flags |=  0x6u;                                       /* :7225 */
+            en01_dg_resume_mode4(w, p, cepw, 1);                     /* :7226 */
+        }
+        break;                                                       /* :7245 */
+
+    case 3:
+        en01_ng_slide_out(w, p);                                     /* :7248 */
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :7259 */
+            w->mtn_add = 0;                                          /* :7261 */
+            if (cepw) cepw->mtn_add = 0;                             /* :7264 */
+            p->flags &= ~0x200u;                                     /* :7266 */
+            en01_dg_resume_mode4(w, p, cepw, 0);                     /* :7267 */
+        }
+        break;                                                       /* :7277 */
+
+    case 4:
+        en01_ng_slide_out(w, p);                                     /* :7280 */
+        en01_ng_gakeoti_end(w, p, cepw);                             /* :7291 */
+        /* Das Original schliesst case 4 ohne break ab (en01.c:7319). */
+        break;
+    default:
+        en01_gap(w, "bhEne01_NG01: mode3 ausserhalb (en01.c:7132)");
+        break;
+    }
+}
+
+/* --- bhEne01_NG02 (en01.c:7325) -----------------------------------------
+   Der Nackenbiss von hinten. Endet immer toedlich fuer den Gegner: je
+   Spielerfigur trennt Motion 36 (ply_id 0) oder 35 den Kopf ab. */
+void recvx_en01_ng02(RECVX_ENEMY_WORK* w)
+{
+    RECVX_EN01_EXP0* p;
+    const RECVX_ENEMY_SERVICES* sv;
+    RECVX_ENEMY_WORK* cepw;
+    RECVX_ENEMY_PLAYER pl;
+    uint32_t frm;
+    int32_t ang, start_frm;
+    float ofs_z;
+
+    if (!w) return;
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_NG02: exp0"); return; }
+    cepw = (RECVX_ENEMY_WORK*)w->exp1;                               /* :7333 */
+
+    sv = en01_sv(w);
+    if (!sv || !sv->player_get || !sv->player_get(&pl)) {            /* :7334 */
+        en01_gap(w, "plp (en01.c:7334)");
+        return;
+    }
+
+    switch (w->mode3) {
+    case 0:
+        /* Lief die Fressmotion, startet der Biss bei Frame 0, sonst bei 10
+           (en01.c:7339). */
+        if (w->mtn_no == 15u) start_frm = 0;                         /* :7341 */
+        else                  start_frm = 655360;                    /* :7345 */
+
+        en01_dg_chg_pair(w, p, cepw, 9u, 209u, start_frm, 10);       /* :7348 */
+
+        w->flg  &= ~0x40u;                                           /* :7357 */
+        w->flg2 |=  1u;                                              /* :7358 */
+
+        pl.mode0 = 4;                                                /* :7360 */
+        pl.mode1 = 0;                                                /* :7361 */
+        pl.mode2 = 1;                                                /* :7362 */
+        pl.mode3 = 0;                                                /* :7363 */
+        if (sv->player_set) sv->player_set(&pl);
+        else en01_gap(w, "plp->mode0..3 (en01.c:7360)");
+
+        p->flags |= 0x20000u;                                        /* :7365 */
+
+        if (p->flags & 0x4000u) {                                    /* :7369 */
+            ofs_z = -8.0f;                                           /* :7371 */
+            ang = (int32_t)(uint16_t)(w->ay + EN01_DEG_ANG(180.0f)); /* :7372 */
+        } else {
+            ofs_z = 8.844476f;                                       /* :7376 */
+            ang = w->ay;                                             /* :7377 */
+        }
+        en01_ng_place_at_player(w, &pl, ofs_z, ang);                 /* :7380 */
+        w->mode3++;                                                  /* :7384 */
+        /* Kein break im Original (en01.c:7385). */
+
+    case 1:
+        if ((w->frm_no >> 16) == 10) {                               /* :7387 */
+            w->ct0 = 0x50;                                           /* :7389 */
+            w->mode3++;                                              /* :7390 */
+        }
+        break;                                                       /* :7392 */
+
+    case 2:
+        if ((w->frm_no >> 16) == 27) {                               /* :7395 */
+            if ((uint32_t)p->personal_type >= RECVX_EN01_PERSONAL_COUNT) {
+                en01_gap(w, "en01_PersonalType[personal_type] ausserhalb (en01.c:7397)");
+                return;
+            }
+            pl.hp -= recvx_en01_personal[p->personal_type].add_atk + 5; /* :7397 */
+            /* NG02 begrenzt auf 0, NG00 setzt stattdessen stflg 0x40000
+               (en01.c:7398-7401). */
+            if (pl.hp < 0) pl.hp = 0;                                /* :7400 */
+            if (sv->player_set) sv->player_set(&pl);
+            else en01_gap(w, "plp->hp (en01.c:7397)");
+        }
+
+        /* NG02 zaehlt ct0 NICHT herunter; nur das Original-Kontaktbit oder
+           ein von aussen auf <= 0 gesetzter Zaehler beendet den Biss
+           (en01.c:7404). */
+        if ((w->flg & 0x2000000u) || w->ct0 <= 0) {                  /* :7404 */
+            if (pl.ply_id == 0u) {                                   /* :7406 */
+                en01_dg_chg_pair(w, p, cepw, 36u, 236u, 0, 5);       /* :7408 */
+                w->flg |= 0x40000u;                                  /* :7410 */
+            } else {
+                en01_dg_chg_pair(w, p, cepw, 35u, 235u, 0, 5);       /* :7419 */
+                w->flg |= 0x40000u;                                  /* :7421 */
+            }
+            pl.mode3 = 2;                                            /* :7428 */
+            if (sv->player_set) sv->player_set(&pl);
+            else en01_gap(w, "plp->mode3 = 2 (en01.c:7428)");
+
+            /* Beide Zweige des Originals setzen plp->ct1 = 5
+               (en01.c:7430-7437); die Abfrage auf ct0 == 0 aendert nichts.
+               RECVX_ENEMY_PLAYER fuehrt kein ct1. */
+            en01_gap(w, "plp->ct1 = 5 (en01.c:7432)");
+
+            w->mode3++;                                              /* :7439 */
+            w->ct0 = 0;                                              /* :7440 */
+        }
+        break;                                                       /* :7442 */
+
+    case 3:
+        frm = (uint32_t)(w->frm_no >> 16);                            /* :7445 */
+
+        if (w->mtn_no == 36u) {                                      /* :7446 */
+            if (frm == 24u) {                                        /* :7448 */
+                recvx_en01_neck_blood_effect(w, 0);                  /* :7450 */
+            } else if (frm == 25u) {                                 /* :7452 */
+                recvx_en01_cut_head(w, 0);                           /* :7454 */
+                recvx_en01_se_play(w, 4877);                         /* :7455 */
+                w->hp = -1;                                          /* :7456 */
+                w->flg &= ~0x20u;                                    /* :7457 */
+            }
+        } else if (w->mtn_no == 35u) {                               /* :7460 */
+            if (frm == 33u) {                                        /* :7462 */
+                w->dvx = 0.0f;                                       /* :7464 */
+                w->dvy = 0.0f;                                       /* :7465 */
+                w->dvz = 0.0f;                                       /* :7466 */
+                recvx_en01_exp_head_effect(w, 1);                    /* :7467 */
+            } else if (frm == 34u) {                                 /* :7469 */
+                recvx_en01_cut_head(w, 1);                           /* :7471 */
+                recvx_en01_se_play(w, 4869);                         /* :7472 */
+                w->hp = -1;                                          /* :7473 */
+                w->flg &= ~0x20u;                                    /* :7474 */
+            } else if (frm == 35u) {                                 /* :7476 */
+                recvx_en01_neck_blood_effect(w, 0);                  /* :7478 */
+            }
+        }
+
+        if ((uint32_t)(w->frm_no >> 16) ==
+                en01_motion_frames(w, (uint32_t)w->mtn_no) - 1u) {   /* :7482 */
+            w->mtn_add = 0;                                          /* :7484 */
+            if (cepw) cepw->mtn_add = 0;                             /* :7487 */
+            p->flags &= ~0xFu;                                       /* :7490 */
+            p->flags &= ~0x8000u;                                    /* :7491 */
+            w->mode0 = 4;                                            /* :7493 */
+            w->mode1 = 0;                                            /* :7494 */
+            w->mode2 = 0;                                            /* :7495 */
+            w->mode3 = 0;                                            /* :7496 */
+            /* mode1 wird unmittelbar danach auf 2 gesetzt; die 0 aus :7494
+               ist wirkungslos und bleibt erhalten (en01.c:7497). */
+            w->mode1 = 2;                                            /* :7497 */
+            if (cepw) en01_copy_modes(cepw, w);                      /* :7501 */
+        }
+        /* Das Original schliesst case 3 ohne break ab (en01.c:7504). */
+        break;
+    default:
+        en01_gap(w, "bhEne01_NG02: mode3 ausserhalb (en01.c:7336)");
+        break;
+    }
+}
+
 /* --- W-Familie: mode2-Verteiler -----------------------------------------
    bhEne01_DamageMode2W[17] (en01.c:2326), DieMode2W[4] (:2346),
-   NageMode2W[4] (:2298). Die Einzelzustaende sind noch nicht portiert und
-   melden ihren Originalnamen; die echten NULL-Slots des Originals sind im
-   Wortlaut davon unterschieden. */
+   NageMode2W[4] (:2298). Alle Einzelzustaende sind portiert; es bleiben nur
+   die drei echten NULL-Slots des Originals, DamageMode2W[12]/[13] und
+   NageMode2W[3]. */
 static void en01_damage_mode2(RECVX_ENEMY_WORK* w, uint32_t index)
 {
     switch (index) {
-    case 0:  en01_gap(w, "bhEne01_DG00 (en01.c:8143) nicht portiert"); break;
-    case 1:  en01_gap(w, "bhEne01_DG01 (en01.c:8192) nicht portiert"); break;
-    case 2:  en01_gap(w, "bhEne01_DG02 (en01.c:8255) nicht portiert"); break;
-    case 3:  en01_gap(w, "bhEne01_DG03 (en01.c:8342) nicht portiert"); break;
-    case 4:  en01_gap(w, "bhEne01_DG04 (en01.c:8570) nicht portiert"); break;
-    case 5:  en01_gap(w, "bhEne01_DG05 (en01.c:8865) nicht portiert"); break;
-    case 6:  en01_gap(w, "bhEne01_DG06 (en01.c:8912) nicht portiert"); break;
-    case 7:  en01_gap(w, "bhEne01_DG07 (en01.c:9006) nicht portiert"); break;
-    case 8:  en01_gap(w, "bhEne01_DG08 (en01.c:9145) nicht portiert"); break;
-    case 9:  en01_gap(w, "bhEne01_DG09 (en01.c:9381) nicht portiert"); break;
-    case 10: en01_gap(w, "bhEne01_DG10 (en01.c:9467) nicht portiert"); break;
-    case 11: en01_gap(w, "bhEne01_DG11 (en01.c:9587) nicht portiert"); break;
+    case 0:  recvx_en01_dg00(w); break;
+    case 1:  recvx_en01_dg01(w); break;
+    case 2:  recvx_en01_dg02(w); break;
+    case 3:  recvx_en01_dg03(w); break;
+    case 4:  recvx_en01_dg04(w); break;
+    case 5:  recvx_en01_dg05(w); break;
+    case 6:  recvx_en01_dg06(w); break;
+    case 7:  recvx_en01_dg07(w); break;
+    case 8:  recvx_en01_dg08(w); break;
+    case 9:  recvx_en01_dg09(w); break;
+    case 10: recvx_en01_dg10(w); break;
+    case 11: recvx_en01_dg11(w); break;
     case 12: en01_gap(w, "bhEne01_DamageMode2W[12] == NULL (en01.c:2340)"); break;
     case 13: en01_gap(w, "bhEne01_DamageMode2W[13] == NULL (en01.c:2341)"); break;
-    case 14: en01_gap(w, "bhEne01_DG14 (en01.c:9657) nicht portiert"); break;
-    case 15: en01_gap(w, "bhEne01_DG15 (en01.c:9807) nicht portiert"); break;
-    case 16: en01_gap(w, "bhEne01_DG16 (en01.c:9837) nicht portiert"); break;
+    case 14: recvx_en01_dg14(w); break;
+    case 15: recvx_en01_dg15(w); break;
+    case 16: recvx_en01_dg16(w); break;
     default: en01_gap(w, "bhEne01_DamageMode2W[mode2]"); break;
     }
 }
@@ -8100,9 +11425,9 @@ static void en01_die_mode2(RECVX_ENEMY_WORK* w, uint32_t index)
 static void en01_nage_mode2(RECVX_ENEMY_WORK* w, uint32_t index)
 {
     switch (index) {
-    case 0: en01_gap(w, "bhEne01_NG00 (en01.c:6753) nicht portiert"); break;
-    case 1: en01_gap(w, "bhEne01_NG01 (en01.c:7125) nicht portiert"); break;
-    case 2: en01_gap(w, "bhEne01_NG02 (en01.c:7325) nicht portiert"); break;
+    case 0: recvx_en01_ng00(w); break;
+    case 1: recvx_en01_ng01(w); break;
+    case 2: recvx_en01_ng02(w); break;
     case 3: en01_gap(w, "bhEne01_NageMode2W[3] == NULL (en01.c:2303)"); break;
     default: en01_gap(w, "bhEne01_NageMode2W[mode2]"); break;
     }

@@ -98,7 +98,7 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # tools/generate_effect_collision.py ist Quarantaene (Policy 2026-10-09):
 # ATR-Boden/Wandkontakt, Reflexion und Linienabfrage sind eigenstaendig nativ;
 # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/player_stairs.c native/player_hair.c native/player_head.c native/adx_tables.c)
+add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_hair.c native/player_head.c native/adx_tables.c)
 target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
 # C02: gemeinsamer Gegnerwork am WorldEntity-Besitzer, native Dispatchkette,
 # bhSetMotion/bhCalcModel des Besitzers und alle nativ vorhandenen Gegner-
@@ -337,6 +337,10 @@ if(BUILD_TESTING)
   add_executable(recvx-effect-pool-tests tests/native/effect_pool_test.cpp)
   target_link_libraries(recvx-effect-pool-tests PRIVATE recvx_game)
   add_test(NAME effect_pool_lifetime COMMAND recvx-effect-pool-tests)
+  # D10 Kartenbildschirm: Datentabellen gegen map.c und der Taskautomat.
+  add_executable(recvx-map-tests tests/native/map_screen_test.cpp)
+  target_link_libraries(recvx-map-tests PRIVATE recvx_game)
+  add_test(NAME original_map_screen COMMAND recvx-map-tests "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_executable(recvx-effect-room-tests tests/native/effect_room_sprites_test.cpp)
   target_link_libraries(recvx-effect-room-tests PRIVATE recvx_game)
   add_test(NAME effect_room_sprites COMMAND recvx-effect-room-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")

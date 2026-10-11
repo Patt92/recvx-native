@@ -62,6 +62,9 @@ public:
     // MainCommand (sub1.c mode 2): the EXIT/FILE/MAP/ITEM bar above the item list.
     bool nav=false,nav_pressed=false;
     unsigned maincsr=3,nav_wait=0;
+    // MainCommand MAP (maincsr 2): der Statusbildschirm fordert den Kartentask
+    // an, wie system.c:853 bhInitMap(MP_SET_SUB) aus dem Unterbildschirm ruft.
+    bool map_requested=false;
     StatusSlide slide;
     bool closing=false;
     unsigned slide_sound=0xffffffff;

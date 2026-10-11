@@ -157,6 +157,7 @@ void StatusMenu::tick(Inventory& inventory){
         else if(nav_pressed){ // MainCommand: the action runs once the pressed animation (wait) ended
             nav_pressed=false;
             if(maincsr==0)begin_close();                                    // StatusCancel
+            else if(maincsr==2){map_requested=true;begin_close();} // MAP: Kartentask anfordern, Statusbildschirm abbauen (st_flg 0x8 fallen lassen)
             else if(maincsr==1){files=file_list=true;file_transition=false;file_entering=true;slide.change_view();file_page=0;commands=examining=combining=nav=false;file_folder.open(inventory,file_bonus&&file_bonus());file_number=file_folder.file();}
             else if(maincsr==3)nav=false;                                   // back to CursorMove
         }
@@ -254,7 +255,7 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     if(nav){ // MainCommand testmode 1: the pad is ignored while the pressed button animates (wait)
         if(nav_wait||nav_pressed)return true;
         if(key==MenuInput::Left&&maincsr){--maincsr;feedback_sound=2;}else if(key==MenuInput::Right&&maincsr<3){++maincsr;feedback_sound=2;}
-        else if(key==MenuInput::Confirm){if(maincsr==2)feedback_sound=1;else{nav_wait=4;nav_pressed=true;feedback_sound=3;}} // MAP needs the map screen (not ported): error SE
+        else if(key==MenuInput::Confirm){nav_wait=4;nav_pressed=true;feedback_sound=3;}
         return true;}
     if(examining){if(key==MenuInput::Left)examine_yaw-=2048;if(key==MenuInput::Right)examine_yaw+=2048;if(key==MenuInput::Up)examine_pitch+=2048;if(key==MenuInput::Down)examine_pitch-=2048;if(key==MenuInput::Confirm)inspect(inventory);return true;}
     if(commands){auto list=actions(inventory);if(list.empty()){commands=false;return true;}if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){

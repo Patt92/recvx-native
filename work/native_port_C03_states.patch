@@ -1,0 +1,98 @@
+C03 — Anschlusspatch für den Integrator
+=======================================
+
+`CMakeLists.txt` gehört dem Integrator und ist im Arbeitsbaum gerade durch
+die D10-/Map-Arbeit geändert. Dieser Patch ist deshalb nicht angewandt.
+Er besteht aus drei unabhängigen Teilen; Teil 1 und 2 sind nötig, damit
+`native/enemies/en01_core.c` überhaupt mitgebaut wird, Teil 3 registriert
+den Komponententest.
+
+Alle drei Teile sind gegen den Stand von heute (CMakeLists.txt mit
+`native/map_objects.cpp` in Zeile 101) formuliert.
+
+
+Teil 1 — die beiden EN01-Quellen in recvx_enemies aufnehmen
+-----------------------------------------------------------
+
+```diff
+@@ CMakeLists.txt (Block ab Zeile 106)
+   native/enemies/enemy_work.c native/enemies/enemy_dispatch.c
+   native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c
+   native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c
+   native/enemies/en56.c native/enemies/en71.c
++  native/enemies/en01_core.c native/enemies/en01_tables.c
+   native/enemies/en03_lib.c native/enemies/en03_collision.c)
+```
+
+`en01_core.c` braucht die Ninja-Mathematik (`njSin`, `njCos`, `njCalcPoint`,
+`njCalcVector`, `njRotateXYZ`, `njRotateY`, `njTranslate`, `njUnitMatrix`,
+`njUnitVector`, `njInnerProduct`, `njGetTranslation`, `njSqrt`) und sonst nur
+libc. `recvx_enemies` hat diese Abhängigkeit bereits über `en07.c`.
+
+
+Teil 2 — Gleitkommazusammenfassung abschalten
+---------------------------------------------
+
+`en01_core.c` bewahrt an mehreren Stellen die getrennten
+Multiplikations-/Additionsschritte des Originals, darunter die drei
+Absinkbögen von DD00/DD02/DD02B (`0.001f * ct0 * ct0 / 2.0f` neben einem
+`double`-`0.5`-Term, en01.c:10187/10199 und en01b.c:807/824) und die
+Sturzbahnen von DG07/DG14 (`slot94.f - float9C * ct0`, en01.c:9085/9744).
+`en01_tables.c` enthält nur Daten, braucht die Option also nicht.
+
+```diff
+@@ CMakeLists.txt (Zeile 114)
+-  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c native/enemies/en03_lib.c native/enemies/en03_collision.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
++  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c native/enemies/en01_core.c native/enemies/en03_lib.c native/enemies/en03_collision.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+```
+
+
+Teil 3 — Komponententest registrieren
+-------------------------------------
+
+`tests/native/en01_core_test.c` (1047 Zeilen, 196 Prüfungen) lag bisher
+unregistriert im Baum. Er ist ein C-Programm mit eigenen Dienststummeln und
+hängt nur an `en01_core.c`, `en01_tables.c`, der Ninja-Mathematik und
+`core_random.cpp`; er lädt keine Originaldaten und braucht keine Fixture.
+
+```diff
+@@ CMakeLists.txt (bei den übrigen add_executable-Testzielen, ~Zeile 373)
++  # en01_core.c gegen eigene Dienststummel: Subtypauflösung, HP-Tabelle mit
++  # add_hp, InitType-Zweige, bhEne01_SePlay inklusive add_seno und
++  # Stimmensperre, CheckMtnTbl über alle drei Tabellen, PlayerLink-Tabelle,
++  # Tabellenformen, der NULL-Platz MoveMode2W[13], die Trefferzustände
++  # DG00/DG02/DG10/DG11/DG16, die B-Familie MV13B/DG05B/DG12B/DG13B und
++  # der Griff NG02/PlyDG00. Keine Originaldaten, keine Fixture.
++  add_executable(recvx-en01-core-tests tests/native/en01_core_test.c
++    native/enemies/en01_core.c native/enemies/en01_tables.c
++    native/ninja_math.c native/ninja_matrix.c native/core_random.cpp)
++  target_include_directories(recvx-en01-core-tests PRIVATE native native/enemies build-tools/ninja)
++  if(NOT MSVC)
++    set_property(TARGET recvx-en01-core-tests APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
++  endif()
++  add_test(NAME en01_core COMMAND recvx-en01-core-tests)
+```
+
+Geprüft wurde der Test ohne CMake, mit genau diesen Quellen:
+
+```
+cc -Wall -Wextra -Wno-unused-parameter -I native -I native/enemies \
+   -o en01_test tests/native/en01_core_test.c \
+   native/enemies/en01_core.c native/enemies/en01_tables.c \
+   native/ninja_math.c native/ninja_matrix.c native/core_random.cpp -lm -lc++
+./en01_test   ->  en01_core_test: 196 Pruefungen, 0 Fehler
+```
+
+Der Linkruf braucht `-lc++`, weil `core_random.cpp` C++ ist. Im CMake-Ziel
+übernimmt das der C++-Linktreiber von selbst, sobald eine `.cpp` in den
+Quellen steht.
+
+
+Noch NICHT in diesem Patch
+--------------------------
+
+`native/world_enemies.cpp` (EN01-Kontext/Dienste binden und `jump[1]`
+umlegen) ist C03c und liegt in `work/native_port_C03_bind.patch`, sobald die
+beiden Spielerfelder aus dem Bericht im Vertrag stehen. Ohne sie würde das
+Umlegen von `jump[1]` den Griffzustand des Spielers unvollständig fahren.
+`native/enemies/en04.c` (C04) ist noch nicht geschrieben.
