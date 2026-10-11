@@ -38,8 +38,9 @@ int main(int argc,char** argv){try{
     // für die hier verbleibenden Effekt-IDs ist weiterhin keine
     // Prozedur gebunden ist, nichts in die Zeichenliste eingereiht wird und
     // die Effektarbeit unverändert bleibt - kein geratener Atlas, kein
-    // geratener Zustand.
-    for(const unsigned id:{24u,122u,200u,201u,218u,230u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
+    // geratener Zustand. 122/218/230 sind seit dem committeten Stand
+    // (2a488f7) positiv portiert und laufen nicht mehr als Lücke mit.
+    for(const unsigned id:{24u,200u,201u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
         check(!supported_effect_sprite(id),"effect gap reports a bound procedure");
         check(!step_effect_sprite(sprite,&queued)&&!queued,"effect gap executed a procedure or queued a draw");
         check(sprite.tex_id==-1&&!sprite.ct0&&!sprite.ani_ct&&!sprite.flg&&sprite.type==14&&sprite.tv[0].y==-1,"effect gap changed the sprite work");}
@@ -110,20 +111,27 @@ int main(int argc,char** argv){try{
         Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(5,18);MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);StatusMenu menu;menu.active=true;menu.stage=0;menu.room=9;vm.flags[10][0]|=0x80000;BoxMenu box;box.synchronize(inv,menu,&vm);check(box.active()&&box.base()==192&&box.moving(),"security script did not enter modal box");box.input(MenuInput::Confirm,inv,menu,&vm,audio);check(!inv.items[192],"pad accepted while the box slides in");for(int i=0;i<9&&box.moving();++i)box.synchronize(inv,menu,&vm);check(!box.moving(),"box slide-in did not finish after nine ticks");box.input(MenuInput::Confirm,inv,menu,&vm,audio);box.input(MenuInput::Confirm,inv,menu,&vm,audio);
         check(inv.items[192]==Inventory::pack(5,18),"modal security confirm did not deposit");
         box.input(MenuInput::Cancel,inv,menu,&vm,audio);check(box.active()&&box.moving()&&menu.active&&!(vm.flags[12][0]&0x200),"security close skipped the slide-out");for(int i=0;i<9;++i)box.synchronize(inv,menu,&vm);check(!box.active()&&!menu.active&&!(vm.flags[10][0]&0x1c0000)&&vm.flags[12][0]&0x200,"security close leaves original script/menu flags stuck");});
-    // PORTIERUNGSLÜCKE (Policy 2026-10-09): Die Spawn-/Fallenbereiche
-    // (bhEne_EnemyAtariCheck, bhEne04_AtariCheck/2) kamen aus
-    // enemy_spawn.inc; Generator und Include sind Quarantäne, siehe
-    // native/enemy_spawn.cpp. Entfallen sind Etagenwahl, einschließende
-    // Bereichskanten, die Fallenplatzierung und die Einmalfallen. Geprüft
-    // bleibt, dass nichts scharf geschaltet wird und weder Gegner noch
-    // Bereiche noch Kontext verändert werden - kein geratener Auslöseradius.
+    // PORTIERT (Policy 2026-10-09, Auftrag C01): Die Spawn-/Fallenbereiche
+    // (bhEne_EnemyAtariCheck, bhEne04_MVType01) liefen aus enemy_spawn.inc als
+    // Quarantäne; jetzt bestimmt native/enemies/enemy_spawn.cpp sie. Ein
+    // wartender Hund (type 1) erwacht, wenn der Spieler auf seiner Etage in
+    // einem prm1=1-Bereich steht UND der Hund selbst in einem prm1=2-Bereich
+    // seiner Etage mit gleichem prm3. Etagenwahl und einschließende Kanten sind
+    // damit belegt: (5,5) und (10,010) innen, (35,5) außerhalb des prm1=1-
+    // Bereichs, Etage 1 trifft die Etage-0-Bereiche nicht. Der Hund wird type 0,
+    // ohne Platzierung, Zufallszug, Raumflag oder Bereichsverbrauch.
     {std::vector<EnemyArea> areas{{1,2,0,0,0,10,10,4,1,0,2},{1,2,0,30,0,10,10,4,2,0,2}};const auto saved_areas=areas;
      for(const int floor:{0,1})for(const auto at:{NJS_POINT3{5,0,5},NJS_POINT3{10,0,10},NJS_POINT3{35,0,5}}){
+        const bool inside=floor==0&&(at.x<=10&&at.z<=10);
         EnemySpawn enemy;enemy.id=4;enemy.type=1;enemy.px=35;enemy.pz=5;EnemySpawnContext context;
-        check(!activate_enemy_spawn(enemy,at,floor,areas,context),"enemy spawn gap activated an enemy");
-        check(enemy.type==1&&enemy.px==35&&enemy.pz==5,"enemy spawn gap changed the enemy work or placed a trap");
-        check(!context.contact&&!context.areas&&!context.room_flags&&context.random==1,"enemy spawn gap changed the activation context or random progress");}
-     check(areas[0].prm3==saved_areas[0].prm3&&areas[1].prm3==saved_areas[1].prm3,"enemy spawn gap consumed a one-use trap area");}
+        // Der Zufallszug wird gezaehlt: context.rand ist seit fd488af ein
+        // std::function (geteilter Strom), kein Fortschrittszaehler. Der
+        // Typ-1-Pfad ruft rand() nie, also muss der Zaehler auf null bleiben.
+        int draws=0;context.rand=[&draws]{++draws;return 1;};
+        check(activate_enemy_spawn(enemy,at,floor,areas,context)==inside,"type1 activation follows the player area and floor");
+        check(enemy.type==(inside?0:1)&&enemy.px==35&&enemy.pz==5,"type1 activation sets type 0 without repositioning");
+        check(!context.contact&&!context.areas&&!context.room_flags&&draws==0,"type1 activation touched the context or random stream");}
+     check(areas[0].prm3==saved_areas[0].prm3&&areas[1].prm3==saved_areas[1].prm3,"type1 activation consumed a one-use trap area");}
     // A v3 ADX loop header is before the CRI marker and data offset.
     {std::vector<std::uint8_t> adx(50+18);adx[0]=0x80;adx[3]=46;adx[4]=3;adx[5]=18;adx[6]=4;adx[7]=1;adx[10]=0xbb;adx[11]=0x80;adx[15]=32;adx[18]=3;adx[27]=1;adx[31]=4;adx[39]=28;std::copy_n("(c)CRI",6,adx.begin()+44);auto decoded=decode_adx(adx);check(decoded.loop_start==4&&decoded.loop_end==28,"ADX v3 loop marker/ranges not parsed");adx[39]=40;bool rejected=false;try{decode_adx(adx);}catch(const std::exception&){rejected=true;}check(rejected,"ADX loop outside waveform accepted");}
     if(argc>1){const auto data=std::filesystem::u8path(argv[1]);

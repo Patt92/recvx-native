@@ -107,10 +107,12 @@ void room(const std::filesystem::path& data,const char* name,unsigned id,unsigne
     Scene after=scene;world.append(after);
     check(after.triangles.size()>before.triangles.size(),"native enemy works are not drawn after their pass");
     for(unsigned i=0;i<64;++i)if(const auto* e=world.state(1,i);e&&e->enemy_native){
+        // room.c:447 ruft bhInitMask nur fuer id > 90; sonst bleibt owP frei.
+        if(e->identity<=90)for(const auto flg:e->enemy_owp_flg)check(!(flg&4u),"bhInitMask auf einen Gegner mit id <= 90 angewandt");
         check(e->enemy_calculated&&e->enemy.mode0!=0,"routine did not initialise / bhCalcModel did not run");
         check(e->transform.position.x==e->enemy.px&&e->motion==e->enemy.mtn_no&&e->hp==e->enemy.hp,"publish Work -> Entity differs");
-        if(id==7)check(e->enemy.hp==1&&e->enemy.mtn_no==3&&e->enemy.mode0==1&&(e->enemy.flg&0x68)==0x68,"bhEne07_Init state differs");
-        if(id==0){NJS_POINT3 probe{e->enemy.px,e->enemy.py+5,e->enemy.pz};check(world.collision_contact(probe,0,1,10).has_value(),"barrel sys->mwalp surface missing from collision");}
+        if(id==7&&e->identity==7)check(e->enemy.hp==1&&e->enemy.mtn_no==3&&e->enemy.mode0==1&&(e->enemy.flg&0x68)==0x68,"bhEne07_Init state differs");
+        if(id==0&&e->identity==0){NJS_POINT3 probe{e->enemy.px,e->enemy.py+5,e->enemy.pz};check(world.collision_contact(probe,0,1,10).has_value(),"barrel sys->mwalp surface missing from collision");}
     }
     if(id==7){
         // The frame clock is the work's: bhSetMotion advanced it in every pass.
@@ -119,6 +121,22 @@ void room(const std::filesystem::path& data,const char* name,unsigned id,unsigne
         world.deactivate_enemy(0);world.tick();check(e->enemy.stflg&0x1000000u,"script stflg write not adopted");
         Scene hidden=scene;world.append(hidden);check(hidden.triangles.size()<after.triangles.size(),"inactive work still drawn");
     }
+}
+// room.c:445-449 ruft bhInitMask fuer jede Raumfigur mit id > 90; face.c:52-60
+// setzt dort mlwP->owP[6..14].flg |= 0x4 (ohne mskp face.c:21-25 nur 6..10).
+// Motion.c:131 SetMtnNormal ueberspringt genau diese Knoten, sodass die 22
+// Kanaele der RM_0000-Raummotionen auf die uebrigen 22 Modellknoten fallen.
+void mask_skip(const std::filesystem::path& data){
+    const auto bytes=read_asset_file(data/"rooms"/"RM_0000.RDT",64*1024*1024);
+    const auto scene=decode_scene(bytes);auto actor=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(bytes,scene,actor,motion,frame,audio,data,{},"RM_0000");
+    for(unsigned i=0;i<2;++i){const auto* e=world.state(1,i);
+        check(e&&e->enemy_bound&&e->identity>90,"RM_0000 scene actor missing");
+        check(e->enemy_owp_flg.size()==27,"RM_0000 scene actor model node count differs");
+        unsigned animated=0;for(const auto flg:e->enemy_owp_flg)if(!(flg&4u))++animated;
+        check(animated==22,"bhInitMask leaves a channel count the room motion cannot fill");
+        for(unsigned n=6;n<=10;++n)check(e->enemy_owp_flg[n]&4u,"bhInitMask did not mark owP[6..14]");
+        check(!(e->enemy_owp_flg[5]&4u)&&!(e->enemy_owp_flg[11]&4u),"bhInitMask marked a node outside owP[6..14]");}
 }
 }
 
@@ -130,5 +148,6 @@ int main(int argc,char** argv){try{
     const std::filesystem::path data(argv[1]);
     room(data,"RM_0130",7,5);   // five original ID-7 entries
     room(data,"RM_0080",0,1);   // the room's one barrel next to five zombies
+    mask_skip(data);            // RM_0000: Claire/Rodrigo, bhInitMask owP skip
     std::cout<<"Enemy work contract, bhSetMotion and the RoomWorld binding passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

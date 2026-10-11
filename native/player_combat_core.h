@@ -287,6 +287,13 @@ typedef struct RECVX_COMBAT_CORE RECVX_COMBAT_CORE;
 extern const int32_t RECVX_CB_WPN_ANG_TAB[21][3];
 extern const int8_t  RECVX_CB_PLY_LEG_ROUTE[2][7];
 
+/* Besitzer eines bhSetGunFire-Aufrufs ausserhalb des Spielerpasses
+   (bhWeaponSeCall event.c:2988): stflg/at_flg/idx_ct und owP[jno].mtx. */
+typedef struct { uint32_t stflg, at_flg; int32_t idx_ct; float mtx[16]; } RECVX_CB_GUN_OWNER;
+/* pwksub.c:2670 bhSetGunFire fuer einen vorhandenen Work; keine Kampfzustaende. */
+void recvx_combat_gun_fire(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
+                           RECVX_COMBAT_SYS* sys, const RECVX_CB_GUN_OWNER* owner,
+                           int32_t wno, int32_t jno, int32_t hand, int32_t ang);
 RECVX_COMBAT_CORE* recvx_combat_create(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services);
 void recvx_combat_destroy(RECVX_COMBAT_CORE* core);
 RECVX_COMBAT_PLAYER* recvx_combat_player(RECVX_COMBAT_CORE* core);

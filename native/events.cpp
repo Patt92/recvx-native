@@ -255,7 +255,7 @@ int EventVm::instruction(Task& t){
     case 0x83:return advance(2); // bhSoundFadeOut: the original body only skips its operands
     case 0x89:change_player=v.u8(p+1);flags[10][0]|=0x80;advance(2);return 1; // bhPlayerChangeSet: cng_pid + cb_flg 0x80 (consumer pending)
     case 0xae:inventory_.infected=false;return advance(2); // bhPlayerPoison2Cr: ply_stflg[0] &= ~0x200000
-    case 0xa0:map_parameters={v.u8(p+1),v.u8(p+2),v.u8(p+4),v.u8(p+3)};flags[10][0]|=0x10000;advance(6);return 1; // bhMapSystemOn: mp_prm[0..3] (consumer pending)
+    case 0xa0:map_parameters={v.u8(p+1),v.u8(p+2),v.u8(p+4),v.u8(p+3)};flags[10][0]|=0x10000;advance(6);return 1; // bhMapSystemOn: mp_prm[0..3] (consumed by runtime)
     case 0x3a:case 0xa1:case 0xce:case 0xcf:case 0xc5:case 0x87:world(t,op,2);return 1;
     case 0x76:world(t,op,4);return 1; // bh3dSoundFlagSet
     case 0xa5:world(t,op,4);return 1; // bhEneRenderSet: mdflg 0x200 (renderer binding pending)

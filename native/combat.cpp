@@ -45,6 +45,7 @@ struct CombatOriginal {
     std::function<int(const RECVX_CB_EFFECT*)> effect;
     std::function<void(const RECVX_CB_VEC*,int,int)> weapon_se;
     std::function<void(int,float,float)> footstep;
+    std::function<void(const RECVX_CB_LIGHT*)> light0;
     explicit CombatOriginal(const PlayerAsset& player):asset(&player){
         tables.wpn=reinterpret_cast<const RECVX_CB_WPN_TAB*>(WpnTab);
         tables.eff=reinterpret_cast<RECVX_CB_EF_WORK(*)[4]>(WpnEffTab);
@@ -67,6 +68,7 @@ struct CombatOriginal {
         s.effect=[](void* p,const RECVX_CB_EFFECT* e){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->effect?c->effect(e):-1);};
         s.weapon_se=[](void* p,const RECVX_CB_VEC* pos,int32_t se,int32_t slot){auto* c=static_cast<CombatOriginal*>(p);if(c->weapon_se)c->weapon_se(pos,se,slot);};
         s.footstep=[](void* p,int32_t floor,float x,float z){auto* c=static_cast<CombatOriginal*>(p);if(c->footstep)c->footstep(floor,x,z);};
+        s.light0=[](void* p,const RECVX_CB_LIGHT* l){auto* c=static_cast<CombatOriginal*>(p);if(c->light0)c->light0(l);};
         // GetOneObjectMotion (playpch.c:185) über die vorhandene Motionquelle.
         s.motion_angle=[](void* p,uint32_t mtn,uint32_t node,uint32_t frame,int32_t* ang)->int32_t{
             auto* c=static_cast<CombatOriginal*>(p);
@@ -125,26 +127,12 @@ ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset&,std::size
         out[original_->script_to_model[n]]={NJS_POINT3{o.pos[0],o.pos[1],o.pos[2]},std::array<Angle,3>{Angle(o.ang[0]),Angle(o.ang[1]),Angle(o.ang[2])}};}
     return out;
 }
-void CombatController::fire(Inventory& inventory,const SceneSpawn& actor,RoomWorld* world,AudioMixer& audio,PlayerAsset& player,std::size_t motion,std::int64_t frame,bool left){
-    const auto& w=WpnTab[weapon_];
-    // Der Zustandsautomat besitzt Trefferzuweisung und Munition; dieser
-    // Rückruf erzeugt nur das Mündungsfeuer (bhEff003).
-    const auto bones=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,pose_overrides(player,motion,frame)));const unsigned hand=left?13:9;
-    const auto& effect=WpnEffTab[weapon_][0];if(effect.flg&&effect.id==3&&hand<bones.size()){
-        WeaponFlash flash;flash.flg=effect.flg;flash.type=effect.type;flash.flr_no=effect.flr_no;flash.mdlver=effect.mdlver;flash.sx=effect.sx;flash.sy=effect.sy;flash.sz=effect.sz;
-        flash.offset={left?-w.wp_fps1.x:w.wp_fps1.x,w.wp_fps1.y,w.wp_fps1.z};flash.angles={effect.ax,left?-32768:0,0};
-        flash.linked_node=hand;auto muzzle=flash.offset;auto matrix=bones[hand];njCalcPoint(&matrix.value,&muzzle,&flash.position);
-        std::copy_n(bones[hand].value,16,flash.matrix);njTranslate(&flash.matrix,left?-w.wp_fps1.x:w.wp_fps1.x,w.wp_fps1.y,w.wp_fps1.z);if(left)njRotateY(&flash.matrix,32768);if(weapon_==13)njRotateY(&flash.matrix,8192);
-        if(weapon_==8||weapon_==12){flash.mdlver=shots%3==0;flash.angles[0]=weapon_==8||flash.mdlver?8192:5461;njRotateX(&flash.matrix,flash.angles[0]);}
-        flash.tick();flashes_.push_back(flash);
-    }
-}
 bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio,EventVm* events){
-    body_=&player;for(auto& flash:flashes_)flash.tick();flashes_.erase(std::remove_if(flashes_.begin(),flashes_.end(),[](const auto& f){return !f.flg;}),flashes_.end());
-    const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){original_.reset();weapon_=weapon;player_=inventory.player;asset_.reset();flashes_.clear();
+    body_=&player;
+    const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){original_.reset();weapon_=weapon;player_=inventory.player;asset_.reset();
         if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);bare_hands_=weapon?WeaponAsset::load(data_,inventory.player,0,mods_):asset_;}}
     const bool supported=weapon_==2||weapon_==3||weapon_==4||weapon_==5||weapon_==6||weapon_==7||weapon_==8||weapon_==9||weapon_==12||weapon_==13;
-    if(blocked||!supported){original_.reset();flashes_.clear();aim_={};if(blocked&&(input.aim||input.attack))inhibited_=true;return false;}
+    if(blocked||!supported){original_.reset();aim_={};if(blocked&&(input.aim||input.attack))inhibited_=true;return false;}
     if(inhibited_){if(input.aim||input.attack)return false;inhibited_=false;}
     if(!original_){if(!input.aim)return false;original_=std::make_shared<CombatOriginal>(player);recvx_combat_set_weapon(original_->core,int(weapon_));}
     auto& engine=*original_;
@@ -193,7 +181,8 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
             spawn.has_offset=e->has_offset!=0;spawn.offset={e->offset.x,e->offset.y,e->offset.z};
             if(!world)return -1;world->set_effect_counter(engine.sys.yk_ct);return world->spawn_player_effect(spawn);}
         if(e->ef.id!=3||e->ef.type!=0){engine.unavailable.insert("bhSetEffectTb id "+std::to_string(e->ef.id));return -1;}
-        fire(inventory,actor,world,audio,player,motion,frame,e->jno==13);return 0;};
+        if(!world)return -1;world->set_effect_counter(engine.sys.yk_ct);return world->spawn_weapon_flash(*e,1,0);};
+    engine.light0=[&](const RECVX_CB_LIGHT* l){if(world)world->set_gun_light(*l);};
     // Kampfsicht auf den einen Spielerwork: Lage/Winkel kommen je Pass vom
     // Hostakteur und gehen danach dorthin zurück (Header Z. 25-29).
     auto& view=engine.player();
@@ -250,21 +239,10 @@ void CombatController::publish_pose(PlayerAsset& player,std::size_t motion,std::
 const std::set<std::string>& CombatController::unbound_routines()const{
     static const std::set<std::string> none;return original_?original_->unavailable:none;
 }
-void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld* world)const{
+void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld*)const{
     if(bones.empty())return;
     const auto hands=body_?body_->script_nodes(bones):bones;
     if(scripted){if(bare_hands_)bare_hands_->append(scene,hands);}
-    else if(asset_){
-        asset_->append(scene,hands);
-        if(world&&!flashes_.empty())if(const auto* atlas=world->weapon_flash_textures()){
-            const unsigned base=scene.textures.size();
-            scene.textures.insert(scene.textures.end(),atlas->begin(),atlas->end());
-            for(const auto& flash:flashes_)if(flash.queued&&flash.ct0){
-                if(flash.texture_count()>atlas->size())throw std::runtime_error("original weapon-flash texture frame missing");
-                const auto* node=flash.linked_node<hands.size()?&hands[flash.linked_node].value:nullptr;
-                flash.append(scene,base,0,{},node);
-            }
-        }
-    }
+    else if(asset_)asset_->append(scene,hands);
 }
 }

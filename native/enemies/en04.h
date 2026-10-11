@@ -388,6 +388,15 @@ typedef struct RECVX_EN04_SERVICES {
     uint32_t (*object_count)(void);
     int      (*object_get)(uint32_t index, RECVX_EN04_OBJECT* out);
     void     (*object_set)(uint32_t index, const RECVX_EN04_OBJECT* in);
+
+    /* en04.c:1628/1643 plp->spd, fehlt in der gemeinsamen Player-Sicht. */
+    int (*player_speed)(float* out);
+    /* en04.c:914-933: CalcPartsPos(plp,{0,1,2,3,4,5},parts_num,1),
+       Ziel-Y = plp->py, Vorpose = owP[previous_joint].mtx[x,z]/plp->pyb,
+       dann CollisionCheckWall2(plp,...,plp->ar,plp->ah). Keine Gegnerkopie
+       als Spielerersatz. 0 bedeutet Dienst nicht ausfuehrbar. */
+    int (*player_collision_parts)(uint32_t parts_num, uint32_t previous_joint,
+                                  RECVX_ENEMY_VEC* delta);
 } RECVX_EN04_SERVICES;
 
 /* ---------------------------------------------------------------------------
@@ -418,7 +427,7 @@ void recvx_en04_player_control(RECVX_ENEMY_WORK* w);  /* en04.c:816  */
 void recvx_en04_player_link(RECVX_ENEMY_WORK* w);     /* en04.c:825  */
 void recvx_en04_collision_check(RECVX_ENEMY_WORK* w); /* en04.c:842  */
 void recvx_en04_coll_check_wall(RECVX_ENEMY_WORK* w); /* en04.c:855  */
-void recvx_en04_init(RECVX_ENEMY_WORK* w);            /* en04.c:939  */
+void recvx_en04_init_work(RECVX_ENEMY_WORK* w);       /* en04.c:939  */
 void recvx_en04_move(RECVX_ENEMY_WORK* w);            /* en04.c:1020 */
 void recvx_en04_nage(RECVX_ENEMY_WORK* w);            /* en04.c:1027 */
 void recvx_en04_damage(RECVX_ENEMY_WORK* w);          /* en04.c:1034 */

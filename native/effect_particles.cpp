@@ -140,6 +140,7 @@ struct Work {
 // damit gilt fuer jede native Lache der Zweig ewP == NULL aus bhEff300 case 2.
 struct Pool {
     bool live = false;
+    int work_slot = -1;         // E17_WORK reserves a second shared eff slot.
     NJS_POINT3 position{};      // oP->px/py/pz
     int eff_dir = 0, srd_dir = 0;
     float srd_pos = 0, bld_spd = 0;
@@ -197,16 +198,46 @@ void add_triangle(Scene& scene, const SceneVertex* quad, unsigned a, unsigned b,
 struct EffectParticles::Impl {
     std::vector<Work> works;
     std::vector<Pool> pools;
-    unsigned char used[eff_slots]{};
+    unsigned char used[eff_slots]{}; // Standalone fixture only; production reads RoomWorld.
+    std::function<unsigned(unsigned)> owner_flags;
+    std::function<void(unsigned,unsigned,unsigned)> owner_write;
     unsigned scan = 0;          // owk_scn_noG
     unsigned blood_counter = 0; // sys->bl_ct, nur fuer die Hoehenstaffelung
     std::set<std::string> unsupported;
     Impl(): works(eff_slots), pools(eff_slots) {}
 
+    unsigned flags(unsigned slot) const {
+        return owner_flags ? owner_flags(slot) : used[slot];
+    }
+    void write(unsigned slot,unsigned flg,unsigned id) {
+        if(owner_write)owner_write(slot,flg,id);
+        else used[slot]=static_cast<unsigned char>(flg);
+    }
     // AllocOwork (ab owk_scn_noG fortlaufend) bzw. AllocOworkOne (immer ab 0).
-    int reserve(bool from_start) { return allocate(used, scan, from_start); }
-    void free_slot(int slot) { used[std::size_t(slot)] = 0; works[std::size_t(slot)] = Work{}; }
-    Work& root(int slot) { works[std::size_t(slot)].live = true; return works[std::size_t(slot)]; }
+    int reserve(bool from_start) {
+        if(!owner_flags)return allocate(used,scan,from_start);
+        for(unsigned i=from_start?0u:scan;i<eff_slots;++i){
+            if(flags(i)&3u)continue;
+            works[i]=Work{};
+            pools[i]=Pool{};
+            write(i,2u,0u);
+            if(!from_start)scan=i+1;
+            return int(i);
+        }
+        return -1;
+    }
+    void free_slot(int slot) {
+        const auto index=unsigned(slot);
+        write(index,0u,0u);
+        works[index]=Work{};
+        pools[index]=Pool{};
+    }
+    Work& root(int slot) {
+        auto& w=works[std::size_t(slot)];
+        w.live=true;
+        write(unsigned(slot),1u,302u);
+        return w;
+    }
 
     // effsub3.c:117-142 — bhClrEff_RY gibt alle drei Plaetze eines Partikels frei.
     void release(Work& w)
@@ -218,14 +249,19 @@ struct EffectParticles::Impl {
 
     Pool* alloc_pool()
     {
-        for (unsigned i = 0; i < eff_slots; ++i) {
-            if (!pools[i].live) {
-                pools[i] = Pool{};
-                pools[i].live = true;
-                return &pools[i];
-            }
+        const int root_slot=reserve(true);
+        if(root_slot<0)return nullptr;
+        const int work_slot=reserve(true);
+        if(work_slot<0){
+            free_slot(root_slot);
+            return nullptr;
         }
-        return nullptr;
+        auto& p=pools[unsigned(root_slot)];
+        p=Pool{};
+        p.live=true;
+        p.work_slot=work_slot;
+        write(unsigned(root_slot),0x200001u,300u);
+        return &p;
     }
 
     std::size_t active_count() const
@@ -275,6 +311,7 @@ void EffectParticles::spawn(unsigned type,const ParticleLink& link,NJS_POINT3 of
         w.attributes|=((((color&0xFF00u)*(entry.col_lv+1u))>>8)&0xFF00u)|0xFF000000u;
         w.destination=(w.attributes&0xFFFFFFu)|0x20000000u;
         w.linked=link.linked;
+        impl_->write(unsigned(root_slot),link.linked?0x81u:1u,302u);
         w.link_kind=link.kind;
         w.link_index=link.index;
         w.link_node=link.node;
@@ -312,6 +349,7 @@ void EffectParticles::spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT
         w.attributes=source_color;
         w.destination=destination_color;
         w.linked=link.linked;
+        impl_->write(unsigned(root_slot),link.linked?0x81u:1u,302u);
         w.link_kind=link.kind;
         w.link_index=link.index;
         w.link_node=link.node;
@@ -537,10 +575,20 @@ static void step_pool(recvx::Pool& p,const std::function<bool(NJS_POINT3)>& wall
 // effect.c:776-845 — die gemeinsame Steuerschleife loest flg 0x80 ueber
 // njCalcPoint(&lkwkp->mlwP->owP[lkono].mtx, &lox, &px) auf. Genau das leistet
 // der resolve-Rueckruf; die Wurzelarbeit wird dabei verschoben, wie im Original.
-void EffectParticles::tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall)
+void EffectParticles::bind_pool(const std::function<unsigned(unsigned)>& flags,
+                                const std::function<void(unsigned,unsigned,unsigned)>& write)
 {
-    for(auto& w:impl_->works){
-        if(!w.live)continue;
+    if(!flags||!write)throw std::runtime_error("particle pool requires both owner callbacks");
+    if(impl_->active_count())throw std::runtime_error("cannot rebind live particle payloads");
+    impl_->owner_flags=flags;
+    impl_->owner_write=write;
+}
+
+void EffectParticles::tick_slot(unsigned slot,const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall)
+{
+    if(slot>=eff_slots)throw std::runtime_error("particle dispatch outside eff[512]");
+    auto& w=impl_->works[slot];
+    if(w.live){
         w.draw_queued=false;
         if(w.linked){
             ParticleLink link;
@@ -551,9 +599,19 @@ void EffectParticles::tick(const std::function<NJS_POINT3(const ParticleLink&,NJ
             w.position=resolve(link,w.offset);
         }
         step_work(w);
-        if(!w.live)impl_->release(w);
+        if(!w.live){
+            impl_->release(w);
+            impl_->free_slot(int(slot));
+        }
     }
-    for(auto& p:impl_->pools)if(p.live)step_pool(p,wall);
+    auto& p=impl_->pools[slot];
+    if(p.live)step_pool(p,wall);
+}
+
+void EffectParticles::tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall)
+{
+    for(unsigned slot=0;slot<eff_slots;++slot)
+        if(impl_->flags(slot)&1u)tick_slot(slot,resolve,wall);
 }
 
 std::size_t EffectParticles::active()const{return impl_->active_count();}

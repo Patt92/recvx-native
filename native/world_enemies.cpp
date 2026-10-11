@@ -1,8 +1,13 @@
+#include <optional>
 #include "world.h"
 #include "binary_view.h"
 #include "core_random.h"
 #include "motion_set.h"
 #include "subplayer.h"
+#include "enemy_dispatch.h"
+#include "enemies/en01_core.h"
+#include "enemies/en04.h"
+#include "enemies/en04_tables.h"
 #include <cstring>
 
 // C02 — the shared enemy work at its existing owner. RoomWorld/WorldEntity
@@ -41,10 +46,75 @@ bool same_wall(const CollisionWall& a,const CollisionWall& b){
 constexpr std::size_t enemy_exp_budget=0xC40000; // eneset.c:910
 }
 
+// C02 player view: no stored RECVX_ENEMY_PLAYER. The fields below refer to
+// SceneSpawn, the Runtime motion clock, EventVm and Inventory/head owners.
+// Sources: en07.c:2393 PlayerControl, player.c:1502, en01.c PlyDG00/01.
+bool RoomWorld::enemy_player_get(RECVX_ENEMY_PLAYER& out)const{
+    if(!player_asset_||!player_hp_owner_||!player_head_flags_)return false;
+    out={};out.pos={player_.position.x,player_.position.y,player_.position.z};
+    out.ax=player_.pitch;out.ay=player_.yaw;out.az=player_.roll;out.flr_no=collision_floor_;
+    out.hp=*player_hp_owner_;
+    out.flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
+    out.flg2=collision_events_?collision_events_->flags[15][0]:collision_flags2_;
+    out.stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+    out.at_flg=player_at_flags_;
+    out.mode0=std::uint8_t(collision_mode_);out.mode1=std::uint8_t(collision_mode_>>8);
+    out.mode2=std::uint8_t(collision_mode_>>16);out.mode3=std::uint8_t(collision_mode_>>24);
+    out.ct0=player_ct0_;out.ct1=player_ct1_;out.ayp=player_ayp_;
+    out.mtn_no=unsigned(motion_);out.frm_no=std::int32_t(frame_);out.mtn_add=std::int32_t(player_step_);
+    out.mtn_md=player_mtn_md_;out.hokan_count=player_hokan_count_;out.hokan_rate=player_hokan_rate_;
+    out.mtn_enemy=player_enemy_motion_?1:0;out.mtn_enemy_owner=player_enemy_owner_;
+    out.wpnr_no=int(player_weapon_);out.ply_id=unsigned(player_character_);out.exp1_flags=*player_head_flags_;
+    return true;
+}
+bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
+    if(!player_asset_||!player_hp_owner_||!player_head_flags_)return false;
+    player_.position={in.pos.x,in.pos.y,in.pos.z};player_.pitch=in.ax;player_.yaw=in.ay;player_.roll=in.az;
+    collision_floor_=in.flr_no;*player_hp_owner_=in.hp;
+    if(collision_events_){collision_events_->flags[13][0]=in.flg;collision_events_->player_flags=in.flg;
+        collision_events_->flags[14][0]=in.stflg;collision_events_->flags[15][0]=in.flg2;
+    }else {collision_flags_=in.flg;collision_status_=in.stflg;collision_flags2_=in.flg2;}
+    player_at_flags_=in.at_flg;
+    collision_mode_=unsigned(in.mode0)|(unsigned(in.mode1)<<8)|(unsigned(in.mode2)<<16)|(unsigned(in.mode3)<<24);
+    player_ct0_=in.ct0;player_ct1_=in.ct1;player_ayp_=in.ayp;
+    motion_=in.mtn_no;frame_=in.frm_no;player_step_=in.mtn_add;
+    player_mtn_md_=in.mtn_md;player_hokan_count_=in.hokan_count;player_hokan_rate_=in.hokan_rate;
+    player_enemy_motion_=in.mtn_enemy!=0;player_enemy_owner_=in.mtn_enemy_owner;
+    player_weapon_=unsigned(in.wpnr_no);*player_head_flags_=in.exp1_flags;
+    // The existing input owner must not run free locomotion during enemy
+    // damage/death modes. This is ownership, not a replacement player phase.
+    const bool driven=in.mode0==4||in.mode0==6;
+    if(driven){enemy_player_driving_=true;grab_driving_=true;player_scripted=true;player_room_motion_=false;}
+    else if(enemy_player_driving_){enemy_player_driving_=false;grab_driving_=false;player_scripted=false;}
+    if(in.hp<0)player_killed_=true;
+    return true;
+}
+unsigned RoomWorld::enemy_player_motion_frames(unsigned mtn,bool from_enemy)const{
+    if(!player_asset_)return 0;
+    if(!from_enemy)return player_asset_->has_motion(mtn)?player_asset_->motion_frames(mtn):0;
+    // PlayerControl queries the new enemy library before its final player_set.
+    // enow therefore supplies the current caller, not a constant zombie ID.
+    const auto i=enemy_table_.enow;
+    if(i>=RECVX_ENEMY_SLOTS||!enemy_table_.slot[i])return 0;
+    const auto* clip=enemy_mn_work(owner_of(enemy_table_.slot[i]),mtn);
+    return clip?clip->frames:0;
+}
+bool RoomWorld::enemy_player_joint(unsigned joint,BoneMatrix& out)const{
+    if(joint>=player_joint_matrices_.size())return false;
+    out=player_joint_matrices_[joint];return true;
+}
+
 void RoomWorld::bind_enemy_services(){
     RECVX_ENEMY_SERVICES& s=enemy_services_;std::memset(&s,0,sizeof s);
     s.gap=[](const char* name){enemy_world->unbound_enemy_.insert(name);};
     s.random_next=[]()->int32_t{return recvx_core_random_next();};
+    s.player_get=[](RECVX_ENEMY_PLAYER* out)->int{return out&&enemy_world->enemy_player_get(*out)?1:0;};
+    s.player_set=[](const RECVX_ENEMY_PLAYER* in){if(!in||!enemy_world->enemy_player_set(*in))enemy_world->unbound_enemy_.insert("player_set: Inventory/EXP1/PlayerAsset nicht gebunden");};
+    s.player_joint_matrix=[](uint32_t joint,float* out)->int{BoneMatrix m;if(!enemy_world->enemy_player_joint(joint,m))return 0;std::memcpy(out,m.value,sizeof m.value);return 1;};
+    s.player_joint_point=[](uint32_t joint,const RECVX_ENEMY_VEC* local,RECVX_ENEMY_VEC* out)->int{
+        BoneMatrix m;if(!enemy_world->enemy_player_joint(joint,m))return 0;
+        NJS_POINT3 p{local->x,local->y,local->z},q;njCalcPoint(&m.value,&p,&q);*out={q.x,q.y,q.z};return 1;};
+    s.player_motion_frames=[](uint32_t mtn,int enemy)->uint32_t{return enemy_world->enemy_player_motion_frames(mtn,enemy!=0);};
     // bhCheckWallType (hitchk.c) over the room-then-mobile geometry.
     s.wall_type=[](const RECVX_ENEMY_VEC* p,uint32_t flg,float r,float h)->int{return enemy_world->collision_contact({p->x,p->y,p->z},flg,r,h)?1:0;};
     // bhCollisionCheckLine (1), Line2 (2) and Line3 (3). `id` is the 1-based
@@ -159,6 +229,14 @@ const MotionClip* RoomWorld::enemy_mn_work(const WorldEntity& e,std::uint32_t mt
 void RoomWorld::init_enemy_works(){
     EnemyWorldScope scope(this);
     bind_enemy_services();
+    static const auto en01_d = recvx_en01_default_data();
+    recvx_en01_set_data(&en01_d);
+    RECVX_EN01_CONTEXT en01_ctx{};
+    en01_ctx.table = &enemy_table_;
+    en01_ctx.services = &enemy_services_;
+    en01_ctx.game_mode = enemy_game_mode_;
+    recvx_en01_set_context(&en01_ctx);
+    recvx_en04_set_data(recvx_en04_default_data());
     recvx_enemy_table_init(&enemy_table_);   // bhInitEnemy
     recvx_enemy_dispatch_init(&enemy_dispatch_);
     enemy_exp_blocks_.clear();enemy_exp_used_=0;enemy_mobile_walls_.clear();
@@ -171,7 +249,24 @@ void RoomWorld::init_enemy_works(){
         e.enemy_bound=true;e.enemy_asset=nullptr;
         for(const auto& m:models_)if(m.kind==1&&m.index==i&&m.actor){e.enemy_asset=m.actor.get();break;}
         // bhMlbBinRealize: objP starts as the model's own node data; owP is zeroed.
-        if(e.enemy_asset){e.enemy_obj=e.enemy_asset->bind_pose();e.enemy_evalflags=e.enemy_asset->node_evalflags();e.enemy_owp_flg.assign(e.enemy_obj.size(),0u);e.enemy_owp_mtx.assign(e.enemy_obj.size(),BoneMatrix{});}
+        if(e.enemy_asset){e.enemy_obj=e.enemy_asset->bind_pose();e.enemy_evalflags=e.enemy_asset->node_evalflags();e.enemy_owp_flg.assign(e.enemy_obj.size(),0u);e.enemy_owp_mtx.assign(e.enemy_obj.size(),BoneMatrix{});
+            // room.c:445-449 ruft fuer jeden Raumgegner mit id > 90 bhInitMask.
+            // face.c:52-60 setzt dort mlwP->owP[6..14].flg |= 0x4 (ohne mskp
+            // nur owP[6..10], face.c:21-25). Motion.c:131 SetMtnNormal
+            // ueberspringt genau diese Knoten, sodass die Motionkanaele erst
+            // dahinter weiterzaehlen; ohne die Markierung landen die Kanaele
+            // der Arme und Beine auf den maskengesteuerten Kopfknoten und die
+            // Gliedmassen behalten ihre Bindepose.
+            // Die von fmCnkInitContext eingefuegten Tochterknoten (tooth/tang/
+            // eyes) liegen hier nicht in objP, sondern nur in der logischen
+            // Knotenliste des Modells; die Originalindizes 6..14 werden daher
+            // ueber dieselbe Zuordnung auf ihre Modellknoten abgebildet.
+            if(t.id>90){const unsigned last=e.enemy_asset->face()?14u:10u;
+                for(unsigned logical=6;logical<=last;++logical){
+                    unsigned physical=0;
+                    try{physical=e.enemy_asset->model_index(logical);}
+                    catch(const std::runtime_error&){unbound_enemy_.insert("bhInitMask: owP[6..14] ausserhalb des Modellbaums");break;}
+                    if(physical<e.enemy_owp_flg.size())e.enemy_owp_flg[physical]|=4u;}}}
         e.enemy_native=t.id<RECVX_ENEMY_IDS&&enemy_dispatch_.jump[t.id]!=nullptr;
         if(e.enemy_native)publish_enemy(e);
     }
@@ -201,7 +296,7 @@ void RoomWorld::adopt_enemy_script(WorldEntity& e){
 void RoomWorld::publish_enemy(WorldEntity& e){
     RECVX_ENEMY_PUBLISH out;recvx_enemy_publish(&e.enemy,&out);
     e.transform.position={out.px,out.py,out.pz};e.transform.yaw=out.ay;e.angles={out.ax,out.ay,out.az};e.object_floor=out.flr_no;e.type=out.type;e.hp=out.hp;
-    e.motion=out.mtn_no;e.room_motion=out.mtn_room!=0;e.frame=out.frm_no;e.step=out.mtn_add;
+    if(!e.scripted){e.motion=out.mtn_no;e.room_motion=out.mtn_room!=0;e.frame=out.frm_no;e.step=out.mtn_add;}
     e.dead=(out.flg&2)!=0;e.inactive=(out.stflg&0x1000000u)!=0;e.hidden=(out.mdflg&0x200u)!=0;e.look=(out.flg&0x8000u)!=0;
     auto& m=e.enemy_mirror;m.position=e.transform.position;m.angles=e.angles;m.yaw=e.transform.yaw;m.floor=e.object_floor;m.motion=e.motion;m.room_motion=e.room_motion;m.frame=e.frame;m.step=e.step;m.hp=e.hp;m.hidden=e.hidden;m.inactive=e.inactive;m.look=e.look;
 }
@@ -236,7 +331,13 @@ void RoomWorld::control_enemy_works(){
     // The T3 supplement is a process-wide binding in en03_lib.c; it is only
     // valid while this world runs its pass.
     recvx_enemy_ext_bind(&enemy_ext_);
+    RECVX_EN01_CONTEXT en01_ctx{};
+    en01_ctx.table = &enemy_table_;
+    en01_ctx.services = &enemy_services_;
+    en01_ctx.game_mode = enemy_game_mode_;
+    recvx_en01_set_context(&en01_ctx);
     recvx_enemy_control(&enemy_table_,&enemy_dispatch_,simulation_flags_,&enemy_services_);
+    recvx_en01_set_context(nullptr);
     recvx_enemy_ext_bind(nullptr);
 }
 }

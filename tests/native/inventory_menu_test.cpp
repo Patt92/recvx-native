@@ -25,6 +25,7 @@ static void select_action(StatusMenu& menu,Inventory& inv,unsigned slot,unsigned
 }
 static void acknowledge(StatusMenu& menu,Inventory& inv){for(unsigned i=0;i<20&&menu.message.active();++i)menu.input(MenuInput::Confirm,inv);check(!menu.message.active(),"message cannot be dismissed");}
 static void yes(StatusMenu& menu,Inventory& inv){while(menu.message.active()&&!menu.message.choices())menu.input(MenuInput::Confirm,inv);if(menu.message.active())menu.input(MenuInput::Confirm,inv);}
+static void no(StatusMenu& menu,Inventory& inv){while(menu.message.active()&&!menu.message.choices())menu.input(MenuInput::Confirm,inv);if(menu.message.active()){menu.input(MenuInput::Down,inv);menu.input(MenuInput::Confirm,inv);}}
 static std::vector<std::uint8_t> use_fixture(){
     std::vector<std::uint8_t> bytes(1500);auto put=[&](unsigned p,unsigned n){for(unsigned i=0;i<4;++i)bytes.at(p+i)=std::uint8_t(n>>(8*i));};
     auto real=[&](unsigned p,float n){std::memcpy(bytes.data()+p,&n,4);};real(0,1.73f);put(16,64);put(28,1100);put(64+0x38,1400);
@@ -57,6 +58,14 @@ int main(){try{
         select_action(menu,inv,2,2);check(menu.combining&&menu.combine_from==2,"Combine does not retain its source");menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);check(menu.message.index()==155,"herb mixing skips original confirmation");yes(menu,inv);
         check(!menu.combining&&menu.active&&inv.occupied()==1&&Inventory::id(inv.slots()[menu.selected])==recipe[2],"herb recipe/result cursor failed through menu");
     }
+    {auto inv=empty();inv.slots()[2]=Inventory::pack(21,1);inv.slots()[3]=Inventory::pack(22,1);StatusMenu menu;messages(menu);
+        select_action(menu,inv,2,2);check(menu.combining&&menu.combine_from==2,"Combine source lost");
+        menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);check(menu.message.index()==155,"herb question missing");
+        const auto saved=inv.items;no(menu,inv);
+        check(inv.items==saved&&menu.combining&&menu.feedback_sound==1,"herb question denial did not keep combination mode or play sound 1");
+        menu.selected=1;menu.input(MenuInput::Up,inv);check(!menu.nav&&menu.combining,"combination cursor leaked to nav on Up");
+        menu.input(MenuInput::Left,inv);check(!menu.nav&&menu.combining,"combination cursor leaked to nav on Left");
+        menu.input(MenuInput::Cancel,inv);check(!menu.combining&&menu.selected==2,"combination cancel failed");}
     {auto inv=empty();inv.slots()[2]=Inventory::pack(22,1);inv.slots()[3]=Inventory::pack(23,1);StatusMenu menu;messages(menu);select_action(menu,inv,2,2);const auto saved=inv.items;menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);
         check(inv.items==saved&&menu.combining&&menu.feedback_sound==1,"invalid herbs consumed or combination exited");menu.input(MenuInput::Cancel,inv);check(!menu.combining&&menu.selected==2,"combine cancel loses source cursor");
         select_action(menu,inv,2,0);check(menu.message.index()==161&&menu.active,"red herb use closes inventory or lacks 161"); /* Verbrauch nicht belegt: Use_00 herbuse = $s3 des Aufrufers */}

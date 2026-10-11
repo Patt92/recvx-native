@@ -48,6 +48,14 @@ int main(int argc,char** argv){try{
         const unsigned full=itemdata[ammo].max; // zweistellig, siehe oben
         const auto one=render(7,0),two=render(full,0),endless=render(full,0x800);
         check(changed(one),"item cell draws nothing at all");
+        // Oberes Waffenfenster (ArmsSet -> BulletSet mode 0): Menge muss sichtbar sein.
+        {auto upper=[&](unsigned amount){Inventory w;std::fill(w.slots()+2,w.slots()+12,0);w.slots()[2]=Inventory::pack(ammo,amount);w.slots()[0]=2;
+             StatusMenu wm;wm.message_source=[](unsigned){return Message{'T'-32,0xffff};};
+             wm.input(MenuInput::Open,w);wm.skip_slide();wm.tick(w);MessageDialog wd;SoftwareRenderer wr(640,480);ui.draw(wr,w,wm,wd,0);return wr.pixels();};
+         const int ix=352,iy=48; /* oberes Fenster: Icon bei y=48, Ziffern bei y+32 */
+         const auto with=upper(full),other=upper(7);
+         unsigned digits=0;for(int y=iy+32;y<iy+32+40;++y)for(int x=ix;x<ix+168;++x)digits+=with[y*640+x]!=other[y*640+x];
+         check(digits,"upper weapon window draws no ammunition amount");}
         // Mehr Stellen heisst mehr veraenderte Pixel gegenueber dem leeren Menue.
         check(changed(two)>changed(one),"two digit amount draws no more than a single digit");
         // Unendlich zeigt eine Sonderglyphe statt der Ziffern.

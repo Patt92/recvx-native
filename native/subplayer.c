@@ -14,48 +14,30 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---------------------------------------------------------------------------
-   Originalfeldbreiten (types.h:238)
-   ---------------------------------------------------------------------------
-   mode0..mode3 sind je ein Byte, ct0..ct3 sind vorzeichenbehaftete 32-Bit-
-   Werte. `RECVX_SUBPLAYER` fuehrt die Modi als `int`, weil der vorhandene
-   Besitzer sie so schreibt; jeder Lesezugriff maskiert deshalb auf die
-   originale Bytebreite. Das ist eine Datenrepraesentations-Anpassung, keine
-   andere Entscheidung: ein Skriptwert jenseits von 255 wird genauso
-   abgeschnitten wie im Original. */
+/* C05: Jeder Schreibzugriff gilt direkt dem Work des WorldEntity-Besitzers.
+   Motion und Modellbaum sehen exakt diesen Work; kein publish/adopt-Schatten. */
 #define SUBPL_BYTE(v) ((unsigned)(v) & 0xFFu)
 
-static void subpl_gap(RECVX_SUBPLAYER* w, const char* where)
+static void subpl_gap(RECVX_ENEMY_WORK* w, const char* where)
 {
-    /* Nur die erste ungebundene Stelle eines Passes wird gehalten; sie nennt
-       die Originalfundstelle, nicht das Originalsymbol. */
-    if (w && !w->gap) w->gap = where;
+    if (w && w->sv && w->sv->gap) w->sv->gap(where);
 }
 
-/* Motion.c:21 bhSetMotion(work, mtn_add, mtn_md, mtn_tp). Alle Aufrufstellen
-   in subpl.c uebergeben genau diese drei Felder des Works.
-   `advanced` meldet dem vorhandenen Motionbesitzer, dass der Aufruf in diesem
-   Pass stattgefunden hat — das ist die Bedingung, unter der das Original den
-   Frame fortschaltet. Ist der Dienst nicht gebunden, wird die Fundstelle
-   gemeldet; es wird kein Frame erfunden. */
-static int subpl_set_motion(RECVX_SUBPLAYER* w)
+static void subpl_set_motion(RECVX_ENEMY_WORK* w)
 {
-    w->advanced = 1;
-    if (w->set_motion) {
-        w->motion_wrapped = w->set_motion(w, w->mtn_add, w->mtn_md, w->mtn_tp);
-        return w->motion_wrapped;
-    }
-    w->motion_wrapped = 0;
-    subpl_gap(w, "subpl:motion-step (Motion.c:21)");
-    return 0;
+    /* Der bestehende Dienst liest datP aus w->mtn_tp. Alle Sideeffects des
+       Motionbesitzers bleiben am selben Work erhalten (insbes. Hokan/Attr). */
+    if (w->sv && w->sv->set_motion)
+        (void)w->sv->set_motion(w, w->mtn_add, w->mtn_md);
+    else subpl_gap(w, "bhSetMotion:subplayer");
 }
 
 /* pwksub.c:133 bhAddSpeed(work, r): die Lage laeuft dem Blickwinkel entgegen,
    deshalb werden beide Anteile subtrahiert. Der Winkel wird vor der
    Tabellenabfrage auf 16 Bit beschnitten. */
-static void subpl_add_speed(RECVX_SUBPLAYER* w, int r)
+static void subpl_add_speed(RECVX_ENEMY_WORK* w, int r)
 {
-    const int angle = (w->ay + r) & 0xFFFF;
+    const int angle = (int)(((uint32_t)w->ay + (uint32_t)r) & 0xFFFFu);
     w->px -= w->spd * njSin(angle);
     w->pz -= w->spd * njCos(angle);
 }
@@ -72,7 +54,7 @@ static void subpl_add_speed(RECVX_SUBPLAYER* w, int r)
 int recvx_subplayer_dir_target(float px, float pz, int ay, float x, float z, int limit)
 {
     int ang = (int)(atan2f(px - x, pz - z) * 10430.381f);
-    ang = (int16_t)(ang - ay);
+    ang = (int16_t)((uint32_t)ang - (uint32_t)ay);
     if (limit < abs(ang)) ang = (ang > 0) ? limit : -limit;
     return ang;
 }
@@ -119,7 +101,7 @@ static float subpl_target_z_signed(int ct0)
 /* subpl.c:155 — Index 0 von subpl_mv00_tbl und Standardeintrag beider
    Tabellen. Eintritt mit Interpolation ueber acht Schritte, Interpolations-
    rate zurueckgesetzt, Motionbit 0x100 geloescht; danach Durchfallen. */
-static void subpl_mv00(RECVX_SUBPLAYER* w)
+static void subpl_mv00(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -143,7 +125,7 @@ static void subpl_mv00(RECVX_SUBPLAYER* w)
 
 /* subpl.c:177 — Index 10 von subpl_mv00_tbl. Gleich wie subpl_mv00, aber OHNE
    hokan_count: die zuvor gesetzte Schrittzahl bleibt stehen. */
-static void subpl_mv00_ex(RECVX_SUBPLAYER* w)
+static void subpl_mv00_ex(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -166,7 +148,7 @@ static void subpl_mv00_ex(RECVX_SUBPLAYER* w)
    Grad pro Pass), Geschwindigkeit aus ct3 in Hundertsteln, Motion fortsetzen,
    dann versetzen. Reihenfolge ist tragend: bhAddSpeed liest den in diesem
    Pass schon geaenderten Winkel und die neue Geschwindigkeit. */
-static void subpl_mv01(RECVX_SUBPLAYER* w)
+static void subpl_mv01(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -178,9 +160,9 @@ static void subpl_mv01(RECVX_SUBPLAYER* w)
         w->frm_mode = 0;
         /* fall through */
     case 1:
-        w->ay += recvx_subplayer_dir_target(w->px, w->pz, w->ay,
+        w->ay = (int32_t)((uint32_t)w->ay + (uint32_t)recvx_subplayer_dir_target(w->px, w->pz, w->ay,
                                             subpl_target_x(w->ct0),
-                                            subpl_target_z_unsigned(w->ct0), 182);
+                                            subpl_target_z_unsigned(w->ct0), 182));
         w->spd = 0.01f * (float)w->ct3;
         subpl_set_motion(w);
         subpl_add_speed(w, 0);
@@ -193,7 +175,7 @@ static void subpl_mv01(RECVX_SUBPLAYER* w)
 /* subpl.c:226 — Index 2 von subpl_mv00_tbl, Index 0 und 2 von subpl_mv01_tbl.
    Stillstand: Geschwindigkeit auf null, Interpolation ueber acht Schritte,
    KEIN bhSetMotion und KEIN Durchfallen. Der Frame bleibt damit stehen. */
-static void subpl_mv02(RECVX_SUBPLAYER* w)
+static void subpl_mv02(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -210,7 +192,7 @@ static void subpl_mv02(RECVX_SUBPLAYER* w)
 
 /* subpl.c:245 — Index 6 von subpl_mv01_tbl. Wie subpl_mv02, aber ohne
    Interpolationsschritte: der Wechsel schneidet hart. */
-static void subpl_mv02_0(RECVX_SUBPLAYER* w)
+static void subpl_mv02_0(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -229,7 +211,7 @@ static void subpl_mv02_0(RECVX_SUBPLAYER* w)
    Drehen und versetzen OHNE bhSetMotion: der Frame wird in diesem Zweig nicht
    fortgeschaltet, die Figur gleitet in ihrer gehaltenen Pose. Das untere
    Halbwort von ct0 wird hier vorzeichenbehaftet gelesen. */
-static void subpl_mv03(RECVX_SUBPLAYER* w)
+static void subpl_mv03(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -239,9 +221,9 @@ static void subpl_mv03(RECVX_SUBPLAYER* w)
         w->frm_mode = 0;
         /* fall through */
     case 1:
-        w->ay += recvx_subplayer_dir_target(w->px, w->pz, w->ay,
+        w->ay = (int32_t)((uint32_t)w->ay + (uint32_t)recvx_subplayer_dir_target(w->px, w->pz, w->ay,
                                             subpl_target_x(w->ct0),
-                                            subpl_target_z_signed(w->ct0), 182);
+                                            subpl_target_z_signed(w->ct0), 182));
         w->spd = 0.01f * (float)w->ct3;
         subpl_add_speed(w, 0);
         break;
@@ -252,7 +234,7 @@ static void subpl_mv03(RECVX_SUBPLAYER* w)
 
 /* subpl.c:287 — Index 7 von subpl_mv01_tbl. Wie subpl_mv03 ohne
    Interpolationsschritte. */
-static void subpl_mv03_0(RECVX_SUBPLAYER* w)
+static void subpl_mv03_0(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -262,9 +244,9 @@ static void subpl_mv03_0(RECVX_SUBPLAYER* w)
         w->frm_mode = 0;
         /* fall through */
     case 1:
-        w->ay += recvx_subplayer_dir_target(w->px, w->pz, w->ay,
+        w->ay = (int32_t)((uint32_t)w->ay + (uint32_t)recvx_subplayer_dir_target(w->px, w->pz, w->ay,
                                             subpl_target_x(w->ct0),
-                                            subpl_target_z_signed(w->ct0), 182);
+                                            subpl_target_z_signed(w->ct0), 182));
         w->spd = 0.01f * (float)w->ct3;
         subpl_add_speed(w, 0);
         break;
@@ -276,7 +258,7 @@ static void subpl_mv03_0(RECVX_SUBPLAYER* w)
 /* subpl.c:310 — Index 4 beider Tabellen. Erzwingt den vollen Framevorschub
    (65536 = ein Frame je Pass) und loest die Motionquelle, ohne zu
    interpolieren. */
-static void subpl_mv05(RECVX_SUBPLAYER* w)
+static void subpl_mv05(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -298,7 +280,7 @@ static void subpl_mv05(RECVX_SUBPLAYER* w)
 /* subpl.c:332 — Index 5 beider Tabellen. Wie subpl_mv05, aber mit sechzehn
    Interpolationsschritten und GESETZTEM Motionbit 0x100 — genau das Bit, das
    subpl_mv00/subpl_mv00_ex wieder loeschen. */
-static void subpl_mv06(RECVX_SUBPLAYER* w)
+static void subpl_mv06(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -321,7 +303,7 @@ static void subpl_mv06(RECVX_SUBPLAYER* w)
 /* subpl.c:357 — Index 6 von subpl_mv00_tbl. Wie subpl_mv00, aber ohne
    Interpolationsschritte, ohne Ruecksetzen der Interpolationsrate und ohne
    Eingriff in mtn_md. */
-static void subpl_mv00_1(RECVX_SUBPLAYER* w)
+static void subpl_mv00_1(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -340,7 +322,7 @@ static void subpl_mv00_1(RECVX_SUBPLAYER* w)
 
 /* subpl.c:393 — Index 10 von subpl_mv01_tbl. Stillstand wie subpl_mv02, aber
    OHNE jeden Eingriff in hokan_count: die zuvor gesetzte Schrittzahl bleibt. */
-static void subpl_mv10(RECVX_SUBPLAYER* w)
+static void subpl_mv10(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode3)) {
     case 0:
@@ -363,8 +345,10 @@ static void subpl_mv10(RECVX_SUBPLAYER* w)
    ein halber Frame je Pass), setzt den Motionmodus auf 0x20 und bringt den
    Bewegungszustand auf 3 — einen Wert, den keiner der elf Zweige behandelt.
    Die Figur haelt danach ihre Pose, bis ein Raumskript mode3 auf 0 setzt. */
-static void subpl_shared_init(RECVX_SUBPLAYER* w)
+void recvx_subplayer_initialize_motion(RECVX_ENEMY_WORK* w,
+                                      const RECVX_SUBPLAYER_MODEL_SERVICES* model)
 {
+    if (!w) return;
     w->hokan_rate = 0;
     w->hokan_count = 0;
     w->mtn_add = 32768;
@@ -375,25 +359,14 @@ static void subpl_shared_init(RECVX_SUBPLAYER* w)
     w->frm_mode = 0;
     w->mode3 = 3;
 
-    /* subpl.c:112-125: fuer genau eine Identitaet (199) blendet das Original
-       die ersten acht Knoten des Modells aus, ruft bhSetMotion auf dieser
-       verkuerzten Knotenliste und stellt sie danach wieder her — und ruft
-       anschliessend bhSetMotion ein ZWEITES Mal auf dem vollen Baum. Der
-       Knotenfensterwechsel ist Sache des Modell-/Objektbaum-Besitzers und
-       hier nicht gebunden.
-
-       Erreichbarkeit: der Einstieg (subpl.c:87) indiziert mit `id - 40` in
-       eine Tabelle mit 120 Eintraegen; 199 liegt mit Index 159 ausserhalb.
-       Keine der 205 Originalraumdateien fuehrt eine Identitaet ueber 99.
-       Der Zweig bleibt deshalb als Luecke gemeldet und wird nicht geraten.
-
-       Der ERSTE der beiden Motionschritte wird hier ausdruecklich NICHT
-       ausgefuehrt: ohne das verkuerzte Knotenfenster liefe er auf dem vollen
-       Baum und damit auf einer anderen Knotenmenge als im Original. Ein
-       falscher Seiteneffekt waere schlechter als die gemeldete Luecke. Der
-       zweite, auf dem vollen Baum laufende Schritt folgt unten regulaer. */
-    if (w->id == 199u)
-        subpl_gap(w, "subpl:init-node-window-199 (subpl.c:114)");
+    /* ID199 ist nur beim direkten Aufruf von em60_init erreichbar, nicht
+       durch die 120-Zeilen-Initweiche. Ohne Fensterdienst darf der erste
+       Motionschritt NICHT auf dem vollen Modell laufen. */
+    if (w->id == 199u) {
+        if (model && model->sample_window)
+            model->sample_window(w, 8u, w->mtn_add, w->mtn_md);
+        else subpl_gap(w, "em60_init:mlwP-window-8");
+    }
 
     subpl_set_motion(w);
 }
@@ -402,7 +375,7 @@ static void subpl_shared_init(RECVX_SUBPLAYER* w)
    Die fuenf Dispatchtabellen (subpl.c:12/22/37/38/56)
    --------------------------------------------------------------------------- */
 
-typedef void (*SUBPL_PROC)(RECVX_SUBPLAYER*);
+typedef void (*SUBPL_PROC)(RECVX_ENEMY_WORK*);
 
 /* subpl.c:38 — ct2-Weiche fuer mode0 1. Reihenfolge und Mehrfachbelegung sind
    die der Originaltabelle; die Indizes 7, 8 und 11..14 zeigen auf denselben
@@ -447,7 +420,7 @@ static const SUBPL_PROC subpl_mv01_tbl[15] = {
 };
 
 /* subpl.c:149 — die ct2-Weiche von mode0 1. */
-static int subpl_event2(RECVX_SUBPLAYER* w)
+static int subpl_event2(RECVX_ENEMY_WORK* w)
 {
     const int ct2 = w->ct2;
     if (ct2 < 0 || ct2 >= 15) {
@@ -464,7 +437,7 @@ static int subpl_event2(RECVX_SUBPLAYER* w)
 /* subpl.c:143 — dieselbe Weiche auf der zweiten Tabelle. subpl.c:137 (der
    mode0-5/6-Zweig) hat denselben Rumpf; beide bleiben getrennt, weil die
    Tabellen sie getrennt fuehren. */
-static int subpl_event(RECVX_SUBPLAYER* w)
+static int subpl_event(RECVX_ENEMY_WORK* w)
 {
     const int ct2 = w->ct2;
     if (ct2 < 0 || ct2 >= 15) {
@@ -477,7 +450,7 @@ static int subpl_event(RECVX_SUBPLAYER* w)
 
 /* subpl.c:37 — mode2-Weiche von mode0 1. Die Originaltabelle hat GENAU EINEN
    Eintrag; jeder andere mode2 liest ueber ihr Ende hinaus. */
-static int subpl_move(RECVX_SUBPLAYER* w)
+static int subpl_move(RECVX_ENEMY_WORK* w)
 {
     if (SUBPL_BYTE(w->mode2) != 0u) {
         subpl_gap(w, "subpl:mode2-out-of-range (subpl.c:37)");
@@ -498,33 +471,39 @@ int recvx_subplayer_init_index(unsigned identity)
     return (int)index;
 }
 
-static int subpl_init_entry(RECVX_SUBPLAYER* w)
+static int subpl_init_entry(RECVX_ENEMY_WORK* w)
 {
     w->mode0 = 1;
     if (recvx_subplayer_init_index(w->id) < 0) {
-        subpl_gap(w, "subpl:init-table-index (subpl.c:91)");
+        /* ELF init_subpl 0x173F30: base 0x3060D0 + id*4. Die belegten
+           Nachbarzeilen 33/37/38 sind echte Funktionsaliases; NULL und
+           Tail-Rekursion werden nicht als erfundene Init ausgefuehrt. */
+        if (w->id == 33u) return subpl_move(w);
+        if (w->id == 37u || w->id == 38u) return subpl_event(w);
+        if (w->id == 32u)
+            subpl_gap(w, "init_subpl:recursive-table-alias-32");
+        else if (w->id == 31u || (w->id >= 34u && w->id <= 36u) || w->id == 39u)
+            subpl_gap(w, "init_subpl:null-table-alias");
+        else subpl_gap(w, "subpl:init-table-index (subpl.c:91)");
         return RECVX_SUBPL_UNHANDLED;
     }
     /* Alle 120 Eintraege zeigen auf dieselbe Routine (subpl.c:22-36); die
        Tabelle unterscheidet die Identitaeten also nicht. Sie wird deshalb
        nicht als Zeigerfeld wiederholt, sondern ueber ihren Index geprueft. */
-    subpl_shared_init(w);
+    recvx_subplayer_initialize_motion(w, NULL);
     return RECVX_SUBPL_HANDLED;
 }
 
-void recvx_subplayer_init(RECVX_SUBPLAYER* work)
+void recvx_subplayer_init(RECVX_ENEMY_WORK* work)
 {
     if (!work) return;
-    work->gap = NULL;
-    work->advanced = 0;
-    work->motion_wrapped = 0;
     (void)subpl_init_entry(work);
 }
 
 /* subpl.c:12 — die mode0-Tabelle. Index 2, 3 und 4 sind im Original NULL:
    ein Skript, das einen dieser Zustaende setzt, springt dort auf die Adresse
    null. Das ist kein freier Zustand und wird hier als Fehler gemeldet. */
-static int subpl_dispatch_mode0(RECVX_SUBPLAYER* w)
+static int subpl_dispatch_mode0(RECVX_ENEMY_WORK* w)
 {
     switch (SUBPL_BYTE(w->mode0)) {
     case 0: return subpl_init_entry(w);
@@ -552,15 +531,12 @@ static int subpl_dispatch_mode0(RECVX_SUBPLAYER* w)
      ~0x2    loescht in JEDEM Pass das Schadens-/Totbit, das der vorhandene
              Besitzer als `dead` fuehrt.
    Sie werden vor dem Dispatch gesetzt, nicht danach. */
-int recvx_subplayer_tick(RECVX_SUBPLAYER* work)
+int recvx_subplayer_tick(RECVX_ENEMY_WORK* work)
 {
     int handled;
 
     if (!work) return RECVX_SUBPL_UNHANDLED;
 
-    work->gap = NULL;
-    work->advanced = 0;
-    work->motion_wrapped = 0;
 
     work->flg |= 0x8100u;
     work->flg &= ~0x2u;
@@ -571,8 +547,8 @@ int recvx_subplayer_tick(RECVX_SUBPLAYER* work)
        zurueckkehrt. Bei einem NULL-Platz oder einem Index daneben kommt das
        Original hier nicht an; der Abschluss bleibt dann aus. */
     if (handled == RECVX_SUBPL_HANDLED) {
-        if (work->calc_model) work->calc_model(work);
-        else subpl_gap(work, "subpl:publish-model (MdlPut.c:240)");
+        if (work->sv && work->sv->calc_model) work->sv->calc_model(work);
+        else subpl_gap(work, "bhCalcModel:subplayer");
     }
     return handled;
 }
@@ -588,157 +564,25 @@ int recvx_is_subplayer(unsigned identity)
     return 0;
 }
 
-/* ---------------------------------------------------------------------------
-   Anschluss an den Gegner-Work-Vertrag (native/enemy_work.h)
-   ---------------------------------------------------------------------------
-   Der Apparat arbeitet oben auf `RECVX_SUBPLAYER`, weil der vorhandene
-   World-Besitzer diesen Satz als Member fuehrt. Fuer die Gegnerseite wird
-   derselbe Feldsatz fuer die Dauer EINES Passes uebernommen und danach
-   zurueckgeschrieben — dieselbe Richtungsregel, die enemy_work.h fuer
-   publish/adopt festlegt. Es entsteht kein zweiter Work und keine Tabelle:
-   die Uebernahme liegt auf dem Stapel des Aufrufs. */
-
-typedef struct {
-    RECVX_SUBPLAYER view;
-    RECVX_ENEMY_WORK* work;
-} SUBPL_BRIDGE;
-
-static SUBPL_BRIDGE* subpl_bridge_of(RECVX_SUBPLAYER* view)
-{
-    /* `view` ist das erste Member; der Rueckweg braucht keinen Offsetkniff. */
-    return (SUBPL_BRIDGE*)(void*)view;
-}
-
-static int subpl_bridge_set_motion(RECVX_SUBPLAYER* view, int add, unsigned mode, void* datP)
-{
-    SUBPL_BRIDGE* b = subpl_bridge_of(view);
-    RECVX_ENEMY_WORK* w = b->work;
-    const RECVX_ENEMY_SERVICES* sv = w->sv;
-
-    /* Die Felder, die bhSetMotion liest, muessen VOR dem Aufruf am echten
-       Work stehen: der Dienst arbeitet auf dem Gegnerwork, nicht auf der
-       Uebernahme. */
-    w->mtn_no = view->mtn_no;
-    w->mtn_md = view->mtn_md;
-    w->mtn_tp = view->mtn_tp;
-    w->mtn_add = view->mtn_add;
-    w->frm_mode = view->frm_mode;
-    w->hokan_count = view->hokan_count;
-    w->hokan_rate = view->hokan_rate;
-    w->frm_no = (int32_t)view->frm_no;
-
-    if (sv && sv->set_motion) {
-        /* Der Vertrag fuehrt bhSetMotion ohne den vierten Parameter (datP).
-           subpl.c uebergibt dort immer mtn_tp; in diesem Apparat ist das Feld
-           an jeder Stelle, die es setzt, NULL (subpl.c:106/210/322/347). Ein
-           von aussen gesetztes mtn_tp waere damit nicht uebertragbar und wird
-           gemeldet statt verworfen. */
-        if (datP) subpl_gap(view, "subpl:motion-data-parameter (Motion.c:21)");
-        const int r = sv->set_motion(w, add, mode);
-        view->frm_no = w->frm_no;
-        view->frm_mode = w->frm_mode;
-        return r;
-    }
-    subpl_gap(view, "subpl:motion-step (Motion.c:21)");
-    return 0;
-}
-
-static void subpl_bridge_calc_model(RECVX_SUBPLAYER* view)
-{
-    SUBPL_BRIDGE* b = subpl_bridge_of(view);
-    RECVX_ENEMY_WORK* w = b->work;
-    const RECVX_ENEMY_SERVICES* sv = w->sv;
-    if (sv && sv->calc_model) sv->calc_model(w);
-    else if (sv && sv->gap)   sv->gap("subpl:publish-model (MdlPut.c:240)");
-}
-
-static void subpl_bridge_load(SUBPL_BRIDGE* b, RECVX_ENEMY_WORK* w)
-{
-    memset(b, 0, sizeof *b);
-    b->work = w;
-    b->view.id = w->id;
-    b->view.flg = w->flg;
-    b->view.mode0 = (int)w->mode0;
-    b->view.mode1 = (int)w->mode1;
-    b->view.mode2 = (int)w->mode2;
-    b->view.mode3 = (int)w->mode3;
-    b->view.ct0 = w->ct0;
-    b->view.ct1 = w->ct1;
-    b->view.ct2 = w->ct2;
-    b->view.ct3 = w->ct3;
-    b->view.mtn_no = w->mtn_no;
-    b->view.mtn_md = w->mtn_md;
-    b->view.frm_mode = w->frm_mode;
-    b->view.hokan_count = w->hokan_count;
-    b->view.hokan_rate = w->hokan_rate;
-    b->view.mtn_add = w->mtn_add;
-    b->view.frm_no = w->frm_no;
-    b->view.mtn_tp = (void*)w->mtn_tp;
-    b->view.ay = w->ay;
-    b->view.px = w->px;
-    b->view.pz = w->pz;
-    b->view.spd = w->spd;
-    b->view.set_motion = subpl_bridge_set_motion;
-    b->view.calc_model = subpl_bridge_calc_model;
-}
-
-static void subpl_bridge_store(SUBPL_BRIDGE* b)
-{
-    RECVX_ENEMY_WORK* w = b->work;
-    w->flg = b->view.flg;
-    /* Originalbreite: ein Byte je Modus (types.h:238). */
-    w->mode0 = (uint8_t)SUBPL_BYTE(b->view.mode0);
-    w->mode1 = (uint8_t)SUBPL_BYTE(b->view.mode1);
-    w->mode2 = (uint8_t)SUBPL_BYTE(b->view.mode2);
-    w->mode3 = (uint8_t)SUBPL_BYTE(b->view.mode3);
-    w->ct0 = b->view.ct0;
-    w->ct1 = b->view.ct1;
-    w->ct2 = b->view.ct2;
-    w->ct3 = b->view.ct3;
-    w->mtn_no = b->view.mtn_no;
-    w->mtn_md = b->view.mtn_md;
-    w->frm_mode = b->view.frm_mode;
-    w->hokan_count = b->view.hokan_count;
-    w->hokan_rate = b->view.hokan_rate;
-    w->mtn_add = b->view.mtn_add;
-    w->frm_no = (int32_t)b->view.frm_no;
-    w->mtn_tp = b->view.mtn_tp;
-    w->ay = b->view.ay;
-    w->px = b->view.px;
-    w->pz = b->view.pz;
-    w->spd = b->view.spd;
-    if (b->view.gap && w->sv && w->sv->gap) w->sv->gap(b->view.gap);
-}
-
-void recvx_subplayer_enemy(RECVX_ENEMY_WORK* work)
-{
-    SUBPL_BRIDGE b;
-    if (!work) return;
-    subpl_bridge_load(&b, work);
-    (void)recvx_subplayer_tick(&b.view);
-    subpl_bridge_store(&b);
-}
-
+/* Die Eventdienste umfassen NUR die jeweilige ct2-Weiche. Der aufrufende
+   Gegnertyp bleibt fuer Flags und bhCalcModel verantwortlich (subpl.c:143/149).
+   Ein zweiter Modellpass oder init_damage hier wuerde die Reihenfolge aendern. */
 void recvx_subplayer_enemy_event(RECVX_ENEMY_WORK* work)
 {
-    SUBPL_BRIDGE b;
-    if (!work) return;
-    subpl_bridge_load(&b, work);
-    (void)subpl_event(&b.view);
-    subpl_bridge_store(&b);
+    if (work) (void)subpl_event(work);
 }
 
 void recvx_subplayer_enemy_event2(RECVX_ENEMY_WORK* work)
 {
-    SUBPL_BRIDGE b;
-    if (!work) return;
-    subpl_bridge_load(&b, work);
-    (void)subpl_event2(&b.view);
-    subpl_bridge_store(&b);
+    if (work) (void)subpl_event2(work);
 }
 
-/* subpl.c:410 — die Routine der Identitaet 28 hat im Original keinen Rumpf.
-   Sie bleibt leer: das ist der belegte Originalzustand und keine Luecke. */
+void recvx_subplayer_enemy(RECVX_ENEMY_WORK* work)
+{
+    (void)recvx_subplayer_tick(work);
+}
+
+/* subpl.c:410 ist nachweislich leer. ID28 hat keine eigenen Sideeffects. */
 void recvx_subplayer_enemy28(RECVX_ENEMY_WORK* work)
 {
     (void)work;

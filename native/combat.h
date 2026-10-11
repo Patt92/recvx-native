@@ -22,9 +22,6 @@ public:
     bool aiming()const;
     unsigned original_mode()const;
     unsigned original_phase()const;
-    // Original bhEff003 muzzle state; queued flashes with their animation counter.
-    std::size_t muzzle_flashes()const{return flashes_.size();}
-    unsigned muzzle_frame()const{return flashes_.empty()?0:flashes_.back().ct0;}
     bool attacking()const;
     const AimSelection& targets()const{return aim_;}
     ModelNodeOverrides pose_overrides(const PlayerAsset& player,std::size_t motion,std::int64_t frame)const;
@@ -39,8 +36,6 @@ private:
     unsigned weapon_=~0u,player_=~0u;int vertical_=0;bool inhibited_=false;
     std::set<unsigned> struck_;
     const PlayerAsset* body_=nullptr;
-    std::vector<WeaponFlash> flashes_;
     AimSelection aim_;
-    void fire(Inventory& inventory,const SceneSpawn& actor,RoomWorld* world,AudioMixer& audio,PlayerAsset& player,std::size_t motion,std::int64_t frame,bool left=false);
 };
 }

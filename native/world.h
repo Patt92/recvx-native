@@ -15,6 +15,8 @@
 #include "enemy_dispatch.h"
 #include "en03_collision.h"
 #include "effect_particles.h"
+#include "weapon_flash.h"
+#include "player_combat_core.h"
 #include "object_itmbox.h"
 #include "view_clip.h"
 #include <set>
@@ -29,7 +31,7 @@ struct WorldEntity {
     // face.c:141 bhControlMask copies it into LIP_WORK.top/ptr while
     // lip->flag == 0. A running stream therefore keeps its own source.
     std::optional<FaceParameter> facial;std::vector<std::uint8_t> lip_stream,lip_current_stream;unsigned lip_bank=0,lip_pos=0,lip_count=0,lip_time=0,lip_cur=0,lip_next=0;bool lip_active=false;
-RECVX_SUBPLAYER subplayer{};bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,type=0,death_ticks=0,object_flags=0,object_parameter=0;int object_floor=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
+bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,type=0,death_ticks=0,object_flags=0,object_parameter=0;int object_floor=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
     // bhEneLookFlgSet (event.c): original BH_PWORK flg bit 0x8000. Enemy AI
     // consumers (en01.c) are still pending; the state itself is exact.
     bool look=false;
@@ -116,6 +118,11 @@ public:
     bool effect_visible(unsigned index)const;
     EffectContext effect_context()const;
     void set_presentation_flags(unsigned flags){presentation_flags_=flags;} // sys->pt_flg, native draw owner
+    // sys->ef_flg. system.c:195 initializes it to 0; its only original writer
+    // is the mn_md1 room-load sequence (system.c:1830/1884), which no native
+    // owner drives yet, so bit 0 stays clear until one binds it.
+    void set_effect_flags(unsigned flags){effect_flags_=flags;}
+    unsigned effect_flags()const{return effect_flags_;}
     struct LightState {unsigned flags,type,clock,link,index,node;NJS_POINT3 position,color;float near_range,far_range;};
     std::optional<LightState> light_state(unsigned index)const;
     ModelPose model_pose(unsigned kind,unsigned index,unsigned script_node=0)const;
@@ -127,10 +134,22 @@ public:
     // no such enemy or its motion library lacks the clip; the caller reports
     // that as a gap instead of drawing a substitute.
     std::optional<Scene> computer_character(unsigned chr_no,unsigned motion,unsigned frame_no);
-    void set_player_asset(const PlayerAsset* player){player_asset_=player;}
+    void set_player_asset(const PlayerAsset* player){player_asset_=player;if(player){player_obj_=player->bind_pose();player_owp_flags_.assign(player_obj_.size(),0);}}
     void set_player_character(unsigned character){player_character_=int(character&3);}
+    // C02: transient enemy view of the existing player. Runtime binds its
+    // Inventory HP and EXP1 head flags by address; neither is copied here.
+    void bind_enemy_player(int& hp,std::uint32_t& head_flags){player_hp_owner_=&hp;player_head_flags_=&head_flags;}
+    bool enemy_player_get(RECVX_ENEMY_PLAYER& out)const;
+    bool enemy_player_set(const RECVX_ENEMY_PLAYER& in);
+    unsigned enemy_player_motion_frames(unsigned motion,bool from_enemy)const;
+    void commit_player_joints(const std::vector<BoneMatrix>& nodes){player_joint_matrices_=nodes;}
+    bool enemy_player_joint(unsigned joint,BoneMatrix& out)const;
+    std::vector<ModelPose> player_local_pose()const;
     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
     int spawn_player_effect(const EffectSpawn& effect){return spawn_effect(effect,1,0);}
+    // bhSetEffectTb for bhSetGunFire requests (bhEff003); link_kind 1 = player, 2 = enemy.
+    int spawn_weapon_flash(const RECVX_CB_EFFECT& effect,unsigned link_kind,unsigned link_index);
+    void set_gun_light(const RECVX_CB_LIGHT& light); // rom->lgtp[0] from bhSetGunFire
     // hitchk.c bhCheckExmAtari, type 4 with attr 0x2: obwp[object] with flg 1
     // becomes type 100 (mode0..mode3 cleared). Returns false when flg 1 is clear.
     bool start_item_box(unsigned object);
@@ -146,6 +165,7 @@ public:
     // The hp the host shows is clamped at 0; a negative plp->hp (the original death condition) stays until the host revives the player.
     void set_player_poisoned(bool poisoned){player_poisoned_=poisoned;}
     void set_player_hp(int hp){if(player_killed_&&hp<=0)return;if(hp>0){player_killed_=false;player_dead_=false;}player_hp_=hp;}
+    int player_health()const{return player_hp_owner_?*player_hp_owner_:player_hp_;}
     // Zombie grab/bite (needs the AI). Default off; the debug menu switches it.
     void set_enemy_grab(bool enabled){enemy_grab_=enabled;}
     bool enemy_grab()const{return enemy_grab_;}
@@ -154,7 +174,7 @@ public:
     bool player_grabbed()const{return grab_driving_;}
     bool player_dead()const{return player_dead_;}
     bool player_killed()const{return player_killed_;}
-    void set_player_attack(bool attacking){player_attacking_=attacking;} // plp->at_flg & 2
+    void set_player_attack(bool attacking){player_attacking_=attacking;player_at_flags_=(player_at_flags_&~2u)|(attacking?2u:0u);} // plp->at_flg & 2
     void set_player_weapon(unsigned wpnr_no){player_weapon_=wpnr_no;} // plp->wpnr_no for bhControlPlayer effects
     void start_task(unsigned level);
     void tick();
@@ -234,7 +254,7 @@ private:
     std::optional<std::pair<unsigned,int>> stair_ground_state_;
     std::vector<unsigned> push_objects_;
     bool push_pose_=false,player_poisoned_=false;
-    int push_health()const{return player_hp_>=120?(player_poisoned_?1:0):player_hp_>=30?1:2;}
+    int push_health()const{return player_health()>=120?(player_poisoned_?1:0):player_health()>=30?1:2;}
     bool push_pose_current()const{return push_&&push_pose_&&!player_scripted&&!player_enemy_motion_&&motion_==std::size_t(push_->state().motion)&&frame_==push_->state().frame;}
     void ensure_push();
     void sync_push_objects();
@@ -245,6 +265,15 @@ private:
     const PlayerAsset* player_asset_=nullptr;
     bool player_room_motion_=false,player_frozen_=false;
     std::int64_t player_step_=65536;
+    int* player_hp_owner_=nullptr;std::uint32_t* player_head_flags_=nullptr;
+    int player_ct0_=0,player_ct1_=0,player_ayp_=0,player_hokan_rate_=0;
+    unsigned player_mtn_md_=0,player_hokan_count_=0,player_at_flags_=0,player_enemy_owner_=0;
+    unsigned player_frm_mode_=0,player_mtn_attr_=0;
+    std::vector<ModelPose> player_obj_;std::vector<unsigned> player_owp_flags_;
+    bool enemy_player_driving_=false;
+    // owP belongs to the player model and is published by its control pass,
+    // not by rendering. Enemy joint queries read the previous committed tree.
+    std::vector<BoneMatrix> player_joint_matrices_;
     SceneSpawn& player_;std::size_t& motion_;std::int64_t& frame_;AudioMixer& audio_;
     std::array<Context,16> contexts_{};
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
@@ -252,7 +281,10 @@ private:
     unsigned enemy_game_mode_=0;
     // bhSetEffectTb from game code: `link_kind` 0 = world position, 2 = enemy joint (WorldEntity index/joint).
     int spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
+    void gun_fire(unsigned kind,unsigned index,const BoneMatrix& joint,unsigned wno,unsigned jno,unsigned hand,int ang);
     void process_effect_output();
+    int reserve_effect_slot(unsigned start=0);
+    void write_particle_slot(unsigned slot,unsigned flags,unsigned id);
     void bomb_damage(const BombRequest& bomb);
     EffectParticles particles_;
     void tick_en01();
@@ -270,6 +302,8 @@ private:
     void bind_enemy_services();
     void init_enemy_works();
     void control_enemy_works();
+    void control_enemy_player_motion();
+    const MotionClip* player_enemy_clip()const;
     void adopt_enemy_script(WorldEntity& e);
     void publish_enemy(WorldEntity& e);
     const MotionClip* enemy_mn_work(const WorldEntity& e,std::uint32_t mtn_no)const;
@@ -283,9 +317,10 @@ private:
     std::vector<Model> models_;
     struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
-        std::optional<std::size_t> atr_link;};
+        std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
     bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=false,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::map<unsigned,std::size_t> barrel_walls_;
     unsigned player_weapon_=0,effect_yk_ct_=0,presentation_flags_=~0u; // system.c initializes pt_flg to ~0u
+    unsigned effect_flags_=0; // system.c:195 sys->ef_flg = 0
     void control_player_effects();
     std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;
     std::vector<MotionClip> room_motions_;

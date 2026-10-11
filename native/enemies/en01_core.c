@@ -11,6 +11,7 @@
    kein Ersatzwert gesetzt.
    =========================================================================== */
 #include "en01_core.h"
+#include "en03_lib.h" /* vorhandener pad_on_clear-Anbieter */
 /* Eigenstaendige Matrixarithmetik des Ports (njCalcPoint(NULL,...) loest
    dort wie im Original auf die gestapelte globale Matrix auf). */
 #include "ninja_matrix.h"
@@ -290,7 +291,12 @@ void recvx_en01_main_loop(RECVX_ENEMY_WORK* w)
 
     if (!w) return;
     p = recvx_en01_exp0(w);
-    if (!p) { en01_gap(w, "bhEne_CallocWork(0xb0, 8)"); return; }
+    /* Mode0[0] allokiert exp0 selbst; vor diesem Dispatch darf der fehlende
+       Block den ersten Kontrollpass nicht sperren (en01.c:2524/2599). */
+    if (!p && w->mode0 != 0u) {
+        en01_gap(w, "bhEne_CallocWork(0xb0, 8)");
+        return;
+    }
 
     if (w->mode0 > 0 && !(w->flg & 0x80u)) {                /* :2506-2509 */
         if (w->type == 1 || w->type == 3 || w->type == 7) {
@@ -303,7 +309,7 @@ void recvx_en01_main_loop(RECVX_ENEMY_WORK* w)
 
     if (w->mode0 != 6) {                                    /* :2520 */
         switch (w->mode0) {
-        case 0: recvx_en01_init(w, p);         break;       /* bhEne01_Init   */
+        case 0: recvx_en01_init_work(w, p);         break;       /* bhEne01_Init   */
         case 1: recvx_en01_move(w);            break;       /* bhEne01_Move   */
         case 2: recvx_en01_nage(w);            break;       /* bhEne01_Nage   */
         case 3: recvx_en01_damage(w);          break;       /* bhEne01_Damage */
@@ -320,6 +326,7 @@ void recvx_en01_main_loop(RECVX_ENEMY_WORK* w)
         }
     }
 
+    if (!w->exp0) return; /* gemeldeter Allokationsfehler, kein Ersatzblock */
     recvx_en01_player_control(w);                           /* :2534 */
     recvx_en01_set_mtn(w);                                  /* :2535 */
     recvx_en01_search_neck(w);                              /* :2536 */
@@ -332,7 +339,7 @@ void recvx_en01_main_loop(RECVX_ENEMY_WORK* w)
    Koerpermasse, Rettung bzw. Neuanlage des Blocks, Subtyp, HP, Flags,
    Oberkoerper-/Normalzweig, InitType, Clip-Gelenke, Treppenfreigabe,
    verschobenes bhSetMotion, CalcEnemy. */
-void recvx_en01_init(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0)
+void recvx_en01_init_work(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0)
 {
     const RECVX_ENEMY_SERVICES* sv;
     const RECVX_EN01_SERVICES*  en = en01_en();
@@ -341,6 +348,7 @@ void recvx_en01_init(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0)
     RECVX_ENEMY_WORK* sv_child[7];
     int32_t sv_sdw_no;
     int32_t sv_word70, sv_word74;
+    int32_t previous_stair;
     uint32_t i;
 
     if (!w) return;
@@ -361,9 +369,15 @@ void recvx_en01_init(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0)
        laufen (Original legt hier bhEne_CallocWork an). */
     p = recvx_en01_exp0(w);
     if (!p) {
-        if (!exp0) { en01_gap(w, "bhEne_CallocWork(0xb0, 8)"); return; }
-        w->exp0 = exp0;
-        p = exp0;
+        if (!exp0) {
+            if (sv && sv->calloc_work) {
+                w->exp0 = sv->calloc_work((uint32_t)sizeof(RECVX_EN01_EXP0));
+            }
+            if (!w->exp0) { en01_gap(w, "bhEne_CallocWork(0xb0, 8)"); return; }
+        } else {
+            w->exp0 = exp0;
+        }
+        p = recvx_en01_exp0(w);
     }
 
     /* if (epw->exp0 != NULL) { if (EXP0_I(64) & 0x80000000) flg |= 0x80; }
@@ -393,7 +407,7 @@ void recvx_en01_init(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0)
         /* --- erster Init: Kindkette anlegen (en01.c:2596-2670) ----------- */
         w->exp1 = NULL;
         p->shadow_slot = -1;                    /* EXP0_I(0x24) :2601 */
-        p->word70 = -1;                         /* Original: NULL  :2601 */
+        p->word70 = 0;                          /* Original: NULL  :2601 */
         p->word74 = -1;                         /* Original: NULL         */
 
         if (!(w->flg & 0x80u)) {
@@ -1060,6 +1074,8 @@ void recvx_en01_player_control(RECVX_ENEMY_WORK* w)
     case 1: recvx_en01_ply_dg01(w, &pl); break;
     default: en01_gap(w, "bhEne01_PlyDmgMode[plp->mode2]"); break;
     }
+
+    if (sv && sv->player_set) sv->player_set(&pl);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1370,6 +1386,8 @@ void recvx_en01_calc_enemy(RECVX_ENEMY_WORK* w)
             en01_joint_translation(epp, 9, &w->watr.c2)) {   /* :3164-3167 */
             w->watr.r = 2.5f;                                /* :3168 */
         }
+    } else if (!w->exp1) {
+        en01_calc_model(w);
     }
 
     if (p->flags2 & 0x200u) {                                /* :3170 */
@@ -2332,7 +2350,7 @@ void recvx_en01_coll_check_wall(RECVX_ENEMY_WORK* w)
         if (sv->line(1u, &from, &to, &normal, w->flg, w->flr_no, NULL, &id)) {
             p->word70 = (int32_t)id;
         } else {
-            p->word70 = -1;
+            p->word70 = 0;
         }
     } else {
         en01_gap(w, "bhCollisionCheckLine (hitchkl.c:12)");
@@ -10222,14 +10240,20 @@ void recvx_en01_dg16(RECVX_ENEMY_WORK* w)
 
 static int32_t en01_ply_ayp_get(RECVX_ENEMY_WORK* w)
 {
-    en01_gap(w, "plp->ayp lesen (en01.c:7559)");
+    const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+    RECVX_ENEMY_PLAYER pl;
+    if (sv && sv->player_get && sv->player_get(&pl)) return pl.ayp;
     return 0;
 }
 
 static void en01_ply_ayp_set(RECVX_ENEMY_WORK* w, int32_t v)
 {
-    (void)v;
-    en01_gap(w, "plp->ayp schreiben (en01.c:7545)");
+    const RECVX_ENEMY_SERVICES* sv = en01_sv(w);
+    RECVX_ENEMY_PLAYER pl;
+    if (sv && sv->player_get && sv->player_set && sv->player_get(&pl)) {
+        pl.ayp = v;
+        sv->player_set(&pl);
+    }
 }
 
 /* pl->mnwP[pl->mtn_no].frm_num (en01.c:7641/:7752): je nach mtn_enemy die

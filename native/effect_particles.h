@@ -19,6 +19,13 @@ public:
     // bhSetEffParticleMk2: the same emitter with an explicit destination colour
     // (bhEne_SetBloodEffect4 passes BloodCol[col][0] and BloodCol[col][1]).
     void spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color);
+    // Production allocation belongs to RoomWorld's eff[512]. Payloads remain
+    // indexed by that owner's slots; standalone tests use the local table.
+    void bind_pool(const std::function<unsigned(unsigned)>& flags,
+                   const std::function<void(unsigned,unsigned,unsigned)>& write);
+    // Dispatch one root in the owner's ascending effect pass; auxiliary slots
+    // reserve capacity but have no effect procedure.
+    void tick_slot(unsigned slot,const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall);
     // resolve(link, offset) = joint matrix * offset, as bhControlEffect does before calling the procedure.
     void tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall);
     // bhSetBloodPoolLnk: `table` is an original BP_WORK (en01_BldTbl); the pool spreads on the floor at `position`.

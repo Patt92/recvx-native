@@ -225,7 +225,7 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
         if(message.choices()&&(key==MenuInput::Left||key==MenuInput::Up||key==MenuInput::Right||key==MenuInput::Down)){const int step=key==MenuInput::Left||key==MenuInput::Up?-1:1;message.selection=(message.selection+message.choices()+step)%message.choices();return true;}
         if(key==MenuInput::Confirm){const bool choice=message.choices(),yes=message.selection==0;message.confirm();if(!message.active()){
             inspection.answer(inventory,choice&&yes);opening_item=inspection.running()?inspection.source():0;opening_frame=0;
-            if(pending_combine_first_){const auto first=pending_combine_first_,second=pending_combine_second_;pending_combine_first_=pending_combine_second_=0;if(choice&&yes)combine(inventory,first,second);}
+            if(pending_combine_first_){const auto first=pending_combine_first_,second=pending_combine_second_;pending_combine_first_=pending_combine_second_=0;if(choice&&yes)combine(inventory,first,second);else feedback_sound=1;}
             finish_inspection(inventory);
         }}return true;
     }
@@ -275,7 +275,7 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     {unsigned sakai=2;while(sakai<12){const auto id=Inventory::id(inventory.slots()[sakai]);if(!(id&&(itemdata[id].type&0x100)))break;++sakai;}
      const unsigned max=inventory.side_pack?10:8;unsigned& l0=selected;unsigned l2=grid_cell(inventory,selected);
      // CursorMove: up from the equipment cell (listcsr_2 == 1) or left from it (listcsr_0 == 1) enters MainCommand.
-     if((key==MenuInput::Up&&l2==1)||(key==MenuInput::Left&&l2<=2&&l0==1)){nav=true;nav_pressed=false;nav_wait=0;maincsr=3;feedback_sound=0;return true;}
+     if(!combining&&((key==MenuInput::Up&&l2==1)||(key==MenuInput::Left&&l2<=2&&l0==1))){nav=true;nav_pressed=false;nav_wait=0;maincsr=3;feedback_sound=0;return true;}
      if(key==MenuInput::Up&&l2!=1){if(l2>=3){if(l0<=sakai){l0--;l2-=2;}else{l0-=2;l2-=2;}}else{l2--;l0--;}}
      else if(key==MenuInput::Down&&l2<max){if(l0<sakai){if((l2&1)&&l0==sakai-1)l0+=2;else l0++;l2+=2;}else{l0+=2;l2+=2;}}
      if(key==MenuInput::Right&&l2<max+1){if(l0<sakai){if(l2<max){if(l2&1)l2++;else l2+=2;l0++;}}else{l0++;l2++;}}
@@ -586,7 +586,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
             icon(image,id,x,y);if(id){quantity(image,inv.slots()[slot],x,y);if(inv.slots()[0]==slot)ascii(image,"E",x+2,y+2,.6f,0xff50d090);}
             if(slot>1)cell+=id&&(itemdata[id].type&0x100)?2:1;if(cell>=inv.capacity())break;
         }
-        if(inv.slots()[0]){const auto id=Inventory::id(inv.slots()[inv.slots()[0]]);icon(image,id,352+((itemdata[id].type&0x100)?24:58)+dx(3),48+dy(3));} // original ArmsSet
+        if(inv.slots()[0]){const auto wpn=inv.slots()[inv.slots()[0]];const auto id=Inventory::id(wpn);const int x=352+((itemdata[id].type&0x100)?24:58)+dx(3),y=48+dy(3);icon(image,id,x,y);quantity(image,wpn,x,y);} // original ArmsSet: BulletSet mode 0, digits at icon x and y+32
         const auto selected_id=menu.pickup?menu.pickup:Inventory::id(inv.slots()[menu.selected]);if(menu.nav&&!menu.files&&!menu.message.active())text(image,system_message(180-menu.maincsr),44+dx(6),342+dy(6),.95f); // MainCommand: bhSetMessage(1,180-maincsr)
         else if(selected_id&&!menu.files&&!menu.message.active()&&!(menu.pickup&&dialog.active()))text(image,read_message(messages_,4,menu.pickup?menu.pickup:inventory_name_id(inv.slots()[menu.selected])),44+dx(6),342+dy(6),.95f);
         if(menu.commands||menu.erase_frames){

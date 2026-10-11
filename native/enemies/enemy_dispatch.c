@@ -2,7 +2,9 @@
    Reihenfolge aus eneset.c; kein Originalkoerper, kein Generator, kein
    Originalkern-Dispatcher. */
 #include "enemy_dispatch.h"
+#include "subplayer.h"
 #include "en00.h"
+#include "en01_work.h"
 #include "en07.h"
 #include "en08.h"
 #include "en10.h"
@@ -12,19 +14,14 @@
 #include "en25.h"
 #include "en56.h"
 #include "en71.h"
+#include "en04.h"
+#include "en11.h"
+#include "en12.h"
+#include "en14.h"
+#include "en18.h"
+#include "en27.h"
+#include "en30.h"
 #include <string.h>
-
-/* KEIN Include fuer Identitaet 4 (Hund).
-   Vorher stand hier #include "en04.h". Eine native en04.h existiert nicht,
-   also loeste der Name ueber den Suchpfad -I include/ps2/veronica/prog still
-   auf den ORIGINALHEADER auf und zog dessen Routinendeklarationen in diese
-   Uebersetzungseinheit. Das ist nach der Projektpolicy unzulaessig; zugleich
-   war der damit besetzte Tabelleneintrag ein Verweis auf eine Funktion, die in
-   diesem Baum nirgends definiert ist (en01_damage.c fuehrt nur leere
-   Initialisierungs-/Tickhuellen). Identitaet 4 bleibt deshalb unbesetzt und
-   wird von recvx_enemy_control namentlich als Portierungsluecke gemeldet.
-   Semantikreferenz fuer die noch offene Arbeit: en04.c, Einstieg bei :23
-   sowie die Trefferpruefung bhEne04_AtariCheck. */
 
 /* eneset.c:84-152 — die Identitaeten, die auf bhSubpl zeigen. */
 int recvx_enemy_is_subplayer_id(uint32_t id)
@@ -42,14 +39,26 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     /* In diesem Teilpaket nativ vorhandene Besitzer. Alle uebrigen Indizes
        bleiben NULL und werden namentlich als Luecke gemeldet; 31..52/57..70/
        72..99 gehoeren dem vorhandenen Subplayer-Besitzer. */
+    // eneset.c:51..152. Every companion uses the SAME native owner/work.
+    for(uint32_t id=0;id<RECVX_ENEMY_IDS;++id)
+        if(recvx_is_subplayer(id)) d->jump[id]=recvx_subplayer_enemy;
+    d->jump[28] = recvx_subplayer_enemy28;
     d->jump[0]  = recvx_en00;
+    d->jump[1]  = recvx_en01_control;
+    d->jump[4]  = recvx_en04;
     d->jump[7]  = recvx_en07;
     d->jump[8]  = recvx_en08;
     d->jump[10] = recvx_en10;
+    d->jump[11] = recvx_en11;
+    d->jump[12] = recvx_en12;
+    d->jump[14] = recvx_en14;
     d->jump[16] = recvx_en16;
+    d->jump[18] = recvx_en18;
     d->jump[20] = recvx_en20;
     d->jump[24] = recvx_en24;
     d->jump[25] = recvx_en25;
+    d->jump[27] = recvx_en27;
+    d->jump[30] = recvx_en30;
     /* 54/55 (gepanzerte Ritter) bleiben unbesetzt: beide rufen
        recvx_en17_blade_tip/_hit aus dem Kettenwerk von Identitaet 17
        (en54.c:102/108, en55.c:94/100), und en17.c ist nicht portiert.
@@ -57,8 +66,6 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
        Luecke "bhEne54"/"bhEne55" gemeldet. */
     d->jump[56] = recvx_en56;
     d->jump[71] = recvx_en71;
-    /* Identitaet 4 (Hund) ist nicht portiert und bleibt bewusst NULL, siehe
-       die Begruendung am Kopf dieser Datei. */
 }
 
 void recvx_enemy_set_call_func(RECVX_ENEMY_DISPATCH* d, uint32_t id, RECVX_ENEMY_PROC proc)

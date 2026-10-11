@@ -553,7 +553,7 @@ int recvx_enemy_chg_mtn(RECVX_ENEMY_WORK* w, uint32_t no, int32_t frm, int32_t r
    bhEne01 (en01.c:2467) ist der Eintrag, den bhJumpEnemy[1] je Pass ruft.
    `exp0` ist der Erweiterungsblock dieses Works; der Besitzer haelt ihn in
    derselben WorldEntity wie den Work selbst. */
-void recvx_en01_init(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0);
+void recvx_en01_init_work(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0);
 void recvx_en01_control(RECVX_ENEMY_WORK* w);
 
 /* bhEne01_MainLoop (en01.c:2504) und bhEne01_SetMtn (en01.c:10322) einzeln,

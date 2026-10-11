@@ -76,9 +76,14 @@ int main(){try{
     for(unsigned type:{2u,3u}){CollisionWall a{1,type,0,0,0,{0,0,0},{10,10,0}};NJS_POINT3 n{},end{0,5,5};
         check(effect_line({a},100,{20,5,5},end,n)&&near(end.x,7.9289f,.02f),"cylinder side was replaced by an analytic circle");
         end={0,5,0};check(!effect_line({a},100,{0,-5,0},end,n),"cylinder invents a bottom cap");
-        end={0,-5,0};n={7,8,9};bool unsupported=false;
-        try{effect_line({a},100,{0,15,0},end,n);}catch(const std::runtime_error&){unsupported=true;}
-        check(unsupported&&end.y==-5&&n.x==7&&n.y==8&&n.z==9,"unresolved cylinder cap is fabricated or partially commits output");}
+        // Downward cap: only the complete octagon of the last loop pass decides
+        // (stale points of passes 0..6 never enclose; user decision 2026-10-11).
+        end={0,-5,0};n={};
+        check(effect_line({a},100,{0,15,0},end,n)&&end.y==10&&near(end.x,0)&&near(end.z,0)&&n.y>0&&n.x==0&&n.z==0,"downward cylinder cap misses its centre");
+        const float c=0.9238795f,s=0.3826834f; // 22.5 degrees: octagon apothem 9.239
+        end={9*c,-5,-9*s};check(effect_line({a},100,{9*c,15,-9*s},end,n)&&end.y==10,"cap misses inside the octagon");
+        end={9.6f*c,5,-9.6f*s};check(!effect_line({a},100,{9.6f*c,15,-9.6f*s},end,n),"cap is a circle instead of the original octagon");
+        end={9.5f,5,9.5f};check(!effect_line({a},100,{9.5f,15,9.5f},end,n),"stale cap points produce a phantom hit outside the octagon");}
     // Reflection: box side/top ties, cylinder sides/top, signed triangles,
     // both orthogonal edges, all ramps, and floors with negative thickness.
     for(unsigned type:{0u,1u}){auto a=box;a.type=type;NJS_POINT3 p{.01f,2,5};int angle=8192;
@@ -111,6 +116,6 @@ int main(){try{
               "parallel line-plane fallback wrong");
         check(line_geometry::line_plane({0,2,0},{1,-1,0},{0,0,0},{0,2,0},closest)==0&&near(closest.x,2)&&near(closest.y,0),
               "line-plane intersection wrong");}
-    std::cout<<"Native ATR line/reflection variants passed; downward cylinder caps remain an explicit semantic gap.\n";
+    std::cout<<"Native ATR line/reflection variants passed; downward cylinder caps use the complete octagon.\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

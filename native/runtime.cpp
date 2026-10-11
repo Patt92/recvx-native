@@ -203,7 +203,7 @@ int main(int argc,char** argv){
         if(room_index==rooms.size())throw std::runtime_error("unknown room: "+args.room);
         recvx::Scene scene;recvx::SceneCamera camera;recvx::SceneSpawn origin,actor;
         recvx::CombatController combat(args.data,args.mods);recvx::CombatControls combat_input;
-        recvx::BoxMenu box_menu;recvx::ComputerTerminal computer(args.data);recvx::MapScreen map_screen;bool map_active=false;recvx::GameOver game_over(args.data,args.mods);recvx::AudioMixer audio(args.data,args.mods);audio.set_disc(args.disc-1);recvx::MoviePlayer movie(args.data,args.mods,audio);std::unique_ptr<recvx::RoomWorld> world;
+        recvx::BoxMenu box_menu;recvx::ComputerTerminal computer(args.data);recvx::MapScreen map_screen;bool map_active=false;int map_entry_mode=RECVX_MP_SET_SUB;recvx::GameOver game_over(args.data,args.mods);recvx::AudioMixer audio(args.data,args.mods);audio.set_disc(args.disc-1);recvx::MoviePlayer movie(args.data,args.mods,audio);std::unique_ptr<recvx::RoomWorld> world;
         // bhControlPlayerHead state (plp->exp1) and the services it calls.
         RECVX_HEAD_STATE head{};recvx_head_begin(&head,int((args.player-10)%4)); // bhSetPlayer: exp1[0]=1, exp1[34]=-1
         // bhCPM1_act_bas (player.c:1994-2048) dispatches the action by plp->mode2; each of the
@@ -347,6 +347,7 @@ int main(int argc,char** argv){
                 events->flags[12][0]=(events->flags[12][0]|0x11e00u)&~0x80u;
                 if(restoring)recvx::restore_events(*restoring,*events); // before Event_init, like sys flags after bhPopGameData
                 world->bind_player_collision(*events);
+                world->bind_enemy_player(inventory.hp,head.flags);
                 const auto clip_room=recvx::RoomIdentity::parse(rooms.name(room_index));
                 events->values[0]=clip_room.stage;events->values[1]=clip_room.room;
                 world->initialize_camera_clip(unsigned(camera_index)); // before Event_init can install an event-camera range
@@ -379,7 +380,7 @@ int main(int argc,char** argv){
             for(unsigned i=0;i<6;++i)for(unsigned j=0;j<3;++j)hin.angles[i][j]=pose[i].angles[j];
             hin.ax=actor.pitch;hin.ay=actor.yaw;hin.az=actor.roll; /* plp->ax/ay/az */
             hin.position[0]=actor.position.x;hin.position[1]=actor.position.y;hin.position[2]=actor.position.z;
-            head.mode0=world->pushing()?3:1; /* plp->mode0: only 4 (damage) suppresses the blink start */
+            head.mode0=world->pushing()?3:int(world->player_mode()&0xffu); /* plp->mode0: only 4 (damage) suppresses the blink start */
             hin.random=head_random();
             /* owP[5].mtx of the previous frame: bhSearchNearEnemy2 and bhLookNearEnemy read
              * EXP1_F(12..20), which bhControlPlayerHead only refreshes at its own end. */
@@ -394,6 +395,7 @@ int main(int argc,char** argv){
             std::vector<recvx::BoneMatrix> nodes;
             if(world->player_scripted)(void)world->sample_player(*player,&nodes,head_overrides);
             else nodes=player->pose(motion,animation,actor.position,actor.yaw,head_overrides);
+            world->commit_player_joints(player->script_nodes(nodes));
             if(nodes.size()>5){head.head[0]=nodes[5].value[12];head.head[1]=nodes[5].value[13];head.head[2]=nodes[5].value[14];}
             const auto* tail=player_attachment();if(!tail)return;const auto link=*player_link();
             if(link.node>=nodes.size())return;
@@ -410,7 +412,7 @@ int main(int argc,char** argv){
         auto compose=[&](){scene.triangles=stage_geometry;scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes;if(player&&(!world||!world->player_hidden))recvx::append_actor(scene,world?world->sample_player(*player,&nodes,head_draw_overrides()):player->sample(motion,animation,actor.position,actor.yaw,&nodes,head_draw_overrides()),texture_base);
             if(player&&(!world||!world->player_hidden))if(const auto* tail=player_attachment()){const auto link=*player_link();if(link.node<nodes.size()){
                 NJS_MATRIX head;std::copy_n(nodes[link.node].value,16,head);NJS_POINT3 at;auto lo=link.offset;njCalcPoint(&head,&lo,&at); // linked object: position only
-                NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,at.x,at.y,at.z);recvx::append_actor(scene,tail->sample_rest(root,hair_angles),attachment_base);}}combat.append(scene,nodes,world&&(world->player_hidden||world->player_scripted)||events&&(events->flags[5][0]&4),world.get());if(world)world->append(scene,nodes,world->camera(scene,camera));};
+                NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,at.x,at.y,at.z);recvx::append_actor(scene,tail->sample_rest(root,hair_angles),attachment_base);}}combat.append(scene,nodes,world&&(world->player_hidden||world->player_scripted),world.get());if(world)world->append(scene,nodes,world->camera(scene,camera));};
         auto advance=[&](){if(player)animation=(animation+65536)%(std::int64_t(player->motion_frames(motion))*65536);};
         recvx::Frontend frontend(input_config,args.controls);frontend.sound=[&](unsigned id){audio.play_system(id);};frontend.third_person=&third_person;
         // Host render quality (settings screen, video.ini); --nearest/--ss override it for this run.
@@ -488,6 +490,12 @@ int main(int argc,char** argv){
             h.pad_ps=pad_ps;
             h.st_flg=events?events->flags[5][0]:0u;
             h.cb_flg=events?events->flags[10][0]:0u;
+            if(events){
+                h.mp_prm[0]=int(events->map_parameters[0]);
+                h.mp_prm[1]=int(events->map_parameters[1]);
+                h.mp_prm[2]=int(events->map_parameters[2]);
+                h.mp_prm[3]=int(events->map_parameters[3]);
+            }
             return h;};
         // bhSysCallCompEvent: while the terminal task owns the screen it reads
         // sys->pad_on/pad_ps itself, so the ordinary gameplay input pass is
@@ -956,13 +964,20 @@ int main(int argc,char** argv){
             for(int i=0;i<frames;++i){replay_input(unsigned(i));update_pad(replay_pad);if(game_over_tick()){audio.mix();if(i==frames-1)draw(unsigned(i));continue;}if(debug.active()){if(i==frames-1)draw(unsigned(i));continue;}if(!frontend.active())gameplay_input.apply({});else if(ui)frontend_command(frontend.apply({}));if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */ /* system.c:853 - der Statusbildschirm ruft bhInitMap(MP_SET_SUB); der    Kartentask besitzt den Pass wie der Terminaltask, bhExitMap map.c:243. *//* Erst wenn der Statusbildschirm abgebaut ist, startet der Kartentask: sein
    Verlassen loescht st_flg 0x8 (sub1.c:3137), worauf FtskMapWait (map.c:1757)
    wartet. Die Anforderung bleibt bis dahin stehen. */
-                if(menu.map_requested&&!menu.active&&events&&!(events->flags[5][0]&8u)){menu.map_requested=false;if(!map_active&&!transitioning){events->flags[11][0]|=0x80000u;map_screen.init(RECVX_MP_SET_SUB,map_host(),map_services);map_screen.set_map();map_active=true;}}if(map_active){ /* bhMlbBinRealize des Etagenmodells, sobald das Paket geladen ist */
+                if(menu.map_requested&&!menu.active&&events&&!(events->flags[5][0]&8u)){menu.map_requested=false;if(!map_active&&!transitioning){events->flags[11][0]|=0x80000u;map_entry_mode=RECVX_MP_SET_SUB;map_screen.init(RECVX_MP_SET_SUB,map_host(),map_services);map_screen.set_map();map_active=true;}}
+                else if(events&&(((events->flags[10][0]&0x10000u))||(!(events->flags[5][0]&4u)&&!(events->flags[10][0]&4u)&&(pad_ps&0x2000u)))&&!map_active&&!transitioning){
+                    const bool is_event=(events->flags[10][0]&0x10000u)!=0;
+                    events->flags[10][0]&=~0x10000u;events->flags[11][0]|=0x80000u;events->flags[5][0]|=0x40000u;
+                    map_entry_mode=is_event?RECVX_MP_SET_EVENT:RECVX_MP_SET_GAME;
+                    map_screen.init(map_entry_mode,map_host(),map_services);map_screen.set_map();map_active=true;}
+                if(map_active){ /* bhMlbBinRealize des Etagenmodells, sobald das Paket geladen ist */
                     if(map_screen.stage_model().size&&map_screen.map_objects().empty())
                         map_screen.set_map_objects(recvx::decode_map_objects(map_screen.buffer(),map_screen.stage_model()));}
-                if(map_active&&!map_screen.control(map_host())){map_screen.exit();if(events&&map_screen.game_map_flag_cleared())events->flags[11][0]&=~0x80000u;map_active=false;
-                    /* system.c case 6: nach bhExitMap uebernimmt der Statusbildschirm
-                       wieder den Schirm (st_flg |= 0x8). */
-                    menu.input(recvx::MenuInput::Open,inventory);}if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio.mix();locomote(replay_move,replay_run,replay_turn);head_hair_step(); /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp) */third_person_tick();if(args.validate_poses)compose();if(i==frames-1)draw(unsigned(i));if(frontend_quit)break;}
+                if(map_active&&!map_screen.control(map_host())){map_screen.exit();if(events&&map_screen.game_map_flag_cleared())events->flags[11][0]&=~0x80000u;if(events)events->flags[5][0]&=~0x40000u;map_active=false;
+                    if(map_entry_mode==RECVX_MP_SET_SUB){
+                        /* system.c case 6: nach bhExitMap uebernimmt der Statusbildschirm
+                           wieder den Schirm (st_flg |= 0x8). */
+                        menu.input(recvx::MenuInput::Open,inventory);}}if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio.mix();locomote(replay_move,replay_run,replay_turn);head_hair_step(); /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp) */third_person_tick();if(args.validate_poses)compose();if(i==frames-1)draw(unsigned(i));if(frontend_quit)break;}
             if(!args.screenshot.empty())image.save_bmp(args.screenshot);
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
             report();return events&&!events->errors.empty()?1:0;
@@ -1053,13 +1068,20 @@ int main(int argc,char** argv){
                 if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */ /* system.c:853 - der Statusbildschirm ruft bhInitMap(MP_SET_SUB); der    Kartentask besitzt den Pass wie der Terminaltask, bhExitMap map.c:243. *//* Erst wenn der Statusbildschirm abgebaut ist, startet der Kartentask: sein
    Verlassen loescht st_flg 0x8 (sub1.c:3137), worauf FtskMapWait (map.c:1757)
    wartet. Die Anforderung bleibt bis dahin stehen. */
-                if(menu.map_requested&&!menu.active&&events&&!(events->flags[5][0]&8u)){menu.map_requested=false;if(!map_active&&!transitioning){events->flags[11][0]|=0x80000u;map_screen.init(RECVX_MP_SET_SUB,map_host(),map_services);map_screen.set_map();map_active=true;}}if(map_active){ /* bhMlbBinRealize des Etagenmodells, sobald das Paket geladen ist */
+                if(menu.map_requested&&!menu.active&&events&&!(events->flags[5][0]&8u)){menu.map_requested=false;if(!map_active&&!transitioning){events->flags[11][0]|=0x80000u;map_entry_mode=RECVX_MP_SET_SUB;map_screen.init(RECVX_MP_SET_SUB,map_host(),map_services);map_screen.set_map();map_active=true;}}
+                else if(events&&(((events->flags[10][0]&0x10000u))||(!(events->flags[5][0]&4u)&&!(events->flags[10][0]&4u)&&(pad_ps&0x2000u)))&&!map_active&&!transitioning){
+                    const bool is_event=(events->flags[10][0]&0x10000u)!=0;
+                    events->flags[10][0]&=~0x10000u;events->flags[11][0]|=0x80000u;events->flags[5][0]|=0x40000u;
+                    map_entry_mode=is_event?RECVX_MP_SET_EVENT:RECVX_MP_SET_GAME;
+                    map_screen.init(map_entry_mode,map_host(),map_services);map_screen.set_map();map_active=true;}
+                if(map_active){ /* bhMlbBinRealize des Etagenmodells, sobald das Paket geladen ist */
                     if(map_screen.stage_model().size&&map_screen.map_objects().empty())
                         map_screen.set_map_objects(recvx::decode_map_objects(map_screen.buffer(),map_screen.stage_model()));}
-                if(map_active&&!map_screen.control(map_host())){map_screen.exit();if(events&&map_screen.game_map_flag_cleared())events->flags[11][0]&=~0x80000u;map_active=false;
-                    /* system.c case 6: nach bhExitMap uebernimmt der Statusbildschirm
-                       wieder den Schirm (st_flg |= 0x8). */
-                    menu.input(recvx::MenuInput::Open,inventory);}
+                if(map_active&&!map_screen.control(map_host())){map_screen.exit();if(events&&map_screen.game_map_flag_cleared())events->flags[11][0]&=~0x80000u;if(events)events->flags[5][0]&=~0x40000u;map_active=false;
+                    if(map_entry_mode==RECVX_MP_SET_SUB){
+                        /* system.c case 6: nach bhExitMap uebernimmt der Statusbildschirm
+                           wieder den Schirm (st_flg |= 0x8). */
+                        menu.input(recvx::MenuInput::Open,inventory);}}
                 if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.synchronize(inventory,menu,events.get(),&audio);computer.begin(*events);}
                 if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){world->set_simulation_flags(events?events->flags[6][0]:~0u);world->set_player_weapon(inventory.weapon());world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
                 if(!args.preview&&args.replay.empty())combat_input={physical.down(recvx::Action::Aim),physical.down(recvx::Action::Attack)||physical.hit(recvx::Action::Attack),physical.turn(),physical.move(),physical.hit(recvx::Action::NextTarget)};

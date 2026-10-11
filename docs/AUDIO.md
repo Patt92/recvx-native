@@ -26,6 +26,16 @@ PS2-Soundhardware. Alle Formate werden nativ dekodiert und in einem
 
 - `COMMON.MLT` (Systemklänge) und die Raumpakete aus `MULTSPQ1/2` werden als
   Sony-HD/BD gelesen (Prog → Sset → Smpl → Vagi) und als SPU-ADPCM dekodiert.
+- Explizite ADPCM-Loopadressen werden als PCM-Framegrenzen erhalten: Start
+  vor dem Startblock, Ende hinter dem End-Repeat-Block. Das Sony-Vagi-Attribut
+  (+6) unterscheidet One-Shot (0) und Loop (1). Repeat ohne belegte Startadresse
+  sowie unbekannte Attribute werden gemeldet, nicht als Vollschleife geraten.
+- SQ-Noten wiederholen nur ihren markierten Samplebereich, unabhängig vom
+  äußeren Slot-/BG-Loopbit und den NRPN-Transportloops. NoteOff, Stop, Fade
+  und Raumersetzung geben die Note frei. Der vorhandene Decoder behandelt
+  Terminalflag 7 als stummen Block; dessen Selbstloop wiederholt keinen Vorlauf.
+  PCM wird weiterhin einmal vorab dekodiert: Predictor-Historie über den
+  Looprücksprung und bitgenaue SPU-Synthese sind damit nicht nachgewiesen.
 - Raumpakete: Schlüssel `stage * 1000 + room * 10 + case`; die Reihenfolge
   Event_init → `RoomSoundCase` → `RequestRoomSoundBank` folgt `system.c`.
 - Systemklänge über `CallSystemSe`, Spielerstimmen über
@@ -87,5 +97,9 @@ FFmpeg wird nur bei dieser Umwandlung benutzt, nicht von der Laufzeit.
   [vgmstream ADX](https://github.com/vgmstream/vgmstream/blob/master/src/meta/adx.c)
 - [vgmstream HD/BD](https://github.com/vgmstream/vgmstream/blob/master/src/meta/hd_bd.c),
   [SPU-ADPCM](https://github.com/vgmstream/vgmstream/blob/master/src/coding/psx_decoder.c)
+- [VGMTrans SonyPS2InstrSet.cpp](https://github.com/vgmtrans/vgmtrans/blob/master/src/main/formats/SonyPS2/SonyPS2InstrSet.cpp)
+  (Vagi-Attribute und One-Shot/Loop),
+  [PSX-SPX ADPCM-Flags](https://psx-spx.consoledev.net/soundprocessingunitspu/)
+  (End/Repeat/Start)
 - [vgmstream SShd](https://github.com/vgmstream/vgmstream/blob/master/src/meta/sshd.c),
   [stb_image](https://github.com/nothings/stb)

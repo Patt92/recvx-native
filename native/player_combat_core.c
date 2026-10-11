@@ -2555,6 +2555,26 @@ RECVX_COMBAT_CORE* recvx_combat_create(const RECVX_CB_TABLES* tables,
 
 void recvx_combat_destroy(RECVX_COMBAT_CORE* core) { free(core); }
 
+void recvx_combat_gun_fire(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
+                           RECVX_COMBAT_SYS* sys, const RECVX_CB_GUN_OWNER* owner,
+                           int32_t wno, int32_t jno, int32_t hand, int32_t ang) {
+    RECVX_COMBAT_CORE* c;
+    if (!owner || jno < 0 || (uint32_t)jno >= RECVX_CB_NODES) {
+        if (services && services->gap) services->gap(services->user, "bhSetGunFire owP[jno]");
+        return;
+    }
+    c = calloc(1, sizeof *c);
+    if (!c) return;
+    _Make_SinTable();
+    if (tables) c->tables = *tables;
+    if (services) c->services = *services;
+    c->sys = sys;
+    c->player.stflg = owner->stflg; c->player.at_flg = owner->at_flg; c->player.idx_ct = owner->idx_ct;
+    memcpy(c->player.owp_mtx[jno], owner->mtx, sizeof owner->mtx);
+    cb_set_gun_fire(c, wno, jno, hand, ang);
+    free(c);
+}
+
 RECVX_COMBAT_PLAYER* recvx_combat_player(RECVX_COMBAT_CORE* core) {
     return core ? &core->player : NULL;
 }

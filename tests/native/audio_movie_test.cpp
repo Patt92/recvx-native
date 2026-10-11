@@ -11,10 +11,57 @@ using namespace recvx;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 template<class F> static void reject(F f){bool rejected=false;try{f();}catch(const std::exception&){rejected=true;}check(rejected,"malformed media accepted");}
 static void le(std::vector<std::uint8_t>& b,unsigned n){for(unsigned i=0;i<4;++i)b.push_back(std::uint8_t(n>>(i*8)));}
+static void sample_loops(const std::filesystem::path& root){
+    // Original MULTSPQ1/0002 bank 2/list 6: program 6/key 60, velocity 127,
+    // tempo 500000/PPQN 480. NoteOn tick 7, NoteOff tick 7687 (50 frames/tick).
+    const auto pack=read_asset_file(root/"archives/MULTSPQ1/0002.bin",32*1024*1024);BinaryView spq(pack);std::vector<std::uint8_t> programs;
+    for(unsigned i=0;i<16&&spq.u32(i*16);++i)if(spq.u32(i*16+8)==1&&spq.u32(i*16+12)==2){const auto offset=spq.u32(i*16),size=spq.u32(i*16+4);spq.require(offset,size);programs={pack.begin()+offset,pack.begin()+offset+size};break;}
+    const auto clip=std::make_shared<PcmClip>(decode_system_sound(programs,6,60));
+    check(clip->rate==32000&&clip->loop_start==3*28&&clip->loop_end==2159*28,"original Vagi loop bounds missing/wrong");
+    AudioMixer sequence(root),reference;sequence.load_room_sounds(0,2);check(sequence.event_sound(0,0x206),"original loop sample SQ missing");reference.play_pcm(12,clip,1,true);
+    const auto actual=sequence.mix(120000),pcm=reference.mix(120000-350);std::vector<std::int16_t> expected(350*2);expected.insert(expected.end(),pcm.begin(),pcm.end());
+    check(actual==expected,"SQ sample loop differs from explicit waveform loop/intro timing");
+    check(std::any_of(actual.begin()+100000*2,actual.end(),[](auto n){return n!=0;}),"SQ note silent after waveform end");
+    sequence.mix(7687*50-120000);const auto released=sequence.mix(100);
+    check(std::all_of(released.begin(),released.end(),[](auto n){return n==0;}),"original NoteOff retains looping sample");
+    const auto restarted=sequence.mix(2000);check(std::any_of(restarted.begin(),restarted.end(),[](auto n){return n!=0;}),"NRPN transport did not restart note after NoteOff");
+    sequence.stop_event_sound(0);const auto stopped=sequence.mix(1600);check(!sequence.active(12)&&std::all_of(stopped.begin(),stopped.end(),[](auto n){return n==0;}),"sample loop survives slot stop");
+    check(sequence.event_sound(0,0x206),"loop sample reentry failed");sequence.mix(120000);sequence.stop(12,1);const auto faded=sequence.mix(audio_frames_per_tick);
+    check(!sequence.active(12)&&faded.back()==0&&std::any_of(faded.begin(),faded.end(),[](auto n){return n!=0;}),"sample loop fade/release failed");
+    check(sequence.event_sound(0,0x206),"loop sample second reentry failed");sequence.mix(120000);sequence.load_room_sounds(0,0);
+    const auto room=sequence.mix(1600);check(!sequence.active(12)&&std::all_of(room.begin(),room.end(),[](auto n){return n==0;}),"sample loop survives room replacement");
+    // Change only Vagi's documented attribute in a copied bank: a one-shot
+    // retains exactly the decoded PCM, but never acquires sample-loop bounds.
+    BinaryView hd(programs);const auto base=hd.u32(0),head=base+hd.u32(base+8),vags=base+hd.u32(head+0x20),vag=vags+hd.u32(vags+16+7*4);
+    auto shot=programs;shot.at(vag+6)=0;const auto one=decode_system_sound(shot,6,60);
+    check(!one.loop_start&&!one.loop_end&&one.samples==clip->samples,"Vagi one-shot did not override ADPCM loop markers");
+    shot.at(vag+6)=2;reject([&]{decode_system_sound(shot,6,60);});
+    // An outer BG/channel loop must not turn a one-shot SQ note into a loop.
+    // Original bank 2/list 0 has a one-shot program; compare both slot policies.
+    const auto short_clip=std::make_shared<PcmClip>(decode_system_sound(programs,0,60));check(!short_clip->loop_end,"original one-shot unexpectedly loops");
+    AudioMixer short_reference;short_reference.play_pcm(12,short_clip,118.f/127.f);const auto short_pcm=short_reference.mix(120000-250);
+    std::vector<std::int16_t> short_expected(250*2);short_expected.insert(short_expected.end(),short_pcm.begin(),short_pcm.end());
+    for(bool outer:{false,true}){AudioMixer short_sequence(root);short_sequence.load_room_sounds(0,2);check(short_sequence.play_room_sequence(2,0,12,outer),"original one-shot SQ missing");check(short_sequence.mix(120000)==short_expected,"outer SQ slot loop repeats a one-shot waveform");short_sequence.mix(300000);check(!short_sequence.active(12),"one-shot SQ end retained slot");}
+    // Original terminal-7 Vagi: a silent self-loop, not a guessed full loop.
+    const auto terminal=read_asset_file(root/"archives/MULTSPQ1/0022.bin",32*1024*1024);BinaryView term(terminal);
+    for(unsigned i=0;i<16&&term.u32(i*16);++i)if(term.u32(i*16+8)==1&&term.u32(i*16+12)==2){
+        const auto offset=term.u32(i*16),size=term.u32(i*16+4);std::vector<std::uint8_t> bank(terminal.begin()+offset,terminal.begin()+offset+size);BinaryView bankv(bank);
+        const auto b=bankv.u32(0),h=b+bankv.u32(b+8),v=b+bankv.u32(h+0x20),p=v+bankv.u32(v+16+5*4),data=bankv.u32(8)+bankv.u32(p);
+        const auto silent=decode_ps_adpcm(std::vector<std::uint8_t>(bank.begin()+data,bank.begin()+data+7*16),43000);
+        check(silent.loop_start==6*28&&silent.loop_end==7*28&&std::all_of(silent.samples.begin()+6*28,silent.samples.end(),[](auto n){return n==0;}),"terminal-7 silent loop bounds wrong");break;
+    }
+    check(sequence.sequence_unavailable.empty(),"sample-loop sequence reported unavailable");
+}
 int main(int argc,char** argv){try{
+    if(argc>2&&std::string(argv[2])=="sample-loops"){sample_loops(std::filesystem::u8path(argv[1]));std::cout<<"Original Sony sample loops, NoteOff, NRPN, stop, fade, room replacement and Vagi attributes passed.\n";return 0;}
+    if(argc>1)sample_loops(std::filesystem::u8path(argv[1]));
     static_assert(game_tick_hz==30&&audio_frames_per_tick==1600);
     {AudioMixer clock;auto second=std::make_shared<PcmClip>();second->rate=48000;second->channels=1;second->samples.assign(48000,100);clock.play_pcm(0,second);unsigned produced=0;for(unsigned tick=0;tick<30;++tick){auto samples=clock.mix();produced+=samples.size()/2;check(samples.front()==100&&samples.back()==100,"audio clock loses or advances samples");}check(produced==48000,"30 engine ticks do not represent one audio second");clock.mix(1);check(!clock.active(0),"one-second voice survives 30 engine ticks");}
     std::vector<std::uint8_t> spu(16);spu[0]=12;spu[1]=1;spu[2]=0xf1;auto ps=decode_ps_adpcm(spu,32000);check(ps.channels==1&&ps.frames()==28&&ps.samples[0]==1&&ps.samples[1]==-1,"SPU nibble order/sign/shift");
+    {std::vector<std::uint8_t> blocks(4*16);for(unsigned i=0;i<4;++i){blocks[i*16]=12;std::fill_n(blocks.begin()+i*16+2,14,std::uint8_t((i+1)*17));}blocks[17]=6;blocks[49]=3;
+        const auto loop=decode_ps_adpcm(blocks,48000);check(loop.loop_start==28&&loop.loop_end==112&&loop.frames()==112&&loop.samples.back()==4,"SPU explicit loop bounds/end block missing");
+        AudioMixer wave;wave.play_pcm(0,std::make_shared<PcmClip>(loop),1,true);const auto output=wave.mix(200);for(unsigned i=0;i<200;++i){const auto at=i<112?i:28+(i-112)%84;check(output[i*2]==loop.samples[at]&&output[i*2+1]==loop.samples[at],"waveform loop repeats intro or omits end block");}
+        blocks[49]=1;const auto shot=decode_ps_adpcm(blocks,48000);check(!shot.loop_end&&shot.frames()==112,"normal SPU end creates a loop");blocks[17]=0;blocks[49]=3;reject([&]{decode_ps_adpcm(blocks,48000);});}
     auto malformed=spu;malformed[0]=0x50;reject([&]{decode_ps_adpcm(malformed,32000);});malformed=spu;malformed.pop_back();reject([&]{decode_ps_adpcm(malformed,32000);});
     if(argc>1){ // CORE character banks: original CallPlayerVoice bank 4, slot 7; replacement and room retention.
         const auto root=std::filesystem::u8path(argv[1]);

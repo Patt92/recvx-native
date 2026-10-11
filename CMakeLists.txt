@@ -105,13 +105,15 @@ target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cp
 # routinen. en54/en55 fehlen bis zum Port von en17.c (Kettenwerk-Besitzer).
 target_sources(recvx_game PRIVATE native/world_enemies.cpp native/motion_set.cpp
   native/enemies/enemy_work.c native/enemies/enemy_dispatch.c
-  native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c
-  native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c
+  native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c
+  native/enemies/en11.c native/enemies/en12.c native/enemies/en14.c
+  native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c
   native/enemies/en56.c native/enemies/en71.c
+  native/enemies/en27.c native/enemies/en30.c
   native/enemies/en03_lib.c native/enemies/en03_collision.c)
 if(NOT MSVC)
   # Preserve separate float multiply/add steps also in production-only builds.
-  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c native/enemies/en16.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c native/enemies/en03_lib.c native/enemies/en03_collision.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+  set_property(SOURCE native/effect_collision.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c native/enemies/en11.c native/enemies/en12.c native/enemies/en14.c native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c native/enemies/en27.c native/enemies/en30.c native/enemies/en03_lib.c native/enemies/en03_collision.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
 endif()
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}" build-tools/ninja)
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
@@ -312,7 +314,11 @@ if(BUILD_TESTING)
   endif()
   add_executable(recvx-audio-tests tests/native/audio_movie_test.cpp)
   target_link_libraries(recvx-audio-tests PRIVATE recvx_game)
-  add_test(NAME audio_movie COMMAND recvx-audio-tests)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/files/COMMON.MLT")
+    add_test(NAME audio_movie COMMAND recvx-audio-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  else()
+    add_test(NAME audio_movie COMMAND recvx-audio-tests)
+  endif()
   add_executable(recvx-bgm-room-tests tests/native/bgm_room_test.cpp)
   target_link_libraries(recvx-bgm-room-tests PRIVATE recvx_game)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
@@ -337,6 +343,12 @@ if(BUILD_TESTING)
   add_executable(recvx-effect-pool-tests tests/native/effect_pool_test.cpp)
   target_link_libraries(recvx-effect-pool-tests PRIVATE recvx_game)
   add_test(NAME effect_pool_lifetime COMMAND recvx-effect-pool-tests)
+  # Der positive Gegenstueck dazu: die Teilchenarbeiten gegen die
+  # Originaltabellen PtclTbl/PtclDat und Eff302Prm. Committet (82f3c58), aber
+  # bisher ohne Ziel, also nie gebaut und nie gelaufen.
+  add_executable(recvx-effect-particles-tests tests/native/effect_particles_test.cpp)
+  target_link_libraries(recvx-effect-particles-tests PRIVATE recvx_game)
+  add_test(NAME original_effect_particles COMMAND recvx-effect-particles-tests)
   # D10 Kartenbildschirm: Datentabellen gegen map.c und der Taskautomat.
   add_executable(recvx-map-tests tests/native/map_screen_test.cpp)
   target_link_libraries(recvx-map-tests PRIVATE recvx_game)
@@ -359,7 +371,7 @@ if(BUILD_TESTING)
   # Wie recvx-weapon-flash-tests bewusst OHNE recvx_game/recvx_scene: der
   # Apparat braucht nur bhSetMotion/bhCalcModel als Zeiger (setzt der Test
   # selbst) und njSin/njCos. Aus enemy_work.h kommen nur Typen, keine Koerper.
-  add_executable(recvx-subplayer-tests tests/native/subplayer_test.cpp native/subplayer.c)
+  add_executable(recvx-subplayer-tests tests/native/subplayer_core_test.cpp native/subplayer.c native/enemies/enemy_work.c native/motion_set.cpp)
   target_include_directories(recvx-subplayer-tests PRIVATE native native/enemies)
   target_compile_features(recvx-subplayer-tests PRIVATE cxx_std_17)
   target_link_libraries(recvx-subplayer-tests PRIVATE recvx_math)
@@ -375,6 +387,29 @@ if(BUILD_TESTING)
   target_compile_features(recvx-enemy-spawn-tests PRIVATE cxx_std_17)
   target_link_libraries(recvx-enemy-spawn-tests PRIVATE recvx_math)
   add_test(NAME enemy_spawn_activation COMMAND recvx-enemy-spawn-tests)
+  add_executable(recvx-c07-tests tests/native/enemy_c07_group_test.cpp)
+  target_include_directories(recvx-c07-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-c07-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-c07-tests PRIVATE recvx_game recvx_math)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+    add_test(NAME enemy_c07_group COMMAND recvx-c07-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  else()
+    add_test(NAME enemy_c07_group COMMAND recvx-c07-tests)
+  endif()
+  add_executable(recvx-en07-tests tests/native/en07_test.cpp)
+  target_include_directories(recvx-en07-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-en07-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-en07-tests PRIVATE recvx_game recvx_math)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+    add_test(NAME enemy_en07_component COMMAND recvx-en07-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  else()
+    add_test(NAME enemy_en07_component COMMAND recvx-en07-tests)
+  endif()
+  add_executable(recvx-en04-tests tests/native/enemy_en04_test.cpp)
+  target_include_directories(recvx-en04-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-en04-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-en04-tests PRIVATE recvx_game recvx_math)
+  add_test(NAME enemy_en04_component COMMAND recvx-en04-tests)
   add_executable(recvx-gameplay-bindings-tests tests/native/gameplay_bindings_test.cpp)
   target_link_libraries(recvx-gameplay-bindings-tests PRIVATE recvx_game)
 if(TARGET recvx_input)

@@ -24,11 +24,17 @@ int main(int argc,char** argv){try{
     // Motion.c:21 und MdlPut.c:240 sind in diesem Test nicht angebunden und
     // müssen sich namentlich als Lücke melden, statt still wegzufallen.
     check(recvx_is_subplayer(91)&&recvx_is_subplayer(93)&&!recvx_is_subplayer(54),"subplayer identity ranges (eneset.c:84-152)");
-    {RECVX_SUBPLAYER sub{};sub.id=93;recvx_subplayer_init(&sub);
+    {RECVX_ENEMY_WORK sub{};sub.id=93;
+     RECVX_ENEMY_SERVICES services{};
+     static std::string last_gap;
+     last_gap.clear();
+     services.gap=[](const char* g){last_gap=g;};
+     sub.sv=&services;
+     recvx_subplayer_init(&sub);
      check(sub.mode0==1&&sub.mtn_add==32768&&sub.mode3==3&&!sub.mtn_no,"subplayer init state (subpl.c:87/95)");
-     check(sub.gap&&std::string(sub.gap)=="subpl:motion-step (Motion.c:21)","unbound motion service not reported");
+     check(last_gap=="bhSetMotion:subplayer","unbound motion service not reported");
      check(recvx_subplayer_tick(&sub)==RECVX_SUBPL_HANDLED&&(sub.flg&0x8100u)==0x8100u,"subplayer pass bits and dispatch (subpl.c:77)");
-     check(sub.gap&&std::string(sub.gap)=="subpl:publish-model (MdlPut.c:240)","unbound model service not reported");}
+     check(last_gap=="bhCalcModel:subplayer","unbound model service not reported");}
     AudioMixer mixer;auto clip=std::make_shared<PcmClip>();clip->rate=48000;clip->channels=1;clip->samples.assign(32000,10000);mixer.play_pcm(24,clip,.5f,true);check(mixer.user_sound_volume(6,0,0,-64,0),"BG volume category unbound");auto samples=mixer.mix(1);check(std::abs(samples[0]-2519)<=1,"fade erased note velocity/program gain");check(mixer.user_sound_volume(6,0,-1,-127,2),"BG fade missing");mixer.mix(3200);check(!mixer.active(24),"fade does not release the voice");mixer.set_room_sound_case(1);check(mixer.take_room_sound_case()==1&&mixer.take_room_sound_case()==0,"sound variant not consumed once");
     // Treppen-, Leiter- und Stufenaktionen (Auftrag B01, native/player_stairs.c):
     // die sechs Originalroutinen kdu/kdd/dnu/dnd/hsu/hsd werden je einmal
@@ -210,28 +216,28 @@ int main(int argc,char** argv){try{
             /* Befehl 12 setzt die Vorzeichenflags, die 140 als bpx/bpz liest. */
             world.bind({0x69,0,0,0,{0x69,12,0,0,0,0}});
             check(world.bind({0x69,0,0,0,{0x69,140,7,0,0xB0,0x04,0x48,0x0D}}),"Common_controll 140 unbound");
-            {const auto& w=world.state(1,0)->subplayer;
+            {const auto& w=world.state(1,0)->enemy;
              check(w.mode0==1&&w.mode1==7&&w.mode2==0&&w.mode3==0,"Common 140 mode fields");
              /* :12527 die Auswahl schreibt ct2 nur im untersten Byte. */
              check((w.ct2&0xff)==1,"Common 140 ct2 low byte");
              /* 12.00/34.00 Einheiten als Hundertstel, gepackt wie subpl.c liest. */
              check(unsigned(w.ct0)==0x04B00D48u,"Common 140 packed ct0 target");}
             world.bind({0x69,0,0,0,{0x69,132,7,0,3,0x7F}});
-            check(world.state(1,0)->subplayer.ct2==0x7F,"Common 132 writes the full ct2 int");
+            check(world.state(1,0)->enemy.ct2==0x7F,"Common 132 writes the full ct2 int");
             world.bind({0x69,0,0,0,{0x69,140,7,1,0xB0,0x04,0x48,0x0D}});
-            check(world.state(1,0)->subplayer.mode0==5&&world.state(1,0)->subplayer.ct2==3,"Common 140 selection byte");
+            check(world.state(1,0)->enemy.mode0==5&&world.state(1,0)->enemy.ct2==3,"Common 140 selection byte");
             world.bind({0x69,0,0,0,{0x69,141,9,4,5,6}});
-            {const auto& w=world.state(1,0)->subplayer;
+            {const auto& w=world.state(1,0)->enemy;
              check(w.mode0==5&&w.mode1==9&&w.ct0==4&&w.ct1==5&&w.ct2==6,"Common 141 fields");}
             world.bind({0x69,0,0,0,{0x69,132,11,0,12,13}});
-            {const auto& w=world.state(1,0)->subplayer;
+            {const auto& w=world.state(1,0)->enemy;
              check(w.mode0==1&&w.mode1==11&&w.ct1==12&&w.ct2==13,"Common 132 fields");}
             /* :12553 negatives z wird als `0u - z` verodert und setzt dabei auch
                die oberen 16 Bit, der x-Teil geht also verloren. Originalverhalten,
                hier festgehalten statt korrigiert. */
             world.bind({0x69,0,0,0,{0x69,12,0,0,1,0}});
             world.bind({0x69,0,0,0,{0x69,140,7,0,0xB0,0x04,0x48,0x0D}});
-            check(unsigned(world.state(1,0)->subplayer.ct0)==0xFFFFF2B8u,"Common 140 negative z keeps the original OR");
+            check(unsigned(world.state(1,0)->enemy.ct0)==0xFFFFF2B8u,"Common 140 negative z keeps the original OR");
         }
         // bhInitEvent runs before the platform requests the soundbank. Decoding
         // the world must not consume a case number intended for that request.

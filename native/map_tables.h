@@ -44,7 +44,7 @@ enum {
     RECVX_MP_MOD_EXIT=9,RECVX_MP_MOD_WAIT=10,RECVX_MP_MOD_WAIT_NOMAP=11
 };
 /* enum_2 set_mod of bhInitMap (system.c:785-879): status |= (1 << set_mod) & 7. */
-enum {RECVX_MP_SET_EVENT=0,RECVX_MP_SET_GAME=1,RECVX_MP_SET_SUB=2};
+enum {RECVX_MP_SET_GAME=0,RECVX_MP_SET_EVENT=1,RECVX_MP_SET_SUB=2};
 /* MD_WORK (map.h): mode-message sprite position and sprite number. */
 typedef struct {float x,y,z;int spr;} RECVX_MAP_MODE_MESSAGE;
 typedef struct {float x,y;} RECVX_MAP_POINT2;

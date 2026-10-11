@@ -22,7 +22,8 @@
      zonzon1.c:433   bhEne_DirTarget, :465 bhEne_GetPartsPos,
                      :493 bhEne_DirCheck, :515 bhEne_DGDirCheck,
                      :591 bhEne_SetWeponAtr, :828 bhEne_CallSE,
-                     :864 bhArcTan2, :879 bhEne_CallPlayerVoice
+                     :864 bhArcTan2, :521 bhEne_CallPlayerVoice
+     zonzon.c:82     bhEne_LeverCheck
      pwksub.c:133    bhAddSpeed
      MdlPut.c:240    bhCalcModel (flg-0x1000-Zweig, siehe root_mtx)
      macros.h:78     EXP0_ATR, :93 RAND_MAX, :104 NJM_DEG_ANG, :105 njRandom
@@ -293,30 +294,46 @@ static void en07_player_set(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_PLAYER* in)
     else en07_gap(w, "player_set (Spielerbesitzer)");
 }
 
-/* bhCollisionCheckLine (hitchkl.c, Variante 1): `to` und die Trefferflaeche
-   werden nur bei Treffer gesetzt. `rec`/`id` duerfen NULL sein. */
+/* bhCollisionCheckLine (hitchkl.c:12, Variante 1): `to`, die Trefferflaeche
+   und die Ebenennormale werden nur bei Treffer gesetzt. `rec`/`id`/`normal`
+   duerfen NULL sein.
+
+   Zur Normale: bhGetHitCollisionNormal (hitchkl.c:911) liest nur die statische
+   Ebene PLANE, die die Linienpruefung beim Treffer schreibt (hitchkl.c:9,
+   :674/:822/:862/:902). en07 ruft sie ausschliesslich DIREKT nach einem
+   Treffer derselben Abfrage (en07.c:1880 nach :1876, en07.c:1942 nach :1939).
+   Der native Liniendienst gibt genau diese Ebene als `normal` zurueck
+   (enemy_work.h:328, native/effect_collision.cpp:270), ohne statischen
+   Zustand. Die Normale wird deshalb aus derselben Abfrage uebernommen; das ist
+   die Datenrepraesentation von PLANE, kein Ersatzwert. */
 static int en07_line1(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* from,
-                      RECVX_ENEMY_VEC* to, RECVX_ENEMY_ATR* rec, uint32_t* id)
+                      RECVX_ENEMY_VEC* to, RECVX_ENEMY_ATR* rec, uint32_t* id,
+                      RECVX_ENEMY_VEC* normal)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
-    RECVX_ENEMY_VEC normal;
+    RECVX_ENEMY_VEC n;
 
     if (!(sv && sv->line)) { en07_gap(w, "bhCollisionCheckLine"); return 0; }
-    normal.x = normal.y = normal.z = 0.0f;
-    return sv->line(1u, from, to, &normal, 0u, -1, rec, id);
+    n.x = n.y = n.z = 0.0f;
+    if (!sv->line(1u, from, to, &n, 0u, -1, rec, id)) return 0;
+    if (normal) *normal = n;
+    return 1;
 }
 
-/* bhCollisionCheckLine2(p1, p2, 0x4000, -1) — die einzige Variante-2-Form in
-   dieser Datei (en07.c:1876 und :2309). */
+/* bhCollisionCheckLine2(p1, p2, 0x4000, -1) (hitchkl.c:49) — die einzige
+   Variante-2-Form in dieser Datei (en07.c:1876 und :2309). Normale wie oben. */
 static int en07_line2(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* from,
-                      RECVX_ENEMY_VEC* to, RECVX_ENEMY_ATR* rec, uint32_t* id)
+                      RECVX_ENEMY_VEC* to, RECVX_ENEMY_ATR* rec, uint32_t* id,
+                      RECVX_ENEMY_VEC* normal)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
-    RECVX_ENEMY_VEC normal;
+    RECVX_ENEMY_VEC n;
 
     if (!(sv && sv->line)) { en07_gap(w, "bhCollisionCheckLine2"); return 0; }
-    normal.x = normal.y = normal.z = 0.0f;
-    return sv->line(2u, from, to, &normal, 0x4000u, -1, rec, id);
+    n.x = n.y = n.z = 0.0f;
+    if (!sv->line(2u, from, to, &n, 0x4000u, -1, rec, id)) return 0;
+    if (normal) *normal = n;
+    return 1;
 }
 
 /* ps2_NaColi.c njDistanceP2P. */
@@ -368,7 +385,7 @@ static int  en07_avoid_wall(RECVX_ENEMY_WORK* w, int32_t dir);
 static void en07_player_blood_effect(RECVX_ENEMY_WORK* w, unsigned char size);
 static void en07_player_control(RECVX_ENEMY_WORK* w);
 static int  en07_obj_edge(RECVX_ENEMY_WORK* w);
-static void en07_calc_atari_offset(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* ofp);
+static int  en07_calc_atari_offset(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* ofp);
 
 typedef void (*RECVX_EN07_PROC)(RECVX_ENEMY_WORK*);
 
@@ -442,7 +459,7 @@ void recvx_en07(RECVX_ENEMY_WORK* w)
     else en07_gap(w, "bhEne_SetWeponAtr");
 
     s = en07_swarm(w);
-    if (s && sv && sv->enemy_now && s->holder == (uint8_t)sv->enemy_now()) {
+    if (s && sv && sv->enemy_now && (uint32_t)s->holder == sv->enemy_now()) {
         RECVX_ENEMY_PLAYER pl;
         if (en07_player(w, &pl) && pl.mode0 == 4u) {
             en07_player_control(w);
@@ -611,7 +628,7 @@ static void en07_init(RECVX_ENEMY_WORK* w)
         p.y = w->py + 999.0f;
         p.z = w->pz;
 
-        if (en07_line1(w, &from, &p, 0, 0)) {
+        if (en07_line1(w, &from, &p, 0, 0, 0)) {
             w->py  = p.y;
             w->pxb = w->px;
             w->pyb = w->py;
@@ -696,8 +713,8 @@ static void en07_br00(RECVX_ENEMY_WORK* w)
         return;
     }
 
-    cb_flg = (sv && sv->system_flags) ? sv->system_flags(0u) : 0u;
-    if (!(sv && sv->system_flags)) en07_gap(w, "sys->cb_flg");
+    if (!(sv && sv->system_flags)) { en07_gap(w, "sys->cb_flg"); return; }
+    cb_flg = sv->system_flags(0u);
 
     if (!(cb_flg & 0x4u) && (e->dist < 10.0f)
         && (w->py < pl.pos.y + 23.0f) && (w->py > pl.pos.y + 10.0f)) {
@@ -1164,7 +1181,7 @@ static void en07_nage(RECVX_ENEMY_WORK* w)
     else en07_gap(w, "bhEne07_NageMode2 ausserhalb der Tabelle");
 }
 
-/* zonzon1.c bhEne_LeverCheck. */
+/* zonzon.c:82 bhEne_LeverCheck. */
 static int en07_lever_check(RECVX_ENEMY_WORK* w)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
@@ -1187,8 +1204,10 @@ static void en07_ng00(RECVX_ENEMY_WORK* w)
     if (!e || !s) { en07_gap(w, "bhEne07_NG00:exp0/exp1 fehlt"); return; }
     if (!en07_player(w, &pl)) return;
 
-    enow = (sv && sv->enemy_now) ? sv->enemy_now() : 0u;
-    if (!(sv && sv->enemy_now)) en07_gap(w, "sys->enow");
+    if (!(sv && sv->enemy_now)) { en07_gap(w, "sys->enow"); return; }
+    /* exp1[6] ist unsigned char, sys->enow unsigned int (types.h:136/:663);
+       der Vergleich en07.c:836/:873 laeuft daher in voller Breite. */
+    enow = sv->enemy_now();
     atk = en07_atk_index(w, e);
 
     switch (w->mode3) {
@@ -1198,12 +1217,12 @@ static void en07_ng00(RECVX_ENEMY_WORK* w)
         e->car_target = 0.1f;
         w->car = 0.1f;
 
-        if (s->holder == (uint8_t)enow) {
+        if ((uint32_t)s->holder == enow) {
             pl.mode0 = 4; pl.mode2 = 1; pl.mode3 = 0;
             en07_player_set(w, &pl);
             s->grab = 1;
 
-            /* zonzon1.c:879 bhEne_CallPlayerVoice(no) = CallPlayerVoice(no|0x400). */
+            /* zonzon1.c:521 bhEne_CallPlayerVoice(no) = CallPlayerVoice(no|0x400). */
             if (sv && sv->player_voice) sv->player_voice(2 | 0x400);
             else en07_gap(w, "bhEne_CallPlayerVoice");
         }
@@ -1224,8 +1243,9 @@ static void en07_ng00(RECVX_ENEMY_WORK* w)
 
         if (!(sv && sv->player_joint_point
               && sv->player_joint_point(en07_atk_pos[atk], &en07_atk_offset[atk], &pos))) {
+            /* Kein Ersatzpunkt: der Pass endet gemeldet in diesem Zustand. */
             en07_gap(w, "bhEne07_NG00:plp->mlwP->owP[AtkPos].mtx");
-            pos = en07_pos(w);
+            return;
         }
 
         {
@@ -1245,7 +1265,7 @@ static void en07_ng00(RECVX_ENEMY_WORK* w)
         /* en07.c:871 — die drei Bedingungen in dieser Reihenfolge; ct0 ist im
            dritten Vergleich bereits heruntergezaehlt. */
         if ((w->ct0-- == 0) || (s->grab == 0u) || ((w->ct0 == 24) && (w->ct2 > 30))) {
-            if (s->holder == (uint8_t)enow) {
+            if ((uint32_t)s->holder == enow) {
                 s->grab     = 0;
                 s->chain    = 0;
                 s->cooldown = 60;
@@ -1293,7 +1313,6 @@ static void en07_ng01(RECVX_ENEMY_WORK* w)
     RECVX_ENEMY_PLAYER pl;
     RECVX_ENEMY_VEC pos;
     float joint[16];
-    int have_joint;
 
     if (!e || !s) { en07_gap(w, "bhEne07_NG01:exp0/exp1 fehlt"); return; }
     if (!en07_player(w, &pl)) return;
@@ -1338,14 +1357,16 @@ static void en07_ng01(RECVX_ENEMY_WORK* w)
             offset.x = 0.0f; offset.y = 0.3f; offset.z = -5.2f;
             v.x = 0.0f; v.y = 0.0f; v.z = 1.0f;
 
-            have_joint = (sv && sv->player_joint_matrix && sv->player_joint_matrix(5u, joint));
-            if (!have_joint) en07_gap(w, "bhEne07_NG01:plp->mlwP->owP[5].mtx");
-            for (i = 0; i < 16; ++i) jm[i] = have_joint ? joint[i] : 0.0f;
-            if (!have_joint) njUnitMatrix(&jm);
+            /* Kein Ersatzgelenk: der Pass endet gemeldet in diesem Zustand. */
+            if (!(sv && sv->player_joint_matrix && sv->player_joint_matrix(5u, joint))) {
+                en07_gap(w, "bhEne07_NG01:plp->mlwP->owP[5].mtx");
+                return;
+            }
+            for (i = 0; i < 16; ++i) jm[i] = joint[i];
 
             if (!(sv && sv->player_joint_point && sv->player_joint_point(5u, &offset, &pos))) {
                 en07_gap(w, "bhEne07_NG01:njCalcPoint(owP[5].mtx)");
-                pos = en07_pos(w);
+                return;
             }
 
             if (w->ct1 > 0) {
@@ -2035,7 +2056,7 @@ static void en07_search_player(RECVX_ENEMY_WORK* w)
 
     pos = pl.pos;
     from = en07_pos(w);
-    if (en07_line1(w, &from, &pos, 0, 0)) {
+    if (en07_line1(w, &from, &pos, 0, 0, 0)) {
         e->sight = 0u;
     }
 
@@ -2050,8 +2071,9 @@ static void en07_collision_walls(RECVX_ENEMY_WORK* w)
     const RECVX_ENEMY_SERVICES* sv = w->sv;
     RECVX_ENEMY_VEC ofp;
 
-    ofp.x = ofp.y = ofp.z = 0.0f;
-    en07_calc_atari_offset(w, &ofp);
+    /* Ohne den Versatz (gemeldete Luecke) laeuft der Wanddurchlauf nicht an
+       einer angenommenen Lage. */
+    if (!en07_calc_atari_offset(w, &ofp)) return;
 
     w->px += ofp.x;
     w->py += ofp.y;
@@ -2070,7 +2092,6 @@ static void en07_collision_walls(RECVX_ENEMY_WORK* w)
 /* en07.c:1871 bhEne07_FloorCollision. */
 static void en07_floor_collision(RECVX_ENEMY_WORK* w)
 {
-    const RECVX_ENEMY_SERVICES* sv = w->sv;
     RECVX_EN07_EXT* e = en07_ext(w);
     RECVX_ENEMY_VEC from, to, n;
     RECVX_ENEMY_ATR rec;
@@ -2084,15 +2105,13 @@ static void en07_floor_collision(RECVX_ENEMY_WORK* w)
     from.x = w->pxb; from.y = w->pyb; from.z = w->pzb;
     to = en07_pos(w);
 
-    if (!en07_line2(w, &from, &to, &rec, &id)) return;
+    /* en07.c:1880 bhGetHitCollisionNormal(&n): die Ebene DIESES Treffers
+       (siehe en07_line1). */
+    if (!en07_line2(w, &from, &to, &rec, &id, &n)) return;
 
     w->px = to.x;
     w->py = to.y;
     w->pz = to.z;
-
-    n.x = n.y = n.z = 0.0f;
-    if (sv && sv->hit_normal) sv->hit_normal(&n);
-    else en07_gap(w, "bhGetHitCollisionNormal");
 
     if (n.y > 0.9f) {
         w->flg &= ~0x200000u;
@@ -2128,7 +2147,7 @@ static int en07_check_hanging_wall(RECVX_ENEMY_WORK* w)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
     RECVX_EN07_EXT* e = en07_ext(w);
-    RECVX_ENEMY_VEC pos, pos2, from, key;
+    RECVX_ENEMY_VEC pos, pos2, from, key, hn;
     RECVX_ENEMY_ATR rec;
     NJS_MATRIX m;
     NJS_VECTOR vec, n;
@@ -2149,9 +2168,14 @@ static int en07_check_hanging_wall(RECVX_ENEMY_WORK* w)
     pos.y = w->py + vec.y;
     pos.z = w->pz + vec.z;
 
-    /* Kein Platz, an dem schon eine andere Fledermaus haengt. */
-    count = (sv && sv->enemy_count) ? sv->enemy_count() : 0u;
-    if (!(sv && sv->enemy_count && sv->enemy_at)) en07_gap(w, "bhEne07_CheckHangingWall:ene/sys->ewk_n");
+    /* Kein Platz, an dem schon eine andere Fledermaus haengt (en07.c:1929).
+       Ohne die Gegnerliste ist das nicht pruefbar; dann kein Andocken statt
+       einer angenommenen leeren Liste. */
+    if (!(sv && sv->enemy_count && sv->enemy_at)) {
+        en07_gap(w, "bhEne07_CheckHangingWall:ene/sys->ewk_n");
+        return 0;
+    }
+    count = sv->enemy_count();
     for (i = 0; i < count; ++i) {
         RECVX_ENEMY_WORK* ep = sv->enemy_at(i);
         if (ep && (ep->flg & 0x1u) && (ep->id == 7u) && (ep != w)) {
@@ -2161,12 +2185,12 @@ static int en07_check_hanging_wall(RECVX_ENEMY_WORK* w)
     }
 
     from = en07_pos(w);
-    if (!en07_line1(w, &from, &pos, &rec, &id)) return 0;
+    /* en07.c:1939-1943: Treffer, Typ 7 ohne attr 8, dann die Ebene DIESES
+       Treffers (bhGetHitCollisionNormal, siehe en07_line1) normiert. */
+    if (!en07_line1(w, &from, &pos, &rec, &id, &hn)) return 0;
     if (!(rec.type == 7u) || (rec.attr & 0x8u)) return 0;
 
-    n.x = n.y = n.z = 0.0f;
-    if (sv && sv->hit_normal) sv->hit_normal((RECVX_ENEMY_VEC*)&n);
-    else en07_gap(w, "bhGetHitCollisionNormal");
+    n.x = hn.x; n.y = hn.y; n.z = hn.z;
     njUnitVector(&n);
 
     if (!(n.y < -0.9f)) return 0;
@@ -2226,8 +2250,13 @@ static int en07_avoid_wall(RECVX_ENEMY_WORK* w, int32_t dir)
 
     own = en07_pos(w);
 
-    count = (sv && sv->enemy_count) ? sv->enemy_count() : 0u;
-    if (!(sv && sv->enemy_count && sv->enemy_at)) en07_gap(w, "bhEne07_AvoidWall:ene/sys->ewk_n");
+    /* en07.c:1999 — ohne die Gegnerliste bricht die Routine gemeldet ab,
+       statt eine leere Liste anzunehmen. */
+    if (!(sv && sv->enemy_count && sv->enemy_at)) {
+        en07_gap(w, "bhEne07_AvoidWall:ene/sys->ewk_n");
+        return 0;
+    }
+    count = sv->enemy_count();
     for (i = 0; i < count; ++i) {
         RECVX_ENEMY_WORK* ep = sv->enemy_at(i);
         if (ep && (ep != w) && (ep->flg & 0x1u) && (ep->id == 7u) && !(ep->flg & 0x2u)) {
@@ -2266,7 +2295,9 @@ static int en07_avoid_wall(RECVX_ENEMY_WORK* w, int32_t dir)
             && sv->motion_root_angles(w, w->mtn_no, (uint32_t)(w->frm_no >> 0x10), key_ang)) {
             njRotateXYZ(&m, key_ang[0], key_ang[1], key_ang[2]);
         } else {
+            /* Kein Ersatzwinkel: Abbruch mit Meldung. */
             en07_gap(w, "bhEne07_AvoidWall:mnwP[mtn_no].md2P->p[1]");
+            return 0;
         }
     }
 
@@ -2277,8 +2308,9 @@ static int en07_avoid_wall(RECVX_ENEMY_WORK* w, int32_t dir)
         trans.y = root.y;
         trans.z = root.z;
     } else {
+        /* Kein Ersatzversatz: Abbruch mit Meldung. */
         en07_gap(w, "bhEne07_AvoidWall:mlwP->objP[0].pos");
-        trans.x = trans.y = trans.z = 0.0f;
+        return 0;
     }
     if (!(w->flg & 0x80000u)) trans.y = 0.0f;
 
@@ -2294,7 +2326,7 @@ static int en07_avoid_wall(RECVX_ENEMY_WORK* w, int32_t dir)
     pos2.y = pos1.y - 4.5f;
     pos2.z = pos1.z;
 
-    hit1 = en07_line1(w, &pos1, &pos2, &rec1, 0);
+    hit1 = en07_line1(w, &pos1, &pos2, &rec1, 0, 0);
     if (!hit1) {
         pos1.x = w->px + trans.x + vdB.x;
         pos1.y = w->py + trans.y + vdB.y - 4.5f;
@@ -2304,7 +2336,7 @@ static int en07_avoid_wall(RECVX_ENEMY_WORK* w, int32_t dir)
         pos2.y = w->py + trans.y + vdB.y;
         pos2.z = pos1.z - 10.0f * njCos(w->ay);
 
-        hit1 = en07_line1(w, &pos1, &pos2, &rec1, 0);
+        hit1 = en07_line1(w, &pos1, &pos2, &rec1, 0, 0);
     }
 
     pos1.x = w->px + trans.x + vdB.x;
@@ -2315,7 +2347,7 @@ static int en07_avoid_wall(RECVX_ENEMY_WORK* w, int32_t dir)
     pos2.y = pos1.y + 4.5f;
     pos2.z = pos1.z;
 
-    hit2 = en07_line1(w, &pos1, &pos2, &rec2, 0);
+    hit2 = en07_line1(w, &pos1, &pos2, &rec2, 0, 0);
     if (!hit2) {
         pos1.x = w->px + trans.x + vdB.x;
         pos1.y = w->py + trans.y + vdB.y + 4.5f;
@@ -2325,7 +2357,7 @@ static int en07_avoid_wall(RECVX_ENEMY_WORK* w, int32_t dir)
         pos2.y = w->py + trans.y + vdB.y;
         pos2.z = pos1.z - 10.0f * njCos(w->ay);
 
-        hit2 = en07_line1(w, &pos1, &pos2, &rec2, 0);
+        hit2 = en07_line1(w, &pos1, &pos2, &rec2, 0, 0);
     }
 
     if (hit1 && hit2) {
@@ -2582,7 +2614,7 @@ static int en07_obj_edge(RECVX_ENEMY_WORK* w)
         p2.z = w->pz;
 
         /* Der Vergleich liest das vom Dienst GEAENDERTE p2.y. */
-        if (en07_line2(w, &p1, &p2, 0, 0) && (w->py == p2.y)) {
+        if (en07_line2(w, &p1, &p2, 0, 0, 0) && (w->py == p2.y)) {
             return 0;
         }
     }
@@ -2590,8 +2622,9 @@ static int en07_obj_edge(RECVX_ENEMY_WORK* w)
     return ret;
 }
 
-/* en07.c:2318 bhEne07_CalcAtariOffset. */
-static void en07_calc_atari_offset(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* ofp)
+/* en07.c:2318 bhEne07_CalcAtariOffset. Rueckgabe 0: ein Originalschluessel
+   fehlt und wurde gemeldet; `ofp` ist dann nicht beschrieben. */
+static int en07_calc_atari_offset(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* ofp)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
     NJS_MATRIX m;
@@ -2611,6 +2644,7 @@ static void en07_calc_atari_offset(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* ofp)
             njRotateXYZ(&m, key_ang[0], key_ang[1], key_ang[2]);
         } else {
             en07_gap(w, "bhEne07_CalcAtariOffset:mnwP[mtn_no].md2P->p[1]");
+            return 0;
         }
     }
 
@@ -2622,7 +2656,7 @@ static void en07_calc_atari_offset(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* ofp)
         trans.z = root.z;
     } else {
         en07_gap(w, "bhEne07_CalcAtariOffset:mlwP->objP[0].pos");
-        trans.x = trans.y = trans.z = 0.0f;
+        return 0;
     }
     if (!(w->flg & 0x80000u)) trans.y = 0.0f;
 
@@ -2635,4 +2669,5 @@ static void en07_calc_atari_offset(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* ofp)
     ofp->x = out.x;
     ofp->y = out.y;
     ofp->z = out.z;
+    return 1;
 }

@@ -138,7 +138,8 @@ typedef struct {
     int32_t  hp;
     uint32_t flg, flg2, stflg, at_flg;
     uint8_t  mode0, mode1, mode2, mode3;
-    int32_t  ct0;
+    int32_t  ct0, ct1;
+    int32_t  ayp;               /* PlyDG00/01: persistenter Drehschritt     */
     uint32_t mtn_no, mtn_md, hokan_count;
     int32_t  hokan_rate, frm_no, mtn_add;
     /* plp->mnwP: 1 = die Motionquelle des Gegners ist eingehaengt

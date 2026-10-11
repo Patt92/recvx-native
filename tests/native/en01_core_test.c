@@ -244,7 +244,7 @@ static void test_init_hp(void)
     g_player_bound = 1; memset(&g_player, 0, sizeof(g_player));
     work_init(&w, &p);
     w.mdlver = 3; w.type = 0;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check_eq(p.personal_type, 4, "mdlver 3 -> Subtyp 4");
     check_eq(w.hp, 99, "gm_mode 0, rand%16=5: 90 + 10% = 99");
     check_eq(w.mode0, 1, "InitType00 setzt mode0 = 1");
@@ -258,7 +258,7 @@ static void test_init_hp(void)
     g_rand_seq[0] = 5; g_rand_n = 1;
     work_init(&w, &p);
     w.mdlver = 5; w.type = 0;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check_eq(p.personal_type, 10, "mdlver 5 -> Subtyp 10");
     check_eq(w.hp, 40, "gm_mode 2, rand%16=5: 40, Subtyp 10 ohne add_hp");
 
@@ -269,7 +269,7 @@ static void test_init_hp(void)
     g_rand_seq[0] = 0; g_rand_n = 1;
     work_init(&w, &p);
     w.mdlver = 9; w.type = 0;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check_eq(p.personal_type, 19, "mdlver 9 -> Subtyp 19");
     check_eq(w.hp, 48, "add_hp -20 Prozent: 60 -> 48");
 
@@ -278,7 +278,7 @@ static void test_init_hp(void)
     reset_logs();
     work_init(&w, &p);
     w.mdlver = 3;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check(gap_seen("en01_hp_tbl"), "fehlende HP-Tabelle wird namentlich gemeldet");
 }
 
@@ -299,7 +299,7 @@ static void test_init_types(void)
     g_rand_seq[0] = 0; g_rand_n = 1;          /* en01_hp_tbl[0][0] == 60 */
     work_init(&w, &p);
     w.mdlver = 0; w.type = 2;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check_eq(w.hp, 30, "InitType02 halbiert die HP (60 -> 30)");
     check_eq(w.mtn_no, 3, "InitType02 ohne flg 0x80: mtn_no = 3");
     check_eq(p.flags & 0xFu, 1, "InitType02 setzt das untere Nibble auf 1");
@@ -312,7 +312,7 @@ static void test_init_types(void)
     parent.hp = 77; parent.type = 2;
     work_init(&w, &p);
     w.mdlver = 0; w.type = 2; w.flg = 0x80u; w.lkwkp = &parent;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check_eq(w.hp, 77, "InitType02 mit flg 0x80 uebernimmt lkwkp->hp");
     check_eq(w.mtn_no, 203, "InitType02 mit flg 0x80: mtn_no = 203");
     check_eq(p.flags & 0xFu, 0, "InitType02 mit flg 0x80 loescht das Nibble");
@@ -326,7 +326,7 @@ static void test_init_types(void)
     g_rand_seq[0] = 0; g_rand_n = 1;
     work_init(&w, &p);
     w.mdlver = 0; w.type = 6;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check_eq(w.mode2, 4, "InitType06 setzt mode2 = 4");
     check_eq(w.mtn_no, 3, "InitType06 ohne flg 0x80: mtn_no = 3");
 
@@ -334,7 +334,7 @@ static void test_init_types(void)
     g_rand_seq[0] = 0; g_rand_n = 1;
     work_init(&w, &p);
     w.mdlver = 0; w.type = 15;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check_eq(w.mode2, 4, "InitType15 setzt mode2 = 4");
     check_eq(w.mtn_no, 13, "InitType15 ohne flg 0x80: mtn_no = 13");
     check_eq(w.mtn_add, 0, "InitType15 setzt mtn_add = 0");
@@ -347,7 +347,7 @@ static void test_init_types(void)
     g_rand_seq[0] = 0; g_rand_n = 1;
     work_init(&w, &p);
     w.mdlver = 0; w.type = 10;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check_eq(w.flg & 0x20u, 0, "InitType10 loescht flg 0x20");
     check_eq(p.flags & 0x10000000u, 0, "InitType10 loescht flags 0x10000000");
     check_eq(w.mtn_no, 2, "InitType10 ohne flg 0x80: mtn_no = 2");
@@ -356,7 +356,7 @@ static void test_init_types(void)
     g_rand_seq[0] = 0; g_rand_n = 1;
     work_init(&w, &p);
     w.mdlver = 0; w.type = 11;
-    recvx_en01_init(&w, &p);
+    recvx_en01_init_work(&w, &p);
     check(p.flags2 & 0x10u, "InitType11 setzt flags2 0x10");
     check_eq(w.mtn_no, 2, "InitType11 ohne flg 0x80: mtn_no = 2");
 

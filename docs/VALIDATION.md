@@ -104,3 +104,47 @@ ausgegeben.
 
 Logs und Ansichten einzelner Prüfläufe liegen lokal unter
 `build/validation/`.
+
+## Entscheidungen zu undefiniertem Originalverhalten
+
+- **ATR-Zylinderdeckel bei abwärts gerichteten Linien** (Nutzerentscheidung
+  2026-10-11). `bhCollisionCheckLineMain` (`hitchkl.c:350–365`,
+  0x26A418..0x26A4CC) schreibt pro Schleifendurchlauf einen Deckelpunkt und
+  testet sofort ein 8-Eck. In den Durchläufen 0..6 stehen also noch die
+  letzte Seitenfläche (area[1..3]) und nie geschriebener Stack (area[4..7]).
+  Durchlauf 0 trifft wegen area[0]==area[1] (Nullnormale) nie. Festgelegt
+  ist: Nicht geschriebene Punkte umschließen den Schnittpunkt nie. Damit
+  entscheidet nur das vollständige 8-Eck aus Durchlauf 7, danach gilt
+  `p2->y = area[0].y`. Das stimmt mit dem Original überall überein, wo dessen
+  Ergebnis nicht vom Stackinhalt abhängt. Abweichen kann es nur bei einem
+  Schnittpunkt außerhalb des 8-Ecks, für den das Original abhängig vom
+  Stackinhalt einen Phantomtreffer liefern könnte. Test:
+  `native_line_reflection` (Mitte, innerhalb/außerhalb des 8-Ecks, Ecke).
+  Vorher brach jede solche Abfrage die Runtime ab, z. B. die en07-Sichtlinie
+  `bhEne07_SearchPlayer` in RM_2010.
+
+## Live-Effekte Mündungsfeuer/0x49 (2026-10-11)
+Details: work/native_port_live_effects.result.md. Build build/live-effects-20261011, Policy PASS, 13 CTest-Gruppen, verify_combat (Build und Paket), Pixelabnahme Frames 3502/3562 gegen Kontrollbuild (nur Flash-Draw aus). Paket arm64 SHA256 a0adeb29…1a9c, signiert. Windows crossgebaut, nicht ausgeführt.
+
+## Gemeinsamer Effektpool / aufsteigender Pass (2026-10-11 abends)
+Details: work/native_port_live_effects.result.md, Abschnitt „Nachtrag“.
+Sprites, Mündungsfeuer, Partikelwurzeln/Zusatzarbeiten und Blutlachen liegen in
+einem `eff[512]` (effsub3.c:67/92/145); der Effektpass läuft aufsteigend und
+übernimmt die Spawn-Ausgabe nach jeder Prozedur (effect.c:742), Tickgate
+`(sp_flg & 8) || (ef_flg & 1)` (effect.c:750), Zeichengate `pt_flg & 0x10`
+(game.c:339) plus Spiegelterm `gm_flg & 0x4000 && mdflg & 0x40` (effect.c:1301);
+0x49 löst den Empfängerjoint vor dem Ton auf. 62/62 CTest sequenziell,
+verify_combat --runtime-only gegen Build und installierte Runtime, Pixelabnahme
+3502/3562 je 570 Pixel in (163,244)–(213,266) bei identischem Zustand, über
+Start.command reproduziert. Neue produktive Regression (RM_0090 bhEff125→126 im
+selben Pass) ist gegen den gesicherten Vorherstand rot. `native_lighter_effect`
+wurde nicht abgeschwächt: Ursache gemessen (drei bhEff182-Kinder zeichnen jetzt
+im selben Bild), Test sucht die Flamme über ihren Atlaseintrag und ist in beiden
+Ständen grün. Ausgelieferter Starter arm64 SHA256 f77140f4…fa23,
+signiert/verifiziert; Backup
+archived/releases/live-effects-shared-pool-before-20261011-203905 (c9a8de35…b190).
+Windows x64 crossgebaut (SHA256 d86a54fc…1917), windows_link_audit bestanden,
+nicht ausgeführt. Offen: ef_flg/pt_flg haben keinen nativen Schreiber, mdflg wird von
+keiner Effektprozedur gesetzt, Partikelerzeuger nur über den quarantänierten
+en01-Kern erreichbar (kein produktiver Blutspawn geprüft),
+CallPlayerWeaponSeEx-Slot/Position bleibt gemeldete Lücke.

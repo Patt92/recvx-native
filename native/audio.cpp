@@ -16,15 +16,24 @@ void pan_gains(unsigned pan,float& left,float& right){left=pan<=64?1.f:float(127
 PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate){
     if(bytes.empty()||bytes.size()%16||bytes.size()>32*1024*1024||rate<8000||rate>96000)throw std::runtime_error("invalid SPU-ADPCM dimensions");
     static constexpr int coefficients[5][2]={{0,0},{60,0},{115,-52},{98,-55},{122,-60}};
-    PcmClip out;out.rate=rate;out.channels=1;int previous=0,older=0;
+    PcmClip out;out.rate=rate;out.channels=1;int previous=0,older=0;bool loop_start=false;
     for(std::size_t p=0;p<bytes.size();p+=16){const unsigned filter=bytes[p]>>4,shift=bytes[p]&15,flags=bytes[p+1];
         if(filter>4||shift>12||flags>7)throw std::runtime_error("invalid SPU-ADPCM frame");
+        // Block flags are addresses, not a request to repeat the whole waveform.
+        // Bit 2 copies the current address (PSX-SPX "Loop Start"); a later
+        // marked block replaces the earlier one, exactly like the SPU register.
+        if(flags&4){out.loop_start=out.frames();loop_start=true;}
         for(unsigned i=0;i<28;++i){int nibble=(bytes[p+2+i/2]>>((i&1)*4))&15;if(nibble>=8)nibble-=16;
             const int residual=nibble*(1<<(12-shift));const int predictor=coefficients[filter][0]*previous+coefficients[filter][1]*older;
             const int sample=flags==7?0:std::clamp(residual+(predictor>=0?predictor/64:-((-predictor+63)/64)),-32768,32767);
             out.samples.push_back(std::int16_t(sample));older=previous;previous=sample;
-        }if(flags&1)break;
-    }return out;
+        }if(flags&1){
+            // Bit 0 ends, bit 1 repeats instead of releasing (PSX-SPX "Loop
+            // End/Repeat"). Flag 7 mutes its own block and loops it silently.
+            if(flags&2){if(!loop_start)throw std::runtime_error("SPU repeat without explicit loop start unsupported");out.loop_end=out.frames();}
+            break;
+        }
+    }if(!out.loop_end)out.loop_start=0;return out;
 }
 PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned program,int key){
     BinaryView v(bytes);v.require(0,24);const auto hd=v.u32(0),hd_size=v.u32(4),bd=v.u32(8),bd_size=v.u32(12);v.require(hd,hd_size);v.require(bd,bd_size);
@@ -47,6 +56,10 @@ PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned prog
     const auto start=v.u32(vag);std::size_t end=bd_size;for(unsigned i=0;i<=v.u32(vags+12);++i){const auto next=v.u32(entry(vags,i,8));if(next>start)end=std::min(end,std::size_t(next));}
     if(start>=end||end>bd_size)throw std::runtime_error("invalid Sony sound-bank waveform range");
     auto out=decode_ps_adpcm(std::vector<std::uint8_t>(bytes.begin()+bd+start,bytes.begin()+bd+end),v.u16(vag+4));
+    const auto attribute=v.u8(vag+6);
+    if(attribute==0)out.loop_start=out.loop_end=0; // SCEHD_VAG_1SHOT overrides waveform markers.
+    else if(attribute==1){if(!out.loop_end)throw std::runtime_error("Sony looping Vagi without explicit sounding loop bounds unsupported");}
+    else throw std::runtime_error("unsupported Sony Vagi attribute");
     out.volume=float(v.u8(pg+6))/127.f*float(v.u8(zone+0x10))/127.f;out.pan=unsigned(std::clamp(int(v.u8(pg+7))+int(v.u8(zone+0x11))-64,0,127));
     return out;
 }
@@ -358,13 +371,13 @@ std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)th
         if(channel.fade){channel.gain+=(channel.target-channel.gain)/channel.fade;if(!--channel.fade&&channel.target==0){channel.clip.reset();channel.layers.clear();channel.sequence.reset();continue;}}
         if(channel.sequence)sequence_step(channel);
         const float gain=channel.volume*channel.gain;
-        auto voice=[&](std::shared_ptr<PcmClip>& held,double& position,float l,float r){auto& clip=*held;
-            const auto end=channel.loop&&clip.loop_end?clip.loop_end:clip.frames();if(position>=end){if(channel.loop){const auto begin=clip.loop_end?clip.loop_start:0;position=begin+std::fmod(position-end,double(end-begin));}else{held.reset();return;}}
-            const auto i=std::size_t(position),next=channel.loop&&i+1>=end?(clip.loop_end?clip.loop_start:0):std::min(i+1,clip.frames()-1);const float fraction=float(position-i);
+        auto voice=[&](std::shared_ptr<PcmClip>& held,double& position,float l,float r,bool loop){auto& clip=*held;
+            const auto end=loop&&clip.loop_end?clip.loop_end:clip.frames();if(position>=end){if(loop){const auto begin=clip.loop_end?clip.loop_start:0;position=begin+std::fmod(position-end,double(end-begin));}else{held.reset();return;}}
+            const auto i=std::size_t(position),next=loop&&i+1>=end?(clip.loop_end?clip.loop_start:0):std::min(i+1,clip.frames()-1);const float fraction=float(position-i);
             auto sample=[&](unsigned ch){const float a=clip.samples[i*clip.channels+ch],b=clip.samples[next*clip.channels+ch];return (a+(b-a)*fraction)*gain;};left+=sample(0)*l;right+=sample(clip.channels==1?0:1)*r;position+=double(clip.rate)/48000;};
-        if(channel.sequence){for(auto& note:channel.sequence->notes)if(note.layer.clip)voice(note.layer.clip,note.layer.position,note.layer.left,note.layer.right);channel.sequence->until-=1;continue;}
-        if(channel.clip)voice(channel.clip,channel.position,channel.left,channel.right);
-        for(auto& layer:channel.layers)if(layer.clip)voice(layer.clip,layer.position,layer.left,layer.right);
+        if(channel.sequence){for(auto& note:channel.sequence->notes)if(note.layer.clip)voice(note.layer.clip,note.layer.position,note.layer.left,note.layer.right,note.layer.clip->loop_end>note.layer.clip->loop_start);channel.sequence->until-=1;continue;}
+        if(channel.clip)voice(channel.clip,channel.position,channel.left,channel.right,channel.loop);
+        for(auto& layer:channel.layers)if(layer.clip)voice(layer.clip,layer.position,layer.left,layer.right,channel.loop);
         // A finished first note hands the slot to the next sounding layer.
         if(!channel.clip||!channel.layers.empty()){channel.layers.erase(std::remove_if(channel.layers.begin(),channel.layers.end(),[](const Layer& l){return !l.clip;}),channel.layers.end());if(!channel.clip&&!channel.layers.empty()){const auto next=channel.layers.front();channel.layers.erase(channel.layers.begin());channel.clip=next.clip;channel.position=next.position;channel.left=next.left;channel.right=next.right;}}
     }out[f*2]=std::int16_t(std::clamp(left,-32768.f,32767.f));out[f*2+1]=std::int16_t(std::clamp(right,-32768.f,32767.f));}return out;

@@ -74,6 +74,10 @@ als offene Semantik diagnostiziert und wirft, ohne Teilergebnis. Kein
 geratener Deckel, Nullfüllung als Spielverhalten oder emulierter Stack.
 Zylinderseiten sind für horizontale/aufwärts gerichtete Queries portiert;
 ein vollständiger Zylinder-Linienport wird ausdrücklich nicht behauptet.
+**Nachtrag 2026-10-11:** Auf Nutzerentscheidung geschlossen: Nur das
+vollständige 8-Eck des letzten Durchlaufs entscheidet, Stackreste gelten nie
+als Treffer. Kein Abbruch mehr; Begründung in `docs/VALIDATION.md`
+(„Entscheidungen zu undefiniertem Originalverhalten“).
 Weiterer Originalbefund: Das widersprüchliche Typ-7-Rechtsseitengate ist
 bei 0x26A150..0x26A19C bestätigt und erhalten, nicht still korrigiert.
 

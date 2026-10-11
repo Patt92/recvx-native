@@ -135,6 +135,10 @@ public:
     int map_floor()const{return map_flr_;}
     int player_room()const{return ply_rom_;}
     int player_floor()const{return ply_flr_;}
+    int bnk_mode()const{return bnk_mde_;}
+    int bnk_stage()const{return bnk_stg_;}
+    int bnk_floor()const{return bnk_flr_;}
+    int bnk_room()const{return bnk_rom_;}
     bool has_map_data()const{return map_code_!=0;}
     bool no_map()const{return map_mode_==RECVX_MP_MOD_WAIT_NOMAP;}
     float zoom()const{return vew_zom_;}

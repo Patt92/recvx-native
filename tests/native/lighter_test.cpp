@@ -71,7 +71,15 @@ static void resources(const std::filesystem::path& data){
     for(unsigned turn:{0u,16384u}){actor.yaw=int(turn);std::vector<BoneMatrix> model_nodes;Scene draw=world.sample_player(player,&model_nodes);const auto nodes=player.script_nodes(model_nodes);auto hand=nodes.at(9);
         NJS_POINT3 point={.3f,0,-1.5f};njCalcPoint(&hand.value,&point,&point);check(same(world.light_state(1)->position,point),"light offset not transformed by actual hand node");
         const auto count=draw.triangles.size();world.append(draw,model_nodes,stage.cameras.at(0));check(draw.triangles.size()>=count+2,"production flame triangles absent");
-        const auto& t=draw.triangles.at(draw.triangles.size()-2);check(t.blend==SceneBlend::Ninja&&t.blend_register==ninja_blend_register(8,6)&&!t.depth_write&&t.texture_filter==SceneTextureFilter::Linear,"flame blend/filter/depth contract differs");
+        // Die Flamme wird ueber ihren eigenen Atlaseintrag gesucht, nicht
+        // ueber die Listenposition: der Effektpass uebernimmt seit
+        // effect.c:742 die Spawn-Ausgabe aufsteigend, deshalb koennen im
+        // selben Bild erzeugte Arbeiten mit hoeherem Platz nach bhEff009
+        // angehaengt werden (RM_0050: drei bhEff182-Kinder der bhEff218-Werke).
+        std::size_t at=count;
+        for(;at+1<draw.triangles.size();++at)if(draw.triangles[at].texture<draw.textures.size()&&draw.textures[draw.triangles[at].texture].pixels==atlas.at(25).pixels)break;
+        check(at+1<draw.triangles.size(),"bhEff009 flame pair absent from the effect pass");
+        const auto& t=draw.triangles.at(at);check(t.blend==SceneBlend::Ninja&&t.blend_register==ninja_blend_register(8,6)&&!t.depth_write&&t.texture_filter==SceneTextureFilter::Linear,"flame blend/filter/depth contract differs");
         check(draw.textures.at(t.texture).pixels==atlas.at(25).pixels,"production common atlas or alpha was altered");
         const auto* flame=world.effect_state(slot);point=weapon_fire_offset(1);njCalcPoint(&hand.value,&point,&point);
         NJS_MATRIX basis;njUnitMatrix(&basis);const auto camera=stage.cameras.at(0);njRotateY(&basis,-camera.angles[1]);njRotateX(&basis,-camera.angles[0]);njRotateZ(&basis,-camera.angles[2]);njScale(&basis,1,-1,-1);
@@ -79,7 +87,7 @@ static void resources(const std::filesystem::path& data){
         check(same(t.vertices[0].position,point),"flame hand anchor/billboard applies wrong rotation/translation");
         // Real atlas and production geometry rendered in isolation. Runtime
         // acquisition is separately checked by verify_lighter.py.
-        Scene only;only.background=0xff101010;only.textures=draw.textures;only.triangles={t,draw.triangles.back()};NJS_MATRIX view;njUnitMatrix(&view);
+        Scene only;only.background=0xff101010;only.textures=draw.textures;only.triangles={t,draw.triangles.at(at+1)};NJS_MATRIX view;njUnitMatrix(&view);
         const auto center=t.vertices[2].position;njTranslate(&view,-center.x,-center.y,5-center.z);SoftwareRenderer image(128,128);image.set_supersampling(1);image.draw_view(only,view,200,200);
         check(std::count_if(image.pixels().begin(),image.pixels().end(),[](auto pixel){return pixel!=0xff101010;})>0,"real flame atlas/geometry renders no pixels");
     }

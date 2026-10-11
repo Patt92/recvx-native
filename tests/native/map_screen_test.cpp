@@ -435,7 +435,7 @@ static void test_task_sequence(const std::string& data_root){
     screen.init(RECVX_MP_SET_GAME,host,services);
     equal("Öffnen spielt SE 3",sounds.size(),size_t(1));
     if(!sounds.empty()){equal("SE-Typ beim Öffnen",sounds[0].first,0);equal("SE-Nummer beim Öffnen",sounds[0].second,3);}
-    equal("Status aus set_mod MP_SET_GAME",screen.status()&7,2);
+    equal("Status aus set_mod MP_SET_GAME",screen.status()&7,1);
 
     /* Erster Tick: MP_MOD_FIRST legt Hintergrund, Zoom-Screen und die
        Wartetask an, baut den Verbindungsgraphen und wechselt nach MP_MOD_WAIT;
@@ -546,9 +546,14 @@ static void test_palette_and_modes(){
     auto services=services_for(flags,slots);
     services.read_inside_file=[](unsigned,unsigned){return std::vector<std::uint8_t>{};};
     MapHost host;
+    host.mp_prm={1,2,3,4};
     MapScreen screen;
     screen.init(RECVX_MP_SET_EVENT,host,services);
-    equal("MP_SET_EVENT setzt Status Bit 0",screen.status()&7,1);
+    equal("MP_SET_EVENT setzt Status Bit 1",screen.status()&7,2);
+    equal("MP_SET_EVENT bnk_mde",screen.bnk_mode(),1);
+    equal("MP_SET_EVENT bnk_stg",screen.bnk_stage(),2);
+    equal("MP_SET_EVENT bnk_flr",screen.bnk_floor(),3);
+    equal("MP_SET_EVENT bnk_rom",screen.bnk_room(),4+2*100);
     screen.control(host);
     for(int index=0;index<16;++index){
         close_to("Palette "+std::to_string(index)+" a",screen.palette()[index].a,recvx_map_pal[index].a);

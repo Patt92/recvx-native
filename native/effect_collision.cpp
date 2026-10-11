@@ -218,7 +218,6 @@ struct LineClip {
     void cylinder(const CollisionWall& a,float h){
         const auto o=a.position;
         if(!bounds(o.x-a.extent.x,o.x+a.extent.x,o.z-a.extent.x,o.z+a.extent.x))return;
-        if(direction.y<0)throw std::runtime_error("unported ATR cylinder downward line: original cap reads uninitialized polygon points");
         // Side geometry is the original octagon, NOT an analytic circle ray.
         NJS_POINT3 old_bottom{o.x+a.extent.x,o.y,o.z},old_top{old_bottom.x,o.y+h,o.z};
         for(unsigned j=1;j<=8;++j){
@@ -228,6 +227,21 @@ struct LineClip {
             const NJS_POINT3 side[4]={next_bottom,next_top,old_top,old_bottom};polygon(side,4);
             old_bottom=next_bottom;old_top=next_top;
         }
+        if(!(direction.y<0))return;
+        // Downward cap, hitchkl.c:350-365 (0x26A418..0x26A4CC): iteration j
+        // writes area[j] and immediately tests all eight points, so passes
+        // 0..6 still read the last side quad (area[1..3]) and stack never
+        // written by this function (area[4..7]). Pass 0 has area[0]==area[1],
+        // a zero normal, and never hits. Decided with the user (2026-10-11):
+        // unwritten points never enclose the crossing point, so passes 1..6
+        // miss (a miss writes nothing) and only the complete octagon of pass
+        // 7 decides. Not derivable from the original; see docs/VALIDATION.md.
+        NJS_POINT3 cap[8];
+        for(unsigned j=0;j<8;++j){
+            const int angle=int(182.04445f*float((360*j)/8));
+            cap[j]={o.x+a.extent.x*njCos(angle),o.y+h,o.z-a.extent.x*njSin(angle)};
+        }
+        if(polygon(cap,8))end.y=cap[0].y; // p2->y = area[0].y
     }
     bool visit(const CollisionWall& a,float room_height){
         // Per-record return is distinct from the accumulated query hit.

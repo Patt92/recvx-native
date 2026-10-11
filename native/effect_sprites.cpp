@@ -207,6 +207,109 @@ void step_eff182(EffectSprite& s,bool& queued){
     ++s.ct0;
     queued=true;
 }
+// effsub1.c:731 bhEff002 — Rauch/Staub-Sprite (Atlas-Gruppe 2). mdlver waehlt die UV-Tabelle,
+// type das Verhalten. Die Nachfolgeanforderungen laufen ueber bhSetEffectTb (setentry-Muster).
+float eff002_random(){return float(-recvx_core_random_next())/-2147483648.0f;}
+void eff002_request(EffectSprite& s,unsigned type,unsigned mdlver){
+    EffectSpawn e;e.flg=0x4100001;e.id=2;e.type=type;e.flr_no=0;e.mdlver=mdlver;
+    e.position={s.px,s.py,s.pz};e.scale={s.sxb,s.syb,s.szb};e.ax=0;e.ay=0;e.lkono=s.ct0;
+    pending.spawns.push_back(e);
+}
+void step_eff002(EffectSprite& s,bool& queued){
+    if(s.mode0==0){
+        s.tex_id=2;quad_color(s,0x80ffffffu);
+        switch(s.type){
+        case 2:quad_color(s,0x60c0c0c0u);[[fallthrough]];
+        case 0:case 6:s.bl_src=8;s.bl_dst=6;s.yn=0;break;
+        case 3:
+            s.xn=float(double(eff002_random())*0.1-0.05f);
+            s.yn=float(0.1f+double(eff002_random())*0.1);
+            s.zn=float(double(eff002_random())*0.1-0.05f);
+            [[fallthrough]];
+        case 5:
+            quad_color(s,s.mdlver==11?0x40ffffffu:0x40c0c0c0u);
+            s.ani_ct=1;s.bl_src=8;s.bl_dst=6;break;
+        case 4:s.bl_src=8;s.bl_dst=6;s.yn=0;s.ani_ct=1;break;
+        case 7:quad_color(s,0x40ffffffu);s.bl_src=8;s.bl_dst=10;s.spd=64.0f;s.ani_ct=1;break;
+        case 8:
+            s.xn=s.lox;s.yn=s.loy;s.zn=s.loz;
+            quad_color(s,0x40ffffffu);s.ani_ct=1;s.bl_src=8;s.bl_dst=10;break;
+        case 1:
+            s.flg=0x4100001;s.bl_src=11;s.bl_dst=3;
+            s.xn=float(double(eff002_random())*0.2-0.1f);
+            s.yn=float(0.4f+double(eff002_random())*0.3);
+            s.zn=float(double(eff002_random())*0.2-0.1f);
+            s.ani_ct=1;break;
+        case 9:
+            s.xn=float(double(eff002_random())*0.1-0.05f);
+            s.yn=s.sz;
+            s.zn=float(double(eff002_random())*0.1-0.05f);
+            quad_color(s,0xc0202020u);s.ani_ct=1;s.bl_src=8;s.bl_dst=6;break;
+        case 10:s.bl_src=8;s.bl_dst=6;s.ct0=s.lkono;s.ct3=128;break;
+        default:break;
+        }
+        switch(s.mdlver){
+        case 1:s.uv=eff002_v1;break;
+        case 2:case 11:s.uv=eff002_v2;break;
+        case 3:s.uv=eff002_v3;break;
+        case 4:s.uv=eff002_v4;break;
+        case 8:s.uv=eff002_v8;break;
+        case 9:s.uv=eff002_v9;break;
+        case 10:s.uv=eff002_vz;break;
+        default:s.uv=eff002_v0;break;
+        }
+        s.mode0=1;
+        if(s.type<9)return;
+    }else if(s.mode0==1){
+        switch(s.type){
+        case 0:
+            if(s.ct0<4)eff002_request(s,10,10);
+            [[fallthrough]];
+        case 6:
+            s.px+=s.lox;s.py+=s.loy;s.pz+=s.loz;
+            s.lox*=0.9f;s.loy*=0.9f;s.loz*=0.9f;
+            s.py+=s.yn;
+            if(s.yn<0.1f)s.yn+=0.01f;
+            break;
+        case 3:case 8:
+            if(s.flg&0x80){
+                eff002_request(s,3,11);
+                --s.flr_no;
+                if(s.flr_no<=0)s.flg=0;
+                return;
+            }
+            s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+            s.yn=s.yn*0.9f;
+            break;
+        case 4:
+            if(s.ct0<6)eff002_request(s,10,3);
+            s.px+=s.lox;s.py+=s.loy;s.pz+=s.loz;
+            s.lox*=0.9f;s.loy*=0.9f;s.loz*=0.9f;
+            break;
+        case 1:case 9:
+            s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+            s.yn=s.yn*0.9f;
+            break;
+        case 7:
+            quad_color(s,(unsigned(s.spd)<<24)|0xffffffu);
+            s.spd*=0.9f;
+            break;
+        case 10:
+            quad_color(s,(unsigned(s.ct3)<<24)|0xffffffu);
+            s.ct3-=32;
+            if(s.ct3<=0){s.flg=0;return;}
+            break;
+        default:break;
+        }
+    }
+    const auto& uv=latched_uv(s,s.ct0,"bhEff002");
+    if(uv.u==-1.0f){s.flg=0;return;}
+    s.sx=4.0f*(s.sxb*uv.xs);
+    s.sy=4.0f*(s.syb*uv.ys);
+    quad_uv(s,uv);
+    if(s.type<10)++s.ct0;
+    queued=true;
+}
 // effsub5.c:1609 bhEff218 — Feuer. 17 Varianten auf den Texturgruppen 70..79.
 void step_eff218(EffectSprite& s,bool& queued){
     if(s.type==0&&s.mode1!=0)s.type=s.mode1;
@@ -289,7 +392,7 @@ std::vector<std::pair<unsigned,unsigned>> common_effect_categories(){
 }
 bool supported_effect_sprite(unsigned id){
     switch(id){
-    case 9:case 122:case 123:case 125:case 126:case 181:case 182:case 218:case 230:return true;
+    case 2:case 9:case 122:case 123:case 125:case 126:case 181:case 182:case 218:case 230:return true;
     default:return false;
     }
 }
@@ -305,6 +408,7 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
     if(s.id!=9){
         bool entered=false;
         switch(s.id){
+        case 2:step_eff002(s,entered);break;
         case 122:step_eff122(s,entered);break;
         case 123:step_eff123(s,entered);break;
         case 125:step_eff125(s,c);break;

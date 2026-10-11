@@ -10,8 +10,12 @@ struct EffectModelWork;
 // Fields consumed by the original bhEff200/201/218 procedures and draw path.
 struct EffectSprite {
     unsigned id=0,type=0,mode0=0,mode1=0,flg=0,stflg=0,ani_ct=0;bool polygon_queued=false;
+    // O_WRK.mdflg (offset 0x84). The draw pass reads bit 0x40 together with
+    // gm_flg 0x4000 (effect.c:1301); AllocOwork zeroes it and no original
+    // effect procedure writes it, so only a future owner can set it.
+    unsigned mdflg=0;
     int ayp=0;float yn=0;void* func=nullptr;
-    int ax=0,ay=0,az=0,lkono=0,ct0=0,ct1=0,ct2=0,tex_id=-1,bl_src=8,bl_dst=6;
+    int ax=0,ay=0,az=0,lkono=0,ct0=0,ct1=0,ct2=0,ct3=0,tex_id=-1,bl_src=8,bl_dst=6;
     // O_WRK.exp0 as the room procedures use it: the UV table latched at init.
     const void* uv=nullptr;
     // bhSetEffectTb/bhSetEffect fields used by the generated procedures (px..pz must stay contiguous).

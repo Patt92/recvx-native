@@ -161,9 +161,10 @@ static void steam(const std::filesystem::path& data){
     unsigned child=0;bool found=false;
     while(world.effect_state(child)){if(world.effect_state(child)->id==126){found=true;break;}++child;}
     check(found,"bhEff125 did not request the original bhEff126 work");
-    // Der Host leert die Anforderungsliste nach der Pool-Schleife, deshalb
-    // laeuft das erste Bild der Wolke einen Tick spaeter als im Original.
-    world.tick();
+    // effect.c:742 laeuft aufsteigend und schreibt den Spawn unmittelbar in
+    // eff[512]. Der Kindplatz liegt ueber dem Erzeuger, also laeuft seine
+    // Prozedur im selben Pass; ein zusaetzlicher Tick waere die Abweichung.
+    check(child>slot,"bhEff125 child did not land on a higher shared slot");
     const auto* cloud=world.effect_state(child);
     check(cloud->tex_id==35&&cloud->ani_ct==1&&cloud->mode0==1,"bhEff126 texture/animation selection differs");
     check(cloud->yn<0&&cloud->gpy>-1000.0f,"bhEff126 has no original ground reference");
@@ -226,10 +227,34 @@ static void muzzle_flash(const std::filesystem::path& data){
           "real muzzle-flash atlas/geometry renders no pixels");
 }
 
+// effsub1.c:731 bhEff002 — Rauch/Staub, Texturgruppe 2.
+static void puff002(){
+    EffectContext c;bool queued=false;
+    // Init-Durchlauf zeichnet fuer type<9 nicht (return vor dem UV-Teil).
+    auto s=work(2,3);s.mdlver=11;
+    check(step_effect_sprite(s,c,&queued)&&!queued&&s.mode0==1,"bhEff002 init must not draw for type<9");
+    check(s.tex_id==2&&s.ani_ct==1&&s.bl_src==8&&s.bl_dst==6,"bhEff002 type 3 texture/blend differ");
+    for(const auto& v:s.tv)check(v.col==0x40ffffffu,"bhEff002 mdlver 11 colour differs");
+    check(s.xn>=-0.05f&&s.xn<=0.05f&&s.yn>=0.1f&&s.yn<=0.2f,"bhEff002 type 3 velocity outside the original rand range");
+    const float y0=s.yn;
+    check(step_effect_sprite(s,c,&queued)&&queued,"bhEff002 did not enter the translucent list");
+    check(close(s.py,y0)&&close(s.yn,y0*0.9f),"bhEff002 type 3 does not move and damp yn");
+    check(close(s.sx,4.f*0.0625f)&&close(s.sy,4.f*0.0625f)&&s.ct0==1,"bhEff002 UV tile size/advance differ (uvinfo_v2 row 0)");
+    // Typ 0: erzeugt waehrend ct0<4 je Bild eine Typ-10-Arbeit (mdlver 10, lkono=ct0).
+    auto trail=work(2,0);step_effect_sprite(trail,c,&queued);take_effect_output();
+    step_effect_sprite(trail,c,&queued);auto out=take_effect_output();
+    check(out.spawns.size()==1&&out.spawns[0].id==2&&out.spawns[0].type==10&&out.spawns[0].mdlver==10&&out.spawns[0].flg==0x4100001u&&out.spawns[0].lkono==0,"bhEff002 type 0 request differs");
+    // Typ 10: ct0=lkono, ct3=128, je Bild -32, bei <=0 Slot frei.
+    EffectSpawn spawn=out.spawns[0];EffectSprite fade;initialize_effect_sprite(fade,spawn);
+    check(step_effect_sprite(fade,c,&queued)&&queued&&fade.ct3==128,"bhEff002 type 10 must draw in its init pass");
+    unsigned frames=0;while(fade.flg&&frames<8){step_effect_sprite(fade,c,&queued);++frames;}
+    check(!fade.flg&&frames==4,"bhEff002 type 10 does not release after four fades");
+}
+
 int main(int argc,char** argv){
     try{
         _Make_SinTable();
-        sign_plate();blinking_lamp();fire();panel();smoke();
+        sign_plate();blinking_lamp();fire();panel();smoke();puff002();
         if(argc>1){const std::filesystem::path data=argv[1];steam(data);production(data);muzzle_flash(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}

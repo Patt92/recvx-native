@@ -509,7 +509,7 @@ unsigned combi_03(const ComboContext& c,unsigned ps,std::uint32_t& moto,std::uin
     moto=0;aite=(product<<16)|(combo_cap(product,c.game_mode)&0xffff);
     return 1;
 }
-// Combi_04: Kräuter mischen (Menge des einen verbraucht die des anderen).
+// Combi_04: Pulver + Bogenpfeile (Menge des einen verbraucht die des anderen).
 unsigned combi_04(unsigned ps,std::uint32_t& moto,std::uint32_t& aite){
     unsigned ok=0;unsigned b1=moto&0xffff,b2=aite&0xffff;
     unsigned id1=Inventory::id(moto),id2=Inventory::id(aite);
