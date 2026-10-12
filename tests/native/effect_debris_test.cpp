@@ -35,7 +35,7 @@ int main(){try{_Make_SinTable();
     check(request.spawns.empty()&&request.sounds.empty()&&request.bombs.empty()&&!request.light,
           "explosion gap requested effects, sounds, blast damage or a light");
     // Noch nicht portierte Prozeduren: sie duerfen weder laufen noch zeichnen.
-    for(const unsigned id:{0u,5u,15u,16u,23u,24u,25u,29u,200u,201u,231u,232u}){
+    for(const unsigned id:{15u,16u,23u,24u,25u,29u,200u,201u,231u,232u}){ // bhEff000 (Patronenhuelse) und bhEff005 (Blutspritzer, effsub1.c:2099, Gegner-Angriffskette) sind gebunden
         check(!supported_effect_sprite(id),"an effect procedure claims to be bound");
         EffectSprite sprite;EffectSpawn spawn;spawn.id=id;initialize_effect_sprite(sprite,spawn);
         bool queued=true;

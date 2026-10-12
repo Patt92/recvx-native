@@ -19,10 +19,13 @@
 #include "player_combat_core.h"
 #include "object_itmbox.h"
 #include "view_clip.h"
+#include <deque>
 #include <set>
 #include <string>
 #include <map>
 #include <memory>
+#include <optional>
+#include <functional>
 namespace recvx {
 struct PlayerGroundWork {NJS_POINT3 ground{};NJS_POINT3 water_c1{},water_c2{};float water_radius=0;std::optional<GroundHit> hit;};
 struct WorldEntity {
@@ -31,7 +34,10 @@ struct WorldEntity {
     // face.c:141 bhControlMask copies it into LIP_WORK.top/ptr while
     // lip->flag == 0. A running stream therefore keeps its own source.
     std::optional<FaceParameter> facial;std::vector<std::uint8_t> lip_stream,lip_current_stream;unsigned lip_bank=0,lip_pos=0,lip_count=0,lip_time=0,lip_cur=0,lip_next=0;bool lip_active=false;
-bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,type=0,death_ticks=0,object_flags=0,object_parameter=0;int object_floor=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
+bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,type=0,death_ticks=0,object_flags=0,object_parameter=0;int object_floor=0;
+    // O_WRK fields of a room object (kind 2) that enemy routines read and write
+    // (en04.c:1100 door branch, :3955 wire shake): flg2, mode1, mode3, ct0, ayp.
+    unsigned object_flg2=0,object_mode1=0,object_mode3=0;int object_ct0=0,object_ayp=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
     // bhEneLookFlgSet (event.c): original BH_PWORK flg bit 0x8000. Enemy AI
     // consumers (en01.c) are still pending; the state itself is exact.
     bool look=false;
@@ -69,6 +75,13 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // bhCyoutenHenkeiSetEX, the original mbp model indices obj_a/obj_b.
     // Vertex interpolation/rendering is pending; the shape clock is exact.
     bool morph=false;float morph_shape=0;unsigned morph_obj_a=0,morph_obj_b=0;
+    // objP[node].evalflags of the realized models beyond the Work's own
+    // (mbp[0], whose live array is enemy_evalflags). The blend reads the live
+    // array of both sources, not the immutable asset's.
+    std::vector<std::vector<std::uint32_t>> morph_model_flags;
+    const std::vector<std::uint32_t>* morph_live_flags(unsigned model)const{
+        return model&&model<=morph_model_flags.size()&&!morph_model_flags[model-1].empty()?&morph_model_flags[model-1]:nullptr;
+    }
     // C02: the original BH_PWORK of a room enemy (eneset.c:170 bhSetEnemy).
     // It lives here; RoomWorld's enemy table only points at it. enemy_native:
     // bhJumpEnemy[id] has a native routine, so this work (not the fields
@@ -77,6 +90,18 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // mlwP of that work: objP pos/ang (bhSetMotion), objP evalflags, owP
     // flg/mtx (bhCalcTree). enemy_calculated: bhCalcModel has run once.
     std::vector<ModelPose> enemy_obj;std::vector<std::uint32_t> enemy_evalflags,enemy_owp_flg;std::vector<BoneMatrix> enemy_owp_mtx;bool enemy_calculated=false;
+    // Verknuepfte Kindworks (bhEne01_SetLinkEnemy, en01.c:2815). model_owner:
+    // `epp->mlwP = epw->mdl` — das Kind liest und schreibt den Objektbaum des
+    // Elternworks, es hat keinen eigenen. model_window: objP/owP += 8 und
+    // obj_num -= 8 am geteilten ML_WORK (en01.c:2799/10347/3148); der Wert gehoert
+    // deshalb dem Baumbesitzer. motion_library: `epp->mnwP = epw->mnwP`
+    // (en01.c:2829), die Identitaet, deren emtp das Kind abspielt; -1 = eigene.
+    WorldEntity* model_owner=nullptr;unsigned model_window=0;int motion_library=-1;
+    // npSetAllMatColor(mlwP->objP, obj_num, color) (njplus.c:1375) patcht in
+    // JEDEM Objekt des Baums die Materialchunks 17..23: B/G/R werden immer
+    // geschrieben, A nur, wenn der Modellwert nicht 0 ist. Der Wert gehoert
+    // wie der Baum dem model_owner.
+    bool enemy_material_set=false;std::uint32_t enemy_material_color=0;
     // Entity values as the last publish left them; a difference before the
     // next pass is a script write that recvx_enemy_adopt takes over.
     struct EnemyMirror {NJS_POINT3 position{};std::array<int,3> angles{};int yaw=0,floor=0;unsigned motion=0;bool room_motion=false;std::int64_t frame=0,step=0;int hp=0;bool hidden=false,inactive=false,look=false;} enemy_mirror{};};
@@ -86,6 +111,7 @@ public:
     struct CombatTarget {unsigned index,identity;NJS_POINT3 position;float radius,height;int hp;};
     std::vector<CombatTarget> combat_targets()const;
     void combat_difficulty(unsigned mode);
+    void sound_monitor();
     // weapon.c bhCheckEnemies/bhSetGunFire: assigns one hit (joint damage, hit position/direction) to the en01 work.
     bool damage(unsigned index,int weapon,int amount,unsigned comb_flg,NJS_POINT3 position,NJS_POINT3 direction,int hit_joint=-1);
     // Original en01 routines the damage/death port called while they are still unbound (reported, never hidden).
@@ -120,6 +146,11 @@ public:
     // gov_md0 driver of gameover.c is pending).
     bool game_over_requested()const{return game_over_;}
     // bhCyoutenHenkei family on the player work (bhCyoutenHenkeiSetEX type 0).
+    bool player_enemy_motion()const{return player_enemy_motion_;}
+    // en07.c:2190/2221: plp->mnwP is the controlled work's library while a grab
+    // owns the player, and plp->mtn_no then indexes that library. The host frame
+    // count must follow the same source as the sampled clip.
+    unsigned player_motion_frames()const;
     bool player_morph()const{return player_morph_.morph;}float player_morph_shape()const{return player_morph_.morph_shape;}
     const EffectSprite* effect_state(unsigned index)const{return index<sprites_.size()?&sprites_[index].sprite:nullptr;}
     bool effect_visible(unsigned index)const;
@@ -152,6 +183,8 @@ public:
     void commit_player_joints(const std::vector<BoneMatrix>& nodes){player_joint_matrices_=nodes;}
     bool enemy_player_joint(unsigned joint,BoneMatrix& out)const;
     std::vector<ModelPose> player_local_pose()const;
+    void set_pad_clear_callback(std::function<void(uint32_t)> cb){pad_clear_cb_=std::move(cb);}
+    void clear_pad_on(uint32_t bits){if(pad_clear_cb_)pad_clear_cb_(bits);}
     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
     int spawn_player_effect(const EffectSpawn& effect){return spawn_effect(effect,1,0);}
     // bhSetEffectTb for bhSetGunFire requests (bhEff003); link_kind 1 = player, 2 = enemy.
@@ -178,11 +211,22 @@ public:
     bool enemy_grab()const{return enemy_grab_;}
     // sys->pad_ps while grabbed: newly pressed direction bits (0xf) and buttons (0x2d00); bhEne_LeverCheck shakes the zombie off.
     void set_player_lever(unsigned pad_ps){lever_bits_=pad_ps;}
+    unsigned player_lever()const{return lever_bits_;}
     bool player_grabbed()const{return grab_driving_;}
     bool player_dead()const{return player_dead_;}
     bool player_killed()const{return player_killed_;}
     void set_player_attack(bool attacking){player_attacking_=attacking;player_at_flags_=(player_at_flags_&~2u)|(attacking?2u:0u);} // plp->at_flg & 2
     void set_player_weapon(unsigned wpnr_no){player_weapon_=wpnr_no;} // plp->wpnr_no for bhControlPlayer effects
+    void set_player_way(std::int16_t way){player_way_=way;} // plp->way, written by the combat pass (player.c:1707/4992)
+    void set_player_speed(float spd){player_spd_=spd;} // plp->spd of the native action pass
+    // StartVibrationEx(AtrbId, VibNo) requests of enemies, zonzon helpers and
+    // event opcode 0x9f; SetEventVibrationMode of opcode 0x9e. The runtime owns
+    // the vibration unit and drains these once per tick.
+    std::vector<std::pair<int,int>> take_vibration_requests(){auto out=std::move(vibration_requests_);vibration_requests_.clear();return out;}
+    std::optional<int> take_vibration_mode(){auto out=vibration_mode_request_;vibration_mode_request_.reset();return out;}
+    // PEXP0_F(offset) writes by enemy grab routines (en04.c:3448/3449); the
+    // player's EXP_WORK floats live with the runtime's action work.
+    std::vector<std::pair<unsigned,float>> take_player_exp0_writes(){auto out=std::move(player_exp0_writes_);player_exp0_writes_.clear();return out;}
     void start_task(unsigned level);
     void tick();
     unsigned take_enemy_room_flags(){const auto flags=enemy_spawn_.room_flags;enemy_spawn_.room_flags=0;return flags;}
@@ -222,6 +266,12 @@ public:
     // receives fp->py + fp->h, the surface the original splash is placed on.
     bool water_top(NJS_POINT3 position,float& top)const;
     void player_footstep(const PlayerAsset& player);
+    void player_foot_sound(const PlayerAsset& player,unsigned node,unsigned type);
+    bool search_near_enemy_b(NJS_POINT3 pos,int ay,int ar,float len)const;
+    NJS_POINT3 player_safe_position()const{return collision_safe_;}
+    void set_player_safe_position(NJS_POINT3 p){collision_safe_=p;}
+    bool player_safe_position_ready()const{return collision_probe_ready_;}
+    void report_enemy_gap(const char* name){unbound_enemy_.insert(name);}
     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f,std::optional<bool> walking={});
     void bind_player_collision(EventVm&);
     NJS_POINT3 move_player(NJS_POINT3 from,NJS_POINT3 to,int movement,bool run,int turn=0);
@@ -243,7 +293,8 @@ private:
         if(!model.actor)return nullptr;
         return index==0?model.actor.get():model.actor->model(index);
     }
-    struct Context {unsigned kind=0,index=0,node=0,mode1=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
+    /* BH_SCEWORK mode1/mode2 (types.h:1953) */
+    struct Context {unsigned kind=0,index=0,node=0,mode1=0,mode2=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
     struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;};
     struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};
     struct EventCameraTrack {std::vector<EventCamera> keys;unsigned next=0;};
@@ -284,12 +335,16 @@ private:
     int* player_hp_owner_=nullptr;std::uint32_t* player_head_flags_=nullptr;
     int player_ct0_=0,player_ct1_=0,player_ayp_=0,player_hokan_rate_=0;
     unsigned player_mtn_md_=0,player_hokan_count_=0,player_at_flags_=0,player_enemy_owner_=0;
+    const RECVX_ENEMY_WORK* player_enemy_work_=nullptr; // plp->mnwP: the grabbing work
     unsigned player_frm_mode_=0,player_mtn_attr_=0;
     std::vector<ModelPose> player_obj_;std::vector<unsigned> player_owp_flags_;
     bool enemy_player_driving_=false;
     // owP belongs to the player model and is published by its control pass,
     // not by rendering. Enemy joint queries read the previous committed tree.
     std::vector<BoneMatrix> player_joint_matrices_;
+    BoneMatrix player_link_matrix_{};
+    bool player_link_matrix_valid_=false;
+    std::function<void(uint32_t)> pad_clear_cb_;
     SceneSpawn& player_;std::size_t& motion_;std::int64_t& frame_;AudioMixer& audio_;
     std::array<Context,16> contexts_{};
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
@@ -300,6 +355,7 @@ private:
     void gun_fire(unsigned kind,unsigned index,const BoneMatrix& joint,unsigned wno,unsigned jno,unsigned hand,int ang);
     void process_effect_output();
     int reserve_effect_slot(unsigned start=0);
+    void tick_shadow(unsigned slot);
     void write_particle_slot(unsigned slot,unsigned flags,unsigned id);
     void bomb_damage(const BombRequest& bomb);
     EffectParticles particles_;
@@ -315,14 +371,27 @@ private:
     // T3 service supplement (en03_lib.h RECVX_ENEMY_EXT): the original
     // rom->walp + sys->mwalp order for the shared en03.c:5220 wall pass.
     RECVX_ENEMY_EXT enemy_ext_{};std::vector<CollisionWall> enemy_wall_cache_;
+    // Kindworks aus bhSetEnemy(&zob_lkmtab, ...) (en01.c:2817): Raumlebensdauer
+    // wie ene[], stabile Adressen, weil die Tabelle nur Zeiger haelt.
+    std::deque<WorldEntity> enemy_children_;
+    WorldEntity* create_enemy_child(RECVX_ENEMY_WORK* parent);
     void bind_enemy_services();
     void init_enemy_works();
     void control_enemy_works();
     void control_enemy_player_motion();
     const MotionClip* player_enemy_clip()const;
+    // mlwP eines Works: der Objektbaum, den er liest und schreibt. Ein Kind
+    // mit `epp->mlwP = epw->mdl` (en01.c:2827) hat keinen eigenen.
+    WorldEntity& tree_owner(WorldEntity& e)const{return e.model_owner?*e.model_owner:e;}
+    const WorldEntity& tree_owner(const WorldEntity& e)const{return e.model_owner?*e.model_owner:e;}
     void adopt_enemy_script(WorldEntity& e);
     void publish_enemy(WorldEntity& e);
     const MotionClip* enemy_mn_work(const WorldEntity& e,std::uint32_t mtn_no)const;
+    // Ist fuer diesen Work ueberhaupt ein Clip vorhanden? Szenenfiguren wie
+    // Identitaet 91 in RM_9301 haben in ihrer RDT keinen emtp-Eintrag (room.c
+    // legt dann eine genullte mnwP an): es laeuft dort kein bhSetMotion, also
+    // ueberschreibt auch nichts einen Skript-Schreibzugriff auf objP.
+    bool enemy_motion_available(const WorldEntity& e,unsigned mtn,bool room)const;
     void calc_enemy_model(WorldEntity& e);
     void sync_player_grab();
     std::vector<BoneMatrix> player_joints_now()const;
@@ -334,11 +403,28 @@ private:
     struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
-    bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=false,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::map<unsigned,std::size_t> barrel_walls_;
+    bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
+    float player_spd_=0; // plp->spd
+    // player.c:1366-1387 bhControlPlayer: pxb/pyb/pzb of the previous pass and
+    // EXP_WORK nlxb/nlyb/nlzb, the last settled root position (owP[0]).
+    NJS_POINT3 player_prev_pos_{},player_last_tick_pos_{},player_nl_{};bool player_prev_valid_=false;
+    // plp->djnt_no / dvx..dvz / dpx..dpz written by enemy hit routines.
+    int player_hit_joint_=-1;NJS_POINT3 player_hit_dv_{},player_hit_dp_{};
+    // plp->mlwP->objP[node] writes of the enemy pass; the next player motion
+    // write replaces them, so they are removed at the next world tick.
+    std::vector<unsigned> player_transient_nodes_;
+    std::vector<std::pair<int,int>> vibration_requests_;std::optional<int> vibration_mode_request_;
+    std::vector<std::pair<unsigned,float>> player_exp0_writes_;
+    std::vector<CollisionWall> enemy_floor_cache_,enemy_step_cache_;
+    int effect_template_ay_=0; // sys->ef.ay carried between EN01 writers (RECVX_EN01_EF_KEEP_AY)
+    bool enemy_work_index(const RECVX_ENEMY_WORK* w,unsigned& index)const;
+    int effect_tb(unsigned flg,int id,int type,unsigned mdlver,NJS_POINT3 position,NJS_POINT3 scale,int ax,int ay,const RECVX_ENEMY_VEC* ofs,RECVX_ENEMY_WORK* link_w,bool link_player,int lkono);
     unsigned player_weapon_=0,effect_yk_ct_=0,presentation_flags_=~0u; // system.c initializes pt_flg to ~0u
     unsigned effect_flags_=0; // system.c:195 sys->ef_flg = 0
     void control_player_effects();
+    std::vector<CollisionWall> effect_walls_; // rom->walp + sys->mwalp as bhCheckWallType sees them
     std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;
+    std::vector<std::shared_ptr<const ShadowGeometry>> shadow_models_;
     std::vector<MotionClip> room_motions_;
     std::vector<std::vector<FaceParameter>> face_sequences_;std::vector<unsigned> face_sequence_ids_;std::vector<std::vector<std::uint8_t>> lip_sequences_;
     mutable std::map<unsigned,MotionClip> room_motion_segments_;
@@ -351,10 +437,24 @@ private:
     const MotionClip& posed_motion_clip(const WorldEntity& entity)const;
     const MotionClip& motion_clip(const WorldEntity& entity,unsigned motion,bool room_motion)const;
     const MotionClip& entity_motion_data(const WorldEntity& entity,unsigned motion,bool room_motion)const;
+    // Der verknuepfte Oberkoerperwork (bhEne01_SetLinkEnemy, en01.c:2815) teilt
+    // sich Objektbaum und owP mit dem Hauptwork; sein bhSetMotion laeuft mit
+    // objP/owP += 8 und obj_num -= 8 auf den Knoten 8.. (en01.c:2799-2805,
+    // :10347-10353, :3145-3160). Unterer und oberer Teil liegen als getrennte
+    // Clips vor: mnwP[mtn] mit 8 Kanaelen und mnwP[mtn + 0xc8] mit 10
+    // (en01_walk_mtn, en01.c:1118); im Raumvorrat ist das Paar (mtn, mtn+1).
+    // Ein Entity hat nur EINEN Objektbaum, deshalb fuehrt der Host beide
+    // Fenster in einem Clip zusammen. Die Kanalordnung bleibt die des
+    // Originals: mtn_tp = en01_flipTree (en01.c:2400) bildet Kanal k auf Knoten
+    // flipTree[k] ab, und flipTree[8..17] == 8 + flipTree2[0..9] (en01.c:2407).
+    // nullptr, wenn kein Paar vorliegt; der Aufrufer behaelt dann den unteren
+    // Clip (kein Ersatzclipp, keine erfundene Oberkoerperpose).
+    const MotionClip* segmented_clip(const MotionClip& lower,const MotionClip& upper,std::map<unsigned,MotionClip>& cache,unsigned key)const;
     std::vector<CollisionWall> walls_;
     struct FloorSound {CollisionWall area;unsigned sound;};
     std::vector<FloorSound> floor_sounds_;std::vector<CollisionWall> effect_water_room_,effect_water_mobile_;
     std::vector<EnemyArea> enemy_areas_;EnemySpawnContext enemy_spawn_;
+    std::vector<CollisionWall> route_areas_;std::vector<std::uint8_t> route_table_; // rom->rutp / rom->ruttp (rutchk.c)
     unsigned footstep_slot_=4;
     std::size_t footstep_motion_=~std::size_t(0);
     std::int64_t footstep_frame_=-1;

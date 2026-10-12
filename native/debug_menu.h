@@ -4,7 +4,8 @@
 namespace recvx {
 struct DebugConfig {
     SDL_Scancode hotkey=SDL_SCANCODE_F2;
-    bool enemy_grab=false; // Debug override default; the engine itself permits original attacks.
+    bool enemy_grab=false; // Only meaningful with enemy_grab_configured; unset lets the runtime default to the original attacks.
+    bool enemy_grab_configured=false;
     static DebugConfig read(const std::filesystem::path& path);
     static void write_defaults(const std::filesystem::path& path);
     // A packaged macOS app keeps editable configuration beside the .app.

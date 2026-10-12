@@ -63,6 +63,7 @@ gekennzeichnet; Raumskripte und Ressourcen bleiben unverändert.
 | `verify_bgm_rooms.py` | Musik beim Verlassen, normale und übersprungene Tür |
 | `verify_audio_state.py` | Event_init → RoomSoundCase → Soundbank |
 | `verify_combat.py` | Messeraufnahme, Ausrüstung, Kampf |
+| `verify_enemy_ai.py` | Zombie-Verfolgung, Griff/Biss, Hebelrütteln, Tod → Game Over (RM_0080) |
 | `verify_ammunition.py` | Munitionsaufnahme mit leerer Pistole |
 | `verify_pickups.py` | Karten- und breite Waffenaufnahmen |
 | `verify_pickup_slide.py` | Aufnahmefrage ignoriert Eingaben während des Einfahrens |
@@ -148,3 +149,15 @@ nicht ausgeführt. Offen: ef_flg/pt_flg haben keinen nativen Schreiber, mdflg wi
 keiner Effektprozedur gesetzt, Partikelerzeuger nur über den quarantänierten
 en01-Kern erreichbar (kein produktiver Blutspawn geprüft),
 CallPlayerWeaponSeEx-Slot/Position bleibt gemeldete Lücke.
+
+## Gegner-Angriffe: Hunde und Spielermotion im Griff (2026-10-12 abends)
+Details: work/native_port_enemy_ai.result.md, Abschnitt „Nachtrag“. Build
+build/enemy-ai-claude-20261011, Policy PASS. `tools/verify_enemy_ai.py` PASS
+(build/validation/enemy-ai-20261012/verify-final): RM_0080 Zombies, RM_0060/RM_0031/RM_3070
+natürlich, RM_1000 Hunde natürlich (Griff/Freigabe/Game Over), RM_0050 Falle (Diagnose-Snapshot).
+76/77 CTest seriell (rot: shadow_modifier_pixels, parallele untracked Schattenarbeit, Baseline
+identisch). Installiertes Starter-Binary arm64 SHA256 44bb6154…1743, signiert/verifiziert, Smoke über
+Start.command (headless und Standardlauf mit SDL-Dummy); Backup
+archived/releases/enemy-ai-dogs-before-20261012-204915. Windows x64 crossgebaut
+(64db1186…0c06), Policy mit Builddir PASS, nicht ausgeführt. Logs:
+build/validation/enemy-ai-20261012/dogs.

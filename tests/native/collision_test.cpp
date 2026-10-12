@@ -3,14 +3,36 @@
 #include "effect_sprites.h"
 #include "ninja_math.h"
 #include "geometry_atr.h"
+#include "wall_capsule.h"
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 using namespace recvx;
 static void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+// pwksub.c:1891 bhCheckC2Wall / sdfunc.c:824 CheckCollision4Sound, expectations from the original formulas.
+static void c2_wall(){
+    auto cap=[](NJS_POINT3 a,NJS_POINT3 b){return RECVX_CB_CAPSULE{{a.x,a.y,a.z},{b.x,b.y,b.z},0.1f};};
+    const CollisionWall box{1,0,0,0,0,{0,0,-20},{.01f,0,40}};
+    check(check_c2_wall({box},100,cap({-10,5,0},{10,5,0}))==1,"type 0 box (h 0 -> rom->h) must block the sound capsule");
+    check(check_c2_wall({box},100,cap({-10,5,30},{10,5,30}))==0,"capsule beside the type 0 box blocked");
+    auto off=box;off.attributes=0x10;check(check_c2_wall({off},100,cap({-10,5,0},{10,5,0}))==0,"attr 0x10 walls are skipped");
+    off=box;off.flags=0;check(check_c2_wall({off},100,cap({-10,5,0},{10,5,0}))==0,"disabled walls are skipped");
+    const CollisionWall pillar{1,2,0,0,0,{0,0,0},{1,10,0}};
+    check(check_c2_wall({pillar},100,cap({-10,5,0},{10,5,0}))==1&&check_c2_wall({pillar},100,cap({-10,5,5},{10,5,5}))==0,"type 2 cylinder radius w");
+    // Type 4 prism over (0,0),(10,0),(0,10): bhCheckInnerTriangle(hp,pos,0,0) keeps |pz+d-z| > |d/(w/(x-px))|.
+    const CollisionWall prism{1,4,0,0,0,{0,0,0},{10,10,10}};
+    check(check_c2_wall({prism},100,cap({2,20,2},{2,-5,2}))==1,"type 4 top face inside the triangle");
+    check(check_c2_wall({prism},100,cap({8,20,8},{8,-5,8}))==0,"type 4 outside the hypotenuse");
+    // Type 7 boxes put v[0].y = py-0.1 under v[6].y = py+h; njCollisionCheckBC still hits through the faces.
+    const CollisionWall slab{1,7,0,0,0,{0,0,0},{10,.05f,10}};
+    check(check_c2_wall({slab},100,cap({2,50,2},{2,-50,2}))==1&&check_c2_wall({slab},100,cap({2,50,2},{2,10,2}))==0,"type 7 slab");
+    check(check_collision_4_sound({box},100,0,{-10,5,0},{10,5,0})==0,"rom->flg without bit 2 never occludes");
+    check(check_collision_4_sound({box},100,2,{-10,5,0},{10,5,0})==-0x1C,"CheckCollision4Sound returns -0x1C");
+}
 int main(){try{
     _Make_SinTable();
+    c2_wall();
     std::array<float,32> floors{};floors[3]=20;
     CollisionWall wall{1,0,0,0,0,{0,0,-20},{.01f,0,40}};
     auto move=[&](NJS_POINT3 a,NJS_POINT3 b,float radius=1){return move_walls({wall},100,floors,a,b,radius);};

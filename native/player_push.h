@@ -28,6 +28,8 @@ public:
  const RECVX_PUSH_STATE& state()const{return state_;}
  std::vector<CollisionWall> walls()const;
  std::vector<RECVX_STAIR_AREA> steps()const;
+ // hitchk.c:4965/5003 bhSetUseKaidanFlag/bhClrUseKaidanFlag on a sys->metcp entry: attr 0x400000.
+ void mark_step(unsigned index,bool used){recvx_push_step_attr(core_,index,used?0x400000u:0u,used?0u:0x400000u);}
  std::vector<RECVX_STAIR_AREA> floors()const;
  NJS_POINT3 object(unsigned i)const;
  // SetMtnSlow (mtn_md 8): the half-step reverse of MTN49 samples between keys.

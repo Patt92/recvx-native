@@ -84,10 +84,11 @@ bool query(MotionTerrain t,MotionActor s,NJS_POINT3& p,NJS_POINT3 previous,float
             const float dx=a.position.x-p.x,dz=a.position.z-p.z,reach=radius+a.extent.x;
             if(!(njSqrt(dx*dx+dz*dz)<reach&&p.y+height>=a.position.y&&p.y<=a.position.y+h))break;
             ++hits;
-            if((a.attributes&0x40)&&(s.status&0x40000000u)&&!(s.flags&6)){
+            unsigned& plf=s.player_flags?*s.player_flags:s.flags;
+            if((a.attributes&0x40)&&(s.status&0x40000000u)&&!(plf&6)){
                 float sine,cosine;njSinCos(s.yaw,&sine,&cosine);NJS_VECTOR direction{dx,0,dz};njUnitVector(&direction);
                 s.mode=(-sine*direction.x-cosine*direction.z)>0?2:0x102;
-                s.flags|=0x10004;s.system|=4;
+                plf|=0x10004;s.system|=4;
                 if(!s.effect29)throw std::runtime_error("motion wall attribute 0x40 requires native effect29 owner");
                 if(s.effect29(source,index))source.attributes&=~0x40u;
             }

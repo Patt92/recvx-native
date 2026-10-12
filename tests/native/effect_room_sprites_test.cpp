@@ -251,10 +251,43 @@ static void puff002(){
     check(!fade.flg&&frames==4,"bhEff002 type 10 does not release after four fades");
 }
 
+
+// effsub1.c:255 bhEff000: Typ 0 Init-Zufallswerte, Flugbahn, Bodenabprall, CallYakkyouSe(262) nach der zweiten Beruehrung.
+static void cartridge_case(){
+    std::vector<CollisionWall> walls{{1,6,0,0,0,{-50,0,-50},{100,0,100}}}; // type 6 slope-free floor box would use bhGetGroundPosition; use a type 0 box floor
+    walls[0].type=0;walls[0].position={-50,-10,-50};walls[0].extent={100,10,100};
+    GroundCollision ground;ground.update(walls,100.f);
+    set_effect_walls(&walls,100.f);set_effect_ground(&ground,nullptr,nullptr);set_effect_water({});
+    EffectContext c;c.yk_ct=7;bool queued=false;
+    { // yk_ct == flr_no releases the work immediately
+        EffectSpawn spawn;spawn.id=0;spawn.type=0;spawn.flr_no=7;spawn.flg=1;EffectSprite s;initialize_effect_sprite(s,spawn);
+        step_effect_sprite(s,c,&queued);check(s.flg==0,"bhEff000 must release when yk_ct == flr_no");}
+    { // py < -100 releases too
+        EffectSpawn spawn;spawn.id=0;spawn.type=0;spawn.flg=1;spawn.position={0,-101,0};EffectSprite s;initialize_effect_sprite(s,spawn);
+        step_effect_sprite(s,c,&queued);check(s.flg==0,"bhEff000 must release below py -100");}
+    recvx_core_random_seed(1);
+    EffectSpawn spawn;spawn.id=0;spawn.type=0;spawn.flg=1;spawn.flr_no=3;spawn.position={0,5,0};spawn.ay=4096;EffectSprite s;initialize_effect_sprite(s,spawn);
+    recvx_core_random_seed(1);
+    const float r1=-recvx_core_random_next()/-2.1474836e9f,r2=-recvx_core_random_next()/-2.1474836e9f,r3=-recvx_core_random_next()/-2.1474836e9f;
+    recvx_core_random_seed(1);
+    check(step_effect_sprite(s,c,&queued),"bhEff000 not dispatched");
+    check(s.tex_id==5&&s.ani_ct==0&&s.polygon_queued&&s.mode0==1,"bhEff000 mode 0 state differs");
+    const float zn0=0.65f+0.1f*r2;
+    const int ayp=4096-(int(182.04445f*(110.0f+(16.0f*r3-8.0f)))&0xFFFF);
+    check(close(s.yn,0.2f*r1-0.04f)&&close(s.zn,zn0)&&s.ayp==ayp,"bhEff000 type 0 launch values differ");
+    NJS_POINT3 first{-zn0*njSin(ayp),5+0.2f*r1,-zn0*njCos(ayp)};
+    check(close(s.px,first.x)&&close(s.py,first.y)&&close(s.pz,first.z),"bhEff000 first flight step differs");
+    check(!(s.flg&0x80),"bhEff000 clears the link bit after init");
+    // fall until the floor: mode must leave 1 and the shell sound must be requested at most twice
+    unsigned sounds=0;
+    for(unsigned pass=0;pass<400&&s.flg;++pass){step_effect_sprite(s,c,&queued);sounds+=unsigned(take_effect_output().room_sounds.size());}
+    check(!s.flg,"bhEff000 never released after settling");
+    check(sounds>=1&&sounds<=2,"CallYakkyouSe(262) must run for ct0 0 and 1 only");
+}
 int main(int argc,char** argv){
     try{
         _Make_SinTable();
-        sign_plate();blinking_lamp();fire();panel();smoke();puff002();
+        cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
         if(argc>1){const std::filesystem::path data=argv[1];steam(data);production(data);muzzle_flash(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}

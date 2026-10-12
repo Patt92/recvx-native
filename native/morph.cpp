@@ -8,14 +8,15 @@ constexpr std::size_t header_size=64;
 // npTransform advances sp/dp/fp by two NJS_POINT4 per vertex.
 constexpr std::size_t vertex_size=32;
 }
-MorphStreams morph_streams(const std::vector<std::uint8_t>& model,std::size_t objects){
+MorphStreams morph_streams(const std::vector<std::uint8_t>& model,std::size_t objects,const std::vector<std::uint32_t>* evalflags){
     MorphStreams out;out.model=&model;out.chunk.assign(objects,MorphStreams::none);
     BinaryView v(model);
     const auto base=v.u16(4);
     const auto nodes=v.relative(base,v.u32(12),objects*52);
     for(std::size_t i=0;i<objects;++i){
         // npPushMdlstr2 skips evalflags 0x8; a NULL model has no vlist to blend.
-        if(v.u32(nodes+i*52)&0x8u)continue;
+        const auto flags=evalflags&&i<evalflags->size()?(*evalflags)[i]:v.u32(nodes+i*52);
+        if(flags&0x8u)continue;
         const auto mdl=v.u32(nodes+i*52+4);
         if(mdl==0xffffffff)continue;
         const auto vlist=v.u32(v.relative(base,mdl,24));

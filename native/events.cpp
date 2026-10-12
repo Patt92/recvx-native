@@ -224,7 +224,7 @@ int EventVm::instruction(Task& t){
     case 0x93:world(t,op,2);return 1;            // bhBgmOff2
     case 0x77:world(t,op,6);return 1; // bhSoundVolumeSet
     case 0xb6:world(t,op,2);return 1; // bhRoomSoundCase -> SetRoomSoundCaseNo
-    case 0x19:world(t,op,8);return 1;
+    case 0x19:case 0xc4:world(t,op,8);return 1;
     case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x67:{unsigned length=0;switch(v.u8(p+1)){case 0:case 0x80:case 0x8b:case 0x90:length=2;break;case 0x8f:length=6;break;case 0x92:case 0x93:length=8;break;case 0x94:case 0x95:length=4;break;default:throw std::runtime_error("unimplemented Sub_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x15:world(t,op,4);return 1;

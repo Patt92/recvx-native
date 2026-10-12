@@ -355,7 +355,7 @@ void recvx_en04_dmg_chk(RECVX_ENEMY_WORK* w) { /* :626 */
     if(!(e->flg&0x4000000))return;
     e->flg&=~0x40c0000u;p.exp1_flags|=4;
     XNEED(pad_on_clear,"sys->pad_on");context.en04->pad_on_clear(15);
-    p.flg=(p.flg&~0x10000u)|8;p.stflg&=~0x50000u;p.at_flg=0;p.mtn_enemy=0;
+    p.flg=(p.flg&~0x10000u)|8;p.stflg&=~0x50000u;p.at_flg=0;p.mtn_enemy=0;p.mtn_enemy_work=NULL;
     if(p.flg2&0x200) {
         RECVX_ENEMY_VEC dv;int32_t j;
         XNEED(player_hit_get,"plp->dvx");if(!context.en04->player_hit_get(&j,&dv,NULL)) {gap(w,"plp->dvx");return;}
@@ -506,7 +506,11 @@ void recvx_en04_brain(RECVX_ENEMY_WORK* w) {
         if((e->search&64)&&e->dist<50&&!e->line_hit&&w->flr_no==p.flr_no)q=p.pos;
         else {
             XNEED(check_route,"bhCheckRoute");RECVX_ENEMY_VEC from=position(w);
-            if(!context.en04->check_route(&from,&p.pos,&q)){gap(w,"bhCheckRoute result");return;}
+            /* rutchk.c:5 writes `pos` only for a valid zone pair; without route
+               zones the original continues with the uninitialised stack value
+               of the previous call. The last target is that value here; the
+               brain pass itself goes on as in the original. */
+            if(!context.en04->check_route(&from,&p.pos,&q)){gap(w,"bhCheckRoute: keine Wegezone (Original liest uninitialisiertes pos)");q.x=e->target.x;q.y=p.pos.y;q.z=e->target.z;}
         }e->target.x=q.x;e->target.z=q.z;
     }
     switch(w->mode2) {
@@ -775,6 +779,7 @@ static void player_grab(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl) {
     case 0:
         pl->mtn_enemy = 1;
         pl->mtn_enemy_owner = w->id;
+        pl->mtn_enemy_work = w;
         pl->frm_no = 0;
         pl->hokan_count = 5;
         pl->mtn_add = 65536;
@@ -820,6 +825,7 @@ static void player_grab(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl) {
                 context.en04->player_node_pos_set(0, 2, 0.0f);
             } else gap(w, "plp->mlwP->objP[0].pos");
             pl->mtn_enemy = 0;
+            pl->mtn_enemy_work = NULL;
             pl->frm_no = 0;
             pl->mtn_no = 42;
             pl->hokan_rate = 58982;
@@ -870,6 +876,7 @@ static void player_death(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl) {
         pl->flg &= ~0x40000u;
         pl->mtn_enemy = 1;
         pl->mtn_enemy_owner = w->id;
+        pl->mtn_enemy_work = w;
         pl->frm_no = 0;
         pl->hokan_count = 5;
         pl->mtn_add = 65536;
@@ -997,7 +1004,17 @@ static void mv02(RECVX_ENEMY_WORK* w) { /* en04.c:1792 */
         /* en04.c:1822: kein break */
     case 1:
         if(e->flg&0x1000) {
-            w->mode3=2;have_rot=0; /* en04.c:1825: rot bleibt undefiniert */
+            /* en04.c:1824-1826 laesst `rot` unzugewiesen in die gemeinsame
+               Schlusszeile (en04.c:1962-1966) laufen. Im Original liegt `rot`
+               in $s0; bhEne04_MV02 beschreibt $s0 vor dieser Stelle nicht,
+               also traegt es den Wert des Aufrufers weiter: bhEne04_MVType00
+               setzt $s0 = $sp + 0x58 (SLUS_201.84 0x1A6138) und laesst es bis
+               zum jalr 0x1A63A8 nach bhEne04_MoveMode2[] unveraendert.
+               bhEne04_RunMotion (en04.c:3657) wertet nur `rot != 0` und
+               `rot > 0` aus; ein positiver EE-Stackzeiger ergibt deshalb
+               idx 0 = mtn_tbl[0] bzw. mtn_tbl2[0]. rot = 1 bildet genau
+               dieses Ergebnis ab. */
+            w->mode3=2;rot=1;
         }else {
             speed_up(w,0.1f,1.2f);
             if(w->spd>=1.2f&&w->ct1<10&&w->ct3==0) {

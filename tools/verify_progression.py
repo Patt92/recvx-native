@@ -28,7 +28,7 @@ REPLAY = '''0 debug_key F2
 360 up
 361 confirm
 362 down
-363 confirm
+366 confirm
 370 cancel
 400 position 34.5 0 5 0
 420 position 44.5 0 5 0
@@ -40,7 +40,7 @@ REPLAY = '''0 debug_key F2
 600 up
 601 confirm
 602 down
-603 confirm
+606 confirm
 610 cancel
 '''
 
@@ -70,7 +70,13 @@ def check(runtime, data, folder, prefix):
             for field in ['player_hidden', 'player_scripted', 'cinematic', 'dialog_open', 'inventory_open', 'box_open']:
                 assert not result[field], (name, field)
             assert result['fixed_camera'] == -1, name
-        if name in ('box', 'deposit-pass'):
+        # sub1.c ItemBox testmode 2 scrollt die Kistenliste mit +/-19 px je Bild
+        # und schiebt den Index erst nach 38/|number| Bildern vor; Bestaetigen
+        # ist waehrenddessen gesperrt (7606). Der Lighter liegt deshalb schon bei
+        # Bild 364 in der Box, die Waffe erst danach (Replay: down 362, confirm 366).
+        if name == 'box':
+            assert result['security_items_2'][:1] == [327681], (name, 'lighter deposit')
+        if name == 'deposit-pass':
             assert result['security_items_2'][:2] == [327681, 3604481], (name, 'gun/lighter deposit')
             assert result['items'][1] == result['items'][3] == 0, name
         if name == 'withdraw':

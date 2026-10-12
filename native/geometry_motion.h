@@ -13,6 +13,13 @@ struct MotionActor {
     int yaw;bool player=true;
     // bhSetEffect(29, &plp->px, &hp->flg, 0); `index` is the ATR place in MotionTerrain::walls.
     std::function<bool(CollisionWall&,std::size_t index)> effect29;
+    // hitchk.c:250-295 liest und schreibt dieser Zweig IMMER den Spielerwork:
+    // `!(plp->flg & 0x6)`, `plp->flg |= 0x10004`, `*(int*)&plp->mode0 = …`,
+    // `sys->st_flg |= 4`, `bhSetEffect(29, (POINT*)&plp->px, &hp->flg, 0)` —
+    // auch wenn bhCheckWallEx mit einem Gegnerwork laeuft (zonzon.c:1222).
+    // `player_flags` ist deshalb plp->flg, waehrend `flags` der Work des
+    // Aufrufers bleibt (solid_enabled liest ihn). Leer = dasselbe Feld.
+    unsigned* player_flags=nullptr;
 };
 struct MotionTerrain {
     std::vector<CollisionWall>& walls; // room, then mobile, then temporary limits

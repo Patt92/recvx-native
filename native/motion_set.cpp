@@ -53,10 +53,16 @@ struct Pass {
     const MotionClip& clip;const std::int8_t* datP;std::vector<ModelPose>& obj;const std::vector<std::uint32_t>& owp;std::string* gap;
     bool fail(const char* what){if(gap&&gap->empty())*gap=what;return false;}
     // NormalTbl (Motion.c:7) is the identity over 64 nodes.
+    static constexpr std::size_t surplus=~std::size_t(0);
     bool node(std::size_t at,std::size_t& out){
         if(!datP&&at>=64)return fail("bhSetMotion:NormalTbl[64] ueberschritten");
         const std::int32_t n=datP?datP[at]:std::int32_t(at);
-        if(n<0||std::size_t(n)>=obj.size()||std::size_t(n)>=owp.size())return fail("bhSetMotion:objP/owP-Index ausserhalb des Modells");
+        if(n<0)return fail("bhSetMotion:objP/owP-Index ausserhalb des Modells");
+        // A motion with more channels than the model has objects: the original
+        // writes objP[n] past the model's object array (Motion.c:131 loops over
+        // the motion's obj_num). That write has no target here; the channel is
+        // consumed and reported as the original defect it reproduces.
+        if(std::size_t(n)>=obj.size()||std::size_t(n)>=owp.size()){fail("bhSetMotion: Motionkanal ohne Modellknoten (Original schreibt hinter objP)");out=surplus;return true;}
         out=std::size_t(n);return true;}
     bool channel(std::size_t c){return c<clip.positions.size()&&c<clip.angles.size()?true:fail("bhSetMotion:md2P ausserhalb der Motion");}
     bool frame(std::int32_t f){return f>=0&&std::uint32_t(f)<clip.frames?true:fail("bhSetMotion:frm_no ausserhalb von frm_num");}
@@ -68,6 +74,7 @@ bool normal(Pass& p,std::int32_t frm_no,unsigned mode){
     std::size_t at=0,ch=0;
     for(std::int32_t left=std::int32_t(p.clip.positions.size());left>0;++at){
         std::size_t n;if(!p.node(at,n))return false;
+        if(n==Pass::surplus){if(!p.channel(ch))return false;++ch;--left;continue;}
         if(p.owp[n]&4)continue;
         if(!p.channel(ch)||!p.frame(f))return false;
         auto& o=p.obj[n];
@@ -84,6 +91,7 @@ bool normal_hokan(Pass& p,std::int32_t frm_no,unsigned mode,float rate){
     std::size_t at=0;
     for(std::size_t ch=0;ch<p.clip.positions.size();++ch,++at){
         std::size_t n;if(!p.node(at,n))return false;
+        if(n==Pass::surplus)continue;
         if(p.owp[n]&4)continue;
         if(!p.channel(ch)||!p.frame(f))return false;
         auto& o=p.obj[n];
@@ -101,12 +109,13 @@ bool normal_hokan(Pass& p,std::int32_t frm_no,unsigned mode,float rate){
 // Motion.c:337 SetMtnFast: the root position comes from channel 0 only.
 bool fast(Pass& p,std::int32_t frm_no,unsigned mode){
     const std::int32_t f=frm_no/65536;const std::int32_t flp=(mode&2)?-1:1;
-    std::size_t root;if(!p.node(0,root)||!p.channel(0)||!p.frame(f))return false;
+    std::size_t root;if(!p.node(0,root)||root==Pass::surplus||!p.channel(0)||!p.frame(f))return false;
     if(p.clip.positions[0].empty())return p.fail("bhSetMotion:SetMtnFast ohne Wurzelschluessel");
     {const auto& k=p.clip.positions[0][std::size_t(f)];p.obj[root].position={k.x*((mode&2)?-1.f:1.f),k.y,k.z};}
     std::size_t at=0,ch=0;
     for(std::int32_t left=std::int32_t(p.clip.positions.size());left>0;++at){
         std::size_t n;if(!p.node(at,n))return false;
+        if(n==Pass::surplus){if(!p.channel(ch))return false;++ch;--left;continue;}
         if(p.owp[n]&4)continue;
         if(!p.channel(ch))return false;
         if(!(p.owp[n]&2)){auto& a=p.obj[n].angles;if(!p.clip.angles[ch].empty()){const auto& k=p.clip.angles[ch][std::size_t(f)];a={k[0],k[1]*flp,k[2]*flp};}else a={0,0,0};}
@@ -117,7 +126,7 @@ bool fast(Pass& p,std::int32_t frm_no,unsigned mode){
 // Motion.c:400 SetMtnFastHokan.
 bool fast_hokan(Pass& p,std::int32_t frm_no,unsigned mode,float rate){
     const std::int32_t f=frm_no/65536;const float flp_f=(mode&2)?-1.f:1.f;const std::int32_t flp=(mode&2)?-1:1;
-    std::size_t root;if(!p.node(0,root)||!p.channel(0)||!p.frame(f))return false;
+    std::size_t root;if(!p.node(0,root)||root==Pass::surplus||!p.channel(0)||!p.frame(f))return false;
     if(p.clip.positions[0].empty())return p.fail("bhSetMotion:SetMtnFastHokan ohne Wurzelschluessel");
     {const auto& k=p.clip.positions[0][std::size_t(f)];auto& pos=p.obj[root].position;
         if(mode&0x100)pos={k.x*flp_f,k.y,k.z};
@@ -125,6 +134,7 @@ bool fast_hokan(Pass& p,std::int32_t frm_no,unsigned mode,float rate){
     std::size_t at=0,ch=0;
     for(std::int32_t left=std::int32_t(p.clip.positions.size());left>0;++at){
         std::size_t n;if(!p.node(at,n))return false;
+        if(n==Pass::surplus){if(!p.channel(ch))return false;++ch;--left;continue;}
         if(p.owp[n]&4)continue;
         if(!p.channel(ch))return false;
         if(!(p.owp[n]&2)){auto* ang=p.obj[n].angles.data();
@@ -147,6 +157,7 @@ bool slow(Pass& p,std::int32_t frm_no,unsigned mode,bool hokan,float rate){
     std::size_t at=0,ch=0;
     for(std::int32_t left=std::int32_t(p.clip.positions.size());left>0;++at){
         std::size_t n;if(!p.node(at,n))return false;
+        if(n==Pass::surplus){if(!p.channel(ch))return false;++ch;--left;continue;}
         if(p.owp[n]&4)continue;
         if(!p.channel(ch)||!p.frame(src))return false;
         auto& o=p.obj[n];

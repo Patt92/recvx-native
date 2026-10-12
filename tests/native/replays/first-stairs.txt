@@ -1,5 +1,8 @@
 # Diagnostic: original RM_0010 spawn 1, turn toward the first stairs and use the original door.
+# bhCPM1_act_bas player.c:2001/2008 turns by 7.2 * rtspd degrees per pass, and rtspd is 1.0
+# while sys->gm_flg 0x40 is clear (player.c:1964-1974). 180 degrees is therefore 25 passes;
+# the earlier fixture held right for 40 passes, which is the old host's constant 4.5.
 0 keys right
-40 keys none
-41 confirm
-42 confirm
+25 keys none
+26 confirm
+27 confirm

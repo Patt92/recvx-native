@@ -42,6 +42,8 @@ public:
     void configure(InputConfig config);
     void suppress_held();
     std::size_t controllers()const{return pads_.size();}
+    // scePadSetActDirect of the frame: big motor (low frequency) and small motor.
+    void rumble(unsigned low,unsigned high,unsigned milliseconds);
 private:
     struct Pad {SDL_GameController* handle=nullptr;std::array<Sint16,SDL_CONTROLLER_AXIS_MAX> axes{};std::array<Uint8,SDL_CONTROLLER_BUTTON_MAX> buttons{};};
     InputConfig config_;

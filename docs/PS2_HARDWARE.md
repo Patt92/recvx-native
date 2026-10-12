@@ -199,9 +199,15 @@ Kopf des Pakets:
 DMA-Tag        qwc = num*3 + 3,  0x70000000 (Scratchpad-Quelle)
 GIFtag         PACKED, NREG 1, AD      -> TEST_1
 TEST_1         ATE=1 ATST=GREATER AREF=0 AFAIL=KEEP ZTE=1 ZTST=GEQUAL
-GIFtag         REGLIST, NREG 3, NLOOP=num, PRIM aus `prim`
-REGLIST        ST, RGBAQ, XYZF2
+GIFtag         PACKED, NREG 3, NLOOP=num, PRIM aus `prim`
+Registerliste  ST, RGBAQ, XYZF2
 ```
+
+Nachtrag 2026-10-12: Die Decomp beschriftet diesen Tag als REGLIST; das ELF
+widerlegt das. `Ps2AddPrim3DEx` 0x002CC12C–0x002CC160 und `Ps2AddPrim3DMod`
+0x002CC6E4–0x002CC724 bauen die Basis `0x3000400000008000`: FLG-Bits 58–59
+sind 0 (PACKED), NREG ist 3. Die Registerbeschreibung ist `0x412`, die
+Vertexfolge besteht tatsächlich aus drei Quadwords, nicht drei 64-Bit-Worten.
 
 Je Vertex (Quelle `VU1_PRIM_BUF`, 48 Byte):
 

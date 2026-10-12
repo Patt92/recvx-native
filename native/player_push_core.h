@@ -70,6 +70,9 @@ void recvx_push_tick(RECVX_PUSH_CORE*,RECVX_PUSH_STATE*,int forward);
 /* sys->mwalp (nur Kisteneintraege), sys->metcp, sys->mflrp. */
 unsigned recvx_push_walls(RECVX_PUSH_CORE*,const RECVX_STAIR_AREA**);
 unsigned recvx_push_steps(RECVX_PUSH_CORE*,const RECVX_STAIR_AREA**);
+/* attr |= set_bits; attr &= ~clear_bits eines sys->metcp-Eintrags
+ * (bhSetUseKaidanFlag/bhClrUseKaidanFlag, hitchk.c:4965/5003). */
+void recvx_push_step_attr(RECVX_PUSH_CORE*,unsigned index,unsigned set_bits,unsigned clear_bits);
 unsigned recvx_push_floors(RECVX_PUSH_CORE*,const RECVX_STAIR_AREA**);
 #ifdef __cplusplus
 }

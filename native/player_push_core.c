@@ -843,4 +843,8 @@ void recvx_push_wall_attributes(RECVX_PUSH_CORE* c,const unsigned* attr,unsigned
 
 unsigned recvx_push_walls(RECVX_PUSH_CORE* c,const RECVX_STAIR_AREA** out){*out=c?c->mwal:NULL;return c?c->mwal_n:0;}
 unsigned recvx_push_steps(RECVX_PUSH_CORE* c,const RECVX_STAIR_AREA** out){*out=c?c->metc:NULL;return c?c->metc_n:0;}
+void recvx_push_step_attr(RECVX_PUSH_CORE* c,unsigned index,unsigned set_bits,unsigned clear_bits){
+    if(!c||index>=c->metc_n)return;
+    c->metc[index].attr=(c->metc[index].attr|set_bits)&~clear_bits;
+}
 unsigned recvx_push_floors(RECVX_PUSH_CORE* c,const RECVX_STAIR_AREA** out){*out=c?c->mflr:NULL;return c?c->mflr_n:0;}

@@ -235,6 +235,12 @@ typedef struct RECVX_EN01_EXP0 {
        keiner Stelle der drei EN01-Quellen adressiert, gehoert aber zur
        Allokation und wird wie dort genullt. */
     /* 0xA4 */ uint8_t  tail[12];
+    /* --- Native Erweiterung hinter dem 0xB0-Originalblock -----------------
+       0x74 traegt im Original den ATR_WORK-Zeiger der Treppenflaeche
+       (en01.c:11839/11846); der native Dienst liefert Index und Satz
+       getrennt. Der Satz steht hier, damit bhEne01_MV08 prm0/prm1/prm2
+       lesen kann (en01.c:6115-6143). Gueltig, solange word74 >= 0. */
+    RECVX_ENEMY_ATR stair_rec;
 } RECVX_EN01_EXP0;
 
 /* ---------------------------------------------------------------------------
@@ -386,6 +392,8 @@ typedef struct RECVX_EN01_SERVICES {
        bhEne_GetTranslateMtn(2) sie als Weltbewegung liefert
        (en01.c:10358/10412/10418). Nur diese beiden Komponenten, y bleibt. */
     void (*node_local_clear_xz)(struct RECVX_ENEMY_WORK* w, uint32_t node);
+    /* mlwP->objP[node].pos[axis] = v (en01.c:6311 objP[0].pos[1] = 0). */
+    void (*node_local_set)(struct RECVX_ENEMY_WORK* w, uint32_t node, uint32_t axis, float v);
 
     /* rutchk.c:47 bhCheckRouteID(ps) — Index der Wegezone, in der ein Punkt
        liegt, oder 0xFF (en01.c:4617/4621). Der Basisdienst `route(from,to)`
@@ -511,7 +519,114 @@ typedef struct RECVX_EN01_SERVICES {
     /* bhEne01_SePlay ruft ChechPlayEnemySe vor RequestEnemySe, aber nur
        fuer die beiden Stimm-Nummern 20/21 (en01.c:11387-11393). Die
        Basisdienste dafuer stehen schon in RECVX_ENEMY_SERVICES. */
+
+    /* --- Kindfamilie en01sub.c (native/enemies/en01_sub.c) --------------
+       Alle folgenden Eintraege sind neu fuer die Kindfamilie. NULL -> der
+       Mechanismus meldet die Originalstelle ueber services->gap und bricht
+       den betroffenen Zweig ab; es wird nichts ersetzt. */
+
+    /* hitchk.c:1939 bhCheckWallType(pos, flg, ar, ah) mit dem ATR-Satz der
+       getroffenen Wandflaeche. Der Basisdienst wall_type ist nur ein
+       Praedikat; bhEne01Leg_DG00 liest hp->type (en01sub.c:751-765).
+       Rueckgabe 1 = Treffer, `rec` (falls != NULL) gesetzt. */
+    int (*wall_type_atr)(const RECVX_ENEMY_VEC* pos, uint32_t flg, float ar,
+                         float ah, RECVX_ENEMY_ATR* rec);
+    /* hitchk.c:2178 bhCheckWallRefAngle(pos, flg, ar, ah, &ay): Wandabprall
+       mit Reflexionswinkel. Schreibt wie das Original `pos` (Eingabe und
+       Ausgabe) und `*ay`. Aufrufe en01sub.c:937 (Kopf, &epw->ay),
+       :1118 (Kappe, lokales ay). Rueckgabe 1 = Treffer (Original:
+       ATR_WORK* != NULL), `rec` (falls != NULL) erhaelt den ATR-Satz. */
+    int (*wall_ref_angle)(RECVX_ENEMY_VEC* pos, uint32_t flg, float ar, float ah,
+                          int32_t* ay, RECVX_ENEMY_ATR* rec);
+    /* owk->mtx eines Modellknotens SCHREIBEN: `w->mlwP->owP[joint].mtx =
+       in16`. Lesen geht ueber den Basisdienst joint_matrix. Die Kinder
+       Arm/Bein/Kopf/Kappe/Bombe aendern die Gelenkmatrix direkt
+       (en01sub.c:295-307, :357-372, :918-922, :1092-1145, :1252). Der
+       Besitzer darf die Matrix im selben Pass nicht neu aus objP rechnen,
+       wenn owP[joint].flg Bit 0x1 steht (MdlPut.c:296 bhCalcTree). */
+    int (*joint_matrix_set)(struct RECVX_ENEMY_WORK* w, uint32_t joint,
+                            const float* in16);
+    /* owP[joint].flg |= bits — 0x100 (en01sub.c:387/628/968) bzw. 3
+       (bhEne01_FlyingCap en01.c:11910, dort noch nicht genutzt). */
+    void (*joint_flags_or)(struct RECVX_ENEMY_WORK* w, uint32_t joint,
+                           uint32_t bits);
+    /* epw->mtx: die WURZELmatrix des Works nach bhCalcModel (MdlPut.c:240-
+       262; bei flg 0x80 lkwkp->owP[lkono] * T(lo) * R(a)). bhEne01Scope_Effect
+       liest daraus Lage und Winkel (en01sub.c:1979-1987). 1 = geliefert. */
+    int (*work_matrix)(const struct RECVX_ENEMY_WORK* w, float* out16);
+    /* epw->lkwkp = (unsigned char*)plp (en01sub.c:1417): der Wurm haengt
+       sich an den SPIELERwork. `link` 1 = anhaengen; EN01 setzt danach
+       w->lkwkp = NULL, weil der Spieler kein Gegnerwork ist, und der
+       Besitzer fuehrt bei flg 0x80 den Spielerbezug (plp->mlwP->owP[lkono],
+       lkono 0 bzw. 3). `link` 0 = Spielerbezug aufheben; EN01 ruft das
+       genau dort, wo das Original lkwkp wieder auf epw->exp1 setzt
+       (en01sub.c:1322/:1723), und schreibt danach w->lkwkp selbst.
+       Rueckgabe 0 = nicht ausfuehrbar. */
+    int (*link_player)(struct RECVX_ENEMY_WORK* w, int link);
+    /* plp->mtx — die Wurzelmatrix des Spielers (nicht owP[]). Der Wurm
+       setzt sich und den Spieler relativ dazu (en01sub.c:1466/1527/1594).
+       1 = geliefert. */
+    int (*player_matrix)(float* out16);
+    /* PEXP0_F(off) = value — Schreibzugriff auf den exp0-Block des Spielers
+       (macros.h:66). en01sub.c:1529/1530 schreibt die Offsets 72 und 80
+       (plp->px/pz nach dem Abwurf). */
+    void (*player_exp0_float_set)(uint32_t offset, float value);
+    /* plp->mlwP->objP[node].pos[0] = pos[2] = 0 (en01sub.c:1532-1534). */
+    void (*player_node_clear_xz)(uint32_t node);
+    /* sys->pad_on &= ~bits (en01sub.c:1536/1699/1744). Dieselbe Original-
+       zeile steht auch in en01.c:7643/7755/7767/7928/8956 (dort bisher als
+       Luecke gemeldet). */
+    void (*pad_on_clear)(uint32_t bits);
 } RECVX_EN01_SERVICES;
+
+/* ---------------------------------------------------------------------------
+   exp0-Bloecke der Kindfamilie (en01sub.c)
+   ---------------------------------------------------------------------------
+   Die Kinder legen eigene Bloecke an: Kopf bhEne_CallocWork(32, 8)
+   (en01sub.c:809), Arm/Bein/Kappe/Wurm bhEne_CallocWork(112, 8)
+   (:227/:671/:1009/:1302). Bombe, Zielfernrohr und Elternwork haben keinen.
+
+   Belegte Offsets (alle Zugriffe der Datei en01sub.c und en01b.c:328-329):
+     0x00 NJS_CNK_OBJECT* — Knoten eines Modellbaums (EXP0_I(0))
+     0x04 O_WORK*         — Gelenkwork desselben Baums (EXP0_I(4))
+     0x08 int  Kettenlaenge (EXP0_I(8)); Arm/Bein 2, Kopf/Kappe 0
+     0x0C int  Blutgelenk des Elternworks (EXP0_I(12), :288/:458/:739)
+     0x14 int  von Init genullt (EXP0_I(20)), sonst nie gelesen
+     0x30 NJS_MATRIX (exp0[48], :322/:727/:1183) — nur im 112-Byte-Block
+   EXP0_F(96)/(100)/(104) liegen INNERHALB dieser Matrix: es sind deren
+   Elemente 12/13/14 (Translation). Das Original ueberschreibt mit
+   EXP0_F(100) = grand also mtx[13] (en01sub.c:326, :337/343) — dieselbe
+   Speicherstelle, deshalb nativ ausdruecklich als mtx[12..14] gefuehrt.
+
+   Die beiden Zeiger des Originals zeigen in den objP[]/owP[]-Baum eines
+   Modells. Nativ ist der Baum Besitz des Hosts; ein Zeiger wird deshalb
+   als (Work, Knotenindex) gefuehrt: `work` ist der Work, dessen mlwP
+   gemeint ist (en01b.c:328: epp->mlwP->objP[11] -> {epp, 11}). work == NULL
+   ist die Uebersetzung des Original-NULL. Zeigerarithmetik owk[+-1] bzw.
+   obj++ ist Knotenindex +-1 im selben Baum. Das ist eine reine
+   Datenrepraesentations-Anpassung; die Offsetasserts in en01_sub.c belegen
+   die Reihenfolge (jedes Feld hinter den zwei Referenzen um deren
+   Groessenzuwachs versetzt). */
+typedef struct RECVX_EN01_NODE_REF {
+    struct RECVX_ENEMY_WORK* work;
+    int32_t                  node;
+} RECVX_EN01_NODE_REF;
+
+typedef struct RECVX_EN01_SUB_EXP0 {
+    /* 0x00 */ RECVX_EN01_NODE_REF obj;      /* NJS_CNK_OBJECT*           */
+    /* 0x04 */ RECVX_EN01_NODE_REF owk;      /* O_WORK*                   */
+    /* 0x08 */ int32_t  node_num;            /* EXP0_I(8)                 */
+    /* 0x0C */ int32_t  djnt_no;             /* EXP0_I(12)                */
+    /* 0x10 */ int32_t  word10;              /* nie adressiert            */
+    /* 0x14 */ int32_t  word14;              /* EXP0_I(20)                */
+    /* 0x18 */ uint8_t  pad18[8];            /* bis 0x20 (Kopfblock-Ende) */
+} RECVX_EN01_SUB_EXP0;
+
+typedef struct RECVX_EN01_SUB_EXP0_MTX {
+    /* 0x00 */ RECVX_EN01_SUB_EXP0 base;
+    /* 0x20 */ uint8_t  pad20[16];
+    /* 0x30 */ float    mtx[16];             /* exp0[48]; [12..14] = EXP0_F(96/100/104) */
+} RECVX_EN01_SUB_EXP0_MTX;
 
 /* ---------------------------------------------------------------------------
    Laufzeitkontext eines Raums
@@ -529,6 +644,14 @@ typedef struct RECVX_EN01_CONTEXT {
        Tabellen NUR, wenn die Motionquelle des Works nicht die Raumliste ist
        (en01.c:10496). Entspricht mtn_room == 0 im gemeinsamen Work. */
     uint32_t                       game_mode; /* sys->gm_mode (en01.c:2703)   */
+    /* sys->stg_no / sys->rom_no des laufenden Raums. Nur bhEne01Parent_
+       NoKaidanCheck liest sie (en01sub.c:177). stg_no 0 ist ein gueltiger
+       Wert und zugleich der Tabelleneintrag ene_stg_tbl[0]; deshalb gilt der
+       Satz nur bei stage_valid != 0, sonst meldet der Mechanismus die Luecke
+       statt mit einem Nullwert zu vergleichen. */
+    int32_t                        stg_no;
+    int32_t                        rom_no;
+    uint32_t                       stage_valid;
 } RECVX_EN01_CONTEXT;
 
 void recvx_en01_set_context(const RECVX_EN01_CONTEXT* ctx);

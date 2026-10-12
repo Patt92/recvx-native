@@ -185,6 +185,15 @@ int  recvx_en01_side_rot_neck(RECVX_ENEMY_WORK* w, int neck_no,
 int  recvx_en01_search_player2(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* pp,
                                int pp_r, int r);                   /* :922 */
 
+/* --- Gemeinsame Helfer fuer native/enemies/en01_sub.c ----------------------
+   Nur Weitergaben der in en01_core.c liegenden Originalhelfer bzw. des dort
+   gebundenen Kontexts; kein zweiter Zustand. */
+const RECVX_EN01_CONTEXT* recvx_en01_context(void);  /* NULL = nicht gesetzt */
+int32_t recvx_en01_niten_dir(float hontai_x, float hontai_z,
+                             float target_x, float target_z); /* zonzon.c:70 */
+void recvx_en01_ikou(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos,
+                     int32_t add_dir);                         /* zonzon.c:10 */
+
 /* --- Kindfamilie (en01sub.c) — ids 1/0x1F..0x26 ---------------------------
    Jede Familie hat ihren eigenen mode0-Eintritt; die Unterfunktionen bleiben
    sichtbar, damit der Dispatchbesitzer und die Tests sie einzeln pruefen

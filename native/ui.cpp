@@ -483,7 +483,7 @@ void GameUi::quantity(SoftwareRenderer& image,std::uint32_t packed,int x,int y,b
         ++column;drawn=true;
     }
 }
-void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide,unsigned exit_state,unsigned note)const{
+void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide,unsigned exit_state,unsigned note,float row_shift,unsigned arrows)const{
     rectangle(image,0,0,640,480,0xff101010);
     // Slide offsets of the original cen_pos centers relative to the settled layout (sub1.c SpriteH).
     auto dx=[&](unsigned c){return slide?int(std::lround(slide->x(c)))-centers[c][0]:0;};
@@ -503,7 +503,7 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
         p.pos[0]=cell>=2?20+int((cell&~unsigned(wide))%2)*68:base==64?88:4;p.pos[1]=cell>=2?4+int((cell/2)-1)*48:-76;
         p.atr|=0x20;sprites.push_back(p);}
 
-    for(unsigned i=0;i<std::size(parts_15b)&&parts_15b[i].anim!=-1&&parts_15b[i].anim!=255;++i){if(base==64&&i>=31)continue;auto p=parts_15b[i];if(i==22){p.anim=0;p.parts_num=exit_state==0?10:exit_state==1?12:13;}if(i==18||i==19)p.anim=std::any_of(inv.items.begin()+base,inv.items.begin()+base+(base==64?128:32),[](auto item){return item!=0;})?17:16;if(i==27||i==28)p.pos[1]=68+int((base==64?1.59375f:6.375f)*index);sprites.push_back(p);}
+    for(unsigned i=0;i<std::size(parts_15b)&&parts_15b[i].anim!=-1&&parts_15b[i].anim!=255;++i){if(base==64&&i>=31)continue;auto p=parts_15b[i];if(i==22){p.anim=0;p.parts_num=exit_state==0?10:exit_state==1?12:13;}if(i==18||i==19)p.anim=std::any_of(inv.items.begin()+base,inv.items.begin()+base+(base==64?128:32),[](auto item){return item!=0;})?17:16;if(i==20||i==21)p.anim=arrows?(i==20?(arrows==1?19:18):(arrows==2?19:18)):p.anim;if(i==27||i==28)p.pos[1]=68+int((base==64?1.59375f:6.375f)*index);sprites.push_back(p);}
     for(unsigned i=0;i<std::size(parts_16b)&&parts_16b[i].anim!=-1&&parts_16b[i].anim!=255;++i){auto p=parts_16b[i];if(!i){p.anim=0;p.parts_num=exit_state?11:0;}sprites.push_back(p);}group(parts_17b);
     if(base==64)group(parts_18b);else for(auto p:parts_03b){if(p.anim==-1||p.anim==255)break;p.cen_no=9;sprites.push_back(p);}
     std::stable_sort(sprites.begin(),sprites.end(),[](const auto& a,const auto& b){return a.pos[2]>b.pos[2];});
@@ -511,11 +511,16 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
         const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[t.texid],int(p.pos[0])+centers[p.cen_no][0]+dx(p.cen_no)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+dy(p.cen_no)+int(std::min(i,ny-1)*p.move),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,tint(p.col),bool(p.atr&8),p.ang);
     }
     const int count=base==64?128:32;
-    // ItemBoxIconSet/SpriteOnOff: 38-pixel rows; only 31 < y < 259
-    // displayed, bottom row clipped to 19 pixels. Original item-name states.
-    for(int row=1;row<6;++row){const auto packed=inv.items[base+(int(index)+count+row-3)%count];const auto id=Inventory::id(packed);const int y=40+31+38*row+dy(10),x0=dx(10);
+    // ItemBoxInit sets parts_20b pos[1] = 38*num1+31 for the eight box rows and
+    // leaves pos[0]/pos[2] at 296/21; ItemBoxIconSet adds the scroll mutation to
+    // pos[1] every frame, marks a row invisible outside 31 < pos[1] < 259 and
+    // clips the icon to 19 px above 240. SpriteOnOff draws the item name at
+    // pos[1] + cen_pos[10][1] and only for the same window. Rows 0 and 6 are
+    // outside the window without a scroll offset, so five rows are visible.
+    for(int row=0;row<7;++row){const float row_y=31.f+38.f*row+row_shift;if(!(row_y>31.f&&row_y<259.f))continue;
+        const auto packed=inv.items[base+(int(index)+count+row-3)%count];const auto id=Inventory::id(packed);const int y=int(row_y)+centers[10][1]+dy(10),x0=dx(10);
         if(selecting&&row==3){rectangle(image,43+x0,y-2,348,2,0xff9f9f80);rectangle(image,43+x0,y+36,348,2,0xff9f9f80);}
-        if(id){text(image,read_message(messages_,4,inventory_name_id(packed)),44+x0,y,.95f);icon(image,id,324+x0,y,row==5?19:38,42);quantity(image,packed,324+x0,y,true);}
+        if(id){text(image,read_message(messages_,4,inventory_name_id(packed)),44+x0,y,.95f);icon(image,id,324+x0,y,row_y>240.f?19:38,42);quantity(image,packed,324+x0,y,true);}
     }
     unsigned cell=0;for(unsigned slot=1;slot<12;++slot){const auto id=Inventory::id(inv.slots()[slot]);const unsigned center=slot==1?(base==64?4:9):5;const int x=(slot==1?(base==64?528:444):460+int(cell&1)*68)+dx(center),y=(slot==1?48:128+int(cell/2)*48)+dy(center);
         if(!selecting&&!exit_state&&slot==menu.selected){rectangle(image,x-1,y-1,id&&(itemdata[id].type&0x100)?138:70,50,0xff238699);rectangle(image,x+1,y+1,id&&(itemdata[id].type&0x100)?134:66,46,0xff111f22);}

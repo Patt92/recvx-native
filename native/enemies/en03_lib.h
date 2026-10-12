@@ -197,6 +197,10 @@ void recvx_t3_set_blood_nbt(RECVX_ENEMY_WORK* w, int type);
    (en01sub.c:292/462/512 mit &epw->xn, also wird dort epw->zn genullt).
    Der Quirk bleibt erhalten und wird nicht stillschweigend lokalisiert. */
 void recvx_t3_set_blood2(RECVX_ENEMY_WORK* w, int type, RECVX_ENEMY_VEC* ofs, int ry);
+/* Dieselben beiden Originale mit plp als Work (en04.c:2976/3609, en03.c:2920):
+   Trefferfelder/Waffe aus den EXT-Spielerdiensten, Link ist der Spieler. */
+void recvx_t3_set_blood_player(int type, const RECVX_T3_BT* bt);
+void recvx_t3_set_blood2_player(int type, RECVX_ENEMY_VEC* ofs, int ry);
 /* zonzon.c:634/683 bhEne_SetBlood3/4 (Punktblut/Wasserblut). */
 void recvx_t3_set_blood3(RECVX_ENEMY_WORK* w, int lnk_obj, const RECVX_ENEMY_VEC* ofs,
                          const RECVX_ENEMY_VEC* dv, int n, int tex_id, int type, int wcnt);

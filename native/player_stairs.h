@@ -109,6 +109,10 @@ typedef struct {
 // `action` is the mode2 the caller selected (14 kdu, 15 kdd, 16 dnu, 17 dnd,
 // 20 hsu, 21 hsd). The caller has already applied the probe table (type 1 at
 // 0.75, type 2 at 4.5 then 6.0/9.1) and bhSetUseKaidanFlag.
+/* player.c:216-227 PlMtnAct[wpntp][dmlvl][column]; 0xFFFF ausserhalb der Tabelle. */
+unsigned recvx_player_mtn_act(int wpntp,int dmlvl,int column);
+/* player.c:239-257 PlFootSnd[ply_id][foot][column]; -1 ausserhalb der Tabelle. */
+int recvx_player_foot_snd(int ply_id,int foot,int column);
 int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,int action,const float* grand,float px,float py,float pz,int ay,int floor,int dmlvl,int wpntp);
 // One original 30-Hz player frame: the whole action routine, then bhSetMotion's
 // frame advance and the plp->flg 0x400000 last-frame update. Returns 0 on the

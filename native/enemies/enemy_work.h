@@ -146,7 +146,16 @@ typedef struct {
        (bhEne07_PlayerControl), 0 = plp->mnwPb, die eigene Bibliothek. */
     uint8_t  mtn_enemy;
     uint32_t mtn_enemy_owner;   /* Gegnerindex, dessen Bibliothek gilt      */
+    /* plp->mnwP = epw->mnwP (en01.c:7584, en04.c:3405): das greifende Work
+       selbst; gleiche Gegner-IDs koennen verschiedene mnwP tragen
+       (bhSetEneMtn-Raumform), deshalb reicht der Index nicht. */
+    const struct RECVX_ENEMY_WORK* mtn_enemy_work;
     int32_t  wpnr_no;
+    /* plp->car/plp->cah: PlyInfo[sys->ply_id][0/1] - 1.0f (player.c:199/708).
+       bhCheckPlayer (hitchk.c:5712) und bhCheckEnemies (hitchk.c:5788) rechnen
+       damit; plp->aox/aoy/aoz sind im Original nur in player.c:713 genullt und
+       werden nirgends geschrieben, also 0. */
+    float    car, cah;
     uint32_t ply_id;            /* sys->ply_id, nur lesend                  */
     uint32_t exp1_flags;        /* plp->exp1 EXP1_I(0)                      */
 } RECVX_ENEMY_PLAYER;
@@ -331,6 +340,14 @@ typedef struct RECVX_ENEMY_SERVICES {
     /* bhCheckWallEx (hitchk.c): bewegt `pos` aus `prev`; 1 = Kontakt. */
     int   (*wall_move)(RECVX_ENEMY_WORK* w, RECVX_ENEMY_VEC* pos,
                        const RECVX_ENEMY_VEC* prev, float r, float h, uint32_t flg);
+    /* hitchk.c:5391 bhCheckDansa(pp): laeuft rom->etcp und danach sys->metcp
+       ab, loescht stflg 0x20000 und setzt es wieder, wenn der Fuss des Works
+       in einer Typ-2-Flaeche mit prm0 != 0 auf derselben Etage liegt und
+       stflg 0x30 frei ist (hitchk.c:5400-5424). bhCheckWallEx ruft dieselbe
+       Routine, wenn stflg 0x20000 schon steht (hitchk.c:664-667). Der Besitzer
+       stellt beide Tabellen in der Originalreihenfolge bereit; NULL -> der
+       Aufrufer meldet "bhCheckDansa (hitchk.c:5391)". */
+    void  (*check_dansa)(RECVX_ENEMY_WORK* w);
     /* bhCollisionCheckLine / Line2 / Line3: `to` und `normal` werden bei
        Treffer gesetzt, bei Fehltreffer unveraendert gelassen.
        `variant` 1/2/3 waehlt die Originalfassung. `rec` (optional) erhaelt

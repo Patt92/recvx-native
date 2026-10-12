@@ -130,8 +130,19 @@ Gameplay-Freigabe; der aktuelle Lückenplan steht in
 - Zombies (`en01.c`): Wahrnehmung, Wegsuche, Verfolgung, Fußfixierung,
   Trefferreaktionen, Niederschlag, Tod, Blut, Gegnerstimmen.
 - Greifen/Beißen mit Spielerschaden und Hebelrütteln (`EatCheck`,
-  `bhEne01_Nage`, `PlyDG00/01`); standardmäßig über das Debugmenü
-  zuschaltbar.
+  `bhEne01_Nage`, `PlyDG00/01`) laufen im normalen Spiel (Standard an;
+  `debug.ini enemy_grab = off`, Debugmenü oder `--enemy-grab off` schalten
+  ab). Die Kette ist seit 2026-10-12 geschlossen: Spielersuche
+  (`bhSearchPlayer/2`), Bereichs-/Bodeneffektflächen
+  (`bhEne_EnemyAtariCheck`, `bhCheckFloorEffect`), Wegzonen
+  (`bhCheckRouteID/bhCheckRoute` aus `rom->rutp/ruttp`), Laufmotionswechsel
+  (`bhGetFrameNum`, `bhCalcFixOffset`, `bhEne_GetTranslateMtn/2`,
+  `bhAddSpeed`), Treppenflächen (`bhKaidanAtrCheck`), Spielerkapsel
+  (`plp->watr`, `npCollisionCheckSC`) und der Gegner-Spieler-Kontakt
+  (`bhCheckPlayer`, Bedingung `plp->flg & 8` war invertiert). Bisse ziehen
+  direkt von der Inventar-HP ab; HP < 0 führt in das native Game Over.
+  Nachweis: `tools/verify_enemy_ai.py` (RM_0080: natürlicher Spawn,
+  Diagnoseaufstellung, Hebelrütteln, Tod).
 - Fässer (`bhEne00`) mit Explosion und Kettenreaktion.
 - Hunde: Aktivierung über die originalen Bereichs-/Fallenregeln.
 
@@ -139,6 +150,12 @@ Gameplay-Freigabe; der aktuelle Lückenplan steht in
 - Alle weiteren Gegnerfamilien (en02 ff.), vollständige Hunde-KI.
 - Zombie-Treppen, Kopf-/Gliedmaßenabtrennung, Feuer, Krabbler-Zweige,
   gegenseitiges Wegschieben.
+- Auf dem Angriffspfad noch gemeldet: Blutsprite `bhEff005` (Partikel laufen),
+  Controller-Vibration (`StartVibrationEx`), `bhSetUseKaidanFlag` für
+  `sys->metcp`-Kisten, der `nlxb`-Zweig von `bhCheckPlayer` beim sterbenden
+  Spieler. Originaldefekt nachgebildet: `bhEne01_ChgWalkMtn` verschiebt den
+  rohen `bhGetFrameNum`-Wert um 16 Bit, der Startframe kann `frm_num`
+  erreichen; dieser eine Pass behält die Vorpose und wird gemeldet.
 
 ## Inventar und Items
 

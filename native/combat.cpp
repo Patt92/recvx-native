@@ -118,6 +118,7 @@ bool CombatController::aiming()const{return original_&&original_->result.active;
 // mode2 69/169 = bhCPM2_act_atk/_atk_pch (Schuss), 72 = bhCPM2_act_knf
 // (Messer) — die drei zuschlagenden Zweige der Tabelle in player.c:4527-4563.
 bool CombatController::attacking()const{const unsigned m=original_mode();return original_&&(m==69||m==169||m==72);}
+std::int16_t CombatController::aim_yaw()const{return original_?original_->player().way:std::int16_t(0);}
 // Nur die Knoten, die der Kampfpass selbst geschrieben hat (PlyPchMain
 // playpch.c:112-130). Alles andere bleibt die Pose der Motionquelle.
 ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset&,std::size_t,std::int64_t)const{
@@ -154,10 +155,13 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // sys->pt_flg gehoert RoomWorld::set_presentation_flags; ein Leseweg
     // fehlt, deshalb wird der Zugriff namentlich gemeldet (Anschlussvertrag).
     engine.pt_flg_or=[&](unsigned bits){(void)bits;engine.unavailable.insert("sys->pt_flg (RoomWorld ohne Leseweg)");};
-    // CallPlayerWeaponSeEx: WpnTab[w].snd_wpno ist die Bank, seno0 das Programm.
-    engine.weapon_se=[&](const RECVX_CB_VEC*,int se,int){audio.play_weapon_sound(unsigned(WpnTab[weapon_].snd_wpno),unsigned(se)&255);};
+    // CallPlayerWeaponSeEx(pPos, SeNo, SlotNo): WpnTab[w].snd_wpno liefert das Paket mit SE-Bank 1;
+    // Slotwahl 8/9/19 und Get3DSoundParameter im gemeinsamen Mixerpfad, gm_flg 0x01000000 = Syukan.
+    engine.weapon_se=[&](const RECVX_CB_VEC* pos,int se,int slot){
+        audio.call_player_weapon_se(unsigned(WpnTab[weapon_].snd_wpno),se,{pos->x,pos->y,pos->z},slot,events&&(events->flags[11][0]&0x01000000u));};
     // CallPlayerFootStepSe(bhCheckFloorSound(...),1,1).
-    engine.footstep=[&](int,float x,float z){if(!world)return;const unsigned surface=world->floor_sound({x,0,z});if(surface<=4)audio.footstep(surface,1,0);};
+    // CallPlayerFootStepSe(bhCheckFloorSound(...),1,1) -> CallPlayerFootStepSeEx(..,&PlayerPos); x/z bestimmen nur den Bodenklang.
+    engine.footstep=[&](int,float x,float z){if(!world)return;const unsigned surface=world->floor_sound({x,0,z});if(surface<=4)audio.player_footstep_se(surface,1,true,events&&(events->flags[11][0]&0x01000000u));};
     // bhCheckL2Wall (pwksub.c:718) gegen den vorhandenen Raumkollisionssatz.
     // Der ATR-Satz (sys->ahtp) ist noch nicht exponiert; der Kern meldet ihn.
     engine.l2_wall=[&](const RECVX_CB_LINE* l,unsigned flags,float* len,RECVX_CB_WALL_HIT* hit)->int{
@@ -172,16 +176,18 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
         NJS_POINT3 dir{cap->c2.x-cap->c1.x,cap->c2.y-cap->c1.y,cap->c2.z-cap->c1.z};
         const float length=njUnitVector(&dir);if(length<=0)return 0;
         return world->combat_wall_distance({cap->c1.x,cap->c1.y,cap->c1.z},dir,length,flags)<length?1:0;};
-    // bhSetGunFire (pwksub.c:2670) fordert über bhSetEffectTb zwei Arbeiten an:
-    // id 3 / type 0 ist das Mündungsfeuer (bhEff003), id 0 / type 10 die
-    // Hülsenarbeit, die bhEff000 verbraucht.
+    // bhSetGunFire (pwksub.c:2670) fordert ueber bhSetEffectTb die Arbeit aus WpnEffTab[wno][0]
+    // an, bhSetYakkyou (pwksub.c:3242) die aus [wno][3] und [wno][2]. flg/id/type/mdlver stammen
+    // also aus der Originaltabelle; id 3 ist das Muendungsfeuer (eigener Zeichenweg), alle
+    // uebrigen portierten ids laufen ueber den gemeinsamen bhSetEffectTb-Pfad (z. B. bhEff000).
     engine.effect=[&](const RECVX_CB_EFFECT* e)->int{
-        if(e->ef.id==0&&e->ef.type==10){EffectSpawn spawn;spawn.flg=e->ef.flg;spawn.id=e->ef.id;spawn.type=e->ef.type;spawn.flr_no=e->ef.flr_no;spawn.mdlver=e->ef.mdlver;
-            spawn.position={e->ef.px,e->ef.py,e->ef.pz};spawn.scale={e->ef.sx,e->ef.sy,e->ef.sz};spawn.ax=e->ef.ax;spawn.ay=e->ef.ay;spawn.lkono=e->jno;
-            spawn.has_offset=e->has_offset!=0;spawn.offset={e->offset.x,e->offset.y,e->offset.z};
-            if(!world)return -1;world->set_effect_counter(engine.sys.yk_ct);return world->spawn_player_effect(spawn);}
-        if(e->ef.id!=3||e->ef.type!=0){engine.unavailable.insert("bhSetEffectTb id "+std::to_string(e->ef.id));return -1;}
-        if(!world)return -1;world->set_effect_counter(engine.sys.yk_ct);return world->spawn_weapon_flash(*e,1,0);};
+        if(!world)return -1;
+        world->set_effect_counter(engine.sys.yk_ct);
+        if(e->ef.id==3)return world->spawn_weapon_flash(*e,1,0);
+        EffectSpawn spawn;spawn.flg=e->ef.flg;spawn.id=e->ef.id;spawn.type=e->ef.type;spawn.flr_no=e->ef.flr_no;spawn.mdlver=e->ef.mdlver;
+        spawn.position={e->ef.px,e->ef.py,e->ef.pz};spawn.scale={e->ef.sx,e->ef.sy,e->ef.sz};spawn.ax=e->ef.ax;spawn.ay=e->ef.ay;spawn.lkono=e->jno;
+        spawn.has_offset=e->has_offset!=0;spawn.offset={e->offset.x,e->offset.y,e->offset.z};
+        return world->spawn_player_effect(spawn);};
     engine.light0=[&](const RECVX_CB_LIGHT* l){if(world)world->set_gun_light(*l);};
     // Kampfsicht auf den einen Spielerwork: Lage/Winkel kommen je Pass vom
     // Hostakteur und gehen danach dorthin zurück (Header Z. 25-29).

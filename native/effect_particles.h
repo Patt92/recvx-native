@@ -15,10 +15,13 @@ public:
     EffectParticles(EffectParticles&&) noexcept;
     EffectParticles& operator=(EffectParticles&&) noexcept;
     // `offset` is relative to the linked joint (or a world position when unlinked); `color` is the ARGB blood tint.
-    void spawn(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color);
+    // Returns the root O_WRK slot of the first set (bhSetEffParticle's return), -1 when the pool is full.
+    int spawn(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color);
+    // zonzon.c:627 op->mode1 = 1 on the returned root; bhEff302 does not read it, the value is kept with the work.
+    void set_mode1(unsigned slot,unsigned value);
     // bhSetEffParticleMk2: the same emitter with an explicit destination colour
     // (bhEne_SetBloodEffect4 passes BloodCol[col][0] and BloodCol[col][1]).
-    void spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color);
+    int spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color);
     // Production allocation belongs to RoomWorld's eff[512]. Payloads remain
     // indexed by that owner's slots; standalone tests use the local table.
     void bind_pool(const std::function<unsigned(unsigned)>& flags,

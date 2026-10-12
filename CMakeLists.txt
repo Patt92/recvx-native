@@ -100,14 +100,14 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # tools/generate_effect_collision.py ist Quarantaene (Policy 2026-10-09):
 # ATR-Boden/Wandkontakt, Reflexion und Linienabfrage sind eigenstaendig nativ;
 # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_hair.c native/player_head.c native/adx_tables.c)
+add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_action.c native/player_hair.c native/player_head.c native/adx_tables.c)
 target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
 # C02: gemeinsamer Gegnerwork am WorldEntity-Besitzer, native Dispatchkette,
 # bhSetMotion/bhCalcModel des Besitzers und alle nativ vorhandenen Gegner-
 # routinen. en54/en55 fehlen bis zum Port von en17.c (Kettenwerk-Besitzer).
 target_sources(recvx_game PRIVATE native/world_enemies.cpp native/motion_set.cpp
   native/enemies/enemy_work.c native/enemies/enemy_dispatch.c
-  native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c
+  native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_sub.c native/enemies/en01_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en10.c
   native/enemies/en11.c native/enemies/en12.c native/enemies/en14.c
   native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en24.c native/enemies/en25.c
   native/enemies/en56.c native/enemies/en71.c
@@ -175,7 +175,7 @@ if(RECVX_BUILD_RUNTIME)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_original_core.py"
       "${CMAKE_CURRENT_SOURCE_DIR}" --build-dir "${CMAKE_CURRENT_BINARY_DIR}" --binary "$<TARGET_FILE:recvx-runtime>"
     VERBATIM)
-  add_library(recvx_input native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp)
+  add_library(recvx_input native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp native/vibration.cpp)
   target_link_libraries(recvx_input PUBLIC recvx_game SDL2::SDL2)
   if(BUILD_TESTING)
     add_executable(recvx-debug-tests tests/native/debug_menu_test.cpp)
@@ -314,6 +314,9 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
     add_test(NAME native_ground_world COMMAND recvx-ground-world-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
+  add_executable(recvx-audio-sq-tests tests/native/audio_sq_test.cpp)
+  target_link_libraries(recvx-audio-sq-tests PRIVATE recvx_game)
+  add_test(NAME sony_sq_dictionary COMMAND recvx-audio-sq-tests)
   add_executable(recvx-audio-tests tests/native/audio_movie_test.cpp)
   target_link_libraries(recvx-audio-tests PRIVATE recvx_game)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/files/COMMON.MLT")
@@ -412,6 +415,11 @@ if(BUILD_TESTING)
   target_compile_features(recvx-en04-tests PRIVATE cxx_std_17)
   target_link_libraries(recvx-en04-tests PRIVATE recvx_game recvx_math)
   add_test(NAME enemy_en04_component COMMAND recvx-en04-tests)
+  # EN01-Kindfamilie (en01sub.c): Komponentenpruefung mit Testaufstellungen.
+  add_executable(recvx-en01-sub-tests tests/native/en01_sub_test.c)
+  target_include_directories(recvx-en01-sub-tests PRIVATE native native/enemies build-tools/ninja)
+  target_link_libraries(recvx-en01-sub-tests PRIVATE recvx_game recvx_math)
+  add_test(NAME enemy_en01_sub_component COMMAND recvx-en01-sub-tests)
   add_executable(recvx-gameplay-bindings-tests tests/native/gameplay_bindings_test.cpp)
   target_link_libraries(recvx-gameplay-bindings-tests PRIVATE recvx_game)
 if(TARGET recvx_input)
@@ -462,6 +470,48 @@ endif()
   add_executable(recvx-scene-tests tests/native/scene_test.cpp)
   target_link_libraries(recvx-scene-tests PRIVATE recvx_scene)
   add_test(NAME scene_renderer COMMAND recvx-scene-tests)
+  # F05: independent modifier asset and effect-state checks.
+  add_executable(recvx-shadow-geometry-tests tests/native/shadow_geometry_test.cpp)
+  target_link_libraries(recvx-shadow-geometry-tests PRIVATE recvx_scene)
+  add_test(NAME shadow_original_geometry COMMAND recvx-shadow-geometry-tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0001.bin")
+  add_executable(recvx-shadow-state-tests tests/native/shadow_state_test.cpp)
+  target_link_libraries(recvx-shadow-state-tests PRIVATE recvx_scene)
+  add_test(NAME shadow_effect_state COMMAND recvx-shadow-state-tests)
+  add_executable(recvx-shadow-mask-tests tests/native/shadow_mask_test.cpp)
+  target_link_libraries(recvx-shadow-mask-tests PRIVATE recvx_scene)
+  add_test(NAME shadow_mask_arithmetic COMMAND recvx-shadow-mask-tests)
+  add_executable(recvx-shadow-raster-tests tests/native/shadow_raster_test.cpp)
+  target_link_libraries(recvx-shadow-raster-tests PRIVATE recvx_scene)
+  add_test(NAME shadow_mask_raster COMMAND recvx-shadow-raster-tests)
+  add_executable(recvx-shadow-projection-tests tests/native/shadow_projection_test.cpp)
+  target_link_libraries(recvx-shadow-projection-tests PRIVATE recvx_scene)
+  add_test(NAME shadow_original_projection COMMAND recvx-shadow-projection-tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0001.bin")
+  add_executable(recvx-shadow-volume-tests tests/native/shadow_volume_test.cpp)
+  target_link_libraries(recvx-shadow-volume-tests PRIVATE recvx_scene)
+  add_test(NAME shadow_original_volume COMMAND recvx-shadow-volume-tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0001.bin")
+  add_executable(recvx-shadow-depth-tests tests/native/shadow_depth_test.cpp)
+  target_link_libraries(recvx-shadow-depth-tests PRIVATE recvx_scene)
+  add_test(NAME shadow_depth_transport COMMAND recvx-shadow-depth-tests)
+  add_test(NAME shadow_elf_semantics COMMAND "${Python3_EXECUTABLE}" -I
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/verify_shadow_semantics.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/files/SLUS_201.84")
+
+
+  add_executable(recvx-shadow-renderer-tests tests/native/shadow_renderer_test.cpp)
+  target_link_libraries(recvx-shadow-renderer-tests PRIVATE recvx_scene)
+  add_test(NAME shadow_modifier_pixels COMMAND recvx-shadow-renderer-tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0001.bin")
+
+
+  add_executable(recvx-shadow-world-tests tests/native/shadow_world_test.cpp)
+  target_link_libraries(recvx-shadow-world-tests PRIVATE recvx_game)
+  add_test(NAME shadow_world_binding COMMAND recvx-shadow-world-tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/data")
+
+
   add_executable(recvx-face-tests tests/native/face_test.cpp)
   target_link_libraries(recvx-face-tests PRIVATE recvx_game)
   add_test(NAME original_face_geometry COMMAND recvx-face-tests)
@@ -471,6 +521,12 @@ endif()
   add_executable(recvx-morph-tests tests/native/morph_test.cpp)
   target_link_libraries(recvx-morph-tests PRIVATE recvx_scene)
   add_test(NAME actor_morph_blend COMMAND recvx-morph-tests)
+  add_executable(recvx-player-action-tests tests/native/player_action_test.cpp)
+  target_link_libraries(recvx-player-action-tests PRIVATE recvx_game)
+  add_test(NAME player_action COMMAND recvx-player-action-tests)
+  add_executable(recvx-morph-world-tests tests/native/morph_world_test.cpp)
+  target_link_libraries(recvx-morph-world-tests PRIVATE recvx_game)
+  add_test(NAME enemy_morph_selection COMMAND recvx-morph-world-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
 endif()
 install(TARGETS recvx-native RUNTIME DESTINATION bin)
 
@@ -514,6 +570,11 @@ target_sources(recvx_game PRIVATE native/player_combat_core.c)
 # Spielerkampfs. Solange es hier fehlt, uebersetzt player_combat_core.c die
 # Einheit mit; mit diesem Eintrag entfaellt das #include "combat_geometry.c".
 target_sources(recvx_game PRIVATE native/combat_geometry.c)
+# pwksub.c bhCheckC2Wall with its Ninja primitives (CheckCollision4Sound).
+target_sources(recvx_game PRIVATE native/wall_capsule.cpp native/audio_pitch.cpp native/audio_sq.cpp native/audio_pan.cpp native/audio_spu.cpp)
+if(NOT MSVC)
+  set_property(SOURCE native/wall_capsule.cpp native/audio.cpp APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+endif()
 # Preserve original C field aliasing and separate float multiply/add evaluation.
 if(NOT MSVC)
  set_source_files_properties(native/player_push_core.c PROPERTIES COMPILE_OPTIONS "-fno-strict-aliasing;-ffp-contract=off")

@@ -1450,10 +1450,13 @@ static const void* t3_texp(RECVX_ENEMY_WORK* w)
    des Works aus dem Winkel ry neu; das ist ein beobachtbarer Seiteneffekt.
    Die Typen 3/6/7/8/10/11 nullen `ofs->z` im Speicher des Aufrufers
    (en03_lib.h:178). */
-void recvx_t3_set_blood2(RECVX_ENEMY_WORK* w, int type, RECVX_ENEMY_VEC* ofs, int ry)
+/* Kern von bhEne_SetBlood2 mit explizitem Linkziel: `lk` ist der Gegnerwork
+   oder der Spieler; `w` liefert id/djnt_no/dvx../dpx.. (fuer den Spieler eine
+   Sicht aus den EXT-Diensten, siehe recvx_t3_set_blood2_player). */
+static void t3_set_blood2_lk(RECVX_T3_LINK lk, RECVX_ENEMY_WORK* w, int type,
+                             RECVX_ENEMY_VEC* ofs, int ry)
 {
     RECVX_T3_EFF e = t3_eff_base();
-    const RECVX_T3_LINK lk = t3_link_w(w);
     uint32_t bl_color;
 
     e.flg = 1u;
@@ -1546,7 +1549,8 @@ void recvx_t3_set_blood2(RECVX_ENEMY_WORK* w, int type, RECVX_ENEMY_VEC* ofs, in
 
     case 10:
         ofs->z = 0.0f;
-        recvx_t3_set_blood4(w, w->djnt_no, ofs, 0, 2);
+        if (lk.player != 0) t3_gap_w(w, "zonzon.c:617 bhEne_SetBlood4(plp)");
+        else recvx_t3_set_blood4(w, w->djnt_no, ofs, 0, 2);
         break;
 
     case 11:
@@ -1576,18 +1580,64 @@ void recvx_t3_set_blood2(RECVX_ENEMY_WORK* w, int type, RECVX_ENEMY_VEC* ofs, in
     }
 }
 
+void recvx_t3_set_blood2(RECVX_ENEMY_WORK* w, int type, RECVX_ENEMY_VEC* ofs, int ry)
+{
+    t3_set_blood2_lk(t3_link_w(w), w, type, ofs, ry);
+}
+
+/* bhEne_SetBlood2(plp, ...) (en04.c:3609, en03.c:2920 u.a.): der Spieler ist
+   kein RECVX_ENEMY_WORK. Seine Trefferfelder kommen aus player_hit_get und
+   gehen nach dem Aufruf (dvx.. der Typen 4/6/11) ueber player_hit_set zurueck;
+   plp->id ist 0 (player.c:700), wpnr_no aus player_get. */
+static int t3_player_view(RECVX_ENEMY_WORK* pw)
+{
+    RECVX_ENEMY_VEC dv, dp;
+    RECVX_ENEMY_PLAYER pl;
+    int djnt;
+
+    memset(pw, 0, sizeof(*pw));
+    if (!(t3_ext_bound && t3_ext_bound->player_hit_get &&
+          t3_ext_bound->player_hit_get(&djnt, &dv, &dp))) {
+        recvx_t3_gap("zonzon.c:415/466 plp->djnt_no/dvx/dpx (Spieler)");
+        return 0;
+    }
+    pw->id = t3_ext_bound->player_id ? (uint16_t)t3_ext_bound->player_id() : 0u;
+    pw->djnt_no = djnt;
+    pw->dvx = dv.x; pw->dvy = dv.y; pw->dvz = dv.z;
+    pw->dpx = dp.x; pw->dpy = dp.y; pw->dpz = dp.z;
+    if (t3_ext_bound->player_get && t3_ext_bound->player_get(&pl)) pw->wpnr_no = pl.wpnr_no;
+    return 1;
+}
+
+static void t3_player_store(const RECVX_ENEMY_WORK* pw)
+{
+    const RECVX_ENEMY_VEC dv = t3_dv(pw);
+    const RECVX_ENEMY_VEC dp = t3_vec3(pw->dpx, pw->dpy, pw->dpz);
+    if (t3_ext_bound && t3_ext_bound->player_hit_set) t3_ext_bound->player_hit_set(pw->djnt_no, &dv, &dp);
+}
+
+void recvx_t3_set_blood2_player(int type, RECVX_ENEMY_VEC* ofs, int ry)
+{
+    RECVX_ENEMY_WORK pw;
+    RECVX_T3_LINK lk;
+    if (!t3_player_view(&pw)) return;
+    lk.w = NULL; lk.player = 1;
+    t3_set_blood2_lk(lk, &pw, type, ofs, ry);
+    t3_player_store(&pw);
+}
+
 /* zonzon.c:415 — Versatz des Treffers in die Gelenklage. Ohne Tabelle (oder
    bei den Waffen 10 und 13) wird der Weltversatz in das Trefferglied
    zurueckgerechnet; mit Tabelle kommt er aus dem Eintrag des Trefferglieds,
    mit Streuung aus zwei Zufallsziehungen, und djnt_no wechselt auf das
    dort eingetragene Folgeglied. Die Blutrichtung ist plp->way. */
-void recvx_t3_set_blood(RECVX_ENEMY_WORK* w, int type, const RECVX_T3_BT* bt)
+static void t3_set_blood_lk(RECVX_T3_LINK lk, RECVX_ENEMY_WORK* w, int type, const RECVX_T3_BT* bt)
 {
     RECVX_ENEMY_VEC ofp;
     float m[16];
     int way = 0;
 
-    if (!(w->sv && w->sv->joint_matrix && w->sv->joint_matrix(w, (uint32_t)w->djnt_no, m))) {
+    if (!t3_link_joint_matrix(lk, (uint32_t)w->djnt_no, m)) {
         t3_gap_w(w, "zonzon.c:415 mlwP->owP[djnt_no].mtx");
         return;
     }
@@ -1620,7 +1670,22 @@ void recvx_t3_set_blood(RECVX_ENEMY_WORK* w, int type, const RECVX_T3_BT* bt)
     if (t3_ext_bound && t3_ext_bound->player_way) way = t3_ext_bound->player_way();
     else t3_gap_w(w, "zonzon.c:462 plp->way");
 
-    recvx_t3_set_blood2(w, type, &ofp, way);
+    t3_set_blood2_lk(lk, w, type, &ofp, way);
+}
+
+void recvx_t3_set_blood(RECVX_ENEMY_WORK* w, int type, const RECVX_T3_BT* bt)
+{
+    t3_set_blood_lk(t3_link_w(w), w, type, bt);
+}
+
+void recvx_t3_set_blood_player(int type, const RECVX_T3_BT* bt)
+{
+    RECVX_ENEMY_WORK pw;
+    RECVX_T3_LINK lk;
+    if (!t3_player_view(&pw)) return;
+    lk.w = NULL; lk.player = 1;
+    t3_set_blood_lk(lk, &pw, type, bt);
+    t3_player_store(&pw);
 }
 
 void recvx_t3_set_blood_nbt(RECVX_ENEMY_WORK* w, int type)

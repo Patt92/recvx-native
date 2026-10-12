@@ -111,6 +111,52 @@ int main(int argc,char** argv){try{
         Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(5,18);MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);StatusMenu menu;menu.active=true;menu.stage=0;menu.room=9;vm.flags[10][0]|=0x80000;BoxMenu box;box.synchronize(inv,menu,&vm);check(box.active()&&box.base()==192&&box.moving(),"security script did not enter modal box");box.input(MenuInput::Confirm,inv,menu,&vm,audio);check(!inv.items[192],"pad accepted while the box slides in");for(int i=0;i<9&&box.moving();++i)box.synchronize(inv,menu,&vm);check(!box.moving(),"box slide-in did not finish after nine ticks");box.input(MenuInput::Confirm,inv,menu,&vm,audio);box.input(MenuInput::Confirm,inv,menu,&vm,audio);
         check(inv.items[192]==Inventory::pack(5,18),"modal security confirm did not deposit");
         box.input(MenuInput::Cancel,inv,menu,&vm,audio);check(box.active()&&box.moving()&&menu.active&&!(vm.flags[12][0]&0x200),"security close skipped the slide-out");for(int i=0;i<9;++i)box.synchronize(inv,menu,&vm);check(!box.active()&&!menu.active&&!(vm.flags[10][0]&0x1c0000)&&vm.flags[12][0]&0x200,"security close leaves original script/menu flags stuck");});
+    // sub1.c ItemBox testmode 2 (ItemBoxIconSet's persistent parts_20b pos[1]
+    // mutation and the tail at 7688-7751): a one-row request displaces every row
+    // by `number` (+-19) per frame for 38/|number| frames; the direction flag
+    // adds the full 38 px in the frame that advances the box index
+    // (ips1/ipsdisp), so the accumulated shift returns to zero. The five-entry
+    // shoulder scroll keeps the original keywait>10 / boxwait>3 repeat counters.
+    section("ItemBox Listen-Scroll (testmode 2)",[&]{
+        Inventory inv;std::fill(inv.items.begin()+64,inv.items.begin()+192,0);MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);StatusMenu menu;menu.active=true;menu.stage=0;menu.room=9;vm.flags[10][0]|=0x40000;BoxMenu box;box.synchronize(inv,menu,&vm);
+        for(int i=0;i<9&&box.moving();++i)box.synchronize(inv,menu,&vm);
+        check(box.active()&&box.base()==64&&!box.moving()&&box.box_index()==0,"item box list did not settle at ips1 0");
+        box.input(MenuInput::Confirm,inv,menu,&vm,audio);   // testmode 2
+        box.input(MenuInput::Down,inv,menu,&vm,audio);
+        check(box.arrows()==2,"down request must light parts_15b[21] (anim 19)");
+        box.synchronize(inv,menu,&vm);check(box.row_shift()==-19.f&&box.box_index()==0,"first scroll frame must displace the rows by -19");
+        box.synchronize(inv,menu,&vm);check(box.row_shift()==-38.f&&box.box_index()==0,"second scroll frame must displace the rows by -38");
+        box.synchronize(inv,menu,&vm);check(box.row_shift()==0.f&&box.box_index()==1&&box.arrows()==3,"direction frame must advance ips1, restore the rows and set both parts_15b arrows to the neutral 18");
+        // sub1.c:7606: Confirm/Cancel stehen hinter `st->wait == 0`; waehrend der
+        // laufenden Scroll-Animation wird keine der beiden Tasten verarbeitet.
+        {Inventory gate;std::fill(gate.items.begin()+64,gate.items.begin()+192,0);gate.items[64]=Inventory::pack(12,3);gate.items[65]=Inventory::pack(12,5);gate.slots()[2]=Inventory::pack(12,10);
+         MessageDialog d;auto b=event_fixture({0xff,0});EventVm v(b,gate,d);StatusMenu m;m.active=true;m.selected=2;m.stage=0;m.room=9;v.flags[10][0]|=0x40000;BoxMenu bo;bo.synchronize(gate,m,&v);
+         for(int i=0;i<9&&bo.moving();++i)bo.synchronize(gate,m,&v);
+         bo.input(MenuInput::Confirm,gate,m,&v,audio);       // testmode 2
+         bo.input(MenuInput::Down,gate,m,&v,audio);
+         bo.synchronize(gate,m,&v);                          // Tail: wait++ = 1, Scroll laeuft
+         bo.input(MenuInput::Confirm,gate,m,&v,audio);
+         check(gate.items[65]==Inventory::pack(12,5)&&gate.slots()[2]==Inventory::pack(12,10),"ItemBox 7606: confirm during the pending scroll must be ignored");
+         bo.synchronize(gate,m,&v);bo.synchronize(gate,m,&v);bo.synchronize(gate,m,&v);
+         bo.input(MenuInput::Confirm,gate,m,&v,audio);
+         check(gate.slots()[2]==Inventory::pack(12,15)&&!gate.items[65]&&gate.items[64]==Inventory::pack(12,3),"ItemBox deposit after the settled scroll uses the advanced box entry (ips1 1), not entry 0");}
+        box.input(MenuInput::Up,inv,menu,&vm,audio);
+        check(box.arrows()==1,"up request must light parts_15b[20] (anim 19)");
+        for(int i=0;i<3;++i)box.synchronize(inv,menu,&vm);
+        check(box.box_index()==0&&box.row_shift()==0.f,"up request must return to the previous box entry");
+        box.input(MenuInput::Right,inv,menu,&vm,audio);check(box.box_index()==5,"first five-entry scroll must step immediately (keywait 1)");
+        box.input(MenuInput::Right,inv,menu,&vm,audio);check(box.box_index()==5,"second event must only count keywait");
+        for(int i=0;i<8;++i)box.input(MenuInput::Right,inv,menu,&vm,audio);
+        check(box.box_index()==5,"keywait<=10 must not step again");
+        box.input(MenuInput::Right,inv,menu,&vm,audio);
+        check(box.box_index()==5,"keywait==11 alone must not step while boxwait is counted");
+        box.input(MenuInput::Right,inv,menu,&vm,audio);
+        check(box.box_index()==10,"boxwait>3 must step five more entries (ItemBoxInit leaves boxwait 4)");
+        for(int i=0;i<3;++i)box.input(MenuInput::Right,inv,menu,&vm,audio);
+        check(box.box_index()==10,"boxwait 1..3 must not step yet");
+        box.input(MenuInput::Right,inv,menu,&vm,audio);
+        check(box.box_index()==15,"boxwait>3 must repeat every four events");
+    });
     // PORTIERT (Policy 2026-10-09, Auftrag C01): Die Spawn-/Fallenbereiche
     // (bhEne_EnemyAtariCheck, bhEne04_MVType01) liefen aus enemy_spawn.inc als
     // Quarantäne; jetzt bestimmt native/enemies/enemy_spawn.cpp sie. Ein
@@ -135,6 +181,11 @@ int main(int argc,char** argv){try{
     // A v3 ADX loop header is before the CRI marker and data offset.
     {std::vector<std::uint8_t> adx(50+18);adx[0]=0x80;adx[3]=46;adx[4]=3;adx[5]=18;adx[6]=4;adx[7]=1;adx[10]=0xbb;adx[11]=0x80;adx[15]=32;adx[18]=3;adx[27]=1;adx[31]=4;adx[39]=28;std::copy_n("(c)CRI",6,adx.begin()+44);auto decoded=decode_adx(adx);check(decoded.loop_start==4&&decoded.loop_end==28,"ADX v3 loop marker/ranges not parsed");adx[39]=40;bool rejected=false;try{decode_adx(adx);}catch(const std::exception&){rejected=true;}check(rejected,"ADX loop outside waveform accepted");}
     if(argc>1){const auto data=std::filesystem::u8path(argv[1]);
+        // ItemBoxIconSet leaves the parts_20b pos[1] values where the scroll put
+        // them; the draw must follow that mutation (rows move with it).
+        {GameUi ui(data);Inventory inv;for(unsigned i=0;i<7;++i)inv.items[64+i]=Inventory::pack(5+i,1);StatusMenu menu;menu.active=true;menu.selected=1;SoftwareRenderer plain(640,480),shifted(640,480);
+            ui.draw_box(plain,inv,menu,64,3,false);ui.draw_box(shifted,inv,menu,64,3,false,nullptr,0,0,-19.f,3);
+            check(plain.pixels()!=shifted.pixels(),"parts_20b row shift must move the drawn box rows");}
         // Door PCM remains alive across the room sound-bank reset. Three
         // original door triggers must not overwrite each other or foot voices.
         {AudioMixer door_audio(data);door_audio.load_door_sounds(7);for(unsigned program:{1u,0u,2u})check(door_audio.play_door_sound(program),"original opening/closing door program unavailable");

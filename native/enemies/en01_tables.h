@@ -191,7 +191,16 @@ typedef struct {
     float    sx, sy, sz;
     int32_t  ay;
     uint8_t  mdlver;
+    /* sys->ef ist EINE gemeinsame Vorlage: ein Feld, das der Aufrufer nicht
+       setzt, traegt im Original den Wert des letzten Schreibers weiter.
+       `keep` nennt diese Felder (RECVX_EN01_EF_KEEP_*); der Anbieter von
+       set_effect_tb muss sie aus seiner Vorlage uebernehmen statt aus
+       diesem Satz. 0 = alle Felder gelten (bisheriges Verhalten aller
+       en01.c-Aufrufer). */
+    uint32_t keep;
 } RECVX_EN01_EF;
+/* bhEne01Scope_Effect setzt sys->ef.ay nicht (en01sub.c:1966-1979). */
+#define RECVX_EN01_EF_KEEP_AY  0x0001u
 
 /* Die Felder eines eff[]-Slots, die EN01 NACH bhSetEffectTb setzt (gemessen
    ueber alle eff[eno]-Zugriffe in en01.c). `mask` waehlt, welche gelten. */
@@ -203,6 +212,10 @@ typedef struct {
 #define RECVX_EN01_EFS_ANG     0x0020u  /* ax/ay                            */
 #define RECVX_EN01_EFS_CT      0x0040u  /* ct0/ct1/ct3                      */
 #define RECVX_EN01_EFS_SHP     0x0080u  /* shp_ct                           */
+/* Kindfamilie en01sub.c, bhEne01Scope_Effect (en01sub.c:1985-1991): */
+#define RECVX_EN01_EFS_AZ      0x0100u  /* az                               */
+#define RECVX_EN01_EFS_CT3     0x0200u  /* nur ct3 (ct0/ct1 bleiben)        */
+#define RECVX_EN01_EFS_EXP0    0x0400u  /* exp0 = Gegnerwork                */
 typedef struct {
     struct RECVX_ENEMY_WORK* lkwkp;
     float    xn, yn, zn;
@@ -215,6 +228,8 @@ typedef struct {
     int32_t  ax, ay;
     int32_t  ct0, ct1, ct3;
     float    shp_ct;
+    int32_t  az;                         /* RECVX_EN01_EFS_AZ   */
+    struct RECVX_ENEMY_WORK* exp0;       /* RECVX_EN01_EFS_EXP0 */
 } RECVX_EN01_EF_SLOT;
 
 /* ---------------------------------------------------------------------------

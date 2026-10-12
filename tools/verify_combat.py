@@ -124,8 +124,9 @@ def check_runtime(runtime, data, emulator):
         rounds = [(item & 0xffff) for item in saved['items'] if (item >> 16) & 255 == 9]
         if rounds != [10]:
             raise SystemExit(f'bhCountBullet did not consume two rounds: {rounds}')
-        if saved['audio_played'].count('ARMS/0001/0005') != 2:
-            raise SystemExit('weapon shot sound missing (CallPlayerWeaponSeEx)')
+        shots = [entry for entry in saved['audio_played'] if entry.startswith('ARMS/0001/0005/')]
+        if shots != ['ARMS/0001/0005/slot8', 'ARMS/0001/0005/slot9']:
+            raise SystemExit(f'weapon shot sound/alternating slots incorrect (CallPlayerWeaponSeEx): {shots}')
         if saved['motion'] != 42:
             raise SystemExit(f"bhCPM2_act_wre did not return to idle: motion={saved['motion']}")
         if saved['blocked_commands']:

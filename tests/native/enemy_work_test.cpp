@@ -138,6 +138,37 @@ void mask_skip(const std::filesystem::path& data){
         for(unsigned n=6;n<=10;++n)check(e->enemy_owp_flg[n]&4u,"bhInitMask did not mark owP[6..14]");
         check(!(e->enemy_owp_flg[5]&4u)&&!(e->enemy_owp_flg[11]&4u),"bhInitMask marked a node outside owP[6..14]");}
 }
+// RM_0020: das emtp der Identitaet 1 traegt den unteren Koerper bei mtn (8
+// Kanaele) und den verknuepften Oberkoerper bei mtn + 0xc8 (10 Kanaele,
+// en01_walk_mtn en01.c:1118). Der Oberkoerperwork des Originals schreibt beide
+// mit objP/owP += 8 auf denselben Objektbaum (en01.c:2815, :10347-10353); fehlt
+// die Zusammenfuehrung, bleiben Arme und Kopf in der Ruhelage (T-Pose), waehrend
+// der Zombie laeuft. Vorher/Nachher in diesem Raum gemessen: ohne die
+// Zusammenfuehrung bewegten sich 0 der 10 Oberkoerperknoten, mit ihr 8.
+void cemetery_upper_body(const std::filesystem::path& data){
+    const auto bytes=read_asset_file(data/"rooms"/std::string("RM_0020.RDT"),64*1024*1024);
+    const auto scene=decode_scene(bytes);auto actor=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(bytes,scene,actor,motion,frame,audio,data,{},"RM_0020");
+    Inventory inventory;MessageDialog dialog;EventVm events(bytes,inventory,dialog);world.bind_player_collision(events);
+    world.set_simulation_flags(~0u);
+    const WorldEntity* zombie=nullptr;
+    for(unsigned i=0;i<64;++i)if(const auto* e=world.state(1,i);e&&e->enemy_bound&&e->identity==1)zombie=e;
+    check(zombie!=nullptr,"RM_0020 Zombie fehlt");
+    const auto& asset=*zombie->enemy_asset;
+    check(asset.bones()==18,"RM_0020 Zombie-Skelett weicht ab");
+    const auto rest=asset.bind_pose();
+    for(unsigned pass=0;pass<8;++pass)world.tick();
+    // en01_flipTree (en01.c:2400) fuer 18 Kanaele: Kanal 8..17 -> Knoten
+    // 8,9,10,11,15,16,17,12,13,14.
+    static const unsigned upper[10]={8,9,10,11,15,16,17,12,13,14};
+    unsigned posed=0;
+    for(const auto node:upper){const auto& now=zombie->enemy_obj.at(node);const auto& bind=rest.at(node);
+        if(now.position.x!=bind.position.x||now.position.y!=bind.position.y||now.position.z!=bind.position.z||
+           now.angles[0]!=bind.angles[0]||now.angles[1]!=bind.angles[1]||now.angles[2]!=bind.angles[2])++posed;}
+    // Die Knoten 8 und 10 tragen im Paar (2, 202) dieses Raums reine
+    // Nullschluessel; die uebrigen acht kommen aus dem Oberkoerperclip.
+    check(posed>=8,"Oberkoerper des Zombies bleibt in der Ruhelage (T-Pose)");
+}
 }
 
 int main(int argc,char** argv){try{
@@ -149,5 +180,6 @@ int main(int argc,char** argv){try{
     room(data,"RM_0130",7,5);   // five original ID-7 entries
     room(data,"RM_0080",0,1);   // the room's one barrel next to five zombies
     mask_skip(data);            // RM_0000: Claire/Rodrigo, bhInitMask owP skip
+    cemetery_upper_body(data);  // RM_0020: verknuepfter Oberkoerper des Zombies
     std::cout<<"Enemy work contract, bhSetMotion and the RoomWorld binding passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

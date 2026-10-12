@@ -119,7 +119,12 @@ class GameUi {
 public:
     GameUi(const std::filesystem::path& data,const std::filesystem::path& mods={});
     void draw(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick);
-    void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0)const;
+    // `row_shift` is the accumulated sub1.c ItemBoxIconSet mutation of the
+    // parts_20b pos[1] values (testmode 2 `number` plus the ±38 direction
+    // frame); `arrows` mirrors the parts_15b[20]/[21] anim of ItemBox testmode
+    // 2: 0 = table values (not scrolling), 1 = parts_09b[20] lit (Up), 2 =
+    // parts_09b[21] lit (Down), 3 = both neutral (18).
+    void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0,float row_shift=0.f,unsigned arrows=0)const;
     void draw_title(SoftwareRenderer& image);
     void draw_title_options(SoftwareRenderer& image,unsigned selected);
     void label(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=.6f,std::uint32_t color=0xffffffff)const;

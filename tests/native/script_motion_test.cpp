@@ -24,12 +24,16 @@ int main(int argc,char** argv){try{
     for(unsigned tick=0;tick<220;++tick){
         vm.check_floor(player.position,player.yaw,world.floor_at(player.position));vm.tick();world.tick();sound.mix();
         const auto& e=*world.state(1,2);
-        if(active&&!e.hidden){const auto root=world.model_pose(1,2).position;check(root.x<-220&&root.x>-250,"drag leaves the original motion's position range");
+        // Der Raum blendet die Figur nach dem Ziehen mit bhInitModelSet (0x24)
+        // aus; das ist das Original-stflg 0x1000000 und damit das Zeichengate
+        // (entity_hidden), nicht das rohe hidden-Feld.
+        const auto drawn=!e.hidden&&!e.inactive;
+        if(active&&drawn){const auto root=world.model_pose(1,2).position;check(root.x<-220&&root.x>-250,"drag leaves the original motion's position range");
             if(previous)check(root.x>=previous-.001f,"drag returns towards its starting position within a motion section");
             previous=root.x;++samples;
             if(e.frame==0){check(e.pose_frame()==84*65536,"visible wrap sampled frame zero instead of final frame 84");check(root.x>-231,"last visible drag frame flashes back to the ground position");wrapped_visible=true;}
         }
-        if(active&&e.hidden)hidden=true;
+        if(active&&!drawn)hidden=true;
     }
     check(vm.errors.empty(),"original drag trigger/script is blocked");check(starts==std::vector<unsigned>{0,60,64},"Common 34 lost the original frame 60/64 offsets or restarted the event");
     check(samples>90&&wrapped_visible&&hidden,"original drag/hide sequence not fully exercised");

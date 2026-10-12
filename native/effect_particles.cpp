@@ -106,6 +106,7 @@ constexpr Prm Eff302Prm[20] = {
 // Quell- und Ziel-Farbe statt aus der col_lv-Verschneidung.
 struct Work {
     bool live = false;
+    unsigned mode1 = 0;         // oP->mode1 (zonzon.c:627); no reader in bhEff302
     unsigned type = 0;          // oP->type = pdP->mov_no
     unsigned draw_typ = 0;      // pdP->drw_typ, 1 = Sprite, 2 = Linie
     bool linked = false;        // oP->flg 0x80
@@ -281,11 +282,12 @@ EffectParticles& EffectParticles::operator=(EffectParticles&&) noexcept=default;
 // effsub3.c:911 — bhSetEffParticle. Ein Aufruf legt je Tabelleneintrag drei
 // Arbeiten an (Wurzel, E02_WORK, E02_WRK) und beginnt die Vergabe wieder bei
 // owk_scn_noG = 0. Bei erschoepftem Pool wird der ganze Satz freigegeben.
-void EffectParticles::spawn(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color)
+int EffectParticles::spawn(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color)
 {
     if(type>=19)throw std::runtime_error("particle type outside PtclTbl");
     const PT& table=PtclTbl[type];
     impl_->scan=0;
+    int first=-1;
     for(unsigned set_no=0;set_no<table.set_num;++set_no){
         const PD& entry=table.pd[set_no];
         // Ein Satz sind drei Arbeiten aus dem einen Pool: die Wurzel (O_WRK),
@@ -298,9 +300,10 @@ void EffectParticles::spawn(unsigned type,const ParticleLink& link,NJS_POINT3 of
             if(root_slot>=0)impl_->free_slot(root_slot);
             if(part_slot>=0)impl_->free_slot(part_slot);
             if(vert_slot>=0)impl_->free_slot(vert_slot);
-            return;
+            return first;
         }
         Work& w=impl_->root(root_slot);
+        if(first<0)first=root_slot;
         w.part_slot=part_slot;
         w.vert_slot=vert_slot;
         w.type=entry.mov_no;
@@ -320,15 +323,24 @@ void EffectParticles::spawn(unsigned type,const ParticleLink& link,NJS_POINT3 of
         w.direction=direction;
         njUnitVector(reinterpret_cast<NJS_VECTOR*>(&w.direction));
     }
+    return first;
+}
+
+void EffectParticles::set_mode1(unsigned slot,unsigned value)
+{
+    if(slot>=eff_slots)return;
+    auto& w=impl_->works[slot];
+    if(w.live)w.mode1=value;
 }
 
 // effsub3.c:1008 — bhSetEffParticleMk2: gleiche Felder, mtn_attr aus src_col und
 // mtn_no direkt aus dst_col, ohne die 0x20000000-Verknuepfung.
-void EffectParticles::spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color)
+int EffectParticles::spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color)
 {
     if(type>=19)throw std::runtime_error("particle type outside PtclTbl");
     const PT& table=PtclTbl[type];
     impl_->scan=0;
+    int first=-1;
     for(unsigned set_no=0;set_no<table.set_num;++set_no){
         const PD& entry=table.pd[set_no];
         const int root_slot=impl_->reserve(false);
@@ -338,9 +350,10 @@ void EffectParticles::spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT
             if(root_slot>=0)impl_->free_slot(root_slot);
             if(part_slot>=0)impl_->free_slot(part_slot);
             if(vert_slot>=0)impl_->free_slot(vert_slot);
-            return;
+            return first;
         }
         Work& w=impl_->root(root_slot);
+        if(first<0)first=root_slot;
         w.part_slot=part_slot;
         w.vert_slot=vert_slot;
         w.type=entry.mov_no;
@@ -358,6 +371,7 @@ void EffectParticles::spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT
         w.direction=direction;
         njUnitVector(reinterpret_cast<NJS_VECTOR*>(&w.direction));
     }
+    return first;
 }
 
 // effsub3.c:1107-1381 — bhEff302, zweistufig: case 0 richtet die sechs Stufen

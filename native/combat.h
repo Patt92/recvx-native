@@ -23,6 +23,7 @@ public:
     unsigned original_mode()const;
     unsigned original_phase()const;
     bool attacking()const;
+    std::int16_t aim_yaw()const; // plp->way of the combat player work
     const AimSelection& targets()const{return aim_;}
     ModelNodeOverrides pose_overrides(const PlayerAsset& player,std::size_t motion,std::int64_t frame)const;
     static float target_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,NJS_POINT3 position,float radius,float height);

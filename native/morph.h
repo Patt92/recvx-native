@@ -21,7 +21,10 @@ struct MorphStreams {
     // Raw vertex `index`: position at +0, normal at +16.
     void vertex(std::size_t object,std::size_t index,float* position,float* normal)const;
 };
-MorphStreams morph_streams(const std::vector<std::uint8_t>& model,std::size_t objects);
+// `evalflags`, when given, is the live objP[node].evalflags of the Work (the
+// native WorldEntity owns it); the original excludes exactly the objects whose
+// live flag has bit 0x8, not the immutable asset's.
+MorphStreams morph_streams(const std::vector<std::uint8_t>& model,std::size_t objects,const std::vector<std::uint32_t>* evalflags=nullptr);
 // npTransform's per-vertex step for two objects npCalcMorphing paired up.
 // npTransform scales its own argument by 0.001; `factor` is that scaled value.
 // Components the source and target share are copied verbatim, matching the

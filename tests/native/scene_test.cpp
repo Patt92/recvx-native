@@ -29,7 +29,12 @@ static std::vector<std::uint8_t> fixture(){
 }
 template<class F>static void rejects(F f,const char* message){bool rejected=false;try{f();}catch(const std::runtime_error&){rejected=true;}check(rejected,message);}
 int main(){try{
-    _Make_SinTable();auto data=fixture();auto scene=recvx::decode_scene(data);
+    _Make_SinTable();
+    {recvx::SceneCamera camera;camera.position={3,4,5};camera.distance=10;
+     auto p=recvx::camera_world_position(camera);check(p.x==3&&p.y==4&&p.z==-5,"sound listener must include cam.ln");
+     camera.angles[1]=16384;p=recvx::camera_world_position(camera);check(p.x==-7&&p.y==4&&p.z==5,"sound listener must rotate cam.ln by cam.ay");
+     camera.angles={16384,0,0};p=recvx::camera_world_position(camera);check(p.x==3&&p.y==14&&p.z==5,"sound listener must rotate cam.ln by cam.ax");}
+    auto data=fixture();auto scene=recvx::decode_scene(data);
     check(scene.triangles.size()==1&&scene.cameras.size()==1&&scene.textures.size()==1,"decoded scene counts");
     // A material writes blend state after an earlier NJD_CB_BA. Test the
     // original chunks, not a manually constructed host triangle.

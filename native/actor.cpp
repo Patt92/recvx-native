@@ -227,6 +227,21 @@ std::vector<BoneMatrix> PlayerAsset::tree_matrices(const std::vector<ModelPose>&
     if(std::find(visited.begin(),visited.end(),false)!=visited.end())throw std::runtime_error("unreachable model node");
     return result;
 }
+void PlayerAsset::tree_window(const std::vector<ModelPose>& pose,const NJS_MATRIX& root,unsigned first,const std::vector<std::uint32_t>& owp_flg,std::vector<BoneMatrix>& owp_mtx)const{
+    if(pose.size()!=bones()||owp_mtx.size()!=bones()||first>=pose.size())throw std::runtime_error("native object tree window differs from model");
+    // MdlPut.c:262 laeuft obj_num Knoten in Feldreihenfolge ab objP; Kind-
+    // und Geschwisterzeiger steuern nur den Matrixstapel. Knoten ausserhalb
+    // des Fensters erreicht diese Schleife nie.
+    std::vector<bool> visited(pose.size());
+    std::function<void(std::int32_t,const NJS_MATRIX&,unsigned)> visit=[&](std::int32_t node,const NJS_MATRIX& parent,unsigned depth){
+        if(node<0||unsigned(node)<first)return;
+        if(depth>256||std::size_t(node)>=pose.size()||visited[node])throw std::runtime_error("invalid/cyclic skeleton hierarchy");
+        visited[node]=true;auto& world=owp_mtx[node].value;
+        if(std::size_t(node)>=owp_flg.size()||!(owp_flg[node]&1)){std::copy_n(parent,16,world);const auto& t=pose[node];njTranslate(&world,t.position.x,t.position.y,t.position.z);njRotateXYZ(&world,t.angles[0],t.angles[1],t.angles[2]);}
+        visit(children_[node],world,depth+1);visit(siblings_[node],parent,depth);
+    };
+    visit(std::int32_t(first),root,0);
+}
 std::vector<std::uint32_t> PlayerAsset::node_evalflags()const{
     BinaryView v(model_);const auto base=v.u16(4);const auto objects=v.relative(base,v.u32(12),bones()*52);
     std::vector<std::uint32_t> out(bones());for(std::size_t i=0;i<out.size();++i)out[i]=v.u32(objects+i*52);return out;
@@ -314,7 +329,11 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
     // npCalcMorphing pairs obj_a with obj_b object by object; npPushMdlstr2 has
     // already excluded the evalflags 0x8 objects both walk past.
     MorphStreams morph_a,morph_b;float morph_factor=0;
-    if(geometry.morph.model){morph_a=morph_streams(encoded,bones());morph_b=morph_streams(*geometry.morph.model,bones());morph_factor=geometry.morph.shape*0.001f;}
+    if(geometry.morph.model){
+        morph_a=morph_streams(encoded,bones(),geometry.evalflags.empty()?nullptr:&geometry.evalflags);
+        morph_b=morph_streams(*geometry.morph.model,bones(),geometry.morph.flags);
+        morph_factor=geometry.morph.shape*0.001f;
+    }
     auto without_rotation=full;
     if(matrices_out){matrices_out->clear();for(const auto& matrix:full){BoneMatrix copy;std::copy_n(matrix.value,16,copy.value);matrices_out->push_back(copy);}}
     for(std::size_t i=0;i<bones();++i) {

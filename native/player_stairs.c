@@ -28,12 +28,24 @@
 static const unsigned short PlMtnAct[2][3][7]={
     {{42,39,0,4,16,52,9},{43,40,2,7,18,52,9},{44,41,3,8,19,52,9}},
     {{42,39,1,6,17,54,9},{43,40,2,7,18,54,9},{44,41,3,8,19,54,9}}};
+/* Dieselbe Tabelle fuer die uebrigen Aktionen des Spielerbesitzers
+   (z. B. den act_std-Eintrag, player.c:2114); keine zweite Kopie. */
+unsigned recvx_player_mtn_act(int wpntp,int dmlvl,int column)
+{
+    if(wpntp<0||wpntp>1||dmlvl<0||dmlvl>2||column<0||column>6)return 0xFFFFu;
+    return PlMtnAct[wpntp][dmlvl][column];
+}
 /* player.c:239-257.  Alle vier Reihen sind im Original gleich. */
 static const signed char PlFootSnd[4][2][7]={
     {{10,8,10,10,0,21,20},{28,18,28,30,16,8,8}},
     {{10,8,10,10,0,21,20},{28,18,28,30,16,8,8}},
     {{10,8,10,10,0,21,20},{28,18,28,30,16,8,8}},
     {{10,8,10,10,0,21,20},{28,18,28,30,16,8,8}}};
+int recvx_player_foot_snd(int ply_id,int foot,int column)
+{
+    if(ply_id<0||ply_id>3||foot<0||foot>1||column<0||column>6)return -1;
+    return PlFootSnd[ply_id][foot][column];
+}
 /* player.c:258-281. */
 static const signed char PlKDU[4][2][3]={
     {{19,6,15},{19,6,15}},{{21,10,15},{24,18,15}},

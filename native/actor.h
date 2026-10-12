@@ -65,6 +65,10 @@ public:
     // owP flg 0x1 keeps the matrix the caller passes in `owp_mtx` (njSetMatrix)
     // and its subtree continues from it.
     std::vector<BoneMatrix> tree_matrices(const std::vector<ModelPose>& pose,const NJS_MATRIX& root,const std::vector<std::uint32_t>& owp_flg={},const std::vector<BoneMatrix>& owp_mtx={})const;
+    // Dasselbe mit objP/owP += first, obj_num -= first (en01.c:3148-3156):
+    // bhCalcTree beginnt bei Knoten `first` unter `root` und schreibt nur die
+    // owP der Knoten first.. in `owp_mtx`; die uebrigen bleiben unberuehrt.
+    void tree_window(const std::vector<ModelPose>& pose,const NJS_MATRIX& root,unsigned first,const std::vector<std::uint32_t>& owp_flg,std::vector<BoneMatrix>& owp_mtx)const;
     Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr,const MorphSource* morph=nullptr) const;
     Scene sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& matrices,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out=nullptr,const FaceParameter* face_param=nullptr,const std::vector<std::uint8_t>* live_model=nullptr,const MorphSource* morph=nullptr)const;
     const std::vector<std::uint8_t>& encoded_model()const{return model_;}

@@ -44,6 +44,7 @@ public:
             const auto cam=cut_offset+i*0x2a8+0x20;
             SceneCamera camera;
             camera.flags=view.u16(cam);
+            camera.fog_color=view.u32(cam+0xb8);camera.fog_near=view.f32(cam+0xbc);camera.fog_far=view.f32(cam+0xc0);
             camera.transition_speed=std::int8_t(view.u8(cam+3));
             camera.move_speed=view.f32(cam+0x30);camera.angle_speed=std::int8_t(view.u8(cam+0x50));
             camera.cut_origin={view.f32(cut+8),view.f32(cut+12),view.f32(cut+16)};
@@ -466,6 +467,11 @@ void ActiveCameraMotion::tick(const SceneCamera& target){
     for(unsigned axis=0;axis<3;++axis)view_.angles[axis]=turn(view_.angles[axis],target.angles[axis],angle,axis!=2);
     view_.perspective=turn(view_.perspective,target.perspective,blending_?float(clock_)*hkn:0.01f*target.angle_speed,false);
     if(blending_&&++clock_>=unsigned(target.transition_speed+1))blending_=false;
+}
+NJS_POINT3 camera_world_position(const SceneCamera& camera){
+    NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,camera.position.x,camera.position.y,camera.position.z);
+    njRotateY(&m,camera.angles[1]);njRotateX(&m,camera.angles[0]);njRotateZ(&m,camera.angles[2]);
+    NJS_POINT3 local{0,0,-camera.distance},out;njCalcPoint(&m,&local,&out);return out;
 }
 
 }

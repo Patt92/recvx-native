@@ -3,6 +3,8 @@
 #include "binary_view.h"
 #include "core_random.h"
 #include "effect_collision.h"
+// bhEff017 liest stflg/ct0 des verknuepften Gegnerworks (effsub1.c:4222).
+#include "enemies/enemy_work.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include <algorithm>
@@ -29,6 +31,10 @@ struct EffectFireTable {const EffectFireUv* table;int count,tex_id,ani_ct,palett
 #include "effect_sprite_tables_data.inc"
 // bhGetGroundPosition-Anbieter des Raumbesitzers (kein eigener ATR-Satz).
 GroundCollision* effect_ground=nullptr;
+// rom->walp + sys->mwalp und bhCheckWater des Raumbesitzers (pro Tick gesetzt).
+const std::vector<CollisionWall>* effect_wall_set=nullptr;float effect_wall_height=0;std::function<bool(NJS_POINT3,float&)> effect_water_probe;
+// sys->mwalp-Zugriff des Raumbesitzers (effsub1.c:4224 bhEff017).
+std::function<void(int)> mobile_wall_clear;
 // rand() der Originalroutinen: derselbe prozessweite EE-Generator.
 float effect_random(){return -recvx_core_random_next()/-2.1474836e9f;}
 void quad_color(EffectSprite& s,std::uint32_t color){for(auto& v:s.tv)v.col=color;}
@@ -124,6 +130,102 @@ void step_eff125(EffectSprite& s,const EffectContext& c){
     pending.spawns.push_back(e);
     s.mode1=0;
 }
+// effsub1.c:255 bhEff000 -- Patronenhuelse (bhSetGunFire/bhSetYakkyou, Typ 0..3 und 10).
+// sys->ef_pol[ef_poln++] ist hier polygon_queued; der Zeichenpfad des Waffenmodells liest es.
+void step_eff000(EffectSprite& s,const EffectContext& c){
+    s.polygon_queued=false;
+    if(int(c.yk_ct)==s.flr_no||s.py<-100.0f){s.flg=0;return;}
+    if(!effect_wall_set)throw std::runtime_error("bhEff000 without the room's bhCheckWallType provider");
+    if(!effect_ground)throw std::runtime_error("bhEff000 without the room's bhGetGroundPosition provider");
+    s.polygon_queued=true;
+    auto fall=[&](){ // water drag shared by modes 1 and 4
+        if(s.stflg&0x100000){s.zn-=0.005f;if(s.zn<0)s.zn=0;if(s.yn>-0.25f)s.yn-=0.01f;}
+        else if(s.yn>-1.0f)s.yn-=0.04f;
+    };
+    switch(s.mode0){
+    case 0:
+        s.tex_id=5;s.ani_ct=0;
+        // njCalcPoint(link matrix, lox..) is the owner's link_point, applied before this pass.
+        s.flg&=~0x80u;
+        if(s.mdlver==0){
+            switch(s.type){
+            case 0:{s.yn=0.2f*effect_random();s.zn=0.65f+0.1f*effect_random();const float r=effect_random();s.ayp=s.ay-(int(182.04445f*(110.0f+(16.0f*r-8.0f)))&0xFFFF);break;}
+            case 1:{s.yn=0;s.zn=0.3f+0.1f*effect_random();const float r=effect_random();s.ayp=s.ay-(int(182.04445f*(110.0f+(16.0f*r-8.0f)))&0xFFFF);break;}
+            case 2:{s.yn=0.1f*effect_random();s.zn=0.7f+0.1f*effect_random();const float r=effect_random();s.ayp=s.ay-(int(182.04445f*(100.0f+(16.0f*r-8.0f)))&0xFFFF);break;}
+            case 3:{s.yn=0.2f+0.1f*effect_random();s.zn=1.0f+0.1f*effect_random();const float r=effect_random();s.ayp=s.ay-(int(182.04445f*(90.0f+(16.0f*r-8.0f)))&0xFFFF);break;}
+            case 10:{s.px+=0.2f*effect_random()-0.1f;s.py-=0.2f*effect_random();s.pz+=0.2f*effect_random()-0.1f;
+                s.yn=-(0.1f+0.2f*effect_random());s.zn=0;s.ax=16384;s.ayp=s.ay;break;}
+            }
+        }else{
+            s.yn=0.1f*effect_random();s.zn=0.3f+0.1f*effect_random();const float r=effect_random();s.ayp=s.ay-(int(182.04445f*(105.0f+(12.0f*r-6.0f)))&0xFFFF);
+        }
+        s.ct1=0;s.ct0=0;s.mode0=1;
+        [[fallthrough]];
+    case 1:
+        s.px-=s.zn*njSin(s.ayp);s.pz-=s.zn*njCos(s.ayp);s.py+=s.yn;
+        s.ay-=int(182.04445f*(40.0f*s.zn))&0xFFFF;s.ax-=int(182.04445f*(20.0f*s.zn))&0xFFFF;
+        fall();
+        break;
+    case 2:
+        if(s.zn>0){
+            s.ay-=int(182.04445f*(10.0f*s.zn))&0xFFFF;
+            s.px-=s.zn*njSin(s.ayp);s.pz-=s.zn*njCos(s.ayp);s.zn-=0.01f;
+            break;
+        }
+        s.flg=0;return;
+    case 3:{
+        const float floor=0.1f+effect_ground->query({s.px,s.py,s.pz});
+        if(const auto hit=effect_ground->hit();hit&&hit->record&&hit->record->type==6){
+            switch(hit->record->id){case 0:s.ayp=0;break;case 1:s.ayp=16384;break;case 2:s.ayp=49152;break;case 3:s.ayp=32768;break;}
+            s.ay+=(s.ayp-s.ay)>>1;
+            s.px-=s.zn*njSin(s.ay+16384);s.pz-=s.zn*njCos(s.ay+16384);
+            if(s.zn<0.5f)s.zn+=0.01f;
+            s.py+=s.yn;
+            if(s.yn>-1.0f)s.yn-=0.04f;
+            if(floor>s.py)s.py=floor;
+            return;
+        }
+        s.mode0=4;
+        [[fallthrough]];}
+    case 4:{
+        s.px-=s.zn*njSin(s.ay+16384);s.pz-=s.zn*njCos(s.ay+16384);
+        if(!effect_wall(*effect_wall_set,effect_wall_height,{s.px,s.py-0.1f,s.pz},0x400,0.1f,0.1f)){
+            s.py+=s.yn;fall();
+        }else{
+            s.zn-=0.01f;
+            if(s.zn<0){s.zn=0;s.mode0=5;}
+        }
+        break;}
+    case 5:
+        s.flg=0;return;
+    }
+    if((c.st_flg&0x40)&&!(s.stflg&0x100000)){
+        float top=0;
+        if(effect_water_probe&&effect_water_probe({s.px,s.py,s.pz},top)){
+            s.stflg|=0x100000;s.zn*=0.25f;s.yn*=0.25f;
+            EffectSpawn splash;splash.flg=1;splash.id=15;splash.type=2;splash.mdlver=0;splash.scale={0.25f,0.25f,0.25f};
+            splash.position={s.px,top,s.pz};splash.ay=0;pending.spawns.push_back(splash);
+        }
+    }
+    if(const auto wall=effect_wall(*effect_wall_set,effect_wall_height,{s.px,s.py,s.pz},s.flg,0.1f,0.1f)){
+        const float before=s.py;NJS_POINT3 position{s.px,s.py,s.pz};
+        reflect_effect_wall(*wall,effect_wall_height,position,0.1f,0.1f,s.ayp);
+        s.px=position.x;s.py=position.y;s.pz=position.z;
+        if(s.py!=before&&s.yn<0){
+            if(s.stflg&0x100000){s.zn=0;s.mode0=2;return;}
+            s.py+=0.1f;
+            if(wall->type==6){s.yn=0.5f*s.zn;s.zn=0.1f*s.zn;}
+            else{s.yn=0.35f*-s.yn;s.zn=0.5f*s.zn;}
+            if(std::fabs(s.yn)<0.1f){
+                s.ax=0;s.yn=0;
+                if(wall->type==6){s.mode0=3;s.zn=0;}else s.mode0=2;
+            }
+        }
+        if(s.ct0==0&&s.type==10){s.zn=0.1f+0.1f*effect_random();s.ayp=int(182.04445f*(360.0f*effect_random()))&0xFFFF;}
+        if(s.ct0<2){++s.ct0;pending.room_sounds.push_back({{s.px,s.py,s.pz},262});}
+        else if(s.type==1)s.flg=0;
+    }else if(s.mode0==2&&s.zn>0)s.mode0=1;
+}
 // effsub1.c:8488 bhEff126 — aufsteigende Dampf-/Staubwolke, Texturgruppe 35.
 void step_eff126(EffectSprite& s,bool& queued){
     if(s.mode0==0){
@@ -173,6 +275,25 @@ void step_eff126(EffectSprite& s,bool& queued){
     queued=true;
 }
 // effsub0.c:1916 bhEff181 — Raucherzeuger; floor(sz) ist der Abstand der Stoesse.
+// effsub1.c:2099 bhEff005: blood splash sprite, one UV row per tick until the
+// -1 terminator of the size table (type 0 small, 1 medium, 2 large).
+void step_eff005(EffectSprite& s,bool& queued){
+    if(s.mode0==0){
+        s.tex_id=5;s.flg|=0x4100000;quad_color(s,0xffffffffu);s.bl_src=8;s.bl_dst=6;s.ct0=0;s.ani_ct=s.mdlver;s.mode0=1;
+    }
+    const EffectUv* uvp=nullptr;
+    switch(s.type){
+    case 0:uvp=s.ct0>=0&&s.ct0<14?&eff005_uv_s[s.ct0]:nullptr;break;
+    case 1:uvp=s.ct0>=0&&s.ct0<12?&eff005_uv_m[s.ct0]:nullptr;break;
+    case 2:uvp=s.ct0>=0&&s.ct0<13?&eff005_uv_l[s.ct0]:nullptr;break;
+    default:break; // effsub1.c:2174 leaves uvp unset for other types
+    }
+    if(!uvp){s.flg=0;throw std::runtime_error("bhEff005 type/ct0 outside its UV tables");}
+    if(uvp->u==-1.0f){s.flg=0;return;}
+    s.sx=8.0f*(s.sxb*uvp->xs);s.sy=8.0f*(s.syb*uvp->ys);
+    quad_uv(s,*uvp);
+    ++s.ct0;queued=true;
+}
 void step_eff181(EffectSprite& s){
     s.flg|=0x1000000;
     if(s.type==0&&s.mode1!=0)s.type=s.mode1;
@@ -390,9 +511,20 @@ std::vector<std::pair<unsigned,unsigned>> common_effect_categories(){
     std::vector<std::pair<unsigned,unsigned>> out;unsigned first=0;
     for(const auto [model,frames]:categories){out.emplace_back(first,frames);first+=frames;}return out;
 }
+
+// effsub1.c:4220 bhEff017 — der Effekt haelt den verknuepften Work und
+// loescht dessen mobile Flaeche, sobald der Work stirbt. Das Original setzt
+// op->flg nie zurueck: der Platz bleibt für die restliche Raumlaufzeit belegt
+// und die Wache laeuft jeden Pass erneut.
+void step_eff017(EffectSprite& s){
+    const auto* w=static_cast<const RECVX_ENEMY_WORK*>(s.lkwkp);
+    if(!w)return; /* bhSetEffect(17, .., lkp) ist im Original nie ohne Link */
+    if(!(w->stflg&0x1000000u))return;
+    if(mobile_wall_clear)mobile_wall_clear(w->ct0);
+}
 bool supported_effect_sprite(unsigned id){
     switch(id){
-    case 2:case 9:case 122:case 123:case 125:case 126:case 181:case 182:case 218:case 230:return true;
+    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 181:case 182:case 218:case 230:return true;
     default:return false;
     }
 }
@@ -408,7 +540,10 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
     if(s.id!=9){
         bool entered=false;
         switch(s.id){
+        case 0:step_eff000(s,c);break;
         case 2:step_eff002(s,entered);break;
+        case 5:step_eff005(s,entered);break;
+        case 17:step_eff017(s);break;
         case 122:step_eff122(s,entered);break;
         case 123:step_eff123(s,entered);break;
         case 125:step_eff125(s,c);break;
@@ -452,7 +587,8 @@ void step_light_color(unsigned type,unsigned speed,unsigned& clock,NJS_POINT3 co
     if(type>=4)delta=unsigned(float(delta)*(-recvx_core_random_next()/-2.1474836e9f));
     clock=(clock+delta)&0x7fff;
 }
-void set_effect_walls(const std::vector<CollisionWall>* walls,float height){(void)walls;(void)height;}
+void set_effect_walls(const std::vector<CollisionWall>* walls,float height){effect_wall_set=walls;effect_wall_height=height;}
+void set_effect_water(std::function<bool(NJS_POINT3,float&)> probe){effect_water_probe=std::move(probe);}
 void set_effect_ground(GroundCollision* ground,const std::vector<CollisionWall>* room,const std::vector<CollisionWall>* mobile){
     // bhGetGroundPosition der Raumwerke; Wassersaetze haben hier keinen Abnehmer.
     effect_ground=ground;(void)room;(void)mobile;
@@ -461,6 +597,9 @@ void set_effect_link_matrix(unsigned node,const float* matrix){
     // Die Knotenmatrix hat ohne Effektprozeduren keinen Abnehmer.
     (void)node;(void)matrix;
 }
+// effsub1.c:4220 bhEff017 — siehe effect_sprites.h.
+void set_effect_mobile_wall_clear(std::function<void(int)> clear){mobile_wall_clear=std::move(clear);}
+
 void set_explosion(NJS_POINT3 position,NJS_POINT3 view){(void)position;(void)view;}
 void set_explosion_effect(NJS_POINT3 position,NJS_POINT3 view){(void)position;(void)view;}
 EffectOutput take_effect_output(){EffectOutput out=std::move(pending);pending=EffectOutput{};return out;}

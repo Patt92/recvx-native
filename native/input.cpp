@@ -158,6 +158,7 @@ void InputManager::event(const SDL_Event& e){if(e.type==SDL_CONTROLLERDEVICEADDE
     if(e.type==SDL_CONTROLLERAXISMOTION){const auto p=pads_.find(e.caxis.which);if(p!=pads_.end()&&e.caxis.axis<SDL_CONTROLLER_AXIS_MAX){if((e.caxis.axis<SDL_CONTROLLER_AXIS_TRIGGERLEFT?std::abs(int(e.caxis.value)):int(e.caxis.value))>config_.deadzone*32767)last_gamepad_=true;p->second.axes[e.caxis.axis]=e.caxis.value;evaluate();}}
     if(e.type==SDL_CONTROLLERDEVICEREMAPPED){const auto p=pads_.find(e.cdevice.which);if(p!=pads_.end()){refresh(p->second);evaluate(false);}}
 }
+void InputManager::rumble(unsigned low,unsigned high,unsigned milliseconds){for(auto& item:pads_)SDL_GameControllerRumble(item.second.handle,Uint16(low>65535u?65535u:low),Uint16(high>65535u?65535u:high),Uint32(milliseconds));}
 InputFrame InputManager::tick(){for(auto& item:pads_)refresh(item.second);evaluate();InputFrame frame;frame.gamepad_input=last_gamepad_;frame.held=held_;frame.pressed=pending_;pending_.fill(false);
     for(unsigned a=0;a<action_count;++a){if(!held_[a])suppressed_[a]=false;if(suppressed_[a])frame.held[a]=frame.pressed[a]=false;}
     for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(!suppressed_[a]&&navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}return frame;}

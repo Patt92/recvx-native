@@ -1,5 +1,6 @@
 #pragma once
 #include "ninja_matrix.h"
+#include "fog.h"
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -78,6 +79,7 @@ struct SceneCamera {
     float clip_near=0.05f,clip_far=0; // njClipZ (bhChangeViewClip*), set by the runtime; far 0 = unlimited
     std::array<std::uint32_t,16> hidden_objects{};
     std::uint16_t flags=0;
+    std::uint32_t fog_color=0;float fog_near=0,fog_far=0; // RDT CAM_WRK b8/bc/c0, signed distances
     // Original CAM_WRK spd, am_spd and aa_spd; control runs at 30 Hz.
     int transition_speed=0,angle_speed=0;float move_speed=0;
     NJS_POINT3 cut_origin{},cut_extent{};
@@ -114,7 +116,15 @@ struct SceneCutArea {
     float minx=0,minz=0,maxx=0,maxz=0;
     std::uint32_t attributes=0;
 };
+// F05: original modifier models remain separate from material triangles.
+struct ShadowGeometry;
+struct SceneShadow {
+    std::shared_ptr<const ShadowGeometry> geometry;
+    std::array<float,16> transform{};
+};
 struct Scene {
+    std::vector<SceneShadow> shadows;
+    FogState fog; // installed EOR state, copied from the existing World owner
     std::vector<SceneTriangle> triangles;
     std::vector<SceneLine> lines;
     std::vector<SceneCamera> cameras;
@@ -133,6 +143,9 @@ Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint3
 std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 position,std::int8_t floor=0);
 // bhInitActiveCamera target evaluation (no transition/event-camera state).
 SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 position,std::int8_t floor=0,const NJS_POINT3* eye=nullptr);
+// camera.c:47-57 cam.wpx/wpy/wpz: pivot + RotY(ay)RotX(ax)RotZ(az)(0,0,-ln).
+// This is the sound system's CameraPos, not the eye of the view matrix.
+NJS_POINT3 camera_world_position(const SceneCamera& camera);
 struct ModelPose {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};
@@ -142,6 +155,9 @@ struct ModelPose {
 // draw, the span npPushMdlstr2/npCalcMorphing/npPopMdlstr2 brackets bhPutModel.
 struct MorphSource {
     const std::vector<std::uint8_t>* model=nullptr;
+    // Live objP[node].evalflags of obj_b. obj_a's come from ModelGeometryOptions
+    // evalflags, or from its own asset when the caller has no live copy.
+    const std::vector<std::uint32_t>* flags=nullptr;
     float shape=0;
 };
 struct ModelGeometryOptions {

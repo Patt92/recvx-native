@@ -76,8 +76,10 @@ _Static_assert(RECVX_EN01_OFF(walk_index)   == 0xA0 + RECVX_EN01_PP(9), "exp0 wa
 _Static_assert(RECVX_EN01_OFF(tail)         == 0xA4 + RECVX_EN01_PP(9), "exp0 tail");
 _Static_assert(sizeof(RECVX_EN01_EXP0)      >= 0xB0 + RECVX_EN01_PP(9), "exp0 size");
 /* Das Original adressiert den Block als Bytefeld; nativ rundet der Compiler
-   die 212 Nutzbytes auf die Zeigerausrichtung (216 bei 8-Byte-Zeigern). */
-_Static_assert(sizeof(RECVX_EN01_EXP0)      < 0xB0 + RECVX_EN01_PP(9) + sizeof(void*),
+   die 212 Nutzbytes auf die Zeigerausrichtung (216 bei 8-Byte-Zeigern). Die
+   native Erweiterung stair_rec liegt vollstaendig hinter dem Originalblock. */
+_Static_assert(RECVX_EN01_OFF(stair_rec)    >= 0xB0 + RECVX_EN01_PP(9), "exp0 stair_rec");
+_Static_assert(RECVX_EN01_OFF(stair_rec)    < 0xB0 + RECVX_EN01_PP(9) + sizeof(void*),
                "exp0 Polster");
 
 /* ---------------------------------------------------------------------------
@@ -105,6 +107,12 @@ RECVX_EN01_EXP0* recvx_en01_exp0(RECVX_ENEMY_WORK* w)
     return w ? (RECVX_EN01_EXP0*)w->exp0 : NULL;
 }
 
+/* Gebundener Kontext fuer native/enemies/en01_sub.c (en01_core.h). */
+const RECVX_EN01_CONTEXT* recvx_en01_context(void)
+{
+    return g_ctx_set ? &g_ctx : NULL;
+}
+
 /* Meldet einen nicht gebundenen Dienst namentlich (kein stiller No-op mit
    Ersatzwert, keine Ersatzkonstante). */
 static void en01_gap(const RECVX_ENEMY_WORK* w, const char* name)
@@ -117,6 +125,8 @@ static const RECVX_ENEMY_SERVICES* en01_sv(const RECVX_ENEMY_WORK* w)
 {
     return w ? w->sv : NULL;
 }
+
+static void en01_clear_pad_on(RECVX_ENEMY_WORK* w);
 
 static int32_t en01_rand(const RECVX_ENEMY_WORK* w)
 {
@@ -737,6 +747,20 @@ static void en01_ikou(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos,
     }
 }
 
+/* Weitergaben fuer native/enemies/en01_sub.c (en01_core.h). */
+int32_t recvx_en01_niten_dir(float hontai_x, float hontai_z, float target_x,
+                             float target_z)
+{
+    return en01_niten_dir(hontai_x, hontai_z, target_x, target_z);
+}
+
+void recvx_en01_ikou(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos,
+                     int32_t add_dir)
+{
+    if (!w || !pos) return;
+    en01_ikou(w, pos, add_dir);
+}
+
 /* --- zonzon.c:45 ikou3 --------------------------------------------------- */
 static int32_t en01_ikou3(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos,
                           int32_t add_dir)
@@ -809,7 +833,8 @@ static int en01_collision_wall2(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* ps,
     int hit = 0;
 
     w->flg &= ~0x100u;
-    en01_gap(w, "bhCheckDansa (hitchk.c:5391)");
+    if (sv && sv->check_dansa) sv->check_dansa(w);
+    else en01_gap(w, "bhCheckDansa (hitchk.c:5391)");
     if (sv && sv->wall_move &&
         sv->wall_move(w, &pos, ops, ar, ah, w->flg) != 0) {
         if (sv->wall_type) hit = sv->wall_type(ps, w->flg, ar, ah);
@@ -1441,8 +1466,6 @@ void recvx_en01_dmg_check(RECVX_ENEMY_WORK* w)
     int pass;
 
     if (!w) return;
-    p = recvx_en01_exp0(w);
-    if (!p) { en01_gap(w, "bhEne01_DmgCheck: exp0"); return; }
 
     cepw = (RECVX_ENEMY_WORK*)w->exp1;                       /* :3202 */
 
@@ -1450,6 +1473,11 @@ void recvx_en01_dmg_check(RECVX_ENEMY_WORK* w)
         w->type == 10) {                                     /* :3204 */
         return;
     }
+
+    /* EXP0 wird erst hinter dem flg-Tor gelesen (:3209); vor bhEne01_Init
+       (erster Pass, exp0 noch NULL) kommt das Original hier nie an. */
+    p = recvx_en01_exp0(w);
+    if (!p) { en01_gap(w, "bhEne01_DmgCheck: exp0"); return; }
 
     /* bhEne_CalcDamage(epw, CombWepTbl, CombJointTbl) (:3206). Die beiden
        Tabellen sind EN01-Daten (en01.c:960/985); ohne gebundenen Datenpfad
@@ -2397,7 +2425,8 @@ void recvx_en01_coll_check_wall(RECVX_ENEMY_WORK* w)
             ops.y = w->pyb + w->aoy;
             ops.z = w->pzb + w->aoz;
 
-            en01_gap(w, "bhCheckDansa (hitchk.c:5391)");     /* :4273 */
+            if (sv->check_dansa) sv->check_dansa(w);         /* :4273 */
+            else en01_gap(w, "bhCheckDansa (hitchk.c:5391)");
             if (sv->wall_move) {
                 sv->wall_move(w, &ps, &ops, w->ar, w->ah, w->flg); /* :4274 */
             } else {
@@ -2433,7 +2462,8 @@ void recvx_en01_coll_check_wall(RECVX_ENEMY_WORK* w)
         ops.y = w->pyb + w->aoy;
         ops.z = w->pzb + w->aoz;
 
-        en01_gap(w, "bhCheckDansa (hitchk.c:5391)");         /* :4309 */
+        if (sv->check_dansa) sv->check_dansa(w);             /* :4309 */
+        else en01_gap(w, "bhCheckDansa (hitchk.c:5391)");
         if (sv->wall_move) {
             sv->wall_move(w, &ps, &ops, w->ar, w->ah, w->flg);  /* :4310 */
         } else {
@@ -5268,11 +5298,44 @@ void recvx_en01_mv08(RECVX_ENEMY_WORK* w)
             else en01_gap(w, "bhEne01_MV08: Oberkoerper-exp0 (en01.c:6112)");
         }
 
-        /* prm0/prm1/prm2 des gecachten Treppensatzes (en01.c:6115-6143).
-           Der native Dienst gibt nur den Index heraus; ohne den Satz gibt
-           es weder Richtung, Zielhoehe noch Stufenzahl. */
-        en01_gap(w, "exp0+0x74 ATR_WORK prm0/prm1/prm2 (en01.c:6115)");
-        return;
+        /* prm0/prm1/prm2 der in bhEne01_KaidanCheck gecachten Treppenflaeche
+           (exp0+0x74 im Original, nativ stair_rec; en01.c:6115-6143). */
+        if (p->word74 < 0) {
+            en01_gap(w, "bhEne01_MV08: exp0+0x74 ohne Treppenflaeche (en01.c:6115)");
+            return;
+        }
+        if (p->stair_rec.prm0 == 0u) {                               /* :6115 */
+            p->flags |= 0x800000u;                                   /* :6117 */
+            p->byte2E = 0;                                           /* :6118 */
+            w->yn = w->py + (float)(p->stair_rec.prm2 * 2u);         /* :6119 */
+        } else {
+            p->flags &= ~0x800000u;                                  /* :6123 */
+            p->byte2E = (int8_t)p->stair_rec.prm2;                   /* :6124 */
+            w->yn = w->py - (float)(p->stair_rec.prm2 * 2u);         /* :6125 */
+        }
+        p->byte2D = (int8_t)w->flr_no;                               /* :6128 */
+        p->flags |= 0x400000u;                                       /* :6129 */
+        p->flags2 |= 8u;                                             /* :6130 */
+        w->flg2 |= 1u;                                               /* :6131 */
+        if (p->stair_rec.prm1 >= 4u) {                               /* kaidan_ang[4], en01.c:1345 */
+            en01_gap(w, "kaidan_ang[prm1] ausserhalb (en01.c:6132)");
+            return;
+        }
+        w->axp = recvx_en01_kaidan_ang[p->stair_rec.prm1];           /* :6132 */
+        w->ayp = (int32_t)(uint16_t)(w->axp - w->ay);                /* :6133 */
+        if (w->ayp > EN01_DEG_ANG(180.0f)) {                         /* :6135 */
+            w->ayp = (w->ayp - EN01_DEG_ANG(180.0f)) - EN01_DEG_ANG(180.0f);
+        }
+        w->ayp /= 10;                                                /* :6140 */
+        p->flags &= ~0xFu;                                           /* :6141 */
+        w->way = 256;                                                /* :6142 */
+        w->ct1 = (int32_t)p->stair_rec.prm2 - 2;                     /* :6143 */
+        w->ct0 = 10;                                                 /* :6144 */
+        p->grab_point.x = w->px;                                     /* :6145-6147 */
+        p->grab_point.y = w->py;
+        p->grab_point.z = w->pz;
+        w->mode3++;                                                  /* :6148 */
+        /* faellt durch (en01.c:6150) */
 
     case 1:
         if (--w->ct0 >= 0) {                                         /* :6151 */
@@ -5422,10 +5485,13 @@ void recvx_en01_mv08(RECVX_ENEMY_WORK* w)
             w->flr_no = sv->floor_num(w->yn);                        /* :6309 */
             w->py = sv->grand((uint32_t)(w->flr_no + 2));            /* :6310 */
 
-            /* mlwP->objP[0].pos[1] = 0: der Vertrag kennt nur
-               node_local (lesend) und node_local_clear_xz (x/z). Fuer die
-               senkrechte Komponente fehlt der Schreibweg. */
-            en01_gap(w, "mlwP->objP[0].pos[1] = 0 (en01.c:6311)");
+            {
+                const RECVX_EN01_SERVICES* en01 = en01_en();
+                if (en01 && en01->node_local_set)
+                    en01->node_local_set(w, 0u, 1u, 0.0f);           /* :6311 mlwP->objP[0].pos[1] = 0 */
+                else
+                    en01_gap(w, "mlwP->objP[0].pos[1] = 0 (en01.c:6311)");
+            }
 
             if ((uint32_t)p->walk_index + 1u >= 6u) {
                 /* en01_walk_mtn hat sechs Eintraege (en01_tables.c:58); das
@@ -6469,12 +6535,14 @@ int recvx_en01_kaidan_check(RECVX_ENEMY_WORK* w)
     if (rec.prm0 == 0u) {                                    /* :11835 */
         if (pl.flr_no > w->flr_no) {                         /* :11837 */
             p->word74 = idx;                                 /* :11839 */
+            p->stair_rec = rec;
             if (sv->stair_use) sv->stair_use(idx, 1);        /* :11840 */
             else en01_gap(w, "bhSetUseKaidanFlag (hitchk.c:4965)");
             return 1;                                        /* :11841 */
         }
     } else if (pl.flr_no < w->flr_no) {                      /* :11844 */
         p->word74 = idx;                                     /* :11846 */
+        p->stair_rec = rec;
         if (sv->stair_use) sv->stair_use(idx, 1);            /* :11847 */
         else en01_gap(w, "bhSetUseKaidanFlag (hitchk.c:4965)");
         return 1;                                            /* :11848 */
@@ -6676,9 +6744,12 @@ void recvx_en01_chg_walk_mtn(RECVX_ENEMY_WORK* w)
         en01_gap(w, "bhGetFrameNum (pwksub.c:144)");
         return;
     }
-    frm = en->frame_num(en01_motion_frames(w, w->mtn_no),
-                        en01_motion_frames(w, mtn_no1),
-                        w->frm_no) * 65536;                  /* :10297 */
+    /* Das zweite * 65536 laeuft im Original in 32 Bit ueber: ein 16.16-Frame
+       mal 65536 ist stets ein Vielfaches von 2^32, also 0. Vorzeichenlos
+       gerechnet, damit derselbe Umlauf und kein undefiniertes Verhalten. */
+    frm = (int32_t)((uint32_t)en->frame_num(en01_motion_frames(w, w->mtn_no),
+                                            en01_motion_frames(w, mtn_no1),
+                                            w->frm_no) * 65536u); /* :10297 */
 
     recvx_enemy_chg_mtn(w, mtn_no1, frm, 20);                /* :10298 */
     p->flags &= ~0x3000000u;                                 /* :10299 */
@@ -8048,14 +8119,23 @@ void recvx_en01_ng03_b(RECVX_ENEMY_WORK* w)
                 if (sepw) {                                          /* :326 */
                     /* Das Original legt in sepw->exp0+0 und +4 ZEIGER auf
                        epp->mlwP->objP[11].evalflags bzw. owP[11].flg ab
-                       (en01b.c:328-329); das Kopf-Kindwork schaltet damit
-                       spaeter die Sichtbarkeit des Halsknotens am
-                       Hauptkoerper. Der Vertrag hat dafuer nur
-                       model_node_hidden und keinen Weg, eine fremde
-                       Feldadresse zu uebergeben. Ohne diesen Anschluss
-                       wird hier nichts ersetzt. */
-                    en01_gap(w, "sepw->exp0[0/4] = &objP[11].evalflags / "
-                                "&owP[11].flg (en01b.c:328)");
+                       (en01b.c:328-329). Beide Felder sind das jeweils
+                       erste Element von NJS_CNK_OBJECT bzw. O_WORK
+                       (types.h:40), die Zeiger zeigen also auf Knoten 11
+                       des Elternbaums. Nativ: Knotenreferenz {epp, 11}
+                       im Kopfblock (RECVX_EN01_SUB_EXP0, en01_work.h);
+                       bhEne01Head_DG00 (en01_sub.c) arbeitet darauf.
+                       Ein fehlender Kopfblock waere im Original ein
+                       Schreibzugriff auf NULL und wird gemeldet. */
+                    RECVX_EN01_SUB_EXP0* hx = (RECVX_EN01_SUB_EXP0*)sepw->exp0;
+                    if (hx) {
+                        hx->obj.work = epp;                          /* :328 */
+                        hx->obj.node = 11;
+                        hx->owk.work = epp;                          /* :329 */
+                        hx->owk.node = 11;
+                    } else {
+                        en01_gap(w, "sepw->exp0 NULL (en01b.c:328)");
+                    }
 
                     sepw->ay = (int16_t)((w->ay + 32768) & 0xFFFF);  /* :331 */
                     sepw->mode0 = 3;                                 /* :333 */
@@ -9408,10 +9488,8 @@ void recvx_en01_dg06(RECVX_ENEMY_WORK* w)
                 w->mode3 = 0;                                        /* :8949 */
                 if (cepw) en01_copy_modes(cepw, w);                  /* :8953 */
 
-                /* sys->pad_on &= ~0xF (en01.c:8956): der Vertrag hat dafuer
-                   nur player_hurt_state als Bundle, keinen eigenen Weg auf
-                   das Padwort. Hier wird nichts erfunden. */
-                en01_gap(w, "sys->pad_on &= ~0xF (en01.c:8956)");
+                /* sys->pad_on &= ~0xF (en01.c:8956). */
+                en01_clear_pad_on(w);
 
                 pl.flg   &= ~0x10004u;                               /* :8957 */
                 pl.stflg &= ~0x10000u;                               /* :8958 */
@@ -10277,12 +10355,15 @@ static void en01_player_se_play(RECVX_ENEMY_WORK* w, int se)
     else en01_gap(w, "bhEne_PlayerSePlay (zonzon1.c)");
 }
 
-/* `sys->pad_on &= ~0xF` (en01.c:7643/7755/7767/7928) — der Vertrag hat
-   dafuer nur das Bundle player_hurt_state und keinen eigenen Weg auf das
-   Padwort. */
+/* `sys->pad_on &= ~0xF` (en01.c:7643/7755/7767/7928). */
 static void en01_clear_pad_on(RECVX_ENEMY_WORK* w)
 {
-    en01_gap(w, "sys->pad_on &= ~0xF (en01.c:7643)");
+    const RECVX_EN01_SERVICES* en = en01_en();
+    if (en && en->pad_on_clear) {
+        en->pad_on_clear(0xFu);
+    } else {
+        en01_gap(w, "sys->pad_on &= ~0xF (en01.c:7643)");
+    }
 }
 
 /* --- bhEne01_PlyDG00 (en01.c:7509) --------------------------------------
@@ -10369,6 +10450,8 @@ void recvx_en01_ply_dg00(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
                Gegners uebernimmt; der Vertrag bildet das ueber
                mtn_enemy/mtn_enemy_owner ab. */
             pl->mtn_enemy = 1;                                       /* :7584 */
+            pl->mtn_enemy_owner = w->id;
+            pl->mtn_enemy_work = w;
             pl->frm_no = 0;                                          /* :7585 */
             pl->hokan_count = 5;                                     /* :7586 */
             pl->hokan_rate = 42598;                                  /* :7587 */
@@ -10415,6 +10498,8 @@ void recvx_en01_ply_dg00(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
             pl->stflg &= ~0x10000u;                                  /* :7646 */
             pl->at_flg = 0;                                          /* :7647 */
             pl->mtn_enemy = 0;                                       /* :7648 */
+            pl->mtn_enemy_owner = 0;
+            pl->mtn_enemy_work = NULL;
             /* `*(int*)&pl->mode0 = 1` (en01.c:7649) setzt mode0 = 1 und
                mode1..3 = 0. */
             pl->mode0 = 1;                                           /* :7649 */
@@ -10449,6 +10534,8 @@ void recvx_en01_ply_dg00(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
         }
 
         pl->mtn_enemy = 1;                                           /* :7680 */
+        pl->mtn_enemy_owner = w->id;
+            pl->mtn_enemy_work = w;
         pl->frm_no = 0;                                              /* :7681 */
         pl->hokan_count = 5;                                         /* :7682 */
         pl->hokan_rate = 42598;                                      /* :7683 */
@@ -10516,6 +10603,8 @@ void recvx_en01_ply_dg00(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
         pl->stflg &= ~0x10000u;                                      /* :7770 */
         pl->at_flg = 0;                                              /* :7771 */
         pl->mtn_enemy = 0;                                           /* :7772 */
+        pl->mtn_enemy_owner = 0;
+            pl->mtn_enemy_work = NULL;
         pl->mode0 = 2;                                               /* :7773 */
         pl->mode1 = 1;                                               /* :7774 */
         pl->mode2 = 1;                                               /* :7775 */
@@ -10575,6 +10664,8 @@ void recvx_en01_ply_dg01(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
 
         if (frm == 11u) {                                            /* :7812 */
             pl->mtn_enemy = 1;                                       /* :7814 */
+            pl->mtn_enemy_owner = w->id;
+            pl->mtn_enemy_work = w;
             pl->frm_no = 0;                                          /* :7815 */
             pl->hokan_count = 5;                                     /* :7816 */
             pl->hokan_rate = 42598;                                  /* :7817 */
@@ -10668,6 +10759,8 @@ void recvx_en01_ply_dg01(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
             pl->stflg &= ~0x10000u;                                  /* :7932 */
             pl->at_flg = 0;                                          /* :7933 */
             pl->mtn_enemy = 0;                                       /* :7934 */
+            pl->mtn_enemy_owner = 0;
+            pl->mtn_enemy_work = NULL;
             pl->mode0 = 1;                                           /* :7935 */
             pl->mode1 = 0;
             pl->mode2 = 0;
@@ -10692,6 +10785,8 @@ void recvx_en01_ply_dg01(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
         pl->flg &= ~0x40000u;                                        /* :7950 */
         pl->ct0 = 0;                                                 /* :7951 */
         pl->mtn_enemy = 1;                                           /* :7952 */
+        pl->mtn_enemy_owner = w->id;
+            pl->mtn_enemy_work = w;
         pl->frm_no = 0;                                              /* :7953 */
         pl->hokan_count = 5;                                         /* :7954 */
         pl->hokan_rate = 42598;                                      /* :7955 */
@@ -11047,11 +11142,9 @@ void recvx_en01_ng00(RECVX_ENEMY_WORK* w)
                 w->flg |= 0x40000u;                                  /* :6868 */
                 w->mode3++;                                          /* :6874 */
                 pl.mode3 = 2;                                        /* :6875 */
+                pl.ct1 = 0;                                          /* :6876 */
                 if (sv->player_set) sv->player_set(&pl);
                 else en01_gap(w, "plp->mode3 = 2 (en01.c:6875)");
-                /* plp->ct1 = 0 (en01.c:6876): RECVX_ENEMY_PLAYER fuehrt
-                   kein ct1. */
-                en01_gap(w, "plp->ct1 = 0 (en01.c:6876)");
                 p->flags &= ~0xFu;                                   /* :6877 */
                 p->flags |=  0x6u;                                   /* :6878 */
                 w->ct0 = 0;                                          /* :6879 */
@@ -11342,13 +11435,9 @@ void recvx_en01_ng02(RECVX_ENEMY_WORK* w)
                 w->flg |= 0x40000u;                                  /* :7421 */
             }
             pl.mode3 = 2;                                            /* :7428 */
+            pl.ct1 = 5;                                              /* :7432 */
             if (sv->player_set) sv->player_set(&pl);
             else en01_gap(w, "plp->mode3 = 2 (en01.c:7428)");
-
-            /* Beide Zweige des Originals setzen plp->ct1 = 5
-               (en01.c:7430-7437); die Abfrage auf ct0 == 0 aendert nichts.
-               RECVX_ENEMY_PLAYER fuehrt kein ct1. */
-            en01_gap(w, "plp->ct1 = 5 (en01.c:7432)");
 
             w->mode3++;                                              /* :7439 */
             w->ct0 = 0;                                              /* :7440 */

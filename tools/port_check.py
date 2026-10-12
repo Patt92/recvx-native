@@ -223,11 +223,11 @@ README_END = '<!-- port-status:end -->'
 # Kurzbeschreibung je Kategorie fuer die README-Tabelle (Bereichsname -> Text).
 README_NOTES = {
     'Spieler/Kampf': 'Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen.',
-    'Events/Skript': 'Originale Event-VM, gemeinsame Actor-Control-Fälle und 150/223 Befehle gebunden; weitere Befehle/Abläufe offen.',
+    'Events/Skript': 'Originale Event-VM und gemeinsame Actor-Control-Fälle; weitere Befehle/Abläufe offen (Zahl unten).',
     'Menü/Items/Text': 'Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen.',
     'Modelle/Animation': 'Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen.',
     'Raum/Kamera/Tür': 'Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen.',
-    'Gegner/KI': 'Original-Dispatcher entfernt; vollständige eigenständige Gegnerabläufe und Bindungen noch offen.',
+    'Gegner/KI': 'Eigenständiger Dispatcher recvx_enemy_control, en01-Schaden/-Tod/-Griff und Hundeangriffe; Rest-KI, weitere Gegner-IDs und Effektbindungen offen.',
     'Audio': 'Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt.',
     'Effekte': 'Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen.',
     'Ablauf/Speichern': 'Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen.',

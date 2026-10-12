@@ -1,4 +1,6 @@
 #include "world.h"
+#include "shadow_geometry.h"
+#include "wall_capsule.h"
 #include "binary_view.h"
 #include "room.h"
 #include "weapon_tables.h"
@@ -19,7 +21,7 @@ namespace {
 thread_local std::set<std::string>* en01_unbound_log=nullptr;
 thread_local std::function<void(RECVX_EN01*,const RECVX_EN01_EFFECT*,const float*,int)> en01_spawn_hook;
 thread_local std::function<void(const float*)> en01_explode_hook;
-thread_local std::function<void(unsigned,int)> en01_se_request;
+thread_local std::function<void(unsigned,const float*,int)> en01_se_request;
 thread_local std::function<void(int)> en01_player_voice;
 thread_local std::function<int(unsigned,int)> en01_se_playing;
 thread_local std::function<int(const float*,float,float,unsigned)> en01_wall_probe_hook;
@@ -36,7 +38,7 @@ void en01_host_install(std::set<std::string>* log){
     static const RECVX_EN01_HOST host{
         [](int weapon)->int{return weapon>=0&&weapon<23?int(WpnTab[weapon].flg):0;},
         [](const char* name){en01_note(name);},
-        [](unsigned enemy,const float*,int se){if(en01_se_request)en01_se_request(enemy,se);},
+        [](unsigned enemy,const float* position,int se){if(en01_se_request)en01_se_request(enemy,position,se);},
         [](unsigned enemy,int se)->int{return en01_se_playing?en01_se_playing(enemy,se):0;},
         [](RECVX_EN01*,const char* kind,int joint,const float* position,int angle,const void* table){if(en01_blood_hook)en01_blood_hook(kind,joint,position,angle,table);else en01_note(std::string("blood:")+kind);},
         [](unsigned id)->int{return supported_effect_sprite(id)?1:0;},
@@ -156,6 +158,9 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     // E03 follows the four ef_info model blocks before the common PVP list.
     if(!data.empty()){const auto system=data/"archives/SYSTEM/0001.bin";if(std::filesystem::is_regular_file(system)){const auto bytes=read_asset_file(system,8*1024*1024);const auto common_offset=common_effect_textures_offset(bytes);if(common_offset!=std::size_t(-1)){auto common=decode_texture_bundle(bytes,common_offset);
         effect_model0_=decode_model_asset(bytes,4,common_offset);
+        // bhDrawMdfEffect selects objP[mdlver].model, not the object hierarchy.
+        for(auto& geometry:decode_shadow_geometry(bytes))
+            shadow_models_.push_back(std::make_shared<const ShadowGeometry>(std::move(geometry)));
         const auto categories=common_effect_categories();
         for(unsigned id=0;id<categories.size();++id){const auto [first,frames]=categories[id];if(!frames||first+frames>common.size()||effect_textures_.count(id))continue;std::vector<SceneTexture> atlas;
             for(unsigned f=0;f<frames;++f)atlas.push_back(common[first+f]); // Ninja blend consumes the decoded 0..128 alpha unchanged.
@@ -196,7 +201,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     (void)stage;
 }
 const MotionClip& RoomWorld::enemy_library_clip(unsigned identity,unsigned index)const{
-    const auto library=enemy_motions_.find(identity);if(library==enemy_motions_.end()||index>=library->second.entries.size()||!library->second.entries[index].second)throw std::runtime_error("enemy library motion unavailable");
+    const auto library=enemy_motions_.find(identity);if(library==enemy_motions_.end()||index>=library->second.entries.size()||!library->second.entries[index].second)throw std::runtime_error("enemy library motion unavailable: identity "+std::to_string(identity)+", clip "+std::to_string(index)+", library "+(library==enemy_motions_.end()?"absent":std::to_string(library->second.entries.size())));
     auto& decoded=library->second.decoded;auto at=decoded.find(index);if(at==decoded.end()){const auto entry=library->second.entries.at(index);at=decoded.emplace(index,decode_motion_asset(section(room_,entry.first,entry.second))).first;}return at->second;
 }
 const MotionClip& RoomWorld::entity_motion(const WorldEntity& e)const{return motion_clip(e,e.motion,e.room_motion);}
@@ -210,9 +215,22 @@ const MotionClip& RoomWorld::motion_clip(const WorldEntity& e,unsigned motion,bo
     if(at==slow_motion_clips_.end()){auto slow=clip;slow.interpolate=true;at=slow_motion_clips_.emplace(&clip,std::move(slow)).first;}
     return at->second;
 }
+// Unterer und verknuepfter Oberkoerper als EIN Clip (siehe world.h). Beide
+// Fenster muessen dieselbe Uhr und dieselbe Interpolation tragen, sonst bleibt
+// es beim unteren Clip; join_motion_segments prueft genau dieselben Bedingungen
+// und wirft, deshalb die Vorpruefung hier.
+const MotionClip* RoomWorld::segmented_clip(const MotionClip& lower,const MotionClip& upper,std::map<unsigned,MotionClip>& cache,unsigned key)const{
+    if(lower.positions.size()!=8||upper.positions.size()!=10||lower.frames!=upper.frames||lower.interpolate!=upper.interpolate)return nullptr;
+    auto at=cache.find(key);
+    if(at==cache.end())at=cache.emplace(key,join_motion_segments(lower,upper)).first;
+    return &at->second;
+}
 const MotionClip& RoomWorld::entity_motion_data(const WorldEntity& e,unsigned e_motion,bool e_room_motion)const{
-    if(e_room_motion){const auto& lower=room_motions_.at(e_motion);if(e.identity==1&&lower.positions.size()==8){auto at=room_motion_segments_.find(e_motion);if(at==room_motion_segments_.end()){const auto& upper=room_motions_.at(e_motion+1);if(upper.positions.size()!=10)throw std::runtime_error("room segmented upper motion missing");at=room_motion_segments_.emplace(e_motion,join_motion_segments(lower,upper)).first;}return at->second;}return lower;}
-    const auto library=enemy_motions_.find(e.identity);if(library==enemy_motions_.end()||e_motion>=library->second.entries.size())throw std::runtime_error("built-in enemy motion unavailable");
+    if(e_room_motion){const auto& lower=room_motions_.at(e_motion);if(e.identity==1&&lower.positions.size()==8){const auto& upper=room_motions_.at(e_motion+1);const auto* joined=segmented_clip(lower,upper,room_motion_segments_,e_motion);if(!joined)throw std::runtime_error("room segmented upper motion missing");return *joined;}return lower;}
+    // Ein verknuepftes Kindwork spielt die mnwP seines Elternworks
+    // (en01.c:2829): dieselbe Aufloesung wie enemy_mn_work, sonst greift der
+    // mtn_no des Kindes in die falsche Bibliothek.
+    const auto library=enemy_motions_.find(e.motion_library>=0?unsigned(e.motion_library):e.identity);if(library==enemy_motions_.end()||e_motion>=library->second.entries.size())throw std::runtime_error("built-in enemy motion unavailable: identity "+std::to_string(e.identity)+", library "+std::to_string(e.motion_library)+", clip "+std::to_string(e_motion));
     auto decode=[&](unsigned index)->const MotionClip&{auto& decoded=library->second.decoded;auto at=decoded.find(index);if(at==decoded.end()){const auto entry=library->second.entries.at(index);if(!entry.second)throw std::runtime_error("empty built-in enemy motion");at=decoded.emplace(index,decode_motion_asset(section(room_,entry.first,entry.second))).first;}return at->second;};
     const auto& lower=decode(e_motion);
     // Common_controll 25 sets the linked en01 actor to mtn_no + 0xc8.
@@ -222,7 +240,9 @@ const MotionClip& RoomWorld::entity_motion_data(const WorldEntity& e,unsigned e_
         // The linked upper-body work (exp1) may play a clip other than motion+200 (e.g. 118 while walking, 119 running).
         if(e.upper_motion&&e.upper_motion<library->second.entries.size()&&library->second.entries[e.upper_motion].second&&decode(e.upper_motion).positions.size()==10&&decode(e.upper_motion).frames==lower.frames)index=e.upper_motion;
         if(index>=library->second.entries.size()||!library->second.entries[index].second)throw std::runtime_error("segmented enemy upper motion missing");
-        auto& cache=library->second.segmented;const unsigned key=e_motion*1024+index;auto at=cache.find(key);if(at==cache.end()){const auto& upper=decode(index);if(upper.positions.size()!=10)throw std::runtime_error("segmented enemy upper skeleton differs");at=cache.emplace(key,join_motion_segments(lower,upper)).first;}return at->second;}
+        const auto* joined=segmented_clip(lower,decode(index),library->second.segmented,e_motion*1024+index);
+        if(!joined)throw std::runtime_error("segmented enemy upper skeleton differs");
+        return *joined;}
     return lower;
 }
 std::vector<RoomWorld::CombatTarget> RoomWorld::combat_targets()const{std::vector<CombatTarget> out;for(const auto& pair:entities_){const auto& e=pair.second;
@@ -239,7 +259,10 @@ void RoomWorld::init_en01(bool hard){
     recvx_en01_set_frame_counts(frames.data(),unsigned(frames.size()));
     BinaryView v(room_);const auto ene_count=v.u32(header_+0x88);const auto enep=v.u32(header_+8);std::vector<const RECVX_EN01*> previous;
     {const auto rut_n=v.u32(header_+0xA8);if(rut_n&&rut_n<=256){const auto rutp=v.u32(header_+0x28),ruttp=v.u32(header_+0x2C);v.require(rutp,rut_n*36);v.require(ruttp,rut_n*rut_n);
-        recvx_en01_set_routes(room_.data()+rutp,rut_n,room_.data()+ruttp);}else recvx_en01_set_routes(nullptr,0,nullptr);} // rom->rutp / ruttp for bhCheckRoute
+        recvx_en01_set_routes(room_.data()+rutp,rut_n,room_.data()+ruttp);
+        route_areas_.clear();route_table_.assign(room_.begin()+ruttp,room_.begin()+ruttp+rut_n*rut_n);
+        for(unsigned i=0;i<rut_n;++i){const auto p=rutp+i*36;route_areas_.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)},{v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)}});}
+        }else{recvx_en01_set_routes(nullptr,0,nullptr);route_areas_.clear();route_table_.clear();}} // rom->rutp / ruttp for bhCheckRoute
     {const auto ec=v.u32(header_+0x9c),fc=v.u32(header_+0xa0),ep=v.u32(header_+0x1c),fp=v.u32(header_+0x20);v.require(ep,ec*36);v.require(fp,fc*36);recvx_en01_set_terrain(room_.data()+ep,ec,room_.data()+fp,fc);}
     recvx_en01_set_mobile_terrain(nullptr,0,nullptr,0);
     for(unsigned i=0;i<ene_count;++i){auto found=entities_.find({1,i});if(found==entities_.end()||found->second.identity!=1)continue;auto& e=found->second;if(e.dead||e.scripted)continue;
@@ -336,7 +359,7 @@ const ModelNodeOverrides& RoomWorld::overrides(unsigned kind,unsigned index)cons
 const RoomWorld::Model& RoomWorld::model(unsigned kind,unsigned index)const{for(const auto& m:models_)if(m.kind==kind&&m.index==index)return m;throw std::runtime_error("model control has no realized model");}
 unsigned RoomWorld::model_index(unsigned kind,unsigned index,unsigned node)const{if(!kind){if(!player_asset_)throw std::runtime_error("player model control requires player asset");return player_asset_->model_index(node);}const auto& m=model(kind,index);if(m.actor)return m.actor->model_index(node);if(node>=m.rest_pose.size())throw std::runtime_error("object model control node outside hierarchy");return node;}
 ModelPose RoomWorld::model_pose(unsigned kind,unsigned index,unsigned node)const{return model_pose_physical(kind,index,model_index(kind,index,node));}
-ModelPose RoomWorld::model_pose_physical(unsigned kind,unsigned index,unsigned physical)const{auto edits=overrides(kind,index);if(!kind&&push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;if(!kind)return (player_room_motion_?player_asset_->local_pose_clip(room_motions_.at(motion_),frame_,{},edits):player_asset_->local_pose(motion_,frame_,edits)).at(physical);const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(kind==1&&e->enemy_native&&!e->scripted){if(physical>=e->enemy_obj.size())throw std::runtime_error("model control node outside native enemy work");return e->enemy_obj[physical];} /* mlwP->objP of the native work */if(m.actor){if(e->posed_has_motion()){const auto& clip=posed_motion_clip(*e);return m.actor->local_pose_clip(clip,e->posed_frame(),m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=object_pose(m,*e).at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
+ModelPose RoomWorld::model_pose_physical(unsigned kind,unsigned index,unsigned physical)const{auto edits=overrides(kind,index);if(!kind&&push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;if(!kind){if(player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("player enemy motion without clip");return player_asset_->local_pose_clip(*c,frame_,{},edits).at(physical);} /* plp->mnwP = epw->mnwP while grabbed */ return (player_room_motion_?player_asset_->local_pose_clip(room_motions_.at(motion_),frame_,{},edits):player_asset_->local_pose(motion_,frame_,edits)).at(physical);}const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(kind==1&&e->enemy_native&&!e->scripted){if(physical>=e->enemy_obj.size())throw std::runtime_error("model control node outside native enemy work");return e->enemy_obj[physical];} /* mlwP->objP of the native work */if(m.actor){if(e->posed_has_motion()){const auto& clip=posed_motion_clip(*e);return m.actor->local_pose_clip(clip,e->posed_frame(),m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=object_pose(m,*e).at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
 std::optional<Scene> RoomWorld::computer_character(unsigned chr_no,unsigned motion,unsigned frame_no){
     const auto found=entities_.find({1,chr_no});
     if(found==entities_.end())return {};
@@ -413,7 +436,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0xba){for(unsigned key=0;key<2;++key)for(unsigned axis=0;axis<3;++axis)ctx.ground[key][axis]=v.u16(2+key*8+axis*2)/100.f*(v.u8(1+key*8)&(1u<<axis)?-1:1);return true;}
     if(op==0xbb){float keys[12],out[3];for(unsigned key=0;key<4;++key)for(unsigned axis=0;axis<3;++axis)keys[key*3+axis]=ctx.ground[key<2?1:0][axis];njOverhauserSpline(keys,out,nullptr,event_clock(c.loop_remaining,c.loop_total));walls_.at(v.u8(1)).position={out[0],out[1],out[2]};update_ground_geometry();return true;}
     if(op==0xd0){auto& e=entity(1,v.u8(1));e.hp=v.u16(2);return true;}
-    if(op==0x79){if(v.u8(1)>=6)return false;(void)model_pose(1,v.u8(2),v.u8(3));return audio_.enemy_sound(v.u8(1),v.u16(4));}
+    if(op==0x79){if(v.u8(1)>=6)return false;const auto pose=model_pose(1,v.u8(2),v.u8(3));return audio_.enemy_sound(v.u8(1),v.u16(4),{pose.position.x,pose.position.y,pose.position.z});} // bhEneSeOn: CallEnemySe(v0, &objP[v2].pos, v3)
     if(op==0x66){if(v.u8(1)==1){ctx.mode1=0;return true;}if(v.u8(1)==20){const auto& source=contexts_.at(v.u8(2));const auto root=model_pose(source.kind,source.index).position;auto& p=ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;p.x+=root.x;p.z+=root.z;return true;}return false;}
 
     // bhGrdPosSet addresses rom->walp (not the separate floor-sound table).
@@ -421,7 +444,10 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0xc){const auto index=v.u8(1);if(index>=enemy_areas_.size())throw std::runtime_error("world floor outside original room table");if(v.u8(2)){enemy_areas_[index].flg&=~1u;floor_sounds_[index].area.flags&=~1u;}else{enemy_areas_[index].flg|=1;floor_sounds_[index].area.flags|=1;}return true;}
     if(op==0x7b){auto& wall=walls_.at(v.u8(1));wall.attributes=v.u16(2);for(unsigned i=0;i<4;++i)wall.parameters[i]=v.u8(4+i);wall.type=v.u8(8);update_ground_geometry();return true;}
     if(op==0xb9){const auto index=v.u8(1);if(index>=walls_.size())throw std::runtime_error("script ground position outside wall table");const auto signs=v.u8(3);walls_[index].position={v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};update_ground_geometry();return true;}
-    if(op==0x48){const auto point=link_point(ctx.kind,ctx.index,v.u8(5),{});return audio_.footstep(floor_sound(point),v.u8(4),v.u8(3),v.u8(1)==0);}
+    // FootSeCall: die Lage der Schrittstimme ist der Fusspunkt; der
+    // zusaetzliche SoundPoint-Parameter von audio_.footstep (native/audio.h)
+    // erhaelt deshalb genau `point`.
+    if(op==0x48){const auto point=link_point(ctx.kind,ctx.index,v.u8(5),{});return audio_.footstep(floor_sound(point),v.u8(4),v.u8(3),v.u8(1)==0,{point.x,point.y,point.z},collision_events_&&(collision_events_->flags[11][0]&0x01000000u));}
     if(op==0xab){background_target_=0xff000000u|(unsigned(v.u8(2))<<16)|(unsigned(v.u8(3))<<8)|v.u8(4);background_delay_=v.u8(5);background_pending_=true;return true;}
     // event.c bhObjLinkSet* family: byte 1 parent index, 2 child, 3 node, 4 release,
     // 5 offset signs, 6/8/10 offsets. Kinds: 0 player, 1 enemy, 2 object, 3 item.
@@ -470,6 +496,8 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(player_asset_){auto& edit=entity(0,0).node_overrides[0];auto angles=model_pose_physical(0,0,0).angles;angles[1]=0;edit.angles=angles;}
         actor_nodes_.clear();return true;}
     if(op==0x9d){entity(2,v.u8(1)).aspd=v.u8(2);return true;} // objitm.c light parameter; consumers pending
+    if(op==0x9e){vibration_mode_request_=v.u8(1)==0?1:0;return true;} // event.c:6744 bhPuruPuruFlagSet -> SetEventVibrationMode(v0 == 0)
+    if(op==0x9f){vibration_requests_.push_back({2,int(v.u8(1))});return true;} // event.c:6766 bhPuruPuruStart -> StartVibrationEx(2, v0)
     if(op==0xcc){entity(1,v.u8(1)).look=v.u8(2)!=0;return true;} // en01.c AI consumer pending
     if(op==0xc6){game_over_=true;return true;} // runtime owns the original gameover.c dispatcher
     if(op==0x24){
@@ -530,16 +558,35 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0x95){audio_.request_bgm2(v.u8(1),-45);return true;}
     if(op==0xa7){audio_.request_bgm2(v.u8(1),-int(v.u8(2)));return true;}
     if(op==0x93){audio_.stop_bgm2();return true;}
+    // bh3dSoundFlagSet (event.c:5595) -> Set3dSoundFlag(v0,v1,v2); bhSoundFlagReSet (event.c:6209) -> Reset3dSoundFlag.
+    if(op==0x76){try{audio_.set_3d_sound_flag(v.u8(1),v.u8(2),v.u8(3));}catch(const std::runtime_error&){unbound_enemy_.insert("Set3dSoundFlag: Slot ausserhalb der Originaltabelle (bh3dSoundFlagSet)");}return true;}
+    if(op==0x87){audio_.reset_3d_sound_flag();return true;}
     if(op==0x77)return audio_.user_sound_volume(v.u8(1),v.u8(2),-int(v.u8(3)),-int(v.u8(4)),v.u8(5));
     if(op==0xb6){audio_.set_room_sound_case(v.u8(1));return true;}
     if(op==0xd4){audio_.play_system(v.u16(2));return true;}
     if(op==0x16){audio_.stop_bgm(v.u8(1)*10);return true;}
-    if(op==0x19){audio_.play(1,audio_.set_name("VOICE"),v.u16(2),1,false,v.u8(5)*10);return true;}
-    if(op==0x1a){audio_.stop(1,v.u8(1)*10);return true;}
+    // bhVoiceOn/bhVoiceWait/bhVoiceOff/bhVoiceStart (event.c:1415/8601/1485/8671).
+    // v0 owner kind (0 player, 1 enemy, 2 object), v1 voice (u16), v2 mode, v3 fade*10, v4 owner index;
+    // pPos = owP[0].mtx[12..14]. VoiceWait starts paused, VoiceStart continues the same voice.
+    auto play_voice=[&](bool pause){
+        const unsigned kind=v.u8(1);if(kind>2)throw std::runtime_error("bhVoiceOn owner kind outside the original switch");
+        const auto joint=link_matrix(kind,v.u8(6),0);
+        if(!joint){unbound_enemy_.insert("bhVoiceOn owP[0]");return true;}
+        if(ctx.mode2){ctx.mode2=0;audio_.stop_voice(0);}
+        ctx.mode2=1;
+        audio_.play_voice(int(v.u16(2)),{joint->value[12],joint->value[13],joint->value[14]},int(v.u8(4)),unsigned(v.u8(5))*10,pause);
+        return true;};
+    if(op==0x19)return play_voice(false);
+    if(op==0xc4)return play_voice(true);
+    if(op==0x1a){ctx.mode2=0;audio_.stop_voice(unsigned(v.u8(1))*10);return true;}
+    if(op==0xc5){audio_.continue_voice();return true;}
     // CallNativeEventSe uses bank 2 and SDE SlotDef {7,6,5,4,3}.
     // Host voices 8..12 keep those independent of UI, feet, weapons and CRI.
     if(op==0x75){audio_.custom_midi_slots(v.u8(1),v.u8(2));return true;}
-    if(op==0x17){return audio_.event_sound(v.u8(1),v.u16(4));} // ExPlayMidi
+    // bhSeOn (event.c:1131): v0 slot, v1 kind (0 player, 1 enemy, 2 object), v2 index, v3 SeNo, v4 mode; pPos = owP[0].mtx[12..14].
+    if(op==0x17){const unsigned kind=v.u8(2);if(kind>2)return false;const auto joint=link_matrix(kind,v.u8(3),0);
+        if(!joint){unbound_enemy_.insert("bhSeOn owP[0]");return true;}
+        return audio_.event_sound(v.u8(1),v.u16(4),{joint->value[12],joint->value[13],joint->value[14]},int(v.u8(6)));}
     if(op==0x18){return audio_.stop_event_sound(v.u8(1));}
     // bhEvtLighterFireSet → bhSetLighterFire(obwp[v0], flg): flg 0 lights (st_flg 0x20000000, room light 1 on).
     if(op==0xa2){auto& system=collision_events_?collision_events_->flags[5][0]:collision_system_;
@@ -550,12 +597,36 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         }else{if(lights_.size()>1)lights_[1].flags&=~2u;system&=~0x20000000u;}
         return true;}
     // bhEasySESet → PlayGameSe4Event(Type, SlotNo, ..., SeNo at +14). Volume/pan ramps are not modelled.
-    if(op==0x86){const unsigned type=v.u8(1),slot=v.u8(2),se=v.u16(14);switch(type){
-        case 7:return audio_.event_sound(slot,se); // CallNativeEventSe (ExPlayMidi)
-        case 5:if(slot>=6)return false;return audio_.enemy_sound(slot,se);              // CallEnemySe
-        case 6:return slot<=2&&audio_.background_sound(slot,se);                         // CallBackGroundSe
-        case 3:{unsigned bank=0,program=0;if(!weapon_shot_sound(player_weapon_,bank,program))return true;return audio_.play_weapon_sound(bank,se&255);} // CallPlayerWeaponSeEx
-        default:return false;}}
+    // bhEasySESet (event.c:6117) -> PlayGameSe4Event (sdfunc.c:1279). Bytes: 1 type, 2 slot, 3/4 StartVol/LastVol (negated),
+    // 5/6 StartPan/LastPan (-128), 7 frame, 8 FloorType, 9 owner kind, 10 owner index, 11 joint, 12 SeType, 14 SeNo.
+    if(op==0x86){const int type=v.u8(1),slot=v.u8(2),se=v.u16(14);
+        const int start_vol=-int(v.u8(3)),last_vol=-int(v.u8(4)),start_pan=int(v.u8(5))-128,last_pan=int(v.u8(6))-128;
+        const bool syukan=collision_events_&&(collision_events_->flags[11][0]&0x01000000u);
+        try{audio_.set_3d_sound_flag(type,slot,(last_vol!=-1?2u:0u)|(last_pan!=-1?4u:0u));
+            if(last_vol!=-1)audio_.user_sound_volume(unsigned(type),unsigned(slot),start_vol,last_vol,v.u8(7));
+            if(last_pan!=-1)audio_.user_sound_pan(unsigned(type),unsigned(slot),start_pan,last_pan,v.u8(7));}
+        catch(const std::runtime_error&){unbound_enemy_.insert("Set3dSoundFlag: Slot ausserhalb der Originaltabelle (bhEasySESet)");}
+        // pPos = epw->mlwP->owP[byte 11].mtx[12]; epw by byte 9 (0 player, 1 enemy, 2 object, 3 item) and byte 10.
+        auto position=[&](SoundPoint& out){const auto joint=link_matrix(v.u8(9),v.u8(10),v.u8(11));if(!joint){unbound_enemy_.insert("bhEasySESet owP["+std::to_string(v.u8(11))+"]");return false;}out={joint->value[12],joint->value[13],joint->value[14]};return true;};
+        SoundPoint at;
+        switch(type){
+        case 0:audio_.play_player_voice(se);return true;                                                   // CallPlayerVoice
+        case 1:if(!position(at))return true;return audio_.footstep(v.u8(8),v.u8(12),unsigned(slot),true,at,syukan); // CallPlayerFootStepSeEx(FloorType,SeType,1,Id,pPos)
+        case 2:return audio_.player_action_se(se,true,syukan);                                             // CallPlayerActionSe
+        case 3:{unsigned bank=0,program=0;if(!weapon_shot_sound(player_weapon_,bank,program))return true;if(!position(at))return true;
+            return audio_.call_player_weapon_se(bank,se,at,slot,syukan);}                                    // CallPlayerWeaponSeEx
+        case 4:{unsigned bank=0,program=0;if(!weapon_shot_sound(player_weapon_,bank,program))return true;if(!position(at))return true;
+            return audio_.cartridge_se(bank,at,se);}                                                         // CallYakkyouSe
+        case 5:if(slot>=6)return false;if(!position(at))return true;return audio_.enemy_sound(unsigned(slot),unsigned(se),at); // CallEnemySe
+        case 6:return slot<=2&&audio_.background_sound(unsigned(slot),unsigned(se));                       // CallBackGroundSe
+        case 7:if(!position(at))return true;return audio_.event_sound(unsigned(slot),unsigned(se),at,1);   // CallNativeEventSe(Mode 1)
+        default:return true;}}                                                                              // types 8..11 do nothing in the original
+    // bhSoundPanSet (event.c:5971): SetUserSoundPan(v0, v1, v2-128, v3-128, v4).
+    if(op==0x7f)return audio_.user_sound_pan(v.u8(1),v.u8(2),int(v.u8(3))-128,int(v.u8(4))-128,v.u8(5));
+    // bhAddObjSe (event.c:6315) / bhDelObjSe (event.c:4023).
+    if(op==0x8b){const unsigned flags=v.u8(3);const float x=v.u16(4)/100.f*(flags&1?-1.f:1.f),y=v.u16(6)/100.f*(flags&2?-1.f:1.f),z=v.u16(8)/100.f*(flags&4?-1.f:1.f);
+        try{audio_.regist_object_se(v.u8(1),{x,y,z},v.u16(10),v.u8(2));}catch(const std::exception&){unbound_enemy_.insert("RegistObjectSe ausserhalb ObjectInfo[16]/ObjectReqList");}return true;}
+    if(op==0x45){try{audio_.free_object_se(v.u8(1));}catch(const std::exception&){unbound_enemy_.insert("FreeObjectSe ausserhalb ObjectInfo[16]");}return true;}
     // bhBGSeOn / bhBGSeOn2 / bhBGSeOff: direct/queued background requests and timer*10 fades.
     if(op==0x1c){if(v.u8(1)>2)return false;return audio_.background_sound(v.u8(1),v.u16(2),v.u8(4)*10);}
     if(op==0x94){audio_.request_background_sound(v.u8(1),v.u16(2));return true;} // CallBackGroundSe2 compares the raw SeNo
@@ -578,15 +649,8 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(!joint){unbound_enemy_.insert("bhWeaponSeCall owP["+std::to_string(jno)+"]");return true;}
         if(mode<2){
             unsigned bank=0,program=0;
-            if(weapon_shot_sound(player_weapon_,bank,program)){
-                audio_.play_weapon_sound(bank,program);
-                // sdfunc.c:1546 CallPlayerWeaponSeEx picks MIDI slot 8/9
-                // alternating for SlotNo 0 and slot 19 otherwise, and feeds
-                // pPos to SetupSeGenericParm. The native mixer has neither a
-                // weapon slot pair nor a positional parameter, so the request
-                // keeps its single host voice; both are reported, not faked.
-                unbound_enemy_.insert("CallPlayerWeaponSeEx SlotNo "+std::to_string(se_slot)+" / pPos");
-            }
+            if(weapon_shot_sound(player_weapon_,bank,program))
+                audio_.call_player_weapon_se(bank,int(program),{joint->value[12],joint->value[13],joint->value[14]},int(se_slot),collision_events_&&(collision_events_->flags[11][0]&0x01000000u));
         }
         gun_fire(kind,index,*joint,wno,jno,hand,angle);return true;}
     if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};return true;case 0x80:player_scripted=false;player_room_motion_=false;player_frozen_=false;motion_=42;frame_=0;return true;case 0x34:player_room_motion_=false;motion_=42;frame_=0;return true;default:return false;}}
@@ -653,6 +717,15 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
             if(cmd==38){const auto signs=v.u8(3);edit.position=NJS_POINT3{v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};}
             if(cmd==17||cmd==19){pose.position.x+=ctx.increment.x*(ctx.pos_sign[0]?-1:1);pose.position.y+=ctx.increment.y*(ctx.pos_sign[1]?-1:1);pose.position.z+=ctx.increment.z*(ctx.pos_sign[2]?-1:1);edit.position=pose.position;}
             if(cmd==18||cmd==19){for(unsigned a=0;a<3;++a)pose.angles[a]+=ctx.angle_increment[a]*(ctx.ang_sign[a]?-1:1);edit.angles=pose.angles;}
+            /* Ein frei laufender nativer Work besitzt objP selbst (enemy_obj):
+               der Schreibzugriff gilt genau dort und wird vom naechsten
+               bhSetMotion dieses Works ueberschrieben, wie im Original. Ein
+               Override bliebe hier ungelesen stehen. */
+            {auto& e=entity(ctx.kind,ctx.index);
+             if(ctx.kind==1&&e.enemy_native&&!e.scripted&&physical<e.enemy_obj.size()){
+                 if(edit.position)e.enemy_obj[physical].position=*edit.position;
+                 if(edit.angles)e.enemy_obj[physical].angles=*edit.angles;
+                 e.node_overrides.erase(physical);}}
             actor_nodes_.clear();return true;}
 if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign)[i]=v.u8(i+2);return true;}
         if(cmd==26||cmd==27){const auto key=v.u8(2),signs=v.u8(3);if(key>=4)throw std::runtime_error("interpolation key outside original task table");for(unsigned i=0;i<3;++i)(cmd==26?ctx.positions:ctx.angles)[key][i]=(cmd==26?v.u16(4+i*2)/100.f:float(v.u8(4+i)))*(signs&(1u<<i)?-1:1);return true;}
@@ -747,7 +820,7 @@ void RoomWorld::tick_en01(){
     en01_blood_hook=[this](const char* kind,int palette,const float* position,int angle,const void* table){
         if(std::string(kind)=="BloodPool"&&table)particles_.spawn_pool(table,{position[0],position[1],position[2]},angle,palette);else unbound_enemy_.insert(std::string("blood:")+kind);};
     en01_player_voice=[this](int no){audio_.play_player_voice(no);};
-    en01_se_request=[this](unsigned enemy,int se){audio_.request_enemy_se(enemy,se);};
+    en01_se_request=[this](unsigned enemy,const float* p,int se){audio_.request_enemy_se(enemy,{p[0],p[1],p[2]},se,1,0);};
     en01_se_playing=[this](unsigned enemy,int se){return audio_.enemy_se_playing(enemy,se)?1:0;};
     en01_explode_hook=[this](const float* position){explode({position[0],position[1],position[2]},NJS_POINT3{0,0,1});};
     for(auto& pair:entities_){auto& e=pair.second;if(!(simulation_flags_&2u)||pair.first.first!=1||!e.en01||e.scripted||e.inactive||e.frozen||e.enemy_native)continue;
@@ -844,13 +917,22 @@ void RoomWorld::gun_fire(unsigned kind,unsigned index,const BoneMatrix& joint,un
     RECVX_CB_GUN_OWNER work{};work.stflg=kind?0u:0x40000000u;work.idx_ct=int32_t(index);std::copy_n(joint.value,16,work.mtx);
     recvx_combat_gun_fire(&tables,&s,&sys,&work,int32_t(wno),int32_t(jno),int32_t(hand),ang);
 }
+void RoomWorld::sound_monitor(){
+    // ExecSoundSystemMonitor (sdfunc.c:3002): ExecEnemySeManager, then ExecObjectSeManager, both with CheckCollision4Sound.
+    const auto collision=[this](SoundPoint camera,SoundPoint source){
+        return check_collision_4_sound(collision_geometry(),room_height_,BinaryView(room_).u32(header_+0x100),{camera.x,camera.y,camera.z},{source.x,source.y,source.z});};
+    audio_.exec_enemy_se(collision);
+    audio_.exec_object_se(collision);
+}
 // Drains what the original effect procedures requested through bhSetEffectTb/bhSetEffect/CallPlayerActionSe/bhCheckBombAtari.
 void RoomWorld::process_effect_output(){
     auto out=take_effect_output();
     for(const auto& spawn:out.spawns)spawn_effect(spawn);
     for(const auto id:out.unsupported)unbound_enemy_.insert("bhEff"+std::to_string(id));
     for(const auto se:out.sounds)audio_.play_room_sound((se>>8)&15,se&255,6); // CallPlayerActionSe: bank (SeNo/256)&0xF, list SeNo
-    for(const auto& se:out.room_sounds)audio_.play_room_sound(se.bank,se.program,se.slot); // sdfunc.c CallYakkyouSe, slot 10
+    for(const auto& se:out.room_sounds){ // sdfunc.c CallYakkyouSe(pPos, SeNo): arms bank 1 on SE slot 10
+        unsigned bank=0,program=0;if(!weapon_shot_sound(player_weapon_,bank,program))continue;
+        audio_.cartridge_se(bank,{se.position.x,se.position.y,se.position.z},se.sound);}
     if(out.light){if(lights_.empty())lights_.resize(1,Light{});const auto& l=*out.light;lights_[0]=Light{l.flg,l.type,unsigned(l.aspd),unsigned(l.lkflg),unsigned(l.lkno),unsigned(l.lkono),unsigned(l.lsrc),0,l.position,l.offset,l.direction,l.color,l.near_range,l.far_range};}
     for(const auto& bomb:out.bombs)bomb_damage(bomb);
 }
@@ -879,7 +961,7 @@ void RoomWorld::bomb_damage(const BombRequest& bomb){
 std::vector<BoneMatrix> RoomWorld::player_joints_now()const{
     if(!player_asset_)return {};
     try{
-        if(grab_driving_&&player_enemy_motion_){std::vector<BoneMatrix> nodes;(void)player_asset_->sample_clip(enemy_library_clip(player_enemy_owner_?player_enemy_owner_:1,unsigned(motion_)),frame_,player_.position,player_.yaw,{},&nodes);return player_asset_->script_nodes(nodes);}
+        if(grab_driving_&&player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("grab pose without clip");std::vector<BoneMatrix> nodes;(void)player_asset_->sample_clip(*c,frame_,player_.position,player_.yaw,{},&nodes);return player_asset_->script_nodes(nodes);}
         if(player_scripted||!player_asset_->has_motion(motion_))return {};
         return player_asset_->script_nodes(player_asset_->pose(motion_,frame_,player_.position,player_.yaw));
     }catch(const std::exception&){return {};}
@@ -900,6 +982,19 @@ void RoomWorld::sync_player_grab(){
     }
 }
 void RoomWorld::tick(){
+    // The objP writes of the previous enemy pass were replaced by the player's
+    // own bhSetMotion in between (player.c), so they do not carry over.
+    if(!player_transient_nodes_.empty()){auto& edits=entity(0,0).node_overrides;for(const auto node:player_transient_nodes_)edits.erase(node);player_transient_nodes_.clear();}
+    // player.c:1366-1387 at the head of bhControlPlayer: pxb/pyb/pzb of the
+    // previous pass, then the settled root position nlxb/nlyb/nlzb (owP[0] of
+    // the last bhCalcModel, moved only once the root left a 0.3 radius).
+    {const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+     if((simulation_flags_&1u)&&!(stflg&0x1000000u)){
+        player_prev_pos_=player_prev_valid_?player_last_tick_pos_:player_.position;player_prev_valid_=true;
+        if(!player_joint_matrices_.empty()){const auto& root=player_joint_matrices_[0].value;
+            const float px=root[12]-player_nl_.x,py=player_.position.y-player_nl_.y,pz=root[14]-player_nl_.z;
+            if(std::sqrt(px*px+py*py+pz*pz)>0.3f)player_nl_={root[12],player_.position.y,root[14]};}}
+     player_last_tick_pos_=player_.position;}
     // objitm.c runs its object work before enemy movement; make the same
     // sys->metcp/mflrp snapshot visible to hitchk.c/en01 for this frame.
     ensure_push();update_push();
@@ -914,10 +1009,11 @@ void RoomWorld::tick(){
 
     tick_en01();
     control_enemy_works();
-    audio_.exec_enemy_se(); // ExecEnemySeManager, after every enemy request of this pass
     update_player_ground_work(); // player.c:1743-1762, immediately before bhControlEffect
     control_player_effects();
-    set_effect_walls(&walls_,room_height_);set_effect_ground(&ground_,&effect_water_room_,&effect_water_mobile_);
+    effect_walls_=collision_geometry();set_effect_walls(&effect_walls_,room_height_);set_effect_water([this](NJS_POINT3 p,float& top){return water_top(p,top);});set_effect_ground(&ground_,&effect_water_room_,&effect_water_mobile_);
+    // effsub1.c:4224 bhEff017: hp->flg &= ~1 im Effektwork des sterbenden EN00.
+    set_effect_mobile_wall_clear([this](int index){if(index<0||std::size_t(index)>=enemy_mobile_walls_.size()){unbound_enemy_.insert("bhEff017: sys->mwalp[ct0] ohne Zuteilung");return;}enemy_mobile_walls_[std::size_t(index)].flags&=~1u;update_ground_geometry();});
     // effect.c:750 bhControlEffect: (sp_flg & 8) || (ef_flg & 1).
     if((simulation_flags_&8u)||(effect_flags_&1u))for(unsigned i=0;i<512;++i){
         // effect.c:776 Workgate: (flg & 1) && !(stflg & 0x01000000). Ein leerer
@@ -937,8 +1033,9 @@ void RoomWorld::tick(){
             // resize sprites_, and higher new slots run in this same pass.
             auto dispatch=[&](){
                 auto& work=sprites_[i];
+                if(work.sprite.id==1){tick_shadow(i);return;}
                 if(work.weapon){work.weapon->tick();work.sprite.flg=work.weapon->flg;work.queued=work.weapon->queued;return;}
-                if(work.link&&work.link<=4){
+                if(work.link&&work.link<=4&&!(work.sprite.id==0&&work.sprite.mode0!=0)){ // bhEff000 links its joint only in mode 0
                     const auto pos=link_point(work.link-1,work.index,work.node,work.offset);
                     work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;
                     if(work.sprite.id==0&&work.link==1)if(const auto matrix=link_matrix(0,work.index,work.node))set_effect_link_matrix(work.node,matrix->value);
@@ -970,7 +1067,10 @@ void RoomWorld::tick(){
 
     auto refresh=[](ModelNodeOverrides& edits,const MotionClip& clip,const std::vector<unsigned>& nodes){for(unsigned channel=0;channel<clip.positions.size();++channel){const auto node=nodes.empty()?channel:nodes.at(channel);const auto at=edits.find(node);if(at==edits.end())continue;if(!clip.positions[channel].empty())at->second.position.reset();at->second.angles.reset();if(!at->second.position&&!at->second.angles)edits.erase(at);}};
     for(auto& pair:entities_){auto& e=pair.second;if(pair.first.first==0){if(player_asset_&&player_scripted&&!player_enemy_motion_){const auto& clip=player_room_motion_?room_motions_.at(motion_):player_asset_->motion_clip(motion_);refresh(e.node_overrides,clip,player_asset_->motion_nodes(clip.positions.size()));}}
-        else if(!e.enemy_native&&e.posed_has_motion())for(const auto& m:models_)if(m.kind==pair.first.first&&m.index==pair.first.second&&m.actor){const auto& clip=posed_motion_clip(e);refresh(e.node_overrides,clip,m.actor->motion_nodes(clip.positions.size()));break;}}
+        // Ein skriptgefuehrter nativer Work wird ueber denselben Clippfad
+        // gezeichnet; auch seine Overrides gelten nur bis zum naechsten
+        // Motion-Schreibzugriff (event.c:12099 Common_controll 8, :36/38).
+        else if((!e.enemy_native||e.scripted)&&e.posed_has_motion()&&enemy_motion_available(e,e.posed_motion(),e.posed_room_motion()))for(const auto& m:models_)if(m.kind==pair.first.first&&m.index==pair.first.second&&m.actor){const auto& clip=posed_motion_clip(e);refresh(e.node_overrides,clip,m.actor->motion_nodes(clip.positions.size()));break;}}
     // bhControlMask/fmSetLipSyncParam: sample before advancing, two VSync units
     // for each lip tick; face motion uses its independent one-frame clock.
     for(const auto& m:models_)if(m.actor&&m.actor->face()){auto& e=entity(m.kind,m.index);const auto& base=m.actor->face()->keys();const auto& keys=e.face_keys.empty()?base:e.face_keys;auto param=sample_face_parameters(keys,e.face_frame);
@@ -999,7 +1099,8 @@ void RoomWorld::tick(){
     // bhSetMotion/bhCalcModel write the object tree inside the control pass.
     // Committing here, and only here, is what makes a work written while the
     // pass is paused invisible until the pass runs again.
-    e.commit_pose();}if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
+    e.commit_pose();}if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
+    control_enemy_player_motion();
     apply_en01_flinch();
     sync_player_grab();
     if(background_pending_){if(background_delay_)--background_delay_;else{background_=background_target_;background_pending_=false;}}
@@ -1014,7 +1115,7 @@ Scene RoomWorld::sample_player(const PlayerAsset& player,std::vector<BoneMatrix>
     const PlayerAsset* base=&player;MorphSource morph;const MorphSource* morph_ptr=nullptr;
     if(const auto* a=player.model(player_morph_.morph_obj_a);a&&a->bones()==player.bones())base=a;
     if(player_morph_.morph)if(const auto* b=player.model(player_morph_.morph_obj_b);b&&b->bones()==base->bones()){morph.model=&b->encoded_model();morph.shape=player_morph_.morph_shape;morph_ptr=&morph;}
-    if(player_enemy_motion_)return base->sample_clip(enemy_library_clip(player_enemy_owner_?player_enemy_owner_:1,unsigned(motion_)),frame_,player_.position,player_.yaw,{},nodes,pose_overrides,nullptr,morph_ptr); // the grab clips live in the zombie MTN list
+    if(player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("player enemy motion without clip");return base->sample_clip(*c,frame_,player_.position,player_.yaw,{},nodes,pose_overrides,nullptr,morph_ptr);} // the grab clips live in the zombie MTN list
     return player_room_motion_?base->sample_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw,{},nodes,pose_overrides,nullptr,morph_ptr):base->sample(motion_,frame_,player_.position,player_.yaw,nodes,pose_overrides,nullptr,morph_ptr);
 }
 unsigned RoomWorld::frame(unsigned kind,unsigned index)const{if(!kind)return unsigned(std::max<std::int64_t>(0,frame_));const auto at=entities_.find({kind,index});return at==entities_.end()?0:unsigned(std::max<std::int64_t>(0,at->second.frame));}
@@ -1032,7 +1133,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         if(model.actor){
             if(const auto* a=model_variant(model,e.morph_obj_a);a&&a->bones()==model.actor->bones())drawn=a;
             const bool blending=e.morph||(e.enemy_bound&&(e.enemy.mdflg&2u));
-            if(blending)if(const auto* b=model_variant(model,e.morph_obj_b);b&&b->bones()==drawn->bones()){morph.model=&b->encoded_model();morph.shape=e.morph?e.morph_shape:e.enemy.shp_ct;morph_ptr=&morph;}
+            if(blending)if(const auto* b=model_variant(model,e.morph_obj_b);b&&b->bones()==drawn->bones()){morph.model=&b->encoded_model();morph.flags=e.morph_live_flags(e.morph_obj_b);morph.shape=e.morph?e.morph_shape:e.enemy.shp_ct;morph_ptr=&morph;}
         }
         if(model.kind==1&&e.enemy_native&&!e.scripted){
             // eneset.c:797 bhDrawEnemy / :866 bhDrawEneObject: the work's own
@@ -1042,6 +1143,14 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
             if(!model.actor||!e.enemy_calculated||!listed||(w.mdflg&1u))continue;
             object=drawn->sample_work(e.enemy_obj,e.enemy_owp_mtx,e.enemy_evalflags,&actor_nodes_[{model.kind,model.index}],nullptr,nullptr,morph_ptr);
             object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=drawn->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=drawn->script_index(t.object);
+            // npSetAllMatColor hat die Materialchunks des geteilten Baums
+            // gepatcht (njplus.c:1375-1450): B/G/R aus dem Auftrag, A nur,
+            // wenn der Modellwert ungleich 0 war. Knoten mit evalflags 0x8
+            // (ausgeblendet) erreicht das Original nicht.
+            {const auto& tree=tree_owner(e);
+             if(tree.enemy_material_set)for(auto& t:object.triangles){
+                 const std::uint32_t alpha=(t.color&0xff000000u)?(tree.enemy_material_color&0xff000000u):0u;
+                 t.color=alpha|(tree.enemy_material_color&0x00ffffffu);}}
             if(std::getenv("RODRIGO_DBG")&&e.room_motion&&e.motion<room_motions_.size()&&room_motions_[e.motion].frames){const auto& clip=room_motions_[e.motion];const auto ref=model.actor->pose_clip(clip,e.frame,e.transform.position,e.transform.yaw,model.actor->motion_nodes(unsigned(clip.positions.size())));
                 std::fprintf(stderr,"DBGCMP idx=%u id=%u ch=%zu bones=%zu frame=%lld wfrm=%d mtn=%u\n",model.index,e.identity,clip.positions.size(),e.enemy_owp_mtx.size(),(long long)e.frame,int(e.enemy.frm_no),unsigned(e.enemy.mtn_no));
                 for(std::size_t n=0;n<std::min(ref.size(),e.enemy_owp_mtx.size());++n){const auto* a=e.enemy_owp_mtx[n].value;const auto* b=ref[n].value;std::fprintf(stderr,"  n%02zu native(%.2f,%.2f,%.2f) actor(%.2f,%.2f,%.2f)%s\n",n,a[12],a[13],a[14],b[12],b[13],b[14],std::fabs(a[12]-b[12])+std::fabs(a[13]-b[13])+std::fabs(a[14]-b[14])>0.05f?" DIFF":"");}}
@@ -1092,6 +1201,49 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         else {njUnitMatrix(&matrix);if(work.link&&work.link<=4)if(const auto parent=link_matrix(work.link-1,work.index,work.node))std::copy(parent->value,parent->value+16,matrix);njTranslate(&matrix,s.lox,s.loy,s.loz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
         njScale(&matrix,s.sx,s.sy,s.sz);
         for(auto triangle:effect_model0_->triangles){if(triangle.textured)triangle.texture=std::uint16_t(texture);for(auto& vertex:triangle.vertices){njCalcPoint(&matrix,&vertex.position,&vertex.position);njCalcVector(&matrix,&vertex.normal,&vertex.normal);njUnitVector(&vertex.normal);}triangle.camera_mask=false;triangle.world_lit=false;triangle.gouraud=false;scene.triangles.push_back(std::move(triangle));}}
+    // F05: preserve modifier pool order, presentation and per-work gates. The
+    // modifier models come with the common effect bundle (SYSTEM entry 1,
+    // like effect_model0_ above); a world built without that bundle has
+    // nothing to draw them with.
+    if(draw_effects&&!shadow_models_.empty())for(const auto& work:sprites_){
+        const auto& s=work.sprite;
+        if(s.id!=1||work.hidden||!work.queued)continue;
+        if(((s.flg|s.stflg)&0x01000000u)||
+           ((mirror&0x4000u)&&(s.mdflg&0x40u)))continue;
+        if(s.mdlver>=shadow_models_.size())
+            throw std::runtime_error("bhDrawMdfEffect: original modifier model missing (mdlver "+std::to_string(s.mdlver)+" of "+std::to_string(shadow_models_.size())+")");
+        NJS_MATRIX matrix;
+        if((s.flg&0x200000u)||!(s.flg&0x80u)){
+            njUnitMatrix(&matrix);
+            njTranslate(&matrix,s.px,s.py,s.pz);
+            njRotateXYZ(&matrix,s.ax,s.ay,s.az);
+        }else{
+            const WorldEntity* owner=nullptr;
+            if(s.lkwkp){const auto* w=static_cast<const RECVX_ENEMY_WORK*>(s.lkwkp);if(w->owner)owner=static_cast<const WorldEntity*>(w->owner);} /* child works live in enemy_children_ */
+            if(!owner)for(const auto& entry:entities_){
+                if(entry.second.enemy_bound&&s.lkwkp==&entry.second.enemy){
+                    owner=&entry.second;
+                    break;
+                }
+            }
+            if(!owner)
+                throw std::runtime_error("bhDrawMdfEffect: linked owner missing");
+            const auto& tree=owner->model_owner?*owner->model_owner:*owner;
+            if(s.lkono<0||!tree.enemy_calculated)
+                throw std::runtime_error("bhDrawMdfEffect: linked matrix unavailable");
+            const auto node=std::size_t(tree.model_window)+unsigned(s.lkono);
+            if(node>=tree.enemy_owp_mtx.size())
+                throw std::runtime_error("bhDrawMdfEffect: linked joint outside model");
+            std::copy_n(tree.enemy_owp_mtx[node].value,16,matrix);
+            njTranslate(&matrix,s.lox,s.loy,s.loz);
+            njRotateXYZ(&matrix,s.ax,s.ay,s.az);
+        }
+        njScale(&matrix,s.sx,s.sy,s.sz);
+        SceneShadow draw;
+        draw.geometry=shadow_models_[s.mdlver];
+        std::copy_n(matrix,16,draw.transform.begin());
+        scene.shadows.push_back(std::move(draw));
+    }
     { // bhDrawWeaponEffect (bhEff003): ef_tn[3], draw gate pt_flg & 0x10
         const auto atlas=effect_textures_.find(3);bool any=false;for(const auto& w:sprites_)if(w.weapon&&!w.hidden&&w.weapon->queued&&w.weapon->ct0)any=true;
         if(any&&draw_effects&&atlas!=effect_textures_.end()){
@@ -1116,7 +1268,7 @@ bool RoomWorld::entity_hidden(unsigned kind,unsigned index)const{
 }
 std::optional<BoneMatrix> RoomWorld::link_matrix(unsigned kind,unsigned index,unsigned node,unsigned depth)const{
     if(depth>32)throw std::runtime_error("cyclic entity attachment");
-    if(!kind&&player_asset_){auto edits=overrides(0,0);if(push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;auto matrices=player_asset_->script_nodes(player_room_motion_?player_asset_->pose_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw,{},edits):player_asset_->pose(motion_,frame_,player_.position,player_.yaw,edits));if(node<matrices.size())return matrices[node];}
+    if(!kind&&player_asset_){auto edits=overrides(0,0);if(push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;const MotionClip* enemy_clip=player_enemy_motion_?player_enemy_clip():nullptr;if(player_enemy_motion_&&!enemy_clip)throw std::runtime_error("player enemy motion without clip");auto matrices=player_asset_->script_nodes(enemy_clip?player_asset_->pose_clip(*enemy_clip,frame_,player_.position,player_.yaw,{},edits) /* plp->mnwP = epw->mnwP while grabbed */ :player_room_motion_?player_asset_->pose_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw,{},edits):player_asset_->pose(motion_,frame_,player_.position,player_.yaw,edits));if(node<matrices.size())return matrices[node];}
     const auto* e=state(kind,index);
     if(kind==1&&e&&e->enemy_native&&e->enemy_calculated&&e->enemy_asset){unsigned physical=0;try{physical=e->enemy_asset->model_index(node);}catch(const std::runtime_error&){return {};}if(physical<e->enemy_owp_mtx.size())return e->enemy_owp_mtx[physical];return {};}
     if(kind&&e)for(const auto& m:models_)if(m.kind==kind&&m.index==index){
@@ -1411,5 +1563,39 @@ bool RoomWorld::effect_visible(unsigned index)const{
 std::optional<RoomWorld::LightState> RoomWorld::light_state(unsigned index)const{
     if(index>=lights_.size())return {};const auto& l=lights_[index];
     return LightState{l.flags,l.type,l.clock,l.link,l.index,l.node,l.link?link_point(l.link-1,l.index,l.node,l.offset):l.position,l.color_sampled?l.working_color:l.color,l.near_range,l.far_range};
+}
+
+// player.c act_* : bhCheckFloorSound(plp, flr_no, owP[node].mtx[12/14]) then
+// CallPlayerFootStepSe(fsnd, type, 1). owP is the pose of the last
+// bhCalcModel, so the node is read from the clip/frame the host has not yet
+// advanced. node 0xFFFFFFFF is act_srt's plp->gpx/gpz.
+void RoomWorld::player_foot_sound(const PlayerAsset& player,unsigned node,unsigned type){
+    float x=player_.position.x,z=player_.position.z;
+    if(node!=0xFFFFFFFFu){
+        if(!player.has_motion(motion_)){unbound_enemy_.insert("bhCheckFloorSound: owP ohne Spielerclip");return;}
+        const auto bones=player.pose(motion_,frame_,player_.position,player_.yaw,overrides(0,0));
+        if(node>=bones.size()){unbound_enemy_.insert("bhCheckFloorSound: owP[node] ausserhalb des Modells");return;}
+        x=bones[node].value[12];z=bones[node].value[14];
+    }
+    audio_.player_footstep_se(floor_sound(floor_at(player_.position),x,z),type);
+}
+// pwksub.c:326 bhSearchNearEnemyB over ene[0..ewk_n-1]; the line-of-sight
+// capsule uses the same bhCheckC2WallN provider as the combat port.
+bool RoomWorld::search_near_enemy_b(NJS_POINT3 pos,int ay,int ar,float len)const{
+    if(ar==0)ar=32768;
+    NJS_VECTOR vc1{0,0,-1.0f},vc0{},vc2{};NJS_MATRIX m;njUnitMatrix(&m);
+    njRotateY(&m,ay);njCalcVector(&m,&vc1,&vc0);njRotateY(&m,ar);njCalcVector(&m,&vc1,&vc2);
+    const float er=-njInnerProduct(&vc0,&vc2);
+    for(std::uint32_t i=0;i<enemy_table_.ewk_n&&i<RECVX_ENEMY_SLOTS;++i){const auto* w=enemy_table_.slot[i];if(!w)continue;
+        if(!(w->flg&1u)||!(w->flg&0x20u)||(w->flg&0x8002u)||(w->flg2&0x10u)||(w->stflg&0x41000000u))continue;
+        if(w->flg&0x80u){if(!w->lkwkp)continue;if(w->lkwkp->stflg&0x1000000u)continue;}
+        const NJS_POINT3 c2{0.5f*(w->watr.c1.x+w->watr.c2.x),0.5f*(w->watr.c1.y+w->watr.c2.y),0.5f*(w->watr.c1.z+w->watr.c2.z)};
+        NJS_VECTOR v{pos.x-c2.x,0,pos.z-c2.z};const float ln=njScalor(&v);if(ln>len)continue;
+        njUnitVector(&v);const float a=njInnerProduct(&vc0,&v);if(!(a<er))continue;
+        NJS_POINT3 dir{c2.x-pos.x,c2.y-pos.y,c2.z-pos.z};const float length=njUnitVector(&dir);
+        if(length>0&&combat_wall_distance(pos,dir,length,0x400)<length)continue; // bhCheckC2WallN != 0
+        return true;
+    }
+    return false;
 }
 }
