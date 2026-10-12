@@ -716,8 +716,8 @@ void player_control_motions(const RECVX_ENEMY_SERVICES& sv) {
             const uint32_t mtn = want[id][column[m]];
             require(ply.mtn_no == mtn,
                     "en07.c:2174-2178 ply_motion-Tabelle oder Spaltenwahl weicht ab");
-            require(ply.mtn_enemy == 1u && ply.mtn_enemy_owner == 0u,
-                    "en07.c:2190/2221/2236 plp->mnwP = epw->mnwP fehlt");
+            require(ply.mtn_enemy == 1u && ply.mtn_enemy_owner == w.id,
+                    "en07.c:2190/2221/2236 plp->mnwP = epw->mnwP (Bibliothek des greifenden Gegners, nach IDENTITAET epw->id = sys->emtp[id]) fehlt");
             require(ply.mtn_add == 0x10000, "en07.c:2195/2226/2239 plp->mtn_add = 0x10000");
             if (m == 0) {
                 /* en07.c:2186-2199 */

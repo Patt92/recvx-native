@@ -761,7 +761,7 @@ static void control_player(Pass* p)
         break;
     case 1:
         if (!pl.frm_no) {
-            pl.mtn_enemy=1; pl.mtn_enemy_owner=(uint32_t)w->idx_ct;
+            pl.mtn_enemy=1; pl.mtn_enemy_owner=w->id;
             pl.mtn_no=pl.mode2==0 ? 31 : 32;
             pl.frm_no=0; pl.hokan_count=3; pl.hokan_rate=32768; pl.mtn_add=65536;
             ++pl.mode3; changed=1;

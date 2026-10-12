@@ -2452,10 +2452,11 @@ static void en07_player_control(RECVX_ENEMY_WORK* w)
             pl.flg |= 0x80000u;
             pl.flg |= 0x10004u;
             pl.stflg |= 0x10000u;
-            /* plp->mnwP = epw->mnwP. */
             pl.mtn_enemy = 1u;
-            pl.mtn_enemy_owner = (sv && sv->enemy_now) ? sv->enemy_now() : 0u;
-            if (!(sv && sv->enemy_now)) en07_gap(w, "sys->enow");
+            /* plp->mnwP = epw->mnwP, und epw->mnwP = sys->emtp[epw->id]
+               (room.c:375/390): die Motionbibliothek haengt an der
+               IDENTITAET des greifenden Gegners, nicht am Slotindex. */
+            pl.mtn_enemy_owner = w->id;
             pl.mtn_no = ply_motion[ply][1];
             pl.frm_no = 0;
             pl.hokan_count = 5;
@@ -2498,8 +2499,9 @@ static void en07_player_control(RECVX_ENEMY_WORK* w)
         pl.flg |=  0x10004u;
         pl.stflg |= 0x10000u;
         pl.mtn_enemy = 1u;
-        pl.mtn_enemy_owner = (sv && sv->enemy_now) ? sv->enemy_now() : 0u;
-        if (!(sv && sv->enemy_now)) en07_gap(w, "sys->enow");
+        /* plp->mnwP = epw->mnwP = sys->emtp[epw->id] (room.c:375/390):
+           Identitaet, nicht Slotindex. */
+        pl.mtn_enemy_owner = w->id;
         pl.mtn_no = ply_motion[ply][2];
         pl.frm_no = 0;
         pl.hokan_count = 5;
@@ -2514,8 +2516,9 @@ static void en07_player_control(RECVX_ENEMY_WORK* w)
         switch (pl.mode3) {
         case 0:
             pl.mtn_enemy = 1u;
-            pl.mtn_enemy_owner = (sv && sv->enemy_now) ? sv->enemy_now() : 0u;
-            if (!(sv && sv->enemy_now)) en07_gap(w, "sys->enow");
+            /* plp->mnwP = epw->mnwP = sys->emtp[epw->id] (room.c:375/390):
+               Identitaet, nicht Slotindex. */
+            pl.mtn_enemy_owner = w->id;
             pl.mtn_no = ply_motion[ply][0];
             pl.frm_no = 0;
             pl.mtn_add = 0x10000;

@@ -766,7 +766,7 @@ static void control_player(RECVX_ENEMY_WORK* w)
             w->sv->player_set(&p); w->sv->player_voice(0x402); w->sv->vibration(1,9); return;
         case 1:
             if (!p.frm_no) {
-                p.mtn_enemy=1; p.mtn_enemy_owner=(uint32_t)w->idx_ct;
+                p.mtn_enemy=1; p.mtn_enemy_owner=w->id;
                 p.mtn_no=p.mode2?23:22; p.frm_no=0; p.hokan_count=3;
                 p.hokan_rate=32768; p.mtn_add=65536; ++p.mode3;
                 w->sv->player_set(&p); extra(w)->player_library(w,1);
@@ -775,7 +775,7 @@ static void control_player(RECVX_ENEMY_WORK* w)
         case 2:
             if (!p.frm_no) {
                 /* La reference installe epw->mnwPb, pas plp->mnwPb. */
-                p.mtn_enemy=1; p.mtn_enemy_owner=(uint32_t)w->idx_ct;
+                p.mtn_enemy=1; p.mtn_enemy_owner=w->id;
                 p.flg=(p.flg&~0x10004u)|8u; p.flg2&=~1u; p.at_flg=0; p.stflg&=~0x10000u;
                 p.mode0=1; p.mode1=p.mode2=p.mode3=0;
                 w->sv->player_set(&p); extra(w)->player_library(w,2);
@@ -794,7 +794,7 @@ static void control_player(RECVX_ENEMY_WORK* w)
         p.exp1_flags=(p.exp1_flags|0x1e0u)&~4u;
         p.ct0=p.mode2?8:1;
         ayp=p.mode2?arc(w->px-p.pos.x,w->pz-p.pos.z):arc(p.pos.x-w->px,p.pos.z-w->pz);
-        ct1=8; p.mtn_enemy=1; p.mtn_enemy_owner=(uint32_t)w->idx_ct;
+        ct1=8; p.mtn_enemy=1; p.mtn_enemy_owner=w->id;
         p.mtn_no=p.mode2+20u; p.frm_no=0; p.hokan_count=5; p.hokan_rate=52428;
         p.mtn_add=0; ++p.mode3;
         w->sv->player_set(&p); extra(w)->player_library(w,1);
