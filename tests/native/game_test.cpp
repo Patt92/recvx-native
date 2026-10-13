@@ -259,13 +259,14 @@ int main(int argc,char** argv){try{
         const std::vector<std::uint8_t> release={0x57,1,5,4,15,0,0,0,0xff,0};std::copy(release.begin(),release.end(),binary.begin()+1180);EventVm next(binary,state,text);next.inherit_progress(response);next.start(0,0);next.tick();check(next.errors.empty()&&next.flag(4,15)&&!(next.flags[11][0]&0x20000),"camera-retention release desynchronizes event");
     }
     {auto binary=data;binary[1118]=0;const std::vector<std::uint8_t> script={0x37,7,0x33,0,0,0,0,1,0,0,0xff,0};std::copy(script.begin(),script.end(),binary.begin()+1180);MessageDialog text;Inventory state;EventVm cases(binary,state,text);unsigned calls=0;cases.door=[&](const DoorRequest& request){++calls;check(request.room_case==7,"room case never reaches door request");return true;};cases.start(0,0);cases.tick();check(cases.errors.empty()&&calls==1,"two-byte room case command desynchronizes door call");}
-    // TGA orientation and exported PS2 alpha normalization.
+    // TGA orientation and one shared alpha domain: cooked files carry the
+    // engine's 8-bit alpha (no GS 0..128 halving), so export and import keep it.
     const auto directory=std::filesystem::temp_directory_path()/"recvx-asset-test";std::filesystem::create_directories(directory);const auto file=directory/"roundtrip.tga";if(std::filesystem::exists(file))std::filesystem::remove(file);
-    SceneTexture texture{2,2,{0x80112233,0x40445566,0x00778899,0x80aabbcc}};write_tga(file,texture);auto loaded=read_tga(file);check(loaded.pixels==std::vector<std::uint32_t>({0xff112233,0x80445566,0x00778899,0xffaabbcc}),"TGA color/orientation/alpha");std::filesystem::remove(file);
+    SceneTexture texture{2,2,{0x80112233,0x40445566,0x00778899,0x80aabbcc}};write_tga(file,texture);auto loaded=read_tga(file);check(loaded.pixels==std::vector<std::uint32_t>({0x80112233,0x40445566,0x00778899,0x80aabbcc}),"TGA color/orientation/alpha");std::filesystem::remove(file);
     const auto base=directory/"data",mods=directory/"mods",relative=std::filesystem::path("textures/rooms/RM_0000/0000.tga");
     if(std::filesystem::exists(base/relative))std::filesystem::remove(base/relative);if(std::filesystem::exists(mods/relative))std::filesystem::remove(mods/relative);
     write_tga(base/relative,texture);SceneTexture hd{4,4,std::vector<std::uint32_t>(16,0x80abcdef)};write_tga(mods/relative,hd);
-    Scene mod_scene;mod_scene.textures={texture};apply_texture_files(mod_scene,base,mods,"rooms/RM_0000");check(mod_scene.textures[0].width==4&&mod_scene.textures[0].pixels[0]==0xffabcdef,"HD texture override precedence");
+    Scene mod_scene;mod_scene.textures={texture};apply_texture_files(mod_scene,base,mods,"rooms/RM_0000");check(mod_scene.textures[0].width==4&&mod_scene.textures[0].pixels[0]==0x80abcdef,"HD texture override precedence");
     std::filesystem::remove(mods/relative);apply_texture_files(mod_scene,base,mods,"rooms/RM_0000");check(mod_scene.textures[0].width==2,"base texture fallback");std::filesystem::remove(base/relative);
     // Common 5 is six bytes, including padding; following commands must run.
     auto common=data;const std::vector<std::uint8_t> commands={0x69,5,1,2,3,0,5,4,7,0,0,0,0xff,0};std::copy(commands.begin(),commands.end(),common.begin()+1180);

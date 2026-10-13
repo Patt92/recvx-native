@@ -41,7 +41,11 @@ std::vector<BoneMatrix> PlayerAsset::script_nodes(const std::vector<BoneMatrix>&
 }
 MotionClip join_motion_segments(const MotionClip& lower,const MotionClip& upper){
     if(!lower.frames||lower.frames!=upper.frames||lower.interpolate!=upper.interpolate||lower.positions.size()!=lower.angles.size()||upper.positions.size()!=upper.angles.size())throw std::runtime_error("incompatible segmented motion clocks");
-    auto out=lower;out.positions.insert(out.positions.end(),upper.positions.begin(),upper.positions.end());out.angles.insert(out.angles.end(),upper.angles.begin(),upper.angles.end());return out;
+    auto out=lower;out.positions.insert(out.positions.end(),upper.positions.begin(),upper.positions.end());out.angles.insert(out.angles.end(),upper.angles.begin(),upper.angles.end());
+    // Der Nachbarb lock gilt je MTN-Block: fuer den zusammengesetzten Satz sind
+    // nur so viele Keys hinter frm_num vorhanden, wie beide Teile mitbringen.
+    out.tail_keys=std::min(lower.tail_keys,upper.tail_keys);
+    return out;
 }
 MotionClip decode_motion_asset(const std::vector<std::uint8_t>& data) {
     BinaryView v(data);
@@ -56,19 +60,47 @@ MotionClip decode_motion_asset(const std::vector<std::uint8_t>& data) {
     const auto attribute=v.u32(12);
     if(attribute!=0xffffffff){const auto at=v.relative(base,attribute,clip.frames*2);for(unsigned f=0;f<clip.frames;++f)clip.attributes.push_back(v.u16(at+f*2));}
     clip.positions.resize(count);clip.angles.resize(count);
+    // Die Keys hinter frm_num: das Original liest sie als naechste Woerter im
+    // MTN-Bytebild weiter (Motion.c:131). Angehaengt wird nur so viel, wie fuer
+    // JEDEN keyfuehrenden Kanal im selben Bereich liegt (gemeinsames Minimum,
+    // Grenze 8), damit alle Keyschlangen gleich lang bleiben. ee_f32, weil der
+    // Nachbarb lock kein gueltiger Keywert sein muss.
+    std::vector<std::size_t> position_extra(count,0), angle_extra(count,0);
+    std::size_t common_extra=8;
     for(std::size_t i=0;i<count;++i) {
         auto offset=v.u32(channels+i*8);
         if(offset!=0xffffffff) {
             const auto p=v.relative(base,offset,std::size_t(clip.frames)*12);
             auto& keys=clip.positions[i];keys.reserve(clip.frames);
             for(unsigned f=0;f<clip.frames;++f)keys.push_back({v.f32(p+f*12),v.f32(p+f*12+4),v.f32(p+f*12+8)});
+            const auto at=p+std::size_t(clip.frames)*12;
+            while(position_extra[i]<8&&v.has(at+position_extra[i]*12,12))++position_extra[i];
+            common_extra=std::min(common_extra,position_extra[i]);
         }
         offset=v.u32(channels+i*8+4);
         if(offset!=0xffffffff) {
             const auto p=v.relative(base,offset,std::size_t(clip.frames)*6);
             auto& keys=clip.angles[i];keys.reserve(clip.frames);
             for(unsigned f=0;f<clip.frames;++f)keys.push_back({v.u16(p+f*6),v.u16(p+f*6+2),v.u16(p+f*6+4)});
+            const auto at=p+std::size_t(clip.frames)*6;
+            while(angle_extra[i]<8&&v.has(at+angle_extra[i]*6,6))++angle_extra[i];
+            common_extra=std::min(common_extra,angle_extra[i]);
         }
+    }
+    if(common_extra) {
+        for(std::size_t i=0;i<count;++i) {
+            auto offset=v.u32(channels+i*8);
+            if(offset!=0xffffffff) {
+                const auto at=v.relative(base,offset,std::size_t(clip.frames)*12)+std::size_t(clip.frames)*12;
+                for(std::size_t k=0;k<common_extra;++k)clip.positions[i].push_back({v.ee_f32(at+k*12),v.ee_f32(at+k*12+4),v.ee_f32(at+k*12+8)});
+            }
+            offset=v.u32(channels+i*8+4);
+            if(offset!=0xffffffff) {
+                const auto at=v.relative(base,offset,std::size_t(clip.frames)*6)+std::size_t(clip.frames)*6;
+                for(std::size_t k=0;k<common_extra;++k)clip.angles[i].push_back({std::int32_t(v.u16(at+k*6)),std::int32_t(v.u16(at+k*6+2)),std::int32_t(v.u16(at+k*6+4))});
+            }
+        }
+        clip.tail_keys=unsigned(common_extra);
     }
     return clip;
 }

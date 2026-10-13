@@ -1925,7 +1925,7 @@ void recvx_en01_worm_mv01(RECVX_ENEMY_WORK* w)               /* :1350 */
 /* Gemeinsame Spielerbedingung von MV02 (:1584 und :1621). */
 static int sub_worm_player_free(const RECVX_ENEMY_PLAYER* pl)
 {
-    return !(pl->flg & 0x4u) && !(pl->flg & 0x2u) &&
+    return !(pl->flg & 0x4u) && !(pl->debug_attack_disabled || (pl->flg & 0x2u)) &&
            !(pl->stflg & 0x80000000u) && pl->hp >= 0;
 }
 

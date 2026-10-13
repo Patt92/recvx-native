@@ -102,6 +102,33 @@ def blocking_walls(walls, position, floor, flg, stflg, radius=3.5, height=16.5, 
     return hits
 
 
+def common_player_positions(path: Path, script: int):
+    """Common_controll 7 operands of one room script (event.c:12034-12066).
+
+    bhCommonCtr command 7 writes the one plp position: three unsigned shorts in
+    1/100 units, each negated when the matching bhCetask->bpx/bpy/bpz sign byte
+    of command 12 (event.c:12020-12032) is set.  The scan is bounded by the
+    script's own range in the Event_init offset table, so it reads the shipped
+    room rather than a remembered coordinate.
+    """
+    data = path.read_bytes()
+    base = struct.unpack_from('<I', data, 28)[0]
+    header = struct.unpack_from('<I', data, base)[0]
+    table = [struct.unpack_from('<I', data, base + p)[0] for p in range(8, header, 4)]
+    start = base + table[script]
+    end = base + (table[script + 1] if script + 1 < len(table) else header)
+    signs, out = (0, 0, 0), []
+    position = start
+    while position < end - 7:
+        if data[position] == 0x69 and data[position + 1] == 0x0C:
+            signs = tuple(data[position + 2:position + 5])
+        elif data[position] == 0x69 and data[position + 1] == 0x07:
+            axes = struct.unpack_from('<3H', data, position + 2)
+            out.append(tuple(value / 100.0 * (-1 if signs[i] else 1) for i, value in enumerate(axes)))
+        position += 1
+    return out
+
+
 def player_motion_sizes(path: Path):
     """Sizes of the motion slots of one SYSTEM/00xx player asset."""
     data = path.read_bytes()
@@ -177,7 +204,7 @@ def main():
         folder.mkdir(parents=True, exist_ok=True)
         mods = Path(temporary) / 'mods'  # deliberately absent: the shipped rooms only
 
-        def run(name, room, frames, replay=''):
+        def run(name, room, frames, replay='', spawn=None):
             state = folder / f'{name}.json'
             if state.exists():
                 raise SystemExit(f'{state} already exists; the runtime refuses to overwrite it')
@@ -187,6 +214,8 @@ def main():
                                 '--mods', str(mods), '--room', room, '--headless',
                                 '--in-game', '--frames', str(frames),
                                 '--replay', str(script), '--state', str(state)]
+            if spawn is not None:
+                command += ['--spawn', str(spawn)]
             done = subprocess.run(command, capture_output=True, text=True)
             if done.returncode:
                 raise SystemExit(f'{name}: runtime failed\n{done.stderr[-800:]}')
@@ -256,8 +285,14 @@ def main():
         print('interaction path (diagnostic placement)')
         # 0x280 = HOKAN | MTN_ATTR.  RECVX_STAIR_UNBOUND_HEADWORK (0x100) was part
         # of this set until B06 bound the head control; release_head_look now has
-        # a real owner, so the bit must no longer appear.  0x4 (EFFECT_OFF) only
-        # the dnd splash adds.
+        # a real owner, so the bit must no longer appear.  0x4 is VIBRATION,
+        # not EFFECT_OFF (0x2): dnd requests StartVibrationEx(0, 7) at
+        # player.c:3605, bound by runtime.cpp to VibrationUnit::start and
+        # sdfunc.c:3382-3403's option/event gate. Verify the request below.
+        # The separate splash branch needs sys->st_flg 0x40 (player.c:3607)
+        # and a water hit; it is not exercised by this dry RM_2050 replay.
+        # Its undefined matrix-tail offset remains diagnosed as 0x2 and is
+        # checked by tests/native/continuity_test.cpp's water fixture.
         # The end nodes below are the positions the original mechanisms produce
         # once the player work carries its planted foot:
         #   * kdu reaches its landing over bhFixPositionXYZ (player.c:3033 sets
@@ -272,21 +307,65 @@ def main():
         #     blocks - therefore land one motion frame earlier than the host
         #     used to report, which is the 0.03..0.48 unit difference here.
         cases = (
-            ('kdu', 'RM_0050.RDX', 3, '60 position -186 0 88 0\n61 confirm\n',
-             dict(mode2=14, floor=2, unsupported=0x280), (-170.6260, 8.0, 87.8682), 4),
-            ('kdd', 'RM_0050.RDX', 4, '60 position -183 8 85 0\n61 confirm\n',
-             dict(mode2=15, floor=0, unsupported=0x280), (-196.0960, 0.0, 85.0881), 4),
-            ('dnu', 'RM_2050.RDX', 7, '60 position 40 0 46 0\n61 confirm\n',
-             dict(mode2=16, floor=1, unsupported=0x280), (39.9974, 9.0, 41.1307), 0),
-            ('dnd', 'RM_2050.RDX', 9, '60 position 35 9 35 0\n61 confirm\n',
-             dict(mode2=17, floor=0, unsupported=0x284), (35.0, 0.0, 26.6055), 0))
+            # Startlagen 2026-10-13: bhControlPlayer prueft die Waende auch im Stehen
+            # (player.c:1600-1655). Die frueheren Diagnoselagen standen in Original-
+            # waenden und wurden vorher nur deshalb nicht verschoben: kdu (-186,0,88) in
+            # der Setzstufe ATR 47 (Typ 1, x -185.3..-183.3, mit ar ab -188.8), kdd
+            # (-183,8,85) in ATR 16 (Typ 1, Etage 2, x -181..-179, mit ar bis -175.5).
+            # Die Lagen unten sind die Kanten, an denen ein laufender Spieler steht; kdu
+            # landet damit bei -173.43, dem in AGENTS.md (2026-10-10) natuerlich
+            # erlaufenen Wert, und kdd haelt die Setzstufe ATR 47 bei -188.8.
+            ('kdu', 'RM_0050.RDX', 3, '60 position -188.8 0 88 0\n61 confirm\n',
+             dict(mode2=14, floor=2, unsupported=0x280), (-173.4260, 8.0, 87.8682), 4),
+            ('kdd', 'RM_0050.RDX', 4, '60 position -175.51 8 85 0\n61 confirm\n',
+             dict(mode2=15, floor=0, unsupported=0x280), (-188.8000, 0.0, 85.0881), 4),
+            #   * dnu starts west of the raised platform, facing +x (yaw 49152:
+            #     (ay + 8192) & ~0x3fff == 49152, so the 6-unit probe of
+            #     bhCheckExmAtari type 2 (hitchk.c:4735) lands at x 35.8 inside
+            #     ATR 7 inset by one unit, and the 9.1-high wall probe (:4742)
+            #     clears the floor-1 slab).  The former placement (40, 0, 46)
+            #     stood under that slab, ATR 24 (type 7, y 8..9) and inside the
+            #     step block ATR 23: bhControlPlayer's body pass (player.c:1600-
+            #     1655, bhCheckWallEx type 7 case) pushes a 16.5-high figure out
+            #     of there before bhCheckExmAtari ever runs (:1678), so the
+            #     original can never start the action from that spot; the host
+            #     only tolerated it while a standing player skipped the pass.
+            #     Landing: the step-edge limit walls of bhSetDansaLimitAtari
+            #     (hitchk.c:666, 2*ar thick around ATR 9) hold the foot at
+            #     x = 34 - 2.5*ar + 2*ar + ar = 35.75; the lateral node offset
+            #     (-0.0026) is the same motion delta as before.
+            ('dnu', 'RM_2050.RDX', 7, '60 position 29.8 0 46 49152\n61 confirm\n',
+             dict(mode2=16, floor=1, unsupported=0x280), (35.75, 9.0, 45.9974), 0),
+            #   * dnd: (35, 9, 35) stand im Eckpfosten ATR 27 (Typ 5, 34..38/34..38,
+            #     Etage 1); der Koerperpass schob ihn nach (39.5, 39.5), wo die 4.5er-Sonde
+            #     noch in ATR 9 liegt und das Original dnd nicht startet (hitchk.c danf).
+            #     (45, 9, 36) blickt von der -z-Kante herunter. Die Landung 21.75 haelt
+            #     anschliessend die Stufenkanten-Begrenzung aus dan_ap
+            #     (bhSetDansaLimitAtari, hitchk.c:666): spx +5.86, act_std zieht 0.9 davon nach.
+            ('dnd', 'RM_2050.RDX', 9, '60 position 45 9 36 0\n61 confirm\n',
+             dict(mode2=17, floor=0, unsupported=0x280), (45.0, 0.0, 27.0199), 0))
         areas = {room: atr_entries(args.data / 'rooms' / room)
                  for room in ('RM_0050.RDT', 'RM_2050.RDT')}
         for name, room, index, replay, expect, end, depth in cases:
             area = areas[room.replace('.RDX', '.RDT')][index]
             check(area['type'] in (1, 2), f'{name} uses the ATR record {index} of {room}')
             close(area['parameters'][2], depth, 0, f'{name} area depth parameter')
-            state = summary(run(f'{name}', room, 140, replay))
+            result = run(f'{name}', room, 140, replay)
+            state = summary(result)
+            if name == 'dnd':
+                # Positive binding proof, not just deletion of an unbound bit:
+                # player.c:3605 -> runtime's (type 0, pattern 7) callback ->
+                # VibrationUnit::start. No controller is present headless, so
+                # StartVibrationBasic still counts the request, not a motor start
+                # (sdfunc.c:3386, vibman.c:58). This room has no other request.
+                check(result['vibration_requests'] == 1,
+                      'dnd delivers its one StartVibrationEx(0, 7) request to the native unit')
+                check(not (state['st_flg'] & 0x40),
+                      'the dry dnd replay does not enter the conditional water-splash branch')
+            # runtime.cpp writes "stairs": null until bhCheckExmAtari started an
+            # action (stairs.active || stairs.mode2); a missing key means the
+            # replay placement never reached the original trigger.
+            check('active' in state, f'{name} started its stair action (--state stairs is not null)')
             check(not state['active'] and state['motion'] == 42,
                   f'{name} finished and released the player')
             check(state['mode2'] == expect['mode2'], f'{name} ran the original action {expect["mode2"]}')
@@ -300,12 +379,12 @@ def main():
         # --- no teleport --------------------------------------------------
         print('release frame is an ordinary step (RM_2050 dnd)')
         trace = {frames: summary(run(f'dnd-{frames}', 'RM_2050.RDX', frames,
-                                     '60 position 35 9 35 0\n61 confirm\n'))
+                                     '60 position 45 9 36 0\n61 confirm\n'))
                  for frames in (86, 88, 90)}
-        check(trace[86]['active'] and trace[86]['actor'] == [35, 9, 35],
+        check(trace[86]['active'] and trace[86]['actor'] == [45, 9, 36],
               'the work position holds the start height for the whole descent')
         check(not trace[88]['active'], 'the release frame ends the action')
-        close(trace[88]['actor'][2], 26.6055, 0.001, 'the release frame moves the player by the node')
+        close(trace[88]['actor'][2], 21.75, 0.001, 'the release frame moves the player by the node')
         check(trace[90]['camera_pose'][:3] != trace[88]['camera_pose'][:3],
               'the follow camera switches after the floor change, not with the release')
 
@@ -336,6 +415,56 @@ def main():
               'the figure walks on along the upper walkway instead of being pushed back')
         check(walking[180]['camera_pose'][:3] != landed['camera_pose'][:3],
               'the follow camera tracks the figure on the upper floor')
+
+        # --- the scripted first descent of RM_0050 ------------------------
+        # Reported symptom: coming back through the upper door and walking down
+        # the staircase left the figure hanging in the middle of it, unable to
+        # move in either direction.  The first use of the upper stair area is
+        # not the kdd action at all: Event_init turns ATR 4 into a type-3 area
+        # (bhEtcAtariSet2, event.c:2893), so bhCheckExmAtari's cb_flg 0x100 plus
+        # etc_idx 4 starts the room's own scene (bhEvtOn of events 5/6/7), which
+        # stages the figure with Common_controll 7, walks it down with its own
+        # motion and step sounds, restores ATR 4 to type 1 and hands control
+        # back with bhPlCtr 0x80.  The two Common_controll 7 operands are read
+        # from the room file, not remembered.
+        print('scripted first descent (RM_0050, natural walk from the upper door)')
+        staging, release = common_player_positions(args.data / 'rooms' / 'RM_0050.RDT', 5)
+        descend = (ROOT / 'tests/native/replays/stairs-rm0050-descend.txt').read_text()
+        scene = run('rm0050-scene', 'RM_0050.RDX', 150, descend, spawn=2)
+        check(scene['player_scripted'] and 5 in scene['events'] and 7 in scene['events'],
+              'walking to the stair head starts the original scene')
+        for axis, target in enumerate(staging):
+            close(scene['actor'][axis], target, 0.001, 'the scene stages the figure at its own node')
+        # bhPlCtr 0x80 gives the player back before the task's own tail (a 60
+        # frame wait, then bhWalAtariSet re-enables wall 31 and bhEvtEnd), so the
+        # release is checked on the player, the task end one run later.
+        done = run('rm0050-released', 'RM_0050.RDX', 300, descend, spawn=2)
+        check(not done['player_scripted'] and not done['cinematic'] and done['event_camera'] == -1,
+              'the scene ends and hands control back')
+        check(not done['blocked_commands'], 'the scene leaves no blocked event command')
+        # Freigabe (2026-10-13 nachgemessen): das Szenenskript schaltet mit Common 23 (0)
+        # flg 0x118 ab (event.c:11971, Offset 18) und erst im Freigabeblock wieder ein
+        # (Offset 252, direkt vor bhPlCtr 0x80). Solange flg 0x10 fehlt, schreibt der
+        # Koerperteil kein spx (player.c:1600-1653). bhPlCtr 0x80 setzt mode3 0
+        # (event.c:9632), bhCPM2_act_std case 0 rechnet spxn = 0.3*(spx-px) gegen das spx
+        # von vor der Szene (player.c:2127) und zieht die Figur dreimal nach; die
+        # Setzstufe ATR 47 (Typ 1, px -185.3) haelt sie an ihrer Kante px - ar.
+        riser = next(w for w in walls if w['index'] == 47)
+        close(done['actor'][0], riser['position'][0] - 3.5, 0.001,
+              'act_std settles the released figure against the riser ATR 47')
+        close(done['actor'][1], release[1], 0.001, 'the release stays on the lower floor')
+        check(release[2] - 3.5 < done['actor'][2] < release[2],
+              'the settle moves from the scene node towards the pre-scene spx')
+        trapped = blocking_walls(walls, done['actor'], 0,
+                                 done['work_flags'][13], done['work_flags'][14])
+        check(not trapped, f'the release position is clear of the stair walls (ATR {trapped})')
+        away = {frames: run(f'rm0050-away-{frames}', 'RM_0050.RDX', frames, descend, spawn=2)
+                for frames in (440, 540)}
+        check(not away[440]['event_tasks'], 'the scene task has ended')
+        check(away[440]['actor'][0] < done['actor'][0] - 5,
+              'the figure walks off the stair foot instead of hanging in the staircase')
+        check(away[540]['actor'][0] < away[440]['actor'][0] - 20,
+              'it keeps walking away under its own control')
 
     print()
     if failures:

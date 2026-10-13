@@ -353,6 +353,7 @@ static int cb_search_near_enemy(RECVX_COMBAT_CORE* c, int32_t* r, float* h, int3
     float er, ln, nr = 0, ah = *h, epx = 0, epz = 0;
     int32_t ar = *r, idx = -1; uint32_t i;
     NJS_MATRIX mt;
+    c->res.near_calls++;
     if (ar == 0) ar = 32768;
     vc1.x = 0; vc1.y = 0; vc1.z = -1.0f;
     njUnitMatrix(&mt);
@@ -366,7 +367,9 @@ static int cb_search_near_enemy(RECVX_COMBAT_CORE* c, int32_t* r, float* h, int3
     if (!t) return 0;
     for (i = 0; i < t->ewk_n; i++) {
         RECVX_ENEMY_WORK* e = t->slot[i];
-        if (!e || !cb_targetable(e)) continue;
+        if (!e) continue;
+        c->res.near_seen++;
+        if (!cb_targetable(e)) { c->res.near_filter++; continue; }
         cb_watr_center(e, &cap.c2);
         vc1.x = c->player.px - cap.c2.x;
         vc1.y = cap.c1.y - cap.c2.y;
@@ -374,12 +377,23 @@ static int cb_search_near_enemy(RECVX_COMBAT_CORE* c, int32_t* r, float* h, int3
         ln = cb_scalor(&vc1);
         vc1.y = 0;
         cb_unit(&vc1);
-        if (cb_inner(&vc0, &vc1) < er && cb_c2_wall_n(c, &cap, 0x40000400) == 0
-            && (ln < nr || nr == 0)) {
+        if (cb_inner(&vc0, &vc1) >= er) { c->res.near_cone++; continue; }
+        {
+            if (cb_c2_wall_n(c, &cap, 0x40000400) != 0) {
+                c->res.near_wall++;
+                if (c->res.near_wall_probe_n < 3) {
+                    float* p = c->res.near_wall_probe[c->res.near_wall_probe_n++];
+                    p[0] = cap.c1.y; p[1] = cap.c2.y; p[2] = ln; p[3] = c->player.py;
+                }
+                continue;
+            }
+        }
+        if (ln < nr || nr == 0) {
             epx = cap.c2.x; epz = cap.c2.z; nr = ln; idx = (int32_t)i;
         }
     }
     if (idx != -1) {
+        c->res.near_found++;
         RECVX_ENEMY_WORK* e = t->slot[idx];
         *id = idx;
         /* pp == plp: der Spielerkampf setzt stflg 0x800 immer (pwksub.c:296) */
@@ -899,7 +913,9 @@ static int cb_check_gun_atari(RECVX_COMBAT_CORE* c, CB_GA* g) {
         RECVX_ENEMY_WORK* e = t->slot[i];
         int contact = 0; int32_t kno = -1;
         RECVX_CB_CAPSULE ewatr;
-        if (!e || !cb_hittable_gun(e)) continue;
+        if (!e) continue;
+        c->res.gun_seen++;
+        if (!cb_hittable_gun(e)) { c->res.gun_filter++; continue; }
         cb_watr_center(e, &ap);
         ewatr.c1.x = e->watr.c1.x; ewatr.c1.y = e->watr.c1.y; ewatr.c1.z = e->watr.c1.z;
         ewatr.c2.x = e->watr.c2.x; ewatr.c2.y = e->watr.c2.y; ewatr.c2.z = e->watr.c2.z;

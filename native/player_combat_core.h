@@ -267,6 +267,20 @@ typedef struct {
     uint32_t reloads;      /* Eintritte in mode2 70 (bhCPM2_act_rld)            */
     uint32_t gun_atari;    /* bhCheckGunAtari-Aufrufe                           */
     uint32_t knife_wall;   /* Messer an der Wand (weapon.c:1086-1089)           */
+    /* Zielaufschaltung: Gruende, warum die Suche keinen Gegner liefert.
+       Reine Zaehler, keine andere Semantik. */
+    uint32_t near_calls;   /* bhSearchNearEnemy-Aufrufe                        */
+    uint32_t near_seen;    /* belegte Tabellenplaetze im Durchlauf            */
+    uint32_t near_filter;  /* am Zielbarkeitsfilter verworfen                 */
+    uint32_t near_cone;    /* ausserhalb des Sichtkegels                      */
+    uint32_t near_wall;    /* von bhCheckC2WallN verdeckt                     */
+    uint32_t near_found;   /* Aufschaltungen                                  */
+    uint32_t gun_seen;     /* belegte Tabellenplaetze in bhCheckGunAtari      */
+    uint32_t gun_filter;   /* am Trefferfilter (flg 0x1/0x20) verworfen       */
+    /* Geometrie der drei zuletzt von bhCheckC2WallN verworfenen Sonden:
+       c1.y, c2.y, Entfernung der Wand, Laenge der Sonde. */
+    float    near_wall_probe[3][4];
+    uint32_t near_wall_probe_n;
     /* Zustand nach dem Pass, zur Pruefung der Originalfolgen. */
     uint8_t  mode1, mode2, mode3;
     uint32_t at_flg, flg, stflg;

@@ -9,7 +9,10 @@
 #include <string>
 #include <vector>
 namespace recvx {
-enum class Action {Forward,Back,TurnLeft,TurnRight,Run,Inventory,Confirm,Cancel,Up,Down,Left,Right,Skip,Pause,Quit,Wireframe,Aim,Attack,NextTarget,Count};
+// Select: the PS2 SELECT button (pad.c pad_tab_a[16] = NJS_PERIPHERAL 0x100 ->
+// sys->pad_ps 0x10000). It is the only button that requests the cinematic skip
+// (system.c:545 bhSysCallGame). Skip stays the host video skip / pause release.
+enum class Action {Forward,Back,TurnLeft,TurnRight,Run,Inventory,Confirm,Cancel,Up,Down,Left,Right,Skip,Pause,Quit,Wireframe,Aim,Attack,NextTarget,Select,Count};
 constexpr unsigned action_count=unsigned(Action::Count);
 struct InputFrame {
     bool gamepad_input=false;
@@ -61,12 +64,18 @@ private:
 class GameplayInput {
 public:
     GameplayInput(Inventory& inventory,StatusMenu& menu,MessageDialog& dialog,EventVm* events):inventory_(inventory),menu_(menu),dialog_(dialog),events_(events){}
-    void menu_input(MenuInput key);
+    // `repeat`: das Ereignis stammt aus der Host-Tastenwiederholung (InputFrame::repeat),
+    // nicht aus einer echten Druckflanke. Die Originalroutinen entscheiden selbst, ob sie
+    // eine Wiederholung kennen: der Statusbildschirm/die Kiste zaehlen dafuer eigene
+    // Wartezaehler auf sys->pad_on (sub1.c CursorMove/ItemBox keywait/boxwait), waehrend
+    // bhControlMessage (message.c:269-285) ausschliesslich die Flanke sys->pad_ps liest.
+    void menu_input(MenuInput key,bool repeat=false);
     std::function<void(unsigned)> sound;
     std::function<bool(MenuInput)> modal_input;
     std::function<bool(const InputFrame&)> frame_input; // raw-pad task (computer terminal); true = frame consumed
     void synchronize(); // Consume script-owned UI requests before movement.
     bool apply(const InputFrame& frame); // true means an explicit quit action
+    // confirm_transition: bewusste Host-Abweichung (Tuer-Skip, siehe doors.h).
     std::function<void()> interact,confirm_transition;
     std::function<bool()> transition_active,video_active;
     std::function<void()> skip_video;

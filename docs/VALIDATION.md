@@ -161,3 +161,24 @@ Start.command (headless und Standardlauf mit SDL-Dummy); Backup
 archived/releases/enemy-ai-dogs-before-20261012-204915. Windows x64 crossgebaut
 (64db1186…0c06), Policy mit Builddir PASS, nicht ausgeführt. Logs:
 build/validation/enemy-ai-20261012/dogs.
+
+## Alpha-Domäne der Texturen, Punkt 1 des Transparenzplans (2026-10-13 nachts)
+Eine Host-Domäne für Textur-Alpha (0..255, Faktor alpha/255 = originales As/128): Dekoder
+ohne Ps2AlphaIsHalf-Halbierung, `write_tga` ohne ×2 (Export/Import verlustfrei), Renderer
+mit einem Teiler für alle Blendarten, die vier handgeschriebenen ×2-Verdopplungen in
+ui/computer/world entfernt. Details: work/native_port_alpha_domain.result.md.
+CTest 79/81 in build/alphadomain-claude-20261013; rot `script_motion` (vorbestehend, mit
+dem Binary von 22:00 in build/mapinput-claude-20261013 mit identischer Meldung belegt) und
+`original_map_render` (neue, unfertige Parallelarbeit der Kartensitzung: 11 Füllungen statt
+1, 0 Objekte, Licht 0 — keiner der Fehlschläge auf dem geänderten Pfad). Neuer Fall
+`chunk_blend_test` (TGA-Alpha 0x80 → halbe Mischung) mit Gegenprobe gegen eine Kopie des
+Renderers mit dem alten Teiler. verify_detector/-lighter/-scanner/-computer/-frontend/
+-progression/-pickups/-events/-doors/-stairs/-combat/-snapshot/-continuity/-fog PASS,
+Raumscan 205/205 lädt/0 blockiert, check_no_original_core PASS.
+Dev-App über tools/build_native.py aktualisiert (build/macos-arm64, arm64-only, signiert und
+verifiziert, SHA256 a55478ed…23d6); Smoke mit den App-Optionen inklusive `--mods` (HD-Paket)
+über SDL-Dummy: 30 presents, kein Fehler. Bildvergleich RM_0090 Kamera 1/2 mit und ohne
+HD-Paket: dieselbe Änderung (776 bzw. 242 Pixel Delta ≥ 8). Backup
+archived/releases/alpha-domain-before-20261013-224118; die Dev-App selbst behält den
+vorherigen Stand unter build/start/macos-arm64/.previous-*. Der Build enthält den
+Arbeitsstand der parallelen Karten-/Schatten-/Fog-Sitzungen. Kein Paket, kein Commit/Push.

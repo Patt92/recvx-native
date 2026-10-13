@@ -15,7 +15,16 @@ int main(int argc,char** argv){try{
     const auto path=std::filesystem::temp_directory_path()/("recvx-frontend-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".ini");auto config=InputConfig::defaults();config.save(path);InputManager devices(config);Frontend front(config,path);front.changed=[&](const InputConfig& value){devices.configure(value);};
     auto event=[&](const SDL_Event& e){devices.event(e);front.event(e);};auto tick=[&]{return front.apply(devices.tick());};
     auto press=[&](SDL_Scancode code){event(key(code,true));const auto result=tick();event(key(code,false));tick();return result;};
-    check(front.active()&&!front.settings(),"default main menu missing");press(SDL_SCANCODE_DOWN);press(SDL_SCANCODE_RETURN);check(front.settings()&&!front.gamepad_page(),"keyboard settings inaccessible");
+    // adv.c Adv_BioCvTitle: Mode 0..3, 30-frame fade (GetSamurai(50)), PRESS START (Mode 6), Start -> plate fade -> Mode 9 with Cursor 1 (NEW GAME; LOAD GAME needs a memory card).
+    auto settle=[&](int mode){for(int i=0;i<400&&front.mode()!=mode;++i)tick();check(front.mode()==mode,"title mode not reached");};
+    check(front.active()&&!front.settings()&&front.title()&&front.mode()==0,"title task does not start at Mode 0");
+    settle(4);check(front.fade()>0.9f,"Mode 3 fade-in not requested");settle(6);check(front.press_start()&&front.flush()==0.f,"PRESS START plate missing");
+    press(SDL_SCANCODE_RETURN);check(front.mode()==7,"Start does not leave the PRESS START plate");settle(9);check(front.cursor()==Frontend::new_game_cursor&&front.menu_ready(),"game-mode plate cursor not on NEW GAME");
+    press(SDL_SCANCODE_UP);check(front.cursor()==Frontend::new_game_cursor,"LOAD GAME selectable without memory card");
+    for(int i=0;i<4;++i)press(SDL_SCANCODE_DOWN);check(front.cursor()==Frontend::quit_row,"cursor does not clamp on the QUIT row");
+    press(SDL_SCANCODE_ESCAPE);check(front.mode()==10,"Cancel does not fade the plate out");settle(6);check(front.press_start(),"Cancel does not return to PRESS START");
+    press(SDL_SCANCODE_RETURN);settle(9);check(front.cursor()==Frontend::quit_row,"Cursor[0] must persist across Cancel");press(SDL_SCANCODE_UP);check(front.cursor()==Frontend::option_cursor,"OPTION row");press(SDL_SCANCODE_RETURN);check(front.mode()==17&&!front.starting(),"OPTION does not start the leave fade");
+    for(int i=0;i<400&&!front.settings();++i)tick();check(front.settings()&&!front.gamepad_page(),"keyboard settings inaccessible");
     for(unsigned i=0;i<12;++i)front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.capturing(),"keyboard rebinding not armed");press(SDL_SCANCODE_F9);
     check(!front.capturing()&&config.describe(Action::Skip,false)=="F9"&&config.describe(Action::Skip,true)=="Start/Options","keyboard rebind changed wrong device");
     check(InputConfig::read(path).describe(Action::Skip,false)=="F9","keyboard rebind not persistent");
@@ -35,7 +44,18 @@ int main(int argc,char** argv){try{
     // Cancel capture must not also exit the settings page.
     for(unsigned i=0;i<4;++i)front.input(MenuInput::Up);front.input(MenuInput::Confirm);press(SDL_SCANCODE_ESCAPE);check(front.settings()&&!front.capturing(),"capture cancel exits settings");
     for(unsigned i=action_count-3;i<action_count+2;++i)front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(config.describe(Action::Confirm,false)=="Enter"&&config.describe(Action::Confirm,true)=="A","default restoration failed");
-    press(SDL_SCANCODE_ESCAPE);check(front.active()&&!front.settings(),"Escape quits instead of returning to main menu");press(SDL_SCANCODE_UP);check(press(SDL_SCANCODE_RETURN)==FrontendCommand::TitleCall&&front.starting(),"new game must start the title call");{FrontendCommand r=FrontendCommand::None;for(int i=0;i<200&&r!=FrontendCommand::NewGame;++i)r=tick();check(r==FrontendCommand::NewGame&&!front.active(),"new game command missing after title fade");}
+    press(SDL_SCANCODE_ESCAPE);check(front.active()&&!front.settings()&&front.title()&&front.mode()<=1,"Escape quits instead of returning to the title (Mode 0, FromTitle 2)"); // the key-up tick already ran Mode 0
+    settle(9);check(front.cursor()==Frontend::option_cursor,"cursor not on OPTION after leaving the option screen");press(SDL_SCANCODE_UP);check(front.cursor()==Frontend::new_game_cursor,"NEW GAME row");
+    check(press(SDL_SCANCODE_RETURN)==FrontendCommand::TitleCall&&front.starting(),"new game must start the title call");{FrontendCommand r=FrontendCommand::None;for(int i=0;i<200&&r!=FrontendCommand::NewGame;++i)r=tick();check(r==FrontendCommand::NewGame&&!front.active(),"new game command missing after title fade");}
+    {// Host QUIT row: SE 3, the OPTION leave fade, then FrontendCommand::Quit; the attract timer re-initialises the title (demo not ported).
+        auto quit_config=InputConfig::defaults();Frontend quit(quit_config,path);unsigned sounds=0,last=99;quit.sound=[&](unsigned id){++sounds;last=id;};
+        auto settle_quit=[&](int mode){for(int i=0;i<400&&quit.mode()!=mode;++i)quit.apply({});check(quit.mode()==mode,"quit title mode");};
+        settle_quit(6);quit.input(MenuInput::Confirm);quit.apply({});check(last==3&&sounds==1,"CheckStartButton SE 3");settle_quit(9);
+        for(int i=0;i<2;++i){quit.input(MenuInput::Down);quit.apply({});}check(quit.cursor()==Frontend::quit_row&&last==2,"QUIT row / cursor SE 2");
+        quit.input(MenuInput::Confirm);check(quit.apply({})==FrontendCommand::None&&quit.mode()==17&&last==3,"QUIT leave fade");
+        FrontendCommand r=FrontendCommand::None;unsigned ticks=0;for(;ticks<100&&r==FrontendCommand::None;++ticks)r=quit.apply({});check(r==FrontendCommand::Quit&&ticks>=30&&ticks<=31,"QUIT command after GetSamurai(50) = 30 frames");
+        Frontend attract(quit_config,path);for(int i=0;i<400&&attract.mode()!=6;++i)attract.apply({});for(int i=0;i<1000&&attract.attract_count()==0;++i)attract.apply({});
+        check(attract.attract_count()==1&&attract.title()&&attract.mode()<=1,"900-frame attract timer does not re-initialise the title");}
     SDL_JoystickClose(joystick);SDL_JoystickDetachVirtual(index);std::filesystem::remove(path);
     // Video routing must work even without the event cinematic-skip flag.
     Inventory inventory;StatusMenu menu;MessageDialog dialog;GameplayInput gameplay(inventory,menu,dialog,nullptr);bool video=true;unsigned skips=0;gameplay.video_active=[&]{return video;};gameplay.skip_video=[&]{video=false;++skips;};InputFrame frame;frame.pressed[unsigned(Action::Confirm)]=true;
@@ -71,11 +91,13 @@ int main(int argc,char** argv){try{
         std::cout<<"Original running film skipped by OK/Skip; audio stopped and original cell hint restored.\n";
     }
     {// adv.c TitleCall/Mode 17: New Game starts the voice and a 138-frame fade; buttons are ignored until black.
-        auto title_config=InputConfig::defaults();Frontend title(title_config,path);
-        check(title.input(MenuInput::Confirm)==FrontendCommand::TitleCall&&title.starting()&&title.active(),"New Game must start TitleCall");
-        check(title.input(MenuInput::Cancel)==FrontendCommand::None&&title.starting(),"title fade accepted input");
-        unsigned ticks=0;FrontendCommand result=FrontendCommand::None;while(result==FrontendCommand::None&&ticks<400){result=title.apply({});++ticks;}
+        auto title_config=InputConfig::defaults();auto to_new_game=[&](Frontend& t){for(int i=0;i<400&&t.mode()!=6;++i)t.apply({});t.input(MenuInput::Confirm);for(int i=0;i<400&&t.mode()!=9;++i)t.apply({});check(t.cursor()==Frontend::new_game_cursor,"NEW GAME cursor");t.input(MenuInput::Confirm);return t.apply({});};
+        Frontend title(title_config,path);unsigned vibrations=0;title.vibrate=[&](unsigned pattern){vibrations+=pattern;};
+        check(to_new_game(title)==FrontendCommand::TitleCall&&title.starting()&&title.active()&&vibrations==16,"New Game must start TitleCall (StartVibrationEx 16)");
+        title.input(MenuInput::Cancel);check(title.apply({})==FrontendCommand::None&&title.starting(),"title fade accepted input");
+        unsigned ticks=1;FrontendCommand result=FrontendCommand::None;while(result==FrontendCommand::None&&ticks<400){result=title.apply({});++ticks;}
         check(result==FrontendCommand::NewGame&&ticks==139&&!title.active(),"title fade length differs from GetSamurai(430)"); // float32 sum of 1/138 reaches 1 after 139 frames
-        Frontend flash(title_config,path);flash.input(MenuInput::Confirm);for(int i=0;i<60;++i)flash.apply({});check(flash.flush()==0&&flash.fade()>.4f&&flash.fade()<.45f,"FlushCount/fade rate per frame");}
+        Frontend flash(title_config,path);to_new_game(flash);for(int i=0;i<60;++i)flash.apply({});check(flash.flush()==0&&flash.fade()>.4f&&flash.fade()<.45f,"FlushCount/fade rate per frame");
+        Frontend shortcut(title_config,path);const auto commands=shortcut.replay_new_game();check(commands.size()==2&&commands[0]==FrontendCommand::TitleCall&&commands[1]==FrontendCommand::NewGame&&!shortcut.active(),"replay new_game shortcut");}
     std::cout<<"Main menu, keyboard/controller settings, live rebinding, persistence and video routing passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<" SDL: "<<SDL_GetError()<<'\n';return 1;}}

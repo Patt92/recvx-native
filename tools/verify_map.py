@@ -43,6 +43,48 @@ REPLAY = f'''0 debug_key F2
 # danach wieder geoeffneten Statusbildschirm sofort schliessen, system.c case 6.
 CLOSE = '240 cancel\n'
 
+# Waehrend der Kartentask laeuft, setzt sub1.c:3141 st_flg 0x40000 und
+# bhCheckSubTask (system.c:561, Maske 0x1C040008) sperrt Statusbildschirm und
+# Interaktion; nur MapPadMain liest das Pad. Inventar/OK duerfen also nichts
+# oeffnen oder ausloesen, die Karte bleibt offen.
+LOCKED = '150 inventory\n160 confirm\n170 up\n'
+ST_FLG_MAP = 0x40000
+
+
+def read_bmp(path):
+    """24-bit bottom-up BMP (SoftwareRenderer::save_bmp) -> (width, height, pixel(x, y) -> (r, g, b))."""
+    data = path.read_bytes()
+    assert data[:2] == b'BM', 'not a BMP'
+    offset = int.from_bytes(data[10:14], 'little')
+    width = int.from_bytes(data[18:22], 'little')
+    height = int.from_bytes(data[22:26], 'little')
+    row = (width * 3 + 3) & ~3
+    def pixel(x, y):
+        at = offset + (height - 1 - y) * row + x * 3
+        return data[at + 2], data[at + 1], data[at]
+    return width, height, pixel
+
+
+# map.c MapCol[0] 0xFF000800 (background fill) and MapCol[1] 0xFF003000 (grid).
+BACKGROUND = (0x00, 0x08, 0x00)
+GRID = (0x00, 0x30, 0x00)
+
+
+def check_picture(name, folder):
+    width, height, pixel = read_bmp(folder / f'{name}.bmp')
+    assert (width, height) == (640, 480), (width, height)
+    assert pixel(5, 5) == BACKGROUND, ('background fill missing at 5,5', pixel(5, 5))
+    # MapDrawLine on 0.5 + floor(x): rows 0,32,.. and columns 16,48,.. carry MapCol[1].
+    assert pixel(100, 32) == GRID and pixel(100, 33) == BACKGROUND, ('grid row 32', pixel(100, 32), pixel(100, 33))
+    assert pixel(16, 100) == GRID and pixel(17, 100) == BACKGROUND, ('grid column 16', pixel(16, 100), pixel(17, 100))
+    foreground = sum(1 for y in range(0, 480, 2) for x in range(0, 640, 2)
+                     if pixel(x, y) not in (BACKGROUND, GRID))
+    assert foreground > 500, ('the map picture shows only grid and background', foreground)
+    # FsubModeMessage: X button sprite (24x24 around 464,441) from the map texture.
+    button = sum(1 for y in range(429, 453) for x in range(452, 476) if pixel(x, y) not in (BACKGROUND, GRID))
+    assert button > 0, 'mode message sprite missing at 464,441'
+    return foreground
+
 
 def run(runtime, data, folder, name, room, frames, replay):
     (folder / f'{name}.txt').write_text(replay)
@@ -89,27 +131,59 @@ def check(runtime, data, folder):
                          'check stage/floor selection before claiming the screen works')
     assert screen['tags'], 'no room tags were entered (MapTagEntry)'
     assert screen['mode'] in (7, 8), ('map not in a view mode', screen['mode'])
+    assert opened['work_flags'][5] & ST_FLG_MAP, 'MAP from the status bar did not set st_flg 0x40000 (sub1.c:3141)'
+    # Teil B: the draw list reached the renderer and the frame shows the map.
+    rendered = screen['rendered']
+    assert screen['initialized'], 'map task not initialised while active'
+    assert rendered['fills'] >= 1 and rendered['lines'] >= 30, ('background/grid not rendered', rendered)
+    assert rendered['objects'] > 0 and rendered['objects_without_model'] == 0, ('floor objects not rendered', rendered)
+    assert rendered['sprites'] >= 2 and rendered['sprites_without_texture'] == 0, ('sprites not rendered', rendered)
+    assert rendered['markers_without_model'] == 0 and rendered['compass'] == 1, ('markers/compass', rendered)
+    assert rendered['marker_models'] == 4 and rendered['map_textures'] >= 1, ('index resources', rendered)
+    foreground = check_picture('status-map', folder)
 
-    # 2. Closing returns to the status menu and releases gm_flg 0x80000.
+    # 2. Input lock while the map task owns the screen (bhCheckSubTask gate).
+    locked = run(runtime, data, folder, 'status-map-locked', 'RM_0020.RDX', 240, REPLAY + LOCKED)
+    lock_screen = require_binding(locked, 'status-map-locked')
+    assert lock_screen['active'], 'inventory/OK during the map closed the map task'
+    assert not locked['inventory_open'], 'the status screen opened over the running map'
+    assert not locked['dialog_open'], 'OK during the map reached an interaction'
+    assert locked['events'] == opened['events'], ('OK during the map dispatched events', locked['events'])
+
+    # 3. Closing returns to the status menu and releases gm_flg 0x80000 and st_flg 0x40000.
     closed = run(runtime, data, folder, 'status-map-close', 'RM_0020.RDX', 320, REPLAY + CLOSE)
     after = require_binding(closed, 'status-map-close')
     assert not after['active'], 'the map screen did not close'
     assert not (closed["work_flags"][11] & 0x80000), 'gm_flg 0x80000 was not released'
+    assert not (closed["work_flags"][5] & ST_FLG_MAP), 'st_flg 0x40000 was not released (system.c:886)'
     assert closed['inventory_open'], 'closing the map did not return to the status menu'
+    # bhSetScreenFade(0xFF000000, 8) on exit (map.c:540) ran to black before FtskMapExit
+    # released the task; the status screen holds it undrawn (system.c:921 draws only
+    # on its own exit).
+    assert closed['screen_fade']['an'] == 255 and not closed['screen_fade']['running'], ('exit fade', closed['screen_fade'])
 
-    # 3. Event entry: the room that hands out a map (RM_0060, it_flg 133).
+    # 3b. Leaving the status screen afterwards: bhSetScreenFade(fade_pbk, 3) with
+    #     fade_pbk 0 (system.c:921) clears the black over the game picture.
+    returned = run(runtime, data, folder, 'status-map-return', 'RM_0020.RDX', 360, REPLAY + CLOSE + '290 cancel\n300 cancel\n')
+    assert not returned['inventory_open'] and not returned['map']['active'], 'status screen did not close after the map'
+    assert returned['screen_fade']['an'] == 0 and not returned['screen_fade']['running'], ('return fade', returned['screen_fade'])
+    _, _, pixel = read_bmp(folder / 'status-map-return.bmp')
+    assert any(pixel(x, y) != (0, 0, 0) for y in range(0, 480, 16) for x in range(0, 640, 16)), 'game picture stayed black after the map'
+
+    # 4. Event entry: the room that hands out a map (RM_0060, it_flg 133).
     #    Entered through the room's own script, not by forcing the task.
     event = run(runtime, data, folder, 'event-map', 'RM_0060.RDX', 400, REPLAY)
     assert not event['blocked_commands'], ('blocked event commands', event['event_tasks'])
     print('map screen verified:',
-          f"mode {screen['mode']}, {len(screen['tags'])} tags, {screen['draws']} draw calls")
+          f"mode {screen['mode']}, {len(screen['tags'])} tags, {screen['draws']} draw calls, "
+          f"{rendered['objects']} floor objects, {rendered['sprites']} sprites, {foreground} foreground samples")
     return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--runtime', type=Path, default=ROOT / 'build/d10-map/recvx-runtime')
+    parser.add_argument('--runtime', type=Path, default=ROOT / 'build/macos-arm64/recvx-runtime')
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--out', type=Path, help='keep logs, state and screenshots here')
     arguments = parser.parse_args()

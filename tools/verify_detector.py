@@ -7,10 +7,12 @@ playthrough or a physical-controller test.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 
+from verify_events import assert_camera_still, assert_no_camera_jump, camera_trace
 from verify_progression import REPLAY as BOX_REPLAY
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,12 +92,31 @@ def check(runtime, data, folder):
     lamps(repeat, True)
     assert repeat['event_sound_active'][4], 'alarm cannot retrigger'
     assert repeat['audio_played'].count('MULTSPQ1/0013/2/seq2/prog2') == 2, 'repeat alarm request'
+    # Roller shutter camera path.  RM_0090's event cameras are all single-key
+    # tracks (keyf_n 1, nxt_no 0, lkflg 0), so bhControlEventCamera holds each
+    # shot exactly on its CAM_KEYF_WORK values: key 0 of a one-key track fills
+    # all 20 control slots (cut.c:1960-1980), so the spline cannot move.  Event 6
+    # cuts to track 0 and then to track 4 while the shutter runs.
+    traced = folder / 'shutter-camera'
+    with (folder / 'shutter-camera.log').open('w') as log:
+        trace = subprocess.run([str(runtime.resolve()), '--data', str(data.resolve()),
+            '--headless', '--in-game', '--room', 'RM_0090.RDX', '--frames', '790',
+            '--replay', str(folder / 'yes.txt'), '--state', str(traced.with_suffix('.json'))],
+            cwd=ROOT, stdout=log, stderr=subprocess.PIPE, check=True,
+            env={**os.environ, 'RECVX_CAM_TRACE': '1'}, text=True)
+    traced.with_suffix('.cam').write_text(trace.stderr)
+    frames = camera_trace(trace.stderr)
+    # CAM_KEYF_WORK values from the RDT camera table (0x6de0 + track * 0x808 + 8).
+    assert_camera_still(frames, 'RM_0090 shutter', 0, 0, [13.94, 33.27, 100.46], [4488, -3784, 0])
+    assert_camera_still(frames, 'RM_0090 shutter', 4, 0, [53.92, 17.25, 7.72], [5874, -1308, 0])
+    assert_no_camera_jump(frames, 'RM_0090 shutter')
     safe = run('deposit-pass', 'box', 550)
     lamps(safe, False)
     assert not safe['event_sound_active'][4], 'metal-free passage sounds alarm'
     assert not any('/seq2/' in s for s in safe['audio_played']), 'metal-free alarm request'
     run('box', 'box', 364)
     print('Original alarm SQ loop, animated lamps, Yes/No switch handover, both shutter SFX, '
+          'the shutter camera path (single-key stills on tracks 0 and 4, no drift), '
           'repeat alarm and metal-free passage verified; screenshots use real UI/resources.')
 
 

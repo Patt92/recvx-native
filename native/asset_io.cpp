@@ -32,6 +32,10 @@ std::size_t system_texture_bundle_offset(const std::vector<std::uint8_t>& entry)
     }
     return std::size_t(-1);
 }
+// Texture files and decoded original textures share one alpha domain: the
+// host 8-bit alpha whose blend factor is alpha/255.  Ps2AlphaIsHalf's GS
+// 0..128 ratio is the same value over 128, i.e. the same factor, so a palette
+// keeps its file alpha and the TGA carries it unchanged.
 SceneTexture read_tga(const std::filesystem::path& path){
     const auto bytes=read_asset_file(path,256*1024*1024+65536);BinaryView v(bytes);v.require(0,18);
     if(v.u8(1)!=0||v.u8(2)!=2||(v.u8(16)!=24&&v.u8(16)!=32))throw std::runtime_error("texture must be uncompressed RGB/RGBA TGA: "+path.string());
@@ -48,7 +52,7 @@ SceneTexture read_tga(const std::filesystem::path& path){
 void write_tga(const std::filesystem::path& path,const SceneTexture& t){
     if(!t.width||!t.height||t.width>8192||t.height>8192||t.pixels.size()!=std::size_t(t.width)*t.height)throw std::runtime_error("invalid exported texture");
     std::vector<std::uint8_t> bytes(18+t.pixels.size()*4);bytes[2]=2;bytes[12]=t.width&255;bytes[13]=t.width>>8;bytes[14]=t.height&255;bytes[15]=t.height>>8;bytes[16]=32;bytes[17]=40;
-    for(std::size_t i=0;i<t.pixels.size();++i){const auto p=t.pixels[i];for(unsigned c=0;c<3;++c)bytes[18+i*4+c]=(p>>(c*8))&255;bytes[18+i*4+3]=std::min(255u,((p>>24)&255)*2);}
+    for(std::size_t i=0;i<t.pixels.size();++i){const auto p=t.pixels[i];for(unsigned c=0;c<3;++c)bytes[18+i*4+c]=(p>>(c*8))&255;bytes[18+i*4+3]=(p>>24)&255;}
     write_asset_file(path,bytes);
 }
 void apply_texture_files(Scene& scene,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity){

@@ -30,7 +30,8 @@ extern "C" {
      +0x1C int             Winkel zum Spieler (:155; :120 setzt das Feld als
                            float 0, :155 schreibt es als int — beide Zugriffe
                            bleiben erhalten)
-     +0x20 char            Sperrzeit nach einem Biss (:121/399, :85-88)
+     +0x20 unsigned char   Sperrzeit nach einem Biss (UC-Lesen :85/165,
+                           C-Schreiben :121/399; alle 256 Bytewerte bleiben erhalten)
      +0x21 char            wird in Init auf 0 gesetzt (:122) und sonst nie
                            benutzt
    Das Modell wechselt jeden dritten Pass (epw->mlwP = &epw->mdl[n]); nativ

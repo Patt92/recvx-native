@@ -18,7 +18,7 @@
 #include <stdexcept>
 namespace recvx {
 namespace {
-constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","pause","quit","wireframe","aim","attack","next_target"};
+constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","pause","quit","wireframe","aim","attack","next_target","select"};
 const char* defaults_text=R"INI(# RECVX controls: edit and restart. SDL scancode names use physical key positions.
 # Multiple alternatives are separated by commas. 'none' disables this device's binding.
 [keyboard]
@@ -41,6 +41,10 @@ wireframe = F3
 aim = R
 attack = Left Ctrl, Return
 next_target = Q
+# select: the PS2 SELECT button. Only this button skips a running cinematic
+# (system.c:545 bhSysCallGame, sys->pad_ps 0x10000). P is the host key paired with
+# the controller's Back/Select button (docs/CONTROLS.md); rebind as needed.
+select = P
 
 [gamepad]
 forward = axis:lefty-, button:dpup
@@ -62,6 +66,7 @@ wireframe = none
 aim = button:rightshoulder
 attack = button:a
 next_target = button:leftshoulder
+select = button:back
 
 [settings]
 deadzone = 0.25
@@ -88,9 +93,11 @@ InputConfig parse(std::istream& stream){InputConfig out;std::string section,line
             if(value.back()==',')throw std::runtime_error("empty trailing alternative");
         }catch(const std::exception& e){throw std::runtime_error("controls line "+std::to_string(lineno)+": "+e.what());}}
     for(const auto* device:{"keyboard","gamepad"})for(auto name:names)if(!seen.count(std::string(device)+"/"+name)){
-        if(std::string(name)=="aim"||std::string(name)=="attack"||std::string(name)=="next_target"||std::string(name)=="pause"){
+        if(std::string(name)=="aim"||std::string(name)=="attack"||std::string(name)=="next_target"||std::string(name)=="pause"||std::string(name)=="select"){
             const bool pad=std::string(device)=="gamepad";
             if(std::string(name)=="pause"){out.bindings[unsigned(Action::Pause)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_BACK):int(SDL_SCANCODE_P),1});continue;}
+            /* Older controls.ini without a select line: the PS2 SELECT button (pad.c pad_tab_a[16] = 0x100) */
+            if(std::string(name)=="select"){out.bindings[unsigned(Action::Select)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_BACK):int(SDL_SCANCODE_P),1});continue;}
             if(std::string(name)=="aim")out.bindings[unsigned(Action::Aim)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER):int(SDL_SCANCODE_R),1});
             else if(std::string(name)=="next_target")out.bindings[unsigned(Action::NextTarget)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_LEFTSHOULDER):int(SDL_SCANCODE_Q),1});
             else {out.bindings[unsigned(Action::Attack)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_A):int(SDL_SCANCODE_LCTRL),1});if(!pad)out.bindings[unsigned(Action::Attack)].push_back({InputBinding::Kind::Key,SDL_SCANCODE_RETURN,1});}continue;
@@ -162,14 +169,38 @@ void InputManager::rumble(unsigned low,unsigned high,unsigned milliseconds){for(
 InputFrame InputManager::tick(){for(auto& item:pads_)refresh(item.second);evaluate();InputFrame frame;frame.gamepad_input=last_gamepad_;frame.held=held_;frame.pressed=pending_;pending_.fill(false);
     for(unsigned a=0;a<action_count;++a){if(!held_[a])suppressed_[a]=false;if(suppressed_[a])frame.held[a]=frame.pressed[a]=false;}
     for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(!suppressed_[a]&&navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}return frame;}
-void GameplayInput::menu_input(MenuInput key){if(modal_input&&modal_input(key))return;if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;}if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;if(dialog_.active()&&(!menu_.active||menu_.pickup)){if(menu_.active&&menu_.pickup&&menu_.slide.pad_locked())return; /* sub1.c GetItem: every testmode waits for !(statusflg & 0x40) */if(key==MenuInput::Confirm&&!menu_.active&&dialog_.timed()&&!dialog_.choices()&&(events_->flags[10][0]&4)&&events_->skip_cinematic()){if(sound)sound(3);return;} // host: OK skips the running cinematic like Select
-        if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(sound)sound(key==MenuInput::Confirm?3:0);if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;synchronize();}else if(key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Up||key==MenuInput::Down){if(dialog_.choices()){if(sound)sound(2);events_->choose_dialog(key==MenuInput::Left||key==MenuInput::Up?-1:1);}}return;}
+void GameplayInput::menu_input(MenuInput key,bool repeat){
+    /* Kartentask: sub1.c:3141 (MAP aus der Statusleiste) und system.c:630 (Dreieck/
+       bhMapSystemOn) setzen st_flg 0x40000; bhCheckSubTask (system.c:561) sperrt mit
+       st_flg & 0x1C040008 Statusbildschirm, Kiste, Terminal und Interaktion, das Pad
+       liest allein MapPadMain (map.c:569) ueber sys->pad_ps. */
+    if(events_&&(events_->flags[5][0]&0x40000u))return;
+    if(modal_input&&modal_input(key))return;if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;} /* Host-Abweichung: das Original liest hier kein Pad (bhStartDoorDemo loescht pad_ps/pad_on), der Skip ist gewuenscht */if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;if(dialog_.active()&&(!menu_.active||menu_.pickup)){if(menu_.active&&menu_.pickup&&menu_.slide.pad_locked())return; /* sub1.c GetItem: every testmode waits for !(statusflg & 0x40) */
+        /* OK/Cancel only acknowledge the dialogue (message.c). The cinematic skip is
+           never requested here: bhSysCallGame (system.c:545) reads pad_ps 0x10000
+           (SELECT) alone, see Action::Select in apply(). */
+        if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(sound)sound(key==MenuInput::Confirm?3:0);if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;synchronize();}else if(key==MenuInput::Left||key==MenuInput::Right){
+            /* bhControlMessage (message.c:269-285) bewegt mes_sel ausschliesslich mit
+               sys->pad_ps 0x4 (mes_sel--) und 0x8 (mes_sel++). pad_ps ist in bhSetPad
+               (pad.c:275) `pad & ~sys->pad_oncpy`, also die reine Druckflanke: eine beim
+               Hinlaufen gehaltene Richtung liefert keine weitere Flanke, und die Routine
+               kennt keinen Wiederholzaehler. Die Host-Tastenwiederholung ist damit keine
+               Eingabe fuer den Dialog. */
+            if(repeat)return;
+            if(dialog_.choices()){if(sound)sound(2);events_->choose_dialog(key==MenuInput::Left?-1:1);}
+        }
+        /* Hoch/Runter sind die Padbits 0x1/0x2 (pad.c:162-170); bhControlMessage liest sie
+           nicht: die Auswahlfelder stehen waagerecht (message.c:150, pos.x += 28). Sie
+           werden hier nur verschluckt, damit sie nicht in die Raumsteuerung fallen. */
+        return;}
     // The original hint ends before its task releases cinematic control. Keep
     // one inventory request across that short handover, never across a video.
     if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4)){if(inventory_grace_&&!dialog_.active())inventory_pending_=true;return;}
     if(menu_.active||key==MenuInput::Open){const bool was_active=menu_.active;menu_.input(key,inventory_);if(!was_active&&menu_.active)events_->begin_status();if(menu_.use_item){unsigned index=0;if(!events_->use(menu_.use_item,&index,menu_.selected)){menu_.active=true;menu_.abort_close();if(index)menu_.show_message(index);menu_.feedback_sound=1;}menu_.use_item=0;}events_->menu_open=menu_.active;if(sound&&menu_.feedback_sound!=0xffffffff)sound(menu_.feedback_sound);return;}
-    // Host: OK also requests the original cinematic skip (bhSysCallGame pad bit 0x10000, Select).
-    if(key==MenuInput::Confirm&&(events_->flags[10][0]&4)){events_->skip_cinematic();return;}
+    // bhSysCallGame (system.c:545): only pad_ps 0x10000 (SELECT) requests the cinematic
+    // skip; OK is not a skip. During a cinematic (cb_flg 4) bhCheckExmAtari is not
+    // reached either, so OK does nothing here.
+    if(key==MenuInput::Confirm&&(events_->flags[10][0]&4))return;
     if(key==MenuInput::Confirm&&interact){interact();synchronize();}
 }
 void GameplayInput::synchronize(){
@@ -187,9 +218,13 @@ void GameplayInput::synchronize(){
     if(events_){const auto found=events_->pickup_display();if(found){if(!menu_.pickup){if(sound)sound(3); /* ItemTaskCheck: CallSystemSe(0,3) when the status task starts */menu_.commands=menu_.examining=menu_.combining=menu_.files=false;menu_.message=MessageDialog{};menu_.inspection=ItemInspection{};const auto angle=inspection_default_angles(found);menu_.examine_pitch=angle[0];menu_.examine_yaw=angle[1];menu_.examine_roll=angle[2];}menu_.pickup=found;menu_.active=true;events_->menu_open=true;}
         else if(menu_.pickup){menu_.pickup=0;menu_.begin_close();events_->menu_open=menu_.active;}}
     if(events_&&events_->status_requested&&!dialog_.active()&&!(transition_active&&transition_active())&&(!(events_->flags[5][0]&4)||(events_->flags[10][0]&0x64010))&& /* bhCheckSubTask: cb_flg 0x64010 requests ignore st_flg 0x4 */!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(3);menu_.input(MenuInput::Open,inventory_);events_->begin_status();}if(events_->flags[10][0]&0x40000)events_->flags[12][0]&=~0x200u;events_->menu_open=menu_.active;}}
-bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))return f.hit(Action::Quit);menu_.tick(inventory_);if(menu_.slide_sound!=0xffffffff){if(sound)sound(menu_.slide_sound);menu_.slide_sound=0xffffffff;}synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
+bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))return f.hit(Action::Quit);
+    /* st_flg 0x40000 (Kartentask, siehe menu_input): kein Spiel-/Menuepfad und kein
+       Host-Quit; Cancel erreicht die Karte als pad_ps 0x1000 (map.c:540, Ausstieg). */
+    if(events_&&(events_->flags[5][0]&0x40000u))return false;
+    menu_.tick(inventory_);if(menu_.slide_sound!=0xffffffff){if(sound)sound(menu_.slide_sound);menu_.slide_sound=0xffffffff;}synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
     if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
-    if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition();return false;}if(video_active&&video_active()){
+    if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition(); /* Host-Abweichung: gewuenschter Tuer-Skip, siehe doors.h */return false;}if(video_active&&video_active()){
         inventory_pending_=false;inventory_grace_=0;
         if(f.hit(Action::Confirm)||f.hit(Action::Skip)||f.hit(Action::Cancel)){if(skip_video)skip_video();return false;}
         return f.hit(Action::Quit);
@@ -198,7 +233,11 @@ bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))re
     if(f.hit(Action::Confirm)&&(menu_.active||dialog_.active()||!f.down(Action::Aim)||(events_&&(events_->flags[5][0]&4))))menu_input(MenuInput::Confirm);
     if(transition_active&&transition_active())return false;
     if(menu_.active&&menu_.examining&&!menu_.busy()){const int direction=int(f.down(Action::Right))-int(f.down(Action::Left));menu_.examine_yaw+=direction*512;menu_.examine_pitch+=(int(f.down(Action::Up))-int(f.down(Action::Down)))*512;return false;}
-    for(auto pair:{std::pair<Action,MenuInput>{Action::Up,MenuInput::Up},{Action::Down,MenuInput::Down},{Action::Left,MenuInput::Left},{Action::Right,MenuInput::Right}})if(f.navigation(pair.first))menu_input(pair.second);
-    if(f.hit(Action::Skip)&&events_)events_->skip_cinematic();return false;
+    // f.hit ist die Druckflanke (sys->pad_ps, pad.c:275), f.repeat die Host-Wiederholung
+    // fuer die Originalzaehler der Menues; der Empfaenger entscheidet (siehe menu_input).
+    for(auto pair:{std::pair<Action,MenuInput>{Action::Up,MenuInput::Up},{Action::Down,MenuInput::Down},{Action::Left,MenuInput::Left},{Action::Right,MenuInput::Right}})if(f.navigation(pair.first))menu_input(pair.second,!f.hit(pair.first));
+    // system.c:545 bhSysCallGame: pad_ps 0x10000 (SELECT, pad.c pad_tab_a[16] = 0x100) is the
+    // only pad bit that requests the cinematic skip. Skip (Start/Space) and OK do not.
+    if(f.hit(Action::Select)&&events_)events_->skip_cinematic();return false;
 }
 }

@@ -531,7 +531,7 @@ void recvx_en04_brain(RECVX_ENEMY_WORK* w) {
                 }
             }else if(!recvx_t3_ikou3(w,&p.pos,2048)) {
                 int back=recvx_t3_cdir_check(w->ay,p.ay);
-                if(!(e->flg&0x200000)&&!(p.flg&6)&&!(p.stflg&0x80000000)&&back==0) {
+                if(!(e->flg&0x200000)&&!p.debug_attack_disabled&&!(p.flg&6)&&!(p.stflg&0x80000000)&&back==0) {
                     mode(w,2,0,0,0);p.flg|=0x10004;e->flg|=0x4000000;put_player(w,&p);return;
                 }attack_mode(w,9);
             }
@@ -734,7 +734,7 @@ void recvx_en04_move(RECVX_ENEMY_WORK* w) { /* en04.c:1020 */
 int recvx_en04_ply_damage_check(RECVX_ENEMY_WORK* w, int type) {
     RECVX_ENEMY_PLAYER pl;
     if (!player(w, &pl)) return 0;
-    if ((pl.flg & 4u) || (pl.flg & 2u) || (pl.stflg & 0x80000000u)) return 0;
+    if ((pl.flg & 4u) || (pl.debug_attack_disabled || (pl.flg & 2u)) || (pl.stflg & 0x80000000u)) return 0;
     RECVX_ENEMY_VEC center;
     if (!parts(w, &center)) return 0;
     RECVX_ENEMY_CAPSULE pl_cap;

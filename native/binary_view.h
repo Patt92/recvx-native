@@ -33,6 +33,9 @@ public:
         if(((bits>>23)&255)==255)return (bits>>31)?-std::numeric_limits<float>::max():std::numeric_limits<float>::max();
         float f;std::memcpy(&f,&bits,4);return f;
     }
+    // Bounds query without throwing: the original reads some fields past the
+    // end of a block (e.g. the key behind frm_num, Motion.c:131).
+    bool has(std::size_t offset,std::size_t count) const noexcept {return offset<=size_&&count<=size_-offset;}
     std::size_t relative(std::size_t base,std::uint32_t offset,std::size_t required) const {
         require(base,0);if(offset>size_-base)throw std::runtime_error("binary relative offset outside asset: base "+std::to_string(base)+", offset "+std::to_string(offset)+", asset size "+std::to_string(size_));
         const auto p=base+offset;require(p,required);return p;

@@ -638,8 +638,10 @@ bool AudioMixer::enemy_sound(unsigned slot,unsigned sound,SoundPoint position){
     apply_se_pan(18+slot,request.pan_default?0:request.pan);apply_se_volume(18+slot,request.volume_default?0:request.volume);return true;
 }
 void AudioMixer::load_door_sounds(unsigned bank){
-    for(unsigned slot=door_voice_first;slot<=door_voice_last;++slot)stop(slot);door_source_.clear();
-    for(auto it=room_sounds_.begin();it!=room_sounds_.end();)it=std::get<0>(it->first)==0x101u?room_sounds_.erase(it):std::next(it);door_bank_=bank;door_slot_=door_voice_first;
+    // RequestDoorSoundBank -> LoadSoundPackFile -> SetSoundData (sdc.c:85) only downloads program
+    // bank 1; no MIDI port is stopped and MidiHandle[2] keeps its port rotation across doors.
+    door_source_.clear();
+    for(auto it=room_sounds_.begin();it!=room_sounds_.end();)it=std::get<0>(it->first)==0x101u?room_sounds_.erase(it):std::next(it);door_bank_=bank;
     if(data_.empty())return;const auto bytes=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(bytes);unsigned pack=0;
     for(;pack<bytes.size()/2;++pack){if(ids.u16(pack*2)==(0x8000|bank))break;if(ids.u16(pack*2)==0xffff)return;}if(pack==bytes.size()/2)return;
     auto file=mods_/("audio/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/("archives/MULTSPQ"+disc_digit())/(asset_number(pack)+".bin");const auto data=read_asset_file(file,32*1024*1024);BinaryView v(data);
@@ -655,10 +657,18 @@ void AudioMixer::load_door_sounds(unsigned bank){
 bool AudioMixer::play_door_sound(unsigned program){
     if(door_source_.empty())return false;
     program&=255;
+    // CallDoorSe (sdfunc.c:1684) -> ExPlayMidi -> PlayMidi -> sdMidiPlay (ps2_sg_sd.c:495): the port
+    // MidiHandle[2] currently names is stopped if it still sounds (SdrBgmStop), then the handle
+    // rotates 2 -> 8 -> 9 -> 2 and the new list plays on that port. door_slot_ is the named port.
+    if(active(door_slot_))stop(door_slot_);
+    door_slot_=door_slot_==door_voice_last?door_voice_first:door_slot_+1;
     if(!play_room_sequence(1,program,door_slot_)){unavailable.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return false;}
-    door_slot_=door_slot_==door_voice_last?door_voice_first:door_slot_+1;played.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return true;
+    played.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return true;
 }
-void AudioMixer::finish_door_sound(){for(unsigned slot=door_voice_first;slot<=door_voice_last;++slot)stop(slot,adx_fade_ticks(250));}
+// Com_ExecRoomFadeIn (sdfunc.c:2905): RequestMidiFadeFunction(2, 2, 250) fades MidiHandle[2], and
+// sdMidiSetVol/Volume_Control act on the one port that handle names (ps2_sg_sd.c:670, 1190);
+// earlier ports were already stopped by the rotation or have run out on their own.
+void AudioMixer::finish_door_sound(){if(active(door_slot_))stop(door_slot_,adx_fade_ticks(250));}
 PcmClip decode_adx(const std::vector<std::uint8_t>& b){
     auto need=[&](std::size_t p,std::size_t n){if(p>b.size()||n>b.size()-p)throw std::runtime_error("truncated ADX audio");};
     auto be16=[&](std::size_t p){need(p,2);return unsigned(b[p])*256+b[p+1];};

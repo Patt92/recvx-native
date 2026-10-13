@@ -85,7 +85,7 @@ void quad(SoftwareRenderer& image,const SceneTexture& texture,const RECVX_COM_DR
         const auto texel=texture.pixels[ty*texture.width+tx];
         const unsigned r=channel(texel,16)*channel(d.color,16)/255,g=channel(texel,8)*channel(d.color,8)/255,b=channel(texel,0)*channel(d.color,0)/255;
         auto& out=canvas[y*image.width()+x];
-        if(d.trans)blend(out,r,g,b,std::min(255u,channel(texel,24)*2)*channel(d.color,24)/255); /* PS2 texel alpha 0x80 = opaque */ else out=0xff000000u|r<<16|g<<8|b;
+        if(d.trans)blend(out,r,g,b,channel(texel,24)*channel(d.color,24)/255); /* host alpha 0xFF = opaque */ else out=0xff000000u|r<<16|g<<8|b;
     }
 }
 }

@@ -42,7 +42,7 @@ int main(int argc,char** argv){try{
     // Motionlaengen, Knotenlagen, Grundhoehen und die Schrittdienste.
     std::array<float,32> floors{};floors[2]=0;floors[3]=9;
     struct Host {unsigned feet=0,actions=0,effects=0,water=0,vibration=0,kaidan=0,head_release=0,badflag=0,last_node=0,probe_node=0;
-                 int burst=0,splash_up=0,splash_dn=0,sound=-1;float bits=0;};
+                 int burst=0,splash_up=0,splash_dn=0,sound=-1,vib_type=-1,vib_pattern=-1;float bits=0;};
     Host h;
     RECVX_STAIR_HOST services{&h,
         /* Testfixture fuer die Wurzelbewegung: die Originalmotionen 31/33/35/37
@@ -78,7 +78,8 @@ int main(int argc,char** argv){try{
         [](void* p,const float*,float* top){auto& h=*static_cast<Host*>(p);++h.water;h.probe_node=h.last_node;*top=1.5f;return 1;},
         [](void* p,const RECVX_STAIR_EFFECT* e){auto& h=*static_cast<Host*>(p);++h.effects;
             if(e->id==108){if(e->lkono==10){++h.splash_up;h.bits=e->offset[0];}else ++h.splash_dn;}else if(e->id==11)++h.burst;},
-        [](void* p,int,int){++static_cast<Host*>(p)->vibration;},
+        // player.c:3605: retain the exact StartVibrationEx(0, 7) operands.
+        [](void* p,int type,int pattern){auto& h=*static_cast<Host*>(p);++h.vibration;h.vib_type=type;h.vib_pattern=pattern;},
         [](void* p,int){++static_cast<Host*>(p)->kaidan;},
         /* bhCPM2_act_* case 0: EXP1_I(0) &= ~0x4; |= 0x1E0 (B06 head control). */
         [](void* p){++static_cast<Host*>(p)->head_release;},
@@ -146,7 +147,9 @@ int main(int argc,char** argv){try{
         s.st_flg|=0x40u;
         h.water=0;h.vibration=0;h.effects=0;h.burst=0;h.splash_dn=0;h.actions=0;h.sound=-1;h.probe_node=0;
         run_stairs(s);
-        check(h.vibration==1&&h.water==1&&h.probe_node==19,"danf step did not probe the original water node");
+        check(h.vibration==1&&h.vib_type==0&&h.vib_pattern==7,"dnd StartVibrationEx operands differ from player.c:3605");
+        check(!(s.unsupported_services&RECVX_STAIR_UNBOUND_VIBRATION),"bound dnd vibration still reported missing");
+        check(h.water==1&&h.probe_node==19,"danf step did not probe the original water node");
         check(h.splash_dn==1&&h.burst==6&&h.effects==7,"danf splash does not carry the original effect set");
         check(h.actions==1&&h.sound==522,"danf splash did not request CallPlayerActionSe 522");
         check((s.unsupported_services&RECVX_STAIR_UNBOUND_EFFECT_OFF)!=0,"danf splash stopped reporting the unbound effect offset");}

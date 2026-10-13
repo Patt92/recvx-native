@@ -10,7 +10,9 @@
    und subpl.c:143 (bhEne_Event).
    Kein Originalkoerper, kein Generator, keine zweite Workwelt. */
 #include "en10.h"
-#include "ninja_math.h"
+#include "en03_lib.h"
+#include "../core_random.h"
+#include "../ninja_math.h"
 #include <math.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -30,7 +32,7 @@ typedef struct {
     float         home_dist;     /* +0x14 EXP0_F(0x14)  */
     float         ply_dist;      /* +0x18 EXP0_F(0x18)  */
     int32_t       ply_ang;       /* +0x1C EXP0_I(0x1C)  */
-    signed char   bite_wait;     /* +0x20 EXP0_C(0x20)  */
+    unsigned char bite_wait;     /* +0x20 EXP0_UC(0x20), C nur beim Schreiben */
     signed char   unused21;      /* +0x21 EXP0_C(0x21)  */
     unsigned char pad22[2];      /* +0x22 Rest des 0x24-Blocks */
 } RECVX_EN10_EXP0;
@@ -55,8 +57,8 @@ static int32_t en10_rand(RECVX_ENEMY_WORK* w)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
     if (sv && sv->random_next) return sv->random_next();
-    if (sv && sv->gap) sv->gap("rand");
-    return 0;
+    /* Derselbe bereits vorhandene EE-Strom, keine feste Ersatzrueckgabe. */
+    return recvx_core_random_next();
 }
 
 /* en10.c:129/282/338/401: `rand() % 5 * 1.5 * 182.04444885253906` bzw. ohne
@@ -331,7 +333,7 @@ static void en10_brain(RECVX_ENEMY_WORK* w)
 
     if (en10_player(w, &ply)) {
         if (!(ply.stflg & 0x80000000u)) {                   /* :161 */
-            if (!(ply.flg & 4u) && !(ply.flg & 2u) && !(w->flg & 4u)) {   /* :163 */
+            if (!(ply.flg & 4u) && !(ply.debug_attack_disabled || (ply.flg & 2u)) && !(w->flg & 4u)) {   /* :163 */
                 if ((e->bite_wait == 0) && (e->ply_dist < 3.0f)
                     && (abs(e->ply_ang) < 0xE38)) {         /* :165 */
                     w->mode0 = 2;
@@ -401,8 +403,11 @@ static void en10_move(RECVX_ENEMY_WORK* w)
             RECVX_ENEMY_VEC vec;
             vec.x = w->dvx; vec.y = w->dvy; vec.z = w->dvz;
             sv->blood_effect4(&pos, &vec, 1, 1, 0);
-        } else if (sv && sv->gap) {
-            sv->gap("bhEne_SetBloodEffect4");
+        } else {
+            RECVX_ENEMY_VEC vec = {w->dvx, w->dvy, w->dvz};
+            /* Derselbe schon portierte zonzon1.c:175-Mechanismus ueber
+               RECVX_ENEMY_EXT.effect_tb, wenn kein direkter Anbieter steht. */
+            recvx_t3_set_blood_effect4(&pos, &vec, 1, 1, 0);
         }
 
         w->mdflg |= 1u;
@@ -541,15 +546,22 @@ static void en10_nage(RECVX_ENEMY_WORK* w)
         if (sv && sv->vibration) sv->vibration(1, 0xA);   /* :376 */
         else if (sv && sv->gap)  sv->gap("StartVibrationEx(1, 0xA)");
 
-        /* :378-390: EF-Vorlage {flg 1, id 5, type 0, mdlver 0,
-           px = px-0.5, py = py+0.3, pz = pz-0.5, sx/sy/sz 2, ay = epw->ay}
-           und bhSetEffectTb(&sys->ef, NULL, NULL, 0) (effect.c:436) — also
-           OHNE Verknuepfung. set_effect (enemy_work.h:447) kennt nur
-           id/pos/off/link/param: Skala 2 und der Winkel ay haetten dort
-           keinen Platz, der Spawn wuerde mit Skala 1 und Winkel 0 entstehen.
-           Deshalb kein Ersatzspawn, sondern die gemeldete Luecke. */
-        if (sv && sv->gap)
-            sv->gap("bhSetEffectTb(EF{flg=1,id=5,type=0,scale=2,ay=epw->ay})");
+        /* en10.c:378-390: dieselbe vollstaendige Effektvorlage wie bei den
+           grossen Gegnern; ohne Link, Skala 2 und der Winkel des Works.
+           Der vorhandene T3-Dienst erreicht RoomWorld::effect_tb. */
+        {
+            const RECVX_ENEMY_EXT* ext = recvx_enemy_ext();
+            RECVX_T3_EFF ef = {0};
+            RECVX_T3_LINK link = {NULL, 0};
+            ef.id = 5; ef.flg = 1; ef.type = 0; ef.mdlver = 0;
+            ef.px = w->px - 0.5f;
+            ef.py = 0.3f + w->py;
+            ef.pz = w->pz - 0.5f;
+            ef.sx = ef.sy = ef.sz = 2.0f;
+            ef.ay = w->ay;
+            if (ext && ext->effect_tb) (void)ext->effect_tb(&ef, NULL, link, 0);
+            else if (sv && sv->gap) sv->gap("bhSetEffectTb (EN10 Biss)");
+        }
 
         w->mode3++;
         /* fall through */
@@ -561,7 +573,12 @@ static void en10_nage(RECVX_ENEMY_WORK* w)
             if (e) {
                 e->bite_wait = 0x1E;            /* :399 */
                 /* :401-405: ohne den Faktor 1.5. */
-                e->turn = en10_rand_turn(w, 0);
+                /* en10.c:401 benutzt FLOAT 182.04445f, anders als die
+                   double-Konstante in MV02 (:338). Rundung vor int-Cast. */
+                {
+                    const int32_t angle = (int32_t)((en10_rand(w) % 5) * 182.04445f);
+                    e->turn = (en10_rand(w) % 2) ? angle : -angle;
+                }
             } else {
                 (void)en10_rand_turn(w, 0);
                 if (sv && sv->gap) sv->gap("EXP0-Block (en10.c:399)");

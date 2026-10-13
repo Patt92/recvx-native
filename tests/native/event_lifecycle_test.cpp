@@ -64,6 +64,77 @@ int main(int argc,char** argv){try{
   if(r.inventory.weapon()!=1||r.menu.active||r.dialog.active()||r.world.player_scripted||r.world.player_hidden||(r.vm.flags[5][0]&4)){std::cerr<<"end press="<<press<<" weapon="<<r.inventory.weapon()<<" menu="<<r.menu.active<<" dialog="<<r.dialog.index()<<" st="<<r.vm.flags[5][0]<<" cb="<<r.vm.flags[10][0]<<" tasks=";for(auto t:r.vm.task_states())std::cerr<<t.event<<":"<<t.offset<<",";std::cerr<<"\n";}
   check(r.inventory.weapon()==1&&!r.menu.active&&!r.dialog.active()&&!r.world.player_scripted&&!r.world.player_hidden&&!(r.vm.flags[5][0]&4),"early Enter / lighter / Rodrigo retains control lock");
  }
+ // Cinematic skip in the middle of the running scene. The original path is
+ // bhSysCallGame (system.c:538-556, cb_flg 0x10000000) -> the scd1 skip block
+ // of RM_0000 at scenario offset 1194 (bhCk cb_flg bit 3 with ev_flg 99 and
+ // rm_flg bit 9), which clears the request, bhEvtKill levels 0..7 and starts
+ // the cleanup event 34; event 34 hides the cinematic stand-in again with
+ // bhInitModelSet 1/0/0 (scenario offset 7154) and shows the player.
+ // bhCheckSubTask (system.c:736-744) then releases the player work.
+ // Drawn enemy triangles (eneset.c:797 bhDrawEnemy gate). The natural end of
+ // the scene leaves only Rodrigo visible; the stand-in (ene[0], id 91 bhSubpl)
+ // is hidden by bhInitModelSet 1/0/0 through stflg 0x1000000 regardless of
+ // whether Sub_controll 0x80 released it before (natural end) or the task was
+ // killed first (skip). Measured before the fix: 2x the Rodrigo count after a skip.
+ auto drawn_enemy_triangles=[](const Room& r){Scene s;r.world.append(s,{},r.scene.cameras.at(0));std::size_t n=0;for(const auto& t:s.triangles)if(t.light_category==1)++n;return n;};
+ std::size_t natural_enemy_triangles=0;
+ {
+  Room r(data,"RM_0000");unsigned ticks=0;
+  while(!(r.dialog.active()&&r.dialog.index()==4)&&ticks<5000){if(ticks==1)r.input.menu_input(MenuInput::Confirm);if(ticks>1&&r.movie.active())r.input.menu_input(MenuInput::Confirm);r.tick();++ticks;}
+  check(r.dialog.active()&&r.dialog.index()==4,"natural fixture misses the original hint");r.input.menu_input(MenuInput::Confirm);
+  for(unsigned t=0;t<100&&!r.menu.active;++t)r.tick();check(r.menu.active,"natural fixture loses the automatic inventory request");for(unsigned t=0;t<40;++t)r.tick();
+  r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
+  r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);
+  unsigned wait=0;while(!(r.vm.flags[4][0]&0x00400000u)&&wait++<4000)r.tick();check(r.vm.flags[4][0]&0x00400000u,"natural cell cinematic never started");
+  unsigned release=0;while((r.vm.flags[10][0]&4)&&release++<6000)r.tick();check(!(r.vm.flags[10][0]&4),"natural cell cinematic never ends");
+  for(unsigned t=0;t<400;++t)r.tick();
+  const auto* stand_in=r.world.state(1,0);check(stand_in&&stand_in->inactive,"natural cell cinematic leaves the stand-in active");
+  natural_enemy_triangles=drawn_enemy_triangles(r);
+  check(natural_enemy_triangles>0,"natural cell cinematic end draws no enemy work (Rodrigo expected)");
+ }
+ for(unsigned delay:{0u,60u,200u,400u,700u}){
+  Room r(data,"RM_0000");unsigned ticks=0;
+  while(!(r.dialog.active()&&r.dialog.index()==4)&&ticks<5000){if(ticks==1)r.input.menu_input(MenuInput::Confirm);if(ticks>1&&r.movie.active())r.input.menu_input(MenuInput::Confirm);r.tick();++ticks;}
+  check(r.dialog.active()&&r.dialog.index()==4,"skip fixture misses the original hint");r.input.menu_input(MenuInput::Confirm);
+  for(unsigned t=0;t<100&&!r.menu.active;++t)r.tick();check(r.menu.active,"skip fixture loses the automatic inventory request");for(unsigned t=0;t<40;++t)r.tick();
+  r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
+  r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);
+  check(r.inventory.weapon()==1,"skip fixture did not equip the original lighter");
+  // rm_flg bit 9 (0x00400000) marks the running cell cinematic; the scd1 block
+  // at 1080 sets it, the skip block at 1194 and the regular end clear it.
+  unsigned wait=0;while(!(r.vm.flags[4][0]&0x00400000u)&&wait++<4000)r.tick();
+  check(r.vm.flags[4][0]&0x00400000u,"original cell cinematic never started");
+  for(unsigned t=0;t<delay;++t)r.tick();
+  if(!(r.vm.flags[10][0]&4)){std::cerr<<"skip delay="<<delay<<" cinematic already over\n";}
+  check(r.vm.flags[10][0]&4,"cell cinematic ended before the skip request");
+  check(r.vm.skip_cinematic(),"bhSysCallGame refused the original skip request");
+  unsigned release=0;while((r.vm.flags[10][0]&4)&&release++<900)r.tick();
+  if(r.vm.flags[10][0]&4){std::cerr<<"skip delay="<<delay<<" cb="<<r.vm.flags[10][0]<<" tasks=";for(auto t:r.vm.task_states())std::cerr<<t.event<<":"<<t.level<<":"<<t.offset<<",";std::cerr<<"\n";}
+  check(!(r.vm.flags[10][0]&4),"skipped cell cinematic never reaches bhCineSet 1");
+  // system.c:738-742 in the same bhCheckSubTask pass as the falling cb_flg 4.
+  // Measured gap, not coverage: the host's bhLoadWork case 0 (world.cpp op 0x65)
+  // does not yet write plp->flg 0x10000 / stflg 0x10000 / mode0 7 / mtn_no 42
+  // (event.c:12721-12738), so nothing sets these bits during a cinematic today
+  // and the three checks below only bite once that half is ported.
+  check(!(r.vm.flags[13][0]&0x10000u),"cinematic end keeps plp->flg 0x10000");
+  check(!(r.vm.flags[14][0]&0x18000u),"cinematic end keeps plp->stflg 0x18000");
+  check(!(r.vm.flags[10][0]&0x10000000u),"cinematic end keeps the skip request");
+  if(r.world.player_mode()>>24)std::cerr<<"skip delay="<<delay<<" plp->mode3="<<(r.world.player_mode()>>24)<<"\n";
+  check(!(r.world.player_mode()>>24),"cinematic end keeps plp->mode3 (system.c:742)");
+  for(unsigned t=0;t<400;++t)r.tick();
+  const auto* stand_in=r.world.state(1,0);
+  if(!stand_in||!stand_in->inactive)std::cerr<<"skip delay="<<delay<<" stand-in still active\n";
+  check(stand_in&&stand_in->inactive,"skipped cell cinematic leaves the stand-in visible");
+  bool scene_task=false;for(const auto& t:r.vm.task_states())if(t.level<8)scene_task=true;
+  if(scene_task){std::cerr<<"skip delay="<<delay<<" surviving tasks=";for(auto t:r.vm.task_states())std::cerr<<t.event<<":"<<t.level<<":"<<t.offset<<",";std::cerr<<"\n";}
+  check(!scene_task,"skipped cell cinematic keeps a scene task running");
+  check(!r.world.player_hidden&&!r.world.player_scripted&&!(r.vm.flags[5][0]&4),"skipped cell cinematic does not return control");
+  // The killed scene task never ran Sub_controll 0x80 for ene[0]; bhDrawEnemy
+  // decides by the work flags alone, so the drawn set must equal the natural end.
+  const auto skipped_enemy_triangles=drawn_enemy_triangles(r);
+  if(skipped_enemy_triangles!=natural_enemy_triangles)std::cerr<<"skip delay="<<delay<<" drawn enemy triangles="<<skipped_enemy_triangles<<" natural="<<natural_enemy_triangles<<"\n";
+  check(skipped_enemy_triangles==natural_enemy_triangles,"skipped cell cinematic still draws the hidden stand-in (eneset.c:797 gate bypassed)");
+ }
  if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory expectation(s) failed; doors and early-Enter timings passed.\n";return 1;}
- std::cout<<"Both original dog events -> padlock -> all three exits, and 14 early Enter timings -> hint/lighter/Rodrigo passed. Diagnostic event starts/floor placement; no campaign proof.\n";return 0;
+ std::cout<<"Both original dog events -> padlock -> all three exits, 14 early Enter timings -> hint/lighter/Rodrigo and five mid-scene cinematic skips passed. Diagnostic event starts/floor placement; no campaign proof.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

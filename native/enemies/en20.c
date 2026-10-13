@@ -6,7 +6,8 @@
    (bhSetMotion), MdlPut.c:240 (bhCalcModel) und subpl.c:143 (bhEne_Event).
    Kein Originalkoerper, kein Generator, keine zweite Workwelt. */
 #include "en20.h"
-#include "ninja_math.h"
+#include "../ninja_math.h"
+#include "../core_random.h"
 #include <math.h>
 #include <stddef.h>
 
@@ -17,8 +18,7 @@ static int32_t en20_rand(RECVX_ENEMY_WORK* w)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
     if (sv && sv->random_next) return sv->random_next();
-    if (sv && sv->gap) sv->gap("rand");
-    return 0;
+    return recvx_core_random_next(); /* vorhandener gemeinsamer EE-Strom */
 }
 
 /* pwksub.c:133 bhAddSpeed(pp, r): Bewegung in Blickrichtung. Alle Aufrufer

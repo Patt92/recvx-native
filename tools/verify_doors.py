@@ -4,10 +4,13 @@
 Three things are checked, and none of them is satisfied by a room simply
 loading: a door demo requested by an original DoorCall has to run its own
 sequence (camera, fade, leaf motion and the door sounds in their original
-order), it has to end in the destination room with the controls back, and the
-confirm skip has to cut it short and still arrive at the same place. The
-direct transition (door type 255, no demo) is checked separately so the two
-cannot be confused.
+order), and it has to end in the destination room with the controls back --
+only through FadeProc1, since the original demo has no abort path of its own.
+The confirm skip is checked separately as what it is: a deliberate host
+deviation (see native/doors.h) that the user asked for. It has to shorten the
+sequence, reach the same destination, silence the door voices it cuts, and
+leave every other channel alone. The direct transition (door type 255, no
+demo) is checked separately so the three cannot be confused.
 """
 import argparse
 import json
@@ -81,7 +84,6 @@ def main():
         assert ramp['door_active'], ('ramp', 'the DoorCall started no door demo')
         assert ramp['door_ticks'] >= 10, ('ramp', 'the demo finished in a handful of passes',
                                          ramp['door_ticks'])
-        assert not ramp['door_skipped'], ('ramp', 'the demo reported a skip')
         # FadeProc1 is running, so the fade status is up and its rate is inside
         # the open ramp the parameter block walks through.
         assert ramp['door']['status'] & 0x100, ('ramp', 'the fade status was never raised')
@@ -97,7 +99,6 @@ def main():
         assert running['door_ticks'] > 40, ('running', 'the demo finished in a handful of passes',
                                            running['door_ticks'])
         assert running['room'] == 'RM_0020.RDX', ('running', 'the room changed before the demo ended')
-        assert not running['door_skipped'], ('running', 'the demo reported a skip')
         state = running['door']
         # The fade out is over and the demo is holding before the fade back in.
         assert not state['status'] & 0x100, ('running', 'the fade out never ended')
@@ -135,7 +136,7 @@ def main():
         done = run('finished', 400)
         assert done['room'] == 'RM_0010.RDX' and done['room_changes'] == 1, \
             ('finished', 'the demo did not arrive in the destination room', done['room'])
-        assert not done['door_active'] and not done['door_skipped'], ('finished', 'the demo did not end')
+        assert not done['door_active'], ('finished', 'the demo did not end')
         assert done['door_ticks'] > 100, ('finished', 'the sequence was far shorter than a door demo',
                                           done['door_ticks'])
         # door.c requests the opening sound, the leaf sound and -- only after
@@ -148,7 +149,64 @@ def main():
         for field in ['cinematic', 'player_hidden', 'player_scripted', 'dialog_open', 'movie_active']:
             assert not done[field], ('finished', field, 'the controls were not handed back')
 
-        # --- the confirm skip ---------------------------------------------
+        # --- the room handover frame (ts_flg 0x80, task 7 still off) --------
+        # bhSysCallDoordemo mode 2/10 sets ts_flg 0x100|0x80 (system.c:984,
+        # system.c:1044), so neither bhSysCallGame nor bhSysCallEvent runs for
+        # the rest of the demo.  The room loader clears both bits only in its
+        # very last step, after bhInitEvent: system.c:1886 (bhSysCallMonitor,
+        # mn_md0 4 / mn_md1 16; bhInitEvent is mn_md1 10, system.c:1816).
+        # bhSysCallMonitor is task 20 and njUserMain walks the table in index
+        # order (main.c:195-201), so task 7 does not run in the frame the bit
+        # falls.  The next pass runs bhControlEnemy..bhControlLight and only
+        # then bhAllDrawModel (game.c:48-74).  The destination room can
+        # therefore never be drawn before its first enemy pass -- which is
+        # what used to happen here: the frame that loaded the room drew it with
+        # the enemy works still in their bhSetEnemy/bhInitEvent pose, so the
+        # zombies flashed at a wrong place for one frame.
+        def shot(name, frames):
+            picture = folder / (name + '.bmp')
+            if picture.exists():
+                picture.unlink()
+            value = run(name, frames, extra=['--screenshot', str(picture.resolve())])
+            raw = picture.read_bytes()
+            offset, width, height = (struct.unpack_from('<I', raw, 10)[0],
+                                     struct.unpack_from('<i', raw, 18)[0],
+                                     struct.unpack_from('<i', raw, 22)[0])
+            stride = (width * 3 + 3) & ~3
+            lit = sum(1 for y in range(height) for x in range(width)
+                      if any(raw[offset + y * stride + x * 3 + c] for c in range(3)))
+            return value, lit
+
+        handover = None
+        for frames in range(done['door_ticks'], done['door_ticks'] + 4):
+            value, lit = shot('handover-%d' % frames, frames)
+            if value['room_changes'] == 1:
+                handover = (frames, value, lit)
+                break
+        assert handover, ('handover', 'the demo never reached its destination room in the sampled window',
+                          done['door_ticks'])
+        frames, value, lit = handover
+        assert value['room'] == 'RM_0010.RDX', ('handover', 'the handover frame is not in the destination room')
+        assert value['door_active'], \
+            ('handover', 'task 7 was released in the same frame that loaded the room; '
+                         'system.c:1886 clears ts_flg 0x80 behind task 7', frames)
+        assert lit == 0, \
+            ('handover', 'the destination room was drawn in the frame that loaded it, before its '
+                         'first bhControlEnemy pass', frames, lit)
+        released, lit_after = shot('handover-release', frames + 1)
+        assert not released['door_active'], ('handover', 'ts_flg 0x80 was never released', frames + 1)
+        assert released['room'] == 'RM_0010.RDX' and released['room_changes'] == 1, \
+            ('handover', 'the release frame left the destination room')
+        assert lit_after > 0, ('handover', 'the destination room stayed blank after the release', frames + 1)
+
+        # --- the host skip (deliberate deviation from the original) ---------
+        # BEWUSSTE ABWEICHUNG, NICHT WEGPORTIEREN (Nutzerentscheidung 2026-10-13):
+        # the original has no abort path -- bhStartDoorDemo (room.c:978) clears
+        # pad_ps/pad_on, bhSysCallDoordemo (system.c:939) reads no pad, and
+        # bhControlDoor (door.c:386-528,638-646) only ends on FadeProc1's status
+        # 0x40. The confirm skip is a host comfort function the user asked for.
+        # It has to reach the same destination with the controls back, and it
+        # must not carry a half-played door sound into the destination room.
         skipped = run('skipped', 400, '40 confirm\n')
         assert skipped['door_skipped'], ('skipped', 'the confirm did not skip the demo')
         assert skipped['room'] == 'RM_0010.RDX' and skipped['room_changes'] == 1, \
@@ -156,8 +214,30 @@ def main():
         assert skipped['door_ticks'] < done['door_ticks'], \
             ('skipped', 'the skip did not shorten the sequence', skipped['door_ticks'], done['door_ticks'])
         assert not skipped['door_active'], ('skipped', 'the skipped demo stayed active')
+        assert not any(skipped['door_voices_active']), \
+            ('skipped', 'a door voice was still sounding after the skip', skipped['door_voices_active'])
         for field in ['cinematic', 'player_hidden', 'player_scripted']:
-            assert not skipped[field], ('skipped', field, 'the controls were not handed back')
+            assert not skipped[field], (field, 'the controls were not handed back')
+
+        # The same frame with and without the confirm. Measured: the opening
+        # sound of this packet starts around pass 35 and is still sounding on
+        # its door voice at frame 41, so the undisturbed run shows a sounding
+        # voice there and the skipped one must show none. Without the targeted
+        # stop the voice would run on into RM_0010 until Com_ExecRoomFadeIn's
+        # 250-tick fade caught it.
+        reference = run('skip-reference', 41)
+        assert reference['door_active'] and any(reference['door_voices_active']), \
+            ('skip-reference', 'no door voice was sounding at the sampled frame -- the skip check has nothing to cut',
+             reference['door_voices_active'])
+        cut = run('skip-cut', 41, '40 confirm\n')
+        assert cut['door_skipped'] and cut['room'] == 'RM_0010.RDX' and cut['room_changes'] == 1, \
+            ('skip-cut', 'the skip did not reach the destination room in the sampled frame')
+        assert not any(cut['door_voices_active']), \
+            ('skip-cut', 'the skip let a door voice sound into the destination room', cut['door_voices_active'])
+        # The door sound that was cut keeps its provenance entry; only the voice ends.
+        assert [s for s in cut['audio_played'] if s.startswith('DOOR/')] == [bank + '/0000'], \
+            ('skip-cut', 'the skip changed which door sounds were requested',
+             [s for s in cut['audio_played'] if s.startswith('DOOR/')])
 
         # --- the heartbeat light and the heartbeat shake ---------------------
         # dmo_atr 0x20 runs DokiProcLgt, 0x40 replaces the packet's shake by
@@ -190,9 +270,30 @@ def main():
             ('doki', 'the heartbeat shake lost its interval', shaken['shake_sounds'], doki['door_ticks'])
         assert 'COMMON/0010' in doki['audio_played'], ('doki', 'PruSndTbl sound 10 was not played',
                                                        [s for s in doki['audio_played'] if s.startswith('COMMON/')])
-        # pdVibMxStart has no native driver; the request is reported, not faked.
-        assert 'StartVibrationEx(2, 13)' in doki['audio_unavailable'], \
-            ('doki', 'the vibration request was dropped instead of reported')
+        # StartVibrationEx(2, 13) now reaches the vibration unit: every request
+        # passes its gate; without a controller nothing starts.
+        assert doki['vibration_requests'] == shaken['shake_patterns'], \
+            ('doki', 'the vibration requests did not reach the vibration unit',
+             doki['vibration_requests'], shaken['shake_patterns'])
+        # The skip stops the door voices only. The heartbeat shake gives this
+        # fixture a second sounding channel: its PruSndTbl sound starts on the
+        # system SE slot at pass 44 and is still sounding at frame 45, while the
+        # door voice of the opening sound is sounding too. A skip there has to
+        # silence the door voice and leave the system SE alone -- a blanket
+        # "stop everything" (BGM, ambient, other voices) would fail this.
+        doki_reference = run('doki-skip-reference', 45)
+        assert any(doki_reference['door_voices_active']) and doki_reference['system_sound_active'][0], \
+            ('doki-skip', 'the sampled frame has no door voice and no system sound to tell apart',
+             doki_reference['door_voices_active'], doki_reference['system_sound_active'])
+        doki_cut = run('doki-skip', 45, '44 confirm\n')
+        assert doki_cut['door_skipped'] and doki_cut['room_changes'] == 1, \
+            ('doki-skip', 'the skip did not run')
+        assert not any(doki_cut['door_voices_active']), \
+            ('doki-skip', 'the skip left a door voice sounding', doki_cut['door_voices_active'])
+        assert doki_cut['system_sound_active'] == doki_reference['system_sound_active'], \
+            ('doki-skip', 'the skip cut a channel that is not a door voice',
+             doki_cut['system_sound_active'], doki_reference['system_sound_active'])
+
         # The attribute changes the two procedures, not the sequence itself.
         done_doki = run('doki-finished', 400)
         assert done_doki['room'] == 'RM_0010.RDX' and done_doki['door_ticks'] == done['door_ticks'], \
@@ -202,15 +303,24 @@ def main():
                        attribute=0, stage=0, room=1, spawn=0, door_type=7)
 
         # --- a direct transition has no demo at all -------------------------
-        stairs = run('stairs', 180, use_mods=False, room='RM_0010.RDX',
-                     extra=['--spawn', '1', '--replay', str(ROOT / 'tests/native/replays/first-stairs.txt')])
-        assert stairs['room'] == 'RM_0020.RDX' and stairs['room_changes'] == 1, \
-            ('stairs', 'the direct transition did not change the room')
-        assert stairs['door_ticks'] == 1 and not stairs['door_active'], \
-            ('stairs', 'a door type 255 transition ran a demo', stairs['door_ticks'])
-        assert not [s for s in stairs['audio_played'] if s.startswith('DOOR/')], \
-            ('stairs', 'a direct transition played door sounds')
-        assert not stairs['player_hidden'] and not stairs['blocked_commands']
+        # bhSysCallDoordemo mode 0 (system.c:949): dor_tp 255 goes straight to
+        # mode 10, so the same original DoorCall with door type 255 loads the
+        # destination without a demo, without door sounds and without a pass of
+        # bhControlDoor. (The earlier fixture walked RM_0010 spawn 1 into its
+        # stair door, which runs a real demo; it only looked direct because the
+        # host skip cut that demo at its first pass.)
+        door_call_room(args.data / 'rooms/RM_0020.RDT', mods / 'rooms/RM_0020.RDT',
+                       attribute=0, stage=0, room=1, spawn=0, door_type=255)
+        direct = run('direct', 60)
+        assert direct['room'] == 'RM_0010.RDX' and direct['room_changes'] == 1, \
+            ('direct', 'the direct transition did not change the room')
+        assert direct['door_ticks'] == 0 and not direct['door_active'], \
+            ('direct', 'a door type 255 transition ran a demo', direct['door_ticks'])
+        assert not [s for s in direct['audio_played'] if s.startswith('DOOR/')], \
+            ('direct', 'a direct transition played door sounds')
+        assert not direct['player_hidden'] and not direct['blocked_commands']
+        door_call_room(args.data / 'rooms/RM_0020.RDT', mods / 'rooms/RM_0020.RDT',
+                       attribute=0, stage=0, room=1, spawn=0, door_type=7)
 
         # --- ordinary movement keeps its own footsteps ----------------------
         walked = run('walk', 240, '0 keys forward\n60 keys back\n120 keys forward run\n180 keys none\n',
@@ -220,9 +330,10 @@ def main():
         assert not walked['door_active'] and not walked['room_changes'], \
             ('walk', 'walking started a transition')
 
-    print('Original door demo verified: DoorCall runs its own sequence with the door sounds in order, '
-          'arrives in the destination room with the controls back, the confirm skip shortens it to the '
-          'same destination, and a type 255 transition still runs no demo.')
+    print('Original door demo verified: DoorCall runs its own sequence with the door sounds in order and '
+          'arrives in the destination room with the controls back. The host skip (deliberate deviation, '
+          'see native/doors.h) shortens it to the same destination, silences the door voices it cuts and '
+          'leaves the other channels sounding; a type 255 transition still runs no demo.')
 
 
 if __name__ == '__main__':

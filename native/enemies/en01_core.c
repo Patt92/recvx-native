@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <stdlib.h>
 /* T2 — EN01-Zustandsmaschine (Zombie), nativ eigenstaendig bestimmt.
    ===========================================================================
    Semantikreferenz: en01.c, en01b.c, en01sub.c (Fundstelle an jeder Stelle als
@@ -264,15 +266,38 @@ static RECVX_ENEMY_WORK* en01_set_link_enemy(RECVX_ENEMY_WORK* w, int32_t lkono,
 /* ---------------------------------------------------------------------------
    bhEne01 (en01.c:2467-2502) — Eintrag fuer bhJumpEnemy[1]
    --------------------------------------------------------------------------- */
+
+/* Temporary diagnostic: observe self and linked parent without changing state. */
+#define EN01_POSITION_TRACE(call) do { \
+    if (!getenv("RECVX_POSITION_TRACE")) { call; } \
+    else { \
+        RECVX_ENEMY_WORK* targets[2] = {w, w->lkwkp}; \
+        float before[2][3]; \
+        unsigned trace_i; \
+        for (trace_i=0; trace_i<2; ++trace_i) { \
+            RECVX_ENEMY_WORK* q=targets[trace_i]; \
+            if(q){before[trace_i][0]=q->px;before[trace_i][1]=q->py;before[trace_i][2]=q->pz;} \
+        } \
+        call; \
+        for (trace_i=0; trace_i<2; ++trace_i) { \
+            RECVX_ENEMY_WORK* q=targets[trace_i]; \
+            if(q&&(q->px!=before[trace_i][0]||q->py!=before[trace_i][1]||q->pz!=before[trace_i][2])) \
+                fprintf(stderr,"POS phase=%s caller=%u target=%u parent=%u mode=%u motion=%u before=%.9g,%.9g,%.9g after=%.9g,%.9g,%.9g\n", \
+                    #call,(unsigned)w->owner_index,(unsigned)q->owner_index,trace_i, \
+                    (unsigned)q->mode0,(unsigned)q->mtn_no, \
+                    before[trace_i][0],before[trace_i][1],before[trace_i][2],q->px,q->py,q->pz); \
+        } \
+    } \
+} while(0)
 void recvx_en01_control(RECVX_ENEMY_WORK* w)
 {
     RECVX_EN01_EXP0* p;
 
     if (!w) return;
 
-    recvx_en01_dmg_check(w);                                /* en01.c:2469 */
+    EN01_POSITION_TRACE(recvx_en01_dmg_check(w));                                /* en01.c:2469 */
 
-    recvx_en01_main_loop(w);                                /* :2471 */
+    EN01_POSITION_TRACE(recvx_en01_main_loop(w));                                /* :2471 */
 
     if (w->flg & 0x4u) w->flg &= ~0x4u;                     /* :2473-2476 */
 
@@ -282,15 +307,17 @@ void recvx_en01_control(RECVX_ENEMY_WORK* w)
         if (p->word30 > 0)  p->word30--;                    /* EXP0_I(48)  :2483 */
         if (p->word34 > 0)  p->word34--;                    /* EXP0_I(52)  :2488 */
 
-        recvx_en01_coll_check(w);                          /* :2493 */
+        EN01_POSITION_TRACE(recvx_en01_coll_check(w));                          /* :2493 */
 
-        if (p->flags & 0x80000u) recvx_en01_player_link(w);/* :2495 */
+        if (p->flags & 0x80000u) EN01_POSITION_TRACE(recvx_en01_player_link(w));/* :2495 */
     } else {
         en01_gap(w, "bhEne_CallocWork(0xb0, 8)");
     }
 
-    recvx_en01_calc_enemy(w);                              /* :2500 */
+    EN01_POSITION_TRACE(recvx_en01_calc_enemy(w));                              /* :2500 */
 }
+#undef EN01_POSITION_TRACE
+
 
 /* ---------------------------------------------------------------------------
    bhEne01_MainLoop (en01.c:2504-2538)
@@ -2741,19 +2768,16 @@ void recvx_en01_coll_check(RECVX_ENEMY_WORK* w)
                     if (!(pe->flags & 0x40u)) {              /* :4032 */
                         if (pe->flags & 0x40000u) {          /* :4034 */
                             ep->flg2 &= ~1u;                 /* :4036 */
-                            if (sv && sv->check_player) sv->check_player(ep);
-                            else en01_gap(w, "bhCheckPlayer (hitchk.c)");
+                            if (sv && sv->check_player) sv->check_player(ep); else en01_gap(w, "bhCheckPlayer (hitchk.c)");
                             ep->flg2 |= 1u;                  /* :4040 */
                         } else {
-                            if (sv && sv->check_player) sv->check_player(ep); /* :4044 */
-                            else en01_gap(w, "bhCheckPlayer (hitchk.c)");
+                            {float _b[3]={ep->px,ep->py,ep->pz};float _m[16];int _j=en01_joint_mtx(ep,0,_m);if (sv && sv->check_player) sv->check_player(ep); else en01_gap(w, "bhCheckPlayer (hitchk.c)"); /* :4044 */if(getenv("RECVX_POSITION_TRACE")&&(ep->px!=_b[0]||ep->pz!=_b[2]))fprintf(stderr,"SUB %s ep=%u flg=%x aox=%.4g aoz=%.4g j0=%d j0xz=%.4g,%.4g before=%.5g,%.5g,%.5g after=%.5g,%.5g,%.5g\n","PLY",(unsigned)ep->owner_index,(unsigned)ep->flg,ep->aox,ep->aoz,_j,_j?_m[12]:0.f,_j?_m[14]:0.f,_b[0],_b[1],_b[2],ep->px,ep->py,ep->pz);}
                         }
-                        if (sv && sv->check_enemies) sv->check_enemies(ep); /* :4047 */
-                        else en01_gap(w, "bhCheckEnemies (weapon.c)");
+                        {float _b[3]={ep->px,ep->py,ep->pz};float _m[16];int _j=en01_joint_mtx(ep,0,_m);if (sv && sv->check_enemies) sv->check_enemies(ep); else en01_gap(w, "bhCheckEnemies (weapon.c)"); /* :4047 */if(getenv("RECVX_POSITION_TRACE")&&(ep->px!=_b[0]||ep->pz!=_b[2]))fprintf(stderr,"SUB %s ep=%u flg=%x aox=%.4g aoz=%.4g j0=%d j0xz=%.4g,%.4g before=%.5g,%.5g,%.5g after=%.5g,%.5g,%.5g\n","ENE",(unsigned)ep->owner_index,(unsigned)ep->flg,ep->aox,ep->aoz,_j,_j?_m[12]:0.f,_j?_m[14]:0.f,_b[0],_b[1],_b[2],ep->px,ep->py,ep->pz);}
                     }
                 }
             }
-            recvx_en01_coll_check_wall(ep);                  /* :4052 */
+            {float _b[3]={ep->px,ep->py,ep->pz};float _m[16];int _j=en01_joint_mtx(ep,0,_m);recvx_en01_coll_check_wall(ep);                  /* :4052 */if(getenv("RECVX_POSITION_TRACE")&&(ep->px!=_b[0]||ep->pz!=_b[2]))fprintf(stderr,"SUB %s ep=%u flg=%x aox=%.4g aoz=%.4g j0=%d j0xz=%.4g,%.4g before=%.5g,%.5g,%.5g after=%.5g,%.5g,%.5g\n","WALL",(unsigned)ep->owner_index,(unsigned)ep->flg,ep->aox,ep->aoz,_j,_j?_m[12]:0.f,_j?_m[14]:0.f,_b[0],_b[1],_b[2],ep->px,ep->py,ep->pz);}
         }
     } else if (!(w->flg & 2u) && (p->flags & 0x40000000u)) { /* :4055 */
         recvx_en01_coll_check_wall(w);                       /* :4057 */
@@ -3202,7 +3226,7 @@ int recvx_en01_action_mode_check(RECVX_ENEMY_WORK* w)
         return 0;                                            /* :4723 */
     }
 
-    if ((pl.flg & 4u) || (pl.flg & 2u) || (pl.stflg & 0x80000000u)) { /* :4726 */
+    if ((pl.flg & 4u) || (pl.debug_attack_disabled || (pl.flg & 2u)) || (pl.stflg & 0x80000000u)) { /* :4726 */
         self.x = w->px; self.y = w->py; self.z = w->pz;
         if (!en01_search_player2(w, &self, w->ay, 5461, &seen)) return 0;
         if (seen != -1) {                                    /* :4728 */
@@ -6349,7 +6373,7 @@ int recvx_en01_eat_check(RECVX_ENEMY_WORK* w, int rng, float dist, int mode)
         en01_gap(w, "plp (en01.c:11666)");
         return 0;
     }
-    if ((p->flags & 0x20000000u) || (pl.flg & 2u) ||
+    if ((p->flags & 0x20000000u) || (pl.debug_attack_disabled || (pl.flg & 2u)) ||
         (pl.stflg & 0x80000000u)) {                          /* :11666 */
         return 0;                                            /* :11668 */
     }
@@ -6405,7 +6429,7 @@ int recvx_en01_eat_check(RECVX_ENEMY_WORK* w, int rng, float dist, int mode)
         }
         /* at.r = 1.0f (en01.c:11709) */
         if (!sv->sphere_capsule(&sphere, 1.0f, &cap.c1, &cap.c2, cap.r) ||
-            pl.pos.y != w->py || (pl.flg & 2u) ||
+            pl.pos.y != w->py || (pl.debug_attack_disabled || (pl.flg & 2u)) ||
             (pl.stflg & 0x80000000u) || pl.hp < 0) {         /* :11711-11716 */
             return 0;                                        /* :11718 */
         }
@@ -6481,7 +6505,7 @@ int recvx_en01_worm_check(RECVX_ENEMY_WORK* w)
         (uint16_t)(pl.ay - w->ay + EN01_DEG_ANG(45.0f)) <
             (uint16_t)EN01_DEG_ANG(90.0f) &&
         pl.pos.y == w->py &&
-        !(pl.flg & 2u) &&
+        !(pl.debug_attack_disabled || (pl.flg & 2u)) &&
         !(pl.stflg & 0x80000000u) &&
         pl.hp >= 0) {                                        /* :11783-11791 */
         return 1;                                            /* :11793 */

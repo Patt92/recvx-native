@@ -1,5 +1,6 @@
 #include "renderer.h"
 #include "chunk_blend.h"
+#include "shadow_raster.h"
 #include <algorithm>
 #include <atomic>
 #include <thread>
@@ -10,7 +11,7 @@
 #include <stdexcept>
 namespace recvx {
 namespace {
-struct Projected {float x,y,invz,u_over_z,v_over_z;};
+struct Projected {float x,y,invz,u_over_z,v_over_z;float tz=0;};
 float edge(const Projected& a,const Projected& b,float x,float y){return(b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);}
 std::uint32_t shade(const SceneTriangle& t){
     if(t.world_lit)return t.color;
@@ -79,7 +80,10 @@ struct Setup {
     bool gouraud=false;std::array<NJS_POINT3,3> light{};
     float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
     std::uint64_t blend_register=0x44;
-    bool filtered=false,linear_only=false;
+    bool filtered=false,linear_only=false,post=false;
+    // GS FOG: every CNK strip is drawn with FGE (ps2_NinjaCnk.c:1880); F per vertex
+    // from njCalcFogPower(fVSZ) (:1196), interpolated like the vertex colour.
+    bool fogged=false;std::array<float,3> fog{};
 };
 SceneVertex lerp_vertex(const SceneVertex& a,const SceneVertex& b,float t){
     auto mix=[t](float x,float y){return x+(y-x)*t;};
@@ -121,6 +125,13 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     near=std::max(near,0.001f);
     last_clip_={{near,far}};
     std::vector<Setup> setups;setups.reserve(scene.triangles.size());
+    // F05: receivers carry the same transported vertex depth as the modifier
+    // (Ps2AddPrim3D*/Mod: clamp(-a-b*q), integer vertex Z, screen-linear).
+    std::optional<ShadowDepthCoefficients> zc;
+    if(!scene.shadows.empty()){
+        if(!(far>near))throw std::runtime_error("shadow: finite njClipZ range required for transported depth");
+        zc=shadow_depth_coefficients(-near,-far);
+    }
     for(const auto& triangle:scene.triangles){
         // bhCkFlg numbers bits from the most significant bit.
         if(triangle.camera_mask && triangle.object<512 && (hidden[triangle.object/32] & (0x80000000u>>(triangle.object%32))))continue;
@@ -147,7 +158,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             std::array<Projected,3> p;
             const std::array<SceneVertex,3> v{clipped[0],clipped[fan],clipped[fan+1]};
             bool finite=true;
-            for(int i=0;i<3;++i){const auto point=v[i].position;p[i]={W*0.5f+point.x*(focal_x*float(S))/point.z,H*0.5f+point.y*(focal_y*float(S))/point.z,1/point.z,v[i].u/point.z,v[i].v/point.z};finite=finite&&std::isfinite(p[i].x)&&std::isfinite(p[i].y);}
+            for(int i=0;i<3;++i){const auto point=v[i].position;p[i]={W*0.5f+point.x*(focal_x*float(S))/point.z,H*0.5f+point.y*(focal_y*float(S))/point.z,1/point.z,v[i].u/point.z,v[i].v/point.z,zc?float(shadow_vertex_depth(*zc,1/point.z)):0.f};finite=finite&&std::isfinite(p[i].x)&&std::isfinite(p[i].y);}
             if(!finite)continue;
             float area=edge(p[0],p[1],p[2].x,p[2].y);
             if(std::abs(area)<1e-6f||!std::isfinite(area))continue;
@@ -162,10 +173,12 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             // used to derive perspective-correct texture derivatives per pixel.
             const float dax=-(p[2].y-p[1].y)/area,day=(p[2].x-p[1].x)/area,dbx=-(p[0].y-p[2].y)/area,dby=(p[0].x-p[2].x)/area,dcx=-(dax+dbx),dcy=-(day+dby);
             Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
-            setup.blend_register=triangle.blend_register;
+            setup.blend_register=triangle.blend_register;setup.post=triangle.after_modifiers;
             setup.filtered=triangle.texture_filter==SceneTextureFilter::Linear||(triangle.texture_filter==SceneTextureFilter::Default&&filter_);
             setup.linear_only=triangle.texture_filter==SceneTextureFilter::Linear;
             if(triangle.gouraud&&triangle.world_lit){setup.gouraud=true;setup.light={v[0].light,v[1].light,v[2].light};if(area_swapped)std::swap(setup.light[1],setup.light[2]);}
+            // njDraw* primitives (effects) choose FGE per call (ps2_NaDraw.c:351/355); only the CNK strips are fogged here.
+            if(scene.fog.enabled&&triangle.world_lit){setup.fogged=true;for(int i=0;i<3;++i)setup.fog[i]=fog_sample(scene.fog,v[i].position.z);if(area_swapped)std::swap(setup.fog[1],setup.fog[2]);}
             setup.Ux=dax*p[0].u_over_z+dbx*p[1].u_over_z+dcx*p[2].u_over_z;setup.Uy=day*p[0].u_over_z+dby*p[1].u_over_z+dcy*p[2].u_over_z;
             setup.Vx=dax*p[0].v_over_z+dbx*p[1].v_over_z+dcx*p[2].v_over_z;setup.Vy=day*p[0].v_over_z+dby*p[1].v_over_z+dcy*p[2].v_over_z;
             setup.Wx=dax*p[0].invz+dbx*p[1].invz+dcx*p[2].invz;setup.Wy=day*p[0].invz+dby*p[1].invz+dcy*p[2].invz;
@@ -174,11 +187,17 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             setups.push_back(setup);
         }
     }
+    std::size_t setups_before_modifiers=0;
     // Ninja draws translucent polygons after the opaque pass: keep opaque order, then far-to-near.
     {auto first=std::stable_partition(setups.begin(),setups.end(),[](const Setup& s){return s.blend==SceneBlend::Opaque;});
-     std::stable_sort(first,setups.end(),[](const Setup& a,const Setup& b){return a.p[0].invz+a.p[1].invz+a.p[2].invz<b.p[0].invz+b.p[1].invz+b.p[2].invz;});}
+     std::stable_sort(first,setups.end(),[](const Setup& a,const Setup& b){return a.p[0].invz+a.p[1].invz+a.p[2].invz<b.p[0].invz+b.p[1].invz+b.p[2].invz;});
+     // game.c:318 draws room, objects, then effects (modifiers) and only then enemy/player.
+     if(zc)setups_before_modifiers=std::size_t(std::stable_partition(setups.begin(),first,[](const Setup& s){return !s.post;})-setups.begin());}
     // Stage 2: rasterize horizontal bands, possibly on several threads. Every band visits the
     // setups in submission order, so the result does not depend on the thread count.
+    std::vector<float> transported;if(zc)transported.assign(std::size_t(W)*H,0.f);
+    // njSetFogColor keeps 0x00RRGGBB; the canvas is 0xAABBGGRR.
+    const std::uint32_t fog_pixel=0xff000000u|((scene.fog_color&255u)<<16)|(scene.fog_color&0xff00u)|((scene.fog_color>>16)&255u);
     const auto rasterize=[&](const Setup& s,int y0,int y1){
         const auto& p=s.p;const auto* texture=s.texture;
             int setup_y=-1,setup_x=0,setup_taps=1,setup_l0=0;float setup_du=0,setup_dv=0,setup_frac=0;
@@ -218,9 +237,10 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         if((texel>>24)==0)continue;
                         pixel=modulate(texel,pixel);
                         if(s.blend!=SceneBlend::Opaque){
-                            // TIM2 alpha has already been translated into the
-                            // PS2 GS 0..128 range; see the filtered path below.
-                            coverage=std::min(1.f,float(texel>>24)/(s.blend==SceneBlend::Ninja?128.f:255.f));
+                            // Every engine texture carries the host 0..255
+                            // alpha whose blend factor is alpha/255 (see the
+                            // filtered path below).
+                            coverage=float(texel>>24)/255.f;
                         }
                     } else {
                                                 const float tw=float(texture->width),th=float(texture->height);
@@ -253,19 +273,17 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         // what is already drawn instead of flipping on/off at a threshold.
                         if(acc[3]<=0.f)continue;
                         // Constant alpha cancels out of RGB interpolation. Keep
-                        // its actual coverage separately (GS textures often use 128).
+                        // its actual coverage separately (full opacity is 0xFF).
                         if(s.blend!=SceneBlend::Opaque){
-                            // Ps2CheckTextureAlpha converts TIM2 alpha to the GS
-                            // 0..128 domain.  CNK's VU1 path preserves that
-                            // domain: vu1SetAlphaRatio supplies a separate
-                            // 0..128 material ratio, and textured strips combine
-                            // it with the texel alpha before GS ALPHA.  Treating
-                            // a CNK texel as 0..255 makes the normal GS value
-                            // 128 half-transparent (notably on NPC/player
-                            // strips using NJD_FST_UA).  Host Alpha/Additive
-                            // sprites retain their conventional 0..255 alpha.
-                            const float alpha_domain=s.blend==SceneBlend::Ninja?128.f:255.f;
-                            coverage=texture->filter_cache->uniform_alpha?float(texture->filter_cache->max_alpha)/alpha_domain:acc[3]/alpha_domain;
+                            // One alpha domain for every path: the texel alpha
+                            // is the GS ratio over 255.  Ps2CheckTextureAlpha's
+                            // Ps2AlphaIsHalf halves the TIM2 palette and the GS
+                            // blends As/128; the same factor is (2*As)/256, so
+                            // the engine keeps the 8-bit alpha and divides by
+                            // 255.  CNK strips combine it with vu1SetAlphaRatio
+                            // (the material alpha over 255) as the VU1 path does
+                            // before GS ALPHA.
+                            coverage=texture->filter_cache->uniform_alpha?float(texture->filter_cache->max_alpha)/255.f:acc[3]/255.f;
                             coverage=std::min(1.f,coverage);
                         }
                         else if(texture->filter_cache->cutout){coverage=std::min(1.f,acc[3]/float(texture->filter_cache->max_alpha));if(coverage<1.f/32)continue;}
@@ -274,6 +292,9 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         pixel=modulate(0xff000000|(channel(acc[2])<<16)|(channel(acc[1])<<8)|channel(acc[0]),pixel);
                     }
                 }
+                if(s.fogged){ // GS: Cv = (Cs*F + Cf*(255-F)) >> 8 per channel, F from the vertex fog coefficients
+                    const unsigned F=unsigned(std::clamp(a*s.fog[0]+b*s.fog[1]+c*s.fog[2],0.f,255.f));
+                    std::uint32_t out=pixel&0xff000000u;for(unsigned shift:{0u,8u,16u})out|=((((pixel>>shift)&255u)*F+((fog_pixel>>shift)&255u)*(255u-F))>>8)<<shift;pixel=out;}
                 if(s.blend==SceneBlend::Additive){
                     const auto below=color[index];std::uint32_t mixed=0xff000000;
                     const float alpha=coverage*float(s.color>>24)/255.f;
@@ -290,25 +311,63 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                     for(unsigned shift:{0u,8u,16u})mixed|=std::uint32_t(float((below>>shift)&255)*(1-coverage)+float((pixel>>shift)&255)*coverage+.5f)<<shift;
                     pixel=mixed;if(coverage<.5f){color[index]=pixel;continue;} // too thin to occlude later geometry
                 }
-                if(s.depth_write)depth[index]=invz;
+                if(s.depth_write){depth[index]=invz;if(!transported.empty())transported[index]=a*p[0].tz+b*p[1].tz+c*p[2].tz;}
                 color[index]=wireframe && std::min({a,b,c})>0.025f?scene.background:pixel;
             }
             }
     };
     constexpr int band_rows=8; // base-resolution rows per work item
     const int bands=(height_+band_rows-1)/band_rows;
-    std::atomic<int> next_band{0};
-    const auto worker=[&]{for(int band=next_band++;band<bands;band=next_band++){
-        const int by0=band*band_rows,by1=std::min(height_,by0+band_rows),y0=by0*S,y1=by1*S;
-        for(const auto& s:setups)if(s.maxy>=y0&&s.miny<y1)rasterize(s,y0,y1);
-        if(S>1)for(int y=by0;y<by1;++y)for(int x=0;x<width_;++x){
-            unsigned r=0,g=0,b=0;float nearest=0;
-            for(int sy=0;sy<S;++sy)for(int sx=0;sx<S;++sx){const auto at=std::size_t(y*S+sy)*W+x*S+sx;const auto c=color[at];r+=c&255;g+=(c>>8)&255;b+=(c>>16)&255;nearest=std::max(nearest,depth[at]);}
-            const unsigned n=unsigned(S*S);pixels_[std::size_t(y)*width_+x]=0xff000000|(((b+n/2)/n)<<16)|(((g+n/2)/n)<<8)|((r+n/2)/n);depth_[std::size_t(y)*width_+x]=nearest;}
-    }};
-    const unsigned workers=std::min<unsigned>(threads_?threads_:std::min(4u,std::max(1u,std::thread::hardware_concurrency())),std::max(1,bands));
-    if(workers<=1||setups.size()<64)worker();
-    else{std::vector<std::thread> pool;for(unsigned i=1;i<workers;++i)pool.emplace_back(worker);worker();for(auto& t:pool)t.join();}
+    // Band rasterization is the bulk of a frame and scales with the hardware
+    // threads; the result is identical for any worker count (same bands, same
+    // submission order), so this is presentation speed only and never changes a
+    // pixel. Two threads stay free for the SDL audio callback and presentation
+    // (measured: more workers than hardware threads is slower again), and the
+    // count never drops below the four workers used before.
+    const unsigned available=std::max(1u,std::thread::hardware_concurrency());
+    const unsigned default_workers=std::max(4u,available>2u?available-2u:1u);
+    const unsigned workers=std::min<unsigned>(threads_?threads_:default_workers,std::max(1,bands));
+    // Stage [first,last) over every band, then optionally downsample. Joining
+    // between stages keeps the shadow pass serial and thread-count independent.
+    const auto run=[&](std::size_t first,std::size_t last,bool resolve){
+        std::atomic<int> next_band{0};
+        const auto worker=[&]{for(int band=next_band++;band<bands;band=next_band++){
+            const int by0=band*band_rows,by1=std::min(height_,by0+band_rows),y0=by0*S,y1=by1*S;
+            for(std::size_t i=first;i<last;++i){const auto& s=setups[i];if(s.maxy>=y0&&s.miny<y1)rasterize(s,y0,y1);}
+            if(resolve&&S>1)for(int y=by0;y<by1;++y)for(int x=0;x<width_;++x){
+                unsigned r=0,g=0,b=0;float nearest=0;
+                for(int sy=0;sy<S;++sy)for(int sx=0;sx<S;++sx){const auto at=std::size_t(y*S+sy)*W+x*S+sx;const auto c=color[at];r+=c&255;g+=(c>>8)&255;b+=(c>>16)&255;nearest=std::max(nearest,depth[at]);}
+                const unsigned n=unsigned(S*S);pixels_[std::size_t(y)*width_+x]=0xff000000|(((b+n/2)/n)<<16)|(((g+n/2)/n)<<8)|((r+n/2)/n);depth_[std::size_t(y)*width_+x]=nearest;}
+        }};
+        if(workers<=1||last-first<64)worker();
+        else{std::vector<std::thread> pool;for(unsigned i=1;i<workers;++i)pool.emplace_back(worker);worker();for(auto& t:pool)t.join();}
+    };
+    if(!zc)run(0,setups.size(),true);
+    else{
+        run(0,setups_before_modifiers,false);
+        // bhDrawMdfEffect: per work two mask passes, then one rectangle composite.
+        // Receiver Z is never written. GS compares transported integer Z with GEQUAL.
+        const float aspect_x=focal_x*640.f/float(width_),aspect_y=focal_y*480.f/float(height_);
+        for(const auto& shadow:scene.shadows){
+            const auto projection=project_shadow(shadow,view,1.f,aspect_x,aspect_y);
+            if(!projection.drawable)continue;
+            const auto mask=raster_shadow_mask(projection,*zc,[&](int x,int y,float modifier){
+                const int sx=std::min(W-1,int((float(x)+.5f)*float(W)/640.f)),sy=std::min(H-1,int((float(y)+.5f)*float(H)/480.f));
+                return shadow_depth_pass(std::uint32_t(modifier),std::uint32_t(transported[std::size_t(sy)*W+sx]));});
+            const auto fog=fog_sample(scene.fog,projection.last_vertex_z);
+            const unsigned fog_power=unsigned(std::clamp(fog,0.f,255.f));
+            const auto quantize=[](float v,float origin){return std::trunc(v*16.f)/16.f-origin;};
+            const float rx0=quantize(projection.bounds[0],1728.f),ry0=quantize(projection.bounds[1],1808.f);
+            const float rx1=quantize(projection.bounds[2],1728.f),ry1=quantize(projection.bounds[3],1808.f);
+            for(int y=0;y<H;++y){const int my=std::min(479,int((float(y)+.5f)*480.f/float(H)));
+                if(float(my)+.5f<ry0||float(my)+.5f>=ry1)continue;
+                for(int x=0;x<W;++x){const int mx=std::min(639,int((float(x)+.5f)*640.f/float(W)));
+                    if(float(mx)+.5f<rx0||float(mx)+.5f>=rx1)continue;
+                    const unsigned value=mask[std::size_t(my)*640+mx];if(!value)continue;
+                    auto& pixel=color[std::size_t(y)*W+x];pixel=shadow_mask_composite(pixel,value,fog_power);}}
+        }
+        run(setups_before_modifiers,setups.size(),true);
+    }
     // njDrawLine3D: finite 3D segments, endpoint colours, depth test, no depth write.
     for(const auto& line:scene.lines){NJS_POINT3 a=line.points[0],b=line.points[1];njCalcPoint(&view,&a,&a);njCalcPoint(&view,&b,&b);float lo=0,hi=1;
         const float dz=b.z-a.z;if(std::abs(dz)<1e-8f){if(a.z<near||(far>near&&a.z>far))continue;}
@@ -320,10 +379,12 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
         auto clip=[&](float p,float q){if(std::abs(p)<1e-8f)return q>=0;const float r=q/p;if(p<0)first=std::max(first,r);else last=std::min(last,r);return first<=last;};
         if(!clip(-dx,x0)||!clip(dx,width_-1-x0)||!clip(-dy,y0)||!clip(dy,height_-1-y0))continue;
         const int steps=std::max(1,int(std::ceil(std::max(std::abs(dx),std::abs(dy))*(last-first))));
-        for(int n=0;n<=steps;++n){const float t=lerp(first,last,float(n)/steps),original=lerp(lo,hi,t);const int x=int(std::lround(x0+dx*t)),y=int(std::lround(y0+dy*t));if(x<0||y<0||x>=width_||y>=height_)continue;
+        // GS raster rule: pixel i covers [i, i+1), so a coordinate lands in floor(c)
+        // (map.c:2337 MapDrawLine aims at 0.5 + floor(x), the pixel centre).
+        for(int n=0;n<=steps;++n){const float t=lerp(first,last,float(n)/steps),original=lerp(lo,hi,t);const int x=int(std::floor(x0+dx*t)),y=int(std::floor(y0+dy*t));if(x<0||y<0||x>=width_||y>=height_)continue;
             const auto at=std::size_t(y)*width_+x;const float invz=lerp(1/c.z,1/d.z,t);if(invz<depth_[at])continue;
             unsigned pixel=0;for(unsigned shift:{0u,8u,16u,24u})pixel|=unsigned(std::clamp(lerp(float((line.colors[0]>>shift)&255),float((line.colors[1]>>shift)&255),original),0.f,255.f))<<shift;
-            pixels_[at]=blend_gs(0x44,pixel,pixels_[at],std::min(1.f,float(pixel>>24)/128.f));
+            pixels_[at]=blend_gs(0x44,pixel,pixels_[at],std::min(1.f,float(pixel>>24)/255.f));
         }
     }
 

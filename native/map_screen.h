@@ -84,6 +84,7 @@ struct MapObject {
     std::array<std::int32_t,3> ang{};
     int child=-1,sibling=-1;
     bool has_model=false;        /* objP->model != NULL */
+    std::uint32_t node=0;        /* index into the file's NJS_CNK_OBJECT array (model geometry lookup) */
 };
 
 /* map.c tag_wrk_typ: one room marker of the current floor plus its four
@@ -157,7 +158,21 @@ public:
     const MapChunk& map_texture()const{return map_texture_;}
     const MapChunk& stage_texture()const{return stage_texture_;}
     const MapChunk& stage_model()const{return stage_model_;}
+    /* The floor file (map.c:420 map_bufP after the index). */
     const std::vector<std::uint8_t>& buffer()const{return buffer_;}
+    /* The player's index file MRY/000<ply_id>: marker_models() and
+       map_texture() address these bytes. */
+    const std::vector<std::uint8_t>& index_buffer()const{return index_buffer_;}
+    /* Bumped whenever the index / floor resources change (reload keys). */
+    unsigned index_generation()const{return index_generation_;}
+    unsigned stage_generation()const{return stage_generation_;}
+    /* MapViewMain / MapLightMain state of the last control() tick: the view
+       matrix every draw matrix already contains, the easy-multi light in
+       camera space (fCx..fCz), its colour (pr,pg,pb)/map_scale and ambient. */
+    const NJS_MATRIX& view_matrix()const{return vew_mtx_;}
+    const NJS_VECTOR& light_camera_direction()const{return light_camera_;}
+    const std::array<float,3>& light_color()const{return light_color_;}
+    const std::array<float,3>& ambient()const{return ambient_;}
     /* The sound effects requested this tick, in call order (CallSystemSe). */
     const std::vector<std::pair<int,int>>& sounds()const{return sounds_;}
     /* Files requested through bhReadMapData, in call order. */
@@ -233,7 +248,10 @@ private:
     /* Host/service bindings and the loaded file. */
     MapHost host_{};
     MapServices services_{};
-    std::vector<std::uint8_t> buffer_;
+    std::vector<std::uint8_t> buffer_,index_buffer_;
+    unsigned index_generation_=0,stage_generation_=0;
+    NJS_VECTOR light_world_{},light_camera_{};
+    std::array<float,3> light_color_{},ambient_{};
     std::size_t index_floor_table_=0;
     std::vector<MapObject> objects_;
     void purge_tree();               /* MapPurgeTree (map.c:1245) */

@@ -38,6 +38,7 @@ struct CombatOriginal {
     // `gap` mit dem Originalnamen gemeldet und tut nichts.
     std::function<int()> reload;
     std::function<int()> check_bullet,count_bullet;
+    std::function<RECVX_ENEMY_TABLE*()> enemies;
     std::function<int(unsigned)> event_flag;
     std::function<void(unsigned)> set_event_flag,pt_flg_or;
     std::function<int(const RECVX_CB_LINE*,unsigned,float*,RECVX_CB_WALL_HIT*)> l2_wall;
@@ -60,6 +61,9 @@ struct CombatOriginal {
         s.search_bullet=[](void* p){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->reload?c->reload():0);};
         s.check_bullet=[](void* p){auto* c=static_cast<CombatOriginal*>(p);return int16_t(c->check_bullet?c->check_bullet():0);};
         s.count_bullet=[](void* p){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->count_bullet?c->count_bullet():0);};
+        // sys->ene / sys->ewk_n: die Gegnertabelle des vorhandenen Raum-
+        // besitzers, genau die, die der Gegnerpass fuellt. Kein zweiter Satz.
+        s.enemies=[](void* p)->RECVX_ENEMY_TABLE*{auto* c=static_cast<CombatOriginal*>(p);return c->enemies?c->enemies():nullptr;};
         s.event_flag=[](void* p,uint32_t no){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->event_flag?c->event_flag(no):0);};
         s.set_event_flag=[](void* p,uint32_t no){auto* c=static_cast<CombatOriginal*>(p);if(c->set_event_flag)c->set_event_flag(no);};
         s.pt_flg_or=[](void* p,uint32_t bits){auto* c=static_cast<CombatOriginal*>(p);if(c->pt_flg_or)c->pt_flg_or(bits);};
@@ -80,9 +84,8 @@ struct CombatOriginal {
             const auto& keys=clip.angles[model];
             const auto& key=keys[std::min<std::size_t>(frame,keys.size()-1)];
             ang[0]=key[0];ang[1]=key[1];ang[2]=key[2];return 1;};
-        // Ungebundene Besitzer: Gegnertabelle (C02 ist in world noch nicht
-        // exponiert), Wasserabfragen (P03/E01), Wandzerstörung, Funken/
-        // Spritzer/Licht (E-Pakete) und Vibration ohne Treiber. Sie bleiben
+        // Ungebundene Besitzer: Wasserabfragen (P03/E01), Wandzerstörung,
+        // Funken/Spritzer (E-Pakete) und Vibration ohne Treiber. Sie bleiben
         // NULL; der Kern meldet sie namentlich über `gap`.
         core=recvx_combat_create(&tables,&s);if(!core)throw std::bad_alloc();
         // Logische Knotenzahl des Körpers (ActorNodeLayout script_to_model).
@@ -148,6 +151,10 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
         return int(std::int16_t(entry&0xffff));};
     // weapon.c:439 bhCountBullet beim vorhandenen Inventarbesitzer.
     engine.count_bullet=[&]{return inventory.count_bullet()?1:0;};
+    // sys->ene / sys->ewk_n des vorhandenen Raumbesitzers (pwksub.c:244,
+    // playpch.c:318, weapon.c:614). Ohne laufenden Raum gibt es keine
+    // Gegnertabelle; der Aufrufer meldet die Luecke dann namentlich.
+    engine.enemies=[&]()->RECVX_ENEMY_TABLE*{return world?&world->enemy_table():nullptr;};
     // bhCkFlg/bhStFlg(sys->ev_flg, n): Flagmatrix 1 des vorhandenen
     // Eventbesitzers (snapshot.cpp:73 bindet genau sie an ev_flg).
     engine.event_flag=[&](unsigned no){return events?(events->flag(1,no)?1:0):0;};
@@ -207,7 +214,7 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // der Inventarbesitzer setzt es in bhCountBullet, der Kampf löscht es.
     if(events&&inventory.chamber_empty)events->flags[11][0]|=0x40000u;
     const unsigned old_shots=engine.result.shots,old_hits=engine.result.hits,old_empty=engine.result.empty;const bool was_attacking=attacking();
-    recvx_combat_tick(engine.core,&engine.sys,&engine.result);engine.pad=pad;
+    recvx_combat_tick(engine.core,&engine.sys,&engine.result);engine.pad=pad;accumulate_aim(engine.result);
     if(events)inventory.chamber_empty=(events->flags[11][0]&0x40000u)!=0;
     if(engine.sys.cam_written)engine.unavailable.insert("cam.pe_ax/cam.pe_pers (Kamerabesitzer)");
     if(world)world->set_effect_counter(engine.sys.yk_ct);
@@ -241,6 +248,21 @@ void CombatController::publish_pose(PlayerAsset& player,std::size_t motion,std::
         view.obj[n].pos[0]=local[m].position.x;view.obj[n].pos[1]=local[m].position.y;view.obj[n].pos[2]=local[m].position.z;
         view.obj[n].ang[0]=local[m].angles[0];view.obj[n].ang[1]=local[m].angles[1];view.obj[n].ang[2]=local[m].angles[2];
     }
+}
+// Zaehler der Zielsuche aufsummieren; ein neuer Kern zaehlt wieder ab null.
+void CombatController::accumulate_aim(const RECVX_COMBAT_RESULT& r){
+    if(original_.get()!=aim_core_){aim_core_=original_.get();aim_seen_=RECVX_COMBAT_RESULT{};}
+    aim_history_.near_calls+=int(r.near_calls-aim_seen_.near_calls);
+    aim_history_.near_seen+=int(r.near_seen-aim_seen_.near_seen);
+    aim_history_.near_filter+=int(r.near_filter-aim_seen_.near_filter);
+    aim_history_.near_cone+=int(r.near_cone-aim_seen_.near_cone);
+    aim_history_.near_wall+=int(r.near_wall-aim_seen_.near_wall);
+    aim_history_.near_found+=int(r.near_found-aim_seen_.near_found);
+    aim_history_.gun_seen+=int(r.gun_seen-aim_seen_.gun_seen);
+    aim_history_.gun_filter+=int(r.gun_filter-aim_seen_.gun_filter);
+    aim_history_.wall_probe_n=std::min(r.near_wall_probe_n,3u);
+    for(unsigned i=0;i<aim_history_.wall_probe_n;++i)std::copy_n(r.near_wall_probe[i],4,aim_history_.wall_probe[i]);
+    aim_seen_=r;
 }
 const std::set<std::string>& CombatController::unbound_routines()const{
     static const std::set<std::string> none;return original_?original_->unavailable:none;

@@ -185,7 +185,7 @@ bool RoomWorld::enemy_player_get(RECVX_ENEMY_PLAYER& out)const{
     out.ax=player_.pitch;out.ay=player_.yaw;out.az=player_.roll;out.flr_no=collision_floor_;
     out.hp=*player_hp_owner_;
     out.flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
-    if(!enemy_grab_)out.flg|=2u;
+    out.debug_attack_disabled=!enemy_grab_;
     out.flg2=collision_events_?collision_events_->flags[15][0]:collision_flags2_;
     out.stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
     if(player_hidden||event_camera||(player_scripted&&!grab_driving_))out.stflg|=0x80000000u;
@@ -205,6 +205,7 @@ bool RoomWorld::enemy_player_get(RECVX_ENEMY_PLAYER& out)const{
 }
 bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
     if(!player_asset_||!player_hp_owner_||!player_head_flags_)return false;
+    if(std::getenv("RECVX_POSITION_TRACE")&&(player_.position.x!=in.pos.x||player_.position.z!=in.pos.z))std::fprintf(stderr,"POSITION_WRITE mode=%u enemy=%u old=%.8g,%.8g,%.8g new=%.8g,%.8g,%.8g flg=%x stflg=%x floor=%d\n",unsigned(in.mode0),unsigned(enemy_table_.enow),player_.position.x,player_.position.y,player_.position.z,in.pos.x,in.pos.y,in.pos.z,in.flg,in.stflg,int(in.flr_no));
     player_.position={in.pos.x,in.pos.y,in.pos.z};player_.pitch=in.ax;player_.yaw=in.ay;player_.roll=in.az;
     collision_floor_=in.flr_no;*player_hp_owner_=in.hp;
     if(collision_events_){collision_events_->flags[13][0]=in.flg;collision_events_->player_flags=in.flg;
@@ -395,7 +396,12 @@ void RoomWorld::bind_enemy_services(){
         const RECVX_CB_SPHERE sph{{c->x,c->y,c->z},r};const RECVX_CB_CAPSULE cap{{c1->x,c1->y,c1->z},{c2->x,c2->y,c2->z},cr};
         return recvx_cb_check_sc(&sph,&cap);};
     // sdfunc.c RequestEnemySe/Ex (RequestEnemySeBasic Flag 1), ChechPlayEnemySe, CallPlayerVoice.
-    s.enemy_se=[](uint32_t enemy,const RECVX_ENEMY_VEC* p,int se){enemy_world->audio_.request_enemy_se(enemy,{p->x,p->y,p->z},se,1,0);};
+    s.enemy_se=[](uint32_t enemy,const RECVX_ENEMY_VEC* p,int se){
+        if(std::getenv("ZOMBIE_SE_DBG")){
+            const auto* w=enemy<RECVX_ENEMY_SLOTS?enemy_world->enemy_table_.slot[enemy]:nullptr;
+            std::fprintf(stderr,"ZOMBIE_SE enemy_se enemy=%u se=%d inactive=%d stflg=%u\n",enemy,se,(w&&(w->stflg&0x1000000u))?1:0,w?w->stflg:0u);
+        }
+        enemy_world->audio_.request_enemy_se(enemy,{p->x,p->y,p->z},se,1,0);};
     s.enemy_se_ex=[](uint32_t enemy,const RECVX_ENEMY_VEC* p,int se,int fade){enemy_world->audio_.request_enemy_se(enemy,{p->x,p->y,p->z},se,1,fade);};
     s.enemy_se_playing=[](uint32_t enemy,int se)->int{return enemy_world->audio_.enemy_se_playing(enemy,se)?1:0;};
     s.player_voice=[](int se){enemy_world->audio_.play_player_voice(se);};
@@ -416,14 +422,14 @@ void RoomWorld::bind_enemy_services(){
         const auto first=std::ptrdiff_t(t.model_window);
         std::vector<ModelPose> obj(t.enemy_obj.begin()+first,t.enemy_obj.end());
         const std::vector<std::uint32_t> owp(t.enemy_owp_flg.begin()+first,t.enemy_owp_flg.end());
-        const int r=set_motion(m,add,md,world->enemy_mn_work(e,w->mtn_no),static_cast<const std::int8_t*>(w->mtn_tp),obj,owp,&gap);
+        const int r=set_motion(m,add,md,world->enemy_mn_work(e,w->mtn_no),static_cast<const std::int8_t*>(w->mtn_tp),obj,owp,&gap,w->id,w->mtn_no);
         std::copy(obj.begin(),obj.end(),t.enemy_obj.begin()+first);
         w->frm_no=m.frm_no;w->frm_mode=m.frm_mode;w->hokan_count=m.hokan_count;w->mtn_attr=m.mtn_attr;
         // bhGetFrameNum clamps to the raw frm_num and bhEne01_ChgWalkMtn shifts
         // that by 16 (en01.c:10297): frm_no == frm_num on entry, one key past
         // the motion in the original. That pass keeps the previous pose here
         // and is reported; the advance below wraps it exactly as Motion.c:106.
-        if(!gap.empty()){world->unbound_enemy_.insert(gap+" (id "+std::to_string(w->id)+", mtn "+std::to_string(w->mtn_no)+")");if(std::getenv("RECVX_MTN_DBG")){const auto* c=world->enemy_mn_work(e,w->mtn_no);std::fprintf(stderr,"MTNDBG id=%u mtn=%u frm=%d md=%u obj=%zu owp=%zu window=%zu chans=%zu frames=%u gap=%s\n",w->id,w->mtn_no,w->frm_no,md,obj.size(),owp.size(),t.model_window,c?c->positions.size():0u,c?c->frames:0u,gap.c_str());}}
+        if(!gap.empty()){world->unbound_enemy_.insert(gap);if(std::getenv("RECVX_MTN_DBG")){const auto* c=world->enemy_mn_work(e,w->mtn_no);std::fprintf(stderr,"MTNDBG id=%u mtn=%u frm=%d md=%u obj=%zu owp=%zu window=%zu chans=%zu frames=%u gap=%s\n",w->id,w->mtn_no,w->frm_no,md,obj.size(),owp.size(),t.model_window,c?c->positions.size():0u,c?c->frames:0u,gap.c_str());}}
         return r;};
     s.calc_model=[](RECVX_ENEMY_WORK* w){enemy_world->calc_enemy_model(owner_of(w));};
     // Before the first bhCalcModel the original reads the owP that
@@ -547,6 +553,19 @@ void RoomWorld::bind_enemy_services(){
     s.mobile_wall_set=[](int index,const RECVX_ENEMY_ATR* in){auto* world=enemy_world;auto& walls=world->enemy_mobile_walls_;if(index<0||std::size_t(index)>=walls.size()){world->unbound_enemy_.insert("sys->mwalp: Index ohne Zuteilung");return;}
         walls[std::size_t(index)]={in->flg,in->type,in->id,in->flr_no,in->attr,{in->px,in->py,in->pz},{in->w,in->h,in->d},{in->prm0,in->prm1,in->prm2,in->prm3}};world->update_ground_geometry();};
     // subpl.c:143 bhEne_Event belongs to the existing subplayer apparatus.
+    // effect.c:331 bhSetEffect(id, &POINT, lkp, param): eigener Poolplatz mit
+    // flg 1, type/mdlver/flr_no 0, Skala 1 und Nullpunkt; ox/oy/oz kommen aus
+    // dem POINT des Aufrufers (eneset.c:461 uebergibt dort drei Nullen,
+    // en01.c:10814 stattdessen mtx[12..]). Aufrufer: eneset.c:461 (id 17),
+    // en01.c:10814 (id 108).
+    s.set_effect=[](int id,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* off,RECVX_ENEMY_WORK* link,int param)->int{
+        auto* world=enemy_world;EffectSpawn e;
+        e.flg=1;e.id=unsigned(id);e.type=0;e.mdlver=0;e.lkono=param;
+        if(pos)e.position={pos->x,pos->y,pos->z};
+        if(off){e.has_offset=true;e.offset={off->x,off->y,off->z};}
+        unsigned kind=0,index=0;
+        if(link){if(!world->enemy_work_index(link,index)){world->unbound_enemy_.insert("bhSetEffect: Linkwork ohne Raumfigur (Kindwork)");return -1;}kind=2;e.linked_work=link;}
+        return world->spawn_effect(e,kind,index);};
     s.event=recvx_subplayer_enemy_event;
     // zonzon1.c:591 bhEne_SetWeponAtr: capsule from two owP matrices.
     s.weapon_atr=[](RECVX_ENEMY_WORK* w,int j1,int j2,float r){
@@ -883,17 +902,6 @@ void RoomWorld::bind_enemy_services(){
     x.set_call_func=[](uint32_t id,RECVX_ENEMY_PROC proc){recvx_enemy_set_call_func(&enemy_world->enemy_dispatch_,id,proc);};
     x.vibration=s.vibration;
     // --- effect.c bhSetEffectTb / eff[eno] patches / effsub3.c bhSetEffParticle ---
-    // effect.c:331 bhSetEffect(id, &POINT, lkp, param): eigener Poolplatz mit
-    // flg 1, type/mdlver/flr_no 0, Skala 1 und Nullpunkt; ox/oy/oz kommen aus
-    // dem POINT des Aufrufers (eneset.c:461 uebergibt dort drei Nullen).
-    x.set_effect=[](int id,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* off,RECVX_ENEMY_WORK* link,int param)->int{
-        auto* world=enemy_world;EffectSpawn e;
-        e.flg=1;e.id=unsigned(id);e.type=0;e.mdlver=0;e.lkono=param;
-        if(pos)e.position={pos->x,pos->y,pos->z};
-        if(off){e.has_offset=true;e.offset={off->x,off->y,off->z};}
-        unsigned kind=0,index=0;
-        if(link){if(!world->enemy_work_index(link,index)){world->unbound_enemy_.insert("bhSetEffect: Linkwork ohne Raumfigur (Kindwork)");return -1;}kind=2;e.linked_work=link;}
-        return world->spawn_effect(e,kind,index);};
     // One spawn path for the zonzon helpers (en03_lib), EN01's sys->ef template
     // and EN04. A link to an enemy work resolves to its room entity (sprite link
     // kind 2, particle kind 1); a player link is kind 1 / kind 0; children of
@@ -1095,7 +1103,7 @@ void RoomWorld::control_enemy_player_motion(){
         std::vector<ModelPose> obj=player_asset_->local_pose_clip(*clip,frame_); /* mlwP->objP scratch: the host samples the pose */
         const std::vector<std::uint32_t> owp(obj.size(),0u);
         std::string gap;
-        (void)set_motion(m,int(player_step_),player_mtn_md_,clip,nullptr,obj,owp,&gap);
+        (void)set_motion(m,int(player_step_),player_mtn_md_,clip,nullptr,obj,owp,&gap,0u,unsigned(motion_));
         if(!gap.empty())unbound_enemy_.insert(gap+" (plp)");
         frame_=m.frm_no;player_hokan_count_=m.hokan_count;
     }
@@ -1309,5 +1317,35 @@ void RoomWorld::control_enemy_works(){
     recvx_en18_bind(nullptr);
     recvx_en30_bind(nullptr);
     recvx_enemy_ext_bind(nullptr);recvx_en11_bind(nullptr);
+}
+
+// pwksub.c:39-56 bhCalcLinkModel(pp): ueber ene[0..ewk_n) jedes Work mit
+// flg 0x1 und 0x80, dessen lkwkp pp ist und dessen mlwP gesetzt ist, erhaelt
+// bhCalcModel. Die weiteren Schleifen (pwksub.c:58-84: O_WRK der Raumobjekte
+// und Items, eff[512]) haben hier keinen gespeicherten Zustand: verknuepfte
+// Objekte nehmen ihre Matrix beim Zeichnen aus link_matrix des Elternwerks
+// und Effektsprites ueber ihr lkwkp; nur Gegnerworks fuehren gespeicherte owP.
+void RoomWorld::calc_enemy_link_model(WorldEntity& e){
+    const RECVX_ENEMY_WORK* parent=&e.enemy;
+    auto linked=[&](WorldEntity& c){const auto& w=c.enemy;return &c!=&e&&c.enemy_bound&&(w.flg&1u)&&(w.flg&0x80u)&&w.lkwkp==parent&&tree_owner(c).enemy_asset!=nullptr;};
+    for(auto& pair:entities_)if(pair.first.first==1&&linked(pair.second))calc_enemy_model(pair.second);
+    for(auto& c:enemy_children_)if(linked(c))calc_enemy_model(c);
+}
+
+// event.c:11070-11094 (Common 25), :11600-11628 (Common 24) und :11941-11969
+// (Common 34): switch(v0) ueber den ct1-Wert des Skripts. 0: SetMotion +
+// CalcModel + CalcLinkModel, 1: nichts, 2: SetMotion, 3: CalcModel,
+// 4: CalcLinkModel, 5: SetMotion + CalcModel, 6: SetMotion + CalcLinkModel,
+// 7: CalcModel + CalcLinkModel. bhSetMotion(work, 0, 0, 0) schreibt den Key
+// bei frm_no ohne Vorschub; ohne mode-Bit 2 gilt NormalTbl (Motion.c:148),
+// der mtn_tp des Works bleibt ungenutzt.
+void RoomWorld::enemy_script_evaluate(WorldEntity& e,unsigned mode){
+    EnemyWorldScope scope(this);
+    const bool motion=mode==0||mode==2||mode==5||mode==6;
+    const bool model=mode==0||mode==3||mode==5||mode==7;
+    const bool link=mode==0||mode==4||mode==6||mode==7;
+    if(motion&&enemy_services_.set_motion)(void)enemy_services_.set_motion(&e.enemy,0,0u);
+    if(model)calc_enemy_model(e);
+    if(link)calc_enemy_link_model(e);
 }
 }

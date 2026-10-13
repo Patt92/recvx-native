@@ -126,7 +126,11 @@ public:
     // parts_09b[21] lit (Down), 3 = both neutral (18).
     void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0,float row_shift=0.f,unsigned arrows=0)const;
     void draw_title(SoftwareRenderer& image);
-    void draw_title_options(SoftwareRenderer& image,unsigned selected);
+    // ADV/0002 title textures (AdvEasySetupTextureBasic): 0 = list texture 0
+    // (background picture), 2 = list texture 1 (plate atlas). Loads on demand.
+    const SceneTexture& title_texture(unsigned index);
+    // Pixel width label() would use for `text` (FontSz per glyph, 14 per space).
+    int label_width(const std::string& text,float scale)const;
     void label(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=.6f,std::uint32_t color=0xffffffff)const;
     // bhDispMessage: a message at the given pixel origin in the dialogue font.
     void show_message(SoftwareRenderer& image,const Message& message,int x,int y,std::uint32_t tint=0xffffffff)const{text(image,message,x,y,1,tint,true);}
@@ -138,6 +142,7 @@ public:
     Message system_message(unsigned index)const;
 private:
     void quantity(SoftwareRenderer&,std::uint32_t packed,int x,int y,bool box=false)const;
+    void load_title();
     std::vector<SceneTexture> title_;
     std::map<unsigned,std::vector<SceneTexture>> file_textures_;
     std::vector<SceneTexture> menu_,fonts_,dialog_fonts_;

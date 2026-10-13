@@ -1,0 +1,5 @@
+10 keys right
+23 keys forward
+70 keys none
+71 confirm
+400 keys forward

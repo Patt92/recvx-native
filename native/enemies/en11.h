@@ -42,13 +42,18 @@ void recvx_en11_bind(const RECVX_EN11_SERVICES* services);
    0x60 Eff261. Hostzeiger werden durch stabile Besitzeridentitaeten ersetzt.
    Keine Lage/Motion/HP im EXP: diese gehoeren allein RECVX_ENEMY_WORK. */
 typedef struct {
-    float basis[16];
-    uint8_t alarm;
-    uint32_t wall_id;
-    uint8_t wall_valid;          /* EXP0 0x58 != NULL */
+    float basis[16];             /* 0x00..0x3F */
+    uint8_t reserved_40[0x16];
+    uint8_t alarm;               /* 0x56 EXP0_UC(0x56) */
+    uint8_t reserved_57;
+    uint32_t wall_id;            /* 0x58 ATR_WORK*: native Besitzeridentitaet */
+    int32_t dir;                /* 0x5C EXP0_I(0x5C) */
+    int32_t effect_slot;        /* 0x60 O_WRK*: native eff-Slotnummer */
+    uint8_t reserved_64[0x0C];
+    /* Technische Sicht auf den Trefferdatensatz, hinter dem Originalblock
+       (en11.c:152: 0x70 Byte). Kein zusaetzlicher Flaechenbesitzer. */
     RECVX_ENEMY_ATR wall;
-    int32_t dir;
-    int effect_slot;
+    uint8_t wall_valid;
     uint8_t initialized;
 } RECVX_EN11_STATE;
 void recvx_en11(RECVX_ENEMY_WORK* w);

@@ -1,8 +1,10 @@
+#include <cstdlib>
 // C02: the shared enemy work at its owner. Component checks against the
 // semantics references (eneset.c:170/325/344/797, zonzon1.c:806,
 // Motion.c:21) and the production binding in RoomWorld with original room
 // data. Positive effects are checked, not only the absence of errors.
 #include "world.h"
+#include "actor.h"
 #include "motion_set.h"
 #include "asset_io.h"
 #include <cmath>
@@ -169,6 +171,96 @@ void cemetery_upper_body(const std::filesystem::path& data){
     // Nullschluessel; die uebrigen acht kommen aus dem Oberkoerperclip.
     check(posed>=8,"Oberkoerper des Zombies bleibt in der Ruhelage (T-Pose)");
 }
+
+// Debug policy must not become a persistent original player death flag.
+// Exercise the actual get/set binding, including a fresh destination world.
+void debug_player_flags_contract(const std::filesystem::path& data){
+    auto player=PlayerAsset::load(data,10);
+    Inventory inventory;inventory.hp=160;
+    std::uint32_t head_flags=0;
+    for(const char* name:{"RM_0080","RM_1000"}){
+        const auto bytes=read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024);
+        const auto scene=decode_scene(bytes);auto actor=scene.spawns.at(0);
+        std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+        RoomWorld world(bytes,scene,actor,motion,frame,audio,data,{},name);
+        MessageDialog dialog;EventVm events(bytes,inventory,dialog);
+        world.set_player_asset(&player);world.bind_player_collision(events);
+        world.bind_enemy_player(inventory.hp,head_flags);
+        const auto original_flags=events.flags[13][0];
+        for(bool enabled:{false,true,false}){
+            world.set_enemy_grab(enabled);
+            RECVX_ENEMY_PLAYER view{};
+            check(world.enemy_player_get(view),"debug flags: player binding absent");
+            check(view.debug_attack_disabled==!enabled,"debug flags: policy not exposed");
+            check(view.flg==original_flags,"debug policy contaminated original flags");
+            check(view.hp==160,"debug flags: HP changed during read or room replacement");
+            check(world.enemy_player_set(view),"debug flags: player write failed");
+            check(inventory.hp==160&&!world.player_dead()&&!world.player_killed(),
+                  "debug round trip killed living player");
+            check(events.flags[13][0]==original_flags&&events.player_flags==original_flags,
+                  "debug round trip persisted synthetic death flag");
+        }
+        // A real death flag must still propagate, even with attacks disabled.
+        RECVX_ENEMY_PLAYER dead{};
+        check(world.enemy_player_get(dead),"death flag: player binding absent");
+        dead.flg|=2u;
+        check(world.enemy_player_set(dead),"death flag: write failed");
+        check(world.player_dead()&&(events.player_flags&2u)&&inventory.hp==160,
+              "real death flag was hidden by the debug policy");
+    }
+}
+
+
+// event.c:352 initializes enemy works before scd0.
+// RM_0070 commands 24/25 select mode0=5 and the linked zombie upper motion.
+void event_enemy_owner_contract(const std::filesystem::path& data){
+    const auto bytes=read_asset_file(data/"rooms/RM_0070.RDT",64*1024*1024);
+    const auto scene=decode_scene(bytes);
+    auto actor=scene.spawns.at(0);
+    std::size_t motion=42;std::int64_t frame=0;
+    AudioMixer audio(data);
+    RoomWorld world(bytes,scene,actor,motion,frame,audio,data,{},"RM_0070");
+    auto player=PlayerAsset::load(data,10);
+    Inventory inventory;inventory.hp=160;
+    std::uint32_t head_flags=0;
+    MessageDialog dialog;EventVm events(bytes,inventory,dialog);
+    world.set_player_asset(&player);
+    world.bind_player_collision(events);
+    world.bind_enemy_player(inventory.hp,head_flags);
+    world.set_enemy_ai(true);world.set_enemy_grab(true);
+    events.values[0]=0;events.values[1]=7;
+    events.binding=[&](const EventCommand& c){
+        if(std::getenv("RECVX_EVENT_FLAGS_TRACE")){
+            std::cerr<<"EVENT task="<<c.task<<" offset="<<c.offset<<" bytes=";
+            for(auto byte:c.bytes)std::cerr<<unsigned(byte)<<' ';
+            std::cerr<<'\n';
+        }
+        return world.bind(c);
+    };
+    events.task_started=[&](unsigned task){world.start_task(task);};
+    events.animation_frame=[&](unsigned kind,unsigned index){return world.frame(kind,index);};
+    events.initialize();
+    events.tick();
+    check(events.errors.empty(),"RM_0070 event setup blocked");
+    const unsigned motions[]={1,51,13,5};
+    const unsigned upper_motions[]={2,251,213,6};
+    for(unsigned i=0;i<4;++i){
+        const auto* e=world.state(1,i);
+        check(e&&e->enemy_bound,"RM_0070 native enemy missing");
+        check(e->enemy.exp0&&e->enemy.exp1,"enemy initialization did not precede event commands");
+        std::cout<<"Event owner "<<i<<": mode0="<<unsigned(e->enemy.mode0)
+                 <<" native motion="<<e->enemy.mtn_no
+                 <<" event motion="<<e->motion<<'\n';
+        check(e->enemy.mode0==5,"event command did not select native event dispatch");
+        check(e->enemy.mtn_no==motions[i],"event motion did not reach native owner");
+        check(e->enemy.ct2==6,"event command lost original hard-transition mode");
+        const auto* upper=static_cast<const RECVX_ENEMY_WORK*>(e->enemy.exp1);
+        check(upper->mode0==6,"linked upper body retained autonomous dispatch");
+        check(upper->mtn_no==upper_motions[i],"linked upper motion uses wrong library offset");
+        check(upper->mtn_room==e->enemy.mtn_room,"upper and lower motion libraries differ");
+    }
+}
+
 }
 
 int main(int argc,char** argv){try{
@@ -177,6 +269,8 @@ int main(int argc,char** argv){try{
     motion_contract();
     check(argc==2,"original data directory required");
     const std::filesystem::path data(argv[1]);
+    debug_player_flags_contract(data);
+    event_enemy_owner_contract(data);
     room(data,"RM_0130",7,5);   // five original ID-7 entries
     room(data,"RM_0080",0,1);   // the room's one barrel next to five zombies
     mask_skip(data);            // RM_0000: Claire/Rodrigo, bhInitMask owP skip

@@ -45,7 +45,10 @@ int main(){try{
     camera.set_enabled(false);
     const auto controls=std::filesystem::temp_directory_path()/("recvx-third-person-controls-"+stamp+".ini");Cleanup controls_cleanup{controls};
     auto config=InputConfig::defaults();config.save(controls);Frontend front(config,controls);front.third_person=&camera;
-    front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.settings(),"settings screen not reached");
+    // adv.c title task: PRESS START (Mode 6), Start, NEW GAME -> OPTION (Cursor 2), OK, GetSamurai(50) fade, then the host settings screen.
+    auto settle=[&](auto ready){for(int i=0;i<600&&!ready();++i)front.apply({});};
+    settle([&]{return front.mode()==6;});front.input(MenuInput::Confirm);settle([&]{return front.menu_ready();});
+    front.input(MenuInput::Down);front.apply({});front.input(MenuInput::Confirm);settle([&]{return front.settings();});check(front.settings(),"settings screen not reached");
     for(unsigned i=0;i<Frontend::third_person_row;++i)front.input(MenuInput::Down);check(front.selected()==Frontend::third_person_row,"camera row not selectable");
     front.input(MenuInput::Right);check(camera.enabled()&&ThirdPersonCamera::read(path).enabled,"menu toggle on failed");
     front.input(MenuInput::Confirm);check(!camera.enabled()&&!ThirdPersonCamera::read(path).enabled,"menu toggle off failed");

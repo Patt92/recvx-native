@@ -92,6 +92,15 @@ void DoorSequence::tick(){if(!active_)return;recvx_door_step(&core_);
     for(int i=0;i<core_.pru_vib;++i)shake_patterns_.push_back({core_.pru_vib_atrb,core_.pru_vib_no});
     core_.pru_se=core_.pru_vib=0;
     ++ticks_;if(core_.status&0x40){active_=false;finished_=true;}if(ticks_>3600)throw std::runtime_error("original door sequence exceeded tick budget");}
+// BEWUSSTE ABWEICHUNG VOM ORIGINAL - NICHT ERNEUT WEGPORTIEREN.
+// Host-Komfortfunktion, im Original nicht vorhanden: bhSysCallDoordemo
+// (system.c:939) liest kein Pad, bhStartDoorDemo (room.c:978) loescht
+// pad_ps/pad_on, und bhControlDoor (door.c:386-528,638-646) endet erst mit
+// dem Statusbit 0x40 aus FadeProc1. Vom Nutzer ausdruecklich gewuenscht
+// (2026-10-13); die Tuerstimmen werden dabei gestoppt (runtime.cpp), damit
+// kein halb gespielter Tuerton in den Zielraum laeuft.
+// Gesetzt wird dasselbe Abschlussbit, das FadeProc1 setzen wuerde, damit der
+// uebrige Ablauf (Raumwechsel, Freigabe) genau den regulaeren Weg nimmt.
 void DoorSequence::skip(){if(active_){skipped_=true;active_=false;finished_=true;core_.status|=0x40;}}
 // njCnkSetEasyMultiAmbient plus the point lights of slots 2..4, evaluated the
 // way Ninja chunk lighting does it: per vertex over its own normal and

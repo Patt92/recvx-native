@@ -51,6 +51,8 @@ void blend(std::int32_t* ang,float rate){
 
 struct Pass {
     const MotionClip& clip;const std::int8_t* datP;std::vector<ModelPose>& obj;const std::vector<std::uint32_t>& owp;std::string* gap;
+    // Nur fuer Meldungen: Bibliotheksbesitzer und Motionindex der Motion.
+    unsigned motion_id=0,motion_no=0;
     bool fail(const char* what){if(gap&&gap->empty())*gap=what;return false;}
     // NormalTbl (Motion.c:7) is the identity over 64 nodes.
     static constexpr std::size_t surplus=~std::size_t(0);
@@ -65,7 +67,17 @@ struct Pass {
         if(std::size_t(n)>=obj.size()||std::size_t(n)>=owp.size()){fail("bhSetMotion: Motionkanal ohne Modellknoten (Original schreibt hinter objP)");out=surplus;return true;}
         out=std::size_t(n);return true;}
     bool channel(std::size_t c){return c<clip.positions.size()&&c<clip.angles.size()?true:fail("bhSetMotion:md2P ausserhalb der Motion");}
-    bool frame(std::int32_t f){return f>=0&&std::uint32_t(f)<clip.frames?true:fail("bhSetMotion:frm_no ausserhalb von frm_num");}
+    bool frame(std::int32_t f){
+        if(f>=0&&std::uint32_t(f)<clip.frames)return true;
+        // Hinter dem Ende: das Original liest den Key im MTN-Bytebild weiter
+        // (Motion.c:131). Wurden die Nachbarkeys angehaengt (clip.tail_keys),
+        // tut die Portierung dasselbe; sonst bleibt es bei der Meldung.
+        if(f>=0&&std::uint32_t(f)<clip.frames+clip.tail_keys)return true;
+        // Die Zahlen gehoeren in die Meldung: das Original liest hier ueber
+        // das Ende der Keyschlange hinaus; ohne Frame und Laenge laesst sich
+        // der Fall nicht von einem Hostfehler unterscheiden.
+        if(gap&&gap->empty())*gap="bhSetMotion:frm_no "+std::to_string(f)+" ausserhalb von frm_num "+std::to_string(clip.frames)+" (id "+std::to_string(motion_id)+", mtn "+std::to_string(motion_no)+")";
+        return false;}
 };
 
 // Motion.c:131 SetMtnNormal: an owP-0x4 node advances datP only.
@@ -181,11 +193,11 @@ bool slow(Pass& p,std::int32_t frm_no,unsigned mode,bool hokan,float rate){
 }
 }
 
-int set_motion(MotionWork& w,int add,unsigned mode,const MotionClip* clip,const std::int8_t* datP,std::vector<ModelPose>& obj,const std::vector<std::uint32_t>& owp_flg,std::string* gap){
+int set_motion(MotionWork& w,int add,unsigned mode,const MotionClip* clip,const std::int8_t* datP,std::vector<ModelPose>& obj,const std::vector<std::uint32_t>& owp_flg,std::string* gap,unsigned motion_id,unsigned motion_no){
     if(!clip)return 0; // Motion.c:29 mnwP[mtn_no].datP == NULL
     if(!clip->frames){if(gap&&gap->empty())*gap="bhSetMotion:frm_num 0";return 0;}
     if((mode&2)&&!datP){if(gap&&gap->empty())*gap="bhSetMotion:mtn_tp fehlt bei mtn_md 0x2";return 0;}
-    Pass p{*clip,(mode&2)?datP:nullptr,obj,owp_flg,gap};
+    Pass p{*clip,(mode&2)?datP:nullptr,obj,owp_flg,gap};p.motion_id=motion_id;p.motion_no=motion_no;
     const float rate=(mode&0x20)?(1.0f/float(w.hokan_count))-(0.000015258789f*float(w.hokan_rate)):0.000015258789f*float(65536-w.hokan_rate);
     const unsigned flg=clip->flags;
     bool hokan=w.hokan_count!=0;

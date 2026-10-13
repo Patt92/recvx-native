@@ -64,6 +64,7 @@ struct SceneTriangle {
     bool textured=false;
     bool camera_mask=true;
     bool world_lit=false;
+    bool after_modifiers=false; // enemy/player draw phase: game.c:318 draws these after bhDrawEffect modifiers
     bool gouraud=false; // color is the unlit base; vertices carry light factors (Ninja per-vertex lighting)
     SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
     unsigned light_category=1;
@@ -125,6 +126,7 @@ struct SceneShadow {
 struct Scene {
     std::vector<SceneShadow> shadows;
     FogState fog; // installed EOR state, copied from the existing World owner
+    std::uint32_t fog_color=0; // njSetFogColor (sync.c:163/177/200): 0x00RRGGBB of cam.fog_col or sys->fog_col
     std::vector<SceneTriangle> triangles;
     std::vector<SceneLine> lines;
     std::vector<SceneCamera> cameras;

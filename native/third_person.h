@@ -31,7 +31,7 @@ public:
     void toggle(bool persist=true){set_enabled(!enabled(),persist);}
     const ThirdPersonSettings& settings()const{return settings_;}
     void configure(const ThirdPersonSettings& settings,bool persist=true);
-    std::string describe()const{return enabled()?"An":"Aus";}
+    std::string describe()const{return enabled()?"On":"Off";}
     const std::string& status()const{return status_;}
     std::function<void(const ThirdPersonSettings&)> changed;
     // Advance once per original 30-Hz game tick after locomotion.

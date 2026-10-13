@@ -163,14 +163,16 @@ private:
                     if(palette_offset+index*4+4>clut_size)throw std::runtime_error("TIM2 palette index outside CLUT");
                     auto rgba=view.u32(clut+palette_offset+index*4);
                     // Ps2CheckTextureAlpha runs before palettes are installed.
-                    // Banked images color-key black; ARGB4444/8888 alpha is
-                    // converted to the GS 0..128 range unless already changed.
+                    // Banked images color-key black; the 4-bit ARGB4444 alpha
+                    // is expanded to 8 bits (Ps2Alpha4to8) unless already
+                    // changed.  The engine keeps the host alpha domain 0..255:
+                    // Ps2AlphaIsHalf's GS 0..128 step is the same factor over
+                    // 256, and the cooked TGA files store that 0..255 value.
                     if(view.u16(payload+14)==0){
                         const auto color_type=view.u8(payload+12);
                         unsigned alpha=rgba>>24;
                         if(banked&&(rgba&0xffffff)==0)alpha=0;
-                        if(color_type==2){alpha|=alpha>>4;alpha=(alpha+1)>>1;}
-                        else if(color_type==6)alpha=(alpha+1)>>1;
+                        if(color_type==2)alpha|=alpha>>4;
                         rgba=(rgba&0xffffff)|(alpha<<24);
                     }
                     texture.pixels.push_back((rgba&0xff00ff00)|((rgba&255)<<16)|((rgba>>16)&255));
@@ -334,7 +336,10 @@ private:
                         if(i>=2) {
                             SceneTriangle triangle{{strip[i-2],strip[i-1],strip[i]},material,texture,current_object,type!=64};
                             triangle.camera_mask=camera_mask;
-                            if(use_alpha){triangle.blend=SceneBlend::Ninja;triangle.blend_register=chunk_blend_register(blend_src,blend_dst);}
+                            // The strip's GS ALPHA register is kept for every strip: a caller forcing
+                            // NJD_FST_UA through njSetConstantAttr (map.c:723) still blends with it.
+                            triangle.blend_register=chunk_blend_register(blend_src,blend_dst);
+                            if(use_alpha)triangle.blend=SceneBlend::Ninja;
                             if(((i&1)!=0)^reverse)std::swap(triangle.vertices[0],triangle.vertices[1]);
                             if(output.triangles.size()>=2000000)throw std::runtime_error("room triangle limit exceeded");
                             output.triangles.push_back(triangle);

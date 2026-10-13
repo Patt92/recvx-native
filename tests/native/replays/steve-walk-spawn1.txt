@@ -1,6 +1,11 @@
 # RM_0030 spawn 1: walk across the courtyard, turn left, then approach.
+# Umgetaktet am 2026-10-13 wie graveyard-walk.txt: die allein gehaltene Drehtaste
+# setzt mode2 1/2 (bhControlPlayerPad, player.c:1840-1855) und dreht in
+# bhCPM1_act_bas (player.c:2001/2008) mit 7.2 Grad/Bild statt der 4.5 Grad/Bild
+# der Laufdrehung (bhCPM2_act_run, player.c:2499/2504). 90 Grad brauchen damit
+# 13 statt 20 Bilder; mit der alten Taktung drehte der Weg am Trigger vorbei.
 0 keys forward
 120 keys left
-140 keys forward
+133 keys forward
 250 keys none
 3200 confirm

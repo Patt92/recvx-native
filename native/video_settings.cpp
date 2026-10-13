@@ -5,7 +5,7 @@
 namespace recvx {
 namespace {
 constexpr const char* names[]={"original","low","high","ultra"};
-constexpr const char* labels[]={"Original (scharf, flimmert)","Niedrig (Filter)","Hoch (Filter + 2x SSAA)","Ultra (Filter + 3x SSAA)"};
+constexpr const char* labels[]={"Original (sharp, shimmers)","Low (filter)","High (filter + 2x SSAA)","Ultra (filter + 3x SSAA)"};
 }
 std::string VideoSettings::describe()const{return labels[int(quality)];}
 VideoSettings VideoSettings::read(const std::filesystem::path& path){
@@ -32,7 +32,7 @@ VideoConfig::VideoConfig(std::filesystem::path path):path_(std::move(path)){
 }
 void VideoConfig::set(RenderQuality quality,bool persist){
     settings_.quality=quality;status_.clear();
-    if(persist&&!path_.empty())try{settings_.save(path_);status_="Gespeichert";}catch(const std::exception& e){status_=e.what();}
+    if(persist&&!path_.empty())try{settings_.save(path_);status_="Saved";}catch(const std::exception& e){status_=e.what();}
 }
 void VideoConfig::cycle(int direction,bool persist){set(RenderQuality((int(settings_.quality)+4+(direction<0?-1:1))%4),persist);}
 }

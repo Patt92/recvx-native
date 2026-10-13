@@ -127,7 +127,8 @@ public:
     static unsigned se_voice(unsigned se_slot);
     void load_door_sounds(unsigned bank);
     bool play_door_sound(unsigned program);
-    void finish_door_sound(); // original MIDI slot 2: fade after the destination is visible
+    void finish_door_sound(); // Com_ExecRoomFadeIn: RequestMidiFadeFunction(2, 2, 250) on the port MidiHandle[2] names
+    unsigned door_voice()const{return door_slot_;} // the port MidiHandle[2] currently names (sdMidiPlay rotation 2 -> 8 -> 9)
     void stop(unsigned slot,unsigned fade_ticks=0);
     bool active(unsigned slot)const;
     std::vector<std::int16_t> mix(unsigned frames=audio_frames_per_tick);

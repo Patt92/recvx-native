@@ -186,11 +186,15 @@ int main(int argc,char** argv){try{
         {GameUi ui(data);Inventory inv;for(unsigned i=0;i<7;++i)inv.items[64+i]=Inventory::pack(5+i,1);StatusMenu menu;menu.active=true;menu.selected=1;SoftwareRenderer plain(640,480),shifted(640,480);
             ui.draw_box(plain,inv,menu,64,3,false);ui.draw_box(shifted,inv,menu,64,3,false,nullptr,0,0,-19.f,3);
             check(plain.pixels()!=shifted.pixels(),"parts_20b row shift must move the drawn box rows");}
-        // Door PCM remains alive across the room sound-bank reset. Three
-        // original door triggers must not overwrite each other or foot voices.
-        {AudioMixer door_audio(data);door_audio.load_door_sounds(7);for(unsigned program:{1u,0u,2u})check(door_audio.play_door_sound(program),"original opening/closing door program unavailable");
-         for(unsigned slot=door_voice_first;slot<=door_voice_last;++slot)check(door_audio.active(slot),"door trigger overwrote another door voice");
-         door_audio.load_room_sounds(0,0,0);for(unsigned slot=door_voice_first;slot<=door_voice_last;++slot)check(door_audio.active(slot),"room sound reset cuts off door closing audio");}
+        // Door PCM remains alive across the room sound-bank reset. sdMidiPlay
+        // (ps2_sg_sd.c:510) stops the port MidiHandle[2] still names when it
+        // sounds, then rotates 2 -> 8 -> 9: three immediate door triggers leave
+        // only the last one sounding, on a voice the earlier ones did not use.
+        {AudioMixer door_audio(data);door_audio.load_door_sounds(7);std::vector<unsigned> voices;
+         for(unsigned program:{1u,0u,2u}){check(door_audio.play_door_sound(program),"original opening/closing door program unavailable");voices.push_back(door_audio.door_voice());}
+         check(voices[0]!=voices[1]&&voices[1]!=voices[2]&&voices[0]!=voices[2],"door triggers did not rotate the handle's ports");
+         for(unsigned slot=door_voice_first;slot<=door_voice_last;++slot)check(door_audio.active(slot)==(slot==voices[2]),"a stopped door port kept sounding or the current one is silent");
+         door_audio.load_room_sounds(0,0,0);check(door_audio.active(voices[2]),"room sound reset cuts off door closing audio");}
         // Actual Steve cue has no loop; actual ambient BGM does.
         auto cue=decode_adx(read_asset_file(data/"archives/BGM1/0048.bin",32*1024*1024));check(!cue.loop_end,"Steve cue unexpectedly marked looping");AudioMixer music(data);music.play(0,"BGM1",48,1,true);for(unsigned i=0;i<3;++i)music.mix(480000);check(!music.active(0),"Steve cue loops after its natural end");auto ambient=decode_adx(read_asset_file(data/"archives/BGM1/0000.bin",32*1024*1024));check(ambient.loop_end>ambient.loop_start&&ambient.loop_end<=ambient.frames(),"original ambient loop points lost");
         for(const auto name:{"RM_0020","RM_0050","RM_0070","RM_0080","RM_0090"}){

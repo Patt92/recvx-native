@@ -155,3 +155,81 @@ Hokan-Blend der Spielerpose im Griff (Pose gesampelt, Takt original), Zombie-Tre
 `sys->metcp`-Treppenflag, `nlxb`-Zweig, Blutsprite-Typ 11 `op->mode1`, EN04-Treppen (`stair_rec`
 nativ hinter dem Originalblock), der Stackwert von `rot` in MV02, Bosse/übrige Gegnerfamilien.
 Keine Vollport- oder Durchspielbehauptung.
+
+
+## Nachtrag 2, 2026-10-12 spaet: BH_SET_EFFECT, MV02-Zweig, MTN-Indexraum; Originaldefekte belegt
+
+Auftrag des Nutzers: die im Bericht offen gelisteten Punkte beheben. Umgesetzt
+sind die drei, die auf der Hostseite lagen; die uebrigen sind jetzt mit
+Disassembly bzw. Originaldaten belegt und als Originaldefekte eingeordnet.
+Kein Commit/Push.
+
+### Behoben
+
+| Punkt | Original | Nativ | Nachweis |
+|---|---|---|---|
+| `bhSetEffect(17)` fehlte (Fass/EN00) | `bhEff017` (effsub1.c:4218): `hp = &sys->mwalp[lkwkp->ct0]; hp->flg &= ~0x1`, sobald der verknuepfte Work `stflg & 0x1000000` traegt. Erzeuger: eneset.c:461 `bhSetEffect(17, &pnt, ep, 0)`. | `s.set_effect` (world_enemies.cpp, effect.c:331: freier `eff[512]`-Platz, flg 1/0x80, Nullpunkt, Skala 1) + `step_eff017` + `set_effect_mobile_wall_clear` (world.cpp: `enemy_mobile_walls_[i].flags &= ~1`, danach `update_ground_geometry`). Der Effektplatz bleibt wie im Original dauerhaft belegt (kein Terminator). | RM_0080: Luecke `bhSetEffect(17)` verschwunden; vorher in natural/front/death (3 Laeufe). |
+| MV02-Zweig `EXP0_I(0x10) & 0x1000` | en04.c:1824-1826 setzt `mode3 = 2` und laeuft ohne `rot`-Zuweisung in die gemeinsame Schlusszeile (en04.c:1962-1966) `bhEne04_RunMotion(epw, rot)`. | `rot` liegt in `$s0`. `bhEne04_MV02` beschreibt `$s0` vor dieser Stelle nicht; der Aufrufer `bhEne04_MVType00` setzt `$s0 = $sp + 0x58` (SLUS_201.84 0x1A6138) und laesst es bis zum `jalr` 0x1A63A8 nach `bhEne04_MoveMode2[]` unveraendert. Ein EE-Stackzeiger ist positiv; `bhEne04_RunMotion` (en04.c:3657) wertet nur `rot != 0` und `rot > 0` aus, also `idx 0` = `mtn_tbl[0]`/`mtn_tbl2[0]`. Nativ `rot = 1`. | RM_0050 (Falle): Luecke `bhEne04_MV02 rot undefiniert` verschwunden. |
+| Skript-Treppenanforderung `0xa4` auf einem `sys->metcp`-Eintrag | `rom->etcp[0..etc_n-1]` und danach `sys->metcp`; `bhObj001` fuellt ihn (objitm.c:953/974 `op->ct1 = sys->metc_n++`). | `drain_script_stairs` (runtime.cpp) bildet denselben Indexraum aus `events->interactions` + `world->push_steps()`; ein Satz aus `sys->metcp` traegt keine Raumtabellenmarke. | Baum baut, Suite gruen; ein Skriptfall mit Index >= `etc_n` ist in den geprueften Raeumen nicht aufgetreten. |
+| `frm_no >= frm_num` beim Motionswechsel (`frm_no 44 / frm_num 44`, `72 / 70`) | `Motion.c:131` liest den Key bei `frm_no >> 16` ohne Grenze gegen `frm_num`. Erreichbar ueber `bhGetFrameNum` (klemmt auf die reine Bildzahl, `*65536` in en01.c:10297) und `chg_mtn_upper` (en01.c:10314, Frame der laengeren Unterkoerpermotion an eine kuerzere Oberkoerpermotion). | `decode_motion_asset` haengt die Nachbarkeys aus demselben MTN-Bereich als zusaetzliche Keyelemente an jeden keyfuehrenden Kanal (`tail_keys`, gemeinsames Minimum, Grenze 8, `ee_f32` wegen moeglicher Rohbytes); `Pass::frame` laesst `frm_no>>16 < frm_num + tail_keys` zu. Liegt der Nachbarb lock nicht im eigenen MTN-Bereich, bleibt es bei der Meldung. `join_motion_segments` nimmt das Minimum beider Teile. | RM_0080/RM_0060/RM_0031/RM_3070: die Luecken `frm_no 44/44` (7 Laeufe) und `72/70` (2) verschwunden; CTest 77/78 unveraendert. |
+
+### Am Original belegt, nicht Hostfehler
+
+- Belegprobe zum Nachbarb lock (RM_0080, Motion 2, 59 Bilder): die Positionstafel
+  von Kanal 0 endet auf Nullpolster, der gelesene Nachbarb lock ist `(0,0,0)`;
+  genau das steht jetzt im Posezustand dieses Bildes.
+- `en01:Nachbar ohne exp0 (en01.c:11440)`. Der Filter von `bhControlEnemy`
+  (eneset.c:364) ueberspringt Works mit `stflg & 0x41000000`; `bhEne01_GetWalkMotion`
+  (en01.c:11420-11432) prueft nur `id == 1 && flg & 1 && !(flg & 0x80)`. Ein Work
+  mit `stflg 0x1000000` (bhEneSetCk) hat deshalb noch kein `exp0`, und
+  `EPP_EXP0_I(0xA0)` liest im Original die EE-Adresse 0xA0.
+- `bhCheckRoute: keine Wegezone`. `pos` liegt in `bhEne04_Brain` auf `$sp+0x20`
+  (SLUS_201.84 0x1A6D64 `addiu $a2,$sp,0x20`); der Rueckgabewert 0xFF wird nicht
+  geprueft, gelesen wird 0x1A6D70/0x1A6D7C. In RM_1000 haben die Wegezonen
+  `h = 0`, ein Hund auf y=8 faellt damit aus jeder Zone. Nativ bleibt das
+  vorherige Ziel stehen und die Luecke wird gemeldet.
+
+### Bereits gebunden, im Bericht noch als offen gefuehrt
+
+- `nlxb`-Zweig (player.c:1379-1387): `RoomWorld::player_nl_` fuehrt die gesetzte
+  Wurzellage im Raumtakt nach (world.cpp:991-997) und geht ueber
+  `s.check_player` in `bhCheckPlayer` ein; Ledger-Zeile auf `done` gesetzt.
+- Blutsprite-Typ 11 mit `op->mode1 = 1` (zonzon.c:619-627): nativ ueber
+  `RECVX_T3_EFF_MODE1` -> `EffectParticles::set_mode1` vorhanden. Kein Aufrufer
+  der Originalquellen uebergibt Typ 11 (`SetBlood2`-Argumente: 0/1/2/4/6/9),
+  und `bhEff302` (effsub3.c:1107-1385) liest `mode1` nirgends. Der Schreibzugriff
+  ist damit wirksam, aber unerreichbar; kein Handlungsbedarf.
+
+### Weiterhin offen
+
+Hokan-Blend der Spielerpose (F01: der Host sampelt `plp->mlwP->objP` weiterhin
+statt es fortzuschreiben; ein vollstaendiger Umbau muss die Pose fuer Zeichnung
+und Gelenkmatrizen aus derselben Quelle ziehen), Zombie-/EN04-Treppenzweige im
+echten Ablauf, Bosse und uebrige Gegnerfamilien. Beim Nachbarb lock bleibt eine
+Grenze: der Decoder sieht je Motion nur ihren eigenen MTN-Bereich; endet eine
+Keytafel am Bereichsende, liest das Original in den *naechsten* Motionblock
+weiter, die Portierung meldet dort. Keine Vollport- oder Durchspielbehauptung.
+
+### Nachweise dieses Nachtrags
+
+- `tools/verify_enemy_ai.py` PASS, zuletzt gegen das installierte Paket
+  (`build/validation/enemy-ai-20261012/verify-gaps3`: RM_0080 mit HP 75 nach
+  1200 Ticks, 0 blockierte Befehle).
+- CTest seriell 77/78; einzige rote Suite `shadow_modifier_pixels` (parallele
+  Schattenarbeit, Baseline-rot).
+- Lueckenliste ueber alle neun Laeufe: vorher `bhSetEffect(17)` (3), `bhEne04_MV02
+  rot undefiniert` (1), `frm_no 44/44` (7), `frm_no 72/70` (2), `bhCheckRoute` (4),
+  `en01:Nachbar ohne exp0` (1); nachher nur noch `bhCheckRoute` (4) und
+  `en01:Nachbar ohne exp0` (1) — die beiden, deren Originalwert nicht
+  reproduzierbar ist.
+- `tools/port_check.py` rc=0; `tools/check_no_original_core.py` PASS fuer Quelle
+  und Mac-Binary (ueber `Start.command`).
+- Auslieferung: `build/start/macos-arm64/RECVX Native.app` ersetzt, ad hoc signiert,
+  `codesign --verify --deep --strict` OK, arm64, SHA256 d4946b19…;
+  Backup der vorher installierten Runtime
+  `archived/releases/enemy-gaps-before-20261012-215111`. Normaler Starterlauf
+  (SDL-Dummy) RM_1000: 400 Present, 200 Rendering, 199 Ticks, HP 154, 0 blockierte
+  Befehle; RM_0080 mit 600 Ticks ebenso. Gegenprobe mit der zuvor installierten
+  Runtime (23d6c7ad…): RM_0080 zeigt dort noch die Luecke `frm_no 44/44`, HP 75,
+  dieselben 6 offenen Weltbindungen — die Zahl stammt also nicht aus dieser
+  Aenderung. Benutzer-INIs unveraendert.

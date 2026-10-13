@@ -1,13 +1,24 @@
 # Original post-stairs spawn; tank movement and wall collision, no teleport.
-# Confirm skips the active original cemetery film; continued OK acknowledges dialogue.
+# SELECT (replay "select", system.c:545 bhSysCallGame pad_ps 0x10000) skips the active
+# original cemetery cinematic; continued OK only acknowledges dialogue (2026-10-13: OK no
+# longer requests the skip, the Select line was added with the same frame).
+# Ziel ist Boden-Trigger 0 (rom->flrp[0], x 129.69..136.72 / z 124.49..143.83); erst
+# dessen cb_flg 0x200 mit sys->flr_idx == 0 oeffnet in scd1 den bhCk aus event.c:509
+# und startet Event 0 (Helikopter).
+# Umgetaktet am 2026-10-13: die Drehschritte waren auf 4.5 Grad/Bild ausgelegt. Das ist
+# die Drehung im Lauf (bhCPM2_act_run, player.c:2499/2504). Eine allein gehaltene
+# Drehtaste setzt in bhControlPlayerPad (player.c:1840-1855) mode2 1/2, und
+# bhCPM1_act_bas (player.c:2001/2008) dreht dort mit 7.2 Grad/Bild. Seit dieser
+# Bindung drehten die alten Bildnummern zu weit, der Weg lief in die Westwand.
+# Beide 90-Grad-Drehungen brauchen jetzt 13 statt 20 Bilder.
 0 keys none
 60 keys forward
 126 keys right
-145 keys forward right
-146 keys forward
-187 keys right
-207 keys forward
+139 keys forward
+182 keys right
+195 keys forward
 1000 keys none
+1100 select
 1100 confirm
 1200 confirm
 1300 confirm

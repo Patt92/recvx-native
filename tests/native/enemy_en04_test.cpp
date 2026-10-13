@@ -457,18 +457,23 @@ void mv01_mv02(){
     /* en04.c:1810: nur bei gesetztem 0x800 wird ct1 aus rand gezogen. */
     require(m.ct1!=0,"MV02 ct1 en04.c:1812 differs");
 
-    /* en04.c:1825: dieser Zweig liest `rot` undefiniert. Die Portierung
-       meldet die Luecke und laesst die Motion stehen. */
+    /* en04.c:1824-1826: dieser Zweig laesst `rot` unzugewiesen in die
+       Schlusszeile laufen. Im Original liegt `rot` in $s0, das
+       bhEne04_MVType00 als $sp + 0x58 (SLUS_201.84 0x1A6138) unveraendert
+       weitergibt: ein positiver Wert, bhEne04_RunMotion (en04.c:3657) nimmt
+       damit idx 0 = mtn_tbl[0] = 3. Keine Luecke mehr. */
     reset();
     auto u=make(); u.mode0=1; u.mode1=0; u.mode2=2; u.mode3=1; u.type=0;
     u.exp0=allocate(sizeof(RECVX_EN04_EXP0));
     static_cast<RECVX_EN04_EXP0*>(u.exp0)->flg=0x1000;
-    u.mtn_no=1; ply.pos={0,0,40};
+    u.mtn_no=1; ply.pos={0,0,-40};
+    // e->target liegt hinter dem Hund (niten_dir 180 Grad gegen ay), e->dist ueber 15: sonst setzt
+    // die Sonde en04.c:1962 rot auf 0 und RunMotion waehlt mit idx 1 wieder mtn 1.
+    auto* ue=static_cast<RECVX_EN04_EXP0*>(u.exp0); ue->target={0,0,-40}; ue->dist=40.0f; u.ay=32768;
     recvx_en04_move(&u);
     require(u.mode3==2,"MV02 en04.c:1825 Zustandswechsel fehlt");
-    bool found=false; for(const auto& g:gaps) if(g.find("en04.c:1825")!=std::string::npos) found=true;
-    require(found,"MV02 undefinierter rot muss als Luecke gemeldet werden");
-    require(u.mtn_no==1,"MV02 darf ohne rot keine RunMotion-Wahl treffen");
+    for(const auto& g:gaps) require(g.find("en04.c:1825")==std::string::npos,"MV02 rot ist per Disassembly belegt, keine Luecke");
+    require(u.mtn_no==3,"MV02 0x1000: rot > 0, RunMotion muss mtn_tbl[0] = 3 waehlen");
 }
 
 /* ---------------------------------------------------------------------------

@@ -168,6 +168,14 @@ void MapScreen::analyze_index(){
     const int packed=get_floor_no(buffer_.data()+index_floor_table_,buffer_.size()-index_floor_table_,ply_rom_,host_.player_y);
     if(packed==-1){map_no_=-1;ply_flr_=-1;}
     else{map_no_=(unsigned(packed)>>16)&0xFFFF;ply_flr_=packed&0xFFFF;}
+    /* map.c:420: `map_bufP = pacP` advances the load pointer past the index
+       so the floor file lands behind it and the marker models, the map
+       texture and the message blocks stay in memory. The native reader
+       delivers whole files, so the index bytes move to their own buffer and
+       the chunk spans above keep addressing them. */
+    index_buffer_=std::move(buffer_);
+    buffer_.clear();
+    ++index_generation_;
 }
 
 int MapScreen::get_floor_no(const std::uint8_t* data,std::size_t size,int rom_no,float pos_y){
@@ -207,15 +215,15 @@ void MapScreen::analyze_stage(){
     /* MP_MOD_DAT_SET (map.c:464): 'MPAC', the offset to the opcode stream,
        then the stage map model and its texture. */
     map_code_=0;stage_model_={};stage_texture_={};
-    if(buffer_.size()<8||read_u32(buffer_,0)!=kMpac){map_mode_=RECVX_MP_MOD_WAIT_NOMAP;return;}
+    if(buffer_.size()<8||read_u32(buffer_,0)!=kMpac){map_mode_=RECVX_MP_MOD_WAIT_NOMAP;++stage_generation_;return;}
     std::size_t cursor=4+read_u32(buffer_,4);
-    if(cursor+4>buffer_.size()){map_mode_=RECVX_MP_MOD_WAIT_NOMAP;return;}
+    if(cursor+4>buffer_.size()){map_mode_=RECVX_MP_MOD_WAIT_NOMAP;++stage_generation_;return;}
     std::size_t next=read_u32(buffer_,cursor);
     cursor+=4;
     map_code_=cursor;
     if(next!=~0u){
         cursor+=next;
-        if(cursor+4>buffer_.size()){map_mode_=RECVX_MP_MOD_WAIT_NOMAP;return;}
+        if(cursor+4>buffer_.size()){map_mode_=RECVX_MP_MOD_WAIT_NOMAP;++stage_generation_;return;}
         next=read_u32(buffer_,cursor);
         cursor+=4;
         stage_model_={cursor,next==~0u?buffer_.size()-cursor:next};
@@ -228,6 +236,7 @@ void MapScreen::analyze_stage(){
     func_alloc(ProcMapDraw,0);
     tag_init();
     map_mode_=RECVX_MP_MOD_VEW_NORMAL;
+    ++stage_generation_;
 }
 
 void MapScreen::set_map_objects(std::vector<MapObject> objects){
@@ -468,9 +477,20 @@ void MapScreen::view_main(){
 }
 
 void MapScreen::light_main(){
-    /* MapLightMain (map.c:625): the easy-multi light the integrator installs
-       for the map draw. lgt_scale follows map_scale and scales the colour. */
+    /* MapLightMain (map.c:625): njCnkSetEasyMultiLightSwitch(1,1), ambient
+       (ar,ag,ab), lgt_scale = map_scale, the light vector from yaw/pitch, the
+       colour (pr,pg,pb) / map_scale and njCnkSetEasyMultiLightMatrices with
+       the view matrix pushed. njCnkSetEasyMultiLightVector keeps -v
+       (ps2_NinjaCnk.c:328-336); the matrices routine rotates it with the
+       translation removed (:365-391), which njCalcVector does. */
     lgt_scale_=map_scale_;
+    const int yaw=yaw_,pitch=pitch_;
+    const float scl=1.0f/map_scale_;
+    NJS_VECTOR v{-njSin(yaw)*njCos(pitch),njSin(pitch),-njCos(yaw)*njCos(pitch)};
+    light_world_={-v.x,-v.y,-v.z};
+    light_color_={pr_*scl,pg_*scl,pb_*scl};
+    ambient_={ar_,ag_,ab_};
+    njCalcVector(&vew_mtx_,&light_world_,&light_camera_);
 }
 
 void MapScreen::palette_main(){

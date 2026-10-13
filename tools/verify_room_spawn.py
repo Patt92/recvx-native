@@ -34,7 +34,13 @@ def main():
     door = '10 skip\n60 position 50 0 34 32768\n61 confirm\n'
     before = run('door-last', door, 225, '--in-game', '--room', 'RM_0040.RDX', '--spawn', '1')
     assert before['door_active'] and before['room'] == 'RM_0040.RDX'
-    for frames in [226, 227, 240]:
+    # main.c:195-201: Task 20 releases Task 7 after its turn in the table.
+    # At room load the door task still owns presentation; the following pass
+    # controls the destination before its first game drawing (game.c:48-74).
+    handover = run('door-226', door, 226, '--in-game', '--room', 'RM_0040.RDX', '--spawn', '1')
+    assert handover['room'] == 'RM_0090.RDX' and handover['room_changes'] == 1
+    assert handover['door_active'] and handover['actor'][1] == 0 and not handover['blocked_commands']
+    for frames in [227, 228, 240]:
         s = run('door-' + str(frames), door, frames, '--in-game', '--room', 'RM_0040.RDX', '--spawn', '1')
         assert s['room'] == 'RM_0090.RDX' and s['room_changes'] == 1 and not s['door_active']
         assert s['actor'][1] == 0 and not s['blocked_commands'], s

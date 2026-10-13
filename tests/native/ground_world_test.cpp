@@ -72,6 +72,38 @@ int main(int argc,char** argv){try{
     const auto after=world.move_player(from,candidate,1,false);
     check(std::fabs(after.x-(edge+4.5f))<.003f,"leading-point/body pass not bound to real player flags");
     check(events.player_flags==events.flags[13][0],"native player flag mirror diverges");
+    // Gemeinsamer bhControlPlayer-Koerperteil: fremder Positionsschreibzugriff
+    // (z.B. bhCheckPlayer) ist kein eigener Lauf-/Rennschritt. Alle mode0-
+    // Zustaende benutzen dieselben beiden WallEx-Sonden, nicht nur Hundegriffe.
+    for(unsigned mode:{1u,2u,3u,4u,6u,7u}){
+        std::size_t body_motion=42;std::int64_t body_frame=0;auto body_actor=scene.spawns[0];
+        RoomWorld body(room,scene,body_actor,body_motion,body_frame,audio,data,{},"RM_0050");
+        body.set_player_asset(&player);Inventory inv;MessageDialog mes;EventVm vm(room,inv,mes);body.bind_player_collision(vm);
+        for(unsigned i=0;i<wall_count;++i)check(body.bind({0x0a,0,0,0,{0x0a,std::uint8_t(i),std::uint8_t(i!=barrier),0}}),"body wall fixture binding missing");
+        body.set_player_mode(mode);body_actor.yaw=16384;
+        body_actor.position={edge+6,0,z};body.settle_player_body(body_actor.position,0);
+        body.check_player_floor(body_actor.position,body_actor.yaw,0);
+        body_actor.position={edge+3.2f,0,z}; // erlaubter Stoss IN den ATR-Radius
+        body.settle_player_body(body_actor.position,0);
+        check(std::fabs(body_actor.position.x-(edge+3.5f))<.003f,"stationary/enemy-driven body crosses wall");
+        // player.c:1600-1650: stflg bit 0 is cleared before the bps probe
+        // (:1611) and again before the body pass (:1645); only a hit sets it
+        // (hitchk.c:1250). Wall 11 is 25 high, so the raised probe (y+12.5,
+        // pah 1.0) hits first and drags plp->px to the box edge (:1635). The
+        // body pass then tests exactly that edge: (npos->x - px) < xn
+        // (hitchk.c:718) is false at the boundary, so it does not hit and the
+        // frame ends with bit 0 clear. The shared status word must carry that.
+        check(!(vm.flags[14][0]&1u),"body pass leaves stale wall-hit bit in shared player status");
+        body.check_player_floor(body_actor.position,body_actor.yaw,0);
+        body_actor.position={edge+8,0,z+2};body.settle_player_body(body_actor.position,0);
+        check(body_actor.position.x==edge+8&&body_actor.position.z==z+2,"body pass forbids normal unobstructed displacement");
+        vm.flags[13][0]&=~0x10u;body_actor.position={edge+3.2f,0,z};body.settle_player_body(body_actor.position,0);
+        check(body_actor.position.x==edge+3.2f,"stationary body ignores original flg10 gate");
+        vm.flags[13][0]|=0x10u;vm.flags[6][0]&=~1u;body.settle_player_body(body_actor.position,0);
+        check(body_actor.position.x==edge+3.2f,"stationary body runs while player task paused");
+        vm.flags[6][0]|=1u;vm.flags[14][0]|=0x1000000u;body.settle_player_body(body_actor.position,0);
+        check(body_actor.position.x==edge+3.2f,"stationary body runs on hidden work");
+    }
     events.flags[13][0]&=~0x10u;
     check(world.move_player(from,candidate,1,false).x==candidate.x,"original player wall enable gate ignored");
     events.flags[13][0]|=0x10u;events.flags[6][0]&=~1u;

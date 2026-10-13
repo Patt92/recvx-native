@@ -118,10 +118,18 @@ check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<
  // native/effect_particles.cpp. Geprüft bleibt die Skriptfreigabe über
  // Sub_controll (Zusicherung oben) und dass der freigegebene Gegner ohne die
  // Originalroutinen inert bleibt.
- check(std::hypot(next.x-at.x,next.z-at.z)<.01f,"enemy gap moved the released zombie");
- check(!world.damage(index,2,20,0x10,{next.x,next.y+10,next.z},{0,0,-1}),"enemy gap accepted damage on the released zombie");world.tick();
- check(!world.blood_particles(),"particle gap produced blood");
- std::cout<<"Original zombie script release passed; AI movement, hits and blood are documented gaps.\n";}
+ // 2026-10-13: Sub_controll 0x8f (event.c:9804-9844) ist jetzt an den nativen
+ // Work gebunden: mode0 1 / mode1..3 0, mnwP = emtp[id], ct2-Byte 0; davor
+ // Common 23 (1) und 46 (1) (event.c:11971/10358) setzen flg 0x118 und 0x20.
+ // Der freigegebene Work laeuft damit in bhEne01_Move (en01.c:2207) und
+ // naehert sich dem Spieler (bhEne01_Brain); die alte "inert"-Zusicherung
+ // beschrieb die nicht gebundene Freigabe, nicht das Original.
+ {const auto& w=world.state(1,index)->enemy;
+  check(w.mode0==1&&w.mode1==0&&w.mode2==0&&w.mode3==0,"Sub_controll 0x8f did not set the original modes on the native work");
+  check(w.mtn_room==0,"Sub_controll 0x8f did not select mnwP = emtp[id]");
+  check((w.flg&0x118u)==0x118u&&(w.flg&0x20u),"Common 23/46 did not restore flg 0x118/0x20 before the release");}
+ check(std::hypot(next.x-at.x,next.z-at.z)>=.01f,"released zombie stayed inert under the ported bhEne01_Move");
+ std::cout<<"Original zombie script release passed: Sub_controll 0x8f modes, emtp library and flg 0x118/0x20 on the native work; the released zombie moves under bhEne01_Move.\n";}
  if(!soft_failures.empty()){for(const auto& f:soft_failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<soft_failures.size()<<" inventory expectation(s) failed; the remaining bindings passed.\n";return 1;}
  return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

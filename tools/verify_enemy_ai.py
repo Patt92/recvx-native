@@ -44,12 +44,26 @@ import zlib
 from pathlib import Path
 
 ALLOWED_GAPS = (
-    'bhSetEffect(17)',                        # bhEne00 (Fass), nicht Teil dieser Kette
-    'bhSetMotion:frm_no ausserhalb von frm_num',  # bhGetFrameNum/ChgWalkMtn: Original liest einen Key hinter frm_num
+    # Motion.c:131 liest den Key bei frm_no>>16 ohne Grenze gegen frm_num. Die
+    # Nachbarkeys aus demselben MTN-Bereich werden nativ angehaengt
+    # (decode_motion_asset, tail_keys); diese Meldung steht nur noch, wenn die
+    # Keytafel am Rand ihres eigenen Bereichs endet.
+    'bhSetMotion:frm_no ',
     'bhSetMotion: Motionkanal ohne Modellknoten',  # Motion mit mehr Kanaelen als Knoten: Original schreibt hinter objP
     'bhCheckRoute: keine Wegezone',           # rutchk.c:5 laesst pos uninitialisiert (Hund/Spieler ausserhalb rom->rutp)
-    'bhEne04_MV02 rot undefiniert',           # en04.c:1825: rot bleibt im Zweig 0x1000 uninitialisiert
     'en01:Nachbar ohne exp0',                 # en01.c:11440 liest EPP_EXP0 eines skript-inaktiven Works (exp0 NULL)
+    # Erster Pass eines Raums: plp->mdl[i].owP kommt aus bhGetFreeMemory
+    # (dread.c:161) und wird nicht geloescht, bhMlbBinRealize setzt den Zeiger
+    # nur auf NULL (binfunc.c:28). Vor dem ersten bhCalcModel(plp) liest das
+    # Original damit nicht initialisierten Speicher; nativ wird gemeldet statt
+    # eine Pose zu erfinden. Gemessen nur im Tick 0 (danach 22 Knoten).
+    'plp->mlwP->owP[0] (en01.c:2840)',
+    'plp->mlwP->owP vor bhCalcModel(plp)',
+    # RM_0020: Gegner 4 ist id 91 (Maskenzombie); eneset.c:376 bhControlMask
+    # (face.c) ist nicht portiert und liegt ausserhalb der Angriffskette.
+    'bhControlMask',
+    # RM_0020 Helikopterszene: bhEff352 (effsub) ist nicht portiert; nur gemeldet.
+    'bhEff352',
 )
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -110,6 +124,63 @@ def grabbed(state):
 
 FRONT = '0 position -3 0 24 0\n'
 results = {}
+REPO = Path(__file__).resolve().parent.parent
+
+# --- Friedhof RM_0020: Helikopter-Kriecher (Gegner 3) ----------------------
+# Soll aus dem RM_0020-Skript (scd0-Init, base-rel 262-402, ev_flg 104 == 0):
+#   bhInitModelSet 1/0,1,2,5/0 -> stflg 0x1000000 (event.c:2847) fuer die vier
+#   Friedhofszombies, 1/4/0 fuer den Maskenzombie 4 (id 91); Gegner 3 (ed_flg 4
+#   == 0): bhLoadWork, Common 12/7 (0,0,0)/13/11, Common 23 (0: flg &= ~0x118,
+#   event.c:11981), Common 46 (0: flg &= ~0x20, :10362), Common 24 (Raum-MTN 4,
+#   mode0 5 = bhEne_Event, ct1 0 = sofortiges bhSetMotion/bhCalcModel/
+#   bhCalcLinkModel event.c:11601, ct2 6). Nach der Szene (ev 11/12): Common 25
+#   (Bibliothek 40, mode0 5) als Kriechen ab (141,0,130), Common 23/46 (1),
+#   Sub_controll 0x8f (event.c:9804) -> mode0 1 (bhEne01_Move); bhInitModelSet
+#   1/0,1,2,5/1 weckt die vier Zombies, 1/4/0 deaktiviert den Maskenzombie.
+# Ohne Greifen, weil die Zombies nach der Szene den Spieler sonst toeten und das
+# native Game Over den Raum neu laedt (gemessen: Bild 2600 frisch initialisiert).
+GRAB_OFF = ['--enemy-ai', 'on', '--enemy-grab', 'off']
+
+
+def crawler_waits(state, name):
+    for idx in (0, 1, 2, 5):
+        w = enemy(state, idx)['work']
+        assert w['stflg'] & 0x1000000, (name, 'Zombie', idx, 'nicht per bhInitModelSet deaktiviert', w)
+    w4 = enemy(state, 4)['work']
+    assert w4['stflg'] & 0x1000000, (name, 'Maskenzombie 4 nicht deaktiviert', w4)
+    w3 = enemy(state, 3)['work']
+    assert not (w3['stflg'] & 0x1000000), (name, 'Kriecher faelschlich deaktiviert', w3)
+    assert w3['mode'][0] == 5 and w3['mode'][1] == 4 and w3['mtn_no'] == 4, (name, 'Kriecher nicht in bhEne_Event mit Raum-MTN 4', w3)
+    assert all(abs(v) < .01 for v in w3['pos']), (name, 'Kriecher nicht am Skriptursprung (0,0,0), sondern in der KI unterwegs', w3)
+    assert not (w3['flg'] & 0x118) and not (w3['flg'] & 0x20), (name, 'Common 23/46 (0) nicht auf dem Work', w3)
+    assert not any(c['opcode'] == 0x69 and c['event'] == 0 for c in state['pending_commands']), \
+        (name, 'Common_controll der Init-Szene ungebunden', state['_pending_opcodes'])
+
+
+entry = run('graveyard-entry', 'RM_0020.RDX', 30, '', GRAB_OFF, ai=False)
+crawler_waits(entry, 'graveyard-entry')
+# Natuerlicher Tuereintritt RM_0050 -> RM_0030 -> RM_0020 (tools/verify_continuity.py RETURN).
+door = run('graveyard-door', 'RM_0050.RDX', 1100,
+           '60 position -33 0 110 16384\n61 confirm\n180 confirm\n500 skip\n700 position 32.5 0 70 49152\n701 confirm\n750 skip\n',
+           GRAB_OFF, ai=False)
+assert door['room'] == 'RM_0020.RDX' and door['room_changes'] == 2, ('graveyard-door', door['room'], door['room_changes'])
+crawler_waits(door, 'graveyard-door')
+WALK = (REPO / 'tests/native/replays/graveyard-walk.txt').read_text()
+crawl = run('graveyard-crawl', 'RM_0020.RDX', 1000, WALK, GRAB_OFF, ai=False)
+assert crawl['cinematic'] and crawl['event_flags'][3] & 0x800000, ('graveyard-crawl', 'Heli-Szene/ev_flg 104 bei Bild 1000', crawl['cinematic'])
+w3 = enemy(crawl, 3)['work']
+assert w3['mode'][0] == 5 and w3['mtn_no'] == 40 and not (w3['stflg'] & 0x1000000), ('graveyard-crawl', 'Kriechmotion 40 (Common 25, mode0 5) nicht aktiv', w3)
+assert 120 < w3['pos'][0] < 150 and 120 < w3['pos'][2] < 140, ('graveyard-crawl', 'Kriecher nicht an der Skriptlage um (141,0,130)', w3)
+after = run('graveyard-after', 'RM_0020.RDX', 1200, WALK, GRAB_OFF, ai=False)
+assert not after['cinematic'] and not after['event_tasks'], ('graveyard-after', 'Szene nicht beendet', after['event_tasks'])
+for idx in (0, 1, 2, 3, 5):
+    w = enemy(after, idx)['work']
+    assert not (w['stflg'] & 0x1000000) and w['mode'][0] == 1, ('graveyard-after', 'Zombie', idx, 'nicht in bhEne01_Move', w)
+w3 = enemy(after, 3)['work']
+assert (w3['flg'] & 0x118) == 0x118 and (w3['flg'] & 0x20), ('graveyard-after', 'Common 23/46 (1) vor Sub_controll 0x8f fehlt', w3)
+assert enemy(after, 4)['work']['stflg'] & 0x1000000, ('graveyard-after', 'Maskenzombie 4 nach der Szene aktiv', enemy(after, 4)['work'])
+results['graveyard'] = {'entry': enemy(entry, 3)['work'], 'door': enemy(door, 3)['work'], 'crawl': enemy(crawl, 3)['work'],
+                        'after': {e['index']: e['work'] for e in after['enemies']}, 'gaps': sorted(set(after['_gaps']) | set(door['_gaps']))}
 
 # --- Zombies RM_0080 -------------------------------------------------------
 natural = run('natural', 'RM_0080.RDX', 1500, '')
@@ -146,6 +217,38 @@ r60 = run('rm0060-natural', 'RM_0060.RDX', 1500, '')
 assert r60['hp'] < 160, ('rm0060', 'kein Biss im natuerlichen Lauf', r60['hp'])
 assert all(e['type'] == 11 for e in r60['enemies'] if e['identity'] == 1), ('rm0060', 'InitType11 erwartet')
 results['rm0060-natural'] = {'hp': r60['hp'], 'gaps': r60['_gaps']}
+
+# Griffende mit spielergebundenem Effekt. bhEne01_PlyDG00 Zweig 3 (en01.c:7625-
+# 7637) gibt plp->mnwP = plp->mnwPb zurueck und laesst plp->mtn_no auf dem
+# Zombie-Eintrag En01_PlyMtn_OffsetTbl[0] + 10/11 = 410/411 stehen, bis
+# bhControlPlayer ihn im selben Bild ueberschreibt (game.c:47). bhControlEffect
+# (game.c:48) liest danach pp->mlwP->owP[op->lkono].mtx (effect.c:803-811).
+# Loeste der Port stattdessen plp->mnwP[plp->mtn_no] auf, brach der Lauf im
+# Freigabebild mit "actor motion unavailable" ab (Nutzermeldung Friedhof).
+# Diagnose dieses Falls: das Debugmenue ruestet das Feuerzeug (Item 55) aus,
+# damit bhEff009 als spielergebundene Arbeit (link 1, Knoten 9) im Effektpass
+# liegt; keine Positionierung, keine Flags.
+lamp = '0 debug_key F2\n1 debug_select equip 55\n2 confirm\n4 debug_key F2\n'
+# Bild 1200 endet zwischen zwei Griffen: der Spieler lebt, ist freigegeben, und
+# bhControlPlayer hat plp->mtn_no bereits zurueckgeholt.
+r60l = run('rm0060-lighter-release', 'RM_0060.RDX', 1200, lamp)
+assert r60l['weapon'] == 1 and any(e['id'] == 9 and e['type'] == 2 and e['visible'] for e in r60l['effects']), \
+    ('rm0060-lighter', 'kein sichtbarer spielergebundener bhEff009 im Effektpass', r60l['weapon'], r60l['effects'])
+assert r60l['hp'] < 160, ('rm0060-lighter', 'kein Biss', r60l['hp'])
+assert not r60l['player_scripted'], ('rm0060-lighter', 'Lauf endet nicht nach einer Freigabe', r60l.get('player_work'))
+assert r60l['motion'] < 400, ('rm0060-lighter', 'bhControlPlayer holt plp->mtn_no nach der Freigabe nicht zurueck', r60l['motion'])
+results['rm0060-lighter-release'] = {'hp': r60l['hp'], 'motion': r60l['motion'], 'gaps': r60l['_gaps']}
+
+# Derselbe Raum ueber mehrere vollstaendige Griff-/Freigabefolgen bis zum Tod.
+# `run` wirft bei jedem Abbruch der Laufzeit, der Fall ist also die eigentliche
+# Absturzsicherung: der Effektpass loest den Spielerlink in jedem dieser Bilder
+# auf. plp->mtn_no bleibt hier zu Recht auf dem Zombie-Eintrag stehen, weil
+# bhControlPlayer nach dem Tod nicht mehr laeuft — darum keine Motionzusage.
+r60d = run('rm0060-lighter-death', 'RM_0060.RDX', 3000, lamp)
+assert r60d['hp'] < 0 and r60d['gameover_active'], ('rm0060-lighter-death', 'kein Tod ueber die Griffkette', r60d['hp'], r60d['gameover_active'])
+assert any(e['id'] == 9 and e['type'] == 2 for e in r60d['effects']), \
+    ('rm0060-lighter-death', 'spielergebundener bhEff009 ueberlebt die Griffkette nicht', r60d['effects'])
+results['rm0060-lighter-death'] = {'hp': r60d['hp'], 'motion': r60d['motion'], 'gaps': r60d['_gaps']}
 
 r31 = run('rm0031-natural', 'RM_0031.RDX', 1500, '')
 assert r31['hp'] < 160, ('rm0031', 'kein Biss im natuerlichen Lauf', r31['hp'])

@@ -35,6 +35,10 @@ struct WorldEntity {
     // lip->flag == 0. A running stream therefore keeps its own source.
     std::optional<FaceParameter> facial;std::vector<std::uint8_t> lip_stream,lip_current_stream;unsigned lip_bank=0,lip_pos=0,lip_count=0,lip_time=0,lip_cur=0,lip_next=0;bool lip_active=false;
 bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std::array<int,3> angles{};unsigned identity=0,type=0,death_ticks=0,object_flags=0,object_parameter=0;int object_floor=0;
+    // O_WRK.hide[0..3] (objitm.c:200-203 bhSetObject, :262-265 bhSetItem): die
+    // Schnittnummern, in denen ein Werk mit flg 0x40000000 gezeichnet wird.
+    // 255 steht in den Originaldaten fuer "kein Schnitt".
+    std::array<std::uint8_t,4> object_hide{{255,255,255,255}};
     // O_WRK fields of a room object (kind 2) that enemy routines read and write
     // (en04.c:1100 door branch, :3955 wire shake): flg2, mode1, mode3, ct0, ayp.
     unsigned object_flg2=0,object_mode1=0,object_mode3=0;int object_ct0=0,object_ayp=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
@@ -180,7 +184,18 @@ public:
     bool enemy_player_get(RECVX_ENEMY_PLAYER& out)const;
     bool enemy_player_set(const RECVX_ENEMY_PLAYER& in);
     unsigned enemy_player_motion_frames(unsigned motion,bool from_enemy)const;
+    // sys->ene / sys->ewk_n: die eine Gegnertabelle des Raumlaufs. Der
+    // Kampfpass liest sie ueber den Dienst `enemies` (pwksub.c:244
+    // bhSearchNearEnemy, playpch.c:318 bhSearchEnemy, weapon.c:614
+    // bhCheckGunAtari); sie haelt nur Zeiger auf die vorhandenen Entities und
+    // wird vom Gegnerpass desselben Besitzers gefuellt.
+    RECVX_ENEMY_TABLE& enemy_table(){return enemy_table_;}
     void commit_player_joints(const std::vector<BoneMatrix>& nodes){player_joint_matrices_=nodes;}
+    // bhCalcModel(plp) (player.c:1517) runs on mlwP->objP after the mode routine
+    // and bhControlPlayerHead, so the owP it commits carries the script node
+    // writes and the crate pose as well.  The owner of the committed matrices
+    // uses this to sample exactly that object tree.
+    ModelNodeOverrides player_pose_overrides()const{auto edits=overrides(0,0);if(push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;return edits;}
     bool enemy_player_joint(unsigned joint,BoneMatrix& out)const;
     std::vector<ModelPose> player_local_pose()const;
     void set_pad_clear_callback(std::function<void(uint32_t)> cb){pad_clear_cb_=std::move(cb);}
@@ -244,9 +259,16 @@ public:
     unsigned event_camera_index=0;
     std::optional<unsigned> fixed_camera;
     unsigned event_camera_key()const{return event_camera_key_;}
-    void initialize_camera_clip(unsigned cut);
+    unsigned event_camera_clock()const{return event_camera_clock_;} // cam.ct0
+    bool event_camera_paused()const{return event_camera_paused_;}   // cam.mode0 == 3
+    bool event_camera_finished()const{return event_camera_finished_;} // cam.mode0 == 2
+    // bhSetCut (cut.c:281): clip, hide tables and the cam.fog_* hand-over. The
+    // bhSetFixedCut clip call passes cam.ncut, its fog comes from cno separately.
+    void initialize_camera_clip(unsigned cut,bool hand_over_fog=true);
     ViewClip camera_clip()const{return installed_clip_;}
     void tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking=true);
+    struct FogView {bool enabled;std::uint32_t color;float near_range,far_range;int ct;};
+    FogView fog_view()const{return {fog_.enabled,fog_color_,cam_fog_near_,cam_fog_far_,fog_ct_};}
     bool camera_transitioning()const{return active_camera_.transitioning();}
     unsigned camera_clock()const{return active_camera_.clock();}
     int floor_at(NJS_POINT3 position)const;
@@ -270,6 +292,20 @@ public:
     bool search_near_enemy_b(NJS_POINT3 pos,int ay,int ar,float len)const;
     NJS_POINT3 player_safe_position()const{return collision_safe_;}
     void set_player_safe_position(NJS_POINT3 p){collision_safe_=p;}
+    // Host-Diagnose-Teleport (Replay "position", Debug): der Spieler steht danach so, als
+    // waere er schon dort gewesen. Wie die Original-Teleports der Aktionsenden
+    // (player.c:3095-3099: px = spx, bpx = bpxb = px) folgen spx/spz und die Vorsonde bpxb der
+    // neuen Lage; sonst waehlt bhCheckWallEx die Austrittsseite nach der alten Sonde.
+    // Ende einer Stufen-/Treppenaktion: bpx = bpxb = px, bpy = bpyb = 12.5 + py, bpz = bpzb = pz
+    // (player.c:3099/3294/3474/3692). Ohne das vergleicht der erste Koerperpass nach der
+    // Landung gegen die Vorsonde der Ausgangsebene.
+    void set_player_previous_probe(NJS_POINT3 p){collision_previous_probe_={p.x,p.y+12.5f,p.z};}
+    void place_player(NJS_POINT3 p){collision_safe_=p;collision_previous_probe_={p.x,p.y+12.5f,p.z};collision_front_offset_=collision_front_target_=0.f;collision_probe_ready_=true;}
+    // bhControlPlayer player.c:1578-1591 und :1649-1654: der Spielerpass fuehrt
+    // EXP_WORK arn an arp nach und schreibt fpx/bpx/spx aus der aktuellen Lage.
+    // `arp` ist der Wert, den bhCPM2_act_* dieses Bildes hinterlassen hat.
+    void settle_player_body(NJS_POINT3& position,float arp);
+    void finish_player_pass(NJS_POINT3& position,Angle yaw);
     bool player_safe_position_ready()const{return collision_probe_ready_;}
     void report_enemy_gap(const char* name){unbound_enemy_.insert(name);}
     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f,std::optional<bool> walking={});
@@ -294,9 +330,10 @@ private:
         return index==0?model.actor.get():model.actor->model(index);
     }
     /* BH_SCEWORK mode1/mode2 (types.h:1953) */
-    struct Context {unsigned kind=0,index=0,node=0,mode1=0,mode2=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
+    struct Context {unsigned kind=0,index=0,node=0,mode1=0,mode2=0;unsigned mtn_md=0,mdflg=0;int hokan_rate=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
     struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;};
-    struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;};
+    // CAM_KEYF_WORK: flg (0x8 = this key carries fog), fog_col/fog_nr/fog_fr.
+    struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;unsigned flags=0;std::uint32_t fog_color=0;float fog_near=0,fog_far=0;};
     struct EventCameraTrack {std::vector<EventCamera> keys;unsigned next=0;};
     std::vector<std::uint8_t> room_;std::size_t header_;unsigned simulation_flags_=~0u;
     std::unique_ptr<PlayerPush> push_;
@@ -309,14 +346,19 @@ private:
     unsigned collision_control_=0,collision_system_=0,collision_mode_=1;
     unsigned collision_floor_sound_=0,collision_foot_effect_=0;
     int collision_floor_=0,collision_push_count_=0,collision_push_index_=0,collision_floor_index_=0;
-    float collision_front_offset_=0;
+    float collision_front_offset_=0,collision_front_target_=0; // EXP_WORK arn/arp
     NJS_POINT3 collision_previous_probe_{},collision_safe_{};
     bool collision_probe_ready_=false;
+    // Der Koerperteil von bhControlPlayer laeuft im Original genau einmal je
+    // Bild (player.c:1578-1655). Im Host besitzt ihn der Bewegungspass; ohne
+    // Bewegungspass uebernimmt ihn die bhCheckFloorP-Stelle.
+    bool collision_body_pass_=false;
+    void player_body_pass(NJS_POINT3& position,Angle yaw);
     std::optional<std::size_t> collision_step_;
     MotionActor motion_actor();
     std::vector<CollisionWall> motion_steps()const;
     std::vector<CollisionWall> motion_floors()const;
-    NJS_POINT3 resolve_player_motion(NJS_POINT3,NJS_POINT3,float,float,std::optional<float>);
+    NJS_POINT3 resolve_player_motion(NJS_POINT3,NJS_POINT3,float,float,std::optional<float>,std::optional<Angle> yaw={});
     PlayerGroundWork player_ground_{};bool player_ground_ready_=false;
     std::optional<std::pair<unsigned,int>> stair_ground_state_;
     std::vector<unsigned> push_objects_;
@@ -348,7 +390,7 @@ private:
     SceneSpawn& player_;std::size_t& motion_;std::int64_t& frame_;AudioMixer& audio_;
     std::array<Context,16> contexts_{};
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
-    std::set<std::string> unbound_enemy_;
+    mutable std::set<std::string> unbound_enemy_; // const owP/pose services report their gaps too
     unsigned enemy_game_mode_=0;
     // bhSetEffectTb from game code: `link_kind` 0 = world position, 2 = enemy joint (WorldEntity index/joint).
     int spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
@@ -393,7 +435,18 @@ private:
     // ueberschreibt auch nichts einen Skript-Schreibzugriff auf objP.
     bool enemy_motion_available(const WorldEntity& e,unsigned mtn,bool room)const;
     void calc_enemy_model(WorldEntity& e);
+    // pwksub.c:39 bhCalcLinkModel(pp): bhCalcModel fuer jedes aktive Work mit
+    // flg 0x80, dessen lkwkp pp ist.
+    void calc_enemy_link_model(WorldEntity& e);
+    // event.c:11070 (Common 25), :11600 (Common 24), :11941 (Common 34): der
+    // ct1-Schalter waehlt nach dem Modusaufbau die sofortige Auswertung
+    // bhSetMotion(work,0,0,0) / bhCalcModel / bhCalcLinkModel.
+    void enemy_script_evaluate(WorldEntity& e,unsigned mode);
     void sync_player_grab();
+    // player.c:1600-1664, the tail of bhControlPlayer that bhCtrPly_mode0 does
+    // not gate: the bps probe, the body bhCheckWallEx and bhCheckFloorP also run
+    // in the two enemy-driven player modes (bhCPM0_nage/bhCPM0_enedie).
+    void control_player_grab_collision();
     std::vector<BoneMatrix> player_joints_now()const;
     const MotionClip& enemy_library_clip(unsigned identity,unsigned index)const;
     void apply_en01_flinch();
@@ -463,6 +516,20 @@ private:
     std::vector<EventCameraTrack> event_cameras_;
     unsigned event_camera_key_=0,event_camera_clock_=0;
     bool event_camera_finished_=false;
+    // cam.mode0 of bhControlEventCamera (cut.c:1986): 0 = init pass (event_camera_init_),
+    // 1 = travelling, 2 = final hold (event_camera_finished_), 3 = held by
+    // bhCamPauseSet (event_camera_paused_, event.c:1032; the switch has no case 3).
+    bool event_camera_init_=false,event_camera_paused_=false;
+    // cam.ips/ian/ipf/icr: the 20 Overhauser control slots of bhInitEventCamera (cut.c:1845).
+    std::array<float,60> event_ips_{},event_ian_{},event_ipf_{},event_icr_{};
+    struct EventCameraLock {unsigned flg=0,no=0,ono=0;NJS_POINT3 offset{};};
+    std::array<const EventCamera*,20> event_camera_control_keys()const;
+    EventCameraLock event_camera_lock_fields(unsigned track,unsigned slot)const; // raw CAM_KEYF_WORK slot; kfp[1] past keyf_n reads the following slot
+    NJS_POINT3 event_camera_lock_position(const EventCamera& key); // cut.c:2391 bhGetEvtCamLockPosition
+    void event_camera_lock_angles(const EventCamera& key,std::int16_t& ax,std::int16_t& ay); // cut.c:2248 / :1682
+    void init_event_camera();       // cut.c:1845 bhInitEventCamera
+    void check_event_camera_lock(); // cut.c:2221 bhCheckEvtCamLockPosition
+    void control_event_camera();    // cut.c:1986 bhControlEventCamera
     SceneCamera event_camera_pose_{};
     // Native camera owner's installed njClipZ and last GameNear/GameFar.
     // Flag/key mutations alone do not invoke either original clip routine.
@@ -471,6 +538,16 @@ private:
     bool restore_camera_clip_=false;
     ActiveCameraMotion active_camera_;std::vector<SceneCamera> room_cameras_;
     bool camera_force_=false;
+    // Fog owner (sync.c:143-255 bhControlEOR): cam.fog_* as handed over by
+    // bhSetCut/bhSetFixedCut/bhSetEventCamera, sys->fog_ct/fog_cngct, the
+    // installed njGenerateFogTable3 state and the njSetFogColor colour.
+    std::uint32_t cam_fog_color_=0;float cam_fog_near_=0,cam_fog_far_=0;unsigned cut_fog_flags_=0; // rom->cutp[cam.ncut].cam[camver].flg
+    int fog_ct_=0,fog_cngct_=2; // system.c:156: 3 with ss_flg bit 1 (bhChangeHWSetting), else 2; the host has no ss_flg bit 1 owner
+    FogState fog_;std::uint32_t fog_color_=0;
+    std::uint32_t script_fog_color_=0; // sys->fog_col (bhFogColorSet 0x4c), read while st_flg 0x100000
+    void cut_fog_handover(const SceneCamera& ci,bool set_cut); // cut.c:349-377 bhSetCut / :463-484 bhSetFixedCut
+    void control_fog(); // sync.c:143-255
+    void install_fog(); // njSetFogColor + njGenerateFogTable3 + njSetFogTable + njFogEnable
     std::vector<Light> lights_,event_lights_;
     std::vector<NJS_POINT3> positions_;
     mutable std::map<std::pair<unsigned,unsigned>,std::vector<BoneMatrix>> actor_nodes_;
@@ -484,6 +561,11 @@ private:
     unsigned model_index(unsigned kind,unsigned index,unsigned script_node)const;
     const ModelNodeOverrides& overrides(unsigned kind,unsigned index)const;
     bool entity_hidden(unsigned kind,unsigned index)const;
+    // objitm.c:562 (bhDrawObjItm, Items), :659 (bhDrawObject) und :688
+    // (bhDrawSpObject) teilen dieselbe Bedingung: ein Werk mit flg 0x40000000
+    // wird nur gezeichnet, wenn sys->gm_flg & 0x40, cam.flg & 0x46 oder
+    // cam.ncut einem seiner vier hide[]-Eintraege entspricht.
+    bool object_cut_hidden(const WorldEntity& state)const;
     std::vector<ModelPose> object_pose(const Model& model,const WorldEntity& state)const;
     std::vector<BoneMatrix> object_matrices(const Model& model,const WorldEntity& entity,const NJS_MATRIX& transform)const;
     ModelPose model_pose_physical(unsigned kind,unsigned index,unsigned physical)const; // objP[physical] of the original model

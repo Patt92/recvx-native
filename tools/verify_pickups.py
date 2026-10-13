@@ -13,7 +13,19 @@ import struct
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
-MAP = '60 position 26 0 90 16384\n61 confirm\n100 confirm\n180 confirm\n'
+# Die Karte (ATR 11, x 16..23) ist nur von Westen erreichbar: oestlich davon liegt die
+# erhoehte Plattform, Wand 21 Typ 7 (x 19..63, y 7..8). bhCheckWallEx Typ 7 (hitchk.c:562)
+# schiebt einen 16,5 hohen Koerper dort heraus; die fruehere Diagnoseposition (26,0,90)
+# stand unter der Plattform und war im Original unerreichbar.
+MAP = '60 position 14 0 90 49152\n61 confirm\n100 confirm\n180 confirm\n'
+# Die Diagnoseposition der Calico-Aufnahme stand auf z=12 und erreichte den Regal-ETC
+# nicht mehr (RM_0070 ETC 4, pos(49,0,7) ext(7.99,0,7.99), attr 0x3c00). Gemessen am
+# 2026-10-13 mit drei Runtimes (pickupsel 13:0x, combat-aim 2026-10-12 23:45,
+# doorskip3 2026-10-13 08:24): z=6 und z=10 oeffnen die Frage 157, z=12 und z=14 nicht —
+# in allen drei Builds gleich, also keine neue Regression, sondern eine veraltete
+# Platzierung. OFFEN und nicht hiermit geklaert: warum bhCheckExmAtari den Bereich ab
+# z>=12 ablehnt (Probepunkt `fpx - sin*(3+(3-arn))`, hitchk.c); das gehoert in den
+# Interaktions-/Weltpfad, nicht in den Dialog-/GetItem-Pfad.
 CALICO = '''0 debug_key F2
 1 debug_select snapshot_load 2
 2 confirm
@@ -25,7 +37,7 @@ CALICO = '''0 debug_key F2
 15 debug_select equip 9
 16 confirm
 17 debug_key F2
-60 position 47 0 12 0
+60 position 47 0 10 0
 61 confirm
 100 confirm
 180 confirm
@@ -66,6 +78,14 @@ def check(runtime, data, folder):
     assert acquired(taken, 133) and 5 in taken['events'] and taken['dialog_index'] == 6
     assert taken['items'] == question['items'], 'original map flag must not consume an item slot'
     released(taken)
+    # bhControlMessage (message.c:269-285) bewegt mes_sel ausschliesslich mit sys->pad_ps
+    # 0x4 und 0x8. Die senkrechten Padbits 0x1/0x2 (pad.c:162-170) liest die Routine nicht,
+    # die Auswahlfelder stehen waagerecht (message.c:150). Hoch/Runter darf die Antwort
+    # also nicht verschieben: die Frage wird weiter mit Ja quittiert.
+    vertical = run('map-vertical', 'RM_0060.RDX',
+                   MAP.replace('100 confirm', '100 up\n101 down\n102 up\n103 confirm'), 240)
+    assert acquired(vertical, 133) and 5 in vertical['events'], 'vertical pad bits moved the Yes/No selection'
+    released(vertical)
     retry = MAP.replace('100 confirm', '100 right\n101 confirm').replace('180 confirm',
             '180 confirm\n220 confirm\n300 confirm')
     retried = run('map-no-retry', 'RM_0060.RDX', retry, 360)

@@ -18,8 +18,17 @@ names. Keyboard and mapped gamepads can be used together without changing modes.
 | Confirm/interact | Enter | A |
 | Cancel menu/dialogue | Escape | B |
 | Menu/item examination | Arrow keys or WASD | Left stick or D-pad |
-| Video / cinematic skip | Space; Enter also skips active videos and permitted scenes | Start/Options; A also skips active videos and permitted scenes |
+| Cinematic skip (PS2 SELECT, `select`) | P | Back/Select |
+| Video skip (`skip`) | Space; Enter and Escape also skip active videos | Start/Options; A and B also skip active videos |
 | Pause | P | Back/Select; resume with Start/Options |
+
+Only SELECT skips a running cinematic, as in the original (`system.c:545`
+`bhSysCallGame` reads `pad_ps & 0x10000`; `pad.c pad_tab_a[16]` maps it to the
+SELECT button). Confirm, Start and Space never request the skip; Confirm only
+acknowledges dialogue text. The host maps SELECT to P / Back by default (the
+same keys as the host pause, which is blocked while a cinematic runs); a
+`controls.ini` without a `select` line gets this default. There is no on-screen
+skip hint; the original shows none.
 | Quit | Escape outside menus/dialogue, or F10 | Unbound by default |
 | Wireframe diagnostic | F2 | Unbound by default |
 

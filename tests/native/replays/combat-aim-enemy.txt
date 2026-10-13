@@ -1,0 +1,41 @@
+# A01-A04 Aufschaltung und Schaden gegen einen echten Gegner.
+# Der M93R kommt wie in combat-handgun.txt aus dem Steve-Ereignis (RM_0030);
+# danach Teleport in den Diagnoseraum RM_0080 (Raumindex 10), in dem fuenf
+# Originalzombies stehen, dort anvisieren und mehrfach feuern.
+# Keine Positionssetzung, keine Flagbearbeitung, kein Debug-Inventar und keine
+# Aenderung an Gegnerdaten; der Raumwechsel ist die Debug-Menue-Funktion
+# `room` (Raum/Teleport), die Inventar und globale Flags unveraendert laesst.
+# --enemy-ai on: die Zombies laufen heran. Der Griff bleibt aus (--enemy-grab
+# off, headless-Standard), damit kein Biss den Schussablauf unterbricht.
+0 keys forward
+90 keys none
+3200 confirm
+3400 keys aim
+3500 keys aim attack
+3503 keys aim
+3560 keys aim attack
+3563 keys aim
+3640 keys none
+3700 debug_key F2
+3701 debug_select room 10
+3702 confirm
+3703 debug_key F2
+# Diagnose-Aufstellung 5 Einheiten vor Zombie 3 (bei (-15.41, 0, 30.89) nach dem
+# Raumwechsel) auf derselben Seite der Wand, die das Sichtfeld nach Norden
+# trennt; Blickrichtung 8192 = 45 Grad neben ihm. Beim Zielen dreht die
+# Aufschaltung (bhSearchNearEnemy -> bhCalcLockEneYR -> ay) den Spieler auf das
+# Ziel; das ist an `yaw` ablesbar. Danach laeuft die KI normal weiter.
+# 2026-10-13: (-15.41, 0, 36) stand in ATR 13 (Typ 0, z 39..41, mit ar ab 35.5) und an der
+# Saeule ATR 54 (Typ 5); bhControlPlayer schiebt den Koerper dort auch im Stehen heraus
+# (player.c:1600-1655). (-17.0, 0, 33.15) ist die freie Lage, an der er dann steht.
+3800 position -17.0 0 33.15 8192
+3900 keys aim
+3950 keys aim attack
+3953 keys aim
+4000 keys aim attack
+4003 keys aim
+4050 keys aim attack
+4053 keys aim
+4100 keys aim attack
+4103 keys aim
+4200 keys none

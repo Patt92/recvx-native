@@ -12,6 +12,7 @@ constexpr std::size_t kMaxNodes=4096; /* Schranke gegen beschaedigte Ketten   */
 struct Walk {
     const BinaryView& view;
     std::size_t base;                 /* Zeigerbasis: Chunkanfang + 16 */
+    std::uint32_t root;               /* obj_off: Anfang des Knotenfeldes */
     std::vector<MapObject>& out;
 
     /* Besuchsreihenfolge wie der originale Baumlauf (Kind vor Geschwister,
@@ -27,6 +28,12 @@ struct Walk {
             MapObject object;
             object.pos={view.f32(node+8),view.f32(node+12),view.f32(node+16)};
             object.ang={view.i32(node+20),view.i32(node+24),view.i32(node+28)};
+            /* objP->model (scene.cpp:208 node+4): MapCodeProcess case 4 draws
+               only when it is not NULL. The file index of the node is the
+               geometry key for the decoded MDL (scene.cpp visit: objects+i*52). */
+            object.has_model=view.u32(node+4)!=kNone;
+            if(offset<root||(offset-root)%kNodeSize)throw std::runtime_error("map object outside the node array");
+            object.node=std::uint32_t((offset-root)/kNodeSize);
             out[std::size_t(index)]=object;
         }
         /* Erst die Kinder, dann die Geschwister; die Verweise werden nach dem
@@ -51,7 +58,7 @@ std::vector<MapObject> decode_map_objects(const std::vector<std::uint8_t>& packe
     if((view.u32(chunk.offset)&0xffffffu)!=0x4c444du)return objects;
     const auto obj_off=view.u32(chunk.offset+12);
     if(obj_off==kNone)return objects;
-    Walk walk{view,chunk.offset+kHeaderSize,objects};
+    Walk walk{view,chunk.offset+kHeaderSize,obj_off,objects};
     walk.visit(obj_off);
     return objects;
 }

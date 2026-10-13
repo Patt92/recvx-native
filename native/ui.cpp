@@ -290,7 +290,6 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
 GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mods):data_(data),mods_(mods){
     auto load=[&](const char* identity,unsigned count){std::vector<SceneTexture> out;for(unsigned i=0;i<count;++i){const auto rel=std::filesystem::path("textures")/identity/(asset_number(i)+".tga");out.push_back(read_tga(!mods.empty()&&std::filesystem::is_regular_file(mods/rel)?mods/rel:data/rel));}return out;};
     menu_=decode_texture_bundle(read_asset_file(data/"archives/ITEM1/0145.bin",8*1024*1024));
-    for(auto& texture:menu_)for(auto& bank:texture.palette_banks)for(auto& pixel:bank.second)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);
     auto menu_overrides=load("menu",5);for(unsigned i=0;i<menu_overrides.size();++i)menu_[i].pixels=menu_overrides[i].pixels;
     fonts_=load("fonts",4);
     dialog_fonts_=fonts_;
@@ -304,7 +303,9 @@ GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mo
 void GameUi::label(SoftwareRenderer& image,const std::string& str,int x,int y,float scale,std::uint32_t color)const{
     Message message;for(unsigned char c:str)message.push_back(c=='\n'?0xff00:c==' '?0xff01:c>=32&&c<140?c-32:31);message.push_back(0xffff);text(image,message,x,y,scale,color,true);
 }
-void GameUi::draw_title(SoftwareRenderer& image){
+const SceneTexture& GameUi::title_texture(unsigned index){load_title();return title_.at(index);}
+int GameUi::label_width(const std::string& str,float scale)const{float width=0;for(unsigned char c:str){const unsigned glyph=c==' '?0xff01:c>=32&&c<140?c-32:31;width+=(glyph==0xff01?14.f:(glyph<std::size(FontSz)?FontSz[glyph]:28))*scale;}return int(width);}
+void GameUi::load_title(){
     if(title_.empty()){
         const auto packet=read_asset_file(data_/"archives/ADV/0002.bin",8*1024*1024);BinaryView view(packet);
         for(unsigned i=0;i<3;++i){const auto resource=view.u32(i*4);const auto offset=view.relative(resource,view.u32(resource+4),256);
@@ -313,20 +314,21 @@ void GameUi::draw_title(SoftwareRenderer& image){
             std::vector<std::uint8_t> bundle(44+32+length+4);auto put=[&](std::size_t p,std::uint32_t value){for(unsigned j=0;j<4;++j)bundle[p+j]=std::uint8_t(value>>(j*8));};
             put(0,0x00494c50);put(4,12);put(32,1);put(44,0x324d4954);put(48,length);std::copy_n(packet.begin()+offset,length,bundle.begin()+76);put(76+length,0xffffffff);
             auto textures=decode_texture_bundle(bundle);if(textures.size()!=1)throw std::runtime_error("original title texture missing");title_.push_back(std::move(textures.front()));
-            for(auto& pixel:title_.back().pixels)pixel=(pixel&0xffffff)|(std::min(255u,(pixel>>24)*2)<<24);
         }
         Scene replacement;replacement.textures=title_;apply_texture_files(replacement,data_,mods_,"title");title_=std::move(replacement.textures);
     }
+}
+// adv.c DisplayTitleBg (1562): AdvDwawOnePictureEx(0) 1:1, then the two bottom
+// plates of texture 1 via AdvEasyDrawTextureS with ShadowAlpha 192 (a black copy
+// offset by +3,+3 drawn just behind each plate).
+void GameUi::draw_title(SoftwareRenderer& image){
+    load_title();
     std::fill(image.canvas().begin(),image.canvas().end(),0xff000000);
     blit_pixels(image,title_[0],0,0,640,480,0,0,int(title_[0].width)*640/1024,int(title_[0].height)*480/512);
+    blit_pixels(image,title_[2],23,399,352,52,0,460,352,512,0xc0000000);
     blit_pixels(image,title_[2],20,396,352,52,0,460,352,512);
+    blit_pixels(image,title_[2],351,421,240,32,272,432,512,464,0xc0000000);
     blit_pixels(image,title_[2],348,418,240,32,272,432,512,464);
-}
-void GameUi::draw_title_options(SoftwareRenderer& image,unsigned selected){
-    if(title_.empty())draw_title(image);
-    blit_pixels(image,title_[2],64,288,512,32,0,96,512,128,selected==0?0xffffffff:0xff7f7f7f);
-    blit_pixels(image,title_[2],64,320,512,32,0,128,512,160,selected==1?0xffffffff:0xff7f7f7f);
-    label(image,"Beenden",264,352,.9f,selected==2?0xffffffff:0xff7f7f7f);
 }
 Message GameUi::system_message(unsigned i)const{return read_message(messages_,system_table_,i);}
 void GameUi::draw_pause(SoftwareRenderer& image,bool controller_present)const{

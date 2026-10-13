@@ -310,13 +310,39 @@ int main(int argc,char** argv){try{_Make_SinTable();
      DoorSequence mirrored;mirrored.begin(root,{},DoorRequest{2,0,1,0,0,0}); // attr 2 mirrors the demo
      check((mirrored.state().status&0xc00)!=(push.state().status&0xc00),"the mirror attribute did not flip the door status");}
 
-    // --- skip ends the demo at once ----------------------------------------
+    // --- the demo ends through FadeProc1 alone ------------------------------
+    // bhSysCallDoordemo (system.c:939) has no pad or flag that cuts the demo
+    // short; bhControlDoor keeps returning 1 until FadeProc1 mode 5 sets
+    // status 0x40 (door.c:641). The sequence has no abort service, and the
+    // completion bit must not appear before the fade's last wait has run out.
+    unsigned full_run_ticks=0;
+    {DoorSequence door;door.begin(root,{},DoorRequest{0,0,1,0,0,0});
+     unsigned ticks=0;bool early=false;
+     while(door.active()){door.tick();++ticks;if(door.state().status&0x40){if(door.state().fde_mode<6)early=true;}}
+     check(!early,"the completion status appeared before FadeProc1 reached its end");
+     check(door.finished()&&door.state().fde_mode==6&&ticks>100,"the demo did not end through FadeProc1");
+     check(!door.skipped(),"the undisturbed demo reported a skip");
+     full_run_ticks=ticks;}
+
+    // --- the host skip ends the demo early ---------------------------------
+    // BEWUSSTE ABWEICHUNG VOM ORIGINAL (doors.h, Nutzerentscheidung 2026-10-13):
+    // skip() ist eine Host-Komfortfunktion. Geprueft wird, dass sie genau den
+    // regulaeren Abschluss erzeugt -- Statusbit 0x40 wie von FadeProc1, kein
+    // aktiver Lauf mehr -- und dabei deutlich vor dem eigenen Ende steht, denn
+    // nur dann kann ein Tuerton noch klingen und muss gestoppt werden.
     {DoorSequence door;door.begin(root,{},DoorRequest{0,0,1,0,0,0});
      for(unsigned i=0;i<20;++i)door.tick();
-     check(door.active()&&!door.finished(),"the demo ended before it was skipped");
+     check(door.active()&&!door.finished()&&!door.skipped(),"the demo ended before it was skipped");
      door.skip();
      check(door.skipped()&&door.finished()&&!door.active(),"the skip did not end the demo");
-     check(door.state().status&0x40,"the skip left the completion status clear");}
+     check(door.state().status&0x40,"the skip left the completion status clear");
+     check(door.ticks()<full_run_ticks,"the skip did not shorten the sequence");
+     // A second request starts a clean sequence: the skip must not stick.
+     door.begin(root,{},DoorRequest{0,0,1,0,0,0});
+     check(door.active()&&!door.skipped()&&!door.finished(),"the skip survived into the next door");
+     // The direct transition (type 255) finishes without ever being skipped.
+     DoorSequence straight;straight.begin(root,{},DoorRequest{0x80000000u,0,1,0,0,0});
+     check(straight.finished()&&!straight.active()&&!straight.skipped(),"a direct transition reported a skip");}
 
     // --- the heartbeat light and the heartbeat shake ------------------------
     // dmo_atr 0x20 switches DokiProcLgt on: the rectified sine over time*1024

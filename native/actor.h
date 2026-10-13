@@ -15,6 +15,15 @@ struct MotionClip {
     bool interpolate=false;
     std::vector<std::vector<NJS_POINT3>> positions;
     std::vector<std::vector<std::array<std::int32_t,3>>> angles;
+    // Motion.c:131 liest den Key bei frm_no>>16 ohne Grenze gegen frm_num.
+    // Startet ein Wechsel hinter dem Ende (bhGetFrameNum klemmt auf die
+    // Bildzahl, en01.c:10297 verschiebt ein zweites Mal um 16; chg_mtn_upper
+    // gibt den Frame der laengeren Unterkoerpermotion weiter, en01.c:10314),
+    // liest das Original den naechsten Block im MTN-Bytebild weiter. `tail_keys`
+    // ist die Anzahl der Keys, die dafuer aus demselben Bereich an JEDEN
+    // keyfuehrenden Kanal angehaengt wurden (0 = der Nachbarb lock liegt
+    // ausserhalb; dann bleibt es bei der Meldung).
+    unsigned tail_keys=0;
 };
 // fmCnkInitContext inserts procedural face children, then _fmSetObjP flattens
 // the hierarchy. Keep script indices separate from the immutable skin indices.

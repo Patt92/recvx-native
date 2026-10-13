@@ -13,7 +13,10 @@ Drei getrennte Stufen, jede einzeln abschaltbar:
               echten RECVX_ENEMY_WORKs.
   --runtime   Originalablauf in der Runtime: Steve-Szene laeuft durch, der
               M93R wird per Skript uebergeben, danach Zielen, zwei Schuesse,
-              Munitionsabzug, Schussklang und Wegstecken.
+              Munitionsabzug, Schussklang und Wegstecken. Anschliessend im
+              Diagnoseraum RM_0080 Aufschaltung auf einen echten Gegner
+              (pp.lck_tbl ueber den Dienst `enemies`, sys->ene / sys->ewk_n)
+              und gebuchter Schaden gegen denselben Replay ohne Schuss.
 
 Der Runtime-Schritt braucht den Anschluss aus
 work/native_port_A01_A04_combat.patch: native/runtime.cpp nimmt sys->st_flg
@@ -23,6 +26,7 @@ Kampfpass nach einem Tick selbst aus; dieses Skript meldet das namentlich.
 """
 import argparse
 import json
+import math
 import re
 import subprocess
 import sys
@@ -131,13 +135,91 @@ def check_runtime(runtime, data, emulator):
             raise SystemExit(f"bhCPM2_act_wre did not return to idle: motion={saved['motion']}")
         if saved['blocked_commands']:
             raise SystemExit('event commands blocked during the combat replay')
-        # Ohne die Gegnertabelle (C02) gibt es keine Aufschaltung und keinen
-        # Schaden; das ist der dokumentierte Anschlussvertrag, kein Ersatzwert.
+        # Aufschaltung und Schaden prueft check_runtime_enemy am echten Gegner.
         print('Runtime: Steve-Geschenk -> M93R ausgeruestet -> Zielen -> zwei Schuesse '
-              '-> Munition 12->10 -> Schussklang -> Wegstecken auf Leerlauf bestanden. '
-              'Aufschaltung/Schaden bleiben offen, solange world die Gegnertabelle '
-              'nicht exponiert (combat_hits=%d, target=%d).'
+              '-> Munition 12->10 -> Schussklang -> Wegstecken auf Leerlauf bestanden '
+              '(combat_hits=%d, target=%d).'
               % (saved['combat_hits'], saved['combat_target_right']))
+
+
+def check_runtime_enemy(runtime, data, emulator):
+    """Aufschaltung auf einen echten Gegner und Schadensbuchung im Spielablauf.
+
+    Der Kampfkern liest die Gegnertabelle (sys->ene / sys->ewk_n) ueber den
+    Dienst `enemies` (pwksub.c:244 bhSearchNearEnemy, playpch.c:318 bhSearchEnemy,
+    weapon.c:614 bhCheckGunAtari). Ohne diese Bindung bleibt pp.sch_lst/pp.lck_tbl
+    leer -- combat_target_right bleibt -1 und bhCheckGunAtari bucht keinen
+    Schaden. Verglichen wird derselbe Replay einmal mit und einmal ohne die
+    Abdruckzeilen; die Differenz der Gegner-HP ist der gebuchte Schaden.
+    """
+    prefix = [emulator] if emulator else []
+
+    def path(p):
+        absolute = str(Path(p).resolve())
+        if emulator and runtime.suffix.lower() == '.exe':
+            return 'Z:' + absolute.replace('/', '\\')
+        return absolute
+
+    lines = (ROOT / 'tests/native/replays/combat-aim-enemy.txt').read_text().splitlines()
+    with tempfile.TemporaryDirectory(prefix='recvx-combat-aim-') as folder:
+        root = Path(folder)
+
+        def run(name, replay):
+            script = root / (name + '.txt')
+            script.write_text(replay)
+            state = root / (name + '.json')
+            subprocess.run(prefix + [str(runtime.resolve()), '--data', path(data), '--headless',
+                                     '--in-game', '--room', 'RM_0030.RDX', '--replay', path(script),
+                                     '--frames', '4300', '--state', path(state), '--enemy-ai', 'on'],
+                           check=True, cwd=ROOT)
+            return json.loads(state.read_text())
+
+        def zombie_hp(saved):
+            return sum(e['hp'] for e in saved['enemies'] if e['identity'] == 1)
+
+        fired = run('aim', '\n'.join(lines) + '\n')
+        control = run('control', '\n'.join(line.replace(' attack', '') for line in lines) + '\n')
+
+        if fired['room'].split('.')[0] != 'RM_0080':
+            raise SystemExit(f"Raumwechsel nach RM_0080 fehlgeschlagen: {fired['room']}")
+        if fired['weapon'] != 4:
+            raise SystemExit(f'M93R nicht ausgeruestet: weapon={fired["weapon"]}')
+        if fired['combat_shots'] < 3 or fired['combat_attacks'] < 3:
+            raise SystemExit(f"Der Kampfpass hat nicht gefeuert: shots={fired['combat_shots']}, "
+                             f"attacks={fired['combat_attacks']}")
+        aim = fired['combat_aim']
+        if aim['near_calls'] < 1 or aim['near_seen'] < 1:
+            raise SystemExit('bhSearchNearEnemy hat die Gegnertabelle nie gelesen; der Dienst '
+                             '`enemies` (sys->ene / sys->ewk_n) ist nicht gebunden')
+        if aim['near_found'] < 1:
+            raise SystemExit('keine Aufschaltung: bhSearchNearEnemy findet kein Ziel '
+                             f"(seen={aim['near_seen']}, filter={aim['near_filter']}, "
+                             f"cone={aim['near_cone']}, wall={aim['near_wall']})")
+        # Die Aufschaltung dreht den Spieler auf das Ziel (plp->ayp -> plp->ay). Die
+        # Blickrichtung ist (-sin ay, -cos ay) (player.c:1583, fpx = px - sin*arn); die
+        # Sollrichtung kommt aus der tatsaechlichen Lage von Spieler und naechstem Zombie.
+        px, _, pz = fired['actor']
+        target = min((e for e in fired['enemies'] if e['identity'] == 1),
+                     key=lambda e: math.hypot(e['position'][0] - px, e['position'][2] - pz))
+        dx, dz = target['position'][0] - px, target['position'][2] - pz
+        want = int(round(math.atan2(-dx, -dz) * 32768 / math.pi)) % 65536
+        diff = (fired['yaw'] - want) % 65536
+        turned = min(diff, 65536 - diff)
+        moved = min((fired['yaw'] - 8192) % 65536, (8192 - fired['yaw']) % 65536)
+        if turned > 4096 or moved < 1024:
+            raise SystemExit(f'der Spieler dreht nicht auf das Ziel (yaw={fired["yaw"]}, '
+                             f'Ziel {want}, Platzierung war 8192)')
+        if fired['combat_hits'] < 1:
+            raise SystemExit('kein Treffer gebucht (bhCheckGunAtari ohne Gegnertabelle)')
+        if zombie_hp(fired) >= zombie_hp(control):
+            raise SystemExit('kein Gegner hat Schaden genommen: '
+                             f'{zombie_hp(fired)} >= {zombie_hp(control)}')
+        if fired['blocked_commands']:
+            raise SystemExit('event commands blocked during the combat replay')
+        print('Runtime: M93R -> RM_0080 -> Aufschaltung (yaw %d -> %d Grad neben dem Ziel) -> '
+              '%d Schuesse, %d Treffer, Gegner-HP %d statt %d ohne Schuss.'
+              % (8192, turned, fired['combat_shots'], fired['combat_hits'],
+                 zombie_hp(fired), zombie_hp(control)))
 
 
 def main():
@@ -159,6 +241,7 @@ def main():
         check_unit(args.build)
     if (run_all or args.runtime_only) and args.runtime and args.data:
         check_runtime(args.runtime, args.data, args.emulator)
+        check_runtime_enemy(args.runtime, args.data, args.emulator)
     elif run_all or args.runtime_only:
         print('Runtime-Stufe uebersprungen: --runtime und --data angeben.', file=sys.stderr)
 

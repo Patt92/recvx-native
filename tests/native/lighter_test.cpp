@@ -48,7 +48,7 @@ static void draw_contract(){
     s.flg=(s.flg|0x80u)&~0x100000u;NJS_MATRIX parent;njUnitMatrix(&parent);njRotateY(&parent,16384);njRotateZ(&parent,8192);
     Scene scene;append_effect_sprite(scene,s,{5,6,7},{.5f,.5f,.5f},{},0,parent);NJS_POINT3 p{-.5f,-1,0};njCalcVector(&parent,&p,&p);p.x+=5;p.y+=6;p.z+=7;
     check(scene.triangles.size()==2&&same(scene.triangles[0].vertices[0].position,p),"non-billboard linked effect ignores parent basis");
-    Scene filter;filter.background=0xff303030;filter.textures.push_back({2,2,{0x80000000,0x80ffffff,0x80ffffff,0x80000000}});
+    Scene filter;filter.background=0xff303030;filter.textures.push_back({2,2,{0xff000000,0xffffffff,0xffffffff,0xff000000}});
     SceneTriangle tri;tri.textured=true;tri.world_lit=true;tri.color=0xffffffff;tri.blend=SceneBlend::Ninja;tri.vertices={SceneVertex{{-4,-4,2},.5f,.5f},SceneVertex{{4,-4,2},.5f,.5f},SceneVertex{{0,4,2},.5f,.5f}};filter.triangles.push_back(tri);
     NJS_MATRIX view;njUnitMatrix(&view);SoftwareRenderer image(32,32);image.set_supersampling(1);
     for(bool default_filter:{false,true}){image.set_texture_filtering(default_filter);filter.triangles[0].texture_filter=SceneTextureFilter::Point;image.draw_view(filter,view,16,16);check(image.pixels()[16*32+16]==0xff000000,"explicit point filter ignored");
@@ -69,6 +69,9 @@ static void resources(const std::filesystem::path& data){
     check(world.effect_state(slot)&&world.effect_visible(slot)&&(events.flags[13][0]&0x1000000)&&events.player_flags==events.flags[13][0],"lighter not attached to native player flags/owner");
     const auto lamp=world.light_state(1);check(lamp&&lamp->flags==3&&lamp->type==4&&lamp->link==1&&lamp->index==0&&lamp->node==9&&same(lamp->color,{3.16f*.75f,2.06f*.75f,.7f*.75f}),"lighter light not sampled/linked on production owner");
     for(unsigned turn:{0u,16384u}){actor.yaw=int(turn);std::vector<BoneMatrix> model_nodes;Scene draw=world.sample_player(player,&model_nodes);const auto nodes=player.script_nodes(model_nodes);auto hand=nodes.at(9);
+        // bhCalcModel(plp) at the end of bhControlPlayer (player.c:1517) commits
+        // this object tree; every link reads plp->mlwP->owP, never the clip.
+        world.commit_player_joints(nodes);
         NJS_POINT3 point={.3f,0,-1.5f};njCalcPoint(&hand.value,&point,&point);check(same(world.light_state(1)->position,point),"light offset not transformed by actual hand node");
         const auto count=draw.triangles.size();world.append(draw,model_nodes,stage.cameras.at(0));check(draw.triangles.size()>=count+2,"production flame triangles absent");
         // Die Flamme wird ueber ihren eigenen Atlaseintrag gesucht, nicht
@@ -111,4 +114,35 @@ static void resources(const std::filesystem::path& data){
     check(!(events.flags[5][0]&0x20000000u)&&!world.effect_state(slot)->flg&&!world.effect_visible(slot)&&!(world.light_state(1)->flags&2u),"object flame/light do not release on original event flag");
     std::cout<<"Common effect PVP "<<offset<<", 40 textures; native flame/light/hand/alpha/render lifecycle passed.\n";
 }
-int main(int argc,char** argv){try{check(argc==2,"original data directory required");_Make_SinTable();flame_states();light_states();draw_contract();resources(argv[1]);return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+// bhEne01_PlyDG00 case 3 (en01.c:7625-7637) ends the bite: it hands the player
+// work back to plp->mnwPb and writes *(int*)&pl->mode0 = 1, but leaves
+// plp->mtn_no on the zombie entry (En01_PlyMtn_OffsetTbl[0] + 10/11 = 410/411)
+// until bhControlPlayer rewrites it in the same frame (game.c:47).
+// bhControlEffect (game.c:48) then reads pp->mlwP->owP[op->lkono].mtx
+// (effect.c:803-811) and the player light does the same, so neither may resolve
+// plp->mnwP[plp->mtn_no] on that frame.
+static void grab_release_links(const std::filesystem::path& data){
+    const auto room=read_asset_file(data/"rooms/RM_0050.RDT",64*1024*1024);const auto stage=decode_scene(room);auto actor=stage.spawns.at(0);
+    std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);RoomWorld world(room,stage,actor,motion,frame,audio,data,{},"RM_0050");
+    auto player=PlayerAsset::load(data,10);world.set_player_asset(&player);Inventory inventory;MessageDialog dialog;EventVm events(room,inventory,dialog);world.bind_player_collision(events);
+    check(!player.has_motion(410)&&!player.has_motion(411),"the player library owns the zombie grab entries, premise gone");
+    world.set_player_weapon(1);
+    // bhCalcModel(plp) of the pass before the release (player.c:1517).
+    std::vector<BoneMatrix> model_nodes;(void)world.sample_player(player,&model_nodes);
+    const auto committed=player.script_nodes(model_nodes);world.commit_player_joints(committed);
+    world.tick();
+    unsigned slot=0;while(world.effect_state(slot)&&!(world.effect_state(slot)->id==9&&world.effect_state(slot)->type==2))++slot;
+    check(world.effect_state(slot)&&world.effect_visible(slot),"lighter flame absent before the release frame");
+    for(const std::size_t entry:{std::size_t(410),std::size_t(411)}){
+        motion=entry;frame=35*65536;world.commit_player_joints(committed);
+        world.tick(); // the released frame: mnwPb active, mtn_no still the zombie entry
+        auto owp=committed.at(9); // plp->mlwP->owP[9].mtx
+        NJS_POINT3 hand=weapon_fire_offset(1);njCalcPoint(&owp.value,&hand,&hand);
+        const auto* flame=world.effect_state(slot);
+        check(flame&&close(flame->px,hand.x)&&close(flame->py,hand.y)&&close(flame->pz,hand.z),"released frame does not link the flame to plp->mlwP->owP[9]");
+        NJS_POINT3 lamp{.3f,0,-1.5f};njCalcPoint(&owp.value,&lamp,&lamp); // lgttab[1] offset
+        check(same(world.light_state(1)->position,lamp),"released frame does not take the player light from the committed owP");
+    }
+    std::cout<<"PlyDG00 release: effect and light links read plp->mlwP->owP; motion 410/411 never resolved in mnwPb.\n";
+}
+int main(int argc,char** argv){try{check(argc==2,"original data directory required");_Make_SinTable();flame_states();light_states();draw_contract();resources(argv[1]);grab_release_links(argv[1]);return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -60,7 +60,7 @@ void ThirdPersonCamera::save(const std::filesystem::path& path,const ThirdPerson
 }
 void ThirdPersonCamera::configure(const ThirdPersonSettings& settings,bool persist){
     validate(settings);
-    if(persist&&!path_.empty()){try{save(path_,settings);status_="Gespeichert";}catch(const std::exception&){status_="Speichern fehlgeschlagen";}}
+    if(persist&&!path_.empty()){try{save(path_,settings);status_="Saved";}catch(const std::exception&){status_="Save failed";}}
     settings_=settings;valid_=false;if(changed)changed(settings_);
 }
 void ThirdPersonCamera::set_enabled(bool enabled,bool persist){auto candidate=settings_;candidate.enabled=enabled;configure(candidate,persist);}

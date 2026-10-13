@@ -43,10 +43,12 @@ int main(){try{
      std::copy(commands.begin(),commands.end(),chunk.begin()+2180);
      auto decoded=recvx::decode_scene(chunk);check(decoded.triangles[0].blend==recvx::SceneBlend::Ninja&&decoded.triangles[0].blend_register==0x44,"material blend bits do not override earlier NJD_CB_BA");}
     check(scene.textures[0].pixels[1]==0x80100010&&scene.textures[0].pixels[2]==0x80080008,"CSM1 palette permutation");
-    // Real PLI/TIM2 loading color-keys black and halves ARGB8888 alpha.
+    // Real PLI/TIM2 loading color-keys black and expands ARGB4444 alpha with
+    // Ps2Alpha4to8.  Ps2AlphaIsHalf's GS 0..128 step is not stored: the engine
+    // keeps the 8-bit alpha and blends it over 255 (the same As/128 factor).
     std::vector<std::uint8_t> bank(44);auto word=[&](std::size_t p,unsigned x){for(unsigned i=0;i<4;++i)bank.at(p+i)=std::uint8_t(x>>(8*i));};word(0,0x00494c50);word(4,12);word(32,1);word(40,0x00010000);
-    bank.insert(bank.end(),data.begin()+2320,data.begin()+3640);bank[76+12]=6;bank[76+144]=5;
-    auto palette=recvx::decode_texture_bundle(bank);check(palette.size()==1&&palette[0].pixels[0]==0&&palette[0].pixels[1]==0x40100010,"PS2 palette alpha preparation");
+    bank.insert(bank.end(),data.begin()+2320,data.begin()+3640);bank[76+12]=2;bank[76+144]=5;
+    auto palette=recvx::decode_texture_bundle(bank);check(palette.size()==1&&palette[0].pixels[0]==0&&palette[0].pixels[1]==0x88100010,"PS2 palette alpha preparation");
     bank[76+15]=0x80;palette=recvx::decode_texture_bundle(bank);check(palette[0].pixels[0]==0x80000000&&palette[0].pixels[1]==0x80100010,"palette alpha converted twice");
     recvx::SoftwareRenderer image(64,48);image.draw(scene,scene.cameras[0]);
     check(image.covered_pixels()>100&&image.covered_pixels()<3072,"triangle coverage");

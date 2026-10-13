@@ -11,10 +11,18 @@ class DoorSequence {
 public:
     void begin(const std::filesystem::path& data,const std::filesystem::path& mods,const DoorRequest& request);
     void tick();
+    // BEWUSSTE ABWEICHUNG VOM ORIGINAL - NICHT ERNEUT WEGPORTIEREN.
+    // Im Original gibt es keinen Tuer-Skip: bhSysCallDoordemo (system.c:939)
+    // liest kein Pad und kein Flag, bhStartDoorDemo (room.c:978) loescht
+    // pad_ps/pad_on, und bhControlDoor (door.c:386-528) endet erst, wenn
+    // FadeProc1 das Statusbit 0x40 gesetzt hat (door.c:638-646).
+    // skip() ist eine vom Nutzer ausdruecklich gewuenschte Host-Komfort-
+    // funktion (Entscheidung 2026-10-13); die noch klingenden Tuerstimmen
+    // werden dabei gestoppt. Siehe docs/port_ledger.tsv und CLAUDE.md.
     void skip();
     bool active()const{return active_;}
     bool finished()const{return finished_;}
-    bool skipped()const{return skipped_;}
+    bool skipped()const{return skipped_;} // ended by the host skip, not by FadeProc1
     bool direct()const{return direct_;} // no door demo (attr 0x80000000 / type 255)
     unsigned sound_bank()const{return sound_bank_;}
     std::vector<unsigned> take_sounds(){auto out=std::move(sounds_);sounds_.clear();return out;}

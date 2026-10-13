@@ -102,6 +102,8 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
 add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_action.c native/player_hair.c native/player_head.c native/adx_tables.c)
 target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
+# D10 Teil B: Kartenbild (Ps2AddPrim2D/3D-Seite von map.c) und sys->fade_* (screen.c).
+target_sources(recvx_game PRIVATE native/map_render.cpp native/screen_fade.cpp)
 # C02: gemeinsamer Gegnerwork am WorldEntity-Besitzer, native Dispatchkette,
 # bhSetMotion/bhCalcModel des Besitzers und alle nativ vorhandenen Gegner-
 # routinen. en54/en55 fehlen bis zum Port von en17.c (Kettenwerk-Besitzer).
@@ -195,6 +197,10 @@ if(RECVX_BUILD_RUNTIME)
     add_executable(recvx-input-tests tests/native/input_test.cpp)
     target_link_libraries(recvx-input-tests PRIVATE recvx_input)
     add_test(NAME keyboard_controller_config COMMAND recvx-input-tests)
+    # message.c:269-295 / pad.c:275: real held direction versus newly pressed dialog bits.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0060.RDT")
+      add_test(NAME message_dialog_pad_edges COMMAND recvx-input-tests --dialog-edges "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
   endif()
   # No original engine or historical console audit target is permitted.
   target_link_libraries(recvx-runtime PRIVATE recvx_input)
@@ -358,9 +364,18 @@ if(BUILD_TESTING)
   add_executable(recvx-map-tests tests/native/map_screen_test.cpp)
   target_link_libraries(recvx-map-tests PRIVATE recvx_game)
   add_test(NAME original_map_screen COMMAND recvx-map-tests "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  # D10 Teil B: Bildschirmfade, 2D->Tiefenpuffer-Abbildung und das gerenderte Kartenbild an den Originaldaten.
+  add_executable(recvx-map-render-tests tests/native/map_render_test.cpp)
+  target_link_libraries(recvx-map-render-tests PRIVATE recvx_game)
+  add_test(NAME original_map_render COMMAND recvx-map-render-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_executable(recvx-effect-room-tests tests/native/effect_room_sprites_test.cpp)
   target_link_libraries(recvx-effect-room-tests PRIVATE recvx_game)
   add_test(NAME effect_room_sprites COMMAND recvx-effect-room-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  # objitm.c:562/659/688: Schnitt-Beschraenkung der Raumobjekte/-items
+  # (O_WRK.flg 0x40000000 und hide[0..3] aus dem ETTY_WORK).
+  add_executable(recvx-object-cut-tests tests/native/object_cut_test.cpp)
+  target_link_libraries(recvx-object-cut-tests PRIVATE recvx_game)
+  add_test(NAME object_cut_restriction COMMAND recvx-object-cut-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_executable(recvx-lighter-tests tests/native/lighter_test.cpp)
   target_link_libraries(recvx-lighter-tests PRIVATE recvx_game)
   add_test(NAME native_lighter_effect COMMAND recvx-lighter-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
@@ -478,6 +493,9 @@ endif()
   add_executable(recvx-shadow-state-tests tests/native/shadow_state_test.cpp)
   target_link_libraries(recvx-shadow-state-tests PRIVATE recvx_scene)
   add_test(NAME shadow_effect_state COMMAND recvx-shadow-state-tests)
+  add_executable(recvx-lighting-fog-tests tests/native/lighting_fog_test.cpp)
+  target_link_libraries(recvx-lighting-fog-tests PRIVATE recvx_scene)
+  add_test(NAME lighting_fog_semantics COMMAND recvx-lighting-fog-tests)
   add_executable(recvx-shadow-mask-tests tests/native/shadow_mask_test.cpp)
   target_link_libraries(recvx-shadow-mask-tests PRIVATE recvx_scene)
   add_test(NAME shadow_mask_arithmetic COMMAND recvx-shadow-mask-tests)

@@ -1,0 +1,7 @@
+# X04 – bhSubpl-Familie (Begleiter/Statisten)
+
+Identitäten (Raumscan): 42 (RM_9320), 43 (RM_1130 RM_1140 RM_3120 RM_3220), 44 (RM_7030), 47 (RM_8030), 49 (RM_1002), 51 (RM_3000), 52 (RM_6040 RM_9050), 58 (RM_3230 RM_7070 RM_7071), 59 (RM_3230 RM_7070 RM_7071), 60 (RM_5000 RM_5001), 61 (RM_1090), 62 (RM_0030 RM_0031), 63 (RM_9180), 65 (RM_3020 RM_7000), 66 (RM_3091), 67 (RM_0010 RM_0060 RM_0070 RM_3030), 68 (RM_0110), 69 (RM_0110 RM_1002 RM_3150 RM_5010), 70 (RM_6030), 72 (RM_6060), 73 (RM_6030 RM_9030), 74 (RM_6020), 75 (RM_6080 RM_9080), 76 (RM_4010 RM_4011 RM_4012 RM_8010), 77 (RM_3240 RM_9090 RM_9091), 78 (RM_6040), 79 (RM_9280), 81 (RM_6040 RM_9280), 82 (RM_9280), 83 (RM_3000 RM_7120), 84 (RM_7120), 85 (RM_9150), 87 (RM_0110), 88 (RM_3210 RM_7060), 89 (RM_7240), 90 (RM_7240), 91 (RM_0000 RM_0020 RM_0030 RM_0040), 92 (RM_5820 RM_7030 RM_7070 RM_7110), 93 (RM_0030 RM_0040 RM_1001 RM_1050), 94 (RM_1020 RM_3010), 95 (RM_2030 RM_2050 RM_7030 RM_9050), 96 (RM_2040 RM_3020 RM_3230 RM_3240), 97 (RM_1002 RM_5820 RM_7070 RM_9320), 98 (RM_0000 RM_7220 RM_7221 RM_7230), 99 (RM_3130)
+
+Original `subpl.c:76`. Nativer Besitzer `native/subplayer.*` existiert; Audit gegen Original und Raumabnahme je Identität offen. bhControlMask (id > 90, eneset.c) ist im Dispatcher nur als Lücke gemeldet.
+
+Abnahme wie [RULES.md](RULES.md); Raumliste je Identität aus dem Raumscan erzeugen.

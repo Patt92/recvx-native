@@ -25,6 +25,9 @@ struct MotionWork {
 // Returns the original -1/0/1. A state the original would read outside its
 // tables (frame/channel/node beyond the data) is not executed; `gap` then
 // names it and the frame clock still follows Motion.c:79-115.
+// `motion_id`/`motion_no` werden nur in Meldungen gefuehrt (der Eigentuemer
+// der Bibliothek und der Motionindex).
 int set_motion(MotionWork& work,int add,unsigned mode,const MotionClip* clip,const std::int8_t* datP,
-               std::vector<ModelPose>& obj,const std::vector<std::uint32_t>& owp_flg,std::string* gap=nullptr);
+               std::vector<ModelPose>& obj,const std::vector<std::uint32_t>& owp_flg,std::string* gap=nullptr,
+               unsigned motion_id=0,unsigned motion_no=0);
 }

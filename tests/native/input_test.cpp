@@ -25,13 +25,76 @@ static void axis(InputManager& input,SDL_Joystick* joystick,SDL_GameControllerAx
 static int attach(){const auto index=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);check(index>=0,"virtual controller attach failed");check(SDL_IsGameController(index),"SDL does not recognize virtual gamepad");return index;}
 static void detach(SDL_JoystickID id){for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_JoystickGetDeviceInstanceID(i)==id){check(SDL_JoystickDetachVirtual(i)==0,"virtual detach failed");return;}throw std::runtime_error("virtual device not found");}
 struct Quit{~Quit(){SDL_Quit();}};
+// Unabhaengiger Aufruf, damit die Dialogregression nicht hinter dem RM_0000-Select-
+// Ablauf verschwindet. message.c:269-295 liest nur pad_ps 0x4/0x8, pad.c:275 bildet
+// diese Flanken ohne Wiederholung. Der bestehende Cinematic-Test bleibt unveraendert.
+static void dialog_edges(const std::filesystem::path& root){
+    const auto bytes=read_asset_file(root/"rooms/RM_0060.RDT",64*1024*1024);
+    const auto scene=decode_scene(bytes);
+    for(const bool controller:{false,true}){
+        const int index=attach();SDL_Joystick* joystick=SDL_JoystickOpen(index);check(joystick,"dialog virtual joystick open failed");
+        const auto id=SDL_JoystickInstanceID(joystick);
+        SDL_JoystickSetVirtualAxis(joystick,SDL_CONTROLLER_AXIS_TRIGGERLEFT,-32768);
+        SDL_JoystickSetVirtualAxis(joystick,SDL_CONTROLLER_AXIS_TRIGGERRIGHT,-32768);
+        {
+            InputManager input(InputConfig::defaults());pump(input);input.tick();
+            Inventory inventory;StatusMenu menu;MessageDialog dialog;auto actor=scene.spawns.at(0);
+            std::size_t motion=42;std::int64_t clock=0;AudioMixer audio(root);
+            RoomWorld world(bytes,scene,actor,motion,clock,audio,root);
+            EventVm events(bytes,inventory,dialog);GameplayInput gameplay(inventory,menu,dialog,&events);
+            events.binding=[&](const EventCommand& c){return world.bind(c);};
+            events.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};
+            events.audio_active=[&](unsigned s){return audio.active(s);};events.audio_stop=[&](unsigned s){audio.stop(s);};
+            std::vector<unsigned> sounds;gameplay.sound=[&](unsigned s){sounds.push_back(s);};
+            gameplay.interact=[&]{events.interact(actor.position,actor.yaw,world.floor_at(actor.position));};
+            auto tick=[&]{const auto f=input.tick();check(!gameplay.apply(f),"dialog input quits");events.check_floor(actor.position,actor.yaw);events.tick();gameplay.synchronize();world.tick();audio.mix();return f;};
+            auto held=[&](SDL_Scancode k,SDL_GameControllerButton b,bool down){if(controller)button(input,joystick,b,down);else key(input,k,down);};
+            events.initialize();for(unsigned i=0;i<60;++i)tick();
+            actor.position={26,0,90};actor.yaw=16384; // echte Gefaengniskartenfrage, verify_pickups.py MAP
+            held(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT,true);for(unsigned i=0;i<40;++i)tick();
+            held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,true);tick();held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,false);tick();
+            check(dialog.active()&&dialog.index()==5&&dialog.choices()==2&&dialog.selection==0,"RM_0060 default question missing");
+            const auto before=sounds.size();unsigned repeats=0;
+            for(unsigned i=0;i<40;++i){const auto f=tick();repeats+=f.repeat[unsigned(Action::Right)];check(dialog.selection==0,"held direction changes Yes/No selection");}
+            check(repeats>0&&std::count(sounds.begin()+before,sounds.end(),2u)==0,"dialog repeat test did not exercise/suppress real repeat");
+            held(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT,false);tick();
+            held(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT,true);tick();check(dialog.selection==1,"new right edge does not select No");
+            held(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT,false);tick();
+            held(SDL_SCANCODE_LEFT,SDL_CONTROLLER_BUTTON_DPAD_LEFT,true);tick();check(dialog.selection==0,"new left edge does not select Yes");
+            held(SDL_SCANCODE_LEFT,SDL_CONTROLLER_BUTTON_DPAD_LEFT,false);tick();
+            held(SDL_SCANCODE_W,SDL_CONTROLLER_BUTTON_DPAD_UP,true);for(unsigned i=0;i<40;++i){tick();check(dialog.selection==0,"vertical direction changes Yes/No selection");}
+            held(SDL_SCANCODE_W,SDL_CONTROLLER_BUTTON_DPAD_UP,false);tick();
+            held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,true);tick();held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,false);tick();
+            for(unsigned i=0;i<40;++i)tick();
+            check(events.flag(7,133),"default Yes did not acquire prison map");
+            // Statusmenue-Cursor behaelt seine Wiederholung (sub1.c CursorMove),
+            // unabhaengig von der pad_ps-only-Auswahl in bhControlMessage.
+            dialog=MessageDialog{};menu.active=true;menu.skip_slide();menu.nav=true;menu.maincsr=3;events.menu_open=true;
+            held(SDL_SCANCODE_LEFT,SDL_CONTROLLER_BUTTON_DPAD_LEFT,true);gameplay.apply(input.tick());check(menu.maincsr==2,"status cursor initial edge missing");
+            for(unsigned i=0;i<40;++i)gameplay.apply(input.tick());check(menu.maincsr==0,"status cursor held repeat stopped");
+            held(SDL_SCANCODE_LEFT,SDL_CONTROLLER_BUTTON_DPAD_LEFT,false);input.tick();
+            std::cout<<(controller?"controller":"keyboard")<<": RM_0060 held/no repeat, new edges, vertical pad, map Yes and status repeat PASS\n";
+        }
+        SDL_JoystickClose(joystick);detach(id);
+    }
+}
 int main(int argc,char** argv){try{
     SDL_SetMainReady();SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0,"SDL controller init failed");Quit quit;_Make_SinTable();
+    if(argc==3&&std::string(argv[1])=="--dialog-edges"){dialog_edges(std::filesystem::u8path(argv[2]));return 0;}
     const auto config=InputConfig::defaults();const int index=attach();SDL_Joystick* joystick=SDL_JoystickOpen(index);check(joystick,"virtual joystick open failed");const auto id=SDL_JoystickInstanceID(joystick);
     SDL_JoystickSetVirtualAxis(joystick,SDL_CONTROLLER_AXIS_TRIGGERLEFT,-32768);SDL_JoystickSetVirtualAxis(joystick,SDL_CONTROLLER_AXIS_TRIGGERRIGHT,-32768);SDL_GameControllerUpdate();
     {InputManager input(config);pump(input);check(input.controllers()>=1,"controller present at startup not opened");input.tick();
         button(input,joystick,SDL_CONTROLLER_BUTTON_BACK,true);check(input.tick().hit(Action::Pause),"controller Select/Back pause binding missing");button(input,joystick,SDL_CONTROLLER_BUTTON_BACK,false);input.tick();
         key(input,SDL_SCANCODE_P,true);check(input.tick().hit(Action::Pause),"keyboard pause binding missing");key(input,SDL_SCANCODE_P,false);input.tick();
+        // PS2 SELECT (pad.c pad_tab_a[16] = 0x100 -> pad_ps 0x10000): Back/Select on the controller, P on the keyboard.
+        button(input,joystick,SDL_CONTROLLER_BUTTON_BACK,true);check(input.tick().hit(Action::Select),"controller Select binding missing");button(input,joystick,SDL_CONTROLLER_BUTTON_BACK,false);input.tick();
+        key(input,SDL_SCANCODE_P,true);check(input.tick().hit(Action::Select),"keyboard Select binding missing");key(input,SDL_SCANCODE_P,false);input.tick();
+        button(input,joystick,SDL_CONTROLLER_BUTTON_START,true);check(!input.tick().hit(Action::Select),"Start counts as Select");button(input,joystick,SDL_CONTROLLER_BUTTON_START,false);input.tick();
+        key(input,SDL_SCANCODE_SPACE,true);check(!input.tick().hit(Action::Select),"Space counts as Select");key(input,SDL_SCANCODE_SPACE,false);input.tick();
+        {const std::string legacy("[keyboard]\nforward = I\nback = K\nturn_left = J\nturn_right = L\nrun = Left Shift\ninventory = Tab\nconfirm = Return\ncancel = Escape\nup = Up\ndown = Down\nleft = Left\nright = Right\nskip = Space\nquit = F10\nwireframe = F3\n[gamepad]\nforward = button:dpup\nback = button:dpdown\nturn_left = button:dpleft\nturn_right = button:dpright\nrun = button:b\ninventory = button:y\nconfirm = button:a\ncancel = button:b\nup = button:dpup\ndown = button:dpdown\nleft = button:dpleft\nright = button:dpright\nskip = button:start\nquit = none\nwireframe = none\n");
+            const auto temporary=std::filesystem::temp_directory_path()/"recvx-input-test-legacy-controls.ini";{std::ofstream out(temporary);out<<legacy;}
+            const auto old=InputConfig::read(temporary);std::filesystem::remove(temporary);
+            check(old.describe(Action::Select,false)=="P"&&old.describe(Action::Select,true)=="Back","controls.ini without a select line loses the SELECT button");}
         key(input,SDL_SCANCODE_Q,true);check(input.tick().hit(Action::NextTarget),"keyboard target switch missing");check(!input.tick().hit(Action::NextTarget),"held target switch repeats");key(input,SDL_SCANCODE_Q,false);input.tick();
         button(input,joystick,SDL_CONTROLLER_BUTTON_LEFTSHOULDER,true);check(input.tick().hit(Action::NextTarget),"L1/LB target switch missing");button(input,joystick,SDL_CONTROLLER_BUTTON_LEFTSHOULDER,false);input.tick();
         key(input,SDL_SCANCODE_R,true);key(input,SDL_SCANCODE_LCTRL,true);auto weapon_input=input.tick();check(weapon_input.down(Action::Aim)&&weapon_input.hit(Action::Attack),"keyboard aim/attack missing");key(input,SDL_SCANCODE_R,false);key(input,SDL_SCANCODE_LCTRL,false);input.tick();
@@ -49,11 +112,19 @@ int main(int argc,char** argv){try{
         key(input,SDL_SCANCODE_W,true);axis(input,joystick,SDL_CONTROLLER_AXIS_LEFTX,32767);const auto extra_index=attach();SDL_Joystick* extra=SDL_JoystickOpen(extra_index);const auto extra_id=SDL_JoystickInstanceID(extra);SDL_JoystickClose(extra);pump(input);
         const auto count=input.controllers();check(count>=2,"hot-plug controller not opened");detach(extra_id);pump(input);check(input.controllers()==count-1,"removed device index confused with instance ID");
         axis(input,joystick,SDL_CONTROLLER_AXIS_LEFTX,0);key(input,SDL_SCANCODE_W,false);input.tick();
-        {Inventory inventory;StatusMenu menu;MessageDialog dialog;GameplayInput gameplay(inventory,menu,dialog,nullptr);bool active=true;unsigned skips=0;
-            gameplay.transition_active=[&]{return active;};gameplay.confirm_transition=[&]{++skips;};
-            key(input,SDL_SCANCODE_RETURN,true);gameplay.apply(input.tick());check(skips==1,"keyboard OK does not skip door");for(unsigned i=0;i<30;++i)gameplay.apply(input.tick());check(skips==1,"held keyboard OK skips repeatedly");key(input,SDL_SCANCODE_RETURN,false);input.tick();
-            button(input,joystick,SDL_CONTROLLER_BUTTON_A,true);gameplay.apply(input.tick());check(skips==2,"controller OK does not skip door");for(unsigned i=0;i<30;++i)gameplay.apply(input.tick());check(skips==2,"held controller OK skips repeatedly");button(input,joystick,SDL_CONTROLLER_BUTTON_A,false);input.tick();
-            key(input,SDL_SCANCODE_TAB,true);gameplay.apply(input.tick());check(!menu.active,"inventory opens during door transition");key(input,SDL_SCANCODE_TAB,false);input.tick();}
+        {Inventory inventory;StatusMenu menu;MessageDialog dialog;GameplayInput gameplay(inventory,menu,dialog,nullptr);bool active=true;unsigned interactions=0,skips=0;
+            // BEWUSSTE ABWEICHUNG VOM ORIGINAL (doors.h, Nutzerentscheidung 2026-10-13):
+            // das Original liest waehrend der Tuerdemo kein Pad (bhStartDoorDemo loescht
+            // pad_ps/pad_on). Der Host-Skip ist gewuenscht, darf aber nur einmal je Druck
+            // ausloesen, nie die Aktion erreichen und nie das Inventar oeffnen.
+            gameplay.transition_active=[&]{return active;};gameplay.interact=[&]{++interactions;};gameplay.confirm_transition=[&]{++skips;};
+            key(input,SDL_SCANCODE_RETURN,true);check(!gameplay.apply(input.tick()),"keyboard OK quits during door");check(skips==1,"keyboard OK does not skip door");for(unsigned i=0;i<30;++i)gameplay.apply(input.tick());check(skips==1,"held keyboard OK skips repeatedly");check(interactions==0,"keyboard OK acted during door transition");key(input,SDL_SCANCODE_RETURN,false);input.tick();
+            button(input,joystick,SDL_CONTROLLER_BUTTON_A,true);check(!gameplay.apply(input.tick()),"controller OK quits during door");check(skips==2,"controller OK does not skip door");for(unsigned i=0;i<30;++i)gameplay.apply(input.tick());check(skips==2,"held controller OK skips repeatedly");check(interactions==0,"controller OK acted during door transition");button(input,joystick,SDL_CONTROLLER_BUTTON_A,false);input.tick();
+            gameplay.menu_input(MenuInput::Confirm);check(skips==3&&interactions==0&&!menu.active,"menu confirm did not reach the door skip alone");
+            gameplay.menu_input(MenuInput::Cancel);check(skips==3,"menu cancel skipped the door");
+            key(input,SDL_SCANCODE_TAB,true);gameplay.apply(input.tick());check(!menu.active,"inventory opens during door transition");key(input,SDL_SCANCODE_TAB,false);input.tick();
+            // Without a transition the same press is the ordinary action again.
+            active=false;key(input,SDL_SCANCODE_RETURN,true);gameplay.apply(input.tick());check(skips==3,"the skip ran outside a door transition");key(input,SDL_SCANCODE_RETURN,false);input.tick();active=true;}
         for(const bool controller:{false,true}){
             Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(21,1);inv.slots()[3]=Inventory::pack(22,1);StatusMenu menu;menu.active=true;menu.skip_slide();menu.selected=2;MessageDialog room;
             std::unique_ptr<GameUi> ui;if(argc>1)ui=std::make_unique<GameUi>(std::filesystem::u8path(argv[1]));menu.message_source=[&](unsigned index){return ui?ui->system_message(index):Message{'L'-32,0xff02,0,'?'-32,0xff04,'Y'-32,0xff04,'N'-32,0xffff};};
@@ -98,11 +169,31 @@ int main(int argc,char** argv){try{
             gameplay.video_active=[&]{return movie.active();};gameplay.skip_video=[&]{movie.stop();};
             movie.start(0);press(SDL_CONTROLLER_BUTTON_START);check(!movie.active(),"SDL controller Start does not skip active original FMV");
             movie.start(0);key(input,SDL_SCANCODE_RETURN,true);tick();key(input,SDL_SCANCODE_RETURN,false);tick();check(!movie.active(),"keyboard OK does not skip active original FMV");
-            events.initialize();tick();press(SDL_CONTROLLER_BUTTON_Y);check(!menu.active,"controller opens inventory during cinematic");press(SDL_CONTROLLER_BUTTON_START);for(unsigned i=0;i<60;++i)tick();
-            check(dialog.active()&&dialog.index()==4&&world.event_camera_index==37,"controller skip does not reach original cell hint");press(SDL_CONTROLLER_BUTTON_A);const auto before_auto=opening_sounds.size();for(unsigned i=0;i<40;++i)tick();check(menu.active,"original hint does not automatically open inventory");check(opening_sounds.size()>before_auto&&opening_sounds[before_auto]==3,"automatic inventory uses close sound");
+            events.initialize();tick();press(SDL_CONTROLLER_BUTTON_Y);check(!menu.active,"controller opens inventory during cinematic");
+            // system.c:545 bhSysCallGame: only pad_ps 0x10000 (SELECT) sets cb_flg 0x10000000. OK (A/Return), Start and Space are not a skip.
+            check((events.flags[10][0]&4)&&!(events.flags[10][0]&0x10000000),"cell cinematic not running before the skip checks");
+            press(SDL_CONTROLLER_BUTTON_A);check((events.flags[10][0]&4)&&!(events.flags[10][0]&0x10000000),"controller OK requested the cinematic skip");
+            key(input,SDL_SCANCODE_RETURN,true);tick();key(input,SDL_SCANCODE_RETURN,false);tick();check((events.flags[10][0]&4)&&!(events.flags[10][0]&0x10000000),"keyboard OK requested the cinematic skip");
+            press(SDL_CONTROLLER_BUTTON_START);check((events.flags[10][0]&4)&&!(events.flags[10][0]&0x10000000),"controller Start requested the cinematic skip");
+            key(input,SDL_SCANCODE_SPACE,true);tick();key(input,SDL_SCANCODE_SPACE,false);tick();check((events.flags[10][0]&4)&&!(events.flags[10][0]&0x10000000),"keyboard Space requested the cinematic skip");
+            press(SDL_CONTROLLER_BUTTON_BACK);check((events.flags[10][0]&0x10000000)||!(events.flags[10][0]&4),"controller Select did not request the cinematic skip");for(unsigned i=0;i<60;++i)tick();
+            check(dialog.active()&&dialog.index()==4&&world.event_camera_index==37,"controller Select skip does not reach original cell hint");press(SDL_CONTROLLER_BUTTON_A);const auto before_auto=opening_sounds.size();for(unsigned i=0;i<40;++i)tick();check(menu.active,"original hint does not automatically open inventory");check(opening_sounds.size()>before_auto&&opening_sounds[before_auto]==3,"automatic inventory uses close sound");
             button(input,joystick,SDL_CONTROLLER_BUTTON_A,true);tick();for(unsigned i=0;i<30;++i)tick();check(menu.commands&&inventory.weapon()==0,"held A auto-equips or advances multiple actions");button(input,joystick,SDL_CONTROLLER_BUTTON_A,false);tick();press(SDL_CONTROLLER_BUTTON_A);
             check(inventory.weapon()==1&&menu.active,"A does not equip lighter");for(unsigned i=0;i<4;++i)tick();press(SDL_CONTROLLER_BUTTON_B);press(SDL_CONTROLLER_BUTTON_B);for(unsigned i=0;i<40&&menu.active;++i)tick();check(!menu.active,"B does not close the status screen after equipping"); /* WeaponSet keeps the status screen open; CursorMove-Cancel enters MainCommand, the second cancel is StatusCancel. */bool voice_advanced=false;for(unsigned i=0;i<3000;++i){tick();if(!voice_advanced&&dialog.active()&&audio.active(1)){for(unsigned page=0;page<8&&dialog.active();++page)gameplay.menu_input(MenuInput::Confirm);check(!dialog.active()&&!audio.active(1),"Rodrigo voice keeps playing after confirming its dialogue");voice_advanced=true;}}check(voice_advanced,"real Rodrigo voice/dialogue advance was not exercised");check(std::find(audio.played.begin(),audio.played.end(),"VOICE1/0016")!=audio.played.end(),"original Rodrigo VOICE1/0016 was not played");check(events.errors.empty()&&!world.player_hidden&&!world.player_scripted&&!(events.flags[5][0]&4),"controller equipment path fails to restore game control");
             press(SDL_CONTROLLER_BUTTON_Y);for(unsigned i=0;i<40;++i)tick();press(SDL_CONTROLLER_BUTTON_B);check(menu.active&&menu.nav,"first B does not return to the status command bar");press(SDL_CONTROLLER_BUTTON_B);for(unsigned i=0;i<40&&menu.active;++i)tick();check(!menu.active&&!events.menu_open,"B does not finish closing inventory");
+            /* Kartentask: sub1.c:3141 setzt st_flg 0x40000, bhCheckSubTask (system.c:561,
+               Maske 0x1C040008) sperrt damit Statusbildschirm und Interaktion; das Pad liest
+               allein MapPadMain (map.c:569). Inventar darf nicht ueber der Karte aufgehen,
+               Escape (Cancel+Quit) darf das Programm nicht beenden. Positivkontrolle ohne Bit. */
+            events.flags[5][0]|=0x40000u;
+            press(SDL_CONTROLLER_BUTTON_Y);check(!menu.active&&!events.menu_open,"controller inventory opened over the map task");
+            key(input,SDL_SCANCODE_TAB,true);tick();key(input,SDL_SCANCODE_TAB,false);tick();check(!menu.active,"keyboard inventory opened over the map task");
+            key(input,SDL_SCANCODE_ESCAPE,true);{const auto f=input.tick();check(f.hit(Action::Quit)&&f.hit(Action::Cancel),"Escape is not Quit+Cancel in the default bindings");check(!gameplay.apply(f),"Escape quits the program while the map task runs");}key(input,SDL_SCANCODE_ESCAPE,false);tick();
+            gameplay.menu_input(MenuInput::Open);check(!menu.active,"replay Open bypassed the map lock");
+            check((events.flags[5][0]&0x40000u)&&!dialog.active(),"the input lock changed st_flg 0x40000 or opened a dialogue");
+            events.flags[5][0]&=~0x40000u;
+            press(SDL_CONTROLLER_BUTTON_Y);for(unsigned i=0;i<40;++i)tick();check(menu.active,"inventory stays locked after the map task released st_flg 0x40000");
+            press(SDL_CONTROLLER_BUTTON_B);press(SDL_CONTROLLER_BUTTON_B);for(unsigned i=0;i<40&&menu.active;++i)tick();check(!menu.active&&!events.menu_open,"B does not close the inventory after the map lock check");
             GameUi pickup_ui(root);events.item_message=[&](unsigned index,unsigned item){auto message=pickup_ui.system_message(index);for(unsigned i=0;i+1<message.size();++i)if(message[i]==0xff03&&message[i+1]==0xffff)message[++i]=std::uint16_t(item);return message;};
             // Real room pickup routed through the same keyboard/controller OK.
             // D02 GetItem über die echte Raumaufnahme (RM_0000): Controller-OK ->
@@ -119,7 +210,22 @@ int main(int argc,char** argv){try{
                 press(SDL_CONTROLLER_BUTTON_A);check(!inventory.contains(8)&&dialog.index()==157,"pickup answer accepted while the status screen slides in (statusflg 0x40)");
                 settle_slide();press(SDL_CONTROLLER_BUTTON_A);check(inventory.contains(8)&&dialog.index()==158&&menu.active&&menu.pickup==8,std::string("controller pickup result closes model too early: knife=")+std::to_string(inventory.contains(8))+" dialog="+std::to_string(dialog.index())+" active="+std::to_string(menu.active)+" pickup="+std::to_string(menu.pickup));
                 while(dialog.active())press(SDL_CONTROLLER_BUTTON_A);settle_close();check(!(events.interactions[7].flags&1)&&!menu.active&&!menu.pickup,std::string("controller pickup completion does not restore room control: item_flag=")+std::to_string(events.interactions[7].flags&1)+" active="+std::to_string(menu.active)+" pickup="+std::to_string(menu.pickup));
-                const auto& ammo_area=events.interactions[4];actor.position={ammo_area.position.x+ammo_area.extent.x/2,0,ammo_area.position.z+ammo_area.extent.z/2+2};auto keyboard_ok=[&]{key(input,SDL_SCANCODE_RETURN,true);tick();key(input,SDL_SCANCODE_RETURN,false);tick();};keyboard_ok();check(dialog.choices()==2&&menu.active&&menu.pickup==12,"keyboard pickup status/model prompt missing");
+                const auto& ammo_area=events.interactions[4];actor.position={ammo_area.position.x+ammo_area.extent.x/2,0,ammo_area.position.z+ammo_area.extent.z/2+2};auto keyboard_ok=[&]{key(input,SDL_SCANCODE_RETURN,true);tick();key(input,SDL_SCANCODE_RETURN,false);tick();};
+                // Der Spieler laeuft mit gehaltener Richtung auf das Item zu und drueckt
+                // OK, waehrend die Taste gehalten bleibt. bhControlMessage (message.c:
+                // 269-285) bewegt mes_sel nur mit der Druckflanke sys->pad_ps 0x4/0x8
+                // (pad.c:275 `pad & ~pad_oncpy`) und kennt keinen Wiederholzaehler, also
+                // bleibt die Antwort auf dem Standard, bis eine neue Flanke kommt.
+                key(input,SDL_SCANCODE_RIGHT,true);for(unsigned i=0;i<40;++i)tick(); /* laenger als repeat_delay: die Host-Wiederholung laeuft */
+                keyboard_ok();check(dialog.choices()==2&&menu.active&&menu.pickup==12,"keyboard pickup status/model prompt missing");
+                settle_slide();const auto before_hold=opening_sounds.size();for(unsigned i=0;i<40;++i)tick();
+                check(dialog.selection==0&&std::find(opening_sounds.begin()+before_hold,opening_sounds.end(),2u)==opening_sounds.end(),std::string("held direction moves the pickup answer: selection=")+std::to_string(dialog.selection));
+                key(input,SDL_SCANCODE_RIGHT,false);tick();const auto before_edge=opening_sounds.size();key(input,SDL_SCANCODE_RIGHT,true);tick();
+                check(dialog.selection==1&&std::find(opening_sounds.begin()+before_edge,opening_sounds.end(),2u)!=opening_sounds.end(),"new direction edge does not move the pickup answer");
+                key(input,SDL_SCANCODE_RIGHT,false);tick();key(input,SDL_SCANCODE_LEFT,true);tick();check(dialog.selection==0,"left edge does not return to the default answer");key(input,SDL_SCANCODE_LEFT,false);tick();
+                // Vorwaerts (W/Pfeil hoch) belegt Forward und Up; message.c liest die
+                // senkrechten Padbits 0x1/0x2 nicht, die Auswahlfelder stehen waagerecht.
+                key(input,SDL_SCANCODE_W,true);for(unsigned i=0;i<40;++i)tick();check(dialog.selection==0,"forward key moves the pickup answer");key(input,SDL_SCANCODE_W,false);tick();
                 settle_slide();keyboard_ok();check(inventory.contains(12),"keyboard pickup Yes failed");while(dialog.active())keyboard_ok();settle_close();check(!(events.interactions[4].flags&1)&&!menu.active,"keyboard picked ammo remains available or the screen stays open");});
             // Schließt die Aufnahme nicht, bleibt der Statusbildschirm offen und
             // blockiert die folgenden Eingabeprüfungen; dann wird er für die

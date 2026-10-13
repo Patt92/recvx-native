@@ -24,6 +24,11 @@ public:
     unsigned original_phase()const;
     bool attacking()const;
     std::int16_t aim_yaw()const; // plp->way of the combat player work
+    // Gruende der Zielsuche. Reine Zaehler des Kerns, wie shots/hits ueber die
+    // Lebensdauer der Kampfpässe aufsummiert, damit sie auch nach dem
+    // Wegstecken lesbar bleiben.
+    struct AimDiagnostics {int near_calls=0,near_seen=0,near_filter=0,near_cone=0,near_wall=0,near_found=0,gun_seen=0,gun_filter=0;float wall_probe[3][4]{};unsigned wall_probe_n=0;};
+    AimDiagnostics aim_diagnostics()const{return aim_history_;}
     const AimSelection& targets()const{return aim_;}
     ModelNodeOverrides pose_overrides(const PlayerAsset& player,std::size_t motion,std::int64_t frame)const;
     static float target_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,NJS_POINT3 position,float radius,float height);
@@ -31,8 +36,12 @@ public:
     // ihr Dienst keinen gebundenen Besitzer hat (nie verdeckt).
     const std::set<std::string>& unbound_routines()const;
 private:
+    void accumulate_aim(const RECVX_COMBAT_RESULT& result);
     void publish_pose(PlayerAsset& player,std::size_t motion,std::int64_t frame,const SceneSpawn& actor);
     std::shared_ptr<CombatOriginal> original_;
+    AimDiagnostics aim_history_{};
+    const void* aim_core_=nullptr;
+    RECVX_COMBAT_RESULT aim_seen_{};
     std::filesystem::path data_,mods_;std::optional<WeaponAsset> asset_,bare_hands_;
     unsigned weapon_=~0u,player_=~0u;int vertical_=0;bool inhibited_=false;
     std::set<unsigned> struck_;

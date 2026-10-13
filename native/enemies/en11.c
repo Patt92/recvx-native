@@ -4,9 +4,16 @@
    Keine Originalkoerper, Generatoren, globale Spielwork oder Raumregeln. */
 #include "en11.h"
 #include "en03_collision.h"
-#include "ninja_matrix.h"
+#include "../ninja_matrix.h"
 #include <math.h>
 #include <string.h>
+#include <stddef.h>
+
+_Static_assert(offsetof(RECVX_EN11_STATE, alarm)==0x56u,"EXP0_UC(0x56)");
+_Static_assert(offsetof(RECVX_EN11_STATE, wall_id)==0x58u,"EXP0_P(0x58)");
+_Static_assert(offsetof(RECVX_EN11_STATE, dir)==0x5Cu,"EXP0_I(0x5C)");
+_Static_assert(offsetof(RECVX_EN11_STATE, effect_slot)==0x60u,"EXP0_P(0x60)");
+_Static_assert(offsetof(RECVX_EN11_STATE, wall)==0x70u,"native ATR view after original EXP0");
 
 static const RECVX_EN11_SERVICES* extra;
 void recvx_en11_bind(const RECVX_EN11_SERVICES* s) { extra = s; }
@@ -47,6 +54,8 @@ static int effect_read(RECVX_ENEMY_WORK* w, RECVX_EN11_EFFECT* e)
 static int light(RECVX_ENEMY_WORK* w, int mode)
 {
     RECVX_EN11_EFFECT e;
+    /* en11.c:1117: nur 0..3 dereferenzieren den Effektwork. */
+    if (mode < 0 || mode > 3) return 1;
     if (!extra || !extra->effect_set) return gap(w,"bhEne11_LightControl");
     if (!state(w)) return gap(w,"bhEne11_LightControl: exp0 fehlt");
     if (!effect_read(w,&e)) return 0;
@@ -55,7 +64,7 @@ static int light(RECVX_ENEMY_WORK* w, int mode)
     case 1: e.mode0=3; break;
     case 2: e.mode0=0; break;
     case 3: e.mode0=2; e.ax=e.axp=0x38e; break;
-    default: break; /* en11.c:1117-1137: kein default-Zweig, nichts geschrieben. */
+    default: return 1; /* en11.c:1117-1137: kein Schreibzugriff fuer andere Werte. */
     }
     extra->effect_set(state(w)->effect_slot,&e); return 1;
 }

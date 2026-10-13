@@ -54,8 +54,12 @@ public:
     std::function<std::pair<unsigned,unsigned>()> pad_state;
     std::function<unsigned()> player_yaw; // plp->ay
     std::function<void(unsigned)> set_player_yaw;
+    /* system.c:742 (bhCheckSubTask, pass in which cb_flg 4 falls): plp->mode3 = 0. */
+    std::function<void()> release_cinematic_player;
     std::function<bool(const DoorRequest&)> door;
     void inherit_progress(const EventVm& previous);
+    /* bhInitEvent, event.c:352: enemy pass before scd0 and scheduler. */
+    std::function<void()> initialize_enemies;
     void initialize();
     void tick();
     void finish_room_exit(); // final bhControlEvent pass before bhStartDoorDemo

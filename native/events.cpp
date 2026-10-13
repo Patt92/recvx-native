@@ -38,7 +38,7 @@ void EventVm::inherit_progress(const EventVm& previous){
     for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
 }
-void EventVm::initialize(){Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
+void EventVm::initialize(){if(initialize_enemies)initialize_enemies();Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
 void EventVm::world(Task& task,unsigned op,std::size_t length){
     BinaryView v(room_);v.require(task.pc,length);EventCommand c{op,task.level,task.event,task.pc-base_,{room_.begin()+task.pc,room_.begin()+task.pc+length}};
     c.loop_remaining=task.cnt2;c.loop_total=task.cnt3;
@@ -48,6 +48,8 @@ void EventVm::world(Task& task,unsigned op,std::size_t length){
 }
 int EventVm::instruction(Task& t){
     BinaryView v(room_);const auto p=t.pc;const unsigned op=v.u8(p);auto advance=[&](std::size_t n){v.require(p,n);t.pc+=n;return 1;};
+    /* Diagnose: RECVX_EVENT_TRACE=1 protokolliert jede ausgefuehrte Skriptanweisung (Event, Ebene, Offset, Bytes). */
+    if(static const bool trace=std::getenv("RECVX_EVENT_TRACE")!=nullptr;trace){std::fprintf(stderr,"EVTRACE ev=%u lvl=%u off=%zu op=%02x:",t.event,t.level,p-base_,op);for(std::size_t i=1;i<10&&p+i<room_.size();++i)std::fprintf(stderr," %02x",v.u8(p+i));std::fputc('\n',stderr);}
     switch(op){
     case 0:return 0;
     case 1:{const auto target=v.relative(p+2,v.u8(p+1),1);if(t.branches.size()>=32)throw std::runtime_error("event IF nesting limit");t.branches.push_back(target);return advance(2);}
@@ -346,8 +348,16 @@ void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10
     status_use_pending_=false;if(!menu_open)flags[5][0]&=~8u;door_scenario_pending_=false;
     // game.c consumes the interaction response after the scenario/scheduler pass.
     if(!(flags[10][0]&1))flags[10][0]&=~0x1000u;
-    // bhSysCall after bhControlEvent: a finished cinematic drops its skip request.
-    if(cinematic&&!(flags[10][0]&4))flags[10][0]&=~0x10000000u;}
+    // bhCheckSubTask after bhControlEvent (system.c:736-744): the same pass in
+    // which cb_flg 4 falls releases the player work the cinematic held and drops
+    // the skip request. This is the only original site that clears plp->flg
+    // 0x10000 (bhControlPlayerPad gate, player.c:1804) and plp->stflg 0x18000,
+    // and it resets plp->mode3 so bhCPM0_action returns to PlMtnAct (player.c:2098).
+    if(cinematic&&!(flags[10][0]&4)){
+        flags[13][0]&=~0x10000u;flags[14][0]&=~0x18000u;flags[10][0]&=~0x10000000u;
+        player_flags=flags[13][0];
+        if(release_cinematic_player)release_cinematic_player();
+    }}
 Message EventVm::room_message(unsigned index)const{return read_message(room_,messages_,index);}
 bool EventVm::request_door(const DoorRequest& request){
     if(!door||!door(request))return false;

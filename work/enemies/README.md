@@ -1,0 +1,48 @@
+# Gegner-Work-Items
+
+Regeln: [RULES.md](RULES.md) · Querschnitt: [X_COMMON.md](X_COMMON.md) · Begleiter: [X04_SUBPL.md](X04_SUBPL.md)
+
+Einzelberichte der Fortsetzung: [EN10](EN010.result.md), [EN11](EN011.result.md),
+[EN20](EN020.result.md), [EN71](EN071.result.md), [EN53](EN053.result.md),
+[EN21](EN021.result.md).
+Gemeinsame noch ausstehende Bindungen: [INTEGRATION_NEXT.md](INTEGRATION_NEXT.md).
+Komponentengeprüft ist nicht gleich vollständige Runtime-Abnahme.
+
+| Item | Routine | Status | Räume | erster Raum |
+| --- | --- | --- | --- | --- |
+| [EN000](EN000.md) - | `bhEne00` | nativ verdrahtet, Audit/Abnahme offen | 11 | RM_0080 |
+| [EN001](EN001.md) Zombie | `bhEne01` | nativ verdrahtet, Audit/Abnahme offen | 72 | RM_0020 |
+| [EN002](EN002.md) Gulp Worm | `bhEne02` | FEHLT | 6 | RM_3091 |
+| [EN003](EN003.md) Black Widow | `bhEne03` | nativ vorhanden, NICHT verdrahtet | 3 | RM_6090 |
+| [EN004](EN004.md) Cerberus | `bhEne04` | nativ verdrahtet, Audit/Abnahme offen | 6 | RM_0050 |
+| [EN005](EN005.md) Hunter/Sweeper | `bhEne05` | FEHLT | 17 | RM_5590 |
+| [EN006](EN006.md) Moth | `bhEne06` | FEHLT | 1 | RM_6030 |
+| [EN007](EN007.md) Bat | `bhEne07` | nativ verdrahtet, Audit/Abnahme offen | 4 | RM_0130 |
+| [EN008](EN008.md) Fish | `bhEne08` | nativ verdrahtet, Audit/Abnahme offen | 3 | RM_4000 |
+| [EN009](EN009.md) Bandersnatch | `bhEne09` | FEHLT | 12 | RM_1060 |
+| [EN010](EN010.md) Ant A | `bhEne10` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9170 |
+| [EN011](EN011.md) Spotter | `bhEne11` | nativ verdrahtet, Audit/Abnahme offen | 6 | RM_7081 |
+| [EN012](EN012.md) First Form Alexia | `bhEne12` | nativ verdrahtet, Audit/Abnahme offen | 3 | RM_5820 |
+| [EN013](EN013.md) Second Form Alexia | `bhEne13` | FEHLT | 2 | RM_5810 |
+| [EN014](EN014.md) Third Form Alexia | `bhEne14` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_5810 |
+| [EN015](EN015.md) Nosferatu | `bhEne15` | FEHLT | 2 | RM_5800 |
+| [EN016](EN016.md) Alfred Ashford | `bhEne16` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_1020 |
+| [EN017](EN017.md) Monster Steve | `bhEne17` | nativ vorhanden, NICHT verdrahtet | 1 | RM_9280 |
+| [EN018](EN018.md) Alexia's Tentacle | `bhEne18` | nativ verdrahtet, Audit/Abnahme offen | 0 | – |
+| [EN019](EN019.md) Tyrant T-078 | `bhEne19` | FEHLT | 4 | RM_1122 |
+| [EN020](EN020.md) Ant B | `bhEne20` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9170 |
+| [EN021](EN021.md) Albinoid Infant | `bhEne21` | nativ vorhanden + Einzeltest, NICHT verdrahtet | 2 | RM_3120 |
+| [EN022](EN022.md) Albinoid Adult | `bhEne22` | FEHLT | 1 | RM_7100 |
+| [EN023](EN023.md) Giant Black Widow | `bhEne23` | FEHLT | 1 | RM_9050 |
+| [EN024](EN024.md) Baby Black Widow | `bhEne24` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9050 |
+| [EN025](EN025.md) Ceiling Trap | `bhEne25` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9290 |
+| [EN026](EN026.md) Anatomist Zombie | `bhEne26` | FEHLT | 1 | RM_0110 |
+| [EN027](EN027.md) Moth Egg | `bhEne27` | nativ verdrahtet, Audit/Abnahme offen | 0 | – |
+| [EN028](EN028.md) - | `bhEne28` | nativ verdrahtet, Audit/Abnahme offen | 0 | – |
+| [EN029](EN029.md) Tentacle | `bhEne29` | FEHLT | 3 | RM_9000 |
+| [EN030](EN030.md) Alexia's Baby | `bhEne30` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_5810 |
+| [EN053](EN053.md) Nosferatu-Kern | `bhEne53` | native Zustände + Einzeltest vorhanden, Anschluss offen | 3 | RM_5800 |
+| [EN054](EN054.md) Armored Knight A (with sword and medium shield) | `bhEne54` | nativ vorhanden, NICHT verdrahtet | 1 | RM_9280 |
+| [EN055](EN055.md) Armored Knight B (with lance and large shield) | `bhEne55` | nativ vorhanden, NICHT verdrahtet | 1 | RM_9280 |
+| [EN056](EN056.md) - | `bhEne56` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_4020 |
+| [EN071](EN071.md) Ant C | `bhEne71` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9170 |

@@ -158,6 +158,9 @@ typedef struct {
     float    car, cah;
     uint32_t ply_id;            /* sys->ply_id, nur lesend                  */
     uint32_t exp1_flags;        /* plp->exp1 EXP1_I(0)                      */
+    /* Read-only host debug policy, not an original player flag.
+       player_set never writes this value back to the player owner. */
+    uint8_t debug_attack_disabled;
 } RECVX_ENEMY_PLAYER;
 
 #define RECVX_ENEMY_SLOTS      128u  /* eneset.c:315 Tabellengrenze       */
