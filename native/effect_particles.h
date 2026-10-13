@@ -38,6 +38,12 @@ public:
     void append(Scene& scene,const SceneCamera& camera,unsigned texture_base)const;
     std::size_t active()const;
     const std::set<std::string>& unsupported()const;
+    // effect.c:220 bhPushEffectWork/:234 bhPopEffectWork sichern den ganzen
+    // eff[512]-Satz samt der Nutzlasttabelle (sys->ef_poln..ob_nlgn). Der Host
+    // sichert hier die Nutzlasten; sprites_ haelt der Raumbesitzer selbst.
+    struct State;
+    std::shared_ptr<const State> save()const;
+    void restore(const std::shared_ptr<const State>& state);
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

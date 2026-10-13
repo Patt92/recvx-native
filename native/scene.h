@@ -70,6 +70,7 @@ struct SceneTriangle {
     unsigned light_category=1;
     std::uint64_t blend_register=0x44; // original GS source-alpha/inverse-source-alpha
     SceneTextureFilter texture_filter=SceneTextureFilter::Default;
+    unsigned texture_color_divisor=255; // raw Ninja constant-material RGB uses 128, native normalized RGB uses 255
 };
 struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;};
 struct SceneCamera {

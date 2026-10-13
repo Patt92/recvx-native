@@ -43,6 +43,12 @@ struct EnemyWorldScope {
     explicit EnemyWorldScope(RoomWorld* w):previous(enemy_world){enemy_world=w;}
     ~EnemyWorldScope(){enemy_world=previous;}
 };
+// Die T3-Ergaenzung (en03_lib.c) ist prozessweit gebunden und gilt nur
+// waehrend des Aufrufs, genau wie in control_enemy_works.
+struct EnemyExtScope {
+    explicit EnemyExtScope(RECVX_ENEMY_EXT* ext){recvx_enemy_ext_bind(ext);}
+    ~EnemyExtScope(){recvx_enemy_ext_bind(nullptr);}
+};
 WorldEntity& owner_of(RECVX_ENEMY_WORK* w){return *static_cast<WorldEntity*>(w->owner);}
 const WorldEntity& owner_of(const RECVX_ENEMY_WORK* w){return *static_cast<const WorldEntity*>(w->owner);}
 // mlwP: der Objektbaum, den ein Work liest und schreibt. Ein Kind mit
@@ -1347,5 +1353,22 @@ void RoomWorld::enemy_script_evaluate(WorldEntity& e,unsigned mode){
     if(motion&&enemy_services_.set_motion)(void)enemy_services_.set_motion(&e.enemy,0,0u);
     if(model)calc_enemy_model(e);
     if(link)calc_enemy_link_model(e);
+}
+
+// event.c:4302 bhEffBloodSet: v0 ist der Raumindex in rom->enep, v1 zugleich
+// epw->djnt_no und der Gelenkpunkt von bhSetEffectTb, die drei u16 sind der
+// Trefferversatz mit den Vorzeichenbits von v2; danach Typ, Flags und der
+// Gradwinkel (Bit 1 der Flags negiert ihn). Den Kern (zonzon.c:466
+// bhEne_SetBlood2 mit bhSetEffectTb/bhSetEffParticle) traegt recvx_t3_set_blood2.
+bool RoomWorld::script_blood_set(unsigned index,unsigned joint,int type,unsigned flags,int turn,NJS_POINT3 offset){
+    const auto* known=state(1,index);if(!known||!known->enemy_bound)return false;
+    EnemyWorldScope scope(this);
+    EnemyExtScope ext(&enemy_ext_);
+    auto& work=entity(1,index);
+    work.enemy.djnt_no=int(joint);
+    RECVX_ENEMY_VEC ofs{offset.x,offset.y,offset.z};
+    int ry=int(turn);if(flags&2)ry=-ry;
+    recvx_t3_set_blood2(&work.enemy,type,&ofs,int(std::int16_t(float(std::int16_t(ry))*65536.0f/360.0f)));
+    return true;
 }
 }

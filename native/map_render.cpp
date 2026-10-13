@@ -84,30 +84,27 @@ void MapRenderer::add_screen_quad(const std::array<float,8>& p,std::uint32_t col
 }
 
 void MapRenderer::add_model(const std::vector<SceneTriangle>& geometry,const NJS_MATRIX& matrix,const RECVX_MAP_ARGB& material,const MapScreen& map){
-    /* njSetConstantMaterial + njCnkEasyMultiDrawModel/Object under
-       njControl3D(0x810): diffuse = constant material, alpha ratio = its a,
-       NJD_FST_UA forced by njSetConstantAttr(-1,0x800). Per vertex
-       (njCnkCvVn): I = ambient + sum(max(0, N' . fC) * light colour) with N'
-       the normal transformed by the full current matrix, unnormalised. */
+    /* map.c:734 njControl3D(0x810) selects the CM colour function:
+       njCnkCs:1748 / vu1GetVertexColorCM:1590 reads diffuse and alpha ONLY,
+       not the intensities calculated by MapLightMain/njCnkCvVn.
+       vu1SetDiffuseMaterial emits 128*RGB; untextured fragments retain these
+       truncated channels. Textured fragments use them as MODULATE factors
+       over 128, retained explicitly in the native renderer. */
     NJS_MATRIX m;std::copy_n(matrix,16,m);
-    const auto& fc=map.light_camera_direction();
-    const auto& lc=map.light_color();
-    const auto& ambient=map.ambient();
-    const std::uint32_t color=material_color(material);
-    const bool opaque=material.a>=1.0f;
+    (void)map;
     for(const auto& source:geometry){
         SceneTriangle t=source;
         for(auto& vertex:t.vertices){
             NJS_POINT3 local=vertex.position;njCalcPoint(&m,&local,&vertex.position);
             NJS_VECTOR n=vertex.normal;njCalcVector(&m,&n,&vertex.normal);
-            float r=ambient[0],g=ambient[1],b=ambient[2];
-            const float f3=vertex.normal.x*fc.x+vertex.normal.y*fc.y+vertex.normal.z*fc.z;
-            if(f3>0.f){r+=f3*lc[0];g+=f3*lc[1];b+=f3*lc[2];}
-            vertex.light={std::clamp(r,0.f,1.f),std::clamp(g,0.f,1.f),std::clamp(b,0.f,1.f)};
         }
-        t.color=color;t.textured=false;t.camera_mask=false;t.world_lit=true;t.gouraud=true;
-        /* ABE with a full alpha ratio under SA/ISA is the opaque result. */
-        t.blend=opaque?SceneBlend::Opaque:SceneBlend::Ninja;
+        const auto channel=[](float value){return unsigned(std::clamp(128.f*value,0.f,255.f));};
+        t.texture_color_divisor=128;
+        t.color=(material_color(material)&0xff000000u)|channel(material.r)<<16|channel(material.g)<<8|channel(material.b);
+        t.camera_mask=false;t.world_lit=true;t.gouraud=false;
+        /* NJD_FST_UA is forced even for full-alpha materials: the chunk
+           blend pair remains authoritative (not always SA/ISA). */
+        t.blend=SceneBlend::Ninja;
         scene_.triangles.push_back(t);
         ++stats_.triangles;
     }
@@ -148,7 +145,13 @@ void MapRenderer::draw(SoftwareRenderer& image,const MapScreen& map){
                fractions (shift by bitcount(width)-4 into 12.4 texels). */
             const float left=d.points[0]-float(anim.cx),top=d.points[1]-float(anim.cy);
             const float right=d.points[0]+float(anim.sx-anim.cx),bottom=d.points[1]+float(anim.sy-anim.cy);
-            const float u1=float(anim.u1)/256.0f,v1=float(anim.v1)/256.0f,u2=float(anim.u2)/256.0f,v2=float(anim.v2)/256.0f;
+            /* ps2_NaSprite.c:40-101: BOTH axes use bitcount(width)-4,
+               plus eight 12.4 units (half a texel). MapDrawSprite ang=0
+               selects quadrant 3, which adds no further UV correction. */
+            const auto& tex=list[std::size_t(anim.texid)];
+            const float u1=float(anim.u1)/256.f+.5f/float(tex.width),u2=float(anim.u2)/256.f+.5f/float(tex.width);
+            const float v1=(float(anim.v1)*float(tex.width)/256.f+.5f)/float(tex.height);
+            const float v2=(float(anim.v2)*float(tex.width)/256.f+.5f)/float(tex.height);
             const float pri=std::min(d.priority,-1.0f);
             const NJS_POINT3 p[4]={screen_point(left,top,pri,stats_),screen_point(right,top,pri,stats_),
                                    screen_point(right,bottom,pri,stats_),screen_point(left,bottom,pri,stats_)};
@@ -157,7 +160,12 @@ void MapRenderer::draw(SoftwareRenderer& image,const MapScreen& map){
             for(const auto& tri:order){
                 SceneTriangle t;
                 for(int i=0;i<3;++i){t.vertices[i].position=p[tri[i]];t.vertices[i].u=uv[tri[i]][0];t.vertices[i].v=uv[tri[i]][1];}
-                t.color=0xffffffffu;t.textured=true;t.texture=texture;t.camera_mask=false;t.world_lit=true;
+                /* MapDrawSprite installs its constant material and requests
+                   NJD_SPRITE_COLOR (0x2), not an unconditional white sprite. */
+                const auto channel=[](float v){return unsigned(std::clamp(128.f*v,0.f,255.f));};
+                t.color=(d.color&0xff000000u)|channel(d.material.r)<<16|channel(d.material.g)<<8|channel(d.material.b);
+                t.texture_color_divisor=128;
+                t.textured=true;t.texture=texture;t.camera_mask=false;t.world_lit=true;
                 t.blend=SceneBlend::Ninja;t.blend_register=0x44;
                 scene_.triangles.push_back(t);
             }
@@ -174,7 +182,10 @@ void MapRenderer::draw(SoftwareRenderer& image,const MapScreen& map){
             if(d.model<0||std::size_t(d.model)>=objects.size()){++stats_.objects_without_model;break;}
             const auto node=objects[std::size_t(d.model)].node;
             if(node>=object_geometry_.size()){++stats_.objects_without_model;break;}
+            const auto first=scene_.triangles.size();
             add_model(object_geometry_[node],d.matrix,d.material,map);
+            for(std::size_t i=first;i<scene_.triangles.size();++i)if(scene_.triangles[i].textured)
+                scene_.triangles[i].texture=std::uint16_t(stage_base+scene_.triangles[i].texture);
             ++stats_.objects;
             break;
         }

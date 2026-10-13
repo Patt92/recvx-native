@@ -21,6 +21,9 @@ namespace {
 constexpr const char* names[]={"forward","back","turn_left","turn_right","run","inventory","confirm","cancel","up","down","left","right","skip","pause","quit","wireframe","aim","attack","next_target","select"};
 const char* defaults_text=R"INI(# RECVX controls: edit and restart. SDL scancode names use physical key positions.
 # Multiple alternatives are separated by commas. 'none' disables this device's binding.
+# Escape is the menu Cancel key and the host pause key: with no menu, dialogue or
+# room task open it opens and closes the pause overlay, and it never terminates the
+# runtime. A key listed under cancel is ignored under quit.
 [keyboard]
 forward = I, W, Up
 back = K, S, Down
@@ -35,8 +38,8 @@ down = Down, S
 left = Left, A
 right = Right, D
 skip = Space
-pause = P
-quit = Escape, F10
+pause = P, Escape
+quit = F10
 wireframe = F3
 aim = R
 attack = Left Ctrl, Return
@@ -95,15 +98,36 @@ InputConfig parse(std::istream& stream){InputConfig out;std::string section,line
     for(const auto* device:{"keyboard","gamepad"})for(auto name:names)if(!seen.count(std::string(device)+"/"+name)){
         if(std::string(name)=="aim"||std::string(name)=="attack"||std::string(name)=="next_target"||std::string(name)=="pause"||std::string(name)=="select"){
             const bool pad=std::string(device)=="gamepad";
-            if(std::string(name)=="pause"){out.bindings[unsigned(Action::Pause)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_BACK):int(SDL_SCANCODE_P),1});continue;}
+            if(std::string(name)=="pause"){out.bindings[unsigned(Action::Pause)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_BACK):int(SDL_SCANCODE_P),1});if(!pad)out.bindings[unsigned(Action::Pause)].push_back({InputBinding::Kind::Key,SDL_SCANCODE_ESCAPE,1});continue;}
             /* Older controls.ini without a select line: the PS2 SELECT button (pad.c pad_tab_a[16] = 0x100) */
             if(std::string(name)=="select"){out.bindings[unsigned(Action::Select)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_BACK):int(SDL_SCANCODE_P),1});continue;}
             if(std::string(name)=="aim")out.bindings[unsigned(Action::Aim)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER):int(SDL_SCANCODE_R),1});
             else if(std::string(name)=="next_target")out.bindings[unsigned(Action::NextTarget)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_LEFTSHOULDER):int(SDL_SCANCODE_Q),1});
             else {out.bindings[unsigned(Action::Attack)].push_back({pad?InputBinding::Kind::Button:InputBinding::Kind::Key,pad?int(SDL_CONTROLLER_BUTTON_A):int(SDL_SCANCODE_LCTRL),1});if(!pad)out.bindings[unsigned(Action::Attack)].push_back({InputBinding::Kind::Key,SDL_SCANCODE_RETURN,1});}continue;
         }throw std::runtime_error(std::string("missing controls binding: ")+device+"/"+name);}
+    /* Ein Key, der Cancel ist, beendet die Runtime nie: sonst schliesst Escape,
+       das Menue-Abbruch und Host-Pause ist, ein laufendes Spiel (docs/CONTROLS.md).
+       Aeltere controls.ini mit `quit = Escape, F10` behalten so nur F10. */
+    {auto& quit=out.bindings[unsigned(Action::Quit)];const auto& cancel=out.bindings[unsigned(Action::Cancel)];
+     quit.erase(std::remove_if(quit.begin(),quit.end(),[&](const InputBinding& b){return std::find_if(cancel.begin(),cancel.end(),[&](const InputBinding& c){return c.kind==b.kind&&c.code==b.code&&c.direction==b.direction;})!=cancel.end();}),quit.end());}
     if(out.menu_threshold<out.deadzone)throw std::runtime_error("menu_threshold must be at least deadzone");return out;
 }
+}
+unsigned item_box_pad(const InputFrame& f){
+    unsigned bits=0;
+    if(f.down(Action::Up))bits|=1u;
+    if(f.down(Action::Down))bits|=2u;
+    if(f.down(Action::Left)||f.down(Action::TurnLeft))bits|=4u;
+    if(f.down(Action::Right)||f.down(Action::TurnRight))bits|=8u;
+    if(f.down(Action::Aim))bits|=0x10u;
+    if(f.down(Action::NextTarget))bits|=0x80u;
+    if(f.down(Action::Confirm))bits|=0x200u|0x800u;
+    if(f.down(Action::Cancel))bits|=0x1000u;
+    if(f.down(Action::Inventory))bits|=0x4000u;
+    if(f.down(Action::Run))bits|=0x400u;
+    if(f.down(Action::Select))bits|=0x8000u|0x10000u;
+    if(f.down(Action::Skip))bits|=0x20000u;
+    return bits;
 }
 InputConfig InputConfig::defaults(){std::istringstream stream(defaults_text);return parse(stream);}
 InputConfig InputConfig::read(const std::filesystem::path& path){std::ifstream stream(path);if(!stream)throw std::runtime_error("cannot read controls: "+path.string());if(std::filesystem::file_size(path)>65536)throw std::runtime_error("controls file too large");return parse(stream);}
@@ -168,7 +192,12 @@ void InputManager::event(const SDL_Event& e){if(e.type==SDL_CONTROLLERDEVICEADDE
 void InputManager::rumble(unsigned low,unsigned high,unsigned milliseconds){for(auto& item:pads_)SDL_GameControllerRumble(item.second.handle,Uint16(low>65535u?65535u:low),Uint16(high>65535u?65535u:high),Uint32(milliseconds));}
 InputFrame InputManager::tick(){for(auto& item:pads_)refresh(item.second);evaluate();InputFrame frame;frame.gamepad_input=last_gamepad_;frame.held=held_;frame.pressed=pending_;pending_.fill(false);
     for(unsigned a=0;a<action_count;++a){if(!held_[a])suppressed_[a]=false;if(suppressed_[a])frame.held[a]=frame.pressed[a]=false;}
-    for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(!suppressed_[a]&&navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}return frame;}
+    for(unsigned a=0;a<action_count;++a){if(!held_[a])age_[a]=0;else{if(frame.pressed[a])age_[a]=0;if(age_[a]>=config_.repeat_delay+config_.repeat_interval+1)age_[a]=config_.repeat_delay+1;++age_[a];if(!suppressed_[a]&&navigation(a)&&age_[a]>config_.repeat_delay&&(age_[a]-config_.repeat_delay-1)%config_.repeat_interval==0)frame.repeat[a]=true;}}
+    /* Cancel schlaegt Quit in derselben Flanke: ein Key, der Cancel ist, beendet die
+       Runtime nie (Escape ist Menue-Abbruch und Host-Pause, docs/CONTROLS.md). Das gilt
+       auch fuer eine Belegung, die erst im Einstellungsschirm gemeinsam entstanden ist. */
+    if(frame.pressed[unsigned(Action::Cancel)])frame.pressed[unsigned(Action::Quit)]=false;
+    return frame;}
 void GameplayInput::menu_input(MenuInput key,bool repeat){
     /* Kartentask: sub1.c:3141 (MAP aus der Statusleiste) und system.c:630 (Dreieck/
        bhMapSystemOn) setzen st_flg 0x40000; bhCheckSubTask (system.c:561) sperrt mit

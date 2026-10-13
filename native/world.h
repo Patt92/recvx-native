@@ -121,6 +121,8 @@ public:
     // Original en01 routines the damage/death port called while they are still unbound (reported, never hidden).
     const std::set<std::string>& unbound_enemy_routines()const{return unbound_enemy_;}
     std::size_t blood_particles()const{return particles_.active();}
+    // event.c:4302 bhEffBloodSet: epw->djnt_no und bhEne_SetBlood2 am Gegnerwork.
+    bool script_blood_set(unsigned index,unsigned joint,int type,unsigned flags,int turn,NJS_POINT3 offset);
     bool enemy_dead(unsigned index)const;
     struct JointHit {int joint;NJS_POINT3 point;};
     std::optional<JointHit> enemy_capsule_hit(unsigned index,NJS_POINT3 start,NJS_POINT3 end,float radius);
@@ -160,6 +162,17 @@ public:
     bool effect_visible(unsigned index)const;
     EffectContext effect_context()const;
     void set_presentation_flags(unsigned flags){presentation_flags_=flags;} // sys->pt_flg, native draw owner
+    unsigned presentation_flags()const{return presentation_flags_;}
+    // game.c:196-224 / :115-139 (bhCheckExmAtari, cb_flg 0x8): exm_attr 0x2 also drops
+    // rom->lgtp[1].flg 0x2; neither restore path sets it again.
+    void clear_exm_light(){if(lights_.size()>1)lights_[1].flags&=~2u;}
+    // hitchk.c:4819: cam.flg 0x20 (cut.c bhSetCut/bhSetFixedCut take it from the cut's
+    // flg 0x400; bhSetEventCamera/bhSetEventFixedCut clear it) arms ef_flg 0x10.
+    void mark_exm_cut_effect(){if(!event_camera&&(cut_fog_flags_&0x400u))effect_flags_|=0x10u;}
+    void set_fixed_cut(unsigned cno);                       // cut.c:448 bhSetFixedCut
+    void set_event_camera(unsigned cno,unsigned kno,bool lock); // cut.c:1644 / :1726
+    // cut.c:12 bhCheckCut(1): bhSetCut(cam.ncut, 1) for the player's current cut.
+    void return_to_cut(){event_camera=false;fixed_camera.reset();camera_force_=true;}
     // sys->ef_flg. system.c:195 initializes it to 0; its only original writer
     // is the mn_md1 room-load sequence (system.c:1830/1884), which no native
     // owner drives yet, so bit 0 stays clear until one binds it.
@@ -472,11 +485,20 @@ private:
     int effect_template_ay_=0; // sys->ef.ay carried between EN01 writers (RECVX_EN01_EF_KEEP_AY)
     bool enemy_work_index(const RECVX_ENEMY_WORK* w,unsigned& index)const;
     int effect_tb(unsigned flg,int id,int type,unsigned mdlver,NJS_POINT3 position,NJS_POINT3 scale,int ax,int ay,const RECVX_ENEMY_VEC* ofs,RECVX_ENEMY_WORK* link_w,bool link_player,int lkono);
+    // bhSetEffect (effect.c:331) / bhSetEffectTb ohne die Prozedurpruefung.
+    int allocate_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index);
     unsigned player_weapon_=0,effect_yk_ct_=0,presentation_flags_=~0u; // system.c initializes pt_flg to ~0u
     unsigned effect_flags_=0; // system.c:195 sys->ef_flg = 0
     void control_player_effects();
     std::vector<CollisionWall> effect_walls_; // rom->walp + sys->mwalp as bhCheckWallType sees them
     std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;
+    // event.c:220 bhPushEffectWork/:234 bhPopEffectWork sichern den ganzen
+    // eff[512]-Satz (hier sprites_ plus die Partikelnutzlast des Besitzers) und
+    // stellen ihn auf Anforderung wieder her. Das Original kopiert in einen
+    // Speicherblock und ersetzt ihn vollstaendig, deshalb ist auch hier genau
+    // ein Schnappschuss aktiv.
+    struct EffectPushState {std::vector<SpriteWork> works;std::shared_ptr<const EffectParticles::State> particles;};
+    std::optional<EffectPushState> effect_push_;
     std::vector<std::shared_ptr<const ShadowGeometry>> shadow_models_;
     std::vector<MotionClip> room_motions_;
     std::vector<std::vector<FaceParameter>> face_sequences_;std::vector<unsigned> face_sequence_ids_;std::vector<std::vector<std::uint8_t>> lip_sequences_;

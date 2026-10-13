@@ -522,21 +522,35 @@ void step_eff017(EffectSprite& s){
     if(!(w->stflg&0x1000000u))return;
     if(mobile_wall_clear)mobile_wall_clear(w->ct0);
 }
-bool supported_effect_sprite(unsigned id){
+// Die portierten Originalprozeduren (native/effect_procedures.cpp, erzeugt von
+// tools/generate_effect_procedures.py). Hier nur die Schnittstelle, damit die
+// Datei den Shim nicht einbinden muss.
+namespace original {
+bool supported(unsigned id);
+bool step(unsigned id,EffectSprite& w);
+}
+// Die von Hand portierten Kennungen; sie behalten den Vorrang vor der
+// erzeugten Tabelle (keine doppelte Implementierung derselben Kennung).
+bool hand_ported_effect_sprite(unsigned id){
     switch(id){
     case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 181:case 182:case 218:case 230:return true;
     default:return false;
     }
 }
+bool supported_effect_sprite(unsigned id){return hand_ported_effect_sprite(id)||original::supported(id);}
 bool ported_effect_atlas(unsigned group){
     return group==35||group==41||group==414||(group>=70&&group<=79)||(group>=400&&group<=407);
 }
 bool step_effect_sprite(EffectSprite& sprite,bool* queued){
+    // Die erzeugten Originalprozeduren brauchen keinen Pass-Kontext; die von Hand
+    // portierten Flammen/Kennungen lesen die Flags des Besitzers.
+    if(!hand_ported_effect_sprite(sprite.id)&&original::supported(sprite.id)){sprite.frame_queued=false;const bool ran=original::step(sprite.id,sprite);if(queued)*queued=sprite.frame_queued;return ran;}
     if(supported_effect_sprite(sprite.id))throw std::runtime_error("flame step requires native flag context");
     if(queued)*queued=false;return false;
 }
 bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
     if(queued)*queued=false;if(!supported_effect_sprite(s.id))return false;
+    if(!hand_ported_effect_sprite(s.id)){s.frame_queued=false;if(!original::step(s.id,s))throw std::runtime_error("unknown ported effect procedure");if(queued)*queued=s.frame_queued;return true;}
     if(s.id!=9){
         bool entered=false;
         switch(s.id){
@@ -614,6 +628,9 @@ void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
 int original_effect_slot(const std::vector<unsigned>& flags){for(unsigned i=0;i<512;++i)if(i>=flags.size()||!(flags[i]&3u))return int(i);return -1;}
 void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,unsigned>& bases){for(const auto& q:sprite.quads){const auto base=bases.find(q.category);if(base==bases.end())throw std::runtime_error("original custom-effect texture missing");EffectSprite quad;quad.id=302;quad.flg=0x100000;quad.tv=q.vertices;quad.bl_src=int(q.source);quad.bl_dst=int(q.destination);append_effect_sprite(scene,quad,q.center,{1,1,1},camera,base->second);}}
+// effsub0.c:10 setentry / effect.c:436 bhSetEffectTb: die Anforderung dieses
+// Passes; der Besitzer leert die Liste mit take_effect_output().
+void push_effect_spawn(const EffectSpawn& spawn){pending.spawns.push_back(spawn);}
 void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix){
     if((s.flg|s.stflg)&0x1000000)return;
     // bhDrawTrsEffect3D: translation, UnitRotPortion for flag 0x100000,
@@ -623,11 +640,19 @@ void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position
     else {if((s.flg&0x80)&&!(s.flg&0x200000)){if(!linked_matrix)throw std::runtime_error("linked effect draw missing native node matrix");std::copy(linked_matrix,linked_matrix+16,basis);}njRotateXYZ(&basis,s.ax,s.ay,s.az);}
     std::array<SceneVertex,4> vertices;
     for(unsigned i=0;i<4;++i){NJS_POINT3 point{s.tv[i].x*scale.x,s.tv[i].y*scale.y,s.tv[i].z*scale.z};njCalcVector(&basis,&point,&point);point.x+=position.x;point.y+=position.y;point.z+=position.z;vertices[i]={point,s.tv[i].u,s.tv[i].v,{}};}
+    // effect.c:bhDrawTrsEffect3D selects this op's pair with
+    // njColorBlendingMode(0, op->bl_src)/(1, op->bl_dst) and restores 8/6 after
+    // the draw; the primitive draws with the register that pair produced.
+    // A sprite whose original procedure the port has not bound yet carries no
+    // pair (the additive approximation stays, see color_blending_unavailable and
+    // the ledger), so it is not drawn with a substituted register.
+    const bool original_pair=s.id==5||s.id==23||s.id==302||supported_effect_sprite(s.id);
+    if(original_pair){color_blending_mode(0,s.bl_src);color_blending_mode(1,s.bl_dst);}
+    const auto register_=original_pair?color_blending_alpha():0ull;
     for(auto indices:{std::array<unsigned,3>{0,1,2},std::array<unsigned,3>{1,3,2}}){SceneTriangle triangle;for(unsigned i=0;i<3;++i)triangle.vertices[i]=vertices[indices[i]];triangle.color=s.tv[0].col;triangle.texture=texture;triangle.textured=true;triangle.camera_mask=false;triangle.world_lit=true;triangle.depth_write=false;
-        // Effects bound with their original njColorBlendingMode pair (hit blood, explosion). The older atlas sprites keep the
-        // additive approximation they were verified with until their pairs are checked against the original look.
-        if(s.id==5||s.id==23||s.id==302||supported_effect_sprite(s.id)){triangle.blend=SceneBlend::Ninja;triangle.blend_register=ninja_blend_register(unsigned(s.bl_src),unsigned(s.bl_dst));}else triangle.blend=SceneBlend::Additive;
+        if(original_pair){triangle.blend=SceneBlend::Ninja;triangle.blend_register=register_;}else triangle.blend=SceneBlend::Additive;
         if(s.id==9)triangle.texture_filter=(s.flg&0x20000000u)?SceneTextureFilter::Point:SceneTextureFilter::Linear;
         scene.triangles.push_back(triangle);}
+    if(original_pair){color_blending_mode(0,8);color_blending_mode(1,6);}
 }
 }

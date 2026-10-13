@@ -10,7 +10,10 @@ namespace recvx {
 struct EffectModelWork;
 // Fields consumed by the original bhEff200/201/218 procedures and draw path.
 struct EffectSprite {
-    unsigned id=0,type=0,mode0=0,mode1=0,flg=0,stflg=0,ani_ct=0;bool polygon_queued=false;
+    unsigned id=0,type=0,mode0=0,mode1=0,mode2=0,mode3=0,flg=0,stflg=0,ani_ct=0;bool polygon_queued=false;
+    // Mitgliedschaft dieses Bildes in sys->ef_trs (effect.c:910 bhControlEffect
+    // leert die Liste jeden Pass; bhDrawTrsEffect3D zeichnet nur, was drinsteht).
+    bool frame_queued=false;
     // O_WRK.mdflg (offset 0x84). The draw pass reads bit 0x40 together with
     // gm_flg 0x4000 (effect.c:1301); AllocOwork zeroes it and no original
     // effect procedure writes it, so only a future owner can set it.
@@ -64,6 +67,9 @@ void initialize_effect_sprite(EffectSprite& sprite,const EffectSpawn& spawn);
 // bhSetExplosion (weapon.c): sound 534, flash light, effects 16/23/24. `view` is cam.vx/vy/vz.
 void set_explosion(NJS_POINT3 position,NJS_POINT3 view);
 EffectOutput take_effect_output();
+// effsub0.c:10 setentry / effect.c:436 bhSetEffectTb: eine Anforderung in die
+// Liste dieses Passes. Die portierten Originalprozeduren rufen sie.
+void push_effect_spawn(const EffectSpawn& spawn);
 // bhInitEffect: SYSTEM entry 1 holds the ef_info models, then the common effect PVP list.
 std::size_t common_effect_textures_offset(const std::vector<std::uint8_t>& system_entry);
 // sys->ef_tn: first texture of each ef_info category (bhDrawTrsEffect3D uses ef_tn[tex_id]+ani_ct).

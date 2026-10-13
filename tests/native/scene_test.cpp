@@ -63,6 +63,15 @@ int main(){try{
     scene.triangles[0].textured=true;scene.textures[0].pixels.assign(4,0xff0000ff);
     image.draw(scene,scene.cameras[0]);const auto textured=image.pixels()[24*64+32];
     check((textured&0xffff00)==0&&(textured&255)>0,"texture sampling/color modulation");
+    // Raw Ninja CM RGB is quantized before MODULATE and divided by 128,
+    // not converted to an approximate 8-bit normalized factor first.
+    scene.triangles[0].world_lit=true;scene.triangles[0].color=0xff598080;
+    scene.triangles[0].texture_color_divisor=128;
+    scene.textures[0].pixels.assign(4,0xffc86432);
+    image.set_supersampling(1);
+    for(bool filtered:{false,true}){image.set_texture_filtering(filtered);image.draw(scene,scene.cameras[0]);
+        check(image.pixels()[24*64+32]==0xff8b6432,"raw constant material texture factor changed");}
+    scene.triangles[0].texture_color_divisor=255;scene.triangles[0].world_lit=false;
     scene.textures[0].pixels.assign(4,0);image.draw(scene,scene.cameras[0]);
     check(image.covered_pixels()==0,"transparent texel wrote depth");scene.triangles[0].textured=false;
     scene.cameras[0].hidden_objects[0]=0x80000000;image.draw(scene,scene.cameras[0]);check(image.covered_pixels()==0,"camera hide bit order");

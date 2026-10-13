@@ -13,15 +13,14 @@ namespace recvx {
      primitive at pri sits at camera distance -pri. The screen points come
      back through the njSetScreen contract of map.c:356-369 (dist 500,
      aspect 1.174, 640x480 centred at 320/240) and njClipZ(-2,-20000).
-   - njDrawSprite2D attr 0x22 = SCALE | ALPHA, no NJD_SPRITE_COLOR: the quad
-     uses the TexAnm cell of the map (spr < 17) or stage texture, vertex
-     colour 128 (unity) and only the texel alpha (ps2_NaSprite.c:220-237).
+   - njDrawSprite2D attr 0x22 = COLOR | ALPHA (ninjadef.h BIT_1/BIT_5): the
+     TexAnm cell of the map (spr < 17) or stage texture uses the installed
+     constant material, quantized to trunc(128*channel), and texel alpha.
    - njCnkEasyMultiDraw* under njControl3D(0x810) + njSetConstantAttr(-1,0x800)
-     draws every strip with the constant material and NJD_FST_UA; the vertex
-     intensity is njCnkCvVn's N.fC with the unnormalised normal of the
-     current matrix (ps2_NinjaCnk.c:1218-1245), which is how MapLightMain's
-     (pr,pg,pb)/map_scale colour and the njScale(1,lgt_scale,1) root of
-     MapCodeProcess cancel to pr * ny.
+     draws every strip with constant material and NJD_FST_UA. The selected
+     vu1GetVertexColorCM does NOT consume the normal-light intensity;
+     untextured RGB is trunc(128*material), texture modulation divides by 128.
+     MapLightMain's state remains available, but is not this shader's input.
    - njDrawPolygon3DEx(CmpArw,4,1): translucent strip, colour per vertex. */
 struct MapRenderStats {
     unsigned fills=0,lines=0,sprites=0,markers=0,objects=0,compass=0,triangles=0;

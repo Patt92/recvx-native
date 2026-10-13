@@ -10,8 +10,20 @@ int main(int argc,char** argv){try{
     // Selected registers from ps2_NaSystem.c, including FIX addition and
     // subtraction. Unsupported original pairs must diagnose.
     check(chunk_blend_register(4,5)==0x44&&chunk_blend_register(4,1)==0x48&&chunk_blend_register(0,1)==0x46&&chunk_blend_register(6,3)==0x8000000068ull&&chunk_blend_register(3,0)==0x1000000026ull,"Ninja mode table differs from original");
-    check(ninja_blend_register(8,10)==0x48,"original muzzle SA/ONE blend wrong");
     bool rejected=false;try{chunk_blend_register(2,2);}catch(const std::exception&){rejected=true;}check(rejected,"unsupported original mode silently substituted");
+    // ps2_NaSystem.c:169-425 njColorBlendingModeSys as state: the pairs the
+    // original game selects, the two special indices (0 -> 0x01, 1 -> 0x44), the
+    // pair that leaves the register standing, and the abort pair that is
+    // diagnosed instead of substituted.
+    color_blending_mode(0,8);color_blending_mode(1,6);check(color_blending_alpha()==0x44,"njColorBlendingMode(0,8)/(1,6) is not SA/ISA");
+    color_blending_mode(0,8);color_blending_mode(1,10);check(color_blending_alpha()==0x48,"effect pair 8/10 lost its ONE destination");
+    color_blending_mode(0,11);color_blending_mode(1,3);check(color_blending_alpha()==0x46,"effect pair 11/3 lost its inverse destination alpha");
+    color_blending_mode(0,9);color_blending_mode(1,6);check(color_blending_alpha()==0x44,"weapon pair 9/6 differs from SA/ISA");
+    color_blending_mode(0,0);check(color_blending_alpha()==0x01,"index 0 must write ALPHA 0x01 without a table lookup");
+    color_blending_mode(0,1);check(color_blending_alpha()==0x44,"index 1 must write ALPHA 0x44 without a table lookup");
+    color_blending_mode(0,0);color_blending_mode(1,6);check(color_blending_alpha()==0x01,"a pair holding index 0 must keep the register (bhEff111 0/0)");
+    color_blending_mode(0,8);color_blending_mode(1,6);color_blending_mode(0,9);color_blending_mode(1,3);
+    check(color_blending_alpha()==0x44&&color_blending_unavailable().size()==1u&&color_blending_unavailable()[0]=="9/3","unsupported effect pair 9/3 is not diagnosed like njColorBlendingModeSys");
     check((blend_gs(0x44,0xffc0c0c0,0xff202020,.25f)&0xffffff)==0x484848,"SA/ISA arithmetic incorrect");
     check((blend_gs(0x48,0xffc0c0c0,0xff202020,.25f)&0xffffff)==0x505050,"SA/ONE arithmetic incorrect");
     check((blend_gs(0,0xffc0c0c0,0xff202020,.25f)&0xffffff)==0xc0c0c0,"source copy register incorrect");

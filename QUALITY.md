@@ -53,3 +53,22 @@ additives Effekt-Blending statt `bl_src`/`bl_dst`; feste Rückgaben und leere
 Gegnerdienste; synthetisches Umkippen als Todesdarstellung. Diese Liste ist
 eine Ausgangsbasis, kein vollständiges Audit und keine Erledigtmeldung.
 Kistenschieben wird separat bearbeitet.
+
+## Generierte Effektprozeduren in `native/` (Nutzerfreigabe 2026-10-14)
+
+`native/effect_core.{h,cpp}` (Shim) und `native/effect_procedures.cpp` (die
+übersetzten Originalprozeduren aus `effsub0..6.c`) sind auf ausdrückliche
+Nutzeranweisung vom 2026-10-14 **bewusst Bestandteil von `native/`** und werden
+in `recvx_game`/`recvx-runtime` gelinkt. Begründung des Nutzers: der Übersetzer
+`tools/generate_effect_procedures.py` läuft **einmalig von Hand**, nie im Build;
+das Ergebnis ist nativer Quelltext auf den vorhandenen Besitzern (`EffectSprite`,
+`EffectRoom`), es entsteht **kein** PS2-Originalkern, keine Hardware-Nachbildung
+und keine zweite `sys`/`plp`/`rom`/`ene`/`eff`-Welt. Abdeckungstor: der
+Übersetzer gibt eine Prozedur nur aus, wenn nach der Übersetzung keine unbekannte
+Dienstfläche übrig bleibt (Laufbericht `work/effect_procedures.generator.md`).
+
+**Nice to have nach Projektabschluss:** die 68 übersetzten Prozeduren durch
+eigenständig geschriebene Implementierungen auf denselben Besitzern zu ersetzen,
+damit die Herkunft „maschinell übersetzt" verschwindet. Bis dahin gilt: gleiche
+Semantik, gleiche Reihenfolge, gleiche Seiteneffekte, aber der Text stammt aus
+dem Übersetzer.

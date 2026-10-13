@@ -485,7 +485,7 @@ void GameUi::quantity(SoftwareRenderer& image,std::uint32_t packed,int x,int y,b
         ++column;drawn=true;
     }
 }
-void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide,unsigned exit_state,unsigned note,float row_shift,unsigned arrows)const{
+void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide,unsigned exit_state,unsigned note,float row_shift,unsigned arrows,unsigned cursor_cell)const{
     rectangle(image,0,0,640,480,0xff101010);
     // Slide offsets of the original cen_pos centers relative to the settled layout (sub1.c SpriteH).
     auto dx=[&](unsigned c){return slide?int(std::lround(slide->x(c)))-centers[c][0]:0;};
@@ -501,7 +501,7 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
     // CursorInit disables the second/third cursor sprites. CursorSet positions
     // the first over the selected pip cell; never draw the uninitialised
     // 364-pixel second cursor through the security list.
-    if(!selecting&&!exit_state){auto p=parts_09b[0];const auto cell=grid_cell(inv,menu.selected);const bool wide=itemdata[Inventory::id(inv.slots()[menu.selected])].type&0x100;
+    if(!selecting&&!exit_state){auto p=parts_09b[0];const auto cell=cursor_cell?cursor_cell:grid_cell(inv,menu.selected);const bool wide=itemdata[Inventory::id(inv.slots()[menu.selected])].type&0x100;
         p.pos[0]=cell>=2?20+int((cell&~unsigned(wide))%2)*68:base==64?88:4;p.pos[1]=cell>=2?4+int((cell/2)-1)*48:-76;
         p.atr|=0x20;sprites.push_back(p);}
 

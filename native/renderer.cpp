@@ -80,6 +80,7 @@ struct Setup {
     bool gouraud=false;std::array<NJS_POINT3,3> light{};
     float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
     std::uint64_t blend_register=0x44;
+    unsigned texture_color_divisor=255;
     bool filtered=false,linear_only=false,post=false;
     // GS FOG: every CNK strip is drawn with FGE (ps2_NinjaCnk.c:1880); F per vertex
     // from njCalcFogPower(fVSZ) (:1196), interpolated like the vertex colour.
@@ -94,9 +95,9 @@ std::uint32_t lit(std::uint32_t base,float r,float g,float b){
     auto ch=[&](unsigned shift,float k){return std::uint32_t(std::clamp(float((base>>shift)&255)*k+.5f,0.f,255.f));};
     return (base&0xff000000)|(ch(16,r)<<16)|(ch(8,g)<<8)|ch(0,b);
 }
-std::uint32_t modulate(std::uint32_t texture,std::uint32_t light) {
+std::uint32_t modulate(std::uint32_t texture,std::uint32_t light,unsigned divisor) {
     unsigned result=0xff000000;
-    for(unsigned shift:{0u,8u,16u})result|=((((texture>>shift)&255)*((light>>shift)&255))/255)<<shift;
+    for(unsigned shift:{0u,8u,16u})result|=std::min(255u,(((texture>>shift)&255)*((light>>shift)&255))/divisor)<<shift;
     return result;
 }
 }
@@ -172,7 +173,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             // Screen-space gradients of the barycentric weights (constant per triangle),
             // used to derive perspective-correct texture derivatives per pixel.
             const float dax=-(p[2].y-p[1].y)/area,day=(p[2].x-p[1].x)/area,dbx=-(p[0].y-p[2].y)/area,dby=(p[0].x-p[2].x)/area,dcx=-(dax+dbx),dcy=-(day+dby);
-            Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
+            Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.texture_color_divisor=triangle.texture_color_divisor;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
             setup.blend_register=triangle.blend_register;setup.post=triangle.after_modifiers;
             setup.filtered=triangle.texture_filter==SceneTextureFilter::Linear||(triangle.texture_filter==SceneTextureFilter::Default&&filter_);
             setup.linear_only=triangle.texture_filter==SceneTextureFilter::Linear;
@@ -235,7 +236,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         const auto ty=std::min(texture->height-1,unsigned(v*texture->height));
                         const auto texel=texture->pixels[std::size_t(ty)*texture->width+tx];
                         if((texel>>24)==0)continue;
-                        pixel=modulate(texel,pixel);
+                        pixel=modulate(texel,pixel,s.texture_color_divisor);
                         if(s.blend!=SceneBlend::Opaque){
                             // Every engine texture carries the host 0..255
                             // alpha whose blend factor is alpha/255 (see the
@@ -289,7 +290,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         else if(texture->filter_cache->cutout){coverage=std::min(1.f,acc[3]/float(texture->filter_cache->max_alpha));if(coverage<1.f/32)continue;}
                         const float inv=1.f/acc[3];
                         auto channel=[&](float value){return std::uint32_t(std::clamp(value*inv+.5f,0.f,255.f));};
-                        pixel=modulate(0xff000000|(channel(acc[2])<<16)|(channel(acc[1])<<8)|channel(acc[0]),pixel);
+                        pixel=modulate(0xff000000|(channel(acc[2])<<16)|(channel(acc[1])<<8)|channel(acc[0]),pixel,s.texture_color_divisor);
                     }
                 }
                 if(s.fogged){ // GS: Cv = (Cs*F + Cf*(255-F)) >> 8 per channel, F from the vertex fog coefficients

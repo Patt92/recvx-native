@@ -82,7 +82,7 @@ static void resources(const std::filesystem::path& data){
         std::size_t at=count;
         for(;at+1<draw.triangles.size();++at)if(draw.triangles[at].texture<draw.textures.size()&&draw.textures[draw.triangles[at].texture].pixels==atlas.at(25).pixels)break;
         check(at+1<draw.triangles.size(),"bhEff009 flame pair absent from the effect pass");
-        const auto& t=draw.triangles.at(at);check(t.blend==SceneBlend::Ninja&&t.blend_register==ninja_blend_register(8,6)&&!t.depth_write&&t.texture_filter==SceneTextureFilter::Linear,"flame blend/filter/depth contract differs");
+        const auto& t=draw.triangles.at(at);check(t.blend==SceneBlend::Ninja&&t.blend_register==0x44&&!t.depth_write&&t.texture_filter==SceneTextureFilter::Linear,"flame blend/filter/depth contract differs");
         check(draw.textures.at(t.texture).pixels==atlas.at(25).pixels,"production common atlas or alpha was altered");
         const auto* flame=world.effect_state(slot);point=weapon_fire_offset(1);njCalcPoint(&hand.value,&point,&point);
         NJS_MATRIX basis;njUnitMatrix(&basis);const auto camera=stage.cameras.at(0);njRotateY(&basis,-camera.angles[1]);njRotateX(&basis,-camera.angles[0]);njRotateZ(&basis,-camera.angles[2]);njScale(&basis,1,-1,-1);

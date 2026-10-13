@@ -3,10 +3,42 @@
 #include <stdexcept>
 namespace recvx {
 #include "chunk_blend_data.inc"
-std::uint64_t ninja_blend_register(unsigned source,unsigned destination){
-    if(source>12||destination>11)throw std::runtime_error("Ninja blend index outside platform table");
-    const auto mode=alpha_tbl[source][destination];if(mode==0xffffffffull)throw std::runtime_error("unsupported original Ninja blend pair");return mode;
+namespace {
+// Ps2_nj_save_current.mode_bk[0..1]/set_last and Ps2_gs_save.mode_bk[0..1] with
+// its ALPHA register. ps2_dummy.c:188-189 Ps2Init leaves (8,6) selected, the
+// first njColorBlendingModeSys(8,6) gives alpha_tbl[8][6] = 0x44.
+int nj_mode_bk[2]={8,6};
+int nj_set_last=1;
+int gs_mode_bk[2]={8,6};
+std::uint64_t gs_alpha=0x44;
+std::vector<std::string> unavailable;
+void diagnose(int source,int destination){
+    const auto entry=std::to_string(source)+"/"+std::to_string(destination);
+    for(const auto& known:unavailable)if(known==entry)return;
+    unavailable.push_back(entry);
 }
+}
+void color_blending_mode(int target,int mode){
+    if(target!=0&&target!=1)throw std::runtime_error("njColorBlendingMode target outside Ps2_nj_save_current.mode_bk");
+    nj_mode_bk[target]=mode;
+    nj_set_last=target;
+    color_blending_mode_sys(nj_mode_bk[0],nj_mode_bk[1]);
+}
+void color_blending_mode_sys(int source,int destination){
+    gs_mode_bk[0]=source;
+    gs_mode_bk[1]=destination;
+    // The select_Last field stays where the last njColorBlendingMode put it, so
+    // the branch tests nj_save (ps2_NaSystem.c:361-379).
+    if(gs_mode_bk[nj_set_last]<2){
+        gs_alpha=gs_mode_bk[nj_set_last]==0?1u:68u;
+        return;
+    }
+    if(gs_mode_bk[0]<2||gs_mode_bk[1]<2)return; // the register keeps its value
+    if(source>12||destination>11||alpha_tbl[source][destination]==0xffffffffull){diagnose(source,destination);return;}
+    gs_alpha=alpha_tbl[source][destination];
+}
+std::uint64_t color_blending_alpha(){return gs_alpha;}
+const std::vector<std::string>& color_blending_unavailable(){return unavailable;}
 std::uint64_t chunk_blend_register(unsigned source,unsigned destination){
     if(source>7||destination>7)throw std::runtime_error("chunk blend index outside Ninja table");
     const auto mode=alpha_tbl[lNaCnkSrcAlphaMode[source]][lNaCnkDstAlphaMode[destination]];

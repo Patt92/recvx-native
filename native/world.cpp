@@ -432,6 +432,33 @@ static float event_div_product(float numerator,unsigned remaining,unsigned total
     return std::isinf(product)?std::copysign(std::numeric_limits<float>::max(),product):product;
 }
 static float event_clock(unsigned remaining,unsigned total){return event_div_product(1.f,remaining,total);}
+void RoomWorld::set_fixed_cut(unsigned cno){
+    event_camera=false;fixed_camera=cno;active_camera_.reset(room_cameras_.at(*fixed_camera),*fixed_camera);if(collision_events_)initialize_camera_clip(clip_cut_.value_or(collision_events_->values[2]),false);cut_fog_handover(room_cameras_.at(*fixed_camera),false);
+}
+void RoomWorld::set_event_camera(unsigned cno,unsigned kno,bool lock){
+    // cut.c:1644 bhSetEventCamera (lock = true) / :1726 bhSetEventFixedCut (lock = false).
+    event_camera_index=cno;if(event_camera_index>=event_cameras_.size())throw std::runtime_error("event camera outside table");event_camera_key_=kno;if(event_camera_key_>=event_cameras_[event_camera_index].keys.size())throw std::runtime_error("event camera key outside table");event_camera_clock_=0;event_camera_finished_=false;event_camera=true;restore_camera_clip_=false;
+        {const auto& k=event_cameras_[event_camera_index].keys[event_camera_key_];
+         // cut.c:1660-1684 bhSetEventCamera: cam.px/py/pz, cam.ax/ay/az and cam.pers come
+         // straight from the key (the angles as the signed CAM_KEYF_WORK shorts), and a
+         // locked key (:1677) already aims at its lock position before the first
+         // bhControlEventCamera pass.
+         event_camera_pose_=k.camera;
+         for(unsigned axis=0;axis<3;++axis)event_camera_pose_.angles[axis]=int(std::int16_t(k.camera.angles[axis]));
+         event_camera_pose_.perspective=int(std::int16_t(k.camera.perspective));
+         if(lock&&k.link){const auto pos=event_camera_lock_position(k);
+             const float px=pos.x-event_camera_pose_.position.x,pz=pos.z-event_camera_pose_.position.z;
+             event_camera_pose_.angles[0]=int(std::int16_t(-int(10430.381f*std::atan2(pos.y-event_camera_pose_.position.y,njSqrt(px*px+pz*pz)))));
+             event_camera_pose_.angles[1]=int(std::int16_t(-int(10430.381f*std::atan2(px,pz))+32768));}
+         // :1686 *(int*)&cam.mode0 = 0 - the next bhControlEventCamera pass runs case 0.
+         event_camera_init_=true;event_camera_paused_=false;
+         // :1694-1716: cam.fog_* always take the key; only sys->fog_ct differs, and it
+         // waits sys->fog_cngct - 4 while fog is on (st_flg 0x2) and the key carries flag 0x8.
+         cam_fog_color_=k.fog_color&0xffffffu;cam_fog_near_=k.fog_near;cam_fog_far_=k.fog_far;
+         if(collision_events_&&(collision_events_->flags[5][0]&0x2u)&&(k.flags&0x8u)){fog_ct_=fog_cngct_-4;if(fog_ct_<0)fog_ct_=0;}
+         else fog_ct_=0;
+         // cut.c:1718 / :2018: gm_flg 0x10 arms the bhControlEOR fog pass.
+         if(collision_events_)collision_events_->flags[11][0]|=0x10u;}if(collision_events_){const auto& e=*collision_events_;installed_clip_=event_view_clip(e.values[0],e.values[1],e.values[21],event_camera_index,e.flags[12][0]);}}
 bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=contexts_.at(c.task);const auto op=c.opcode;
     if(std::getenv("RECVX_EVENT_OWNER_TRACE")&&ctx.kind==1&&
        (op==0x67||(op==0x69&&(v.u8(1)==24||v.u8(1)==25||v.u8(1)==34)))){
@@ -476,6 +503,59 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         e.linked=true;e.parent_kind=parent_kind;e.parent_index=parent_kind?v.u8(1):0;e.parent_node=v.u8(3);const auto signs=v.u8(5);e.link_offset={v.u16(6)/100.f*(signs&1?-1:1),v.u16(8)/100.f*(signs&2?-1:1),v.u16(10)/100.f*(signs&4?-1:1)};return true;}
     if(op==0x3b){const auto kind=v.u8(1);if(kind>2)return false;entity(kind,v.u8(2)).hidden_nodes[v.u8(3)]=v.u8(4)==0;return true;}
     if(op==0x43||op==0x91||op==0xad||op==0xd2){const auto index=v.u8(1);if(index>=sprites_.size())throw std::runtime_error("script effect outside original room table");auto& work=sprites_[index];if(op==0x43){work.hidden=v.u8(2)==0;return true;} /* bhEffDispSet: stflg 0x1000000 for every effect */if(!supported_effect_sprite(work.sprite.id))return false;if(op==0x91)work.sprite.mode1=v.u8(2);else if(op==0xad){work.sprite.type=v.u8(2);entity(4,index).type=work.sprite.type;}else{const auto signs=v.u8(3);work.scale={v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};}return true;}
+    // event.c:1919 bhEffectSet: bhSetEffect(v1, &{0,0,0}, NULL, 0) — erster
+    // freier Platz des geteilten eff[512]-Satzes. Der Befehl legt den Arbeitssatz
+    // auch dann an, wenn seine Prozedur noch nicht portiert ist; das wird wie
+    // jede andere Luecke namentlich gemeldet, nicht durch einen Ersatz verdeckt.
+    if(op==0x2c){const unsigned id=v.u16(2);
+        EffectSpawn spawn;spawn.flg=1;spawn.id=id;spawn.type=0;spawn.position={0,0,0};spawn.scale={1,1,1};
+        const int slot=allocate_effect(spawn,0,0);
+        if(slot<0)unbound_enemy_.insert("bhSetEffect: kein freier eff[512]-Platz");
+        else if(!supported_effect_sprite(id))unbound_enemy_.insert("bhEff"+std::to_string(id));
+        return true;}
+    // event.c:5336 bhEffPush/:5346 bhEffPop: bhPushEffectWork/bhPopEffectWork.
+    if(op==0x70){EffectPushState state;state.works=sprites_;state.particles=particles_.save();effect_push_=std::move(state);return true;}
+    if(op==0x71){if(effect_push_){sprites_=effect_push_->works;particles_.restore(effect_push_->particles);}return true;}
+    // event.c:4302 bhEffBloodSet: Blutstoss am Gegnerwork. v0 der Raumindex,
+    // v1 zugleich epw->djnt_no und der Gelenkpunkt, v2 die Vorzeichenbits des
+    // Versatzes, danach Typ, Flags und der Gradwinkel (Bit 1 negiert ihn).
+    if(op==0x4e){const unsigned signs=v.u8(3);
+        const NJS_POINT3 offset={(signs&1?-1.f:1.f)*v.u16(4)/100.f,(signs&2?-1.f:1.f)*v.u16(6)/100.f,(signs&4?-1.f:1.f)*v.u16(8)/100.f};
+        return script_blood_set(v.u8(1),v.u8(2),int(v.u8(10)),v.u8(11),int(v.u8(12)),offset);}
+
+    // eine Blutlache am Boden. v1 ist zugleich epw->djnt_no und die Auswahlnummer
+    // der Originaltabelle (0/1 evnt_BldTbl2, 2 evnt_BldTbl); die Richtung ist
+    // ay + objP[1].ang[1], der Ursprung owP[0]. Der zweite Befehl traegt Lage
+    // (Vorzeichen in v0, Zentimeter) und Winkel selbst.
+    if(op==0x56||op==0x58){
+        // event.c:43/51 — BP_WORK der beiden Ereignispfade, Feld fuer Feld.
+        static const RECVX_ENEMY_BP_WORK evnt_bld_tbl{{0.0f,0.1f,0.0f},0,0.0f,0.08f,{1.0f,0.8f,1.0f,0.8f,0.0f},{0,4,8,12,0}};
+        static const RECVX_ENEMY_BP_WORK evnt_bld_tbl2{{0.0f,0.1f,0.0f},0,0.0f,0.07f,{1.0f,0.2f,0.5f,0.8f,0.0f},{1,4,12,15,0}};
+        unsigned palette=0;int angle=0;const RECVX_ENEMY_BP_WORK* table=&evnt_bld_tbl2;NJS_POINT3 position{};
+        if(op==0x56){
+            const unsigned index=v.u8(1),select=v.u8(2);palette=v.u16(4);
+            const auto* known=state(1,index);if(!known||!known->enemy_bound)return false;
+            const auto root=link_matrix(1,index,0);if(!root)return false;
+            if(known->enemy_obj.size()<=1)return false;
+            auto& work=entity(1,index);
+            work.enemy.djnt_no=int(select);
+            const int base=work.enemy.ay+work.enemy_obj[1].angles[1];
+            angle=select==0?int(std::uint16_t(base+32768)):base;
+            position={root->value[12],root->value[13],root->value[14]};
+            if(select==2)table=&evnt_bld_tbl;
+        }else{
+            const unsigned signs=v.u8(1),select=v.u8(9);
+            position={(signs&1?-1.f:1.f)*v.u16(2)/100.f,(signs&2?-1.f:1.f)*v.u16(4)/100.f,(signs&4?-1.f:1.f)*v.u16(6)/100.f};
+            int turn=int(v.u8(10));if(select&2)turn=-turn;palette=v.u16(12);
+            // (short)((short)v2 * (65536.0f / 360.0f)), danach ggf. der Halbkreis-Offset.
+            angle=int(std::int16_t(float(std::int16_t(turn))*65536.0f/360.0f));
+            if(select==0)angle=int(std::uint16_t(angle+32768));
+            if(select==2)table=&evnt_bld_tbl;
+        }
+        position.x-=njSin(angle);position.z-=njCos(angle);
+        particles_.spawn_pool(table,position,angle,int(palette));
+        return true;
+    }
     // bhLoadWork2: 0 player, 1 enemy by enep, 2 object work stored on task byte[2].
     if(op==0x68){const auto kind=v.u8(1);if(kind>2)return false;
         if(kind==2){auto& target=contexts_.at(v.u8(2));target.kind=2;target.index=v.u8(3);target.node=v.u8(4);target.work=true;return true;}
@@ -570,29 +650,8 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(op==0x8f){if(!v.u8(2))e.face_flags|=16;else e.face_flags&=~16u;}
         if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;}
         if(op==0x9a){if(!v.u8(2))e.face_flags|=2;else e.face_flags&=~2u;}return true;}
-    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;restore_camera_clip_=true;return true;}event_camera_index=v.u8(2);if(event_camera_index>=event_cameras_.size())throw std::runtime_error("event camera outside table");event_camera_key_=v.u8(3);if(event_camera_key_>=event_cameras_[event_camera_index].keys.size())throw std::runtime_error("event camera key outside table");event_camera_clock_=0;event_camera_finished_=false;event_camera=true;restore_camera_clip_=false;
-        {const auto& k=event_cameras_[event_camera_index].keys[event_camera_key_];
-         // cut.c:1660-1684 bhSetEventCamera: cam.px/py/pz, cam.ax/ay/az and cam.pers come
-         // straight from the key (the angles as the signed CAM_KEYF_WORK shorts), and a
-         // locked key (:1677) already aims at its lock position before the first
-         // bhControlEventCamera pass.
-         event_camera_pose_=k.camera;
-         for(unsigned axis=0;axis<3;++axis)event_camera_pose_.angles[axis]=int(std::int16_t(k.camera.angles[axis]));
-         event_camera_pose_.perspective=int(std::int16_t(k.camera.perspective));
-         if(k.link){const auto pos=event_camera_lock_position(k);
-             const float px=pos.x-event_camera_pose_.position.x,pz=pos.z-event_camera_pose_.position.z;
-             event_camera_pose_.angles[0]=int(std::int16_t(-int(10430.381f*std::atan2(pos.y-event_camera_pose_.position.y,njSqrt(px*px+pz*pz)))));
-             event_camera_pose_.angles[1]=int(std::int16_t(-int(10430.381f*std::atan2(px,pz))+32768));}
-         // :1686 *(int*)&cam.mode0 = 0 - the next bhControlEventCamera pass runs case 0.
-         event_camera_init_=true;event_camera_paused_=false;
-         // :1694-1716: cam.fog_* always take the key; only sys->fog_ct differs, and it
-         // waits sys->fog_cngct - 4 while fog is on (st_flg 0x2) and the key carries flag 0x8.
-         cam_fog_color_=k.fog_color&0xffffffu;cam_fog_near_=k.fog_near;cam_fog_far_=k.fog_far;
-         if(collision_events_&&(collision_events_->flags[5][0]&0x2u)&&(k.flags&0x8u)){fog_ct_=fog_cngct_-4;if(fog_ct_<0)fog_ct_=0;}
-         else fog_ct_=0;
-         // cut.c:1718 / :2018: gm_flg 0x10 arms the bhControlEOR fog pass.
-         if(collision_events_)collision_events_->flags[11][0]|=0x10u;}if(collision_events_){const auto& e=*collision_events_;installed_clip_=event_view_clip(e.values[0],e.values[1],e.values[21],event_camera_index,e.flags[12][0]);}return true;}
-    if(op==0x2a){event_camera=false;const auto mode=v.u8(1);if(mode==0){fixed_camera=v.u8(2);active_camera_.reset(room_cameras_.at(*fixed_camera),*fixed_camera);if(collision_events_)initialize_camera_clip(clip_cut_.value_or(collision_events_->values[2]),false);cut_fog_handover(room_cameras_.at(*fixed_camera),false);}else if(mode==1)fixed_camera.reset();else throw std::runtime_error("invalid fixed camera mode");return true;}
+    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;restore_camera_clip_=true;return true;}set_event_camera(v.u8(2),v.u8(3),true);return true;}
+    if(op==0x2a){const auto mode=v.u8(1);if(mode==0)set_fixed_cut(v.u8(2));else if(mode==1){event_camera=false;fixed_camera.reset();}else throw std::runtime_error("invalid fixed camera mode");return true;}
     if(op==0x5b){event_camera=false;fixed_camera.reset();camera_force_=true;return true;}
     // event.c:1032 bhCamPauseSet: v0 0 -> cam.mode0 = 3 (bhControlEventCamera has no case 3: pose and
     // cam.ct0 hold), v0 1 -> cam.mode0 = 1 (continues from cam.ct0, also out of the final hold 2).
@@ -1108,6 +1167,12 @@ void RoomWorld::write_particle_slot(unsigned slot,unsigned flags,unsigned id){
 // bhSetEffectTb/bhSetEffect: first free entry of the shared original eff[512] table.
 int RoomWorld::spawn_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index){
     if(!supported_effect_sprite(spawn.id)){unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));return -1;}
+    return allocate_effect(spawn,link_kind,link_index);
+}
+// Die Zuweisung selbst, ohne Ruecksicht auf eine portierte Prozedur: bhSetEffect
+// legt den Arbeitssatz immer an (effect.c:331), der Aufrufer in bind() meldet die
+// fehlende Prozedur.
+int RoomWorld::allocate_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index){
     SpriteWork work;initialize_effect_sprite(work.sprite,spawn);work.scale=spawn.scale;work.dynamic=true;work.queued=false;
     if(link_kind){work.sprite.flg|=0x80;work.link=link_kind;work.index=link_index;work.node=unsigned(spawn.lkono);work.offset=spawn.offset;}
     const int free_slot=reserve_effect_slot();if(free_slot<0)return -1;const unsigned index=unsigned(free_slot);
@@ -1401,6 +1466,8 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         // erreichen bhPutModel nur in den Schnitten ihrer hide[]-Liste.
         // bhDrawEnemy/bhDrawEneObject (eneset.c) kennen diese Bedingung nicht.
         if((model.kind==2||model.kind==3)&&object_cut_hidden(e))continue;
+        // game.c:336/353: bhDrawEneObject and bhDrawEnemy run only with sys->pt_flg 0x2.
+        if(model.kind==1&&!(presentation_flags_&2u))continue;
         // eneset.c:843/884: with mdflg bit 2 set, bhPutModel draws obj_a's own
         // object streams blended toward obj_b by shp_ct*0.001 for this frame, and
         // npPushMdlstr2/npCalcMorphing/npPopMdlstr2 restore everything afterwards.

@@ -261,7 +261,11 @@ int EventVm::instruction(Task& t){
     case 0x3a:case 0xa1:case 0xce:case 0xcf:case 0xc5:case 0x87:world(t,op,2);return 1;
     case 0x76:world(t,op,4);return 1; // bh3dSoundFlagSet
     case 0xa5:world(t,op,4);return 1; // bhEneRenderSet: mdflg 0x200 (renderer binding pending)
-    case 0x58:world(t,op,14);return 1; // bhEffBloodPoolSet2 (effect spawn pending)
+    case 0x2c:world(t,op,4);return 1;  // bhEffectSet: bhSetEffect im geteilten eff[512]
+    case 0x70:case 0x71:world(t,op,2);return 1; // bhEffPush/bhEffPop
+    case 0x4e:world(t,op,14);return 1; // bhEffBloodSet: Blutstoss am Gegnerwork
+    case 0x56:world(t,op,6);return 1;  // bhEffBloodPoolSet: Blutlache am Gegnerwork
+    case 0x58:world(t,op,14);return 1; // bhEffBloodPoolSet2: Blutlache an einer Lage
     case 0x7f:world(t,op,6);return 1; // bhSoundPanSet
     case 0x46:world(t,op,8);return 1; // bhSetNextRoomBgm
     case 0x47:world(t,op,10);return 1; // bhSetNextRoomBgSe
@@ -341,7 +345,34 @@ void EventVm::check_event_deadline(){
         flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;set_flag(1,70,1);
     }
 }
-void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
+void EventVm::control_exm(){
+    // bhMainSequence (game.c:115-286) for the bhCheckExmAtari requests of this pass.
+    auto& st=flags[5][0];auto& sp=flags[6][0];auto& cb=flags[10][0];auto& gm=flags[11][0];
+    const unsigned pad_ps=pad_cleared_||!pad_state?0u:pad_state().first; // hitchk.c: sys->pad_ps = 0
+    if((st&0x200000)&&!(cb&1)){ // :115
+        st&=~0x200080u;if(cb&0x20000000){cb|=0x1000;cb&=~0x20000000u;}if(!(cb&4))st&=~4u;
+        sp=0xffffffffu;if(presentation_flags)presentation_flags(0,3);
+        if(!(gm&0x20000)){st&=~1u;gm|=0x800;}}
+    if(cb&0x8){ // :196
+        cb&=~0x8u;sp=0x38;if(!(exm_attr&0x20))sp|=0x80;
+        if(exm_attr&0x2){if(presentation_flags)presentation_flags(1,0);if(exm_light_off)exm_light_off();}
+        if(exm_attr&0x4){if(presentation_flags)presentation_flags(2,0);}
+        if(exm_attr&0x10)sp|=0x2;}
+    if(st&0x80){ // :227
+        if((gm&0x10000)&&(gm&0x20000))sp|=0x40;
+        if((pad_ps&0x200)&&!(st&0x200))st|=0x200000;}
+    if(cb&0x20){ // :239
+        cb&=~0x20u;sp=0x30;if(st&0x80){sp|=0x8;if(!(exm_attr&0x20))sp|=0x80;}
+        if(exm_attr&0x10)sp|=0x2;}
+    if(gm&0x1000){ // :274 bhSetFixedCut / bhSetEventFixedCut clear gm_flg 0x1000 and set st_flg 0x1
+        gm&=~0x1000u;st|=1;
+        if(!(gm&0x10000)){if(fixed_cut)fixed_cut(fixcno);}else if(event_fixed_cut)event_fixed_cut(fixcno,fixkno);}
+    // :286 bhCheckCut(1) (cut.c:12): only the forced return to the player's cut; the
+    // player-eye branch (gm_flg 0x40) has no native owner and keeps gm_flg 0x800.
+    if((gm&0x800)&&(sp&0x40)&&!(st&1)&&!(gm&0x40)){gm&=~0x800u;if(return_cut)return_cut();}
+    pad_cleared_=false;
+}
+void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
     // ItemUse/Use_01/05 call StatusCancel, whose animated exit keeps st_flg
     // 8 for bhControlEvent. The host closes visually at once; retain that
     // handover through one complete scenario/scheduler pass.
@@ -436,6 +467,8 @@ void EventVm::confirm_dialog(){
         // The script sees it once, alongside the original end marker 0x4000.
         if(interaction_answer){flags[10][0]|=0x1000;flags[5][0]|=0x4000;}
         if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;}
+        // game.c:180-192: the examined camera ends with the message (pt_flg |= 3, bhCheckCut(1)).
+        if(flags[5][0]&0x80){flags[5][0]&=~0x80u;if(presentation_flags)presentation_flags(0,3);if(!(flags[11][0]&0x20000)){flags[5][0]&=~1u;flags[11][0]|=0x800;}}
         finish_pickup();flags[5][0]&=~0x200u;flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;
     }
 }
@@ -498,11 +531,23 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){
             return true;}
         if(a.type==4){const auto model=a.parameters[0];if(model>=room_items_.size())throw std::runtime_error("pickup model outside room");auto id=room_items_[model];if(id==130)id=35;if(!id||id>=156||!item_message)return false;
             values[20]=i;flags[10][0]|=0x100;if(a.attribute&0x10)begin_file(id,model);else begin_pickup(id,model);return true;}
-        values[20]=i;flags[10][0]|=0x100;if(a.type==3&&(a.attribute&0x8000)){
-            // hitchk.c bhCheckExmAtari -> bhSetMessage: interaction work,
-            // response/end bits and page selection start afresh.
-            show_dialog(read_message(room_,messages_,a.parameters[1]),a.parameters[1]);
-            flags[10][0]|=0x20;flags[5][0]|=0x2204;return true;}
+        values[20]=i;flags[10][0]|=0x100;
+        // hitchk.c:4786-4843 (case 3): both the camera and the message wait for st_flg 0x80 to clear.
+        if(a.type==3&&!(flags[5][0]&0x80)){
+            if(a.attribute&9){
+                fixcno=a.parameters[0];fixkno=a.parameters[2];exm_attr=a.attribute;pad_cleared_=true;
+                flags[11][0]|=0x1000;if(a.attribute&8)flags[11][0]|=0x10000;else flags[11][0]&=~0x10000u;
+                flags[5][0]|=0x80|0x4;flags[10][0]|=0x8;
+                if(exm_cut_effect)exm_cut_effect(); // cam.flg 0x20 -> ef_flg 0x10
+            }
+            if(a.attribute&0x8000){
+                // hitchk.c bhCheckExmAtari -> bhSetMessage: interaction work,
+                // response/end bits and page selection start afresh.
+                show_dialog(read_message(room_,messages_,a.parameters[1]),a.parameters[1]);
+                if(!(a.attribute&9))pad_cleared_=true;
+                flags[10][0]|=0x20;flags[5][0]|=0x2204;
+            }
+        }
         return true;
     }return false;
 }

@@ -193,7 +193,36 @@ Gameplay-Freigabe; der aktuelle Lückenplan steht in
   der Eingabe- und Übergangsphasen sind noch Host-Steuerung.
 - `ItemCombination`-Menüablauf und -Animation (die Regeln selbst sind
   original).
-- Listen-Scrollanimation der Item-Box, Kartenbildschirm.
+- Vollständige analoge Padbindung des Kartenbildschirms (`pad_ax/ay/al/ar`)
+  und gemeinsame Systemtask-/Drawreihenfolge außerhalb des geprüften MAP-Pfads.
+
+### Kartenbildschirm
+
+**Portiert:** `MapScreen` besitzt den Automaten aus `map.c`, Flag-/Etagenwahl,
+Zoom-/Nachbarzustände und Original-Zeichenliste. `MapRenderer` dekodiert MRY-
+Index und Etagenmodelle mit dem vorhandenen MDL/PVP-Pfad und zeichnet Gitter,
+Rahmen, Sprites, Marker, Etagenobjekte und Kompass. `pri` und Modellgeometrie
+teilen den Tiefenpuffer. Karten-CNKs verwenden den von `njControl3D(0x810)`
+gewählten Constant-Material-Farbpfad, nicht den Normalenlichtshader; Typ-41-
+Normalen bleiben im gemeinsamen Assetdecoder erhalten. Spritefarbe und
+Texturmodulation behalten die originale 128er-Faktordomäne.
+
+Solange die Karte den Schirm besitzt, steht **Task 7** still: der
+Spieleinstieg setzt `ts_flg 0x180` (system.c:777), der Statusmenü-Einstieg hat
+Task 7 schon gestoppt und `sp_flg 0x30` hinterlassen (system.c:608), sodass
+`bhControlPlayer` (player.c:1365, `sp_flg & 0x1`) nicht läuft. Der Host wacht
+Welt-, Kamera- und Spielerpass mit derselben Bedingung; eine gehaltene Richtung
+bewegt die Figur während der offenen Karte nicht mehr.
+
+`ScreenFade` bildet Setzen, Vorlauf und Abschluss aus `screen.c` ab. Die
+MAP-Rückkehr wartet auf das live gelesene `cb_flg & 0x2`, auch wenn der Fade
+erst im selben Kontrollpass startet. Statusmenü → Karte → Statusmenü → Spiel
+und Wiedereintritt sind im nativen Runtime-Pfad geprüft.
+
+**Offen:** analoge Kartensteuerung, globaler Fade-/Taskbesitzer für sämtliche
+anderen Spieltasks, vollständige originale Primitive-/Material-Drawreihenfolge
+und Alpha-/Texturfunktion außerhalb dieser nativen Abbildung. Kein pauschaler
+1:1-Nachweis des vollständigen Kartenbildschirms.
 
 Die vollständige Item-, Untersuchungs- und Rezeptabdeckung erzeugt
 `recvx-inventory-engine-tests` als [INVENTORY-COVERAGE.md](INVENTORY-COVERAGE.md).

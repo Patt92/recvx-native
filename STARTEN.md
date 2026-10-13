@@ -36,6 +36,7 @@ Details zu Build, Datenprüfung und Plattformen stehen in
 | Laufen | Shift | B |
 | Bestätigen / Interagieren | Enter | A |
 | Zurück | Escape | B |
+| Pause (ein/aus) | Escape oder P | Back/Select |
 | Inventar | Tab | Y |
 | Zwischensequenz überspringen | Space | Start |
 | Debugmenü | F2 | – |

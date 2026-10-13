@@ -67,8 +67,12 @@ int main(){try{_Make_SinTable();shared_pool();
     check(original_effect_slot({1u,2u,0x80u,3u})==2,"bhSetEffectTb did not choose the first slot with !(flg & 3)");
     std::vector<unsigned> full_effect_pool(512,1u);check(original_effect_slot(full_effect_pool)==-1,"full eff[512] pool did not report allocation failure");
     {EffectSprite effect;EffectSpawn request;request.id=29;initialize_effect_sprite(effect,request);
-     check(!supported_effect_sprite(29),"bhEff029 claims to be bound");
-     check(!step_effect_sprite(effect),"bhEff029 gap ran a procedure");}
+     // bhEff029 kommt aus der portierten Originalprozedur
+     // (native/effect_procedures.cpp); die fruehere Luecke ist geschlossen.
+     check(supported_effect_sprite(29),"bhEff029 is not bound to the ported original procedure");
+     // bhEff029 (effsub1.c:5908) laeuft jetzt als portierte Originalprozedur
+     // und traegt ihr Ergebnis in frame_queued ein.
+     check(step_effect_sprite(effect),"bhEff029 ported procedure did not run");}
     {EffectParticles particles;
      particles.spawn(18,{},{},{0,0,1},0xffff0000);
      particles.spawn_mk2(18,{},{},{0,0,1},0xffff0000,0xff000000);

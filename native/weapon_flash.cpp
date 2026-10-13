@@ -37,10 +37,16 @@ using Quad=std::array<NJS_POINT3,4>;
 void emit(Scene& scene,NJS_MATRIX& matrix,const Quad& points,const UV& uv,
           unsigned texture,std::uint32_t color,int source,int destination,bool reverse=false) {
     const unsigned order[2][3]={{0,1,2},{1,3,2}};
+    // effsub1.c:bhDrawWeaponEffect sets this pair around its njDrawTexture3DEx
+    // calls, and changes it to 8/10 for the flare spokes below; every primitive
+    // draws with the register the pair produced.
+    color_blending_mode(0,source);
+    color_blending_mode(1,destination);
+    const auto register_=color_blending_alpha();
     for (const auto& triangle:order) {
         SceneTriangle out;out.texture=texture;out.textured=true;out.camera_mask=false;
         out.color=color;out.world_lit=true;out.depth_write=false;out.blend=SceneBlend::Ninja;
-        out.blend_register=ninja_blend_register(source,destination);
+        out.blend_register=register_;
         for (unsigned i=0;i<3;++i) {
             const unsigned n=triangle[i];auto point=points[n];njCalcPoint(&matrix,&point,&point);
             const bool right=bool(n&1)^reverse;

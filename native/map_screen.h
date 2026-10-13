@@ -67,6 +67,9 @@ struct MapServices {
     std::function<std::vector<std::uint8_t>(unsigned partition,unsigned file)> read_inside_file;
     std::function<void(int,int)> call_system_se;              /* CallSystemSe */
     std::function<void(std::uint32_t,float)> set_screen_fade; /* bhSetScreenFade */
+    /* FtskMapExit reads sys->cb_flg live, including a fade started earlier in
+       the SAME bhControlMap call; the entry snapshot cannot provide that. */
+    std::function<bool()> screen_fade_pending;
 };
 
 /* One MPAC chunk of a loaded map file, as a span of the loaded bytes. The

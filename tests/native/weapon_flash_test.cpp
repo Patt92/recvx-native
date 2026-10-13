@@ -27,7 +27,8 @@ int main(){try{
             const unsigned first=type==0||type==5?frame:frame==2?1:0;
             check(scene.triangles[0].texture==20+first,"original texture frame changed");
             check(scene.triangles[0].color==(type==5?std::uint32_t(-0x5fa0):~0u),"original tint changed");
-            check(scene.triangles[0].blend_register==ninja_blend_register(f.bl_src,f.bl_dst),"blend changed");
+            color_blending_mode(0,f.bl_src);color_blending_mode(1,f.bl_dst);
+            check(scene.triangles[0].blend_register==color_blending_alpha(),"blend changed");
             if(type==1||type==2||type==4)check(scene.triangles[6].texture==20+(frame==0?0:1),"radial palette changed");
             Scene repeat;f.append(repeat,20);
             for(unsigned i=0;i<triangles;++i)for(unsigned v=0;v<3;++v){const auto a=scene.triangles[i].vertices[v].position,b=repeat.triangles[i].vertices[v].position;check(a.x==b.x&&a.y==b.y&&a.z==b.z,"render matrix accumulated between draws");}

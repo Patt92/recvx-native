@@ -76,7 +76,7 @@ static void emitter_stages()
        (0x40 * 225) >> 8 = 0x38, (0x20 * 225) >> 8 = 0x1C; Alpha bleibt fest. */
     check(scene.triangles[0].color==0xFF804020u,"col_lv 255 changed the particle colour");
     check(scene.triangles[32].color==0xFF70381Cu,"col_lv 224 did not scale the particle colour");
-    check(scene.triangles[0].blend==SceneBlend::Ninja&&scene.triangles[0].blend_register==ninja_blend_register(8,6),
+    check(scene.triangles[0].blend==SceneBlend::Ninja&&scene.triangles[0].blend_register==0x44,
           "njColorBlendingMode(0,8)/(1,6) is not the particle blend register");
     check(scene.triangles[0].depth_write==false,"particle sprites must not write depth");
     check(scene.triangles[0].textured&&!scene.triangles[0].camera_mask,"particle sprites must be textured billboards");
@@ -238,7 +238,7 @@ static void blood_pool()
     check(scene.triangles.size()==16u,"bhEff300 did not emit eight sprite quads");
     check(scene.triangles[0].color==0xF0808080u,"the blood pool colour differs");
     check(scene.triangles[0].texture==18u,"the blood pool texture frame 17 + pal_bnk differs");
-    check(scene.triangles[0].blend==SceneBlend::Ninja&&scene.triangles[0].blend_register==ninja_blend_register(8,6),
+    check(scene.triangles[0].blend==SceneBlend::Ninja&&scene.triangles[0].blend_register==0x44,
           "the blood pool blend register differs");
     check(std::fabs(scene.triangles[0].vertices[0].position.y-(3+0.01f+0.1f))<1e-5f,
           "the blood pool resting height differs from py += 0.01 and off_pos");

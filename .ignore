@@ -1,2 +1,6 @@
 # Also exclude quarantined content when explicitly searching archived/.
 archived/FORBIDDEN_DONTUSE/
+
+# Documentation snapshots are on-demand, not broad-search context.
+# Explicit file reads still work; this does not alter Git or policy auditing.
+/work/history/

@@ -1,6 +1,8 @@
 #include "map_render.h"
 #include "map_objects.h"
 #include "screen_fade.h"
+#include "binary_view.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -15,8 +17,8 @@ using namespace recvx;
    2. Ps2AddPrim2D-Abbildung: Hintergrundfuellung und Gitter von FsubBackDraw
       landen pixelgenau (MapDrawLine zielt auf 0.5 + floor(x), GS-Rasterregel).
    3. Originaldaten MRY/0000 + MRY/0005: Markermodelle, Kartentextur,
-      Etagenobjekte, Sprites, Kompass; Lichtterm njCnkCvVn mit der
-      lgt_scale-Kompensation (Boeden pr = 0.6, nie darueber). */
+      Etagenobjekte, Sprites, Kompass; Typ-41-Normalen und der tatsaechlich
+      gewaehlte CM-Farbpfad (128*Material, ohne Normalen-Lichtterm). */
 
 static int failures=0;
 static void fail(const std::string& what){std::cerr<<"FAIL "<<what<<"\n";++failures;}
@@ -53,21 +55,25 @@ std::uint32_t pixel(const SoftwareRenderer& image,int x,int y){return image.pixe
 
 static void test_screen_fade(){
     ScreenFade fade;
-    /* bhSetScreenFade(0xFF000000, 8): hkn 9, first control only counts, then
-       eight steps of 255/8 to 255; the pass reaching ct >= 8 finishes. */
+    /* bhSetScreenFade(0xFF000000, 8): hkn 9. screen.c:21/50: the first control
+       pass only counts (fade_ct 0 -> 1), then every pass interpolates by
+       (ap-ao)/(hkn-1) and finishes when fade_ct >= hkn-1 = 8. That is the
+       eighth control call overall (one count pass + seven interpolation
+       passes, the last one snaps to the target); zero-based pass index 7. */
     fade.set(0xFF000000u,8.0f);
     equal("fade_pbk after the first set is the initial target",fade.previous(),0u);
     check("set does not change fade_an",fade.an()==0.f);
     int finished_at=-1;
     for(int pass=0;pass<20&&finished_at<0;++pass)if(fade.control())finished_at=pass;
-    equal("fade to black finishes in the ninth control pass",finished_at,8);
+    equal("fade to black finishes in the eighth control pass",finished_at,7);
     check("fade_an reaches 255",fade.an()==255.f);
-    /* bhSetScreenFade(sys->fade_pbk, 3): previous target becomes black. */
+    /* bhSetScreenFade(sys->fade_pbk, 3): previous target becomes black.
+       hkn 4: count pass + two interpolation passes, ct >= 3 on call three. */
     fade.set(fade.previous(),3.0f);
     equal("fade_pbk keeps the black target",fade.previous(),0xFF000000u);
     finished_at=-1;
     for(int pass=0;pass<20&&finished_at<0;++pass)if(fade.control())finished_at=pass;
-    equal("fade back finishes in the fourth control pass",finished_at,3);
+    equal("fade back finishes in the third control pass",finished_at,2);
     check("fade_an returns to 0",fade.an()==0.f&&!fade.visible());
     /* ct <= 1: hkn 1, the first control already finishes. */
     fade.set(0xFF102030u,1.0f);
@@ -93,22 +99,34 @@ static void test_background_mapping(const std::string& data_root){
     SoftwareRenderer image(640,480);image.set_supersampling(1);
     MapRenderer renderer;renderer.draw(image,screen);
     const auto& stats=renderer.stats();
-    equal("background fill drawn",stats.fills,1u);
+    /* One control tick legitimately runs FsubBackDraw plus FsubZoomScreen,
+       FsubModeMessage and the compass: 11 fills, not 1. */
+    check("background fill drawn",stats.fills>=1u);
     check("grid lines drawn",stats.lines>=30u);
     equal("no 2D draw inside the near plane",stats.draws_below_near,0u);
-    equal("background colour MapCol[0] at (5,5)",pixel(image,5,5),0xff000800u);
-    equal("background covers the last pixel",pixel(image,639,479),0xff000800u);
-    equal("horizontal grid line on row 32",pixel(image,100,32),0xff003000u);
-    equal("row 33 is background again",pixel(image,100,33),0xff000800u);
-    equal("row 0 is the first grid line",pixel(image,100,0),0xff003000u);
-    equal("vertical grid line on column 16 (-16 + 32 + 0.5)",pixel(image,16,100),0xff003000u);
-    equal("column 15 is background",pixel(image,15,100),0xff000800u);
-    equal("column 17 is background",pixel(image,17,100),0xff000800u);
-    equal("vertical grid line on column 48",pixel(image,48,100),0xff003000u);
+    /* FsubZoomScreen's semi-transparent plate (0x80000000, depth -8) frames
+       the viewport (56,64)-(585,417); samples therefore sit inside it.
+       GS register 0x44 blends the plate over the background: (0,8,0)->(0,4,0). */
+    equal("background colour MapCol[0] inside the viewport",pixel(image,100,100),0xff000800u);
+    equal("plate blends RGB and retains incoming framebuffer alpha",pixel(image,5,5),0x80000400u);
+    equal("horizontal grid line on row 96 (0 + 3*32)",pixel(image,100,96),0xff003000u);
+    equal("row 97 is background again",pixel(image,100,97),0xff000800u);
+    equal("vertical grid line on column 80 (-16 + 3*32)",pixel(image,80,100),0xff003000u);
+    equal("column 79 is background",pixel(image,79,100),0xff000800u);
+    equal("column 81 is background",pixel(image,81,100),0xff000800u);
+    /* The -8 plate writes depth; the -1580 grid submitted after triangles
+       fails the depth test outside the viewport. */
+    equal("near plate masks the distant grid outside the viewport",pixel(image,100,32),0x80000400u);
 }
 
 static void test_real_floor(const std::string& data_root){
-    FlagStore flags;std::uint32_t slots[16]={};
+    /* The opcode stream gates every obj/marker block with flagck group 8
+       (mp_flg, visited rooms) plus jmp: with all flags clear the whole floor
+       is skipped and objects/markers stay 0. The game state that renders the
+       floor (verify_map afterB, f8 = 0x44000000) has those bits set, so the
+       unit test models "every room visited". */
+    FlagStore flags;flags.groups[8].assign(1024,true);
+    std::uint32_t slots[16]={};
     auto services=services_for(flags,slots,data_root);
     MapHost host;host.ply_id=0;host.stg_no=0;host.rom_no=0;host.player_x=0;host.player_y=0;host.player_z=0;
     MapScreen screen;screen.init(RECVX_MP_SET_SUB,host,services);
@@ -144,13 +162,66 @@ static void test_real_floor(const std::string& data_root){
     std::cout<<"map render: fills "<<stats.fills<<", lines "<<stats.lines<<", sprites "<<stats.sprites<<", markers "<<stats.markers
              <<", objects "<<stats.objects<<", compass "<<stats.compass<<", triangles "<<stats.triangles<<"\n";
 
-    /* njCnkCvVn with MapLightMain: I = (pr,pg,pb)/map_scale * (N' . fC), N'
-       through the matrix whose root is njScale(1, lgt_scale, 1): floors reach
-       exactly pr = 0.6, nothing exceeds it. */
-    float max_light=0;
-    for(const auto& t:renderer.scene().triangles)if(t.gouraud)for(const auto& v:t.vertices)max_light=std::max(max_light,v.light.y);
-    check("lit floor reaches pr * 1 = 0.6",max_light>=0.59f);
-    check("no vertex exceeds the compensated light",max_light<=0.6f+1e-3f);
+    /* Regression: FtskMapExit must see the fade started in the same control
+       call, not the MapHost snapshot taken before bhSetScreenFade. */
+    ScreenFade fade;bool pending=false;
+    services.set_screen_fade=[&](std::uint32_t color,float ticks){fade.set(color,ticks);pending=true;};
+    services.screen_fade_pending=[&]{return pending;};
+    MapScreen closing;closing.init(RECVX_MP_SET_SUB,host,services);
+    for(int tick=0;tick<40&&closing.mode()!=RECVX_MP_MOD_WAIT_NORMAL;++tick){
+        closing.control(host);if(pending&&fade.control())pending=false;
+    }
+    host.pad_ps=0x1000;closing.control(host);
+    host.pad_ps=0;closing.control(host);
+    check("exit task waits for the newly started fade",closing.mode()==RECVX_MP_MOD_WAIT&&pending);
+    int exit_passes=0;
+    while(pending&&exit_passes++<20){
+        check("map remains running throughout fade",closing.control(host));
+        check("exit mode not reached before fade completion",closing.mode()!=RECVX_MP_MOD_EXIT);
+        if(fade.control())pending=false;
+    }
+    check("exit fade reached black",fade.an()==255.f&&!pending);
+    closing.control(host);
+    check("exit mode follows fade completion",closing.mode()==RECVX_MP_MOD_EXIT);
+    check("map exits on the next control pass",!closing.control(host));
+
+    /* Typ 41 has real Float32 normals; validate the first marker against
+       the original MRY/0000 record at 0x50: (0,1,0), not a synthetic normal. */
+    const auto marker=decode_model_asset(screen.index_buffer(),screen.marker_models()[0].offset,0);
+    check("marker geometry available for normal check",!marker.triangles.empty());
+    if(!marker.triangles.empty()){
+        const auto& n=marker.triangles[0].vertices[0].normal;
+        check("Typ 41 marker normal is retained",std::abs(n.x)<1e-6f&&std::abs(n.y-1.f)<1e-6f&&std::abs(n.z)<1e-6f);
+    }
+    /* map.c njControl3D(0x810) -> njCnkCs CM -> vu1GetVertexColorCM:
+       constant material only, RGB trunc(128*palette), no 0.6 light term.
+       Walk model triangles in the order their actual draw calls were emitted. */
+    const auto floor_geometry=decode_model_asset(screen.buffer(),screen.stage_model().offset,0);
+    std::size_t triangle=0;unsigned constant_checks=0;
+    for(const auto& d:screen.draw_list()){
+        if(d.kind==MapDraw::Kind::MapObject||d.kind==MapDraw::Kind::Marker){
+            const auto& t=renderer.scene().triangles[triangle];
+            check("map CM does not select the intensity shader",!t.gouraud);
+            check("constant-attr keeps the original chunk blend",t.blend==SceneBlend::Ninja);
+            if(!t.textured){
+                const auto channel=[](float value){return unsigned(std::clamp(128.f*value,0.f,255.f));};
+                const auto rgb=channel(d.material.r)<<16|channel(d.material.g)<<8|channel(d.material.b);
+                equal("CM output matches original palette transport",t.color&0x00ffffffu,rgb);
+                ++constant_checks;
+            }
+            /* Both decoded models retain the original object id on triangles. */
+            const auto geometry=d.kind==MapDraw::Kind::Marker?
+                decode_model_asset(screen.index_buffer(),screen.marker_models()[std::size_t(d.model)].offset,0):Scene{};
+            if(d.kind==MapDraw::Kind::Marker)triangle+=geometry.triangles.size();
+            else{
+                const auto node=screen.map_objects()[std::size_t(d.model)].node;
+                triangle+=std::count_if(floor_geometry.triangles.begin(),floor_geometry.triangles.end(),
+                    [node](const SceneTriangle& t){return t.object==node;});
+            }
+        }else if(d.kind==MapDraw::Kind::Line){}
+        else triangle+=2;
+    }
+    check("original constant-material colours were checked",constant_checks>0);
 
     std::size_t foreground=0;
     for(int y=0;y<480;++y)for(int x=0;x<640;++x){const auto p=pixel(image,x,y);if(p!=0xff000800u&&p!=0xff003000u)++foreground;}
@@ -159,7 +230,23 @@ static void test_real_floor(const std::string& data_root){
     std::size_t button=0;
     for(int y=429;y<453;++y)for(int x=452;x<476;++x){const auto p=pixel(image,x,y);if(p!=0xff000800u&&p!=0xff003000u)++button;}
     check("X button sprite visible at 464,441",button>0);
-    std::cout<<"map render: foreground pixels "<<foreground<<", max light "<<max_light<<"\n";
+    std::cout<<"map render: foreground pixels "<<foreground<<", CM checks "<<constant_checks<<"\n";
+    /* Same owner and renderer, fresh bhInitMap: no stale marker/texture cache
+       before the new index has loaded. A newly allocated renderer is the
+       independent image reference after the index/floor read completes. */
+    const auto index_revision=screen.index_generation(),stage_revision=screen.stage_generation();
+    screen.exit();host.pad_ps=0;screen.init(RECVX_MP_SET_SUB,host,services);
+    check("re-entry advances native resource revisions",screen.index_generation()>index_revision&&screen.stage_generation()>stage_revision);
+    screen.control(host);renderer.draw(image,screen);
+    equal("old marker cache released before fresh index read",renderer.marker_count(),std::size_t(0));
+    equal("old texture cache released before fresh index read",renderer.map_texture_count(),std::size_t(0));
+    for(int tick=0;tick<40&&screen.mode()!=RECVX_MP_MOD_WAIT_NORMAL;++tick){
+        if(screen.stage_model().size&&screen.map_objects().empty())screen.set_map_objects(decode_map_objects(screen.buffer(),screen.stage_model()));
+        screen.control(host);if(pending&&fade.control())pending=false;
+    }
+    screen.control(host);renderer.draw(image,screen);
+    MapRenderer fresh;SoftwareRenderer reference(640,480);reference.set_supersampling(1);fresh.draw(reference,screen);
+    check("reused renderer matches independently decoded map on re-entry",image.pixels()==reference.pixels());
 }
 
 int main(int argc,char** argv){

@@ -42,7 +42,12 @@ std::uint32_t map_argb_to_color(const RECVX_MAP_ARGB& argb){
 void MapScreen::init(int set_mod,const MapHost& host,const MapServices& services){
     /* bhInitMap (map.c:64). npSetMemory clears the whole work first, so every
        field starts at zero and only the original assignments follow. */
+    /* Resource revisions belong to this native owner, not the cleared
+       original map work. Keep them monotonic so a renderer surviving exit
+       cannot reuse the previous player's/index/floor assets on re-entry. */
+    const unsigned index_revision=index_generation_+1,stage_revision=stage_generation_+1;
     *this=MapScreen{};
+    index_generation_=index_revision;stage_generation_=stage_revision;
     host_=host;services_=services;
     status_=(1<<set_mod)&7;
     ply_stg_=host.stg_no;
@@ -1036,7 +1041,7 @@ int MapScreen::ftsk_map_wait(){
 
 int MapScreen::ftsk_map_exit(){
     /* FtskMapExit (map.c:1771). */
-    return (host_.cb_flg&0x2)?1:0;
+    return (services_.screen_fade_pending?services_.screen_fade_pending():(host_.cb_flg&0x2)!=0)?1:0;
 }
 
 int MapScreen::ftsk_map_read(int index){

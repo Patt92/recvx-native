@@ -100,7 +100,7 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # tools/generate_effect_collision.py ist Quarantaene (Policy 2026-10-09):
 # ATR-Boden/Wandkontakt, Reflexion und Linienabfrage sind eigenstaendig nativ;
 # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_action.c native/player_hair.c native/player_head.c native/adx_tables.c)
+add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/effect_core.cpp native/effect_procedures.cpp native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_action.c native/player_hair.c native/player_head.c native/adx_tables.c)
 target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
 # D10 Teil B: Kartenbild (Ps2AddPrim2D/3D-Seite von map.c) und sys->fade_* (screen.c).
 target_sources(recvx_game PRIVATE native/map_render.cpp native/screen_fade.cpp)
@@ -200,6 +200,7 @@ if(RECVX_BUILD_RUNTIME)
     # message.c:269-295 / pad.c:275: real held direction versus newly pressed dialog bits.
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0060.RDT")
       add_test(NAME message_dialog_pad_edges COMMAND recvx-input-tests --dialog-edges "${CMAKE_CURRENT_SOURCE_DIR}/data")
+      add_test(NAME item_box_pad_frames COMMAND recvx-input-tests --box-pad "${CMAKE_CURRENT_SOURCE_DIR}/data")
     endif()
   endif()
   # No original engine or historical console audit target is permitted.

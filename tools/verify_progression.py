@@ -24,7 +24,7 @@ REPLAY = '''0 debug_key F2
 321 confirm
 350 right
 351 confirm
-352 confirm
+354 confirm
 360 up
 361 confirm
 362 down
@@ -36,7 +36,7 @@ REPLAY = '''0 debug_key F2
 561 confirm
 590 right
 591 confirm
-592 confirm
+594 confirm
 600 up
 601 confirm
 602 down
@@ -89,11 +89,12 @@ def check(runtime, data, folder, prefix):
     # and EXIT closes through StatusCancel.
     wrong = folder / 'wrong-slot.txt'
     wrong.write_text(REPLAY.split('321 confirm')[0] + '321 confirm\n340 confirm\n345 cancel\n350 up\n355 confirm\n360 confirm\n'
-                     '370 down\n372 confirm\n376 confirm\n380 cancel\n384 up\n388 confirm\n392 confirm\n400 up\n403 up\n406 confirm\n')
-    # 378: right after the STANDARD-cell exchange. 390: the EXIT press has run
-    # StatusCancel (the room script re-requests the box afterwards, because the
-    # player still stands on its trigger; the walk-away close is covered above).
-    for frames, closed in [(378, False), (390, True)]:
+                     '370 down\n372 right\n374 confirm\n376 confirm\n380 up\n382 up\n384 confirm\n')
+    # 378: right after the STANDARD-cell exchange. 398: the EXIT press and
+    # SpriteH's nine closing ticks have completed (384 press, 388 StatusCancel).
+    # The room script re-requests the box afterwards, because the
+    # player still stands on its trigger; the walk-away close is covered above.
+    for frames, closed in [(378, False), (398, True)]:
         state = folder / ('wrong-slot-%d.json' % frames)
         with (folder / ('wrong-slot-%d.log' % frames)).open('w') as log:
             subprocess.run(prefix + [str(runtime.resolve()), '--data', str(data.resolve()),

@@ -13,6 +13,9 @@ struct Quit{~Quit(){SDL_Quit();}};
 int main(int argc,char** argv){try{
     SDL_SetMainReady();SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0,"SDL init");Quit quit;_Make_SinTable();
     const auto path=std::filesystem::temp_directory_path()/("recvx-frontend-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".ini");auto config=InputConfig::defaults();config.save(path);InputManager devices(config);Frontend front(config,path);front.changed=[&](const InputConfig& value){devices.configure(value);};
+    // Der gespeicherte Einstellungsstand muss die Host-Pause auf Escape behalten und
+    // Escape aus quit heraushalten, sonst schliesst die Pausentaste ein laufendes Spiel.
+    check(InputConfig::read(path).describe(Action::Pause,false)=="P / Escape"&&InputConfig::read(path).describe(Action::Quit,false)=="F10","a saved controls.ini loses the Escape pause key or keeps Escape as a quit key");
     auto event=[&](const SDL_Event& e){devices.event(e);front.event(e);};auto tick=[&]{return front.apply(devices.tick());};
     auto press=[&](SDL_Scancode code){event(key(code,true));const auto result=tick();event(key(code,false));tick();return result;};
     // adv.c Adv_BioCvTitle: Mode 0..3, 30-frame fade (GetSamurai(50)), PRESS START (Mode 6), Start -> plate fade -> Mode 9 with Cursor 1 (NEW GAME; LOAD GAME needs a memory card).

@@ -182,3 +182,48 @@ HD-Paket: dieselbe Änderung (776 bzw. 242 Pixel Delta ≥ 8). Backup
 archived/releases/alpha-domain-before-20261013-224118; die Dev-App selbst behält den
 vorherigen Stand unter build/start/macos-arm64/.previous-*. Der Build enthält den
 Arbeitsstand der parallelen Karten-/Schatten-/Fog-Sitzungen. Kein Paket, kein Commit/Push.
+
+## Blendzustand der Original-Engine (Punkt 2 des Transparenzplans, 2026-10-13)
+njColorBlendingMode/njColorBlendingModeSys als Zustandsautomat in native/chunk_blend.cpp
+(nj- und gs-Save getrennt, Index 0/1 -> 0x01/0x44 ohne Tabellenzugriff, Paar mit Index < 2
+laesst das Register stehen, ungueltige Paare als `blend_unavailable` in --state statt
+Abbruch); gebunden an Effektsprite-, Partikel- und Muendungsfeuerpfade, ID-Whitelist und
+ninja_blend_register entfallen. Details: work/native_port_blend_state.result.md.
+CTest 79/81 in build/alphadomain-claude-20261013 (rot: script_motion vorbestehend,
+original_map_render Parallelarbeit). verify_lighter/combat/detector/scanner/doors/
+continuity/events PASS; verify_enemy_ai identisch zum Vorher-Binary rot (RM_0080 „kein
+Biss", fremde Sitzung). Gemessen: RM_0090 Kamera 1/2 und die Lighter-Szene sind gegen das
+Runtime von 22:41 pixelgleich (0 von 307200, Delta 0) — der Mechanismus ist ersetzt, die
+sichtbaren Effektluecken liegen in den noch fehlenden Effektprozeduren (Kategorie + Paar).
+Kein Paket, keine Dev-App, kein Commit.
+
+## Effekt-Skriptbefehle: Blutlache 0x56/0x58, Dev-Auslieferung Punkt 2 (2026-10-13)
+Dev-App build/start/macos-arm64 mit Punkt 2 ersetzt und signiert (Hash 2766db10…, Backup
+archived/releases/blend-state-before-20261013-233239 = a55478ed…); Laufzeit-Suiten gegen
+genau dieses Binary gruen, blend_unavailable in acht echten Raeumen leer, CTest 80/82 (rot
+script_motion vorbestehend, original_map_render Parallelarbeit — verify_map scheitert mit dem
+Vorher-Binary identisch). Danach 0x56 bhEffBloodPoolSet neu gebunden (Laenge 6) und 0x58
+bhEffBloodPoolSet2 von „effect spawn pending" auf die Originalbindung umgestellt
+(native/world.cpp, Tabellen evnt_BldTbl/evnt_BldTbl2 feldgleich als RECVX_ENEMY_BP_WORK);
+der Poolmechanismus selbst (effsub3.c:145/234) war schon portiert. Nachweis
+tests/native/gameplay_bindings_test.cpp (Bindung true, blood_particles +1 je Befehl,
+epw->djnt_no) und gemessen RM_3140: 3 offene Bindungen inklusive 0x58 vorher, 2 nachher.
+Gescannt (tools/scan_event_rooms.py, 205/205): weiter ohne Implementierung sind 0x2c
+bhEffectSet, 0x4e bhEffBloodSet, 0x70/0x71 bhEffPush/bhEffPop, 0x96/0x97/0x98, 0xaa, 0xb0,
+0xc3, 0xc8. Ebenfalls gemessen: im Scanner-Replay laeuft kein Effekt-Skriptbefehl, die
+RM_0090-Fraeseffekte gehoeren zum Terminaltask/Raumobjekt, nicht zu sys->ef_*. Zusaetzlich
+0x4e bhEffBloodSet (Laenge 14) gebunden: RoomWorld::script_blood_set schreibt epw->djnt_no
+und ruft den portierten Kern zonzon.c:466 bhEne_SetBlood2; der T3-Dienst und der Weltzeiger
+werden fuer genau diesen Aufruf gebunden (EnemyExtScope wie in control_enemy_works), sonst
+meldet die Bibliothek "[zonzon.c:493 effect.c bhSetEffectTb]" als Luecke (gemessen).
+CTest 80/82 unveraendert. Details: work/native_port_effect_script.result.md.
+Danach die restliche Effekt-Skriptflaeche: 0x2c bhEffectSet belegt den ersten freien Platz des
+geteilten eff[512]-Satzes (RoomWorld::allocate_effect) und meldet eine noch fehlende Prozedur
+namentlich, statt die Eventaufgabe abzubrechen; 0x70/0x71 bhEffPush/bhEffPop sichern bzw.
+ersetzen den ganzen Satz (sprites_ plus Partikelnutzlast, EffectParticles::save/restore) wie
+bhPushEffectWork/bhPopEffectWork. Nachweis tests/native/gameplay_bindings_test.cpp. Dev-App
+ersetzt/signiert (70cf7f60…), alle zwoelf verify-Suiten gegen genau dieses Binary PASS;
+CTest rot nur script_motion (fremd, vorbestehend) und engine_progression_resources (ItemBox
+Listen-Scroll, laufende Box-Sitzung). Ein Dev-Build um 23:57 enthielt deren halbfertigen Stand
+und liess verify_progression rot werden; die Gegenprobe mit und ohne meine Befehle besteht die
+Suite, sobald die Nachbardateien ihren naechsten Stand haben. Kein Paket, kein Commit.

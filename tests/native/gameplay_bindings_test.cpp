@@ -130,6 +130,45 @@ check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<
   check((w.flg&0x118u)==0x118u&&(w.flg&0x20u),"Common 23/46 did not restore flg 0x118/0x20 before the release");}
  check(std::hypot(next.x-at.x,next.z-at.z)>=.01f,"released zombie stayed inert under the ported bhEne01_Move");
  std::cout<<"Original zombie script release passed: Sub_controll 0x8f modes, emtp library and flg 0x118/0x20 on the native work; the released zombie moves under bhEne01_Move.\n";}
+ // event.c:4384/4446 bhEffBloodPoolSet/bhEffBloodPoolSet2: die beiden
+ // Skriptbefehle der Blutlache. v1 ist djnt_no und Tabellenauswahl zugleich
+ // (0/1 evnt_BldTbl2, 2 evnt_BldTbl), die Richtung ay + objP[1].ang[1] bzw.
+ // der eigene Winkeloperand, der Ursprung owP[0] bzw. die eigene Lage.
+ {auto bytes=read_asset_file(data/"rooms/RM_0080.RDT",64*1024*1024);auto scene=decode_scene(bytes);auto player=scene.spawns.at(0);std::size_t m=42;std::int64_t f=0;RoomWorld world(bytes,scene,player,m,f,audio,data);auto body=PlayerAsset::load(data);world.set_player_asset(&body);world.set_enemy_ai(true);const unsigned index=3;Inventory inv;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.binding=[&](const auto& c){return world.bind(c);};vm.task_started=[&](unsigned l){world.start_task(l);};vm.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};vm.start(0,40);for(unsigned t=0;t<300;++t){vm.tick();world.tick();}
+  check(world.state(1,index)&&world.state(1,index)->enemy_bound&&world.state(1,index)->enemy_calculated,"blood pool premise: RM_0080 zombie work not bound/calculated");
+  const auto before=world.blood_particles();
+  check(world.bind(cmd({0x56,std::uint8_t(index),1,0,0x00,0x00})),"bhEffBloodPoolSet 0x56 unbound");
+  check(world.blood_particles()==before+1,"bhEffBloodPoolSet spawned no original pool");
+  check(world.state(1,index)->enemy.djnt_no==1,"bhEffBloodPoolSet did not write epw->djnt_no");
+  // Der zweite Befehl traegt die Lage selbst (Vorzeichen in v0, Zentimeter) und
+  // waehlt bei v1 == 2 die andere Tabelle; Winkel in Grad, wie im Original.
+  check(world.bind(cmd({0x58,0x05,0x64,0x00,0x00,0x00,0x32,0x00,0,2,90,0,0x00,0x00})),"bhEffBloodPoolSet2 0x58 unbound");
+  check(world.blood_particles()==before+2,"bhEffBloodPoolSet2 spawned no original pool");
+  // event.c:4302 bhEffBloodSet: Typ 0..2 startet ueber bhEne_SetBlood2 den
+  // Originaleffekt 5 (bhEff005) am Work; v1 ist djnt_no und Linkgelenk.
+  const auto flames=[&]{unsigned n=0;for(unsigned i=0;world.effect_state(i);++i)if(world.effect_state(i)->id==5)++n;return n;};
+  const auto flames_before=flames();
+  check(world.bind(cmd({0x4e,std::uint8_t(index),3,0x00,0x64,0x00,0x00,0x00,0x00,0x00,0,0,90,0})),"bhEffBloodSet 0x4e unbound");
+  if(flames()<flames_before+1){std::string gaps;for(const auto& g:world.unbound_enemy_routines())gaps+=" ["+g+"]";throw std::runtime_error("bhEffBloodSet spawned no original effect 5;"+gaps);}
+  check(world.state(1,index)->enemy.djnt_no==3,"bhEffBloodSet did not write epw->djnt_no");
+  check(!world.bind(cmd({0x4e,200,0,0,0,0,0,0,0,0,0,0,0,0})),"bhEffBloodSet accepted an absent enemy work");
+  // event.c:1919 bhEffectSet (bhSetEffect in den geteilten eff[512]) und
+  // :5336/5346 bhEffPush/bhEffPop (bhPushEffectWork/bhPopEffectWork).
+  const auto slots=[&]{unsigned n=0;while(world.effect_state(n))++n;return n;};
+  const auto eff_before=slots();
+  check(world.bind(cmd({0x2c,0,0x07,0x01})),"bhEffectSet 0x2c unbound"); // id 263
+  check(slots()==eff_before+1,"bhEffectSet allocated no eff[512]-Platz");
+  check(world.effect_state(eff_before)->id==263&&(world.effect_state(eff_before)->flg&1u)&&world.effect_state(eff_before)->type==0,"bhEffectSet wrote other work fields than bhSetEffect");
+  check(world.unbound_enemy_routines().count("bhEff263")==1,"unported effect procedure is not reported by name");
+  const auto pushed=slots();
+  check(world.bind(cmd({0x70,0})),"bhEffPush 0x70 unbound");
+  check(world.bind(cmd({0x2c,0,0x05,0x00})),"bhEffectSet 0x2c unbound"); // id 5, portiert
+  check(world.unbound_enemy_routines().count("bhEff5")==0,"a ported procedure was reported as a gap");
+  check(slots()==pushed+1,"bhEffPush stopped the running pass");
+  check(world.bind(cmd({0x71,0})),"bhEffPop 0x71 unbound");
+  check(slots()==pushed,"bhEffPop did not restore the whole original eff[512] set");
+  std::cout<<"Original effect-script surface passed: 0x2c allocates the shared eff[512] slot and names the missing procedure, 0x70/0x71 restore the set.\n";
+  std::cout<<"Original blood script commands passed: 0x56/0x58 write the pool, 0x4e starts original effect 5 at the work joint and rejects an absent work.\n";}
  if(!soft_failures.empty()){for(const auto& f:soft_failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<soft_failures.size()<<" inventory expectation(s) failed; the remaining bindings passed.\n";return 1;}
  return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

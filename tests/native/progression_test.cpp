@@ -121,41 +121,99 @@ int main(int argc,char** argv){try{
         Inventory inv;std::fill(inv.items.begin()+64,inv.items.begin()+192,0);MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);StatusMenu menu;menu.active=true;menu.stage=0;menu.room=9;vm.flags[10][0]|=0x40000;BoxMenu box;box.synchronize(inv,menu,&vm);
         for(int i=0;i<9&&box.moving();++i)box.synchronize(inv,menu,&vm);
         check(box.active()&&box.base()==64&&!box.moving()&&box.box_index()==0,"item box list did not settle at ips1 0");
-        box.input(MenuInput::Confirm,inv,menu,&vm,audio);   // testmode 2
-        box.input(MenuInput::Down,inv,menu,&vm,audio);
+        box.tick(0x800,0x800,inv,menu,&vm,audio);   // testmode 2
+        box.tick(0x2,0x2,inv,menu,&vm,audio);
         check(box.arrows()==2,"down request must light parts_15b[21] (anim 19)");
-        box.synchronize(inv,menu,&vm);check(box.row_shift()==-19.f&&box.box_index()==0,"first scroll frame must displace the rows by -19");
-        box.synchronize(inv,menu,&vm);check(box.row_shift()==-38.f&&box.box_index()==0,"second scroll frame must displace the rows by -38");
-        box.synchronize(inv,menu,&vm);check(box.row_shift()==0.f&&box.box_index()==1&&box.arrows()==3,"direction frame must advance ips1, restore the rows and set both parts_15b arrows to the neutral 18");
+        check(box.row_shift()==-19.f&&box.box_index()==0,"request frame must displace the rows by -19 in the same ItemBox pass");
+        box.tick(0,0,inv,menu,&vm,audio);check(box.row_shift()==-38.f&&box.box_index()==0,"second scroll frame must displace the rows by -38");
+        box.tick(0,0,inv,menu,&vm,audio);check(box.row_shift()==0.f&&box.box_index()==1&&box.arrows()==3,"direction frame must advance ips1, restore the rows and set both parts_15b arrows to the neutral 18");
         // sub1.c:7606: Confirm/Cancel stehen hinter `st->wait == 0`; waehrend der
         // laufenden Scroll-Animation wird keine der beiden Tasten verarbeitet.
         {Inventory gate;std::fill(gate.items.begin()+64,gate.items.begin()+192,0);gate.items[64]=Inventory::pack(12,3);gate.items[65]=Inventory::pack(12,5);gate.slots()[2]=Inventory::pack(12,10);
          MessageDialog d;auto b=event_fixture({0xff,0});EventVm v(b,gate,d);StatusMenu m;m.active=true;m.selected=2;m.stage=0;m.room=9;v.flags[10][0]|=0x40000;BoxMenu bo;bo.synchronize(gate,m,&v);
          for(int i=0;i<9&&bo.moving();++i)bo.synchronize(gate,m,&v);
-         bo.input(MenuInput::Confirm,gate,m,&v,audio);       // testmode 2
-         bo.input(MenuInput::Down,gate,m,&v,audio);
-         bo.synchronize(gate,m,&v);                          // Tail: wait++ = 1, Scroll laeuft
-         bo.input(MenuInput::Confirm,gate,m,&v,audio);
+         bo.tick(0x800,0x800,gate,m,&v,audio);       // testmode 2
+         bo.tick(0x2,0x2,gate,m,&v,audio);           // Tail: wait++ = 1, Scroll laeuft
+         bo.tick(0x800,0x800,gate,m,&v,audio);
          check(gate.items[65]==Inventory::pack(12,5)&&gate.slots()[2]==Inventory::pack(12,10),"ItemBox 7606: confirm during the pending scroll must be ignored");
-         bo.synchronize(gate,m,&v);bo.synchronize(gate,m,&v);bo.synchronize(gate,m,&v);
-         bo.input(MenuInput::Confirm,gate,m,&v,audio);
+         bo.tick(0,0,gate,m,&v,audio);
+         bo.tick(0x800,0x800,gate,m,&v,audio);
          check(gate.slots()[2]==Inventory::pack(12,15)&&!gate.items[65]&&gate.items[64]==Inventory::pack(12,3),"ItemBox deposit after the settled scroll uses the advanced box entry (ips1 1), not entry 0");}
-        box.input(MenuInput::Up,inv,menu,&vm,audio);
+        box.tick(0x1,0x1,inv,menu,&vm,audio);
         check(box.arrows()==1,"up request must light parts_15b[20] (anim 19)");
-        for(int i=0;i<3;++i)box.synchronize(inv,menu,&vm);
+        for(int i=0;i<2;++i)box.tick(0,0,inv,menu,&vm,audio);
         check(box.box_index()==0&&box.row_shift()==0.f,"up request must return to the previous box entry");
-        box.input(MenuInput::Right,inv,menu,&vm,audio);check(box.box_index()==5,"first five-entry scroll must step immediately (keywait 1)");
-        box.input(MenuInput::Right,inv,menu,&vm,audio);check(box.box_index()==5,"second event must only count keywait");
-        for(int i=0;i<8;++i)box.input(MenuInput::Right,inv,menu,&vm,audio);
+        box.pad(0,0,inv,menu,&vm,audio);
+        box.pad(0x10,0x10,inv,menu,&vm,audio);check(box.box_index()==5,"first five-entry scroll must step immediately (keywait 1)");
+        box.pad(0x10,0,inv,menu,&vm,audio);check(box.box_index()==5,"second held frame must only count keywait");
+        for(int i=0;i<8;++i)box.pad(0x10,0,inv,menu,&vm,audio);
         check(box.box_index()==5,"keywait<=10 must not step again");
-        box.input(MenuInput::Right,inv,menu,&vm,audio);
-        check(box.box_index()==5,"keywait==11 alone must not step while boxwait is counted");
-        box.input(MenuInput::Right,inv,menu,&vm,audio);
-        check(box.box_index()==10,"boxwait>3 must step five more entries (ItemBoxInit leaves boxwait 4)");
-        for(int i=0;i<3;++i)box.input(MenuInput::Right,inv,menu,&vm,audio);
+        box.pad(0x10,0,inv,menu,&vm,audio);
+        check(box.box_index()==5,"keywait==11 alone must not step");
+        box.pad(0x10,0,inv,menu,&vm,audio);
+        check(box.box_index()==10,"boxwait>3 must step five more entries after the initial hold delay");
+        for(int i=0;i<3;++i)box.pad(0x10,0,inv,menu,&vm,audio);
         check(box.box_index()==10,"boxwait 1..3 must not step yet");
-        box.input(MenuInput::Right,inv,menu,&vm,audio);
-        check(box.box_index()==15,"boxwait>3 must repeat every four events");
+        box.pad(0x10,0,inv,menu,&vm,audio);
+        check(box.box_index()==15,"boxwait>3 must repeat every four held frames");
+        for(const unsigned direction:{0x8u,0x4u})for(int i=0;i<3;++i){
+            box.pad(0,0,inv,menu,&vm,audio);
+            box.pad(direction,direction,inv,menu,&vm,audio);
+            check(box.box_index()==15,"horizontal D-pad must not act as an ItemBox shoulder");
+        }
+        box.pad(0,0,inv,menu,&vm,audio);
+        box.pad(0x80,0x80,inv,menu,&vm,audio);
+        check(box.box_index()==10,"original left shoulder must jump five entries");
+        box.pad(0x100,0x100,inv,menu,&vm,audio);
+        box.pad(0x180,0x80,inv,menu,&vm,audio);
+        check(box.box_index()==10,"another held pad bit must prevent the full-release timer reset");
+        box.pad(0,0,inv,menu,&vm,audio);
+        box.pad(0x80,0x80,inv,menu,&vm,audio);
+        check(box.box_index()==5,"a fully released pad must restore the immediate shoulder jump");
+    });
+    section("ItemBox SpriteH/Pad/EXIT Reihenfolge",[&]{
+        Inventory inv;MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);
+        StatusMenu menu;menu.active=true;vm.flags[10][0]|=0x40000;BoxMenu box;
+        box.tick(0,0,inv,menu,&vm,audio);
+        for(int i=0;i<8;++i)box.tick(0,0,inv,menu,&vm,audio);
+        check(box.moving(),"SpriteH must keep the pad locked before the ninth tick");
+        box.tick(0x800,0x800,inv,menu,&vm,audio);
+        check(!box.moving(),"SpriteH must unlock before ItemBox reads the ninth tick's pad");
+        box.tick(0x2,0x2,inv,menu,&vm,audio);
+        check(box.row_shift()==-19.f,"confirm on the unlock frame must have entered testmode 2");
+        box.tick(0x800,0x800,inv,menu,&vm,audio);
+        check(box.row_shift()==-38.f,"confirm must be ignored before the scroll tail settles");
+        box.tick(0x1000,0x1000,inv,menu,&vm,audio);
+        check(box.box_index()==1&&box.arrows()==3,"cancel on the index-advance frame must still be ignored");
+        box.tick(0x1000,0x1000,inv,menu,&vm,audio);
+        check(box.arrows()==0&&!box.moving(),"cancel after the scroll must return to testmode 1");
+        box.tick(0x1,0x1,inv,menu,&vm,audio); // testmode 3
+        box.tick(0x800,0x800,inv,menu,&vm,audio); // wait 4 -> 3 in this frame
+        for(int i=0;i<3;++i)box.tick(0,0,inv,menu,&vm,audio);
+        check(!box.moving(),"EXIT must not start StatusCancel while its press counter is nonzero");
+        box.tick(0,0,inv,menu,&vm,audio);
+        check(box.moving(),"EXIT must start StatusCancel in the frame after wait reaches zero");
+        for(int i=0;i<9;++i)box.tick(0x800,0x800,inv,menu,&vm,audio);
+        check(!box.active()&&!menu.active,"closing SpriteH must release without processing the held confirm");
+        menu.active=true;vm.flags[10][0]|=0x40000;box.tick(0,0,inv,menu,&vm,audio);
+        for(int i=0;i<9;++i)box.tick(0,0,inv,menu,&vm,audio);
+        box.tick(0x1,0x1,inv,menu,&vm,audio);box.tick(0x800,0x800,inv,menu,&vm,audio);
+        box.tick(0x2,0x2,inv,menu,&vm,audio);
+        for(int i=0;i<6;++i)box.tick(0,0,inv,menu,&vm,audio);
+        check(!box.moving()&&menu.selected==2,"Down during a pressed EXIT must cancel the press and restore the item cursor");
+    });
+    section("ItemBox unabhängige Cursorzelle",[&]{
+        Inventory inv;inv.slots()[2]=Inventory::pack(1,1); // original wide-item type 0x100
+        MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);
+        StatusMenu menu;menu.active=true;vm.flags[10][0]|=0x40000;BoxMenu box;
+        box.tick(0,0,inv,menu,&vm,audio);for(int i=0;i<9;++i)box.tick(0,0,inv,menu,&vm,audio);
+        check(menu.selected==2&&box.cursor_cell()==2,"CursorInit must start on the left half of the first wide item");
+        box.tick(8,8,inv,menu,&vm,audio);
+        check(menu.selected==3&&box.cursor_cell()==4,"Right from an even wide-item cell must add two cells and one pip index");
+        box.tick(0,0,inv,menu,&vm,audio);box.tick(4,4,inv,menu,&vm,audio);
+        check(menu.selected==2&&box.cursor_cell()==3,"Left from sakai must select the wide item on its right half, not reconstruct cell 2");
+        box.tick(0,0,inv,menu,&vm,audio);box.tick(2,2,inv,menu,&vm,audio);
+        check(menu.selected==4&&box.cursor_cell()==5,"Down from the right half before sakai must add two pip indices and two cells");
     });
     // PORTIERT (Policy 2026-10-09, Auftrag C01): Die Spawn-/Fallenbereiche
     // (bhEne_EnemyAtariCheck, bhEne04_MVType01) liefen aus enemy_spawn.inc als

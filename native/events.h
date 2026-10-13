@@ -74,6 +74,15 @@ public:
     void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);
     std::function<void(NJS_POINT3,Angle,int)> floor_binding;
     const std::vector<Interaction>& floor_areas()const{return floors_;}
+    // sys->exm_attr / fixcno / fixkno of the last bhCheckExmAtari camera (hitchk.c:4790).
+    unsigned exm_attr=0,fixcno=0,fixkno=0;
+    // Native owners for game.c's exm handling: sys->pt_flg (clear,set), rom->lgtp[1].flg 0x2,
+    // ef_flg 0x10 from cam.flg 0x20, bhSetFixedCut, bhSetEventFixedCut, bhCheckCut(1).
+    std::function<void(unsigned,unsigned)> presentation_flags;
+    std::function<void()> exm_light_off,exm_cut_effect,return_cut;
+    std::function<void(unsigned)> fixed_cut;
+    std::function<void(unsigned,unsigned)> event_fixed_cut;
+    void control_exm(); // bhMainSequence, game.c:115-286, before bhControlMessage/bhControlEvent
     void confirm_dialog();
     void cancel_dialog();
     void choose_dialog(int direction);
@@ -100,6 +109,7 @@ public:
     void set_flag(unsigned matrix,unsigned index,unsigned mode);
 private:
     bool door_scenario_pending_=false;
+    bool pad_cleared_=false; // hitchk.c sys->pad_ps = 0 for the rest of the pass
     bool request_door(const DoorRequest& request);
     struct Loop {std::size_t condition=0,body=0;unsigned count=0;bool repeat=false;};
     struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0,wpnl_no=0;float addpx=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;std::array<unsigned,32> loop_counts{};};

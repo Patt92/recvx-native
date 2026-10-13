@@ -1,0 +1,12 @@
+{
+  "AGENTS.md": {
+    "archive": "AGENTS.before.md",
+    "bytes": 222614,
+    "sha256": "64dc725c4c9a299a5dbad73d082bb99795ecca8b00496d783c43baca8db31b84"
+  },
+  "CLAUDE.md": {
+    "archive": "CLAUDE.before.md",
+    "bytes": 111653,
+    "sha256": "67b256e4752643794c5acf6ee6714910eca16c1f9f74aa55b1639b9bd35e32fe"
+  }
+}

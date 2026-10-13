@@ -187,10 +187,12 @@ void add_triangle(Scene& scene, const SceneVertex* quad, unsigned a, unsigned b,
     triangle.camera_mask = false;
     triangle.world_lit = true;
     triangle.depth_write = false;
-    // bhEff_PtclSpriteDrawB setzt njColorBlendingMode(0,8)/(1,6); bhSetBloodPoolLnk
-    // schreibt dasselbe Paar in bl_src/bl_dst.
+    // bhEff_PtclSpriteDrawB setzt njColorBlendingMode(0,8)/(1,6) vor seinen
+    // njPtclDrawSprite-Aufrufen; bhSetBloodPoolLnk schreibt dasselbe Paar.
+    color_blending_mode(0, 8);
+    color_blending_mode(1, 6);
     triangle.blend = SceneBlend::Ninja;
-    triangle.blend_register = ninja_blend_register(8, 6);
+    triangle.blend_register = color_blending_alpha();
     scene.triangles.push_back(triangle);
 }
 
@@ -629,6 +631,26 @@ void EffectParticles::tick(const std::function<NJS_POINT3(const ParticleLink&,NJ
 }
 
 std::size_t EffectParticles::active()const{return impl_->active_count();}
+
+// effect.c:220/234: der Originalkopie entspricht der vollstaendige Satz der
+// Nutzlasten (works/pools je eff-Platz, bl_ct als Hoehenstaffelung und der
+// AllocOwork-Umlaufzeiger). sprites_ gehoert dem Raumbesitzer.
+struct EffectParticles::State {
+    std::vector<Work> works;
+    std::vector<Pool> pools;
+    unsigned scan=0,blood_counter=0;
+};
+std::shared_ptr<const EffectParticles::State> EffectParticles::save()const{
+    auto state=std::make_shared<State>();
+    state->works=impl_->works;state->pools=impl_->pools;
+    state->scan=impl_->scan;state->blood_counter=impl_->blood_counter;
+    return state;
+}
+void EffectParticles::restore(const std::shared_ptr<const State>& state){
+    if(!state)return;
+    impl_->works=state->works;impl_->pools=state->pools;
+    impl_->scan=state->scan;impl_->blood_counter=state->blood_counter;
+}
 
 const std::set<std::string>& EffectParticles::unsupported()const{return impl_->unsupported;}
 

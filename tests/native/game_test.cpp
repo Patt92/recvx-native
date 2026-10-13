@@ -245,6 +245,21 @@ int main(int argc,char** argv){try{
         auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm question(binary,state,text);question.menu_open=status;text.show({0xff04,33,0xff04,34,0xffff},0);question.choose_dialog(int(selected));question.confirm_dialog();question.tick();check(!text.active()&&question.values[7]==selected+(status?100:0),"confirmed menu answer/result lost after dialogue closes");
         text.show({0xff04,33,0xfe09,0xff04,34,0xffff},1);question.tick();check(question.values[7]==1,"new question retains previous result offset");
     }
+    { // hitchk.c:4786 + game.c:196-286: examined camera (attr 0xb80e, RM_0031 medal door shape)
+        MessageDialog text;Inventory state;EventVm exm(data,state,text);
+        exm.interactions.push_back({1,3,0xb80e,0,{0,0,0},{10,0,10},{4,0,7,0}});
+        unsigned pt=~0u,cut_calls=0,event_cno=~0u,event_kno=~0u,returns=0,lights=0;
+        exm.presentation_flags=[&](unsigned clear,unsigned set){pt=(pt&~clear)|set;};exm.exm_light_off=[&]{++lights;};
+        exm.fixed_cut=[&](unsigned){++cut_calls;};exm.event_fixed_cut=[&](unsigned c,unsigned k){event_cno=c;event_kno=k;};exm.return_cut=[&]{++returns;};
+        exm.pad_state=[]{return std::pair<unsigned,unsigned>{0x200|0x800,0x200|0x800};};
+        const bool hit=exm.interact({5,0,2},32768,0); // 0xb80e admits only (ay+0x2000)&0xc000 == 0x8000
+        check(hit&&text.active()&&(exm.flags[5][0]&0x2284)==0x2284&&exm.exm_attr==0xb80e&&exm.fixcno==4&&exm.fixkno==7,"examined camera request incomplete");
+        exm.control_exm();
+        check(exm.flags[6][0]==0xb8&&!(pt&3)&&lights==1&&event_cno==4&&event_kno==7&&!cut_calls&&(exm.flags[5][0]&1)&&!(exm.flags[11][0]&0x1000)&&!(exm.flags[5][0]&0x200000),"examined camera pass differs from game.c (sp 0xb8, pt ~3, bhSetEventFixedCut)");
+        text.show({33,0xffff},0);exm.confirm_dialog();
+        check(!(exm.flags[5][0]&0x81)&&(pt&3)==3&&exm.flags[6][0]==0xffffffffu&&(exm.flags[11][0]&0x800),"closing the examined message keeps the camera");
+        exm.control_exm();check(returns==1&&!(exm.flags[11][0]&0x800),"bhCheckCut(1) does not return to the player cut");
+    }
     // Original room choices hand their result to scd1 for one pass. Both
     // Yes and No acknowledge the interaction; inventory questions do not.
     for(unsigned selected:{0u,1u}){
@@ -252,8 +267,10 @@ int main(int argc,char** argv){try{
         MessageDialog text;Inventory state;EventVm response(binary,state,text);
         response.interactions.push_back({1,3,0x8000,0,{0,0,0},{10,0,10},{0,0,0,0}});
         check(response.interact({5,0,8},0,0)&&text.active()&&(response.flags[5][0]&0x2204)==0x2204,"room interaction omits original modal work");
+        response.control_exm();check(response.flags[6][0]==0x30&&!(response.flags[10][0]&0x20),"room message leaves enemies/player simulation running (game.c cb_flg 0x20: sp_flg 0x30)");
         text.show({33,0xff02,0,0xff04,33,0xff04,34,0xffff},0);response.confirm_dialog();check(text.active()&&!(response.flags[10][0]&0x1000),"intermediate page acknowledges interaction");
         response.choose_dialog(int(selected));response.confirm_dialog();check((response.flags[10][0]&0x1000)&&(response.flags[5][0]&0x4000)&&!(response.flags[5][0]&0x2204)&&response.values[7]==selected,"interaction choice loses acknowledgement/end state");
+        check(response.flags[6][0]==0xffffffffu,"closing the room message does not restore sp_flg (message.c:312)");
         response.tick();check(response.errors.empty()&&response.values[30]==42&&(response.flags[11][0]&0x20000)&&!(response.flags[10][0]&0x1000),"scenario does not consume room answer/camera-retention command");
         response.values[30]=0;response.tick();check(response.values[30]==0,"interaction acknowledgement repeats");
         const std::vector<std::uint8_t> release={0x57,1,5,4,15,0,0,0,0xff,0};std::copy(release.begin(),release.end(),binary.begin()+1180);EventVm next(binary,state,text);next.inherit_progress(response);next.start(0,0);next.tick();check(next.errors.empty()&&next.flag(4,15)&&!(next.flags[11][0]&0x20000),"camera-retention release desynchronizes event");

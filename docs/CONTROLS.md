@@ -17,10 +17,12 @@ names. Keyboard and mapped gamepads can be used together without changing modes.
 | Inventory | Tab | Y |
 | Confirm/interact | Enter | A |
 | Cancel menu/dialogue | Escape | B |
+| Pause | P, Escape | Back/Select; press again or Start/Options to resume |
 | Menu/item examination | Arrow keys or WASD | Left stick or D-pad |
 | Cinematic skip (PS2 SELECT, `select`) | P | Back/Select |
 | Video skip (`skip`) | Space; Enter and Escape also skip active videos | Start/Options; A and B also skip active videos |
-| Pause | P | Back/Select; resume with Start/Options |
+| Quit | F10 | Unbound by default |
+| Wireframe diagnostic | F2 | Unbound by default |
 
 Only SELECT skips a running cinematic, as in the original (`system.c:545`
 `bhSysCallGame` reads `pad_ps & 0x10000`; `pad.c pad_tab_a[16]` maps it to the
@@ -29,8 +31,16 @@ acknowledges dialogue text. The host maps SELECT to P / Back by default (the
 same keys as the host pause, which is blocked while a cinematic runs); a
 `controls.ini` without a `select` line gets this default. There is no on-screen
 skip hint; the original shows none.
-| Quit | Escape outside menus/dialogue, or F10 | Unbound by default |
-| Wireframe diagnostic | F2 | Unbound by default |
+
+Escape never terminates the runtime. Inside a menu or dialogue it cancels;
+outside one, with free control, it opens the pause overlay and closes it again.
+`system.c:668` `bhSysCallEvent` enters the overlay (`ss_flg 0x80000000`,
+`ssv_md0 10`) and `system.c:691` leaves it on the same newly pressed button, so
+the pause key toggles; the gate is the original `st_flg 0x1C040208` mask, which
+keeps the pause out of cinematics, the map task, terminals, the status screen,
+doors, movies and scripted scenes. A key listed under `cancel` is therefore
+ignored under `quit`: an older `controls.ini` that still says
+`quit = Escape, F10` keeps F10 and loses Escape.
 
 The stick controls the current original-style tank movement; this does not add
 camera-relative 360-degree movement. Gameplay movement speed still uses the
@@ -89,8 +99,9 @@ logical Xbox-layout names, including for PlayStation hardware.
 Keyboard names are SDL scancode names (physical key positions), such as Return,
 Space, Escape, Tab, E, Left Shift and Right Shift. Duplicate keys/settings,
 unknown names, empty lists, nonfinite thresholds and invalid repeat counts are
-rejected. Sharing a physical key across contexts is supported: Escape can be
-cancel and quit; while a menu/dialogue is open it cancels instead of quitting.
+rejected. Sharing a physical key across contexts is supported: Escape cancels
+inside a menu or dialogue and is the host pause key outside one. A key listed
+under `cancel` never terminates the runtime, so `quit` ignores it.
 
 Axis thresholds are fractions from 0.05 to 0.95. The menu threshold must be at
 least the movement deadzone. Repetition values are ticks at the 60 Hz simulation

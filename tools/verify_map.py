@@ -73,15 +73,19 @@ GRID = (0x00, 0x30, 0x00)
 def check_picture(name, folder):
     width, height, pixel = read_bmp(folder / f'{name}.bmp')
     assert (width, height) == (640, 480), (width, height)
-    assert pixel(5, 5) == BACKGROUND, ('background fill missing at 5,5', pixel(5, 5))
-    # MapDrawLine on 0.5 + floor(x): rows 0,32,.. and columns 16,48,.. carry MapCol[1].
-    assert pixel(100, 32) == GRID and pixel(100, 33) == BACKGROUND, ('grid row 32', pixel(100, 32), pixel(100, 33))
-    assert pixel(16, 100) == GRID and pixel(17, 100) == BACKGROUND, ('grid column 16', pixel(16, 100), pixel(17, 100))
-    foreground = sum(1 for y in range(0, 480, 2) for x in range(0, 640, 2)
-                     if pixel(x, y) not in (BACKGROUND, GRID))
-    assert foreground > 500, ('the map picture shows only grid and background', foreground)
+    # FsubZoomScreen masks the outside with a 0x80000000 plate at -8.
+    # Background/grid probes must sit inside ScrIn (56,64)-(585,417).
+    assert pixel(100, 100) == BACKGROUND, ('background inside viewport', pixel(100, 100))
+    assert pixel(5, 5) == (0, 4, 0), ('frame plate blend', pixel(5, 5))
+    # MapDrawLine targets 0.5 + floor(x): row 96 and column -16+3*32=80.
+    assert pixel(100, 96) == GRID and pixel(100, 97) == BACKGROUND, ('grid row 96', pixel(100, 96), pixel(100, 97))
+    assert pixel(80, 100) == GRID and pixel(81, 100) == BACKGROUND, ('grid column 80', pixel(80, 100), pixel(81, 100))
+    foreground = sum(1 for y in range(96, 400, 2) for x in range(64, 550, 2)
+                     if pixel(x, y) not in (BACKGROUND, GRID, (0, 0, 0), (0, 4, 0)))
+    assert foreground > 500, ('no coloured map geometry inside the viewport', foreground)
     # FsubModeMessage: X button sprite (24x24 around 464,441) from the map texture.
-    button = sum(1 for y in range(429, 453) for x in range(452, 476) if pixel(x, y) not in (BACKGROUND, GRID))
+    button = sum(1 for y in range(429, 453) for x in range(452, 476)
+                 if pixel(x, y) not in (BACKGROUND, GRID, (0, 0, 0), (0, 4, 0)))
     assert button > 0, 'mode message sprite missing at 464,441'
     return foreground
 
@@ -150,6 +154,19 @@ def check(runtime, data, folder):
     assert not locked['dialog_open'], 'OK during the map reached an interaction'
     assert locked['events'] == opened['events'], ('OK during the map dispatched events', locked['events'])
 
+    # 2b. Task 7 (bhMainSequence -> bhControlPlayer) is stopped while the map owns
+    #     the screen: system.c:777 sets ts_flg 0x180 for the game/event entry, and
+    #     the status-menu entry already left sp_flg 0x30 from bhCheckSubTask
+    #     (system.c:608) so bhControlPlayer (player.c:1365, sp_flg & 0x1) cannot run.
+    #     A held direction must therefore not move the player.
+    walked = run(runtime, data, folder, 'status-map-move', 'RM_0020.RDX', 240, REPLAY + '150 keys forward\n')
+    assert walked['map']['active'], 'the map closed while a direction was held'
+    assert walked['actor'] == opened['actor'], (
+        'the player moved while the map was open', opened['actor'], walked['actor'])
+    assert (walked['motion'], walked['animation_frame']) == (opened['motion'], opened['animation_frame']), (
+        'the player motion advanced while the map was open',
+        (opened['motion'], opened['animation_frame']), (walked['motion'], walked['animation_frame']))
+
     # 3. Closing returns to the status menu and releases gm_flg 0x80000 and st_flg 0x40000.
     closed = run(runtime, data, folder, 'status-map-close', 'RM_0020.RDX', 320, REPLAY + CLOSE)
     after = require_binding(closed, 'status-map-close')
@@ -169,6 +186,14 @@ def check(runtime, data, folder):
     assert returned['screen_fade']['an'] == 0 and not returned['screen_fade']['running'], ('return fade', returned['screen_fade'])
     _, _, pixel = read_bmp(folder / 'status-map-return.bmp')
     assert any(pixel(x, y) != (0, 0, 0) for y in range(0, 480, 16) for x in range(0, 640, 16)), 'game picture stayed black after the map'
+
+    # Re-enter with the same MapScreen/MapRenderer owners after returning to
+    # gameplay: resources must be reloaded, not a stale generation-1 cache.
+    again_replay = REPLAY + CLOSE + '290 cancel\n300 cancel\n340 inventory\n380 cancel\n388 left\n396 confirm\n'
+    again = run(runtime, data, folder, 'status-map-reopen', 'RM_0020.RDX', 480, again_replay)
+    assert again['map']['active'] and again['map']['initialized'], 'map did not re-open'
+    assert again['map']['rendered']['objects'] > 0, 'floor resources lost on re-entry'
+    check_picture('status-map-reopen', folder)
 
     # 4. Event entry: the room that hands out a map (RM_0060, it_flg 133).
     #    Entered through the room's own script, not by forcing the task.

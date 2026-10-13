@@ -12,6 +12,10 @@ namespace recvx {
 // Select: the PS2 SELECT button (pad.c pad_tab_a[16] = NJS_PERIPHERAL 0x100 ->
 // sys->pad_ps 0x10000). It is the only button that requests the cinematic skip
 // (system.c:545 bhSysCallGame). Skip stays the host video skip / pause release.
+// Pause: the host key of the pause overlay (system.c:668 bhSysCallEvent sets
+// ss_flg 0x80000000 and ssv_md0 10). It toggles, because the original enters and
+// leaves on the same pad bit (pad_ps 0x20000 in, pad1.push 0x800 out). Escape is
+// bound to it as well: Cancel inside menus, never a quit key.
 enum class Action {Forward,Back,TurnLeft,TurnRight,Run,Inventory,Confirm,Cancel,Up,Down,Left,Right,Skip,Pause,Quit,Wireframe,Aim,Attack,NextTarget,Select,Count};
 constexpr unsigned action_count=unsigned(Action::Count);
 struct InputFrame {
@@ -23,6 +27,9 @@ struct InputFrame {
     int move()const{return int(down(Action::Forward))-int(down(Action::Back));}
     int turn()const{return int(down(Action::TurnRight))-int(down(Action::TurnLeft));}
 };
+// ItemBox uses the two shoulders independently of the combat button: native
+// bindings Aim (R/RB) and NextTarget (Q/LB) supply pad_tab_a bits 4 and 7.
+unsigned item_box_pad(const InputFrame& frame);
 struct InputBinding {enum class Kind {Key,Button,Axis};Kind kind;int code;int direction=1;};
 struct InputConfig {
     std::array<std::vector<InputBinding>,action_count> bindings;

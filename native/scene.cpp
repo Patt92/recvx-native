@@ -282,7 +282,12 @@ private:
                     if(type!=51 || vertices->size()!=count)throw std::runtime_error("skin vertex count does not match PS2 chunk");
                     value.position=(*vertices)[i];
                 } else njCalcPoint(world,&point,&value.position);
-                value.normal={};if(type==51){const auto* normals=options&&!options->world_normals.empty()?&options->world_normals[current_object]:nullptr;
+                value.normal={};
+                /* NJD_CV_VN (41), njCnkCvVn: three position floats followed
+                   immediately by three normal floats. Keep the transformed
+                   length, including original zero normals (no normalization). */
+                if(type==41){NJS_VECTOR n{view.f32(p+12),view.f32(p+16),view.f32(p+20)};njCalcVector(world,&n,&value.normal);}
+                if(type==51){const auto* normals=options&&!options->world_normals.empty()?&options->world_normals[current_object]:nullptr;
                     if(normals&&!normals->empty()){if(normals->size()!=count)throw std::runtime_error("skin normal count does not match PS2 chunk");value.normal=(*normals)[i];}
                     else{NJS_VECTOR n{view.f32(p+16),view.f32(p+20),view.f32(p+24)};njCalcVector(world,&n,&value.normal);}njUnitVector(&value.normal);}
                 value.valid=true;

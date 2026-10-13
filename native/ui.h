@@ -124,7 +124,7 @@ public:
     // frame); `arrows` mirrors the parts_15b[20]/[21] anim of ItemBox testmode
     // 2: 0 = table values (not scrolling), 1 = parts_09b[20] lit (Up), 2 =
     // parts_09b[21] lit (Down), 3 = both neutral (18).
-    void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0,float row_shift=0.f,unsigned arrows=0)const;
+    void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0,float row_shift=0.f,unsigned arrows=0,unsigned cursor_cell=0)const;
     void draw_title(SoftwareRenderer& image);
     // ADV/0002 title textures (AdvEasySetupTextureBasic): 0 = list texture 0
     // (background picture), 2 = list texture 1 (plate atlas). Loads on demand.
