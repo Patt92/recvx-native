@@ -28,6 +28,7 @@
    Dispatch-Eintrag 0x10 der Tabelle (eneset.c:51) gehoert dem
    Dispatcher-Besitzer und wird hier nur beschrieben, nicht angelegt. */
 #include "en16.h"
+#include "en03_lib.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include <math.h>
@@ -39,7 +40,7 @@
    4 + 12*i, EXP0_I(0x64) bei 0x64.
    --------------------------------------------------------------------------- */
 typedef struct {
-    int32_t slot;            /* +0x00 EXP0_I(0)     &eff[eff_id] (en16.c:89)     */
+    int32_t slot;            /* +0x00 EXP0_I(0)     &eff[eff_id] (en16.c:89); nativ eff_id + 1, 0 = NULL */
     RECVX_ENEMY_VEC pts[8];  /* +0x04 EXP0_P(0..7)  macros.h:80                  */
     int32_t pts_num;         /* +0x64 EXP0_I(0x64)  Anzahl gueltiger Punkte      */
 } RECVX_EN16_EXP0;
@@ -62,16 +63,9 @@ _Static_assert(offsetof(RECVX_EN16_EXP0, pts_num) == 0x64u,
    sind die BH_PWORK-Felder ct0 (0x3D4) und exp0 (0x2F0). en16.c:259
    (`(*(BH_PWORK**)epw->exp0)->lox`) belegt dieselbe Dereferenzkette fuer die
    uebrigen Felder. */
-typedef struct {
-    int32_t mode0;           /* +0x0C  ((char*)EXP0_I(0))[0xC] = 0/1/2
-                                (en16.c:46/90/140/149/174/315) */
-    int32_t ct0;             /* +0x3D4 bhEff_E11_CheckCollisionPlayer:
-                                > 0 = Strahl steht im Spieler
-                                (en16.c:198/217/223/365) */
-    RECVX_ENEMY_VEC gpx;     /* +0x58  Trefferpunkt auf dem Spieler (:223) */
-    RECVX_ENEMY_VEC lox;     /* +0x64  letzter Wandtreffer (:259-261) */
-    void*   atr;             /* +0x2F0 getroffene Flaeche (ATR_WORK*), :252 */
-} RECVX_EN16_EFF;
+/* RECVX_EN16_EFF (en16.h) traegt genau diese Felder. */
+static const RECVX_EN16_SERVICES* en16_extra;
+void recvx_en16_bind(const RECVX_EN16_SERVICES* services) { en16_extra = services; }
 
 /* ---------------------------------------------------------------------------
    Originalbausteine
@@ -127,13 +121,13 @@ static int en16_player(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* out)
     return 0;
 }
 
-/* Der Vertrag kennt nur set_effect/effect_set_mdlver, keine Sicht auf
-   Effektfelder. Der Lesezugriff liefert 0 und meldet die benoetigten Felder;
-   er laeuft nur, wenn EXP0_I(0) != 0 ist, also erst mit gebundenem Effekt. */
+/* EXP0_I(0) ist &eff[slot]; nativ steht dort slot + 1, 0 bleibt NULL. */
 static int en16_eff_read(RECVX_ENEMY_WORK* w, RECVX_EN16_EFF* out)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
-    (void)out;
+    const RECVX_EN16_EXP0* e = (const RECVX_EN16_EXP0*)w->exp0;
+    if (!e || e->slot == 0) return 0;
+    if (en16_extra && en16_extra->effect_get && en16_extra->effect_get(e->slot - 1, out)) return 1;
     if (sv && sv->gap)
         sv->gap("Effektfeld-Sicht eff[mode0,ct0,gpx,lox,exp0] (effsub2.c:2390)");
     return 0;
@@ -143,7 +137,11 @@ static int en16_eff_read(RECVX_ENEMY_WORK* w, RECVX_EN16_EFF* out)
 static void en16_eff_mode(RECVX_ENEMY_WORK* w, int32_t mode0)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
-    (void)mode0;
+    const RECVX_EN16_EXP0* e = (const RECVX_EN16_EXP0*)w->exp0;
+    if (e && e->slot != 0 && en16_extra && en16_extra->effect_mode) {
+        en16_extra->effect_mode(e->slot - 1, mode0);
+        return;
+    }
     if (sv && sv->gap) sv->gap("eff[slot].mode0 (O_WRK+0xC)");
 }
 
@@ -247,24 +245,23 @@ static void en16_init(RECVX_ENEMY_WORK* w)
             e->slot = 0;
             e->pts_num = 0;
 
-            /* en16.c:75-86: EF-Vorlage {flg 1, id 270, type 0, mdlver 0,
+            /* en16.c:75-87: EF-Vorlage {flg 1, id 270, type 0, mdlver 0,
                px/py/pz 0, sx/sy/sz 0, ay 0} und
-               bhSetEffectTb(&sys->ef, NULL, (unsigned char*)epw, 0)
-               (effect.c:436). Nativ fehlt der Dienst mit vollstaendiger
-               Vorlage — set_effect (enemy_work.h:419) kennt nur
-               id/pos/off/link/param, die Skala waere 1 statt 0 — und Effekt
-               270 ist nicht portiert. Deshalb bleibt EXP0_I(0) == 0, genau
-               wie im Original bei eff_id < 0. */
-            if (sv && sv->gap)
-                sv->gap("bhSetEffectTb(EF{flg=1,id=270,type=0,scale=0,ay=0})");
-            eff_id = -1;
+               bhSetEffectTb(&sys->ef, NULL, (unsigned char*)epw, 0). */
+            if (en16_extra && en16_extra->effect_tb) eff_id = en16_extra->effect_tb(w);
+            else {
+                if (sv && sv->gap)
+                    sv->gap("bhSetEffectTb(EF{flg=1,id=270,type=0,scale=0,ay=0})");
+                eff_id = -1;
+            }
 
             if (eff_id >= 0) {
-                e->slot = eff_id;
+                e->slot = eff_id + 1;
                 en16_eff_mode(w, 0);   /* en16.c:90 */
                 /* en16.c:91 bhEff_E16_LaserSight((O_WRK*)EXP0_I(0))
                    (effsub2.c:2353; case 0 setzt func + mode0++). */
-                if (sv && sv->gap) sv->gap("bhEff_E16_LaserSight(eff)");
+                if (en16_extra && en16_extra->effect_step) en16_extra->effect_step(eff_id);
+                else if (sv && sv->gap) sv->gap("bhEff_E16_LaserSight(eff)");
             }
         }
     }
@@ -290,14 +287,12 @@ static void en16_br00(RECVX_ENEMY_WORK* w)
 
     if (!en16_player(w, &ply)) return;   /* plp->flr_no/px/pz unbekannt */
 
-    /* hitchk.c:5474 bhCheckFloorEnemy(plp->flr_no, plp->px, plp->pz): sucht
-       die Bodenflaeche (rom->flrp + sys->mflrp) mit flg&1, type 2,
-       px..px+w / pz..pz+d und passendem flr_no; Rueckgabe Flaeche oder NULL,
-       gelesen wird nur prm0. Der Vertrag hat diesen Dienst nicht
-       (line/ground/floor_num decken ihn nicht ab). Solange er fehlt, ist das
-       Ergebnis unbekannt und der Zweig verhaelt sich wie das Original bei
-       NULL — gemeldet, kein Ersatzwert. */
-    if (sv && sv->gap)
+    /* hitchk.c:5474 bhCheckFloorEnemy(plp->flr_no, plp->px, plp->pz): erste
+       Bodenflaeche (rom->flrp + sys->mflrp) mit flg&1, type 2, px..px+w /
+       pz..pz+d und passendem flr_no; gelesen wird nur prm0. */
+    if (en16_extra && en16_extra->floor_enemy)
+        hit = en16_extra->floor_enemy(ply.flr_no, ply.pos.x, ply.pos.z, &prm0);
+    else if (sv && sv->gap)
         sv->gap("bhCheckFloorEnemy(plp->flr_no,plp->px,plp->pz) (Ergebnis "
                 "unbekannt, Zweig wie NULL)");
 
@@ -411,14 +406,17 @@ static void en16_mv02(RECVX_ENEMY_WORK* w)
                         dir.x = w->xn - w->px;
                         dir.y = w->yn - w->py;
                         dir.z = w->zn - w->pz;
-                        if (sv && sv->gap)
-                            sv->gap("plp->dvx/dvy/dvz = Zielpunkt - Position "
-                                    "(en16.c:219-221)");
-                        /* :223 erster Parameter ist plp (Spielerwork), der
-                           Vertragsdienst nimmt einen Gegnerwork. */
-                        if (sv && sv->gap)
-                            sv->gap("bhEne_SetBloodEffectBurst(plp,2,eff->ct0,"
-                                    "&eff->gpx,1) (en16.c:223)");
+                        /* :219-223: plp->dv = Zielpunkt - Position, danach
+                           bhEne_SetBloodEffectBurst(plp, 2, eff->ct0, &eff->gpx, 1)
+                           (zonzon1.c:243) am Spielerbesitzer. */
+                        {
+                            int djnt = 0; RECVX_ENEMY_VEC dv0, dp;
+                            const RECVX_T3_LINK plink = { NULL, 1 };
+                            if (recvx_t3_player_hit_get(&djnt, &dv0, &dp)) {
+                                recvx_t3_player_hit_set(djnt, &dir, &dp);
+                                recvx_t3_set_blood_effect_burst(plink, 2, eff.ct0, &eff.gpx, 1);
+                            }
+                        }
                         /* :224-236 */
                         if (150 < ply.hp)      ply.hp -= ply.hp / 2;
                         else if (50 < ply.hp)  ply.hp -= ply.hp / 3;
@@ -436,18 +434,24 @@ static void en16_mv02(RECVX_ENEMY_WORK* w)
                         if (sv && sv->player_set) sv->player_set(&ply);
                         else if (sv && sv->gap) sv->gap("player_set (Spielerbesitzer)");
                     } else if (eff.atr != NULL) {
-                        /* :252-266 Wandtreffer: hp = Effekt-exp0,
-                           v = Position - Zielpunkt, pos = eff->lox/loy/loz,
-                           bhSetEffGunSpark(&pos,&v,0xFFF8F8A0,0x4CE04010,
-                           WpnTab[13].hiteff-4),
-                           gap.wpn_no = 0xD, gap.ay = bhArcTan2(v.x,v.z),
-                           bhSetGunSplash(&gap,&pos,hp->prm0).
-                           bhCheckWallAttrB89 (hitchk.c:5881) und die beiden
-                           Effektaufrufe sind nativ nicht gebunden; die
-                           Bedingung wird nicht ersetzt. */
-                        if (sv && sv->gap)
-                            sv->gap("bhCheckWallAttrB89 + bhSetEffGunSpark + "
-                                    "bhSetGunSplash (en16.c:252-266)");
+                        /* :252-266 Wandtreffer: v = Position - Zielpunkt,
+                           pos = eff->lox/loy/loz, Funken 308 und
+                           bhSetGunSplash(&gap {wpn_no 0xD, ay = bhArcTan2(v.x,v.z)}, &pos, hp->prm0). */
+                        int32_t prm0 = 0;
+                        if (en16_extra && en16_extra->wall_attr_b89 &&
+                            en16_extra->wall_attr_b89(eff.atr, &prm0)) {
+                            RECVX_ENEMY_VEC v, at;
+                            v.x = w->px - w->xn; v.y = w->py - w->yn; v.z = w->pz - w->zn;
+                            at = eff.lox;
+                            /* bhSetEffGunSpark -> bhSetRapEff(308) (effsub3.c:2401):
+                               OR_WORK-Effekt 308 ist nativ nicht portiert. */
+                            if (sv && sv->gap) sv->gap("bhSetEffGunSpark/bhEff308 (en16.c:262)");
+                            if (en16_extra->gun_splash)
+                                en16_extra->gun_splash(0xD, (int32_t)recvx_t3_arc_tan2(v.x, v.z), &v, &at, prm0);
+                            else if (sv && sv->gap) sv->gap("bhSetGunSplash (en16.c:265)");
+                        } else if (!en16_extra || !en16_extra->wall_attr_b89) {
+                            if (sv && sv->gap) sv->gap("bhCheckWallAttrB89 (en16.c:253)");
+                        }
                     }
                 }
             }

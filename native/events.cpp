@@ -38,7 +38,7 @@ void EventVm::inherit_progress(const EventVm& previous){
     for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
 }
-void EventVm::initialize(){if(initialize_enemies)initialize_enemies();Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
+void EventVm::initialize(){if(initialize_enemies)initialize_enemies();ifel_debt_=0;Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
 void EventVm::world(Task& task,unsigned op,std::size_t length){
     BinaryView v(room_);v.require(task.pc,length);EventCommand c{op,task.level,task.event,task.pc-base_,{room_.begin()+task.pc,room_.begin()+task.pc+length}};
     c.loop_remaining=task.cnt2;c.loop_total=task.cnt3;
@@ -51,10 +51,16 @@ int EventVm::instruction(Task& t){
     /* Diagnose: RECVX_EVENT_TRACE=1 protokolliert jede ausgefuehrte Skriptanweisung (Event, Ebene, Offset, Bytes). */
     if(static const bool trace=std::getenv("RECVX_EVENT_TRACE")!=nullptr;trace){std::fprintf(stderr,"EVTRACE ev=%u lvl=%u off=%zu op=%02x:",t.event,t.level,p-base_,op);for(std::size_t i=1;i<10&&p+i<room_.size();++i)std::fprintf(stderr," %02x",v.u8(p+i));std::fputc('\n',stderr);}
     switch(op){
-    case 0:return 0;
-    case 1:{const auto target=v.relative(p+2,v.u8(p+1),1);if(t.branches.size()>=32)throw std::runtime_error("event IF nesting limit");t.branches.push_back(target);return advance(2);}
-    case 2:if(t.branches.empty())throw std::runtime_error("event ELSE without IF");t.branches.pop_back();t.pc=v.relative(p,v.u8(p+1),1);return 1;
-    case 3:if(t.branches.empty())throw std::runtime_error("event ENDIF without IF");t.branches.pop_back();return advance(2);
+    // event.c:388 bhEnd: bhIfelFlg = 0, offene Zweige verfallen.
+    case 0:t.branches.clear();ifel_debt_=0;return 0;
+    // event.c:395 bhIfelCk: bhIfelFlg++. Steht der Zaehler nach einem ENDIF ohne IF
+    // im Minus, hebt das IF nur die Schuld auf; ein Fehlschlag springt dann nicht
+    // (Schleifenabbruch bei bhIfelFlg <= 0, event.c:13049).
+    case 1:{const auto target=v.relative(p+2,v.u8(p+1),1);if(ifel_debt_<0){++ifel_debt_;return advance(2);}if(t.branches.size()>=32)throw std::runtime_error("event IF nesting limit");t.branches.push_back(target);return advance(2);}
+    // event.c:413 bhElseCk / :425 bhEndif: G_Sp--, bhIfelFlg--; ohne offenes IF geht
+    // der Zaehler ins Minus, der Befehl selbst wird wie im Original ausgefuehrt.
+    case 2:if(t.branches.empty())--ifel_debt_;else t.branches.pop_back();t.pc=v.relative(p,v.u8(p+1),1);return 1;
+    case 3:if(t.branches.empty())--ifel_debt_;else t.branches.pop_back();return advance(2);
     case 4:{const unsigned matrix=v.u8(p+1),bit=v.u16(p+2),extra=v.u8(p+4),mode=v.u8(p+5);advance(6);if(matrix==10&&((bit==22&&values[16]!=extra)||(bit==23&&values[20]!=extra)))return 0;return int(mode)^int(flag(matrix,bit&0x3ff));}
     case 5:set_flag(v.u8(p+1),v.u16(p+2)&0x3ff,v.u8(p+5));return advance(6);
     case 6:{const unsigned key=v.u8(p+1),mode=v.u8(p+2),operand=v.u8(p+3);advance(4);switch(mode){case 0:return values[key]==operand;case 1:return values[key]>operand;case 2:return values[key]>=operand;case 3:return values[key]<operand;case 4:return values[key]<=operand;case 5:return values[key]!=operand;default:throw std::runtime_error("unsupported event byte comparison");}}
@@ -76,7 +82,9 @@ int EventVm::instruction(Task& t){
     case 0x62:{const unsigned camera=v.u8(p+1),key=v.u8(p+2),match_key=v.u8(p+3);advance(6);if(!(flags[6][0]&0x40))return 1;
         if(flags[5][0]&1){unsigned active=0,active_key=0;if(!event_camera)throw std::runtime_error("camera check requires native world binding");if(event_camera(active,active_key)&&active==camera&&(!match_key||active_key==key))return 0;}return 1;}
     // bhCamInfoSet toggles CUT_WORK.flg bit 0 of camera-switch group v1.
-    case 0x2a:{const auto mode=v.u8(p+1);world(t,op,4);if(!mode){flags[5][0]|=1;flags[11][0]|=0x1000;}else if(mode==1){flags[5][0]&=~1u;flags[11][0]&=~0x1000u;}return 1;}
+    // event.c:994 bhCamSet2: case 0 sets st_flg 0x1, gm_flg 0x1000 and sys->fixcno = v1, then
+    // bhSetFixedCut (cut.c:448) clears gm_flg 0x1000 at once; game.c:274 must not see it later.
+    case 0x2a:{const auto mode=v.u8(p+1);if(!mode){flags[5][0]|=1;fixcno=v.u8(p+2);}world(t,op,4);if(!mode)flags[11][0]&=~0x1000u;else if(mode==1){flags[5][0]&=~1u;flags[11][0]&=~0x1000u;}return 1;}
     case 0x39:world(t,op,4);return 1;
     // Original Event_T_timer: one increment per scheduler pass with active work.
     case 0x60:{const auto limit=v.u16(p+4);advance(6);return event_timer<limit;}
@@ -372,7 +380,7 @@ void EventVm::control_exm(){
     if((gm&0x800)&&(sp&0x40)&&!(st&1)&&!(gm&0x40)){gm&=~0x800u;if(return_cut)return_cut();}
     pad_cleared_=false;
 }
-void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
+void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_debt_=0; /* bhScenarioCheck: bhIfelFlg = 0 */Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
     // ItemUse/Use_01/05 call StatusCancel, whose animated exit keeps st_flg
     // 8 for bhControlEvent. The host closes visually at once; retain that
     // handover through one complete scenario/scheduler pass.

@@ -7,12 +7,25 @@ import platform
 import plistlib
 import shlex
 import shutil
+import re
 import subprocess
 import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.5'
+def _project_version():
+    # Einzige Quelle: project(... VERSION x.y.z) in CMakeLists.txt; die Buildnummer
+    # zaehlt die Commits (git rev-list --count HEAD), damit jede App ihre Version traegt.
+    text = (Path(__file__).resolve().parents[1] / 'CMakeLists.txt').read_text()
+    major, minor = re.search(r'project\(recvx_native VERSION (\d+)\.(\d+)', text).groups()
+    try:
+        build = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'], cwd=Path(__file__).resolve().parents[1], text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        build = '0'
+    return f'{major}.{minor}', f'{major}.{minor}.{build}'
+
+
+VERSION, FULL_VERSION = _project_version()  # VERSION benennt das Paketverzeichnis (Start.command)
 
 
 def run(*args):
@@ -67,7 +80,7 @@ def sync_macos_start_package(build: Path) -> None:
         with (contents / 'Info.plist').open('wb') as info:
             plistlib.dump({'CFBundleExecutable': 'Start', 'CFBundleIdentifier': 'org.recvx.native.development',
                           'CFBundleName': 'RECVX Native', 'CFBundlePackageType': 'APPL',
-                          'CFBundleVersion': VERSION, 'LSMinimumSystemVersion': '11.0',
+                          'CFBundleVersion': FULL_VERSION, 'CFBundleShortVersionString': FULL_VERSION, 'LSMinimumSystemVersion': '11.0',
                           'NSHighResolutionCapable': True}, info)
         run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT, '--binary', runtime)
         run('codesign', '--force', '--sign', '-', bundled_library)
@@ -122,7 +135,7 @@ def main():
             parser.error('macOS builds require a macOS host')
         build = ROOT / 'build' / ('macos-arm64' if target == 'macos' else 'windows-native' if target == 'windows' else 'native')
         run_checks = args.test and not args.no_test
-        configure = ['cmake', '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}']
+        configure = ['cmake', '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}']
         if target == 'macos':
             configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
         run(*configure)

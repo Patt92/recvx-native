@@ -1000,23 +1000,18 @@ static void en21_set_spark_eff(RECVX_ENEMY_WORK* w, int num, int flg, uint32_t o
     int n;
 
     for (n = 0; n < num; ++n) {
-        RECVX_T3_EFF ef = {0};
-        RECVX_T3_LINK none = {NULL, 0};
+        RECVX_ENEMY_VEC pos;
+        int32_t ay = 0;
+        const int32_t* angle = NULL;
         RECVX_ENEMY_PLAYER ply;
         float mtx[16];
-        int slot;
-
-        ef.id = 399;
-        ef.flg = 1;
-        ef.type = flg;
-        ef.sx = 1.0f; ef.sy = 1.0f; ef.sz = 1.0f;
 
         switch (flg) {
         case 0:
-            ef.px = w->px - 0.5f;
-            ef.py = w->py + 0.7f;
-            ef.pz = w->pz - 0.5f;
-            ef.ay = w->ay;
+            pos.x = w->px - 0.5f;
+            pos.y = w->py + 0.7f;
+            pos.z = w->pz - 0.5f;
+            ay = w->ay; angle = &ay;
             break;
 
         case 1: {
@@ -1031,11 +1026,11 @@ static void en21_set_spark_eff(RECVX_ENEMY_WORK* w, int num, int flg, uint32_t o
             mx = mtx[12]; my = mtx[13]; mz = mtx[14];
 
             tmp = ((en21_rand(w) % 2) ? 0.2f : -0.2f);
-            ef.px = mx + (tmp * (en21_rand(w) % 3));
+            pos.x = mx + (tmp * (en21_rand(w) % 3));
             tmp = ((en21_rand(w) % 2) ? 0.1f : -0.1f);
-            ef.pz = mz + (tmp * (en21_rand(w) % 3));
+            pos.z = mz + (tmp * (en21_rand(w) % 3));
             tmp = ((en21_rand(w) % 2) ? 0.1f : -0.1f);
-            ef.py = my + (tmp * (en21_rand(w) % 3));
+            pos.y = my + (tmp * (en21_rand(w) % 3));
             break;
         }
 
@@ -1043,10 +1038,10 @@ static void en21_set_spark_eff(RECVX_ENEMY_WORK* w, int num, int flg, uint32_t o
             float tmp;
             if (!en21_player(w, &ply)) return;
             tmp = ((en21_rand(w) % 2) ? 0.5f : -0.5f);
-            ef.px = ply.pos.x + (tmp * ((en21_rand(w) % 6) + 1));
+            pos.x = ply.pos.x + (tmp * ((en21_rand(w) % 6) + 1));
             tmp = ((en21_rand(w) % 2) ? 0.4f : -0.4f);
-            ef.pz = ply.pos.z + (tmp * ((en21_rand(w) % 5) + 1));
-            ef.py = ply.pos.y + (3.0f * ((en21_rand(w) % 5) + 1));
+            pos.z = ply.pos.z + (tmp * ((en21_rand(w) % 5) + 1));
+            pos.y = ply.pos.y + (3.0f * ((en21_rand(w) % 5) + 1));
             break;
         }
 
@@ -1059,10 +1054,10 @@ static void en21_set_spark_eff(RECVX_ENEMY_WORK* w, int num, int flg, uint32_t o
             mx = mtx[12];
             my = mtx[13] + 0.7f;
             mz = mtx[14];
-            ef.px = mx;
-            ef.pz = mz;
-            ef.py = my;
-            ef.ay = w->ay + EN21_DEG_ANG(180.0f);
+            pos.x = mx;
+            pos.z = mz;
+            pos.y = my;
+            ay = w->ay + EN21_DEG_ANG(180.0f); angle = &ay;
             break;
         }
 
@@ -1072,58 +1067,27 @@ static void en21_set_spark_eff(RECVX_ENEMY_WORK* w, int num, int flg, uint32_t o
             return;
         }
 
-        if (!ext || !ext->effect_tb || !ext->effect_patch || !ext->model_texp) {
-            en21_gap(w, "bhSetEffectTb/eff[eno]/mlwP->texP (en21.c:1157)");
-            return;
-        }
-        slot = ext->effect_tb(&ef, NULL, none, 0);
-        if (slot != -1) {
-            RECVX_T3_EFFPATCH p = {0};
-            p.fields = RECVX_T3_EFF_STFLG_OR | RECVX_T3_EFF_TEXP | RECVX_T3_EFF_TEX_ID;
-            p.stflg_or = 0x20;
-            p.texp = ext->model_texp(w);
-            p.tex_id = 5;
-            ext->effect_patch(slot, &p);
-        }
+        if (en21_services && en21_services->effect_request)
+            en21_services->effect_request(w, 399, flg, &pos, NULL, angle, 5);
+        else en21_gap(w, "bhEne21_SetSparkEff: sys->ef/txp[0]");
     }
 }
 
 /* en21.c:1299 bhEne21_SetMarkEff. */
 static void en21_set_mark_eff(RECVX_ENEMY_WORK* w)
 {
-    const RECVX_ENEMY_EXT* ext = recvx_enemy_ext();
-    RECVX_T3_EFF ef = {0};
-    RECVX_T3_LINK none = {NULL, 0};
     float mtx[16];
-    int slot;
+    RECVX_ENEMY_VEC pos;
+    const int32_t ax = EN21_DEG_ANG(90.0f), ay = w->ay;
 
     if (!w->sv || !w->sv->joint_matrix || !w->sv->joint_matrix(w, 0u, mtx)) {
         en21_gap(w, "bhEne21_SetMarkEff:mlwP->owP[0].mtx");
         return;
     }
-    ef.id = 396;
-    ef.flg = 1;
-    ef.type = 0;
-    ef.sx = 1.0f; ef.sy = 1.0f; ef.sz = 1.0f;
-    ef.px = mtx[12];
-    ef.py = mtx[13] + 0.1f;
-    ef.pz = mtx[14];
-    ef.ay = w->ay;
-    ef.ax = EN21_DEG_ANG(90.0f);
-
-    if (!ext || !ext->effect_tb || !ext->effect_patch || !ext->model_texp) {
-        en21_gap(w, "bhSetEffectTb/eff[eno]/mlwP->texP (en21.c:1315)");
-        return;
-    }
-    slot = ext->effect_tb(&ef, NULL, none, 0);
-    if (slot != -1) {
-        RECVX_T3_EFFPATCH p = {0};
-        p.fields = RECVX_T3_EFF_STFLG_OR | RECVX_T3_EFF_TEXP | RECVX_T3_EFF_TEX_ID;
-        p.stflg_or = 0x20;
-        p.texp = ext->model_texp(w);
-        p.tex_id = 6;
-        ext->effect_patch(slot, &p);
-    }
+    pos.x = mtx[12]; pos.y = mtx[13] + 0.1f; pos.z = mtx[14];
+    if (en21_services && en21_services->effect_request)
+        en21_services->effect_request(w, 396, 0, &pos, &ax, &ay, 6);
+    else en21_gap(w, "bhEne21_SetMarkEff: sys->ef/txp[0]");
 }
 
 /* ---------------------------------------------------------------------------

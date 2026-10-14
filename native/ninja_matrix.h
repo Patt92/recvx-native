@@ -8,6 +8,9 @@ typedef Float NJS_MATRIX[16];
 typedef struct { Float x,y,z; } NJS_VECTOR;
 typedef NJS_VECTOR NJS_POINT3;
 typedef struct { Float x,y,z,w; } NJS_POINT4;
+typedef struct { Float x,y; } NJS_POINT2;
+/* ninja.h NJS_SCREEN (types.h:2112, 0x14 Bytes): dist, w, h, cx, cy. */
+typedef struct { Float dist,w,h,cx,cy; } NJS_SCREEN;
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -51,8 +54,30 @@ Float njScalor(NJS_VECTOR* v);
 Float njUnitVector(NJS_VECTOR* v);
 Float njInnerProduct(NJS_VECTOR* a, NJS_VECTOR* b);
 Float njOuterProduct(NJS_VECTOR* a, NJS_VECTOR* b, NJS_VECTOR* dest);
+/* ps2_NaColi.c:301 — Flaechennormale aus den ERSTEN DREI Punkten von p:
+   (p1-p0) x (p2-p1), unnormiert. */
+void njGetPlaneNormal(NJS_POINT3* p, NJS_VECTOR* v);
+/* ps2_NaColi.c:314 — dieselbe Normale aus drei einzelnen Punkten. Die
+   Kantenreihenfolge ist (p1-p0) x (p2-p1), nicht (p1-p0) x (p2-p0). */
+void njGetPlaneNormal2(NJS_POINT3* p0, NJS_POINT3* p1, NJS_POINT3* p2, NJS_VECTOR* v);
+/* ps2_NaView.c:217 — NaViewScreenMatrix = diag(AspectW, AspectH, 1) mit [15] = dist. */
+void njViewScreenMatrix(NJS_MATRIX* vs);
+/* ps2_NaView.c:27 / :81 / :55 — Bildschirm-, Seitenverhaeltnis- und
+   Perspektivzustand. Die Hardwareteile des Originals (Ps2CalcScreenCone,
+   vu1SetScreenProjection/Offset, njClearMatrix) haben hier keinen Abnehmer. */
+void njSetScreen(NJS_SCREEN* s);
+void njSetAspect(Float ax, Float ay);
+void njSetPerspective(Angle ang);
+/* ps2_NaMatrix.c:1572 — Bildschirmpunkt von p3 unter m (NULL = aktuelle
+   Matrix): NaViewScreenMatrix * m, dann x/y durch z geteilt, mit dist
+   skaliert und um fNaViwOffsetX/Y verschoben. p2->z des Originals landet in
+   einer lokalen Variablen und ist damit kein Ergebnis. */
+void njProjectScreen(NJS_MATRIX* m, NJS_POINT3* p3, NJS_POINT2* p2);
 extern NJS_MATRIX* pNaMatMatrixStuckPtr;
 extern NJS_MATRIX NaViwViewMatrix;
+extern NJS_MATRIX NaViewScreenMatrix;
+extern NJS_SCREEN _nj_screen_;
+extern Float fNaViwOffsetX, fNaViwOffsetY, fNaViwAspectW, fNaViwAspectH;
 #ifdef __cplusplus
 }
 #endif

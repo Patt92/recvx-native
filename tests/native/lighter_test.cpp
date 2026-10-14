@@ -97,9 +97,19 @@ static void resources(const std::filesystem::path& data){
     world.set_simulation_flags(0);const auto before=world.effect_state(slot)->ct0;const auto clock=world.light_state(1)->clock;world.tick();check(world.effect_state(slot)->ct0==before&&world.light_state(1)->clock==clock&&world.effect_visible(slot),"paused effect does not retain its queued frame");
     events.flags[14][0]|=0x1000000;check(!world.effect_visible(slot),"paused hidden-player flame remains drawn");events.flags[14][0]&=~0x1000000u;
     world.set_simulation_flags(~0u);world.set_presentation_flags(0);world.tick();check(!world.effect_visible(slot)&&world.effect_state(slot)->ct0==before,"presentation gate ignored");world.set_presentation_flags(~0u);
-    world.set_player_weapon(0);world.tick();check(!world.effect_state(slot)->flg&&!world.effect_visible(slot)&&!(events.flags[13][0]&0x1000000)&&!(world.light_state(1)->flags&2),"unequip leaves flame/light allocated");
-    world.set_player_weapon(1);world.tick();check(world.effect_visible(slot)&&world.effect_state(slot)->ct0==1,"reequip does not reuse first free shared slot/reset UV cursor");
-    events.flags[14][0]|=0x1000000;world.tick();check(!world.effect_visible(slot)&&!(world.light_state(1)->flags&2),"hidden player control leaves its lighter light enabled");events.flags[14][0]&=~0x1000000u;world.tick();check(world.effect_visible(slot)&&(world.light_state(1)->flags&2),"player light does not relink after hidden status ends");
+    // effect.c:268 bhSetExtraEffectWork nimmt den ersten freien eff[512]-Platz: der eben
+    // freigegebene Flammenplatz kann im selben Pass als Hilfsarbeitssatz (flg 2) eines
+    // anderen Raumeffekts wiederkehren. Geprueft wird deshalb, dass keine Flamme mehr
+    // lebt, nicht dass genau dieser Platz leer bleibt.
+    const auto flame_live=[&]{for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(s&&(s->flg&1u)&&s->id==9&&s->type==2)return true;}return false;};
+    world.set_player_weapon(0);world.tick();check(!flame_live()&&!world.effect_visible(slot)&&!(events.flags[13][0]&0x1000000)&&!(world.light_state(1)->flags&2),"unequip leaves flame/light allocated");
+    // bhSetEffectTb nimmt den ersten freien Platz des geteilten eff[512]-Satzes: welcher das
+    // ist, haengt davon ab, was die uebrigen Raumeffekte gerade belegen (auch Hilfsarbeitssaetze).
+    world.set_player_weapon(1);world.tick();
+    unsigned flame=512;for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(s&&(s->flg&1u)&&s->id==9&&s->type==2){flame=i;break;}}
+    check(flame<512&&world.effect_visible(flame)&&world.effect_state(flame)->ct0==1,"reequip does not reset the UV cursor");
+    for(unsigned i=0;i<flame;++i){const auto* s=world.effect_state(i);check(s&&(s->flg&3u),"reequip did not take the first free shared slot");}
+    events.flags[14][0]|=0x1000000;world.tick();check(!world.effect_visible(flame)&&!(world.light_state(1)->flags&2),"hidden player control leaves its lighter light enabled");events.flags[14][0]&=~0x1000000u;world.tick();check(world.effect_visible(flame)&&(world.light_state(1)->flags&2),"player light does not relink after hidden status ends");
     world.set_player_weapon(0);world.tick();unsigned object=4;while(object<256&&(!world.state(2,object)||!(world.state(2,object)->object_flags&1u)))++object;
     check(object<256,"real room contains no enabled object for object-linked flame test");
     check(world.bind({0xa2,0,0,0,{0xa2,std::uint8_t(object),0,0}}),"object lighter event remains unbound");world.tick();

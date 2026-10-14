@@ -89,6 +89,29 @@ void player_hit_set(int djnt, const RECVX_ENEMY_VEC*, const RECVX_ENEMY_VEC* dp)
 void voice_free(int n) { voices.push_back(n); }
 int particle_mk2(RECVX_T3_LINK, int, const RECVX_ENEMY_VEC*, const RECVX_ENEMY_VEC*, uint32_t, uint32_t, int) { ++particles; return 0; }
 
+// en21.c:1085/1299 now go through RECVX_EN21_SERVICES.effect_request instead of
+// the shared RECVX_ENEMY_EXT effect_tb/effect_patch pair (world_enemies.cpp
+// bound it directly to effect_detail::request_template()+patch). The fixture
+// writes into the same effects/patches vectors so the existing spark/mark
+// assertions keep checking the real values, not a weaker stand-in.
+int effect_request(RECVX_ENEMY_WORK* w, int id, int type, const RECVX_ENEMY_VEC* pos,
+                   const int32_t* ax, const int32_t* ay, int tex_id)
+{
+    RECVX_T3_EFF ef{};
+    ef.id = id; ef.flg = 1; ef.type = type;
+    ef.px = pos->x; ef.py = pos->y; ef.pz = pos->z;
+    ef.sx = 1.f; ef.sy = 1.f; ef.sz = 1.f;
+    if (ax) ef.ax = *ax;
+    if (ay) ef.ay = *ay;
+    effects.push_back(ef);
+    const int slot = int(effects.size()) - 1;
+    RECVX_T3_EFFPATCH p{};
+    p.fields = RECVX_T3_EFF_STFLG_OR | RECVX_T3_EFF_TEXP | RECVX_T3_EFF_TEX_ID;
+    p.stflg_or = 0x20; p.texp = model_texp(w); p.tex_id = tex_id;
+    patches.push_back(p);
+    return slot;
+}
+
 int route(const RECVX_ENEMY_VEC* a, const RECVX_ENEMY_VEC* b, RECVX_ENEMY_VEC* o) { return route_fn ? route_fn(a, b, o) : 0xFF; }
 int game_mode(int* out) { *out = gm_mode_value; return 1; }
 void set_way(int16_t w) { way_value = w; way_set = true; }
@@ -116,6 +139,7 @@ void build()
     ext_full.ene_at = [](uint32_t) -> RECVX_ENEMY_WORK* { return nullptr; };
     x21 = RECVX_EN21_SERVICES{};
     x21.check_route = route; x21.game_mode = game_mode; x21.player_set_way = set_way;
+    x21.effect_request = effect_request;
     recvx_enemy_ext_bind(&ext_full);
     recvx_en21_bind(&x21);
 }

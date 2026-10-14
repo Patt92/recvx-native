@@ -1,5 +1,12 @@
 # Effektprozedur-Generator, Laufbericht
 
+> Stand 2026-10-14 (nach dem Lauf): Nutzeranweisung „weg vom Übersetzer“. Alle
+> 66 ausgegebenen Prozeduren sind eigenständig in
+> `native/effect_sprite_procedures.cpp` (bzw. schon zuvor in
+> `native/effect_sprites.cpp`) implementiert; Übersetzer, Shim und Generat sind
+> entfernt. Die Tabelle unten bleibt als Liste der nie übersetzten Prozeduren
+> und ihres Dienstbedarfs gültig; siehe `work/native_port_effsub0_handport.result.md`.
+
 Prozeduren in effsub0..6 gefunden: 171
 ausgegeben: 68
 zurueckgestellt: 103

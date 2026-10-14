@@ -106,6 +106,8 @@ int  recvx_t3_attack_hit_check(const RECVX_ENEMY_VEC* pos, float ar);
 /* plp->djnt_no / plp->dvx.. / plp->dpx.. nach bhEne_AttackHitCheck bzw.
    bhEne_HitCheckParts (Original schreibt genau diese vier Feldergruppen). */
 int  recvx_t3_player_hit_get(int* djnt_no, RECVX_ENEMY_VEC* dv, RECVX_ENEMY_VEC* dp);
+/* plp->djnt_no/dvx/dpx schreiben (Spielerbesitzer); 0 = Luecke gemeldet. */
+int  recvx_t3_player_hit_set(int djnt_no, const RECVX_ENEMY_VEC* dv, const RECVX_ENEMY_VEC* dp);
 /* zonzon.c:1376 bhEne_HitCheckParts — naechstes Koerpergelenk zum Trefferpunkt. */
 void recvx_t3_hit_check_parts(RECVX_T3_LINK lk, const RECVX_ENEMY_VEC* pos);
 /* zonzon1.c:521 bhEne_CallPlayerVoice — no |= 0x400. */

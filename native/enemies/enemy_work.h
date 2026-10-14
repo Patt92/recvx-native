@@ -588,6 +588,10 @@ typedef struct RECVX_ENEMY_SERVICES {
        originale 0xC40000-Budget erschoepft ist — der Aufrufer muss das wie im
        Original behandeln und darf keinen statischen Ersatzblock nehmen. */
     void* (*calloc_work)(uint32_t size);
+
+    /* eneset.c:372 bhControlMask(epw) vor der Gegnerroutine (id > 90): der
+       Masken-/Lippenbesitzer des Raumworks (face.c:79). */
+    void  (*control_mask)(RECVX_ENEMY_WORK* w);
 } RECVX_ENEMY_SERVICES;
 
 /* ===========================================================================

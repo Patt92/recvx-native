@@ -39,6 +39,10 @@ int main(int argc,char** argv){try{
     check(samples>90&&wrapped_visible&&hidden,"original drag/hide sequence not fully exercised");
     // Same shared mechanism: start frame, fractional slow sampling, pause, and
     // loop boundary must work without room-specific rules.
+    // Die Drag-Szene hat die Figur mit bhInitModelSet deaktiviert (stflg 0x1000000);
+    // bhControlEnemy ueberspringt solche Works (eneset.c:360). Fuer die folgenden
+    // Pruefungen wird sie mit demselben Originalbefehl wieder aktiviert.
+    world.bind(command({0x24,1,2,1}));
     world.bind(command({0x65,1,2,0}));world.bind(command({0x69,23,0,0}));
     world.bind(command({0x69,34,3,1,0,1,5,6,65,0}));world.tick();
     const auto a=world.model_pose(1,2).position.x;world.tick();const auto half=world.model_pose(1,2).position.x;
@@ -46,18 +50,29 @@ int main(int argc,char** argv){try{
     // control pass (bhSetMotion), which samples frm_no before advancing it.
     world.bind(command({0x69,40,66,0}));world.tick();const auto b=world.model_pose(1,2).position.x;
     check(std::abs(half-(a+b)*.5f)<.0001f,"mtn_md bit 8 does not interpolate half-frame root motion");
-    world.bind(command({0x69,23,1,0}));world.tick();check(world.model_pose(1,2).position.x==b,"paused script changes its sampled pose");
+    // event.c:11971-11997 Common 23 schaltet nur flg 0x118 am Work; es ist keine
+    // Bewegungspause (die ist bhMotionPauseSet, unten). Die Motion laeuft weiter.
+    world.bind(command({0x69,23,1,0}));world.tick();
+    check((world.state(1,2)->enemy.flg&0x118u)==0x118u,"Common 23 (1) does not set work flg 0x118");
+    check(world.model_pose(1,2).position.x!=b,"Common 23 (1) froze the work motion like a host pause");
     world.bind(command({0x69,23,0,0}));world.bind(command({0x69,34,1,1,0,1,5,6,84,0}));world.tick();
     check(world.frame(1,2)==0&&world.state(1,2)->pose_frame()==84*65536,"next loop clock and last rendered pose are not independent");
     world.tick();check(world.state(1,2)->pose_frame()==0,"intentional animation loop does not resume frame zero on the next tick");
-    // event.c bhMotionPauseSet is distinct from Common 23's work flags.
-    // Check both the advanced event clock and the already sampled render pose.
-    const auto before_pause=world.frame(1,2);const auto pose_before_pause=world.state(1,2)->pose_frame();
-    check(world.bind(command({0x2b,0})),"actor motion pause is unbound");
-    for(unsigned i=0;i<7;++i)world.tick();
-    check(world.frame(1,2)==before_pause&&world.state(1,2)->pose_frame()==pose_before_pause,"MotionPauseSet changes the actor clock or displayed pose");
-    world.bind(command({0x2b,2}));world.tick();check(world.frame(1,2)==before_pause,"undefined pause mode resumes motion");
-    world.bind(command({0x2b,1}));world.tick();check(world.frame(1,2)!=before_pause,"MotionPauseSet does not resume the actor");
+    // event.c:1791 bhMotionPauseSet schreibt nur mode3 (4 bzw. 1) an Work und
+    // bei id 1 an exp1. Fuer diesen EN01-Work (mode0 5, ct2 6 = mv00_subpl2_0)
+    // treibt bhEne01_SetMtn (en01.c:2528/10322) bhSetMotion unabhaengig von
+    // mode3 weiter: die Uhr laeuft im Original auch "pausiert". Eine echte
+    // Pause zeigt der Spielerwork unten.
+    {
+        const auto& d=*world.state(1,2);
+        check(world.bind(command({0x2b,0})),"actor motion pause is unbound");
+        const auto* upper=static_cast<const RECVX_ENEMY_WORK*>(d.enemy.exp1);
+        check(d.enemy.mode3==4&&upper&&upper->mode3==4,"MotionPauseSet (0) does not write mode3 4 to work and exp1");
+        const auto before=world.frame(1,2);world.tick();
+        check(world.frame(1,2)!=before,"EN01 bhEne01_SetMtn stopped under mode3 4 (not original)");
+        world.bind(command({0x2b,2}));check(d.enemy.mode3==4,"undefined pause mode changed mode3");
+        world.bind(command({0x2b,1}));check(d.enemy.mode3==1&&upper->mode3==1,"MotionPauseSet (1) does not write mode3 1 to work and exp1");
+    }
     world.bind(command({0x65,0,0,0}));world.bind(command({0x69,34,1,0,0,0,0,6,1,0}));
     world.tick();const auto player_clock=frame;
     world.bind(command({0x2b,0}));for(unsigned i=0;i<7;++i)world.tick();check(frame==player_clock,"MotionPauseSet ignores the player work");
@@ -66,7 +81,8 @@ int main(int argc,char** argv){try{
         BinaryView v(other);const auto h=inspect_room(other).room_offset,table=v.u32(h+8);unsigned enemy=0;
         while(enemy<v.u32(h+0x88)&&v.u16(table+enemy*36+4)!=1)++enemy;
         check(enemy<v.u32(h+0x88),"second room has no original zombie");
-        actors.bind(command({0x65,1,std::uint8_t(enemy),0}));actors.bind(command({0x69,34,1,1,1,1,5,6,20,0}));
+        actors.set_simulation_flags(~0u);actors.tick(); // bhEne01_Init (Pass 1) legt exp0/exp1 an; Common 34 setzt sie voraus (event.c:11300)
+        actors.bind(command({0x65,1,std::uint8_t(enemy),0}));check(actors.bind(command({0x69,34,1,1,1,1,5,6,20,0})),"Common 34 on the second room's zombie not bound");
         bool loop=false;for(unsigned tick=0;tick<500;++tick){const auto before=actors.frame(1,enemy);actors.tick();check(actors.state(1,enemy)->pose_frame()==before,"second room samples the advanced clock");if(actors.frame(1,enemy)==0){loop=true;break;}}
         check(loop,"second original room motion did not reach its loop boundary");Scene rendered;actors.append(rendered,{},stage.cameras[0]);check(!rendered.triangles.empty(),"last pose in second room is not drawable");
     }

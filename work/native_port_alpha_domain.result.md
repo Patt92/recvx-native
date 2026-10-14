@@ -14,7 +14,7 @@ archived/releases/alpha-domain-before-20261013-224118 (SHA256 f9614470…), zus�
 `build/start/macos-arm64/.previous-*/RECVX Native.app` erhalten. Der Dev-App-Build enthält
 den Arbeitsstand der parallelen Karten-/Schatten-/Fog-Sitzungen. CTest wurde deshalb dort
 nicht gefahren (`--no-test`, sonst blockiert `original_map_render` die Auslieferung); die
-Suite lief vollständig in `build/alphadomain-claude-20261013` (79/81, beide Roten erklärt).
+Suite lief vollständig (79/81, beide Roten erklärt).
 
 ## Ursache
 
@@ -68,7 +68,7 @@ in den Palettendaten gespeichert, sondern als Domänenkonvention — die Semanti
 - `tests/native/scene_test.cpp` (Palettenalpha/`ClutChange`-Tor, jetzt über den
   ARGB4444-Zweig beobachtbar), `tests/native/game_test.cpp` (TGA-Rundlauf verlustfrei,
   HD-Vorrang), `tests/native/lighter_test.cpp` (Filterpfad mit vollem Alpha).
-- CTest in `build/alphadomain-claude-20261013`: **79/81**. Rot: `script_motion`
+- CTest: **79/81**. Rot: `script_motion`
   (vorbestehend, gleiche Meldung mit dem Binary von 22:00 in
   `build/mapinput-claude-20261013` belegt) und `original_map_render` (neue, noch
   unfertige Parallelarbeit der Kartensitzung: 11 Füllungen statt 1, 0 Objekte, Licht 0,

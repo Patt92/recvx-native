@@ -149,3 +149,71 @@ Float njInnerProduct(NJS_VECTOR* a,NJS_VECTOR* b){return(a->x*b->x+a->y*b->y)+a-
 Float njOuterProduct(NJS_VECTOR* a,NJS_VECTOR* b,NJS_VECTOR* dest){
     NJS_VECTOR result={a->y*b->z-a->z*b->y,a->z*b->x-a->x*b->z,a->x*b->y-a->y*b->x};*dest=result;return njScalor(&result);
 }
+// ps2_NaColi.c:301 njGetPlaneNormal — Kreuzprodukt ueber die ersten DREI
+// Punkte des Feldes, unnormiert; der Aufrufer normiert selbst.
+void njGetPlaneNormal(NJS_POINT3* p,NJS_VECTOR* v){
+    NJS_POINT3* p2=&p[1];NJS_POINT3* p3=&p[2];
+    v->x=((p2->y-p->y)*(p3->z-p2->z))-((p2->z-p->z)*(p3->y-p2->y));
+    v->y=((p2->z-p->z)*(p3->x-p2->x))-((p2->x-p->x)*(p3->z-p2->z));
+    v->z=((p2->x-p->x)*(p3->y-p2->y))-((p2->y-p->y)*(p3->x-p2->x));
+}
+// ps2_NaColi.c:314 njGetPlaneNormal2 — dieselbe Normale aus drei Punkten.
+// Die zweite Kante ist p2-p1 (nicht p2-p0); das Vorzeichen von v haengt daran.
+void njGetPlaneNormal2(NJS_POINT3* p0,NJS_POINT3* p1,NJS_POINT3* p2,NJS_VECTOR* v){
+    v->x=((p1->y-p0->y)*(p2->z-p1->z))-((p1->z-p0->z)*(p2->y-p1->y));
+    v->y=((p1->z-p0->z)*(p2->x-p1->x))-((p1->x-p0->x)*(p2->z-p1->z));
+    v->z=((p1->x-p0->x)*(p2->y-p1->y))-((p1->y-p0->y)*(p2->x-p1->x));
+}
+// Zustand nach system.c:429/443 (njSetScreen dist 500, 640x480, Mitte 320/240;
+// njSetAspect(BHD_ASPECT_X 1.174, BHD_ASPECT_Y 1.0)). Die Vorbelegung von
+// fNaViwOffsetX/Y in ps2_NaView.c:14 ist mit cx/cy derselben Aufrufe identisch.
+NJS_SCREEN _nj_screen_={500.0f,640.0f,480.0f,320.0f,240.0f};
+Float fNaViwOffsetX=2048.0f;
+Float fNaViwOffsetY=2048.0f;
+Float fNaViwAspectW=1.174000025f;
+Float fNaViwAspectH=1.0f;
+NJS_MATRIX NaViewScreenMatrix={1.174000025f,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,500.0f};
+// ps2_NaView.c:217 njViewScreenMatrix.
+void njViewScreenMatrix(NJS_MATRIX* vs){
+    Float* p=*vs;
+    njUnitMatrix(vs);
+    p[0]=fNaViwAspectW;p[5]=fNaViwAspectH;
+    p[10]=1.0f;p[12]=0;p[13]=0;p[14]=0;
+    p[15]=_nj_screen_.dist;
+}
+// ps2_NaView.c:27 njSetScreen. Ps2CalcScreenCone, vu1SetScreenProjection und
+// vu1SetScreenOffset sind Hardwareschritte ohne nativen Abnehmer; fNaViwHalfW/H
+// und ClipDispW/H haben hier keinen Leser.
+void njSetScreen(NJS_SCREEN* s){
+    _nj_screen_.dist=s->dist;
+    _nj_screen_.w=s->w;_nj_screen_.h=s->h;
+    _nj_screen_.cx=s->cx;_nj_screen_.cy=s->cy;
+    fNaViwOffsetX=s->cx+1728.0f;
+    fNaViwOffsetY=s->cy+1808.0f;
+    njViewScreenMatrix(&NaViewScreenMatrix);
+}
+// ps2_NaView.c:81 njSetAspect.
+void njSetAspect(Float ax,Float ay){
+    fNaViwAspectW=ax;fNaViwAspectH=ay;
+    njViewScreenMatrix(&NaViewScreenMatrix);
+}
+// ps2_NaView.c:55 njSetPerspective: halber Winkel, dann (w/2) / tan. Der
+// Faktor 0.0000958738 ist die Originalkonstante. njViewScreenMatrix wird hier
+// wie im Original NICHT erneut gerufen, [15] bleibt also stehen.
+void njSetPerspective(Angle ang){
+    ang/=2;
+    _nj_screen_.dist=(_nj_screen_.w/2.0f)/tanf(0.0000958738f*(Float)ang);
+}
+// ps2_NaMatrix.c:1572 njProjectScreen. njMulMatrixCN rechnet NaViewScreenMatrix
+// mal m in die VU-Register, njCalcPointCN liest sie; nativ steht dafuer eine
+// lokale Matrix. Die Division durch z bleibt ungeschuetzt wie im Original.
+void njProjectScreen(NJS_MATRIX* m,NJS_POINT3* p3,NJS_POINT2* p2){
+    NJS_MATRIX combined;NJS_POINT3 point;Float q;
+    if(m==NULL)m=pNaMatMatrixStuckPtr;
+    njSetMatrix(&combined,&NaViewScreenMatrix);
+    njMultiMatrix(&combined,m);
+    njCalcPoint(&combined,p3,&point);
+    q=_nj_screen_.dist/point.z;
+    p2->x=point.x*q+fNaViwOffsetX;
+    p2->y=point.y*q+fNaViwOffsetY;
+}

@@ -37,6 +37,33 @@ extern "C" {
    beschrieben, nicht angelegt. */
 void recvx_en16(RECVX_ENEMY_WORK* w);
 
+/* Sicht auf den Laserstrahl-Effekt (BH_PWORK/O_WRK-Kopf), die en16 liest. */
+typedef struct {
+    int32_t mode0;           /* +0x0C */
+    int32_t ct0;             /* +0x3D4 bhEff_E11_CheckCollisionPlayer */
+    RECVX_ENEMY_VEC gpx;     /* +0x58 */
+    RECVX_ENEMY_VEC lox;     /* +0x64 */
+    void*   atr;             /* +0x2F0 getroffene Flaeche oder NULL */
+} RECVX_EN16_EFF;
+
+/* Anbieter des Effektbesitzers (eff[512] des Raums). Slots sind eff-Indizes;
+   NULL-Dienst = benannte Luecke. */
+typedef struct {
+    /* en16.c:75-87 bhSetEffectTb(&sys->ef {flg 1, id 270, Skala 0}, NULL, epw, 0) */
+    int  (*effect_tb)(RECVX_ENEMY_WORK* w);
+    int  (*effect_get)(int slot, RECVX_EN16_EFF* out);
+    void (*effect_mode)(int slot, int32_t mode0);
+    /* en16.c:91 bhEff_E16_LaserSight(eff) unmittelbar nach dem Anlegen */
+    void (*effect_step)(int slot);
+    /* hitchk.c:5474 bhCheckFloorEnemy(flr_no, px, pz): 1 und prm0 bei Treffer */
+    int  (*floor_enemy)(int flr_no, float px, float pz, int32_t* prm0);
+    /* hitchk.c:5881 bhCheckWallAttrB89(hp) auf der Flaeche aus eff->exp0; prm0 dazu. */
+    int  (*wall_attr_b89)(const void* atr, int32_t* prm0);
+    /* weapon.c:1632 bhSetGunSplash(&gap {wpn_no, ay, v}, pos, wattr) */
+    void (*gun_splash)(int wpn_no, int32_t ay, const RECVX_ENEMY_VEC* gvec, const RECVX_ENEMY_VEC* pos, int wattr);
+} RECVX_EN16_SERVICES;
+void recvx_en16_bind(const RECVX_EN16_SERVICES* services);
+
 /* en16.c:387/393/399 — Effektpunkte des Laserstrahls. Der Aufrufer ist die
    Zeichenroutine des Effekts (effsub2.c:2390) und uebergibt immer einen
    gueltigen Punkt; en16.c:408 kopiert ihn ohne Nullpruefung. Nativ meldet

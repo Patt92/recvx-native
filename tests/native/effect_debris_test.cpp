@@ -35,8 +35,12 @@ int main(){try{_Make_SinTable();
     check(request.spawns.empty()&&request.sounds.empty()&&request.bombs.empty()&&!request.light,
           "explosion gap requested effects, sounds, blast damage or a light");
     // Noch nicht portierte Prozeduren: sie duerfen weder laufen noch zeichnen.
-    // 15/29/231 kommen aus den portierten Originalprozeduren (native/effect_procedures.cpp).
-    for(const unsigned id:{16u,23u,24u,25u,200u,201u,232u}){ // bhEff000 (Patronenhuelse) und bhEff005 (Blutspritzer, effsub1.c:2099, Gegner-Angriffskette) sind gebunden
+    // 15/29/231 kommen aus den von Hand portierten Originalprozeduren (native/effect_sprite_procedures.cpp).
+    // 200/201/232 sind seit 2026-10-14 von Hand portiert (Gruppe 2); 204/221/229 bleiben offen.
+    // 16/22/24/25/27 sind seit den Gruppen 3 und 4 (2026-10-14) portiert; offen bleiben 23/204/221/229.
+    // 221 ist seit Gruppe 6 (2026-10-14) portiert; offen bleibt 229 (sein Erzeuger bhEff228
+    // liefert den Linkzeiger nicht, den die Zeichenfunktion liest).
+    for(const unsigned id:{229u}){ // bhEff000 (Patronenhuelse) und bhEff005 (Blutspritzer, effsub1.c:2099, Gegner-Angriffskette) sind gebunden
         check(!supported_effect_sprite(id),"an effect procedure claims to be bound");
         EffectSprite sprite;EffectSpawn spawn;spawn.id=id;initialize_effect_sprite(sprite,spawn);
         bool queued=true;

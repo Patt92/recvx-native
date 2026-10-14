@@ -21,6 +21,17 @@ Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 
+**CTest `script_motion` grün (2026-10-14, `build/en09-claude-20261014`, 86/86).**
+Ursache war Buchführung, nicht Darstellung: `pose_frame()` liefert für native
+Gegnerworks jetzt den Frame, den bhSetMotion vor dem Vorschub abgetastet hat
+(`sampled_frame`, gesetzt im Dienst `set_motion`); bhMotionPauseSet (0x2b) schreibt
+mode3 auch auf den nativen Work und exp1. Testerwartungen, die dem Original
+widersprachen, sind mit Quellbeleg korrigiert: Common 23 ist keine Pause (event.c:11971,
+nur flg 0x118), bhMotionPauseSet stoppt einen EN01-Work nicht (bhEne01_SetMtn läuft
+unabhängig von mode3, en01.c:2528); die Figur wird nach der Drag-Szene per Originalbefehl
+0x24 reaktiviert, der Zombie in RM_0070 erst nach bhEne01_Init per Common 34 gesteuert.
+Ältere Testbinärs (z. B. `build/macos-arm64`, `box0090`) vor Verwendung neu bauen.
+
 `Start.command` bevorzugt die Entwicklungs-App unter `build/start/macos-arm64`,
 danach das v0.5-Paket, zuletzt das Build-Binary. Die Dokumentationstrennung ändert
 keine Runtime, kein Paket, keine Konfiguration und keinen Snapshot.
@@ -39,6 +50,52 @@ und eine Taste, die Cancel ist, zählt nicht als Quit (auch nach Neubelegung; al
 [keyboard_controller_config mit Negativkontrolle](tests/native/input_test.cpp)
 und `main_menu_settings_video_skip` in der eigenen Build-Runtime,
 [Controls](docs/CONTROLS.md). **Noch keine Starter-/Paketersetzung.**
+
+**ID-Karte RM_1020 (Fix A):** Der Freeze nach der Wegwerf-Frage ist behoben. Der Spielerpass
+läuft trotz st_flg 0x4 unter den Originalbedingungen von bhCPM0_action, und bhControlPlayerPad
+gibt das Bit frei (player.c:1838). Geprüft in der eigenen Build-Runtime
+`build/discard-claude-20261014`. Offen ist B: das Original-Pad-Gating statt Host-Gate.
+**Noch keine Starter-/Paketersetzung.**
+[Bericht](work/native_port_discard_question.result.md).
+
+**Effektprozeduren (Übersetzer abgelöst, weitere Gruppen):** alle 66 vormals
+regex-übersetzten Prozeduren sowie 66 nie übersetzte (effsub0, effsub1, effsub5 und
+effsub6, zuletzt die Augenlichter 145/146, die Gaswand 127 und der Schneefall 219 mit
+der Schneebibliothek aus effsub5) sind eigenständig in
+`native/effect_sprite_procedures.cpp` portiert; 20 Prozeduren dieser Dateien und die
+Familien aus effsub2/3/4 bleiben offen; `native/effect_procedures.cpp`, `native/effect_core.*` und
+`tools/generate_effect_procedures.py` sind entfernt. Dazu sind
+`njGetPlaneNormal`/`njGetPlaneNormal2`, `njProjectScreen` und der Bildschirmzustand
+(`njSetScreen`/`njSetAspect`/`njSetPerspective`/`njViewScreenMatrix`) in
+`native/ninja_matrix.c` portiert und tragen das Rückseitentor `flg 0x20000` des
+Effektzeichenpfads. Zufalls- und Versatzfehler des
+Generats sind in [QUALITY.md](QUALITY.md) dokumentiert. Belege, Offenliste der nie
+übersetzten Prozeduren mit dem Scan aller 205 Raumdateien:
+[Ergebnis](work/native_port_effsub0_handport.result.md), Differenzläufe
+`build/validation/effproc-handport-20261014/`, Gruppen 7/8
+`build/validation/effproc-backface-20261014/`, Gruppe 9 `build/validation/effproc-snow-20261014/`.
+**Noch keine Starter-/Paketersetzung.**
+
+**Gegner-KI EN21:** Albinoid-Jungtier im nativen WorldEntity-/Dispatchpfad
+angebunden, mit Route/Spielmodus, Spielergriff, Audio und Effekten 396/399 auf der
+Modelltexturliste. Gemeinsame Routeninitialisierung ohne Zombie-Ressource und
+Spieler-Griffseiteneffekte ergänzt. Eigene arm64-Build `build/en21-bind-claude-20261014`.
+**Tests auf Nutzerwunsch zurückgestellt; keine Gameplay-Abnahme oder Starter-Ersetzung.**
+[Umfang und spätere Abnahme](work/native_port_EN21_world.result.md).
+
+**Bandersnatcher (EN09):** Stillstand behoben — Identität 9 fehlte im Dispatch, die
+Zustandsmaschine war nur Gerüst. KI, Motion/Fußfixierung, Arme, Griff, Schaden, Tod
+und Rauch portiert; RM_1060 A/B und `tests/native/en09_world_test.cpp` grün.
+Eigene Build `build/en09-claude-20261014`. **Noch keine Starter-/Paketersetzung.**
+[Bericht](work/native_port_EN09_world.result.md).
+
+**Gegner-Auditbefunde (2026-10-14):** `bhCheckWall` für Gegner, `bhControlMask` im
+Gegnerpass, Baum beim Raumaufbau (room.c:438), modellose Works, EN11-Dienste,
+Effekte 261/270 mit `bhCollisionCheckL2MDL` (plp mdl[3]) und Eckalpha gebunden; CTest
+`enemy_beam_effects`. Zombie-`natural` ist Originalverhalten (RM_0080 pos_no 0 →
+Sub_controll 0x8f Typ 8), Verifier korrigiert. Offen: EN05, EN13/13B, EN23,
+EN12-Feuereffekte 262ff., EN56/bhEff134, EN16-Folgeeffekte.
+[Bericht](work/native_port_enemy_audit_fixes.result.md).
 
 ## Gezielter Zugang zu bisherigen Befunden
 

@@ -217,7 +217,9 @@ int main(int argc,char** argv){try{
     {auto binary=data;binary[1118]=0;const std::vector<std::uint8_t> script={0x2b,0,5,4,13,0,0,0,0xff,0};std::copy(script.begin(),script.end(),binary.begin()+1180);
         Inventory state;MessageDialog text;EventVm pause(binary,state,text);unsigned calls=0;pause.binding=[&](const EventCommand& c){check(c.opcode==0x2b&&c.bytes==std::vector<std::uint8_t>{0x2b,0},"MotionPauseSet consumed the following opcode");++calls;return true;};pause.start(0,0);pause.tick();check(calls==1&&pause.errors.empty()&&pause.flag(4,13),"two-byte MotionPauseSet misaligns the event stream");
         for(bool write:{false,true}){bool refused=false;try{if(write)pause.set_flag(0,1,0);else (void)pause.flag(0,1);}catch(const std::exception&){refused=true;}check(refused,"undefined matrix zero silently uses scratch memory");}}
-    auto broken=data;broken[1118]=3;MessageDialog d;EventVm bad(broken,lighter,d);bad.tick();check(!bad.errors.empty(),"unbalanced conditional accepted");
+    // event.c:425 bhEndif: ein ENDIF ohne IF senkt nur G_Sp/bhIfelFlg (RM_1100 0x44c steht so
+    // in den Originaldaten); das Original laeuft weiter, ein Abbruch waere keine Originalsemantik.
+    auto broken=data;broken[1118]=3;MessageDialog d;EventVm bad(broken,lighter,d);bad.tick();check(bad.errors.empty(),"ENDIF without IF blocks the event like a host error");
     for(unsigned mode=0;mode<6;++mode){auto compare=data;compare[1118]=1;compare[1119]=12;compare[1120]=6;compare[1121]=23;compare[1122]=mode;compare[1123]=0;compare[1124]=5;compare[1125]=4;compare[1126]=1;compare[1127]=0;compare[1128]=0;compare[1129]=0;compare[1130]=3;compare[1131]=0;compare[1132]=0;
         MessageDialog msg;EventVm conditional(compare,lighter,msg);conditional.tick();const bool expected=mode==0||mode==2||mode==4;check(conditional.flag(4,1)==expected,"original byte-comparison operands/order");}
     // bhCmpW reads work state, rather than the unrelated byte-register array.
@@ -259,6 +261,15 @@ int main(int argc,char** argv){try{
         text.show({33,0xffff},0);exm.confirm_dialog();
         check(!(exm.flags[5][0]&0x81)&&(pt&3)==3&&exm.flags[6][0]==0xffffffffu&&(exm.flags[11][0]&0x800),"closing the examined message keeps the camera");
         exm.control_exm();check(returns==1&&!(exm.flags[11][0]&0x800),"bhCheckCut(1) does not return to the player cut");
+    }
+    { // event.c:994 bhCamSet2 case 0 (RM_0090 security boxes: 2a 00 09 00): fixcno = v1, and
+      // bhSetFixedCut clears gm_flg 0x1000 at once, so game.c:274 never re-cuts to a stale fixcno.
+        auto binary=data;binary[1118]=0;const std::vector<std::uint8_t> script={0x2a,0,9,0,5,4,13,0,0,0,0xff,0};std::copy(script.begin(),script.end(),binary.begin()+1180);
+        MessageDialog text;Inventory state;EventVm cut(binary,state,text);unsigned scripted=~0u,exm_cuts=0;
+        cut.binding=[&](const EventCommand& c){if(c.opcode==0x2a)scripted=c.bytes.at(2);return true;};cut.fixed_cut=[&](unsigned){++exm_cuts;};cut.event_fixed_cut=[&](unsigned,unsigned){++exm_cuts;};
+        cut.start(0,0);cut.tick();
+        check(cut.errors.empty()&&cut.flag(4,13)&&scripted==9&&cut.fixcno==9&&(cut.flags[5][0]&1)&&!(cut.flags[11][0]&0x1000),"bhCamSet2 leaves gm_flg 0x1000 or loses sys->fixcno");
+        cut.control_exm();check(!exm_cuts,"script fixed cut re-run by game.c:274 with stale fixcno");
     }
     // Original room choices hand their result to scd1 for one pass. Both
     // Yes and No acknowledge the interaction; inventory questions do not.

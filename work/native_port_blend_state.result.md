@@ -46,7 +46,7 @@ untergeschobenen Register gezeichnet.
   Register bleibt — genau eine Meldung `"9/3"`.
 - `weapon_flash_test`, `lighter_test`, `effect_particles_test` prüfen die Register der
   echten Zeichenpfade (0x44).
-- CTest in `build/alphadomain-claude-20261013`: **79/81**, rot nur `script_motion`
+- CTest: **79/81**, rot nur `script_motion`
   (vorbestehend, mit dem Binary von 22:00 identisch) und `original_map_render`
   (Parallelarbeit der Kartensitzung).
 - Laufzeit: verify_lighter, verify_combat, verify_detector, verify_scanner, verify_doors,

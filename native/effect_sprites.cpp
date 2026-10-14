@@ -1,10 +1,14 @@
 #include "effect_sprites.h"
+#include "effect_sprites_internal.h"
 #include "chunk_blend.h"
 #include "binary_view.h"
 #include "core_random.h"
 #include "effect_collision.h"
 // bhEff017 liest stflg/ct0 des verknuepften Gegnerworks (effsub1.c:4222).
 #include "enemies/enemy_work.h"
+#include "enemies/en21.h"
+#include "enemies/en16.h"
+#include "enemies/en03_lib.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include <algorithm>
@@ -25,7 +29,6 @@ EffectOutput pending;
 constexpr std::pair<unsigned,unsigned> categories[]={{1,9},{1,0},{0,2},{0,4},{0,4},{0,4},{0,2},{1,0},{0,1},{0,2},{0,3},{0,5},{0,0},{1,0},{0,0},{0,0},{0,0},{0,2},{0,1},{0,1}};
 // UV_WORK (types.h:2194) und EFF5UV/EFF5UVTBL (effsub5.h:6/22) als reine
 // Layouttypen der Datentabellen, kein Originalcode.
-struct EffectUv {float u,v,xs,ys;};
 struct EffectFireUv {short u,v;};
 struct EffectFireTable {const EffectFireUv* table;int count,tex_id,ani_ct,palette_bank;short w,h;};
 #include "effect_sprite_tables_data.inc"
@@ -35,6 +38,19 @@ GroundCollision* effect_ground=nullptr;
 const std::vector<CollisionWall>* effect_wall_set=nullptr;float effect_wall_height=0;std::function<bool(NJS_POINT3,float&)> effect_water_probe;
 // sys->mwalp-Zugriff des Raumbesitzers (effsub1.c:4224 bhEff017).
 std::function<void(int)> mobile_wall_clear;
+// rom->flrp / sys->mflrp (bhCheckFloorEffect), bhSetExtraEffectWork-Platz und Knotenmatrizen des Raumbesitzers.
+const std::vector<CollisionWall>* effect_floor_room=nullptr;const std::vector<CollisionWall>* effect_floor_mobile=nullptr;
+std::function<int()> extra_reserve;std::function<void(int)> extra_release;
+std::function<bool(unsigned,unsigned,unsigned,NJS_MATRIX&)> link_lookup;
+std::function<bool(unsigned,unsigned,int&)> work_angle_lookup;
+std::function<EffectSprite*(int)> pool_lookup;
+// effsub2.c:2296 bhEff_E11_CheckCollisionPlayer des Raumbesitzers (Treffermodelle von
+// plp mdl[3] und Figuren 41..43/91..93): Objektindex oder -1, p2 auf den Treffer gekuerzt.
+std::function<int(NJS_POINT3,NJS_POINT3&)> player_hit_lookup;
+std::function<int(int,unsigned,unsigned,NJS_POINT3,NJS_POINT3,unsigned,unsigned,int)> particle_mk2_hook;
+}
+// Gemeinsame Dienste der von Hand portierten Prozeduren (effect_sprites_internal.h).
+namespace effect_detail {
 // rand() der Originalroutinen: derselbe prozessweite EE-Generator.
 float effect_random(){return -recvx_core_random_next()/-2.1474836e9f;}
 void quad_color(EffectSprite& s,std::uint32_t color){for(auto& v:s.tv)v.col=color;}
@@ -49,11 +65,92 @@ const EffectUv& latched_uv(const EffectSprite& s,int index,const char* what){
     if(index<0)throw std::runtime_error(std::string(what)+" UV cursor below its original table");
     return static_cast<const EffectUv*>(s.uv)[index];
 }
-// effsub0.c:10 setentry: eine Effektanforderung mit Lage/Winkel/Skalierung des Erzeugers.
-void setentry(unsigned id,unsigned type,const EffectSprite& s){
-    EffectSpawn e;e.flg=0x4100001;e.id=id;e.type=type;e.flr_no=0;e.mdlver=0;
-    e.position={s.px,s.py,s.pz};e.scale={s.sx,s.sy,s.sz};e.ax=s.ax;e.ay=s.ay;
+// sys->ef der Original-Effektprozeduren (effect.h EF_WORK): eine prozessweite Vorlage.
+EffectSpawn& request_template(){static EffectSpawn request;return request;}
+}
+EffectWeather& effect_weather(){static EffectWeather weather;return weather;}
+// sys->gas_py (effsub1.c:8734): ein Besitzer, keine Kopie.
+float& effect_gas_height(){static float gas_py=0;return gas_py;}
+namespace effect_detail {
+void submit_template(int lkono,const NJS_POINT3* offset){
+    EffectSpawn e=request_template();e.lkono=lkono;e.linked_work=nullptr;
+    e.has_offset=offset!=nullptr;if(offset)e.offset=*offset;else e.offset={};
+    e.has_velocity=false;e.velocity={};e.tex_id_override=-1;e.az=0;e.parent_slot=-1;
+    e.mode1=0;e.has_color=false;e.color=0;
     pending.spawns.push_back(e);
+}
+EffectSpawn& last_request(){
+    if(pending.spawns.empty())throw std::runtime_error("effect procedure patches a request before bhSetEffectTb");
+    return pending.spawns.back();
+}
+void queue_opaque(EffectSprite& s){s.opaque_queued=true;}
+void queue_custom(EffectSprite& s){s.custom_queued=true;}
+float ground_height(NJS_POINT3 probe,const char* what){
+    if(!effect_ground)throw std::runtime_error(std::string(what)+" without the room's bhGetGroundPosition provider");
+    return effect_ground->query(probe);
+}
+bool wall_reflect(NJS_POINT3& position,unsigned flags,float radius,float height,int& angle,const char* what){
+    if(!effect_wall_set)throw std::runtime_error(std::string(what)+" without the room's bhCheckWallRefAngle provider");
+    const auto wall=effect_wall(*effect_wall_set,effect_wall_height,position,flags,radius,height);
+    if(!wall)return false;
+    reflect_effect_wall(*wall,effect_wall_height,position,radius,height,angle);
+    return true;
+}
+void request_bomb(NJS_POINT3 position,float radius,int damage_max,int damage_min){pending.bombs.push_back({position,radius,damage_max,damage_min});}
+void request_direct(unsigned id,NJS_POINT3 position,int lkono){
+    EffectSpawn e;e.flg=1;e.id=id;e.type=0;e.flr_no=0;e.mdlver=0;e.position=position;e.scale={1,1,1};e.ax=0;e.ay=0;e.lkono=lkono;
+    pending.spawns.push_back(e);
+}
+void request_background_sound(unsigned slot,unsigned sound){pending.background_sounds.push_back({slot,sound});}
+bool acquire_extra_work(EffectSprite& s){
+    if(!extra_reserve)throw std::runtime_error("bhSetExtraEffectWork without the room's eff[512] pool");
+    const int slot=extra_reserve();
+    if(slot<0)return false;
+    s.extra=std::make_shared<std::array<unsigned,312>>();s.extra->fill(0);
+    (*s.extra)[0]=2u;s.extra_slot=slot;return true;
+}
+int reserve_extra_slot(){
+    if(!extra_reserve)throw std::runtime_error("bhSetExtraEffectWork without the room's eff[512] pool");
+    return extra_reserve();
+}
+void release_extra_slot(int slot){if(slot>=0&&extra_release)extra_release(slot);}
+void release_extra_work(EffectSprite& s){
+    if(s.extra)(*s.extra)[0]=0u;
+    if(s.extra_slot>=0&&extra_release)extra_release(s.extra_slot);
+    s.extra_slot=-1;
+}
+std::optional<FloorEffectHit> floor_effect(int flr_no,float px,float pz,const char* what){
+    if(!effect_floor_room)throw std::runtime_error(std::string(what)+" without the room's bhCheckFloorEffect floor table");
+    for(const auto* table:{effect_floor_room,effect_floor_mobile}){
+        if(!table)continue;
+        for(const auto& a:*table){
+            if((a.flags&1u)&&a.type==3&&a.position.x<=px&&a.position.x+a.extent.x>=px&&a.position.z<=pz&&a.position.z+a.extent.z>=pz&&a.floor==flr_no)return FloorEffectHit{a.type,a.parameters[0]};
+        }
+    }
+    return {};
+}
+NJS_MATRIX& link_node_matrix(unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out,const char* what){
+    if(!link_lookup||!link_lookup(kind,index,node,out))throw std::runtime_error(std::string(what)+" without the linked work's node matrix");
+    return out;
+}
+EffectSprite* pool_work(int slot){return pool_lookup?pool_lookup(slot):nullptr;}
+void report_gap(const char* name){pending.gaps.insert(name);}
+void request_player_kill(){pending.player_killed=true;}
+void sink_slot_into_pv(const EffectSprite& owner,int index){
+    auto& request=last_request();
+    request.slot_sink_work=owner.slot;request.slot_sink_index=index;
+}
+int work_angle(unsigned kind,unsigned index,const char* what){
+    int ay=0;
+    if(!work_angle_lookup||!work_angle_lookup(kind,index,ay))throw std::runtime_error(std::string(what)+" without the linked work's ay");
+    return ay;
+}
+// effsub0.c:10 setentry: sys->ef mit Lage/Winkel/Skalierung des Erzeugers fuellen, bhSetEffectTb(&sys->ef, NULL, NULL, 0).
+void setentry(unsigned id,unsigned type,const EffectSprite& s){
+    auto& r=request_template();
+    r.flg=0x4100001;r.id=id;r.type=type;r.flr_no=0;r.mdlver=0;
+    r.position={s.px,s.py,s.pz};r.scale={s.sx,s.sy,s.sz};r.ax=s.ax;r.ay=s.ay;
+    submit_template(0);
 }
 // effsub0.c:29 effinit. op->bank (sys->ef_pbkb[tex_id]) ist die PVP-Palettenbank
 // der Originalhardware; der native Zeichenpfad liest dekodierte RGBA-Texturen,
@@ -75,6 +172,9 @@ void effset(EffectSprite& s,const EffectUv& uv,unsigned num){
     for(unsigned i=0;i<4;++i)s.tv[i].col=effset_color[num][i];
     quad_uv(s,uv);
 }
+}
+using namespace effect_detail;
+namespace {
 // effsub1.c:8158 bhEff122 — weltfeste Leuchtplatte, Texturgruppe 41.
 // ani_ct waehlt die Platte (type), mode1 die UV-Kachel (Skriptbefehl 0x91).
 void step_eff122(EffectSprite& s,bool& queued){
@@ -522,35 +622,335 @@ void step_eff017(EffectSprite& s){
     if(!(w->stflg&0x1000000u))return;
     if(mobile_wall_clear)mobile_wall_clear(w->ct0);
 }
-// Die portierten Originalprozeduren (native/effect_procedures.cpp, erzeugt von
-// tools/generate_effect_procedures.py). Hier nur die Schnittstelle, damit die
-// Datei den Shim nicht einbinden muss.
-namespace original {
-bool supported(unsigned id);
-bool step(unsigned id,EffectSprite& w);
+// Die von Hand portierten Kennungen: die Tabelle in native/effect_sprite_procedures.cpp
+// und die aelteren Schalterfaelle unten (keine doppelte Implementierung derselben Kennung).
+const HandEffectProcedure* hand_procedure(unsigned id){
+    for(std::size_t i=0;i<hand_effect_procedure_count;++i)if(hand_effect_procedures[i].id==id)return &hand_effect_procedures[i];
+    return nullptr;
 }
-// Die von Hand portierten Kennungen; sie behalten den Vorrang vor der
-// erzeugten Tabelle (keine doppelte Implementierung derselben Kennung).
+// en21.c:1168/1324: transient field view of this same eff[] slot, not
+// another effect owner. Only fields the two native procedures write return.
+static bool step_en21_effect(EffectSprite& s){
+    RECVX_EN21_EFFECT op{};
+    op.flg=s.flg;op.stflg=s.stflg;op.type=std::uint16_t(s.type);op.mode0=std::uint8_t(s.mode0);
+    op.bl_src=s.bl_src;op.bl_dst=s.bl_dst;op.ct0=s.ct0;op.ct1=s.ct1;op.ct2=s.ct2;
+    op.px=s.px;op.py=s.py;op.pz=s.pz;op.ay=s.ay;
+    op.sx=s.sx;op.sy=s.sy;op.sxb=s.sxb;op.syb=s.syb;op.yn=s.yn;
+    for(unsigned i=0;i<4;++i){op.tv[i].col=s.tv[i].col;op.tv[i].u=s.tv[i].u;op.tv[i].v=s.tv[i].v;}
+    op.random_next=recvx_core_random_next;
+    const bool queued=(s.id==399?recvx_en21_effect_spark(&op):recvx_en21_effect_mark(&op))!=0;
+    s.flg=op.flg;s.stflg=op.stflg;s.mode0=op.mode0;s.bl_src=op.bl_src;s.bl_dst=op.bl_dst;
+    s.ct0=op.ct0;s.ct1=op.ct1;s.ct2=op.ct2;s.px=op.px;s.py=op.py;s.pz=op.pz;
+    s.sx=op.sx;s.sy=op.sy;s.sxb=op.sxb;s.syb=op.syb;s.yn=op.yn;
+    for(unsigned i=0;i<4;++i){s.tv[i].col=op.tv[i].col;s.tv[i].u=op.tv[i].u;s.tv[i].v=op.tv[i].v;}
+    return queued;
+}
+
+// cam.mtx (camera.c:28-37: Basismatrix, Rz(az) Rx(ax) Ry(ay)); nur der Drehanteil
+// wird hier gebraucht (njCalcVector). Vor der ersten Kamera ist cam.mtx die Einheit.
+static void camera_rotation(const EffectContext& c,NJS_MATRIX& m){
+    njUnitMatrix(&m);if(!c.camera_ready)return;
+    njScale(&m,1,-1,-1);njRotateZ(&m,c.camera_angles[2]);njRotateX(&m,c.camera_angles[0]);njRotateY(&m,c.camera_angles[1]);
+}
+// bhCollisionCheckLine2(p1, p2, 0x4400, -1) auf rom->walp + sys->mwalp des Raumbesitzers.
+static std::optional<CollisionWall> beam_wall(NJS_POINT3 p1,NJS_POINT3& p2,const char* what){
+    if(!effect_wall_set){effect_detail::report_gap(what);return {};}
+    NJS_POINT3 normal{};return effect_line(*effect_wall_set,effect_wall_height,p1,p2,normal,0x4400u,-1);
+}
+static int beam_player(NJS_POINT3 p1,NJS_POINT3& p2,const char* what){
+    if(!player_hit_lookup){effect_detail::report_gap(what);return -1;}
+    return player_hit_lookup(p1,p2);
+}
+// NJS_COLOR (argb) als Eckfarbe 0xAARRGGBB; Kanalzuweisung wie das Original (unsigned char).
+static std::uint32_t argb(unsigned a,unsigned r,unsigned g,unsigned b){return ((a&255u)<<24)|((r&255u)<<16)|((g&255u)<<8)|(b&255u);}
+// njDrawLine3DEx-Farbe in Leinwandordnung 0xAABBGGRR.
+static std::uint32_t line_color(std::uint32_t c){return (c&0xff00ff00u)|((c>>16)&255u)|((c&255u)<<16);}
+// njDrawPolygon3D(p3c, 3, 0x60) nach njColorBlendingMode(0, 8)/(1, 10) und njFogDisable.
+static void beam_triangle(EffectSprite& s,const NJS_POINT3 (&p)[3],const std::uint32_t (&col)[3]){
+    EffectSprite::Quad q;q.center={0,0,0};q.world_space=true;q.textured=false;q.fogged=false;q.pn=3;q.gouraud=true;q.source=8;q.destination=10;
+    for(unsigned i=0;i<3;++i){q.vertices[i].x=p[i].x;q.vertices[i].y=p[i].y;q.vertices[i].z=p[i].z;q.vertices[i].col=col[i];}
+    q.vertices[3]=q.vertices[2];s.quads.push_back(q);
+}
+// Der Kreisring beider Strahlen: 16 Punkte bei (360*i)/16 Grad (Ganzzahlteilung).
+static Angle beam_angle(int i){return Angle(182.04445f*float((360*i)/16));}
+// njCalcVector(mtx), njCalcVector(cam.mtx) der Randnormalen; Rate nach effsub2.c:2120-2154.
+static float searchlight_rate(float z){
+    if(z>0){z-=0.3f;if(z<0)z=0;if(z>0.5f)z=0.5f;return z;}
+    z=-z-0.3f;z*=1.6f;if(z<0)z=0;if(z>1.0f)z=1.0f;return z;
+}
+// effsub2.c:2014 bhEff_E11_SearchLight und :2092 bhEff_E11_SearchLightDraw. Die
+// Zeichenfunktion laeuft nativ im selben Pass wie die Prozedur (ef_fnc-Liste); sie
+// schreibt pt[16] in den Hilfssatz und ct2 bei Spielertreffer in mode0 2.
+static bool step_e11_searchlight(EffectSprite& s,const EffectContext& c){
+    using namespace effect_detail;
+    switch(s.mode0){
+    case 0:
+        s.ct0=0;s.ct1=0;s.ct2=0;s.ax=0;s.mode0=0xFF;
+        if(!s.extra&&!acquire_extra_work(s))report_gap("bhEff_E11_SearchLight: bhSetExtraEffectWork ohne freien eff[512]-Platz");
+        return false;
+    case 1:
+        if(++s.ct0>=32)s.mode0++;
+        s.ax+=int(std::int16_t(s.axp-s.ax))/16;
+        s.ct1+=10;break;
+    case 2:
+        s.ct0=32;s.ax=s.axp;s.ct1+=s.ct2!=0?14:6;break;
+    case 3:
+        s.ct0-=3;if(s.ct0<=0){s.ct0=0;s.mode0=0;}
+        s.ax=s.ax-(s.ax/8);s.ct1+=2;break;
+    case 0xFF:return false;
+    default:break; // effsub2.c:2016: kein Fall, weiter zu sx/sy/sz und ef_fnc
+    }
+    s.sx=effect_random();s.sy=effect_random();s.sz=effect_random();
+    // --- bhEff_E11_SearchLightDraw ---
+    auto* link=static_cast<RECVX_ENEMY_WORK*>(s.lkwkp);
+    NJS_MATRIX mtx;
+    if(!link||!link_lookup||!link_lookup(1,link->owner_index,4,mtx)){report_gap("bhEff_E11_SearchLightDraw: lkwkp->mlwP->owP[4]");return false;}
+    if(!s.extra){report_gap("bhEff_E11_SearchLightDraw: op->exp0 fehlt");return false;}
+    auto* pt=extra_rows<NJS_POINT3>(s,"bhEff_E11_SearchLightDraw");
+    const NJS_POINT3 p1{mtx[12],mtx[13],mtx[14]};
+    NJS_MATRIX cam;camera_rotation(c,cam);
+    float rate[16];
+    const float spread=std::tan(0.0000958738f*float(s.ax));
+    for(int i=0;i<16;++i){
+        NJS_POINT3 pos{100.0f*njCos(beam_angle(i))*spread,100.0f*njSin(beam_angle(i))*spread,-100.0f};
+        NJS_POINT3 n{pos.x,pos.y,0};njUnitVector(&n);njCalcVector(&mtx,&n,&n);njCalcVector(&cam,&n,&n);
+        rate[i]=searchlight_rate(n.z);
+        if(c.sp_flg&0x8u){
+            njCalcPoint(&mtx,&pos,&pt[i]);
+            beam_wall(p1,pt[i],"bhEff_E11_SearchLightDraw: bhCollisionCheckLine2 ohne Wandsatz");
+            if(beam_player(p1,pt[i],"bhEff_E11_CheckCollisionPlayer ohne Treffermodelle")!=-1&&s.mode0==2)s.ct2=1;
+        }
+    }
+    std::uint32_t c0,c1;
+    const unsigned apex=unsigned(150.0f+55.0f*s.sx);
+    if(s.ct2!=0){c0=argb(apex,unsigned(s.ct0*3),0,0);c1=argb(0,unsigned(s.ct0*2),0,0);}
+    else{c0=argb(apex,unsigned(0.8f*float(s.ct0)),unsigned(0.8f*float(s.ct0)),unsigned(s.ct0));c1=argb(0,unsigned(0.4f*float(s.ct0)),unsigned(0.4f*float(s.ct0)),unsigned(s.ct0));}
+    const float edge=30.0f+15.0f*s.sx;
+    for(int i=0;i<16;++i){
+        const int j=i<15?i+1:0;
+        const NJS_POINT3 area[3]={p1,pt[i],pt[j]};
+        const std::uint32_t col[3]={c0,(c1&0xffffffu)|(unsigned(edge*rate[i])<<24),(c1&0xffffffu)|(unsigned(edge*rate[j])<<24)};
+        beam_triangle(s,area,col);
+    }
+    // Zwei umlaufende Linien vom Ursprung zum interpolierten Randpunkt.
+    const int id1=(s.ct1/16)&0xF,id2=(id1+1)&0xF;
+    const float r=float(s.ct1&0xF)/16.0f;
+    const auto mix=[&](int a,int b){return NJS_POINT3{(1.0f-r)*pt[a].x+r*pt[b].x,(1.0f-r)*pt[a].y+r*pt[b].y,(1.0f-r)*pt[a].z+r*pt[b].z};};
+    const unsigned red=unsigned(s.ct2<<6),green=unsigned((1-s.ct2)<<6);
+    const std::uint32_t l0=line_color(argb(unsigned(64.0f*s.sy),red,green,0)),l1=line_color(argb(unsigned(128.0f*s.sz),red,green,0));
+    const auto reg=ninja_blend_register(8,10);
+    s.lines.push_back({{p1,mix(id1,id2)},{l0,l1},reg});
+    const int id3=((s.ct1/16)+8)&0xF;
+    s.lines.push_back({{p1,mix(id3,(id3+1)&0xF)},{l0,l1},reg});
+    s.fnc_exit_src=8;s.fnc_exit_dst=6; // njSetSystemAttr stellt den gesicherten Zustand wieder her
+    effect_detail::queue_custom(s);
+    return true;
+}
+// effsub2.c:2353 bhEff_E16_LaserSight und :2390 bhEff_E16_LaserSightDraw.
+static bool step_e16_laser(EffectSprite& s,const EffectContext& c){
+    using namespace effect_detail;
+    auto* opp=static_cast<RECVX_ENEMY_WORK*>(s.lkwkp);
+    if(!opp){report_gap("bhEff_E16_LaserSight: op->lkwkp fehlt");return false;}
+    if((opp->flg!=0)^1){s.flg=0;return false;}
+    switch(s.mode0){
+    case 0:s.mode0++;return false;
+    case 1:return false;
+    default:if(opp->stflg&0x1000000u)return false;break;
+    }
+    NJS_MATRIX mtx;
+    if(!link_lookup||!link_lookup(1,opp->owner_index,unsigned(s.lkono),mtx)){report_gap("bhEff_E16_LaserSightDraw: lkwkp->mlwP->owP[lkono]");return false;}
+    const NJS_POINT3 p1{mtx[12],mtx[13],mtx[14]};
+    NJS_POINT3 pos{0,0,-1500.0f};njCalcPoint(&mtx,&pos,&pos);
+    if(c.sp_flg&0x8u){
+        s.line_wall=beam_wall(p1,pos,"bhEff_E16_LaserSightDraw: bhCollisionCheckLine2 ohne Wandsatz");
+        s.lox=pos.x;s.loy=pos.y;s.loz=pos.z;
+        s.ct0=beam_player(p1,pos,"bhEff_E11_CheckCollisionPlayer ohne Treffermodelle");
+        s.gpx=pos.x;s.gpy=pos.y;s.gpz=pos.z;
+        const RECVX_ENEMY_VEC v{pos.x,pos.y,pos.z};recvx_en16_add_eff_pos(opp,&v);
+    }else{pos={s.gpx,s.gpy,s.gpz};}
+    const float dx=pos.x-p1.x,dy=pos.y-p1.y,dz=pos.z-p1.z;
+    const float len=-njSqrt(dx*dx+dy*dy+dz*dz);
+    NJS_POINT3 pt[16];float rate[16];
+    NJS_MATRIX cam;camera_rotation(c,cam);
+    for(int i=0;i<16;++i){
+        NJS_POINT3 pw{0.07f*njCos(beam_angle(i)),0.07f*njSin(beam_angle(i)),len};
+        njCalcPoint(&mtx,&pw,&pt[i]);
+        NJS_POINT3 n{pw.x,pw.y,0};njUnitVector(&n);njCalcVector(&mtx,&n,&n);njCalcVector(&cam,&n,&n);
+        if(n.z>0)rate[i]=0;
+        else{float z=-n.z-0.3f;z*=1.6f;if(z<0)z=0;if(z>1.0f)z=1.0f;rate[i]=z;}
+    }
+    const auto reg=ninja_blend_register(8,10);
+    s.lines.push_back({{p1,pos},{line_color(argb(64,64,0,0)),line_color(argb(128,64,0,0))},reg});
+    if(opp->type!=0){
+        const int num=recvx_en16_eff_num(opp);const RECVX_ENEMY_VEC* effp=recvx_en16_eff_pos(opp);
+        for(int i=0;i<num&&effp;++i){
+            const unsigned a=unsigned(40-i*4);
+            s.lines.push_back({{p1,{effp[i].x,effp[i].y,effp[i].z}},{line_color(argb(a,64,0,0)),line_color(argb(a,64,0,0))},reg});
+        }
+    }
+    for(int i=0;i<16;++i){
+        const int j=i<15?i+1:0;
+        const NJS_POINT3 area[3]={p1,pt[i],pt[j]};
+        const std::uint32_t col[3]={argb(0,0,0,0),argb(unsigned(255.0f*rate[i]),100,0,0),argb(unsigned(255.0f*rate[j]),100,0,0)};
+        beam_triangle(s,area,col);
+    }
+    s.fnc_exit_src=8;s.fnc_exit_dst=6;
+    effect_detail::queue_custom(s);
+    return true;
+}
+
+// zonzon1.c:43 BloodCol[4][2] (reine Datentabelle, gleiche Werte wie recvx_t3_blood_col).
+static const std::uint32_t* blood_col(unsigned color,const char* what){
+    if(color>=4){effect_detail::report_gap(what);return nullptr;}
+    return recvx_t3_blood_col[color];
+}
+// effsub2.c:851 bhEff_E00_Blood (Effekt 296): Blutspritzer Texturgruppe 5, Bild mdlver,
+// Bewegung * 0.97 und Fall 0.1, UV-Zeilen bis u < 0, BaseSize 0.125, ef_trs.
+static bool step_e00_blood(EffectSprite& s){
+    static const EffectUv tab0[13]={{0.3125f,0.5f,0.0625f,0.0625f},{0.375f,0.4375f,0.125f,0.125f},{0.5f,0.4375f,0.15625f,0.15625f},{0.65625f,0.4375f,0.15625f,0.15625f},{0.8125f,0.4375f,0.15625f,0.15625f},{0.0f,0.5625f,0.1875f,0.1875f},{0.1875f,0.5625f,0.1875f,0.1875f},{0.375f,0.59375f,0.1875f,0.1875f},{0.5625f,0.59375f,0.1875f,0.1875f},{0.0f,0.78125f,0.21875f,0.21875f},{0.21875f,0.78125f,0.21875f,0.21875f},{0.4375f,0.78125f,0.21875f,0.21875f},{-1,0,0,0}};
+    static const EffectUv tab1[12]={{0.0f,0.25f,0.0625f,0.0625f},{0.0f,0.15625f,0.09375f,0.09375f},{0.09375f,0.15625f,0.125f,0.125f},{0.21875f,0.15625f,0.15625f,0.15625f},{0.375f,0.15625f,0.15625f,0.15625f},{0.0f,0.0f,0.15625f,0.15625f},{0.15625f,0.0f,0.15625f,0.15625f},{0.3125f,0.0f,0.15625f,0.15625f},{0.46875f,0.0f,0.15625f,0.15625f},{0.625f,0.0f,0.15625f,0.15625f},{0.78125f,0.125f,0.15625f,0.15625f},{-1,0,0,0}};
+    static const EffectUv tab2[14]={{0.0f,0.3125f,0.0625f,0.0625f},{0.0f,0.5f,0.0625f,0.0625f},{0.0f,0.375f,0.0625f,0.0625f},{0.0f,0.4375f,0.0625f,0.0625f},{0.0625f,0.3125f,0.125f,0.125f},{0.1875f,0.3125f,0.125f,0.125f},{0.3125f,0.3125f,0.125f,0.125f},{0.4375f,0.3125f,0.125f,0.125f},{0.5625f,0.3125f,0.125f,0.125f},{0.6875f,0.3125f,0.125f,0.125f},{0.8125f,0.3125f,0.125f,0.125f},{0.0625f,0.4375f,0.125f,0.125f},{0.1875f,0.4375f,0.125f,0.125f},{-1,0,0,0}};
+    static const EffectUv* const tables[3]={tab0,tab1,tab2};
+    switch(s.mode0){
+    case 0:
+        s.tex_id=5;s.flg|=0x4180000u;effect_detail::quad_color(s,0xffffffffu);s.bl_src=8;s.bl_dst=6;
+        s.ani_ct=s.mdlver;s.sxb=s.sx;s.syb=s.sy;s.mtn_no=int(s.type);s.frm_no=0;s.mode0++;break;
+    case 1:if(s.frm_no==0){s.flg=0;return false;}break;
+    default:break;
+    }
+    s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+    s.xn*=0.97f;s.yn*=0.97f;s.zn*=0.97f;s.yn-=0.1f;
+    if(s.mtn_no<0||s.mtn_no>2){effect_detail::report_gap("bhEff_E00_Blood: type ausserhalb uvtble[3]");s.flg=0;return false;}
+    const EffectUv* table=tables[s.mtn_no];const EffectUv& uv=table[s.frm_no];
+    s.frm_no++;if(table[s.frm_no].u<0)s.frm_no=0;
+    // effsub2.c:4702 bhEff_SetUVInfo(op, uvp, 0.125f)
+    effect_detail::quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/0.125f;s.sy=(s.syb*uv.ys)/0.125f;
+    return true;
+}
+// effsub2.c:694 bhEff_E00_BloodBurst (Effekt 297): Partikelstoss am Gelenk lkwkp->owP[lkono]
+// nach einer Typliste {type1, type2, size, spd, wait} (P_WK, 16 Byte, Felder per
+// Disassembly 0x0023E98C..0x0023EC04: short @0/@2, float @4/@8, short @0xC).
+static bool step_e00_blood_burst(EffectSprite& s,const EffectContext& c){
+    struct P{int type1,type2;float size,spd;int wait;};
+    static const P t0[2]={{17,1,1.5f,0.3f,4},{-1,2,0.7f,0.5f,-1}};
+    static const P t1[4]={{17,1,1.5f,-0.8f,0},{9,1,1.5f,0.3f,4},{17,2,1.5f,0.3f,2},{-1,2,1.0f,0.5f,-1}};
+    static const P t2[5]={{17,1,1.5f,0.1f,0},{17,1,1.5f,-0.8f,0},{9,1,1.8f,0.3f,4},{17,2,2.3f,0.3f,2},{9,1,1.7f,0.5f,-1}};
+    static const P t3[2]={{9,2,1.8f,0.3f,3},{10,1,1.7f,0.5f,-1}};
+    static const P t4[5]={{17,1,1.5f,0.1f,0},{-1,2,1.5f,0.8f,0},{10,2,1.3f,0.6f,6},{17,2,1.5f,0.4f,0},{9,1,1.0f,0.7f,-1}};
+    static const P t5[2]={{17,1,1.5f,0.8f,0},{10,2,1.3f,0.6f,-1}};
+    static const P t6[1]={{17,2,1.5f,0.8f,-1}};
+    static const P* const lists[7]={t0,t1,t2,t3,t4,t5,t6};
+    static const unsigned counts[7]={2,4,5,2,5,2,1};
+    using namespace effect_detail;
+    const auto* pp=static_cast<const RECVX_ENEMY_WORK*>(s.lkwkp);
+    if(pp&&(pp->stflg&0x1000000u))return false;
+    if(s.link_kind==0&&(c.player_stflg&0x1000000u))return false;
+    switch(s.mode0){
+    case 0:{NJS_POINT3 v{s.xn,s.yn,s.zn};njUnitVector(&v);s.xn=v.x;s.yn=v.y;s.zn=v.z;}
+        s.frm_no=0;s.mode0++;
+        [[fallthrough]];
+    case 1:
+        if(s.type>=7){report_gap("bhEff_E00_BloodBurst: type ausserhalb TypeList[7]");s.flg=0;return false;}
+        if(s.link_kind<0||!s.link_matrix){report_gap("bhEff_E00_BloodBurst: lkwkp->mlwP->owP[lkono] ohne Link");s.flg=0;return false;}
+        for(;;){
+            if(unsigned(s.frm_no)>=counts[s.type]){report_gap("bhEff_E00_BloodBurst: frm_no hinter der Typliste");s.flg=0;return false;}
+            const P& p=lists[s.type][s.frm_no];
+            const NJS_POINT3 lo{s.lox,s.loy,s.loz};
+            if(p.type1>=0){
+                const auto* col=blood_col(s.mdlver,"bhEff_E00_BloodBurst: BloodCol[mdlver] ausserhalb");
+                const NJS_POINT3 dir=p.spd>0?NJS_POINT3{s.xn,s.yn,s.zn}:NJS_POINT3{-s.xn,-s.yn,-s.zn};
+                if(!col){}
+                else if(!particle_mk2_hook)report_gap("bhSetEffParticleMk2 ohne Partikelbesitzer");
+                else particle_mk2_hook(s.link_kind,s.link_index,unsigned(s.lkono),lo,dir,col[0],col[1],p.type1);
+            }
+            if(p.type2>=0){
+                auto& ef=request_template();
+                ef.id=296;ef.flg=1;ef.type=unsigned(p.type2);
+                ef.scale={s.sx*p.size,s.sy*p.size,1.0f};ef.ax=0;ef.ay=0;ef.mdlver=s.mdlver;
+                NJS_MATRIX m;std::copy(s.link_matrix,s.link_matrix+16,m);NJS_POINT3 l=lo;njCalcPoint(&m,&l,&ef.position);
+                submit_template(0,nullptr);
+                auto& r=last_request();r.has_velocity=true;r.velocity={s.xn*p.spd,s.yn*p.spd,s.zn*p.spd};
+            }
+            s.ct0=p.wait;
+            if(p.wait==-1){s.flg=0;return false;}
+            if(p.wait!=0)break;
+            s.frm_no++;
+        }
+        s.frm_no++;s.mode0++;
+        [[fallthrough]];
+    case 2:
+        if(s.ct0!=0){s.ct0--;return false;}
+        s.mode0--;break;
+    default:break;
+    }
+    return false;
+}
+// effsub4.c:2149/3142/3177: EN09 throw smoke; delayed start, 255-domain UV.
+static bool step_en09_smoke(EffectSprite& s){
+    static const EffectUv uv[15]={{0,0,16,16},{16,0,24,24},{40,0,24,24},{64,0,32,32},
+        {96,0,48,48},{144,0,48,48},{192,0,64,64},{0,64,64,64},{64,64,64,64},
+        {128,64,64,64},{192,64,64,64},{0,128,64,64},{64,128,64,64},{128,128,64,64},{192,128,64,64}};
+    switch(s.mode0){
+    case 0:for(auto& v:s.tv)v.col=0x40808080;s.bl_src=8;s.bl_dst=10;s.flg|=0x4180000;s.stflg|=0x20;
+        s.ani_ct=0;s.ct0=s.ct1=s.ct2=0;s.spd=1;s.mode1=s.type;s.mode2=0;++s.mode0;break;
+    case 1:if(--s.ct3>=0)break;s.mode2=1;++s.mode0;
+        [[fallthrough]];
+    case 2:s.xn*=s.zn;s.px+=s.xn*-njSin(s.ay);s.pz+=s.xn*-njCos(s.ay);s.py+=s.yn;break;
+    }
+    if(!s.mode2)return false;
+    if(s.mode1>1)throw std::runtime_error("bhEff369: anim_tbl index outside 0..1");
+    const int pattern=s.ct1+(s.mode1?0:4);
+    if(pattern==15){s.flg=0;return false;}
+    if(pattern<0||pattern>=15)throw std::runtime_error("bhEff369: animation index outside table");
+    if(++s.ct0==1){s.ct0=0;if(s.spd!=0)++s.ct1;}
+    const auto& u=uv[pattern];s.sx=s.sxb*(u.xs/100);s.sy=s.syb*(u.ys/100);
+    s.tv[0].u=s.tv[2].u=u.u/255;s.tv[0].v=s.tv[1].v=u.v/255;
+    s.tv[1].u=s.tv[3].u=(u.u+u.xs-1)/255;s.tv[2].v=s.tv[3].v=(u.v+u.ys-1)/255;
+    return s.flg!=0;
+}
 bool hand_ported_effect_sprite(unsigned id){
     switch(id){
-    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 181:case 182:case 218:case 230:return true;
-    default:return false;
+    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 369:case 396:case 399:return true;
+    default:return hand_procedure(id)!=nullptr;
     }
 }
-bool supported_effect_sprite(unsigned id){return hand_ported_effect_sprite(id)||original::supported(id);}
+bool supported_effect_sprite(unsigned id){return hand_ported_effect_sprite(id);}
+// Raum-Texturgruppen (room.c ef_tn, Kennungen 30..99 und ab 400), die von Hand portierte
+// Prozeduren ueber tex_id adressieren: effsub1 (31,33,34,36,38,39,40,43), effsub0 (50..57,
+// 64,68,69,70..79,80,94,400..412,414,429..431), effsub5 (58..67,411..431), effsub6 (80).
 bool ported_effect_atlas(unsigned group){
-    return group==35||group==41||group==414||(group>=70&&group<=79)||(group>=400&&group<=407);
+    switch(group){
+    case 31:case 33:case 34:case 35:case 36:case 38:case 39:case 40:case 41:case 43:
+    case 50:case 51:case 52:case 53:case 54:case 55:case 56:case 57:case 58:case 59:
+    case 60:case 61:case 62:case 63:case 64:case 65:case 66:case 67:case 68:case 69:
+    case 80:case 94:
+    case 408:case 409:case 410:case 411:case 412:case 413:case 414:case 415:case 416:case 418:case 420:
+    case 417:case 419:case 421:case 422:case 423:case 424:case 425:case 426:case 427:case 428:
+    case 429:case 430:case 431:return true;
+    case 32:return true; // bhDraw107 (Regeneinschlag)
+    default:return (group>=70&&group<=79)||(group>=400&&group<=407);
+    }
 }
 bool step_effect_sprite(EffectSprite& sprite,bool* queued){
-    // Die erzeugten Originalprozeduren brauchen keinen Pass-Kontext; die von Hand
-    // portierten Flammen/Kennungen lesen die Flags des Besitzers.
-    if(!hand_ported_effect_sprite(sprite.id)&&original::supported(sprite.id)){sprite.frame_queued=false;const bool ran=original::step(sprite.id,sprite);if(queued)*queued=sprite.frame_queued;return ran;}
-    if(supported_effect_sprite(sprite.id))throw std::runtime_error("flame step requires native flag context");
+    // Die Tabellenprozeduren (effsub0/1/5/6) lesen keine Passflags; die aelteren
+    // Schalterfaelle (Patronenhuelse, Flamme, Erzeuger 125) brauchen den Besitzerkontext.
+    if(hand_procedure(sprite.id)||sprite.id==369||sprite.id==396||sprite.id==399){const EffectContext none;return step_effect_sprite(sprite,none,queued);}
+    if(supported_effect_sprite(sprite.id))throw std::runtime_error("effect step requires native flag context");
     if(queued)*queued=false;return false;
 }
 bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
     if(queued)*queued=false;if(!supported_effect_sprite(s.id))return false;
-    if(!hand_ported_effect_sprite(s.id)){s.frame_queued=false;if(!original::step(s.id,s))throw std::runtime_error("unknown ported effect procedure");if(queued)*queued=s.frame_queued;return true;}
+    if(s.id==369){const bool entered=step_en09_smoke(s);if(queued)*queued=entered;return true;}
+    if(s.id==296){const bool entered=step_e00_blood(s);if(queued)*queued=entered;return true;}
+    if(s.id==297){step_e00_blood_burst(s,c);if(queued)*queued=false;return true;}
+    if(s.id==261||s.id==270){s.custom_queued=false;s.quads.clear();s.lines.clear();const bool entered=s.id==261?step_e11_searchlight(s,c):step_e16_laser(s,c);if(queued)*queued=entered;return true;}
+    if(s.id==396||s.id==399){const bool entered=step_en21_effect(s);if(queued)*queued=entered;return true;}
+    if(const auto* procedure=hand_procedure(s.id)){
+        // effect.c:742 bhControlEffect leert die Zeichenlisten zu Beginn jedes Passes.
+        s.opaque_queued=false;s.custom_queued=false;s.quads.clear();s.lines.clear();
+        bool entered=false;procedure->step(s,c,entered);
+        if(queued)*queued=entered||s.opaque_queued||s.custom_queued;return true;
+    }
     if(s.id!=9){
         bool entered=false;
         switch(s.id){
@@ -604,9 +1004,15 @@ void step_light_color(unsigned type,unsigned speed,unsigned& clock,NJS_POINT3 co
 void set_effect_walls(const std::vector<CollisionWall>* walls,float height){effect_wall_set=walls;effect_wall_height=height;}
 void set_effect_water(std::function<bool(NJS_POINT3,float&)> probe){effect_water_probe=std::move(probe);}
 void set_effect_ground(GroundCollision* ground,const std::vector<CollisionWall>* room,const std::vector<CollisionWall>* mobile){
-    // bhGetGroundPosition der Raumwerke; Wassersaetze haben hier keinen Abnehmer.
-    effect_ground=ground;(void)room;(void)mobile;
+    // bhGetGroundPosition der Raumwerke; rom->flrp/sys->mflrp fuer bhCheckFloorEffect.
+    effect_ground=ground;effect_floor_room=room;effect_floor_mobile=mobile;
 }
+void set_effect_extra_allocator(std::function<int()> reserve,std::function<void(int)> release){extra_reserve=std::move(reserve);extra_release=std::move(release);}
+void set_effect_link_lookup(std::function<bool(unsigned,unsigned,unsigned,NJS_MATRIX&)> lookup){link_lookup=std::move(lookup);}
+void set_effect_player_hit(std::function<int(NJS_POINT3,NJS_POINT3&)> lookup){player_hit_lookup=std::move(lookup);}
+void set_effect_particle_mk2(std::function<int(int,unsigned,unsigned,NJS_POINT3,NJS_POINT3,unsigned,unsigned,int)> hook){particle_mk2_hook=std::move(hook);}
+void set_effect_work_angle(std::function<bool(unsigned,unsigned,int&)> lookup){work_angle_lookup=std::move(lookup);}
+void set_effect_pool_lookup(std::function<EffectSprite*(int)> lookup){pool_lookup=std::move(lookup);}
 void set_effect_link_matrix(unsigned node,const float* matrix){
     // Die Knotenmatrix hat ohne Effektprozeduren keinen Abnehmer.
     (void)node;(void)matrix;
@@ -623,23 +1029,94 @@ void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
     s.sx=s.sxb=e.scale.x;s.sy=s.syb=e.scale.y;s.sz=s.szb=e.scale.z;s.ax=e.ax;s.ay=e.ay;s.az=0;s.lkono=e.lkono;
     s.lkwkp=e.linked_work;
     if(e.has_offset){s.lox=e.offset.x;s.loy=e.offset.y;s.loz=e.offset.z;}
+    // Nachtraege der Originalerzeuger am neuen eff[n] (siehe EffectSpawn).
+    if(e.has_velocity){s.xn=e.velocity.x;s.yn=e.velocity.y;s.zn=e.velocity.z;}
+    if(e.tex_id_override>=0)s.tex_id=e.tex_id_override;
+    s.az=e.az;s.parent_slot=e.parent_slot;s.mode1=unsigned(e.mode1);
+    if(e.has_color)s.tv[0].col=e.color;
 }
 // effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
 int original_effect_slot(const std::vector<unsigned>& flags){for(unsigned i=0;i<512;++i)if(i>=flags.size()||!(flags[i]&3u))return int(i);return -1;}
-void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,unsigned>& bases){for(const auto& q:sprite.quads){const auto base=bases.find(q.category);if(base==bases.end())throw std::runtime_error("original custom-effect texture missing");EffectSprite quad;quad.id=302;quad.flg=0x100000;quad.tv=q.vertices;quad.bl_src=int(q.source);quad.bl_dst=int(q.destination);append_effect_sprite(scene,quad,q.center,{1,1,1},camera,base->second);}}
+void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,std::pair<unsigned,unsigned>>& bases,std::pair<unsigned,unsigned>* fnc_blend){
+    // Vor der ef_fnc-Schleife haben alle Zeichenpaesse 8/6 zurueckgestellt (effect.c:1268/1416).
+    const std::pair<unsigned,unsigned> entry=fnc_blend?*fnc_blend:std::pair<unsigned,unsigned>{8,6};
+    // DrawEff5SnowRect (effsub5.c:5804): Wind unter cam.mtx, einmal je Aufruf.
+    bool wind_ready=false;Angle wind_z=0;
+    for(const auto& q0:sprite.quads){
+        EffectSprite::Quad q=q0;
+        if(q.inherit_blend){q.source=entry.first;q.destination=entry.second;}
+        if(q.wind_aligned){
+            if(!wind_ready){
+                NJS_MATRIX view;camera_view_matrix(camera,view);
+                NJS_POINT3 v=q.wind;njCalcVector(&view,&v,&v);
+                wind_z=Angle(int(10430.381f*std::atan2(v.y,v.x))+16384);wind_ready=true;
+            }
+            // njUnitRotPortion, njRotateZ(aAngleZ), [njRotateY]: die Billboardlage des
+            // Hosts ist UnitRotPortion; die beiden Drehungen gehen in die Eckpunkte.
+            NJS_MATRIX turn;njUnitMatrix(&turn);njRotateZ(&turn,wind_z);if(q.turn_y)njRotateY(&turn,q.turn_y);
+            for(auto& v:q.vertices){NJS_POINT3 p{v.x,v.y,v.z};njCalcVector(&turn,&p,&p);v.x=p.x;v.y=p.y;v.z=p.z;}
+        }
+        unsigned texture=0;
+        if(q.textured){
+            const auto base=bases.find(q.category);if(base==bases.end())throw std::runtime_error("original custom-effect texture missing");
+            if(q.frame>=base->second.second)throw std::runtime_error("original custom-effect texture frame outside its atlas");
+            texture=base->second.first+q.frame;
+        }
+        EffectSprite quad;quad.id=302;quad.flg=q.world_space?0u:0x100000u;quad.tv=q.vertices;quad.bl_src=int(q.source);quad.bl_dst=int(q.destination);
+        quad.fog_disabled=!q.fogged;quad.point_filter=q.point_filter;quad.untextured=!q.textured;quad.pn=q.pn;quad.gouraud=q.gouraud;quad.fog_color_set=q.fog_color_set;quad.fog_color=q.fog_color;
+        append_effect_sprite(scene,quad,q.world_space?NJS_POINT3{0,0,0}:q.center,{1,1,1},camera,texture);
+    }
+    if(fnc_blend&&sprite.fnc_exit_src>=0&&sprite.fnc_exit_dst>=0)*fnc_blend={unsigned(sprite.fnc_exit_src),unsigned(sprite.fnc_exit_dst)};
+}
 // effsub0.c:10 setentry / effect.c:436 bhSetEffectTb: die Anforderung dieses
 // Passes; der Besitzer leert die Liste mit take_effect_output().
 void push_effect_spawn(const EffectSpawn& spawn){pending.spawns.push_back(spawn);}
-void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix){
+// effect.c:1374 (bhDrawTrsEffect3D), :1241 (Ntx), :1515 (Pnc), :1651 (Opq):
+// Rueckseitentor flg 0x20000. njCalcPoint der ersten drei Eckpunkte fuellt pa/pb/pc
+// (davon bleibt nur z stehen), njProjectScreen ueberschreibt x/y mit dem
+// Bildschirmpunkt, njGetPlaneNormal2 (ps2_NaColi.c:314) nimmt die Normale und
+// njUnitVector normiert sie; vec.z < 0 heisst Rueckseite. Die Winkelweite kommt
+// wie in camera.c:28 aus njSetPerspective(cam.pers) vor dem Zeichenpass.
+bool backface_culled(const std::array<SceneVertex,4>& world,const SceneCamera& camera){
+    njSetPerspective(camera.perspective);
+    NJS_MATRIX view;camera_view_matrix(camera,view);
+    NJS_POINT3 p[3];
+    for(unsigned i=0;i<3;++i){
+        NJS_POINT3 point=world[i].position;
+        njCalcPoint(&view,&point,&p[i]);
+        NJS_POINT2 screen;njProjectScreen(&view,&point,&screen);
+        p[i].x=screen.x;p[i].y=screen.y;
+    }
+    NJS_VECTOR vec;njGetPlaneNormal2(&p[0],&p[1],&p[2],&vec);njUnitVector(&vec);
+    return vec.z<0;
+}
+void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix,unsigned* stflg_out){
     if((s.flg|s.stflg)&0x1000000)return;
     // bhDrawTrsEffect3D: translation, UnitRotPortion for flag 0x100000,
     // Z rotation, scale. Invert the room view rotation to place the billboard.
     NJS_MATRIX basis;njUnitMatrix(&basis);
     if(s.flg&0x100000){njRotateY(&basis,-camera.angles[1]);njRotateX(&basis,-camera.angles[0]);njRotateZ(&basis,-camera.angles[2]);njScale(&basis,1,-1,-1);njRotateZ(&basis,s.az);}
     else {if((s.flg&0x80)&&!(s.flg&0x200000)){if(!linked_matrix)throw std::runtime_error("linked effect draw missing native node matrix");std::copy(linked_matrix,linked_matrix+16,basis);}njRotateXYZ(&basis,s.ax,s.ay,s.az);}
+    if(s.pn!=3&&s.pn!=4)throw std::runtime_error("original effect draw with a vertex count outside 3/4");
     std::array<SceneVertex,4> vertices;
-    for(unsigned i=0;i<4;++i){NJS_POINT3 point{s.tv[i].x*scale.x,s.tv[i].y*scale.y,s.tv[i].z*scale.z};njCalcVector(&basis,&point,&point);point.x+=position.x;point.y+=position.y;point.z+=position.z;vertices[i]={point,s.tv[i].u,s.tv[i].v,{}};}
+    for(unsigned i=0;i<4;++i){NJS_POINT3 point{s.tv[i].x*scale.x,s.tv[i].y*scale.y,s.tv[i].z*scale.z};njCalcVector(&basis,&point,&point);point.x+=position.x;point.y+=position.y;point.z+=position.z;vertices[i]={point,s.tv[i].u,s.tv[i].v,{}};
+        // Eigene Eckfarben (njDrawPolygon3DEx): die Flaechenfarbe traegt das Alpha, die
+        // Eckfaktoren den RGB-Anteil; verschiedene Alphas tragen die Eckpunkte selbst.
+        if(s.gouraud)vertices[i].light={float((s.tv[i].col>>16)&255u)/255.f,float((s.tv[i].col>>8)&255u)/255.f,float(s.tv[i].col&255u)/255.f};}
+    // GS-Gouraud interpoliert auch Alpha je Eckpunkt (njDrawPolygon3D mit eigenen
+    // Eckfarben, effsub2.c SearchLight/LaserSight): dann traegt jeder Eckpunkt sein Alpha.
+    bool vertex_alpha=false;
+    if(s.gouraud)for(unsigned i=1;i<s.pn&&i<4;++i)if((s.tv[i].col&0xff000000u)!=(s.tv[0].col&0xff000000u))vertex_alpha=true;
+    if(vertex_alpha)for(unsigned i=0;i<4;++i)vertices[i].alpha=float(s.tv[i].col>>24)/255.f;
+    // Rueckseitentor: der Originalzeichenpfad setzt stflg 0x10 und zeichnet nicht,
+    // sonst loescht er das Bit. Es wird auch ohne Zeichnung gebraucht
+    // (screen.c:943 liest es am Rendertextur-Satz).
+    if(s.flg&0x20000u){
+        const bool culled=backface_culled(vertices,camera);
+        if(stflg_out){if(culled)*stflg_out|=0x10u;else *stflg_out&=~0x10u;}
+        if(culled)return;
+    }
     // effect.c:bhDrawTrsEffect3D selects this op's pair with
     // njColorBlendingMode(0, op->bl_src)/(1, op->bl_dst) and restores 8/6 after
     // the draw; the primitive draws with the register that pair produced.
@@ -647,11 +1124,15 @@ void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position
     // pair (the additive approximation stays, see color_blending_unavailable and
     // the ledger), so it is not drawn with a substituted register.
     const bool original_pair=s.id==5||s.id==23||s.id==302||supported_effect_sprite(s.id);
-    if(original_pair){color_blending_mode(0,s.bl_src);color_blending_mode(1,s.bl_dst);}
+    // sys->ef_opq (bhDrawOpqEffect3D, effect.c:1435): festes Paar 8/6 vor der Schleife, Tiefenschreiben.
+    if(original_pair){color_blending_mode(0,s.opaque_queued?8:s.bl_src);color_blending_mode(1,s.opaque_queued?6:s.bl_dst);}
     const auto register_=original_pair?color_blending_alpha():0ull;
-    for(auto indices:{std::array<unsigned,3>{0,1,2},std::array<unsigned,3>{1,3,2}}){SceneTriangle triangle;for(unsigned i=0;i<3;++i)triangle.vertices[i]=vertices[indices[i]];triangle.color=s.tv[0].col;triangle.texture=texture;triangle.textured=true;triangle.camera_mask=false;triangle.world_lit=true;triangle.depth_write=false;
+    const std::array<std::array<unsigned,3>,2> strip{{{0,1,2},{1,3,2}}};
+    for(unsigned t=0;t<(s.pn==3?1u:2u);++t){const auto indices=strip[t];SceneTriangle triangle;for(unsigned i=0;i<3;++i)triangle.vertices[i]=vertices[indices[i]];triangle.color=vertex_alpha?0xffffffffu:s.gouraud?((s.tv[0].col&0xff000000u)|0xffffffu):s.tv[0].col;triangle.gouraud=s.gouraud;triangle.vertex_alpha=vertex_alpha;triangle.texture=texture;triangle.textured=true;triangle.camera_mask=false;triangle.world_lit=true;triangle.depth_write=s.opaque_queued;triangle.fogged=!s.fog_disabled;if(s.untextured)triangle.textured=false;
+        triangle.fog_color_set=s.fog_color_set;triangle.fog_color=s.fog_color;
         if(original_pair){triangle.blend=SceneBlend::Ninja;triangle.blend_register=register_;}else triangle.blend=SceneBlend::Additive;
         if(s.id==9)triangle.texture_filter=(s.flg&0x20000000u)?SceneTextureFilter::Point:SceneTextureFilter::Linear;
+        if(s.point_filter)triangle.texture_filter=SceneTextureFilter::Point;
         scene.triangles.push_back(triangle);}
     if(original_pair){color_blending_mode(0,8);color_blending_mode(1,6);}
 }

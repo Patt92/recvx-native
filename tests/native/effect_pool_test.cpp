@@ -68,7 +68,7 @@ int main(){try{_Make_SinTable();shared_pool();
     std::vector<unsigned> full_effect_pool(512,1u);check(original_effect_slot(full_effect_pool)==-1,"full eff[512] pool did not report allocation failure");
     {EffectSprite effect;EffectSpawn request;request.id=29;initialize_effect_sprite(effect,request);
      // bhEff029 kommt aus der portierten Originalprozedur
-     // (native/effect_procedures.cpp); die fruehere Luecke ist geschlossen.
+     // (native/effect_sprite_procedures.cpp); die fruehere Luecke ist geschlossen.
      check(supported_effect_sprite(29),"bhEff029 is not bound to the ported original procedure");
      // bhEff029 (effsub1.c:5908) laeuft jetzt als portierte Originalprozedur
      // und traegt ihr Ergebnis in frame_queued ein.

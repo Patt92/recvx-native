@@ -1047,6 +1047,16 @@ int recvx_t3_attack_hit_check(const RECVX_ENEMY_VEC* pos, float ar)
     return 0;
 }
 
+int recvx_t3_player_hit_set(int djnt_no, const RECVX_ENEMY_VEC* dv, const RECVX_ENEMY_VEC* dp)
+{
+    if (t3_ext_bound && t3_ext_bound->player_hit_set) {
+        t3_ext_bound->player_hit_set(djnt_no, dv, dp);
+        return 1;
+    }
+    recvx_t3_gap("plp->djnt_no/dvx/dpx schreiben");
+    return 0;
+}
+
 int recvx_t3_player_hit_get(int* djnt_no, RECVX_ENEMY_VEC* dv, RECVX_ENEMY_VEC* dp)
 {
     if (t3_ext_bound && t3_ext_bound->player_hit_get)

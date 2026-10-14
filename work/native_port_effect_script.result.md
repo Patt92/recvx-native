@@ -82,7 +82,7 @@ und `world_enemies.cpp:1001` bindet den Gegnerdienst darauf. Offen war allein di
   ab (`false`). Lauf: PASS.
 - Gemessene Gegenprobe an echten Daten: `RM_3140` hatte mit dem Vorher-Binary
   `pending_world_bindings` 3 **mit** Opcode 0x58, mit dem neuen Stand 2 ohne.
-- CTest `build/alphadomain-claude-20261013`: **80/82**, rot nur `script_motion`
+- CTest: **80/82**, rot nur `script_motion`
   (fremde Sitzung, vorbestehend) und `original_map_render` (parallele Kartenarbeit;
   `verify_map` scheitert mit dem Vorher-Binary identisch).
 - Dev-App gegen die installierte Runtime: lighter, detector, events, scanner, combat,

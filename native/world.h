@@ -8,6 +8,7 @@
 #include "effect_collision.h"
 #include "geometry_motion.h"
 #include "effect_sprites.h"
+#include "hit_model.h"
 #include "enemy_spawn.h"
 #include "subplayer.h"
 #include "en01_damage.h"
@@ -57,7 +58,10 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     std::optional<std::int64_t> sampled_frame;
     unsigned motion_mode3=0; // O_WRK: only bhSetObj/ItmMotion advances mode 1.
     bool motion_slow=false; // Common 24/25/34 mtn_md bit 8, separate from MTN flags.
-    std::int64_t pose_frame()const{return scripted&&sampled_frame?*sampled_frame:frame;}
+    // Skriptpfad: der vor dem Vorschub abgetastete Frame. Nativer Gegnerwork:
+    // bhSetMotion (Motion.c:21) tastet objP bei frm_no ab und schiebt danach vor;
+    // frame ist die vorgeschobene Uhr, sampled_frame der gezeichnete Frame.
+    std::int64_t pose_frame()const{return (scripted||enemy_native)&&sampled_frame?*sampled_frame:frame;}
     // objP of the original work. motion/room_motion/frame/has_motion above are
     // mtn_no/frm_no, the state the control pass will sample next;
     // bhSetMotion/bhCalcModel write the object tree, and they only run while
@@ -100,6 +104,9 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // obj_num -= 8 am geteilten ML_WORK (en01.c:2799/10347/3148); der Wert gehoert
     // deshalb dem Baumbesitzer. motion_library: `epp->mnwP = epw->mnwP`
     // (en01.c:2829), die Identitaet, deren emtp das Kind abspielt; -1 = eigene.
+    // room.c:559 bhSetEneMdl ohne MDL-Block mit Objekten (mdl_n 0) bzw. ein mdl[slot] hinter
+    // mdl_n: das ML_WORK bleibt genullt (obj_num 0); bhCalcTree/Draw laufen leer, kein Fehler.
+    bool model_absent=false;
     WorldEntity* model_owner=nullptr;unsigned model_window=0;int motion_library=-1;
     // npSetAllMatColor(mlwP->objP, obj_num, color) (njplus.c:1375) patcht in
     // JEDEM Objekt des Baums die Materialchunks 17..23: B/G/R werden immer
@@ -108,6 +115,9 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     bool enemy_material_set=false;std::uint32_t enemy_material_color=0;
     // Entity values as the last publish left them; a difference before the
     // next pass is a script write that recvx_enemy_adopt takes over.
+    // pp->dan_ap (hitchk.c:5050 bhSetDansaLimitAtari): last step ETC this
+    // enemy work stood on, as its place in rom->etcp + sys->metcp.
+    std::optional<std::size_t> enemy_dansa_step;
     struct EnemyMirror {NJS_POINT3 position{};std::array<int,3> angles{};int yaw=0,floor=0;unsigned motion=0;bool room_motion=false;std::int64_t frame=0,step=0;int hp=0;bool hidden=false,inactive=false,look=false;} enemy_mirror{};};
 class RoomWorld {
 public:
@@ -280,6 +290,8 @@ public:
     void initialize_camera_clip(unsigned cut,bool hand_over_fog=true);
     ViewClip camera_clip()const{return installed_clip_;}
     void tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking=true);
+    // face.c:79 bhControlMask fuer einen Besitzer mit Maskendaten (Gegnerpass id > 90 oder Weltpass).
+    void control_mask(WorldEntity& e,const PlayerAsset& actor);
     struct FogView {bool enabled;std::uint32_t color;float near_range,far_range;int ct;};
     FogView fog_view()const{return {fog_.enabled,fog_color_,cam_fog_near_,cam_fog_far_,fog_ct_};}
     bool camera_transitioning()const{return active_camera_.transitioning();}
@@ -397,6 +409,10 @@ private:
     // owP belongs to the player model and is published by its control pass,
     // not by rendering. Enemy joint queries read the previous committed tree.
     std::vector<BoneMatrix> player_joint_matrices_;
+    // hitchkl.c:735 Datensicht der Treffermodelle (plp mdl[3], Figuren mdl[1]) je Modell.
+    std::map<const PlayerAsset*,std::vector<std::optional<HitModelObject>>> hit_models_;
+    // effsub2.c:2296 bhEff_E11_CheckCollisionPlayer.
+    int effect_player_hit(NJS_POINT3 p1,NJS_POINT3& p2);
     BoneMatrix player_link_matrix_{};
     bool player_link_matrix_valid_=false;
     std::function<void(uint32_t)> pad_clear_cb_;
@@ -404,6 +420,10 @@ private:
     std::array<Context,16> contexts_{};
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
     mutable std::set<std::string> unbound_enemy_; // const owP/pose services report their gaps too
+    // Plaetze, deren letzter Zeichenpass das Rueckseitentor flg 0x20000 geschlossen
+    // hat (effect.c:1391 op->stflg |= 0x10). bhControlEffect traegt sie im naechsten
+    // Bild in stflg ein; der Zeichenpass selbst ist const.
+    mutable std::set<unsigned> effect_backface_;
     unsigned enemy_game_mode_=0;
     // bhSetEffectTb from game code: `link_kind` 0 = world position, 2 = enemy joint (WorldEntity index/joint).
     int spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
@@ -466,7 +486,10 @@ private:
     void init_en01(bool hard);
     void init_barrels();
     std::vector<Model> models_;
-    struct SpriteWork {EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
+    // txp[0] is a captured list on the room/model asset, not a copied atlas.
+    // models_ is fixed after load; SpriteWork (including snapshots) keeps only
+    // the reference and dies with this RoomWorld.
+    struct SpriteWork {const std::vector<SceneTexture>* texture_list=nullptr;EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
     bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
@@ -488,9 +511,12 @@ private:
     // bhSetEffect (effect.c:331) / bhSetEffectTb ohne die Prozedurpruefung.
     int allocate_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index);
     unsigned player_weapon_=0,effect_yk_ct_=0,presentation_flags_=~0u; // system.c initializes pt_flg to ~0u
+    unsigned stage_no_=0,room_no_=0; // sys->stg_no/rom_no aus dem Raumnamen (RoomIdentity)
+    unsigned enemy_count_=0; // rom->ene_n
     unsigned effect_flags_=0; // system.c:195 sys->ef_flg = 0
     void control_player_effects();
     std::vector<CollisionWall> effect_walls_; // rom->walp + sys->mwalp as bhCheckWallType sees them
+    const std::vector<SceneTexture>* effect_texture_list(const SpriteWork& work)const;
     std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;
     // event.c:220 bhPushEffectWork/:234 bhPopEffectWork sichern den ganzen
     // eff[512]-Satz (hier sprites_ plus die Partikelnutzlast des Besitzers) und

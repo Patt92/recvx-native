@@ -104,10 +104,14 @@ void room(const std::filesystem::path& data,const char* name,unsigned id,unsigne
         ++bound;check(e->enemy_native&&e->enemy.owner==e&&e->enemy.owner_index==i&&e->enemy.idx_ct>=0,"work not a member of its entity");}
     check(bound==expected,"room enemies not bound in room order");
     world.set_simulation_flags(~0u);
+    // room.c:438-444: bhKeepObjWork + bhCalcModel(pwp) beim Raumaufbau, also
+    // ist jeder Raumgegner mit Modell schon vor seinem ersten Pass berechnet
+    // und zeichenbar (kein Nullbaum bis zum ersten Pass).
+    for(unsigned i=0;i<64;++i)if(const auto* e=world.state(1,i);e&&e->enemy_native&&e->enemy_asset)check(e->enemy_calculated,"room.c:443 bhCalcModel at room load missing");
     Scene before=scene;world.append(before);
     for(unsigned pass=0;pass<30;++pass)world.tick();
     Scene after=scene;world.append(after);
-    check(after.triangles.size()>before.triangles.size(),"native enemy works are not drawn after their pass");
+    check(before.triangles.size()>scene.triangles.size()&&after.triangles.size()>scene.triangles.size(),"native enemy works are not drawn");
     for(unsigned i=0;i<64;++i)if(const auto* e=world.state(1,i);e&&e->enemy_native){
         // room.c:447 ruft bhInitMask nur fuer id > 90; sonst bleibt owP frei.
         if(e->identity<=90)for(const auto flg:e->enemy_owp_flg)check(!(flg&4u),"bhInitMask auf einen Gegner mit id <= 90 angewandt");

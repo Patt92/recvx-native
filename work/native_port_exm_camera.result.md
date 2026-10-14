@@ -34,8 +34,8 @@ mit `0x8` (Eventkamera), einer ohne Text. Keiner nutzt `0x10`/`0x20`.
   Eventkamera 0/0, Spieler ausgeblendet, Gegner/Spieler stehen, nach Seite 3
   Rückkehr zur Schnittkamera, `sp_flg ~0`. `sp_flg 0x10` schaltet das Raumskript
   selbst (Matrix 6 Index 27).
-- ctest 82/83; `script_motion` war vorher schon rot (`boxpad-claude-20261014`,
-  `alphadomain-claude-20261013`, gleiche Meldung).
+- ctest 82/83; `script_motion` war vorher schon rot (gleiche Meldung in zwei älteren,
+  inzwischen entfernten Buildordnern).
 
 ## Offen
 - `bhCheckCut(1)` im Spieleraugen-Zweig (`gm_flg 0x40`) ohne nativen Besitzer.
@@ -43,3 +43,14 @@ mit `0x8` (Eventkamera), einer ohne Text. Keiner nutzt `0x10`/`0x20`.
   Schnittübergabe über `cut_fog_handover` lief.
 - Native Schnittprüfung (`follow`) beachtet `sp_flg 0x40` nicht generell.
 - Nicht ins Paket `build/packages/macos-arm64-v0.5` installiert.
+
+## Regression RM_0090 Sicherheitsboxen (2026-10-14)
+- Ursache: Opcode 0x2a (`event.c:994` bhCamSet2, Fall 0) setzte nativ `gm_flg 0x1000`
+  dauerhaft und ließ `sys->fixcno` aus. Im Original löscht bhSetFixedCut (`cut.c:448`)
+  das Bit sofort. Seit `control_exm` (`game.c:274`) das Bit liest, schnitt der nächste
+  Pass auf den alten `fixcno` (0) zurück: Kiste in Schnitt 0 statt 8/9, Claire per
+  Skript (`0x24`) ausgeblendet, Deckelanimation in Weitwinkel.
+- Fix `native/events.cpp` (case 0x2a): `fixcno = v1`, Bit nach dem Weltaufruf gelöscht.
+  Test in `tests/native/game_test.cpp`; Replays vorher/nachher in
+  `build/validation/box0090-claude-20261014/` (Schnitt 0 -> 8/9, Rückkehr nach Ende).
+- Offen: `gm_flg 0x20` aus bhSetFixedCut hat weiter keinen nativen Besitzer.

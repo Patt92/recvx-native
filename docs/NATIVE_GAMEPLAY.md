@@ -126,6 +126,13 @@ Gameplay-Freigabe; der aktuelle Lückenplan steht in
 
 ## Gegner
 
+**EN21 (Albinoid-Jungtier): implementiert und angebunden, Laufzeitabnahme offen.**
+Der vorhandene native Zustandsautomat läuft im WorldEntity-Dispatch, mit Routen,
+Spielmodus, Spielergriff und Audio. Funken/Spuren (399/396) verwenden die vom
+Gegner gesetzte Modelltexturliste statt eines gemeinsamen Ersatzatlasses.
+Die gemeinsamen Raumrouten werden auch ohne Zombie-Motionbibliothek geladen.
+Tests sind bewusst zurückgestellt; dies ist keine vollständige Gegnerabnahme.
+
 **Portiert**
 - Zombies (`en01.c`): Wahrnehmung, Wegsuche, Verfolgung, Fußfixierung,
   Trefferreaktionen, Niederschlag, Tod, Blut, Gegnerstimmen.

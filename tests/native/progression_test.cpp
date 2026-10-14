@@ -40,7 +40,9 @@ int main(int argc,char** argv){try{
     // die Effektarbeit unverändert bleibt - kein geratener Atlas, kein
     // geratener Zustand. 122/218/230 sind seit dem committeten Stand
     // (2a488f7) positiv portiert und laufen nicht mehr als Lücke mit.
-    for(const unsigned id:{24u,200u,201u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
+    // 200/201 sind seit 2026-10-14 von Hand portiert und laufen nicht mehr als Luecke mit; 221/229 bleiben offen.
+    // 24 und 221 sind portiert (Gruppen 4 und 6, 2026-10-14); 229 bleibt offen.
+    for(const unsigned id:{229u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
         check(!supported_effect_sprite(id),"effect gap reports a bound procedure");
         check(!step_effect_sprite(sprite,&queued)&&!queued,"effect gap executed a procedure or queued a draw");
         check(sprite.tex_id==-1&&!sprite.ct0&&!sprite.ani_ct&&!sprite.flg&&sprite.type==14&&sprite.tv[0].y==-1,"effect gap changed the sprite work");}

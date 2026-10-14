@@ -106,6 +106,7 @@ static std::vector<std::uint8_t> skinned_object_packet(const std::vector<std::ui
 }
 WorldEntity& RoomWorld::entity(unsigned kind,unsigned index){if(kind>4||index>4096)throw std::runtime_error("invalid world entity kind "+std::to_string(kind)+" index "+std::to_string(index));return entities_[{kind,index}];}
 RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data,const std::filesystem::path& mods,const std::string& room_name,unsigned game_mode):room_(b),header_(inspect_room(b).room_offset),player_(player),motion_(motion),frame_(frame),audio_(audio){
+    {const auto id=RoomIdentity::parse(room_name);stage_no_=id.stage;room_no_=id.room;}
     particles_.bind_pool(
         [this](unsigned slot){return slot<sprites_.size()?sprites_[slot].sprite.flg:0u;},
         [this](unsigned slot,unsigned flags,unsigned id){write_particle_slot(slot,flags,id);});
@@ -140,18 +141,23 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
             if(bytes&&(v.u32(at)&0xffffff)==0x4c444d){if(v.u32(at+8)!=0xffffffff){const auto key=std::make_tuple(kind,identity,variant,version++);auto it=texture_cache.find(key);if(it==texture_cache.end())it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(first)texture=it->second;}first=false;}at+=bytes;}}
         else {const auto mdl=skinned_object(v,model)?model+8+v.u32(model):model;const auto key=std::make_tuple(kind,identity,0u,0u);auto it=texture_cache.find(key);if(it==texture_cache.end()&&v.u32(mdl+8)!=0xffffffff)it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(it!=texture_cache.end())texture=it->second;}
         Model out;out.kind=kind;out.index=index;
-        if(actor&&!actor_has_objects(v,model))return;
+        if(actor&&!actor_has_objects(v,model)){e.model_absent=true;return;}
         if(actor){out.actor=std::make_unique<PlayerAsset>(actor_packet(b,model,texture),identity>90);}
         else if(skinned_object(v,model)){out.actor=std::make_unique<PlayerAsset>(skinned_object_packet(b,model,texture));actor=true;}
         else {ModelGeometryOptions pose;out.source_model=model;const auto base=v.relative(model,v.u16(model+4),0),nodes=v.relative(base,v.u32(model+12),v.u16(model+6)*52);for(unsigned i=0;i<v.u16(model+6);++i){const auto p=nodes+i*52;out.rest_pose.push_back({{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.i32(p+20),v.i32(p+24),v.i32(p+28)}});}out.object=decode_model_asset(b,model,texture,pose);}
         if(actor)out.object.textures=out.actor->textures();if(!data.empty())apply_texture_files(out.object,data,mods,std::filesystem::path(kind==1?"npcs":kind==2?"objects":"room-items")/room_name/asset_number(index));
         models_.push_back(std::move(out));};
+    enemy_count_=ene_count;
     const auto enep=v.u32(header_+8);for(unsigned i=0;i<ene_count;++i)if(v.u32(enep+i*36)&1)load(1,i,enep+i*36,true);
     const auto objp=v.u32(header_+12),obj_count=v.u32(header_+0x8c);for(unsigned i=4;i<obj_count;++i)load(2,i,objp+i*36,false);
     const auto itmp=v.u32(header_+16),item_count=v.u32(header_+0x90);for(unsigned i=0;i<item_count;++i)load(3,i,itmp+i*36,false);
     // room.c bhSetRoom appends unique room effect atlases after actor/item textures.
     const auto effectp=v.u32(header_+0x14),effect_count=v.u32(header_+0x94);if(effect_count>512)throw std::runtime_error("too many original room effects");v.require(effectp,effect_count*68);
     std::set<unsigned> effect_ids;
+    // eff[512] ist ein festes Feld (effect.c:276). Eine Prozedur haelt ihren
+    // eigenen Satz als Referenz, waehrend bhSetExtraEffectWork weitere Plaetze
+    // belegt; mit voller Kapazitaet verschiebt eine Belegung nie den Speicher.
+    sprites_.reserve(512);
     for(unsigned i=0;i<effect_count;++i){const auto p=effectp+i*68;const unsigned id=v.u16(p+4);SpriteWork work;work.sprite.id=id;work.sprite.type=v.u16(p+6);work.sprite.flg=v.u32(p);work.sprite.ay=v.u16(p+36);work.sprite.ax=v.u16(p+38);work.sprite.lkono=v.u32(p+48);work.scale={v.f32(p+24),v.f32(p+28),v.f32(p+32)};work.link=v.u32(p+40);work.index=v.u32(p+44);work.node=v.u32(p+48);work.offset={v.f32(p+52),v.f32(p+56),v.f32(p+60)};work.sprite.px=v.f32(p+12);work.sprite.py=v.f32(p+16);work.sprite.pz=v.f32(p+20);work.sprite.sx=work.sprite.sxb=work.scale.x;work.sprite.sy=work.sprite.syb=work.scale.y;work.sprite.sz=work.sprite.szb=work.scale.z;sprites_.push_back(work);auto& e=entity(4,i);e.identity=id;e.type=work.sprite.type;e.angles={work.sprite.ax,work.sprite.ay,0};e.transform.position={v.f32(p+12),v.f32(p+16),v.f32(p+20)};
         if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)||ported_effect_atlas(id)){auto atlas=decode_texture_bundle(b,texture);
             // Eine portierte Prozedur behaelt die Alpha-Domaene des Dekoders;
@@ -174,7 +180,11 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         // Preserve those absolute starts and their following animation frames.
         for(const unsigned first:{31u,33u,34u,36u})if(first<common.size()&&!effect_textures_.count(first)){std::vector<SceneTexture> atlas;
             for(auto it=common.begin()+first;it!=common.end();++it)atlas.push_back(*it);
-            effect_textures_[first]=std::move(atlas);}}}}
+            effect_textures_[first]=std::move(atlas);}
+        // effsub5.c bhEff204 setzt sys->ef_tn[449] = 7: die Gruppe zeigt auf die gemeinsame Textur 7.
+        if(common.size()>7&&!effect_textures_.count(449)){std::vector<SceneTexture> atlas;
+            for(auto it=common.begin()+7;it!=common.end();++it)atlas.push_back(*it);
+            effect_textures_[449]=std::move(atlas);}}}}
     const auto motion_table=v.u32(24);auto motions=v.u32(motion_table+ene_count*4);
     if(motions)for(unsigned i=0;i<256;++i){const auto n=v.u32(motions);motions+=4;if(n==0xffffffff)break;room_motions_.push_back(n?decode_motion_asset(section(b,motions,n)):MotionClip{});motions+=n;}
     // room.c: room motions are followed by mspp (sized PARAM_WORK sequences).
@@ -259,15 +269,17 @@ std::vector<RoomWorld::CombatTarget> RoomWorld::combat_targets()const{std::vecto
 // bhEne01_Init rolls the hp table (EXP0 type, difficulty) itself; re-running it at room load applies the game mode.
 void RoomWorld::init_en01(bool hard){
     en01_host_install(&unbound_enemy_);
-    const auto library=enemy_motions_.find(1);if(library==enemy_motions_.end())return;
-    std::vector<unsigned> frames(library->second.entries.size(),0);for(std::size_t i=0;i<frames.size();++i){const auto entry=library->second.entries[i];if(entry.second)frames[i]=en01_motion_frames(section(room_,entry.first,entry.second));}
-    recvx_en01_set_frame_counts(frames.data(),unsigned(frames.size()));
     BinaryView v(room_);const auto ene_count=v.u32(header_+0x88);const auto enep=v.u32(header_+8);std::vector<const RECVX_EN01*> previous;
     {const auto rut_n=v.u32(header_+0xA8);if(rut_n&&rut_n<=256){const auto rutp=v.u32(header_+0x28),ruttp=v.u32(header_+0x2C);v.require(rutp,rut_n*36);v.require(ruttp,rut_n*rut_n);
         recvx_en01_set_routes(room_.data()+rutp,rut_n,room_.data()+ruttp);
         route_areas_.clear();route_table_.assign(room_.begin()+ruttp,room_.begin()+ruttp+rut_n*rut_n);
         for(unsigned i=0;i<rut_n;++i){const auto p=rutp+i*36;route_areas_.push_back({v.u8(p),v.u8(p+1),v.u8(p+2),int(std::int8_t(v.u8(p+3))),v.u32(p+4),{v.f32(p+8),v.f32(p+12),v.f32(p+16)},{v.f32(p+20),v.f32(p+24),v.f32(p+28)},{v.u8(p+32),v.u8(p+33),v.u8(p+34),v.u8(p+35)}});}
         }else{recvx_en01_set_routes(nullptr,0,nullptr);route_areas_.clear();route_table_.clear();}} // rom->rutp / ruttp for bhCheckRoute
+    // Room routes belong to rom, not to an EN01 motion resource. EN04/EN21
+    // use the same rutp/ruttp even in a room without any zombie library.
+    const auto library=enemy_motions_.find(1);if(library==enemy_motions_.end())return;
+    std::vector<unsigned> frames(library->second.entries.size(),0);for(std::size_t i=0;i<frames.size();++i){const auto entry=library->second.entries[i];if(entry.second)frames[i]=en01_motion_frames(section(room_,entry.first,entry.second));}
+    recvx_en01_set_frame_counts(frames.data(),unsigned(frames.size()));
     {const auto ec=v.u32(header_+0x9c),fc=v.u32(header_+0xa0),ep=v.u32(header_+0x1c),fp=v.u32(header_+0x20);v.require(ep,ec*36);v.require(fp,fc*36);recvx_en01_set_terrain(room_.data()+ep,ec,room_.data()+fp,fc);}
     recvx_en01_set_mobile_terrain(nullptr,0,nullptr,0);
     for(unsigned i=0;i<ene_count;++i){auto found=entities_.find({1,i});if(found==entities_.end()||found->second.identity!=1)continue;auto& e=found->second;if(e.dead||e.scripted)continue;
@@ -515,7 +527,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         return true;}
     // event.c:5336 bhEffPush/:5346 bhEffPop: bhPushEffectWork/bhPopEffectWork.
     if(op==0x70){EffectPushState state;state.works=sprites_;state.particles=particles_.save();effect_push_=std::move(state);return true;}
-    if(op==0x71){if(effect_push_){sprites_=effect_push_->works;particles_.restore(effect_push_->particles);}return true;}
+    if(op==0x71){if(effect_push_){sprites_=effect_push_->works;sprites_.reserve(512);particles_.restore(effect_push_->particles);}return true;}
     // event.c:4302 bhEffBloodSet: Blutstoss am Gegnerwork. v0 der Raumindex,
     // v1 zugleich epw->djnt_no und der Gelenkpunkt, v2 die Vorzeichenbits des
     // Versatzes, danach Typ, Flags und der Gradwinkel (Bit 1 negiert ihn).
@@ -636,6 +648,8 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(!ctx.kind)player_morph_.motion_mode3=mode3;
         else{auto& e=entity(ctx.kind,ctx.index);e.motion_mode3=mode3;
             if(e.subplayer_bound)e.enemy.mode3=mode3;
+            // Nativer Gegnerwork: bhCetask->work->mode3 und bei id 1 exp1->mode3 (event.c:1804-1820).
+            else if(e.enemy_bound&&e.enemy_native){e.enemy.mode3=std::uint8_t(mode3);if(e.enemy.id==1&&e.enemy.exp1)static_cast<RECVX_ENEMY_WORK*>(e.enemy.exp1)->mode3=std::uint8_t(mode3);}
             if(e.en01)recvx_enemy_motion_mode(e.en01.get(),mode3); // Also writes id-1 exp1.
         }
         return true;
@@ -724,7 +738,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
             if(last_pan!=-1)audio_.user_sound_pan(unsigned(type),unsigned(slot),start_pan,last_pan,v.u8(7));}
         catch(const std::runtime_error&){unbound_enemy_.insert("Set3dSoundFlag: Slot ausserhalb der Originaltabelle (bhEasySESet)");}
         // pPos = epw->mlwP->owP[byte 11].mtx[12]; epw by byte 9 (0 player, 1 enemy, 2 object, 3 item) and byte 10.
-        auto position=[&](SoundPoint& out){const auto joint=link_matrix(v.u8(9),v.u8(10),v.u8(11));if(!joint){unbound_enemy_.insert("bhEasySESet owP["+std::to_string(v.u8(11))+"]");return false;}out={joint->value[12],joint->value[13],joint->value[14]};return true;};
+        auto position=[&](SoundPoint& out){const auto joint=link_matrix(v.u8(9),v.u8(10),v.u8(11));if(!joint){/* player before the first bhCalcModel(plp): link_matrix already reports it */if(v.u8(9)!=0||!player_joint_matrices_.empty())unbound_enemy_.insert("bhEasySESet owP["+std::to_string(v.u8(11))+"]");return false;}out={joint->value[12],joint->value[13],joint->value[14]};return true;};
         SoundPoint at;
         switch(type){
         case 0:audio_.play_player_voice(se);return true;                                                   // CallPlayerVoice
@@ -748,6 +762,12 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0x1c){if(v.u8(1)>2)return false;return audio_.background_sound(v.u8(1),v.u16(2),v.u8(4)*10);}
     if(op==0x94){audio_.request_background_sound(v.u8(1),v.u16(2));return true;} // CallBackGroundSe2 compares the raw SeNo
     if(op==0x92){audio_.request_background_sound(v.u8(1),-1);return true;}
+    // event.c bhZombieUpDieCk: rom->enep[v0].wrk_no; exp1 is the linked
+    // upper-body BH_PWORK, its first word flg. Bit 2 -> bhFlagSet(4, v1, 0).
+    if(op==0x8e){const auto at=entities_.find({1,v.u8(1)});if(at==entities_.end()||!at->second.enemy_bound||!collision_events_)return false;
+        const auto& w=at->second.enemy;
+        if(w.id==1&&w.exp1&&(static_cast<const RECVX_ENEMY_WORK*>(w.exp1)->flg&2u))collision_events_->set_flag(4,v.u16(2)&0x3ff,0);
+        return true;}
     if(op==0x1d){if(v.u8(1)>2)return false;audio_.stop_background_sound(v.u8(1),v.u8(2)?AudioMixer::adx_fade_ticks(v.u8(2)*10):0);return true;}
     // event.c:2988 bhWeaponSeCall, ten bytes. The shot sound is always
     // WpnTab[plp->wpnr_no].seno0 (also for a room enemy in mode 1) and is
@@ -1174,10 +1194,10 @@ int RoomWorld::spawn_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned
 // fehlende Prozedur.
 int RoomWorld::allocate_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index){
     SpriteWork work;initialize_effect_sprite(work.sprite,spawn);work.scale=spawn.scale;work.dynamic=true;work.queued=false;
-    if(link_kind){work.sprite.flg|=0x80;work.link=link_kind;work.index=link_index;work.node=unsigned(spawn.lkono);work.offset=spawn.offset;}
+    if(link_kind){work.sprite.flg|=0x80;work.link=link_kind;work.index=link_index;work.node=unsigned(spawn.lkono);work.offset=spawn.offset;work.sprite.link_kind=int(link_kind)-1;work.sprite.link_index=link_index;}
     const int free_slot=reserve_effect_slot();if(free_slot<0)return -1;const unsigned index=unsigned(free_slot);
-    sprites_[index]=work;
-    auto& e=entity(4,index);e.transform.position=spawn.position;e.angles={spawn.ax,spawn.ay,0};e.hidden=false;return free_slot;
+    sprites_[index]=work;sprites_[index].sprite.slot=int(index);
+    auto& e=entity(4,index);e.transform.position=spawn.position;e.angles={spawn.ax,spawn.ay,spawn.az};e.hidden=false;return free_slot;
 }
 int RoomWorld::spawn_weapon_flash(const RECVX_CB_EFFECT& e,unsigned link_kind,unsigned link_index){
     if(e.ef.id!=3){unbound_enemy_.insert("bhEff"+std::to_string(e.ef.id));return -1;}
@@ -1216,14 +1236,25 @@ void RoomWorld::sound_monitor(){
 // Drains what the original effect procedures requested through bhSetEffectTb/bhSetEffect/CallPlayerActionSe/bhCheckBombAtari.
 void RoomWorld::process_effect_output(){
     auto out=take_effect_output();
-    for(const auto& spawn:out.spawns)spawn_effect(spawn);
+    for(const auto& spawn:out.spawns){
+        const int slot=spawn_effect(spawn);
+        // bhSetEffectTb-Rueckgabe in das pv des Erzeugers (effsub1.c bhEff118).
+        if(spawn.slot_sink_work>=0&&std::size_t(spawn.slot_sink_work)<sprites_.size()&&spawn.slot_sink_index>=0&&spawn.slot_sink_index<32)
+            reinterpret_cast<std::int16_t*>(sprites_[std::size_t(spawn.slot_sink_work)].sprite.pv)[spawn.slot_sink_index]=std::int16_t(slot);
+    }
     for(const auto id:out.unsupported)unbound_enemy_.insert("bhEff"+std::to_string(id));
+    for(const auto& gap:out.gaps)unbound_enemy_.insert(gap);
     for(const auto se:out.sounds)audio_.play_room_sound((se>>8)&15,se&255,6); // CallPlayerActionSe: bank (SeNo/256)&0xF, list SeNo
     for(const auto& se:out.room_sounds){ // sdfunc.c CallYakkyouSe(pPos, SeNo): arms bank 1 on SE slot 10
         unsigned bank=0,program=0;if(!weapon_shot_sound(player_weapon_,bank,program))continue;
         audio_.cartridge_se(bank,{se.position.x,se.position.y,se.position.z},se.sound);}
     if(out.light){if(lights_.empty())lights_.resize(1,Light{});const auto& l=*out.light;lights_[0]=Light{l.flg,l.type,unsigned(l.aspd),unsigned(l.lkflg),unsigned(l.lkno),unsigned(l.lkono),unsigned(l.lsrc),0,l.position,l.offset,l.direction,l.color,l.near_range,l.far_range};}
     for(const auto& bomb:out.bombs)bomb_damage(bomb);
+    // effsub1.c:8825 bhEff127: plp->hp = -1. Derselbe Weg wie beim Biss
+    // (world.cpp:1142): der Verlust geht als Schaden an den Spielerbesitzer,
+    // der Satz gilt als getoetet.
+    if(out.player_killed&&!player_killed_){blast_damage_+=player_hp_+1;player_hp_=-1;player_killed_=true;}
+    for(const auto& se:out.background_sounds)audio_.background_sound(se.slot,se.sound); // CallBackGroundSe (effsub1.c bhEff105)
 }
 void RoomWorld::explode(NJS_POINT3 position,NJS_POINT3){
     // bhSetExplosion offsets the fireball by 4 units towards the camera (cam.vx/vy/vz is the view direction).
@@ -1292,13 +1323,70 @@ void RoomWorld::sync_player_grab(){
 void RoomWorld::control_player_grab_collision(){
     const unsigned mode0=collision_mode_&0xffu;
     if(mode0!=4u&&mode0!=6u)return;                                  /* bhCtrPly_mode0[4]/[6] */
+    const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+    if(!(simulation_flags_&1u)||(stflg&0x1000000u))return;             /* bhControlPlayer:1365 */
+    // bhCPM0_nage/enedie: release the head action and mark the player busy,
+    // not only the collision tail. EN21 drives these same player modes.
+    if(player_head_flags_&&(*player_head_flags_&4u))*player_head_flags_=(*player_head_flags_&~4u)|0x1e0u;
+    if(collision_events_){auto& st=collision_events_->flags[5][0];auto& gm=collision_events_->flags[11][0];
+        st|=4u;
+        if(gm&0x40u){gm&=~0x40u;if(!(gm&0x1000000u))gm&=~0x80u;gm|=0x800u;
+            if(st&0x800000u){st&=~0x800000u;gm&=~0x80000u;presentation_flags_|=1u;}}}
     unsigned& flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
+    collision_safe_={player_.position.x,player_.position.y,player_.position.z};
+    collision_front_target_=0.f;                                    /* exp0->arp = 0 */
     flg&=~0x36900000u;                                               /* player.c:6611/6689 */
     if(collision_events_)collision_events_->player_flags=flg;
     if(!(flg&0x10u))return;                                          /* player.c:1600 */
-    collision_safe_={player_.position.x,player_.position.y,player_.position.z}; /* exp0->spx/spy/spz, player.c:6606 */
     settle_player_body(player_.position,0.f);                       /* gemeinsamer Koerperpass, exp0->arp = 0 */
 }
+// effsub2.c:2296 bhEff_E11_CheckCollisionPlayer: plp->mdl[3] (Treffermodell) unter
+// plp->mlwP->owP, danach jede aktive Figur 41..43/91..93 mit ihrem mdl[1] unter
+// ep->mlwP->owP. Jeder Treffer kuerzt p2 (bhCollisionCheckL2PL); der Rueckgabewert
+// ist der Objektindex des letzten Treffers.
+int RoomWorld::effect_player_hit(NJS_POINT3 p1,NJS_POINT3& p2){
+    int ret=-1;
+    const auto test=[&](const PlayerAsset* hit,const std::vector<BoneMatrix>& owp,std::size_t first,std::size_t num,const char* what){
+        if(!hit)return; // pObj == NULL
+        auto cached=hit_models_.find(hit);
+        if(cached==hit_models_.end())cached=hit_models_.emplace(hit,decode_hit_model(hit->encoded_model())).first;
+        const auto& objects=cached->second;
+        for(std::size_t i=0;i<num;++i){
+            if(i>=objects.size()){unbound_enemy_.insert(std::string(what)+": obj_num ueber das Treffermodell hinaus");return;}
+            if(!objects[i])continue;
+            if(first+i>=owp.size()){unbound_enemy_.insert(std::string(what)+": owP vor bhCalcModel");return;}
+            switch(line_hit_model(p1,p2,*objects[i],owp[first+i].value)){
+            case HitModelResult::Hit:ret=int(i);break;
+            case HitModelResult::IndexOutside:unbound_enemy_.insert(std::string(what)+": Polygonindex ausserhalb der Punktliste");return;
+            default:break;}
+        }
+    };
+    if(player_asset_)test(player_asset_->model(3),player_joint_matrices_,0,player_asset_->bones(),"bhEff_E11_CheckCollisionPlayer(plp)");
+    for(auto& pair:entities_){
+        if(pair.first.first!=1||!pair.second.enemy_bound)continue;
+        const auto& e=pair.second;const auto& w=e.enemy;
+        if(!(w.flg&1u)||!((w.id>=41&&w.id<=43)||(w.id>=91&&w.id<=93)))continue;
+        const PlayerAsset* hit=nullptr;for(const auto& m:models_)if(m.kind==1&&m.index==pair.first.second){hit=model_variant(m,1);break;}
+        const auto& t=e.model_owner?*e.model_owner:e;
+        const std::size_t first=t.model_window,num=t.enemy_asset&&t.enemy_asset->bones()>first?t.enemy_asset->bones()-first:0;
+        test(hit,t.enemy_owp_mtx,first,num,"bhEff_E11_CheckCollisionPlayer(ene)");
+    }
+    return ret;
+}
+// face.c:79 bhControlMask / fmSetLipSyncParam fuer einen Besitzer mit Maske.
+void RoomWorld::control_mask(WorldEntity& e,const PlayerAsset& actor){const auto& base=actor.face()->keys();const auto& keys=e.face_keys.empty()?base:e.face_keys;auto param=sample_face_parameters(keys,e.face_frame);
+        if((e.face_flags&4)&&!e.lip_stream.empty()){
+            // face.c:139 only latches exp0[268] into LIP_WORK.top/ptr while
+            // lip->flag == 0, so a later bhSetLip cannot retarget this cursor.
+            if(!e.lip_active){e.lip_current_stream=e.lip_stream;e.lip_pos=e.lip_count=e.lip_time=0;e.lip_active=true;}
+            const auto& stream=e.lip_current_stream;
+            if(e.lip_count>=e.lip_time){e.lip_count-=e.lip_time;if(e.lip_pos>=stream.size())throw std::runtime_error("unterminated lip stream");if(stream[e.lip_pos]==255){e.lip_cur=0;e.lip_active=false;e.face_flags&=~4u;}else{if(e.lip_pos+2>=stream.size())throw std::runtime_error("truncated lip timing pair");e.lip_cur=stream[e.lip_pos++];e.lip_time=stream[e.lip_pos++];e.lip_next=stream[e.lip_pos]==255?0:stream[e.lip_pos];}}
+            const auto offset=e.lip_bank*6;if(offset+std::max(e.lip_cur,e.lip_next)>=base.size())throw std::runtime_error("lip parameter outside MASK bank");const auto a=lip_face_parameter(base[offset+e.lip_cur]),b=lip_face_parameter(base[offset+e.lip_next]);FaceParameter lip=a;
+            if(e.lip_active&&int(e.lip_time)-int(e.lip_count)<10){const float rate=e.lip_time<10?float(e.lip_count)/float(e.lip_time):float(10-(int(e.lip_time)-int(e.lip_count)))/10;lip=interpolate_face_parameters(a,b,rate,e.lip_time<10?e.lip_time/10.f:1,0x3fff000);}
+            for(unsigned j=0;j<32;++j)if(0x3fff000u&(1u<<j))param.muscle[j]=lip.muscle[j];param.jawang=lip.jawang;param.jawtrans=lip.jawtrans;param.tangx=lip.tangx;param.tangy=lip.tangy;param.tangz=lip.tangz;if(e.lip_active)e.lip_count+=2;
+        }else e.lip_active=false;e.facial=param;
+        if((e.face_flags&1)&&!(e.face_flags&16)){++e.face_frame;const auto last=unsigned(keys.back().frame);if(e.face_frame>=last){if(e.face_flags&2)e.face_frame=0;else {e.face_frame=last?last-1:0;e.face_flags&=~1u;}}}
+    }
 void RoomWorld::tick(){
     // The objP writes of the previous enemy pass were replaced by the player's
     // own bhSetMotion in between (player.c), so they do not carry over.
@@ -1330,6 +1418,20 @@ void RoomWorld::tick(){
     update_player_ground_work(); // player.c:1743-1762, immediately before bhControlEffect
     control_player_effects();
     effect_walls_=collision_geometry();set_effect_walls(&effect_walls_,room_height_);set_effect_water([this](NJS_POINT3 p,float& top){return water_top(p,top);});set_effect_ground(&ground_,&effect_water_room_,&effect_water_mobile_);
+    // bhSetExtraEffectWork: derselbe eff[512]-Pool (flg 2), bhControlEffect ueberspringt flg-2-Plaetze.
+    set_effect_extra_allocator([this](){return reserve_effect_slot();},[this](int slot){if(slot>=0&&std::size_t(slot)<sprites_.size()&&(sprites_[std::size_t(slot)].sprite.flg&3u)==2u)sprites_[std::size_t(slot)].sprite.flg=0;});
+    set_effect_link_lookup([this](unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out){const auto m=link_matrix(kind,index,node);if(!m)return false;std::copy(m->value,m->value+16,out);return true;});
+    set_effect_player_hit([this](NJS_POINT3 p1,NJS_POINT3& p2){return effect_player_hit(p1,p2);});
+    set_effect_particle_mk2([this](int kind,unsigned index,unsigned node,NJS_POINT3 off,NJS_POINT3 dir,unsigned src,unsigned dst,int type)->int{
+        if(type<0||type>=19){unbound_enemy_.insert("bhSetEffParticleMk2: typ_no ausserhalb PtclTbl");return -1;}
+        ParticleLink link;link.linked=kind>=0;link.kind=kind<0?0u:unsigned(kind);link.index=index;link.node=node;
+        return particles_.spawn_mk2(unsigned(type),link,off,dir,src,dst);});
+    // pp->ay: plp->ay bzw. ene[..].ay des Raumgegners (BH_PWORK.ay, kein Matrixwinkel).
+    set_effect_pool_lookup([this](int slot)->EffectSprite*{return slot>=0&&std::size_t(slot)<sprites_.size()?&sprites_[std::size_t(slot)].sprite:nullptr;});
+    set_effect_work_angle([this](unsigned kind,unsigned index,int& ay){
+        if(!kind){ay=player_.yaw;return true;}
+        const auto* e=state(kind,index);if(!e||!e->enemy_bound)return false;
+        ay=e->enemy.ay;return true;});
     // effsub1.c:4224 bhEff017: hp->flg &= ~1 im Effektwork des sterbenden EN00.
     set_effect_mobile_wall_clear([this](int index){if(index<0||std::size_t(index)>=enemy_mobile_walls_.size()){unbound_enemy_.insert("bhEff017: sys->mwalp[ct0] ohne Zuteilung");return;}enemy_mobile_walls_[std::size_t(index)].flags&=~1u;update_ground_geometry();});
     // effect.c:750 bhControlEffect: (sp_flg & 8) || (ef_flg & 1).
@@ -1370,7 +1472,15 @@ void RoomWorld::tick(){
                     return;
                 }
                 if(supported_effect_sprite(work.sprite.id)){
+                    // Rueckseitenbit des letzten Zeichenpasses (effect.c:1391).
+                    if(effect_backface_.count(i))work.sprite.stflg|=0x10u;else work.sprite.stflg&=~0x10u;
+                    // eff[n]-Platz und O_WRK.exp0-Elternsatz (effsub5.c 203/227/248 lesen ihn).
+                    work.sprite.slot=int(i);
+                    work.sprite.parent=work.sprite.parent_slot>=0&&std::size_t(work.sprite.parent_slot)<sprites_.size()?&sprites_[std::size_t(work.sprite.parent_slot)].sprite:nullptr;
+                    std::optional<BoneMatrix> link_node;if(work.link&&work.link<=4)link_node=link_matrix(work.link-1,work.index,work.node);
+                    work.sprite.link_matrix=link_node?link_node->value:nullptr;
                     step_effect_sprite(work.sprite,effect_context(),&work.queued);
+                    work.sprite.link_matrix=nullptr;
                     auto& e=entity(4,i);e.type=work.sprite.type;
                     e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};
                     if(work.dynamic){work.scale={work.sprite.sx,work.sprite.sy,work.sprite.sz};e.transform.position={work.sprite.px,work.sprite.py,work.sprite.pz};}
@@ -1391,19 +1501,9 @@ void RoomWorld::tick(){
         else if((!e.enemy_native||e.scripted)&&e.posed_has_motion()&&enemy_motion_available(e,e.posed_motion(),e.posed_room_motion()))for(const auto& m:models_)if(m.kind==pair.first.first&&m.index==pair.first.second&&m.actor){const auto& clip=posed_motion_clip(e);refresh(e.node_overrides,clip,m.actor->motion_nodes(clip.positions.size()));break;}}
     // bhControlMask/fmSetLipSyncParam: sample before advancing, two VSync units
     // for each lip tick; face motion uses its independent one-frame clock.
-    for(const auto& m:models_)if(m.actor&&m.actor->face()){auto& e=entity(m.kind,m.index);const auto& base=m.actor->face()->keys();const auto& keys=e.face_keys.empty()?base:e.face_keys;auto param=sample_face_parameters(keys,e.face_frame);
-        if((e.face_flags&4)&&!e.lip_stream.empty()){
-            // face.c:139 only latches exp0[268] into LIP_WORK.top/ptr while
-            // lip->flag == 0, so a later bhSetLip cannot retarget this cursor.
-            if(!e.lip_active){e.lip_current_stream=e.lip_stream;e.lip_pos=e.lip_count=e.lip_time=0;e.lip_active=true;}
-            const auto& stream=e.lip_current_stream;
-            if(e.lip_count>=e.lip_time){e.lip_count-=e.lip_time;if(e.lip_pos>=stream.size())throw std::runtime_error("unterminated lip stream");if(stream[e.lip_pos]==255){e.lip_cur=0;e.lip_active=false;e.face_flags&=~4u;}else{if(e.lip_pos+2>=stream.size())throw std::runtime_error("truncated lip timing pair");e.lip_cur=stream[e.lip_pos++];e.lip_time=stream[e.lip_pos++];e.lip_next=stream[e.lip_pos]==255?0:stream[e.lip_pos];}}
-            const auto offset=e.lip_bank*6;if(offset+std::max(e.lip_cur,e.lip_next)>=base.size())throw std::runtime_error("lip parameter outside MASK bank");const auto a=lip_face_parameter(base[offset+e.lip_cur]),b=lip_face_parameter(base[offset+e.lip_next]);FaceParameter lip=a;
-            if(e.lip_active&&int(e.lip_time)-int(e.lip_count)<10){const float rate=e.lip_time<10?float(e.lip_count)/float(e.lip_time):float(10-(int(e.lip_time)-int(e.lip_count)))/10;lip=interpolate_face_parameters(a,b,rate,e.lip_time<10?e.lip_time/10.f:1,0x3fff000);}
-            for(unsigned j=0;j<32;++j)if(0x3fff000u&(1u<<j))param.muscle[j]=lip.muscle[j];param.jawang=lip.jawang;param.jawtrans=lip.jawtrans;param.tangx=lip.tangx;param.tangy=lip.tangy;param.tangz=lip.tangz;if(e.lip_active)e.lip_count+=2;
-        }else e.lip_active=false;e.facial=param;
-        if((e.face_flags&1)&&!(e.face_flags&16)){++e.face_frame;const auto last=unsigned(keys.back().frame);if(e.face_frame>=last){if(e.face_flags&2)e.face_frame=0;else {e.face_frame=last?last-1:0;e.face_flags&=~1u;}}}
-    }
+    // eneset.c:372: Raumgegner mit id > 90 durchlaufen bhControlMask im eigenen
+    // Gegnerpass (control_mask ueber RECVX_ENEMY_SERVICES), nicht hier.
+    for(const auto& m:models_)if(m.actor&&m.actor->face()){auto& e=entity(m.kind,m.index);if(m.kind==1&&e.enemy_bound&&e.enemy_native&&e.enemy.id>90)continue;control_mask(e,*m.actor);}
     actor_nodes_.clear();auto animate_light=[&](Light& l,bool enabled){if(!(l.flags&1u)||!enabled)return;
         if(!l.color_sampled){l.working_color=l.color;l.color_sampled=true;}
         step_light_color(l.type,l.speed,l.clock,l.color,l.working_color,bool(simulation_flags_&0x80u));
@@ -1616,10 +1716,19 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
                 std::optional<BoneMatrix> parent;if(w.link&&w.link<=4)parent=link_matrix(w.link-1,w.index,w.node);
                 if((w.weapon->flg&0x80)&&!(w.weapon->flg&0x200000)&&!parent)continue;
                 w.weapon->append(scene,base,gm,wall,parent?&parent->value:nullptr);}}}
-    for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];if(!effect_visible(i))continue;const auto atlas=effect_textures_.find(work.sprite.tex_id);const auto base=scene.textures.size();scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());auto position=entities_.at({4,i}).transform.position;std::optional<BoneMatrix> parent;if(work.link&&work.link<=4){position=link_point(work.link-1,work.index,work.node,work.offset);parent=link_matrix(work.link-1,work.index,work.node);}auto sprite=work.sprite;const auto& e=entities_.at({4,i});sprite.ax=e.angles[0];sprite.ay=e.angles[1];sprite.az=e.angles[2];append_effect_sprite(scene,sprite,position,work.scale,effect_camera,unsigned(base+sprite.ani_ct),parent?parent->value:nullptr);}
-    if(draw_effects){std::map<unsigned,unsigned> bases;const auto drawable=[&](const SpriteWork& work){return !work.hidden&&work.queued&&!((mirror&0x4000u)&&(work.sprite.mdflg&0x40u));};
-     for(const auto& work:sprites_)if(drawable(work))for(const auto& q:work.sprite.quads)if(!bases.count(q.category)){const auto atlas=effect_textures_.find(q.category);if(atlas!=effect_textures_.end()){bases[q.category]=unsigned(scene.textures.size());scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());}}
-     for(const auto& work:sprites_)if(drawable(work)&&!work.sprite.quads.empty())append_custom_effect(scene,work.sprite,effect_camera,bases);}
+    for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];if(!effect_visible(i))continue;const auto* textures=effect_texture_list(work);const auto base=scene.textures.size();scene.textures.insert(scene.textures.end(),textures->begin(),textures->end());auto position=entities_.at({4,i}).transform.position;std::optional<BoneMatrix> parent;if(work.link&&work.link<=4){position=link_point(work.link-1,work.index,work.node,work.offset);parent=link_matrix(work.link-1,work.index,work.node);}auto sprite=work.sprite;const auto& e=entities_.at({4,i});sprite.ax=e.angles[0];sprite.ay=e.angles[1];sprite.az=e.angles[2];unsigned stflg=sprite.stflg;append_effect_sprite(scene,sprite,position,work.scale,effect_camera,unsigned(base+((sprite.stflg&0x20u)?unsigned(sprite.tex_id):0u)+sprite.ani_ct),parent?parent->value:nullptr,&stflg);
+        // effect.c:1391 schreibt das Rueckseitenbit in den Arbeitssatz zurueck.
+        // Der Zeichenpass ist hier const, deshalb merkt er sich den Platz und
+        // bhControlEffect traegt das Bit vor den Prozeduren des naechsten
+        // Bildes in stflg ein. Zwischen beiden Punkten liest es niemand.
+        if(stflg&0x10u)effect_backface_.insert(i);else effect_backface_.erase(i);}
+    if(draw_effects){std::map<unsigned,std::pair<unsigned,unsigned>> bases;const auto drawable=[&](const SpriteWork& work){return !work.hidden&&work.queued&&!((mirror&0x4000u)&&(work.sprite.mdflg&0x40u));};
+     for(const auto& work:sprites_)if(drawable(work))for(const auto& q:work.sprite.quads)if(q.textured&&!bases.count(q.category)){const auto atlas=effect_textures_.find(q.category);if(atlas!=effect_textures_.end()){bases[q.category]={unsigned(scene.textures.size()),unsigned(atlas->second.size())};scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());}}
+     // effect.c:929: jede eingereihte Zeichenfunktion in Listenreihenfolge, auch ohne
+     // Viereck, weil sie den Blendzustand fuer die naechste hinterlaesst.
+     std::pair<unsigned,unsigned> fnc_blend{8,6};
+     for(const auto& work:sprites_)if(drawable(work)&&(work.sprite.custom_queued||!work.sprite.quads.empty()))append_custom_effect(scene,work.sprite,effect_camera,bases,&fnc_blend);
+     for(const auto& work:sprites_)if(drawable(work))scene.lines.insert(scene.lines.end(),work.sprite.lines.begin(),work.sprite.lines.end());}
     if(draw_effects&&particles_.active()){const auto atlas=effect_textures_.find(4);if(atlas!=effect_textures_.end()&&atlas->second.size()>=4){const unsigned base=unsigned(scene.textures.size());scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());particles_.append(scene,effect_camera,base);}}
     if(draw_effects&&particles_.active()){const auto atlas=effect_textures_.find(17);if(atlas!=effect_textures_.end()&&!atlas->second.empty()){const unsigned base=unsigned(scene.textures.size());scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());particles_.append_pools(scene,base);}} // floor blood pools (bhEff300) // bhEff_PtclSpriteDrawB
 }
@@ -2212,18 +2321,41 @@ EffectContext RoomWorld::effect_context()const{
     // bhFlagCk/bhFlagSet (event.c:13096): matrix 10 is cb_flg, 11 is gm_flg.
     const auto control=collision_events_?collision_events_->flags[10][0]:collision_control_;
     const auto game=collision_events_?collision_events_->flags[11][0]:0u;
-    return {system,presentation_flags_,flags,status,player_hidden?1u:0u,control,simulation_flags_,effect_yk_ct_,game};
+    EffectContext context{system,presentation_flags_,flags,status,player_hidden?1u:0u,control,simulation_flags_,effect_yk_ct_,game};
+    // cam.ax/ay/az fuer bhEff186 (effsub0.c): die Lage, die bhControlCamera zuletzt schrieb.
+    if(active_camera_.ready()){context.camera_angles=active_camera_.view().angles;context.camera_ready=true;}
+    context.stage_no=stage_no_;context.room_no=room_no_;context.enemy_count=enemy_count_;
+    // bhCkFlg(sys->ev_flg, 2) fuer bhEff127: Flagmatrix 1 des Eventbesitzers,
+    // Bits vom hoechsten her gezaehlt (combat.cpp:158, snapshot.cpp:73).
+    context.ev_flg_2=collision_events_&&(collision_events_->flags[1][0]&(0x80000000u>>2))!=0;
+    if(active_camera_.ready()){
+        // camera.c:45-56: cam.vx/vy/vz = -(Ry Rx Rz)(0,0,-1), cam.wpx.. = T(pos) Ry Rx Rz (0,0,-ln).
+        const auto c=active_camera_.view();
+        NJS_MATRIX m;njUnitMatrix(&m);njRotateY(&m,c.angles[1]);njRotateX(&m,c.angles[0]);njRotateZ(&m,c.angles[2]);
+        NJS_POINT3 back{0,0,-1.0f},view;njCalcVector(&m,&back,&view);context.camera_view={-view.x,-view.y,view.z};
+        NJS_POINT3 eye{0,0,-c.distance};njCalcVector(&m,&eye,&eye);context.camera_position={c.position.x+eye.x,c.position.y+eye.y,c.position.z+eye.z};
+    }
+    return context;
+}
+// effect.c:1324-1333: the model list is captured by txp[0]; without stflg
+// 0x20 the effect category still selects sys->ef_tn[tex_id]. No fallback.
+const std::vector<SceneTexture>* RoomWorld::effect_texture_list(const SpriteWork& work)const{
+    if(work.sprite.stflg&0x20u)return work.texture_list;
+    const auto at=effect_textures_.find(work.sprite.tex_id);
+    return at==effect_textures_.end()?nullptr:&at->second;
 }
 bool RoomWorld::effect_visible(unsigned index)const{
     if(index>=sprites_.size())return false;const auto& w=sprites_[index];const auto& s=w.sprite;
-    if(w.weapon||w.hidden||!w.queued||((s.flg|s.stflg)&0x1000000u))return false;
+    // sys->ef_fnc-Saetze zeichnen sich selbst (quads/lines), nicht ueber bhDrawTrsEffect3D.
+    if(w.weapon||w.hidden||!w.queued||s.custom_queued||((s.flg|s.stflg)&0x1000000u))return false;
     const auto c=effect_context();
     // effect.c:339 gates the whole bhDrawEffect pass; effect.c:1301 adds the
     // mirror term and the player's own hide bits for the lighter flame.
     if(!(presentation_flags_&0x10u))return false;
     if((c.gm_flg&0x4000u)&&(s.mdflg&0x40u))return false;
     if(!(simulation_flags_&8u)&&s.id==9&&s.type==2&&((c.player_stflg&0x1000000u)||(c.player_mdflg&1u)))return false;
-    const auto atlas=effect_textures_.find(s.tex_id);return atlas!=effect_textures_.end()&&s.ani_ct<atlas->second.size();
+    const auto* textures=effect_texture_list(w);
+    return textures&&s.tex_id>=0&&((s.stflg&0x20u)?std::size_t(s.tex_id)+s.ani_ct:s.ani_ct)<textures->size();
 }
 std::optional<RoomWorld::LightState> RoomWorld::light_state(unsigned index)const{
     if(index>=lights_.size())return {};const auto& l=lights_[index];

@@ -232,6 +232,25 @@ typedef struct {
     int             route_rec_valid;
 } RECVX_EN09_EXT;
 
+/* Passgebundene Anbieter am vorhandenen World-/Assetbesitzer. */
+typedef struct {
+    int (*game_mode)(void);
+    int (*weapon_flags)(uint32_t,uint32_t*);
+    void (*material)(RECVX_ENEMY_WORK*,uint32_t);
+    int (*node)(const RECVX_ENEMY_WORK*,uint32_t,RECVX_ENEMY_VEC*,int32_t*);
+    void (*node_pos)(RECVX_ENEMY_WORK*,uint32_t,uint32_t,float);
+    void (*node_ang)(RECVX_ENEMY_WORK*,uint32_t,uint32_t,int32_t);
+    void (*fix_offset)(RECVX_ENEMY_WORK*,const int8_t*,const RECVX_ENEMY_VEC*,RECVX_ENEMY_VEC*);
+    void (*model_init)(RECVX_ENEMY_WORK*);
+    void (*player_node_flags_clear)(uint32_t,uint32_t);
+    int (*search)(const RECVX_ENEMY_WORK*,const RECVX_ENEMY_VEC*,int32_t,int32_t,int32_t*);
+    int (*route)(const RECVX_ENEMY_VEC*,const RECVX_ENEMY_VEC*,RECVX_ENEMY_VEC*);
+    int (*wall)(const RECVX_ENEMY_VEC*,uint32_t,float,float,RECVX_ENEMY_ATR*);
+    int (*floor_area)(const RECVX_ENEMY_VEC*,int,uint8_t,uint8_t,RECVX_ENEMY_ATR*);
+    int (*player_chain)(RECVX_ENEMY_VEC*);
+    void (*smoke)(RECVX_ENEMY_WORK*,const RECVX_ENEMY_VEC*,int);
+} RECVX_EN09_SERVICES;
+void recvx_en09_bind(const RECVX_EN09_SERVICES* services);
 void recvx_en09(RECVX_ENEMY_WORK* w);
 
 #ifdef __cplusplus

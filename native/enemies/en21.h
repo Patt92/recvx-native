@@ -64,6 +64,13 @@ typedef struct {
     /* plp->way = epw->ay (en21.c:796; Blutrichtung, vom Spielerbesitzer
        gefuehrt, RECVX_ENEMY_PLAYER fuehrt es nicht). */
     void (*player_set_way)(int16_t way);
+    /* en21.c:1085/1299: nur die beschriebenen sys->ef-Felder aendern;
+       ax/ay NULL behalten den letzten Vorlagenwert. Danach bhSetEffectTb
+       und am neuen Slot stflg 0x20, txp[0] = epw->mlwP->texP, tex_id.
+       Die Vorlage und die Texturliste bleiben bei ihren nativen Besitzern. */
+    int (*effect_request)(RECVX_ENEMY_WORK* w, int id, int type,
+                          const RECVX_ENEMY_VEC* pos, const int32_t* ax,
+                          const int32_t* ay, int tex_id);
 } RECVX_EN21_SERVICES;
 
 void recvx_en21_bind(const RECVX_EN21_SERVICES* sv);

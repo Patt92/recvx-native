@@ -17,6 +17,9 @@ std::uint32_t blend_gs(std::uint64_t mode,std::uint32_t source,std::uint32_t des
 void color_blending_mode(int target,int mode);
 void color_blending_mode_sys(int source,int destination);
 std::uint64_t color_blending_alpha();
+// The register a fresh njColorBlendingMode(0, source)/(1, destination) pair selects
+// (both indices >= 2); throws for pairs njColorBlendingModeSys rejects.
+std::uint64_t ninja_blend_register(int source,int destination);
 // Pairs the original ends in njColorBlendingModeSys' "ALPHA ERROR" abort. The
 // port reports them and keeps the register instead of substituting a mode.
 const std::vector<std::string>& color_blending_unavailable();

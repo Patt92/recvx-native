@@ -56,16 +56,16 @@ Mechanismen mit 0,5; **voll belegt** nur vollständig abgeschlossene.
 
 | Kategorie | Belegumfang | Gewichtet | Voll belegt | Mechanismen | Stand |
 |---|---|---:|---:|---:|---|
-| Events/Skript | `█████████░` | 93,8 % | 87,5 % | 21/24 | Originale Event-VM und gemeinsame Actor-Control-Fälle; weitere Befehle/Abläufe offen (Zahl unten). |
-| Menü/Items/Text | `█████████░` | 93,8 % | 87,5 % | 7/8 | Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen. |
-| Modelle/Animation | `█████████░` | 90,0 % | 80,0 % | 4/5 | Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen. |
-| Gegner/KI | `█████████░` | 87,5 % | 75,0 % | 9/12 | Eigenständiger Dispatcher recvx_enemy_control, en01-Schaden/-Tod/-Griff und Hundeangriffe; Rest-KI, weitere Gegner-IDs und Effektbindungen offen. |
-| Spieler/Kampf | `███████░░░` | 68,8 % | 37,5 % | 6/16 | Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen. |
-| Effekte | `██████░░░░` | 62,5 % | 25,0 % | 2/8 | Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen. |
-| Raum/Kamera/Tür | `██████░░░░` | 62,5 % | 25,0 % | 1/4 | Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen. |
-| Audio | `██████░░░░` | 61,1 % | 22,2 % | 4/18 | Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt. |
-| Ablauf/Speichern | `█████░░░░░` | 50,0 % | 0,0 % | 0/2 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
-| **Expliziter nativer Belegumfang** | `████████░░` | **77,8 %** | **55,7 %** | **54/97** | 161/223 Event-Befehle gebunden; kein Gesamtfortschritt. |
+| Effekte | `██████████` | 97,5 % | 95,0 % | 151/159 | Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen. |
+| Modelle/Animation | `█████████░` | 91,7 % | 83,3 % | 5/6 | Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen. |
+| Events/Skript | `█████████░` | 88,8 % | 77,5 % | 31/40 | Originale Event-VM und gemeinsame Actor-Control-Fälle; weitere Befehle/Abläufe offen (Zahl unten). |
+| Menü/Items/Text | `████████░░` | 82,9 % | 73,2 % | 30/41 | Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen. |
+| Gegner/KI | `████████░░` | 76,2 % | 52,4 % | 11/21 | Eigenständiger Dispatcher recvx_enemy_control, en01-Schaden/-Tod/-Griff und Hundeangriffe; Rest-KI, weitere Gegner-IDs und Effektbindungen offen. |
+| Spieler/Kampf | `███████░░░` | 66,7 % | 33,3 % | 7/21 | Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen. |
+| Audio | `██████░░░░` | 60,0 % | 20,0 % | 4/20 | Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt. |
+| Ablauf/Speichern | `██████░░░░` | 56,2 % | 12,5 % | 1/8 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
+| Raum/Kamera/Tür | `██████░░░░` | 55,6 % | 16,7 % | 3/18 | Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen. |
+| **Expliziter nativer Belegumfang** | `█████████░` | **85,8 %** | **72,8 %** | **243/334** | 169/223 Event-Befehle gebunden; kein Gesamtfortschritt. |
 
 <!-- port-status:end -->
 

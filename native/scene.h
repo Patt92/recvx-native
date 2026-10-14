@@ -9,7 +9,9 @@
 #include <map>
 namespace recvx {
 // light: per-vertex lighting factor (r,g,b), used when the triangle is gouraud-lit.
-struct SceneVertex { NJS_POINT3 position; float u=0,v=0; NJS_VECTOR normal{}; NJS_POINT3 light{1,1,1}; };
+// alpha: Faktor auf das Dreiecksalpha, nur mit SceneTriangle::vertex_alpha (GS-Gouraud
+// interpoliert RGBA je Eckpunkt, njDrawPolygon3D mit eigenen Eckfarben).
+struct SceneVertex { NJS_POINT3 position; float u=0,v=0; NJS_VECTOR normal{}; NJS_POINT3 light{1,1,1}; float alpha=1; };
 // Texture samples are immutable during scene composition. Copies share storage;
 // resource edits detach so mods/atlas edits cannot alter another decoded asset.
 class TexturePixels {
@@ -66,13 +68,19 @@ struct SceneTriangle {
     bool world_lit=false;
     bool after_modifiers=false; // enemy/player draw phase: game.c:318 draws these after bhDrawEffect modifiers
     bool gouraud=false; // color is the unlit base; vertices carry light factors (Ninja per-vertex lighting)
+    bool vertex_alpha=false; // vertices carry their own alpha factor (Gouraud RGBA)
     SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
+    bool fogged=true; // njFogDisable um einen Effekt-Zeichenaufruf (effsub2.c bhEff_Draw3DSprite)
+    // Ps2SetFogColorSys um genau einen Zeichenaufruf (ps2_NaDraw.c:469 njDrawTexture3DHEx
+    // nimmt dafuer die Offsetfarbe des ersten Eckpunkts) und danach Ps2SetFogColor zurueck.
+    bool fog_color_set=false;std::uint32_t fog_color=0; // 0x00RRGGBB wie njSetFogColor
     unsigned light_category=1;
     std::uint64_t blend_register=0x44; // original GS source-alpha/inverse-source-alpha
     SceneTextureFilter texture_filter=SceneTextureFilter::Default;
     unsigned texture_color_divisor=255; // raw Ninja constant-material RGB uses 128, native normalized RGB uses 255
 };
-struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;};
+// colors in canvas order 0xAABBGGRR; blend_register = GS ALPHA of the draw (0x44 = njDrawLine3D default 8/6).
+struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;std::uint64_t blend_register=0x44;};
 struct SceneCamera {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};
@@ -149,6 +157,10 @@ SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 po
 // camera.c:47-57 cam.wpx/wpy/wpz: pivot + RotY(ay)RotX(ax)RotZ(az)(0,0,-ln).
 // This is the sound system's CameraPos, not the eye of the view matrix.
 NJS_POINT3 camera_world_position(const SceneCamera& camera);
+// camera.c:28-36 bhControlCamera: cmat (njSetView, diag(1,-1,-1)), Dolly
+// -cam.ln, njRotateZ/X/Y und die Kameraverschiebung. Danach ist z vor der
+// Kamera positiv und y zeigt nach unten.
+void camera_view_matrix(const SceneCamera& camera,NJS_MATRIX& out);
 struct ModelPose {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};

@@ -3,11 +3,11 @@
 beissen; Hebelruetteln, Freigabe, Game Over — headless mit Originalressourcen,
 ausdruecklich `--enemy-ai on --enemy-grab on`.
 
-Zombies (RM_0080, fuenf Zombies id 1, kein Skriptereignis vor dem Kontakt):
-  natural   Spieler bleibt auf Spawn 0 und tut nichts (keine Diagnoseplatzierung).
-            Ein Zombie findet ihn ueber bhSearchPlayer/Brain/MV, greift
-            (bhEne01_EatCheck -> Nage, Spielermotion aus der Gegnerbibliothek)
-            und beisst (PlyDG00/01: Inventar-HP sinkt).
+Zombies (RM_0080, fuenf Zombies id 1):
+  natural   Spieler bleibt auf Spawn 0 (pos_no 0 wie die Originaltuer aus RM_0050)
+            und tut nichts: das Raumskript setzt Zombies 0..2 per Sub_controll
+            0x8f auf Typ 8 (ruhen bis Schaden), 3/4 warten in bhEne_Event.
+            Kein Biss; die Angriffskette pruefen front/lever/death/RM_0060.
   front     Diagnose-Aufstellung vor Zombie 0 (`position -3 0 24 0`); zwischen
             zwei Griffen kommt die Steuerung zurueck (player_scripted wechselt).
   lever     Wie `front`, ab Tick 20 jeden Tick eine neue Richtung
@@ -15,10 +15,11 @@ Zombies (RM_0080, fuenf Zombies id 1, kein Skriptereignis vor dem Kontakt):
   death     `front` ueber 1500 Ticks: HP < 0, Kauen, natives Game Over (Phase 2).
 Weitere natuerliche Zombie-Laeufe ohne Diagnoseplatzierung:
   RM_0060   vier Zombies InitType11 — Biss im natuerlichen Lauf.
-  RM_0031   Zombie type 9 (bhEne01_InitType02, liegend, mtn 3, HP/2) neben
+  RM_0031   Zombies mit Skriptzustand Sub_controll 0x93 (Typ 10, mode0 5) neben
             normalen Zombies; Griff mit plp->mnwP = epw->mnwP des greifenden Works.
   RM_3070   Zombie type 6 (InitType06, mode2 4 = Kriechvariante) — fruehester
-            Raum mit dieser Art in den Raumdaten; natuerlicher Lauf.
+            Raum mit dieser Art in den Raumdaten; natuerlicher Lauf, Zombie 1
+            per Skript Typ 8 (kein Biss ohne Eingabe).
 Hunde (EN04):
   RM_1000   drei Hunde, einer type 0 aktiv: Griff (bhEne04_NG00, PlyDG00:
             Spielermotion aus der Hundebibliothek), Biss (HP -8 je Durchlauf),
@@ -59,6 +60,9 @@ ALLOWED_GAPS = (
     # eine Pose zu erfinden. Gemessen nur im Tick 0 (danach 22 Knoten).
     'plp->mlwP->owP[0] (en01.c:2840)',
     'plp->mlwP->owP vor bhCalcModel(plp)',
+    # Derselbe erste Pass in bhEne04_MVType00..02 (en04.c:1061/1126/1160): owP[1]
+    # des Spielers vor bhCalcModel(plp); gemessen ab Bild 1 in RM_1000.
+    'plp->mlwP->owP[1] (en04.c:1061)',
     # RM_0020: Gegner 4 ist id 91 (Maskenzombie); eneset.c:376 bhControlMask
     # (face.c) ist nicht portiert und liegt ausserhalb der Angriffskette.
     'bhControlMask',
@@ -122,7 +126,12 @@ def grabbed(state):
     return state['player_scripted'] and pw.get('mode', [0])[0] in (4, 6) and pw.get('mtn_enemy') == 1
 
 
-FRONT = '0 position -3 0 24 0\n'
+# Seit Sub_controll 0x8f den nativen Work erreicht (1c2934d), ruhen die Zombies
+# bei pos_no 0 als Typ 8 (siehe `natural`). Die Diagnose-Aufstellung nutzt
+# deshalb Spawn 2 (pos_no 2 -> Skriptzweig 0x8f type 0, Zombies aktiv) und steht
+# 2.8 Einheiten vor Zombie 0 an seiner Skriptlage (4.76, 0, -37.16), Blick -z.
+FRONT = '0 position 4.76 0 -34 0\n'
+FRONT_SPAWN = ['--spawn', '2']
 results = {}
 REPO = Path(__file__).resolve().parent.parent
 
@@ -184,15 +193,28 @@ results['graveyard'] = {'entry': enemy(entry, 3)['work'], 'door': enemy(door, 3)
 
 # --- Zombies RM_0080 -------------------------------------------------------
 natural = run('natural', 'RM_0080.RDX', 1500, '')
-assert natural['hp'] < 160, ('natural', 'kein Biss: HP unveraendert', natural['hp'])
-assert any(e.get('work', {}).get('mode', [0])[0] in (1, 2) for e in natural['enemies'] if e['identity'] == 1), \
-    ('natural', 'kein Zombie im Verfolgungs-/Angriffsmodus')
+# RM_0080-Skript (ev 0, off 1334/1436/1538): `06 0f 00 00` (bhCmpB pos_no == 0)
+# -> Common 46 (0), Sub_controll 0x8f type 8; sonst 0x8f type 0. Auch die
+# Originaltuer RM_0050 -> RM_0080 liefert pos_no 0. Typ 8 ueberspringt Brain/
+# ActionModeCheck (en01.c:4873) und wird erst durch Schaden zu Typ 0
+# (en01.c:3218). Die Zombies 3/4 warten in bhEne_Event (mode0 5). Ohne
+# Spielereingabe bleibt der Raum deshalb original ruhig; vor 1c2934d erreichte
+# Sub_controll den nativen Work nicht, daher die fruehere Biss-Erwartung.
+for idx in (0, 1, 2):
+    e = enemy(natural, idx)
+    assert e['type'] & 0xff == 8 and e['work']['mode'][0] == 1, ('natural', 'Zombie', idx, 'nicht original Typ 8 (pos_no 0)', e)
+for idx in (3, 4):
+    assert enemy(natural, idx)['work']['mode'][0] == 5, ('natural', 'Zombie', idx, 'nicht in bhEne_Event', enemy(natural, idx))
+assert natural['hp'] == 160 and not natural['player_scripted'], ('natural', 'Biss trotz ruhender Typ-8-Zombies', natural['hp'])
 results['natural'] = {'hp': natural['hp'], 'grabbed_at_end': natural['player_scripted'], 'gaps': natural['_gaps'],
                       'pending_opcodes': natural['_pending_opcodes']}
 
-early = run('front-90', 'RM_0080.RDX', 90, FRONT)
-mid = run('front-200', 'RM_0080.RDX', 200, FRONT)
-late = run('front-1000', 'RM_0080.RDX', 1000, FRONT)
+early = run('front-90', 'RM_0080.RDX', 90, FRONT, FRONT_SPAWN)
+# Bild 120 liegt zwischen erstem Griff und Folgegriff (gemessen 90/120/160).
+mid = run('front-120', 'RM_0080.RDX', 120, FRONT, FRONT_SPAWN)
+# Bei Spawn 2 greifen drei aktive Zombies nacheinander; Bild 600 liegt vor dem
+# Game Over (gemessen HP 50), der Tod selbst ist `death`.
+late = run('front-600', 'RM_0080.RDX', 600, FRONT, FRONT_SPAWN)
 assert early['player_scripted'], ('front', 'Zombie 0 greift nicht innerhalb von 90 Ticks')
 assert early['hp'] < 160, ('front', 'erster Biss fehlt', early['hp'])
 assert enemy(early, 0)['work']['mode'][0] == 2, ('front', 'Zombie 0 nicht in mode0 2 (Angriff)', enemy(early, 0)['work'])
@@ -201,12 +223,12 @@ assert mid['hp'] <= early['hp'] and late['hp'] < early['hp'], ('front', 'HP sink
 assert not late['gameover_active'], ('front', 'Game Over zu frueh')
 results['front'] = {'hp': [early['hp'], mid['hp'], late['hp']], 'gaps': late['_gaps']}
 
-lever_lines = [FRONT.strip()] + [f'{f} keys {"left" if f % 2 else "right"}' for f in range(20, 1200)]
-lever = run('lever-1000', 'RM_0080.RDX', 1000, '\n'.join(lever_lines) + '\n')
+lever_lines = [FRONT.strip()] + [f'{f} keys {"left" if f % 2 else "right"}' for f in range(20, 700)]
+lever = run('lever-600', 'RM_0080.RDX', 600, '\n'.join(lever_lines) + '\n', FRONT_SPAWN)
 assert lever['hp'] > late['hp'], ('lever', 'Hebelruetteln senkt den Schaden nicht', lever['hp'], late['hp'])
 results['lever'] = {'hp': lever['hp'], 'hp_without_lever': late['hp']}
 
-death = run('death-1500', 'RM_0080.RDX', 1500, FRONT)
+death = run('death-1500', 'RM_0080.RDX', 1500, FRONT, FRONT_SPAWN)
 assert death['hp'] < 0, ('death', 'Spieler stirbt nicht', death['hp'])
 assert death['gameover_active'] and death['gameover_phase'] == 2, ('death', 'Game Over nicht aktiv/Phase 2', death['gameover_phase'])
 assert enemy(death, 0)['work']['mode'][3] == 2 or enemy(death, 0)['work']['mode'][0] in (1, 2), ('death', enemy(death, 0)['work'])
@@ -229,9 +251,11 @@ results['rm0060-natural'] = {'hp': r60['hp'], 'gaps': r60['_gaps']}
 # damit bhEff009 als spielergebundene Arbeit (link 1, Knoten 9) im Effektpass
 # liegt; keine Positionierung, keine Flags.
 lamp = '0 debug_key F2\n1 debug_select equip 55\n2 confirm\n4 debug_key F2\n'
-# Bild 1200 endet zwischen zwei Griffen: der Spieler lebt, ist freigegeben, und
-# bhControlPlayer hat plp->mtn_no bereits zurueckgeholt.
-r60l = run('rm0060-lighter-release', 'RM_0060.RDX', 1200, lamp)
+# Bild 1150 endet zwischen zwei Griffen: der Spieler lebt, ist freigegeben, und
+# bhControlPlayer hat plp->mtn_no bereits zurueckgeholt. (2026-10-14: der
+# Folgegriff beginnt vor Bild 1200, gleich mit dem Vorher-Binary; Fenster
+# gemessen 1100/1150 frei, 1200 gegriffen.)
+r60l = run('rm0060-lighter-release', 'RM_0060.RDX', 1150, lamp)
 assert r60l['weapon'] == 1 and any(e['id'] == 9 and e['type'] == 2 and e['visible'] for e in r60l['effects']), \
     ('rm0060-lighter', 'kein sichtbarer spielergebundener bhEff009 im Effektpass', r60l['weapon'], r60l['effects'])
 assert r60l['hp'] < 160, ('rm0060-lighter', 'kein Biss', r60l['hp'])
@@ -252,14 +276,26 @@ results['rm0060-lighter-death'] = {'hp': r60d['hp'], 'motion': r60d['motion'], '
 
 r31 = run('rm0031-natural', 'RM_0031.RDX', 1500, '')
 assert r31['hp'] < 160, ('rm0031', 'kein Biss im natuerlichen Lauf', r31['hp'])
-assert any(e['identity'] == 1 and e['type'] == 9 for e in r31['enemies']), ('rm0031', 'Zombie type 9 fehlt')
+# Das Raumskript schreibt im ersten Bild Sub_controll 0x93 (event.c:9889: mode0..3,
+# Typbyte) mit Typ 10 und mode0 5 auf die Zombies 1/4 (EVTRACE off 748/806/1354);
+# der Spawn-Typ 9 ist danach nicht mehr sichtbar (vor 1c2934d erreichte
+# Sub_controll den nativen Work nicht). Zombie 4 wird spaeter skriptseitig auf
+# Typ 0 freigegeben und greift an.
+z4 = enemy(r31, 4)
+assert enemy(r31, 1)['type'] == 10 and enemy(r31, 1)['work']['mode'][0] == 5, ('rm0031', 'Zombie 1 nicht im Skriptzustand 0x93', enemy(r31, 1))
+assert z4['type'] == 0 and z4['work']['mode'][0] in (1, 2), ('rm0031', 'Zombie 4 nicht freigegeben', z4)
 results['rm0031-natural'] = {'hp': r31['hp'], 'grabbed_at_end': grabbed(r31), 'gaps': r31['_gaps']}
 
 r3070 = run('rm3070-crawl', 'RM_3070.RDX', 1500, '')
 crawler = [e for e in r3070['enemies'] if e['identity'] == 1 and e['type'] == 6]
 assert crawler, ('rm3070', 'Zombie type 6 (Kriechvariante) fehlt')
 assert crawler[0]['work']['mode'][0] >= 1 and crawler[0]['work']['mode'][2] == 4, ('rm3070', 'Kriecher nicht in mode2 4', crawler[0]['work'])
-assert r3070['hp'] < 160, ('rm3070', 'kein Schaden im natuerlichen Lauf', r3070['hp'])
+# Erstbesuch: Skriptblock off 536 (bhCk ed_flg 125 == 0, rm_flg 2 == 0) ->
+# Common 46 (0), Sub_controll 0x8f Typ 8 fuer Zombie 1 (ruht bis Schaden,
+# en01.c:3218/4873). Der Biss vom 2026-10-12 kam von diesem Zombie, solange
+# Sub_controll den nativen Work nicht erreichte; Kriecher (MV14 haelt, Brain02
+# nur mit mode1 & 1) und Zombie 2 erreichen den Spieler ohne Eingabe nicht.
+assert enemy(r3070, 1)['type'] == 8, ('rm3070', 'Zombie 1 nicht im Skriptzustand Typ 8', enemy(r3070, 1))
 results['rm3070-crawl'] = {'hp': r3070['hp'], 'crawler': crawler[0]['work']['mode'], 'gaps': r3070['_gaps']}
 
 # --- Hunde RM_1000 (natuerlich, keine Eingabe) ------------------------------

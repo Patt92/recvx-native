@@ -78,7 +78,9 @@ void bilinear(const Level& l,float u,float v,float weight,float* acc){
 struct Setup {
     std::array<Projected,3> p;float area;int minx,maxx,miny,maxy;std::uint32_t color;const SceneTexture* texture;
     bool gouraud=false;std::array<NJS_POINT3,3> light{};
+    bool vertex_alpha=false;std::array<float,3> alpha{1,1,1};
     float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
+    bool fog_color_set=false;std::uint32_t fog_color=0;
     std::uint64_t blend_register=0x44;
     unsigned texture_color_divisor=255;
     bool filtered=false,linear_only=false,post=false;
@@ -88,9 +90,11 @@ struct Setup {
 };
 SceneVertex lerp_vertex(const SceneVertex& a,const SceneVertex& b,float t){
     auto mix=[t](float x,float y){return x+(y-x)*t;};
-    return {{mix(a.position.x,b.position.x),mix(a.position.y,b.position.y),mix(a.position.z,b.position.z)},mix(a.u,b.u),mix(a.v,b.v),{},{mix(a.light.x,b.light.x),mix(a.light.y,b.light.y),mix(a.light.z,b.light.z)}};
+    return {{mix(a.position.x,b.position.x),mix(a.position.y,b.position.y),mix(a.position.z,b.position.z)},mix(a.u,b.u),mix(a.v,b.v),{},{mix(a.light.x,b.light.x),mix(a.light.y,b.light.y),mix(a.light.z,b.light.z)},mix(a.alpha,b.alpha)};
 }
 // Base colour scaled by an interpolated per-vertex light factor (GS Gouraud: screen-linear).
+// njSetFogColor haelt 0x00RRGGBB; die Leinwand ist 0xAABBGGRR.
+std::uint32_t fog_canvas_color(std::uint32_t rgb){return 0xff000000u|((rgb&255u)<<16)|(rgb&0xff00u)|((rgb>>16)&255u);}
 std::uint32_t lit(std::uint32_t base,float r,float g,float b){
     auto ch=[&](unsigned shift,float k){return std::uint32_t(std::clamp(float((base>>shift)&255)*k+.5f,0.f,255.f));};
     return (base&0xff000000)|(ch(16,r)<<16)|(ch(8,g)<<8)|ch(0,b);
@@ -107,10 +111,7 @@ SoftwareRenderer::SoftwareRenderer(int width,int height):width_(width),height_(h
 }
 void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wireframe){
     // bhControlCamera order: initial Ninja view, dolly, Z/X/Y, camera translation.
-    NJS_MATRIX view;njUnitMatrix(&view);njScale(&view,1,-1,-1);
-    njTranslate(&view,0,0,-camera.distance);
-    njRotateZ(&view,camera.angles[2]);njRotateX(&view,camera.angles[0]);njRotateY(&view,camera.angles[1]);
-    njTranslate(&view,-camera.position.x,-camera.position.y,-camera.position.z);
+    NJS_MATRIX view;camera_view_matrix(camera,view);
     const float focal=(width_*0.5f)/std::tan(0.0000958738f*(camera.perspective/2));
     const float aspect_x=1.174f;
     const float focal_y=focal*(height_/480.0f)/(width_/640.0f);
@@ -178,8 +179,10 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             setup.filtered=triangle.texture_filter==SceneTextureFilter::Linear||(triangle.texture_filter==SceneTextureFilter::Default&&filter_);
             setup.linear_only=triangle.texture_filter==SceneTextureFilter::Linear;
             if(triangle.gouraud&&triangle.world_lit){setup.gouraud=true;setup.light={v[0].light,v[1].light,v[2].light};if(area_swapped)std::swap(setup.light[1],setup.light[2]);}
+            if(triangle.vertex_alpha){setup.vertex_alpha=true;setup.alpha={v[0].alpha,v[1].alpha,v[2].alpha};if(area_swapped)std::swap(setup.alpha[1],setup.alpha[2]);}
             // njDraw* primitives (effects) choose FGE per call (ps2_NaDraw.c:351/355); only the CNK strips are fogged here.
-            if(scene.fog.enabled&&triangle.world_lit){setup.fogged=true;for(int i=0;i<3;++i)setup.fog[i]=fog_sample(scene.fog,v[i].position.z);if(area_swapped)std::swap(setup.fog[1],setup.fog[2]);}
+            if(triangle.fog_color_set){setup.fog_color_set=true;setup.fog_color=fog_canvas_color(triangle.fog_color);}
+            if(scene.fog.enabled&&triangle.world_lit&&triangle.fogged){setup.fogged=true;for(int i=0;i<3;++i)setup.fog[i]=fog_sample(scene.fog,v[i].position.z);if(area_swapped)std::swap(setup.fog[1],setup.fog[2]);}
             setup.Ux=dax*p[0].u_over_z+dbx*p[1].u_over_z+dcx*p[2].u_over_z;setup.Uy=day*p[0].u_over_z+dby*p[1].u_over_z+dcy*p[2].u_over_z;
             setup.Vx=dax*p[0].v_over_z+dbx*p[1].v_over_z+dcx*p[2].v_over_z;setup.Vy=day*p[0].v_over_z+dby*p[1].v_over_z+dcy*p[2].v_over_z;
             setup.Wx=dax*p[0].invz+dbx*p[1].invz+dcx*p[2].invz;setup.Wy=day*p[0].invz+dby*p[1].invz+dcy*p[2].invz;
@@ -295,15 +298,16 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                 }
                 if(s.fogged){ // GS: Cv = (Cs*F + Cf*(255-F)) >> 8 per channel, F from the vertex fog coefficients
                     const unsigned F=unsigned(std::clamp(a*s.fog[0]+b*s.fog[1]+c*s.fog[2],0.f,255.f));
-                    std::uint32_t out=pixel&0xff000000u;for(unsigned shift:{0u,8u,16u})out|=((((pixel>>shift)&255u)*F+((fog_pixel>>shift)&255u)*(255u-F))>>8)<<shift;pixel=out;}
+                    const std::uint32_t fog_rgb=s.fog_color_set?s.fog_color:fog_pixel;
+                    std::uint32_t out=pixel&0xff000000u;for(unsigned shift:{0u,8u,16u})out|=((((pixel>>shift)&255u)*F+((fog_rgb>>shift)&255u)*(255u-F))>>8)<<shift;pixel=out;}
                 if(s.blend==SceneBlend::Additive){
                     const auto below=color[index];std::uint32_t mixed=0xff000000;
-                    const float alpha=coverage*float(s.color>>24)/255.f;
+                    const float alpha=coverage*float(s.color>>24)/255.f*(s.vertex_alpha?std::clamp(a*s.alpha[0]+b*s.alpha[1]+c*s.alpha[2],0.f,1.f):1.f);
                     for(unsigned shift:{0u,8u,16u})mixed|=std::min(255u,unsigned((below>>shift)&255)+unsigned(float((pixel>>shift)&255)*alpha+.5f))<<shift;
                     color[index]=mixed;continue;
                 }
                 if(s.blend==SceneBlend::Alpha||s.blend==SceneBlend::Ninja){
-                    const float alpha=coverage*float(s.color>>24)/255.f;
+                    const float alpha=coverage*float(s.color>>24)/255.f*(s.vertex_alpha?std::clamp(a*s.alpha[0]+b*s.alpha[1]+c*s.alpha[2],0.f,1.f):1.f);
                     color[index]=blend_gs(s.blend==SceneBlend::Ninja?s.blend_register:0x44,pixel,color[index],alpha);
                     if(s.depth_write&&alpha>=.5f)depth[index]=invz;continue;
                 }
@@ -385,7 +389,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
         for(int n=0;n<=steps;++n){const float t=lerp(first,last,float(n)/steps),original=lerp(lo,hi,t);const int x=int(std::floor(x0+dx*t)),y=int(std::floor(y0+dy*t));if(x<0||y<0||x>=width_||y>=height_)continue;
             const auto at=std::size_t(y)*width_+x;const float invz=lerp(1/c.z,1/d.z,t);if(invz<depth_[at])continue;
             unsigned pixel=0;for(unsigned shift:{0u,8u,16u,24u})pixel|=unsigned(std::clamp(lerp(float((line.colors[0]>>shift)&255),float((line.colors[1]>>shift)&255),original),0.f,255.f))<<shift;
-            pixels_[at]=blend_gs(0x44,pixel,pixels_[at],std::min(1.f,float(pixel>>24)/255.f));
+            pixels_[at]=blend_gs(line.blend_register,pixel,pixels_[at],std::min(1.f,float(pixel>>24)/255.f));
         }
     }
 

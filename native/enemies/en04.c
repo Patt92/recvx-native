@@ -665,8 +665,11 @@ int recvx_en04_atari_check2(RECVX_ENEMY_WORK* w){return activation_check(w,1);}
    eigenen Lage (en04.c:1061/1126/1160). Weil die y-Komponente dabei epw->py
    ist, bleibt nur der waagerechte Anteil. */
 static int mv_type_distance(RECVX_ENEMY_WORK* w) {
-    RECVX_ENEMY_VEC q;float dx,dz;
-    if(!ply_joint(w,1,&q))return 0;
+    RECVX_ENEMY_VEC q;float dx,dz,m[16];
+    /* Wie en01.c:2840: vor dem ersten bhCalcModel(plp) liest das Original hier
+       nicht initialisierten owP-Speicher (dread.c:161); gemeldet statt erfunden. */
+    if(!w->sv||!w->sv->player_joint_matrix||!w->sv->player_joint_matrix(1,m)) {gap(w,"plp->mlwP->owP[1] (en04.c:1061)");return 0;}
+    q.x=m[12];q.y=m[13];q.z=m[14];
     dx=q.x-w->px;dz=q.z-w->pz;
     ex(w)->dist=njSqrt(dx*dx+dz*dz);return 1;
 }

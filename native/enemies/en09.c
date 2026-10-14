@@ -2,49 +2,19 @@
    koerper, kein Generator, keine zweite Workwelt. Fundstellen stehen in
    en09.h und zusaetzlich an jeder Funktion.
 
-   STAND DIESER DATEI (Claude, 2026-10-13)
-   ---------------------------------------
-   Portiert ist der RAHMEN eines Passes und die MOTIONSCHICHT:
-     bhEne09 (:2037), MainLoop (:2099), PlayerControl (:2112),
-     CalcEnemy (:2128), CollCheck (:2167), CollCheckWall (:2186),
-     CollCheckArm (:2326, im Original leer), Init (:2332),
-     Move/Damage/Nage/Die-Verteiler (:2460-2481), SetMtn (:7396),
-     MtnTblPlay (:7558), SePlay (:7694), ChkDiffAngle (:7369),
-     SetSmokeEffect (:7703).
-   Das ist genau die Schicht, die im Host bisher ganz fehlte und ohne die der
-   Work in mode [0,0,0,0] mit mtn_no 0 stehen bleibt (gemessen in RM_1060,
-   300 Bilder) — der Renderer zeigt dann die Bindepose (T-Pose).
-
-   NOCH NICHT portiert sind die Zustandskoerper Brain/MV/NG/DG/DD und die
-   Schadenspruefung (zusammen rund 5000 Originalzeilen). Sie sind NICHT
-   stillschweigend leer: jeder dieser Zweige meldet seinen Originalnamen ueber
-   `gap` und tut nichts. Dadurch ist an `--state` ablesbar, welcher Zweig
-   fehlt, statt dass ein Gegner unerklaert stillsteht.
-
-   OFFENE DIENSTE (Patchvorschlaege, hier bewusst NICHT selbst gebaut; die
-   gemeinsamen Dateien gehoeren derzeit einer parallelen Sitzung):
-     1. Schreibzugriff auf mlwP->objP[node].pos[axis]. Init (:2379-2416) und
-        SetMtn (:7462-7472) setzen die vier Armsegmentlaengen an den Knoten
-        7..10. en01 hat dafuer `node_local_set` in SEINEM Erweiterungssatz
-        (en01_work.h:396); RECVX_ENEMY_EXT (en03_lib.h) hat nur das lesende
-        `node_transform`. Ohne diesen Dienst bleibt der Arm auf seiner
-        Modelllaenge.
-     2. bhCalcFixOffset (MtnTblPlay :7597-7631, Fussfixierung). Liegt
-        ebenfalls nur im EN01-Satz (en01_work.h:457).
-     3. npSetAllMatColor (Init :2438, Materialfarbe 0xFFB2B2B2).
-     4. Modellumschaltung mlwP->objP = mbp[0] und obj_a/obj_b = mbp[0]/mbp[1]
-        (Init :2424-2427).
-     5. Spielerknotenflags owP[4].flg &= ~3 / owP[5].flg &= ~2 (Init :2390).
-     6. Flaechenidentitaet zu bhCheckWallType. Das Original legt den
-        ATR_WORK-Zeiger in exp0+0x50 ab (:2203); der Dienst `wall_type`
-        (enemy_work.h) ist nur ein Praedikat. `line` zeigt mit `rec`/`id`, wie
-        die Erweiterung aussehen muesste.
-   Jeder dieser Punkte wird zur Laufzeit namentlich gemeldet. Es wird KEIN
-   Ersatzwert eingesetzt. */
+   Init/Motionschicht und die folgenden Zustandsketten werden auf den
+   bestehenden World-/Assetbesitzern portiert. Nicht portierte Zweige melden
+   weiterhin ihren Originalnamen; keine neutrale Ersatzantwort.
+ */
 #include "en09.h"
 #include "en09_tables.h"
 #include "en03_lib.h"
 #include <stddef.h>
+#include <math.h>
+#include <string.h>
+#include "../ninja_math.h"
+#include "../ninja_matrix.h"
+#include "../combat_geometry.h"
 
 /* ---------------------------------------------------------------------------
    Lage der exp0-Felder gegen die Originaloffsets (en09.c:2376: 0x7C Byte)
@@ -67,6 +37,9 @@ _Static_assert(offsetof(RECVX_EN09_EXT, route_atr)   == 0x54u, "exp0 + 0x54 (ATR
 _Static_assert(offsetof(RECVX_EN09_EXT, arm_len_out) == 0x6Cu, "EXP0_F(0x6C)");
 _Static_assert(offsetof(RECVX_EN09_EXT, wall_rec)    == 0x7Cu,
                "nativer Zusatz liegt hinter dem Originalblock");
+
+static const RECVX_EN09_SERVICES* en09_services;
+void recvx_en09_bind(const RECVX_EN09_SERVICES* s){en09_services=s;}
 
 #define EN09_EXP0_SIZE 0x7Cu   /* en09.c:2376 bhEne_CallocWork(0x7C, 8) */
 
@@ -188,19 +161,10 @@ static void en09_coll_check_wall(RECVX_ENEMY_WORK* w)
 
     w->stflg &= ~1u;                                      /* :2196 */
 
-    /* :2198-2203 Probe an der Koerpermitte; das Original legt den
-       ATR_WORK-Zeiger in exp0 + 0x50 ab. Der Dienst `wall_type` ist nur ein
-       Praedikat, liefert also keine Flaechenidentitaet — die Probe laeuft,
-       das Feld bleibt 0 und die fehlende Identitaet wird gemeldet. */
-    ps.x = w->px + w->aox; ps.y = w->py + w->aoy; ps.z = w->pz + w->aoz;
-    if (sv && sv->wall_type) {
-        (void)sv->wall_type(&ps, w->flg, w->ar, w->ah);
-        en09_gap(w, "bhCheckWallType: ATR_WORK-Identitaet fehlt im Dienst");
-    } else {
-        en09_gap(w, "bhCheckWallType");
-    }
-    e->wall_atr = 0u;
-    e->wall_rec_valid = 0;
+    ps.x=w->px+w->aox;ps.y=w->py+w->aoy;ps.z=w->pz+w->aoz;
+    if(!en09_services||!en09_services->wall){en09_gap(w,"bhCheckWallType: Datensatzanbieter fehlt");return;}
+    e->wall_rec_valid=en09_services->wall(&ps,w->flg,w->ar,w->ah,&e->wall_rec);
+    e->wall_atr=e->wall_rec_valid?1u:0u;
 
     mode = e->state & RECVX_EN09_ST_COLL_CASE;            /* :2205 ff. */
 
@@ -320,16 +284,22 @@ static void en09_mtn_tbl_play(RECVX_ENEMY_WORK* w, int frm)
                     vec2.x = 0.0f; vec2.y = 0.0f; vec2.z = -1.5f;
                     /* fall through — ORIGINALER DURCHFALL (en09.c:7593) */
                 case 0:
-                    en09_gap(w, "bhCalcFixOffset (en09_tree[0]/[1])");
+                    if(en09_services&&en09_services->fix_offset){RECVX_ENEMY_VEC v={0};
+                        en09_services->fix_offset(w,(const int8_t*)d->tree[(e->state&0x10000000u)?1:0],&vec2,&v);
+                        w->px-=v.x;w->pz-=v.z;}else en09_gap(w,"bhCalcFixOffset");
                     break;
                 case 8:
                     vec2.x = 0.0f; vec2.y = 0.0f; vec2.z = -1.5f;
                     /* fall through — ORIGINALER DURCHFALL (en09.c:7614) */
                 case 1:
-                    en09_gap(w, "bhCalcFixOffset (en09_tree[1]/[0])");
+                    if(en09_services&&en09_services->fix_offset){RECVX_ENEMY_VEC v={0};
+                        en09_services->fix_offset(w,(const int8_t*)d->tree[(e->state&0x10000000u)?0:1],&vec2,&v);
+                        w->px-=v.x;w->pz-=v.z;}else en09_gap(w,"bhCalcFixOffset");
                     break;
                 case 6:
-                    en09_gap(w, "bhCalcFixOffset (en09_tree[2])");
+                    if(en09_services&&en09_services->fix_offset){RECVX_ENEMY_VEC v={0};
+                        en09_services->fix_offset(w,(const int8_t*)d->tree[2],NULL,&v);
+                        w->px-=v.x;w->py-=v.y;w->pz-=v.z;}else en09_gap(w,"bhCalcFixOffset");
                     break;
                 default:
                     break;
@@ -404,19 +374,27 @@ static int en09_set_mtn(RECVX_ENEMY_WORK* w)
            NJS_CNK_OBJECT dreizehn Worte breit ist. Nativ sind es dieselben
            vier Knoten, Achse 0. Der schreibende Knotendienst fehlt im
            gemeinsamen Satz (siehe Dateikopf, Punkt 1). */
-        (void)arm_len;
-        en09_gap(w, "mlwP->objP[7..10].pos[0] (Armlaenge, Schreibdienst fehlt)");
+        if(!en09_services||!en09_services->node||!en09_services->node_pos){en09_gap(w,"bhEne09_SetMtn: Armknoten");return ret;}
+        for(int k=0;k<4;++k){RECVX_ENEMY_VEC p,last;
+            if(!en09_services->node(w,7u+k,&p,NULL)||!en09_services->node(w,10,&last,NULL)){en09_gap(w,"bhEne09_SetMtn: Armknoten fehlt");return ret;}
+            en09_services->node_pos(w,7u+k,0,frm==0?e->arm_len[k]:p.x+(arm_len-last.x)/4.0f);}
     }
 
     /* :7476-7501 Wurzelversatz der Motion. */
     if (e->state & RECVX_EN09_ST_ROOT_MTN_3) {
-        en09_gap(w, "mlwP->objP[0].pos (Wurzelversatz, Schreibdienst fehlt)");
+        if(en09_services&&en09_services->node_pos){en09_services->node_pos(w,0,0,0);en09_services->node_pos(w,0,2,0);
+            if(e->state&RECVX_EN09_ST_ROOT_MTN_3)en09_services->node_pos(w,0,1,0);}
+        else {en09_gap(w,"bhEne09_SetMtn: Wurzelknoten");return ret;}
         recvx_t3_get_translate_mtn(w, frm, 1);
     } else if (e->state & RECVX_EN09_ST_ROOT_MTN_XZ) {
-        en09_gap(w, "mlwP->objP[0].pos (Wurzelversatz, Schreibdienst fehlt)");
+        if(en09_services&&en09_services->node_pos){en09_services->node_pos(w,0,0,0);en09_services->node_pos(w,0,2,0);
+            if(e->state&RECVX_EN09_ST_ROOT_MTN_3)en09_services->node_pos(w,0,1,0);}
+        else {en09_gap(w,"bhEne09_SetMtn: Wurzelknoten");return ret;}
         recvx_t3_get_translate_mtn(w, frm, 0);
     } else if (e->state & RECVX_EN09_ST_ROOT_XZ) {
-        en09_gap(w, "mlwP->objP[0].pos (Wurzelversatz, Schreibdienst fehlt)");
+        if(en09_services&&en09_services->node_pos){en09_services->node_pos(w,0,0,0);en09_services->node_pos(w,0,2,0);
+            if(e->state&RECVX_EN09_ST_ROOT_MTN_3)en09_services->node_pos(w,0,1,0);}
+        else {en09_gap(w,"bhEne09_SetMtn: Wurzelknoten");return ret;}
     }
 
     w->mdflg |= 2u;                                         /* :7503 */
@@ -428,14 +406,15 @@ static int en09_set_mtn(RECVX_ENEMY_WORK* w)
 
     /* :7507-7542 Kopfdrehung ueber Knoten 2. */
     if (e->state & RECVX_EN09_ST_HEAD_ROT) {
-        if (w->mtn_no == 0u)
-            en09_gap(w, "mlwP->objP[2].ang (Kopfspiegelung, Schreibdienst fehlt)");
+        int32_t ang[3];
+        if(!en09_services||!en09_services->node||!en09_services->node_ang||!en09_services->node(w,2,NULL,ang)){en09_gap(w,"bhEne09_SetMtn: Kopfknoten");return ret;}
+        if(w->mtn_no==0){ang[0]+=32768;ang[1]=32768-ang[1];ang[2]+=32768;
+            for(int k=0;k<3;++k)en09_services->node_ang(w,2,k,ang[k]);}
 
         if (w->ct3 < 4) {
             const int32_t step = (e->state & RECVX_EN09_ST_ROT_UP)
                                ? rot_tbl[w->ct3] : rot_tbl2[w->ct3];
-            (void)step;
-            en09_gap(w, "mlwP->objP[2].ang (Kopfdrehung, Schreibdienst fehlt)");
+            en09_services->node_ang(w,2,0,ang[0]+step);
             if (w->ct3 == 3) w->hokan_count = 7u;
         } else if (w->ct3 >= 9) {
             e->state &= ~RECVX_EN09_ST_HEAD_ROT;
@@ -444,9 +423,10 @@ static int en09_set_mtn(RECVX_ENEMY_WORK* w)
     }
 
     /* :7544-7550 */
-    if (w->mode0 < 5u && w->mtn_no == 0xFu && frm < 0xC)
-        en09_gap(w, "mlwP->objP[0].pos[1] = 0 (Schreibdienst fehlt)");
-
+    if (w->mode0 < 5u && w->mtn_no == 0xFu && frm < 0xC){
+        if(en09_services&&en09_services->node_pos)en09_services->node_pos(w,0,1,0);
+        else en09_gap(w,"bhEne09_SetMtn: Wurzelknoten");
+    }
     en09_mtn_tbl_play(w, frm);                              /* :7552 */
 
     return ret;
@@ -471,12 +451,9 @@ static void en09_init(RECVX_ENEMY_WORK* w)
     w->stflg = 0u;
     w->aox = w->aoy = w->aoz = 0.0f;
 
-    /* :2352-2359 — HP aus der Tabelle, Index rand() % 16 aus dem gemeinsamen
-       EE-Strom. sys->gm_mode liegt nicht im Gegnervertrag; ohne den Wert
-       waere die Zeilenwahl geraten, deshalb wird sie gemeldet und Zeile 0
-       (gm_mode != 2, der normale Spielmodus) benutzt. */
-    en09_gap(w, "sys->gm_mode (HP-Zeilenwahl en09_hp_tbl)");
-    w->hp = d->hp_tbl[0][recvx_t3_rand_mod(16)];
+    if(!en09_services||!en09_services->game_mode||!en09_services->node||!en09_services->node_pos||!en09_services->model_init){
+        en09_gap(w,"bhEne09_Init: World-/Modellanbieter fehlt");return;}
+    w->hp=d->hp_tbl[en09_services->game_mode()==2][recvx_t3_rand_mod(16)];
 
     for (i = 0; i < (int)RECVX_ENEMY_DAM; ++i) w->dam[i] = 0;   /* :2361 */
 
@@ -494,12 +471,14 @@ static void en09_init(RECVX_ENEMY_WORK* w)
         if (!w->exp0) { en09_gap(w, "bhEne_CallocWork: exp-Budget erschoepft"); return; }
         e = en09_ext(w);
         /* :2378-2382 Startlaengen der vier Armsegmente aus objP[7..10]. */
-        en09_gap(w, "mlwP->objP[7..10].pos[0] (Armstartlaenge, Lesedienst fehlt)");
-        e->arm_len[0] = e->arm_len[1] = e->arm_len[2] = e->arm_len[3] = 0.0f;
+        for(i=0;i<4;++i){RECVX_ENEMY_VEC p;
+            if(!en09_services->node(w,7u+i,&p,NULL)){en09_gap(w,"bhEne09_Init: Armknoten fehlt");return;}
+            e->arm_len[i]=p.x;}
     } else {                                               /* :2384 */
         e = en09_ext(w);
-        if (e->state & RECVX_EN09_ST_INIT_PLY)
-            en09_gap(w, "plp->mlwP->owP[4].flg/owP[5].flg (Schreibdienst fehlt)");
+        if (e->state & RECVX_EN09_ST_INIT_PLY){
+            if(!en09_services->player_node_flags_clear){en09_gap(w,"plp->owP[4/5].flg");return;}
+            en09_services->player_node_flags_clear(4,3);en09_services->player_node_flags_clear(5,2);}
 
         for (i = 0; i < 4; ++i) save[i] = e->arm_len[i];   /* :2395 */
 
@@ -517,7 +496,7 @@ static void en09_init(RECVX_ENEMY_WORK* w)
         e->route_atr = 0u; e->route_rec_valid = 0;
 
         /* :2412-2416 die geretteten Laengen zurueck in die Knoten 7..10. */
-        en09_gap(w, "mlwP->objP[7..10].pos[0] (Armlaenge zurueck, Schreibdienst fehlt)");
+        for(i=0;i<4;++i)en09_services->node_pos(w,7u+i,0,e->arm_len[i]);
     }
 
     e = en09_ext(w);
@@ -529,7 +508,7 @@ static void en09_init(RECVX_ENEMY_WORK* w)
     w->flg |= 0x178u;                                      /* :2422 */
     w->flg &= ~2u;
 
-    en09_gap(w, "mlwP->objP = mbp[0], obj_a/obj_b (Modellumschaltung fehlt)");
+    en09_services->model_init(w);
     w->mdflg = 0u;                                         /* :2425 */
     w->cpcl = d->cap_col;                                  /* :2428 */
 
@@ -543,7 +522,7 @@ static void en09_init(RECVX_ENEMY_WORK* w)
 
     w->mdflg &= ~0x400u;                                   /* :2436 */
 
-    en09_gap(w, "npSetAllMatColor(0xFFB2B2B2)");           /* :2438 */
+    /* Materialfarbe wird vom selben model_init-Anbieter gesetzt (:2438). */
 
     for (i = 0; i < 8; ++i) w->clp_jno[i] = recvx_en09_clp_jno[i];  /* :2440 */
     w->mode0 = 1u; w->mode1 = 0u; w->mode2 = 0u; w->mode3 = 0u;     /* :2448 */
@@ -559,6 +538,8 @@ static void en09_init(RECVX_ENEMY_WORK* w)
    Zustandsverteiler. Die Koerper sind noch nicht portiert; jeder meldet
    seinen Originalnamen und tut nichts (en09.c:1915-2014 sind die Tabellen).
    --------------------------------------------------------------------------- */
+#include "en09_behavior.inc"
+
 static void en09_move(RECVX_ENEMY_WORK* w)
 {
     /* :2460 bhEne09_MoveType[epw->type]; 0..8 MVType00, 9 MVType09, 10 MVType10. */
@@ -566,14 +547,16 @@ static void en09_move(RECVX_ENEMY_WORK* w)
         en09_gap(w, "bhEne09_MoveType: type ausserhalb der Tabelle");
         return;
     }
-    if      (w->type == 9u)  en09_gap(w, "bhEne09_MVType09");
-    else if (w->type == 10u) en09_gap(w, "bhEne09_MVType10");
-    else                     en09_gap(w, "bhEne09_MVType00");
+    RECVX_ENEMY_PLAYER plp;if(!en09_player(w,&plp))return;
+    en09_ext(w)->ply_dist=en09_distance(plp.pos,en09_pos(w));
+    if(w->type==9){en09_ext(w)->trg_x=w->px;en09_ext(w)->trg_z=w->pz;en09_transition(w,10);en09_move_state(w,&plp);}
+    else if(w->type==10){if(w->mode2==3)en09_mv03(w);else en09_mv00(w);}
+    else {if(w->mode1==1)en09_brain(w,&plp);if(w->mode0==1)en09_move_state(w,&plp);}
 }
 
-static void en09_damage(RECVX_ENEMY_WORK* w) { en09_gap(w, "bhEne09_DGType00"); } /* :2466 */
-static void en09_nage(RECVX_ENEMY_WORK* w)   { en09_gap(w, "bhEne09_NGType00"); } /* :2472 */
-static void en09_die(RECVX_ENEMY_WORK* w)    { en09_gap(w, "bhEne09_DDType00"); } /* :2478 */
+static void en09_damage(RECVX_ENEMY_WORK* w) { en09_damage_state(w); } /* :2466 */
+static void en09_nage(RECVX_ENEMY_WORK* w)   { en09_nage_state(w); } /* :2472 */
+static void en09_die(RECVX_ENEMY_WORK* w)    { en09_die_state(w); } /* :2478 */
 
 /* en09.c:2112 bhEne09_PlayerControl */
 static void en09_player_control(RECVX_ENEMY_WORK* w)
@@ -589,8 +572,7 @@ static void en09_player_control(RECVX_ENEMY_WORK* w)
     }
     if (pl.mode0 != 4u && pl.mode0 != 6u) return;
 
-    if (pl.mode2 == 0u) en09_gap(w, "bhEne09_PlyDG00");
-    else                en09_gap(w, "bhEne09_PlyDG01");
+    en09_player_grab(w,&pl);
 }
 
 /* en09.c:2099 bhEne09_MainLoop */
@@ -631,7 +613,7 @@ void recvx_en09(RECVX_ENEMY_WORK* w)
     if (!w) return;
     sv = w->sv;
 
-    en09_gap(w, "bhEne09_DmgCheck");                       /* :2042 */
+    en09_damage_check(w);                       /* :2042 */
     en09_main_loop(w);                                     /* :2043 */
 
     if (w->flg & 4u) {                                     /* :2045 */
@@ -644,14 +626,15 @@ void recvx_en09(RECVX_ENEMY_WORK* w)
 
     en09_coll_check(w);                                    /* :2060 */
     en09_calc_enemy(w);                                    /* :2061 */
-    en09_gap(w, "bhEne09_PlayerLink");                     /* :2062 */
+    en09_player_link(w);                     /* :2062 */
 
     e = en09_ext(w);
     if (e && (e->state & RECVX_EN09_ST_ARM_OUT)) {         /* :2064 */
         RECVX_ENEMY_PLAYER pl;
         if (sv && sv->player_get && sv->player_get(&pl)) {
-            if (!(pl.flg & 4u) && !(pl.stflg & 0x80000000u))
-                en09_gap(w, "bhEne09_CollChkArm (Spieler)");
+            if (!(pl.flg & 4u) && !(pl.stflg & 0x80000000u)){
+                if(en09_arm_contact(w,&pl.pos,pl.car)&&sv->player_set)sv->player_set(&pl);
+            }
         } else en09_gap(w, "plp (bhEne09 Armkollision)");
 
         /* :2071-2084 — dieselbe Pruefung gegen alle uebrigen Gegner der
@@ -663,8 +646,9 @@ void recvx_en09(RECVX_ENEMY_WORK* w)
                 if (!ep || ep == w) continue;
                 if (ep->id == 0u || ep->id == 0x3Du) continue;
                 if ((ep->flg & 2u) || (ep->flg2 & 1u) || !(ep->flg & 1u)) continue;
-                en09_gap(w, "bhEne09_CollChkArm (Gegner)");
-                break;   /* eine Meldung je Pass genuegt */
+                RECVX_ENEMY_VEC pos=en09_pos(ep);
+                if(en09_arm_contact(w,&pos,ep->car)){ep->px=pos.x;ep->pz=pos.z;}
+
             }
         } else en09_gap(w, "sys->ene/ewk_n");
     }

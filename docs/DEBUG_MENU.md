@@ -82,8 +82,8 @@ Slotverschiebungen keine alten Kombinationen oder Untersuchungen ausloesen.
 ## Pruefung
 
 ```sh
-build/native/recvx-debug-tests data build/validation/debug-menu.bmp
-python3 tools/verify_debug.py --runtime build/native/recvx-runtime --data data
+build/macos-arm64/recvx-debug-tests data build/validation/debug-menu.bmp
+python3 tools/verify_debug.py --runtime build/macos-arm64/recvx-runtime --data data
 ```
 
 Der CTest-Test prueft Standard/remappten Hotkey, Wiederholungen, Softwarepfade,

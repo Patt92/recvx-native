@@ -44,22 +44,22 @@ macOS-Builds sind ausschließlich arm64 (Deployment Target 11.0, SDL2 arm64,
 kein Rosetta) und lokal ad hoc signiert, nicht notarisiert. Windows-Builds
 sind x64; Crossbuilds müssen auf Windows oder unter Wine getestet werden.
 
-Direkte Entwicklungsbefehle:
+Direkte Entwicklungsbefehle (macOS; die Linux-CI baut als `build/native`):
 
 ```sh
-cmake -S . -B build/native -DRECVX_FETCH_SDL2=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build/macos-arm64 -DRECVX_FETCH_SDL2=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
 ```
 
 ```sh
-cmake --build build/native --parallel 8
+cmake --build build/macos-arm64 --parallel 8
 ```
 
 ```sh
-ctest --test-dir build/native --output-on-failure
+ctest --test-dir build/macos-arm64 --output-on-failure
 ```
 
 ```sh
-build/native/recvx-runtime --data data
+build/macos-arm64/recvx-runtime --data data
 ```
 
 ## Spieldaten

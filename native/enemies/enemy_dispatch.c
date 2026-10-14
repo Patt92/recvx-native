@@ -7,9 +7,11 @@
 #include "en01_work.h"
 #include "en07.h"
 #include "en08.h"
+#include "en09.h"
 #include "en10.h"
 #include "en16.h"
 #include "en20.h"
+#include "en21.h"
 #include "en24.h"
 #include "en25.h"
 #include "en56.h"
@@ -48,6 +50,7 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[4]  = recvx_en04;
     d->jump[7]  = recvx_en07;
     d->jump[8]  = recvx_en08;
+    d->jump[9]  = recvx_en09;
     d->jump[10] = recvx_en10;
     d->jump[11] = recvx_en11;
     d->jump[12] = recvx_en12;
@@ -55,6 +58,7 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[16] = recvx_en16;
     d->jump[18] = recvx_en18;
     d->jump[20] = recvx_en20;
+    d->jump[21] = recvx_en21;
     d->jump[24] = recvx_en24;
     d->jump[25] = recvx_en25;
     d->jump[27] = recvx_en27;
@@ -133,10 +137,12 @@ uint32_t recvx_enemy_control(RECVX_ENEMY_TABLE* t, const RECVX_ENEMY_DISPATCH* d
         w->axb = w->ax; w->ayb = w->ay; w->azb = w->az;
 
         /* eneset.c:372 — nur Identitaeten > 90 bekommen bhControlMask vor
-           ihrer Gegnerroutine. Das ist der Masken-/Lippenbesitzer
-           (native/face.*), nicht dieses Teilpaket. */
-        if (w->id > 90u && sv && sv->gap)
-            sv->gap("bhControlMask");
+           ihrer Gegnerroutine; der Masken-/Lippenbesitzer liegt beim
+           Raumwork (RoomWorld::control_mask). */
+        if (w->id > 90u && sv) {
+            if (sv->control_mask) sv->control_mask(w);
+            else if (sv->gap) sv->gap("bhControlMask");
+        }
 
         if (w->id < RECVX_ENEMY_IDS && d->jump[w->id]) {
             d->jump[w->id](w);

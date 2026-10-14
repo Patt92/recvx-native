@@ -17,6 +17,9 @@ public:
     std::vector<Interaction> interactions;
     std::vector<EventCommand> pending_bindings;
     std::vector<std::string> errors;
+    // event.c:36 bhIfelFlg unter null: ein ENDIF/ELSE ohne IF (event.c:413/425) zieht den
+    // globalen Zaehler ins Minus. bhScenarioCheck (:13068) und bhEnd (:388) setzen ihn auf 0.
+    int ifel_debt_=0;
     std::vector<unsigned> dispatched;
     bool menu_open=false,status_requested=false;
     unsigned change_player=0; // sys->cng_pid (bhPlayerChangeSet, cb_flg 0x80)

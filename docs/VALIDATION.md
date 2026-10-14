@@ -19,7 +19,8 @@ Es gibt drei Ebenen:
 ```
 
 ```sh
-ctest --test-dir build/native --output-on-failure
+# macOS: ./build.sh legt build/macos-arm64 an (Linux/CI nutzt build/native)
+ctest --test-dir build/macos-arm64 --output-on-failure
 ```
 
 Tests mit Originaldaten erwarten `data/`. Tests mit gemeinsamen Fixtures
@@ -39,7 +40,7 @@ Tests mit Originaldaten erwarten `data/`. Tests mit gemeinsamen Fixtures
 [INVENTORY-COVERAGE.md](INVENTORY-COVERAGE.md) wird mit Originaldaten erzeugt:
 
 ```sh
-build/native/recvx-inventory-engine-tests data docs/INVENTORY-COVERAGE.md
+build/macos-arm64/recvx-inventory-engine-tests data docs/INVENTORY-COVERAGE.md
 ```
 
 ## Prüfskripte
@@ -80,13 +81,13 @@ gekennzeichnet; Raumskripte und Ressourcen bleiben unverändert.
 Beispiel:
 
 ```sh
-python3 tools/verify_frontend.py --runtime build/native/recvx-runtime --data data
+python3 tools/verify_frontend.py --runtime build/macos-arm64/recvx-runtime --data data
 ```
 
 ## Raumscan
 
 ```sh
-python3 tools/verify_rooms.py --runtime build/native/recvx-runtime --data data
+python3 tools/verify_rooms.py --runtime build/macos-arm64/recvx-runtime --data data
 ```
 
 Startet alle 205 Räume ohne Eingaben. Ladefehler lassen die Prüfung
@@ -167,7 +168,7 @@ Eine Host-Domäne für Textur-Alpha (0..255, Faktor alpha/255 = originales As/12
 ohne Ps2AlphaIsHalf-Halbierung, `write_tga` ohne ×2 (Export/Import verlustfrei), Renderer
 mit einem Teiler für alle Blendarten, die vier handgeschriebenen ×2-Verdopplungen in
 ui/computer/world entfernt. Details: work/native_port_alpha_domain.result.md.
-CTest 79/81 in build/alphadomain-claude-20261013; rot `script_motion` (vorbestehend, mit
+CTest 79/81; rot `script_motion` (vorbestehend, mit
 dem Binary von 22:00 in build/mapinput-claude-20261013 mit identischer Meldung belegt) und
 `original_map_render` (neue, unfertige Parallelarbeit der Kartensitzung: 11 Füllungen statt
 1, 0 Objekte, Licht 0 — keiner der Fehlschläge auf dem geänderten Pfad). Neuer Fall
@@ -189,7 +190,7 @@ njColorBlendingMode/njColorBlendingModeSys als Zustandsautomat in native/chunk_b
 laesst das Register stehen, ungueltige Paare als `blend_unavailable` in --state statt
 Abbruch); gebunden an Effektsprite-, Partikel- und Muendungsfeuerpfade, ID-Whitelist und
 ninja_blend_register entfallen. Details: work/native_port_blend_state.result.md.
-CTest 79/81 in build/alphadomain-claude-20261013 (rot: script_motion vorbestehend,
+CTest 79/81 (rot: script_motion vorbestehend,
 original_map_render Parallelarbeit). verify_lighter/combat/detector/scanner/doors/
 continuity/events PASS; verify_enemy_ai identisch zum Vorher-Binary rot (RM_0080 „kein
 Biss", fremde Sitzung). Gemessen: RM_0090 Kamera 1/2 und die Lighter-Szene sind gegen das

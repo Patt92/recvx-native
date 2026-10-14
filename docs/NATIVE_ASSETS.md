@@ -62,7 +62,7 @@ Building a pack from a Dolphin GameCube HD pack (`GCDE08`, DDS BC7, 4x):
 python3 -m venv build/texvenv && build/texvenv/bin/pip install pillow numpy
 build/texvenv/bin/python tools/match_hd_textures.py --pack <.../Load/Textures/GCDE08> --output build/hd-matches.json
 build/texvenv/bin/python tools/build_hd_textures.py --matches build/hd-matches.json --output build/hd-textures --scale 2
-build/native/recvx-runtime --data data --mods build/hd-textures
+build/macos-arm64/recvx-runtime --data data --mods build/hd-textures
 ```
 
 The runtime looks in `<mods>` first; without `--mods` it uses `mods/` beside `data/`

@@ -39,6 +39,9 @@ RECVX_STAIR_AREA collision_record(const CollisionWall& wall);
 // untouched on a miss or unsupported query; normals retain original scale.
 std::optional<CollisionWall> effect_line(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal);
 std::optional<CollisionWall> effect_line(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor=-1,bool omit_attribute4=false);
+// hitchkl.c bhCollisionCheckL2PL: line start->end against one polygon (num
+// vertices, plane from the first three); a hit shortens end to the crossing.
+bool effect_line_polygon(NJS_POINT3 start,NJS_POINT3& end,const NJS_POINT3* vertices,unsigned count);
 void reflect_effect_wall(const CollisionWall& wall,float room_height,NJS_POINT3& position,float radius,float height,int& angle);
 // Original hitchk.c bhGetGroundPosition; hit_index receives sys->htp's table index,
 // or size_t(-1) when the original query finds no floor.

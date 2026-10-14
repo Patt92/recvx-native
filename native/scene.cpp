@@ -478,6 +478,12 @@ void ActiveCameraMotion::tick(const SceneCamera& target){
     view_.perspective=turn(view_.perspective,target.perspective,blending_?float(clock_)*hkn:0.01f*target.angle_speed,false);
     if(blending_&&++clock_>=unsigned(target.transition_speed+1))blending_=false;
 }
+void camera_view_matrix(const SceneCamera& camera,NJS_MATRIX& out){
+    njUnitMatrix(&out);njScale(&out,1,-1,-1);
+    njTranslate(&out,0,0,-camera.distance);
+    njRotateZ(&out,camera.angles[2]);njRotateX(&out,camera.angles[0]);njRotateY(&out,camera.angles[1]);
+    njTranslate(&out,-camera.position.x,-camera.position.y,-camera.position.z);
+}
 NJS_POINT3 camera_world_position(const SceneCamera& camera){
     NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,camera.position.x,camera.position.y,camera.position.z);
     njRotateY(&m,camera.angles[1]);njRotateX(&m,camera.angles[0]);njRotateZ(&m,camera.angles[2]);

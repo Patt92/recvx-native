@@ -38,6 +38,10 @@ void color_blending_mode_sys(int source,int destination){
     gs_alpha=alpha_tbl[source][destination];
 }
 std::uint64_t color_blending_alpha(){return gs_alpha;}
+std::uint64_t ninja_blend_register(int source,int destination){
+    if(source<2||destination<2||source>12||destination>11||alpha_tbl[source][destination]==0xffffffffull)throw std::runtime_error("njColorBlendingMode pair without an ALPHA register");
+    return alpha_tbl[source][destination];
+}
 const std::vector<std::string>& color_blending_unavailable(){return unavailable;}
 std::uint64_t chunk_blend_register(unsigned source,unsigned destination){
     if(source>7||destination>7)throw std::runtime_error("chunk blend index outside Ninja table");

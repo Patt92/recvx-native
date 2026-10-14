@@ -360,6 +360,7 @@ float original_ground_position(const std::vector<CollisionWall>& walls,float roo
     if(hit_index)*hit_index=query.entry?query.entry->second:std::size_t(-1);
     return query.result;
 }
+bool effect_line_polygon(NJS_POINT3 start,NJS_POINT3& end,const NJS_POINT3* vertices,unsigned count){LineClip clip(start,end);if(!clip.polygon(vertices,count))return false;end=clip.end;return true;}
 std::optional<CollisionWall> effect_line(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal){return line_query(walls,height,start,end,normal,false,0,0,false);}
 std::optional<CollisionWall> effect_line(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,bool omit_attribute4){return line_query(walls,height,start,end,normal,true,flags,floor,omit_attribute4);}
 }

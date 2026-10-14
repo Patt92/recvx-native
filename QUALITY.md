@@ -54,21 +54,88 @@ Gegnerdienste; synthetisches Umkippen als Todesdarstellung. Diese Liste ist
 eine Ausgangsbasis, kein vollständiges Audit und keine Erledigtmeldung.
 Kistenschieben wird separat bearbeitet.
 
-## Generierte Effektprozeduren in `native/` (Nutzerfreigabe 2026-10-14)
+## Effektprozeduren: Übersetzer abgelöst (Nutzeranweisung 2026-10-14)
 
-`native/effect_core.{h,cpp}` (Shim) und `native/effect_procedures.cpp` (die
-übersetzten Originalprozeduren aus `effsub0..6.c`) sind auf ausdrückliche
-Nutzeranweisung vom 2026-10-14 **bewusst Bestandteil von `native/`** und werden
-in `recvx_game`/`recvx-runtime` gelinkt. Begründung des Nutzers: der Übersetzer
-`tools/generate_effect_procedures.py` läuft **einmalig von Hand**, nie im Build;
-das Ergebnis ist nativer Quelltext auf den vorhandenen Besitzern (`EffectSprite`,
-`EffectRoom`), es entsteht **kein** PS2-Originalkern, keine Hardware-Nachbildung
-und keine zweite `sys`/`plp`/`rom`/`ene`/`eff`-Welt. Abdeckungstor: der
-Übersetzer gibt eine Prozedur nur aus, wenn nach der Übersetzung keine unbekannte
-Dienstfläche übrig bleibt (Laufbericht `work/effect_procedures.generator.md`).
+Die am 2026-10-14 zunächst freigegebenen, regex-übersetzten Originalprozeduren
+(`native/effect_procedures.cpp`, Shim `native/effect_core.{h,cpp}`, Übersetzer
+`tools/generate_effect_procedures.py`) sind auf spätere Nutzeranweisung vom
+selben Tag („weg vom Generatorkram“) vollständig durch eigenständig
+geschriebene Implementierungen ersetzt und entfernt worden:
+`native/effect_sprite_procedures.cpp` (Prozeduren), `native/effect_sprite_procedure_tables.inc`
+(reine UV-/Bild-/Pausentabellen mit Originalzeilen), `native/effect_sprites_internal.h`
+(gemeinsame Dienste `effect_detail::{effinit, effset, setentry, request_template,
+submit_template, latched_uv, quad_uv, quad_color, effect_random}`).
 
-**Nice to have nach Projektabschluss:** die 68 übersetzten Prozeduren durch
-eigenständig geschriebene Implementierungen auf denselben Besitzern zu ersetzen,
-damit die Herkunft „maschinell übersetzt" verschwindet. Bis dahin gilt: gleiche
-Semantik, gleiche Reihenfolge, gleiche Seiteneffekte, aber der Text stammt aus
-dem Übersetzer.
+- `effect_detail::request_template()` ist `sys->ef`: eine prozessweite Vorlage,
+  deren nicht beschriebene Felder vom letzten Schreiber stehen bleiben
+  (bhEff101/103/104/015 u. a. schreiben nur einen Teil). Keine zweite Vorlage anlegen.
+- Zufallsreihenfolge innerhalb eines Ausdrucks (`rand() - rand()`) ist aus der
+  Disassembly belegt (bhEff152, 184, 246, 248: erster Aufruf ist der Minuend).
+  `(short)(float)` der EE wird als `short_of()` (erst `int`, dann 16 Bit) nachgebildet.
+- Nachträge der Originalerzeuger am neuen `eff[n]` (xn/yn/zn, tex_id, az, lkono,
+  `exp0 = op`) laufen als Felder von `EffectSpawn` (`velocity`, `tex_id_override`,
+  `az`, `lkono`, `parent_slot`); der Raumbesitzer trägt `slot` ein und löst
+  `parent_slot` vor jedem Pass in `EffectSprite::parent` auf. `sys->ef_opq` ist
+  `opaque_queued` (Paar 8/6, Tiefenschreiben). `cam.ax/ay/az` des Vorbildes stehen
+  in `EffectContext::camera_angles` (bhControlEffect läuft vor bhControlCamera);
+  `stage_no/room_no` kommen aus dem Raumnamen. `sys->winds/windr/thunder` haben mit
+  `effect_weather()` einen Besitzer im Effektmodul (nur Effektprozeduren schreiben sie;
+  Leser bhEff106/bhDrawThunder sind noch offen). CallBackGroundSe und bhCheckBombAtari
+  laufen als `EffectOutput.background_sounds`/`bombs` zum Raumbesitzer.
+- Prozeduren mit eigener Zeichenfunktion (`sys->ef_fnc`, `op->func`) reihen sich mit
+  `queue_custom` ein und legen ihre Vierecke/Linien in `EffectSprite::quads`/`lines`;
+  der Raumbesitzer zeichnet sie und überspringt für sie den `bhDrawTrsEffect3D`-Pfad.
+  `bhSetExtraEffectWork` ist derselbe `eff[512]`-Pool (`set_effect_extra_allocator`,
+  Platz mit `flg 2`), die Hilfsarbeitssätze liegen in `EffectSprite::extra`.
+  Zeichenfunktionen, die auch Zustand fortschreiben (bhEff022/024/025/027/100/107),
+  laufen hinter demselben Tor wie der Originalzeichenpass (`pt_flg 0x10`,
+  game.c:338/426); Mehrfachdurchläufe je Bild (Spiegelpass) hat der Host nicht.
+- Was eine sonst portierte Prozedur nicht erreicht, meldet sie benannt über
+  `EffectOutput.gaps` an den Raumbesitzer, statt es zu überdecken (bhEff019 und
+  das Raumlicht `rom->lgtp`). Der Ledger führt solche Prozeduren als `partial`.
+- Das Rückseitentor `flg 0x20000` der vier Effektzeichenpässe (effect.c:1241/1374/
+  1515/1651) ist portiert, zusammen mit den Ninja-Funktionen, die es braucht:
+  `njGetPlaneNormal`/`njGetPlaneNormal2` (ps2_NaColi.c:301/314), `njProjectScreen`
+  (ps2_NaMatrix.c:1572) und der Bildschirmzustand aus ps2_NaView.c. Die
+  Sichtbarkeitsrichtung ist belegt, nicht gewählt: nach `cmat` (njSetView,
+  diag(1,-1,-1)) ist `z` vor der Kamera positiv und `y` zeigt nach unten, und der
+  Einheitsquad aus bhSetEffectTb ergibt ein negatives Kreuzprodukt, wenn seine
+  lokale +z-Seite zur Kamera zeigt. Ein Billboard (0x100000) dreht die Reihenfolge
+  mit `njScale(1,-1,-1)` um und kommt deshalb immer durch das Tor. `stflg 0x10`
+  schreibt der Zeichenpass über `RoomWorld::effect_backface_` zurück, weil er
+  `const` ist; einziger Originalleser ist bhDrawSmallScreenRenderTexture
+  (screen.c:943) und der bleibt offen.
+- `njDrawTexture3DHEx` (ps2_NaDraw.c:464) zeichnet mit der Grundfarbe `bcol` als
+  Eckfarbe und setzt aus `ocol` des ersten Eckpunkts die Nebelfarbe genau dieses
+  Aufrufs (`SceneTriangle::fog_color`). Das ist aus der Routine belegt, nicht
+  geraten: `njDrawTextureSub3DH` liest nur `ocol`, und `njDrawTexture3DHEx`
+  schreibt `bcol` dorthin.
+- `sys->ef_ntx` ist derselbe Zeichenpfad ohne Textur, `sys->ef_pnc` derselbe wie
+  `sys->ef_trs`: `njControl3D(0x4000)` liest der Texturzeichner (ps2_NaDraw.c:280)
+  nie, nur die Chunk-Modelle (ps2_NinjaCnk.c) tun das. Der Unterschied ist die
+  Reihenfolge der Durchgänge, nicht der Zeichenzustand.
+- Nachweis je Gruppe: Differenzlauf Generat gegen Handfassung über Typen,
+  Aufträge, mdlver und Passes vor dem Entfernen (Logs und Prüfprogramm in
+  `build/validation/effproc-handport-20261014/`), dazu feste Tests mit
+  Originalfundstellen in `tests/native/effect_room_sprites_test.cpp`.
+
+**Befund am entfernten Generat:** der Übersetzer ersetzte `rand()` durch das
+bereits normierte `effect_random()`, ließ aber `/ -2.1474836E9f` stehen, sodass
+jeder Zufallsausdruck ≈0 ergab (Streuung fehlte, `>= 0.5f` war nie wahr,
+Pausentabellen nahmen Index 0). Außerdem las er den Versatz `&op->xn` als
+`(xn, zn, sx)` statt des Originallayouts `(xn, yn, zn)` (bhEff132). Beides ist
+in der Handfassung korrigiert und in den Tests festgehalten.
+
+- Eigene Zeichenfunktionen (`ef_fnc`) laufen in Platzreihenfolge mit einem
+  durchgereichten Blendzustand: `DrawEff5SnowRect` setzt keins und erbt, `bhDraw107`
+  hinterlässt 8/10, alle übrigen portierten stellen 8/6 zurück (Scan aller
+  Zeichenfunktionen in effsub*/effect.c). `bhSetExtraEffectWork`-Plätze ohne
+  Satzinhalt belegt `reserve_extra_slot`; die Schneebox hält elf davon.
+- `sys->gas_py` (bhEff127) hat mit `effect_gas_height()` einen Besitzer im
+  Effektmodul; nur diese Prozedur schreibt und liest sie. `plp->hp = -1` geht als
+  `EffectOutput::player_killed` denselben Weg wie ein Biss (world.cpp:1142).
+
+Noch nicht portiert bleiben die Prozeduren, die der Übersetzer nie ausgab
+(`sys->`-Dienste, `cam`/`rom`/`eff`-Zugriffe, Partikel-/Modellpfade aus
+effsub2/3/4); Liste und Dienstbedarf in
+`work/native_port_effsub0_handport.result.md`.
