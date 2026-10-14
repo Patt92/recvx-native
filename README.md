@@ -9,14 +9,15 @@ Mechanismen werden eigenständig auf den vorhandenen nativen Besitzern
 implementiert. Originalquellen sind nur Semantikreferenz; Originalkern,
 generierte Funktionskörper und PS2-/VU-/GS-Nachbildung sind verboten.
 
-> **Status (9. Oktober 2026): stabil baubar, aber noch nicht vollständig spielbar.**
-> Inventar, Itembefehle, EKG, Untersuchung und Dateiordner sind eigenständig
-> nativ umgesetzt und mit positiven Teilabläufen geprüft. macOS arm64:
-> **44/44 CTest**, **205/205 Räume laden**, **0 blockierte Eventbefehle**.
-> Windows x64: Binary gebaut und laut Prüfbericht auditiert; ein tatsächlicher
-> Windows-Lauf fehlt. Kampf, Kollision, Treppen, Effekte und vollständige
-> Gegnerabläufe bleiben offen. Nächster Gameplay-Auftrag: **D04 Computerterminal**.
-> Aufgaben und Zuständigkeiten: [Roadmap](docs/NATIVE_REIMPLEMENTATION_ROADMAP.md).
+> **Status (14. Oktober 2026): aktiver Port, nicht vollständig spielbar.**
+> Der Schutzprüfer besteht für den aktuellen Quellbaum. Neue Teilstände umfassen
+> Gegner-KI (unter anderem EN09), viele handportierte Effektprozeduren,
+> Kartenrenderer und Eingabe-/Ablaufkorrekturen. Paketberichte enthalten
+> gezielte Runtime- und Testnachweise; sie stammen aus unterschiedlichen Builds.
+> Ein gemeinsamer Abnahmelauf des aktuellen Arbeitsbaums und eine neue
+> Starter-/Paketersetzung sind nicht belegt. Windows-Runtime und mehrere
+> Gegnerfamilien bleiben offen. Die Tabelle unten misst nur dokumentierte
+> Mechanismen, keinen Fertigstellungsgrad des Spiels.
 
 ## Vorhandene native Teile
 
@@ -30,14 +31,15 @@ generierte Funktionskörper und PS2-/VU-/GS-Nachbildung sind verboten.
 - **Inventar und Status:** Aufnahmefrage, Sortierung, Ausrüstung,
   inventarseitiges Nachladen/Munitionszählen, Kombinationen, Itemgebrauch,
   Kistentransfer, Mengenanzeige, Befehlsfenster und Heil-/Gift-EKG. Das ist
-  kein Nachweis des noch fehlenden Spielerkampfs oder Itembox-Deckelablaufs.
+  kein Nachweis eines vollständigen Spielerdurchlaufs.
 - **Untersuchung und Dateien:** originale Aktions-/Umwandlungsabläufe,
   Sichtbarkeitsmasken, Versatz, Kameradistanzen und Skalierung der Itemansicht;
   Dateiaufnahme, Leser und Ordner mit **24 Dateien / 167 Seiten**.
 - **Actor/Rendering/Audio:** native Modell-, Textur-, Skin-/Pose- und
   Zeichengrundlagen, eigenständiger Face/Lip-Port, Math und Waffenblitze;
-  BGM-Discregel an beiden Raumladewegen. Vollständige Actor-/Gegnerbindungen,
-  Face-Korrekturen, Morph, Shadow und weitere Effekt-/Soundpfade bleiben offen.
+  BGM-Discregel an beiden Raumladewegen. Viele Effektprozeduren sind jetzt
+  eigenständig handportiert; weitere Effekt-, Actor-, Shadow- und Soundpfade
+  bleiben offen.
 
 ## Portierungsstand
 
@@ -56,16 +58,16 @@ Mechanismen mit 0,5; **voll belegt** nur vollständig abgeschlossene.
 
 | Kategorie | Belegumfang | Gewichtet | Voll belegt | Mechanismen | Stand |
 |---|---|---:|---:|---:|---|
-| Effekte | `██████████` | 97,5 % | 95,0 % | 151/159 | Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen. |
-| Modelle/Animation | `█████████░` | 91,7 % | 83,3 % | 5/6 | Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen. |
-| Events/Skript | `█████████░` | 88,8 % | 77,5 % | 31/40 | Originale Event-VM und gemeinsame Actor-Control-Fälle; weitere Befehle/Abläufe offen (Zahl unten). |
+| Effekte | `██████████` | 96,4 % | 92,8 % | 154/166 | Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen. |
+| Events/Skript | `█████████░` | 89,0 % | 78,0 % | 32/41 | Originale Event-VM und gemeinsame Actor-Control-Fälle; weitere Befehle/Abläufe offen (Zahl unten). |
+| Modelle/Animation | `█████████░` | 85,7 % | 71,4 % | 5/7 | Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen. |
 | Menü/Items/Text | `████████░░` | 82,9 % | 73,2 % | 30/41 | Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen. |
-| Gegner/KI | `████████░░` | 76,2 % | 52,4 % | 11/21 | Eigenständiger Dispatcher recvx_enemy_control, en01-Schaden/-Tod/-Griff und Hundeangriffe; Rest-KI, weitere Gegner-IDs und Effektbindungen offen. |
-| Spieler/Kampf | `███████░░░` | 66,7 % | 33,3 % | 7/21 | Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen. |
+| Gegner/KI | `████████░░` | 79,4 % | 58,8 % | 20/34 | Eigenständiger Dispatcher recvx_enemy_control, en01-Schaden/-Tod/-Griff und Hundeangriffe; Rest-KI, weitere Gegner-IDs und Effektbindungen offen. |
+| Spieler/Kampf | `███████░░░` | 68,2 % | 36,4 % | 8/22 | Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen. |
 | Audio | `██████░░░░` | 60,0 % | 20,0 % | 4/20 | Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt. |
-| Ablauf/Speichern | `██████░░░░` | 56,2 % | 12,5 % | 1/8 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
-| Raum/Kamera/Tür | `██████░░░░` | 55,6 % | 16,7 % | 3/18 | Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen. |
-| **Expliziter nativer Belegumfang** | `█████████░` | **85,8 %** | **72,8 %** | **243/334** | 169/223 Event-Befehle gebunden; kein Gesamtfortschritt. |
+| Ablauf/Speichern | `██████░░░░` | 55,6 % | 11,1 % | 1/9 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
+| Raum/Kamera/Tür | `██████░░░░` | 55,3 % | 15,8 % | 3/19 | Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen. |
+| **Expliziter nativer Belegumfang** | `█████████░` | **85,2 %** | **71,6 %** | **257/359** | 170/223 Event-Befehle gebunden; kein Gesamtfortschritt. |
 
 <!-- port-status:end -->
 
@@ -73,42 +75,31 @@ Mechanismen mit 0,5; **voll belegt** nur vollständig abgeschlossene.
 
 | Bereich | Stand | Nachweis / verbleibende Grenze |
 |---|---|---|
-| Schutz / Build | PASS | macOS-Quellen, Build und Runtime-Binary geprüft. Alle 22 gelisteten Funktionskörper-Generatoren quarantiniert; Build verwendet native Datenmodule. |
-| Inventar / Kiste / Inventar-Events (D01/D02/D06/D07) | Portiert, positive Teilabläufe geprüft | Aufnahme, Gebrauch, Kombination, Transfer und sieben Eventmutationen wirken auf derselben Inventory. Vollständige Aufnahme-Replays hängen teilweise an Kollision/Kampf; Itembox-Objektablauf B05 bleibt offen. |
-| EKG / Mengen / Befehlsfenster (D08/D09) | Portiert, Ausgabe geprüft | Heil-/Giftverlauf, sichtbare EKG-Ausgabe, Mengen/Farbbanken und Itembefehle. |
-| Untersuchung / Dateien (D03) | Portiert, Runtime-Abläufe geprüft | 156 Untersuchungsfälle mit 11 Umwandlungen; Itemansicht mit originalen Größen. Dateiaufnahme, Katalog und Ordner-Replays bestanden. |
-| Computerterminal (D04) | In Arbeit, produktiv noch Lücke | Plan vorhanden; Fensterautomat, Interpreter, Tastatur, Darstellung und Scanner-/Passwortabläufe noch nicht integriert. |
-| Spielerbewegung / Kampf (A/B) | Wesentliche Mechanismen offen | Wand-/Bodenauflösung, Push, Treppen/Leitern, Zielwahl und vollständige Angriffs-/Trefferabläufe fehlen. Inventar-Nachladen ist kein Kampfport. |
-| Gegner / Actor (C/F) | Teilweise portiert | Native-Portierungs-Kern vorhanden: Dispatcher `recvx_enemy_control` (Port von `bhControlEnemy`/`bhJumpEnemy`, `eneset.c:344`) liegt vor und meldet jede noch offene Id namentlich als Portierungslücke statt zu verschweigen. Subplayer-Pfad (T5, 45 Id./195 Works) portiert; Gegnerschaden `en01` über CTest belegt; gemeinsamer Actor-/Morph-Pfad portiert; EN07-Abnahme RM_0130 im erlaubten nativen Pfad erledigt. Gegner-Lücken über alle 205 Räume gemessen (120 Ticks je Raum): 5× Basic-Modell, 7× Skript-Motion-Rückgabe (IDs 5, 11×2, 20, 21), 9× `bhEff017`, je 1× `pdGetPeripheral`/`StartVibrationEx`, `bhEne01_LinkFireEffect`×2; Skelett-Mismatch 0. Offen: `en04` (Hund, Dispatch-Index bewusst NULL), `en02` ff. und vollständige Hunde-KI, Face/Shadow/Subplayer-Object-Morph, Restzustände der KI. |
-| Raum / Kamera / Türen (G/P04) | Raumladen geprüft, Sequenzen offen | 205/205 Räume laden; originale Türdemos und kamerabezogene Clipbereiche fehlen. |
-| Effekte / Audio (E) | Teilweise portiert | Native Audio-/Zeichengrundlagen und BGM-Discregel vorhanden; Effektzustände, gemeinsame Effekttexturen, Kollisionsabfragen und weitere SFX-Bindungen offen. |
-| Gameover / System / Speichern (D05) | Unvollständig | Snapshot-Replay geprüft; Tod/Retry und vollständige originale System-/Saveabläufe nicht abgeschlossen. |
-| Windows x64 | Gebaut, laut Bericht auditiert | Linkeingänge und PE-Vergleichslink geprüft. Tatsächlicher Windows-Lauf und unabhängige Prüfung des neuen Auditwegs stehen aus. |
+| Schutz / Build | Quellpolicy PASS; gemeinsamer Stand offen | Der aktuelle Quellbaum besteht `check_no_original_core.py`. Die jüngsten Änderungen sind nicht gemeinsam gebaut; kein aktuelles Starter-/Paketrelease belegt. |
+| Inventar / Kiste / Status (D01/D02/D06–D09) | Portiert, Teilabläufe geprüft | Aufnahme, Gebrauch, Kombination, Transfer, Itembefehle und EKG besitzen positive Teilnachweise. Ein vollständiger Spieldurchlauf ist damit nicht belegt. |
+| Untersuchung / Dateien / Karte (D03/D10) | Portiert, Runtime-Teile geprüft | Itemansicht, Dateiabläufe sowie MAP-Geometrie, Marker und Sprites sind in eigenen Build-Runtimes geprüft; noch keine aktuelle Starter-/Paketersetzung. |
+| Spieler / Eingabe / Kampf (A/B) | Teilweise portiert | Bewegung, Kollision, Push, Treppen und Zielwahl haben eigene Nachweise. M93R-Aufschaltung/Treffer sind diagnostisch geprüft; allgemeine Spielerzustände und weitere Waffen fehlen. |
+| Gegner / Actor (C/F) | Mehrere Familien aktiv; Gesamtport offen | EN01/EN04-Angriffe und EN09/Bandersnatcher sind in nativen Runtime-Teilabläufen geprüft. EN21 ist angeschlossen, seine Tests wurden zurückgestellt. EN05, EN12, EN13/13B, EN23, EN56 und weitere Dienste bleiben offen. |
+| Effekte / Licht / Audio (E) | Viele native Prozeduren, Gesamtpfade offen | Der Regex-Übersetzer wurde entfernt; viele Effektprozeduren sind handportiert. Weitere IDs, Partikel-/Modellpfade, Licht-/Sounddienste und Renderinggrenzen bleiben offen. |
+| Shadow / Kamera / Türen (F/G/P) | Teilweise portiert | Türsequenzen und Clipaufrufe besitzen gezielte Nachweise. Shadow-Renderer, vollständiger Kamerapfad und originale Eisraumdarstellung bleiben offen. |
+| System / Speichern | Unvollständig | Eingabe- und Ablaufkorrekturen sind teilweise geprüft; originales Speichern/Laden und vollständige Systemzustände fehlen. |
+| Windows x64 | Kein aktueller Nachweis | Vorhandene Windows-Binaries stammen aus älteren Builds; der aktuelle Arbeitsbaum ist nicht auf Windows ausgeführt. |
 
 <!-- native-progress:end -->
 
-**Prüfstand:** Im vorhandenen macOS-Testprotokoll bestehen **44/44 CTest**;
-die Suite enthält auch Lückenverträge, deren Erfolg keine Spielfunktion
-beweist. Die Berichte dokumentieren **24/24 Policy-Tests**, neun Windows-
-Auditprüfungen und **205/205 ladende Räume mit 0 blockierten Befehlen**.
-Bestandene native Runtime-Teilabläufe: `verify_events`, `verify_pickup_slide`,
-`verify_progression`, `verify_snapshot`, `verify_item_catalog`,
-`verify_file_pickup` und `verify_file_folder`.
+**Prüfstand:** Paketläufe unterscheiden sich je Build. Der Effekt-Handport meldet
+82/83 CTest, EN09 86/86 und der Gegner-Audit 85/86; die roten Fälle und ihre
+Vorherstände sind in den jeweiligen Berichten dokumentiert. Diese Zahlen sind
+keine gemeinsame Abnahme des aktuellen Arbeitsbaums. Der Policy-Quellcheck
+besteht; aktuelle Runtime-/Paket- und Windows-Abnahme fehlen.
 
-**Noch blockiert:** vollständige `verify_pickups` (Kollision),
-`verify_ammunition`/`verify_combat` (Spielerkampf), `verify_detector`
-(Effekte) und `verify_continuity` (Treppenmotion). Direkt gestartete
-Aufnahmen sind nur Teilnachweise. Der statische Besitzer-Skriptscan ist
-unvollständig; ein Raumsweep deckt nicht alle Skriptpfade ab. Es gibt keinen
-Durchspielnachweis und keinen tatsächlichen Windows-Runtime-Nachweis.
-
-Ein Durchspielnachweis und ein tatsächlicher Windows-Runtime-Nachweis fehlen
-weiterhin; die Prozentzahlen oben sind kein Fertigstellungsgrad des Spiels.
-
-Belege: [Inventar](work/native_port_inventory_tests.result.md),
-[Untersuchung/Dateien](work/native_port_D03_files_inspection.result.md),
-[Windows-Audit](work/native_port_windows_audit.md) und aktuelle Ergänzungen in
-[AGENTS.md](AGENTS.md). Nächster Auftrag: [D04-Plan](work/native_port_D04_computer.plan.md).
+Ausgewählte Nachweise: [EN09/Bandersnatcher](work/native_port_EN09_world.result.md),
+[Gegner-Audit](work/native_port_enemy_audit_fixes.result.md),
+[Effektprozeduren](work/native_port_effsub0_handport.result.md),
+[MAP-Renderer](work/native_port_D10_map_render.result.md),
+[Eingabesperre RM_1020](work/native_port_discard_question.result.md).
+Die automatisch berechnete Ledger-Tabelle oben beschreibt dokumentierte
+Mechanismen, nicht Spielvollständigkeit.
 
 ## Schnellstart
 
