@@ -1007,6 +1007,7 @@ bool ported_effect_atlas(unsigned group){
     case 60:case 61:case 62:case 63:case 64:case 65:case 66:case 67:case 68:case 69:
     case 44: // effsub1b.c:123 bhDraw134 (sys->ef_tn[44])
     case 80:case 94:
+    case 82:case 83: // effsub2.c:1061 bhEff_E02_SandDust (tex_id = mdlver + 82)
     case 408:case 409:case 410:case 411:case 412:case 413:case 414:case 415:case 416:case 418:case 420:
     case 417:case 419:case 421:case 422:case 423:case 424:case 425:case 426:case 427:case 428:
     case 429:case 430:case 431:return true;

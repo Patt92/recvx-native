@@ -56,6 +56,11 @@ public:
     // newly pressed logical bits (edge), pad_on the held ones (bhSetPad).
     std::function<std::pair<unsigned,unsigned>()> pad_state;
     std::function<unsigned()> player_yaw; // plp->ay
+    // bhObjDposCk (event.c:7605): obwp[n].ay und rom->enep[n] -> mdl->objP[node].ang[0].
+    std::function<bool(unsigned,int&)> object_ay_get;
+    std::function<void(unsigned,int)> object_ay_set;
+    std::function<bool(unsigned,unsigned,int&)> enemy_node_ax_get;
+    std::function<void(unsigned,unsigned,int)> enemy_node_ax_set;
     std::function<void(unsigned)> set_player_yaw;
     /* system.c:742 (bhCheckSubTask, pass in which cb_flg 4 falls): plp->mode3 = 0. */
     std::function<void()> release_cinematic_player;

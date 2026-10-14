@@ -3434,10 +3434,13 @@ void step_eff219(EffectSprite& s,const EffectContext& c,bool&){
     if(s.type==0)return;
     s.flg|=0x1000000u;
     s.type=((s.type-1)%3)+1;
-    // cam.wpx/wpy/wpz und cam.vx/vy/vz liest erst ein gelaufenes bhControlCamera;
-    // ohne diesen Stand ist die Kameralage eine benannte Luecke, die Box wartet.
-    const bool camera_box=s.type!=3;
-    if(camera_box&&!c.camera_ready){report_gap("bhEff219: cam.wpx/cam.vx vor dem ersten bhControlCamera");return;}
+    // cam.wpx/wpy/wpz und cam.vx/vy/vz sind vor dem ersten bhControlCamera NICHT
+    // undefiniert: room.c:33 bhInitCamera nullt beim Raumladen das ganze cam-Objekt
+    // (camera.c:8 npSetMemory(&cam, 0x4AC, 0)), und game.c:50 bhControlEffect laeuft
+    // vor :58 bhControlCamera. Im ersten Effektpass eines Raums ist cam also 0/0.
+    // EffectContext::camera_position/camera_view sind genauso mit 0 initialisiert —
+    // der Effekt legt die Box damit wie das Original am Ursprung an und folgt der
+    // Kamera, sobald sie gelaufen ist. Kein Warten, keine Luecke.
     const NJS_POINT3 ahead{c.camera_position.x+(40.0f*c.camera_view.x),c.camera_position.y+(40.0f*c.camera_view.y),c.camera_position.z+(40.0f*c.camera_view.z)};
     if(s.mode0==0){
         auto snow=create_snow_rect(850);
@@ -3910,7 +3913,121 @@ void step_e12_binta(EffectSprite& s,const EffectContext&,bool&){
     default:break;
     }
 }
+// effsub2.c:1061 bhEff_E02_SandDust (253) — Sandwolke des Gulp Worm (en02.c:2500 SetSandSpr).
+// Sechs UV-Tabellen BH_UVTAB0..5, gewaehlt mit type + 3*mdlver; Grundfarbe 0xFF404040, Blend 8/3,
+// Texturgruppe 82 + mdlver, Ausrichtung 2 (bhEff_SetAlign). Je Pass ein Tabellenschritt ueber
+// ct1 (u < 0 beendet den Effekt), Lage += Richtung; die Richtung faellt auf 0.9 (nicht bei
+// type 2) und sinkt um 0.1; bhEff_SetUVInfo mit Basis 0.0625; Mitglied von sys->ef_trs.
+namespace e02 {
+constexpr EffectUv dust_uv0[12]={{0.3125f,0.09375f,0.03125f,0.03125f},{0.34375f,0.0859375f,0.03125f,0.03125f},{0.3125f,0.125f,0.0625f,0.0625f},{0.0f,0.0f,0.09375f,0.09375f},{0.09375f,0.0f,0.09375f,0.09375f},{0.1875f,0.0f,0.09375f,0.078125f},{0.28125f,0.0f,0.09375f,0.078125f},{0.375f,0.0f,0.125f,0.125f},{0.5f,0.015625f,0.15625f,0.125f},{0.65625f,0.015625f,0.15625f,0.125f},{0.8125f,0.015625f,0.15625f,0.125f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv dust_uv1[15]={{0.33984375f,0.359375f,0.03125f,0.03125f},{0.375f,0.3515625f,0.03125f,0.03125f},{0.34375f,0.38671875f,0.0625f,0.0625f},{0.42578125f,0.37109375f,0.0625f,0.0625f},{0.5078125f,0.359375f,0.078125f,0.078125f},{0.58984375f,0.31640625f,0.09375f,0.09375f},{0.703125f,0.328125f,0.09375f,0.09375f},{0.8125f,0.3203125f,0.109375f,0.109375f},{0.01171875f,0.2109375f,0.125f,0.125f},{0.15625f,0.203125f,0.15625f,0.15625f},{0.3125f,0.19921875f,0.15625f,0.15625f},{0.46875f,0.1484375f,0.15625f,0.15625f},{0.625f,0.1484375f,0.15625f,0.15625f},{0.78125f,0.1484375f,0.15625f,0.15625f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv dust_uv2[16]={{0.0f,0.4453125f,0.1875f,0.1875f},{0.1875f,0.4453125f,0.1875f,0.1875f},{0.375f,0.4375f,0.1875f,0.1875f},{0.5625f,0.4375f,0.1875f,0.1875f},{0.75f,0.4375f,0.1875f,0.1875f},{0.0f,0.625f,0.1875f,0.1875f},{0.1875f,0.62109375f,0.1875f,0.1875f},{0.375f,0.62109375f,0.1875f,0.1875f},{0.5625f,0.625f,0.1875f,0.18359375f},{0.75f,0.625f,0.1875f,0.18359375f},{0.0f,0.8125f,0.1875f,0.1875f},{0.1875f,0.80859375f,0.1875f,0.1875f},{0.375f,0.80859375f,0.1875f,0.1875f},{0.5625f,0.80859375f,0.1875f,0.1875f},{0.75f,0.80859375f,0.1875f,0.1875f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv dust_uv3[15]={{0.3125f,0.09375f,0.03125f,0.03125f},{0.34375f,0.09375f,0.03125f,0.03125f},{0.3125f,0.125f,0.0625f,0.0625f},{0.0f,0.0f,0.09375f,0.09375f},{0.09375f,0.0f,0.09375f,0.09375f},{0.1875f,0.0f,0.09375f,0.09375f},{0.28125f,0.0f,0.09375f,0.09375f},{0.0f,0.09375f,0.09375f,0.09375f},{0.09375f,0.09375f,0.09375f,0.09375f},{0.1875f,0.09375f,0.125f,0.125f},{0.375f,0.0f,0.125f,0.125f},{0.5f,0.0f,0.15625f,0.15625f},{0.65625f,0.0f,0.15625f,0.15625f},{0.8125f,0.0f,0.15625f,0.15625f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv dust_uv4[15]={{0.0f,0.375f,0.03125f,0.03125f},{0.03125f,0.375f,0.03125f,0.03125f},{0.0f,0.40625f,0.0625f,0.0625f},{0.0625f,0.375f,0.09375f,0.09375f},{0.15625f,0.375f,0.09375f,0.09375f},{0.25f,0.375f,0.09375f,0.09375f},{0.34375f,0.375f,0.125f,0.125f},{0.46875f,0.375f,0.125f,0.125f},{0.0f,0.21875f,0.15625f,0.15625f},{0.15625f,0.21875f,0.15625f,0.15625f},{0.3125f,0.21875f,0.15625f,0.15625f},{0.46875f,0.21875f,0.15625f,0.15625f},{0.625f,0.21875f,0.15625f,0.15625f},{0.78125f,0.21875f,0.15625f,0.15625f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv dust_uv5[11]={{0.0f,0.5625f,0.1875f,0.1875f},{0.1875f,0.5625f,0.1875f,0.1875f},{0.375f,0.5625f,0.1875f,0.1875f},{0.5625f,0.5625f,0.1875f,0.1875f},{0.75f,0.5625f,0.1875f,0.1875f},{0.0f,0.75f,0.1875f,0.1875f},{0.1875f,0.75f,0.1875f,0.1875f},{0.375f,0.75f,0.1875f,0.1875f},{0.5625f,0.75f,0.1875f,0.1875f},{0.75f,0.75f,0.1875f,0.1875f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr const EffectUv* dust_uv[6]={dust_uv0,dust_uv1,dust_uv2,dust_uv3,dust_uv4,dust_uv5};
+constexpr std::uint32_t grain_col[3]={0xFF332417u,0xFF322320u,0xFF211816u};
+}
+void step_e02_sand_dust(EffectSprite& s,const EffectContext&,bool& queued){
+    using namespace e02;
+    if(s.mode0==0){
+        e12::align2(s);quad_color(s,0xFF404040u);
+        s.bl_src=8;s.bl_dst=3;
+        s.tex_id=int(s.mdlver)+82;s.ani_ct=0;
+        s.ct0=0;s.ct1=0;
+        s.flg|=0x180000u;s.flg|=0x4000000u;
+        s.sxb=s.sx;s.syb=s.sy;
+        const unsigned k=s.type+s.mdlver*3u;
+        if(k>=6){report_gap("bhEff_E02_SandDust: uvtble[type + mdlver*3] ausserhalb");s.flg=0;return;}
+        s.uv=dust_uv[k];
+        s.mode0=1;
+    }
+    const auto& uv=latched_uv(s,s.ct1,"bhEff_E02_SandDust");
+    if(uv.u<0){s.flg=0;return;}
+    ++s.ct1;
+    s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+    if(s.type!=2){s.xn*=0.9f;s.yn*=0.9f;s.zn*=0.9f;}
+    s.yn-=0.1f;
+    quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/0.0625f;s.sy=(s.syb*uv.ys)/0.0625f;
+    queued=true;
+}
+// effsub2.c:1237 bhEff_E02_SandParticle (254) — sechzehn Sandkoerner (en02.c:2997
+// SetSandParticle): Lage um px/py/pz mit ±sx/sy/sz (je zwei Zufallswerte), Richtung um
+// xn/yn/zn mit ±sxb/syb/szb; Farbe col[type]; lebt 10 + 10r Passes; Fall 0.4, waagerecht
+// 0.8. Zeichnung bhEff_E00_DrawParticlePly mit dem vorgefundenen Blendpaar.
+void step_e02_sand_particle(EffectSprite& s,const EffectContext& c,bool&){
+    using namespace e02;
+    if(s.mode0==0){
+        if(!acquire_extra_work(s)){s.flg=0;return;}
+        auto& p=particle_work(s,"bhEff_E02_SandParticle");
+        p.num=16;
+        if(s.type>=3){report_gap("bhEff_E02_SandParticle: type ausserhalb col[3]");s.flg=0;release_extra_work(s);return;}
+        for(int i=0;i<p.num;++i){
+            float a;
+            a=s.px+(s.sx*effect_random());p.pos[i].x=a-(s.sx*effect_random());
+            a=s.py+(s.sy*effect_random());p.pos[i].y=a-(s.sy*effect_random());
+            a=s.pz+(s.sz*effect_random());p.pos[i].z=a-(s.sz*effect_random());
+            a=s.xn+(s.sxb*effect_random());p.vec[i].x=a-(s.sxb*effect_random());
+            a=s.yn+(s.syb*effect_random());p.vec[i].y=a-(s.syb*effect_random());
+            a=s.zn+(s.szb*effect_random());p.vec[i].z=a-(s.szb*effect_random());
+        }
+        p.sx=1.0f;p.sy=1.0f;p.col=grain_col[s.type];
+        s.ct0=int(10.0f+(10.0f*effect_random()));
+        s.flg|=0x20000000u;
+        s.mode0=1;
+        return;
+    }
+    auto& p=particle_work(s,"bhEff_E02_SandParticle");
+    for(int i=0;i<p.num;++i){
+        p.pos[i].x+=p.vec[i].x;p.pos[i].y+=p.vec[i].y;p.pos[i].z+=p.vec[i].z;
+        p.vec[i].y-=0.4f;p.vec[i].x*=0.8f;p.vec[i].z*=0.8f;
+    }
+    if(s.ct0--==0){s.flg=0;release_extra_work(s);return;}
+    queue_custom(s);
+    if(!drawing(c))return;
+    push_particle_sprites(s,p,0,0,s.bl_src,s.bl_dst,false,false);
+}
+// effsub4.c:1117 bhEff_Sub355 — Zielfernrohr-Marke des EN01-Kindes bhEne01Scope
+// (en01sub.c:1948 bhEne01Scope_Effect: zwei Saetze an scope_ofs ueber der Zombiematrix,
+// exp0 = Elternwork, ct3 = 0, sx/sy/sz 0.18). Texturgruppe 4 Bild 2 — eine GLOBALE
+// Effekttextur aus bhInitEffect (effect.c:68; room.c:295-303 nullt nur 30..99/400..449),
+// nativ in effect_textures_ aus SYSTEM/0001.bin. Blend 8/10, Rueckseitentor 0x20000.
+// Das Alpha startet bei 0xF0 (tv[0].col 0x00FF0000 + 0xF0000000) und sinkt je Pass um
+// 0x10, bis es unter 0x10 faellt — insgesamt 16 Passes. flg 0x4000000 und 0x80000
+// werden wie im Original gesetzt; effect.c liest beide nirgends (nur 0x20000, :1241).
+// Der Satz stirbt mit stflg 0x1000000 des Elternwerks (bhEneSetCk).
+void step_eff355(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0:
+        quad_color(s,0x00FF0000u);
+        s.bl_src=8;s.bl_dst=10;
+        s.flg|=0x40A0000u;
+        s.ani_ct=2;
+        s.tex_id=4;
+        s.ct1=0;s.ct2=0;
+        s.sx=s.sxb;s.sy=s.syb;
+        quad_uv(s,{0.0f,0.0f,1.0f,1.0f});
+        ++s.mode0;
+    [[fallthrough]];
+    case 1:
+        --s.ct3;
+        if(s.ct3>=0)break;
+        s.mode2=1;
+        ++s.mode0;
+    [[fallthrough]];
+    case 2:
+        s.tv[0].col+=0xF0000000u;
+        quad_color(s,s.tv[0].col);
+        if((s.tv[0].col&0xFF000000u)<0x10000000u)s.flg=0;
+        break;
+    default:break;
+    }
+    if(!s.exp0){report_gap("bhEff355: exp0 (Elternwork, bhEne01Scope_Effect)");return;}
+    if(reinterpret_cast<const RECVX_ENEMY_WORK*>(s.exp0)->stflg&0x1000000u){s.flg=0;return;}
+    if(s.mode2!=0&&s.flg!=0)queued=true;
+}
 const HandEffectProcedure hand_effect_procedures[]={
+    {253,step_e02_sand_dust},{254,step_e02_sand_particle},{355,step_eff355},
     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
     {8,step_eff008},{10,step_eff010},{11,step_eff011},{14,step_eff014},{15,step_eff015},{29,step_eff029},
     {101,step_eff101},{103,step_eff103},{104,step_eff104},{116,step_eff116},{117,step_eff117},{119,step_eff119},

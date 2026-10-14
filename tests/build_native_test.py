@@ -1,6 +1,7 @@
 """Development-app publishing; macOS tools are mocked, not policy bypassed."""
 import importlib.util
 from pathlib import Path
+import plistlib
 import subprocess
 import tempfile
 import unittest
@@ -23,6 +24,9 @@ class DevelopmentAppTests(unittest.TestCase):
         (self.build / 'recvx-runtime').write_bytes(b'fixture native runtime')
         (self.build / 'recvx-runtime').chmod(0o755)
         (self.root / 'controls.ini').write_text('user configuration')
+        self.icon = self.root / 'native/resources/app-icon.icns'
+        self.icon.parent.mkdir(parents=True)
+        self.icon.write_bytes(b'fixture icon')
         self.app = self.root / 'build/start/macos-arm64/RECVX Native.app'
         self.commands = []
         self.addCleanup(patch.stopall)
@@ -37,6 +41,11 @@ class DevelopmentAppTests(unittest.TestCase):
 
     def record_command(self, *command):
         self.commands.append(tuple(map(str, command)))
+        if command[0] == 'codesign' and Path(command[-1]).suffix == '.app':
+            contents = Path(command[-1]) / 'Contents'
+            with (contents / 'Info.plist').open('rb') as info:
+                self.assertEqual(plistlib.load(info)['CFBundleIconFile'], 'app-icon.icns')
+            self.assertEqual((contents / 'Resources/app-icon.icns').read_bytes(), self.icon.read_bytes())
 
     def test_creates_without_any_old_package(self):
         build_native.sync_macos_start_package(self.build)
@@ -76,6 +85,15 @@ class DevelopmentAppTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 build_native.sync_macos_start_package(self.build)
         self.assertEqual((self.app / 'Contents/MacOS/recvx-runtime').read_bytes(), b'fixture native runtime')
+        self.assertEqual(list(self.app.parent.glob('.staging-*')), [])
+
+    def test_missing_icon_does_not_publish_over_previous_app(self):
+        build_native.sync_macos_start_package(self.build)
+        self.icon.unlink()
+        with self.assertRaises(FileNotFoundError):
+            build_native.sync_macos_start_package(self.build)
+        self.assertEqual((self.app / 'Contents/Resources/app-icon.icns').read_bytes(), b'fixture icon')
+        self.assertEqual(list(self.app.parent.glob('.previous-*')), [])
         self.assertEqual(list(self.app.parent.glob('.staging-*')), [])
 
     def test_missing_sdl_fails_before_creating_app(self):

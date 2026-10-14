@@ -529,6 +529,20 @@ int main(int argc,char** argv){try{
         std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state;MessageDialog text;EventVm event(bytes,state,text);unsigned yaw=0;
         event.player_yaw=[&]{return yaw;};event.set_player_yaw=[&](unsigned value){yaw=value;};event.binding=[&](const EventCommand&){return true;};
         event.start(0,0);event.tick();check(event.errors.empty()&&yaw==5461&&event.flag(4,30),"bhPlyDposCk must turn by one step and advance 6 bytes");}
+    // bhObjDposCk (0xb1, event.c:7605): 6 bytes, Bedingung einer WHILE-Schleife (fc 08 b1 .. fe fd). obwp[v0].ay (v4 == 0)
+    // bzw. objP[v4].ang[0] wandert je Durchlauf um v3 Grad auf v2 Grad; 1 = laeuft noch, 0 = angekommen.
+    {auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0xfc,8,0xb1,2,0,90,30,0,0xfe,0xfd, 0x05,0x04,30,0,0,0, 0xff,0};
+        std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state;MessageDialog text;EventVm event(bytes,state,text);int ay=0,steps=0;
+        event.object_ay_get=[&](unsigned i,int& v){if(i!=2)return false;v=ay;return true;};event.object_ay_set=[&](unsigned,int v){ay=v;++steps;};
+        event.binding=[&](const EventCommand&){return true;};
+        event.start(0,0);unsigned ticks=0;for(;ticks<12&&!event.flag(4,30);++ticks)event.tick();
+        check(event.errors.empty()&&ay==16384&&event.flag(4,30)&&steps>=3,"bhObjDposCk object branch must walk to the target in steps and then end the loop");}
+    {auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0xfc,8,0xb1,3,3,90,30,4,0xfe,0xfd, 0x05,0x04,30,0,0,0, 0xff,0};
+        std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state;MessageDialog text;EventVm event(bytes,state,text);int ax=0;
+        event.enemy_node_ax_get=[&](unsigned e,unsigned n,int& v){if(e!=3||n!=4)return false;v=ax;return true;};event.enemy_node_ax_set=[&](unsigned,unsigned,int v){ax=v;};
+        event.binding=[&](const EventCommand&){return true;};
+        event.start(0,0);for(unsigned ticks=0;ticks<12&&!event.flag(4,30);++ticks)event.tick();
+        check(event.errors.empty()&&ax==-16384&&event.flag(4,30),"bhObjDposCk enemy node branch must negate the target for the reverse flag");}
     if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory section(s) failed; the remaining game checks passed.\n";return 1;}
     std::cout<<"Inventory host rules, GetItem/Combi/ItemUse/D06 inventory effects, dialogs, event waits/branches and asset tests passed.\n";return 0;
 }catch(const std::exception& e){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<e.what()<<'\n';return 1;}}

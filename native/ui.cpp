@@ -3,6 +3,7 @@
 #include "asset_io.h"
 #include "binary_view.h"
 #include "item_asset.h"
+#include "typewriter.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -436,6 +437,121 @@ void GameUi::draw_title(SoftwareRenderer& image){
     blit_pixels(image,title_[2],348,418,240,32,272,432,512,464);
 }
 Message GameUi::system_message(unsigned i)const{return read_message(messages_,system_table_,i);}
+void GameUi::direct_message(SoftwareRenderer& image,const Message& m,float x,float y,std::uint32_t color,float sx,float sy,float line,unsigned count,bool spaces_count)const{
+    // Original ARGB -> canvas AABBGGRR (scene.h), without altering atlas pixels.
+    color=(color&0xff00ff00u)|((color&0xffu)<<16)|((color>>16)&0xffu);
+    const float start=x;const bool limited=count!=0;
+    for(std::size_t i=0;i<m.size();++i){
+        const unsigned c=m[i];if(c==0xffff)break;
+        if(c==0xff00){x=start;y+=30*line;continue;}
+        if(c==0xff01){x+=14*sx;if(limited&&spaces_count&&!--count)break;continue;}
+        if(c==0xff02||c==0xff03){++i;continue;}
+        if(c==0xff04){x+=28*sx;continue;}
+        if(c>=0xfe00)continue;
+        if(c/324>=fonts_.size())throw std::runtime_error("typewriter glyph missing from original font atlas");
+        const auto& atlas=fonts_[c/324];const unsigned glyph=c%324;
+        const float u=float((glyph%18)*14)/256,v=float((glyph/18)*14)/256;
+        PulseQuad q{{{x,y,u,v,color,0},{x+28*sx,y,u+14.f/256,v,color,0},
+                     {x,y+28*sy,u,v+14.f/256,color,0},{x+28*sx,y+28*sy,u+14.f/256,v+14.f/256,color,0}}};
+        pulse_quad(image,atlas,q);x+=(c<108?FontSz[c]:0)*sx;
+        if(limited&&!--count)break;
+    }
+}
+void GameUi::draw_typewriter(SoftwareRenderer& image,const Typewriter& screen){
+    using Phase=Typewriter::Phase;
+    if(typewriter_textures_.empty()){
+        // TypeWriterTextureInit, bup_00.c:285–328: ITEM1 144, three textures.
+        typewriter_textures_=decode_texture_bundle(read_asset_file(data_/"archives/ITEM1/0144.bin",8*1024*1024));
+        if(typewriter_textures_.size()!=3)throw std::runtime_error("typewriter requires original ITEM1/0144 textures (3)");
+        Scene replacement;replacement.textures=typewriter_textures_;apply_texture_files(replacement,data_,mods_,"typewriter");typewriter_textures_=std::move(replacement.textures);
+    }
+    auto quad=[&](unsigned tex,float x,float y,float w,float h,float u1,float v1,float u2,float v2,std::uint32_t color){
+        PulseQuad q{{{x,y,u1,v1,color,0},{x+w,y,u2,v1,color,0},{x,y+h,u1,v2,color,0},{x+w,y+h,u2,v2,color,0}}};
+        pulse_quad(image,typewriter_textures_.at(tex),q);
+    };
+    // DispBackGroundTexture, McSaveFile:977–1018; no invented flat background.
+    quad(0,0,0,512,480,0,0,1,.93f,0xff909090);
+    quad(1,512,0,128,480,0,0,.24f,.93f,0xff909090);
+    auto message=[&](unsigned id,float x,float y,std::uint32_t col=0xffffffffu,float scale=1,float line=1,unsigned count=0,bool spaces=false){direct_message(image,system_message(id),x,y,col,scale,scale,line,count,spaces);};
+    auto cursor=[&](float x,float y){quad(2,x,y,16,30,.47070313f,0,.5019531f,.0625f,0xff808080);};
+    auto arrow=[&](float x,float y,unsigned mode){
+        // DispUpDownCursol, McSaveFile:898–974: polygon vertices, not text glyphs.
+        float ax=x,ay=y,bx=x+16,by=y,cx=x+8,cy=y-8;
+        if(mode==1){ay=by=y+226;cy=y+234;}
+        else if(mode>=2){ay=y+(mode==3?22:0);by=ay+8;cy=ay+16;bx=x+8;cx=x;}
+        const float area=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+        auto& pixels=image.canvas();
+        for(int py=std::max(0,int(std::floor(std::min({ay,by,cy}))));py<std::min(image.height(),int(std::ceil(std::max({ay,by,cy}))));++py)
+            for(int px=std::max(0,int(std::floor(std::min({ax,bx,cx}))));px<std::min(image.width(),int(std::ceil(std::max({ax,bx,cx}))));++px){
+                const float a=((bx-px-.5f)*(cy-py-.5f)-(by-py-.5f)*(cx-px-.5f))/area;
+                const float b=((cx-px-.5f)*(ay-py-.5f)-(cy-py-.5f)*(ax-px-.5f))/area;
+                if(a>=0&&b>=0&&a+b<=1)pixels[py*image.width()+px]=0xffc0c0c0;
+            }
+    };
+    const auto phase=screen.phase();const bool save=screen.mode()==Typewriter::Mode::Save;
+    if(phase==Phase::Card){
+        // The host directory is one available storage endpoint, corresponding
+        // to port 0. Port 1 is unavailable, not an emulated second card.
+        // CheckDisp[Load]MemoryCard: one connected endpoint, selected or EXIT.
+        quad(2,128,200,109,148,screen.selection()? .21875f:0,0,screen.selection()? .4375f:.21679688f,.296875f,0xff646464);
+        quad(2,400,200,109,148,.21875f,0,.4375f,.296875f,0xff646464);
+        cursor(70,129+258*screen.selection());
+        message(save?472:452,96,82,0xffffffff,.71f,.75f);
+        message(463,90,136,0xffffffff,.71f,.75f);message(464,153,158,0xffffffff,.71f,.75f);
+        message(463,360,136,0xffffffff,.71f,.75f);message(465,423,158,0xffffffff,.71f,.75f);
+        message(save?473:453,90,395,0xffffffff,.71f,.75f);
+        return;
+    }
+    const bool window=phase==Phase::Files||phase==Phase::Confirm||phase==Phase::Io||phase==Phase::Typing||phase==Phase::Success;
+    if(window){
+        message(463,140,32);message(464,420,32);cursor(32,103+40*screen.row());
+        // mcDispWindowFoundtion: arguments are right/bottom, not width/height.
+        const SceneTexture white=[](){SceneTexture t;t.width=t.height=1;t.pixels={0xffffffff};return t;}();
+        PulseQuad foundation{{{16,96,0,0,0x18808080,0},{616,96,1,0,0x18808080,0},{16,310,0,1,0x18808080,0},{616,310,1,1,0x18808080,0}}};
+        pulse_quad(image,white,foundation);
+        auto glyph=[&](unsigned code,float x,float y,std::uint32_t color){direct_message(image,Message{std::uint16_t(code),0xffff},x,y,color);};
+        for(unsigned row=0;row<5;++row){
+            const auto& s=screen.slots().at(screen.top()+row);const float y=108+40*row;
+            // mcDispFileNumber / mcDispFileName: number, '.', player, '/', save
+            // count, '/', RoomNameSwitch-derived original message. No HP/room IDs.
+            const auto numcolor=s.exists?0xffffffffu:0xff606060u;
+            if(s.slot/10)glyph(16+s.slot/10,60,y,numcolor);glyph(16+s.slot%10,86,y,numcolor);glyph(14,118,y,numcolor);
+            if(!s.exists){message(215,132,y,0xff606060);continue;}
+            if(s.game_mode<0||s.game_mode>2)throw std::runtime_error("typewriter: original file-name colour for game mode is unresolved");
+            const auto col=s.game_mode==1?0xff20ff20u:s.game_mode==2?0xffff2020u:0xffffffffu;
+            if(s.save_ct>99)throw std::runtime_error("typewriter: save count outside original MesNumTbl");
+            if(phase==Phase::Typing&&row==screen.row()){
+                const unsigned n=screen.write_count(),p=s.player;
+                if(n>=3&&n<=8-p)message(208+p,132,y,col,1,1,n-2,true);
+                else if(n>=9-p){message(208+p,132,y,col);glyph(15,230,y,col);}
+                if(n>=11-p)glyph(16+s.save_ct/10,262,y,col);
+                if(n>=12-p)glyph(16+s.save_ct%10,288,y,col);
+                if(n>=13-p)glyph(15,320,y,col);
+                // Type_Space second/third columns are -1 for every original row.
+                constexpr unsigned lengths[]={28,29,29,28,28,29,29,28,28,29,27,30,28,29,29,29,29,28};
+                if(s.save_room<1||s.save_room>18)throw std::runtime_error("typewriter: missing Type_Space save room");
+                const unsigned max=lengths[s.save_room-1];
+                if(n>=max-p)message(215+s.save_room,352,y,col);
+                else if(n>=15-p)message(215+s.save_room,352,y,col,1,1,n-15,true);
+            }else{message(208+s.player,132,y,col);glyph(15,230,y,col);glyph(16+s.save_ct/10,262,y,col);glyph(16+s.save_ct%10,288,y,col);glyph(15,320,y,col);message(215+s.save_room,352,y,col);}
+        }
+    }
+    if(screen.arrows()){arrow(320,90,0);arrow(320,90,1);}
+    const unsigned id=screen.message();
+    if(phase==Phase::Confirm){
+        message(id,id==482?210:240,311,0xffffffff,.71f,.75f);message(466,290,360,0xffffffff,.71f,.75f);
+        arrow(256,save?359:358,screen.selection()+2);
+    }else if(phase==Phase::Io||phase==Phase::Typing)message(id,90,311,0xffffffff,.71f,.75f);
+    else if(phase==Phase::Success)message(id,236,311,0xffffffff,.71f,.75f);
+    else if(phase==Phase::NoSave)message(id,275,194,0xff20ff20,.71f,.75f);
+    else if(phase==Phase::Error)message(id,save?226:242,save?224:194,0xff20ff20,.71f,.75f); // 486: SaveScreen case 14; 461: DispLoadMessageSelect case 9
+    else if(phase==Phase::SpecialSave){
+        // DispMessageSelect case 8 (253 at 240/311, 466 at 290/360, colour 3) and
+        // DispTexture cCgFlag 2: cursor at (256,359). ps2_SaveScreen.c:116–119,178–180.
+        message(id,240,311,0xff20ff20,.71f,.75f);message(466,290,360,0xff20ff20,.71f,.75f);
+        arrow(256,359,screen.selection()+2);
+    }
+}
 void GameUi::draw_pause(SoftwareRenderer& image,bool controller_present)const{
     // screen.c bhDrawScreenSaver: mode 8/6, a black 640x480 polygon with
     // sys->ssv_an=64.  With black source that is dest * (255-64)/255.

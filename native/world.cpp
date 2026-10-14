@@ -370,6 +370,13 @@ std::optional<RoomWorld::JointHit> RoomWorld::enemy_capsule_hit(unsigned index,N
 }
 void RoomWorld::set_enemy_health(unsigned index,int hp){auto at=entities_.find({1,index});if(at==entities_.end())throw std::runtime_error("script HP assignment enemy unavailable");at->second.hp=hp;if(at->second.en01)recvx_en01_set_hp(at->second.en01.get(),hp);}
 void RoomWorld::deactivate_enemy(unsigned index){entity(1,index).inactive=true;}
+bool RoomWorld::object_ay(unsigned index,int& ay)const{const auto it=entities_.find({2,index});if(it==entities_.end())return false;ay=it->second.angles[1];return true;}
+void RoomWorld::set_object_ay(unsigned index,int ay){auto& e=entity(2,index);e.angles[1]=ay;e.transform.yaw=Angle(ay);actor_nodes_.clear();}
+bool RoomWorld::enemy_node_ax(unsigned enemy,unsigned physical,int& ax)const{if(!state(1,enemy))return false;ax=model_pose_physical(1,enemy,physical).angles[0];return true;}
+void RoomWorld::set_enemy_node_ax(unsigned enemy,unsigned physical,int ax){
+    auto& e=entity(1,enemy);
+    if(e.enemy_native&&!e.scripted&&physical<e.enemy_obj.size()){e.enemy_obj[physical].angles[0]=ax;actor_nodes_.clear();return;}
+    auto angles=model_pose_physical(1,enemy,physical).angles;angles[0]=ax;e.node_overrides[physical].angles=angles;actor_nodes_.clear();}
 bool RoomWorld::enemy_dead(unsigned index)const{auto it=entities_.find({1,index});return it!=entities_.end()&&it->second.dead;}
 bool RoomWorld::step_clear(NJS_POINT3 probe,float radius,float height)const{
     // bhCheckExmAtari accepts no contact or the first contact's attr 4.
@@ -1016,20 +1023,26 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
         if(cmd>=28&&cmd<=33||cmd==44||cmd==45){
             const float clock=event_clock(c.loop_remaining,c.loop_total);
             auto interpolate=[&](const auto& keys){float input[12],out[3];const bool four=cmd==29||cmd==32||cmd==33;for(unsigned i=0;i<4;++i)for(unsigned a=0;a<3;++a)input[i*3+a]=keys[four?3-i:i<2?1:0][a];if(!four&&v.u8(2))njLinear(input+3,out,nullptr,clock);else njOverhauserSpline(input,out,nullptr,clock);return std::array<float,3>{out[0],out[1],out[2]};};
-            if(cmd==28||cmd==29||cmd==30||cmd==32||cmd==44){const auto out=interpolate(ctx.positions);auto local=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:NJS_POINT3{};auto& pos=ctx.node?local:ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;const auto mask=cmd==44?v.u8(3):7;if(mask&1)pos.x=out[0];if(mask&2)pos.y=out[1];if(mask&4)pos.z=out[2];if(ctx.node)entity(ctx.kind,ctx.index).node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].position=pos;}
-            if(cmd==28||cmd==29||cmd==31||cmd==33||cmd==45){const auto out=interpolate(ctx.angles);auto& e=entity(ctx.kind,ctx.index);const auto mask=cmd==45?v.u8(3):7;auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:e.angles;for(unsigned i=0;i<3;++i)if(mask&(1u<<i))angles[i]=int(out[i]*182.04445f);if(ctx.node)e.node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].angles=angles;else {e.angles=angles;if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];}}actor_nodes_.clear();return true;
+            if(cmd==28||cmd==29||cmd==30||cmd==32||cmd==44){const auto out=interpolate(ctx.positions);auto local=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:NJS_POINT3{};auto& pos=ctx.node?local:ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;const auto mask=cmd==44?v.u8(3):7;if(mask&1)pos.x=out[0];if(mask&2)pos.y=out[1];if(mask&4)pos.z=out[2];if(ctx.node)entity(ctx.kind,ctx.index).node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].position=pos;else if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;s.px=pos.x;s.py=pos.y;s.pz=pos.z;}}
+            if(cmd==28||cmd==29||cmd==31||cmd==33||cmd==45){const auto out=interpolate(ctx.angles);auto& e=entity(ctx.kind,ctx.index);const auto mask=cmd==45?v.u8(3):7;auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:e.angles;for(unsigned i=0;i<3;++i)if(mask&(1u<<i))angles[i]=int(out[i]*182.04445f);if(ctx.node)e.node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].angles=angles;else {e.angles=angles;if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;s.ax=angles[0];s.ay=angles[1];s.az=angles[2];}}}actor_nodes_.clear();return true;
         }
         if(cmd==5){ctx.increment={v.u8(2)*.1f,v.u8(3)*.1f,v.u8(4)*.1f};return true;}
         if(cmd==6){for(unsigned i=0;i<3;++i)ctx.angle_increment[i]=int(v.u8(2+i)*(65536.f/360))>>1;return true;}
-        if(cmd==3||cmd==4){auto& e=entity(ctx.kind,ctx.index);if(!ctx.kind)e.angles[1]=player_.yaw;for(unsigned i=0;i<3;++i)e.angles[i]+=ctx.angle_increment[i]*(ctx.ang_sign[i]?-1:1);if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];if(cmd==3)return true;}
+        if(cmd==3||cmd==4){auto& e=entity(ctx.kind,ctx.index);if(!ctx.kind)e.angles[1]=player_.yaw;for(unsigned i=0;i<3;++i)e.angles[i]+=ctx.angle_increment[i]*(ctx.ang_sign[i]?-1:1);if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;s.ax=e.angles[0];s.ay=e.angles[1];s.az=e.angles[2];}if(cmd==3)return true;}
         if(cmd==7||cmd==11||cmd==2||cmd==4){auto& e=entity(ctx.kind,ctx.index);auto pos=ctx.kind?e.transform.position:player_.position;
             if(cmd==7)pos={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};
             if(cmd==2||cmd==4){pos.x+=ctx.increment.x*(ctx.pos_sign[0]?-1:1);pos.y+=ctx.increment.y*(ctx.pos_sign[1]?-1:1);pos.z+=ctx.increment.z*(ctx.pos_sign[2]?-1:1);}
             if(!ctx.kind)player_.position=pos;else e.transform.position=pos;
+            // event.c:12038..12065: CommonCtr schreibt denselben eff[]-Work,
+            // den bhControlEffect/der Zeichenpass lesen, nicht nur seine Entitysicht.
+            if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;
+                s.px=pos.x;s.py=pos.y;s.pz=pos.z;
+                if(cmd==7)s.flr_no=floor_at(pos);}
             if(cmd==11){const int yaw=int(v.u8(3)*182.04445f)*(ctx.ang_sign[1]?-1:1);if(!ctx.kind)player_.yaw=yaw;else {e.transform.yaw=yaw;e.angles={int(v.u8(2)*182.04445f)*(ctx.ang_sign[0]?-1:1),yaw,int(v.u8(4)*182.04445f)*(ctx.ang_sign[2]?-1:1)};}}
             // event.c:12034 (7), :12068 (11), :12167 (2), :12223 (4) write bhCetask->work itself. A bound
             // native work (enemy/subplayer) is that work: its bhCalcModel (owP, read by e.g.
             // bhMotionPosSetEnePly) translates by w.px/py/pz and rotates by w.ax/ay/az.
+            if(ctx.kind==4&&cmd==11){auto& s=sprites_.at(ctx.index).sprite;s.ax=e.angles[0];s.ay=e.angles[1];s.az=e.angles[2];}
             if(ctx.kind==1&&e.enemy_bound){auto& w=e.enemy;
                 /* event.c:12053 work->flr_no = bhCheckFloorNum(py). e.object_floor ist die
                    Entitaetssicht desselben Felds: ohne sie uebernahm adopt_enemy_script beim
@@ -1843,7 +1856,10 @@ void RoomWorld::tick(){
                 // effect.c:800: nur solange flg 0x80 steht (bhSetEffectLink/bhSetEffectTb); eine
                 // Prozedur, die es loescht (effsub6.c bhEff148), haelt ihre Lage selbst.
                 if(work.link&&work.link<=4&&(work.sprite.flg&0x80u)&&!(work.sprite.id==0&&work.sprite.mode0!=0)){ // bhEff000 links its joint only in mode 0
-                    const auto pos=link_point(work.link-1,work.index,work.node,work.offset);
+                    // effect.c:812 njCalcPoint(&owp->mtx, &op->lox, &op->px): der Satz-Versatz lox/loy/loz,
+                    // den Prozeduren wie bhEff352/354/371/373 selbst fortschreiben, nicht der Erzeuger-Versatz
+                    // (bhSetEffectTb effect.c:481 / bhSetEffectLink room.c:787 schreiben ihn nur als Startwert).
+                    const auto pos=link_point(work.link-1,work.index,work.node,{work.sprite.lox,work.sprite.loy,work.sprite.loz});
                     work.sprite.px=pos.x;work.sprite.py=pos.y;work.sprite.pz=pos.z;
                     if(work.sprite.id==0&&work.link==1)if(const auto matrix=link_matrix(0,work.index,work.node))set_effect_link_matrix(work.node,matrix->value);
                 }
@@ -2281,7 +2297,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
                 std::optional<BoneMatrix> parent;if(w.link&&w.link<=4)parent=link_matrix(w.link-1,w.index,w.node);
                 if((w.weapon->flg&0x80)&&!(w.weapon->flg&0x200000)&&!parent)continue;
                 w.weapon->append(scene,base,gm,wall,parent?&parent->value:nullptr);}}}
-    for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];if(!effect_visible(i))continue;const auto* textures=effect_texture_list(work);const auto base=scene.textures.size();scene.textures.insert(scene.textures.end(),textures->begin(),textures->end());auto position=entities_.at({4,i}).transform.position;std::optional<BoneMatrix> parent;if(work.link&&work.link<=4&&(work.sprite.flg&0x80u)){position=link_point(work.link-1,work.index,work.node,work.offset);parent=link_matrix(work.link-1,work.index,work.node);}auto sprite=work.sprite;const auto& e=entities_.at({4,i});sprite.ax=e.angles[0];sprite.ay=e.angles[1];sprite.az=e.angles[2];
+    for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];if(!effect_visible(i))continue;const auto* textures=effect_texture_list(work);const auto base=scene.textures.size();scene.textures.insert(scene.textures.end(),textures->begin(),textures->end());auto position=entities_.at({4,i}).transform.position;std::optional<BoneMatrix> parent;if(work.link&&work.link<=4&&(work.sprite.flg&0x80u)&&!(work.sprite.flg&0x200000u)){/* effect.c:1346..1349: Prozeduren wie bhEff352 schreiben den Linkversatz selbst. */position=link_point(work.link-1,work.index,work.node,{work.sprite.lox,work.sprite.loy,work.sprite.loz});parent=link_matrix(work.link-1,work.index,work.node);}auto sprite=work.sprite;const auto& e=entities_.at({4,i});sprite.ax=e.angles[0];sprite.ay=e.angles[1];sprite.az=e.angles[2];
         // effect.c:1338: flg 0x80 ohne 0x200000 setzt op->mtx aus lkwkp->mlwP->owP[lkono].mtx.
         // Fehlt dem Host diese Matrix, ist das eine benannte Luecke, kein Abbruch des Bildes.
         if((sprite.flg&0x80u)&&!(sprite.flg&0x200000u)&&!parent){unbound_enemy_.insert("bhDrawTrsEffect3D: lkwkp->mlwP->owP[lkono].mtx ohne nativen Knoten");continue;}

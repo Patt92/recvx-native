@@ -56,9 +56,18 @@ RECVX_STAIR_AREA record(const CollisionWall& a){
         static_cast<unsigned char>(a.parameters[0]),static_cast<unsigned char>(a.parameters[1]),
         static_cast<unsigned char>(a.parameters[2]),static_cast<unsigned char>(a.parameters[3])};
 }
-bool wall_contact(const CollisionWall& a,float room_height,NJS_POINT3 p,unsigned flags,float radius,float actor_height){
+// hitchk.c:1939 bhCheckWallType und :2178 bhCheckWallRefAngle durchsuchen
+// rom->walp + sys->mwalp mit demselben Durchlauf, aber verschiedenen Toren:
+//   bhCheckWallType    prüft nur (!(type & 1)) || (!(flg & 0x400)).
+//   bhCheckWallRefAngle prüft zusätzlich (!(attr & 0x20)) || (!(flg & 0x200)),
+//     und zwar in den Fällen type 0..5 und 7, NICHT in Fall 6 (:2594-2595).
+// `attribute_gate` wählt die zweite Variante. Ein Aufruf mit flg 0x200
+// unterscheidet beide; die Effekte (bhCheckWallType, effsub1.c:518/5404)
+// dürfen das Tor nicht bekommen.
+bool wall_contact(const CollisionWall& a,float room_height,NJS_POINT3 p,unsigned flags,float radius,float actor_height,bool attribute_gate){
     if(!(a.flags&1))return false;
     if(a.type<6 && (a.type&1) && (flags&0x400))return false;
+    if(attribute_gate && a.type!=6 && (a.attributes&0x20) && (flags&0x200))return false;
     const bool vertical=p.y+actor_height>=a.position.y && p.y<=a.position.y+atr_geometry::height(a,room_height);
     switch(a.type){
     case 0:case 1:return vertical && atr_geometry::rectangle(a,p,radius);
@@ -306,7 +315,11 @@ std::optional<GroundHit> GroundCollision::hit()const{
     return GroundHit{work_->selected->first,work_->selected->second,&table[work_->selected->second]};
 }
 std::optional<CollisionWall> effect_wall(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 position,unsigned flags,float radius,float actor_height){
-    for(const auto& wall:walls)if(wall_contact(wall,height,position,flags,radius,actor_height))return wall;
+    for(const auto& wall:walls)if(wall_contact(wall,height,position,flags,radius,actor_height,false))return wall;
+    return {};
+}
+std::optional<CollisionWall> effect_wall_ref_angle(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 position,unsigned flags,float radius,float actor_height){
+    for(const auto& wall:walls)if(wall_contact(wall,height,position,flags,radius,actor_height,true))return wall;
     return {};
 }
 RECVX_STAIR_AREA collision_record(const CollisionWall& wall){return record(wall);}

@@ -18,6 +18,9 @@ struct SaveSlotInfo {
     int hp=0;
     unsigned play_time=0;    // stv_tm, 60-Hz VSync
     std::uint32_t save_ct=0;
+    int game_mode=0;         // SAVEFILE.gm_mode; originale Dateinamenfarbe
+    unsigned save_room=0;    // RoomNameSwitch(stg_no * 100 + rom_no), nicht Host-Raumtext
+    bool damaged=false;     // vorhandene, nicht lesbare Datei ist kein freier Slot
 };
 std::filesystem::path save_slot_path(const std::filesystem::path& saves_dir,unsigned slot);
 std::vector<SaveSlotInfo> list_save_slots(const std::filesystem::path& saves_dir);

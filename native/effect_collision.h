@@ -30,6 +30,10 @@ private:
 };
 // Native bhCheckWallType predicate, including box/cylinder/triangle/ramp/floor cases.
 std::optional<CollisionWall> effect_wall(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 position,unsigned flags,float radius,float actor_height);
+// Native bhCheckWallRefAngle search (hitchk.c:2178): same walk, plus the
+// (!(attr & 0x20)) || (!(flg & 0x200)) gate that bhCheckWallType lacks. The
+// position/angle response is reflect_effect_wall (bhSetWallRefAngle).
+std::optional<CollisionWall> effect_wall_ref_angle(const std::vector<CollisionWall>& walls,float height,NJS_POINT3 position,unsigned flags,float radius,float actor_height);
 // Complete native ATR layout view for host services, not a partial header.
 RECVX_STAIR_AREA collision_record(const CollisionWall& wall);
 // No query operands: bhCollisionCheckLine. Explicit flags/floor:

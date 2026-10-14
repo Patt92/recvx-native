@@ -1,0 +1,2 @@
+// SDL2 uses the first group icon for the window; Explorer uses it for the EXE.
+1 ICON "@RECVX_APP_ICON@"

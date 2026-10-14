@@ -6,6 +6,7 @@
 #include "room.h"
 #include "effect_sprites_internal.h"
 #include "asset_io.h"
+#include "binary_view.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include "core_random.h"
@@ -178,6 +179,48 @@ static void steam(const std::filesystem::path& data){
     check(cloud->yn<0&&cloud->gpy>-1000.0f,"bhEff126 has no original ground reference");
     const float first=cloud->py;world.tick();
     check(world.effect_state(child)->py<first,"bhEff126 does not rise/sink along its original speed");
+}
+
+// RM_0040 Event_init 10 setzt die Schalteranzeigen mit CommonCtr 7 auf
+// (1,11.5,4.95), (1,11.5,4.55), (1,11.1,4.95), (1,11.1,4.55).
+// Die Werte kommen aus den achtbyte-Auftraegen des RDT, nicht aus Ersatzgrafik.
+// event.c:12034..12065 schreibt eff[] selbst; der naechste Control-Pass darf
+// den Ort nicht wieder aus der urspruenglichen Raumtabelle herstellen.
+static void power_switch_positions(const std::filesystem::path& data){
+    const auto room=read_asset_file(data/"rooms/RM_0040.RDT",64*1024*1024);const auto stage=decode_scene(room);
+    auto actor=stage.spawns.at(0);std::size_t motion=0;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(room,stage,actor,motion,frame,audio,data,{},"RM_0040");
+    Inventory inventory;MessageDialog dialog;EventVm events(room,inventory,dialog);world.bind_player_collision(events);
+    const BinaryView bytes(room);const auto base=inspect_room(room).event_offset;
+    const auto script=base+bytes.u32(base+8+10*4);
+    check(script==base+2578,"RM_0040 Event_init 10 offset differs");
+    // Nur die tatsaechlichen Platzierungsauftraege dieses Originalskripts
+    // abspielen; keine synthetischen Lampenerzeuger oder Raumsonderfaelle.
+    for(unsigned k=0;k<4;++k){const auto p=script+k*20;
+        check(bytes.u8(p)==0x65&&bytes.u8(p+1)==4&&bytes.u8(p+2)==15+k,"power switch work selection differs");
+        for(const auto [offset,length]:std::array<std::pair<unsigned,unsigned>,3>{{{0,4},{4,6},{10,8}}}){
+            const auto q=p+offset;
+            check(world.bind({bytes.u8(q),2,10,q-base,{room.begin()+q,room.begin()+q+length}}),"power switch placement command unbound");
+        }
+    }
+    for(unsigned pass=0;pass<2;++pass){world.tick();
+        for(unsigned k=0;k<4;++k){const auto* s=world.effect_state(15+k);const auto* e=world.state(4,15+k);
+            check(s&&e&&s->id==230&&s->tex_id==414&&world.effect_visible(15+k),"original switch display missing");
+            const float y=k<2?11.5f:11.1f,z=k%2==0?4.95f:4.55f;
+            check(close(s->px,1)&&close(s->py,y)&&close(s->pz,z),"CommonCtr effect position lost after ControlEffect");
+            check(close(e->transform.position.x,s->px)&&close(e->transform.position.y,s->py)&&close(e->transform.position.z,s->pz),"effect Entity differs from its work");
+        }
+    }
+    Scene draw;world.append(draw,{},stage.cameras.at(0));
+    for(unsigned k=0;k<4;++k){bool found=false;
+        for(std::size_t i=0;i+1<draw.triangles.size();++i){const auto& a=draw.triangles[i];const auto& b=draw.triangles[i+1];
+            if(a.blend!=SceneBlend::Ninja||!a.textured||a.depth_write||a.texture!=b.texture)continue;
+            const auto p=a.vertices[0].position,q=b.vertices[1].position;
+            if(close((p.x+q.x)/2,1)&&close((p.y+q.y)/2,k<2?11.5f:11.1f)&&close((p.z+q.z)/2,k%2==0?4.95f:4.55f)){
+                check(!draw.textures.at(a.texture).pixels.empty(),"switch display has no original texture");found=true;break;}
+        }
+        check(found,"switch work position did not reach the actual scene");
+    }
 }
 
 // Produktive Zeichenausgabe mit Originalraeumen und echten Texturen.
@@ -1808,6 +1851,64 @@ static void flame352(){
     step_effect_sprite(s,c,&queued);
     check(s.flg==0,"bhEff352 did not end when the ground is above the sprite");
 }
+// Produktiver Linkzeichenpass: bhEff352 schreibt lox/loy/loz pro Kamera,
+// effect.c:1346..1349 zeichnet genau diesen Versatz. Nicht das Erzeuger-offset.
+// Testaufstellung: an den bereits veroeffentlichten Spielerbaum gebundene Flamme
+// (derselbe generische Effektlink wie fuer EN01), keine neue Motionpose.
+static void flame352_scene(const std::filesystem::path& data){
+    const auto room=read_asset_file(data/"rooms/RM_0040.RDT",64*1024*1024);const auto stage=decode_scene(room);
+    auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(room,stage,actor,motion,frame,audio,data,{},"RM_0040");
+    auto player=PlayerAsset::load(data,10);world.set_player_asset(&player);
+    Inventory inventory;MessageDialog dialog;EventVm events(room,inventory,dialog);world.bind_player_collision(events);
+    world.tick();std::vector<BoneMatrix> nodes;(void)world.sample_player(player,&nodes);nodes=player.script_nodes(nodes);world.commit_player_joints(nodes);
+    EffectSpawn spawn;spawn.id=352;spawn.type=0;spawn.scale={2,2,0};spawn.lkono=9;
+    spawn.has_offset=true;spawn.offset={0.1f,0.2f,0.3f};spawn.has_velocity=true;spawn.velocity={0,0,1.5f};
+    const int slot=world.spawn_player_effect(spawn);check(slot>=0,"linked flame allocation failed");
+    for(int view=0;view<2;++view){
+        auto camera=stage.cameras.at(0);camera.angles={view==0?0:4096,view==0?0:16384,0};
+        world.tick_camera(stage,camera,0);world.tick();
+        const auto* s=world.effect_state(unsigned(slot));check(s&&world.effect_visible(unsigned(slot)),"linked flame not queued");
+        const auto context=world.effect_context();NJS_POINT3 expected;njCalcPoint(&nodes.at(9).value,&spawn.offset,&expected);
+        expected.x-=context.camera_view.x*spawn.velocity.z;expected.y-=context.camera_view.y*spawn.velocity.z;expected.z-=context.camera_view.z*spawn.velocity.z;
+        Scene draw;world.append(draw,nodes,camera);bool found=false;
+        for(std::size_t i=0;i+1<draw.triangles.size();++i){const auto& a=draw.triangles[i];const auto& b=draw.triangles[i+1];
+            if(a.color!=s->tv[0].col||a.blend!=SceneBlend::Ninja||!a.textured||a.texture!=b.texture)continue;
+            // Lokale Eck-Y -1.5 / +0.5: Ursprung = Mittelpunkt + sy * Billboard-Y.
+            NJS_MATRIX billboard;njUnitMatrix(&billboard);njRotateY(&billboard,-camera.angles[1]);njRotateX(&billboard,-camera.angles[0]);njRotateZ(&billboard,-camera.angles[2]);njScale(&billboard,1,-1,-1);
+            NJS_POINT3 halfheight{0,0.5f*s->sy,0};njCalcVector(&billboard,&halfheight,&halfheight);
+            const auto p=a.vertices[0].position,q=b.vertices[1].position;
+            const NJS_POINT3 origin{(p.x+q.x)/2+halfheight.x,(p.y+q.y)/2+halfheight.y,(p.z+q.z)/2+halfheight.z};
+            if(close(origin.x,expected.x)&&close(origin.y,expected.y)&&close(origin.z,expected.z)){found=true;break;}
+        }
+        check(found,"draw ignored bhEff352's camera-adjusted lox/loy/loz");
+    }
+    {
+        // effect.c:812 bhControlEffect: vor der Prozedur px = owP[lkono] * (lox,loy,loz) des Satzes,
+        // also der von bhEff352 im vorigen Pass geschriebene Kameraversatz, nicht der Erzeuger-Versatz
+        // aus bhSetEffectTb (effect.c:481). Dritte Kameraansicht: lox aendert sich, px traegt den alten Wert.
+        const auto* s=world.effect_state(unsigned(slot));const NJS_POINT3 previous{s->lox,s->loy,s->loz};
+        auto camera=stage.cameras.at(0);camera.angles={-4096,-16384,0};world.tick_camera(stage,camera,0);world.tick();s=world.effect_state(unsigned(slot));
+        check(s&&!(close(s->lox,previous.x)&&close(s->loy,previous.y)&&close(s->loz,previous.z)),"test setup: third view did not move bhEff352's lox/loy/loz");
+        NJS_POINT3 expected,stale;njCalcPoint(&nodes.at(9).value,const_cast<NJS_POINT3*>(&previous),&expected);njCalcPoint(&nodes.at(9).value,&spawn.offset,&stale);
+        check(close(s->px,expected.x)&&close(s->py,expected.y)&&close(s->pz,expected.z),"bhControlEffect px does not follow owP * (lox,loy,loz) of the previous pass");
+        check(!(close(s->px,stale.x)&&close(s->py,stale.y)&&close(s->pz,stale.z)),"bhControlEffect px still uses the producer offset instead of op->lox");
+    }
+    // flg 0x200000 erzwingt freie Weltlage, auch wenn der Satz einen Link hat.
+    EffectSpawn free;free.id=122;free.type=1;free.flg=0x200001u;free.position={40,50,60};free.scale={1,1,1};free.has_offset=true;free.offset={900,800,700};
+    const int unlinked=world.spawn_player_effect(free);check(unlinked>=0,"free effect allocation failed");world.tick();
+    // bhControlEffect:812 aktualisiert px auch bei 0x200000; der Zeichenpass
+    // benutzt dann diesen Weltort statt ein zweites Mal lox zu transformieren.
+    const auto* free_work=world.effect_state(unsigned(unlinked));const NJS_POINT3 free_position{free_work->px,free_work->py,free_work->pz};
+    Scene draw;world.append(draw,nodes,stage.cameras.at(0));bool found=false;
+    for(std::size_t i=0;i+1<draw.triangles.size();++i){const auto& a=draw.triangles[i];const auto& b=draw.triangles[i+1];
+        if(a.blend!=SceneBlend::Ninja||!a.textured||a.texture!=b.texture)continue;
+        const auto p=a.vertices[0].position,q=b.vertices[1].position;
+        if(close((p.x+q.x)/2,free_position.x)&&close((p.y+q.y)/2,free_position.y)&&close((p.z+q.z)/2,free_position.z))found=true;
+    }
+    check(found,"0x200000 world-space effect consumed its ignored link offset");
+}
+
 // Effektaufrufe der eff[]-Zeichenpaesse laufen nicht durch njClipZ (SceneTriangle::ninja_primitive):
 // njDrawTextureSub3D (ps2_NaDraw.c:302) verwirft den Aufruf bei scr.z < 0, Ps2AddPrim3D
 // (ps2_dummy.c:486) laesst ein Streifendreieck fallen, wenn ein Eckpunkt ausserhalb +-2047
@@ -1850,7 +1951,7 @@ int main(int argc,char** argv){
         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
         muzzle_weapon229();flame352();effect_call_clip();
         effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();afterimage_color_contract();
-        if(argc>1){const std::filesystem::path data=argv[1];steam(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);afterimage_room(data);published_afterimage_models(data);}
+        if(argc>1){const std::filesystem::path data=argv[1];steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);afterimage_room(data);published_afterimage_models(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}
 }

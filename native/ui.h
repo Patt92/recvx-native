@@ -11,6 +11,7 @@
 #include <memory>
 namespace recvx {
 class EventVm;
+class Typewriter;
 enum class MenuInput {Open,Cancel,Confirm,Up,Down,Left,Right};
 // Status/ItemBox screen slide (sub1.c SpriteH, SpriteUV, StatusCancel, BGFadeIn/Out):
 // the twelve sprite centers (cen_pos) move 1/8 of their delta for eight ticks plus
@@ -155,6 +156,8 @@ public:
     // parts_09b[21] lit (Down), 3 = both neutral (18).
     void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0,float row_shift=0.f,unsigned arrows=0,unsigned cursor_cell=0)const;
     void draw_title(SoftwareRenderer& image);
+    // Original bup_00 / McSaveFile / SaveScreen / LoadScreen assets and messages.
+    void draw_typewriter(SoftwareRenderer& image,const Typewriter& screen);
     // ADV/0002 title textures (AdvEasySetupTextureBasic): 0 = list texture 0
     // (background picture), 2 = list texture 1 (plate atlas). Loads on demand.
     const SceneTexture& title_texture(unsigned index);
@@ -172,7 +175,10 @@ public:
 private:
     void quantity(SoftwareRenderer&,std::uint32_t packed,int x,int y,bool box=false)const;
     void load_title();
-    std::vector<SceneTexture> title_;
+    std::vector<SceneTexture> title_,typewriter_textures_;
+    // Direct bhDispMessage/Ex semantics: ignores inline colour/choice opcodes,
+    // unlike MessageDialog text(). Original fonts, fractional cursor advances.
+    void direct_message(SoftwareRenderer&,const Message&,float x,float y,std::uint32_t color,float sx=1,float sy=1,float line=1,unsigned count=0,bool spaces_count=false)const;
     std::map<unsigned,std::vector<SceneTexture>> file_textures_;
     std::vector<SceneTexture> menu_,fonts_,dialog_fonts_;
     std::vector<std::uint8_t> messages_;

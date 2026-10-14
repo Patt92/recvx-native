@@ -108,10 +108,11 @@ void recvx_en08(RECVX_ENEMY_WORK* w)
     w->ar = 5.0f;
 
     /* en08.c:41 bhEne03_Collision: Koerperkollision der Fischgroesse gegen
-       die ATR-Flaechen des Raums (en03.c:5220). Besitzer ist Identitaet 3
-       (T3). Ohne Anschluss wird die Luecke gemeldet — der Fisch bewegt sich
-       dann ohne Wandkontakt weiter, es wird nichts erfunden. */
-    if (sv && sv->gap) sv->gap("bhEne03_Collision(en03.c:5220)");
+       die ATR-Flaechen des Raums (en03.c:5220). Der gemeinsame Wanddurchlauf
+       liegt im Basisdienst collision_works (Anbieter: der EN03-Port); EN08
+       verwirft wie das Original den Rueckgabewert. */
+    if (sv && sv->collision_works) (void)sv->collision_works(w);
+    else if (sv && sv->gap)        sv->gap("bhEne03_Collision(en03.c:5220)");
 
     /* en08.c:42 bhEne_CheckEnemiesBall (zonzon1.c:529); geteilte Fassung
        dieser Teilaufgabe siehe unten. */

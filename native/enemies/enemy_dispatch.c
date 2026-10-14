@@ -5,6 +5,7 @@
 #include "subplayer.h"
 #include "en00.h"
 #include "en01_work.h"
+#include "en02.h"
 #include "en07.h"
 #include "en08.h"
 #include "en09.h"
@@ -14,6 +15,7 @@
 #include "en21.h"
 #include "en24.h"
 #include "en25.h"
+#include "en53.h"
 #include "en56.h"
 #include "en71.h"
 #include "en04.h"
@@ -50,6 +52,7 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[28] = recvx_subplayer_enemy28;
     d->jump[0]  = recvx_en00;
     d->jump[1]  = recvx_en01_control;
+    d->jump[2]  = recvx_en02;
     d->jump[4]  = recvx_en04;
     d->jump[7]  = recvx_en07;
     d->jump[8]  = recvx_en08;
@@ -69,6 +72,9 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[25] = recvx_en25;
     d->jump[27] = recvx_en27;
     d->jump[30] = recvx_en30;
+    /* 53 (Nosferatu-Kern) ruft den Dienst recvx_en53 aus en53.c; ChangeAmbient
+       fehlt im Welt-Besitzer (world_enemies.cpp), daher meldet der Pass die Luecke. */
+    d->jump[53] = recvx_en53;
     /* 54/55 (gepanzerte Ritter) bleiben unbesetzt: beide rufen
        recvx_en17_blade_tip/_hit aus dem Kettenwerk von Identitaet 17
        (en54.c:102/108, en55.c:94/100), und en17.c ist nicht portiert.

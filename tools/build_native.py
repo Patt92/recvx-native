@@ -77,9 +77,13 @@ def sync_macos_start_package(build: Path) -> None:
         launcher.write_text('#!/bin/sh\nrecvx_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
                             f'exec "$recvx_dir/recvx-runtime" {options} "$@"\n')
         launcher.chmod(0o755)
+        resources = contents / 'Resources'
+        resources.mkdir()
+        shutil.copy2(ROOT / 'native/resources/app-icon.icns', resources / 'app-icon.icns')
         with (contents / 'Info.plist').open('wb') as info:
             plistlib.dump({'CFBundleExecutable': 'Start', 'CFBundleIdentifier': 'org.recvx.native.development',
                           'CFBundleName': 'RECVX Native', 'CFBundlePackageType': 'APPL',
+                          'CFBundleIconFile': 'app-icon.icns',
                           'CFBundleVersion': FULL_VERSION, 'CFBundleShortVersionString': FULL_VERSION, 'LSMinimumSystemVersion': '11.0',
                           'NSHighResolutionCapable': True}, info)
         run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT, '--binary', runtime)
@@ -127,6 +131,8 @@ def main():
     if args.verify_runtime and not (data / 'native-data.version').is_file():
         parser.error(f'--verify-runtime requires a prepared native data tree (missing {data / "native-data.version"})')
     if target == 'windows' and platform.system() != 'Windows':
+        # The final binary audit also invokes Zig; use the same project cache.
+        os.environ['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build/toolchains/zig-cache')
         run(sys.executable, ROOT / 'tools/build_windows.py', '--jobs', args.jobs)
         build = ROOT / 'build/windows-x64'
         print('Cross-built Windows x64.', flush=True)

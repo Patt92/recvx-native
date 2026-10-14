@@ -266,6 +266,28 @@ int EventVm::instruction(Task& t){
     // here; effects needing world/audio/player services are reported as pending
     // world bindings with their exact operands.
     case 0x68:world(t,op,6);return 1; // bhLoadWork2
+    // event.c:7605 bhObjDposCk: v4 == 0 dreht obwp[v0].ay, sonst objP[v4].ang[0] des Gegners rom->enep[v0]
+    // je Durchlauf um v3 Grad auf v2 Grad (Bit 2 von v1: Gegenrichtung). 1 = laeuft noch, 0 = fertig.
+    case 0xb1:{v.require(p,6);const unsigned v0=v.u8(p+1),v1=v.u8(p+2),v3=v.u8(p+4),v4=v.u8(p+5);int v2=v.u8(p+3);advance(6);
+        if(v4==0){
+            if((v1&2)&&v2!=0)v2-=360;
+            const int eay=int(v2*(65536.0f/360.0f)),eay2=int(v3*(65536.0f/360.0f));
+            int ay=0;if(!object_ay_get||!object_ay_get(v0,ay))throw std::runtime_error("object yaw check requires native world binding");
+            ay=int(std::int16_t(ay));
+            if(eay!=int(std::uint16_t(ay))){
+                if(eay<int(std::uint16_t(ay))){ay-=int(std::int16_t(eay2));if(eay>=int(std::uint16_t(ay))){object_ay_set(v0,int(std::uint16_t(eay)));return 0;}object_ay_set(v0,ay);return 1;}
+                if(int(std::uint16_t(ay))<eay){ay+=int(std::int16_t(eay2));if(eay<=int(std::uint16_t(ay))){object_ay_set(v0,int(std::uint16_t(eay)));return 0;}object_ay_set(v0,ay);return 1;}
+            }
+            object_ay_set(v0,ay);return 0;}
+        if((v1&2))v2=-v2;
+        const int eay=int(std::int16_t(int(v2*(65536.0f/360.0f)))),eay2=int(std::int16_t(int(v3*(65536.0f/360.0f))));
+        int ang=0;if(!enemy_node_ax_get||!enemy_node_ax_get(v0,v4,ang))throw std::runtime_error("enemy node angle check requires native world binding");
+        ang=int(std::int16_t(ang));
+        if(eay!=ang){
+            if(eay<ang){ang-=eay2;if(eay>=ang){enemy_node_ax_set(v0,v4,eay);return 0;}enemy_node_ax_set(v0,v4,ang);return 1;}
+            if(ang<eay){ang+=eay2;if(eay<=ang){enemy_node_ax_set(v0,v4,eay);return 0;}enemy_node_ax_set(v0,v4,ang);return 1;}
+        }
+        enemy_node_ax_set(v0,v4,ang);return 0;}
     case 0xbe:{ // bhPlyDposCk: turn the player yaw towards a target by a fixed step each pass
         if(!player_yaw||!set_player_yaw)throw std::runtime_error("player yaw check requires native player binding");
         int target=v.u8(p+2);const unsigned flags_byte=v.u8(p+1);const int step=v.u8(p+3);advance(6);

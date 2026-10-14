@@ -89,9 +89,12 @@ def main():
         launcher = binaries / "Start"
         launcher.write_text('#!/bin/sh\nrecvx_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$recvx_dir/recvx-runtime" --data "$recvx_dir/../Resources/data" --mods "$recvx_dir/../../../mods" "$@"\n')
         launcher.chmod(0o755)
+        resources = contents / "Resources"
+        resources.mkdir()
+        shutil.copy2(ROOT / "native/resources/app-icon.icns", resources / "app-icon.icns")
         with (contents / "Info.plist").open("wb") as info:
             plistlib.dump({"CFBundleExecutable": "Start", "CFBundleIdentifier": "org.recvx.native", "CFBundleName": "RECVX Native",
-                          "CFBundlePackageType": "APPL", "CFBundleVersion": "0.5.0", "CFBundleShortVersionString": "0.5.0", "LSMinimumSystemVersion": "11.0", "NSHighResolutionCapable": True}, info)
+                          "CFBundlePackageType": "APPL", "CFBundleIconFile": "app-icon.icns", "CFBundleVersion": "0.5.0", "CFBundleShortVersionString": "0.5.0", "LSMinimumSystemVersion": "11.0", "NSHighResolutionCapable": True}, info)
         data_destination = contents / "Resources/data"
         run("codesign", "--force", "--sign", "-", str(frameworks / library_name))
         run("codesign", "--force", "--sign", "-", str(binaries / "recvx-runtime"))

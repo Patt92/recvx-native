@@ -144,6 +144,11 @@ public:
     // event.c:4302 bhEffBloodSet: epw->djnt_no und bhEne_SetBlood2 am Gegnerwork.
     bool script_blood_set(unsigned index,unsigned joint,int type,unsigned flags,int turn,NJS_POINT3 offset);
     bool enemy_dead(unsigned index)const;
+    // bhObjDposCk (event.c:7605): obwp[index].ay und objP[physical].ang[0] eines Raumgegners.
+    bool object_ay(unsigned index,int& ay)const;
+    void set_object_ay(unsigned index,int ay);
+    bool enemy_node_ax(unsigned enemy,unsigned physical,int& ax)const;
+    void set_enemy_node_ax(unsigned enemy,unsigned physical,int ax);
     struct JointHit {int joint;NJS_POINT3 point;};
     std::optional<JointHit> enemy_capsule_hit(unsigned index,NJS_POINT3 start,NJS_POINT3 end,float radius);
     void set_enemy_health(unsigned index,int hp);

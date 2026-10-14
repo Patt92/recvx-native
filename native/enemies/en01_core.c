@@ -6653,11 +6653,15 @@ void recvx_en01_flying_cap(RECVX_ENEMY_WORK* w, int tbl_no)
     }
 
     sepw->flg &= ~0x80u;                                     /* :11909 */
-    /* sepw->mlwP->owP[0].flg |= 3 (en01.c:11910): der Kappenknoten wird
-       wieder gezeichnet und eigenstaendig transformiert. Der Objektbaum
-       gehoert dem Besitzer; der Vertrag hat dafuer nur
-       model_node_hidden (Bit 0x8 von evalflags), nicht owP[].flg. */
-    en01_gap(w, "mlwP->owP[0].flg |= 3 (en01.c:11910)");
+    /* sepw->mlwP->owP[0].flg |= 3 (en01.c:11910): die Kappe wird wieder
+       gezeichnet und eigenstaendig transformiert. sepw->mlwP ist der
+       geteilte Baum des Elternwerks (en01.c:2828 `epp->mlwP = epw->mdl`),
+       deshalb schreibt der Dienst auf dem Baum von sepw, nicht von w. */
+    if (en->joint_flags_or) {
+        en->joint_flags_or(sepw, 0u, 3u);                    /* :11910 */
+    } else {
+        en01_gap(w, "mlwP->owP[0].flg |= 3 (en01.c:11910)");
+    }
 
     sepw->way  = (int16_t)(ftbl->angY + (w->ay + nang[1]));  /* :11912 */
     sepw->wax  = (int16_t)ftbl->rspd;                        /* :11913 */

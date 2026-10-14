@@ -74,6 +74,9 @@ def main():
         wrapper.write_text(f'#!/bin/sh\nexec {shlex.quote(str(zig))} {command} "$@"\n')
         wrapper.chmod(0o755)
         compilers[name] = wrapper.as_posix()
+    resource_compiler = toolchains / "zig-rc"
+    resource_compiler.write_text(f'#!/bin/sh\nexec {shlex.quote(str(zig))} rc /:output-format coff /:target X64 "$@"\n')
+    resource_compiler.chmod(0o755)
     toolchain = toolchains / "windows-zig.cmake"
     # Dieser Werkzeugsatz kann keine auditierbare Symboltabelle in die PE legen:
     # llvm-nm/llvm-objdump finden in der von zig/LLD erzeugten Datei weder eine
@@ -83,12 +86,19 @@ def main():
     # work/native_port_windows_audit.md. Keine Lockerung des Prüfers.
     toolchain.write_text('set(CMAKE_SYSTEM_NAME Windows)\nset(CMAKE_SYSTEM_PROCESSOR AMD64)\n' + "".join(
         f'set({key} "{compilers[name]}" CACHE FILEPATH "" FORCE)\n' for key, name in
-        [("CMAKE_C_COMPILER", "cc"), ("CMAKE_CXX_COMPILER", "cxx"), ("CMAKE_AR", "ar"), ("CMAKE_RANLIB", "ranlib")]))
+        [("CMAKE_C_COMPILER", "cc"), ("CMAKE_CXX_COMPILER", "cxx"), ("CMAKE_AR", "ar"), ("CMAKE_RANLIB", "ranlib")]) +
+        f'set(CMAKE_RC_COMPILER "{resource_compiler.as_posix()}" CACHE FILEPATH "" FORCE)\n' +
+        'set(CMAKE_RC_COMPILE_OBJECT "<CMAKE_RC_COMPILER> <DEFINES> <INCLUDES> <FLAGS> /fo <OBJECT> -- <SOURCE>")\n')
     if args.prepare_only:
         print(toolchain)
         return
     env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(toolchains / "zig-cache"))
     build = ROOT / "build/windows-x64"
+    # CMake can retain the old windres compiler in its language metadata even
+    # after the toolchain cache changes. Redetect RC, without clearing the build.
+    for metadata in (build / "CMakeFiles").glob("*/CMakeRCCompiler.cmake"):
+        if f'set(CMAKE_RC_COMPILER "{resource_compiler.as_posix()}")' not in metadata.read_text():
+            metadata.unlink()
     subprocess.run(["cmake", "-S", str(ROOT), "-B", str(build), "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
                     f"-DCMAKE_PREFIX_PATH={sdl}", "-DCMAKE_BUILD_TYPE=Release", "-DRECVX_FETCH_SDL2=OFF"], check=True, env=env)
     subprocess.run(["cmake", "--build", str(build), "--parallel", str(args.jobs)], check=True, env=env)

@@ -447,7 +447,7 @@ int main(int argc,char** argv){
                     if(c.opcode==0xc6){game_over_requested=true;return true;} // bhGameOverSet
                     if(c.opcode==0xcd){return_title_requested=true;return true;} // bhReturnTitleEvt: RequestAllStopSoundEx(1,1,0); bhReturnTitle()
                     if(c.opcode==0xbd){retry_point=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index});return true;} // bhReTryPointSet = bhPushGameData
-                    return world->bind(c);};events->object_position=[&](unsigned k,unsigned i){return world->position(k,i);};events->item_box_object=[&](unsigned o){return world->start_item_box(o);};events->animation_frame=[&](unsigned k,unsigned i){return world->frame(k,i);};events->audio_active=[&](unsigned slot){return audio.active(slot);};events->audio_stop=[&](unsigned slot){audio.stop(slot);}; /* StopVoice stops its voice; never discard the mixed door/BGM/SFX queue. */events->system_voice=[&](unsigned voice){audio.play(1,"ADV",voice+16,1,false);}; /* adv.c CallSystemVoice: PatId[3], VoiceNo + 16. */events->movie_active=[&](){return movie.active();};events->movie_time=[&](){return movie.time_centiseconds();};events->item_message=[&](unsigned index,unsigned item){auto message=ui->system_message(index);for(unsigned i=0;i+1<message.size();++i)if(message[i]==0xff03&&message[i+1]==0xffff)message[++i]=std::uint16_t(item);return message;};events->enemy_health=[&](unsigned index)->std::optional<int>{const auto* e=world->state(1,index);return e?std::optional<int>(e->hp):std::nullopt;};events->set_enemy_health=[&](unsigned index,int hp){world->set_enemy_health(index,hp);};events->enemy_dead=[&](unsigned index){return world->enemy_dead(index);};events->enemy_disable=[&](unsigned index){world->deactivate_enemy(index);};events->event_camera=[&](unsigned& index,unsigned& key){index=world->event_camera_index;key=world->event_camera_key();return world->event_camera;};audio.begin_room_init();if(player&&player->has_motion(motion))world->commit_player_joints(player->script_nodes(player->pose(motion,animation,actor.position,actor.yaw))); /* player.c:840 bhSetPlayer: bhCalcModel(plp) before Event_init's bhControlEnemy (event.c:352) */events->initialize(); /* system.c mode 10: bhInitEvent before bhSysCallSndMonitor requests the room bank. */audio.load_room_sounds(identity.stage,identity.room,audio.take_room_sound_case());audio.load_player_sounds((args.player-10)%4);audio.room_fade_in(); /* init script and soundbank done, SendSoundCommand(1) */}
+                    return world->bind(c);};events->object_position=[&](unsigned k,unsigned i){return world->position(k,i);};events->item_box_object=[&](unsigned o){return world->start_item_box(o);};events->animation_frame=[&](unsigned k,unsigned i){return world->frame(k,i);};events->audio_active=[&](unsigned slot){return audio.active(slot);};events->audio_stop=[&](unsigned slot){audio.stop(slot);}; /* StopVoice stops its voice; never discard the mixed door/BGM/SFX queue. */events->system_voice=[&](unsigned voice){audio.play(1,"ADV",voice+16,1,false);}; /* adv.c CallSystemVoice: PatId[3], VoiceNo + 16. */events->movie_active=[&](){return movie.active();};events->movie_time=[&](){return movie.time_centiseconds();};events->item_message=[&](unsigned index,unsigned item){auto message=ui->system_message(index);for(unsigned i=0;i+1<message.size();++i)if(message[i]==0xff03&&message[i+1]==0xffff)message[++i]=std::uint16_t(item);return message;};events->enemy_health=[&](unsigned index)->std::optional<int>{const auto* e=world->state(1,index);return e?std::optional<int>(e->hp):std::nullopt;};events->set_enemy_health=[&](unsigned index,int hp){world->set_enemy_health(index,hp);};events->enemy_dead=[&](unsigned index){return world->enemy_dead(index);};events->object_ay_get=[&](unsigned i,int& v){return world->object_ay(i,v);};events->object_ay_set=[&](unsigned i,int v){world->set_object_ay(i,v);};events->enemy_node_ax_get=[&](unsigned e,unsigned n,int& v){return world->enemy_node_ax(e,n,v);};events->enemy_node_ax_set=[&](unsigned e,unsigned n,int v){world->set_enemy_node_ax(e,n,v);};events->enemy_disable=[&](unsigned index){world->deactivate_enemy(index);};events->event_camera=[&](unsigned& index,unsigned& key){index=world->event_camera_index;key=world->event_camera_key();return world->event_camera;};audio.begin_room_init();if(player&&player->has_motion(motion))world->commit_player_joints(player->script_nodes(player->pose(motion,animation,actor.position,actor.yaw))); /* player.c:840 bhSetPlayer: bhCalcModel(plp) before Event_init's bhControlEnemy (event.c:352) */events->initialize(); /* system.c mode 10: bhInitEvent before bhSysCallSndMonitor requests the room bank. */audio.load_room_sounds(identity.stage,identity.room,audio.take_room_sound_case());audio.load_player_sounds((args.player-10)%4);audio.room_fade_in(); /* init script and soundbank done, SendSoundCommand(1) */}
             if(events&&world&&(!retry_point||player_change_push))retry_point=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index}); // bhInitPlayer: bhPushGameData
             std::cout<<rooms.name(room_index)<<": "<<scene.object_count<<" objects, "<<stage_triangles<<" stage triangles, "<<scene.cameras.size()<<" cameras, "<<scene.spawns.size()<<" spawns\n";
         };
@@ -683,7 +683,23 @@ int main(int argc,char** argv){
         // bhSysCallCompEvent: while the terminal task owns the screen it reads
         // sys->pad_on/pad_ps itself, so the ordinary gameplay input pass is
         // skipped entirely; the terminal pass below supplies the pad.
-        gameplay_input.frame_input=[&](const recvx::InputFrame&){return events&&computer.active();};
+        unsigned typewriter_pad_on=0,typewriter_pad_ps=0;
+        gameplay_input.frame_input=[&](const recvx::InputFrame& f){
+            // SelectFile liest gehaltene Richtungen mit eigenen Zaehlern;
+            // OK/Cancel bleiben Druckflanken, auch bei kurzen Tastendruecken.
+            if(typewriter.active()){
+                unsigned pressed=0;
+                if(f.hit(recvx::Action::Confirm))pressed|=0x800u;
+                if(f.hit(recvx::Action::Cancel))pressed|=0x1000u;
+                if(f.hit(recvx::Action::Up))pressed|=1u;
+                if(f.hit(recvx::Action::Down))pressed|=2u;
+                // Directions/choices are sampled here; the screen pass runs
+                // below once after replay input and task entry.
+                typewriter_pad_on=recvx::item_box_pad(f);typewriter_pad_ps=pressed;
+                return true;
+            }
+            return events&&computer.active();
+        };
         // bhDrawSpEvtComCharacter asks the actor owner for rom->enep[chr_no].
         computer.character_scene=[&](unsigned chr_no,unsigned motion_no,unsigned frame_no)->std::optional<recvx::Scene>{
             if(!world)return std::nullopt;return world->computer_character(chr_no,motion_no,frame_no);};
@@ -756,9 +772,11 @@ int main(int argc,char** argv){
             events->flags[6][0]=0xffffffffu;events->flags[11][0]|=0x8000u;fade_set(screen_fade.previous(),3.0f);
         };
         auto typewriter_step=[&]{
-            if(!typewriter.done())return;
-            const unsigned slot=typewriter.slot();
-            if(typewriter.confirmed()){
+            if(const auto sound=typewriter.take_sound();sound!=0xffffffffu)audio.play_system(sound);
+            if(typewriter.io_pending()){
+                const unsigned slot=typewriter.slot();
+                std::optional<recvx::Snapshot> written;
+                try{
                 if(typewriter.mode()==recvx::Typewriter::Mode::Save){
                     if(!events||!world)throw std::runtime_error("Schreibmaschine ohne laufendes Spiel");
                     // mcWriteStartSaveFile (0x271A50), vor dem memcpy von sys->version..save_end:
@@ -770,23 +788,35 @@ int main(int argc,char** argv){
                         if(inventory.save_ct!=99)++inventory.save_ct;
                         if(const auto ribbon=inventory.search(31)){auto& word=inventory.slots()[ribbon];
                             if(!(word&0x8000000u)){const auto next=word-1;if(next&0xffu)word=next;else inventory.erase(ribbon);}}
-                    }else events->set_flag(1,56,1);
+                    }else events->set_flag(1,56,0); /* bhCrFlg(sys->ev_flg,56), ps2_McSaveFile.c:168 */
                     auto snap=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index});
                     if(special){snap.save.stg_no=6;snap.save.rom_no=0;snap.save.rcase=0;snap.save.pos_no=0;snap.host.room=recvx::RoomIdentity{6,0,0}.name();}
-                    recvx::write_save_slot(saves_dir,slot,snap);
-                    std::cout<<"Typewriter: Spielstand in Slot "<<slot<<" gespeichert ("<<snap.host.room<<")\n";
+                    recvx::write_save_slot(saves_dir,slot,snap);written=std::move(snap);
+                    std::cout<<"Typewriter: Spielstand in Slot "<<slot<<" gespeichert ("<<written->host.room<<")\n";
                 }else{
                     typewriter_apply(recvx::read_save_slot(saves_dir,slot));
                 }
+                }catch(const std::exception& e){
+                    // Keep the original read/write error screen instead of hiding
+                    // it behind an immediate return to gameplay/title. The original
+                    // has no rollback: save_ct and the ribbon stay consumed, and a
+                    // failed write end sets ev_flg 56 (ps2_McSaveFile.c:193–212), which
+                    // ExecuteStateSaveScreenExit turns into the special-save question.
+                    if(typewriter.mode()==recvx::Typewriter::Mode::Save&&events)events->set_flag(1,56,1);
+                    std::cerr<<"Typewriter I/O: "<<e.what()<<'\n';typewriter.io_complete(false,saves_dir);return;
+                }
+                typewriter.io_complete(true,saves_dir);
+                // bhPushGameData after the typed file name (ps2_SaveScreen.c:1408); the
+                // screen owns the pass, so the state equals the written record.
+                if(written)retry_point=std::move(*written);
             }
+            if(!typewriter.done())return;
             typewriter_release(typewriter.mode()==recvx::Typewriter::Mode::Save);
             typewriter.reset();
         };
         auto typewriter_key=[&](recvx::MenuInput key){
-            if(key==recvx::MenuInput::Up)typewriter.input(recvx::Typewriter::Key::Up);
-            else if(key==recvx::MenuInput::Down)typewriter.input(recvx::Typewriter::Key::Down);
-            else if(key==recvx::MenuInput::Confirm)typewriter.input(recvx::Typewriter::Key::Confirm);
-            else if(key==recvx::MenuInput::Cancel)typewriter.input(recvx::Typewriter::Key::Cancel);
+            const unsigned bit=key==recvx::MenuInput::Up?1u:key==recvx::MenuInput::Down?2u:key==recvx::MenuInput::Confirm?0x800u:key==recvx::MenuInput::Cancel?0x1000u:0u;
+            typewriter_pad_on|=bit;typewriter_pad_ps|=bit;
         };
         auto typewriter_enter=[&]{
             if(typewriter.active())return;
@@ -1281,7 +1311,7 @@ int main(int argc,char** argv){
         auto pause_allowed=[&]{return world&&!frontend.active()&&!game_over.active()&&!debug.active()&&!transition_pending&&!computer.active()&&!menu.active&&!dialog.active()&&!movie.active()&&!stairs.active&&!world->player_scripted&&!world->player_hidden&&!(events&&(events->flags[5][0]&0x40004u));}; /* bhSysCallEvent (system.c:668) sperrt Pause mit st_flg 0x1C040208: 0x4 Cinematic, 0x40000 Kartentask */
         auto draw=[&](unsigned frame,std::size_t controllers=0){if(game_over.active()&&ui){if(game_over.phase()==0){compose();image.draw(scene,view_camera(),wireframe);}game_over.draw(image,*ui);debug.draw(image,*ui);return;}if(frontend.active()&&ui){frontend.draw(image,*ui,controllers);debug.draw(image,*ui);return;}
             /* Schreibmaschinen-Slotauswahl: eigenes Bild, solange die Aufgabe laeuft. */
-            if(typewriter.active()&&ui){std::fill(image.canvas().begin(),image.canvas().end(),0xff101010u);ui->label(image,typewriter.mode()==recvx::Typewriter::Mode::Save?"SAVE GAME":"LOAD GAME",60,36,.9f,0xffffffffu);const auto& twslots=typewriter.slots();for(unsigned i=0;i<twslots.size()&&i<15;++i){std::ostringstream line;line<<(i==typewriter.cursor()?"> ":"  ")<<"SLOT "<<std::setw(2)<<std::setfill('0')<<(i+1)<<(twslots[i].exists?"  "+twslots[i].room+"  HP "+std::to_string(twslots[i].hp):"  ----");ui->label(image,line.str(),60,80+int(i)*28,.7f,i==typewriter.cursor()?0xffffc000u:0xffffffffu);}debug.draw(image,*ui);return;}
+            if(typewriter.active()&&ui){ui->draw_typewriter(image,typewriter);debug.draw(image,*ui);return;}
             /* sp_evt.c: bhCheckSubTask leaves sp_flg 0x30, so neither the room
                nor the game draw pass runs while the terminal task owns the
                screen. The terminal covers the frame with its own background. */
@@ -1301,7 +1331,7 @@ int main(int argc,char** argv){
             for(int i=0;i<frames;++i){ /* Diagnose only: global replay tick before input, room transfer and camera commands. */if(std::getenv("RECVX_CAM_TRACE"))std::fprintf(stderr,"CAMTICK tick=%d room=%s changes=%u third_active=%d\n",i,rooms.name(room_index).c_str(),unsigned(room_changes),int(third_person.active()));replay_input(unsigned(i));update_pad(replay_pad);vibration.tick();if(game_over_tick()){audio.mix();if(i==frames-1)draw(unsigned(i));continue;}if(debug.active()){if(i==frames-1)draw(unsigned(i));continue;}
                 // Schreibmaschine: der Raum loescht ts_flg-Bit 15 -> Slotauswahl (bup_00.c).
                 typewriter_enter();if(events)typewriter_was_blocked=bool(events->flags[12][0]&0x8000u);
-                if(typewriter.active()){try{typewriter_step();}catch(const std::exception& e){std::cerr<<"Typewriter: "<<e.what()<<'\n';typewriter_release(typewriter.mode()==recvx::Typewriter::Mode::Save);typewriter.reset();}if(i==frames-1)draw(unsigned(i));continue;}
+                if(typewriter.active()){try{typewriter.control(typewriter_pad_on,typewriter_pad_ps,typewriter.mode()==recvx::Typewriter::Mode::Save&&events&&events->flag(1,56));typewriter_pad_on=typewriter_pad_ps=0;typewriter_step();}catch(const std::exception& e){std::cerr<<"Typewriter: "<<e.what()<<'\n';typewriter_release(typewriter.mode()==recvx::Typewriter::Mode::Save);typewriter.reset();}audio.mix();if(i==frames-1)draw(unsigned(i));continue;}
                 if(!frontend.active())gameplay_input.apply({});else if(ui)frontend_command(frontend.apply({}));if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();sound_monitor();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */ /* system.c:853 - der Statusbildschirm ruft bhInitMap(MP_SET_SUB); der    Kartentask besitzt den Pass wie der Terminaltask, bhExitMap map.c:243. *//* Erst wenn der Statusbildschirm abgebaut ist, startet der Kartentask: sein
    Verlassen loescht st_flg 0x8 (sub1.c:3137), worauf FtskMapWait (map.c:1757)
    wartet. Die Anforderung bleibt bis dahin stehen. */
@@ -1379,7 +1409,7 @@ int main(int argc,char** argv){
                     // game.c reads button edges (sys->pad_ps), so a button still
                     // held when the title task hands over must not count as a
                     // fresh press in the first game frame (skip, action, menu).
-                    const bool was_frontend=frontend.active();
+                    const bool was_frontend=frontend.active()&&!typewriter.active();
                     if(was_frontend)frontend_command(frontend.apply(physical));
                     if(was_frontend&&!frontend.active()){devices.suppress_held();accumulator=0;render_dirty=false;continue;}
                     if(pause_active){
@@ -1404,7 +1434,7 @@ int main(int argc,char** argv){
                 if(game_over_tick()){audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);continue;}
                 if(debug.active()){if(audio_device)SDL_PauseAudioDevice(audio_device,1);continue;}
                 typewriter_enter();if(events)typewriter_was_blocked=bool(events->flags[12][0]&0x8000u);
-                if(typewriter.active()){try{typewriter_step();}catch(const std::exception& e){std::cerr<<"Typewriter: "<<e.what()<<'\n';typewriter_release(typewriter.mode()==recvx::Typewriter::Mode::Save);typewriter.reset();}draw(input_tick,devices.controllers());continue;}
+                if(typewriter.active()){try{typewriter.control(typewriter_pad_on,typewriter_pad_ps,typewriter.mode()==recvx::Typewriter::Mode::Save&&events&&events->flag(1,56));typewriter_pad_on=typewriter_pad_ps=0;typewriter_step();}catch(const std::exception& e){std::cerr<<"Typewriter: "<<e.what()<<'\n';typewriter_release(typewriter.mode()==recvx::Typewriter::Mode::Save);typewriter.reset();}audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);draw(input_tick,devices.controllers());continue;}
                 if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();sound_monitor();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */ /* system.c:853 - der Statusbildschirm ruft bhInitMap(MP_SET_SUB); der    Kartentask besitzt den Pass wie der Terminaltask, bhExitMap map.c:243. *//* Erst wenn der Statusbildschirm abgebaut ist, startet der Kartentask: sein
    Verlassen loescht st_flg 0x8 (sub1.c:3137), worauf FtskMapWait (map.c:1757)
    wartet. Die Anforderung bleibt bis dahin stehen. */

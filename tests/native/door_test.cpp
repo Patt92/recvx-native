@@ -391,6 +391,138 @@ int main(int argc,char** argv){try{_Make_SinTable();
      DoorSequence other;other.begin(root,{},DoorRequest{0,0,1,0,0,0});
      check(!other.clip_case(),"another door type matched the dmo_clip case");}
 
+    // --- stair demo: mesh, original projection and image edge, not Kaidan ---
+    // RM_0010 -> RM_0020 selects MRY/0072, case 1 (attribute 0x80).
+    // The first tread is present in the original CNK stream but lies below
+    // the 640x480 image at the initial ViewProc4 pose. Do not "repair" that
+    // with a room override or an invented near/far range. The far-plane
+    // packet reject hides UPPER steps, independently of this image edge.
+    // Original: door.c:191-240/454-489/877-910/991-1075;
+    // system.c:429-437; ps2_NaView.c:55-65; ps2_NinjaCnk.c:2431-2536.
+    {const auto bytes=read_asset_file(root/"archives/MRY/0072.bin",8*1024*1024);
+     BinaryView packet(bytes);std::size_t p=4+packet.u32(4),model=0;
+     for(unsigned section=0;section<4;++section){if(!section)model=p+4;p+=4+packet.u32(p);}
+     const auto base=model+packet.u16(model+4),objects=base+packet.u32(model+12);
+     const auto stair_model=base+packet.u32(objects+52+4),vertices=base+packet.u32(stair_model);
+     check(packet.u8(vertices)==41&&packet.u16(vertices+4)==0&&packet.u16(vertices+6)==410,
+           "stair demo no longer has its original 410-vertex CNK source");
+     auto mesh=decode_model_asset(bytes,model,0);
+     check(mesh.object_count==2&&mesh.triangles.size()==328,"stair demo lost original nodes or CNK triangles");
+     // Both original objects have identity transforms; obj0 is a modelless
+     // root (evalflag 8), obj1 the mesh (evalflag 16). Verify rather than
+     // silently projecting raw model vertices as if all assets were identity.
+     for(unsigned node=0;node<2;++node){const auto o=objects+node*52;
+         for(unsigned axis=0;axis<3;++axis)
+             check(packet.f32(o+8+axis*4)==0&&packet.i32(o+20+axis*4)==0&&packet.f32(o+32+axis*4)==1,
+                   "stair model object transform is not the original identity");
+     }
+     check(packet.u32(objects)==8&&packet.u32(objects+4)==0xffffffffu&&packet.u32(objects+52)==16,
+           "stair root/mesh object flags changed");
+     // Independently read original strip indices and winding: every decoded
+     // triangle must carry exactly those original positions, including all
+     // lower steps. Count equality alone would miss substituted geometry.
+     std::size_t polygon=base+packet.u32(stair_model+4),decoded=0;
+     while(packet.u8(polygon)!=255){const unsigned type=packet.u8(polygon);
+         if(type<8){polygon+=2;continue;}if(type<16){polygon+=4;continue;}
+         const auto end=polygon+(packet.u16(polygon+2)+2)*2;
+         if(type>=64){check(type==66,"stair polygon no longer uses original Uvn strips");
+             const auto header=packet.u16(polygon+4);std::size_t at=polygon+6;
+             for(unsigned strip=0;strip<(header&0x3fff);++strip){const auto bits=packet.u16(at);at+=2;
+                 const bool reverse=bits&0x8000;const unsigned count=reverse?0x10000u-bits:bits;
+                 std::vector<unsigned> indices;
+                 for(unsigned v=0;v<count;++v){indices.push_back(packet.u16(at));at+=6;
+                     if(v<2)continue;at+=2*(header>>14);
+                     std::array<unsigned,3> index{indices[v-2],indices[v-1],indices[v]};
+                     if(bool(v&1)^reverse)std::swap(index[0],index[1]);
+                     check(decoded<mesh.triangles.size(),"original stair stream has more triangles than native mesh");
+                     const auto& triangle=mesh.triangles[decoded++];check(triangle.object==1,"stair triangle belongs to another object");
+                     for(unsigned corner=0;corner<3;++corner){check(index[corner]<410,"stair source index outside original vertex block");
+                         const auto source=vertices+8+index[corner]*24;const auto& position=triangle.vertices[corner].position;
+                         check(position.x==packet.f32(source)&&position.y==packet.f32(source+4)&&position.z==packet.f32(source+8),
+                               "native stair triangle differs from the original CNK indices or object transform");
+                     }
+                 }
+             }
+         }
+         polygon=end;
+     }
+     check(decoded==mesh.triangles.size(),"native stair mesh has triangles absent from the original stream");
+     // 41 original strips, each ten vertices / eight triangles, not twenty
+     // procedural host steps. This also catches loss of the lower mesh half.
+     unsigned segments=0,segment_triangles=0;std::uint32_t previous=0;
+     Scene first_tread;first_tread.background=0xff000000;
+     for(auto triangle:mesh.triangles){
+         check(triangle.strip_clip&&triangle.strip_segment,"stair CNK bypasses the original strip clip rule");
+         if(triangle.strip_segment!=previous){
+             if(previous)check(segment_triangles==8,"stair strip did not emit all ten original vertices");
+             previous=triangle.strip_segment;segment_triangles=0;++segments;
+         }
+         ++segment_triangles;
+         if(std::all_of(triangle.vertices.begin(),triangle.vertices.end(),[](const SceneVertex& v){
+             return v.position.y==1.5f&&v.position.z>=-3.f&&v.position.z<=0.f;})){
+             triangle.textured=false;triangle.color=0xffffffff;triangle.world_lit=true;
+             first_tread.triangles.push_back(triangle);
+         }
+     }
+     check(segments==41&&segment_triangles==8,"stair demo lost original strip boundaries");
+     check(first_tread.triangles.size()==8,"the first original stair tread is absent from the native mesh");
+     // njSetPerspective halves the INTEGER angle (ELF 0x002E2A80: sra a0,1),
+     // then uses w/2/tanf. dist is screen projection distance, NOT a dolly.
+     NJS_SCREEN screen{500,640,480,320,240};njSetScreen(&screen);njSetPerspective(12743);
+     const float projection=_nj_screen_.dist;
+     check(std::abs(projection-457.05916f)<.001f,"original door projection distance or angle units changed");
+     DoorSequence stairs;stairs.begin(root,{},DoorRequest{0x80,0,2,0,1,0});
+     auto camera=[&](){SceneCamera c;c.position=stairs.state().vew_pos;
+         for(unsigned axis=0;axis<3;++axis)c.angles[axis]=-stairs.state().vew_ang[axis];
+         c.perspective=12743;c.clip_near=stairs.clip_near();c.clip_far=stairs.clip_far();return c;};
+     const auto project_tread=[&](const SceneCamera& c){
+         NJS_MATRIX view,original;camera_view_matrix(c,view);
+         // Actual bhControlDoor draw call, independent of camera_view_matrix.
+         njUnitMatrix(&original);njRotateX(&original,32768);
+         njRotateZ(&original,-stairs.state().vew_ang[2]);
+         njRotateX(&original,-stairs.state().vew_ang[0]);
+         njRotateY(&original,-stairs.state().vew_ang[1]);
+         njTranslate(&original,-c.position.x,-c.position.y,-c.position.z);
+         std::array<float,4> bounds{INFINITY,-INFINITY,INFINITY,-INFINITY}; // y min/max, z min/max
+         for(const auto& t:first_tread.triangles)for(const auto& v:t.vertices){
+             NJS_POINT3 source=v.position,a,b;njCalcPoint(&view,&source,&a);njCalcPoint(&original,&source,&b);
+             check(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)<.0001f,"door model/camera transform differs from original call order");
+             const float y=240.f+projection*a.y/a.z;
+             bounds[0]=std::min(bounds[0],y);bounds[1]=std::max(bounds[1],y);
+             bounds[2]=std::min(bounds[2],a.z);bounds[3]=std::max(bounds[3],a.z);
+         }
+         return bounds;
+     };
+     SoftwareRenderer image(640,480);image.set_supersampling(1);image.set_render_threads(1);
+     stairs.tick();stairs.tick();const auto early=camera();const auto early_bounds=project_tread(early);
+     check(early.position.x==0&&early.position.y==12&&early.position.z==16&&early.angles[0]==0,
+           "ViewProc4 no longer starts at the original packet pose");
+     check(early_bounds[2]>=10&&early_bounds[3]<=34,"first tread is outside z clip, not merely below the image");
+     check(early_bounds[0]>480&&std::abs(early_bounds[0]-492.5853f)<.01f&&std::abs(early_bounds[1]-539.9451f)<.01f,
+           "initial first tread does not project below the original screen edge");
+     image.draw(first_tread,early);check(image.covered_pixels()==0,"off-image first tread leaked onto the initial door frame");
+     // 198 is an original procedure pass, not a new animation time limit:
+     // View4 waits 24, View6 waits 96 for angles and interpolates its target.
+     while(stairs.ticks()<198)stairs.tick();const auto later=camera();const auto later_bounds=project_tread(later);
+     check(std::abs(later.position.z-10.7139f)<.001f&&later.angles[0]==4005,"ViewProc6 stair camera progression changed");
+     check(later_bounds[0]>=0&&later_bounds[1]<480&&later_bounds[2]>=10&&later_bounds[3]<=34,
+           "original tilt no longer brings the first tread into the image independently of near/far");
+     image.draw(first_tread,later);check(image.covered_pixels()>0,"present first stair tread is not drawn when the original camera sees it");
+     const auto tread_mask=image.pixels();
+     for(unsigned node=0;node<2;++node){const auto& n=stairs.state().objP[node];const auto o=objects+node*52;
+         check(n.evalflags==packet.u32(o)&&n.model==packet.u32(o+4),"door sequence changed the static stair mesh binding");
+         for(unsigned axis=0;axis<3;++axis)check(n.pos[axis]==0&&n.ang[axis]==0,"door sequence moved a static stair object");
+     }
+     stairs.draw(image);check(image.covered_pixels()>0&&image.last_clip()[0]==10&&image.last_clip()[1]==34,
+           "productive stair demo lost its geometry or original clip range");
+     std::size_t lit_tread=0;
+     for(std::size_t pixel=0;pixel<tread_mask.size();++pixel)
+         if(tread_mask[pixel]!=0xff000000u&&(image.pixels()[pixel]&0xffffffu))++lit_tread;
+     check(lit_tread>0,"DoorSequence::draw leaves the visible first-tread region blank");
+     std::cout<<"Stair demo: 410 source vertices / 41 strips / 328 triangles; first tread below image at pass 2 (y "
+              <<early_bounds[0]<<".."<<early_bounds[1]<<"), visible at pass 198 (y "<<later_bounds[0]<<".."<<later_bounds[1]<<").\n";
+    }
+
     // --- the sequence is actually drawn, and the light reaches the image ---
     {DoorSequence door;door.begin(root,{},DoorRequest{0,0,1,0,0,0});
      for(unsigned i=0;i<60;++i)door.tick();
