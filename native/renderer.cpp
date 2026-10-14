@@ -115,6 +115,8 @@ void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wi
     const float focal=(width_*0.5f)/std::tan(0.0000958738f*(camera.perspective/2));
     const float aspect_x=1.174f;
     const float focal_y=focal*(height_/480.0f)/(width_/640.0f);
+    // Ninja-Bildschirm 640x480: fSx = AspectW*x*dist/z, fSy = AspectH*y*dist/z (ps2_NinjaCnk.c:1195).
+    ninja_sx_=focal*aspect_x*640.0f/float(width_);ninja_sy_=focal_y*480.0f/float(height_);
     draw_view(scene,view,focal*aspect_x,focal_y,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far);
 }
 void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far){
@@ -134,24 +136,100 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
         if(!(far>near))throw std::runtime_error("shadow: finite njClipZ range required for transported depth");
         zc=shadow_depth_coefficients(-near,-far);
     }
-    for(const auto& triangle:scene.triangles){
+    // Chunk-Streifen (SceneTriangle::strip_clip) folgen der Clipregel der Ninja-Streifen, nur
+    // im Ninja-Bildschirm von draw(). Bezug: ClipMatrix2 (_Make_ClipMatrix, ps2_NaView.c:233)
+    // mit ClipVolume 320x240 (ps2_NaView.c:24) und njClipZ-Grenzen near >= 1 / far <= 65535
+    // (ps2_NaView.c:142; Grundwert 65535, ps2_NaView.c:21).
+    const float ninja_sx=ninja_sx_,ninja_sy=ninja_sy_;ninja_sx_=ninja_sy_=0;
+    const bool strip_rule=ninja_sx>0&&ninja_sy>0;
+    const float strip_near=std::max(near,1.0f),strip_far=far>near?std::min(far,65535.0f):65535.0f;
+    // vclipw.xyz gegen ClipMatrix2: Bits +x 1, -x 2, +y 4, -y 8, +z (fern) 16, -z (nah) 32.
+    // AspectH ist im Spiel 1 (BHD_ASPECT_Y, main.c:54), also ist ninja_sy die Projektion dist.
+    const auto clip_code=[&](const NJS_POINT3& v){
+        const float w=std::fabs(v.z),cx=v.x*ninja_sy/320.0f,cy=v.y*ninja_sy/240.0f;
+        const float cz=v.z*(strip_far+strip_near)/(strip_far-strip_near)-2.0f*strip_far*strip_near/(strip_far-strip_near);
+        return unsigned(cx>w)|unsigned(cx<-w)<<1|unsigned(cy>w)<<2|unsigned(cy<-w)<<3|unsigned(cz>w)<<4|unsigned(cz<-w)<<5;};
+    // _Check_DisplayAreaPoint (ps2_Vu1Strip.c:766) mit dem Bildschirmversatz 2048
+    // (fNaViwOffsetX/Y = cx+1728/cy+1808, ps2_NaView.c:39) und der Sicht-z (pP->fZ = fVz).
+    const auto outside_display=[&](const NJS_POINT3& v){
+        if(!(v.z>=1.0f&&v.z<65535.0f))return true;
+        const float x=2048.0f+v.x*ninja_sx/v.z,y=2048.0f+v.y*ninja_sy/v.z;
+        return !(x>=1.0f&&x<4095.0f&&y>=1.0f&&y<4095.0f);};
+    // njCnkCsUvh/njCnkCsUvn verwerfen ein Paket von hoechstens 60 Eckpunkten, wenn alle seine
+    // Eckpunkte ausserhalb derselben Ebene liegen (UND der vclipw-Bits, ps2_NinjaCnk.c:2045-2104
+    // auf dem VU1-Weg, _CVV ps2_NinjaCnk.c:2240-2266 auf dem EE-Weg).
+    std::vector<std::uint8_t> strip_reject;
+    if(strip_rule){strip_reject.assign(scene.triangles.size(),0);
+        for(std::size_t i=0;i<scene.triangles.size();){
+            const auto id=scene.triangles[i].strip_segment;
+            if(!id||!scene.triangles[i].strip_clip){++i;continue;}
+            std::size_t j=i;unsigned code=63;
+            for(;j<scene.triangles.size()&&scene.triangles[j].strip_segment==id;++j)
+                for(const auto& vertex:scene.triangles[j].vertices){NJS_POINT3 source=vertex.position,p;njCalcPoint(&view,&source,&p);code&=clip_code(p);}
+            if(code)std::fill(strip_reject.begin()+std::ptrdiff_t(i),strip_reject.begin()+std::ptrdiff_t(j),std::uint8_t(1));
+            i=j;}}
+    // Effektaufrufe (SceneTriangle::ninja_primitive). Ps2AddPrim3D (ps2_dummy.c:486): vf7.xy =
+    // Bildpunkt - 2048, vf7.z = z + 0.062501907*z - 2048.0625, vclipw.xyz gegen 2047; ein
+    // gesetztes Bit in den letzten drei Eckpunkten (Maske 0x3FFFF) gibt dem Streifendreieck ADC.
+    const auto ninja_vertex_out=[&](const NJS_POINT3& v){
+        if(std::fabs(v.z+0.062501907f*v.z-2048.0625f)>2047.0f)return true;
+        return std::fabs(v.x*ninja_sx/v.z)>2047.0f||std::fabs(v.y*ninja_sy/v.z)>2047.0f;};
+    // njDrawTextureSub3D (ps2_NaDraw.c:302): scr.z < 0 eines Eckpunkts beendet den Aufruf; cflag
+    // beginnt mit 15 und behaelt die x/y-Bits von _Clip_Screen (ps2_Vu1Strip.c:1202:
+    // (x-2048)*0.75 und y-2048 gegen 240), die allen Eckpunkten gemeinsam sind.
+    std::vector<std::uint8_t> ninja_reject;
+    if(strip_rule){ninja_reject.assign(scene.triangles.size(),0);
+        for(std::size_t i=0;i<scene.triangles.size();){
+            const auto id=scene.triangles[i].ninja_primitive;
+            if(!id){++i;continue;}
+            std::size_t j=i;bool behind=false;unsigned code=15;
+            for(;j<scene.triangles.size()&&scene.triangles[j].ninja_primitive==id;++j)
+                for(const auto& vertex:scene.triangles[j].vertices){NJS_POINT3 source=vertex.position,p;njCalcPoint(&view,&source,&p);
+                    if(p.z<0){behind=true;continue;}
+                    const float x=(p.x*ninja_sx/p.z)*0.75f,y=p.y*ninja_sy/p.z;
+                    code&=unsigned(x>240.0f)|unsigned(x<-240.0f)<<1|unsigned(y>240.0f)<<2|unsigned(y<-240.0f)<<3;}
+            if(scene.triangles[i].ninja_screen_reject&&(behind||code))std::fill(ninja_reject.begin()+std::ptrdiff_t(i),ninja_reject.begin()+std::ptrdiff_t(j),std::uint8_t(1));
+            i=j;}}
+    for(std::size_t triangle_index=0;triangle_index<scene.triangles.size();++triangle_index){
+        const auto& triangle=scene.triangles[triangle_index];
         // bhCkFlg numbers bits from the most significant bit.
         if(triangle.camera_mask && triangle.object<512 && (hidden[triangle.object/32] & (0x80000000u>>(triangle.object%32))))continue;
         std::vector<SceneVertex> polygon;polygon.reserve(4);
         for(auto vertex:triangle.vertices){njCalcPoint(&view,&vertex.position,&vertex.position);polygon.push_back(vertex);}
+        float clip_near=near,clip_far=far;bool clip_z=true;
+        if(strip_rule&&triangle.strip_clip){
+            if(strip_reject[triangle_index])continue;
+            // vu1DrawTriangleStrip* (ps2_Vu1Strip.c:943/1057/1178/1420, VU1 DoubleMain/SingleMain):
+            // ein Dreieck geht unverändert in den Streifen, solange keiner seiner Eckpunkte den
+            // Anzeigebereich verlässt oder keiner ausserhalb des Clipvolumens liegt; sonst wird es
+            // gegen die sechs Ebenen geschnitten (_Check_ScissorPlane, ELF 0x002D3EB0: nah, fern,
+            // -x, +x, -y, +y; die Seiten begrenzt hier das Raster). Auch jenseits von njClipZ-fern
+            // liegende Dreiecke im Anzeigebereich werden daher ganz gezeichnet.
+            bool flagged=false,outside=false;
+            for(const auto& v:polygon){flagged=flagged||outside_display(v.position);outside=outside||clip_code(v.position)!=0;}
+            if(!flagged||!outside)clip_z=false;else{clip_near=strip_near;clip_far=strip_far;}
+        }
+        // Effektaufruf: keine njClipZ-Klippung; ein Dreieck mit einem Clipbit-Eckpunkt fehlt ganz.
+        if(strip_rule&&triangle.ninja_primitive){
+            if(ninja_reject[triangle_index])continue;
+            bool flagged=false;for(const auto& v:polygon)flagged=flagged||ninja_vertex_out(v.position);
+            if(flagged)continue;
+            clip_z=false;
+        }
         // Clip in camera space before division; surfaces crossing the near plane remain visible.
         std::vector<SceneVertex> clipped;clipped.reserve(4);
-        for(std::size_t i=0;i<polygon.size();++i){
+        if(!clip_z)clipped=polygon;
+        else for(std::size_t i=0;i<polygon.size();++i){
             const auto a=polygon[i],b=polygon[(i+1)%polygon.size()];
-            const bool inside=a.position.z>=near,next=b.position.z>=near;
+            const bool inside=a.position.z>=clip_near,next=b.position.z>=clip_near;
             if(inside)clipped.push_back(a);
-            if(inside!=next){const float t=(near-a.position.z)/(b.position.z-a.position.z);clipped.push_back(lerp_vertex(a,b,t));clipped.back().position.z=near;}
+            if(inside!=next){const float t=(clip_near-a.position.z)/(b.position.z-a.position.z);clipped.push_back(lerp_vertex(a,b,t));clipped.back().position.z=clip_near;}
         }
         // Far plane (njClipZ far) clipped the same way.
-        if(far>near&&clipped.size()>=3){std::vector<SceneVertex> inner;inner.reserve(clipped.size()+1);
-            for(std::size_t i=0;i<clipped.size();++i){const auto a=clipped[i],b=clipped[(i+1)%clipped.size()];const bool inside=a.position.z<=far,next=b.position.z<=far;
+        if(clip_z&&clip_far>clip_near&&clipped.size()>=3){std::vector<SceneVertex> inner;inner.reserve(clipped.size()+1);
+            for(std::size_t i=0;i<clipped.size();++i){const auto a=clipped[i],b=clipped[(i+1)%clipped.size()];const bool inside=a.position.z<=clip_far,next=b.position.z<=clip_far;
                 if(inside)inner.push_back(a);
-                if(inside!=next){const float t=(far-a.position.z)/(b.position.z-a.position.z);inner.push_back(lerp_vertex(a,b,t));inner.back().position.z=far;}}
+                if(inside!=next){const float t=(clip_far-a.position.z)/(b.position.z-a.position.z);inner.push_back(lerp_vertex(a,b,t));inner.back().position.z=clip_far;}}
             clipped=std::move(inner);}
         if(clipped.size()<3)continue;
         const auto color=shade(triangle);

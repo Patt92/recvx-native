@@ -32,7 +32,7 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
 // Keep undefined selectors visible instead of inventing a scratch flag bank.
 bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size())throw std::runtime_error("event flag outside matrix");index&=0x3ff;return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
 void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||mode>5)throw std::runtime_error("invalid event flag operation");index&=0x3ff;auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
-void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<16&&tasks_[level].active)++level;if(level==16)return;}if(task_started)task_started(level);const auto counts=tasks_[level].loop_counts;const auto cnt2=tasks_[level].cnt2,cnt3=tasks_[level].cnt3;tasks_[level]={};tasks_[level].loop_counts=counts;tasks_[level].cnt2=cnt2;tasks_[level].cnt3=cnt3;tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
+void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<16&&tasks_[level].active)++level;if(level==16)return;}if(task_started)task_started(level);const auto counts=tasks_[level].loop_counts;const auto cnt2=tasks_[level].cnt2,cnt3=tasks_[level].cnt3,wpnl_no=tasks_[level].wpnl_no;const auto addpx=tasks_[level].addpx;tasks_[level]={};tasks_[level].loop_counts=counts;tasks_[level].cnt2=cnt2;tasks_[level].cnt3=cnt3;tasks_[level].wpnl_no=wpnl_no;tasks_[level].addpx=addpx; /* Event_init (event.c:12956) leaves cnt, wpnl_no and addpx */tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
 void EventVm::inherit_progress(const EventVm& previous){
     // Original global event/key/item/map/game flags outlive a ROM_WORK load.
     for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
@@ -63,7 +63,8 @@ int EventVm::instruction(Task& t){
     case 3:if(t.branches.empty())--ifel_debt_;else t.branches.pop_back();return advance(2);
     case 4:{const unsigned matrix=v.u8(p+1),bit=v.u16(p+2),extra=v.u8(p+4),mode=v.u8(p+5);advance(6);if(matrix==10&&((bit==22&&values[16]!=extra)||(bit==23&&values[20]!=extra)))return 0;return int(mode)^int(flag(matrix,bit&0x3ff));}
     case 5:set_flag(v.u8(p+1),v.u16(p+2)&0x3ff,v.u8(p+5));return advance(6);
-    case 6:{const unsigned key=v.u8(p+1),mode=v.u8(p+2),operand=v.u8(p+3);advance(4);switch(mode){case 0:return values[key]==operand;case 1:return values[key]>operand;case 2:return values[key]>=operand;case 3:return values[key]<operand;case 4:return values[key]<=operand;case 5:return values[key]!=operand;default:throw std::runtime_error("unsupported event byte comparison");}}
+    // event.c:701 bhCmpB key 17 reads bhEtask->wpnl_no, i.e. task 0, whichever task compares.
+    case 6:{const unsigned key=v.u8(p+1),mode=v.u8(p+2),operand=v.u8(p+3);advance(4);const unsigned value=key==17?tasks_[0].wpnl_no:values[key];switch(mode){case 0:return value==operand;case 1:return value>operand;case 2:return value>=operand;case 3:return value<operand;case 4:return value<=operand;case 5:return value!=operand;default:throw std::runtime_error("unsupported event byte comparison");}}
     // bhCmpW: enemy index, field selector, comparison, unsigned 16-bit operand.
     // The selected work value is signed (in particular scripted enemy HP).
     case 7:{v.require(p,6);const unsigned enemy=v.u8(p+1),field=v.u8(p+2),mode=v.u8(p+3);const int operand=v.u16(p+4);int value=0;
@@ -102,6 +103,12 @@ int EventVm::instruction(Task& t){
     case 0x79:world(t,op,6);return 1;
     case 0x7a:world(t,op,2);return 1;
     case 0x78:world(t,op,14);return 1;
+    // event.c:5454/5516 bhLightParameterCSet/Start, :7067/7119 bhFogParameterCSet/Start. Both Start
+    // commands return 0 and end the pass inside their FOR loop.
+    case 0x73:world(t,op,22);return 1;
+    case 0x74:world(t,op,4);return 0;
+    case 0xa8:world(t,op,10);return 1;
+    case 0xa9:world(t,op,2);return 0;
     case 0xba:world(t,op,16);return 1;
     case 0xbb:world(t,op,2);return 0;
     case 0x80:case 0x7e:world(t,op,4);return 1;
@@ -157,11 +164,12 @@ int EventVm::instruction(Task& t){
         case 3:flags[10][0]|=0x44;flags[5][0]|=4;break;
         case 4:flags[10][0]&=~0x44u;flags[5][0]&=~4u;flags[6][0]=0xffffffff;break;
         default:throw std::runtime_error("invalid CineSet mode");}return 1;}
-    // event.c bhRandamSet: single shared EE rand(), float scaling, then modulo.
-    case 0x63:{const unsigned limit=v.u8(p+1);if(!limit)throw std::runtime_error("bhRandamSet modulus zero");const int scaled=int(100.0f*(float(recvx_core_random_next())/2147483648.0f));t.wpnl_no=unsigned(scaled)%limit;return advance(2);}
+    // event.c:4942 bhRandamSet: single shared EE rand(), float scaling, then modulo, stored in
+    // bhEtask->wpnl_no (task 0) for every caller; :6407 bhRandTest writes the same task's addpx.
+    case 0x63:{const unsigned limit=v.u8(p+1);if(!limit)throw std::runtime_error("bhRandamSet modulus zero");const int scaled=int(100.0f*(float(recvx_core_random_next())/2147483648.0f));tasks_[0].wpnl_no=unsigned(scaled)%limit;return advance(2);}
     // event.c bhRandTest (opcode 0x8c): optional global srand(seed), then
     // one original rand() stored both as float bits and wpnl_no.
-    case 0x8c:{const unsigned mode=v.u8(p+1),seed=(v.u16(p+2)<<16)|v.u16(p+4);advance(6);if(mode==0)recvx_core_random_seed(seed);t.addpx=float(recvx_core_random_next())/2147483648.0f;std::memcpy(&t.wpnl_no,&t.addpx,sizeof t.wpnl_no);return 1;}
+    case 0x8c:{const unsigned mode=v.u8(p+1),seed=(v.u16(p+2)<<16)|v.u16(p+4);advance(6);if(mode==0)recvx_core_random_seed(seed);tasks_[0].addpx=float(recvx_core_random_next())/2147483648.0f;std::memcpy(&tasks_[0].wpnl_no,&tasks_[0].addpx,sizeof tasks_[0].wpnl_no);return 1;}
     case 0x14:{const auto packed=v.u16(p+2);advance(4);start(packed&255,packed>>8);return 1;}
     case 0x1f:{const auto mode=v.u8(p+1),index=v.u8(p+2),freeze=v.u8(p+3);advance(4);if(!mode){show_dialog(read_message(room_,messages_,index),index);opening_hint_=t.event==16&&index==4;if(!freeze)flags[6][0]&=~7u;}else flags[6][0]|=7;return 1;}
     case 0x25:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");auto& a=interactions[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);return advance(10);}
@@ -210,6 +218,12 @@ int EventVm::instruction(Task& t){
     case 0x1c:world(t,op,6);return 1;
     case 0x6e:world(t,op,22);return 1;
     case 0x6d:world(t,op,22);return 1; // bhCyodanSet: particle effect remains pending.
+    // event.c:8307 bhCyodanSetEx (RM_0090 event 23, the laser): same Cyodan
+    // family as 0x6d plus a second colour and a work/node link. 28 bytes is
+    // measured against the data: RM_0090 event 23 holds two adjacent 0xc0
+    // records exactly 28 bytes apart. RoomWorld::bind spawns bhSetEffParticleMk2
+    // (id 302, PtclTbl) through the native particle owner.
+    case 0xc0:world(t,op,28);return 1;
     case 0xab:world(t,op,6);return 1; // bhBGColorSet, including deferred application.
     case 0xd1:world(t,op,10);return 1;
     case 0x17:world(t,op,8);return 1;
@@ -235,7 +249,7 @@ int EventVm::instruction(Task& t){
     case 0x77:world(t,op,6);return 1; // bhSoundVolumeSet
     case 0xb6:world(t,op,2);return 1; // bhRoomSoundCase -> SetRoomSoundCaseNo
     case 0x19:case 0xc4:world(t,op,8);return 1;
-    case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
+    case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;case 150:length=4;break;case 129:length=12;break;case 130:case 142:length=2;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x67:{unsigned length=0;switch(v.u8(p+1)){case 0:case 0x80:case 0x8b:case 0x90:length=2;break;case 0x8f:length=6;break;case 0x92:case 0x93:length=8;break;case 0x94:case 0x95:length=4;break;default:throw std::runtime_error("unimplemented Sub_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
     case 0x15:world(t,op,4);return 1;
     // bhCyoutenHenkeiStart/StartEX: task work morph step inside the FOR clock
@@ -520,10 +534,21 @@ void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
 // bhSysCallGame: any running cinematic (cb_flg 4, CineSet 0/3/5) may be skipped once, never
 // with menu/movie/system states st_flg 0x1C040008 active. Cleared when it ends (see tick).
 bool EventVm::skip_cinematic(){if(!(flags[10][0]&4)||(flags[5][0]&0x1C040008u)||(flags[10][0]&0x10000000))return false;flags[10][0]|=0x10000000;return true;}
-bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){
+bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){return interact(pos,yaw,floor,pos,0.0f);}
+bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor,NJS_POINT3 front,float arn){
     if((flags[5][0]&4)||dialog_.active()||menu_open)return false;
     const auto direction=(yaw+8192)&0xc000;
-    for(unsigned i=0;i<interactions.size();++i){const auto& a=interactions[i];const float distance=(a.type==0||a.type==2)?4.5f:a.type==3?6.0f:2.0f;const auto probe=NJS_POINT3{pos.x-distance*njSin(yaw),pos.y,pos.z-distance*njCos(yaw)};if(!(a.flags&1)||a.floor!=floor||a.type==1||a.type==2||probe.x<a.position.x||probe.x>a.position.x+a.extent.x||probe.z<a.position.z||probe.z>a.position.z+a.extent.z)continue;
+    /* hitchk.c:4601-4618: pxn[0] und pxn[3] gehen von EXP_WORK fpx/fpz aus (vor den
+       Wandpaessen, player.c:1585), pxn[1]/[2]/[4] von plp->px/pz nach ihnen. Gegen eine
+       Wand gelaufen liegt fpx um den Schub weiter vorn; die Tuersonde reicht damit im
+       Gehen so weit wie im Original. Der Eintrag waehlt seine Sonde mit exp->type. */
+    float sine,cosine;njSinCos(yaw,&sine,&cosine);
+    const float pxn[5]={front.x-sine*(1.5f+(3.0f-arn)),pos.x-0.75f*sine,pos.x-4.5f*sine,front.x-sine*(3.0f+(3.0f-arn)),pos.x-2.0f*sine};
+    const float pzn[5]={front.z-cosine*(1.5f+(3.0f-arn)),pos.z-0.75f*cosine,pos.z-4.5f*cosine,front.z-cosine*(3.0f+(3.0f-arn)),pos.z-2.0f*cosine};
+    for(unsigned i=0;i<interactions.size();++i){const auto& a=interactions[i];
+        /* Typen ueber 4 kommen in keiner Raumtabelle vor; pxn[type] laege dort ausserhalb
+           der Tabelle (hitchk.c:4639). Sie behalten die bisherige Host-Sonde (Luecke). */
+        const auto probe=a.type<5?NJS_POINT3{pxn[a.type],pos.y,pzn[a.type]}:NJS_POINT3{pos.x-2.0f*sine,pos.y,pos.z-2.0f*cosine};if(!(a.flags&1)||a.floor!=floor||a.type==1||a.type==2||probe.x<a.position.x||probe.x>a.position.x+a.extent.x||probe.z<a.position.z||probe.z>a.position.z+a.extent.z)continue;
         if(a.type==0){if(a.floor!=floor||(direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000)))continue;
             values[20]=i;flags[10][0]|=0x100; // original etc_idx / cb_flg, also for doors
             if(request_door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]}))return true;

@@ -3,19 +3,24 @@
 // Geprueft werden Zustandsautomat, Originaldaten und die tatsaechliche
 // Zeichenausgabe auf dem produktiven RoomWorld-Besitzer mit Originalraeumen.
 #include "world.h"
+#include "room.h"
 #include "effect_sprites_internal.h"
 #include "asset_io.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include "core_random.h"
 #include "chunk_blend.h"
+#include "cnk_light.h"
 #include "weapon_flash.h"
 #include "weapon_tables.h"
 #include <algorithm>
+#include <map>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 using namespace recvx;
 static void check(bool value,const char* why){if(!value)throw std::runtime_error(why);}
 static bool close(float a,float b){return std::fabs(a-b)<.0001f;}
@@ -645,6 +650,7 @@ static int eff223_u0(int ct2){static const int u[18]={0,40,80,120,160,200,0,40,8
 // Gruppe 2 (effsub0 Rest, effsub1 018/124, effsub5, effsub6): Erzeugernachtraege am neuen
 // eff[n] (Startgeschwindigkeit, tex_id, az, lkono, Elternsatz), Opak-Liste, Kamerawinkel.
 static float frac(){return -recvx_core_random_next()/-2.1474836e9f;}
+static void install_group4_services();
 static void group2_producers(){
     EffectContext c;bool queued=false;take_effect_output();
     { // 177: eff[n].lkono = op->lkono
@@ -665,7 +671,16 @@ static void group2_producers(){
         step_effect_sprite(s,c,&queued);check(take_effect_output().spawns.size()==1,"bhEff238 fires again after type passes");
         s.type=0;s.mode1=0;step_effect_sprite(s,c,&queued);check(take_effect_output().spawns.empty()&&s.mode0==0&&(s.flg&0x1000000u),"bhEff238 idle resets mode0");
         s.mode1=0xff;step_effect_sprite(s,c,&queued);out=take_effect_output();check(out.spawns.size()==1&&s.type==0&&s.mode0==0,"bhEff238 0xFF is a one-shot");
-        s.flg|=0x80u;s.mode1=1;bool rejected=false;try{step_effect_sprite(s,c,&queued);}catch(const std::runtime_error&){rejected=true;}check(rejected,"bhEff238 on a linked work must report the missing node matrix");take_effect_output(); /* die Anforderung ging wie im Original vor der Matrix hinaus */
+        // Verlinkt (flg 0x80 aus bhSetEffectLink): Drehanteil der Linkmatrix, dann (ay, ax).
+        s.flg|=0x80u;s.mode1=1;s.mode0=0;s.type=0;
+        NJS_MATRIX joint;njUnitMatrix(&joint);njTranslate(&joint,50,60,70);njRotateZ(&joint,8192);njRotateX(&joint,4096);
+        s.link_matrix=joint;step_effect_sprite(s,c,&queued);s.link_matrix=nullptr;out=take_effect_output();
+        {NJS_MATRIX r;std::copy(joint,joint+16,r);njUnitTransPortion(&r);njRotateY(&r,s.ay);njRotateX(&r,s.ax);NJS_POINT3 e;njCalcPoint(&r,&v,&e);
+         check(out.spawns.size()==1&&close(out.spawns[0].velocity.x,e.x)&&close(out.spawns[0].velocity.y,e.y)&&close(out.spawns[0].velocity.z,e.z),"bhEff238 linked child must turn with the joint's rotation");}
+        // Ohne native Gelenkmatrix: Luecke, kein Kind mit geratener Richtung.
+        s.mode0=1;step_effect_sprite(s,c,&queued);out=take_effect_output();
+        check(out.spawns.empty()&&out.gaps.size()==1,"bhEff238 on a linked work without the node matrix reports the gap");
+        bool rejected=false;
     }
     { // 228: 229 mit az 8192 (gemeldet, nicht portiert) plus Rauch 2 Art 6 vor dem Erzeuger
         EffectSpawn spawn;spawn.id=228;spawn.type=1;spawn.lkono=2;spawn.scale={4,4,4};spawn.position={1,0,0};spawn.flg=1;EffectSprite s;initialize_effect_sprite(s,spawn);
@@ -818,7 +833,18 @@ static void group2_sprites(){
         recvx_core_random_seed(9);s=work(248,0,{2.5f,20.3f,4.5f});s.parent=&parent;step_effect_sprite(s,c,&queued);
         check(queued&&s.tex_id==426&&close(s.aoy,20)&&s.ct2==int(10.0f*(20.3f-20.0f))&&close(s.aoz,0.25f)&&close(s.sz,4)&&close(s.aox,0.1f)&&close(s.sx,2)&&(s.tv[0].col>>24)==unsigned(int((255.0f*20)/40.0f))&&((s.tv[0].col>>16)&0xff)==0xff,"bhEff248 parameters differ");
         parent.type=0;step_effect_sprite(s,c,&queued);check(!queued&&s.flg==0,"bhEff248 ends when the parent rests");parent.type=1;
-        parent.flg|=0x80u;s=work(248,0,{2,2,2});s.parent=&parent;rejected=false;try{step_effect_sprite(s,c,&queued);}catch(const std::runtime_error&){rejected=true;}check(rejected,"bhEff248 under a linked parent reports the missing node matrix");
+        // Verlinkter Elternsatz: die Drehung beginnt mit dessen Gelenkmatrix (njCalcVector).
+        install_group4_services();
+        parent.flg|=0x80u;parent.link_kind=1;parent.link_index=2;parent.lkono=3;
+        recvx_core_random_seed(9);float rr[4];for(auto& x:rr)x=frac(); /* rr[0]: Streuung von zn (aoz 0) */
+        recvx_core_random_seed(9);s=work(248,0,{2,2,2});s.ax=100;s.ay=200;s.parent=&parent;step_effect_sprite(s,c,&queued);
+        {NJS_MATRIX r;njUnitMatrix(&r);njTranslate(&r,10.0f+3.0f,20.0f,30.0f);njRotateY(&r,8192);
+         njRotateXYZ(&r,100,200,0);njRotateZ(&r,Angle(65536.0f*rr[1]));njRotateX(&r,Angle(512.0f*(rr[2]-rr[3])));
+         NJS_POINT3 v0{0,0,2.0f/10.0f},e;njCalcVector(&r,&v0,&e);
+         check(s.flg&&close(s.xn,e.x)&&close(s.yn,e.y)&&close(s.zn,e.z),"bhEff248 under a linked parent must start in the parent's joint frame");}
+        parent.link_index=9;s=work(248,0,{2,2,2});s.parent=&parent;take_effect_output();step_effect_sprite(s,c,&queued);
+        check(s.flg==0&&take_effect_output().gaps.size()==1,"bhEff248 under a linked parent without its node reports the gap");
+        parent.flg&=~0x80u;parent.link_kind=-1;set_effect_extra_allocator({},{});set_effect_link_lookup({});set_effect_work_angle({});
     }
     { // 246: Art 0 faellt bis lkono und spritzt; Art 1 Rolle/Kipp mit Wachstum aus den Nachkommaanteilen
         EffectSpawn spawn;spawn.id=246;spawn.type=0;spawn.lkono=0;spawn.mdlver=1;spawn.scale={1,1,10};spawn.position={0,0.3f,0};spawn.flg=1;EffectSprite s;initialize_effect_sprite(s,spawn);
@@ -1566,12 +1592,265 @@ static void snow_room(const std::filesystem::path& data){
     check(flakes>0&&flakes%2==0,"the snow boxes produced no flakes in the scene");
     check(world.unbound_enemy_routines().count("bhEff219: cam.wpx/cam.vx vor dem ersten bhControlCamera")==1,"the camera box must report its gap without a camera pass");
 }
+// effsub1b.c:621/713 bhEff135/136 und effect.c:935 ef_Zanzo, mit Testdiensten.
+static void group10_afterimages(){
+    install_group4_services();
+    EffectContext c;c.pt_flg=0x10;bool queued=false;take_effect_output();
+    bool opened=false;std::size_t used=0;int vertices=100;unsigned captures=0;
+    EffectAfterimageServices svc;
+    svc.zan_open=[&](){opened=true;};
+    svc.zan_reserve=[&](std::size_t bytes){if(used+bytes>=0x200000u)return false;used+=bytes;return true;};
+    svc.vertex_count=[&](unsigned kind,unsigned index,unsigned mdl,unsigned node){return kind==1&&index==2&&mdl==0&&node==1?vertices:-2;};
+    svc.work_position=[](unsigned,unsigned)->std::optional<NJS_POINT3>{return NJS_POINT3{1,2,3};};
+    svc.capture=[&](unsigned kind,unsigned index,unsigned mdl,unsigned node)->std::shared_ptr<const EffectAfterimage>{
+        ++captures;auto a=std::make_shared<EffectAfterimage>();a->kind=kind;a->index=index;a->mdl=mdl;a->node=node;a->triangles.resize(3);return a;};
+    set_effect_afterimage_services(svc);
+    { // 135: ohne Auftrag nur ef_flg/zan, mit Auftrag und Link die Reservierung.
+        auto s=work(135,0);s.flg=1u|0x80u;s.slot=7;s.link_kind=1;s.link_index=2;s.lkono=1;
+        step_effect_sprite(s,c,&queued);
+        check(opened&&(s.flg&0x1000000u)&&s.mode0==0&&used==0&&!queued,"bhEff135 without an order only opens the buffer");
+        s.mode1=1;step_effect_sprite(s,c,&queued);
+        // ((100 << 5) + 72) = 3272, +64 - 3272 % 64 = 3328; acht Plaetze.
+        check(s.mode0==1&&s.ct0==0&&used==8*3328u&&take_effect_output().spawns.empty(),"bhEff135 reservation size differs");
+        // Ein glatter Rest bekommt trotzdem einen vollen 64er-Schritt: (126 << 5) + 72 = 4104, Rest 8 -> 4160;
+        // (2 << 5) + 72 = 136 -> 192; 0 Eckpunkte: 72 -> 128.
+        auto t=work(135,0);t.flg=1u|0x80u;t.mode1=1;t.link_kind=1;t.link_index=2;t.lkono=1;vertices=0;used=0;
+        step_effect_sprite(t,c,&queued);check(used==8*128u,"bhEff135 rounds 72 up to 128");
+        // Passt der Puffer nicht mehr, bleibt mode0 0 und der naechste Pass versucht es erneut.
+        auto full=work(135,0);full.flg=1u|0x80u;full.mode1=1;full.link_kind=1;full.link_index=2;full.lkono=1;vertices=100;used=0x200000u-8*3328u;
+        step_effect_sprite(full,c,&queued);check(full.mode0==0&&used==0x200000u-8*3328u,"bhEff135 must not reserve past 2 MB (>= test)");
+        // model NULL: still; unbekanntes Modell: Luecke.
+        auto none=work(135,0);none.flg=1u|0x80u;none.mode1=1;none.link_kind=1;none.link_index=2;none.lkono=1;vertices=-1;used=0;
+        step_effect_sprite(none,c,&queued);check(none.mode0==0&&used==0&&take_effect_output().gaps.empty(),"bhEff135 with a NULL model stays silent");
+        none.lkono=4;step_effect_sprite(none,c,&queued);check(take_effect_output().gaps.size()==1,"bhEff135 with an unknown model reports the gap");
+        // Ohne flg 0x80 (bhSetEffectLink fand das Werk nicht aktiv) passiert nichts.
+        auto loose=work(135,0);loose.flg=1;loose.mode1=1;loose.link_kind=1;loose.link_index=2;loose.lkono=1;vertices=100;used=0;
+        step_effect_sprite(loose,c,&queued);check(loose.mode0==0&&used==0,"bhEff135 needs flg 0x80");
+        // mode0 1: je Pass ein 136, Ringplatz 0..5, an dasselbe Werk, flg 0x80 wieder geloescht.
+        for(unsigned pass=0;pass<7;++pass){step_effect_sprite(s,c,&queued);auto out=take_effect_output();
+            check(out.spawns.size()==1,"bhEff135 must place one afterimage per pass");
+            const auto& e=out.spawns[0];
+            check(e.id==136&&e.flg==1&&e.type==7&&e.flr_no==int(pass%6)&&e.mdlver==0&&e.lkono==1&&e.link_kind==1&&e.link_index==2&&e.drop_link_flag,"bhEff136 request differs");
+            check(close(e.position.x,1)&&close(e.position.y,2)&&close(e.position.z,3),"bhEff136 starts at pp->px");}
+        s.mode1=0;step_effect_sprite(s,c,&queued);check(take_effect_output().spawns.empty()&&s.mode0==1,"bhEff135 without an order places nothing");
+    }
+    { // 136: Schnappschuss, dann fuenf gezeichnete Passes mit Alpha 200..40, dann frei.
+        EffectSpawn spawn;spawn.id=136;spawn.flg=1;spawn.type=7;spawn.lkono=1;spawn.link_kind=1;spawn.link_index=2;
+        EffectSprite s;initialize_effect_sprite(s,spawn);s.link_kind=1;s.link_index=2;
+        captures=0;step_effect_sprite(s,c,&queued);
+        check(captures==1&&s.afterimage&&s.afterimage->node==1&&s.mode0==1&&s.ct0==5&&!queued,"bhEff136 snapshot pass differs");
+        const unsigned alphas[5]={200,160,120,80,40};
+        for(unsigned pass=0;pass<5;++pass){step_effect_sprite(s,c,&queued);
+            check(queued&&s.zanzo_slot==int(5-pass)&&s.afterimage_alpha==alphas[pass]&&!s.custom_queued,"bhEff136 Zanzo pass differs");}
+        step_effect_sprite(s,c,&queued);check(!queued&&s.flg==0&&s.zanzo_slot<0,"bhEff136 must end after five drawn passes");
+        // Raum 1-00 Fall 2 (sowie 5-82, 9-32 Fall 1): die ef_fnc-Liste statt ef_Zanzo.
+        EffectContext fnc=c;fnc.stage_no=1;fnc.room_no=0;fnc.room_case=2;
+        initialize_effect_sprite(s,spawn);s.link_kind=1;s.link_index=2;step_effect_sprite(s,fnc,&queued);step_effect_sprite(s,fnc,&queued);
+        check(queued&&s.custom_queued&&s.zanzo_slot<0&&s.afterimage_alpha==200,"bhEff136 in room 1-00/2 draws through ef_fnc");
+        fnc.room_case=1;initialize_effect_sprite(s,spawn);s.link_kind=1;s.link_index=2;step_effect_sprite(s,fnc,&queued);step_effect_sprite(s,fnc,&queued);
+        check(s.zanzo_slot==5,"room 1-00 case 1 keeps ef_Zanzo");
+        // Ohne Schnappschuss: Luecke, kein Nachbild.
+        svc.capture=[](unsigned,unsigned,unsigned,unsigned)->std::shared_ptr<const EffectAfterimage>{return nullptr;};set_effect_afterimage_services(svc);
+        initialize_effect_sprite(s,spawn);s.link_kind=1;s.link_index=2;take_effect_output();step_effect_sprite(s,c,&queued);
+        check(s.flg==0&&take_effect_output().gaps.size()==1,"bhEff136 without native geometry reports the gap");
+    }
+    set_effect_afterimage_services({});
+    set_effect_extra_allocator({},{});set_effect_link_lookup({});set_effect_work_angle({});set_effect_pool_lookup({});
+}
+// RM_7070 (Gegner 5, Gelenk 1, ef_Zanzo) und RM_1002 (Fall 2, ef_fnc): Testaufstellung,
+// die die 135-Eintraege wie Skriptbefehl 0x91 einschaltet. Geprueft wird die Kette
+// bhSetEffectLink -> 135 -> 136 -> Nachbild in der Szene auf echten Raumdaten.
+static void afterimage_room(const std::filesystem::path& data){
+    for(const char* name:{"RM_7070","RM_1002"}){
+        const auto room=read_asset_file(data/(std::string("rooms/")+name+".RDT"),64*1024*1024);
+        const auto stage=decode_scene(room);auto actor=stage.spawns.at(0);
+        std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+        RoomWorld world(room,stage,actor,motion,frame,audio,data,{},name);
+        auto player=PlayerAsset::load(data,10);world.set_player_asset(&player);
+        Inventory inventory;MessageDialog dialog;EventVm events(room,inventory,dialog);
+        events.values[21]=RoomIdentity::parse(name).variant; /* runtime.cpp:384 sys->rcase */
+        world.bind_player_collision(events);
+        for(unsigned i=0;i<4;++i){world.tick();world.tick_camera(stage,stage.cameras.at(0),0);}
+        unsigned armed=0;
+        for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(s&&s->id==135){
+            check((s->flg&0x80u)&&s->link_kind>=1,"bhSetEffectLink must link the room's 135 entries");
+            const_cast<EffectSprite*>(s)->mode1=1;++armed;}}
+        check(armed>0,"room without its 135 entries");
+        for(unsigned i=0;i<12;++i){world.tick();world.tick_camera(stage,stage.cameras.at(0),0);}
+        unsigned shots=0,zanzo=0,fnc=0;
+        for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(!s||!(s->flg&1u)||s->id!=136)continue;
+            check(!(s->flg&0x80u)&&s->afterimage,"bhEff136 must hold a snapshot and no flg 0x80");++shots;if(s->zanzo_slot>=0)++zanzo;if(s->custom_queued)++fnc;}
+        // RM_1002 Eintrag 17 haengt an obwp[17] Gelenk 0 ohne Modell (objP[0].model NULL):
+        // er bleibt wie im Original still in mode0 0.
+        unsigned producing=0;for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(s&&s->id==135&&s->mode0==1)++producing;}
+        check(producing==(std::string(name)=="RM_1002"?2u:1u),"the 135 entries with a model must reserve their snapshots");
+        check(shots==6*producing,"every producing 135 keeps six afterimages alive");
+        const bool fnc_room=std::string(name)=="RM_1002";
+        check(fnc_room?(fnc==5*producing&&zanzo==0):(zanzo==5&&fnc==0),"afterimage list (ef_fnc/ef_Zanzo) differs");
+        Scene draw;std::vector<BoneMatrix> nodes;world.append(draw,nodes,stage.cameras.at(0));
+        std::map<unsigned,std::size_t> alphas;
+        for(const auto& t:draw.triangles)if(t.light_category==1&&!t.after_modifiers&&t.gouraud&&t.blend==SceneBlend::Ninja){
+            if(t.diffuse_material)++alphas[t.color>>24];
+            for(const auto& v:t.vertices)check(v.light.x>=0&&v.light.x<=1.0f+1e-4f,"afterimage lit RGB outside native range");}
+        check(alphas.size()==5&&alphas.count(40)&&alphas.count(200),"afterimages must draw with material alpha 200..40");
+        check(world.unbound_enemy_routines().count("bhEff135: pp->mdl[type].objP[lkono].model ohne nativen Modellbesitzer")==0,"afterimage source model unresolved");
+    }
+}
+
+static void afterimage_color_contract(){
+    // ps2_Vu1Strip.c:1654 DifAmb (selected by flags 0x0A): clamp first, then material.
+    const auto dark=cnk_afterimage_color(0xffc86432u,0);
+    check(close(dark.x,160)&&close(dark.y,80)&&close(dark.z,40),"DifAmb must multiply material after adding ambient");
+    const auto half=cnk_afterimage_color(0xffc86432u,0.1f);
+    check(close(half.x,180)&&close(half.y,90)&&close(half.z,45),"DifAmb light/ambient order differs");
+    const auto saturated=cnk_afterimage_color(0xffc86432u,0.7f);
+    check(close(saturated.x,200)&&close(saturated.y,100)&&close(saturated.z,50),"DifAmb must clamp the light before multiplying diffuse RGB");
+}
+static void published_afterimage_models(const std::filesystem::path& data){
+    const auto room=read_asset_file(data/"rooms/RM_7070.RDT",64*1024*1024);const auto stage=decode_scene(room);auto actor=stage.spawns.at(0);
+    std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);RoomWorld world(room,stage,actor,motion,frame,audio,data,{},"RM_7070");
+    auto player=PlayerAsset::load(data,10);world.set_player_asset(&player);
+    Inventory inventory;MessageDialog dialog;EventVm events(room,inventory,dialog);world.bind_player_collision(events);world.tick();
+    // Test publication at a non-bind pose. Hide the selected node and its ancestor:
+    // bhDraw136 draws the selected model directly, not the visible hierarchy.
+    auto pose=player.local_pose(42,0);auto flags=player.node_evalflags();unsigned node=0;
+    for(;node<player.bones();++node)if(model_object_vertex_count(player.encoded_model(),0,node).has_value())break;
+    check(node<player.bones(),"player has no snapshot model");
+    NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,100,20,30);njRotateY(&root,8192);
+    auto matrices=player.tree_matrices(pose,root);flags[0]|=8u;flags[node]|=8u;
+    world.commit_afterimage_model(0,0,0,player,pose,matrices,flags);
+    const auto& svc=effect_detail::afterimage_service();
+    const auto logical=player.script_index(node);const auto shot=svc.capture(0,0,0,logical);
+    check(shot&&!shot->triangles.empty()&&!shot->textures.empty(),"committed player object must capture even under hidden nodes");
+    auto expected=player.sample_object_work(node,pose,matrices,flags);
+    check(shot->triangles.size()==expected.triangles.size(),"player snapshot must contain exactly one object's model");
+    for(unsigned k=0;k<3;++k){const auto a=shot->triangles.front().vertices[k].position,b=expected.triangles.front().vertices[k].position;
+        check(close(a.x,b.x)&&close(a.y,b.y)&&close(a.z,b.z),"player snapshot differs from committed owP");}
+    motion=0;frame=123*65536;actor.position={-100,300,800};
+    const auto frozen=svc.capture(0,0,0,logical);
+    check(frozen&&close(frozen->triangles[0].vertices[0].position.x,shot->triangles[0].vertices[0].position.x),"snapshot must not rebuild the next player motion or world position");
+    // An additional mdl[n] owns its own texture/objP/owP. Publish one that has geometry.
+    // mdl[1] is a modifier volume, not a textured body model. mdl[4] is the
+    // control-owned Claire attachment (bhResetPlayer), used by the runtime too.
+    unsigned extra=4,extra_node=0;const PlayerAsset* model=player.model(extra);
+    check(model,"player mdl[4] attachment missing");
+    for(;extra_node<model->bones();++extra_node)if(model_object_vertex_count(model->encoded_model(),0,extra_node))break;
+    check(extra_node<model->bones(),"player attachment has no model object");
+    const auto extra_logical=model->script_index(extra_node);
+    check(svc.vertex_count(0,0,extra,extra_logical)>=0,"bhEff135 must inspect mdl[n] vertex count");
+    // Assets alone do not justify guessing rest matrices.
+    take_effect_output();check(!svc.capture(0,0,extra,extra_logical),"an unpublished supplementary model must remain a gap");
+    auto ep=model->bind_pose();auto ef=model->node_evalflags();njUnitMatrix(&root);njTranslate(&root,40,50,60);
+    auto em=model->tree_matrices(ep,root);world.commit_afterimage_model(0,0,extra,*model,ep,em,ef);
+    const auto es=svc.capture(0,0,extra,extra_logical);
+    check(es&&!es->triangles.empty()&&es->mdl==extra,"published supplementary mdl must capture");
+    const auto ee=model->sample_object_work(extra_node,ep,em,ef);
+    check(close(es->triangles[0].vertices[0].position.y,ee.triangles[0].vertices[0].position.y),"additional model used body matrices instead of its own owP");
+    world.set_player_asset(nullptr);
+    check(!svc.capture(0,0,0,logical),"rebinding the player must discard published model handles");
+    set_effect_afterimage_services({});
+}
+// effsub5.c:3036 bhEff229 / :3117 bhDrawWeaponEffect2 — Muendungsfeuer der Doppelwaffe
+// (WpnEffTab[21][0]: flg 0x81, flr_no 3, mdlver 0, Skalierung 4). Drei Passes: ein
+// zentrales Quad und zwei Balken (Blend 8/10), danach sechs um Z gedrehte Balkenpaare
+// (Blend 8/6) im Gelenkraum des verlinkten Werks (Texturgruppe 3). Die Eckpunkte werden
+// ueber op->mtx = lkwkp->owP[lkono] * [lx,ly,lz] * ax/ay/az und die Skalierung (sx,sx,sz)
+// in Weltkoordinaten gerechnet.
+static void muzzle_weapon229(){
+    EffectContext c;bool queued=false;auto s=work(229,0);
+    s.flg=0x81u;s.flr_no=3;s.type=0;s.mdlver=0;s.sx=s.sy=s.sz=4.0f;
+    NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,10.0f,20.0f,30.0f);
+    float link[16];std::memcpy(link,m,sizeof link);s.link_matrix=link;
+    for(unsigned pass=0;pass<3;++pass){
+        check(step_effect_sprite(s,c,&queued)&&queued,"bhEff229 did not queue a draw");
+        check(s.custom_queued,"bhEff229 is not an ef_fnc (custom) sprite");
+        check(s.tex_id==3&&s.bl_src==8&&s.bl_dst==10,"bhEff229 texture/blend differs");
+        check(s.spd==(pass==1?1.0f:0.8f),"bhEff229 spd differs from ct0");
+        check(s.quads.size()==15,"bhEff229 emitted an unexpected number of quads (expected 15)");
+        for(const auto& q:s.quads){
+            check(q.world_space&&q.textured&&q.category==3&&q.pn==4,"bhEff229 quad flags differ");
+            check(q.frame<2,"bhEff229 texture frame outside akpal[2][3]");
+        }
+        check(s.quads[0].source==8&&s.quads[0].destination==10,"bhEff229 central quad blend differs");
+        check(s.quads[3].source==8&&s.quads[3].destination==6,"bhEff229 turned pair blend differs");
+    }
+    // Erstes Quad (Eckpunkt 0): skalierte Ecke (-0.25,-0.25,0.3)*4 = (-1,-1,1.2), op->mtx T(10,20,30).
+    check(close(s.quads.empty()?0:s.quads[0].vertices[0].x,9.0f),"bhEff229 first vertex x differs");
+    check(s.mode0==2&&s.ct0==3,"bhEff229 did not finish after flr_no passes");
+    check(step_effect_sprite(s,c,&queued)&&s.flg==0&&!queued,"bhEff229 did not end after its passes");
+}
+// effsub4.c:654 bhEff_Sub352 — Flamme am verlinkten Werk (Erzeuger ist das Gegner-Feuer
+// bhEne_SetSanEffect/zonzon.c:939: zn=len, ct3=time, shp_ct=Bodenhoehe). Tor pt_flg 0x2;
+// sxb waechst um yn bzw. schrumpft x0.96; die Weltlage ist Werk-Gelenk * (ofx,ofy,ofz),
+// um cam.v * zn zur Kamera verschoben, als lokale lox/loy/loz gehalten.
+static void flame352(){
+    EffectContext off;off.pt_flg=1u;bool q=false;auto s2=work(352,0);
+    check(step_effect_sprite(s2,off,&q)&&!q,"bhEff352 runs without pt_flg 0x2");
+
+    EffectContext c;c.pt_flg=0x2u;c.camera_view={0,0,-1};bool queued=false;
+    auto s=work(352,0);
+    s.sx=s.sxb=2.0f;s.sy=s.syb=2.0f;s.sz=2.0f;s.zn=1.0f;s.shp_ct=-100.0f;
+    NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,5.0f,10.0f,15.0f);
+    float lm[16];std::copy(m,m+16,lm);s.link_matrix=lm;
+    check(step_effect_sprite(s,c,&queued)&&queued,"bhEff352 first pass did not queue");
+    check(s.tex_id==8&&s.bl_src==8&&s.bl_dst==10&&(s.flg&0x4180000u)==0x4180000u,"bhEff352 init differs");
+    check(close(s.xn,2.0f)&&close(s.yn,0.25f),"bhEff352 growth constants differ");
+    check(s.mode0==2&&s.mode2==1,"bhEff352 did not enter mode 2");
+    check(close(s.sxb,0.25f),"bhEff352 did not grow by yn");
+    // ofs (0,0,0), owk T(5,10,15), cam.v (0,0,-1), zn 1: p2 (5,10,15), p1 -cam*zn+p2-owk_trans
+    // = (0,0,1); die Drehlage von inv(owk) ist die Identitaet, also lox/loy/loz = (0,0,1),
+    // Zeichenursprung owk*local = (5,10,16) -> op->mtx[13] = 10.
+    check(close(s.lox,0.0f)&&close(s.loy,0.0f)&&close(s.loz,1.0f),"bhEff352 local position differs");
+    check(close(s.mtx_world_y,10.0f),"bhEff352 world Y differs");
+    check(close(s.sx,0.25f*0.48f),"bhEff352 UV size differs");
+    // Bodenabschluss (bhEff352: shp_ct > op->mtx[13]).
+    s.shp_ct=100.0f;
+    step_effect_sprite(s,c,&queued);
+    check(s.flg==0,"bhEff352 did not end when the ground is above the sprite");
+}
+// Effektaufrufe der eff[]-Zeichenpaesse laufen nicht durch njClipZ (SceneTriangle::ninja_primitive):
+// njDrawTextureSub3D (ps2_NaDraw.c:302) verwirft den Aufruf bei scr.z < 0, Ps2AddPrim3D
+// (ps2_dummy.c:486) laesst ein Streifendreieck fallen, wenn ein Eckpunkt ausserhalb +-2047
+// Bildpunkte um 2048 oder ausserhalb 1 <= z <= 3854 liegt. Eine njClipZ-Nahebene von 9 (Kamera
+// der RM_0020-Explosion) darf einen Effekt bei z = 5 nicht abschneiden.
+static void effect_call_clip(){
+    SceneCamera camera;camera.perspective=14016;camera.clip_near=9.0f;camera.clip_far=0;
+    // Sicht z = -Welt z, Sicht y = -Welt y (camera_view_matrix: njScale(1,-1,-1)).
+    const auto quad=[](std::array<NJS_POINT3,4> view,std::uint32_t id,bool screen_reject){
+        std::array<SceneVertex,4> v;for(unsigned i=0;i<4;++i)v[i]=SceneVertex{{view[i].x,-view[i].y,-view[i].z}};
+        std::vector<SceneTriangle> out;
+        for(const auto& index:std::array<std::array<unsigned,3>,2>{{{0,1,2},{1,3,2}}}){
+            SceneTriangle t;t.vertices={v[index[0]],v[index[1]],v[index[2]]};t.color=0xffffffffu;t.world_lit=true;t.camera_mask=false;
+            t.ninja_primitive=id;t.ninja_screen_reject=screen_reject;out.push_back(t);}
+        return out;};
+    const auto pixels=[&](const std::vector<SceneTriangle>& triangles){
+        Scene scene;scene.background=0xff000000;scene.triangles=triangles;
+        SoftwareRenderer image(64,48);image.set_supersampling(1);image.draw(scene,camera);
+        return std::count_if(image.pixels().begin(),image.pixels().end(),[](auto p){return p!=0xff000000u;});};
+    const std::array<NJS_POINT3,4> near_quad{{{-1,-1,5},{1,-1,5},{-1,1,5},{1,1,5}}};
+    check(pixels(quad(near_quad,0,true))==0,"test setup: an ordinary triangle at z 5 is not clipped by njClipZ 9");
+    const auto both=pixels(quad(near_quad,1,true));
+    check(both>0,"effect call at z 5 still clipped by njClipZ near 9");
+    // Halbe Breite 30 bei z = 5: x*ninja_sx/z liegt weit jenseits 2047 -> beide Dreiecke ADC.
+    check(pixels(quad({{{-30,-1,5},{30,-1,5},{-30,1,5},{30,1,5}}},1,true))==0,"effect triangle beyond the GS +-2047 window still drawn");
+    // Nur v3 jenseits: Dreieck (v0,v1,v2) bleibt, (v1,v2,v3) faellt.
+    const auto half=pixels(quad({{{-1,-1,5},{1,-1,5},{-1,1,5},{30,1,5}}},1,true));
+    check(half>0&&half<both,"Ps2AddPrim3D drops whole calls instead of the flagged strip triangle");
+    // z 0.5 an v3 (|1.0625z-2048.06| > 2047): dasselbe Dreieck faellt, keine Nahklippung.
+    check(pixels(quad({{{-1,-1,5},{1,-1,5},{-1,1,5},{1,1,0.5f}}},1,true))==half,"vertex closer than z 1 not flagged by the Ps2AddPrim3D z test");
+    // scr.z < 0: njDrawTextureSub3D verwirft den ganzen Aufruf, njDrawPolygonSub3D (ef_ntx) nicht.
+    const std::array<NJS_POINT3,4> behind{{{-1,-1,5},{1,-1,5},{-1,1,5},{1,1,-1}}};
+    check(pixels(quad(behind,1,true))==0,"njDrawTextureSub3D call with scr.z < 0 still drawn");
+    check(pixels(quad(behind,1,false))==half,"njDrawPolygonSub3D lost the triangle without the scr.z < 0 vertex");
+}
+
 int main(int argc,char** argv){
     try{
         _Make_SinTable();
         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
-        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();
-        if(argc>1){const std::filesystem::path data=argv[1];steam(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);}
+        muzzle_weapon229();flame352();effect_call_clip();
+        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();afterimage_color_contract();
+        if(argc>1){const std::filesystem::path data=argv[1];steam(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);afterimage_room(data);published_afterimage_models(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}
 }

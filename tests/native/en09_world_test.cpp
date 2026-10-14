@@ -15,9 +15,10 @@ struct Fixture {
     std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn actor;
     std::size_t motion=42;std::int64_t frame=0;AudioMixer audio;PlayerAsset player;
     Inventory inv;MessageDialog dialog;std::uint32_t head=0;RoomWorld world;EventVm events;
-    Fixture(const std::filesystem::path& data):bytes(RoomArchive(data).load("RM_1060.RDX",64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.at(0)),audio(data),player(PlayerAsset::load(data,10)),
-        world(bytes,scene,actor,motion,frame,audio,data,{},"RM_1060"),events(bytes,inv,dialog){
+    Fixture(const std::filesystem::path& data,const char* room="RM_1060",unsigned spawn=0):bytes(RoomArchive(data).load(std::string(room)+".RDX",64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.at(spawn)),audio(data),player(PlayerAsset::load(data,10)),
+        world(bytes,scene,actor,motion,frame,audio,data,{},room),events(bytes,inv,dialog){
         world.set_player_asset(&player);world.bind_player_collision(events);world.bind_enemy_player(inv.hp,head);world.set_enemy_ai(true);world.set_enemy_grab(false);
+        events.values[15]=spawn; /* runtime.cpp: bhCmpB key 15 = Eintrittsnummer */
         events.binding=[this](const EventCommand& c){return world.bind(c);};events.initialize();
     }
     RECVX_ENEMY_WORK& enemy(unsigned i=0){auto* p=world.enemy_table().slot[i];check(p&&p->id==9,"original RM_1060 Bandersnatcher missing");return *p;}
@@ -63,6 +64,27 @@ int main(int argc,char** argv){try{
         check(!(e.flg&4)&&e.dam[4]==0,"damage flags not cleared at end of enemy pass");
     }
     {
+        // event.c:12053 Common_controll 7 setzt work->flr_no = bhCheckFloorNum(py);
+        // der folgende Sub_controll 0x8f (bhLoadWork-Uebernahme) darf die Etage
+        // der Raumtabelle (RM_2000 EN09 #1: flr_no -1, py -36) nicht zuruecklegen.
+        // Eintritt 0: Skript legt #1 auf (40, 0, 45); Eintritt 1: auf (145, 36, 60).
+        for(unsigned spawn=0;spawn<2;++spawn){
+            Fixture f(data,"RM_2000",spawn);
+            for(unsigned i=0;i<2;++i){auto* w=f.world.enemy_table().slot[i];check(w&&w->id==9,"original RM_2000 Bandersnatcher missing");
+                check(w->flr_no==f.world.floor_at({w->px,w->py,w->pz}),"script placement kept the room-table floor instead of bhCheckFloorNum(py)");}
+            check(f.world.enemy_table().slot[1]->flr_no==(spawn?f.world.floor_at({145,36,60}):0),"RM_2000 EN09 #1 floor after script placement wrong");
+        }
+        // event.c:10053 Common_controll 47 = bhCalcModel(work): owP folgt der Skriptlage.
+        // Diagnoseaufstellung: #1 wird hier direkt per bhEneSetCk-Befehl 0x24
+        // aktiviert (natuerlich: Kameraschnitt-Ereignis). Ohne Neuberechnung zog
+        // bhCalcFixOffset den Work auf die Raumtabellenlage (25.03/69.95) zurueck.
+        Fixture f(data,"RM_2000",0);auto* w=f.world.enemy_table().slot[1];
+        check(w->px==40&&w->pz==45,"RM_2000 EN09 #1 script position (event.c:12034) missing");
+        EventCommand on;on.opcode=0x24;on.bytes={0x24,1,1,1};check(f.world.bind(on),"bhEneSetCk activation not bound");
+        for(int i=0;i<4;++i)f.tick();
+        check(!(w->stflg&0x1000000u)&&std::hypot(w->px-40.0f,w->pz-45.0f)<3.0f,"activated EN09 jumped back to the room-table position (stale owP after Common_controll 47)");
+    }
+    {
         // effsub4.c:2149/3177: delayed smoke uses model texture, mode1 type,
         // fifteen frames then release; no drawing during the delay.
         EffectSprite s;EffectSpawn spawn;spawn.id=369;spawn.type=1;spawn.scale={2,2,2};initialize_effect_sprite(s,spawn);
@@ -73,5 +95,5 @@ int main(int argc,char** argv){try{
         for(int i=1;i<15;++i)step_effect_sprite(s,EffectContext{},&queued);
         step_effect_sprite(s,EffectContext{},&queued);check(!queued&&!s.flg,"smoke fails to release");
     }
-    std::cout<<"EN09 real-world dispatch, arm initialization, walking, pause, type 10, corpse, damage and smoke PASS\n";return 0;
+    std::cout<<"EN09 real-world dispatch, arm initialization, walking, pause, type 10, corpse, damage, RM_2000 script floor and smoke PASS\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

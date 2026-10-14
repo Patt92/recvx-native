@@ -18,7 +18,7 @@ struct VideoSettings {
     static VideoSettings read(const std::filesystem::path& path); // missing file -> defaults
     void save(const std::filesystem::path& path)const;
 };
-// Persisted beside controls.ini as video.ini; the settings screen cycles it.
+// Persisted in the platform user-data directory as video.ini; --video-config overrides it.
 class VideoConfig {
 public:
     VideoConfig()=default;

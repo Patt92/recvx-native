@@ -76,7 +76,10 @@ int main(int argc,char** argv){try{
  // is hidden by bhInitModelSet 1/0/0 through stflg 0x1000000 regardless of
  // whether Sub_controll 0x80 released it before (natural end) or the task was
  // killed first (skip). Measured before the fix: 2x the Rodrigo count after a skip.
- auto drawn_enemy_triangles=[](const Room& r){Scene s;r.world.append(s,{},r.scene.cameras.at(0));std::size_t n=0;for(const auto& t:s.triangles)if(t.light_category==1)++n;return n;};
+  // Enemy works only (world.cpp: kind 1 models draw after the modifiers, game.c:318). Effect
+ // sprites keep the default light category 1; their set follows bhRandamSet branches
+ // (RM_0000 scd1 picks events 12..15), which differ between the natural and the skipped run.
+ auto drawn_enemy_triangles=[](const Room& r){Scene s;r.world.append(s,{},r.scene.cameras.at(0));std::size_t n=0;for(const auto& t:s.triangles)if(t.light_category==1&&t.after_modifiers)++n;return n;};
  std::size_t natural_enemy_triangles=0;
  {
   Room r(data,"RM_0000");unsigned ticks=0;
@@ -135,6 +138,23 @@ int main(int argc,char** argv){try{
   if(skipped_enemy_triangles!=natural_enemy_triangles)std::cerr<<"skip delay="<<delay<<" drawn enemy triangles="<<skipped_enemy_triangles<<" natural="<<natural_enemy_triangles<<"\n";
   check(skipped_enemy_triangles==natural_enemy_triangles,"skipped cell cinematic still draws the hidden stand-in (eneset.c:797 gate bypassed)");
  }
+ // RM_0090 event 23 is the 3D-laser sequence (bhEffTypeSet 0xad + 0xc0
+ // bhCyodanSetEx records, event.c:8307). Measured before the first fix the task
+ // died at offset 0x20fa with "unimplemented opcode 0xc0". The records link to
+ // sys->obwp[8] node 2 (w4 2, w5 8, w6 2) and spawn bhSetEffParticleMk2 with
+ // WpnTab[4].hiteff (event.c:8441-8461) through the native particle owner, so
+ // no 0xc0 stays pending and particles must appear while the event runs.
+ {
+  Room r(data,"RM_0090");r.vm.start(0,23);
+  bool active=true;unsigned ticks=0;std::size_t particles=0;
+  for(;ticks<400&&active;++ticks){r.tick();if(r.world.blood_particles()>particles)particles=r.world.blood_particles();active=false;for(const auto& t:r.vm.task_states())if(t.event==23)active=true;}
+  check(r.vm.errors.empty(),"RM_0090 laser event blocked on an unimplemented opcode");
+  check(!active,"RM_0090 laser event did not run to its end");
+  bool saw_c0=false;for(const auto& c:r.vm.pending_bindings)if(c.opcode==0xc0)saw_c0=true;
+  check(!saw_c0,"RM_0090 laser event leaves bhCyodanSetEx (0xc0) unbound");
+  for(const auto& gap:r.world.unbound_enemy_routines())if(gap.find("bhCyodanSetEx")!=std::string::npos||gap.find("PtclTbl")!=std::string::npos)throw std::runtime_error("RM_0090 laser event: "+gap);
+  check(particles>0,"RM_0090 laser event spawned no bhSetEffParticleMk2 particles");
+ }
  if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory expectation(s) failed; doors and early-Enter timings passed.\n";return 1;}
- std::cout<<"Both original dog events -> padlock -> all three exits, 14 early Enter timings -> hint/lighter/Rodrigo and five mid-scene cinematic skips passed. Diagnostic event starts/floor placement; no campaign proof.\n";return 0;
+ std::cout<<"Both original dog events -> padlock -> all three exits, 14 early Enter timings -> hint/lighter/Rodrigo, five mid-scene cinematic skips and the RM_0090 laser event past its original 0xc0 opcode passed. Diagnostic event starts/floor placement; no campaign proof.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -213,6 +213,7 @@ int main(int argc,char** argv){try{
                 press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);check(menu.selected==3,"keyboard/gamepad combine cursor does not reach the partner slot");
                 ok();check(menu.message.active()&&menu.message.index()==155,"keyboard/gamepad combine question 155 missing");
                 while(menu.message.active()&&!menu.message.choices())ok();ok();
+                for(int i=0;i<20&&(menu.combining||menu.erase_frames);++i)tick(); // ItemCombination subcsr 2/3 und ItemCommandErase laufen je Statusframe
                 check(inv.contains(25)&&!inv.contains(21)&&!inv.contains(22)&&!menu.combining&&menu.active,"keyboard/gamepad herb Combine failed");});
             if(menu.combining)press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);
             // D03 Untersuchung über denselben Eingabeweg: Dietrichfrage 181,

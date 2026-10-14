@@ -181,12 +181,17 @@ int main(){try{
     section("D01 Selektor 6 Combi_03 Kräuter",[&]{
         const unsigned recipes[][3]={{21,21,24},{21,22,25},{21,23,26},{21,24,28},{21,26,27},{22,26,29},{23,24,27},{23,25,29}};
         for(const auto& r:recipes)for(unsigned reverse=0;reverse<2;++reverse){auto inv=clean();inv.slots()[2]=Inventory::pack(r[reverse?1:0],1);inv.slots()[3]=Inventory::pack(r[reverse?0:1],1);unsigned m=0,s=0;
-            check(inv.combine(2,3,&m,&s)&&inv.occupied()==1&&inv.slots()[2]==Inventory::pack(r[2],1)&&s==2,"herb recipe/result cursor differs: "+std::to_string(r[0])+"+"+std::to_string(r[1]));}
+            // movedir 0: listcsr_0 = listcsr_1 (3, sub1.c:5980-5984); das folgende ItemSort
+            // zieht das Produkt nach 2, der Cursor folgt ihm nicht (kein Nachführen im Original).
+            check(inv.combine(2,3,&m,&s)&&inv.occupied()==1&&inv.slots()[2]==Inventory::pack(r[2],1)&&s==3&&!inv.slots()[3],"herb recipe/result cursor differs: "+std::to_string(r[0])+"+"+std::to_string(r[1]));}
         {auto inv=clean();inv.slots()[2]=Inventory::pack(22,1);inv.slots()[3]=Inventory::pack(23,1);const auto before=inv.items;unsigned m=0,s=0;check(inv.combination_rule(2,3)<0&&!inv.combine(2,3,&m,&s)&&inv.items==before,"invalid herb pair combined");}});
     section("D01 Selektor 7/8 Combi_04 Pulver + Pfeile",[&]{
         for(const auto counts:{std::pair<unsigned,unsigned>{4,10},{10,4},{4,4}})for(unsigned reverse=0;reverse<2;++reverse){auto inv=clean();inv.slots()[2]=Inventory::pack(35,counts.first);inv.slots()[3]=Inventory::pack(18,counts.second);unsigned result=0;
             check(inv.combine(reverse?3:2,reverse?2:3,nullptr,&result),"partial bowgun powder conversion refused");
-            check(Inventory::id(inv.slots()[result])==36&&Inventory::quantity(inv.slots()[result])==std::min(counts.first,counts.second),"conversion loses explosive arrow count/result cursor");
+            // Gleiche Mengen leeren beide Plätze bis auf das Produkt: listcsr_0 (sub1.c:5980-5984) bleibt
+            // auf Slot 3, das ItemSort des Statusframes zieht 36 nach Slot 2 (kein Nachführen).
+            const bool equal=counts.first==counts.second;
+            check(Inventory::id(inv.slots()[equal?2:result])==36&&Inventory::quantity(inv.slots()[equal?2:result])==std::min(counts.first,counts.second)&&(!equal||(result==3&&!inv.slots()[3])),"conversion loses explosive arrow count/result cursor");
             check(inv.contains(18)==(counts.second>counts.first)&&inv.contains(35)==(counts.first>counts.second),"conversion loses leftover arrows/powder");
             unsigned rest=0;for(unsigned i=2;i<12;++i)if(Inventory::id(inv.slots()[i])==18||Inventory::id(inv.slots()[i])==35)rest+=Inventory::quantity(inv.slots()[i]);
             check(rest==std::max(counts.first,counts.second)-std::min(counts.first,counts.second),"conversion leftover count differs");}});

@@ -1,4 +1,5 @@
 #include "chunk_blend.h"
+#include <utility>
 #include <algorithm>
 #include <stdexcept>
 namespace recvx {
@@ -43,6 +44,10 @@ std::uint64_t ninja_blend_register(int source,int destination){
     return alpha_tbl[source][destination];
 }
 const std::vector<std::string>& color_blending_unavailable(){return unavailable;}
+std::pair<int,int> chunk_blend_modes(unsigned source,unsigned destination){
+    if(source>7||destination>7)throw std::runtime_error("chunk blend index outside Ninja table");
+    return {int(lNaCnkSrcAlphaMode[source]),int(lNaCnkDstAlphaMode[destination])};
+}
 std::uint64_t chunk_blend_register(unsigned source,unsigned destination){
     if(source>7||destination>7)throw std::runtime_error("chunk blend index outside Ninja table");
     const auto mode=alpha_tbl[lNaCnkSrcAlphaMode[source]][lNaCnkDstAlphaMode[destination]];

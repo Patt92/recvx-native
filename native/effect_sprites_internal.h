@@ -64,6 +64,8 @@ struct FloorEffectHit {unsigned type,prm0;};
 std::optional<FloorEffectHit> floor_effect(int flr_no,float px,float pz,const char* what);
 // pp->mlwP->owP[node].mtx (kind 0 Spieler, 1 Gegner) ueber den Raumbesitzer; ohne Anbieter Luecke.
 NJS_MATRIX& link_node_matrix(unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out,const char* what);
+// Dasselbe ohne Abbruch: false, wenn der Raumbesitzer den Knoten nicht hat.
+bool find_link_node_matrix(unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out);
 // pp->ay des Werksatzes (kind 0 Spieler, 1 Gegner nach Raumindex).
 int work_angle(unsigned kind,unsigned index,const char* what);
 // eff[slot] des geteilten Satzes; nullptr, wenn der Platz nicht existiert.
@@ -73,8 +75,22 @@ EffectSprite* pool_work(int slot);
 void sink_slot_into_pv(const EffectSprite& owner,int index);
 // Ein Dienst, den diese Prozedur nicht erreichen konnte: benannt melden statt verdecken.
 void report_gap(const char* name);
+// Besitzerzugriffe (EffectWorldHooks); ohne Besitzer benannte Luecke.
+bool hook_player_get(RECVX_ENEMY_PLAYER& p,const char* what);
+void hook_player_set(const RECVX_ENEMY_PLAYER& p);
+void hook_player_exp0(unsigned offset,float value);
+void hook_player_fire(int jno,NJS_POINT3 ofp,float size,int life);
+void hook_fire_light(NJS_POINT3 pos);
+void hook_en12_binta(void* enemy_work,int action);
+bool hook_effect_se_playing(int se);
+void hook_effect_se(NJS_POINT3 pos,int se);
+void hook_player_dv(NJS_POINT3 dv);
 // effsub1.c:8825 bhEff127: plp->hp = -1 am Spielerwork des Raumbesitzers.
 void request_player_kill();
+// sys->ef_flg |= bits (der Raumbesitzer haelt ef_flg).
+void request_effect_flags(unsigned bits);
+// Die Nachbilddienste des Raumbesitzers (set_effect_afterimage_services).
+const EffectAfterimageServices& afterimage_service();
 // bhSetExtraEffectWork ohne Satzinhalt: nur den eff[512]-Platz (flg 2) belegen bzw.
 // freigeben (*(int*)work = 0). -1, wenn der Pool voll ist.
 int reserve_extra_slot();
@@ -89,6 +105,16 @@ void effset(EffectSprite& s,const EffectUv& uv,unsigned num);
 // Punktgruppen (je 100 NJS_POINT3 ab Byte 4) und Vektorfeld in je einen
 // bhSetExtraEffectWork-Satz; nativ liegen die Daten hier, die Plaetze bleiben im
 // eff[512]-Pool belegt wie im Original (header_slot, Group::slot, vector_slot).
+// R08_WORK (effsub3.c): prm_a = Eff308PRM_WORK (Offsets per Disassembly 0x0024AD30..0x0024B184:
+// vtx_num @0, speed @4, accel @8, @0xC unbenutzt, time @0x10, ang_rand @0x14, spd_rand @0x18,
+// tim_rand @0x1C, gravity @0x20), prm_b = PMB_WORK (vtx_pos, vtx_dir, col_src, col_dst, gnd_hgh).
+struct EffectSpark308 {
+    struct Prm {int vtx_num;float speed,accel,unused_c;int time;float ang_rand,spd_rand;int tim_rand;float gravity;} prm_a{};
+    NJS_POINT3 vtx_pos{},vtx_dir{};std::uint32_t col_src=0,col_dst=0;float gnd_hgh=0;
+    int mode=0,drw_num=0;float wnd_spd=0,wnd_acl=0;
+    std::array<NJS_POINT3,32> VtxBuf{};std::array<NJS_POINT3,16> VtxDir{};std::array<std::uint32_t,32> VtxCol{};
+    std::array<int,16> TimBuf{};std::array<std::uint32_t,16> ColAdd{},ColSub{};
+};
 struct EffectSnow {
     unsigned flg=2;int header_slot=-1;
     unsigned ulFrame=0;

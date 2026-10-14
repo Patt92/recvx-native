@@ -19,11 +19,13 @@
 #include "weapon_flash.h"
 #include "player_combat_core.h"
 #include "object_itmbox.h"
+#include "player_head.h"
 #include "view_clip.h"
 #include <deque>
 #include <set>
 #include <string>
 #include <map>
+#include <tuple>
 #include <memory>
 #include <optional>
 #include <functional>
@@ -42,6 +44,8 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     std::array<std::uint8_t,4> object_hide{{255,255,255,255}};
     // O_WRK fields of a room object (kind 2) that enemy routines read and write
     // (en04.c:1100 door branch, :3955 wire shake): flg2, mode1, mode3, ct0, ayp.
+    // O_WRK yn und gpx/gpy/gpz (objitm.c:1860 Ausgangslage) fuer bhEne56/bhEff134.
+    float object_yn=0;NJS_POINT3 object_origin{};
     unsigned object_flg2=0,object_mode1=0,object_mode3=0;int object_ct0=0,object_ayp=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
     // bhEneLookFlgSet (event.c): original BH_PWORK flg bit 0x8000. Enemy AI
     // consumers (en01.c) are still pending; the state itself is exact.
@@ -108,6 +112,12 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // mdl_n: das ML_WORK bleibt genullt (obj_num 0); bhCalcTree/Draw laufen leer, kein Fehler.
     bool model_absent=false;
     WorldEntity* model_owner=nullptr;unsigned model_window=0;int motion_library=-1;
+    // `epp->mlwP = &epw->mdl[base]` (en13.c:111-184): mdl[k] dieses Works ist
+    // mdl[base+k] des Elternworks; model_bank ist dessen Modellreihe, nullptr = eigene.
+    const PlayerAsset* model_bank=nullptr;unsigned model_base=0;
+    // Beschreibbarer Vertexstrom des gezeichneten mlwP->objP (bhEne13_ScaleModel
+    // schreibt p[0]/p[1] an Ort und Stelle). Leer = unveraenderte Modelldaten.
+    std::vector<std::uint8_t> live_model;
     // npSetAllMatColor(mlwP->objP, obj_num, color) (njplus.c:1375) patcht in
     // JEDEM Objekt des Baums die Materialchunks 17..23: B/G/R werden immer
     // geschrieben, A nur, wenn der Modellwert nicht 0 ist. Der Wert gehoert
@@ -148,6 +158,11 @@ public:
     std::optional<CollisionWall> collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,bool omit_attribute4=false)const;
     float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,floor_at(origin));}
     float combat_wall_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range,unsigned flags=0x400)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,-32768,flags);}
+    // pwksub.c:718 bhCheckL2Wall(lp, flg, len) over rom->walp + sys->mwalp (collision_geometry
+    // order): the line runs from `origin` along `vector` (not normalised). Returns the hit
+    // count != 0, *len = nr, *apos = sys->apos and, on a hit, *atr = *sys->ahtp and *index
+    // its position in collision_geometry() (-1 = NULL).
+    int l2_wall(NJS_POINT3 origin,NJS_POINT3 vector,unsigned flg,float* len,NJS_POINT3* apos,CollisionWall* atr=nullptr,int* index=nullptr)const;
     // bhGetGroundPosition for the original attack path; same collision set as movement.
     float combat_ground(NJS_POINT3 probe);
     std::optional<GroundHit> ground_hit()const{return ground_.hit();}
@@ -199,11 +214,13 @@ public:
     // no such enemy or its motion library lacks the clip; the caller reports
     // that as a gap instead of drawing a substitute.
     std::optional<Scene> computer_character(unsigned chr_no,unsigned motion,unsigned frame_no);
-    void set_player_asset(const PlayerAsset* player){player_asset_=player;if(player){player_obj_=player->bind_pose();player_owp_flags_.assign(player_obj_.size(),0);}}
+    void set_player_asset(const PlayerAsset* player){for(auto it=afterimage_models_.begin();it!=afterimage_models_.end();)if(std::get<0>(it->first)==0)it=afterimage_models_.erase(it);else ++it;player_asset_=player;if(player){player_obj_=player->bind_pose();player_owp_flags_.assign(player_obj_.size(),0);}}
     void set_player_character(unsigned character){player_character_=int(character&3);}
     // C02: transient enemy view of the existing player. Runtime binds its
     // Inventory HP and EXP1 head flags by address; neither is copied here.
     void bind_enemy_player(int& hp,std::uint32_t& head_flags){player_hp_owner_=&hp;player_head_flags_=&head_flags;}
+    // plp->exp1 head work (player_head.h): Player_controll 129/130/142/150 write its flags and nod script.
+    void bind_player_head(RECVX_HEAD_STATE& head){player_head_=&head;}
     bool enemy_player_get(RECVX_ENEMY_PLAYER& out)const;
     bool enemy_player_set(const RECVX_ENEMY_PLAYER& in);
     unsigned enemy_player_motion_frames(unsigned motion,bool from_enemy)const;
@@ -214,6 +231,13 @@ public:
     // wird vom Gegnerpass desselben Besitzers gefuellt.
     RECVX_ENEMY_TABLE& enemy_table(){return enemy_table_;}
     void commit_player_joints(const std::vector<BoneMatrix>& nodes){player_joint_matrices_=nodes;}
+    // owP des zuletzt berechneten Spielerbaums (das bhCalcModel(plp) der vorigen Runde).
+    // Genau dieses owP liest das Original in bhSetGunFire/bhControlEffect; eine Abfrage
+    // darf keinen neuen Motionzustand daraus samplen.
+    const std::vector<BoneMatrix>& player_committed_joints()const{return player_joint_matrices_;}
+    // Publish objP and physical owP from the same control pass. Afterimage capture must
+    // not infer this pose from the next motion frame. Additional mdl[n] need their own work.
+    void commit_afterimage_model(unsigned kind,unsigned index,unsigned mdl,const PlayerAsset& asset,const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& nodes,const std::vector<std::uint32_t>& flags);
     // bhCalcModel(plp) (player.c:1517) runs on mlwP->objP after the mode routine
     // and bhControlPlayerHead, so the owP it commits carries the script node
     // writes and the crate pose as well.  The owner of the committed matrices
@@ -257,6 +281,10 @@ public:
     void set_player_weapon(unsigned wpnr_no){player_weapon_=wpnr_no;} // plp->wpnr_no for bhControlPlayer effects
     void set_player_way(std::int16_t way){player_way_=way;} // plp->way, written by the combat pass (player.c:1707/4992)
     void set_player_speed(float spd){player_spd_=spd;} // plp->spd of the native action pass
+    // PEXP0_I(0x14) dmlvl des nativen Aktionsbesitzers (en05.c:5627 bhEne05_CheckJump liest es).
+    void set_player_dmlvl(std::int32_t dmlvl){player_dmlvl_=dmlvl;player_dmlvl_bound_=true;}
+    // plp->stflg |= 0x80000 (en05.c:1827/1973/2852): der Giftzustand gehoert dem Inventar.
+    bool take_player_poison(){const bool v=player_poison_request_;player_poison_request_=false;return v;}
     // StartVibrationEx(AtrbId, VibNo) requests of enemies, zonzon helpers and
     // event opcode 0x9f; SetEventVibrationMode of opcode 0x9e. The runtime owns
     // the vibration unit and drains these once per tick.
@@ -290,6 +318,21 @@ public:
     void initialize_camera_clip(unsigned cut,bool hand_over_fog=true);
     ViewClip camera_clip()const{return installed_clip_;}
     void tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking=true);
+    // effsub3.c:2401 bhSetEffGunSpark: AllocOworkOne (erster freier eff-Platz), Effekt 308.
+    int gun_spark(NJS_POINT3 pos,NJS_POINT3 dir,std::uint32_t src_col,std::uint32_t dst_col,int typ_no);
+    // sys->pad_on/pad_ps dieses Passes (bhSysCallMain), fuer Effektprozeduren mit Padsteuerung (bhEff134).
+    void set_pad(unsigned on,unsigned ps){pad_on_=on;pad_ps_=ps;}
+    // screen.c bhSetScreenFade und sys->fade_pbk beim Besitzer der Runtime.
+    void set_screen_fade_hooks(std::function<void(std::uint32_t,float)> set,std::function<std::uint32_t()> previous){screen_fade_set_=std::move(set);screen_fade_previous_=std::move(previous);}
+    // player.c:1114 bhStandPlayerMotion beim Spielerbesitzer der Runtime (Aktion, Motion,
+    // Flags); die Welt setzt nur mnwP = mnwPb. Ohne Besitzer: benannte Luecke, false.
+    void set_stand_player_hook(std::function<void()> hook){stand_player_=std::move(hook);}
+    bool stand_player_motion();
+    void set_camera_offset_owner(NJS_POINT3* offset){camera_offset_=offset;}
+    // Kindworks aus bhSetEnemy (Diagnose: --state).
+    const std::deque<WorldEntity>& enemy_children()const{return enemy_children_;}
+    // effsub1b.c:101 bhDraw134: die Kran-Anzeige (2D, Texturgruppe 44) ueber dem Bild.
+    void draw_ufo_hud(SoftwareRenderer& image)const;
     // face.c:79 bhControlMask fuer einen Besitzer mit Maskendaten (Gegnerpass id > 90 oder Weltpass).
     void control_mask(WorldEntity& e,const PlayerAsset& actor);
     struct FogView {bool enabled;std::uint32_t color;float near_range,far_range;int ct;};
@@ -325,7 +368,13 @@ public:
     // (player.c:3099/3294/3474/3692). Ohne das vergleicht der erste Koerperpass nach der
     // Landung gegen die Vorsonde der Ausgangsebene.
     void set_player_previous_probe(NJS_POINT3 p){collision_previous_probe_={p.x,p.y+12.5f,p.z};}
-    void place_player(NJS_POINT3 p){collision_safe_=p;collision_previous_probe_={p.x,p.y+12.5f,p.z};collision_front_offset_=collision_front_target_=0.f;collision_probe_ready_=true;}
+    void place_player(NJS_POINT3 p){collision_safe_=p;collision_previous_probe_={p.x,p.y+12.5f,p.z};collision_front_offset_=collision_front_target_=0.f;collision_front_point_=p;collision_probe_ready_=true;}
+    // EXP_WORK fpx/fpy/fpz und arn, wie sie der Koerperteil von bhControlPlayer zuletzt
+    // schrieb (player.c:1578-1587): fpx = px - sin(ay)*arn mit der Lage NACH dem
+    // Aktionsschritt und VOR bhCheckWallEx (:1622/:1647 aendern px, fpx nicht).
+    // bhCheckExmAtari liest daraus die Sonden pxn[0]/pxn[3] (hitchk.c:4605-4618).
+    NJS_POINT3 player_front_point()const{return collision_front_point_;}
+    float player_front_offset()const{return collision_front_offset_;}
     // bhControlPlayer player.c:1578-1591 und :1649-1654: der Spielerpass fuehrt
     // EXP_WORK arn an arp nach und schreibt fpx/bpx/spx aus der aktuellen Lage.
     // `arp` ist der Wert, den bhCPM2_act_* dieses Bildes hinterlassen hat.
@@ -355,7 +404,7 @@ private:
         return index==0?model.actor.get():model.actor->model(index);
     }
     /* BH_SCEWORK mode1/mode2 (types.h:1953) */
-    struct Context {unsigned kind=0,index=0,node=0,mode1=0,mode2=0;unsigned mtn_md=0,mdflg=0;int hokan_rate=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};};
+    struct Context {unsigned kind=0,index=0,node=0,mode1=0,mode2=0;unsigned mtn_md=0,mdflg=0;int hokan_rate=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};std::array<std::array<float,5>,2> e_lgt{};};
     struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;};
     // CAM_KEYF_WORK: flg (0x8 = this key carries fog), fog_col/fog_nr/fog_fr.
     struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;unsigned flags=0;std::uint32_t fog_color=0;float fog_near=0,fog_far=0;};
@@ -372,6 +421,7 @@ private:
     unsigned collision_floor_sound_=0,collision_foot_effect_=0;
     int collision_floor_=0,collision_push_count_=0,collision_push_index_=0,collision_floor_index_=0;
     float collision_front_offset_=0,collision_front_target_=0; // EXP_WORK arn/arp
+    NJS_POINT3 collision_front_point_{}; // EXP_WORK fpx/fpy/fpz (player.c:1585-1587)
     NJS_POINT3 collision_previous_probe_{},collision_safe_{};
     bool collision_probe_ready_=false;
     // Der Koerperteil von bhControlPlayer laeuft im Original genau einmal je
@@ -399,7 +449,7 @@ private:
     const PlayerAsset* player_asset_=nullptr;
     bool player_room_motion_=false,player_frozen_=false;
     std::int64_t player_step_=65536;
-    int* player_hp_owner_=nullptr;std::uint32_t* player_head_flags_=nullptr;
+    int* player_hp_owner_=nullptr;std::uint32_t* player_head_flags_=nullptr;RECVX_HEAD_STATE* player_head_=nullptr;
     int player_ct0_=0,player_ct1_=0,player_ayp_=0,player_hokan_rate_=0;
     unsigned player_mtn_md_=0,player_hokan_count_=0,player_at_flags_=0,player_enemy_owner_=0;
     const RECVX_ENEMY_WORK* player_enemy_work_=nullptr; // plp->mnwP: the grabbing work
@@ -409,6 +459,23 @@ private:
     // owP belongs to the player model and is published by its control pass,
     // not by rendering. Enemy joint queries read the previous committed tree.
     std::vector<BoneMatrix> player_joint_matrices_;
+    struct AfterimageModelWork {const PlayerAsset* asset=nullptr;std::vector<ModelPose> pose;std::vector<BoneMatrix> nodes;std::vector<std::uint32_t> flags;};
+    // Views of published mdl[n], not another work dispatcher. Room lifetime and explicit commit.
+    std::map<std::tuple<unsigned,unsigned,unsigned>,AfterimageModelWork> afterimage_models_;
+    // sys->ufo_pos/ufo_md/ufo_flg/ufo_oidx: geteilt von bhEff134 (effsub1b.c:220) und bhEne56.
+    struct UfoState{NJS_POINT3 pos{};int md=0,flg=0;unsigned oidx=0;} ufo_;
+    // plp->ct1/ayp (en12.c:1710-1742 Drehung im Griff) und npSetAllMatColor(plp) (en12.c:1192).
+    std::optional<std::uint32_t> player_material_; // plp ct1/ayp liegen in player_ct1_/player_ayp_ (oben)
+    unsigned pad_on_=0,pad_ps_=0;
+    std::function<void()> stand_player_;
+    // cam.ofx/ofy/ofz (camera.c:36/49/81): Besitzer ist die Runtime, weil cam den
+    // Raumwechsel ueberdauert. nullptr = nicht gebunden.
+    NJS_POINT3* camera_offset_=nullptr;
+    std::function<void(std::uint32_t,float)> screen_fade_set_;std::function<std::uint32_t()> screen_fade_previous_;
+    void step_ufo_effect(unsigned slot);
+    // bhEne_SetFireEffect(plp, ...) und bhEne12_SetFireBintaEffect aus Effektprozeduren.
+    void effect_player_fire(int jno,NJS_POINT3 ofp,float size,int life);
+    void effect_en12_binta(RECVX_ENEMY_WORK* w,int action);
     // hitchkl.c:735 Datensicht der Treffermodelle (plp mdl[3], Figuren mdl[1]) je Modell.
     std::map<const PlayerAsset*,std::vector<std::optional<HitModelObject>>> hit_models_;
     // effsub2.c:2296 bhEff_E11_CheckCollisionPlayer.
@@ -431,6 +498,8 @@ private:
     void process_effect_output();
     int reserve_effect_slot(unsigned start=0);
     void tick_shadow(unsigned slot);
+    // effsub2.c:1717 bhEff_E03_Shadow: der Schatten von bhSetShadow mit id 258 (en23.c:613).
+    void tick_e03_shadow(unsigned slot);
     void write_particle_slot(unsigned slot,unsigned flags,unsigned id);
     void bomb_damage(const BombRequest& bomb);
     EffectParticles particles_;
@@ -450,6 +519,11 @@ private:
     // wie ene[], stabile Adressen, weil die Tabelle nur Zeiger haelt.
     std::deque<WorldEntity> enemy_children_;
     WorldEntity* create_enemy_child(RECVX_ENEMY_WORK* parent);
+    // bhSetEnemy(tmpl) fuer ein Kind mit `mlwP = &parent->mdl[base]`; share: denselben
+    // ML_WORK wie dieses Kind benutzen (en13.c:170).
+    WorldEntity* create_enemy_child(RECVX_ENEMY_WORK* parent,const RECVX_ENEMY_TEMPLATE& tmpl,unsigned base,RECVX_ENEMY_WORK* share);
+    // eneset.c:797 bhDrawEnemy fuer die Kindworks aus bhSetEnemy (enemy_children_).
+    void append_enemy_children(Scene& scene)const;
     void bind_enemy_services();
     void init_enemy_works();
     void control_enemy_works();
@@ -468,6 +542,9 @@ private:
     // ueberschreibt auch nichts einen Skript-Schreibzugriff auf objP.
     bool enemy_motion_available(const WorldEntity& e,unsigned mtn,bool room)const;
     void calc_enemy_model(WorldEntity& e);
+    // eneset.c:797 bhDrawEnemy: Works mit mdflg 0x4 rechnen ihren Baum erst beim
+    // Zeichnen (bhCalcModel vor bhPutModel). Einmal je Bild am Ende des Passes.
+    void calc_enemy_draw_models();
     // pwksub.c:39 bhCalcLinkModel(pp): bhCalcModel fuer jedes aktive Work mit
     // flg 0x80, dessen lkwkp pp ist.
     void calc_enemy_link_model(WorldEntity& e);
@@ -492,7 +569,7 @@ private:
     struct SpriteWork {const std::vector<SceneTexture>* texture_list=nullptr;EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
-    bool player_attacking_=false;int blast_damage_=0;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
+    bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
     float player_spd_=0; // plp->spd
     // player.c:1366-1387 bhControlPlayer: pxb/pyb/pzb of the previous pass and
     // EXP_WORK nlxb/nlyb/nlzb, the last settled root position (owP[0]).
@@ -514,6 +591,16 @@ private:
     unsigned stage_no_=0,room_no_=0; // sys->stg_no/rom_no aus dem Raumnamen (RoomIdentity)
     unsigned enemy_count_=0; // rom->ene_n
     unsigned effect_flags_=0; // system.c:195 sys->ef_flg = 0
+    // sys->zanp - sys->zan_memp: belegte Bytes des 2-MB-Nachbildpuffers (effsub1b.c:627).
+    std::size_t zan_used_=0;
+    unsigned room_case_=0; // Fall der geladenen Raumdatei (RM_SRRC)
+    // npSetAllMatAlphaColor (njplus.c:1495) aus bhDraw136 schreibt das Alpha dauerhaft in
+    // die Diffusmaterialien von objP[node] des Werks. Schluessel (kind,index,mdl,node).
+    // before: Stand, den Objekte/Items sehen (bhDrawObjItm vor bhDrawEffect, game.c:341/346),
+    // after: nach den Nachbildern dieses Bildes (bhDrawEnemy/bhDrawPlayer danach).
+    std::map<std::tuple<unsigned,unsigned,unsigned,unsigned>,unsigned> afterimage_alpha_before_,afterimage_alpha_after_;
+    // Laufender Stand waehrend des Zeichenpasses (beginnt bei before).
+    mutable std::map<std::tuple<unsigned,unsigned,unsigned,unsigned>,unsigned> afterimage_alpha_running_;
     void control_player_effects();
     std::vector<CollisionWall> effect_walls_; // rom->walp + sys->mwalp as bhCheckWallType sees them
     const std::vector<SceneTexture>* effect_texture_list(const SpriteWork& work)const;
@@ -618,6 +705,13 @@ private:
     std::vector<BoneMatrix> object_matrices(const Model& model,const WorldEntity& entity,const NJS_MATRIX& transform)const;
     ModelPose model_pose_physical(unsigned kind,unsigned index,unsigned physical)const; // objP[physical] of the original model
     std::optional<BoneMatrix> link_matrix(unsigned kind,unsigned index,unsigned node,unsigned depth=0)const;
+    bool entity_geometry(const Model& model,const WorldEntity& e,Scene& object)const;
+    const PlayerAsset* afterimage_asset(unsigned kind,unsigned index,unsigned mdl)const;
+    bool afterimage_node_hidden(unsigned kind,unsigned index,unsigned mdl,unsigned node)const;
+    // effsub1b.c:713 bhEff136: objP[node] von mdl[mdl] des Werks in seiner jetzigen Lage.
+    std::shared_ptr<const EffectAfterimage> capture_afterimage(unsigned kind,unsigned index,unsigned mdl,unsigned node)const;
+    // effsub1b.c:690 bhDraw136: ein Nachbild in die Szene, mit dem Materialalpha des Satzes.
+    void append_afterimage(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,std::pair<unsigned,unsigned>* fnc_blend)const;
     NJS_POINT3 link_point(unsigned kind,unsigned index,unsigned node,NJS_POINT3 offset)const;
 };
 }

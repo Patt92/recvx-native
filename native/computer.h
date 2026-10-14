@@ -32,6 +32,9 @@ public:
     // rom->enep[chr_no] posed at the origin with the script's motion/frame.
     // An empty answer is reported as a gap, never drawn as a substitute.
     std::function<std::optional<Scene>(unsigned chr_no,unsigned mtn_no,unsigned frm_no)> character_scene;
+    // bhExitSpEvtComputer ends with bhStandPlayerMotion; the player owner answers it.
+    std::function<void()> stand_player;
+    unsigned stand_gaps()const{return stand_gaps_;}
     const RECVX_COM_FRAME* frame()const{return frame_.get();}
     unsigned character_gaps()const{return character_gaps_;}
     // bhDispMessage indexes rom->mesp without a bound; a room whose table
@@ -46,6 +49,7 @@ private:
     bool active_=false;
     unsigned pending_=0;
     mutable unsigned character_gaps_=0,message_gaps_=0;
+    unsigned stand_gaps_=0;
     std::unique_ptr<RECVX_COM_FRAME> frame_;
     mutable std::vector<SceneTexture> textures_;
     std::vector<std::string> text_;

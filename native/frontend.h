@@ -5,7 +5,7 @@
 namespace recvx {
 // TitleCall: original adv.c TitleCall started (play ADV entry 3, white flash and
 // fade to black). NewGame follows once the fade is complete (Mode 17 -> -1).
-enum class FrontendCommand {None,TitleCall,NewGame,Quit};
+enum class FrontendCommand {None,TitleCall,NewGame,LoadGame,Quit};
 // Title screen = adv.c Adv_BioCvTitle (2048) ported mode by mode: Mode 0..4
 // init and 30-frame fade-in (RequestAdvFade(2, GetSamurai(50)) = 1/30), Mode 5..7
 // "PRESS START button" plate (DisplayPressStartPlate, 900-frame attract timer),
@@ -60,6 +60,10 @@ public:
     void event(const SDL_Event& event);
     void draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers);
     std::function<void(const InputConfig&)> changed;
+    // LOAD GAME ist seit 2026-10-14 keine Abweichung mehr: liegen Schreib-
+    // maschinen-Spielstaende vor (FindFirstVmDrive-Pendant), ist Cursor 0
+    // waehlbar und laeuft ueber Titel-Returncode 3 in den Ladebildschirm.
+    std::function<bool()> has_saves;
     std::function<void(unsigned)> sound;   // CallSystemSe(0, n) / CallSystemSeBasic(n,0,0)
     std::function<void(unsigned)> vibrate; // TitleCall: StartVibrationEx(PortId, 16)
     ThirdPersonCamera* third_person=nullptr; // optional camera mod row in the settings screen

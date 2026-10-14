@@ -9,6 +9,7 @@
 #include "../ninja_matrix.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
@@ -297,6 +298,7 @@ void recvx_en04_collision_check(RECVX_ENEMY_WORK* w) { /* :842 */
 void recvx_en04_damage_add(RECVX_ENEMY_WORK* w) { /* :733 */
     const RECVX_EN04_WPNDAMAGE* t=&recvx_en04_wpn_damage[0];RECVX_EN04_EXP0* e=ex(w);
     if(w->hp>=0) {
+        if(getenv("EN04_DMG_DBG"))fprintf(stderr,"EN04DMG id=%u total_dam=%d comb_wep=%d wpnr=%d hp_before=%d\n",w->id,w->total_dam,w->comb_wep,w->wpnr_no,w->hp);
         w->hp-=w->total_dam;
         if(w->comb_wep>=22) {gap(w,"En04_WpnDamageTbl comb_wep");return;}
         t=&recvx_en04_wpn_damage[w->comb_wep];

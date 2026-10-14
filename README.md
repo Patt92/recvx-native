@@ -47,28 +47,34 @@ Fortschritt nach tatsächlichen Paketen und Prüfgrenzen, nicht nach historische
 Generatorausgaben. **Portiert** bezeichnet den genannten Bereich, nicht das
 gesamte Spiel oder sämtliche abhängigen Abläufe.
 
-Die Prozentzahlen unten misst `tools/port_check.py` aus dem
+Die Prozentzahlen unten werden aus dem [Portstatus](docs/PORT_STATUS.md)
+übernommen. Dieser Bericht berechnet sie mit `tools/port_check.py` aus dem
 [Funktionsledger](docs/port_ledger.tsv) und den im nativen Eventpfad gebundenen
 Event-Befehlen. Sie beschreiben nur den explizit belegten Belegumfang, keinen
 Gesamtfortschritt des Spiels. **Gewichtet** zählt teilweise belegte
 Mechanismen mit 0,5; **voll belegt** nur vollständig abgeschlossene.
 
 <!-- port-status:begin -->
-<!-- Automatisch erzeugt: python3 tools/port_check.py --readme README.md -->
+<!-- Fortschrittstabelle und Kennzahlen direkt aus docs/PORT_STATUS.md synchronisiert. -->
 
-| Kategorie | Belegumfang | Gewichtet | Voll belegt | Mechanismen | Stand |
-|---|---|---:|---:|---:|---|
-| Effekte | `██████████` | 96,4 % | 92,8 % | 154/166 | Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen. |
-| Events/Skript | `█████████░` | 89,0 % | 78,0 % | 32/41 | Originale Event-VM und gemeinsame Actor-Control-Fälle; weitere Befehle/Abläufe offen (Zahl unten). |
-| Modelle/Animation | `█████████░` | 85,7 % | 71,4 % | 5/7 | Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen. |
-| Menü/Items/Text | `████████░░` | 82,9 % | 73,2 % | 30/41 | Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen. |
-| Gegner/KI | `████████░░` | 79,4 % | 58,8 % | 20/34 | Eigenständiger Dispatcher recvx_enemy_control, en01-Schaden/-Tod/-Griff und Hundeangriffe; Rest-KI, weitere Gegner-IDs und Effektbindungen offen. |
-| Spieler/Kampf | `███████░░░` | 68,2 % | 36,4 % | 8/22 | Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen. |
-| Audio | `██████░░░░` | 60,0 % | 20,0 % | 4/20 | Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt. |
-| Ablauf/Speichern | `██████░░░░` | 55,6 % | 11,1 % | 1/9 | Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen. |
-| Raum/Kamera/Tür | `██████░░░░` | 55,3 % | 15,8 % | 3/19 | Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen. |
-| **Expliziter nativer Belegumfang** | `█████████░` | **85,2 %** | **71,6 %** | **257/359** | 170/223 Event-Befehle gebunden; kein Gesamtfortschritt. |
+Expliziter Belegumfang: **84.0 %** gewichtet, **69.0 %** voll belegt (263/381 Mechanismen; kein Gesamtfortschritt).
 
+Event-Befehle (bhScenarioJmpT): 176/223 gebunden, 29 nur konsumiert, 18 fehlen.
+
+| Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |
+|---|---:|---:|---:|---:|---:|
+| Gegner/KI | 21/45 | 73.3 % | 46.7 % | 24 | 0 |
+| Effekte | 158/172 | 95.9 % | 91.9 % | 14 | 0 |
+| Events/Skript | 32/41 | 89.0 % | 78.0 % | 9 | 0 |
+| Spieler/Kampf | 9/23 | 69.6 % | 39.1 % | 14 | 0 |
+| Raum/Kamera/Tür | 3/22 | 54.5 % | 13.6 % | 18 | 1 |
+| Menü/Items/Text | 30/41 | 82.9 % | 73.2 % | 8 | 3 |
+| Modelle/Animation | 5/8 | 81.2 % | 62.5 % | 3 | 0 |
+| Audio | 4/20 | 60.0 % | 20.0 % | 16 | 0 |
+| Ablauf/Speichern | 1/9 | 55.6 % | 11.1 % | 8 | 0 |
+| Plattform (Host-ersetzt) | 8/17 | 73.5 % | 47.1 % | 9 | 0 |
+
+Nur dokumentierter Belegumfang, kein Gesamtfortschritt des Spiels.
 <!-- port-status:end -->
 
 <!-- native-progress:begin -->

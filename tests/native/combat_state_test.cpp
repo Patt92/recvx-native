@@ -60,6 +60,7 @@ struct Fixture {
     std::vector<int> sounds;
     unsigned effects = 0, muzzle = 0, shells = 0;
     unsigned vibrations = 0, lights = 0;
+    unsigned sparks = 0; std::int32_t spark_type = -1;
 
     /* Gegnertabelle: echte Works, wie sie der Besitzer haelt. */
     RECVX_ENEMY_TABLE table{};
@@ -128,6 +129,11 @@ struct Fixture {
             if (e->ef.id == 3 && e->ef.type == 0) ++f->muzzle;
             if (e->ef.id == 0 && e->ef.type == 10) ++f->shells;
             return 0;
+        };
+        s.gun_spark = [](void* p, const RECVX_CB_VEC*, const RECVX_CB_VEC*, std::uint32_t,
+                         std::uint32_t, std::int32_t type) {
+            auto* f = static_cast<Fixture*>(p);
+            ++f->sparks; f->spark_type = type;
         };
         s.weapon_se = [](void* p, const RECVX_CB_VEC*, std::int32_t se, std::int32_t) {
             static_cast<Fixture*>(p)->sounds.push_back(se);
@@ -660,6 +666,30 @@ void test_reported_gaps() {
 
 }  // namespace
 
+/* pwksub.c:3156-3240 bhSetGunFire case 21 — Doppelwaffe: der Schuss laeuft entlang der
+ * Gelenkachse, prueft die Wand (bhCheckL2Wall) und legt bei einem Wandtreffer ueber
+ * bhCheckWallAttrB89 Funken mit Art hiteff-4 (Waffe 21: 5-4 == 1) an. Vorher meldete der
+ * Kern hier nur eine Luecke. */
+void test_dual_wall_spark() {
+    check(WpnEffTab[21][0].id == 229 && WpnEffTab[21][0].flr_no == 3,
+          "WpnEffTab[21][0] is no longer the dual muzzle flash (229, flr_no 3)");
+    Fixture f;
+    f.equip(21);
+    f.endless = true;
+    f.wall_in_shot = true;   /* bhCheckL2Wall meldet die Wand */
+    f.wall_distance = 1.0f;  /* kuerzer als die 1000-Einheiten-Schusslinie */
+    f.tick(true, false);
+    check(f.run_until(65, 24), "dual weapon never reached act_wpn");
+    f.tick(true, true);
+    check(f.res.mode2 == 69, "dual trigger did not reach act_atk");
+    const unsigned before = f.res.shots;
+    for (unsigned i = 0; i < 6 && f.res.shots == before; ++i) f.tick(true, true);
+    check(f.res.shots > before, "dual weapon did not call bhSetGunFire");
+    check(f.sparks >= 1, "bhSetGunFire Waffe 21 legte keinen Wandfunken an");
+    check(f.spark_type == std::int32_t(WpnTab[21].hiteff) - 4,
+          "Funkenart weicht von WpnTab[21].hiteff-4 ab");
+}
+
 int main() {
     try {
         test_tables();
@@ -671,6 +701,7 @@ int main() {
         test_damage_ranges();
         test_shot_blocked_by_wall();
         test_auto_fire_branch();
+        test_dual_wall_spark();
         test_dual_wield();
         test_euler_order();
         test_reported_gaps();

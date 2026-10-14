@@ -78,9 +78,33 @@ struct SceneTriangle {
     std::uint64_t blend_register=0x44; // original GS source-alpha/inverse-source-alpha
     SceneTextureFilter texture_filter=SceneTextureFilter::Default;
     unsigned texture_color_divisor=255; // raw Ninja constant-material RGB uses 128, native normalized RGB uses 255
+    // color stammt aus einem Diffusmaterial-Chunk (NJD_CM_D/DA/DS/DAS, Typ 17/19/21/23);
+    // nur dort schreibt npSetAllMatAlphaColor (njplus.c:1495) das Alpha.
+    bool diffuse_material=false;
+    // Ninja-Indizes des letzten Material-/NJD_CB_BA-Chunks vor dem Streifen; bhDraw136
+    // hinterlaesst dieses Paar fuer die naechste ef_fnc-Funktion (-1 = unbekannt).
+    std::int8_t chunk_mode_src=-1,chunk_mode_dst=-1;
+    // Chunk-Streifen (njCnkCs/njCnkCsUvh/njCnkCsUvn, ps2_NinjaCnk.c:1720/1860/2292) folgen der
+    // Clipregel der vu1DrawTriangleStrip*-Funktionen (ps2_Vu1Strip.c:846/967/1081/1234), nicht
+    // einer exakten Z-Klippung. strip_segment != 0 ist das <=60-Eckpunkt-Paket, das njCnkCsUvh/
+    // njCnkCsUvn als Ganzes verwerfen, wenn alle Eckpunkte ausserhalb derselben Ebene liegen
+    // (ps2_NinjaCnk.c:2017-2104/2240-2272); njCnkCs (ohne UV) hat diese Paketpruefung nicht.
+    bool strip_clip=false;std::uint32_t strip_segment=0;
+    // Effektaufrufe der eff[]-Zeichenpaesse (effect.c bhDrawNtxEffect3D/bhDrawTrsEffect3D/
+    // bhDrawOpqEffect3D) laufen nicht durch njClipZ: njDrawTextureSub3D (ps2_NaDraw.c:302)
+    // verwirft den ganzen Aufruf, wenn ein Eckpunkt scr.z < 0 hat oder alle Eckpunkte jenseits
+    // derselben Kante des 640x480-Bildes liegen (_Clip_Screen, ps2_Vu1Strip.c:1202);
+    // njDrawPolygonSub3D (ps2_NaDraw.c:222, ef_ntx) prueft beides nicht (ninja_screen_reject false).
+    // Danach setzt Ps2AddPrim3D (ps2_dummy.c:486) jedem Eckpunkt mit |x-2048| > 2047, |y-2048| > 2047 oder |1.062501907*z-2048.0625| > 2047
+    // (vclipw gegen clip_vec/zclip_ab_vec) das Clipbit; ein Streifendreieck mit einem solchen
+    // Eckpunkt bekommt ADC und wird nicht gezeichnet. Eine Z-Klippung gibt es dort nicht.
+    // ninja_primitive != 0 nummeriert den Aufruf; seine Dreiecke folgen aufeinander.
+    std::uint32_t ninja_primitive=0;bool ninja_screen_reject=false;
 };
 // colors in canvas order 0xAABBGGRR; blend_register = GS ALPHA of the draw (0x44 = njDrawLine3D default 8/6).
-struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;std::uint64_t blend_register=0x44;};
+// inherit_blend: die Zeichenfunktion setzt kein Blendpaar (effsub3.c bhEff308Drw); der Raumbesitzer
+// traegt das Register des ef_fnc-Vorgaengers ein.
+struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;std::uint64_t blend_register=0x44;bool inherit_blend=false;};
 struct SceneCamera {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};
@@ -180,6 +204,9 @@ struct ModelGeometryOptions {
     std::vector<ModelPose> pose;
     std::vector<std::uint32_t> evalflags;
     MorphSource morph{};
+    // Direct model call (bhDraw136): decode this physical object only, ignoring its hide bit.
+    int draw_object=-1;
+    bool skin_fm=false; // npCalcSkinFM skips logical nodes 11..14 and remaps influences >10 by +4
     // Authoritative native O_WORK matrices: rendering must not resample a
     // motion or rebuild a second pose after original procedural joint edits.
     std::vector<std::array<float,16>> world_matrices;
@@ -189,4 +216,7 @@ struct ModelGeometryOptions {
 // Standalone MDL/PVP path shared by stage and animated character loading.
 Scene decode_model_asset(const std::vector<std::uint8_t>& data,std::size_t model_offset,
                          std::size_t texture_offset,const ModelGeometryOptions& options={});
+// mlwP->objP[object].model->vlist[1] >> 16 (effsub1b.c:646 bhEff135): die Eckpunktzahl
+// des ersten Eckpunkt-Chunks. nullopt, wenn das Objekt kein Modell hat (model NULL).
+std::optional<unsigned> model_object_vertex_count(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object);
 }

@@ -1,5 +1,6 @@
 #include "world.h"
 #include "room.h"
+#include "core_random.h"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -51,6 +52,20 @@ int main(int argc,char** argv){try{
         const auto manor_mid=manor_world.camera(manor_scene,manor_scene.cameras.at(0));check(distance(manor_start.position,manor_mid.position)>1,"RM_1020 event camera keyframe remains static");
         for(unsigned tick=30;tick<180;++tick)manor_world.tick_camera(manor_scene,manor_scene.cameras.at(0),0);
         const auto manor_final=manor_world.camera(manor_scene,manor_scene.cameras.at(0));check(manor_world.event_camera&&manor_world.event_camera_key()==2&&distance(manor_final.position,{9.5907059f,61.725918f,60.876106f})<.01f,"RM_1020 event camera does not reach its original final key");
+        // event.c:4701 bhCamYureSet (RM_0020 Event 7, Explosion): v0 0 setzt cam.ofx/ofy/ofz
+        // nacheinander auf (0.01*v1)*(-rand()/-2.1474836E9f), v0 != 0 loescht sie; bhControlCamera
+        // verschiebt damit die Sicht (camera.c:36), cam.px selbst bleibt.
+        auto yard=rooms.load("RM_0020.RDX",64*1024*1024);auto yard_scene=decode_scene(yard);auto yard_actor=yard_scene.spawns.at(0);std::size_t yard_motion=42;std::int64_t yard_frame=0;AudioMixer yard_audio(data);RoomWorld yard_world(yard,yard_scene,yard_actor,yard_motion,yard_frame,yard_audio,data);
+        check(!yard_world.bind({0x5a,0,0,0,{0x5a,0,0x64,0}}),"bhCamYureSet claims a binding without the cam owner");
+        NJS_POINT3 offset{};yard_world.set_camera_offset_owner(&offset);
+        recvx_core_random_seed(7);const float amp=0.01f*400.0f;
+        const float ex=amp*(-recvx_core_random_next()/-2.1474836E9f),ey=amp*(-recvx_core_random_next()/-2.1474836E9f),ez=amp*(-recvx_core_random_next()/-2.1474836E9f);
+        recvx_core_random_seed(7);const auto still=yard_world.camera(yard_scene,yard_scene.cameras.at(0));
+        check(yard_world.bind({0x5a,0,0,0,{0x5a,0,0x90,0x01}}),"RM_0020 bhCamYureSet unbound");
+        check(offset.x==ex&&offset.y==ey&&offset.z==ez&&ex!=ey,"bhCamYureSet offset differs from the original x/y/z rand order");
+        const auto shaken=yard_world.camera(yard_scene,yard_scene.cameras.at(0));
+        check(shaken.position.x==still.position.x+ex&&shaken.position.y==still.position.y+ey&&shaken.position.z==still.position.z+ez,"cam.ofx does not move the view");
+        check(yard_world.bind({0x5a,0,0,0,{0x5a,1,0,0}})&&offset.x==0&&offset.y==0&&offset.z==0,"bhCamYureSet v0 1 does not clear cam.ofx/ofy/ofz");
     }
     std::cout<<"Original active-camera return verified\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

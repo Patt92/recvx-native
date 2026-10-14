@@ -34,20 +34,27 @@ unsigned Inventory::wide_boundary()const{
     unsigned i=0;while(i<10&&(type_of(id(slots()[i+2]))&kWide))++i;
     return i+2;
 }
-void Inventory::compact(unsigned* tracked_slot){
-    // ItemSort: zuerst alle breiten, dann alle übrigen belegten Einträge in
-    // ursprünglicher Reihenfolge; leere fallen ans Ende. pip[0] wird vom
-    // Original nicht angepasst (die Aufrufer korrigieren es selbst).
-    // `tracked_slot` folgt dem Eintrag, auf den er zeigte (Host-Cursor).
-    std::array<std::uint32_t,10> sorted{};std::array<unsigned,10> origin{};unsigned n=0;
+void Inventory::sort(){
+    // sub1.c ItemSort (sub1.c:2266): läuft in SpriteOnOff während des
+    // Statusbildschirms in JEDEM Frame (sub1.c:8296 `if (st->subcsr != 3)`),
+    // also auch nach jedem Entfernen. Der Ausrüstungsindex pip[0] wird vom
+    // Original nicht angepasst; compact() lässt ihn wie ItemSort unberührt.
+    compact();
+}
+void Inventory::compact(){
+    // ItemSort (sub1.c:2266-2343): zuerst alle breiten, dann alle übrigen
+    // belegten Einträge in ursprünglicher Reihenfolge; leere fallen ans Ende.
+    // pip[0] und die Menücursor werden vom Original nicht nachgeführt (die
+    // Aufrufer korrigieren pip[0] selbst). Die flgchk-0x10/0x20-Markierung
+    // (sub1.c:2290/2307/2312) entfällt: keine Quelle setzt flgchk 0x10/0x20,
+    // gesetzt werden nur 0x2/0x8 (sub1.c:4378/7432).
+    std::array<std::uint32_t,10> sorted{};unsigned n=0;
     for(unsigned pass=0;pass<2;++pass)for(unsigned i=0;i<10;++i){
         const auto entry=slots()[i+2];const auto item=id(entry);
         const bool wide=type_of(item)&kWide;
-        if(pass==0?wide:(!wide&&item)){sorted[n]=entry;origin[n]=i+2;++n;}
+        if(pass==0?wide:(!wide&&item))sorted[n++]=entry;
     }
     for(unsigned i=0;i<10;++i)slots()[i+2]=sorted[i];
-    if(tracked_slot&&*tracked_slot>=2&&*tracked_slot<12)
-        for(unsigned i=0;i<n;++i)if(origin[i]==*tracked_slot){*tracked_slot=i+2;break;}
 }
 unsigned Inventory::search(unsigned item)const{
     // ItemSearch: pip[1..11], Vergleich nur auf die Item-ID (Low-Byte).
@@ -206,8 +213,9 @@ PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,un
             if(type_of(have)&kWide)++count;
         }
         // Die Meldung 158 kommt erst im folgenden Durchlauf (testmode 2);
-        // dieser endet mit der Einfügung. StatusMain ruft danach ItemSort.
-        compact();
+        // dieser endet mit der Einfügung. GetItem selbst sortiert nicht: ein
+        // neues breites Item kommt erst durch das ItemSort desselben
+        // Statusframes nach vorn (SpriteOnOff, sub1.c:8296).
     }else if(control&0x1000000){
         // Sonderslot: pip[1] erhält das Item; lag die Ausrüstung dort, wird sie
         // gelöst (plp->mode3/wpnr_no = 0, mn_mode0 = 3 beim Kampfbesitzer).
@@ -304,7 +312,8 @@ ItemUseResult Inventory::use_item(unsigned slot,const std::array<unsigned,4>* pa
     // StatusMain löscht cb_flg 0x400 im nächsten Durchlauf; nur StatusCancel
     // lässt das benutzte Item für die Event-VM stehen.
     if(!result.closing)control&=~0x400u;
-    if(!id(slots()[slot]))compact();
+    // ItemUse sortiert nicht; die Lücke eines verbrauchten Eintrags schließt
+    // das ItemSort desselben Statusframes (SpriteOnOff, sub1.c:8296).
     return result;
 }
 bool Inventory::count_bullet(){
@@ -359,6 +368,23 @@ Inventory::Inventory(){
     items[1]=0x370001;items[2]=0x910001;
     items[18]=0x80001;items[19]=0x50012;items[20]=0xc001e;items[21]=0x140001;
     items[32]=2;items[33]=0x8a0001;items[34]=0x220190;items[383]=1;
+    // system.c:483-489: every player starts at the game-mode HP.
+    const int initial=max_hp;for(auto& v:ply_hp)v=initial;
+}
+unsigned Inventory::switch_player(unsigned target){
+    if(target>=ply_hp.size())throw std::runtime_error("bhPlayerChangeSet target outside the original player table");
+    const unsigned previous=player;
+    if(previous==target)return previous;
+    // system.c:1729/1746/1747: the outgoing work keeps its persistent state,
+    // keyed by the still-active ply_id.
+    ply_stflg[previous]=player_stflg();
+    ply_hp[previous]=hp;
+    partner_weapon[previous]=std::uint8_t(weapon());
+    // sys->ply_id = sys->cng_pid; bhResetPlayer then restores the new player.
+    player=target;
+    hp=ply_hp[player];
+    set_player_stflg(ply_stflg[player]);
+    return previous;
 }
 unsigned Inventory::occupied()const{unsigned n=0;for(unsigned i=2;i<12;++i)if(auto item=id(slots()[i]))n+=(itemdata[item].type&0x100)?2:1;return n;}
 bool Inventory::contains(unsigned item)const{for(unsigned i=1;i<12;++i)if(id(slots()[i])==item)return true;return false;}
@@ -530,23 +556,22 @@ unsigned combi_05(const ComboContext& c,std::uint32_t& moto,std::uint32_t& aite)
     return 1;
 }
 }
-bool Inventory::combine(unsigned first,unsigned second,unsigned* out,unsigned* result_slot){
-    // ItemCommand Kombinationszweig (sub1.c subcsr 2/3). `first` ist listcsr_0
-    // (das gewählte Item), `second` listcsr_1 (das zuvor markierte). Die Klasse
-    // combidata[ps+2] entscheidet Mechanik und Richtung. Klasse 6 (Frage 155)
-    // beantwortet der Aufrufer vor dem Aufruf mit Ja; ein Nein ruft nicht auf.
-    if(out)*out=0;if(result_slot)*result_slot=0;
-    if(first<1||second<1||first>=12||second>=12||first==second)return false;
-    const int rule=combination_rule(first,second);
-    if(rule<0)return false;
+Inventory::CombineResult Inventory::combine_items(int rule,unsigned first,unsigned second,bool message_active){
+    // ItemCombination subcsr 2 (sub1.c:5578-5933). `first` ist listcsr_0
+    // (moto), `second` listcsr_1 (aite). Die Klasse combidata[ps+2] entscheidet
+    // Mechanik und Richtung. Klasse 6 (Frage 155) beantwortet der Aufrufer vor
+    // dem Aufruf mit Ja (mes_sel 100 -> Combi_03); ein Nein ruft nicht auf.
+    // Combi_xx schreibt pip sofort, auch bei ok 4 (Combi_00 schreibt moto und
+    // aite immer zurück, sub1.c:6744-6745); kein Zurückrollen.
+    CombineResult r;
+    if(first<1||second<1||first>=12||second>=12||first==second||rule<0)return r;
     // st->cmbitm = num1: Index der passenden ID; Produkt ps+1, Klasse ps+2.
     const unsigned ps=unsigned(rule);
     const unsigned kind=unsigned(combidata[ps+2])&0xff;
-    const auto saved=items;
     // plp->wpnr_no steht beim WeaponSet-Aufruf nach dem Tausch noch auf der
     // Waffe von vorher; der Wert wird deshalb vor jeder Mutation abgenommen.
     const unsigned wpnr_before=weapon();
-    ComboContext c{game_mode,slots()[0],first,second,false};
+    ComboContext c{game_mode,slots()[0],first,second,message_active};
     auto& moto=slots()[first];auto& aite=slots()[second];
     unsigned ok=0;bool movedir=false;
     auto equip_from=[&](unsigned slot){weapon_set(slot,slot,wpnr_before);};
@@ -568,18 +593,29 @@ bool Inventory::combine(unsigned first,unsigned second,unsigned* out,unsigned* r
         switch(ok&0x7f){case 0:if(ok&0x80)movedir=true;ok=3;break;case 1:movedir=true;ok=second<slots()[0]?1:3;break;case 2:ok=first<slots()[0]?1:3;break;default:break;}break;
     case 10:ok=combi_05(c,moto,aite);ok=first<slots()[0]?1:3;break;
     case 11:ok=combi_05(c,aite,moto);ok=second<slots()[0]?1:3;movedir=true;break;
-    default:items=saved;return false;
+    default:throw std::runtime_error("combination class outside the original ItemCombination switch");
     }
-    if(out)*out=c.message;
-    if(ok==4||ok==5||!ok){items=saved;return false;}
-    // subcsr 3 nach der Bewegung: ok 1 und pip[0] hinter einem der beiden
-    // Cursor senkt pip[0] um eins (der verbrauchte Eintrag rückt nach).
+    r.ok=ok;r.movedir=movedir;r.message=c.message;
+    return r;
+}
+void Inventory::combine_finish(unsigned ok,unsigned first,unsigned second){
+    // sub1.c:5963-5966 nach der Bewegung: ok 1 und pip[0] hinter einem der
+    // beiden Cursor senkt pip[0] um eins (der verbrauchte Eintrag rückt durch
+    // das folgende ItemSort nach).
     if(ok==1&&(slots()[0]>first||slots()[0]>second)&&slots()[0]>1)--slots()[0];
-    // Ergebnisposition: movedir 0 -> Cursor geht auf listcsr_1; ItemSort folgt.
-    unsigned destination=movedir?first:second;
-    if(!id(slots()[destination]))destination=id(slots()[first])?first:second;
-    compact(&destination);
-    if(result_slot)*result_slot=destination;
+}
+bool Inventory::combine(unsigned first,unsigned second,unsigned* out,unsigned* result_slot){
+    if(out)*out=0;if(result_slot)*result_slot=0;
+    const int rule=combination_rule(first,second);
+    if(rule<0)return false;
+    const auto r=combine_items(rule,first,second);
+    if(out)*out=r.message;
+    // ok 4 (voll) und 5 (nichts) bleiben in subcsr 1 (sub1.c:5613-5616/5925-5937).
+    if(!r.ok||r.ok==4||r.ok==5)return false;
+    combine_finish(r.ok,first,second);
+    // subcsr 3 -> 4: movedir 0 setzt listcsr_0 = listcsr_1 (sub1.c:5980-5984).
+    if(result_slot)*result_slot=r.movedir?first:second;
+    sort(); // SpriteOnOff des folgenden Statusframes (sub1.c:8293-8296, subcsr != 3)
     return true;
 }
 // Event-Inventarmutationen (event.c). Sie arbeiten absichtlich roh auf
@@ -740,7 +776,9 @@ bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned st
                 else if((type_of(id1)&kWide)&&eq<lt_c&&(type_of(arms)&kWide))--eq;
             }else if((type_of(id2)&kWide)&&!(type_of(arms)&kWide))++eq;
         }
-        compact();
+        // ItemBoxChange ruft kein ItemSort (Disassembly 0x002A53E0: nur
+        // bhSetMessage/Combi_01); den geparkten Eintrag holt das ItemSort
+        // desselben Statusframes nach vorn (SpriteOnOff, sub1.c:8296).
         return true;
     }
     if(chk==2){
@@ -751,7 +789,6 @@ bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned st
                 combi_01(x,bxp[index],slots()[stack_slot]);break;
             }
         }
-        compact();
         return true;
     }
     if(out)*out=159;

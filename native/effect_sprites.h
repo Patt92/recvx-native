@@ -6,10 +6,20 @@
 #include <memory>
 #include <map>
 #include "collision.h"
+#include "enemies/enemy_work.h"
 namespace recvx {
 struct EffectModelWork;
 // EFF5SNOWRECT (effsub5.h:50): die Schneebox von bhEff219; Aufbau in effect_sprites_internal.h.
 struct EffectSnow;
+// Nachbild (effsub1b.c:690 bhDraw136): die Dreiecke von objP[lkono] des verlinkten Werks
+// in der Lage des Bildes, in dem bhEff136 angelegt wurde (npCalcSkin/npCopyVlist und
+// op->mtx = owP[lkono].mtx ergeben zusammen genau diese Weltlage). Texturen bezieht der
+// Zeichenpass aus dem Modell des Werks (kind/index wie EffectSprite::link_kind).
+struct EffectAfterimage {unsigned kind=0,index=0,mdl=0,node=0;std::vector<SceneTriangle> triangles;
+    // Selected mdl[mdlver].texP, not necessarily the body's texP. Shared pixel storage.
+    std::vector<SceneTexture> textures;};
+// R08_WORK (effsub3.c:2492 bhEff308): Funkenstrahl aus bhSetEffGunSpark/bhSetRapEff.
+struct EffectSpark308;
 // UV_WORK (types.h:2194): eine Zeile der Original-UV-Tabellen {u, v, Breite, Hoehe}.
 struct EffectUv {float u,v,xs,ys;};
 // Fields consumed by the original bhEff200/201/218 procedures and draw path.
@@ -28,8 +38,16 @@ struct EffectSprite {
     const void* uv=nullptr;
     // bhSetEffectTb/bhSetEffect fields used by the generated procedures (px..pz must stay contiguous).
     unsigned mdlver=0;int flr_no=0;float px=0,py=0,pz=0,gpx=0,gpy=0,gpz=0,lox=0,loy=0,loz=0,xn=0,zn=0,sx=1,sy=1,sz=1,sxb=1,syb=1,szb=1,spd=0;void* lkwkp=nullptr;EffectModelWork* mlwP=nullptr;
-    // O_WRK.aox/aoy/aoz (0x70..0x78) und ofy (0x3A8): weitere Arbeitsfelder der Originalprozeduren.
-    float aox=0,aoy=0,aoz=0,ofy=0;int axp=0,azp=0;
+    // O_WRK.aox/aoy/aoz (0x70..0x78) und ofx/ofy/ofz (0x3A4/0x3A8/0x3AC): weitere
+    // Arbeitsfelder der Originalprozeduren (bhEff352 kopiert dort seine Startlage ab).
+    float aox=0,aoy=0,aoz=0,ofx=0,ofy=0,ofz=0;int axp=0,azp=0;
+    // O_WRK.shp_ct (0x34C): Bodenhoehe unter dem Werk (bhEff352-Abschlusspruefung) und
+    // O_WRK.mtx[13] (Y der Zeichenmatrix des letzten Bildes, ebendieselbe Pruefung).
+    float shp_ct=0,mtx_world_y=0;
+    // O_WRK.aspd (bhEff134: Leuchtzaehler der Kran-Anzeige).
+    int aspd=0;
+    // O_WRK.exp1 als eff-Platz (en12.c:1815 eff[eno].exp1 = EXP0_I(32)); -1 = NULL.
+    int exp1_slot=-1;
     // Platz dieses Satzes in eff[512] (der Raumbesitzer traegt ihn vor jedem Pass ein) und
     // O_WRK.exp0 als Elternsatz (effsub5.c bhEff202/226/247 schreiben eff[n].exp0 = op):
     // parent_slot ist der Platz, parent der vom Besitzer vor dem Pass aufgeloeste Satz.
@@ -65,7 +83,8 @@ struct EffectSprite {
     const float* link_matrix=nullptr;
     // O_WRK.mtn_no/frm_no/ah/aw (effsub6.c bhEff149) und njFogDisable des eigenen Zeichenaufrufs.
     int mtn_no=0,frm_no=0;float ah=0,aw=0;bool fog_disabled=false,point_filter=false,untextured=false;
-    // lkwkp als Raumfigur: 0 Spieler, 1 Raumgegner (Index link_index); -1 ohne Link. Vom Raumbesitzer bei bhSetEffectTb gesetzt.
+    // lkwkp als Raumfigur: 0 Spieler, 1 Raumgegner, 2 Objekt, 3 Item (Index link_index); -1 ohne Link.
+    // Vom Raumbesitzer bei bhSetEffectTb bzw. beim Raumladen (room.c:787 bhSetEffectLink) gesetzt.
     int link_kind=-1;unsigned link_index=0;
     // Ps2SetFogColorSys fuer genau diesen Zeichenaufruf (ps2_NaDraw.c:469).
     bool fog_color_set=false;std::uint32_t fog_color=0;
@@ -85,6 +104,10 @@ struct EffectSprite {
     // bhEff219: O_WRK.exp0 zeigt auf die Schneebox. Geteilt wie der Originalzeiger,
     // auch ueber den Effektstapel (Skriptbefehl 0x70/0x71 kopiert eff[]).
     std::shared_ptr<EffectSnow> snow;
+    // bhEff136: Nachbild, ef_Zanzo-Platz dieses Passes (-1 keiner; effect.c:767 leert die
+    // Liste je Steuerpass) und das Materialalpha (ct0 + 1) * 40, das bhDraw136 setzt.
+    std::shared_ptr<const EffectAfterimage> afterimage;int zanzo_slot=-1;unsigned afterimage_alpha=0;
+    std::shared_ptr<EffectSpark308> spark308;
     bool flame_compact_uv=false; // bhEff009 latches its UV bank at initialization.
     // O_WRK.exp0 von bhEff_E16_LaserSightDraw: die von bhCollisionCheckLine2 getroffene Flaeche (ATR_WORK*).
     std::optional<CollisionWall> line_wall;
@@ -107,6 +130,8 @@ struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,pla
     // Ereignisbit steht (objitm.c:1791/1830 setzt es). Flagmatrix 1 des
     // Eventbesitzers, Bit 2 von oben gezaehlt.
     bool ev_flg_2=false;
+    // sys->rcase (Skriptbefehl 0x37 bhRoomCaseNo, sonst der Fall der geladenen Raumdatei).
+    unsigned room_case=0;
     // cam.wpx/wpy/wpz (Auge) und cam.vx/vy/vz (Blickrichtung) des Vorbildes (camera.c:45-56).
     NJS_POINT3 camera_position{},camera_view{};};
 // sys->winds/windr (mit den Vorbildwerten windsb/windrb) und sys->thunder: Wetterzustand,
@@ -135,6 +160,22 @@ void set_effect_extra_allocator(std::function<int()> reserve,std::function<void(
 // pp->mlwP->owP[node].mtx eines Spieler-/Gegnersatzes (kind 0 Spieler, 1 Gegner nach Raumindex).
 void set_effect_link_lookup(std::function<bool(unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out)> lookup);
 // effsub2.c:2296 bhEff_E11_CheckCollisionPlayer: Objektindex des getroffenen Treffermodells oder -1; kuerzt p2.
+// Zugriffe der Effektprozeduren auf Spieler-, Licht-, Gegner- und Stimmenbesitzer des
+// Raums (effsub2.c E12: plp-Schaden/-Schub, rom->lgtp[1], bhEne12_SetFireBintaEffect,
+// bhEne_CallEffectSE). Ein leerer Dienst wird als Luecke gemeldet.
+struct EffectWorldHooks {
+    std::function<bool(RECVX_ENEMY_PLAYER&)> player_get;
+    std::function<void(const RECVX_ENEMY_PLAYER&)> player_set;
+    std::function<void(unsigned offset,float value)> player_exp0;
+    std::function<void(int jno,NJS_POINT3 ofp,float size,int life)> player_fire;
+    std::function<void(NJS_POINT3 pos)> fire_light;
+    std::function<void(void* enemy_work,int action)> en12_binta;
+    std::function<bool(int se)> effect_se_playing;
+    std::function<void(NJS_POINT3 pos,int se)> effect_se;
+    // plp->dvx/dvy/dvz (effsub2.c:2791/2981): derselbe Feldsatz, den bhEne_AttackHitCheck schreibt.
+    std::function<void(NJS_POINT3 dv)> player_dv;
+};
+void set_effect_world_hooks(EffectWorldHooks hooks);
 // effsub3.c:1008 bhSetEffParticleMk2(lkwkp, lnk_no, off, dir, src, dst, typ) aus einer Effektprozedur (Partikelbesitzer des Raums).
 void set_effect_particle_mk2(std::function<int(int link_kind,unsigned link_index,unsigned node,NJS_POINT3 offset,NJS_POINT3 direction,unsigned src,unsigned dst,int type)> hook);
 void set_effect_player_hit(std::function<int(NJS_POINT3 p1,NJS_POINT3& p2)> lookup);
@@ -143,6 +184,19 @@ void set_effect_work_angle(std::function<bool(unsigned kind,unsigned index,int& 
 // eff[n] des geteilten Satzes: Prozeduren, die ihre Kinder ueber deren Platz fuehren
 // (effsub1.c bhEff118), greifen damit auf den Nachbarsatz zu.
 void set_effect_pool_lookup(std::function<EffectSprite*(int slot)> lookup);
+// Dienste des Raumbesitzers fuer bhEff135/136 (effsub1b.c:621..760):
+// zan_open: sys->ef_flg 0x4 und der 2-MB-Puffer zan_memp beim ersten Lauf im Raum;
+// zan_reserve(bytes): sys->zanp vorruecken, false wenn &zanp[n] >= zan_memp + 0x200000;
+// vertex_count: objP[node].model->vlist[1] >> 16 von mdl[mdl] des Werks, -1 = model NULL,
+// -2 = der Host kennt das Modell nicht; work_position: pp->px/py/pz; capture: das Nachbild.
+struct EffectAfterimageServices {
+    std::function<void()> zan_open;
+    std::function<bool(std::size_t bytes)> zan_reserve;
+    std::function<int(unsigned kind,unsigned index,unsigned mdl,unsigned node)> vertex_count;
+    std::function<std::optional<NJS_POINT3>(unsigned kind,unsigned index)> work_position;
+    std::function<std::shared_ptr<const EffectAfterimage>(unsigned kind,unsigned index,unsigned mdl,unsigned node)> capture;
+};
+void set_effect_afterimage_services(EffectAfterimageServices services);
 void set_explosion_effect(NJS_POINT3 position,NJS_POINT3 view);
 // Texturgruppe -> {erste Szenentextur, Bildzahl}.
 // fnc_blend: das Blendpaar, das vor diesem ef_fnc-Eintrag gilt; der Aufruf schreibt das
@@ -161,6 +215,12 @@ struct EffectSpawn {unsigned flg=1,id=0,type=0;int flr_no=0;unsigned mdlver=0;NJ
     // effsub6.c:154 bhEff146_Init schreibt am neuen Satz zusaetzlich mode1 und
     // tv[0].col (nur der erste Eckpunkt, wie op->tv->col im Original).
     int mode1=0;bool has_color=false;std::uint32_t color=0;
+    // bhSetEffectTb(&sys->ef, NULL, lkwkp, lkono) mit Linkzeiger: das Werk (kind wie
+    // EffectSprite::link_kind). drop_link_flag: der Erzeuger loescht danach eff[n].flg 0x80
+    // (effsub1b.c:689 bhEff135), der Satz haelt lkwkp, folgt dem Gelenk aber nicht.
+    int link_kind=-1;unsigned link_index=0;bool drop_link_flag=false;
+    // effsub2.c:3035-3040: eff[eno].aox/aoy/aoz und exp1 (eff-Platz, -1 = NULL) am neuen Satz.
+    bool has_ao=false;NJS_POINT3 ao{};bool has_exp1=false;int exp1_slot=-1;
     // bhSetEffectTb gibt den belegten Platz zurueck; eine Prozedur, die ihre Kinder ueber
     // deren Platz fuehrt (effsub1.c bhEff118), legt ihn in ihrem eigenen pv ab. Der
     // Raumbesitzer traegt ihn nach der Zuweisung dort ein (-1 = kein Rueckschreiben).
@@ -176,7 +236,9 @@ struct EffectOutput {std::vector<EffectSpawn> spawns;std::vector<unsigned> sound
     std::set<std::string> gaps;
     // effsub1.c:8825 bhEff127: plp->hp = -1, wenn die Gaswand ueber den
     // Spielerkopf steigt. Der Raumbesitzer traegt es am Spielerwork ein.
-    bool player_killed=false;};
+    bool player_killed=false;
+    // sys->ef_flg-Bits, die eine Prozedur setzt (effsub1b.c:631 bhEff135: 0x4).
+    unsigned effect_flags=0;};
 // Fills the effect work exactly as bhSetEffectTb copies an EF_WORK.
 void initialize_effect_sprite(EffectSprite& sprite,const EffectSpawn& spawn);
 // bhSetExplosion (weapon.c): sound 534, flash light, effects 16/23/24. `view` is cam.vx/vy/vz.
@@ -197,6 +259,8 @@ bool step_effect_sprite(EffectSprite& sprite,const EffectContext& context,bool* 
 // light.c types 1..6: working RGB is sampled before advancing the clock.
 void step_light_color(unsigned type,unsigned speed,unsigned& clock,NJS_POINT3 color,NJS_POINT3& working,bool running);
 bool supported_effect_sprite(unsigned id);
+// effsub3.c:2401 bhSetEffGunSpark -> bhSetRapEff(308): fuellt einen frisch belegten eff-Satz.
+bool start_gun_spark(EffectSprite& sprite,NJS_POINT3 pos,NJS_POINT3 dir,std::uint32_t src_col,std::uint32_t dst_col,int typ_no);
 // Room texture groups (room.c:305-329 ef_tn) a ported procedure addresses
 // through tex_id. Their atlases keep the decoded Ninja alpha, because the
 // ported effects draw with their own njColorBlendingMode pair.

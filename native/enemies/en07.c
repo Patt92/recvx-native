@@ -709,7 +709,12 @@ static void en07_br00(RECVX_ENEMY_WORK* w)
         e->hang_wait = 300 + (int32_t)(300.0f * en07_rand01(w));
     }
 
-    if ((pl.wpnr_no == 1) || (pl.stflg & 0x80000000u) || (e->sight == 0u) || (s->cooldown > 0u)) {
+    /* en07.c:341 — der einzige Angriffsbeginn der Fledermaus (mode0 = 2 nur
+       hier, en07.c:353/:373). debug_attack_disabled ist der Host-Schalter
+       "Gegner-Angriff" und steht wie bei en01/en04/en09/en10/en21 im Tor vor
+       dem Angriff; Suche, Haengen und Flug laufen unveraendert weiter. */
+    if ((pl.wpnr_no == 1) || (pl.stflg & 0x80000000u) || (e->sight == 0u) || (s->cooldown > 0u)
+        || pl.debug_attack_disabled) {
         return;
     }
 

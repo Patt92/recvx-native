@@ -39,11 +39,13 @@ Event-Sonderbehandlung.
   verify_enemy_ai (`graveyard-entry`, Lücke bhEff107).
 - Prüfläufe: `build/validation/discard-1020-20261014/`.
 
-## Offen (B)
+## Variante B (2026-10-14, umgesetzt)
 
-Der Host-Gate auf st_flg 0x4 soll ganz entfallen. Ihn ersetzt das Original-Gating:
-`bhSetPad` nur bei sp_flg 0x20, sonst pad_on = 0, und bei cb_flg 0x4 die Maske 0x1188F
-(system.c:522-534). Hinzu kommt der Pass-Gate `bhControlPlayer` sp_flg 0x1.
-Dafür ist eine breitere Prüfung der Cinematic-, Tür- und Kistenszenen nötig.
-
-Keine Starter-/Paketersetzung.
+Der Host-Gate auf st_flg 0x4 ist entfernt. Es gelten die Original-Gates:
+`bhControlPlayer` nur mit sp_flg 0x1 und plp->stflg 0x1000000 frei (player.c:1365);
+`bhSysCallMain` setzt pad_on = 0 ohne sp_flg 0x20 und maskiert bei cb_flg 0x4 auf
+0x1188F (system.c:522-534), auch fuer Zielen/Angriff des Kampfpasses und den Pad der
+Effektprozeduren. st_flg 0x4 loescht weiterhin bhControlPlayerPad.
+Pruefung `build/validation/padgate-20261014/`: discard_question, events, event_freeze,
+doors, continuity, push, stairs, item_box_object, computer, pickups, lighter, gameover,
+frontend, combat, palace_stairs gruen; verify_enemy_ai rot wie Vorbestand (dogs-3000).

@@ -55,5 +55,28 @@ int main(int argc,char** argv){try{
         for(const auto& t:room.triangles)if(t.textured&&(t.texture==32||t.texture==49)&&t.blend==SceneBlend::Ninja){check(t.blend_register==0x44,"real window SA/ISA blend not decoded");++glass;}
         check(glass>=4,"actual detector room glass lost transparency metadata");
     }
-    std::cout<<"Original chunk/GS registers, textured transparency, shared edges and occlusion verified.\n";return 0;
+    {
+        // Chunk strip clip rule (vu1DrawTriangleStripOpaque*, ps2_Vu1Strip.c:846/967; VU1
+        // DoubleMain/SingleMain; strip packet reject ps2_NinjaCnk.c:2045-2104): a strip
+        // triangle whose vertices all stay inside _Check_DisplayAreaPoint is drawn whole,
+        // also beyond njClipZ far; a packet whose vertices all lie beyond one clip plane
+        // is dropped. Non-strip triangles keep the exact z clip.
+        _Make_SinTable();
+        SceneCamera camera;camera.perspective=8192;camera.clip_near=1;camera.clip_far=10;
+        const auto quad=[](float z,std::uint32_t color){SceneTriangle t;t.vertices={SceneVertex{{-6,-6,z}},SceneVertex{{6,-6,z}},SceneVertex{{0,6,z}}};t.color=color;t.world_lit=true;return t;};
+        SoftwareRenderer strip(64,48);strip.set_supersampling(1);
+        const auto centre=[&](const Scene& sc){strip.draw(sc,camera);return strip.pixels()[24*64+32];};
+        Scene far;far.background=0xff000000;
+        auto beyond=quad(-20,0xff3040a0);far.triangles={beyond};
+        check(centre(far)==0xff000000,"ordinary triangle beyond njClipZ far is drawn");
+        far.triangles[0].strip_clip=true;far.triangles[0].strip_segment=0;
+        check(centre(far)==0xff3040a0,"njCnkCs strip triangle on screen beyond far is clipped (vu1DrawTriangleStrip* draws it whole)");
+        far.triangles[0].strip_segment=1000001u;
+        check(centre(far)==0xff000000,"njCnkCsUvh packet entirely beyond far survives the vclipw AND reject");
+        auto inside=quad(-5,0xff20a020);inside.strip_clip=true;inside.strip_segment=1000001u;
+        for(auto& v:inside.vertices){v.position.x=v.position.x*0.2f+3.f;v.position.y=v.position.y*0.2f-0.8f;}
+        far.triangles.push_back(inside);
+        check(centre(far)==0xff3040a0,"packet with one vertex inside the clip volume is dropped although the AND is zero");
+    }
+    std::cout<<"Original chunk/GS registers, textured transparency, shared edges, occlusion and the chunk strip clip rule verified.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

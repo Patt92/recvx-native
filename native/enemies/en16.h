@@ -59,6 +59,9 @@ typedef struct {
     int  (*floor_enemy)(int flr_no, float px, float pz, int32_t* prm0);
     /* hitchk.c:5881 bhCheckWallAttrB89(hp) auf der Flaeche aus eff->exp0; prm0 dazu. */
     int  (*wall_attr_b89)(const void* atr, int32_t* prm0);
+    /* effsub3.c:2401 bhSetEffGunSpark(pos, dir, src, dst, typ) */
+    void (*gun_spark)(const RECVX_ENEMY_VEC* pos, const RECVX_ENEMY_VEC* dir, uint32_t src, uint32_t dst, int typ);
+    int hiteff13; /* weapon.c WpnTab[13].hiteff */
     /* weapon.c:1632 bhSetGunSplash(&gap {wpn_no, ay, v}, pos, wattr) */
     void (*gun_splash)(int wpn_no, int32_t ay, const RECVX_ENEMY_VEC* gvec, const RECVX_ENEMY_VEC* pos, int wattr);
 } RECVX_EN16_SERVICES;

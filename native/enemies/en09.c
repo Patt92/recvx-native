@@ -10,6 +10,8 @@
 #include "en09_tables.h"
 #include "en03_lib.h"
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 #include <string.h>
 #include "../ninja_math.h"
@@ -549,6 +551,7 @@ static void en09_move(RECVX_ENEMY_WORK* w)
     }
     RECVX_ENEMY_PLAYER plp;if(!en09_player(w,&plp))return;
     en09_ext(w)->ply_dist=en09_distance(plp.pos,en09_pos(w));
+    if(getenv("EN09_MOVE_DBG"))fprintf(stderr,"EN09MOVE id=%u type=%u mode=%u,%u,%u flr=%d px=%.2f pz=%.2f\n",w->id,w->type,w->mode0,w->mode1,w->mode2,w->flr_no,w->px,w->pz);
     if(w->type==9){en09_ext(w)->trg_x=w->px;en09_ext(w)->trg_z=w->pz;en09_transition(w,10);en09_move_state(w,&plp);}
     else if(w->type==10){if(w->mode2==3)en09_mv03(w);else en09_mv00(w);}
     else {if(w->mode1==1)en09_brain(w,&plp);if(w->mode0==1)en09_move_state(w,&plp);}

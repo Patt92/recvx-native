@@ -131,7 +131,7 @@ unsigned item_box_pad(const InputFrame& f){
 }
 InputConfig InputConfig::defaults(){std::istringstream stream(defaults_text);return parse(stream);}
 InputConfig InputConfig::read(const std::filesystem::path& path){std::ifstream stream(path);if(!stream)throw std::runtime_error("cannot read controls: "+path.string());if(std::filesystem::file_size(path)>65536)throw std::runtime_error("controls file too large");return parse(stream);}
-void InputConfig::write_defaults(const std::filesystem::path& path){if(std::filesystem::exists(path))throw std::runtime_error("controls output already exists");std::ofstream file(path);if(!file)throw std::runtime_error("cannot write controls: "+path.string());file<<defaults_text;file.close();if(!file)throw std::runtime_error("controls write failed");}
+void InputConfig::write_defaults(const std::filesystem::path& path){if(std::filesystem::exists(path))throw std::runtime_error("controls output already exists");if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());std::ofstream file(path);if(!file)throw std::runtime_error("cannot write controls: "+path.string());file<<defaults_text;file.close();if(!file)throw std::runtime_error("controls write failed");}
 
 std::string InputConfig::describe(Action action,bool gamepad)const{
     std::string result;
@@ -159,6 +159,7 @@ void InputConfig::save(const std::filesystem::path& path)const{
     }text<<"\n[settings]\ndeadzone = "<<deadzone<<"\nmenu_threshold = "<<menu_threshold<<"\nrepeat_delay_ticks = "<<repeat_delay<<"\nrepeat_interval_ticks = "<<repeat_interval<<'\n';
     // Validate before opening an existing user configuration for writing.
     std::istringstream validation(text.str());parse(validation);
+    if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
     auto temporary=path;temporary+=".tmp-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     try{std::ofstream output(temporary);if(!output)throw std::runtime_error("cannot save controls");output<<text.str();output.close();if(!output)throw std::runtime_error("controls save failed");
 #ifdef _WIN32
@@ -251,7 +252,7 @@ bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))re
     /* st_flg 0x40000 (Kartentask, siehe menu_input): kein Spiel-/Menuepfad und kein
        Host-Quit; Cancel erreicht die Karte als pad_ps 0x1000 (map.c:540, Ausstieg). */
     if(events_&&(events_->flags[5][0]&0x40000u))return false;
-    menu_.tick(inventory_);if(menu_.slide_sound!=0xffffffff){if(sound)sound(menu_.slide_sound);menu_.slide_sound=0xffffffff;}synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
+    menu_.tick(inventory_);if(menu_.slide_sound!=0xffffffff){if(sound)sound(menu_.slide_sound);menu_.slide_sound=0xffffffff;}if(menu_.tick_sound!=0xffffffff){if(sound)sound(menu_.tick_sound);menu_.tick_sound=0xffffffff;}synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
     if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
     if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition(); /* Host-Abweichung: gewuenschter Tuer-Skip, siehe doors.h */return false;}if(video_active&&video_active()){
         inventory_pending_=false;inventory_grace_=0;

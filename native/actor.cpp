@@ -4,6 +4,7 @@
 #include "asset_io.h"
 #include "morph.h"
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <stdexcept>
@@ -341,6 +342,18 @@ Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS
     auto full=matrices(geometry.pose,position,yaw);
     return render_pose(std::move(geometry),std::move(full),matrices_out,face_param);
 }
+std::vector<std::uint8_t> PlayerAsset::live_stream()const{
+    std::vector<std::uint8_t> out=model_;
+    BinaryView source(model_);const auto base=source.u16(4);const auto objects=source.relative(base,source.u32(12),bones()*52);
+    auto put=[&](std::size_t at,float value){std::memcpy(out.data()+at,&value,4);};
+    for(const auto& mesh:skin_){
+        const auto mdl=source.relative(base,source.u32(objects+mesh.object*52+4),24),chunk=source.relative(base,source.u32(mdl),64);
+        for(std::size_t i=0;i<mesh.local_vertices.size();++i){const auto p=chunk+64+i*32;
+            put(p,mesh.local_vertices[i].x);put(p+4,mesh.local_vertices[i].y);put(p+8,mesh.local_vertices[i].z);
+            put(p+16,mesh.local_normals[i].x);put(p+20,mesh.local_normals[i].y);put(p+24,mesh.local_normals[i].z);}
+    }
+    return out;
+}
 Scene PlayerAsset::sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& work,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out,const FaceParameter* face_param,const std::vector<std::uint8_t>* live_model,const MorphSource* morph)const{
     if(pose.size()!=bones()||work.size()!=bones()||flags.size()!=bones())throw std::runtime_error("native actor work skeleton differs from model");
     ModelGeometryOptions geometry;geometry.pose=pose;geometry.evalflags=flags;
@@ -351,11 +364,18 @@ Scene PlayerAsset::sample_work(const std::vector<ModelPose>& pose,const std::vec
     }
     return render_pose(std::move(geometry),std::move(full),matrices_out,face_param,live_model);
 }
+Scene PlayerAsset::sample_object_work(unsigned object,const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& work,const std::vector<std::uint32_t>& flags,const std::vector<std::uint8_t>* live_model,bool skin_fm)const{
+    if(object>=bones()||pose.size()!=bones()||work.size()!=bones()||flags.size()!=bones())throw std::runtime_error("snapshot object lacks committed model work");
+    ModelGeometryOptions geometry;geometry.pose=pose;geometry.evalflags=flags;geometry.draw_object=int(object);geometry.skin_fm=skin_fm;
+    std::vector<Matrix> full(work.size());geometry.world_matrices.resize(work.size());
+    for(std::size_t n=0;n<work.size();++n){std::copy_n(work[n].value,16,full[n].value);std::copy_n(work[n].value,16,geometry.world_matrices[n].begin());}
+    return render_pose(std::move(geometry),std::move(full),nullptr,nullptr,live_model);
+}
 Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix> full,std::vector<BoneMatrix>* matrices_out,const FaceParameter* face_param,const std::vector<std::uint8_t>* live_model)const{
     // Native enemy routines deform the owned vertex streams in place. That
     // stream is the renderer's source too; never resample an immutable asset.
     const auto& encoded=live_model?*live_model:model_;
-    std::vector<std::uint8_t> deformed;if(face_&&!live_model){deformed=encoded;const auto param=face_param?*face_param:sample_face_parameters(face_->keys(),0);face_->deform(deformed,param);}
+    std::vector<std::uint8_t> deformed;if(face_&&!live_model&&geometry.draw_object<0){deformed=encoded;const auto param=face_param?*face_param:sample_face_parameters(face_->keys(),0);face_->deform(deformed,param);}
     const auto& rendered=deformed.empty()?encoded:deformed;
     BinaryView source(encoded),changed(rendered);const auto base=source.u16(4);const auto objects=source.relative(base,source.u32(12),bones()*52);
     // npCalcMorphing pairs obj_a with obj_b object by object; npPushMdlstr2 has
@@ -376,11 +396,17 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
     }
     geometry.world_vertices.resize(bones());
     geometry.world_normals.resize(bones());
+    // npInitCalcSkinFM/npCalcSkinFM (njplus.c:2049/2140): four procedural
+    // face nodes consume no skin record, influence indices >10 skip them.
+    const auto bind_translation=geometry.skin_fm?matrices(bind_pose_,{},0,true):std::vector<Matrix>{};
     for(const auto& mesh:skin_) {
+        if(geometry.skin_fm&&script_index(unsigned(mesh.object))>=11&&script_index(unsigned(mesh.object))<=14)continue;
         auto& vertices=geometry.world_vertices[mesh.object];vertices.reserve(mesh.weights.size());
         auto& normals=geometry.world_normals[mesh.object];normals.reserve(mesh.weights.size());
         for(std::size_t i=0;i<mesh.weights.size();++i) {
-            const auto word=mesh.weights[i],bone=word>>24,level=(word>>16)&255;
+            const auto word=mesh.weights[i],raw_bone=word>>24,level=(word>>16)&255;
+            const unsigned bone=geometry.skin_fm?model_index(raw_bone+(raw_bone>10?4u:0u)):raw_bone;
+            if(bone>=full.size())throw std::runtime_error("Skin-FM influence outside committed skeleton");
             auto point=mesh.local_vertices[i];auto normal=mesh.local_normals[i];NJS_POINT3 a,b;
             if(live_model||!deformed.empty()){
                 const auto mdl=source.relative(base,source.u32(objects+mesh.object*52+4),24),chunk=source.relative(base,source.u32(mdl),64),p=chunk+64+i*32;
@@ -388,6 +414,11 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
                 // influencing bone's origin. Do not convert them twice.
                 if(live_model){point={changed.f32(p),changed.f32(p+4),changed.f32(p+8)};normal={changed.f32(p+16),changed.f32(p+20),changed.f32(p+24)};}
                 else{point.x+=changed.f32(p)-source.f32(p);point.y+=changed.f32(p+4)-source.f32(p+4);point.z+=changed.f32(p+8)-source.f32(p+8);}
+            }
+            if(geometry.skin_fm&&bone!=raw_bone){
+                point.x+=bind_translation[raw_bone].value[12]-bind_translation[bone].value[12];
+                point.y+=bind_translation[raw_bone].value[13]-bind_translation[bone].value[13];
+                point.z+=bind_translation[raw_bone].value[14]-bind_translation[bone].value[14];
             }
             if(geometry.morph.model){
                 float sp[3],sn[3],bp[3],bn[3];

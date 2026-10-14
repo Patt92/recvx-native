@@ -37,7 +37,7 @@ public:
     const std::set<std::string>& unbound_routines()const;
 private:
     void accumulate_aim(const RECVX_COMBAT_RESULT& result);
-    void publish_pose(PlayerAsset& player,std::size_t motion,std::int64_t frame,const SceneSpawn& actor);
+    void publish_pose(PlayerAsset& player,std::size_t motion,std::int64_t frame,const SceneSpawn& actor,RoomWorld* world);
     std::shared_ptr<CombatOriginal> original_;
     AimDiagnostics aim_history_{};
     const void* aim_core_=nullptr;

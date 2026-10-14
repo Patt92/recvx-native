@@ -52,6 +52,7 @@ void ThirdPersonCamera::save(const std::filesystem::path& path,const ThirdPerson
         <<"\nshoulder_side = "<<(s.left_shoulder?"left":"right")<<"\ndistance = "<<s.distance<<"\nheight = "<<s.height<<"\nshoulder = "<<s.shoulder
         <<"\naim_distance = "<<s.aim_distance<<"\naim_height = "<<s.aim_height<<"\naim_shoulder = "<<s.aim_shoulder
         <<"\nfov = "<<s.fov<<"\naim_fov = "<<s.aim_fov<<"\nsmoothing = "<<s.smoothing<<'\n';
+    if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
     auto temporary=path;temporary+=".tmp-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     try{std::ofstream output(temporary);if(!output)throw std::runtime_error("cannot save third_person settings");output<<text.str();output.close();if(!output)throw std::runtime_error("third_person save failed");
         std::error_code error;std::filesystem::rename(temporary,path,error);

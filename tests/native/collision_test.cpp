@@ -30,9 +30,39 @@ static void c2_wall(){
     check(check_collision_4_sound({box},100,0,{-10,5,0},{10,5,0})==0,"rom->flg without bit 2 never occludes");
     check(check_collision_4_sound({box},100,2,{-10,5,0},{10,5,0})==-0x1C,"CheckCollision4Sound returns -0x1C");
 }
+// pwksub.c:718 bhCheckL2Wall: *len = nr, sys->apos and sys->ahtp (the winning record),
+// expectations computed by hand from the original face planes.
+static void l2_wall(){
+    auto near=[](float a,float b){return std::fabs(a-b)<1e-4f;};
+    auto line=[](NJS_POINT3 p,NJS_POINT3 v){return RECVX_CB_LINE{p.x,p.y,p.z,v.x,v.y,v.z};};
+    float len=0;RECVX_CB_VEC apos{};int ahtp=-2;
+    // Two type 0 boxes, the farther one first in rom->walp: face px+0.1 (normal -x) of each is hit;
+    // the nearer one wins with nr, and sys->ahtp names it together with its attr/prm.
+    CollisionWall far{1,0,0,0,0x300,{5,0,-20},{2,0,40},{1,5,255,255}},near_box{1,0,0,0,0x100,{0,0,-20},{2,0,40},{0,0,0,0}};
+    check(check_l2_wall({far,near_box},100,line({-10,5,0},{20,0,0}),0x400,&len,&apos,&ahtp)==1,"type 0 box not hit");
+    check(ahtp==1&&near(len,10.1f)&&near(apos.x,0.1f)&&near(apos.y,5)&&near(apos.z,0),"bhCheckL2Wall does not keep the nearest face hit as sys->apos/sys->ahtp");
+    check(check_l2_wall({far},100,line({-10,5,0},{20,0,0}),0x400,&len,&apos,&ahtp)==1&&ahtp==0&&near(apos.x,5.1f)&&near(len,15.1f),"far box face");
+    // Type 1 is skipped with flg 0x400; without a hit apos = lp->p + lp->v, ahtp = NULL, *len = |lp->v|.
+    auto see=near_box;see.type=1;
+    check(check_l2_wall({see},100,line({-10,5,0},{20,0,0}),0x400,&len,&apos,&ahtp)==0&&ahtp==-1&&near(apos.x,10)&&near(len,20),"type 1 with flg 0x400 or the no-hit result");
+    check(check_l2_wall({see},100,line({-10,5,0},{20,0,0}),0,&len,&apos,&ahtp)==1&&ahtp==0,"type 1 without flg 0x400");
+    auto off=near_box;off.flags=0;check(check_l2_wall({off},100,line({-10,5,0},{20,0,0}),0x400,&len,&apos,&ahtp)==0,"disabled wall hit");
+    // Type 7 slab (h < 0, prm0 1 = water): face py-0.1 with ps.y <= 0 && ps.y >= h.
+    const CollisionWall water{1,7,0,0,0,{0,0,0},{10,-5,10},{1,0,0,0}};
+    check(check_l2_wall({water},100,line({5,10,5},{0,-20,0}),0x400,&len,&apos,&ahtp)==1&&ahtp==0&&near(apos.y,-0.1f)&&near(len,10.1f),"type 7 slab not hit from above");
+    check(check_l2_wall({water},100,line({-5,5,5},{20,0,0}),0x400,&len,&apos,&ahtp)==0,"type 7 slab hit by a line above it");
+    // Type 2 cylinder (radius w): the mantle hit is pulled onto the radius facing lp->p.
+    const CollisionWall pillar{1,2,0,0,0,{0,0,0},{1,10,0}};
+    check(check_l2_wall({pillar},100,line({-10,5,0},{20,0,0}),0x400,&len,&apos,&ahtp)==1&&near(apos.x,-1)&&near(len,9),"type 2 mantle");
+    // Type 4 prism id 0 over (0,0),(10,0),(0,10): top face py+h-0.1 inside the triangle.
+    const CollisionWall prism{1,4,0,0,0,{0,0,0},{10,10,10}};
+    check(check_l2_wall({prism},100,line({2,20,2},{0,-25,0}),0x400,&len,&apos,&ahtp)==1&&near(apos.y,9.9f)&&near(len,10.1f),"type 4 top face");
+    check(check_l2_wall({prism},100,line({8,20,8},{0,-25,0}),0x400,&len,&apos,&ahtp)==0,"type 4 outside the hypotenuse");
+}
 int main(){try{
     _Make_SinTable();
     c2_wall();
+    l2_wall();
     std::array<float,32> floors{};floors[3]=20;
     CollisionWall wall{1,0,0,0,0,{0,0,-20},{.01f,0,40}};
     auto move=[&](NJS_POINT3 a,NJS_POINT3 b,float radius=1){return move_walls({wall},100,floors,a,b,radius);};

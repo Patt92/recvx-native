@@ -108,6 +108,12 @@ void plane_normal(const V p[3],Plane& pl){
     pl.vy=(p[1].z-p[0].z)*(p[2].x-p[1].x)-(p[1].x-p[0].x)*(p[2].z-p[1].z);
     pl.vz=(p[1].x-p[0].x)*(p[2].y-p[1].y)-(p[1].y-p[0].y)*(p[2].x-p[1].x);
 }
+// ps2_NaColi.c:35 njIsParalellL2PL
+int is_paralell_l2pl(const L& l,const Plane& pl){
+    float px=pl.vx,py=pl.vy,pz=pl.vz,n=njInvertSqrt(px*px+py*py+pz*pz);px*=n;py*=n;pz*=n;
+    float lx=l.vx,ly=l.vy,lz=l.vz;n=njInvertSqrt(lx*lx+ly*ly+lz*lz);lx*=n;ly*=n;lz*=n;
+    return std::fabs(px*lx+py*ly+pz*lz)<=0.025f?1:0;
+}
 // hitchk.c:3699 bhCheckInnerTriangle(hp, pos, 0, 0) as bhCheckC2Wall calls it: the ar == 0 branch.
 int inner_triangle(const CollisionWall& hp,float room_height,const V& pos){
     const float h=hp.extent.y?hp.extent.y:room_height;
@@ -153,6 +159,130 @@ int check_c2_wall(const std::vector<CollisionWall>& walls,float room_height,cons
         }
     }
     return 0;
+}
+// pwksub.c:718-1890 bhCheckL2Wall (100% matching source). A 0.01 capsule from lp->p to
+// lp->p + lp->v pre-selects each record (njCollisionCheckBC / npCollisionCheckCC); its c2
+// moves to every accepted hit, so later records only compete inside the shorter line.
+// Each face plane is intersected with the infinite line (njDistanceL2PL), and the point
+// counts when it lies inside the record and closer to lp->p than the best one so far.
+int check_l2_wall(const std::vector<CollisionWall>& walls,float room_height,const RECVX_CB_LINE& line,unsigned flg,float* len,RECVX_CB_VEC* apos,int* ahtp){
+    const L& lp=line;
+    auto scalor=[](float x,float y,float z){NJS_VECTOR v{x,y,z};return njScalor(&v);};
+    C cap{{lp.px,lp.py,lp.pz},{lp.px+lp.vx,lp.py+lp.vy,lp.pz+lp.vz},0.01f};
+    float nr=scalor(lp.vx,lp.vy,lp.vz);
+    int hit=0,found=-1;V at{};
+    for(std::size_t n=0;n<walls.size();++n){
+        const auto& hp=walls[n];if(!(hp.flags&1))continue;
+        const float px=hp.position.x,py=hp.position.y,pz=hp.position.z,w=hp.extent.x,d=hp.extent.z;
+        float h=hp.extent.y;if(!h)h=room_height;
+        // sys->apos = pt; hit++; sys->ahtp = hp; cap.c2 = pt;
+        auto take=[&](const V& pt,float ln){nr=ln;at=pt;++hit;found=int(n);cap.c2=pt;};
+        auto origin_distance=[&](const V& pt){return scalor(pt.x-lp.px,pt.y-lp.py,pt.z-lp.pz);};
+        // Faces of the box records (types 0/1, 6, 7): inside [0,w]x[0,h]x[0,d] of the
+        // record; type 7 carries a negative h and tests ps.y <= 0 && ps.y >= h.
+        auto box_face=[&](const Plane& pl,bool downward){V pt;if(distance_l2pl(lp,pl,pt))return;
+            const float ln=origin_distance(pt);const float x=pt.x-px,y=pt.y-py,z=pt.z-pz;
+            if(x>=0&&x<=w&&(downward?(y<=0&&y>=h):(y>=0&&y<=h))&&z>=0&&z<=d&&ln<nr)take(pt,ln);};
+        // Faces of the triangle prisms (types 4/5): bhCheckInnerTriangle(hp, &pt, 0, 0).
+        auto prism_face=[&](const Plane& pl){V pt;if(distance_l2pl(lp,pl,pt))return;
+            const float ln=origin_distance(pt);if(inner_triangle(hp,room_height,pt)&&ln<nr)take(pt,ln);};
+        const Box standard{{{px,py+h,pz+d},{px,py+h,pz},{px+w,py+h,pz},{px+w,py+h,pz+d},{px,py,pz+d},{px,py,pz},{px+w,py,pz},{px+w,py,pz+d}}};
+        switch(hp.type){
+        case 0:case 1:
+            if(!(hp.type&1)||!(flg&0x400)){
+                if(check_bc(standard,cap)){
+                    box_face({px,(py+h)-0.1f,pz,0,1.0f,0},false);
+                    box_face({px,0.1f+py,pz,0,-1.0f,0},false);
+                    box_face({0.1f+px,py,pz,-1.0f,0,0},false);
+                    box_face({(px+w)-0.1f,py,pz,1.0f,0,0},false);
+                    box_face({px,py,0.1f+pz,0,0,-1.0f},false);
+                    box_face({px,py,(pz+d)-0.1f,0,0,1.0f},false);
+                }
+            }
+            break;
+        case 2:case 3:
+            if(!(hp.type&1)||!(flg&0x400)){
+                const C cap2{{px,py,pz},{px,py+h,pz},w};
+                if(recvx_cb_check_cc(&cap2,&cap)){
+                    // Top and bottom discs, only when the line is not parallel to them.
+                    auto disc=[&](const Plane& pl){V pt;if(distance_l2pl(lp,pl,pt))return;
+                        const float ln=origin_distance(pt),lr=scalor(pt.x-px,0,pt.z-pz),y=pt.y-py;
+                        if(lr<w&&ln<nr&&y>=0&&y<=h)take(pt,ln);};
+                    const Plane top{px,(py+h)-0.1f,pz,0,1.0f,0};
+                    if(!is_paralell_l2pl(lp,top)){disc(top);disc({px,0.1f+py,pz,0,-1.0f,0});}
+                    // Mantle: the plane through the axis point facing lp->p, its hit pulled
+                    // back onto the radius.
+                    const L cln{px,py,pz,0,h,0};V pt,ps;
+                    recvx_cb_distance_l2l(&lp,&cln,&pt,&ps);
+                    if(scalor(pt.x-px,0,pt.z-pz)<w){
+                        NJS_VECTOR u{lp.px-px,0,lp.pz-pz};njUnitVector(&u);
+                        const Plane side{px+u.x*w,py,pz+u.z*w,u.x,0,u.z};
+                        if(!distance_l2pl(lp,side,pt)){
+                            NJS_VECTOR r{pt.x-px,0,pt.z-pz};njUnitVector(&r);
+                            pt.x=px+r.x*w;pt.z=pz+r.z*w;
+                            const float ln=origin_distance(pt),y=pt.y-py;
+                            if(ln<nr&&y>=0&&y<=h)take(pt,ln);
+                        }
+                    }
+                }
+            }
+            break;
+        case 4:case 5:
+            if(!(hp.type&1)||!(flg&0x400)){
+                Box box;
+                switch(hp.id){
+                case 0:box=standard;break;
+                case 1:box={{{px,py+h,pz},{px,py+h,pz+d},{px+w,py+h,pz+d},{px+w,py+h,pz},{px,py,pz},{px,py,pz+d},{px+w,py,pz+d},{px+w,py,pz}}};break;
+                case 2:box={{{px+w,py+h,pz+d},{px+w,py+h,pz},{px,py+h,pz},{px,py+h,pz+d},{px+w,py,pz+d},{px+w,py,pz},{px,py,pz},{px,py,pz+d}}};break;
+                case 3:box={{{px+w,py+h,pz},{px+w,py+h,pz+d},{px,py+h,pz+d},{px,py+h,pz},{px+w,py,pz},{px+w,py,pz+d},{px,py,pz+d},{px,py,pz}}};break;
+                // id > 3 leaves the box of an earlier record in the original (no room
+                // table carries one; types 4..6 use id 0..3 only).
+                default:continue;
+                }
+                if(check_bc(box,cap)){
+                    prism_face({px,(py+h)-0.1f,pz,0,1.0f,0});
+                    prism_face({px,0.1f+py,pz,0,-1.0f,0});
+                    prism_face({px,py,d>=0?0.1f+pz:pz-0.1f,0,0,1.0f});
+                    prism_face({w>=0?0.1f+px:px-0.1f,py,pz,1.0f,0,0});
+                    NJS_VECTOR n=(hp.id==0||hp.id==3)?NJS_VECTOR{d,0,w}:NJS_VECTOR{-d,0,-w};
+                    njUnitVector(&n);
+                    Plane hyp{px+w,py,pz,n.x,0,n.z};
+                    hyp.px-=0.1f*hyp.vx;hyp.pz-=0.1f*hyp.vz;
+                    prism_face(hyp);
+                }
+            }
+            break;
+        case 6:
+            if(check_bc(standard,cap)){
+                NJS_VECTOR n;Plane pl{};
+                switch(hp.id){
+                case 0:pl.px=px;pl.py=py;pl.pz=pz;n={-h,w,0};break;
+                case 1:pl.px=px;pl.py=py;pl.pz=pz+d;n={0,d,h};break;
+                case 2:pl.px=px;pl.py=py;pl.pz=pz;n={0,d,-h};break;
+                case 3:pl.px=px+w;pl.py=py;pl.pz=pz;n={h,w,0};break;
+                default:continue; // see case 4/5
+                }
+                njUnitVector(&n);pl.vx=n.x;pl.vy=n.y;pl.vz=n.z;
+                box_face(pl,false);
+            }
+            break;
+        case 7:{
+            const Box slab{{{px,py-0.1f,pz+d},{px,py-0.1f,pz},{px+w,py-0.1f,pz},{px+w,py-0.1f,pz+d},{px,py+h,pz+d},{px,py+h,pz},{px+w,py+h,pz},{px+w,py+h,pz+d}}};
+            if(check_bc(slab,cap)){
+                box_face({px,py-0.1f,pz,0,1.0f,0},true);
+                box_face({px,0.1f+(py+h),pz,0,-1.0f,0},true);
+                box_face({0.1f+px,py,pz,-1.0f,0,0},true);
+                box_face({(px+w)-0.1f,py,pz,1.0f,0,0},true);
+                box_face({px,py,0.1f+pz,0,0,-1.0f},true);
+                box_face({px,py,(pz+d)-0.1f,0,0,1.0f},true);
+            }
+            break;}
+        }
+    }
+    if(len)*len=nr;
+    if(hit==0){if(apos)*apos={lp.px+lp.vx,lp.py+lp.vy,lp.pz+lp.vz};if(ahtp)*ahtp=-1;return 0;}
+    if(apos)*apos=at;if(ahtp)*ahtp=found;
+    return 1;
 }
 int check_collision_4_sound(const std::vector<CollisionWall>& walls,float room_height,unsigned room_flags,NJS_POINT3 camera,NJS_POINT3 source){
     if(!(room_flags&2))return 0;

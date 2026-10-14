@@ -5,6 +5,8 @@
    Dienstluecken brechen den betroffenen Mechanismus ab und werden benannt;
    sie sind KEINE erfolgreichen Null-/Standardrueckgaben. */
 #include "en12.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include "ninja_matrix.h"
 #include <math.h>
 #include <string.h>

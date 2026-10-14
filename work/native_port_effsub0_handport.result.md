@@ -483,17 +483,198 @@ inzwischen grün (die fremde Arbeit hat den Testdienst ergänzt). Rot bleibt all
 instead of final frame 84"), gemessen mit frisch gebautem Testbinär gegen den
 aktuellen Quellenstand.
 
-## Verbleibende nie portierte Prozeduren (Stand nach Gruppe 9)
+## Gruppe 10: Effektlinks (bhSetEffectLink) und Nachbilder (bhEff135/136)
 
-20 in effsub0/1/1b/5/6, dazu die Familien in effsub2/3/4. Der Scan der
+### room.c:787 bhSetEffectLink — bisher nicht portiert
+
+Beim Raumladen hängt `bhSetEffectLink` jeden Raumeffekt mit `lkflg` 1..4 an
+`plp`, `ene[lkno]`, `obwp[lkno]` oder `itwp[lkno]`: `lkno` über der Raumanzahl
+wird 0; ist das Werk aktiv (`flg & 1`), bekommt der Satz `flg 0x80`, `lkwkp`,
+`lkono` (auf `obj_num` begrenzt) und `lox = efp->lx`, sonst bleibt `flg 0x80`
+aus. Nativ fehlte das ganz: verlinkte Raumeffekte folgten zwar dem Gelenk, aber
+ohne `flg 0x80`, also ohne die Gelenkdrehung im Zeichenpass. Jetzt
+(`native/world.cpp`):
+
+- `flg 0x80`, `EffectSprite::link_kind/link_index` (= `lkwkp`), `lkono`, `lox`.
+- `bhControlEffect` folgt dem Link nur noch bei `flg 0x80` (effect.c:800), und
+  gezeichnet wird aus `op->px` bzw. der Linkmatrix wie `bhDrawTrsEffect3D`. Ein
+  Raumsatz, der seine Lage selbst fortschreibt, wird jetzt dort gezeichnet
+  (vorher blieb die Zeichenlage beim Ladeort stehen).
+- Fehlt dem Host die Gelenkmatrix, meldet der Zeichenpass eine benannte Lücke
+  statt das Bild abzubrechen.
+- Offen: `lkflg 5` (`eff[efid[lkno]]`, benannte Lücke, in keinem Raum belegt)
+  und das Rückschreiben von `efp->px` in die Raumtabelle (kein nativer Leser).
+
+Gemessen an allen 63 Räumen mit verlinkten Effekten
+(`build/validation/effproc-afterimage-20261014/link_old_vs_new.log`): sichtbar
+ändert sich nur die Dauerleuchte **196** in RM_4010/4011/4012/8010. Sie stand
+bisher senkrecht **in** der Konsolenfläche (|cos| 0,00 zur Normalen der 0,07
+entfernten Fläche) und liegt jetzt fast flach auf (|cos| 0,87). 122 und 230
+bleiben unverändert.
+
+Mit `flg 0x80` werden drei bisher nie erreichte Linkzweige aktiv, alle portiert:
+**bhEff238** (Startrichtung im Drehanteil der Gelenkmatrix, sonst Lücke ohne
+Kind), **bhEff248** (Drehung beginnt mit der Gelenkmatrix des Elternsatzes) und
+**bhEff148** (`lkwkp` bleibt nach dem Löschen von `flg 0x80` gesetzt, der Tropfen
+folgt dem Gelenk über `owP[lkono].mtx * lox`, bis `mode1` den Fall auslöst). Der
+alte Testfall „238 unter Link wirft" ist durch einen Test des Zweigs ersetzt.
+
+### Nachbilder: bhEff135 / bhEff136 / bhDraw136 (effsub1b.c:621..760)
+
+Zehn Raumeinträge in RM_1002, 5820, 7070, 9321, 9370; die Raumskripte schalten
+sie mit 0x91 an und aus (Bytesuche in den Skriptbereichen).
+
+- **135** ist unsichtbar. Beim ersten Lauf im Raum setzt er `sys->ef_flg 0x4`
+  und belegt den 2-MB-Puffer `zan_memp` (`bhInitRoomChangeSystem` leert
+  `ef_flg` je Raum, system.c:195). Mit Auftrag und `flg 0x80` reserviert er acht
+  Schnappschussplätze der Größe `((vlist[1] >> 16) << 5) + 72`, auf 64
+  aufgerundet — und zwar immer um einen vollen Schritt, auch bei glattem Rest.
+  Passt das nicht mehr (`&zanp[n] >= zan_memp + 0x200000`), versucht er es jeden
+  Pass erneut; `objP[lkono].model == NULL` bleibt still. Die Eckpunktzahl liest
+  `model_object_vertex_count` (`native/scene.cpp`) aus dem ersten Eckpunktchunk
+  des Gelenkmodells. Danach legt er je Pass ein 136 an (Ringplatz 0..5, Lage
+  `pp->px`, Link auf dasselbe Werk) und löscht dessen `flg 0x80` gleich wieder.
+- **136** hält im ersten Pass `objP[lkono]` von `mdl[mdlver]` in der aktuellen
+  Lage fest. Das Original kopiert dafür die gehäutete `vlist` und die Matrix
+  `owP[lkono]`; nativ ergibt dieselbe Weltlage `entity_geometry` — die
+  Geometrie, mit der der Zeichenpass das Werk zeichnet, jetzt als gemeinsame
+  Funktion aus `RoomWorld::append` herausgelöst. Danach zeichnet 136 fünf
+  Passes über `ef_Zanzo[ct0]` (effect.c:938: von 5 bis 0, nach der
+  ef_fnc-Liste; ein späterer Satz überschreibt den Platz) bzw. in Raum 1-00
+  Fall 2, 5-82 und 9-32 Fall 1 über die ef_fnc-Liste, und endet.
+- **bhDraw136**: `njSetConstantAttr(0, 0xA00)` mit `njControl3D(0x800)` macht
+  jeden Streifen zu IS|UA — beleuchtet und mit dem Register seines
+  Materialchunks gemischt. `npSetAllMatAlphaColor` setzt das Alpha
+  `(ct0 + 1) * 40` = 200..40 in die Diffusmaterialien (Chunk 17/21: erste Farbe,
+  19/23: beide). Das Licht ist das Simple-Licht: Farbe 1, Intensität 1, Umgebung
+  0,8, Richtung −(0, 0.3, 0.7) im Kameraraum, Normalen unter `cam.mtx`
+  (`njCnkCvVn`). Das bleibende Register des letzten Materialchunks gilt für die
+  nächste ef_fnc-Funktion.
+- **Dauerhafte Nebenwirkung:** `npSetAllMatAlphaColor` schreibt in das geteilte
+  Modell des Werks. Gegner zeichnen nach `bhDrawEffect` und sehen das Alpha im
+  selben Bild, Objekte/Items davor und sehen es ein Bild später (außer in den
+  Albinoid-Räumen 7-10/3-06, system.c:1647). Knoten mit `evalflags 0x8`
+  erreicht das Original nicht. Sichtbar ist das nur an Streifen mit UA; in den
+  fünf Räumen hat das Quellgelenk keine.
+- `sys->ef_flg 0x4` lässt `bhDrawEffect` `bhSetHalfLight` aufrufen. Das betrifft
+  nur Chunkmodelle innerhalb des Effektpasses; `bhDraw136` setzt das Simple-Licht
+  danach selbst vollständig, und `bhAllDrawModel` ruft `bhSetHalfLight` nach
+  `bhDrawEffect` ohnehin (game.c:351).
+- Historischer Stand dieser Runde: Spieler und `mdl[n > 0]` waren ungebunden.
+  Die Aussage, die Lichtrechnung sei nicht aus Quellen belegbar, war falsch:
+  `ps2_Vu1Strip.c:1654` enthält den Algorithmus. Aktueller Abgleich und Bindungen
+  stehen im Abschnitt „Nachprüfung der Nachbildlücken“ unten.
+
+**Prüfung Gruppe 10:** feste Tests `group10_afterimages` (Puffer, Reservierung
+samt Rundung bei 0 und 100 Eckpunkten, 2-MB-Grenze mit `>=`, Modell NULL still,
+unbekanntes Modell als Lücke, ohne `flg 0x80` nichts, sieben Aufträge mit
+Ringplatz und Linkdaten, Schnappschuss, Alpha 200..40, Ende nach fünf Passes,
+ef_fnc-Raum und Fall 1, fehlende Geometrie als Lücke) und `afterimage_room` an
+**RM_7070** (ef_Zanzo) und **RM_1002** (ef_fnc): bhSetEffectLink verlinkt die
+135er, je erzeugendem 135 sechs lebende Nachbilder, fünf Alphastufen 40..200,
+Licht 0,8..1. RM_1002 Eintrag 17 hängt an `obwp[17]` Gelenk 0 ohne Modell und
+bleibt wie im Original still. Numerischer Abgleich: die Schnappschussdreiecke
+sind bei ruhendem Gegner lagegleich mit dem gezeichneten Gelenk
+(`probe_afterimage.cpp`). Dauerlauf über alle fünf Räume
+(`soak_afterimage.log`): Einschalten, nach 300 Bildern Ausschalten (nach 20
+Passes kein Nachbild mehr), Wiedereinschalten, keine Ausnahme. Dazu die
+Linkräume RM_4010/6100/9000/9050/9060/9120/9370 600 Bilder ohne Ausnahme; die
+238-Lücken dort kommen von Werken ohne native Gelenkmatrix im Prüfprogramm.
+
+**Gesamtprüfung nach Gruppe 10:** `tools/check_no_original_core.py` PASS,
+vollständiger Build fehlerfrei, ctest **86/86** (auch `script_motion` ist mit dem
+aktuellen Arbeitsbaum grün), RM_0050 unverändert stabil.
+
+## Nachprüfung der Nachbildlücken (2026-10-14)
+
+Der erneute Quellen-/Besitzerabgleich erfolgte ausdrücklich für den Effektkern,
+unter Erhalt der parallelen Gegner-/Eventänderungen. Die erste Policyprüfung
+meldete Stringliterale aus laufender EN13-Arbeit; diese wurden von der anderen
+Arbeit zwischenzeitlich geändert. Kein Prüfer wurde abgeschwächt. Die Nachricht
+zur Dateiabstimmung wurde wegen unterschiedlicher Sitzungsberechtigungen nicht
+zugestellt; die Änderungen hier beschränken sich auf gezielte Nachbildstellen.
+
+### Was von den drei alten Aussagen noch stimmt
+
+1. **Material × Licht:** jetzt quellbelegt. `bhDraw136` setzt konstante Attribute
+   `0xA00`, also Byteflags `0x0A`. Untexturierte Streifen nehmen
+   `usCnkCsPolColorCalcFunc[2] = 4`, texturierte Simple-Streifen
+   `usCnkCsTexColorCalcFunc[2][2] = 4` (`ps2_NinjaCnk.c:141/142/1759/1918`).
+   Beide wählen `vu1GetVertexColorDifAmb` (`ps2_Vu1Strip.c:1654`):
+   `RGB = Diffusmaterial * clamp(Licht + Ambient, 0, 1)`. Diffus-RGB wird für die
+   ursprüngliche Texturmodulation mit 128 skaliert; der native dekodierte RGB-Pfad
+   nutzt die entsprechende 255-Domäne. Alpha ist unabhängig davon
+   `128 * Materialalpha` (`vu1SetAlphaRatio`, :197). Dafür gibt es jetzt den
+   begrenzten nativen Algorithmus `cnk_afterimage_color` und feste Werteprüfungen.
+   Keine VU-Ausführung oder Hardware-Nachbildung. Register-/Paketquantisierung
+   des allgemeinen Renderers bleibt eine separate offene Abhängigkeit.
+2. **Spieler/Zusatzmodelle:** kein pauschaler Ausschluss mehr. `bhEff135` liest
+   jetzt die Eckpunktzahl des ausgewählten `mdl[n]`. Die Aufnahme zeichnet genau
+   `objP[lkono].model`, auch bei verborgenem Knoten oder verborgenem Vorfahren;
+   der vorherige Hierarchiedraw verlor solche Modelle. `sample_object_work`
+   nutzt veröffentlichte physische `objP`-/`owP`-Daten, nicht Motion-Resampling.
+   Der Spieler-Kopf-/Haarpass veröffentlicht Körper und `mdl[4]`-Anhang mit ihren
+   eigenen Matrizen. Zusatzmodelle der Gegner können den bereits vorhandenen,
+   berechneten Kindmodellbesitzer verwenden; ein Asset ohne veröffentlichten
+   Baum bleibt ausdrücklich eine Lücke. Die Texturen kommen vom gewählten Modell.
+   Veränderte Vertexströme (`live_model`, parallele EN13-Arbeit) bleiben Quelle.
+3. **Sichtprüfung:** verbessert, aber weiterhin kein Durchspielnachweis.
+   `Start.command` wurde mit isolierten Diagnose-INIs in RM_1002 ausgeführt,
+   420 Bilder und Screenshot. Der Frame enthält Raum und Spieler; die 135er
+   waren dort ohne Auftrag, also belegt er keine natürlich aktivierte Nachbildfolge.
+   Zusätzlich erzeugt `visual_probe.cpp` einen A/B-Draw desselben Zustands mit
+   Originalraumgeometrie: Diagnosekamera und eingeschaltete 135er, Quellkörper
+   nur für diesen Vergleich ausgeblendet. Aus der Nordansicht ändern Nachbilder
+   **33.017 Pixel**; beide PNGs wurden angesehen. Aus der ersten Gegenansicht
+   waren sie vollständig verdeckt (0 Pixel), was als negativer Lauf erhalten ist.
+
+### Weitere behobene Abweichungen
+
+- Direkte Nachbildaufnahme erhält die Länge interpolierter Hautnormalen; das
+  Original normiert diese im `npCalcSkin`-/Nachbildpfad nicht nachträglich.
+- `npCalcSkinFM` (`njplus.c:2049/2140`) überspringt logische Knoten 11..14 und
+  addiert bei Einflussnummern >10 vier. Nativ läuft die Übersetzung über die
+  vorhandene Script-/Physical-Node-Tabelle, nicht über einen geratenen Arrayindex.
+  Das war relevant für RM_7070: die dortige Figur setzt `mdflg 0x100`.
+- Die Alpha-Schreibbedingung liest die veröffentlichten `evalflags 0x8` des
+  gewählten Modells, nicht ausschließlich `WorldEntity::hidden_nodes`.
+- Spieler-Neubindung löscht veröffentlichte Modellhandles. Ein nicht
+  veröffentlichtes Zusatzmodell bekommt weder Einheits- noch Bindpose als Ersatz.
+
+### Prüfstand und Grenzen
+
+- Vorherstand gemessen: `./build.sh --test`, **86/86**. Die parallele Gegnerarbeit
+  ergänzt währenddessen zwei Suiten; aktueller Lauf **88/88**, einschließlich
+  `script_motion`, Effekt-, Actor-, Haar-/Kopf- und EN13-Suiten.
+- Feste Tests: Farbrechnung/Reihenfolge, direkter versteckter Modelldraw,
+  unnormierte Halbnormale, Skin-FM-Interpolation, veröffentlichter Spieler und
+  `mdl[4]`, unveränderte Aufnahme nach Änderung des nächsten Motionframes und
+  der Workposition, fehlender Zusatzmodellbaum und Neubindung.
+- Dauerläufe aller fünf ursprünglichen Nachbildräume, je 600 Bilder mit ein/aus/
+  wieder ein: gleicher stabiler Bestand, nach Abschalten 0 Nachbilder,
+  keine Ausnahme. Fremde Gegnerlücken bleiben im Log sichtbar.
+- Build ausschließlich `./build.sh`, `build/macos-arm64`, Start.command-Dev-App
+  aktualisiert/signiert. arm64 und Signatur geprüft. Kein Paket, Commit oder Push.
+- Offen bleiben nicht veröffentlichte Zusatzmodellbäume, die modifierartigen
+  Chunk-56..58-Modelle im allgemeinen Modelldecoder, vollständige natürliche
+  Aktivierung/Sichtabnahme und einige allgemeine Zeichennebenwirkungen (z. B.
+  letzter Materialzustand ohne zeichnenden Streifen). Die Nachbilder sind deshalb
+  im Ledger **partial**, nicht vollständig erledigt.
+
+Belege: `build/validation/effproc-afterimage-recheck-20261014/`,
+`tests/native/actor_test.cpp` und `tests/native/effect_room_sprites_test.cpp`.
+
+## Verbleibende nie portierte Prozeduren (Stand nach Gruppe 10)
+
+18 in effsub0/1/1b/5/6, dazu die Familien in effsub2/3/4. Der Scan der
 Effektlisten aller 205 RDT (siehe Korrektur oben) sagt, welche davon überhaupt
 statisch vorkommen; das ist die Reihenfolge, in der sie es wert sind.
 
-- **Statisch in Räumen, offen:** 135 (10×, `zan_memp`), 110 (3×) und 111 (2×,
-  Rendertexturen `ren_*`/`ef_tex`/`memp`), 112 (2×, Spiegel `mr_pl`,
-  `st_flg 0x100`), 085 (2×, tauscht `textures[3].texaddr` eines Gegnermodells),
-  021 (1×, 2D-Balken), 133/134/137/138 (`ond_*`, `pad_ps`, `ufo_*`,
-  `fade_pbk`: Ereignissteuerung).
+- **Statisch in Räumen, offen:** 110 (3×) und 111 (2×, Rendertexturen
+  `ren_*`/`ef_tex`/`memp`), 112 (2×, Spiegel `mr_pl`, `st_flg 0x100`), 085 (2×,
+  tauscht `textures[3].texaddr` eines Gegnermodells), 021 (1×, 2D-Balken),
+  133/134/137/138 (`ond_*`, `pad_ps`, `ufo_*`, `fade_pbk`: Ereignissteuerung;
+  bhEff134 bearbeitet inzwischen eine parallele Sitzung in `native/world.cpp`).
 - **Zeichenzustand, den der Host nicht führt:** 001 (`ef_mdf`, Schatten;
   Besitzer `tick_shadow` partial), 006 (`ef_opq` mit eigener Matrix und pn 3,
   liest die vom Zeichenpass geschriebene `op->mtx`), 021 (`njDrawPolygon2D` und
@@ -505,7 +686,7 @@ statisch vorkommen; das ist die Reihenfolge, in der sie es wert sind.
 - **Raum-/Systemzustand ohne nativen Besitzer:** 007 (`ef_pol`, `obwp`,
   Waffen-SE), 013 und 130 (Bogen/Armbrust: `ahtp`/`apos`, `cam`/`ene`/`plp`,
   Trefferdienste), 108 (Wasseroberfläche `wt_*`), 120 (`npSetOffsetUV` am
-  Linkmodell), 136 (`npCalcSkin`).
+  Linkmodell).
 - **effsub2/3/4:** Partikel- und Modellfamilien (bhEff300..30c/349,
   bhEff_Sub350..373/398, bhEff_E00_*) mit eigenen Besitzern; 300/302 liegen
   bereits in `native/effect_particles.cpp`.

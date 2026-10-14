@@ -29,18 +29,22 @@ int main(){try{
     // bhPushGameData -> file -> bhPopGameData.
     const auto data=room();Inventory inventory;inventory.player=1;inventory.hp=77;inventory.max_hp=160;inventory.poisoned=true;inventory.side_pack=true;inventory.play_time=12345;
     inventory.items[16+1]=Inventory::pack(2,13);inventory.items[16]=1;inventory.items[64]=Inventory::pack(30,2); // equipped slot, item box
+    // Gespeicherter Zustand eines anderen Spielers (bhPlayerChangeSet, system.c:1729/1746/1747).
+    inventory.ply_hp[0]=140;inventory.ply_stflg[0]=0x80000;inventory.partner_weapon[0]=3;
     MessageDialog dialog;EventVm events(data,inventory,dialog);
     events.values[0]=1;events.values[1]=0x02;events.values[21]=0;events.values[7]=3;events.values[18]=4;events.values[25]=5;
     events.set_flag(1,40,0);events.set_flag(2,3,0);events.set_flag(3,700,0);events.set_flag(7,100,0);events.set_flag(8,200,0);events.set_flag(9,5,0);events.set_flag(11,6,0);events.set_flag(16,1,0);
     events.flags[14][0]=0x40000000|0x08000000|0x1; // only 0x78280000 survives bhPushGameData
     const auto snap=capture_snapshot(inventory,events,11,"RM_1020.RDX",{{10,20,30},2048,1,3,4});
     check(snap.save.ply_id==1&&snap.save.ply_hp[1]==77&&snap.save.ply_stflg[1]==(0x40000000|0x08000000),"push player fields");
+    check(snap.save.ply_hp[0]==140&&snap.save.ply_stflg[0]==0x80000&&snap.save.ply_wno[0]==3,"room.c:1033 copies the stored entries of the other players");
     check(snap.save.save_ct==0&&snap.save.retry_ct==0&&snap.save.clear_ct==0,"snapshot must not count saves or retries");
     const auto path=std::filesystem::temp_directory_path()/"recvx-snapshot-test.rcvxsnap";write_snapshot(path,snap);
     const auto loaded=read_snapshot(path);check(loaded.save.encode()==snap.save.encode()&&loaded.host.room=="RM_1020.RDX"&&loaded.host.body==11,"file roundtrip");
 
     Inventory restored;MessageDialog d2;restore_inventory(loaded,restored);EventVm next(data,restored,d2);restore_events(loaded,next);
     check(restored.items==inventory.items&&restored.player==1&&restored.hp==77&&restored.poisoned&&restored.side_pack&&restored.play_time==12345,"inventory restore");
+    check(restored.ply_hp[0]==140&&restored.ply_stflg[0]==0x80000&&restored.partner_weapon[0]==3,"room.c:1043 restores the other players' entries");
     for(unsigned m:{1u,2u,3u,7u,8u,9u,11u,16u})check(next.flags[m]==events.flags[m],"flag matrix restore");
     check(next.values[7]==3&&next.values[18]==4&&next.values[25]==5,"session values restore");
     check(next.flags[14][0]==(0x40000000|0x08000000),"bhSetRoom stflg | 0x40000000");

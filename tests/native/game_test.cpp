@@ -31,14 +31,17 @@ static std::vector<std::uint8_t> fixture(){
     const std::vector<std::uint8_t> scan={1,22,4,4,0,0,0,1,0x26,1,5,4,0,0,0,0,0x14,0,0,0,3,0,0,0};
     std::copy(scan.begin(),scan.end(),b.begin()+1118);
     const std::vector<std::uint8_t> event={0xf8,0xf9,3,0,0x1f,0,0,1,0xff,0};std::copy(event.begin(),event.end(),b.begin()+1180);
-    b[1210]=0xc0; // Unknown commands must block with their PC retained.
+    // 0xe4 steht als Stellvertreter fuer einen noch nicht portierten Befehl:
+    // in der Originaltabelle ist der Platz mit dm0 belegt (event.c:437, gibt 0
+    // zurueck = der Befehl rueckt nicht vor), also von keinem Raumskript benutzt.
+    b[1210]=0xe4; // Unknown commands must block with their PC retained.
     put(b,1400,1);put(b,1404,8);b[1408]='A'-32;b[1410]=255;b[1411]=255;return b;
 }
 int main(int argc,char** argv){try{
     _Make_SinTable();Inventory inv;check(inv.slots()[1]==0x370001&&inv.slots()[2]==0x910001,"new-game items differ");
     {auto next=[](std::uint32_t& state){state=state*0x41c64e6du+0x3039u;return int(state&0x7fffffffu);};std::uint32_t state=1;check(recvx_core_random_next()==next(state),"EE rand first output differs from executable");recvx_core_random_seed(0x12345678);state=0x12345678;check(recvx_core_random_next()==next(state)&&recvx_core_random_next()==next(state),"EE rand seed/state transition differs from executable");
-        auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0x8c,0,0x34,0x12,0x78,0x56,0x63,7,0xc0,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state_items;MessageDialog text;EventVm event(bytes,state_items,text);event.start(0,0);event.tick();state=0x12345678;next(state);const int ranged=int(100.0f*(float(next(state))/2147483648.0f))%7;check(event.errors.size()==1&&event.task_states().front().blocked&&event.task_states().front().wpnl_no==unsigned(ranged)&&recvx_core_random_next()==next(state),"bhRandTest/bhRandamSet did not share the original EE RNG and task result");
-        recvx_core_random_seed(1);state=1;const std::vector<std::uint8_t> no_seed={0x8c,1,0xaa,0xbb,0xcc,0xdd,0xc0,0};std::copy(no_seed.begin(),no_seed.end(),bytes.begin()+1180);Inventory state_items2;MessageDialog text2;EventVm no_seed_event(bytes,state_items2,text2);no_seed_event.start(0,0);no_seed_event.tick();const auto first=next(state);float random_float=float(first)/2147483648.0f;unsigned expected_bits=0;std::memcpy(&expected_bits,&random_float,sizeof expected_bits);check(no_seed_event.errors.size()==1&&no_seed_event.task_states().front().wpnl_no==expected_bits&&recvx_core_random_next()==next(state),"bhRandTest nonzero mode reseeded or stored the wrong original task fields");recvx_core_random_seed(1);}
+        auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0x8c,0,0x34,0x12,0x78,0x56,0x63,7,0xe4,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state_items;MessageDialog text;EventVm event(bytes,state_items,text);event.start(0,0);event.tick();state=0x12345678;next(state);const int ranged=int(100.0f*(float(next(state))/2147483648.0f))%7;check(event.errors.size()==1&&event.task_states().front().blocked&&event.task_states().front().wpnl_no==unsigned(ranged)&&recvx_core_random_next()==next(state),"bhRandTest/bhRandamSet did not share the original EE RNG and task result");
+        recvx_core_random_seed(1);state=1;const std::vector<std::uint8_t> no_seed={0x8c,1,0xaa,0xbb,0xcc,0xdd,0xe4,0};std::copy(no_seed.begin(),no_seed.end(),bytes.begin()+1180);Inventory state_items2;MessageDialog text2;EventVm no_seed_event(bytes,state_items2,text2);no_seed_event.start(0,0);no_seed_event.tick();const auto first=next(state);float random_float=float(first)/2147483648.0f;unsigned expected_bits=0;std::memcpy(&expected_bits,&random_float,sizeof expected_bits);check(no_seed_event.errors.size()==1&&no_seed_event.task_states().front().wpnl_no==expected_bits&&recvx_core_random_next()==next(state),"bhRandTest nonzero mode reseeded or stored the wrong original task fields");recvx_core_random_seed(1);}
     check(inv.equip(1)&&inv.weapon()==1,"lighter equip");check(inv.equip(1)&&!inv.weapon(),"lighter unequip");check(!inv.equip(2),"manual equipped as weapon");
     check(inv.acquire(21,1)&&inv.acquire(22,1),"herb pickup");unsigned green=0,red=0;for(unsigned i=2;i<12;++i){if(Inventory::id(inv.slots()[i])==21)green=i;if(Inventory::id(inv.slots()[i])==22)red=i;}
     // D01/D07: Combi_03 (Selektor 6 nach Ja) grün+rot -> 25, danach ItemUse ->
@@ -66,8 +69,8 @@ int main(int argc,char** argv){try{
             check(result.granted&&result.mode==2&&!result.message&&gift.slots()[3]==Inventory::pack(9,getbulletmax[9][mode]-3)&&gift.slots()[0]==3&&gift.weapon()==4&&!(control&0xc000)&&(control&0x800),"script gift lost original ammo adjustment/equipment, mode "+std::to_string(mode));
             const auto ack=gift.pickup(9,control,0,3,result.mode);check(ack.message==158&&ack.mode==3,"script gift lacks 158 in the pass after the insertion, mode "+std::to_string(mode));
             const auto change=gift.take_weapon_change();check(change.changed&&change.wpnr_no==4,"WeaponSet of the gift not reported to the weapon owner");}
-        {Inventory gift;unsigned control=0x4000;const auto result=gift.pickup(3,control,7,4);check(result.granted&&Inventory::quantity(gift.slots()[2])==getbulletmax[3][0]&&gift.slots()[0]==0,"ordinary scripted gift inherits cinematic ammo/equip rule");}
-        {Inventory gift;unsigned control=0xc000;const auto result=gift.pickup(3,control,7,4);check(result.granted&&Inventory::quantity(gift.slots()[2])==getbulletmax[3][0]&&!gift.weapon()&&!(control&0x8000),"wide shotgun cinematic gift takes the narrow -2/WeaponSet branch");}});
+        {Inventory gift;unsigned control=0x4000;const auto result=gift.pickup(3,control,7,4);gift.sort(); /* GetItem sortiert nicht; SpriteOnOff (sub1.c:8296) zieht das breite Item vor */check(result.granted&&Inventory::quantity(gift.slots()[2])==getbulletmax[3][0]&&gift.slots()[0]==0,"ordinary scripted gift inherits cinematic ammo/equip rule");}
+        {Inventory gift;unsigned control=0xc000;const auto result=gift.pickup(3,control,7,4);gift.sort();check(result.granted&&Inventory::quantity(gift.slots()[2])==getbulletmax[3][0]&&!gift.weapon()&&!(control&0x8000),"wide shotgun cinematic gift takes the narrow -2/WeaponSet branch");}});
     // ItemSort zwischen GetItem und ItemSet: jede breite Waffe steht vorn; eine
     // ausgerüstete schmale Waffe verschiebt sich um eins (GetItem
     // "*st->pip += 1"), auch bei zwei breiten Aufnahmen nacheinander.
@@ -79,11 +82,15 @@ int main(int argc,char** argv){try{
             if(narrow)pickup.equip(2);unsigned control=0;auto question=pickup.pickup(wide,control,0,7);
             check(question.mode==1&&question.message==157,"wide pickup capacity/question changed"+at);
             auto result=pickup.pickup(wide,control,0,7,question.mode,100);
+            // GetItem fügt am ersten freien Platz ein und sortiert nicht (Disassembly ohne ItemSort);
+            // das ItemSort desselben Statusframes (SpriteOnOff, sub1.c:8296) holt das breite Item vor.
+            check(!narrow||Inventory::id(pickup.slots()[narrow+2])==wide,"GetItem must insert at the first free slot without sorting"+at);
+            pickup.sort();
             check(result.granted&&Inventory::id(pickup.slots()[2])==wide&&pickup.occupied()==narrow+2,"wide pickup lacks original ItemSort phase"+at);
             check(!narrow?pickup.slots()[0]==0:pickup.slots()[0]==3&&pickup.weapon()==4,"ItemSort loses original equipment correction"+at);
             if((wide==33||wide==34))check(Inventory::quantity(pickup.slots()[2])==0,"Claire's 33/34 keep their GetItem amount"+at);
             else check(pickup.slots()[2]==((std::uint32_t(wide)<<16)|getbulletmax[wide][0]),"wide item lost (id << 16) | getbulletmax"+at);
-            if(narrow<=4){control=0x4000;result=pickup.pickup(142,control,0,7);check(result.granted&&Inventory::id(pickup.slots()[3])==142&&(!narrow||pickup.slots()[0]==4),"second wide pickup moves an equipped wide/narrow item incorrectly"+at);}
+            if(narrow<=4){control=0x4000;result=pickup.pickup(142,control,0,7);pickup.sort();check(result.granted&&Inventory::id(pickup.slots()[3])==142&&(!narrow||pickup.slots()[0]==4),"second wide pickup moves an equipped wide/narrow item incorrectly"+at);}
         }});
     section("D02 GetItem Frage, Nein, Ja, Überlauf",[]{
         {Inventory pickup;unsigned control=0;const auto saved=pickup.items;auto question=pickup.pickup(12,control,0,0);check(question.mode==1&&question.message==157&&!question.granted&&pickup.items==saved,"ordinary pickup skips its question");auto no=pickup.pickup(12,control,0,0,question.mode,101);check(!no.granted&&no.mode==3&&pickup.items==saved,"No grants ordinary pickup");auto yes=pickup.pickup(12,control,0,0,question.mode,100);check(yes.granted&&yes.mode==2&&pickup.slots()[3]==Inventory::pack(12,getbulletmax[12][0]),"confirmed original pickup amount wrong");check(pickup.pickup(12,control,0,0,yes.mode).message==158,"confirmed pickup lacks 158 one pass later");}
@@ -345,6 +352,16 @@ int main(int argc,char** argv){try{
     check(!door_vm.interact({5,0,5},0,0)&&requests==0,"door floor filter ignored");
     check(door_vm.interact({5,0,5},0,-1)&&requests==1&&requested.room_name()=="RM_0010.RDX","negative-floor door destination lost");
     door_vm.interactions[0].attribute=0x1000;check(!door_vm.interact({5,0,5},0,-1)&&requests==1,"door facing filter ignored");
+    // hitchk.c:4606 pxn[0] = fpx - sin(ay)*(1.5 + (3 - arn)): the door probe starts at EXP_WORK fpx
+    // (player.c:1585, before the wall passes), not at the pushed-back plp->px. Forward is -z for ay 0.
+    {MessageDialog walk_message;EventVm door_walk(door_room,bag,walk_message);unsigned walk_requests=0;door_walk.door=[&](const DoorRequest&){++walk_requests;return true;};
+     check(!door_walk.interact({5,0,15},0,-1)&&!door_walk.interact({5,0,15},0,-1,{5,0,13},2.0f)&&walk_requests==0,"door probe reaches past pxn[0]");
+     check(door_walk.interact({5,0,15},0,-1,{5,0,12},2.0f)&&walk_requests==1,"door probe ignores EXP_WORK fpx/arn (walking against the door)");}
+    // player.c:1678: stflg 0x10080, flg 0x4000004 and cb_flg 0x4017 close bhCheckExmAtari.
+    {MessageDialog gate_message;EventVm gate(door_room,bag,gate_message);gate.flags[14][0]=gate.flags[13][0]=gate.flags[10][0]=0;
+     const auto saved=gate.flags;check(gate.exm_flags_clear(),"exm gate closed without original flags");
+     for(const auto& bit:{std::pair<unsigned,unsigned>{14,0x80},{14,0x10000},{13,0x4},{13,0x4000000},{10,0x1},{10,0x2},{10,0x4},{10,0x10},{10,0x4000}}){gate.flags=saved;gate.flags[bit.first][0]|=bit.second;check(!gate.exm_flags_clear(),"player.c:1678 exm gate bit ignored");}
+     gate.flags=saved;gate.flags[10][0]|=0x8;check(gate.exm_flags_clear(),"exm gate closes on a bit outside cb_flg 0x4017");}
     auto door_script=data;const std::vector<std::uint8_t> door_call={0x33,0,6,0,0,1,1,2,0xff,0};std::copy(door_call.begin(),door_call.end(),door_script.begin()+1180);
     MessageDialog scripted_message;EventVm scripted(door_script,bag,scripted_message);scripted.set_flag(4,0,0);scripted.door=door_vm.door;scripted.start(0,0);scripted.tick();
     check(scripted.errors.empty()&&requests==2&&requested.attribute==6&&requested.room==1&&requested.spawn==1&&requested.type==2,"DoorCall operand order incorrect");

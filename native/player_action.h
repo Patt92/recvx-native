@@ -84,6 +84,14 @@ typedef struct RECVX_PLAYER_ACTION_IO {
 void recvx_player_action_reset(RECVX_PLAYER_ACTION* a, float px, float pz, int32_t ay,
                                int32_t wpntp, int32_t dmlvl, uint32_t mtn_no);
 
+/* player.c:1114 bhStandPlayerMotion: EXP0_I(5) nach hp/stflg 0x280000, flg &= 0xC96EFFFB,
+   flg |= 8, stflg &= ~0x18000, mode2/mode3 = 0 (mode0/mode1 setzt der Spielerbesitzer:
+   *(int*)&mode0 = 1), PEXP0_F(72/80) = px/pz, mtn_no = PlMtnAct[wpntp][dmlvl][0],
+   hokan_rate/hokan_count/frm_no = 0. mnwP = mnwPb, bhSetMotion(plp,0,0,NULL) und
+   bhCalcModel bleiben beim Posenbesitzer. `stflg_owned` wie in RECVX_PLAYER_ACTION_IO. */
+void recvx_player_stand_motion(RECVX_PLAYER_ACTION* a, uint32_t* flg, uint32_t* stflg,
+                               uint32_t stflg_owned, int32_t hp);
+
 /* pwksub.c:144 bhGetFrameNum, Originalvergleich frm > fnm_new eingeschlossen. */
 int32_t recvx_player_action_frame_num(uint32_t fnm_old, uint32_t fnm_new, int32_t fno_now);
 

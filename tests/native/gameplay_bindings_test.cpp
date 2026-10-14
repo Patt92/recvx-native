@@ -156,10 +156,10 @@ check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<
   // :5336/5346 bhEffPush/bhEffPop (bhPushEffectWork/bhPopEffectWork).
   const auto slots=[&]{unsigned n=0;while(world.effect_state(n))++n;return n;};
   const auto eff_before=slots();
-  check(world.bind(cmd({0x2c,0,0x07,0x01})),"bhEffectSet 0x2c unbound"); // id 263
+  check(world.bind(cmd({0x2c,0,0x00,0x01})),"bhEffectSet 0x2c unbound"); // id 256 (bhEff_E03_Acid, noch nicht portiert; 263 ist seit 2026-10-14 portiert)
   check(slots()==eff_before+1,"bhEffectSet allocated no eff[512]-Platz");
-  check(world.effect_state(eff_before)->id==263&&(world.effect_state(eff_before)->flg&1u)&&world.effect_state(eff_before)->type==0,"bhEffectSet wrote other work fields than bhSetEffect");
-  check(world.unbound_enemy_routines().count("bhEff263")==1,"unported effect procedure is not reported by name");
+  check(world.effect_state(eff_before)->id==256&&(world.effect_state(eff_before)->flg&1u)&&world.effect_state(eff_before)->type==0,"bhEffectSet wrote other work fields than bhSetEffect");
+  check(world.unbound_enemy_routines().count("bhEff256")==1,"unported effect procedure is not reported by name");
   const auto pushed=slots();
   check(world.bind(cmd({0x70,0})),"bhEffPush 0x70 unbound");
   check(world.bind(cmd({0x2c,0,0x05,0x00})),"bhEffectSet 0x2c unbound"); // id 5, portiert

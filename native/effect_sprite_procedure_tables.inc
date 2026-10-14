@@ -234,3 +234,17 @@ constexpr EffectUv eff019_t1[15]={{0.015625f,0.0f,0.15625f,0.125f},{0.015625f,0.
 constexpr EffectUv eff019_t2[8]={{0.3125f,0.875f,0.09375f,0.09375f},{0.40625f,0.875f,0.09375f,0.09375f},{0.5f,0.875f,0.09375f,0.09375f},{0.59375f,0.875f,0.09375f,0.09375f},{0.6875f,0.875f,0.09375f,0.09375f},{0.78125f,0.875f,0.09375f,0.09375f},{0.875f,0.875f,0.09375f,0.09375f},{-1.0f,0.0f,0.0f,0.0f}};
 // effsub1.c bhEff012 pv: vier Polygoneckpunkte mit eigener Farbe je Ecke.
 constexpr std::uint32_t eff012_corner_color[4]={0xFF800000u,0xFF600000u,0xFF200000u,0xFF800000u};
+
+
+// effsub5.c:3119 bhDrawWeaponEffect2 uvinfo_t01[2][6]: mdlver waehlt die Bank,
+// ani*3+k (k 0..2) die Zeile (Muendungsfeuer der Doppelwaffe, Texturgruppe 3).
+constexpr EffectUv eff229_t01[2][6]={
+ {{0.625f,0.0f,0.0625f,0.0625f},{0.796875f,0.0625f,0.09375f,0.0625f},{0.96875f,0.125f,0.03125f,0.09375f},{0.21875f,0.1875f,0.0625f,0.0625f},{0.0f,0.1875f,0.09375f,0.0625f},{0.65625f,0.34375f,0.0625f,0.125f}},
+ {{0.546875f,0.0f,0.0625f,0.0625f},{0.90625f,0.0625f,0.09375f,0.0625f},{0.921875f,0.125f,0.03125f,0.09375f},{0.296875f,0.1875f,0.0625f,0.0625f},{0.109375f,0.1875f,0.09375f,0.0625f},{0.71875f,0.34375f,0.0625f,0.125f}}};
+// effsub5.c:3115 akpal[2][3]: Texturbild-Offset der drei Durchgaenge.
+constexpr unsigned eff229_akpal[2][3]={{0,0,1},{0,1,1}};
+
+// effsub4.c:656 bhEff_Sub352 uvinfo[10] (rohe 255er-Werte: u/v in Pixeln,
+// xs/ys in Hundertsteln fuer sx = sxb*xs/100) und :669 anim00_tbl[11] (ptrn,timer).
+constexpr EffectUv eff352_uv[10]={{0.0f,0.0f,48.0f,48.0f},{48.0f,0.0f,48.0f,48.0f},{96.0f,0.0f,48.0f,48.0f},{144.0f,0.0f,48.0f,48.0f},{192.0f,0.0f,48.0f,48.0f},{0.0f,48.0f,48.0f,48.0f},{48.0f,48.0f,48.0f,48.0f},{96.0f,48.0f,48.0f,48.0f},{144.0f,48.0f,48.0f,48.0f},{192.0f,48.0f,48.0f,48.0f}};
+constexpr short eff352_anim[11][2]={{0,1},{1,1},{2,1},{3,1},{4,1},{5,1},{6,1},{7,1},{8,1},{9,1},{-2,0}};

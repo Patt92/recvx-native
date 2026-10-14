@@ -71,7 +71,16 @@ public:
     void check_event_deadline();
     bool event_deadline_visible()const;
     void start(unsigned level,unsigned event);
+    // hitchk.c bhCheckExmAtari, types 0/3/4. `position` is plp->px/pz after the wall
+    // passes; `front`/`front_offset` are EXP_WORK fpx/fpz and arn (player.c:1585),
+    // the source of the type 0 and type 3 probes pxn[0]/pxn[3] (hitchk.c:4605/:4614).
+    // The three-argument form is a standing player: fpx == px, arn == 0.
     bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
+    bool interact(NJS_POINT3 position,Angle yaw,int floor,NJS_POINT3 front,float front_offset);
+    // player.c:1678, the flag part of the bhCheckExmAtari gate: !(plp->stflg & 0x10080),
+    // !(plp->flg & 0x4000004), !(sys->cb_flg & 0x4017). mode0 == 1 and pad_ps 0x200
+    // stay with the caller (OK edge of the free player).
+    bool exm_flags_clear()const{return !(flags[14][0]&0x10080u)&&!(flags[13][0]&0x4000004u)&&!(flags[10][0]&0x4017u);}
     bool use(unsigned item,unsigned* message=nullptr,unsigned slot=~0u);
     void begin_status(); // StatusMain clears the previous ItemUse request.
     void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);

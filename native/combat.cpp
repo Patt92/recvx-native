@@ -47,6 +47,7 @@ struct CombatOriginal {
     std::function<void(const RECVX_CB_VEC*,int,int)> weapon_se;
     std::function<void(int,float,float)> footstep;
     std::function<void(const RECVX_CB_LIGHT*)> light0;
+    std::function<void(const RECVX_CB_VEC*,const RECVX_CB_VEC*,uint32_t,uint32_t,int)> gun_spark;
     explicit CombatOriginal(const PlayerAsset& player):asset(&player){
         tables.wpn=reinterpret_cast<const RECVX_CB_WPN_TAB*>(WpnTab);
         tables.eff=reinterpret_cast<RECVX_CB_EF_WORK(*)[4]>(WpnEffTab);
@@ -73,6 +74,7 @@ struct CombatOriginal {
         s.weapon_se=[](void* p,const RECVX_CB_VEC* pos,int32_t se,int32_t slot){auto* c=static_cast<CombatOriginal*>(p);if(c->weapon_se)c->weapon_se(pos,se,slot);};
         s.footstep=[](void* p,int32_t floor,float x,float z){auto* c=static_cast<CombatOriginal*>(p);if(c->footstep)c->footstep(floor,x,z);};
         s.light0=[](void* p,const RECVX_CB_LIGHT* l){auto* c=static_cast<CombatOriginal*>(p);if(c->light0)c->light0(l);};
+        s.gun_spark=[](void* p,const RECVX_CB_VEC* pos,const RECVX_CB_VEC* vec,uint32_t c0,uint32_t c1,int32_t type){auto* c=static_cast<CombatOriginal*>(p);if(c->gun_spark)c->gun_spark(pos,vec,c0,c1,int(type));};
         // GetOneObjectMotion (playpch.c:185) über die vorhandene Motionquelle.
         s.motion_angle=[](void* p,uint32_t mtn,uint32_t node,uint32_t frame,int32_t* ang)->int32_t{
             auto* c=static_cast<CombatOriginal*>(p);
@@ -85,7 +87,7 @@ struct CombatOriginal {
             const auto& key=keys[std::min<std::size_t>(frame,keys.size()-1)];
             ang[0]=key[0];ang[1]=key[1];ang[2]=key[2];return 1;};
         // Ungebundene Besitzer: Wasserabfragen (P03/E01), Wandzerstörung,
-        // Funken/Spritzer (E-Pakete) und Vibration ohne Treiber. Sie bleiben
+        // Spritzer (bhSetGunSplash) und Vibration ohne Treiber. Sie bleiben
         // NULL; der Kern meldet sie namentlich über `gap`.
         core=recvx_combat_create(&tables,&s);if(!core)throw std::bad_alloc();
         // Logische Knotenzahl des Körpers (ActorNodeLayout script_to_model).
@@ -169,14 +171,17 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // CallPlayerFootStepSe(bhCheckFloorSound(...),1,1).
     // CallPlayerFootStepSe(bhCheckFloorSound(...),1,1) -> CallPlayerFootStepSeEx(..,&PlayerPos); x/z bestimmen nur den Bodenklang.
     engine.footstep=[&](int,float x,float z){if(!world)return;const unsigned surface=world->floor_sound({x,0,z});if(surface<=4)audio.player_footstep_se(surface,1,true,events&&(events->flags[11][0]&0x01000000u));};
-    // bhCheckL2Wall (pwksub.c:718) gegen den vorhandenen Raumkollisionssatz.
-    // Der ATR-Satz (sys->ahtp) ist noch nicht exponiert; der Kern meldet ihn.
+    // bhCheckL2Wall (pwksub.c:718) als Port ueber rom->walp + sys->mwalp (RoomWorld::l2_wall):
+    // *len = nr, sys->apos und der getroffene ATR-Satz sys->ahtp, den bhCheckWallAttrB89
+    // (hitchk.c:5881) und der Doppelwaffenpfad (pwksub.c:3172-3237, prm0) lesen.
     engine.l2_wall=[&](const RECVX_CB_LINE* l,unsigned flags,float* len,RECVX_CB_WALL_HIT* hit)->int{
-        if(!world||!l)return 0;NJS_POINT3 dir{l->vx,l->vy,l->vz};const float length=njUnitVector(&dir);if(length<=0)return 0;
-        const float reach=world->combat_wall_distance({l->px,l->py,l->pz},dir,length,flags);
-        if(reach>=length)return 0;if(len)*len=reach;
-        if(hit){*hit={};hit->apos={l->px+dir.x*reach,l->py+dir.y*reach,l->pz+dir.z*reach};}
-        return 1;};
+        if(!world||!l)return 0;
+        NJS_POINT3 apos{};CollisionWall atr{};int index=-1;
+        const int found=world->l2_wall({l->px,l->py,l->pz},{l->vx,l->vy,l->vz},flags,len,&apos,&atr,&index);
+        if(hit){*hit={};hit->apos={apos.x,apos.y,apos.z};
+            if(found){hit->atr={atr.flags,atr.type,atr.attributes,std::int32_t(atr.floor),atr.position.x,atr.position.y,atr.position.z,atr.extent.x,atr.extent.y,atr.extent.z,
+                std::uint8_t(atr.parameters[0]),std::uint8_t(atr.parameters[1]),std::uint8_t(atr.parameters[2]),std::uint8_t(atr.parameters[3]),std::uint8_t(atr.id)};hit->id=std::uint32_t(index);}}
+        return found;};
     // bhCheckC2WallN (pwksub.c:2172): Sichtkapsel gegen denselben Satz.
     engine.c2_wall_n=[&](const RECVX_CB_CAPSULE* cap,unsigned flags)->int{
         if(!world||!cap)return 0;
@@ -187,6 +192,8 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // an, bhSetYakkyou (pwksub.c:3242) die aus [wno][3] und [wno][2]. flg/id/type/mdlver stammen
     // also aus der Originaltabelle; id 3 ist das Muendungsfeuer (eigener Zeichenweg), alle
     // uebrigen portierten ids laufen ueber den gemeinsamen bhSetEffectTb-Pfad (z. B. bhEff000).
+    // effsub3.c:2401 bhSetEffGunSpark am Wandtreffer (weapon.c bhCheckGunAtari).
+    engine.gun_spark=[&](const RECVX_CB_VEC* pos,const RECVX_CB_VEC* vec,uint32_t c0,uint32_t c1,int type){if(world)world->gun_spark({pos->x,pos->y,pos->z},{vec->x,vec->y,vec->z},c0,c1,type);};
     engine.effect=[&](const RECVX_CB_EFFECT* e)->int{
         if(!world)return -1;
         world->set_effect_counter(engine.sys.yk_ct);
@@ -203,13 +210,15 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     view.ply_id=int(player_);view.wpnr_no=int(weapon_);
     view.px=actor.position.x;view.py=actor.position.y;view.pz=actor.position.z;view.ay=actor.yaw;
     view.mtn_no=unsigned(motion);view.frm_no=int(frame);
-    publish_pose(player,motion,frame,actor);
+    publish_pose(player,motion,frame,actor,world);
     // bhSetPad (pad.c:162) und die Flagbänke bhCk 11/5/6 des vorhandenen Besitzers.
     const unsigned pad=(input.aim?0x10u:0)|(input.attack?0x100u:0)|(input.vertical>0?0x20u:input.vertical<0?0x40u:0)|(input.turn>0?8u:input.turn<0?4u:0)|(input.next_target?0x80u:0);
     engine.sys.pad_on=pad;engine.sys.pad_ps=pad&~engine.pad;
     engine.sys.gm_flg=events?&events->flags[11][0]:nullptr;
     engine.sys.st_flg=events?&events->flags[5][0]:nullptr;
     engine.sys.sp_flg=events?&events->flags[6][0]:nullptr;
+    // cam.ncut fuer bhCheckWallAttrB89 (hitchk.c:5900): bhCmpB-Schluessel 2 des Eventbesitzers.
+    engine.sys.cam_ncut=events?events->values[2]:0u;
     // sys->gm_flg 0x40000 (Magazin leer) hat im Original genau einen Platz;
     // der Inventarbesitzer setzt es in bhCountBullet, der Kampf löscht es.
     if(events&&inventory.chamber_empty)events->flags[11][0]|=0x40000u;
@@ -223,7 +232,7 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     if(engine.result.active){actor.yaw=view.ay;actor.position.x=view.px;actor.position.z=view.pz;motion=view.mtn_no;frame=view.frm_no;}
     vertical_=input.vertical;
     // Nach bhCalcModel: Messerabfrage (player.c:1689-1724) und bhObjWpn.
-    publish_pose(player,motion,frame,actor);
+    publish_pose(player,motion,frame,actor,world);
     recvx_combat_after_model(engine.core,&engine.sys,&engine.result);
     // PlyPchMain führt die Aufschaltung in pp.lck_tbl als RECVX_ENEMY_WORK*;
     // owner_index ist der Raumindex des vorhandenen Besitzers. Ohne die noch
@@ -235,15 +244,19 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
 }
 // objP des Originals: die Pose, die das Motionsampling geschrieben hat, plus
 // die Gelenkmatrizen des letzten bhCalcModel. Beides je Pass neu.
-void CombatController::publish_pose(PlayerAsset& player,std::size_t motion,std::int64_t frame,const SceneSpawn& actor){
+void CombatController::publish_pose(PlayerAsset& player,std::size_t motion,std::int64_t frame,const SceneSpawn& actor,RoomWorld* world){
     auto& engine=*original_;auto& view=engine.player();
     const auto overrides=pose_overrides(player,motion,frame);
     if(!player.has_motion(motion)){view.nodes=0;return;}
     const auto local=player.local_pose(motion,frame,overrides);
     const auto bones=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw,overrides));
     view.nodes=unsigned(std::min<std::size_t>(RECVX_CB_NODES,std::min(bones.size(),engine.script_to_model.size())));
+    // pp->mlwP->owP ist der zuletzt von bhCalcModel(plp) berechnete Objektbaum (der
+    // vorigen Runde). bhSetGunFire/bhControlEffect lesen genau ihn; die Pose des
+    // laufenden Passes darf hier nicht neu gesampelt werden.
+    const std::vector<BoneMatrix>* committed=world?&world->player_committed_joints():nullptr;
     for(unsigned n=0;n<view.nodes;++n){
-        std::copy_n(bones[n].value,16,view.owp_mtx[n]);
+        std::copy_n(committed&&n<committed->size()?(*committed)[n].value:bones[n].value,16,view.owp_mtx[n]);
         const unsigned m=engine.script_to_model[n];if(m>=local.size())continue;
         view.obj[n].pos[0]=local[m].position.x;view.obj[n].pos[1]=local[m].position.y;view.obj[n].pos[2]=local[m].position.z;
         view.obj[n].ang[0]=local[m].angles[0];view.obj[n].ang[1]=local[m].angles[1];view.obj[n].ang[2]=local[m].angles[2];

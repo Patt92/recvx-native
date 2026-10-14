@@ -37,6 +37,10 @@ private:
     unsigned threads_=0;
     int ss_=2;
     std::array<float,2> last_clip_{{0.05f,0.f}};
+    // Bildschirmmassstab der Ninja-Projektion fuer die Clipregel der Chunk-Streifen:
+    // fSx = AspectW*x*dist/z, fSy = AspectH*y*dist/z in 640x480-Einheiten (ps2_NinjaCnk.c:1195).
+    // Nur draw() setzt ihn (Spiel-/Tuerkamera); 0 = Regel aus (Sonderansichten).
+    float ninja_sx_=0,ninja_sy_=0;
     std::vector<std::uint32_t> hi_pixels_;
     std::vector<float> hi_depth_;
     std::vector<std::uint32_t> pixels_;

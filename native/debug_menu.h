@@ -8,9 +8,10 @@ struct DebugConfig {
     bool enemy_grab_configured=false;
     static DebugConfig read(const std::filesystem::path& path);
     static void write_defaults(const std::filesystem::path& path);
-    // A packaged macOS app keeps editable configuration beside the .app.
-    // Direct executables and Windows packages keep it beside the executable.
+    // Utility for locating an executable/package directory; not a user-data path.
     static std::filesystem::path software_directory(const std::filesystem::path& executable);
+    // Platform user-data default. Runtime development builds use their shared
+    // Git-root UserPaths instead.
     static std::filesystem::path default_path();
 };
 struct DebugChoice {unsigned value;std::string label;};

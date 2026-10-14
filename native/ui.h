@@ -96,6 +96,23 @@ public:
     bool pulse_open()const{return pulse_open_;}
     bool busy()const{return message.active()||inspection.running();}
     void tick(Inventory& inventory);
+    // SpriteOnOff (sub1.c:8176), der Zeichenteil des Statustasks, läuft im
+    // Original nach der Statuslogik desselben Frames (sub1.c:3580): ItemSort
+    // ausser bei subcsr 3 (8293-8296) und CursorSet (8318). Der Runtime ruft
+    // es einmal je Spieltick nach Status-, Ereignis- und Kistenlogik.
+    void sprite_on_off(Inventory& inventory);
+    // CallSystemSe aus Statusschritten ohne Pad (ItemCombination subcsr 2).
+    unsigned tick_sound=0xffffffff;
+    // sub1.c ItemCombination st->subcsr: 0 = kein Kombinieren, 1 Auswahl
+    // (CursorMove-artig, 5301-5571), 2 Combi_xx (5572-5938), 3 Verschmelzen
+    // (mct/mct_00/mpt, 5939-5986). Das Ende (subcsr 4) gibt an ItemCommandErase ab.
+    unsigned combine_subcsr()const{return combining?combine_subcsr_:0u;}
+    unsigned combine_item()const{return combine_item_;}
+    // parts_09b[0]/[1] des Statusbildschirms (Cursor und Kombinationsquelle),
+    // wie CursorSet (sub1.c:2009-2203) sie setzt; in subcsr 3 die eingefrorenen
+    // und von ItemCombination verschobenen Werte. Positionen relativ zu cen_pos[5].
+    struct CursorPart {bool visible=false;float x=0,y=0;unsigned anim=0;int sx=0;float color=.6f;};
+    std::array<CursorPart,2> cursor_parts(const Inventory& inventory)const;
     void reset(Inventory& inventory);
     void show_message(unsigned index);
 
@@ -105,10 +122,22 @@ public:
     bool input_unslid(MenuInput key,Inventory& inventory);
     std::vector<std::string> actions(const Inventory& inventory)const;
 private:
-    unsigned pending_combine_first_=0,pending_combine_second_=0;
+    // ItemCombination-Zustand (sub1.c:5225-5244: statische mct/mct_00/ok/mpt).
+    unsigned combine_subcsr_=0,combine_ok_=0,combine_mct_=0,combine_mct00_=0,combine_item_=0,combine_answer_=0;
+    int combine_rule_=-1; // st->cmbitm
+    bool combine_question_=false,combine_settled_=false;
+    float combine_mpt_[2]{};
+    std::array<CursorPart,2> combine_parts_{};
+    CursorPart combine_source_{}; // parts_09b[1] nach subcsr 0 (sub1.c:5266-5279)
+    // CursorSet-Farbpuls (st->color00/colorcount/colorflg, sub1.c:2013-2128).
+    float color00_=.6f;unsigned colorcount_=0;bool colorflg_=true;
+    void reset_cursor_color(){color00_=.6f;colorcount_=0;colorflg_=true;}
+    void begin_combine(const Inventory& inventory);
+    void end_combine();
+    void step_combine(Inventory& inventory);
+    bool cursor_visible()const{return active&&!nav&&!pickup&&!files;}
     bool pulse_open_=false,slide_open_=false;
     void finish_inspection(Inventory& inventory);
-    void combine(Inventory& inventory,unsigned first,unsigned second);
     void open_file(Inventory& inventory,unsigned file,bool list=false);
     void inspect(Inventory& inventory);
     void close_examine(Inventory& inventory);

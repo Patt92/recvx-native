@@ -80,12 +80,16 @@ extern "C" {
 
 /* en04.c:264 WPNDAMAGE_WORK (effect.h): Wirkung je Waffe. nm_act/cb_act
    waehlen den Schadenmodus, nm_blood/cb_blood den Bluttyp; flg traegt die
-   Zusatzwirkungen (1 Hackfleisch, 2/4 Feuer, 8 kein Blut, 0x10 Saeure). */
+   Zusatzwirkungen (1 Hackfleisch, 2/4 Feuer, 8 kein Blut, 0x10 Saeure).
+   Feldfolge wie types.h:1931 WPNDAMAGE_WORK {flg, nm_act, nm_blood, cb_act,
+   cb_blood}; die Tabelle en04_tables.c steht zeilengleich in dieser Folge.
+   (Vorher stand cb_act vor nm_blood: der toetende Treffer las nm_blood 7 als
+   cb_act, ChgDmgMode :720 liess mode0 stehen, der Hund starb nie.) */
 typedef struct {
     uint8_t flg;
     uint8_t nm_act;
-    uint8_t cb_act;
     uint8_t nm_blood;
+    uint8_t cb_act;
     uint8_t cb_blood;
 } RECVX_EN04_WPNDAMAGE;
 

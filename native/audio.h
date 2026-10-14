@@ -87,6 +87,8 @@ public:
     // SPU2 ADSR and reverb follow MODHSYN/LIBSD (audio_spu.h); output levels are not a bit-exact IOP mix.
     // CallSystemSe with bit 31 (ExPlayMidi, MIDI slot 2): bank (SeNo/256)&15, list is a char (low byte).
     bool play_system_midi(unsigned se_number);
+    // sdfunc.c:1400 StopSystemSe: StopMidi(2) (host slot 13).
+    void stop_system_midi(){stop(13);}
     bool play_room_sequence(unsigned bank,unsigned list,unsigned slot,bool loop=false);
     void custom_midi_slots(unsigned objects,unsigned events);
     bool event_sound(unsigned slot,unsigned sound);

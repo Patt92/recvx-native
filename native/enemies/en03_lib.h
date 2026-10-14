@@ -229,6 +229,9 @@ void recvx_t3_set_blood_effect_burst(RECVX_T3_LINK lk, int type, int jno,
 void recvx_t3_set_bloodstain(RECVX_ENEMY_WORK* w, int type, int jno, const RECVX_ENEMY_VEC* ofp);
 void recvx_t3_set_fire_effect(RECVX_ENEMY_WORK* w, int jno, const RECVX_ENEMY_VEC* ofp,
                               float size, int len);
+/* Dasselbe am Spielerbesitzer (en12.c:1202 bhEne_SetFireEffect(plp, ...)). */
+void recvx_t3_set_fire_effect_link(RECVX_T3_LINK lk, int jno, const RECVX_ENEMY_VEC* ofp,
+                                   float size, int len);
 void recvx_t3_set_acid_effect(RECVX_ENEMY_WORK* w, int jno, const RECVX_ENEMY_VEC* ofp, float size);
 void recvx_t3_set_nikuhen_effect(RECVX_ENEMY_WORK* w, int type, const RECVX_ENEMY_VEC* pos,
                                  const RECVX_ENEMY_VEC* v, int tex_id);

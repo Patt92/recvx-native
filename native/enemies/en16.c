@@ -443,9 +443,11 @@ static void en16_mv02(RECVX_ENEMY_WORK* w)
                             RECVX_ENEMY_VEC v, at;
                             v.x = w->px - w->xn; v.y = w->py - w->yn; v.z = w->pz - w->zn;
                             at = eff.lox;
-                            /* bhSetEffGunSpark -> bhSetRapEff(308) (effsub3.c:2401):
-                               OR_WORK-Effekt 308 ist nativ nicht portiert. */
-                            if (sv && sv->gap) sv->gap("bhSetEffGunSpark/bhEff308 (en16.c:262)");
+                            /* en16.c:262 bhSetEffGunSpark(&pos, &v, 0xFFF8F8A0, 0x4CE04010,
+                               WpnTab[13].hiteff - 4). */
+                            if (en16_extra->gun_spark)
+                                en16_extra->gun_spark(&at, &v, 0xFFF8F8A0u, 0x4CE04010u, en16_extra->hiteff13 - 4);
+                            else if (sv && sv->gap) sv->gap("bhSetEffGunSpark (en16.c:262)");
                             if (en16_extra->gun_splash)
                                 en16_extra->gun_splash(0xD, (int32_t)recvx_t3_arc_tan2(v.x, v.z), &v, &at, prm0);
                             else if (sv && sv->gap) sv->gap("bhSetGunSplash (en16.c:265)");

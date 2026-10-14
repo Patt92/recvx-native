@@ -18,9 +18,10 @@ void BoxMenu::synchronize(Inventory& inventory,StatusMenu& menu,EventVm* events,
     if(const auto sound=slide_.take_sound();sound!=0xffffffff&&audio)audio->play_system(sound);
     if(closed&&closing_){ // SpriteH set statusflg 0x80000: hand control back to the script
         menu.reset(inventory);reset();events->menu_open=false;events->flags[10][0]&=~0x1c0000u;events->flags[12][0]|=0x200u;
-        // ItemTaskCheck: bhStandPlayerMotion clears plp->stflg 0x18000 and the pad lock; the next
+        // ItemTaskCheck (sub1.c:3105): bhStandPlayerMotion at the player owner; the next
         // bhControlPlayerPad clears st_flg 0x4 set by bhCheckExmAtari for the lid.
-        events->flags[14][0]&=~0x18000u;events->flags[5][0]&=~4u;
+        if(stand_player)stand_player();else ++stand_gaps_;
+        events->flags[5][0]&=~4u;
     }
 }
 void BoxMenu::pad(unsigned on,unsigned pressed,Inventory& inventory,StatusMenu& menu,EventVm* events,AudioMixer& audio){

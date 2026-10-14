@@ -67,6 +67,15 @@ int main(){try{
     near(live.triangles[0].vertices[0].position.x,16,"native vertex mutation missing from skin renderer");
     near(live.triangles[0].vertices[0].normal.y,1,"native normal mutation missing from skin renderer");
     check(live.triangles[0].textured,"native material texture gate changed");
+    // bhDraw136 draws exactly objP[n].model even under evalflags 0x8. The
+    // copied skin normal keeps the unnormalised interpolation length.
+    const auto snap=player.sample_object_work(1,player.local_pose(0,65536),player.pose(0,65536),{15,15});
+    check(snap.triangles.size()==1,"direct snapshot lost the hidden model");
+    near(snap.triangles[0].vertices[0].normal.x,.5f,"snapshot normal must not be renormalised");
+    near(snap.triangles[0].vertices[0].normal.y,.5f,"snapshot interpolated normal differs");
+    const auto fm=player.sample_object_work(1,player.local_pose(0,65536),player.pose(0,65536),{15,15},nullptr,true);
+    near(fm.triangles[0].vertices[0].position.x,23,"Skin-FM low-index influence differs from regular skin");
+    near(fm.triangles[0].vertices[0].position.y,1,"Skin-FM half-weight interpolation differs");
     near(player.sample(0,0).triangles[0].vertices[0].position.x,14,"native rendering mutated immutable source");
     check(player.model_index(1)==1,"script node lookup incorrect");rejects([&]{player.model_index(2);},"invalid script node accepted");
     edits[2].position=NJS_POINT3{};rejects([&]{player.sample(0,0,{},0,nullptr,edits);},"override outside skeleton accepted");

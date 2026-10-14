@@ -63,7 +63,7 @@ void Frontend::title_call(int return_code){ // adv.c:1825 TitleCall(PortId, Retu
 // like the original without a card. MaxFlag 0: no wrap at either end.
 void Frontend::check_button(){
     if(pad_on_){saver_timer_=9000;saver_command_=0;}       // CheckAdvScreenSaverStopKey -> StopAdvScreenSaver(0)
-    bool connect=true;if(cursor_==0){cursor_=1;connect=false;}
+    bool connect=true;if(cursor_==0&&!(has_saves&&has_saves())){cursor_=1;connect=false;}
     const unsigned last=cursor_max_;                       // original: CursorMax-1; host: +1 for the QUIT row (deviation)
     if(connect){
         if(cursor_moves_<0){cursor_=std::max(cursor_,2u)-1;if(sound)sound(2);}       // Rept & 0x1000 (pad up): Cursor--, Cursor 0 -> 1
@@ -72,7 +72,7 @@ void Frontend::check_button(){
     if(ok_pressed_){ // press & 0x800 (Start) || press & AdvGetOkButton()
         const int command=cursor_==quit_row?4:mode_command_id_[cursor_];
         switch(command){
-        case 0: if(sound)sound(1);break;                                    // FindFirstVmDrive() < 0: CallSystemSe(0,1); unreachable with Flag 0
+        case 0: if(sound)sound(3);from_title_=0;title_call(3);break;        // LOAD GAME: system.c:374 ss_flg 0x200, tk_flg 0x308040, typ_md0 0 -> Ladebildschirm
         case 1: from_title_=0;title_call(2);break;                          // NEW GAME: AppMode 1, sys->gm_mode 0, TitleCall(PortId, 2)
         case 2: from_title_=2;next_return_code_=4;mode_=17;if(sound)sound(3);request_adv_fade(3,samurai(50));break; // OPTION: AppMode 0
         case 3: from_title_=3;title_call(6);break;                          // BATTLE GAME (ExtraFlag): sys->gm_mode 3, TitleCall(PortId, 6)
@@ -105,8 +105,8 @@ void Frontend::title_frame(){ // adv.c:2048 Adv_BioCvTitle, one 30-Hz frame
         else if(start_pressed_){if(sound)sound(3);saver_timer_=9000;saver_command_=0;flush_count_=255;flush_speed_=32;next_mode_=8;mode_=7;} // CheckStartButton: CallSystemSeBasic(3,0,0); StopAdvScreenSaver(0)
         view_.kind=TitleView::PressStart;view_.flush=flush_count_;break;
     case 7: view_.kind=TitleView::PressStart;view_.flush=flush_count_;fade_out_plate();break;
-    case 8: // DepthLevel 1; ss_flg |= 0x20000; ulFrame 2; (Cursor 0 && FindFirstVmDrive() < 0) -> Cursor 1
-        if(cursor_==0)cursor_=1;
+    case 8: // DepthLevel 1; ss_flg |= 0x20000; ulFrame 2; (Cursor 0 && no card/save) -> Cursor 1
+        if(cursor_==0&&!(has_saves&&has_saves()))cursor_=1;
         fade_in_plate(9);display_game_mode_plate(true);break;
     case 9: check_button();display_game_mode_plate(false);break; // CheckMcSelectPortInfoState alternates ports 0/1; both 0 without a card
     case 10: display_game_mode_plate(true);fade_out_plate();break;
@@ -123,8 +123,9 @@ void Frontend::finish_title_task(){ // adv.c:2436 Mode -1: StopVibrationEx; AdvE
     case 2: screen_=Screen::Hidden;pending_command_=FrontendCommand::NewGame;break; // system.c:365 bhSysCallFirstmovie case 2 -> opening (runtime: StopAdx(0), new game)
     case 4: screen_=Screen::Controls;selected_=0;gamepad_=option_pad_;status_.clear();break; // case 4 -> Adv_GameOptionScreen: host settings screen (deviation)
     case 1: ++attract_count_;from_title_=0;break;                                           // case 1 -> attract demo (ss_flg 0x400200): not ported, title re-initialises
+    case 3: screen_=Screen::Hidden;pending_command_=FrontendCommand::LoadGame;break;         // LOAD GAME -> Schreibmaschinen-Ladebildschirm (Slotwahl)
     case 100: pending_command_=FrontendCommand::Quit;break;                                 // host QUIT
-    default: from_title_=0;break;                                                           // 3 (LOAD GAME) / 6 (BATTLE GAME): unreachable without memory card / ExtraFlag
+    default: from_title_=0;break;                                                           // 6 (BATTLE GAME): unreachable without ExtraFlag
     }
 }
 FrontendCommand Frontend::title_step(){pending_command_=FrontendCommand::None;title_frame();pad_on_=start_pressed_=ok_pressed_=cancel_pressed_=false;cursor_moves_=0;return pending_command_;}

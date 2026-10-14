@@ -61,6 +61,7 @@ static int en09_attack(RECVX_ENEMY_WORK* epw,const RECVX_ENEMY_PLAYER* plp,int m
     RECVX_EN09_EXT* e=en09_ext(epw);RECVX_ENEMY_VEC a=en09_pos(epw),b=plp->pos,n;
     int hit=en09_line(epw,a,&b,&n,NULL);if(hit<0)return 0;
     float dx=plp->pos.x-epw->px,dz=plp->pos.z-epw->pz,dist=njSqrt(dx*dx+dz*dz);
+    if(getenv("EN09_ATK_DBG"))fprintf(stderr,"EN09ATK mode=%d ply_dist=%.3f dist=%.3f hit=%d flr=%d/%d ik2=%d hp=%d plhp=%d flg=%x stflg=%x\n",mode,e->ply_dist,dist,hit,epw->flr_no,plp->flr_no,recvx_t3_ikou3(epw,&plp->pos,0x2000),epw->hp,plp->hp,plp->flg,plp->stflg);
     if(mode<2)return e->ply_dist>17&&e->ply_dist<20&&!hit&&epw->flr_no==plp->flr_no&&
         (!mode?(epw->hp<75&&plp->hp<80):1)&&recvx_t3_ikou3(epw,&plp->pos,0x2000)==0;
     float matrix[16];
@@ -593,11 +594,11 @@ static void en09_mv_jump(RECVX_ENEMY_WORK* epw,int down){
     if(epw->mode3==1){
         if(epw->flg&0x02000000){en09_motion(epw,1,10);epw->mtn_md|=0x100;epw->py=epw->sv->grand((unsigned)(epw->flr_no+2));epw->flg2&=~1u;
             e->state&=down?~0x800b0u:~0x400b0u;epw->ct0=10;++epw->mode3;return;}
-        f=epw->frm_no>>16;if(f<5)epw->ay+=epw->ayp/5;
+        f=epw->frm_no>>16;if(getenv("EN09_JUMP_DBG"))fprintf(stderr,"EN09JUMP down=%d f=%d py=%.3f flr=%d state=%x mtn=%u add=%d\n",down,f,epw->py,epw->flr_no,e->state,epw->mtn_no,epw->mtn_add);if(f<5)epw->ay+=epw->ayp/5;
         const RECVX_EN09_ARM_POS* table=down?en09_tables(epw)->arm_pos2:en09_tables(epw)->arm_pos;
         if(f<0||(unsigned)f>=(down?RECVX_EN09_ARM_POS2_COUNT:RECVX_EN09_ARM_POS_COUNT)){en09_gap(epw,"EN09 jump arm table index");return;}
         for(unsigned j=7;j<11;++j){float value,last;if(!en09_node_x(epw,j,&value)||!en09_node_x(epw,10,&last))return;en09_services->node_pos(epw,j,0,value+(table[f].len-last)/4);}
-        if(!down&&f==69){epw->flr_no=(int8_t)epw->sv->floor_num(epw->py);e->state&=~0x8000u;}
+        if(!down&&f==69){epw->flr_no=(int8_t)epw->sv->floor_num(epw->py);if(getenv("EN09_JUMP_DBG"))fprintf(stderr,"EN09JUMP f69 py=%.3f -> floor_num=%d\n",epw->py,(int)epw->flr_no);e->state&=~0x8000u;}
         if(down&&f==30)e->state&=~0x8000u;else if(down&&f==45)epw->flr_no=(int8_t)epw->sv->floor_num(epw->py);
     }else if(epw->mode3==2&&--epw->ct0<0){epw->mode1=1;epw->mode2=1;epw->mode3=0;epw->mtn_md&=~0x100u;}
 }

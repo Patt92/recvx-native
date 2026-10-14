@@ -1,8 +1,18 @@
 #pragma once
 #include "ninja_matrix.h"
 #include <cmath>
+#include <algorithm>
+#include <cstdint>
 
 namespace recvx {
+// bhDraw136: njSetConstantAttr(0,0xA00) -> flags 0x0A. Both polygon table[2]
+// and Simple texture table[2][2] select colour function 4 (DifAmb), not specular.
+// ps2_Vu1Strip.c:1654: clamp(L + ambient,0,1) * diffuse. vu1SetDiffuseMaterial
+// scales RGB by 128 for GS modulation; native decoded RGB uses the equivalent 0..255.
+inline NJS_POINT3 cnk_afterimage_color(std::uint32_t diffuse,float light){
+    const float d=std::clamp(light+0.8f,0.0f,1.0f);
+    return {float((diffuse>>16)&255u)*d,float((diffuse>>8)&255u)*d,float(diffuse&255u)*d};
+}
 // njCnkCvVn (ps2_NinjaCnk.c:1226-1262), the per-vertex light term of the
 // EasyMulti chunk path. The VU0 form (njCnkCvVnPs2, :1316-1324) feeds the same
 // squared ranges and colours to VU0_CALCPOINT.

@@ -17,6 +17,11 @@ Noch kein vollstaendig spielbares Spiel.
 
 Start: macOS "RECVX Native.app", Windows Start.cmd.
 Bedienung und Tasten: STARTEN.md, CONTROLS.md.
+Benutzerdaten: Windows %APPDATA%\\RECVX, macOS ~/Library/Application Support/RECVX.
+Pfade fuer einzelne INIs, Snapshots und Spielstaende koennen mit
+--controls, --debug-config, --video-config, --third-person-config,
+--snapshots und --saves ueberschrieben werden; --user-dir setzt das gemeinsame
+Benutzerdatenverzeichnis.
 Portstand der Spielsysteme: GAMEPLAY-STATUS.md.
 Austauschbare Ressourcen: ASSETS-AND-MODS.md.
 Debugmenue (F2): DEBUG_MENU.md.
@@ -60,7 +65,7 @@ def main():
         if zig:
             shutil.copy2(zig / "lib/libcxx/LICENSE.TXT", output / "LLVM-LICENSE.txt")
             shutil.copy2(zig / "lib/libc/mingw/COPYING", output / "MinGW-LICENSE.txt")
-        (output / "Start.cmd").write_text('@echo off\r\n"%~dp0recvx-runtime.exe" --data "%~dp0data" --mods "%~dp0mods" --controls "%~dp0controls.ini" %*\r\nset "recvx_exit=%errorlevel%"\r\nif not "%recvx_exit%" == "0" pause\r\nexit /b %recvx_exit%\r\n')
+        (output / "Start.cmd").write_text('@echo off\r\n"%~dp0recvx-runtime.exe" --data "%~dp0data" --mods "%~dp0mods" %*\r\nset "recvx_exit=%errorlevel%"\r\nif not "%recvx_exit%" == "0" pause\r\nexit /b %recvx_exit%\r\n')
         data_destination = output / "data"
     else:
         if subprocess.check_output(["lipo", "-archs", str(source)], text=True).split() != ["arm64"]:
@@ -82,7 +87,7 @@ def main():
         run("install_name_tool", "-change", linked, f"@executable_path/../Frameworks/{library_name}", str(binaries / "recvx-runtime"))
         run("install_name_tool", "-id", f"@rpath/{library_name}", str(frameworks / library_name))
         launcher = binaries / "Start"
-        launcher.write_text('#!/bin/sh\nrecvx_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$recvx_dir/recvx-runtime" --data "$recvx_dir/../Resources/data" --mods "$recvx_dir/../../../mods" --controls "$recvx_dir/../../../controls.ini" "$@"\n')
+        launcher.write_text('#!/bin/sh\nrecvx_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$recvx_dir/recvx-runtime" --data "$recvx_dir/../Resources/data" --mods "$recvx_dir/../../../mods" "$@"\n')
         launcher.chmod(0o755)
         with (contents / "Info.plist").open("wb") as info:
             plistlib.dump({"CFBundleExecutable": "Start", "CFBundleIdentifier": "org.recvx.native", "CFBundleName": "RECVX Native",

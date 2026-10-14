@@ -23,6 +23,7 @@ VideoSettings VideoSettings::read(const std::filesystem::path& path){
 }
 void VideoSettings::save(const std::filesystem::path& path)const{
     std::ostringstream text;text<<"# RECVX host render quality: original, low, high, ultra\nquality = "<<names[int(quality)]<<'\n';
+    if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
     auto temporary=path;temporary+=".tmp";
     {std::ofstream file(temporary);if(!file)throw std::runtime_error("cannot save video settings");file<<text.str();file.close();if(!file)throw std::runtime_error("video settings save failed");}
     std::filesystem::rename(temporary,path);

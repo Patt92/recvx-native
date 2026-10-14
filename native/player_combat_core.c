@@ -1226,7 +1226,46 @@ static void cb_set_gun_fire(RECVX_COMBAT_CORE* c, int32_t wno, int32_t jno,
     }
     case 11: cb_gap(c, "bhSetGunFire Waffe 11 (bhEff014/Eff002, pwksub.c:2978)"); break;
     case 20: cb_gap(c, "bhSetGunFire Waffe 20 (bhEff027, pwksub.c:3127)"); break;
-    case 21: cb_gap(c, "bhSetGunFire Waffe 21 (Laser/Wandfunken, pwksub.c:3156)"); break;
+    case 21: {
+        /* pwksub.c:3156-3240: die Doppelwaffe schiesst entlang der Gelenkachse
+           (Y +36, X -1547 auf owP[jno], Richtung (0,0,-1000)), prueft die Wand
+           und legt Funken sowie - auf einer Wasserflaeche (prm0 1) - vier
+           bhEff011-Tropfen in zwei Winkeln und zwei Groessen an. */
+        RECVX_CB_LINE gline; RECVX_CB_VEC ops, ps, wps; RECVX_CB_WALL_HIT wh;
+        float len = 0; int walhit = 0;
+        ops = wt->wp_fps1;
+        cb_calc_point(p->owp_mtx[jno], &ops, (RECVX_CB_VEC*)&gline.px);
+        ops.x = 0; ops.y = 0; ops.z = -1000.0f;
+        { NJS_MATRIX m; cb_mtx_of(p->owp_mtx[jno], &m);
+          njRotateY(&m, 36); njRotateX(&m, -1547);
+          njCalcVector(&m, (NJS_VECTOR*)&ops, (NJS_VECTOR*)&gline.vx); }
+        memset(&wh, 0, sizeof wh);
+        if (cb_l2_wall(c, &gline, 0x400, &len, &wh) != 0) { wps = wh.apos; walhit = 1; }
+        if (walhit != 0 && cb_wall_attr_b89(c, &wh) != 0) {
+            ps.x = -gline.vx; ps.y = -gline.vy; ps.z = -gline.vz;
+            if (c->services.gun_spark)
+                c->services.gun_spark(c->services.user, &wps, &ps, 0xFFF8F8A0u, 0x4CE04010u,
+                                      (int32_t)wt->hiteff - 4);
+            else cb_gap(c, "bhSetEffGunSpark");
+            if (wh.atr.prm0 == 1) {
+                RECVX_CB_EFFECT r;
+                memset(&r, 0, sizeof r);
+                r.ef.id = 11; r.ef.flg = 1; r.ef.mdlver = 1; r.ef.type = 1; r.ef.flr_no = 1;
+                r.ef.px = wps.x; r.ef.py = wps.y; r.ef.pz = wps.z;
+                r.ef.ax = 0; r.ef.ay = 16384;
+                r.ef.sx = r.ef.sy = r.ef.sz = wt->ef_scale; r.jno = 0;
+                cb_effect(c, &r);
+                r.ef.sx = r.ef.sy = r.ef.sz = 0.5f * wt->ef_scale;
+                cb_effect(c, &r);
+                r.ef.ay = -16384;
+                r.ef.sx = r.ef.sy = r.ef.sz = wt->ef_scale; r.jno = 1;
+                cb_effect(c, &r);
+                r.ef.sx = r.ef.sy = r.ef.sz = 0.5f * wt->ef_scale;
+                cb_effect(c, &r);
+            }
+        }
+        break;
+    }
     default: break;
     }
 }

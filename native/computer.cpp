@@ -41,11 +41,8 @@ void ComputerTerminal::tick(unsigned held,unsigned pressed,EventVm& events,Audio
         events.flags[6][0]=frame_->system.sp_flg;events.flags[11][0]=frame_->system.gm_flg;
         events.flags[12][0]=frame_->system.ts_flg;
         if(frame_->stand_player){
-            // bhStandPlayerMotion (player.c): plp->flg &= 0xC96EFFFB | 0x8 and
-            // plp->stflg &= ~0x18000. The standing motion itself is the
-            // runtime's ordinary player pass once control is back.
-            events.player_flags&=0xC96EFFFBu;events.player_flags|=0x8u;
-            events.flags[14][0]&=~0x18000u;
+            // sp_evt.c:781 bhStandPlayerMotion (player.c:1114) beim Spielerbesitzer.
+            if(stand_player)stand_player();else ++stand_gaps_;
         }
         active_=false;
     }

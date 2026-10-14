@@ -19,6 +19,9 @@
 #include "en04.h"
 #include "en11.h"
 #include "en12.h"
+#include "en13.h"
+#include "en23.h"
+#include "en05.h"
 #include "en14.h"
 #include "en18.h"
 #include "en27.h"
@@ -54,11 +57,14 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[10] = recvx_en10;
     d->jump[11] = recvx_en11;
     d->jump[12] = recvx_en12;
+    d->jump[13] = recvx_en13;
     d->jump[14] = recvx_en14;
     d->jump[16] = recvx_en16;
     d->jump[18] = recvx_en18;
     d->jump[20] = recvx_en20;
     d->jump[21] = recvx_en21;
+    d->jump[23] = recvx_en23;
+    d->jump[5] = recvx_en05;
     d->jump[24] = recvx_en24;
     d->jump[25] = recvx_en25;
     d->jump[27] = recvx_en27;

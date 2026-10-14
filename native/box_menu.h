@@ -1,6 +1,7 @@
 #pragma once
 #include "ui.h"
 #include "events.h"
+#include <functional>
 namespace recvx {
 class AudioMixer;
 // Native ItemBox pad pass, list scroll and SpriteH/StatusCancel slide.
@@ -14,6 +15,9 @@ public:
     // ItemBox reads pad_on every game tick, including release ticks (sub1.c:7688).
     void pad(unsigned on,unsigned pressed,Inventory& inventory,StatusMenu& menu,EventVm* events,AudioMixer& audio);
     void draw(SoftwareRenderer& image,const GameUi& ui,const Inventory& inventory,const StatusMenu& menu)const;
+    // ItemTaskCheck's bhStandPlayerMotion (player.c:1114), answered by the player owner.
+    std::function<void()> stand_player;
+    unsigned stand_gaps()const{return stand_gaps_;}
     bool active()const{return active_;}
     unsigned base()const{return base_;}
     // sub1.c ItemBox testmode 2 (the box list scrolls under the fixed row 3).
@@ -28,7 +32,7 @@ public:
 private:
     // ItemBox testmode 3 (cursor on EXIT, pressed animation) and the non-modal bhSetMessage note.
     bool active_=false,selecting_=false,closing_=false,exit_=false,exit_pressed_=false;
-    unsigned exit_wait_=0,note_=0;
+    unsigned exit_wait_=0,note_=0,stand_gaps_=0;
     void cursor(unsigned on,Inventory& inventory,StatusMenu& menu,AudioMixer& audio);
     StatusSlide slide_;
     unsigned base_=64;

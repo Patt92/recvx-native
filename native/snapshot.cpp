@@ -69,10 +69,15 @@ Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsig
     Snapshot snap;auto& s=snap.save;
     if(inventory.player>3)throw std::runtime_error("player id outside SAVEFILE");
     s.ply_id=std::int8_t(inventory.player);s.stg_no=std::int8_t(events.values[0]);s.rom_no=std::int8_t(events.values[1]);s.rcase=std::int8_t(events.values[21]);
-    s.pos_no=std::int8_t(player.spawn);s.cut_no=std::int8_t(player.camera);s.flr_no=std::int8_t(player.floor);s.gm_mode=std::int32_t(inventory.game_mode);
+    s.pos_no=std::int8_t(player.spawn);s.cut_no=std::int8_t(player.camera);s.flr_no=std::int8_t(player.floor);s.gm_mode=std::int32_t(inventory.game_mode);s.save_ct=inventory.save_ct;
     to_save(s.ev_flg,events.flags[1]);to_save(s.ky_flg,events.flags[2]);to_save(s.ed_flg,events.flags[3]);
     to_save(s.it_flg,events.flags[7]);to_save(s.mp_flg,events.flags[8]);to_save(s.ic_flg,events.flags[9]);
     s.itm=inventory.items;
+    // room.c:1033 npCopyMemory kopiert den ganzen SYS-Bereich, also auch die
+    // gespeicherten Eintraege der anderen Spieler in ply_stflg/ply_wno/ply_hp
+    // (system.c:1729/1746/1747 bhFinishRoom bei bhPlayerChangeSet). Nur der
+    // aktive Eintrag wird davor aus plp neu geschrieben (room.c:1022/1030/1031).
+    for(std::size_t i=0;i<s.ply_hp.size();++i){s.ply_hp[i]=std::int16_t(inventory.ply_hp[i]);s.ply_stflg[i]=inventory.ply_stflg[i];s.ply_wno[i]=std::int8_t(inventory.partner_weapon[i]);}
     // bhPushGameData: sys->ply_stflg[ply_id] = plp->stflg & 0x78280000.
     s.ply_stflg[s.ply_id]=events.flags[14][0]&0x78280000u;
     s.ply_pos=player.position;s.ply_ang=player.yaw;
@@ -86,8 +91,13 @@ Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsig
 }
 void restore_inventory(const Snapshot& snap,Inventory& inventory){
     const auto& s=snap.save;if(s.ply_id<0||s.ply_id>3)throw std::runtime_error("snapshot player id invalid");
-    inventory.items=s.itm;inventory.player=unsigned(s.ply_id);inventory.game_mode=unsigned(s.gm_mode);
+    inventory.items=s.itm;inventory.player=unsigned(s.ply_id);inventory.game_mode=unsigned(s.gm_mode);inventory.save_ct=s.save_ct;
     inventory.hp=s.ply_hp[s.ply_id];inventory.max_hp=snap.host.max_hp;inventory.play_time=std::uint32_t(s.stv_tm);
+    // bhPopGameData restores sys->ply_hp / sys->ply_stflg together with the pip
+    // bank. Keep the per-player arrays in step with the live player so a later
+    // bhPlayerChangeSet saves and restores the correct values. ply_stflg holds
+    // the same poison bits as player_stflg() (0x80000/0x200000).
+    for(std::size_t i=0;i<inventory.ply_hp.size();++i){inventory.ply_hp[i]=s.ply_hp[i];inventory.ply_stflg[i]=unsigned(s.ply_stflg[i])&0x280000u;inventory.partner_weapon[i]=std::uint8_t(s.ply_wno[i]);} // room.c:1043 auch sys->ply_wno
     inventory.poisoned=snap.host.poisoned;inventory.infected=snap.host.infected;inventory.side_pack=snap.host.side_pack;
 }
 void restore_events(const Snapshot& snap,EventVm& events){

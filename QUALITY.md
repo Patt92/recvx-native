@@ -131,6 +131,15 @@ in der Handfassung korrigiert und in den Tests festgehalten.
   hinterlässt 8/10, alle übrigen portierten stellen 8/6 zurück (Scan aller
   Zeichenfunktionen in effsub*/effect.c). `bhSetExtraEffectWork`-Plätze ohne
   Satzinhalt belegt `reserve_extra_slot`; die Schneebox hält elf davon.
+- `bhSetEffectLink` (room.c:787) läuft beim Raumladen: verlinkte Raumeffekte tragen
+  `flg 0x80`, `lkwkp` (`EffectSprite::link_kind/link_index`), begrenztes `lkono` und
+  `lox`. Der Link wird nur bei `flg 0x80` verfolgt (effect.c:800), gezeichnet wird aus
+  `op->px` bzw. der Linkmatrix. Nachbilder (bhEff136) lesen veröffentlichte objP/owP
+  des ausgewählten Modells und zeichnen genau dessen Knotenmodell, ohne neue Motionpose.
+  Spieler/mdl[4] werden im vorhandenen Kopf-/Haarpass veröffentlicht; andere Zusatzmodelle
+  brauchen ihren echten Baumbesitzer. Die belegte DifAmb-Rechnung steht in
+  ps2_Vu1Strip.c:1654 (`cnk_afterimage_color`); Hautnormalen behalten ihre Länge.
+  `npSetAllMatAlphaColor` bleibt als Modellzustand stehen (`afterimage_alpha_*`).
 - `sys->gas_py` (bhEff127) hat mit `effect_gas_height()` einen Besitzer im
   Effektmodul; nur diese Prozedur schreibt und liest sie. `plp->hp = -1` geht als
   `EffectOutput::player_killed` denselben Weg wie ein Biss (world.cpp:1142).

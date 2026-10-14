@@ -44,10 +44,12 @@ std::function<int()> extra_reserve;std::function<void(int)> extra_release;
 std::function<bool(unsigned,unsigned,unsigned,NJS_MATRIX&)> link_lookup;
 std::function<bool(unsigned,unsigned,int&)> work_angle_lookup;
 std::function<EffectSprite*(int)> pool_lookup;
+EffectAfterimageServices afterimage_services;
 // effsub2.c:2296 bhEff_E11_CheckCollisionPlayer des Raumbesitzers (Treffermodelle von
 // plp mdl[3] und Figuren 41..43/91..93): Objektindex oder -1, p2 auf den Treffer gekuerzt.
 std::function<int(NJS_POINT3,NJS_POINT3&)> player_hit_lookup;
 std::function<int(int,unsigned,unsigned,NJS_POINT3,NJS_POINT3,unsigned,unsigned,int)> particle_mk2_hook;
+EffectWorldHooks world_hooks;
 }
 // Gemeinsame Dienste der von Hand portierten Prozeduren (effect_sprites_internal.h).
 namespace effect_detail {
@@ -76,7 +78,8 @@ void submit_template(int lkono,const NJS_POINT3* offset){
     EffectSpawn e=request_template();e.lkono=lkono;e.linked_work=nullptr;
     e.has_offset=offset!=nullptr;if(offset)e.offset=*offset;else e.offset={};
     e.has_velocity=false;e.velocity={};e.tex_id_override=-1;e.az=0;e.parent_slot=-1;
-    e.mode1=0;e.has_color=false;e.color=0;
+    e.mode1=0;e.has_color=false;e.color=0;e.has_ao=false;e.ao={};e.has_exp1=false;e.exp1_slot=-1;
+    e.link_kind=-1;e.link_index=0;e.drop_link_flag=false;
     pending.spawns.push_back(e);
 }
 EffectSpawn& last_request(){
@@ -129,13 +132,25 @@ std::optional<FloorEffectHit> floor_effect(int flr_no,float px,float pz,const ch
     }
     return {};
 }
+bool find_link_node_matrix(unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out){return link_lookup&&link_lookup(kind,index,node,out);}
 NJS_MATRIX& link_node_matrix(unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out,const char* what){
     if(!link_lookup||!link_lookup(kind,index,node,out))throw std::runtime_error(std::string(what)+" without the linked work's node matrix");
     return out;
 }
 EffectSprite* pool_work(int slot){return pool_lookup?pool_lookup(slot):nullptr;}
 void report_gap(const char* name){pending.gaps.insert(name);}
+bool hook_player_get(RECVX_ENEMY_PLAYER& p,const char* what){if(world_hooks.player_get&&world_hooks.player_get(p))return true;report_gap(what);return false;}
+void hook_player_set(const RECVX_ENEMY_PLAYER& p){if(world_hooks.player_set)world_hooks.player_set(p);else report_gap("plp schreiben ohne Spielerbesitzer");}
+void hook_player_exp0(unsigned off,float v){if(world_hooks.player_exp0)world_hooks.player_exp0(off,v);else report_gap("PEXP0_F ohne Spielerbesitzer");}
+void hook_player_fire(int jno,NJS_POINT3 ofp,float size,int life){if(world_hooks.player_fire)world_hooks.player_fire(jno,ofp,size,life);else report_gap("bhEne_SetFireEffect(plp) ohne Besitzer");}
+void hook_fire_light(NJS_POINT3 pos){if(world_hooks.fire_light)world_hooks.fire_light(pos);else report_gap("rom->lgtp[1] ohne Lichtbesitzer");}
+void hook_en12_binta(void* w,int action){if(world_hooks.en12_binta)world_hooks.en12_binta(w,action);else report_gap("bhEne12_SetFireBintaEffect ohne Gegnerbesitzer");}
+bool hook_effect_se_playing(int se){if(world_hooks.effect_se_playing)return world_hooks.effect_se_playing(se);report_gap("bhEne_CheckPlayEffectSE ohne Stimmenbesitzer");return true;}
+void hook_player_dv(NJS_POINT3 dv){if(world_hooks.player_dv)world_hooks.player_dv(dv);else report_gap("plp->dvx/dvy/dvz ohne Spielerbesitzer");}
+void hook_effect_se(NJS_POINT3 pos,int se){if(world_hooks.effect_se)world_hooks.effect_se(pos,se);else report_gap("bhEne_CallEffectSE ohne Stimmenbesitzer");}
 void request_player_kill(){pending.player_killed=true;}
+void request_effect_flags(unsigned bits){pending.effect_flags|=bits;}
+const EffectAfterimageServices& afterimage_service(){return afterimage_services;}
 void sink_slot_into_pv(const EffectSprite& owner,int index){
     auto& request=last_request();
     request.slot_sink_work=owner.slot;request.slot_sink_index=index;
@@ -663,8 +678,8 @@ static int beam_player(NJS_POINT3 p1,NJS_POINT3& p2,const char* what){
 }
 // NJS_COLOR (argb) als Eckfarbe 0xAARRGGBB; Kanalzuweisung wie das Original (unsigned char).
 static std::uint32_t argb(unsigned a,unsigned r,unsigned g,unsigned b){return ((a&255u)<<24)|((r&255u)<<16)|((g&255u)<<8)|(b&255u);}
-// njDrawLine3DEx-Farbe in Leinwandordnung 0xAABBGGRR.
-static std::uint32_t line_color(std::uint32_t c){return (c&0xff00ff00u)|((c>>16)&255u)|((c&255u)<<16);}
+// njDrawLine3DEx-Farbe: NJS_COLOR (ARGB) ist bereits die Leinwandordnung (SDL ARGB8888).
+static std::uint32_t line_color(std::uint32_t c){return c;}
 // njDrawPolygon3D(p3c, 3, 0x60) nach njColorBlendingMode(0, 8)/(1, 10) und njFogDisable.
 static void beam_triangle(EffectSprite& s,const NJS_POINT3 (&p)[3],const std::uint32_t (&col)[3]){
     EffectSprite::Quad q;q.center={0,0,0};q.world_space=true;q.textured=false;q.fogged=false;q.pn=3;q.gouraud=true;q.source=8;q.destination=10;
@@ -885,6 +900,73 @@ static bool step_e00_blood_burst(EffectSprite& s,const EffectContext& c){
     }
     return false;
 }
+
+// effsub3.c:2401 bhSetEffGunSpark: Eff308Prm[4] (reine Datentabelle).
+static const EffectSpark308::Prm gun_spark_prm[4]={
+    {8,0.5f,0.9800000190734863f,1.0f,5,55.0f,0.800000011920929f,4,-0.03266666829586029f},
+    {10,0.6000000238418579f,0.9800000190734863f,2.0f,7,50.0f,0.800000011920929f,4,-0.03266666829586029f},
+    {12,0.699999988079071f,0.9800000190734863f,3.0f,9,45.0f,0.800000011920929f,4,-0.03266666829586029f},
+    {12,1.0f,0.9800000190734863f,3.0f,12,20.0f,0.800000011920929f,4,-0.03266666829586029f}};
+// effsub3.c:2492 bhEff308 / :2695 bhEff308Drw: Funkenlinien mit Farbverlauf, Wind und Bodenprall.
+static bool step_eff308(EffectSprite& s){
+    if(!s.spark308){effect_detail::report_gap("bhEff308 ohne R08_WORK");s.flg=0;return false;}
+    auto& r=*s.spark308;
+    const int n=r.prm_a.vtx_num;
+    if(n<0||n>16){effect_detail::report_gap("bhEff308: vtx_num ausserhalb VtxDir[16]");s.flg=0;return false;}
+    if(r.mode==0){
+        njUnitVector(&r.vtx_dir);
+        for(int i=0;i<n;++i){
+            const int ax=int(182.04445f*(r.prm_a.ang_rand*(effect_detail::effect_random()-0.5f)));
+            const int ay=int(182.04445f*(r.prm_a.ang_rand*(effect_detail::effect_random()-0.5f)));
+            const float sp=r.prm_a.speed+(r.prm_a.spd_rand*(effect_detail::effect_random()-0.5f));
+            NJS_MATRIX m;njUnitMatrix(&m);njRotateY(&m,ay);njRotateX(&m,ax);
+            NJS_POINT3 d;njCalcVector(&m,&r.vtx_dir,&d);r.VtxDir[std::size_t(i)]={d.x*sp,d.y*sp,d.z*sp};
+        }
+        for(int i=0;i<n;++i){r.VtxBuf[std::size_t(2*i)]=r.vtx_pos;r.VtxCol[std::size_t(2*i)]=r.col_src;r.VtxCol[std::size_t(2*i+1)]=r.col_dst&0xFFFFFFu;}
+        for(int i=0;i<n;++i){
+            const int tim=r.prm_a.time+int(float(r.prm_a.tim_rand)*effect_detail::effect_random());
+            r.TimBuf[std::size_t(i)]=tim;
+            int src=int(r.col_src),dst=int(r.col_dst);auto& add=r.ColAdd[std::size_t(i)];auto& sub=r.ColSub[std::size_t(i)];
+            int tmp=((dst&0xFF)-(src&0xFF))/tim;
+            if(tmp<0)sub=std::uint32_t(~tmp&0xFF);else add=std::uint32_t(tmp&0xFF);
+            tmp=((dst&0xFF00)-(src&0xFF00))/tim;
+            if(tmp<0)sub|=std::uint32_t(~tmp&0xFF00);else add|=std::uint32_t(tmp&0xFF00);
+            tmp=((dst&0xFF0000)-(src&0xFF0000))/tim;
+            if(tmp<0)sub|=std::uint32_t(~tmp&0xFF0000);else add|=std::uint32_t(tmp&0xFF0000);
+            src>>=16;dst>>=16;
+            tmp=((dst&0xFF00)-(src&0xFF00))/tim;
+            if(tmp<0)sub|=std::uint32_t(~tmp&0xFF00)<<16;else add|=std::uint32_t(tmp&0xFF00)<<16;
+        }
+        r.wnd_spd=0;r.wnd_acl=0.01f*effect_weather().winds;
+        r.mode++;
+    }
+    r.drw_num=0;
+    const float sp=r.wnd_spd;const int ay=effect_weather().windr;
+    const NJS_POINT3 wnd{sp*-njSin(ay),0,sp*-njCos(ay)};
+    r.wnd_spd=sp+r.wnd_acl;
+    for(int i=0;i<n;++i){
+        auto& t=r.TimBuf[std::size_t(i)];if(t<=0)continue;
+        t--;r.drw_num++;
+        auto& v0=r.VtxBuf[std::size_t(2*i)];auto& dir=r.VtxDir[std::size_t(i)];
+        r.VtxBuf[std::size_t(2*i+1)]=v0;
+        v0.x+=dir.x;v0.y+=dir.y;v0.z+=dir.z;v0.x+=wnd.x;v0.y+=wnd.y;v0.z+=wnd.z;
+        dir.x*=r.prm_a.accel;dir.y*=r.prm_a.accel;dir.z*=r.prm_a.accel;dir.y+=r.prm_a.gravity;
+        auto& c=r.VtxCol[std::size_t(2*i)];c+=r.ColAdd[std::size_t(i)];c-=r.ColSub[std::size_t(i)];
+        if(v0.y<r.gnd_hgh){dir.y*=-0.5f;v0.y=r.gnd_hgh;}
+    }
+    if(r.drw_num==0){s.flg=0;return false;}
+    // bhEff308Drw: njDrawLine3D je Funke mit TimBuf != 0; kein eigenes Blendpaar.
+    for(int i=0;i<n;++i)if(r.TimBuf[std::size_t(i)]!=0){SceneLine l{{r.VtxBuf[std::size_t(2*i)],r.VtxBuf[std::size_t(2*i+1)]},{r.VtxCol[std::size_t(2*i)],r.VtxCol[std::size_t(2*i+1)]}};l.inherit_blend=true;s.lines.push_back(l);}
+    s.fnc_exit_src=-1;s.fnc_exit_dst=-1;
+    effect_detail::queue_custom(s);
+    return true;
+}
+bool start_gun_spark(EffectSprite& s,NJS_POINT3 pos,NJS_POINT3 dir,std::uint32_t src,std::uint32_t dst,int typ){
+    if(typ<0||typ>3){effect_detail::report_gap("bhSetEffGunSpark: typ_no ausserhalb Eff308Prm[4]");return false;}
+    s.flg=1;s.id=308;s.spark308=std::make_shared<EffectSpark308>();auto& r=*s.spark308;
+    r.prm_a=gun_spark_prm[typ];r.vtx_pos=pos;r.vtx_dir=dir;r.col_src=src;r.col_dst=dst;r.gnd_hgh=pos.y-100.0f;
+    return true;
+}
 // effsub4.c:2149/3142/3177: EN09 throw smoke; delayed start, 255-domain UV.
 static bool step_en09_smoke(EffectSprite& s){
     static const EffectUv uv[15]={{0,0,16,16},{16,0,24,24},{40,0,24,24},{64,0,32,32},
@@ -910,7 +992,7 @@ static bool step_en09_smoke(EffectSprite& s){
 }
 bool hand_ported_effect_sprite(unsigned id){
     switch(id){
-    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 369:case 396:case 399:return true;
+    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 134:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 308:case 369:case 396:case 399:return true;
     default:return hand_procedure(id)!=nullptr;
     }
 }
@@ -923,6 +1005,7 @@ bool ported_effect_atlas(unsigned group){
     case 31:case 33:case 34:case 35:case 36:case 38:case 39:case 40:case 41:case 43:
     case 50:case 51:case 52:case 53:case 54:case 55:case 56:case 57:case 58:case 59:
     case 60:case 61:case 62:case 63:case 64:case 65:case 66:case 67:case 68:case 69:
+    case 44: // effsub1b.c:123 bhDraw134 (sys->ef_tn[44])
     case 80:case 94:
     case 408:case 409:case 410:case 411:case 412:case 413:case 414:case 415:case 416:case 418:case 420:
     case 417:case 419:case 421:case 422:case 423:case 424:case 425:case 426:case 427:case 428:
@@ -941,15 +1024,16 @@ bool step_effect_sprite(EffectSprite& sprite,bool* queued){
 bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
     if(queued)*queued=false;if(!supported_effect_sprite(s.id))return false;
     if(s.id==369){const bool entered=step_en09_smoke(s);if(queued)*queued=entered;return true;}
+    if(s.id==308){s.custom_queued=false;s.quads.clear();s.lines.clear();const bool entered=step_eff308(s);if(queued)*queued=entered;return true;}
     if(s.id==296){const bool entered=step_e00_blood(s);if(queued)*queued=entered;return true;}
     if(s.id==297){step_e00_blood_burst(s,c);if(queued)*queued=false;return true;}
     if(s.id==261||s.id==270){s.custom_queued=false;s.quads.clear();s.lines.clear();const bool entered=s.id==261?step_e11_searchlight(s,c):step_e16_laser(s,c);if(queued)*queued=entered;return true;}
     if(s.id==396||s.id==399){const bool entered=step_en21_effect(s);if(queued)*queued=entered;return true;}
     if(const auto* procedure=hand_procedure(s.id)){
         // effect.c:742 bhControlEffect leert die Zeichenlisten zu Beginn jedes Passes.
-        s.opaque_queued=false;s.custom_queued=false;s.quads.clear();s.lines.clear();
+        s.opaque_queued=false;s.custom_queued=false;s.zanzo_slot=-1;s.quads.clear();s.lines.clear();
         bool entered=false;procedure->step(s,c,entered);
-        if(queued)*queued=entered||s.opaque_queued||s.custom_queued;return true;
+        if(queued)*queued=entered||s.opaque_queued||s.custom_queued||s.zanzo_slot>=0;return true; /* ef_Zanzo (effect.c:938) zaehlt wie eine Zeichenliste */
     }
     if(s.id!=9){
         bool entered=false;
@@ -1010,9 +1094,11 @@ void set_effect_ground(GroundCollision* ground,const std::vector<CollisionWall>*
 void set_effect_extra_allocator(std::function<int()> reserve,std::function<void(int)> release){extra_reserve=std::move(reserve);extra_release=std::move(release);}
 void set_effect_link_lookup(std::function<bool(unsigned,unsigned,unsigned,NJS_MATRIX&)> lookup){link_lookup=std::move(lookup);}
 void set_effect_player_hit(std::function<int(NJS_POINT3,NJS_POINT3&)> lookup){player_hit_lookup=std::move(lookup);}
+void set_effect_world_hooks(EffectWorldHooks hooks){world_hooks=std::move(hooks);}
 void set_effect_particle_mk2(std::function<int(int,unsigned,unsigned,NJS_POINT3,NJS_POINT3,unsigned,unsigned,int)> hook){particle_mk2_hook=std::move(hook);}
 void set_effect_work_angle(std::function<bool(unsigned,unsigned,int&)> lookup){work_angle_lookup=std::move(lookup);}
 void set_effect_pool_lookup(std::function<EffectSprite*(int)> lookup){pool_lookup=std::move(lookup);}
+void set_effect_afterimage_services(EffectAfterimageServices services){afterimage_services=std::move(services);}
 void set_effect_link_matrix(unsigned node,const float* matrix){
     // Die Knotenmatrix hat ohne Effektprozeduren keinen Abnehmer.
     (void)node;(void)matrix;
@@ -1020,8 +1106,53 @@ void set_effect_link_matrix(unsigned node,const float* matrix){
 // effsub1.c:4220 bhEff017 — siehe effect_sprites.h.
 void set_effect_mobile_wall_clear(std::function<void(int)> clear){mobile_wall_clear=std::move(clear);}
 
-void set_explosion(NJS_POINT3 position,NJS_POINT3 view){(void)position;(void)view;}
-void set_explosion_effect(NJS_POINT3 position,NJS_POINT3 view){(void)position;(void)view;}
+// weapon.c:1706 bhSetExplosion — der Sprengsatz eines Fasses (eneset.c bhEne00) und
+// eines Wandtreffers (weapon.c:560 bhCheckGunAtari): Ton 534, Blitzlicht rom->lgtp,
+// Zuender bhEff016 (Kennung 16; ruft nach lkono Passes bhCheckBombAtari = Flaechenschaden)
+// sowie Feuerball 23 und zwei Truemmer 24. `view` ist cam.vx/vy/vz des Vorbildes.
+void set_explosion(NJS_POINT3 position,NJS_POINT3 view){
+    pending.sounds.push_back(534); // CallPlayerActionSe(534,1): Bank 2, Liste 534&255 (sdfunc.c:1537 Type 3)
+    OriginalLight light{};
+    light.flg=3;light.type=101;light.aspd=8;light.lkflg=0;light.lkno=0;light.lkono=0;light.lsrc=4;
+    light.position=position;light.offset={0,0,0};light.direction={0,0,0};light.color={4.5f,3.0f,1.5f};
+    light.near_range=30.0f;light.far_range=200.0f;
+    pending.light=light;
+    effect_detail::request_direct(16,position,16); // bhSetEffect(16,&pnt,NULL,16), pnt-ox/oy/oz = 0
+    auto& r=effect_detail::request_template(); // sys->ef der Originalerzeuger
+    r.id=23;r.flg=1;r.type=1;r.mdlver=1;r.flr_no=0;r.scale={6.0f,6.0f,6.0f};
+    r.position={position.x-4.0f*view.x,position.y-4.0f*view.y,position.z-4.0f*view.z};
+    r.ax=0;r.ay=0;
+    effect_detail::submit_template(0);
+    for(int i=0;i<2;++i){ // zwei Truemmer 24; Startversatz aus (0,0,-2) um (ax,ay,0) gedreht
+        r.id=24;r.flg=1;r.type=0;r.mdlver=1;r.flr_no=i&3;
+        r.scale.x=1.0f+effect_detail::effect_random();r.scale.y=r.scale.x;r.scale.z=0.0f;
+        r.ay=int(182.04445f*(360.0f*effect_detail::effect_random()));
+        r.ax=int(182.04445f*(80.0f*effect_detail::effect_random())); // Reihenfolge sx,ay,ax wie im Original
+        NJS_MATRIX m;njUnitMatrix(&m);njRotateXYZ(&m,Angle(r.ax),Angle(r.ay),0);
+        NJS_VECTOR vc0{0,0,-2.0f},vc1;njCalcVector(&m,&vc0,&vc1); // vc1 = bhSetEffectTb-Versatz
+        const NJS_POINT3 offset{vc1.x,vc1.y,vc1.z};
+        effect_detail::submit_template(0,&offset);
+    }
+}
+// weapon.c:1812 bhSetExplosionEffect — dieselbe Feuerbalfolge ohne Ton/Licht/Zuender,
+// z. B. gameover.c:539 und event.c:8766.
+void set_explosion_effect(NJS_POINT3 position,NJS_POINT3 view){
+    auto& r=effect_detail::request_template();
+    r.id=23;r.flg=1;r.type=1;r.mdlver=1;r.flr_no=0;r.scale={6.0f,6.0f,6.0f};
+    r.position={position.x-4.0f*view.x,position.y-4.0f*view.y,position.z-4.0f*view.z};
+    r.ax=0;r.ay=0;
+    effect_detail::submit_template(0);
+    for(int i=0;i<2;++i){
+        r.id=24;r.flg=1;r.type=0;r.mdlver=1;r.flr_no=i&3;
+        r.scale.x=1.0f+effect_detail::effect_random();r.scale.y=r.scale.x;r.scale.z=0.0f;
+        r.ay=int(182.04445f*(360.0f*effect_detail::effect_random()));
+        r.ax=int(182.04445f*(80.0f*effect_detail::effect_random()));
+        NJS_MATRIX m;njUnitMatrix(&m);njRotateXYZ(&m,Angle(r.ax),Angle(r.ay),0);
+        NJS_VECTOR vc0{0,0,-2.0f},vc1;njCalcVector(&m,&vc0,&vc1);
+        const NJS_POINT3 offset{vc1.x,vc1.y,vc1.z};
+        effect_detail::submit_template(0,&offset);
+    }
+}
 EffectOutput take_effect_output(){EffectOutput out=std::move(pending);pending=EffectOutput{};return out;}
 // bhSetEffectTb: copy flg/id/type/mdlver/flr_no, position, scale (also kept in sxb..), angles and the joint offset.
 void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
@@ -1034,6 +1165,8 @@ void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
     if(e.tex_id_override>=0)s.tex_id=e.tex_id_override;
     s.az=e.az;s.parent_slot=e.parent_slot;s.mode1=unsigned(e.mode1);
     if(e.has_color)s.tv[0].col=e.color;
+    if(e.has_ao){s.aox=e.ao.x;s.aoy=e.ao.y;s.aoz=e.ao.z;}
+    if(e.has_exp1)s.exp1_slot=e.exp1_slot;
 }
 // effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.

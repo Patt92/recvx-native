@@ -147,6 +147,30 @@ void recvx_player_action_reset(RECVX_PLAYER_ACTION* a, float px, float pz, int32
     a->rtspd = 1.0f;
 }
 
+void recvx_player_stand_motion(RECVX_PLAYER_ACTION* a, uint32_t* flg, uint32_t* stflg,
+                               uint32_t stflg_owned, int32_t hp)
+{
+    if (hp >= 120) {
+        if ((*stflg | stflg_owned) & 0x280000u) a->dmlvl = 1;
+        else if (a->dmlvl != 0) a->dmlvl = 0;
+    } else if (hp >= 30) {
+        if (a->dmlvl != 1) a->dmlvl = 1;
+    } else if (a->dmlvl != 2) {
+        a->dmlvl = 2;
+    }
+    *flg &= 0xC96EFFFBu;
+    *flg |= 0x8u;
+    *stflg &= ~0x18000u;
+    a->mode2 = 0;
+    a->mode3 = 0;
+    a->spx = a->px;
+    a->spz = a->pz;
+    a->mtn_no = mtn(a->wpntp, a->dmlvl, 0);
+    a->hokan_rate = 0;
+    a->hokan_count = 0;
+    a->frm_no = 0;
+}
+
 void recvx_player_action_pad(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_ACTION_IO* io, uint32_t* mode1)
 {
     if (!(io->pad_on & 0x1u) && (*io->stflg & 0x80u)) {

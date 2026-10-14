@@ -2420,6 +2420,12 @@ void recvx_t3_set_bloodstain(RECVX_ENEMY_WORK* w, int type, int jno,
 void recvx_t3_set_fire_effect(RECVX_ENEMY_WORK* w, int jno, const RECVX_ENEMY_VEC* ofp,
                               float size, int len)
 {
+    recvx_t3_set_fire_effect_link(t3_link_w(w), jno, ofp, size, len);
+}
+void recvx_t3_set_fire_effect_link(RECVX_T3_LINK lk, int jno, const RECVX_ENEMY_VEC* ofp,
+                                   float size, int len)
+{
+    RECVX_ENEMY_WORK* w = lk.w;
     const RECVX_ENEMY_VEC org = { 0.0f, 0.0f, 0.0f };
     const RECVX_ENEMY_VEC* use = ofp ? ofp : &org;
     RECVX_T3_EFF e = t3_eff_base();
@@ -2434,7 +2440,7 @@ void recvx_t3_set_fire_effect(RECVX_ENEMY_WORK* w, int jno, const RECVX_ENEMY_VE
     e.ay = 0;
     e.mdlver = 0;
 
-    eno = t3_effect_tb(w, &e, use, t3_link_w(w), jno,
+    eno = t3_effect_tb(w, &e, use, lk, jno,
                        "zonzon1.c:382 effect.c bhSetEffectTb");
     if (eno == -1) return;
 

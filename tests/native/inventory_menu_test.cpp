@@ -18,11 +18,15 @@ static Message fixture_message(unsigned index){
     if(index==155||index==119||(index>=181&&index<=187))return {'L'-32,0xff02,0,'?'-32,0xff04,'Y'-32,0xff04,'N'-32,0xffff};
     return {'T'-32,0xffff};
 }
+// Ein Statusframe: StatusMain-Logik (tick) und danach SpriteOnOff (ItemSort/CursorSet, sub1.c:3580).
+static void frame(StatusMenu& menu,Inventory& inv){menu.tick(inv);menu.sprite_on_off(inv);}
 static void select_action(StatusMenu& menu,Inventory& inv,unsigned slot,unsigned action){
     // ItemCommand slides the command window in and ItemCommandErase out (4 frames each).
-    if(!menu.active)menu.input(MenuInput::Open,inv);menu.skip_slide();menu.selected=slot;menu.input(MenuInput::Confirm,inv);for(int f=0;f<4;++f)menu.tick(inv);
-    for(unsigned i=0;i<action;++i)menu.input(MenuInput::Down,inv);menu.input(MenuInput::Confirm,inv);for(int f=0;f<4;++f)menu.tick(inv);
+    if(!menu.active)menu.input(MenuInput::Open,inv);menu.skip_slide();menu.selected=slot;menu.input(MenuInput::Confirm,inv);for(int f=0;f<4;++f)frame(menu,inv);
+    for(unsigned i=0;i<action;++i)menu.input(MenuInput::Down,inv);menu.input(MenuInput::Confirm,inv);for(int f=0;f<4;++f)frame(menu,inv);
 }
+// ItemCombination subcsr 2 -> 3 -> 4 und ItemCommandErase bis zur Rückkehr in CursorMove.
+static void finish_combine(StatusMenu& menu,Inventory& inv){for(int f=0;f<40&&(menu.combining||menu.erase_frames);++f)frame(menu,inv);}
 static void acknowledge(StatusMenu& menu,Inventory& inv){for(unsigned i=0;i<20&&menu.message.active();++i)menu.input(MenuInput::Confirm,inv);check(!menu.message.active(),"message cannot be dismissed");}
 static void yes(StatusMenu& menu,Inventory& inv){while(menu.message.active()&&!menu.message.choices())menu.input(MenuInput::Confirm,inv);if(menu.message.active())menu.input(MenuInput::Confirm,inv);}
 static void no(StatusMenu& menu,Inventory& inv){while(menu.message.active()&&!menu.message.choices())menu.input(MenuInput::Confirm,inv);if(menu.message.active()){menu.input(MenuInput::Down,inv);menu.input(MenuInput::Confirm,inv);}}
@@ -55,23 +59,28 @@ int main(){try{
     const unsigned recipes[][3]={{21,21,24},{21,22,25},{21,23,26},{21,24,28},{21,26,27},{22,26,29},{23,24,27},{23,25,29}};
     for(const auto& recipe:recipes)for(unsigned reverse=0;reverse<2;++reverse){
         auto inv=empty();inv.slots()[2]=Inventory::pack(recipe[reverse?1:0],1);inv.slots()[3]=Inventory::pack(recipe[reverse?0:1],1);StatusMenu menu;messages(menu);
-        select_action(menu,inv,2,2);check(menu.combining&&menu.combine_from==2,"Combine does not retain its source");menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);check(menu.message.index()==155,"herb mixing skips original confirmation");yes(menu,inv);
+        select_action(menu,inv,2,2);check(menu.combining&&menu.combine_from==2,"Combine does not retain its source");menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);
+        check(!menu.message.active()&&menu.combine_subcsr()==2,"decide must only enter subcsr 2 (sub1.c:5527)");frame(menu,inv);
+        check(menu.message.index()==155&&menu.tick_sound==3,"herb mixing skips original confirmation 155 / SE 3 (sub1.c:5717-5720)");menu.tick_sound=~0u;yes(menu,inv);
+        finish_combine(menu,inv);
         check(!menu.combining&&menu.active&&inv.occupied()==1&&Inventory::id(inv.slots()[menu.selected])==recipe[2],"herb recipe/result cursor failed through menu");
     }
     {auto inv=empty();inv.slots()[2]=Inventory::pack(21,1);inv.slots()[3]=Inventory::pack(22,1);StatusMenu menu;messages(menu);
         select_action(menu,inv,2,2);check(menu.combining&&menu.combine_from==2,"Combine source lost");
-        menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);check(menu.message.index()==155,"herb question missing");
-        const auto saved=inv.items;no(menu,inv);
-        check(inv.items==saved&&menu.combining&&menu.feedback_sound==1,"herb question denial did not keep combination mode or play sound 1");
-        menu.selected=1;menu.input(MenuInput::Up,inv);check(!menu.nav&&menu.combining,"combination cursor leaked to nav on Up");
+        menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);frame(menu,inv);check(menu.message.index()==155,"herb question missing");
+        menu.input(MenuInput::Cancel,inv);check(menu.message.active(),"Cancel must not answer the 155 question (message.c:233 reads only 0x800)");
+        const auto saved=inv.items;no(menu,inv);menu.tick_sound=~0u;frame(menu,inv);
+        check(inv.items==saved&&menu.combining&&menu.combine_subcsr()==1&&menu.tick_sound==1,"herb question denial did not keep combination mode or play sound 1 (ok 5, sub1.c:5741/5929-5935)");
+        frame(menu,inv);menu.selected=1;menu.input(MenuInput::Up,inv);check(!menu.nav&&menu.combining,"combination cursor leaked to nav on Up");
         menu.input(MenuInput::Left,inv);check(!menu.nav&&menu.combining,"combination cursor leaked to nav on Left");
-        menu.input(MenuInput::Cancel,inv);check(!menu.combining&&menu.selected==2,"combination cancel failed");}
+        menu.input(MenuInput::Cancel,inv);check(!menu.combining&&menu.selected==2&&menu.commands&&menu.command==2,"combination cancel must return to the command window (testmode 1, sub1.c:5546-5565)");}
     {auto inv=empty();inv.slots()[2]=Inventory::pack(22,1);inv.slots()[3]=Inventory::pack(23,1);StatusMenu menu;messages(menu);select_action(menu,inv,2,2);const auto saved=inv.items;menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);
         check(inv.items==saved&&menu.combining&&menu.feedback_sound==1,"invalid herbs consumed or combination exited");menu.input(MenuInput::Cancel,inv);check(!menu.combining&&menu.selected==2,"combine cancel loses source cursor");
+        menu.input(MenuInput::Cancel,inv);for(int f=0;f<4;++f)frame(menu,inv); // ItemCommand testmode 1 Cancel -> ItemCommandErase
         select_action(menu,inv,2,0);check(menu.message.index()==161&&menu.active,"red herb use closes inventory or lacks 161"); /* Verbrauch nicht belegt: Use_00 herbuse = $s3 des Aufrufers */}
-    {auto inv=empty();inv.slots()[2]=Inventory::pack(21,1);inv.slots()[3]=Inventory::pack(22,1);for(unsigned i=4;i<10;++i)inv.slots()[i]=Inventory::pack(95,1);StatusMenu menu;messages(menu);select_action(menu,inv,2,2);menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);yes(menu,inv);check(inv.contains(25)&&inv.occupied()==7,"full inventory prevents an in-place herb combination");inv.hp=10;inv.poisoned=true;select_action(menu,inv,menu.selected,0);check(inv.hp==160&&inv.poisoned&&!inv.contains(25)&&menu.active,"mixed herb use fails or incorrectly cures poison");}
-    for(const auto counts:{std::pair<unsigned,unsigned>{4,10},{10,4},{4,4}})for(unsigned reverse=0;reverse<2;++reverse){auto inv=empty();inv.slots()[2]=Inventory::pack(35,counts.first);inv.slots()[3]=Inventory::pack(18,counts.second);unsigned result=0;check(inv.combine(reverse?3:2,reverse?2:3,nullptr,&result),"partial bowgun powder conversion rolled back");check(Inventory::id(inv.slots()[result])==36&&Inventory::quantity(inv.slots()[result])==std::min(counts.first,counts.second),"conversion loses explosive arrow count/result cursor");check(inv.contains(18)==(counts.second>counts.first)&&inv.contains(35)==(counts.first>counts.second),"conversion loses leftover arrows/powder");}
-    {auto inv=empty();inv.slots()[2]=Inventory::pack(5,18);inv.slots()[3]=Inventory::pack(12,30);inv.equip(2);StatusMenu menu;messages(menu);select_action(menu,inv,2,2);menu.input(MenuInput::Right,inv);const auto saved=inv.items;menu.input(MenuInput::Confirm,inv);check(inv.items==saved&&menu.message.index()==156&&menu.combining,"full magazine mutates inventory or loses original dialogue");acknowledge(menu,inv);menu.input(MenuInput::Cancel,inv);check(inv.weapon()==3,"failed reload unequips handgun");}
+    {auto inv=empty();inv.slots()[2]=Inventory::pack(21,1);inv.slots()[3]=Inventory::pack(22,1);for(unsigned i=4;i<10;++i)inv.slots()[i]=Inventory::pack(95,1);StatusMenu menu;messages(menu);select_action(menu,inv,2,2);menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);frame(menu,inv);yes(menu,inv);finish_combine(menu,inv);check(inv.contains(25)&&inv.occupied()==7,"full inventory prevents an in-place herb combination");inv.hp=10;inv.poisoned=true;select_action(menu,inv,menu.selected,0);check(inv.hp==160&&inv.poisoned&&!inv.contains(25)&&menu.active,"mixed herb use fails or incorrectly cures poison");}
+    for(const auto counts:{std::pair<unsigned,unsigned>{4,10},{10,4},{4,4}})for(unsigned reverse=0;reverse<2;++reverse){auto inv=empty();inv.slots()[2]=Inventory::pack(35,counts.first);inv.slots()[3]=Inventory::pack(18,counts.second);unsigned result=0;check(inv.combine(reverse?3:2,reverse?2:3,nullptr,&result),"partial bowgun powder conversion rolled back");const bool equal=counts.first==counts.second; /* gleiche Mengen: listcsr_0 bleibt auf 3, ItemSort zieht 36 nach 2 (sub1.c:5980-5984, 8296) */check(Inventory::id(inv.slots()[equal?2:result])==36&&Inventory::quantity(inv.slots()[equal?2:result])==std::min(counts.first,counts.second)&&(!equal||(result==3&&!inv.slots()[3])),"conversion loses explosive arrow count/result cursor");check(inv.contains(18)==(counts.second>counts.first)&&inv.contains(35)==(counts.first>counts.second),"conversion loses leftover arrows/powder");}
+    {auto inv=empty();inv.slots()[2]=Inventory::pack(5,18);inv.slots()[3]=Inventory::pack(12,30);inv.equip(2);StatusMenu menu;messages(menu);select_action(menu,inv,2,2);menu.input(MenuInput::Right,inv);const auto saved=inv.items;menu.input(MenuInput::Confirm,inv);frame(menu,inv);check(inv.items==saved&&menu.message.index()==156&&menu.combining&&menu.combine_subcsr()==1&&menu.tick_sound==0,"full magazine mutates inventory or loses original dialogue 156 / SE 0 (sub1.c:5611-5616)");acknowledge(menu,inv);menu.input(MenuInput::Cancel,inv);check(inv.weapon()==3,"failed reload unequips handgun");}
     });
     // D07 am Bodentrigger über EventVm::use: Schlüssel außerhalb 161, Treffer
     // startet das Raumskript (UseItemCheck, Verbrauch, Flag), TG-01 176, Munition

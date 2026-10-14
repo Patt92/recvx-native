@@ -131,9 +131,101 @@ void StatusMenu::acquire_file(Inventory& inventory,unsigned file){
 void StatusMenu::finish_inspection(Inventory& inventory){
     if(inspection.completed_file()<24){open_file(inventory,inspection.completed_file());file_item_source=true;examining=false;inspection=ItemInspection{};}
 }
-void StatusMenu::combine(Inventory& inventory,unsigned first,unsigned second){
-    unsigned index=0,destination=0;if(inventory.combine(first,second,&index,&destination)){combining=false;selected=destination;}
-    else{feedback_sound=1;if(index)show_message(index);}
+std::array<StatusMenu::CursorPart,2> StatusMenu::cursor_parts(const Inventory& inventory)const{
+    // ItemCombination subcsr 3: CursorSet ruht (sub1.c:8318), es gelten die von
+    // subcsr 2/3 gesetzten parts_09b-Werte.
+    if(combining&&combine_subcsr_==3)return combine_parts_;
+    std::array<CursorPart,2> parts;
+    // CursorSet (sub1.c:2131-2203): Zelle listcsr_2, bei breitem Item auf die
+    // gerade Zelle; ausserhalb der Liste (pip[1]) 88,-76 im Statusbildschirm
+    // (cb_flg 0x180000 betrifft nur die Kiste). Mit sichtbarem parts_09b[1]
+    // (Kombinieren) +4/+4, anim 2 und parts_15[1..3].sx 136/68, sonst
+    // parts_15[0].sx 144/76.
+    auto& p=parts[0];p.visible=cursor_visible();
+    const unsigned item=selected<12?Inventory::id(inventory.slots()[selected]):0;const bool wide=item&&(itemdata[item].type&0x100);
+    const unsigned cell=grid_cell(inventory,selected);
+    if(cell>=2){const unsigned num1=wide?(cell&~1u):cell;p.x=20.f+float((num1%2)*68);p.y=4.f+float((int(num1/2)-1)*48);}else{p.x=88.f;p.y=-76.f;}
+    if(combining){p.x+=4.f;p.y+=4.f;p.anim=2;p.sx=wide?136:68;}else{p.anim=0;p.sx=wide?144:76;}
+    p.color=color00_;
+    if(combining){parts[1]=combine_source_;parts[1].visible=p.visible;parts[1].color=.6f;}
+    return parts;
+}
+void StatusMenu::begin_combine(const Inventory& inventory){
+    // ItemCommand Kombinieren (sub1.c:4843-4851: subcsr 0, testmode 2) und
+    // ItemCombination subcsr 0 (5259-5300): parts_09b[1] übernimmt die
+    // Cursorposition (Quelle, anim 0 = parts_15[0] mit der Breite der Quelle),
+    // parts_09b[0] rückt um +4/+4 und zeigt anim 2; Farbpuls neu, listcsr_1 =
+    // listcsr_0. Das Befehlsfenster bleibt offen (kein statusflg 0x800000).
+    combine_source_=cursor_parts(inventory)[0];combine_source_.anim=0;
+    combining=true;combine_from=selected;combine_subcsr_=1;combine_item_=selected<12?Inventory::id(inventory.slots()[selected]):0;
+    combine_ok_=combine_mct_=combine_mct00_=0;combine_mpt_[0]=combine_mpt_[1]=0;combine_rule_=-1;combine_question_=false;combine_answer_=0;
+    reset_cursor_color();
+}
+void StatusMenu::end_combine(){combining=false;combine_subcsr_=0;combine_question_=false;combine_answer_=0;combine_rule_=-1;}
+void StatusMenu::step_combine(Inventory& inventory){
+    combine_settled_=false;
+    if(!combining){combine_subcsr_=0;return;}
+    if(!active||combine_subcsr_<2)return;
+    if(combine_subcsr_==2){
+        const auto before=cursor_parts(inventory); // CursorSet des Vorframes
+        const bool question=(combidata[combine_rule_+2]&255)==6;
+        Inventory::CombineResult r;
+        if(question){
+            // sub1.c:5713-5745: Frage 155 mit SE 3, Antwort mes_sel 100 -> Combi_03, 101 -> ok 5.
+            if(!combine_question_){if(!message.active()){show_message(155);tick_sound=3;combine_question_=true;}return;}
+            if(!combine_answer_)return;
+            const auto answer=combine_answer_;combine_answer_=0;combine_question_=false;
+            if(answer==100)r=inventory.combine_items(combine_rule_,selected,combine_from,message.active());else r.ok=5;
+        }else r=inventory.combine_items(combine_rule_,selected,combine_from,message.active());
+        if(r.message)show_message(r.message); // Combi_00: bhSetMessage(1,156)
+        combine_ok_=r.ok;
+        if(r.ok&&r.ok!=4){
+            // sub1.c:5899-5918: subcsr 3, mct_00 4; movedir: parts_09b[1] wandert
+            // (mct 132), sonst parts_09b[0] (mct 4), je ein Viertel von mpt.
+            combine_subcsr_=3;combine_mct00_=4;combine_parts_=before;
+            const auto &p0=before[0],&p1=before[1];
+            if(r.movedir){combine_mct_=132;combine_mpt_[0]=(p0.x-4.f)-p1.x;combine_mpt_[1]=(p0.y-4.f)-p1.y;}
+            else{combine_mct_=4;combine_mpt_[0]=p1.x-(p0.x-4.f);combine_mpt_[1]=p1.y-(p0.y-4.f);}
+        }
+        // sub1.c:5613-5616/5643-5646: voll -> SE 0, subcsr 1; 5920-5937: sonst SE 3,
+        // ok 5 -> SE 1 und subcsr 1, jeweils nur ohne laufende Meldung (st_flg 0x200).
+        if(r.ok==4){tick_sound=0;combine_subcsr_=1;combine_settled_=true;}
+        else if(r.ok!=5){if(!message.active())tick_sound=3;}
+        else if(!message.active()){tick_sound=1;combine_subcsr_=1;combine_settled_=true;}
+        return;
+    }
+    // subcsr 3 (sub1.c:5939-5986): vier Wartebilder (mct_00), vier Schritte mpt/4.
+    if(combine_mct_&0xF){
+        if(!combine_mct00_){
+            auto& part=combine_parts_[(combine_mct_&0x80)?1:0];part.x+=combine_mpt_[0]/4.f;part.y+=combine_mpt_[1]/4.f;
+            --combine_mct_;
+        }else --combine_mct00_;
+        return;
+    }
+    inventory.combine_finish(combine_ok_,selected,combine_from);
+    // statusflg 0x800000 -> ItemCommandErase im selben Frame (sub1.c:3496), subcsr 4,
+    // parts_09b[0].anim 0, parts_09b[1] aus, Farbpuls neu; movedir 0: listcsr_0 = listcsr_1.
+    erase_frames=4;erase_item=combine_item_;erase_command=command;commands=false;
+    const bool moved_source=combine_mct_&0x80;
+    end_combine();reset_cursor_color();
+    if(!moved_source)selected=combine_from;
+}
+void StatusMenu::sprite_on_off(Inventory& inventory){
+    if(!active)return;
+    // sub1.c:8293-8296: ItemSort ausser während des Verschmelzens.
+    const bool merging=combining&&combine_subcsr_==3;
+    if(!merging)inventory.sort();
+    // sub1.c:8318: CursorSet ohne GetItem-Bildschirm (subscreenmode 8) und nicht in subcsr 3.
+    if(merging||pickup)return;
+    if(cursor_visible()){
+        // statusflg 0x10 ist das sichtbare Itemmodell (itemview.c:383/393), nativ `examining`.
+        if(!examining)++colorcount_;else{colorcount_=0;color00_=.6f;}
+        if(colorcount_>2){
+            colorcount_=0;const float step=combining?.07f:.05f; // parts_09b[1] sichtbar: 0.07, sonst 0.05
+            if(colorflg_){color00_+=step;if(color00_>1.f){color00_=1.f;colorflg_=false;}}
+            else{color00_-=step;if(color00_<.6f){color00_=.6f;colorflg_=true;}}
+        }
+    }else reset_cursor_color();
 }
 void StatusMenu::tick(Inventory& inventory){
     // fileview.c PageScroll: accelerating outgoing/incoming page, eight-frame
@@ -170,6 +262,9 @@ void StatusMenu::tick(Inventory& inventory){
         if(const auto sound=slide.take_sound();sound!=0xffffffff)slide_sound=sound;
         if(closed&&file_transition){file_transition=false;file_list=false;slide=StatusSlide{};file_scroll=3;file_x=708;file_move=10;file_wait=0;file_display_page=file_page=0;}else if(closed&&closing){active=false;closing=false;slide_open_=false;}
     }
+    // ItemCommand testmode 2 -> ItemCombination subcsr 2/3 (StatusMain-Dispatch,
+    // sub1.c:3416/4936). ItemSort und CursorSet folgen in sprite_on_off().
+    step_combine(inventory);
     if(commands&&command_frames<4)++command_frames;else if(erase_frames)--erase_frames;
     // StatusInit runs PulseInit on every opening; StatusMain then runs PulseMain once per frame.
     const auto condition=StatusPulse::condition(inventory.hp,(inventory.player_stflg()&0x280000u)!=0);
@@ -221,11 +316,15 @@ bool StatusMenu::input_unslid(MenuInput key,Inventory& inventory){
 bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     if(active&&message.active()){
         if(key==MenuInput::Open)return true;
-        if(key==MenuInput::Cancel){message=MessageDialog{};inspection.answer(inventory,false);pending_combine_first_=pending_combine_second_=0;finish_inspection(inventory);return true;}
+        // Frage 155 der Kombination: bhControlMessage beantwortet Auswahlfragen nur mit
+        // pad_ps 0x800 (message.c:233); Cancel schliesst sie nicht.
+        if(key==MenuInput::Cancel&&combine_question_)return true;
+        if(key==MenuInput::Cancel){message=MessageDialog{};inspection.answer(inventory,false);finish_inspection(inventory);return true;}
         if(message.choices()&&(key==MenuInput::Left||key==MenuInput::Up||key==MenuInput::Right||key==MenuInput::Down)){const int step=key==MenuInput::Left||key==MenuInput::Up?-1:1;message.selection=(message.selection+message.choices()+step)%message.choices();return true;}
         if(key==MenuInput::Confirm){const bool choice=message.choices(),yes=message.selection==0;message.confirm();if(!message.active()){
+            // ItemCombination subcsr 2 liest mes_sel (100 Ja / 101 Nein) erst im naechsten Statusframe (sub1.c:5726-5744).
+            if(combine_question_&&choice){combine_answer_=yes?100:101;return true;}
             inspection.answer(inventory,choice&&yes);opening_item=inspection.running()?inspection.source():0;opening_frame=0;
-            if(pending_combine_first_){const auto first=pending_combine_first_,second=pending_combine_second_;pending_combine_first_=pending_combine_second_=0;if(choice&&yes)combine(inventory,first,second);else feedback_sound=1;}
             finish_inspection(inventory);
         }}return true;
     }
@@ -250,15 +349,18 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
         if((key==MenuInput::Left&&file_page)||(key==MenuInput::Right&&file_page+1<file_pages())){file_scroll=key==MenuInput::Right?1:2;file_move=10;file_page+=key==MenuInput::Right?1:-1;feedback_sound=4;}
         return true;
     }
-    if(key==MenuInput::Open){if(examining)close_examine(inventory);active=!active;commands=examining=combining=false;nav=nav_pressed=false;nav_wait=0;selected=1;command=0;inspection=ItemInspection{};return true;}if(!active)return false;
-    if(key==MenuInput::Cancel){if(examining)close_examine(inventory);else if(commands)commands=false;else if(combining){combining=false;selected=combine_from;}else if(!nav){nav=true;maincsr=3;nav_wait=0;feedback_sound=0;}else if(!nav_wait)active=false;return true;} // CursorMove 0x1000 enters MainCommand (maincsr 3), MainCommand 0x1000 is StatusCancel
+    // ItemCombination liest das Pad nur in subcsr 1 (sub1.c:5301); subcsr 2/3 und der
+    // Frame, in dem subcsr 2 nach 1 zurueckfaellt, nehmen keine Eingabe an.
+    if(active&&combining&&(combine_subcsr_!=1||combine_settled_))return true;
+    if(key==MenuInput::Open){if(examining)close_examine(inventory);active=!active;commands=examining=false;end_combine();nav=nav_pressed=false;nav_wait=0;selected=1;command=0;inspection=ItemInspection{};return true;}if(!active)return false;
+    if(key==MenuInput::Cancel){if(examining)close_examine(inventory);else if(combining){end_combine();selected=combine_from;reset_cursor_color();} /* subcsr 1, 0x1000 (sub1.c:5546-5565): testmode 1 zurueck ins Befehlsfenster, listcsr_0 = listcsr_1, SE 0 */else if(commands)commands=false;else if(!nav){nav=true;maincsr=3;nav_wait=0;feedback_sound=0;}else if(!nav_wait)active=false;return true;} // CursorMove 0x1000 enters MainCommand (maincsr 3), MainCommand 0x1000 is StatusCancel
     if(nav){ // MainCommand testmode 1: the pad is ignored while the pressed button animates (wait)
         if(nav_wait||nav_pressed)return true;
         if(key==MenuInput::Left&&maincsr){--maincsr;feedback_sound=2;}else if(key==MenuInput::Right&&maincsr<3){++maincsr;feedback_sound=2;}
         else if(key==MenuInput::Confirm){nav_wait=4;nav_pressed=true;feedback_sound=3;}
         return true;}
     if(examining){if(key==MenuInput::Left)examine_yaw-=2048;if(key==MenuInput::Right)examine_yaw+=2048;if(key==MenuInput::Up)examine_pitch+=2048;if(key==MenuInput::Down)examine_pitch-=2048;if(key==MenuInput::Confirm)inspect(inventory);return true;}
-    if(commands){auto list=actions(inventory);if(list.empty()){commands=false;return true;}if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
+    if(commands&&!combining){auto list=actions(inventory);if(list.empty()){commands=false;return true;}if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
         const auto item=Inventory::id(inventory.slots()[selected]);
         if(command==0){if(itemdata[item].type&1){inventory.equip(selected);}else if(item==145)open_file(inventory,0,true);
             else if((itemdata[item].type&0x5f)==8){ // ItemCommand -> ItemUse -> Use_00; the status screen stays open
@@ -266,9 +368,9 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
                 if(result.message)show_message(result.message);if(result.pulse)pulse.begin_cure(result.condition,result.pulse);}
             else{use_item=item;active=false;}}
         else if(command==1){if(item==145)open_file(inventory,0,true);else{examining=true;inspection=ItemInspection{};const auto angle=inspection_default_angles(item);examine_pitch=angle[0];examine_yaw=angle[1];examine_roll=angle[2];}}
-        else if(command==2){combining=true;combine_from=selected;}else if(command==3){use_item=item;active=false;}
+        else if(command==2)begin_combine(inventory);else if(command==3){use_item=item;active=false;}
         else if(command==4&&toggle_shotgun_burst)toggle_shotgun_burst();
-        commands=false;
+        if(!combining)commands=false;
     }return true;}
     // sub1.c CursorMove: listcsr_0 = selected (pip index, 1 = equipment), listcsr_2 = grid cell.
     // ItemSort keeps wide items first; sakai is the pip index of the first narrow/empty entry.
@@ -282,8 +384,11 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
      else if(key==MenuInput::Left&&l2>2){if(l0<sakai){if(l0>2){l0--;l2-=2;}}else{l0--;l2--;}}
      selected=std::clamp(l0,1u,11u);
      while(selected>1&&grid_cell(inventory,selected)>max+1)--selected;} // host: a bag removed while open leaves no locked cell
-    if(key==MenuInput::Confirm){if(combining){const auto rule=inventory.combination_rule(selected,combine_from);
-        if(rule>=0&&(combidata[rule+2]&255)==6){pending_combine_first_=selected;pending_combine_second_=combine_from;show_message(155);}else combine(inventory,selected,combine_from);
+    if(key==MenuInput::Confirm){if(combining){
+        // subcsr 1, 0x800 (sub1.c:5450-5545): gleicher Platz oder keine Regel -> SE 1;
+        // sonst st->cmbitm und subcsr 2 ohne Klang. Combi_xx laeuft im naechsten Statusframe.
+        const int rule=selected!=combine_from?inventory.combination_rule(selected,combine_from):-1;
+        if(rule<0)feedback_sound=1;else{combine_rule_=rule;combine_subcsr_=2;}
     }else if(Inventory::id(inventory.slots()[selected])){commands=true;command=0;}}
     return true;
 }
@@ -588,23 +693,25 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         }
         // ItemSet, personal slot + the two-column normal inventory; large weapons span a row.
         unsigned cell=0;for(unsigned slot=1;slot<12;++slot){const auto id=Inventory::id(inv.slots()[slot]);const unsigned center=slot==1?4:5;const int x=(slot==1?528:460+int(cell&1)*68)+dx(center),y=(slot==1?48:128+int(cell/2)*48)+dy(center);
-            if(menu.combining&&slot==menu.combine_from){rectangle(image,x-1,y-1,(id&&(itemdata[id].type&0x100))?138:70,50,0xffd9ab47);rectangle(image,x+1,y+1,(id&&(itemdata[id].type&0x100))?134:66,46,0xff111f22);}
-            if(slot==menu.selected&&!menu.nav){rectangle(image,x-1,y-1,(id&&(itemdata[id].type&0x100))?138:70,50,0xff238699);rectangle(image,x+1,y+1,(id&&(itemdata[id].type&0x100))?134:66,46,0xff111f22);}
             icon(image,id,x,y);if(id){quantity(image,inv.slots()[slot],x,y);if(inv.slots()[0]==slot)ascii(image,"E",x+2,y+2,.6f,0xff50d090);}
             if(slot>1)cell+=id&&(itemdata[id].type&0x100)?2:1;if(cell>=inv.capacity())break;
         }
+        // parts_09b[0]/[1] (Cursor, Kombinationsquelle) aus parts_15 an cen_pos[5]; z 2 liegt
+        // vor den Itemsymbolen (ItemSet z 4). In ItemCombination subcsr 3 wandern sie (mpt).
+        for(const auto& c:menu.cursor_parts(inv)){if(!c.visible)continue;auto t=tables[15][c.anim];t.sx=c.sx;if(t.texid<0||unsigned(t.texid)>=menu_.size())continue;
+            blit(image,menu_[t.texid],int(c.x)+centers[5][0]+dx(5),int(c.y)+centers[5][1]+dy(5),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,tint({1.f,c.color,c.color,c.color}));}
         if(inv.slots()[0]){const auto wpn=inv.slots()[inv.slots()[0]];const auto id=Inventory::id(wpn);const int x=352+((itemdata[id].type&0x100)?24:58)+dx(3),y=48+dy(3);icon(image,id,x,y);quantity(image,wpn,x,y);} // original ArmsSet: BulletSet mode 0, digits at icon x and y+32
         const auto selected_id=menu.pickup?menu.pickup:Inventory::id(inv.slots()[menu.selected]);if(menu.nav&&!menu.files&&!menu.message.active())text(image,system_message(180-menu.maincsr),44+dx(6),342+dy(6),.95f); // MainCommand: bhSetMessage(1,180-maincsr)
         else if(selected_id&&!menu.files&&!menu.message.active()&&!(menu.pickup&&dialog.active()))text(image,read_message(messages_,4,menu.pickup?menu.pickup:inventory_name_id(inv.slots()[menu.selected])),44+dx(6),342+dy(6),.95f);
         if(menu.commands||menu.erase_frames){
             // cen_pos[11] slides 24 px per frame; 96 px is the fully opened window.
             const bool erasing=!menu.commands;const int slide=(4-int(erasing?menu.erase_frames:menu.command_frames))*24;
-            const unsigned command_item=erasing?menu.erase_item:selected_id;const unsigned cursor=erasing?menu.erase_command:menu.command;
+            // ItemCommand testmode 2: das Fenster bleibt mit den parts_06b der Quelle stehen (TrigerSet nur in testmode 0, sub1.c:4625).
+            const unsigned command_item=erasing?menu.erase_item:menu.combining?menu.combine_item():selected_id;const unsigned cursor=erasing?menu.erase_command:menu.command;
             const auto command_parts=item_command_parts(command_item,cursor,menu.shotgun_burst&&menu.shotgun_burst());
             for(const auto& p:command_parts){if(!(p.atr&0x20))continue;const auto& part=tables[p.parts_num][p.anim];const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;
                 for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]-96+(p.cen_no==11?slide:0)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
             }}
-        if(menu.combining)ascii(image,"Combine",44,400,.8f,0xff50c0ff);
         if((menu.examining||menu.pickup)&&selected_id&&selected_id<145){
             const auto source=menu.pickup?menu.pickup:menu.inspection.running()?menu.inspection.item():selected_id;
             const auto id=inspection_model_id(source);

@@ -219,44 +219,31 @@ def summarize(records):
 
 README_BEGIN = '<!-- port-status:begin -->'
 README_END = '<!-- port-status:end -->'
+PORT_STATUS = ROOT / 'docs/PORT_STATUS.md'
 
-# Kurzbeschreibung je Kategorie fuer die README-Tabelle (Bereichsname -> Text).
-README_NOTES = {
-    'Spieler/Kampf': 'Wandkollision, Kistenschieben, Waffen/Zielwahl; allgemeine Spieler-Work und weitere Zustandsroutinen offen.',
-    'Events/Skript': 'Originale Event-VM und gemeinsame Actor-Control-Fälle; weitere Befehle/Abläufe offen (Zahl unten).',
-    'Menü/Items/Text': 'Itemregeln, Dateiordner, Statusansichten; Statusmenü-Zustandsmaschine und Map offen.',
-    'Modelle/Animation': 'Gemeinsame Actor-Assets, Skinning und Gegner-Morph-Draw; Face/Lip, Shadow und Player-Morph offen.',
-    'Raum/Kamera/Tür': 'Raumwechsel, Eventkameras, Türsequenzen; weitere Originaldienste offen.',
-    'Gegner/KI': 'Eigenständiger Dispatcher recvx_enemy_control, en01-Schaden/-Tod/-Griff und Hundeangriffe; Rest-KI, weitere Gegner-IDs und Effektbindungen offen.',
-    'Audio': 'Host-Mixer mit einzelnen Originalbindungen; Original-Audiofunktionen nicht vollständig belegt.',
-    'Effekte': 'Einzelne Effekt-IDs; allgemeiner Effektlebenszyklus, Licht und viele IDs offen.',
-    'Ablauf/Speichern': 'Einzelne Ablaufpfade; Save-/Systemzustandsmaschinen größtenteils offen.',
-}
-
-def bar(value, width=10):
-    filled = round(width * value / 100.0)
-    return '█' * filled + '░' * (width - filled)
-
-def readme_block(groups, engine, opcode_done, opcode_total):
-    de = lambda v: f'{v:.1f}'.replace('.', ',')
+def readme_block_from_status(status):
+    lines = status.splitlines()
+    summary_index = next((i for i, line in enumerate(lines) if line.startswith('Expliziter Belegumfang:')), None)
+    events_index = next((i for i, line in enumerate(lines) if line.startswith('Event-Befehle (bhScenarioJmpT):')), None)
+    table_index = next((i for i, line in enumerate(lines) if line.startswith('| Bereich | Mechanismen | Belegumfang |')), None)
+    if summary_index is None or events_index is None or table_index is None:
+        raise SystemExit('PORT_STATUS: Zusammenfassung oder Event-Befehlszeile nicht lesbar')
+    table = [lines[table_index]]
+    for line in lines[table_index + 1:]:
+        if not line.startswith('|'):
+            break
+        table.append(line)
+    if len(table) < 3:
+        raise SystemExit('PORT_STATUS: Fortschrittstabelle fehlt oder ist leer')
     lines = [README_BEGIN,
-             '<!-- Automatisch erzeugt: python3 tools/port_check.py --readme README.md -->',
+             '<!-- Fortschrittstabelle und Kennzahlen direkt aus docs/PORT_STATUS.md synchronisiert. -->',
              '',
-             '| Kategorie | Belegumfang | Gewichtet | Voll belegt | Mechanismen | Stand |',
-             '|---|---|---:|---:|---:|---|']
-    for label, g in sorted(((l, g) for l, g in groups.items() if l != PLATFORM and g['weight']),
-                           key=lambda x: -percent(x[1]['weighted'], x[1]['weight'])):
-        w = percent(g['weighted'], g['weight'])
-        lines.append(f'| {label} | `{bar(w)}` | {de(w)} % | {de(percent(g["strict"], g["weight"]))} % | '
-                     f'{g["done_functions"]}/{g["functions"]} | {README_NOTES.get(label, "")} |')
-    w = percent(engine['weighted'], engine['weight'])
-    lines.append(f'| **Expliziter nativer Belegumfang** | `{bar(w)}` | **{de(w)} %** | **{de(percent(engine["strict"], engine["weight"]))} %** | '
-                 f'**{engine["done_functions"]}/{engine["functions"]}** | '
-                 f'{opcode_done}/{opcode_total} Event-Befehle gebunden; kein Gesamtfortschritt. |')
-    lines += ['', README_END]
+             lines[summary_index], '', lines[events_index], '', *table, '',
+             'Nur dokumentierter Belegumfang, kein Gesamtfortschritt des Spiels.', README_END]
     return '\n'.join(lines)
 
-def update_readme(path, block):
+def update_readme(path, status):
+    block = readme_block_from_status(status)
     text = path.read_text()
     pattern = re.compile(re.escape(README_BEGIN) + r'.*?' + re.escape(README_END), re.S)
     if not pattern.search(text):
@@ -271,7 +258,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--json', type=Path, help='vollständige Funktionsliste als JSON schreiben')
     parser.add_argument('--markdown', type=Path, help='Bericht als Markdown schreiben (z. B. docs/PORT_STATUS.md)')
-    parser.add_argument('--readme', type=Path, help='Prozenttabelle zwischen den port-status-Markern in dieser README aktualisieren')
+    parser.add_argument('--readme', type=Path, help='Fortschrittstabelle aus docs/PORT_STATUS.md synchronisieren')
     parser.add_argument('--top', type=int, default=15, help='größte fehlende Funktionen anzeigen')
     parser.add_argument('--domain', help='nur diesen Bereich auflisten (Teilstring)')
     parser.add_argument('--fail-under', type=float, help='Exit 1, wenn der gewichtete Engine-Wert darunter liegt')
@@ -333,7 +320,8 @@ def main():
     if args.markdown:
         args.markdown.write_text(report + '\n\nErzeugt mit `python3 tools/port_check.py --markdown ' + str(args.markdown) + '`.\n')
     if args.readme:
-        update_readme(args.readme, readme_block(groups, engine, opcode_done, opcode_total))
+        status = report if args.markdown and args.markdown.resolve() == PORT_STATUS.resolve() else PORT_STATUS.read_text()
+        update_readme(args.readme, status)
     if args.json:
         args.json.write_text(json.dumps({'scope': 'explicit_native_evidence_only',
                                          'engine_weighted': percent(engine['weighted'], engine['weight']),

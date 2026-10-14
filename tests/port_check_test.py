@@ -29,6 +29,15 @@ class PortCheckTest(unittest.TestCase):
         self.assertFalse(any(record['source'] == 'forbidden' for record in records))
         self.assertTrue(any(record['status'] == 'unbestaetigt' for record in records))
 
+    def test_readme_progress_is_sourced_from_port_status(self):
+        status = (ROOT / 'docs/PORT_STATUS.md').read_text()
+        block = port_check.readme_block_from_status(status)
+        readme = (ROOT / 'README.md').read_text()
+        match = port_check.re.search(port_check.re.escape(port_check.README_BEGIN) + r'.*?' +
+                                     port_check.re.escape(port_check.README_END), readme, port_check.re.S)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(0), block)
+
 
 if __name__ == '__main__':
     unittest.main()

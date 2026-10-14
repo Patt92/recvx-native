@@ -69,6 +69,9 @@ public:
     NJS_POINT3 bind_position(std::size_t node)const{return bind_pose_.at(node).position;}
     // bhMlbBinRealize: the initial mlwP->objP pos/ang and evalflags of every physical node.
     const std::vector<ModelPose>& bind_pose()const{return bind_pose_;}
+    // NJS_CNK_OBJECT child/sibling of a physical node; -1 = NULL.
+    std::int32_t child(std::size_t node)const{return node<children_.size()?children_[node]:-1;}
+    std::int32_t sibling(std::size_t node)const{return node<siblings_.size()?siblings_[node]:-1;}
     std::vector<std::uint32_t> node_evalflags()const;
     // MdlPut.c:262 bhCalcTree over a native objP pose below `root`. A node with
     // owP flg 0x1 keeps the matrix the caller passes in `owp_mtx` (njSetMatrix)
@@ -80,7 +83,14 @@ public:
     void tree_window(const std::vector<ModelPose>& pose,const NJS_MATRIX& root,unsigned first,const std::vector<std::uint32_t>& owp_flg,std::vector<BoneMatrix>& owp_mtx)const;
     Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr,const MorphSource* morph=nullptr) const;
     Scene sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& matrices,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out=nullptr,const FaceParameter* face_param=nullptr,const std::vector<std::uint8_t>* live_model=nullptr,const MorphSource* morph=nullptr)const;
+    // bhEff136: npCalcSkin plus a direct model draw against committed physical owP matrices.
+    // Does not sample motion, traverse a hidden ancestor, or apply a morph draw of another model.
+    Scene sample_object_work(unsigned object,const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& matrices,const std::vector<std::uint32_t>& flags,const std::vector<std::uint8_t>* live_model=nullptr,bool skin_fm=false)const;
     const std::vector<std::uint8_t>& encoded_model()const{return model_;}
+    // The model stream as the original holds it in memory after load: npSkinConvert
+    // has rewritten every skinned vertex into its influencing bone's bind origin.
+    // A writable copy for routines that edit vlist data in place (bhEne13_ScaleModel).
+    std::vector<std::uint8_t> live_stream()const;
     const std::vector<std::uint8_t>& encoded_skin()const{return encoded_skin_;}
     const std::vector<std::vector<std::uint8_t>>& encoded_motions()const{return encoded_motions_;}
 private:

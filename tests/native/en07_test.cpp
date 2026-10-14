@@ -524,11 +524,14 @@ void br00_back_attack(const RECVX_ENEMY_SERVICES& sv) {
     require(s->holder == 0u, "en07.c:352 exp1[6] = sys->enow");
 }
 
-/* en07.c:341/346: Sperre durch Waffe, Sichtlinie, Abklingzeit, cb_flg 0x4. */
+/* en07.c:341/346: Sperre durch Waffe, Sichtlinie, Abklingzeit, cb_flg 0x4.
+   Fall 4 ist der Host-Schalter "Gegner-Angriff aus" (debug_attack_disabled)
+   im selben Tor :341 — kein Originalfeld, sperrt nur den Angriffsbeginn. */
 void br00_gates(const RECVX_ENEMY_SERVICES& sv) {
-    const char* names[4] = {"plp->wpnr_no == 1", "EXP0_UC(0x34) == 0",
-                            "exp1[7] > 0", "sys->cb_flg & 0x4"};
-    for (int k = 0; k < 4; ++k) {
+    const char* names[5] = {"plp->wpnr_no == 1", "EXP0_UC(0x34) == 0",
+                            "exp1[7] > 0", "sys->cb_flg & 0x4",
+                            "Host debug_attack_disabled"};
+    for (int k = 0; k < 5; ++k) {
         reset();
         random_queue = {rnd(0.0)};
         RECVX_ENEMY_WORK w;
@@ -539,11 +542,19 @@ void br00_gates(const RECVX_ENEMY_SERVICES& sv) {
         if (k == 1) line_hit = 1, line_to = {0, 0, 0};  /* Sicht blockiert */
         if (k == 2) s->cooldown = 1;
         if (k == 3) sys_flags[0] = 0x4u;
+        if (k == 4) ply.debug_attack_disabled = 1;
         random_queue.clear(); random_cursor = 0; random_queue = {rnd(0.25)};
         recvx_en07(&w);
         if (k == 1) require(e->sight == 0u, "en07.c:1843 Sichtlinie nicht ausgewertet");
         require(w.mode0 != 2u,
                 (std::string("en07.c:341/346 Angriff trotz Sperre ") + names[k]).c_str());
+        if (k == 4) {
+            /* Nur der Angriff faellt weg: Sicht wird weiter ausgewertet, die
+               Spielerflags bleiben unberuehrt (en07.c:358/368 nicht erreicht). */
+            require(e->sight == 1u, "Host-Schalter darf die Suche en07.c:1837 nicht sperren");
+            require(s->chain == 0u && (ply.flg & 0x10004u) == 0u,
+                    "Host-Schalter: Kette/Spielerflags en07.c:357-369 trotzdem gesetzt");
+        }
     }
 }
 

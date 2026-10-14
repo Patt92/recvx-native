@@ -18,6 +18,7 @@ public:
     Inventory();
     std::array<std::uint32_t,384> items{};
     unsigned player=0,game_mode=0;
+    std::int32_t save_ct=0; // sys->save_ct (mcWriteStartSaveFile 0x271A50 increments it, max 99)
     int hp=160,max_hp=160;
     std::uint32_t play_time=0; // sync.c stv_tm, 60-Hz VSync units, room-independent.
     bool poisoned=false,side_pack=false,infected=false;
@@ -54,6 +55,22 @@ public:
     // trigger (cb_flg 0x200), `condition` the status screen's st->hp/st->abc.
     ItemUseResult use_item(unsigned slot,const std::array<unsigned,4>* parameters,unsigned& control,unsigned stage,unsigned room,unsigned condition,bool message_active=false);
     int combination_rule(unsigned first,unsigned second)const;
+    // sub1.c ItemCombination subcsr 2 (sub1.c:5578-5933): ein Combi_xx-Schritt
+    // auf pip für die Regel st->cmbitm (`rule`, aus combination_rule), `first`
+    // = listcsr_0, `second` = listcsr_1. Schreibt pip sofort (wie das Original
+    // vor der Verschmelzanimation) und liefert das nachbearbeitete ok
+    // (1/2/3 gelungen -> subcsr 3, 4 voll -> subcsr 1, 5 nichts -> subcsr 1),
+    // movedir und die Meldung (156 aus Combi_00). Klasse 6 ist hier Combi_03,
+    // also die Ja-Antwort auf Frage 155; die Frage stellt der Statusbildschirm.
+    struct CombineResult {unsigned ok=0;bool movedir=false;unsigned message=0;};
+    CombineResult combine_items(int rule,unsigned first,unsigned second,bool message_active=false);
+    // sub1.c:5963-5966, Ende von subcsr 3: ok 1 und pip[0] hinter einem der
+    // beiden Cursor senkt pip[0] um eins. Kein ItemSort (das folgt im Statusframe).
+    void combine_finish(unsigned ok,unsigned first,unsigned second);
+    // Ganzer Ablauf ohne Bildschirm: combine_items, combine_finish und das
+    // ItemSort des nächsten Statusframes (sub1.c:8296). `result_slot` ist der
+    // Original-listcsr_0 danach (movedir 0 -> listcsr_1, sub1.c:5980-5984);
+    // er folgt dem Eintrag beim Sortieren nicht, wie im Original.
     bool combine(unsigned first,unsigned second,unsigned* message=nullptr,unsigned* result_slot=nullptr);
     bool transform(unsigned slot,unsigned expected,unsigned replacement);
     bool deposit(unsigned slot,unsigned box=64);
@@ -76,6 +93,12 @@ public:
     bool unlimited_attack=false;
     // sub1.c sakai: first slot behind the wide items (menu cursor boundary).
     unsigned wide_boundary()const;
+    // sub1.c ItemSort, as called once per status-screen frame from SpriteOnOff
+    // (sub1.c:8296, the only per-frame original caller; the other two call sites
+    // are EraseItem and bhSearchBullet and are reproduced inside erase()/reload()).
+    // GetItem, ItemUse, Combi_xx and ItemBoxChange do not sort; their gaps and
+    // wide-item order are closed by this per-frame call (StatusMenu::sprite_on_off).
+    void sort();
     // Event-Inventarmutationen (event.c, Opcodes 0x31/0xb2/0xbf/0xc1/0xc2/
     // 0xc7/0xc9). Sie wirken direkt auf sys->itm; ply_wno ist der einzige
     // zusätzliche Zustand (Waffennummer des Partners, bhItemGetGet Item 34).
@@ -87,10 +110,23 @@ public:
     void script_item_change(unsigned item,unsigned replacement);           // bhPlItemChangeM
     void script_item_amount(unsigned item,unsigned amount);                // bhPlItemTamaSet
     std::array<std::uint8_t,4> partner_weapon{};                           // sys->ply_wno
+    // sys->ply_hp[4] / sys->ply_stflg[4] default to the AllItemInit values
+    // (system.c:483-489: hp 160/320 by gm_mode, stflg 0x40000000). The live
+    // player keeps its state in hp/player_stflg(); these arrays hold the other
+    // players' state across a bhPlayerChangeSet (room.c:1022-1031
+    // bhPushGameData, system.c:1729-1747 bhFinishRoom, player.c:993-996
+    // bhResetPlayer).
+    std::array<int,4> ply_hp{160,160,160,160};
+    std::array<unsigned,4> ply_stflg{0x40000000u,0x40000000u,0x40000000u,0x40000000u};
+    // system.c:1729-1776 bhFinishRoom + bhResetPlayer: store the outgoing player
+    // work under the old ply_id, make `target` the active player and restore that
+    // player's persistent state. The pip bank (slots()) and the derived weapon
+    // follow from player*16 (sys->itm[ply_id*16]). Returns the previous ply_id.
+    unsigned switch_player(unsigned target);
 private:
     // Original ItemSort over pip[2..11]: wide items first, then the rest; the
     // equipped index pip[0] is left unchanged, exactly as in the original.
-    void compact(unsigned* tracked_slot=nullptr);
+    void compact();
     // WeaponSet: `previous` is plp->wpnr_no before this mutation. Callers read
     // it with weapon() before touching any slot, because the original calls
     // WeaponSet after a combination has already swapped the entries. No second

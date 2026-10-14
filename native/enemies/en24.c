@@ -307,14 +307,10 @@ void recvx_en24(RECVX_ENEMY_WORK* w)
             if (3 < w->frm_no) {
                 w->frm_no = 0;
             }
-            /* mdl_no ist nativ die Auswahl der Modellwurzel; dass der
-               Modellsatz dabei DEM VERKNUEPFTEN WORK gehoert (en24.c:107
-               `&ep->mdl[...]`, nicht `&epw->mdl[...]`), hat im gemeinsamen
-               Vertrag keine Entsprechung. Der Index wird gesetzt, der fremde
-               Besitzer des Satzes namentlich gemeldet. */
-            w->mdl_no = (uint32_t)(w->frm_no + 2);
-            en24_gap(w, "mlwP = &lkwkp->mdl[frm_no+2] (en24.c:107): "
-                        "Modellsatz des verknuepften Works fehlt im Vertrag");
+            /* en24.c:107 `epw->mlwP = &ep->mdl[frm_no + 2]`: der Modellsatz
+               gehoert dem VERKNUEPFTEN Work. */
+            if (!sv || !sv->link_model || !sv->link_model(w, ep, (uint32_t)(w->frm_no + 2)))
+                en24_gap(w, "mlwP = &lkwkp->mdl[frm_no+2] (en24.c:107)");
             w->frm_no++;
         }
     }

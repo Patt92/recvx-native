@@ -11,7 +11,9 @@
 #include "chunk_blend.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
+#include "core_random.h"
 #include "weapon_tables.h"
+#include "enemies/en03_lib.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -633,6 +635,145 @@ void step_eff194(EffectSprite& s,const EffectContext&,bool&){
     if(!request_armed(s))return;
     plain_request(s,195,(s.type-1)%3,0);
     s.type=0;s.mode1=0;
+}
+// effsub5.c:3036 bhEff229 / :3117 bhDrawWeaponEffect2 — Muendungsfeuer der Doppelwaffe
+// (Texturgruppe 3). Im Gelenkraum des verlinkten Werks: ein zentrales Quad und zwei Balken
+// (Blend 8/10), danach vier oder sechs um Z gedrehte Balkenpaare (Blend 8/6). mdlver waehlt
+// die UV-Bank, ani = ct0-1 die Zeile; nach flr_no Passes endet der Satz.
+void step_eff229(EffectSprite& s,const EffectContext&,bool& queued){
+    if(s.mode0==0){
+        s.tex_id=3;s.tv[0].col=0xffffffffu;
+        s.bl_src=8;s.bl_dst=10;s.ani_ct=0;s.ct0=0;s.ct1=0;s.mode0=1;
+    }
+    if(s.mode0==2){s.flg=0;return;}
+    s.spd=s.ct0==1?1.0f:0.8f;
+    ++s.ct0;
+    if(s.ct0>=s.flr_no)s.mode0=2;
+    const int ani=s.ct0-1;
+    if(ani<0||ani>2){report_gap("bhEff229: ani ausserhalb akpal[2][3]");s.flg=0;return;}
+    if(s.mdlver>=2)report_gap("bhEff229: mdlver ausserhalb uvinfo_t01[2]");
+    if(!s.link_matrix){report_gap("bhEff229: lkwkp->mlwP->owP[lkono] ohne Link");s.flg=0;return;}
+    NJS_MATRIX base;std::copy(s.link_matrix,s.link_matrix+16,base);
+    njTranslate(&base,s.lox,s.loy,s.loz);
+    njRotateXYZ(&base,s.ax,s.ay,s.az);
+    const float off=s.mdlver!=0?0.2f:0.0f;
+    const EffectUv* bank=eff229_t01[s.mdlver<2?s.mdlver:0];
+    auto emit=[&](int zrot,const NJS_POINT3* p,const float* u,const float* v,unsigned frame,unsigned src,unsigned dst){
+        EffectSprite::Quad q;q.world_space=true;q.textured=true;q.category=3;q.frame=frame;q.pn=4;q.source=src;q.destination=dst;
+        NJS_MATRIX rot;njUnitMatrix(&rot);if(zrot)njRotateZ(&rot,zrot);
+        for(int i=0;i<4;++i){
+            const NJS_POINT3 in=p[i];NJS_POINT3 r;njCalcVector(&rot,(NJS_VECTOR*)&in,(NJS_VECTOR*)&r);
+            NJS_POINT3 sc{r.x*s.sx,r.y*s.sx,r.z*s.sz};
+            NJS_POINT3 w;njCalcPoint(&base,&sc,&w);
+            q.vertices[i]={w.x,w.y,w.z,u[i],v[i],0xffffffffu};
+        }
+        s.quads.push_back(q);
+    };
+    { /* Quad 1: zentrale Flaeche z=0.3. */
+        const EffectUv& uv=bank[ani*3+0];
+        const NJS_POINT3 p[4]={{-0.25f-off,-0.25f-off,0.3f},{-0.25f-off,0.25f+off,0.3f},{0.25f+off,-0.25f-off,0.3f},{0.25f+off,0.25f+off,0.3f}};
+        const float u[4]={uv.u,uv.u+uv.xs,uv.u,uv.u+uv.xs},v[4]={uv.v,uv.v,uv.v+uv.ys,uv.v+uv.ys};
+        emit(0,p,u,v,eff229_akpal[0][ani],8,10);
+    }
+    { /* Quad 2/3: Waagerecht-/Senkrechtbalken, gemeinsame UV-Zeile (Quad 3 erbt sie). */
+        const EffectUv& uv=bank[ani*3+1];
+        const float u[4]={uv.u+uv.xs,uv.u,uv.u+uv.xs,uv.u},v[4]={uv.v,uv.v,uv.v+uv.ys,uv.v+uv.ys};
+        const NJS_POINT3 p2[4]={{-0.45f-off,0,0},{-0.45f-off,0,1.5f},{0.45f+off,0,0},{0.45f+off,0,1.5f}};
+        emit(0,p2,u,v,eff229_akpal[0][ani],8,10);
+        const NJS_POINT3 p3[4]={{0,-0.45f-off,0},{0,-0.45f-off,1.5f},{0,0.45f+off,0},{0,0.45f+off,1.5f}};
+        emit(0,p3,u,v,eff229_akpal[0][ani],8,10);
+    }
+    { /* Quad 4/5: Balkenpaare, vier- oder sechsmal um Z gedreht. */
+        const EffectUv& uv=bank[ani*3+2];
+        const unsigned frame=eff229_akpal[1][ani];
+        const NJS_POINT3 pa[4]={{-1.0f-off,-0.2f-off,0.3f},{-1.0f-off,0.2f+off,0.3f},{0,-0.2f-off,0},{0,0.2f+off,0}};
+        const NJS_POINT3 pb[4]={{-1.0f-off,0,0.1f-off},{-1.0f-off,0,0.5f+off},{0,0,-0.2f-off},{0,0,0.2f+off}};
+        const float u[4]={uv.u,uv.u+uv.xs,uv.u,uv.u+uv.xs},v[4]={uv.v,uv.v,uv.v+uv.ys,uv.v+uv.ys};
+        const int turns=(s.type==2||s.mdlver!=0)?4:6;
+        const int step=(s.type==2||s.mdlver!=0)?16384:10922;
+        for(int i=0;i<turns;++i){emit(step*i,pa,u,v,frame,8,6);emit(step*i,pb,u,v,frame,8,6);}
+    }
+    s.fnc_exit_src=8;s.fnc_exit_dst=6;
+    queue_custom(s);
+    queued=true;
+}
+// effsub4.c:654 bhEff_Sub352 (+ :600 bhEff_SetSpriteAnime / :586 bhEff_SetSprite) —
+// Flamme am verlinkten Werk, Erzeuger das Gegner-Feuer bhEne_SetSanEffect
+// (zonzon.c:939: zn=len, ct3=time, shp_ct=Bodenhoehe). Tore: sys->pt_flg & 0x2 und
+// !(lkwkp->stflg & 0x1000000). mode0 0..3: sxb waechst (yn = Start/8) bzw. schrumpft
+// (x0.96); UV-Umlauf anim00_tbl; die Weltlage ist Werk-Gelenk * (ofx,ofy,ofz), um
+// cam.v * zn zur Kamera verschoben, als lokale lox/loy/loz gespeichert. Die
+// Abschlusspruefung vergleicht shp_ct mit op->mtx[13] (Y der Zeichenmatrix des
+// vorherigen Bildes, nativ mtx_world_y).
+void step_eff352(EffectSprite& s,const EffectContext& c,bool& queued){
+    if(!(c.pt_flg&0x2u))return;
+    // effsub4.c:707: mode0 0 initialisiert auch bei gesetztem lkwkp->stflg 0x1000000.
+    if(s.mode0!=0&&s.lkwkp&&(static_cast<const RECVX_ENEMY_WORK*>(s.lkwkp)->stflg&0x1000000u))return;
+    switch(s.mode0){
+    case 0:
+        s.bl_src=8;s.bl_dst=10;
+        s.flg|=0x4180000u;
+        s.tex_id=8;s.ani_ct=0;s.spd=1.0f;
+        s.tv[0]={-1.0f,-1.5f,0,0,0,0};s.tv[1]={1.0f,-1.5f,0,0,0,0};s.tv[2]={-1.0f,0.5f,0,0,0,0};s.tv[3]={1.0f,0.5f,0,0,0,0};
+        if(s.type==0||s.type==2){s.tv[0].col=0xC0FFFFFFu;s.ct1=0;}
+        else{s.tv[0].col=0xB4FFFFFFu;s.ct1=5;s.sxb*=1.2f;s.syb*=1.2f;s.tv[0].z=s.tv[1].z=s.tv[2].z=s.tv[3].z=0.05f;}
+        s.tv[1].col=s.tv[2].col=s.tv[3].col=s.tv[0].col;
+        s.ct0=0;s.ct2=0;s.ct3=0;
+        s.ofx=s.lox;s.ofy=s.loy;s.ofz=s.loz;
+        s.xn=s.sxb;s.yn=s.sxb/8.0f;
+        s.sxb=s.syb=0.0f;
+        s.mode1=0;s.mode2=0;
+        ++s.mode0;
+    [[fallthrough]];
+    case 1:
+        --s.ct3;
+        if(s.ct3>=0)break;
+        if(s.type>=2)s.ct3=recvx_core_random_next()%60+30;
+        s.mode2=1;
+        ++s.mode0;
+    [[fallthrough]];
+    case 2:
+        s.sxb+=s.yn;
+        if(s.sxb>s.xn)s.sxb=s.xn;
+        s.syb=s.sxb;
+        if(s.type>=2&&--s.ct3<0){s.ct3=40;++s.mode0;}
+        break;
+    case 3:
+        s.sxb*=0.96f;s.syb=s.sxb;
+        if(--s.ct3<0){s.flg=0;return;}
+        break;
+    default:break;
+    }
+    if(s.flg!=0&&s.ct2!=0&&s.shp_ct>s.mtx_world_y){s.flg=0;return;}
+    if(s.mode2==0)return;
+    // bhEff_SetSpriteAnime(op, anim00_tbl, uvinfo, 0).
+    if(s.ct1<0||s.ct1>=11){report_gap("bhEff352: ct1 ausserhalb anim00_tbl[11]");s.flg=0;return;}
+    if(eff352_anim[s.ct1][0]==-1){s.flg=0;return;}
+    if(eff352_anim[s.ct1][0]==-2)s.ct1=eff352_anim[s.ct1][1];
+    const short timer=eff352_anim[s.ct1][1],ptrn=eff352_anim[s.ct1][0];
+    ++s.ct0;
+    if(timer==s.ct0){s.ct0=0;if(s.spd!=0)++s.ct1;}
+    if(ptrn<100){
+        if(ptrn<0||ptrn>=10){report_gap("bhEff352: UV-Zeile ausserhalb uvinfo[10]");s.flg=0;return;}
+        const EffectUv& uv=eff352_uv[ptrn];
+        s.sx=s.sxb*(uv.xs/100.0f);
+        s.sy=s.syb*(uv.ys/100.0f);
+        s.tv[0].u=uv.u/255.0f;s.tv[0].v=uv.v/255.0f;
+        s.tv[3].u=((uv.u+uv.xs)-1.0f)/255.0f;s.tv[3].v=((uv.v+uv.ys)-1.0f)/255.0f;
+        s.tv[1].u=s.tv[3].u;s.tv[1].v=s.tv[0].v;
+        s.tv[2].u=s.tv[0].u;s.tv[2].v=s.tv[3].v;
+        if(s.flg!=0)queued=true;
+    }
+    if(!s.link_matrix){report_gap("bhEff352: lkwkp->mlwP->owP[lkono] ohne Link");s.flg=0;return;}
+    NJS_MATRIX owk;std::copy(s.link_matrix,s.link_matrix+16,owk);
+    NJS_POINT3 p2;{NJS_POINT3 o{s.ofx,s.ofy,s.ofz};njCalcPoint(&owk,&o,&p2);}
+    NJS_POINT3 p1{p2.x-c.camera_view.x*s.zn-owk[12],p2.y-c.camera_view.y*s.zn-owk[13],p2.z-c.camera_view.z*s.zn-owk[14]};
+    NJS_MATRIX inv;std::copy(owk,owk+16,inv);njInvertMatrix(&inv);
+    NJS_POINT3 local;njCalcVector(&inv,&p1,&local);
+    s.lox=local.x;s.loy=local.y;s.loz=local.z;
+    // op->mtx[13] der Zeichenmatrix = Y des Zeichenursprungs owk * T(lox,loy,loz).
+    NJS_POINT3 world;njCalcPoint(&owk,&local,&world);
+    s.mtx_world_y=world.y;s.ct2=1;
 }
 // ======================= effsub1.c =======================
 // Gemeinsame Zeichenform der effsub1-Sprites: UV-Zeile uebernehmen (ohne effset-Groesse/-Farbe).
@@ -1829,22 +1970,30 @@ void step_eff237(EffectSprite& s,const EffectContext&,bool& queued){
     uv_cell(s,eff237_cells[s.ct0],63,63);queued=true;
 }
 // effsub5.c bhEff238 — Erzeuger der Funken 239: ein Kind je Ausloesung mit Start-
-// geschwindigkeit (0,0,-sz/4*1.2/10) um (ay,ax) (bei verlinktem Erzeuger im Drehanteil
-// der Linkmatrix, hier Luecke); type 0xFF einmalig, sonst alle type Passes.
+// geschwindigkeit (0,0,-sz/4*1.2/10) um (ay,ax), bei verlinktem Erzeuger (flg 0x80 aus
+// bhSetEffectLink) zusaetzlich im Drehanteil der Linkmatrix; type 0xFF einmalig, sonst
+// alle type Passes.
 void step_eff238(EffectSprite& s,const EffectContext&,bool&){
     if(s.type==0&&s.mode1!=0)s.type=s.mode1;
     if(s.type==0){s.mode0=0;s.flg|=0x1000000u;return;}
     s.flg&=~0x1000000u;
     if(s.mode0==0){s.ct0=0;s.mode0=1;}
     if(s.mode0==1){
+        const bool linked=(s.flg&0x80u)&&!(s.flg&0x200000u);
+        // Ohne die Linkmatrix gibt es keine belegte Startrichtung: Luecke, kein Kind.
+        if(linked&&!s.link_matrix){report_gap("bhEff238: lkwkp->mlwP->owP[lkono].mtx ohne nativen Knoten");return;}
         auto& r=request_template();
         r.flg=1;r.id=239;r.type=0;r.flr_no=0;r.position={s.px,s.py,s.pz};r.mdlver=0;
         r.scale={s.sx,s.sy,1.0f};r.ax=s.ax;r.ay=s.ay;
         submit_template(0);
-        if((s.flg&0x80u)&&!(s.flg&0x200000u))throw std::runtime_error("bhEff238 on a linked work needs the link node's rotation (not bound)");
-        Basis b;b.y(s.ay);b.x(s.ax);
+        NJS_POINT3 v{0,0,float((((double)-s.sz/4.0)*1.2)/10.0)};
         auto& child=last_request();child.has_velocity=true;
-        child.velocity=b.apply({0,0,float((((double)-s.sz/4.0)*1.2)/10.0)});
+        if(linked){
+            // effsub5.c:4177: lkwkp->mlwP->owP[lkono].mtx, njUnitTransPortion, dann
+            // njRotateY(ay)/njRotateX(ax) und njCalcPoint (ohne Verschiebung).
+            NJS_MATRIX m;std::copy(s.link_matrix,s.link_matrix+16,m);njUnitTransPortion(&m);njRotateY(&m,s.ay);njRotateX(&m,s.ax);
+            NJS_POINT3 out;njCalcPoint(&m,&v,&out);child.velocity=out;
+        }else{Basis b;b.y(s.ay);b.x(s.ax);child.velocity=b.apply(v);}
         if(s.type==0xff){s.type=0;s.mode0=0;return;}
         s.mode0=2;return;
     }
@@ -2034,10 +2183,17 @@ void step_eff248(EffectSprite& s,const EffectContext&,bool& queued){
         set_corners(s,{-0.21875f,-0.21875f,0},{0.21875f,-0.21875f,0},{-0.21875f,0.21875f,0},{0.21875f,0.21875f,0});
         s.xn=0;s.yn=0;s.zn=s.sz/10.0f;
         s.zn+=s.aoz*(s.zn*effect_random());
-        if((parent.flg&0x80u)&&!(parent.flg&0x200000u))throw std::runtime_error("bhEff248 under a linked parent needs the parent's link node matrix (not bound)");
-        Basis b;b.xyz(s.ax,s.ay,0);b.z(random_angle(65536.0f));
-        {const float a=effect_random();const float c=effect_random();b.x(Angle(512.0f*(a-c)));}
-        set_velocity(s,b.apply(velocity_of(s)));
+        // effsub5.c:5374: unter einem verlinkten Elternsatz beginnt die Drehung mit
+        // dessen lkwkp->mlwP->owP[lkono].mtx (njCalcVector, die Verschiebung faellt weg).
+        NJS_MATRIX m;njUnitMatrix(&m);
+        if((parent.flg&0x80u)&&!(parent.flg&0x200000u)){
+            if(parent.link_kind<0){report_gap("bhEff248: Elternsatz mit flg 0x80 ohne lkwkp");s.flg=0;return;}
+            if(!find_link_node_matrix(unsigned(parent.link_kind),parent.link_index,unsigned(parent.lkono),m)){report_gap("bhEff248: lkwkp->mlwP->owP[lkono].mtx des Elternsatzes ohne nativen Knoten");s.flg=0;return;}
+        }
+        njRotateXYZ(&m,s.ax,s.ay,0);
+        njRotateZ(&m,random_angle(65536.0f));
+        {const float a=effect_random();const float c=effect_random();njRotateX(&m,Angle(512.0f*(a-c)));}
+        NJS_POINT3 v=velocity_of(s),out;njCalcVector(&m,&v,&out);set_velocity(s,out);
         s.mode0=1;
     }else{
         if(++s.ct0>=16){s.flg=0;return;}
@@ -2100,7 +2256,12 @@ void step_eff148(EffectSprite& s,const EffectContext&,bool& queued){
     switch(s.mode1){
     case 0:
         s.flg&=~0x80u;
-        if(s.lkwkp)throw std::runtime_error("bhEff148 with lkwkp needs the linked work's node matrix (not bound)");
+        // op->lkwkp bleibt gesetzt, auch nachdem flg 0x80 fort ist: die Lage folgt dem
+        // Gelenk weiter ueber owP[lkono].mtx * lox, bis mode1 den Fall ausloest.
+        if(s.link_kind>=0){
+            if(!s.link_matrix){report_gap("bhEff148: lkwkp->mlwP->owP[lkono].mtx ohne nativen Knoten");}
+            else{NJS_MATRIX m;std::copy(s.link_matrix,s.link_matrix+16,m);NJS_POINT3 lo{s.lox,s.loy,s.loz},p;njCalcPoint(&m,&lo,&p);s.px=p.x;s.py=p.y;s.pz=p.z;}
+        }
         s.ofy=s.py;break;
     case 1:
         if(s.yn>-2.0f)s.yn-=0.1f;
@@ -3309,6 +3470,73 @@ void step_eff219(EffectSprite& s,const EffectContext& c,bool&){
     queue_custom(s);
     if(drawing(c))draw_snow_rect(s,snow);
 }
+// effsub1b.c:621 bhEff135 — Nachbildgeber an einem Gelenk: unsichtbar; beim ersten
+// Lauf im Raum belegt er sys->ef_flg 0x4 und den 2-MB-Puffer zan_memp. Mit Auftrag
+// (mode1) und gesetztem Link (flg 0x80 aus bhSetEffectLink) reserviert er acht
+// Schnappschussplaetze der Groesse ((vlist[1] >> 16) << 5) + 72, auf 64 aufgerundet
+// (ein voller 64er-Schritt auch bei glattem Rest); passt das nicht mehr, versucht er es
+// jeden Pass weiter. Danach legt er je Pass ein bhEff136 an (type = eigener Platz,
+// flr_no = Ringplatz 0..5, mdlver = type), haengt es an dasselbe Werk und loescht
+// dessen flg 0x80 wieder.
+void step_eff135(EffectSprite& s,const EffectContext&,bool&){
+    s.flg|=0x1000000u;
+    const auto& svc=afterimage_service();
+    if(!svc.zan_open||!svc.zan_reserve||!svc.vertex_count||!svc.capture){report_gap("bhEff135: sys->zan_memp/zanp ohne Besitzer");return;}
+    svc.zan_open();
+    switch(s.mode0){
+    case 0:
+        if((s.flg&0x80u)&&s.mode1!=0){
+            if(s.link_kind<0){report_gap("bhEff135: flg 0x80 ohne lkwkp");break;}
+            const int vertices=svc.vertex_count(unsigned(s.link_kind),s.link_index,s.type,unsigned(s.lkono));
+            if(vertices==-2){report_gap("bhEff135: pp->mdl[type].objP[lkono].model ohne nativen Modellbesitzer");break;}
+            if(vertices<0)break;                       /* objP oder model NULL */
+            int i=(vertices<<5)+72;
+            i+=64-(i%64);
+            if(svc.zan_reserve(std::size_t(8*i))){s.ct0=0;s.mode0=1;}
+        }
+        break;
+    case 1:
+        if(s.mode1!=0){
+            if(s.link_kind<0){report_gap("bhEff135: bhEff136 ohne lkwkp");break;}
+            auto& r=request_template();
+            r.id=136;r.flg=1;r.type=unsigned(s.slot);r.flr_no=s.ct0;r.mdlver=s.type;
+            if(!svc.work_position){report_gap("bhEff135: pp->px ohne Besitzer");break;}
+            const auto at=svc.work_position(unsigned(s.link_kind),s.link_index);
+            if(!at){report_gap("bhEff135: pp->px des verlinkten Werks unbekannt");break;}
+            r.position=*at;
+            submit_template(s.lkono);
+            auto& child=last_request();
+            child.link_kind=s.link_kind;child.link_index=s.link_index;child.drop_link_flag=true;
+            if(++s.ct0>5)s.ct0=0;
+        }
+        break;
+    }
+}
+// effsub1b.c:713 bhEff136 — ein Nachbild. Im ersten Pass haelt es objP[lkono] von
+// mdl[mdlver] in der aktuellen Lage fest (Hautberechnung und owP-Matrix), zeichnet
+// dann fuenf Passes mit dem Materialalpha (ct0 + 1) * 40 = 200..40 und endet. Gezeichnet
+// wird ueber ef_Zanzo[ct0] (effect.c:938, Platz 5 bis 0, der spaetere Satz gewinnt);
+// in Raum 1-00 Fall 2, 5-82 und 9-32 Fall 1 stattdessen in der ef_fnc-Liste.
+void step_eff136(EffectSprite& s,const EffectContext& c,bool&){
+    s.zanzo_slot=-1;
+    if(s.mode0==0){
+        const auto& svc=afterimage_service();
+        if(s.link_kind<0){report_gap("bhEff136: lkwkp fehlt");s.flg=0;return;}
+        if(!svc.capture){report_gap("bhEff136: npCalcSkin/npCopyVlist ohne Besitzer");s.flg=0;return;}
+        auto shot=svc.capture(unsigned(s.link_kind),s.link_index,s.mdlver,unsigned(s.lkono));
+        if(!shot){report_gap("bhEff136: objP[lkono] des verlinkten Werks ohne native Geometrie");s.flg=0;return;}
+        s.afterimage=std::move(shot);
+        s.ct0=5;s.mode0=1;
+        return;
+    }
+    if(s.ct0==0){s.flg=0;return;}
+    const bool fnc_room=(c.stage_no==1&&c.room_no==0&&c.room_case==2)||(c.stage_no==5&&c.room_no==82)||(c.stage_no==9&&c.room_no==32&&c.room_case==1);
+    if(fnc_room)queue_custom(s);
+    else s.zanzo_slot=s.ct0;
+    --s.ct0;
+    s.afterimage_alpha=unsigned((s.ct0+1)*40)&0xffu;
+    s.fnc_exit_src=-1;s.fnc_exit_dst=-1;     /* Chunkstreifen setzen das Register selbst, siehe Zeichenpass */
+}
 // effsub6.c:11 eye_ofs — die beiden Augenpunkte im Raum der Gelenkmatrix.
 const NJS_POINT3 eye_ofs[2]={{0.28f,0.82f,-0.90f},{-0.28f,0.82f,-0.90f}};
 // effsub6.c:114 bhEff146_Init — legt jeden Pass zwei Augenlichter (146) an der
@@ -3400,7 +3628,290 @@ void step_eff146(EffectSprite& s,const EffectContext&,bool& queued){
 }
 }
 // effect.c:869 bhControlEffect: die Prozedur je Effektkennung.
+
+// ======================= effsub2.c E12 (Alexia I) =======================
+// Gemeinsame Teile: UV_WORK-Tabellen, bhEff_SetUVInfo, bhEff_SetAlign und die
+// Zeichnung bhEff_Draw3DSprite (effsub2.c:4582) als Billboard- oder Weltviereck.
+namespace e12 {
+constexpr EffectUv fire_uv0[10]={{0.0f,0.0f,0.15625f,0.1875f},{0.1875f,0.0f,0.15625f,0.1875f},{0.375f,0.0f,0.15625f,0.1875f},{0.5625f,0.0f,0.15625f,0.1875f},{0.75f,0.0f,0.15625f,0.1875f},{0.0f,0.1875f,0.15625f,0.1875f},{0.1875f,0.1875f,0.15625f,0.1875f},{0.375f,0.1875f,0.15625f,0.1875f},{0.5625f,0.1875f,0.15625f,0.1875f},{-1,0,0,0}};
+constexpr EffectUv fire_uv1[9]={{0.03125f,0.46875f,0.15625f,0.21875f},{0.25f,0.46875f,0.15625f,0.21875f},{0.46875f,0.46875f,0.15625f,0.21875f},{0.6875f,0.46875f,0.15625f,0.21875f},{0.03125f,0.6875f,0.15625f,0.21875f},{0.25f,0.6875f,0.15625f,0.21875f},{0.46875f,0.6875f,0.15625f,0.21875f},{0.6875f,0.6875f,0.15625f,0.21875f},{-1,0,0,0}};
+constexpr EffectUv fire2_uv[11]={{0.0f,0.0f,0.1875f,0.1875f},{0.1875f,0.0f,0.1875f,0.1875f},{0.375f,0.0f,0.1875f,0.1875f},{0.5625f,0.0f,0.1875f,0.1875f},{0.75f,0.0f,0.1875f,0.1875f},{0.0f,0.1875f,0.1875f,0.1875f},{0.1875f,0.1875f,0.1875f,0.1875f},{0.375f,0.1875f,0.1875f,0.1875f},{0.5625f,0.1875f,0.1875f,0.1875f},{0.75f,0.1875f,0.1875f,0.1875f},{-1,0,0,0}};
+constexpr EffectUv fire3_uv[21]={{0.0f,0.0f,0.21875f,0.21875f},{0.21875f,0.0f,0.21875f,0.21875f},{0.4375f,0.0f,0.21875f,0.21875f},{0.65625f,0.0f,0.21875f,0.21875f},{0.0f,0.21875f,0.21875f,0.21875f},{0.21875f,0.21875f,0.21875f,0.21875f},{0.4375f,0.21875f,0.21875f,0.21875f},{0.65625f,0.21875f,0.21875f,0.21875f},{0.0f,0.4375f,0.21875f,0.21875f},{0.21875f,0.4375f,0.21875f,0.21875f},{0.4375f,0.4375f,0.21875f,0.21875f},{0.65625f,0.4375f,0.21875f,0.21875f},{0.0f,0.65625f,0.21875f,0.21875f},{0.21875f,0.65625f,0.21875f,0.21875f},{0.4375f,0.65625f,0.21875f,0.21875f},{0.4375f,0.65625f,0.21875f,0.21875f},{0.4375f,0.65625f,0.21875f,0.21875f},{0.4375f,0.65625f,0.21875f,0.21875f},{0.4375f,0.65625f,0.21875f,0.21875f},{0.4375f,0.65625f,0.21875f,0.21875f},{-1,0,0,0}};
+constexpr std::uint32_t spark_col[3]={0x32230E,0x1E1E0A,0x50411C};
+// bhEff_SetUVInfo(op, uvp, BaseSize) und Tabellenschritt (u < 0 = Ende).
+void step_uv(EffectSprite& s,const EffectUv* table,int rows,float base,const char* what){
+    if(s.frm_no<0||s.frm_no>=rows-1)throw std::runtime_error(std::string(what)+" frame outside its UV table");
+    const auto& uv=table[s.frm_no];++s.frm_no;if(table[s.frm_no].u<0)s.frm_no=0;
+    quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/base;s.sy=(s.syb*uv.ys)/base;
+}
+void align2(EffectSprite& s){set_corners(s,{-1,-2,0},{1,-2,0},{-1,0,0},{1,0,0});}
+void align3(EffectSprite& s){set_corners(s,{-1,2,0},{1,2,0},{-1,0,0},{1,0,0});}
+// cam.mtx (camera.c:28-37) Drehanteil des Vorbildes.
+void camera_rotation(const EffectContext& c,NJS_MATRIX& m){
+    njUnitMatrix(&m);if(!c.camera_ready)return;
+    njScale(&m,1,-1,-1);njRotateZ(&m,c.camera_angles[2]);njRotateX(&m,c.camera_angles[0]);njRotateY(&m,c.camera_angles[1]);
+}
+// op->mtx wie bhEff_Draw3DSprite (:4615-4632): frei T(p) njRotateEx(ax,0), verlinkt
+// lkwkp->owP[lkono] T(lo) RotXYZ.
+bool sprite_matrix(const EffectSprite& s,NJS_MATRIX& m,const char* what){
+    if(!(s.flg&0x80u)||(s.flg&0x200000u)){
+        njUnitMatrix(&m);njTranslate(&m,s.px,s.py,s.pz);njRotateZ(&m,s.az);njRotateY(&m,s.ay);njRotateX(&m,s.ax);return true;}
+    if(!s.link_matrix){report_gap(what);return false;}
+    std::copy(s.link_matrix,s.link_matrix+16,m);njTranslate(&m,s.lox,s.loy,s.loz);njRotateXYZ(&m,s.ax,s.ay,s.az);return true;
+}
+// bhEff_Draw3DSprite in die eigene Zeichenliste von `out`; Textur ef_tn[group]+frame.
+void draw_3d_sprite(EffectSprite& out,const EffectSprite& s,unsigned group,unsigned frame,int src,int dst,const EffectContext& c){
+    if(s.stflg&0x20u){report_gap("bhEff_Draw3DSprite: txp[0]-Textur in E12 nicht gebunden");return;}
+    if(s.flg&0x20000u){report_gap("bhEff_Draw3DSprite: Rueckseitentest 0x20000 in E12 nicht gebunden");return;}
+    NJS_MATRIX m;if(!sprite_matrix(s,m,"bhEff_Draw3DSprite: lkwkp->owP[lkono]"))return;
+    const bool point=(s.flg&0x20000000u)!=0;
+    std::array<EffectSprite::Vertex,4> v=s.tv;
+    if(s.flg&0x100000u){
+        if(c.gm_flg&0x4000u){report_gap("bhEff_Draw3DSprite: Spiegelpfad gm_flg 0x4000 (sys->mr_pl)");return;}
+        NJS_MATRIX r;njUnitMatrix(&r);njRotateZ(&r,s.az);
+        for(auto& p:v){NJS_POINT3 q{p.x*s.sx,p.y*s.sy,p.z*s.sz};njCalcVector(&r,&q,&q);p.x=q.x;p.y=q.y;p.z=q.z;}
+        push_billboard(out,{m[12],m[13],m[14]},v,group,frame,src,dst,point);
+    }else{
+        njScale(&m,s.sx,s.sy,s.sz);push_world_quad(out,m,v,group,frame,src,dst,true,false);out.quads.back().point_filter=point;
+    }
+    out.quads.back().fogged=false;
+}
+// bhEne_DirCheck(plp->ay, &plp->dvx) (zonzon1.c:493).
+int dg_dir(int ay,NJS_POINT3 dv){NJS_MATRIX m;njUnitMatrix(&m);njRotateY(&m,-ay);NJS_POINT3 v;njCalcVector(&m,&dv,&v);return v.z>=0?0:1;}
+}
+// effsub2.c:3337 bhEff_E12_FireManager (262) / :3372 bhEff_E12_FireBurstDraw: sammelt die
+// Feuer (263 type != 0) dieses Passes und zeichnet sie mit Texturgruppe 80 Bild 1, 8/3, Punktfilter.
+void step_e12_fire_manager(EffectSprite& s,const EffectContext&,bool&){
+    switch(s.mode0){
+    case 0:
+        if(!s.extra&&!acquire_extra_work(s))report_gap("bhEff_E12_FireManager: bhSetExtraEffectWork ohne Platz");
+        s.tex_id=80;s.ani_ct=1;s.bl_src=8;s.bl_dst=3;s.mode0++;break;
+    case 1:s.ct0=0;break;
+    default:break;
+    }
+    queue_custom(s);
+}
+// effsub2.c:2595 bhEff_E12_Fire (263).
+void step_e12_fire(EffectSprite& s,const EffectContext& c,bool&){
+    using namespace e12;
+    switch(s.mode0){
+    case 0:
+        s.tex_id=80;s.ani_ct=1;quad_color(s,0x80FFFFFFu);s.bl_src=8;s.bl_dst=3;
+        if(s.type==0){s.flg|=0x4180000u;align2(s);s.mtn_no=0;s.frm_no=int(8.0f*effect_random());}
+        else{s.flg|=0x24080000u;align3(s);s.mtn_no=int(2.0f*effect_random());s.frm_no=int(8.0f*effect_random());}
+        s.sxb=s.sx;s.syb=s.sy;
+        if(s.type==1)s.ct0=int(200.0f*effect_random())+200;else if(s.type==2)s.ct0=20;
+        s.ct1=0;s.ct3=int(300.0f*effect_random());s.ah=0.2f;s.aw=1.0f;
+        if(s.type==1)hook_fire_light({s.px,s.py,s.pz});
+        s.mode0++;s.mode1=0;
+        if(s.type==0){s.mode0=6;return;}
+        if(!hook_effect_se_playing(74499))hook_effect_se({s.px,s.py,s.pz},74499);
+        [[fallthrough]];
+    case 1:
+        s.ah+=0.2f;if(s.ah>1.0f){s.ah=1.0f;s.mode0++;}
+        break;
+    case 2:{
+        if(s.type!=0){if(s.ct0--==0)s.mode0++;}
+        else if(s.mode1==2)s.mode0++;
+        if(s.type==0||s.type==1){
+            RECVX_ENEMY_PLAYER p;
+            if(hook_player_get(p,"bhEff_E12_Fire: plp")){
+                const float ar=p.car+1.0f; // plp->ar = PlyInfo[ply_id][0], car = ar - 1 (player.c:705-708)
+                const float dx=p.pos.x-s.px,dz=p.pos.z-s.pz,ln=njSqrt(dx*dx+dz*dz);
+                if(ln<1.5f+ar){
+                    p.pos.x=s.px+(dx*(1.5f+ar))/ln;p.pos.z=s.pz+(dz*(1.5f+ar))/ln;
+                    hook_player_exp0(0x48,p.pos.x);hook_player_exp0(0x50,p.pos.z);
+                    if(s.ct1==0&&!(p.flg&4u)&&!(p.stflg&0x80000000u)&&!(c.cb_flg&4u)){
+                        p.flg|=0x10004u;p.stflg|=0x10000u;
+                        hook_player_dv({dx,0,dz});
+                        p.mode0=2;p.mode1=std::uint8_t(dg_dir(p.ay,{dx,0,dz}));p.mode2=0;p.mode3=0;
+                        s.ct1=90;
+                    }
+                    hook_player_set(p);
+                }
+            }
+            if(s.ct1!=0)s.ct1--;
+        }
+        if(s.ct3--==0){
+            auto& r=request_template();r.id=264;r.type=0;r.flg=1;r.position={s.px,5.0f+s.py,s.pz};r.ax=0;r.ay=0;
+            submit_template(0,nullptr);
+            s.ct3=int(200.0f*effect_random())+200;
+        }
+        break;}
+    case 3:
+        s.ah-=0.02f;s.aw-=0.01f;
+        if(s.ah<0.8f){s.ah=0.8f;s.aw=0.9f;s.ct3=128;s.mode0++;}
+        break;
+    case 4:
+        s.ct3-=8;s.ah-=0.002f;s.aw-=0.001f;
+        if(s.ct3<0){if(s.type!=0){s.flg=0;return;}s.mode0++;return;}
+        quad_color(s,(unsigned(s.ct3)<<24)|0xFFFFFFu);
+        break;
+    case 5:return;
+    case 6:if(s.mode1==1)s.mode0=1;return;
+    default:return;
+    }
+    if(s.mtn_no<0||s.mtn_no>1)throw std::runtime_error("bhEff_E12_Fire mtn_no outside uvtble[2]");
+    if(s.mtn_no==0)step_uv(s,fire_uv0,10,0.09375f,"bhEff_E12_Fire");else step_uv(s,fire_uv1,9,0.09375f,"bhEff_E12_Fire");
+    s.sx*=s.aw;s.sy*=s.ah;
+    NJS_MATRIX cam;camera_rotation(c,cam);
+    if(s.aoy==0){NJS_POINT3 a{s.aox,s.aoy,s.aoz},v;njCalcVector(&cam,&a,&v);s.sx*=0.5f+std::fabs(0.5f*v.z);}
+    if(s.type!=0)s.ay=recvx_t3_arc_tan2(cam[8],cam[10]);
+    if(s.type==0){
+        queue_custom(s);
+        if(drawing(c))draw_3d_sprite(s,s,80,unsigned(s.ani_ct),s.bl_src,s.bl_dst,c);
+        return;
+    }
+    // In die Liste des Feuerverwalters (exp1 -> eff[262], exp0[4+4*ct0], ct0 < 300).
+    auto* mgr=pool_work(s.exp1_slot);
+    if(!mgr||mgr->id!=262){report_gap("bhEff_E12_Fire: op->exp1 ohne bhEff_E12_FireManager");return;}
+    if(mgr->ct0<300){
+        mgr->ct0++;
+        if(drawing(c)){
+            NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,s.px,s.py,s.pz);njRotateZ(&m,s.az);njRotateY(&m,s.ay);njRotateX(&m,s.ax);
+            if(s.flg&0x100000u){report_gap("bhEff_E12_FireBurstDraw: flg 0x100000");return;}
+            njScale(&m,s.sx,s.sy,s.sz);
+            push_world_quad(*mgr,m,s.tv,80,unsigned(mgr->ani_ct),mgr->bl_src,mgr->bl_dst,true,false);mgr->quads.back().point_filter=true;
+        }
+    }
+}
+// effsub2.c:3229 bhEff_E12_FireSpark (264): 16 Funken im P_WRK, gemeinsame Gruppe 4, 8/10.
+void step_e12_fire_spark(EffectSprite& s,const EffectContext& c,bool&){
+    using namespace e12;
+    if(s.mode0==0){
+        if(!acquire_extra_work(s)){s.flg=0;return;}
+        auto& p=particle_work(s,"bhEff_E12_FireSpark");p.num=16;
+        for(int i=0;i<p.num;++i){
+            p.pos[i].x=(s.px-(2.0f*effect_random()))-1.0f;p.pos[i].y=s.py+(5.0f*effect_random());p.pos[i].z=(s.pz-(2.0f*effect_random()))-1.0f;
+            s.xn=0.1f+(0.1f*effect_random());s.ay=int(65536.0f*effect_random());
+            p.vec[i].x=s.xn*-njSin(s.ay);p.vec[i].y=0.5f+(0.5f*effect_random());p.vec[i].z=s.xn*-njCos(s.ay);
+        }
+        p.sx=0.1f;p.sy=0.15f;s.ct0=int(30.0f+(20.0f*effect_random()));s.ct2=0xFF;
+        s.flg|=0x20000000u;s.bl_src=8;s.bl_dst=10;s.mode0++;return;
+    }
+    auto& p=particle_work(s,"bhEff_E12_FireSpark");
+    for(int i=0;i<p.num;++i){
+        p.vec[i].x+=(0.06f*effect_random())-0.03f;p.vec[i].y+=(0.1f*effect_random())-0.05f;p.vec[i].z+=(0.06f*effect_random())-0.03f;
+        p.pos[i].x+=p.vec[i].x;p.pos[i].y+=p.vec[i].y;p.pos[i].z+=p.vec[i].z;
+        p.vec[i].x*=0.95f;p.vec[i].y*=0.95f;p.vec[i].z*=0.95f;
+    }
+    p.col=spark_col[int(3.0f*effect_random())]|(unsigned(s.ct2)<<24);
+    const unsigned frame=unsigned(int(4.0f*effect_random())); // tex_id = sys->ef_tn[4] + (0..3)
+    if(s.ct0<30)s.ct2-=8;
+    if(s.ct0--==0){s.flg=0;release_extra_work(s);return;}
+    queue_custom(s);
+    if(drawing(c))push_particle_sprites(s,p,4,frame,s.bl_src,s.bl_dst,true,(s.flg&0x20000000u)!=0);
+}
+// effsub2.c:2929 bhEff_E12_FrameLiquid (265): brennende Lache (ef_trs, Gruppe 80, 8/3).
+void step_e12_frame_liquid(EffectSprite& s,const EffectContext& c,bool& entered){
+    using namespace e12;
+    (void)c;
+    switch(s.mode0){
+    case 0:
+        s.tex_id=80;set_corners(s,{-1,0,-1},{-1,0,1},{1,0,-1},{1,0,1});
+        quad_color(s,0xFF6E0000u);s.flg|=0x4000000u;s.bl_src=8;s.bl_dst=3;s.mode0=1;s.mode1=0;
+        [[fallthrough]];
+    case 1:
+        if(s.type!=0){
+            if(s.ct0--==0){
+                RECVX_ENEMY_PLAYER p;int hit=0;
+                if(hook_player_get(p,"bhEff_E12_FrameLiquid: plp")){
+                    const float dx=p.pos.x-s.px,dz=p.pos.z-s.pz;
+                    hit=njSqrt(dx*dx+dz*dz)<(1.0f+(1.5f+(p.car+1.0f)))?1:0;
+                    if(hit&&!(p.flg&4u)&&!(p.stflg&0x80000000u)){
+                        p.flg|=0x10004u;p.stflg|=0x10000u;
+                        // plp->dvx = op->px ... (die Lage, nicht eine Richtung, wie im Original).
+                        hook_player_dv({s.px,s.py,s.pz});
+                        const int dir=dg_dir(p.ay,{s.px,s.py,s.pz});
+                        p.mode0=4;p.mode2=std::uint8_t(dir);p.mode3=0;p.hp-=20;
+                        hook_player_set(p);
+                        for(int i=0;i<4;++i){
+                            NJS_POINT3 o;o.x=1.0f-(2.0f*effect_random());o.y=-0.5f+(2.0f*effect_random());o.z=dir?1.3f:-1.5f;
+                            const float size=0.5f+effect_random();const int life=int(10.0f*effect_random())+20;
+                            hook_player_fire(3,o,size,life);
+                        }
+                    }
+                }
+                auto& r=request_template();r.id=263;r.type=unsigned(hit+1);r.flg=1;
+                r.position=s.aoy>0?NJS_POINT3{s.px,s.py,s.pz}:NJS_POINT3{s.px+(0.5f*s.aox),s.py+(0.5f*s.aoy),s.pz+(0.5f*s.aoz)};
+                r.scale={2.0f,2.0f+effect_random(),1.0f};r.ax=0;r.ay=0;
+                submit_template(0,nullptr);
+                auto& q=last_request();q.has_ao=true;q.ao={s.aox,s.aoy,s.aoz};q.has_exp1=true;q.exp1_slot=s.exp1_slot;
+                s.mode0++;s.ct0=110;
+            }
+        }else if(s.mode1!=0){s.mode0++;s.ct0=110;}
+        break;
+    case 2:
+        quad_color(s,(unsigned(s.ct0)<<16)|0xFF000000u);
+        if(s.ct0--==0){s.ct0=0xFF;s.mode0++;}
+        [[fallthrough]];
+    case 3:
+        s.ct0-=5;
+        if(s.ct0<0){if(s.type!=0){s.flg=0;return;}s.mode0=4;return;}
+        quad_color(s,unsigned(s.ct0)<<24);
+        break;
+    case 4:return;
+    default:return;
+    }
+    entered=true; // sys->ef_trs: bhDrawTrsEffect3D
+}
+// effsub2.c:3436 bhEff_E12_Fire2 (274): Handfeuer am Gelenk, gemeinsame Gruppe 8, 8/10.
+void step_e12_fire2(EffectSprite& s,const EffectContext& c,bool&){
+    using namespace e12;
+    switch(s.mode0){
+    case 0:
+        s.tex_id=8;s.ani_ct=0;quad_color(s,0xFF808080u);s.bl_src=8;s.bl_dst=10;s.flg|=0x4180000u;align2(s);
+        s.mtn_no=0;s.frm_no=int(8.0f*effect_random());s.sxb=s.sx;s.syb=s.sy;s.aw=1.0f;s.ah=1.0f;s.ct3=0xFF;s.mode0++;
+        [[fallthrough]];
+    case 1:
+        if(s.ct1!=0){s.ct1--;return;}
+        s.mode0++;break;
+    case 2:
+        if(s.ct0!=0)s.ct0--;else s.mode0++;
+        break;
+    case 3:
+        s.ct3-=8;if(s.ct3<0){s.flg=0;return;}
+        quad_color(s,(unsigned(s.ct3)<<24)|0xFFFFFFu);break;
+    default:break;
+    }
+    step_uv(s,fire2_uv,11,0.09375f,"bhEff_E12_Fire2");
+    s.sx*=s.aw;s.sy*=s.ah;
+    queue_custom(s);
+    if(drawing(c))draw_3d_sprite(s,s,8,unsigned(s.ani_ct),s.bl_src,s.bl_dst,c);
+}
+// effsub2.c:3544 bhEff_E12_Fire3 (275): Flammenspur der Hand, gemeinsame Gruppe 9, 8/10.
+void step_e12_fire3(EffectSprite& s,const EffectContext& c,bool&){
+    using namespace e12;
+    switch(s.mode0){
+    case 0:
+        s.tex_id=9;s.ani_ct=0;quad_color(s,0xFFFFFFFFu);s.bl_src=8;s.bl_dst=10;s.flg|=0x4180000u;align2(s);
+        s.mtn_no=0;s.frm_no=int(9.0f*effect_random());s.sxb=s.sx;s.syb=s.sy;s.ct3=0xFF;s.mode0++;break;
+    case 1:
+        if(s.frm_no==0){s.flg=0;return;}
+        if(s.frm_no>7){s.ct3-=16;if(s.ct3<16)s.ct3=16;quad_color(s,(unsigned(s.ct3)<<24)|0xFFFFFFu);}
+        break;
+    default:break;
+    }
+    step_uv(s,fire3_uv,21,0.1875f,"bhEff_E12_Fire3");
+    s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+    s.xn*=0.9f;s.yn*=0.9f;s.zn*=0.9f;
+    s.xn+=(0.04f*effect_random())-0.02f;s.zn+=(0.04f*effect_random())-0.02f;s.yn+=0.03f*effect_random();
+    queue_custom(s);
+    if(drawing(c))draw_3d_sprite(s,s,9,unsigned(s.ani_ct),s.bl_src,s.bl_dst,c);
+}
+// effsub2.c:3658 bhEff_E12_BintaEffControl (276): Skriptauftrag mode1 an bhEne12_SetFireBintaEffect.
+void step_e12_binta(EffectSprite& s,const EffectContext&,bool&){
+    if(s.mode0==0){s.flg|=0x1000000u;s.mode0++;}
+    if(s.mode0!=1||!s.lkwkp)return;
+    switch(s.mode1){
+    case 1:hook_en12_binta(s.lkwkp,0);s.mode1=0;break;
+    case 2:hook_en12_binta(s.lkwkp,1);s.mode1=0;break;
+    case 3:hook_en12_binta(s.lkwkp,2);break;
+    default:break;
+    }
+}
 const HandEffectProcedure hand_effect_procedures[]={
+    {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
     {8,step_eff008},{10,step_eff010},{11,step_eff011},{14,step_eff014},{15,step_eff015},{29,step_eff029},
     {101,step_eff101},{103,step_eff103},{104,step_eff104},{116,step_eff116},{117,step_eff117},{119,step_eff119},
     {121,step_eff121},{128,step_eff128},{131,step_eff131},{132,step_eff132},{144,step_eff144},
@@ -3418,7 +3929,8 @@ const HandEffectProcedure hand_effect_procedures[]={
     {200,step_eff200},{201,step_eff201},{202,step_eff202},{203,step_eff203},{205,step_eff205},
     {207,step_eff207},{209,step_eff209},{210,step_eff210},{211,step_eff211},{212,step_eff212},
     {213,step_eff213},{216,step_eff216},{220,step_eff220},{223,step_eff223},{225,step_eff225},
-    {226,step_eff226},{227,step_eff227},{228,step_eff228},{232,step_eff232},{233,step_eff233},
+    {226,step_eff226},{227,step_eff227},{228,step_eff228},{229,step_eff229},{232,step_eff232},{233,step_eff233},
+    {352,step_eff352},
     {234,step_eff234},{235,step_eff235},{237,step_eff237},{238,step_eff238},{239,step_eff239},
     {240,step_eff240},{242,step_eff242},{244,step_eff244},{245,step_eff245},{246,step_eff246},
     {247,step_eff247},{248,step_eff248},{249,step_eff249},{147,step_eff147},{148,step_eff148},
@@ -3429,7 +3941,7 @@ const HandEffectProcedure hand_effect_procedures[]={
     {149,step_eff149},
     {12,step_eff012},{19,step_eff019},{23,step_eff023},{118,step_eff118},{204,step_eff204},
     {114,step_eff114},{221,step_eff221},
-    {145,step_eff145},{146,step_eff146},{127,step_eff127},{219,step_eff219},
+    {145,step_eff145},{146,step_eff146},{127,step_eff127},{219,step_eff219},{135,step_eff135},{136,step_eff136},
 };
 const std::size_t hand_effect_procedure_count=sizeof(hand_effect_procedures)/sizeof(hand_effect_procedures[0]);
 }

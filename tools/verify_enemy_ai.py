@@ -12,7 +12,7 @@ Zombies (RM_0080, fuenf Zombies id 1):
             zwei Griffen kommt die Steuerung zurueck (player_scripted wechselt).
   lever     Wie `front`, ab Tick 20 jeden Tick eine neue Richtung
             (sys->pad_ps -> bhEne_LeverCheck): messbar weniger HP-Verlust.
-  death     `front` ueber 1500 Ticks: HP < 0, Kauen, natives Game Over (Phase 2).
+  death     `front` ueber 1800 Ticks: HP < 0, Kauen, natives Game Over (Phase 2).
 Weitere natuerliche Zombie-Laeufe ohne Diagnoseplatzierung:
   RM_0060   vier Zombies InitType11 — Biss im natuerlichen Lauf.
   RM_0031   Zombies mit Skriptzustand Sub_controll 0x93 (Typ 10, mode0 5) neben
@@ -129,8 +129,12 @@ def grabbed(state):
 # Seit Sub_controll 0x8f den nativen Work erreicht (1c2934d), ruhen die Zombies
 # bei pos_no 0 als Typ 8 (siehe `natural`). Die Diagnose-Aufstellung nutzt
 # deshalb Spawn 2 (pos_no 2 -> Skriptzweig 0x8f type 0, Zombies aktiv) und steht
-# 2.8 Einheiten vor Zombie 0 an seiner Skriptlage (4.76, 0, -37.16), Blick -z.
-FRONT = '0 position 4.76 0 -34 0\n'
+# knapp 3 Einheiten vor Zombie 0 an seiner Skriptlage: RM_0080 ev 0 off 1292-1312
+# Common 12/7/11 -> (-3, 0, 21), ay 180 (event.c:12034/12068), danach Common 47
+# bhCalcModel (event.c:10053). Die frueher hier stehende Lage (4.76, 0, -37.16)
+# war die Raumtabellenlage, auf die der Work mangels Common 47 per
+# bhCalcFixOffset zurueckgezogen wurde (enemies_bats_bander_dogs-20261014).
+FRONT = '0 position -3 0 24 0\n'
 FRONT_SPAWN = ['--spawn', '2']
 results = {}
 REPO = Path(__file__).resolve().parent.parent
@@ -228,7 +232,9 @@ lever = run('lever-600', 'RM_0080.RDX', 600, '\n'.join(lever_lines) + '\n', FRON
 assert lever['hp'] > late['hp'], ('lever', 'Hebelruetteln senkt den Schaden nicht', lever['hp'], late['hp'])
 results['lever'] = {'hp': lever['hp'], 'hp_without_lever': late['hp']}
 
-death = run('death-1500', 'RM_0080.RDX', 1500, FRONT, FRONT_SPAWN)
+# An der Skriptlage (-3, 0, 21) erreicht der Tod Phase 2 gemessen bei Bild 1600
+# (Phase 1 bei 1500); 1800 laesst Abstand, die Pruefung bleibt Tod + Phase 2.
+death = run('death-1800', 'RM_0080.RDX', 1800, FRONT, FRONT_SPAWN)
 assert death['hp'] < 0, ('death', 'Spieler stirbt nicht', death['hp'])
 assert death['gameover_active'] and death['gameover_phase'] == 2, ('death', 'Game Over nicht aktiv/Phase 2', death['gameover_phase'])
 assert enemy(death, 0)['work']['mode'][3] == 2 or enemy(death, 0)['work']['mode'][0] in (1, 2), ('death', enemy(death, 0)['work'])

@@ -40,14 +40,18 @@ int main(int argc,char** argv){try{
     // die Effektarbeit unverändert bleibt - kein geratener Atlas, kein
     // geratener Zustand. 122/218/230 sind seit dem committeten Stand
     // (2a488f7) positiv portiert und laufen nicht mehr als Lücke mit.
-    // 200/201 sind seit 2026-10-14 von Hand portiert und laufen nicht mehr als Luecke mit; 221/229 bleiben offen.
-    // 24 und 221 sind portiert (Gruppen 4 und 6, 2026-10-14); 229 bleibt offen.
-    for(const unsigned id:{229u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
+    // 200/201/232 sind seit 2026-10-14 von Hand portiert und laufen nicht mehr als Luecke mit.
+    // 24 und 221 sind portiert (Gruppen 4 und 6, 2026-10-14); 229 (Muendungsfeuer der
+    // Doppelwaffe, effsub5.c) ebenfalls. Nur noch wirklich ungebundene Kennungen laufen hier.
+    check(supported_effect_sprite(229u),"229 (Doppelwaffe-Muendungsfeuer) meldet sich ungebunden");
+    for(const unsigned id:{21u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
         check(!supported_effect_sprite(id),"effect gap reports a bound procedure");
         check(!step_effect_sprite(sprite,&queued)&&!queued,"effect gap executed a procedure or queued a draw");
         check(sprite.tex_id==-1&&!sprite.ct0&&!sprite.ani_ct&&!sprite.flg&&sprite.type==14&&sprite.tv[0].y==-1,"effect gap changed the sprite work");}
     set_explosion({0,0,0},{0,0,-1});set_explosion_effect({0,0,0},{0,0,-1});
-    {const auto out=take_effect_output();check(out.spawns.empty()&&out.sounds.empty()&&out.bombs.empty()&&!out.light,"explosion gap requested effects, sounds, a light or a bomb");}
+    {const auto out=take_effect_output();
+     check(out.spawns.size()==7&&out.sounds==std::vector<unsigned>{534u}&&out.bombs.empty()&&out.light.has_value(),
+           "bhSetExplosion/bhSetExplosionEffect requests differ from weapon.c:1706/1812");}
     // PCM loop boundaries preserve the intro and loop subsection, not the outro.
     AudioMixer audio;auto pcm=std::make_shared<PcmClip>();pcm->rate=48000;pcm->channels=1;pcm->samples={100,200,300,400,500};pcm->loop_start=1;pcm->loop_end=4;audio.play_pcm(0,pcm,1,true);const auto sound=audio.mix(8);const int expected[]={100,200,300,400,200,300,400,200};for(unsigned i=0;i<8;++i)check(sound[i*2]==expected[i],"PCM loop loses intro or uses whole file");
     // Item checks include empty slots and inspected-ID state, as event.c does.
@@ -86,7 +90,9 @@ int main(int argc,char** argv){try{
             check(inv.box_change(2,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(5,18)&&inv.slots()[0]==0&&inv.contains(21),"swapping out the equipped gun must clear pip[0]");}
         // Item vor der ausgerüsteten Waffe einlagern: pip[0] sinkt, ItemSort.
         {auto inv=pocket();inv.slots()[2]=Inventory::pack(95,1);inv.slots()[3]=Inventory::pack(21,1);inv.slots()[4]=Inventory::pack(5,18);inv.slots()[0]=4;unsigned message=0;
-            check(inv.box_change(2,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(95,1)&&inv.slots()[2]==Inventory::pack(21,1)&&inv.slots()[3]==Inventory::pack(5,18)&&inv.slots()[0]==3&&inv.weapon()==3,"deposit before the equipped gun must lower pip[0] and sort");}});
+            // ItemBoxChange sortiert nicht (Disassembly 0x002A53E0); die Lücke bleibt bis SpriteOnOff (sub1.c:8296).
+            check(inv.box_change(2,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(95,1)&&!inv.slots()[2]&&inv.slots()[0]==3,"deposit before the equipped gun must lower pip[0] without sorting");
+            inv.sort();check(inv.slots()[2]==Inventory::pack(21,1)&&inv.slots()[3]==Inventory::pack(5,18)&&inv.slots()[0]==3&&inv.weapon()==3,"deposit before the equipped gun must lower pip[0] and sort");}});
     section("D02 ItemBoxChange Kapazität (breit) 159",[&]{
         {auto inv=pocket();for(unsigned i=2;i<10;++i)inv.slots()[i]=Inventory::pack(95,1);inv.items[64]=Inventory::pack(3,7);const auto saved=inv.items;unsigned message=0;
             check(!inv.box_change(2,0,64,0,0,&message)&&message==159&&inv.items==saved,"wide box item into a full pocket must answer 159");}
@@ -99,7 +105,8 @@ int main(int argc,char** argv){try{
         // Boxeintrag landet in pip[max+1] (kein Wert 2), pip[1] wird 0, die Kiste
         // erhält das Messer; ItemSort holt das Item nach vorn.
         {auto inv=pocket();inv.slots()[1]=Inventory::pack(55,1);inv.slots()[2]=Inventory::pack(95,1);inv.slots()[3]=Inventory::pack(95,1);inv.items[64]=Inventory::pack(21,1);unsigned message=0;
-            check(inv.box_change(1,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(55,1)&&!inv.slots()[1]&&inv.slots()[4]==Inventory::pack(21,1)&&inv.occupied()==3,"non-standard box item at pip[1] must go to pip[max+1] and sort in");}
+            check(inv.box_change(1,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(55,1)&&!inv.slots()[1]&&inv.slots()[9]==Inventory::pack(21,1)&&!inv.slots()[4],"non-standard box item at pip[1] must go to pip[max+1] (no ItemSort in ItemBoxChange)");
+            inv.sort();check(inv.slots()[4]==Inventory::pack(21,1)&&!inv.slots()[9]&&inv.occupied()==3,"non-standard box item at pip[1] must go to pip[max+1] and sort in");}
         // Grundwaffe aus der Kiste auf einen Taschenslot (Disassembly 0x2A5834:
         // chk2 bleibt 1, lt_c3 = lt_c, lt_c2 = 1, $v1 = 0): die Kiste erhält das
         // Taschenitem, das Messer geht nach pip[1], der Taschenslot wird leer.

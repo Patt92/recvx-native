@@ -3,11 +3,16 @@
 #include "binary_view.h"
 #include "room.h"
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <string>
 namespace recvx {
 namespace {
 struct CachedVertex {NJS_POINT3 position{};NJS_VECTOR normal{};bool valid=false;};
+// Kennung je <=60-Eckpunkt-Paket eines Chunk-Streifens (ps2_NinjaCnk.c:2017-2019:
+// 60 Eckpunkte, Fortsetzung 58 weiter). Prozessweit eindeutig, damit zusammengelegte
+// Szenen (Raum, Figuren, Tuer) ihre Pakete nicht vermischen.
+std::uint32_t next_strip_segments(std::uint32_t count){static std::atomic<std::uint32_t> next{1};return next.fetch_add(count);}
 class Decoder {
 public:
     explicit Decoder(const std::vector<std::uint8_t>& input):data(input),view(input),cache(65536){}
@@ -108,7 +113,17 @@ private:
         visited.resize(output.object_count);
         NJS_MATRIX matrix;njUnitMatrix(&matrix);
         if(options)std::copy(std::begin(options->transform),std::end(options->transform),std::begin(matrix));
-        visit(objects,&matrix,0);
+        if(options&&options->draw_object>=0){
+            const unsigned index=unsigned(options->draw_object);
+            if(index>=output.object_count)throw std::runtime_error("direct model object outside table");
+            current_object=std::uint16_t(index);
+            const auto pointer=view.u32(objects+std::size_t(index)*52+4);
+            if(pointer!=0xffffffffu){
+                if(!options->world_matrices.empty())std::copy_n(options->world_matrices[index].begin(),16,matrix);
+                const auto at=view.relative(base,pointer,chunk_model?24:40);
+                if(chunk_model)decode_model(at,&matrix);else decode_basic_model(at,&matrix);
+            }
+        }else visit(objects,&matrix,0);
     }
     const std::vector<std::uint8_t>& data;
     BinaryView view;
@@ -289,7 +304,7 @@ private:
                 if(type==41){NJS_VECTOR n{view.f32(p+12),view.f32(p+16),view.f32(p+20)};njCalcVector(world,&n,&value.normal);}
                 if(type==51){const auto* normals=options&&!options->world_normals.empty()?&options->world_normals[current_object]:nullptr;
                     if(normals&&!normals->empty()){if(normals->size()!=count)throw std::runtime_error("skin normal count does not match PS2 chunk");value.normal=(*normals)[i];}
-                    else{NJS_VECTOR n{view.f32(p+16),view.f32(p+20),view.f32(p+24)};njCalcVector(world,&n,&value.normal);}njUnitVector(&value.normal);}
+                    else{NJS_VECTOR n{view.f32(p+16),view.f32(p+20),view.f32(p+24)};njCalcVector(world,&n,&value.normal);}if(!options||options->draw_object<0)njUnitVector(&value.normal);}
                 value.valid=true;
             }
             chunk=end;
@@ -298,6 +313,7 @@ private:
     }
     void decode_polygons(std::size_t chunk) {
         std::uint32_t material=0xffb2b2b2;std::uint16_t texture=0;unsigned blend_src=4,blend_dst=5; // NJD_CB_BA default SA/ISA
+        bool diffuse=false;
         for(unsigned iteration=0;iteration<65536;++iteration) {
             const auto type=view.u8(chunk);
             if(type==255)return;
@@ -308,7 +324,7 @@ private:
             // njCnkCmD/A/Da/S/Ds/As/Das all update the blend mode, even
             // ambient-only materials. NJD_CB_BA is not its only writer.
             if(type>=17&&type<=23){const auto f=view.u8(chunk+1);blend_src=(f>>3)&7;blend_dst=f&7;}
-            if((type&1) && type>=17 && type<=23)material=view.u32(chunk+4);
+            if((type&1) && type>=17 && type<=23){material=view.u32(chunk+4);diffuse=true;}
             if(type>=64 && type<=66) {
                 auto at=chunk+4;
                 const auto flags=view.u16(at);at+=2;
@@ -325,6 +341,10 @@ private:
                     const unsigned count=reverse?0x10000u-length_bits:length_bits;
                     if(count<3)throw std::runtime_error("invalid triangle strip length");
                     std::vector<SceneVertex> strip;strip.reserve(count);
+                    // njCnkCsUvh/njCnkCsUvn (Typ 65/66) senden je hoechstens 60 Eckpunkte und
+                    // setzen 58 weiter fort; Dreieck i gehoert zum Paket (i-2)/58. njCnkCs (64)
+                    // reicht den ganzen Streifen ohne Paketpruefung weiter (ps2_NinjaCnk.c:1720).
+                    const std::uint32_t segment_base=type!=64?next_strip_segments((count-3)/58+1):0;
                     for(unsigned i=0;i<count;++i) {
                         const auto index=read();
                         if(!cache[index].valid)throw std::runtime_error("polygon references unloaded vertex");
@@ -340,11 +360,12 @@ private:
                         strip.push_back(vertex);
                         if(i>=2) {
                             SceneTriangle triangle{{strip[i-2],strip[i-1],strip[i]},material,texture,current_object,type!=64};
-                            triangle.camera_mask=camera_mask;
+                            triangle.camera_mask=camera_mask;triangle.diffuse_material=diffuse;{const auto m=chunk_blend_modes(blend_src,blend_dst);triangle.chunk_mode_src=std::int8_t(m.first);triangle.chunk_mode_dst=std::int8_t(m.second);}
                             // The strip's GS ALPHA register is kept for every strip: a caller forcing
                             // NJD_FST_UA through njSetConstantAttr (map.c:723) still blends with it.
                             triangle.blend_register=chunk_blend_register(blend_src,blend_dst);
                             if(use_alpha)triangle.blend=SceneBlend::Ninja;
+                            triangle.strip_clip=true;if(segment_base)triangle.strip_segment=segment_base+(i-2)/58;
                             if(((i&1)!=0)^reverse)std::swap(triangle.vertices[0],triangle.vertices[1]);
                             if(output.triangles.size()>=2000000)throw std::runtime_error("room triangle limit exceeded");
                             output.triangles.push_back(triangle);
@@ -368,6 +389,21 @@ Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint3
 Scene decode_model_asset(const std::vector<std::uint8_t>& data,std::size_t model_offset,
                          std::size_t texture_offset,const ModelGeometryOptions& options) {
     return Decoder(data).decode_asset(model_offset,texture_offset,options);
+}
+std::optional<unsigned> model_object_vertex_count(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object){
+    BinaryView view(data);view.require(model,16);
+    if(view.u8(model)!='M'||view.u8(model+1)!='D'||view.u8(model+2)!='L')throw std::runtime_error("unsupported model format (expected MDL)");
+    if(!(view.u8(model+3)&0x80))throw std::runtime_error("objP[n].model->vlist on a Basic model");
+    const auto base=view.relative(model,view.u16(model+4),0);const unsigned count=view.u16(model+6);
+    if(object>=count)throw std::runtime_error("objP index outside the model's object table");
+    const auto objects=view.relative(base,view.u32(model+12),std::size_t(count)*52);
+    const auto pointer=view.u32(objects+std::size_t(object)*52+4);
+    if(pointer==0xffffffffu)return std::nullopt;              // objP[n].model == NULL
+    const auto chunk_model=view.relative(base,pointer,24);
+    const auto vlist=view.u32(chunk_model);
+    if(vlist==0xffffffffu)throw std::runtime_error("objP[n].model->vlist is NULL");
+    const auto at=view.relative(base,vlist,8);
+    return unsigned(view.u32(at+4)>>16);                      // vlist[1] >> 16
 }
 std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 position,std::int8_t floor) {
     // bhCheckCutArea / bhCheckCutAreaInnerTriangle, with its inclusive/exclusive

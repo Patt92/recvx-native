@@ -1,4 +1,5 @@
 #include "debug_menu.h"
+#include "user_paths.h"
 #include <algorithm>
 #include <fstream>
 #include <set>
@@ -23,7 +24,7 @@ DebugConfig DebugConfig::read(const std::filesystem::path& path){
     }return result;
 }
 void DebugConfig::write_defaults(const std::filesystem::path& path){
-    if(std::filesystem::exists(path))throw std::runtime_error("debug.ini already exists");std::ofstream output(path);if(!output)throw std::runtime_error("cannot create debug.ini: "+path.string());
+    if(std::filesystem::exists(path))throw std::runtime_error("debug.ini already exists");if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());std::ofstream output(path);if(!output)throw std::runtime_error("cannot create debug.ini: "+path.string());
     // enemy_grab is left unset: the runtime then uses the original attacks in
     // interactive play (off only for --headless/--replay); "enemy_grab = off"
     // here is the user's explicit override.
@@ -33,12 +34,7 @@ std::filesystem::path DebugConfig::software_directory(const std::filesystem::pat
     const auto directory=executable.parent_path();if(directory.filename()=="MacOS"&&directory.parent_path().filename()=="Contents"&&directory.parent_path().parent_path().extension()==".app")return directory.parent_path().parent_path().parent_path();return directory;
 }
 std::filesystem::path DebugConfig::default_path(){
-    // SDL's macOS base-path API returns Contents/Resources for bundles;
-    // explicitly normalize this as well as the executable's MacOS path.
-    char* raw=SDL_GetBasePath();if(!raw)throw std::runtime_error("cannot locate software directory");const auto base=std::filesystem::u8path(raw);SDL_free(raw);const auto directory=base.lexically_normal();
-    const auto leaf=directory.filename().empty()?directory.parent_path():directory;
-    if(leaf.filename()=="Resources"&&leaf.parent_path().filename()=="Contents"&&leaf.parent_path().parent_path().extension()==".app")return leaf.parent_path().parent_path().parent_path()/"debug.ini";
-    return software_directory(leaf/"recvx-runtime")/"debug.ini";
+    return platform_user_data_dir()/"debug.ini";
 }
 void DebugMenu::add(DebugAction action){
     if(action.id.empty()||!action.choices||!action.current||!action.execute)throw std::runtime_error("incomplete debug action");

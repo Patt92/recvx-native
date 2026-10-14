@@ -104,20 +104,23 @@ add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native
 target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/geometry_motion.cpp)
 # D10 Teil B: Kartenbild (Ps2AddPrim2D/3D-Seite von map.c) und sys->fade_* (screen.c).
 target_sources(recvx_game PRIVATE native/map_render.cpp native/screen_fade.cpp)
+# Gemeinsame Benutzerpfade (user_paths), Schreibmaschinen-Slots (save_slots) und
+# die Slotauswahl (typewriter). bup_00.c ControlTypewriter / ps2_SaveScreen.
+target_sources(recvx_game PRIVATE native/user_paths.cpp native/save_slots.cpp native/typewriter.cpp)
 # C02: gemeinsamer Gegnerwork am WorldEntity-Besitzer, native Dispatchkette,
 # bhSetMotion/bhCalcModel des Besitzers und alle nativ vorhandenen Gegner-
 # routinen. en54/en55 fehlen bis zum Port von en17.c (Kettenwerk-Besitzer).
 target_sources(recvx_game PRIVATE native/world_enemies.cpp native/motion_set.cpp
   native/enemies/enemy_work.c native/enemies/enemy_dispatch.c
   native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_sub.c native/enemies/en01_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en09.c native/enemies/en09_tables.c native/enemies/en09_arm_tables.c native/enemies/en10.c
-  native/enemies/en11.c native/enemies/en12.c native/enemies/en14.c
+  native/enemies/en11.c native/enemies/en12.c native/enemies/en13.c native/enemies/en02_trans_tables.c native/enemies/en14.c native/enemies/en23.c native/enemies/en03_spider.c native/enemies/en05.c native/enemies/en05_tables.c
   native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en21.c native/enemies/en24.c native/enemies/en25.c
   native/enemies/en56.c native/enemies/en71.c
   native/enemies/en27.c native/enemies/en30.c
   native/enemies/en03_lib.c native/enemies/en03_collision.c)
 if(NOT MSVC)
   # Preserve separate float multiply/add steps also in production-only builds.
-  set_property(SOURCE native/effect_collision.cpp native/hit_model.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en09.c native/enemies/en09_tables.c native/enemies/en09_arm_tables.c native/enemies/en10.c native/enemies/en11.c native/enemies/en12.c native/enemies/en14.c native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en21.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c native/enemies/en27.c native/enemies/en30.c native/enemies/en03_lib.c native/enemies/en03_collision.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+  set_property(SOURCE native/effect_collision.cpp native/hit_model.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en09.c native/enemies/en09_tables.c native/enemies/en09_arm_tables.c native/enemies/en10.c native/enemies/en11.c native/enemies/en12.c native/enemies/en13.c native/enemies/en14.c native/enemies/en23.c native/enemies/en03_spider.c native/enemies/en05.c native/enemies/en05_tables.c native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en21.c native/enemies/en24.c native/enemies/en25.c native/enemies/en56.c native/enemies/en71.c native/enemies/en27.c native/enemies/en30.c native/enemies/en03_lib.c native/enemies/en03_collision.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
 endif()
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}" build-tools/ninja)
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
@@ -270,6 +273,12 @@ if(BUILD_TESTING)
   add_executable(recvx-inventory-tests tests/native/inventory_menu_test.cpp)
   target_link_libraries(recvx-inventory-tests PRIVATE recvx_game)
   add_test(NAME inventory_combine_inspect COMMAND recvx-inventory-tests)
+  add_executable(recvx-inventory-sort-tests tests/native/inventory_sort_test.cpp)
+  target_link_libraries(recvx-inventory-sort-tests PRIVATE recvx_game)
+  add_test(NAME inventory_item_sort COMMAND recvx-inventory-sort-tests)
+  add_executable(recvx-save-slots-tests tests/native/save_slots_test.cpp)
+  target_link_libraries(recvx-save-slots-tests PRIVATE recvx_game)
+  add_test(NAME typewriter_save_slots COMMAND recvx-save-slots-tests)
   add_executable(recvx-item-view-tests tests/native/item_view_test.cpp)
   target_link_libraries(recvx-item-view-tests PRIVATE recvx_game)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/ITEM1")
@@ -440,6 +449,27 @@ if(BUILD_TESTING)
   target_link_libraries(recvx-en09-tests PRIVATE recvx_game recvx_math)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
     add_test(NAME enemy_en09_world COMMAND recvx-en09-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  add_executable(recvx-en13-tests tests/native/en13_world_test.cpp)
+  target_include_directories(recvx-en13-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-en13-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-en13-tests PRIVATE recvx_game recvx_math)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+    add_test(NAME enemy_en13_world COMMAND recvx-en13-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  add_executable(recvx-en23-tests tests/native/en23_world_test.cpp)
+  target_include_directories(recvx-en23-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-en23-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-en23-tests PRIVATE recvx_game recvx_math)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+    add_test(NAME enemy_en23_world COMMAND recvx-en23-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  add_executable(recvx-en05-tests tests/native/en05_world_test.cpp)
+  target_include_directories(recvx-en05-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-en05-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-en05-tests PRIVATE recvx_game recvx_math)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+    add_test(NAME enemy_en05_world COMMAND recvx-en05-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
   add_executable(recvx-enemy-beam-tests tests/native/enemy_beam_test.cpp)
   target_include_directories(recvx-enemy-beam-tests PRIVATE native native/enemies)

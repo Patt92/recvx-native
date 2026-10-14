@@ -59,10 +59,10 @@ gibt das Bit frei (player.c:1838). Geprüft in der eigenen Build-Runtime
 [Bericht](work/native_port_discard_question.result.md).
 
 **Effektprozeduren (Übersetzer abgelöst, weitere Gruppen):** alle 66 vormals
-regex-übersetzten Prozeduren sowie 66 nie übersetzte (effsub0, effsub1, effsub5 und
-effsub6, zuletzt die Augenlichter 145/146, die Gaswand 127 und der Schneefall 219 mit
-der Schneebibliothek aus effsub5) sind eigenständig in
-`native/effect_sprite_procedures.cpp` portiert; 20 Prozeduren dieser Dateien und die
+regex-übersetzten Prozeduren sowie 68 nie übersetzte (effsub0, effsub1, effsub1b,
+effsub5 und effsub6, zuletzt die Augenlichter 145/146, die Gaswand 127, der Schneefall
+219 mit der Schneebibliothek aus effsub5 und die Nachbilder 135/136) sind eigenständig in
+`native/effect_sprite_procedures.cpp` portiert; 18 Prozeduren dieser Dateien und die
 Familien aus effsub2/3/4 bleiben offen; `native/effect_procedures.cpp`, `native/effect_core.*` und
 `tools/generate_effect_procedures.py` sind entfernt. Dazu sind
 `njGetPlaneNormal`/`njGetPlaneNormal2`, `njProjectScreen` und der Bildschirmzustand
@@ -73,8 +73,12 @@ Generats sind in [QUALITY.md](QUALITY.md) dokumentiert. Belege, Offenliste der n
 übersetzten Prozeduren mit dem Scan aller 205 Raumdateien:
 [Ergebnis](work/native_port_effsub0_handport.result.md), Differenzläufe
 `build/validation/effproc-handport-20261014/`, Gruppen 7/8
-`build/validation/effproc-backface-20261014/`, Gruppe 9 `build/validation/effproc-snow-20261014/`.
-**Noch keine Starter-/Paketersetzung.**
+`build/validation/effproc-backface-20261014/`, Gruppe 9 `build/validation/effproc-snow-20261014/`, Gruppe 10 (inkl. `bhSetEffectLink` beim
+Raumladen) `build/validation/effproc-afterimage-20261014/`.
+Nachbild-Nachprüfung: belegte DifAmb-Lichtrechnung, committed Spieler-/Zusatzmodellaufnahme
+und Skin-FM; **88/88** Tests. Diagnose-A/B mit Originalraumgeometrie, keine natürliche
+Sichtabnahme. [Belege](work/native_port_effsub0_handport.result.md).
+**Start.command-Dev-App durch `./build.sh` aktualisiert; kein Paket ersetzt.**
 
 **Gegner-KI EN21:** Albinoid-Jungtier im nativen WorldEntity-/Dispatchpfad
 angebunden, mit Route/Spielmodus, Spielergriff, Audio und Effekten 396/399 auf der
@@ -89,12 +93,26 @@ und Rauch portiert; RM_1060 A/B und `tests/native/en09_world_test.cpp` grün.
 Eigene Build `build/en09-claude-20261014`. **Noch keine Starter-/Paketersetzung.**
 [Bericht](work/native_port_EN09_world.result.md).
 
+**Offene Punkte, Stand 2026-10-14 nachmittags:** ID-Karte Variante B (Original-Padsperre statt
+st_flg-0x4-Hostsperre), UFO-Kran bhEff134 + EN56-Dienste + Anzeige, Funken 308, Blutstoss 296/297,
+EN16-Folgeeffekte, Regen (Linien je Bild geleert), RM_1100 ENDIF ohne IF erledigt; EN12: Dienste und Feuereffekte 262-265/274-276 gebunden (Alexia kaempft in RM_9321); offen
+EN12-MV04 (Original-UB bei stehendem Spieler, Nutzerentscheidung), Effekte 256/257/266/269.
+
+**EN05/EN13/13B/EN23/bhStandPlayerMotion (2026-10-14 abends):** Hunter/Sweeper (EN05 +
+bhEne05s), Alexia II (EN13/13B), Riesenspinne (EN23 + bhEne03s/EN24-Kinder) portiert und
+im Dispatch; bhStandPlayerMotion an Kiste/Karte/Status/Computer/Player_controll 52/bhEff134.
+Runtime rechnet plp vor Event_init (player.c:840) — schliesst die Erst-Pass-Lücken
+`plp->mlwP->owP[n]`. CTest 89/89 grün (`enemy_en05_world`, `enemy_en13_world`,
+`enemy_en23_world`). Offen: Effekte 238/256/267, EN14-Lücken, plp->txp[2], keine
+Fensterabnahme, Windows nicht gebaut. Nur Entwicklungs-Start.command aktualisiert.
+[Bericht](work/native_port_en05_en13_en23_stand.result.md).
+
 **Gegner-Auditbefunde (2026-10-14):** `bhCheckWall` für Gegner, `bhControlMask` im
 Gegnerpass, Baum beim Raumaufbau (room.c:438), modellose Works, EN11-Dienste,
 Effekte 261/270 mit `bhCollisionCheckL2MDL` (plp mdl[3]) und Eckalpha gebunden; CTest
 `enemy_beam_effects`. Zombie-`natural` ist Originalverhalten (RM_0080 pos_no 0 →
-Sub_controll 0x8f Typ 8), Verifier korrigiert. Offen: EN05, EN13/13B, EN23,
-EN12-Feuereffekte 262ff., EN56/bhEff134, EN16-Folgeeffekte.
+Sub_controll 0x8f Typ 8), Verifier korrigiert. Offen: EN56/bhEff134, EN16-Folgeeffekte
+(EN05/EN13/EN23 und EN12-Feuereffekte siehe oben).
 [Bericht](work/native_port_enemy_audit_fixes.result.md).
 
 ## Gezielter Zugang zu bisherigen Befunden

@@ -213,10 +213,14 @@ void tables(){
             "en04_tree en04.c:254 differs");
     require(recvx_en04_shadow[0]==5&&recvx_en04_shadow[2]==18&&recvx_en04_shadow[5]==-1,
             "En04SdwTab en04.c:259 differs");
-    /* en04.c:264 En04_WpnDamageTbl: Zeile 15 { 0x18, 0, 1, 3, 3 }. */
+    /* en04.c:264 En04_WpnDamageTbl: Zeile 15 { 0x18, 0, 1, 3, 3 } in der
+       Feldfolge types.h:1931 {flg, nm_act, nm_blood, cb_act, cb_blood}. */
     require(recvx_en04_wpn_damage[15].flg==0x18&&recvx_en04_wpn_damage[15].nm_act==0&&
-            recvx_en04_wpn_damage[15].cb_act==1&&recvx_en04_wpn_damage[15].nm_blood==3&&
-            recvx_en04_wpn_damage[15].cb_blood==3,"En04_WpnDamageTbl[15] en04.c:279 differs");
+            recvx_en04_wpn_damage[15].nm_blood==1&&recvx_en04_wpn_damage[15].cb_act==3&&
+            recvx_en04_wpn_damage[15].cb_blood==3,"En04_WpnDamageTbl[15] en04.c:285 differs");
+    /* en04.c:274 Zeile 4 (Handfeuerwaffe) { 0x00, 0, 7, 3, 3 }: nm_blood 7, cb_act 3. */
+    require(recvx_en04_wpn_damage[4].nm_blood==7&&recvx_en04_wpn_damage[4].cb_act==3&&
+            recvx_en04_wpn_damage[4].cb_blood==3,"En04_WpnDamageTbl[4] en04.c:274 differs");
     require(recvx_en04_wpn_damage[11].flg==1&&recvx_en04_wpn_damage[14].flg==2&&
             recvx_en04_wpn_damage[16].flg==0x0a&&recvx_en04_wpn_damage[18].flg==0x0c&&
             recvx_en04_wpn_damage[2].cb_act==3&&recvx_en04_wpn_damage[6].cb_blood==5,
@@ -557,6 +561,17 @@ void damage(){
     /* en04.c:694: hp < 0 erzwingt den Kombozweig. */
     require((k.comb_flg&1u)&&k.comb_timeout==0&&k.comb_pnt==0,
             "ChgDmgMode en04.c:695-697 differs");
+
+    /* en04.c:696/716/719: toetender Treffer mit Waffe 4 (Zeile { 0, 0, 7, 3, 3 })
+       nimmt act = cb_act = 3 < 4 -> Schadensmodus 3; erst DG00 :3226 fuehrt dann
+       bei hp < 0 nach mode0 4. Mit vertauschter Feldfolge war act 7 und der
+       Hund blieb in mode0 1 (RM_1000: hp -7, nie tot). */
+    reset();
+    auto l=make(); l.mode0=1; l.mode2=7; l.exp0=allocate(sizeof(RECVX_EN04_EXP0));
+    l.flg|=4; l.hp=13; l.total_dam=20; l.comb_wep=4; l.wpnr_no=4; l.dam[1]=20;
+    recvx_en04_dmg_chk(&l);
+    require(l.hp==-7&&l.mode0==3&&l.mode1==0&&l.mode2==0&&l.mode3==0,
+            "ChgDmgMode toetender Treffer cb_act en04.c:716-723 differs");
 
     /* en04.c:724: EXP0 0x20000 (Treppe) waehlt DamageMode2 1. */
     reset();

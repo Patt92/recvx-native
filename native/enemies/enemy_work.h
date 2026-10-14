@@ -560,6 +560,10 @@ typedef struct RECVX_ENEMY_SERVICES {
        den Folgepaessen der Gegnerposition (eneset.c:496-498). */
     /* `get` erlaubt das originale Lesen-Aendern-Schreiben auf derselben
        Flaeche (bhEne00 Mode 0 else-Zweig und Mode 1 loeschen einzelne Bits). */
+    /* `epw->mlwP = &ep->mdl[k]` (en23.c:550/658, en24.c:107): der Work rechnet
+       und zeichnet ab jetzt das ML_WORK k von `owner` (owner == w: eigene Reihe).
+       0 = Modell fehlt. */
+    int   (*link_model)(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_WORK* owner, uint32_t k);
     int   (*mobile_wall_alloc)(void);
     int   (*mobile_wall_get)(int index, RECVX_ENEMY_ATR* out);
     void  (*mobile_wall_set)(int index, const RECVX_ENEMY_ATR* atr);
