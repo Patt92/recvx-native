@@ -31,7 +31,8 @@ def door_call_room(source: Path, destination: Path, attribute: int, stage: int,
                     0x33, 0, attribute & 0xFF, (attribute >> 8) & 0xFF,
                     stage, room, spawn, door_type,
                     0, 0])
-    data += struct.pack('<III', 12, 17, 18) + bytes([0x14, 0, 0, 0, 0, 0]) + script
+    # scd1 setzt wie die Raeume sp_flg 0x10 (bhSet 6,27,0), sonst ruht bhEventScheduler2 (event.c:13024).
+    data += struct.pack('<III', 12, 17, 24) + bytes([0x14, 0, 0, 0, 0]) + bytes([5, 6, 0x1b, 0, 0, 0, 0]) + script
     struct.pack_into('<I', data, 28, offset)
     destination.write_bytes(bytes(data))
 

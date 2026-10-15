@@ -19,6 +19,7 @@ struct Room {
  std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn actor;std::size_t motion=42;std::int64_t frame=0;
  Inventory inventory;StatusMenu menu;MessageDialog dialog;AudioMixer audio;MoviePlayer movie;PlayerAsset body;RoomWorld world;EventVm vm;GameplayInput input;
  Room(const std::filesystem::path& data,const char* name):bytes(read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.at(0)),audio(data),movie(data,{},audio),body(PlayerAsset::load(data)),world(bytes,scene,actor,motion,frame,audio,data),vm(bytes,inventory,dialog),input(inventory,menu,dialog,&vm){
+  bind_item_names(read_asset_file(data/"files/SYSMES.ALD",4*1024*1024)); // sys->mes_ip wie GameUi in der Runtime
   world.set_player_asset(&body);vm.values[1]=std::string(name)=="RM_0050"?5:0;
   vm.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes[1]);return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};
   vm.task_started=[&](unsigned n){world.start_task(n);};vm.animation_frame=[&](unsigned k,unsigned n){return world.frame(k,n);};vm.object_position=[&](unsigned k,unsigned n){return world.position(k,n);};
@@ -57,7 +58,9 @@ int main(int argc,char** argv){try{
   Room r(data,"RM_0000");unsigned ticks=0;
   while(!(r.dialog.active()&&r.dialog.index()==4)&&ticks<5000){if(ticks==press)r.input.menu_input(MenuInput::Confirm);if(ticks>press&&r.movie.active())r.input.menu_input(MenuInput::Confirm);r.tick();++ticks;}
   if(!r.dialog.active()||r.dialog.index()!=4){std::cerr<<"early press="<<press<<" dialog="<<r.dialog.index()<<" movie="<<r.movie.active()<<" st="<<r.vm.flags[5][0]<<" cb="<<r.vm.flags[10][0]<<" tasks=";for(auto t:r.vm.task_states())std::cerr<<t.event<<":"<<t.offset<<",";std::cerr<<"\n";}
-  check(r.dialog.active()&&r.dialog.index()==4,"early Enter fails to reach original hint");r.input.menu_input(MenuInput::Confirm);
+  check(r.dialog.active()&&r.dialog.index()==4,"early Enter fails to reach original hint");
+  for(unsigned t=0;t<200&&!r.dialog.closable();++t)r.tick(); // erst die aufgebaute Seite nimmt OK an (message.c:345, game.c:264)
+  r.input.menu_input(MenuInput::Confirm);
   for(unsigned t=0;t<100&&!r.menu.active;++t)r.tick();check(r.menu.active,"early Enter loses automatic inventory request");for(unsigned t=0;t<40;++t)r.tick();
   r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
   r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);for(unsigned t=0;t<4000;++t)r.tick();
@@ -84,7 +87,9 @@ int main(int argc,char** argv){try{
  {
   Room r(data,"RM_0000");unsigned ticks=0;
   while(!(r.dialog.active()&&r.dialog.index()==4)&&ticks<5000){if(ticks==1)r.input.menu_input(MenuInput::Confirm);if(ticks>1&&r.movie.active())r.input.menu_input(MenuInput::Confirm);r.tick();++ticks;}
-  check(r.dialog.active()&&r.dialog.index()==4,"natural fixture misses the original hint");r.input.menu_input(MenuInput::Confirm);
+  check(r.dialog.active()&&r.dialog.index()==4,"natural fixture misses the original hint");
+  for(unsigned t=0;t<200&&!r.dialog.closable();++t)r.tick(); // erst die aufgebaute Seite nimmt OK an (game.c:264)
+  r.input.menu_input(MenuInput::Confirm);
   for(unsigned t=0;t<100&&!r.menu.active;++t)r.tick();check(r.menu.active,"natural fixture loses the automatic inventory request");for(unsigned t=0;t<40;++t)r.tick();
   r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
   r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);
@@ -98,7 +103,9 @@ int main(int argc,char** argv){try{
  for(unsigned delay:{0u,60u,200u,400u,700u}){
   Room r(data,"RM_0000");unsigned ticks=0;
   while(!(r.dialog.active()&&r.dialog.index()==4)&&ticks<5000){if(ticks==1)r.input.menu_input(MenuInput::Confirm);if(ticks>1&&r.movie.active())r.input.menu_input(MenuInput::Confirm);r.tick();++ticks;}
-  check(r.dialog.active()&&r.dialog.index()==4,"skip fixture misses the original hint");r.input.menu_input(MenuInput::Confirm);
+  check(r.dialog.active()&&r.dialog.index()==4,"skip fixture misses the original hint");
+  for(unsigned t=0;t<200&&!r.dialog.closable();++t)r.tick(); // erst die aufgebaute Seite nimmt OK an (game.c:264)
+  r.input.menu_input(MenuInput::Confirm);
   for(unsigned t=0;t<100&&!r.menu.active;++t)r.tick();check(r.menu.active,"skip fixture loses the automatic inventory request");for(unsigned t=0;t<40;++t)r.tick();
   r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
   r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);

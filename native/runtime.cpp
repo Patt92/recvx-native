@@ -30,6 +30,7 @@
 #include "view_clip.h"
 #include "player_stairs.h"
 #include "player_action.h"
+#include "player_event.h"
 #include "player_hair.h"
 #include "player_head.h"
 #include <random>
@@ -240,6 +241,7 @@ int main(int argc,char** argv){
         // another owner had the pass (stairs, damage, push, combat, event), whose end writes
         // *(int*)&plp->mode0 = 1, so the next free pass enters act_std (mode2/mode3 = 0).
         RECVX_PLAYER_ACTION action{};bool action_resume=true,action_player_set=false;unsigned action_pad=0;
+        RECVX_PLAYER_EVENT player_event{}; // plp mode1/ct2/mtn_md fuer bhCPM0_event (pl_evt.c)
         int action_pad_dx=0,action_pad_dy=0; // sys->pad_dx/pad_dy (pad.c:195-278)
         // bhCPM1_act_bas (player.c:1994-2048) dispatches the action by plp->mode2; each of the
         // seven normal locomotion routines sets EXP1_I(0) |= 0x4 in its own mode3-0 entry block
@@ -420,7 +422,7 @@ int main(int argc,char** argv){
             if(restoring){const auto saved=recvx::snapshot_player(*restoring);actor.position=saved.position;actor.yaw=saved.yaw;} // room.c cb_flg 0x800000: ply_pos/ply_ang
             world.reset();camera_index=0;camera=scene.cameras[0];follow();stairs={};stair_etc_marked=-1;script_stairs.clear(); // bhSetRDT replaces the room-local player/stair work before bhInitEvent
             stage_geometry=scene.triangles;stable_textures=scene.textures.size();
-            if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4),inventory.game_mode);if(!restoring&&!scene.spawns.empty())world->initialize_player_spawn(); /* bhSetRoom before player setup/Event_init; saved positions retain Y. */origin=actor;follow();if(world)world->set_player_safe_position(actor.position);world->set_player_asset(player.get());{ // bhResetPlayer keeps EXP_WORK.wpntp; only bhSetPlayer (first setup, restored game) derives it from wpnr_no.
+            if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4),inventory.game_mode);recvx::bind_pose_gap([&](const char* name){if(world)world->report_enemy_gap(name);});if(!restoring&&!scene.spawns.empty())world->initialize_player_spawn(); /* bhSetRoom before player setup/Event_init; saved positions retain Y. */origin=actor;follow();if(world)world->set_player_safe_position(actor.position);world->set_player_asset(player.get());{ // bhResetPlayer keeps EXP_WORK.wpntp; only bhSetPlayer (first setup, restored game) derives it from wpnr_no.
                     const bool set_player=!action_player_set||bool(restoring);const std::int32_t wpntp=set_player?(inventory.weapon()<10?0:1):action.wpntp;
                     const int hp=inventory.hp;const bool poison=(inventory.player_stflg()&0x280000u)!=0;const std::int32_t dmlvl=hp>=120?(poison?1:0):hp>=30?1:2;
                     recvx_player_action_reset(&action,actor.position.x,actor.position.z,actor.yaw,wpntp,dmlvl,unsigned(motion));action_player_set=true;action_resume=true;action_pad=0;}world->set_player_character((args.player-10)%4);world->set_stand_player_hook(stand_player_motion);world->set_camera_offset_owner(&camera_offset);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);
@@ -440,14 +442,14 @@ int main(int argc,char** argv){
                 const auto clip_room=recvx::RoomIdentity::parse(rooms.name(room_index));
                 events->values[0]=clip_room.stage;events->values[1]=clip_room.room;
                 world->initialize_camera_clip(unsigned(camera_index)); // before Event_init can install an event-camera range
-                const auto identity=recvx::RoomIdentity::parse(rooms.name(room_index));audio.mount_sound_afs(identity.stage); /* system.c:1602 disc change task before the room loads */events->values[0]=identity.stage;events->values[1]=identity.room;menu.stage=events->values[0];menu.room=events->values[1];menu.file_progress=[&](){return events?recvx::file_page_reduction(events->flags[1]):7u;};menu.file_bonus=[&](){return events&&(events->flags[16][0]&0x1000);};menu.file_manual_read=[&](bool automatic){if(!events||(!automatic&&events->flag(9,480)))return;inventory.erase_read_manual(automatic);events->set_flag(9,480,0);};menu.shotgun_burst=[&](){return events&&events->flag(1,74);};menu.toggle_shotgun_burst=[&](){if(events)events->set_flag(1,74,2);};events->values[15]=unsigned(args.spawn);events->values[2]=unsigned(camera_index);events->values[21]=identity.variant;events->door=request_door;
+                const auto identity=recvx::RoomIdentity::parse(rooms.name(room_index));audio.mount_sound_afs(identity.stage); /* system.c:1602 disc change task before the room loads */events->values[0]=identity.stage;events->values[1]=identity.room;menu.stage=events->values[0];menu.room=events->values[1];menu.file_progress=[&](){return events?recvx::file_page_reduction(events->flags[1]):7u;};menu.file_bonus=[&](){return events&&(events->flags[16][0]&0x1000);};menu.file_manual_read=[&](bool automatic){if(!events||(!automatic&&events->flag(9,480)))return;inventory.erase_read_manual(automatic);events->set_flag(9,480,0);};menu.shotgun_burst=[&](){return events&&events->flag(1,74);};menu.toggle_shotgun_burst=[&](){if(events)events->set_flag(1,74,2);};events->values[15]=unsigned(args.spawn);events->values[2]=unsigned(camera_index);events->values[21]=identity.variant; /* system.c:1623: die Raumdatei rm_SRRC folgt aus sys->rcase, die geladene Datei bestimmt es also */events->door=request_door;
                 events->task_started=[&](unsigned level){world->start_task(level);};events->presentation_flags=[&](unsigned clear,unsigned set){world->set_presentation_flags((world->presentation_flags()&~clear)|set);};events->exm_light_off=[&]{world->clear_exm_light();};events->exm_cut_effect=[&]{world->mark_exm_cut_effect();};events->fixed_cut=[&](unsigned cno){world->set_fixed_cut(cno);};events->event_fixed_cut=[&](unsigned cno,unsigned kno){world->set_event_camera(cno,kno,false);};events->return_cut=[&]{world->return_to_cut();}; /* game.c:115-286 bhCheckExmAtari owners */events->player_yaw=[&]{return unsigned(actor.yaw)&65535u;};events->set_player_yaw=[&](unsigned yaw){actor.yaw=yaw&65535;};events->pad_state=[&]{return std::pair<unsigned,unsigned>{pad_ps,pad_on};};events->binding=[&](const recvx::EventCommand& c){if(c.opcode==0x39){const unsigned group=c.bytes.at(2);if(group>=scene.cut_enabled.size()||!scene.cut_tables[group])throw std::runtime_error("bhCamInfoSet camera group without cut table");scene.cut_enabled[group]=c.bytes.at(1)==0;follow();return true;}if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();return true;}
                     if(c.opcode==0x13&&c.bytes.at(1)==1){const bool bound=world->bind(c);follow();world->tick_camera(scene,camera,camera_index,automatic_camera);return bound;} // bhCamSet: bhCheckCut(1), then njClipZ, before the next script command
                     if(c.opcode==0xa4){script_stairs.push_back(c);return true;} // bhPlayerKaidanMotion: same stair driver as the interaction path
                     if(c.opcode==0xc6){game_over_requested=true;return true;} // bhGameOverSet
                     if(c.opcode==0xcd){return_title_requested=true;return true;} // bhReturnTitleEvt: RequestAllStopSoundEx(1,1,0); bhReturnTitle()
                     if(c.opcode==0xbd){retry_point=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index});return true;} // bhReTryPointSet = bhPushGameData
-                    return world->bind(c);};events->object_position=[&](unsigned k,unsigned i){return world->position(k,i);};events->item_box_object=[&](unsigned o){return world->start_item_box(o);};events->animation_frame=[&](unsigned k,unsigned i){return world->frame(k,i);};events->audio_active=[&](unsigned slot){return audio.active(slot);};events->audio_stop=[&](unsigned slot){audio.stop(slot);}; /* StopVoice stops its voice; never discard the mixed door/BGM/SFX queue. */events->system_voice=[&](unsigned voice){audio.play(1,"ADV",voice+16,1,false);}; /* adv.c CallSystemVoice: PatId[3], VoiceNo + 16. */events->movie_active=[&](){return movie.active();};events->movie_time=[&](){return movie.time_centiseconds();};events->item_message=[&](unsigned index,unsigned item){auto message=ui->system_message(index);for(unsigned i=0;i+1<message.size();++i)if(message[i]==0xff03&&message[i+1]==0xffff)message[++i]=std::uint16_t(item);return message;};events->enemy_health=[&](unsigned index)->std::optional<int>{const auto* e=world->state(1,index);return e?std::optional<int>(e->hp):std::nullopt;};events->set_enemy_health=[&](unsigned index,int hp){world->set_enemy_health(index,hp);};events->enemy_dead=[&](unsigned index){return world->enemy_dead(index);};events->object_ay_get=[&](unsigned i,int& v){return world->object_ay(i,v);};events->object_ay_set=[&](unsigned i,int v){world->set_object_ay(i,v);};events->enemy_node_ax_get=[&](unsigned e,unsigned n,int& v){return world->enemy_node_ax(e,n,v);};events->enemy_node_ax_set=[&](unsigned e,unsigned n,int v){world->set_enemy_node_ax(e,n,v);};events->enemy_disable=[&](unsigned index){world->deactivate_enemy(index);};events->event_camera=[&](unsigned& index,unsigned& key){index=world->event_camera_index;key=world->event_camera_key();return world->event_camera;};audio.begin_room_init();if(player&&player->has_motion(motion))world->commit_player_joints(player->script_nodes(player->pose(motion,animation,actor.position,actor.yaw))); /* player.c:840 bhSetPlayer: bhCalcModel(plp) before Event_init's bhControlEnemy (event.c:352) */events->initialize(); /* system.c mode 10: bhInitEvent before bhSysCallSndMonitor requests the room bank. */audio.load_room_sounds(identity.stage,identity.room,audio.take_room_sound_case());audio.load_player_sounds((args.player-10)%4);audio.room_fade_in(); /* init script and soundbank done, SendSoundCommand(1) */}
+                    return world->bind(c);};events->object_position=[&](unsigned k,unsigned i){return world->position(k,i);};events->item_box_object=[&](unsigned o){return world->start_item_box(o);};events->animation_frame=[&](unsigned k,unsigned i){return world->frame(k,i);};events->audio_active=[&](unsigned slot){return audio.active(slot);};events->audio_stop=[&](unsigned slot){audio.stop(slot);}; /* StopVoice stops its voice; never discard the mixed door/BGM/SFX queue. */events->system_voice=[&](unsigned voice){audio.play(1,"ADV",voice+16,1,false);};events->system_se=[&](unsigned se){audio.play_system(se);}; /* adv.c CallSystemVoice: PatId[3], VoiceNo + 16. */events->movie_active=[&](){return movie.active();};events->movie_time=[&](){return movie.time_centiseconds();};events->item_message=[&](unsigned index,unsigned item){auto message=ui->system_message(index);for(unsigned i=0;i+1<message.size();++i)if(message[i]==0xff03&&message[i+1]==0xffff)message[++i]=std::uint16_t(item);return message;};events->enemy_health=[&](unsigned index)->std::optional<int>{const auto* e=world->state(1,index);return e?std::optional<int>(e->hp):std::nullopt;};events->set_enemy_health=[&](unsigned index,int hp){world->set_enemy_health(index,hp);};events->enemy_dead=[&](unsigned index){return world->enemy_dead(index);};events->object_ay_get=[&](unsigned i,int& v){return world->object_ay(i,v);};events->object_ay_set=[&](unsigned i,int v){world->set_object_ay(i,v);};events->enemy_node_ax_get=[&](unsigned e,unsigned n,int& v){return world->enemy_node_ax(e,n,v);};events->enemy_node_ax_set=[&](unsigned e,unsigned n,int v){world->set_enemy_node_ax(e,n,v);};events->enemy_disable=[&](unsigned index){world->deactivate_enemy(index);};events->event_camera=[&](unsigned& index,unsigned& key){index=world->event_camera_index;key=world->event_camera_key();return world->event_camera;};audio.begin_room_init();if(player&&player->has_motion(motion))world->commit_player_joints(player->script_nodes(player->pose(motion,animation,actor.position,actor.yaw))); /* player.c:840 bhSetPlayer: bhCalcModel(plp) before Event_init's bhControlEnemy (event.c:352) */events->initialize(); /* system.c mode 10: bhInitEvent before bhSysCallSndMonitor requests the room bank. */audio.load_room_sounds(identity.stage,identity.room,audio.take_room_sound_case());audio.load_player_sounds((args.player-10)%4);audio.room_fade_in(); /* init script and soundbank done, SendSoundCommand(1) */}
             if(events&&world&&(!retry_point||player_change_push))retry_point=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index}); // bhInitPlayer: bhPushGameData
             std::cout<<rooms.name(room_index)<<": "<<scene.object_count<<" objects, "<<stage_triangles<<" stage triangles, "<<scene.cameras.size()<<" cameras, "<<scene.spawns.size()<<" spawns\n";
         };
@@ -502,7 +504,9 @@ int main(int argc,char** argv){
             for(unsigned i=0;i<6;++i)for(unsigned j=0;j<3;++j)in.angles[i][j]=hout[i][j]; /* post-head pose */
             in.ax=actor.pitch;in.ay=actor.yaw;in.az=actor.roll; /* plp->ax/ay/az of the one player work */
             in.offset[0]=link.offset.x;in.offset[1]=link.offset.y;in.offset[2]=link.offset.z; /* obwp[2].lox/loy/loz */
-            in.reset=hair_reset?1:0;hair_reset=false;
+            /* objitm.c:2184: bhObjClpn Fall 1 setzt mit plp->flg2 0x2 (bhInitPonySet 0x80) den Zopf zurueck und loescht das Bit. */
+            const bool pony=events&&(events->flags[15][0]&0x2u)&&hair.mode0==1;if(pony)events->flags[15][0]&=~0x2u;
+            in.reset=(hair_reset||pony)?1:0;hair_reset=false;
             std::int32_t out[RECVX_HAIR_SEGMENTS][2];if(recvx_hair_tick(&hair,hair_variant,&in,out)){hair_angles.assign(RECVX_HAIR_SEGMENTS,{0,0});for(unsigned i=0;i<RECVX_HAIR_SEGMENTS;++i)hair_angles[i]={out[i][0],out[i][1]};}
             auto tail_pose=tail->bind_pose();for(unsigned n=0;n<tail_pose.size()&&n<hair_angles.size();++n){tail_pose[n].angles[0]=hair_angles[n][0];tail_pose[n].angles[1]=hair_angles[n][1];}
             NJS_POINT3 lo=link.offset,at;NJS_MATRIX head_mtx;std::copy_n(nodes[link.node].value,16,head_mtx);njCalcPoint(&head_mtx,&lo,&at);
@@ -512,7 +516,7 @@ int main(int argc,char** argv){
         // the same angles the hair sampled, so the head overrides are merged over the combat ones.
         auto head_draw_overrides=[&]{auto out=combat.pose_overrides(*player,motion,animation);
             for(const auto& node:head_pose)out[node.first]=node.second;return out;};
-        auto compose=[&](){scene.shadows.clear();scene.lines.clear(); /* njDrawLine3D-Linien gelten nur fuer dieses Bild */scene.triangles=stage_geometry;const auto stage_count=scene.triangles.size();scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes; /* game.c:357: bhPutModel(plp) only with pt_flg 0x1 (or stflg 0x1000000, whose sleep counter stays with the existing owner); the pose is still sampled for links. */const bool player_put=!world||(world->presentation_flags()&1u)||(world->effect_context().player_stflg&0x1000000u);if(player&&(!world||!world->player_hidden)){auto sampled=world?world->sample_player(*player,&nodes,head_draw_overrides()):player->sample(motion,animation,actor.position,actor.yaw,&nodes,head_draw_overrides());if(player_put)recvx::append_actor(scene,sampled,texture_base);}
+        auto compose=[&](){scene.shadows.clear();scene.lines.clear(); /* njDrawLine3D-Linien gelten nur fuer dieses Bild */scene.triangles=stage_geometry;const auto stage_count=scene.triangles.size();scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes; /* game.c:357: bhPutModel(plp) only with pt_flg 0x1 (or stflg 0x1000000, whose sleep counter stays with the existing owner); the pose is still sampled for links. */const bool player_put=!world||(world->presentation_flags()&1u)||(world->effect_context().player_stflg&0x1000000u);if(player&&(!world||!world->player_hidden||(player_put&&world->player_sleep_draw()))){auto sampled=world?world->sample_player(*player,&nodes,head_draw_overrides()):player->sample(motion,animation,actor.position,actor.yaw,&nodes,head_draw_overrides());if(player_put)recvx::append_actor(scene,sampled,texture_base);}
             if(player_put&&player&&(!world||!world->player_hidden))if(const auto* tail=player_attachment()){const auto link=*player_link();if(link.node<nodes.size()){
                 NJS_MATRIX head;std::copy_n(nodes[link.node].value,16,head);NJS_POINT3 at;auto lo=link.offset;njCalcPoint(&head,&lo,&at); // linked object: position only
                 NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,at.x,at.y,at.z);recvx::append_actor(scene,tail->sample_rest(root,hair_angles),attachment_base);}}for(std::size_t i=stage_count;i<scene.triangles.size();++i)scene.triangles[i].after_modifiers=true; /* game.c:318 bhDrawPlayer follows bhDrawEffect */if(player_put)combat.append(scene,nodes,world&&(world->player_hidden||world->player_scripted),world.get());if(world)world->append(scene,nodes,world->camera(scene,camera));};
@@ -531,7 +535,7 @@ int main(int argc,char** argv){
         auto advance=[&](){const auto frames=player_frames();if(frames)animation=(animation+65536)%(frames*65536);};
         recvx::Frontend frontend(input_config,args.controls);frontend.sound=[&](unsigned id){audio.play_system(id);};frontend.vibrate=[&](unsigned pattern){vibration.start(0,int(pattern));}; /* TitleCall: StartVibrationEx(PortId, 16) */frontend.third_person=&third_person;
         // LOAD GAME ist waehlbar, sobald ein Schreibmaschinen-Spielstand vorliegt.
-        frontend.has_saves=[&]{for(const auto& s:recvx::list_save_slots(saves_dir))if(s.exists)return true;return false;};
+        frontend.has_saves=[&]{for(const auto& s:recvx::list_save_slots(saves_dir))if(s.exists||s.damaged)return true;return false;};
         // Host render quality (settings screen, video.ini); --nearest/--ss override it for this run.
         recvx::VideoConfig video(args.video_config);if(!video.status().empty())std::cerr<<"Video settings ignored: "<<video.status()<<'\n';
         if(!args.video_explicit){args.nearest=!video.settings().filtering();args.supersampling=video.settings().supersampling();}frontend.video=&video;if(args.preview||args.in_game||args.inventory){frontend.hide();load();}
@@ -564,7 +568,11 @@ int main(int argc,char** argv){
                 // Com_ExecRoomFadeIn (finish_door_sound); BGM, Ambient und alle uebrigen
                 // Kanaele bleiben in beiden Faellen unberuehrt.
                 if(door.skipped())for(unsigned slot=recvx::door_voice_first;slot<=recvx::door_voice_last;++slot)audio.stop(slot);
-                movie.stop();audio.stop(1);args.spawn=destination.spawn;motion=42;animation=0;locomotion=false;room_handover=true;++room_changes;load();gameplay_input.set_events(events.get());follow();audio.finish_door_sound();}
+                movie.stop();audio.stop(1);args.spawn=destination.spawn;motion=42;animation=0;locomotion=false;room_handover=true;++room_changes;load();
+                /* bhStartDoorDemo Fall 1 (room.c:1006): nach dem Laden sp_flg = -1. Erst damit
+                   laeuft der Scheduler wieder, den bhInitEvent mit sp_flg &= ~0x10 verlassen hat. */
+                if(events)events->flags[6][0]=0xffffffffu;
+                gameplay_input.set_events(events.get());follow();audio.finish_door_sound();}
             return true;
         };
         bool frontend_quit=false;
@@ -1171,7 +1179,8 @@ int main(int argc,char** argv){
             // pass gate (player.c:1365: sp_flg 0x1, plp->stflg 0x1000000 clear) and bhSysCallMain's
             // pad gate (system.c:522-534: pad_on = 0 without sp_flg 0x20, cb_flg 0x4 masks 0x1188F).
             const bool pass_gate=!events||((events->flags[6][0]&1u)&&!(events->flags[14][0]&0x1000000u));
-            const bool blocked=debug.active()||frontend.active()||transition_pending||computer.active()||menu.active||dialog.active()||movie.active()||(world&&(world->player_scripted||world->player_hidden))||!pass_gate;
+            /* plp mode0 7 ueber Player_controll 131: bhControlPlayer fuehrt bhCPM0_event auch waehrend eines Texts aus (nur das sp_flg-Tor gilt). */const bool event_mode=world&&!world->player_scripted&&world->player_event().requested&&(world->player_mode()&0xffu)==7u; // plp->mode0 7 (bhCtrPly_mode0[7])
+            const bool blocked=debug.active()||frontend.active()||transition_pending||computer.active()||menu.active||(dialog.active()&&!event_mode)||movie.active()||(world&&(world->player_scripted||world->player_hidden))||!pass_gate;
             
 
             const bool next_target=combat_input.next_target;combat_input.next_target=false;
@@ -1199,7 +1208,7 @@ int main(int argc,char** argv){
             unsigned pad=(move>0?0x1u:0u)|(move<0?0x2u:0u)|(turn<0?0x4u:0u)|(turn>0?0x8u:0u)|(run?0x400u:0u);
             if(!(events->flags[6][0]&0x20u))pad=0;            // system.c:528 sys->pad_on = 0
             if(events->flags[10][0]&4u)pad&=0x1188Fu;          // system.c:531 cb_flg 0x4
-            if(action_resume){action.mode2=0;action.mode3=0;action_resume=false;}
+            if(action_resume&&!event_mode){action.mode2=0;action.mode3=0;}if(!event_mode)action_resume=false; // bhCPM0_event fuehrt mode3 selbst
             action.px=actor.position.x;action.pz=actor.position.z;action.ay=actor.yaw;action.mtn_no=unsigned(motion);action.frm_no=std::int32_t(animation);
             if(world->player_safe_position_ready()){const auto safe=world->player_safe_position();action.spx=safe.x;action.spz=safe.z;}
             struct ActionHost{const recvx::PlayerAsset* body;recvx::RoomWorld* world;const recvx::SceneSpawn* actor;RECVX_HEAD_STATE* head;};
@@ -1226,9 +1235,20 @@ int main(int argc,char** argv){
                 const NJS_POINT3 head_point{h->head->head[0],h->head->head[1],h->head->head[2]}; // EXP1_F(12/16/20)
                 return h->world->search_near_enemy_b(head_point,ay,13653,30.0f)?1:0;};
             io.gap=[](void* u,const char* name){static_cast<ActionHost*>(u)->world->report_enemy_gap(name);};
+            if(event_mode){
+                // pl_evt.c:62 bhCPM0_event an Stelle von bhCtrPly_mode0[0]; Ende ueber Player_controll 128/139.
+                const auto& ev=world->player_event();action.mode2=ev.mode2;player_event.mode1=ev.mode1;
+                if(ev.reset){action.mode3=0;world->clear_player_event_reset();}
+                RECVX_PLAYER_EVENT_IO eio{};eio.base=&io;eio.flr_snd=world->player_floor_sound();
+                eio.floor_step=[](void* u,std::uint32_t snd,std::uint32_t type){static_cast<ActionHost*>(u)->world->player_floor_step(snd,type);};
+                recvx_player_event(&action,&player_event,&eio);
+                world->set_player_mode((world->player_mode()&0x0000ffffu)|(action.mode2<<16)|(action.mode3<<24)); // plp mode2/mode3 im einen Spielerwork
+                action_resume=true; // zurueck zu bhCPM0_action beginnt dort bei mode2/mode3 0 (event.c:9639)
+            }else{
             if(!(events->flags[13][0]&0x10000u))recvx_player_action_pad(&action,&io,nullptr);
             if(!recvx_player_action_bas(&action,&io)){action_resume=true;follow();return;} // mode2 14..22: special owners
             recvx_player_action_turn(&action,&io);
+            }
             if(world->player_safe_position_ready())world->set_player_safe_position({action.spx,world->player_safe_position().y,action.spz});
             const auto from=actor.position;
             actor.yaw=action.ay&65535;
@@ -1238,8 +1258,8 @@ int main(int argc,char** argv){
             // bhCPM2_act_wlk/_run/_bak/_bk2 carry the collided step (arp 2.0/3.0/-1.0 and
             // bhAddSpeed); act_std, act_srt and act_sta only carry EXP_WORK.spxn/spzn and run no
             // wall pass, so a scripted teleport (rom->posp) is not pushed out of its own geometry.
-            const unsigned m2=action.mode2;const bool movement=(m2>=3&&m2<=6)||(m2>=9&&m2<=12);
-            const int wall_move=(m2>=3&&m2<=6)?1:(m2>=9&&m2<=12)?-1:0;
+            const unsigned m2=action.mode2;const bool movement=event_mode?(m2>=2&&m2<=4)||m2==6||m2==7:(m2>=3&&m2<=6)||(m2>=9&&m2<=12);
+            const int wall_move=event_mode?(m2==4?-1:movement?1:0):(m2>=3&&m2<=6)?1:(m2>=9&&m2<=12)?-1:0;
             if(movement){
                 locomotion=true;
                 actor.position=world->move_player(from,{action.px,from.y,action.pz},wall_move,m2==6,0);

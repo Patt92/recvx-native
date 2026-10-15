@@ -80,11 +80,19 @@ bool hook_player_get(RECVX_ENEMY_PLAYER& p,const char* what);
 void hook_player_set(const RECVX_ENEMY_PLAYER& p);
 void hook_player_exp0(unsigned offset,float value);
 void hook_player_fire(int jno,NJS_POINT3 ofp,float size,int life);
-void hook_fire_light(NJS_POINT3 pos);
+// rom->lgtp[1] der Feuer (effsub2.c:2681 E12_Fire, :4012 E14_Fire): Summenlage, Farbe und der
+// Teiler der Reichweite 20 + lkono/far_divisor (0 = feste Reichweite 20).
+void hook_fire_light(NJS_POINT3 pos,NJS_POINT3 color,float far_divisor);
 void hook_en12_binta(void* enemy_work,int action);
 bool hook_effect_se_playing(int se);
 void hook_effect_se(NJS_POINT3 pos,int se);
 void hook_player_dv(NJS_POINT3 dv);
+// plp->watr des Spielerbesitzers (EffectWorldHooks::player_watr); ohne Besitzer benannte Luecke.
+bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what);
+// hitchkl.c:49 bhCollisionCheckLine2(p1, p2, flg, flr_no) auf rom->walp + sys->mwalp des
+// Raumbesitzers (set_effect_walls) samt :911 bhGetHitCollisionNormal: end wird auf den Treffer
+// gekuerzt, normal ist die Flaechennormale des letzten Treffers. Ohne Wandsatz benannte Luecke.
+bool collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what);
 // effsub1.c:8825 bhEff127: plp->hp = -1 am Spielerwork des Raumbesitzers.
 void request_player_kill();
 // sys->ef_flg |= bits (der Raumbesitzer haelt ef_flg).

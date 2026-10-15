@@ -54,17 +54,18 @@ int main(){try{
     check(slots[2].exists&&slots[2].room=="RM_1080.RDX"&&slots[2].hp==120&&slots[2].play_time==4321&&slots[2].save_room==2,"Slot-3-Kopf falsch");
     const auto back=read_save_slot(saves,3);
     check(back.save.ply_hp[0]==120&&back.host.room=="RM_1080.RDX"&&back.save.stv_tm==4321,"Slot-Roundtrip verliert Daten");
+    {std::ofstream broken(save_slot_path(saves,5),std::ios::binary);broken<<"not a snapshot";}
+    slots=list_save_slots(saves);
+    check(!slots[4].exists&&slots[4].damaged,"beschaedigte Slotdatei wird nicht als defekt erkannt");
     {bool threw=false;try{save_slot_path(saves,0);}catch(const std::exception&){threw=true;}check(threw,"Slot 0 akzeptiert");}
     {bool threw=false;try{save_slot_path(saves,kSaveSlots+1);}catch(const std::exception&){threw=true;}check(threw,"Slot 16 akzeptiert");}
     using Phase=Typewriter::Phase;using Key=Typewriter::Key;
-    // Speicherbildschirm, Originalzustaende ps2_SaveScreen.c: AwarenessCard -> SelectCard
-    // (443–520, Y 0 Karte / 1 Verlassen), OK -> LostDirCheck -> SelectFile (1069–1083,
-    // lSelectFileNumber 0, nicht der erste freie Slot).
+    // Speicherbildschirm, Originalzustaende ps2_SaveScreen.c. Die
+    // Memory-Karten-Auswahl (SelectCard, 443–520) ist als Konsolenverhalten
+    // entfernt; der Host-Ordner ist ein Speicherort, der Bildschirm startet
+    // direkt im SelectFile (1069–1083, lSelectFileNumber 0, nicht der erste freie Slot).
     Typewriter tw;tw.open(Typewriter::Mode::Save,saves);
-    check(tw.active()&&tw.slots().size()==kSaveSlots&&tw.phase()==Phase::Card&&tw.selection()==0,"Speicherbildschirm startet nicht in der Kartenauswahl");
-    tw.input(Key::Down);check(tw.selection()==1,"SelectCard: Richtung schaltet nicht auf Verlassen");
-    tw.input(Key::Up);check(tw.selection()==0,"SelectCard: Richtung schaltet nicht auf die Karte zurueck");
-    tw.input(Key::Confirm);check(tw.phase()==Phase::Files&&tw.cursor()==0&&tw.top()==0,"OK auf der Karte oeffnet SelectFile nicht bei Slot 1");
+    check(tw.active()&&tw.slots().size()==kSaveSlots&&tw.phase()==Phase::Files&&tw.cursor()==0&&tw.top()==0,"Speicherbildschirm startet nicht in der Slotliste bei Slot 1");
     tw.input(Key::Down);check(tw.cursor()==1,"Cursor faellt nicht");
     tw.input(Key::Up);check(tw.cursor()==0,"Cursor steigt nicht");
     // Leerer Slot: SaveCursorNew (1270–1322), Meldung 482, Auswahl 0 = speichern.
@@ -88,36 +89,56 @@ int main(){try{
     tw.control(0u,0u);check(tw.phase()==Phase::Exit&&!tw.done(),"Erfolg geht nicht in den Verlassen-Zustand");
     tw.control(0u,0u);check(tw.done()&&tw.confirmed()&&!tw.cancelled(),"Verlassen ohne ev_flg 56 beendet den Bildschirm nicht im naechsten Bild");
     tw.reset();check(!tw.active(),"reset laesst den Bildschirm aktiv");
-    // Schreibfehler: ErrCardWrite (1443–1464), Meldung 486, OK/Cancel zurueck zur Karte.
+    // Schreibfehler: ErrCardWrite (1443–1464), Meldung 486, OK/Cancel zurueck zur Slotliste.
     tw.open(Typewriter::Mode::Save,saves);tw.input(Key::Confirm);tw.input(Key::Confirm);tw.input(Key::Confirm);tw.control(0u,0u);
     tw.io_complete(false,saves);check(tw.phase()==Phase::Error&&tw.message()==486,"Schreibfehler zeigt nicht 486");
-    tw.input(Key::Confirm);check(tw.phase()==Phase::Card&&tw.selection()==0&&tw.cursor()==0,"Fehler kehrt nicht zur Kartenauswahl zurueck");
-    // Verlassen mit ev_flg 56: SpecialSave (536–604), Meldung 253, Auswahl 1 = zurueck zur Karte.
-    tw.input(Key::Down);tw.input(Key::Confirm);check(tw.phase()==Phase::Exit&&tw.cancelled(),"Verlassen auf der Karte setzt den Exit-Zustand nicht");
+    tw.input(Key::Confirm);check(tw.phase()==Phase::Files&&tw.cursor()==0,"Fehler kehrt nicht zur Slotliste zurueck");
+    // Verlassen mit ev_flg 56: SpecialSave (536–604), Meldung 253, Auswahl 1 = zurueck zur Slotliste.
+    tw.input(Key::Cancel);check(tw.phase()==Phase::Exit&&tw.cancelled(),"Cancel in der Slotliste setzt den Exit-Zustand nicht");
     tw.control(0u,0u,true);check(tw.phase()==Phase::SpecialSave&&tw.selection()==1&&tw.message()==253&&!tw.done(),"ev_flg 56 oeffnet die Sonderspeicher-Rueckfrage nicht");
-    tw.input(Key::Confirm);check(tw.phase()==Phase::Card&&!tw.done(),"Sonderspeicher-Rueckfrage 'zurueck' fuehrt nicht zur Karte");
-    tw.input(Key::Cancel);tw.control(0u,0u,true);check(tw.phase()==Phase::SpecialSave,"Cancel auf der Karte umgeht die Sonderspeicher-Rueckfrage");
-    tw.input(Key::Cancel);check(tw.phase()==Phase::Card,"Cancel in der Sonderspeicher-Rueckfrage fuehrt nicht zur Karte");
+    tw.input(Key::Confirm);check(tw.phase()==Phase::Files&&!tw.done(),"Sonderspeicher-Rueckfrage 'zurueck' fuehrt nicht zur Slotliste");
+    tw.input(Key::Cancel);tw.control(0u,0u,true);check(tw.phase()==Phase::SpecialSave,"Cancel in der Slotliste umgeht die Sonderspeicher-Rueckfrage");
+    tw.input(Key::Cancel);check(tw.phase()==Phase::Files,"Cancel in der Sonderspeicher-Rueckfrage fuehrt nicht zur Slotliste");
     tw.input(Key::Cancel);tw.control(0u,0u,true);tw.input(Key::Up);check(tw.selection()==0,"Richtung schaltet die Sonderspeicher-Rueckfrage nicht um");
     tw.input(Key::Confirm);check(tw.done()&&tw.cancelled(),"Sonderspeicher-Rueckfrage 'verlassen' setzt usExitFlag nicht sofort");
     tw.reset();
-    // Ladebildschirm, ps2_LoadScreen.c: SelectCard (334–411) -> DirCheck -> SelectFile
-    // (650–665, Slot 1), leerer Slot -> NoSave (787–808), belegter -> LoadCursor (811–865).
-    tw.open(Typewriter::Mode::Load,saves);check(tw.phase()==Phase::Card,"Ladebildschirm startet nicht in der Kartenauswahl");
-    tw.input(Key::Confirm);check(tw.phase()==Phase::Files&&tw.cursor()==0,"Ladebildschirm startet nicht bei Slot 1");
+    // Ladebildschirm, ps2_LoadScreen.c: SelectCard (334–411) entfällt als
+    // Konsolenverhalten; DirCheck -> SelectFile (650–665, Slot 1), leerer Slot
+    // -> NoSave (787–808), belegter -> LoadCursor (811–865).
+    tw.open(Typewriter::Mode::Load,saves);check(tw.phase()==Phase::Files&&tw.cursor()==0,"Ladebildschirm startet nicht in der Slotliste bei Slot 1");
     tw.input(Key::Confirm);check(tw.phase()==Phase::NoSave&&tw.message()==458&&!tw.confirmed(),"Laden aus einem leeren Slot wird nicht mit 458 abgelehnt");
     tw.input(Key::Cancel);check(tw.phase()==Phase::Files&&tw.cursor()==0,"NoSave kehrt nicht zur Slotliste zurueck");
     tw.input(Key::Down);tw.input(Key::Down);tw.input(Key::Confirm);check(tw.phase()==Phase::Confirm&&tw.message()==459&&tw.selection()==0,"belegter Ladeslot fragt nicht mit 459/Ja");
     tw.input(Key::Confirm);tw.control(0u,0u);check(tw.io_pending()&&tw.slot()==3,"Laden fordert Slot 3 nicht an");
     tw.io_complete(true,saves);tw.control(0u,0u);check(tw.done()&&tw.confirmed()&&tw.slot()==3,"Laden bestaetigt nicht Slot 3");
     tw.reset();tw.open(Typewriter::Mode::Load,saves);tw.input(Key::Confirm);
-    tw.input(Key::Cancel);check(tw.phase()==Phase::Card&&!tw.done(),"Cancel in der Slotliste fuehrt nicht zur Karte (LoadScreen 743–747)");
-    tw.input(Key::Cancel);tw.control(0u,0u);check(tw.done()&&tw.cancelled(),"Cancel auf der Karte beendet den Ladebildschirm nicht (TitleExit)");
+    tw.input(Key::Cancel);check(tw.phase()==Phase::Files&&!tw.done(),"Cancel verlaesst die NoSave-Meldung nicht zur Slotliste (LoadScreen 743–747)");
+    tw.input(Key::Cancel);check(tw.phase()==Phase::Exit&&!tw.done(),"Cancel in der Slotliste fuehrt nicht in den Verlassen-Zustand");
+    tw.control(0u,0u);check(tw.done()&&tw.cancelled(),"Verlassen beendet den Ladebildschirm nicht (TitleExit)");
+    // Ein defekter Slot sperrt nicht die ganze Liste: Laden meldet den Defekt
+    // erst bei Auswahl; Speichern verlangt vor dem Ersetzen die uebliche 483-Abfrage.
+    Typewriter damaged_load;damaged_load.open(Typewriter::Mode::Load,saves);
+    check(damaged_load.phase()==Phase::Files&&damaged_load.slots()[4].damaged,"defekter Slot blockiert bereits beim Oeffnen");
+    for(unsigned i=0;i<4;++i)damaged_load.input(Key::Down);
+    damaged_load.input(Key::Confirm);
+    check(damaged_load.phase()==Phase::Error&&damaged_load.message()==461,"Laden eines defekten Slots zeigt keinen Lesefehler");
+    damaged_load.input(Key::Confirm);
+    check(damaged_load.phase()==Phase::Files&&damaged_load.cursor()==4,"Lesefehler kehrt nicht zum betroffenen Slot zurueck");
+    Typewriter damaged_save;damaged_save.open(Typewriter::Mode::Save,saves);
+    for(unsigned i=0;i<4;++i)damaged_save.input(Key::Down);
+    damaged_save.input(Key::Confirm);
+    check(damaged_save.phase()==Phase::Confirm&&damaged_save.message()==483&&damaged_save.selection()==1,"defekter Slot wird beim Speichern nicht als belegt behandelt");
+    damaged_save.input(Key::Confirm);
+    check(damaged_save.phase()==Phase::Files&&damaged_save.cursor()==4,"Standard-Nein ueberschreibt den defekten Slot");
+    damaged_save.input(Key::Confirm);damaged_save.input(Key::Up);damaged_save.input(Key::Confirm);
+    check(damaged_save.phase()==Phase::Io,"bestaetigtes Ersetzen startet den Schreibvorgang nicht");
+    damaged_save.control(0u,0u);write_save_slot(saves,5,snap);damaged_save.io_complete(true,saves);
+    check(damaged_save.phase()==Phase::Typing&&damaged_save.slots()[4].exists&&!damaged_save.slots()[4].damaged,"defekter Slot wird nach erfolgreichem Ersatz nicht als gueltig erkannt");
     // SelectFile: ps2_SaveScreen.c:1086-1169 / ps2_LoadScreen.c:667-748.
     // Eigene Wiederholung bei gehaltenem Pad: Bilder 1, 8, 11; keine Host-Repeats.
     for(const auto mode:{Typewriter::Mode::Save,Typewriter::Mode::Load}){
-        Typewriter pad;pad.open(mode,saves);pad.control(0u,0x800u);
-        check(pad.phase()==Phase::Files,"Pad-OK auf der Karte oeffnet SelectFile nicht");
+        Typewriter pad;pad.open(mode,saves);
+        check(pad.phase()==Phase::Files,"Bildschirm startet nicht in der Slotliste");
         const unsigned initial=pad.cursor();
         for(unsigned frame=1;frame<=11;++frame){
             pad.control(2u,0u);
@@ -128,15 +149,15 @@ int main(){try{
         pad.control(1u,0u);
         check(pad.cursor()==(initial+2u)%kSaveSlots,"Loslassen setzt die Richtungszaehler nicht zurueck");
         pad.control(2u,0x1000u);
-        check(pad.phase()==Phase::Card&&pad.cursor()==0&&!pad.done(),"Cancel muss die Richtung im selben Bild sperren und zur Karte fuehren");
+        check(pad.phase()==Phase::Exit&&pad.cursor()==(initial+2u)%kSaveSlots&&!pad.done(),"Cancel muss die Richtung im selben Bild sperren und in den Verlassen-Zustand fuehren");
     }
     {
-        Typewriter pad;pad.open(Typewriter::Mode::Save,saves);pad.control(0u,0x800u);
+        Typewriter pad;pad.open(Typewriter::Mode::Save,saves);
         pad.control(2u,0x1800u);
         check(pad.phase()==Phase::Confirm&&pad.cursor()==0,"OK hat Vorrang vor Cancel und Richtungsbewegung");
     }
     {
-        Typewriter pad;pad.open(Typewriter::Mode::Load,saves);pad.control(0u,0x800u);
+        Typewriter pad;pad.open(Typewriter::Mode::Load,saves);
         pad.control(1u,0u);
         pad.control(0u,0x800u);
         check(pad.phase()==Phase::NoSave&&!pad.confirmed(),"Pad-OK akzeptiert einen leeren Ladeslot");

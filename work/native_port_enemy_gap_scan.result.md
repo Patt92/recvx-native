@@ -61,9 +61,14 @@ den Pool zu schreiben.
 | + EN02 Gulp Worm (Port, 6 Räume) + Stimme 127 | 35 |
 | + bhEff_Sub355 (3 Räume, schließt `eff[-1]` mit) | 32 |
 | + bhEff219 (4 Räume, Fehllücke entfernt) | 32 Räume / 48 Lücken-Einträge |
-| + EN11-Dienstbindung je Pass (RM_9100) | **31** Räume / 45 Einträge |
+| + EN11-Dienstbindung je Pass (RM_9100) | 31 Räume / 45 Einträge |
+| + EN19 Tyrant T-078 (Subagent, geprüft) | **31** Räume / **52** Einträge (s. u.) |
+| + Effekt 256/257 (bhEff_E03_Acid/bhEff_E00_Acid) + EN14-Säuredienste | **31** Räume / **50** Einträge |
+| + Effekt 267/269 + alle EN14-Dienste (LookPlayer, Strahlsuche) | **31** Räume / **46** Einträge |
+| + Effekt 250 (Mince) + `model_texp_index` | **31** Räume / **44** Einträge |
+| + Morph-Zeichenpfad (actor.cpp) | **31** Räume / **44** Einträge (run13; Fix außerhalb des Scan-Endbilds) |
 
-Prüfläufe: `run1` (vorher), `run2`…`run8` (nachher) in diesem Verzeichnis,
+Prüfläufe: `run1` (vorher), `run2`…`run13` (nachher) in diesem Verzeichnis,
 jeweils `gaps.json` mit allen Räumen je Lücke.
 
 Tests: 31/31 Gegner-/Effekt-/Morph-Tests grün (`enemy*`, `en01*`, `en04`,
@@ -294,3 +299,156 @@ EN09-Erfahrung: halbe Zustandsmaschine = Stillstand statt Lückenmeldung).
 Die drei EN14-Meldungen brauchen Effektprozeduren: `bhEne14: eff[512] erste
 Eff130/type4-Suche` → `bhEff130` (effsub1.c:9001), `bhEne14_Acid: Eff256/SetEffectTb`
 → `bhEff_E03_Acid` (256). `bhEne14_LookPlayaer: owP.flg` braucht den `joint_flags`-Dienst.
+
+### 8. EN19 Tyrant T-078 — Portiert und geprüft; Rest sind Effektprozeduren (Subagent, 2026-10-15)
+
+Ein Subagent hat EN19 portiert (`native/enemies/en19.c` 2353 Z., `en19.h`, `en19_tables.c`),
+in `jump[19]` und CMake eingetragen, Test `enemy_en19_world` angelegt. Der Agent starb danach
+am API-Kontingent; ich habe seinen Stand gegen die Originale geprüft:
+
+- **Baut fehlerfrei**, Test grün, keine TODO/Stub-Marker in `en19.c`.
+- **Tabellengrößen exakt wie im Original**: En19ActTbl[50], En19CombWepTbl[21],
+  En19PlyActTbl[17], Ene19CapColTbl[28], FlpTbl[26], En19CombJointTbl[26], En19HpTbl[4],
+  En19AtkRng[3], En19OvlTbl[3], Eff30aPrm1/2[3]. Alle **21** Mv-Routinen vorhanden (mv00..mv20
+  inkl. mv04a/mv04b).
+- **Verhalten in RM_5840** (dort läuft er frei): mode0 1, Motion 14 auf Bild 28, hp 900
+  (= En19HpTbl[0][2] für Typ 2), **Spieler-HP 160 → 120** — die Angriffskette greift.
+  RM_1122/RM_3230/RM_5010 sind skriptgehalten (`stflg 0x1004000` bzw. mode0 5), dort steht er
+  zu Recht; der Test nutzt RM_5840.
+- **Spot-Checks** gegen die Originale bestanden: `head_turn` stimmt Zeile für Zeile
+  (objP[5].ang[1], `dlt/8`, Klemme ±7281 als short, objP[6].ang[1] = 0, owP[4]/[5].flg 0x2,
+  else-Zweig löscht); die eine Zeile in `native/world.cpp` (Spielerpass-Gate um mode0 5
+  erweitert) ist belegt: `bhCtrPly_mode0[9]` = {…, nage(4), **enedam(5)**, enedie(6), …}.
+- Ledger: 26 Zeilen mit ehrlichen `missing`/`partial`-Markern (z. B. `SetLeftClaw`/`SetClawPlane`
+  `missing`, Effekte 303/304/305/306/309/310/311/349 als Lücke benannt).
+
+**Zählweise, ehrlich:** die Lücken-**Einträge stiegen** von 45 auf 52, obwohl die Substanz
+besser wurde. Vorher meldeten die 4 EN19-Räume je *eine* Meldung „bhEne19" (Gegner fehlt
+ganz); jetzt läuft der Gegner und meldet 10 benannte **Effekt**lücken. Die Zahl der Räume
+bleibt 31. Wer die Einträge als Fortschrittsmaß liest, sieht hier eine Verschlechterung; richtig
+ist: eine Lücke „Gegner fehlt" wurde durch benannte Einzellücken ersetzt.
+
+**Diese Effekte sind an einem fehlenden SUBSYSTEM blockiert.** Die EN19-Lücken sind
+`effsub3.c`-Prozeduren (303/304/305/306/307/308/309/310 (=bhEff30a)/311/312 (=bhEff30c)/349),
+nativ ist davon **keine** registriert. Der Erzeuger des Schattens, `rySetShadow` (effsub3.c:1640),
+setzt `oP->mlwP = &sys->efm[1]` — die **globalen Effektmodelle** aus `bhInitEffect`
+(effect.c:60-77, `bhMlbBinRealize` für ef_info-Einträge mit flg & 1). `sys->efm` kommt nativ
+**nirgends** vor (0 Treffer in native/). Vor der Prozedurportierung ist also dieses Modellsubsystem
+zu klären. `oP->ct0/ct1/ct2` sind im Original **Zeiger** in den Objektbaum des Gegners
+(`&owP[obj].mtx[12]`) — nativ ist das wie bei EN23 (`RECVX_EN03S_LINK` owner+node) als
+Besitzer+Knoten aufzulösen, nicht als roher Zeiger.
+
+### 9. Effekt 256/257 (Säure) portiert; EN14-Säuredienste gebunden (2026-10-15)
+
+`bhEff_E03_Acid` (256, effsub2.c:1389) und sein Kind `bhEff_E00_Acid` (257, :533) sind in
+`native/effect_sprite_procedures.cpp` von Hand portiert (`step_e03_acid`, `step_e00_acid`).
+Dafür fehlten drei Dinge am Besitzer, nicht nur die Prozedur:
+
+- **`pxb/pyb/pzb` am `EffectSprite`** — effect.c:794 hält die Vorbildlage vor jedem Prozeduraufruf
+  fest; nativ gab es das Feld nicht. `RoomWorld` setzt es jetzt direkt vor `step_effect_sprite`.
+- **Haken `player_watr`** (`EffectWorldHooks`): `plp->watr` = Kapsel owP[4]→owP[0], r 2.5
+  (player.c:1758), aus dem von der Runtime festgeschriebenen Spielerbaum. Dieselbe Quelle wie
+  `en.player_capsule` der Gegnerdienste.
+- **`effect_detail::collision_line`**: `bhCollisionCheckLine2(p1, p2, 0x4400, -1)` samt
+  `bhGetHitCollisionNormal` auf dem Wandsatz des Raumbesitzers. Das Original **kürzt p2 auf den
+  Treffer** (hitchkl.c:135ff schreibt `p2->y = hp->py + h` usw.), der Tropfen landet also auf der
+  Fläche; der native `line_query` liefert dasselbe `end`.
+
+EN14 (`bhEne14_Acid`, en14.c:1311) hatte seine Dienste `acid_alloc`/`acid_setup` schon als Vertrag,
+aber ungebunden; sie liegen jetzt in `control_enemy_works` (sys->ef id 256/flg 1/type 4 bzw. 6,
+danach stflg 0x20, `txp[0] = mdl[2].texP` als Texturliste, tex_id 0, Richtung, Lage, mdlver = SE).
+EN23 (`bhEne23_Acid`) spawnte 256 schon über `effect_tb`/`effect_patch` — jetzt läuft die Prozedur.
+
+**Geprüft:** `bhEff_SetAlign(2)` ≡ `e12::align2` (tv y −2/−2/0/0, x ±1); Kinder 257/269 bekommen
+die UV-skalierte `op->sx` (1.5·0.15625/0.125 = 1.875), nicht die Spawn-Skalierung — mein erster
+Testwert war falsch; SE nur, wenn `bhEne_CheckPlayEffectSE` 0 liefert (type 6 am Boden: nur bei
+mdlver 0, ohne Vorprüfung); `*(int*)&plp->mode0 = 2` nullt mode1..3; Gift mit `rand() < poison`
+**nach** dem HP-Abzug (Zufallsreihenfolge wie Original). Test `effect_e03_acid`: Flug, Bodenaufprall
+(Lage auf y 10 gekürzt, 8 Passes Aufpralltabelle), Spielertreffer (HP 100→80, flg 0x10004,
+stflg 0x10000, Schub = Richtung), `plp->flg 4` sperrt, type 5 ohne Wandprüfung, type 6 → Kind 269
+(1.5/2/1), 257-Alphaabbau. 36/36 Gegner-/Effekt-Tests grün.
+
+**Messung (`run10`):** 31 Räume / **50** Einträge (vorher 52), 0 Fehlschläge. Einzige Änderung
+gegenüber `run9`: `bhEne14_Acid: Eff256/SetEffectTb` ist aus RM_5810 und RM_9302 verschwunden;
+dort laufen 8 bzw. 24 Säuresätze, der Spieler verliert HP. RM_9050 (EN23) kommt in 600 Bildern
+nicht bis zum Spucken — dort nur der Unit-Test als Beleg, kein Laufzeitnachweis.
+
+**Offen:** 269 `bhEff_E14_Fire` (effsub2.c:3963, 251 Z.), das Feuerkind von type 6 (EN14 Typ ≠ 0) —
+als `bhEff269` gemeldet, Ledger `missing`. Die übrigen EN14-Lücken (`bhEff267` Fluid,
+`eff[512] erste Eff130/type4-Suche`, `LookPlayaer: owP.flg`) sind unverändert.
+
+### 10. Effekt 267/269 portiert, EN14-Dienste vollständig gebunden (2026-10-15)
+
+`bhEff_E13_Fluid` (267, effsub2.c:3698) und `bhEff_E14_Fire` (269, :3963) sind von Hand portiert
+(`step_e13_fluid`, `step_e14_fire`). Befunde vor dem Port, die die Richtung bestimmt haben:
+
+- **267 erzeugt nicht EN14**, sondern `bhEne30_SetFluidEffect` (en30.c:984, nativ schon vorhanden,
+  vier Aufrufstellen) — die Lücke in den EN14-Räumen kam von EN30-Tropfen. Texturgruppe **81**
+  musste in `ported_effect_atlas` frei (sonst wird der Raumatlas nicht dekodiert).
+- **269** entsteht nur aus meinem 256-Port (type 6, EN14 Typ ≠ 0). Seine UV-Tabellen sind
+  byteidentisch mit denen von E12_Fire (geprüft, wiederverwendet). Der Lichtblock `rom->lgtp[1]`
+  weicht von E12 ab (kein +5 in y, Reichweite fest 20, Farbe 3/1.8/0.7) — der Haken `fire_light`
+  ist deshalb um Farbe und Reichweitenteiler verallgemeinert; E12 übergibt 5+py, 1.3/0.3, Teiler 10.
+- **Strahlsuche** (`bhEne14: eff[512] erste Eff130/type4-Suche`): `find_beam` sucht jetzt im echten
+  Pool (en14.c:213-221), `beam_line` liest O_WRK +0x10 `px` und +0x64 `lox` — belegt über die
+  gleiche Kopfsicht `RECVX_EN16_EFF` (en16.h, Laser 270) und `bhEff130` (effsub1.c:9073, `px += lox`
+  je Pass). Im Baum gibt es **keine `types.h`**; die Offsets stammen aus diesen Fundstellen.
+  **Ehrlich:** `bhEff130` (Spielerwaffenstrahl, 1120 Z., `bhCheckFlyAtari`) ist nicht portiert und
+  `spawn_effect` legt ihn nicht an — die Suche findet nativ nie einen Strahl, EN14 weicht dem
+  Spieler-Strahl nicht aus. Das bleibt als `bhEff130` gemeldet, sobald die Waffe feuert.
+- **LookPlayer**: `joint_flags` (owP[6].flg Bit 2 als mask/value), `node_angles`, `motion_angles`
+  (`md2P[6].p[1][frm]`, wie en12), `joint_matrix_set`, `node_local`, dazu `floor_enemy`
+  (bhCheckFloorEnemy wie en12) und `game_mode` — alle in `control_enemy_works` gebunden.
+
+**Geprüft:** Test `effect_e14_fire` (269: Start, einmaliger Spielertreffer −20 HP / mode0 4 / vier
+`bhEne_SetFireEffect(plp, 3, …)`, Licht ohne +5, Phasen bis Ende bzw. Dauerbrand type 0; 267:
+Tabellenwahl 2,3,0,1, Landung 0.5 über der Fläche, Wandhaften, Ausblenden). **37/37** Tests grün.
+Raum RM_9302 headless: **21 sichtbare 256-Sätze** (Bild 240, Texturliste aus `mdl[2].texP`),
+**19–21 sichtbare 257-Spritzer** (Bild 250–260, globale Gruppe 2), RM_5810: **12 sichtbare
+267-Tropfen** (Gruppe 81). Spieler-HP sinkt in beiden Räumen unter 0 (Boss, KI an, Spieler steht).
+
+**Messung (`run11`):** 31 Räume / **46** Einträge (vorher 50), 0 Fehlschläge. Weg: `bhEff267`,
+`Eff130/type4-Suche`, `LookPlayaer: owP.flg` (je RM_5810/RM_9302). **Neu:** `bhEff250` und
+`bhEff301` jetzt auch in RM_9302 — der Kampf kommt dort erst durch den Port so weit, dass EN14
+Blut-/Fleischeffekte anfordert; aufgedeckt, nicht verursacht.
+
+**Offen (EN14-Räume):** `bhEff250` (bhEff_E00_Mince), `bhEff301` (Blutfleck, effsub3.c, 703 Z.),
+`bhEff130`. `./build.sh` gelaufen (Start.command-App aktualisiert). Fremde Änderungen im Baum
+(`native/events.cpp`, `tools/verify_clock_puzzle.py`, `work/rm1090_clock/`) nicht berührt.
+
+### 11. Effekt 250 (Mince) portiert; Morph-Zeichenpfad-Abbruch gefunden und behoben (2026-10-15)
+
+`bhEff_E00_Mince` (250, effsub2.c:23) ist portiert (`step_e00_mince`): strukturell ein Zwilling von
+267 (dieselben vier UV-Tabellen, hier in natürlicher Reihenfolge über `type & 3`), Startrichtung aus
+`ay`, Fall 0.06, Blutkinder 296 in den Passes mit ct0 1..9, `type & 0x100` unterdrückt sie. Erzeuger
+sind `bhEne_SetMinceEffect/2` (zonzon1.c:52/92) und `SetMince` (en15.c) — nativ `t3_set_mince`.
+
+**Zweite Schicht:** nach dem Port meldeten RM_5810/RM_9302 `zonzon1.c:84 mdl[BloodType[id].mdlno].texP`
+— der Erzeuger holt die Blut-Texturliste über `RECVX_ENEMY_EXT.model_texp_index`, und genau der war
+nie gebunden (nur `model_texp` ohne Index). Jetzt gebunden (gleiche Regel wie en23 `model_texture`).
+Beide Räume melden danach nur noch `bhEff301`.
+
+**Morph-Abbruch (neu, durch den EN14-Fortschritt erreichbar):** beim Abtasten mehrerer Endbilder brach
+RM_5810 bei **Endbild 505–535** mit `Native runtime error: morph object has no vertex stream` ab —
+Endbild 500, 550, 600 und 900 liefen durch. Ursache: `actor.cpp` rief `morph_a.vertex()` *vor* der
+beidseitigen Prüfung in `morph_blend`; EN14 **MV02** (en14.c:456, Morph mdl[0]/mdl[1]) hat **Objekt 1
+mit evalflags 0xE** (Bit 0x8 = HIDE, Modell vorhanden) — genau den Fall, den `npCalcMorphing`
+(njplus.c:677) überspringt und unverblendet lässt. Fix: Quellzugriff nur nach erfolgreichem
+`morph_blend`; `RECVX_MORPH_TRACE=1` nennt übersprungene Objekte. **Vorherstand gemessen:** HEAD
+(7d1f366, Worktree-Build in `$TMPDIR`) rendert Endbild 510/520/900 fehlerfrei — nicht, weil der Pfad
+dort robust wäre, sondern weil EN14 ohne die LookPlayer-/Strahl-Dienste MV02 in diesem Fenster nicht
+erreichte. Der Abbruch war also durch meine Dienstbindung neu erreichbar; der Fehler lag im nativen
+Zeichenpfad. Die Scans sehen so etwas nicht: sie exportieren nur das Endbild 600.
+
+**Belege:** Test `effect_e14_fire` Abschnitt 5 (250), 37/37 grün; RM_5810 Endbild 505/515: **5 sichtbare
+250-Brocken** (Textur 2 aus `BloodType`) und 296-Blut sichtbar; Sweep 505–545 ohne Abbruch.
+
+**Messung (`run12`, vor dem Morph-Fix):** 31 Räume / **44** Einträge (vorher 46), 0 Fehlschläge; einzige
+Änderung: `bhEff250` aus RM_5810/RM_9302 weg.
+**Messung (`run13`, mit Morph-Fix):** identisch 31 Räume / **44** Einträge, 0 Fehlschläge — der Fix
+liegt außerhalb des Scan-Endbilds 600 und ist nur im Endbild-Sweep 505–545 sichtbar.
+
+**Letzte Lücke der EN14-Räume:** `bhEff301` (Blutfleck, effsub3.c:404, 703 Z.) zeichnet über
+`sys->ef_trs2d` (bhDrawTrsEffect2D, effect.c:912) — eine **2D-Effektliste, die der Host nicht hat**
+(0 native Treffer); dazu `sys->bl_ct` (nativ nur als Partikelzähler) und die globale Gruppe
+`ef_tn[4]`. Wie `sys->efm` und `sys->wt_*` ein Subsystem, kein Einzelport.

@@ -80,9 +80,17 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     bool posed_room_motion()const{return pose_set?pose_room:room_motion;}
     bool posed_has_motion()const{return pose_set?pose_motion_valid:has_motion;}
     std::int64_t posed_frame()const{return pose_set?pose_frm:pose_frame();}
-    // bhObjAspdSet: object work aspd, a light parameter in objitm.c
-    // (emissive intensity 0.1*aspd and ob_spc/special object selection).
-    unsigned aspd=0;
+    // O_WRK.aspd (int, from ETTY_WORK short): objects select ob_spc with it, items
+    // glint with light 1 of intensity 0.1*aspd (objitm.c:417/571).
+    int aspd=0;
+    // Item glint state of bhControlObjItm (objitm.c:417-450): ct0/ct1/ct2, ayp and mdflg 0x80.
+    int item_ct0=0,item_ct1=0,item_ct2=0,item_ayp=0;bool item_glint=false;
+    // bhControlObjItm list of a room object (objitm.c:364-383): 0 none, 1 ob_nlg, 2 ob_hlg, 3 ob_spc,
+    // with its position in ob_spc (bhDrawObjItm skips the first entry in five rooms).
+    unsigned object_list=0,object_spc_index=0;int draw_tp=0; // O_WRK.draw_tp = ETTY prm1 (bhSetObject/bhSetItem)
+    // bhSetAlphaFadeObject (objitm.c:721): flg 0x200000 with pv[0] jntno/jnt_n and pv[1] alpha/count;
+    // npSetAllMatAlphaColor rewrites the node materials for good (node -> diffuse alpha byte).
+    bool alpha_fade=false;int alpha_jntno=0,alpha_jnt_n=0;float alpha_target=0,alpha_count=0;std::map<unsigned,unsigned> node_alpha;
     // bhCyoutenHenkei family: mdflg bit 2 plus shp_ct (0..1000) and, for
     // bhCyoutenHenkeiSetEX, the original mbp model indices obj_a/obj_b.
     // Vertex interpolation/rendering is pending; the shape clock is exact.
@@ -203,6 +211,14 @@ public:
     void set_event_camera(unsigned cno,unsigned kno,bool lock); // cut.c:1644 / :1726
     // cut.c:12 bhCheckCut(1): bhSetCut(cam.ncut, 1) for the player's current cut.
     void return_to_cut(){event_camera=false;fixed_camera.reset();camera_force_=true;}
+    // cut.c:2472-2763 Augenkamera: cam.flg 0x4 (bhControlPlEyeCamera nach dem Abschalten) und der
+    // Augenpfad unter gm_flg 0x40 (bhSetPlEyeCamera). Ein Kamerabesitzer neben Raum-/Eventkamera.
+    struct EyeCamera{bool active=false,returning=false;unsigned mode0=0,ct0=0;NJS_POINT3 position{},target{};
+        std::int32_t ax=0,ay=0,az=0,axp=0,ayp=0,azp=0,pers=11832,ppers=11832;float ln=0,pln=0;};
+    int eye_pe_ax_=0,eye_pe_pers_=11832; // cam.pe_ax/pe_pers (bhCPM0_action, act_suw/rld, bhSyukanModeSet)
+    void set_eye_request(int pe_ax,int pe_pers){eye_pe_ax_=pe_ax;eye_pe_pers_=pe_pers;}
+    void set_player_wax(int wax){player_wax_=std::int16_t(wax);}
+    void set_player_aim_mode(unsigned mode1,unsigned at_flg){player_aim_mode1_=mode1;player_aim_at_flg_=at_flg;}
     // sys->ef_flg. system.c:195 initializes it to 0; its only original writer
     // is the mn_md1 room-load sequence (system.c:1830/1884), which no native
     // owner drives yet, so bit 0 stays clear until one binds it.
@@ -236,6 +252,8 @@ public:
     // wird vom Gegnerpass desselben Besitzers gefuellt.
     RECVX_ENEMY_TABLE& enemy_table(){return enemy_table_;}
     void commit_player_joints(const std::vector<BoneMatrix>& nodes){player_joint_matrices_=nodes;}
+    // game.c:357-360: der mit stflg 0x1000000 verborgene Spieler wird gezeichnet, solange pl_sleep_cnt laeuft; je Zeichnung -1.
+    bool player_sleep_draw(){if(!pl_sleep_cnt_)return false;--pl_sleep_cnt_;return true;}
     // owP des zuletzt berechneten Spielerbaums (das bhCalcModel(plp) der vorigen Runde).
     // Genau dieses owP liest das Original in bhSetGunFire/bhControlEffect; eine Abfrage
     // darf keinen neuen Motionzustand daraus samplen.
@@ -362,6 +380,9 @@ public:
     bool water_top(NJS_POINT3 position,float& top)const;
     void player_footstep(const PlayerAsset& player);
     void player_foot_sound(const PlayerAsset& player,unsigned node,unsigned type);
+    // pl_smove01: CallPlayerFootStepSe(plp->flr_snd, type, 1) ohne bhCheckFloorSound.
+    void player_floor_step(unsigned flr_snd,unsigned type){audio_.player_footstep_se(flr_snd,type);}
+    unsigned player_floor_sound()const{return collision_floor_sound_;} // plp->flr_snd (bhCheckFloorP Typ 1)
     bool search_near_enemy_b(NJS_POINT3 pos,int ay,int ar,float len)const;
     NJS_POINT3 player_safe_position()const{return collision_safe_;}
     void set_player_safe_position(NJS_POINT3 p){collision_safe_=p;}
@@ -503,6 +524,12 @@ private:
     void process_effect_output();
     int reserve_effect_slot(unsigned start=0);
     void tick_shadow(unsigned slot);
+    int en11_light_control(RECVX_ENEMY_WORK* w,int mode);
+    static void bind_en11_services();
+    // effect.c:644 bhSetShadow on a native work; returns the eff[512] slot or -1.
+    int set_enemy_shadow(const std::int8_t* jtb,RECVX_ENEMY_WORK* link,int lkono,float sx,float sy,float sz);
+    // player.c:791/905 bhSetShadow(NULL, plp, 1, 4.5, 4.0, 3.5): its lkwkp names plp through this tag.
+    unsigned char player_shadow_tag_=0;
     // effsub2.c:1717 bhEff_E03_Shadow: der Schatten von bhSetShadow mit id 258 (en23.c:613).
     void tick_e03_shadow(unsigned slot);
     void write_particle_slot(unsigned slot,unsigned flags,unsigned id);
@@ -550,6 +577,9 @@ private:
     // eneset.c:797 bhDrawEnemy: Works mit mdflg 0x4 rechnen ihren Baum erst beim
     // Zeichnen (bhCalcModel vor bhPutModel). Einmal je Bild am Ende des Passes.
     void calc_enemy_draw_models();
+    void control_item_glint(); // objitm.c:397-450, item part of bhControlObjItm
+    void build_object_lists(); // objitm.c:289-383, object part of bhControlObjItm
+    void control_alpha_fade(unsigned kind,unsigned index); // objitm.c:740 bhControlAlphaFadeObject
     // pwksub.c:39 bhCalcLinkModel(pp): bhCalcModel fuer jedes aktive Work mit
     // flg 0x80, dessen lkwkp pp ist.
     void calc_enemy_link_model(WorldEntity& e);
@@ -599,6 +629,17 @@ private:
     // sys->zanp - sys->zan_memp: belegte Bytes des 2-MB-Nachbildpuffers (effsub1b.c:627).
     std::size_t zan_used_=0;
     unsigned room_case_=0; // Fall der geladenen Raumdatei (RM_SRRC)
+    unsigned pl_sleep_cnt_=0; // system.c:43 pl_sleep_cnt (event.c:2832, game.c:357)
+    EyeCamera eye_{};std::int16_t player_wax_=0;unsigned player_aim_mode1_=0,player_aim_at_flg_=0;
+    std::uint32_t room_fog_color_=0;float room_fog_near_=0,room_fog_far_=0;
+    bool eye_owp5(NJS_MATRIX& m)const;void init_eye_camera(const Scene& stage,std::size_t cut);void set_eye_camera();void control_eye_camera(const Scene& stage,std::size_t cut,bool hold);
+    // event.c:9391 Player_controll 131: plp mode0 7 mit mode2 (bhCPM0_event_tbl) und mode1; die Runtime
+    // fuehrt pl_smove (player_event.c) ueber ihren Spielerbesitzer aus und meldet hier das Ende.
+    struct PlayerEvent{bool requested=false;unsigned mode1=0,mode2=0;bool reset=false;};PlayerEvent player_event_{};
+public:
+    const PlayerEvent& player_event()const{return player_event_;}
+    void clear_player_event_reset(){player_event_.reset=false;}
+private:
     // npSetAllMatAlphaColor (njplus.c:1495) aus bhDraw136 schreibt das Alpha dauerhaft in
     // die Diffusmaterialien von objP[node] des Werks. Schluessel (kind,index,mdl,node).
     // before: Stand, den Objekte/Items sehen (bhDrawObjItm vor bhDrawEffect, game.c:341/346),

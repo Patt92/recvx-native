@@ -20,6 +20,7 @@
 #include "enemies/en53.h"
 #include "enemies/en02.h"
 #include "enemies/en05.h"
+#include "enemies/en19.h"
 #include "enemies/en03_spider.h"
 #include "enemies/en18.h"
 #include "enemies/en21.h"
@@ -261,7 +262,10 @@ bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
     player_weapon_=unsigned(in.wpnr_no);*player_head_flags_=in.exp1_flags;
     // The existing input owner must not run free locomotion during enemy
     // damage/death modes. This is ownership, not a replacement player phase.
-    const bool driven=in.mode0==4||in.mode0==6;
+    // mode0 5 (bhCPM0_enedam, player.c:6635) ist Zeile fuer Zeile bhCPM0_nage
+    // (mode0 4, :6596): der Gegner fuehrt den Spieler (EN19 bhEne19_PlySetDamage,
+    // en19.c:3827 setzt plp->mode0 = 5).
+    const bool driven=in.mode0==4||in.mode0==5||in.mode0==6;
     if(driven){enemy_player_driving_=true;grab_driving_=true;player_scripted=true;player_room_motion_=false;}
     else if(enemy_player_driving_){enemy_player_driving_=false;grab_driving_=false;player_scripted=false;player_enemy_motion_=false;player_enemy_work_=nullptr;player_link_matrix_valid_=false;}
     if(in.hp<0&&player_damage_allowed)player_killed_=true;
@@ -286,6 +290,24 @@ bool RoomWorld::enemy_player_joint(unsigned joint,BoneMatrix& out)const{
 
 // effect.c:802 link update, then effsub1.c:599 bhEff001.
 // Use the linked owner's actual model window; never substitute a root pose.
+int RoomWorld::set_enemy_shadow(const std::int8_t* jtb,RECVX_ENEMY_WORK* link,int lkono,float sx,float sy,float sz){
+    // effect.c:644 bhSetShadow: the first eff[512] slot without flg & 3, zeroed,
+    // flg 0x240001, id 1, type 0 with a joint chain (1 without), tex_id -1,
+    // scale and its copy, lkwkp/lkono with flg 0x80, jno[] up to the -1.
+    const int slot=reserve_effect_slot();if(slot<0)return -1;
+    auto& work=sprites_[unsigned(slot)];auto& o=work.sprite;
+    o.flg=0x240001u;o.id=1;o.type=jtb?0u:1u;o.tex_id=-1;o.mdlver=0;o.px=o.py=o.pz=0;
+    o.sx=o.sxb=sx;o.sy=o.syb=sy;o.sz=o.szb=sz;o.ax=o.ay=o.az=0;o.lkono=lkono;
+    if(link){o.lkwkp=link;o.flg|=0x80u;}
+    o.jno.fill(0);
+    if(!jtb)o.jno[0]=-1;else for(unsigned j=0;j<15;++j){o.jno[j]=jtb[j];if(jtb[j]==-1)break;}
+    work.hidden=false;work.queued=false;
+    return slot;
+}
+int RoomWorld::en11_light_control(RECVX_ENEMY_WORK* w,int mode){
+    // event.c:9912 Sub_controll 148: bhEne11_LightControl(bhCetask->work, v0) ausserhalb des Gegnerpasses.
+    EnemyWorldScope scope(this);bind_en11_services();const int result=recvx_en11_light_control(w,mode);recvx_en11_bind(nullptr);return result;
+}
 void RoomWorld::tick_shadow(unsigned slot){
     auto& work=sprites_.at(slot);
     auto& shadow=work.sprite;
@@ -293,6 +315,22 @@ void RoomWorld::tick_shadow(unsigned slot){
     // op->lkwkp is the BH_PWORK the creator passed to bhSetShadow; its native
     // owner is the entity recvx_enemy_set registered (room work or a child of
     // enemy_children_, which has no entities_ entry).
+    if(shadow.lkwkp==&player_shadow_tag_){
+        if(!player_asset_)return; // Welt ohne Spielerbesitzer (Werkzeug/Test): kein plp, nichts zu zeichnen
+        // effsub1.c bhEff001 an plp: flg/stflg des Spielerworks (EventVm 13/14), stflg 0x1000000
+        // aus bhInitModelSet (player_hidden), owP aus dem Spielerbaum (link_matrix 0).
+        const unsigned flg=collision_events_?collision_events_->flags[13][0]:1u;
+        const unsigned stflg=(collision_events_?collision_events_->flags[14][0]:collision_status_)|(player_hidden?0x1000000u:0u);
+        const auto matrix=[&](int joint)->BoneMatrix{const auto m=joint<0?std::optional<BoneMatrix>{}:link_matrix(0,0,unsigned(joint));
+            if(!m)throw std::runtime_error("bhEff001: plp->mlwP->owP nicht verfuegbar");return *m;};
+        try{
+            if((shadow.flg&0x80u)&&(flg&1u)){auto m=matrix(shadow.lkono);NJS_POINT3 offset{shadow.lox,shadow.loy,shadow.loz},position{};njCalcPoint(&m.value,&offset,&position);shadow.px=position.x;shadow.py=position.y;shadow.pz=position.z;}
+            ShadowOwnerView view;view.flags=flg;view.status=stflg;view.model_flags=0;view.yaw=player_.yaw;
+            if(shadow.mode0==1&&shadow.mdlver==0&&(stflg&0x2000u))view.root_matrix_y=matrix(0).value[13];
+            work.queued=step_shadow(shadow,view,presentation_flags_,[&](int joint){const auto m=matrix(joint);return NJS_POINT3{m.value[12],m.value[13],m.value[14]};},[&](NJS_POINT3 position){return ground_.query(position);});
+        }catch(const std::runtime_error& error){unbound_enemy_.insert(error.what());}
+        return;
+    }
     WorldEntity* linked=nullptr;
     if(shadow.lkwkp){auto* w=static_cast<RECVX_ENEMY_WORK*>(shadow.lkwkp);if(w->owner)linked=static_cast<WorldEntity*>(w->owner);}
     if(!linked)for(auto& entry:entities_){
@@ -559,16 +597,7 @@ void RoomWorld::bind_enemy_services(){
     // scale and its copy, lkwkp/lkono with flg 0x80, jno[] up to the -1.
     // F05 advances this same slot in tick_shadow. Modifier rendering is
     // separate from the texture-atlas sprite path and remains to be bound.
-    s.set_shadow=[](const int8_t* jtb,RECVX_ENEMY_WORK* link,int lkono,float sx,float sy,float sz)->int{
-        auto* world=enemy_world;const int slot=world->reserve_effect_slot();if(slot<0)return -1;
-        auto& work=world->sprites_[unsigned(slot)];auto& o=work.sprite;
-        o.flg=0x240001u;o.id=1;o.type=jtb?0u:1u;o.tex_id=-1;o.mdlver=0;o.px=o.py=o.pz=0;
-        o.sx=o.sxb=sx;o.sy=o.syb=sy;o.sz=o.szb=sz;o.ax=o.ay=o.az=0;o.lkono=lkono;
-        if(link){o.lkwkp=link;o.flg|=0x80u;}
-        o.jno.fill(0);
-        if(!jtb)o.jno[0]=-1;else for(unsigned j=0;j<15;++j){o.jno[j]=jtb[j];if(jtb[j]==-1)break;}
-        work.hidden=false;work.queued=false;
-        return slot;};
+    s.set_shadow=[](const int8_t* jtb,RECVX_ENEMY_WORK* link,int lkono,float sx,float sy,float sz)->int{return enemy_world->set_enemy_shadow(jtb,link,lkono,sx,sy,sz);};
     // en07.c:216 eff[sdw].mdlver = 1 nach bhSetShadow. Ein Slot ausserhalb des
     // Pools kann nur aus einem fehlerhaften Rueckgabewert kommen; das Original
     // schreibt dann mit eff[-1] vor den Pool, nativ wird gemeldet.
@@ -1084,6 +1113,16 @@ void RoomWorld::bind_enemy_services(){
         if(!t.enemy_asset){enemy_world->unbound_enemy_.insert("mlwP->texP: Modell fehlt");return nullptr;}
         for(const auto& m:enemy_world->models_)if(m.actor.get()==t.enemy_asset)return &m.object.textures;
         enemy_world->unbound_enemy_.insert("mlwP->texP: Texturliste fehlt");return nullptr;};
+    // mdl[k].texP (zonzon1.c:84 bhEne_SetMinceEffect: BloodType[id].mdlno): eigenes texP oder das
+    // des letzten texturierten mdl davor (room.c bhSetEneMdl), wie en23 model_texture.
+    x.model_texp_index=[](const RECVX_ENEMY_WORK* w,int k)->const void*{
+        const auto& e=tree_of(owner_of(w));const PlayerAsset* bank=e.model_bank?e.model_bank:e.enemy_asset;
+        if(k<0){enemy_world->unbound_enemy_.insert("mdl[k].texP: Index negativ");return nullptr;}
+        const unsigned base=(e.model_bank?e.model_base:0u)+unsigned(k);
+        if(!bank){enemy_world->unbound_enemy_.insert("mdl[k].texP: Modell fehlt");return nullptr;}
+        for(unsigned i=base;i>0;--i)if(const auto* a=bank->model(i);a&&!a->textures().empty())return &a->textures();
+        for(const auto& m:enemy_world->models_)if(m.actor.get()==bank)return &m.object.textures;
+        enemy_world->unbound_enemy_.insert("mdl[k].texP: Texturliste fehlt");return nullptr;};
     x.player_joint_matrix=s.player_joint_matrix;
     x.player_voice_free=s.player_voice;
     // zonzon1.c:844/858 bhEne_CallEffectSE / bhEne_CheckPlayEffectSE: die feste
@@ -1517,10 +1556,43 @@ void RoomWorld::calc_enemy_draw_models(){
         auto& e=owner_of(w);if(!e.enemy_native)continue;
         if((w->flg&0x80u)&&!w->lkwkp)continue;
         calc_enemy_model(e);}
+    // eneset.c:866 bhDrawEneObject (game.c nach bhDrawEnemy): die en_obj-Works (flg 0x80000000).
+    for(std::uint32_t i=0;i<enemy_table_.en_objn&&i<RECVX_ENEMY_OBJECTS;++i){auto* w=enemy_table_.en_obj[i];if(!w||!w->owner)continue;
+        if(!(w->flg&0x1u)||(w->stflg&0x41000000u)||!(w->mdflg&0x4u))continue;
+        auto& e=owner_of(w);if(e.enemy_native)calc_enemy_model(e);}
 }
 
 // eneset.c:344 bhControlEnemy over the table; native routines only. The
 // legacy en01/en04 store keeps its own tick until C03/C04 replace it.
+// en11.c-Dienste fuer den Gegnerpass und fuer Sub_controll 148 (bhEne11_LightControl aus dem Skript).
+void RoomWorld::bind_en11_services(){
+static RECVX_EN11_SERVICES en11{};
+    // en11.c:132 sys->rm_flg &= ~1 (event.c:440 Bank 4 = rm_flg; Bank 1 der Dienstnummer).
+    en11.flags_clear=[](uint32_t which,uint32_t bits){auto* world=enemy_world;static const unsigned bank[4]={10,4,5,6};
+        if(which<4&&world->collision_events_)world->collision_events_->flags[bank[which]][0]&=~bits;else world->unbound_enemy_.insert("EN11 flags_clear: EventVm nicht gebunden");};
+    // en11.c:170-185 bhSetEffectTb(&sys->ef {id 0x105, flg 1, Skala 0}, NULL, epw, 0).
+    en11.effect_create=[](const RECVX_EN11_EFFECT_TEMPLATE* t,RECVX_ENEMY_WORK* link)->int{
+        return enemy_world->effect_tb(t->flg,int(t->id),int(t->type),t->mdlver,{t->pos.x,t->pos.y,t->pos.z},{t->scale.x,t->scale.y,t->scale.z},0,t->ay,nullptr,link,false,0);};
+    // eff[slot] als O_WRK-Sicht: mode0, ct2, ax, axp (effsub2.c:2014 bhEff_E11_SearchLight).
+    en11.effect_get=[](int slot,RECVX_EN11_EFFECT* out)->int{auto* world=enemy_world;
+        if(slot<0||std::size_t(slot)>=world->sprites_.size()||world->sprites_[std::size_t(slot)].sprite.id!=261)return 0;
+        const auto& e=world->sprites_[std::size_t(slot)].sprite;out->mode0=std::uint8_t(e.mode0);out->ct2=e.ct2;out->ax=e.ax;out->axp=e.axp;return 1;};
+    en11.effect_set=[](int slot,const RECVX_EN11_EFFECT* in){auto* world=enemy_world;
+        if(slot<0||std::size_t(slot)>=world->sprites_.size()||world->sprites_[std::size_t(slot)].sprite.id!=261){world->unbound_enemy_.insert("EN11 eff[slot] ohne bhEff_E11_SearchLight");return;}
+        auto& e=world->sprites_[std::size_t(slot)].sprite;e.mode0=in->mode0;e.ct2=in->ct2;e.ax=in->ax;e.axp=in->axp;};
+    // mlwP->objP[node].ang (en11.c:1047-1090 bhEne11_CameraSet).
+    en11.node_angles_get=[](RECVX_ENEMY_WORK* w,uint32_t node,int32_t out[3])->int{const auto& t=tree_of(owner_of(w));node+=t.model_window;
+        if(node>=t.enemy_obj.size())return 0;for(unsigned k=0;k<3;++k)out[k]=t.enemy_obj[node].angles[k];return 1;};
+    en11.node_angles_set=[](RECVX_ENEMY_WORK* w,uint32_t node,const int32_t in[3]){auto& t=tree_of(owner_of(w));node+=t.model_window;
+        if(node>=t.enemy_obj.size()){enemy_world->unbound_enemy_.insert("EN11 objP[node].ang ausserhalb des Modells");return;}
+        for(unsigned k=0;k<3;++k)t.enemy_obj[node].angles[k]=in[k];};
+    // mlwP->owP[node].flg (en11.c:956-957 bhEne11_MV09).
+    en11.node_work_flags=[](RECVX_ENEMY_WORK* w,uint32_t node,uint32_t set,uint32_t clear){auto& t=tree_of(owner_of(w));node+=t.model_window;
+        if(node>=t.enemy_owp_flg.size()){enemy_world->unbound_enemy_.insert("EN11 owP[node].flg ausserhalb des Modells");return;}
+        t.enemy_owp_flg[node]=(t.enemy_owp_flg[node]|set)&~clear;};
+    en11.se_pan=[](uint32_t enemy,const RECVX_ENEMY_VEC* p,int se){enemy_world->audio_.request_enemy_se(enemy,{p->x,p->y,p->z},se,0,0);}; // zonzon1.c:852 bhEne_SetSEPan
+    recvx_en11_bind(&en11);
+}
 void RoomWorld::control_enemy_works(){
     EnemyWorldScope scope(this);
     for(auto& pair:entities_)if(pair.first.first==1&&pair.second.enemy_bound)adopt_enemy_script(pair.second);
@@ -1531,7 +1603,68 @@ void RoomWorld::control_enemy_works(){
     // waehlen. Die Modulglobale gelten nur waehrend dieses Passes, wie die
     // T3-Ergaenzung oben. recvx_en12_bind haengt am einzelnen Work, weil es
     // dessen exp0-Block anlegt.
-    recvx_en14_bind_services(en14_resolver);
+    // en14.c:1311 bhEne14_Acid: sys->ef (id 256, flg 1, type 4/6, Lage, Skalierung) ueber
+    // bhSetEffectTb; die uebrigen Felder der Vorlage bleiben die des letzten Schreibers.
+    // Danach eff[eno] (en14.c:1370-1393): stflg 0x20, txp[0] = mdl[2].texP, tex_id 0,
+    // Richtung, Lage, mdlver = se. Die Prozedur selbst ist bhEff_E03_Acid (256).
+    static const RECVX_EN14_SERVICES en14=[]{
+        RECVX_EN14_SERVICES t=en14_services();
+        t.acid_alloc=[](RECVX_ENEMY_WORK*,uint32_t type,const RECVX_ENEMY_VEC* pos,float size)->int{
+            auto& ef=effect_detail::request_template();ef.id=256;ef.flg=1;ef.type=type;ef.position={pos->x,pos->y,pos->z};ef.scale={size,size,size};
+            EffectSpawn spawn;spawn.flg=ef.flg;spawn.id=ef.id;spawn.type=ef.type;spawn.flr_no=ef.flr_no;
+            spawn.mdlver=ef.mdlver;spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;
+            return enemy_world->spawn_effect(spawn);};
+        t.acid_setup=[](RECVX_ENEMY_WORK* w,int slot,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* v,int se){
+            auto* world=enemy_world;if(slot<0||std::size_t(slot)>=world->sprites_.size())return;
+            auto& sw=world->sprites_[std::size_t(slot)];auto& s=sw.sprite;
+            s.stflg|=0x20u;s.tex_id=0;s.xn=v->x;s.yn=v->y;s.zn=v->z;s.px=pos->x;s.py=pos->y;s.pz=pos->z;s.mdlver=unsigned(se);
+            // mdl[2].texP: eigenes texP oder das des letzten texturierten mdl davor (room.c bhSetEneMdl),
+            // wie en23 model_texture. effect.c:1329: stflg 0x20 waehlt txp[0], nicht sys->ef_tn[tex_id].
+            const auto& e=tree_of(owner_of(w));const PlayerAsset* bank=e.model_bank?e.model_bank:e.enemy_asset;
+            const unsigned base=(e.model_bank?e.model_base:0u)+2u;sw.texture_list=nullptr;
+            if(!bank){world->unbound_enemy_.insert("bhEne14_Acid: epw->mdl[2].texP ohne Modell");return;}
+            for(unsigned i=base;i>0;--i)if(const auto* a=bank->model(i);a&&!a->textures().empty()){sw.texture_list=&a->textures();return;}
+            for(const auto& m:world->models_)if(m.actor.get()==bank){sw.texture_list=&m.object.textures;return;}
+            world->unbound_enemy_.insert("bhEne14_Acid: epw->mdl[2].texP ohne Texturliste");};
+        // en14.c:952 bhEne14_LookPlayaer: owP[6].flg Bit 2 (mask/value), objP[6].ang, owP[6].mtx und
+        // der Drehschluessel mnwP[mtn_no].md2P[6].p[1][frm_no/65536] (wie en12 Kopfwinkel).
+        t.joint_flags=[](RECVX_ENEMY_WORK* w,uint32_t joint,uint32_t mask,uint32_t value){
+            auto& tr=tree_of(owner_of(w));joint+=tr.model_window;
+            if(joint>=tr.enemy_owp_flg.size()){enemy_world->unbound_enemy_.insert("bhEne14_LookPlayaer: owP[joint].flg ausserhalb des Modells");return;}
+            tr.enemy_owp_flg[joint]=(tr.enemy_owp_flg[joint]&~mask)|(value&mask);};
+        t.node_angles=[](RECVX_ENEMY_WORK* w,uint32_t node,const int32_t* a){auto& tr=tree_of(owner_of(w));node+=tr.model_window;
+            if(node>=tr.enemy_obj.size()){enemy_world->unbound_enemy_.insert("bhEne14_LookPlayaer: objP[node].ang ausserhalb des Modells");return;}
+            for(unsigned k=0;k<3;++k)tr.enemy_obj[node].angles[k]=a[k];};
+        t.motion_angles=[](const RECVX_ENEMY_WORK* w,uint32_t mtn,uint32_t node,uint32_t frame,int32_t* out)->int{
+            const auto* clip=enemy_world->enemy_mn_work(owner_of(w),mtn);
+            if(!clip||node>=clip->angles.size()||clip->angles[node].empty())return 0;
+            const auto& keys=clip->angles[node];const auto& k=keys[std::min<std::size_t>(frame,keys.size()-1)];
+            if(frame>=keys.size())enemy_world->unbound_enemy_.insert("bhEne14_LookPlayaer: frm_no hinter frm_num");
+            out[0]=k[0];out[1]=k[1];out[2]=k[2];return 1;};
+        t.joint_matrix_set=[](RECVX_ENEMY_WORK* w,uint32_t joint,const float* m){en01_services().joint_matrix_set(w,joint,m);};
+        t.node_local=en01_services().node_local;
+        // hitchk.c:5474 bhCheckFloorEnemy: erste Bodenflaeche type 2 (rom->flrp, sys->mflrp), wie en12.
+        t.floor_enemy=[](int flr_no,float px,float pz,RECVX_ENEMY_ATR* out)->int{auto* world=enemy_world;
+            for(const auto* table:{&world->effect_water_room_,&world->effect_water_mobile_})for(const auto& a:*table)
+                if((a.flags&1u)&&a.type==2&&a.position.x<=px&&a.position.x+a.extent.x>=px&&a.position.z<=pz&&a.position.z+a.extent.z>=pz&&a.floor==flr_no){if(out)*out=atr_of(a);return 1;}
+            return 0;};
+        t.game_mode=[](int* out)->int{*out=int(enemy_world->enemy_game_mode_);return 1;};
+        // en14.c:213-221: erster eff[0..511] mit flg 1, ohne stflg 0x1000000, id 130, type 4
+        // (Spielerwaffe aus WpnEffTab); Handle = Platz + 1, 0 = keiner. Die Suche laeuft gegen den
+        // echten Pool: bhEff130 ist nicht portiert, spawn_effect legt solche Saetze nicht an und
+        // meldet "bhEff130" — dann findet die Suche nichts, wie im Original ohne Strahl.
+        t.find_beam=[](uint32_t* handle)->int{auto* world=enemy_world;*handle=0;
+            for(std::size_t i=0;i<world->sprites_.size();++i){const auto& e=world->sprites_[i].sprite;
+                if((e.flg&1u)&&!(e.stflg&0x1000000u)&&e.id==130&&e.type==4){*handle=uint32_t(i)+1u;break;}}
+            return 1;};
+        // en14.c:657-664/833-839: O_WRK +0x10 px/py/pz und +0x64 lox/loy/loz (Kopfsicht wie
+        // RECVX_EN16_EFF in en16.h; bhEff130 effsub1.c:9073 schiebt px += lox je Pass).
+        t.beam_line=[](uint32_t handle,RECVX_ENEMY_VEC* pos,RECVX_ENEMY_VEC* dir)->int{auto* world=enemy_world;
+            if(handle==0||std::size_t(handle-1)>=world->sprites_.size())return 0;
+            const auto& e=world->sprites_[std::size_t(handle-1)].sprite;
+            *pos={e.px,e.py,e.pz};*dir={e.lox,e.loy,e.loz};return 1;};
+        return t;}();
+    recvx_en14_bind_services([](const RECVX_ENEMY_WORK*)->const RECVX_EN14_SERVICES*{return &en14;});
     recvx_en18_bind(&en18_services());
     recvx_en30_bind(&en30_services());
     const RECVX_EN21_SERVICES en21{
@@ -1552,32 +1685,7 @@ void RoomWorld::control_enemy_works(){
         // T3-Ergaenzung. Sie liegen HIER, weil control_enemy_works sie am Ende wieder
         // loest; vorher band sie nur init_enemy_works, sodass ab dem zweiten Pass keine
         // Dienste mehr gefunden wurden (Fehlluecke "bhEne11: linked bhEff261 work").
-        static RECVX_EN11_SERVICES en11{};
-        // en11.c:132 sys->rm_flg &= ~1 (event.c:440 Bank 4 = rm_flg; Bank 1 der Dienstnummer).
-        en11.flags_clear=[](uint32_t which,uint32_t bits){auto* world=enemy_world;static const unsigned bank[4]={10,4,5,6};
-            if(which<4&&world->collision_events_)world->collision_events_->flags[bank[which]][0]&=~bits;else world->unbound_enemy_.insert("EN11 flags_clear: EventVm nicht gebunden");};
-        // en11.c:170-185 bhSetEffectTb(&sys->ef {id 0x105, flg 1, Skala 0}, NULL, epw, 0).
-        en11.effect_create=[](const RECVX_EN11_EFFECT_TEMPLATE* t,RECVX_ENEMY_WORK* link)->int{
-            return enemy_world->effect_tb(t->flg,int(t->id),int(t->type),t->mdlver,{t->pos.x,t->pos.y,t->pos.z},{t->scale.x,t->scale.y,t->scale.z},0,t->ay,nullptr,link,false,0);};
-        // eff[slot] als O_WRK-Sicht: mode0, ct2, ax, axp (effsub2.c:2014 bhEff_E11_SearchLight).
-        en11.effect_get=[](int slot,RECVX_EN11_EFFECT* out)->int{auto* world=enemy_world;
-            if(slot<0||std::size_t(slot)>=world->sprites_.size()||world->sprites_[std::size_t(slot)].sprite.id!=261)return 0;
-            const auto& e=world->sprites_[std::size_t(slot)].sprite;out->mode0=std::uint8_t(e.mode0);out->ct2=e.ct2;out->ax=e.ax;out->axp=e.axp;return 1;};
-        en11.effect_set=[](int slot,const RECVX_EN11_EFFECT* in){auto* world=enemy_world;
-            if(slot<0||std::size_t(slot)>=world->sprites_.size()||world->sprites_[std::size_t(slot)].sprite.id!=261){world->unbound_enemy_.insert("EN11 eff[slot] ohne bhEff_E11_SearchLight");return;}
-            auto& e=world->sprites_[std::size_t(slot)].sprite;e.mode0=in->mode0;e.ct2=in->ct2;e.ax=in->ax;e.axp=in->axp;};
-        // mlwP->objP[node].ang (en11.c:1047-1090 bhEne11_CameraSet).
-        en11.node_angles_get=[](RECVX_ENEMY_WORK* w,uint32_t node,int32_t out[3])->int{const auto& t=tree_of(owner_of(w));node+=t.model_window;
-            if(node>=t.enemy_obj.size())return 0;for(unsigned k=0;k<3;++k)out[k]=t.enemy_obj[node].angles[k];return 1;};
-        en11.node_angles_set=[](RECVX_ENEMY_WORK* w,uint32_t node,const int32_t in[3]){auto& t=tree_of(owner_of(w));node+=t.model_window;
-            if(node>=t.enemy_obj.size()){enemy_world->unbound_enemy_.insert("EN11 objP[node].ang ausserhalb des Modells");return;}
-            for(unsigned k=0;k<3;++k)t.enemy_obj[node].angles[k]=in[k];};
-        // mlwP->owP[node].flg (en11.c:956-957 bhEne11_MV09).
-        en11.node_work_flags=[](RECVX_ENEMY_WORK* w,uint32_t node,uint32_t set,uint32_t clear){auto& t=tree_of(owner_of(w));node+=t.model_window;
-            if(node>=t.enemy_owp_flg.size()){enemy_world->unbound_enemy_.insert("EN11 owP[node].flg ausserhalb des Modells");return;}
-            t.enemy_owp_flg[node]=(t.enemy_owp_flg[node]|set)&~clear;};
-        en11.se_pan=[](uint32_t enemy,const RECVX_ENEMY_VEC* p,int se){enemy_world->audio_.request_enemy_se(enemy,{p->x,p->y,p->z},se,0,0);}; // zonzon1.c:852 bhEne_SetSEPan
-        recvx_en11_bind(&en11);
+        bind_en11_services();
         static RECVX_EN16_SERVICES en16{};
         en16.effect_tb=[](RECVX_ENEMY_WORK* w)->int{return enemy_world->effect_tb(1,270,0,0,{0,0,0},{0,0,0},0,0,nullptr,w,false,0);};
         en16.effect_get=[](int slot,RECVX_EN16_EFF* out)->int{auto* world=enemy_world;
@@ -1948,6 +2056,59 @@ void RoomWorld::control_enemy_works(){
         t.room_height=[]()->float{return enemy_world->room_height_;};
         return t;}();
     recvx_en05_bind(&en05);
+    // --- EN19 (en19.h): Blattzugriffe auf vorhandene Besitzer ---------------------
+    static const RECVX_EN19_SERVICES en19=[]{RECVX_EN19_SERVICES t{};
+        t.game_mode=en23.game_mode;
+        // sys->gm_flg: runtime.cpp fuehrt es als events->flags[11][0] (world.cpp:2351).
+        t.game_flags=[](uint32_t* out)->int{auto* world=enemy_world;if(!world->collision_events_)return 0;*out=world->collision_events_->flags[11][0];return 1;};
+        t.room_flags=en23.room_flags;
+        t.node_local=en01_services().node_local;
+        t.node_local_set=en01_services().node_local_set;
+        t.node_angle_set=en01_services().node_angle_set;
+        t.owp_flags=en05.owp_flags;
+        // Motion.c / en19.c:3809: mnwP[mtn_no].atrP[frm_no >> 16]; atrP == NULL -> 0.
+        t.motion_attribute=[](const RECVX_ENEMY_WORK* w,uint32_t mtn,uint32_t frame,int32_t* out)->int{
+            const auto* clip=enemy_world->enemy_mn_work(owner_of(w),mtn);if(!clip)return 0;
+            if(clip->attributes.empty()){*out=0;return 1;}
+            if(frame>=clip->attributes.size())return 0;
+            *out=int32_t(clip->attributes[frame]);return 1;};
+        t.fix_offset=en05.fix_offset;
+        t.floor_enemy=en02.floor_enemy;
+        t.check_route=en01_services().route_next;
+        t.route_id=en01_services().route_id;
+        t.wall_ref_angle=[](RECVX_ENEMY_VEC* pos,uint32_t flg,float ar,float ah,int32_t* ay)->int{return en01_services().wall_ref_angle(pos,flg,ar,ah,ay,nullptr);};
+        // hitchk.c:12 bhCheckWall(plp) mit plp->ah = 1.0f (en19.c:494-501): derselbe Weg wie
+        // en12.player_wall (en12.c:1765), nur mit den uebergebenen ar/ah des Spielerworks.
+        t.player_wall=[](RECVX_ENEMY_PLAYER* p,float ar,float ah)->int{auto* world=enemy_world;
+            MotionActor actor=world->motion_actor();
+            auto walls=world->collision_geometry();auto steps=world->motion_steps();auto floors=world->motion_floors();
+            MotionTerrain terrain{walls,steps,floors,world->floors_,world->room_height_};
+            NJS_POINT3 q{p->pos.x,p->pos.y,p->pos.z};
+            const bool hit=resolve_motion_wall_direct(terrain,actor,q,ar,ah);
+            p->pos={q.x,q.y,q.z};return hit?1:0;};
+        t.player_exp0_float_set=[](uint32_t offset,float v){enemy_world->player_exp0_writes_.push_back({offset,v});};
+        t.player_library=en13.player_library;
+        // effect.c:436 bhSetEffectTb(&sys->ef, ofs, link, joint): nur die maskierten Felder der
+        // persistenten Vorlage schreiben (sz bleibt in PlyDmg042 vom Vorgaenger, en19.c:4095), dann anlegen.
+        t.effect_tb=[](uint32_t mask,const RECVX_EN19_EF* v,const RECVX_ENEMY_VEC* ofs,RECVX_ENEMY_WORK* link,int joint)->int{auto* world=enemy_world;auto& ef=effect_detail::request_template();
+            if(mask&RECVX_EN19_EF_FLG)ef.flg=v->flg;if(mask&RECVX_EN19_EF_ID)ef.id=v->id;if(mask&RECVX_EN19_EF_TYPE)ef.type=v->type;
+            if(mask&RECVX_EN19_EF_MDLVER)ef.mdlver=v->mdlver;if(mask&RECVX_EN19_EF_FLR)ef.flr_no=v->flr_no;
+            if(mask&RECVX_EN19_EF_POS)ef.position={v->pos.x,v->pos.y,v->pos.z};
+            if(mask&RECVX_EN19_EF_SX)ef.scale.x=v->sx;if(mask&RECVX_EN19_EF_SY)ef.scale.y=v->sy;if(mask&RECVX_EN19_EF_SZ)ef.scale.z=v->sz;
+            if(mask&RECVX_EN19_EF_AX)ef.ax=v->ax;if(mask&RECVX_EN19_EF_AY)ef.ay=v->ay;
+            EffectSpawn spawn;spawn.flg=ef.flg;spawn.id=ef.id;spawn.type=ef.type;spawn.flr_no=ef.flr_no;spawn.mdlver=ef.mdlver;
+            spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;spawn.lkono=joint;
+            if(ofs){spawn.has_offset=true;spawn.offset={ofs->x,ofs->y,ofs->z};}
+            unsigned kind=0,index=0;
+            if(link){if(!world->enemy_work_index(link,index)){world->unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne Raumfigur (en19)");return -1;}kind=2;spawn.linked_work=link;}
+            return world->spawn_effect(spawn,kind,index);};
+        // effsub3.c-Effekte des OR_WORK-Pools (304 rySetShadow, 307 Klauenflaeche, 308 bhSetEffSpark
+        // mit rom->lgtp[2], 309/311 rySetEffBlood/2, 310 Kamerawackel bhEff30a, 312 gespiegelte
+        // Klaue bhEff30c, 349 Rueckruf bhEne19_TyBloodSet) sind nicht portiert: shadow, cam_shake,
+        // blood_callback, left_claw, claw_matrix, claw_plane, spark, blood, blood2 bleiben NULL,
+        // die Routinen melden die Originalnamen.
+        return t;}();
+    recvx_en19_bind(&en19);
     RECVX_EN01_CONTEXT en01_ctx{};
     en01_ctx.table = &enemy_table_;
     en01_ctx.services = &enemy_services_;
@@ -1972,6 +2133,7 @@ void RoomWorld::control_enemy_works(){
     recvx_en23_bind(nullptr);
     recvx_en02_bind(nullptr);
     recvx_en05_bind(nullptr);
+    recvx_en19_bind(nullptr);
     recvx_en03_bind(nullptr);
     recvx_en30_bind(nullptr);
     recvx_en21_bind(nullptr);

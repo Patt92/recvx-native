@@ -4,17 +4,25 @@
 #include "asset_io.h"
 #include "morph.h"
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <stdexcept>
 namespace recvx {
 namespace {
+// Meldeweg fuer Posen, die das Modell nicht aufnehmen kann (siehe sample_motion_pose).
+// Wird von der Runtime an den Raum gebunden; ohne Bindung bleibt die Luecke ungemeldet.
+std::function<void(const char*)> pose_gap_sink;
+
 std::vector<std::uint8_t> slice(const std::vector<std::uint8_t>& data,std::size_t begin,std::size_t size) {
     BinaryView(data).require(begin,size);
     return {data.begin()+begin,data.begin()+begin+size};
 }
 }
+// Meldung einer Pose, die das Modell nicht aufnehmen kann (siehe sample_motion_pose).
+void bind_pose_gap(std::function<void(const char*)> sink){pose_gap_sink=std::move(sink);}
 ActorNodeLayout decode_actor_node_layout(const std::vector<std::uint8_t>& model,const std::vector<std::uint8_t>& mask,bool face_actor){
     BinaryView v(model);const auto count=v.u16(6),base=v.u16(4);const auto nodes=v.relative(base,v.u32(12),count*52);
     if(!count||count>256)throw std::runtime_error("invalid face skeleton size");
@@ -310,14 +318,25 @@ Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 p
     return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out,overrides,face_param,morph);
 }
 std::vector<ModelPose> sample_motion_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<ModelPose>& rest,const std::vector<unsigned>& nodes){
-    if(!clip.frames||clip.positions.size()!=clip.angles.size()||clip.positions.size()>rest.size())throw std::runtime_error("room motion does not fit actor skeleton: channels="+std::to_string(clip.positions.size())+", bones="+std::to_string(rest.size())+", mapped="+std::to_string(nodes.size()));
+    if(!clip.frames||clip.positions.size()!=clip.angles.size())throw std::runtime_error("invalid actor motion channels");
+    if(!nodes.empty()&&nodes.size()!=clip.positions.size())throw std::runtime_error("motion node map size differs");
     const auto length=std::int64_t(clip.frames)*65536;
     auto clock=frame_q16%length;if(clock<0)clock+=length;const auto frame=std::size_t(clock/65536);
     auto pose=rest;
     const auto next=(frame+1)%clip.frames;const float blend=clip.interpolate?float(clock&65535)/65536:0;
-    if(!nodes.empty()&&nodes.size()!=clip.positions.size())throw std::runtime_error("motion node map size differs");
+    bool surplus_reported=false;
     for(std::size_t i=0;i<clip.positions.size();++i) {
-        const auto node=nodes.empty()?i:nodes[i];if(node>=rest.size())throw std::runtime_error("motion node map outside actor");
+        const auto node=nodes.empty()?i:nodes[i];
+        /* Motion.c:131 laeuft ueber obj_num der MOTION und schreibt objP[*datP] ohne
+           Grenze gegen das Modell: hat die Motion mehr Kanaele als das Modell Knoten,
+           schreibt das Original hinter objP. Dieser Kanal hat hier kein Ziel; er wird
+           verbraucht und die Originalluecke gemeldet, nicht durch einen Ersatzwert
+           gefuellt (dieselbe Behandlung wie native/motion_set.cpp:63-67). */
+        if(node>=rest.size()){
+            if(!surplus_reported&&pose_gap_sink){surplus_reported=true;char text[192];
+                std::snprintf(text,sizeof text,"room motion does not fit actor skeleton: channels=%zu, bones=%zu, mapped=%zu (Original schreibt hinter objP)",clip.positions.size(),rest.size(),nodes.size());
+                pose_gap_sink(text);}
+            continue;}
         if(!clip.positions[i].empty()){const auto a=clip.positions[i].at(frame),b=clip.positions[i].at(next);pose[node].position={a.x+(b.x-a.x)*blend,a.y+(b.y-a.y)*blend,a.z+(b.z-a.z)*blend};}
         if(clip.angles[i].empty())pose[node].angles={};else for(unsigned axis=0;axis<3;++axis){const auto a=clip.angles[i].at(frame)[axis],b=clip.angles[i].at(next)[axis];int delta=(b-a)&65535;if(delta>=32768)delta-=65536;pose[node].angles[axis]=(a+int(delta*blend))&65535;}
     }
@@ -422,13 +441,15 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
             }
             if(geometry.morph.model){
                 float sp[3],sn[3],bp[3],bn[3];
-                morph_a.vertex(mesh.object,i,sp,sn);
+                // npCalcMorphing (njplus.c:677) laesst ein Objekt ohne Modell oder mit evalflags
+                // 0x8 unverblendet; erst wenn beide Stroeme da sind (morph_blend), gibt es ein Delta.
                 // npTransform blends the source stream itself, so the skin pass
                 // consumes the blended object and not a post-skin correction.
                 if(morph_blend(morph_a,morph_b,mesh.object,i,morph_factor,bp,bn)){
+                    morph_a.vertex(mesh.object,i,sp,sn);
                     point.x+=bp[0]-sp[0];point.y+=bp[1]-sp[1];point.z+=bp[2]-sp[2];
                     normal.x+=bn[0]-sn[0];normal.y+=bn[1]-sn[1];normal.z+=bn[2]-sn[2];
-                }
+                }else if(i==0&&std::getenv("RECVX_MORPH_TRACE"))std::fprintf(stderr,"MORPH-SKIP obj %zu a_stream %d b_stream %d evalflags %x mdl %x\n",mesh.object,morph_a.stream(mesh.object)!=MorphStreams::none,morph_b.stream(mesh.object)!=MorphStreams::none,geometry.evalflags.empty()?source.u32(objects+mesh.object*52):geometry.evalflags[mesh.object],source.u32(objects+mesh.object*52+4));
             }
             njCalcPoint(&full[bone].value,&point,&b);
             if(level==9)vertices.push_back(b);

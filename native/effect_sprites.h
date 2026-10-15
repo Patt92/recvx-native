@@ -33,6 +33,9 @@ struct EffectSprite {
     // effect procedure writes it, so only a future owner can set it.
     unsigned mdflg=0;
     int ayp=0;float yn=0;void* func=nullptr;
+    // O_WRK.pxb/pyb/pzb: die Lage des Vorbildes, die effect.c:794 bhControlEffect vor jedem
+    // Prozeduraufruf festhaelt (effsub2.c bhEff_E03_Acid prueft die Strecke pxb -> px).
+    float pxb=0,pyb=0,pzb=0;
     int ax=0,ay=0,az=0,lkono=0,ct0=0,ct1=0,ct2=0,ct3=0,tex_id=-1,bl_src=8,bl_dst=6;
     // O_WRK.exp0 as the room procedures use it: the UV table latched at init.
     const void* uv=nullptr;
@@ -168,12 +171,17 @@ struct EffectWorldHooks {
     std::function<void(const RECVX_ENEMY_PLAYER&)> player_set;
     std::function<void(unsigned offset,float value)> player_exp0;
     std::function<void(int jno,NJS_POINT3 ofp,float size,int life)> player_fire;
-    std::function<void(NJS_POINT3 pos)> fire_light;
+    // rom->lgtp[1]: E12_Fire (:2681) summiert px/5+py/pz, fr = 20 + lkono/10, Farbe 3/1.3/0.3;
+    // E14_Fire (:4012) summiert px/py/pz, fr fest 20, Farbe 3/1.8/0.7. far_divisor 0 = fest.
+    std::function<void(NJS_POINT3 pos,NJS_POINT3 color,float far_divisor)> fire_light;
     std::function<void(void* enemy_work,int action)> en12_binta;
     std::function<bool(int se)> effect_se_playing;
     std::function<void(NJS_POINT3 pos,int se)> effect_se;
     // plp->dvx/dvy/dvz (effsub2.c:2791/2981): derselbe Feldsatz, den bhEne_AttackHitCheck schreibt.
     std::function<void(NJS_POINT3 dv)> player_dv;
+    // plp->watr (player.c:1758: c1 = owP[4], c2 = owP[0], r 2.5) fuer npCollisionCheckCC
+    // der Effektprozeduren (effsub2.c:1536 bhEff_E03_Acid). false = kein Spielerbaum.
+    std::function<bool(RECVX_ENEMY_CAPSULE&)> player_watr;
 };
 void set_effect_world_hooks(EffectWorldHooks hooks);
 // effsub3.c:1008 bhSetEffParticleMk2(lkwkp, lnk_no, off, dir, src, dst, typ) aus einer Effektprozedur (Partikelbesitzer des Raums).

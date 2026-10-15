@@ -36,7 +36,9 @@ def check(runtime, data, folder):
         assert not result['blocked_commands'], (name, result['event_tasks'])
         return result
 
-    terminal = run('terminal', 190)
+    # Frame 230: bhControlMessage baut die Panelfrage (Meldung 4) je Durchlauf auf
+    # (message.c:345 mes_ct); erst ihre Antwort startet das Terminal.
+    terminal = run('terminal', 230)
     flags = terminal['work_flags']
     assert flags[10] & 0x400000 and flags[5] & 0x4000000 and flags[6] == 0x30, ('terminal not active', flags)
     assert 20 in terminal['events'], 'scanner event 20 not started'
@@ -50,7 +52,8 @@ def check(runtime, data, folder):
     assert not screen['unknown_opcodes'], 'the terminal interpreter met an undefined opcode'
     assert screen['message'] == 5, ('command 241 did not request room message 5', screen['message'])
     assert screen['flg'] & 0x200, 'command 245 did not lock the cancel button of the scanner'
-    done = run('finished', 900)
+    # Die Deckelmeldung 18 nach dem Terminal schliesst erst nach ihrem Aufbau (Frame ~990).
+    done = run('finished', 1000)
     flags = done['work_flags']
     assert not flags[10] & 0x400000 and not flags[5] & 0x4000000 and flags[6] == 0xffffffff, ('terminal did not exit', flags)
     assert flags[11] & 0x4 and flags[11] & 0x8000 and flags[12] & 0x20000, ('bhExitSpEvtComputer gm_flg/ts_flg', flags)

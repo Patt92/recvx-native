@@ -20,6 +20,9 @@ static void check(bool value,const char* message){if(!value)throw std::runtime_e
 static Inventory bag(){Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);return inv;}
 // Ein Statusframe: StatusMain-Logik (tick), danach SpriteOnOff mit ItemSort (sub1.c:3580/8296).
 static void frame(StatusMenu& menu,Inventory& inv){menu.tick(inv);menu.sprite_on_off(inv);}
+// bhControlMessage-Durchlaeufe (StatusMenu::tick): erst die aufgebaute Seite bzw. offene Auswahl nimmt OK an (message.c:228-337).
+static void reveal(StatusMenu& menu){for(unsigned k=0;k<400&&menu.message.active()&&!menu.message.closable()&&!menu.message.choosing()&&!menu.message.turnable();++k)menu.message.update();}
+
 static void tick_menu(StatusMenu& menu,Inventory& inv){menu.input(MenuInput::Open,inv);menu.skip_slide();frame(menu,inv);}
 static Message fixture_message(unsigned index){
     if(index==155)return {'L'-32,0xff02,0,'?'-32,0xff04,'Y'-32,0xff04,'N'-32,0xffff};
@@ -111,7 +114,7 @@ int main(){try{
      check(before[0].visible&&before[1].visible&&before[0].anim==2&&before[1].anim==0&&before[0].x==92.f&&before[0].y==8.f&&before[1].x==20.f&&before[1].y==4.f,
            "parts_09b-Lage im Kombinieren weicht ab (CursorSet +4/+4, Quelle 20/4, sub1.c:2151-2158/5268-5273)");
      menu.input(MenuInput::Confirm,inv);frame(menu,inv);check(menu.message.index()==155,"Frage 155 fehlt");
-     while(menu.message.active()&&!menu.message.choices())menu.input(MenuInput::Confirm,inv);
+     reveal(menu);while(menu.message.active()&&!menu.message.choices()){menu.input(MenuInput::Confirm,inv);reveal(menu);}
      check(menu.message.active()&&menu.message.selection==0,"Frage 155 bietet keine Ja-Auswahl");
      menu.input(MenuInput::Confirm,inv); // Ja (mes_sel 100)
      check(inv.slots()[3]==Inventory::pack(22,1),"pip darf erst im naechsten Statusframe kombiniert werden");

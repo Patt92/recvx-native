@@ -199,10 +199,10 @@ int main(int argc,char** argv){try{
             Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(21,1);inv.slots()[3]=Inventory::pack(22,1);StatusMenu menu;menu.active=true;menu.skip_slide();menu.selected=2;MessageDialog room;
             std::unique_ptr<GameUi> ui;if(argc>1)ui=std::make_unique<GameUi>(std::filesystem::u8path(argv[1]));menu.message_source=[&](unsigned index){return ui?ui->system_message(index):Message{'L'-32,0xff02,0,'?'-32,0xff04,'Y'-32,0xff04,'N'-32,0xffff};};
             std::vector<std::uint8_t> bytes(1500);float version=1.73f;std::memcpy(bytes.data(),&version,4);auto put=[&](unsigned p,unsigned n){for(unsigned i=0;i<4;++i)bytes.at(p+i)=std::uint8_t(n>>(8*i));};put(16,64);put(28,1100);put(64+0x38,1400);put(1100,12);put(1104,14);put(1108,30);EventVm events(bytes,inv,room);
-            GameplayInput gameplay(inv,menu,room,&events);std::vector<unsigned> sounds;gameplay.sound=[&](unsigned sound){sounds.push_back(sound);};auto tick=[&]{check(!gameplay.apply(input.tick()),"inventory control quits game");};
+            GameplayInput gameplay(inv,menu,room,&events);std::vector<unsigned> sounds;gameplay.sound=[&](unsigned sound){sounds.push_back(sound);};auto tick=[&]{check(!gameplay.apply(input.tick()),"inventory control quits game");menu.tick(inv);}; /* StatusMain je Bild: bhControlMessage baut den Text auf (message.c:345) */
             auto held=[&](SDL_Scancode code,SDL_GameControllerButton b,bool down){if(controller)button(input,joystick,b,down);else key(input,code,down);};
             auto press=[&](SDL_Scancode code,SDL_GameControllerButton b){held(code,b,true);tick();held(code,b,false);tick();};
-            auto ok=[&]{press(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A);};auto settle=[&]{for(int i=0;i<4;++i)tick();}; /* ItemCommand window slide */auto down=[&]{press(SDL_SCANCODE_DOWN,SDL_CONTROLLER_BUTTON_DPAD_DOWN);};
+            auto ok=[&]{press(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A);};auto settle=[&]{for(int i=0;i<4;++i)tick();}; /* bhControlMessage: Zwischenseiten blaettert OK, eine Auswahl nimmt OK erst offen an (message.c:233/325) */auto ready=[&]{for(unsigned i=0;i<400&&menu.message.active()&&!menu.message.choosing();++i){if(menu.message.turnable())ok();else tick();}}; /* ItemCommand window slide */auto down=[&]{press(SDL_SCANCODE_DOWN,SDL_CONTROLLER_BUTTON_DPAD_DOWN);};
             // D01/D07 über Tastatur und Controller (derselbe Menüweg): Kräuter
             // kombinieren (Frage 155, Ja -> 25), ungültiger Gebrauch des
             // Dietrichs -> Use_05 Meldung 161 ohne Ereignis, Fehler-SE 1. Die
@@ -212,7 +212,7 @@ int main(int argc,char** argv){try{
                 ok();settle();down();down();ok();settle();check(menu.combining&&menu.combine_from==2,"keyboard/gamepad cannot enter the original Combine mode");
                 press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);check(menu.selected==3,"keyboard/gamepad combine cursor does not reach the partner slot");
                 ok();check(menu.message.active()&&menu.message.index()==155,"keyboard/gamepad combine question 155 missing");
-                while(menu.message.active()&&!menu.message.choices())ok();ok();
+                ready();ok();
                 for(int i=0;i<20&&(menu.combining||menu.erase_frames);++i)tick(); // ItemCombination subcsr 2/3 und ItemCommandErase laufen je Statusframe
                 check(inv.contains(25)&&!inv.contains(21)&&!inv.contains(22)&&!menu.combining&&menu.active,"keyboard/gamepad herb Combine failed");});
             if(menu.combining)press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);
@@ -222,9 +222,11 @@ int main(int argc,char** argv){try{
             section(controller?"D03 Untersuchung (Controller)":"D03 Untersuchung (Tastatur)",[&]{
                 inv.slots()[2]=Inventory::pack(128,1);inv.slots()[3]=Inventory::pack(50,1);menu.selected=2;ok();settle();down();ok();settle();check(menu.examining,"keyboard/gamepad cannot examine case");menu.examine_pitch=menu.examine_yaw=menu.examine_roll=0;ok();check(menu.message.index()==181,"keyboard/gamepad lockpick question missing");
                 held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,true);tick();for(unsigned i=0;i<30;++i)tick();check(menu.message.active()&&!menu.opening_item&&inv.contains(128),"held OK answers its own new question");held(SDL_SCANCODE_RETURN,SDL_CONTROLLER_BUTTON_A,false);tick();
-                while(menu.message.active()&&!menu.message.choices())ok();press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);ok();check(inv.contains(128)&&!menu.opening_item,"keyboard/gamepad No opens case");
-                ok();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);check(!menu.message.active()&&menu.examining&&inv.contains(128),"keyboard/gamepad cancel closes inventory or consumes case");
-                ok();while(menu.message.active()&&!menu.message.choices())ok();ok();for(unsigned i=0;i<100;++i)tick();check(inv.contains(35)&&inv.contains(50)&&menu.active&&menu.message.index()==164,"keyboard/gamepad case Yes does not retain lockpick or show contents");
+                ready();press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);ok();check(inv.contains(128)&&!menu.opening_item,"keyboard/gamepad No opens case");
+                // itemview.c:568: Cancel wirkt nur ohne offenen Text (st_flg 0x200); die Frage 181 beantwortet allein OK (message.c:233).
+                ok();ready();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);check(menu.message.active()&&menu.message.index()==181&&menu.examining&&inv.contains(128),"keyboard/gamepad cancel answers the lockpick question");
+                press(SDL_SCANCODE_RIGHT,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);ok();check(!menu.message.active()&&menu.examining&&inv.contains(128),"keyboard/gamepad No closes inventory or consumes case");
+                ok();ready();ok();for(unsigned i=0;i<100;++i)tick();check(inv.contains(35)&&inv.contains(50)&&menu.active&&menu.message.index()==164,"keyboard/gamepad case Yes does not retain lockpick or show contents");
                 while(menu.message.active())ok();press(SDL_SCANCODE_ESCAPE,SDL_CONTROLLER_BUTTON_B);});
             section(controller?"D07 Gebrauch ohne Trigger (Controller)":"D07 Gebrauch ohne Trigger (Tastatur)",[&]{
                 unsigned key_slot=0;for(unsigned i=2;i<12;++i)if(Inventory::id(inv.slots()[i])==50)key_slot=i;

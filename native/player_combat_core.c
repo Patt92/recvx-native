@@ -2743,7 +2743,7 @@ void recvx_combat_tick(RECVX_COMBAT_CORE* core, RECVX_COMBAT_SYS* sys,
     core->res.mode1 = p->mode1; core->res.mode2 = p->mode2; core->res.mode3 = p->mode3;
     core->res.at_flg = p->at_flg; core->res.flg = p->flg; core->res.stflg = p->stflg;
     core->res.mtn_no = p->mtn_no; core->res.frm_no = p->frm_no;
-    core->res.src_no = p->src_no; core->res.locked = p->pp.lck_n;
+    core->res.src_no = p->src_no; core->res.locked = p->pp.lck_n; core->res.wax = p->wax;
     if (out) *out = core->res;
     core->sys = NULL;
 }

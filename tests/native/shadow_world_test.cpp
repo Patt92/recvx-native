@@ -32,12 +32,17 @@ int main(int argc,char** argv){
 
         // Natural native initialization, no fabricated shadow allocation.
         world.tick();
-        std::vector<unsigned> slots;
+        // Gegnerschatten; dazu legt bhSetPlayer/bhResetPlayer (player.c:791/905) je Raum
+        // genau einen Spielerschatten an, der an keinem Gegnerwork haengt.
+        std::vector<unsigned> slots;unsigned others=0;
         for(unsigned i=0;i<512;++i){
             const auto* s=world.effect_state(i);
-            if(s&&s->id==1&&(s->flg&1u))slots.push_back(i);
+            if(!(s&&s->id==1&&(s->flg&1u)))continue;
+            bool enemy=false;for(unsigned k=0;k<64;++k){const auto* c=world.state(1,k);if(c&&s->lkwkp==&c->enemy){enemy=true;break;}}
+            if(enemy)slots.push_back(i);else ++others;
         }
         check(slots.size()==5,"five original bats must allocate five shadows");
+        check(others==1,"bhSetPlayer must allocate exactly one player shadow");
         for(const auto slot:slots){
             const auto* s=world.effect_state(slot);
             check(s->mode0==1&&(s->flg&0x08000000u),

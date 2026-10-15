@@ -14,6 +14,7 @@
 #include "core_random.h"
 #include "weapon_tables.h"
 #include "enemies/en03_lib.h"
+#include "combat_geometry.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -3705,7 +3706,7 @@ void step_e12_fire(EffectSprite& s,const EffectContext& c,bool&){
         s.sxb=s.sx;s.syb=s.sy;
         if(s.type==1)s.ct0=int(200.0f*effect_random())+200;else if(s.type==2)s.ct0=20;
         s.ct1=0;s.ct3=int(300.0f*effect_random());s.ah=0.2f;s.aw=1.0f;
-        if(s.type==1)hook_fire_light({s.px,s.py,s.pz});
+        if(s.type==1)hook_fire_light({s.px,5.0f+s.py,s.pz},{3.0f,1.3f,0.3f},10.0f);
         s.mode0++;s.mode1=0;
         if(s.type==0){s.mode0=6;return;}
         if(!hook_effect_se_playing(74499))hook_effect_se({s.px,s.py,s.pz},74499);
@@ -4026,8 +4027,341 @@ void step_eff355(EffectSprite& s,const EffectContext&,bool& queued){
     if(reinterpret_cast<const RECVX_ENEMY_WORK*>(s.exp0)->stflg&0x1000000u){s.flg=0;return;}
     if(s.mode2!=0&&s.flg!=0)queued=true;
 }
+// effsub2.c:1389 bhEff_E03_Acid (256) — Saeuretropfen von EN23 (en23.c:3732, type 2) und EN14
+// (en14.c:1311, type 4 bzw. 6; mdlver = SE-Wahl). Die Textur ist die des Erzeugers (stflg 0x20,
+// txp[0] = epw->mdl[k].texP, effect.c:1329), per effect_patch/acid_setup am Satz hinterlegt.
+// Ausrichtung 2; Farbe/Blend 0xFFFF3E00 8/10 (type 6) sonst 0xFF80A880 8/6; flg 0x4180000;
+// ct0 100 Passes Flug; stflg 0x20; flg 0x10 (Wandpruefung) ausser type 5. Drei UV-Tabellen ueber
+// mtn_no (0 Start, 1 Flug, 2 Aufprall), Basis 0.125; Mitglied von sys->ef_trs. Flug: Lage += Richtung,
+// Richtung *= 0.97, yn -= 0.3. Spieler (ausser type 0/6): Kapsel pxb -> px r 2 gegen plp->watr
+// (npCollisionCheckCC) -> param[type]: Schaden dam, Schub dv = Richtung, Gift mit Anteil poison,
+// Kind 257, Ende. Boden: bhCollisionCheckLine2(pxb, px, 0x4400, -1) kuerzt die Lage auf den Treffer;
+// Normale n.y > 0.9 (double-Vergleich des Originals) schaltet auf die Aufpralltabelle, sonst Lage += n;
+// Kind 269 (type 6, Feuer 1.5/2/1) bzw. 257 (Spritzer). Ohne flg 0x10 endet der Tropfen beim Fallen.
+namespace e03 {
+struct AcidParam {int dam;float poison;int se;};
+constexpr AcidParam acid_param[7]={{0,0.0f,0},{10,0.25f,0x12308},{20,0.4f,0x12308},{20,0.0f,0x12305},{20,0.15f,0x12304},{10,0.25f,0x12308},{20,0.0f,0x12305}};
+constexpr EffectUv acid_uv0[7]={{0.0f,0.4375f,0.0625f,0.0625f},{0.0f,0.375f,0.0625f,0.0625f},{0.0f,0.0f,0.09375f,0.09375f},{0.0f,0.09375f,0.09375f,0.09375f},{0.0f,0.1875f,0.125f,0.125f},{0.625f,0.1875f,0.125f,0.125f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv acid_uv1[7]={{0.15625f,0.0f,0.15625f,0.15625f},{0.3125f,0.0f,0.15625f,0.15625f},{0.46875f,0.0f,0.15625f,0.15625f},{0.15625f,0.15625f,0.15625f,0.15625f},{0.3125f,0.15625f,0.15625f,0.15625f},{0.46875f,0.15625f,0.15625f,0.15625f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv acid_uv2[9]={{0.625f,0.0f,0.1875f,0.1875f},{0.8125f,0.0f,0.1875f,0.1875f},{0.8125f,0.1875f,0.1875f,0.1875f},{0.0625f,0.3125f,0.1875f,0.1875f},{0.25f,0.3125f,0.1875f,0.1875f},{0.4375f,0.3125f,0.1875f,0.1875f},{0.625f,0.3125f,0.1875f,0.1875f},{0.8125f,0.375f,0.1875f,0.125f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr const EffectUv* acid_uv[3]={acid_uv0,acid_uv1,acid_uv2};
+constexpr int acid_rows[3]={7,7,9};
+// sys->ef der Kinder: id, flg 1, type, Lage des Tropfens, Skalierung, ax/ay 0; bhSetEffectTb(&sys->ef, NULL, NULL, 0).
+void acid_child(unsigned id,unsigned type,const EffectSprite& s,NJS_POINT3 scale){
+    auto& r=request_template();r.id=id;r.flg=1;r.type=type;r.position={s.px,s.py,s.pz};r.scale=scale;r.ax=0;r.ay=0;
+    submit_template(0);
+}
+// effsub2.c:533 bhEff_E00_Acid (257): Spritzer-UV (8 Zeilen, Ende u < 0).
+constexpr EffectUv splash_uv[8]={{0.25f,0.0f,0.125f,0.125f},{0.5f,0.0f,0.125f,0.125f},{0.75f,0.0f,0.125f,0.125f},{0.0f,0.125f,0.1875f,0.1875f},{0.1875f,0.125f,0.1875f,0.1875f},{0.375f,0.125f,0.1875f,0.1875f},{0.0f,0.3125f,0.1875f,0.1875f},{-1.0f,0.0f,0.0f,0.0f}};
+}
+void step_e03_acid(EffectSprite& s,const EffectContext&,bool& queued){
+    using namespace e03;
+    if(s.type>=7){report_gap("bhEff_E03_Acid: type ausserhalb param[7]");s.flg=0;return;}
+    const AcidParam& prm=acid_param[s.type];
+    switch(s.mode0){
+    case 0:
+        e12::align2(s);
+        if(s.type==6){quad_color(s,0xFFFF3E00u);s.bl_src=8;s.bl_dst=10;}
+        else{quad_color(s,0xFF80A880u);s.bl_src=8;s.bl_dst=6;}
+        s.flg|=0x4180000u;
+        s.ct0=100;s.ct1=0;
+        s.stflg|=0x20u;
+        s.sxb=s.sx;s.syb=s.sy;
+        if(s.type!=5)s.flg|=0x10u;else s.flg&=~0x10u;
+        s.mtn_no=0;s.frm_no=0;
+        s.mode0++;
+        [[fallthrough]];
+    case 1:
+        if(s.frm_no==0){s.mtn_no++;s.frm_no=int(6.0f*effect_random());s.mode0++;}
+        break;
+    case 2:
+        if(s.ct0--==0){s.flg=0;return;}
+        break;
+    case 3:
+        if(s.frm_no==0){s.flg=0;return;}
+        break;
+    default:break;
+    }
+    if(s.mode0<3){
+        s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+        s.xn*=0.97f;s.yn*=0.97f;s.zn*=0.97f;
+        s.yn-=0.3f;
+        if(s.type!=0&&s.type!=6){
+            RECVX_ENEMY_CAPSULE watr;
+            if(hook_player_watr(watr,"bhEff_E03_Acid: plp->watr")){
+                const RECVX_CB_CAPSULE path{{s.pxb,s.pyb,s.pzb},{s.px,s.py,s.pz},2.0f};
+                const RECVX_CB_CAPSULE body{{watr.c1.x,watr.c1.y,watr.c1.z},{watr.c2.x,watr.c2.y,watr.c2.z},watr.r};
+                if(recvx_cb_check_cc(&path,&body)!=0){
+                    RECVX_ENEMY_PLAYER p;
+                    if(hook_player_get(p,"bhEff_E03_Acid: plp")&&!(p.flg&4u)&&!(p.stflg&0x80000000u)){
+                        if(!hook_effect_se_playing(prm.se))hook_effect_se({s.px,s.py,s.pz},prm.se);
+                        p.flg|=0x10004u;p.stflg|=0x10000u;
+                        hook_player_dv({s.xn,s.yn,s.zn});
+                        p.mode0=2;p.mode1=0;p.mode2=0;p.mode3=0; // *(int*)&plp->mode0 = 2
+                        p.hp-=prm.dam;
+                        if(effect_random()<prm.poison)p.stflg|=0x80000u;
+                        hook_player_set(p);
+                    }
+                    acid_child(257,0,s,{s.sx,s.sy,s.sz});
+                    s.flg=0;return;
+                }
+            }
+        }
+        if(s.flg&0x10u){
+            NJS_POINT3 end{s.px,s.py,s.pz},n{};
+            if(collision_line({s.pxb,s.pyb,s.pzb},end,n,0x4400u,-1,"bhEff_E03_Acid: bhCollisionCheckLine2 ohne Wandsatz")){
+                s.px=end.x;s.py=end.y;s.pz=end.z;
+                njUnitVector(&n);
+                if(double(n.y)>0.9)s.mtn_no++;
+                else{s.px+=n.x;s.py+=n.y;s.pz+=n.z;}
+                s.frm_no=0;
+                s.mode0=3;
+                if(s.type==6){
+                    if(s.mdlver==0)hook_effect_se({s.px,s.py,s.pz},prm.se);
+                    acid_child(269,1,s,{1.5f,2.0f,1.0f});
+                }else{
+                    if(!hook_effect_se_playing(prm.se))hook_effect_se({s.px,s.py,s.pz},prm.se);
+                    acid_child(257,0,s,{s.sx,s.sy,s.sz});
+                }
+            }
+        }else if(s.yn<0){
+            s.mtn_no++;
+            s.frm_no=0;
+            s.mode0=3;
+            acid_child(257,0,s,{s.sx,s.sy,s.sz});
+            if(!hook_effect_se_playing(prm.se))hook_effect_se({s.px,s.py,s.pz},prm.se);
+        }
+    }
+    if(s.mtn_no<0||s.mtn_no>2){report_gap("bhEff_E03_Acid: mtn_no ausserhalb uvtble[3]");s.flg=0;return;}
+    e12::step_uv(s,acid_uv[s.mtn_no],acid_rows[s.mtn_no],0.125f,"bhEff_E03_Acid");
+    queued=true;
+}
+// effsub2.c:533 bhEff_E00_Acid (257) — Saeurespritzer, Kind von 256 (und von bhEff_E00_AcidGenerator):
+// globale Texturgruppe 2 (bhInitEffect), Blend 8/6, flg 0x180000, stflg ohne 0x20 (eigene Gruppe statt
+// txp[0]); yn 0.2 + 0.4r, lebt 10 + 10r Passes, ct2 64 als Alpha. Je Pass eine Tabellenzeile ueber ct1;
+// am Ende (u < 0) bleibt die letzte Zeile stehen und ct2 sinkt um 8, unter 5 auf 0. Farbe
+// (ct2 << 24) | 0xD2CDC8, bhEff_SetUVInfo Basis 0.09375; Lage += Richtung, Richtung *= 0.9, waagerecht
+// je ±0.1 Zufall; Mitglied von sys->ef_trs.
+void step_e00_acid(EffectSprite& s,const EffectContext&,bool& queued){
+    using namespace e03;
+    if(s.mode0==0){
+        s.tex_id=2;
+        s.bl_src=8;s.bl_dst=6;
+        s.flg|=0x180000u;
+        s.stflg&=~0x20u;
+        s.sxb=s.sx;s.syb=s.sy;
+        s.yn=0.2f+(0.4f*effect_random());
+        s.ct0=int(10.0f*effect_random())+10;
+        s.ct2=64;
+        s.mode0=1;
+    }
+    if(s.mode0!=1)return;
+    if(s.ct0--==0){s.flg=0;return;}
+    if(s.ct1<0||s.ct1>7){report_gap("bhEff_E00_Acid: ct1 ausserhalb BH_UVTAB0[8]");s.flg=0;return;}
+    const EffectUv* uv=&splash_uv[s.ct1];
+    if(uv->u<0){
+        s.ct1--;
+        uv=&splash_uv[s.ct1];
+        s.ct2-=8;
+        if(s.ct2<5)s.ct2=0;
+    }
+    s.ct1++;
+    quad_color(s,(std::uint32_t(s.ct2)<<24)|0xD2CDC8u);
+    quad_uv(s,*uv);s.sx=(s.sxb*uv->xs)/0.09375f;s.sy=(s.syb*uv->ys)/0.09375f;
+    s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+    s.xn*=0.9f;s.yn*=0.9f;s.zn*=0.9f;
+    s.xn+=(0.2f*effect_random())-0.1f;
+    s.zn+=(0.2f*effect_random())-0.1f;
+    queued=true;
+}
+// effsub2.c:3963 bhEff_E14_Fire (269) — Feuerlache der Alexia-Saeure (Kind von bhEff_E03_Acid type 6).
+// Texturgruppe 80 Bild 1, Farbe 0x80FFFFFF, Blend 8/3, flg 0x24080000, Ausrichtung 3; die beiden
+// UV-Tabellen sind byteidentisch mit denen von bhEff_E12_Fire (e12::fire_uv0/1), Basis 0.09375.
+// type 1 fuellt rom->lgtp[1] wie E12, aber ohne +5 in y, mit fester Reichweite 20 und Farbe
+// 3.0/1.8/0.7. Einmal beim Start: Spieler im Umkreis 1.5 + plp->ar (und nicht schon im Schaden)
+// bekommt flg 0x10004, stflg 0x10000, mode0 4, mode2 = mode1 (0), mode3 0, -20 HP und vier
+// bhEne_SetFireEffect(plp, 3, ofp, 0.5+0.3r, 20+10r). Phasen: ah 0.2 -> 1.0, 20 Passes brennen mit
+// Funken 264 alle 200+200r Passes, dann Abklingen bis ah 0.6/aw 0.8, Alpha ct3 128 - 8 je Pass;
+// type != 0 endet, type 0 bleibt in mode0 5 stehen. Zeichnung bhEff_Draw3DSprite (sys->ef_fnc),
+// ay aus cam.mtx[8]/[10].
+void step_e14_fire(EffectSprite& s,const EffectContext& c,bool&){
+    using namespace e12;
+    switch(s.mode0){
+    case 0:
+        s.tex_id=80;s.ani_ct=1;quad_color(s,0x80FFFFFFu);s.bl_src=8;s.bl_dst=3;
+        s.flg|=0x24080000u;align3(s);
+        s.mtn_no=int(2.0f*effect_random());s.frm_no=int(8.0f*effect_random());
+        s.sxb=s.sx;s.syb=s.sy;
+        s.ct0=20;s.ct1=0;s.ct3=int(300.0f*effect_random());
+        s.ah=0.2f;s.aw=1.0f;
+        if(s.type==1)hook_fire_light({s.px,s.py,s.pz},{3.0f,1.8f,0.7f},0.0f);
+        s.mode0++;s.mode1=0;
+        {RECVX_ENEMY_PLAYER p;
+         if(hook_player_get(p,"bhEff_E14_Fire: plp")){
+            const float ar=p.car+1.0f; // plp->ar = car + 1 (player.c:705-708)
+            const float px=p.pos.x-s.px,pz=p.pos.z-s.pz;
+            if(njSqrt(px*px+pz*pz)<1.5f+ar&&!(p.flg&4u)&&!(p.stflg&0x80000000u)){
+                p.flg|=0x10004u;p.stflg|=0x10000u;
+                p.mode0=4;p.mode2=std::uint8_t(s.mode1);p.mode3=0;
+                p.hp-=20;
+                hook_player_set(p);
+                for(int i=0;i<4;++i){
+                    NJS_POINT3 ofp;
+                    ofp.x=1.0f-(2.0f*effect_random());
+                    ofp.y=-0.5f+(2.0f*effect_random());
+                    ofp.z=s.mode1!=0?1.3f:-1.5f;
+                    const float ln=0.5f+(0.3f*effect_random());
+                    hook_player_fire(3,ofp,ln,int(10.0f*effect_random())+20);
+                }
+            }
+         }}
+        [[fallthrough]];
+    case 1:
+        s.ah+=0.2f;
+        if(s.ah<=1.0f)break;
+        s.ah=1.0f;s.mode0++;
+        break;
+    case 2:
+        if(s.ct0--==0)s.mode0++;
+        if(s.ct3--==0){
+            auto& r=request_template();r.id=264;r.type=0;r.flg=1;r.position={s.px,5.0f+s.py,s.pz};r.ax=0;r.ay=0;
+            submit_template(0);
+            s.ct3=int(200.0f*effect_random())+200;
+        }
+        break;
+    case 3:
+        s.ah-=0.02f;s.aw-=0.01f;
+        if(s.ah<0.6f){s.ah=0.6f;s.aw=0.8f;s.ct3=128;s.mode0++;}
+        break;
+    case 4:
+        s.ct3-=8;s.ah-=0.002f;s.aw-=0.001f;
+        if(s.ct3<0){if(s.type!=0){s.flg=0;return;}s.mode0++;return;}
+        quad_color(s,(unsigned(s.ct3)<<24)|0xFFFFFFu);
+        break;
+    default:break; // mode0 5: die type-0-Lache bleibt mit der letzten Farbe stehen (kein Fall im Original)
+    }
+    if(s.mtn_no<0||s.mtn_no>1)throw std::runtime_error("bhEff_E14_Fire mtn_no outside uvtble[2]");
+    if(s.mtn_no==0)step_uv(s,fire_uv0,10,0.09375f,"bhEff_E14_Fire");else step_uv(s,fire_uv1,9,0.09375f,"bhEff_E14_Fire");
+    s.sx*=s.aw;s.sy*=s.ah;
+    NJS_MATRIX cam;camera_rotation(c,cam);
+    s.ay=recvx_t3_arc_tan2(cam[8],cam[10]);
+    queue_custom(s);
+    if(drawing(c))draw_3d_sprite(s,s,80,unsigned(s.ani_ct),s.bl_src,s.bl_dst,c);
+}
+// effsub2.c:3698 bhEff_E13_Fluid (267) — Fluessigkeitstropfen von bhEne30_SetFluidEffect (en30.c:984,
+// xn/yn/zn nachgetragen). Texturgruppe 81 Bild 0, Farbe 0xFFFFFFFF, Blend 8/3, flg 0x180000; vier
+// UV-Zeilen-Tabellen, gewaehlt mit type (Reihenfolge 2,3,0,1), Basis 0.0625; Startbild 4r. Lebt
+// ct3 Passes (30+20r bei type 0/2, sonst 10+5r) oder bis zur Landung (ct2 0), danach 8 Passes
+// Ausblenden (Alpha 0xFF - 32*ct0, Groesse 0.9 je Pass). Flug: Lage += Richtung, yn -= 0.15,
+// waagerecht 0.97; bhCollisionCheckLine2 um 0.5 unter der Lage von pxb nach px: Normale n.y > 0.9
+// beendet den Flug, sonst bleibt der Tropfen an der Wand haengen; Lage = Treffer + 0.5 in y.
+// Mitglied von sys->ef_trs.
+namespace e13 {
+constexpr EffectUv fluid_uv0[9]={{0.875f,0.0f,0.125f,0.125f},{0.75f,0.0f,0.125f,0.125f},{0.625f,0.0f,0.125f,0.125f},{0.0f,0.0f,0.125f,0.125f},{0.125f,0.0f,0.125f,0.125f},{0.25f,0.0f,0.125f,0.125f},{0.375f,0.0f,0.125f,0.125f},{0.5f,0.0f,0.125f,0.125f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv fluid_uv1[9]={{0.875f,0.125f,0.125f,0.125f},{0.75f,0.125f,0.125f,0.125f},{0.625f,0.125f,0.125f,0.125f},{0.0f,0.125f,0.125f,0.125f},{0.125f,0.125f,0.125f,0.125f},{0.25f,0.125f,0.125f,0.125f},{0.375f,0.125f,0.125f,0.125f},{0.5f,0.125f,0.125f,0.125f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv fluid_uv2[9]={{0.875f,0.25f,0.125f,0.125f},{0.75f,0.25f,0.125f,0.125f},{0.625f,0.25f,0.125f,0.125f},{0.0f,0.25f,0.125f,0.125f},{0.125f,0.25f,0.125f,0.125f},{0.25f,0.25f,0.125f,0.125f},{0.375f,0.25f,0.125f,0.125f},{0.5f,0.25f,0.125f,0.125f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr EffectUv fluid_uv3[9]={{0.875f,0.375f,0.125f,0.125f},{0.75f,0.375f,0.125f,0.125f},{0.625f,0.375f,0.125f,0.125f},{0.0f,0.375f,0.125f,0.125f},{0.125f,0.375f,0.125f,0.125f},{0.25f,0.375f,0.125f,0.125f},{0.375f,0.375f,0.125f,0.125f},{0.5f,0.375f,0.125f,0.125f},{-1.0f,0.0f,0.0f,0.0f}};
+constexpr const EffectUv* fluid_uv[4]={fluid_uv2,fluid_uv3,fluid_uv0,fluid_uv1};
+}
+void step_e13_fluid(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0:
+        s.flg|=0x180000u;s.tex_id=81;s.ani_ct=0;quad_color(s,0xFFFFFFFFu);s.bl_src=8;s.bl_dst=3;
+        s.mtn_no=int(s.type);s.frm_no=int(4.0f*effect_random());
+        s.sxb=s.sx;s.syb=s.sy;
+        s.ct0=0;s.ct2=1;
+        if(s.type==0||s.type==2)s.ct3=int(30.0f+(20.0f*effect_random()));else s.ct3=int(10.0f+(5.0f*effect_random()));
+        s.mode0=1;
+        [[fallthrough]];
+    case 1:
+        if(s.ct0==s.ct3||s.ct2==0){s.mode0=2;s.ct0=0;break;}
+        s.frm_no++;if(s.frm_no>7)s.frm_no=3;
+        s.ct0++;
+        break;
+    case 2:
+        s.ct0++;
+        if(s.ct0>=8){s.flg=0;return;}
+        quad_color(s,(unsigned(0xFF-(s.ct0*32))<<24)|0xFFFFFFu);
+        s.sx*=0.9f;s.sy*=0.9f; // vom bhEff_SetUVInfo unten wieder aus sxb/syb ueberschrieben, wie im Original
+        break;
+    default:break;
+    }
+    if(s.ct2!=0){
+        s.px+=s.xn;s.pz+=s.zn;s.py+=s.yn;
+        s.yn-=0.15f;
+        const NJS_POINT3 p1{s.pxb,s.pyb-0.5f,s.pzb};NJS_POINT3 p2{s.px,s.py-0.5f,s.pz},n{};
+        s.xn*=0.97f;s.zn*=0.97f;
+        if(collision_line(p1,p2,n,0x4400u,-1,"bhEff_E13_Fluid: bhCollisionCheckLine2 ohne Wandsatz")){
+            njUnitVector(&n);
+            if(n.y>0.9f)s.ct2=0;else{s.xn=0;s.zn=0;s.yn=0;}
+            s.px=p2.x;s.py=0.5f+p2.y;s.pz=p2.z;
+        }
+    }
+    if(s.mtn_no<0||s.mtn_no>3){report_gap("bhEff_E13_Fluid: type ausserhalb uvtble[4]");s.flg=0;return;}
+    if(s.frm_no<0||s.frm_no>7){report_gap("bhEff_E13_Fluid: frm_no ausserhalb BH_UVTAB[9]");s.flg=0;return;}
+    const EffectUv& uv=e13::fluid_uv[s.mtn_no][s.frm_no];
+    quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/0.0625f;s.sy=(s.syb*uv.ys)/0.0625f;
+    queued=true;
+}
+// effsub2.c:23 bhEff_E00_Mince (250) — Fleischbrocken von bhEne_SetMinceEffect/2 (zonzon1.c:52/92,
+// en15.c SetMince): Textur des Erzeugers (stflg 0x20, txp[0]/tex_id aus BloodType), weiss 8/3,
+// flg 0x4180000; dieselben vier UV-Tabellen wie bhEff_E13_Fluid in natuerlicher Reihenfolge ueber
+// type & 3 (Basis 0.0625), Startbild 4r. Startrichtung aus ay (0.5 + 0.6r), yn 1.4r - 0.6; Lebensdauer
+// ct3 (30+20r bei type 0/2, sonst 10+5r) oder Landung, danach 8 Passes Ausblenden. Solange ct0 < 10
+// und type ohne 0x100: je Pass ein Blutkind 296 (type 1, Groesse 0.1+0.3r, mdlver = Blutfarbe).
+// Flug yn -= 0.06, waagerecht 0.97, bhCollisionCheckLine2 0.5 unter der Lage wie 267. ef_trs.
+namespace e00m {
+constexpr const EffectUv* mince_uv[4]={e13::fluid_uv0,e13::fluid_uv1,e13::fluid_uv2,e13::fluid_uv3};
+}
+void step_e00_mince(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0:
+        s.flg|=0x4180000u;s.stflg|=0x20u;quad_color(s,0xFFFFFFFFu);s.bl_src=8;s.bl_dst=3;
+        s.mtn_no=int(s.type&3u);s.frm_no=int(4.0f*effect_random());
+        s.sxb=s.sx;s.syb=s.sy;
+        {const float spd=0.5f+(0.6f*effect_random());
+         s.xn=spd*-njSin(Angle(s.ay));s.zn=spd*-njCos(Angle(s.ay));}
+        s.yn=(1.4f*effect_random())-0.6f;
+        s.ct0=0;s.ct1=int(4.0f*effect_random());s.ct2=1;
+        if(s.type==0||s.type==2)s.ct3=int(30.0f+(20.0f*effect_random()));else s.ct3=int(10.0f+(5.0f*effect_random()));
+        s.mode0=1;
+        [[fallthrough]];
+    case 1:
+        if(s.ct0==s.ct3||s.ct2==0){s.mode0=2;s.ct0=0;}
+        else{s.frm_no++;if(s.frm_no>7)s.frm_no=3;s.ct0++;}
+        if(!(s.type&0x100u)&&s.ct0<10){
+            auto& r=request_template();r.id=296;r.flg=1;r.type=1;r.position={s.px,s.py,s.pz};
+            const float size=0.1f+(0.3f*effect_random());r.scale={size,size,size};r.ax=0;r.ay=0;r.mdlver=s.mdlver;
+            submit_template(0);
+            s.ct1=int(4.0f*effect_random());
+        }
+        break;
+    case 2:
+        s.ct0++;
+        if(s.ct0>=8){s.flg=0;return;}
+        quad_color(s,(unsigned(0xFF-(s.ct0<<5))<<24)|0xFFFFFFu);
+        s.sx*=0.9f;s.sy*=0.9f; // vom bhEff_SetUVInfo unten wieder aus sxb/syb ueberschrieben, wie im Original
+        break;
+    default:break;
+    }
+    if(s.ct2!=0){
+        s.px+=s.xn;s.pz+=s.zn;s.py+=s.yn;
+        s.yn-=0.06f;
+        const NJS_POINT3 p1{s.pxb,s.pyb-0.5f,s.pzb};NJS_POINT3 p2{s.px,s.py-0.5f,s.pz},n{};
+        s.xn*=0.97f;s.zn*=0.97f;
+        if(collision_line(p1,p2,n,0x4400u,-1,"bhEff_E00_Mince: bhCollisionCheckLine2 ohne Wandsatz")){
+            njUnitVector(&n);
+            if(n.y>0.9f)s.ct2=0;else{s.xn=0;s.zn=0;s.yn=0;}
+            s.px=p2.x;s.py=0.5f+p2.y;s.pz=p2.z;
+        }
+    }
+    if(s.frm_no<0||s.frm_no>7){report_gap("bhEff_E00_Mince: frm_no ausserhalb BH_UVTAB[9]");s.flg=0;return;}
+    const EffectUv& uv=e00m::mince_uv[s.mtn_no][s.frm_no];
+    quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/0.0625f;s.sy=(s.syb*uv.ys)/0.0625f;
+    queued=true;
+}
 const HandEffectProcedure hand_effect_procedures[]={
-    {253,step_e02_sand_dust},{254,step_e02_sand_particle},{355,step_eff355},
+    {253,step_e02_sand_dust},{254,step_e02_sand_particle},{256,step_e03_acid},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},
     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
     {8,step_eff008},{10,step_eff010},{11,step_eff011},{14,step_eff014},{15,step_eff015},{29,step_eff029},
     {101,step_eff101},{103,step_eff103},{104,step_eff104},{116,step_eff116},{117,step_eff117},{119,step_eff119},

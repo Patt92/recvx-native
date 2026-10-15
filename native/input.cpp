@@ -209,7 +209,9 @@ void GameplayInput::menu_input(MenuInput key,bool repeat){
         /* OK/Cancel only acknowledge the dialogue (message.c). The cinematic skip is
            never requested here: bhSysCallGame (system.c:545) reads pad_ps 0x10000
            (SELECT) alone, see Action::Select in apply(). */
-        if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(sound)sound(key==MenuInput::Confirm?3:0);if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;synchronize();}else if(key==MenuInput::Left||key==MenuInput::Right){
+        /* Das Schliessen eines Texts spielt keinen Systemklang (game.c:264, message.c); den
+           GetItem-Klang der beantworteten Aufnahmefrage spielt EventVm::close_dialog. */
+        if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;synchronize();}else if(key==MenuInput::Left||key==MenuInput::Right){
             /* bhControlMessage (message.c:269-285) bewegt mes_sel ausschliesslich mit
                sys->pad_ps 0x4 (mes_sel--) und 0x8 (mes_sel++). pad_ps ist in bhSetPad
                (pad.c:275) `pad & ~sys->pad_oncpy`, also die reine Druckflanke: eine beim
@@ -217,7 +219,7 @@ void GameplayInput::menu_input(MenuInput key,bool repeat){
                kennt keinen Wiederholzaehler. Die Host-Tastenwiederholung ist damit keine
                Eingabe fuer den Dialog. */
             if(repeat)return;
-            if(dialog_.choices()){if(sound)sound(2);events_->choose_dialog(key==MenuInput::Left?-1:1);}
+            events_->choose_dialog(key==MenuInput::Left?-1:1); // Klang und Wirkung im naechsten bhControlMessage-Durchlauf
         }
         /* Hoch/Runter sind die Padbits 0x1/0x2 (pad.c:162-170); bhControlMessage liest sie
            nicht: die Auswahlfelder stehen waagerecht (message.c:150, pos.x += 28). Sie
@@ -252,6 +254,8 @@ bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))re
     /* st_flg 0x40000 (Kartentask, siehe menu_input): kein Spiel-/Menuepfad und kein
        Host-Quit; Cancel erreicht die Karte als pad_ps 0x1000 (map.c:540, Ausstieg). */
     if(events_&&(events_->flags[5][0]&0x40000u))return false;
+    /* pad_on 0x800 dieses Durchlaufs: bhControlMessage zaehlt mes_ct mit gehaltenem OK um 4 weiter (message.c:345). */
+    dialog_.begin_frame(f.down(Action::Confirm));menu_.message.begin_frame(f.down(Action::Confirm));
     menu_.tick(inventory_);if(menu_.slide_sound!=0xffffffff){if(sound)sound(menu_.slide_sound);menu_.slide_sound=0xffffffff;}if(menu_.tick_sound!=0xffffffff){if(sound)sound(menu_.tick_sound);menu_.tick_sound=0xffffffff;}synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
     if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
     if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition(); /* Host-Abweichung: gewuenschter Tuer-Skip, siehe doors.h */return false;}if(video_active&&video_active()){

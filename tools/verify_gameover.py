@@ -34,7 +34,8 @@ with tempfile.TemporaryDirectory(prefix='recvx-gameover-') as folder:
     offset = len(room)
     # Init ends. Scan waits, invokes original bhGameOverSet and ends. The retry
     # checkpoint precedes the scan.
-    room += struct.pack('<III', 12, 17, 18) + bytes([0x14, 0, 0, 0, 0, 0, 0xf8, 0xf9, 20, 0, 0xc6, 0, 0])
+    # scd1 setzt wie die Raeume sp_flg 0x10 (bhSet 6,27,0), sonst ruht bhEventScheduler2 (event.c:13024).
+    room += struct.pack('<III', 12, 17, 24) + bytes([0x14, 0, 0, 0, 0]) + bytes([5, 6, 0x1b, 0, 0, 0, 0]) + bytes([0xf8, 0xf9, 20, 0, 0xc6, 0, 0])
     struct.pack_into('<I', room, 28, offset)
     (mods / 'rooms/RM_0020.RDT').write_bytes(bytes(room))
 

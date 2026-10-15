@@ -143,11 +143,16 @@ bool hook_player_get(RECVX_ENEMY_PLAYER& p,const char* what){if(world_hooks.play
 void hook_player_set(const RECVX_ENEMY_PLAYER& p){if(world_hooks.player_set)world_hooks.player_set(p);else report_gap("plp schreiben ohne Spielerbesitzer");}
 void hook_player_exp0(unsigned off,float v){if(world_hooks.player_exp0)world_hooks.player_exp0(off,v);else report_gap("PEXP0_F ohne Spielerbesitzer");}
 void hook_player_fire(int jno,NJS_POINT3 ofp,float size,int life){if(world_hooks.player_fire)world_hooks.player_fire(jno,ofp,size,life);else report_gap("bhEne_SetFireEffect(plp) ohne Besitzer");}
-void hook_fire_light(NJS_POINT3 pos){if(world_hooks.fire_light)world_hooks.fire_light(pos);else report_gap("rom->lgtp[1] ohne Lichtbesitzer");}
+void hook_fire_light(NJS_POINT3 pos,NJS_POINT3 color,float far_divisor){if(world_hooks.fire_light)world_hooks.fire_light(pos,color,far_divisor);else report_gap("rom->lgtp[1] ohne Lichtbesitzer");}
 void hook_en12_binta(void* w,int action){if(world_hooks.en12_binta)world_hooks.en12_binta(w,action);else report_gap("bhEne12_SetFireBintaEffect ohne Gegnerbesitzer");}
 bool hook_effect_se_playing(int se){if(world_hooks.effect_se_playing)return world_hooks.effect_se_playing(se);report_gap("bhEne_CheckPlayEffectSE ohne Stimmenbesitzer");return true;}
 void hook_player_dv(NJS_POINT3 dv){if(world_hooks.player_dv)world_hooks.player_dv(dv);else report_gap("plp->dvx/dvy/dvz ohne Spielerbesitzer");}
 void hook_effect_se(NJS_POINT3 pos,int se){if(world_hooks.effect_se)world_hooks.effect_se(pos,se);else report_gap("bhEne_CallEffectSE ohne Stimmenbesitzer");}
+bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what){if(world_hooks.player_watr&&world_hooks.player_watr(c))return true;report_gap(what);return false;}
+bool collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what){
+    if(!effect_wall_set){report_gap(what);return false;}
+    return effect_line(*effect_wall_set,effect_wall_height,start,end,normal,flags,floor).has_value();
+}
 void request_player_kill(){pending.player_killed=true;}
 void request_effect_flags(unsigned bits){pending.effect_flags|=bits;}
 const EffectAfterimageServices& afterimage_service(){return afterimage_services;}
@@ -1007,6 +1012,7 @@ bool ported_effect_atlas(unsigned group){
     case 60:case 61:case 62:case 63:case 64:case 65:case 66:case 67:case 68:case 69:
     case 44: // effsub1b.c:123 bhDraw134 (sys->ef_tn[44])
     case 80:case 94:
+    case 81: // effsub2.c:3698 bhEff_E13_Fluid
     case 82:case 83: // effsub2.c:1061 bhEff_E02_SandDust (tex_id = mdlver + 82)
     case 408:case 409:case 410:case 411:case 412:case 413:case 414:case 415:case 416:case 418:case 420:
     case 417:case 419:case 421:case 422:case 423:case 424:case 425:case 426:case 427:case 428:

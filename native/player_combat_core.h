@@ -286,6 +286,7 @@ typedef struct {
     uint32_t at_flg, flg, stflg;
     uint32_t mtn_no; int32_t frm_no;
     int32_t  src_no;       /* aufgeschaltetes Ziel (plp->src_no), -1 = keines   */
+    int16_t  wax;          /* plp->wax nach dem Pass (bhSetPlEyeCamera)        */
     uint32_t locked;       /* pp.lck_n: Eintraege in LckTbl                     */
 } RECVX_COMBAT_RESULT;
 

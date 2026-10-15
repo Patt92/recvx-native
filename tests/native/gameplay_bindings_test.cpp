@@ -24,6 +24,9 @@ static std::vector<std::string> soft_failures;
 static EventCommand cmd(std::initializer_list<std::uint8_t> b){EventCommand c;c.bytes=b;c.opcode=c.bytes[0];return c;}
 int main(int argc,char** argv){try{
  if(argc<2)return 0;_Make_SinTable();std::filesystem::path data=argv[1];AudioMixer audio(data);
+ // sys->mes_ip: wie GameUi in der Runtime, sonst kann der Textaufbau (message.c:127
+ // bhDispItemName) einen Gegenstandsnamen nicht zaehlen.
+ bind_item_names(read_asset_file(data/"files/SYSMES.ALD",4*1024*1024));
  {auto bytes=read_asset_file(data/"rooms/RM_0050.RDT",64*1024*1024);auto scene=decode_scene(bytes);auto player=scene.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;RoomWorld world(bytes,scene,player,motion,frame,audio,data);auto asset=PlayerAsset::load(data);world.set_player_asset(&asset);Inventory inv;inv.acquire(84,1);MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.binding=[&](const EventCommand& c){return world.bind(c);};vm.task_started=[&](unsigned l){world.start_task(l);};vm.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};vm.initialize();vm.tick();
  // D07 ItemUse am originalen Bodentrigger 27 (Schlüssel 84): Use_05 schließt,
  // das Raumskript fragt, Ja wirft den Schlüssel weg (Skriptbefehl) und gibt die
@@ -156,10 +159,10 @@ check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<
   // :5336/5346 bhEffPush/bhEffPop (bhPushEffectWork/bhPopEffectWork).
   const auto slots=[&]{unsigned n=0;while(world.effect_state(n))++n;return n;};
   const auto eff_before=slots();
-  check(world.bind(cmd({0x2c,0,0x00,0x01})),"bhEffectSet 0x2c unbound"); // id 256 (bhEff_E03_Acid, noch nicht portiert; 263 ist seit 2026-10-14 portiert)
+  check(world.bind(cmd({0x2c,0,0x02,0x01})),"bhEffectSet 0x2c unbound"); // id 258 (bhJumpEffect2[8] bhEff_E03_Shadow, nicht portiert; 256/263 sind portiert)
   check(slots()==eff_before+1,"bhEffectSet allocated no eff[512]-Platz");
-  check(world.effect_state(eff_before)->id==256&&(world.effect_state(eff_before)->flg&1u)&&world.effect_state(eff_before)->type==0,"bhEffectSet wrote other work fields than bhSetEffect");
-  check(world.unbound_enemy_routines().count("bhEff256")==1,"unported effect procedure is not reported by name");
+  check(world.effect_state(eff_before)->id==258&&(world.effect_state(eff_before)->flg&1u)&&world.effect_state(eff_before)->type==0,"bhEffectSet wrote other work fields than bhSetEffect");
+  check(world.unbound_enemy_routines().count("bhEff258")==1,"unported effect procedure is not reported by name");
   const auto pushed=slots();
   check(world.bind(cmd({0x70,0})),"bhEffPush 0x70 unbound");
   check(world.bind(cmd({0x2c,0,0x05,0x00})),"bhEffectSet 0x2c unbound"); // id 5, portiert

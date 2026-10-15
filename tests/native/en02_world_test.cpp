@@ -21,10 +21,12 @@ struct Fixture {
         world(bytes,scene,actor,motion,frame,audio,data,{},"RM_5830"),events(bytes,inv,dialog){
         world.set_player_asset(&player);world.bind_player_collision(events);world.bind_enemy_player(inv.hp,head);world.set_enemy_ai(true);world.set_enemy_grab(true);
         world.set_camera_offset_owner(&camera); // cam.ofx/ofy/ofz (bhEne02_CameraControl)
+        // player.c:840 bhSetPlayer: bhCalcModel(plp) vor Event_init, wie die Runtime (commit_player_joints).
+        world.commit_player_joints(player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw)));
         events.binding=[this](const EventCommand& c){return world.bind(c);};events.initialize();
     }
     RECVX_ENEMY_WORK& worm(){auto& t=world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]&&t.slot[i]->id==2)return *t.slot[i];throw std::runtime_error("original RM_5830 gulp worm missing");}
-    void tick(){world.set_simulation_flags(events.flags[6][0]);world.tick();}
+    void tick(){world.commit_player_joints(player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw)));world.set_simulation_flags(events.flags[6][0]);world.tick();}
     // Nur die Luecken, die nicht EN02-Logik sind: die beiden unportierten Sandsprites und
     // die dokumentierte Original-UB (ang in SetSandEffectMain Fall 8).
     void no_en02_gaps(const char* phase){

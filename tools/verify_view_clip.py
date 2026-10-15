@@ -43,7 +43,7 @@ def main():
             script = b''.join(command + bytes([0xf8]) for _, command, _ in phases[:index+1])
             script += bytes([0xf9, 250, 0, 0, 0])
             table = len(room)
-            room += struct.pack('<III', 12, 18, 20) + bytes([0x14, 0, 0, 0, 0, 0, 0, 0]) + script
+            room += struct.pack('<III', 12, 18, 26) + bytes([0x14, 0, 0, 0, 0, 0]) + bytes([5, 6, 0x1b, 0, 0, 0, 0, 0]) + script  # scd1: sp_flg 0x10 (event.c:13024)
             struct.pack_into('<I', room, 28, table)
             (mods / 'rooms/RM_0020.RDT').write_bytes(room)
             state = args.output / (name + '.json')
@@ -65,7 +65,7 @@ def main():
         room = bytearray((args.data / 'rooms/RM_0020.RDT').read_bytes())
         table = len(room)
         script = bytes([0xf8, 0xf9, 20, 0, 5, 11, 21, 0, 0, 0, 0xc6, 0, 0])
-        room += struct.pack('<III', 12, 18, 20) + bytes([0x14, 0, 0, 0, 0, 0, 0, 0]) + script
+        room += struct.pack('<III', 12, 18, 26) + bytes([0x14, 0, 0, 0, 0, 0]) + bytes([5, 6, 0x1b, 0, 0, 0, 0, 0]) + script  # scd1: sp_flg 0x10 (event.c:13024)
         struct.pack_into('<I', room, 28, table)
         (mods / 'rooms/RM_0020.RDT').write_bytes(room)
         state = args.output / 'monitor-death.json'

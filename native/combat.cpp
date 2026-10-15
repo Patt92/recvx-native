@@ -225,7 +225,8 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     const unsigned old_shots=engine.result.shots,old_hits=engine.result.hits,old_empty=engine.result.empty;const bool was_attacking=attacking();
     recvx_combat_tick(engine.core,&engine.sys,&engine.result);engine.pad=pad;accumulate_aim(engine.result);
     if(events)inventory.chamber_empty=(events->flags[11][0]&0x40000u)!=0;
-    if(engine.sys.cam_written)engine.unavailable.insert("cam.pe_ax/cam.pe_pers (Kamerabesitzer)");
+    if(engine.sys.cam_written&&world){world->set_eye_request(engine.sys.cam_pe_ax,engine.sys.cam_pe_pers);engine.sys.cam_written=0;} // cam.pe_ax/pe_pers fuer bhInitPlEyeCamera
+    if(world){world->set_player_aim_mode(engine.result.mode1,engine.result.at_flg);world->set_player_wax(engine.result.wax);}
     if(world)world->set_effect_counter(engine.sys.yk_ct);
     shots+=engine.result.shots-old_shots;hits+=engine.result.hits-old_hits;empty+=engine.result.empty-old_empty;
     if(!was_attacking&&attacking()){++attacks;struck_.clear();}

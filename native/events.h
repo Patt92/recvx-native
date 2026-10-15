@@ -19,7 +19,8 @@ public:
     std::vector<std::string> errors;
     // event.c:36 bhIfelFlg unter null: ein ENDIF/ELSE ohne IF (event.c:413/425) zieht den
     // globalen Zaehler ins Minus. bhScenarioCheck (:13068) und bhEnd (:388) setzen ihn auf 0.
-    int ifel_debt_=0;
+    // event.c bhIfelFlg/G_Sp: globale Werte aller Tasks eines Durchlaufs (bhScenarioCheck setzt bhIfelFlg 0).
+    int ifel_=0;std::int64_t gsp_=0;
     std::vector<unsigned> dispatched;
     bool menu_open=false,status_requested=false;
     unsigned change_player=0; // sys->cng_pid (bhPlayerChangeSet, cb_flg 0x80)
@@ -47,6 +48,7 @@ public:
     std::function<void(unsigned)> audio_stop;
     // CallSystemVoice (ADV/PatId[3], VoiceNo + 16) for timer mode 3.
     std::function<void(unsigned)> system_voice;
+    std::function<void(unsigned)> system_se; // CallSystemSe(0, n) of bhControlMessage/GetItem
     std::function<Message(unsigned,unsigned)> item_message;
     // RoomWorld::start_item_box: obwp[object] becomes type 100 (bhObjItmBox).
     std::function<bool(unsigned)> item_box_object;
@@ -102,6 +104,7 @@ public:
     void control_exm(); // bhMainSequence, game.c:115-286, before bhControlMessage/bhControlEvent
     void confirm_dialog();
     void cancel_dialog();
+    void close_dialog(bool answered);
     void choose_dialog(int direction);
     bool skip_cinematic();
     void service_item_request(); // bhCheckSubTask cb_flg 0x4010 -> GetItem
@@ -129,7 +132,7 @@ private:
     bool pad_cleared_=false; // hitchk.c sys->pad_ps = 0 for the rest of the pass
     bool request_door(const DoorRequest& request);
     struct Loop {std::size_t condition=0,body=0;unsigned count=0;bool repeat=false;};
-    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0,wpnl_no=0;float addpx=0;std::size_t pc=0;std::vector<std::size_t> branches;std::vector<Loop> loops;std::array<unsigned,32> loop_counts{};};
+    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0,wpnl_no=0;float addpx=0;std::size_t pc=0;std::vector<Loop> loops;std::array<unsigned,32> loop_counts{};};
     std::vector<std::uint8_t> room_;
     std::size_t base_=0,scd0_=0,scd1_=0,messages_=0;
     std::vector<std::size_t> scripts_;

@@ -270,7 +270,7 @@ void StatusMenu::tick(Inventory& inventory){
     // StatusInit runs PulseInit on every opening; StatusMain then runs PulseMain once per frame.
     const auto condition=StatusPulse::condition(inventory.hp,(inventory.player_stflg()&0x280000u)!=0);
     if(!active)pulse_open_=false;else{if(!pulse_open_||(!pulse.healing()&&pulse.condition()!=condition)){pulse.open(condition);pulse_open_=true;}pulse.tick();}
-    const bool had_message=message.active();message.tick();if(had_message&&!message.active())finish_inspection(inventory);
+    const bool had_message=message.active();message.update();if(had_message&&!message.active())finish_inspection(inventory);
     if(!inspection.running())return;
     inspection.tick(inventory);opening_frame=inspection.action_frame();opening_item=inspection.running()?inspection.source():0;
     if(const auto angles=inspection.take_display_reset()){examine_pitch=(*angles)[0];examine_yaw=(*angles)[1];examine_roll=(*angles)[2];}
@@ -317,17 +317,23 @@ bool StatusMenu::input_unslid(MenuInput key,Inventory& inventory){
 bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     if(active&&message.active()){
         if(key==MenuInput::Open)return true;
-        // Frage 155 der Kombination: bhControlMessage beantwortet Auswahlfragen nur mit
-        // pad_ps 0x800 (message.c:233); Cancel schliesst sie nicht.
-        if(key==MenuInput::Cancel&&combine_question_)return true;
-        if(key==MenuInput::Cancel){message=MessageDialog{};inspection.answer(inventory,false);finish_inspection(inventory);return true;}
-        if(message.choices()&&(key==MenuInput::Left||key==MenuInput::Up||key==MenuInput::Right||key==MenuInput::Down)){const int step=key==MenuInput::Left||key==MenuInput::Up?-1:1;message.selection=(message.selection+message.choices()+step)%message.choices();return true;}
-        if(key==MenuInput::Confirm){const bool choice=message.choices(),yes=message.selection==0;message.confirm();if(!message.active()){
+        // StatusMain laeuft nach bhControlMessage dieses Durchlaufs (StatusMenu::tick vor der
+        // Eingabe): die Tasten wirken hier sofort auf dessen Parse, ohne zweiten Schritt.
+        // Auswahlfragen (Kombination 155, ItemModelMessageWait) beantwortet nur pad_ps 0x800
+        // (message.c:233); SpriteOnOff (sub1.c:8418) schliesst mit OK/Cancel nur die fertige
+        // letzte Seite (st_flg 0x4000|0x1000). mes_sel bewegen nur pad_ps 0x4/0x8.
+        if(key==MenuInput::Cancel){if(!message.closable())return true;message=MessageDialog{};inspection.answer(inventory,false);finish_inspection(inventory);return true;}
+        if(key==MenuInput::Left||key==MenuInput::Right){message.press(false,key==MenuInput::Left?-1:1);if(message.moved())feedback_sound=2;return true;}
+        if(key==MenuInput::Confirm){bool choice=false;
+            if(message.closable())message.close();
+            else if(message.press(true,0)==MessageDialog::Step::Answered){choice=true;message.close();}
+            else return true;
+            const bool yes=message.selection==0;
             // ItemCombination subcsr 2 liest mes_sel (100 Ja / 101 Nein) erst im naechsten Statusframe (sub1.c:5726-5744).
             if(combine_question_&&choice){combine_answer_=yes?100:101;return true;}
             inspection.answer(inventory,choice&&yes);opening_item=inspection.running()?inspection.source():0;opening_frame=0;
             finish_inspection(inventory);
-        }}return true;
+        }return true;
     }
     if(inspection.running())return true;
     if(files){
@@ -403,7 +409,7 @@ GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mo
     // Map that ramp to black/white for dialogue, retaining its antialiasing and alpha.
     for(auto& font:dialog_fonts_){unsigned low=255,high=0;for(auto c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});low=std::min(low,value);high=std::max(high,value);}
         if(high>low)for(auto& c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});const auto shade=(value-low)*255/(high-low);c=(c&0xff000000)|shade*0x010101;}}
-    messages_=read_asset_file(data/"files/SYSMES.ALD",4*1024*1024);BinaryView v(messages_);system_table_=8+v.u32(0);v.require(system_table_,4);
+    messages_=read_asset_file(data/"files/SYSMES.ALD",4*1024*1024);bind_item_names(messages_); /* sys->mes_ip fuer bhDispItemName im Textaufbau */BinaryView v(messages_);system_table_=8+v.u32(0);v.require(system_table_,4);
 }
 
 void GameUi::label(SoftwareRenderer& image,const std::string& str,int x,int y,float scale,std::uint32_t color)const{
@@ -489,39 +495,41 @@ void GameUi::draw_typewriter(SoftwareRenderer& image,const Typewriter& screen){
             }
     };
     const auto phase=screen.phase();const bool save=screen.mode()==Typewriter::Mode::Save;
-    if(phase==Phase::Card){
-        // The host directory is one available storage endpoint, corresponding
-        // to port 0. Port 1 is unavailable, not an emulated second card.
-        // CheckDisp[Load]MemoryCard: one connected endpoint, selected or EXIT.
-        quad(2,128,200,109,148,screen.selection()? .21875f:0,0,screen.selection()? .4375f:.21679688f,.296875f,0xff646464);
-        quad(2,400,200,109,148,.21875f,0,.4375f,.296875f,0xff646464);
-        cursor(70,129+258*screen.selection());
-        message(save?472:452,96,82,0xffffffff,.71f,.75f);
-        message(463,90,136,0xffffffff,.71f,.75f);message(464,153,158,0xffffffff,.71f,.75f);
-        message(463,360,136,0xffffffff,.71f,.75f);message(465,423,158,0xffffffff,.71f,.75f);
-        message(save?473:453,90,395,0xffffffff,.71f,.75f);
-        return;
-    }
     const bool window=phase==Phase::Files||phase==Phase::Confirm||phase==Phase::Io||phase==Phase::Typing||phase==Phase::Success;
     if(window){
         message(463,140,32);message(464,420,32);cursor(32,103+40*screen.row());
-        // mcDispWindowFoundtion: arguments are right/bottom, not width/height.
-        const SceneTexture white=[](){SceneTexture t;t.width=t.height=1;t.pixels={0xffffffff};return t;}();
-        PulseQuad foundation{{{16,96,0,0,0x18808080,0},{616,96,1,0,0x18808080,0},{16,310,0,1,0x18808080,0},{616,310,1,1,0x18808080,0}}};
-        pulse_quad(image,white,foundation);
+        // njDrawPolygon (ps2_NaDraw.c:8-58) schreibt den Alphawert des Vertex als col>>25,
+        // also die Haelfte des Farbbytes; njDrawPolygon(...,1) mischt danach mit dem
+        // ALPHA-Register des vorangehenden Fonts (0x44: CS als Faktor, /128). Fuer
+        // 0x18808080 ergibt das 12/128 statt des bisher angenommenen FIX=96/128.
+        auto& pixels=image.canvas();
+        constexpr unsigned alpha=0x18808080u>>25;
+        for(int y=96;y<310&&y<image.height();++y)for(int x=16;x<616&&x<image.width();++x){
+            auto& dst=pixels[std::size_t(y)*image.width()+x];std::uint32_t out=0xff000000u;
+            for(unsigned shift:{0u,8u,16u})out|=((128u*alpha+((dst>>shift)&255u)*(128u-alpha))/128u)<<shift;
+            dst=out;
+        }
         auto glyph=[&](unsigned code,float x,float y,std::uint32_t color){direct_message(image,Message{std::uint16_t(code),0xffff},x,y,color);};
+        auto damaged_mark=[&](int x,int y){
+            auto& pixels=image.canvas();
+            const auto red=0xff0000ffu;
+            for(int py=0;py<14;++py)for(int px=0;px<8;++px)
+                if(px==0||px==7||py==0||py==13||((px==3||px==4)&&py>=3&&py<=8)||((px==3||px==4)&&py==10))
+                    pixels[(y+py)*image.width()+x+px]=red;
+        };
         for(unsigned row=0;row<5;++row){
             const auto& s=screen.slots().at(screen.top()+row);const float y=108+40*row;
             // mcDispFileNumber / mcDispFileName: number, '.', player, '/', save
             // count, '/', RoomNameSwitch-derived original message. No HP/room IDs.
-            const auto numcolor=s.exists?0xffffffffu:0xff606060u;
+            const auto numcolor=s.damaged?0xffff2020u:s.exists?0xffffffffu:0xff606060u;
             if(s.slot/10)glyph(16+s.slot/10,60,y,numcolor);glyph(16+s.slot%10,86,y,numcolor);glyph(14,118,y,numcolor);
+            if(s.damaged){damaged_mark(126,int(y)+7);continue;}
             if(!s.exists){message(215,132,y,0xff606060);continue;}
             if(s.game_mode<0||s.game_mode>2)throw std::runtime_error("typewriter: original file-name colour for game mode is unresolved");
             const auto col=s.game_mode==1?0xff20ff20u:s.game_mode==2?0xffff2020u:0xffffffffu;
             if(s.save_ct>99)throw std::runtime_error("typewriter: save count outside original MesNumTbl");
             if(phase==Phase::Typing&&row==screen.row()){
-                const unsigned n=screen.write_count(),p=s.player;
+                const unsigned n=screen.drawn_count(),p=s.player;
                 if(n>=3&&n<=8-p)message(208+p,132,y,col,1,1,n-2,true);
                 else if(n>=9-p){message(208+p,132,y,col);glyph(15,230,y,col);}
                 if(n>=11-p)glyph(16+s.save_ct/10,262,y,col);
@@ -532,7 +540,7 @@ void GameUi::draw_typewriter(SoftwareRenderer& image,const Typewriter& screen){
                 if(s.save_room<1||s.save_room>18)throw std::runtime_error("typewriter: missing Type_Space save room");
                 const unsigned max=lengths[s.save_room-1];
                 if(n>=max-p)message(215+s.save_room,352,y,col);
-                else if(n>=15-p)message(215+s.save_room,352,y,col,1,1,n-15,true);
+                else if(n>=15-p)message(215+s.save_room,352,y,col,1,1,n-(14-p),true);
             }else{message(208+s.player,132,y,col);glyph(15,230,y,col);glyph(16+s.save_ct/10,262,y,col);glyph(16+s.save_ct%10,288,y,col);glyph(15,320,y,col);message(215+s.save_room,352,y,col);}
         }
     }
@@ -750,7 +758,7 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
         icon(image,id,x,y);if(id)quantity(image,inv.slots()[slot],x,y);
         if(slot>1)cell+=id&&(itemdata[id].type&0x100)?2:1;if(cell>=inv.capacity())break;
     }
-    const auto packed=selecting?inv.items[base+index]:inv.slots()[menu.selected];if(menu.message.active())text(image,menu.message.page(),44+dx(6),342+dy(6),1,0xffffffff,true,int(menu.message.selection));else if(note)text(image,system_message(note),44+dx(6),342+dy(6),1,0xffffffff,true);else if(Inventory::id(packed))text(image,read_message(messages_,4,inventory_name_id(packed)),44+dx(6),342+dy(6),.95f);
+    const auto packed=selecting?inv.items[base+index]:inv.slots()[menu.selected];if(menu.message.active())text(image,menu.message.visible(),44+dx(6),342+dy(6),1,0xffffffff,true,int(menu.message.selection));else if(note)text(image,system_message(note),44+dx(6),342+dy(6),1,0xffffffff,true);else if(Inventory::id(packed))text(image,read_message(messages_,4,inventory_name_id(packed)),44+dx(6),342+dy(6),.95f);
 }
 void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick){
     if(menu.active&&menu.files&&!menu.file_list){
@@ -868,6 +876,6 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
     const auto& visible_dialog=menu.active&&menu.message.active()?menu.message:dialog;
     // bhControlMessage mode 1 uses mes_spos[1], replacing the item name.
     // Room dialogue uses mode 0; neither mode draws a background panel.
-    if(visible_dialog.active()&&std::any_of(visible_dialog.page().begin(),visible_dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;}))text(image,visible_dialog.page(),menu.active?44:68,menu.active?342:374,1,0xffffffff,true,int(visible_dialog.selection));
+    if(visible_dialog.active()&&std::any_of(visible_dialog.page().begin(),visible_dialog.page().end(),[](auto code){return code<0xfe00||code==0xff03;}))text(image,visible_dialog.visible(),menu.active?44:68,menu.active?342:374,1,0xffffffff,true,int(visible_dialog.selection));
 }
 }

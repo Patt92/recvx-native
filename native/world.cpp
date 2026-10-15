@@ -125,6 +125,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         [this](unsigned slot){return slot<sprites_.size()?sprites_[slot].sprite.flg:0u;},
         [this](unsigned slot,unsigned flags,unsigned id){write_particle_slot(slot,flags,id);});
     room_cameras_=stage.cameras;
+    {BinaryView rv(b);room_fog_color_=rv.u32(header_+0x108);room_fog_near_=rv.f32(header_+0x10c);room_fog_far_=rv.f32(header_+0x110);} // rom->fog_col/fog_nr/fog_fr
     BinaryView v(b);for(unsigned i=0;i<4;++i){ambient_[i]={v.f32(header_+0x3bc+i*4),v.f32(header_+0x3cc+i*4),v.f32(header_+0x3dc+i*4)};ambient_slots_[i]=v.u8(header_+0x3b8+i);if(ambient_slots_[i]>=4)throw std::runtime_error("invalid room ambient channel");}
     const auto walls=v.u32(header_+0x18),count=v.u32(header_+0x98);if(count>4096)throw std::runtime_error("too many collision walls");v.require(walls,count*36);
     room_height_=v.f32(header_+0x118);for(unsigned i=0;i<32;++i)floors_[i]=v.f32(header_+0x120+i*4);
@@ -147,7 +148,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     const auto ene_count=v.u32(header_+0x88),model_table=v.u32(20),texture_table=v.u32(32);std::size_t model_slot=1,texture_slot=1;std::map<std::tuple<unsigned,unsigned,unsigned,unsigned>,std::size_t> texture_cache;
     auto load=[&](unsigned kind,unsigned index,std::size_t p,bool actor){auto& e=entity(kind,index);e.transform={{v.f32(p+12),v.f32(p+16),v.f32(p+20)},int(v.u16(p+28))};e.angles={int(v.u16(p+24)),int(v.u16(p+28)),int(v.u16(p+26))};
         const auto model=v.u32(model_table+model_slot++*4);std::size_t texture=0;
-        const unsigned identity=v.u16(p+4),variant=actor?v.u8(p+9):0;e.identity=identity;e.type=v.u16(p+6);e.object_flags=v.u32(p);e.object_parameter=e.type>>8;e.object_floor=std::int8_t(v.u8(p+8));if(kind==2)e.aspd=std::uint16_t(v.u16(p+30));if(kind==1&&identity==1)e.hp=en01_hp_tbl[0][index%16];
+        const unsigned identity=v.u16(p+4),variant=actor?v.u8(p+9):0;e.identity=identity;e.type=v.u16(p+6);e.object_flags=v.u32(p);e.object_parameter=e.type>>8;e.object_floor=std::int8_t(v.u8(p+8));if(kind==2||kind==3)e.aspd=std::int16_t(v.u16(p+30));if(kind==2||kind==3)e.draw_tp=std::int8_t(v.u8(p+11)); /* bhSetObject/bhSetItem: opp->aspd = ETTY aspd (short) */if(kind==1&&identity==1)e.hp=en01_hp_tbl[0][index%16];
         // objitm.c:200-203 bhSetObject / :262-265 bhSetItem copy ETTY_WORK.hide[0..3]
         // (die vier Bytes am Satzende) in das O_WRK. bhSetEneMdl kopiert sie nicht.
         if(kind==2||kind==3)for(unsigned i=0;i<4;++i)e.object_hide[i]=v.u8(p+32+i);
@@ -254,6 +255,9 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     // not to a second per-entity motion owner at room construction.
     for(auto& pair:entities_)if(pair.first.first==1&&recvx_is_subplayer(pair.second.identity))
         pair.second.subplayer_bound=true;
+    build_object_lists(); // der erste bhControlObjItm-Durchlauf vor dem ersten Zeichnen
+    /* player.c:791 bhSetPlayer / :905 bhResetPlayer: der Spielerschatten (Typ 1, lkono 1) je Raum. */
+    if(const int slot=set_enemy_shadow(nullptr,nullptr,1,4.5f,4.0f,3.5f);slot>=0){auto& o=sprites_[unsigned(slot)].sprite;o.lkwkp=&player_shadow_tag_;o.flg|=0x80u;}
     (void)stage;
 }
 const MotionClip& RoomWorld::enemy_library_clip(unsigned identity,unsigned index)const{
@@ -472,6 +476,8 @@ std::optional<Scene> RoomWorld::computer_character(unsigned chr_no,unsigned moti
 }
 void RoomWorld::start_task(unsigned level){auto& task=contexts_.at(level);task.mode1=0;task.positions={};task.angles={};}
 std::vector<ModelPose> RoomWorld::object_pose(const Model& model,const WorldEntity& state)const{
+    if(state.posed_has_motion()&&posed_motion_clip(state).positions.size()>model.rest_pose.size())
+        unbound_enemy_.insert("bhSetMotion: Motion mit mehr Kanaelen als Modellknoten (Original schreibt hinter objP); work="+std::to_string(model.kind)+"/"+std::to_string(model.index)+", identity="+std::to_string(state.identity)+", motion="+(state.posed_room_motion()?"room/":"builtin/")+std::to_string(state.posed_motion())+", channels="+std::to_string(posed_motion_clip(state).positions.size())+", nodes="+std::to_string(model.rest_pose.size()));
     auto pose=state.posed_has_motion()?sample_motion_pose(posed_motion_clip(state),state.posed_frame(),model.rest_pose):model.rest_pose;
     for(const auto& pair:state.node_overrides){auto& node=pose.at(pair.first);if(pair.second.position)node.position=*pair.second.position;if(pair.second.angles)node.angles=*pair.second.angles;}return pose;
 }
@@ -581,7 +587,26 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(v.u8(4)){if(e.linked)e.transform.position=link_point(e.parent_kind,e.parent_index,e.parent_node,e.link_offset);e.linked=false;return true;}
         e.linked=true;e.parent_kind=parent_kind;e.parent_index=parent_kind?v.u8(1):0;e.parent_node=v.u8(3);const auto signs=v.u8(5);e.link_offset={v.u16(6)/100.f*(signs&1?-1:1),v.u16(8)/100.f*(signs&2?-1:1),v.u16(10)/100.f*(signs&4?-1:1)};return true;}
     if(op==0x3b){const auto kind=v.u8(1);if(kind>2)return false;entity(kind,v.u8(2)).hidden_nodes[v.u8(3)]=v.u8(4)==0;return true;}
-    if(op==0x43||op==0x91||op==0xad||op==0xd2){const auto index=v.u8(1);if(index>=sprites_.size())throw std::runtime_error("script effect outside original room table");auto& work=sprites_[index];if(op==0x43){work.hidden=v.u8(2)==0;return true;} /* bhEffDispSet: stflg 0x1000000 for every effect */if(!supported_effect_sprite(work.sprite.id))return false;if(op==0x91)work.sprite.mode1=v.u8(2);else if(op==0xad){work.sprite.type=v.u8(2);entity(4,index).type=work.sprite.type;}else{const auto signs=v.u8(3);work.scale={v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};}return true;}
+    // event.c bhInitSetKage (0x2f): bhSetShadow(NULL, ene[enep[v0].wrk_no], 1, ...) einmal je Work
+    // (flg 0x800). bhKageSwSet (0x7e): stflg 0x8 schaltet den Schatten des Works ab (effsub1.c:718).
+    if(op==0x2f||op==0x7e){
+        if(op==0x7e&&v.u8(1)==0){if(!collision_events_)return false;auto& stflg=collision_events_->flags[14][0];if(!v.u8(3))stflg|=0x8u;else stflg&=~0x8u;return true;} // plp->stflg
+        if(op==0x7e&&v.u8(1)!=1)return false; // obwp/itwp als BH_PWORK: ohne nativen Besitzer
+        const unsigned index=op==0x2f?v.u8(1):v.u8(2);const auto found=entities_.find({1u,index});
+        if(found==entities_.end()||!found->second.enemy_bound)return false;
+        auto& w=found->second.enemy;
+        if(op==0x7e){if(!v.u8(3))w.stflg|=0x8u;else w.stflg&=~0x8u;return true;}
+        if(!(w.flg&0x800u)){w.flg|=0x800u;const unsigned type=v.u8(2);
+            if(type<4)set_enemy_shadow(nullptr,&w,1,4.5f,4.0f,3.5f);else if(type==4)set_enemy_shadow(nullptr,&w,1,6.5f,4.0f,4.5f);}
+        return true;}
+    if(op==0x43||op==0x88||op==0x91||op==0xad||op==0xd1||op==0xd2){const auto index=v.u8(1);if(index>=sprites_.size())throw std::runtime_error("script effect outside original room table");auto& work=sprites_[index];if(op==0x43){work.hidden=v.u8(2)==0;if(work.hidden)work.sprite.stflg|=0x1000000u;else work.sprite.stflg&=~0x1000000u;return true;} /* bhEffDispSet (event.c:3653): stflg 0x1000000, das auch Kindeffekte am Traeger lesen */
+        /* event.c:6219 bhEffUVSet (0x88): tv[0..3].u/v aus vier u16 in 1/256. */
+        if(op==0x88){const float u0=v.u16(2)/256.0f,v0=v.u16(4)/256.0f,u1=v.u16(6)/256.0f,v1=v.u16(8)/256.0f;auto& tv=work.sprite.tv;tv[0].u=u0;tv[0].v=v0;tv[1].u=u1;tv[1].v=v0;tv[2].u=u0;tv[2].v=v1;tv[3].u=u1;tv[3].v=v1;return true;}
+        if(op==0xd1||op==0xd2){const auto signs=v.u8(3);const NJS_POINT3 value={v.u16(4)/100.f*(signs&1?-1:1),v.u16(6)/100.f*(signs&2?-1:1),v.u16(8)/100.f*(signs&4?-1:1)};
+            if(op==0xd1){work.scale=value;work.sprite.sx=work.sprite.sxb=value.x;work.sprite.sy=work.sprite.syb=value.y;work.sprite.sz=work.sprite.szb=value.z;} /* bhEffSSizeSet (event.c:8941): sxb = sx */
+            else{work.offset=value;work.sprite.lox=value.x;work.sprite.loy=value.y;work.sprite.loz=value.z;} /* bhEffLinkOffsetSet (event.c:8998): lox/loy/loz */
+            return true;}
+        if(!supported_effect_sprite(work.sprite.id))return false;if(op==0x91)work.sprite.mode1=v.u8(2);else{work.sprite.type=v.u8(2);entity(4,index).type=work.sprite.type;}return true;}
     // event.c:1919 bhEffectSet: bhSetEffect(v1, &{0,0,0}, NULL, 0) — erster
     // freier Platz des geteilten eff[512]-Satzes. Der Befehl legt den Arbeitssatz
     // auch dann an, wenn seine Prozedur noch nicht portiert ist; das wird wie
@@ -635,10 +660,12 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         particles_.spawn_pool(table,position,angle,int(palette));
         return true;
     }
-    // bhLoadWork2: 0 player, 1 enemy by enep, 2 object work stored on task byte[2].
+    // bhLoadWork2 (event.c:12933): Fall 2 ueberspringt Byte 2; tk_no, obwp-Index
+    // und model_cno stehen in Byte 3, 4 und 5.
     if(op==0x68){const auto kind=v.u8(1);if(kind>2)return false;
-        if(kind==2){auto& target=contexts_.at(v.u8(2));target.kind=2;target.index=v.u8(3);target.node=v.u8(4);target.work=true;return true;}
-        ctx.kind=kind;ctx.index=kind?v.u8(2):0;ctx.node=0;ctx.work=true;if(!kind)player_scripted=true;return true;}
+        if(kind==2){auto& target=contexts_.at(v.u8(3));target.kind=2;target.index=v.u8(4);target.node=v.u8(5);target.work=true;return true;}
+        // Fall 1 laesst model_cno stehen; nur Fall 0 setzt ihn auf 0.
+        ctx.kind=kind;ctx.index=kind?v.u8(2):0;if(!kind)ctx.node=0;ctx.work=true;if(!kind)player_scripted=true;return true;}
     if(op==0x65){ctx.kind=v.u8(1);ctx.index=v.u8(2);ctx.node=v.u8(3);ctx.work=true;
         if(!ctx.kind){player_scripted=true;}
         else if(ctx.kind==1&&entity(1,ctx.index).enemy_bound){
@@ -685,6 +712,30 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(player_asset_){auto& edit=entity(0,0).node_overrides[0];auto angles=model_pose_physical(0,0,0).angles;angles[1]=0;edit.angles=angles;}
         actor_nodes_.clear();return true;}
     if(op==0x9d){entity(2,v.u8(1)).aspd=v.u8(2);return true;} // objitm.c light parameter; consumers pending
+    if(op==0x42){entity(3,v.u8(1)).aspd=v.u8(2);return true;}
+    // event.c:8873 bhSyukanModeSet (0xce): 0 schaltet die Ich-Perspektive ein (gm_flg 0x1000000|0x2000,
+    // st_flg ~0x1, cam.pe_ax/pe_pers/axp/ax); sonst gm_flg &= ~0x10000C0, |= 0x800. Die Augenkamera
+    // selbst fuehrt tick_camera (bhInitPlEyeCamera/bhSetPlEyeCamera/bhControlPlEyeCamera).
+    if(op==0xce){if(!collision_events_)return false;auto& gm=collision_events_->flags[11][0];
+        if(!v.u8(1)){gm|=0x1000000u|0x2000u;collision_events_->flags[5][0]&=~0x1u;eye_pe_ax_=0;eye_pe_pers_=11832;eye_.axp=0;eye_.ax=0;}
+        else{gm&=~0x10000C0u;gm|=0x800u;}
+        return true;}
+    // event.c:6007 bhInitPonySet (0x80): flg2 0x2 an plp (bhObjClpn setzt den Zopf zurueck) oder ene[enep[v3]].
+    if(op==0x80){const unsigned kind=v.u8(1);
+        if(kind==0){if(!collision_events_)return false;collision_events_->flags[15][0]|=0x2u;return true;}
+        if(kind!=1)return true; // keine weitere Art im Original
+        const auto found=entities_.find({1u,unsigned(v.u8(2))});if(found==entities_.end()||!found->second.enemy_bound)return false;
+        found->second.enemy.flg2|=0x2u;return true;}
+    // event.c:1851 bhInitMotionPause (0x2d) / :1879 bhInitMotionPauseEx (0x30): mode0 5, mode3 4; Ex dazu
+    // frm_no 0, mtn_no v1 aus sys->rmthp; bei id 1 ebenso exp1 (ohne dessen mnwP).
+    if(op==0x2d||op==0x30){const auto found=entities_.find({1u,unsigned(v.u8(1))});if(found==entities_.end()||!found->second.enemy_bound)return false;
+        auto& e=found->second;auto& w=e.enemy;adopt_enemy_script(e);
+        auto* upper=w.id==1?static_cast<RECVX_ENEMY_WORK*>(w.exp1):nullptr;if(w.id==1&&!upper){unbound_enemy_.insert("bhInitMotionPause: exp1 fehlt");return false;}
+        w.mode0=5;w.mode3=4;if(upper){upper->mode0=5;upper->mode3=4;}
+        if(op==0x30){w.frm_no=0;w.mtn_no=v.u8(2);w.mtn_room=1;if(upper){upper->frm_no=0;upper->mtn_no=v.u8(2);}}
+        publish_enemy(e);e.commit_pose();return true;}
+    // event.c bhObjAlphaSet (0x6c): bhSetAlphaFadeObject(obwp/itwp[v1], v2, v3, v4, v5); andere Arten setzen kein op.
+    if(op==0x6c){const unsigned kind=v.u8(1);if(kind!=2&&kind!=3)return false;auto& e=entity(kind,v.u8(2));e.alpha_fade=true;e.alpha_jntno=v.u8(3);e.alpha_jnt_n=v.u8(4);e.alpha_target=float(v.u8(5));e.alpha_count=float(v.u8(6));return true;} // event.c bhItmAspdSet: sys->itwp[v0].aspd = v1 (Glanz, objitm.c:417)
     if(op==0x9e){vibration_mode_request_=v.u8(1)==0?1:0;return true;} // event.c:6744 bhPuruPuruFlagSet -> SetEventVibrationMode(v0 == 0)
     if(op==0x9f){vibration_requests_.push_back({2,int(v.u8(1))});return true;} // event.c:6766 bhPuruPuruStart -> StartVibrationEx(2, v0)
     if(op==0xcc){entity(1,v.u8(1)).look=v.u8(2)!=0;return true;} // en01.c AI consumer pending
@@ -708,7 +759,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         }
         return true;
     }
-    if(op==0x20){const unsigned kind=v.u8(2),index=v.u8(1);if(!kind)player_hidden=v.u8(3)==0;else entity(kind,index).hidden=v.u8(3)==0;return true;}
+    if(op==0x20){const unsigned kind=v.u8(2),index=v.u8(1);if(!kind){player_hidden=v.u8(3)==0;if(player_hidden&&stage_no_==9&&room_no_==30&&room_case_==2)pl_sleep_cnt_=2;} /* event.c:2832 */else entity(kind,index).hidden=v.u8(3)==0;return true;}
     // objitm.c never ticks room-object motions. The scenario explicitly samples
     // them through bhSetObjMotion / bhSetItmMotion, including the sp_flg gate.
     if(op==0x50||op==0x9c){auto& e=entity(op==0x50?2:3,v.u8(1));if(e.has_motion&&e.motion_mode3==1&&(c.simulation_flags&4)){e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);actor_nodes_.clear();}return true;}
@@ -898,6 +949,14 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
        Sonst zieht der Settle-Schritt spxn/spzn aus bhCPM2_act_std bzw. pl_smove01
        (pl_evt.c:132-145) den Spieler nach der Szene wieder zur alten Lage zurueck.
        Der Host fuehrt spx/spz als collision_safe_ und glich sie hier bisher nicht ab. */
+    // event.c:9391 Player_controll 131: mode3 = mode2 == v0 ? 1 : 0, mode0 7, mode1 v1, mode2 v0, mode2 1 -> mode3 0.
+    // Der Spieler laeuft dann ueber bhCPM0_event (pl_evt.c) statt eines Skriptclips.
+    if(op==0x64&&v.u8(1)==131){if(ctx.kind!=0)return false;
+        const unsigned v0=v.u8(2),v1=v.u8(3);player_event_.reset=!(player_event_.requested&&player_event_.mode2==v0)||v0==1;
+        player_event_.requested=true;player_event_.mode1=v1;player_event_.mode2=v0;
+        collision_mode_=7u|(v1<<8)|(v0<<16)|((player_event_.reset?0u:(collision_mode_>>24))<<24);
+        player_scripted=false;player_frozen_=false;return true;}
+    if(op==0x64&&(v.u8(1)==0x80||v.u8(1)==0x8b))player_event_.requested=false; // Player_controll 128/139: zurueck zu bhCPM0_action
     if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;return true;case 0x80:player_scripted=false;player_room_motion_=false;player_frozen_=false;motion_=42;frame_=0;return true;case 0x34:return stand_player_motion(); // event.c:9697 Player_controll 52
         // event.c:9275 Player_controll 150 writes plp->exp1 (the head flags), whatever work the task holds.
         case 150:if(!player_head_)return false;if(v.u8(2)==0){player_head_->flags|=0x1E0u;player_head_->flags&=~0x14u;}else player_head_->flags|=0x14u;return true;
@@ -920,9 +979,10 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         auto& e=entity(ctx.kind,ctx.index);auto& w=e.enemy;const auto sub=v.u8(1);
         if(sub==0x80||sub==0x90){if(sub==0x80){const auto library=enemy_motions_.find(e.identity);const bool present=library!=enemy_motions_.end()&&w.mtn_no<library->second.entries.size()&&library->second.entries[w.mtn_no].second;
                 e.subplayer_no_motion=!present;if(present){e.room_motion=false;e.motion=w.mtn_no;}}
-            w.mtn_room=0;w.mode0=1;w.mode2=0;w.ct2=0;if(sub==0x90)w.mode3=3;e.scripted=false;e.frozen=false;return true;}
+            w.mtn_room=0;w.mode0=1;w.mode2=0;w.ct2&=~0xff;if(sub==0x90)w.mode3=3;e.scripted=false;e.frozen=false;return true;}
         if(sub==0x8b)return true;
-        if(sub==0x8f||sub==0x92||sub==0x93){if(sub!=0x93)w.mtn_room=0;w.mode0=v.u8(2);w.mode1=v.u8(3);w.mode2=v.u8(4);w.mode3=sub==0x8f?0:v.u8(sub==0x93?5:6);w.ct2=0;e.type=(e.type&0xff00)|v.u8(sub==0x93?6:5);if(sub!=0x93){const auto library=enemy_motions_.find(e.identity);const bool present=library!=enemy_motions_.end()&&w.mtn_no<library->second.entries.size()&&library->second.entries[w.mtn_no].second;e.subplayer_no_motion=!present;if(present)e.room_motion=false;}e.scripted=false;e.frozen=false;return true;}
+        // event.c:9804-9911: 0x8f/0x92 loeschen nur das unterste ct2-Byte, 0x93 laesst ct2 stehen.
+        if(sub==0x8f||sub==0x92||sub==0x93){if(sub!=0x93)w.mtn_room=0;w.mode0=v.u8(2);w.mode1=v.u8(3);w.mode2=v.u8(4);w.mode3=sub==0x8f?0:v.u8(sub==0x93?5:6);if(sub!=0x93)w.ct2&=~0xff;w.type=std::uint16_t((w.type&0xff00u)|v.u8(sub==0x93?6:5));e.type=w.type;if(sub!=0x93){const auto library=enemy_motions_.find(e.identity);const bool present=library!=enemy_motions_.end()&&w.mtn_no<library->second.entries.size()&&library->second.entries[w.mtn_no].second;e.subplayer_no_motion=!present;if(present)e.room_motion=false;}e.scripted=false;e.frozen=false;return true;}
     }
     // Sub_controll (event.c:9762-9911) on the native work of an enemy that is
     // no subplayer: 0x80 (:9762), 0x90 (:9788), 0x8f (:9804), 0x92 (:9846),
@@ -931,6 +991,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     // back to 1 after a Common 24/25/34 with mode0 5) never reached the work.
     if(op==0x67&&ctx.kind==1&&entity(ctx.kind,ctx.index).enemy_native&&!entity(ctx.kind,ctx.index).subplayer_bound){
         auto& e=entity(ctx.kind,ctx.index);auto& w=e.enemy;const auto sub=v.u8(1);
+        if(sub==0x94){adopt_enemy_script(e);const int done=en11_light_control(&w,v.u8(2));publish_enemy(e);return done!=0;} // event.c:9912 Sub_controll 148
         if(sub==0x80||sub==0x90||sub==0x8f||sub==0x92||sub==0x93){
             adopt_enemy_script(e);
             auto* upper=w.id==1?static_cast<RECVX_ENEMY_WORK*>(w.exp1):nullptr;
@@ -964,6 +1025,10 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     }
     if(op==0x67&&v.u8(1)==0x80){auto& e=entity(ctx.kind,ctx.index);e.scripted=false;e.frozen=false;if(ctx.kind==1&&(e.identity==1||e.identity==4)){e.room_motion=false;e.frame=0;e.step=65536;e.motion=e.identity==4?(e.type?49:47):e.type==15?13:(e.type==2||e.type==3||e.type==6||e.type==7||e.type==9)?3:2;e.has_motion=true;entity_motion(e);}return true;}
     if(op==0x69){const auto cmd=v.u8(1);
+        // objP eines frei laufenden nativen Works ist enemy_obj; ein Override bliebe dort ungelesen.
+        auto set_node=[&](unsigned physical,const NJS_POINT3* pos,const std::array<int,3>* ang){auto& e=entity(ctx.kind,ctx.index);
+            if(ctx.kind==1&&e.enemy_native&&!e.scripted&&physical<e.enemy_obj.size()){if(pos)e.enemy_obj[physical].position=*pos;if(ang)e.enemy_obj[physical].angles=*ang;e.node_overrides.erase(physical);}
+            else{auto& o=e.node_overrides[physical];if(pos)o.position=*pos;if(ang)o.angles=*ang;}};
         if(cmd==48||cmd==49){const auto key=v.u8(2);if(key>=4)throw std::runtime_error("captured interpolation key outside original task table");if(cmd==48){const auto pos=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;ctx.positions[key]={pos.x,pos.y,pos.z};}else{auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:entity(ctx.kind,ctx.index).angles;if(!ctx.node&&!ctx.kind)angles[1]=player_.yaw;for(unsigned axis=0;axis<3;++axis){float n=std::int16_t(angles[axis])*0.005493164f;if(axis!=1||!v.u8(3)){if(n<0)n+=360;}else if(n>180)n-=360;ctx.angles[key][axis]=n;}}return true;}
         if(cmd==14||cmd==21){auto& e=entity(ctx.kind,ctx.index);if(!e.subplayer_bound)return false;(cmd==14?e.enemy.ct3:e.enemy.ct1)=v.u8(2);return true;}
         /* Common_controll 132/140/141 (event.c:12495/12516/12561) sind die drei
@@ -995,8 +1060,9 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
             if(cmd==141){w.ct0=v.u8(3);w.ct1=v.u8(4);w.ct2=v.u8(5);}
             return true;}
         if(cmd==15||cmd==16){auto& e=entity(ctx.kind,ctx.index);std::array<int,3> angles{};for(unsigned axis=0;axis<3;++axis)angles[axis]=int(v.u8(2+axis)*182.04445f)*(cmd==15?(ctx.ang_sign[axis]?-1:1):(v.u8(5)&(1u<<axis)?-1:1));
-            e.node_overrides[cmd==15?0:1].angles=angles;if(cmd==15){e.angles=angles;if(ctx.kind)e.transform.yaw=angles[1];else player_.yaw=angles[1];}actor_nodes_.clear();return true;}
-        if(cmd==50){auto& e=entity(ctx.kind,ctx.index);e.type=(e.type&0xff00)|v.u8(2);if(ctx.kind==4&&ctx.index<sprites_.size())sprites_[ctx.index].sprite.type=e.type;return true;}
+            // event.c:12594/12628: 15 schreibt work->ax/axb.. und mlwP->objP[0].ang, 16 objP[1].ang.
+            set_node(cmd==15?0:1,nullptr,&angles);if(cmd==15){e.angles=angles;if(ctx.kind)e.transform.yaw=angles[1];else player_.yaw=angles[1];if(ctx.kind==1&&e.enemy_bound){auto& w=e.enemy;w.ax=w.axb=angles[0];w.ay=w.ayb=angles[1];w.az=w.azb=angles[2];}}actor_nodes_.clear();return true;}
+        if(cmd==50){auto& e=entity(ctx.kind,ctx.index);e.type=(e.type&0xff00)|v.u8(2);if(ctx.kind==1&&e.enemy_bound)e.enemy.type=std::uint16_t((e.enemy.type&0xff00u)|v.u8(2)); /* event.c:10050: das Typbyte des Works selbst */if(ctx.kind==4&&ctx.index<sprites_.size())sprites_[ctx.index].sprite.type=e.type;return true;}
         if(cmd==8||cmd==36||cmd==38||cmd==17||cmd==18||cmd==19){const auto node=cmd==38?v.u8(2):cmd==36?0:ctx.node;const auto physical=model_index(ctx.kind,ctx.index,node);auto pose=model_pose(ctx.kind,ctx.index,node);auto& edit=entity(ctx.kind,ctx.index).node_overrides[physical];
             /* Common_controll 8 (event.c:12099) schreibt work->mdl->objP
                [model_cno].pos.  model_cno ist der vom Task uber bhLoadWork
@@ -1023,8 +1089,12 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
         if(cmd>=28&&cmd<=33||cmd==44||cmd==45){
             const float clock=event_clock(c.loop_remaining,c.loop_total);
             auto interpolate=[&](const auto& keys){float input[12],out[3];const bool four=cmd==29||cmd==32||cmd==33;for(unsigned i=0;i<4;++i)for(unsigned a=0;a<3;++a)input[i*3+a]=keys[four?3-i:i<2?1:0][a];if(!four&&v.u8(2))njLinear(input+3,out,nullptr,clock);else njOverhauserSpline(input,out,nullptr,clock);return std::array<float,3>{out[0],out[1],out[2]};};
-            if(cmd==28||cmd==29||cmd==30||cmd==32||cmd==44){const auto out=interpolate(ctx.positions);auto local=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:NJS_POINT3{};auto& pos=ctx.node?local:ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;const auto mask=cmd==44?v.u8(3):7;if(mask&1)pos.x=out[0];if(mask&2)pos.y=out[1];if(mask&4)pos.z=out[2];if(ctx.node)entity(ctx.kind,ctx.index).node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].position=pos;else if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;s.px=pos.x;s.py=pos.y;s.pz=pos.z;}}
-            if(cmd==28||cmd==29||cmd==31||cmd==33||cmd==45){const auto out=interpolate(ctx.angles);auto& e=entity(ctx.kind,ctx.index);const auto mask=cmd==45?v.u8(3):7;auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:e.angles;for(unsigned i=0;i<3;++i)if(mask&(1u<<i))angles[i]=int(out[i]*182.04445f);if(ctx.node)e.node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].angles=angles;else {e.angles=angles;if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;s.ax=angles[0];s.ay=angles[1];s.az=angles[2];}}}actor_nodes_.clear();return true;
+            if(cmd==28||cmd==29||cmd==30||cmd==32||cmd==44){const auto out=interpolate(ctx.positions);auto local=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).position:NJS_POINT3{};auto& pos=ctx.node?local:ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;const auto mask=cmd==44?v.u8(3):7;if(mask&1)pos.x=out[0];if(mask&2)pos.y=out[1];if(mask&4)pos.z=out[2];if(ctx.node)set_node(model_index(ctx.kind,ctx.index,ctx.node),&pos,nullptr);else if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;s.px=pos.x;s.py=pos.y;s.pz=pos.z;}
+                /* event.c:10505: model_cno 0 schreibt work->px/py/pz */
+                else if(ctx.kind==1&&entity(1,ctx.index).enemy_bound){auto& w=entity(1,ctx.index).enemy;if(mask&1)w.px=out[0];if(mask&2)w.py=out[1];if(mask&4)w.pz=out[2];}}
+            if(cmd==28||cmd==29||cmd==31||cmd==33||cmd==45){const auto out=interpolate(ctx.angles);auto& e=entity(ctx.kind,ctx.index);const auto mask=cmd==45?v.u8(3):7;auto angles=ctx.node?model_pose(ctx.kind,ctx.index,ctx.node).angles:e.angles;for(unsigned i=0;i<3;++i)if(mask&(1u<<i))angles[i]=int(out[i]*182.04445f);if(ctx.node)set_node(model_index(ctx.kind,ctx.index,ctx.node),nullptr,&angles);else {e.angles=angles;if(!ctx.kind)player_.yaw=e.angles[1];else e.transform.yaw=e.angles[1];if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;s.ax=angles[0];s.ay=angles[1];s.az=angles[2];}
+                /* event.c:10555: model_cno 0 schreibt work->ax/ay/az */
+                if(ctx.kind==1&&e.enemy_bound){auto& w=e.enemy;if(mask&1)w.ax=angles[0];if(mask&2)w.ay=angles[1];if(mask&4)w.az=angles[2];}}}actor_nodes_.clear();return true;
         }
         if(cmd==5){ctx.increment={v.u8(2)*.1f,v.u8(3)*.1f,v.u8(4)*.1f};return true;}
         if(cmd==6){for(unsigned i=0;i<3;++i)ctx.angle_increment[i]=int(v.u8(2+i)*(65536.f/360))>>1;return true;}
@@ -1053,7 +1123,13 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
                 else if(cmd==11){w.ax=w.axb=e.angles[0];w.ay=w.ayb=e.angles[1];w.az=w.azb=e.angles[2];}}
             return true;}
         if(cmd==9){auto& e=entity(ctx.kind,ctx.index);std::array<int,3> angles{};for(unsigned axis=0;axis<3;++axis)angles[axis]=int(v.u8(2+axis)*182.04445f)*(ctx.ang_sign[axis]?-1:1);
-            e.node_overrides[model_index(ctx.kind,ctx.index,ctx.node)].angles=angles;actor_nodes_.clear();return true;}
+            const auto physical=model_index(ctx.kind,ctx.index,ctx.node);
+            /* event.c:12136 schreibt work->mdl->objP[model_cno].ang. Ein frei laufender
+               nativer Work besitzt objP selbst (enemy_obj, wie Befehl 8/18); ein Override
+               bliebe dort ungelesen (RM_1090 scd0: Uhrblende/Ziffernscheibe auf -20 Grad). */
+            if(ctx.kind==1&&e.enemy_native&&!e.scripted&&physical<e.enemy_obj.size()){e.enemy_obj[physical].angles=angles;e.node_overrides.erase(physical);}
+            else e.node_overrides[physical].angles=angles;
+            actor_nodes_.clear();return true;}
         if(cmd==23){const unsigned mode=v.u8(2);const bool frozen=mode==1||mode==3;if(!ctx.kind){player_frozen_=frozen;/* event.c:11971-11997 gilt fuer jeden bhCetask->work, auch den Spieler nach bhLoadWork 0: flg 0x10 schaltet seinen Koerper-Wandpass (player.c:1600) ab bzw. an. */unsigned& flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;switch(mode){case 0:flg&=~0x118u;break;case 1:flg|=0x118u;break;case 2:flg&=~0x18u;break;case 3:flg|=0x18u;break;default:break;}if(collision_events_)collision_events_->player_flags=flg;}else{auto& e=entity(ctx.kind,ctx.index);e.frozen=frozen;
             // event.c:11971-11997: the original toggles work flags, not a host
             // freeze. 0: flg &= ~0x118, 1: |= 0x118, 2: &= ~0x18, 3: |= 0x18
@@ -1061,7 +1137,9 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
             // hitchk.c bhCheckWall; 0x100 hitchk.c:469/629 line probe).
             if(ctx.kind==1&&e.enemy_bound){auto& flg=e.enemy.flg;switch(mode){case 0:flg&=~0x118u;break;case 1:flg|=0x118u;break;case 2:flg&=~0x18u;break;case 3:flg|=0x18u;break;default:break;}}}
             return true;}
-        if(cmd==40){if(!ctx.kind)frame_=std::int64_t(v.u16(2))*65536;else {auto& e=entity(ctx.kind,ctx.index);e.frame=std::int64_t(v.u16(2))*65536;e.sampled_frame=e.frame;}return true;}
+        if(cmd==40){if(!ctx.kind)frame_=std::int64_t(v.u16(2))*65536;else {auto& e=entity(ctx.kind,ctx.index);e.frame=std::int64_t(v.u16(2))*65536;e.sampled_frame=e.frame;
+                /* event.c:10370: work->frm_no, bei id 1 auch exp1->frm_no */
+                if(ctx.kind==1&&e.enemy_bound){auto& w=e.enemy;w.frm_no=std::int32_t(v.u16(2))<<16;if(w.id==1&&w.exp1)static_cast<RECVX_ENEMY_WORK*>(w.exp1)->frm_no=w.frm_no;}}return true;}
         if(cmd==24||cmd==34||cmd==25){
             if(ctx.kind==1){
                 auto& e=entity(1,ctx.index);
@@ -1504,7 +1582,7 @@ void RoomWorld::sync_player_grab(){
 // (hitchk.c:641-717), so the zero-length step still resolves the penetration.
 void RoomWorld::control_player_grab_collision(){
     const unsigned mode0=collision_mode_&0xffu;
-    if(mode0!=4u&&mode0!=6u)return;                                  /* bhCtrPly_mode0[4]/[6] */
+    if(mode0!=4u&&mode0!=5u&&mode0!=6u)return;                       /* bhCtrPly_mode0[4]/[5]/[6]: bhCPM0_enedam (:6635) == bhCPM0_nage (:6596) */
     const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
     if(!(simulation_flags_&1u)||(stflg&0x1000000u))return;             /* bhControlPlayer:1365 */
     // bhCPM0_nage/enedie: release the head action and mark the player busy,
@@ -1788,18 +1866,24 @@ void RoomWorld::tick(){
      h.player_exp0=[this](unsigned off,float v){player_exp0_writes_.push_back({off,v});};
      h.player_fire=[this](int jno,NJS_POINT3 o,float size,int life){effect_player_fire(jno,o,size,life);};
      // effsub2.c:2681-2735: rom->lgtp[1] sammelt die Feuerlagen (lkono = Zahl, vx/vy/vz = Summe).
-     h.fire_light=[this](NJS_POINT3 pos){
-         if(lights_.size()<2){unbound_enemy_.insert("bhEff_E12_Fire: rom->lgtp[1] fehlt");return;}
+     // effsub2.c:4012 E14_Fire: wie E12, aber ohne +5 in y, fr fest 20 (far_divisor 0), Farbe 3/1.8/0.7.
+     h.fire_light=[this](NJS_POINT3 pos,NJS_POINT3 color,float far_divisor){
+         if(lights_.size()<2){unbound_enemy_.insert("bhEff_E12_Fire/E14_Fire: rom->lgtp[1] fehlt");return;}
          auto& l=lights_[1];
          if(!(l.flags&1u)){l.clock=0;l.node=0;l.direction={0,0,0};}
-         l.node++;l.flags|=3u;l.type=13;l.speed=2;l.link=0;l.source=4;l.near_range=15.0f;l.far_range=20.0f+(float(l.node)/10.0f);
-         l.direction.x+=pos.x;l.direction.y+=5.0f+pos.y;l.direction.z+=pos.z;
+         l.node++;l.flags|=3u;l.type=13;l.speed=2;l.link=0;l.source=4;l.near_range=15.0f;
+         l.far_range=far_divisor>0.0f?20.0f+(float(l.node)/far_divisor):20.0f;
+         l.direction.x+=pos.x;l.direction.y+=pos.y;l.direction.z+=pos.z;
          l.position={l.direction.x/float(l.node),l.direction.y/float(l.node),l.direction.z/float(l.node)};
-         l.color={3.0f,1.3f,0.3f};l.color_sampled=false;};
+         l.color=color;l.color_sampled=false;};
      h.en12_binta=[this](void* w,int action){effect_en12_binta(static_cast<RECVX_ENEMY_WORK*>(w),action);};
      h.effect_se_playing=[this](int se){return audio_.enemy_se_playing(127,se);};
      h.effect_se=[this](NJS_POINT3 p,int se){audio_.request_enemy_se(127,{p.x,p.y,p.z},se,1,0);};
      h.player_dv=[this](NJS_POINT3 v){player_hit_dv_=v;};
+     // player.c:1758 plp->watr: c1 = owP[4], c2 = owP[0], r 2.5 aus dem Spielerbaum, den die
+     // Runtime nach bhCalcModel(plp) festschreibt (derselbe Satz wie en.player_capsule).
+     h.player_watr=[this](RECVX_ENEMY_CAPSULE& c){BoneMatrix a,b;if(!enemy_player_joint(4,a)||!enemy_player_joint(0,b))return false;
+         c.c1={a.value[12],a.value[13],a.value[14]};c.c2={b.value[12],b.value[13],b.value[14]};c.r=2.5f;return true;};
      set_effect_world_hooks(std::move(h));}
     set_effect_particle_mk2([this](int kind,unsigned index,unsigned node,NJS_POINT3 off,NJS_POINT3 dir,unsigned src,unsigned dst,int type)->int{
         if(type<0||type>=19){unbound_enemy_.insert("bhSetEffParticleMk2: typ_no ausserhalb PtclTbl");return -1;}
@@ -1885,6 +1969,8 @@ void RoomWorld::tick(){
                     work.sprite.parent=work.sprite.parent_slot>=0&&std::size_t(work.sprite.parent_slot)<sprites_.size()?&sprites_[std::size_t(work.sprite.parent_slot)].sprite:nullptr;
                     std::optional<BoneMatrix> link_node;if(work.link&&work.link<=4)link_node=link_matrix(work.link-1,work.index,work.node);
                     work.sprite.link_matrix=link_node?link_node->value:nullptr;
+                    // effect.c:794-796: pxb/pyb/pzb = Lage des Vorbildes vor dem Prozeduraufruf.
+                    work.sprite.pxb=work.sprite.px;work.sprite.pyb=work.sprite.py;work.sprite.pzb=work.sprite.pz;
                     step_effect_sprite(work.sprite,effect_context(),&work.queued);
                     work.sprite.link_matrix=nullptr;
                     auto& e=entity(4,i);e.type=work.sprite.type;
@@ -1901,6 +1987,7 @@ void RoomWorld::tick(){
     }
     // An original effect that clears its own flg is released (O_WRK slot free).
     for(auto& work:sprites_)if((work.player_effect||work.dynamic)&&!work.sprite.flg)work.hidden=true; // slot reused by the next bhSetEffectTb
+    build_object_lists();control_item_glint(); // game.c:51 bhControlObjItm nach bhControlEffect
     // npSetAllMatAlphaColor aus bhDraw136 dieses Bildes vorab festhalten: Objekte/Items
     // zeichnen vor bhDrawEffect (game.c:341, ausser in den Albinoid-Raeumen 7-10/3-06,
     // system.c:1647), Gegner danach (game.c:353).
@@ -2164,11 +2251,20 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     scene.fog=fog_;scene.fog_color=fog_color_; // the installed njFog state of bhControlEOR
     actor_nodes_.clear();if(!player_nodes.empty())actor_nodes_[{0,0}]=player_nodes;
     const auto player_state=entities_.find({0,0});if(player_state!=entities_.end())scene.triangles.erase(std::remove_if(scene.triangles.begin(),scene.triangles.end(),[&](const auto& t){const auto at=player_state->second.hidden_nodes.find(t.object);return !t.camera_mask&&at!=player_state->second.hidden_nodes.end()&&at->second;}),scene.triangles.end());
+    struct ItemGlint{std::size_t begin,end;NJS_POINT3 direction;float intensity;int light=-1;bool full=false;int easy=-1;};std::vector<ItemGlint> glints;
+    /* MdlPut.c:33-37: draw_tp 2/3 (und mit gm_flg 0x80 jedes Modell) zeichnet mit dem Einzellicht (Easy/Simple). */
+    const unsigned gm_flg=collision_events_?collision_events_->flags[11][0]:0u,st_flg_draw=collision_events_?collision_events_->flags[5][0]:0u;
+    const bool eye_light=(gm_flg&0x1000040u)&&!(st_flg_draw&0x20u);bool enemy_drawn=false;
     for(const auto& model:models_){const auto found=entities_.find({model.kind,model.index});if(found==entities_.end()||(!(model.kind==1&&found->second.enemy_native)&&entity_hidden(model.kind,model.index)))continue;const auto& e=found->second;Scene object;
         // objitm.c:562/659/688: Raumobjekte und Raumitems mit flg 0x40000000
         // erreichen bhPutModel nur in den Schnitten ihrer hide[]-Liste.
         // bhDrawEnemy/bhDrawEneObject (eneset.c) kennen diese Bedingung nicht.
         if((model.kind==2||model.kind==3)&&object_cut_hidden(e))continue;
+        // objitm.c:503-537 bhDrawObjItm: Raumobjekte zeichnet nur ihre bhControlObjItm-Liste; den
+        // ersten ob_spc-Eintrag lassen RM_1130/3060/7060/7100/9110 aus (objitm.c:533).
+        if(model.kind==2){if(!e.object_list)continue;
+            if(e.object_list==3&&e.object_spc_index==0&&((stage_no_==1&&room_no_==13)||(stage_no_==3&&room_no_==6)||(stage_no_==7&&room_no_==6)||(stage_no_==7&&room_no_==10)||(stage_no_==9&&room_no_==11)))continue;
+}
         // game.c:336/353: bhDrawEneObject and bhDrawEnemy run only with sys->pt_flg 0x2.
         if(model.kind==1&&!(presentation_flags_&2u))continue;
         // eneset.c:843/884: with mdflg bit 2 set, bhPutModel draws obj_a's own
@@ -2199,11 +2295,28 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
          const auto& written=after?afterimage_alpha_after_:afterimage_alpha_before_;
          for(const auto& [key,alpha]:written)if(std::get<0>(key)==model.kind&&std::get<1>(key)==model.index&&std::get<2>(key)==0)
              for(auto& t:object.triangles)if(t.object==std::get<3>(key)&&t.diffuse_material)t.color=(t.color&0x00ffffffu)|(std::uint32_t(alpha&0xffu)<<24);}
+        /* objitm.c:740 bhControlAlphaFadeObject: dauerhaft umgeschriebene Materialalphas der Knoten. */
+        if(!e.node_alpha.empty())for(auto& t:object.triangles)if(t.diffuse_material){const auto at=e.node_alpha.find(t.object);if(at!=e.node_alpha.end())t.color=(t.color&0x00ffffffu)|(at->second<<24);}
         for(const auto& t:object.triangles)if(t.textured&&t.texture>=object.textures.size())throw std::runtime_error("room entity "+std::to_string(model.kind)+"/"+std::to_string(model.index)+" texture "+std::to_string(t.texture)+" of "+std::to_string(object.textures.size()));
         for(auto& triangle:object.triangles){triangle.light_category=model.kind;triangle.after_modifiers=model.kind==1;} /* game.c:318 enemies draw after modifiers */
+        /* game.c:320-352 Lichtzustand je Zeichengruppe: ob_hlg/ob_spc mit amb_chr (objitm.c:523), en_obj
+           (bhDrawEneObject vor bhDrawObjItm) mit amb_rom und vollem Licht; Kategorie 1 sonst halbes Licht. */
+        const bool en_obj=model.kind==1&&e.enemy_native&&(e.enemy.flg&0x80000000u);
+        if((model.kind==2&&e.object_list>=2)||en_obj)for(auto& triangle:object.triangles)triangle.light_category=en_obj?0u:1u;
         if(std::getenv("RODRIGO_DBG")&&(model.kind==1||(model.kind==2&&e.linked))){float mn[3]={1e9,1e9,1e9},mx[3]={-1e9,-1e9,-1e9};for(const auto& t:object.triangles)for(const auto& vx:t.vertices){const float q[3]={vx.position.x,vx.position.y,vx.position.z};for(int a=0;a<3;++a){mn[a]=std::min(mn[a],q[a]);mx[a]=std::max(mx[a],q[a]);}}
             std::fprintf(stderr,"DBG kind=%u idx=%u id=%u linked=%d parent=%u/%u/%u native=%d tris=%zu bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) motion=%u room=%d frame=%lld flg=%08x stflg=%08x calculated=%d workpos=(%.4f,%.4f,%.4f) root=(%.4f,%.4f,%.4f)\n",model.kind,model.index,e.identity,int(e.linked),e.parent_kind,e.parent_index,e.parent_node,int(e.enemy_native),object.triangles.size(),mn[0],mn[1],mn[2],mx[0],mx[1],mx[2],e.motion,int(e.room_motion),(long long)e.frame,e.enemy.flg,e.enemy.stflg,int(e.enemy_calculated),e.enemy.px,e.enemy.py,e.enemy.pz,e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[12],e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[13],e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[14]);}
-        const auto offset=scene.textures.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
+        const auto offset=scene.textures.size();const auto first_triangle=scene.triangles.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
+        /* objitm.c:569-585 bhDrawObjItm: mdflg 0x80 ersetzt Licht 1 durch bhGetLightVector(57344, ayp, 0) mit 0.1*aspd. */
+        if(model.kind==3&&e.item_glint){NJS_MATRIX m;njUnitMatrix(&m);njRotateZ(&m,0);njRotateY(&m,e.item_ayp);njRotateX(&m,57344);NJS_POINT3 forward{0,0,-1.0f},vec;njCalcPoint(&m,&forward,&vec);
+            glints.push_back({first_triangle,scene.triangles.size(),vec,0.1f*float(e.aspd)});}
+        /* objitm.c:683-718 bhDrawSpObject (type 5, draw_tp 0): Licht 1 = rom->lgtp[aspd] auf dem halben Zustand. */
+        if(model.kind==2&&e.object_list==3)glints.push_back({first_triangle,scene.triangles.size(),{},0.f,e.aspd});
+        if(en_obj)glints.push_back({first_triangle,scene.triangles.size(),{},0.f,-1,true});
+        {int dt=(model.kind==2||model.kind==3)?e.draw_tp:0;if((gm_flg&0x80u)&&dt<2)dt+=2;
+         if(model.kind==1&&!en_obj){enemy_drawn=true;if(eye_light&&e.enemy_native&&(e.enemy.mdflg&0x400u))unbound_enemy_.insert("eneset.c:826 Gegnerzeichnen: bhSetEasyDirLight aus npGetMatColor (mdflg 0x400)");}
+         /* Easy-Zustand: 0 bhSetLight, 1 bhSetHalfLight, 2 bhDrawSpObject (rom->lgtp[aspd], 0.2), 3 bhSetEasyDirLight(0.6) der Augenkamera. */
+         if(dt>=2){const int mode=model.kind==3||en_obj||(model.kind==2&&e.object_list==1)?0:model.kind==2&&e.object_list==3?2:model.kind==2?1:eye_light?3:1;
+             glints.push_back({first_triangle,scene.triangles.size(),{},0.f,model.kind==2&&e.object_list==3?e.aspd:-1,false,mode});}}
     }
     append_enemy_children(scene);
     if(std::getenv("RODRIGO_DBG"))for(const auto& m:models_)if(m.kind==3){const auto* st=state(3,m.index);std::fprintf(stderr,"DBGITEM idx=%u id=%u nodes=%zu actor=%d hidden=%d motion=%d room=%d frames=%u\n",m.index,st?st->identity:0,m.rest_pose.size(),int(bool(m.actor)),st?int(st->hidden):-1,st?int(st->motion):-1,st?int(st->room_motion):-1,st&&st->has_motion&&st->room_motion&&st->motion<room_motions_.size()?unsigned(room_motions_[st->motion].positions.size()):0u);}
@@ -2219,12 +2332,48 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     else for(const auto& l:lights_)add(l,bool(l.flags&2));
     // Ninja chunk lighting is evaluated per vertex (vertex normal and position) and
     // interpolated across the polygon; the triangle keeps its unlit base colour.
-    for(auto& t:scene.triangles){const unsigned category=t.camera_mask?0:std::min(3u,t.light_category);const auto ambient=ambient_[ambient_slots_[category]];
+    // Licht 1 eines glaenzenden Items: das Richtungslicht (Slot 1, Quelle 2) wird ersetzt, Punktlichter bleiben.
+    // light.c bhSetHalfLight (game.c:352, objitm.c:520): Licht 1 und Punktlichter mit 0.5.
+    auto half=active;for(auto& l:half){l.color.x*=0.5f;l.color.y*=0.5f;l.color.z*=0.5f;}
+    std::vector<std::vector<SampleLight>> glint_lights;for(const auto& g:glints){
+        if(g.full){glint_lights.push_back(active);continue;}
+        auto lights=g.light>=0?half:active;lights.erase(std::remove_if(lights.begin(),lights.end(),[](const auto& l){return l.source==2;}),lights.end());
+        if(g.light<0)lights.push_back({NJS_POINT3{},NJS_POINT3{g.intensity,g.intensity,g.intensity},g.direction,0.f,0.f,2u});
+        else if(std::size_t(g.light)<lights_.size()){const auto& l=lights_[std::size_t(g.light)];lights.push_back({NJS_POINT3{},l.color_sampled?l.working_color:l.color,l.direction,0.f,0.f,2u});}
+        else unbound_enemy_.insert("bhDrawSpObject: rom->lgtp[aspd] ausserhalb der Raumlichter");
+        glint_lights.push_back(std::move(lights));}
+    // Einzellicht (ps2_NinjaCnk.c:252-276, NaCnkLighting[0]): fC = -v, fI, Umgebung fB/fG/fR.
+    struct EasyLight{bool camera=false;NJS_POINT3 v{},color{};float intensity=0,ambient=0;};
+    const auto lg=std::find_if(active.begin(),active.end(),[](const auto& l){return l.source==2;});const bool has_lg=lg!=active.end();
+    const auto easy_dir=[&](float it){ // light.c bhSetEasyDirLight
+        if(!lights_.empty()&&(lights_[0].flags&2u)&&(lights_[0].type==100||lights_[0].type==101))unbound_enemy_.insert("bhSetEasyDirLight: rom->lgtp[0] Typ 100/101 ohne Besitzer");
+        return EasyLight{true,{0,0.3f,0.7f},{1,1,1},it,0.2f};};
+    const EasyLight easy_full=(gm_flg&0x80u)?easy_dir(1.0f):has_lg?EasyLight{false,lg->direction,lg->color,1.0f,0.f}:EasyLight{}; // light.c bhSetLight
+    const EasyLight easy_half=(gm_flg&0x80u)?easy_dir(0.6f):has_lg?EasyLight{false,lg->direction,{0.5f*lg->color.x,0.5f*lg->color.y,0.5f*lg->color.z},1.0f,0.f}:EasyLight{}; // bhSetHalfLight
+    const EasyLight easy_eye=eye_light?easy_dir(0.6f):EasyLight{}; // eneset.c:839 je Gegner
+    const EasyLight easy_player=(eye_light&&enemy_drawn)?easy_eye:easy_half; // der Zustand nach bhDrawEnemy (game.c:351-358)
+    NJS_MATRIX view;camera_view_matrix(effect_camera,view);
+    for(std::size_t ti=0;ti<scene.triangles.size();++ti){auto& t=scene.triangles[ti];const auto* lights=(!t.camera_mask&&t.light_category==1)?&half:&active;const EasyLight* easy=nullptr;EasyLight spc{};
+        for(std::size_t g=0;g<glints.size();++g)if(ti>=glints[g].begin&&ti<glints[g].end){
+            if(glints[g].easy>=0){const int m=glints[g].easy;
+                if(m==0)easy=&easy_full;else if(m==1)easy=&easy_half;else if(m==3)easy=&easy_eye;
+                else if(glints[g].light>=0&&std::size_t(glints[g].light)<lights_.size()){const auto& l=lights_[std::size_t(glints[g].light)];spc={false,l.direction,l.color_sampled?l.working_color:l.color,1.0f,0.2f};easy=&spc;} // bhDrawSpObject draw_tp != 0
+                else unbound_enemy_.insert("bhDrawSpObject: rom->lgtp[aspd] ausserhalb der Raumlichter");
+                break;}
+            lights=&glint_lights[g];}
+        if(!easy&&(gm_flg&0x80u))easy=t.camera_mask?&easy_full:t.light_category==1?&easy_player:nullptr; // Raum und Spieler unter gm_flg 0x80
+        if(easy){NJS_VECTOR a{t.vertices[1].position.x-t.vertices[0].position.x,t.vertices[1].position.y-t.vertices[0].position.y,t.vertices[1].position.z-t.vertices[0].position.z},b{t.vertices[2].position.x-t.vertices[0].position.x,t.vertices[2].position.y-t.vertices[0].position.y,t.vertices[2].position.z-t.vertices[0].position.z},face;njOuterProduct(&a,&b,&face);njUnitVector(&face);
+            for(auto& vertex:t.vertices){auto normal=vertex.normal;if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);
+                NJS_VECTOR n=normal;if(easy->camera){NJS_VECTOR c;njCalcVector(&view,&n,&c);n=c;}
+                const float f=std::max(0.f,-(n.x*easy->v.x+n.y*easy->v.y+n.z*easy->v.z))*easy->intensity;
+                vertex.light={std::clamp(easy->ambient+f*easy->color.x,0.f,1.f),std::clamp(easy->ambient+f*easy->color.y,0.f,1.f),std::clamp(easy->ambient+f*easy->color.z,0.f,1.f)};}
+            t.gouraud=true;t.world_lit=true;continue;}
+        const unsigned category=t.camera_mask?0:std::min(3u,t.light_category);const auto ambient=ambient_[ambient_slots_[category]];
         NJS_VECTOR a{t.vertices[1].position.x-t.vertices[0].position.x,t.vertices[1].position.y-t.vertices[0].position.y,t.vertices[1].position.z-t.vertices[0].position.z},b{t.vertices[2].position.x-t.vertices[0].position.x,t.vertices[2].position.y-t.vertices[0].position.y,t.vertices[2].position.z-t.vertices[0].position.z},face;njOuterProduct(&a,&b,&face);njUnitVector(&face);
         for(auto& vertex:t.vertices){auto normal=vertex.normal;if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);auto color=ambient;
             // njCnkCvVn (ps2_NinjaCnk.c:1226-1262): the point term with squared
             // ranges and the directional term with -v live in cnk_light.h.
-            for(const auto& l:active){const float diffuse=l.source==4?cnk_point_light_term(l.position,l.near_range,l.far_range,vertex.position,normal):cnk_directional_light_term(l.direction,normal);
+            for(const auto& l:*lights){const float diffuse=l.source==4?cnk_point_light_term(l.position,l.near_range,l.far_range,vertex.position,normal):cnk_directional_light_term(l.direction,normal);
                 color.x+=l.color.x*diffuse;color.y+=l.color.y*diffuse;color.z+=l.color.z*diffuse;}
             vertex.light={std::clamp(color.x,0.f,1.f),std::clamp(color.y,0.f,1.f),std::clamp(color.z,0.f,1.f)};}
         t.gouraud=true;t.world_lit=true;
@@ -2334,6 +2483,59 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
      for(const auto* sp:afterimage_order(afterimages))append_afterimage(scene,*sp,effect_camera,nullptr);}
     if(draw_effects&&particles_.active()){const auto atlas=effect_textures_.find(4);if(atlas!=effect_textures_.end()&&atlas->second.size()>=4){const unsigned base=unsigned(scene.textures.size());scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());particles_.append(scene,effect_camera,base);}}
     if(draw_effects&&particles_.active()){const auto atlas=effect_textures_.find(17);if(atlas!=effect_textures_.end()&&!atlas->second.empty()){const unsigned base=unsigned(scene.textures.size());scene.textures.insert(scene.textures.end(),atlas->second.begin(),atlas->second.end());particles_.append_pools(scene,base);}} // floor blood pools (bhEff300) // bhEff_PtclSpriteDrawB
+}
+void RoomWorld::build_object_lists(){
+    // objitm.c:289-383: mit sp_flg 0x4 neu (sonst bleiben die Listen des letzten Durchlaufs);
+    // mit cb_flg 0x40000000 nur die ersten vier Objekte. Ein Objekt ohne stflg 0x1000000 mit
+    // flg 1 und Modell kommt mit id >= 1000 in ob_hlg (id >= 1210 nur mit pt_flg 0x1, sonst
+    // pt_flg 0x2), sonst mit pt_flg 0x4 in ob_spc (type 5 mit aspd) oder ob_nlg.
+    if(!(simulation_flags_&4u))return;
+    const unsigned limit=collision_events_&&(collision_events_->flags[10][0]&0x40000000u)?4u:~0u;
+    const unsigned pt=presentation_flags_;unsigned spc=0;
+    for(auto& pair:entities_){if(pair.first.first!=2)continue;auto& e=pair.second;e.object_list=0;
+        if(pair.first.second>=limit||(entity_hidden(2,pair.first.second)&&!pl_sleep_cnt_)||!(e.object_flags&1u))continue; // objitm.c:322
+        if(e.alpha_fade)control_alpha_fade(2,pair.first.second); // objitm.c:389
+        if(e.model_absent)continue;
+        if(e.identity>=1000){if((pt&1u)&&e.identity>=1210)e.object_list=2;else if((pt&2u)&&e.identity<1210)e.object_list=2;}
+        else if(pt&4u){if((e.type&0xffu)==5&&e.aspd){e.object_list=3;e.object_spc_index=spc++;}else e.object_list=1;}
+    }
+}
+void RoomWorld::control_alpha_fade(unsigned kind,unsigned index){
+    // objitm.c:740-791: je Knoten jntno..jntno+jnt_n-1 mit Modell und ohne evalflags 0x8 liest das
+    // Alpha des ersten Materials (plist[2] Byte 3), naehert es um (na - a) / count an, klemmt auf
+    // 0..255 und schreibt es mit npSetAllMatAlphaColor dauerhaft zurueck; count faellt um 1.
+    auto& e=entity(kind,index);
+    const auto model=std::find_if(models_.begin(),models_.end(),[&](const Model& m){return m.kind==kind&&m.index==index;});
+    if(model!=models_.end()){
+        const auto& bytes=model->actor?model->actor->encoded_model():room_;const std::size_t start=model->actor?0:model->source_model;
+        BinaryView v(bytes);const auto base=v.relative(start,v.u16(start+4),0);const unsigned count=v.u16(start+6);const auto nodes=v.relative(base,v.u32(start+12),std::size_t(count)*52);
+        for(int i=0;i<e.alpha_jnt_n;++i){const unsigned node=unsigned(e.alpha_jntno+i);if(node>=count){unbound_enemy_.insert("bhControlAlphaFadeObject: Knoten ausserhalb von objP");break;}
+            const auto object=nodes+std::size_t(node)*52;const auto cnk=v.u32(object+4);
+            if(cnk==0xffffffffu||(v.u32(object)&0x8u))continue; // objp->model == NULL oder evalflags 0x8
+            const auto plist=v.relative(base,v.u32(v.relative(base,cnk,8)+4),8);
+            const auto stored=e.node_alpha.find(node);float alpha=float(stored!=e.node_alpha.end()?stored->second:v.u8(plist+7)); // ((uchar*)&plist[2])[3]
+            alpha+=(e.alpha_target-alpha)/e.alpha_count;
+            if(alpha<0)alpha=0;if(alpha>255.0f)alpha=255.0f;
+            e.node_alpha[node]=unsigned(alpha)&0xffu;}
+    }else unbound_enemy_.insert("bhControlAlphaFadeObject: Werk ohne Modell");
+    e.alpha_count-=1.0f;if(e.alpha_count<=0)e.alpha_fade=false;
+}
+void RoomWorld::control_item_glint(){
+    // objitm.c:282-450 bhControlObjItm: nur mit sp_flg 0x4, die Items nicht mit cb_flg 0x40000000.
+    // Je Item (Reihenfolge rom->itwp) ohne stflg 0x1000000 (bhInitModelSet: hidden) mit flg 1 und
+    // aspd: Pause ct2 (60..89 Bilder aus dem gemeinsamen EE-rand), dann acht Bilder mdflg 0x80
+    // mit ayp += 8192 (Lichtrichtung des Glanzes in bhDrawObjItm).
+    if(!(simulation_flags_&4u))return;
+    if(collision_events_&&(collision_events_->flags[10][0]&0x40000000u))return;
+    for(auto& pair:entities_){if(pair.first.first!=3)continue;auto& e=pair.second;
+        if(e.hidden||!(e.object_flags&1u))continue;
+        if(e.aspd)switch(e.item_ct0){
+        case 1:if(++e.item_ct1>e.item_ct2){e.item_glint=true;e.item_ayp=0;e.item_ct1=0;++e.item_ct0;}break;
+        case 2:e.item_ayp+=8192;e.item_ct1=(e.item_ct1+1)&7;if(!e.item_ct1){e.item_glint=false;++e.item_ct0;}break;
+        default:e.item_glint=false;e.item_ct0=1;e.item_ct1=0;e.item_ct2=int(30.0f*(-recvx_core_random_next()/-2.1474836E9f))+60;break;
+        }
+        if(e.alpha_fade)control_alpha_fade(3,pair.first.second); // objitm.c:456
+    }
 }
 bool RoomWorld::entity_hidden(unsigned kind,unsigned index)const{
     if(!kind)return player_hidden;const auto e=entities_.find({kind,index});if(e==entities_.end())return false;
@@ -2566,6 +2768,87 @@ void RoomWorld::control_event_camera(){
     if(collision_events_)collision_events_->flags[5][0]&=~0x10u;
     apply(0.f,false);
 }
+bool RoomWorld::eye_owp5(NJS_MATRIX& m)const{
+    // plp->mlwP->owP[5].mtx: Kopfknoten des Spielerbaums dieses Durchlaufs.
+    if(player_joint_matrices_.size()<=5){unbound_enemy_.insert("Augenkamera: plp->mlwP->owP[5] nicht verfuegbar");return false;}
+    std::copy_n(player_joint_matrices_[5].value,16,m);return true;
+}
+void RoomWorld::init_eye_camera(const Scene& stage,std::size_t cut){
+    // cut.c:2621 bhInitPlEyeCamera.
+    if(!collision_events_)return;auto& gm=collision_events_->flags[11][0];auto& st=collision_events_->flags[5][0];
+    gm&=~0x2000u;
+    const unsigned flg=collision_events_->flags[13][0];
+    if(flg&0x4u){if(!(gm&0x1000000u)){gm&=~0x40u;gm&=~0x80u;gm|=0x800u;}st&=~0x800000u;gm&=~0x80000u;presentation_flags_|=1u;return;}
+    NJS_MATRIX head;if(!eye_owp5(head))return;
+    gm|=0x20u|0xC0u;
+    eye_={};eye_.active=true;
+    eye_.position=eye_.target={head[12],head[13],head[14]};
+    eye_.ax=eye_.axp=eye_pe_ax_;eye_.ay=eye_.ayp=player_.yaw;eye_.az=eye_.azp=0;
+    eye_.ln=0;eye_.pers=11832;eye_.ppers=eye_pe_pers_;eye_.mode0=0;
+    st&=~0x1u;
+    // rom->mdl.objP[i].evalflags &= ~0x8: die Augenpose traegt keine hidden_objects-Maske (camera()).
+    // rom->lgtp[4..].flg &= ~0x2.
+    for(std::size_t i=4;i<lights_.size();++i)lights_[i].flags&=~2u;
+    // Nebel des Raumes (rom->fog_*), Umschaltung wie bhSetCut nach fog_cngct - 4.
+    cam_fog_color_=room_fog_color_;cam_fog_near_=room_fog_near_;cam_fog_far_=room_fog_far_;
+    if(st&0x2u){fog_ct_=fog_cngct_-4;if(fog_ct_<0)fog_ct_=0;}else fog_ct_=0;
+    gm|=0x10u;
+    installed_clip_={player_weapon_==10||player_weapon_==19?1.1f:1.0f,20000.0f}; // njClipZ(-1.0/-1.1, -20000)
+    (void)stage;(void)cut;
+}
+void RoomWorld::set_eye_camera(){
+    // cut.c:2719 bhSetPlEyeCamera.
+    if(!collision_events_)return;const unsigned st=collision_events_->flags[5][0];
+    NJS_MATRIX head;if(!eye_owp5(head))return;
+    NJS_POINT3 local{0,1.5f,-1.0f},at;njCalcPoint(&head,&local,&at);eye_.position=at;eye_.ln=0;
+    if(st&0x800000u){
+        eye_.ax=-player_wax_;eye_.ay=-player_.yaw;eye_.az=0;
+        const std::int16_t axn=std::int16_t(eye_.pers),ay=std::int16_t(eye_.ppers);
+        if(std::abs(ay-axn)<364)eye_.pers=eye_.ppers;else eye_.pers=axn>ay?axn-364:axn+364;
+    }else{
+        eye_.axp=0;std::int16_t ay=2048;
+        if((collision_mode_&0xffu)==1u&&player_aim_mode1_!=0){eye_.axp=-player_wax_;ay=0;}
+        std::int16_t axn=std::int16_t(eye_.ax);ay=std::int16_t(eye_.axp+ay-axn);axn=std::int16_t(axn+ay/4);
+        eye_.ax=axn;eye_.ay=-player_.yaw;eye_.az=0;
+        if(std::abs(int(ay))<182){axn=std::int16_t(eye_.pers);axn=std::int16_t(axn+(std::int16_t(eye_.ppers)-axn)/4);eye_.pers=axn;}
+    }
+}
+void RoomWorld::control_eye_camera(const Scene& stage,std::size_t cut,bool hold){
+    // cut.c:2472 bhControlPlEyeCamera(attr): ci = rom->cutp[cam.ncut].cam[cam.camver].
+    if(cut>=stage.cameras.size()){unbound_enemy_.insert("bhControlPlEyeCamera: cam.ncut ausserhalb der Schnitttabelle");return;}
+    const auto& ci=stage.cameras[cut];const float hkn=1.0f/float(ci.transition_speed+1);const int ahkn=ci.transition_speed+1;const int ct=int(eye_.ct0);
+    auto lerp_ang=[&](std::int32_t a,std::int32_t b){return std::int32_t(std::int16_t(std::int16_t(a)+ct*(std::int16_t(std::int16_t(b)-std::int16_t(a))/ahkn)));};
+    NJS_MATRIX head;
+    switch(eye_.mode0){
+    case 0:
+        if(!eye_owp5(head))return;
+        eye_.target={head[12],head[13],head[14]};eye_.axp=0;eye_.ayp=-player_.yaw;eye_.azp=0;
+        eye_.position.x+=ct*(hkn*(eye_.target.x-eye_.position.x));eye_.position.y+=ct*(hkn*(eye_.target.y-eye_.position.y));eye_.position.z+=ct*(hkn*(eye_.target.z-eye_.position.z));
+        eye_.pln=-2.2f;eye_.ppers=11832;
+        eye_.ax=lerp_ang(eye_.ax,eye_.axp);eye_.ay=lerp_ang(eye_.ay,eye_.ayp);eye_.az=lerp_ang(eye_.az,eye_.azp);
+        eye_.ln+=ct*(hkn*(eye_.pln-eye_.ln));eye_.pers+=ct*((eye_.ppers-eye_.pers)/ahkn);
+        if(int(++eye_.ct0)>=ahkn){eye_.position={head[12],head[13],head[14]};eye_.ax=0;eye_.ay=-player_.yaw;eye_.az=0;eye_.ln=eye_.pln;eye_.pers=eye_.ppers;eye_.mode0=1;}
+        break;
+    case 1:
+        eye_.axp=0;
+        if(player_aim_mode1_!=0){if(player_aim_at_flg_&0x4u)eye_.axp=57344;if(player_aim_at_flg_&0x8u)eye_.axp=7281;}
+        eye_.ln=-2.2f;if(!eye_owp5(head))return;eye_.position={head[12],head[13],head[14]};
+        eye_.ax=std::int16_t(std::int16_t(eye_.ax)+std::int16_t((std::int16_t(eye_.axp)-std::int16_t(eye_.ax))/4));eye_.ay=-player_.yaw;eye_.az=0;
+        if(!hold){ // attr 0x4000 haelt die Augenkamera; sonst zurueck zur Schnittkamera (bhInitActiveCamera)
+            eye_.axp=ci.angles[0];eye_.ayp=ci.angles[1];eye_.azp=ci.angles[2];eye_.target=ci.position;eye_.pln=ci.distance;eye_.ppers=ci.perspective;
+            const auto aimed=camera_for_actor(stage,cut,player_.position,std::int8_t(floor_at(player_.position)),nullptr);
+            eye_.axp=aimed.angles[0];eye_.ayp=aimed.angles[1];eye_.azp=aimed.angles[2];eye_.target=aimed.position;eye_.pln=aimed.distance;eye_.ppers=aimed.perspective;
+            eye_.mode0=2;eye_.ct0=0;}
+        break;
+    case 2:
+        eye_.position.x+=ct*(hkn*(eye_.target.x-eye_.position.x));eye_.position.y+=ct*(hkn*(eye_.target.y-eye_.position.y));eye_.position.z+=ct*(hkn*(eye_.target.z-eye_.position.z));
+        eye_.ax=lerp_ang(eye_.ax,eye_.axp);eye_.ay=lerp_ang(eye_.ay,eye_.ayp);eye_.az=lerp_ang(eye_.az,eye_.azp);
+        eye_.ln+=ct*(hkn*(eye_.pln-eye_.ln));eye_.pers+=ct*((eye_.ppers-eye_.pers)/ahkn);
+        if(int(++eye_.ct0)>=ahkn){eye_.ax=eye_.axp;eye_.ay=eye_.ayp;eye_.az=eye_.azp;eye_.position=eye_.target;eye_.ln=eye_.pln;eye_.pers=eye_.ppers;eye_.returning=false;eye_.active=false;camera_force_=true;}
+        break;
+    default:break;
+    }
+}
 void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking){
     // bhCheckCut invokes bhSetCut only on a new cut or forced return.
     // bhSetFixedCut's clip invocation uses cam.ncut, not its cno argument.
@@ -2582,6 +2865,13 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
         installed_clip_=restored_view_clip(room_clip_,collision_events_->flags[12][0],collision_events_->flags[11][0]);
         restore_camera_clip_=false;
     }
+    // cut.c:12-149 bhCheckCut / game.c:53 bhSetPlEyeCamera / game.c:284 bhInitPlEyeCamera.
+    if(collision_events_&&!event_camera&&!fixed_camera){auto& gm=collision_events_->flags[11][0];const unsigned st=collision_events_->flags[5][0],sp=collision_events_->flags[6][0];
+        if(gm&0x2000u)init_eye_camera(stage,cut);
+        if((gm&0x40u)&&(sp&0x40u)&&!(st&1u)&&eye_.active){set_eye_camera();gm&=~0x20u;return;}
+        if(eye_.active&&!(gm&0x40u)){ // cam.flg 0x4: der Augenpfad endet, bhControlPlEyeCamera fuehrt zurueck
+            if(!eye_.returning){eye_.returning=true;eye_.mode0=1;eye_.ct0=0;}
+            control_eye_camera(stage,cut,false);if(eye_.active)return;}}
     if(event_camera){
         control_event_camera();
         active_camera_.reset(camera(stage,target),cut);
@@ -2644,6 +2934,7 @@ SceneCamera RoomWorld::camera(const Scene& stage,const SceneCamera& active)const
     // bhSetEventCamera for the frame before its first pass) left them; the lock
     // aim is applied there under the original kfp/kfp[1] condition, never here.
     else out=event_camera_pose_;
+    if(eye_.active&&!event_camera&&!fixed_camera){out.position=eye_.position;out.angles={eye_.ax,eye_.ay,eye_.az};out.distance=eye_.ln;out.perspective=eye_.pers;out.hidden_objects={};}
     // bhControlCamera (camera.c:36/49/81) translates by cam.px+ofx; the offset
     // never enters cam.px itself.
     if(camera_offset_){out.position.x+=camera_offset_->x;out.position.y+=camera_offset_->y;out.position.z+=camera_offset_->z;}

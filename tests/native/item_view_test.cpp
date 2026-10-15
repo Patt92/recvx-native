@@ -102,9 +102,11 @@ int main(int argc,char** argv){try{
         // Öffnungsaktion: der Absenkversatz schiebt das Modell nach unten.
         menu.examine_pitch=menu.examine_yaw=menu.examine_roll=0;
         menu.input(MenuInput::Confirm,inv);
-        unsigned guard=0;while(menu.message.active()&&!menu.message.choices()&&++guard<30)menu.input(MenuInput::Confirm,inv);
+        // bhControlMessage-Durchlaeufe: erst die aufgebaute Seite bzw. offene Auswahl nimmt OK an (message.c:228-337).
+        const auto reveal=[&]{for(unsigned k=0;k<400&&menu.message.active()&&!menu.message.closable()&&!menu.message.choosing()&&!menu.message.turnable();++k)menu.message.update();};
+        unsigned guard=0;reveal();while(menu.message.active()&&!menu.message.choices()&&++guard<30){menu.input(MenuInput::Confirm,inv);reveal();}
         check(menu.message.choices(),"the case question did not offer a choice");
-        menu.input(MenuInput::Confirm,inv);
+        reveal();menu.input(MenuInput::Confirm,inv);
         const auto opening_start=render(inv,menu,"examine-action-0");
         for(unsigned i=0;i<16;++i)menu.tick(inv);
         const auto opening_mid=render(inv,menu,"examine-action-16");

@@ -28,7 +28,9 @@ static std::vector<std::uint8_t> fixture(){
     std::vector<std::uint8_t> b(1500);float version=1.73f;std::memcpy(b.data(),&version,4);put(b,16,64);put(b,28,1100);put(b,64+0x38,1400);
     put(b,1100,16);put(b,1104,18);put(b,1108,80);put(b,1112,110); // init, scan, two events.
     // scan starts event 0 exactly once, after lighter equipment.
-    const std::vector<std::uint8_t> scan={1,22,4,4,0,0,0,1,0x26,1,5,4,0,0,0,0,0x14,0,0,0,3,0,0,0};
+    // scd1 setzt wie die Raeume zuerst sp_flg 0x10 (bhSet 6,27,0): nach bhInitEvent laeuft
+    // bhEventScheduler2 nur damit (event.c:13024).
+    const std::vector<std::uint8_t> scan={5,6,0x1b,0,0,0,1,22,4,4,0,0,0,1,0x26,1,5,4,0,0,0,0,0x14,0,0,0,3,0,0,0};
     std::copy(scan.begin(),scan.end(),b.begin()+1118);
     const std::vector<std::uint8_t> event={0xf8,0xf9,3,0,0x1f,0,0,1,0xff,0};std::copy(event.begin(),event.end(),b.begin()+1180);
     // 0xe4 steht als Stellvertreter fuer einen noch nicht portierten Befehl:
@@ -141,11 +143,16 @@ int main(int argc,char** argv){try{
         request.service_item_request();check(gift.contains(9)&&request.pickup_display()==9&&!text.active(),"shared subtask gate rejects cinematic gift");
         request.service_pickup();check(text.index()==158,"GetItem must report 158 in the status pass after the insertion");
         const auto saved=gift.items;request.service_item_request();check(gift.items==saved,"repeated subtask polling duplicates gift");
+        for(unsigned k=0;k<400&&text.active()&&!text.closable();++k)request.tick(); // bhControlMessage baut 158 auf, erst dann nimmt OK an (game.c:264)
         request.confirm_dialog();check(!request.pickup_display()&&!(request.flags[10][0]&0x10)&&gift.items==saved,"gift acknowledgement loses item or retains request");
         request.service_item_request();check(!request.pickup_display()&&gift.items==saved,"closed gift reopens");
         MessageDialog next_text;EventVm next(bytes,gift,next_text);next.inherit_progress(request);next.initialize();check(gift.items==saved&&gift.weapon()==4,"room transition loses awarded weapon");});
     // High operand bits are ignored by bhCk/bhSet's original 10-bit index.
     for(unsigned high:{0u,0x400u,0x8000u,0xfc00u}){auto bytes=fixture();bytes[1118]=0;unsigned bit=high|35;const std::vector<std::uint8_t> code={5,1,std::uint8_t(bit),std::uint8_t(bit>>8),0,0,1,14,4,1,std::uint8_t(bit),std::uint8_t(bit>>8),0,0,5,4,30,0,0,0,3,0,0xff,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state;MessageDialog text;EventVm event(bytes,state,text);event.start(0,0);event.tick();check(event.errors.empty()&&event.flag(1,35)&&event.flag(4,30),"script flag index must mask original upper bits");}
+    { // event.c:13045-13059: bhSleep im IF gibt 0 zurueck; der Scheduler springt im selben Durchlauf auf --G_Sp (hinter das ENDIF).
+        auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={1,10,6,17,0,0,0xf8,0xf9,5,0,3,0,5,1,40,0,0,0,0xff,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);
+        Inventory items;MessageDialog text;EventVm vm(bytes,items,text);vm.start(0,0);vm.tick();
+        check(vm.errors.empty()&&vm.flag(1,40)&&vm.task_states().empty(),"sleep inside an IF waits instead of leaving the IF");}
     for(bool playing:{false,true})for(unsigned time:{0u,99u,100u,101u,65535u})for(unsigned mode=0;mode<6;++mode){auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={1,14,0xac,7,100,0,std::uint8_t(mode),0,5,4,30,0,0,0,3,0,0xff,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state;MessageDialog text;EventVm event(bytes,state,text);event.movie_active=[&]{return playing;};event.movie_time=[&]{return time;};event.start(0,0);event.tick();const bool expected[]={time!=100,time<=100,time<100,time>=100,time>100,time==100};check(event.errors.empty()&&event.flag(4,30)==(!playing||expected[mode]),"movie time branch lost inverted comparison/end behavior");}
     for(bool poisoned:{false,true})for(unsigned mode:{0u,1u,2u,255u}){auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={1,10,0x8a,std::uint8_t(mode),5,4,30,0,0,0,3,0,0xff,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state;state.infected=poisoned;state.poisoned=!poisoned; /* bhPlayerPoisonCk reads stflg 0x200000 only, never 0x80000 */MessageDialog text;EventVm event(bytes,state,text);event.start(0,0);event.tick();check(event.errors.empty()&&event.flag(4,30)==(poisoned==(mode==0)),"original poison condition/inverted modes failed");}
     for(int hp:{-199,-99,0,99,100,199,999})for(unsigned percent:{0u,1u,50u,255u}){auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0x99,3,std::uint8_t(percent),0,5,4,30,0,0,0,0xff,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state;MessageDialog text;EventVm event(bytes,state,text);int changed=0;event.enemy_health=[&](unsigned index)->std::optional<int>{check(index==3,"HP increase enemy operand");return hp;};event.set_enemy_health=[&](unsigned index,int value){check(index==3,"HP increase writes different enemy");changed=value;};event.start(0,0);event.tick();check(event.errors.empty()&&event.flag(4,30)&&changed==hp+(hp/100)*int(percent),"HP increase loses original integer arithmetic or operands");}
@@ -219,6 +226,7 @@ int main(int argc,char** argv){try{
     MessageDialog dialog;Inventory lighter;auto data=fixture();EventVm vm(data,lighter,dialog);vm.initialize();vm.menu_open=true;vm.tick();check(vm.dispatched.empty(),"event before equip");StatusMenu menu;
     menu.input(MenuInput::Open,lighter);menu.skip_slide();menu.input(MenuInput::Confirm,lighter);for(int f=0;f<4;++f)menu.tick(lighter);menu.input(MenuInput::Confirm,lighter);check(lighter.weapon()==1&&menu.active&&!menu.commands&&menu.erase_frames==4,"WeaponSet keeps the status screen open and erases the command window");for(int f=0;f<4;++f)menu.tick(lighter);menu.input(MenuInput::Cancel,lighter);menu.input(MenuInput::Cancel,lighter);for(int f=0;f<40&&menu.active;++f)menu.tick(lighter);check(!menu.active,"status screen does not close after equip");
     vm.menu_open=false;vm.tick();check(vm.dispatched==std::vector<unsigned>{0},"equipment-driven script dispatch");vm.tick();vm.tick();vm.tick();check(dialog.active()&&message_text(dialog.page())=="A","sleep/resume/message");
+    for(unsigned k=0;k<8&&!dialog.closable();++k)vm.tick(); // bhControlMessage: die Seite ist nach dem Aufbau schliessbar (game.c:264)
     vm.confirm_dialog();check(!dialog.active(),"confirm dialog");vm.start(1,1);vm.tick();check(vm.errors.size()==1,"unknown command did not block");vm.tick();check(vm.errors.size()==1,"blocked command retried");
     vm.set_flag(1,33,0);check(vm.flag(1,33)&&!vm.flag(1,32),"MSB flag order");vm.set_flag(1,33,2);check(!vm.flag(1,33),"flag toggle");
     {auto binary=data;binary[1118]=0;const std::vector<std::uint8_t> script={0x2b,0,5,4,13,0,0,0,0xff,0};std::copy(script.begin(),script.end(),binary.begin()+1180);
@@ -226,7 +234,7 @@ int main(int argc,char** argv){try{
         for(bool write:{false,true}){bool refused=false;try{if(write)pause.set_flag(0,1,0);else (void)pause.flag(0,1);}catch(const std::exception&){refused=true;}check(refused,"undefined matrix zero silently uses scratch memory");}}
     // event.c:425 bhEndif: ein ENDIF ohne IF senkt nur G_Sp/bhIfelFlg (RM_1100 0x44c steht so
     // in den Originaldaten); das Original laeuft weiter, ein Abbruch waere keine Originalsemantik.
-    auto broken=data;broken[1118]=3;MessageDialog d;EventVm bad(broken,lighter,d);bad.tick();check(bad.errors.empty(),"ENDIF without IF blocks the event like a host error");
+    auto broken=data;broken[1118]=3;broken[1119]=0;broken[1120]=0;MessageDialog d;EventVm bad(broken,lighter,d);bad.tick();check(bad.errors.empty(),"ENDIF without IF blocks the event like a host error");
     for(unsigned mode=0;mode<6;++mode){auto compare=data;compare[1118]=1;compare[1119]=12;compare[1120]=6;compare[1121]=23;compare[1122]=mode;compare[1123]=0;compare[1124]=5;compare[1125]=4;compare[1126]=1;compare[1127]=0;compare[1128]=0;compare[1129]=0;compare[1130]=3;compare[1131]=0;compare[1132]=0;
         MessageDialog msg;EventVm conditional(compare,lighter,msg);conditional.tick();const bool expected=mode==0||mode==2||mode==4;check(conditional.flag(4,1)==expected,"original byte-comparison operands/order");}
     // bhCmpW reads work state, rather than the unrelated byte-register array.
@@ -249,9 +257,23 @@ int main(int argc,char** argv){try{
         absent.start(0,0);absent.tick();check(absent.errors.size()==1&&absent.task_states().front().offset==80&&absent.task_states().front().blocked,"unbound word work must block at original PC");
     }
     {auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm clock(binary,state,text);clock.advance_game_clock();check(state.play_time==0,"game time runs without original evflag 3");clock.set_flag(1,3,0);for(unsigned tick=0;tick<30;++tick)clock.advance_game_clock();check(state.play_time==60,"30-Hz host loses original VSync time units");clock.tick();check(state.play_time==60,"event scheduler duplicates game time");state.play_time=215999999;clock.advance_game_clock();clock.advance_game_clock();check(state.play_time==216000000,"game time exceeds original cap");clock.set_flag(1,3,1);state.play_time=17;clock.advance_game_clock(3);check(state.play_time==17,"disabled original timer still runs");clock.values[7]=101;MessageDialog next;EventVm other(binary,state,next);other.inherit_progress(clock);check(state.play_time==17&&other.values[7]==101,"room switch resets game time/dialogue result");}
-    {MessageDialog choices;choices.show({0xff04,33,0xfe09,0xff04,34,0xffff},0);check(choices.selection==1&&choices.choices()==2,"default question cursor marker ignored");choices.show({0xff04,33,0xff04,34,0xfe09,0xffff},0);check(choices.selection==0,"question cursor does not wrap at original choice count");choices.show({0xff04,33,0xfe09,0xff04,34,0xff02,0,35,0xffff},0);choices.confirm();check(choices.active()&&choices.selection==0&&!choices.choices(),"next message page retains prior question selection");}
+    {MessageDialog choices;choices.show({0xff04,33,0xfe09,0xff04,34,0xffff},0);choices.update();check(choices.selection==1&&choices.choices()==2&&choices.choosing(),"default question cursor marker ignored");choices.show({0xff04,33,0xff04,34,0xfe09,0xffff},0);choices.update();check(choices.selection==0,"question cursor does not wrap at original choice count");
+     choices.show({33,0xff02,0,0xff04,34,0xfe09,0xff04,35,0xffff},0);choices.update();choices.update();choices.queue_ok();check(choices.update()==MessageDialog::Step::Turned&&choices.selection==0,"intermediate page does not turn with OK");choices.update();check(choices.choosing()&&choices.selection==1&&choices.choices()==2,"question after a page turn lost its cursor");}
+    { // message.c:74-356: Aufbau ueber mes_ct, FE00 sofort, gehaltenes OK +4, Timer erst nach dem Aufbau.
+        MessageDialog text;text.show({33,34,35,0xffff},0);for(unsigned i=0;i<3;++i)text.update();check(text.visible()==Message{33,34,35}&&!text.closable(),"text reveal does not follow mes_ct");text.update();check(text.closable(),"revealed final page is not closable");
+        text.show({33,34,35,36,37,0xffff},0);for(unsigned i=0;i<3;++i){text.begin_frame(true);text.update();}check(text.closable(),"held OK does not speed the reveal by 4"); /* ct 0, 4, 8: erst der dritte Parse erreicht FFFF */
+        text.show({33,34,35,36,37,0xffff},0);for(unsigned i=0;i<3;++i){text.begin_frame(false);text.update();}check(!text.closable(),"reveal without held OK is as fast as with it");
+        text.show({0xfe00,33,34,0xffff},0);text.update();check(text.closable(),"FE00 does not reveal the page at once");
+        MessageDialog timed;timed.show({33,0xff02,3,0xffff},0);timed.update();check(!timed.timer_running(),"timer starts before the reveal reaches FF02");
+        timed.update();check(timed.timer_running()&&!timed.closable(),"timed page accepts a key");
+        check(timed.update()==MessageDialog::Step::None&&timed.update()==MessageDialog::Step::None&&timed.update()==MessageDialog::Step::Closed&&!timed.active(),"timed text does not close after its timer");
+        MessageDialog paged;paged.show({33,0xff02,2,0xfe08,34,0xff02,0,35,0xffff},0);for(unsigned i=0;i<4;++i)paged.update();check(paged.page()==Message{34,0xffff},"FE08 does not turn after the timer");
+        paged.update();check(paged.visible()==Message{34}&&!paged.closable(),"FE08 page is not an intermediate page");
+        auto binary=data;binary[1118]=0;Inventory state;EventVm vm(binary,state,paged);vm.cancel_dialog();vm.tick();check(paged.page()==Message{34,0xffff},"Cancel turned an intermediate page");
+        vm.confirm_dialog();vm.tick();check(paged.page()==Message{35,0xffff},"OK did not turn the intermediate page");vm.tick();vm.tick();check(paged.closable(),"final page after the turn not closable");vm.cancel_dialog();check(!paged.active(),"Cancel did not close the final page");
+        paged.show({0xff04,33,0xff04,34,0xffff},0);vm.tick();vm.cancel_dialog();vm.tick();check(paged.active()&&paged.choosing(),"Cancel answered a question");}
     for(bool status:{false,true})for(unsigned selected:{0u,1u}){
-        auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm question(binary,state,text);question.menu_open=status;text.show({0xff04,33,0xff04,34,0xffff},0);question.choose_dialog(int(selected));question.confirm_dialog();question.tick();check(!text.active()&&question.values[7]==selected+(status?100:0),"confirmed menu answer/result lost after dialogue closes");
+        auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm question(binary,state,text);question.menu_open=status;text.show({0xff04,33,0xff04,34,0xffff},0);question.choose_dialog(int(selected));question.tick();question.confirm_dialog();question.tick();check(!text.active()&&question.values[7]==selected+(status?100:0),"confirmed menu answer/result lost after dialogue closes");
         text.show({0xff04,33,0xfe09,0xff04,34,0xffff},1);question.tick();check(question.values[7]==1,"new question retains previous result offset");
     }
     { // hitchk.c:4786 + game.c:196-286: examined camera (attr 0xb80e, RM_0031 medal door shape)
@@ -265,7 +287,7 @@ int main(int argc,char** argv){try{
         check(hit&&text.active()&&(exm.flags[5][0]&0x2284)==0x2284&&exm.exm_attr==0xb80e&&exm.fixcno==4&&exm.fixkno==7,"examined camera request incomplete");
         exm.control_exm();
         check(exm.flags[6][0]==0xb8&&!(pt&3)&&lights==1&&event_cno==4&&event_kno==7&&!cut_calls&&(exm.flags[5][0]&1)&&!(exm.flags[11][0]&0x1000)&&!(exm.flags[5][0]&0x200000),"examined camera pass differs from game.c (sp 0xb8, pt ~3, bhSetEventFixedCut)");
-        text.show({33,0xffff},0);exm.confirm_dialog();
+        text.show({33,0xffff},0);for(unsigned k=0;k<4&&!text.closable();++k)text.update();exm.confirm_dialog(); // erst die aufgebaute Seite schliesst (game.c:264)
         check(!(exm.flags[5][0]&0x81)&&(pt&3)==3&&exm.flags[6][0]==0xffffffffu&&(exm.flags[11][0]&0x800),"closing the examined message keeps the camera");
         exm.control_exm();check(returns==1&&!(exm.flags[11][0]&0x800),"bhCheckCut(1) does not return to the player cut");
     }
@@ -286,8 +308,9 @@ int main(int argc,char** argv){try{
         response.interactions.push_back({1,3,0x8000,0,{0,0,0},{10,0,10},{0,0,0,0}});
         check(response.interact({5,0,8},0,0)&&text.active()&&(response.flags[5][0]&0x2204)==0x2204,"room interaction omits original modal work");
         response.control_exm();check(response.flags[6][0]==0x30&&!(response.flags[10][0]&0x20),"room message leaves enemies/player simulation running (game.c cb_flg 0x20: sp_flg 0x30)");
-        text.show({33,0xff02,0,0xff04,33,0xff04,34,0xffff},0);response.confirm_dialog();check(text.active()&&!(response.flags[10][0]&0x1000),"intermediate page acknowledges interaction");
-        response.choose_dialog(int(selected));response.confirm_dialog();check((response.flags[10][0]&0x1000)&&(response.flags[5][0]&0x4000)&&!(response.flags[5][0]&0x2204)&&response.values[7]==selected,"interaction choice loses acknowledgement/end state");
+        // bhControlMessage je Durchlauf: Zwischenseite erst nach dem Aufbau mit OK, dann Auswahl und OK in eigenen Durchlaeufen.
+        text.show({33,0xff02,0,0xff04,33,0xff04,34,0xffff},0);for(unsigned k=0;k<8&&!text.turnable();++k)response.tick();response.confirm_dialog();response.tick();check(text.active()&&!(response.flags[10][0]&0x1000),"intermediate page acknowledges interaction");
+        for(unsigned k=0;k<8&&!text.choosing();++k)response.tick();response.choose_dialog(int(selected));response.tick();response.confirm_dialog();response.tick();/* Das scd1 sieht cb_flg 0x1000 im Durchlauf der Antwort (bhControlEvent nach bhControlMessage) und setzt mit 0x57 gm_flg 0x20000. */check((response.flags[11][0]&0x20000)&&(response.flags[5][0]&0x4000)&&!(response.flags[5][0]&0x2204)&&response.values[7]==selected,"interaction choice loses acknowledgement/end state");
         check(response.flags[6][0]==0xffffffffu,"closing the room message does not restore sp_flg (message.c:312)");
         response.tick();check(response.errors.empty()&&response.values[30]==42&&(response.flags[11][0]&0x20000)&&!(response.flags[10][0]&0x1000),"scenario does not consume room answer/camera-retention command");
         response.values[30]=0;response.tick();check(response.values[30]==0,"interaction acknowledgement repeats");
@@ -331,7 +354,7 @@ int main(int argc,char** argv){try{
     auto loop_data=data;const std::vector<std::uint8_t> loop_script={0xfa,0,3,0,0x69,31,1,0xfe,0xfb,0,0xff,0};std::copy(loop_script.begin(),loop_script.end(),loop_data.begin()+1180);MessageDialog loop_dialog;EventVm loop_vm(loop_data,lighter,loop_dialog);std::vector<std::pair<unsigned,unsigned>> clocks;loop_vm.binding=[&](const EventCommand& c){clocks.push_back({c.loop_remaining,c.loop_total});return true;};loop_vm.start(0,0);for(unsigned i=0;i<5;++i)loop_vm.tick();check(loop_vm.errors.empty()&&clocks==std::vector<std::pair<unsigned,unsigned>>{{3,3},{2,3},{1,3}},"FOR does not supply original countdown clock to interpolation");
     auto cinematic=data;cinematic[1180]=0x12;cinematic[1181]=3;cinematic[1182]=0xff;cinematic[1183]=0;MessageDialog cd;EventVm cine(cinematic,lighter,cd);cine.start(0,0);cine.tick();
     check((cine.flags[5][0]&4)&&cine.skip_cinematic(),"original CineSet/skip flags");check(!cine.interact({0,0,0},0),"interaction during cinematic");
-    MessageDialog timed;timed.show({0xff02,2,0xffff},0);check(!timed.tick()&&timed.active()&&timed.tick()&&!timed.active(),"original timed empty message");
+    MessageDialog timed;timed.show({0xff02,2,0xffff},0); /* message.c: der Parse setzt mes_tim 2, zwei Zaehlschritte, dann schliesst st_flg 0x4000 ohne 0x1000 */check(timed.update()==MessageDialog::Step::None&&timed.active()&&timed.update()==MessageDialog::Step::None&&timed.update()==MessageDialog::Step::Closed&&!timed.active(),"original timed empty message");
     Inventory bag;MessageDialog bag_message;EventVm bag_vm(data,bag,bag_message);StatusMenu bag_menu;bag_menu.input(MenuInput::Open,bag);bag_menu.skip_slide();
     for(unsigned i=0;i<20;++i)bag_menu.input(MenuInput::Right,bag);check(bag_menu.selected==9&&bag.capacity()==8,"cursor enters unavailable bag slots");
     bag_vm.set_flag(11,4,0);for(unsigned i=0;i<20;++i)bag_menu.input(MenuInput::Right,bag);check(bag_menu.selected==11&&bag.capacity()==10,"original bag flag does not unlock slots");

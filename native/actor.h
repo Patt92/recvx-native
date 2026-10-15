@@ -2,6 +2,7 @@
 #include "scene.h"
 #include "face.h"
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <map>
 #include <memory>
@@ -31,6 +32,9 @@ struct ActorNodeLayout {std::vector<unsigned> script_to_model,motion_to_model,mo
 ActorNodeLayout decode_actor_node_layout(const std::vector<std::uint8_t>& model,const std::vector<std::uint8_t>& mask,bool face_actor=false);
 MotionClip join_motion_segments(const MotionClip& lower,const MotionClip& upper);
 std::vector<ModelPose> sample_motion_pose(const MotionClip& clip,std::int64_t frame,const std::vector<ModelPose>& rest,const std::vector<unsigned>& nodes={});
+// Eine Motion mit mehr Kanaelen als das Modell Knoten hat schreibt im Original hinter
+// objP (Motion.c:131). Der Host meldet die Luecke hier statt sie zu erfinden.
+void bind_pose_gap(std::function<void(const char*)> sink);
 MotionClip decode_motion_asset(const std::vector<std::uint8_t>& data);
 class PlayerAsset {
 public:

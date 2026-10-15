@@ -28,8 +28,11 @@ static void select_action(StatusMenu& menu,Inventory& inv,unsigned slot,unsigned
 // ItemCombination subcsr 2 -> 3 -> 4 und ItemCommandErase bis zur Rückkehr in CursorMove.
 static void finish_combine(StatusMenu& menu,Inventory& inv){for(int f=0;f<40&&(menu.combining||menu.erase_frames);++f)frame(menu,inv);}
 static void acknowledge(StatusMenu& menu,Inventory& inv){for(unsigned i=0;i<20&&menu.message.active();++i)menu.input(MenuInput::Confirm,inv);check(!menu.message.active(),"message cannot be dismissed");}
-static void yes(StatusMenu& menu,Inventory& inv){while(menu.message.active()&&!menu.message.choices())menu.input(MenuInput::Confirm,inv);if(menu.message.active())menu.input(MenuInput::Confirm,inv);}
-static void no(StatusMenu& menu,Inventory& inv){while(menu.message.active()&&!menu.message.choices())menu.input(MenuInput::Confirm,inv);if(menu.message.active()){menu.input(MenuInput::Down,inv);menu.input(MenuInput::Confirm,inv);}}
+// bhControlMessage-Durchlaeufe (StatusMenu::tick): erst die aufgebaute Seite bzw. offene Auswahl nimmt OK an (message.c:228-337).
+static void reveal(StatusMenu& menu){for(unsigned k=0;k<400&&menu.message.active()&&!menu.message.closable()&&!menu.message.choosing()&&!menu.message.turnable();++k)menu.message.update();}
+static void yes(StatusMenu& menu,Inventory& inv){reveal(menu);while(menu.message.active()&&!menu.message.choices()){menu.input(MenuInput::Confirm,inv);reveal(menu);}if(menu.message.active())menu.input(MenuInput::Confirm,inv);}
+// mes_sel bewegt nur pad_ps 0x4/0x8 (message.c:269-285): Nein liegt rechts.
+static void no(StatusMenu& menu,Inventory& inv){reveal(menu);while(menu.message.active()&&!menu.message.choices()){menu.input(MenuInput::Confirm,inv);reveal(menu);}if(menu.message.active()){menu.input(MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);}}
 static std::vector<std::uint8_t> use_fixture(){
     std::vector<std::uint8_t> bytes(1500);auto put=[&](unsigned p,unsigned n){for(unsigned i=0;i<4;++i)bytes.at(p+i)=std::uint8_t(n>>(8*i));};
     auto real=[&](unsigned p,float n){std::memcpy(bytes.data()+p,&n,4);};real(0,1.73f);put(16,64);put(28,1100);put(64+0x38,1400);

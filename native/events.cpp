@@ -32,13 +32,14 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
 // Keep undefined selectors visible instead of inventing a scratch flag bank.
 bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size())throw std::runtime_error("event flag outside matrix");index&=0x3ff;return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
 void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||mode>5)throw std::runtime_error("invalid event flag operation");index&=0x3ff;auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
-void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<16&&tasks_[level].active)++level;if(level==16)return;}if(task_started)task_started(level);const auto counts=tasks_[level].loop_counts;const auto cnt2=tasks_[level].cnt2,cnt3=tasks_[level].cnt3,wpnl_no=tasks_[level].wpnl_no;const auto addpx=tasks_[level].addpx;tasks_[level]={};tasks_[level].loop_counts=counts;tasks_[level].cnt2=cnt2;tasks_[level].cnt3=cnt3;tasks_[level].wpnl_no=wpnl_no;tasks_[level].addpx=addpx; /* Event_init (event.c:12956) leaves cnt, wpnl_no and addpx */tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
+void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<15&&tasks_[level].active)++level;} /* Event_exec (event.c:13001): sind 0..14 belegt, wird Slot 15 neu belegt */if(task_started)task_started(level);const auto counts=tasks_[level].loop_counts;const auto cnt2=tasks_[level].cnt2,cnt3=tasks_[level].cnt3,wpnl_no=tasks_[level].wpnl_no;const auto addpx=tasks_[level].addpx;tasks_[level]={};tasks_[level].loop_counts=counts;tasks_[level].cnt2=cnt2;tasks_[level].cnt3=cnt3;tasks_[level].wpnl_no=wpnl_no;tasks_[level].addpx=addpx; /* Event_init (event.c:12956) leaves cnt, wpnl_no and addpx */tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
 void EventVm::inherit_progress(const EventVm& previous){
     // Original global event/key/item/map/game flags outlive a ROM_WORK load.
     for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
+    values[21]=previous.values[21]; // sys->rcase lebt ueber das Raumladen hinaus (bhRoomCaseNo 0x37, bhSv 21; system.c:1623 waehlt damit die naechste RDX)
 }
-void EventVm::initialize(){if(initialize_enemies)initialize_enemies();ifel_debt_=0;Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
+void EventVm::initialize(){if(initialize_enemies)initialize_enemies();ifel_=0;Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
 void EventVm::world(Task& task,unsigned op,std::size_t length){
     BinaryView v(room_);v.require(task.pc,length);EventCommand c{op,task.level,task.event,task.pc-base_,{room_.begin()+task.pc,room_.begin()+task.pc+length}};
     c.loop_remaining=task.cnt2;c.loop_total=task.cnt3;
@@ -51,16 +52,15 @@ int EventVm::instruction(Task& t){
     /* Diagnose: RECVX_EVENT_TRACE=1 protokolliert jede ausgefuehrte Skriptanweisung (Event, Ebene, Offset, Bytes). */
     if(static const bool trace=std::getenv("RECVX_EVENT_TRACE")!=nullptr;trace){std::fprintf(stderr,"EVTRACE ev=%u lvl=%u off=%zu op=%02x:",t.event,t.level,p-base_,op);for(std::size_t i=1;i<10&&p+i<room_.size();++i)std::fprintf(stderr," %02x",v.u8(p+i));std::fputc('\n',stderr);}
     switch(op){
-    // event.c:388 bhEnd: bhIfelFlg = 0, offene Zweige verfallen.
-    case 0:t.branches.clear();ifel_debt_=0;return 0;
-    // event.c:395 bhIfelCk: bhIfelFlg++. Steht der Zaehler nach einem ENDIF ohne IF
-    // im Minus, hebt das IF nur die Schuld auf; ein Fehlschlag springt dann nicht
-    // (Schleifenabbruch bei bhIfelFlg <= 0, event.c:13049).
-    case 1:{const auto target=v.relative(p+2,v.u8(p+1),1);if(ifel_debt_<0){++ifel_debt_;return advance(2);}if(t.branches.size()>=32)throw std::runtime_error("event IF nesting limit");t.branches.push_back(target);return advance(2);}
+    // event.c:388 bhEnd: bhIfelFlg = 0.
+    case 0:ifel_=0;return 0;
+    // event.c:395 bhIfelCk: G_Sp = Ziel + 4 Bytes (unsigned int*, G_Sp++), bhIfelFlg++.
+    // G_Sp ist ein einzelner globaler Zeiger, kein Stapel: ein inneres IF ueberschreibt ihn.
+    case 1:gsp_=std::int64_t(v.relative(p+2,v.u8(p+1),1))+4;++ifel_;return advance(2);
     // event.c:413 bhElseCk / :425 bhEndif: G_Sp--, bhIfelFlg--; ohne offenes IF geht
-    // der Zaehler ins Minus, der Befehl selbst wird wie im Original ausgefuehrt.
-    case 2:if(t.branches.empty())--ifel_debt_;else t.branches.pop_back();t.pc=v.relative(p,v.u8(p+1),1);return 1;
-    case 3:if(t.branches.empty())--ifel_debt_;else t.branches.pop_back();return advance(2);
+    // der Zaehler ins Minus.
+    case 2:gsp_-=4;--ifel_;t.pc=v.relative(p,v.u8(p+1),1);return 1;
+    case 3:gsp_-=4;--ifel_;return advance(2);
     case 4:{const unsigned matrix=v.u8(p+1),bit=v.u16(p+2),extra=v.u8(p+4),mode=v.u8(p+5);advance(6);if(matrix==10&&((bit==22&&values[16]!=extra)||(bit==23&&values[20]!=extra)))return 0;return int(mode)^int(flag(matrix,bit&0x3ff));}
     case 5:set_flag(v.u8(p+1),v.u16(p+2)&0x3ff,v.u8(p+5));return advance(6);
     // event.c:701 bhCmpB key 17 reads bhEtask->wpnl_no, i.e. task 0, whichever task compares.
@@ -193,12 +193,12 @@ int EventVm::instruction(Task& t){
     case 0x81:{const auto mode=v.u8(p+1);advance(2);return mode==unsigned(!menu_open);}
     case 0xbc:{const auto level=v.u8(p+1);if(level>=16)throw std::runtime_error("event kill outside task table");advance(2);tasks_[level].active=false;return 1;}
     case 0xf8:t.delay=v.u16(p+2);if(!t.delay)t.delay=0xffffffff;t.pc++;return instruction(t);
-    case 0xf9:if(t.delay>0)--t.delay;if(!t.delay)t.pc+=3;return 2;
-    case 0xfe:t.pc++;return 2;
+    case 0xf9:if(t.delay>0)--t.delay;if(!t.delay)t.pc+=3;return 0;
+    case 0xfe:t.pc++;return 0;
     case 0xf4:t.pc++;return 1;
-    case 0xff:t.active=false;advance(2);return 2;
+    case 0xff:t.active=false;advance(2);return 0;
     case 0xfc:{if(t.loops.size()>=32)throw std::runtime_error("event WHILE nesting limit");auto end=v.relative(p,v.u8(p+1),1);t.loops.push_back({p+2,end,t.loop_counts[t.loops.size()],false});t.pc=end;return 1;}
-    case 0xfd:case 0xf3:{if(t.loops.empty()||t.loops.back().repeat)throw std::runtime_error("event EWHILE without WHILE");const auto loop=t.loops.back();t.pc=loop.condition;const auto condition=instruction(t);if(condition==1){t.pc=loop.body;return 1;}t.pc=p+1;t.loops.pop_back();return op==0xf3?1:2;}
+    case 0xfd:case 0xf3:{if(t.loops.empty()||t.loops.back().repeat)throw std::runtime_error("event EWHILE without WHILE");const auto loop=t.loops.back();t.pc=loop.condition;const auto condition=instruction(t);if(condition==1){t.pc=loop.body;return 1;}t.pc=p+1;t.loops.pop_back();return op==0xf3?1:0;}
     case 0xfa:if(t.loops.size()>=32)throw std::runtime_error("event FOR nesting limit");t.cnt2=t.cnt3=std::uint32_t(std::int32_t(std::int16_t(v.u16(p+2))));t.loop_counts[t.loops.size()]=t.cnt2;t.loops.push_back({0,p+4,t.cnt2,true});return advance(4);
     case 0xfb:if(t.loops.empty())throw std::runtime_error("event NEXT without loop");if(t.loops.back().count!=1){t.cnt2=--t.loops.back().count;t.loop_counts[t.loops.size()-1]=t.cnt2;t.pc=t.loops.back().body;}else{t.loop_counts[t.loops.size()-1]=0;t.loops.pop_back();advance(2);}return 1;
     // The binary structure is known, but these commands still need native
@@ -345,7 +345,7 @@ int EventVm::instruction(Task& t){
     }
 }
 void EventVm::run(Task& t,bool scenario){
-    if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);if(result==1)continue;if(result==0&&!t.branches.empty()){t.pc=t.branches.back();t.branches.pop_back();continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
+    if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);if(result==1)continue;/* bhEventScheduler2/bhScenarioCheck (event.c:13045-13059): jede 0-Rueckgabe bei bhIfelFlg > 0, auch bhSleep/bhSleeping/bhEvtNext/bhEvtEnd und das Ende von bhEwhile, springt im selben Durchlauf auf --G_Sp. */if(ifel_>0){gsp_-=4;--ifel_;if(gsp_<0)throw std::runtime_error("event G_Sp outside script");t.pc=std::size_t(gsp_);continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
     catch(const std::exception& e){t.blocked=true;std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(t.pc-base_)<<" (opcode 0x"<<unsigned(room_.at(t.pc))<<"): "<<e.what();if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());}
 }
 void EventVm::advance_game_clock(unsigned vertical_blanks){
@@ -416,7 +416,10 @@ void EventVm::control_exm(){
     if((gm&0x800)&&(sp&0x40)&&!(st&1)&&!(gm&0x40)){gm&=~0x800u;if(return_cut)return_cut();}
     pad_cleared_=false;
 }
-void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;if(dialog_.tick()){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_debt_=0; /* bhScenarioCheck: bhIfelFlg = 0 */Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);
+void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;/* bhSysCallEvent: bhControlMessage vor bhControlEvent, mit den Tasten dieses Durchlaufs (message.c:50). */{const auto step=dialog_.update();if(dialog_.moved()&&system_se)system_se(2); /* message.c:275/284 */if(step==MessageDialog::Step::Answered)close_dialog(true);else if(step==MessageDialog::Step::Closed){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}if(dialog_.active())values[7]=dialog_.selection;}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_=0; /* bhScenarioCheck: bhIfelFlg = 0 */Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);
+    // bhEventScheduler2 (event.c:13024) laeuft nur mit sp_flg 0x10; die Raeume setzen bzw. loeschen
+    // das Bit selbst im scd1 (bhSet 6,27), z. B. RM_0000 in jedem Durchlauf.
+    if(flags[6][0]&0x10u){if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);}
     // ItemUse/Use_01/05 call StatusCancel, whose animated exit keeps st_flg
     // 8 for bhControlEvent. The host closes visually at once; retain that
     // handover through one complete scenario/scheduler pass.
@@ -443,7 +446,7 @@ bool EventVm::request_door(const DoorRequest& request){
 void EventVm::finish_room_exit(){if(door_scenario_pending_)tick();}
 void EventVm::hide_item(unsigned index){if(index>=room_items_.size())throw std::runtime_error("pickup model outside room");EventCommand command{0x20,0,0,0,{0x20,std::uint8_t(index),3,0}};if(!binding||!binding(command))pending_bindings.push_back(command);}
 std::vector<EventTaskState> EventVm::task_states()const{std::vector<EventTaskState> out;for(const auto& t:tasks_)if(t.active)out.push_back({t.event,t.level,t.delay,t.pc-base_,t.blocked,t.wpnl_no});return out;}
-void EventVm::choose_dialog(int direction){const auto count=dialog_.choices();if(count)dialog_.selection=(dialog_.selection+count+direction)%count;values[7]=dialog_.selection;}
+void EventVm::choose_dialog(int direction){dialog_.queue_move(direction);} // pad_ps 0x4/0x8 fuer den naechsten bhControlMessage-Durchlauf
 void EventVm::finish_pickup(){if(pickup_display_)flags[10][0]&=~0x10u;pickup_item_=pickup_display_=pickup_mode_=0;pickup_model_=~0u;}
 void EventVm::show_dialog(Message message,unsigned index){
     // message.c bhSetMessage: neither a previous question's end/response nor
@@ -490,31 +493,41 @@ void EventVm::cancel_item_request(){
     dialog_=MessageDialog{};flags[5][0]&=~0x200u;flags[10][0]&=~0x1000u;
     finish_pickup();finish_file();
 }
-void EventVm::cancel_dialog(){if(pickup_item_&&dialog_.choices()){dialog_.selection=1;confirm_dialog();}else confirm_dialog();}
+void EventVm::cancel_dialog(){
+    // game.c:264: Cancel schliesst nur die fertige letzte Seite (st_flg 0x4000|0x1000 aus
+    // dem vorigen Durchlauf). Eine Auswahl (auch GetItem, sub1.c:3877) und Zwischenseiten
+    // kennen kein Cancel; das liest dort allein das Raumskript (bhPadCheck, RM_1090 Event 13).
+    if(dialog_.closable())close_dialog(false);
+}
 void EventVm::confirm_dialog(){
+    // game.c:264 schliesst die fertige letzte Seite noch vor bhControlMessage; Auswahl und
+    // Zwischenseite beantwortet erst bhControlMessage dieses Durchlaufs (tick).
+    if(!dialog_.active())return;
+    if(dialog_.closable())close_dialog(false);else dialog_.queue_ok();
+}
+void EventVm::close_dialog(bool answered){
     // bhDispMessage also acknowledges script-owned questions (st_flg 0x2000
     // clear). Padlock disposal waits for this same cb_flg 0x1000 response.
-    const bool interaction_answer=dialog_.active()&&dialog_.choices()&&!menu_open;
-    if(dialog_.active())values[7]=dialog_.selection+(dialog_.choices()&&menu_open?100:0);
-    if(pickup_item_&&dialog_.choices()){
-        // GetItem testmode 1/4 löschen mit der Antwort cb_flg 0x1000 und
-        // st_flg 0x200; die Frage verschwindet also, bevor der nächste
-        // Durchlauf 158 meldet.
-        const unsigned answer=100+dialog_.selection;
+    const bool interaction_answer=answered&&!menu_open;
+    values[7]=unsigned(dialog_.selection)+(answered&&menu_open?100u:0u);
+    if(pickup_item_&&answered){
+        // GetItem testmode 1/4 (sub1.c:3877/3926): CallSystemSe(0,3), dann loeschen die
+        // Antwort cb_flg 0x1000 und st_flg 0x200; die Frage verschwindet also, bevor der
+        // naechste Durchlauf 158 meldet.
+        if(system_se)system_se(3);
+        const unsigned answer=100+unsigned(dialog_.selection);
         dialog_=MessageDialog{};flags[5][0]&=~0x200u;
         pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1],pickup_mode_,int(answer),status_busy&&status_busy()));return;
     }
-    const bool was_active=dialog_.active();dialog_.confirm();if(dialog_.active())values[7]=dialog_.selection;if(was_active&&!dialog_.active()&&audio_stop)audio_stop(1);
-    if(!dialog_.active()){
-        // message.c: a confirmed interaction choice requests cb_flg 0x20000000;
-        // game.c bhSysCall converts that into 0x1000 for bhControlEvent.
-        // The script sees it once, alongside the original end marker 0x4000.
-        if(interaction_answer){flags[10][0]|=0x1000;flags[5][0]|=0x4000;}
-        if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;}
-        // game.c:180-192: the examined camera ends with the message (pt_flg |= 3, bhCheckCut(1)).
-        if(flags[5][0]&0x80){flags[5][0]&=~0x80u;if(presentation_flags)presentation_flags(0,3);if(!(flags[11][0]&0x20000)){flags[5][0]&=~1u;flags[11][0]|=0x800;}}
-        finish_pickup();flags[5][0]&=~0x200u;flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;
-    }
+    dialog_.close();if(audio_stop)audio_stop(1);
+    // message.c: a confirmed interaction choice requests cb_flg 0x20000000;
+    // game.c bhSysCall converts that into 0x1000 for bhControlEvent.
+    // The script sees it once, alongside the original end marker 0x4000.
+    if(interaction_answer){flags[10][0]|=0x1000;flags[5][0]|=0x4000;}
+    if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;}
+    // game.c:180-192: the examined camera ends with the message (pt_flg |= 3, bhCheckCut(1)).
+    if(flags[5][0]&0x80){flags[5][0]&=~0x80u;if(presentation_flags)presentation_flags(0,3);if(!(flags[11][0]&0x20000)){flags[5][0]&=~1u;flags[11][0]|=0x800;}}
+    finish_pickup();flags[5][0]&=~0x200u;flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;
 }
 void EventVm::service_pickup(){
     // StatusMain ruft GetItem in jedem Durchlauf. Nach der Einfügung (testmode
