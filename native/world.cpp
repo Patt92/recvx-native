@@ -610,7 +610,11 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
 
     // event.c:6985 bhEneRenderSet toggles only BH_PWORK.mdflg bit 0x200.
     // Native rendering has the same draw gate on the common WorldEntity.
-    if(op==0xa5){entity(1,v.u8(1)).hidden=v.u8(2)==0;return true;}
+    if(op==0xa5){auto& e=entity(1,v.u8(1));e.hidden=v.u8(2)==0;
+        // event.c:6985-7010: BH_PWORK.mdflg 0x200 am Work selbst; der Host-Spiegel allein ging beim
+        // naechsten publish_enemy (Sofortauswertung im selben Eventlauf) wieder verloren.
+        if(e.enemy_bound){if(e.hidden)e.enemy.mdflg|=0x200u;else e.enemy.mdflg&=~0x200u;e.enemy_mirror.hidden=e.hidden;}
+        return true;}
     if(op==0x7a){audio_.stop_enemy_sound(v.u8(1));return true;}
     // event.c:5454 bhLightParameterCSet / :7067 bhFogParameterCSet: the task's BH_SCEWORK e_lgt[2][5]
     // (target key 0, start key 1). Light values are u16/100, fog values the raw A/R/G/B bytes.
@@ -837,7 +841,11 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         }
         return true;
     }
-    if(op==0x20){const unsigned kind=v.u8(2),index=v.u8(1);if(!kind){player_hidden=v.u8(3)==0;if(player_hidden&&stage_no_==9&&room_no_==30&&room_case_==2)pl_sleep_cnt_=2;} /* event.c:2832 */else entity(kind,index).hidden=v.u8(3)==0;return true;}
+    if(op==0x20){const unsigned kind=v.u8(2),index=v.u8(1);if(!kind){player_hidden=v.u8(3)==0;if(player_hidden&&stage_no_==9&&room_no_==30&&room_case_==2)pl_sleep_cnt_=2;} /* event.c:2832 */
+        // event.c:2283-2330 bhSetDispObj: ene[enep[v0].wrk_no].mdflg Bit 0x1 (Zeichentor eneset.c:814),
+        // nicht das 0x200 von bhEneRenderSet, das unter st_flg 0x20 nicht wirkt.
+        else if(kind==1&&entity(1,index).enemy_bound&&entity(1,index).enemy_native){auto& w=entity(1,index).enemy;if(v.u8(3)==0)w.mdflg|=0x1u;else w.mdflg&=~0x1u;}
+        else entity(kind,index).hidden=v.u8(3)==0;return true;}
     // objitm.c never ticks room-object motions. The scenario explicitly samples
     // them through bhSetObjMotion / bhSetItmMotion, including the sp_flg gate.
     if(op==0x50||op==0x9c){auto& e=entity(op==0x50?2:3,v.u8(1));if(e.has_motion&&e.motion_mode3==1&&(c.simulation_flags&4)){e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);actor_nodes_.clear();}return true;}
@@ -1326,12 +1334,22 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
                 player_morph_.motion_mode3=v.u8(3)<=1?0:1;motion_=index;frame_=start;player_step_=motion_step(v.u8(2));player_room_motion_=cmd!=25;player_scripted=true;return true;}
             auto& e=entity(ctx.kind,ctx.index);if(cmd==25&&ctx.kind!=1)return false;e.room_motion=cmd!=25;e.motion=index;if(!entity_motion(e).frames)throw std::runtime_error("script entity motion unavailable");e.frame=start;e.sampled_frame=start;e.step=motion_step(v.u8(2));e.scripted=true;e.has_motion=true;e.motion_slow=(v.u8(2)!=1&&v.u8(2)!=2)||v.u8(7)==6;e.motion_mode3=v.u8(3)<=1?0:1;
             if(e.subplayer_bound){
-                e.subplayer_no_motion=false;auto& w=e.enemy;w.mtn_room=cmd!=25;w.mtn_no=index;w.mtn_add=int(e.step);w.mtn_md=0x20|(v.u8(2)==1||v.u8(2)==2?0:8);w.frm_no=start;w.frm_mode=0;w.hokan_count=0;w.hokan_rate=0;
-                if(v.u8(3)<=1){ // Common_controll case 1 also selects the subplayer dispatch mode.
-                    w.mode0=v.u8(5)?5:1;w.mode1=index;w.mode2=0;w.mode3=0;w.ct1=v.u8(6);w.ct2=v.u8(7)>8?10:v.u8(7);
-                    if(v.u8(7)!=6&&v.u8(7)<=8)w.hokan_count=8;
+                // event.c:11834-11909 (34) / :11501-11570 (24) / :10990-11060 (25): selector 1 writes
+                // the low byte of mtn_no, mtn_md 0x20 (|8 for steps other than 1/2) and |8 for
+                // transition 6; hokan_count stays unless the transition is > 8. Common 25 takes
+                // mtn_md/hokan_rate from the task and sets hokan_count 0 / t1 / 8 (then mtn_md &= ~8).
+                // Selector 0 and 2/3 set hokan_count 0 for transition 6, else 8.
+                const unsigned selector=v.u8(3),t1=v.u8(7);
+                e.subplayer_no_motion=false;auto& w=e.enemy;w.mtn_room=cmd!=25;w.mtn_add=int(e.step);w.frm_no=start;w.frm_mode=0;
+                if(cmd==25&&selector==1){w.mtn_md=ctx.mtn_md;w.hokan_rate=ctx.hokan_rate;}else{w.mtn_md=0x20|(v.u8(2)==1||v.u8(2)==2?0:8);w.hokan_rate=0;}
+                if(selector==1)w.mtn_no=(w.mtn_no&~255u)|index;else w.mtn_no=index;
+                if(selector<=1){ // Common_controll case 1 also selects the subplayer dispatch mode.
+                    w.mode0=v.u8(5)?5:1;w.mode1=index;w.mode2=0;w.mode3=0;w.ct1=v.u8(6);w.ct2=t1>8?10:t1;
+                    if(selector==1&&cmd!=25){if(t1==6)w.mtn_md|=8u;else if(t1>8)w.hokan_count=t1;}
+                    else if(selector==1){if(t1==6){w.hokan_count=0;w.mtn_md|=8u;}else if(t1>8)w.hokan_count=t1;else{w.hokan_count=8;w.mtn_md&=~8u;}}
+                    else{w.hokan_count=t1==6?0:8;if(t1==6)w.mtn_md|=8u;}
                 }else { // Cases 2/3 set only mode3, MTN, rate and start frame.
-                    w.mode3=1;w.hokan_count=v.u8(7)==6?0:8;
+                    w.mode3=1;w.hokan_count=t1==6?0:8;if(t1==6)w.mtn_md|=8u;
                 }
                 // event.c:11940-11967 (24/34) / :11069-11096 (25) switch(v0 = byte 6) runs on the
                 // work's own tree at once: bhSetMotion/bhCalcModel/bhCalcLinkModel, so the next

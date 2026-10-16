@@ -2,21 +2,21 @@
 
 Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.
 
-Expliziter Belegumfang: **85.8 %** gewichtet, **72.5 %** voll belegt (346/477 Mechanismen; kein Gesamtfortschritt).
+Expliziter Belegumfang: **85.6 %** gewichtet, **72.5 %** voll belegt (358/494 Mechanismen; kein Gesamtfortschritt).
 
 Event-Befehle (bhScenarioJmpT): 188/223 gebunden, 19 nur konsumiert, 16 fehlen.
 
 | Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |
 |---|---:|---:|---:|---:|---:|
 | Gegner/KI | 55/86 | 82.0 % | 64.0 % | 31 | 0 |
-| Effekte | 178/192 | 96.4 % | 92.7 % | 14 | 0 |
-| Events/Skript | 34/44 | 88.6 % | 77.3 % | 10 | 0 |
-| Spieler/Kampf | 19/35 | 77.1 % | 54.3 % | 16 | 0 |
+| Effekte | 180/196 | 95.7 % | 91.8 % | 15 | 1 |
+| Events/Skript | 34/45 | 86.7 % | 75.6 % | 10 | 1 |
+| Spieler/Kampf | 25/42 | 79.8 % | 59.5 % | 17 | 0 |
 | Raum/Kamera/Tür | 4/23 | 56.5 % | 17.4 % | 18 | 1 |
-| Menü/Items/Text | 32/43 | 83.7 % | 74.4 % | 8 | 3 |
-| Modelle/Animation | 7/10 | 85.0 % | 70.0 % | 3 | 0 |
+| Menü/Items/Text | 34/45 | 84.4 % | 75.6 % | 8 | 3 |
+| Modelle/Animation | 7/11 | 81.8 % | 63.6 % | 4 | 0 |
 | Audio | 4/20 | 60.0 % | 20.0 % | 16 | 0 |
-| Ablauf/Speichern | 13/24 | 77.1 % | 54.2 % | 11 | 0 |
+| Ablauf/Speichern | 15/26 | 78.8 % | 57.7 % | 11 | 0 |
 | Plattform (Host-ersetzt) | 10/19 | 76.3 % | 52.6 % | 9 | 0 |
 
 Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichheit, Originalquellen und quarantänierte Generatoren zählen nie als Portbeleg.
@@ -26,7 +26,10 @@ Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichhe
 - `adv.c` Adv_GameOptionScreen (missing, Optionsbildschirm (DisplayOptionPlateLevel0-3, Sound/Vibration/Key-Config) nicht portiert; OPTION oeffnet den Host-Einstellungsbildschirm (frontend.h, dokumentierte Abweichung))
 - `adv.c` CheckMcSelectPortInfoState (missing, Originale Memory-Card-Portabfrage nicht portiert; die Host-Slotauswahl ermittelt belegte Spielstaende aus dem Benutzerdatenverzeichnis)
 - `adv.c` FindFirstVmDrive (missing, Originale Memory-Card-Suche nicht portiert; der Host ersetzt sie durch native Spielstaende im Plattform-Benutzerdatenverzeichnis und aktiviert LOAD GAME bei belegtem Slot)
+- `effsub1.c` bhEff111 (missing, Rendertextur-Monitor: effsub1.c:6929 legt eine 512x512-Textur (sys->ren_info) an, screen.c:920 bhDrawSmallScreenRenderTexture zeichnet je Bild Raum, Objekte/Items und Gegner (bhAllEasyDrawModel, ohne Spieler und Effekte) aus Raumschnitt op->type mit 0.8*dist/512 Breite hinein, bhDrawThlEffect3D (effect.c:1562) zeigt sie auf dem Quad (bcol -1/0xFFC0C0C0 im Wechsel, ocol-Fade bei lkono 1). system.c:1662 setzt Ps2_rendertex_initflag nur fuer Stage 1 Raum 5 (RM_1050): dort zeigt der Monitor Steve aus Schnitt 6. Nativ nicht gebunden (2026-10-16 festgestellt), der Monitor bleibt schwarz.)
+- `event.c` bhEtcAtariEnePosSet (missing, Opcode 0xb3 (event.c:7794) und 0xb4 bhEtcAtariEvtPosSet (:7865): sys->evt_posno[4] und die ATR-Verschiebung auf rom->posp. Nicht in der nativen VM; Common_controll 51/52 lesen evt_posno und bleiben deshalb benannte Luecke (2026-10-16).)
 - `objitm.c` bhDrawSpObject (missing, Die gemeinsame Schnitt-Beschraenkung (objitm.c:688) ist gebunden; die Spezialobjektliste sys->ob_spc mit ihren Typzweigen (Licht 5 usw.) hat im Host keinen Besitzer.)
+- `Motion.c` bhSetMotion:Spieler (partial, player.c:1502 bhSetMotion(plp) Knotenteil (SetMtnNormal/Fast/Slow und ihre Hokan-Varianten, Motion.c:131-859) seit 2026-10-16 auf dem einen plp->mlwP->objP (RoomWorld::player_obj_) ueber das vorhandene set_motion (motion_set.cpp): RoomWorld::player_set_motion_pose mit dem Stand VOR Vorschub und hokan_count-Abzug; die Uhren bleiben bei ihren Pfaden. Gebunden: Aktions-/Eventpfad (runtime vor recvx_player_action_motion, mtn_md 0 aus player.c:1779), Kampfkern (services.set_motion_pose in cb_set_motion, Luecke SetMtn*Hokan entfaellt), Schaden (bhCPM0_damage hokan 49152/4 jetzt am Spielerwerk), Griff (player_set_motion_now schreibt objP statt Wegwerfpuffer), Schieben (player_push_core hokan_sample, hokan_count sinkt je Pass; Slow-Abtastung push_->pose nur noch ohne objP). Darstellung: player_pose_edits legt objP unter alle Bearbeitungen (sample_player, Kopf, Gelenke, Fussschritt, model_pose_physical, Kampf publish_pose). Folge: Motionwechsel blenden, und die gezeigte Pose ist wie im Original das Bild VOR dem Vorschub (vorher eins weiter). Test player_motion_blend (zwei Gegenproben rot); RECVX_PLAYER_POSE_TRACE belegt Mischung in Lauf->Stand und Ziehen/Wegstecken. OFFEN: Treppe (player_stairs), Gameover, skriptgefuehrte Spielermotion (world.cpp 0x65/0x66) fuehren objP noch nicht.)
 - `adv.c` AdvGetCancelButton (partial, Host-Cancel statt keytype-Tabelle {32,128,64})
 - `adv.c` AdvGetOkButton (partial, Host-Confirm steht fuer 0x800 (Start) und den keytype-OK-Button zugleich; keytype-Tabellen {192,96,160} nicht gebunden)
 - `adv.c` ResetAdvSystem (partial, Nur die Titelfelder NextReturnCode/ExtraFlag/NextMode/GenFlag und StopAdvScreenSaver(1) (Frontend::reset_adv_system); Texturlisten, Optionsfelder und VM-Felder fehlen)
@@ -34,10 +37,7 @@ Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichhe
 - `cut.c` bhControlEventCamera (partial, Vollstaendige mode0-Maschine in RoomWorld::control_event_camera (native/world.cpp): 0 Initpass mit st_flg 0x10/0x800000 und bhInitEventCamera (:1998-2020), 1 Fahrt, 2 Endhalten unter !(gm_flg 0x1) (:2140), 3 aus bhCamPauseSet ohne case-Zweig (Pose, cam.ct0 und cam.keyf_no halten). cam.ct0 zaehlt nur bei !(sys->st_flg & 0x80) (:2101). Alle vier Splines laufen jetzt ueber die 20 Kontrollslots cam.ips/ian/ipf/icr statt ueber die Rohkeys; Keyframe-Lock lkflg/lkno/lkono nur bei Gleichheit mit kfp[1] bzw. keyf_n==1 (:2049-2056, Fall 2 ohne den keyf_n-Zweig :2159-2166). Gemessen RM_0040 ev5 (bhCamSet 0,10,1 + bhCamPauseSet 0): vorher drehte ax 65338->54060 ueber 30 Bilder, jetzt Standbild exakt auf Key 1 (7.5,11.5,4.5 / -198,-17736,0 / pers 9102) wie im RDT. Offen: bhSetEventHideObjLgt wird nicht als Aufruf nachgebildet (die Masken werden je Bild aus dem aktuellen Key gelesen), sys->pt_flg 0x1 des 0x800000-Zweigs hat keinen nativen Besitzer, und cam.pers wird ohne belegte CAM_WORK-Breite nicht genarrowt.)
 - `cut.c` bhSetCut (partial, cam.fog_* vom Schnitt, fog_ct = fog_cngct-3 (ef_flg 0x10 einmal weniger) bei st_flg 0x2 && flg 0x8, sonst 0, gm_flg 0x10 (:349-377) in RoomWorld::cut_fog_handover ueber initialize_camera_clip; sys->fog_cngct ohne ss_flg-Bit-1-Besitzer fest 2 (fog_ct ist bei 2 und 3 gleich 0). Uebrige bhSetCut-Teile (Clip/Hide) wie zuvor.)
 - `cut.c` bhSetEventCamera (partial, Opcode 0x13 Modus 0 setzt jetzt cam.px/py/pz, cam.ax/ay/az (als vorzeichenbehaftete CAM_KEYF_WORK-shorts) und cam.pers aus dem Key und bei lkflg != 0 sofort die Zielwinkel (:1660-1684), danach *(int*)&cam.mode0 = 0 (:1686) als Initpass von bhControlEventCamera. cam.fog_* nehmen den Key in BEIDEN Zweigen; nur sys->fog_ct unterscheidet sich (fog_cngct - 4, geklemmt, bei st_flg 0x2 && kfp->flg 0x8, sonst 0, :1694-1716) - vorher uebernahm der Host die Fogwerte nur im ersten Zweig und setzte fog_ct nie. gm_flg 0x10 (:1718). Splines cam.ipf/cam.icr je Bild in control_event_camera. Offen: cam.pxp/axp-Vorgaengerfelder, cam.ln, cam.flg 0x2/0x38 und bhSetEventHideObjLgt als Aufruf.)
-- `cut.c` bhSetFixedCut (partial, Fog-Uebergabe :463-484 (ohne ef_flg-Zweig) bei Opcode 0x2a Modus 0.)
-- `door.c` bhControlDoor (partial, native/doors.cpp tick: recvx_door_step, zwei CallDoorSe-Gruppen (0xF0000 sofort, 0xF00000 erst bei status 0x20), ControlSoundTiming-Kommandos, Ende nur ueber status 0x40 aus FadeProc1 (door.c:641). spd_mde-Schleife nur DMO_SPD_1; Zeichnung Host-Renderer.)
-- `effect.c` bhControlEffect (partial, Spielerlink liest jetzt wie effect.c:803-811 pp->mlwP->owP[op->lkono].mtx aus dem zuletzt von bhCalcModel(plp) festgeschriebenen Baum (native/world.cpp RoomWorld::link_matrix, player_joint_matrices_) statt plp->mnwP[plp->mtn_no] neu abzutasten. Behebt den Absturz actor motion unavailable im Freigabebild eines Griffs. Tests: tests/native/lighter_test.cpp grab_release_links, tools/verify_enemy_ai.py rm0060-lighter-release/-death. Uebrige Effektzweige unveraendert offen.)
-- `effect.c` bhDrawTrsEffect3D (partial, Eigenstaendiger nativer Eff009-Zeichenweg: Hand-/Objektanker, Billboard bzw. verknuepfte Matrix, unveraendertes Atlasalpha, Ninja-Blendpaar, Point/Linear je Draw und Tiefe positiv geprueft. Andere Effekte/Drawgates/Linktyp 5 bleiben offen. work/native_port_E03_lighter.result.md | Rueckseitentor flg 0x20000 portiert: njCalcPoint + njProjectScreen der ersten drei Eckpunkte, njGetPlaneNormal2, njUnitVector, vec.z < 0 -> stflg 0x10 und nicht zeichnen. Das Bit merkt der const-Zeichenpass und bhControlEffect traegt es im naechsten Bild ein; einziger Originalleser ist bhDrawSmallScreenRenderTexture (screen.c:943, offen). Texturwahl/Blendpaar/Billboard waren schon gebunden. native/effect_sprites.cpp append_effect_sprite; Tests group7_backface_and_eyes und eye_lights (RM_1002, Tor schliesst aus Kamera 2))
+- `cut.c` bhSetFixedCut (partial, Fog-Uebergabe :463-484 (ohne ef_flg-Zweig) bei Opcode 0x2a Modus 0. Seit 2026-10-16 auch :486 cam.ncut = cno vor bhChangeViewClipRM (:537): die Nahgrenze kommt aus dem neuen Schnitt, nicht aus dem vorigen Raumschnitt (RM_1050 Ameisen-Juwel: Schnitt 5 behielt 20/20000 von Schnitt 1, die Vitrine lag vor der Nahgrenze, es blieb die Hintergrundfarbe). Test native_ground_world (Gegenprobe rot).)
 
 ## Unbestätigte historische Ledger-Einträge
 
