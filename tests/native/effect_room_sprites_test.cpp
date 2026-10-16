@@ -1158,10 +1158,16 @@ static void group5_rest(){
         spawn.type=2;initialize_effect_sprite(s,spawn);bool rejected=false;try{step_effect_sprite(s,c,&queued);}catch(const std::runtime_error&){rejected=true;}
         check(rejected,"bhEff012 accepts a kind outside its original speed cases");
     }
-    { // 019: vier Reihen; Art 0 meldet das ungebundene Raumlicht
+    { // 019: vier Reihen; Art 0 setzt rom->lgtp[0] (ohne Lichtbesitzer benannte Luecke)
         auto s=work(19,0);step_effect_sprite(s,c,&queued);auto out=take_effect_output();
         check(queued&&s.tex_id==19&&s.bl_dst==10&&close(s.py,1.0f)&&close(s.yn,0.9f),"bhEff019 kind 0 rise differs");
         check(out.gaps.size()==1&&out.gaps.begin()->find("rom->lgtp")!=std::string::npos,"bhEff019 must report the unbound room light");
+        // Mit Lichtbesitzer: effsub1.c bhEff019 type 0 schreibt lgtp[0] nur ohne flg 0x2, rgb 3/2/1, nr 20, fr 60, Lage des Satzes.
+        bool lit=false,cond=false;NJS_POINT3 at{},rgb{};float nr=0,fr=0;
+        EffectWorldHooks h;h.room_light0=[&](NJS_POINT3 p,NJS_POINT3 c3,float n,float f,bool only){lit=true;at=p;rgb=c3;nr=n;fr=f;cond=only;};set_effect_world_hooks(h);
+        auto lamp=work(19,0);lamp.px=4;lamp.pz=-2;step_effect_sprite(lamp,c,&queued);out=take_effect_output();
+        check(lit&&cond&&close(at.x,4)&&close(at.z,-2)&&close(rgb.x,3)&&close(rgb.y,2)&&close(rgb.z,1)&&close(nr,20)&&close(fr,60)&&out.gaps.empty(),"bhEff019 kind 0 must set rom->lgtp[0] only while its flg 0x2 is clear");
+        set_effect_world_hooks({});
         s=work(19,1);step_effect_sprite(s,c,&queued);
         check(queued&&s.bl_src==11&&s.bl_dst==3&&s.ct1==72&&s.tv[0].col==((72u<<24)|0xffffffu)&&close(s.py,1.4f),"bhEff019 kind 1 fade-in differs");
         s=work(19,2);step_effect_sprite(s,c,&queued);
@@ -1579,11 +1585,15 @@ static void group9_snow(){
         auto four=work(219,4);four.flg=1;four.ax=100;g_extra_next=0;step_effect_sprite(four,cam,&queued);
         check(four.type==1,"bhEff219 type must wrap to 1..3");
     }
-    { // Kamerabox ohne gelaufenes bhControlCamera: Luecke, kein Satz belegt.
+    { // Kamerabox ohne gelaufenes bhControlCamera: cam ist beim Raumladen genullt
+      // (room.c:33 bhInitCamera, camera.c:8 npSetMemory(&cam, 0x4AC, 0)) und game.c:50
+      // bhControlEffect laeuft vor :58 bhControlCamera — die Box liegt wie im Original
+      // am Ursprung und folgt der Kamera, sobald sie gelaufen ist. Kein Warten, keine Luecke.
         g_extra_next=0;take_effect_output();
         auto s=work(219,1);s.flg=1;s.ax=100;step_effect_sprite(s,c,&queued);
         auto out=take_effect_output();
-        check(!s.snow&&g_extra_next==0&&out.gaps.size()==1&&s.mode0==0,"bhEff219 without the camera must report the gap and wait");
+        check(s.snow&&g_extra_next==11&&out.gaps.empty()&&s.mode0==1&&queued,"bhEff219 without a camera pass must place the box at the zeroed cam like the original");
+        check(close(s.snow->AreaCenter.x,0)&&close(s.snow->AreaCenter.y,0)&&close(s.snow->AreaCenter.z,0)&&close(s.snow->fAreaSizeX,65.0f),"the camera box without a camera pass must sit at the origin with edge 65");
         // Ohne Auftrag (type 0, mode1 0) bleibt der Satz unberuehrt.
         auto idle=work(219,0);idle.flg=1;step_effect_sprite(idle,c,&queued);
         check(!idle.snow&&!(idle.flg&0x1000000u)&&!queued,"bhEff219 without an order does nothing");
@@ -1618,7 +1628,10 @@ static void group9_snow(){
     set_effect_extra_allocator({},{});set_effect_link_lookup({});set_effect_work_angle({});set_effect_pool_lookup({});
 }
 // Originalraum RM_9090: zwei Schneeboxen vom type 3 (Eintraege 24/25) und eine
-// Kamerabox (12). Ohne Kameralauf wartet die Kamerabox mit benannter Luecke.
+// Kamerabox (12). Ohne Kameralauf liegt die Kamerabox wie im Original am genullten cam.
+// Der Test laeuft ohne Raumskript: im Spiel schaltet das Skript alle drei Boxen beim
+// Betreten per 0x43 bhEffDispSet (event.c:3653) aus. Er prueft den Effektpfad, nicht
+// die Sichtbarkeit im Raum; die Bildabnahme steht im Ledger (RM_5840).
 static void snow_room(const std::filesystem::path& data){
     const auto room=read_asset_file(data/"rooms/RM_9090.RDT",64*1024*1024);
     const auto stage=decode_scene(room);auto actor=stage.spawns.at(0);
@@ -1629,11 +1642,17 @@ static void snow_room(const std::filesystem::path& data){
     for(unsigned i=0;i<4;++i)world.tick();
     unsigned extra=0,boxes=0;
     for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(!s)continue;if((s->flg&3u)==2u)++extra;if(s->id==219&&s->snow)++boxes;}
-    check(boxes==2&&extra>=22,"RM_9090 must hold two snow boxes in 22 extra works");
+    check(boxes==3&&extra>=33,"RM_9090 must hold three snow boxes (two fixed, one camera) in 33 extra works");
     Scene draw;std::vector<BoneMatrix> nodes;world.append(draw,nodes,stage.cameras.at(0));
     const auto flakes=std::count_if(draw.triangles.begin(),draw.triangles.end(),[](const SceneTriangle& t){return t.color==0xa0ffffffu&&t.texture_filter==SceneTextureFilter::Point;});
     check(flakes>0&&flakes%2==0,"the snow boxes produced no flakes in the scene");
-    check(world.unbound_enemy_routines().count("bhEff219: cam.wpx/cam.vx vor dem ersten bhControlCamera")==1,"the camera box must report its gap without a camera pass");
+    // Die Kamerabox (Eintrag 12, type 1) laeuft mit, ohne eine Luecke zu melden; nur die
+    // beiden type-3-Boxen stehen fest, die Kamerabox haengt an cam.wp + 40 * cam.v.
+    unsigned fixed=0,camera_box=0;
+    for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(!s||s->id!=219||!s->snow)continue;
+        if(s->type==3)++fixed;else{++camera_box;check(close(s->snow->fAreaSizeX,65.0f),"the camera box must keep edge 65");}}
+    check(fixed==2&&camera_box==1,"RM_9090 must hold two fixed boxes and one camera box");
+    for(const auto& gap:world.unbound_enemy_routines())check(gap.rfind("bhEff219",0)!=0,"bhEff219 must not report a gap on the zeroed camera");
 }
 // effsub1b.c:621/713 bhEff135/136 und effect.c:935 ef_Zanzo, mit Testdiensten.
 static void group10_afterimages(){
@@ -1703,6 +1722,59 @@ static void group10_afterimages(){
 // RM_7070 (Gegner 5, Gelenk 1, ef_Zanzo) und RM_1002 (Fall 2, ef_fnc): Testaufstellung,
 // die die 135-Eintraege wie Skriptbefehl 0x91 einschaltet. Geprueft wird die Kette
 // bhSetEffectLink -> 135 -> 136 -> Nachbild in der Szene auf echten Raumdaten.
+// effect.c:905 bhDrawNtxEffect2D: der Schirmsatz von bhEff130 type 3 (BOW-Gas) faerbt das
+// fertige Bild. Erwartung aus ps2_NaDraw.c:8 njDrawPolygon: Alpha = col >> 25 (a >> 1) als
+// GS-Verhaeltnis / 128 unter 8/6, Eckfarbe 0x10C040; auf schwarzem Grund also Kanal*ratio/128.
+// Tore: pt_flg 0x10 (effect.c:339), flg/stflg 0x1000000 und gm_flg 0x4000 + mdflg 0x40.
+static void ntx2d_room(const std::filesystem::path& data){
+    const auto room=read_asset_file(data/"rooms/RM_5840.RDT",64*1024*1024);
+    const auto stage=decode_scene(room);auto actor=stage.spawns.at(0);
+    std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(room,stage,actor,motion,frame,audio,data,{},"RM_5840");
+    world.set_simulation_flags(~0u);
+    const int slot=world.reserve_effect_slot(0);check(slot>=0,"no free eff[] slot for the gas screen");
+    auto& s=const_cast<EffectSprite&>(*world.effect_state(unsigned(slot)));
+    // Ein BOW-Gas-Geschoss im Einschlag (mode0 2, type 3, mode1 0): der erste Pass legt den
+    // Schirm-Vierecksatz pv an (:9820-:9834); erst ab ct0 > 7 steht er in ef_ntx2d (:9904).
+    s.flg=1;s.id=130;s.type=3;s.mode0=2;s.mode1=0;s.px=0;s.py=0;s.pz=0;
+    auto draw=[&](unsigned pt){world.set_presentation_flags(pt);SoftwareRenderer image(640,480);std::fill(image.canvas().begin(),image.canvas().end(),0xff000000u);world.draw_ntx2d_effects(image);return image.canvas();};
+    const auto all_black=[](const std::vector<std::uint32_t>& c){return std::all_of(c.begin(),c.end(),[](std::uint32_t p){return p==0xff000000u;});};
+    const auto& w=*world.effect_state(unsigned(slot));
+    unsigned passes=0,first_listed=0;
+    while(!w.ntx2d_queued&&passes<40){world.tick();++passes;check(all_black(draw(0x10)),"an unlisted gas screen must not tint the frame");}
+    first_listed=passes;
+    check(w.mode1==1&&w.ct0==9,"first ef_ntx2d entry must be the pass with ct0 8 (:9904), leaving ct0 9");
+    check(close(w.pv[0],0)&&close(w.pv[4],640.0f)&&close(w.pv[9],480.0f)&&close(w.pv[14],1.2195f)&&w.pn==4,"screen quad pv (0,0)-(640,480), z 1.2195 (:9820-:9834)");
+    check(all_black(draw(0x10)),"sin(0) screen must not tint the frame");
+    // Bis zum letzten reinen Phase-1-Eintrag (ct0 23 -> 24): Alpha 64*sin(15<<10) = 63, ratio 31.
+    while(w.ct0<24&&w.mode1==1)world.tick();
+    check(w.ntx2d_queued&&w.mode1==1&&w.ct0==24,"gas screen pass count differs");
+    std::uint32_t col;std::memcpy(&col,&w.pv[3],4);
+    const unsigned a=unsigned(int(64.0f*njSin(Angle(15<<10))))&0xFFu;
+    check(a==63&&col==((std::uint32_t(a)<<24)|0x10C040u),"gas screen colour in the last pure phase-1 pass differs");
+    auto tinted=draw(0x10);
+    // njDrawPolygon: Alpha = col >> 25 = a >> 1 als GS-Verhaeltnis / 128; ueber Schwarz also Kanal*ratio/128.
+    const unsigned ratio=(a>>1);
+    const unsigned want_r=(0x10u*ratio)/128u,want_g=(0xC0u*ratio)/128u,want_b=(0x40u*ratio)/128u;
+    const std::uint32_t want=0xff000000u|(want_r<<16)|(want_g<<8)|want_b;
+    unsigned matches=0;for(auto p:tinted)if(p==want)++matches;
+    check(matches>=640u*480u*99u/100u,"gas screen tint differs from njDrawPolygon alpha (col >> 25)/128 over the full frame");
+    // Tore: ohne pt_flg 0x10 kein Effektzeichenpass; stflg 0x1000000 versteckt den Satz.
+    check(all_black(draw(0)),"ntx2d drew without pt_flg 0x10");
+    s.stflg|=0x1000000u;const bool hidden_black=all_black(draw(0x10));s.stflg&=~0x1000000u;
+    check(hidden_black,"ntx2d drew a work hidden by stflg 0x1000000");
+    // Das Zeichnen selbst aendert den Satz nicht (const Pass).
+    check(w.ntx2d_queued&&w.mode1==1&&w.ct0==24,"draw pass mutated the gas screen work");
+    // :9904-:9916 im naechsten Pass: Eintrag mit ct0 24 (Alpha 64, Scheitel), ct0++ -> 25, > 24 ->
+    // bhSetBowDamage, ct0 32, mode1 2 — alles in einem Pass; der Eintrag bleibt bis zum naechsten Pass.
+    world.tick();
+    check(w.mode1==2&&w.ct0==32&&w.ntx2d_queued,"the bow-damage pass still lists the peak screen (:9908 before :9913)");
+    std::memcpy(&col,&w.pv[3],4);check(col==((64u<<24)|0x10C040u),"peak colour must be alpha 64");
+    // :9924-:9934 Ausblenden: 31 Paesse mit Eintrag (ct0 31..1), der Pass mit ct0 1 -> 0 gibt frei ohne Eintrag.
+    unsigned fade_listed=0;for(int i=0;i<40&&w.flg;++i){world.tick();if(w.flg&&w.ntx2d_queued)++fade_listed;}
+    check(!w.flg&&fade_listed==31,"fade phase must list 31 passes, then free the work");
+    (void)first_listed;
+}
 static void afterimage_room(const std::filesystem::path& data){
     for(const char* name:{"RM_7070","RM_1002"}){
         const auto room=read_asset_file(data/(std::string("rooms/")+name+".RDT"),64*1024*1024);
@@ -1731,12 +1803,87 @@ static void afterimage_room(const std::filesystem::path& data){
         const bool fnc_room=std::string(name)=="RM_1002";
         check(fnc_room?(fnc==5*producing&&zanzo==0):(zanzo==5&&fnc==0),"afterimage list (ef_fnc/ef_Zanzo) differs");
         Scene draw;std::vector<BoneMatrix> nodes;world.append(draw,nodes,stage.cameras.at(0));
+        // Die Nachbilder liegen in der Effektphase 6 (ef_fnc/ef_Zanzo, world.cpp append_afterimage).
+        // Halbes Licht allein genuegt als Merkmal nicht: objitm.c:518-529 zeichnet ob_hlg/ob_spc
+        // nach bhSetHalfLight() mit amb_chr, also ebenfalls in Kategorie 1 (Phasen 3/4).
         std::map<unsigned,std::size_t> alphas;
-        for(const auto& t:draw.triangles)if(t.light_category==1&&!t.after_modifiers&&t.gouraud&&t.blend==SceneBlend::Ninja){
+        for(const auto& t:draw.triangles)if(t.light_category==1&&!t.after_modifiers&&t.gouraud&&t.blend==SceneBlend::Ninja&&t.material_phase==6){
             if(t.diffuse_material)++alphas[t.color>>24];
             for(const auto& v:t.vertices)check(v.light.x>=0&&v.light.x<=1.0f+1e-4f,"afterimage lit RGB outside native range");}
         check(alphas.size()==5&&alphas.count(40)&&alphas.count(200),"afterimages must draw with material alpha 200..40");
+        // Jede Stufe ist dasselbe Modell in einem anderen Pass, also dieselbe Dreieckszahl.
+        for(const auto& [alpha,count]:alphas)check(count==alphas.begin()->second,"every afterimage pass must draw the same model");
+        // objitm.c:518-529: die Objektlisten ob_hlg/ob_spc gehoeren auf halbes Licht.
+        for(const auto& t:draw.triangles)if(t.material_phase==3||t.material_phase==4)
+            check(t.light_category==1,"ob_hlg/ob_spc must draw at half light (objitm.c:518-529)");
         check(world.unbound_enemy_routines().count("bhEff135: pp->mdl[type].objP[lkono].model ohne nativen Modellbesitzer")==0,"afterimage source model unresolved");
+    }
+}
+
+// effsub2.c:623 bhEff_E00_AcidGenerator (298) — die Quelle, die 257 nachschiebt.
+// Erzeuger ist en19.c:3336 bhEne19_SetDmgEffect Zeile 5 {2, 131072, 32, 298}.
+static void acid_generator(){
+    install_group4_services();
+    EffectContext c;c.pt_flg=0x10;bool queued=false;take_effect_output();
+    // Die Erzeugerzeile: scl = 0.000015258789f * 131072, type = 32 als Zahl der Ausgaben.
+    const float scl=0.000015258789f*131072.0f;
+    const auto spawn298=[&](){
+        EffectSpawn e;e.flg=1;e.id=298;e.type=32;e.mdlver=0;e.position={3.0f,4.0f,5.0f};
+        e.scale={scl,scl,scl};e.ax=0;e.ay=0;
+        EffectSprite s;initialize_effect_sprite(s,e);return s;};
+    { // Wartezeit: ct0 = 5 und `ct0-- == 0` je Pass -> sechs Paesse ohne Ausgabe.
+        auto s=spawn298();
+        step_effect_sprite(s,c,&queued);
+        check(s.mode0==1&&s.ct0==4&&!queued&&take_effect_output().spawns.empty(),"bhEff_E00_AcidGenerator :635: ct0 = 5, erster Pass ohne Ausgabe");
+        unsigned passes=1;
+        while(s.mode0==1&&passes<20){step_effect_sprite(s,c,&queued);++passes;check(take_effect_output().spawns.empty(),"298 gibt waehrend der Wartezeit nichts aus");}
+        check(passes==6&&s.mode0==2,"bhEff_E00_AcidGenerator :639: sechs Paesse bis mode0 2");
+        // Ab mode0 2 je Pass genau zwei 257: eigener Platz und ein versetzter mit 0.4-facher Groesse.
+        recvx_core_random_seed(23);float r[3];for(auto& x:r)x=frac();recvx_core_random_seed(23);
+        step_effect_sprite(s,c,&queued);
+        auto out=take_effect_output();
+        check(out.spawns.size()==2,"bhEff_E00_AcidGenerator :663/:676: zwei 257 je Pass");
+        check(!queued,"298 zeichnet selbst nichts (kein ef_trs)");
+        const auto& a=out.spawns[0];const auto& b=out.spawns[1];
+        check(a.id==257&&a.flg==1&&a.type==0&&a.ax==0&&a.ay==0,"298 :647-:661: erster 257 differiert");
+        check(close(a.position.x,3.0f)&&close(a.position.y,4.0f)&&close(a.position.z,5.0f),"298 :652: erster 257 an der eigenen Lage");
+        check(close(a.scale.x,scl)&&close(a.scale.y,scl)&&close(a.scale.z,scl),"298 :656: erster 257 mit der eigenen Groesse");
+        check(b.id==257&&b.flg==1&&b.type==0&&b.ax==0&&b.ay==0,"298 zweiter 257 differiert");
+        // :665-:667 ein Zufallswert je Achse, Reihenfolge x, y, z.
+        check(close(b.position.x,3.0f+(0.5f*(scl*(r[0]-0.5f))))&&close(b.position.y,4.0f+(0.5f*(scl*(r[1]-0.5f))))&&close(b.position.z,5.0f+(0.5f*(scl*(r[2]-0.5f)))),"298 :665-:667: Streuung oder Zufallsreihenfolge differiert");
+        check(close(b.scale.x,0.4f*scl)&&close(b.scale.y,0.4f*scl)&&close(b.scale.z,0.4f*scl),"298 :669-:671: zweiter 257 mit 0.4-facher Groesse");
+        check(s.type==31,"298 :680: type zaehlt je Ausgabe abwaerts");
+    }
+    { // type 32 heisst 32 ausgebende Paesse; danach ist der Satz frei.
+        auto s=spawn298();
+        for(unsigned i=0;i<6;++i)step_effect_sprite(s,c,&queued);
+        take_effect_output();
+        unsigned emits=0;std::size_t works=0;
+        while(s.flg&&emits<100){step_effect_sprite(s,c,&queued);works+=take_effect_output().spawns.size();++emits;}
+        check(emits==32&&works==64&&s.type==0&&s.flg==0,"bhEff_E00_AcidGenerator :678-:686: 32 Ausgaben, dann flg 0");
+    }
+    { // :630 Der verlinkte Erzeuger mit stflg 0x1000000 haelt das ganze Werk an, auch den Zaehler.
+        RECVX_ENEMY_WORK owner{};owner.stflg=0x1000000u;
+        auto s=spawn298();s.lkwkp=&owner;
+        for(unsigned i=0;i<10;++i)step_effect_sprite(s,c,&queued);
+        check(s.mode0==0&&s.ct0==0&&take_effect_output().spawns.empty(),"298 :630: versteckter Erzeuger haelt auch den Wartezaehler an");
+        owner.stflg=0;
+        step_effect_sprite(s,c,&queued);
+        check(s.mode0==1&&s.ct0==4,"298: nach dem Freigeben laeuft die Wartezeit von vorn an");
+        // Ein Erzeuger, der mitten im Nachschieben verschwindet, gibt nichts mehr aus.
+        for(unsigned i=0;i<6;++i)step_effect_sprite(s,c,&queued);
+        check(s.mode0==2,"298: mode0 2 nach der Wartezeit");
+        take_effect_output();
+        const unsigned left=s.type;
+        owner.stflg=0x1000000u;
+        for(unsigned i=0;i<5;++i)step_effect_sprite(s,c,&queued);
+        check(s.type==left&&take_effect_output().spawns.empty(),"298: versteckter Erzeuger stoppt die Ausgabe ohne type zu verbrauchen");
+    }
+    // Ohne Link (lkwkp NULL) laeuft der Satz wie im Original (owp == NULL ist der erste Zweig).
+    {
+        auto s=spawn298();
+        for(unsigned i=0;i<7;++i)step_effect_sprite(s,c,&queued);
+        check(s.mode0==2&&take_effect_output().spawns.size()==2,"298 :630: ohne lkwkp laeuft der Satz");
     }
 }
 
@@ -1950,8 +2097,8 @@ int main(int argc,char** argv){
         _Make_SinTable();
         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
         muzzle_weapon229();flame352();effect_call_clip();
-        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();afterimage_color_contract();
-        if(argc>1){const std::filesystem::path data=argv[1];steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);afterimage_room(data);published_afterimage_models(data);}
+        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();
+        if(argc>1){const std::filesystem::path data=argv[1];steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);ntx2d_room(data);afterimage_room(data);published_afterimage_models(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}
 }

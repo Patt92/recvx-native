@@ -61,6 +61,12 @@ struct Fixture {
     unsigned effects = 0, muzzle = 0, shells = 0;
     unsigned vibrations = 0, lights = 0;
     unsigned sparks = 0; std::int32_t spark_type = -1;
+    /* Wasserzweige (weapon.c:872-958, :1035-1069). */
+    bool water_hit = false; RECVX_CB_VEC water_at{}; unsigned water_calls = 0;
+    RECVX_CB_LINE water_line{}; bool water_inside = true; unsigned water_checks = 0;
+    std::vector<RECVX_CB_EFFECT> requests;
+    struct Splash { RECVX_CB_VEC pos; std::int32_t ang, type; float sx, sy, sz; };
+    std::vector<Splash> splashes;
 
     /* Gegnertabelle: echte Works, wie sie der Besitzer haelt. */
     RECVX_ENEMY_TABLE table{};
@@ -126,6 +132,7 @@ struct Fixture {
         s.effect = [](void* p, const RECVX_CB_EFFECT* e) -> std::int32_t {
             auto* f = static_cast<Fixture*>(p);
             ++f->effects;
+            f->requests.push_back(*e);
             if (e->ef.id == 3 && e->ef.type == 0) ++f->muzzle;
             if (e->ef.id == 0 && e->ef.type == 10) ++f->shells;
             return 0;
@@ -134,6 +141,20 @@ struct Fixture {
                          std::uint32_t, std::int32_t type) {
             auto* f = static_cast<Fixture*>(p);
             ++f->sparks; f->spark_type = type;
+        };
+        s.l2_water = [](void* p, const RECVX_CB_LINE* l, RECVX_CB_VEC* hit) -> std::int32_t {
+            auto* f = static_cast<Fixture*>(p);
+            ++f->water_calls; f->water_line = *l;
+            if (!f->water_hit) return 0;
+            *hit = f->water_at; return 1;
+        };
+        s.check_water = [](void* p, const RECVX_CB_VEC*) -> std::int32_t {
+            auto* f = static_cast<Fixture*>(p);
+            ++f->water_checks; return f->water_inside ? 1 : 0;
+        };
+        s.water_splash4 = [](void* p, const RECVX_CB_VEC* pos, std::int32_t ang, std::int32_t type,
+                             float sx, float sy, float sz) {
+            static_cast<Fixture*>(p)->splashes.push_back({*pos, ang, type, sx, sy, sz});
         };
         s.weapon_se = [](void* p, const RECVX_CB_VEC*, std::int32_t se, std::int32_t) {
             static_cast<Fixture*>(p)->sounds.push_back(se);
@@ -666,6 +687,124 @@ void test_reported_gaps() {
 
 }  // namespace
 
+
+/* weapon.c:872-958 bhCheckGunAtari / :1035-1069 bhCheckKnifeAtari: Einschlag in
+ * Wasserflaechen (sys->st_flg 0x40). Vorher meldete der Kern hier nur Luecken. */
+void test_water_impact() {
+    const auto water = [](const RECVX_CB_EFFECT& e, unsigned id) { return e.ef.id == id && e.sys_ef == 1; };
+    {   /* Handfeuerwaffe ohne Gegnertreffer: ein id-15-Satz plus bhSetWaterSplash4. */
+        Fixture f;
+        f.st = 0x40; f.water_hit = true; f.water_at = {1.0f, -2.0f, -20.0f};
+        f.table.ewk_n = 0;
+        f.equip(3);
+        f.tick(true, false);
+        check(f.run_until(65, 24), "water: draw never reached act_wpn");
+        f.tick(true, true);
+        f.tick(true, true);
+        check(f.res.gun_atari == 1, "water: bhCheckGunAtari not called");
+        check(f.water_calls == 1, "water: bhCheckL2Water not called once");
+        check(f.water_line.vx != 0 || f.water_line.vy != 0 || f.water_line.vz != 0, "water: line vector is wps - gline.p, not zero");
+        unsigned n = 0; const RECVX_CB_EFFECT* hit = nullptr;
+        for (const auto& e : f.requests) if (water(e, 15)) { ++n; hit = &e; }
+        check(n == 1 && hit, "water: weapon 3 must request exactly one id-15 work");
+        check(hit->ef.flg == 1 && hit->ef.type == 2 && hit->ef.flr_no == 0 && hit->ef.mdlver == 0 && hit->ef.ay == 0 && hit->jno == 0,
+              "water: id-15 fields (flg 1, type 2, flr_no (0&3)*2, ay 0, lkono 0)");
+        check(hit->ef.px >= 0.5f && hit->ef.px <= 1.5f && hit->ef.pz >= -20.5f && hit->ef.pz <= -19.5f && hit->ef.py == -2.0f,
+              "water: id-15 position is ps +/- 0.5 in x/z, ps.y");
+        const bool small = WpnTab[3].ef_scale < 1.5f;
+        const float s0 = small ? 0.8f : 1.2f, base = small ? 0.8f : 1.0f, spread = small ? 0.2f : 0.25f;
+        check(hit->ef.sx == s0 && hit->ef.sz == s0 && hit->ef.sy >= base && hit->ef.sy <= base + spread, "water: id-15 scale by WpnTab ef_scale");
+        check(f.splashes.size() == 1, "water: bhSetWaterSplash4 not called once");
+        const auto& sp = f.splashes[0];
+        check(sp.pos.x == hit->ef.px && sp.pos.y == hit->ef.py && sp.pos.z == hit->ef.pz, "water: splash4 at &sys->ef.px");
+        check(sp.type == (small ? 0 : 1) && sp.sx == s0 && sp.sy == s0 && sp.sz == s0, "water: splash4 type/scale");
+        for (const auto& g : f.gaps) check(g.find("Wasser") == std::string::npos && g.find("L2Water") == std::string::npos, "water: gap still reported: " + g);
+    }
+    {   /* Ohne st_flg 0x40 fragt der Kern das Wasser nicht ab. */
+        Fixture f;
+        f.water_hit = true; f.table.ewk_n = 0;
+        f.equip(3);
+        f.tick(true, false);
+        check(f.run_until(65, 24), "dry: draw never reached act_wpn");
+        f.tick(true, true);
+        f.tick(true, true);
+        check(f.water_calls == 0 && f.splashes.empty(), "dry: bhCheckL2Water outside a water room");
+    }
+    {   /* Fehlprobe: kein Satz, kein Spritzer. */
+        Fixture f;
+        f.st = 0x40; f.table.ewk_n = 0;
+        f.equip(3);
+        f.tick(true, false);
+        check(f.run_until(65, 24), "miss: draw never reached act_wpn");
+        f.tick(true, true);
+        f.tick(true, true);
+        check(f.water_calls == 1 && f.splashes.empty(), "miss: splash without a water hit");
+        for (const auto& e : f.requests) check(!water(e, 15), "miss: id-15 work without a water hit");
+    }
+    {   /* Messer: zwei id-11-Saetze mit lkono 1, type 1 dann 0, ein gemeinsames ay. */
+        Fixture f;
+        f.st = 0x40; f.water_hit = true; f.water_at = {0.0f, -1.0f, -4.0f};
+        f.place_enemy(0, 0.0f, -60.0f);
+        f.place_enemy(1, 40.0f, -60.0f);
+        f.equip(2);
+        f.tick(true, false);
+        check(f.run_until(65, 24), "knife water: draw never reached act_wpn");
+        f.tick(true, true);
+        for (unsigned i = 0; i < 24 && !f.res.knife_checks; ++i) f.tick(true, true);
+        check(f.res.knife_checks > 0 && f.water_calls >= 1, "knife water: bhCheckL2Water never ran");
+        std::vector<RECVX_CB_EFFECT> w;
+        for (const auto& e : f.requests) if (water(e, 11)) w.push_back(e);
+        check(w.size() == 2 * f.water_calls, "knife water: two id-11 works per water hit");
+        check(w[0].ef.type == 1 && w[1].ef.type == 0 && w[0].jno == 1 && w[1].jno == 1, "knife water: type 1 then 0, lkono 1");
+        check(w[0].ef.sx == 2.0f && w[0].ef.sy == 2.0f && w[1].ef.sx == 1.2f && w[1].ef.sz == 1.2f, "knife water: scales 2.0 and 1.2");
+        check(w[0].ef.ay == w[1].ef.ay && w[0].ef.px == w[1].ef.px && w[0].ef.py == -1.0f, "knife water: second work keeps ay/position");
+        check(w[0].ef.px >= -0.5f && w[0].ef.px <= 0.5f && w[0].ef.pz >= -4.5f && w[0].ef.pz <= -3.5f, "knife water: ps +/- 0.5");
+        check(f.splashes.empty(), "knife water: no bhSetWaterSplash4 in the knife branch");
+    }
+}
+
+
+/* Raketenwerfer (18) und Linear Launcher (20): Abschuss player.c:5096/5113 mit bhEff130
+ * type 4/6 aus WpnEffTab[w][2]; Waffe 20 legt in bhSetGunFire (pwksub.c:3126) zusaetzlich
+ * die Funken bhEff027 ueber sys->ef an. Vorher meldete der Kern dort eine Luecke. */
+void test_launchers() {
+    for (int w : {18, 20}) {
+        Fixture f;
+        f.equip(w);
+        f.endless = true;
+        f.tick(true, false);
+        check(f.run_until(65, 40), "launcher " + std::to_string(w) + " never reached act_wpn");
+        const unsigned before = f.res.shots;
+        for (unsigned i = 0; i < 8 && f.res.shots == before; ++i) f.tick(true, true);
+        check(f.res.shots > before, "launcher " + std::to_string(w) + " did not call bhSetGunFire");
+        for (unsigned i = 0; i < 40; ++i) f.tick(true, true);
+        unsigned shells = 0, sparks27 = 0;
+        const RECVX_CB_EFFECT* spark = nullptr;
+        for (const auto& e : f.requests) {
+            if (e.ef.id == 130) { ++shells; check(e.ef.type == (w == 18 ? 4u : 6u) && e.has_offset && !e.link_player, "launcher: bhEff130 type/offset"); }
+            if (e.ef.id == 27) { ++sparks27; spark = &e; }
+        }
+        check(shells >= 1, "launcher " + std::to_string(w) + ": no bhEff130 projectile");
+        for (const auto& g : f.gaps) check(g.find("Waffe 20") == std::string::npos, "launcher: gap still reported: " + g);
+        if (w == 18) { check(sparks27 == 0, "launcher 18 must not request bhEff027"); continue; }
+        check(sparks27 >= 1 && spark, "launcher 20: bhEff027 sparks missing");
+        check(spark->sys_ef == 2 && spark->jno == 0 && !spark->link_player && spark->ef.flg == 1 && spark->ef.type == 0
+              && spark->ef.sx == 1.0f && spark->ef.sy == 1.0f && spark->ef.sz == 0.0f && spark->ef.ax == 0 && spark->ef.ay == 0,
+              "launcher 20: bhEff027 fields (pwksub.c:3129-3141)");
+        /* Die Testgelenke sind reine Verschiebungen: der Versatz bleibt (-3,0,0), die Lage
+           ist Gelenkort + wp_fps2. */
+        check(spark->has_offset && spark->offset.x == -3.0f && spark->offset.y == 0.0f && spark->offset.z == 0.0f,
+              "launcher 20: offset (-3,0,0) through owP[jno] rotation");
+        const auto& fp = WpnTab[20].wp_fps2;
+        bool at_joint = false;
+        for (unsigned n = 0; n < kNodes; ++n) {
+            const float* m = f.player().owp_mtx[n];
+            if (spark->ef.px == m[12] + fp.x && spark->ef.py == m[13] + fp.y && spark->ef.pz == m[14] + fp.z) at_joint = true;
+        }
+        check(at_joint, "launcher 20: bhEff027 position is owP[jno] * wp_fps2");
+    }
+}
+
 /* pwksub.c:3156-3240 bhSetGunFire case 21 — Doppelwaffe: der Schuss laeuft entlang der
  * Gelenkachse, prueft die Wand (bhCheckL2Wall) und legt bei einem Wandtreffer ueber
  * bhCheckWallAttrB89 Funken mit Art hiteff-4 (Waffe 21: 5-4 == 1) an. Vorher meldete der
@@ -702,6 +841,8 @@ int main() {
         test_shot_blocked_by_wall();
         test_auto_fire_branch();
         test_dual_wall_spark();
+        test_water_impact();
+        test_launchers();
         test_dual_wield();
         test_euler_order();
         test_reported_gaps();

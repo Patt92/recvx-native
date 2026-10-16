@@ -2,6 +2,7 @@
 #include "player_combat_core.h"
 #include <functional>
 #include "weapon_tables.h"
+#include "effect_sprites_internal.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -22,6 +23,11 @@ float CombatController::target_distance(NJS_POINT3 origin,NJS_POINT3 direction,f
 // (types.h:212, 0x28 Byte) layoutgleich zu den hier vorhandenen Tabellen; die
 // Tabellenansicht zeigt deshalb auf genau diese eine Tabelle, nicht auf eine
 // Kopie (pwksub.c:2748/3266 schreiben WpnEffTab).
+// bhSetEffectTb(&sys->ef, ...) der Kampfwege: die geschriebenen Felder gehen in die eine
+// gemeinsame Vorlage (effect_detail::request_template); ohne with_ax gilt deren ax.
+void sys_ef_request(EffectSpawn& spawn,bool with_ax){auto& t=effect_detail::request_template();
+    t.flg=spawn.flg;t.id=spawn.id;t.type=spawn.type;t.flr_no=spawn.flr_no;t.mdlver=spawn.mdlver;
+    t.position=spawn.position;t.scale=spawn.scale;t.ay=spawn.ay;if(with_ax)t.ax=spawn.ax;else spawn.ax=t.ax;}
 static_assert(sizeof(WPN_TAB)==sizeof(RECVX_CB_WPN_TAB)&&sizeof(WPN_TAB)==0x68,"WPN_TAB layout");
 static_assert(sizeof(EF_WORK)==sizeof(RECVX_CB_EF_WORK)&&sizeof(EF_WORK)==0x28,"EF_WORK layout");
 struct CombatOriginal {
@@ -48,6 +54,9 @@ struct CombatOriginal {
     std::function<void(int,float,float)> footstep;
     std::function<void(const RECVX_CB_LIGHT*)> light0;
     std::function<void(const RECVX_CB_VEC*,const RECVX_CB_VEC*,uint32_t,uint32_t,int)> gun_spark;
+    std::function<int(const RECVX_CB_LINE*,RECVX_CB_VEC*)> l2_water;
+    std::function<int(const RECVX_CB_VEC*)> check_water;
+    std::function<void(const RECVX_CB_VEC*,int,int,float,float,float)> water_splash4;
     explicit CombatOriginal(const PlayerAsset& player):asset(&player){
         tables.wpn=reinterpret_cast<const RECVX_CB_WPN_TAB*>(WpnTab);
         tables.eff=reinterpret_cast<RECVX_CB_EF_WORK(*)[4]>(WpnEffTab);
@@ -75,6 +84,10 @@ struct CombatOriginal {
         s.footstep=[](void* p,int32_t floor,float x,float z){auto* c=static_cast<CombatOriginal*>(p);if(c->footstep)c->footstep(floor,x,z);};
         s.light0=[](void* p,const RECVX_CB_LIGHT* l){auto* c=static_cast<CombatOriginal*>(p);if(c->light0)c->light0(l);};
         s.gun_spark=[](void* p,const RECVX_CB_VEC* pos,const RECVX_CB_VEC* vec,uint32_t c0,uint32_t c1,int32_t type){auto* c=static_cast<CombatOriginal*>(p);if(c->gun_spark)c->gun_spark(pos,vec,c0,c1,int(type));};
+        // bhCheckL2Water/bhCheckWater/bhSetWaterSplash4 der Wasserzweige (weapon.c:872/1035).
+        s.l2_water=[](void* p,const RECVX_CB_LINE* l,RECVX_CB_VEC* hit){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->l2_water?c->l2_water(l,hit):0);};
+        s.check_water=[](void* p,const RECVX_CB_VEC* pos){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->check_water?c->check_water(pos):0);};
+        s.water_splash4=[](void* p,const RECVX_CB_VEC* pos,int32_t ang,int32_t type,float sx,float sy,float sz){auto* c=static_cast<CombatOriginal*>(p);if(c->water_splash4)c->water_splash4(pos,int(ang),int(type),sx,sy,sz);};
         // GetOneObjectMotion (playpch.c:185) über die vorhandene Motionquelle.
         s.motion_angle=[](void* p,uint32_t mtn,uint32_t node,uint32_t frame,int32_t* ang)->int32_t{
             auto* c=static_cast<CombatOriginal*>(p);
@@ -86,8 +99,8 @@ struct CombatOriginal {
             const auto& keys=clip.angles[model];
             const auto& key=keys[std::min<std::size_t>(frame,keys.size()-1)];
             ang[0]=key[0];ang[1]=key[1];ang[2]=key[2];return 1;};
-        // Ungebundene Besitzer: Wasserabfragen (P03/E01), Wandzerstörung,
-        // Spritzer (bhSetGunSplash) und Vibration ohne Treiber. Sie bleiben
+        // Ungebundene Besitzer: Wandzerstörung, Spritzer (bhSetGunSplash)
+        // und Vibration ohne Treiber. Sie bleiben
         // NULL; der Kern meldet sie namentlich über `gap`.
         core=recvx_combat_create(&tables,&s);if(!core)throw std::bad_alloc();
         // Logische Knotenzahl des Körpers (ActorNodeLayout script_to_model).
@@ -137,7 +150,13 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     body_=&player;
     const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){original_.reset();weapon_=weapon;player_=inventory.player;asset_.reset();
         if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);bare_hands_=weapon?WeaponAsset::load(data_,inventory.player,0,mods_):asset_;}}
-    const bool supported=weapon_==2||weapon_==3||weapon_==4||weapon_==5||weapon_==6||weapon_==7||weapon_==8||weapon_==9||weapon_==12||weapon_==13;
+    const bool supported=weapon_==2||weapon_==3||weapon_==4||weapon_==5||weapon_==6||weapon_==7||weapon_==8||weapon_==9||weapon_==12||weapon_==13||
+        weapon_==14||weapon_==15||weapon_==16||weapon_==17|| // Granatwerfer: Abschuss player.c:4990, Geschoss bhEff130
+        weapon_==18||weapon_==20; // Raketenwerfer (bhEff130 type 4), Linear Launcher (type 6, bhEff027 pwksub.c:3126)
+    // Eine Waffe mit Angriffsflags (WpnTab[w].flg != 0; 0 = keine Waffe, 1 = Feuerzeug) ohne
+    // nativen Kampfweg ist eine Portierungsluecke: benennen statt still nichts zu tun.
+    if(!blocked&&!supported&&weapon_<23&&WpnTab[weapon_].flg&&(input.aim||input.attack))
+        unsupported_.insert("CombatController: Waffe "+std::to_string(weapon_)+" (WpnTab["+std::to_string(weapon_)+"].flg 0x"+[&]{char b[12];std::snprintf(b,sizeof b,"%x",WpnTab[weapon_].flg);return std::string(b);}()+") ohne nativen Kampfweg (weapon.c/player.c)");
     if(blocked||!supported){original_.reset();aim_={};if(blocked&&(input.aim||input.attack))inhibited_=true;return false;}
     if(inhibited_){if(input.aim||input.attack)return false;inhibited_=false;}
     if(!original_){if(!input.aim)return false;original_=std::make_shared<CombatOriginal>(player);recvx_combat_set_weapon(original_->core,int(weapon_));}
@@ -201,8 +220,18 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
         EffectSpawn spawn;spawn.flg=e->ef.flg;spawn.id=e->ef.id;spawn.type=e->ef.type;spawn.flr_no=e->ef.flr_no;spawn.mdlver=e->ef.mdlver;
         spawn.position={e->ef.px,e->ef.py,e->ef.pz};spawn.scale={e->ef.sx,e->ef.sy,e->ef.sz};spawn.ax=e->ef.ax;spawn.ay=e->ef.ay;spawn.lkono=e->jno;
         spawn.has_offset=e->has_offset!=0;spawn.offset={e->offset.x,e->offset.y,e->offset.z};
-        return world->spawn_player_effect(spawn);};
+        // sys->ef-Anforderungen schreiben die Vorlage; Modus 1 laesst deren ax stehen.
+        if(e->sys_ef)sys_ef_request(spawn,e->sys_ef==2);
+        // bhSetEffectTb(eft, &ops, pp, jno) haengt nur mit Linkzeiger am Spieler (pwksub.c:2874/2925);
+        // mit NULL (pwksub.c:2810/2919, player.c:5013 Abschuss) bleibt der Satz frei, wie im
+        // Gegnerpfad RoomWorld::gun_fire (link_player).
+        return e->link_player?world->spawn_player_effect(spawn):world->spawn_unlinked_effect(spawn);};
     engine.light0=[&](const RECVX_CB_LIGHT* l){if(world)world->set_gun_light(*l);};
+    engine.l2_water=[&](const RECVX_CB_LINE* l,RECVX_CB_VEC* hit)->int{
+        if(!world)return 0;NJS_POINT3 pt{};if(!world->l2_water({l->px,l->py,l->pz},{l->vx,l->vy,l->vz},pt))return 0;
+        *hit={pt.x,pt.y,pt.z};return 1;};
+    engine.check_water=[&](const RECVX_CB_VEC* pos)->int{float top;return world&&world->water_top({pos->x,pos->y,pos->z},top)?1:0;};
+    engine.water_splash4=[&](const RECVX_CB_VEC* pos,int ang,int type,float sx,float sy,float sz){if(world)world->water_splash4({pos->x,pos->y,pos->z},ang,type,sx,sy,sz);};
     // Kampfsicht auf den einen Spielerwork: Lage/Winkel kommen je Pass vom
     // Hostakteur und gehen danach dorthin zurück (Header Z. 25-29).
     auto& view=engine.player();
@@ -279,7 +308,9 @@ void CombatController::accumulate_aim(const RECVX_COMBAT_RESULT& r){
     aim_seen_=r;
 }
 const std::set<std::string>& CombatController::unbound_routines()const{
-    static const std::set<std::string> none;return original_?original_->unavailable:none;
+    reported_=unsupported_;
+    if(original_)reported_.insert(original_->unavailable.begin(),original_->unavailable.end());
+    return reported_;
 }
 void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld*)const{
     if(bones.empty())return;

@@ -2,22 +2,22 @@
 
 Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.
 
-Expliziter Belegumfang: **84.4 %** gewichtet, **69.9 %** voll belegt (285/408 Mechanismen; kein Gesamtfortschritt).
+Expliziter Belegumfang: **85.8 %** gewichtet, **72.5 %** voll belegt (346/477 Mechanismen; kein Gesamtfortschritt).
 
-Event-Befehle (bhScenarioJmpT): 177/223 gebunden, 29 nur konsumiert, 17 fehlen.
+Event-Befehle (bhScenarioJmpT): 188/223 gebunden, 19 nur konsumiert, 16 fehlen.
 
 | Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |
 |---|---:|---:|---:|---:|---:|
-| Gegner/KI | 26/52 | 75.0 % | 50.0 % | 26 | 0 |
-| Effekte | 161/175 | 96.0 % | 92.0 % | 14 | 0 |
-| Events/Skript | 32/41 | 89.0 % | 78.0 % | 9 | 0 |
-| Spieler/Kampf | 10/24 | 70.8 % | 41.7 % | 14 | 0 |
-| Raum/Kamera/Tür | 3/22 | 54.5 % | 13.6 % | 18 | 1 |
-| Menü/Items/Text | 30/41 | 82.9 % | 73.2 % | 8 | 3 |
-| Modelle/Animation | 5/8 | 81.2 % | 62.5 % | 3 | 0 |
+| Gegner/KI | 55/86 | 82.0 % | 64.0 % | 31 | 0 |
+| Effekte | 178/192 | 96.4 % | 92.7 % | 14 | 0 |
+| Events/Skript | 34/44 | 88.6 % | 77.3 % | 10 | 0 |
+| Spieler/Kampf | 19/35 | 77.1 % | 54.3 % | 16 | 0 |
+| Raum/Kamera/Tür | 4/23 | 56.5 % | 17.4 % | 18 | 1 |
+| Menü/Items/Text | 32/43 | 83.7 % | 74.4 % | 8 | 3 |
+| Modelle/Animation | 7/10 | 85.0 % | 70.0 % | 3 | 0 |
 | Audio | 4/20 | 60.0 % | 20.0 % | 16 | 0 |
-| Ablauf/Speichern | 14/25 | 78.0 % | 56.0 % | 11 | 0 |
-| Plattform (Host-ersetzt) | 8/17 | 73.5 % | 47.1 % | 9 | 0 |
+| Ablauf/Speichern | 13/24 | 77.1 % | 54.2 % | 11 | 0 |
+| Plattform (Host-ersetzt) | 10/19 | 76.3 % | 52.6 % | 9 | 0 |
 
 Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichheit, Originalquellen und quarantänierte Generatoren zählen nie als Portbeleg.
 
@@ -37,7 +37,7 @@ Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichhe
 - `cut.c` bhSetFixedCut (partial, Fog-Uebergabe :463-484 (ohne ef_flg-Zweig) bei Opcode 0x2a Modus 0.)
 - `door.c` bhControlDoor (partial, native/doors.cpp tick: recvx_door_step, zwei CallDoorSe-Gruppen (0xF0000 sofort, 0xF00000 erst bei status 0x20), ControlSoundTiming-Kommandos, Ende nur ueber status 0x40 aus FadeProc1 (door.c:641). spd_mde-Schleife nur DMO_SPD_1; Zeichnung Host-Renderer.)
 - `effect.c` bhControlEffect (partial, Spielerlink liest jetzt wie effect.c:803-811 pp->mlwP->owP[op->lkono].mtx aus dem zuletzt von bhCalcModel(plp) festgeschriebenen Baum (native/world.cpp RoomWorld::link_matrix, player_joint_matrices_) statt plp->mnwP[plp->mtn_no] neu abzutasten. Behebt den Absturz actor motion unavailable im Freigabebild eines Griffs. Tests: tests/native/lighter_test.cpp grab_release_links, tools/verify_enemy_ai.py rm0060-lighter-release/-death. Uebrige Effektzweige unveraendert offen.)
-- `effect.c` bhInitEffect (partial, Eigenstaendige ef_info-Auswertung der vier Modellblöcke, PVP an Offset 8448 und 40 gemeinsame Texturen auf dem bestehenden nativen Assetbesitzer positiv geprueft; kein Generator. Vollstaendige Modellwork-Initialisierung fuer andere Effekte bleibt offen. work/native_port_E03_lighter.result.md)
+- `effect.c` bhDrawTrsEffect3D (partial, Eigenstaendiger nativer Eff009-Zeichenweg: Hand-/Objektanker, Billboard bzw. verknuepfte Matrix, unveraendertes Atlasalpha, Ninja-Blendpaar, Point/Linear je Draw und Tiefe positiv geprueft. Andere Effekte/Drawgates/Linktyp 5 bleiben offen. work/native_port_E03_lighter.result.md | Rueckseitentor flg 0x20000 portiert: njCalcPoint + njProjectScreen der ersten drei Eckpunkte, njGetPlaneNormal2, njUnitVector, vec.z < 0 -> stflg 0x10 und nicht zeichnen. Das Bit merkt der const-Zeichenpass und bhControlEffect traegt es im naechsten Bild ein; einziger Originalleser ist bhDrawSmallScreenRenderTexture (screen.c:943, offen). Texturwahl/Blendpaar/Billboard waren schon gebunden. native/effect_sprites.cpp append_effect_sprite; Tests group7_backface_and_eyes und eye_lights (RM_1002, Tor schliesst aus Kamera 2))
 
 ## Unbestätigte historische Ledger-Einträge
 

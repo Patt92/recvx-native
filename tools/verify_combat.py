@@ -92,6 +92,11 @@ def check_unit(build):
                         '-Wno-unused-parameter', *includes,
                         '-c', str(NATIVE / f'{name}.c'), '-o', str(obj)], check=True)
         objects.append(str(obj))
+    # rand() der Wasserzweige/1-aus-30: der prozessweite EE-Generator (core_random).
+    obj = out / 'core_random.o'
+    subprocess.run(['clang++', '-std=c++20', '-O1', '-g', *includes,
+                    '-c', str(NATIVE / 'core_random.cpp'), '-o', str(obj)], check=True)
+    objects.append(str(obj))
     binary = out / 'combat_state_test'
     subprocess.run(['clang++', '-std=c++20', '-O1', '-g', *includes, '-o', str(binary),
                     str(ROOT / 'tests/native/combat_state_test.cpp'), *objects], check=True)

@@ -4,7 +4,6 @@
 #include "asset_io.h"
 #include "morph.h"
 #include <algorithm>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -313,9 +312,9 @@ void PlayerAsset::locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t&
         actor.position.x-=step*njSin(actor.yaw);actor.position.z-=step*njCos(actor.yaw);}
     frame=(frame+65536)%(std::int64_t(motion_frames(motion))*65536);
 }
-Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param,const MorphSource* morph) const {
+Scene PlayerAsset::sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param,const MorphSource* morph,const std::vector<std::uint8_t>* live_model) const {
     if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");
-    return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out,overrides,face_param,morph);
+    return sample_clip(*motions_.at(motion),frame_q16,position,yaw,{},matrices_out,overrides,face_param,morph,live_model);
 }
 std::vector<ModelPose> sample_motion_pose(const MotionClip& clip,std::int64_t frame_q16,const std::vector<ModelPose>& rest,const std::vector<unsigned>& nodes){
     if(!clip.frames||clip.positions.size()!=clip.angles.size())throw std::runtime_error("invalid actor motion channels");
@@ -353,13 +352,13 @@ std::vector<BoneMatrix> PlayerAsset::pose_clip(const MotionClip& clip,std::int64
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
     const auto matrices_=matrices(local_pose_clip(clip,frame_q16,nodes,overrides),position,yaw);std::vector<BoneMatrix> result;for(const auto& matrix:matrices_){BoneMatrix bone;std::copy_n(matrix.value,16,bone.value);result.push_back(bone);}return result;
 }
-Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param,const MorphSource* morph) const {
+Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position,Angle yaw,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const FaceParameter* face_param,const MorphSource* morph,const std::vector<std::uint8_t>* live_model) const {
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("nonfinite actor position");
     ModelGeometryOptions geometry;geometry.pose=local_pose_clip(clip,frame_q16,nodes,overrides);
     if(morph)geometry.morph=*morph;
     njTranslate(&geometry.transform,position.x,position.y,position.z);njRotateY(&geometry.transform,yaw);
     auto full=matrices(geometry.pose,position,yaw);
-    return render_pose(std::move(geometry),std::move(full),matrices_out,face_param);
+    return render_pose(std::move(geometry),std::move(full),matrices_out,face_param,live_model);
 }
 std::vector<std::uint8_t> PlayerAsset::live_stream()const{
     std::vector<std::uint8_t> out=model_;
@@ -382,6 +381,37 @@ Scene PlayerAsset::sample_work(const std::vector<ModelPose>& pose,const std::vec
         for(unsigned k=0;k<16;++k){if(!std::isfinite(work[i].value[k]))throw std::runtime_error("nonfinite native actor work matrix");full[i].value[k]=geometry.world_matrices[i][k]=work[i].value[k];}
     }
     return render_pose(std::move(geometry),std::move(full),matrices_out,face_param,live_model);
+}
+Scene PlayerAsset::sample_tree(const std::vector<ModelPose>& pose,const std::vector<std::uint32_t>& flags,const std::vector<std::uint8_t>* live_model)const{
+    if(pose.size()!=bones()||flags.size()!=bones())throw std::runtime_error("local object tree differs from model");
+    ModelGeometryOptions geometry;geometry.evalflags=flags;
+    // Anders als bhCalcTree zeichnet njCnkEasyDrawObject mit evalflags 1/2/4/0x20.
+    // Der Decoder liest den bestehenden Baum direkt; keine Skin-Verformung aus owP.
+    auto encoded=live_model?*live_model:model_;
+    BinaryView view(encoded);const auto base=view.u16(4);const auto objects=view.relative(base,view.u32(12),bones()*52);
+    auto put=[&](std::size_t at,const auto& value){std::memcpy(encoded.data()+at,&value,sizeof value);};
+    for(std::size_t n=0;n<bones();++n){
+        const auto at=objects+n*52;const auto& p=pose[n];
+        put(at+8,p.position.x);put(at+12,p.position.y);put(at+16,p.position.z);
+        for(unsigned axis=0;axis<3;++axis){const std::int32_t angle=p.angles[axis];put(at+20+axis*4,angle);}
+    }
+    // npRetSkinConvert (njplus.c:1309-1311) hebt die Translation in den
+    // Einflussknoten mit den AKTUELLEN objP-Positionen auf, ohne Rotationen.
+    // Ohne Live-Strom liegen die bei npSkinConvert vorbereiteten Werte in skin_.
+    if(!skin_.empty()){
+        const auto translations=matrices(pose,{},0,true);
+        for(const auto& mesh:skin_){
+            const auto mdl=view.relative(base,view.u32(objects+mesh.object*52+4),24),chunk=view.relative(base,view.u32(mdl),64);
+            for(std::size_t i=0;i<mesh.weights.size();++i){
+                const auto influence=mesh.weights[i]>>24;const auto at=chunk+64+i*32;
+                for(unsigned axis=0;axis<3;++axis){const auto k=12+axis;
+                    const float converted=live_model?view.f32(at+axis*4):(&mesh.local_vertices[i].x)[axis];
+                    const float value=converted+(translations[influence].value[k]-translations[mesh.object].value[k]);
+                    put(at+axis*4,value);}
+            }
+        }
+    }
+    return decode_model_asset(encoded,0,0,geometry);
 }
 Scene PlayerAsset::sample_object_work(unsigned object,const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& work,const std::vector<std::uint32_t>& flags,const std::vector<std::uint8_t>* live_model,bool skin_fm)const{
     if(object>=bones()||pose.size()!=bones()||work.size()!=bones()||flags.size()!=bones())throw std::runtime_error("snapshot object lacks committed model work");
@@ -471,6 +501,7 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
     return scene;
 }
 void append_actor(Scene& stage,const Scene& actor,std::size_t texture_base) {
+    for(auto write:actor.ambient_writes){write.triangle+=stage.triangles.size();write.camera_mask=false;stage.ambient_writes.push_back(write);}
     if(texture_base>std::numeric_limits<std::uint16_t>::max())throw std::runtime_error("texture offset exceeds renderer range");
     for(auto triangle:actor.triangles) {
         if(triangle.textured&&texture_base+triangle.texture>=stage.textures.size())throw std::runtime_error("actor texture outside scene table: index "+std::to_string(triangle.texture)+", base "+std::to_string(texture_base)+", count "+std::to_string(stage.textures.size()));
@@ -490,6 +521,8 @@ void PlayerAsset::load_models(const std::vector<std::uint8_t>& data,std::size_t 
     std::vector<std::vector<std::uint8_t>> bundles(records.size());std::size_t p=morph_end;
     for(std::size_t i=0;i<records.size();++i){if(!records[i].textured)continue;if(p+4>data.size())break;auto size=file.u32(p);p+=4;if(size&0x80000000u){p=(p+31)&~std::size_t(31);size&=0x7fffffffu;}if(size>data.size()-p)break;bundles[i]=slice(data,p,size);p+=size;}
     models_.resize(records.size()-1);
+    // mdl[k] mit k >= 1: 0 = Satz gelesen, 1 = Satz liess sich nicht lesen.
+    model_failed_.assign(records.size()-1,0);
     for(std::size_t i=1;i<records.size();++i){const auto& r=records[i];if(BinaryView(r.mdl).u16(6)==0)continue;
         std::vector<std::uint8_t> out(4);auto put=[&](std::uint32_t v){for(int k=0;k<4;++k)out.push_back(std::uint8_t(v>>(8*k)));};
         auto append=[&](const std::vector<std::uint8_t>& block){put(std::uint32_t(block.size()));out.insert(out.end(),block.begin(),block.end());};
@@ -498,7 +531,7 @@ void PlayerAsset::load_models(const std::vector<std::uint8_t>& data,std::size_t 
         put(8);put(0);put(0xffffffffu);   // one empty motion slot
         put(4);put(0xffffffffu);          // no translation curves
         put(std::uint32_t(bundles[i].size()));out.insert(out.end(),bundles[i].begin(),bundles[i].end());
-        try{models_[i-1]=std::make_shared<PlayerAsset>(out);}catch(const std::exception&){models_[i-1].reset();}}
+        try{models_[i-1]=std::make_shared<PlayerAsset>(out);}catch(const std::exception&){models_[i-1].reset();model_failed_[i-1]=1;}}
 }
 Scene PlayerAsset::sample_rest(const NJS_MATRIX& root,const std::vector<std::array<std::int32_t,2>>& angles)const{
     MotionClip rest;rest.frames=1;for(std::size_t i=0;i<bind_pose_.size();++i){const auto& node=bind_pose_[i];auto a=node.angles;if(i<angles.size()){a[0]=angles[i][0];a[1]=angles[i][1];}rest.positions.push_back({node.position});rest.angles.push_back({a});}

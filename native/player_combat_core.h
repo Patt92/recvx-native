@@ -204,6 +204,10 @@ typedef struct {
     int32_t has_offset; RECVX_CB_VEC offset;
     int32_t link_player; int32_t jno;
     int32_t has_matrix; float matrix[16];
+    /* Anforderung ueber die gemeinsame Vorlage sys->ef: 0 nein (Tabellenarbeit), 1 alle
+       Felder ausser ax (weapon.c:872-958/1035-1069 Wasserzweige schreiben ax nicht, es
+       bleibt der Vorlagenwert), 2 alle Felder (pwksub.c:3126 Waffe 20). */
+    int32_t sys_ef;
 } RECVX_CB_EFFECT;
 
 /* rom->lgtp[0] durch bhSetGunFire (pwksub.c:2684-2733). */

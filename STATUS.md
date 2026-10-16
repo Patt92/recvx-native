@@ -317,7 +317,199 @@ die Schlussmeldung 158 schließt stumm (message.c), dann SE 9 (SpriteUV :2940); 
 grün. CTest 100/101; `effect_room_sprites` auf HEAD-Worktree ebenso rot.
 `verify_typewriter_save` auf HEAD-Worktree ebenso rot (Titel-LOAD-Replay ohne Kartenschritt).
 Dev-App per `./build.sh` aktualisiert (23:10); kein Paket ersetzt.
+Gegnerpaket 2026-10-15 (Arbeitsbaum): `rySetShadow`/`bhEff304` gebunden (Modifier-Schatten ueber
+`sys->efm[1]`; drei Gelenke, Lage/ay/sx/sz/Sichtgate nach effsub3.c:1683) und EN29 Tentakel
+portiert (`native/enemies/en29.c`+`en29.h`: Mode0/BrainType, `En29ActTbl[40]` im EA_WORK-Layout,
+Mv00-04/20 mit 74498/74499, TargetAnalyze, DmgCheck, AttackHitCheck gegen `plp->watr`,
+PlySetDamage/PlyMoveMain/PlyAction*, SetDmgEffect, fuenf Schadenskapsel-Kinder als Ring).
+Tests `effect_ry_shadow` (RM_5840) und `enemy_en29_world` (RM_9000, Angriffskette bis
+PlyMoveMain); CTest 102/103 (47 fremd). Lueckenmessung alle 205 Raeume: 31/44 -> **26/37**
+(`build/validation/enemy_scan_20261014/run15`). Ledger und
+`work/native_port_enemy_gap_scan.result.md` (Abschnitt 12) fortgeschrieben.
+**Naechster Posten:** EN17 (Monster Steve; Vertrag en17.h und en54/en55 liegen fertig),
+EN17 Monster Steve inklusive zwei Kettenwerken (Arme) ist portiert (`native/enemies/en17.c`);
+damit laufen auch die gepanzerten Ritter EN54/EN55 (beide jetzt in Build und Dispatch). Test
+`enemy_en17_world` (RM_9280); CTest 103/104 (47 fremd). Messung: 26/37 -> **25/34**
+(`run16`); `bhEne17`/`54`/`55` aus RM_9280 weg. Offen und benannt: Partikel `bhEff_SetPtcl*`,
+Nachbild 364, `rom->lgtp[2]`, Spielerblut. [Bericht](work/native_port_enemy_gap_scan.result.md)
+Abschnitt 13. **Naechster Posten:** das `sys->wt_*`-Wassertiefenfeld (`bhObj005`) fuer `bhEff108`
+(4 Raeume).
+Wasserflaeche `bhObj005` (`native/world_water.cpp`: Hoehenkarte `sys->wt_*`, Eckpunkt-y/Normalen
+nach den ELF-geprueften Asm-Bloecken und `VU0_WAVE_INIT/CALC`, 4x4-Kachel-UV ueber `npSetOffsetUV2`,
+Abklingen) und `bhEff108` (Wasserringe) sind portiert; Zeichenpfad ueber
+`ModelGeometryOptions.local_vertices/local_normals/uv_*`. Befund: `sys->st_flg 0x40` setzte nativ
+nie jemand, alle wassergebundenen Pfade (Zombie-Wassercheck, Spritzer, Wasserschritte) waren in den
+13 Wasserraeumen stumm; EN01 `bhCheckWater` jetzt gebunden. Test `object_water_wave`
+(RM_3060/3210/7060/9130); CTest 104/105 (47 fremd). Messung: 25/34 -> **32/42** (`run17`):
+`bhEff108` (4) weg, neu die eine belegte Original-UB "Nachbarzelle vor `wt_wvp`" (Randeckpunkte
+x/z = 0) in 12 Raeumen. [Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 14.
+**Naechster Posten:** `bhEne03` (RM_6090/7080/7250), danach EN53 `child_ambient`. **Kein Commit/Push.**
+Schwarze Witwe `bhEne03` (`native/enemies/en03.c`, rund 4100 Zeilen) ist portiert und im Dispatch
+(`jump[3]`): Init samt acht `bhEne03s`-Beinkindern und fuenfzehn EN24-Kindern, verstecktem
+Anfuehrerwork, Schatten 258; Brain BR00-02, Move MV00-19, Nage NG00/01, Damage DG00-12, Die
+DD00-05, CollisionWalls/BoxEdge2/Line/Line2, DiveSpace, DamageInit, CheckJumpSpace, PlayerControl,
+CallSE, Acid, HitMark. Befunde: `CheckClimbWall`/`CheckClimbDownWall`/`AvoidWall` sind im Original
+parameterlos und geben 0 — die Zweige `mode2 6/7/8` sind damit unerreichbar (Originalverhalten).
+Ein absichtlich leerer MDL-Record **innerhalb** eines Modellsatzes ist im Original ein ML_WORK mit
+`obj_num 0`; `load_models`/`create_enemy_child` unterscheiden ihn jetzt von einem gescheiterten
+Lesevorgang (`model_failed`). `plp->dvx/dvy/dvz` hat keinen verbrauchenden Spielerbesitzer (Dienst
+meldet es); `EXP0_INT(pno,980)` schreibt im Original hinter den Kindblock (nicht nachgebildet),
+`EXP0_BYTE(...,12/14/15)` bleibt als `recvx_en03s_leg_mark` erhalten. Test `enemy_en03_world`
+(RM_6090; Init, Kinder, Anfuehrer, MV00-Zweig nach 96 Passen, Gelenkmatrix weicht von der Bind-Pose
+ab, GoAHead bewegt, Gegenprobe ohne Gegnerpass); CTest 105/106 (47 fremd). Messung: 32/42 -> **30/40**
+(`run18`); `bhEne03` (3) weg, neu die eine, einmalige Spielerlookup-Meldung nach dem Griffende in
+RM_7250. [Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 15.
+Nosferatu `bhEne15` (`native/enemies/en15.c`, `jump[15]`) ist portiert: Bewegung, drei Hiebe
+(Fluegelquader `njCollisionCheckBC2`, Kapsel), Spritzer, Wurf, Schaden/Kerntreffer, Tod, alle acht
+Spielerfuehrungen und das Gift 397 (`bhEff_E15_Poison`). Mechanismusweite Befunde:
+`bhSetMotion(plp)` aus dem Gegnerpass (`player_set_motion_now`), Rueckweg fuer `plp->spd`
+(`take_player_speed`), Giftbits `stflg 0x80000/0x200000` erreichen jetzt das Inventar (damit
+vergiftet auch die Saeure 256 wie im Original), Effektsaetze tragen `exp0 = epw`. Test
+`enemy_en15_world` (RM_5800: Wurfkette, Sturz ueber den Plattformrand, Gift); CTest 106/107
+(47 fremd). Messung: 30/40 -> **30/38** (`run19`), `bhEne15` (2) weg.
+[Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 16.
+EN53 `child_ambient` ist am vorhandenen Modellbesitzer gebunden: je `mbp[k]` ein Live-Strom,
+Patch nur auf Ambient-Gruen, geordnete Materialweitergabe und Multi-Lichtauswertung.
+`enemy_en53_world` prueft drei Originalraeume, Puls, diagnostischen Tod, Patchgrenzen und den
+produktiven Zeichen-/Lichtpfad; neun gezielte Tests gruen. Start.command-Dev-App neu gebaut,
+arm64/Signatur geprueft; RM_5800/6040/6100 bei 1/8/30/60/600 Bildern ohne Enemy gaps und
+Posenabbruch. Kein neuer Gesamtscan; Kampf/Fensterabnahme offen.
+[EN53-Bericht](work/enemies/EN053.result.md), Scanbericht Abschnitt 17.
+`bhSetRapEff 310` erledigt (2026-10-16): die ganze Effektanlage des Tyrant laeuft nativ auf dem
+vorhandenen `eff[512]`-Satz. Neu von Hand portiert: 310 `bhEff30a` Kamerawackel, 349 Rueckruf,
+308 `bhSetEffSpark` (eigene Tabelle `Eff308Prm[2]`, `gnd_hgh` aus `bhGetGroundPosition`) in
+`native/effect_rap_camera.cpp`; 307 Klauenflaeche + 312 gespiegelte Klaue in
+`native/effect_rap_claw.cpp`; 309/311 Blutstrahlen in `native/effect_rap_blood.cpp`; 305 Staub +
+306 Rauch in `native/effect_eff30x.cpp`. Kamera/Licht ueber die Haken `camera_offset_set/add` und
+`spark_light`, Bereichsueberschreitungen bleiben benannte Luecken. Tests `effect_rap_camera`,
+`effect_rap_claw`, `effect_rap_blood`, `effect_eff30x` und `enemy_en19_world` gruen
+(RM_5840: `310=1 349=0 312=3`, Typ 2 hat kein 349). Headless 600 Bilder: RM_5010 **+310/349**,
+RM_5840 **+305/307/309/310/312**, Kamerapose und Tyrant-Zustand vorher/nachher gleich, keine
+Effektluecke. Tabellen byteweise am ELF belegt (u. a. `Tex5Buv[12]` liest Sprungtabellenworte =
+Denormale ~3.4e-39, nativ `{0,0,0,0}`). Offen: `bhEff298`/`bhEff303` unportiert, `bhEne19`
+Mode0-Index 4 (im Original NULL), kein natuerlicher Durchspielnachweis (Spieler stirbt im Lauf).
+[EN19-Bericht](work/enemies/EN019.result.md). **Kein Commit/Push.**
+
+**`effect_room_sprites` wieder grün (2026-10-16), zwei vorbestehende Befunde geklaert:** (1) seit
+`7d1f366` meldet `step_eff219` die Kameraluecke bewusst nicht mehr, weil `room.c:33`
+`bhInitCamera` das ganze `cam`-Objekt beim Raumladen nullt und `game.c:50` vor `:58` laeuft – die
+Box liegt im ersten Pass am Ursprung; drei veraltete Pruefungen nachgezogen. (2) Der danach
+sichtbare Nachbildfehler stammt aus `f7f6c67` und ist **gemessen** eingegrenzt (`7b81215` gruen,
+`7d1f366` + 219-Korrektur gruen, erst `f7f6c67` rot): die fuenf Nachbildalphas sind korrekt
+(je 2704 Dreiecke, Materialphase 6), aber `f7f6c67` gibt Objektlistenwerken
+(`kind==2 && object_list>=2`) `light_category = 1` – **belegt richtig**, denn `objitm.c:518-529`
+zeichnet `ob_hlg`/`ob_spc` nach `bhSetHalfLight()` mit `amb_chr`. Zu grob war der Test; die
+Alphapruefung laeuft jetzt auf `material_phase == 6`, dazu gleiche Dreieckszahl je Stufe und eine
+ausdrueckliche Pruefung, dass Phase 3/4 auf halbem Licht liegt. Gegenprobe mit abgeschaltetem
+Alphaschreiben schlaegt fehl. **Voller CTest 112/112 gruen.**
+Scanbericht Abschnitt 18. **Kein Commit/Push.**
+
+**`bhEff298`/`bhEff303` portiert (2026-10-16), die EN19-Effektkette ist damit vollstaendig:**
+298 `bhEff_E00_AcidGenerator` (effsub2.c:623) in `native/effect_sprite_procedures.cpp`, 303
+Blutfleck (effsub3.c:1507) in `native/effect_rap_blood.cpp`; `enemy_en19_world` laesst **keine**
+Effektluecke mehr zu. Zwei Besitzerfragen mitgeklaert: `sys->bl_ct` liegt jetzt bei
+`effect_blood_counter()` (ein Zaehler fuer Partikelpfad und bhEff301/303, Schnappschuss
+erhalten), und `RoomWorld::EnemyCallbackFrame` bindet im Effektpass Weltzeiger und
+EN19-Dienste, weil `bhEff349` dort Gegnercode ausfuehrt (`bhEne19_TyBloodSet` ruft
+`bhGetGroundPosition`/`objP[18]`/`bhSetEffectTb`) — **ohne den Rahmen stuerzt der Weltest ab**.
+Belegte Eigenheiten: 303 zaehlt `bl_ct` erst und nutzt es dann (umgekehrt zu bhClrEff_RY/301),
+`sy` waechst gegen `szb` statt `syb`, `flg = 0x200001` ist eine Zuweisung; 298 haelt bei
+`stflg 0x1000000` des Erzeugers auch den Wartezaehler an. Voller CTest **112/112** gruen,
+vier Gegenproben greifen; RM_5010/5840/3230 headless je 600 Bilder mit identischen Satz-IDs,
+Kamerapose, HP und Motion (kein natuerlicher Lauf erreicht die beiden Saetze).
+Gemessen offen: RM_5010/3230 halten den Tyrant in `mode0 5`, RM_5840 ist Typ 2 ohne 349,
+RM_1122 nicht im Kampf; der 303-Nachweis laeuft ueber das gekennzeichnete `status`-Bit, und der
+Erzeugerzweig von 298 braucht einen Treffer mit Waffe 15 (`comb_wep` aus en03_lib.c:1314).
+Scanbericht Abschnitt 19, [EN19-Bericht](work/enemies/EN019.result.md). **Kein Commit/Push.**
+
+**Ledgerbereinigung (2026-10-16):** `docs/port_ledger.tsv` hatte zehn doppelte Schluessel, und
+`tools/port_check.py` wertete still die jeweils letzte Zeile. Drei verfaelschten den Bericht:
+`rySetShadow` (veraltetes `missing` ueberdeckte den belegten Port), `bhEff219` (`partial`
+ueberdeckte `done`) und `bhDrawTrsEffect3D` (eine falsch einsortierte `eff[-1]`-Notiz hob den
+Zeichenpass auf `done`; jetzt wieder `partial`, die Notiz steht bei `bhSetEffect`). Alle zehn
+zusammengefuehrt, und `port_check.py` lehnt doppelte Schluessel jetzt ab. `rySetShadow`/`bhEff304`
+gegen effsub3.c:1640/1683 geprueft (Gegenprobe Vorzeichen `ay` greift) -> `done`. `bhEff219`
+Bildabnahme im Schneehof RM_5840 (natuerlicher Lauf, einzige Flockenquelle) -> `done`; in RM_9090
+schaltet das Raumskript alle drei Boxen per `0x43` aus, das leere Bild dort ist Originalverhalten
+(Laufzeitspur `build/validation/snow219_20261016/`). Effekte jetzt 176/190, kein offener Posten.
+CTest 112/112. **Kein Commit/Push.**
+
+**Granatwerfer und der 298-Erzeugerzweig (2026-10-16):** Waffe 15 ist der Saeure-Granatwerfer
+(sub1.c:4489-4492). Der Erzeugerzweig war nicht erreichbar, weil `CombatController` die Waffen
+14..17 still abwies (`return false` ohne Meldung). Jetzt: nicht freigegebene Waffen melden
+`Combat gaps` (auch in der Runtime-Ausgabe); der Abschuss player.c:4990-5120 ist im Kern portiert
+(vorher benannte Luecke), das Geschoss `bhEff130` (effsub1.c:9001, alle Typen) in
+`native/effect_eff130.cpp`, `bhCheckFlyAtari`/`bhSetBowDamage` in `native/weapon_fly.c`; Waffen
+14..17 freigegeben. `enemy_en19_world` belegt die **ganze Kette ueber einen echten Treffer**:
+Saeureschuss -> Geschoss -> `bhCheckFlyAtari` (wpnr_no 15) -> `comb_wep 15` -> 298 -> 257
+(Tyrant-HP 900 -> 860). Mitgeklaert: `bhEff019`/`bhEff130` schreiben `rom->lgtp[0]` ueber einen
+Lichtbesitzer (`room_light0`, bhEff019 jetzt `done`); der Spielerkampf haengte Effekte aus
+`bhSetEffectTb(..., NULL, ...)` (pwksub.c:2810/2919) faelschlich an den Spieler — `link_player`
+entscheidet jetzt wie im Gegnerpfad. Tests `effect_eff130` (neu), `enemy_en19_world`,
+`effect_room_sprites`; Gegenproben greifen; nach erzwungenem Neubau **CTest 113/113**,
+`verify_combat` gruen, RM_5010/5840 vorher/nachher identisch. Offen: `sys->ef_ntx2d`,
+`bhCheckL2Water` (beide inzwischen portiert, s. u.), Waffen 18/20, Mündungsrauch nicht bildlich abgenommen.
 **Kein Commit/Push.**
+
+**Zwei Fremdbefunde geprueft und behoben (2026-10-16):** (1) `bhLoadWork` 0x65 nahm fuer alle Arten
+Byte 3 als Knoten; das Original setzt ihn fuer Spieler/Item/Effekt auf 0 (event.c:12733/12785/12799).
+Reale Folge in RM_4010/4011/8010: `65 03 03 01` + Unterbefehl 18 drehte Item 3 um Knoten 1 statt um die
+Wurzel (anderer Drehpunkt). Korrigiert in `native/world.cpp`; `script_motion` spielt die echten
+Befehlsfolgen der drei Raeume ab (vorher rot gemessen) plus Gegenfaelle Spieler/Effekt/Objekt. `bhLoadWorkEx`
+0xB5 (gleiche Regel, bhEtask) ist weiterhin nicht portiert und jetzt als `missing` gefuehrt. (2) Das
+Computer-Figurenfenster tastete eine Motionpose neu ab; das Original zeichnet den vorhandenen lokalen
+objP-Baum nach npRetSkinConvert und nullt objP[1].ang dauerhaft (sp_evt.c:1478-1500). Neu
+`PlayerAsset::sample_tree` (direkter Baum-Zeichenweg mit npRetSkinConvert-Translationen),
+`computer_character` liest enemy_obj/evalflags/live_stream bzw. committed Pose + node_overrides und
+schreibt mtn_no/frm_no/px..az ans Gegnerwerk. Betroffen nur Skript 3 (Albinoid-Datenbank); Scanner 4-6
+nutzen das Fenster nicht. Tests actor/computer_terminal/script_motion, Gegenproben rot, **CTest 113/113**,
+`verify_computer` gruen. **Kein Commit/Push.**
+
+**`bhLoadWorkEx` 0xB5 portiert (2026-10-16):** derselbe Auswahlzweig wie 0x65, Ziel `bhEtask[0]`
+(Task-Ebene 0) statt des laufenden Tasks; Knotenregel identisch. Test `script_motion` (Zielkontext
+messbar getrennt, Gegenprobe rot). Fall 0 teilt weiter die bekannte Luecke mit `bhLoadWork`.
+**Baufalle gefunden:** `./build.sh` ohne `--test` konfiguriert `BUILD_TESTING=OFF`; danach sind alle
+Testziele im Makefile leer (`make: Nothing to be done`, rc 0) und ein Testlauf trifft das alte Binary.
+Ein vorheriger "gruener" Lauf von 0xB5 war dadurch ungueltig; nach `cmake -DBUILD_TESTING=ON` neu gebaut
+und mit `strings` am Binary belegt. Vor jedem Testlauf nach build.sh: Cache pruefen oder
+`./build.sh --test`. **Kein Commit/Push.**
+
+**Granatwerfer-Rest (2026-10-16):** (1) **Kein Nachladen im Original** — `bhSearchBullet` (sub1.c:8907)
+laedt nur Combi-Zeilen mit Flag `0xF000`; alle Granatenzeilen tragen `0x4/0x5`, nur Bogenmunition `0xF005`.
+Das zuvor hier vermutete "Nachladen mit Munitionswechsel" ist kein Portposten; der Port prueft dasselbe
+Tor. Festgenagelt in `ammunition` (leerer Werfer laedt/feuert nicht, Armbrust laedt). (2) **`sys->ef_ntx2d`
+portiert:** `bhEff130` type 3 reiht den Schirmsatz je Pass ein (`ntx2d_queued`), `RoomWorld::draw_ntx2d_effects`
+= effect.c:905 `bhDrawNtxEffect2D` -> `njDrawPolygon` (Alpha `col>>25`/128 unter 8/6) zeichnet ihn im
+Runtime-Zeichenpass vor HUD und Fade. Tests `effect_eff130` (Eintrag erst ab ct0 > 7, Farben exakt) und
+`effect_room_sprites ntx2d_room` (RM_5840, Pixelnachweis ueber die ganze Leinwand, Tore pt_flg/stflg);
+zwei Gegenproben rot. `./build.sh --test`: **CTest 113/113**, Dev-App 16:58. **Kein Commit/Push.**
+
+**Wassereinschlag portiert (2026-10-16):** `bhCheckL2Water` (hitchk.c:5561) = `RoomWorld::l2_water` auf
+denselben Flaechen/derselben Reihenfolge wie `bhCheckWater`; `bhSetWaterSplash4` (pwksub.c:2643) =
+`effect_detail::water_splash4` (im Effektpass ueber `submit_template`, sonst direkt). Gebunden und damit
+geschlossen: Kampfkern Schuss (weapon.c:872-958, id 15 + Splash4, Waffe 11 mit 32 Saetzen) und Messer
+(:1035-1069, zwei id-11-Saetze), `bhEff130`, EN01 `water_line` (4 Stellen), T3 `water_line`. Mitbehoben:
+T3 uebergab einen **Endpunkt** statt des Vektors (0,20,0) (zonzon.c:921); der Kampfkern zog `rand()` aus der
+libc statt aus dem EE-Generator (auch player.c:4950). `RECVX_CB_EFFECT.sys_ef_keep_ax`: Wasserzweige
+schreiben `sys->ef`, ax bleibt Vorlagenwert. Tests `object_water_wave` (RM_3060/3210/7060/9130 echte
+Flaechen) und `combat_player_state test_water_impact`; vier Gegenproben rot. `./build.sh --test`:
+**CTest 113/113**, `verify_combat` gruen, Dev-App 18:56. Nicht belegt: Waffe 11 (32 Saetze) nur im Code,
+kein Bild-/Durchspielnachweis im Wasserraum. Befund: Skriptbefehl 0x7c aendert nur die Event-Flaechenliste,
+nicht `floor_sounds_` (Quelle von bhCheckWater/L2Water) — moeglicher zweiter Besitzer, ungeprueft.
+**Kein Commit/Push.**
+
+**Bodenflaechentabelle rom->flrp vereinheitlicht (2026-10-16):** Der 0x7c-Befund war echt. `RoomWorld` hielt
+drei Kopien (`floor_sounds_`, `enemy_areas_`, `effect_water_room_`); 0x7c (bhFlrAtariSet2) erreichte keine,
+0x0c nicht die Effekt-/Gegnerboden-Kopie (bhCheckFloorEnemy, Effektboden). Jetzt eine Tabelle
+`room_floors_`, `enemy_areas()` als Sicht, 0x7c an die Welt weitergeleitet. Realfall **RM_0070**: das
+Init-Skript setzt bei Flag 1/0x74 den Bodenklang von Flaeche 2 auf 2 — vorher blieb nativ Klang 1.
+Ebenso RM_4020 (Flaeche 2 -> Klang 3, nicht einzeln geprueft). Test `world_floor_table` (neu), zwei
+Gegenproben rot. `./build.sh --test`: **CTest 114/114**, Dev-App aktualisiert. Weiter getrennt: die
+Eventsicht `EventVm::floors_` (beide Schreiber spiegeln jetzt), `activate_enemy_spawn` ignoriert sys->mflrp
+(ungeprueft). **Kein Commit/Push.**
+
+**Naechster Posten:** Waffen 18/20 im CombatController (bhEff130 type 4/6 sind nur im Komponententest
+belegt). **Kein Commit/Push.**
 
 ## Gezielter Zugang zu bisherigen Befunden
 

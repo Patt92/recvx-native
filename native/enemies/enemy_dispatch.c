@@ -23,10 +23,16 @@
 #include "en12.h"
 #include "en13.h"
 #include "en23.h"
+#include "en03.h"
+#include "en15.h"
 #include "en05.h"
 #include "en14.h"
 #include "en18.h"
 #include "en19.h"
+#include "en29.h"
+#include "en17.h"
+#include "en54.h"
+#include "en55.h"
 #include "en27.h"
 #include "en30.h"
 #include <string.h>
@@ -54,6 +60,7 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[0]  = recvx_en00;
     d->jump[1]  = recvx_en01_control;
     d->jump[2]  = recvx_en02;
+    d->jump[3]  = recvx_en03;
     d->jump[4]  = recvx_en04;
     d->jump[7]  = recvx_en07;
     d->jump[8]  = recvx_en08;
@@ -63,8 +70,10 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[12] = recvx_en12;
     d->jump[13] = recvx_en13;
     d->jump[14] = recvx_en14;
+    d->jump[15] = recvx_en15;
     d->jump[16] = recvx_en16;
     d->jump[18] = recvx_en18;
+    d->jump[17] = recvx_en17;
     d->jump[19] = recvx_en19;
     d->jump[20] = recvx_en20;
     d->jump[21] = recvx_en21;
@@ -73,10 +82,12 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[24] = recvx_en24;
     d->jump[25] = recvx_en25;
     d->jump[27] = recvx_en27;
+    d->jump[29] = recvx_en29;
     d->jump[30] = recvx_en30;
-    /* 53 (Nosferatu-Kern) ruft den Dienst recvx_en53 aus en53.c; ChangeAmbient
-       fehlt im Welt-Besitzer (world_enemies.cpp), daher meldet der Pass die Luecke. */
+    /* 53 (Nosferatu-Kern): eigene Puls-/Todmaschine, Material am Welt-Besitzer. */
     d->jump[53] = recvx_en53;
+    d->jump[54] = recvx_en54;
+    d->jump[55] = recvx_en55;
     /* 54/55 (gepanzerte Ritter) bleiben unbesetzt: beide rufen
        recvx_en17_blade_tip/_hit aus dem Kettenwerk von Identitaet 17
        (en54.c:102/108, en55.c:94/100), und en17.c ist nicht portiert.

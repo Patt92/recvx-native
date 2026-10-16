@@ -153,8 +153,11 @@ typedef struct RECVX_EN19_SERVICES {
     int  (*left_claw)(RECVX_ENEMY_WORK* w, uint32_t base, uint32_t obj);
     /* R0_WK.mtxP des Handles (en19.c:2426/2581: fwP->clw0P->mtxP). */
     int  (*claw_matrix)(int handle, float* out16);
-    /* bhSetRapEff(307, EFFPRM_WORK, 12) (en19.c:4801 bhEne19_SetClawPlane). */
-    int  (*claw_plane)(RECVX_ENEMY_WORK* w, const float* mtx16, int col, int tim, float src_x, float dst_x);
+    /* bhSetRapEff(307, EFFPRM_WORK, 12) (en19.c:4801 bhEne19_SetClawPlane). EFFPRM_WORK.mtxP
+       ist ein Zeiger auf eine LEBENDE Matrix, die bhEff307 je Pass liest: claw_slot >= 0 der
+       R0_WK.mtxP des 312-Satzes (fwP->clw0P/clw2P, en19.c:2331/2455), sonst owP[joint].mtx
+       des Works (en19.c:2238/2326/2450). */
+    int  (*claw_plane)(RECVX_ENEMY_WORK* w, int claw_slot, uint32_t joint, int col, int tim, float src_x, float dst_x);
     /* effsub3.c:2430 bhSetEffSpark(pos, dir, src_col, dst_col, typ_no) -> 308 + rom->lgtp[2]. */
     int  (*spark)(const RECVX_ENEMY_VEC* pos, const RECVX_ENEMY_VEC* dir, uint32_t src_col, uint32_t dst_col, int typ_no);
     /* effsub3.c:2748 rySetEffBlood(mtxP, pos, dir, typ) -> 309; mtxP ist
@@ -165,6 +168,10 @@ typedef struct RECVX_EN19_SERVICES {
 } RECVX_EN19_SERVICES;
 
 void recvx_en19_bind(const RECVX_EN19_SERVICES* services);
+/* Die gerade gebundenen Dienste (NULL ausserhalb des Gegnerpasses). bhEff349
+   (effsub3.c:3234) ruft bhEne19_TyBloodSet im Effektpass auf; der Raumbesitzer
+   stellt dafuer denselben Rahmen her und braucht den vorigen Stand zum Zuruecksetzen. */
+const RECVX_EN19_SERVICES* recvx_en19_bound(void);
 /* Einstieg bhEne19 (en19.c:226) fuer bhJumpEnemy[19]. */
 void recvx_en19(RECVX_ENEMY_WORK* w);
 /* en19.c:3597 bhEne19_TyBloodSet: die Routine, die bhEff349 je Effektpass ueber

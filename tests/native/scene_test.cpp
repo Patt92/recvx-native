@@ -42,6 +42,23 @@ int main(){try{
      commands.insert(commands.end(),chunk.begin()+2180,chunk.begin()+2195);commands[11]=8;
      std::copy(commands.begin(),commands.end(),chunk.begin()+2180);
      auto decoded=recvx::decode_scene(chunk);check(decoded.triangles[0].blend==recvx::SceneBlend::Ninja&&decoded.triangles[0].blend_register==0x44,"material blend bits do not override earlier NJD_CB_BA");}
+    // njCnkCmA/Da/As/Das: B/G/R, never diffuse alpha. ChangeAmbient writes G only.
+    for(unsigned tag:{18u,19u,22u,23u}){
+        auto chunk=fixture();const unsigned words=tag==18?2:tag==23?6:4;
+        std::vector<std::uint8_t> commands(4+words*2,0);commands[0]=std::uint8_t(tag);commands[1]=37;commands[2]=std::uint8_t(words);
+        if(tag&1u){commands[4]=11;commands[5]=22;commands[6]=33;commands[7]=77;}
+        const unsigned p=(tag==18||tag==22)?4:8;commands[p]=31;commands[p+1]=63;commands[p+2]=127;commands[p+3]=249;
+        commands.insert(commands.end(),chunk.begin()+2180,chunk.begin()+2195);std::copy(commands.begin(),commands.end(),chunk.begin()+2180);
+        const auto decoded=recvx::decode_scene(chunk);const auto& t=decoded.triangles.at(0);
+        check(std::abs(t.ambient_material.x-127.f/255.f)<1e-6f&&std::abs(t.ambient_material.y-63.f/255.f)<1e-6f&&std::abs(t.ambient_material.z-31.f/255.f)<1e-6f,"ambient chunk channel/offset differs");
+        check((t.color>>24)==((tag&1u)?77u:255u),"ambient alpha replaced diffuse alpha");
+    }
+    // Ordered writes survive model boundaries, including a final material with no triangles.
+    {recvx::Scene s;s.triangles.resize(3);s.ambient_writes={{0,{.1f,.2f,.3f},0,0,false},{1,{.4f,.5f,.6f},0,0,false}};
+     auto end=s.resolve_ambient_material();check(s.triangles[0].ambient_material.y==.2f&&s.triangles[2].ambient_material.y==.5f&&end.y==.5f,"material inheritance reset between models");
+     s.ambient_writes.push_back({3,{.7f,.8f,.9f},0,0,false});end=s.resolve_ambient_material();check(end.y==.8f,"empty final material write lost");
+     s.triangles[0].material_phase=5;s.ambient_writes[0].phase=5;s.resolve_ambient_material();check(s.triangles[0].ambient_material.y==.2f,"player material executed before enemy material");
+     s.triangles[1].object=9;s.erase_triangles([](const auto& t){return t.object==9;});check(s.ambient_writes[2].triangle==2,"material positions not remapped after filtering");}
     check(scene.textures[0].pixels[1]==0x80100010&&scene.textures[0].pixels[2]==0x80080008,"CSM1 palette permutation");
     // Real PLI/TIM2 loading color-keys black and expands ARGB4444 alpha with
     // Ps2Alpha4to8.  Ps2AlphaIsHalf's GS 0..128 step is not stored: the engine

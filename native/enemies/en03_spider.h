@@ -74,6 +74,15 @@ typedef struct RECVX_EN03S_LINK {
     uint32_t node;
 } RECVX_EN03S_LINK;
 void recvx_en03s(RECVX_ENEMY_WORK* w);
+/* en03.c:4588-4592 / :6461-6465: der Elternwork schreibt in den exp0-Block des
+   Beinkindes EXP0_BYTE(i,12)=1, EXP0_BYTE(i,14)=0, EXP0_BYTE(i,15)=0. Die drei
+   Bytes liegen in den Bytes 12..15 des 212-Byte-Blocks (bhEne_CallocWork(0xD4,8),
+   en03sub.c:37) und damit in EXP0_F(0xC) — in en03sub.c die z-Komponente der
+   Fluggeschwindigkeit, die das Kind sehr wohl liest. Byte 13 bleibt unberuehrt.
+   Der zweite Teil desselben Schreibvorgangs, EXP0_INT(pno,980), liegt 768 Byte
+   hinter dem Block; das ist belegte Original-UB (Schreiben in fremden Speicher)
+   und wird gemeldet, nicht nachgebildet. */
+void recvx_en03s_leg_mark(RECVX_ENEMY_WORK* child);
 
 #ifdef __cplusplus
 }

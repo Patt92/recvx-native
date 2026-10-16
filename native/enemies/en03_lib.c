@@ -1918,12 +1918,13 @@ static void t3_set_dfire_effect2(RECVX_ENEMY_WORK* w, int no, const RECVX_T3_BT*
     int pass;
 
     if (w->stflg & 0x100000u) {
+        /* zonzon.c:917-925: line.p = epw->p, line.v = (0, 20, 0). */
         RECVX_ENEMY_VEC from = t3_pos(w);
-        RECVX_ENEMY_VEC to = t3_vec3(w->px, w->py + 20.0f, w->pz);
+        RECVX_ENEMY_VEC vec = t3_vec3(0.0f, 20.0f, 0.0f);
         RECVX_ENEMY_VEC out;
 
         if (t3_ext_bound && t3_ext_bound->water_line &&
-            t3_ext_bound->water_line(&from, &to, &out)) {
+            t3_ext_bound->water_line(&from, &vec, &out)) {
             water_y = out.y;
             have_water_y = 1;
         } else {

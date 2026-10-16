@@ -4,6 +4,8 @@
 #include "asset_io.h"
 #include "room.h"
 #include "audio.h"
+#include "binary_view.h"
+#include <cmath>
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -274,6 +276,8 @@ int main(int argc,char** argv){try{
         // bhEneSetCk: a figure the terminal shows takes no control pass of its own.
         world.deactivate_enemy(0);
         world.tick(); // one ordinary pass, so the tree holds a pose
+        // Diagnose: explizit den Skriptbesitzer pruefen; der native Baum folgt unten separat.
+        const_cast<WorldEntity*>(world.state(1,0))->scripted=true;
         const auto* work=world.state(1,0);
         check(work&&work->posed_has_motion(),"enemy 0 of RM_0020 carries no posed motion");
         check(work->motion!=31,"the test needs an enemy that is not already on motion 31");
@@ -291,16 +295,54 @@ int main(int argc,char** argv){try{
               "a repeated terminal pass moved the tree during the control pause");
         check(world.state(1,0)->motion==31,"the work did not take the written motion");
         check(world.state(1,0)->posed_motion()!=31,"the object tree followed the work without a control pass");
-        // bhExitSpEvtComputer hands the pass back; the next one poses the tree.
+        // Das Original schreibt weder Motionquelle noch mtn_add. Der Baum haelt auch
+        // direkte Event-Schreibvorgaenge, die nicht aus dem Clip wiederherstellbar sind.
+        const auto old_source=work->room_motion;const auto old_step=work->step;
+        EventCommand select;select.opcode=0x65;select.bytes={0x65,1,0,1};check(world.bind(select),"select character node");
+        EventCommand edit;edit.opcode=0x69;edit.bytes={0x69,8,232,3,208,7,184,11};check(world.bind(edit),"edit character tree");
+        const auto changed=fingerprint(world.computer_character(0,31,7));
+        check(changed!=reference,"the character window ignored the existing node write");
+        check(work->frame==7&&work->room_motion==old_source&&work->step==old_step,"terminal must write raw frm_no, preserving motion source and step");
+        check(work->enemy.mtn_no==31&&work->enemy.frm_no==7,"terminal did not write the authoritative enemy work");
+        check(world.state(1,0)->node_overrides.at(1).angles==std::optional<std::array<int,3>>({0,0,0}),"terminal must permanently clear physical objP[1].ang");
+        check(fingerprint(world.computer_character(0,31,7))==changed,"repeated drawing changed the paused object tree");
+        // bhExitSpEvtComputer hands the pass back; the next one samples the selected
+        // source, rather than a source/step invented by the terminal draw.
         world.tick();
         check(world.state(1,0)->posed_motion()==31,"the control pass did not apply the written motion");
-        const auto after=fingerprint(world.computer_character(0,31,0));
-        check(after!=reference,"the written motion had no effect after the control pass returned");
-        // And it stays put again while the pass is paused.
-        check(fingerprint(world.computer_character(0,work->motion,0))==after,
-              "a second terminal pass moved the tree before its control pass ran");
         std::cout<<"Actor owner: a work written without a control pass leaves the object tree alone.\n";
     } else std::cout<<"No cooked data supplied: the actor-owner pose rule was not exercised.\n";
+    if(argc>1){
+        // Nativer Besitzer: eine Diagnoseaenderung am lokalen Baum muss sichtbar sein,
+        // selbst wenn Work-Motion/owP noch einen ganz anderen Zustand enthalten.
+        const std::filesystem::path data=argv[1];const auto bytes=read_asset_file(data/"rooms/RM_5840.RDT",64*1024*1024);
+        const auto stage=decode_scene(bytes);auto spawn=stage.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;
+        AudioMixer sound(data);RoomWorld world(bytes,stage,spawn,motion,frame,sound,data,{},"RM_5840");world.tick();
+        auto& e=const_cast<WorldEntity&>(*world.state(1,0));check(e.enemy_native&&e.enemy_asset&&e.enemy_obj.size()>2,"native character fixture needs a committed tree");
+        e.enemy_obj[1].angles={4096,8192,12288};
+        const auto owp=e.enemy_owp_mtx;const auto source=e.enemy.mtn_room;const auto step=e.enemy.mtn_add;
+        const auto same=[](const Scene& a,const Scene& b){if(a.triangles.size()!=b.triangles.size()||a.triangles.empty())return false;
+            for(std::size_t t=0;t<a.triangles.size();++t)for(unsigned n=0;n<3;++n){const auto& p=a.triangles[t].vertices[n].position;const auto& q=b.triangles[t].vertices[n].position;
+                if(std::fabs(p.x-q.x)>1e-4f||std::fabs(p.y-q.y)>1e-4f||std::fabs(p.z-q.z)>1e-4f)return false;}
+            return true;};
+        auto first=world.computer_character(0,3,7);
+        check(first&&!first->triangles.empty(),"native character window answered with no figure");
+        check(e.enemy_obj[1].angles==std::array<int,3>{0,0,0},"native objP[1] rotation was not cleared permanently");
+        // Ein direkter objP-Schreibvorgang (Knoten 2) ohne neuen owP-Pass: das Original
+        // zeichnet den lokalen Baum, also muss die Aenderung sichtbar werden, waehrend
+        // die festgeschriebenen owP-Matrizen sie nicht enthalten.
+        e.enemy_obj[2].position.x+=7.0f;
+        auto actual=world.computer_character(0,3,7);
+        check(actual&&!same(*actual,*first),"character window ignored the local objP write");
+        const auto expected=e.enemy_asset->sample_tree(e.enemy_obj,e.enemy_evalflags,e.live_stream(0));
+        check(same(*actual,expected),"character window did not draw enemy_obj/evalflags through the local tree path");
+        const auto skinned=e.enemy_asset->sample_work(e.enemy_obj,e.enemy_owp_mtx,e.enemy_evalflags,nullptr,nullptr,e.live_stream(0));
+        check(!same(*actual,skinned),"character window still draws the committed owP skin path");
+        check(e.enemy.mtn_no==3&&e.enemy.frm_no==7&&e.enemy.mtn_room==source&&e.enemy.mtn_add==step,"terminal writes changed unrelated native motion fields");
+        check(e.enemy.px==0&&e.enemy.py==0&&e.enemy.pz==0&&e.enemy.ax==0&&e.enemy.ay==0&&e.enemy.az==0,"terminal did not zero native work position/angles");
+        check(e.enemy_owp_mtx.size()==owp.size(),"terminal rebuilt owP");
+        for(std::size_t n=0;n<owp.size();++n)for(unsigned k=0;k<16;++k)check(e.enemy_owp_mtx[n].value[k]==owp[n].value[k],"draw changed committed owP matrices");
+    }
     std::cout<<"Computer terminal: window automaton, interpreter, soft keyboard, text grid and character window verified.\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<"Computer test failed: "<<e.what()<<'\n';return 1;}}

@@ -13,7 +13,7 @@ Komponentengeprüft ist nicht gleich vollständige Runtime-Abnahme.
 | [EN000](EN000.md) - | `bhEne00` | nativ verdrahtet, Audit/Abnahme offen | 11 | RM_0080 |
 | [EN001](EN001.md) Zombie | `bhEne01` | nativ verdrahtet, Audit/Abnahme offen | 72 | RM_0020 |
 | [EN002](EN002.md) Gulp Worm | `bhEne02` | FEHLT | 6 | RM_3091 |
-| [EN003](EN003.md) Black Widow | `bhEne03` | nativ vorhanden, NICHT verdrahtet | 3 | RM_6090 |
+| [EN003](EN003.md) Black Widow | `bhEne03` | nativ verdrahtet + Welttest, Fensterabnahme offen | 3 | RM_6090 |
 | [EN004](EN004.md) Cerberus | `bhEne04` | nativ verdrahtet, Audit/Abnahme offen | 6 | RM_0050 |
 | [EN005](EN005.md) Hunter/Sweeper | `bhEne05` | FEHLT | 17 | RM_5590 |
 | [EN006](EN006.md) Moth | `bhEne06` | FEHLT | 1 | RM_6030 |
@@ -25,7 +25,7 @@ Komponentengeprüft ist nicht gleich vollständige Runtime-Abnahme.
 | [EN012](EN012.md) First Form Alexia | `bhEne12` | nativ verdrahtet, Audit/Abnahme offen | 3 | RM_5820 |
 | [EN013](EN013.md) Second Form Alexia | `bhEne13` | FEHLT | 2 | RM_5810 |
 | [EN014](EN014.md) Third Form Alexia | `bhEne14` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_5810 |
-| [EN015](EN015.md) Nosferatu | `bhEne15` | FEHLT | 2 | RM_5800 |
+| [EN015](EN015.md) Nosferatu | `bhEne15` | nativ verdrahtet + Welttest, Fensterabnahme offen | 2 | RM_5800 |
 | [EN016](EN016.md) Alfred Ashford | `bhEne16` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_1020 |
 | [EN017](EN017.md) Monster Steve | `bhEne17` | nativ vorhanden, NICHT verdrahtet | 1 | RM_9280 |
 | [EN018](EN018.md) Alexia's Tentacle | `bhEne18` | nativ verdrahtet, Audit/Abnahme offen | 0 | – |
@@ -41,7 +41,7 @@ Komponentengeprüft ist nicht gleich vollständige Runtime-Abnahme.
 | [EN028](EN028.md) - | `bhEne28` | nativ verdrahtet, Audit/Abnahme offen | 0 | – |
 | [EN029](EN029.md) Tentacle | `bhEne29` | FEHLT | 3 | RM_9000 |
 | [EN030](EN030.md) Alexia's Baby | `bhEne30` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_5810 |
-| [EN053](EN053.md) Nosferatu-Kern | `bhEne53` | native Zustände + Einzeltest vorhanden, Anschluss offen | 3 | RM_5800 |
+| [EN053](EN053.md) Nosferatu-Kern | `bhEne53` | nativ verdrahtet + Welttest/Starter geprueft, Fensterabnahme offen | 3 | RM_5800 |
 | [EN054](EN054.md) Armored Knight A (with sword and medium shield) | `bhEne54` | nativ vorhanden, NICHT verdrahtet | 1 | RM_9280 |
 | [EN055](EN055.md) Armored Knight B (with lance and large shield) | `bhEne55` | nativ vorhanden, NICHT verdrahtet | 1 | RM_9280 |
 | [EN056](EN056.md) - | `bhEne56` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_4020 |

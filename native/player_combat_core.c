@@ -1,6 +1,7 @@
 #include "player_combat_core.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
+#include "core_random.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -164,6 +165,30 @@ static void cb_vibration(RECVX_COMBAT_CORE* c, int32_t port, int32_t type) {
 static int32_t cb_effect(RECVX_COMBAT_CORE* c, const RECVX_CB_EFFECT* r) {
     if (!c->services.effect) { cb_gap(c, "bhSetEffectTb"); return -1; }
     return c->services.effect(c->services.user, r);
+}
+/* player.c:5013 u. a. bhSetEffectTb(eft, &fpsb, NULL, 0): die Vorlage WpnEffTab[w][2]
+   mit fpsb als Versatz (beim neuen Satz lox/loy/loz = Fluggeschwindigkeit, effsub1.c:9073),
+   ohne Link und mit lkono 0. */
+static void cb_launch(RECVX_COMBAT_CORE* c, const RECVX_CB_EF_WORK* eft, const RECVX_CB_VEC* fpsb) {
+    RECVX_CB_EFFECT r;
+    memset(&r, 0, sizeof r);
+    r.ef = *eft;
+    r.has_offset = 1;
+    r.offset = *fpsb;
+    cb_effect(c, &r);
+}
+/* rand() der Originalroutinen: derselbe prozessweite EE-Generator (core_random). */
+static float cb_rand(void) { return -recvx_core_random_next() / -2.1474836E9f; }
+/* bhSetEffectTb(&sys->ef, NULL, NULL, lkono) der Wasserzweige: alle Felder ausser ax. */
+static void cb_sys_ef(RECVX_COMBAT_CORE* c, const RECVX_CB_EF_WORK* ef, int32_t lkono) {
+    RECVX_CB_EFFECT r;
+    memset(&r, 0, sizeof r);
+    r.ef = *ef; r.jno = lkono; r.sys_ef = 1;
+    cb_effect(c, &r);
+}
+static void cb_water_splash4(RECVX_COMBAT_CORE* c, const RECVX_CB_VEC* pos, int32_t ang, int32_t type, float sx, float sy, float sz) {
+    if (!c->services.water_splash4) { cb_gap(c, "bhSetWaterSplash4 (pwksub.c:2643)"); return; }
+    c->services.water_splash4(c->services.user, pos, ang, type, sx, sy, sz);
 }
 static int32_t cb_c2_wall_n(RECVX_COMBAT_CORE* c, const RECVX_CB_CAPSULE* cap, uint32_t flg) {
     if (!c->services.c2_wall_n) { cb_gap(c, "bhCheckC2WallN (pwksub.c:2172)"); return 0; }
@@ -1008,8 +1033,50 @@ static int cb_check_gun_atari(RECVX_COMBAT_CORE* c, CB_GA* g) {
         wtln.vx = wps.x - gline.px; wtln.vy = wps.y - gline.py; wtln.vz = wps.z - gline.pz;
         if (!c->services.l2_water) cb_gap(c, "bhCheckL2Water");
         else if (c->services.l2_water(c->services.user, &wtln, &ps)) {
+            RECVX_CB_EF_WORK ef;
+            int32_t k;
             watflg = 1;
-            cb_gap(c, "bhCheckGunAtari Wassereinschlag (bhSetEffectTb/bhSetWaterSplash4)");
+            memset(&ef, 0, sizeof ef);
+            /* weapon.c:891: Waffe 11 streut 32 Spritzer, alle anderen einen. */
+            k = (g->wpn_no == 11) ? 32 : 1;
+            while (k--) {
+                ef.id = 15; ef.flg = 1; ef.mdlver = 0; ef.type = 2;
+                ef.flr_no = (int16_t)((k & 3) * 2);
+                if (g->wpn_no == 11) {
+                    RECVX_CB_VEC at;
+                    sca.x = g->px - ps.x; sca.y = g->py - ps.y; sca.z = g->pz - ps.z;
+                    ll = njScalor((NJS_VECTOR*)&sca);
+                    ll = g->r + (g->rn * ll);
+                    ef.px = ps.x + (((2.0f * ll) * cb_rand()) - ll);
+                    ef.pz = ps.z + (((2.0f * ll) * cb_rand()) - ll);
+                    ef.py = ps.y - 0.1f;
+                    at.x = ef.px; at.y = ef.py; at.z = ef.pz;
+                    /* :923 bhCheckWater(&sys->ef.px) */
+                    if (!c->services.check_water) cb_gap(c, "bhCheckWater");
+                    else if (c->services.check_water(c->services.user, &at)) {
+                        ef.ay = 0;
+                        ef.sx = 0.4f; ef.sy = 0.6f + (0.2f * cb_rand()); ef.sz = 0.4f;
+                        cb_sys_ef(c, &ef, 0);
+                    }
+                } else {
+                    RECVX_CB_VEC at;
+                    ef.px = ps.x + (cb_rand() - 0.5f);
+                    ef.pz = ps.z + (cb_rand() - 0.5f);
+                    ef.py = ps.y;
+                    ef.ay = 0;
+                    at.x = ef.px; at.y = ef.py; at.z = ef.pz;
+                    /* :940 WpnTab[gap->wpn_no] (nicht die 0x100-Ersatzwaffe) */
+                    if (cb_wpn(c, g->wpn_no)->ef_scale < 1.5f) {
+                        ef.sx = 0.8f; ef.sy = 0.8f + (0.2f * cb_rand()); ef.sz = 0.8f;
+                        cb_sys_ef(c, &ef, 0);
+                        cb_water_splash4(c, &at, g->ay, 0, 0.8f, 0.8f, 0.8f);
+                    } else {
+                        ef.sx = 1.2f; ef.sy = 1.0f + (0.25f * cb_rand()); ef.sz = 1.2f;
+                        cb_sys_ef(c, &ef, 0);
+                        cb_water_splash4(c, &at, g->ay, 1, 1.2f, 1.2f, 1.2f);
+                    }
+                }
+            }
         }
     }
     if (((id == -1) && walhit && wp_hef && !watflg)
@@ -1048,8 +1115,21 @@ static void cb_check_knife_atari(RECVX_COMBAT_CORE* c, CB_GA* g) {
     gline.vx = g->vx; gline.vy = g->vy; gline.vz = g->vz;
     if (cb_st(c) & 0x40) {
         if (!c->services.l2_water) cb_gap(c, "bhCheckL2Water");
-        else if (c->services.l2_water(c->services.user, &gline, &ps))
-            cb_gap(c, "bhCheckKnifeAtari Wassereinschlag (bhSetEffectTb)");
+        else if (c->services.l2_water(c->services.user, &gline, &ps)) {
+            /* weapon.c:1037-1069: zwei Saetze mit lkono 1, ay einmal gesetzt. */
+            RECVX_CB_EF_WORK ef;
+            memset(&ef, 0, sizeof ef);
+            ef.id = 11; ef.flg = 1; ef.mdlver = 0; ef.type = 1; ef.flr_no = 0;
+            ef.sx = 2.0f; ef.sy = 2.0f; ef.sz = 2.0f;
+            ef.px = ps.x + (cb_rand() - 0.5f);
+            ef.pz = ps.z + (cb_rand() - 0.5f);
+            ef.py = ps.y;
+            ef.ay = (int16_t)(g->ay - 16384);
+            cb_sys_ef(c, &ef, 1);
+            ef.type = 0;
+            ef.sx = 1.2f; ef.sy = 1.2f; ef.sz = 1.2f;
+            cb_sys_ef(c, &ef, 1);
+        }
     }
     if (cb_l2_wall(c, &gline, 0x400, &len, &wh) != 0) {
         wps = wh.apos;
@@ -1225,7 +1305,23 @@ static void cb_set_gun_fire(RECVX_COMBAT_CORE* c, int32_t wno, int32_t jno,
         break;
     }
     case 11: cb_gap(c, "bhSetGunFire Waffe 11 (bhEff014/Eff002, pwksub.c:2978)"); break;
-    case 20: cb_gap(c, "bhSetGunFire Waffe 20 (bhEff027, pwksub.c:3127)"); break;
+    case 20: {
+        /* pwksub.c:3126-3150: Funken bhEff027 an der Muendung (wp_fps2 auf owP[jno]) ueber
+           sys->ef; alle Felder geschrieben, Versatz (-3,0,0) nur gedreht, ohne Link, lkono 0. */
+        RECVX_CB_EFFECT req;
+        RECVX_CB_VEC ps = { -3.0f, 0.0f, 0.0f };
+        NJS_MATRIX m;
+        memset(&req, 0, sizeof req);
+        cb_calc_point(p->owp_mtx[jno], &wt->wp_fps2, (RECVX_CB_VEC*)&req.ef.px);
+        req.ef.id = 27; req.ef.flg = 1; req.ef.type = 0; req.ef.mdlver = 0; req.ef.flr_no = 0;
+        req.ef.sx = 1.0f; req.ef.sy = 1.0f; req.ef.sz = 0.0f;
+        req.ef.ay = 0; req.ef.ax = 0;
+        cb_mtx_of(p->owp_mtx[jno], &m);
+        njCalcVector(&m, (NJS_VECTOR*)&ps, (NJS_VECTOR*)&req.offset);
+        req.has_offset = 1; req.jno = 0; req.sys_ef = 2;
+        cb_effect(c, &req);
+        break;
+    }
     case 21: {
         /* pwksub.c:3156-3240: die Doppelwaffe schiesst entlang der Gelenkachse
            (Y +36, X -1547 auf owP[jno], Richtung (0,0,-1000)), prueft die Wand
@@ -1698,7 +1794,7 @@ static void cb_act_wpn(RECVX_COMBAT_CORE* c) {
                     wno = p->wpnr_no;
                     if (p->wpnr_no == 3 && (cb_gm(c) & 0x10000000)) {
                         /* player.c:4950: 1 von 30 Schuessen als Waffe 6 */
-                        if ((int)(30.0f * (-rand() / -2.1474836E9f)) == 15) {
+                        if ((int)(30.0f * cb_rand()) == 15) {
                             wno = 6; p->at_flg |= 0x100;
                         } else p->at_flg &= ~0x100u;
                     }
@@ -1714,12 +1810,66 @@ static void cb_act_wpn(RECVX_COMBAT_CORE* c) {
                     if ((wt->flg & 0x20000000)) {
                         RECVX_CB_EF_WORK* eft = cb_eff_tab(c, p->wpnr_no, 2);
                         if (eft && eft->flg != 0) {
+                            NJS_MATRIX rm;
+                            RECVX_CB_VEC fps, fpsb;
                             p->way = (int16_t)p->ay; p->waz = 0;
-                            /* Die Streugeometrie der Wurf-/Flammenwaffen
-                               (player.c:4993-5120, Faelle 10/14-20) ist eine
-                               gemeldete Luecke; die davon unabhaengigen
-                               Originalwirkungen stehen hier. */
-                            cb_gap(c, "bhCPM2_act_wpn Wurf-/Streueffekt (player.c:4993-5120)");
+                            /* player.c:4996-4998: njSetMatrix(owP[9]) und
+                               njCalcPoint(wp_fps1) schreiben die Abschusslage IN
+                               WpnEffTab[w][2] (die Tabelle ist im Original veraenderlich). */
+                            cb_calc_point(p->owp_mtx[9], &wt->wp_fps1, (RECVX_CB_VEC*)&eft->px);
+                            /* :5000/:5001 njUnitRotPortion + njRotateXYZ(wax, way, waz): die
+                               Geschwindigkeit sieht nur die Drehung (njCalcVector). */
+                            njUnitMatrix(&rm);
+                            njRotateXYZ(&rm, p->wax, p->way, p->waz);
+                            fps.x = fps.y = 0;
+                            eft->ax = p->wax;
+                            eft->ay = p->way;
+                            switch (p->wpnr_no) {
+                            case 10: case 19:                         /* :5005 */
+                                fps.z = -3.0f;
+                                njCalcVector(&rm, (NJS_VECTOR*)&fps, (NJS_VECTOR*)&fpsb);
+                                cb_launch(c, eft, &fpsb);
+                                break;
+                            case 14: {                                /* :5018 fuenf Splitter */
+                                NJS_MATRIX k;
+                                if (p->wax < 0) njRotateX(&rm, -(p->wax / 2));
+                                fps.z = -2.0f;
+                                njCalcVector(&rm, (NJS_VECTOR*)&fps, (NJS_VECTOR*)&fpsb);
+                                cb_launch(c, eft, &fpsb);
+                                njRotateX(&rm, -3276);
+                                memcpy(k, rm, sizeof k); njRotateY(&k, -2730);   /* njPushMatrixEx */
+                                fps.z = -1.6f;
+                                njCalcVector(&k, (NJS_VECTOR*)&fps, (NJS_VECTOR*)&fpsb);
+                                cb_launch(c, eft, &fpsb);
+                                njRotateX(&rm, -728);                            /* nach njPopMatrixEx */
+                                memcpy(k, rm, sizeof k); njRotateY(&k, 2730);
+                                fps.z = -1.6f;
+                                njCalcVector(&k, (NJS_VECTOR*)&fps, (NJS_VECTOR*)&fpsb);
+                                cb_launch(c, eft, &fpsb);
+                                njRotateX(&rm, -2548);
+                                memcpy(k, rm, sizeof k); njRotateY(&k, -1092);
+                                fps.z = -1.2f;
+                                njCalcVector(&k, (NJS_VECTOR*)&fps, (NJS_VECTOR*)&fpsb);
+                                cb_launch(c, eft, &fpsb);
+                                njRotateX(&rm, -364);
+                                memcpy(k, rm, sizeof k); njRotateY(&k, 1092);
+                                fps.z = -1.2f;
+                                njCalcVector(&k, (NJS_VECTOR*)&fps, (NJS_VECTOR*)&fpsb);
+                                cb_launch(c, eft, &fpsb);
+                                break; }
+                            case 15: case 16: case 17: case 18:       /* :5083 / :5096 */
+                                fps.z = -2.5f;
+                                njCalcVector(&rm, (NJS_VECTOR*)&fps, (NJS_VECTOR*)&fpsb);
+                                cb_launch(c, eft, &fpsb);
+                                break;
+                            case 20:                                  /* :5113 */
+                                fps.z = -3.0f;
+                                njCalcVector(&rm, (NJS_VECTOR*)&fps, (NJS_VECTOR*)&fpsb);
+                                cb_launch(c, eft, &fpsb);
+                                break;
+                            default:                                  /* keine Zeile im Original */
+                                break;
+                            }
                             if (p->wpnr_no == 18) {
                                 if (c->sys && c->sys->gm_mode == 3) cb_set_ev_flag(c, 75);
                             } else if (p->wpnr_no == 20) {

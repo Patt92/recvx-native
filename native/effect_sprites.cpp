@@ -1,5 +1,8 @@
 #include "effect_sprites.h"
 #include "effect_sprites_internal.h"
+#include "effect_rap_camera.h"
+#include "effect_rap_blood.h"
+#include "effect_rap_claw.h"
 #include "chunk_blend.h"
 #include "binary_view.h"
 #include "core_random.h"
@@ -73,6 +76,8 @@ EffectSpawn& request_template(){static EffectSpawn request;return request;}
 EffectWeather& effect_weather(){static EffectWeather weather;return weather;}
 // sys->gas_py (effsub1.c:8734): ein Besitzer, keine Kopie.
 float& effect_gas_height(){static float gas_py=0;return gas_py;}
+unsigned& effect_blood_counter(){static unsigned bl_ct=0;return bl_ct;}
+WaterWaveField& water_wave(){static WaterWaveField field;return field;}
 namespace effect_detail {
 void submit_template(int lkono,const NJS_POINT3* offset){
     EffectSpawn e=request_template();e.lkono=lkono;e.linked_work=nullptr;
@@ -80,7 +85,14 @@ void submit_template(int lkono,const NJS_POINT3* offset){
     e.has_velocity=false;e.velocity={};e.tex_id_override=-1;e.az=0;e.parent_slot=-1;
     e.mode1=0;e.has_color=false;e.color=0;e.has_ao=false;e.ao={};e.has_exp1=false;e.exp1_slot=-1;
     e.link_kind=-1;e.link_index=0;e.drop_link_flag=false;
+    e.stflg_or=0;e.texture_from_slot=-1;e.owner_work=nullptr;
     pending.spawns.push_back(e);
+}
+void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz,const std::function<void(int lkono)>& submit){
+    auto& r=request_template();r.id=11;r.flg=1;r.mdlver=0;r.type=unsigned(type+10);r.flr_no=0;
+    r.scale={sx,sy,sz};r.position=pos;
+    r.ay=ang+16384;submit(0);
+    r.ay=ang-16384;submit(1);
 }
 EffectSpawn& last_request(){
     if(pending.spawns.empty())throw std::runtime_error("effect procedure patches a request before bhSetEffectTb");
@@ -98,6 +110,10 @@ bool wall_reflect(NJS_POINT3& position,unsigned flags,float radius,float height,
     if(!wall)return false;
     reflect_effect_wall(*wall,effect_wall_height,position,radius,height,angle);
     return true;
+}
+bool wall_type(NJS_POINT3 position,unsigned flags,float radius,float height,const char* what){
+    if(!effect_wall_set){report_gap(what);return false;}
+    return effect_wall(*effect_wall_set,effect_wall_height,position,flags,radius,height).has_value();
 }
 void request_bomb(NJS_POINT3 position,float radius,int damage_max,int damage_min){pending.bombs.push_back({position,radius,damage_max,damage_min});}
 void request_direct(unsigned id,NJS_POINT3 position,int lkono){
@@ -147,7 +163,14 @@ void hook_fire_light(NJS_POINT3 pos,NJS_POINT3 color,float far_divisor){if(world
 void hook_en12_binta(void* w,int action){if(world_hooks.en12_binta)world_hooks.en12_binta(w,action);else report_gap("bhEne12_SetFireBintaEffect ohne Gegnerbesitzer");}
 bool hook_effect_se_playing(int se){if(world_hooks.effect_se_playing)return world_hooks.effect_se_playing(se);report_gap("bhEne_CheckPlayEffectSE ohne Stimmenbesitzer");return true;}
 void hook_player_dv(NJS_POINT3 dv){if(world_hooks.player_dv)world_hooks.player_dv(dv);else report_gap("plp->dvx/dvy/dvz ohne Spielerbesitzer");}
+void hook_enemy_se(void* w,NJS_POINT3 pos,int se){if(world_hooks.enemy_se)world_hooks.enemy_se(w,pos,se);else report_gap("RequestEnemySe ohne Stimmenbesitzer (Effekt)");}
+bool hook_player_joint(unsigned joint,float* out16,const char* what){if(world_hooks.player_joint&&world_hooks.player_joint(joint,out16))return true;report_gap(what);return false;}
+void hook_player_hit(int dax,int day,int djnt_no,NJS_POINT3 dp){if(world_hooks.player_hit)world_hooks.player_hit(dax,day,djnt_no,dp);else report_gap("plp->dax/day/djnt_no/dpx ohne Spielerbesitzer");}
 void hook_effect_se(NJS_POINT3 pos,int se){if(world_hooks.effect_se)world_hooks.effect_se(pos,se);else report_gap("bhEne_CallEffectSE ohne Stimmenbesitzer");}
+void hook_camera_offset_add(NJS_POINT3 add){if(world_hooks.camera_offset_add)world_hooks.camera_offset_add(add);else report_gap("cam.ofx/ofy/ofz ohne Kamerabesitzer (bhEff30a)");}
+void hook_camera_offset_set(NJS_POINT3 value){if(world_hooks.camera_offset_set)world_hooks.camera_offset_set(value);else report_gap("cam.ofx/ofy/ofz ohne Kamerabesitzer (bhEff30a)");}
+void hook_room_light0(NJS_POINT3 pos,NJS_POINT3 rgb,float nr,float fr,bool only_if_off,const char* what){if(world_hooks.room_light0)world_hooks.room_light0(pos,rgb,nr,fr,only_if_off);else report_gap(what);}
+void hook_spark_light(NJS_POINT3 pos,NJS_POINT3 dir){if(world_hooks.spark_light)world_hooks.spark_light(pos,dir);else report_gap("rom->lgtp[2] ohne Lichtbesitzer (bhSetEffSpark)");}
 bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what){if(world_hooks.player_watr&&world_hooks.player_watr(c))return true;report_gap(what);return false;}
 bool collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what){
     if(!effect_wall_set){report_gap(what);return false;}
@@ -997,7 +1020,7 @@ static bool step_en09_smoke(EffectSprite& s){
 }
 bool hand_ported_effect_sprite(unsigned id){
     switch(id){
-    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 134:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 308:case 369:case 396:case 399:return true;
+    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 134:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
     default:return hand_procedure(id)!=nullptr;
     }
 }
@@ -1032,6 +1055,12 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
     if(queued)*queued=false;if(!supported_effect_sprite(s.id))return false;
     if(s.id==369){const bool entered=step_en09_smoke(s);if(queued)*queued=entered;return true;}
     if(s.id==308){s.custom_queued=false;s.quads.clear();s.lines.clear();const bool entered=step_eff308(s);if(queued)*queued=entered;return true;}
+    // effsub3.c OR_WORK-Saetze (bhJumpEffect3[op->id-300], effect.c:831): 310/349 zeichnen nie,
+    // 307/309/311/312 reihen sich selbst in ef_fnc ein (effect.c:742 leert die Listen je Pass).
+    if(s.id==310){step_eff30a(s,c);if(queued)*queued=false;return true;}
+    if(s.id==349){step_eff349(s);if(queued)*queued=false;return true;}
+    if(s.id==309||s.id==311){s.custom_queued=false;s.quads.clear();s.lines.clear();const bool entered=s.id==309?step_eff309(s,c):step_eff30b(s,c);if(queued)*queued=entered;return true;}
+    if(s.id==307||s.id==312){s.custom_queued=false;s.quads.clear();s.lines.clear();const bool entered=s.id==307?step_eff307(s,c):step_eff30c(s);if(queued)*queued=entered;return true;}
     if(s.id==296){const bool entered=step_e00_blood(s);if(queued)*queued=entered;return true;}
     if(s.id==297){step_e00_blood_burst(s,c);if(queued)*queued=false;return true;}
     if(s.id==261||s.id==270){s.custom_queued=false;s.quads.clear();s.lines.clear();const bool entered=s.id==261?step_e11_searchlight(s,c):step_e16_laser(s,c);if(queued)*queued=entered;return true;}
@@ -1174,6 +1203,7 @@ void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
     if(e.has_color)s.tv[0].col=e.color;
     if(e.has_ao){s.aox=e.ao.x;s.aoy=e.ao.y;s.aoz=e.ao.z;}
     if(e.has_exp1)s.exp1_slot=e.exp1_slot;
+    s.stflg|=e.stflg_or;s.owner_work=e.owner_work;
 }
 // effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.

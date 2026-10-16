@@ -1,6 +1,6 @@
 /* EN53 — Nosferatus eigener Kern. Eigenstaendige native Zustandsmaschine,
    Originalreferenz en15.c:3439-3745. Kein generierter Koerper/zweiter Work.
-   Kein Anschluss an jump[53], solange die Modell-/Materialdienste fehlen. */
+   jump[53], Modell-/Materialdienste auf dem vorhandenen WorldEntity. */
 #include "en53.h"
 #include "en03_lib.h"
 #include "../core_random.h"

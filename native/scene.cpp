@@ -109,6 +109,10 @@ private:
             throw std::runtime_error("skin does not match model object count");
         if(options && !options->world_normals.empty() && options->world_normals.size()!=output.object_count)
             throw std::runtime_error("normal skin does not match model object count");
+        if(options && !options->local_vertices.empty() && options->local_vertices.size()!=output.object_count)
+            throw std::runtime_error("local vertex edit does not match model object count");
+        if(options && !options->local_normals.empty() && options->local_normals.size()!=output.object_count)
+            throw std::runtime_error("local normal edit does not match model object count");
         objects=view.relative(base,view.u32(model+12),output.object_count*52);
         visited.resize(output.object_count);
         NJS_MATRIX matrix;njUnitMatrix(&matrix);
@@ -292,6 +296,11 @@ private:
                 const auto p=payload+i*stride;
                 NJS_POINT3 point{view.f32(p),view.f32(p+4),view.f32(p+8)};
                 auto& value=cache[first+i];
+                // bhObj005 (objitm.c:1294): die beschriebene Kopie des ersten Eckpunkt-Chunks.
+                const auto* local=iteration==0&&options&&!options->local_vertices.empty()?&options->local_vertices[current_object]:nullptr;
+                if(local&&!local->empty()){if(local->size()!=count)throw std::runtime_error("local vertex edit does not match PS2 chunk");point=(*local)[i];}
+                const auto* local_n=iteration==0&&options&&!options->local_normals.empty()?&options->local_normals[current_object]:nullptr;
+                if(local_n&&!local_n->empty()&&local_n->size()!=count)throw std::runtime_error("local normal edit does not match PS2 chunk");
                 const auto* vertices=options && !options->world_vertices.empty()?&options->world_vertices[current_object]:nullptr;
                 if(vertices && !vertices->empty()) {
                     if(type!=51 || vertices->size()!=count)throw std::runtime_error("skin vertex count does not match PS2 chunk");
@@ -301,10 +310,10 @@ private:
                 /* NJD_CV_VN (41), njCnkCvVn: three position floats followed
                    immediately by three normal floats. Keep the transformed
                    length, including original zero normals (no normalization). */
-                if(type==41){NJS_VECTOR n{view.f32(p+12),view.f32(p+16),view.f32(p+20)};njCalcVector(world,&n,&value.normal);}
+                if(type==41){NJS_VECTOR n{view.f32(p+12),view.f32(p+16),view.f32(p+20)};if(local_n&&!local_n->empty())n=(*local_n)[i];njCalcVector(world,&n,&value.normal);}
                 if(type==51){const auto* normals=options&&!options->world_normals.empty()?&options->world_normals[current_object]:nullptr;
                     if(normals&&!normals->empty()){if(normals->size()!=count)throw std::runtime_error("skin normal count does not match PS2 chunk");value.normal=(*normals)[i];}
-                    else{NJS_VECTOR n{view.f32(p+16),view.f32(p+20),view.f32(p+24)};njCalcVector(world,&n,&value.normal);}if(!options||options->draw_object<0)njUnitVector(&value.normal);}
+                    else{NJS_VECTOR n{view.f32(p+16),view.f32(p+20),view.f32(p+24)};if(local_n&&!local_n->empty())n=(*local_n)[i];njCalcVector(world,&n,&value.normal);}if(!options||options->draw_object<0)njUnitVector(&value.normal);}
                 value.valid=true;
             }
             chunk=end;
@@ -313,10 +322,13 @@ private:
     }
     void decode_polygons(std::size_t chunk) {
         std::uint32_t material=0xffb2b2b2;std::uint16_t texture=0;unsigned blend_src=4,blend_dst=5; // NJD_CB_BA default SA/ISA
-        bool diffuse=false;
+        bool diffuse=false;const std::size_t plist=chunk;
         for(unsigned iteration=0;iteration<65536;++iteration) {
             const auto type=view.u8(chunk);
             if(type==255)return;
+            // npSetOffsetUV2 (njplus.c:1687-1691): u/v des getroffenen Chunks 66 um offu/offv
+            // (short) verschoben; der Versatz liegt im Chunk selbst und gilt fuer jeden Streifen.
+            const bool uv_shift=type==66&&options&&options->uv_object==int(current_object)&&chunk-plist==options->uv_chunk;
             if(type==1){const auto f=view.u8(chunk+1);blend_src=(f>>3)&7;blend_dst=f&7;}
             if(type<8){chunk+=2;continue;}
             if(type<16){if(type==8)texture=view.u16(chunk+2)&0xfff;view.require(chunk,4);chunk+=4;continue;}
@@ -325,6 +337,11 @@ private:
             // ambient-only materials. NJD_CB_BA is not its only writer.
             if(type>=17&&type<=23){const auto f=view.u8(chunk+1);blend_src=(f>>3)&7;blend_dst=f&7;}
             if((type&1) && type>=17 && type<=23){material=view.u32(chunk+4);diffuse=true;}
+            if(type==18||type==19||type==22||type==23){
+                const auto p=chunk+((type==18||type==22)?4u:8u);
+                if(p+4>end)throw std::runtime_error("ambient material outside chunk");
+                output.ambient_writes.push_back({output.triangles.size(),{view.u8(p+2)/255.f,view.u8(p+1)/255.f,view.u8(p)/255.f},0,current_object,camera_mask});
+            }
             if(type>=64 && type<=66) {
                 auto at=chunk+4;
                 const auto flags=view.u16(at);at+=2;
@@ -350,7 +367,8 @@ private:
                         if(!cache[index].valid)throw std::runtime_error("polygon references unloaded vertex");
                         SceneVertex vertex{cache[index].position,0,0,cache[index].normal};
                         if(type!=64) {
-                            const auto ubits=read(),vbits=read();
+                            auto ubits=unsigned(read()),vbits=unsigned(read());
+                            if(uv_shift){ubits=unsigned(int(ubits)+options->uv_u)&0xffffu;vbits=unsigned(int(vbits)+options->uv_v)&0xffffu;}
                             const auto u=ubits<0x8000?int(ubits):int(ubits)-65536;
                             const auto v=vbits<0x8000?int(vbits):int(vbits)-65536;
                             const float scale=type==65?255.0f:1023.0f;
@@ -360,6 +378,8 @@ private:
                         strip.push_back(vertex);
                         if(i>=2) {
                             SceneTriangle triangle{{strip[i-2],strip[i-1],strip[i]},material,texture,current_object,type!=64};
+                            const unsigned color_mode=view.u8(chunk+1)&7u;
+                            triangle.chunk_ambient=type==64?!(color_mode&1u):!(color_mode&1u)&&color_mode!=6u;
                             triangle.camera_mask=camera_mask;triangle.diffuse_material=diffuse;{const auto m=chunk_blend_modes(blend_src,blend_dst);triangle.chunk_mode_src=std::int8_t(m.first);triangle.chunk_mode_dst=std::int8_t(m.second);}
                             // The strip's GS ALPHA register is kept for every strip: a caller forcing
                             // NJD_FST_UA through njSetConstantAttr (map.c:723) still blends with it.
@@ -381,14 +401,35 @@ private:
     }
 };
 }
+void Scene::erase_triangles(const std::function<bool(const SceneTriangle&)>& predicate){
+    std::vector<std::size_t> positions(triangles.size()+1);std::size_t kept=0;
+    for(std::size_t i=0;i<triangles.size();++i){positions[i]=kept;if(!predicate(triangles[i]))triangles[kept++]=triangles[i];}
+    positions.back()=kept;
+    for(auto& w:ambient_writes)w.triangle=positions.at(w.triangle);
+    triangles.resize(kept);
+}
+NJS_POINT3 Scene::resolve_ambient_material(NJS_POINT3 initial,const SceneCamera* camera){
+    struct Op{unsigned phase;std::size_t triangle,order;const AmbientWrite* write;};
+    std::vector<Op> ops;ops.reserve(ambient_writes.size()+triangles.size());
+    for(std::size_t i=0;i<ambient_writes.size();++i){const auto& w=ambient_writes[i];
+        if(camera&&w.camera_mask&&w.object<512&&(camera->hidden_objects[w.object/32]&(0x80000000u>>(w.object%32))))continue;
+        ops.push_back({w.phase,w.triangle,i,&w});}
+    for(std::size_t i=0;i<triangles.size();++i)ops.push_back({triangles[i].material_phase,i,ambient_writes.size(),nullptr});
+    std::stable_sort(ops.begin(),ops.end(),[](const Op& a,const Op& b){
+        if(a.phase!=b.phase)return a.phase<b.phase;
+        if(a.triangle!=b.triangle)return a.triangle<b.triangle;
+        return a.order<b.order;});
+    for(const auto& op:ops)if(op.write)initial=op.write->color;else triangles[op.triangle].ambient_material=initial;
+    return initial;
+}
 Scene decode_scene(const std::vector<std::uint8_t>& room) {
-    return Decoder(room).decode();
+    auto scene=Decoder(room).decode();scene.resolve_ambient_material();return scene;
 }
 std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>& data,std::size_t offset){return Decoder(data).decode_bundle(offset);}
 Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint32_t model,const NJS_MATRIX& world){return Decoder(memory,size).decode_memory_model(model,world);}
 Scene decode_model_asset(const std::vector<std::uint8_t>& data,std::size_t model_offset,
                          std::size_t texture_offset,const ModelGeometryOptions& options) {
-    return Decoder(data).decode_asset(model_offset,texture_offset,options);
+    auto scene=Decoder(data).decode_asset(model_offset,texture_offset,options);scene.resolve_ambient_material();return scene;
 }
 std::optional<unsigned> model_object_vertex_count(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object){
     BinaryView view(data);view.require(model,16);
@@ -404,6 +445,65 @@ std::optional<unsigned> model_object_vertex_count(const std::vector<std::uint8_t
     if(vlist==0xffffffffu)throw std::runtime_error("objP[n].model->vlist is NULL");
     const auto at=view.relative(base,vlist,8);
     return unsigned(view.u32(at+4)>>16);                      // vlist[1] >> 16
+}
+namespace {
+// objP[object].model (MDL-Chunkmodell): Byteoffset des NJS_CNK_MODEL oder nullopt (model NULL).
+std::optional<std::size_t> model_object_chunk_model(const BinaryView& view,std::size_t model,unsigned object,std::size_t& base){
+    view.require(model,16);
+    if(view.u8(model)!='M'||view.u8(model+1)!='D'||view.u8(model+2)!='L')throw std::runtime_error("unsupported model format (expected MDL)");
+    if(!(view.u8(model+3)&0x80))throw std::runtime_error("objP[n].model on a Basic model");
+    base=view.relative(model,view.u16(model+4),0);const unsigned count=view.u16(model+6);
+    if(object>=count)throw std::runtime_error("objP index outside the model's object table");
+    const auto objects=view.relative(base,view.u32(model+12),std::size_t(count)*52);
+    const auto pointer=view.u32(objects+std::size_t(object)*52+4);
+    if(pointer==0xffffffffu)return std::nullopt;
+    return view.relative(base,pointer,24);
+}
+}
+std::optional<ModelObjectVertices> model_object_vertices(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object){
+    BinaryView view(data);std::size_t base=0;const auto chunk_model=model_object_chunk_model(view,model,object,base);
+    if(!chunk_model)return std::nullopt;
+    const auto vlist=view.u32(*chunk_model);if(vlist==0xffffffffu)return std::nullopt;
+    const auto chunk=view.relative(base,vlist,8);ModelObjectVertices out;out.chunk_type=view.u8(chunk);
+    if(out.chunk_type==255)return out;
+    const auto end=view.relative(chunk,std::uint32_t(view.u16(chunk+2)+1)*4,0);view.require(chunk,end-chunk);
+    const unsigned count=view.u16(chunk+6);std::size_t payload=chunk+8,stride=0,normal=0;
+    switch(out.chunk_type){
+    case 32:stride=16;break;case 33:stride=32;break;case 34:stride=12;break;
+    case 35:case 36:case 37:case 38:case 39:case 40:case 48:stride=16;break;
+    case 41:stride=24;normal=12;break;
+    case 42:case 43:case 44:case 45:case 46:case 47:stride=28;break;
+    case 49:case 50:stride=20;break;
+    case 51:payload=chunk+64;stride=32;normal=16;break;
+    default:throw std::runtime_error("unsupported vertex chunk "+std::to_string(out.chunk_type));
+    }
+    if(payload>end||std::size_t(count)*stride>end-payload)throw std::runtime_error("vertex chunk payload exceeds chunk");
+    for(unsigned i=0;i<count;++i){const auto p=payload+i*stride;out.positions.push_back({view.f32(p),view.f32(p+4),view.f32(p+8)});
+        if(normal)out.normals.push_back({view.f32(p+normal),view.f32(p+normal+4),view.f32(p+normal+8)});}
+    return out;
+}
+std::optional<ModelObjectUvWalk> model_object_uv_walk(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object){
+    BinaryView view(data);std::size_t base=0;const auto chunk_model=model_object_chunk_model(view,model,object,base);
+    if(!chunk_model)return std::nullopt;
+    const auto plist_ptr=view.u32(*chunk_model+4);if(plist_ptr==0xffffffffu)return std::nullopt;
+    const auto plist=view.relative(base,plist_ptr,2);ModelObjectUvWalk out;
+    // Der Lauf des Originals: Kopf lesen (short), bei 66 Groesse ueberspringen und die
+    // Streifenzahl mit den Nutzerbits lesen; sonst ein weiteres short ueberspringen.
+    std::size_t p=plist;
+    for(unsigned guard=0;guard<65536;++guard){view.require(p,2);const unsigned head=view.u8(p);p+=2;
+        if(head==66){view.require(p,4);out.found=true;out.chunk=(p-2)-plist;out.usr_num=(view.u16(p+2)>>14)&3u;break;}
+        if(head!=255)p+=2;else break;}
+    if(!out.found)return out;
+    // Die regulaere Chunk-Kette (ps2_NinjaCnk.c): liegt der erste Chunk 66 genau dort?
+    std::size_t c=plist;
+    for(unsigned guard=0;guard<65536;++guard){const auto type=view.u8(c);
+        if(type==255)break;
+        if(type<8){c+=2;continue;}
+        if(type<16){c+=4;continue;}
+        if(type==66){out.proper=(c-plist)==out.chunk;break;}
+        if(type>=56)break;
+        c=view.relative(c,std::uint32_t(view.u16(c+2)+2)*2,0);}
+    return out;
 }
 std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 position,std::int8_t floor) {
     // bhCheckCutArea / bhCheckCutAreaInnerTriangle, with its inclusive/exclusive

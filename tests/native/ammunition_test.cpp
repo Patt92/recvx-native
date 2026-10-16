@@ -112,6 +112,29 @@ int main(){
         // pip[0] == 0: iw zeigt auf pip[0] selbst, bn = 0 -> 0, nichts ändert sich.
         Inventory none;none.slots()[0]=0;const auto before=none.items;
         check(!none.count_bullet()&&none.items==before,"count without equipped weapon fired or mutated");});
+    // sub1.c:8907 bhSearchBullet laedt nur Combi-Zeilen mit Flag 0xF000. Die Granaten
+    // (Item 15/16/17/37 -> Werfer 6) tragen in combidata 0x4/0x5, nur Bogenmunition
+    // (Item 18/36 -> Waffe 7) traegt 0xF005. Der Granatwerfer hat also KEIN Original-
+    // Nachladen; neue Sorten kommen allein ueber den Statusbildschirm (Combi_01/02).
+    // Ein leerer Werfer bleibt beim Abzug leer, unabhaengig von der geladenen Sorte
+    // und der Munition im Gepaeck. Die Armbrust (Item 7) laedt dagegen nach.
+    section("bhSearchBullet: Granatwerfer laedt nicht, Armbrust laedt",[]{
+        for(unsigned sort:{0u,0x1000u,0x2000u,0x4000u})for(unsigned ammo:{15u,16u,17u,37u}){
+            const std::string at=" sort=0x"+std::to_string(sort)+" ammo="+std::to_string(ammo);
+            Inventory inv;std::fill(inv.slots(),inv.slots()+12,0);
+            inv.slots()[0]=2;inv.slots()[2]=Inventory::pack(6|sort,0);inv.slots()[3]=Inventory::pack(ammo,6);
+            const auto before=inv.items;
+            check(!inv.reload()&&inv.items==before,"empty grenade launcher reloaded although combidata carries no 0xF000 row"+at);
+            check(!inv.count_bullet(),"empty grenade launcher fired"+at);
+        }
+        Inventory bow;std::fill(bow.slots(),bow.slots()+12,0);
+        bow.slots()[0]=2;bow.slots()[2]=Inventory::pack(7,0);bow.slots()[3]=Inventory::pack(18,30);
+        check(bow.reload()&&Inventory::quantity(bow.slots()[2])==30&&Inventory::id(bow.slots()[3])==0,"bow gun must reload 30 arrows from the 0xF005 row");
+        Inventory gas;std::fill(gas.slots(),gas.slots()+12,0);
+        gas.slots()[0]=2;gas.slots()[2]=Inventory::pack(7|0x2000,0);gas.slots()[3]=Inventory::pack(36,20);
+        check(gas.reload()&&Inventory::quantity(gas.slots()[2])==20,"gas-round bow gun (item 155 row) must reload from item 36");
+        check(!gas.reload(),"gas bow must not reload a second time without ammunition");
+    });
     if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" ammunition section(s) failed.\n";return 1;}
     std::cout<<"GetItem question/answer/stack/endless, bhSearchBullet/Combi_99 (4 modes, 3 guns, side pack) and signed bhCountBullet passed.\n";
     return 0;

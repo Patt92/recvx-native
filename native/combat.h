@@ -10,6 +10,8 @@ namespace recvx {
 NJS_POINT3 weapon_fire_offset(unsigned weapon);
 // WpnTab[w].snd_wpno / seno0 (CallPlayerWeaponSeEx); false when the weapon has no shot sound.
 bool weapon_shot_sound(unsigned weapon,unsigned& bank,unsigned& program);
+// RECVX_CB_EFFECT.sys_ef: bhSetEffectTb(&sys->ef, ...) schreibt die gemeinsame Vorlage.
+void sys_ef_request(EffectSpawn& spawn,bool with_ax);
 struct CombatControls {bool aim=false,attack=false;int turn=0,vertical=0;bool next_target=false;};
 struct CombatOriginal;
 class CombatController {
@@ -45,6 +47,9 @@ private:
     std::filesystem::path data_,mods_;std::optional<WeaponAsset> asset_,bare_hands_;
     unsigned weapon_=~0u,player_=~0u;int vertical_=0;bool inhibited_=false;
     std::set<unsigned> struck_;
+    // Waffen ohne nativen Kampfweg, die gezogen/abgefeuert werden sollten (benannte Luecke),
+    // und die fuer unbound_routines() zusammengefuehrte Sicht.
+    std::set<std::string> unsupported_;mutable std::set<std::string> reported_;
     const PlayerAsset* body_=nullptr;
     AimSelection aim_;
 };

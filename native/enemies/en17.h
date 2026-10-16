@@ -1,6 +1,7 @@
 #ifndef RECVX_NATIVE_EN17_H
 #define RECVX_NATIVE_EN17_H
 #include "enemy_work.h"
+#include "enemy_dispatch.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -66,9 +67,12 @@ typedef struct {
 } RECVX_EN17_LIGHT;
 
 typedef struct {
-    /* en17.c:889-895 bhEne17_SetLinkWork: epp->mdl[0] = epw->mdl[mdl_no],
-       epp->mlwP = &epp->mdl[0], epp->mnwP = epw->mnwP. 1 = gelungen. */
-    int  (*link_model)(RECVX_ENEMY_WORK* child, RECVX_ENEMY_WORK* parent, uint32_t mdl_no);
+    /* en17.c:879 bhEne17_SetLinkWork: bhSetEnemy mit der 9-Wort-Vorlage (flg 0x80A1,
+       id), lkwkp = parent, lkono = lnk_obj, lox/loy/loz = 0, epp->mdl[0] = epw->mdl[mdl_no],
+       mlwP = &epp->mdl[0], mnwP = epw->mnwP. NULL bei voller Tabelle oder fehlendem Modell. */
+    RECVX_ENEMY_WORK* (*create_child)(RECVX_ENEMY_WORK* parent, uint32_t lnk_obj, uint32_t mdl_no, uint32_t id);
+    /* eneset.c:933 bhEne_SetCallFunc. */
+    void (*set_call_func)(uint32_t id, RECVX_ENEMY_PROC proc);
     /* en17.c:861-863: mlwP->objP = *mbp; obj_a = mbp[0]; obj_b = mbp[1]. */
     void (*select_morph_pair)(RECVX_ENEMY_WORK* w);
     /* bhCheckRoute(&epw->px, &plp->px, &out): 255 = kein Weg. */
@@ -102,12 +106,16 @@ typedef struct {
     void (*set_light)(uint32_t index, const RECVX_EN17_LIGHT* light);
     /* npCollisionCheckCC(a, b). */
     int  (*capsule_capsule)(const RECVX_ENEMY_CAPSULE* a, const RECVX_ENEMY_CAPSULE* b);
+    /* plp->mnwP: 1 = ewP->mnwP (en17.c:1463), 0 = plp->mnwPb (en17.c:1432). */
+    void (*player_library)(const RECVX_ENEMY_WORK* w, uint32_t source);
 } RECVX_EN17_SERVICES;
 
 void recvx_en17_bind(const RECVX_EN17_SERVICES* services);
 
-/* Einstieg bhEne17 (en17.c:347). */
+/* Einstieg bhEne17 (en17.c:347) und die Kettenwerke bhEne17LArm/RArm (en17sub.c:23/101). */
 void recvx_en17(RECVX_ENEMY_WORK* w);
+void recvx_en17_larm(RECVX_ENEMY_WORK* w);
+void recvx_en17_rarm(RECVX_ENEMY_WORK* w);
 
 /* Klingenspitze des linken Arms: njCalcPoint(arm->mlwP->owP[1].mtx,
    (0,0,-17.5)) (en54.c/en55.c CollCheck). 0, wenn Kettenwerk oder Dienst fehlen. */

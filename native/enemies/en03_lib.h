@@ -343,8 +343,9 @@ typedef struct RECVX_ENEMY_EXT {
        bhEne_SetMinceEffect :85, bhEne_SetNikuhenEffect :792). */
     const void* (*model_texp)(const RECVX_ENEMY_WORK* w);
     const void* (*model_texp_index)(const RECVX_ENEMY_WORK* w, int mdl_index);
-    /* hitchk.c bhCheckL2Water(&line, &out): Wasseroberflaeche. */
-    int  (*water_line)(const RECVX_ENEMY_VEC* from, const RECVX_ENEMY_VEC* to,
+    /* hitchk.c:5561 bhCheckL2Water(&line, &out): Wasseroberflaeche. `from`/`vec`
+       sind NJS_LINE (Lage und Richtungsvektor, kein Endpunkt). */
+    int  (*water_line)(const RECVX_ENEMY_VEC* from, const RECVX_ENEMY_VEC* vec,
                        RECVX_ENEMY_VEC* out);
     /* hitchk.c:5391 bhCheckDansa(pw): Stufenanhebung des Works in seiner
        aktuellen Lage. WICHTIG: bhCheckWall/bhCheckWallEx rufen sie NICHT

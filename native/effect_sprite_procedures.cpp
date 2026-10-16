@@ -8,12 +8,16 @@
 // und nehmen ihren Auftrag aus mode1 (Skriptbefehl), sobald type 0 ist.
 // Sprites lesen ihre beim Start festgehaltene UV-Tabelle zeilenweise, bis u == -1.
 #include "effect_sprites_internal.h"
+#include "effect_eff30x.h"
+#include "effect_rap_blood.h"
+#include "effect_eff130.h"
 #include "chunk_blend.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include "core_random.h"
 #include "weapon_tables.h"
 #include "enemies/en03_lib.h"
+#include "enemies/en15.h"
 #include "combat_geometry.h"
 #include <algorithm>
 #include <cmath>
@@ -2315,6 +2319,45 @@ void step_eff170(EffectSprite& s,const EffectContext&,bool&){step_bouncer(s,171,
 void step_eff016(EffectSprite& s,const EffectContext&,bool&){
     if(++s.ct0>=s.lkono){request_bomb({s.px,s.py,s.pz},20.0f,150,100);s.flg=0;}
 }
+// effsub1.c bhEff108 — Wasserring: ohne sys->st_flg 0x40 oder mit gm_flg 0x1 frei. Beim Start
+// px/pz in Kartenzellen (minus wt_px/wt_pz), Hoehe sy = 0.1*lkono, Radius car 1, Wachstum
+// spd = 0.5*sy. Je Pass ein Bresenham-Kreis (acht Oktanten) mit Radius car um (px, pz): jede
+// Zelle innerhalb wt_maxx/wt_maxz (unsigned short, negative Zellen fallen heraus) nimmt das
+// Maximum aus Zellhoehe und sy. Danach car += spd, spd klingt bis 0.1 um 0.008 ab, sy um
+// 0.01; unter 0 ist das Werk frei. Ohne angelegte Karte schreibt das Original hinter einen
+// alten wt_wvp (bhGetFreeMemory des Vorraums): benannte Luecke, kein Ersatz.
+void step_eff108(EffectSprite& s,const EffectContext& c,bool&){
+    if(!(c.st_flg&0x40u)||(c.gm_flg&1u)){s.flg=0;return;}
+    s.flg|=0x1000000u;
+    auto& wt=water_wave();
+    if(!wt.allocated){report_gap("bhEff108: sys->wt_wvp ohne bhObj005 (Original schreibt in fremden Speicher)");return;}
+    if(s.mode0==0){
+        s.px-=wt.px;s.pz-=wt.pz;
+        s.sy=0.1f*float(s.lkono);
+        s.car=1.0f;
+        s.spd=0.5f*s.sy;
+        s.mode0=1;
+    }
+    const int ox=int(s.px),oy=int(s.pz);
+    int r=int(s.car);
+    int e=3-(r*2);
+    auto raise=[&](int ax,int ay){
+        if((unsigned short)ax<unsigned(wt.maxx)&&(unsigned short)ay<unsigned(wt.maxz)){
+            float& wty=wt.wvp[std::size_t(ay+(ax*wt.zp))];
+            if(s.sy>wty)wty=s.sy;
+        }
+    };
+    for(int x=0;x<=r;++x){
+        raise(ox+x,oy+r);raise(ox+x,oy-r);raise(ox-x,oy+r);raise(ox-x,oy-r);
+        raise(ox+r,oy+x);raise(ox+r,oy-x);raise(ox-r,oy+x);raise(ox-r,oy-x);
+        if(e<0){e+=x*4;e+=6;}
+        else{e+=(x-r)*4;e+=10;r--;}
+    }
+    s.car+=s.spd;
+    if(s.spd>0.1f)s.spd-=0.008f;
+    s.sy-=0.01f;
+    if(s.sy<0)s.flg=0;
+}
 // effsub1.c bhEff109 — unsichtbarer Erzeuger von 108 (bhSetEffect mit Link-Nummer): Art 0
 // alle 16 Passes mit lkono 13, sonst alle lkono+1 Passes mit lkono = type; gesperrt bei gm_flg 1.
 void step_eff109(EffectSprite& s,const EffectContext& c,bool&){
@@ -3052,15 +3095,15 @@ void step_eff012(EffectSprite& s,const EffectContext&,bool& queued){
 // Wasser-/Oelstoesse: Art 0 steigt mit yn 1.0 (Daempfung 0.9) und setzt zusaetzlich das
 // erste Raumlicht; Art 1 steigt mit 1.4 und blendet ueber ct1 ein; Art 2 waechst je Pass
 // um 0.5; Art 3 ist die Reihe von Art 1 ohne Bewegung.
-// PORTIERUNGSLUECKE: rom->lgtp (die Lichttabelle des Raumes) hat im Host keinen Besitzer;
-// die Lichtzuweisung wird benannt gemeldet statt ersetzt.
+// rom->lgtp[0] liegt beim Lichtbesitzer des Raumes (EffectWorldHooks::room_light0).
 void step_eff019(EffectSprite& s,const EffectContext&,bool& queued){
     if(s.mode0==0){
         s.flg=0x4100001u;s.tex_id=19;quad_color(s,0xffffffffu);s.ani_ct=0;
         switch(s.type){
         case 0:
             s.bl_src=8;s.bl_dst=10;s.uv=eff019_t0;s.yn=1.0f;
-            report_gap("bhEff019: rom->lgtp[0] (Raumlicht type 101) nicht gebunden");
+            // effsub1.c bhEff019 type 0: rom->lgtp[0] nur, wenn dessen flg 0x2 nicht steht; rgb 3/2/1, nr 20, fr 60.
+            hook_room_light0({s.px,s.py,s.pz},{3.0f,2.0f,1.0f},20.0f,60.0f,true,"bhEff019: rom->lgtp[0] ohne Lichtbesitzer");
             break;
         case 1:
             quad_color(s,0x30ffffffu);s.bl_src=11;s.bl_dst=3;s.uv=eff019_t1;s.yn=1.4f;s.ct1=48;break;
@@ -4174,6 +4217,216 @@ void step_e00_acid(EffectSprite& s,const EffectContext&,bool& queued){
     s.zn+=(0.2f*effect_random())-0.1f;
     queued=true;
 }
+// effsub2.c:623 bhEff_E00_AcidGenerator (298) — die Quelle, die 257 nachschiebt. Erzeuger ist
+// en19.c:3336 bhEne19_SetDmgEffect Zeile 5 {2, 131072, 32, 298}: der Trefferpunkt dpx in das
+// Gelenk djnt_no zurueckgerechnet (invertierte Gelenkmatrix), Skalierung 0.000015258789 * 131072
+// = 2.0 und type 32 als Zahl der Ausgaben. Der Satz zeichnet selbst nichts (kein ef_trs).
+// Das ganze Werk ruht, solange der verlinkte Erzeuger stflg 0x1000000 traegt (:630) — auch der
+// Wartezaehler laeuft dann nicht. lkwkp ist hier ein Gegnerwerk; dessen stflg liegt wie bei
+// O_WRK auf 0x88 (types.h:121/:282), die Zeigerumdeutung des Originals trifft dasselbe Feld.
+// Wartezeit: ct0 = 5, dann je Pass `ct0-- == 0` (Postdekrement), also sechs Paesse bis mode0 2.
+// Ab dann je Pass zwei 257: einer an der eigenen Lage/Skalierung, einer um 0.5 * s * (r - 0.5)
+// je Achse versetzt mit 0.4-facher Skalierung. type zaehlt abwaerts, bei 0 ist der Satz frei.
+void step_e00_acid_generator(EffectSprite& s,const EffectContext&,bool&){
+    if(s.lkwkp&&(static_cast<const RECVX_ENEMY_WORK*>(s.lkwkp)->stflg&0x1000000u))return;
+    switch(s.mode0){
+    case 0:
+        s.ct0=5;
+        s.mode0++;
+        [[fallthrough]];
+    case 1:
+        if(s.ct0--==0){s.mode0++;return;}
+        break;
+    case 2:{
+        auto& r=request_template();
+        r.id=257;r.flg=1;r.type=0;
+        r.position={s.px,s.py,s.pz};
+        r.scale={s.sx,s.sy,s.sz};
+        r.ax=0;r.ay=0;
+        submit_template(0);
+        // :665-:667 ein Zufallswert je Achse, in dieser Reihenfolge (eigene Anweisungen).
+        r.position.x=s.px+(0.5f*(s.sx*(effect_random()-0.5f)));
+        r.position.y=s.py+(0.5f*(s.sy*(effect_random()-0.5f)));
+        r.position.z=s.pz+(0.5f*(s.sz*(effect_random()-0.5f)));
+        r.scale={0.4f*s.sx,0.4f*s.sy,0.4f*s.sz};
+        r.ax=0;r.ay=0;
+        submit_template(0);
+        if(s.type>0)s.type--;
+        if(s.type==0)s.flg=0;
+        break;}
+    default:break;
+    }
+}
+// en15.c:2616 bhEff_E15_Poison (397) — Nosferatus Gift. Erzeuger: _bhEne_SetPoison (Typ 1
+// Wolkenquelle und zwei Typ-0-Fluegel am Trefferknoten), SpecialAttack (Typ 4 Spritzer) und
+// _bhEne_SetPoison2 (Typ 3 Schwaden, Typ 2 Bodenlache). Textur ist txp[0] des Erzeugers
+// (stflg 0x20) mit tex_id = eff_info[type].texid; Blend 8/3; flg 0x80000 (Typ 0/1/2) bzw.
+// 0x180000. Je Pass: PoisonAttack (Kugel r 3 gegen plp->owP[5] r 2, ausser Typ 1/2, gesperrt
+// solange poison_attack_wait oder das Haltebit des Erzeugers steht), Bewegung mit Zufall und
+// sys->winds (Typ 3/4), Folgewolken (Typ 1/2), Bodenschnitt (Typ 4), UV-Zeile aus eff_info.
+// Zeichnung nur in mode0 1 (sys->ef_trs); das Ausblenden in mode0 2 setzt Farben, die das
+// Original nicht mehr zeichnet, weil kein Eintrag in ef_trs erfolgt.
+namespace e15 {
+struct Uv {std::int16_t u,v,sx,sy,frm,scale;};
+constexpr Uv uvinfo1_1[5]={{0,0,24,24,3,20},{0,24,24,24,2,20},{0,48,24,24,5,20},{0,24,24,24,3,20},{-1,0,0,0,0,0}};
+constexpr Uv uvinfo1_2[16]={{24,0,16,16,1,10},{40,0,24,24,2,10},{64,0,32,32,2,10},{96,0,40,40,2,10},{136,0,48,48,2,10},{184,0,48,48,2,10},{24,40,48,48,2,10},{72,40,48,48,3,10},{120,48,56,56,3,10},{176,48,56,56,4,10},{0,88,56,56,5,10},{56,88,56,56,5,10},{112,104,56,56,5,10},{168,104,56,56,5,10},{168,160,56,56,5,10},{-1,0,0,0,0,0}};
+constexpr Uv uvinfo1_3[23]={{24,0,16,16,1,10},{40,0,24,24,2,10},{64,0,32,32,2,10},{96,0,40,40,2,10},{136,0,48,48,2,10},{184,0,48,48,2,10},{24,40,48,48,2,10},{72,40,48,48,3,10},{24,40,48,48,2,10},{184,0,48,48,2,10},{24,40,48,48,2,10},{72,40,48,48,3,10},{184,0,48,48,2,10},{24,40,48,48,2,10},{72,40,48,48,3,10},{120,48,56,56,3,10},{176,48,56,56,4,10},{0,88,56,56,5,10},{56,88,56,56,5,10},{112,104,56,56,5,10},{168,104,56,56,5,10},{168,160,56,56,5,10},{-1,0,0,0,0,0}};
+constexpr Uv uvinfo2_1[30]={{0,0,16,16,1,10},{16,0,16,16,1,11},{32,0,24,24,1,12},{56,0,24,24,1,13},{80,0,24,24,1,14},{0,16,32,32,1,15},{80,0,24,24,1,16},{56,0,24,24,1,17},{32,0,24,24,1,18},{56,0,24,24,1,19},{80,0,24,24,1,20},{0,16,32,32,1,21},{80,0,24,24,1,22},{56,0,24,24,1,23},{32,0,24,24,1,24},{56,0,24,24,1,25},{80,0,24,24,1,26},{0,16,32,32,1,27},{0,48,32,32,1,28},{0,80,32,32,1,29},{0,112,32,32,1,30},{0,144,32,32,1,31},{32,24,40,40,1,32},{72,24,40,40,1,33},{32,64,40,40,1,34},{72,64,40,40,1,35},{32,104,40,40,1,36},{72,104,40,40,1,37},{32,144,40,40,1,38},{-1,0,0,0,0,0}};
+constexpr Uv uvinfo2_2[16]={{104,0,16,16,1,10},{112,16,24,24,2,10},{136,0,32,32,2,10},{168,0,40,40,2,10},{208,0,48,48,2,10},{112,40,48,48,2,10},{160,40,48,48,2,10},{208,48,48,48,3,10},{112,88,56,56,3,10},{72,144,56,56,4,10},{128,144,56,56,5,10},{184,144,56,56,5,10},{0,200,56,56,5,10},{56,200,56,56,5,10},{112,200,56,56,5,10},{-1,0,0,0,0,0}};
+// eff_info[5] (en15.c:2319): Texturbild und UV-Tabelle je Typ.
+struct Info {int texid;const Uv* uv;int rows;};
+constexpr Info eff_info[5]={{7,uvinfo2_2,16},{6,uvinfo1_2,16},{6,uvinfo1_3,23},{7,uvinfo2_1,30},{6,uvinfo1_1,5}};
+float rnd(){return effect_random();} // -rand() / -2147483648.0f
+RECVX_EN15_STATE* owner_state(const EffectSprite& s){
+    auto* w=static_cast<RECVX_ENEMY_WORK*>(s.owner_work);
+    return w?static_cast<RECVX_EN15_STATE*>(w->exp0):nullptr;
+}
+// en15.c:2438 _bhEne_SetPoison2(op, type, ofp, 0).
+void set_poison2(const EffectSprite& s,unsigned type,NJS_POINT3 ofp){
+    auto& ef=request_template();
+    ef.id=397;ef.type=type;ef.flg=1;
+    ef.position={s.px+ofp.x,s.py+ofp.y,s.pz+ofp.z};
+    ef.scale.x=ef.scale.y=2.0f;ef.scale.z=0.0f;
+    if(type==2){ef.ax=16384;ef.ay=0;}else{ef.ay=0;ef.ax=0;}
+    ef.mdlver=0;
+    submit_template(0);
+    auto& r=last_request();
+    r.stflg_or=0x20u;r.texture_from_slot=s.slot;r.tex_id_override=eff_info[type].texid;r.owner_work=s.owner_work;
+    r.has_velocity=true;r.velocity={s.xn,s.yn,s.zn};
+}
+// en15.c:2597 AddWindForce.
+void add_wind(EffectSprite& s,float reg){
+    const auto& wd=effect_weather();
+    NJS_VECTOR v1{reg*wd.winds*-njSin(wd.windr),0.0f,reg*wd.winds*-njCos(wd.windr)};
+    NJS_VECTOR v2{reg*wd.windsb*-njSin(wd.windrb),0.0f,reg*wd.windsb*-njCos(wd.windrb)};
+    v1.x-=v2.x;v1.y-=v2.y;v1.z-=v2.z;
+    s.xn+=v1.x;s.yn+=v1.y;s.zn+=v1.z;
+    s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+}
+// en15.c:2530 PoisonAttack mit :2172 bhEne15_AttackPlayerSS.
+void poison_attack(EffectSprite& s){
+    signed char& wait=*recvx_en15_poison_attack_wait();
+    if(wait!=0)return;
+    if(s.type==1||s.type==2)return;
+    const RECVX_CB_SPHERE col{{s.px,s.py,s.pz},3.0f};
+    RECVX_ENEMY_PLAYER p;
+    if(!hook_player_get(p,"bhEff_E15_Poison: plp"))return;
+    const NJS_POINT3 attack_v{p.pos.x-col.c.x,p.pos.y-col.c.y,p.pos.z-col.c.z};
+    auto* es=owner_state(s);
+    if(!es){report_gap("bhEff_E15_Poison: op->exp0 ohne Nosferatu-Werk");return;}
+    if(es->hold&1)return;
+    float m[16];
+    if(!hook_player_joint(5,m,"bhEff_E15_Poison: plp->mlwP->owP[5]"))return;
+    const RECVX_CB_SPHERE plcol{{m[12],m[13],m[14]},2.0f};
+    if(!recvx_cb_check_ss(&plcol,&col))return;
+    // bhEne15_AttackPlayerSS: dax/day = NJM_RAD_ANG(atan2f), dv, djnt_no 5, dp = Kugelmitte,
+    // dam[5] (kein Leser im Spielerbesitzer), hp -= 3, flg |= 4.
+    constexpr float k=65536.0f/(3.141592f*2.0f);
+    hook_player_hit(int(std::atan2(attack_v.y,attack_v.z)*k),int(std::atan2(attack_v.x,attack_v.z)*k),5,{col.c.x,col.c.y,col.c.z});
+    hook_player_dv(attack_v);
+    p.hp-=3;p.flg|=4u;
+    if(p.mode0!=1&&p.mode0!=0){
+        p.hp+=3;
+    }else{
+        if(es->poison>5){if(double(rnd())<0.6)p.stflg|=0x200000u;}
+        else es->poison++;
+        p.flg|=4u;
+        if(p.hp<0)p.hp=0;
+        p.mode0=2;p.mode1=0;p.mode2=0;p.mode3=0;
+    }
+    hook_player_set(p);
+    wait=20;
+}
+}
+void step_e15_poison(EffectSprite& s,const EffectContext&,bool& queued){
+    using namespace e15;
+    if(s.type>=5){report_gap("bhEff_E15_Poison: type ausserhalb eff_info[5]");s.flg=0;return;}
+    switch(s.mode0){
+    case 0:
+        for(auto& v:s.tv)v.col=0xFFFFFFFFu;
+        s.bl_src=8;s.bl_dst=3;
+        if(s.type==1||s.type==0||s.type==2)s.flg|=0x80000u;
+        else s.flg|=0x180000u;
+        s.stflg|=0x20u;
+        s.sxb=s.sx;s.syb=s.sy;
+        s.ct0=s.ct1=s.ct2=0;
+        s.ct3=(s.type==4)?99:0;
+        if(s.type==1||s.type==2)hook_enemy_se(s.owner_work,{s.px,s.py,s.pz},74505);
+        s.mode0++;
+        s.mtn_attr=0;
+        [[fallthrough]];
+    case 1:{
+        const Info& info=eff_info[s.type];
+        poison_attack(s);
+        switch(s.type){
+        case 4:
+            s.yn-=1.3f;
+            s.xn*=0.9f;s.yn*=0.9f;s.zn*=0.9f;
+            [[fallthrough]];
+        case 3:
+            if(s.type==3)s.yn-=0.044f;
+            s.xn=float(s.xn+(double(rnd())-0.5)/20.0);
+            s.yn=float(s.yn+(double(rnd())-0.5)/20.0);
+            s.zn=float(s.zn+(double(rnd())-0.5)/20.0);
+            add_wind(s,0.03f);
+            if(s.py<-90.0f){s.flg=0;return;}
+            break;
+        default:break;
+        }
+        switch(s.type){
+        case 1:case 2:{
+            const double r=double(rnd());
+            if(s.mtn_attr!=0?r<0.6:r<0.1){
+                NJS_POINT3 pos;
+                pos.x=2.0f*rnd();pos.y=2.0f*rnd();pos.z=2.0f*rnd();
+                const auto& wd=effect_weather();
+                s.xn=(0.03f*wd.winds)*-njSin(wd.windr);
+                s.yn=(s.type==1)?0.0f:1.2f;
+                s.zn=(0.03f*wd.winds)*-njCos(wd.windr);
+                set_poison2(s,3,pos);
+                s.mtn_attr++;
+                if(s.mtn_attr>10)s.mtn_attr=0;
+            }
+            break;}
+        case 4:{
+            NJS_POINT3 end{s.px,s.py,s.pz},n{};
+            if(collision_line({s.pxb,s.pyb,s.pzb},end,n,0x4400u,-1,"bhEff_E15_Poison: bhCollisionCheckLine2 ohne Wandsatz")){
+                s.py=0;
+                set_poison2(s,2,{0.0f,0.01f,0.0f});
+                s.flg=0;return;
+            }
+            break;}
+        default:break;
+        }
+        if(s.ct0<0||s.ct0>=info.rows){report_gap("bhEff_E15_Poison: ct0 ausserhalb der UV-Tabelle");s.flg=0;return;}
+        const Uv& uv=info.uv[s.ct0];
+        s.tv[0].u=uv.u/256.0f;
+        s.tv[0].v=uv.v/256.0f;
+        s.tv[1].u=((uv.u+uv.sx)-1)/256.0f;
+        s.tv[1].v=s.tv[0].v;
+        s.tv[2].u=s.tv[0].u;
+        s.tv[2].v=((uv.v+uv.sy)-1)/256.0f;
+        s.tv[3].u=s.tv[1].u;
+        s.tv[3].v=s.tv[2].v;
+        s.sx=s.sy=s.sz=uv.scale/10.0f;
+        queued=true; // sys->ef_trs (bis 512 Eintraege)
+        s.ct2++;
+        if(s.ct1<uv.frm)s.ct1++;
+        else{s.ct0++;s.ct1=0;}
+        if(info.uv[s.ct0].u==-1){
+            if(s.ct3!=0){s.ct0=s.ct1=0;s.ct3--;break;}
+            s.ct0=0;s.mode0=2;
+        }
+        return;}
+    case 2:
+        if(s.ct0<15)s.ct0++;
+        else{s.flg=0;break;}
+        for(auto& v:s.tv)v.col=(std::uint32_t(0xFF-(s.ct0*17))<<24)|0xFFFFFFu;
+        break;
+    case 4:break;
+    default:break;
+    }
+}
 // effsub2.c:3963 bhEff_E14_Fire (269) — Feuerlache der Alexia-Saeure (Kind von bhEff_E03_Acid type 6).
 // Texturgruppe 80 Bild 1, Farbe 0x80FFFFFF, Blend 8/3, flg 0x24080000, Ausrichtung 3; die beiden
 // UV-Tabellen sind byteidentisch mit denen von bhEff_E12_Fire (e12::fire_uv0/1), Basis 0.09375.
@@ -4361,7 +4614,7 @@ void step_e00_mince(EffectSprite& s,const EffectContext&,bool& queued){
     queued=true;
 }
 const HandEffectProcedure hand_effect_procedures[]={
-    {253,step_e02_sand_dust},{254,step_e02_sand_particle},{256,step_e03_acid},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},
+    {253,step_e02_sand_dust},{254,step_e02_sand_particle},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},
     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
     {8,step_eff008},{10,step_eff010},{11,step_eff011},{14,step_eff014},{15,step_eff015},{29,step_eff029},
     {101,step_eff101},{103,step_eff103},{104,step_eff104},{116,step_eff116},{117,step_eff117},{119,step_eff119},
@@ -4385,7 +4638,7 @@ const HandEffectProcedure hand_effect_procedures[]={
     {234,step_eff234},{235,step_eff235},{237,step_eff237},{238,step_eff238},{239,step_eff239},
     {240,step_eff240},{242,step_eff242},{244,step_eff244},{245,step_eff245},{246,step_eff246},
     {247,step_eff247},{248,step_eff248},{249,step_eff249},{147,step_eff147},{148,step_eff148},
-    {165,step_eff165},{170,step_eff170},{16,step_eff016},{109,step_eff109},{115,step_eff115},
+    {165,step_eff165},{170,step_eff170},{16,step_eff016},{108,step_eff108},{109,step_eff109},{115,step_eff115},
     {113,step_eff113},{102,step_eff102},{105,step_eff105},
     {100,step_eff100},{107,step_eff107},{22,step_eff022},{24,step_eff024},{25,step_eff025},
     {27,step_eff027},{217,step_eff217},{143,step_eff143},{243,step_eff243},{236,step_eff236},

@@ -76,6 +76,34 @@ int main(){try{
     const auto fm=player.sample_object_work(1,player.local_pose(0,65536),player.pose(0,65536),{15,15},nullptr,true);
     near(fm.triangles[0].vertices[0].position.x,23,"Skin-FM low-index influence differs from regular skin");
     near(fm.triangles[0].vertices[0].position.y,1,"Skin-FM half-weight interpolation differs");
+    // sp_evt.c:1478-1500: roher objP-Zeichenweg nach npRetSkinConvert, nicht npCalcSkin.
+    // flags 4: Translation/Rotation aktiv, Skalierung aus; Kind um 90 Grad gedreht.
+    auto tree_pose=player.local_pose(0,65536);
+    const auto tree=player.sample_tree(tree_pose,{4,4});
+    near(tree.triangles[0].vertices[0].position.x,22,"local tree must use the mesh object transform");
+    near(tree.triangles[0].vertices[0].position.y,2,"local tree must not interpolate skin weights");
+    tree_pose[1].position.x=5; // bestehender objP-Schreibvorgang, keine neue Motion
+    auto converted=player.live_stream();const auto saved=converted;
+    const auto restored=player.sample_tree(tree_pose,{4,4},&converted);
+    // npRetSkinConvert addiert den aktuellen Einflussursprung minus Meshursprung.
+    near(restored.triangles[0].vertices[0].position.x,25,"npRetSkinConvert must use current local translations");
+    near(restored.triangles[0].vertices[0].position.y,2,"unskinned tree rotation differs");
+    check(converted==saved,"computer drawing modified the owned converted vertex stream");
+    const auto no_live=player.sample_tree(tree_pose,{4,4});
+    near(no_live.triangles[0].vertices[0].position.x,25,"immutable and converted model trees disagree");
+    check(player.sample_tree(tree_pose,{4,12}).triangles.empty(),"local object tree ignored evalflags 0x8");
+    {   // Einfluss ungleich Meshobjekt: npRetSkinConvert (njplus.c:1309) verschiebt den
+        // Punkt um (Einflussknoten jetzt - Meshknoten jetzt); mit Bindabstand exakt der Rohwert,
+        // mit verschobenem Kind (x 5 statt 2) um -3 in x. Ohne Konvertierung laege y bei 0.
+        auto alt=f.bytes;u32(alt,f.weight+4,0x00090000);recvx::PlayerAsset other(alt);
+        auto rest=other.local_pose(0,65536);
+        near(other.sample_tree(rest,{4,4}).triangles[0].vertices[1].position.x,20,"bind-relative tree must restore the raw vertex");
+        near(other.sample_tree(rest,{4,4}).triangles[0].vertices[1].position.y,0,"bind-relative tree must restore the raw vertex Y");
+        rest[1].position.x=5;
+        const auto moved=other.sample_tree(rest,{4,4});
+        near(moved.triangles[0].vertices[1].position.x,23,"npRetSkinConvert X with moved mesh object");
+        near(moved.triangles[0].vertices[1].position.y,-3,"npRetSkinConvert must apply the current influence/mesh offset");
+    }
     near(player.sample(0,0).triangles[0].vertices[0].position.x,14,"native rendering mutated immutable source");
     check(player.model_index(1)==1,"script node lookup incorrect");rejects([&]{player.model_index(2);},"invalid script node accepted");
     edits[2].position=NJS_POINT3{};rejects([&]{player.sample(0,0,{},0,nullptr,edits);},"override outside skeleton accepted");

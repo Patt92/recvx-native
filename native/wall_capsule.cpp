@@ -1,4 +1,5 @@
 #include "wall_capsule.h"
+#include "ninja_collision.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include <cmath>
@@ -93,6 +94,45 @@ float distance_p2pl(const V& p,const Plane& pl,V& cp){
     float vx=pl.vx,vy=pl.vy,vz=pl.vz,length=njInvertSqrt(vx*vx+vy*vy+vz*vz);vx*=length;vy*=length;vz*=length;
     length=vx*(p.x-pl.px)+vy*(p.y-pl.py)+vz*(p.z-pl.pz);
     cp={p.x-vx*length,p.y-vy*length,p.z-vz*length};return std::fabs(length);
+}
+// ps2_NaColi.c:1361 njCheckPlane4IncludePoint: Winkelsumme der vier Richtungen zum Punkt.
+int check_plane4_include_point(const V& p1,const V& p2,const V& p3,const V& p4,const V& pc){
+    const float cx=pc.x,cy=pc.y,cz=pc.z;
+    float vx1=p1.x-cx,vy1=p1.y-cy,vz1=p1.z-cz,t1=vx1*vx1+vy1*vy1+vz1*vz1;if(t1<0.001f)return 1;
+    t1=njInvertSqrt(t1);vx1*=t1;vy1*=t1;vz1*=t1;
+    float vx2=p2.x-cx,vy2=p2.y-cy,vz2=p2.z-cz,t2=vx2*vx2+vy2*vy2+vz2*vz2;if(t2<0.001f)return 1;
+    t2=njInvertSqrt(t2);vx2*=t2;vy2*=t2;vz2*=t2;
+    float vx3=p3.x-cx,vy3=p3.y-cy,vz3=p3.z-cz,t3=vx3*vx3+vy3*vy3+vz3*vz3;if(t3<0.001f)return 1;
+    t3=njInvertSqrt(t3);vx3*=t3;vy3*=t3;vz3*=t3;
+    float vx4=p4.x-cx,vy4=p4.y-cy,vz4=p4.z-cz,t4=vx4*vx4+vy4*vy4+vz4*vz4;if(t4<0.001f)return 1;
+    t4=njInvertSqrt(t4);vx4*=t4;vy4*=t4;vz4*=t4;
+    t1=vx1*vx2+vy1*vy2+vz1*vz2;if(t1<-1.0f||1.0f<t1)return 0;
+    t2=vx2*vx3+vy2*vy3+vz2*vz3;if(t2<-1.0f||1.0f<t2)return 0;
+    t3=vx3*vx4+vy3*vy4+vz3*vz4;if(t3<-1.0f||1.0f<t3)return 0;
+    t4=vx4*vx1+vy4*vy1+vz4*vz1;if(t4<-1.0f||1.0f<t4)return 0;
+    if(std::acos(t1)+std::acos(t2)+std::acos(t3)+std::acos(t4)<6.25f)return 0;
+    return 1;
+}
+// ps2_NaColi.c:1032 njCollisionCheckBC2: zwoelf Kanten (Kapseln r 0, Reihenfolge der
+// c1/c2-Ersetzungen des Originals), dann die sechs Flaechen gegen c1 und c2 mit den festen
+// Achsennormalen der Tabelle (auch bei schiefem Quader), zuletzt die Achse als Gerade.
+int check_bc2(const V v[8],const C& capsule){
+    static constexpr unsigned vertex[6][4]={{0,1,2,3},{4,7,6,5},{0,3,7,4},{2,1,5,6},{1,0,4,5},{3,2,6,7}};
+    static constexpr V normal[6]={{0,1.0f,0},{0,-1.0f,0},{0,0,1.0f},{0,0,-1.0f},{-1.0f,0,0},{1.0f,0,0}};
+    static constexpr unsigned edges[12][2]={{0,3},{0,4},{0,1},{5,1},{5,4},{5,6},{2,6},{2,1},{2,3},{7,3},{7,4},{7,6}};
+    for(const auto& e:edges){const C edge{v[e[0]],v[e[1]],0};if(check_cc(capsule,edge))return 1;}
+    static constexpr unsigned face_point[6]={0,4,0,1,0,2};
+    static constexpr unsigned face_quad[6][4]={{0,1,2,3},{4,5,6,7},{0,3,7,4},{1,2,6,5},{0,1,5,4},{2,3,7,6}};
+    const float r=capsule.r;
+    for(const V* end:{&capsule.c1,&capsule.c2}){
+        for(unsigned i=0;i<6;++i){
+            const V& o=v[face_point[i]];const Plane pl{o.x,o.y,o.z,normal[i].x,normal[i].y,normal[i].z};V cross;
+            if(distance_p2pl(*end,pl,cross)<=r&&check_plane4_include_point(v[face_quad[i][0]],v[face_quad[i][1]],v[face_quad[i][2]],v[face_quad[i][3]],cross))return 1;
+        }
+    }
+    const L line{capsule.c1.x,capsule.c1.y,capsule.c1.z,capsule.c2.x-capsule.c1.x,capsule.c2.y-capsule.c1.y,capsule.c2.z-capsule.c1.z};
+    for(unsigned i=0;i<6;++i)if(check_plane4_and_line(v[vertex[i][0]],v[vertex[i][1]],v[vertex[i][2]],v[vertex[i][3]],normal[i],line))return 1;
+    return 0;
 }
 // ps2_NaColi.c:246 njDistanceL2PL (cp != NULL)
 float distance_l2pl(const L& l,const Plane& pl,V& cp){
@@ -290,3 +330,5 @@ int check_collision_4_sound(const std::vector<CollisionWall>& walls,float room_h
     return check_c2_wall(walls,room_height,capsule)?-0x1C:0;
 }
 }
+extern "C" int recvx_nj_check_cc(const RECVX_CB_CAPSULE* a,const RECVX_CB_CAPSULE* b){return recvx::check_cc(*a,*b);}
+extern "C" int recvx_nj_check_bc2(const RECVX_CB_VEC box[8],const RECVX_CB_CAPSULE* capsule){return recvx::check_bc2(box,*capsule);}

@@ -31,6 +31,15 @@
 #include <functional>
 namespace recvx {
 struct PlayerGroundWork {NJS_POINT3 ground{};NJS_POINT3 water_c1{},water_c2{};float water_radius=0;std::optional<GroundHit> hit;};
+// O_WRK von bhObj005 (objitm.c:1213, bhJumpObject[5] Wasserflaeche): mode0, ct0..ct3, xn/zn,
+// exp1 (der Original-vlist: base/base_normals, in dessen x das Original je Eckpunkt den
+// Zeiger auf seine Kartenzelle ablegt: cell) und exp2 (die gezeichnete Kopie: vertices/
+// normals). uv_* ist die Summe der npSetOffsetUV2-Aufrufe auf objP[0].model->plist.
+struct WaterWaveWork {unsigned mode0=0;int ct0=0,ct1=0,ct2=0,ct3=0;float xn=0,zn=0;unsigned chunk_type=0;
+    std::vector<NJS_POINT3> base,vertices;std::vector<NJS_VECTOR> base_normals,normals;std::vector<int> cell;
+    bool orphan=false; // objitm.c:1230: zweites Wasserobjekt ohne eigene exp1/exp2
+    bool uv_ok=false;std::size_t uv_chunk=0;int uv_u=0,uv_v=0;
+    bool neighbour_gap=false,range_gap=false;};
 struct WorldEntity {
     std::vector<FaceParameter> face_keys;unsigned face_frame=0,face_flags=0;
     // face.c:321 bhSetLip only stores the selected stream in exp0[268];
@@ -91,6 +100,8 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // bhSetAlphaFadeObject (objitm.c:721): flg 0x200000 with pv[0] jntno/jnt_n and pv[1] alpha/count;
     // npSetAllMatAlphaColor rewrites the node materials for good (node -> diffuse alpha byte).
     bool alpha_fade=false;int alpha_jntno=0,alpha_jnt_n=0;float alpha_target=0,alpha_count=0;std::map<unsigned,unsigned> node_alpha;
+    // bhObj005: nur Objekte vom Typ 5 (objitm.c:361 bhJumpObject[op->type]).
+    std::shared_ptr<WaterWaveWork> water;
     // bhCyoutenHenkei family: mdflg bit 2 plus shp_ct (0..1000) and, for
     // bhCyoutenHenkeiSetEX, the original mbp model indices obj_a/obj_b.
     // Vertex interpolation/rendering is pending; the shape clock is exact.
@@ -126,6 +137,11 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // Beschreibbarer Vertexstrom des gezeichneten mlwP->objP (bhEne13_ScaleModel
     // schreibt p[0]/p[1] an Ort und Stelle). Leer = unveraenderte Modelldaten.
     std::vector<std::uint8_t> live_model;
+    std::map<unsigned,std::vector<std::uint8_t>> live_models;
+    const std::vector<std::uint8_t>* live_stream(unsigned model)const{
+        if(!model)return live_model.empty()?nullptr:&live_model;
+        const auto at=live_models.find(model);return at==live_models.end()?nullptr:&at->second;
+    }
     // npSetAllMatColor(mlwP->objP, obj_num, color) (njplus.c:1375) patcht in
     // JEDEM Objekt des Baums die Materialchunks 17..23: B/G/R werden immer
     // geschrieben, A nur, wenn der Modellwert nicht 0 ist. Der Wert gehoert
@@ -148,6 +164,28 @@ public:
     bool damage(unsigned index,int weapon,int amount,unsigned comb_flg,NJS_POINT3 position,NJS_POINT3 direction,int hit_joint=-1);
     // Original en01 routines the damage/death port called while they are still unbound (reported, never hidden).
     const std::set<std::string>& unbound_enemy_routines()const{return unbound_enemy_;}
+    // effect.c:268/effsub3.c AllocOworkOne: naechster freier eff[512]-Platz ab `start`, genullt und mit
+    // flg 2 vorgemerkt (-1 = voll). Die Erzeuger (bhSetRapEff, bhSetEffectTb) schreiben flg 1 selbst.
+    int reserve_effect_slot(unsigned start=0);
+    // effect.c:869 bhControlEffect fuehrt mit bhEff349 (effsub3.c:3234) Gegnercode aus:
+    // en19.c:250 traegt bhEne19_TyBloodSet als fnc_prcP ein, und die Routine ruft
+    // bhGetGroundPosition, mlwP->objP[18] und bhSetEffectTb auf. Im Original ist das
+    // derselbe sys/rom/eff-Satz wie im Gegnerpass; nativ sind der Weltzeiger und die
+    // Gegnerdienste nur waehrend bhControlEnemy gebunden. Dieser Rahmen stellt beide
+    // fuer den Effektpass her und setzt sie danach genau auf ihren vorigen Stand zurueck.
+    // Implementierung in native/world_enemies.cpp, wo diese Bindungen liegen.
+    class EnemyCallbackFrame {
+    public:
+        explicit EnemyCallbackFrame(RoomWorld* world);
+        ~EnemyCallbackFrame();
+        EnemyCallbackFrame(const EnemyCallbackFrame&)=delete;
+        EnemyCallbackFrame& operator=(const EnemyCallbackFrame&)=delete;
+    private:
+        RoomWorld* previous_world_;
+        // Der vorige Stand von recvx_en19_bound(); als void*, damit world.h die
+        // Dienststruktur des Gegnermoduls nicht kennen muss.
+        const void* previous_en19_;
+    };
     std::size_t blood_particles()const{return particles_.active();}
     // event.c:4302 bhEffBloodSet: epw->djnt_no und bhEne_SetBlood2 am Gegnerwork.
     bool script_blood_set(unsigned index,unsigned joint,int type,unsigned flags,int turn,NJS_POINT3 offset);
@@ -272,6 +310,8 @@ public:
     void clear_pad_on(uint32_t bits){if(pad_clear_cb_)pad_clear_cb_(bits);}
     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
     int spawn_player_effect(const EffectSpawn& effect){return spawn_effect(effect,1,0);}
+    // bhSetEffectTb(eft, &ops, NULL, jno) aus dem Spielerkampf: derselbe Pool, ohne Link.
+    int spawn_unlinked_effect(const EffectSpawn& effect){return spawn_effect(effect,0,0);}
     // bhSetEffectTb for bhSetGunFire requests (bhEff003); link_kind 1 = player, 2 = enemy.
     int spawn_weapon_flash(const RECVX_CB_EFFECT& effect,unsigned link_kind,unsigned link_index);
     void set_gun_light(const RECVX_CB_LIGHT& light); // rom->lgtp[0] from bhSetGunFire
@@ -280,6 +320,11 @@ public:
     bool start_item_box(unsigned object);
     // bhControlObject for every type-100 room object: bhJumpObject[100] = bhObjItmBox.
     void control_item_boxes(unsigned& cb_flg,unsigned& player_stflg);
+    // objitm.c:1213 bhObj005 fuer jedes Typ-5-Objekt (Wasserflaeche) im bhControlObjItm-Durchlauf:
+    // legt sys->wt_* an (water_wave()), setzt sys->st_flg 0x40, verschiebt je Pass die
+    // Eckpunkte/Normalen der gezeichneten Kopie und laesst die Karte abklingen.
+    void control_water_objects();
+    const WaterWaveWork* water_work(unsigned object)const;
     // bhSetExplosion: the effect works, flash light and sound; `view` is the camera direction (cam.vx/vy/vz).
     void explode(NJS_POINT3 position,NJS_POINT3 view);
     // Blast damage dealt to the player by bhCheckBombAtari since the last call (hp points).
@@ -304,10 +349,12 @@ public:
     void set_player_weapon(unsigned wpnr_no){player_weapon_=wpnr_no;} // plp->wpnr_no for bhControlPlayer effects
     void set_player_way(std::int16_t way){player_way_=way;} // plp->way, written by the combat pass (player.c:1707/4992)
     void set_player_speed(float spd){player_spd_=spd;} // plp->spd of the native action pass
+    std::optional<float> take_player_speed(){if(!player_spd_written_)return std::nullopt;player_spd_written_=false;return player_spd_;}
     // PEXP0_I(0x14) dmlvl des nativen Aktionsbesitzers (en05.c:5627 bhEne05_CheckJump liest es).
     void set_player_dmlvl(std::int32_t dmlvl){player_dmlvl_=dmlvl;player_dmlvl_bound_=true;}
     // plp->stflg |= 0x80000 (en05.c:1827/1973/2852): der Giftzustand gehoert dem Inventar.
     bool take_player_poison(){const bool v=player_poison_request_;player_poison_request_=false;return v;}
+    bool take_player_infect(){const bool v=player_infect_request_;player_infect_request_=false;return v;}
     // StartVibrationEx(AtrbId, VibNo) requests of enemies, zonzon helpers and
     // event opcode 0x9f; SetEventVibrationMode of opcode 0x9e. The runtime owns
     // the vibration unit and drains these once per tick.
@@ -356,6 +403,10 @@ public:
     const std::deque<WorldEntity>& enemy_children()const{return enemy_children_;}
     // effsub1b.c:101 bhDraw134: die Kran-Anzeige (2D, Texturgruppe 44) ueber dem Bild.
     void draw_ufo_hud(SoftwareRenderer& image)const;
+    // effect.c:905 bhDrawNtxEffect2D(sys->ef_ntx2d): untexturierte Schirmpolygone der
+    // Effektsaetze dieses Passes (bhEff130 type 3), njDrawPolygon(pvp, pn, 1) ueber das
+    // fertige Bild, Tore flg/stflg 0x1000000 und gm_flg 0x4000 + mdflg 0x40.
+    void draw_ntx2d_effects(SoftwareRenderer& image)const;
     // face.c:79 bhControlMask fuer einen Besitzer mit Maskendaten (Gegnerpass id > 90 oder Weltpass).
     void control_mask(WorldEntity& e,const PlayerAsset& actor);
     struct FogView {bool enabled;std::uint32_t color;float near_range,far_range;int ct;};
@@ -378,6 +429,12 @@ public:
     // that contains the probe, room flrp before bhObj001's mflrp. `top` then
     // receives fp->py + fp->h, the surface the original splash is placed on.
     bool water_top(NJS_POINT3 position,float& top)const;
+    // hitchk.c:5561 bhCheckL2Water: line (origin, vec) against the top plane of
+    // the same water areas in the same order; the first hit within |vec| wins.
+    bool l2_water(NJS_POINT3 origin,NJS_POINT3 vec,NJS_POINT3& hit)const;
+    // pwksub.c:2643 bhSetWaterSplash4: two id-11 effects (type+10) from the
+    // shared sys->ef template, ay = ang +/- 16384, lkono 0 and 1.
+    void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz);
     void player_footstep(const PlayerAsset& player);
     void player_foot_sound(const PlayerAsset& player,unsigned node,unsigned type);
     // pl_smove01: CallPlayerFootStepSe(plp->flr_snd, type, 1) ohne bhCheckFloorSound.
@@ -522,7 +579,6 @@ private:
     int spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
     void gun_fire(unsigned kind,unsigned index,const BoneMatrix& joint,unsigned wno,unsigned jno,unsigned hand,int ang);
     void process_effect_output();
-    int reserve_effect_slot(unsigned start=0);
     void tick_shadow(unsigned slot);
     int en11_light_control(RECVX_ENEMY_WORK* w,int mode);
     static void bind_en11_services();
@@ -532,6 +588,9 @@ private:
     unsigned char player_shadow_tag_=0;
     // effsub2.c:1717 bhEff_E03_Shadow: der Schatten von bhSetShadow mit id 258 (en23.c:613).
     void tick_e03_shadow(unsigned slot);
+    // effsub3.c:1640 rySetShadow / :1683 bhEff304 (Modifier-Schatten ueber sys->efm[1], drei owP-Gelenke).
+    int ry_set_shadow(RECVX_ENEMY_WORK* w,int obj0,int obj1,int obj2,float off_a,float off_b);
+    void tick_ry_shadow(unsigned slot);
     void write_particle_slot(unsigned slot,unsigned flags,unsigned id);
     void bomb_damage(const BombRequest& bomb);
     EffectParticles particles_;
@@ -556,10 +615,13 @@ private:
     WorldEntity* create_enemy_child(RECVX_ENEMY_WORK* parent,const RECVX_ENEMY_TEMPLATE& tmpl,unsigned base,RECVX_ENEMY_WORK* share);
     // eneset.c:797 bhDrawEnemy fuer die Kindworks aus bhSetEnemy (enemy_children_).
     void append_enemy_children(Scene& scene)const;
+    // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP.
+    void append_claw_model(Scene& scene,const EffectSprite& sprite)const;
     void bind_enemy_services();
     void init_enemy_works();
     void control_enemy_works();
     void control_enemy_player_motion();
+    int player_set_motion_now(int add,const MotionClip*& clip);
     const MotionClip* player_enemy_clip()const;
     // mlwP eines Works: der Objektbaum, den er liest und schreibt. Ein Kind
     // mit `epp->mlwP = epw->mdl` (en01.c:2827) hat keinen eigenen.
@@ -604,8 +666,14 @@ private:
     struct SpriteWork {const std::vector<SceneTexture>* texture_list=nullptr;EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
-    bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
+    bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false,player_infect_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
     float player_spd_=0; // plp->spd
+    // plp->spd, das ein Gegnerpass waehrend des Griffs schreibt (en15.c:2915/3118): der Besitzer
+    // ist die native Aktion (runtime action.spd); take_player_speed reicht den Wert dorthin zurueck.
+    bool player_spd_written_=false;
+    // plp->dax/day (en15.c:2098/2153/1379, Rueckstossrichtung des Griffs).
+    std::int32_t player_dax_=0,player_day_=0;
+    std::int32_t player_axp_=0; // plp->axp (en17.c:1388/1412, bhAddSpeed)
     // player.c:1366-1387 bhControlPlayer: pxb/pyb/pzb of the previous pass and
     // EXP_WORK nlxb/nlyb/nlzb, the last settled root position (owP[0]).
     NJS_POINT3 player_prev_pos_{},player_last_tick_pos_{},player_nl_{};bool player_prev_valid_=false;
@@ -685,9 +753,12 @@ private:
     // Clip (kein Ersatzclipp, keine erfundene Oberkoerperpose).
     const MotionClip* segmented_clip(const MotionClip& lower,const MotionClip& upper,std::map<unsigned,MotionClip>& cache,unsigned key)const;
     std::vector<CollisionWall> walls_;
-    struct FloorSound {CollisionWall area;unsigned sound;};
-    std::vector<FloorSound> floor_sounds_;std::vector<CollisionWall> effect_water_room_,effect_water_mobile_;
-    std::vector<EnemyArea> enemy_areas_;EnemySpawnContext enemy_spawn_;
+    // rom->flrp: die eine Bodenflaechentabelle des Raums (Bodenklang = prm0, Wasser type 3,
+    // Gegnerflaechen type 2). Skriptbefehle 0x0c/0x7c schreiben hier; alle Leser sehen dieselben
+    // Saetze. effect_water_mobile_ ist sys->mflrp (bhObj001), je Pass aus push_ neu gefuellt.
+    std::vector<CollisionWall> room_floors_,effect_water_mobile_;
+    EnemySpawnContext enemy_spawn_;
+    std::vector<EnemyArea> enemy_areas()const; // ATR_WORK-Sicht fuer activate_enemy_spawn
     std::vector<CollisionWall> route_areas_;std::vector<std::uint8_t> route_table_; // rom->rutp / rom->ruttp (rutchk.c)
     unsigned footstep_slot_=4;
     std::size_t footstep_motion_=~std::size_t(0);
@@ -733,10 +804,13 @@ private:
     std::vector<NJS_POINT3> positions_;
     mutable std::map<std::pair<unsigned,unsigned>,std::vector<BoneMatrix>> actor_nodes_;
     std::array<NJS_POINT3,4> ambient_{};
+    mutable NJS_POINT3 ambient_material_{1,1,1}; // ps2_NinjaCnk.c:158, persists between model draws
     std::array<unsigned,4> ambient_slots_{};
     float fade_=0,fade_target_=0,fade_step_=0;unsigned fade_color_=0;
     std::uint32_t background_=0,background_target_=0;unsigned background_delay_=0;bool background_pending_=false;
     std::map<unsigned,ItemBoxObjectWork> item_boxes_; // O_WRK mode0/ct0 of type-100 objects
+    void control_water_object(unsigned index,WorldEntity& e);
+    unsigned object_pass_count_=0; // sys->gfrm_ct (system.c:556), nur die Paritaet in bhObj005
     WorldEntity& entity(unsigned kind,unsigned index);
     const Model& model(unsigned kind,unsigned index)const;
     unsigned model_index(unsigned kind,unsigned index,unsigned script_node)const;

@@ -7,6 +7,7 @@
 #include "effect_sprites.h"
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 namespace recvx {
 namespace effect_detail {
@@ -25,6 +26,10 @@ EffectSpawn& request_template();
 // effect.c:436 bhSetEffectTb(&sys->ef, offset, NULL, lkono): die Vorlage in die
 // Liste dieses Passes (offset -> lox/loy/loz des neuen Satzes).
 void submit_template(int lkono,const NJS_POINT3* offset=nullptr);
+// pwksub.c:2643 bhSetWaterSplash4: schreibt id 11, flg 1, mdlver 0, type+10, flr_no 0,
+// Skalierung und Lage in die Vorlage, dann ay = ang+16384 mit lkono 0 und ay = ang-16384
+// mit lkono 1. `submit` legt den Satz an: im Effektpass submit_template, sonst direkt.
+void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz,const std::function<void(int lkono)>& submit);
 // effsub0.c:10 setentry: Vorlage mit Lage/Winkel/Skalierung des Erzeugers fuellen und uebergeben.
 void setentry(unsigned id,unsigned type,const EffectSprite& s);
 // eff[lNumber] nach bhSetEffectTb: die zuletzt uebergebene Anforderung, an der die
@@ -42,6 +47,9 @@ float ground_height(NJS_POINT3 probe,const char* what);
 // hitchk.c:2178 bhCheckWallRefAngle(&pos, flg, ar, ah, &ay) auf dem Wandsatz des Raumbesitzers
 // (set_effect_walls): Lage und Winkel werden an der getroffenen Wand gespiegelt.
 bool wall_reflect(NJS_POINT3& position,unsigned flags,float radius,float height,int& angle,const char* what);
+// hitchk.c:1939 bhCheckWallType(&pos, flg, ar, ah) != NULL auf demselben Wandsatz; ohne Wandsatz
+// benannte Luecke und kein Treffer.
+bool wall_type(NJS_POINT3 position,unsigned flags,float radius,float height,const char* what);
 // weapon.c bhCheckBombAtari(&pos, ar, dmax, dmin): Sprengschaden des Raumbesitzers.
 void request_bomb(NJS_POINT3 position,float radius,int damage_max,int damage_min);
 // effect.c:331 bhSetEffect(id, &pos, lkp, lkono): ein Satz mit flg 1, type 0, Skalierung 1 ohne sys->ef.
@@ -87,8 +95,18 @@ void hook_en12_binta(void* enemy_work,int action);
 bool hook_effect_se_playing(int se);
 void hook_effect_se(NJS_POINT3 pos,int se);
 void hook_player_dv(NJS_POINT3 dv);
+void hook_enemy_se(void* enemy_work,NJS_POINT3 pos,int se);
+bool hook_player_joint(unsigned joint,float* out16,const char* what);
+void hook_player_hit(int dax,int day,int djnt_no,NJS_POINT3 dp);
 // plp->watr des Spielerbesitzers (EffectWorldHooks::player_watr); ohne Besitzer benannte Luecke.
 bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what);
+// cam.ofx/ofy/ofz des Kamerabesitzers (EffectWorldHooks::camera_offset_add/_set); ohne Besitzer benannte Luecke.
+void hook_camera_offset_add(NJS_POINT3 add);
+void hook_camera_offset_set(NJS_POINT3 value);
+// rom->lgtp[2] von bhSetEffSpark (EffectWorldHooks::spark_light); ohne Besitzer benannte Luecke.
+void hook_spark_light(NJS_POINT3 pos,NJS_POINT3 dir);
+// rom->lgtp[0] (EffectWorldHooks::room_light0); ohne Besitzer benannte Luecke.
+void hook_room_light0(NJS_POINT3 pos,NJS_POINT3 rgb,float nr,float fr,bool only_if_off,const char* what);
 // hitchkl.c:49 bhCollisionCheckLine2(p1, p2, flg, flr_no) auf rom->walp + sys->mwalp des
 // Raumbesitzers (set_effect_walls) samt :911 bhGetHitCollisionNormal: end wird auf den Treffer
 // gekuerzt, normal ist die Flaechennormale des letzten Treffers. Ohne Wandsatz benannte Luecke.

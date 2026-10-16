@@ -25,6 +25,7 @@
 
 static const RECVX_EN19_SERVICES* en19_sv;
 void recvx_en19_bind(const RECVX_EN19_SERVICES* services) { en19_sv = services; }
+const RECVX_EN19_SERVICES* recvx_en19_bound(void) { return en19_sv; }
 
 static void gap(const RECVX_ENEMY_WORK* w, const char* name)
 {
@@ -205,7 +206,7 @@ static int  check_dmg_lvl0(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw);
 static int  check_dmg_lvl1(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw);
 static int  check_dmg_lvl2(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw);
 static int  set_left_claw(RECVX_ENEMY_WORK* w, uint32_t tgt_bas, uint32_t tgt_obj);
-static void set_claw_plane(RECVX_ENEMY_WORK* w, const NJS_MATRIX* mtxP, int col, int tim, float src_x, float dst_x);
+static void set_claw_plane(RECVX_ENEMY_WORK* w, int claw_slot, uint32_t joint, int col, int tim, float src_x, float dst_x);
 
 /* en19.c:21 bhEne19_Mode0[6] (Index 4 ist NULL), :29 BrainType[3], :35 CheckDmgLvl[3]. */
 typedef void (*en19_mode_fn)(RECVX_ENEMY_WORK*);
@@ -1101,8 +1102,8 @@ static void mv10(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw, int count)
     if (!joint(w, OBJ_CLAW0, &mtx0) || !joint(w, OBJ_CLAW2, &mtx2)) return;
 
     if (fw->act_frm == 50) {                                         /* :2264 */
-        set_claw_plane(w, &mtx0, (int)0xF0808080, 11, -2.0f, 3.0f); /* -0x0F7F7F80 */
-        set_claw_plane(w, &mtx2, -1, 11, -2.0f, 3.0f);
+        set_claw_plane(w, -1, OBJ_CLAW0, (int)0xF0808080, 11, -2.0f, 3.0f); /* -0x0F7F7F80, owP[10].mtx */
+        set_claw_plane(w, -1, OBJ_CLAW2, -1, 11, -2.0f, 3.0f);                /* owP[12].mtx */
     }
     if (fw->act_frm == 60) {                                         /* :2270 */
         NJS_POINT3 pos, dir, o = off;
@@ -1191,8 +1192,9 @@ static void mv13_14(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw, int count, int is
         }
         if (mtx_ok) {
             if (fw->act_frm == 8) {                                  /* :2358 */
-                set_claw_plane(w, &mtx0, (int)0xF0808080, 16, -2.0f, 3.0f);
-                set_claw_plane(w, &mtx2, -1, 16, -2.0f, 3.0f);
+                /* mtx0P/mtx2P: eigene owP[10]/owP[12] oder die R0_WK.mtxP der 312-Saetze (:2326-2332). */
+                set_claw_plane(w, own ? -1 : fw->clw0, OBJ_CLAW0, (int)0xF0808080, 16, -2.0f, 3.0f);
+                set_claw_plane(w, own ? -1 : fw->clw2, OBJ_CLAW2, -1, 16, -2.0f, 3.0f);
             }
             if (!is14) {
                 if (fw->act_frm >= 18 && fw->act_frm < 19) {         /* :2364 */
@@ -2346,8 +2348,8 @@ static int set_left_claw(RECVX_ENEMY_WORK* w, uint32_t tgt_bas, uint32_t tgt_obj
 
 /* en19.c:4801 bhEne19_SetClawPlane: bhSetRapEff(307, EFFPRM_WORK, 12) mit
    src = (src_x, 0, 0), dst = (dst_x, 0, 0), frm_inc 0.125, tex_id 4, texP = mlwP->texP. */
-static void set_claw_plane(RECVX_ENEMY_WORK* w, const NJS_MATRIX* mtxP, int col, int tim, float src_x, float dst_x)
+static void set_claw_plane(RECVX_ENEMY_WORK* w, int claw_slot, uint32_t joint, int col, int tim, float src_x, float dst_x)
 {
     if (!en19_sv || !en19_sv->claw_plane) { gap(w, "bhSetRapEff(307) bhEff307 (en19.c:4822)"); return; }
-    if (en19_sv->claw_plane(w, (const float*)mtxP, col, tim, src_x, dst_x) < 0) gap(w, "bhSetRapEff(307): OR_WORK-Pool voll (en19.c:4822)");
+    if (en19_sv->claw_plane(w, claw_slot, joint, col, tim, src_x, dst_x) < 0) gap(w, "bhSetRapEff(307): OR_WORK-Pool voll (en19.c:4822)");
 }

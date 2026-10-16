@@ -170,6 +170,10 @@ def read_ledger():
             fields = line.split('\t')
             if len(fields) < 2 or fields[1] not in ('done', 'partial', 'missing', 'skip'):
                 raise SystemExit(f'{LEDGER.name}:{number}: erwartet "<datei.c|datei.c:Funktion|Funktion>\\t<done|partial|missing|skip>\\t<Notiz>"')
+            # Ein Schluessel, eine Zeile: sonst gewinnt still die letzte und ein
+            # ueberholter Eintrag verdeckt den belegten Stand (oder umgekehrt).
+            if fields[0] in rules:
+                raise SystemExit(f'{LEDGER.name}:{number}: Schluessel "{fields[0]}" steht doppelt; bestehende Zeile aktualisieren statt eine neue anzuhaengen')
             rules[fields[0]] = (fields[1], fields[2] if len(fields) > 2 else '')
     return rules
 

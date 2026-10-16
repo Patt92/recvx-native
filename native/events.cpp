@@ -174,7 +174,7 @@ int EventVm::instruction(Task& t){
     case 0x1f:{const auto mode=v.u8(p+1),index=v.u8(p+2),freeze=v.u8(p+3);advance(4);if(!mode){show_dialog(read_message(room_,messages_,index),index);opening_hint_=t.event==16&&index==4;if(!freeze)flags[6][0]&=~7u;}else flags[6][0]|=7;return 1;}
     case 0x25:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");auto& a=interactions[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);return advance(10);}
     case 0x7b:world(t,op,10);return 1;
-    case 0x7c:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");auto& a=floors_[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);return advance(10);}
+    case 0x7c:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");auto& a=floors_[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);world(t,op,10);return 1;}
     case 0x26:{const auto weapon=v.u8(p+1);advance(2);return inventory_.weapon()==weapon;}
     case 0x27:values[18]=v.u8(p+1);if(!values[18])inventory_.slots()[0]=0;return advance(2);
     case 0x28:status_requested=true;flags[12][0]|=0x200;return advance(2);
@@ -266,6 +266,7 @@ int EventVm::instruction(Task& t){
     // here; effects needing world/audio/player services are reported as pending
     // world bindings with their exact operands.
     case 0x68:world(t,op,6);return 1; // bhLoadWork2
+    case 0xb5:world(t,op,4);return 1; // bhLoadWorkEx (event.c:12808): wie 0x65, Ziel bhEtask[0]
     // event.c:7605 bhObjDposCk: v4 == 0 dreht obwp[v0].ay, sonst objP[v4].ang[0] des Gegners rom->enep[v0]
     // je Durchlauf um v3 Grad auf v2 Grad (Bit 2 von v1: Gegenrichtung). 1 = laeuft noch, 0 = fertig.
     case 0xb1:{v.require(p,6);const unsigned v0=v.u8(p+1),v1=v.u8(p+2),v3=v.u8(p+4),v4=v.u8(p+5);int v2=v.u8(p+3);advance(6);

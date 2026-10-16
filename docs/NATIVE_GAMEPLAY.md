@@ -119,8 +119,15 @@ Gameplay-Freigabe; der aktuelle Lückenplan steht in
   `bhSearchNextEnemy`, `bhCalcLockEneYR`, Dual-Waffen-Teilung).
 - Mündungsfeuer (`bhEff003`), Hülsen (`bhEff000`) mit Boden-/Wandabprall.
 
+- Granatwerfer (Waffen 14–17: Spreng-, Säure-, Brand-, BOW-Gas-Munition): Abschuss
+  (`player.c:4990`), Geschoss `bhEff130` mit Flug, Wand-/Gegnertreffer
+  (`bhCheckFlyAtari`), Einschlägen und `bhSetBowDamage`.
+
 **Offen**
-- Schrotflinte, Armbrust, Granat- und Spezialwaffen, Zielfernrohr.
+- Schrotflinte, Armbrust, Waffen 18/20, Zielfernrohr. Nicht freigegebene Waffen melden
+  ihre Lücke beim Zielen namentlich (`Combat gaps`).
+- Granatwerfer: Schirmfärbung des BOW-Gases (`sys->ef_ntx2d`), Wassereinschlag
+  (`bhCheckL2Water`), Nachladen mit Munitionswechsel ungeprüft.
 - Weitere Mündungsvarianten, Rauch, Waffenlichter, Gelenkkapseln für
   Waffen mit `WpnTab.flg & 8`.
 

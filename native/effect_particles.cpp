@@ -205,7 +205,8 @@ struct EffectParticles::Impl {
     std::function<unsigned(unsigned)> owner_flags;
     std::function<void(unsigned,unsigned,unsigned)> owner_write;
     unsigned scan = 0;          // owk_scn_noG
-    unsigned blood_counter = 0; // sys->bl_ct, nur fuer die Hoehenstaffelung
+    // sys->bl_ct liegt nicht hier, sondern bei effect_blood_counter() (effect_sprites.h):
+    // ein Besitzer fuer diesen Pfad und bhEff301/bhEff303.
     std::set<std::string> unsupported;
     Impl(): works(eff_slots), pools(eff_slots) {}
 
@@ -489,7 +490,8 @@ static void step_work(Work& w)
 }
 
 // effsub3.c:145-231 — bhSetBloodPoolLnk. Zwei Arbeiten aus AllocOworkOne; die
-// Hoehe staffelt sich ueber sys->bl_ct (nativ der Zaehler dieser Klasse).
+// Hoehe staffelt sich ueber sys->bl_ct (nativ effect_blood_counter(), derselbe Besitzer,
+// den auch bhEff301/bhEff303 in native/effect_rap_blood.cpp zaehlen).
 void EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direction,int palette)
 {
     (void)palette;
@@ -501,8 +503,9 @@ void EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direc
     p->position=position;
     p->position.y+=0.01f;
     njAddVector(reinterpret_cast<NJS_VECTOR*>(&p->position),reinterpret_cast<NJS_VECTOR*>(const_cast<NJS_POINT3*>(&tab.off_pos)));
-    p->position.y+=0.001f*float(impl_->blood_counter);
-    impl_->blood_counter=(impl_->blood_counter+1)&0x1FF;
+    // effsub3.c:176/:178 — erst verwenden, dann zaehlen (bhEff303 macht es umgekehrt).
+    p->position.y+=0.001f*float(effect_blood_counter());
+    effect_blood_counter()=(effect_blood_counter()+1)&0x1FF;
     p->eff_dir=direction;
     p->srd_dir=tab.srd_dir;
     p->srd_pos=tab.srd_pos;
@@ -643,13 +646,13 @@ struct EffectParticles::State {
 std::shared_ptr<const EffectParticles::State> EffectParticles::save()const{
     auto state=std::make_shared<State>();
     state->works=impl_->works;state->pools=impl_->pools;
-    state->scan=impl_->scan;state->blood_counter=impl_->blood_counter;
+    state->scan=impl_->scan;state->blood_counter=effect_blood_counter();
     return state;
 }
 void EffectParticles::restore(const std::shared_ptr<const State>& state){
     if(!state)return;
     impl_->works=state->works;impl_->pools=state->pools;
-    impl_->scan=state->scan;impl_->blood_counter=state->blood_counter;
+    impl_->scan=state->scan;effect_blood_counter()=state->blood_counter;
 }
 
 const std::set<std::string>& EffectParticles::unsupported()const{return impl_->unsupported;}

@@ -97,5 +97,72 @@ int main(int argc,char** argv){try{
         check(spawn.yaw==std::int16_t(std::int16_t(sum)+32768),"bhMotionPosSetEnePly yaw must be sum of node Y angles + 0x8000");
         check(w.model_pose(0,0,0).angles[1]==0,"bhMotionPosSetEnePly must clear the player root Y angle");
         check(spawn.position.y==w.floor_heights()[1],"bhMotionPosSetEnePly Y must be rom->grand[v1+1]");}
-    std::cout<<"Original RM_0050 trigger/event 12, frame 60/64 offsets, final pose before hide, fractional sampling, pause and loop passed.\n";return 0;
+    // bhLoadWork (event.c:12713): nur Gegner/Objekte lesen model_cno aus Byte 3.
+    // Reale Item-Drehung aus RM_4010: 65 03 03 01 waehlt trotzdem objP[0].
+    for(const char* name:{"RM_4010","RM_4011","RM_8010"}){
+        const auto room=read_asset_file(data/(std::string("rooms/")+name+".RDT"),64*1024*1024);
+        const auto stage=decode_scene(room);auto spawn=stage.spawns.at(0);std::size_t m=42;std::int64_t f=0;
+        AudioMixer a(data);RoomWorld w(room,stage,spawn,m,f,a,data,{},name);
+        const auto base=inspect_room(room).event_offset;
+        const unsigned off=std::string(name)=="RM_4010"?0x9ee:std::string(name)=="RM_4011"?0xc88:0x7de;
+        auto real_command=[&](unsigned rel,unsigned size){EventCommand c;c.bytes.assign(room.begin()+base+off+rel,room.begin()+base+off+rel+size);c.opcode=c.bytes[0];return c;};
+        const auto select=real_command(0,4);check(select.bytes==std::vector<std::uint8_t>({0x65,3,3,1}),"original item selector changed");
+        const auto root=w.model_pose(3,3,0),child=w.model_pose(3,3,1);
+        check(w.bind(select)&&w.bind(real_command(8,6))&&w.bind(real_command(14,6)),"original item rotation setup unbound");
+        for(unsigned i=0;i<20;++i)check(w.bind(real_command(20,3)),"original item rotation unbound");
+        check(w.model_pose(3,3,0).angles[0]==root.angles[0]-20*(int(18*(65536.f/360.f))>>1),"bhLoadWork item must rotate node zero, ignoring byte 3");
+        check(w.model_pose(3,3,1).angles==child.angles,"bhLoadWork item rotated a child instead of the root");
+    }
+    {
+        // Synthetische Gegenpruefung: Spieler/Effect ignorieren Byte 3, Objekt behaelt es.
+        world.bind(command({0x65,0,0,7}));world.bind(command({0x69,12,0,0,0,0}));
+        const auto before=world.model_pose(0,0,7).position;
+        check(world.bind(command({0x69,8,100,0,200,0,44,1})),"player root write unbound");
+        const auto root=world.model_pose(0,0,0).position;
+        check(root.x==1&&root.y==2&&root.z==3,"bhLoadWork player must select node zero");
+        const auto after=world.model_pose(0,0,7).position;
+        check(before.x==after.x&&before.y==after.y&&before.z==after.z,"player selector touched operand node");
+        world.bind(command({0x65,4,0,255}));
+        world.bind(command({0x69,26,0,0,100,0,200,0,44,1}));
+        world.bind(command({0x69,26,1,0,100,0,200,0,44,1}));
+        check(world.bind(command({0x69,30,0})),"effect root interpolation must not request a model node");
+        const auto* effect=world.effect_state(0);
+        check(effect&&effect->px==1&&effect->py==2&&effect->pz==3,"effect selector did not write effect work position");
+        world.bind(command({0x65,2,15,1}));
+        const auto object_root=world.model_pose(2,15,0).position;
+        check(world.bind(command({0x69,8,100,0,200,0,44,1})),"object child write unbound");
+        const auto object_child=world.model_pose(2,15,1).position;
+        check(object_child.x==1&&object_child.y==2&&object_child.z==3,"object selector must retain byte 3");
+        const auto unchanged=world.model_pose(2,15,0).position;
+        check(unchanged.x==object_root.x&&unchanged.y==object_root.y&&unchanged.z==object_root.z,"object child write touched root");
+    }
+    {
+        // bhLoadWorkEx (event.c:12808, 0xB5): dieselbe Auswahl, aber in bhEtask[0], nicht im
+        // Kontext des laufenden Tasks. Real in RM_4010/4011 als `b5 00 00 01` hinter den
+        // Item-Drehschleifen; hier Gegner/Objekt-Faelle, damit der Zielkontext messbar ist.
+        auto on_task=[&](unsigned task,std::initializer_list<std::uint8_t> bytes){EventCommand c;c.bytes=bytes;c.opcode=*bytes.begin();c.task=task;return c;};
+        // Task 3 waehlt sich das Objekt 15/Knoten 1; ein 0xB5 auf Task 3 darf das nicht aendern,
+        // sondern muss Ebene 0 auf den Gegner 2 setzen (model_cno aus Byte 3).
+        check(world.bind(on_task(3,{0x65,2,15,1})),"task 3 selector unbound");
+        check(world.bind(on_task(3,{0xb5,1,2,1})),"bhLoadWorkEx unbound");
+        const auto before_t3=world.model_pose(2,15,1).position;
+        check(world.bind(on_task(3,{0x69,8,100,0,100,0,100,0})),"task 3 write unbound");
+        const auto t3=world.model_pose(2,15,1).position;
+        check(t3.x==1&&t3.y==1&&t3.z==1,"bhLoadWorkEx must not touch the running task's context");
+        (void)before_t3;
+        // Ebene 0 zeigt jetzt auf Gegner 2, Knoten 1: ein Schreibvorgang auf Task 0 landet dort.
+        world.bind(on_task(0,{0x69,12,0,0,0,0}));
+        const auto enemy_before=world.model_pose(1,2,1).position;
+        check(world.bind(on_task(0,{0x69,8,200,0,200,0,200,0})),"task 0 write unbound");
+        const auto enemy_after=world.model_pose(1,2,1).position;
+        check(enemy_after.x==2&&enemy_after.y==2&&enemy_after.z==2&&(enemy_before.x!=2||enemy_before.z!=2),"bhLoadWorkEx must select into bhEtask[0]");
+        // Item ueber 0xB5: Byte 3 wird wie bei 0x65 ignoriert (event.c:12880).
+        check(world.bind(on_task(5,{0xb5,3,0,1})),"bhLoadWorkEx item unbound");
+        check(world.bind(on_task(0,{0x69,8,44,1,44,1,44,1})),"task 0 item write unbound");
+        const auto item_root=world.model_pose(3,0,0).position;
+        check(item_root.x==3&&item_root.y==3&&item_root.z==3,"bhLoadWorkEx item must select node zero");
+        // Art > 4 faellt wie im Original durch den switch: nichts gebunden, Kontext unveraendert.
+        check(!world.bind(on_task(5,{0xb5,7,0,0})),"bhLoadWorkEx kind 7 must stay unbound");
+    }
+    std::cout<<"Original script motion, bhLoadWork and bhLoadWorkEx node selection passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

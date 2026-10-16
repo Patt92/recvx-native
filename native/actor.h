@@ -62,11 +62,15 @@ public:
     std::vector<ModelPose> local_pose_clip(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes={},const ModelNodeOverrides& overrides={})const;
     std::vector<BoneMatrix> pose(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const ModelNodeOverrides& overrides={}) const;
     std::vector<BoneMatrix> pose_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},const ModelNodeOverrides& overrides={}) const;
-    Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr,const MorphSource* morph=nullptr) const;
+    Scene sample(std::size_t motion,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr,const MorphSource* morph=nullptr,const std::vector<std::uint8_t>* live_model=nullptr) const;
     // bhReadPlayerData: further plp->mdl[n] (n >= 1) with their SKIN/texture bundle, e.g. Claire's
     // ponytail mdl[4] used by obwp[2] (bhResetPlayer). nullptr when the model has no objects.
     const PlayerAsset* model(unsigned index)const{return index>0&&index<=models_.size()?models_[index-1].get():nullptr;}
     std::size_t model_count()const{return models_.size()+1;}
+    // mdl[index] (index >= 1) ist im Satz vorhanden, liess sich aber nicht
+    // lesen (Ausnahme des Lesers). Ein Modellsatz mit 0 Objekten
+    // (actor.cpp:493, `u16(6)==0`) ist KEIN Fehler und liefert hier false.
+    bool model_failed(unsigned index)const{return index>0&&index<=model_failed_.size()&&model_failed_[index-1]!=0;}
     // Bind pose, posed into world space by `root` (object world matrix incl. link offset).
     // `angles` overrides the X/Y rotation of the first nodes (bhObjClpn writes objP[i].ang[0..1]).
     Scene sample_rest(const NJS_MATRIX& root,const std::vector<std::array<std::int32_t,2>>& angles={})const;
@@ -85,8 +89,11 @@ public:
     // bhCalcTree beginnt bei Knoten `first` unter `root` und schreibt nur die
     // owP der Knoten first.. in `owp_mtx`; die uebrigen bleiben unberuehrt.
     void tree_window(const std::vector<ModelPose>& pose,const NJS_MATRIX& root,unsigned first,const std::vector<std::uint32_t>& owp_flg,std::vector<BoneMatrix>& owp_mtx)const;
-    Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr,const MorphSource* morph=nullptr) const;
+    Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr,const MorphSource* morph=nullptr,const std::vector<std::uint8_t>* live_model=nullptr) const;
     Scene sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& matrices,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out=nullptr,const FaceParameter* face_param=nullptr,const std::vector<std::uint8_t>* live_model=nullptr,const MorphSource* morph=nullptr)const;
+    // sp_evt.c:1478-1500: npRetSkinConvert, dann njCnkEasyDrawObject auf dem lokalen objP.
+    // Keine Motionabtastung und kein npCalcSkin/owP; evalflags und Objekt-Skalierung bleiben wirksam.
+    Scene sample_tree(const std::vector<ModelPose>& pose,const std::vector<std::uint32_t>& flags,const std::vector<std::uint8_t>* live_model=nullptr)const;
     // bhEff136: npCalcSkin plus a direct model draw against committed physical owP matrices.
     // Does not sample motion, traverse a hidden ancestor, or apply a morph draw of another model.
     Scene sample_object_work(unsigned object,const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& matrices,const std::vector<std::uint32_t>& flags,const std::vector<std::uint8_t>* live_model=nullptr,bool skin_fm=false)const;
@@ -118,6 +125,7 @@ private:
     std::vector<SceneTexture> textures_;
     std::vector<std::vector<float>> translations_;
     std::vector<std::shared_ptr<PlayerAsset>> models_;
+    std::vector<std::uint8_t> model_failed_;   // je models_[k], 1 = Lesefehler
     void load_models(const std::vector<std::uint8_t>& data,std::size_t model_end,std::size_t morph_end);
     std::vector<Matrix> matrices(const std::vector<ModelPose>& pose,NJS_POINT3 position,Angle yaw,bool translations_only=false) const;
     Scene render_pose(ModelGeometryOptions geometry,std::vector<Matrix> full,std::vector<BoneMatrix>* matrices_out,const FaceParameter* face_param,const std::vector<std::uint8_t>* live_model=nullptr)const;

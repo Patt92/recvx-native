@@ -16,15 +16,29 @@ struct EffectSnow;
 // op->mtx = owP[lkono].mtx ergeben zusammen genau diese Weltlage). Texturen bezieht der
 // Zeichenpass aus dem Modell des Werks (kind/index wie EffectSprite::link_kind).
 struct EffectAfterimage {unsigned kind=0,index=0,mdl=0,node=0;std::vector<SceneTriangle> triangles;
+    std::vector<Scene::AmbientWrite> ambient_writes;
     // Selected mdl[mdlver].texP, not necessarily the body's texP. Shared pixel storage.
     std::vector<SceneTexture> textures;};
 // R08_WORK (effsub3.c:2492 bhEff308): Funkenstrahl aus bhSetEffGunSpark/bhSetRapEff.
 struct EffectSpark308;
+// effsub3.c OR_WORK-Saetze (bhSetRapEff): R0A_WORK 310 Kamerawackel, R49_WORK 349 Rueckruf,
+// R09_WORK 309 / R0B_WORK 311 Blut, R07_WORK 307 Klauenflaeche, R0_WK 312 gespiegelte Klaue.
+// Definitionen in native/effect_rap_camera.h, effect_rap_blood.h, effect_rap_claw.h.
+struct EffectCameraShake30a;struct EffectCallback349;struct EffectBlood309;struct EffectBlood30b;struct EffectClawPlane307;struct EffectClaw30c;
+// ANM_WORK (effsub3.h:38) von bhEff303: sie liegt im Werk selbst bei (char*)oP + 1028,
+// das DSP_WRK dahinter bei + 1060. Von dessen VtxBuf nimmt bhEff303 nur die vier
+// Eckpunkte (oP->tvp = dspP->VtxBuf, effsub3.c:1555), und die sind nativ EffectSprite::tv;
+// vtx_scl/vtx_pos liest allein ryRapTexDrw der Saetze 309/311.
+struct EffectRapAnm;
 // UV_WORK (types.h:2194): eine Zeile der Original-UV-Tabellen {u, v, Breite, Hoehe}.
 struct EffectUv {float u,v,xs,ys;};
 // Fields consumed by the original bhEff200/201/218 procedures and draw path.
 struct EffectSprite {
     unsigned id=0,type=0,mode0=0,mode1=0,mode2=0,mode3=0,flg=0,stflg=0,ani_ct=0;bool polygon_queued=false;
+    // sys->ef_ntx2d[ef_ntx2dn++] = op (effsub1.c:9908/9930 bhEff130 type 3): die untexturierte
+    // Schirmliste dieses Passes; bhDrawNtxEffect2D (effect.c) zeichnet pv[0..pn) mit
+    // njDrawPolygon(trans 1) ueber das fertige Bild. Wie polygon_queued je Pass neu gesetzt.
+    bool ntx2d_queued=false;
     // Mitgliedschaft dieses Bildes in sys->ef_trs (effect.c:910 bhControlEffect
     // leert die Liste jeden Pass; bhDrawTrsEffect3D zeichnet nur, was drinsteht).
     bool frame_queued=false;
@@ -49,12 +63,17 @@ struct EffectSprite {
     float shp_ct=0,mtx_world_y=0;
     // O_WRK.aspd (bhEff134: Leuchtzaehler der Kran-Anzeige).
     int aspd=0;
+    // O_WRK.mtn_attr (en15.c:2664/2714 bhEff_E15_Poison: Folgezaehler der Giftwolken).
+    int mtn_attr=0;
     // O_WRK.exp1 als eff-Platz (en12.c:1815 eff[eno].exp1 = EXP0_I(32)); -1 = NULL.
     int exp1_slot=-1;
     // Platz dieses Satzes in eff[512] (der Raumbesitzer traegt ihn vor jedem Pass ein) und
     // O_WRK.exp0 als Elternsatz (effsub5.c bhEff202/226/247 schreiben eff[n].exp0 = op):
     // parent_slot ist der Platz, parent der vom Besitzer vor dem Pass aufgeloeste Satz.
     int slot=-1,parent_slot=-1;const EffectSprite* parent=nullptr;
+    // O_WRK.exp0 als erzeugendes Gegnerwerk (en15.c:2353/2379 eff[eno].exp0 = epw): der
+    // RECVX_ENEMY_WORK, dessen exp0 bhEff_E15_Poison liest und schreibt; nullptr = NULL.
+    void* owner_work=nullptr;
     // Mitgliedschaft in sys->ef_opq (effect.c:897 bhDrawOpqEffect3D: festes Blendpaar 8/6, Tiefenschreiben).
     bool opaque_queued=false;
     // Mitgliedschaft in sys->ef_fnc (effect.c:929): der Satz zeichnet sich mit op->func
@@ -86,6 +105,11 @@ struct EffectSprite {
     const float* link_matrix=nullptr;
     // O_WRK.mtn_no/frm_no/ah/aw (effsub6.c bhEff149) und njFogDisable des eigenen Zeichenaufrufs.
     int mtn_no=0,frm_no=0;float ah=0,aw=0;bool fog_disabled=false,point_filter=false,untextured=false;
+    // O_WRK.frm_mode (types.h:151, unsigned int @0x370): bhEff303 zaehlt damit die
+    // Ausblendpaesse (effsub3.c:1592 `(int)--oP->frm_mode >= 0`).
+    unsigned frm_mode=0;
+    // O_WRK.car (bhEff108: Ringradius in Kartenzellen).
+    float car=0;
     // lkwkp als Raumfigur: 0 Spieler, 1 Raumgegner, 2 Objekt, 3 Item (Index link_index); -1 ohne Link.
     // Vom Raumbesitzer bei bhSetEffectTb bzw. beim Raumladen (room.c:787 bhSetEffectLink) gesetzt.
     int link_kind=-1;unsigned link_index=0;
@@ -111,6 +135,12 @@ struct EffectSprite {
     // Liste je Steuerpass) und das Materialalpha (ct0 + 1) * 40, das bhDraw136 setzt.
     std::shared_ptr<const EffectAfterimage> afterimage;int zanzo_slot=-1;unsigned afterimage_alpha=0;
     std::shared_ptr<EffectSpark308> spark308;
+    // free4 der OR_WORK-Saetze aus bhSetRapEff (effsub3.c:2137), je Kennung ein Satz.
+    std::shared_ptr<EffectCameraShake30a> shake30a;std::shared_ptr<EffectCallback349> callback349;
+    std::shared_ptr<EffectBlood309> blood309;std::shared_ptr<EffectBlood30b> blood30b;
+    std::shared_ptr<EffectClawPlane307> plane307;std::shared_ptr<EffectClaw30c> claw30c;
+    // ANM_WORK von bhEff303 (im Werk bei oP + 1028, siehe die Vorwaertsdeklaration oben).
+    std::shared_ptr<EffectRapAnm> rap_anm;
     bool flame_compact_uv=false; // bhEff009 latches its UV bank at initialization.
     // O_WRK.exp0 von bhEff_E16_LaserSightDraw: die von bhCollisionCheckLine2 getroffene Flaeche (ATR_WORK*).
     std::optional<CollisionWall> line_wall;
@@ -145,6 +175,20 @@ EffectWeather& effect_weather();
 // sys->gas_py: Hoehe der Gaswand. Nur bhEff127 schreibt und liest sie
 // (effsub1.c:8734 Null beim Start, :8818 Anstieg, :8778/:8784/:8792/:8823 Leser).
 float& effect_gas_height();
+// sys->bl_ct: der Hoehenversatz, mit dem Blutflecken gegeneinander gestaffelt werden
+// (effect.c:54 und system.c:262 nullen ihn). Alle Schreiber zaehlen (x + 1) & 0x1FF und
+// addieren 0.001 * bl_ct auf die Hoehe; die Reihenfolge ist je Fundstelle verschieden:
+// bhClrEff_RY (effsub3.c:176 nutzen, :178 zaehlen) und bhEff301 (:529/:531) gegen
+// bhEff303 (effsub3.c:1532 zaehlen, :1534 nutzen). Ein Besitzer fuer alle, auch fuer den
+// Partikelpfad in native/effect_particles.cpp; keine zweite Zaehlung.
+unsigned& effect_blood_counter();
+// sys->wt_nbpt/wt_px/wt_pz/wt_xp/wt_zp/wt_minx/wt_minz/wt_maxx/wt_maxz/wt_wvp (types.h:781-790):
+// die Wasserhoehenkarte. bhObj005 (objitm.c:1270-1289) legt sie aus dem Wasserobjekt an
+// und laesst sie abklingen, bhEff108 (effsub1.c:6435) hebt Kreisringe an. Ein Besitzer,
+// keine Kopie; `allocated` steht fuer den von bhGetFreeMemory bezogenen wt_wvp (das Original
+// loescht ihn beim Raumwechsel nicht, sys->st_flg 0x40 bleibt stehen).
+struct WaterWaveField {float px=0,pz=0;int xp=0,zp=0,minx=0,minz=0,maxx=0,maxz=0,nbpt=0;std::vector<float> wvp;bool allocated=false;};
+WaterWaveField& water_wave();
 void set_effect_context(const EffectContext& context);
 void set_effect_walls(const std::vector<CollisionWall>* walls,float room_height);
 // bhCheckWater(&px): first containing water area; top receives py + h.
@@ -182,6 +226,24 @@ struct EffectWorldHooks {
     // plp->watr (player.c:1758: c1 = owP[4], c2 = owP[0], r 2.5) fuer npCollisionCheckCC
     // der Effektprozeduren (effsub2.c:1536 bhEff_E03_Acid). false = kein Spielerbaum.
     std::function<bool(RECVX_ENEMY_CAPSULE&)> player_watr;
+    // RequestEnemySe(GetLocalEneNo(op->exp0), pos, se) (en15.c:2659): die Stimme des erzeugenden
+    // Gegnerwerks (RECVX_ENEMY_WORK*).
+    std::function<void(void* enemy_work,NJS_POINT3 pos,int se)> enemy_se;
+    // plp->mlwP->owP[joint].mtx (en15.c:2176 bhEne15_AttackPlayerSS: Gelenk 5). false = kein Spielerbaum.
+    std::function<bool(unsigned joint,float* out16)> player_joint;
+    // plp->dax/day, djnt_no und dpx/dpy/dpz eines Treffers (en15.c:2183-2187).
+    std::function<void(int dax,int day,int djnt_no,NJS_POINT3 dp)> player_hit;
+    // cam.ofx/ofy/ofz (effsub3.c:3177 Nullsetzen, :3220 njAddVector) des Kamerabesitzers.
+    std::function<void(NJS_POINT3 add)> camera_offset_add;
+    std::function<void(NJS_POINT3 value)> camera_offset_set;
+    // rom->lgtp[2] von bhSetEffSpark (effsub3.c:2455-2481): flg 3, type 13, aspd 16, lsrc 4,
+    // nr 15, fr 30, rgb 3/1.8/0.7, Richtung dir, Lage pos, lkono++ (ct0/lkono/v genullt, wenn flg 1 aus war).
+    std::function<void(NJS_POINT3 pos,NJS_POINT3 dir)> spark_light;
+    // rom->lgtp[0] der Feuer-/Explosionslichter: flg 3, type 101, aspd 8, lkflg/lkno/lkono 0,
+    // mode 0, lsrc 4, Richtung 0, ct0 0, light NULL; rgb/nr/fr und Lage je Aufrufer.
+    // only_if_off: nur wenn lgtp[0].flg & 0x2 nicht steht (effsub1.c bhEff019 type 0);
+    // bhEff130 type 6 (effsub1.c:10076) schreibt unbedingt.
+    std::function<void(NJS_POINT3 pos,NJS_POINT3 rgb,float nr,float fr,bool only_if_off)> room_light0;
 };
 void set_effect_world_hooks(EffectWorldHooks hooks);
 // effsub3.c:1008 bhSetEffParticleMk2(lkwkp, lnk_no, off, dir, src, dst, typ) aus einer Effektprozedur (Partikelbesitzer des Raums).
@@ -232,7 +294,10 @@ struct EffectSpawn {unsigned flg=1,id=0,type=0;int flr_no=0;unsigned mdlver=0;NJ
     // bhSetEffectTb gibt den belegten Platz zurueck; eine Prozedur, die ihre Kinder ueber
     // deren Platz fuehrt (effsub1.c bhEff118), legt ihn in ihrem eigenen pv ab. Der
     // Raumbesitzer traegt ihn nach der Zuweisung dort ein (-1 = kein Rueckschreiben).
-    int slot_sink_work=-1,slot_sink_index=-1;};
+    int slot_sink_work=-1,slot_sink_index=-1;
+    // en15.c:2470-2474 _bhEne_SetPoison2: eff[eno].stflg |= 0x20, txp[0] = op->txp[0] (die Textur
+    // des Elternsatzes `texture_from_slot`) und exp0 = op->exp0 (das erzeugende Gegnerwerk).
+    unsigned stflg_or=0;int texture_from_slot=-1;void* owner_work=nullptr;};
 struct BombRequest {NJS_POINT3 position;float radius;int damage_max,damage_min;}; // bhCheckBombAtari
 // CallYakkyouSe(&op->px, SeNo): the owner resolves the arms bank and plays it on SE slot 10.
 struct EffectRoomSound {NJS_POINT3 position;int sound;};

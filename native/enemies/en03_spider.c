@@ -446,6 +446,17 @@ static void s_wall_check2(RECVX_ENEMY_WORK* w)
     njCalcPoint(&m, &cl, &cw);
     s->center_world = rv(cw);
 }
+void recvx_en03s_leg_mark(RECVX_ENEMY_WORK* child)
+{
+    unsigned char* b;
+    if (!child || !child->exp0) { gap(child, "bhEne03: EXP0_BYTE(pno,12) ohne Kindexp0"); return; }
+    /* Byte 12 ist die niedrigste Stelle von EXP0_F(0xC); 13 bleibt stehen. */
+    b = (unsigned char*)child->exp0;
+    b[12] = 1;
+    b[14] = 0;
+    b[15] = 0;
+}
+
 void recvx_en03s(RECVX_ENEMY_WORK* w)
 {
     if (!w) return;

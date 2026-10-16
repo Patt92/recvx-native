@@ -7,6 +7,7 @@
 #include <optional>
 #include <memory>
 #include <map>
+#include <functional>
 namespace recvx {
 // light: per-vertex lighting factor (r,g,b), used when the triangle is gouraud-lit.
 // alpha: Faktor auf das Dreiecksalpha, nur mit SceneTriangle::vertex_alpha (GS-Gouraud
@@ -81,6 +82,9 @@ struct SceneTriangle {
     // color stammt aus einem Diffusmaterial-Chunk (NJD_CM_D/DA/DS/DAS, Typ 17/19/21/23);
     // nur dort schreibt npSetAllMatAlphaColor (njplus.c:1495) das Alpha.
     bool diffuse_material=false;
+    NJS_POINT3 ambient_material{1,1,1};
+    bool chunk_ambient=false; // strip colour functions containing ambient (ps2_NinjaCnk.c:141)
+    unsigned material_phase=0; // game.c:318/objitm.c:503: room, en_obj, object lists, items, effects, enemies, player
     // Ninja-Indizes des letzten Material-/NJD_CB_BA-Chunks vor dem Streifen; bhDraw136
     // hinterlaesst dieses Paar fuer die naechste ef_fnc-Funktion (-1 = unbekannt).
     std::int8_t chunk_mode_src=-1,chunk_mode_dst=-1;
@@ -160,6 +164,12 @@ struct Scene {
     std::vector<SceneShadow> shadows;
     FogState fog; // installed EOR state, copied from the existing World owner
     std::uint32_t fog_color=0; // njSetFogColor (sync.c:163/177/200): 0x00RRGGBB of cam.fog_col or sys->fog_col
+    struct AmbientWrite {
+        std::size_t triangle=0;NJS_POINT3 color{};unsigned phase=0,object=0;bool camera_mask=false;
+    };
+    std::vector<AmbientWrite> ambient_writes; // ordered material writes, also for empty polygon lists
+    NJS_POINT3 resolve_ambient_material(NJS_POINT3 initial={1,1,1},const SceneCamera* camera=nullptr);
+    void erase_triangles(const std::function<bool(const SceneTriangle&)>& predicate);
     std::vector<SceneTriangle> triangles;
     std::vector<SceneLine> lines;
     std::vector<SceneCamera> cameras;
@@ -212,7 +222,28 @@ struct ModelGeometryOptions {
     std::vector<std::array<float,16>> world_matrices;
     std::vector<std::vector<NJS_POINT3>> world_vertices;
     std::vector<std::vector<NJS_VECTOR>> world_normals;
+    // objitm.c:1294 bhObj005: objP[n].model->vlist zeigt auf eine jedes Bild neu beschriebene
+    // Kopie des Eckpunkt-Chunks. Je Objekt die lokalen Lagen/Normalen dieser Kopie; sie
+    // ersetzen den Chunk-Inhalt vor der Knotenmatrix (leer = Chunk unveraendert).
+    std::vector<std::vector<NJS_POINT3>> local_vertices;
+    std::vector<std::vector<NJS_VECTOR>> local_normals;
+    // njplus.c:1653 npSetOffsetUV2: der aufsummierte u/v-Versatz (1/1024, short-Arithmetik)
+    // des Streifenchunks 66, der uv_chunk Bytes hinter dem plist-Anfang von objP[uv_object]
+    // liegt. uv_object -1 = kein Versatz.
+    int uv_object=-1;std::size_t uv_chunk=0;int uv_u=0,uv_v=0;
 };
+// objP[object].model->vlist, erster Eckpunkt-Chunk (bhObj005 liest ps->x/ps->z und y und
+// beschreibt die Kopie): Chunk-Typ, lokale Lagen und (Typ 41/51) Normalen in Chunkreihenfolge.
+// nullopt, wenn das Objekt kein Modell oder keinen vlist hat.
+struct ModelObjectVertices {unsigned chunk_type=0;std::vector<NJS_POINT3> positions;std::vector<NJS_VECTOR> normals;};
+std::optional<ModelObjectVertices> model_object_vertices(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object);
+// njplus.c:1662-1670: der Lauf von npSetOffsetUV2 ueber objP[object].model->plist (je Kopf ein
+// short, je Nicht-66-Chunk ein weiteres short, Ende bei 255). found: der Lauf landet auf einem
+// Kopf 66; chunk: dessen Byteabstand zum plist-Anfang; usr_num: die zwei Nutzerbits des
+// Streifenkopfes; proper: dieser Kopf ist zugleich der erste 66-Chunk der regulaeren
+// Chunk-Kette (sonst liest das Original einen Fremdkopf).
+struct ModelObjectUvWalk {bool found=false,proper=false;unsigned usr_num=0;std::size_t chunk=0;};
+std::optional<ModelObjectUvWalk> model_object_uv_walk(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object);
 // Standalone MDL/PVP path shared by stage and animated character loading.
 Scene decode_model_asset(const std::vector<std::uint8_t>& data,std::size_t model_offset,
                          std::size_t texture_offset,const ModelGeometryOptions& options={});
