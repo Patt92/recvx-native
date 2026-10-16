@@ -508,8 +508,98 @@ Gegenproben rot. `./build.sh --test`: **CTest 114/114**, Dev-App aktualisiert. W
 Eventsicht `EventVm::floors_` (beide Schreiber spiegeln jetzt), `activate_enemy_spawn` ignoriert sys->mflrp
 (ungeprueft). **Kein Commit/Push.**
 
-**Naechster Posten:** Waffen 18/20 im CombatController (bhEff130 type 4/6 sind nur im Komponententest
-belegt). **Kein Commit/Push.**
+**Waffen 13/18/20 und Zielfernrohr (2026-10-16):** Befund: `WpnTab.flg 0x20` schickt Waffe **13** (bisher als
+"unterstuetzt" gefuehrt) und 18 nach mode2 71 `bhCPM2_act_scp` (playpch2.c:13) — dort stand im Kern nur eine
+Luecke, Waffe 13 schoss nativ also nie. Portiert: Ich-Perspektive (gm 0x80000/st 0x800000, pt_flg 0x1 aus),
+Schuss (13: Gun-Atari ab owP[5]; 18: Rakete bhEff130 type 4, ef_flg 0x2), 30-Schritt-Rueckstoss, Zoom
+cam.ppers 3640 auf pad 0x80, Zielen ueber pad_dx/pad_dy, Freigabe nach ct0 > 5. Waffe 20: bhSetGunFire-Funken
+bhEff027 (pwksub.c:3126). CombatController gibt 18/20 frei. Mitbehoben: sys->pad_dx/pad_dy jetzt ein
+Besitzer (Runtime, nur mit sp_flg 0x20 wie bhSysCallPad); pt_flg und sys->ef_flg im Kampf gebunden (vorher
+Luecke bzw. immer 0, das Raketen-Nachladetor player.c fuer 18 griff nie). Tests `combat_player_state`
+test_scope/test_linear_launcher, drei Gegenproben rot; `./build.sh --test` **CTest 114/114**, `verify_combat
+--unit/--runtime` gruen. Nicht belegt: kein Bild der Ich-Perspektive in der Runtime, kein natuerlicher Erwerb
+von 13/18/20 durchgespielt. Offen/Befund: der Kampf-Pad bildet "vorwaerts" nur auf 0x20 ab, das Original
+setzt 0x1|0x20 (pad.c pad_tab: Steuerkreuz oben = Bit 0 und Bit 5) — wirkt auf bhControlPlayerPad
+(player.c:1818); Analogstick pad_ax/pad_ay fehlt im Host. **Kein Commit/Push.**
+
+**plp->stflg im Kampf vereinheitlicht (2026-10-16):** Bei der Pad-Pruefung gefunden: die Kampfsicht hielt
+plp->stflg als eigene Kopie. Das Zielbit 0x400 (player.c:1789), das en05/en09/en17 lesen, erreichte die
+Gegner nie; das Item-Kisten-Tor 0x10000 sperrte das Zielen nicht. Jetzt liest/schreibt der CombatController
+Eventbank 14 um jeden Kernaufruf. Kampf-Pad: Steuerkreuz oben/unten = 0x21/0x42 wie pad_tab (Wirkung im Host
+nicht beobachtbar, s. Ledger). Test `combat_player_work` (neu), Gegenprobe rot; `./build.sh --test`
+**CTest 115/115**, `verify_combat --runtime` gruen. OFFEN: plp->flg (Bank 13) ist weiter privat in der
+Kampfsicht. **Kein Commit/Push.**
+
+**Waffe 11 und plp->flg-Pruefung (2026-10-16):** `bhSetGunFire` Waffe 11 (pwksub.c:2981) portiert: fuenf
+bhEff014- und acht bhEff002-Saetze ueber sys->ef mit der Vorlagenvererbung des Originals (type 3 nimmt die Lage
+von Satz 4). CombatController gibt 11 frei. Test `test_weapon11_fire`, zwei Gegenproben rot; `./build.sh --test`
+**CTest 115/115**, `verify_combat` gruen. plp->flg: geprueft und **bewusst nicht** an Bank 13 gebunden — kein
+externer Leser eines Kampf-flg-Bits ausser dem Passtor 0x10000, und eine Bindung wuerde nach einem Menue/Event
+(Kern wird verworfen) 0x10000 stehen lassen und den Bewegungspfad sperren. Voraussetzung waere, den Kern bei
+Sperren zu behalten wie das Original den Spielerwork (Ledger `player.c:BH_PWORK.flg:Kampf`). **Kein Commit/Push.**
+
+**Bogengewehr (Waffen 10/19) portiert (2026-10-16):** `bhEff013` (effsub1.c:3352) in `native/effect_eff013.cpp`
+mit Flug, Zielverfolgung, Wand-/Gegner-/Wassertreffer, Stecken (121 Paesse) und Sprengpfeil-Explosion; gezeichnet
+ueber bhDrawPolEffect mit `efm[13].objP[mdlver]` (vierter Modellblock aus SYSTEM 0001). Dabei geschlossen:
+**`bhCheckCapCol2Capsule`** (weapon.c:1496, CPCL-Gelenkkapseln) war im Kern nur eine Luecke — **auch Waffe 13
+konnte deshalb keinen Gegner treffen**. `bhLinkBlood` ist im Original leer, EN01 meldete es faelschlich als
+Luecke. Neu: `recvx_combat_check_gun_atari`/`recvx_combat_search_near_enemy` fuer Effekte, bhEffDmy 139..142,
+Laufzeitanhaengen eines Effekts an einen Gegnerwork. CombatController gibt 10/19 frei. Test
+`effect_eff013_world` (RM_0080, drei Faelle, drei Gegenproben rot); `./build.sh --test` **CTest 116/116**,
+`verify_combat` gruen, Dev-App 20:29. Nicht belegt: Bild, Wasserraum, natuerlicher Erwerb. **Kein Commit/Push.**
+
+**Semantikabgleich Treffer (2026-10-16):** `bhCheckGunAtari` (weapon.c:473-870) und `bhCheckKnifeAtari`
+(:1002-1146) Zeile fuer Zeile gegen den Kern: Filter, Kegeltest, Gelenkkapsel-/Kapselzweig, Sichtwand, naechster
+Treffer, Durchschlagszweig (nimmt wie das Original px/nr des bisher naechsten), Gelenkwahl, Schadensstufen und die
+Gelenkkoordinaten-Rueckgabe stimmen ueberein. Einzige Restluecke dort: Wandzerstoerung attr 0x1000000
+(:552-566, bhSetExplosion/obwp[prm3].mdflg/ahtp->flg) ist im Spielerkampf ungebunden — Befund: nur `bhObj012`
+(objitm.c:2069) erzeugt solche Waende, und **kein Raum fuehrt ein Typ-12-Objekt** (alle RDX geprueft); bhObj012 ist
+nativ nicht portiert. **Kein Commit/Push.**
+
+**Spieler-Bewegungsmischung (SetMtn*Hokan) portiert (2026-10-16):** plp->mlwP->objP ist jetzt dauerhaft
+(`RoomWorld::player_obj_`); Aktion/Event, Kampf, Schaden, Griff und Schieben schreiben den Knotenteil von
+bhSetMotion mit dem Stand vor dem Vorschub ueber das vorhandene `set_motion`, alle Abtaststellen legen objP unter
+ihre Bearbeitungen. Motionwechsel blenden wie im Original (Protokoll: Lauf->Stand ueber 5 Paesse, Ziehen/Wegstecken
+ueber 4/12); die gezeigte Pose ist das Bild vor dem Vorschub (vorher eins voraus). Kampf-Luecke `SetMtn*Hokan`
+und Push-Bit HOKAN entfallen. Test `player_motion_blend` (neu, zwei Gegenproben rot). `./build.sh --test`
+**CTest 117/117**, `verify_combat` gruen (gleiche 6 Schuesse/4 Treffer; Aufschaltwinkel 3521 -> 3366, weil der
+Kern jetzt die objP-Pose liest), `verify_push`, `verify_stairs`, `verify_lighter` gruen. Rot, aber mit
+abgeschalteter Mischung identisch rot gemessen: `verify_events` (window sequence), `verify_enemy_ai` (Hunde-
+Todesbiss bei Bild 3000); `verify_crate_edge` erwartet veraltet Opcode 0x8b als offen (seit 7023885 gebunden).
+Offen: Treppe, Gameover, skriptgefuehrte Spielermotion fuehren objP noch nicht. Dev-App 21:10. **Kein Commit/Push.**
+
+**2026-10-16, drei gemeldete Fehler (RM_1050 / Inventar), Ursachen belegt und behoben:**
+(1) *Ameisen-Juwel, blaue Flaeche:* `RoomWorld::set_fixed_cut` schlug die Nahgrenze mit dem vorigen Raumschnitt
+nach (Schnitt 1: 20/20000) statt mit `cam.ncut = cno` (cut.c:486 vor bhChangeViewClipRM :537); die Vitrine lag
+vor der Nahgrenze, es blieb die Hintergrundfarbe. Jetzt Schnitt 5 -> 2/20000, Bild zeigt die Vitrine.
+(2) *Steve-Schalter ohne Bilder:* die Meldungsbits von `sys->st_flg` (0x1000 Seite fertig, 0x4000, 0x8000, 0x800,
+0x400, 0x80000) lebten nur im `MessageDialog`; das Skript (Ereignis 34, @2ba2) wartet per bhFlagCk Typ 5 auf
+0x1000 und dessen Fall beim Umblaettern von Meldung 24 und setzt erst dann bhCamSet 4 (Schaltertafel mit den
+sechs Waffenbildern). `EventVm` spiegelt `MessageDialog::status()` jetzt nach jedem Pass in flags[5]; Kamera 4
+und die Bilder erscheinen. Dabei festgestellt: der Monitor (bhEff111, Rendertextur aus Schnitt 6, nur RM_1050)
+ist nicht gebunden und bleibt schwarz (Ledger `effsub1.c:bhEff111`, missing).
+(3) *Inventartext vor der UI:* GetItem laeuft im Original erst im stehenden Aufnahmebildschirm (sub1.c:3452,
+StatusMain case 8 nach SpriteH ohne statusflg 0x40); `begin_pickup` entschied sofort, die Frage 157 stand an
+ihrer festen Position (mes_spos[1] 44/342) ueber den einfahrenden Sprites. Die Entscheidung wartet jetzt auf den
+Statustask und das Ende der Einfahrt. Der Itemname selbst faehrt mit cen_pos[6] mit (unveraendert).
+Tests: `native_ground_world` (Clip), `event_lifecycle` (RM_1050 Ereignis 34 bis bhCamSet 4),
+`native-gameplay-bindings` (RM_0000 Messer); alle drei mit Gegenprobe rot. Headless-Bilder: Vitrine, Schaltertafel.
+
+**2026-10-16, RM_0080 Rolltor-Zombies (Nutzerbefund "bewegende Dummies"):** Der Schalter (Interaktion 8, nach
+geloester Sperre `ev_flg 110`) startet Ereignisse 5-11/40/41; 7 und 8 sind die zwei Zombies: Common 25 Lauf,
+`Common_controll 53` (@132a/@1360), dann `Sub_controll 0x8f` Modus 1. Die native VM kannte Befehl 53 nicht,
+der Task blieb stehen ("unimplemented Common_controll command 53"), die Zombies blieben in mode0 5. Ursache
+ist das Parsing: die 0x69-Laengentabelle war ein Teilstand. Jetzt `EventVm::common_controll_length` mit allen
+49 Originalbefehlen aus event.c:9963-12710 (Zeigervorschub je Fall, Selektorabhaengigkeit 24/25/34/35,
+Achsenabhaengigkeit 10/22); nativ gebunden 0, 53, 10/22, 43, 35 Selektor 1; benannte Luecken 51/52
+(`sys->evt_posno`, Opcodes 0xb3/0xb4 ohne Besitzer) und 35 Selektor 0/Spieler. Test `event_lifecycle`
+(Tabelle gegen die Originalvorschuebe; RM_0080 Rolltor bis beide Zombies im Brain laufen; Gegenprobe rot).
+Headless-Nachweis (`--enemy-ai on`, Snapshot mit ev_flg 110): Bild 300 Rolltor oeffnet, 500 beide laufen
+auf die Spielerin zu (mtn 125/117), 800 Griff (mode 1/0/5/1). CTest 117/117.
+
+**Naechster Posten:** objP auch fuer Treppe/Gameover/Skriptmotion, danach die roten Prueflaeufe verify_events
+und verify_enemy_ai (vorbestehend) untersuchen; bhEff111-Rendertextur und 0xb3/0xb4 `evt_posno` als eigene
+Posten. **Kein Commit/Push.**
 
 ## Gezielter Zugang zu bisherigen Befunden
 

@@ -523,6 +523,24 @@ int main(int argc,char** argv){try{_Make_SinTable();
               <<early_bounds[0]<<".."<<early_bounds[1]<<"), visible at pass 198 (y "<<later_bounds[0]<<".."<<later_bounds[1]<<").\n";
     }
 
+    // --- bhControlDoor zeichnet nur ohne Abschlussbit 0x40 (door.c:395) ----
+    // Ein uebersprungener Lauf (Host-Skip setzt 0x40, 0x200 bleibt stehen) und
+    // eine Direktanforderung (Typ 255 laesst core_ unberuehrt) duerfen das
+    // zuletzt gezeigte Tuermodell weder im Uebergabebild noch im ersten Bild
+    // der naechsten Anforderung erneut zeichnen. Typ 16 ist die Leiterdemo.
+    {DoorSequence ladder;ladder.begin(root,{},DoorRequest{0,0,1,0,16,0});
+     for(unsigned i=0;i<39;++i)ladder.tick();
+     SoftwareRenderer image(640,480);image.set_supersampling(1);image.set_render_threads(1);
+     ladder.draw(image);
+     check((ladder.state().status&0x200)&&image.covered_pixels()>0,"the running ladder demo was not drawn");
+     ladder.skip();
+     check((ladder.state().status&0x240)==0x240,"the skip no longer leaves the original model bit beside 0x40");
+     ladder.draw(image);
+     check(image.covered_pixels()==0,"a skipped door model is drawn after the completion bit 0x40 (door.c:395)");
+     ladder.begin(root,{},DoorRequest{0x80000000u,0,2,0,255,0});
+     ladder.draw(image);
+     check(ladder.direct()&&image.covered_pixels()==0,"a direct transition draws the previous door model");}
+
     // --- the sequence is actually drawn, and the light reaches the image ---
     {DoorSequence door;door.begin(root,{},DoorRequest{0,0,1,0,0,0});
      for(unsigned i=0;i<60;++i)door.tick();

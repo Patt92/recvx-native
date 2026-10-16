@@ -2,10 +2,13 @@
 #include "input.h"
 #include "world.h"
 #include "movie.h"
+#include "renderer.h"
 #include "asset_io.h"
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <algorithm>
+#include <functional>
 #include <vector>
 #include <iostream>
 #include <stdexcept>
@@ -18,7 +21,8 @@ static void expect(bool ok,const std::string& why){if(!ok)failures.push_back(why
 struct Room {
  std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn actor;std::size_t motion=42;std::int64_t frame=0;
  Inventory inventory;StatusMenu menu;MessageDialog dialog;AudioMixer audio;MoviePlayer movie;PlayerAsset body;RoomWorld world;EventVm vm;GameplayInput input;
- Room(const std::filesystem::path& data,const char* name):bytes(read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.at(0)),audio(data),movie(data,{},audio),body(PlayerAsset::load(data)),world(bytes,scene,actor,motion,frame,audio,data),vm(bytes,inventory,dialog),input(inventory,menu,dialog,&vm){
+ // `pre` runs before bhInitEvent (scd0), like flags carried into the room from elsewhere.
+ Room(const std::filesystem::path& data,const char* name,const std::function<void(EventVm&)>& pre={}):bytes(read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.at(0)),audio(data),movie(data,{},audio),body(PlayerAsset::load(data)),world(bytes,scene,actor,motion,frame,audio,data),vm(bytes,inventory,dialog),input(inventory,menu,dialog,&vm){
   bind_item_names(read_asset_file(data/"files/SYSMES.ALD",4*1024*1024)); // sys->mes_ip wie GameUi in der Runtime
   world.set_player_asset(&body);vm.values[1]=std::string(name)=="RM_0050"?5:0;
   vm.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes[1]);return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};
@@ -26,7 +30,7 @@ struct Room {
   vm.audio_active=[&](unsigned n){return audio.active(n);};vm.movie_active=[&]{return movie.active();};vm.movie_time=[&]{return movie.time_centiseconds();};vm.enemy_dead=[&](unsigned n){return world.enemy_dead(n);};
   input.video_active=[&]{return movie.active();};input.skip_video=[&]{movie.stop();};vm.door=[](const DoorRequest&){return true;};
   if(std::string(name)=="RM_0050")inventory.acquire(84,1); // Diagnostic precondition: the player brings the padlock key into the room.
-  audio.begin_room_init();vm.initialize();audio.load_room_sounds(0,vm.values[1],audio.take_room_sound_case());audio.room_fade_in();
+  if(pre)pre(vm);audio.begin_room_init();vm.initialize();audio.load_room_sounds(0,vm.values[1],audio.take_room_sound_case());audio.room_fade_in();
  }
  void tick(){input.apply({});vm.check_floor(actor.position,actor.yaw,world.floor_at(actor.position));vm.tick();input.synchronize();world.set_simulation_flags(vm.flags[6][0]);world.tick();vm.flags[4][0]|=world.take_enemy_room_flags();movie.tick();audio.mix();check(vm.errors.empty(),"original event stream blocked");}
  bool task(unsigned event){for(const auto& t:vm.task_states())if(t.event==event)return true;return false;}
@@ -52,6 +56,100 @@ int main(int argc,char** argv){try{
   for(unsigned yaw=0;yaw<65536&&!requested;yaw+=16384){float rad=yaw*6.28318530718f/65536;float probe=a.type==0?4.5f:6.f;r.actor.position={a.position.x+a.extent.x*.5f+probe*std::sin(rad),a.position.y,a.position.z+a.extent.z*.5f+probe*std::cos(rad)};requested=r.vm.interact(r.actor.position,yaw,a.floor);}
   check(requested,"door refused after dog event and padlock");if(exit==0)r.vm.tick();r.vm.finish_room_exit();check(r.vm.flags[10][0]&1,"door scenario fails after dog event and padlock");check(r.vm.errors.empty(),"door exit blocked");
  }
+ // RM_1050 Ereignis 34 (Steve-Schalter, Skript @2ba2): bhCamSet 1 (Monitor), Meldung 24,
+ // WHILE !bhFlagCk(5,19) [st_flg 0x1000 Seite fertig], WHILE bhFlagCk(5,19) [bis OK
+ // umblaettert], erst dann bhCamSet 4 auf die Schaltertafel. Die Meldungsbits sind
+ // sys->st_flg selbst (message.c), kein eigener Dialogzustand des Hosts.
+ {Room r(data,"RM_1050");r.vm.set_flag(1,0x92,1);r.vm.start(0,34);r.tick();check(r.task(34),"RM_1050 switch event did not start");
+  bool page=false,cam4=false;
+  for(unsigned t=0;t<600&&r.task(34)&&!cam4;++t){r.tick();
+   check((r.vm.flags[5][0]&0x8dc00u)==(r.dialog.status()&0x8dc00u),"st_flg message bits differ from the bhControlMessage state");
+   if(r.dialog.active()&&(r.vm.flags[5][0]&0x1000u))page=true;
+   if(r.dialog.active()&&(r.dialog.turnable()||r.dialog.choosing())&&t%4==0){r.dialog.selection=0;r.vm.confirm_dialog();}
+   if(r.world.event_camera&&r.world.event_camera_index==4)cam4=true;}
+  check(page,"RM_1050 message 24 never raised st_flg 0x1000 for the script");
+  check(cam4,"RM_1050 switch event did not reach bhCamSet 4 after the page turn");
+  std::cout<<"RM_1050 switch event: st_flg message bits mirrored, bhCamSet 4 reached after the page turn.\n";}
+ // Common_controll (event.c:9963-12710) advances the script pointer per command; the
+ // whole table, including the selector-dependent 24/25/34/35 and axis-dependent 10/22
+ // lengths, must match the original or the task desynchronizes (RM_0080 below).
+ {struct Row{unsigned cmd,b2,b3;std::size_t len;};const Row rows[]={
+   {0,0,0,2},{36,0,0,2},{47,0,0,2},{2,0,0,3},{17,0,0,3},{33,0,0,3},{14,0,0,4},{23,1,0,4},{40,0,0,4},{41,0,0,4},{42,0,0,4},{46,1,0,4},{48,0,0,4},{49,0,0,4},{50,1,0,4},{52,0,0,4},{53,0,0,4},
+   {43,0,7,5},{44,0,7,5},{45,0,7,5},{5,0,0,6},{6,0,0,6},{9,0,0,6},{11,0,0,6},{12,0,0,6},{13,0,0,6},{15,0,0,6},{16,0,0,6},{51,0,0,6},{132,0,0,6},{141,0,0,6},
+   {10,0,0,6},{10,2,0,6},{10,3,0,2},{22,1,0,6},{22,9,0,2},{7,0,0,8},{8,0,0,8},{27,0,0,8},{140,0,0,8},{26,0,0,10},{38,0,0,10},
+   {24,1,0,8},{24,1,3,8},{24,1,4,3},{25,1,0,8},{25,1,1,8},{25,1,2,3},{34,1,0,10},{34,1,3,10},{34,1,4,3},{35,1,0,8},{35,1,1,9},{35,1,2,3},{1,0,0,0},{37,0,0,0},{54,0,0,0}};
+  for(const auto& r:rows){const auto got=EventVm::common_controll_length(r.cmd,r.b2,r.b3);if(got!=r.len){std::cerr<<"Common_controll "<<r.cmd<<" bytes "<<r.b2<<"/"<<r.b3<<": length "<<got<<" expected "<<r.len<<"\n";check(false,"Common_controll length differs from the original pointer advance");}}}
+ // RM_0080 shutter switch (interaction 8, scd1 @0c46): with ev_flg 110 set (lock released)
+ // and ev_flg 10 clear, "Push the switch?" Yes starts events 5-11/40/41. Events 7 and 8 are the
+ // two zombies behind the shutter: Common 25 walk, Common 53 (@132a/@1360), then
+ // Sub_controll 0x8f mode0 1 hands them to their own Brain. A task that stops at an
+ // unparsed command leaves them in mode0 5 (script walk) for good.
+ // ev_flg 110 is carried into the room (scd0 @022e places the switch work by it), so it is set before bhInitEvent.
+ {Room r(data,"RM_0080",[](EventVm& vm){vm.set_flag(1,110,0);vm.set_flag(1,10,1);});for(unsigned t=0;t<5;++t)r.tick();
+  const auto& a=r.vm.interactions.at(8);r.actor.position={a.position.x+a.extent.x*.5f,0,a.position.z+a.extent.z+3.5f};r.actor.yaw=0;r.world.place_player(r.actor.position);
+  check(r.vm.interact(r.actor.position,r.actor.yaw,r.world.floor_at(r.actor.position))&&r.vm.values[20]==8&&r.dialog.index()==2,"RM_0080 shutter switch question missing");
+  bool started=false,both_done=false;const auto* z0=r.world.state(1,0);const auto* z1=r.world.state(1,1);check(z0&&z1,"RM_0080 zombies missing");const auto p0=z0->transform.position,p1=z1->transform.position;
+  for(unsigned t=0;t<1200&&!both_done;++t){r.tick();
+   // Meldung 2 hat zwei Seiten: OK blaettert die erste um (message.c:325), die zweite traegt Ja/Nein.
+   if(r.dialog.active()&&(r.dialog.turnable()||r.dialog.choosing())&&t%3==2){r.dialog.selection=0;r.vm.confirm_dialog();}
+   if(r.task(7)&&r.task(8))started=true;
+   if(started&&!r.task(7)&&!r.task(8))both_done=true;}
+  check(started,"RM_0080 zombie events 7/8 never started");
+  check(both_done&&r.vm.errors.empty(),"RM_0080 zombie events 7/8 did not finish (Common_controll 53 parse)");
+  check(z0->enemy.mode0==1&&z1->enemy.mode0==1&&!z0->scripted&&!z1->scripted,"RM_0080 zombies stayed scripted dummies after the shutter (Sub_controll 0x8f not reached)");
+  // Released to bhEne01 Brain: the next passes move them on their own, not a script walk.
+  const auto q0=z0->transform.position,q1=z1->transform.position;for(unsigned t=0;t<240;++t)r.tick();
+  check(z0->enemy.mode0==1&&z1->enemy.mode0==1&&(z0->transform.position.x!=q0.x||z0->transform.position.z!=q0.z)&&(z1->transform.position.x!=q1.x||z1->transform.position.z!=q1.z),"RM_0080 zombies did not move under their own Brain after release");(void)p0;(void)p1;
+  std::cout<<"RM_0080 shutter: Common_controll 53 parsed, both zombies released to their Brain.\n";}
+ // RM_3140 Ueberwachungskamera: scd1 (@04be) startet mit ev_flg 218 ueber 0x91 bhEffModeSet den
+ // Raumeffekt 9 = bhEff137 (effsub1b.c:1015). Er besitzt die Kamera unter cam.flg 0x40, schwenkt mit
+ // pad_on, zoomt mit OK und setzt ev_flg 65/66/72, die das Skript in Events umsetzt.
+ {Room r(data,"RM_3140",[](EventVm& vm){vm.set_flag(1,218,0);});
+  for(unsigned t=0;t<2;++t)r.tick();
+  check(std::none_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0x91;}),"RM_3140 bhEffModeSet on bhEff137 unbound");
+  auto cam=r.world.camera(r.scene,r.scene.cameras.at(0));
+  check(cam.position.x==67.5f&&cam.position.y==29.3f&&cam.position.z==6.5f&&cam.perspective==14563&&cam.distance==-2.0f&&cam.angles[1]==(int(182.04445f*226.0f)&0xffff),"bhEff137 monitor camera pose differs");
+  check((r.vm.flags[5][0]&1u)&&(r.vm.flags[10][0]&0x44u)==0x44u,"bhEff137 st_flg 1 / cb_flg 0x44 missing");
+  for(unsigned t=0;t<70;++t)r.tick();
+  r.world.set_pad(0x8,0x8);r.tick();r.world.set_pad(0,0);for(unsigned t=0;t<9;++t)r.tick();
+  cam=r.world.camera(r.scene,r.scene.cameras.at(0));check(cam.angles[1]==(int(182.04445f*230.0f)&0xffff),"bhEff137 pad pan (8 steps of 0.5 deg) differs");
+  r.world.set_pad(0x800,0x800);r.tick();r.world.set_pad(0,0);
+  bool flag66=false;for(unsigned t=0;t<120&&!(r.dialog.active()&&r.dialog.index()==23);++t){r.tick();flag66=flag66||r.vm.flag(1,66);}
+  check(flag66&&r.dialog.active()&&r.dialog.index()==23,"bhEff137 zoom did not set ev_flg 66 / room event 1 question");
+  std::cout<<"RM_3140 surveillance camera: bhEff137 owns the camera, pans, zooms and hands ev_flg 66 to the room script.\n";}
+ // Raumwechsel maskiert gm_flg (bhInitRoomChangeSystem, system.c:185: &= 0x9B8C00CB). RM_1130 verlaesst
+ // den Raum nach "Climb down the ladder?" mit 57 00 (gm_flg 0x20000) ohne 57 01; dieses Bit darf in
+ // RM_1080 die Rueckkehr der Untersuchungskamera der Luger-Tuer (Interaktion 1, attr 0x800e) nicht sperren.
+ {Room before(data,"RM_1130");before.vm.flags[11][0]|=0x30800u|0x8000000u; // Stand nach der Leiterfrage (Diagnosevorbedingung)
+  unsigned returned=0;
+  Room r(data,"RM_1080",[&](EventVm& vm){vm.inherit_progress(before.vm);vm.return_cut=[&]{++returned;};});
+  check(!(r.vm.flags[11][0]&0x30800u)&&(r.vm.flags[11][0]&0x8000000u),"room change keeps room-bound gm_flg camera bits or drops the side pack");
+  r.vm.event_fixed_cut=[&](unsigned c,unsigned k){r.world.set_event_camera(c,k,false);};
+  for(unsigned t=0;t<4;++t)r.tick();const unsigned before_door=returned;
+  r.actor.position={20,0,-34};r.actor.yaw=0;r.world.place_player(r.actor.position);
+  check(r.vm.interact(r.actor.position,r.actor.yaw,r.world.floor_at(r.actor.position))&&r.dialog.index()==1,"RM_1080 Luger door message missing");
+  for(unsigned t=0;t<400&&r.dialog.active();++t){r.tick();if(r.dialog.turnable()||r.dialog.closable())r.vm.confirm_dialog();}
+  for(unsigned t=0;t<4;++t)r.tick();
+  check(!r.dialog.active()&&returned>before_door&&!(r.vm.flags[5][0]&1u),"RM_1080 Luger door close-up camera never returns (bhCheckCut(1))");
+  std::cout<<"Room change masks gm_flg (system.c:185); RM_1080 Luger door camera returns after the message.\n";}
+ // RM_1050 Monitor (Raumeffekt 1, bhEff111 effsub1.c:6927): scd0 schaltet ihn mit ev_flg 0x92 per
+ // 0x91 01 00 live; der Effekt fordert ueber gm_flg 0x200 bhDrawSmallScreenRenderTexture (screen.c:920)
+ // an, das Schnitt 6 (Steve) ohne Spieler in eine 512x512-Textur zeichnet; bhDrawThlEffect3D zeigt sie.
+ {Room r(data,"RM_1050",[](EventVm& vm){vm.set_flag(1,0x92,0);});
+  for(unsigned t=0;t<3;++t)r.tick();
+  check(std::none_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0x91;}),"RM_1050 bhEffModeSet on bhEff111 unbound");
+  const auto* m=r.world.effect_state(1);check(m&&m->id==111&&m->mode0==2&&m->tex_id==111&&m->lkono==0&&(m->flg&0x4020000u)==0x4020000u,"bhEff111 state differs (lkono must be 0 without lkflg, room.c:781)");
+  check(r.vm.flags[11][0]&0x200u,"bhEff111 does not request the small-screen render (gm_flg 0x200)");
+  SceneCamera view;view.position={24.7329f,14.44f,32.7362f};view.angles={0,0,0};view.perspective=10012;view.clip_near=1;view.clip_far=20000;
+  const auto rt=r.world.small_screen_pass(view);check(rt&&rt->slot==1&&rt->cut==6,"monitor render pass missing for a camera that sees the monitor");
+  Scene screen=r.scene;r.world.append(screen,{},rt->camera,{true,rt->cut});
+  SoftwareRenderer target(512,512);target.set_supersampling(1);target.set_render_threads(1);target.draw_screen(screen,rt->camera,rt->dist);
+  check(target.covered_pixels()>1000,"cut 6 rendered nothing into the monitor texture");
+  r.world.commit_small_screen(target.pixels(),512,512);
+  Scene shown=r.scene;const auto base=shown.triangles.size();r.world.append(shown,{},view);
+  unsigned monitor=0;for(std::size_t i=base;i<shown.triangles.size();++i){const auto& t=shown.triangles[i];if(t.textured&&t.texture<shown.textures.size()&&shown.textures[t.texture].width==512&&t.blend==SceneBlend::Opaque)++monitor;}
+  check(monitor==2,"bhDrawThlEffect3D monitor quad with the render texture missing");
+  std::cout<<"RM_1050 monitor: bhEff111 live, cut 6 rendered into the 512x512 texture and shown on the quad.\n";}
  // Fresh Enter edges before the FMV: sweep the initial game frames, including
  // the cinematic start and subsequent animation waits. Finish the same flow.
  for(unsigned press:{0u,1u,2u,3u,10u,30u,60u,120u,300u,600u,900u,1100u,1200u,1300u}){

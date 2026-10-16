@@ -32,6 +32,12 @@ public:
     void queue_ok(){ok_=true;}
     void queue_move(int direction){move_+=direction;}
     bool moved()const{return moved_;}
+    // The message bits of sys->st_flg as bhControlMessage leaves them (0x80000 default
+    // selection, 0x8000 choice open, 0x4000 end reached, 0x1000 page complete, 0x800 timer,
+    // 0x400 line wait). They are one variable with the script's st_flg (bhFlagCk type 5);
+    // the owner mirrors them into its flag bank after every pass. Kept after close(),
+    // like the original, until the next bhSetMessage.
+    unsigned status()const{return st_;}
     // The whole bhControlMessage pass with the queued presses.
     Step update();
     // The pad part of the pass for an owner whose update already ran this frame

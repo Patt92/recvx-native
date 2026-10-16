@@ -14,7 +14,7 @@ typedef struct {int index;unsigned flags;int aspd,param,floor;float x,y,z;} RECV
 typedef struct {void* user;void (*sound)(void*,int);void (*vibration)(void*,int,int);int ply_id;} RECVX_PUSH_HOST;
 typedef struct RECVX_PUSH_CORE RECVX_PUSH_CORE;
 
-#define RECVX_PUSH_UNBOUND_HOKAN     0x0001u /* SetMtn*Hokan-Mischung hat keinen nativen Besitzer */
+#define RECVX_PUSH_UNBOUND_HOKAN     0x0001u /* frei: die SetMtn*Hokan-Mischung fuehrt RoomWorld::player_set_motion_pose */
 #define RECVX_PUSH_UNBOUND_MOTION    0x0002u /* Motion fehlt im nativen Spielerasset */
 #define RECVX_PUSH_UNBOUND_TRANS     0x0004u /* bhGetTransZ(PlyTrsZ[4][dmlvl]) fehlt */
 #define RECVX_PUSH_UNBOUND_SOUND     0x0008u /* CallPlayerActionSe ohne Host */
@@ -34,6 +34,7 @@ typedef struct {
     int frm_no;                    /* plp->frm_no, 16.16 */
     int frm_mode,mtn_add,mtn_md;
     int hokan_rate,hokan_count;
+    int hokan_sample;              /* hokan_count dieses bhSetMotion vor dem Abzug (Knotenteil beim Host) */
     int mode0,mode2;
     int dmlvl,wpntp;
     unsigned flags,status,st_flg,flg2; /* plp->flg, plp->stflg, sys->st_flg, plp->flg2 */

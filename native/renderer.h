@@ -6,6 +6,10 @@ class SoftwareRenderer {
 public:
     SoftwareRenderer(int width,int height);
     void draw(const Scene& scene,const SceneCamera& camera,bool wireframe=false);
+    // screen.c:961-974 njSetScreen(dist, w, h, cx = w/2, cy = h/2) mit unveraendertem njSetAspect
+    // (BHD_ASPECT 1.174/1): fSx = 1.174*x*dist/z, fSy = y*dist/z in einem Bild dieser Groesse.
+    // Die Ninja-Streifen-Clipregeln (ClipVolume 320x240 des 640er Bildes) gelten hier nicht.
+    void draw_screen(const Scene& scene,const SceneCamera& camera,float dist);
     // Already prepared camera-space matrix, including the original item-view
     // path which bypasses njSetView's world Y/Z conversion.
     // near/far: njClipZ distances in view space (far 0 = unlimited).

@@ -36,10 +36,57 @@ void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())thr
 void EventVm::inherit_progress(const EventVm& previous){
     // Original global event/key/item/map/game flags outlive a ROM_WORK load.
     for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
+    // bhSysCallRoomRead -> bhInitReadRDT -> bhInitRoomChangeSystem (system.c:1629, room.c:32,
+    // system.c:185): sys->gm_flg &= 0x9B8C00CB. Raumgebundene Kamerabits (0x800 bhCheckCut(1),
+    // 0x1000/0x10000 Festkamera, 0x20000 bhFixEventCamPly, 0x10, 0x200000) enden mit dem Raum;
+    // sonst haelt ein im Vorraum gesetztes 0x20000 jede Untersuchungskamera fest (RM_1130 -> RM_1080).
+    flags[11][0]&=room_change_gm_mask;
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
     values[21]=previous.values[21]; // sys->rcase lebt ueber das Raumladen hinaus (bhRoomCaseNo 0x37, bhSv 21; system.c:1623 waehlt damit die naechste RDX)
 }
-void EventVm::initialize(){if(initialize_enemies)initialize_enemies();ifel_=0;Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
+void EventVm::initialize(){check_sub_pack(); /* bhSetPlayer/bhInitRoomChangePlayer/bhResetPlayer (player.c:844/935/1035) vor bhInitEvent */if(initialize_enemies)initialize_enemies();ifel_=0;Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
+// Common_controll (event.c:9963-12710) advances bhScePtr itself, command by
+// command; bhCommonCtr (:9951) has consumed the 0x69 byte before. The lengths
+// below are whole instructions (0x69 included), read off every original case
+// (line = case label in event.c):
+//   0 :12706 (++)                      2/3/4 :12167/12195/12223 (++ ++)
+//   5/6 :11996/12005 (++ 3x++ ++)      7 :12034 (++ 3x +=2)     8 :12099 (++ 3x +=2)
+//   9 :12136 (++ ++ ++ +=2)            10 :12452 (++, Achse 0..2: +=2 +=2)
+//   11 :12068 (++ ++ ++ +=2)           12/13 :12019/12026 (++ 3x++ ++)
+//   14/21 :12572/12583 (++ ++ ++)      15/16 :12594/12628 (++ ++ ++ +=2)
+//   17/18/19 :12275/12310/12345 (++ ++) 22 :12403 (++, Achse 0..2: +=2 +=2)
+//   23 :11971 (++ +=2)                 24 :11299 (++ ++, Selektor 0..3 je 5x++)
+//   25 :10880 (++ ++, Selektor 0/1 je 5x++)
+//   26 :10724 (++ ++ ++ 3x +=2)        27 :10764 (++ ++ ++ ++ ++ +=2)
+//   28..33 :10384/10571/10472/10521/10644/10684 (++ ++)
+//   34 :11632 (++ ++, Selektor 0..3: 5x++ +=2)
+//   35 :11100 (++ ++, Selektor 0: 5x++; Selektor 1: ++ ++ ++ ++ +=2)
+//   36 :12661 (++)                     38 :12667 (++ ++ ++ 3x +=2)
+//   40/41/46 :10370/10346/10358 (++ +=2)  42 :10324 (++ ++ ++)
+//   43 :10057 (++ ++ ++ ++)            44/45 :10184/10254 (++ ++ ++ ++)
+//   47 :10053 (++)                     48 :10799 (++ +=2)       49 :10825 (++ ++ ++)
+//   50 :10048 (++ +=2)                 51 :9997 (++ ++ ++ +=2)  52 :10030 (++ +=2)
+//   53 :9967 (++ +=2)                  132 :12495 (++ ++ ++ ++ ++)
+//   140 :12516 (++ ++ ++ +=2 +=2)      141 :12561 (++ ++ ++ ++ ++)
+// A selector outside the original sub-switch (24/25/34/35, axis of 10/22) leaves
+// the pointer on that byte: the next instruction starts there, as in the original.
+std::size_t EventVm::common_controll_length(unsigned command,unsigned byte2,unsigned byte3){
+    switch(command){
+    case 0:case 36:case 47:return 2;
+    case 2:case 3:case 4:case 17:case 18:case 19:case 28:case 29:case 30:case 31:case 32:case 33:return 3;
+    case 14:case 21:case 23:case 40:case 41:case 42:case 46:case 48:case 49:case 50:case 52:case 53:return 4;
+    case 43:case 44:case 45:return 5;
+    case 5:case 6:case 9:case 11:case 12:case 13:case 15:case 16:case 51:case 132:case 141:return 6;
+    case 10:case 22:return byte2<=2?6:2;
+    case 7:case 8:case 27:case 140:return 8;
+    case 26:case 38:return 10;
+    case 24:return byte3<=3?8:3;
+    case 25:return byte3<=1?8:3;
+    case 34:return byte3<=3?10:3;
+    case 35:return byte3==0?8:byte3==1?9:3;
+    default:return 0;
+    }
+}
 void EventVm::world(Task& task,unsigned op,std::size_t length){
     BinaryView v(room_);v.require(task.pc,length);EventCommand c{op,task.level,task.event,task.pc-base_,{room_.begin()+task.pc,room_.begin()+task.pc+length}};
     c.loop_remaining=task.cnt2;c.loop_total=task.cnt3;
@@ -335,13 +382,11 @@ int EventVm::instruction(Task& t){
         case 6:hit=!quiet&&(ps&0x200u)!=0&&(on&0x10u)==0;break;
         default:throw std::runtime_error("invalid bhPadCheck mode");}
         return hit?0:1;}
-    case 0x69:{const unsigned command=v.u8(p+1);unsigned length=0;switch(command){case 2:case 3:case 4:case 17:case 18:case 19:case 28:case 29:case 30:case 31:case 32:case 33:length=3;break;case 5:case 6:length=6;break;case 7:case 8:case 27:length=8;break;case 9:case 11:case 12:case 13:case 15:case 16:length=6;break;
-        /* Common_controll 132/140/141 steuern den Begleitfiguren-Bewegungsapparat
-           an (event.c:12495/12517/12561). Laengen aus dem Vorschub des
-           Originalzeigers: 132 liest mode1, die Modusauswahl, ct1 und ct2 (vier
-           Bytes), 140 mode1, die Auswahl und zwei u16 (sechs Bytes), 141 mode1,
-           ct0, ct1 und ct2 (vier Bytes). */
-        case 132:case 141:length=6;break;case 140:length=8;break;case 14:case 21:case 23:case 40:case 41:case 42:case 46:case 48:case 49:length=4;break;case 44:case 45:length=5;break;case 36:case 47:length=2;break;case 24:case 25:length=8;break;case 34:case 26:case 38:length=10;break;case 50:length=4;break;default:throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));}world(t,op,length);return 1;}
+    case 0x69:{ // bhCommonCtr -> Common_controll (event.c:9963-12710): one pointer advance per command
+        const unsigned command=v.u8(p+1);
+        const auto length=common_controll_length(command,v.u8(p+2),v.u8(p+3));
+        if(!length)throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));
+        world(t,op,length);return 1;}
     default:{std::ostringstream s;s<<"unimplemented opcode 0x"<<std::hex<<op;throw std::runtime_error(s.str());}
     }
 }
@@ -417,7 +462,12 @@ void EventVm::control_exm(){
     if((gm&0x800)&&(sp&0x40)&&!(st&1)&&!(gm&0x40)){gm&=~0x800u;if(return_cut)return_cut();}
     pad_cleared_=false;
 }
-void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;/* bhSysCallEvent: bhControlMessage vor bhControlEvent, mit den Tasten dieses Durchlaufs (message.c:50). */{const auto step=dialog_.update();if(dialog_.moved()&&system_se)system_se(2); /* message.c:275/284 */if(step==MessageDialog::Step::Answered)close_dialog(true);else if(step==MessageDialog::Step::Closed){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}if(dialog_.active())values[7]=dialog_.selection;}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_=0; /* bhScenarioCheck: bhIfelFlg = 0 */Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);
+void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;/* bhSysCallEvent: bhControlMessage vor bhControlEvent, mit den Tasten dieses Durchlaufs (message.c:50). */{const auto step=dialog_.update();if(dialog_.moved()&&system_se)system_se(2); /* message.c:275/284 */if(step==MessageDialog::Step::Answered)close_dialog(true);else if(step==MessageDialog::Step::Closed){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}if(dialog_.active())values[7]=dialog_.selection;
+    // sys->st_flg ist eine Variable: die Meldungsbits, die bhControlMessage schreibt (0x1000
+    // Seite fertig, 0x4000 Ende, 0x8000 Auswahl, 0x800/0x400 Wartezeit, 0x80000 Vorauswahl),
+    // liest das Raumskript per bhFlagCk Typ 5 (RM_1050 Ereignis 34: WHILE !(st_flg & 0x1000),
+    // dann WHILE (st_flg & 0x1000) bis zum Umblaettern, erst danach bhCamSet 4).
+    flags[5][0]=(flags[5][0]&~0x8dc00u)|(dialog_.status()&0x8dc00u);}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_=0; /* bhScenarioCheck: bhIfelFlg = 0 */Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);
     // bhEventScheduler2 (event.c:13024) laeuft nur mit sp_flg 0x10; die Raeume setzen bzw. loeschen
     // das Bit selbst im scd1 (bhSet 6,27), z. B. RM_0000 in jedem Durchlauf.
     if(flags[6][0]&0x10u){if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);}
@@ -448,7 +498,7 @@ void EventVm::finish_room_exit(){if(door_scenario_pending_)tick();}
 void EventVm::hide_item(unsigned index){if(index>=room_items_.size())throw std::runtime_error("pickup model outside room");EventCommand command{0x20,0,0,0,{0x20,std::uint8_t(index),3,0}};if(!binding||!binding(command))pending_bindings.push_back(command);}
 std::vector<EventTaskState> EventVm::task_states()const{std::vector<EventTaskState> out;for(const auto& t:tasks_)if(t.active)out.push_back({t.event,t.level,t.delay,t.pc-base_,t.blocked,t.wpnl_no});return out;}
 void EventVm::choose_dialog(int direction){dialog_.queue_move(direction);} // pad_ps 0x4/0x8 fuer den naechsten bhControlMessage-Durchlauf
-void EventVm::finish_pickup(){if(pickup_display_)flags[10][0]&=~0x10u;pickup_item_=pickup_display_=pickup_mode_=0;pickup_model_=~0u;}
+void EventVm::finish_pickup(){if(pickup_display_)flags[10][0]&=~0x10u;pickup_item_=pickup_display_=pickup_mode_=0;pickup_model_=~0u;pickup_decision_pending_=false;}
 void EventVm::show_dialog(Message message,unsigned index){
     // message.c bhSetMessage: neither a previous question's end/response nor
     // its page marker may acknowledge the newly started message.
@@ -467,7 +517,11 @@ void EventVm::begin_pickup(unsigned item,unsigned model){
     pickup_display_=pickup_item_=item;pickup_model_=model;values[8]=item;
     // StatusMain clears the acknowledgement before starting each GetItem.
     begin_status();flags[10][0]=(flags[10][0]&~0x800u)|0x10;
-    pickup_result(inventory_.pickup(item,flags[10][0],values[0],values[1]));
+    // sub1.c:3452 StatusMain case 8: GetItem laeuft erst nach SpriteH, wenn statusflg
+    // 0x40 (Einfahrt) gefallen und 0x10 (ItemView zeigt das Modell, itemview.c:380)
+    // gesetzt ist. testmode 0 entscheidet also erst bei stehendem Bildschirm; die Frage
+    // 157/154/153 (mes_spos[1], feste Position) liegt nie ueber den einfahrenden Sprites.
+    pickup_mode_=0;pickup_decision_pending_=true;service_pickup();
 }
 void EventVm::begin_file(unsigned item,unsigned model){
     // StatusMain/GetFile: FILE requests acknowledge the room pickup, but only
@@ -534,10 +588,27 @@ void EventVm::service_pickup(){
     // StatusMain ruft GetItem in jedem Durchlauf. Nach der Einfügung (testmode
     // 2) folgt dort die Meldung 158 und testmode 3; beides passiert erst im
     // nächsten Durchlauf und wartet auf statusflg 0x40 / st_flg 0x200.
-    if(!pickup_item_||pickup_mode_!=2||dialog_.active())return;
-    pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1],2,-1,status_busy&&status_busy()));
+    if(!pickup_item_)return;
+    const bool busy=status_busy&&status_busy();
+    if(pickup_decision_pending_){ // testmode 0, erst ohne statusflg 0x40 (sub1.c:3452)
+        if(busy)return;
+        pickup_decision_pending_=false;pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1]));return;}
+    if(pickup_mode_!=2||dialog_.active())return;
+    pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1],2,-1,busy));
 }
-void EventVm::begin_status(){flags[10][0]&=~0x400u;} // sub1.c StatusMain entry
+void EventVm::begin_status(){
+    flags[10][0]&=~0x400u; // sub1.c StatusMain entry
+    // sub1.c:3392-3399 StatusMain case 0x1 (jede Oeffnung: Status, GetItem, Datei, Kiste):
+    // gm_mode 3 setzt gm_flg 0x8000000 fest, sonst bhCheckSubPack. Die Tasche (RM_4050
+    // Ereignis 0) setzt nur ev_flg 6; erst diese Ableitung gibt die zwei Plaetze frei.
+    if(inventory_.game_mode==3){flags[11][0]|=0x8000000u;inventory_.side_pack=true;}
+    else check_sub_pack();
+}
+void EventVm::check_sub_pack(){
+    if(inventory_.player>2)return; // player.c:1076: ply_id 3 laesst gm_flg stehen
+    if(flag(1,6+inventory_.player))flags[11][0]|=0x8000000u;else flags[11][0]&=~0x8000000u;
+    inventory_.side_pack=bool(flags[11][0]&0x8000000u);
+}
 bool EventVm::use(unsigned item,unsigned* message,unsigned slot){
     if(message)*message=0;if(!item||item>=156||!inventory_.contains(item))return false;
     if(slot==~0u){slot=1;while(slot<12&&Inventory::id(inventory_.slots()[slot])!=item)++slot;}

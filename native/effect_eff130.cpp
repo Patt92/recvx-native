@@ -67,6 +67,7 @@ void smoke19(const EffectSprite& s,unsigned type,float scale,NJS_POINT3 at){
 }
 }
 void set_effect_projectile_services(EffectProjectileServices s){services=std::move(s);}
+const EffectProjectileServices& effect_projectile_services(){return services;}
 
 // effsub1.c:9001 bhEff130.
 void step_eff130(EffectSprite& s,const EffectContext& c,bool& queued){

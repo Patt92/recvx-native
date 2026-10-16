@@ -68,6 +68,7 @@ public:
     std::function<void()> release_cinematic_player;
     std::function<bool(const DoorRequest&)> door;
     void inherit_progress(const EventVm& previous);
+    static constexpr unsigned room_change_gm_mask=0x9B8C00CBu; // system.c:185 bhInitRoomChangeSystem
     /* bhInitEvent, event.c:352: enemy pass before scd0 and scheduler. */
     std::function<void()> initialize_enemies;
     void initialize();
@@ -78,6 +79,8 @@ public:
     void check_event_deadline();
     bool event_deadline_visible()const;
     void start(unsigned level,unsigned event);
+    // Whole-instruction length of Common_controll `command` (0x69 included); 0 = no original case.
+    static std::size_t common_controll_length(unsigned command,unsigned byte2,unsigned byte3);
     // hitchk.c bhCheckExmAtari, types 0/3/4. `position` is plp->px/pz after the wall
     // passes; `front`/`front_offset` are EXP_WORK fpx/fpz and arn (player.c:1585),
     // the source of the type 0 and type 3 probes pxn[0]/pxn[3] (hitchk.c:4605/:4614).
@@ -90,6 +93,8 @@ public:
     bool exm_flags_clear()const{return !(flags[14][0]&0x10080u)&&!(flags[13][0]&0x4000004u)&&!(flags[10][0]&0x4017u);}
     bool use(unsigned item,unsigned* message=nullptr,unsigned slot=~0u);
     void begin_status(); // StatusMain clears the previous ItemUse request.
+    // player.c:1072 bhCheckSubPack: gm_flg 0x8000000 (10 Plaetze) aus ev_flg 6/7/8 fuer ply_id 0/1/2.
+    void check_sub_pack();
     void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);
     std::function<void(NJS_POINT3,Angle,int)> floor_binding;
     const std::vector<Interaction>& floor_areas()const{return floors_;}
@@ -140,6 +145,7 @@ private:
     Inventory& inventory_;MessageDialog& dialog_;
     bool opening_hint_=false,status_use_pending_=false;
     unsigned pickup_item_=0,pickup_model_=~0u,pickup_display_=0,pickup_mode_=0;
+    bool pickup_decision_pending_=false; // GetItem testmode 0 still owed (sub1.c:3452 gate)
     unsigned acquired_file_=~0u;
     std::vector<unsigned> room_items_;
     void hide_item(unsigned index);

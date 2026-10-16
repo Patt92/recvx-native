@@ -12,7 +12,7 @@ NJS_POINT3 weapon_fire_offset(unsigned weapon);
 bool weapon_shot_sound(unsigned weapon,unsigned& bank,unsigned& program);
 // RECVX_CB_EFFECT.sys_ef: bhSetEffectTb(&sys->ef, ...) schreibt die gemeinsame Vorlage.
 void sys_ef_request(EffectSpawn& spawn,bool with_ax);
-struct CombatControls {bool aim=false,attack=false;int turn=0,vertical=0;bool next_target=false;};
+struct CombatControls {bool aim=false,attack=false;int turn=0,vertical=0;bool next_target=false;int pad_dx=0,pad_dy=0;};
 struct CombatOriginal;
 class CombatController {
 public:

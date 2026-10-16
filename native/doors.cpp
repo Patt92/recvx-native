@@ -136,11 +136,17 @@ void DoorSequence::draw(SoftwareRenderer& renderer){
     // bhSetDoor njClipZ. njSetAspect(1.174, 1) equals BHD_ASPECT_X/Y, which the
     // renderer already uses, so only the clip range differs from gameplay.
     camera.clip_near=clip_near_;camera.clip_far=clip_far_;
-    if(core_.status&0x200){ModelGeometryOptions options;options.pose.resize(count_);if(core_.status&0x400)njRotateY(&options.transform,32768);
+    // bhControlDoor (door.c:395) zeichnet das Tuermodell und ryExcuteFade nur,
+    // solange das Abschlussbit 0x40 fehlt; nach bhExitDoor (system.c:1003/1006,
+    // Modus 6) und im Direktfall (Modus 10) wird kein DoorWrk-Modell gezeichnet.
+    // Ein beendeter, uebersprungener oder nie gestarteter Lauf darf daher weder
+    // im Uebergabebild noch im ersten Bild der naechsten Anforderung erscheinen.
+    const bool controlling=!(core_.status&0x40);
+    if(controlling&&(core_.status&0x200)){ModelGeometryOptions options;options.pose.resize(count_);if(core_.status&0x400)njRotateY(&options.transform,32768);
         for(unsigned i=0;i<count_;++i){const auto& n=nodes_[i];options.pose[i]={{n.pos[0],n.pos[1],n.pos[2]},{n.ang[0],n.ang[1],n.ang[2]}};std::memcpy(model_.data()+objects_+i*52,&n.evalflags,4);std::memcpy(model_.data()+objects_+i*52+4,&n.model,4);}
         scene=decode_model_asset(model_,model_offset_,0,options);scene.textures=textures_;scene.background=0xff000000;
         light_scene(scene);
     }renderer.draw(scene,camera);
-    if(core_.status&0x100){const float opacity=std::clamp(core_.fde_rate,0.0f,1.0f);for(auto& pixel:renderer.canvas()){std::uint32_t mixed=0xff000000;for(unsigned shift:{0u,8u,16u})mixed|=unsigned(((pixel>>shift)&255)*(1-opacity)+((unsigned(core_.fde_col)>>shift)&255)*opacity)<<shift;pixel=mixed;}}
+    if(controlling&&(core_.status&0x100)){const float opacity=std::clamp(core_.fde_rate,0.0f,1.0f);for(auto& pixel:renderer.canvas()){std::uint32_t mixed=0xff000000;for(unsigned shift:{0u,8u,16u})mixed|=unsigned(((pixel>>shift)&255)*(1-opacity)+((unsigned(core_.fde_col)>>shift)&255)*opacity)<<shift;pixel=mixed;}}
 }
 }

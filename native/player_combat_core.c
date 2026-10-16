@@ -68,16 +68,7 @@ const int8_t RECVX_CB_PLY_LEG_ROUTE[2][7] = {
     { 0, 1, 18, 19, 20, 21, -1 }
 };
 
-/* GA_WORK (weapon.c). px..pz und vx..vz liegen zusammen, weil
-   bhCheckGunAtari sie als NJS_LINE weiterreicht (weapon.c:625). */
-typedef struct {
-    uint32_t at_flg;
-    int32_t  wpn_no;
-    float    r, l, rn, rmax;
-    int32_t  ax, ay;
-    float    px, py, pz, vx, vy, vz;
-    float    gx, gy, gz;
-} CB_GA;
+typedef RECVX_CB_GA CB_GA;
 
 struct RECVX_COMBAT_CORE {
     RECVX_CB_TABLES        tables;
@@ -149,6 +140,10 @@ static void cb_set_ev_flag(RECVX_COMBAT_CORE* c, uint32_t no) {
 static void cb_pt_flg(RECVX_COMBAT_CORE* c, uint32_t bits) {
     if (!c->services.pt_flg_or) { cb_gap(c, "sys->pt_flg"); return; }
     c->services.pt_flg_or(c->services.user, bits);
+}
+static void cb_pt_clr(RECVX_COMBAT_CORE* c, uint32_t bits) {
+    if (!c->services.pt_flg_clr) { cb_gap(c, "sys->pt_flg"); return; }
+    c->services.pt_flg_clr(c->services.user, bits);
 }
 static RECVX_ENEMY_TABLE* cb_enemies(RECVX_COMBAT_CORE* c) {
     if (!c->services.enemies) { cb_gap(c, "sys->ene / sys->ewk_n (Gegnertabelle)"); return NULL; }
@@ -371,7 +366,7 @@ static int32_t cb_calc_lock_ene_yr(RECVX_COMBAT_CORE* c, int32_t idx) {
 /* --------------------------------------------------------------------------
    pwksub.c:218 bhSearchNearEnemy
    -------------------------------------------------------------------------- */
-static int cb_search_near_enemy(RECVX_COMBAT_CORE* c, int32_t* r, float* h, int32_t* id) {
+static int cb_search_near_enemy(RECVX_COMBAT_CORE* c, int32_t* r, float* h, int32_t* id, int is_plp) {
     RECVX_ENEMY_TABLE* t = cb_enemies(c);
     RECVX_CB_VEC vc0, vc1, vc2;
     RECVX_CB_CAPSULE cap;
@@ -421,8 +416,8 @@ static int cb_search_near_enemy(RECVX_COMBAT_CORE* c, int32_t* r, float* h, int3
         c->res.near_found++;
         RECVX_ENEMY_WORK* e = t->slot[idx];
         *id = idx;
-        /* pp == plp: der Spielerkampf setzt stflg 0x800 immer (pwksub.c:296) */
-        e->stflg |= 0x800;
+        /* pwksub.c:296: nur fuer pp == plp */
+        if (is_plp) e->stflg |= 0x800;
         vc0.x = epx - c->player.px; vc0.y = 0; vc0.z = epz - c->player.pz;
         cb_unit(&vc0);
         *r = (int32_t)(10430.381f * atan2f(-vc0.x, -vc0.z));
@@ -782,9 +777,9 @@ static void cb_ply_pch_main(RECVX_COMBAT_CORE* c) {
 /* --------------------------------------------------------------------------
    Motion.c:21 bhSetMotion — Framevorschub und hokan_count.
    Die Knoteninterpolation selbst (SetMtnNormal/Fast/Slow und ihre Hokan-
-   Varianten, Motion.c:131-859) gehoert dem vorhandenen Posenbesitzer; sie
-   wird hier NICHT zweitgefuehrt und als Luecke gemeldet, weil der Host ohne
-   Blendrate sampelt.
+   Varianten, Motion.c:131-859) gehoert dem vorhandenen Posenbesitzer
+   (services.set_motion_pose, RoomWorld::player_set_motion_pose); sie wird hier
+   nicht zweitgefuehrt.
    -------------------------------------------------------------------------- */
 static int cb_set_motion(RECVX_COMBAT_CORE* c, int32_t add, uint32_t mode) {
     RECVX_COMBAT_PLAYER* p = &c->player;
@@ -792,8 +787,10 @@ static int cb_set_motion(RECVX_COMBAT_CORE* c, int32_t add, uint32_t mode) {
     int32_t frm_num;
     if (!m) { cb_gap(c, "mnwP[mtn_no] (Motionquelle des Posenbesitzers)"); return 0; }
     if (!m->has_data) return 0;
+    if (c->services.set_motion_pose)
+        c->services.set_motion_pose(c->services.user, p->mtn_no, p->frm_no, mode, p->hokan_count, p->hokan_rate);
     if (p->hokan_count != 0) {
-        cb_gap(c, "SetMtn*Hokan Knoteninterpolation (Motion.c:232/472/747)");
+        if (!c->services.set_motion_pose) cb_gap(c, "SetMtn*Hokan Knoteninterpolation (Motion.c:232/472/747)");
         p->hokan_count--;
     }
     if (m->atrP) p->mtn_attr = m->atrP[(uint32_t)p->frm_no >> 16];
@@ -840,11 +837,57 @@ static void cb_fix_position(RECVX_COMBAT_CORE* c, const int8_t* route) {
    Der originale CPCL-Satz liegt im Gegnervertrag (enemy_work.h); ohne ihn
    gibt das Original -1 zurueck.
    -------------------------------------------------------------------------- */
+/* weapon.c:1496 bhCheckCapCol2Capsule: die CPCL-Zeilen des Gegners {jnt_a, jnt_b, cap_r}
+   bis cap_r 0. jnt_a == jnt_b: Kugel um owP[jnt_a] * (0.1 * naechste Zeile), r 0.1 * cap_r,
+   Trefferpunkt = Fusspunkt auf der Linie; sonst Kapsel owP[jnt_a] - owP[jnt_b]. Der dem
+   Linienanfang naechste Treffer gewinnt (nr ab 10000), pp->cpcl_no = Zeilenzaehler ct. */
 static int32_t cb_check_cap_col2capsule(RECVX_COMBAT_CORE* c, RECVX_ENEMY_WORK* e,
                                         const RECVX_CB_CAPSULE* cap, RECVX_CB_VEC* hps) {
-    (void)cap; (void)hps;
-    if (!e->cpcl) return -1;
-    cb_gap(c, "bhCheckCapCol2Capsule (CPCL-Gelenkkapseln, weapon.c:1496)");
+    const RECVX_ENEMY_CPCL* cpcl = e->cpcl;
+    RECVX_CB_LINE gline;
+    float nr = 10000.0f, len;
+    int32_t jno = -1, cpcl_no = -1, ct = 0;
+    float ma[16], mb[16];
+    if (!cpcl) return -1;
+    if (!e->sv || !e->sv->joint_matrix) { cb_gap(c, "bhCheckCapCol2Capsule: mlwP->owP des Gegners (joint_matrix)"); return -1; }
+    gline.px = cap->c1.x; gline.py = cap->c1.y; gline.pz = cap->c1.z;
+    gline.vx = cap->c2.x - gline.px; gline.vy = cap->c2.y - gline.py; gline.vz = cap->c2.z - gline.pz;
+    for (;;) {
+        const int32_t jnt_a = cpcl->x, jnt_b = cpcl->y, cap_r = cpcl->z;
+        RECVX_CB_VEC htp, sca;
+        if (cap_r == 0) break;
+        if (jnt_a == jnt_b) {
+            RECVX_CB_SPHERE sp;
+            RECVX_CB_VEC ofp;
+            cpcl++;
+            ofp.x = 0.1f * cpcl->x; ofp.y = 0.1f * cpcl->y; ofp.z = 0.1f * cpcl->z;
+            if (!e->sv->joint_matrix(e, (uint32_t)jnt_a, ma)) { cb_gap(c, "bhCheckCapCol2Capsule: owP[jnt_a]"); return -1; }
+            cb_calc_point(ma, &ofp, &sp.c);
+            sp.r = 0.1f * cap_r;
+            if (recvx_cb_check_sc(&sp, cap) != 0) {
+                recvx_cb_distance_p2l(&sp.c, &gline, &htp);
+                sca.x = htp.x - gline.px; sca.y = htp.y - gline.py; sca.z = htp.z - gline.pz;
+                len = cb_scalor(&sca);
+                if (len < nr) { nr = len; jno = jnt_a; cpcl_no = ct; *hps = htp; }
+            }
+        } else {
+            RECVX_CB_CAPSULE cp;
+            if (!e->sv->joint_matrix(e, (uint32_t)jnt_a, ma) || !e->sv->joint_matrix(e, (uint32_t)jnt_b, mb)) {
+                cb_gap(c, "bhCheckCapCol2Capsule: owP[jnt_a/jnt_b]"); return -1;
+            }
+            cp.c1.x = ma[12]; cp.c1.y = ma[13]; cp.c1.z = ma[14];
+            cp.c2.x = mb[12]; cp.c2.y = mb[13]; cp.c2.z = mb[14];
+            cp.r = 0.1f * cap_r;
+            if (recvx_cb_check_ccex(cap, &cp, &htp) != 0) {
+                sca.x = htp.x - gline.px; sca.y = htp.y - gline.py; sca.z = htp.z - gline.pz;
+                len = cb_scalor(&sca);
+                if (len < nr) { nr = len; jno = jnt_a; cpcl_no = ct; *hps = htp; }
+            }
+        }
+        cpcl++;
+        ct++;
+    }
+    if (cpcl_no != -1) { e->cpcl_no = cpcl_no; return jno; }
     return -1;
 }
 
@@ -1304,7 +1347,61 @@ static void cb_set_gun_fire(RECVX_COMBAT_CORE* c, int32_t wno, int32_t jno,
         cb_effect(c, &req);
         break;
     }
-    case 11: cb_gap(c, "bhSetGunFire Waffe 11 (bhEff014/Eff002, pwksub.c:2978)"); break;
+    case 11: {
+        /* pwksub.c:2981-3125: Muendungsfeuer bhEff014 type 1/0/2/2/3 und acht Rauchsaetze
+           bhEff002 type 6 ueber sys->ef. Die Vorlage behaelt zwischen den Aufrufen, was nicht
+           neu geschrieben wird (type 3 uebernimmt die Lage des vierten Satzes); nach dem ersten
+           Satz sind alle Felder geschrieben, jede Anforderung traegt daher die volle Vorlage. */
+        RECVX_CB_EFFECT req;
+        RECVX_CB_EF_WORK ef;
+        RECVX_CB_VEC ps, ops, ps2;
+        NJS_MATRIX m;
+        int32_t i;
+        const float* jm = p->owp_mtx[jno];
+        memset(&ef, 0, sizeof ef);
+#define CB_SYS_EF(off, link, lk) do { memset(&req, 0, sizeof req); req.ef = ef; req.sys_ef = 2; \
+            if (off) { req.has_offset = 1; req.offset = *(off); } req.link_player = (link); req.jno = (lk); \
+            cb_effect(c, &req); } while (0)
+        ef.id = 14; ef.type = 1; ef.flr_no = 0; ef.mdlver = 0;
+        ef.ay = (int16_t)p->ay; ef.ax = 0; ef.flg = 0x4100001;
+        ps = wt->wp_fps1;
+        cb_calc_point(jm, &ps, (RECVX_CB_VEC*)&ef.px);
+        ef.sx = ef.sy = ef.sz = 1.0f;
+        CB_SYS_EF((const RECVX_CB_VEC*)0, 0, 0);
+        ef.id = 14; ef.type = 0; ef.ay = (int16_t)p->ay; ef.flg = 0x4100001;
+        ps.x = 1.5f + wt->wp_fps1.x; ps.y = wt->wp_fps1.y; ps.z = wt->wp_fps1.z;
+        cb_calc_point(jm, &ps, (RECVX_CB_VEC*)&ef.px);
+        ef.sx = ef.sy = ef.sz = 1.5f;
+        CB_SYS_EF((const RECVX_CB_VEC*)0, 0, 0);
+        ef.id = 14; ef.type = 2; ef.ay = (int16_t)p->ay; ef.flg = 0x4100001;
+        ps.x = 1.5f + wt->wp_fps1.x; ps.y = wt->wp_fps1.y; ps.z = wt->wp_fps1.z;
+        cb_calc_point(jm, &ps, (RECVX_CB_VEC*)&ef.px);
+        ps.x = 1.5f; ps.y = 0; ps.z = 0;
+        cb_calc_point(jm, &ps, &ops);
+        ops.x -= jm[12]; ops.y -= jm[13]; ops.z -= jm[14];
+        ef.sx = ef.sy = ef.sz = 2.5f;
+        CB_SYS_EF(&ops, 0, 0);
+        ps.x = 1.51f + wt->wp_fps1.x; ps.y = wt->wp_fps1.y; ps.z = wt->wp_fps1.z;
+        cb_calc_point(jm, &ps, (RECVX_CB_VEC*)&ef.px);
+        CB_SYS_EF(&ops, 0, 0);
+        ef.id = 14; ef.type = 3; ef.ay = 0; ef.flg = 0x4000001;
+        if (p->ply_id == 0) ps = wt->wp_fps1;
+        else { ps.x = 6.9f; ps.y = 0; ps.z = -0.8385f; }
+        ef.sx = ef.sy = ef.sz = 0.19f;
+        CB_SYS_EF(&ps, 1, jno);
+        ef.id = 2; ef.type = 6; ef.flr_no = 0; ef.mdlver = 9;
+        ef.ay = ef.ax = 0; ef.flg = 0x4100001;
+        ef.sx = ef.sy = ef.sz = 1.0f;
+        ps.x = 0.5f; ps.y = 0; ps.z = 0.4f;
+        cb_mtx_of(jm, &m);
+        for (i = 0; i < 8; i++) {
+            njCalcVector(&m, (NJS_VECTOR*)&ps, (NJS_VECTOR*)&ps2);
+            CB_SYS_EF(&ps2, 0, jno);
+            njRotateX(&m, 8192);
+        }
+#undef CB_SYS_EF
+        break;
+    }
     case 20: {
         /* pwksub.c:3126-3150: Funken bhEff027 an der Muendung (wp_fps2 auf owP[jno]) ueber
            sys->ef; alle Felder geschrieben, Versatz (-3,0,0) nur gedreht, ohne Link, lkono 0. */
@@ -1633,7 +1730,7 @@ static void cb_act_suw(RECVX_COMBAT_CORE* c) {
         p->mtn_add = 65536;
         p->arp = 2.0f;
         p->frm_no = 0;
-        if (cb_search_near_enemy(c, &p->ayp, &ln, &p->src_no) != 0) {
+        if (cb_search_near_enemy(c, &p->ayp, &ln, &p->src_no, 1) != 0) {
             if (cb_wpn(c, p->wpnr_no)->flg & 0x4000000) p->flg &= ~0x80000u;
             else p->flg |= 0x80000u;
             p->ayp = cb_calc_lock_ene_yr(c, p->src_no);
@@ -1890,6 +1987,159 @@ static void cb_act_wpn(RECVX_COMBAT_CORE* c) {
         }
         break;
     }
+}
+
+/* --------------------------------------------------------------------------
+   playpch2.c:13 bhCPM2_act_scp — Zielfernrohr (WpnTab.flg 0x20: Waffen 13, 18).
+   ((SYS_WORK*)plp)->itm[95] (:49) liegt auf BH_PWORK-Offset 0x3EC = plp->at_flg.
+   -------------------------------------------------------------------------- */
+static void cb_act_scp(RECVX_COMBAT_CORE* c) {
+    RECVX_COMBAT_PLAYER* p = &c->player;
+    const RECVX_CB_WPN_TAB* wt = cb_wpn(c, p->wpnr_no);
+    const uint32_t pad_on = c->sys ? c->sys->pad_on : 0;
+    const uint32_t pad_ps = c->sys ? c->sys->pad_ps : 0;
+    switch (p->mode3) {
+    case 0:
+        p->flg |= 0xC0000;
+        p->mtn_no = cb_mtn_wpn(c, 1);
+        p->hokan_rate = 65536;
+        p->hokan_count = 0;
+        p->mtn_add = 0;
+        p->frm_no = 0;
+        p->arp = 2.0f;
+        p->ct0 = 0;
+        p->mode3++;
+        /* FALLTHROUGH */
+    case 1: {
+        int16_t bn;
+        cb_pt_clr(c, 0x1);
+        cb_gm_or(c, 0x80000);
+        cb_st_or(c, 0x800000);
+        if (!(pad_on & 0x100)) p->at_flg &= ~0x40u;
+        if (!(pad_on & 0x10) && p->ct0 > 5) {
+            if (!(cb_gm(c) & 0x1000000)) cb_gm_clr(c, 0x800C0);
+            else {
+                cb_gm_clr(c, 0x80000);
+                if (c->sys) { c->sys->cam_pe_ax = 0; c->sys->cam_written |= 0x9; }
+            }
+            cb_gm_or(c, 0x800);
+            p->mode2 = 0x44; p->mode3 = 0;
+            p->at_flg = 0;
+            return;
+        }
+        if (p->ct0 > 5) p->at_flg |= 0x10;
+        else p->ct0++;
+        bn = cb_check_bullet(c);
+        if (((pad_on & 0x100) && (pad_on & 0x10) && !(p->at_flg & 0x40) && (p->at_flg & 0x10) && bn)
+            || ((pad_ps & 0x100) && (pad_on & 0x10) && !(p->at_flg & 0x40) && (p->at_flg & 0x10) && !bn)) {
+            if (!bn) {
+                RECVX_CB_VEC pos;
+                if (cb_search_bullet(c) != 0 && (cb_gm(c) & 0x40000)) {
+                    cb_gm_clr(c, 0x40000);
+                    p->mode2 = 0x46; p->mode3 = 0;
+                    c->res.reloads++;
+                    return;
+                }
+                cb_calc_point(p->owp_mtx[9], &wt->wp_fps1, &pos);
+                cb_weapon_se(c, &pos, 260, 0);
+                c->res.empty++;
+            } else {
+                cb_gm_clr(c, 0x40000);
+                p->mode3 = 2;
+                p->at_flg &= ~0x10u;
+                p->at_flg |= 0x40;
+                p->scp_ct = 0;
+                return;
+            }
+        }
+        break;
+    }
+    case 2: {
+        RECVX_CB_EF_WORK* eft = cb_eff_tab(c, p->wpnr_no, 2);
+        p->flg |= 0xC0000;
+        p->ct3 = p->wax;
+        p->mode3++;
+        if ((wt->flg & 0x20000000) && eft && eft->flg != 0) {
+            p->way = (int16_t)p->ay;
+            p->waz = 0;
+            switch (p->wpnr_no) {
+            case 18: {
+                RECVX_CB_VEC fps = { 0.0f, 0.0f, -2.5f }, fpsb;
+                if (c->sys) c->sys->ef_flg |= 0x2;
+                eft->px = p->owp_mtx[5][12];
+                eft->py = p->owp_mtx[5][13];
+                eft->pz = p->owp_mtx[5][14];
+                cb_rot_vector(p->wax, p->way, p->waz, &fps, &fpsb);
+                eft->ax = p->wax;
+                eft->ay = p->way;
+                eft->px += fpsb.x; eft->py += fpsb.y; eft->pz += fpsb.z;
+                cb_launch(c, eft, &fpsb);
+                if (c->sys && c->sys->gm_mode == 3) cb_set_ev_flag(c, 75);
+                break;
+            }
+            default: break;
+            }
+        }
+        if (wt->flg & 0x10000000) {
+            CB_GA g;
+            RECVX_CB_VEC ps = { 0.0f, 1.5f, -1.0f }, v;
+            g.at_flg = p->at_flg;
+            g.wpn_no = p->wpnr_no;
+            g.r = wt->r; g.l = wt->l; g.rn = wt->rn; g.rmax = wt->rmax;
+            g.ax = p->wax; g.ay = p->ay;
+            p->way = (int16_t)p->ay; p->waz = 0;
+            cb_calc_point(p->owp_mtx[5], &ps, (RECVX_CB_VEC*)&g.px);
+            g.gx = g.px; g.gy = g.py; g.gz = g.pz;
+            ps.x = 0; ps.y = 0; ps.z = -g.l;
+            cb_rot_vector(p->wax, p->way, p->waz, &ps, &v);
+            g.vx = v.x; g.vy = v.y; g.vz = v.z;
+            cb_check_gun_atari(c, &g);
+            cb_count_bullet(c);
+        }
+        if (wt->vib_tp >= 0) cb_vibration(c, 0, wt->vib_tp);
+        if (wt->seno0 != 0) {
+            cb_weapon_se(c, (RECVX_CB_VEC*)&p->owp_mtx[9][12], (int32_t)(uint16_t)wt->seno0, 0);
+            p->stflg |= 0x100;
+        }
+    }
+        /* FALLTHROUGH */
+    case 3: {
+        RECVX_CB_EF_WORK* e3 = cb_eff_tab(c, p->wpnr_no, 3);
+        if (p->scp_ct == wt->ef_yct && e3 && e3->flg != 0)
+            cb_set_yakkyou(c, p->wpnr_no, 9, 0, p->ay);
+        if (p->scp_ct >= 30) {
+            p->at_flg |= 0x10;
+            p->wax = (int16_t)p->ct3;
+            p->mtn_no = cb_mtn_wpn(c, 1);
+            p->hokan_rate = 65536;
+            p->hokan_count = 0;
+            p->mtn_add = 0;
+            p->frm_no = 0;
+            p->ct0 = 0;
+            p->mode3 = 1;
+        } else {
+            if (!(pad_on & 0x100)) p->at_flg &= ~0x40u;
+            p->wax = (int16_t)((int16_t)p->ct3 + ((2048 - (p->scp_ct * 64)) * njSin((p->scp_ct * 1911) + 8192)));
+            p->scp_ct++;
+        }
+        break;
+    }
+    default: break;
+    }
+    if (p->mode3 != 3 && c->sys) {
+        const RECVX_COMBAT_SYS* s = c->sys;
+        c->sys->cam_ppers = (pad_on & 0x80) ? 3640 : 11832;
+        c->sys->cam_written |= 0x4;
+        if (pad_on & 0x60) p->wax = (int16_t)(p->wax - 4.0f * s->pad_dy);
+        else if (s->pad_ay >= 48) p->wax = (int16_t)(p->wax - 4.0f * (s->pad_ay - 48));
+        else if (s->pad_ay < -47) p->wax = (int16_t)(p->wax - 4.0f * (s->pad_ay + 48));
+        if (pad_on & 0xC) p->ay = (int32_t)(p->ay - 4.0f * s->pad_dx);
+        else if (s->pad_ax >= 48) p->ay = (int32_t)(p->ay - 4.0f * (s->pad_ax - 48));
+        else if (s->pad_ax < -47) p->ay = (int32_t)(p->ay - 4.0f * (s->pad_ax + 48));
+        if (p->wax > 8192) p->wax = 8192;
+        if (p->wax < -8192) p->wax = -8192;
+    }
+    p->waxp = p->wax;
 }
 
 /* --------------------------------------------------------------------------
@@ -2682,7 +2932,7 @@ static void cb_act_atk_dispatch(RECVX_COMBAT_CORE* c) {
     case 68:  cb_act_wre(c); break;
     case 69:  cb_act_atk(c); break;
     case 70:  cb_act_rld(c); break;
-    case 71:  cb_gap(c, "bhCPM2_act_scp (playpch2.c:13, Zielfernrohr)"); break;
+    case 71:  cb_act_scp(c); break;
     case 72:  cb_act_knf(c); break;
     case 164: cb_act_suw_pch(c); break;
     case 169: cb_act_atk_pch(c); break;
@@ -2778,6 +3028,38 @@ void recvx_combat_gun_fire(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SER
     memcpy(c->player.owp_mtx[jno], owner->mtx, sizeof owner->mtx);
     cb_set_gun_fire(c, wno, jno, hand, ang);
     free(c);
+}
+
+int32_t recvx_combat_check_gun_atari(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
+                                     RECVX_COMBAT_SYS* sys, RECVX_CB_GA* gap) {
+    RECVX_COMBAT_CORE* c;
+    int32_t hit;
+    if (!gap) return 0;
+    c = calloc(1, sizeof *c);
+    if (!c) return 0;
+    _Make_SinTable();
+    if (tables) c->tables = *tables;
+    if (services) c->services = *services;
+    c->sys = sys;
+    hit = cb_check_gun_atari(c, gap);
+    free(c);
+    return hit;
+}
+
+int32_t recvx_combat_search_near_enemy(const RECVX_COMBAT_SERVICES* services, RECVX_COMBAT_SYS* sys,
+                                       float px, float py, float pz, int32_t ay,
+                                       int32_t* r, float* h, int32_t* id) {
+    RECVX_COMBAT_CORE* c;
+    int32_t found;
+    c = calloc(1, sizeof *c);
+    if (!c) return 0;
+    _Make_SinTable();
+    if (services) c->services = *services;
+    c->sys = sys;
+    c->player.px = px; c->player.py = py; c->player.pz = pz; c->player.ay = ay;
+    found = cb_search_near_enemy(c, r, h, id, 0);
+    free(c);
+    return found;
 }
 
 RECVX_COMBAT_PLAYER* recvx_combat_player(RECVX_COMBAT_CORE* core) {

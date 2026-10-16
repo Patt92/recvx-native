@@ -240,9 +240,9 @@ int main(int argc,char** argv){
         // player.c bhControlPlayerPad/bhCPM1_act_bas (native/player_action.c). action_resume:
         // another owner had the pass (stairs, damage, push, combat, event), whose end writes
         // *(int*)&plp->mode0 = 1, so the next free pass enters act_std (mode2/mode3 = 0).
-        RECVX_PLAYER_ACTION action{};bool action_resume=true,action_player_set=false;unsigned action_pad=0;
+        RECVX_PLAYER_ACTION action{};bool action_resume=true,action_player_set=false;unsigned action_pad=0,action_pad_old=0; // action_pad: sys->pad_oncpy (pad_ps-Flanke); action_pad_old: sys->pad_on nach dem letzten Pass (pad.c:146 pad_old)
         RECVX_PLAYER_EVENT player_event{}; // plp mode1/ct2/mtn_md fuer bhCPM0_event (pl_evt.c)
-        int action_pad_dx=0,action_pad_dy=0; // sys->pad_dx/pad_dy (pad.c:195-278)
+        int pad_dx=0,pad_dy=0; // sys->pad_dx/pad_dy (pad.c:195-278): ein Besitzer fuer Aktions- und Kampfpfad
         // bhCPM1_act_bas (player.c:1994-2048) dispatches the action by plp->mode2; each of the
         // seven normal locomotion routines sets EXP1_I(0) |= 0x4 in its own mode3-0 entry block
         // (std 2112, srt 2176, sta 2237, wlk 2312, run 2438, bak 2575, bk2 2727) and assigns in
@@ -425,7 +425,7 @@ int main(int argc,char** argv){
             if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4),inventory.game_mode);recvx::bind_pose_gap([&](const char* name){if(world)world->report_enemy_gap(name);});if(!restoring&&!scene.spawns.empty())world->initialize_player_spawn(); /* bhSetRoom before player setup/Event_init; saved positions retain Y. */origin=actor;follow();if(world)world->set_player_safe_position(actor.position);world->set_player_asset(player.get());{ // bhResetPlayer keeps EXP_WORK.wpntp; only bhSetPlayer (first setup, restored game) derives it from wpnr_no.
                     const bool set_player=!action_player_set||bool(restoring);const std::int32_t wpntp=set_player?(inventory.weapon()<10?0:1):action.wpntp;
                     const int hp=inventory.hp;const bool poison=(inventory.player_stflg()&0x280000u)!=0;const std::int32_t dmlvl=hp>=120?(poison?1:0):hp>=30?1:2;
-                    recvx_player_action_reset(&action,actor.position.x,actor.position.z,actor.yaw,wpntp,dmlvl,unsigned(motion));action_player_set=true;action_resume=true;action_pad=0;}world->set_player_character((args.player-10)%4);world->set_stand_player_hook(stand_player_motion);world->set_camera_offset_owner(&camera_offset);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);
+                    recvx_player_action_reset(&action,actor.position.x,actor.position.z,actor.yaw,wpntp,dmlvl,unsigned(motion));action_player_set=true;action_resume=true;action_pad=0;action_pad_old=0;}world->set_player_character((args.player-10)%4);world->set_stand_player_hook(stand_player_motion);world->set_camera_offset_owner(&camera_offset);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);
                 if(previous)events->inherit_progress(*previous);
                 // bhSysCallInit installs ts_flg 0x3df80 (system.c:453).  At
                 // this runtime's gameplay handoff the original input lock
@@ -516,10 +516,21 @@ int main(int argc,char** argv){
         // the same angles the hair sampled, so the head overrides are merged over the combat ones.
         auto head_draw_overrides=[&]{auto out=combat.pose_overrides(*player,motion,animation);
             for(const auto& node:head_pose)out[node.first]=node.second;return out;};
+        std::optional<recvx::SoftwareRenderer> small_screen; // screen.c:920 Renderziel des Monitors (bhEff111)
+        bool status_was_open=false; // sub1.c:3175 ItemTaskCheck-Ausgang (Monitor-Rendertextur)
         auto compose=[&](){scene.shadows.clear();scene.lines.clear(); /* njDrawLine3D-Linien gelten nur fuer dieses Bild */scene.triangles=stage_geometry;scene.ambient_writes=stage_ambient;const auto stage_count=scene.triangles.size();scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes; /* game.c:357: bhPutModel(plp) only with pt_flg 0x1 (or stflg 0x1000000, whose sleep counter stays with the existing owner); the pose is still sampled for links. */const bool player_put=!world||(world->presentation_flags()&1u)||(world->effect_context().player_stflg&0x1000000u);if(player&&(!world||!world->player_hidden||(player_put&&world->player_sleep_draw()))){auto sampled=world?world->sample_player(*player,&nodes,head_draw_overrides()):player->sample(motion,animation,actor.position,actor.yaw,&nodes,head_draw_overrides());if(player_put)recvx::append_actor(scene,sampled,texture_base);}
             if(player_put&&player&&(!world||!world->player_hidden))if(const auto* tail=player_attachment()){const auto link=*player_link();if(link.node<nodes.size()){
                 NJS_MATRIX head;std::copy_n(nodes[link.node].value,16,head);NJS_POINT3 at;auto lo=link.offset;njCalcPoint(&head,&lo,&at); // linked object: position only
-                NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,at.x,at.y,at.z);recvx::append_actor(scene,tail->sample_rest(root,hair_angles),attachment_base);}}for(std::size_t i=stage_count;i<scene.triangles.size();++i)scene.triangles[i].after_modifiers=true; /* game.c:318 bhDrawPlayer follows bhDrawEffect */if(player_put)combat.append(scene,nodes,world&&(world->player_hidden||world->player_scripted),world.get());if(world)world->append(scene,nodes,world->camera(scene,camera));};
+                NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,at.x,at.y,at.z);recvx::append_actor(scene,tail->sample_rest(root,hair_angles),attachment_base);}}for(std::size_t i=stage_count;i<scene.triangles.size();++i)scene.triangles[i].after_modifiers=true; /* game.c:318 bhDrawPlayer follows bhDrawEffect */if(player_put)combat.append(scene,nodes,world&&(world->player_hidden||world->player_scripted),world.get());/* game.c:63: bhDrawSmallScreenRenderTexture vor bhAllDrawModel desselben Bildes (bhEff111, gm_flg 0x200). */
+            if(world){auto view=world->camera(scene,camera);if(events){const auto clip=world->camera_clip();view.clip_near=clip.near;view.clip_far=clip.far;}
+             if(const auto rt=world->small_screen_pass(view)){
+                recvx::Scene screen;screen.background=scene.background;screen.triangles=stage_geometry;screen.ambient_writes=stage_ambient;screen.textures=scene.textures;
+                world->append(screen,nodes,rt->camera,{true,rt->cut}); /* bhAllEasyDrawModel: kein Spieler, keine Effekte */
+                if(!small_screen)small_screen.emplace(512,512); /* njSetTextureInfo(&sys->ren_info, ..., 512, 512) */
+                small_screen->set_texture_filtering(!args.nearest);small_screen->set_supersampling(args.supersampling);
+                small_screen->draw_screen(screen,rt->camera,rt->dist);
+                world->commit_small_screen(small_screen->pixels(),512,512);}}
+            if(world)world->append(scene,nodes,world->camera(scene,camera));};
         // en07.c:2190/2221: while a grab owns the player, plp->mtn_no indexes the
         // controlled work's library (plp->mnwP) and not the player asset. One
         // index, the library follows its owner; the frame count must too.
@@ -723,7 +734,7 @@ int main(int argc,char** argv){
         debug.add({"give_count","Itemmenge","Links/Rechts: Menge einstellen. OK uebernimmt die Menge fuer Item geben.",[]{std::vector<recvx::DebugChoice> result;for(unsigned i=1;i<=999;++i)result.push_back({i,std::to_string(i)});return result;},[&]{return give_count;},[&](unsigned value){give_count=value;return std::string("Itemmenge gesetzt");}});
         debug.add({"give","Item / File geben","OK: Item ins Inventar oder Datei nach FILE; Originaltypen und Dateititel.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned id=1;id<=145;++id)if(!recvx::original_file_model_mask(id)){std::ostringstream label;label<<id<<" "<<(ui?ui->item_name(id):"")<<" [0x"<<std::hex<<itemdata[id].type<<"]";result.push_back({id,label.str()});}for(unsigned file=0;file<24;++file)result.push_back({256+file,"FILE "+std::to_string(file)+" "+(ui?recvx::message_text(ui->system_message(159+file)):"")});return result;},[]{return 21;},[&](unsigned value){auto candidate=inventory;auto status=menu;status.reset(candidate);if(!candidate.debug_acquire(value,give_count))throw std::runtime_error("Inventar voll oder ungueltiger Item-/Dateieintrag");candidate.repair_owned_file_items();inventory=std::move(candidate);menu=std::move(status);if(events){events->cancel_item_request();events->menu_open=false;}return std::string(value>=256?"Datei unter FILE hinzugefuegt":"Item hinzugefuegt");}});
         debug.add({"hp","Gesundheit / HP","OK: HP auf gewaehlten Wert setzen.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=1;i<=unsigned(inventory.max_hp);++i)result.push_back({i,std::to_string(i)});return result;},[&]{return unsigned(std::max(1,inventory.hp));},[&](unsigned value){inventory.hp=int(value);return std::string("HP gesetzt");}});
-        debug.add({"side_pack","Tasche / Slots","OK: 8 oder 10 Slots; Tasche mit belegten Extras wird nicht entfernt.",[]{return std::vector<recvx::DebugChoice>{{0,"8 Slots"},{1,"10 Slots"}};},[&]{return unsigned(inventory.side_pack);},[&](unsigned value){if(!value&&inventory.occupied()>8)throw std::runtime_error("Mehr als 8 Slots belegt");inventory.side_pack=bool(value);if(events)events->set_flag(11,4,value?0:1);return std::string("Tasche gesetzt");}});
+        debug.add({"side_pack","Tasche / Slots","OK: 8 oder 10 Slots; Tasche mit belegten Extras wird nicht entfernt.",[]{return std::vector<recvx::DebugChoice>{{0,"8 Slots"},{1,"10 Slots"}};},[&]{return unsigned(inventory.side_pack);},[&](unsigned value){if(!value&&inventory.occupied()>8)throw std::runtime_error("Mehr als 8 Slots belegt");inventory.side_pack=bool(value);if(events){if(inventory.player<3)events->set_flag(1,6+inventory.player,value?0:1); /* Quelle ist ev_flg 6/7/8 (bhCheckSubPack, player.c:1072) */events->set_flag(11,4,value?0:1);}return std::string("Tasche gesetzt");}});
         debug.add({"enemy_ai","Gegner-KI","OK: Zombie-KI ein/aus. Aus: Gegner bleiben stehen (Reaktionen auf Treffer laufen weiter).",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(enemy_ai);},[&](unsigned value){enemy_ai=value!=0;if(world)world->set_enemy_ai(enemy_ai);return std::string("Gegner-KI: ")+(enemy_ai?"an":"aus");}});
         debug.add({"enemy_grab","Gegner-Angriff","OK: Greifen/Beissen der Zombies (braucht die Gegner-KI). Standard: an. Hebelrütteln befreit; Tod oeffnet die originale Retry-Auswahl.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(enemy_grab);},[&](unsigned value){enemy_grab=value!=0;if(world)world->set_enemy_grab(enemy_grab);return std::string("Gegner-Angriff: ")+(enemy_grab?"an":"aus");}});
         debug.add({"wireframe","Wireframe","OK: Drahtgitterdarstellung umschalten.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(wireframe);},[&](unsigned value){wireframe=bool(value);return std::string("Darstellung gesetzt");}});
@@ -1111,7 +1122,14 @@ int main(int argc,char** argv){
                am Anfang des naechsten Bildes vor der Spieleraktion (das verschob spx vor
                bhCPM2_act_std case 0, player.c:2127, und damit die Freigabelage nach Szenen). */
             struct PlayerPassEnd{std::unique_ptr<recvx::RoomWorld>& w;recvx::SceneSpawn& a;~PlayerPassEnd(){if(w)w->finish_player_pass(a.position,a.yaw);}} player_pass_end{world,actor};
+            if(world)world->begin_player_motion_pass(); // plp->mlwP->objP: ohne Knotenteil im Vorpass folgt es der gezeigten Pose
             bool run_pressed = run && !lever_run;
+            // system.c:522 bhSysCallPad -> bhSetPad nur mit sp_flg 0x20, einmal je Bild: pad_dx/pad_dy
+            // steigen je Pass um 4, solange die Richtung gehalten wird, und halbieren sich ohne sie
+            // (pad.c:195-278); ohne bhSetPad bleiben sie stehen.
+            if(!events||(events->flags[6][0]&0x20u)){const unsigned dir=(move>0?0x1u:0u)|(move<0?0x2u:0u)|(turn<0?0x4u:0u)|(turn>0?0x8u:0u);
+                if(dir&0xCu){if(dir&0x8u){pad_dx=pad_dx>=0?pad_dx+4:0;}if(dir&0x4u){pad_dx=pad_dx<=0?pad_dx-4:0;}pad_dx=std::clamp(pad_dx,-128,127);}else pad_dx/=2;
+                if(dir&0x3u){if(dir&0x2u){pad_dy=pad_dy>=0?pad_dy+4:0;}if(dir&0x1u){pad_dy=pad_dy<=0?pad_dy-4:0;}pad_dy=std::clamp(pad_dy,-128,127);}else pad_dy/=2;}
             { // sys->pad_ps: newly pressed direction/buttons shake a grabbing zombie off (bhEne_LeverCheck)
                 const bool direction=(move&&move!=lever_move)||(turn&&turn!=lever_turn),button=(combat_input.attack&&!lever_attack)||(combat_input.aim&&!lever_aim)||run_pressed;
                 if(world)world->set_player_lever((direction?0xfu:0u)|(button?0x100u:0u));
@@ -1138,7 +1156,7 @@ int main(int argc,char** argv){
                     head_other_action();recvx_head_release_look(&head); /* EXP1_I(0) &= ~0x4; |= 0x1E0 */
                     motion=std::size_t(mode2*2u+71u+mode1);animation=0;
                     if(!player->has_motion(motion))throw std::runtime_error("bhCPM0_damage: player motion "+std::to_string(motion)+" missing");
-                    /* hokan_rate 49152 / hokan_count 4: the host player pose has no hokan blend yet (F01). */
+                    action.hokan_rate=49152;action.hokan_count=4; /* player.c bhCPM0_damage: plp->hokan_rate/hokan_count (Felder des einen Spielerwerks) */
                     damage_arp=mode1?1.f+float(mode2):-(1.f+float(mode2));
                     audio.play_player_voice(mode1?1024:(mode2<2?1026:1027));
                     world->set_player_mode((mode&0x00ffffffu)|(1u<<24));
@@ -1157,6 +1175,9 @@ int main(int argc,char** argv){
                         /* pt_flg |= 1: the native pt_flg owner keeps its system.c start value ~0u, bit 1 is already set. */
                         if(st_flg&0x800000u){st_flg&=~0x800000u;gm_flg&=~0x80000u;}}}
                 // bhControlPlayer: bhSetMotion after the mode routine, then flg 0x400000 = last frame reached.
+                // Knotenteil auf objP mit dem Stand vor dem Vorschub; mtn_md bleibt die 0 aus bhCPM0_action
+                // (player.c:1779), bhCPM0_damage schreibt es nicht.
+                world->player_set_motion_pose(motion,std::int32_t(animation),0u,action.hokan_count,action.hokan_rate);if(action.hokan_count)--action.hokan_count;
                 {const auto frames=player_frames();if(frames){animation=(animation+65536)%(frames*65536);
                 if(animation/65536>=frames-1)flg|=0x400000u;else flg&=~0x400000u;}}
                 if(finished)damage_pad_release=true;
@@ -1187,7 +1208,7 @@ int main(int argc,char** argv){
             // Dieselbe Padsperre wie im Spielerpass (system.c:522-534): ohne sp_flg 0x20 kein Pad;
             // cb_flg 0x4 laesst nur 0x1188F durch (Richtungen; Zielen 0x100/Angriff 0x10 nicht).
             const bool pad_live=!events||(events->flags[6][0]&0x20u);const bool pad_masked=events&&(events->flags[10][0]&4u);
-            const recvx::CombatControls gated_combat{pad_live&&!pad_masked&&combat_input.aim,pad_live&&!pad_masked&&combat_input.attack,pad_live?turn:0,pad_live?move:0,pad_live&&next_target};
+            const recvx::CombatControls gated_combat{pad_live&&!pad_masked&&combat_input.aim,pad_live&&!pad_masked&&combat_input.attack,pad_live?turn:0,pad_live?move:0,pad_live&&next_target,pad_dx,pad_dy};
             if(player&&!args.preview&&combat.tick(gated_combat,blocked,inventory,*player,actor,motion,animation,world.get(),audio,events.get())){
                 // bhCPM0_action (player.c:1793): the attack entry sets mode1/mode2/mode3 = 1/0x40/0
                 // and gives the look up with EXP1_I(0) &= ~0x4; |= 0x1E0.  bhControlPlayerPch then
@@ -1216,14 +1237,10 @@ int main(int argc,char** argv){
             RECVX_PLAYER_ACTION_IO io{};
             io.flg=&events->flags[13][0];io.flg2=&events->flags[15][0];io.stflg=&events->flags[14][0];io.st_flg=&events->flags[5][0];io.exp1=&head.flags;
             io.stflg_owned=inventory.player_stflg();
-            io.pad_old=action_pad;io.pad_on=pad;io.pad_ps=pad&~action_pad;action_pad=pad;
-            // pad.c:195-278: pad_dx/pad_dy ramp by 4 per pass while held, halve on release;
-            // pad_ax/pad_ay are the analog stick, which the digital host input does not carry.
-            if(pad&0xCu){if(pad&0x8u){action_pad_dx=action_pad_dx>=0?action_pad_dx+4:0;}if(pad&0x4u){action_pad_dx=action_pad_dx<=0?action_pad_dx-4:0;}
-                action_pad_dx=std::clamp(action_pad_dx,-128,127);}else action_pad_dx/=2;
-            if(pad&0x3u){if(pad&0x2u){action_pad_dy=action_pad_dy>=0?action_pad_dy+4:0;}if(pad&0x1u){action_pad_dy=action_pad_dy<=0?action_pad_dy-4:0;}
-                action_pad_dy=std::clamp(action_pad_dy,-128,127);}else action_pad_dy/=2;
-            io.pad_dx=float(action_pad_dx);io.pad_ax=0.0f;io.analog_valid=1;
+            io.pad_old=action_pad_old;io.pad_on=pad;io.pad_ps=pad&~action_pad;action_pad=pad;action_pad_old=pad;
+            // pad_dx aus dem einen bhSetPad-Besitzer oben; pad_ax/pad_ay sind der Analogstick, den die
+            // digitale Hosteingabe nicht fuehrt.
+            io.pad_dx=float(pad_dx);io.pad_ax=0.0f;io.analog_valid=1;
             io.gm_flg=events->flags[11][0];io.ply_id=std::int32_t((args.player-10)%4);io.wpnr_no=std::int32_t(inventory.weapon());io.hp=inventory.hp;
             io.psh_ct=0; // act_wlk's psh_ct > 5 hand-off runs in RoomWorld::move_player (PlayerPush::begin)
             io.user=&host;
@@ -1246,14 +1263,20 @@ int main(int argc,char** argv){
                 action_resume=true; // zurueck zu bhCPM0_action beginnt dort bei mode2/mode3 0 (event.c:9639)
             }else{
             if(!(events->flags[13][0]&0x10000u))recvx_player_action_pad(&action,&io,nullptr);
-            if(!recvx_player_action_bas(&action,&io)){action_resume=true;follow();return;} // mode2 14..22: special owners
+            if(!recvx_player_action_bas(&action,&io)){action_pad_old=io.pad_on;action_resume=true;follow();return;} // mode2 14..22: special owners
             recvx_player_action_turn(&action,&io);
             }
+            // pad.c:146 liest im naechsten Bild sys->pad_on NACH diesem Pass: act_sta/act_wre loeschen
+            // dort die Richtungsbits (player.c:2275/5245); sonst bliebe mode3 der Wartebewegung stehen.
+            action_pad_old=io.pad_on;
             if(world->player_safe_position_ready())world->set_player_safe_position({action.spx,world->player_safe_position().y,action.spz});
             const auto from=actor.position;
             actor.yaw=action.ay&65535;
             if(!player->has_motion(action.mtn_no))throw std::runtime_error("bhCPM1_act_bas: player motion "+std::to_string(action.mtn_no)+" missing");
             motion=action.mtn_no;
+            // player.c:1502 bhSetMotion(plp, mtn_add, mtn_md = 0 (player.c:1779), mtn_tp): Knotenteil auf
+            // plp->mlwP->objP mit dem Stand vor dem Vorschub, dann die Uhr.
+            world->player_set_motion_pose(motion,action.frm_no,0u,action.hokan_count,action.hokan_rate);
             recvx_player_action_motion(&action,player->motion_frames(motion));animation=action.frm_no;
             // bhCPM2_act_wlk/_run/_bak/_bk2 carry the collided step (arp 2.0/3.0/-1.0 and
             // bhAddSpeed); act_std, act_srt and act_sta only carry EXP_WORK.spxn/spzn and run no
@@ -1355,7 +1378,7 @@ int main(int argc,char** argv){
                 if(!frontend.active())gameplay_input.apply({});else if(ui)frontend_command(frontend.apply({}));if(events&&!frontend.active()&&!args.preview)events->advance_game_clock();sound_monitor();const bool transitioning=transition_tick();const bool terminal=!transitioning&&events&&!frontend.active()&&computer.active();if(terminal)computer.tick(pad_on&0xfu,pad_ps,*events,&audio); /* bhSysCallCompEvent owns the pass while the terminal runs */ /* system.c:853 - der Statusbildschirm ruft bhInitMap(MP_SET_SUB); der    Kartentask besitzt den Pass wie der Terminaltask, bhExitMap map.c:243. *//* Erst wenn der Statusbildschirm abgebaut ist, startet der Kartentask: sein
    Verlassen loescht st_flg 0x8 (sub1.c:3137), worauf FtskMapWait (map.c:1757)
    wartet. Die Anforderung bleibt bis dahin stehen. */
-                map_task(transitioning);if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->control_exm();events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.tick(pad_on,pad_ps,inventory,menu,events.get(),audio);menu.sprite_on_off(inventory); /* SpriteOnOff nach der Statuslogik (sub1.c:3580): ItemSort/CursorSet */if(!typewriter_subtask())computer.begin(*events);if(!menu.active)fade_control(); /* game.c:40 in bhMainSequence, das waehrend des Statusbildschirms ruht */}/* system.c: bhCheckSubTask setzt fuer den Statusbildschirm mn_mode0 5 und
+                map_task(transitioning);if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->control_exm();events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.tick(pad_on,pad_ps,inventory,menu,events.get(),audio);menu.sprite_on_off(inventory); /* SpriteOnOff nach der Statuslogik (sub1.c:3580): ItemSort/CursorSet */if(status_was_open&&!menu.active&&world)world->item_screen_closed();status_was_open=menu.active; /* sub1.c:3175: Rueckkehr aus dem Statusschirm -> Ps2_rendertex_initflag (Raum 1-05) */if(!typewriter_subtask())computer.begin(*events);if(!menu.active)fade_control(); /* game.c:40 in bhMainSequence, das waehrend des Statusbildschirms ruht */}/* system.c: bhCheckSubTask setzt fuer den Statusbildschirm mn_mode0 5 und
    sp_flg 0x30; sub1.c:3038 stoppt Task 7 (ts_flg |= 0x80). bhSysCallGame und
    damit bhMainSequence (bhControlEnemy/Player/Effect/ObjItm/Camera/Light)
    laufen dann nicht: die Welt steht still, waehrend das Inventar offen ist.
@@ -1459,7 +1482,7 @@ int main(int argc,char** argv){
    Verlassen loescht st_flg 0x8 (sub1.c:3137), worauf FtskMapWait (map.c:1757)
    wartet. Die Anforderung bleibt bis dahin stehen. */
                 map_task(transitioning);
-                if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->control_exm();events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.tick(pad_on,pad_ps,inventory,menu,events.get(),audio);menu.sprite_on_off(inventory); /* SpriteOnOff nach der Statuslogik (sub1.c:3580): ItemSort/CursorSet */if(!typewriter_subtask())computer.begin(*events);if(!menu.active)fade_control(); /* game.c:40 in bhMainSequence, das waehrend des Statusbildschirms ruht */}
+                if(!transitioning&&events&&!frontend.active()&&!terminal&&!computer.active()&&!map_active){events->values[2]=unsigned(camera_index); /* bhCmpB key 2 = cam.ncut */events->menu_open=menu.active;events->check_floor(actor.position,actor.yaw,world?world->floor_at(actor.position):0);events->control_exm();events->tick();events->flags[11][0]|=0x20000000u; /* bhSysCallGame after bhMainSequence */drain_script_stairs();gameplay_input.synchronize();box_menu.tick(pad_on,pad_ps,inventory,menu,events.get(),audio);menu.sprite_on_off(inventory); /* SpriteOnOff nach der Statuslogik (sub1.c:3580): ItemSort/CursorSet */if(status_was_open&&!menu.active&&world)world->item_screen_closed();status_was_open=menu.active; /* sub1.c:3175: Rueckkehr aus dem Statusschirm -> Ps2_rendertex_initflag (Raum 1-05) */if(!typewriter_subtask())computer.begin(*events);if(!menu.active)fade_control(); /* game.c:40 in bhMainSequence, das waehrend des Statusbildschirms ruht */}
                 if(!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()&&!map_active&&!menu.active){world->set_simulation_flags(events?events->flags[6][0]:~0u);{unsigned on=pad_on,ps=pad_ps;if(events){if(!(events->flags[6][0]&0x20u))on=ps=0;if(events->flags[10][0]&4u){on&=0x1188Fu;ps&=0x1188Fu;}}world->set_pad(on,ps);} /* system.c:522-534 */world->set_screen_fade_hooks(fade_set,[&]{return screen_fade.previous();});world->set_player_weapon(inventory.weapon());world->set_player_way(combat.aim_yaw());world->set_player_speed(action.spd);world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);world->set_player_dmlvl(action.dmlvl);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick();if(const auto spd=world->take_player_speed())action.spd=*spd; /* plp->spd aus dem Gegnerpass (en15.c Ply_func) */for(const auto& r:world->take_vibration_requests())vibration.start(r.first,r.second);if(const auto m=world->take_vibration_mode())vibration.set_event_mode(*m);for(const auto& w:world->take_player_exp0_writes()){if(w.first==0x48)action.spx=w.second;else if(w.first==0x50)action.spz=w.second;else world->report_enemy_gap("PEXP0_F(offset) ohne nativen Besitzer");}if(world->take_player_poison())inventory.poisoned=true; /* en05.c:1827 plp->stflg |= 0x80000 */if(world->take_player_infect())inventory.infected=true; /* en15.c:2572 plp->stflg |= 0x200000 */if(const int blast=world->take_blast_damage())inventory.hp=std::max(world->player_killed()?0:1,inventory.hp-blast); /* bhCheckBombAtari and bites */if(world->player_dead()||inventory.hp<0||(events&&(events->player_flags&2)))game_over_requested=true;if(events)events->flags[4][0]|=world->take_enemy_room_flags();}if(!menu.active&&!map_active){follow();if(world)world->tick_camera(scene,camera,camera_index,automatic_camera);} /* system.c:777: bhSysCallMap stoppt Task 7 (ts_flg 0x180) = bhControlCamera */movie.tick();audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
                 if(!args.preview&&args.replay.empty())combat_input={physical.down(recvx::Action::Aim),physical.down(recvx::Action::Attack)||physical.hit(recvx::Action::Attack),physical.turn(),physical.move(),physical.hit(recvx::Action::NextTarget)};
                 if(!menu.active&&!map_active){locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());head_hair_step();} /* game.c:52-53: bhControlObjItm follows bhControlPlayer, which ends in bhCalcModel(plp); system.c:777 stoppt Task 7 waehrend der Karte */if(!menu.active&&!map_active)third_person_tick();if(args.validate_poses)compose();

@@ -119,6 +119,10 @@ void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wi
     ninja_sx_=focal*aspect_x*640.0f/float(width_);ninja_sy_=focal_y*480.0f/float(height_);
     draw_view(scene,view,focal*aspect_x,focal_y,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far);
 }
+void SoftwareRenderer::draw_screen(const Scene& scene,const SceneCamera& camera,float dist){
+    NJS_MATRIX view;camera_view_matrix(camera,view);ninja_sx_=ninja_sy_=0;
+    draw_view(scene,view,1.174f*dist,dist,false,camera.hidden_objects,camera.clip_near,camera.clip_far);
+}
 void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far){
     // Supersampling renders into a larger buffer and box-filters it down (steadier edges).
     const int S=std::clamp(ss_,1,4),W=width_*S,H=height_*S;

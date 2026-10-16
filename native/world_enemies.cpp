@@ -988,6 +988,8 @@ void RoomWorld::bind_enemy_services(){
     // hitchk.c:5532 bhCheckWater(pos): erste Wasserflaeche (type 3, prm0 1) unter pos. Der
     // Aufrufer en01.c:4069 prueft zuvor sys->st_flg 0x40, das bhObj005 im Wasserraum setzt.
     en.check_water=[](const RECVX_ENEMY_VEC* p)->int{float top;return enemy_world->water_top({p->x,p->y,p->z},top)?1:0;};
+    // effect.c:735 bhLinkBlood(BH_PWORK*, int, NJS_POINT3*, float): der Originalkoerper ist leer.
+    en.link_blood=[](RECVX_ENEMY_WORK*,int,const RECVX_ENEMY_VEC*,float){};
     // hitchk.c:5561 bhCheckL2Water(&line, &gpos): NJS_LINE aus Lage und Vektor; ohne Treffer
     // bleibt out ungeschrieben (die Aufrufer halten den Originaldefekt selbst fest).
     en.water_line=[](const RECVX_ENEMY_VEC* from,const RECVX_ENEMY_VEC* vec,RECVX_ENEMY_VEC* out)->int{NJS_POINT3 hit{};
@@ -1399,12 +1401,13 @@ int RoomWorld::player_set_motion_now(int add,const MotionClip*& clip){
     if(player_enemy_motion_)clip=player_enemy_clip();
     else if(player_asset_&&player_asset_->has_motion(motion_))clip=&player_asset_->motion_clip(motion_);
     if(!clip){unbound_enemy_.insert(player_enemy_motion_?"bhSetMotion(plp): mnwP[mtn_no] des Gegners fehlt":"bhSetMotion(plp): mnwPb[mtn_no] fehlt");return -2;}
+    // Knoten- und Uhrteil auf dem einen plp->mlwP->objP (player_obj_), wie player_set_motion_pose.
+    if(player_obj_.size()!=player_asset_->bones()){player_obj_=player_asset_->bind_pose();player_owp_flags_.assign(player_obj_.size(),0u);}
     MotionWork m{std::int32_t(frame_),0u,player_hokan_count_,0u,player_hokan_rate_};
-    std::vector<ModelPose> obj=player_asset_->local_pose_clip(*clip,frame_); /* mlwP->objP scratch: the host samples the pose */
-    const std::vector<std::uint32_t> owp(obj.size(),0u);
     std::string gap;
-    const int r=set_motion(m,add,player_mtn_md_,clip,nullptr,obj,owp,&gap,0u,unsigned(motion_));
+    const int r=set_motion(m,add,player_mtn_md_,clip,nullptr,player_obj_,player_owp_flags_,&gap,0u,unsigned(motion_));
     if(!gap.empty())unbound_enemy_.insert(gap+" (plp)");
+    player_obj_motion_=motion_;player_obj_written_=true;player_obj_drives_=true;
     frame_=m.frm_no;player_hokan_count_=m.hokan_count;
     return r;
 }

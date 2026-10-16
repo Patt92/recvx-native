@@ -13,6 +13,7 @@
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include "ninja_matrix.h"
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <set>
@@ -67,6 +68,8 @@ struct Fixture {
     std::vector<RECVX_CB_EFFECT> requests;
     struct Splash { RECVX_CB_VEC pos; std::int32_t ang, type; float sx, sy, sz; };
     std::vector<Splash> splashes;
+    std::uint32_t pt = ~0u;   /* sys->pt_flg (system.c: Startwert ~0) */
+    RECVX_CB_LINE last_wall_line{}; unsigned wall_lines = 0;
 
     /* Gegnertabelle: echte Works, wie sie der Besitzer haelt. */
     RECVX_ENEMY_TABLE table{};
@@ -107,7 +110,8 @@ struct Fixture {
         };
         s.event_flag = [](void*, std::uint32_t) -> std::int32_t { return 0; };
         s.set_event_flag = [](void*, std::uint32_t) {};
-        s.pt_flg_or = [](void*, std::uint32_t) {};
+        s.pt_flg_or = [](void* p, std::uint32_t b) { static_cast<Fixture*>(p)->pt |= b; };
+        s.pt_flg_clr = [](void* p, std::uint32_t b) { static_cast<Fixture*>(p)->pt &= ~b; };
         s.enemies = [](void* p) { return &static_cast<Fixture*>(p)->table; };
         s.c2_wall_n = [](void* p, const RECVX_CB_CAPSULE*, std::uint32_t flags) -> std::int32_t {
             auto* f = static_cast<Fixture*>(p);
@@ -116,6 +120,7 @@ struct Fixture {
         s.l2_wall = [](void* p, const RECVX_CB_LINE* l, std::uint32_t, float* len,
                        RECVX_CB_WALL_HIT* hit) -> std::int32_t {
             auto* f = static_cast<Fixture*>(p);
+            f->last_wall_line = *l; ++f->wall_lines;
             if (!f->wall_in_shot) return 0;
             NJS_POINT3 dir{l->vx, l->vy, l->vz};
             const float length = njUnitVector(&dir);
@@ -764,45 +769,147 @@ void test_water_impact() {
 }
 
 
-/* Raketenwerfer (18) und Linear Launcher (20): Abschuss player.c:5096/5113 mit bhEff130
- * type 4/6 aus WpnEffTab[w][2]; Waffe 20 legt in bhSetGunFire (pwksub.c:3126) zusaetzlich
- * die Funken bhEff027 ueber sys->ef an. Vorher meldete der Kern dort eine Luecke. */
-void test_launchers() {
-    for (int w : {18, 20}) {
+/* Linear Launcher (20): Abschuss player.c:5113 mit bhEff130 type 6 aus WpnEffTab[20][2];
+ * bhSetGunFire (pwksub.c:3126) legt zusaetzlich die Funken bhEff027 ueber sys->ef an.
+ * Vorher meldete der Kern dort eine Luecke. */
+void test_linear_launcher() {
+    Fixture f;
+    f.equip(20);
+    f.endless = true;
+    f.tick(true, false);
+    check(f.run_until(65, 40), "launcher 20 never reached act_wpn");
+    const unsigned before = f.res.shots;
+    for (unsigned i = 0; i < 8 && f.res.shots == before; ++i) f.tick(true, true);
+    check(f.res.shots > before, "launcher 20 did not call bhSetGunFire");
+    for (unsigned i = 0; i < 40; ++i) f.tick(true, true);
+    unsigned shells = 0, sparks27 = 0;
+    const RECVX_CB_EFFECT* spark = nullptr;
+    for (const auto& e : f.requests) {
+        if (e.ef.id == 130) { ++shells; check(e.ef.type == 6u && e.has_offset && !e.link_player, "launcher 20: bhEff130 type/offset"); }
+        if (e.ef.id == 27) { ++sparks27; spark = &e; }
+    }
+    check(shells >= 1, "launcher 20: no bhEff130 projectile");
+    for (const auto& g : f.gaps) check(g.find("Waffe 20") == std::string::npos, "launcher 20: gap still reported: " + g);
+    check(sparks27 >= 1 && spark, "launcher 20: bhEff027 sparks missing");
+    check(spark->sys_ef == 2 && spark->jno == 0 && !spark->link_player && spark->ef.flg == 1 && spark->ef.type == 0
+          && spark->ef.sx == 1.0f && spark->ef.sy == 1.0f && spark->ef.sz == 0.0f && spark->ef.ax == 0 && spark->ef.ay == 0,
+          "launcher 20: bhEff027 fields (pwksub.c:3129-3141)");
+    /* Die Testgelenke sind reine Verschiebungen: der Versatz bleibt (-3,0,0), die Lage
+       ist Gelenkort + wp_fps2. */
+    check(spark->has_offset && spark->offset.x == -3.0f && spark->offset.y == 0.0f && spark->offset.z == 0.0f,
+          "launcher 20: offset (-3,0,0) through owP[jno] rotation");
+    const auto& fp = WpnTab[20].wp_fps2;
+    bool at_joint = false;
+    for (unsigned n = 0; n < kNodes; ++n) {
+        const float* m = f.player().owp_mtx[n];
+        if (spark->ef.px == m[12] + fp.x && spark->ef.py == m[13] + fp.y && spark->ef.pz == m[14] + fp.z) at_joint = true;
+    }
+    check(at_joint, "launcher 20: bhEff027 position is owP[jno] * wp_fps2");
+}
+
+/* playpch2.c:13 bhCPM2_act_scp: WpnTab.flg 0x20 (Waffen 13 und 18) fuehrt aus act_wpn in
+ * mode2 71. Vorher meldete der Kern dort nur eine Luecke; die Waffe schoss nie. */
+void test_scope() {
+    check((WpnTab[13].flg & 0x20) && (WpnTab[18].flg & 0x20), "WpnTab 13/18 lost the scope flag 0x20");
+    for (int w : {13, 18}) {
+        const std::string n = "scope " + std::to_string(w) + ": ";
         Fixture f;
         f.equip(w);
         f.endless = true;
+        f.place_enemy(0, 0.0f, -20.0f);
+        f.table.ewk_n = 1;
         f.tick(true, false);
-        check(f.run_until(65, 40), "launcher " + std::to_string(w) + " never reached act_wpn");
-        const unsigned before = f.res.shots;
-        for (unsigned i = 0; i < 8 && f.res.shots == before; ++i) f.tick(true, true);
-        check(f.res.shots > before, "launcher " + std::to_string(w) + " did not call bhSetGunFire");
-        for (unsigned i = 0; i < 40; ++i) f.tick(true, true);
-        unsigned shells = 0, sparks27 = 0;
-        const RECVX_CB_EFFECT* spark = nullptr;
-        for (const auto& e : f.requests) {
-            if (e.ef.id == 130) { ++shells; check(e.ef.type == (w == 18 ? 4u : 6u) && e.has_offset && !e.link_player, "launcher: bhEff130 type/offset"); }
-            if (e.ef.id == 27) { ++sparks27; spark = &e; }
+        check(f.run_until(71, 60), n + "never reached mode2 71");
+        for (const auto& g : f.gaps) check(g.find("act_scp") == std::string::npos, n + "gap still reported: " + g);
+        /* case 0/1: Ich-Perspektive (gm 0x80000, st 0x800000), Koerper aus (pt_flg 0x1). */
+        f.tick(true, false);
+        check((f.gm & 0x80000u) && (f.st & 0x800000u) && !(f.pt & 0x1u), n + "gm 0x80000 / st 0x800000 / pt_flg ~0x1");
+        check(f.sys.cam_ppers == 11832 && f.player().arp == 2.0f, n + "cam.ppers 11832, arp 2.0");
+        f.tick(true, false, 0, 0, true);
+        check(f.sys.cam_ppers == 3640, n + "pad 0x80 zooms to cam.ppers 3640");
+        /* Zielbewegung: pad 0x60 mit pad_dy, pad 0xC mit pad_dx (4 Einheiten je Schritt). */
+        const int ay0 = f.player().ay; const int wax0 = f.player().wax;
+        f.sys.pad_dx = 8; f.sys.pad_dy = -8;
+        f.tick(true, false, 1, 1);
+        check(f.player().ay == ay0 - 32 && f.player().wax == wax0 + 32, n + "aim moves by 4 * pad_dx / pad_dy");
+        f.sys.pad_dx = 0; f.sys.pad_dy = 0;
+        f.player().wax = 0; f.player().ay = ay0;
+        for (unsigned i = 0; i < 8; ++i) f.tick(true, false);
+        check(f.player().at_flg & 0x10u, n + "at_flg 0x10 after ct0 > 5");
+        const auto before = f.requests.size(); const unsigned atari = f.res.gun_atari;
+        f.tick(true, true);
+        check(f.res.mode3 == 2 || f.player().mode3 == 2, n + "trigger did not reach mode3 2");
+        f.tick(true, true);
+        /* case 2 faellt in case 3: scp_ct 0 -> wax = ct3 + 2048 * sin(8192). */
+        check(f.player().wax == std::int16_t(2048 * njSin(8192)), n + "first recoil step wax");
+        if (w == 18) {
+            unsigned rockets = 0;
+            for (std::size_t i = before; i < f.requests.size(); ++i) if (f.requests[i].ef.id == 130) {
+                ++rockets;
+                check(f.requests[i].ef.type == 4 && f.requests[i].has_offset && f.requests[i].offset.z < 0, n + "bhEff130 type 4 with -2.5 forward");
+            }
+            check(rockets == 1, n + "exactly one rocket");
+            check(f.sys.ef_flg & 0x2u, n + "sys->ef_flg 0x2 (rocket in flight)");
+        } else {
+            check(f.res.gun_atari == atari + 1, n + "bhCheckGunAtari not called once");
+            /* :172-196: Linie ab owP[5] * (0, 1.5, -1), Richtung RotXYZ(wax, ay, 0) * (0, 0, -l). */
+            const auto& l = f.last_wall_line;
+            const float* h = f.player().owp_mtx[5];
+            float sy, cy; njSinCos(f.player().ay, &sy, &cy);
+            check(std::fabs(l.px - (h[12] + 0.0f)) < 1e-4f && std::fabs(l.py - (h[13] + 1.5f)) < 1e-4f && std::fabs(l.pz - (h[14] - 1.0f)) < 1e-4f,
+                  n + "gun line does not start at owP[5] * (0, 1.5, -1)");
+            check(std::fabs(l.vx + WpnTab[13].l * sy) < 1e-3f && std::fabs(l.vy) < 1e-3f && std::fabs(l.vz + WpnTab[13].l * cy) < 1e-3f,
+                  n + "gun line is not RotY(ay) * (0, 0, -l)");
         }
-        check(shells >= 1, "launcher " + std::to_string(w) + ": no bhEff130 projectile");
-        for (const auto& g : f.gaps) check(g.find("Waffe 20") == std::string::npos, "launcher: gap still reported: " + g);
-        if (w == 18) { check(sparks27 == 0, "launcher 18 must not request bhEff027"); continue; }
-        check(sparks27 >= 1 && spark, "launcher 20: bhEff027 sparks missing");
-        check(spark->sys_ef == 2 && spark->jno == 0 && !spark->link_player && spark->ef.flg == 1 && spark->ef.type == 0
-              && spark->ef.sx == 1.0f && spark->ef.sy == 1.0f && spark->ef.sz == 0.0f && spark->ef.ax == 0 && spark->ef.ay == 0,
-              "launcher 20: bhEff027 fields (pwksub.c:3129-3141)");
-        /* Die Testgelenke sind reine Verschiebungen: der Versatz bleibt (-3,0,0), die Lage
-           ist Gelenkort + wp_fps2. */
-        check(spark->has_offset && spark->offset.x == -3.0f && spark->offset.y == 0.0f && spark->offset.z == 0.0f,
-              "launcher 20: offset (-3,0,0) through owP[jno] rotation");
-        const auto& fp = WpnTab[20].wp_fps2;
-        bool at_joint = false;
-        for (unsigned n = 0; n < kNodes; ++n) {
-            const float* m = f.player().owp_mtx[n];
-            if (spark->ef.px == m[12] + fp.x && spark->ef.py == m[13] + fp.y && spark->ef.pz == m[14] + fp.z) at_joint = true;
-        }
-        check(at_joint, "launcher 20: bhEff027 position is owP[jno] * wp_fps2");
+        /* Rueckstoss: 30 Schritte wax = ct3 + (2048 - 64 ct) sin(1911 ct + 8192), danach mode3 1. */
+        unsigned steps = 0;
+        while (f.player().mode3 == 3 && steps < 40) { f.tick(true, false); ++steps; }
+        check(f.player().mode3 == 1 && steps == 30, n + "recoil does not last 30 passes (" + std::to_string(steps) + ")");
+        /* Ziel los: erst nach ct0 > 5 (nach dem Rueckstoss wieder ab 0) zurueck nach mode2 68,
+           gm 0x800C0 frei, 0x800 gesetzt. */
+        unsigned waited = 0;
+        for (; waited < 12 && f.res.mode2 == 71; ++waited) f.tick(false, false);
+        check(waited == 7, n + "release did not wait for ct0 > 5 (" + std::to_string(waited) + ")");
+        check(f.res.mode2 == 68 && !(f.gm & 0x800C0u) && (f.gm & 0x800u) && f.player().at_flg == 0, n + "release to mode2 68");
     }
+}
+
+
+/* pwksub.c:2981-3125 bhSetGunFire Waffe 11: fuenf bhEff014-Saetze (type 1,0,2,2,3) und acht
+ * bhEff002-Rauchsaetze type 6 ueber sys->ef. Vorher meldete der Kern eine Luecke. */
+void test_weapon11_fire() {
+    Fixture f;
+    f.equip(11);
+    f.endless = true;
+    f.tick(true, false);
+    check(f.run_until(65, 40), "weapon 11 never reached act_wpn");
+    const unsigned before = f.res.shots;
+    for (unsigned i = 0; i < 8 && f.res.shots == before; ++i) f.tick(true, true);
+    check(f.res.shots > before, "weapon 11 did not call bhSetGunFire");
+    for (const auto& g : f.gaps) check(g.find("Waffe 11") == std::string::npos, "weapon 11: gap still reported: " + g);
+    std::vector<RECVX_CB_EFFECT> w;
+    for (const auto& e : f.requests) if (e.sys_ef == 2 && (e.ef.id == 14 || e.ef.id == 2)) w.push_back(e);
+    check(w.size() >= 13, "weapon 11: 5 + 8 sys->ef works expected");
+    const unsigned types[5] = {1, 0, 2, 2, 3};
+    const float scale[5] = {1.0f, 1.5f, 2.5f, 2.5f, 0.19f};
+    for (unsigned k = 0; k < 5; ++k)
+        check(w[k].ef.id == 14 && w[k].ef.type == types[k] && w[k].ef.sx == scale[k], "weapon 11: bhEff014 type/scale order");
+    check(!w[0].has_offset && !w[1].has_offset && w[2].has_offset && w[3].has_offset && w[4].has_offset, "weapon 11: offsets only from set 3 on");
+    check(w[2].offset.x == w[3].offset.x && w[3].ef.px != w[2].ef.px, "weapon 11: set 4 keeps ops, moves to 1.51 + fps1");
+    check(w[4].ef.px == w[3].ef.px && w[4].ef.py == w[3].ef.py && w[4].ef.pz == w[3].ef.pz,
+          "weapon 11: type 3 keeps the position left in sys->ef by set 4");
+    check(w[4].link_player == 1 && w[4].ef.flg == 0x4000001u && w[4].ef.ay == 0, "weapon 11: type 3 linked to plp, flg 0x4000001, ay 0");
+    for (unsigned k = 0; k < 4; ++k) check(!w[k].link_player && w[k].ef.flg == 0x4100001u, "weapon 11: sets 1-4 unlinked, flg 0x4100001");
+    for (unsigned k = 5; k < 13; ++k) {
+        const auto& e = w[k];
+        check(e.ef.id == 2 && e.ef.type == 6 && e.ef.mdlver == 9 && e.ef.flr_no == 0 && !e.link_player && e.jno == w[4].jno && e.has_offset,
+              "weapon 11: bhEff002 type 6 / mdlver 9 / lkono jno");
+        check(e.ef.px == w[3].ef.px, "weapon 11: smoke keeps the template position");
+        const float len = std::sqrt(e.offset.x * e.offset.x + e.offset.y * e.offset.y + e.offset.z * e.offset.z);
+        check(std::fabs(len - std::sqrt(0.41f)) < 1e-4f, "weapon 11: smoke offset is a rotation of (0.5, 0, 0.4)");
+    }
+    /* njRotateX 8192 je Satz: acht verschiedene Richtungen, der neunte waere wieder der erste. */
+    check(std::fabs(w[5].offset.y - w[9].offset.y) > 1e-3f || std::fabs(w[5].offset.z - w[9].offset.z) > 1e-3f, "weapon 11: smoke not rotated about X");
 }
 
 /* pwksub.c:3156-3240 bhSetGunFire case 21 — Doppelwaffe: der Schuss laeuft entlang der
@@ -842,7 +949,9 @@ int main() {
         test_auto_fire_branch();
         test_dual_wall_spark();
         test_water_impact();
-        test_launchers();
+        test_linear_launcher();
+        test_scope();
+        test_weapon11_fire();
         test_dual_wield();
         test_euler_order();
         test_reported_gaps();

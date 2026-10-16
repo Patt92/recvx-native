@@ -26,6 +26,9 @@ EffectSpawn& request_template();
 // effect.c:436 bhSetEffectTb(&sys->ef, offset, NULL, lkono): die Vorlage in die
 // Liste dieses Passes (offset -> lox/loy/loz des neuen Satzes).
 void submit_template(int lkono,const NJS_POINT3* offset=nullptr);
+// bhSetEffectTb aus einem Dienst, den eine Effektprozedur ruft (bhEff013 -> bhCheckGunAtari):
+// der fertige Satz in die Liste dieses Passes, Reihenfolge wie die Vorlagenaufrufe.
+void submit_spawn(const EffectSpawn& spawn);
 // pwksub.c:2643 bhSetWaterSplash4: schreibt id 11, flg 1, mdlver 0, type+10, flr_no 0,
 // Skalierung und Lage in die Vorlage, dann ay = ang+16384 mit lkono 0 und ay = ang-16384
 // mit lkono 1. `submit` legt den Satz an: im Effektpass submit_template, sonst direkt.

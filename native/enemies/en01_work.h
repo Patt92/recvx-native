@@ -328,7 +328,7 @@ typedef struct RECVX_EN01_SERVICES {
        effect.c); der Basisdienstvertrag fuehrt bisher nur die reinen
        Effektvarianten (blood_effect4/Burst/Pool). EN01 reicht die Aufrufe
        unveraendert durch — der Anbieter ist derselbe wie dort. */
-    /* effect.c:736 bhLinkBlood(epw, lnk_obj, ofs, size): Blut am Gelenk. */
+    /* effect.c:736 bhLinkBlood(epw, lnk_obj, ofs, size): im Original ein leerer Koerper. */
     void (*link_blood)(struct RECVX_ENEMY_WORK* w, int lnk_obj,
                        const RECVX_ENEMY_VEC* ofs, float size);
     /* zonzon.c:415 bhEne_SetBlood(epw, type, bt) — bt ist die

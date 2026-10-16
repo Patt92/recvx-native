@@ -1092,6 +1092,13 @@ static void group4_custom_draw(){
         check(!queued&&s.mode0==1&&s.extra&&(s.flg&0x20000000u)&&s.ct0>=10&&s.ct0<=20,"bhEff217 init differs");
         step_effect_sprite(s,c,&queued);
         check(queued&&s.quads.size()==16&&!s.quads[0].textured&&s.quads[0].vertices[0].col==0xff322320u,"bhEff217 polygon particles differ");
+        { // njPtclDrawPolygon: +-h Ninja-Bildschirmpunkte, unabhaengig von der Tiefe (ps2_NinjaPtcl.c:52-58)
+          SceneCamera cam;cam.perspective=10922;NJS_MATRIX view;camera_view_matrix(cam,view);NJS_MATRIX inv;std::copy_n(&view[0],16,&inv[0]);njInvertMatrix(&inv);
+          const float dist=320.0f/std::tan(0.0000958738f*float(cam.perspective/2));
+          for(float depth:{20.0f,150.0f}){EffectSprite one=s;one.quads.resize(1);NJS_POINT3 vp{0,0,depth},wp;njCalcPoint(&inv,&vp,&wp);one.quads[0].center=wp;
+            Scene sc;append_custom_effect(sc,one,cam,{},nullptr);check(sc.triangles.size()==2,"particle polygon not drawn");
+            float xmin=1e9f,xmax=-1e9f;for(const auto& t:sc.triangles)for(const auto& v:t.vertices){NJS_POINT3 p=v.position,o;njCalcPoint(&view,&p,&o);const float x=o.x*1.174f*dist/o.z;xmin=std::min(xmin,x);xmax=std::max(xmax,x);}
+            check(std::fabs((xmax-xmin)-2.0f*one.quads[0].vertices[1].x)<0.01f,"njPtclDrawPolygon size must be Ninja screen points at every depth");}}
         unsigned passes=1;while(s.flg&&passes<200){step_effect_sprite(s,c,&queued);++passes;}
         check(!s.flg&&!g_extra_released.empty(),"bhEff217 must release at the end of its life");
         install_group4_services();

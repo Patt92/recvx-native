@@ -111,6 +111,29 @@ check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<
  menu.skip_slide();menu.input_unslid(MenuInput::Cancel,inv);
  for(unsigned t=0;t<160;++t){menu.tick(inv);controls.synchronize();if(vm.acquired_file()==~0u)check(!(vm.flags[10][0]&0x20010),"file close retained an acquisition request");check(!vm.pickup_display(),"file close started a second GetItem acquisition");vm.tick();world.tick();}
  check(!menu.active&&!dialog.active()&&!inv.contains(48),"closing Director Memo inserted an inventory item or reopened a modal");check(!(vm.flags[10][0]&0x20010),"file close retained original acquisition request flags");check(vm.flag(7,97),"Director Memo original room pickup acknowledgement missing");for(unsigned i=0;i<383;++i)check(inv.items[i]==slots_before[i],"Director Memo changed an inventory slot");check(vm.errors.empty(),"Director Memo original room script blocked");std::cout<<"Original RM_0070 scripted Director Memo: file 8, close consumes both requests, no inventory slot.\n";}
+ // RM_4050 Seitentasche: Ereignis 0 setzt nur ev_flg 6 (it_flg 186); gm_flg 0x8000000 leitet
+ // bhCheckSubPack (player.c:1072) bei jeder Statusoeffnung (sub1.c:3392) und bei der
+ // Spielereinrichtung vor bhInitEvent (player.c:844/935/1035) daraus ab.
+ {auto bytes=read_asset_file(data/"rooms/RM_4050.RDT",64*1024*1024);
+  for(unsigned ply:{0u,1u}){Inventory inv;inv.player=ply;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.initialize();StatusMenu menu;GameplayInput controls(inv,menu,dialog,&vm);
+   check(inv.capacity()==8,"side pack open before pickup");vm.set_flag(1,6,0); // was RM_4050 Ereignis 0 schreibt
+   vm.status_requested=true;controls.synchronize();check(menu.active,"status screen did not open");
+   check(inv.capacity()==(ply==0?10u:8u)&&bool(vm.flags[11][0]&0x8000000u)==(ply==0),"bhCheckSubPack: ev_flg 6 does not give Claire (only Claire) 10 slots on StatusMain");
+   menu.reset(inv);MessageDialog d2;EventVm next(bytes,inv,d2);next.inherit_progress(vm);next.initialize();
+   check(inv.capacity()==(ply==0?10u:8u),"room change does not re-derive the side pack from ev_flg");}
+  {Inventory inv;inv.side_pack=true;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.initialize();check(inv.capacity()==8,"host side_pack survives bhCheckSubPack without ev_flg 6");}
+  std::cout<<"RM_4050 side pack: ev_flg 6 -> gm_flg 0x8000000 via bhCheckSubPack on status open and room setup.\n";}
+ // RM_0000 Messer (Interaktion 7): GetItem laeuft erst im stehenden Statusbildschirm
+ // (sub1.c:3452, StatusMain case 8 nach SpriteH ohne statusflg 0x40). Die Frage 157
+ // steht weder vor dem Statustask noch waehrend der Einfahrt ueber den Sprites.
+ {auto bytes=read_asset_file(data/"rooms/RM_0000.RDT",64*1024*1024);Inventory inv;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.item_message=[](unsigned index,unsigned){return Message{std::uint16_t(index&0x7f),0xffff};};
+  StatusMenu menu;GameplayInput controls(inv,menu,dialog,&vm);controls.synchronize();
+  check(vm.interact({19,0,55},0,0),"original knife interaction failed");
+  check(vm.pickup_display()==8&&!dialog.active(),"GetItem decided before the status task started");
+  controls.synchronize();check(menu.active&&menu.pickup==8&&!dialog.active(),"pickup status task did not open, or GetItem asked at once");
+  unsigned ticks=0;for(;ticks<60&&!dialog.active();++ticks){menu.tick(inv);const bool sliding=menu.slide.pad_locked();vm.tick();controls.synchronize();if(sliding)check(!dialog.active(),"GetItem question shown while the status screen slides in (statusflg 0x40)");}
+  check(dialog.active()&&dialog.index()==157&&!menu.slide.pad_locked()&&ticks>=8,"GetItem question did not follow the finished slide-in");
+  menu.reset(inv);vm.cancel_item_request();std::cout<<"RM_0000 knife GetItem: question 157 only after the status slide-in.\n";}
 #endif
  {auto bytes=read_asset_file(data/"rooms/RM_0090.RDT",64*1024*1024);auto scene=decode_scene(bytes);auto player=scene.spawns.at(0);std::size_t m=42;std::int64_t f=0;RoomWorld world(bytes,scene,player,m,f,audio,data);auto body=PlayerAsset::load(data);world.set_player_asset(&body);Inventory inv;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.binding=[&](const auto& c){return world.bind(c);};vm.task_started=[&](unsigned l){world.start_task(l);};vm.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};vm.start(0,22);for(unsigned t=0;t<35;++t){vm.tick();world.tick();}check(world.state(2,8)->has_motion&&world.state(2,8)->motion==6,"original milling event did not bind room MTN 6");BinaryView v(bytes);const auto h=inspect_room(bytes).room_offset;for(unsigned i=4;i<v.u32(h+0x8c);++i)if(i!=8)world.bind(cmd({0x24,2,std::uint8_t(i),0}));
  Scene first=scene;world.append(first,{},scene.cameras[0]);for(unsigned t=0;t<40;++t){vm.tick();world.tick();}check(vm.errors.empty(),"original milling event blocked");Scene second=scene;world.append(second,{},scene.cameras[0]);for(auto* sample:{&first,&second})sample->triangles.erase(std::remove_if(sample->triangles.begin(),sample->triangles.end(),[](const auto& t){return t.light_category!=2;}),sample->triangles.end());check(!first.triangles.empty(),"milling machine not rendered");check(first.triangles.size()==second.triangles.size(),"milling geometry changed topology");bool moved=false;for(unsigned i=0;i<first.triangles.size();++i)for(unsigned j=0;j<3;++j){const auto a=first.triangles[i].vertices[j].position,b=second.triangles[i].vertices[j].position;if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>.01f)moved=true;}check(moved,"original milling motion does not change rendered vertices");std::cout<<"RM_0090 object 8 / original room MTN 6 changes rendered machine geometry.\n";}

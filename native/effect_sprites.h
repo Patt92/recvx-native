@@ -51,6 +51,9 @@ struct EffectSprite {
     // Prozeduraufruf festhaelt (effsub2.c bhEff_E03_Acid prueft die Strecke pxb -> px).
     float pxb=0,pyb=0,pzb=0;
     int ax=0,ay=0,az=0,lkono=0,ct0=0,ct1=0,ct2=0,ct3=0,tex_id=-1,bl_src=8,bl_dst=6;
+    // O_WRK.exp0 = &sys->ahtp->flg (effsub1.c:3478 bhEff013): der getroffene Wandsatz als Index
+    // in den Wandsatz des Raumbesitzers; -1 = kein Satz.
+    int wall_ref=-1;
     // O_WRK.exp0 as the room procedures use it: the UV table latched at init.
     const void* uv=nullptr;
     // bhSetEffectTb/bhSetEffect fields used by the generated procedures (px..pz must stay contiguous).
@@ -90,6 +93,10 @@ struct EffectSprite {
     struct Quad {NJS_POINT3 center;std::array<Vertex,4> vertices;unsigned category,source,destination;unsigned frame=0,pn=4;bool textured=true,world_space=false,point_filter=false,fogged=true,gouraud=false;
         // Ps2SetFogColorSys fuer genau diesen Aufruf (ps2_NaDraw.c:469 njDrawTexture3DHEx).
         bool fog_color_set=false;std::uint32_t fog_color=0;
+        // njPtclDrawPolygon (ps2_NinjaPtcl.c:22-80): die Eckpunkte sind +-h Punkte des 640x480-
+        // Ninja-Bildschirms um den projizierten Mittelpunkt (scr.x/y +- h, ohne invz*dist), keine
+        // Welteinheiten wie bei njPtclDrawSprite (:100, invz*w*dist).
+        bool screen_size=false;
         // Die Zeichenfunktion setzt kein Blendpaar und erbt den Zustand der vorherigen
         // ef_fnc-Funktion (effsub5.c DrawEff5SnowRect); source/destination gelten dann nicht.
         bool inherit_blend=false;
@@ -345,4 +352,6 @@ int original_effect_slot(const std::vector<unsigned>& flags);
 // stflg_out nimmt das Rueckseitenbit 0x10 auf, das der Originalzeichenpfad in
 // den Arbeitssatz zurueckschreibt (effect.c:1391/1532/1668); nullptr verwirft es.
 void append_effect_sprite(Scene& scene,const EffectSprite& sprite,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix=nullptr,unsigned* stflg_out=nullptr);
+// effect.c:1378-1390 Rueckseitentest flg 0x20000 (njGetPlaneNormal2 der projizierten Ecken 0..2).
+bool backface_culled(const std::array<SceneVertex,4>& world,const SceneCamera& camera);
 }

@@ -364,7 +364,8 @@ int main(int argc,char** argv){try{
      check(itemdata[2].type&0x100&&itemdata[3].type&0x100,"test weapons are not wide");
      wm.input(MenuInput::Down,wide);check(wm.selected==2,"down to first wide weapon");wm.input(MenuInput::Down,wide);check(wm.selected==3,"second wide weapon skipped");
      wm.input(MenuInput::Down,wide);check(wm.selected==5,"below wide rows");wm.input(MenuInput::Up,wide);check(wm.selected==3,"up returns to second wide weapon");wm.input(MenuInput::Up,wide);check(wm.selected==2,"up to first wide weapon");}
-    bag_vm.set_flag(11,4,0);bag_vm.set_flag(1,99,0);bag_vm.set_flag(7,17,0);bag_vm.flags[5][0]=4;bag.hp=93;bag.poisoned=true;bag.equip(1);const auto persistent_items=bag.items;
+    bag_vm.set_flag(1,6,0);bag_vm.set_flag(11,4,0);bag_vm.set_flag(1,99,0); // Taschenquelle ist ev_flg 6 (player.c:1078 bhCheckSubPack)
+bag_vm.set_flag(7,17,0);bag_vm.flags[5][0]=4;bag.hp=93;bag.poisoned=true;bag.equip(1);const auto persistent_items=bag.items;
     MessageDialog next_message;EventVm next_room(data,bag,next_message);next_room.inherit_progress(bag_vm);next_room.initialize();
     check(bag.items==persistent_items&&bag.hp==93&&bag.poisoned&&bag.side_pack&&bag.weapon()==1,"room VM resets persistent inventory/status");
     check(next_room.flag(1,99)&&next_room.flag(7,17)&&next_room.flag(11,4)&&!next_room.flags[5][0],"room flags and global progress mixed");

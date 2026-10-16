@@ -237,8 +237,9 @@ void GameplayInput::menu_input(MenuInput key,bool repeat){
 }
 void GameplayInput::synchronize(){
     if(events_)events_->menu_open=menu_.active;
-    // swork.statusflg 0x40 für GetItem: die Einfahrt des Aufnahmebildschirms.
-    if(events_&&!events_->status_busy)events_->status_busy=[this]{return menu_.active&&menu_.slide.pad_locked();};
+    // GetItem laeuft nur im stehenden Aufnahmebildschirm (sub1.c:3452: StatusMain case 8 nach
+    // SpriteH ohne statusflg 0x40): vor dem Statustask und waehrend der Einfahrt ist er gesperrt.
+    if(events_&&!events_->status_busy)events_->status_busy=[this]{return !menu_.active||menu_.slide.pad_locked();};
     if(events_&&!(transition_active&&transition_active())&&!(video_active&&video_active()))events_->service_item_request();
     if(events_&&events_->acquired_file()!=~0u){
         if(!file_open_){if(sound)sound(3);menu_.acquire_file(inventory_,events_->acquired_file());events_->menu_open=true;file_open_=true;}

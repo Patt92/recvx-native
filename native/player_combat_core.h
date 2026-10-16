@@ -141,6 +141,7 @@ typedef struct {
        arn selbst gehoert dem vorhandenen Bewegungsbesitzer (B00). */
     int32_t  yrct;
     float    rtspd, arp;
+    int32_t  scp_ct;                       /* EXP_WORK scp_ct (playpch2.c act_scp) */
     uint32_t exp1_flags;                   /* EXP1_I(0)                         */
     RECVX_CB_PP_WORK pp;                   /* exp2                              */
     /* mlwP: Objektbaum (objP) und O_WORK.flg der logischen Knoten; owP-Matrizen
@@ -176,6 +177,7 @@ typedef struct {
 typedef struct {
     uint32_t pad_on, pad_ps;               /* bhSetPad (pad.c:162)              */
     int32_t  pad_dx, pad_ax;
+    int32_t  pad_dy, pad_ay;               /* pad.c:236-278 / :143 (act_scp)    */
     uint32_t eor_ct, gm_mode, cam_ncut;
     uint32_t* gm_flg;                       /* bhCk 11                           */
     uint32_t* st_flg;                       /* bhCk 5                            */
@@ -185,9 +187,10 @@ typedef struct {
     /* Kameraschreibzugriffe des Originals aus dem Kampfpfad (player.c:1783-1787
        bhCPM0_action, :4677 act_suw, :6113 act_rld). Der Kamerabesitzer liegt
        ausserhalb dieses Pakets; `cam_written` nennt die geschriebenen Felder
-       (Bit 0 pe_ax, Bit 1 pe_pers), damit der Host sie weiterleiten oder als
+       (Bit 0 pe_ax, Bit 1 pe_pers, Bit 2 ppers, Bit 3 ax = axp = 0 aus
+       playpch2.c:57 act_scp), damit der Host sie weiterleiten oder als
        Anschlussvertrag melden kann. Nie ein Ersatzwert. */
-    int32_t  cam_pe_ax, cam_pe_pers;
+    int32_t  cam_pe_ax, cam_pe_pers, cam_ppers;
     uint32_t cam_written;
 } RECVX_COMBAT_SYS;
 
@@ -226,6 +229,7 @@ typedef struct {
     int32_t (*event_flag)(void* user, uint32_t no);  /* bhCkFlg(sys->ev_flg, no)    */
     void    (*set_event_flag)(void* user, uint32_t no); /* bhStFlg(sys->ev_flg, no) */
     void    (*pt_flg_or)(void* user, uint32_t bits); /* sys->pt_flg |= bits         */
+    void    (*pt_flg_clr)(void* user, uint32_t bits); /* sys->pt_flg &= ~bits (act_scp) */
     /* Gegnertabelle (C02): sys->ene / sys->ewk_n */
     RECVX_ENEMY_TABLE* (*enemies)(void* user);
     /* Kollision (Besitzer P03/E01) */
@@ -255,6 +259,10 @@ typedef struct {
        Motionquelle des Posenbesitzers. 0 = kein Winkelkanal; das Original
        liefert dann 0/0/0. */
     int32_t (*motion_angle)(void* user, uint32_t mtn_no, uint32_t node, uint32_t frame, int32_t* ang3);
+    /* Motion.c:21 bhSetMotion, Knotenteil (SetMtnNormal/Fast/Slow und ihre Hokan-Varianten,
+       Motion.c:131-859) auf plp->mlwP->objP des Posenbesitzers: Stand VOR Vorschub und
+       hokan_count-Abzug. Ohne Dienst bleibt die Mischung eine benannte Luecke. */
+    void    (*set_motion_pose)(void* user, uint32_t mtn_no, int32_t frm_no, uint32_t mode, uint32_t hokan_count, int32_t hokan_rate);
 } RECVX_COMBAT_SERVICES;
 
 /* Eingabe/Ausgabe eines Passes. Zaehler laufen ueber die Lebensdauer des
@@ -306,6 +314,26 @@ typedef struct RECVX_COMBAT_CORE RECVX_COMBAT_CORE;
 extern const int32_t RECVX_CB_WPN_ANG_TAB[21][3];
 extern const int8_t  RECVX_CB_PLY_LEG_ROUTE[2][7];
 
+/* GA_WORK (weapon.c). px..pz und vx..vz liegen zusammen, weil
+   bhCheckGunAtari sie als NJS_LINE weiterreicht (weapon.c:625). */
+typedef struct {
+    uint32_t at_flg;
+    int32_t  wpn_no;
+    float    r, l, rn, rmax;
+    int32_t  ax, ay;
+    float    px, py, pz, vx, vy, vz;
+    float    gx, gy, gz;
+} RECVX_CB_GA;
+/* weapon.c:607 bhCheckGunAtari(gap) ausserhalb des Spielerpasses (effsub1.c:3524 bhEff013):
+   dieselbe Pruefung auf sys->ene; Rueckgabe != 0 bei Treffer, gap traegt dann Gelenk/Index/
+   lokale Lage wie im Original. */
+int32_t recvx_combat_check_gun_atari(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
+                                     RECVX_COMBAT_SYS* sys, RECVX_CB_GA* gap);
+/* pwksub.c:218 bhSearchNearEnemy(pp, &r, &h, &id) fuer einen Werk pp, der nicht plp ist
+   (effsub1.c:3387 bhEff013): kein ene[id].stflg |= 0x800 (pwksub.c:296 nur bei pp == plp). */
+int32_t recvx_combat_search_near_enemy(const RECVX_COMBAT_SERVICES* services, RECVX_COMBAT_SYS* sys,
+                                       float px, float py, float pz, int32_t ay,
+                                       int32_t* r, float* h, int32_t* id);
 /* Besitzer eines bhSetGunFire-Aufrufs ausserhalb des Spielerpasses
    (bhWeaponSeCall event.c:2988): stflg/at_flg/idx_ct und owP[jno].mtx. */
 typedef struct { uint32_t stflg, at_flg; int32_t idx_ct; float mtx[16]; } RECVX_CB_GUN_OWNER;

@@ -18,6 +18,7 @@
 #include "effect_particles.h"
 #include "weapon_flash.h"
 #include "player_combat_core.h"
+#include "weapon_fly.h"
 #include "object_itmbox.h"
 #include "player_head.h"
 #include "view_clip.h"
@@ -55,6 +56,9 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // (en04.c:1100 door branch, :3955 wire shake): flg2, mode1, mode3, ct0, ayp.
     // O_WRK yn und gpx/gpy/gpz (objitm.c:1860 Ausgangslage) fuer bhEne56/bhEff134.
     float object_yn=0;NJS_POINT3 object_origin{};
+    // objitm.c:1846 bhObj008: O_WRK mode0, ct0 (Platz in sys->mwalp, hier object_mobile_walls_)
+    // und owP[0].mtx aus dem bhCalcModel des vorigen bhControlObjItm-Durchlaufs (objitm.c:410).
+    unsigned object008_mode0=0;int object008_wall=-1;bool object008_owp_valid=false;BoneMatrix object008_owp{};
     unsigned object_flg2=0,object_mode1=0,object_mode3=0;int object_ct0=0,object_ayp=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
     // bhEneLookFlgSet (event.c): original BH_PWORK flg bit 0x8000. Enemy AI
     // consumers (en01.c) are still pending; the state itself is exact.
@@ -153,6 +157,8 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // enemy work stood on, as its place in rom->etcp + sys->metcp.
     std::optional<std::size_t> enemy_dansa_step;
     struct EnemyMirror {NJS_POINT3 position{};std::array<int,3> angles{};int yaw=0,floor=0;unsigned motion=0;bool room_motion=false;std::int64_t frame=0,step=0;int hp=0;bool hidden=false,inactive=false,look=false;} enemy_mirror{};};
+// RoomWorld::append: normaler Zeichenpass oder das Monitorbild von screen.c:920 (siehe dort).
+struct WorldDrawPass{bool small_screen=false;unsigned ncut=0;};
 class RoomWorld {
 public:
     RoomWorld(const std::vector<std::uint8_t>& room,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data={},const std::filesystem::path& mods={},const std::string& room_name="RM_0000",unsigned game_mode=0);
@@ -255,6 +261,10 @@ public:
         std::int32_t ax=0,ay=0,az=0,axp=0,ayp=0,azp=0,pers=11832,ppers=11832;float ln=0,pln=0;};
     int eye_pe_ax_=0,eye_pe_pers_=11832; // cam.pe_ax/pe_pers (bhCPM0_action, act_suw/rld, bhSyukanModeSet)
     void set_eye_request(int pe_ax,int pe_pers){eye_pe_ax_=pe_ax;eye_pe_pers_=pe_pers;}
+    int eye_pe_ax()const{return eye_pe_ax_;}
+    int eye_pe_pers()const{return eye_pe_pers_;}
+    void set_eye_ppers(int ppers){eye_.ppers=ppers;}           // cam.ppers (playpch2.c act_scp)
+    void clear_eye_ax(){eye_.ax=eye_.axp=0;}                   // cam.ax = cam.axp = 0 (playpch2.c:57)
     void set_player_wax(int wax){player_wax_=std::int16_t(wax);}
     void set_player_aim_mode(unsigned mode1,unsigned at_flg){player_aim_mode1_=mode1;player_aim_at_flg_=at_flg;}
     // sys->ef_flg. system.c:195 initializes it to 0; its only original writer
@@ -303,9 +313,18 @@ public:
     // and bhControlPlayerHead, so the owP it commits carries the script node
     // writes and the crate pose as well.  The owner of the committed matrices
     // uses this to sample exactly that object tree.
-    ModelNodeOverrides player_pose_overrides()const{auto edits=overrides(0,0);if(push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;return edits;}
+    ModelNodeOverrides player_pose_overrides()const{auto edits=overrides(0,0);if(push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;return player_pose_edits(edits);}
     bool enemy_player_joint(unsigned joint,BoneMatrix& out)const;
     std::vector<ModelPose> player_local_pose()const;
+    // Motion.c:21 bhSetMotion (player.c:1502), Knotenteil: SetMtn*(Hokan) auf plp->mlwP->objP
+    // mit dem Stand VOR Vorschub und hokan_count-Abzug; der Takt bleibt beim Pfad.
+    void player_set_motion_pose(std::size_t mtn_no,std::int32_t frm_no,unsigned mode,unsigned hokan_count,int hokan_rate);
+    // Beginn eines Spielerpasses: lief im vorigen kein Knotenteil, folgt objP der dargestellten
+    // Clip-Pose, damit eine spaetere Mischung vom gezeigten Stand ausgeht.
+    void begin_player_motion_pass();
+    // Bearbeitungen der Spielerpose (Kampf/Schieben/Skript) ueber objP gelegt, solange es die
+    // Darstellung traegt; sonst unveraendert.
+    ModelNodeOverrides player_pose_edits(const ModelNodeOverrides& edits={})const;
     void set_pad_clear_callback(std::function<void(uint32_t)> cb){pad_clear_cb_=std::move(cb);}
     void clear_pad_on(uint32_t bits){if(pad_clear_cb_)pad_clear_cb_(bits);}
     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
@@ -324,6 +343,8 @@ public:
     // legt sys->wt_* an (water_wave()), setzt sys->st_flg 0x40, verschiebt je Pass die
     // Eckpunkte/Normalen der gezeichneten Kopie und laesst die Karte abklingen.
     void control_water_objects();
+    // objitm.c:1846 bhObj008 (bhJumpObject[8]): ATR-Quader in sys->mwalp, folgt owP[0] des Objekts.
+    void control_mobile_wall_objects();
     const WaterWaveWork* water_work(unsigned object)const;
     // bhSetExplosion: the effect works, flash light and sound; `view` is the camera direction (cam.vx/vy/vz).
     void explode(NJS_POINT3 position,NJS_POINT3 view);
@@ -367,7 +388,19 @@ public:
     void tick();
     unsigned take_enemy_room_flags(){const auto flags=enemy_spawn_.room_flags;enemy_spawn_.room_flags=0;return flags;}
     Scene sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes=nullptr,const ModelNodeOverrides& combat={})const;
-    void append(Scene& scene,const std::vector<BoneMatrix>& player_nodes={},const SceneCamera& active={})const;
+    // screen.c:920 bhDrawSmallScreenRenderTexture -> game.c:381 bhAllEasyDrawModel: Raum,
+    // bhDrawObjItm und bhDrawEnemy unter gm_flg | 0x80 und st_flg | 0x20 mit cam.ncut = Rendercut
+    // (cut.c:544 bhSetRenderCut); kein Spieler, keine Effekte. small_screen false = normaler Pass.
+    using DrawPass=WorldDrawPass;
+    void append(Scene& scene,const std::vector<BoneMatrix>& player_nodes={},const SceneCamera& active={},const DrawPass& pass={})const;
+    // game.c:63 und screen.c:928-957: der Rendercut-Auftrag dieses Bildes (eff[ren_idx[0]], Kamera
+    // aus rom->cutp[op->type].cam[0] mit cam.ofx, dist = 0.8 * dist bei 640 Breite) oder nichts.
+    struct SmallScreenPass{unsigned slot=0,cut=0;SceneCamera camera;float dist=0;};
+    std::optional<SmallScreenPass> small_screen_pass(const SceneCamera& view);
+    // screen.c:1007-1012: das fertige Bild als ef_tn[op->id]; Ps2_rendertex_initflag faellt.
+    void commit_small_screen(std::vector<std::uint32_t> pixels,unsigned width,unsigned height);
+    // sub1.c:3175 ItemTaskCheck: nach dem Statusschirm in Raum 1-05 Ps2_rendertex_initflag = 1.
+    void item_screen_closed(){if(stage_no_==1&&room_no_==5)rendertex_init_=true;}
     std::size_t export_textures(const std::filesystem::path& output,const std::string& room_name)const;
     SceneCamera camera(const Scene& stage,const SceneCamera& active)const;
     void overlay(SoftwareRenderer& image)const;
@@ -403,6 +436,9 @@ public:
     const std::deque<WorldEntity>& enemy_children()const{return enemy_children_;}
     // effsub1b.c:101 bhDraw134: die Kran-Anzeige (2D, Texturgruppe 44) ueber dem Bild.
     void draw_ufo_hud(SoftwareRenderer& image)const;
+    // cut.c:138-147 cam.flg 0x40: die Monitorkamera, deren Lage allein bhEff137
+    // (effsub1b.c:1015) schreibt; bhControlMonitorCamera (cut.c:2802) ist leer.
+    bool monitor_camera_active()const{return monitor_.active;}
     // effect.c:905 bhDrawNtxEffect2D(sys->ef_ntx2d): untexturierte Schirmpolygone der
     // Effektsaetze dieses Passes (bhEff130 type 3), njDrawPolygon(pvp, pn, 1) ueber das
     // fertige Bild, Tore flg/stflg 0x1000000 und gm_flg 0x4000 + mdflg 0x40.
@@ -432,6 +468,11 @@ public:
     // hitchk.c:5561 bhCheckL2Water: line (origin, vec) against the top plane of
     // the same water areas in the same order; the first hit within |vec| wins.
     bool l2_water(NJS_POINT3 origin,NJS_POINT3 vec,NJS_POINT3& hit)const;
+    // weapon.c:607 bhCheckGunAtari / pwksub.c:218 bhSearchNearEnemy fuer Effektprozeduren
+    // (effsub1.c:3352 bhEff013): derselbe Kampfkern auf sys->ene, Effekte in die Passliste.
+    int effect_gun_atari(RECVX_GA_WORK& gat);
+    RECVX_COMBAT_SERVICES effect_combat_services();
+    bool effect_search_near_enemy(NJS_POINT3 pos,int ay,int& r,float& h,int& id);
     // pwksub.c:2643 bhSetWaterSplash4: two id-11 effects (type+10) from the
     // shared sys->ef template, ay = ang +/- 16384, lkono 0 and 1.
     void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz);
@@ -522,7 +563,8 @@ private:
     std::vector<unsigned> push_objects_;
     bool push_pose_=false,player_poisoned_=false;
     int push_health()const{return player_health()>=120?(player_poisoned_?1:0):player_health()>=30?1:2;}
-    bool push_pose_current()const{return push_&&push_pose_&&!player_scripted&&!player_enemy_motion_&&motion_==std::size_t(push_->state().motion)&&frame_==push_->state().frame;}
+    // Die Slow-Abtastung der Schiebeaktion; solange objP die Darstellung traegt, hat es sie bereits.
+    bool push_pose_current()const{return push_&&push_pose_&&!player_obj_drives_&&!player_scripted&&!player_enemy_motion_&&motion_==std::size_t(push_->state().motion)&&frame_==push_->state().frame;}
     void ensure_push();
     void sync_push_objects();
     void update_push();
@@ -538,6 +580,9 @@ private:
     const RECVX_ENEMY_WORK* player_enemy_work_=nullptr; // plp->mnwP: the grabbing work
     unsigned player_frm_mode_=0,player_mtn_attr_=0;
     std::vector<ModelPose> player_obj_;std::vector<unsigned> player_owp_flags_;
+    // plp->mlwP->objP traegt die Darstellung, solange der Takt des laufenden Pfads den
+    // Knotenteil von bhSetMotion ueber player_set_motion_pose schreibt (player_obj_drives_).
+    bool player_obj_drives_=false,player_obj_written_=false;std::size_t player_obj_motion_=~std::size_t(0);
     bool enemy_player_driving_=false;
     // owP belongs to the player model and is published by its control pass,
     // not by rendering. Enemy joint queries read the previous committed tree.
@@ -547,6 +592,9 @@ private:
     std::map<std::tuple<unsigned,unsigned,unsigned>,AfterimageModelWork> afterimage_models_;
     // sys->ufo_pos/ufo_md/ufo_flg/ufo_oidx: geteilt von bhEff134 (effsub1b.c:220) und bhEne56.
     struct UfoState{NJS_POINT3 pos{};int md=0,flg=0;unsigned oidx=0;} ufo_;
+    // cam.px/py/pz, cam.ax/ay/az, cam.pers, cam.ln unter cam.flg 0x40 (bhEff137). Raumlokal wie
+    // cam selbst: bhInitCamera (camera.c:9 cam.flg = 0) beim Raumaufbau, bhSetCut loescht 0x46.
+    struct MonitorCamera{bool active=false;unsigned cut=0;NJS_POINT3 position{};std::int32_t ax=0,ay=0,az=0,pers=8192;float ln=0;} monitor_;
     // plp->ct1/ayp (en12.c:1710-1742 Drehung im Griff) und npSetAllMatColor(plp) (en12.c:1192).
     std::optional<std::uint32_t> player_material_; // plp ct1/ayp liegen in player_ct1_/player_ayp_ (oben)
     unsigned pad_on_=0,pad_ps_=0;
@@ -556,6 +604,8 @@ private:
     NJS_POINT3* camera_offset_=nullptr;
     std::function<void(std::uint32_t,float)> screen_fade_set_;std::function<std::uint32_t()> screen_fade_previous_;
     void step_ufo_effect(unsigned slot);
+    void step_monitor_effect(unsigned slot); // effsub1b.c:1015 bhEff137
+    void step_render_monitor_effect(unsigned slot); // effsub1.c:6927 bhEff111
     // bhEne_SetFireEffect(plp, ...) und bhEne12_SetFireBintaEffect aus Effektprozeduren.
     void effect_player_fire(int jno,NJS_POINT3 ofp,float size,int life);
     void effect_en12_binta(RECVX_ENEMY_WORK* w,int action);
@@ -603,6 +653,9 @@ private:
     // game.c:48-51 runs bhControlEnemy before bhControlObjItm, so the first
     // pass puts them ahead of the bhObj001 entries PlayerPush owns.
     std::vector<CollisionWall> enemy_mobile_walls_;
+    // sys->mwalp-Eintraege der Objektprozeduren (bhObj008), im ersten Objektdurchlauf zugeteilt.
+    // Kein Raum fuehrt Typ 1 (PlayerPush) und Typ 8 zugleich; sie liegen hinter den Push-Eintraegen.
+    std::vector<CollisionWall> object_mobile_walls_;
     // T3 service supplement (en03_lib.h RECVX_ENEMY_EXT): the original
     // rom->walp + sys->mwalp order for the shared en03.c:5220 wall pass.
     RECVX_ENEMY_EXT enemy_ext_{};std::vector<CollisionWall> enemy_wall_cache_;
@@ -664,6 +717,8 @@ private:
     // models_ is fixed after load; SpriteWork (including snapshots) keeps only
     // the reference and dies with this RoomWorld.
     struct SpriteWork {const std::vector<SceneTexture>* texture_list=nullptr;EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
+        // Mitgliedschaft in sys->ef_thl dieses Passes (bhEff111; effect.c:902 bhDrawThlEffect3D).
+        bool thl=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
     bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false,player_infect_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
@@ -718,7 +773,7 @@ private:
     void control_player_effects();
     std::vector<CollisionWall> effect_walls_; // rom->walp + sys->mwalp as bhCheckWallType sees them
     const std::vector<SceneTexture>* effect_texture_list(const SpriteWork& work)const;
-    std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;
+    std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;std::vector<std::uint8_t> effect_model13_; // efm[13] Modellblock (bhEff013)
     // event.c:220 bhPushEffectWork/:234 bhPopEffectWork sichern den ganzen
     // eff[512]-Satz (hier sprites_ plus die Partikelnutzlast des Besitzers) und
     // stellen ihn auf Anforderung wieder her. Das Original kopiert in einen
@@ -820,7 +875,11 @@ private:
     // (bhDrawSpObject) teilen dieselbe Bedingung: ein Werk mit flg 0x40000000
     // wird nur gezeichnet, wenn sys->gm_flg & 0x40, cam.flg & 0x46 oder
     // cam.ncut einem seiner vier hide[]-Eintraege entspricht.
-    bool object_cut_hidden(const WorldEntity& state)const;
+    bool object_cut_hidden(const WorldEntity& state,std::optional<unsigned> ncut={})const;
+    // pwksub.c:2503 bhCheckClipPoint unter der Kamera des laufenden Bildes; true = ausserhalb.
+    bool clip_point(const SceneCamera& view,NJS_POINT3 pos)const;
+    std::vector<unsigned> render_texture_slots_; // sys->ren_idx[0..ren_n) (system.c:254 nullt ren_n je Raum)
+    bool rendertex_init_=false;                  // Ps2_rendertex_initflag (screen.c:18)
     std::vector<ModelPose> object_pose(const Model& model,const WorldEntity& state)const;
     std::vector<BoneMatrix> object_matrices(const Model& model,const WorldEntity& entity,const NJS_MATRIX& transform)const;
     ModelPose model_pose_physical(unsigned kind,unsigned index,unsigned physical)const; // objP[physical] of the original model

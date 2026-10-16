@@ -94,6 +94,7 @@ void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz,co
     r.ay=ang+16384;submit(0);
     r.ay=ang-16384;submit(1);
 }
+void submit_spawn(const EffectSpawn& spawn){pending.spawns.push_back(spawn);}
 EffectSpawn& last_request(){
     if(pending.spawns.empty())throw std::runtime_error("effect procedure patches a request before bhSetEffectTb");
     return pending.spawns.back();
@@ -1020,7 +1021,7 @@ static bool step_en09_smoke(EffectSprite& s){
 }
 bool hand_ported_effect_sprite(unsigned id){
     switch(id){
-    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 126:case 134:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
+    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
     default:return hand_procedure(id)!=nullptr;
     }
 }
@@ -1226,6 +1227,16 @@ void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCam
             // Hosts ist UnitRotPortion; die beiden Drehungen gehen in die Eckpunkte.
             NJS_MATRIX turn;njUnitMatrix(&turn);njRotateZ(&turn,wind_z);if(q.turn_y)njRotateY(&turn,q.turn_y);
             for(auto& v:q.vertices){NJS_POINT3 p{v.x,v.y,v.z};njCalcVector(&turn,&p,&p);v.x=p.x;v.y=p.y;v.z=p.z;}
+        }
+        if(q.screen_size){
+            // njPtclDrawPolygon: GS-Sprite scr.x/y +- h im 640x480-Ninja-Bild. Als Billboard am
+            // Mittelpunkt der Kameratiefe z abgebildet: der Renderer projiziert fSx = AspectW*x*dist/z,
+            // fSy = y*dist/z (renderer.cpp:115-119), also h Punkte = h*z/(AspectW*dist) bzw. h*z/dist.
+            NJS_MATRIX view;camera_view_matrix(camera,view);NJS_POINT3 c;njCalcPoint(&view,&q.center,&c);
+            constexpr float aspect_w=1.174f; // SoftwareRenderer::draw aspect_x
+            const float dist=320.0f/std::tan(0.0000958738f*float(camera.perspective/2));
+            const float kx=c.z/(aspect_w*dist),ky=c.z/dist;
+            for(auto& v:q.vertices){v.x*=kx;v.y*=ky;}
         }
         unsigned texture=0;
         if(q.textured){

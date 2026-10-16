@@ -105,6 +105,7 @@ void restore_events(const Snapshot& snap,EventVm& events){
     from_save(events.flags[1],s.ev_flg);from_save(events.flags[2],s.ky_flg);from_save(events.flags[3],s.ed_flg);
     from_save(events.flags[7],s.it_flg);from_save(events.flags[8],s.mp_flg);from_save(events.flags[9],s.ic_flg);
     for(unsigned i=0;i<4;++i)events.flags[session_matrices[i]]=snap.host.session_flags[i];
+    events.flags[11][0]&=EventVm::room_change_gm_mask; // Raumladen nach bhPopGameData: bhInitRoomChangeSystem (system.c:185)
     for(unsigned i=0;i<3;++i)events.values[session_values[i]]=snap.host.session_values[i];
     // room.c bhSetRoom with cb_flg 0x800000: plp->stflg = ply_stflg | 0x40000000.
     events.flags[14][0]=s.ply_stflg[s.ply_id]|0x40000000u;

@@ -11,6 +11,7 @@
 #include "effect_eff30x.h"
 #include "effect_rap_blood.h"
 #include "effect_eff130.h"
+#include "effect_eff013.h"
 #include "chunk_blend.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
@@ -2531,8 +2532,9 @@ void push_world_quad(EffectSprite& s,const NJS_MATRIX& m,std::array<EffectSprite
     q.source=unsigned(src);q.destination=unsigned(dst);q.world_space=true;q.textured=textured;q.fogged=fogged;
     s.quads.push_back(q);
 }
-// njPtclDrawSprite(pos, num, sx, sy): je Punkt ein Billboard der Groesse sx/sy ueber der
-// ganzen Textur. njPtclDrawPolygon(pos, num, sx): dasselbe ohne Textur (textured false).
+// njPtclDrawSprite(pos, num, sx, sy): je Punkt ein Billboard der Groesse sx/sy (Welteinheiten)
+// ueber der ganzen Textur. njPtclDrawPolygon(pos, num, sx): ohne Textur (textured false), sx in
+// Ninja-Bildschirmpunkten (ps2_NinjaPtcl.c:52-58) -> Quad::screen_size.
 void push_particle_sprites(EffectSprite& s,const ParticleWork& p,unsigned group,unsigned frame,
                            int src,int dst,bool textured,bool point_filter){
     if(p.num<0||p.num>48)throw std::runtime_error("particle work count outside P_WRK");
@@ -2543,7 +2545,7 @@ void push_particle_sprites(EffectSprite& s,const ParticleWork& p,unsigned group,
             v[k].u=float(k&1);v[k].v=(k&2)?1.0f:0.0f;v[k].col=p.col;
         }
         EffectSprite::Quad q;q.center=p.pos[i];q.vertices=v;q.category=group;q.frame=frame;
-        q.source=unsigned(src);q.destination=unsigned(dst);q.textured=textured;q.point_filter=point_filter;
+        q.source=unsigned(src);q.destination=unsigned(dst);q.textured=textured;q.point_filter=point_filter;q.screen_size=!textured;
         s.quads.push_back(q);
     }
 }
@@ -4614,7 +4616,7 @@ void step_e00_mince(EffectSprite& s,const EffectContext&,bool& queued){
     queued=true;
 }
 const HandEffectProcedure hand_effect_procedures[]={
-    {253,step_e02_sand_dust},{254,step_e02_sand_particle},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},
+    {253,step_e02_sand_dust},{254,step_e02_sand_particle},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},{13,step_eff013},{139,step_eff_dummy},{140,step_eff_dummy},{141,step_eff_dummy},{142,step_eff_dummy},
     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
     {8,step_eff008},{10,step_eff010},{11,step_eff011},{14,step_eff014},{15,step_eff015},{29,step_eff029},
     {101,step_eff101},{103,step_eff103},{104,step_eff104},{116,step_eff116},{117,step_eff117},{119,step_eff119},

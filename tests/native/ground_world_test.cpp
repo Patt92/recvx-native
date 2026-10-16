@@ -111,7 +111,8 @@ int main(int argc,char** argv){try{
     events.flags[6][0]|=1u;events.flags[14][0]|=0x1000000;
     check(world.move_player(from,candidate,1,false).x==candidate.x,"original hidden work gate ignored");
     // Camera clip installation is a camera invocation, not a render-time
-    // function of mutable display flags or the fixed camera's cno argument.
+    // function of mutable display flags. bhSetFixedCut writes cam.ncut = cno
+    // (cut.c:486) before bhChangeViewClipRM (:537) looks that cut up.
     {const auto camera_room=read_asset_file(data/"rooms/RM_0020.RDT",64*1024*1024);
     const auto camera_scene=decode_scene(camera_room);auto camera_actor=camera_scene.spawns.at(0);
     RoomWorld camera_world(camera_room,camera_scene,camera_actor,motion,frame,audio,data,{},"RM_0020");
@@ -121,10 +122,10 @@ int main(int argc,char** argv){try{
     camera_world.initialize_camera_clip(4);
     check(camera_world.camera_clip().near==4&&camera_world.camera_clip().far==20000,"room cut did not install its original clip range");
     check(camera_world.bind({0x2a,0,0,0,{0x2a,0,0,0}}),"fixed camera binding missing");
-    check(camera_world.camera_clip().near==4&&camera_world.camera_clip().far==20000,"fixed camera used cno instead of cam.ncut for clip lookup");
+    check(camera_world.camera_clip().near==2&&camera_world.camera_clip().far==20000,"fixed camera retained the previous cut's clip instead of the new cam.ncut");
     camera_events.flags[12][0]&=~0x200u;
     camera_world.tick_camera(camera_scene,camera_scene.cameras[0],0,false);
-    check(camera_world.camera_clip().near==4&&camera_world.camera_clip().far==20000,"display flag change alone rewrote installed clip range");
+    check(camera_world.camera_clip().near==2&&camera_world.camera_clip().far==20000,"display flag change alone rewrote installed clip range");
     check(camera_world.bind({0x13,0,0,0,{0x13,1,0,0}}),"room-camera return missing");
     camera_world.tick_camera(camera_scene,camera_scene.cameras[0],0,false);
     check(camera_world.camera_clip().near==1&&camera_world.camera_clip().far==99,"non-game camera return did not install 1/99");
@@ -132,6 +133,18 @@ int main(int argc,char** argv){try{
     check(camera_world.bind({0x13,0,0,0,{0x13,1,0,0}}),"eye-view return missing");
     camera_world.tick_camera(camera_scene,camera_scene.cameras[0],0,false);
     check(camera_world.camera_clip().near==1&&camera_world.camera_clip().far==20000,"eye-view return did not install 1/20000");}
+    // RM_4020 Container (obwp[4], Typ 8): bhObj008 (objitm.c:1846) legt einen ATR-Quader 12x20x22
+    // in sys->mwalp an und fuehrt ihn mit owP[0]; bhGetGroundPosition (hitchk.c:3572) liest walp UND
+    // mwalp. Der Kranschatten (bhEff001, effsub1.c:628) landet so auf der Containeroberseite.
+    {const auto crane_room=read_asset_file(data/"rooms/RM_4020.RDT",64*1024*1024);
+     const auto crane_scene=decode_scene(crane_room);auto crane_actor=crane_scene.spawns.at(0);
+     RoomWorld crane(crane_room,crane_scene,crane_actor,motion,frame,audio,data,{},"RM_4020");crane.set_player_asset(&player);
+     Inventory ci;MessageDialog cd;EventVm cv(crane_room,ci,cd);crane.bind_player_collision(cv);cv.binding=[&](const EventCommand& c){return crane.bind(c);};cv.initialize();
+     const auto* box=crane.state(2,4);check(box&&(box->type&0xffu)==8,"RM_4020 container object missing");
+     for(unsigned t=0;t<4;++t){crane.set_simulation_flags(cv.flags[6][0]);crane.tick();}
+     const NJS_POINT3 top{box->transform.position.x,55.f,box->transform.position.z};
+     check(crane.combat_ground(top)==box->transform.position.y+20.f,"bhObj008 container top missing from bhGetGroundPosition");
+     check(crane.combat_ground({30.f,55.f,12.f})==0.f,"ground beside the container changed");}
     std::cout<<"RM_0050 native World ground/event updates and absent-player-state HP regression passed (ground "
              <<initial<<", room entry "<<hit.index<<").\n";
     return 0;

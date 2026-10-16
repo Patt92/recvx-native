@@ -626,7 +626,6 @@ static void push_motion(RECVX_PUSH_STATE* s,int motion,int add)
     s->hokan_rate=42598;
     s->hokan_count=4;
     s->mtn_add=add;
-    s->unsupported_services|=RECVX_PUSH_UNBOUND_HOKAN;
 }
 
 int recvx_push_begin(RECVX_PUSH_STATE* s,int psh_ct,float x,float y,float z,int ay,int dmlvl,int wpntp)
@@ -736,8 +735,12 @@ void recvx_push_tick(RECVX_PUSH_CORE* c,RECVX_PUSH_STATE* s,int forward)
     default:
         break;
     }
-    /* bhSetMotion: abtasten am aktuellen frm_no, dann vorschieben. */
+    /* bhSetMotion: abtasten am aktuellen frm_no, dann vorschieben. Den Knotenteil
+     * (SetMtn*(Hokan)) fuehrt der Host auf plp->mlwP->objP mit frame/hokan_sample;
+     * hokan_count sinkt je Durchlauf wie in SetMtn*Hokan (Motion.c:194/412/681). */
     sample=s->frm_no;
+    s->hokan_sample=s->hokan_count;
+    if(s->hokan_count)s->hokan_count--;
     frm_num=push_frames(c,s,s->motion);
     if(frm_num){
         total=(int)(frm_num<<16);
