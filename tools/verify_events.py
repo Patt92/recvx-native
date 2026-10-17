@@ -149,7 +149,9 @@ def main():
             assert all(abs(a-b)<.02 for a,b in zip(walked['actor'], [-12.8,0,115.1])), ('walked Steve result', spawn)
         # bhCmpB key 2 is cam.ncut: RM_0070's scan script unlocks the shelf ammunition (ETC 4) per camera.
         shelf = folder / 'shelf-ammo.txt'
-        shelf.write_text('10 position 53 0 11 32768\n40 confirm\n100 confirm\n130 confirm\n')
+        # Meldung 158 baut ein Zeichen je Pass auf (message.c:355, OK gehalten +4 :351); erst die fertige
+        # Seite nimmt OK an (game.c:264). Der Druck bei 130 liegt mitten im Aufbau, 250 bestaetigt.
+        shelf.write_text('10 position 53 0 11 32768\n40 confirm\n100 confirm\n130 confirm\n250 confirm\n')
         state = folder / 'shelf-ammo.json'
         subprocess.run(prefix + [str(args.runtime.resolve()), '--data', str(args.data.resolve()), '--headless', '--in-game',
                                  '--validate-poses', '--room', 'RM_0070.RDX', '--replay', str(shelf), '--frames', '700', '--state', str(state)], check=True, cwd=ROOT)

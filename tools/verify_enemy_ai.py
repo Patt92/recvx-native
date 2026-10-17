@@ -307,6 +307,8 @@ results['rm3070-crawl'] = {'hp': r3070['hp'], 'crawler': crawler[0]['work']['mod
 # --- Hunde RM_1000 (natuerlich, keine Eingabe) ------------------------------
 d350 = run('dogs-350', 'RM_1000.RDX', 350, '')
 d500 = run('dogs-500', 'RM_1000.RDX', 500, '')
+d2520 = run('dogs-2520', 'RM_1000.RDX', 2520, '')
+d2560 = run('dogs-2560', 'RM_1000.RDX', 2560, '')
 d3000 = run('dogs-3000', 'RM_1000.RDX', 3000, '')
 assert grabbed(d350) and d350['player_work']['mode'][0] == 4, ('dogs', 'kein Hundegriff (plp->mode0 4) bei Tick 350', d350.get('player_work'))
 assert d350['hp'] < 160, ('dogs', 'kein Biss bis Tick 350', d350['hp'])
@@ -314,7 +316,15 @@ assert enemy(d350, 1)['work']['mode'][0] == 2, ('dogs', 'Hund 1 nicht in mode0 2
 assert not d500['player_scripted'] and d500['player_work']['mtn_enemy'] == 0, ('dogs', 'Spieler nach dem Hundegriff nicht freigegeben', d500.get('player_work'))
 assert enemy(d500, 1)['work']['mode'][0] == 1, ('dogs', 'Hund 1 nach der Freigabe nicht im Bewegungsmodus', enemy(d500, 1)['work'])
 assert d3000['hp'] < 0 and d3000['gameover_active'] and d3000['gameover_phase'] == 2, ('dogs', 'kein Game Over durch Hunde', d3000['hp'], d3000['gameover_phase'])
-assert d3000['player_work']['mode'][0] == 6, ('dogs', 'Todesbiss NG01 (plp->mode0 6) fehlt', d3000['player_work'])
+# Zweiter Sprungangriff bei Bild ~2497 (hp 0 -> -6): Fallmotion 25 laeuft ohne Game Over, erst ihr
+# Bildwechsel (~2537) loescht ts_flg 0x4000 und startet bhSelectContinue (bhCPM0_die mode3 1).
+assert d2520['hp'] < 0 and d2520['player_work']['mode'][0] == 3 and d2520['player_work']['mtn_no'] == 25 and not d2520['gameover_active'], ('dogs', 'Game Over vor dem Ende der Fallmotion (player.c:6422)', d2520['player_work'], d2520['gameover_active'])
+assert d2560['gameover_active'] and d2560['gameover_phase'] == 0 and d2560['player_work']['mode'][3] == 2 and d2560['player_work']['mtn_no'] == 26, ('dogs', 'Liegemotion 26 in gov_md1 0 fehlt', d2560['player_work'], d2560['gameover_phase'])
+# Die Hunde setzen nur plp->mode0 4 und klemmen beide Bisse auf hp 1 (en07.c:838/922, :899/:1005);
+# der Tod kommt aus dem Sprungangriff (Schadensmodus 2). hp < 0 schaltet player.c:1405 nach
+# bhCPM0_die (mode0 3): Fallmotion 25, beim Bildwechsel Liegemotion 26 (mode3 2) und ts_flg 0x4000
+# -> gov_md0 0. Ein mode0 6 (bhCPM0_enedie) hat fuer EN07 keine Originalquelle.
+assert d3000['player_work']['mode'][0] == 3 and d3000['player_work']['mode'][3] == 2 and d3000['player_work']['mtn_no'] == 26, ('dogs', 'bhCPM0_die (plp->mode0 3, Liegemotion 26) fehlt', d3000['player_work'])
 results['dogs-rm1000'] = {'hp': [d350['hp'], d500['hp'], d3000['hp']], 'gameover_phase': d3000['gameover_phase'], 'gaps': d3000['_gaps']}
 
 # --- Hunde RM_0050: Fallenereignis (Diagnose-Snapshot wie verify_event_freeze) --
@@ -329,13 +339,20 @@ struct.pack_into('<I', b, at, struct.unpack_from('<I', b, at)[0] | (0x80000000 >
 struct.pack_into('<I', b, 16 + 0x1f4 + 2 * 4, (84 << 16) | 1)
 struct.pack_into('<I', b, len(b) - 4, zlib.crc32(b[:-4]))
 (out / 'snapshots/snapshot-2.rcvxsnap').write_bytes(b)
+# scd0 @708: bhRandamSet 10 (event.c:4930) und bhCmpB 17 wuerfeln rm_flg 9; gesetzt -> Falle an
+# flr 23 (x -194, Ereignis 16), frei -> flr 7 (x -142, Ereignis 15) (siehe verify_event_freeze.py).
+# Die Lockposition folgt dem Wurf; eine feste -142 traf nur den freien Fall.
+up = run('rm0050-up', 'RM_0050.RDX', 240, '0 debug_key F2\n1 debug_select snapshot_load 1\n2 confirm\n'
+         '60 position -186 0 86 0\n61 confirm\n', trap_extra)
+rm9 = bool(up['work_flags'][4] & (0x80000000 >> 9))
+trap_event, lure = (16, -191) if rm9 else (15, -142)
 trap = ('0 debug_key F2\n1 debug_select snapshot_load 1\n2 confirm\n'
         '60 position -186 0 86 0\n61 confirm\n'
         '260 position -175.5 8 85.8489 0\n261 confirm\n'
-        '550 position -142 0 0 0\n'
-        '700 position -131 0 10 0\n')
+        '550 position %d 0 0 0\n'
+        '700 position %d 0 10 0\n' % (lure, lure + 11))
 t = run('rm0050-trap-1100', 'RM_0050.RDX', 1100, trap, trap_extra)
-assert 15 in t['events'] or 17 in t['events'], ('rm0050', 'Fallenereignis nicht ausgeloest', t['events'])
+assert trap_event in t['events'], ('rm0050', 'Fallenereignis nicht ausgeloest', trap_event, rm9, t['events'])
 dogs = [e for e in t['enemies'] if e['identity'] == 4]
 assert len(dogs) == 2 and all(d['work']['mode'][0] >= 1 for d in dogs), ('rm0050', 'Hunde nicht freigelassen', [d['work'] for d in dogs])
 assert any(d['work']['mode'][2] == 2 or d['work']['mode'][0] == 2 for d in dogs), ('rm0050', 'kein Hund in Verfolgung/Angriff', [d['work'] for d in dogs])

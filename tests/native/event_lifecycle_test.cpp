@@ -26,13 +26,13 @@ struct Room {
   bind_item_names(read_asset_file(data/"files/SYSMES.ALD",4*1024*1024)); // sys->mes_ip wie GameUi in der Runtime
   world.set_player_asset(&body);vm.values[1]=std::string(name)=="RM_0050"?5:0;
   vm.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes[1]);return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};
-  vm.task_started=[&](unsigned n){world.start_task(n);};vm.animation_frame=[&](unsigned k,unsigned n){return world.frame(k,n);};vm.object_position=[&](unsigned k,unsigned n){return world.position(k,n);};
+  vm.task_started=[&](unsigned n){world.start_task(n);};vm.animation_frame=[&](unsigned k,unsigned n){return world.frame(k,n);};vm.object_position=[&](unsigned k,unsigned n){return world.position(k,n);};vm.enemy_joint_position=[&](unsigned n,unsigned node){return world.enemy_joint_position(n,node);};vm.set_item_position=[&](unsigned n,NJS_POINT3 p){world.set_item_position(n,p);};vm.enemy_disable=[&](unsigned n){world.deactivate_enemy(n);};
   vm.audio_active=[&](unsigned n){return audio.active(n);};vm.movie_active=[&]{return movie.active();};vm.movie_time=[&]{return movie.time_centiseconds();};vm.enemy_dead=[&](unsigned n){return world.enemy_dead(n);};
   input.video_active=[&]{return movie.active();};input.skip_video=[&]{movie.stop();};vm.door=[](const DoorRequest&){return true;};
   if(std::string(name)=="RM_0050")inventory.acquire(84,1); // Diagnostic precondition: the player brings the padlock key into the room.
   if(pre)pre(vm,world);audio.begin_room_init();vm.initialize();audio.load_room_sounds(0,vm.values[1],audio.take_room_sound_case());audio.room_fade_in();
  }
- void tick(){input.apply({});vm.check_floor(actor.position,actor.yaw,world.floor_at(actor.position));vm.tick();input.synchronize();world.set_simulation_flags(vm.flags[6][0]);world.tick();vm.flags[4][0]|=world.take_enemy_room_flags();movie.tick();audio.mix();check(vm.errors.empty(),"original event stream blocked");}
+ void tick(){input.apply({});vm.check_floor(actor.position,actor.yaw,world.floor_at(actor.position));vm.tick();input.synchronize();world.set_simulation_flags(vm.flags[6][0]);world.tick();vm.flags[4][0]|=world.take_enemy_room_flags();movie.tick();audio.mix();if(!vm.errors.empty()){for(const auto& e:vm.errors)std::cerr<<e<<"\n";}check(vm.errors.empty(),"original event stream blocked");}
  bool task(unsigned event){for(const auto& t:vm.task_states())if(t.event==event)return true;return false;}
 };
 int main(int argc,char** argv){try{
@@ -117,6 +117,15 @@ int main(int argc,char** argv){try{
   r.world.set_pad(0x800,0x800);r.tick();r.world.set_pad(0,0);
   bool flag66=false;for(unsigned t=0;t<120&&!(r.dialog.active()&&r.dialog.index()==23);++t){r.tick();flag66=flag66||r.vm.flag(1,66);}
   check(flag66&&r.dialog.active()&&r.dialog.index()==23,"bhEff137 zoom did not set ev_flg 66 / room event 1 question");
+  { // effsub1b.c:828 bhDraw137 ueber ef_fnc: Streifen, Fadenkreuz, Ecken, Pfeile, ZOOM/X/Y (Gruppe 440).
+    SoftwareRenderer hud(640,480);std::fill(hud.canvas().begin(),hud.canvas().end(),0xff000000u);r.world.draw_fnc_huds(hud);
+    const auto lit=[&](int x0,int y0,int x1,int y1){unsigned n=0;for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x)if(hud.canvas()[std::size_t(y)*640+x]!=0xff000000u)++n;return n;};
+    check(!r.world.unbound_enemy_routines().count("bhDraw137: Texturgruppe 440 (sys->ef_tn[440]) nicht geladen"),"bhDraw137 texture group 440 not loaded");
+    check(lit(292,216,348,264)>200&&lit(144,352,240,368)>100&&lit(384,384,496,400)>100,"bhDraw137 monitor display (crosshair / ZOOM / Y digits) not drawn");
+    // Texel = (u+0.5)/256 * Breite (vitof12 + GS-ST, Ps2AddPrim): die Klammern des Fadenkreuzes
+    // (Gruppe 440 ist 128x128) sind hell, die roten Streifen nicht.
+    unsigned white=0;for(int y=216;y<264;++y)for(int x=292;x<348;++x){const auto c=hud.canvas()[std::size_t(y)*640+x];if(((c>>8)&255u)>100&&(c&255u)>100)++white;}
+    check(white>20,"bhDraw137 crosshair not sampled with normalized ST coordinates");}
   std::cout<<"RM_3140 surveillance camera: bhEff137 owns the camera, pans, zooms and hands ev_flg 66 to the room script.\n";}
  // Raumwechsel maskiert gm_flg (bhInitRoomChangeSystem, system.c:185: &= 0x9B8C00CB). RM_1130 verlaesst
  // den Raum nach "Climb down the ladder?" mit 57 00 (gm_flg 0x20000) ohne 57 01; dieses Bit darf in
@@ -152,6 +161,12 @@ int main(int argc,char** argv){try{
   Scene shown=r.scene;const auto base=shown.triangles.size();r.world.append(shown,{},view);
   unsigned monitor=0;for(std::size_t i=base;i<shown.triangles.size();++i){const auto& t=shown.triangles[i];if(t.textured&&t.texture<shown.textures.size()&&shown.textures[t.texture].width==512&&t.blend==SceneBlend::Opaque)++monitor;}
   check(monitor==2,"bhDrawThlEffect3D monitor quad with the render texture missing");
+  // screen.c:928-939: ohne initflag rendert der Monitor nur unter st_flg 0x1 oder gm_flg 0x20 (Schnittwechsel,
+  // cut.c:298/455/1651/1731; bhCheckCut cut.c:22 loescht es je Bild). Diagnosevorbedingung: st_flg 0x1 aus.
+  r.world.set_fixed_cut(5);check(r.vm.flags[11][0]&0x20u,"bhSetFixedCut did not raise gm_flg 0x20");r.vm.flags[5][0]&=~1u;
+  check(bool(r.world.small_screen_pass(view)),"a cut change (gm_flg 0x20) does not refresh the monitor");
+  r.world.commit_small_screen(target.pixels(),512,512);r.world.begin_cut_check();
+  check(!(r.vm.flags[11][0]&0x20u)&&!r.world.small_screen_pass(view),"bhCheckCut does not clear gm_flg 0x20; the monitor re-renders without initflag, st_flg 1 or a cut change");
   std::cout<<"RM_1050 monitor: bhEff111 live, cut 6 rendered into the 512x512 texture and shown on the quad.\n";}
  // bhSetDispObj (0x20, event.c:2283) schreibt fuer Gegnerworks mdflg 0x1 (Zeichentor eneset.c:814),
  // bhEneRenderSet (0xa5, event.c:6985) mdflg 0x200; beide bleiben am Work ueber den naechsten Pass.
@@ -164,6 +179,26 @@ int main(int argc,char** argv){try{
   r.tick();check(z->enemy.mdflg&0x200u,"bhEneRenderSet mdflg 0x200 lost after a pass");
   check(r.world.bind({0xa5,0,0,0,{0xa5,0,1,0}})&&!(z->enemy.mdflg&0x200u),"bhEneRenderSet show does not clear mdflg 0x200");
   std::cout<<"bhSetDispObj/bhEneRenderSet write mdflg 0x1/0x200 on the enemy work and keep them.\n";}
+ // RM_0110 (zombie 4 haelt ein Item): scd1 @06ec bhEtcAtariEnePosSet (0xb3) waehlt aus rom->posp[3..59) den
+ // Platz naechst owP[9] des Gegners, zentriert etcp 12 darum und merkt ihn in sys->evt_posno[0]; scd0 @0184
+ // bhEtcAtariEvtPosSet (0xb4) stellt Feld 12 und itwp[4] beim Wiederbetreten dort hin. evt_posno ist global
+ // (SAVEFILE 0x820). Diagnosevorbedingungen: ed_flg 35 und rm_flg 7 wie nach dem Tod des Zombies.
+ {Room r(data,"RM_0110",[](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);});
+  for(unsigned t=0;t<3;++t)r.tick();
+  r.vm.set_flag(3,35,0); // der Zombie stirbt waehrend dieses Besuchs
+  const auto joint=r.world.enemy_joint_position(4,9);check(bool(joint),"RM_0110 zombie 4 joint 9 unavailable");
+  const auto& posp=r.vm.room_positions();float best=1e30f;unsigned want=3;
+  const auto dist=[&](const NJS_POINT3& a){const float dx=a.x-joint->x,dy=a.y-joint->y,dz=a.z-joint->z;return std::sqrt(dx*dx+dy*dy+dz*dz);};
+  best=dist(posp.at(3));for(unsigned c=3;c<59;++c)if(dist(posp[c])<best){best=dist(posp[c]);want=c;}
+  r.vm.set_flag(4,7,0);r.tick();
+  check(r.vm.errors.empty(),"RM_0110 bhEtcAtariEnePosSet blocked the scenario");
+  check(r.vm.evt_posno[0]==want,"bhEtcAtariEnePosSet chose another rom->posp entry than the nearest to owP[9]");
+  const auto& a=r.vm.interactions.at(12);check(std::fabs(a.position.x-(posp[want].x-a.extent.x/2))<1e-4f&&std::fabs(a.position.z-(posp[want].z-a.extent.z/2))<1e-4f,"etcp 12 not centred on the chosen position");
+  Room again(data,"RM_0110",[&](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);vm.inherit_progress(r.vm);});
+  for(unsigned t=0;t<2;++t)again.tick();
+  check(again.vm.errors.empty()&&again.vm.evt_posno[0]==want,"sys->evt_posno lost on re-entry or 0xb4 blocked scd0");
+  const auto item=again.world.position(3,4);check(item&&item->x==posp[want].x&&item->z==posp[want].z,"bhEtcAtariEvtPosSet did not move itwp[4]");
+  std::cout<<"RM_0110 bhEtcAtariEnePosSet/EvtPosSet: nearest rom->posp "<<want<<", etcp 12 and itwp[4] follow it on re-entry.\n";}
  // Fresh Enter edges before the FMV: sweep the initial game frames, including
  // the cinematic start and subsequent animation waits. Finish the same flow.
  for(unsigned press:{0u,1u,2u,3u,10u,30u,60u,120u,300u,600u,900u,1100u,1200u,1300u}){

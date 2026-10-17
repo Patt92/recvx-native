@@ -15,6 +15,7 @@
 #include "combat.h"
 #include "effect_collision.h"
 #include "core_random.h"
+#include "player_stairs.h" // recvx_player_mtn_act (PlMtnAct)
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -561,6 +562,7 @@ static float event_div_product(float numerator,unsigned remaining,unsigned total
 static float event_clock(unsigned remaining,unsigned total){return event_div_product(1.f,remaining,total);}
 void RoomWorld::set_fixed_cut(unsigned cno){
     event_camera=false;fixed_camera=cno;active_camera_.reset(room_cameras_.at(*fixed_camera),*fixed_camera);
+    if(collision_events_)collision_events_->flags[11][0]|=0x20u; // cut.c:455 gm_flg 0x20
     // cut.c:486 cam.ncut = cno precedes bhChangeViewClipRM (:537). A fixed
     // close-up must not retain the preceding room cut's near plane.
     if(collision_events_)initialize_camera_clip(cno,false);
@@ -568,6 +570,7 @@ void RoomWorld::set_fixed_cut(unsigned cno){
 }
 void RoomWorld::set_event_camera(unsigned cno,unsigned kno,bool lock){
     // cut.c:1644 bhSetEventCamera (lock = true) / :1726 bhSetEventFixedCut (lock = false).
+    if(collision_events_)collision_events_->flags[11][0]|=0x20u; // cut.c:1651/1731 gm_flg 0x20
     event_camera_index=cno;if(event_camera_index>=event_cameras_.size())throw std::runtime_error("event camera outside table");event_camera_key_=kno;if(event_camera_key_>=event_cameras_[event_camera_index].keys.size())throw std::runtime_error("event camera key outside table");event_camera_clock_=0;event_camera_finished_=false;event_camera=true;restore_camera_clip_=false;
         {const auto& k=event_cameras_[event_camera_index].keys[event_camera_key_];
          // cut.c:1660-1684 bhSetEventCamera: cam.px/py/pz, cam.ax/ay/az and cam.pers come
@@ -1041,8 +1044,8 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         const unsigned v0=v.u8(2),v1=v.u8(3);player_event_.reset=!(player_event_.requested&&player_event_.mode2==v0)||v0==1;
         player_event_.requested=true;player_event_.mode1=v1;player_event_.mode2=v0;
         collision_mode_=7u|(v1<<8)|(v0<<16)|((player_event_.reset?0u:(collision_mode_>>24))<<24);
-        player_scripted=false;player_frozen_=false;return true;}
-    if(op==0x64&&(v.u8(1)==0x80||v.u8(1)==0x8b))player_event_.requested=false; // Player_controll 128/139: zurueck zu bhCPM0_action
+        player_scripted=false;player_frozen_=false;player_smove_.active=false;return true;}
+    if(op==0x64&&(v.u8(1)==0x80||v.u8(1)==0x8b)){player_event_.requested=false;player_smove_.active=false;} // Player_controll 128/139: zurueck zu bhCPM0_action
     if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;return true;case 0x80:player_scripted=false;player_room_motion_=false;player_frozen_=false;motion_=42;frame_=0;return true;case 0x34:return stand_player_motion(); // event.c:9697 Player_controll 52
         // event.c:9275 Player_controll 150 writes plp->exp1 (the head flags), whatever work the task holds.
         case 150:if(!player_head_)return false;if(v.u8(2)==0){player_head_->flags|=0x1E0u;player_head_->flags&=~0x14u;}else player_head_->flags|=0x14u;return true;
@@ -1330,8 +1333,32 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
                 }
             }
             const auto index=v.u8(4);const auto start=cmd==34?std::int64_t(v.u16(8))*65536:0;
-            if(!ctx.kind){if(v.u8(3)!=0)return false;if(cmd==25){if(!player_asset_||!player_asset_->has_motion(index))return false;}else if(index>=room_motions_.size()||!room_motions_[index].frames)return true; /* empty original MN_WORK (room.c zeroes rmthp): the player keeps the last pose */
-                player_morph_.motion_mode3=v.u8(3)<=1?0:1;motion_=index;frame_=start;player_step_=motion_step(v.u8(2));player_room_motion_=cmd!=25;player_scripted=true;return true;}
+            if(!ctx.kind){if(v.u8(3)!=0)return false; // alle Spieleraufrufe der Raumdaten nutzen Selektor 0
+                if(cmd==25){if(!player_asset_||!player_asset_->has_motion(index))return false;}else if(index>=room_motions_.size()||!room_motions_[index].frames)return true; /* empty original MN_WORK (room.c zeroes rmthp): the player keeps the last pose */
+                // event.c:11469-11500 (24) / :11802-11833 (34) / :10960-10989 (25), Selektor 0: mnwP = rmthp
+                // (24/34) bzw. plmthp (25), mode0 7, mode2 8, mode3 0, mode1/ct0/ct1/ct2 aus den Bytes 4..7,
+                // mtn_md |= 8 ausser bei Schritt 1/2 und bei Uebergang 6 (dann hokan_count 0, sonst 8),
+                // frm_no = Start. plp->mtn_no bleibt bis pl_smove08 case 0 (pl_evt.c:668).
+                const unsigned t1=v.u8(7);const bool t0=v.u8(2)==1||v.u8(2)==2;
+                player_morph_.motion_mode3=0;player_step_=motion_step(v.u8(2));
+                player_smove_={true,0u,index,int(v.u8(5)),int(v.u8(6)),int(t1),cmd!=25};
+                if(!t0)player_mtn_md_|=8u;
+                if(t1==6){player_hokan_count_=0;player_mtn_md_|=8u;}else player_hokan_count_=8;
+                frame_=start;player_scripted=true;
+                // event.c:11600 switch(v0 = Byte 6): 0/2/5/6 bhSetMotion(plp, 0, 0, 0) auf dem neuen mnwP mit dem
+                // noch alten mtn_no; bhCalcModel/-Link zeichnet der Host aus objP. Der Host schaltet die
+                // Bibliothek (player_room_motion_) erst zusammen mit mtn_no in pl_smove08 case 0 um, damit
+                // Abtastung und Index zusammenpassen. Liegt der alte Index ausserhalb der neuen Bibliothek
+                // (das Original liest dann hinter das Feld), bleibt der Schritt aus und wird gemeldet.
+                {const unsigned v0=v.u8(6);if(v0==0||v0==2||v0==5||v0==6){
+                    const bool room=cmd!=25;
+                    const MotionClip* clip=room?(motion_<room_motions_.size()&&room_motions_[motion_].frames?&room_motions_[motion_]:nullptr):(player_asset_&&player_asset_->has_motion(motion_)?&player_asset_->motion_clip(motion_):nullptr);
+                    if(!clip&&room&&motion_>=room_motions_.size())unbound_enemy_.insert("Common_controll Spieler v0: bhSetMotion auf rmthp[alter mtn_no] hinter der Raumbibliothek (Original liest ausserhalb)");
+                    if(clip&&player_asset_){if(player_obj_.size()!=player_asset_->bones()){player_obj_=player_asset_->bind_pose();player_owp_flags_.assign(player_obj_.size(),0u);}
+                        MotionWork m{std::int32_t(frame_),0u,player_hokan_count_,0u,player_hokan_rate_};std::string gap;
+                        set_motion(m,0,0u,clip,nullptr,player_obj_,player_owp_flags_,&gap,0u,unsigned(motion_));if(!gap.empty())unbound_enemy_.insert(gap+" (plp, Common v0)");
+                        frame_=m.frm_no;player_hokan_count_=m.hokan_count;player_obj_motion_=motion_;player_obj_written_=true;player_obj_drives_=true;}}}
+                return true;}
             auto& e=entity(ctx.kind,ctx.index);if(cmd==25&&ctx.kind!=1)return false;e.room_motion=cmd!=25;e.motion=index;if(!entity_motion(e).frames)throw std::runtime_error("script entity motion unavailable");e.frame=start;e.sampled_frame=start;e.step=motion_step(v.u8(2));e.scripted=true;e.has_motion=true;e.motion_slow=(v.u8(2)!=1&&v.u8(2)!=2)||v.u8(7)==6;e.motion_mode3=v.u8(3)<=1?0:1;
             if(e.subplayer_bound){
                 // event.c:11834-11909 (34) / :11501-11570 (24) / :10990-11060 (25): selector 1 writes
@@ -1388,7 +1415,20 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
             return true;}
         // Common_controll 51/52 (event.c:9997/10030) lesen rom->posp[sys->evt_posno[n]]; evt_posno
         // schreibt allein bhEtcAtariEnePosSet (Opcode 0xb3, event.c:7794), das der Host nicht fuehrt.
-        if(cmd==51||cmd==52){unbound_enemy_.insert("Common_controll 51/52: sys->evt_posno (bhEtcAtariEnePosSet 0xb3) ohne nativen Besitzer");return false;}
+        if(cmd==51||cmd==52){
+            if(!collision_events_){unbound_enemy_.insert("Common_controll 51/52: sys->evt_posno ohne EventVm");return false;}
+            const auto& posp=collision_events_->room_positions();const auto& evt=collision_events_->evt_posno;
+            const unsigned slot=cmd==51?v.u8(4):v.u8(2);if(slot>=evt.size()||evt[slot]>=posp.size())throw std::runtime_error("Common_controll 51/52: evt_posno outside rom->posp");
+            const auto& e=posp[evt[slot]];
+            if(cmd==52){ // event.c:10030: ips[0] = work px/py/pz, ips[1] = posp[evt_posno[v0]]
+                const auto w=ctx.kind?entity(ctx.kind,ctx.index).transform.position:player_.position;
+                ctx.positions[0]={w.x,w.y,w.z};ctx.positions[1]={e.x,e.y,e.z};return true;}
+            // event.c:9997: ips[0] = ips[1] = owP[v1] des Gegners v0, ips[2] = posp - (posp - owP)/2 mit
+            // y = posp.y, ips[3] = owP mit negiertem y.
+            const auto m=link_matrix(1,v.u8(2),v.u8(3));if(!m){unbound_enemy_.insert("Common_controll 51: owP[v1] des Gegners ohne nativen Knoten");return false;}
+            const float ox=m->value[12],oy=m->value[13],oz=m->value[14];
+            ctx.positions[0]={ox,oy,oz};ctx.positions[1]={ox,oy,oz};
+            ctx.positions[2]={e.x-(e.x-ox)/2.0f,e.y,e.z-(e.z-oz)/2.0f};ctx.positions[3]={ox,oy*-1.0f,oz};return true;}
         // Common_controll 35 (event.c:11100-11298): wie 25 (mnwP = emtp[id], mtn_add aus Byte 2),
         // Selektor 1 (:11162-11223): mtn_no-Lowbyte = Byte 4, Byte 5 waehlt mode0 1 / 5 und ct2-
         // Lowbyte 1 / 3 und ist zugleich das x-Ziel ct0 = (+/-Byte5) << 16 (Vorzeichen bpx),
@@ -1768,7 +1808,7 @@ void RoomWorld::sync_player_grab(){
     const bool grabbed=state.mode0==4||state.mode0==6;
     if(grabbed){
         if(!grab_driving_){grab_driving_=true;}
-        player_scripted=true;player_enemy_motion_=state.enemy_clip!=0;player_room_motion_=false;
+        player_scripted=true;player_enemy_motion_=state.enemy_clip!=0;player_room_motion_=false;player_smove_.active=false; // PlyDG: plp mode0 4/6
         player_.position={state.px,player_.position.y,state.pz};player_.yaw=state.ay&0xffff;
         if(player_enemy_motion_){motion_=state.mtn_no;frame_=state.frm_no;}
         else{motion_=state.mode0==6?motion_:motion_;} // before the first clip frame the work keeps the idle pose
@@ -1982,6 +2022,7 @@ void RoomWorld::step_monitor_effect(unsigned slot){
         // bhSetCut aendert cam.ncut nicht (die Clip-Nachschlagung :291 bleibt beim laufenden
         // Schnitt); es uebernimmt Nebel (:348-367) und Verdecktabellen (:318-346) von ci.
         cut_fog_handover(room_cameras_.at(op.type),true);
+        ev.flags[11][0]|=0x20u; // cut.c:298 bhSetCut
         event_camera=false;fixed_camera.reset();eye_.active=false; // cut.c:296 cam.flg &= ~0x80000046
         monitor_.active=true;monitor_.cut=op.type;
         cb|=0x44u;st|=0x1u;
@@ -2039,7 +2080,6 @@ void RoomWorld::step_monitor_effect(unsigned slot){
     default:break;
     }
     // bhDraw137 (effsub1b.c:828, ueber sys->ef_fnc) ist noch nicht portiert: benannte Luecke.
-    if(work.queued)unbound_enemy_.insert("bhDraw137: Monitoranzeige (effsub1b.c:828, ef_tn[440], screen.c:514 bhDrawScopeNumber) nicht portiert");
 }
 // effsub1.c:6927 bhEff111: Ueberwachungsmonitor (RM_1050 Raumeffekt 1, Rendercut op->type).
 // mode1 aus 0x91 bhEffModeSet (event.c:6519): 0 live, 2 letztes Bild halten, sonst Abklingen.
@@ -2128,32 +2168,21 @@ void RoomWorld::commit_small_screen(std::vector<std::uint32_t> pixels,unsigned w
     // und y -16 in den Texturspeicher; dieser GS-Kopierversatz ist nicht nachgebildet (Luecke).
     if(stage_no_!=7)rendertex_init_=false;else unbound_enemy_.insert("bhDrawSmallScreenRenderTexture: Stufe 7 njRenderTextureNumG(2)");
 }
-// effsub1b.c:101 bhDraw134 / effect.c:311 bhDrawPARAM2D / ps2_NaDraw2D.c njDrawPolygon2D:
-// Blend 8/6, Punktfilter, Texturgruppe 44 in Texelkoordinaten (+ GS-Eckversatz),
-// texturierte Farben halbiert (0x80 = 1.0), Alpha (a+1)>>1.
-void RoomWorld::draw_ufo_hud(SoftwareRenderer& image)const{
-    const SpriteWork* hud=nullptr;
-    for(const auto& w:sprites_)if(w.sprite.id==134&&w.queued&&(w.sprite.flg&1u)){hud=&w;break;}
-    if(!hud)return;
-    const auto& op=hud->sprite;
-    const auto atlas=effect_textures_.find(44);
-    const SceneTexture* tex=atlas!=effect_textures_.end()&&!atlas->second.empty()?&atlas->second.front():nullptr;
-    struct Prim{float px,py,x0,y0,x1,y1;std::uint32_t uv[4];};
-    static const Prim tb[8]={
-        {320,412,-64,-36,64,36,{0x00000000,0x00000100,0x00900100,0x00900000}},
-        {320,412,-8,-24,8,8,{0x00900000,0x00900020,0x00D00020,0x00D00000}},
-        {320,412,-8,-32,8,0,{0x00900020,0x00900040,0x00D00040,0x00D00020}},
-        {320,412,-8,-32,8,0,{0x00900040,0x00900060,0x00D00060,0x00D00040}},
-        {320,412,-8,-32,8,0,{0x00900060,0x00900080,0x00D00080,0x00D00060}},
-        {320,412,-32,-8,0,8,{0x009000C0,0x00900100,0x00B00100,0x00B000C0}},
-        {320,412,-32,-8,0,8,{0x00B00080,0x00B000C0,0x00D000C0,0x00D00080}},
-        {320,412,-32,-8,0,8,{0x00B000C0,0x00B00100,0x00D00100,0x00D000C0}}};
-    auto& canvas=image.canvas();const int W=image.width(),H=image.height();
-    const float sx=float(W)/640.0f,sy=float(H)/480.0f;
-    // Ein Dreieck mit Eckfarben (ARGB) und optionalen Texeln; GS-Alpha (a+1)>>1 / 128.
+// Ninja-2D-Polygone der ef_fnc-Anzeigen (ps2_NaDraw2D.c): Schirmlage in 640x480, Blend 8/6,
+// Punktfilter. Die Texelangabe wird (u*16 + Versatz) per vitof12 zu (u*16 + Versatz)/4096 und
+// geht ueber das GS-Register ST (Ps2AddPrim ohne Prim-Bit 0x80000000000000): normiert auf 256,
+// also Texel = (u + Versatz/16)/256 * Texturbreite -- njDrawPolygon2D (:90) +8 an jeder Ecke,
+// njDrawPolygon2DM (:168) +8/+8, +4/+8, +4/+4, +8/+4 je Ecke 0..3. Texturierte Farben halbiert
+// (0x80 = 1.0, attr 0x80000000), Alpha (a+1)>>1 / 128.
+namespace {
+struct Hud2D{
+    std::vector<std::uint32_t>& canvas;int W,H;float sx,sy;const SceneTexture* tex;
     struct V{float x,y,u,v;std::uint32_t c;};
-    const auto tri=[&](const V& a,const V& b,const V& c,bool textured){
+    struct Prim{float px,py,x0,y0,x1,y1;std::uint32_t uv[4];}; // NJS_PRIM, uv 0xVVVVUUUU
+    Hud2D(SoftwareRenderer& image,const SceneTexture* t):canvas(image.canvas()),W(image.width()),H(image.height()),sx(float(image.width())/640.0f),sy(float(image.height())/480.0f),tex(t){}
+    void tri(const V& a,const V& b,const V& c,bool textured){
         const float area=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);if(area==0)return;
+        if(textured&&(!tex||tex->width==0||tex->height==0))return;
         const int x0=std::max(0,int(std::floor(std::min({a.x,b.x,c.x})*sx))),x1=std::min(W-1,int(std::ceil(std::max({a.x,b.x,c.x})*sx)));
         const int y0=std::max(0,int(std::floor(std::min({a.y,b.y,c.y})*sy))),y1=std::min(H-1,int(std::ceil(std::max({a.y,b.y,c.y})*sy)));
         for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
@@ -2163,7 +2192,6 @@ void RoomWorld::draw_ufo_hud(SoftwareRenderer& image)const{
             float ch[4];for(int k=0;k<4;++k){const int sh=k==0?24:k==1?16:k==2?8:0;ch[k]=w0*float((a.c>>sh)&255u)+w1*float((b.c>>sh)&255u)+w2*float((c.c>>sh)&255u);}
             float alpha=std::floor((ch[0]+1.0f)/2.0f)/128.0f;float r=ch[1],g=ch[2],bl=ch[3];
             if(textured){
-                if(!tex||tex->width==0||tex->height==0)return;
                 const float u=w0*a.u+w1*b.u+w2*c.u,v=w0*a.v+w1*b.v+w2*c.v;
                 const auto tx=std::min(tex->width-1,unsigned(std::max(0.0f,u))),ty=std::min(tex->height-1,unsigned(std::max(0.0f,v)));
                 const auto t=tex->pixels[std::size_t(ty)*tex->width+tx];
@@ -2174,18 +2202,94 @@ void RoomWorld::draw_ufo_hud(SoftwareRenderer& image)const{
             auto& d=canvas[std::size_t(y)*W+x];
             const auto mix=[&](float src,unsigned sh){return unsigned(std::clamp(src*alpha+float((d>>sh)&255u)*(1-alpha),0.0f,255.0f));};
             d=0xff000000u|(mix(r,16)<<16)|(mix(g,8)<<8)|mix(bl,0); // Leinwand ARGB8888 wie NJS_COLOR
-        }};
-    const auto prim=[&](const Prim& p,std::uint32_t argb){
+        }}
+    // Ein texturiertes Viereck in Eckreihenfolge 0..3 (Faecher 0,1,2 / 0,2,3).
+    void quad(const float xs[4],const float ys[4],const float us[4],const float vs[4],std::uint32_t argb,bool polygon2dm){
+        static const float du2d[4]={0.5f,0.5f,0.5f,0.5f},dv2d[4]={0.5f,0.5f,0.5f,0.5f};
+        static const float du2m[4]={0.5f,0.25f,0.25f,0.5f},dv2m[4]={0.5f,0.5f,0.25f,0.25f};
+        const float* du=polygon2dm?du2m:du2d;const float* dv=polygon2dm?dv2m:dv2d;
+        const float kw=tex?float(tex->width)/256.0f:0.0f,kh=tex?float(tex->height)/256.0f:0.0f;
+        V v[4];for(int i=0;i<4;++i)v[i]={xs[i],ys[i],(us[i]+du[i])*kw,(vs[i]+dv[i])*kh,argb};
+        tri(v[0],v[1],v[2],true);tri(v[0],v[2],v[3],true);}
+    // effect.c:311 bhDrawPARAM2D -> njDrawPolygon2D(p2c, 4, pri, 0x80000060).
+    void prim(const Prim& p,std::uint32_t argb){
         const float xs[4]={p.px+p.x0,p.px+p.x1,p.px+p.x1,p.px+p.x0},ys[4]={p.py+p.y0,p.py+p.y0,p.py+p.y1,p.py+p.y1};
-        static const float du[4]={0.5f,0.25f,0.25f,0.5f},dv[4]={0.5f,0.5f,0.25f,0.25f};
-        V v[4];for(int i=0;i<4;++i)v[i]={xs[i],ys[i],float(p.uv[i]&0xFFFFu)+du[i],float(p.uv[i]>>16)+dv[i],argb};
-        tri(v[0],v[1],v[2],true);tri(v[0],v[2],v[3],true);};
+        float us[4],vs[4];for(int i=0;i<4;++i){us[i]=float(p.uv[i]&0xFFFFu);vs[i]=float(p.uv[i]>>16);}
+        quad(xs,ys,us,vs,argb,false);}
+};
+}
+// effsub1b.c:101 bhDraw134: Kran-Anzeige, Texturgruppe 44.
+void RoomWorld::draw_ufo_hud(SoftwareRenderer& image,const SpriteWork& hud)const{
+    const auto& op=hud.sprite;
+    const auto atlas=effect_textures_.find(44);
+    const SceneTexture* tex=atlas!=effect_textures_.end()&&!atlas->second.empty()?&atlas->second.front():nullptr;
+    static const Hud2D::Prim tb[8]={
+        {320,412,-64,-36,64,36,{0x00000000,0x00000100,0x00900100,0x00900000}},
+        {320,412,-8,-24,8,8,{0x00900000,0x00900020,0x00D00020,0x00D00000}},
+        {320,412,-8,-32,8,0,{0x00900020,0x00900040,0x00D00040,0x00D00020}},
+        {320,412,-8,-32,8,0,{0x00900040,0x00900060,0x00D00060,0x00D00040}},
+        {320,412,-8,-32,8,0,{0x00900060,0x00900080,0x00D00080,0x00D00060}},
+        {320,412,-32,-8,0,8,{0x009000C0,0x00900100,0x00B00100,0x00B000C0}},
+        {320,412,-32,-8,0,8,{0x00B00080,0x00B000C0,0x00D000C0,0x00D00080}},
+        {320,412,-32,-8,0,8,{0x00B000C0,0x00B00100,0x00D00100,0x00D000C0}}};
+    Hud2D hud2d(image,tex);
     if(!tex)const_cast<RoomWorld*>(this)->unbound_enemy_.insert("bhDraw134: Texturgruppe 44 (sys->ef_tn[44]) nicht geladen");
-    prim(tb[0],0xFFFFFFFFu);
-    const auto arrow=[&](float a,const V& p0,const V& p1,const V& p2){const unsigned t=unsigned(int(a))&255u;const std::uint32_t c=(t<<24)|0xFF0000u|(t<<8);V q0=p0,q1=p1,q2=p2;q0.c=q1.c=q2.c=c;tri(q0,q1,q2,false);};
+    hud2d.prim(tb[0],0xFFFFFFFFu);
+    // effsub1b.c:56/73 njDrawPolygon2D(&p2c, 3, -1.4f, 96): untexturierte Pfeile.
+    const auto arrow=[&](float a,Hud2D::V p0,Hud2D::V p1,Hud2D::V p2){const unsigned t=unsigned(int(a))&255u;const std::uint32_t c=(t<<24)|0xFF0000u|(t<<8);p0.c=p1.c=p2.c=c;hud2d.tri(p0,p1,p2,false);};
     arrow(op.aoy,{320,336,0,0,0},{304,360,0,0,0},{336,360,0,0,0});
     arrow(op.aox,{216,412,0,0,0},{240,396,0,0,0},{240,428,0,0,0});
-    for(int i=0;i<7;++i)prim(tb[i+1],(std::uint32_t(op.jno[std::size_t(i)])*0xF000000u)|0xFFFFFFu);
+    for(int i=0;i<7;++i)hud2d.prim(tb[i+1],(std::uint32_t(op.jno[std::size_t(i)])*0xF000000u)|0xFFFFFFu);
+}
+// effsub1b.c:828 bhDraw137: Anzeige der Ueberwachungskamera (Texturgruppe 440, ef_tn[440]).
+void RoomWorld::draw_monitor_hud(SoftwareRenderer& image,const SpriteWork& hud)const{
+    const auto& op=hud.sprite;
+    const auto atlas=effect_textures_.find(440);
+    const SceneTexture* tex=atlas!=effect_textures_.end()&&!atlas->second.empty()?&atlas->second.front():nullptr;
+    if(!tex){const_cast<RoomWorld*>(this)->unbound_enemy_.insert("bhDraw137: Texturgruppe 440 (sys->ef_tn[440]) nicht geladen");return;}
+    static const Hud2D::Prim tb[9]={
+        {320,44,-16,-12,16,12,{0x00400040,0x00400080,0x00700080,0x00700040}},
+        {320,436,-16,-12,16,12,{0x00700040,0x00700080,0x00400080,0x00400040}},
+        {596,240,-12,-16,12,16,{0x00700040,0x00400040,0x00400080,0x00700080}},
+        {44,240,-12,-16,12,16,{0x00400080,0x00700080,0x00700040,0x00400040}},
+        {320,240,-28,-24,28,24,{0x00900020,0x00900090,0x00F00090,0x00F00020}},
+        {64,64,0,0,48,48,{0x004000A0,0x00400100,0x00A00100,0x00A000A0}},
+        {576,64,0,0,-48,48,{0x004000A0,0x00400100,0x00A00100,0x00A000A0}},
+        {64,418,0,0,48,-48,{0x004000A0,0x00400100,0x00A00100,0x00A000A0}},
+        {576,418,0,0,-48,-48,{0x004000A0,0x00400100,0x00A00100,0x00A000A0}}};
+    Hud2D hud2d(image,tex);
+    // :872-883 fuenf Streifen 640x95 (y += 96), uv (0,64)-(4,255), njDrawPolygon2DM, 0x90FFFFFF.
+    for(int i=0;i<5;++i){const float y=96.0f*float(i);
+        const float xs[4]={0,640,640,0},ys[4]={y,y,y+95.0f,y+95.0f},us[4]={0,4,4,0},vs[4]={64,64,255,255};
+        hud2d.quad(xs,ys,us,vs,0x90FFFFFFu,true);}
+    // :886-892 Fadenkreuz und vier Ecken 0xC0FFFFFF, dann die Richtungspfeile (aktiv ct3).
+    hud2d.prim(tb[4],0xC0FFFFFFu);
+    for(int i=5;i<9;++i)hud2d.prim(tb[i],0xC0FFFFFFu);
+    for(int i=0;i<4;++i)hud2d.prim(tb[i],op.ct3==i?0xC0FF1010u:0x80101010u);
+    // screen.c:514 bhDrawScopeNumber: 16x16 Zeichen aus uv_tab (32er Raster, je -1 am Rand),
+    // njDrawPolygon2D(&p2c, 4, -1.4f, 0x80000060), Farbe -1, gleiche Textur (ef_tn[440]).
+    const auto number=[&](float px,float py,int n){if(n<0||n>17){const_cast<RoomWorld*>(this)->unbound_enemy_.insert("bhDrawScopeNumber: Zeichen ausserhalb uv_tab");return;}
+        const float u0=float((n%8)*32),v0=float((n/8)*32);
+        const float xs[4]={px,px+16.0f,px+16.0f,px},ys[4]={py,py,py+16.0f,py+16.0f},us[4]={u0,u0+31.0f,u0+31.0f,u0},vs[4]={v0,v0,v0+31.0f,v0+31.0f};
+        hud2d.quad(xs,ys,us,vs,0xFFFFFFFFu,false);};
+    const float zom=100.0f-(1.4285715f*((0.005493164f*float(monitor_.pers))-10.0f));
+    float px=144.0f;
+    number(px,352,10);px+=16;number(px,352,11);px+=16;number(px,352,17);px+=32;
+    number(px,352,int(zom/100.0f));px+=16;number(px,352,int(zom/10.0f)%10);px+=16;number(px,352,int(zom)%10);
+    const auto axis=[&](float py,int label,float r){
+        float x=384.0f;number(x,py,label);x+=16;number(x,py,13);x+=16;number(x,py,17);x+=16;
+        if(r<0){number(x,py,15);r=-r;}x+=16;
+        number(x,py,int(r/100.0f));x+=16;number(x,py,int(r/10.0f)%10);x+=16;number(x,py,int(r)%10);};
+    axis(352.0f,12,op.xn-22.0f);
+    axis(384.0f,14,op.yn-226.0f);
+}
+// effect.c:929 die ef_fnc-Schleife: die 2D-Anzeigen in Satzreihenfolge (bhDraw134, bhDraw137),
+// nur mit sys->pt_flg 0x10 (game.c:339/347 bhDrawEffect).
+void RoomWorld::draw_fnc_huds(SoftwareRenderer& image)const{
+    if(!(presentation_flags_&0x10u))return;
+    for(const auto& w:sprites_){if(w.hidden||!w.queued||!(w.sprite.flg&1u))continue;
+        if(w.sprite.id==134)draw_ufo_hud(image,w);
+        else if(w.sprite.id==137)draw_monitor_hud(image,w);}
 }
 // effect.c:905 bhDrawNtxEffect2D -> ps2_NaDraw.c:8 njDrawPolygon(polygon, count, trans 1):
 // Eckfarbe je Punkt (col), Schirmlage x/y + 1728/1808 (GS-Offset, hier 0-basiert), Tiefe
@@ -2531,7 +2635,8 @@ void RoomWorld::tick(){
     // bhSetMotion/bhCalcModel write the object tree inside the control pass.
     // Committing here, and only here, is what makes a work written while the
     // pass is paused invisible until the pass runs again.
-    e.commit_pose();}if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
+    e.commit_pose();}if(player_scripted&&player_smove_.active&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u))control_player_script_motion();
+    else if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
     control_enemy_player_motion();
     apply_en01_flinch();
     sync_player_grab();
@@ -2589,6 +2694,34 @@ void RoomWorld::player_set_motion_pose(std::size_t mtn_no,std::int32_t frm_no,un
     /* Diagnose: RECVX_PLAYER_POSE_TRACE=1 protokolliert je Pass den Knotenteil (Motion, Bild, Mischung). */
     if(std::getenv("RECVX_PLAYER_POSE_TRACE")&&player_obj_.size()>9)std::fprintf(stderr,"POSETRACE mtn=%zu frm=%d mode=%u hokan=%u rate=%d ang9=%d,%d,%d\n",mtn_no,frm_no,mode,hokan_count,hokan_rate,player_obj_[9].angles[0],player_obj_[9].angles[1],player_obj_[9].angles[2]);
 }
+// pl_evt.c:649 pl_smove08 (bhCPM0_event, mode2 8) und danach player.c:1502 bhSetMotion(plp, mtn_add,
+// mtn_md, mtn_tp) auf dem einen objP (player_obj_): Knoten- und Uhrteil in einem Pass.
+void RoomWorld::control_player_script_motion(){
+    auto& sm=player_smove_;
+    const auto frames=[&](std::size_t mtn)->unsigned{if(player_room_motion_)return mtn<room_motions_.size()?room_motions_[mtn].frames:0u;return player_asset_&&player_asset_->has_motion(mtn)?player_asset_->motion_frames(mtn):0u;};
+    switch(sm.mode3){
+    case 0:
+        player_mtn_md_&=~0x2u;player_hokan_rate_=49152;
+        if(sm.ct0==0)sm.mode3=1;else if(sm.ct0==1)sm.mode3=3;else if(sm.ct0==2)sm.mode3=4;
+        motion_=sm.mode1;player_room_motion_=sm.room_library; // mnwP (event.c:11305/10961) und mtn_no zusammen
+        if(sm.mode1==42){const unsigned m=recvx_player_mtn_act(player_wpntp_,player_dmlvl_,0);if(m==0xFFFFu)unbound_enemy_.insert("pl_smove08: PlMtnAct-Zeile ausserhalb der Tabelle");else motion_=m;}
+        break;
+    case 1:if(frames(motion_)&&(frames(motion_)-1u)<=unsigned(frame_/65536)){player_hokan_rate_=49152;player_hokan_count_=4;sm.mode3=2;}break;
+    case 2:break;
+    case 3:if(unsigned(sm.ct2-1)<=unsigned(frame_/65536)){player_hokan_rate_=49152;player_hokan_count_=4;frame_=std::int64_t(sm.ct2-2)*65536;}break;
+    case 4:sm.ct2=int(unsigned(frame_/65536));frame_=std::int64_t(sm.ct2-1)*65536;break;
+    default:break;
+    }
+    if(!player_asset_)return;
+    const MotionClip* clip=player_room_motion_?(motion_<room_motions_.size()&&room_motions_[motion_].frames?&room_motions_[motion_]:nullptr):(player_asset_->has_motion(motion_)?&player_asset_->motion_clip(motion_):nullptr);
+    if(!clip)return; // Motion.c:28 mnwP[mtn_no].datP NULL: kein Schritt
+    if(player_obj_.size()!=player_asset_->bones()){player_obj_=player_asset_->bind_pose();player_owp_flags_.assign(player_obj_.size(),0u);}
+    MotionWork m{std::int32_t(frame_),0u,player_hokan_count_,0u,player_hokan_rate_};std::string gap;
+    set_motion(m,int(player_step_),player_mtn_md_,clip,nullptr,player_obj_,player_owp_flags_,&gap,0u,unsigned(motion_));
+    if(!gap.empty())unbound_enemy_.insert(gap+" (plp, pl_smove08)");
+    frame_=m.frm_no;player_hokan_count_=m.hokan_count;
+    player_obj_motion_=motion_;player_obj_written_=true;player_obj_drives_=true;
+}
 void RoomWorld::begin_player_motion_pass(){
     if(!player_obj_written_&&player_asset_){
         player_obj_drives_=false;
@@ -2597,7 +2730,7 @@ void RoomWorld::begin_player_motion_pass(){
     player_obj_written_=false;
 }
 ModelNodeOverrides RoomWorld::player_pose_edits(const ModelNodeOverrides& edits)const{
-    if(!player_obj_drives_||player_obj_motion_!=motion_||player_scripted||!player_asset_||player_obj_.size()!=player_asset_->bones())return edits;
+    if(!player_obj_drives_||player_obj_motion_!=motion_||(player_scripted&&!player_smove_.active)||!player_asset_||player_obj_.size()!=player_asset_->bones())return edits;
     ModelNodeOverrides out;
     for(unsigned i=0;i<player_obj_.size();++i)out[i]={player_obj_[i].position,player_obj_[i].angles};
     for(const auto& e:edits){auto& o=out[e.first];if(e.second.position)o.position=e.second.position;if(e.second.angles)o.angles=e.second.angles;}
@@ -2605,7 +2738,7 @@ ModelNodeOverrides RoomWorld::player_pose_edits(const ModelNodeOverrides& edits)
 }
 std::vector<ModelPose> RoomWorld::player_local_pose()const{
     if(!player_asset_)return {};
-    if(player_obj_drives_&&player_obj_motion_==motion_&&!player_scripted&&player_obj_.size()==player_asset_->bones())return player_obj_;
+    if(player_obj_drives_&&player_obj_motion_==motion_&&(!player_scripted||player_smove_.active)&&player_obj_.size()==player_asset_->bones())return player_obj_;
     if(player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("player enemy motion without clip");return player_asset_->local_pose_clip(*c,frame_);}
     if(player_room_motion_)return player_asset_->local_pose_clip(room_motions_.at(motion_),frame_);
     return player_asset_->local_pose(motion_,frame_);
@@ -3506,6 +3639,7 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
     if(std::getenv("RECVX_CAM_TRACE")){const auto& p=active_camera_.view();std::fprintf(stderr,"CAMBEFORE ready=%d cut=%zu force=%d evc=%d mode0=%d hct=%u blend=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d\n",int(active_camera_.ready()),cut,int(camera_force_),event_camera?int(event_camera_index):-1,event_camera?(event_camera_paused_?3:(event_camera_init_?0:(event_camera_finished_?2:1))):-1,active_camera_.clock(),int(active_camera_.transitioning()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2]);}
     if(!event_camera&&!fixed_camera&&(!clip_cut_||*clip_cut_!=cut||camera_force_)){
         initialize_camera_clip(unsigned(cut));
+        if(collision_events_)collision_events_->flags[11][0]|=0x20u; // cut.c:298 bhSetCut: gm_flg 0x20 (Schnittwechsel)
     }
     if(restore_camera_clip_&&collision_events_){
         installed_clip_=restored_view_clip(room_clip_,collision_events_->flags[12][0],collision_events_->flags[11][0]);

@@ -1041,6 +1041,7 @@ bool ported_effect_atlas(unsigned group){
     case 408:case 409:case 410:case 411:case 412:case 413:case 414:case 415:case 416:case 418:case 420:
     case 417:case 419:case 421:case 422:case 423:case 424:case 425:case 426:case 427:case 428:
     case 429:case 430:case 431:return true;
+    case 440:return true; // effsub1b.c:850 bhDraw137 (sys->ef_tn[440], Texturhalter, effect.c:788)
     case 32:return true; // bhDraw107 (Regeneinschlag)
     default:return (group>=70&&group<=79)||(group>=400&&group<=407);
     }

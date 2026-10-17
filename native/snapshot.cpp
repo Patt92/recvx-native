@@ -73,6 +73,7 @@ Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsig
     to_save(s.ev_flg,events.flags[1]);to_save(s.ky_flg,events.flags[2]);to_save(s.ed_flg,events.flags[3]);
     to_save(s.it_flg,events.flags[7]);to_save(s.mp_flg,events.flags[8]);to_save(s.ic_flg,events.flags[9]);
     s.itm=inventory.items;
+    s.evt_posno=events.evt_posno; // SAVEFILE 0x820 sys->evt_posno
     // room.c:1033 npCopyMemory kopiert den ganzen SYS-Bereich, also auch die
     // gespeicherten Eintraege der anderen Spieler in ply_stflg/ply_wno/ply_hp
     // (system.c:1729/1746/1747 bhFinishRoom bei bhPlayerChangeSet). Nur der
@@ -104,6 +105,7 @@ void restore_events(const Snapshot& snap,EventVm& events){
     const auto& s=snap.save;
     from_save(events.flags[1],s.ev_flg);from_save(events.flags[2],s.ky_flg);from_save(events.flags[3],s.ed_flg);
     from_save(events.flags[7],s.it_flg);from_save(events.flags[8],s.mp_flg);from_save(events.flags[9],s.ic_flg);
+    events.evt_posno=s.evt_posno;
     for(unsigned i=0;i<4;++i)events.flags[session_matrices[i]]=snap.host.session_flags[i];
     events.flags[11][0]&=EventVm::room_change_gm_mask; // Raumladen nach bhPopGameData: bhInitRoomChangeSystem (system.c:185)
     for(unsigned i=0;i<3;++i)events.values[session_values[i]]=snap.host.session_values[i];

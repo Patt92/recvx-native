@@ -205,9 +205,18 @@ void debug_player_flags_contract(const std::filesystem::path& data){
                   "debug round trip persisted synthetic death flag");
         }
         // A real death flag must still propagate, even with attacks disabled.
+        // bhCPM0_enedie (player.c:6711) is the only reader of plp->flg 0x2 for the
+        // game-over start and runs in mode0 6; bhCPM0_die (mode0 3) sets flg 0x10002
+        // itself and starts over the frame wrap of its fall motion, not over this bit.
+        RECVX_ENEMY_PLAYER dying{};
+        check(world.enemy_player_get(dying),"death flag: player binding absent");
+        dying.flg|=2u;dying.mode0=3;
+        check(world.enemy_player_set(dying),"death flag: write failed");
+        check(!world.player_dead()&&(events.player_flags&2u),
+              "flg 0x2 outside bhCPM0_enedie (mode0 3) must not start the game over");
         RECVX_ENEMY_PLAYER dead{};
         check(world.enemy_player_get(dead),"death flag: player binding absent");
-        dead.flg|=2u;
+        dead.flg|=2u;dead.mode0=6;
         check(world.enemy_player_set(dead),"death flag: write failed");
         check(world.player_dead()&&(events.player_flags&2u)&&inventory.hp==160,
               "real death flag was hidden by the debug policy");

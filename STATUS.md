@@ -597,9 +597,47 @@ Achsenabhaengigkeit 10/22); nativ gebunden 0, 53, 10/22, 43, 35 Selektor 1; bena
 Headless-Nachweis (`--enemy-ai on`, Snapshot mit ev_flg 110): Bild 300 Rolltor oeffnet, 500 beide laufen
 auf die Spielerin zu (mtn 125/117), 800 Griff (mode 1/0/5/1). CTest 117/117.
 
-**Naechster Posten:** objP auch fuer Treppe/Gameover/Skriptmotion, danach die roten Prueflaeufe verify_events
-und verify_enemy_ai (vorbestehend) untersuchen; bhEff111-Rendertextur und 0xb3/0xb4 `evt_posno` als eigene
-Posten. **Kein Commit/Push.**
+**2026-10-17, neun Nutzerbefunde (Diagnose durch Unteragenten, Fixes geprueft):** (1) Leerlauf->Laufen:
+pad_old nach dem Pass (pad.c:146), `tools/verify_idle_walk.py`. (2) RM_4050 Tasche: `bhCheckSubPack`.
+(3) RM_3091 Wurm: `njPtclDrawPolygon` in Bildschirmpunkten. (4) RM_4020 Kranschatten: `bhObj008`.
+(5) Leiter im ersten Uebergangsbild: Tuermodell nur ohne Status 0x40 (door.c:395). (6) RM_1080
+Lugertuer-Kamera: gm_flg-Maske beim Raumladen (system.c:185); Lugertuer ohne Einsetzfrage und RM_3030
+Kartenleser offen sind originalgetreu. (7) RM_3140 Kameraevent: `bhEff137` (Monitoranzeige bhDraw137
+offen). (8) RM_1050 Monitor: `bhEff111` + Rendertextur (Headless-Bild zeigt Steve). (9) Steve: bhSetDispObj
+mdflg 0x1, bhEneRenderSet am Work, Subplayer-Motionswechsel nach Original. Details im Ledger. CTest 117/117,
+alle Gegenproben rot.
+
+**2026-10-17, Nachtrag:** bhDraw137 (RM_3140 Monitoranzeige) portiert; der gemeinsame 2D-Rasterer der
+ef_fnc-Anzeigen rechnet Texel normiert auf 256 (GS-ST, ps2_NaDraw2D.c) -- das korrigiert auch die Kran-Anzeige
+bhDraw134 (Gruppe 44 ist 128x128, vorher nur ein Ausschnitt). gm_flg 0x20 (Schnittwechsel) hat jetzt Schreiber
+und die bhCheckCut-Loeschung; der RM_1050-Monitor frischt bei Schnittwechseln auf. Offen bleibt nur die
+PS2-Framebufferkopie (PS2_Render_Tex_Sub), die ohne GS-Nachbildung nicht bestimmbar ist.
+
+**2026-10-17, weiter offene (Arbeitsbaum gebaut 09:01, CTest 117/117; Dev-App noch 02:34, nicht
+ausgeliefert):** (1) Opcodes 0xb3 `bhEtcAtariEnePosSet` (event.c:7794) und 0xb4 (event.c:7865) mit
+`sys->evt_posno` (Snapshot, Raumwechsel) und rom->posp; Common 51/52 gebunden. Test `event_lifecycle`
+(RM_0110). (2) Skriptgefuehrte Spielermotion: `pl_smove08` (Common 24/25/34 Selektor 0) fuehrt objP ueber
+`set_motion`; Test `player_motion_blend`. (3) `verify_events` gruen: cb_flg 0x4000 verbraucht GetItem
+selbst (sub1.c:3830-3857), Replay-Takt fuer Meldung 158. (4) `verify_enemy_ai`: die Erwartung mode0 6 beim
+Hundetod hatte keine Originalquelle (EN07 setzt nur mode0 4, Bisse klemmen hp auf 1; der Tod kommt aus dem
+Sprungangriff, Schadensmodus 2, hp 6 -> 0 -> -6 bei Bild ~2420/~2497). Portiert: player.c:1405 (hp < 0 ->
+mode0 3, mnwP = mnwPb) und `bhCPM0_die` (Fallmotion 25/27 mit objP ueber set_motion, Bodenlage, Stimme 1025,
+Game-Over-Start beim Bildwechsel ueber ts_flg 0x4000, Liegemotion 26/28; laeuft in gov_md1 0 weiter).
+Dabei zwei Host-Fehler: der Todesmelder las plp->flg 0x2 in jedem Modus (nur bhCPM0_enedie/mode0 6 liest es),
+und ts_flg 0x4000 fehlte im nativen Raumladen. Der RM_0050-Teil des Pruefers war mit dem Baseline-Binary
+ebenfalls rot (feste Lockposition -142, rm_flg 9 wuerfelt die Falle) und folgt jetzt dem Wurf.
+`verify_enemy_ai` gruen; verify_events/event_freeze/stairs/push/lighter/continuity/doors/idle_walk gruen;
+CTest 117/117; Gegenproben rot (kein Uebergang -> kein Game Over; altes Flag -> enemy_work rot). Dev-App 09:53.
+
+**2026-10-17, Treppe auf objP:** die sechs Stufenroutinen fuehren den bhSetMotion-Knotenteil (Mischung,
+hokan_count-Abzug) jetzt auf plp->mlwP->objP, auch im Abschlussbild; bhCalcFixOffset liest objP dieses
+Passes gegen owP des letzten bhCalcModel (vorher ungemischte Rekonstruktion). hokan geht an act_std zurueck.
+Lueckenbit HOKAN entfaellt (0x280 -> 0x200). `verify_stairs` mit POSETRACE-Pruefung gruen, Endlagen wie vorher;
+`core_continuity` mit Knotenteil-/owP-Fixture (Gegenprobe rot). CTest 117/117, Nachbarlaeufe gruen. Dev-App.
+
+**Naechster Posten:** gameover.cpp md1 10 schiebt frm_no waehrend hokan nicht (Motion.c:21 schiebt immer,
+Befund im Ledger); Gegner/Effekte stehen in den 70 Bildern von gov_md1 0 nativ still; Treppe mtn_attr (0x200).
+**Kein Commit/Push.**
 
 ## Gezielter Zugang zu bisherigen Befunden
 

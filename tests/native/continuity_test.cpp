@@ -42,8 +42,24 @@ int main(int argc,char** argv){try{
     // Motionlaengen, Knotenlagen, Grundhoehen und die Schrittdienste.
     std::array<float,32> floors{};floors[2]=0;floors[3]=9;
     struct Host {unsigned feet=0,actions=0,effects=0,water=0,vibration=0,kaidan=0,head_release=0,badflag=0,last_node=0,probe_node=0;
-                 int burst=0,splash_up=0,splash_dn=0,sound=-1,vib_type=-1,vib_pattern=-1;float bits=0;};
+                 int burst=0,splash_up=0,splash_dn=0,sound=-1,vib_type=-1,vib_pattern=-1;float bits=0;
+                 /* plp->mlwP->objP der Fixture: Motion/Bild des letzten Knotenteils (bhSetMotion). */
+                 unsigned obj_motion=0;int obj_frame=0;unsigned node_parts=0,hokan_steps=0;
+                 /* owP[Kettenende] des letzten bhCalcModel (Fixture: Lage und Wurzelknoten). */
+                 bool owp_valid=false;float owp[3]={0,0,0};};
     Host h;
+    /* objP-Fixture fuer bhCalcFixOffset (Motion.c:868): der Wurzelknoten 0
+       traegt bei den Stufenmotionen 31..38 die Hub- und Vorwaertskurve, die
+       Beinkette dahinter steht still.  Das Kettenende ist damit genau die
+       Wurzelbewegung, sodass die Fussfixierung sie vollstaendig in
+       plp->px/py/pz uebernehmen muss.  `frame` ist wie bei bhGetObjMotion
+       der 16.16-Zaehler der Spielerarbeit. */
+    auto fixture_node=[](unsigned motion,int frame,unsigned node,float pos[3],int ang[3]){
+        const bool step=motion>=31u&&motion<=38u;
+        const bool down=step&&(motion%2u)==0u;
+        const float f=float(frame)/65536.0f/26.0f;
+        pos[0]=pos[1]=pos[2]=0.0f;ang[0]=ang[1]=ang[2]=0;
+        if(node==0&&step){pos[1]=(down?-16.0f:16.0f)*f;pos[2]=-24.0f*f;}};
     RECVX_STAIR_HOST services{&h,
         /* Testfixture fuer die Wurzelbewegung: die Originalmotionen 31/33/35/37
            heben und 32/34/36/38 senken die Figur ueber ihre Laenge um die
@@ -59,17 +75,18 @@ int main(int argc,char** argv){try{
            PlKDU-Schwellen (6..24) liegen darunter.  Gemessen aus
            data/archives/SYSTEM/0010..0014.bin. */
         [](void*,unsigned){return 27u;},
-        [](void* p,unsigned node,float out[3]){static_cast<Host*>(p)->last_node=node;out[0]=5;out[1]=0;out[2]=7;},
-        /* objP-Fixture fuer bhCalcFixOffset (Motion.c:868): der Wurzelknoten 0
-           traegt bei den Stufenmotionen 31..38 die Hub- und Vorwaertskurve, die
-           Beinkette dahinter steht still.  Das Kettenende ist damit genau die
-           Wurzelbewegung, sodass die Fussfixierung sie vollstaendig in
-           plp->px/py/pz uebernehmen muss.  `frame` ist wie bei bhGetObjMotion
-           der 16.16-Zaehler der Spielerarbeit. */
-        [](void*,unsigned motion,int frame,unsigned node,float pos[3],int ang[3]){
-            const bool step=motion>=31u&&motion<=38u;
-            const bool down=step&&(motion%2u)==0u;
-            const float f=float(frame)/65536.0f/26.0f;
+        /* owP: das Kettenende (17/21) traegt die Matrix des letzten bhCalcModel,
+           jeder andere Knoten die feste Sondenlage. */
+        [](void* p,unsigned node,float out[3]){auto& h=*static_cast<Host*>(p);h.last_node=node;
+            if((node==17u||node==21u)&&h.owp_valid){out[0]=h.owp[0];out[1]=h.owp[1];out[2]=h.owp[2];}
+            else{out[0]=5;out[1]=0;out[2]=7;}},
+        /* bhSetMotion-Knotenteil: Motion/Bild merken, hokan_count wie SetMtn*Hokan abziehen. */
+        [](void* p,unsigned motion,int frame,int,int* hokan_count,int){auto& h=*static_cast<Host*>(p);
+            h.obj_motion=motion;h.obj_frame=frame;++h.node_parts;if(*hokan_count){--*hokan_count;++h.hokan_steps;}},
+        [](void* p,unsigned node,float pos[3],int ang[3]){const auto& h=*static_cast<Host*>(p);
+            const bool step=h.obj_motion>=31u&&h.obj_motion<=38u;
+            const bool down=step&&(h.obj_motion%2u)==0u;
+            const float f=float(h.obj_frame)/65536.0f/26.0f;
             pos[0]=pos[1]=pos[2]=0.0f;ang[0]=ang[1]=ang[2]=0;
             if(node==0&&step){pos[1]=(down?-16.0f:16.0f)*f;pos[2]=-24.0f*f;}
             return 1;},
@@ -94,8 +111,15 @@ int main(int argc,char** argv){try{
        Wert genauso (native/runtime.cpp); der Host muss ihn wie status/flg
        vorhalten, sonst dreht die Giernaeherung nie. */
     auto seed=[&](RECVX_STAIR_STATE& s){s.rtspd=s.dmlvl==2?0.8f:1.0f;};
+    /* Ein Spielerbild: recvx_stairs_tick, danach bhCalcModel (player.c:1684) der
+       Fixture: owP[Kettenende] = T(px,py,pz) R(ax,ay,az) T(objP[0].pos). */
+    auto tick=[&](RECVX_STAIR_STATE& s){const int r=recvx_stairs_tick(&s,&services);
+        float pos[3];int ang[3];fixture_node(h.obj_motion,h.obj_frame,0u,pos,ang);
+        NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,s.px,s.py,s.pz);njRotateXYZ(&m,s.ax,s.ay,s.az);
+        NJS_POINT3 local{pos[0],pos[1],pos[2]},world;njCalcPoint(&m,&local,&world);
+        h.owp[0]=world.x;h.owp[1]=world.y;h.owp[2]=world.z;h.owp_valid=true;return r;};
     auto run_stairs=[&](RECVX_STAIR_STATE& s){int ticks=0;
-        while(s.active&&ticks<400){if(recvx_stairs_tick(&s,&services)==0){check(!s.active,"stair routine stopped without releasing the player work");break;}++ticks;}
+        while(s.active&&ticks<400){if(tick(s)==0){check(!s.active,"stair routine stopped without releasing the player work");break;}++ticks;}
         check(!s.active&&ticks<400,"stair action never handed the player back");};
     // (1) Einsprungszustand nach hitchk.c bhCheckExmAtari: case 1 (4682)
     // setzt 0x80010010, case 2 (4750) und die danf-Sonde (4949) setzen
@@ -120,7 +144,7 @@ int main(int argc,char** argv){try{
         check(s.active&&(s.status&0x80010020u)==0x80010020u,"stair begin does not match the danf branch");
         check((s.st_flg&4u)==(action==17?0u:4u),"danf branch does not leave sys->st_flg 0x4 alone");
         RECVX_STAIR_STATE first=s;
-        check(recvx_stairs_tick(&first,&services)!=0&&(first.st_flg&4u),"stair tick does not maintain sys->st_flg 0x4");}
+        check(tick(first)!=0&&(first.st_flg&4u),"stair tick does not maintain sys->st_flg 0x4");}
     // (2) Vollstaendiger Ablauf.  Aufwaerts enden kdu/hsu auf der oberen
     // Grundhoehe, abwaerts kdd/hsd auf der unteren; alle vier setzen die
     // Ruhemotion PlMtnAct[wpntp][dmlvl][0] und geben die Arbeit frei.
@@ -132,6 +156,11 @@ int main(int argc,char** argv){try{
         h.feet=0;h.actions=0;h.kaidan=0;h.head_release=0;
         run_stairs(s);
         check(s.mode0==1&&s.motion==42&&s.floor==e.floor&&s.py==e.end_py&&s.py==floors[e.floor+2],"stair action did not return to the original floor table");
+        // Motion.c:21: der Knotenteil laeuft in jedem Bild der Aktion, auch im Abschlussbild
+        // (player.c:1502 nach dem Abschlussblock); hokan_count zaehlt dort ab (case 0: 4, Abschluss: 8).
+        check(h.node_parts>0&&h.hokan_steps>=4&&!(s.unsupported_services&RECVX_STAIR_UNBOUND_HOKAN),"stair action ran without the bhSetMotion node part");
+        check(h.obj_motion==42&&h.obj_frame==0&&s.hokan_count==7,"finishing frame did not sample the rest motion at frame 0 with hokan 8 -> 7");
+        h.node_parts=0;h.hokan_steps=0;
         check((s.flg&0x118u)==0x118u&&!(s.flg&0xD0400u)&&!(s.status&0x80010030u),"stair action did not release its original switches");
         check((s.flg2&1u)&&h.kaidan,"stair action did not open its hokan work or clear the kaidan mark");
         // B06: der mode3-0-Block gibt das Blickziel auf (EXP1_I(0) &= ~0x4; |= 0x1E0).
@@ -160,7 +189,7 @@ int main(int argc,char** argv){try{
         recvx_stairs_begin(&s,&a,16,floors.data(),0,0,0,0,0,0,0);
         s.status|=0x100000u;s.ax=0x3F800000;
         h.splash_up=0;h.bits=0;
-        for(int ticks=0;s.active&&h.splash_up==0&&ticks<40;++ticks)recvx_stairs_tick(&s,&services);
+        for(int ticks=0;s.active&&h.splash_up==0&&ticks<40;++ticks)tick(s);
         check(h.splash_up==1&&h.bits==1.0f,"dnu effect offset is not the raw plp->ax bit pattern");}
     check(!h.badflag,"stair action requested a step sound with ListNo -1");
     // (5) kdu-Abschluss: player.c:3033 setzt plp->flg 0x8040000 und loescht
@@ -179,7 +208,7 @@ int main(int argc,char** argv){try{
         float px=0,py=0,pz=0;int previous=0;bool entered=false;
         for(int ticks=0;s.active&&ticks<400;++ticks){
             const int before=s.mode3;previous=s.sample_frame;px=s.px;py=s.py;pz=s.pz;
-            recvx_stairs_tick(&s,&services);
+            tick(s);
             if(before==5&&s.mode3==6){entered=true;break;}
         }
         check(entered,"kdu never reached its finishing phase");

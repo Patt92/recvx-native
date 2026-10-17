@@ -20,6 +20,8 @@ public:
     std::uint32_t target()const{return ap_<<24|rp_<<16|gp_<<8|bp_;}
     /* game.c:111 / system.c:811: the quad is only drawn while fade_an > 0. */
     bool visible()const{return an_>0.f;}
+    /* player.c:6355-6358 (bhCPM0_die): sys->fade_an/rn/gn/bn = 0 direkt, ohne bhSetScreenFade. */
+    void clear_now(){an_=rn_=gn_=bn_=0.f;}
 private:
     unsigned ap_=0,rp_=0,gp_=0,bp_=0;
     float ao_=0,ro_=0,go_=0,bo_=0;

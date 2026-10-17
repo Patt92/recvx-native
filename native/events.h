@@ -23,6 +23,7 @@ public:
     int ifel_=0;std::int64_t gsp_=0;
     std::vector<unsigned> dispatched;
     bool menu_open=false,status_requested=false;
+    bool game_over_requested=false; // *(int*)&sys->gov_md0 = 0 aus bhCheckEvtTimer (player.c:1305/1326); der Host verbraucht es
     unsigned change_player=0; // sys->cng_pid (bhPlayerChangeSet, cb_flg 0x80)
     std::array<unsigned,4> map_parameters{}; // sys->mp_prm (bhMapSystemOn, cb_flg 0x10000)
     unsigned tick_count=0,event_timer=0,com_number=0; // sys->com_num
@@ -44,6 +45,15 @@ public:
     std::function<bool(unsigned&,unsigned&)> event_camera;
     std::function<unsigned(unsigned,unsigned)> animation_frame;
     std::function<std::optional<NJS_POINT3>(unsigned,unsigned)> object_position;
+    // event.c:7794 bhEtcAtariEnePosSet: ene[enep[n].wrk_no].mlwP->owP[node].mtx[12..14].
+    std::function<std::optional<NJS_POINT3>(unsigned enemy,unsigned node)> enemy_joint_position;
+    // event.c:7865 bhEtcAtariEvtPosSet: sys->itwp[n].px/py/pz.
+    std::function<void(unsigned item,NJS_POINT3)> set_item_position;
+    // sys->evt_posno[4] (types.h:599, SAVEFILE 0x820): Platz in rom->posp, den 0xb3 waehlt und
+    // 0xb4 sowie Common_controll 51/52 lesen; global wie die Ereignisflags.
+    std::array<std::uint8_t,4> evt_posno{};
+    // rom->posp (room +0x24, pos_n +0xA4; POS 16 Bytes).
+    const std::vector<NJS_POINT3>& room_positions()const{return positions_;}
     std::function<bool(unsigned)> audio_active;
     std::function<void(unsigned)> audio_stop;
     // CallSystemVoice (ADV/PatId[3], VoiceNo + 16) for timer mode 3.
@@ -148,6 +158,7 @@ private:
     bool pickup_decision_pending_=false; // GetItem testmode 0 still owed (sub1.c:3452 gate)
     unsigned acquired_file_=~0u;
     std::vector<unsigned> room_items_;
+    std::vector<NJS_POINT3> positions_;
     void hide_item(unsigned index);
     void begin_pickup(unsigned item,unsigned model=~0u);
     void begin_file(unsigned item,unsigned model=~0u);

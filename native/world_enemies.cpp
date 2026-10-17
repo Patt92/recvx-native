@@ -285,10 +285,13 @@ bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
     // (mode0 4, :6596): der Gegner fuehrt den Spieler (EN19 bhEne19_PlySetDamage,
     // en19.c:3827 setzt plp->mode0 = 5).
     const bool driven=in.mode0==4||in.mode0==5||in.mode0==6;
-    if(driven){enemy_player_driving_=true;grab_driving_=true;player_scripted=true;player_room_motion_=false;}
+    if(driven){enemy_player_driving_=true;grab_driving_=true;player_scripted=true;player_room_motion_=false;player_smove_.active=false;}
     else if(enemy_player_driving_){enemy_player_driving_=false;grab_driving_=false;player_scripted=false;player_enemy_motion_=false;player_enemy_work_=nullptr;player_link_matrix_valid_=false;}
     if(in.hp<0&&player_damage_allowed)player_killed_=true;
-    if(player_damage_allowed&&((in.flg&2u)!=0||(in.mode0==6&&in.hp<0)))player_dead_=true;
+    // bhCPM0_enedie (player.c:6711) ist der einzige Leser von plp->flg 0x2 fuer den Game-Over-Start
+    // und laeuft nur in mode0 6; bhCPM0_die (mode0 3) setzt flg 0x10002 selbst und startet ueber
+    // den Bildwechsel seiner Fallmotion, nicht ueber dieses Bit.
+    if(player_damage_allowed&&in.mode0==6&&((in.flg&2u)!=0||in.hp<0))player_dead_=true;
     return true;
 }
 unsigned RoomWorld::enemy_player_motion_frames(unsigned mtn,bool from_enemy)const{

@@ -24,11 +24,14 @@ typedef struct {
     int (*motion_root)(void* user,unsigned motion,int frame,float pos[3]);
     unsigned (*motion_frames)(void* user,unsigned motion);
     void (*node_position)(void* user,unsigned node,float out[3]);           // plp->mlwP->owP[node].mtx[12..14]
-    // objP[node].pos/ang, wie SetMtn* sie fuer `motion` am Bild `frame`
-    // (16.16) geschrieben hat.  bhCalcFixOffset (Motion.c:868) multipliziert
-    // genau diese Knotenwerte entlang PlyLegRoute.  0, wenn der Knoten im
-    // nativen Modell keinen Skriptknoten hat.
-    int (*local_node)(void* user,unsigned motion,int frame,unsigned node,float pos[3],int ang[3]);
+    // Motion.c:21 bhSetMotion, Knotenteil: SetMtn*(Hokan) schreibt plp->mlwP->objP
+    // fuer `motion` am Bild `frame` (16.16, der Stand VOR dem Vorschub) mit
+    // mtn_md und zieht bei laufender Mischung hokan_count ab (Motion.c:338/578/853).
+    void (*set_motion_nodes)(void* user,unsigned motion,int frame,int mtn_md,int* hokan_count,int hokan_rate);
+    // objP[node].pos/ang nach diesem Knotenteil.  bhCalcFixOffset (Motion.c:868)
+    // multipliziert genau diese Knotenwerte entlang PlyLegRoute.  0, wenn der
+    // Knoten im nativen Modell keinen Skriptknoten hat.
+    int (*obj_node)(void* user,unsigned node,float pos[3],int ang[3]);
     // bhCheckFloorSound scans room flrp followed by bhObj001's mflrp; the
     // host receives its exact query operands rather than a synthesized floor.
     int (*floor_sound)(void* user,int floor,float x,float z,int special);
@@ -56,7 +59,7 @@ typedef struct {
 #define RECVX_STAIR_UNBOUND_FOOTSTEP    0x0010u // CallPlayerFootStepSe list not playable
 #define RECVX_STAIR_UNBOUND_ACTION_SE   0x0020u // CallPlayerActionSe 522/523 not playable
 #define RECVX_STAIR_UNBOUND_MOTION      0x0040u // a requested motion is not in the native asset
-#define RECVX_STAIR_UNBOUND_HOKAN       0x0080u // SetMtnNormalHokan blend has no native owner
+#define RECVX_STAIR_UNBOUND_HOKAN       0x0080u // host supplies no bhSetMotion node part (set_motion_nodes)
 #define RECVX_STAIR_UNBOUND_HEADWORK    0x0100u // EXP1_I(0) head-work flags have no native owner
 #define RECVX_STAIR_UNBOUND_MTN_ATTR    0x0200u // per-frame mtn_attr has no native consumer
 #define RECVX_STAIR_UNBOUND_FIXPOS      0x0400u // bhCalcFixOffset route node missing in the native skeleton
@@ -90,16 +93,6 @@ typedef struct {
     unsigned st_flg;             // sys->st_flg bits this action maintains (0x4)
     RECVX_STAIR_AREA area;        // htp: the area bhCheckExmAtari selected
     int area_valid;
-    // Stand des letzten bhCalcModel (player.c:1684): Bildnummer und Lage, mit
-    // denen owP zuletzt berechnet wurde.  bhCalcFixOffset liest owP[last].mtx,
-    // und bhCalcTree baut diese Matrix genau aus diesen Werten entlang der
-    // Knotenkette auf.  Damit braucht die Fussfixierung keine zweite
-    // Knotenkopie des Hosts.
-    unsigned draw_motion;
-    int draw_frame;
-    float draw_px,draw_py,draw_pz;
-    int draw_ax,draw_ay,draw_az;
-    int draw_valid;
     // Bildnummer, an der SetMtn* in diesem Durchlauf abgetastet hat
     // (plp->frm_no vor dem Vorschub).  Die Laufzeit zeichnet damit dieselbe
     // Pose, die das Original in owP stehen hat.

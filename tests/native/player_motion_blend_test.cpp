@@ -59,6 +59,22 @@ int main(int argc,char** argv){try{
     // Ein Pass ohne Knotenteil gibt die Darstellung an den Clip zurueck.
     world.begin_player_motion_pass();world.begin_player_motion_pass();
     check(world.player_pose_edits().empty(),"objP traegt die Darstellung nach einem Pass ohne Knotenteil weiter");
-    for(const auto& g:world.unbound_enemy_routines())check(g.find("plp")==std::string::npos,"Luecke "+g);
+    // Skriptmotion: Common_controll 25 Selektor 0 auf dem Spieler (event.c:10960) setzt mode0 7 / mode2 8;
+    // pl_smove08 (pl_evt.c:649) nimmt mtn_no = mode1, bhSetMotion (player.c:1502) blendet mit hokan_count 8
+    // vom objP zur neuen Motion, statt neu abzutasten.
+    {motion=42;frame=0;world.player_set_motion_pose(42,0,0u,0u,0);const auto stand=world.player_local_pose();
+     auto cmd=[](std::vector<std::uint8_t> b){EventCommand c;c.opcode=b[0];c.bytes=b;return c;};
+     check(world.bind(cmd({0x65,0,0,0})),"bhLoadWork Spieler");
+     check(world.bind(cmd({0x69,25,1,0,std::uint8_t(other),0,1,0})),"Common 25 Selektor 0 auf dem Spieler nicht gebunden");
+     world.tick();check(motion==other,"pl_smove08 setzt mtn_no = mode1 nicht");
+     // Der Knotenteil laeuft mit dem Stand vor dem Vorschub (Motion.c:79): Ziel ist das Bild frm_no - mtn_add.
+     const auto first=world.player_local_pose();const auto clip=player.local_pose(other,frame-65536);
+     bool between=false;for(std::size_t n=0;n<first.size();++n)for(unsigned k=0;k<3;++k){const int d=s16(first[n].angles[k]-clip[n].angles[k]),e=s16(stand[n].angles[k]-clip[n].angles[k]);if(d!=0&&std::abs(d)<std::abs(e))between=true;}
+     check(between,"Skriptmotion springt ohne hokan-Mischung auf die neue Motion");
+     for(unsigned i=0;i<10;++i)world.tick();
+     const auto done=world.player_local_pose();const auto target=player.local_pose(other,frame-65536);
+     for(std::size_t n=0;n<done.size();++n)for(unsigned k=0;k<3;++k)check(std::abs(s16(done[n].angles[k]-target[n].angles[k]))<=1,"nach hokan 8 traegt objP nicht die Motion, Knoten "+std::to_string(n));}
+    // Motionluecken des Spielerwerks (bhSetMotion/pl_smove08); world.tick laeuft hier ohne Runtime-owP (bhEff001).
+    for(const auto& g:world.unbound_enemy_routines())check(g.find("bhSetMotion")==std::string::npos&&g.find("pl_smove08")==std::string::npos,"Luecke "+g);
     std::cout<<"player motion blend PASS\n";return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

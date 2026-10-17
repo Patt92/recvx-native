@@ -20,6 +20,7 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
     v.require(base_,header);scd0_=v.relative(base_,header,1);scd1_=v.relative(base_,v.u32(base_+4),1);
     for(std::size_t p=8;p<header;p+=4)scripts_.push_back(v.relative(base_,v.u32(base_+p),1));
     messages_=v.u32(info.room_offset+0x38);v.require(messages_,4);
+    {const auto posp=v.u32(info.room_offset+0x24),pos_n=v.u32(info.room_offset+0xa4);if(pos_n>4096)throw std::runtime_error("too many room positions");if(pos_n)v.require(posp,pos_n*16);for(unsigned i=0;i<pos_n;++i)positions_.push_back({v.f32(posp+i*16),v.f32(posp+i*16+4),v.f32(posp+i*16+8)});}
     const auto count=v.u32(info.room_offset+0x9c),offset=v.u32(info.room_offset+0x1c);if(count>4096)throw std::runtime_error("too many room interactions");v.require(offset,count*36);
     for(unsigned i=0;i<count;++i){const auto p=offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};for(unsigned j=0;j<4;++j)a.parameters[j]=v.u8(p+32+j);interactions.push_back(a);}
     const auto floor_count=v.u32(info.room_offset+0xa0),floor_offset=v.u32(info.room_offset+0x20);
@@ -42,6 +43,7 @@ void EventVm::inherit_progress(const EventVm& previous){
     // sonst haelt ein im Vorraum gesetztes 0x20000 jede Untersuchungskamera fest (RM_1130 -> RM_1080).
     flags[11][0]&=room_change_gm_mask;
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
+    evt_posno=previous.evt_posno; // sys->evt_posno lebt im SYS-Bereich ueber das Raumladen hinaus
     values[21]=previous.values[21]; // sys->rcase lebt ueber das Raumladen hinaus (bhRoomCaseNo 0x37, bhSv 21; system.c:1623 waehlt damit die naechste RDX)
 }
 void EventVm::initialize(){check_sub_pack(); /* bhSetPlayer/bhInitRoomChangePlayer/bhResetPlayer (player.c:844/935/1035) vor bhInitEvent */if(initialize_enemies)initialize_enemies();ifel_=0;Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
@@ -336,6 +338,25 @@ int EventVm::instruction(Task& t){
             if(ang<eay){ang+=eay2;if(eay<=ang){enemy_node_ax_set(v0,v4,eay);return 0;}enemy_node_ax_set(v0,v4,ang);return 1;}
         }
         enemy_node_ax_set(v0,v4,ang);return 0;}
+    // event.c:7794 bhEtcAtariEnePosSet: aus rom->posp[v2..v3) den Platz naechst owP[v5] des Gegners v0;
+    // etcp[v1] wird darum zentriert, sys->evt_posno[v4] merkt ihn. Der Vergleich beginnt mit
+    // posp[v2] gegen sich selbst (sw2 = Abstand von posp[v2]), wie im Original.
+    case 0xb3:{v.require(p,8);const unsigned v0=v.u8(p+1),v1=v.u8(p+2),v2=v.u8(p+3),v3=v.u8(p+4),v4=v.u8(p+5),v5=v.u8(p+6);advance(8);
+        if(v1>=interactions.size()||v4>=evt_posno.size()||v2>=positions_.size()||(v3>v2&&v3>positions_.size()))throw std::runtime_error("bhEtcAtariEnePosSet operand outside room tables");
+        if(!enemy_joint_position)throw std::runtime_error("bhEtcAtariEnePosSet requires native enemy binding");
+        const auto joint=enemy_joint_position(v0,v5);if(!joint)throw std::runtime_error("bhEtcAtariEnePosSet: owP[node] of the enemy work unavailable");
+        const auto dist=[&](const NJS_POINT3& a){const float dx=a.x-joint->x,dy=a.y-joint->y,dz=a.z-joint->z;return std::sqrt(dx*dx+dy*dy+dz*dz);};
+        float sw2=dist(positions_[v2]);unsigned cnt2=v2;
+        for(unsigned cnt=v2;cnt<v3;++cnt){const float sw1=dist(positions_[cnt]);if(sw1<sw2){sw2=sw1;cnt2=cnt;}}
+        auto& a=interactions[v1];const auto& pos=positions_[cnt2];
+        a.position={pos.x-a.extent.x/2.0f,pos.y,pos.z-a.extent.z/2.0f};evt_posno[v4]=std::uint8_t(cnt2);return 1;}
+    // event.c:7865 bhEtcAtariEvtPosSet: etcp[v1] um posp[evt_posno[v0]], itwp[v3] auf diesen Platz.
+    case 0xb4:{v.require(p,4);const unsigned v0=v.u8(p+1),v1=v.u8(p+2),v3=v.u8(p+3);advance(4);
+        if(v0>=evt_posno.size()||v1>=interactions.size()||evt_posno[v0]>=positions_.size())throw std::runtime_error("bhEtcAtariEvtPosSet operand outside room tables");
+        auto& a=interactions[v1];const auto& pos=positions_[evt_posno[v0]];
+        a.position={pos.x-a.extent.x/2.0f,pos.y,pos.z-a.extent.z/2.0f};
+        if(!set_item_position)throw std::runtime_error("bhEtcAtariEvtPosSet requires native item binding");
+        set_item_position(v3,pos);return 1;}
     case 0xbe:{ // bhPlyDposCk: turn the player yaw towards a target by a fixed step each pass
         if(!player_yaw||!set_player_yaw)throw std::runtime_error("player yaw check requires native player binding");
         int target=v.u8(p+2);const unsigned flags_byte=v.u8(p+1);const int step=v.u8(p+3);advance(6);
@@ -428,11 +449,11 @@ void EventVm::check_event_deadline(){
         inventory_.hp=-1;set_flag(1,69,1);
     }
     if(flag(1,67)){
-        flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;set_flag(1,67,1);
+        flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;game_over_requested=true;set_flag(1,67,1);
     }
     if(flag(1,70)){
         if(system_voice)system_voice(11);
-        flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;set_flag(1,70,1);
+        flags[6][0]=0x20;flags[5][0]&=~0x200u;flags[11][0]|=0x400u;flags[12][0]&=~0x4000u;flags[12][0]|=0x100u;player_flags|=0x10002u;game_over_requested=true;set_flag(1,70,1);
     }
 }
 void EventVm::control_exm(){
@@ -538,7 +559,7 @@ void EventVm::service_item_request(){
     // 0x10 = GetItem (sb_id), anything else without box/file bits = the normal status screen.
     // GetItem consumes 0x4000 itself (sub1.c ~3857); a plain script request is consumed here.
     if(flags[10][0]&0x20000){begin_file(values[8]);return;}
-    if(flags[10][0]&0x10){begin_pickup(values[8]);flags[10][0]&=~0x4000u;return;}
+    if(flags[10][0]&0x10){begin_pickup(values[8]);return;} // cb_flg 0x4000 verbraucht GetItem testmode 0 selbst (sub1.c:3830-3857), das erst im stehenden Bildschirm entscheidet
     flags[10][0]&=~0x4000u;status_requested=true;
 }
 void EventVm::cancel_item_request(){

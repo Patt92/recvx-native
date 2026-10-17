@@ -319,6 +319,13 @@ public:
     // Motion.c:21 bhSetMotion (player.c:1502), Knotenteil: SetMtn*(Hokan) auf plp->mlwP->objP
     // mit dem Stand VOR Vorschub und hokan_count-Abzug; der Takt bleibt beim Pfad.
     void player_set_motion_pose(std::size_t mtn_no,std::int32_t frm_no,unsigned mode,unsigned hokan_count,int hokan_rate);
+    // plp->mlwP->objP[Skriptknoten] nach dem Knotenteil DIESES Passes (bhCalcFixOffset, Motion.c:868).
+    bool player_obj_node(unsigned script_node,float pos[3],int ang[3])const{
+        if(!player_asset_||!player_obj_written_)return false;
+        try{const auto i=player_asset_->model_index(script_node);if(i>=player_obj_.size())return false;
+            const auto& o=player_obj_[i];pos[0]=o.position.x;pos[1]=o.position.y;pos[2]=o.position.z;
+            ang[0]=int(o.angles[0]);ang[1]=int(o.angles[1]);ang[2]=int(o.angles[2]);return true;}
+        catch(const std::exception&){return false;}}
     // Beginn eines Spielerpasses: lief im vorigen kein Knotenteil, folgt objP der dargestellten
     // Clip-Pose, damit eine spaetere Mischung vom gezeigten Stand ausgeht.
     void begin_player_motion_pass();
@@ -373,6 +380,7 @@ public:
     std::optional<float> take_player_speed(){if(!player_spd_written_)return std::nullopt;player_spd_written_=false;return player_spd_;}
     // PEXP0_I(0x14) dmlvl des nativen Aktionsbesitzers (en05.c:5627 bhEne05_CheckJump liest es).
     void set_player_dmlvl(std::int32_t dmlvl){player_dmlvl_=dmlvl;player_dmlvl_bound_=true;}
+    void set_player_wpntp(std::int32_t wpntp){player_wpntp_=wpntp;} // EXP_WORK.wpntp (pl_smove08 mode1 42)
     // plp->stflg |= 0x80000 (en05.c:1827/1973/2852): der Giftzustand gehoert dem Inventar.
     bool take_player_poison(){const bool v=player_poison_request_;player_poison_request_=false;return v;}
     bool take_player_infect(){const bool v=player_infect_request_;player_infect_request_=false;return v;}
@@ -401,11 +409,18 @@ public:
     void commit_small_screen(std::vector<std::uint32_t> pixels,unsigned width,unsigned height);
     // sub1.c:3175 ItemTaskCheck: nach dem Statusschirm in Raum 1-05 Ps2_rendertex_initflag = 1.
     void item_screen_closed(){if(stage_no_==1&&room_no_==5)rendertex_init_=true;}
+    // cut.c:22 bhCheckCut: gm_flg &= ~0x20 je Hauptschleife, nach der exm-Festkamera (game.c:274-291)
+    // und vor bhControlEvent; danach setzen Schnitt-/Ereigniskameras das Bit fuer dieses Bild.
+    void begin_cut_check(){if(collision_events_)collision_events_->flags[11][0]&=~0x20u;}
     std::size_t export_textures(const std::filesystem::path& output,const std::string& room_name)const;
     SceneCamera camera(const Scene& stage,const SceneCamera& active)const;
     void overlay(SoftwareRenderer& image)const;
     unsigned frame(unsigned kind,unsigned index)const;
     std::optional<NJS_POINT3> position(unsigned kind,unsigned index)const;
+    // ene[n].mlwP->owP[node].mtx[12..14] (event.c:7826 bhEtcAtariEnePosSet).
+    std::optional<NJS_POINT3> enemy_joint_position(unsigned index,unsigned node)const{const auto m=link_matrix(1,index,node);if(!m)return {};return NJS_POINT3{m->value[12],m->value[13],m->value[14]};}
+    // sys->itwp[n].px/py/pz (event.c:7896 bhEtcAtariEvtPosSet).
+    void set_item_position(unsigned index,NJS_POINT3 pos){entity(3,index).transform.position=pos;}
     bool player_hidden=false,player_scripted=false,player_action=false;
     bool game_over_=false; // bhGameOverSet request; death driver pending
     WorldEntity player_morph_{}; // bhCyoutenHenkei on the player work
@@ -435,7 +450,8 @@ public:
     // Kindworks aus bhSetEnemy (Diagnose: --state).
     const std::deque<WorldEntity>& enemy_children()const{return enemy_children_;}
     // effsub1b.c:101 bhDraw134: die Kran-Anzeige (2D, Texturgruppe 44) ueber dem Bild.
-    void draw_ufo_hud(SoftwareRenderer& image)const;
+    // effect.c:929 ef_fnc-2D-Anzeigen: bhDraw134 (Kran) und bhDraw137 (Ueberwachungskamera).
+    void draw_fnc_huds(SoftwareRenderer& image)const;
     // cut.c:138-147 cam.flg 0x40: die Monitorkamera, deren Lage allein bhEff137
     // (effsub1b.c:1015) schreibt; bhControlMonitorCamera (cut.c:2802) ist leer.
     bool monitor_camera_active()const{return monitor_.active;}
@@ -514,6 +530,8 @@ public:
     // little endian). bhCheckWallEx writes 2/0x102 for a fire wall.
     unsigned player_mode()const{return collision_mode_;}
     void set_player_mode(unsigned mode){collision_mode_=mode;}
+    // plp->mnwP = plp->mnwPb (player.c:1410 vor bhCPM0_die): die eigene Bibliothek, ohne Standmotion.
+    void set_player_library_own(){player_room_motion_=false;player_enemy_motion_=false;}
     // Free player motion with an explicit EXP_WORK arp (bhCPM0_damage).
     NJS_POINT3 move_player_arp(NJS_POINT3 from,NJS_POINT3 to,float arp){return resolve_player_motion(from,to,3.5f,player_character_?17.5f:16.5f,arp);}
 private:
@@ -576,6 +594,12 @@ private:
     std::int64_t player_step_=65536;
     int* player_hp_owner_=nullptr;std::uint32_t* player_head_flags_=nullptr;RECVX_HEAD_STATE* player_head_=nullptr;
     int player_ct0_=0,player_ct1_=0,player_ayp_=0,player_hokan_rate_=0;
+    // plp im Skriptmotionsmodus: Common_controll 24/25/34 Selektor 0 (event.c:11469/10960/11802) setzt
+    // mode0 7 / mode2 8 (bhCPM0_event -> pl_smove08, pl_evt.c:649) mit mode1/ct0/ct1/ct2; bhControlPlayer
+    // fuehrt danach bhSetMotion(plp, mtn_add, mtn_md) (player.c:1502) auf dem einen objP.
+    struct PlayerScriptMotion{bool active=false;unsigned mode3=0,mode1=0;int ct0=0,ct1=0,ct2=0;bool room_library=false;} player_smove_;
+    std::int32_t player_wpntp_=0;
+    void control_player_script_motion();
     unsigned player_mtn_md_=0,player_hokan_count_=0,player_at_flags_=0,player_enemy_owner_=0;
     const RECVX_ENEMY_WORK* player_enemy_work_=nullptr; // plp->mnwP: the grabbing work
     unsigned player_frm_mode_=0,player_mtn_attr_=0;
@@ -721,6 +745,9 @@ private:
         bool thl=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
+    void draw_ufo_hud(SoftwareRenderer& image,const SpriteWork& hud)const;     // effsub1b.c:101 bhDraw134
+    void draw_monitor_hud(SoftwareRenderer& image,const SpriteWork& hud)const; // effsub1b.c:828 bhDraw137
+
     bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false,player_infect_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
     float player_spd_=0; // plp->spd
     // plp->spd, das ein Gegnerpass waehrend des Griffs schreibt (en15.c:2915/3118): der Besitzer

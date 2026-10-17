@@ -21,6 +21,7 @@ switching after the floor change, not to a teleport.
 """
 import argparse
 import json
+import os
 import struct
 import subprocess
 import tempfile
@@ -204,7 +205,9 @@ def main():
         folder.mkdir(parents=True, exist_ok=True)
         mods = Path(temporary) / 'mods'  # deliberately absent: the shipped rooms only
 
-        def run(name, room, frames, replay='', spawn=None):
+        last_stderr = {'text': ''}
+
+        def run(name, room, frames, replay='', spawn=None, pose_trace=False):
             state = folder / f'{name}.json'
             if state.exists():
                 raise SystemExit(f'{state} already exists; the runtime refuses to overwrite it')
@@ -216,9 +219,13 @@ def main():
                                 '--replay', str(script), '--state', str(state)]
             if spawn is not None:
                 command += ['--spawn', str(spawn)]
-            done = subprocess.run(command, capture_output=True, text=True)
+            env = dict(os.environ)
+            if pose_trace:
+                env['RECVX_PLAYER_POSE_TRACE'] = '1'
+            done = subprocess.run(command, capture_output=True, text=True, env=env)
             if done.returncode:
                 raise SystemExit(f'{name}: runtime failed\n{done.stderr[-800:]}')
+            last_stderr['text'] = done.stderr
             return json.loads(state.read_text())
 
         def summary(state):
@@ -263,6 +270,27 @@ def main():
             check(any(played.startswith('MULTSPQ1/0032/2/') for played in state['audio_played']),
                   f'{room} plays the original room bank step sounds')
 
+        # --- bhSetMotion node part on plp->mlwP->objP ---------------------
+        # player.c:1502 runs bhSetMotion after the step routine in every frame;
+        # SetMtn*Hokan blends the first hokan_count passes (kdd case 0:
+        # hokan_count 4, hokan_rate 42598, player.c) and counts down.  The
+        # runtime's node part logs one POSETRACE line per pass.
+        print('bhSetMotion node part during the action (RM_1120 kdd)')
+        run('RM_1120-trace', 'RM_1120.RDX', 12, pose_trace=True)
+        poses = [dict(f.split('=', 1) for f in line.split()[1:6])
+                 for line in last_stderr['text'].splitlines() if line.startswith('POSETRACE')]
+        check(len(poses) >= 12, f'every action frame runs the node part ({len(poses)} POSETRACE lines)')
+        # kdd mode3 1/2 (yaw approach, motion 39) lasts two passes here, then case 3
+        # (player.c, native/player_stairs.c:300-312) installs the descent motion 32
+        # with a fresh hokan_count 4 / hokan_rate 42598 and frm_no 0.
+        check([(p['mtn'], p['hokan'], p['frm']) for p in poses[:2]] == [('39', '4', '0'), ('39', '3', '65536')],
+              f'the approach passes blend motion 39 from frame 0 ({poses[:2]})')
+        descent = [p for p in poses if p['mtn'] == '32']
+        check([(p['hokan'], p['rate']) for p in descent[:5]] == [(h, '42598') for h in ('4', '3', '2', '1', '0')],
+              f'hokan_count counts 4..0 through SetMtnNormalHokan on motion 32 ({[p["hokan"] for p in descent[:5]]})')
+        check([p['frm'] for p in descent[:3]] == ['0', '65536', '131072'],
+              'the node part samples the frame before the advance (Motion.c:70-108)')
+
         # --- control release ---------------------------------------------
         print('control release (RM_1120)')
         held = summary(run('release-100', 'RM_1120.RDX', 100, '100 keys forward\n'))
@@ -283,9 +311,10 @@ def main():
         # Diagnostic placement: the replay puts the player in front of the area
         # instead of walking there.  Only the action itself is under test.
         print('interaction path (diagnostic placement)')
-        # 0x280 = HOKAN | MTN_ATTR.  RECVX_STAIR_UNBOUND_HEADWORK (0x100) was part
-        # of this set until B06 bound the head control; release_head_look now has
-        # a real owner, so the bit must no longer appear.  0x4 is VIBRATION,
+        # 0x200 = MTN_ATTR.  RECVX_STAIR_UNBOUND_HEADWORK (0x100) was part of
+        # this set until B06 bound the head control, HOKAN (0x80) until the
+        # runtime bound the bhSetMotion node part (set_motion_nodes, objP);
+        # neither bit may appear any more.  0x4 is VIBRATION,
         # not EFFECT_OFF (0x2): dnd requests StartVibrationEx(0, 7) at
         # player.c:3605, bound by runtime.cpp to VibrationUnit::start and
         # sdfunc.c:3382-3403's option/event gate. Verify the request below.
@@ -316,9 +345,9 @@ def main():
             # landet damit bei -173.43, dem in AGENTS.md (2026-10-10) natuerlich
             # erlaufenen Wert, und kdd haelt die Setzstufe ATR 47 bei -188.8.
             ('kdu', 'RM_0050.RDX', 3, '60 position -188.8 0 88 0\n61 confirm\n',
-             dict(mode2=14, floor=2, unsupported=0x280), (-173.4260, 8.0, 87.8682), 4),
+             dict(mode2=14, floor=2, unsupported=0x200), (-173.4260, 8.0, 87.8682), 4),
             ('kdd', 'RM_0050.RDX', 4, '60 position -175.51 8 85 0\n61 confirm\n',
-             dict(mode2=15, floor=0, unsupported=0x280), (-188.8000, 0.0, 85.0881), 4),
+             dict(mode2=15, floor=0, unsupported=0x200), (-188.8000, 0.0, 85.0881), 4),
             #   * dnu starts west of the raised platform, facing +x (yaw 49152:
             #     (ay + 8192) & ~0x3fff == 49152, so the 6-unit probe of
             #     bhCheckExmAtari type 2 (hitchk.c:4735) lands at x 35.8 inside
@@ -335,7 +364,7 @@ def main():
             #     x = 34 - 2.5*ar + 2*ar + ar = 35.75; the lateral node offset
             #     (-0.0026) is the same motion delta as before.
             ('dnu', 'RM_2050.RDX', 7, '60 position 29.8 0 46 49152\n61 confirm\n',
-             dict(mode2=16, floor=1, unsupported=0x280), (35.75, 9.0, 45.9974), 0),
+             dict(mode2=16, floor=1, unsupported=0x200), (35.75, 9.0, 45.9974), 0),
             #   * dnd: (35, 9, 35) stand im Eckpfosten ATR 27 (Typ 5, 34..38/34..38,
             #     Etage 1); der Koerperpass schob ihn nach (39.5, 39.5), wo die 4.5er-Sonde
             #     noch in ATR 9 liegt und das Original dnd nicht startet (hitchk.c danf).
@@ -343,7 +372,7 @@ def main():
             #     anschliessend die Stufenkanten-Begrenzung aus dan_ap
             #     (bhSetDansaLimitAtari, hitchk.c:666): spx +5.86, act_std zieht 0.9 davon nach.
             ('dnd', 'RM_2050.RDX', 9, '60 position 45 9 36 0\n61 confirm\n',
-             dict(mode2=17, floor=0, unsupported=0x280), (45.0, 0.0, 27.0199), 0))
+             dict(mode2=17, floor=0, unsupported=0x200), (45.0, 0.0, 27.0199), 0))
         areas = {room: atr_entries(args.data / 'rooms' / room)
                  for room in ('RM_0050.RDT', 'RM_2050.RDT')}
         for name, room, index, replay, expect, end, depth in cases:
