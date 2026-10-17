@@ -2,21 +2,21 @@
 
 Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.
 
-Expliziter Belegumfang: **86.3 %** gewichtet, **73.7 %** voll belegt (375/509 Mechanismen; kein Gesamtfortschritt).
+Expliziter Belegumfang: **87.2 %** gewichtet, **75.1 %** voll belegt (405/539 Mechanismen; kein Gesamtfortschritt).
 
-Event-Befehle (bhScenarioJmpT): 190/223 gebunden, 19 nur konsumiert, 14 fehlen.
+Event-Befehle (bhScenarioJmpT): 194/223 gebunden, 17 nur konsumiert, 12 fehlen.
 
 | Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |
 |---|---:|---:|---:|---:|---:|
-| Gegner/KI | 55/86 | 82.0 % | 64.0 % | 31 | 0 |
-| Effekte | 182/198 | 96.0 % | 91.9 % | 16 | 0 |
-| Events/Skript | 37/45 | 91.1 % | 82.2 % | 8 | 0 |
-| Spieler/Kampf | 31/48 | 82.3 % | 64.6 % | 17 | 0 |
+| Gegner/KI | 56/87 | 82.2 % | 64.4 % | 31 | 0 |
+| Effekte | 186/202 | 96.0 % | 92.1 % | 16 | 0 |
+| Events/Skript | 45/54 | 91.7 % | 83.3 % | 9 | 0 |
+| Spieler/Kampf | 36/53 | 84.0 % | 67.9 % | 17 | 0 |
 | Raum/Kamera/Tür | 6/25 | 60.0 % | 24.0 % | 18 | 1 |
-| Menü/Items/Text | 35/47 | 83.0 % | 74.5 % | 8 | 4 |
-| Modelle/Animation | 7/11 | 81.8 % | 63.6 % | 4 | 0 |
-| Audio | 4/20 | 60.0 % | 20.0 % | 16 | 0 |
-| Ablauf/Speichern | 18/29 | 81.0 % | 62.1 % | 11 | 0 |
+| Menü/Items/Text | 43/54 | 87.0 % | 79.6 % | 8 | 3 |
+| Modelle/Animation | 8/12 | 83.3 % | 66.7 % | 4 | 0 |
+| Audio | 5/21 | 61.9 % | 23.8 % | 16 | 0 |
+| Ablauf/Speichern | 20/31 | 82.3 % | 64.5 % | 11 | 0 |
 | Plattform (Host-ersetzt) | 12/21 | 78.6 % | 57.1 % | 9 | 0 |
 
 Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichheit, Originalquellen und quarantänierte Generatoren zählen nie als Portbeleg.
@@ -26,7 +26,6 @@ Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichhe
 - `adv.c` Adv_GameOptionScreen (missing, Optionsbildschirm (DisplayOptionPlateLevel0-3, Sound/Vibration/Key-Config) nicht portiert; OPTION oeffnet den Host-Einstellungsbildschirm (frontend.h, dokumentierte Abweichung))
 - `adv.c` CheckMcSelectPortInfoState (missing, Originale Memory-Card-Portabfrage nicht portiert; die Host-Slotauswahl ermittelt belegte Spielstaende aus dem Benutzerdatenverzeichnis)
 - `adv.c` FindFirstVmDrive (missing, Originale Memory-Card-Suche nicht portiert; der Host ersetzt sie durch native Spielstaende im Plattform-Benutzerdatenverzeichnis und aktiviert LOAD GAME bei belegtem Slot)
-- `gameover.c` bhMainGameOver:md1 10 frm_no (missing, native/gameover.cpp haelt frm_no der Sterbemotion waehrend hokan_count (Kommentar "holds frm_no at zero"); Motion.c:21 bhSetMotion schiebt frm_no in jedem Pass auch waehrend SetMtn*Hokan (frm_no += add nach dem Knotenteil). Befund 2026-10-17 beim bhCPM0_die-Port, nicht geaendert (Selbstzerstoerungs-Todesszene gm_flg 0x400).)
 - `objitm.c` bhDrawSpObject (missing, Die gemeinsame Schnitt-Beschraenkung (objitm.c:688) ist gebunden; die Spezialobjektliste sys->ob_spc mit ihren Typzweigen (Licht 5 usw.) hat im Host keinen Besitzer.)
 - `Motion.c` bhSetMotion:Spieler (partial, player.c:1502 bhSetMotion(plp) Knotenteil (SetMtnNormal/Fast/Slow und ihre Hokan-Varianten, Motion.c:131-859) seit 2026-10-16 auf dem einen plp->mlwP->objP (RoomWorld::player_obj_) ueber das vorhandene set_motion (motion_set.cpp): RoomWorld::player_set_motion_pose mit dem Stand VOR Vorschub und hokan_count-Abzug; die Uhren bleiben bei ihren Pfaden. Gebunden: Aktions-/Eventpfad (runtime vor recvx_player_action_motion, mtn_md 0 aus player.c:1779), Kampfkern (services.set_motion_pose in cb_set_motion, Luecke SetMtn*Hokan entfaellt), Schaden (bhCPM0_damage hokan 49152/4 jetzt am Spielerwerk), Griff (player_set_motion_now schreibt objP statt Wegwerfpuffer), Schieben (player_push_core hokan_sample, hokan_count sinkt je Pass; Slow-Abtastung push_->pose nur noch ohne objP). Darstellung: player_pose_edits legt objP unter alle Bearbeitungen (sample_player, Kopf, Gelenke, Fussschritt, model_pose_physical, Kampf publish_pose). Folge: Motionwechsel blenden, und die gezeigte Pose ist wie im Original das Bild VOR dem Vorschub (vorher eins weiter). Test player_motion_blend (zwei Gegenproben rot); RECVX_PLAYER_POSE_TRACE belegt Mischung in Lauf->Stand und Ziehen/Wegstecken. OFFEN: Treppe (player_stairs), Gameover, skriptgefuehrte Spielermotion (world.cpp 0x65/0x66) fuehren objP noch nicht.)
 - `adv.c` AdvGetCancelButton (partial, Host-Cancel statt keytype-Tabelle {32,128,64})
@@ -38,6 +37,7 @@ Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichhe
 - `cut.c` bhSetEventCamera (partial, Opcode 0x13 Modus 0 setzt jetzt cam.px/py/pz, cam.ax/ay/az (als vorzeichenbehaftete CAM_KEYF_WORK-shorts) und cam.pers aus dem Key und bei lkflg != 0 sofort die Zielwinkel (:1660-1684), danach *(int*)&cam.mode0 = 0 (:1686) als Initpass von bhControlEventCamera. cam.fog_* nehmen den Key in BEIDEN Zweigen; nur sys->fog_ct unterscheidet sich (fog_cngct - 4, geklemmt, bei st_flg 0x2 && kfp->flg 0x8, sonst 0, :1694-1716) - vorher uebernahm der Host die Fogwerte nur im ersten Zweig und setzte fog_ct nie. gm_flg 0x10 (:1718). Splines cam.ipf/cam.icr je Bild in control_event_camera. Offen: cam.pxp/axp-Vorgaengerfelder, cam.ln, cam.flg 0x2/0x38 und bhSetEventHideObjLgt als Aufruf.)
 - `cut.c` bhSetFixedCut (partial, Fog-Uebergabe :463-484 (ohne ef_flg-Zweig) bei Opcode 0x2a Modus 0. Seit 2026-10-16 auch :486 cam.ncut = cno vor bhChangeViewClipRM (:537): die Nahgrenze kommt aus dem neuen Schnitt, nicht aus dem vorigen Raumschnitt (RM_1050 Ameisen-Juwel: Schnitt 5 behielt 20/20000 von Schnitt 1, die Vitrine lag vor der Nahgrenze, es blieb die Hintergrundfarbe). Test native_ground_world (Gegenprobe rot).)
 - `door.c` bhControlDoor (partial, native/doors.cpp tick: recvx_door_step, zwei CallDoorSe-Gruppen (0xF0000 sofort, 0xF00000 erst bei status 0x20), ControlSoundTiming-Kommandos, Ende nur ueber status 0x40 aus FadeProc1 (door.c:641). spd_mde-Schleife nur DMO_SPD_1; Zeichnung Host-Renderer.)
+- `effect.c` bhControlEffect (partial, Spielerlink liest jetzt wie effect.c:803-811 pp->mlwP->owP[op->lkono].mtx aus dem zuletzt von bhCalcModel(plp) festgeschriebenen Baum (native/world.cpp RoomWorld::link_matrix, player_joint_matrices_) statt plp->mnwP[plp->mtn_no] neu abzutasten. Behebt den Absturz actor motion unavailable im Freigabebild eines Griffs. Tests: tests/native/lighter_test.cpp grab_release_links, tools/verify_enemy_ai.py rm0060-lighter-release/-death. Uebrige Effektzweige unveraendert offen.)
 
 ## Unbestätigte historische Ledger-Einträge
 

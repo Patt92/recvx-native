@@ -226,6 +226,8 @@ public:
     const PlayerGroundWork* player_ground_work()const{return player_ground_ready_?&player_ground_:nullptr;}
     void player_stair_ground_state(unsigned status,int mode0){stair_ground_state_=std::make_pair(status,mode0);}
     void clear_player_stair_ground_state(){stair_ground_state_.reset();}
+    // sys->ef_tlist ab sys->ef_tn[group]: die Bilder einer geladenen Effektgruppe (nullptr = nicht geladen).
+    const std::vector<SceneTexture>* effect_group_textures(unsigned group)const{const auto at=effect_textures_.find(group);return at==effect_textures_.end()?nullptr:&at->second;}
     const std::vector<SceneTexture>* weapon_flash_textures()const{const auto at=effect_textures_.find(3);return at==effect_textures_.end()?nullptr:&at->second;}
     bool bind(const EventCommand& command);
     void set_simulation_flags(unsigned flags){simulation_flags_=flags;}
@@ -241,6 +243,8 @@ public:
     unsigned player_motion_frames()const;
     bool player_morph()const{return player_morph_.morph;}float player_morph_shape()const{return player_morph_.morph_shape;}
     const EffectSprite* effect_state(unsigned index)const{return index<sprites_.size()?&sprites_[index].sprite:nullptr;}
+    // mlwP->texP-Liste eines Raumwerks, wie der Zeichenpass sie verwendet (bhEff085 tauscht textures[3]).
+    const std::vector<SceneTexture>* model_textures(unsigned kind,unsigned index)const{for(const auto& m:models_)if(m.kind==kind&&m.index==index)return &m.object.textures;return nullptr;}
     bool effect_visible(unsigned index)const;
     EffectContext effect_context()const;
     void set_presentation_flags(unsigned flags){presentation_flags_=flags;} // sys->pt_flg, native draw owner
@@ -332,6 +336,10 @@ public:
     // Bearbeitungen der Spielerpose (Kampf/Schieben/Skript) ueber objP gelegt, solange es die
     // Darstellung traegt; sonst unveraendert.
     ModelNodeOverrides player_pose_edits(const ModelNodeOverrides& edits={})const;
+    // plp->mlwP->objP als Knotenvorgabe fuer einen bhCalcModel(plp)-Verbraucher ausserhalb des
+    // Spielerpasses (gameover.c:453): der ganze Baum, unabhaengig von motion_ (der Spielerpass
+    // prueft die Motion ueber player_pose_edits). Leer, solange kein Knotenteil objP geschrieben hat.
+    ModelNodeOverrides player_obj_overrides()const{ModelNodeOverrides out;if(!player_obj_drives_||!player_asset_||player_obj_.size()!=player_asset_->bones())return out;for(unsigned i=0;i<player_obj_.size();++i)out[i]={player_obj_[i].position,player_obj_[i].angles};return out;}
     void set_pad_clear_callback(std::function<void(uint32_t)> cb){pad_clear_cb_=std::move(cb);}
     void clear_pad_on(uint32_t bits){if(pad_clear_cb_)pad_clear_cb_(bits);}
     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
@@ -355,6 +363,27 @@ public:
     const WaterWaveWork* water_work(unsigned object)const;
     // bhSetExplosion: the effect works, flash light and sound; `view` is the camera direction (cam.vx/vy/vz).
     void explode(NJS_POINT3 position,NJS_POINT3 view);
+    // weapon.c:1812 bhSetExplosionEffect(pos) an diesem Besitzer: Feuerball 23 und zwei Truemmer 24
+    // aus sys->ef, Lage pos - 4 * cam.v mit dem cam.v der gerade gueltigen Kamera (camera.c:62-71
+    // bhMakeCameraVector; unter cam.flg 0x40 die direkt geschriebene Lage). Aufrufer: die
+    // Todesszene gameover.c:539 (gov_etb) und event.c:8766. false, wenn ein Satz nicht angelegt
+    // werden konnte (Prozedur unportiert oder eff[512] voll); die Luecke steht dann in
+    // unbound_enemy_routines().
+    bool explode_effect(NJS_POINT3 position);
+    // gameover.c:313-327: cam.flg = 0x40 und cam.pers/ln/ax..az/px..pz direkt geschrieben; dieselbe
+    // Kameraform wie bhEff137 (cut.c:138-147, bhControlMonitorCamera ist leer). cut = cam.ncut.
+    void set_monitor_camera(unsigned cut,NJS_POINT3 position,int ax,int ay,int az,float ln,int pers);
+    // effect.c:153 bhClearEffect: eff[512] genullt (gameover.c:278 beim Eintritt der Todesszene; room.c:37
+    // deckt der Raumwechsel ab). Nur die O_WRK-Saetze; Partikelnutzlasten ausserhalb von eff[] bleiben wie
+    // im Original stehen und werden ohne ihren Wurzelsatz nicht mehr fortgeschrieben.
+    void clear_effects();
+    // event.c:8801 bhEffClearEvt (Skriptbefehl 0xca, 2 Bytes) -> effect.c:159 bhClearEventEffect: drei
+    // Durchlaeufe ueber eff[512], je nur Saetze mit flg & 1 nach id. bhClrEff_YT (effect.c:166): 5/11/113/
+    // 114/136/159/225/398 flg = 0; 22/24/25/27 flg = 0 und *(int*)exp0 = 0 (Hilfssatz aus
+    // bhSetExtraEffectWork, falls gesetzt). bhClrEff_RY (effsub3.c:117): 301 flg = 0; 302 zusaetzlich die
+    // Hilfsplaetze exp0/exp1. bhClrEff_YG (effsub2.c:4793): 250/253/256/257/272/296/297/298 flg = 0;
+    // 254/260 flg = 0 und *(int*)exp0 = 0. Alles andere (Raumeffekte, 23, Blutlachen 300) bleibt.
+    void clear_event_effects();
     // Blast damage dealt to the player by bhCheckBombAtari since the last call (hp points).
     int take_blast_damage(){const auto value=blast_damage_;blast_damage_=0;return value;}
     // Zombie AI (debug menu). Off keeps idle zombies standing; damage reactions still run.
@@ -459,10 +488,16 @@ public:
     // Effektsaetze dieses Passes (bhEff130 type 3), njDrawPolygon(pvp, pn, 1) ueber das
     // fertige Bild, Tore flg/stflg 0x1000000 und gm_flg 0x4000 + mdflg 0x40.
     void draw_ntx2d_effects(SoftwareRenderer& image)const;
+    // effect.c:912 bhDrawTrsEffect2D(sys->ef_trs2d): texturierte Schirmvierecke der Effektsaetze dieses
+    // Passes (effsub1.c bhEff2D), njDrawTexture(tvp, pn, gidx, 1) mit bl_src/bl_dst ueber das fertige Bild.
+    void draw_trs2d_effects(SoftwareRenderer& image)const;
     // face.c:79 bhControlMask fuer einen Besitzer mit Maskendaten (Gegnerpass id > 90 oder Weltpass).
     void control_mask(WorldEntity& e,const PlayerAsset& actor);
     struct FogView {bool enabled;std::uint32_t color;float near_range,far_range;int ct;};
     FogView fog_view()const{return {fog_.enabled,fog_color_,cam_fog_near_,cam_fog_far_,fog_ct_};}
+    // sync.c:15 njSetEORFunction(bhControlEOR): der Nebelteil (:143-255) laeuft am Ende jedes Bildes, auch
+    // ohne Kamerapass. Unter gm_flg 0x200000 (gameover.c:323, Todesszene md1 10) nur njFogDisable (:143).
+    void end_of_render(){control_fog();}
     bool camera_transitioning()const{return active_camera_.transitioning();}
     unsigned camera_clock()const{return active_camera_.clock();}
     int floor_at(NJS_POINT3 position)const;
@@ -535,7 +570,12 @@ public:
     // Free player motion with an explicit EXP_WORK arp (bhCPM0_damage).
     NJS_POINT3 move_player_arp(NJS_POINT3 from,NJS_POINT3 to,float arp){return resolve_player_motion(from,to,3.5f,player_character_?17.5f:16.5f,arp);}
 private:
-    struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;};
+    // texture_list: Lage des PVP-Buendels von mdl[0] in der Raumdatei, 0 = mdl[0] ohne texP. Gleiche
+    // Werte stehen fuer dieselbe sys->et_lp[id][mdlno][0]-Liste (room.c:592-604, texture_cache beim Laden).
+    struct Model {unsigned kind,index;std::unique_ptr<PlayerAsset> actor;Scene object;std::size_t source_model=0;std::vector<ModelPose> rest_pose;std::size_t texture_list=0;};
+    // rom->effp[i].lkflg/lkno nach bhSetEffectLink (room.c:787): die Raumtabelle, die bhEff085 ueber
+    // op->type liest (effsub6.c:43/56); unabhaengig davon, welcher Satz spaeter auf Platz i liegt.
+    std::vector<std::pair<int,int>> room_effect_links_;
     // bhSetEneMdl realizes one model string per MDL block of the entity's asset
     // list; that order is the mbp[] the morph opcodes index. mbp[0] is the Work's
     // own model, the blocks load_models kept follow as mbp[1..].
@@ -652,7 +692,7 @@ private:
     // bhSetEffectTb from game code: `link_kind` 0 = world position, 2 = enemy joint (WorldEntity index/joint).
     int spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
     void gun_fire(unsigned kind,unsigned index,const BoneMatrix& joint,unsigned wno,unsigned jno,unsigned hand,int ang);
-    void process_effect_output();
+    unsigned process_effect_output(); // Rueckgabe: Anforderungen, die keinen Platz bekamen (bhEff<id> gemeldet)
     void tick_shadow(unsigned slot);
     int en11_light_control(RECVX_ENEMY_WORK* w,int mode);
     static void bind_en11_services();
@@ -667,6 +707,7 @@ private:
     void tick_ry_shadow(unsigned slot);
     void write_particle_slot(unsigned slot,unsigned flags,unsigned id);
     void bomb_damage(const BombRequest& bomb);
+    void bomb_enemy_damage(const BombRequest& bomb);
     EffectParticles particles_;
     void tick_en01();
     // C02 enemy pass on the native works (eneset.c:344 bhControlEnemy) and
@@ -747,6 +788,7 @@ private:
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
     void draw_ufo_hud(SoftwareRenderer& image,const SpriteWork& hud)const;     // effsub1b.c:101 bhDraw134
     void draw_monitor_hud(SoftwareRenderer& image,const SpriteWork& hud)const; // effsub1b.c:828 bhDraw137
+    void draw_eff021_bars(SoftwareRenderer& image)const;                        // effsub1.c:4756 bhDraw021
 
     bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false,player_infect_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
     float player_spd_=0; // plp->spd

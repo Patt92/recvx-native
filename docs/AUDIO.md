@@ -36,6 +36,18 @@ PS2-Soundhardware. Alle Formate werden nativ dekodiert und in einem
   Terminalflag 7 als stummen Block; dessen Selbstloop wiederholt keinen Vorlauf.
   PCM wird weiterhin einmal vorab dekodiert: Predictor-Historie über den
   Looprücksprung und bitgenaue SPU-Synthese sind damit nicht nachgewiesen.
+- MIDI-Noten folgen der Programm-/Splitwahl von `MODHSYN.IRX` (Programmwechsel .text 0x75c,
+  Note-On 0x5f90): leerer Programmeintrag (0xffffffff), Programm über dem letzten Index, Programm
+  ohne Split oder eine von keinem Split gedeckte Taste (Grenzen +2/+4 ohne Bit 7) starten keine
+  Stimme; die Sequenz läuft weiter. Die Splitschleife (0x6098..0x64a0) endet nicht beim ersten
+  Treffer: jeder Split, der die Taste deckt, startet in Tabellenreihenfolge eine eigene Stimme
+  (`decode_system_note`, je Split Lautstärke/Pan aus Programm und Split wie beim Einzelsplit; im
+  Sequenzer je Stimme ein eigener Notenlayer mit Key-On/Key-Off/Kernwahl). Splits mit Sset-Index über
+  dem letzten, Sset ohne Sample, Smpl-Index über dem letzten oder Vagi 0xffffffff überspringt die
+  Schleife wie das Original. Die Velocitybereiche von Sset/Smpl sind in allen Banken 1..127 und
+  lassen jede Note-On-Velocity durch; andere Bereiche werden gemeldet. Offen: Stimmenpool und
+  Stealing (24 Stimmen je Kern, Spurgrenze 0x5e0c, Prioritätsraub 0x659c/0x67a0) – der native
+  Mixer begrenzt Stimmen nicht.
 - Raumpakete: Schlüssel `stage * 1000 + room * 10 + case`; die Reihenfolge
   Event_init → `RoomSoundCase` → `RequestRoomSoundBank` folgt `system.c`.
 - Systemklänge über `CallSystemSe`, Spielerstimmen über

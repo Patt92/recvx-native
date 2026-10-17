@@ -91,6 +91,9 @@ public:
     void start(unsigned level,unsigned event);
     // Whole-instruction length of Common_controll `command` (0x69 included); 0 = no original case.
     static std::size_t common_controll_length(unsigned command,unsigned byte2,unsigned byte3);
+    // Whole-instruction length of Obj_controll `command` (0x66 included): 2/4 for cases 1/20, 1 for every
+    // other byte (default branch leaves bhScePtr on the command byte, which runs as the next opcode).
+    static std::size_t obj_controll_length(unsigned command);
     // hitchk.c bhCheckExmAtari, types 0/3/4. `position` is plp->px/pz after the wall
     // passes; `front`/`front_offset` are EXP_WORK fpx/fpz and arn (player.c:1585),
     // the source of the type 0 and type 3 probes pxn[0]/pxn[3] (hitchk.c:4605/:4614).

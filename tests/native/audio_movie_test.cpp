@@ -3,7 +3,10 @@
 #include "asset_io.h"
 #include "binary_view.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -271,6 +274,40 @@ static void bgm_fade_contract(const std::filesystem::path& root){
     check(m.adx_state(0).volume==float(int(-45.f+15.f/42.f)),"ADX Ex sentinel must truncate the current float volume toward zero");
     (void)fraction;
 }
+// MODHSYN.IRX note-on (.text 0x5f90): the split loop (0x6098..0x64a0) does not leave after a hit. Every split
+// whose key range (+2..+4 without bit 7) holds the key runs its Sset sample loop (0x615c..0x646c) and keys a
+// voice (0x6264 voice, 0x63d0 key-on), then the loop steps to the next split. RM_1100 (MULTSPQ1 pack 1100)
+// bank 2 seq 0 is that room's bhEasySESet type 7 (CallNativeEventSe slot 0, SeNo 512): programs 0/1 each hold
+// two splits over keys 12..119 with pan 0 and pan 127, keyed together at key 60. Before only the first split
+// sounded (right channel silent). The sequence must equal the sum of the two packs that leave one split each.
+static void midi_multi_split(const std::filesystem::path& root){
+    const auto index=read_asset_file(root/"files/MULTSPQ1.IDX",4096);BinaryView ids(index);
+    unsigned pack=0;while(pack<index.size()/2&&ids.u16(pack*2)!=1100)++pack;check(pack<index.size()/2,"RM_1100 sound pack missing");
+    const auto bytes=read_asset_file(root/"archives/MULTSPQ1"/(asset_number(pack)+".bin"),32*1024*1024);BinaryView spq(bytes);
+    std::size_t bank_at=0,bank_size=0;
+    for(unsigned i=0;i<16&&spq.u32(i*16);++i)if(spq.u32(i*16+8)==1&&spq.u32(i*16+12)==2){bank_at=spq.u32(i*16);bank_size=spq.u32(i*16+4);spq.require(bank_at,bank_size);break;}
+    check(bank_size!=0,"RM_1100 MIDI program bank 2 missing");
+    const std::vector<std::uint8_t> programs(bytes.begin()+std::ptrdiff_t(bank_at),bytes.begin()+std::ptrdiff_t(bank_at+bank_size));
+    BinaryView hd(programs);const std::size_t vers=hd.u32(0),head=vers+hd.u32(vers+8),prog=vers+hd.u32(head+0x14);
+    auto zones=[&](unsigned program){const std::size_t pg=prog+hd.u32(prog+16+program*4);check(hd.u8(pg+4)==2&&hd.u8(pg+5)==20,"RM_1100 program is not the two-split pair");return pg+hd.u32(pg);};
+    for(unsigned program:{0u,1u}){const auto voices=decode_system_note(programs,program,60);
+        check(voices.size()==2&&voices[0].frames()&&voices[1].frames()&&voices[0].pan<voices[1].pan,"RM_1100 key 60 does not key one voice per covering split");
+        reject([&]{decode_system_sound(programs,program,60);});}
+    const auto mods=std::filesystem::temp_directory_path()/("recvx-multisplit-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    // keep < 0: the original pack; otherwise the other split of programs 0/1 covers no key (+2 = 127, +4 = 0).
+    auto run=[&](int keep,unsigned& voices){
+        std::filesystem::remove_all(mods);
+        if(keep>=0){auto copy=bytes;for(unsigned program:{0u,1u}){const auto z=bank_at+zones(program)+std::size_t(1-keep)*20;copy.at(z+2)=127;copy.at(z+4)=0;}
+            std::filesystem::create_directories(mods/"audio/MULTSPQ1");std::ofstream(mods/"audio/MULTSPQ1"/(asset_number(pack)+".bin"),std::ios::binary).write(reinterpret_cast<const char*>(copy.data()),std::streamsize(copy.size()));}
+        AudioMixer m(root,mods);m.load_room_sounds(1,10);check(m.room_fx_level()==0,"RM_1100 RoomFxLevel changed: the HALL would no longer be silent");
+        check(m.event_sound(0,512)&&m.active(12)&&m.sequence_unavailable.empty(),"RM_1100 type-7 sequence not played");
+        auto pcm=m.mix(4800);voices=m.spu_voices(0)+m.spu_voices(1);const auto rest=m.mix(48000*2);pcm.insert(pcm.end(),rest.begin(),rest.end());return pcm;};
+    unsigned both=0,left=0,right=0;const auto full=run(-1,both),first=run(0,left),second=run(1,right);std::filesystem::remove_all(mods);
+    check(left==2&&right==2&&both==4,"RM_1100: two notes must key two voices each (one per covering split)");
+    check(std::any_of(second.begin(),second.end(),[](auto n){return n!=0;}),"RM_1100 second split silent");
+    // Voices add in the float mix before one int16 conversion: at most 1 LSB apart from the summed single-split outputs.
+    for(std::size_t i=0;i<full.size();++i)check(std::abs(int(full[i])-int(first[i])-int(second[i]))<=1,"RM_1100 sequence is not the sum of its two splits");
+}
 int main(int argc,char** argv){try{
     sound_3d_core();
     check(sony_pan_factors(32).right==62&&sony_pan_factors(96).left==62&&sony_pan_factors(64).left==128&&sony_pan_factors(64).right==128,"original Sony integer pan factors");
@@ -323,6 +360,15 @@ int main(int argc,char** argv){try{
         bgm.room_fade_in();check(bgm.bgm_request()==0&&bgm.current_bgm_volume()==-30,"room fade-in volume request");bgm.stop_bgm2();check(bgm.bgm_request()==1&&bgm.current_bgm()==-1,"StopBgm2");}
     if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto bank=read_asset_file(root/"files/COMMON.MLT",8*1024*1024);for(unsigned id=0;id<11;++id){const auto sound=decode_system_sound(bank,id);check(sound.rate==32000&&sound.frames()>0&&std::any_of(sound.samples.begin(),sound.samples.end(),[](auto value){return value!=0;}),"original system sound silent/invalid");}reject([&]{decode_system_sound(bank,11);});auto truncated=bank;truncated.resize(256);reject([&]{decode_system_sound(truncated,0);});AudioMixer effects(root);effects.play_system(2);check(effects.active(2)&&effects.played.back()=="COMMON/0002","original cursor sound not routed");effects.load_room_sounds(0,0);for(unsigned id=0;id<5;++id){check(effects.play_room_sound(2,id,4),"original floor bank missing");const auto output=effects.mix(800);check(std::any_of(output.begin(),output.end(),[](auto value){return value!=0;}),"original floor sound silent");}check(effects.played.back()=="MULTSPQ1/0000/2/0004","floor sound route mismatch");effects.load_room_sounds(0,1);check(!effects.active(4)&&effects.play_room_sound(2,2,5)&&effects.played.back()=="MULTSPQ1/0001/2/0002","room sound reload incorrect");check(!effects.play_room_sound(15,0),"missing bank fabricated");reject([&]{effects.play_room_sound(2,100);});}
 
+    // ps2_McSaveFile.c:577/CallSystemSeBasic: typing uses MIDI bank 2 lists 66..68, not COMMON SE.
+    if(argc>1){const auto root=std::filesystem::u8path(argv[1]);for(unsigned id:{0x80000242u,0x80000243u,0x80000244u}){
+        AudioMixer typing(root),reference(root);typing.load_room_sounds(0,1);reference.load_room_sounds(0,1);
+        reference.play_system_midi(id);typing.play_system(id);
+        check(typing.active(13)&&typing.played.back()=="SYSTEM/MIDI/2/"+std::to_string(id&255u),"typewriter high-bit sound not routed to system MIDI");
+        const auto pcm=typing.mix(8000);check(pcm==reference.mix(8000),"typewriter system dispatch differs from ExPlayMidi path");
+        check(std::any_of(pcm.begin(),pcm.end(),[](auto sample){return sample!=0;}),"typewriter MIDI PCM is silent");
+        check(typing.sequence_unavailable.empty(),"typewriter MIDI list unavailable");}}
+
     if(argc>1){AudioMixer enemies(std::filesystem::u8path(argv[1]));enemies.load_room_sounds(0,2);for(unsigned slot=0;slot<6;++slot)check(enemies.enemy_sound(slot,0)&&enemies.active(18+slot),"original enemy bank or independent slot missing");check(enemies.played.back()=="MULTSPQ1/0002/3/0000","enemy bank/list selection incorrect");enemies.stop_enemy_sound(2);for(unsigned slot=0;slot<6;++slot)check(enemies.active(18+slot)==(slot!=2),"enemy sound stop steals another voice");const auto samples=enemies.mix(100);check(std::any_of(samples.begin(),samples.end(),[](auto n){return n!=0;}),"enemy PCM silent");enemies.load_room_sounds(0,0);check(!enemies.active(18),"enemy voice survives room reload");reject([&]{enemies.enemy_sound(6,0);});}
     // RM_9340 bank 3 programs 60..67 carry no split. The mdlver-38 zombie (ene01_typ_tbl type 18,
     // add_seno 40) requests list 63 there: an original silent voice, not an unavailable sound.
@@ -330,6 +376,29 @@ int main(int argc,char** argv){try{
         silent.request_enemy_se(3,{},0x0101131c);silent.exec_enemy_se();check(silent.active(18),"RM_9340 zombie voice 28 missing");
         silent.request_enemy_se(1,{},0x0101133f);silent.exec_enemy_se();check(silent.unavailable.empty(),"split-less enemy program reported unavailable");
         check(silent.played.back()=="MULTSPQ2/0083/3/0063"&&!silent.active(19),"split-less enemy program not served silently");}
+    // RM_9370 (MULTSPQ2 pack 9370) MIDI bank 2, the sequences of event 11's bhEasySESet type 7 (CallNativeEventSe):
+    // MODHSYN.IRX program change (.text 0x75c) keeps no program for an empty table entry (0xffffffff: programs
+    // 23/24/27..30) or a number above the last index (39), note-on (0x5f90) then starts no voice; the split loop
+    // (0x6098) compares key bounds &0x7f and a key no split covers starts no voice either (program 11: key 60 only).
+    // The sequence runs on in its MIDI slot. Before: seq 11 "no split for key", seq 23/28/29 "entry outside section".
+    if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto index=read_asset_file(root/"files/MULTSPQ2.IDX",4096);BinaryView ids(index);
+        unsigned pack=0;while(pack<index.size()/2&&ids.u16(pack*2)!=9370)++pack;check(pack<index.size()/2,"RM_9370 sound pack missing");
+        const auto bytes=read_asset_file(root/"archives/MULTSPQ2"/(asset_number(pack)+".bin"),32*1024*1024);BinaryView spq(bytes);std::vector<std::uint8_t> programs;
+        for(unsigned i=0;i<16&&spq.u32(i*16);++i)if(spq.u32(i*16+8)==1&&spq.u32(i*16+12)==2){const auto offset=spq.u32(i*16),size=spq.u32(i*16+4);spq.require(offset,size);programs={bytes.begin()+offset,bytes.begin()+offset+size};break;}
+        check(!programs.empty(),"RM_9370 MIDI program bank 2 missing");
+        check(decode_system_sound(programs,11,60).frames()>0,"RM_9370 bank 2 program 11 key 60 (its split) silent");
+        check(decode_system_sound(programs,11,61).frames()==0,"key outside every split of program 11 keyed a voice");
+        for(const unsigned empty:{23u,24u,27u,28u,29u,30u})check(decode_system_sound(programs,empty,60).frames()==0,"empty program entry keyed a voice");
+        check(decode_system_sound(programs,40,60).frames()==0,"program above the table's last index keyed a voice");
+        AudioMixer room(root);room.set_disc(1);room.load_room_sounds(9,37);
+        check(room.event_sound(0,523)&&room.active(12)&&room.played.back()=="MULTSPQ2/"+asset_number(pack)+"/2/seq11/prog11","RM_9370 seq 11 not played");
+        const auto sounding=room.mix(48000);check(std::any_of(sounding.begin(),sounding.end(),[](auto n){return n!=0;}),"RM_9370 seq 11 key 60 silent");
+        for(const unsigned seq:{23u,28u,29u}){AudioMixer quiet(root);quiet.set_disc(1);quiet.load_room_sounds(9,37);
+            check(quiet.event_sound(0,0x200|seq)&&quiet.active(12)&&quiet.played.back()=="MULTSPQ2/"+asset_number(pack)+"/2/seq"+std::to_string(seq)+"/prog"+std::to_string(seq),"RM_9370 sequence on an empty program not run");
+            const auto pcm=quiet.mix(4800);check(std::all_of(pcm.begin(),pcm.end(),[](auto n){return n==0;}),"empty program sounded");
+            check(quiet.sequence_unavailable.empty()&&quiet.unavailable.empty(),"empty program reported unavailable");}
+        check(room.sequence_unavailable.empty()&&room.unavailable.empty(),"RM_9370 seq 11 reported unavailable");}
+    if(argc>1)midi_multi_split(std::filesystem::u8path(argv[1]));
 
     if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto index=read_asset_file(root/"files/MULTSPQ1.IDX",4096);BinaryView ids(index);
         // COMMON SQ bank 1 uses key 60 and velocities 120/110/120/120.

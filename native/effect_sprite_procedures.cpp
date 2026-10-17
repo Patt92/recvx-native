@@ -3586,6 +3586,91 @@ void step_eff136(EffectSprite& s,const EffectContext& c,bool&){
     s.afterimage_alpha=unsigned((s.ct0+1)*40)&0xffu;
     s.fnc_exit_src=-1;s.fnc_exit_dst=-1;     /* Chunkstreifen setzen das Register selbst, siehe Zeichenpass */
 }
+// effsub6.c:18 bhEff085 — Texturtausch am Gegnermodell, ohne Zeichnung (kein Pfad reiht den
+// Satz in eine Zeichenliste ein). mode0 0 (:24-33): flg |= 1, stflg = 0, mode0 = 1 und mode1..3
+// genullt, also auch ein vorher gesetztes mode1. mode0 1 (:34-67): der Skriptbefehl 0x91
+// bhEffModeSet (event.c:6519, eff[sys->efid[v0]].mode1 = v1) waehlt. mode1 1: ist rom->effp[op->type]
+// an einen Raumgegner gebunden (lkflg 2), sichert op->exp0 den texaddr von ene[lkno].mlwP->texP->
+// textures[3] und ersetzt ihn durch den von sys->ef_tlist.textures[sys->ef_tn[op->id]]; mode1 2
+// schreibt exp0 zurueck. Beide setzen mode1 = 0, jeder andere Wert bleibt stehen. Ein zweites
+// mode1 1 sichert den schon getauschten Eintrag (Originalverhalten). Keine Zufallsaufrufe.
+void step_eff085(EffectSprite& s,const EffectContext&,bool&){
+    switch(s.mode0){
+    case 0:
+        s.flg|=0x1u;
+        s.stflg=0;
+        s.mode0=1;s.mode1=0;s.mode2=0;s.mode3=0;
+        break;
+    case 1:
+        if(s.mode1==1){
+            int lkflg=0,lkno=0;
+            if(hook_room_effect_link(s.type,lkflg,lkno,"bhEff085")&&lkflg==2){
+                const auto tnp=hook_effect_texaddr(s.id,"bhEff085");                   /* :41 tnp = &ef_tlist.textures[ef_tn[op->id]] */
+                s.exp0_texaddr=hook_enemy_texaddr_get(unsigned(lkno),3,"bhEff085");    /* :49 op->exp0 = tnp2->texaddr */
+                if(tnp)hook_enemy_texaddr_set(unsigned(lkno),3,tnp,"bhEff085");      /* :51 tnp2->texaddr = tnp->texaddr */
+            }
+            s.mode1=0;
+        }
+        else if(s.mode1==2){
+            int lkflg=0,lkno=0;
+            if(hook_room_effect_link(s.type,lkflg,lkno,"bhEff085")&&lkflg==2)
+                hook_enemy_texaddr_set(unsigned(lkno),3,s.exp0_texaddr,"bhEff085");  /* :60 texaddr = (int)op->exp0 */
+            s.mode1=0;
+        }
+        return;
+    default:break;
+    }
+}
+// effsub1.c:177 bhEff2D — texturiertes Schirmviereck (RM_0000 Raumeffekte 9..11: Prologtexte,
+// type 45 = Texturgruppe, lkono 0/1/2 = Bild; RM_5500 ebenso). mode0 0 (:184-215): flg |= 0x1000000,
+// tex_id = type, ani_ct = lkono, px/py/pz = 0, gidx = bhGetGidx (effect.c:249: ef_tlist.textures
+// [ef_tn[tex_id] + ani_ct]; der native Zeichenpass loest Gruppe tex_id, Bild ani_ct aus demselben
+// Satz auf, beide schreibt danach keine Zeile mehr), tv u/v (0,0)(1,0)(0,1)(1,1), alle Eckfarben
+// 0xFFE0E0E0, bl 8/6, mode0 = 1. mode0 1 (:216-249): mode1 0 (Skriptbefehl 0x91 bhEffModeSet)
+// haelt den Satz unsichtbar (flg |= 0x1000000); sonst Breite u = sx/4 * 512*(tv1.u - tv0.u),
+// Hoehe v = sy/4 * 512*(tv2.v - tv0.v), flg &= ~0x1000000, Ecken (px,py),(px+u,py),(px,py+v),
+// (px+u,py+v) in Schirmkoordinaten mit z = 1/sz, Satz in sys->ef_trs2d (bhDrawTrsEffect2D,
+// effect.c:1744). px/py schreibt das Skript ueber bhLoadWork Art 4 + Common_controll 7/2
+// (event.c:12034/12167). Keine Zufallsaufrufe.
+void step_eff2d(EffectSprite& s,const EffectContext&,bool&){
+    switch(s.mode0){
+    case 0:
+        s.flg|=0x1000000u;
+        s.tex_id=int(s.type);
+        s.ani_ct=unsigned(s.lkono);
+        s.px=0;s.py=0;s.pz=0;
+        s.tv[0].u=0;s.tv[0].v=0;
+        s.tv[1].u=1.0f;s.tv[1].v=0;
+        s.tv[2].u=0;s.tv[2].v=1.0f;
+        s.tv[3].u=1.0f;s.tv[3].v=1.0f;
+        quad_color(s,0xFFE0E0E0u);
+        s.bl_src=8;s.bl_dst=6;
+        s.mode0=1;
+        break;
+    case 1:{
+        if(s.mode1==0){s.flg|=0x1000000u;break;}
+        const float u=(s.sx/4.0f)*(512.0f*(s.tv[1].u-s.tv[0].u));
+        const float v=(s.sy/4.0f)*(512.0f*(s.tv[2].v-s.tv[0].v));
+        s.flg&=~0x1000000u;
+        s.tv[0].x=s.px;s.tv[0].y=s.py;s.tv[0].z=1.0f/s.sz;
+        s.tv[1].x=s.px+u;s.tv[1].y=s.py;s.tv[1].z=1.0f/s.sz;
+        s.tv[2].x=s.px;s.tv[2].y=s.py+v;s.tv[2].z=1.0f/s.sz;
+        s.tv[3].x=s.px+u;s.tv[3].y=s.py+v;s.tv[3].z=1.0f/s.sz;
+        queue_trs2d(s);
+        break;}
+    default:break;
+    }
+}
+// effsub1.c:4826 bhEff021 — Prologbalken (RM_0000 Raumeffekt 12). mode1 != 0 (:4829-4835): sys->cb_flg
+// |= 0x40 (bhControlCinesco/bhDrawCinesco bleiben damit aus, screen.c:225/250; CineSet 1 liest es,
+// event.c:1637), op->func = bhDraw021, Satz in sys->ef_fnc. mode1 0 (:4837-4841): cb_flg &= ~0x40 und
+// flg |= 0x1000000 (das kein Zweig wieder loescht; die ef_fnc-Schleife liest es nicht). Kein mode0,
+// keine Zufallsaufrufe. bhDraw021 (:4756-4824) zeichnet der Raumbesitzer in der ef_fnc-Reihenfolge
+// (RoomWorld::draw_eff021_bars); das Blendpaar bleibt 8/6 (fnc_exit 8/6).
+void step_eff021(EffectSprite& s,const EffectContext&,bool&){
+    if(s.mode1!=0){request_cb_flg(0x40u,0u);queue_custom(s);}
+    else{request_cb_flg(0u,0x40u);s.flg|=0x1000000u;}
+}
 // effsub6.c:11 eye_ofs — die beiden Augenpunkte im Raum der Gelenkmatrix.
 const NJS_POINT3 eye_ofs[2]={{0.28f,0.82f,-0.90f},{-0.28f,0.82f,-0.90f}};
 // effsub6.c:114 bhEff146_Init — legt jeden Pass zwei Augenlichter (146) an der
@@ -4647,7 +4732,8 @@ const HandEffectProcedure hand_effect_procedures[]={
     {149,step_eff149},
     {12,step_eff012},{19,step_eff019},{23,step_eff023},{118,step_eff118},{204,step_eff204},
     {114,step_eff114},{221,step_eff221},
-    {145,step_eff145},{146,step_eff146},{127,step_eff127},{219,step_eff219},{135,step_eff135},{136,step_eff136},
+    {85,step_eff085},{145,step_eff145},{146,step_eff146},{127,step_eff127},{219,step_eff219},{135,step_eff135},{136,step_eff136},
+    {20,step_eff2d},{21,step_eff021},
 };
 const std::size_t hand_effect_procedure_count=sizeof(hand_effect_procedures)/sizeof(hand_effect_procedures[0]);
 }

@@ -39,6 +39,10 @@ struct EffectSprite {
     // Schirmliste dieses Passes; bhDrawNtxEffect2D (effect.c) zeichnet pv[0..pn) mit
     // njDrawPolygon(trans 1) ueber das fertige Bild. Wie polygon_queued je Pass neu gesetzt.
     bool ntx2d_queued=false;
+    // sys->ef_trs2d[ef_trs2dn++] = op (effsub1.c:249 bhEff2D): die texturierte Schirmliste dieses
+    // Passes; bhDrawTrsEffect2D (effect.c:1744) zeichnet njDrawTexture(tvp, pn, gidx, 1) mit dem
+    // Blendpaar des Satzes. Wie polygon_queued je Pass neu gesetzt; kein Mitglied von sys->ef_trs.
+    bool trs2d_queued=false;
     // Mitgliedschaft dieses Bildes in sys->ef_trs (effect.c:910 bhControlEffect
     // leert die Liste jeden Pass; bhDrawTrsEffect3D zeichnet nur, was drinsteht).
     bool frame_queued=false;
@@ -151,6 +155,9 @@ struct EffectSprite {
     bool flame_compact_uv=false; // bhEff009 latches its UV bank at initialization.
     // O_WRK.exp0 von bhEff_E16_LaserSightDraw: die von bhCollisionCheckLine2 getroffene Flaeche (ATR_WORK*).
     std::optional<CollisionWall> line_wall;
+    // O_WRK.exp0 von bhEff085 (effsub6.c:49): der gesicherte texaddr von ene[lkno].mlwP->texP->
+    // textures[3], als Griff auf die Szenentextur; nullptr = NULL (AllocOwork nullt den Satz).
+    std::shared_ptr<const SceneTexture> exp0_texaddr;
 };
 // Read-only per-pass values from native owners; never persisted as a sys/plp work.
 // gm_flg: bhSetRoom (room.c:471) clears bit 0 on every room load and no other
@@ -251,6 +258,16 @@ struct EffectWorldHooks {
     // only_if_off: nur wenn lgtp[0].flg & 0x2 nicht steht (effsub1.c bhEff019 type 0);
     // bhEff130 type 6 (effsub1.c:10076) schreibt unbedingt.
     std::function<void(NJS_POINT3 pos,NJS_POINT3 rgb,float nr,float fr,bool only_if_off)> room_light0;
+    // effsub6.c:43/56 bhEff085: rom->effp[type].lkflg/lkno, wie bhSetEffectLink (room.c:787) sie beim
+    // Raumladen hinterlaesst (lkno ausserhalb der Raumanzahl -> 0). false: type ausserhalb rom->eff_n.
+    std::function<bool(unsigned type,int& lkflg,int& lkno)> room_effect_link;
+    // effsub6.c:47-51/60 bhEff085: ene[enemy].mlwP->texP->textures[index].texaddr als Griff auf die
+    // Szenentextur. get: nullptr, wenn der Werksatz diesen Eintrag nicht hat. set schreibt den Eintrag
+    // der geteilten texP (sys->et_lp, room.c:592-604): jeder Raumgegner mit derselben Liste sieht ihn.
+    std::function<std::shared_ptr<const SceneTexture>(unsigned enemy,unsigned index)> enemy_texaddr_get;
+    std::function<bool(unsigned enemy,unsigned index,const std::shared_ptr<const SceneTexture>& texaddr)> enemy_texaddr_set;
+    // effsub6.c:41 &sys->ef_tlist.textures[sys->ef_tn[group]]: das erste Bild der Effektgruppe.
+    std::function<std::shared_ptr<const SceneTexture>(unsigned group)> effect_texaddr;
 };
 void set_effect_world_hooks(EffectWorldHooks hooks);
 // effsub3.c:1008 bhSetEffParticleMk2(lkwkp, lnk_no, off, dir, src, dst, typ) aus einer Effektprozedur (Partikelbesitzer des Raums).
@@ -318,7 +335,10 @@ struct EffectOutput {std::vector<EffectSpawn> spawns;std::vector<unsigned> sound
     // Spielerkopf steigt. Der Raumbesitzer traegt es am Spielerwork ein.
     bool player_killed=false;
     // sys->ef_flg-Bits, die eine Prozedur setzt (effsub1b.c:631 bhEff135: 0x4).
-    unsigned effect_flags=0;};
+    unsigned effect_flags=0;
+    // sys->cb_flg-Bits, die eine Prozedur setzt bzw. loescht (effsub1.c:4831/4839 bhEff021: 0x40);
+    // der Eventbesitzer (flags[10][0]) traegt sie ein.
+    unsigned cb_flg_set=0,cb_flg_clear=0;};
 // Fills the effect work exactly as bhSetEffectTb copies an EF_WORK.
 void initialize_effect_sprite(EffectSprite& sprite,const EffectSpawn& spawn);
 // bhSetExplosion (weapon.c): sound 534, flash light, effects 16/23/24. `view` is cam.vx/vy/vz.

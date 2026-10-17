@@ -4,12 +4,15 @@
 #include "movie.h"
 #include "renderer.h"
 #include "asset_io.h"
+#include "room.h"
 #include <cmath>
 #include <cstdio>
 #include <string>
 #include <algorithm>
 #include <functional>
 #include <vector>
+#include <map>
+#include <array>
 #include <iostream>
 #include <stdexcept>
 using namespace recvx;
@@ -22,15 +25,16 @@ struct Room {
  std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn actor;std::size_t motion=42;std::int64_t frame=0;
  Inventory inventory;StatusMenu menu;MessageDialog dialog;AudioMixer audio;MoviePlayer movie;PlayerAsset body;RoomWorld world;EventVm vm;GameplayInput input;
  // `pre` runs before bhInitEvent (scd0), like flags carried into the room from elsewhere.
- Room(const std::filesystem::path& data,const char* name,const std::function<void(EventVm&,RoomWorld&)>& pre={}):bytes(read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.at(0)),audio(data),movie(data,{},audio),body(PlayerAsset::load(data)),world(bytes,scene,actor,motion,frame,audio,data,{},name),vm(bytes,inventory,dialog),input(inventory,menu,dialog,&vm){
+ Room(const std::filesystem::path& data,const char* name,const std::function<void(EventVm&,RoomWorld&)>& pre={}):bytes(read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.empty()?SceneSpawn{}:scene.spawns.at(0)) /* wie runtime.cpp:420 (RM_9360 hat keine posp) */,audio(data),movie(data,{},audio),body(PlayerAsset::load(data)),world(bytes,scene,actor,motion,frame,audio,data,{},name),vm(bytes,inventory,dialog),input(inventory,menu,dialog,&vm){
   bind_item_names(read_asset_file(data/"files/SYSMES.ALD",4*1024*1024)); // sys->mes_ip wie GameUi in der Runtime
-  world.set_player_asset(&body);vm.values[1]=std::string(name)=="RM_0050"?5:0;
+  world.set_player_asset(&body);{const auto id=RoomIdentity::parse(std::string(name)+".RDX");vm.values[0]=id.stage;vm.values[1]=id.room;} // runtime.cpp: sys->stage_no/room_no aus dem Raumnamen
   vm.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes[1]);return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};
   vm.task_started=[&](unsigned n){world.start_task(n);};vm.animation_frame=[&](unsigned k,unsigned n){return world.frame(k,n);};vm.object_position=[&](unsigned k,unsigned n){return world.position(k,n);};vm.enemy_joint_position=[&](unsigned n,unsigned node){return world.enemy_joint_position(n,node);};vm.set_item_position=[&](unsigned n,NJS_POINT3 p){world.set_item_position(n,p);};vm.enemy_disable=[&](unsigned n){world.deactivate_enemy(n);};
   vm.audio_active=[&](unsigned n){return audio.active(n);};vm.movie_active=[&]{return movie.active();};vm.movie_time=[&]{return movie.time_centiseconds();};vm.enemy_dead=[&](unsigned n){return world.enemy_dead(n);};
   input.video_active=[&]{return movie.active();};input.skip_video=[&]{movie.stop();};vm.door=[](const DoorRequest&){return true;};
   if(std::string(name)=="RM_0050")inventory.acquire(84,1); // Diagnostic precondition: the player brings the padlock key into the room.
-  if(pre)pre(vm,world);audio.begin_room_init();vm.initialize();audio.load_room_sounds(0,vm.values[1],audio.take_room_sound_case());audio.room_fade_in();
+  audio.mount_sound_afs(vm.values[0]); // system.c:1602 Diskwechsel vor dem Raumladen wie runtime.cpp (Stufe >= 6: Satz 2)
+  if(pre)pre(vm,world);audio.begin_room_init();vm.initialize();audio.load_room_sounds(vm.values[0],vm.values[1],audio.take_room_sound_case());audio.room_fade_in();
  }
  void tick(){input.apply({});vm.check_floor(actor.position,actor.yaw,world.floor_at(actor.position));vm.tick();input.synchronize();world.set_simulation_flags(vm.flags[6][0]);world.tick();vm.flags[4][0]|=world.take_enemy_room_flags();movie.tick();audio.mix();if(!vm.errors.empty()){for(const auto& e:vm.errors)std::cerr<<e<<"\n";}check(vm.errors.empty(),"original event stream blocked");}
  bool task(unsigned event){for(const auto& t:vm.task_states())if(t.event==event)return true;return false;}
@@ -79,6 +83,24 @@ int main(int argc,char** argv){try{
    {10,0,0,6},{10,2,0,6},{10,3,0,2},{22,1,0,6},{22,9,0,2},{7,0,0,8},{8,0,0,8},{27,0,0,8},{140,0,0,8},{26,0,0,10},{38,0,0,10},
    {24,1,0,8},{24,1,3,8},{24,1,4,3},{25,1,0,8},{25,1,1,8},{25,1,2,3},{34,1,0,10},{34,1,3,10},{34,1,4,3},{35,1,0,8},{35,1,1,9},{35,1,2,3},{1,0,0,0},{37,0,0,0},{54,0,0,0}};
   for(const auto& r:rows){const auto got=EventVm::common_controll_length(r.cmd,r.b2,r.b3);if(got!=r.len){std::cerr<<"Common_controll "<<r.cmd<<" bytes "<<r.b2<<"/"<<r.b3<<": length "<<got<<" expected "<<r.len<<"\n";check(false,"Common_controll length differs from the original pointer advance");}}}
+ // Obj_controll (event.c:9719-9744) hinter bhObjCtr (:9709, verbraucht 0x66, gibt immer 1 zurueck):
+ // 20 (:9727) ++ +=2 -> 4 Bytes, 1 (:9737) ++ -> 2 Bytes; jeder andere Befehl faellt in den
+ // Default-Zweig (:9742) ohne Vorschub: das Befehlsbyte laeuft als naechster Opcode (event.c:13047).
+ {struct Row{unsigned cmd;std::size_t len;};const Row rows[]={{1,2},{20,4},{0,1},{2,1},{12,1},{19,1},{21,1},{128,1},{255,1}};
+  for(const auto& r:rows){const auto got=EventVm::obj_controll_length(r.cmd);if(got!=r.len){std::cerr<<"Obj_controll "<<r.cmd<<": length "<<got<<" expected "<<r.len<<"\n";check(false,"Obj_controll length differs from the original pointer advance");}}}
+ // RM_3020 Ereignis 6 (@040a): 0x65 bhLoadWork (Objekt 4), 0x66 Obj_controll 12 = Default-Zweig, das
+ // Befehlsbyte 0x0c laeuft als bhFlrAtariSet(flrp[0], v1 0 -> flg |= 1) @040f, dann 0x00 bhEnd @0413
+ // (event.c:387, gibt 0 zurueck ohne Vorschub: die Task bleibt dort wie im Original stehen).
+ // Kein Raumskript startet Ereignis 6 (kein 0x14 mit evt 6 in RM_3020); expliziter Start.
+ {Room r(data,"RM_3020");check(!r.vm.floor_areas().empty(),"RM_3020 has no floor ATR 0");
+  const bool before=r.vm.floor_areas()[0].flags&1u;r.vm.start(0,6);r.vm.set_flag(6,27,0); // sp_flg 0x10 (bhEventScheduler2, event.c:13024), sonst von scd1 @014a/@0172 gesetzt
+  unsigned offset=0;for(unsigned t=0;t<4;++t){r.tick();for(const auto& s:r.vm.task_states())if(s.event==6)offset=s.offset;}
+  for(const auto& err:r.vm.errors)std::cerr<<"RM_3020: "<<err<<'\n';
+  check(r.vm.errors.empty(),"RM_3020 event 6 blocked on Obj_controll 12");
+  check(offset==0x413,"RM_3020 event 6 did not reach bhEnd @0413 through the default branch and 0x0c");
+  check(r.vm.floor_areas()[0].flags&1u,"RM_3020 event 6: 0x0c bhFlrAtariSet did not set flrp[0].flg bit 0");
+  check(std::none_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0x66||c.opcode==0x0c;}),"RM_3020 event 6 left 0x66/0x0c pending");
+  std::cout<<"RM_3020 event 6: Obj_controll 12 default branch, 0x0c bhFlrAtariSet (flrp[0] bit 0 "<<before<<" -> 1), task parked at bhEnd @0413.\n";}
  // RM_0080 shutter switch (interaction 8, scd1 @0c46): with ev_flg 110 set (lock released)
  // and ev_flg 10 clear, "Push the switch?" Yes starts events 5-11/40/41. Events 7 and 8 are the
  // two zombies behind the shutter: Common 25 walk, Common 53 (@132a/@1360), then
@@ -150,7 +172,7 @@ int main(int argc,char** argv){try{
  {Room r(data,"RM_1050",[](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);vm.set_flag(1,0x92,0);});
   for(unsigned t=0;t<3;++t)r.tick();
   check(std::none_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0x91;}),"RM_1050 bhEffModeSet on bhEff111 unbound");
-  const auto* m=r.world.effect_state(1);check(m&&m->id==111&&m->mode0==2&&m->tex_id==111&&m->lkono==0&&(m->flg&0x4020000u)==0x4020000u,"bhEff111 state differs (lkono must be 0 without lkflg, room.c:781)");
+  const auto* m=r.world.effect_state(1);check(m&&m->id==111&&m->mode0==2&&m->tex_id==111&&m->lkono==1&&(m->flg&0x4020000u)==0x4020000u,"bhEff111 state differs (room.c:874-878 bhSetEffectLink lkflg 0: op->lkono = efp->lkono = 1 for RM_1050 entry 1, so effsub1.c:7036 takes the ocol 0x400000/ct0 64 branch)");
   check(r.vm.flags[11][0]&0x200u,"bhEff111 does not request the small-screen render (gm_flg 0x200)");
   SceneCamera view;view.position={24.7329f,14.44f,32.7362f};view.angles={0,0,0};view.perspective=10012;view.clip_near=1;view.clip_far=20000;
   const auto rt=r.world.small_screen_pass(view);check(rt&&rt->slot==1&&rt->cut==6,"monitor render pass missing for a camera that sees the monitor");
@@ -308,6 +330,206 @@ int main(int argc,char** argv){try{
   check(!saw_c0,"RM_0090 laser event leaves bhCyodanSetEx (0xc0) unbound");
   for(const auto& gap:r.world.unbound_enemy_routines())if(gap.find("bhCyodanSetEx")!=std::string::npos||gap.find("PtclTbl")!=std::string::npos)throw std::runtime_error("RM_0090 laser event: "+gap);
   check(particles>0,"RM_0090 laser event spawned no bhSetEffParticleMk2 particles");
+ }
+ // RM_5010 Ereignis 8 (scd1 @026c: ELSE-Zweig von IF rm_flg 0x4, den en19.c:1068 bei TY_BR0_PINCH oder
+ // hp < 0 setzt; Katapulthebel mit liegendem Tyrant): Befehl 0xc8 @09ea = event.c:8722 bhEffBakuDrmSet,
+ // Vorzeichenbyte 2 und drei u16/100 -> (200, -18, 22), dann weapon.c:1812 bhSetExplosionEffect am
+ // Weltbesitzer (RoomWorld::explode_effect): Feuerball 23 und zwei Truemmer 24 im eff[512]-Pool.
+ // Expliziter Ereignisstart; die bhFrameCheck-Warten davor laufen auf den EN19-Motions (Common_controll 24).
+ // Gegenprobe im selben Lauf: ohne Bindung von 0xc8 bleibt der Befehl pending und der Pool ohne 23/24.
+ for(const bool bind_c8:{true,false}){
+  int hp=160;std::uint32_t head=0; // plp fuer bhEne19 (native/enemies/en19.c:62 player_get), wie runtime.cpp bind_enemy_player
+  Room r(data,"RM_5010",[&](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);w.bind_enemy_player(hp,head);vm.set_flag(1,269,0);}); // 1:269 gesetzt: kein Erstbesuchs-Ereignis 0-3
+  r.world.set_enemy_ai(true); // Gegnerpass (eneset.c:352) treibt die EN19-Motion der Warten
+  const auto inner=r.vm.binding;r.vm.binding=[&,inner](const EventCommand& c){if(c.opcode==0xc8&&!bind_c8)return false;return inner(c);};
+  const auto played_before=r.audio.played.size();
+  r.vm.start(0,8);r.vm.set_flag(6,27,0); // scd1 @0204 setzt im Hebelzweig sp_flg 0x10 (bhEventScheduler2, event.c:13024) neben den EvtStarts
+  bool reached=false,fire=false,debris=false;unsigned ticks=0;
+  for(;ticks<1500&&r.task(8);++ticks){r.world.tick_camera(r.scene,r.scene.cameras.at(0),0);r.tick();
+   for(const auto& t:r.vm.task_states())if(t.event==8&&t.offset>=0x9f2)reached=true;
+   for(unsigned i=0;const auto* e=r.world.effect_state(i);++i){if(!e->flg)continue;if(e->id==23)fire=true;if(e->id==24)debris=true;}}
+  for(const auto& err:r.vm.errors)std::cerr<<"RM_5010: "<<err<<'\n';
+  check(r.vm.errors.empty(),"RM_5010 event 8 blocked on an unimplemented opcode (0xc8 bhEffBakuDrmSet)");
+  check(reached,"RM_5010 event 8 never passed 0x9ea (bhFrameCheck waits on the EN19 motions stalled)");
+  const bool pending=std::any_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0xc8;});
+  if(bind_c8){check(!pending,"0xc8 bhEffBakuDrmSet left unbound");
+   for(const auto& gap:r.world.unbound_enemy_routines())if(gap.find("bhSetExplosionEffect")!=std::string::npos)throw std::runtime_error("RM_5010 event 8: "+gap);
+   check(fire&&debris,"bhSetExplosionEffect from the event owner spawned no fireball 23 / debris 24");
+   // 0x86 @0908 bhEasySESet Typ 7, Art 2 Index 0 (sys->obwp[0], die Waffe), Knoten 0, SeNo 0x206:
+   // CallNativeEventSe Mode 1 (sdfunc.c:1861) liest pPos nicht, der Ruf laeuft ohne owP-Aufloesung.
+   // In Ereignis 8 nennt nur dieser Befehl Sequenz 6 der Bank 2.
+   for(const auto& gap:r.world.unbound_enemy_routines())if(gap.find("bhEasySESet")!=std::string::npos)throw std::runtime_error("RM_5010 event 8: "+gap);
+   const auto seq6=std::count_if(r.audio.played.begin()+std::ptrdiff_t(played_before),r.audio.played.end(),[](const std::string& s){return s.find("/2/seq6/")!=std::string::npos;});
+   if(seq6!=1)std::cerr<<"RM_5010 event 8: bank 2 seq 6 played "<<seq6<<" times\n";
+   check(seq6==1,"RM_5010 event 8: bhEasySESet @0908 (obwp[0], CallNativeEventSe mode 1) did not play bank 2 sequence 6");}
+  else check(pending&&!fire&&!debris,"counter-check: without the 0xc8 binding the pool must stay without 23/24");
+ }
+ std::cout<<"RM_5010 event 8: 0xc8 bhEffBakuDrmSet -> bhSetExplosionEffect spawns 23/24; unbound counter-check leaves the pool empty; 0x86 @0908 plays bank 2 seq 6 without owP.\n";
+ // RM_3230 Ereignis 3 (@0af4): WHILE bhFrameCheck(Art 1 Index 2, frm_no < 124<<16) WAIT. rom->enep[2] ist
+ // bhSubpl id 96 (subpl.c:357 mv00_subpl0_1: nur mode3 0/1 schieben). Ereignis 1 (@09e8 Common_controll 24,
+ // mtn_add 0x8000; @0a0c bhMotionPauseSet 0 -> mode3 4) wartet bis frm_no >= 123<<16; bhEwhile (event.c:9147)
+ // gibt beim Schleifenende 0 zurueck, der Gegnerpass des naechsten Bildes schiebt noch einmal um 0x8000, dann
+ // steht der Work bei 123.5. 124<<16 wird nie erreicht: Originalverhalten, der Raumwechsel beendet die Task.
+ {int hp=160;std::uint32_t head=0;Room r(data,"RM_3230",[&](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);w.bind_enemy_player(hp,head);});r.world.set_enemy_ai(true);
+  const auto* e=r.world.state(1,2);check(e&&e->identity==96,"RM_3230 rom->enep[2] is not bhSubpl id 96");
+  // scd1 @0770 startet die Szene nur mit ev_flg 260 frei und cb_flg Bit 22 (Bodenfeld 0 des Spielers); hier explizit
+  // Ereignis 1 (Ebene 1, Motion/Pause) und 3 (Ebene 3, Warte 124) mit sp_flg 0x10 wie @078c, sp_flg 0x1 frei wie @0786.
+  r.vm.start(1,1);r.vm.start(3,3);r.vm.set_flag(6,27,0);r.vm.set_flag(6,31,1);r.tick();check(r.task(3)&&r.task(1),"RM_3230 events 1 and 3 did not start");
+  std::int64_t peak=0;bool paused=false;unsigned ticks=0;
+  for(;ticks<800&&r.task(3);++ticks){r.tick();if(e->enemy_bound){peak=std::max<std::int64_t>(peak,e->enemy.frm_no);if(e->enemy.mode3==4)paused=true;}}
+  if(!(paused&&e->enemy.mode3==4&&e->enemy.frm_no==123*65536+32768&&peak==123*65536+32768))std::cerr<<"RM_3230 enep[2] mode3 "<<unsigned(e->enemy.mode3)<<" frm_no "<<e->enemy.frm_no/65536.0<<" peak "<<peak/65536.0<<" ticks "<<ticks<<'\n';
+  check(paused&&e->enemy.mode3==4&&e->enemy.frm_no==123*65536+32768&&peak==123*65536+32768,"RM_3230 enep[2] does not hold at 123.5 under bhMotionPauseSet (subpl.c:357, Motion.c:21)");
+  bool waiting=false;for(const auto& t:r.vm.task_states())if(t.event==3&&t.offset>=0xaf4&&t.offset<=0xafd)waiting=true;
+  check(waiting&&r.vm.errors.empty(),"RM_3230 event 3 left its 124 wait although frm_no never reaches 124<<16 (original behaviour)");
+  std::cout<<"RM_3230 event 3: enep[2] (bhSubpl 96) holds at 123.5 after bhMotionPauseSet, the 124 wait stays open as in the original.\n";}
+ // RM_9370 Ereignis 5 (@133e): zehn 0xc8 = event.c:8722 bhEffBakuDrmSet (@1ad4/1adc/1b00/1b1a/1c00/2396/23aa/
+ // 23c2/23ce/23da), dazwischen bhCamCheck (0x62, event.c:4881: sp_flg 0x40, st_flg 0x1, cam.flg 0x2, evc_no)
+ // auf die Kameras 6/29/31 von Ereignis 2 und bhFrameCheck (0x38) auf rom->enep[0/1] (bhSubpl 92/97), Ende bhEvtEnd
+ // @23f2. Kein Ausloeser ausser dem Raumeintritt: scd0 @0054 loescht ev_flg 458, scd1 @0430 prueft 458 frei und
+ // startet @044c Ebene 5 Ereignis 5 (Eintritt aus RM_9091 Ereignis 2 @036e, Tuer 09/25). Hier also kein expliziter
+ // Start, sondern derselbe scd1-Pfad. Jede 0xc8 fuehrt weapon.c:1812 bhSetExplosionEffect aus: genau ein Feuerball 23
+ // Art 1 (seine Nachfolgeballe aus bhEff023 sind Art 0), zwei Truemmer 24, aus denen 25 entstehen.
+ // Gegenprobe im selben Lauf: ohne Bindung von 0xc8 bleibt der Befehl pending und kein 23 Art 1 entsteht.
+ for(const bool bind_c8:{true,false}){
+  int hp=160;std::uint32_t head=0;
+  // player.c:840 bhSetPlayer: bhCalcModel(plp) vor Event_init und danach je Bild (bhControlPlayer), wie runtime.cpp
+  // commit_player_joints; bhEff001 der Raumskripte liest plp->mlwP->owP.
+  const PlayerAsset pose_body=PlayerAsset::load(data);const auto spawn=decode_scene(read_asset_file(data/"rooms/RM_9370.RDT",64*1024*1024)).spawns.at(0);
+  const auto commit=[&](RoomWorld& w,const SceneSpawn& a,std::size_t m,std::int64_t f){std::vector<BoneMatrix> nodes;if(w.player_scripted)(void)w.sample_player(pose_body,&nodes);else nodes=pose_body.pose(m,f,a.position,a.yaw);w.commit_player_joints(pose_body.script_nodes(nodes));};
+  Room r(data,"RM_9370",[&](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);w.bind_enemy_player(hp,head);commit(w,spawn,42,0);});
+  r.world.set_enemy_ai(true); // Gegnerpass (eneset.c:352) treibt die bhSubpl-Motions der bhFrameCheck-Warten
+  r.vm.event_camera=[&](unsigned& index,unsigned& key){index=r.world.event_camera_index;key=r.world.event_camera_key();return r.world.event_camera;}; // wie runtime.cpp
+  // event.c:6519 bhEffModeSet (0x91, 4 Bytes) auf Raumeffekt 57 = bhEff085 (effsub6.c:18, rom->effp[57] lkflg 2
+  // lkno 1): Ereignis 2 @0fb0 mode1 1, Ereignis 0 @07ee mode1 2 und @07f2 mode1 0. Der Tausch zeigt sich als
+  // derselbe texaddr (geteilte Pixel) wie das erste Bild der Effektgruppe 85. @07ee und @07f2 geben beide 1
+  // zurueck und laufen im selben Schedulerpass (event.c:13047), nach bhControlEffect (main.c:195): bhEff085
+  // sieht mode1 2 nie, ene[1] behaelt den getauschten Eintrag (Originalverhalten, kein Zuruecksetzen).
+  struct ModeSet{unsigned mode;bool bound;unsigned pass;};std::vector<ModeSet> mode_sets;unsigned passes=0,swapped_ticks=0,restored_after_swap=0;
+  const auto* tex1=r.world.model_textures(1,1);const auto* group85=r.world.effect_group_textures(85);
+  check(tex1&&tex1->size()>3&&group85&&!group85->empty(),"RM_9370 ene[1] texP[3] or effect group 85 missing");
+  const auto* original3=(*tex1)[3].pixels.data();const auto* effect85=group85->front().pixels.data();
+  unsigned requests=0,hits=0,hits_bound=0;const auto inner=r.vm.binding;r.vm.binding=[&,inner](const EventCommand& c){if(c.opcode==0xc8&&!bind_c8)return false;const bool bound=inner(c);if(c.opcode==0xc8&&bound)++requests;if(c.opcode==0x6d){++hits;if(bound)++hits_bound;}if(c.opcode==0x91&&c.bytes.size()>2&&c.bytes[1]==0x39)mode_sets.push_back({c.bytes[2],bound,passes});return bound;};
+  r.world.tick_camera(r.scene,r.scene.cameras.at(0),0);r.tick();commit(r.world,r.actor,r.motion,r.frame);
+  check(r.task(5),"RM_9370 scd1 @044c did not start event 5 on room entry (ev_flg 458 cleared by scd0 @0054)");
+  std::vector<int> fireball_ct(1024,-1);unsigned fireballs=0,ticks=0,peak23=0,peak24=0,peak25=0;std::size_t peak_particles=0;
+  for(;ticks<8000&&r.task(5);++ticks){r.world.tick_camera(r.scene,r.scene.cameras.at(0),0);r.tick();commit(r.world,r.actor,r.motion,r.frame);
+   unsigned n23=0,n24=0,n25=0;
+   for(unsigned i=0;const auto* e=r.world.effect_state(i);++i){const bool live=(e->flg&1u)!=0;
+    if(live&&e->id==23)++n23;if(live&&e->id==24)++n24;if(live&&e->id==25)++n25;
+    const bool primary=live&&e->id==23&&e->type==1; // nur bhSetExplosionEffect setzt 23 Art 1
+    if(i<fireball_ct.size()){if(primary&&(fireball_ct[i]<0||e->ct0<fireball_ct[i]))++fireballs;fireball_ct[i]=primary?e->ct0:-1;}}
+   peak23=std::max(peak23,n23);peak24=std::max(peak24,n24);peak25=std::max(peak25,n25);peak_particles=std::max(peak_particles,r.world.blood_particles());
+   ++passes;const auto* now3=(*r.world.model_textures(1,1))[3].pixels.data();if(now3==effect85)++swapped_ticks;else if(swapped_ticks&&now3==original3)++restored_after_swap;}
+  // Ereignis 0 kann nach Ereignis 5 enden: bis zum Befehl @07f2 weiterlaufen lassen (gleicher Raum).
+  for(unsigned extra=0;extra<4000&&mode_sets.size()<3;++extra){r.world.tick_camera(r.scene,r.scene.cameras.at(0),0);r.tick();commit(r.world,r.actor,r.motion,r.frame);
+   ++passes;const auto* now3=(*r.world.model_textures(1,1))[3].pixels.data();if(now3==effect85)++swapped_ticks;else if(swapped_ticks&&now3==original3)++restored_after_swap;}
+  for(unsigned extra=0;extra<8;++extra){r.world.tick_camera(r.scene,r.scene.cameras.at(0),0);r.tick();++passes;const auto* now3=(*r.world.model_textures(1,1))[3].pixels.data();if(now3==effect85)++swapped_ticks;else if(swapped_ticks&&now3==original3)++restored_after_swap;}
+  for(const auto& err:r.vm.errors)std::cerr<<"RM_9370: "<<err<<'\n';
+  check(r.vm.errors.empty(),"RM_9370 event 5 blocked");
+  check(!r.task(5),"RM_9370 event 5 did not reach bhEvtEnd @23f2");
+  const bool pending=std::any_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0xc8;});
+  if(bind_c8){
+   for(const auto& gap:r.world.unbound_enemy_routines())std::cerr<<"RM_9370 event 5 gap: "<<gap<<'\n';
+   check(r.world.unbound_enemy_routines().empty(),"RM_9370 event 5 reported gaps");
+   if(requests!=10||fireballs!=10)std::cerr<<"RM_9370 event 5: "<<requests<<" bhEffBakuDrmSet, "<<fireballs<<" fireballs 23 type 1\n";
+   check(!pending&&requests==10&&fireballs==10,"RM_9370 event 5: expected ten bhEffBakuDrmSet -> bhSetExplosionEffect (ten fireballs 23 type 1)");
+   check(peak24>=2&&peak25>0,"RM_9370 event 5: explosions spawned no debris 24 / 25");
+   // event.c:5028 bhCyodanSet (0x6d, 22 Byte) -> effsub3.c:911 bhSetEffParticle: Treffer der Gefechtsszene.
+   for(const auto& c:r.vm.pending_bindings)if(c.event==5)std::cerr<<"RM_9370 event 5 pending opcode 0x"<<std::hex<<unsigned(c.opcode)<<" @"<<c.offset<<std::dec<<'\n';
+   check(std::none_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.event==5;}),"RM_9370 event 5 left commands pending");
+   check(hits>0&&hits_bound==hits&&peak_particles>0,"RM_9370 event 5: bhCyodanSet (0x6d) did not spawn bhSetEffParticle particles");
+   std::string modes;for(const auto& m:mode_sets)modes+=std::to_string(m.mode)+(m.bound?"b@":"p@")+std::to_string(m.pass)+" ";
+   std::cout<<"RM_9370 effect 57 (bhEff085): 0x91 mode1 sequence "<<modes<<"; ene[1] texP[3] = ef_tn[85] for "<<swapped_ticks<<" passes, restored "<<restored_after_swap<<".\n";
+   check(mode_sets.size()==3&&mode_sets[0].mode==1&&mode_sets[1].mode==2&&mode_sets[2].mode==0&&mode_sets[0].bound&&mode_sets[1].bound&&mode_sets[2].bound,"RM_9370: 0x91 bhEffModeSet on effect 57 not bound in the order 1 (event 2), 2, 0 (event 0)");
+   check(mode_sets[1].pass==mode_sets[2].pass&&mode_sets[0].pass<mode_sets[1].pass,"RM_9370: 0x91 @07ee/@07f2 not in the same scheduler pass");
+   check(swapped_ticks>0&&restored_after_swap==0&&(*r.world.model_textures(1,1))[3].pixels.data()==effect85,"RM_9370 bhEff085: ene[1] texP[3] must hold ef_tn[85] from event 2 on (mode1 2 is overwritten by 0 in the same pass)");
+   for(const auto& gap:r.world.unbound_enemy_routines())if(gap.find("bhEff085")!=std::string::npos||gap=="bhEff85")throw std::runtime_error("RM_9370: "+gap);
+   std::cout<<"RM_9370 event 5: 10x 0xc8 -> 10 fireballs 23 type 1 in "<<ticks<<" ticks, peak live 23/24/25 = "<<peak23<<"/"<<peak24<<"/"<<peak25<<"; "<<hits<<"x 0x6d bhCyodanSet, peak particles "<<peak_particles<<".\n";}
+  else check(pending&&requests==0&&fireballs==0,"counter-check: without the 0xc8 binding RM_9370 event 5 must spawn no fireball 23 type 1");
+ }
+ // RM_9370 Ereignis 11 (@330c, laeuft mit dem Raumeintritt): bhEasySESet (0x86, event.c:6117) Typ 7 -> CallNativeEventSe
+ // (sdfunc.c:1830) auf Bank 2, u. a. @35fe Sequenz 11 (Programm 11, Tasten 60/61), @37e4/@3898/@38a8 Sequenzen 23/29/28
+ // (leere Programmeintraege). event.c:6205 gibt nach PlayGameSe4Event immer 1 zurueck; MODHSYN (.text 0x75c/0x5f90)
+ // startet fuer leere Programme und ungedeckte Tasten keine Stimme. Erwartung: alle vier Befehle gebunden, keiner
+ // pending, die Sequenzen laufen (seqNN/progNN), keine Lueckenzeile. Zweiter Teil: ein nicht spielbarer Ruf
+ // (Testaufstellung: Sequenz 255 liegt hinter der Tabelle) gilt trotzdem als ausgefuehrt und bleibt benannte Audioluecke.
+ {
+  int hp=160;std::uint32_t head=0;
+  const PlayerAsset pose_body=PlayerAsset::load(data);const auto spawn=decode_scene(read_asset_file(data/"rooms/RM_9370.RDT",64*1024*1024)).spawns.at(0);
+  const auto commit=[&](RoomWorld& w,const SceneSpawn& a,std::size_t m,std::int64_t f){std::vector<BoneMatrix> nodes;if(w.player_scripted)(void)w.sample_player(pose_body,&nodes);else nodes=pose_body.pose(m,f,a.position,a.yaw);w.commit_player_joints(pose_body.script_nodes(nodes));};
+  Room r(data,"RM_9370",[&](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);w.bind_enemy_player(hp,head);commit(w,spawn,42,0);});
+  r.world.set_enemy_ai(true);
+  r.vm.event_camera=[&](unsigned& index,unsigned& key){index=r.world.event_camera_index;key=r.world.event_camera_key();return r.world.event_camera;};
+  struct Call{std::size_t offset;unsigned seq;bool seen=false,bound=false;};std::array<Call,4> calls{{{0x35fe,11},{0x37e4,23},{0x3898,29},{0x38a8,28}}};
+  const auto inner=r.vm.binding;r.vm.binding=[&,inner](const EventCommand& c){const bool bound=inner(c);if(c.opcode==0x86&&c.event==11)for(auto& k:calls)if(k.offset==c.offset){k.seen=true;k.bound=bound;}return bound;};
+  unsigned ticks=0;for(;ticks<6000&&!std::all_of(calls.begin(),calls.end(),[](const Call& k){return k.seen;});++ticks){r.world.tick_camera(r.scene,r.scene.cameras.at(0),0);r.tick();commit(r.world,r.actor,r.motion,r.frame);}
+  const auto need=[](bool ok,const std::string& why){if(!ok)throw std::runtime_error(why);};
+  for(const auto& k:calls){need(k.seen,"RM_9370 event 11: bhEasySESet @"+std::to_string(k.offset)+" not reached");need(k.bound,"RM_9370 event 11: bhEasySESet @"+std::to_string(k.offset)+" left unbound");
+   need(std::any_of(r.audio.played.begin(),r.audio.played.end(),[&](const std::string& s){return s.find("/2/seq"+std::to_string(k.seq)+"/prog"+std::to_string(k.seq))!=std::string::npos;}),"RM_9370 event 11: bank 2 sequence "+std::to_string(k.seq)+" not run");}
+  check(std::none_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0x86;}),"RM_9370: bhEasySESet left pending");
+  for(const auto& gap:r.audio.sequence_unavailable)std::cerr<<"RM_9370 sequence gap: "<<gap<<'\n';
+  check(r.audio.sequence_unavailable.empty(),"RM_9370 event 11: bank 2 sequences reported unavailable");
+  const std::vector<std::uint8_t> unplayable{0x86,0x07,0x00,0x0f,0x0f,0x80,0x80,0x00,0x00,0x01,0x01,0x00,0x00,0x00,0xff,0x02};
+  check(r.world.bind(EventCommand{0x86,11,11,0,unplayable}),"bhEasySESet with an unplayable sequence must still count as executed (event.c:6205)");
+  check(std::find(r.audio.unavailable.begin(),r.audio.unavailable.end(),"bhEasySESet type 7 slot 0 SeNo 767")!=r.audio.unavailable.end()&&!r.audio.sequence_unavailable.empty(),"unplayable bhEasySESet not reported as an audio gap");
+  std::cout<<"RM_9370 event 11: 4x bhEasySESet type 7 (seq 11/23/29/28) bound and run after "<<ticks<<" ticks; unplayable request reported as audio gap, not pending.\n";
+ }
+ // RM_9360 Ereignis 14 (@0ad6): 0xca @0b9a = event.c:8801 bhEffClearEvt (2 Bytes) -> effect.c:159 bhClearEventEffect,
+ // die selektive Freigabe (bhClrEff_YT effect.c:166, bhClrEff_RY effsub3.c:117, bhClrEff_YG effsub2.c:4793), nicht
+ // bhClearEffect (effect.c:153, ganzes eff[]). Start ueber den Raumeintritt: ev_flg 458 mitgebracht -> scd0 @0076 setzt
+ // Bank 4 Bit 0, scd1 @01f2 startet Ereignisse 10-17 (Ebene 4 Ereignis 14 @020a). Testaufstellung: rund zehn Passes vor
+ // 0xca legt der Test am Weltbesitzer eine Explosion (weapon.c:1812: 23 Art 1, zwei 24 mit Hilfssatz aus
+ // bhSetExtraEffectWork, daraus 25) und einen bhCyodanSet-Treffer (0x6d-Bytes aus RM_9370 @1634: Partikelwurzeln 302
+ // mit exp0/exp1) an. Erwartung direkt um den Befehl: 24/25/302 und ihre Hilfsplaetze frei, 23 und alle Raumeffekte
+ // unveraendert. Gegenprobe im selben Lauf: ohne Bindung bleibt 0xca pending und der Pool unveraendert.
+ for(const bool bind_ca:{true,false}){
+  int hp=160;std::uint32_t head=0;
+  Room r(data,"RM_9360",[&](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);w.bind_enemy_player(hp,head);vm.set_flag(1,458,0);});
+  r.world.set_enemy_ai(true); // bhFrameCheck @0aea wartet auf rom->enep[0]
+  r.vm.event_camera=[&](unsigned& index,unsigned& key){index=r.world.event_camera_index;key=r.world.event_camera_key();return r.world.event_camera;};
+  struct Slot{unsigned id,flg;int extra;};
+  const auto snapshot=[&]{std::vector<Slot> out;for(unsigned i=0;const auto* e=r.world.effect_state(i);++i)out.push_back({e->id,e->flg,e->extra_slot});return out;};
+  std::vector<Slot> before,after;std::size_t particles_before=0,particles_after=0;unsigned calls=0;
+  const auto inner=r.vm.binding;r.vm.binding=[&,inner](const EventCommand& c){
+   if(c.opcode!=0xca)return inner(c);
+   ++calls;before=snapshot();particles_before=r.world.blood_particles();
+   const bool bound=bind_ca&&inner(c);after=snapshot();particles_after=r.world.blood_particles();return bound;};
+  r.world.tick_camera(r.scene,r.scene.cameras.at(0),0);r.tick();
+  check(r.task(14),"RM_9360 scd1 @020a did not start event 14 with ev_flg 458 carried into the room");
+  bool spawned=false,hit_set=false;unsigned ticks=0;
+  for(;ticks<3000&&r.task(14)&&!calls;++ticks){
+   for(const auto& t:r.vm.task_states()){if(t.event!=14)continue;
+    if(t.offset>=0xb4a&&!spawned){spawned=true; // 24/25 brauchen einige Passes fuer ihren Hilfssatz (mode0 0)
+     check(r.world.explode_effect({r.actor.position.x,r.actor.position.y+10.0f,r.actor.position.z}),"RM_9360: bhSetExplosionEffect fixture failed");}
+    if(t.offset>=0xb92&&!hit_set){hit_set=true; // die Partikel dieses Treffers leben nur wenige Passes
+     const std::vector<std::uint8_t> hit{0x6d,0x64,0xb4,0xb4,0xf0,0x04,0x22,0x1a,0x2c,0x01,0x86,0x06,0x06,0x00,0x00,0x00,0xf0,0x00,0x78,0x00,0x00,0x00};
+     check(r.world.bind(EventCommand{0x6d,4,14,0,hit}),"RM_9360: bhCyodanSet fixture failed");}}
+   r.world.tick_camera(r.scene,r.scene.cameras.at(0),0);r.tick();}
+  for(const auto& err:r.vm.errors)std::cerr<<"RM_9360: "<<err<<'\n';
+  check(r.vm.errors.empty(),"RM_9360 event 14 blocked");
+  check(spawned&&hit_set&&calls==1,"RM_9360 event 14 did not reach 0xca @0b9a after the fixture");
+  const bool pending=std::any_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0xca;});
+  unsigned live23=0,live24=0,live25=0,live302=0,live_other_listed=0,extras=0,kept23=0,cleared=0,extras_freed=0,room_changed=0;std::map<unsigned,unsigned> other_ids;
+  for(std::size_t i=0;i<before.size();++i){const auto& b=before[i];const bool was=(b.flg&1u)!=0;const bool now=i<after.size()&&(after[i].flg&1u)!=0;
+   if(!was)continue;
+   if(b.id==23){++live23;if(now&&after[i].flg==b.flg)++kept23;}
+   // effect.c:166-203 / effsub3.c:117-142 / effsub2.c:4793-4823: die vollstaendigen id-Listen der drei Durchlaeufe
+   // (RM_9360 hat selbst Raumeffekte 159 in der Liste von bhClrEff_YT).
+   static const unsigned clear_ids[]={5,11,113,114,136,159,225,398,22,24,25,27,301,302,250,253,256,257,272,296,297,298,254,260};
+   const bool listed=std::find(std::begin(clear_ids),std::end(clear_ids),b.id)!=std::end(clear_ids);
+   if(listed&&b.id!=24&&b.id!=25&&b.id!=302){++live_other_listed;++other_ids[b.id];}
+   if(b.id==24)++live24;if(b.id==25)++live25;if(b.id==302)++live302;
+   if(listed){if(!now&&after[i].flg==0)++cleared;
+    if((b.id==24||b.id==25)&&b.extra>=0){++extras;if(std::size_t(b.extra)<after.size()&&after[std::size_t(b.extra)].flg==0)++extras_freed;}}
+   else if(b.id!=23&&(i>=after.size()||after[i].flg!=b.flg))++room_changed;}
+  std::cout<<"RM_9360 event 14 ("<<(bind_ca?"bound":"counter-check")<<") 0xca after "<<ticks<<" ticks: before live 23/24/25/302 = "<<live23<<"/"<<live24<<"/"<<live25<<"/"<<live302
+   <<", other listed "<<live_other_listed<<[&]{std::string o=" (";for(const auto& [id,n]:other_ids)o+=std::to_string(n)+"x"+std::to_string(id)+" ";o.back()=')';return other_ids.empty()?std::string():o;}()<<", extra works "<<extras<<", particles "<<particles_before<<" -> "<<particles_after<<"; cleared "<<cleared<<", extras freed "<<extras_freed<<", 23 kept "<<kept23<<", other changed "<<room_changed<<".\n";
+  check(live23>0&&live24>0&&live25>0&&live302>0&&extras>0&&particles_before>0,"RM_9360: fixture did not fill the pool with 23/24/25/302 before 0xca");
+  check(room_changed==0,"RM_9360 0xca changed effects outside bhClearEventEffect's id lists");
+  if(bind_ca){check(!pending,"0xca bhEffClearEvt left pending");
+   check(cleared==live24+live25+live302+live_other_listed&&extras_freed==extras&&particles_after==0,"bhClearEventEffect did not free every listed id (24/25/302, room 159) and their extra works");
+   check(kept23==live23,"bhClearEventEffect freed the explosion fireball 23 (not in bhClrEff_YT)");}
+  else check(pending&&cleared==0&&extras_freed==0&&particles_after==particles_before,"counter-check: without the 0xca binding the pool must stay unchanged");
  }
  if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory expectation(s) failed; doors and early-Enter timings passed.\n";return 1;}
  std::cout<<"Both original dog events -> padlock -> all three exits, 14 early Enter timings -> hint/lighter/Rodrigo, five mid-scene cinematic skips and the RM_0090 laser event past its original 0xc0 opcode passed. Diagnostic event starts/floor placement; no campaign proof.\n";return 0;

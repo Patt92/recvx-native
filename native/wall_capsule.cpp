@@ -166,7 +166,7 @@ int inner_triangle(const CollisionWall& hp,float room_height,const V& pos){
     return abz<=abx?0:1;
 }
 }
-int check_c2_wall(const std::vector<CollisionWall>& walls,float room_height,const RECVX_CB_CAPSULE& cap){
+static int check_c2_wall_impl(const std::vector<CollisionWall>& walls,float room_height,const RECVX_CB_CAPSULE& cap,bool named,unsigned flags){
     const L lp{cap.c1.x,cap.c1.y,cap.c1.z,cap.c2.x-cap.c1.x,cap.c2.y-cap.c1.y,cap.c2.z-cap.c1.z};
     NJS_VECTOR lv{lp.vx,lp.vy,lp.vz};const float nr=njScalor(&lv);
     // Plane-hit test of the type 4 faces: in front of c1 and closer than c2, inside the triangle.
@@ -175,14 +175,18 @@ int check_c2_wall(const std::vector<CollisionWall>& walls,float room_height,cons
         if(njInnerProduct(&lv,&ps)>0){const float ln=njScalor(&ps);if(inner_triangle(hp,room_height,pt)&&ln<nr)return true;}
         return false;};
     for(const auto& hp:walls){
-        if(!(hp.flags&1)||(hp.attributes&0x10))continue;
+        if(!(hp.flags&1))continue;
+        if(named){if((hp.attributes&0x2000000u)&&(flags&0x40000000u))continue;}
+        else if(hp.attributes&0x10u)continue;
+        // pwksub.c:2229/2274/2295: odd types only participate without flg 0x400.
+        if((hp.type==1||hp.type==3||hp.type==5)&&(!named||(flags&0x400u)))continue;
         const float px=hp.position.x,py=hp.position.y,pz=hp.position.z,w=hp.extent.x,d=hp.extent.z;
         float h=hp.extent.y;if(!h)h=room_height;
         switch(hp.type){
-        case 0:{const Box box{{{px,py+h,pz+d},{px,py+h,pz},{px+w,py+h,pz},{px+w,py+h,pz+d},{px,py,pz+d},{px,py,pz},{px+w,py,pz},{px+w,py,pz+d}}};
+        case 0:case 1:{const Box box{{{px,py+h,pz+d},{px,py+h,pz},{px+w,py+h,pz},{px+w,py+h,pz+d},{px,py,pz+d},{px,py,pz},{px+w,py,pz},{px+w,py,pz+d}}};
             if(check_bc(box,cap))return 1;break;}
-        case 2:{const C cap2{{px,py,pz},{px,py+h,pz},w};if(recvx_cb_check_cc(&cap2,&cap))return 1;break;} // npCollisionCheckCC
-        case 4:{V pt;
+        case 2:case 3:{const C cap2{{px,py,pz},{px,py+h,pz},w};if(recvx_cb_check_cc(&cap2,&cap))return 1;break;} // npCollisionCheckCC
+        case 4:case 5:{V pt;
             Plane pl{px,(py+h)-0.1f,pz,0,1.0f,0};
             if(!distance_l2pl(lp,pl,pt)&&face(hp,pt))return 1;
             pl={px,py,pz,0,-1.0f,0};
@@ -199,6 +203,14 @@ int check_c2_wall(const std::vector<CollisionWall>& walls,float room_height,cons
         }
     }
     return 0;
+}
+int check_c2_wall(const std::vector<CollisionWall>& walls,float room_height,const RECVX_CB_CAPSULE& cap){
+    return check_c2_wall_impl(walls,room_height,cap,false,0);
+}
+// pwksub.c:2172 bhCheckC2WallN: same collision primitives as bhCheckC2Wall,
+// but attr 0x10 is NOT excluded; attr 0x2000000 and odd types use query flags.
+int check_c2_wall_n(const std::vector<CollisionWall>& walls,float room_height,const RECVX_CB_CAPSULE& cap,unsigned flags){
+    return check_c2_wall_impl(walls,room_height,cap,true,flags);
 }
 // pwksub.c:718-1890 bhCheckL2Wall (100% matching source). A 0.01 capsule from lp->p to
 // lp->p + lp->v pre-selects each record (njCollisionCheckBC / npCollisionCheckCC); its c2

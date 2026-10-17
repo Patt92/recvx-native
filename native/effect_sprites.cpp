@@ -101,6 +101,8 @@ EffectSpawn& last_request(){
 }
 void queue_opaque(EffectSprite& s){s.opaque_queued=true;}
 void queue_custom(EffectSprite& s){s.custom_queued=true;}
+void queue_trs2d(EffectSprite& s){s.trs2d_queued=true;}
+void request_cb_flg(unsigned set,unsigned clear){pending.cb_flg_set|=set;pending.cb_flg_clear|=clear;}
 float ground_height(NJS_POINT3 probe,const char* what){
     if(!effect_ground)throw std::runtime_error(std::string(what)+" without the room's bhGetGroundPosition provider");
     return effect_ground->query(probe);
@@ -171,6 +173,28 @@ void hook_effect_se(NJS_POINT3 pos,int se){if(world_hooks.effect_se)world_hooks.
 void hook_camera_offset_add(NJS_POINT3 add){if(world_hooks.camera_offset_add)world_hooks.camera_offset_add(add);else report_gap("cam.ofx/ofy/ofz ohne Kamerabesitzer (bhEff30a)");}
 void hook_camera_offset_set(NJS_POINT3 value){if(world_hooks.camera_offset_set)world_hooks.camera_offset_set(value);else report_gap("cam.ofx/ofy/ofz ohne Kamerabesitzer (bhEff30a)");}
 void hook_room_light0(NJS_POINT3 pos,NJS_POINT3 rgb,float nr,float fr,bool only_if_off,const char* what){if(world_hooks.room_light0)world_hooks.room_light0(pos,rgb,nr,fr,only_if_off);else report_gap(what);}
+bool hook_room_effect_link(unsigned type,int& lkflg,int& lkno,const char* what){
+    if(!world_hooks.room_effect_link){report_gap((std::string(what)+": rom->effp ohne Raumbesitzer").c_str());return false;}
+    if(!world_hooks.room_effect_link(type,lkflg,lkno)){report_gap((std::string(what)+": rom->effp[op->type] ausserhalb rom->eff_n").c_str());return false;}
+    return true;
+}
+std::shared_ptr<const SceneTexture> hook_enemy_texaddr_get(unsigned enemy,unsigned index,const char* what){
+    if(!world_hooks.enemy_texaddr_get){report_gap((std::string(what)+": ene[].mlwP->texP ohne Gegnerbesitzer").c_str());return nullptr;}
+    auto texaddr=world_hooks.enemy_texaddr_get(enemy,index);
+    if(!texaddr)report_gap((std::string(what)+": ene[lkno].mlwP->texP->textures["+std::to_string(index)+"] fehlt").c_str());
+    return texaddr;
+}
+void hook_enemy_texaddr_set(unsigned enemy,unsigned index,const std::shared_ptr<const SceneTexture>& texaddr,const char* what){
+    if(!texaddr){report_gap((std::string(what)+": texaddr NULL (kein gesicherter Eintrag)").c_str());return;}
+    if(!world_hooks.enemy_texaddr_set||!world_hooks.enemy_texaddr_set(enemy,index,texaddr))
+        report_gap((std::string(what)+": ene[lkno].mlwP->texP->textures["+std::to_string(index)+"] nicht schreibbar").c_str());
+}
+std::shared_ptr<const SceneTexture> hook_effect_texaddr(unsigned group,const char* what){
+    if(!world_hooks.effect_texaddr){report_gap((std::string(what)+": sys->ef_tlist ohne Raumbesitzer").c_str());return nullptr;}
+    auto texaddr=world_hooks.effect_texaddr(group);
+    if(!texaddr)report_gap((std::string(what)+": sys->ef_tn["+std::to_string(group)+"] ohne Effekttextur").c_str());
+    return texaddr;
+}
 void hook_spark_light(NJS_POINT3 pos,NJS_POINT3 dir){if(world_hooks.spark_light)world_hooks.spark_light(pos,dir);else report_gap("rom->lgtp[2] ohne Lichtbesitzer (bhSetEffSpark)");}
 bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what){if(world_hooks.player_watr&&world_hooks.player_watr(c))return true;report_gap(what);return false;}
 bool collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what){
@@ -1036,6 +1060,7 @@ bool ported_effect_atlas(unsigned group){
     case 60:case 61:case 62:case 63:case 64:case 65:case 66:case 67:case 68:case 69:
     case 44: // effsub1b.c:123 bhDraw134 (sys->ef_tn[44])
     case 80:case 94:
+    case 85: // effsub6.c:41 bhEff085 (sys->ef_tn[85], erstes Bild als Gegnertextur)
     case 81: // effsub2.c:3698 bhEff_E13_Fluid
     case 82:case 83: // effsub2.c:1061 bhEff_E02_SandDust (tex_id = mdlver + 82)
     case 408:case 409:case 410:case 411:case 412:case 413:case 414:case 415:case 416:case 418:case 420:
@@ -1069,9 +1094,9 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
     if(s.id==396||s.id==399){const bool entered=step_en21_effect(s);if(queued)*queued=entered;return true;}
     if(const auto* procedure=hand_procedure(s.id)){
         // effect.c:742 bhControlEffect leert die Zeichenlisten zu Beginn jedes Passes.
-        s.opaque_queued=false;s.custom_queued=false;s.zanzo_slot=-1;s.quads.clear();s.lines.clear();
+        s.opaque_queued=false;s.custom_queued=false;s.trs2d_queued=false;s.zanzo_slot=-1;s.quads.clear();s.lines.clear();
         bool entered=false;procedure->step(s,c,entered);
-        if(queued)*queued=entered||s.opaque_queued||s.custom_queued||s.zanzo_slot>=0;return true; /* ef_Zanzo (effect.c:938) zaehlt wie eine Zeichenliste */
+        if(queued)*queued=entered||s.opaque_queued||s.custom_queued||s.trs2d_queued||s.zanzo_slot>=0;return true; /* ef_Zanzo (effect.c:938) zaehlt wie eine Zeichenliste */
     }
     if(s.id!=9){
         bool entered=false;

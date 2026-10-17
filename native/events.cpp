@@ -45,6 +45,12 @@ void EventVm::inherit_progress(const EventVm& previous){
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
     evt_posno=previous.evt_posno; // sys->evt_posno lebt im SYS-Bereich ueber das Raumladen hinaus
     values[21]=previous.values[21]; // sys->rcase lebt ueber das Raumladen hinaus (bhRoomCaseNo 0x37, bhSv 21; system.c:1623 waehlt damit die naechste RDX)
+    // sys->evt_tmd/evt_tim/evt_tdg/evt_fcd/evt_fcdct (bhSetEventTimer, system.c:2437) liegen im SYS-Bereich:
+    // bhInitRoomChangeSystem (system.c:178) setzt sie nicht zurueck, nur bhInitGameOver (gameover.c:114)
+    // und der Flagabbruch in bhControlVSync (sync.c:73) loeschen sie. Die Selbstzerstoerung (RM_4040 scd1
+    // 0xcb Modus 1) laeuft ueber die Tuer in RM_3230/RM_3091 weiter.
+    event_deadline_mode=previous.event_deadline_mode;event_deadline_ticks=previous.event_deadline_ticks;event_deadline_danger=previous.event_deadline_danger;
+    event_deadline_voice_tick=previous.event_deadline_voice_tick;event_deadline_voice_count=previous.event_deadline_voice_count;
 }
 void EventVm::initialize(){check_sub_pack(); /* bhSetPlayer/bhInitRoomChangePlayer/bhResetPlayer (player.c:844/935/1035) vor bhInitEvent */if(initialize_enemies)initialize_enemies();ifel_=0;Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
 // Common_controll (event.c:9963-12710) advances bhScePtr itself, command by
@@ -87,6 +93,18 @@ std::size_t EventVm::common_controll_length(unsigned command,unsigned byte2,unsi
     case 34:return byte3<=3?10:3;
     case 35:return byte3==0?8:byte3==1?9:3;
     default:return 0;
+    }
+}
+// Obj_controll (event.c:9719-9744) behind bhObjCtr (:9709, consumes 0x66, always returns 1):
+//   20 :9727 (++ +=2: px/pz += bhEtask[v0].work->mlwP->objP->pos[0]/[2])   1 :9737 (mode1 = 0; ++)
+//   default :9742 return without advancing: bhScePtr stays on the command byte, which the
+//   scheduler loop (event.c:13047 while (bhScenarioJmpT[*bhScePtr]() != 0)) runs as the next opcode.
+// In all 205 room scripts only 1, 20 and once 12 (RM_3020 Ereignis 6 @040e -> 0x0c bhFlrAtariSet) occur.
+std::size_t EventVm::obj_controll_length(unsigned command){
+    switch(command){
+    case 1:return 2;
+    case 20:return 4;
+    default:return 1;
     }
 }
 void EventVm::world(Task& task,unsigned op,std::size_t length){
@@ -164,7 +182,9 @@ int EventVm::instruction(Task& t){
     case 0x4f:world(t,op,6);return 1;
     case 0x88:case 0xd2:world(t,op,10);return 1;
     case 0x45:world(t,op,2);return 1;
-    case 0x66:{const unsigned command=v.u8(p+1);if(command!=1&&command!=20)throw std::runtime_error("unimplemented Obj_controll command "+std::to_string(command));world(t,op,command==1?2:4);return 1;}
+    // bhObjCtr/Obj_controll: cases 1 and 20 act on the task work (RoomWorld::bind); the default branch has no
+    // effect and consumes only the 0x66 byte, bhObjCtr still returns 1 (event.c:9709-9744).
+    case 0x66:{const auto length=obj_controll_length(v.u8(p+1));if(length==1)return advance(1);world(t,op,length);return 1;}
 
     case 0xb9:world(t,op,10);return 1;
     // bhAreaSearchObj: X/Z minima inclusive, maxima exclusive; signed
@@ -236,6 +256,7 @@ int EventVm::instruction(Task& t){
     case 0xc1:inventory_.script_arms_set(v.u8(p+1));values[22]=inventory_.slots()[0];return advance(2);              // bhArmsItemSet
     case 0xc2:inventory_.script_item_give_ex(v.u8(p+1),v.u8(p+2),v.u8(p+3),v.u16(p+4));values[22]=inventory_.slots()[0];return advance(6); // bhItemGetGetEx
     case 0xc7:inventory_.script_item_change(v.u8(p+1),v.u8(p+2));return advance(4);                                 // bhPlItemChangeM
+    case 0xc8:world(t,op,8);return 1; // event.c:8722 bhEffBakuDrmSet: Vorzeichenbyte + 3 u16/100, bhSetExplosionEffect am Weltbesitzer
     case 0xc9:inventory_.script_item_amount(v.u8(p+1),v.u16(p+2));return advance(4);                                // bhPlItemTamaSet
 
     case 0x5c:dialog_=MessageDialog{};flags[5][0]&=~0x200u;return advance(2);
@@ -266,7 +287,8 @@ int EventVm::instruction(Task& t){
     case 0x4a:world(t,op,8);return 1;
     case 0x1c:world(t,op,6);return 1;
     case 0x6e:world(t,op,22);return 1;
-    case 0x6d:world(t,op,22);return 1; // bhCyodanSet: particle effect remains pending.
+    case 0xb0:world(t,op,22);return 1; // event.c:7472 bhHEffectSet2: sys->ef -> bhSetEffectTb(&sys->ef, NULL, NULL, v4), 22 Byte (RM_1050 Ereignis 12/18/24, RM_5001, RM_9110)
+    case 0x6d:world(t,op,22);return 1; // event.c:5028 bhCyodanSet: bhSetEffParticle am Weltbesitzer
     // event.c:8307 bhCyodanSetEx (RM_0090 event 23, the laser): same Cyodan
     // family as 0x6d plus a second colour and a work/node link. 28 bytes is
     // measured against the data: RM_0090 event 23 holds two adjacent 0xc0
@@ -290,7 +312,7 @@ int EventVm::instruction(Task& t){
     case 0x16:case 0x18:case 0x1a:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,op,op==0x42?4:2);return 1;
     // bhFaceReSet: one enemy index; facial control is bound in RoomWorld.
     case 0x90:world(t,op,2);return 1;
-    case 0xca:world(t,op,2);return 1; // bhEffClearEvt; event effects remain pending.
+    case 0xca:world(t,op,2);return 1; // event.c:8801 bhEffClearEvt (2 Bytes): bhClearEventEffect am Weltbesitzer (RoomWorld::clear_event_effects)
     case 0x8f:case 0x5e:world(t,op,4);return 1;
     case 0x95:case 0xa7:world(t,op,4);return 1; // bhBgmOn2/bhBgmOn2Ex
     case 0x92:world(t,op,2);return 1; // bhBGSeOff2
@@ -443,7 +465,7 @@ void EventVm::check_event_deadline(){
     // the mode installed until the normal failure/game-over lifecycle clears
     // them.  All gating flags are retained, rather than treating a host tick
     // as an unconditional timeout.
-    if(event_deadline_mode==0||event_deadline_ticks!=0||(flags[6][0]&0x200u)==0||(flags[11][0]&0x20000000u)==0||(flags[12][0]&0x80u)||(flags[12][0]&0x11e00u)!=0x11e00u||(flags[10][0]&1u))return;
+    if(event_deadline_mode==0||event_deadline_ticks!=0||(flags[6][0]&0x200u)==0||(flags[11][0]&0x20000000u)==0||(flags[12][0]&0x80u)||(flags[12][0]&0x15e00u)!=0x15e00u||(flags[10][0]&1u))return; /* player.c:1272: ts_flg 0x4000 (Task 14 frei), 0x1000, 0x200, 0x400, 0x800, 0x10000 */
     if(flag(1,69)){
         if(flags[5][0]&0x200u){flags[5][0]|=0x400000u;flags[10][0]|=0x2000u;flags[10][0]&=~0x1000u;}
         inventory_.hp=-1;set_flag(1,69,1);

@@ -236,6 +236,11 @@ results['lever'] = {'hp': lever['hp'], 'hp_without_lever': late['hp']}
 # (Phase 1 bei 1500); 1800 laesst Abstand, die Pruefung bleibt Tod + Phase 2.
 death = run('death-1800', 'RM_0080.RDX', 1800, FRONT, FRONT_SPAWN)
 assert death['hp'] < 0, ('death', 'Spieler stirbt nicht', death['hp'])
+# Griff-Tod: NG00 case 2 (en01.c:6861) setzt plp->mode0 6 bei hp < 0, PlyDG00 case 6/7 spielt die
+# Todesmotion Offset+12/13 (412) und setzt plp->flg 0x2 erst an ihrem letzten Bild (:7748);
+# bhCPM0_enedie (player.c:6711) startet das Game Over dann, nicht schon mit hp < 0.
+dying = run('death-1050', 'RM_0080.RDX', 1050, FRONT, FRONT_SPAWN)
+assert dying['hp'] < 0 and dying['player_work']['mode'][0] == 6 and dying['player_work']['mtn_no'] == 412 and not dying['gameover_active'], ('death', 'Game Over vor dem Ende der Todesmotion (plp->flg 0x2, en01.c:7748)', dying['player_work'], dying['gameover_active'])
 assert death['gameover_active'] and death['gameover_phase'] == 2, ('death', 'Game Over nicht aktiv/Phase 2', death['gameover_phase'])
 assert enemy(death, 0)['work']['mode'][3] == 2 or enemy(death, 0)['work']['mode'][0] in (1, 2), ('death', enemy(death, 0)['work'])
 results['death'] = {'hp': death['hp'], 'gameover_phase': death['gameover_phase'], 'gaps': death['_gaps']}
@@ -309,6 +314,7 @@ d350 = run('dogs-350', 'RM_1000.RDX', 350, '')
 d500 = run('dogs-500', 'RM_1000.RDX', 500, '')
 d2520 = run('dogs-2520', 'RM_1000.RDX', 2520, '')
 d2560 = run('dogs-2560', 'RM_1000.RDX', 2560, '')
+d2595 = run('dogs-2595', 'RM_1000.RDX', 2595, '')
 d3000 = run('dogs-3000', 'RM_1000.RDX', 3000, '')
 assert grabbed(d350) and d350['player_work']['mode'][0] == 4, ('dogs', 'kein Hundegriff (plp->mode0 4) bei Tick 350', d350.get('player_work'))
 assert d350['hp'] < 160, ('dogs', 'kein Biss bis Tick 350', d350['hp'])
@@ -320,6 +326,11 @@ assert d3000['hp'] < 0 and d3000['gameover_active'] and d3000['gameover_phase'] 
 # Bildwechsel (~2537) loescht ts_flg 0x4000 und startet bhSelectContinue (bhCPM0_die mode3 1).
 assert d2520['hp'] < 0 and d2520['player_work']['mode'][0] == 3 and d2520['player_work']['mtn_no'] == 25 and not d2520['gameover_active'], ('dogs', 'Game Over vor dem Ende der Fallmotion (player.c:6422)', d2520['player_work'], d2520['gameover_active'])
 assert d2560['gameover_active'] and d2560['gameover_phase'] == 0 and d2560['player_work']['mode'][3] == 2 and d2560['player_work']['mtn_no'] == 26, ('dogs', 'Liegemotion 26 in gov_md1 0 fehlt', d2560['player_work'], d2560['gameover_phase'])
+# main.c:197: Task 7 laeuft in den 70 Bildern von gov_md1 0 weiter (nur Task 8 gesperrt, sp_flg
+# unveraendert): die Hunde bewegen sich zwischen zwei Bildern dieser Phase.
+assert d2595['gameover_active'] and d2595['gameover_phase'] == 0, ('dogs', 'Bild 2595 nicht mehr in gov_md1 0', d2595['gameover_phase'])
+moved = [(enemy(d2560, i)['work']['mtn_no'], enemy(d2560, i)['work']['frm_no'], enemy(d2560, i)['position']) != (enemy(d2595, i)['work']['mtn_no'], enemy(d2595, i)['work']['frm_no'], enemy(d2595, i)['position']) for i in (0, 1, 2)]
+assert all(moved), ('dogs', 'Gegner stehen in gov_md1 0 still (Task 7 muss weiterlaufen)', moved)
 # Die Hunde setzen nur plp->mode0 4 und klemmen beide Bisse auf hp 1 (en07.c:838/922, :899/:1005);
 # der Tod kommt aus dem Sprungangriff (Schadensmodus 2). hp < 0 schaltet player.c:1405 nach
 # bhCPM0_die (mode0 3): Fallmotion 25, beim Bildwechsel Liegemotion 26 (mode3 2) und ts_flg 0x4000

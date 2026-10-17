@@ -5,6 +5,10 @@ connection/removal while running. Windows XInput detection is enabled through
 SDL2; macOS uses SDL's native controller drivers with the same logical button
 names. Keyboard and mapped gamepads can be used together without changing modes.
 
+On macOS, Cmd+W (close window) does not end a running game: the runtime drops
+the close request while Cmd and W are held. Quit stays Cmd+Q, the window's
+close button or the configured quit key.
+
 ## Defaults
 
 | Action | Keyboard | Xbox-layout controller |

@@ -35,6 +35,7 @@
 #include "enemies/en30.h"
 #include "effect_collision.h"
 #include "combat_geometry.h"
+#include "wall_capsule.h"
 #include "weapon_tables.h"
 #include <algorithm>
 #include <cmath>
@@ -291,7 +292,9 @@ bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
     // bhCPM0_enedie (player.c:6711) ist der einzige Leser von plp->flg 0x2 fuer den Game-Over-Start
     // und laeuft nur in mode0 6; bhCPM0_die (mode0 3) setzt flg 0x10002 selbst und startet ueber
     // den Bildwechsel seiner Fallmotion, nicht ueber dieses Bit.
-    if(player_damage_allowed&&in.mode0==6&&((in.flg&2u)!=0||in.hp<0))player_dead_=true;
+    // Nur plp->flg 0x2, nicht hp < 0: en01 PlyDG00 case 7 (en01.c:7748) setzt es erst am letzten Bild
+    // der Spieler-Todesmotion (412/413), bhCPM0_enedie startet dann; en19.c:4385 u.a. ebenso.
+    if(player_damage_allowed&&in.mode0==6&&(in.flg&2u)!=0)player_dead_=true;
     return true;
 }
 unsigned RoomWorld::enemy_player_motion_frames(unsigned mtn,bool from_enemy)const{
@@ -1655,6 +1658,59 @@ void RoomWorld::calc_enemy_draw_models(){
     for(std::uint32_t i=0;i<enemy_table_.en_objn&&i<RECVX_ENEMY_OBJECTS;++i){auto* w=enemy_table_.en_obj[i];if(!w||!w->owner)continue;
         if(!(w->flg&0x1u)||(w->stflg&0x41000000u)||!(w->mdflg&0x4u))continue;
         auto& e=owner_of(w);if(e.enemy_native)calc_enemy_model(e);}
+}
+
+// weapon.c:1419-1490 bhCheckBombAtari, enemy half only. The table points at
+// the real works, including linked children and non-zombie enemy identities.
+// watr and owP are the last published enemy-pass results, never a sampled pose.
+void RoomWorld::bomb_enemy_damage(const BombRequest& bomb){
+    const RECVX_CB_SPHERE blast{{bomb.position.x,bomb.position.y,bomb.position.z},bomb.radius};
+    const auto walls=collision_geometry(); // rom->walp, then sys->mwalp
+    for(std::uint32_t i=0;i<enemy_table_.ewk_n&&i<RECVX_ENEMY_SLOTS;++i){
+        auto* epw=enemy_table_.slot[i];
+        if(!epw||!(epw->flg&1u)||!(epw->flg&0x20u)||(epw->flg&2u)||(epw->stflg&0x1000000u))continue;
+        if(epw->flg&0x80u){
+            if(!epw->lkwkp){unbound_enemy_.insert("bhCheckBombAtari: flg 0x80 ohne lkwkp (weapon.c:1423)");continue;}
+            if(epw->lkwkp->stflg&0x1000000u)continue;
+        }
+        const RECVX_CB_CAPSULE capsule{{epw->watr.c1.x,epw->watr.c1.y,epw->watr.c1.z},
+            {epw->watr.c2.x,epw->watr.c2.y,epw->watr.c2.z},epw->watr.r};
+        if(!recvx_cb_check_sc(&blast,&capsule))continue;
+        RECVX_CB_VEC contact;
+        recvx_cb_distance_p2c(&blast.c,&capsule,&contact);
+        const RECVX_CB_CAPSULE sight{contact,blast.c,0.1f};
+        if(check_c2_wall_n(walls,room_height_,sight,0x400u))continue;
+
+        epw->flg|=4u;epw->flg2|=0x200u;
+        epw->dpx=contact.x;epw->dpy=contact.y;epw->dpz=contact.z;
+        epw->dvx=contact.x-blast.c.x;epw->dvy=contact.y-blast.c.y;epw->dvz=contact.z-blast.c.z;
+        epw->dax=0;epw->day=int(10430.381f*std::atan2(-epw->dvx,-epw->dvz));
+        epw->wpnr_no=20;
+
+        // j starts at 1, knr == 0 remains the original sentinel (also when a
+        // joint sits exactly on the contact). Respect mlwP's shared window.
+        const auto* sv=epw->sv;
+        if(!sv||!sv->obj_num||!sv->joint_matrix){
+            unbound_enemy_.insert("bhCheckBombAtari: mlwP->owP ohne Gelenkbesitzer (weapon.c:1459)");continue;
+        }
+        int kno=0;float nearest=0;bool joints_ok=true;
+        const auto count=sv->obj_num(epw);
+        for(std::uint32_t j=1;j<count;++j){
+            float matrix[16];
+            if(!sv->joint_matrix(epw,j,matrix)){
+                unbound_enemy_.insert("bhCheckBombAtari: owP[j] ausserhalb des Modellbaums (weapon.c:1461)");joints_ok=false;break;
+            }
+            NJS_VECTOR delta{contact.x-matrix[12],contact.y-matrix[13],contact.z-matrix[14]};
+            const float distance=njScalor(&delta);
+            if(nearest==0||nearest>distance){nearest=distance;kno=int(j);}
+        }
+        if(!joints_ok)continue;
+        if(unsigned(kno)>=RECVX_ENEMY_DAM){unbound_enemy_.insert("bhCheckBombAtari: dam[kno] ausserhalb dam[64]");continue;}
+        epw->djnt_no=kno;
+        NJS_VECTOR root{epw->px-blast.c.x,epw->py-blast.c.y,epw->pz-blast.c.z};
+        if(njScalor(&root)<0.5f*bomb.radius){epw->dam[kno]+=bomb.damage_max;epw->comb_flg|=0x10u;}
+        else{epw->dam[kno]+=bomb.damage_min;epw->comb_flg|=0x20u;}
+    }
 }
 
 // eneset.c:344 bhControlEnemy over the table; native routines only. The

@@ -248,7 +248,12 @@ void GameplayInput::synchronize(){
     // bhSysCall: cb_flg 0x40000 requests ItemBox via the same status task as
     // keyboard/Pad inventory. Room scripts need no separate SubStatus opcode.
     if(events_&&!menu_.active&&(events_->flags[10][0]&0x40000))events_->status_requested=true;
-    if(events_){const auto found=events_->pickup_display();if(found){if(!menu_.pickup){if(sound)sound(3); /* ItemTaskCheck: CallSystemSe(0,3) when the status task starts */menu_.commands=menu_.examining=menu_.combining=menu_.files=false;menu_.message=MessageDialog{};menu_.inspection=ItemInspection{};const auto angle=inspection_default_angles(found);menu_.examine_pitch=angle[0];menu_.examine_yaw=angle[1];menu_.examine_roll=angle[2];}menu_.pickup=found;menu_.active=true;events_->menu_open=true;}
+    if(events_){const auto found=events_->pickup_display();if(found){if(!menu_.pickup){if(sound)sound(3); /* ItemTaskCheck: CallSystemSe(0,3) when the status task starts */// sub1.c:3308-3338 (ItemTaskCheck, cb_flg 0x10): StatusInit (sub1.c:1389) baut den ganzen S_WORK
+            // neu auf, dann st->mode = 0 -- der GetItem-Bildschirm erbt keinen Zustand des vorigen
+            // Statusbildschirms (MainCommand/nav, Untersuchen, Kombinieren, Datei, Meldung). Vorher blieb z. B.
+            // nav nach StatusCancel aus MainCommand stehen, und bhSetMessage(1, 180 - maincsr) (sub1.c:4300)
+            // ueberzeichnete die Aufnahmefrage.
+            menu_.reset(inventory_);const auto angle=inspection_default_angles(found);menu_.examine_pitch=angle[0];menu_.examine_yaw=angle[1];menu_.examine_roll=angle[2];}menu_.pickup=found;menu_.active=true;events_->menu_open=true;}
         else if(menu_.pickup){menu_.pickup=0;menu_.begin_close();events_->menu_open=menu_.active;}}
     if(events_&&events_->status_requested&&!dialog_.active()&&!(transition_active&&transition_active())&&(!(events_->flags[5][0]&4)||(events_->flags[10][0]&0x64010))&& /* bhCheckSubTask: cb_flg 0x64010 requests ignore st_flg 0x4 */!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(3);menu_.input(MenuInput::Open,inventory_);events_->begin_status();}if(events_->flags[10][0]&0x40000)events_->flags[12][0]&=~0x200u;events_->menu_open=menu_.active;}}
 bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))return f.hit(Action::Quit);

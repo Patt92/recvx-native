@@ -11263,7 +11263,11 @@ void recvx_en01_ng00(RECVX_ENEMY_WORK* w)
         }
         break;                                                       /* :7059 */
 
-    /* Im Original gibt es keinen case 7 (en01.c:7060). */
+    case 7:
+        /* en01.c:7060: kein case 7 und kein default. Nach case 6 (mode3++ bei flg
+         * 0x2000000) haelt der Work die Lage mit Motion 111, bis bhMainGameOver
+         * md1 1/10 sp_flg neu setzt und bhControlEnemy nicht mehr laeuft. */
+        break;
     case 8:
         en01_ng_slide_out(w, p);                                     /* :7062 */
         en01_ng_gakeoti_end(w, p, cepw);                             /* :7073 */

@@ -336,6 +336,17 @@ void EffectParticles::set_mode1(unsigned slot,unsigned value)
     if(w.live)w.mode1=value;
 }
 
+// effsub3.c:117 bhClrEff_RY, case 302 (:132-136): *(int*)oP->exp1 = 0 und *(int*)oP->exp0 = 0
+// geben die beiden Hilfsplaetze (E02_WRK/E02_WORK, :951-952) frei, dann oP->flg = 0 fuer die
+// Wurzel. Aufrufer ist bhClearEventEffect (effect.c:159) fuer eine Wurzel mit flg & 1 und id 302.
+void EffectParticles::clear_event(unsigned slot)
+{
+    if(slot>=eff_slots)throw std::runtime_error("bhClrEff_RY outside eff[512]");
+    auto& w=impl_->works[slot];
+    if(w.live)impl_->release(w);
+    impl_->free_slot(int(slot));
+}
+
 // effsub3.c:1008 — bhSetEffParticleMk2: gleiche Felder, mtn_attr aus src_col und
 // mtn_no direkt aus dst_col, ohne die 0x20000000-Verknuepfung.
 int EffectParticles::spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color)

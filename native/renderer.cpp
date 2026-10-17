@@ -264,7 +264,8 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             if(triangle.vertex_alpha){setup.vertex_alpha=true;setup.alpha={v[0].alpha,v[1].alpha,v[2].alpha};if(area_swapped)std::swap(setup.alpha[1],setup.alpha[2]);}
             // njDraw* primitives (effects) choose FGE per call (ps2_NaDraw.c:351/355); only the CNK strips are fogged here.
             if(triangle.fog_color_set){setup.fog_color_set=true;setup.fog_color=fog_canvas_color(triangle.fog_color);}
-            if(scene.fog.enabled&&triangle.world_lit&&triangle.fogged){setup.fogged=true;for(int i=0;i<3;++i)setup.fog[i]=fog_sample(scene.fog,v[i].position.z);if(area_swapped)std::swap(setup.fog[1],setup.fog[2]);}
+            if(triangle.fog_fixed){setup.fogged=true;setup.fog={triangle.fog_fixed_value,triangle.fog_fixed_value,triangle.fog_fixed_value};} // XYZF2.F je Eckpunkt fest (ps2_NaDraw.c:443 njDrawTextureSub3DH), ohne Ninja-Nebelzustand
+            else if(scene.fog.enabled&&triangle.world_lit&&triangle.fogged){setup.fogged=true;for(int i=0;i<3;++i)setup.fog[i]=fog_sample(scene.fog,v[i].position.z);if(area_swapped)std::swap(setup.fog[1],setup.fog[2]);}
             setup.Ux=dax*p[0].u_over_z+dbx*p[1].u_over_z+dcx*p[2].u_over_z;setup.Uy=day*p[0].u_over_z+dby*p[1].u_over_z+dcy*p[2].u_over_z;
             setup.Vx=dax*p[0].v_over_z+dbx*p[1].v_over_z+dcx*p[2].v_over_z;setup.Vy=day*p[0].v_over_z+dby*p[1].v_over_z+dcy*p[2].v_over_z;
             setup.Wx=dax*p[0].invz+dbx*p[1].invz+dcx*p[2].invz;setup.Wy=day*p[0].invz+dby*p[1].invz+dcy*p[2].invz;

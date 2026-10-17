@@ -19,6 +19,9 @@ public:
     int spawn(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color);
     // zonzon.c:627 op->mode1 = 1 on the returned root; bhEff302 does not read it, the value is kept with the work.
     void set_mode1(unsigned slot,unsigned value);
+    // effsub3.c:117 bhClrEff_RY case 302 (bhClearEventEffect, Skriptbefehl 0xca): gibt die
+    // Wurzel `slot` und ihre beiden Hilfsplaetze (exp0/exp1) frei.
+    void clear_event(unsigned slot);
     // bhSetEffParticleMk2: the same emitter with an explicit destination colour
     // (bhEne_SetBloodEffect4 passes BloodCol[col][0] and BloodCol[col][1]).
     int spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color);

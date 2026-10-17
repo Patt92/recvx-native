@@ -6,6 +6,8 @@ namespace recvx {
 // pwksub.c:1891 bhCheckC2Wall(cap) over rom->walp + sys->mwalp (collision_geometry order);
 // room_height is rom->h for records with h == 0.
 int check_c2_wall(const std::vector<CollisionWall>& walls,float room_height,const RECVX_CB_CAPSULE& cap);
+// pwksub.c:2172 bhCheckC2WallN, including capsule radius and query-flag gates.
+int check_c2_wall_n(const std::vector<CollisionWall>& walls,float room_height,const RECVX_CB_CAPSULE& cap,unsigned flags);
 // pwksub.c:718 bhCheckL2Wall(lp, flg, len) over the same walls. Writes *len = nr (nearest
 // hit distance from lp->p, or |lp->v| without a hit) and returns the hit count != 0.
 // `apos`/`ahtp` are sys->apos and sys->ahtp: the hit point and the index of the

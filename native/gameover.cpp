@@ -1,11 +1,11 @@
 #include "gameover.h"
 #include "asset_io.h"
-#include "effect_sprites.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <stdexcept>
 
 // Game over (gameover.c semantics) as a native mechanism: the four dispatcher
 // phases, the GV_WORK with its 16x16 point mesh, the ring UV table, the death
@@ -59,10 +59,13 @@ struct GameOver::Impl {
     float an=0,rn=0,gn=0,bn=0,ao=0,ro=0,go=0,bo=0;
     float ap=0,rp=0,gp=0,bp=0;
     // Death scene player work.
-    unsigned player_motion=0,hokan=0;std::int64_t player_frame=0;
+    unsigned player_motion=0,hokan=0;int hokan_rate=0;std::int64_t player_frame=0;
     unsigned blasts=0,unsupported_blasts=0;
     mutable std::vector<SceneTexture> textures;
     mutable bool textures_tried=false;
+    // plp->txp[0] of the death scene body, fetched once per game over (gameover.c:313 mlwP->texP = txp[0]).
+    mutable std::vector<SceneTexture> body_textures;
+    mutable bool body_textures_tried=false;
 
     void set_fade(unsigned argb,float count){
         fading=true;fade_ct=0;
@@ -191,8 +194,10 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                     events.flags[10][0]|=0x40000000u;
                     events.flags[5][0]|=0x5u; // st_flg 0x1 | 0x4
                     events.flags[11][0]|=0x200080u;
+                    if(death_scene_levels){death_scene_levels(g.wpntp,g.dmlvl);g.wpntp=std::min(g.wpntp,1u);g.dmlvl=std::min(g.dmlvl,2u);} /* gameover.c:289: exp0->wpntp/dmlvl dieses Passes */
                     g.player_motion=PlMtnAct[g.wpntp][g.dmlvl][3];
-                    g.player_frame=0;
+                    g.player_frame=0;g.hokan=0;g.hokan_rate=0; /* hokan_rate = 0, hokan_count = 0 */
+                    if(death_scene_enter)death_scene_enter(g.player_motion);
                     break;
                 }
                 ++g.md1;
@@ -242,10 +247,12 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
             break;
         case 10:{
             events.flags[5][0]|=0x4u;
-            // bhSetMotion(plp, mtn_add, 0): the interpolation window set with
-            // the dying motion holds frm_no at zero for hokan_count passes.
-            if(g.hokan>0)--g.hokan;
-            else if(g.body&&g.body->has_motion(g.player_motion)){
+            // bhSetMotion(plp, mtn_add, 0, NULL) (Motion.c:21): der Knotenteil tastet objP am
+            // Stand vor dem Vorschub ab und mischt hokan_count Paesse lang (SetMtn*Hokan zieht
+            // hokan_count ab); frm_no schiebt in jedem Pass, auch waehrend der Mischung.
+            if(g.body&&g.body->has_motion(g.player_motion)){
+                if(death_motion_nodes)death_motion_nodes(g.player_motion,g.player_frame,g.hokan,g.hokan_rate);
+                if(g.hokan>0)--g.hokan;
                 const auto frames=std::int64_t(g.body->motion_frames(g.player_motion))*65536;
                 if(frames>0)g.player_frame=(g.player_frame+65536)%frames;
             }
@@ -253,12 +260,13 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
             const auto& blast=gov_etb[std::min<unsigned>(g.blasts,6)];
             if(blast.frame!=0&&unsigned(blast.frame)<=g.ct){
                 audio.play_player_voice(534);
-                // bhSetExplosionEffect belongs to the effect package; its
-                // request is reported, never replaced by a substitute.
-                set_explosion_effect({blast.x,blast.y,blast.z},{0,0,1});
-                ++g.blasts;++g.unsupported_blasts;
+                // gameover.c:539 bhSetExplosionEffect(&gov_etb[exp_ct].px): weapon.c:1812 at the
+                // world owner; without a binding the request is counted as unsupported, never
+                // replaced by a substitute.
+                if(!(death_blast&&death_blast({blast.x,blast.y,blast.z})))++g.unsupported_blasts;
+                ++g.blasts;
                 if(g.blasts==5){
-                    g.player_motion=25;g.player_frame=0;g.hokan=8;
+                    g.player_motion=25;g.player_frame=0;g.hokan=8;g.hokan_rate=49152;
                     audio.play_dead_voice(int(g.character));
                     g.set_fade(0xFFFFFFFF,30.f);
                 }
@@ -268,6 +276,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                 g.set_fade(0,30.f);
                 g.ct=0;g.md1=1;
                 events.flags[6][0]=0x20;
+                if(death_scene_leave)death_scene_leave(); // gameover.c:567 pt_flg = 0
             }
             break;}
         default:break;
@@ -324,28 +333,57 @@ void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
             for(int x=0;x<16;++x){strip[x*2]=vertex(x+y*16);strip[x*2+1]=vertex(x+(y+1)*16);}
             for(int i=0;i<30;++i){
                 SceneTriangle t;t.vertices={strip[i],strip[i+1],strip[i+2]};
-                t.color=0xffffffffu;t.textured=textured;t.texture=0;t.camera_mask=false;
+                // njDrawTriangle3D (ps2_NaGraphics3D.c:401): Eckfarbe gv->cl (gameover.c:140, -1) >> 1 ist die ganze
+                // Farbe, ohne Lichtrechnung; world_lit = fertige Farbe, keine Hostschattierung (renderer.cpp shade).
+                t.color=0xffffffffu;t.textured=textured;t.texture=0;t.camera_mask=false;t.world_lit=true;t.gouraud=false;
                 t.blend=SceneBlend::Alpha;
                 scene.triangles.push_back(t);
             }
         }
+        // game.c:357 bhPutModel(plp) zeichnet den Koerper im Lichtzustand von bhAllDrawModel: md1 10 setzt gm_flg
+        // 0x80 (gameover.c:323), bhControlLight (light.c:332) und bhSetHalfLight (game.c:352, light.c:992) laufen
+        // dann in bhSetEasyDirLight (light.c:279: Farbe 1, Intensitaet 0.6 / Umgebung 0.2, Richtung 0/0.3/0.7), und
+        // MdlPut.c:33-37 hebt draw_tp auf das Einzellicht. Dieser Zustand hat seinen Besitzer im Raum (RoomWorld::
+        // append, Kategorie 1 unter gm_flg 0x80); der Koerper geht deshalb mit death_scene_append durch denselben
+        // Pass. Das Netz bleibt lichtfrei: njDrawTriangle3D (ps2_NaGraphics3D.c:401) nimmt nur die Eckfarben
+        // gv->cl (gameover.c:140, -1), ohne Lichtrechnung.
+        Scene body;
         if(death&&g.body&&g.body->has_motion(g.player_motion)){
-            // bhCalcModel on the player work: the body stands at the origin with
-            // the original yaw while the blasts pass.
-            auto model=g.body->sample(g.player_motion,g.player_frame,{0,0,0},35499);
-            const auto base=scene.textures.size();
-            scene.textures.insert(scene.textures.end(),model.textures.begin(),model.textures.end());
-            for(auto& t:model.triangles){
-                if(t.textured)t.texture=std::uint16_t(base+t.texture);
-                t.camera_mask=false;
-                for(auto& v:t.vertices){v.position.y+=10.f;v.position.z+=35.f;}
-                scene.triangles.push_back(t);
+            // bhCalcModel on the player work (MdlPut.c:240-264: ewP->mtx = T(px,py,pz) * R(ax,ay,az),
+            // then bhCalcTree over objP): the body stands at the world origin with the original yaw
+            // while the blasts pass; the nodes are plp->mlwP->objP of this pass (death_pose), not a
+            // fresh sample of the advanced counter. game.c:357 bhPutModel(plp) draws it in world
+            // space under cam.mtx (camera.c:28-37: cmat * T(-cam.px, -cam.py, -cam.pz) with ln 0 and
+            // angles 0), i.e. the view below; the body gets no camera-space offset of its own. The
+            // mesh of bhDrawGameOver is the only thing built in cmat space and moved above.
+            body=g.body->sample(g.player_motion,g.player_frame,{0,0,0},35499,nullptr,death_pose?death_pose():ModelNodeOverrides{});
+            if(!g.body_textures_tried){g.body_textures_tried=true;g.body_textures=death_body_textures?death_body_textures():g.body->textures();}
+            body.textures=g.body_textures;
+            for(auto& t:body.triangles){
+                if(t.textured&&t.texture>=body.textures.size())throw std::runtime_error("death scene body texture outside its bundle");
+                t.camera_mask=false;t.after_modifiers=true; // game.c:357: bhPutModel(plp) nach bhDrawEffect
             }
+            for(auto& w:body.ambient_writes)w.camera_mask=false;
+        }
+        if(death&&death_scene_append){
+            // game.c:318 bhAllDrawModel (Task 7 before Task 14) with pt_flg 0x15 under cam.flg 0x40:
+            // the effects of bhSetExplosionEffect are drawn in world space under the scene camera
+            // (0, 10, 35), angles 0, pers 11832 (gameover.c:313-327); the mesh above is built in
+            // camera space and moved by the same translation, so one view matrix serves both.
+            SceneCamera camera;camera.position={0.f,10.f,35.f};camera.angles={0,0,0};camera.distance=0.f;camera.perspective=kPerspective;camera.clip_near=2.f;camera.clip_far=20000.f;
+            death_scene_append(scene,camera,body);
+        } else if(!body.triangles.empty()){
+            // Ohne Raumbesitzer (Werkzeug/Test) gibt es keinen Lichtzustand; der Koerper bleibt mit seinen Grundfarben.
+            const auto base=scene.textures.size();
+            scene.textures.insert(scene.textures.end(),body.textures.begin(),body.textures.end());
+            for(auto t:body.triangles){if(t.textured)t.texture=std::uint16_t(base+t.texture);scene.triangles.push_back(t);}
         }
         const float focal=(float(image.width())*0.5f)/std::tan(0.0000958738f*(kPerspective/2));
         NJS_MATRIX view;njUnitMatrix(&view);njScale(&view,1,-1,-1);
-        // Only the death scene installs a camera (0, 10, 35); the mesh is built
-        // in camera space and is moved with it so the base matrix still applies.
+        // Only the death scene installs a camera (0, 10, 35): the view is cam.mtx of
+        // bhControlCamera (camera.c:28-37, cmat then T(-px, -py, -pz) with ln 0 and
+        // angles 0) for the body and the effects in world space; the mesh is built
+        // in cmat space and was moved by (0, 10, 35) above so the same view serves it.
         if(death)njTranslate(&view,0,-10.f,-35.f);
         image.draw_view(scene,view,focal*1.174f,focal*(float(image.height())/480.f)/(float(image.width())/640.f),false,{},2.f,20000.f);
     }

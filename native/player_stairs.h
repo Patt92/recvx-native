@@ -61,7 +61,8 @@ typedef struct {
 #define RECVX_STAIR_UNBOUND_MOTION      0x0040u // a requested motion is not in the native asset
 #define RECVX_STAIR_UNBOUND_HOKAN       0x0080u // host supplies no bhSetMotion node part (set_motion_nodes)
 #define RECVX_STAIR_UNBOUND_HEADWORK    0x0100u // EXP1_I(0) head-work flags have no native owner
-#define RECVX_STAIR_UNBOUND_MTN_ATTR    0x0200u // per-frame mtn_attr has no native consumer
+// 0x0200 (ehemals MTN_ATTR) entfaellt: plp->mtn_attr hat im Original keinen Leser; bhSetMotion
+// (Motion.c:76) schreibt es, der Knotenteil des Hosts fuehrt es als player_mtn_attr_ mit.
 #define RECVX_STAIR_UNBOUND_FIXPOS      0x0400u // bhCalcFixOffset route node missing in the native skeleton
 // The running action state. `status` is plp->stflg, `flg`/`flg2` are plp->flg/
 // flg2; the runtime seeds flg/status from the live player work before begin and

@@ -635,9 +635,160 @@ Passes gegen owP des letzten bhCalcModel (vorher ungemischte Rekonstruktion). ho
 Lueckenbit HOKAN entfaellt (0x280 -> 0x200). `verify_stairs` mit POSETRACE-Pruefung gruen, Endlagen wie vorher;
 `core_continuity` mit Knotenteil-/owP-Fixture (Gegenprobe rot). CTest 117/117, Nachbarlaeufe gruen. Dev-App.
 
-**Naechster Posten:** gameover.cpp md1 10 schiebt frm_no waehrend hokan nicht (Motion.c:21 schiebt immer,
-Befund im Ledger); Gegner/Effekte stehen in den 70 Bildern von gov_md1 0 nativ still; Treppe mtn_attr (0x200).
-**Kein Commit/Push.**
+**2026-10-17, Todesszene (gov_md1 10) auf objP:** bhSetMotion-Knotenteil je Pass beim Spielerbesitzer,
+frm_no schiebt auch waehrend der Mischung (vorher gehalten), Eintritt mit mnwP = mnwPb, bhDrawGameOver zeichnet
+den objP-Baum. Test `gameover_original` mit SYSTEM/0010 (Gegenprobe rot), CTest 117/117, alle Prueflaeufe gruen,
+Dev-App 10:23. Offen: Laufzeitmessung der Selbstzerstoerungsszene (kein headless erreichbarer Ausloeser).
+
+**2026-10-17, Task 7 in gov_md1 0:** das Spielbild laeuft in den 70 Bildern vor der Game-Over-Maske weiter
+(main.c:197, nur Task 8 ueber ts_flg 0x100 gesperrt), der Game-Over-Pass folgt am Bildende. Dabei: NG00 mode3 7
+ist im Original eine Leerstelle (keine Luecke), bhCPM0_enedie loescht ts_flg 0x4000. `verify_enemy_ai` prueft
+die Hundebewegung in md1 0 (Gegenprobe rot); alle Prueflaeufe gruen, CTest 117/117, Dev-App 10:56.
+
+**2026-10-17, Griff-Tod RM_0080 geprueft:** Spieler mode0 6 / mode3 7 mit Motion 412 ist PlyDG00 case 7, Zombie 1
+in MV16 -- originalgetreu. Fehler war der native Game-Over-Start: in mode0 6 schon bei hp < 0 statt mit plp->flg 0x2
+am Ende der Todesmotion (player.c:6711, en01.c:7748); jetzt Start bei Bild ~1072 statt ~1008. `verify_enemy_ai`
+death-1050 (Gegenprobe Baseline rot), alle Prueflaeufe gruen, CTest 117/117, Dev-App 13:19.
+
+**2026-10-17, Treppe mtn_attr:** plp->mtn_attr hat im Original keinen Leser (nur Motion.c:76 schreibt es); der
+Knotenteil fuehrt es mit, das Lueckenbit 0x200 entfaellt, die Stufenaktionen melden keine offenen Dienste mehr.
+CTest 117/117, Dev-App 14:00.
+
+**2026-10-17, Selbstzerstoerungsszene gemessen:** `tools/verify_self_destruct.py` (Diagnose-Snapshot RM_4040 mit
+ev_flg 257/35 gesetzt, 259/36 frei; Untersuchung von Eintrag 1 loest scd1 @0452 aus: EvtStart 5 + 0xcb Modus 1; die
+Tuer in Event 5 fuehrt nach RM_3230, deren Fluchtszene per SELECT uebersprungen wird, dann RM_3091). Gemessen: evt_tim
+16202 bei Bild 1100, Ablauf bei Bild 9200 (ev_flg 67 frei, gm_flg 0x400, ts_flg 0x4000 frei, sp_flg 0x20 -> kein
+Spielerpass mehr, player.c:1365), md1 0 71 Paesse, md1 10 ab Bild 9273 mit genau einem Knotenteil je Pass: Motion 4
+(20 Bilder) ohne Mischung, fuenfte Explosion in Pass 96 -> Motion 25 ab frm_no 0 mit hokan 8..1 bei schiebendem frm_no,
+Umbruch nach 40 Bildern -> Motion 26 ab Pass 137, md1 1 nach Pass 150; mit ply_hp 100 Motion 7 (zweite PlMtnAct-Zeile).
+Drei native Fehler behoben: der Zaehler evt_tmd/evt_tim ging beim Raumwechsel verloren (system.c:178 laesst ihn stehen;
+`inherit_progress`), bhCheckEvtTimer verlangte ts_flg 0x4000 nicht (player.c:1272), die Todesszene nahm wpntp/dmlvl 0/0
+aus begin() statt exp0 beim Eintritt (gameover.c:289) und schrieb plp->px/py/pz/ay nicht (:303-308). `--state` traegt
+jetzt `event_deadline_mode/ticks`. Tests game_test/gameover_original (Gegenproben rot), CTest 117/117,
+verify_self_destruct/enemy_ai/stairs/events gruen. Dev-App 14:43.
+
+**2026-10-17, RM_3230 Fluchtszene:** kein Enginefehler. Die Szene laeuft nativ durch, sobald der Gegnerpass laeuft:
+Event 2 (rel 0a22) haelt EN19 (Art 1 Index 1) per Common_controll 24 (event.c:11299-11500: mnwP = sys->rmthp, mtn_no 1,
+mtn_add 0x10000, mode0 5) 569 Bilder auf frm_no 0, danach warten die Tasks 0/1/2/4/5 mit bhFrameCheck (event.c:3237,
+Befehl 0x38) auf frm_no 35/80/463; den Vortrieb liefert bhEne19_Event (en19.c, bhEne19_Mode0[5] -> bhSetMotion) im
+Gegnerpass bhControlEnemy, der nur bei sys->sp_flg 0x2 laeuft (eneset.c:352, nativ enemy_dispatch.c:144). Der alte
+Befund (frm_no 0, alle Tasks in 0x38) ist die Headless-/Replay-Vorgabe `--enemy-ai off` (runtime.cpp, world_enemies.cpp
+maskiert sp_flg 0x2), die `verify_self_destruct.py` nicht ueberschrieb. Gemessen mit `--enemy-ai on --enemy-grab on`:
+Raumeintritt RM_3230 Bild 450, Schleife bis 1018, Warten 35/80/463 enden bei 1053/1098/1481 (Skriptarithmetik
+450+569+463), EN19 frm_no 82 bei Bild 1100 und 464 bei 1500, EEVT der Tasks 1/2/4 bei 1482, 5/7 bei 1572, Tuer ab 1573,
+RM_3091 bei Bild 1869 ohne Eingabe (mit Tuer-Skip-Confirm 1580). Pruefer ohne SELECT-Zeile, mit Szenenmessung und
+`--enemy-ai on`; Ablauf jetzt bei Bild 9956, md1 10 ab 10029, Motion 4/25/26 wie vorher (Gegenprobe ohne `--enemy-ai on`
+rot: frm_no 0). Native Quellen unveraendert; `./build.sh --test` CTest 117/117, verify_self_destruct/enemy_ai/events/
+stairs gruen, Dev-App 14:59. **2026-10-17, bhSetExplosionEffect:** weapon.c:1812 (23 Art 1 Groesse 6 an pos - 4 * cam.v, zwei 24 mit
+Zufallsfolge sx/ay/ax, Versatz (0,0,-2) gedreht) war in `native/effect_sprites.cpp` bereits portiert, aber ohne
+Weltbesitzer: `RoomWorld::explode_effect` (cam.v aus effect_context, unter cam.flg 0x40 aus der direkt
+geschriebenen Lage) legt die Saetze an, `GameOver::death_blast` bindet gameover.c:539 (gov_etb, sechs Aufrufe bei
+gov_ct 40/54/68/82/96/110, Test gameover_original). Dazu die Szene selbst: gameover.c:278 bhClearEffect
+(`RoomWorld::clear_effects`), :296-297 pt_flg 0x15, :301-302 sp_flg 0x6C (Task 7 laeuft: `world->tick()` in md1 10
+vor Task 14), :313-327 Kamera cam.flg 0x40 0/10/35 pers 11832 (`set_monitor_camera`, effect_context liest sie),
+game.c:318 Effektzeichnen in das Bild der Todesszene (`death_scene_append`, Szene des Raumbesitzers uebernommen),
+:313 txp[0] Spielertexturen (`death_body_textures`), :567 pt_flg 0. Messung `verify_self_destruct`: eff[512] bei
+gov_ct 10 leer (vorher Raumeffekt 122 belegt), bei gov_ct 100 Saetze 23/24/25 = 4/18/86, keine bhEff23/24/25- oder
+bhSetExplosionEffect-Luecke im Protokoll, Endbilder mit 2582/30020 warmen Pixeln bei gov_ct 45/100 (Vorherstand
+0/0 mit dem Binary 14:42). Gegenprobe Bindung entfernt: rot bei den Effektsaetzen, zurueck gruen. `./build.sh --test`
+CTest 117/117, verify_self_destruct/enemy_ai/events/stairs/combat gruen, Dev-App 15:33. Keine neue Effektprozedur
+noetig (23/24/25 waren done). **2026-10-17, Todesszene Spielerkoerper/Nebel:** Der Koerper stand in md1 10 an der Kameralage statt am Ursprung:
+native/gameover.cpp verschob die Koerperecken wie das cmat-Netz um (0,10,35), game.c:357 bhPutModel zeichnet aber den
+bhCalcModel-Baum (MdlPut.c:240-264, px/py/pz 0, ay 35499) im Weltraum unter cam.mtx (camera.c:28-37, cmat * T(0,-10,-35));
+Versatz entfernt. Messung 640x480 bei gov_ct 36: vorher Fragment x 48..134 / Zeilen 0..31 (oben beschnitten), nachher
+x 278..356 / Zeilen 141..394 (Fuesse 394 gegen 383.5 fuer y 0, Kopf 141 = 16.3 Einheiten). Nebel: kein Nebel im Original
+(gameover.c:242 njFogDisable, :323 gm_flg 0x200000 -> sync.c:143 bhControlEOR njFogDisable je Bild); nativ laeuft der
+EOR-Nebelteil in md1 10 jetzt mit (`world->end_of_render()`), fog.enabled false bei gov_ct 10 (vorher true). Tests
+gameover_original (Koerperpixel-Differenz mit/ohne PlayerAsset; Gegenprobe Versatz zurueck rot), CTest 117/117,
+verify_self_destruct/enemy_ai/events/stairs/combat gruen, Dev-App 15:52. **2026-10-17, Event-Explosion und RM_3230 Event 3:** Skriptbefehl 0xc8 = event.c:8722 bhEffBakuDrmSet (bhScenarioJmpT[200],
+Vorzeichenbyte + 3 u16/100) war in der nativen VM unimplementiert (Task blockierte mit "unimplemented opcode 0xc8"); jetzt
+native/events.cpp case 0xc8 (8 Bytes) + RoomWorld::bind op 0xc8 -> explode_effect (weapon.c:1812, cam.v aus effect_context).
+Nutzer laut Disassembler ueber alle 205 Raumskripte (Laengentabelle vervollstaendigt, keine Abbrueche): RM_5010 Ereignis 8 @09ea
+(Katapulthebel mit Tyrant in TY_BR0_PINCH/hp < 0, scd1 @026c = ELSE von IF rm_flg 0x4, en19.c:1068) und RM_9370 Ereignis 5
+(10 Aufrufe). Headless RM_5010 (Snapshot ev_flg 269, 3700 Bilder bis ct_pinch 0, zwei Hebelzuege): vorher Task 8 @0x9ea
+blockiert und Szene eingefroren, nachher @0x9fb bei Bild 5360 mit 2x23/3x24/14x25 im Pool, Szene endet bei 5600, einzige
+Luecke der vorbestehende bhEasySESet owP[0]. RM_3230 Event 3: Originalverhalten, kein Fix. Ereignis 1 pausiert enep[2]
+(bhSubpl id 96, subpl.c:357 mv00_subpl0_1 ohne mode3-4-Zweig) per bhMotionPauseSet 0 sobald frm_no >= 123; bhEwhile
+(event.c:9147) gibt beim Schleifenende 0 zurueck, der naechste Gegnerpass (bhSysCallGame vor bhSysCallEvent, main.c:195)
+schiebt noch um 0x8000 auf 123.5, danach steht der Work; 124<<16 wird nie erreicht, der Raumwechsel beendet die Task.
+Nativ gemessen: 123.0 bei Bild 509, 123.5/Schleife verlassen bei 510, mode3 4 ab 511, Task 3 bei 0afd bis RM_3091.
+Tests event_lifecycle (RM_5010 Ereignis 8 mit 23/24, Gegenprobe ohne Bindung pending/leer; RM_3230 Haltepunkt 123.5),
+CTest 117/117, verify_self_destruct/enemy_ai/events/stairs/event_freeze gruen, Dev-App 16:58. **2026-10-17, Event-VM 0x86/Obj_controll:** 0x86 = event.c:6117 bhEasySESet
+(16 Bytes, Art 0 plp/1 ene[enep.wrk_no]/2 obwp/3 itwp, Knoten v7) ruft sdfunc.c:1279 PlayGameSe4Event; Typ 7 =
+CallNativeEventSe Mode 1 liest pPos nie (sdfunc.c:1861). Nativ verlangte auch Typ 7 eine owP-Lage und verwarf den Ruf;
+RM_5010 Ereignis 8 @0908 nennt obwp[0] (Waffe, room.c:210 Raumobjekte erst ab 4, nativ kein Waffen-owP) -> Luecke
+`bhEasySESet owP[0]` und fehlender Ton. Jetzt Typ 7 ohne Lageaufloesung (native/world.cpp). 2002 Aufrufe in 205 Raeumen,
+Art 2 nur mit Typ 7, obwp[0] nur RM_3070 @06fc/RM_5010 @0908. Headless RM_5010 (Aufstellung wie 0xc8): vorher 1 Luecke,
+Bank-2-Folge in Ereignis 8 seq2/3/7/11/8; nachher 0 Luecken, seq2/3/6/7/11/8, 0 blockiert. 0x66 = event.c:9708
+bhObjCtr/Obj_controll: nur Faelle 1 (2 Bytes) und 20 (4 Bytes), Default ohne Vorschub und ohne Wirkung, Rueckgabe 1 -
+das Kommandobyte laeuft als naechster Opcode (event.c:13047). `EventVm::obj_controll_length` + Default `advance(1)`
+statt Ausnahme. Einziger Nicht-1/20-Fall aller Raeume: RM_3020 Ereignis 6 Kommando 12 -> 0x0c bhFlrAtariSet @040f ->
+bhEnd @0413 (Task bleibt dort wie im Original); kein Skript in RM_3020 startet Ereignis 6. Tests event_lifecycle
+(Obj_controll-Laengentabelle, RM_3020 Ereignis 6 explizit ohne Fehler bei 0x413, RM_5010 Ereignis 8 ohne
+bhEasySESet-Luecke mit Bank 2 seq6 genau einmal; beide Gegenproben rot/gruen), CTest 117/117,
+verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors gruen, Dev-App 17:37.
+**2026-10-17, RM_9370 Ereignis 5 / Licht der Todesszene:** Ereignis 5 hat keinen eigenen Ausloeser: scd0 @0054 loescht
+ev_flg 458, scd1 @0430 startet bei 458 frei mit allen Szenentasks @044c Ebene 5 Ereignis 5 (Eintritt aus RM_9091 Ereignis 2
+@036e, Tuer 09/25); es wartet mit bhCamCheck (event.c:4881) auf die Kameras von Ereignis 2 und mit bhFrameCheck auf
+enep[0/1] (bhSubpl 92/97, --enemy-ai on). Headless lief es schon durch (10x 0xc8, bhEvtEnd @23f2), liess aber alle 22
+0x6d = event.c:5028 bhCyodanSet (Treffer, bhSetEffParticle effsub3.c:911) pending; jetzt RoomWorld::bind op 0x6d ->
+EffectParticles::spawn. Nachher: 10x 0xc8, 22x 0x6d, Ende ~Bild 4760, blocked 0, keine Luecke, lebende 23/24/25 (neues
+Zustandsfeld effects[].flg) Bild 3620 7/12/110, 3800 0, 4700 4/10/48. Test event_lifecycle RM_9370 (natuerlicher
+scd1-Start, genau 10 Anforderungen/10 Feuerbaelle 23 Art 1, keine pending Befehle von Ereignis 5, Partikel > 0; Gegenproben
+ohne 0xc8-Bindung bzw. ohne 0x6d-Bindung rot/gruen); Testgeruest laedt Diskwechsel/Raumbank jetzt aus RoomIdentity wie
+runtime.cpp. verify_events prueft 0x6d jetzt als gebunden. Todesszene: md1 10 setzt gm_flg 0x80 (gameover.c:323), daher
+bhSetHalfLight = bhSetEasyDirLight(0.6) (light.c:992/279, MdlPut.c:33); der Koerper geht jetzt ueber death_scene_append
+durch RoomWorld::append (Kategorie 1, kein zweiter Lichtweg) statt der Renderer-Hostschattierung; Koerper gov_ct 36
+Mittel RGB 21.0/14.2/17.0 -> 16.8/11.5/14.1, Licht grau 0.2..0.657. Netz: njDrawTriangle3D ohne Licht (Eckfarbe -1),
+jetzt world_lit ohne Hostschattierung (md1 2 Mittel R 18.1 -> 24.9). Test gameover_original (RM_3091-Besitzer; Gegenprobe
+rot/gruen). CTest 117/117, verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors gruen, Dev-App 18:22.
+**2026-10-17, bhEffClearEvt/bhEff085:** 0xca = event.c:8801 bhEffClearEvt (2 Bytes) -> effect.c:159 bhClearEventEffect,
+eine selektive Freigabe (nicht bhClearEffect): bhClrEff_YT (effect.c:166: 5/11/113/114/136/159/225/398, dazu 22/24/25/27 mit
+Hilfssatz exp0), bhClrEff_RY (effsub3.c:117: 301, Partikelwurzel 302 mit exp0/exp1), bhClrEff_YG (effsub2.c:4793:
+250/253/256/257/272/296-298, 254/260 mit exp0), je nur flg & 1. Jetzt RoomWorld::bind op 0xca -> RoomWorld::clear_event_effects
+(+ EffectParticles::clear_event). 51 Aufrufe in 27 Raeumen. Test event_lifecycle RM_9360 Ereignis 14 (Eintritt mit ev_flg 458,
+Aufstellung Explosion + Treffer): um 0xca 3x24/31x25/2x302 und 29 Raumeffekte 159 frei, 33 Hilfssaetze frei, 23 und alles andere
+unveraendert; Gegenprobe rot/gruen. Headless RM_9370 -> RM_9360 (7000 Bilder): pending 1 -> 0. 0x91 bhEffModeSet war schon
+gebunden und scheiterte nur an der fehlenden Prozedur: bhEff085 (effsub6.c:18) jetzt handportiert - zeichnet nie, mode1 1 tauscht
+ene[rom->effp[type].lkno].mlwP->texP->textures[3].texaddr gegen sys->ef_tn[85] (Sicherung in exp0, alle Werke derselben
+et_lp-Liste), mode1 2 stellt her. In RM_9370 laufen 0x91 2 und 0 (Ereignis 0 @07ee/@07f2) im selben Schedulerpass vor dem
+naechsten bhControlEffect, daher bleibt der Tausch wie im Original stehen. Tests effect_eff085 (neu) und event_lifecycle RM_9370
+(1 @Pass 3646, 2/0 @4551, Texturtausch geteilt mit ef_tn[85]); Gegenprobe rot/gruen. Headless RM_9370 4700 Bilder: pending 7 -> 4
+(nur 0x86). CTest 118/118, verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors gruen, Dev-App 19:02.
+**2026-10-17, 0x86 Raumsoundbank:** bhEasySESet (event.c:6117) gibt nach PlayGameSe4Event immer 1 zurueck (event.c:6205);
+Typ 7 -> CallNativeEventSe (sdfunc.c:1830) -> ExPlayMidi. MODHSYN.IRX (nur gelesen): Programmwechsel .text 0x75c behaelt kein
+Programm fuer Eintrag 0xffffffff / Nummer > letzter Index / 0 Splits, Note-On 0x5f90 startet dann keine Stimme; die Splitschleife
+(0x6098) vergleicht Tastengrenzen &0x7f, ungedeckte Taste = keine Stimme. Die Sequenz laeuft weiter. Kein Formatfehler der Basis:
+MULTSPQ2/0086 Bank 2 Programme 23/24/27..30 sind leere Eintraege, Programm 11 hat nur Taste 60 (seq 11 spielt 60 und 61). Nativ
+warf decode_system_sound fuer MIDI-Noten und brach die ganze Sequenz ab; jetzt stumme Note (native/audio.cpp), und op 0x86 gilt
+immer als ausgefuehrt, ein nicht bedienter Ruf ist audio_unavailable 'bhEasySESet type T slot S SeNo N' (native/world.cpp).
+Messung aller 205 Raumskripte gegen das Raumpaket Fall 0: 9 Typ-7-Aufrufe betroffen (RM_3020/3130/6080x2/7100/9370x4), nachher 0;
+RM_3150 @0cae/@0cc8 (seq 116/117) liegen hinter der Tabelle von Paket Fall 0 (der Raum setzt per 0xb6 Fall 1, Paket 3151 fehlt
+im IDX; Bankwahl dort offen) und waeren jetzt Luecke statt pending. Tests audio_movie und
+event_lifecycle (RM_9370 Ereignis 11), Gegenproben rot/gruen. Headless RM_9370 4700 Bilder: pending 4 -> 0, keine Luecke.
+**2026-10-17, MIDI Mehrfach-Splits:** MODHSYN.IRX Note-On (0x5f90, Splitschleife 0x6098..0x64a0) startet fuer jeden Split, der
+die Taste deckt, eine eigene Stimme (kein Abbruch nach Treffer; Stimme 0x6264, Key-On 0x63d0). Nativ jetzt `decode_system_note`
+(native/audio.cpp/.h): je Split ein Clip mit eigener Lautstaerke/Pan, im Sequenzer je Stimme ein Notenlayer. Messung: 80 Paket-
+Sequenzen, 1757 Noten mit >1 Stimme (Stimmen 13347 -> 15104); 7 Typ-7-Aufrufe (RM_0100/1100/1130x2/1140/2000/4050), Stimmen 88 -> 104.
+RM_1100 seq 0: rechter Kanal vorher stumm (RMS R 0 -> 831, L 833 unveraendert). Test audio_movie (Summe der Einzelsplits), Gegenprobe
+rot/gruen; CTest 118/118, verify_audio_state/bgm_rooms/events/event_freeze/enemy_ai/doors gruen, Dev-App 19:46. Offen: Stimmenpool/Stealing (24 je Kern) nativ unbegrenzt.
+**2026-10-17, vier Nutzerbefunde (Dev-App 21:19, CTest 121/121):** (1) Fassexplosion ohne Schaden: der Gegnerteil von
+bhCheckBombAtari (weapon.c:1420) lief ueber die stillgelegte EN01-Fassade mit leerem recvx_en01_bomb; jetzt am echten
+Gegnerwork (`RoomWorld::bomb_enemy_damage`) mit watr-Kapsel, bhCheckC2WallN 0x400 (neu `check_c2_wall_n`, Kapselradius 0.1
+statt Strahl), Gelenkwahl und dam[]/comb_flg. Test `native_barrel_blast` (RM_0080 ueber den echten Trefferpfad).
+(2) RM_1130 Wasserspritzer: der Zeichenpass nahm die Startgroesse der Raumtabelle statt der von bhEff249 fortgeschriebenen
+(effect.c:1374 zeichnet op->sx/sy/sz); Bild 350 vorher bildfuellende Flaechen, jetzt kleine Tropfenwolken (Gegenprobe rot).
+(3) Schreibmaschine: die Tipptoene (0x80000242-244) haben Bit 31 und gehen ueber ExPlayMidi auf MIDI-Slot 2
+(sdfunc.c:1344-1385); `play_system` nahm sie als COMMON-SE-Programm und verwarf sie. Gemessen RM_0010: 24 Sequenzen 2/66..68.
+(4) Ueberlappender Text im Aufnahmebildschirm: er erbte den Zustand des vorigen Statusbildschirms (FILE/Examine), und die
+Befehlsbeschreibung 180 - maincsr zeichnete ueber die Frage; sub1.c:3308 startet ihn mit StatusInit. Test `pickup_status_reset`.
+
+**Naechster Posten:** RM_1050 Steve (Monitor aus der Ferne schwarz, Ereignis haengt nach Steves Abgang) und RM_4020 Greifarm
+(Kistenbereich wird nicht getroffen) sind gemeldet und noch offen; Vorarbeit: Verdacht auf e.frame/frm_no bei skriptgefuehrten
+Subplayern (bhFrameCk). Weiter offen in RM_9370 (nicht Ereignis 5): die Raumeffekte 35/50/54/70-76/80/400/402/405/426 dieses Raums sind nicht
+portiert (Raumtabelleneffekte ohne Prozedur melden keine Luecke). Weiter offen: sys->obwp[0..3] (Waffe rechts/links, Zopf) ueber
+Art 2 nicht aufloesbar (Waffe ohne eigenen owP-Baum, Zopf nur als Nachbildmodell) - Typen 1/3/4/5 von 0x86 mit Art 2
+Index 0..3 (in den Daten nicht genutzt); Art-1-Knotenlagen von 0x86 nicht je Raum gemessen. **Kein Commit/Push.**
 
 ## Gezielter Zugang zu bisherigen Befunden
 

@@ -132,9 +132,10 @@ int main(int argc,char** argv){try{
         check(recvx_stairs_begin(&s,&a,action,floors.data(),0,py,0,0,int(py),0,0)==1,"stair begin refused a type-1 area");
         check(s.active&&s.mode0==1&&s.mode2==action&&(s.status&0x80010010u)==0x80010010u,"stair begin does not match bhCheckExmAtari case 1/2");
         check((s.flg&0x10400u)==0x10400u&&!(s.flg&0x110u)&&(s.st_flg&4u),"stair begin does not set the original player switches");
-        // HOKAN|MTN_ATTR bleiben offen; HEADWORK ist seit B06 gebunden und wird
+        // HOKAN (0x80) bleibt bis zum ersten Knotenteil des Hosts vorbelegt; MTN_ATTR (0x200)
+        // entfaellt (plp->mtn_attr ohne Originalleser); HEADWORK ist seit B06 gebunden und wird
         // nur noch gemeldet, wenn der Host release_head_look nicht stellt.
-        check((s.unsupported_services&0x280u)==0x280u,"stair begin stopped reporting its unbound services");
+        check(s.unsupported_services==0x80u,"stair begin stopped reporting its unbound services");
         check(!(s.unsupported_services&RECVX_STAIR_UNBOUND_HEADWORK),"stair begin must not pre-seed the bound head work");}
     for(int action:{16,17}){
         RECVX_STAIR_STATE s{};RECVX_STAIR_AREA a{};const float py=action==16?0.f:9.f;

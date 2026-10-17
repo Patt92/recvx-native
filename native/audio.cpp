@@ -48,7 +48,10 @@ PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate){
         }
     }if(!out.loop_end)out.loop_start=0;return out;
 }
-PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned program,int key){
+namespace {
+// One clip per voice the program starts: key<0 (TSNDDRV SE request) the first split, key>=0 (MODHSYN
+// note-on) every split whose key range holds the key, in table order.
+std::vector<PcmClip> decode_program_voices(const std::vector<std::uint8_t>& bytes,unsigned program,int key){
     BinaryView v(bytes);v.require(0,24);const auto hd=v.u32(0),hd_size=v.u32(4),bd=v.u32(8),bd_size=v.u32(12);v.require(hd,hd_size);v.require(bd,bd_size);
     auto magic=[&](std::size_t p,const char* expected){v.require(p,8);if(std::memcmp(bytes.data()+p,expected,8))throw std::runtime_error("invalid Sony sound-bank section");};
     magic(hd,"IECSsreV");const auto head=hd+v.u32(hd+8);magic(head,"IECSdaeH");
@@ -57,16 +60,38 @@ PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned prog
     auto entry=[&](std::size_t table,unsigned index,std::size_t size){if(index>v.u32(table+12))throw std::runtime_error("Sony sound-bank index outside table");const auto offset=v.u32(table+16+index*4),length=v.u32(table+8);if(offset>length||size>length-offset)throw std::runtime_error("Sony sound-bank entry outside section");return v.relative(table,offset,size);};
     // Program: +0 split offset, +4 split count, +5 split size, +6 volume, +7 pan.
     // Split: +0 sample set, +2..+4 key low/centre/high, +0x10 volume, +0x11 pan.
+    // MIDI note-on (key>=0) is MODHSYN's path. Its program change (MODHSYN.IRX .text 0x75c) keeps no
+    // program when the number is above the table's last index (+12), the table entry is 0xffffffff or
+    // the program has no split (+4 == 0); note-on (0x5f90) then returns at once without a voice
+    // (`beq t0,zero,0x64c8` at 0x5ff0). The sequence itself runs on (MULTSPQ2/0086 bank 2 programs
+    // 23/24/27..30 are such empty entries).
+    if(key>=0&&(program>v.u32(prog+12)||v.u32(prog+16+std::size_t(program)*4)==0xffffffffu))return {};
     const auto pg=entry(prog,program,0x28);const unsigned splits=v.u8(pg+4),split_size=v.u8(pg+5);
     // A program without splits keys no waveform, so its note-on starts no voice (RM_9340 bank 3
     // programs 60..67: the en01 voice variant add_seno 40 of the mdlver-38 zombie).
     if(!splits)return {};
     if(split_size<0x14)throw std::runtime_error("invalid Sony program split table");
     if(v.u8(pg+12)&1)throw std::runtime_error("Sony phase-inverted program pan not ported");
-    auto zone=v.relative(pg,v.u32(pg),std::size_t(splits)*split_size);
-    if(key>=0){unsigned i=0;for(;i<splits;++i){const auto z=zone+std::size_t(i)*split_size;if(key>=v.u8(z+2)&&key<=v.u8(z+4)){zone=z;break;}}if(i==splits)throw std::runtime_error("Sony program has no split for key");}
+    const auto zones=v.relative(pg,v.u32(pg),std::size_t(splits)*split_size);
+    // MODHSYN note-on split loop (0x6098..0x64a0): split +2 and +4 are compared without bit 7
+    // (`and v0,v0,-129`, bit 7 is the crossfade flag read at 0x4680). A key no split covers starts no
+    // voice and leaves the sequence running: an original silent note, not an unavailable sound.
+    // The loop does not stop at the first hit: every covering split runs its Sset sample loop
+    // (0x615c..0x646c) and keys a voice per sample (0x6264 voice, 0x62f0.. setup, 0x63d0 key-on),
+    // then steps 20 bytes to the next split (0x6474..0x64a0) until the count runs out.
+    std::vector<PcmClip> voices;
+    auto voice=[&](std::size_t zone){
+    // Note-on skips a split whose Sset index is above the table's last (0x60f0..0x6108) or whose Sset has no
+    // sample (0x614c..0x6154), and a sample whose Smpl index is above the last (0x6164..0x6178) or whose
+    // Vagi entry is 0xffffffff (0x6200..0x6208); the next split/sample follows.
+    if(key>=0&&v.u16(zone)>v.u32(sets+12))return;
     const auto set=entry(sets,v.u16(zone),6);
+    if(key>=0&&(!v.u8(set+3)||v.u16(set+4)>v.u32(samples+12)))return;
     if(v.u8(set+3)!=1)throw std::runtime_error("layered system sound unsupported");const auto sample=entry(samples,v.u16(set+4),42);const auto vag=entry(vags,v.u16(sample),8);
+    if(key>=0&&v.u32(vag)==0xffffffffu)return;
+    // Note-on also gates Sset +1..+2 (0x6120/0x6138) and Smpl +2..+4 &0x7f (0x6190/0x61b0) by velocity; every
+    // Sset/Smpl of every bank holds 1..127, so a note-on velocity (1..127) always passes. Others are not ported.
+    if(key>=0&&(v.u8(set+1)!=1||v.u8(set+2)!=127||(v.u8(sample+2)&0x7f)!=1||(v.u8(sample+4)&0x7f)!=127))throw std::runtime_error("Sony Sset/Smpl velocity range not ported");
     const auto start=v.u32(vag);std::size_t end=bd_size;for(unsigned i=0;i<=v.u32(vags+12);++i){const auto next=v.u32(entry(vags,i,8));if(next>start)end=std::min(end,std::size_t(next));}
     if(start>=end||end>bd_size)throw std::runtime_error("invalid Sony sound-bank waveform range");
     auto out=decode_ps_adpcm(std::vector<std::uint8_t>(bytes.begin()+bd+start,bytes.begin()+bd+end),v.u16(vag+4));
@@ -82,10 +107,29 @@ PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned prog
     for(unsigned depth:{0x16u,0x18u,0x1au,0x1cu,0x1eu})if(v.u8(sample+depth))throw std::runtime_error("Sony sample key-follow ADSR not ported");
     out.spu=true;out.adsr1=v.u16(sample+0x12);out.adsr2=v.u16(sample+0x14);out.spu_attr=v.u8(sample+0x29);
     out.volume=float(v.u8(pg+6))/127.f*float(v.u8(zone+0x10))/127.f;out.pan=unsigned(sony_bank_pan(std::int8_t(v.u8(pg+7)),std::int8_t(v.u8(zone+17)),std::int8_t(v.u8(sample+13)),((note-int(v.u8(zone+15)))*int(std::int8_t(v.u8(zone+14)))+(note-int(v.u8(pg+11)))*int(std::int8_t(v.u8(pg+10))))/12));
-    return out;
+    voices.push_back(std::move(out));};
+    if(key<0){voice(zones);return voices;}
+    for(unsigned i=0;i<splits;++i){const auto z=zones+std::size_t(i)*split_size;if(key>=(v.u8(z+2)&0x7f)&&key<=(v.u8(z+4)&0x7f))voice(z);}
+    return voices;
+}
+}
+std::vector<PcmClip> decode_system_note(const std::vector<std::uint8_t>& bytes,unsigned program,int key){
+    if(key<0||key>127)throw std::runtime_error("MIDI note-on key outside 0..127");
+    return decode_program_voices(bytes,program,key);
+}
+PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned program,int key){
+    auto voices=decode_program_voices(bytes,program,key);
+    if(voices.empty())return {};
+    // A key several splits cover keys several voices (decode_system_note); one clip cannot stand for them.
+    if(voices.size()>1)throw std::runtime_error("Sony note keys several splits; decode_system_note returns its voices");
+    return std::move(voices.front());
 }
 void AudioMixer::play_system(unsigned program){
     if(data_.empty())return; // Resource-free engine fixtures have no system bank.
+    // sdfunc.c:1344-1385 CallSystemSeBasic: bit 31 selects ExPlayMidi, bank = (SeNo >> 8) & 15,
+    // list = low byte on MIDI slot 2. mcCallMessageTypeSe uses 0x80000242..244 (room MIDI bank 2),
+    // not COMMON's single-sample SE table. Do not discard the request as an out-of-range SE program.
+    if(program&0x80000000u){play_system_midi(program);return;}
     auto found=system_sounds_.find(program);if(found==system_sounds_.end()){auto file=mods_/"audio/system/COMMON.MLT";if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"files/COMMON.MLT";
         found=system_sounds_.emplace(program,std::make_shared<PcmClip>(decode_system_sound(read_asset_file(file,8*1024*1024),program))).first;}
     if(found->second->frames())play_pcm(effect_slot_,found->second);effect_slot_=effect_slot_==2?3:2;played.push_back("COMMON/"+asset_number(program));
@@ -318,8 +362,8 @@ bool AudioMixer::load_player_sounds(unsigned player){
 bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot,bool loop){
     if(slot<3||slot>=slots_.size())throw std::runtime_error("invalid room effect channel");
     const auto source=room_banks_.find(bank);if(source==room_banks_.end())return false;
-    const auto id=std::make_tuple(bank,program,-1);auto found=room_sounds_.find(id);if(found==room_sounds_.end())found=room_sounds_.emplace(id,std::make_shared<PcmClip>(decode_system_sound(source->second,program))).first;
-    if(found->second->frames())play_pcm(slot,found->second,1,loop);played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(sound_bank_packs_.at(bank))+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
+    const auto id=std::make_tuple(bank,program,-1);auto found=room_sounds_.find(id);if(found==room_sounds_.end())found=room_sounds_.emplace(id,std::vector<std::shared_ptr<PcmClip>>{std::make_shared<PcmClip>(decode_system_sound(source->second,program))}).first;
+    if(found->second.front()->frames())play_pcm(slot,found->second.front(),1,loop);played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(sound_bank_packs_.at(bank))+"/"+std::to_string(bank)+"/"+asset_number(program));return true;
 }
 bool AudioMixer::background_sound(unsigned slot,unsigned sound,unsigned timer){
     if(slot>2)throw std::runtime_error("background sound slot outside original three");
@@ -365,9 +409,11 @@ bool AudioMixer::play_room_sequence(unsigned bank,unsigned list,unsigned slot,bo
                 case 0x90:if(data[1]){
                     if(part.program<0)return fail("note without program");
                     const auto id=std::make_tuple(0x100u|bank,unsigned(part.program),int(data[0]));auto found=room_sounds_.find(id);
-                    if(found==room_sounds_.end())found=room_sounds_.emplace(id,std::make_shared<PcmClip>(decode_system_sound(programs->second,unsigned(part.program),int(data[0])))).first;
-                    if(found->second->frames()){auto& layer=event.layer;layer.clip=found->second;pan_gains(unsigned(std::clamp(int(layer.clip->pan)+int(part.pan)-64,0,127)),layer.left,layer.right);
-                    const float gain=layer.clip->volume*float(data[1])/127.f*float(part.volume)/127.f*float(part.expression)/127.f;layer.left*=gain;layer.right*=gain;}
+                    // MODHSYN keys one voice per covering split (split loop 0x6098..0x64a0); each takes its own
+                    // split's volume/pan with the same channel volume/expression/pan and velocity.
+                    if(found==room_sounds_.end()){std::vector<std::shared_ptr<PcmClip>> voices;for(auto& clip:decode_system_note(programs->second,unsigned(part.program),int(data[0])))voices.push_back(std::make_shared<PcmClip>(std::move(clip)));found=room_sounds_.emplace(id,std::move(voices)).first;}
+                    for(const auto& clip:found->second){if(!clip->frames())continue;Layer layer;layer.clip=clip;pan_gains(unsigned(std::clamp(int(layer.clip->pan)+int(part.pan)-64,0,127)),layer.left,layer.right);
+                    const float gain=layer.clip->volume*float(data[1])/127.f*float(part.volume)/127.f*float(part.expression)/127.f;layer.left*=gain;layer.right*=gain;event.layers.push_back(std::move(layer));}
                     if(programs_played.find("/prog"+std::to_string(part.program))==std::string::npos)programs_played+="/prog"+std::to_string(part.program);
                 }break;
                 default:break;}
@@ -482,7 +528,8 @@ void AudioMixer::sequence_step(Channel& channel){
         auto held=[&](const SequenceNote& note){return note.channel==part&&note.key==event.key&&!(note.layer.clip&&note.layer.clip->spu&&note.layer.env.phase==SpuEnvelope::Release);};
         if((event.status&0xf0)==0x90&&event.value){
             s.notes.erase(std::remove_if(s.notes.begin(),s.notes.end(),held),s.notes.end());
-            s.notes.push_back({event.layer,part,event.key});auto& on=s.notes.back().layer;if(on.clip&&on.clip->spu)key_on(on.clip,on.env,on.core);
+            // One MODHSYN voice per layer, keyed in split order: each core choice (0x64f8) sees the voices before it.
+            for(const auto& layer:event.layers){s.notes.push_back({layer,part,event.key});auto& on=s.notes.back().layer;if(on.clip&&on.clip->spu)key_on(on.clip,on.env,on.core);}
         }else if((event.status&0xf0)==0x80||((event.status&0xf0)==0x90&&!event.value)){
             // MODHSYN note-off: key-off, the voice runs its sample ADSR2 release.
             for(auto& note:s.notes)if(held(note)){if(note.layer.clip&&note.layer.clip->spu)note.layer.env.key_off();else note.layer.clip.reset();}

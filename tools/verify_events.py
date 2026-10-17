@@ -117,7 +117,8 @@ def main():
             if name == 'steve-trigger':
                 gift(result)
                 assert not result['bgm_active'], 'non-looping Steve cue still plays after original end'
-                assert any(command['opcode'] == 0x6d for command in result['pending_commands']), 'missing particle binding hidden'
+                # event.c:5028 bhCyodanSet (0x6d) laeuft am Weltbesitzer (effsub3.c:911 bhSetEffParticle) und bleibt nicht pending.
+                assert not any(command['opcode'] == 0x6d for command in result['pending_commands']), ('bhCyodanSet left pending', result['pending_commands'])
         # system.c:545 bhSysCallGame: only pad_ps 0x10000 (SELECT) requests the skip.
         # OK during the running scene must leave it running (it only acknowledges text).
         no_skip = folder / 'steve-ok-no-skip.txt'

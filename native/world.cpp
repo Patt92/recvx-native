@@ -162,7 +162,7 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         if(actor){unsigned version=0;bool first=true;for(std::size_t at=model,n=0;n<64;++n){const auto bytes=v.u32(at);at+=4;if(bytes==0xffffffff)break;
             if(bytes&&(v.u32(at)&0xffffff)==0x4c444d){if(v.u32(at+8)!=0xffffffff){const auto key=std::make_tuple(kind,identity,variant,version++);auto it=texture_cache.find(key);if(it==texture_cache.end())it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(first){texture=it->second;first_textured=true;}textures.push_back(it->second);}first=false;}at+=bytes;}}
         else {const auto mdl=skinned_object(v,model)?model+8+v.u32(model):model;const auto key=std::make_tuple(kind,identity,0u,0u);auto it=texture_cache.find(key);if(it==texture_cache.end()&&v.u32(mdl+8)!=0xffffffff)it=texture_cache.emplace(key,v.u32(texture_table+4+texture_slot++*4)).first;if(it!=texture_cache.end())texture=it->second;}
-        Model out;out.kind=kind;out.index=index;
+        Model out;out.kind=kind;out.index=index;out.texture_list=actor&&first_textured?texture:0;
         if(actor&&!actor_has_objects(v,model)){e.model_absent=true;return;}
         if(actor){out.actor=std::make_unique<PlayerAsset>(actor_packet(b,model,textures,first_textured),identity>90);}
         else if(skinned_object(v,model)){out.actor=std::make_unique<PlayerAsset>(skinned_object_packet(b,model,texture));actor=true;}
@@ -176,12 +176,15 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     // room.c bhSetRoom appends unique room effect atlases after actor/item textures.
     const auto effectp=v.u32(header_+0x14),effect_count=v.u32(header_+0x94);if(effect_count>512)throw std::runtime_error("too many original room effects");v.require(effectp,effect_count*68);
     std::set<unsigned> effect_ids;
+    // effsub1.c:187 bhEff2D: tex_id = type, die Gruppe eines Raumeffekts 20 ist sein type (RM_0000: 45 =
+    // die drei Prologseiten); room.c:305-329 laedt sie ueber den Halter-Satz mit dieser Kennung.
+    std::set<unsigned> eff2d_groups;for(unsigned i=0;i<effect_count;++i){const auto p=effectp+i*68;if(v.u16(p+4)==20)eff2d_groups.insert(v.u16(p+6));}
     // eff[512] ist ein festes Feld (effect.c:276). Eine Prozedur haelt ihren
     // eigenen Satz als Referenz, waehrend bhSetExtraEffectWork weitere Plaetze
     // belegt; mit voller Kapazitaet verschiebt eine Belegung nie den Speicher.
     sprites_.reserve(512);
-    for(unsigned i=0;i<effect_count;++i){const auto p=effectp+i*68;const unsigned id=v.u16(p+4);SpriteWork work;work.sprite.id=id;work.sprite.type=v.u16(p+6);work.sprite.flg=v.u32(p);work.sprite.ay=v.u16(p+36);work.sprite.ax=v.u16(p+38);work.sprite.lkono=v.u32(p+40)?int(v.u32(p+48)):0; /* room.c:781 bhSetEffectTb(ep, NULL, NULL, 0): lkono 0; nur bhSetEffectLink (:851) schreibt efp->lkono bei lkflg != 0 */work.scale={v.f32(p+24),v.f32(p+28),v.f32(p+32)};work.link=v.u32(p+40);work.index=v.u32(p+44);work.node=v.u32(p+48);work.offset={v.f32(p+52),v.f32(p+56),v.f32(p+60)};work.sprite.px=v.f32(p+12);work.sprite.py=v.f32(p+16);work.sprite.pz=v.f32(p+20);work.sprite.sx=work.sprite.sxb=work.scale.x;work.sprite.sy=work.sprite.syb=work.scale.y;work.sprite.sz=work.sprite.szb=work.scale.z;sprites_.push_back(work);auto& e=entity(4,i);e.identity=id;e.type=work.sprite.type;e.angles={work.sprite.ax,work.sprite.ay,0};e.transform.position={v.f32(p+12),v.f32(p+16),v.f32(p+20)};
-        if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)||ported_effect_atlas(id)){auto atlas=decode_texture_bundle(b,texture);
+    for(unsigned i=0;i<effect_count;++i){const auto p=effectp+i*68;const unsigned id=v.u16(p+4);SpriteWork work;work.sprite.id=id;work.sprite.type=v.u16(p+6);work.sprite.flg=v.u32(p);work.sprite.ay=v.u16(p+36);work.sprite.ax=v.u16(p+38);work.sprite.lkono=0; /* room.c:781 bhSetEffectTb(ep, NULL, NULL, 0): lkono 0; bhSetEffectLink (:787) schreibt es danach: lkflg 0 -> efp->lkono (:877), aktiver Link -> begrenzt (:853), inaktiver Link -> bleibt 0 */work.scale={v.f32(p+24),v.f32(p+28),v.f32(p+32)};work.link=v.u32(p+40);work.index=v.u32(p+44);work.node=v.u32(p+48);work.offset={v.f32(p+52),v.f32(p+56),v.f32(p+60)};work.sprite.px=v.f32(p+12);work.sprite.py=v.f32(p+16);work.sprite.pz=v.f32(p+20);work.sprite.sx=work.sprite.sxb=work.scale.x;work.sprite.sy=work.sprite.syb=work.scale.y;work.sprite.sz=work.sprite.szb=work.scale.z;sprites_.push_back(work);auto& e=entity(4,i);e.identity=id;e.type=work.sprite.type;e.angles={work.sprite.ax,work.sprite.ay,0};e.transform.position={v.f32(p+12),v.f32(p+16),v.f32(p+20)};
+        if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)||eff2d_groups.count(id)||ported_effect_atlas(id)){auto atlas=decode_texture_bundle(b,texture);
             // Eine portierte Prozedur behaelt die Alpha-Domaene des Dekoders;
             // die unportierten Sprites zeichnen dieselben Atlanten additiv.
             Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
@@ -193,8 +196,17 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     // eff[efid[lkno]]) hat keinen nativen Besitzer und bleibt eine benannte Luecke.
     // bhSetEffectLink schreibt zusaetzlich efp->px (die Raumtabelle, nicht op->px);
     // deren einziger Leser ist ein erneutes bhSetEffectTable, das der Host nicht hat.
+    // Dieselbe Klemmung auf der Raumtabelle selbst (efp->lkno, room.c:799-834), fuer die Leser von rom->effp.
+    for(unsigned i=0;i<effect_count;++i){const auto p=effectp+i*68;const int lkflg=int(v.u32(p+40));int lkno=int(v.u32(p+44));
+        if(lkflg==1)lkno=0;
+        else if(lkflg==2){if(int(ene_count)<=lkno)lkno=0;}
+        else if(lkflg==3){if(int(obj_count)<=lkno)lkno=0;}
+        else if(lkflg==4){if(int(item_count)<=lkno)lkno=0;}
+        else if(lkflg==5){if(int(effect_count)<=lkno)lkno=0;}
+        room_effect_links_.emplace_back(lkflg,lkno);}
     for(unsigned i=0;i<effect_count&&i<sprites_.size();++i){auto& work=sprites_[i];
-        if(!work.link)continue;
+        // room.c:874-878 lkflg 0: op->flg &= ~0x80 und op->lkono = efp->lkono unbegrenzt (bhEff2D liest es als Bild der Gruppe).
+        if(!work.link){work.sprite.flg&=~0x80u;work.sprite.lkono=int(work.node);continue;}
         if(work.link>4){unbound_enemy_.insert("bhSetEffectLink: lkflg 5 (eff[efid[lkno]]) ohne nativen Besitzer");work.link=0;continue;}
         const unsigned kind=work.link-1;
         const unsigned count=kind==0?1u:kind==1?ene_count:kind==2?obj_count:item_count;
@@ -692,6 +704,39 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(slot<0)unbound_enemy_.insert("bhSetEffect: kein freier eff[512]-Platz");
         else if(!supported_effect_sprite(id))unbound_enemy_.insert("bhEff"+std::to_string(id));
         return true;}
+    // event.c:7472 bhHEffectSet2 (0xb0, 22 Byte): schreibt die geteilte Vorlage sys->ef
+    // (effect_detail::request_template) Feld fuer Feld -- type Byte 2; px/py/pz u16/100 mit den
+    // Vorzeichenbits von Byte 3 (1 x, 2 y, 4 z); ax/ay aus Grad (Byte 10: Bit 1 negiert ax, Bit 2 ay;
+    // Bytes 11/12) als short wie EF_WORK.ax/ay; sx/sy/sz u16/100 mit den Vorzeichenbits von Byte 13;
+    // id u16 an Byte 20; flg 1, flr_no 0, mdlver 0 -- und ruft bhSetEffectTb(&sys->ef, NULL, NULL,
+    // v4 = Byte 1): erster freier Platz in eff[512], lkono v4, kein Linkwerk. Ausserhalb des
+    // Effektpasses wird sofort belegt (wie 0x2c). RM_1050 Ereignis 12/18/24: bhEff211
+    // (Monitorrauschen, effsub5.c:1039) an der Lage des Monitors.
+    if(op==0xb0){auto& r=effect_detail::request_template();
+        const auto hundredth=[&](unsigned signs,unsigned bit,unsigned at){const float n=float(v.u16(at))/100.0f;return (signs&bit)?-1.0f*n:n;};
+        const auto degrees=[](int value){return int(std::int16_t(int(float(value)*(65536.0f/360.0f))));}; // (short)(v * 65536/360)
+        r.type=v.u8(2);
+        {const unsigned signs=v.u8(3);r.position={hundredth(signs,1,4),hundredth(signs,2,6),hundredth(signs,4,8)};}
+        {const unsigned signs=v.u8(10);const int ax=(signs&1)?-int(v.u8(11)):int(v.u8(11)),ay=(signs&2)?-int(v.u8(12)):int(v.u8(12));r.ax=degrees(ax);r.ay=degrees(ay);}
+        {const unsigned signs=v.u8(13);r.scale={hundredth(signs,1,14),hundredth(signs,2,16),hundredth(signs,4,18)};}
+        r.id=v.u16(20);r.flg=1;r.flr_no=0;r.mdlver=0;
+        // Die Host-Nachtraege (EffectSpawn) gehoeren nicht zu sys->ef: wie submit_template zuruecksetzen.
+        EffectSpawn spawn=r;spawn.lkono=int(v.u8(1));spawn.linked_work=nullptr;spawn.has_offset=false;spawn.offset={};
+        spawn.has_velocity=false;spawn.velocity={};spawn.tex_id_override=-1;spawn.az=0;spawn.parent_slot=-1;
+        spawn.mode1=0;spawn.has_color=false;spawn.color=0;spawn.has_ao=false;spawn.ao={};spawn.has_exp1=false;spawn.exp1_slot=-1;
+        spawn.link_kind=-1;spawn.link_index=0;spawn.drop_link_flag=false;spawn.stflg_or=0;spawn.texture_from_slot=-1;spawn.owner_work=nullptr;
+        spawn.slot_sink_work=-1;spawn.slot_sink_index=-1;
+        const int slot=allocate_effect(spawn,0,0);
+        if(slot<0)unbound_enemy_.insert("bhSetEffectTb: kein freier eff[512]-Platz");
+        else if(!supported_effect_sprite(spawn.id))unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));
+        return true;}
+    // event.c:8722 bhEffBakuDrmSet (Befehl 0xc8): v2 Vorzeichenbits (1 x, 2 y, 4 z), drei u16 in
+    // 1/100 Einheiten als Weltlage, dann weapon.c:1812 bhSetExplosionEffect(&pPos) -> Feuerball 23 und
+    // zwei Truemmer 24 bei pos - 4 * cam.v. Luecken (Kamera/Pool) meldet explode_effect selbst.
+    if(op==0xc8){const unsigned sign=v.u8(1);
+        const auto axis=[&](unsigned at,unsigned bit){const float value=float(v.u16(at))/100.0f;return (sign&bit)?-1.0f*value:value;};
+        explode_effect({axis(2,1),axis(4,2),axis(6,4)});
+        return true;}
     // event.c:5336 bhEffPush/:5346 bhEffPop: bhPushEffectWork/bhPopEffectWork.
     if(op==0x70){EffectPushState state;state.works=sprites_;state.particles=particles_.save();effect_push_=std::move(state);return true;}
     if(op==0x71){if(effect_push_){sprites_=effect_push_->works;sprites_.reserve(512);particles_.restore(effect_push_->particles);}return true;}
@@ -885,6 +930,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     if(op==0x29){const auto mode=v.u8(1);if(mode>1)return true;
         if(!event_camera){unbound_enemy_.insert("bhCamPauseSet: cam.mode0 of bhControlActiveCamera (no event camera active)");return true;}
         if(mode==0)event_camera_paused_=true;else{event_camera_paused_=false;event_camera_finished_=false;}return true;}
+    if(op==0xca){clear_event_effects();return true;} // event.c:8801 bhEffClearEvt -> effect.c:159 bhClearEventEffect
     // effect.c bhDeleteYakkyou: release enabled shell works (IDs 0 and 7).
     if(op==0x6b){for(auto& work:sprites_)if((work.sprite.flg&1)&&(work.sprite.id==0||work.sprite.id==7)){work.sprite.flg=0;work.queued=false;}return true;}
     if(op==0x35){auto& table=v.u8(3)?event_lights_:lights_;const auto index=v.u8(2);if(index>=table.size())throw std::runtime_error("script light outside table");if(v.u8(1))table[index].flags&=~1u;else table[index].flags|=1;return true;}
@@ -951,17 +997,27 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         // pPos = epw->mlwP->owP[byte 11].mtx[12]; epw by byte 9 (0 player, 1 enemy, 2 object, 3 item) and byte 10.
         auto position=[&](SoundPoint& out){const auto joint=link_matrix(v.u8(9),v.u8(10),v.u8(11));if(!joint){/* player before the first bhCalcModel(plp): link_matrix already reports it */if(v.u8(9)!=0||!player_joint_matrices_.empty())unbound_enemy_.insert("bhEasySESet owP["+std::to_string(v.u8(11))+"]");return false;}out={joint->value[12],joint->value[13],joint->value[14]};return true;};
         SoundPoint at;
+        // event.c:6205: bhEasySESet returns 1 after PlayGameSe4Event whatever the driver does with the
+        // request (ExPlaySe/ExPlayMidi only queue it for the IOP). A request the native mixer cannot serve
+        // is therefore an audio gap of that sound, never a pending script command.
+        auto served=[&](bool played){if(!played)audio_.unavailable.push_back("bhEasySESet type "+std::to_string(type)+" slot "+std::to_string(slot)+" SeNo "+std::to_string(se));return true;};
         switch(type){
         case 0:audio_.play_player_voice(se);return true;                                                   // CallPlayerVoice
-        case 1:if(!position(at))return true;return audio_.footstep(v.u8(8),v.u8(12),unsigned(slot),true,at,syukan); // CallPlayerFootStepSeEx(FloorType,SeType,1,Id,pPos)
-        case 2:return audio_.player_action_se(se,true,syukan);                                             // CallPlayerActionSe
+        case 1:if(!position(at))return true;return served(audio_.footstep(v.u8(8),v.u8(12),unsigned(slot),true,at,syukan)); // CallPlayerFootStepSeEx(FloorType,SeType,1,Id,pPos)
+        case 2:return served(audio_.player_action_se(se,true,syukan));                                     // CallPlayerActionSe
         case 3:{unsigned bank=0,program=0;if(!weapon_shot_sound(player_weapon_,bank,program))return true;if(!position(at))return true;
-            return audio_.call_player_weapon_se(bank,se,at,slot,syukan);}                                    // CallPlayerWeaponSeEx
+            return served(audio_.call_player_weapon_se(bank,se,at,slot,syukan));}                            // CallPlayerWeaponSeEx
         case 4:{unsigned bank=0,program=0;if(!weapon_shot_sound(player_weapon_,bank,program))return true;if(!position(at))return true;
-            return audio_.cartridge_se(bank,at,se);}                                                         // CallYakkyouSe
-        case 5:if(slot>=6)return false;if(!position(at))return true;if(std::getenv("ZOMBIE_SE_DBG")){std::fprintf(stderr,"ZOMBIE_SE op=0x86 case5 slot=%d se=%d owner_kind=%u owner_idx=%u\n",slot,se,unsigned(v.u8(9)),unsigned(v.u8(10)));}return audio_.enemy_sound(unsigned(slot),unsigned(se),at); // CallEnemySe
-        case 6:return slot<=2&&audio_.background_sound(unsigned(slot),unsigned(se));                       // CallBackGroundSe
-        case 7:if(!position(at))return true;return audio_.event_sound(unsigned(slot),unsigned(se),at,1);   // CallNativeEventSe(Mode 1)
+            return served(audio_.cartridge_se(bank,at,se));}                                                 // CallYakkyouSe
+        // sdfunc.c:1809 CallEnemySe indexes SlotDef[6] with SlotNo unchecked; above 5 there is no original value.
+        case 5:if(slot>=6){unbound_enemy_.insert("CallEnemySe SlotDef["+std::to_string(slot)+"] ausserhalb SlotDef[6] (bhEasySESet)");return true;}if(!position(at))return true;if(std::getenv("ZOMBIE_SE_DBG")){std::fprintf(stderr,"ZOMBIE_SE op=0x86 case5 slot=%d se=%d owner_kind=%u owner_idx=%u\n",slot,se,unsigned(v.u8(9)),unsigned(v.u8(10)));}return served(audio_.enemy_sound(unsigned(slot),unsigned(se),at)); // CallEnemySe
+        // sdfunc.c:1603 CallBackGroundSeEx: SlotDef[3]/BgSePrmBuf[SlotNo] unchecked, likewise no original value above 2.
+        case 6:if(slot>2){unbound_enemy_.insert("CallBackGroundSeEx SlotDef["+std::to_string(slot)+"] ausserhalb SlotDef[3] (bhEasySESet)");return true;}
+            return served(audio_.background_sound(unsigned(slot),unsigned(se)));                             // CallBackGroundSe
+        // CallNativeEventSe(SlotNo, pPos, SeNo, 1): Mode 1 (sdfunc.c:1861-1873) setzt nur PanDelayTime -2 und
+        // VolumeDelayTime und liest pPos nie; event.c:6203 bildet &owP[v7].mtx[12] nur als Adresse. Die Lage des
+        // Werks (auch obwp[0], die Waffe in RM_3070/RM_5010) wird hier deshalb nicht aufgeloest.
+        case 7:return served(audio_.event_sound(unsigned(slot),unsigned(se),SoundPoint{},1));
         default:return true;}}                                                                              // types 8..11 do nothing in the original
     // bhSoundPanSet (event.c:5971): SetUserSoundPan(v0, v1, v2-128, v3-128, v4).
     if(op==0x7f)return audio_.user_sound_pan(v.u8(1),v.u8(2),int(v.u8(3))-128,int(v.u8(4))-128,v.u8(5));
@@ -1010,6 +1066,19 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
             wps.x+=joint->value[12];wps.y+=joint->value[13];wps.z+=joint->value[14];}
         if(hiteff<0||hiteff>=19){unbound_enemy_.insert("bhSetEffParticleMk2: typ_no ausserhalb PtclTbl");return true;}
         particles_.spawn_mk2(unsigned(hiteff),ParticleLink{},wps,ps,src,dst);return true;}
+    // event.c:5028 bhCyodanSet (22 Byte, RM_9370 Ereignis 5: Treffer der Gefechtsszene): Farbe
+    // v0<<24|v1<<16|v2<<8|v3, Ort wps und Richtung ps je u16/100 mit Vorzeichenbits 1/2/4, Wirkung
+    // WpnTab[v5].hiteff, zwei Fuellbytes (bhScePtr += 4 nach ps.z). Danach bhSetEffParticle(NULL, 0, &wps,
+    // &ps, color, wp_hef) ohne Linkwerk (effsub3.c:911).
+    if(op==0x6d){if(c.bytes.size()<22)return false;
+        const auto signed_hundredth=[&](unsigned signs,unsigned bit,unsigned at){const float n=float(v.u16(at))/100.0f;return (signs&bit)?-1.0f*n:n;};
+        const std::uint32_t color=std::uint32_t(v.u8(4))|std::uint32_t(v.u8(3))<<8|std::uint32_t(v.u8(2))<<16|std::uint32_t(v.u8(1))<<24;
+        const NJS_POINT3 wps{signed_hundredth(v.u8(5),1,6),signed_hundredth(v.u8(5),2,8),signed_hundredth(v.u8(5),4,10)};
+        const unsigned weapon=v.u8(12);if(weapon>=23)throw std::runtime_error("bhCyodanSet: WpnTab index outside table");
+        const int hiteff=WpnTab[weapon].hiteff;
+        const NJS_POINT3 ps{signed_hundredth(v.u8(13),1,14),signed_hundredth(v.u8(13),2,16),signed_hundredth(v.u8(13),4,18)};
+        if(hiteff<0||hiteff>=19){unbound_enemy_.insert("bhSetEffParticle: typ_no ausserhalb PtclTbl");return true;}
+        particles_.spawn(unsigned(hiteff),ParticleLink{},wps,ps,color);return true;}
     // event.c:2988 bhWeaponSeCall, ten bytes. The shot sound is always
     // WpnTab[plp->wpnr_no].seno0 (also for a room enemy in mode 1) and is
     // placed at the receiving joint's owP[jno].mtx[12..14]; modes 2/3 are
@@ -1745,11 +1814,12 @@ void RoomWorld::sound_monitor(){
     audio_.exec_object_se(collision);
 }
 // Drains what the original effect procedures requested through bhSetEffectTb/bhSetEffect/CallPlayerActionSe/bhCheckBombAtari.
-void RoomWorld::process_effect_output(){
-    auto out=take_effect_output();
+unsigned RoomWorld::process_effect_output(){
+    auto out=take_effect_output();unsigned failed=0;
     for(const auto& spawn:out.spawns){
         // bhSetEffectTb(..., lkwkp, lkono): flg 0x80 und das Werk; bhEff135 loescht 0x80 gleich wieder.
         const int slot=spawn.link_kind>=0?spawn_effect(spawn,unsigned(spawn.link_kind)+1,spawn.link_index):spawn_effect(spawn);
+        if(slot<0)++failed;
         if(slot>=0&&spawn.link_kind>=0&&spawn.drop_link_flag)sprites_[std::size_t(slot)].sprite.flg&=~0x80u;
         // txp[0] = op->txp[0] (en15.c:2471): die Texturliste des Elternsatzes.
         if(slot>=0&&spawn.texture_from_slot>=0&&std::size_t(spawn.texture_from_slot)<sprites_.size())
@@ -1759,6 +1829,8 @@ void RoomWorld::process_effect_output(){
             reinterpret_cast<std::int16_t*>(sprites_[std::size_t(spawn.slot_sink_work)].sprite.pv)[spawn.slot_sink_index]=std::int16_t(slot);
     }
     effect_flags_|=out.effect_flags; // sys->ef_flg |= (effsub1b.c:631)
+    // effsub1.c:4831/4839 bhEff021: sys->cb_flg 0x40 setzen/loeschen am Eventbesitzer (flags[10][0]).
+    if(out.cb_flg_set||out.cb_flg_clear){if(collision_events_){collision_events_->flags[10][0]|=out.cb_flg_set;collision_events_->flags[10][0]&=~out.cb_flg_clear;}else unbound_enemy_.insert("sys->cb_flg ohne Eventbesitzer");}
     for(const auto id:out.unsupported)unbound_enemy_.insert("bhEff"+std::to_string(id));
     for(const auto& gap:out.gaps)unbound_enemy_.insert(gap);
     for(const auto se:out.sounds)audio_.play_room_sound((se>>8)&15,se&255,6); // CallPlayerActionSe: bank (SeNo/256)&0xF, list SeNo
@@ -1772,27 +1844,55 @@ void RoomWorld::process_effect_output(){
     // der Satz gilt als getoetet.
     if(out.player_killed&&!player_killed_){blast_damage_+=player_hp_+1;player_hp_=-1;player_killed_=true;}
     for(const auto& se:out.background_sounds)audio_.background_sound(se.slot,se.sound); // CallBackGroundSe (effsub1.c bhEff105)
+    return failed;
 }
 void RoomWorld::explode(NJS_POINT3 position,NJS_POINT3){
     // bhSetExplosion offsets the fireball by 4 units towards the camera (cam.vx/vy/vz is the view direction).
     NJS_POINT3 view{0,0,1};if(active_camera_.ready()){const auto c=active_camera_.view();const float k=6.28318530718f/65536.f,theta=(32768-c.angles[1])*k,phi=-c.angles[0]*k;view={std::sin(theta)*std::cos(phi),std::sin(phi),std::cos(theta)*std::cos(phi)};}
     set_explosion(position,view);process_effect_output();
 }
+// weapon.c:1812 bhSetExplosionEffect: wie bhSetExplosion ohne Ton, Licht und Zuender; cam.v ist
+// der Blickvektor der gueltigen Kamera (effect_context: camera.c:62-71, unter cam.flg 0x40 aus monitor_).
+bool RoomWorld::explode_effect(NJS_POINT3 position){
+    const auto context=effect_context();
+    if(!context.camera_ready){unbound_enemy_.insert("bhSetExplosionEffect: cam.vx/vy/vz ohne gueltige Kamera");return false;}
+    set_explosion_effect(position,context.camera_view);
+    return process_effect_output()==0;
+}
+void RoomWorld::clear_effects(){
+    for(unsigned slot=0;slot<sprites_.size();++slot){sprites_[slot]=SpriteWork{};sprites_[slot].sprite.flg=0;sprites_[slot].hidden=true;sprites_[slot].queued=false;entity(4,slot)=WorldEntity{};}
+    effect_backface_.clear(); // stflg 0x10 je Platz, Teil des genullten Satzes
+}
+void RoomWorld::clear_event_effects(){
+    // effect.c:166 bhClrEff_YT
+    for(auto& work:sprites_){auto& e=work.sprite;if(!(e.flg&1u))continue;
+        switch(e.id){
+        case 5:case 11:case 113:case 114:case 136:case 159:case 225:case 398:e.flg=0;work.queued=false;break;
+        case 22:case 24:case 25:case 27:e.flg=0;work.queued=false;effect_detail::release_extra_work(e);break; // :196-199 if(exp0) *(uint*)exp0 = 0
+        default:break;}}
+    // effsub3.c:117 bhClrEff_RY: 302 ist die Partikelwurzel (bhSetEffParticle, exp0/exp1 = E02-Hilfsplaetze)
+    for(unsigned slot=0;slot<sprites_.size();++slot){auto& e=sprites_[slot].sprite;if(!(e.flg&1u))continue;
+        if(e.id==301){e.flg=0;sprites_[slot].queued=false;}
+        else if(e.id==302)particles_.clear_event(slot);}
+    // effsub2.c:4793 bhClrEff_YG
+    for(auto& work:sprites_){auto& e=work.sprite;if(!(e.flg&1u))continue;
+        switch(e.id){
+        case 250:case 253:case 256:case 257:case 272:case 296:case 297:case 298:e.flg=0;work.queued=false;break;
+        case 254:case 260:e.flg=0;work.queued=false;effect_detail::release_extra_work(e);break; // :4817-4820 *(int*)exp0 = 0
+        default:break;}}
+}
+void RoomWorld::set_monitor_camera(unsigned cut,NJS_POINT3 position,int ax,int ay,int az,float ln,int pers){
+    if(cut>=room_cameras_.size())throw std::runtime_error("cam.flg 0x40: cam.ncut outside room cut table");
+    event_camera=false;fixed_camera.reset();eye_.active=false; // cam.flg = 0x40 (gameover.c:313) ersetzt 0x2/0x4/0x80000000
+    monitor_.active=true;monitor_.cut=cut;monitor_.position=position;monitor_.ax=ax;monitor_.ay=ay;monitor_.az=az;monitor_.ln=ln;monitor_.pers=pers;
+}
 // weapon.c bhCheckBombAtari, enemy half: every eligible work whose capsule the blast sphere touches gets the bomb hit.
 void RoomWorld::bomb_damage(const BombRequest& bomb){
     // Player half (weapon.c): sphere 0.7*ar against the player capsule, line of sight, hp -= dmax inside 0.5*r else dmin.
     if(!player_hidden){const NJS_POINT3 p=player_.position;const float r=3.5f,h=16.5f,cy=std::clamp(bomb.position.y,p.y+r,p.y+h-r);const float dx=bomb.position.x-p.x,dy=bomb.position.y-cy,dz=bomb.position.z-p.z,dist=std::sqrt(dx*dx+dy*dy+dz*dz);
         if(dist<=0.7f*bomb.radius+r){const float wall=combat_wall_distance(bomb.position,{p.x-bomb.position.x,cy-bomb.position.y,p.z-bomb.position.z},1.f,0x400);if(wall>=1.f){const float body=std::sqrt((p.x-bomb.position.x)*(p.x-bomb.position.x)+(p.y-bomb.position.y)*(p.y-bomb.position.y)+(p.z-bomb.position.z)*(p.z-bomb.position.z));blast_damage_+=body<0.5f*0.7f*bomb.radius?bomb.damage_max:bomb.damage_min;}}}
-    for(auto& pair:entities_){auto& e=pair.second;if(pair.first.first!=1||!e.en01||e.hidden||e.inactive||e.dead)continue;
-        RECVX_EN01_STATE st;recvx_en01_state(e.en01.get(),&st);if(!(st.flg&1)||!(st.flg&0x20)||(st.flg&2))continue;
-        // npCollisionCheckSC against the work's capsule (watr: ar 3.8, ah 18.2 from bhEne01_Init).
-        const NJS_POINT3 p=e.transform.position;const float r=e.identity==0?4.0f:3.8f,h=e.identity==0?15.0f:18.2f;const float cy=std::clamp(bomb.position.y,p.y+r,p.y+h-r);
-        const float dx=bomb.position.x-p.x,dy=bomb.position.y-cy,dz=bomb.position.z-p.z;if(std::sqrt(dx*dx+dy*dy+dz*dz)>bomb.radius+r)continue;
-        const NJS_POINT3 contact{p.x,cy,p.z};
-        const float wall=combat_wall_distance(bomb.position,{contact.x-bomb.position.x,contact.y-bomb.position.y,contact.z-bomb.position.z},1.f,0x400);if(wall<1.f)continue;
-        const float dist=std::sqrt((p.x-bomb.position.x)*(p.x-bomb.position.x)+(p.y-bomb.position.y)*(p.y-bomb.position.y)+(p.z-bomb.position.z)*(p.z-bomb.position.z));
-        recvx_en01_bomb(e.en01.get(),&bomb.position.x,bomb.radius,bomb.damage_max,bomb.damage_min,&contact.x,dist);e.scripted=false;
-    }
+    bomb_enemy_damage(bomb); // weapon.c:1420: the real ene work table, not the retired EN01 facade
+
 }
 // The grabbed player: its motion comes from the zombie MTN list (En01_PlyMtn_OffsetTbl + k), its place from PlayerLink.
 std::vector<BoneMatrix> RoomWorld::player_joints_now()const{
@@ -2289,7 +2389,81 @@ void RoomWorld::draw_fnc_huds(SoftwareRenderer& image)const{
     if(!(presentation_flags_&0x10u))return;
     for(const auto& w:sprites_){if(w.hidden||!w.queued||!(w.sprite.flg&1u))continue;
         if(w.sprite.id==134)draw_ufo_hud(image,w);
-        else if(w.sprite.id==137)draw_monitor_hud(image,w);}
+        else if(w.sprite.id==137)draw_monitor_hud(image,w);
+        else if(w.sprite.id==21)draw_eff021_bars(image);}
+}
+// effsub1.c:4756 bhDraw021 (op->func von bhEff021, ef_fnc-Schleife effect.c:929): Blend 8/6, vier
+// untexturierte njDrawPolygon2D(&p2c, 4, -0.9f, 96) ueber x 0..640: y -40..40 schwarz (0xFF000000 an
+// allen Ecken), y 40..104 Verlauf oben schwarz -> unten durchsichtig (Ecken 0/1 0xFF000000, 2/3 0),
+// y 440..520 schwarz, y 376..440 Verlauf oben durchsichtig -> unten schwarz. Eckreihenfolge
+// (0,y0),(640,y0),(640,y1),(0,y1); ps2_NaDraw2D.c:93 ohne Texturbit: Farbe ungehalbiert, Alpha (a+1)>>1.
+void RoomWorld::draw_eff021_bars(SoftwareRenderer& image)const{
+    Hud2D hud2d(image,nullptr);
+    const auto bar=[&](float y0,float y1,std::uint32_t top,std::uint32_t bottom){
+        const Hud2D::V p0{0,y0,0,0,top},p1{640,y0,0,0,top},p2{640,y1,0,0,bottom},p3{0,y1,0,0,bottom};
+        hud2d.tri(p0,p1,p2,false);hud2d.tri(p0,p2,p3,false);};
+    bar(-40.0f,40.0f,0xFF000000u,0xFF000000u);   // :4772-4789
+    bar(40.0f,104.0f,0xFF000000u,0u);            // :4791-4801
+    bar(440.0f,520.0f,0xFF000000u,0xFF000000u);  // :4803-4813
+    bar(376.0f,440.0f,0u,0xFF000000u);           // :4815-4824
+}
+// effect.c:1744 bhDrawTrsEffect2D (sys->ef_trs2d; effect.c:910 nach bhDrawNtxEffect2D, vor der
+// ef_fnc-Schleife): njDrawTexture(op->tvp, op->pn, op->gidx, 1) mit njTextureFilterMode 1 (0 bei
+// flg 0x20000000) und dem Blendpaar bl_src/bl_dst des Satzes; Tore flg/stflg 0x1000000, tex_id >= 0,
+// gm_flg 0x4000 + mdflg 0x40. ps2_NaDraw.c:61 njDrawTextureSub: x/y in 640x480 (GS-Versatz 1728/1808,
+// hier 0-basiert), u/v als ST-Anteil 0..1 der Textur, je Kanal ((c + 1) >> 1) als GS-Anteil /128, Alpha
+// ebenso; z ist nur Tiefe einer ebenen Flaeche ohne Folge. op->gidx ist ef_tlist[ef_tn[tex_id] + ani_ct]
+// (effect.c:249 bhGetGidx), nativ effect_textures_[tex_id][ani_ct]. Blend 8/6 = Cs*As + Cd*(1-As);
+// ein anderes Paar hat hier keinen Pfad und bleibt benannte Luecke. Streifen (0,1,2),(1,3,2).
+void RoomWorld::draw_trs2d_effects(SoftwareRenderer& image)const{
+    if(!(presentation_flags_&0x10u))return; // effect.c:339 gates the whole bhDrawEffect pass
+    const unsigned mirror=collision_events_?collision_events_->flags[11][0]:0u;
+    auto& canvas=image.canvas();const int W=image.width(),H=image.height();
+    const float sx=float(W)/640.0f,sy=float(H)/480.0f;
+    for(const auto& work:sprites_){
+        const auto& s=work.sprite;
+        if(work.hidden||!s.trs2d_queued||(s.flg&0x1000000u)||(s.stflg&0x1000000u)||s.tex_id<0||((mirror&0x4000u)&&(s.mdflg&0x40u)))continue;
+        if(s.bl_src!=8||s.bl_dst!=6){const_cast<RoomWorld*>(this)->unbound_enemy_.insert("bhDrawTrsEffect2D: Blendpaar "+std::to_string(s.bl_src)+"/"+std::to_string(s.bl_dst)+" ohne nativen Schirmpfad");continue;}
+        const auto atlas=effect_textures_.find(unsigned(s.tex_id));
+        if(atlas==effect_textures_.end()||s.ani_ct>=atlas->second.size()){const_cast<RoomWorld*>(this)->unbound_enemy_.insert("bhGetGidx: Texturgruppe "+std::to_string(s.tex_id)+" Bild "+std::to_string(s.ani_ct)+" (sys->ef_tn) nicht geladen");continue;}
+        const SceneTexture& tex=atlas->second[std::size_t(s.ani_ct)];
+        if(tex.width==0||tex.height==0||s.pn<3||s.pn>4)continue;
+        const bool point=(s.flg&0x20000000u)!=0;
+        const int tw=int(tex.width),th=int(tex.height);
+        const auto wrap=[](int i,int n){return (n&(n-1))==0?(i&(n-1)):(((i%n)+n)%n);}; // wie renderer.cpp bilinear()
+        // Texel (r,g,b,a) an ST-Anteil (u,v): Punkt oder bilinear um die Texelmitte (u*w - 0.5).
+        const auto sample=[&](float u,float v,float* out){
+            if(point){const int x=wrap(int(std::floor(u*float(tw))),tw),y=wrap(int(std::floor(v*float(th))),th);const auto t=tex.pixels[std::size_t(y)*tex.width+std::size_t(x)];
+                out[0]=float((t>>16)&255u);out[1]=float((t>>8)&255u);out[2]=float(t&255u);out[3]=float(t>>24);return;}
+            const float fx=u*float(tw)-0.5f,fy=v*float(th)-0.5f;const int ix=int(std::floor(fx)),iy=int(std::floor(fy));const float tx=fx-float(ix),ty=fy-float(iy);
+            const int x0=wrap(ix,tw),x1=wrap(ix+1,tw),y0=wrap(iy,th),y1=wrap(iy+1,th);
+            const std::uint32_t texel[4]={tex.pixels[std::size_t(y0)*tex.width+std::size_t(x0)],tex.pixels[std::size_t(y0)*tex.width+std::size_t(x1)],tex.pixels[std::size_t(y1)*tex.width+std::size_t(x0)],tex.pixels[std::size_t(y1)*tex.width+std::size_t(x1)]};
+            const float k[4]={(1-tx)*(1-ty),tx*(1-ty),(1-tx)*ty,tx*ty};
+            float acc[4]={0,0,0,0}; // alphagewichtet, damit durchsichtige Nachbarn keine Farbe eintragen
+            for(int i=0;i<4;++i){const auto t=texel[i];const float a=float(t>>24)*k[i];acc[0]+=a*float((t>>16)&255u);acc[1]+=a*float((t>>8)&255u);acc[2]+=a*float(t&255u);acc[3]+=a;}
+            if(acc[3]>0){out[0]=acc[0]/acc[3];out[1]=acc[1]/acc[3];out[2]=acc[2]/acc[3];}else out[0]=out[1]=out[2]=0;out[3]=acc[3];};
+        struct V{float x,y,u,v;std::uint32_t c;};V v[4];
+        for(unsigned k=0;k<s.pn;++k)v[k]={s.tv[k].x,s.tv[k].y,s.tv[k].u,s.tv[k].v,s.tv[k].col};
+        const auto tri=[&](const V& a,const V& b,const V& c){
+            const float area=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);if(area==0)return;
+            const int x0=std::max(0,int(std::floor(std::min({a.x,b.x,c.x})*sx))),x1=std::min(W-1,int(std::ceil(std::max({a.x,b.x,c.x})*sx)));
+            const int y0=std::max(0,int(std::floor(std::min({a.y,b.y,c.y})*sy))),y1=std::min(H-1,int(std::ceil(std::max({a.y,b.y,c.y})*sy)));
+            for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
+                const float px=(float(x)+0.5f)/sx,py=(float(y)+0.5f)/sy;
+                const float w0=((b.x-px)*(c.y-py)-(b.y-py)*(c.x-px))/area,w1=((c.x-px)*(a.y-py)-(c.y-py)*(a.x-px))/area,w2=1-w0-w1;
+                if(w0<0||w1<0||w2<0)continue;
+                float ch[4];for(int k=0;k<4;++k){const int sh=k==0?24:k==1?16:k==2?8:0;ch[k]=w0*float((a.c>>sh)&255u)+w1*float((b.c>>sh)&255u)+w2*float((c.c>>sh)&255u);}
+                float t[4];sample(w0*a.u+w1*b.u+w2*c.u,w0*a.v+w1*b.v+w2*c.v,t);
+                // ((c + 1) >> 1) / 128 je Kanal (ps2_NaDraw.c:77-80), Texturalpha im Hostbereich 0..255.
+                const float mr=std::floor((ch[1]+1.0f)/2.0f)/128.0f,mg=std::floor((ch[2]+1.0f)/2.0f)/128.0f,mb=std::floor((ch[3]+1.0f)/2.0f)/128.0f;
+                const float alpha=std::clamp(std::floor((ch[0]+1.0f)/2.0f)/128.0f*(t[3]/255.0f),0.0f,1.0f);
+                if(alpha<=0)continue;
+                auto& d=canvas[std::size_t(y)*W+x];
+                const auto mix=[&](float src,unsigned sh){return unsigned(std::clamp(src*alpha+float((d>>sh)&255u)*(1-alpha),0.0f,255.0f));};
+                d=0xff000000u|(mix(t[0]*mr,16)<<16)|(mix(t[1]*mg,8)<<8)|mix(t[2]*mb,0);
+            }};
+        tri(v[0],v[1],v[2]);if(s.pn==4)tri(v[1],v[3],v[2]);
+    }
 }
 // effect.c:905 bhDrawNtxEffect2D -> ps2_NaDraw.c:8 njDrawPolygon(polygon, count, trans 1):
 // Eckfarbe je Punkt (col), Schirmlage x/y + 1728/1808 (GS-Offset, hier 0-basiert), Tiefe
@@ -2429,6 +2603,19 @@ void RoomWorld::tick(){
      // Runtime nach bhCalcModel(plp) festschreibt (derselbe Satz wie en.player_capsule).
      h.player_watr=[this](RECVX_ENEMY_CAPSULE& c){BoneMatrix a,b;if(!enemy_player_joint(4,a)||!enemy_player_joint(0,b))return false;
          c.c1={a.value[12],a.value[13],a.value[14]};c.c2={b.value[12],b.value[13],b.value[14]};c.r=2.5f;return true;};
+     // effsub6.c:18 bhEff085: rom->effp[type], ene[lkno].mlwP->texP->textures[i].texaddr (auf allen Werken
+     // mit derselben sys->et_lp-Liste) und sys->ef_tlist.textures[sys->ef_tn[group]].
+     h.room_effect_link=[this](unsigned type,int& lkflg,int& lkno){if(type>=room_effect_links_.size())return false;lkflg=room_effect_links_[type].first;lkno=room_effect_links_[type].second;return true;};
+     h.enemy_texaddr_get=[this](unsigned enemy,unsigned index)->std::shared_ptr<const SceneTexture>{
+         for(const auto& m:models_)if(m.kind==1&&m.index==enemy){if(index>=m.object.textures.size())return nullptr;return std::make_shared<const SceneTexture>(m.object.textures[index]);}
+         return nullptr;};
+     h.enemy_texaddr_set=[this](unsigned enemy,unsigned index,const std::shared_ptr<const SceneTexture>& texaddr){
+         const Model* target=nullptr;for(const auto& m:models_)if(m.kind==1&&m.index==enemy)target=&m;
+         if(!target||!texaddr||index>=target->object.textures.size())return false;
+         const auto list=target->texture_list;
+         for(auto& m:models_)if(m.kind==1&&(&m==target||(list&&m.texture_list==list))){if(index>=m.object.textures.size())return false;m.object.textures[index]=*texaddr;}
+         return true;};
+     h.effect_texaddr=[this](unsigned group)->std::shared_ptr<const SceneTexture>{const auto at=effect_textures_.find(group);if(at==effect_textures_.end()||at->second.empty())return nullptr;return std::make_shared<const SceneTexture>(at->second.front());};
      set_effect_world_hooks(std::move(h));}
     set_effect_particle_mk2([this](int kind,unsigned index,unsigned node,NJS_POINT3 off,NJS_POINT3 dir,unsigned src,unsigned dst,int type)->int{
         if(type<0||type>=19){unbound_enemy_.insert("bhSetEffParticleMk2: typ_no ausserhalb PtclTbl");return -1;}
@@ -2585,7 +2772,9 @@ void RoomWorld::tick(){
                         else unbound_enemy_.insert("effect.c:806: op->lkwkp ohne Raumfigur");}
                     auto& e=entity(4,i);e.type=work.sprite.type;
                     e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};
-                    if(work.dynamic)work.scale={work.sprite.sx,work.sprite.sy,work.sprite.sz};
+                    // effect.c:1374 njScaleEx(&op->sx): gezeichnet wird die aktuelle Groesse, die die Prozedur
+                    // fortschreibt (bhEff249 effsub5.c:5497-5556), auch fuer Raumsaetze aus rom->effp.
+                    work.scale={work.sprite.sx,work.sprite.sy,work.sprite.sz};
                     // bhDrawTrsEffect3D zeichnet op->px (effect.c:1340), auch fuer Raumsaetze,
                     // deren Prozedur die Lage selbst fortschreibt (effsub6.c bhEff148 faellt).
                     e.transform.position={work.sprite.px,work.sprite.py,work.sprite.pz};
@@ -2690,6 +2879,7 @@ void RoomWorld::player_set_motion_pose(std::size_t mtn_no,std::int32_t frm_no,un
     MotionWork m{frm_no,0u,hokan_count,0u,hokan_rate};std::string gap;
     set_motion(m,0,mode,clip,nullptr,player_obj_,player_owp_flags_,&gap,0u,unsigned(mtn_no));
     if(!gap.empty())unbound_enemy_.insert(gap+" (plp)");
+    player_mtn_attr_=m.mtn_attr; // Motion.c:76 plp->mtn_attr = atrP[frm_no >> 16] (im Original ohne Leser)
     player_obj_motion_=mtn_no;player_obj_written_=true;player_obj_drives_=true;
     /* Diagnose: RECVX_PLAYER_POSE_TRACE=1 protokolliert je Pass den Knotenteil (Motion, Bild, Mischung). */
     if(std::getenv("RECVX_PLAYER_POSE_TRACE")&&player_obj_.size()>9)std::fprintf(stderr,"POSETRACE mtn=%zu frm=%d mode=%u hokan=%u rate=%d ang9=%d,%d,%d\n",mtn_no,frm_no,mode,hokan_count,hokan_rate,player_obj_[9].angles[0],player_obj_[9].angles[1],player_obj_[9].angles[2]);
@@ -3162,7 +3352,8 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         if(stflg&0x10u)effect_backface_.insert(i);else effect_backface_.erase(i);}
     // effect.c:902/1562 bhDrawThlEffect3D (sys->ef_thl nach ef_opq): Matrix wie bhDrawTrsEffect3D,
     // njDrawTexture3DHEx (ps2_NaDraw.c:465): GS-Farbe ((bcol+1)>>1)/128 je Ecke, Nebelfarbe = ocol
-    // von tvp[0], Nebel an; bl 0/0 = Paar 8/6 ohne Mischen (trans 0), Tiefe geschrieben.
+    // von tvp[0], FGE an mit festem F = 128 (:443, nicht scr.fog); bl 0/0 = Paar 8/6 ohne Mischen
+    // (trans 0 = ohne ABE, :351/355), Tiefe geschrieben.
     if(draw_effects)for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];const auto& s=work.sprite;
         if(work.hidden||!work.thl||((s.flg|s.stflg)&0x1000000u)||s.tex_id<0||((mirror&0x4000u)&&(s.mdflg&0x40u)))continue; // effect.c:1581
         const auto* list=effect_texture_list(work);const std::size_t frame=(s.stflg&0x20u)?std::size_t(s.tex_id)+s.ani_ct:s.ani_ct;
@@ -3184,7 +3375,9 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         const std::array<std::array<unsigned,3>,2> strip{{{0,1,2},{1,3,2}}};
         for(unsigned t=0;t<(s.pn==3?1u:2u);++t){SceneTriangle tr;for(unsigned k=0;k<3;++k)tr.vertices[k]=vertices[strip[t][k]];
             tr.color=gs(s.tv[0].col);tr.texture_color_divisor=128;tr.texture=std::uint16_t(texture);tr.textured=true;tr.camera_mask=false;tr.world_lit=true;
-            tr.depth_write=true;tr.fogged=true;tr.fog_color_set=true;tr.fog_color=s.fog_color&0xffffffu;
+            // ps2_NaDraw.c:443 njDrawTextureSub3DH: XYZF2.F = 128 fest je Eckpunkt (kein scr.fog), FOGCOL = ocol (:469);
+            // der Monitor (bhEff111) ist deshalb aus jeder Entfernung halb mit ocol gemischt, auch ohne Raumnebel.
+            tr.depth_write=true;tr.fogged=false;tr.fog_fixed=true;tr.fog_fixed_value=128.f;tr.fog_color_set=true;tr.fog_color=s.fog_color&0xffffffu;
             tr.blend=trans?SceneBlend::Ninja:SceneBlend::Opaque;if(trans)tr.blend_register=register_;
             tr.texture_filter=(s.flg&0x20000000u)?SceneTextureFilter::Point:SceneTextureFilter::Linear; // effect.c:1586
             scene.triangles.push_back(tr);}
@@ -4049,16 +4242,20 @@ EffectContext RoomWorld::effect_context()const{
     const auto game=collision_events_?collision_events_->flags[11][0]:0u;
     EffectContext context{system,presentation_flags_,flags,status,player_hidden?1u:0u,control,simulation_flags_,effect_yk_ct_,game};
     // cam.ax/ay/az fuer bhEff186 (effsub0.c): die Lage, die bhControlCamera zuletzt schrieb.
-    if(active_camera_.ready()){context.camera_angles=active_camera_.view().angles;context.camera_ready=true;}
+    // Unter cam.flg 0x40 schreibt bhControlCamera nichts (cut.c:138-147, bhControlMonitorCamera leer):
+    // cam.ax..pz sind die direkt geschriebenen Werte (bhEff137, gameover.c:313-327), monitor_.
+    const auto camera_pose=[&]{SceneCamera c=active_camera_.view();if(monitor_.active){c.position=monitor_.position;c.angles={monitor_.ax,monitor_.ay,monitor_.az};c.distance=monitor_.ln;c.perspective=monitor_.pers;}return c;};
+    const bool camera_ready=active_camera_.ready()||monitor_.active;
+    if(camera_ready){context.camera_angles=camera_pose().angles;context.camera_ready=true;}
     context.stage_no=stage_no_;context.room_no=room_no_;context.enemy_count=enemy_count_;
     // bhCkFlg(sys->ev_flg, 2) fuer bhEff127: Flagmatrix 1 des Eventbesitzers,
     // Bits vom hoechsten her gezaehlt (combat.cpp:158, snapshot.cpp:73).
     context.ev_flg_2=collision_events_&&(collision_events_->flags[1][0]&(0x80000000u>>2))!=0;
     // sys->rcase: Skriptbefehl 0x37 (bhRoomCaseNo) im Eventbesitzer, sonst der Fall der Raumdatei.
     context.room_case=collision_events_?unsigned(collision_events_->values[21]):room_case_;
-    if(active_camera_.ready()){
+    if(camera_ready){
         // camera.c:45-56: cam.vx/vy/vz = -(Ry Rx Rz)(0,0,-1), cam.wpx.. = T(pos) Ry Rx Rz (0,0,-ln).
-        const auto c=active_camera_.view();
+        const auto c=camera_pose();
         NJS_MATRIX m;njUnitMatrix(&m);njRotateY(&m,c.angles[1]);njRotateX(&m,c.angles[0]);njRotateZ(&m,c.angles[2]);
         NJS_POINT3 back{0,0,-1.0f},view;njCalcVector(&m,&back,&view);context.camera_view={-view.x,-view.y,view.z};
         NJS_POINT3 eye{0,0,-c.distance};njCalcVector(&m,&eye,&eye);context.camera_position={c.position.x+eye.x,c.position.y+eye.y,c.position.z+eye.z};
@@ -4075,7 +4272,7 @@ const std::vector<SceneTexture>* RoomWorld::effect_texture_list(const SpriteWork
 bool RoomWorld::effect_visible(unsigned index)const{
     if(index>=sprites_.size())return false;const auto& w=sprites_[index];const auto& s=w.sprite;
     // sys->ef_fnc-Saetze zeichnen sich selbst (quads/lines), nicht ueber bhDrawTrsEffect3D.
-    if(w.weapon||w.hidden||!w.queued||s.custom_queued||((s.flg|s.stflg)&0x1000000u))return false;
+    if(w.weapon||w.hidden||!w.queued||s.custom_queued||s.trs2d_queued||((s.flg|s.stflg)&0x1000000u))return false; /* sys->ef_trs2d (bhDrawTrsEffect2D) ist nicht sys->ef_trs */
     const auto c=effect_context();
     // effect.c:339 gates the whole bhDrawEffect pass; effect.c:1301 adds the
     // mirror term and the player's own hide bits for the lighter flame.

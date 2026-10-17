@@ -42,6 +42,10 @@ EffectSpawn& last_request();
 void queue_opaque(EffectSprite& s);
 // sys->ef_fnc[sys->ef_fncn++] = op: der Satz zeichnet sich mit op->func selbst.
 void queue_custom(EffectSprite& s);
+// sys->ef_trs2d[sys->ef_trs2dn++] = op (effsub1.c:249 bhEff2D): die texturierte Schirmliste.
+void queue_trs2d(EffectSprite& s);
+// sys->cb_flg |= set; sys->cb_flg &= ~clear (effsub1.c:4831/4839 bhEff021) am Eventbesitzer.
+void request_cb_flg(unsigned set,unsigned clear);
 // Original-Datentypen der UV-Tabellen in effsub0.h/effsub5.h (EFF0UV/EFF5UV: {u,v} in
 // Texeln einer 256er-Textur; EFF0UVWHUC/EFF5UVWH/EFF5UVWHUC: {u,v,Breite,Hoehe}).
 // bhGetGroundPosition(&probe) ueber den Bodenanbieter des Raumbesitzers (set_effect_ground);
@@ -110,6 +114,12 @@ void hook_camera_offset_set(NJS_POINT3 value);
 void hook_spark_light(NJS_POINT3 pos,NJS_POINT3 dir);
 // rom->lgtp[0] (EffectWorldHooks::room_light0); ohne Besitzer benannte Luecke.
 void hook_room_light0(NJS_POINT3 pos,NJS_POINT3 rgb,float nr,float fr,bool only_if_off,const char* what);
+// bhEff085 (effsub6.c:18): rom->effp[type], ene[].mlwP->texP->textures[].texaddr und
+// sys->ef_tlist.textures[sys->ef_tn[group]] des Raumbesitzers; ohne Besitzer benannte Luecke.
+bool hook_room_effect_link(unsigned type,int& lkflg,int& lkno,const char* what);
+std::shared_ptr<const SceneTexture> hook_enemy_texaddr_get(unsigned enemy,unsigned index,const char* what);
+void hook_enemy_texaddr_set(unsigned enemy,unsigned index,const std::shared_ptr<const SceneTexture>& texaddr,const char* what);
+std::shared_ptr<const SceneTexture> hook_effect_texaddr(unsigned group,const char* what);
 // hitchkl.c:49 bhCollisionCheckLine2(p1, p2, flg, flr_no) auf rom->walp + sys->mwalp des
 // Raumbesitzers (set_effect_walls) samt :911 bhGetHitCollisionNormal: end wird auf den Treffer
 // gekuerzt, normal ist die Flaechennormale des letzten Treffers. Ohne Wandsatz benannte Luecke.

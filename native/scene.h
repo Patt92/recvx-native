@@ -75,6 +75,12 @@ struct SceneTriangle {
     // Ps2SetFogColorSys um genau einen Zeichenaufruf (ps2_NaDraw.c:469 njDrawTexture3DHEx
     // nimmt dafuer die Offsetfarbe des ersten Eckpunkts) und danach Ps2SetFogColor zurueck.
     bool fog_color_set=false;std::uint32_t fog_color=0; // 0x00RRGGBB wie njSetFogColor
+    // Fester GS-Nebelkoeffizient F (0..255) dieses Aufrufs statt des Ninja-Entfernungswerts scr.fog:
+    // njDrawTextureSub3DH (ps2_NaDraw.c:443) schreibt XYZF2.F = 128 in jeden Eckpunkt, waehrend
+    // njDrawTextureSub3D/njDrawPolygonSub3D (:236/:336) scr.fog eintragen. FGE steht im Prim-Wort beider
+    // Texturpfade (0x1E/0x3E, Ps2AddPrim3D ps2_dummy.c:546), der GS mischt also unabhaengig vom
+    // Raumnebel Cv = (Cs*F + FOGCOL*(255-F)) >> 8 mit FOGCOL aus Ps2SetFogColorSys (:1681).
+    bool fog_fixed=false;float fog_fixed_value=255.f;
     unsigned light_category=1;
     std::uint64_t blend_register=0x44; // original GS source-alpha/inverse-source-alpha
     SceneTextureFilter texture_filter=SceneTextureFilter::Default;

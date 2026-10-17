@@ -324,9 +324,10 @@ int main(){try{
      check(recvx_stairs_begin(&st,&area,14,grand,0,0,0,0,0,0,0),"stair begin rejected the case");
      check(!(st.unsupported_services&RECVX_STAIR_UNBOUND_HEADWORK),
            "stair begin still pre-seeds the head work");
-     check((st.unsupported_services&RECVX_STAIR_UNBOUND_HOKAN)&&
-           (st.unsupported_services&RECVX_STAIR_UNBOUND_MTN_ATTR),
-           "the other open stair services must stay reported");}
+     // HOKAN bleibt bis zum ersten Knotenteil des Hosts vorbelegt; MTN_ATTR entfaellt
+     // (plp->mtn_attr hat im Original keinen Leser, Motion.c:76 schreibt es nur).
+     check(st.unsupported_services==RECVX_STAIR_UNBOUND_HOKAN,
+           "the open stair service must stay reported");}
 
     std::cout<<"player head control ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<"player head: "<<e.what()<<'\n';return 1;}}

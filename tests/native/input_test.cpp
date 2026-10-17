@@ -125,7 +125,37 @@ static void box_pad_frames(const std::filesystem::path& root){
         SDL_JoystickClose(joystick);detach(id);
     }
 }
+// sub1.c:3308-3338 ItemTaskCheck (cb_flg 0x10): StatusInit baut den S_WORK neu auf, dann st->mode 0.
+// Der GetItem-Bildschirm erbt keinen Zustand des vorigen Statusbildschirms. Nutzerbefunde 2026-10-17:
+// nach FILE (StatusCancel aus MainCommand) bzw. nach "Examine" einer Karte ueberzeichnete die
+// Befehlsbeschreibung 180 - maincsr (sub1.c:4300) die Aufnahmefrage (RM_0040 Hawk Emblem, Schiffsrad).
+static void pickup_resets_status(const std::filesystem::path& root){
+    const auto room=read_asset_file(root/"rooms/RM_0000.RDT",64*1024*1024);const auto stage=decode_scene(room);
+    Inventory inventory;StatusMenu menu;MessageDialog dialog;auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t clock=0;
+    AudioMixer audio(root);RoomWorld world(room,stage,actor,motion,clock,audio,root);EventVm events(room,inventory,dialog);
+    GameplayInput gameplay(inventory,menu,dialog,&events);GameUi ui(root);
+    menu.message_source=[&](unsigned index){return ui.system_message(index);};
+    events.binding=[&](const EventCommand& c){return world.bind(c);};events.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};
+    events.audio_active=[&](unsigned slot){return audio.active(slot);};events.audio_stop=[&](unsigned slot){audio.stop(slot);};events.movie_active=[]{return false;};
+    events.item_message=[&](unsigned index,unsigned item){auto message=ui.system_message(index);for(unsigned i=0;i+1<message.size();++i)if(message[i]==0xff03&&message[i+1]==0xffff)message[++i]=std::uint16_t(item);return message;};
+    events.initialize();
+    auto tick=[&]{check(!gameplay.apply(InputFrame{}),"pickup reset: input quits");events.tick();gameplay.synchronize();world.tick();audio.mix();};
+    struct Leftover{const char* name;std::function<void()> apply;};
+    for(const Leftover& left:{Leftover{"MainCommand FILE (nav, maincsr 1)",[&]{menu.nav=true;menu.nav_pressed=false;menu.maincsr=1;}},
+                             Leftover{"Examine (examining)",[&]{menu.examining=true;menu.commands=true;}}}){
+        // Testaufstellung (Diagnose): der vorige Statusbildschirm ist geschlossen, sein S_WORK-Rest steht noch.
+        menu=StatusMenu{};menu.message_source=[&](unsigned index){return ui.system_message(index);};left.apply();menu.active=false;events.menu_open=false;
+        events.flags[10][0]|=0x10u;events.values[8]=8u; // cb_flg 0x10 GetItem, sys->sb_id 8 (Messer)
+        for(unsigned i=0;i<4&&!menu.pickup;++i)tick();
+        check(menu.pickup==8&&menu.active,std::string("pickup screen did not start after ")+left.name);
+        check(!menu.nav&&!menu.nav_pressed&&!menu.examining&&!menu.commands&&!menu.combining&&!menu.files,
+              std::string("GetItem screen inherited the previous status state (")+left.name+"): its text overdraws the pickup prompt");
+        menu.pickup=0;menu.active=false;events.menu_open=false;dialog.close();events.flags[10][0]&=~0x10u;
+    }
+    std::cout<<"GetItem screen starts from a fresh status state (StatusInit, sub1.c:3308).\n";
+}
 int main(int argc,char** argv){try{
+    if(argc==3&&std::string(argv[1])=="--pickup-reset"){pickup_resets_status(std::filesystem::u8path(argv[2]));return 0;}
     SDL_SetMainReady();SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0,"SDL controller init failed");Quit quit;_Make_SinTable();
     if(argc==3&&std::string(argv[1])=="--dialog-edges"){dialog_edges(std::filesystem::u8path(argv[2]));return 0;}
     if(argc==3&&std::string(argv[1])=="--box-pad"){box_pad_frames(std::filesystem::u8path(argv[2]));return 0;}
@@ -279,7 +309,13 @@ int main(int argc,char** argv){try{
                 // fährt StatusCancel den Bildschirm aus.
                 auto settle_slide=[&]{for(unsigned i=0;i<60&&menu.slide.pad_locked();++i)tick();check(!menu.slide.pad_locked(),"pickup screen never released the pad");};
                 auto settle_close=[&]{for(unsigned i=0;i<60&&menu.active;++i)tick();};
+                // Der vorige Statusbildschirm wurde oben per B/B (CursorMove -> MainCommand -> StatusCancel)
+                // verlassen und traegt noch nav (MainCommand). sub1.c:3338 setzt den GetItem-Bildschirm
+                // auf st->mode 0: MainCommand und seine Beschreibung 180 - maincsr (sub1.c:4300) laufen
+                // dort nie, sonst ueberzeichnet sie die Aufnahmefrage (RM_0040 Hawk Emblem, 2026-10-17).
+                check(menu.nav,"test precondition: the previous status screen must have been left from MainCommand");
                 gameplay.interact=[&]{events.interact(actor.position,actor.yaw,world.floor_at(actor.position));};actor.position={19,0,55};actor.yaw=0;press(SDL_CONTROLLER_BUTTON_A);check(dialog.index()==157&&dialog.choices()==2&&menu.active&&menu.pickup==8&&events.menu_open,"controller pickup status/model prompt missing");
+                check(!menu.nav&&!menu.nav_pressed,"GetItem screen still runs MainCommand (nav): its description overdraws the pickup prompt");
                 press(SDL_CONTROLLER_BUTTON_A);check(!inventory.contains(8)&&dialog.index()==157,"pickup answer accepted while the status screen slides in (statusflg 0x40)");
                 settle_slide();press(SDL_CONTROLLER_BUTTON_A);check(inventory.contains(8)&&dialog.index()==158&&menu.active&&menu.pickup==8,std::string("controller pickup result closes model too early: knife=")+std::to_string(inventory.contains(8))+" dialog="+std::to_string(dialog.index())+" active="+std::to_string(menu.active)+" pickup="+std::to_string(menu.pickup));
                 while(dialog.active())press(SDL_CONTROLLER_BUTTON_A);settle_close();check(!(events.interactions[7].flags&1)&&!menu.active&&!menu.pickup,std::string("controller pickup completion does not restore room control: item_flag=")+std::to_string(events.interactions[7].flags&1)+" active="+std::to_string(menu.active)+" pickup="+std::to_string(menu.pickup));

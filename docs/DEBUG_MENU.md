@@ -91,3 +91,6 @@ Registry-Erweiterungen, Fehler und Eingabeunterdrueckung. Die Runtime-Pruefung
 pausiert echte Originalraeume und prueft alle fuenf Koerper, Ausruestung, Items,
 HP/Tasche/Wireframe sowie Raum/Spawnwechsel. Die Replaybefehle `debug_key` und
 `debug_select` verwenden die gleichen Hotkey-/Auswahl-/Anwenden-Routinen wie die UI.
+Der Replaybefehl `sdl_key down|up <SDL-Scancode-Name>` (nur SDL-Modus, z. B. mit
+`SDL_VIDEODRIVER=dummy`) schiebt ein echtes SDL-Tastenereignis in die Ereignisschleife
+und prueft damit den physischen Eingabepfad (InputManager, controls.ini) ohne Fenster.

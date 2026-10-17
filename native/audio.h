@@ -27,8 +27,13 @@ struct SonyPitch {int root=60,note=60,fine=0;unsigned bend_down=0,bend_up=0;};
 // spu: Sony-HD-Sample (MODHSYN-Stimme) mit ADSR1/ADSR2 (+0x12/+0x14) und sampleSpuAttr (+0x29).
 struct PcmClip {unsigned rate=0,channels=0;std::optional<SonyPitch> sony_pitch;bool spu=false;std::uint16_t adsr1=0,adsr2=0;std::uint8_t spu_attr=0;std::size_t loop_start=0,loop_end=0;std::vector<std::int16_t> samples;float volume=1;unsigned pan=64;std::size_t frames()const{return channels?samples.size()/channels:0;}};
 PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate);
-// key<0 selects the first split; otherwise the split whose key range holds `key`.
+// key<0 selects the first split; otherwise the split whose key range holds `key`. For key>=0 (MODHSYN
+// note-on) a missing/empty program or a key no split covers yields an empty clip: no voice, as in the driver.
+// A key several splits cover throws: use decode_system_note.
 PcmClip decode_system_sound(const std::vector<std::uint8_t>& bank,unsigned program,int key=-1);
+// MODHSYN note-on (.text 0x5f90, split loop 0x6098..0x64a0): one clip per voice the note keys, i.e. per
+// split whose key range holds `key`, in split-table order; empty when no voice starts.
+std::vector<PcmClip> decode_system_note(const std::vector<std::uint8_t>& bank,unsigned program,int key);
 PcmClip decode_adx(const std::vector<std::uint8_t>& bytes);
 class AudioMixer {
 public:
@@ -157,7 +162,7 @@ private:
     // A voice slot plays one or more layers (simultaneous SQ notes); fades act on the slot.
     struct Layer {std::shared_ptr<PcmClip> clip;double position=0;float left=1,right=1;SpuEnvelope env;unsigned core=0;};
     struct SequenceNote {Layer layer;unsigned channel=0,key=0;};
-    struct SequenceEvent {double delay=0;unsigned status=0,key=0,value=0;Layer layer;};
+    struct SequenceEvent {double delay=0;unsigned status=0,key=0,value=0;std::vector<Layer> layers;}; // note-on: one layer per MODHSYN voice (split)
     struct SequenceLoop {unsigned number=0;std::size_t next=0;unsigned remaining=0;bool counted=false;};
     struct Sequence {std::vector<SequenceEvent> events;std::vector<SequenceNote> notes;std::vector<SequenceLoop> loops;std::size_t next=0;double until=0;unsigned nrpn=0;};
     struct Channel {std::shared_ptr<PcmClip> clip;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1,pan_left=1,pan_right=1;int pitch=0;std::vector<Layer> layers;std::shared_ptr<Sequence> sequence;SpuEnvelope env;unsigned core=0;bool released=false;};
@@ -186,7 +191,7 @@ private:
     void request_sound_fade(int function,unsigned attributes,int timer);
     void request_midi_fade_timer(unsigned midi,int function,int timer);
     std::map<unsigned,std::vector<std::uint8_t>> room_banks_,midi_programs_,midi_sequences_; // type 2 SE / type 1 program / type 0 SQ
-    std::map<std::tuple<unsigned,unsigned,int>,std::shared_ptr<PcmClip>> room_sounds_; // bank (0x100|bank: MIDI), program, key
+    std::map<std::tuple<unsigned,unsigned,int>,std::vector<std::shared_ptr<PcmClip>>> room_sounds_; // bank (0x100|bank: MIDI), program, key -> voices
     unsigned room_pack_=0;
     std::map<unsigned,unsigned> sound_bank_packs_; // provenance of independently replaced SE banks
     unsigned room_sound_case_=0;

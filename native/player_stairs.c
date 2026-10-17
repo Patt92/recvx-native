@@ -865,8 +865,10 @@ int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,int
     /* RECVX_STAIR_UNBOUND_HEADWORK wird nicht mehr vorbelegt: der mode3-0-Block
      * ruft release_head_look und meldet das Bit nur, wenn der Host den Dienst
      * nicht stellt.  Hokan loescht der erste Durchlauf, sobald der Host den
-     * Knotenteil (set_motion_nodes) stellt; mtn_attr bleibt offen. */
-    state->unsupported_services=RECVX_STAIR_UNBOUND_HOKAN|RECVX_STAIR_UNBOUND_MTN_ATTR;
+     * Knotenteil (set_motion_nodes) stellt.  plp->mtn_attr schreibt nur
+     * bhSetMotion (Motion.c:76); das Original liest das Spielerfeld nirgends,
+     * der Knotenteil des Hosts fuehrt es mit -- kein Lueckenbit. */
+    state->unsupported_services=RECVX_STAIR_UNBOUND_HOKAN;
     state->active=1;
     return 1;
 }
