@@ -50,6 +50,7 @@ public:
             SceneCamera camera;
             camera.flags=view.u16(cam);
             camera.fog_color=view.u32(cam+0xb8);camera.fog_near=view.f32(cam+0xbc);camera.fog_far=view.f32(cam+0xc0);
+            camera.filter_no=std::int8_t(view.u8(cam+0x51));camera.filter_rate=std::int8_t(view.u8(cam+0x52));
             camera.transition_speed=std::int8_t(view.u8(cam+3));
             camera.move_speed=view.f32(cam+0x30);camera.angle_speed=std::int8_t(view.u8(cam+0x50));
             camera.cut_origin={view.f32(cut+8),view.f32(cut+12),view.f32(cut+16)};
@@ -162,6 +163,14 @@ private:
                     throw std::runtime_error("invalid TIM2 dimensions");
                 if((type!=4 && type!=5)||view.u8(ph+18)!=3||view.u16(ph+12)!=128)
                     throw std::runtime_error("unsupported stage texture encoding");
+                // Ps2CheckTextureAlpha (ps2_texture.c:149 vor dem Einhaengen): ClutChange 0 setzt
+                // ClampFlag aus Gindex (ps2_dummy.c:1836-1844), sonst bleibt der Dateiwert (0xCC).
+                // Ps2TexLoad nimmt die Bits 0..1 als WMS und 2..3 als WMT (WMT-Argument REPEAT = 0).
+                {const auto gindex=view.u32(payload+8)&0xFFFFFu;
+                 const auto flag=view.u16(payload+14)==0?((gindex==20500||(gindex>=15205&&gindex<=15209))?0xFF000FF0u:0xFF000FF5u):view.u32(payload+0xCC);
+                 const auto wms=flag&3u,wmt=(flag>>2)&3u;
+                 if(wms>1||wmt>1)throw std::runtime_error("GS REGION_CLAMP/REGION_REPEAT texture wrap is not ported");
+                 texture.clamp_u=wms==1;texture.clamp_v=wmt==1;}
                 const auto image=payload+256,clut=view.relative(image,image_size,clut_size);
                 if(clut>end||clut_size>end-clut)throw std::runtime_error("TIM2 payload outside PVP record");
                 const std::size_t count=std::size_t(texture.width)*texture.height;

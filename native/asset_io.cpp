@@ -58,12 +58,14 @@ void write_tga(const std::filesystem::path& path,const SceneTexture& t){
 void apply_texture_files(Scene& scene,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity){
     // Precedence: explicit per-asset mod file > content-keyed HD replacement
     // (mods/textures/hd/<md5 of the cooked data TGA>.tga) > cooked data file > decoded original.
+    // Die Datei ersetzt nur die Bildpunkte; der GS-Wickelmodus gehoert zum Originalkopf.
     for(std::size_t i=0;i<scene.textures.size();++i){const auto relative=std::filesystem::path("textures")/identity/(asset_number(unsigned(i))+".tga");
-        if(!mods.empty()&&std::filesystem::is_regular_file(mods/relative)){scene.textures[i]=read_tga(mods/relative);continue;}
+        auto replace=[&](const std::filesystem::path& file){const bool u=scene.textures[i].clamp_u,v=scene.textures[i].clamp_v;scene.textures[i]=read_tga(file);scene.textures[i].clamp_u=u;scene.textures[i].clamp_v=v;};
+        if(!mods.empty()&&std::filesystem::is_regular_file(mods/relative)){replace(mods/relative);continue;}
         if(!std::filesystem::is_regular_file(data/relative))continue;
         if(!mods.empty()){const auto hd=mods/"textures"/"hd"/(md5_hex(read_asset_file(data/relative,256*1024*1024+65536))+".tga");
-            if(std::filesystem::is_regular_file(hd)){scene.textures[i]=read_tga(hd);continue;}}
-        scene.textures[i]=read_tga(data/relative);
+            if(std::filesystem::is_regular_file(hd)){replace(hd);continue;}}
+        replace(data/relative);
     }
 }
 }

@@ -478,7 +478,14 @@ const ModelNodeOverrides& RoomWorld::overrides(unsigned kind,unsigned index)cons
 const RoomWorld::Model& RoomWorld::model(unsigned kind,unsigned index)const{for(const auto& m:models_)if(m.kind==kind&&m.index==index)return m;throw std::runtime_error("model control has no realized model");}
 unsigned RoomWorld::model_index(unsigned kind,unsigned index,unsigned node)const{if(!kind){if(!player_asset_)throw std::runtime_error("player model control requires player asset");return player_asset_->model_index(node);}const auto& m=model(kind,index);if(m.actor)return m.actor->model_index(node);if(node>=m.rest_pose.size())throw std::runtime_error("object model control node outside hierarchy");return node;}
 ModelPose RoomWorld::model_pose(unsigned kind,unsigned index,unsigned node)const{return model_pose_physical(kind,index,model_index(kind,index,node));}
-ModelPose RoomWorld::model_pose_physical(unsigned kind,unsigned index,unsigned physical)const{auto edits=overrides(kind,index);if(!kind&&push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;if(!kind)edits=player_pose_edits(edits);if(!kind){if(player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("player enemy motion without clip");return player_asset_->local_pose_clip(*c,frame_,{},edits).at(physical);} /* plp->mnwP = epw->mnwP while grabbed */ return (player_room_motion_?player_asset_->local_pose_clip(room_motions_.at(motion_),frame_,{},edits):player_asset_->local_pose(motion_,frame_,edits)).at(physical);}const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(kind==1&&e->enemy_native&&!e->scripted){if(physical>=e->enemy_obj.size())throw std::runtime_error("model control node outside native enemy work");return e->enemy_obj[physical];} /* mlwP->objP of the native work */if(m.actor){if(e->posed_has_motion()){const auto& clip=posed_motion_clip(*e);return m.actor->local_pose_clip(clip,e->posed_frame(),m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=object_pose(m,*e).at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
+ModelPose RoomWorld::model_pose_physical(unsigned kind,unsigned index,unsigned physical)const{auto edits=overrides(kind,index);if(!kind&&push_pose_current())for(const auto& v:push_->pose())edits[v.first]=v.second;if(!kind)edits=player_pose_edits(edits);if(!kind){
+    if(player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("player enemy motion without clip");return player_asset_->local_pose_clip(*c,frame_,{},edits).at(physical);} /* plp->mnwP = epw->mnwP while grabbed */
+    if(player_room_motion_){if(const auto* clip=player_room_clip())return player_asset_->local_pose_clip(*clip,frame_,{},edits).at(physical);
+        /* Motion.c:29: datP NULL tastet nicht ab; objP bleibt der zuletzt geschriebene Stand. */
+        auto pose=player_obj_.size()==player_asset_->bones()?player_obj_:player_asset_->bind_pose();
+        for(const auto& pair:edits){if(pair.first>=pose.size())throw std::runtime_error("model control node outside skeleton");const auto& o=pair.second;if(o.position)pose[pair.first].position=*o.position;if(o.angles)pose[pair.first].angles=*o.angles;}
+        return pose.at(physical);}
+    return player_asset_->local_pose(motion_,frame_,edits).at(physical);}const auto& m=model(kind,index);const auto* e=state(kind,index);if(!e)throw std::runtime_error("model control work unavailable");if(kind==1&&e->enemy_native&&!e->scripted){if(physical>=e->enemy_obj.size())throw std::runtime_error("model control node outside native enemy work");return e->enemy_obj[physical];} /* mlwP->objP of the native work */if(m.actor){if(e->posed_has_motion()){const auto& clip=posed_motion_clip(*e);return m.actor->local_pose_clip(clip,e->posed_frame(),m.actor->motion_nodes(clip.positions.size()),edits).at(physical);}return m.actor->local_pose(0,0,edits).at(physical);}auto pose=object_pose(m,*e).at(physical);const auto at=edits.find(physical);if(at!=edits.end()){if(at->second.position)pose.position=*at->second.position;if(at->second.angles)pose.angles=*at->second.angles;}return pose;}
 std::optional<Scene> RoomWorld::computer_character(unsigned chr_no,unsigned motion,unsigned frame_no){
     const auto found=entities_.find({1,chr_no});
     if(found==entities_.end())return {};
@@ -782,22 +789,30 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     }
     // bhLoadWork2 (event.c:12933): Fall 2 ueberspringt Byte 2; tk_no, obwp-Index
     // und model_cno stehen in Byte 3, 4 und 5.
-    if(op==0x68){const auto kind=v.u8(1);if(kind>2)return false;
-        if(kind==2){auto& target=contexts_.at(v.u8(3));target.kind=2;target.index=v.u8(4);target.node=v.u8(5);target.work=true;return true;}
-        // Fall 1 laesst model_cno stehen; nur Fall 0 setzt ihn auf 0.
-        ctx.kind=kind;ctx.index=kind?v.u8(2):0;if(!kind)ctx.node=0;ctx.work=true;if(!kind)player_scripted=true;return true;}
     // bhLoadWork (event.c:12713) schreibt bhCetask, den Kontext des laufenden Tasks;
     // bhLoadWorkEx (event.c:12808, 0xB5) ist dieselbe Auswahl in bhEtask[0], den Kontext
     // der Task-Ebene 0 (event.c:38 BH_SCEWORK bhEtask[16], :359 bhCetask = bhEtask).
-    // Fall 0 teilt in beiden die bekannte Luecke: plp->mode0 7 / mtn_no 42 / flg 0x10000 /
-    // stflg 0x10000 werden nicht geschrieben (Ledger event.c:bhLoadWork).
+    // Fall 0 schreibt den Spielerwork: bhLoadWork/:Ex (event.c:12722-12737, :12822-12837)
+    // mode0 7, mode2 0, Lowbyte mtn_no 42 (Byte-Store, Hochbyte bleibt), stflg |= 0x10000,
+    // stflg &= ~0x80, flg |= 0x10000; bhLoadWork2 (event.c:12909-12919) mode0 7,
+    // stflg |= 0x10000 und flg |= 0x10000 ohne die drei uebrigen Schreibvorgaenge.
+    auto player_work_owned=[&](bool full){unsigned& flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
+        unsigned& stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+        collision_mode_=full?((collision_mode_&~0x00ff00ffu)|7u):((collision_mode_&~0xffu)|7u);
+        if(full)motion_=(motion_&~std::size_t(0xffu))|42u;
+        flg|=0x10000u;stflg|=0x10000u;if(full)stflg&=~0x80u;
+        if(collision_events_)collision_events_->player_flags=flg;};
+    if(op==0x68){const auto kind=v.u8(1);if(kind>2)return false;
+        if(kind==2){auto& target=contexts_.at(v.u8(3));target.kind=2;target.index=v.u8(4);target.node=v.u8(5);target.work=true;return true;}
+        // Fall 1 laesst model_cno stehen; nur Fall 0 setzt ihn auf 0.
+        ctx.kind=kind;ctx.index=kind?v.u8(2):0;if(!kind)ctx.node=0;ctx.work=true;if(!kind){player_scripted=true;player_work_owned(false);}return true;}
     if(op==0x65||op==0xb5){const unsigned kind=v.u8(1);if(kind>4)return false;
         auto& target=op==0xb5?contexts_.at(0):ctx;
         // event.c:12733/12785/12799 (Ex :12830/:12880/:12894): Spieler, Item und Effekt
         // waehlen immer objP[0]. Nur Gegner und Objekt lesen model_cno aus Byte 3
         // (:12752/:12771, Ex :12847/:12866).
         target.kind=kind;target.index=kind?v.u8(2):0;target.node=(kind==1||kind==2)?v.u8(3):0;target.work=true;
-        if(!target.kind){player_scripted=true;}
+        if(!target.kind){player_scripted=true;player_work_owned(true);}
         else if(target.kind==1&&entity(1,target.index).enemy_bound){
             const auto& w=entity(1,target.index).enemy;
             // bhLoadWork, event.c:12754-12757 (Ex :12849-12852).
@@ -1428,7 +1443,15 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
                         set_motion(m,0,0u,clip,nullptr,player_obj_,player_owp_flags_,&gap,0u,unsigned(motion_));if(!gap.empty())unbound_enemy_.insert(gap+" (plp, Common v0)");
                         frame_=m.frm_no;player_hokan_count_=m.hokan_count;player_obj_motion_=motion_;player_obj_written_=true;player_obj_drives_=true;}}}
                 return true;}
-            auto& e=entity(ctx.kind,ctx.index);if(cmd==25&&ctx.kind!=1)return false;e.room_motion=cmd!=25;e.motion=index;if(!entity_motion(e).frames)throw std::runtime_error("script entity motion unavailable");e.frame=start;e.sampled_frame=start;e.step=motion_step(v.u8(2));e.scripted=true;e.has_motion=true;e.motion_slow=(v.u8(2)!=1&&v.u8(2)!=2)||v.u8(7)==6;e.motion_mode3=v.u8(3)<=1?0:1;
+            auto& e=entity(ctx.kind,ctx.index);if(cmd==25&&ctx.kind!=1)return false;
+            // room.c:700-706 (bhSetRoomMtn): sys->rmthp sind 512 genullte MN_WORK, nur die ersten Eintraege
+            // tragen Raummotionen. Ein mtn_no dahinter hat datP NULL; bhSetMotion (Motion.c:29) tastet dann
+            // nicht ab und zaehlt frm_no nicht weiter. Das Werk wird trotzdem beschrieben (event.c:11501-11570,
+            // 11834-11909); der Host behaelt wie bei Sub_controll 0x80 seinen letzten Clip.
+            const bool present=enemy_motion_available(e,index,cmd!=25);
+            if(!present&&!(e.subplayer_bound&&cmd!=25))throw std::runtime_error("script entity motion unavailable"); /* nur rmthp (24/34) ist als genulltes 512er-Feld belegt */
+            if(present){e.room_motion=cmd!=25;e.motion=index;if(!entity_motion(e).frames)throw std::runtime_error("script entity motion unavailable");e.frame=start;e.sampled_frame=start;}
+            e.step=motion_step(v.u8(2));e.scripted=true;e.has_motion=e.has_motion||present;e.motion_slow=(v.u8(2)!=1&&v.u8(2)!=2)||v.u8(7)==6;e.motion_mode3=v.u8(3)<=1?0:1;
             if(e.subplayer_bound){
                 // event.c:11834-11909 (34) / :11501-11570 (24) / :10990-11060 (25): selector 1 writes
                 // the low byte of mtn_no, mtn_md 0x20 (|8 for steps other than 1/2) and |8 for
@@ -1436,7 +1459,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
                 // mtn_md/hokan_rate from the task and sets hokan_count 0 / t1 / 8 (then mtn_md &= ~8).
                 // Selector 0 and 2/3 set hokan_count 0 for transition 6, else 8.
                 const unsigned selector=v.u8(3),t1=v.u8(7);
-                e.subplayer_no_motion=false;auto& w=e.enemy;w.mtn_room=cmd!=25;w.mtn_add=int(e.step);w.frm_no=start;w.frm_mode=0;
+                e.subplayer_no_motion=!present;auto& w=e.enemy;w.mtn_room=cmd!=25;w.mtn_add=int(e.step);w.frm_no=start;w.frm_mode=0;
                 if(cmd==25&&selector==1){w.mtn_md=ctx.mtn_md;w.hokan_rate=ctx.hokan_rate;}else{w.mtn_md=0x20|(v.u8(2)==1||v.u8(2)==2?0:8);w.hokan_rate=0;}
                 if(selector==1)w.mtn_no=(w.mtn_no&~255u)|index;else w.mtn_no=index;
                 if(selector<=1){ // Common_controll case 1 also selects the subplayer dispatch mode.
@@ -1883,7 +1906,7 @@ void RoomWorld::clear_event_effects(){
 }
 void RoomWorld::set_monitor_camera(unsigned cut,NJS_POINT3 position,int ax,int ay,int az,float ln,int pers){
     if(cut>=room_cameras_.size())throw std::runtime_error("cam.flg 0x40: cam.ncut outside room cut table");
-    event_camera=false;fixed_camera.reset();eye_.active=false; // cam.flg = 0x40 (gameover.c:313) ersetzt 0x2/0x4/0x80000000
+    event_camera=false;fixed_camera.reset();eye_.active=false;camera_filter_=false; // cam.flg = 0x40 (gameover.c:309) ersetzt 0x2/0x4/0x8/0x80000000
     monitor_.active=true;monitor_.cut=cut;monitor_.position=position;monitor_.ax=ax;monitor_.ay=ay;monitor_.az=az;monitor_.ln=ln;monitor_.pers=pers;
 }
 // weapon.c bhCheckBombAtari, enemy half: every eligible work whose capsule the blast sphere touches gets the bomb hit.
@@ -2124,6 +2147,7 @@ void RoomWorld::step_monitor_effect(unsigned slot){
         cut_fog_handover(room_cameras_.at(op.type),true);
         ev.flags[11][0]|=0x20u; // cut.c:298 bhSetCut
         event_camera=false;fixed_camera.reset();eye_.active=false; // cut.c:296 cam.flg &= ~0x80000046
+        camera_filter_=false; // effsub1b.c:1030/1037 cam.flg = 0x40 vor und nach bhSetCut: auch Bit 0x8 ist danach aus
         monitor_.active=true;monitor_.cut=op.type;
         cb|=0x44u;st|=0x1u;
         monitor_.pers=14563;monitor_.ln=-2.0f;
@@ -2798,7 +2822,7 @@ void RoomWorld::tick(){
           if(!hidden)afterimage_alpha_after_[std::make_tuple(shot.kind,shot.index,shot.mdl,shot.node)]=sp->afterimage_alpha;}}}
 
     auto refresh=[](ModelNodeOverrides& edits,const MotionClip& clip,const std::vector<unsigned>& nodes){for(unsigned channel=0;channel<clip.positions.size();++channel){const auto node=nodes.empty()?channel:nodes.at(channel);const auto at=edits.find(node);if(at==edits.end())continue;if(!clip.positions[channel].empty())at->second.position.reset();at->second.angles.reset();if(!at->second.position&&!at->second.angles)edits.erase(at);}};
-    for(auto& pair:entities_){auto& e=pair.second;if(pair.first.first==0){if(player_asset_&&player_scripted&&!player_enemy_motion_){const auto& clip=player_room_motion_?room_motions_.at(motion_):player_asset_->motion_clip(motion_);refresh(e.node_overrides,clip,player_asset_->motion_nodes(clip.positions.size()));}}
+    for(auto& pair:entities_){auto& e=pair.second;if(pair.first.first==0){if(player_asset_&&player_scripted&&!player_enemy_motion_){const MotionClip* clip=player_room_motion_?player_room_clip():&player_asset_->motion_clip(motion_);if(clip)refresh(e.node_overrides,*clip,player_asset_->motion_nodes(clip->positions.size()));}}
         // Ein skriptgefuehrter nativer Work wird ueber denselben Clippfad
         // gezeichnet; auch seine Overrides gelten nur bis zum naechsten
         // Motion-Schreibzugriff (event.c:12099 Common_controll 8, :36/38).
@@ -2817,7 +2841,7 @@ void RoomWorld::tick(){
     };for(unsigned i=0;i<lights_.size();++i)if(!event_camera||i<4)animate_light(lights_[i],bool(lights_[i].flags&2u));
     if(event_camera){const auto& mask=event_cameras_.at(event_camera_index).keys.at(event_camera_key_).hidden_lights;
         for(unsigned i=0;i<event_lights_.size();++i)animate_light(event_lights_[i],!(mask[i/32]&(0x80000000u>>(i%32))));}
-    for(auto& pair:entities_){auto& e=pair.second;if(e.dead)e.death_ticks=std::min(30u,e.death_ticks+1);if(pair.first.first!=2&&pair.first.first!=3&&(pair.first.first!=1||(!(e.scripted||e.subplayer_bound))||(simulation_flags_&2u))&&(e.has_motion||e.subplayer_bound)&&!e.frozen&&!((e.en01||e.enemy_native)&&!e.scripted)){
+    for(auto& pair:entities_){auto& e=pair.second;if(e.dead)e.death_ticks=std::min(30u,e.death_ticks+1);if(pair.first.first!=2&&pair.first.first!=3&&(pair.first.first!=1||(!(e.scripted||e.subplayer_bound))||(simulation_flags_&2u))&&(e.has_motion||e.subplayer_bound)&&!e.frozen&&!((e.en01||e.enemy_native)&&!e.scripted)&&!(e.subplayer_bound&&e.subplayer_no_motion) /* Motion.c:29: datP NULL, frm_no bleibt */){
         bool advance=true;
         if(advance&&(!e.scripted||e.motion_mode3!=4)&&(!(e.scripted||e.subplayer_bound)||pair.first.first!=1||(simulation_flags_&2u))){if(e.scripted)e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);}
     }
@@ -2825,7 +2849,7 @@ void RoomWorld::tick(){
     // Committing here, and only here, is what makes a work written while the
     // pass is paused invisible until the pass runs again.
     e.commit_pose();}if(player_scripted&&player_smove_.active&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u))control_player_script_motion();
-    else if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u)){frame_+=player_step_;if(player_room_motion_)frame_%=std::int64_t(room_motions_.at(motion_).frames)*65536;else if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}
+    else if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u)){if(player_room_motion_){if(const auto* clip=player_room_clip()){frame_+=player_step_;frame_%=std::int64_t(clip->frames)*65536;}} /* Motion.c:29: datP NULL zaehlt frm_no nicht weiter */ else{frame_+=player_step_;if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}}
     control_enemy_player_motion();
     apply_en01_flinch();
     sync_player_grab();
@@ -2851,7 +2875,16 @@ Scene RoomWorld::sample_player(const PlayerAsset& player,std::vector<BoneMatrix>
     if(player_morph_.morph)if(const auto* b=player.model(player_morph_.morph_obj_b);b&&b->bones()==base->bones()){morph.model=&b->encoded_model();morph.shape=player_morph_.morph_shape;morph_ptr=&morph;}
     Scene out;
     if(player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("player enemy motion without clip");out=base->sample_clip(*c,frame_,player_.position,player_.yaw,{},nodes,pose_overrides,nullptr,morph_ptr);} // the grab clips live in the zombie MTN list
-    else out=player_room_motion_?base->sample_clip(room_motions_.at(motion_),frame_,player_.position,player_.yaw,{},nodes,pose_overrides,nullptr,morph_ptr):base->sample(motion_,frame_,player_.position,player_.yaw,nodes,pose_overrides,nullptr,morph_ptr);
+    else if(player_room_motion_){
+        if(const auto* clip=player_room_clip())out=base->sample_clip(*clip,frame_,player_.position,player_.yaw,{},nodes,pose_overrides,nullptr,morph_ptr);
+        else{
+            /* Motion.c:29: datP NULL; gezeichnet wird der zuletzt geschriebene objP/owP. */
+            auto pose=player_obj_.size()==base->bones()?player_obj_:base->bind_pose();
+            for(const auto& pair:pose_overrides){if(pair.first>=pose.size())throw std::runtime_error("model control node outside skeleton");const auto& o=pair.second;if(o.position)pose[pair.first].position=*o.position;if(o.angles)pose[pair.first].angles=*o.angles;}
+            out=player_joint_matrices_.size()==base->bones()&&player_owp_flags_.size()==base->bones()?base->sample_work(pose,player_joint_matrices_,player_owp_flags_,nodes,nullptr,nullptr,morph_ptr):base->sample_tree(pose,base->node_evalflags(),nullptr);
+        }
+    }
+    else out=base->sample(motion_,frame_,player_.position,player_.yaw,nodes,pose_overrides,nullptr,morph_ptr);
     // npSetAllMatColor(plp->mlwP->objP, obj_num, col) (en12.c:1192, njplus.c:1375): RGB aus
     // dem Auftrag, Alpha nur wo das Modell eines hatte.
     if(player_material_)for(auto& t:out.triangles){const std::uint32_t a=(t.color&0xff000000u)?(*player_material_&0xff000000u):0u;t.color=a|(*player_material_&0x00ffffffu);}
@@ -2930,7 +2963,7 @@ std::vector<ModelPose> RoomWorld::player_local_pose()const{
     if(!player_asset_)return {};
     if(player_obj_drives_&&player_obj_motion_==motion_&&(!player_scripted||player_smove_.active)&&player_obj_.size()==player_asset_->bones())return player_obj_;
     if(player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("player enemy motion without clip");return player_asset_->local_pose_clip(*c,frame_);}
-    if(player_room_motion_)return player_asset_->local_pose_clip(room_motions_.at(motion_),frame_);
+    if(player_room_motion_){if(const auto* clip=player_room_clip())return player_asset_->local_pose_clip(*clip,frame_);return player_obj_.size()==player_asset_->bones()?player_obj_:player_asset_->bind_pose();} /* Motion.c:29: datP NULL */
     return player_asset_->local_pose(motion_,frame_);
 }
 unsigned RoomWorld::frame(unsigned kind,unsigned index)const{if(!kind)return unsigned(std::max<std::int64_t>(0,frame_));const auto at=entities_.find({kind,index});return at==entities_.end()?0:unsigned(std::max<std::int64_t>(0,at->second.frame));}
@@ -3680,6 +3713,7 @@ void RoomWorld::control_event_camera(){
     if(event_camera_paused_)return;
     auto& track=event_cameras_.at(event_camera_index);
     if(event_camera_init_){ // case 0 (:1998-2020), falls through into case 1
+        camera_filter_=false; // cut.c:2008 cam.flg &= ~0x8
         if(collision_events_){auto& st=collision_events_->flags[5][0];st|=0x10u;
             if(st&0x800000u){st&=~0x800000u;collision_events_->flags[11][0]&=~0x80000u;}}
         event_camera_clock_=0;event_camera_init_=false;
@@ -3854,9 +3888,19 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
     }
     if(fixed_camera){active_camera_.reset(stage.cameras.at(*fixed_camera),*fixed_camera);return;}
     active_camera_.select(target,cut,camera_force_);camera_force_=false;
+    // cut.c:1197-1217: unter plp->stflg 0x30 (Treppe/Stufe, hitchk.c:4677/4747) und in mode0 7 zielt die Kamera auf
+    // owP[0] des letzten bhCalcModel, nicht auf plp->px/py/pz, das in Stufenaktionen nur beim Motionumlauf nachzieht
+    // (player.c:3258-3271). Der Zweig der freien Steuerung (:1207-1209, EXP_WORK plx/plz) hat noch keinen Besitzer.
+    {const unsigned mode=collision_mode_,mode0=mode&0xffu,mode1=(mode>>8)&0xffu,mode2=(mode>>16)&0xffu;
+     const unsigned flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
+     const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+     const auto owp_root=[&]{if(player_joint_matrices_.empty())return false;const auto& m=player_joint_matrices_[0].value;camera_target_=NJS_POINT3{m[12],m[13],m[14]};camera_target_valid_=true;return true;};
+     if((mode0==1&&mode1==0&&mode2!=13)||((flg&0x200000u)&&mode0!=7)){if(stflg&0x30u)owp_root();else{camera_target_=player_.position;camera_target_valid_=true;}}
+     else if(mode0==7)owp_root();}
+    const auto follow=camera_target_valid_?camera_target_:player_.position;
     // bhControlActiveCamera aims from the current travelling camera, not
     // from its final target position (important during a return/zoom).
-    const auto controlled=tracking?camera_for_actor(stage,cut,player_.position,std::int8_t(floor_at(player_.position)),&active_camera_.view().position):target;
+    const auto controlled=tracking?camera_for_actor(stage,cut,follow,std::int8_t(floor_at(player_.position)),&active_camera_.view().position):target;
     active_camera_.tick(controlled);
     /* Diagnose: RECVX_CAM_TRACE=1, Raumkamerapfad (bhControlActiveCamera). */
     if(std::getenv("RECVX_CAM_TRACE")){const auto& p=active_camera_.view();std::fprintf(stderr,"CAMTRACE cut=%zu fixed=%d blend=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",cut,fixed_camera?int(*fixed_camera):-1,int(active_camera_.transitioning()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}
@@ -3866,7 +3910,10 @@ void RoomWorld::cut_fog_handover(const SceneCamera& ci,bool set_cut){
     // cut camera; with fog on (st_flg 0x2) and a fog-carrying cut (flg 0x8)
     // the change waits sys->fog_cngct - 3 frames (clamped at 0), ef_flg 0x10
     // shortens that once more (bhSetCut only); gm_flg 0x10 arms bhControlEOR.
-    cam_fog_color_=ci.fog_color&0xffffffu;cam_fog_near_=ci.fog_near;cam_fog_far_=ci.fog_far;cut_fog_flags_=ci.flags;
+    cam_fog_color_=ci.fog_color&0xffffffu;cam_fog_near_=ci.fog_near;cut_fog_flags_=ci.flags;cam_fog_far_=ci.fog_far;
+    // cut.c:412-421 (bhSetCut) / :505-514 (bhSetFixedCut): flg 0x8000 setzt cam.flg 0x8 und uebernimmt
+    // sys->fil_no/fil_rt (short aus char, Vorzeichen erweitert); sonst cam.flg &= ~0x8. bhEffFil liest beides.
+    if(ci.flags&0x8000u){camera_filter_=true;filter_no_=ci.filter_no;filter_rate_=ci.filter_rate;}else camera_filter_=false;
     if(!collision_events_)return;auto& st=collision_events_->flags[5][0];auto& gm=collision_events_->flags[11][0];
     if((st&0x2u)&&(ci.flags&0x8u)){fog_ct_=fog_cngct_-3;if(fog_ct_<0)fog_ct_=0;if(set_cut&&(effect_flags_&0x10u)){effect_flags_&=~0x10u;--fog_ct_;}}
     else fog_ct_=0;
@@ -4253,6 +4300,7 @@ EffectContext RoomWorld::effect_context()const{
     context.ev_flg_2=collision_events_&&(collision_events_->flags[1][0]&(0x80000000u>>2))!=0;
     // sys->rcase: Skriptbefehl 0x37 (bhRoomCaseNo) im Eventbesitzer, sonst der Fall der Raumdatei.
     context.room_case=collision_events_?unsigned(collision_events_->values[21]):room_case_;
+    context.camera_filter=camera_filter_;context.filter_no=filter_no_;context.filter_rate=filter_rate_;
     if(camera_ready){
         // camera.c:45-56: cam.vx/vy/vz = -(Ry Rx Rz)(0,0,-1), cam.wpx.. = T(pos) Ry Rx Rz (0,0,-ln).
         const auto c=camera_pose();

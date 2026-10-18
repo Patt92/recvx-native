@@ -78,20 +78,26 @@ int main(){try{
     tw.input(Key::Confirm);tw.input(Key::Up);check(tw.selection()==0,"Richtung schaltet die Rueckfrage nicht um");
     tw.input(Key::Confirm);check(tw.phase()==Phase::Io&&!tw.io_pending()&&tw.message()==484,"Ja startet nicht den Schreibzustand (484)");
     tw.control(0u,0u);check(tw.io_pending()&&tw.slot()==3,"Schreibzustand fordert die Host-Datei nicht an");
+    check(!tw.take_save_complete(),"I/O-Anforderung meldet bereits den Speicherabschluss");
     tw.io_complete(true,saves);
     check(tw.phase()==Phase::Typing&&tw.confirmed()&&tw.write_count()==0,"erfolgreiches Schreiben startet die Schreibanimation nicht");
+    check(!tw.take_save_complete(),"erfolgreiches Datei-I/O erneuert den Continue-Punkt vor der Tippanimation");
     // ps2_McSaveFile.c:571–584: Zeichen n im Pass 1+6(n-1) (sWaitMesTimer % 6), bei
     // slDispWriteMes >= Max im Folgepass Endton 0x80000244 und ++; mcGetStringEnd (849)
     // beendet bei > Max vor dem Zeichnen: Max 29 -> Erfolg im Pass 6*29-3 = 171.
-    {unsigned passes=0;while(tw.phase()==Phase::Typing&&passes<600){tw.control(0u,0u);++passes;}
+    {unsigned passes=0;while(tw.phase()==Phase::Typing&&passes<600){
+        tw.control(0u,0u);++passes;
+        check(tw.take_save_complete()==(passes==6*29-3),"Continue-Punkt wird nicht genau beim Ende der Tippanimation angefordert");
+        check(!tw.take_save_complete(),"Speicherabschluss wird mehrfach geliefert");}
      check(tw.phase()==Phase::Success&&tw.message()==485&&passes==6*29-3,"Schreibanimation endet nicht nach Type_Space[1] (29) Zeichen im Pass 171 mit Meldung 485");}
-    for(unsigned i=0;i<20;++i){tw.control(0u,0u);check(tw.phase()==Phase::Success,"Erfolgsmeldung haelt keine 20 Bilder (SuccessCardWriteMessage)");}
+    for(unsigned i=0;i<20;++i){tw.control(0u,0u);check(tw.phase()==Phase::Success,"Erfolgsmeldung haelt keine 20 Bilder (SuccessCardWriteMessage)");check(!tw.take_save_complete(),"Erfolgsmeldung erneuert den Continue-Punkt wiederholt");}
     tw.control(0u,0u);check(tw.phase()==Phase::Exit&&!tw.done(),"Erfolg geht nicht in den Verlassen-Zustand");
     tw.control(0u,0u);check(tw.done()&&tw.confirmed()&&!tw.cancelled(),"Verlassen ohne ev_flg 56 beendet den Bildschirm nicht im naechsten Bild");
     tw.reset();check(!tw.active(),"reset laesst den Bildschirm aktiv");
     // Schreibfehler: ErrCardWrite (1443–1464), Meldung 486, OK/Cancel zurueck zur Slotliste.
     tw.open(Typewriter::Mode::Save,saves);tw.input(Key::Confirm);tw.input(Key::Confirm);tw.input(Key::Confirm);tw.control(0u,0u);
     tw.io_complete(false,saves);check(tw.phase()==Phase::Error&&tw.message()==486,"Schreibfehler zeigt nicht 486");
+    check(!tw.take_save_complete(),"Schreibfehler erneuert den Continue-Punkt");
     tw.input(Key::Confirm);check(tw.phase()==Phase::Files&&tw.cursor()==0,"Fehler kehrt nicht zur Slotliste zurueck");
     // Verlassen mit ev_flg 56: SpecialSave (536–604), Meldung 253, Auswahl 1 = zurueck zur Slotliste.
     tw.input(Key::Cancel);check(tw.phase()==Phase::Exit&&tw.cancelled(),"Cancel in der Slotliste setzt den Exit-Zustand nicht");

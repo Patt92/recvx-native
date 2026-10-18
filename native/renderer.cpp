@@ -52,10 +52,10 @@ inline float fast_log2(float x){
     bits=(bits&0x7fffffu)|0x3f800000u;float m;std::memcpy(&m,&bits,4);
     return e+(-0.34484843f*m+2.02466578f)*m-0.67487759f;
 }
-struct Level {const std::uint32_t* pixels;unsigned w,h;};
+struct Level {const std::uint32_t* pixels;unsigned w,h;bool clamp_u,clamp_v;};
 Level level_of(const SceneTexture& t,unsigned level){
-    if(level==0)return {t.pixels.data(),t.width,t.height};
-    return {t.filter_cache->mips[level-1].data(),std::max(1u,t.width>>level),std::max(1u,t.height>>level)};
+    if(level==0)return {t.pixels.data(),t.width,t.height,t.clamp_u,t.clamp_v};
+    return {t.filter_cache->mips[level-1].data(),std::max(1u,t.width>>level),std::max(1u,t.height>>level),t.clamp_u,t.clamp_v};
 }
 // Premultiplied accumulation: acc = {r*a, g*a, b*a, a} scaled by weight.
 template<bool Weighted>
@@ -63,9 +63,10 @@ void bilinear(const Level& l,float u,float v,float weight,float* acc){
     const float fx=u*float(l.w)-.5f,fy=v*float(l.h)-.5f;
     const int ix=int(fx)-(fx<0),iy=int(fy)-(fy<0);const float tx=fx-float(ix),ty=fy-float(iy);
     const int w=int(l.w),h=int(l.h);
-    // Power-of-two sizes wrap with a mask; other sizes fall back to modulo.
-    auto wrap=[](int i,int n){return (n&(n-1))==0?(i&(n-1)):(((i%n)+n)%n);};
-    const int x0=wrap(ix,w),x1=wrap(ix+1,w),y0=wrap(iy,h),y1=wrap(iy+1,h);
+    // GS REPEAT: power-of-two sizes wrap with a mask, other sizes fall back to modulo.
+    // GS CLAMP haelt die Texelkoordinate am Rand (beide Bilinearnachbarn bleiben innen).
+    auto wrap=[](int i,int n,bool clamp){return clamp?std::clamp(i,0,n-1):(n&(n-1))==0?(i&(n-1)):(((i%n)+n)%n);};
+    const int x0=wrap(ix,w,l.clamp_u),x1=wrap(ix+1,w,l.clamp_u),y0=wrap(iy,h,l.clamp_v),y1=wrap(iy+1,h,l.clamp_v);
     const std::uint32_t* r0=l.pixels+std::size_t(y0)*l.w;const std::uint32_t* r1=l.pixels+std::size_t(y1)*l.w;
     const std::uint32_t texel[4]={r0[x0],r0[x1],r1[x0],r1[x1]};
     const float k[4]={weight*(1-tx)*(1-ty),weight*tx*(1-ty),weight*(1-tx)*ty,weight*tx*ty};
@@ -317,7 +318,8 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                     float u=(a*p[0].u_over_z+b*p[1].u_over_z+c*p[2].u_over_z)*rz;
                     float v=(a*p[0].v_over_z+b*p[1].v_over_z+c*p[2].v_over_z)*rz;
                     if(!s.filtered) {
-                        u-=std::floor(u);v-=std::floor(v);
+                        if(texture->clamp_u)u=std::clamp(u,0.f,1.f);else u-=std::floor(u);
+                        if(texture->clamp_v)v=std::clamp(v,0.f,1.f);else v-=std::floor(v);
                         const auto tx=std::min(texture->width-1,unsigned(u*texture->width));
                         const auto ty=std::min(texture->height-1,unsigned(v*texture->height));
                         const auto texel=texture->pixels[std::size_t(ty)*texture->width+tx];
@@ -346,7 +348,8 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         }
                         const int taps=setup_taps,top=int(texture->filter_cache->mips.size());
                         const float du=s.linear_only?0:setup_du,dv=s.linear_only?0:setup_dv;const int l0=s.linear_only?0:setup_l0,l1=s.linear_only?0:std::min(l0+1,top);const float frac=s.linear_only?0:setup_frac;
-                        u-=std::floor(u);v-=std::floor(v);
+                        if(!texture->clamp_u)u-=std::floor(u);
+                        if(!texture->clamp_v)v-=std::floor(v);
                         const Level a0=level_of(*texture,unsigned(l0)),a1=level_of(*texture,unsigned(l1));
                         float acc[4]={0,0,0,0};
                         const int draw_taps=s.linear_only?1:taps;

@@ -183,6 +183,23 @@ int main(int argc,char** argv){try{
   Scene shown=r.scene;const auto base=shown.triangles.size();r.world.append(shown,{},view);
   unsigned monitor=0;for(std::size_t i=base;i<shown.triangles.size();++i){const auto& t=shown.triangles[i];if(t.textured&&t.texture<shown.textures.size()&&shown.textures[t.texture].width==512&&t.blend==SceneBlend::Opaque)++monitor;}
   check(monitor==2,"bhDrawThlEffect3D monitor quad with the render texture missing");
+  // Fernsicht aus Schnitt 1 (Raumnebel an: CAM_WRK Nebel 0x28281C, near 0, far -105; Monitor ~85 Einheiten vor
+  // der Kamera). njDrawTextureSub3DH (ps2_NaDraw.c:443) schreibt XYZF2.F = 128 fest in jeden Eckpunkt, FOGCOL =
+  // ocol (:469; 0x400000 bei lkono 1): Cv = (Cs*128 + ocol*127) >> 8 unabhaengig von Entfernung und Raumnebel.
+  // Mit grauem Testbild (0x80 je Kanal, Grundfarbe 0xFF/0xC0 im Wechsel) liegen G/B des Monitors bei 64 bzw. 48
+  // und R um 0x1F darueber; Distanznebel (F << 128) liesse von dem Bild nur die Nebelfarbe uebrig.
+  // Kamerapose = Laufzeitpose von Schnitt 1 am Startplatz (headless --state camera_pose), damit das Rechteck mit
+  // dem Runtime-Endbild uebereinstimmt; die Erwartung haengt nicht vom Raumnebel ab (weder ungenebelt 128/96 noch
+  // Distanznebel erfuellen G/B 48..64 mit R um 0x1F darueber).
+  {SceneCamera far;far.position={22.1396f,20.2529f,110.037f};far.angles={1786,-2288,0};far.distance=0;far.perspective=10012;far.clip_near=20;far.clip_far=20000;
+   const auto draw=[&](std::uint32_t fill){std::vector<std::uint32_t> flat(512u*512u,fill);r.world.commit_small_screen(flat,512,512);Scene s=r.scene;r.world.append(s,{},far);SoftwareRenderer out(640,480);out.set_supersampling(1);out.set_render_threads(1);out.draw(s,far);return out.pixels();};
+   const auto ka=draw(0xff00ff00u),kb=draw(0xff0000ffu),grey=draw(0xff808080u);
+   unsigned n=0;double rs=0,gs=0,bs=0;for(std::size_t i=0;i<ka.size();++i)if(ka[i]!=kb[i]){++n;rs+=grey[i]&255u;gs+=(grey[i]>>8)&255u;bs+=(grey[i]>>16)&255u;}
+   unsigned x0=640,x1=0,y0=480,y1=0;for(std::size_t i=0;i<ka.size();++i)if(ka[i]!=kb[i]){x0=std::min<unsigned>(x0,unsigned(i%640));x1=std::max<unsigned>(x1,unsigned(i%640));y0=std::min<unsigned>(y0,unsigned(i/640));y1=std::max<unsigned>(y1,unsigned(i/640));}
+   check(n>200,"monitor quad not visible from cut 1");
+   const double rm=rs/n,gm=gs/n,bm=bs/n;const bool half=gm>40&&gm<72&&bm>40&&bm<72&&rm>gm+20&&rm<gm+44;
+   std::cout<<"RM_1050 cut 1 monitor quad: "<<n<<" px in x "<<x0<<".."<<x1<<" y "<<y0<<".."<<y1<<", mean RGB "<<rm<<"/"<<gm<<"/"<<bm<<" (grey 0x80 test image, F=128 blend with ocol 0x400000)\n";
+   check(half,"bhDrawThlEffect3D far view is not the fixed F=128 blend with ocol (ps2_NaDraw.c:443): distance fog or wrong fog colour");}
   // screen.c:928-939: ohne initflag rendert der Monitor nur unter st_flg 0x1 oder gm_flg 0x20 (Schnittwechsel,
   // cut.c:298/455/1651/1731; bhCheckCut cut.c:22 loescht es je Bild). Diagnosevorbedingung: st_flg 0x1 aus.
   r.world.set_fixed_cut(5);check(r.vm.flags[11][0]&0x20u,"bhSetFixedCut did not raise gm_flg 0x20");r.vm.flags[5][0]&=~1u;
@@ -190,6 +207,23 @@ int main(int argc,char** argv){try{
   r.world.commit_small_screen(target.pixels(),512,512);r.world.begin_cut_check();
   check(!(r.vm.flags[11][0]&0x20u)&&!r.world.small_screen_pass(view),"bhCheckCut does not clear gm_flg 0x20; the monitor re-renders without initflag, st_flg 1 or a cut change");
   std::cout<<"RM_1050 monitor: bhEff111 live, cut 6 rendered into the 512x512 texture and shown on the quad.\n";}
+ // RM_1050 Steve-Ereignis: Ereignis 31 (@2a74) startet 12..17 (Diagnosevorbedingung: direkter Start, ev_flg 146 gesetzt).
+ // Ereignis 12 ruft @144a 0xb0 bhHEffectSet2 (event.c:7472): sys->ef = {type 1, Lage 30.20/12.60/22.00, ax 5 Grad,
+ // ay 180 Grad, Skalierung 1.70/1.10/4.00, id 211} -> bhSetEffectTb(&sys->ef, NULL, NULL, 0): bhEff211 (effsub5.c:1039,
+ // Monitorrauschen) am Monitor. Danach wartet 12 per bhFrameCheck auf Steves frm_no 642 und endet mit CineSet 1 (@14b0);
+ // ohne 0xb0 blieb Task 12 davor stehen und das Cinematic lief bis zum SELECT-Skip weiter.
+ {Room r(data,"RM_1050",[](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);vm.set_flag(1,0x92,0);});
+  for(unsigned t=0;t<3;++t)r.tick();
+  for(unsigned e=12;e<=17;++e)r.vm.start(e-11,e);
+  for(unsigned t=0;t<3;++t)r.tick();
+  check(r.vm.flags[10][0]&4u,"RM_1050 Steve cinematic did not start (cb_flg 4)");
+  const EffectSprite* noise=nullptr;for(unsigned i=0;const auto* e=r.world.effect_state(i);++i)if(e->id==211&&(e->flg&1u)){noise=e;break;}
+  check(noise!=nullptr,"bhHEffectSet2 (0xb0) did not allocate bhEff211 in eff[512]");
+  check(noise->type==1&&noise->lkono==0&&std::fabs(noise->px-30.2f)<1e-3f&&std::fabs(noise->py-12.6f)<1e-3f&&std::fabs(noise->pz-22.0f)<1e-3f&&std::fabs(noise->sx-1.7f)<1e-4f&&std::fabs(noise->sy-1.1f)<1e-4f&&std::fabs(noise->sz-4.0f)<1e-4f&&(noise->ax&0xffff)==910&&(noise->ay&0xffff)==32768,"bhHEffectSet2 fields differ from event.c:7472 (type, lkono v4, px/py/pz, sx/sy/sz, ax/ay as short degrees)");
+  unsigned ticks=0;while(r.task(12)&&ticks++<3000)r.tick();
+  check(!r.task(12)&&!r.task(15),"RM_1050 event 12/15 never finished");
+  check(!(r.vm.flags[10][0]&4u)&&!r.world.player_scripted,"RM_1050 Steve cinematic keeps cb_flg 4 / player control after event 12 (CineSet 1 @14b0 not reached)");
+  std::cout<<"RM_1050 Steve: bhHEffectSet2 places bhEff211 on the monitor; event 12 reaches CineSet 1 without SELECT.\n";}
  // bhSetDispObj (0x20, event.c:2283) schreibt fuer Gegnerworks mdflg 0x1 (Zeichentor eneset.c:814),
  // bhEneRenderSet (0xa5, event.c:6985) mdflg 0x200; beide bleiben am Work ueber den naechsten Pass.
  {Room r(data,"RM_0080");for(unsigned t=0;t<3;++t)r.tick();
@@ -251,10 +285,28 @@ int main(int argc,char** argv){try{
   // Enemy works only (world.cpp: kind 1 models draw after the modifiers, game.c:318). Effect
  // sprites keep the default light category 1; their set follows bhRandamSet branches
  // (RM_0000 scd1 picks events 12..15), which differ between the natural and the skipped run.
+ // bhLoadWork (0x65) / bhLoadWorkEx (0xB5) Fall 0 und bhLoadWork2 (0x68) Fall 0 schreiben
+ // den Spielerwork direkt (event.c:12722-12737, :12822-12837, :12909-12919).
+ {
+  Room r(data,"RM_0000");r.world.bind_player_collision(r.vm);
+  const auto bind=[&](unsigned op){std::vector<std::uint8_t> b{std::uint8_t(op),0,0,0};if(op==0x68)b.push_back(0);EventCommand c{op,0,0,0,b};return r.world.bind(c);};
+  r.world.set_player_mode(0x03020100u);r.vm.flags[13][0]=0;r.vm.flags[14][0]=0x80;r.motion=0x1234;
+  check(bind(0x65),"bhLoadWork case 0 not bound");
+  check(r.world.player_mode()==0x03000107u,"bhLoadWork case 0 does not write mode0 7 / mode2 0");
+  check((r.motion&0xffu)==42u&&(r.motion>>8)==0x12u,"bhLoadWork case 0 does not write only the mtn_no low byte (event.c:12728)");
+  check((r.vm.flags[13][0]&0x10000u)&&(r.vm.flags[14][0]&0x10000u)&&!(r.vm.flags[14][0]&0x80u),"bhLoadWork case 0 misses flg/stflg 0x10000 or keeps stflg 0x80");
+  r.world.set_player_mode(0x03020100u);r.vm.flags[13][0]=0;r.vm.flags[14][0]=0x80;r.motion=0x1234;
+  check(bind(0xb5),"bhLoadWorkEx case 0 not bound");
+  check(r.world.player_mode()==0x03000107u&&(r.motion&0xffu)==42u&&(r.vm.flags[13][0]&0x10000u)&&(r.vm.flags[14][0]&0x10000u)&&!(r.vm.flags[14][0]&0x80u),"bhLoadWorkEx case 0 differs from event.c:12822-12837");
+  r.world.set_player_mode(0x03020100u);r.vm.flags[13][0]=0;r.vm.flags[14][0]=0x80;r.motion=0x1234;
+  check(bind(0x68),"bhLoadWork2 case 0 not bound");
+  check(r.world.player_mode()==0x03020107u,"bhLoadWork2 case 0 does not write mode0 7 (event.c:12913)");
+  check(r.motion==0x1234&&(r.vm.flags[13][0]&0x10000u)&&(r.vm.flags[14][0]&0x10000u)&&(r.vm.flags[14][0]&0x80u),"bhLoadWork2 case 0 writes beyond mode0 / stflg 0x10000 / flg 0x10000");
+ }
  auto drawn_enemy_triangles=[](const Room& r){Scene s;r.world.append(s,{},r.scene.cameras.at(0));std::size_t n=0;for(const auto& t:s.triangles)if(t.light_category==1&&t.after_modifiers)++n;return n;};
  std::size_t natural_enemy_triangles=0;
  {
-  Room r(data,"RM_0000");unsigned ticks=0;
+  Room r(data,"RM_0000");r.world.bind_player_collision(r.vm);unsigned ticks=0;
   while(!(r.dialog.active()&&r.dialog.index()==4)&&ticks<5000){if(ticks==1)r.input.menu_input(MenuInput::Confirm);if(ticks>1&&r.movie.active())r.input.menu_input(MenuInput::Confirm);r.tick();++ticks;}
   check(r.dialog.active()&&r.dialog.index()==4,"natural fixture misses the original hint");
   for(unsigned t=0;t<200&&!r.dialog.closable();++t)r.tick(); // erst die aufgebaute Seite nimmt OK an (game.c:264)
@@ -263,6 +315,11 @@ int main(int argc,char** argv){try{
   r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
   r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);
   unsigned wait=0;while(!(r.vm.flags[4][0]&0x00400000u)&&wait++<4000)r.tick();check(r.vm.flags[4][0]&0x00400000u,"natural cell cinematic never started");
+  // Der Zellenschnitt fuehrt bhLoadWork/bhLoadWorkEx Fall 0 aus (RECVX_EVENT_TRACE,
+  // scd1 op=65 Byte 2 = 0). Er setzt flg/stflg 0x10000 an derselben Stelle, an der
+  // scd1 die Cinematic beendet; bhCheckSubTask loescht sie im selben Durchlauf
+  // (system.c:736-744). Der Zwischenstand ist deshalb nur am Befehl selbst
+  // beobachtbar (Testblock oben); hier zaehlt, dass die Freigabe echte Schreiber trifft.
   unsigned release=0;while((r.vm.flags[10][0]&4)&&release++<6000)r.tick();check(!(r.vm.flags[10][0]&4),"natural cell cinematic never ends");
   for(unsigned t=0;t<400;++t)r.tick();
   const auto* stand_in=r.world.state(1,0);check(stand_in&&stand_in->inactive,"natural cell cinematic leaves the stand-in active");
@@ -270,7 +327,7 @@ int main(int argc,char** argv){try{
   check(natural_enemy_triangles>0,"natural cell cinematic end draws no enemy work (Rodrigo expected)");
  }
  for(unsigned delay:{0u,60u,200u,400u,700u}){
-  Room r(data,"RM_0000");unsigned ticks=0;
+  Room r(data,"RM_0000");r.world.bind_player_collision(r.vm);unsigned ticks=0;
   while(!(r.dialog.active()&&r.dialog.index()==4)&&ticks<5000){if(ticks==1)r.input.menu_input(MenuInput::Confirm);if(ticks>1&&r.movie.active())r.input.menu_input(MenuInput::Confirm);r.tick();++ticks;}
   check(r.dialog.active()&&r.dialog.index()==4,"skip fixture misses the original hint");
   for(unsigned t=0;t<200&&!r.dialog.closable();++t)r.tick(); // erst die aufgebaute Seite nimmt OK an (game.c:264)
@@ -291,10 +348,8 @@ int main(int argc,char** argv){try{
   if(r.vm.flags[10][0]&4){std::cerr<<"skip delay="<<delay<<" cb="<<r.vm.flags[10][0]<<" tasks=";for(auto t:r.vm.task_states())std::cerr<<t.event<<":"<<t.level<<":"<<t.offset<<",";std::cerr<<"\n";}
   check(!(r.vm.flags[10][0]&4),"skipped cell cinematic never reaches bhCineSet 1");
   // system.c:738-742 in the same bhCheckSubTask pass as the falling cb_flg 4.
-  // Measured gap, not coverage: the host's bhLoadWork case 0 (world.cpp op 0x65)
-  // does not yet write plp->flg 0x10000 / stflg 0x10000 / mode0 7 / mtn_no 42
-  // (event.c:12721-12738), so nothing sets these bits during a cinematic today
-  // and the three checks below only bite once that half is ported.
+  // bhLoadWork/bhLoadWorkEx Fall 0 (event.c:12722-12737) setzen diese Bits im
+  // Zellenschnitt; die Freigabe muss sie hier wieder loeschen.
   check(!(r.vm.flags[13][0]&0x10000u),"cinematic end keeps plp->flg 0x10000");
   check(!(r.vm.flags[14][0]&0x18000u),"cinematic end keeps plp->stflg 0x18000");
   check(!(r.vm.flags[10][0]&0x10000000u),"cinematic end keeps the skip request");

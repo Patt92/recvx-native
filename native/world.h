@@ -567,6 +567,10 @@ public:
     void set_player_mode(unsigned mode){collision_mode_=mode;}
     // plp->mnwP = plp->mnwPb (player.c:1410 vor bhCPM0_die): die eigene Bibliothek, ohne Standmotion.
     void set_player_library_own(){player_room_motion_=false;player_enemy_motion_=false;}
+    // sys->rmthp ist ein 512er Feld genullter MN_WORK; der Host fuehrt nur die
+    // vorhandenen Eintraege. Ein mtn_no dahinter hat datP NULL: bhSetMotion
+    // (Motion.c:29) tastet nicht ab und schreibt objP nicht.
+    const MotionClip* player_room_clip()const{return player_room_motion_&&motion_<room_motions_.size()&&room_motions_[motion_].frames?&room_motions_[motion_]:nullptr;}
     // Free player motion with an explicit EXP_WORK arp (bhCPM0_damage).
     NJS_POINT3 move_player_arp(NJS_POINT3 from,NJS_POINT3 to,float arp){return resolve_player_motion(from,to,3.5f,player_character_?17.5f:16.5f,arp);}
 private:
@@ -914,6 +918,10 @@ private:
     bool restore_camera_clip_=false;
     ActiveCameraMotion active_camera_;std::vector<SceneCamera> room_cameras_;
     bool camera_force_=false;
+    // cut.c:1197-1217 bhControlActiveCamera: cam.plx/ply/plz, das Verfolgungsziel der Raumkamera.
+    NJS_POINT3 camera_target_{};bool camera_target_valid_=false;
+    // cam.flg 0x8 und sys->fil_no/fil_rt (cut.c:412-421/505-514); bhInitCamera (camera.c:9) nullt cam.flg.
+    bool camera_filter_=false;int filter_no_=0,filter_rate_=0;
     // Fog owner (sync.c:143-255 bhControlEOR): cam.fog_* as handed over by
     // bhSetCut/bhSetFixedCut/bhSetEventCamera, sys->fog_ct/fog_cngct, the
     // installed njGenerateFogTable3 state and the njSetFogColor colour.

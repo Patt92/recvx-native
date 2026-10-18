@@ -80,7 +80,7 @@ void Typewriter::control(unsigned pad_on,unsigned pad_ps,bool special_save){
     case Phase::Typing:
         // Original drawing advances the string once per pass; no host-I/O
         // latency is invented. McSaveFile:571–586,847–860; SaveScreen:1402–1426.
-        if(write_count_>write_max_){phase_=Phase::Success;timer_=20;write_count_=0;write_timer_=-6;}
+        if(write_count_>write_max_){save_complete_=true;phase_=Phase::Success;timer_=20;write_count_=0;write_timer_=-6;}
         else{
             drawn_count_=write_count_;
             if(write_timer_%6==0){
@@ -116,7 +116,7 @@ void Typewriter::io_complete(bool success,const std::filesystem::path& saves_dir
     confirmed_=true;phase_=Phase::Typing;
 }
 void Typewriter::reset(){
-    active_=done_=confirmed_=cancelled_=io_ready_=false;slots_.clear();cursor_=top_=selection_=timer_=write_count_=drawn_count_=write_max_=0;
+    active_=done_=confirmed_=cancelled_=io_ready_=save_complete_=false;slots_.clear();cursor_=top_=selection_=timer_=write_count_=drawn_count_=write_max_=0;
     key_wait0_=key_wait1_=0;write_timer_=6;sound_=0xffffffffu;phase_=Phase::Files;
 }
 }

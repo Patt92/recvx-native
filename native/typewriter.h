@@ -37,6 +37,7 @@ public:
     bool io_pending()const{return phase_==Phase::Io&&io_ready_;}
     void io_complete(bool success,const std::filesystem::path& saves_dir);
     unsigned take_sound(){const auto s=sound_;sound_=0xffffffffu;return s;}
+    bool take_save_complete(){const bool complete=save_complete_;save_complete_=false;return complete;}
     void input(Key key);
     // One screen pass: held-pad repeat for Files, pressed directions for choices.
     // special_save is bhCkFlg(sys->ev_flg,56), read by ExecuteStateSaveScreenExit
@@ -49,7 +50,7 @@ private:
     unsigned key_wait0_=0,key_wait1_=0,timer_=0,selection_=0;
     unsigned top_=0,write_count_=0,drawn_count_=0,write_max_=0,sound_=0xffffffffu;
     int write_timer_=6;
-    bool active_=false,done_=false,confirmed_=false,cancelled_=false,io_ready_=false;
+    bool active_=false,done_=false,confirmed_=false,cancelled_=false,io_ready_=false,save_complete_=false;
     Mode mode_=Mode::Save;Phase phase_=Phase::Files;unsigned cursor_=0;
     std::vector<SaveSlotInfo> slots_;
 };

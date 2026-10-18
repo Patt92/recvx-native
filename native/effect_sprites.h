@@ -180,7 +180,9 @@ struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,pla
     // sys->rcase (Skriptbefehl 0x37 bhRoomCaseNo, sonst der Fall der geladenen Raumdatei).
     unsigned room_case=0;
     // cam.wpx/wpy/wpz (Auge) und cam.vx/vy/vz (Blickrichtung) des Vorbildes (camera.c:45-56).
-    NJS_POINT3 camera_position{},camera_view{};};
+    NJS_POINT3 camera_position{},camera_view{};
+    // cam.flg 0x8 und sys->fil_no/fil_rt (cut.c:412-421) fuer bhEffFil (effsub1.c:28).
+    bool camera_filter=false;int filter_no=0,filter_rate=0;};
 // sys->winds/windr (mit den Vorbildwerten windsb/windrb) und sys->thunder: Wetterzustand,
 // den nur die Effektprozeduren schreiben (effsub1.c bhEff102/105) und bhEff106 bzw.
 // bhDrawThunder (effect.c:1775, nur Raum 1-09) lesen. Ein Besitzer, keine Kopie.

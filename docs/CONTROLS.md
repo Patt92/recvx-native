@@ -42,7 +42,11 @@ outside one, with free control, it opens the pause overlay and closes it again.
 `ssv_md0 10`) and `system.c:691` leaves it on the same newly pressed button, so
 the pause key toggles; the gate is the original `st_flg 0x1C040208` mask, which
 keeps the pause out of cinematics, the map task, terminals, the status screen,
-doors, movies and scripted scenes. A key listed under `cancel` is therefore
+doors, movies and scripted scenes. The same line also requires
+`(ts_flg & 0x3DE00) == 0x3DE00`, whose bit 15 belongs to the typewriter task
+(`main.c:195`, task 15 `bhSysCallTypewriter`): while the save or load screen is
+up, Escape is its Cancel and leaves the slot list instead of pausing. A key
+listed under `cancel` is therefore
 ignored under `quit`: an older `controls.ini` that still says
 `quit = Escape, F10` keeps F10 and loses Escape.
 

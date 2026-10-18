@@ -91,6 +91,24 @@ int main(int argc,char** argv){try{
      check(!s.over.active(),"the dispatcher stayed active after the retry");
      check(s.events.flags[12][0]&0x4000u,"bhPopGameData did not set ts_flg 0x4000");}
 
+    // --- the ts_flg 0x4000 ticket stays spent for the whole game over -------
+    // bhCPM0_enedie (player.c:6709-6714) and bhGameOverSet (event.c:8685) start
+    // the dispatcher only while ts_flg 0x4000 stands and clear the bit in the
+    // same branch.  plp->flg 0x2 stays set afterwards, so the bit is the only
+    // thing that keeps the death state from requesting a second start during
+    // the 70 passes of md1 0, where the game pass keeps running.  Only the exit
+    // (gameover.c:516/593) hands the ticket back.
+    {Session s(data);
+     s.events.flags[12][0]&=~0x4000u; // the requesting branch spent it
+     s.over.begin(s.events,0,0,0,0,nullptr);
+     for(unsigned i=0;i<300&&s.last==GameOver::Result::Running;++i){
+         check(!(s.events.flags[12][0]&0x4000u),
+               ("the game over handed ts_flg 0x4000 back in mode "+std::to_string(s.over.phase())).c_str());
+         s.step(s.over.phase()==2&&s.over.count()>=0xFF?0x800u:0u);
+     }
+     check(s.last==GameOver::Result::Retry,"the ticket run did not reach bhPopGameData");
+     check(s.events.flags[12][0]&0x4000u,"the exit did not hand ts_flg 0x4000 back");}
+
     // --- No plays the death voice and runs out into the title --------------
     {Session s(data);
      s.over.begin(s.events,0,0,0,0,nullptr);

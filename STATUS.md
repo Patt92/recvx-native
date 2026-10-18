@@ -51,6 +51,19 @@ und eine Taste, die Cancel ist, zählt nicht als Quit (auch nach Neubelegung; al
 und `main_menu_settings_video_skip` in der eigenen Build-Runtime,
 [Controls](docs/CONTROLS.md). **Noch keine Starter-/Paketersetzung.**
 
+**bhLoadWork-Fall 0 (Spielerwork):** `event.c:bhLoadWork`/`bhLoadWorkEx` Fall 0
+schreiben jetzt `mode0 7`, `mode2 0`, mtn_no-Lowbyte 42, `stflg |= 0x10000`,
+`stflg &= ~0x80` und `flg |= 0x10000`; `bhLoadWork2` Fall 0 nur `mode0 7` sowie
+`flg`/`stflg 0x10000` (jeweils mit Originalfundstelle). Damit greift das
+Spielerpad-Gate `player.c:1804` und die portierte Freigabe in
+`system.c:736-744` löscht echte Schreiber. Die rmthp-Lücke datP NULL
+(`Motion.c:29`) ist für den Spielerwork wie für Entities behandelt (kein
+Schritt, kein frm_no-Fortschritt, zuletzt geschriebener objP/owp wird
+gezeichnet). Setzen und Freigabe liegen in einem Tick; Endbild vorher/nachher
+gleich, Belege: [Messungen](build/validation/loadwork-case0/README.md),
+`event_lifecycle_control_release` und `script_motion` (Ctest 124/124).
+**Noch keine Starter-/Paketersetzung.**
+
 **ID-Karte RM_1020 (Fix A):** Der Freeze nach der Wegwerf-Frage ist behoben. Der Spielerpass
 läuft trotz st_flg 0x4 unter den Originalbedingungen von bhCPM0_action, und bhControlPlayerPad
 gibt das Bit frei (player.c:1838). Geprüft in der eigenen Build-Runtime
@@ -290,10 +303,27 @@ mcDispWindowFoundtion korrigiert (Argumente rechts/unten; feste GS-Alpha 96/255 
 überführt, vorher unsichtbar gezeichnet). Gegen das Original korrigiert: mcWriteStartSaveFile
 **löscht** ev_flg 56 (McSaveFile.c:168; vorher gesetzt und so in den Spielstand geschrieben),
 kein erfundener Inventar-Rollback bei Schreibfehler (stattdessen ev_flg 56, :206),
-bhPushGameData nach dem Speichern (SaveScreen.c:1408). CTest `typewriter_save_slots`,
-94/94 grün. Offen: `typ_flg 0x10` nach dem Laden, Type_Space bei Räumen ohne
-RoomNameSwitch-Eintrag (Original liest Index −1), Fensterabnahme der Ansicht.
-**Start.command-Dev-App durch `./build.sh` aktualisiert; kein Paket ersetzt.**
+Speicherabschluss am 2026-10-18 nachgeprüft: Continue-Punkt erst nach der Tippanimation
+(SaveScreen.c:1408), nicht beim Dateischreiben; einmalige Abschlussmeldung von Typewriter.
+Die vertauschten Flag-56-Operationen berichtigt: Schreibfehler setzt, Sonderspeichern löscht.
+`verify_typewriter_save.py` prüft RM_0010 mit isolierten Benutzerdateien: letzter Tipp-Pass
+noch alter Continue-Punkt, Erfolg neuer Punkt; echter Host-Schreibfehler, wiederholter Fehler,
+Abbruchrückfrage und erneutes Speichern in anderem Slot ohne weiteren Band-/Zählerverbrauch.
+Kartenverwaltung bleibt entfernt. CTest 122/122 grün; derselbe Prüflauf über `Start.command`
+grün, Erfolgs-/Fehler-/Rückfragebilder angesehen. Belege: `build/validation/typewriter-completion/`.
+**Gemeldeter Fehler „Speichermenü nur per Speichern verlassbar" (2026-10-18):** Escape ist im Host
+zugleich `cancel` und `pause`; das Pausetor `pause_allowed` prüfte die laufende Schreibmaschinen-
+aufgabe nicht und verschluckte die Taste, bevor sie die Slotliste erreichte (Tab ist dort keine
+Originaltaste). Das Original sperrt genau diesen Fall: `system.c:668` verlangt zusätzlich
+`(ts_flg & 0x3DE00) == 0x3DE00`, und Bit 15 ist das Taskbit der Schreibmaschine (`main.c:195`,
+Task 15). Jetzt gebunden; Pause in freier Kontrolle unverändert (gemessen: mit Escape 61 Pässe
+und Spieler steht, ohne Escape 356 Pässe und z −35.9 → 52.5). Prüfung mit echten SDL-Tasten:
+`tools/verify_typewriter_save.py --sdl-cancel` (Slotliste und Speicherrückfrage verlassen, kein
+Band-/Zählerverbrauch, keine Speicherdatei; Vorher-Binary rot), auch über `Start.command`.
+Offen: Ladeabschluss (`typ_flg 0x10`), Type_Space bei Räumen ohne RoomNameSwitch-Eintrag
+(Original liest Index −1); keine interaktive Fensterabnahme oder Windows-Lauf.
+**Start.command-Dev-App durch `./build.sh --test` aktualisiert, arm64/Signatur geprüft;
+kein Release-Paket ersetzt, kein Commit/Push.**
 
 Gemeldete Fehler Schreibmaschine/Aufnahme/Scanner (Arbeitsbaum, 2026-10-15): Panel-Fundament
 mit Originalfaktor — `njDrawPolygon` (ps2_NaDraw.c:8-58) schreibt Vertexalpha `col>>25` (12 bei
@@ -783,9 +813,99 @@ statt Strahl), Gelenkwahl und dam[]/comb_flg. Test `native_barrel_blast` (RM_008
 (4) Ueberlappender Text im Aufnahmebildschirm: er erbte den Zustand des vorigen Statusbildschirms (FILE/Examine), und die
 Befehlsbeschreibung 180 - maincsr zeichnete ueber die Frage; sub1.c:3308 startet ihn mit StatusInit. Test `pickup_status_reset`.
 
-**Naechster Posten:** RM_1050 Steve (Monitor aus der Ferne schwarz, Ereignis haengt nach Steves Abgang) und RM_4020 Greifarm
-(Kistenbereich wird nicht getroffen) sind gemeldet und noch offen; Vorarbeit: Verdacht auf e.frame/frm_no bei skriptgefuehrten
-Subplayern (bhFrameCk). Weiter offen in RM_9370 (nicht Ereignis 5): die Raumeffekte 35/50/54/70-76/80/400/402/405/426 dieses Raums sind nicht
+**2026-10-17 spaet, RM_4020 Greifarm und RM_1050 Steve (Dev-App 23:32, CTest 122/122):** (5) Greifarm: dieselbe lkono-Regression
+wie bei den Wasserspritzern (Lader setzte bei lkflg 0 lkono 0 statt efp->lkono, room.c:877); bhEff134 prueft die Greifentfernung
+gegen sys->obwp[op->lkono] (effsub1b.c:453-471) und las obwp[0] statt der Kiste obj[4]. Mit dem Fix von 21:18 misst der Lauf
+Klammern px 13/pz 10, Abstieg py -40.5, nn 1.97 < 4 -> ev_flg 59, EN56 mode0 2; Fehlgriff px 27 ohne Flag. Test `crane_ufo_event`
+(Gegenprobe rot), Replay build/validation/crane-rm4020-20261017. (6) Steve-Haenger: Opcode 0xb0 bhHEffectSet2 (event.c:7472) war
+nicht implementiert; Ereignis 12 blieb @0x144a stehen und erreichte CineSet 1 (@0x14b0) nie - daher lief das Cinematic bis SELECT.
+Die e.frame/frm_no-Vermutung ist widerlegt. 0xb0 schreibt sys->ef (22 Byte) und belegt bhEff211 (Monitorrauschen) mit lkono v4.
+(7) Monitor aus der Ferne schwarz: njDrawTextureSub3DH schreibt XYZF2.F = 128 fest (ps2_NaDraw.c:443, FGE an), der Port nebelte
+den Thl-Quad distanzabhaengig (aus 85 Einheiten blieb in Schnitt 1 nur Nebelfarbe). Jetzt SceneTriangle::fog_fixed, gemessen
+Schnitt 1: 497 px, mittleres RGB 95/64/64 bei grauem Testbild (= Cs*128 + ocol*127 >> 8). Beides in `event_lifecycle_control_release`.
+Runtime-Endbild Schnitt 1 vorher RGB 54/6/6, nachher 42/13/12. Gegenproben: 0xb0 entfernt -> rot (unimplemented @0x144a), F=128 sabotiert -> rot (128/128/128).
+Offen: Headless-Replay des Steve-Ereignisses ueber den Dialogpfad abgebrochen (Auswahl wechselt per right/left, nicht down); bhEff110 (Vollbildansicht) unportiert.
+
+**2026-10-18, Gameover-Retry (Dev-App 01:18, CTest 122/122):** Nutzerbefund „nach Retry sterbe ich am respawnten Punkt direkt wieder, der zweite Retry klappt".
+Ursache: `ts_flg` Bit 0x4000 ist die Einmal-Eintrittskarte des Game-Over-Starts (player.c:6709-6714 verlangt `plp->flg 0x2` UND das Bit und
+verbraucht es; gameover.c:516/593 gibt es erst vor `bhPopGameData` zurueck). Der Port loeschte das Bit, pruefte es aber nicht, und weil
+`plp->flg 0x2` nach dem Tod stehen bleibt (Riegel `player_dead_`, world.h:394, faellt erst bei hp > 0), forderte jeder Pass der 70 Bilder von
+`bhMainGameOver` md1 0 den Start neu an -> nach `bhPopGameData` sofort ein zweites Game Over. Gemessen RM_0080 Griff-Tod: Bild 1800 hp -20/md1 2,
+nach Retry 1 hp 160/Lage sauber, aber md1 0->1->2 erneut; erst Retry 2 frei. Dieselbe Luecke im Skriptbefehl `bhGameOverSet` (event.c:8681-8689).
+Beides in `native/runtime.cpp` behoben. Gegenprobe am sabotierten O3-Binary gegen dieselben Archive: rot; `verify_gameover` und
+`verify_self_destruct` weiter PASS. Neuer Pruefer `tests/native/gameover_retry_death_check.py`.
+Nebenbefund Retry-Punkt geprueft und **widerlegt**: `bhInitPlayer` (player.c:848, bhPushGameData) laeuft nur in mn_md0 1 (Spielstart/Laden,
+system.c:1397); Raumwechsel laufen ueber mn_md0 4 mit `bhResetPlayer` (system.c:1776) ohne Push. Weitere Pushes: Figurenwechsel (system.c:1824),
+Speichern (ps2_SaveScreen.c:1408), Skript 0xbd (event.c:8176); ss_flg 0x400 (system.c:1901) hat in den Quellen keinen Setzer. Der Port bildet
+genau diese Stellen ab (runtime.cpp `!retry_point || player_change_push`, 0xbd, Schreibmaschine).
+
+**2026-10-18, Treppen (Dev-App 01:41, CTest 123/123):** (1) Kamera stockt auf langen Treppen (RM_3080): `tick_camera` folgte immer
+`plp->px/py/pz`, das in Stufenaktionen nur beim Motionumlauf nachzieht (player.c:3258-3271); das Original zielt unter `plp->stflg 0x30` und
+in mode0 7 auf `owP[0]` (cut.c:1197-1217). Vorher 42/80 Bilder Stillstand und 3.3-Einheiten-Spruenge, jetzt 0.07..0.34 je Bild. Test
+`camera_follow_target` (Gegenprobe rot), `verify_stairs` gruen. Offen: freie Steuerung cut.c:1207-1209 (EXP_WORK plx/plz) ohne Besitzer.
+(2) RM_1000 Treppeneinstieg "nur im 90-Grad-Winkel": nicht reproduziert; Typ 1 hat im Original keine Winkelpruefung (hitchk.c:4677),
+Port float-genau gleich, Einstiegsfenster 271 Grad an der natuerlichen Standlage.
+
+**2026-10-18, RM_3130-Absturz und Kamera-Eintritt (Dev-App 02:01, CTest 124/124):** (1) RM_3130 "Native runtime error: vector" nach dem
+Raum-verlassen-Ereignis: Ereignis 2 setzt per Common 24 (Sel. 1) mtn_no 5 auf das Subplayerwerk, der Raum hat aber nur 3 Raummotionen;
+`room_motions_.at(5)` warf. Original: `sys->rmthp` sind 512 genullte MN_WORK (room.c:700-706), `bhSetMotion` tut bei datP NULL nichts
+(Motion.c:29). Test `room_motion_empty_rmthp_slot`. Nachgestellt ueber it_flg 232 + Bodentrigger 0, nicht im natuerlichen Spielablauf.
+(2) RM_1000 Tuer links: Kamera schwenkte von ausserhalb herein. Spawn 2 liegt laut Tabelle knapp ausserhalb jeder Schnittflaeche,
+`follow()` liess dann die rohe CAM_WRK-Lage stehen; cut.c:663-710 rechnet die Verfolgungspose ohne Bereichsgrenze. Vorher 24 Einheiten
+Schwenk, jetzt keiner. `tests/native/room_entry_camera_check.py` (Gegenprobe rot).
+(3) Third-Person "wechselt an Ecken und beim Raumeintritt auf einen festen Punkt": Ursache ist die Ausweichlogik der Host-Mod
+(native/third_person.cpp `consider`): Wand direkt hinter dem Spieler -> Arm schwenkt bis 180 Grad nach vorn (Frontalansicht), nach einigen
+Schritten zurueck. Belegt RM_1000 Spawn 1 (Tor 2 Einheiten hinter Claire, Gang beidseits eng): Bild 2/20 frontal, ab 45 hinten. Die Mod schaltet
+dabei nicht ab (Raumscan: Abschalten nur bei st_flg 0x4 Treppe/Stufe und Ereigniskameras). Drei Versuche (Schwenk <= 90 Grad, Blick in
+Laufrichtung, Anheben vor Zurueckziehen) loesen die Engstelle nicht: dort ist hinten und seitlich kein Platz, Claire faellt aus dem Bild.
+Auf HEAD zurueckgesetzt; Versuchsstand $TMPDIR/tpd/third_person.experiment.cpp. **Vom Nutzer 2026-10-18 als Luecke zurueckgestellt.**
+
+**2026-10-18, Kamerafilter (Dev-App 09:46, CTest 125/125):** Raumeffekt-Luecken neu vermessen: von 89 Raumtabellen-IDs ohne Handport
+sind 77 im Original `bhEffDmy` (ids 30-84, loeschen sich) oder id >= 400 (bhControlEffect setzt flg 0, effect.c:846); echte Luecken 12.
+Groesste: `bhEffFil` 90..92 (effsub1.c:28), der Vollbildfilter, den 140 Kameraschnitte in 61 Raeumen per CAM_WRK flg 0x8000 einschalten
+(cut.c:412-421). Jetzt portiert (Vignette, Laufzeit RM_0070 Bildrand 14.9 -> 10.0). Test `effect_camera_filter` (Gegenprobe rot).
+Rest: 110 (3 Raeume), bhEffBG 93-97 (je 1-3 Raeume), 273 E14_Mucus, 112, 133, 138.
+
+**2026-10-18 11:09, Startabsturz behoben (Dev-App 11:09, CTest 125/125):** "Native runtime error: active camera outside table" sofort
+beim Start. Verursacht vom Kamera-Eintrittsfix 02:01: `follow()` rechnete die Verfolgungspose jetzt auch ohne Schnitttreffer, beim Titel
+gibt es aber keinen Raum und keine Kameratabelle. Alle Pruefungen liefen mit `--in-game` und haben den Titelpfad uebersprungen. Jetzt nur bei
+vorhandener Kamera; `tests/native/room_entry_camera_check.py` startet zusaetzlich ohne Raum (Gegenprobe rot mit genau dieser Meldung).
+Am installierten App-Binary geprueft: Titel, Neues Spiel bis RM_0000, LOAD GAME aus dem Titel, Raumeintritt RM_1000.
+
+**2026-10-18 12:3x, Flammenstreifen Friedhof (Dev-App, CTest 126/126):** Nutzerbefund RM_0020 Kinoszene: fliegende Flammenstriche um den
+brennenden Zombie und seinen Kopf. Quelle eindeutig die Gelenkflammen `bhEff_Sub352` (ohne diese Sprites keine Striche). Ursache: der
+Renderer kachelte jede Textur (REPEAT); bilinear holte an den 48-px-Zellraendern des Effektatlas 8 Flammentexel der Gegenkante. Das Original
+setzt GS CLAMP_1 aus dem TIM2-Kopf: `Ps2TexLoad` (ps2_dummy.c:1650) uebergibt ClampFlag, `Ps2CheckTextureAlpha` (:1749-1844) setzt bei
+ClutChange 0 `0xFF000FF5` (WMS/WMT CLAMP), nur Gindex 20500/15205..15209 `0xFF000FF0` (REPEAT); sonst bleibt der Dateiwert (0xCC). Jetzt
+`SceneTexture::clamp_u/clamp_v` im einzigen TIM2-Decoder (scene.cpp), im Renderer (gefiltert und ungefiltert) und erhalten bei TGA-/HD-/
+Mod-Ersatz. Beleg: Bild 650 vorher/nachher 366 Punkte Unterschied, genau die drei Striche; 37 Raeume Bild 45 sonst hoechstens 22 Punkte.
+Test `gs_texture_clamp` (synthetisch + echte RM_6050-Textur Gindex 20500), Gegenprobe dreifach rot (Renderer, Gindex-Ausnahme, ClutChange).
+Am installierten App-Binary: Bild 650 identisch zum Pruefbild, Titelstart, Neues Spiel bis RM_0000, LOAD GAME. **Offen:** der
+Texturcache-Pfad `Ps2DrawOTagSub` (ps2_dummy.c:1420) setzt fest CLAMP/CLAMP, auch fuer die sechs REPEAT-Gindices (RM_6050/5600/7000/3020),
+falls diese ueber die OT gezeichnet werden - nicht zugeordnet. Ebenfalls offen aus demselben Befund: grauer Balken unten (Kinobilder ~410-426,
+Kamera 12) und schwarzes Flackern (Bilder 358-378). Achtung Gegenprobe: `make` vergleicht Sekunden; Zurueckholen + touch in derselben Sekunde
+wie der Sabotagebau liess das sabotierte Objekt stehen (einmal so ausgeliefert, sofort neu gebaut) - vor touch mindestens 1 s warten.
+
+**2026-10-18, Friedhof Kistenszene (Ereigniskamera 12), Flackern und grauer Balken - kein Portfehler gefunden:** Messung je Bild
+(Proberuntime in $TMPDIR, Produktquellen unberuehrt). (1) Schwarzflackern Bilder ~383-406: im 2-Bild-Takt ist das ganze Bild ~30 %
+dunkler. Allein Effekt 119 (Rauch, Blend 11/3 = Cd*(1-As)) verursacht es; ausgeblendet bleibt die Helligkeit gleichmaessig. Erzeuger
+`bhEff103` Art 2 (effsub1.c:6080) setzt jeden zweiten Pass eine Rauchwolke 119 Art 1; die jeweils neueste sitzt 14.5 Einheiten vor der
+Kamera, Ecken +-1*sx (effect.c:506-520, sx 33) - sie deckt das ganze Bild. 119 (effsub1.c:7890), 103, Ecken, bhDrawTrsEffect3D
+(effect.c:1287), njDrawTextureSub3D-Verwerfen (ps2_NaDraw.c:300-358, _Clip_Screen ps2_Vu1Strip.c:1202) und Tiefentest stimmen mit dem
+Port ueberein. Ohne Originalaufnahme nicht weiter entscheidbar. (2) Grauer Balken unten (Bilder ~407-428): Hintergrundfarbe 0x181E2D
+(rom->bak_col; bhChangeBackColor ps2_event.c:8 hat fuer Stage 0 Raum 2 keinen Eintrag). Der Boden fehlt dort, weil bhChangeViewClip
+(event.c:13205, ViewClipSt0) fuer Raum 2 evc 12 near -9.0 setzt; die Kamera steht ~8 ueber dem Boden. Nativ ebenso. Nebenbefunde (Ledger):
+bhChangeClipVolume/bhChangeClipVolumeRM nicht portiert (andere Stages), PRIM-Lesart in effect_particles.cpp vermutlich vertauscht.
+
+**Zu verifizieren: RM_0090 Security Box verformt** (Nutzerbefund 2026-10-18): nach Abholen der Adlermedaille an der *anderen* Box ist die
+vordere Box (obj[5], Kamera 9) auf dem Rueckweg verformt (Klappe offen + Deckel hochgeklappt), ohne dass sie benutzt wurde; beim Untersuchen
+bewegt sich die Klappe nicht. Laut Nutzer am 2026-10-17 noch nicht vorhanden -> Regression aus den Aenderungen seit gestern. Nutzerverdacht:
+3D-Scanner/Fraese (Ereignis 23) oder Zombie-Fensterspawn. Headless nicht nachgestellt: alle 99 Ereignisse und 20 Interaktionen von RM_0090
+einzeln (mit Gegner-KI) lassen obj[5] unveraendert; Raumskripte schreiben nur Knoten 1 (Ereignis 31 +75 Grad relativ, 7/19 absolut 0),
+nie den Deckel. Naechster Schritt: F5-Snapshot vom Nutzer im kaputten Zustand, dann Knotenwinkel direkt auslesen; alternativ Differenz
+gegen den Stand vom 2026-10-17 (HEAD-Worktree) im selben Ablauf.
+
+**Naechster Posten:** Weiter offen in RM_9370 (nicht Ereignis 5): die Raumeffekte 35/50/54/70-76/80/400/402/405/426 dieses Raums sind nicht
 portiert (Raumtabelleneffekte ohne Prozedur melden keine Luecke). Weiter offen: sys->obwp[0..3] (Waffe rechts/links, Zopf) ueber
 Art 2 nicht aufloesbar (Waffe ohne eigenen owP-Baum, Zopf nur als Nachbildmodell) - Typen 1/3/4/5 von 0x86 mit Art 2
 Index 0..3 (in den Daten nicht genutzt); Art-1-Knotenlagen von 0x86 nicht je Raum gemessen. **Kein Commit/Push.**

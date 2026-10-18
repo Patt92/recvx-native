@@ -3661,6 +3661,44 @@ void step_eff2d(EffectSprite& s,const EffectContext&,bool&){
     default:break;
     }
 }
+// effsub1.c:28 bhEffFil (ids 90..92) — Vollbildfilter eines Kameraschnitts. mode0 0 (:32-58): flg |=
+// 0x1000000, tex_id = id, gidx (Bild ani_ct der Gruppe tex_id), Schirmviereck 640x480 mit z 1.0869, bl 8/6.
+// mode0 1 (:59-127): nur unter cam.flg 0x8 und sys->fil_no == id - 90 (cut.c:412-421 aus CAM_WRK flg 0x8000);
+// fil_rt & 3 waehlt die Drehung der UVs, Eckfarbe ((u8)fil_rt & 0xF0 | 0xF) << 24 | 0xFFFFFF, mode0 2 und
+// Durchfall in mode0 2; sonst unsichtbar. mode0 2 (:128-142): Bedingung weg -> unsichtbar und zurueck in 1,
+// sonst sichtbar in sys->ef_trs2d (bhDrawTrsEffect2D). Keine Zufallsaufrufe.
+void step_efffil(EffectSprite& s,const EffectContext& context,bool&){
+    const bool selected=context.camera_filter&&context.filter_no==int(s.id)-90;
+    switch(s.mode0){
+    case 0:
+        s.flg|=0x1000000u;
+        s.tex_id=int(s.id);
+        s.tv[0].x=0;s.tv[0].y=0;s.tv[0].z=1.0869f;
+        s.tv[1].x=640.0f;s.tv[1].y=0;s.tv[1].z=1.0869f;
+        s.tv[2].x=0;s.tv[2].y=480.0f;s.tv[2].z=1.0869f;
+        s.tv[3].x=640.0f;s.tv[3].y=480.0f;s.tv[3].z=1.0869f;
+        s.bl_src=8;s.bl_dst=6;
+        s.mode0=1;
+        break;
+    case 1:
+        if(!selected){s.flg|=0x1000000u;break;}
+        switch(context.filter_rate&3){
+        case 0:s.tv[0].u=0;s.tv[0].v=0;s.tv[1].u=1.0f;s.tv[1].v=0;s.tv[2].u=0;s.tv[2].v=1.0f;s.tv[3].u=1.0f;s.tv[3].v=1.0f;break;
+        case 1:s.tv[0].u=0;s.tv[0].v=1.0f;s.tv[1].u=0;s.tv[1].v=0;s.tv[2].u=1.0f;s.tv[2].v=1.0f;s.tv[3].u=1.0f;s.tv[3].v=0;break;
+        case 2:s.tv[0].u=1.0f;s.tv[0].v=1.0f;s.tv[1].u=0;s.tv[1].v=1.0f;s.tv[2].u=1.0f;s.tv[2].v=0;s.tv[3].u=0;s.tv[3].v=0;break;
+        case 3:s.tv[0].u=1.0f;s.tv[0].v=0;s.tv[1].u=1.0f;s.tv[1].v=1.0f;s.tv[2].u=0;s.tv[2].v=0;s.tv[3].u=0;s.tv[3].v=1.0f;break;
+        }
+        quad_color(s,((((std::uint32_t(std::uint8_t(context.filter_rate))&0xF0u)|0xFu)&0xFFu)<<24)|0xFFFFFFu);
+        s.mode0=2;
+        [[fallthrough]];
+    case 2:
+        if(!selected){s.flg|=0x1000000u;s.mode0=1;break;}
+        s.flg&=~0x1000000u;
+        queue_trs2d(s);
+        break;
+    default:break;
+    }
+}
 // effsub1.c:4826 bhEff021 — Prologbalken (RM_0000 Raumeffekt 12). mode1 != 0 (:4829-4835): sys->cb_flg
 // |= 0x40 (bhControlCinesco/bhDrawCinesco bleiben damit aus, screen.c:225/250; CineSet 1 liest es,
 // event.c:1637), op->func = bhDraw021, Satz in sys->ef_fnc. mode1 0 (:4837-4841): cb_flg &= ~0x40 und
@@ -4733,7 +4771,7 @@ const HandEffectProcedure hand_effect_procedures[]={
     {12,step_eff012},{19,step_eff019},{23,step_eff023},{118,step_eff118},{204,step_eff204},
     {114,step_eff114},{221,step_eff221},
     {85,step_eff085},{145,step_eff145},{146,step_eff146},{127,step_eff127},{219,step_eff219},{135,step_eff135},{136,step_eff136},
-    {20,step_eff2d},{21,step_eff021},
+    {20,step_eff2d},{21,step_eff021},{90,step_efffil},{91,step_efffil},{92,step_efffil},
 };
 const std::size_t hand_effect_procedure_count=sizeof(hand_effect_procedures)/sizeof(hand_effect_procedures[0]);
 }

@@ -47,6 +47,10 @@ struct SceneTexture {
     TexturePixels pixels;
     std::map<unsigned,TexturePixels> palette_banks; // njSetPaletteBankNum, PLI TEXflag palette-only records
     mutable std::shared_ptr<TextureFilterCache> filter_cache=std::make_shared<TextureFilterCache>();
+    // GS CLAMP WMS/WMT (Ps2TexLoad, ps2_dummy.c:1650: SET_CLAMP_1(ClampFlag, REPEAT, ...)).
+    // Ps2CheckTextureAlpha (:1836-1844) setzt ClampFlag 0xFF000FF5 (beide Achsen CLAMP), nur
+    // Gindex 20500/15205..15209 behalten 0xFF000FF0 (REPEAT); Rendertexturen 0 (ps2_loadtim2.c:124).
+    bool clamp_u=false,clamp_v=false;
     void invalidate_mips()const{filter_cache=std::make_shared<TextureFilterCache>();}
     std::uint64_t fingerprint()const{
         std::uint64_t h=1469598103934665603ull^(std::uint64_t(width)<<32|height);h*=1099511628211ull;
@@ -124,6 +128,7 @@ struct SceneCamera {
     std::array<std::uint32_t,16> hidden_objects{};
     std::uint16_t flags=0;
     std::uint32_t fog_color=0;float fog_near=0,fog_far=0; // RDT CAM_WRK b8/bc/c0, signed distances
+    std::int8_t filter_no=0,filter_rate=0; // CAM_WRK fil_no/fil_rt (char, 0x51/0x52), gelesen unter flg 0x8000
     // Original CAM_WRK spd, am_spd and aa_spd; control runs at 30 Hz.
     int transition_speed=0,angle_speed=0;float move_speed=0;
     NJS_POINT3 cut_origin{},cut_extent{};
