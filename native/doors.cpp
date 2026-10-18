@@ -1,4 +1,5 @@
 #include "doors.h"
+#include "back_color.h"
 #include "asset_io.h"
 #include "binary_view.h"
 #include "room.h"
@@ -66,6 +67,8 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     // bhSetDoor njClipZ: the dmo_clip table narrows the demo of door type 1
     // reading from the MRY partition when its case runs ViewProc4.
     clip_case_=recvx_door_clip(int(request.type),RECVX_DOOR_MRY_PARTITION,int(types[1]),&clip_near_,&clip_far_)!=0;
+    // bhSetDoor (door.c:243) after njClipZ/njSetAspect, like bhSysCallDoordemo mode 2 before it (system.c:982).
+    set_back_color(0);
     if(request.attribute&1)core_.status|=0x4000;if(request.attribute&4)core_.status|=0x4800;if(request.attribute&16)core_.status|=0xa000;if(request.attribute&8)core_.status|=0x1000;
     if(count_<5)core_.status&=~0x3000;
     if(request.attribute&2){core_.status^=0xc00;if(count_>=5)core_.status^=0x2000;else core_.status&=~0x2000;}
@@ -132,7 +135,8 @@ void DoorSequence::light_scene(Scene& scene)const{
     }
 }
 void DoorSequence::draw(SoftwareRenderer& renderer){
-    Scene scene;scene.background=0xff000000;SceneCamera camera;camera.position=core_.vew_pos;for(unsigned i=0;i<3;++i)camera.angles[i]=-core_.vew_ang[i];camera.perspective=12743;
+    // Every frame clears with the installed njSetBackColor: 0 from bhSetDoor, the fade colour in mode 10 (system.c:1033).
+    Scene scene;scene.background=installed_back_pixel();SceneCamera camera;camera.position=core_.vew_pos;for(unsigned i=0;i<3;++i)camera.angles[i]=-core_.vew_ang[i];camera.perspective=12743;
     // bhSetDoor njClipZ. njSetAspect(1.174, 1) equals BHD_ASPECT_X/Y, which the
     // renderer already uses, so only the clip range differs from gameplay.
     camera.clip_near=clip_near_;camera.clip_far=clip_far_;
@@ -144,7 +148,7 @@ void DoorSequence::draw(SoftwareRenderer& renderer){
     const bool controlling=!(core_.status&0x40);
     if(controlling&&(core_.status&0x200)){ModelGeometryOptions options;options.pose.resize(count_);if(core_.status&0x400)njRotateY(&options.transform,32768);
         for(unsigned i=0;i<count_;++i){const auto& n=nodes_[i];options.pose[i]={{n.pos[0],n.pos[1],n.pos[2]},{n.ang[0],n.ang[1],n.ang[2]}};std::memcpy(model_.data()+objects_+i*52,&n.evalflags,4);std::memcpy(model_.data()+objects_+i*52+4,&n.model,4);}
-        scene=decode_model_asset(model_,model_offset_,0,options);scene.textures=textures_;scene.background=0xff000000;
+        scene=decode_model_asset(model_,model_offset_,0,options);scene.textures=textures_;scene.background=installed_back_pixel();
         light_scene(scene);
     }renderer.draw(scene,camera);
     if(controlling&&(core_.status&0x100)){const float opacity=std::clamp(core_.fde_rate,0.0f,1.0f);for(auto& pixel:renderer.canvas()){std::uint32_t mixed=0xff000000;for(unsigned shift:{0u,8u,16u})mixed|=unsigned(((pixel>>shift)&255)*(1-opacity)+((unsigned(core_.fde_col)>>shift)&255)*opacity)<<shift;pixel=mixed;}}

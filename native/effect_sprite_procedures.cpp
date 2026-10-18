@@ -2412,6 +2412,23 @@ void step_eff115(EffectSprite& s,const EffectContext& c,bool&){
     default:break;
     }
 }
+// effsub1.c:7175 bhEff112 — Spiegelebene. Jeder Pass versteckt den Satz selbst (flg 0x1000000,
+// er zeichnet nie). Ohne mdflg 0x1 und nur in Stufe 2 (sys->stg_no) schreibt er sys->mr_pl:
+// Punkt = op->px/py/pz, Normale = cmat * RotXYZ(ax, ay, az) * (0, 0, -1) (njSetMatrix(NULL, cmat),
+// njRotateXYZ, njCalcVector; cmat ist die njSetView-Grundmatrix diag(1,-1,-1), main.c:162) und
+// setzt sys->st_flg 0x100 (game.c:77 Spiegelpass, MdlPut.c:57/89); sonst loescht er 0x100.
+void step_eff112(EffectSprite& s,const EffectContext& c,bool&){
+    s.flg|=0x1000000u;
+    if(!(s.mdflg&0x1u)&&c.stage_no==2){
+        auto& plane=effect_mirror_plane();
+        plane.px=s.px;plane.py=s.py;plane.pz=s.pz;
+        NJS_MATRIX m;njUnitMatrix(&m);njScale(&m,1,-1,-1);
+        njRotateXYZ(&m,s.ax,s.ay,s.az);
+        NJS_VECTOR vec{0,0,-1.0f},out;njCalcVector(&m,&vec,&out);
+        plane.vx=out.x;plane.vy=out.y;plane.vz=out.z;
+        request_st_flg(0x100u,0);
+    }else request_st_flg(0,0x100u);
+}
 // effsub1.c bhEff113 — einmaliger Faecher aus 114 (nicht portiert, gemeldet): Art 0 64
 // Teilchen (r 1, spd 0.5, Groesse 0.4), Art 1 225 (Raum 1-09: 196; r 5, spd 1, Groesse 1.5),
 // Art 2 128 (r 3, spd 0.8, Groesse 1); Rasterwinkel wie bhEff220, danach frei.
@@ -2532,16 +2549,25 @@ void push_world_quad(EffectSprite& s,const NJS_MATRIX& m,std::array<EffectSprite
     q.source=unsigned(src);q.destination=unsigned(dst);q.world_space=true;q.textured=textured;q.fogged=fogged;
     s.quads.push_back(q);
 }
-// njPtclDrawSprite(pos, num, sx, sy): je Punkt ein Billboard der Groesse sx/sy (Welteinheiten)
-// ueber der ganzen Textur. njPtclDrawPolygon(pos, num, sx): ohne Textur (textured false), sx in
-// Ninja-Bildschirmpunkten (ps2_NinjaPtcl.c:52-58) -> Quad::screen_size.
+// njPtclDrawSprite(pos, num, sx, sy) / njPtclDrawPolygon(pos, num, sx) (ps2_NinjaPtcl.c:22-160):
+// je Punkt zwei Eckpunkte (scr -+ Groesse, gleiche Tiefe/Farbe/Nebel) eines GS-Sprites
+// (PRIM 0x76/0x36 bzw. 0x66/0x26 = SPRITE[|TME]|FGE[|ABE]; das Feld beginnt bei Bit 47, siehe
+// effect_particles.cpp). Uebergeben wird num, nicht 2*num (ELF njPtclDrawSprite
+// 0x002D8528/0x002D86A4, njPtclDrawPolygon 0x002D8334/0x002D845C), und Ps2AddPrim3D gibt genau
+// num Eckpunkte aus: es entstehen num/2 Sprites aus den Punkten 0..num/2-1.
+// njPtclDrawSprite: halbe Kante iz*w*dist Ninja-Bildpunkte ohne AspectW (scr.x selbst traegt
+// AspectW = BHD_ASPECT_X 1.174, njViewScreenMatrix ps2_NaView.c:221), also sx/1.174 und sy in
+// Sichtkoordinaten. njPtclDrawPolygon: ohne Textur (textured false), sx in Ninja-
+// Bildschirmpunkten (ps2_NinjaPtcl.c:52-58) -> Quad::screen_size.
 void push_particle_sprites(EffectSprite& s,const ParticleWork& p,unsigned group,unsigned frame,
                            int src,int dst,bool textured,bool point_filter){
     if(p.num<0||p.num>48)throw std::runtime_error("particle work count outside P_WRK");
-    for(int i=0;i<p.num;++i){
+    constexpr float aspect_w=1.174f; // BHD_ASPECT_X (main.c:53)
+    const float hx=textured?p.sx/aspect_w:p.sx;
+    for(int i=0;i<p.num/2;++i){
         std::array<EffectSprite::Vertex,4> v{};
         for(unsigned k=0;k<4;++k){
-            v[k].x=((k&1)?1.0f:-1.0f)*p.sx;v[k].y=((k&2)?1.0f:-1.0f)*p.sy;v[k].z=0;
+            v[k].x=((k&1)?1.0f:-1.0f)*hx;v[k].y=((k&2)?1.0f:-1.0f)*p.sy;v[k].z=0;
             v[k].u=float(k&1);v[k].v=(k&2)?1.0f:0.0f;v[k].col=p.col;
         }
         EffectSprite::Quad q;q.center=p.pos[i];q.vertices=v;q.category=group;q.frame=frame;
@@ -3136,11 +3162,11 @@ void step_eff019(EffectSprite& s,const EffectContext&,bool& queued){
 // Art 1 setzt alle vier, Art 2 alle sechs Bilder einen weiteren Ball (wachsend mit spd)
 // an einer um ±sxb/2 gestreuten Stelle und dazu einen Funken 24, der die gestreute Lage
 // der Vorlage uebernimmt und mit (0,0,-sxb/3) in eine Zufallsrichtung startet.
-// mdlver 0 geht in sys->ef_pnc statt sys->ef_trs: effect.c:886 zeichnet diese Liste mit
-// demselben bhDrawTrsEffect3D, nur unter njControl3D(0x4000). Der Texturzeichner
-// (ps2_NaDraw.c:280 njDrawTexture3DEx) liest die 3D-Steuerflagge nie — nur die
-// Chunk-Modelle tun das (ps2_NinjaCnk.c) —, der Unterschied ist also allein die
-// Reihenfolge der beiden Durchgaenge.
+// mdlver 0 geht in sys->ef_pnc statt sys->ef_trs (effsub1.c:5197-5204): effect.c:886 zeichnet
+// diese Liste mit demselben bhDrawTrsEffect3D unter njControl3D(0x4000). Das setzt
+// Ps2_use_pt_flag (ps2_NinjaCnk.c:209), und Ps2AddPrim3D loescht damit ABE (ps2_dummy.c:510-516):
+// die Primitive geht nicht in die OT, sondern sofort ohne Mischen, Alphatest GREATER 0 (:543),
+// Tiefe geschrieben (Ps2ZbuffOn, :2011). Das Paar 8/6 bleibt gesetzt, wirkt aber nicht.
 void step_eff023(EffectSprite& s,const EffectContext&,bool& queued){
     if(s.mode0==0){
         s.flg=0x100001u;s.ani_ct=s.flr_no;
@@ -3171,7 +3197,8 @@ void step_eff023(EffectSprite& s,const EffectContext&,bool& queued){
     const auto& uv=latched_uv(s,s.ct0,"bhEff023");
     if(uv.u==-1.0f){s.flg=0;return;}
     s.sx=8.0f*(s.sxb*uv.xs);s.sy=8.0f*(s.syb*uv.ys);
-    quad_uv(s,uv);++s.ct0;queued=true;
+    quad_uv(s,uv);++s.ct0;
+    if(s.mdlver==0)s.punch_queued=true;else queued=true;
 }
 // effsub1.c bhEff118 — Ringfuehrung: legt acht Sprites 117 im Kreis um die eigene Lage an
 // und merkt sich ihre Plaetze im geteilten eff[512]-Satz (im Original als short in op->pv).
@@ -4764,7 +4791,7 @@ const HandEffectProcedure hand_effect_procedures[]={
     {240,step_eff240},{242,step_eff242},{244,step_eff244},{245,step_eff245},{246,step_eff246},
     {247,step_eff247},{248,step_eff248},{249,step_eff249},{147,step_eff147},{148,step_eff148},
     {165,step_eff165},{170,step_eff170},{16,step_eff016},{108,step_eff108},{109,step_eff109},{115,step_eff115},
-    {113,step_eff113},{102,step_eff102},{105,step_eff105},
+    {112,step_eff112},{113,step_eff113},{102,step_eff102},{105,step_eff105},
     {100,step_eff100},{107,step_eff107},{22,step_eff022},{24,step_eff024},{25,step_eff025},
     {27,step_eff027},{217,step_eff217},{143,step_eff143},{243,step_eff243},{236,step_eff236},
     {149,step_eff149},

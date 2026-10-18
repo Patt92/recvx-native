@@ -46,6 +46,7 @@ void queue_custom(EffectSprite& s);
 void queue_trs2d(EffectSprite& s);
 // sys->cb_flg |= set; sys->cb_flg &= ~clear (effsub1.c:4831/4839 bhEff021) am Eventbesitzer.
 void request_cb_flg(unsigned set,unsigned clear);
+void request_st_flg(unsigned set,unsigned clear);
 // Original-Datentypen der UV-Tabellen in effsub0.h/effsub5.h (EFF0UV/EFF5UV: {u,v} in
 // Texeln einer 256er-Textur; EFF0UVWHUC/EFF5UVWH/EFF5UVWHUC: {u,v,Breite,Hoehe}).
 // bhGetGroundPosition(&probe) ueber den Bodenanbieter des Raumbesitzers (set_effect_ground);

@@ -64,7 +64,7 @@ int main(){
             const unsigned F=unsigned(std::clamp(recvx::fog_sample(fog,z),0.f,255.f));
             // fog_col 0x000a0f = R 0x00, G 0x0a, B 0x0f (njSetFogColor ps2_NaFog.c:38-41).
             const unsigned r=(0x80u*F+0x00u*(255u-F))>>8,g=(0x80u*F+0x0au*(255u-F))>>8,b=(0x80u*F+0x0fu*(255u-F))>>8;
-            const std::uint32_t expected=0xff000000u|(b<<16)|(g<<8)|r;
+            const std::uint32_t expected=0xff000000u|(r<<16)|(g<<8)|b;
             std::cout<<"z="<<z<<" F="<<F<<" pixel=0x"<<std::hex<<renderer.pixels()[middle]<<" expected=0x"<<expected<<std::dec<<"\n";
             check(renderer.pixels()[middle]==expected,"GS fog mix differs from (Cs*F + Cf*(255-F)) >> 8");
             check(F<255u,"the RM_0000 cell fog must attenuate a visible receiver");
@@ -72,6 +72,20 @@ int main(){
             auto sprite=surface(z,false);sprite.fog=fog;sprite.fog_color=0x000a0fu;
             renderer.draw_view(sprite,view,32,32,false,{},1,100);
             check(renderer.pixels()[middle]!=expected||F==255u,"non-CNK polygons must not take the strip fog");
+        }
+        // ps2_NaDraw.c:180 njDrawTextureH gibt (ocol>>16,ocol>>8,ocol) an
+        // Ps2SetFogColorSys. ps2_dummy.c:1681 schreibt diese Kanaele als r/g/b;
+        // SDL_PIXELFORMAT_ARGB8888 und save_bmp erhalten 0xAARRGGBB, kein R/B-Tausch.
+        // Asymmetrische Werte pruefen beide Pfade (Scene-Nebel und Aufruf-FOGCOL)
+        // bei festem F0/128/255, ohne die Distanz-/Tabellenpruefung zu ersetzen.
+        for(bool custom:{false,true})for(unsigned F:{0u,128u,255u}){
+            auto s=surface(10.f,true);auto& t=s.triangles[0];t.color=0xff204080u;
+            t.fog_fixed=true;t.fog_fixed_value=float(F);s.fog_color=0x00a03007u;
+            t.fog_color_set=custom;t.fog_color=0x000b5590u;
+            renderer.draw_view(s,view,32,32,false,{},1,100);
+            const unsigned fc=custom?t.fog_color:s.fog_color;
+            unsigned expect=0xff000000u;for(unsigned shift:{0u,8u,16u})expect|=((((t.color>>shift)&255u)*F+((fc>>shift)&255u)*(255u-F))>>8)<<shift;
+            check(renderer.pixels()[middle]==expect,"asymmetric fog changes R/B channel order");
         }
         // Naeher ist weniger Nebel: F(10) > F(40) fuer nr 128 / fr -31.
         check(recvx::fog_sample(fog,10.f)>recvx::fog_sample(fog,40.f),"fog power must drop with distance");

@@ -360,6 +360,9 @@ public:
     void control_water_objects();
     // objitm.c:1846 bhObj008 (bhJumpObject[8]): ATR-Quader in sys->mwalp, folgt owP[0] des Objekts.
     void control_mobile_wall_objects();
+    void control_uv_objects(); // objitm.c:2050 bhObj010, dispatch type 10
+    bool offset_work_uv(void* work,unsigned node,int u,int v);
+    bool work_node_angle_z(void* work,unsigned node,int& angle)const;
     const WaterWaveWork* water_work(unsigned object)const;
     // bhSetExplosion: the effect works, flash light and sound; `view` is the camera direction (cam.vx/vy/vz).
     void explode(NJS_POINT3 position,NJS_POINT3 view);
@@ -432,12 +435,17 @@ public:
     void append(Scene& scene,const std::vector<BoneMatrix>& player_nodes={},const SceneCamera& active={},const DrawPass& pass={})const;
     // game.c:63 und screen.c:928-957: der Rendercut-Auftrag dieses Bildes (eff[ren_idx[0]], Kamera
     // aus rom->cutp[op->type].cam[0] mit cam.ofx, dist = 0.8 * dist bei 640 Breite) oder nichts.
-    struct SmallScreenPass{unsigned slot=0,cut=0;SceneCamera camera;float dist=0;};
+    struct SmallScreenPass{unsigned slot=0,cut=0;SceneCamera camera;float dist=0,aspect_y=1.0f;};
     std::optional<SmallScreenPass> small_screen_pass(const SceneCamera& view);
     // screen.c:1007-1012: das fertige Bild als ef_tn[op->id]; Ps2_rendertex_initflag faellt.
     void commit_small_screen(std::vector<std::uint32_t> pixels,unsigned width,unsigned height);
     // sub1.c:3175 ItemTaskCheck: nach dem Statusschirm in Raum 1-05 Ps2_rendertex_initflag = 1.
     void item_screen_closed(){if(stage_no_==1&&room_no_==5)rendertex_init_=true;}
+    // player.c:1666-1676 (nach bhCheckFloorP): unter sys->st_flg 0x100 loescht der Spielerpass
+    // plp->mdflg 0x40 und setzt es, wenn bhCheckFloorEffect(plp->flr_no, plp->gpx, plp->gpz) eine
+    // Flaeche mit prm0 2 liefert. Der Aufrufer reicht plp->flr_no desselben bhCheckFloorP.
+    void check_player_mirror_floor(int flr_no);
+    bool player_mirror_off()const{return player_mirror_off_;} // plp->mdflg 0x40
     // cut.c:22 bhCheckCut: gm_flg &= ~0x20 je Hauptschleife, nach der exm-Festkamera (game.c:274-291)
     // und vor bhControlEvent; danach setzen Schnitt-/Ereigniskameras das Bit fuer dieses Bild.
     void begin_cut_check(){if(collision_events_)collision_events_->flags[11][0]&=~0x20u;}
@@ -464,6 +472,9 @@ public:
     // bhSetFixedCut clip call passes cam.ncut, its fog comes from cno separately.
     void initialize_camera_clip(unsigned cut,bool hand_over_fog=true);
     ViewClip camera_clip()const{return installed_clip_;}
+    // ClipVolume des letzten _Make_ClipVolume-Aufrufs (bhChangeClipVolumeRM beim Raumschnitt,
+    // bhChangeClipVolume bei der Ereigniskamera); nichts sonst setzt es zurueck.
+    ClipVolume clip_volume()const{return installed_volume_;}
     void tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking=true);
     // effsub3.c:2401 bhSetEffGunSpark: AllocOworkOne (erster freier eff-Platz), Effekt 308.
     int gun_spark(NJS_POINT3 pos,NJS_POINT3 dir,std::uint32_t src_col,std::uint32_t dst_col,int typ_no);
@@ -481,6 +492,11 @@ public:
     // effsub1b.c:101 bhDraw134: die Kran-Anzeige (2D, Texturgruppe 44) ueber dem Bild.
     // effect.c:929 ef_fnc-2D-Anzeigen: bhDraw134 (Kran) und bhDraw137 (Ueberwachungskamera).
     void draw_fnc_huds(SoftwareRenderer& image)const;
+    // game.c:68 / screen.c:816: der gesamte bhAllDrawModel-Pass in 512x480, dann
+    // die 15 Streifen aus sys->rpb ueber die 512x512-Rendertextur. true = gezeichnet.
+    bool draw_full_screen(SoftwareRenderer& image,const Scene& scene,const SceneCamera& view,bool wireframe=false)const;
+    // game.c:106, nach bhAllDrawModel/Rendertextur, vor bhDrawScreenFade, unabhaengig von pt_flg.
+    void draw_thermometer(SoftwareRenderer& image)const;
     // cut.c:138-147 cam.flg 0x40: die Monitorkamera, deren Lage allein bhEff137
     // (effsub1b.c:1015) schreibt; bhControlMonitorCamera (cut.c:2802) ist leer.
     bool monitor_camera_active()const{return monitor_.active;}
@@ -498,6 +514,16 @@ public:
     // sync.c:15 njSetEORFunction(bhControlEOR): der Nebelteil (:143-255) laeuft am Ende jedes Bildes, auch
     // ohne Kamerapass. Unter gm_flg 0x200000 (gameover.c:323, Todesszene md1 10) nur njFogDisable (:143).
     void end_of_render(){control_fog();}
+    // ps2_event.c / sync.c:120-139. Separate from camera tick: an event command may tick that more than once per frame.
+    void control_background();
+    void suspend_background(){background_enabled_=false;} // system.c:581/598/613/630/649
+    void restore_background(unsigned delay); // sys->bcl_ct + gm_flg 0x8000; does not enable until EOR expiry
+    // ROM_WORK.bak_col, kept raw (0xAARRGGBB); effect 138 saves/restores it separately from EOR arming.
+    std::uint32_t room_background()const{return room_background_;}
+    void set_room_background(std::uint32_t color){room_background_=color;}
+    std::uint32_t background_pixel()const; // the process-wide installed njSetBackColor (back_color.h), host canvas form
+    bool background_enabled()const{return background_enabled_;}
+    unsigned background_delay()const{return background_delay_;}
     bool camera_transitioning()const{return active_camera_.transitioning();}
     unsigned camera_clock()const{return active_camera_.clock();}
     int floor_at(NJS_POINT3 position)const;
@@ -590,11 +616,16 @@ private:
         return index==0?model.actor.get():model.actor->model(index);
     }
     /* BH_SCEWORK mode1/mode2 (types.h:1953) */
-    struct Context {unsigned kind=0,index=0,node=0,mode1=0,mode2=0;unsigned mtn_md=0,mdflg=0;int hokan_rate=0;bool work=false;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};std::array<std::array<float,5>,2> e_lgt{};};
-    struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;};
+    struct Context {unsigned kind=0,index=0,node=0,mode1=0,mode2=0;unsigned mtn_md=0,mdflg=0;int hokan_rate=0;bool work=false;int ev_eff_no=0;std::array<int,3> pos_sign{},ang_sign{};NJS_POINT3 increment{};std::array<int,3> angle_increment{};std::array<std::array<float,3>,4> positions{},angles{};std::array<std::array<float,3>,2> ground{};std::array<std::array<float,5>,2> e_lgt{};};
+    // mode: LGT_WORK.mode (types.h:412), 0 bei jedem Schreiber (bhInitLight light.c:187, bhSetLightTab
+    // light.c:247, bhSetGunFire pwksub.c:2708, bhSetExplosion weapon.c:1726). lit_after_clear: der letzte
+    // bhControlLight-Pass hat das Licht noch gesetzt (lsrc 4, light.c:788), obwohl er im selben
+    // Durchlauf flg 0x1/0x2 geloescht hat (Typ 13/100/101, light.c:658-699).
+    struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;unsigned mode=0;bool lit_after_clear=false;};
     // CAM_KEYF_WORK: flg (0x8 = this key carries fog), fog_col/fog_nr/fog_fr.
     struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;unsigned flags=0;std::uint32_t fog_color=0;float fog_near=0,fog_far=0;};
     struct EventCameraTrack {std::vector<EventCamera> keys;unsigned next=0;};
+    bool room_uv_modified_=false;
     std::vector<std::uint8_t> room_;std::size_t header_;unsigned simulation_flags_=~0u;
     std::unique_ptr<PlayerPush> push_;
     GroundCollision ground_; // room-owned original sys->htp, shared by ground consumers
@@ -673,7 +704,10 @@ private:
     std::function<void(std::uint32_t,float)> screen_fade_set_;std::function<std::uint32_t()> screen_fade_previous_;
     void step_ufo_effect(unsigned slot);
     void step_monitor_effect(unsigned slot); // effsub1b.c:1015 bhEff137
+    void step_oil_effect(unsigned slot);     // effsub1b.c:1618 bhEff138
     void step_render_monitor_effect(unsigned slot); // effsub1.c:6927 bhEff111
+    void step_full_screen_effect(unsigned slot); // effsub1.c:6660 bhEff110
+    void step_thermometer_effect(unsigned slot); // effsub1b.c:17 bhEff133
     // bhEne_SetFireEffect(plp, ...) und bhEne12_SetFireBintaEffect aus Effektprozeduren.
     void effect_player_fire(int jno,NJS_POINT3 ofp,float size,int life);
     void effect_en12_binta(RECVX_ENEMY_WORK* w,int action);
@@ -736,7 +770,14 @@ private:
     // ML_WORK wie dieses Kind benutzen (en13.c:170).
     WorldEntity* create_enemy_child(RECVX_ENEMY_WORK* parent,const RECVX_ENEMY_TEMPLATE& tmpl,unsigned base,RECVX_ENEMY_WORK* share);
     // eneset.c:797 bhDrawEnemy fuer die Kindworks aus bhSetEnemy (enemy_children_).
-    void append_enemy_children(Scene& scene)const;
+    // mirror: sys->st_flg 0x100 mit gueltigem njMirror, MdlPut.c:57/89 zeichnet jedes Kind ein zweites Mal.
+    void append_enemy_children(Scene& scene,bool mirror=false)const;
+    // MdlPut.c:40: der Spiegelaufruf liegt im Zweig mlwP->flg & 0x80; mlwP->flg ist das Statusbyte
+    // [3] des MDL-Kopfes (binfunc.c:13/34 bhMlbBinRealize).
+    bool put_model_cnk(const Model& model)const;
+    // op->mdflg eines bhPutModel-Works fuer den Spiegeltest; nullopt ohne nativen Besitzer.
+    std::optional<unsigned> put_model_mdflg(const Model& model,const WorldEntity& e)const;
+    bool player_mirror_off_=false; // plp->mdflg 0x40 (player.c:1668/1674); bhSetPlayer setzt mdflg = 0x20 (player.c:698/864)
     // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP.
     void append_claw_model(Scene& scene,const EffectSprite& sprite)const;
     void bind_enemy_services();
@@ -792,6 +833,7 @@ private:
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
     void draw_ufo_hud(SoftwareRenderer& image,const SpriteWork& hud)const;     // effsub1b.c:101 bhDraw134
     void draw_monitor_hud(SoftwareRenderer& image,const SpriteWork& hud)const; // effsub1b.c:828 bhDraw137
+    void draw_oil_hud(SoftwareRenderer& image,const SpriteWork& hud)const;     // effsub1b.c:1258 bhDraw138
     void draw_eff021_bars(SoftwareRenderer& image)const;                        // effsub1.c:4756 bhDraw021
 
     bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false,player_infect_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
@@ -914,6 +956,7 @@ private:
     // Native camera owner's installed njClipZ and last GameNear/GameFar.
     // Flag/key mutations alone do not invoke either original clip routine.
     ViewClip installed_clip_{},room_clip_{};
+    ClipVolume installed_volume_{};
     std::optional<unsigned> clip_cut_;
     bool restore_camera_clip_=false;
     ActiveCameraMotion active_camera_;std::vector<SceneCamera> room_cameras_;
@@ -939,7 +982,9 @@ private:
     mutable NJS_POINT3 ambient_material_{1,1,1}; // ps2_NinjaCnk.c:158, persists between model draws
     std::array<unsigned,4> ambient_slots_{};
     float fade_=0,fade_target_=0,fade_step_=0;unsigned fade_color_=0;
-    std::uint32_t background_=0,background_target_=0;unsigned background_delay_=0;bool background_pending_=false;
+    std::uint32_t room_background_=0; // rom->bak_col; the installed clear itself is the global Db.clear owner (back_color.h)
+    unsigned background_delay_=0;bool background_enabled_=false; // BackColorFlag
+    void change_background(bool event);
     std::map<unsigned,ItemBoxObjectWork> item_boxes_; // O_WRK mode0/ct0 of type-100 objects
     void control_water_object(unsigned index,WorldEntity& e);
     unsigned object_pass_count_=0; // sys->gfrm_ct (system.c:556), nur die Paritaet in bhObj005
@@ -969,5 +1014,10 @@ private:
     // effsub1b.c:690 bhDraw136: ein Nachbild in die Szene, mit dem Materialalpha des Satzes.
     void append_afterimage(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,std::pair<unsigned,unsigned>* fnc_blend)const;
     NJS_POINT3 link_point(unsigned kind,unsigned index,unsigned node,NJS_POINT3 offset)const;
+    struct RenderScreenVertex {float x=0,y=0,z=0,u=0,v=0;std::uint32_t bcol=0,ocol=0;};
+    std::array<RenderScreenVertex,256> render_screen_vertices_{}; // sys->rpb, ein Besitzer
+    float render_aspect_y_=1.0f; // BHD_ASPECT_Y, system.c:273
+    struct Thermometer {unsigned cursor=0;std::array<int,3> digits{{1,0,0}};int direction=0;unsigned texture=0;} thermometer_; // system.c:266-270
+
 };
 }

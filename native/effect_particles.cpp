@@ -18,20 +18,38 @@ namespace recvx {
 // (AllocOwork ab owk_scn_noG, AllocOworkOne immer ab Index 0), Belegung mit
 // drei Plaetzen je Partikelsatz und Kapazitaet 512 unveraendert.
 //
-// Rendererabbildungen (nicht aus dem Repo entscheidbar, daher offengelegt):
-// 1. njDrawTexture3DEx(oP->tvp, 16, 1) zeichnet Ps2AddPrim3D(0x1E..) bzw.
-//    (0x3E..) (ps2_NaDraw.c:351/355). Das niedrige Nibble ist das PRIM-Feld
-//    (ps2_dummy.c:548 baut den GIF-REGLIST-Tag daraus): 6 = SCE_GS_PRIM_SPRITE,
-//    also ein bildschirmparalleles Rechteck je zwei Vertices. Aus den 16
-//    Punkten der Lache werden damit acht Rechtecke (0,1)(2,3)..(14,15). Nativ
-//    werden sie als kameraparallele Rechtecke durch dieselben zwei Raumpunkte
-//    gezeichnet.
-// 2. bhEff_PtclSpriteDrawB zeichnet ueber Ps2AddPrim3D(0x3B..) = PRIM 3
-//    (SCE_GS_PRIM_TRIANGLE) mit sechs Vertices je Sprite, also ein Quad aus
-//    den zwei bildschirmparallelen Eckpunkten; Textur 0..1 ueber das ganze Bild.
-//    Nativ wird das als kameraparalleles Quad der halben Kantenlaenge scl
-//    ueber die bestehende, bereits gepruefte Billboardbasis von
-//    append_effect_sprite gezeichnet.
+// Rendererabbildungen. Das PRIM-Feld des GIF-Tags beginnt bei Bit 47 (PRE ist
+// Bit 46): Ps2AddPrim3D ORt das Primwort in SCE_GIF_SET_TAG(0,1,1,0,0,3), die
+// ELF-Konstante dafuer ist 0x3000400000008000 (Ps2AddPrim3D 0x002CBE1C..0x002CBE2C:
+// NREG 3, PRE Bit 46, EOP). Belege fuer die Lage: ps2_dummy.c:510/514 loescht ABE mit
+// ~SCE_GIF_SET_TAG(0,0,0,SCE_GS_SET_PRIM(0,0,0,0,1,..),0,0) und prueft dafuer
+// Bit 53 (0x20000000000000), ps2_NaGraphics3D.c:532 setzt 0x16800000000000
+// (Bit 47 gesetzt, PRIM 0x2D = TRIFAN|IIP|FGE), njDrawQuadTexture
+// (ps2_NaDraw.c:563/567) gibt zwei Eckpunkte mit 0x2B../0x0B.. aus (PRIM 0x56/
+// 0x16 = SPRITE|TME[|ABE]). Das Primwort ist also (Konstante >> 47):
+// 1. njDrawTexture3DEx(oP->tvp, 16, 1) zeichnet ueber njDrawTextureSub3D
+//    Ps2AddPrim3D(0x3E..)/(0x1E..) (ps2_NaDraw.c:351/355) = PRIM 0x7C/0x3C =
+//    TRISTRIP|IIP|TME|FGE[|ABE]: ein Dreiecksstreifen ueber die 16 Eckpunkte in
+//    tv_buf-Reihenfolge. bhEff300 legt sie im Zickzack um den Kreis an
+//    (effsub3.c:264-284, Winkel eff_dir+16384+4096*{0,1,-1,2,-2,..,7,-7,8};
+//    VtxTbl effsub3.c:236 ist die Kreisfolge dazu), der Streifen fuellt also
+//    das Sechzehneck mit 14 Dreiecken.
+// 2. bhEff_PtclSpriteDrawB -> njPtclDrawSprite (ps2_NinjaPtcl.c:100-160)
+//    zeichnet ueber Ps2AddPrim3D(0x3B..) = PRIM 0x76 = SPRITE|TME|FGE|ABE.
+//    Je Punkt stehen zwei Eckpunkte im Puffer (scr -+ iz*w*dist, ST 0 bzw. 1,
+//    gleiches z/Farbe/Nebel), uebergeben wird aber num = n (ELF
+//    njPtclDrawSprite 0x002D8528/0x002D86A4: a1 -> s7 -> a2 unveraendert),
+//    und Ps2AddPrim3D gibt genau num Eckpunkte zu je 48 Byte aus (Schleife
+//    0x002CBEBC, DMA-Laenge 3*num+3). Aus n Punkten werden damit n/2
+//    GS-Sprites aus den Punkten 0..n/2-1; bei vier Punkten je Aufruf
+//    (effsub3.c:1420-1423) sind das die Punkte 0,1,4,5,8,9,12,13 der Stufe.
+//    Ein GS-Sprite ist ein bildschirmachsenparalleles Rechteck konstanter
+//    Tiefe mit linear 0..1 laufender Textur. Nativ ist das genau ein Quad in
+//    der Bildebene (Billboardbasis von append_effect_sprite, Tiefe = Punkt-
+//    tiefe). Die halbe Breite ist iz*w*dist Ninja-Bildpunkte ohne AspectW,
+//    waehrend scr.x selbst mit AspectW projiziert wird (njViewScreenMatrix
+//    ps2_NaView.c:221, BHD_ASPECT_X 1.174 main.c:53); in Sichtkoordinaten ist
+//    die halbe Kante also w/AspectW waagerecht und h/AspectH (1.0) senkrecht.
 namespace {
 
 // effsub3.c:19 — der Vergabezeiger des gemeinsamen Pools.
@@ -503,14 +521,14 @@ static void step_work(Work& w)
 // effsub3.c:145-231 — bhSetBloodPoolLnk. Zwei Arbeiten aus AllocOworkOne; die
 // Hoehe staffelt sich ueber sys->bl_ct (nativ effect_blood_counter(), derselbe Besitzer,
 // den auch bhEff301/bhEff303 in native/effect_rap_blood.cpp zaehlen).
-void EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direction,int palette)
+int EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direction,int palette)
 {
     (void)palette;
     if(!table)throw std::runtime_error("blood pool without BP_WORK table");
     struct BP {NJS_POINT3 off_pos;int srd_dir;float srd_pos;float bld_spd;float srt_spd[5];int srt_dir[5];};
     const BP& tab=*static_cast<const BP*>(table);
     Pool* p=impl_->alloc_pool();
-    if(!p)return;
+    if(!p)return 0;                                   // effsub3.c:228-231
     p->position=position;
     p->position.y+=0.01f;
     njAddVector(reinterpret_cast<NJS_VECTOR*>(&p->position),reinterpret_cast<NJS_VECTOR*>(const_cast<NJS_POINT3*>(&tab.off_pos)));
@@ -528,6 +546,7 @@ void EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direc
     p->palette=unsigned(palette);
     p->mode0=0;
     p->ct0=0;
+    return 1;                                         // effsub3.c:226
 }
 
 // effsub3.c:234-402 — bhEff300 mit VtxTbl[16].
@@ -702,9 +721,14 @@ static void append_work_lines(Scene& scene,const recvx::Work& w)
 }
 
 // effsub3.c:1386-1429 — bhEff_PtclSpriteDrawB: je Stufe vier njPtclDrawSprite
-// ueber je vier Punkte, Texturrahmen tex_id + (stg_tim & 3).
+// ueber je vier Punkte, Texturrahmen tex_id + (stg_tim & 3). Jeder Aufruf gibt
+// nur seine Punkte 0 und 1 als GS-Sprite aus (Kopfkommentar, Punkt 2).
 void EffectParticles::append(Scene& scene,const SceneCamera& camera,unsigned texture_base)const
 {
+    // BHD_ASPECT_X (main.c:53, system.c:272), mit dem auch der Renderer x projiziert.
+    constexpr float aspect_w=1.174f;
+    constexpr unsigned call_points=4;                 // njPtclDrawSprite(&bufP[4k], 4, scl, scl)
+    constexpr unsigned call_sprites=call_points/2;    // Ps2AddPrim3D(.., num = 4): vier Eckpunkte
     for(const auto& w:impl_->works){
         if(!w.live||!w.draw_queued)continue;
         // effsub3.c:21-27 — FuncTbl[4] = {NULL, bhEff_PtclSpriteDrawB,
@@ -718,21 +742,26 @@ void EffectParticles::append(Scene& scene,const SceneCamera& camera,unsigned tex
             const NJS_POINT3* points=&w.vtx_pos[std::size_t(stg_no)*16];
             const unsigned color=unsigned(w.stg_col[stg_no]);
             const unsigned texture=texture_base+unsigned(w.stg_tim[stg_no]&3);
-            for(unsigned sprite=0;sprite<16;++sprite){
-                EffectSprite s;
-                s.id=302;
-                s.flg=0x100000;
-                s.bl_src=8;
-                s.bl_dst=6;
-                for(unsigned i=0;i<4;++i){
-                    s.tv[i].x=(i&1u)?1.f:-1.f;
-                    s.tv[i].y=(i&2u)?1.f:-1.f;
-                    s.tv[i].z=0;
-                    s.tv[i].u=float(i&1u);
-                    s.tv[i].v=(i&2u)?1.f:0.f;
-                    s.tv[i].col=color;
+            for(unsigned call=0;call<16/call_points;++call){
+                for(unsigned sprite=0;sprite<call_sprites;++sprite){
+                    EffectSprite s;
+                    s.id=302;
+                    s.flg=0x100000;
+                    s.bl_src=8;
+                    s.bl_dst=6;
+                    // Eckpunkt A (scr - iz*w*dist, ST 0/0) oben links, B (+, ST 1/1)
+                    // unten rechts; die Billboardbasis bildet lokal x/y auf Sicht x/y
+                    // (y nach unten) ab.
+                    for(unsigned i=0;i<4;++i){
+                        s.tv[i].x=(i&1u)?1.f:-1.f;
+                        s.tv[i].y=(i&2u)?1.f:-1.f;
+                        s.tv[i].z=0;
+                        s.tv[i].u=float(i&1u);
+                        s.tv[i].v=(i&2u)?1.f:0.f;
+                        s.tv[i].col=color;
+                    }
+                    append_effect_sprite(scene,s,points[call*call_points+sprite],{scl/aspect_w,scl,scl},camera,texture,nullptr);
                 }
-                append_effect_sprite(scene,s,points[sprite],{scl,scl,scl},camera,texture,nullptr);
             }
         }
     }
@@ -740,36 +769,35 @@ void EffectParticles::append(Scene& scene,const SceneCamera& camera,unsigned tex
 
 // effect.c:1287-1424 — bhDrawTrsEffect3D zeichnet eine eingereihte Arbeit mit
 // njDrawTexture3DEx(op->tvp, op->pn, 1); bhSetBloodPoolLnk setzt pn = 16
-// (effsub3.c:194). njDrawTextureSub3D gibt sie als PRIM 6 (SPRITE) aus
-// (0x3E/0x1E in ps2_NaDraw.c:351/355), also als acht Rechtecke aus den Paaren
-// (0,1)..(14,15) des Sechzehn-Punkt-Kranzes. Ein GS-Sprite traegt nur eine
-// Tiefe; die beiden Zwischenecken bekommen hier den Mittelwert der Paartiefe.
-// Die Texturfarbe liegt in allen Punkten gleich (effsub3.c:286).
+// (effsub3.c:194) und flg 0x200001, die Matrix ist also px ohne Drehung
+// (effect.c:1336-1342, ax..az = 0, sx..sz = 1). njDrawTextureSub3D gibt die
+// 16 Eckpunkte als Dreiecksstreifen aus (Kopfkommentar, Punkt 1): Dreieck t
+// besteht aus den Eckpunkten t, t+1, t+2. Die Texturfarbe liegt in allen
+// Punkten gleich (effsub3.c:286). Fuer den ganzen Aufruf gilt die Clipregel
+// von njDrawTextureSub3D/Ps2AddPrim3D (SceneTriangle::ninja_primitive).
 void EffectParticles::append_pools(Scene& scene,unsigned texture_base)const
 {
     for(const auto& p:impl_->pools){
         if(!p.live)continue;
         const unsigned texture=texture_base+p.palette;
         const unsigned color=p.buffer[0].col;
-        for(unsigned pair=0;pair<8;++pair){
-            const auto& a=p.buffer[pair*2];
-            const auto& b=p.buffer[pair*2+1];
-            SceneVertex quad[4];
-            const float za=(a.offset.z+b.offset.z)*0.5f;
-            const NJS_POINT3 local[4]={
-                {a.offset.x,a.offset.y,a.offset.z},
-                {b.offset.x,a.offset.y,za},
-                {a.offset.x,b.offset.y,za},
-                {b.offset.x,b.offset.y,b.offset.z}
-            };
-            const float uv[4][2]={{a.u,a.v},{b.u,a.v},{a.u,b.v},{b.u,b.v}};
-            for(unsigned i=0;i<4;++i){
-                quad[i].position={p.position.x+local[i].x,p.position.y+local[i].y,p.position.z+local[i].z};
-                quad[i].u=uv[i][0];
-                quad[i].v=uv[i][1];
-            }
-            add_triangle(scene,quad,0,1,2,color,texture);
-            add_triangle(scene,quad,1,3,2,color,texture);
+        SceneVertex strip[16];
+        for(unsigned i=0;i<16;++i){
+            const auto& b=p.buffer[i];
+            strip[i].position={p.position.x+b.offset.x,p.position.y+b.offset.y,p.position.z+b.offset.z};
+            strip[i].u=b.u;
+            strip[i].v=b.v;
+        }
+        const std::size_t first=scene.triangles.size();
+        // Der GS kennt keine Rueckseiten; die Umlaufrichtung folgt wie in
+        // append_effect_sprite ({0,1,2},{1,3,2}) dem Streifen.
+        for(unsigned t=0;t+2<16;++t){
+            if(t&1u)add_triangle(scene,strip,t,t+2,t+1,color,texture);
+            else add_triangle(scene,strip,t,t+1,t+2,color,texture);
+        }
+        for(auto k=first;k<scene.triangles.size();++k){
+            scene.triangles[k].ninja_primitive=std::uint32_t(first+1);
+            scene.triangles[k].ninja_screen_reject=true;
         }
     }
 }

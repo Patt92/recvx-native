@@ -194,7 +194,7 @@ int main(int argc,char** argv){try{
   {SceneCamera far;far.position={22.1396f,20.2529f,110.037f};far.angles={1786,-2288,0};far.distance=0;far.perspective=10012;far.clip_near=20;far.clip_far=20000;
    const auto draw=[&](std::uint32_t fill){std::vector<std::uint32_t> flat(512u*512u,fill);r.world.commit_small_screen(flat,512,512);Scene s=r.scene;r.world.append(s,{},far);SoftwareRenderer out(640,480);out.set_supersampling(1);out.set_render_threads(1);out.draw(s,far);return out.pixels();};
    const auto ka=draw(0xff00ff00u),kb=draw(0xff0000ffu),grey=draw(0xff808080u);
-   unsigned n=0;double rs=0,gs=0,bs=0;for(std::size_t i=0;i<ka.size();++i)if(ka[i]!=kb[i]){++n;rs+=grey[i]&255u;gs+=(grey[i]>>8)&255u;bs+=(grey[i]>>16)&255u;}
+   unsigned n=0;double rs=0,gs=0,bs=0;for(std::size_t i=0;i<ka.size();++i)if(ka[i]!=kb[i]){++n;rs+=(grey[i]>>16)&255u;gs+=(grey[i]>>8)&255u;bs+=grey[i]&255u;}
    unsigned x0=640,x1=0,y0=480,y1=0;for(std::size_t i=0;i<ka.size();++i)if(ka[i]!=kb[i]){x0=std::min<unsigned>(x0,unsigned(i%640));x1=std::max<unsigned>(x1,unsigned(i%640));y0=std::min<unsigned>(y0,unsigned(i/640));y1=std::max<unsigned>(y1,unsigned(i/640));}
    check(n>200,"monitor quad not visible from cut 1");
    const double rm=rs/n,gm=gs/n,bm=bs/n;const bool half=gm>40&&gm<72&&bm>40&&bm<72&&rm>gm+20&&rm<gm+44;

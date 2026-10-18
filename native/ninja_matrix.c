@@ -217,3 +217,34 @@ void njProjectScreen(NJS_MATRIX* m,NJS_POINT3* p3,NJS_POINT2* p2){
     p2->x=point.x*q+fNaViwOffsetX;
     p2->y=point.y*q+fNaViwOffsetY;
 }
+/* ps2_NaMatrix.c:1016 njMirror, Ablauf nach der Disassembly (siehe ninja_matrix.h). */
+static int float_bits_zero(Float f){uint32_t u;memcpy(&u,&f,sizeof u);return u==0;}
+static Angle mirror_angle(Float a,Float b){
+    /* njAtan2b (0x002D7210): fptodp beider Argumente, atan2 in double, dptofp. */
+    const Float t=(Float)atan2((double)a,(double)b);
+    /* vmulx.x mit vf4.x = 32768, vdiv durch vf3.w = 3.141592f, vftoi0 schneidet gegen null ab. */
+    return (Angle)((t*32768.0f)/3.141592f);
+}
+int njMirror(NJS_MATRIX* m,NJS_PLANE* pl){
+    NJS_MATRIX mat;Float q,nx,ny,nz,d,tx,ty,tz,s;Angle ax,az;
+    const Float vx=pl->vx,vy=pl->vy,vz=pl->vz;
+    q=njInvertSqrt((vx*vx+vy*vy)+vz*vz);          /* vmul.xyz, vaddy.x, vaddz.x, vrsqrt */
+    nx=vx*q;ny=vy*q;nz=vz*q;                        /* vmulq.xyz vf9 */
+    d=((0.0f-nx*pl->px)-ny*pl->py)-nz*pl->pz;       /* vsubx/vsuby/vsubz.x vf10 */
+    if(float_bits_zero(d))return 0;                 /* 0x002D7300: Zweig mit jr ra ohne Stapelabbau */
+    {const Float t2=d+d;tx=0.0f-vx*t2;ty=0.0f-vy*t2;tz=0.0f-vz*t2;} /* vadd.x vf10; vmulx.xyz vf14; vsub.xyz vf12 */
+    if(float_bits_zero((0.0f+vy)+vz)&&float_bits_zero(0.0f-ny*d))return 0; /* 0x002D7340: lAngleX/Z ungeschrieben */
+    ax=mirror_angle(vz,vy);
+    s=sqrtf(fabsf((0.0f+vy)+vz));                   /* vsqrt Q, vf7x mit vf7.x = vy + vz */
+    az=-mirror_angle(vx,s);                         /* vsubx.x vf12, vf0, vf12x vor vftoi0 */
+    njUnitMatrix(&mat);
+    njUnitRotPortion(&mat);
+    mat[12]=tx;mat[13]=ty;mat[14]=tz;mat[15]=1.0f;  /* sqc2 vf12, 0x30(a0); w liest njMultiMatrix nicht (vf0w) */
+    njRotateX(&mat,ax);
+    njRotateZ(&mat,az);
+    njScale(&mat,1.0f,-1.0f,1.0f);
+    njRotateZ(&mat,-az);
+    njRotateX(&mat,-ax);
+    njMultiMatrix(m,&mat);                          /* NULL = pNaMatMatrixStuckPtr wie im Original */
+    return 1;
+}

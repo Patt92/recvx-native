@@ -1,4 +1,5 @@
 #include "movie.h"
+#include "back_color.h"
 #include "timing.h"
 #include "asset_io.h"
 #include "binary_view.h"
@@ -34,6 +35,8 @@ void MoviePlayer::load(std::vector<std::uint8_t> bytes) {
     // Commit only after every packet has passed validation.
     stop();bytes_=std::move(bytes);frames_=std::move(packets);width_=width;height_=height;numerator_=num;denominator_=den;
     frame_=0;ticks_=0;end_ticks_=std::max((std::uint64_t(count)*den*game_tick_hz+num-1)/num,(std::uint64_t(samples)*game_tick_hz+rate-1)/rate);decoded_=~0u;active_=true;
+    // bhSysCallMovie: njSetBackColor(0,0,0) once the movie is ready (system.c:1141) and in every playing pass (:1171/:1184).
+    set_back_color(0);
     if(clip->frames())audio_.play_pcm(7,std::move(clip));
 }
 void MoviePlayer::stop(){active_=false;audio_.stop(7);bytes_.clear();frames_.clear();pixels_.clear();}

@@ -1,4 +1,5 @@
 #include "map_screen.h"
+#include "back_color.h"
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -42,6 +43,7 @@ std::uint32_t map_argb_to_color(const RECVX_MAP_ARGB& argb){
 void MapScreen::init(int set_mod,const MapHost& host,const MapServices& services){
     /* bhInitMap (map.c:64). npSetMemory clears the whole work first, so every
        field starts at zero and only the original assignments follow. */
+    set_back_color(0); /* map.c:71, before npSetMemory: the global Db.clear (back_color.h) */
     /* Resource revisions belong to this native owner, not the cleared
        original map work. Keep them monotonic so a renderer surviving exit
        cannot reuse the previous player's/index/floor assets on re-entry. */
@@ -394,6 +396,7 @@ bool MapScreen::control(const MapHost& host){
         /* njClipZ(-2, -20000), njSetAspect(1.174, 1), njSetScreen dist 500,
            640x480 centred at 320/240: the clip/aspect/screen contract the
            integrator applies to the camera (map.c:355). */
+        set_back_color(0); /* map.c:359 */
         entry_task(TaskRead,RECVX_MP_MOD_IDX_ANALYZE,host.ply_id);
         map_mode_=RECVX_MP_MOD_WAIT;
         break;

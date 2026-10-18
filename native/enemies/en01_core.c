@@ -5572,11 +5572,26 @@ void recvx_en01_mv08(RECVX_ENEMY_WORK* w)
    ===========================================================================
    DD00 (en01.c:9934), DD01 (:10106), DD02 (:10132), DD03 (:10218).
 
-   OFFEN (Schnittstellenbedarf): alle vier rufen bhSetBloodPoolLnk
-   (effsub3.c:145) fuer die Blutlache. Der EN01-Vertrag kennt nur
-   link_blood (effect.c:736), set_blood3 und set_blood4 — das sind andere
-   Originalroutinen. Der Aufruf wird deshalb gemeldet, nicht ersetzt.
+   DD00..DD02 (und DD02B, en01b.c:763) rufen bhSetBloodPoolLnk
+   (effsub3.c:145) fuer die Blutlache direkt mit pal_bnk 0 auf. Der Aufruf
+   geht ueber RECVX_EN01_SERVICES.blood_pool_lnk an den Effektbesitzer; ohne
+   gebundenen Dienst wird er gemeldet, nicht ersetzt.
    =========================================================================== */
+
+/* bhSetBloodPoolLnk(ewP, posP, ay, tabP, 0) — alle EN01-Aufrufer geben
+   pal_bnk 0 und ignorieren die Rueckgabe (en01.c:9990/9994/10122/10149,
+   en01b.c:763). */
+static void en01_blood_pool_lnk(RECVX_ENEMY_WORK* w, RECVX_ENEMY_WORK* ew,
+                                const RECVX_ENEMY_VEC* pos, int32_t ay,
+                                const RECVX_ENEMY_BP_WORK* tab)
+{
+    const RECVX_EN01_SERVICES* en = en01_en();
+    if (!en || !en->blood_pool_lnk) {
+        en01_gap(w, "bhSetBloodPoolLnk (effsub3.c:145)");
+        return;
+    }
+    (void)en->blood_pool_lnk(ew, pos, ay, tab, 0);
+}
 
 /* --- bhEne01_DD00 (en01.c:9934) -----------------------------------------
    Normales Sterben. mode1 waehlt die Fallmotion; im Wasser (stflg 0x100000)
@@ -5639,11 +5654,12 @@ void recvx_en01_dd00(RECVX_ENEMY_WORK* w)
                 gpos.x = w->px - njSin(ang);                         /* :9986 */
                 gpos.y = w->py;                                      /* :9987 */
                 gpos.z = w->pz - njCos(ang);                         /* :9988 */
-                /* bhSetBloodPoolLnk(epw, &gpos, ang, &en01_BldTbl2, 0). */
-                en01_gap(w, "bhSetBloodPoolLnk (effsub3.c:145)");     /* :9990 */
+                en01_blood_pool_lnk(w, w, &gpos, ang,
+                                    &recvx_en01_bld_tbl2);           /* :9990 */
             } else {
-                /* bhSetBloodPoolLnk(epw, &epw->px, epw->ay, &en01_BldTbl, 0). */
-                en01_gap(w, "bhSetBloodPoolLnk (effsub3.c:145)");     /* :9994 */
+                gpos.x = w->px; gpos.y = w->py; gpos.z = w->pz;      /* &epw->px */
+                en01_blood_pool_lnk(w, w, &gpos, w->ay,
+                                    &recvx_en01_bld_tbl);            /* :9994 */
             }
         } else if (w->mode1 < 3u) {                                  /* :9997 */
             recvx_enemy_chg_mtn(w,
@@ -5771,8 +5787,9 @@ void recvx_en01_dd01(RECVX_ENEMY_WORK* w)
             cepw->flg &= ~0x28u;                                     /* :10118 */
         }
         if (!(w->stflg & 0x100000u)) {                               /* :10120 */
-            /* bhSetBloodPoolLnk(epw, &epw->px, epw->ay, &en01_BldTbl, 0). */
-            en01_gap(w, "bhSetBloodPoolLnk (effsub3.c:145)");         /* :10122 */
+            RECVX_ENEMY_VEC at;
+            at.x = w->px; at.y = w->py; at.z = w->pz;                /* &epw->px */
+            en01_blood_pool_lnk(w, w, &at, w->ay, &recvx_en01_bld_tbl); /* :10122 */
         }
         w->mode3++;                                                  /* :10124 */
         /* fallthrough — das Original hat hier kein break (en01.c:10124/10126). */
@@ -5811,8 +5828,7 @@ void recvx_en01_dd02(RECVX_ENEMY_WORK* w)
         gpos.y = w->py;                                              /* :10146 */
 
         if (!(w->stflg & 0x100000u)) {                               /* :10147 */
-            /* bhSetBloodPoolLnk(epw, &gpos, epw->ay, &en01_BldTbl, 0). */
-            en01_gap(w, "bhSetBloodPoolLnk (effsub3.c:145)");         /* :10149 */
+            en01_blood_pool_lnk(w, w, &gpos, w->ay, &recvx_en01_bld_tbl); /* :10149 */
         }
 
         if (!(p->flags & 0x100000u) && (w->stflg & 0x100000u)) {      /* :10152 */
@@ -8574,12 +8590,9 @@ void recvx_en01_dd02_b(RECVX_ENEMY_WORK* w)
             ps.z = 3.0f;
             if (en01_joint_point(w, 10u, &ps, &pd)) {                /* :757 */
                 pd.y = w->py;                                        /* :759 */
-                /* bhSetBloodPoolLnk(NULL, &pd, epw->ay, &en01_BldTbl, 0)
-                   (en01b.c:761). Der EN01-Vertrag kennt nur bhLinkBlood,
-                   bhEne_SetBlood3 und bhEne_SetBlood4 — andere
-                   Originalroutinen. Ohne den Dienst entsteht hier keine
-                   Ersatzlache. */
-                en01_gap(w, "bhSetBloodPoolLnk (effsub3.c:145)");
+                /* bhSetBloodPoolLnk(NULL, &pd, epw->ay, &en01_BldTbl, 0):
+                   lkwkp NULL (en01b.c:763). */
+                en01_blood_pool_lnk(w, NULL, &pd, w->ay, &recvx_en01_bld_tbl);
             }
         }
 

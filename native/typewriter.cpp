@@ -1,9 +1,11 @@
 #include "typewriter.h"
+#include "back_color.h"
 #include <algorithm>
 #include <stdexcept>
 namespace recvx {
 void Typewriter::open(Mode mode,const std::filesystem::path& saves_dir){
     reset();mode_=mode;slots_=list_save_slots(saves_dir);active_=true;
+    set_back_color(0); // TypeWriterTextureInit case 6 (bup_00.c:299-304): ts_flg |= 0x80, njSetBackColor(0,0,0)
     // Ohne Memory-Karten-Auswahl (Plattformanpassung) startet der Bildschirm
     // direkt im SelectFile nach dem Verzeichnis-Scan. Beide Originalpfade setzen
     // lSelectFileNumber auf null, nicht auf den ersten freien/belegten Slot.

@@ -14,6 +14,7 @@
 #include "cnk_light.h"
 #include "weapon_flash.h"
 #include "weapon_tables.h"
+#include "renderer.h"
 #include <algorithm>
 #include <map>
 #include <cmath>
@@ -1091,7 +1092,9 @@ static void group4_custom_draw(){
         auto s=work(217,1,{2,90,3});step_effect_sprite(s,c,&queued);
         check(!queued&&s.mode0==1&&s.extra&&(s.flg&0x20000000u)&&s.ct0>=10&&s.ct0<=20,"bhEff217 init differs");
         step_effect_sprite(s,c,&queued);
-        check(queued&&s.quads.size()==16&&!s.quads[0].textured&&s.quads[0].vertices[0].col==0xff322320u,"bhEff217 polygon particles differ");
+        // njPtclDrawPolygon(pos, 16, ..) gibt num = 16 Eckpunkte aus, zwei je Punkt: acht GS-Sprites
+        // (ELF njPtclDrawPolygon 0x002D8334/0x002D845C, Ps2AddPrim3D-Schleife 0x002CBEBC).
+        check(queued&&s.quads.size()==8&&!s.quads[0].textured&&s.quads[0].vertices[0].col==0xff322320u,"bhEff217 polygon particles differ");
         { // njPtclDrawPolygon: +-h Ninja-Bildschirmpunkte, unabhaengig von der Tiefe (ps2_NinjaPtcl.c:52-58)
           SceneCamera cam;cam.perspective=10922;NJS_MATRIX view;camera_view_matrix(cam,view);NJS_MATRIX inv;std::copy_n(&view[0],16,&inv[0]);njInvertMatrix(&inv);
           const float dist=320.0f/std::tan(0.0000958738f*float(cam.perspective/2));
@@ -1107,7 +1110,10 @@ static void group4_custom_draw(){
         step_effect_sprite(s,c,&queued);check(!queued&&s.mode0==2&&s.ct2==0xff&&s.ct0>=30&&s.ct0<=50,"bhEff143 second pass seeds the particles");
         step_effect_sprite(s,c,&queued);check(!queued,"bhEff143 stays idle while mode1 is 0");
         s.mode1=1;step_effect_sprite(s,c,&queued);
-        check(queued&&s.quads.size()==16&&s.quads[0].textured&&s.quads[0].category==4&&s.quads[0].frame<4&&s.quads[0].point_filter,"bhEff143 sprite particles differ");
+        // njPtclDrawSprite(pos, 16, 0.1, 0.15): acht GS-Sprites aus den Punkten 0..7; die halbe
+        // Breite iz*w*dist traegt kein AspectW, in Sichtkoordinaten also 0.1/1.174 (ps2_NinjaPtcl.c:129/134).
+        check(queued&&s.quads.size()==8&&s.quads[0].textured&&s.quads[0].category==4&&s.quads[0].frame<4&&s.quads[0].point_filter,"bhEff143 sprite particles differ");
+        check(std::fabs(s.quads[0].vertices[1].x-0.1f/1.174f)<1e-6f&&std::fabs(s.quads[0].vertices[3].y-0.15f)<1e-6f,"bhEff143 GS sprite size differs from iz*w*dist without AspectW");
         check((s.quads[0].vertices[0].col>>24)==0xffu,"bhEff143 alpha comes from ct2");
     }
     { // 243: Rollwinkel aus der Kamera, vier bzw. zwoelf Bilder
@@ -2099,13 +2105,124 @@ static void effect_call_clip(){
     check(pixels(quad(behind,1,false))==half,"njDrawPolygonSub3D lost the triangle without the scr.z < 0 vertex");
 }
 
+// effsub1.c:5197-5204 bhEff023: mdlver 0 in sys->ef_pnc, sonst sys->ef_trs. effect.c:886 zeichnet ef_pnc
+// unter njControl3D(0x4000); Ps2AddPrim3D loescht dann ABE (ps2_dummy.c:510-516): kein Mischen,
+// Alphatest GREATER 0 (:543), sofort mit Tiefe (Ps2ZbuffOn :2011) statt ueber die OT.
+static void explosion_punch_through(){
+    EffectContext c;
+    for(unsigned mdlver:{0u,1u}){
+        auto s=work(23,0,{1,1,1});s.mdlver=mdlver;bool queued=false;
+        check(step_effect_sprite(s,c,&queued)&&queued,"bhEff023 did not enter a draw list");
+        check(s.punch_queued==(mdlver==0),"bhEff023 mdlver 0 must go to sys->ef_pnc, others to sys->ef_trs");
+        SceneCamera camera;camera.perspective=8192;Scene scene;
+        append_effect_sprite(scene,s,{0,0,-40.0f},{1,1,1},camera,0);
+        check(scene.triangles.size()==2,"bhEff023 quad not drawn");
+        for(const auto& t:scene.triangles){
+            if(mdlver==0)check(t.punch_through&&t.blend==SceneBlend::Opaque&&t.depth_write,"ef_pnc draws with the ALPHA register or without depth instead of GS without ABE");
+            else check(!t.punch_through&&t.blend==SceneBlend::Ninja&&!t.depth_write,"ef_trs lost its 8/10 blend");
+        }
+    }
+    // GS ohne ABE: ein Texel mit Alpha > 0 schreibt seine Farbe ganz, Alpha 0 faellt am Test durch.
+    Scene scene;scene.background=0xff202020;{std::vector<std::uint32_t> px(16,0x00ffffffu);std::fill(px.begin(),px.begin()+4,0x80c0c0c0u);std::fill(px.begin()+4,px.begin()+8,0x10c0c0c0u); /* Zeile 0 nur fuer die hoechste Alpha: kein Teilabdeckungsmass */scene.textures={SceneTexture{4,4,TexturePixels(px)}};}
+    SceneTriangle a;a.vertices={SceneVertex{{-4,-4,2},0,0},SceneVertex{{4,-4,2},1,0},SceneVertex{{4,4,2},1,1}};
+    a.color=0xffffffff;a.world_lit=true;a.textured=true;a.blend=SceneBlend::Opaque;a.punch_through=true;a.texture_filter=SceneTextureFilter::Point;
+    auto b=a;b.vertices={a.vertices[0],a.vertices[2],SceneVertex{{-4,4,2},0,1}};scene.triangles={a,b};
+    SoftwareRenderer renderer(32,32);renderer.set_supersampling(1);NJS_MATRIX view;njUnitMatrix(&view);
+    for(bool filter:{false,true}){
+        renderer.set_texture_filtering(filter);scene.triangles[0].texture_filter=scene.triangles[1].texture_filter=filter?SceneTextureFilter::Linear:SceneTextureFilter::Point;
+        renderer.draw_view(scene,view,16,16);
+        check(renderer.pixels()[2*32+16]==0xffc0c0c0u,"punch-through texel with alpha 0x10 is blended instead of written whole");
+        check(renderer.pixels()[30*32+16]==0xff202020u,"punch-through texel with alpha 0 is not rejected by the alpha test");
+        check(renderer.covered_pixels()>0,"punch-through does not write depth");
+        // Eine spaeter eingereihte, weiter hinten liegende Flaeche darf nur durch die Alpha-0-
+        // Loecher sichtbar sein. Das prueft die Tiefe am selben Pixel, nicht nur irgendeinen Eintrag.
+        auto back=a;for(auto& v:back.vertices){v.position.x*=2;v.position.y*=2;v.position.z=4;}
+        back.textured=false;back.punch_through=false;back.color=0xff2030a0u;
+        auto back2=back;back2.vertices={back.vertices[0],back.vertices[2],SceneVertex{{-8,8,4}}};
+        scene.triangles.push_back(back);scene.triangles.push_back(back2);
+        renderer.draw_view(scene,view,16,16);
+        check(renderer.pixels()[2*32+16]==0xffc0c0c0u&&renderer.depth()[2*32+16]==.5f,"later geometry overwrites punch-through depth");
+        check(renderer.pixels()[30*32+16]==0xff2030a0u&&renderer.depth()[30*32+16]==.25f,"alpha-0 hole blocks later geometry");
+        scene.triangles.resize(2);
+    }
+}
+
+// Diagnoseaufstellung im echten Raumbesitzer, kein natuerliches Durchspielen: eff023 aus dem
+// gemeinsamen eff[512]-Pool muss mit originalem SYSTEM-Atlas durch RoomWorld::append gelangen.
+static void explosion_punch_world(const std::filesystem::path& data){
+    const auto bytes=read_asset_file(data/"rooms/RM_0080.RDT",64*1024*1024);const auto stage=decode_scene(bytes);
+    auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(bytes,stage,actor,motion,frame,audio,data,{},"RM_0080");
+    world.clear_effects();world.set_simulation_flags(8u);
+    SceneCamera camera;camera.perspective=8192;
+    EffectSpawn spawn;spawn.id=23;spawn.flg=1;spawn.type=0;spawn.mdlver=0;spawn.scale={8,8,8};spawn.position={0,0,-40};
+    const int slot=world.spawn_unlinked_effect(spawn);check(slot>=0,"bhEff023 cannot use the existing world pool");
+    const auto* atlas=world.effect_group_textures(9);check(atlas&&!atlas->empty(),"bhEff023 original SYSTEM atlas 9 missing");
+    unsigned visible=0;
+    for(unsigned pass=0;pass<16;++pass){
+        world.tick();Scene draw;world.append(draw,{},camera);
+        std::vector<SceneTriangle> punch;for(const auto& t:draw.triangles)if(t.punch_through)punch.push_back(t);
+        if(pass<15){
+            check(world.effect_visible(unsigned(slot))&&punch.size()==2,"ef_pnc work does not reach productive world drawing");
+            for(const auto& t:punch)check(t.textured&&t.texture<draw.textures.size()&&!draw.textures[t.texture].pixels.empty()&&t.depth_write&&t.blend==SceneBlend::Opaque&&t.ninja_primitive&&t.ninja_screen_reject,"world punch-through lost texture, depth, immediate pass or call clip rule");
+            Scene only;only.background=0xff202020;only.textures=draw.textures;only.triangles=std::move(punch);
+            SoftwareRenderer image(128,128);image.set_supersampling(1);image.draw(only,camera);
+            visible+=unsigned(std::count_if(image.pixels().begin(),image.pixels().end(),[](auto p){return p!=0xff202020u;})>0);
+        }else check(!world.effect_visible(unsigned(slot))&&punch.empty(),"terminated ef_pnc work still draws");
+    }
+    check(visible>0,"original SYSTEM atlas produces no punch-through pixels");
+    world.clear_effects();Scene cleared;world.append(cleared,{},camera);
+    check(std::none_of(cleared.triangles.begin(),cleared.triangles.end(),[](const auto& t){return t.punch_through;}),"clear_effects retains ef_pnc geometry");
+}
+
+static void punch_filter_rgb(){
+    // TFX MODULATE vor ATST (ps2_dummy.c:1615-1625/1653), ABE aus: Texel-RGB wird NICHT mit
+    // At premultipliziert. Die gruenen Texel mit At 0 tragen zur bilinearen RGB-Mischung bei,
+    // erst die separat gefilterte Alpha entscheidet ueber Farbe UND Tiefe.
+    {
+        Scene s;s.background=0xff202020;SceneTexture t;t.width=2;t.height=1;
+        t.pixels=TexturePixels(std::vector<std::uint32_t>{0xff0000ffu,0x0000ff00u});t.clamp_u=t.clamp_v=true;s.textures={t};
+        SceneTriangle a;a.vertices={SceneVertex{{-4,-4,2},.5f,.5f},SceneVertex{{4,-4,2},.5f,.5f},SceneVertex{{4,4,2},.5f,.5f}};
+        a.color=0xffffffff;a.world_lit=true;a.textured=true;a.blend=SceneBlend::Opaque;a.punch_through=true;a.texture_filter=SceneTextureFilter::Linear;
+        auto b=a;b.vertices={a.vertices[0],a.vertices[2],SceneVertex{{-4,4,2},.5f,.5f}};s.triangles={a,b};
+        SoftwareRenderer r(32,32);r.set_supersampling(1);r.set_render_threads(1);NJS_MATRIX view;njUnitMatrix(&view);
+        r.draw_view(s,view,16,16);
+        check(r.pixels()[16*32+16]==0xff008080u,"punch-through RGB filtering is alpha-weighted: half opaque blue/transparent green must be cyan, not blue");
+        check(r.depth()[16*32+16]==.5f,"punch-through filtered alpha>0 must write full depth");
+        // Derselbe Filterbesitzer fuer die optionale Host-Minifikation: ein 4x4-Schachbrett
+        // muss auch im Mip cyan bleiben; ein nachtraegliches Entmischen repariert premultiplizierte Mips nicht.
+        std::vector<std::uint32_t> checker(16);for(unsigned y=0;y<4;++y)for(unsigned x=0;x<4;++x)checker[y*4+x]=(x+y)&1?0x0000ff00u:0xff0000ffu;
+        s.textures[0].width=s.textures[0].height=4;s.textures[0].pixels=TexturePixels(checker);s.textures[0].invalidate_mips();
+        for(auto& tr:s.triangles){tr.texture_filter=SceneTextureFilter::Default;for(auto& v:tr.vertices){v.u=(v.position.x+4)*8;v.v=(v.position.y+4)*8;}}
+        r.set_texture_filtering(true);r.draw_view(s,view,16,16);
+        check(r.pixels()[16*32+16]==0xff008080u,"punch-through mip RGB was averaged with alpha weighting");
+    }
+
+}
+
+// Lazy Punch-Mips: Aufbau vor Bandthreads, Fingerprint-/Detach-Vertrag der SceneTexture.
+static void punch_lazy_cache(){
+Scene s;s.background=0xff202020;SceneTexture t;t.width=t.height=4;t.clamp_u=t.clamp_v=true;std::vector<unsigned> px(16);for(unsigned y=0;y<4;++y)for(unsigned x=0;x<4;++x)px[y*4+x]=(x+y)&1?0x0000ff00:0xff0000ff;t.pixels=TexturePixels(px);s.textures={t};
+SceneTriangle a;a.vertices={SceneVertex{{-4,-4,2},0,0},SceneVertex{{4,-4,2},64,0},SceneVertex{{4,4,2},64,64}};a.color=0xffffffff;a.world_lit=true;a.textured=true;auto b=a;b.vertices={a.vertices[0],a.vertices[2],SceneVertex{{-4,4,2},0,64}};s.triangles={a,b};SoftwareRenderer r(32,32);r.set_supersampling(1);r.set_texture_filtering(true);r.set_render_threads(1);NJS_MATRIX m;njUnitMatrix(&m);
+auto draw=[&]{r.draw_view(s,m,16,16);};
+for(auto filter:{SceneTextureFilter::Linear,SceneTextureFilter::Default}){for(auto&tr:s.triangles)tr.texture_filter=filter;draw();check(s.textures[0].filter_cache->punch_mips.empty(),"normal filtered texture eagerly created punch mips");}
+for(auto&tr:s.triangles){tr.punch_through=true;tr.texture_filter=SceneTextureFilter::Linear;}draw();check(s.textures[0].filter_cache->punch_mips.empty(),"Punch Linear must not create unused mips");
+for(auto&tr:s.triangles)tr.texture_filter=SceneTextureFilter::Default;draw();auto shared=s.textures[0].filter_cache;check(!shared->punch_mips.empty(),"Punch Default failed to create mips");check(r.pixels()[16*32+16]==0xff008080,"Punch mip colour not cyan");
+// Unchanged texture copies reuse the cache. Pixel edit must detach both pixels and cache;
+// another original owner remains valid and unchanged.
+SceneTexture other=s.textures[0];draw();check(s.textures[0].filter_cache==shared,"unchanged Punch rebuilt the cache");
+s.textures[0].pixels[0]=0xffffffff;draw();check(s.textures[0].filter_cache!=shared,"pixel revision did not detach shared cache");check(!s.textures[0].filter_cache->punch_mips.empty(),"detached Punch lost mip chain");check(s.textures[0].filter_cache->punch_mips.back()!=shared->punch_mips.back(),"pixel mutation reused stale Punch mip");check(other.filter_cache==shared&&other.filter_cache->punch_mips.back()[0]==0x7f008080,"mutated copy corrupted original cache");
+s.textures[0].pixels.assign(16,0xffff0000);for(auto&tr:s.triangles)tr.punch_through=false;draw();check(s.textures[0].filter_cache->punch_mips.empty(),"ordinary draw after revision retained stale punch cache");for(auto&tr:s.triangles)tr.punch_through=true;draw();check(r.pixels()[16*32+16]==0xffff0000,"new Punch reused old pixel data");
+s.textures[0].invalidate_mips();check(s.textures[0].filter_cache->punch_mips.empty(),"explicit invalidation retained Punch chain");draw();check(r.pixels()[16*32+16]==0xffff0000,"explicit invalidation changed colour");
+}
+
 int main(int argc,char** argv){
     try{
         _Make_SinTable();
         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
-        muzzle_weapon229();flame352();effect_call_clip();
+        muzzle_weapon229();flame352();effect_call_clip();explosion_punch_through();punch_filter_rgb();punch_lazy_cache();
         effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();
-        if(argc>1){const std::filesystem::path data=argv[1];steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);ntx2d_room(data);afterimage_room(data);published_afterimage_models(data);}
+        if(argc>1){const std::filesystem::path data=argv[1];explosion_punch_world(data);steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);ntx2d_room(data);afterimage_room(data);published_afterimage_models(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}
 }

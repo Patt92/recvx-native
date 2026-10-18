@@ -47,6 +47,28 @@ const Row rm9[] = { {0,0,1,-44.0f,-20000.0f}, {3,0,0,-1.0f,-20000.0f}, {3,0,1,-1
 const Row* const rm_stage[]={ rm0,rm1,rm2,rm3,rm4,rm5,rm6,rm7,rm8,rm9 };
 const unsigned rm_count[]={ 8,5,5,4,4,3,6,3,1,12 };
 
+// bhChangeClipVolume: ViewClipStage[stage] (event.c:13567-13624), Schluessel (room, rcase,
+// evc_no); die Spalten near/far des VIEW_CLIP-Satzes tragen hier x/y fuer _Make_ClipVolume.
+const Row cv3[] = { {15,0,3,-320.0f,-240.0f} };
+const Row cv5[] = { {0,1,0,1024.0f,960.0f} };
+const Row cv6[] = { {10,0,24,1024.0f,960.0f}, {10,0,30,1024.0f,960.0f} };
+const Row cv9[] = { {28,0,7,1024.0f,960.0f}, {29,0,0,-320.0f,-240.0f}, {35,0,45,1024.0f,960.0f} };
+// Stages ohne Zeile (nur Sentinel im Original) haben keinen Satz.
+const Row* const cv_stage[]={ nullptr,nullptr,nullptr,cv3,nullptr,cv5,cv6,nullptr,nullptr,cv9 };
+const unsigned cv_count[]={ 0,0,0,1,0,1,2,0,0,3 };
+
+// bhChangeClipVolumeRM: ViewClipStage[sys->stg_no] (event.c:13652-13741), Schluessel
+// (room, cam.ncut); rcase gehoert nicht zum Suchschluessel.
+const Row cr0[] = { {7,0,6,1024.0f,960.0f}, {9,0,0,1024.0f,960.0f}, {9,0,2,1024.0f,960.0f}, {15,0,0,1740.0f,1740.0f} };
+const Row cr1[] = { {0,0,1,1024.0f,960.0f}, {6,0,1,1024.0f,960.0f} };
+const Row cr3[] = { {8,0,7,1024.0f,960.0f}, {12,0,3,1024.0f,960.0f}, {16,0,1,1024.0f,960.0f} };
+const Row cr5[] = { {54,0,7,1024.0f,960.0f}, {63,0,3,1024.0f,960.0f}, {66,0,1,1024.0f,960.0f}, {68,0,1,1024.0f,960.0f} };
+const Row cr6[] = { {3,0,0,1024.0f,960.0f}, {3,0,1,1024.0f,960.0f}, {9,0,0,1024.0f,960.0f}, {9,0,1,1024.0f,960.0f} };
+const Row cr7[] = { {3,1,3,1024.0f,960.0f}, {7,0,5,1024.0f,960.0f}, {8,0,3,1024.0f,960.0f}, {8,0,4,1024.0f,960.0f}, {9,0,1,1024.0f,960.0f}, {20,0,1,1024.0f,960.0f}, {22,0,1,1024.0f,960.0f} };
+const Row cr9[] = { {3,0,0,1024.0f,960.0f}, {3,0,1,1024.0f,960.0f}, {3,0,2,1024.0f,960.0f}, {5,0,0,1740.0f,1740.0f}, {5,0,1,1740.0f,1740.0f}, {5,0,2,1740.0f,1740.0f}, {5,0,3,1740.0f,1740.0f}, {12,0,1,1740.0f,1740.0f}, {12,0,2,1740.0f,1740.0f}, {15,0,3,1024.0f,960.0f}, {15,0,8,1024.0f,960.0f}, {18,0,1,1740.0f,1740.0f}, {32,0,8,1024.0f,960.0f}, {32,1,8,1024.0f,960.0f} };
+const Row* const cr_stage[]={ cr0,cr1,nullptr,cr3,nullptr,cr5,cr6,cr7,nullptr,cr9 };
+const unsigned cr_count[]={ 4,2,0,3,0,4,4,7,0,14 };
+
 // Linearer Scan wie im Original: erster Schlüsseltreffer gewinnt, sonst null.
 // `with_rcase` wählt den Drei-Schlüssel-Vergleich der Event- gegen den
 // Zwei-Schlüssel der Raumtabelle.
@@ -70,4 +92,18 @@ ViewClip event_view_clip(unsigned stage,unsigned room,unsigned rcase,unsigned ev
     if(stage>=10)return fallback;
     const Row* r=find(ev_stage[stage],ev_count[stage],room,rcase,evc_no,true);
     return r?ViewClip{-r->near,-r->far}:fallback;}
+// ps2_NaView.c:298 _Make_ClipVolume; das anschliessende _Make_ClipMatrix ist die
+// Clipcode-Rechnung des Renderers (strip_clip_code) mit diesen Werten.
+ClipVolume make_clip_volume(float x,float y){
+    if(x<0&&y<0)return {320.0f,240.0f,-x*0.5f,-y*0.5f};
+    return {x,y,2047.0f,2047.0f};}
+// event.c:13628-13643 / :13745-13761: x = 320, y = 240, erster Schluesseltreffer gewinnt.
+ClipVolume room_clip_volume(unsigned stage,unsigned room,unsigned cut){
+    if(stage>=10)return make_clip_volume(320.0f,240.0f);
+    const Row* r=find(cr_stage[stage],cr_count[stage],room,0,cut,false);
+    return r?make_clip_volume(r->near,r->far):make_clip_volume(320.0f,240.0f);}
+ClipVolume event_clip_volume(unsigned stage,unsigned room,unsigned rcase,unsigned evc_no){
+    if(stage>=10)return make_clip_volume(320.0f,240.0f);
+    const Row* r=find(cv_stage[stage],cv_count[stage],room,rcase,evc_no,true);
+    return r?make_clip_volume(r->near,r->far):make_clip_volume(320.0f,240.0f);}
 }

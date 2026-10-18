@@ -1,4 +1,5 @@
 #include "map_render.h"
+#include "back_color.h"
 #include "binary_view.h"
 #include "map_tables.h"
 #include <algorithm>
@@ -113,7 +114,7 @@ void MapRenderer::add_model(const std::vector<SceneTriangle>& geometry,const NJS
 void MapRenderer::draw(SoftwareRenderer& image,const MapScreen& map){
     refresh(map);
     scene_=Scene{};
-    scene_.background=0xff000000u;     /* njSetBackColor(0,0,0), map.c:69/359 */
+    scene_.background=installed_back_pixel(); /* Db.clear; MapScreen sets it with njSetBackColor(0,0,0), map.c:71/359 */
     stats_=MapRenderStats{};
     scene_.textures=map_textures_;
     const std::size_t stage_base=scene_.textures.size();

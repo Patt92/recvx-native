@@ -154,8 +154,44 @@ static void pickup_resets_status(const std::filesystem::path& root){
     }
     std::cout<<"GetItem screen starts from a fresh status state (StatusInit, sub1.c:3308).\n";
 }
+// sub1.c:3447-3460 StatusMain subscreenmode 8: der GetItem-Bildschirm kennt kein CursorMove/MainCommand/
+// ItemCommand (nur subscreenmode 2, sub1.c:3407-3418). Nach der Ja-Antwort auf 157 (GetItem testmode 1 -> 2,
+// sub1.c:3877-3895) steht bis bhSetMessage(1, 158) im naechsten Durchlauf (sub1.c:3898-3903) keine Meldung;
+// eine Taste in diesem Durchlauf darf den Statusbildschirm nicht erreichen. Nutzerbefund 2026-10-18 (RM_0070,
+// Calico/Munition): die Befehlsbeschreibung 180 - maincsr (FILE/ITEM) stand unter "You've taken the ...".
+static void pickup_gap_pad(const std::filesystem::path& root){
+    const auto room=read_asset_file(root/"rooms/RM_0000.RDT",64*1024*1024);const auto stage=decode_scene(room);GameUi ui(root);
+    struct Press{const char* name;Action action;};
+    for(const Press& press:{Press{"Cancel",Action::Cancel},Press{"Left",Action::Left},Press{"Up",Action::Up},Press{"Confirm",Action::Confirm},Press{"Inventory",Action::Inventory}}){
+        Inventory inventory;StatusMenu menu;MessageDialog dialog;auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t clock=0;
+        AudioMixer audio(root);RoomWorld world(room,stage,actor,motion,clock,audio,root);EventVm events(room,inventory,dialog);
+        GameplayInput gameplay(inventory,menu,dialog,&events);
+        menu.message_source=[&](unsigned index){return ui.system_message(index);};
+        events.binding=[&](const EventCommand& c){return world.bind(c);};events.animation_frame=[&](unsigned k,unsigned i){return world.frame(k,i);};
+        events.audio_active=[&](unsigned slot){return audio.active(slot);};events.audio_stop=[&](unsigned slot){audio.stop(slot);};events.movie_active=[]{return false;};
+        events.item_message=[&](unsigned index,unsigned item){auto message=ui.system_message(index);for(unsigned i=0;i+1<message.size();++i)if(message[i]==0xff03&&message[i+1]==0xffff)message[++i]=std::uint16_t(item);return message;};
+        events.initialize();
+        auto tick=[&](const InputFrame& frame){check(!gameplay.apply(frame),"pickup gap: input quits");events.tick();gameplay.synchronize();world.tick();audio.mix();};
+        auto pressed=[](Action action){InputFrame frame;frame.pressed[unsigned(action)]=true;frame.held[unsigned(action)]=true;return frame;};
+        const std::string name=press.name;
+        events.flags[10][0]|=0x10u;events.values[8]=8u; // Testaufstellung: cb_flg 0x10 GetItem, sys->sb_id 8 (Messer)
+        // Frage 157 ganz aufgebaut, Einfahrt (statusflg 0x40) vorbei.
+        for(unsigned i=0;i<300&&!(dialog.active()&&dialog.index()==157&&dialog.choosing()&&!menu.slide.pad_locked());++i)tick(InputFrame{});
+        check(menu.active&&menu.pickup==8&&dialog.active()&&dialog.index()==157&&dialog.choosing(),"pickup gap: question 157 not reached");
+        tick(pressed(Action::Confirm)); // Ja: testmode 1 -> 2, die Frage verschwindet (sub1.c:3880-3887)
+        check(menu.active&&menu.pickup==8&&!dialog.active(),"pickup gap: answered question did not leave the testmode-2 pass without a message");
+        tick(pressed(press.action)); // die Taste faellt genau in diesen Durchlauf
+        for(unsigned i=0;i<4&&!(dialog.active()&&dialog.index()==158);++i)tick(InputFrame{});
+        check(dialog.active()&&dialog.index()==158,"pickup gap: message 158 missing after "+name);
+        check(menu.active&&!menu.closing&&menu.pickup==8,"pickup gap: "+name+" closed the GetItem screen");
+        check(!menu.nav&&!menu.nav_pressed&&menu.maincsr==3,"pickup gap: "+name+" entered MainCommand; its description 180 - maincsr overdraws message 158");
+        check(!menu.commands&&!menu.examining&&!menu.combining&&!menu.files&&menu.selected==1,"pickup gap: "+name+" reached CursorMove/ItemCommand on the GetItem screen");
+    }
+    std::cout<<"GetItem screen: a press between question 157 and message 158 reaches no CursorMove/MainCommand (sub1.c:3447).\n";
+}
 int main(int argc,char** argv){try{
     if(argc==3&&std::string(argv[1])=="--pickup-reset"){pickup_resets_status(std::filesystem::u8path(argv[2]));return 0;}
+    if(argc==3&&std::string(argv[1])=="--pickup-pad"){pickup_gap_pad(std::filesystem::u8path(argv[2]));return 0;}
     SDL_SetMainReady();SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0,"SDL controller init failed");Quit quit;_Make_SinTable();
     if(argc==3&&std::string(argv[1])=="--dialog-edges"){dialog_edges(std::filesystem::u8path(argv[2]));return 0;}
     if(argc==3&&std::string(argv[1])=="--box-pad"){box_pad_frames(std::filesystem::u8path(argv[2]));return 0;}

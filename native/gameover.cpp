@@ -1,4 +1,5 @@
 #include "gameover.h"
+#include "back_color.h"
 #include "asset_io.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
@@ -190,6 +191,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                     g.md1=10;
                     g.set_fade(0,30.f);
                     for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,30);
+                    set_back_color(0); // gameover.c:266
                     events.flags[6][0]=0x6C;events.flags[11][0]&=~0x100100u;
                     events.flags[10][0]|=0x40000000u;
                     events.flags[5][0]|=0x5u; // st_flg 0x1 | 0x4
@@ -203,6 +205,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                 ++g.md1;
                 g.set_fade(0,30.f);
                 for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,60);
+                set_back_color(0); // gameover.c:334
                 events.flags[6][0]=0x20;
                 events.flags[11][0]&=~0x100100u;
             }
@@ -314,11 +317,12 @@ void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
     const auto& g=*impl_;
     if(!g.running)return;
     if(g.md1!=0){
-        // njSetBackColor(0,0,0) plus njSetMatrix(NULL, cmat): the mesh is built
+        // Db.clear (njSetBackColor(0,0,0) at the end of md1 0, gameover.c:266/334)
+        // plus njSetMatrix(NULL, cmat): the mesh is built
         // in camera space, so the view is the base matrix alone. In the death
         // scene the camera sits at (0, 10, 35) and the mesh moves with it.
         const bool death=g.md1==10;
-        Scene scene;scene.background=0xff000000u;
+        Scene scene;scene.background=installed_back_pixel();
         const auto& atlas=g.mesh_textures();
         const bool textured=atlas.size()>4;
         if(textured)scene.textures.push_back(atlas[4]);

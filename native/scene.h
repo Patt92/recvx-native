@@ -41,6 +41,7 @@ struct TextureFilterCache {
     bool ready=false,cutout=false,uniform_alpha=false;
     std::uint64_t fingerprint=0;std::uint32_t max_alpha=0;
     std::vector<std::vector<std::uint32_t>> mips;
+    std::vector<std::vector<std::uint32_t>> punch_mips; // RGB ohne Alpha-Gewichtung (ohne ABE)
 };
 struct SceneTexture {
     unsigned width=0,height=0;
@@ -75,6 +76,9 @@ struct SceneTriangle {
     bool gouraud=false; // color is the unlit base; vertices carry light factors (Ninja per-vertex lighting)
     bool vertex_alpha=false; // vertices carry their own alpha factor (Gouraud RGBA)
     SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
+    // GS ohne ABE mit TEST ATST GREATER 0 (Punch-Through, ps2_dummy.c:510-516/543): Texel mit Alpha 0
+    // fallen weg, alle anderen schreiben Farbe und Tiefe ganz - keine Teilabdeckung wie bei Ausschnittstexturen.
+    bool punch_through=false;
     bool fogged=true; // njFogDisable um einen Effekt-Zeichenaufruf (effsub2.c bhEff_Draw3DSprite)
     // Ps2SetFogColorSys um genau einen Zeichenaufruf (ps2_NaDraw.c:469 njDrawTexture3DHEx
     // nimmt dafuer die Offsetfarbe des ersten Eckpunkts) und danach Ps2SetFogColor zurueck.
@@ -114,8 +118,24 @@ struct SceneTriangle {
     // Eckpunkt bekommt ADC und wird nicht gezeichnet. Eine Z-Klippung gibt es dort nicht.
     // ninja_primitive != 0 nummeriert den Aufruf; seine Dreiecke folgen aufeinander.
     std::uint32_t ninja_primitive=0;bool ninja_screen_reject=false;
+    // Nur Metadaten, KEIN Easy-Default des allgemeinen Dekoders. Die belegte
+    // bhPutModel-Route entscheidet aus draw_tp und UA/DB, ob der OT-Cache CLAMP
+    // statt des Texturheaders setzt (ps2_dummy.c:1420). Andere Besitzer bleiben offen.
+    std::int16_t cnk_strip_head=-1;bool texture_cache_clamp=false;
+    // Spiegelpass (sys->st_flg 0x100, Ebene sys->mr_pl): 1 = zweiter bhPutModel-Aufruf unter
+    // njMirror(cam.mtx) (MdlPut.c:57-79/89-111), 2 = bhEtcMirrorDrawModel (game.c:77-91). Die Lage
+    // bleibt die ungespiegelte Weltlage, der Renderer zeichnet mit cam.mtx * Scene::mirror_matrix.
+    std::uint8_t mirror=0;
+    // bhSetHideObject(offset) (cut.c:612): Wortversatz in hidobj; 4 im Spiegelpass (game.c:409).
+    std::uint8_t hidden_offset=0;
+    // bhPutModel(plp) (game.c:364/367): Dreieck des Spielerkoerpers; der Spiegeltest liest plp->mdflg 0x40.
+    bool player_body=false;
 };
-// colors in canvas order 0xAABBGGRR; blend_register = GS ALPHA of the draw (0x44 = njDrawLine3D default 8/6).
+// Expliziter bhPutModel-Zeichenpfad: draw_tp 0..3 (MdlPut.c:8-12/33-37),
+// UA/DB -> pCnkCsVu1FuncTbl (ps2_NinjaCnk.c:106/1921/2353), nur TransDouble(I)
+// -> Ps2AddPrim3DEx -> OT-Cache. Andere Zeichenbesitzer rufen dies nicht implizit auf.
+void route_model_texture_cache(std::vector<SceneTriangle>& triangles,unsigned draw_tp);
+// colors as NJS_COLOR 0xAARRGGBB = canvas order (SDL_PIXELFORMAT_ARGB8888); blend_register = GS ALPHA of the draw (0x44 = njDrawLine3D default 8/6).
 // inherit_blend: die Zeichenfunktion setzt kein Blendpaar (effsub3.c bhEff308Drw); der Raumbesitzer
 // traegt das Register des ef_fnc-Vorgaengers ein.
 struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;std::uint64_t blend_register=0x44;bool inherit_blend=false;};
@@ -125,6 +145,9 @@ struct SceneCamera {
     float distance=0;
     std::int32_t perspective=8192;
     float clip_near=0.05f,clip_far=0; // njClipZ (bhChangeViewClip*), set by the runtime; far 0 = unlimited
+    // ClipVolume.x/y (_Make_ClipVolume, ps2_NaView.c:298) der Streifen-Clipmatrix ClipMatrix2;
+    // bhChangeClipVolume/bhChangeClipVolumeRM, vom Runtime gesetzt. Grundwert ps2_NaView.c:24.
+    float clip_volume_x=320.0f,clip_volume_y=240.0f;
     std::array<std::uint32_t,16> hidden_objects{};
     std::uint16_t flags=0;
     std::uint32_t fog_color=0;float fog_near=0,fog_far=0; // RDT CAM_WRK b8/bc/c0, signed distances
@@ -177,6 +200,7 @@ struct Scene {
     std::uint32_t fog_color=0; // njSetFogColor (sync.c:163/177/200): 0x00RRGGBB of cam.fog_col or sys->fog_col
     struct AmbientWrite {
         std::size_t triangle=0;NJS_POINT3 color{};unsigned phase=0,object=0;bool camera_mask=false;
+        std::uint8_t hidden_offset=0; // SceneTriangle::hidden_offset der Raumspiegelung
     };
     std::vector<AmbientWrite> ambient_writes; // ordered material writes, also for empty polygon lists
     NJS_POINT3 resolve_ambient_material(NJS_POINT3 initial={1,1,1},const SceneCamera* camera=nullptr);
@@ -190,6 +214,8 @@ struct Scene {
     std::vector<bool> cut_enabled,cut_tables; // per CUT_WORK: flg bit 0, decoded areas
     std::size_t object_count=0;
     std::uint32_t background=0xff101010;
+    // njMirror(I, &sys->mr_pl) dieses Bildes (ps2_NaMatrix.c:1016); gilt fuer Dreiecke mit mirror != 0.
+    bool mirror_enabled=false;std::array<float,16> mirror_matrix{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
 };
 Scene decode_scene(const std::vector<std::uint8_t>& room);
 std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>& data,std::size_t offset=0);
@@ -254,6 +280,10 @@ std::optional<ModelObjectVertices> model_object_vertices(const std::vector<std::
 // Streifenkopfes; proper: dieser Kopf ist zugleich der erste 66-Chunk der regulaeren
 // Chunk-Kette (sonst liest das Original einen Fremdkopf).
 struct ModelObjectUvWalk {bool found=false,proper=false;unsigned usr_num=0;std::size_t chunk=0;};
+// njplus.c:1564 npSetOffsetUV: addiert short-UVs in ALLEN Streifen 65/66 des
+// objP[object].model->plist. Kein Matrix-/Samplerzustand; der vorhandene Modellstrom
+// bleibt Quelle der Zeichenpfade. false = kein Modell/plist.
+bool offset_model_object_uv(std::vector<std::uint8_t>& data,std::size_t model,unsigned object,int offu,int offv);
 std::optional<ModelObjectUvWalk> model_object_uv_walk(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object);
 // Standalone MDL/PVP path shared by stage and animated character loading.
 Scene decode_model_asset(const std::vector<std::uint8_t>& data,std::size_t model_offset,

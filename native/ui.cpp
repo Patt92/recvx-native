@@ -444,8 +444,9 @@ void GameUi::draw_title(SoftwareRenderer& image){
 }
 Message GameUi::system_message(unsigned i)const{return read_message(messages_,system_table_,i);}
 void GameUi::direct_message(SoftwareRenderer& image,const Message& m,float x,float y,std::uint32_t color,float sx,float sy,float line,unsigned count,bool spaces_count)const{
-    // Original ARGB -> canvas AABBGGRR (scene.h), without altering atlas pixels.
-    color=(color&0xff00ff00u)|((color&0xffu)<<16)|((color>>16)&0xffu);
+    // bhDispMessageEx/bhDispFontEx (message.c:452-494) geben argb als NJS_COLOR.color
+    // 0xAARRGGBB weiter; njDrawPolygon2DM liest argb.r = Bit 16..23 (ps2_NaDraw2D.c:229-240).
+    // Das ist bereits die Leinwandordnung (SDL_PIXELFORMAT_ARGB8888): kein R/B-Tausch.
     const float start=x;const bool limited=count!=0;
     for(std::size_t i=0;i<m.size();++i){
         const unsigned c=m[i];if(c==0xffff)break;
@@ -475,6 +476,14 @@ void GameUi::draw_typewriter(SoftwareRenderer& image,const Typewriter& screen){
         PulseQuad q{{{x,y,u1,v1,color,0},{x+w,y,u2,v1,color,0},{x,y+h,u1,v2,color,0},{x+w,y+h,u2,v2,color,0}}};
         pulse_quad(image,typewriter_textures_.at(tex),q);
     };
+    // Jedes Bild beginnt schwarz: ControlTypewriter stoppt Task 7 (bhSysCallGame) und setzt
+    // njSetBackColor(0,0,0) (bup_00.c:299-304), der Doppelpuffer loescht bei jedem Tausch mit
+    // dieser Farbe (sceGsSetDefDBuffDc(...,1) ps2_dummy.c:89, Db.clear ps2_NaSystem.c:146-153,
+    // sceGsSwapDBuffDc ps2_NaSystem.c:86). Die Hintergrundtexturen sind schwarz gekeyt (Ps2AlphaIs000,
+    // ps2_dummy.c:1700) und fallen am Alphatest (TEST ATST GREATER 0, ps2_dummy.c:363) durch;
+    // dort bleibt diese Loeschfarbe stehen, nicht das vorige Bild. Ohne Loeschen mischte
+    // mcDispWindowFoundtion in diesen Loechern Bild fuer Bild erneut (Grau 118..128 statt 12).
+    std::fill(image.canvas().begin(),image.canvas().end(),0xff000000u);
     // DispBackGroundTexture, McSaveFile:977–1018; no invented flat background.
     quad(0,0,0,512,480,0,0,1,.93f,0xff909090);
     quad(1,512,0,128,480,0,0,.24f,.93f,0xff909090);
@@ -512,7 +521,7 @@ void GameUi::draw_typewriter(SoftwareRenderer& image,const Typewriter& screen){
         auto glyph=[&](unsigned code,float x,float y,std::uint32_t color){direct_message(image,Message{std::uint16_t(code),0xffff},x,y,color);};
         auto damaged_mark=[&](int x,int y){
             auto& pixels=image.canvas();
-            const auto red=0xff0000ffu;
+            const auto red=0xffff0000u; // Host-Marke (kein Original), Leinwand 0xAARRGGBB
             for(int py=0;py<14;++py)for(int px=0;px<8;++px)
                 if(px==0||px==7||py==0||py==13||((px==3||px==4)&&py>=3&&py<=8)||((px==3||px==4)&&py==10))
                     pixels[(y+py)*image.width()+x+px]=red;
@@ -590,6 +599,14 @@ void GameUi::draw_event_timer(SoftwareRenderer& image,const EventVm& events)cons
     glyph(16+msc/10);x+=20;glyph(16+msc%10);
 }
 std::string GameUi::item_name(unsigned id)const{return message_text(read_message(messages_,4,id));}
+namespace {
+// bhControlMessage (message.c:161-175): 0xFE01..0xFE05 waehlen col 0..4; bhDispFont
+// (message.c:401-431) setzt NJS_COLOR 0xAARRGGBB = Leinwandordnung: 1 = 0xFF20E0FF,
+// 2 = 0xFFFF2020, 3 = 0xFF20FF20, 4 = 0xFF606060, alles andere (auch col 0) 0xFFFFFFFF.
+std::uint32_t font_color(unsigned code){
+    switch(code){case 0xfe02:return 0xff20e0ffu;case 0xfe03:return 0xffff2020u;case 0xfe04:return 0xff20ff20u;case 0xfe05:return 0xff606060u;default:return 0xffffffffu;}
+}
+}
 void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,float scale,std::uint32_t color,bool dialogue,int selected_choice,float yscale)const{
     const int start=x;int choice=0;
     std::function<void(const Message&,unsigned)> write=[&](const Message& part,unsigned depth){
@@ -597,7 +614,7 @@ void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,flo
         // bhDispItemName advances the actual font cursor, including variable
         // glyph widths. Character-count estimates overlap the following '?' .
         if(c==0xff03){if(i+1>=part.size())break;if(depth>=4)throw std::runtime_error("recursive item-name message");write(read_message(messages_,4,part[++i]),depth+1);continue;}
-        if(c==0xff04){if(choice++==selected_choice)blit_pixels(image,menu_[0],x,y+int(5*yscale),int(18*scale),int(18*yscale),0,28,18,46);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=c==0xfe01?0xffffe020:0xffffffff;continue;}if(c/324>=fonts_.size())continue;
+        if(c==0xff04){if(choice++==selected_choice)blit_pixels(image,menu_[0],x,y+int(5*yscale),int(18*scale),int(18*yscale),0,28,18,46);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=font_color(c);continue;}if(c/324>=fonts_.size())continue;
         const auto glyph=c%324;blit(image,(dialogue?dialog_fonts_:fonts_)[c/324],x,y,int(28*scale),int(28*yscale),(glyph%18)*14,(glyph/18)*14,(glyph%18)*14+14,(glyph/18)*14+14,color);
         x+=int((c<std::size(FontSz)?FontSz[c]:28)*scale);
       }
@@ -726,7 +743,18 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
     for(unsigned i=0;parts_04b[i].anim!=-1&&parts_04b[i].anim!=255;++i){auto p=parts_04b[i];if(!inv.side_pack&&(i==6||i==8||i==9||i==13||i==14))p.pos[1]-=48;sprites.push_back(p);}
     group(parts_05b);
     for(auto p:parts_07b){if(p.anim==-1||p.anim==255)break;if(slide)p.col.r=p.col.g=p.col.b=slide->fade();sprites.push_back(p);} // BGFadeIn/Out
-    group(parts_11b);
+    // ArmsSet (sub1.c:4975-5105) laeuft je Bild aus SpriteOnOff (:8311) und schreibt im
+    // Kistenbildschirm (subscreenmode 0x4) center 9 statt 3 in parts_11b/parts_14b[0]
+    // (:4988-4996). Normale Kiste (!(cb_flg & 0x180000), :4999): Ausruestungsflaeche aus
+    // parts_16 anim 4/6/5 und das ausgeruestete Item parts_14b[0] bei pos (58|24, 8, 20.6)
+    // (:5001-5052) mit BulletSet mode 0 (:5088-5090). Sicherheitskiste (:5097-5104): parts_14b[0]
+    // aus, nur parts_11b[0] mit anim 6, parts_11b[1] beendet die Liste.
+    // Offen: ArmsSet setzt parts_11b[1].anim im breiten Zweig (:5019-5029) nicht; nach einer
+    // Sicherheitskiste bliebe dort -1 stehen. Diese bildübergreifende Tabellenmutation hat
+    // keinen nativen Besitzer; gezeichnet wird anim 6 aus Tabelle/schmalem Zweig.
+    const unsigned arms_cursor=inv.slots()[0];const unsigned arms=base==64?Inventory::id(inv.slots()[arms_cursor]):0;
+    for(unsigned i=0;i<(base==64?3u:1u);++i){auto p=parts_11b[i];p.cen_no=9;if(base!=64)p.anim=6;sprites.push_back(p);}
+    if(arms){PARTS p{};p.pos[0]=(itemdata[arms].type&0x100)?24.f:58.f;p.pos[1]=8.f;p.pos[2]=20.6f;p.anim=0;p.cen_no=9;p.parts_num=18;p.col={1,1,1,1};sprites.push_back(p);}
     // CursorInit disables the second/third cursor sprites. CursorSet positions
     // the first over the selected pip cell; never draw the uninitialised
     // 364-pixel second cursor through the security list.
@@ -738,7 +766,11 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
     for(unsigned i=0;i<std::size(parts_16b)&&parts_16b[i].anim!=-1&&parts_16b[i].anim!=255;++i){auto p=parts_16b[i];if(!i){p.anim=0;p.parts_num=exit_state?11:0;}sprites.push_back(p);}group(parts_17b);
     if(base==64)group(parts_18b);else for(auto p:parts_03b){if(p.anim==-1||p.anim==255)break;p.cen_no=9;sprites.push_back(p);}
     std::stable_sort(sprites.begin(),sprites.end(),[](const auto& a,const auto& b){return a.pos[2]>b.pos[2];});
-    for(const auto& p:sprites){if(p.parts_num>=23||!tables[p.parts_num]||p.cen_no>=12)continue;auto t=tables[p.parts_num][p.anim];if(p.parts_num==15&&p.anim==0)t.sx=(itemdata[Inventory::id(inv.slots()[menu.selected])].type&0x100)?144:76;if(t.texid<0||unsigned(t.texid)>=menu_.size())continue;
+    for(const auto& p:sprites){
+        // parts_14b[0] -> parts_18[0] = parts_18[cursor] (ArmsSet :5062-5068): das Itemsymbol
+        // aus ItemSet (:2520-2545) in der z-Reihenfolge der Kistensprites; Ziffern z 20.5 danach.
+        if(p.parts_num==18){const int x=int(p.pos[0])+centers[p.cen_no][0]+dx(p.cen_no),y=int(p.pos[1])+centers[p.cen_no][1]+dy(p.cen_no);icon(image,arms,x,y);quantity(image,inv.slots()[arms_cursor],x,y);continue;}
+        if(p.parts_num>=23||!tables[p.parts_num]||p.cen_no>=12)continue;auto t=tables[p.parts_num][p.anim];if(p.parts_num==15&&p.anim==0)t.sx=(itemdata[Inventory::id(inv.slots()[menu.selected])].type&0x100)?144:76;if(t.texid<0||unsigned(t.texid)>=menu_.size())continue;
         const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[t.texid],int(p.pos[0])+centers[p.cen_no][0]+dx(p.cen_no)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+dy(p.cen_no)+int(std::min(i,ny-1)*p.move),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,tint(p.col),bool(p.atr&8),p.ang);
     }
     const int count=base==64?128:32;
@@ -753,7 +785,10 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
         if(selecting&&row==3){rectangle(image,43+x0,y-2,348,2,0xff9f9f80);rectangle(image,43+x0,y+36,348,2,0xff9f9f80);}
         if(id){text(image,read_message(messages_,4,inventory_name_id(packed)),44+x0,y,.95f);icon(image,id,324+x0,y,row_y>240.f?19:38,42);quantity(image,packed,324+x0,y,true);}
     }
-    unsigned cell=0;for(unsigned slot=1;slot<12;++slot){const auto id=Inventory::id(inv.slots()[slot]);const unsigned center=slot==1?(base==64?4:9):5;const int x=(slot==1?(base==64?528:444):460+int(cell&1)*68)+dx(center),y=(slot==1?48:128+int(cell/2)*48)+dy(center);
+    // ItemSet num3 0 (sub1.c:2453-2478): pip[1] (Standarditem) steht im Kistenbildschirm nur
+    // in der Sicherheitskiste bei center 9, pos (8, 8); in der normalen Kiste ist parts_14b[1]
+    // aus (atr &= ~0x20, :2477). Dort zeigt die Flaeche das ausgeruestete Item (ArmsSet).
+    unsigned cell=0;for(unsigned slot=base==64?2:1;slot<12;++slot){const auto id=Inventory::id(inv.slots()[slot]);const unsigned center=slot==1?9:5;const int x=(slot==1?444:460+int(cell&1)*68)+dx(center),y=(slot==1?48:128+int(cell/2)*48)+dy(center);
         if(!selecting&&!exit_state&&slot==menu.selected){rectangle(image,x-1,y-1,id&&(itemdata[id].type&0x100)?138:70,50,0xff238699);rectangle(image,x+1,y+1,id&&(itemdata[id].type&0x100)?134:66,46,0xff111f22);}
         icon(image,id,x,y);if(id)quantity(image,inv.slots()[slot],x,y);
         if(slot>1)cell+=id&&(itemdata[id].type&0x100)?2:1;if(cell>=inv.capacity())break;

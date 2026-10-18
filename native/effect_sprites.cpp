@@ -76,6 +76,7 @@ EffectSpawn& request_template(){static EffectSpawn request;return request;}
 EffectWeather& effect_weather(){static EffectWeather weather;return weather;}
 // sys->gas_py (effsub1.c:8734): ein Besitzer, keine Kopie.
 float& effect_gas_height(){static float gas_py=0;return gas_py;}
+NJS_PLANE& effect_mirror_plane(){static NJS_PLANE mr_pl{};return mr_pl;}
 unsigned& effect_blood_counter(){static unsigned bl_ct=0;return bl_ct;}
 WaterWaveField& water_wave(){static WaterWaveField field;return field;}
 namespace effect_detail {
@@ -103,6 +104,7 @@ void queue_opaque(EffectSprite& s){s.opaque_queued=true;}
 void queue_custom(EffectSprite& s){s.custom_queued=true;}
 void queue_trs2d(EffectSprite& s){s.trs2d_queued=true;}
 void request_cb_flg(unsigned set,unsigned clear){pending.cb_flg_set|=set;pending.cb_flg_clear|=clear;}
+void request_st_flg(unsigned set,unsigned clear){pending.st_flg_set|=set;pending.st_flg_clear|=clear;}
 float ground_height(NJS_POINT3 probe,const char* what){
     if(!effect_ground)throw std::runtime_error(std::string(what)+" without the room's bhGetGroundPosition provider");
     return effect_ground->query(probe);
@@ -1045,7 +1047,8 @@ static bool step_en09_smoke(EffectSprite& s){
 }
 bool hand_ported_effect_sprite(unsigned id){
     switch(id){
-    case 0:case 2:case 5:case 9:case 17:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
+    case 110:case 133: // Besitzerprozeduren in RoomWorld, wie 111/134/137.
+    case 0:case 2:case 5:case 9:case 17:case 120:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 138:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
     default:return hand_procedure(id)!=nullptr;
     }
 }
@@ -1058,6 +1061,7 @@ bool ported_effect_atlas(unsigned group){
     case 31:case 33:case 34:case 35:case 36:case 38:case 39:case 40:case 41:case 43:
     case 50:case 51:case 52:case 53:case 54:case 55:case 56:case 57:case 58:case 59:
     case 60:case 61:case 62:case 63:case 64:case 65:case 66:case 67:case 68:case 69:
+    case 42: // screen.c:592 bhDrawThermometer (sys->ond_tnm = ef_tn[42])
     case 44: // effsub1b.c:123 bhDraw134 (sys->ef_tn[44])
     case 80:case 94:
     case 85: // effsub6.c:41 bhEff085 (sys->ef_tn[85], erstes Bild als Gegnertextur)
@@ -1067,6 +1071,7 @@ bool ported_effect_atlas(unsigned group){
     case 417:case 419:case 421:case 422:case 423:case 424:case 425:case 426:case 427:case 428:
     case 429:case 430:case 431:return true;
     case 440:return true; // effsub1b.c:850 bhDraw137 (sys->ef_tn[440], Texturhalter, effect.c:788)
+    case 441:return true; // effsub1b.c:1308-1543 bhDraw138 (sys->ef_tn[441] .. +3, Texturhalter RM_8001)
     case 32:return true; // bhDraw107 (Regeneinschlag)
     case 90:case 91:case 92:return true; // effsub1.c:28 bhEffFil (tex_id = op->id)
     default:return (group>=70&&group<=79)||(group>=400&&group<=407);
@@ -1095,9 +1100,9 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
     if(s.id==396||s.id==399){const bool entered=step_en21_effect(s);if(queued)*queued=entered;return true;}
     if(const auto* procedure=hand_procedure(s.id)){
         // effect.c:742 bhControlEffect leert die Zeichenlisten zu Beginn jedes Passes.
-        s.opaque_queued=false;s.custom_queued=false;s.trs2d_queued=false;s.zanzo_slot=-1;s.quads.clear();s.lines.clear();
+        s.opaque_queued=false;s.punch_queued=false;s.custom_queued=false;s.trs2d_queued=false;s.zanzo_slot=-1;s.quads.clear();s.lines.clear();
         bool entered=false;procedure->step(s,c,entered);
-        if(queued)*queued=entered||s.opaque_queued||s.custom_queued||s.trs2d_queued||s.zanzo_slot>=0;return true; /* ef_Zanzo (effect.c:938) zaehlt wie eine Zeichenliste */
+        if(queued)*queued=entered||s.opaque_queued||s.punch_queued||s.custom_queued||s.trs2d_queued||s.zanzo_slot>=0;return true; /* ef_Zanzo (effect.c:938) zaehlt wie eine Zeichenliste */
     }
     if(s.id!=9){
         bool entered=false;
@@ -1106,6 +1111,27 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
         case 2:step_eff002(s,entered);break;
         case 5:step_eff005(s,entered);break;
         case 17:step_eff017(s);break;
+        case 120:{ // effsub1.c:8011-8077 bhEff120: Steuerwerk, nie in einer Zeichenliste.
+            s.flg|=0x1000000u;
+            const auto shift=[&](int v){
+                if(!world_hooks.offset_work_uv||!world_hooks.offset_work_uv(s.lkwkp,4,0,v)||
+                   !world_hooks.offset_work_uv(s.lkwkp,2,0,v))
+                    effect_detail::report_gap("bhEff120: lkwkp->mlwP->objP[4/2].model UV ohne Besitzer");};
+            if(s.mode0==0){if(!(c.gm_flg&1u)){s.ct0=0;s.ct1=1024;shift(s.ct1);s.ct3=0;s.mode0=1;}}
+            else if(s.mode0==1){
+                if(c.gm_flg&1u){shift(-s.ct1);s.mode0=0;break;}
+                int angle=0;
+                if(!world_hooks.work_node_angle_z||!world_hooks.work_node_angle_z(s.lkwkp,11,angle)){
+                    effect_detail::report_gap("bhEff120: lkwkp->mlwP->objP[11].ang[2] ohne Besitzer");break;}
+                const int delta=int(std::int16_t(std::uint16_t(angle-s.azp)));
+                // effsub1.c:8058 `op->ct0 = -(az / 32)` ist im Decomp-C falsch fuer negative az:
+                // SLUS_201.84 bhEff120 0x233A48-0x233A60 rechnet subu, (short) per dsll32/dsra32,
+                // `sra 5` (arithmetisch, rundet gegen -inf) und `negu`. Also ct0 = -floor(az/32):
+                // az -1 -> +1, az -33 -> +2 (C-Division gaebe 0 bzw. +1).
+                s.azp=angle;s.ct0=-(delta>=0?delta/32:-((-delta+31)/32));shift(s.ct0);s.ct1+=s.ct0;
+                if(s.ct1<=0){s.ct1+=1024;shift(1024);}
+            }
+            break;}
         case 122:step_eff122(s,entered);break;
         case 123:step_eff123(s,entered);break;
         case 125:step_eff125(s,c);break;
@@ -1336,9 +1362,11 @@ void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position
     if(original_pair){color_blending_mode(0,s.opaque_queued?8:s.bl_src);color_blending_mode(1,s.opaque_queued?6:s.bl_dst);}
     const auto register_=original_pair?color_blending_alpha():0ull;
     const std::array<std::array<unsigned,3>,2> strip{{{0,1,2},{1,3,2}}};
-    for(unsigned t=0;t<(s.pn==3?1u:2u);++t){const auto indices=strip[t];SceneTriangle triangle;for(unsigned i=0;i<3;++i)triangle.vertices[i]=vertices[indices[i]];triangle.color=vertex_alpha?0xffffffffu:s.gouraud?((s.tv[0].col&0xff000000u)|0xffffffu):s.tv[0].col;triangle.gouraud=s.gouraud;triangle.vertex_alpha=vertex_alpha;triangle.texture=texture;triangle.textured=true;triangle.camera_mask=false;triangle.world_lit=true;triangle.depth_write=s.opaque_queued;triangle.fogged=!s.fog_disabled;if(s.untextured)triangle.textured=false;
+    for(unsigned t=0;t<(s.pn==3?1u:2u);++t){const auto indices=strip[t];SceneTriangle triangle;for(unsigned i=0;i<3;++i)triangle.vertices[i]=vertices[indices[i]];triangle.color=vertex_alpha?0xffffffffu:s.gouraud?((s.tv[0].col&0xff000000u)|0xffffffu):s.tv[0].col;triangle.gouraud=s.gouraud;triangle.vertex_alpha=vertex_alpha;triangle.texture=texture;triangle.textured=true;triangle.camera_mask=false;triangle.world_lit=true;triangle.depth_write=s.opaque_queued||s.punch_queued;triangle.fogged=!s.fog_disabled;if(s.untextured)triangle.textured=false;
         triangle.fog_color_set=s.fog_color_set;triangle.fog_color=s.fog_color;
         if(original_pair){triangle.blend=SceneBlend::Ninja;triangle.blend_register=register_;}else triangle.blend=SceneBlend::Additive;
+        // sys->ef_pnc: ohne ABE gilt das ALPHA-Register nicht (GS gibt Cs aus), sofort statt OT.
+        if(s.punch_queued){triangle.blend=SceneBlend::Opaque;triangle.punch_through=true;}
         if(s.id==9)triangle.texture_filter=(s.flg&0x20000000u)?SceneTextureFilter::Point:SceneTextureFilter::Linear;
         if(s.point_filter)triangle.texture_filter=SceneTextureFilter::Point;
         scene.triangles.push_back(triangle);}

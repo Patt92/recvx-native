@@ -82,6 +82,31 @@ int main(int argc,char** argv){
             renderer.draw_view(outside,view,32,32,false,{},1,100);
             check(renderer.pixels()==expected,"receiver outside volume was shadowed");
         }
+        // Receiver writes at equal native depth must remain compatible with the
+        // separate modifier GEQUAL contract on transported integer vertex Z.
+        // A zero-alpha foreground receiver must not steal either depth buffer.
+        for(int samples:{1,2,3,4})for(unsigned workers:{1u,4u}){
+            renderer.set_supersampling(samples);renderer.set_render_threads(workers);
+            auto equal=surface(10);
+            equal.shadows.push_back(shadow);
+            auto later=equal.triangles[0];later.color=0xff404040u;
+            equal.triangles.push_back(later);
+            // >=64 setups forces band workers; all are coplanar, same colour.
+            for(unsigned i=0;i<64;++i)equal.triangles.push_back(later);
+            renderer.draw_view(equal,view,32,32,false,{},1,100);
+            const auto equal_pixels=renderer.pixels();const auto equal_depth=renderer.depth();
+            check(equal_pixels[middle]==0xff353535u,"later coplanar receiver did not win before modifier composite");
+            auto zero=surface(5).triangles[0];zero.color=0x00ffffffu;
+            equal.triangles.push_back(zero);
+            renderer.draw_view(equal,view,32,32,false,{},1,100);
+            check(renderer.pixels()==equal_pixels&&renderer.depth()==equal_depth,
+                  "alpha-zero receiver changed visible/transported depth or modifier mask");
+            equal.triangles.pop_back();later.after_modifiers=true;later.color=0xff204080u;
+            equal.triangles.push_back(later);
+            renderer.draw_view(equal,view,32,32,false,{},1,100);
+            check(renderer.pixels()[middle]==later.color,
+                  "later post-modifier coplanar primitive rejected by depth test");
+        }
         std::cout<<"PASS: original volume, receiver depth, cancellation and unchanged depth buffer\n";
         return 0;
     }catch(const std::exception& error){

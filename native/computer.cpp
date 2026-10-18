@@ -1,4 +1,5 @@
 #include "computer.h"
+#include "back_color.h"
 #include "asset_io.h"
 #include "audio.h"
 #include "ninja_matrix.h"
@@ -16,7 +17,9 @@ bool ComputerTerminal::begin(EventVm& events){
     const RECVX_COM_SYSTEM before{events.flags[5][0],events.flags[10][0],events.flags[6][0],
                                   events.flags[11][0],events.flags[12][0]};
     recvx_com_begin(events.com_number,&before);
-    *frame_={};frame_->active=1;active_=true;pending_=0;character_gaps_=0;message_gaps_=0;return true;
+    *frame_={};frame_->active=1;active_=true;pending_=0;character_gaps_=0;message_gaps_=0;
+    set_back_color(0); // bhMainSequence mn_mode 7 case 2 (system.c:2120-2124), the terminal's texture read
+    return true;
 }
 void ComputerTerminal::tick(unsigned held,unsigned pressed,EventVm& events,AudioMixer* audio){
     if(!active_)return;

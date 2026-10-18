@@ -1,0 +1,90 @@
+# Zombietod mit Blutlache (bhEne01_DieMode2W DD00, en01.c:9973-9995 -> bhSetBloodPoolLnk,
+# effsub3.c:145). Ablauf wie combat-aim-enemy.txt: M93R aus dem Steve-Ereignis (RM_0030),
+# Debug-Menue-Raumwechsel nach RM_0080 (Raumindex 10), --enemy-ai on, Griff aus.
+# Diagnose-Aufstellung (-0.14, 0, 20.71), Blick 16384; die Aufschaltung waehlt den
+# naechsten Zombie, der herankommt und nach den Treffern stirbt (mode0 4). Danach
+# Dauerfeuer bis Bild 5603. Keine Flag-, Inventar- oder Gegnerdatenbearbeitung.
+0 keys forward
+90 keys none
+3200 confirm
+3400 keys aim
+3500 keys aim attack
+3503 keys aim
+3560 keys aim attack
+3563 keys aim
+3640 keys none
+3700 debug_key F2
+3701 debug_select room 10
+3702 confirm
+3703 debug_key F2
+3800 position -0.14 0 20.71 16384
+3900 keys aim
+3950 keys aim attack
+3953 keys aim
+4000 keys aim attack
+4003 keys aim
+4050 keys aim attack
+4053 keys aim
+4100 keys aim attack
+4103 keys aim
+4150 keys aim attack
+4153 keys aim
+4200 keys aim attack
+4203 keys aim
+4250 keys aim attack
+4253 keys aim
+4300 keys aim attack
+4303 keys aim
+4350 keys aim attack
+4353 keys aim
+4400 keys aim attack
+4403 keys aim
+4450 keys aim attack
+4453 keys aim
+4500 keys aim attack
+4503 keys aim
+4550 keys aim attack
+4553 keys aim
+4600 keys aim attack
+4603 keys aim
+4650 keys aim attack
+4653 keys aim
+4700 keys aim attack
+4703 keys aim
+4750 keys aim attack
+4753 keys aim
+4800 keys aim attack
+4803 keys aim
+4850 keys aim attack
+4853 keys aim
+4900 keys aim attack
+4903 keys aim
+4950 keys aim attack
+4953 keys aim
+5000 keys aim attack
+5003 keys aim
+5050 keys aim attack
+5053 keys aim
+5100 keys aim attack
+5103 keys aim
+5150 keys aim attack
+5153 keys aim
+5200 keys aim attack
+5203 keys aim
+5250 keys aim attack
+5253 keys aim
+5300 keys aim attack
+5303 keys aim
+5350 keys aim attack
+5353 keys aim
+5400 keys aim attack
+5403 keys aim
+5450 keys aim attack
+5453 keys aim
+5500 keys aim attack
+5503 keys aim
+5550 keys aim attack
+5553 keys aim
+5600 keys aim attack
+5603 keys aim
+5700 keys none

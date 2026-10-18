@@ -2,18 +2,26 @@
 #include "scene.h"
 #include <filesystem>
 namespace recvx {
+// vclipw.xyz eines Sichtraumpunkts gegen ClipMatrix2 (_Make_ClipMatrix, ps2_NaView.c:233):
+// m[0][0] = projection/volume_x, m[1][1] = projection/volume_y, z-Zeilen aus njClipZ near/far
+// (positive Abstaende). Bits +x 1, -x 2, +y 4, -y 8, +z (fern) 16, -z (nah) 32.
+unsigned strip_clip_code(const NJS_POINT3& view_point,float projection,float volume_x,float volume_y,float near,float far);
 class SoftwareRenderer {
 public:
     SoftwareRenderer(int width,int height);
     void draw(const Scene& scene,const SceneCamera& camera,bool wireframe=false);
     // screen.c:961-974 njSetScreen(dist, w, h, cx = w/2, cy = h/2) mit unveraendertem njSetAspect
     // (BHD_ASPECT 1.174/1): fSx = 1.174*x*dist/z, fSy = y*dist/z in einem Bild dieser Groesse.
-    // Die Ninja-Streifen-Clipregeln (ClipVolume 320x240 des 640er Bildes) gelten hier nicht.
-    void draw_screen(const Scene& scene,const SceneCamera& camera,float dist);
+    // Die Ninja-Streifen-Clipregeln (ClipVolume des 640er Bildes) gelten hier nicht.
+    void draw_screen(const Scene& scene,const SceneCamera& camera,float dist,float aspect_y=1.0f);
+    // screen.c:816: njSetPerspective bei w=640, dann dist *= 0.8, 512x480,
+    // mit dem von bhEff110 gesetzten njSetAspect und originaler Streifen-Clipregel.
+    void draw_full_screen_source(const Scene& scene,const SceneCamera& camera,float aspect_y,bool wireframe=false);
     // Already prepared camera-space matrix, including the original item-view
     // path which bypasses njSetView's world Y/Z conversion.
     // near/far: njClipZ distances in view space (far 0 = unlimited).
-    void draw_view(const Scene& scene,const NJS_MATRIX& view,float focal_x,float focal_y,bool wireframe=false,const std::array<std::uint32_t,16>& hidden={},float near=0.05f,float far=0);
+    // volume_x/y: ClipVolume der Streifenregel, nur im Ninja-Bildschirm von draw() wirksam.
+    void draw_view(const Scene& scene,const NJS_MATRIX& view,float focal_x,float focal_y,bool wireframe=false,const std::array<std::uint32_t,16>& hidden={},float near=0.05f,float far=0,float volume_x=320.0f,float volume_y=240.0f);
     const std::vector<std::uint32_t>& pixels() const {return pixels_;}
     // 1/z of the nearest surface per pixel; 0 where nothing was drawn. Lets a
     // caller composite an off-screen pass without a colour key.
@@ -49,5 +57,6 @@ private:
     std::vector<float> hi_depth_;
     std::vector<std::uint32_t> pixels_;
     std::vector<float> depth_;
+    void draw_view_projected(const Scene& scene,const NJS_MATRIX& view,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far,float volume_x,float volume_y,float projection);
 };
 }

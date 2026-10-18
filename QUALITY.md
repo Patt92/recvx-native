@@ -110,10 +110,13 @@ submit_template, latched_uv, quad_uv, quad_color, effect_random}`).
   Aufrufs (`SceneTriangle::fog_color`). Das ist aus der Routine belegt, nicht
   geraten: `njDrawTextureSub3DH` liest nur `ocol`, und `njDrawTexture3DHEx`
   schreibt `bcol` dorthin.
-- `sys->ef_ntx` ist derselbe Zeichenpfad ohne Textur, `sys->ef_pnc` derselbe wie
-  `sys->ef_trs`: `njControl3D(0x4000)` liest der Texturzeichner (ps2_NaDraw.c:280)
-  nie, nur die Chunk-Modelle (ps2_NinjaCnk.c) tun das. Der Unterschied ist die
-  Reihenfolge der Durchgänge, nicht der Zeichenzustand.
+- `sys->ef_ntx` ist der untexturierte Zeichenpfad. `sys->ef_pnc` nutzt zwar
+  wie `sys->ef_trs` den Aufruf `bhDrawTrsEffect3D`, aber unter
+  `njControl3D(0x4000)` (effect.c:886). Das setzt `Ps2_use_pt_flag`
+  (ps2_NinjaCnk.c:209); `Ps2AddPrim3D` löscht dadurch ABE (ps2_dummy.c:510-516).
+  Die Primitive zeichnet sofort ohne Überblendung, mit Alphatest GREATER 0
+  (:543) und Tiefenschreiben statt über die OT. Nur den direkten Leser in
+  `njDrawTexture3DEx` zu prüfen übersieht diesen nachgeschalteten Zustand.
 - Nachweis je Gruppe: Differenzlauf Generat gegen Handfassung über Typen,
   Aufträge, mdlver und Passes vor dem Entfernen (Logs und Prüfprogramm in
   `build/validation/effproc-handport-20261014/`), dazu feste Tests mit

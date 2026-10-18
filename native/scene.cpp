@@ -394,6 +394,7 @@ private:
                             // NJD_FST_UA through njSetConstantAttr (map.c:723) still blends with it.
                             triangle.blend_register=chunk_blend_register(blend_src,blend_dst);
                             if(use_alpha)triangle.blend=SceneBlend::Ninja;
+                            if(type!=64)triangle.cnk_strip_head=std::int16_t(view.u8(chunk+1));
                             triangle.strip_clip=true;if(segment_base)triangle.strip_segment=segment_base+(i-2)/58;
                             if(((i&1)!=0)^reverse)std::swap(triangle.vertices[0],triangle.vertices[1]);
                             if(output.triangles.size()>=2000000)throw std::runtime_error("room triangle limit exceeded");
@@ -421,7 +422,7 @@ NJS_POINT3 Scene::resolve_ambient_material(NJS_POINT3 initial,const SceneCamera*
     struct Op{unsigned phase;std::size_t triangle,order;const AmbientWrite* write;};
     std::vector<Op> ops;ops.reserve(ambient_writes.size()+triangles.size());
     for(std::size_t i=0;i<ambient_writes.size();++i){const auto& w=ambient_writes[i];
-        if(camera&&w.camera_mask&&w.object<512&&(camera->hidden_objects[w.object/32]&(0x80000000u>>(w.object%32))))continue;
+        if(camera&&w.camera_mask&&w.object/32+w.hidden_offset<16&&(camera->hidden_objects[w.object/32+w.hidden_offset]&(0x80000000u>>(w.object%32))))continue; // bhSetHideObject(hidden_offset)
         ops.push_back({w.phase,w.triangle,i,&w});}
     for(std::size_t i=0;i<triangles.size();++i)ops.push_back({triangles[i].material_phase,i,ambient_writes.size(),nullptr});
     std::stable_sort(ops.begin(),ops.end(),[](const Op& a,const Op& b){
@@ -433,6 +434,12 @@ NJS_POINT3 Scene::resolve_ambient_material(NJS_POINT3 initial,const SceneCamera*
 }
 Scene decode_scene(const std::vector<std::uint8_t>& room) {
     auto scene=Decoder(room).decode();scene.resolve_ambient_material();return scene;
+}
+void route_model_texture_cache(std::vector<SceneTriangle>& triangles,unsigned draw_tp){
+    if(draw_tp>3)throw std::runtime_error("bhPutModel draw_tp outside jump table");
+    const bool simple=(draw_tp&1u)!=0; // 0 EasyMulti, 1 SimpleMulti, 2 Easy, 3 Simple
+    for(auto& t:triangles)if(t.cnk_strip_head>=0){const unsigned flag=unsigned(t.cnk_strip_head);
+        t.texture_cache_clamp=(flag&8u)&&(!simple||(flag&16u));}
 }
 std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>& data,std::size_t offset){return Decoder(data).decode_bundle(offset);}
 Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint32_t model,const NJS_MATRIX& world){return Decoder(memory,size).decode_memory_model(model,world);}
@@ -468,6 +475,36 @@ std::optional<std::size_t> model_object_chunk_model(const BinaryView& view,std::
     if(pointer==0xffffffffu)return std::nullopt;
     return view.relative(base,pointer,24);
 }
+}
+bool offset_model_object_uv(std::vector<std::uint8_t>& data,std::size_t model,unsigned object,int offu,int offv){
+    BinaryView view(data);std::size_t base=0;const auto mdl=model_object_chunk_model(view,model,object,base);
+    if(!mdl||view.u32(*mdl+4)==0xffffffffu)return false;
+    std::size_t p=view.relative(base,view.u32(*mdl+4),2);
+    const auto shift=[&](std::size_t at){const unsigned u=(unsigned(view.u16(at))+unsigned(offu))&0xffffu;
+        const unsigned v=(unsigned(view.u16(at+2))+unsigned(offv))&0xffffu;
+        data[at]=std::uint8_t(u);data[at+1]=std::uint8_t(u>>8);
+        data[at+2]=std::uint8_t(v);data[at+3]=std::uint8_t(v>>8);};
+    const auto skip=[&](std::size_t at,int shorts){const auto next=std::int64_t(at)+2*std::int64_t(shorts);
+        if(next<0)throw std::runtime_error("npSetOffsetUV: polygon offset before model");
+        view.require(std::size_t(next),0);return std::size_t(next);};
+    // njplus.c:1574-1648. usr_num ist im Asm ein BYTE-Schritt, zweimal je Streifen,
+    // nicht die normale Chunk-Nutzlast je Dreieck. Deshalb den Originallauf lesen,
+    // nicht die dekodierten Eckpunkte verschieben (short-Ueberlauf muss bleiben).
+    for(unsigned guard=0;guard<65536;++guard){const unsigned head=view.u8(p);p+=2;
+        if(head==255)return true;
+        if(head>=64&&head<67){const auto size=view.u16(p);const auto info=view.u16(p+2);p+=4;
+            if(head==64){p=skip(p,std::int16_t(size));continue;}
+            // ELF 0x12DE40/54: lh und AND 0xFFFF3FFF, kein unsigned14-Maskieren.
+            // Userbits 2/3 behalten das Vorzeichen: do-while durchlaeuft einen Streifen.
+            const int strips=int(std::int16_t(info))&~0xc000;const unsigned user=info>>14;
+            for(int strip=0;strip<std::max(1,strips);++strip){const int length=std::int16_t(view.u16(p));p+=2;
+                const unsigned count=unsigned(length<0?-length:length);
+                for(unsigned i=0;i<std::max(1u,count);++i){view.require(p,6);shift(p+2);p+=6;}
+                p=view.relative(p,2u*user,0);}
+        }else if(head==8){view.require(p,2);p+=2;}
+        else if((head>=17&&head<24)||(head>=56&&head<59)){const auto size=view.u16(p);p=skip(p+2,std::int16_t(size));}
+    }
+    throw std::runtime_error("npSetOffsetUV: unterminated polygon list");
 }
 std::optional<ModelObjectVertices> model_object_vertices(const std::vector<std::uint8_t>& data,std::size_t model,unsigned object){
     BinaryView view(data);std::size_t base=0;const auto chunk_model=model_object_chunk_model(view,model,object,base);

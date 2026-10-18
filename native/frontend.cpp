@@ -1,4 +1,5 @@
 #include "frontend.h"
+#include "back_color.h"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -33,7 +34,7 @@ void fill(SoftwareRenderer& image,std::uint32_t rgb,unsigned alpha){
 }
 }
 // ---------------------------------------------------------------- adv.c title task
-void Frontend::reset_adv_system(){next_return_code_=0;extra_flag_=0;next_mode_=0;gen_flag_=0;saver_timer_=9000;saver_command_=0;saver_rate_=0;} // adv.c:83 ResetAdvSystem subset, StopAdvScreenSaver(1)
+void Frontend::reset_adv_system(){set_back_color(0); /* adv.c:97 */next_return_code_=0;extra_flag_=0;next_mode_=0;gen_flag_=0;saver_timer_=9000;saver_command_=0;saver_rate_=0;} // adv.c:83 ResetAdvSystem subset, StopAdvScreenSaver(1)
 void Frontend::request_adv_fade(int type,float speed){fade_type_=type;fade_speed_=speed;if(type==1)fade_type_=0;else if(type==2)fade_rate_=1;else if(type==3)fade_rate_=0;} // adv.c:384
 void Frontend::execute_adv_fade(){ // adv.c:451 ExecuteAdvFadeEx(0)
     if(fade_type_==2){fade_rate_-=fade_speed_;if(fade_rate_<=0){fade_rate_=0;fade_type_=0;}view_.fade=true;view_.fade_rate=fade_rate_;}

@@ -46,7 +46,11 @@ palette/alpha rules are applied during export; TGA uses ordinary 0–255 alpha.
 The 2D renderer blends alpha. The 3D renderer filters textures trilinearly with up to 4x anisotropic taps
 (alpha-weighted mip chains), blends partly covered cut-out pixels by their coverage
 and renders with 2x2 supersampling on all CPU cores (`--ss 1..4`, `--nearest` for the
-old point sampling); material transparency modes beyond cut-outs remain incomplete. Invalid overrides fail with a diagnostic.
+old point sampling). The original punch-through effect pass instead filters RGB independently
+of alpha, rejects alpha-zero samples and writes the remaining colour and depth without blending.
+Its host mip chain keeps the same independent RGB filtering; filtered alpha-test quantization
+and equal-depth comparisons remain open. Other material transparency gaps remain documented
+in the port ledger. Invalid overrides fail with a diagnostic.
 
 ## HD texture packs (content-keyed)
 

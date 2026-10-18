@@ -8,6 +8,8 @@
 #include "core_random.h"
 #include "chunk_blend.h"
 #include "ninja_math.h"
+#include "ninja_matrix.h"
+#include "scene.h"
 #include <cmath>
 #include <cstddef>
 #include <iostream>
@@ -66,8 +68,11 @@ static void emitter_stages()
     check(p.active()==2,"mode0 case 1 dropped a particle work");
     scene.triangles.clear();
     p.append(scene,camera,4);
-    /* Je Arbeit und Stufe sechzehn Sprites zu je zwei Dreiecken. */
-    check(scene.triangles.size()==64u,"the first Eff302Prm[0] stage did not draw two works of sixteen sprites");
+    /* Je Arbeit und Stufe vier njPtclDrawSprite(&bufP[4k], 4, ..) (effsub3.c:1420-1423).
+       njPtclDrawSprite legt je Punkt zwei Eckpunkte an, reicht aber num = 4 an
+       Ps2AddPrim3D weiter (ELF 0x002D8528/0x002D86A4), das genau num Eckpunkte
+       ausgibt: zwei GS-Sprites je Aufruf, acht je Stufe, zu je zwei Dreiecken. */
+    check(scene.triangles.size()==32u,"the first Eff302Prm[0] stage did not draw two works of eight GS sprites");
     /* stg_tim[0] steht nach dem Anlegen auf 1 (effsub3.c:1322): der
        Texturrahmen ist tex_id + (stg_tim & 3), hier die Basis 4. */
     check(scene.triangles[0].texture==5u,"the particle texture frame differs from stg_tim & 3");
@@ -75,20 +80,43 @@ static void emitter_stages()
        (zweiter Satz, zweite Arbeit) liefert (0x80 * 225) >> 8 = 0x70,
        (0x40 * 225) >> 8 = 0x38, (0x20 * 225) >> 8 = 0x1C; Alpha bleibt fest. */
     check(scene.triangles[0].color==0xFF804020u,"col_lv 255 changed the particle colour");
-    check(scene.triangles[32].color==0xFF70381Cu,"col_lv 224 did not scale the particle colour");
+    check(scene.triangles[16].color==0xFF70381Cu,"col_lv 224 did not scale the particle colour");
     check(scene.triangles[0].blend==SceneBlend::Ninja&&scene.triangles[0].blend_register==0x44,
           "njColorBlendingMode(0,8)/(1,6) is not the particle blend register");
     check(scene.triangles[0].depth_write==false,"particle sprites must not write depth");
     check(scene.triangles[0].textured&&!scene.triangles[0].camera_mask,"particle sprites must be textured billboards");
-    /* vtx_scale = 0.025; njPtclDrawSprite deutet w/h als halbe Kantenlaenge
-       (ps2_NinjaPtcl.c:118-129, scr.x +- invz * w * dist), die Quadratkante
-       misst also 2 * 0.025. scl_add_1st greift erst im naechsten Tick. */
+    /* vtx_scale = 0.025; njPtclDrawSprite (ps2_NinjaPtcl.c:126-134) legt die
+       Ecken bei scr.x/y -+ iz * w * dist, ohne AspectW, waehrend scr.x selbst
+       mit AspectW = 1.174 projiziert ist (njViewScreenMatrix ps2_NaView.c:221,
+       BHD_ASPECT_X main.c:53). Das GS-Sprite ist bildschirmachsenparallel mit
+       konstanter Tiefe; in Sichtkoordinaten misst es 2 * 0.025 / 1.174
+       waagerecht und 2 * 0.025 senkrecht, A (ST 0/0) liegt oben links.
+       scl_add_1st greift erst im naechsten Tick. Gedrehte Kamera, damit eine
+       Weltachsen-Abbildung auffaellt. */
     {
-        const NJS_POINT3& a=scene.triangles[0].vertices[0].position;
-        const NJS_POINT3& b=scene.triangles[0].vertices[1].position;
-        const NJS_POINT3& c=scene.triangles[0].vertices[2].position;
-        const float minx=std::fmin(a.x,std::fmin(b.x,c.x)),maxx=std::fmax(a.x,std::fmax(b.x,c.x));
-        check(std::fabs((maxx-minx)-0.05f)<1e-4f,"the particle sprite scale differs from vtx_scale 0.025");
+        SceneCamera turned;
+        turned.angles={0x0800,0x2400,0x0300};
+        turned.position={1,2,-6};
+        Scene view_scene;
+        p.append(view_scene,turned,4);
+        check(view_scene.triangles.size()==32u,"the turned camera changed the GS sprite count");
+        NJS_MATRIX view;camera_view_matrix(turned,view);
+        for(std::size_t t=0;t<view_scene.triangles.size();t+=2){
+            float minx=1e9f,maxx=-1e9f,miny=1e9f,maxy=-1e9f,minz=1e9f,maxz=-1e9f;
+            float u0x=0,u0y=0,u1x=0,u1y=0;
+            for(std::size_t k=t;k<t+2;++k)for(const auto& v:view_scene.triangles[k].vertices){
+                NJS_POINT3 src=v.position,q;njCalcPoint(&view,&src,&q);
+                minx=std::fmin(minx,q.x);maxx=std::fmax(maxx,q.x);
+                miny=std::fmin(miny,q.y);maxy=std::fmax(maxy,q.y);
+                minz=std::fmin(minz,q.z);maxz=std::fmax(maxz,q.z);
+                if(v.u==0&&v.v==0){u0x=q.x;u0y=q.y;}
+                if(v.u==1&&v.v==1){u1x=q.x;u1y=q.y;}
+            }
+            check(std::fabs((maxx-minx)-0.05f/1.174f)<1e-4f,"the GS sprite width ignores iz*w*dist without AspectW");
+            check(std::fabs((maxy-miny)-0.05f)<1e-4f,"the GS sprite height differs from 2 * vtx_scale");
+            check(maxz-minz<1e-4f,"a GS sprite must keep one depth");
+            check(u0x<u1x&&u0y<u1y,"the GS sprite texture does not run from the top-left corner A");
+        }
     }
 
     /* Stufe k entsteht im Dispatch 2 + stg_timer[k] und faellt im Dispatch
@@ -102,7 +130,7 @@ static void emitter_stages()
         while(dispatch<s.dispatch){p.tick(at_rest,no_wall);++dispatch;}
         scene.triangles.clear();
         p.append(scene,camera,4);
-        check(scene.triangles.size()==std::size_t(2*16*2*s.stages),"the particle stage count differs from Eff302Prm[0]");
+        check(scene.triangles.size()==std::size_t(2*8*2*s.stages),"the particle stage count differs from Eff302Prm[0]");
     }
 
     /* Bei stg_num == 0 setzt bhEff302 oP->flg = 0 und gibt damit alle drei
@@ -134,8 +162,9 @@ static void emitter_line_kind()
     p.tick(at_rest,no_wall);   /* case 0 */
     p.tick(at_rest,no_wall);   /* erster case-1-Durchlauf */
     p.append(scene,camera,4);
-    /* Nur der Sprite-Satz zeichnet Dreiecke; der Liniensatz geht in scene.lines. */
-    check(scene.triangles.size()==32u,"the sprite set of PtclDat04 did not draw sixteen sprites");
+    /* Nur der Sprite-Satz zeichnet Dreiecke (acht GS-Sprites, s. o.); der
+       Liniensatz geht in scene.lines. */
+    check(scene.triangles.size()==16u,"the sprite set of PtclDat04 did not draw eight GS sprites");
     /* bhEff_PtclLineDraw legt je Stufe sechzehn Strecken an und setzt
        lne_col[0] = col & 0xFFFFFF, lne_col[1] = col. */
     check(scene.lines.size()==16u,"bhEff_PtclLineDraw did not emit sixteen segments");
@@ -223,8 +252,12 @@ static void linked_work()
 }
 
 /* bhSetBloodPoolLnk (effsub3.c:145-231) + bhEff300: py += 0.01, dann off_pos,
-   dann 0.001 * sys->bl_ct; die Lache zeichnet als acht Rechtecke im
-   Texturrahmen 17 + pal_bnk mit Farbe 0xF0808080. */
+   dann 0.001 * sys->bl_ct. bhDrawTrsEffect3D zeichnet njDrawTexture3DEx(tvp,
+   16, 1) (effect.c:1414), njDrawTextureSub3D gibt das als Ps2AddPrim3D(0x3E..)
+   aus (ps2_NaDraw.c:351). Das PRIM-Feld beginnt bei Bit 47 (PRE ist Bit 46, ELF
+   Ps2AddPrim3D 0x002CBE1C: Tag 0x3000400000008000 | prim | num), 0x3E << 48 ist
+   also PRIM 0x7C = TRISTRIP|IIP|TME|FGE|ABE: ein Streifen ueber die 16 Eckpunkte
+   in tv_buf-Reihenfolge, Texturrahmen 17 + pal_bnk, Farbe 0xF0808080. */
 static void blood_pool()
 {
     seed();
@@ -235,7 +268,7 @@ static void blood_pool()
     p.tick(at_rest,no_wall);
     Scene scene;
     p.append_pools(scene,17);
-    check(scene.triangles.size()==16u,"bhEff300 did not emit eight sprite quads");
+    check(scene.triangles.size()==14u,"bhEff300 did not emit one 16-vertex triangle strip");
     check(scene.triangles[0].color==0xF0808080u,"the blood pool colour differs");
     check(scene.triangles[0].texture==18u,"the blood pool texture frame 17 + pal_bnk differs");
     check(scene.triangles[0].blend==SceneBlend::Ninja&&scene.triangles[0].blend_register==0x44,
@@ -244,24 +277,37 @@ static void blood_pool()
           "the blood pool resting height differs from py += 0.01 and off_pos");
     check(scene.triangles[0].vertices[0].position.x==2.0f,"the blood pool x does not sit on the given position");
 
-    /* VtxTbl[16] = {0,1,3,5,7,9,11,13,15,14,12,10,8,6,4,2} legt den Ring aus den
-       Paaren (2k, 2k+1) an: die uv-Werte liegen auf dem Einheitskreis und sind
-       paarweise verschieden. */
+    /* bhEff300 case 0 (effsub3.c:264-284): ang beginnt bei eff_dir + 16384 und
+       springt um 4096 * i, bei geradem i negativ; u/v = 0.5 + 0.5 * cos/sin(ang).
+       Dreieck t des Streifens besteht aus den Eckpunkten t, t+1, t+2. */
     float uv[16][2];
-    for(unsigned k=0;k<8;++k){
-        uv[k*2][0]=scene.triangles[k*2].vertices[0].u;
-        uv[k*2][1]=scene.triangles[k*2].vertices[0].v;
-        uv[k*2+1][0]=scene.triangles[k*2].vertices[1].u;
-        uv[k*2+1][1]=scene.triangles[k*2].vertices[1].v;
+    {
+        int ang=0+16384;
+        for(int i=0;i<16;++i){
+            int tmp=4096*i;if(!(i&1))tmp=-tmp;ang+=tmp;
+            uv[i][0]=0.5f+0.5f*njCos(ang);uv[i][1]=0.5f+0.5f*njSin(ang);
+        }
     }
-    for(unsigned i=0;i<16;++i){
-        check(uv[i][0]>=-1e-6f&&uv[i][0]<=1.0f+1e-6f&&uv[i][1]>=-1e-6f&&uv[i][1]<=1.0f+1e-6f,
-              "a blood pool uv left the unit range");
-        check(scene.triangles[i].texture==18u,"a blood pool quad lost its texture frame");
-        for(unsigned j=0;j<i;++j)
-            check(std::fabs(uv[i][0]-uv[j][0])>1e-4f||std::fabs(uv[i][1]-uv[j][1])>1e-4f,
-                  "two blood pool ring points share a uv");
+    const auto has_uv=[&](const SceneTriangle& tr,int i){
+        for(const auto& v:tr.vertices)if(std::fabs(v.u-uv[i][0])<1e-5f&&std::fabs(v.v-uv[i][1])<1e-5f)return true;
+        return false;};
+    double area=0;
+    for(unsigned t=0;t<14;++t){
+        const SceneTriangle& tr=scene.triangles[t];
+        check(tr.texture==18u,"a blood pool triangle lost its texture frame");
+        check(has_uv(tr,int(t))&&has_uv(tr,int(t)+1)&&has_uv(tr,int(t)+2),
+              "a blood pool triangle is not (t, t+1, t+2) of the tv_buf strip");
+        check(tr.ninja_primitive!=0u&&tr.ninja_primitive==scene.triangles[0].ninja_primitive&&tr.ninja_screen_reject,
+              "the blood pool strip lost the njDrawTextureSub3D call clip rule");
+        const auto& a=tr.vertices[0];const auto& b=tr.vertices[1];const auto& c=tr.vertices[2];
+        area+=0.5*std::fabs(double(b.u-a.u)*double(c.v-a.v)-double(c.u-a.u)*double(b.v-a.v));
+        check(std::fabs(a.position.y-b.position.y)<1e-6f&&std::fabs(a.position.y-c.position.y)<1e-6f,
+              "the blood pool strip left its floor plane");
     }
+    /* Der Zickzack-Streifen fuellt das Sechzehneck im Texturkreis (Radius 0.5)
+       genau einmal: Flaeche 8 * 0.25 * sin(22.5 Grad). Acht Paar-Rechtecke oder
+       ein falsch geordneter Streifen ergeben eine andere Summe. */
+    check(std::fabs(area-2.0*std::sin(3.14159265358979/8.0))<1e-4,"the blood pool strip does not tile the sixteen-gon once");
 
     /* sys->bl_ct staffelt die Hoehe und laeuft ueber 0x1FF zurueck. */
     EffectParticles q;
@@ -270,16 +316,18 @@ static void blood_pool()
     q.tick(at_rest,no_wall);
     Scene staggered;
     q.append_pools(staggered,17);
-    check(staggered.triangles.size()==32u,"two blood pools did not emit sixteen quads");
-    check(std::fabs((staggered.triangles[16].vertices[0].position.y-staggered.triangles[0].vertices[0].position.y)-0.001f)<1e-6f,
+    check(staggered.triangles.size()==28u,"two blood pools did not emit two strips");
+    check(std::fabs((staggered.triangles[14].vertices[0].position.y-staggered.triangles[0].vertices[0].position.y)-0.001f)<1e-6f,
           "sys->bl_ct did not stagger the blood pool height by 0.001");
+    check(staggered.triangles[14].ninja_primitive!=staggered.triangles[0].ninja_primitive,
+          "two blood pool draw calls share one clip identity");
 
     /* Die Lache bleibt stehen, bis der Besitzer sie freigibt. */
     for(int i=0;i<300;++i)p.tick(at_rest,no_wall);
     check(p.active()==1,"the blood pool stopped on its own");
     scene.triangles.clear();
     p.append_pools(scene,17);
-    check(scene.triangles.size()==16u,"the resting blood pool stopped drawing");
+    check(scene.triangles.size()==14u,"the resting blood pool stopped drawing");
 }
 
 /* bhEne_SetBloodEffect4 reicht die beiden Blutfarben unveraendert durch
@@ -298,18 +346,18 @@ static void emitter_mk2()
     SceneCamera camera;
     Scene scene;
     p.append(scene,camera,4);
-    check(scene.triangles.size()==64u,"PtclTbl[1] did not draw two works of one stage");
+    check(scene.triangles.size()==32u,"PtclTbl[1] did not draw two works of one stage");
     /* Die frisch angelegte Stufe traegt src_col unveraendert (effsub3.c:1294). */
     check(scene.triangles[0].color==0xFF204080u,"bhSetEffParticleMk2 changed the source colour");
-    check(scene.triangles[32].color==0xFF204080u,"the second Mk2 set lost its source colour");
+    check(scene.triangles[16].color==0xFF204080u,"the second Mk2 set lost its source colour");
 
     p.tick(at_rest,no_wall);   /* Dispatch 3: Stufe 1 */
     scene.triangles.clear();
     p.append(scene,camera,4);
-    check(scene.triangles.size()==128u,"PtclTbl[1] did not draw two works of two stages");
+    check(scene.triangles.size()==64u,"PtclTbl[1] did not draw two works of two stages");
     /* Stufe 1 ist neu und traegt src_col; Stufe 0 hat bereits einen
        col_add/col_sub-Schritt hinter sich (effsub3.c:1301-1302). */
-    check(scene.triangles[32].color==0xFF204080u,"the freshly created Mk2 stage lost its source colour");
+    check(scene.triangles[16].color==0xFF204080u,"the freshly created Mk2 stage lost its source colour");
     check(scene.triangles[0].color!=0xFF204080u,"the older Mk2 stage did not take a colour step");
 }
 

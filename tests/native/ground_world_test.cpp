@@ -121,6 +121,7 @@ int main(int argc,char** argv){try{
     camera_events.values[0]=0;camera_events.values[1]=2;camera_events.flags[12][0]|=0x200u;
     camera_world.initialize_camera_clip(4);
     check(camera_world.camera_clip().near==4&&camera_world.camera_clip().far==20000,"room cut did not install its original clip range");
+    check(camera_world.clip_volume().x==320&&camera_world.clip_volume().y==240,"room without bhChangeClipVolumeRM row changed ClipVolume");
     check(camera_world.bind({0x2a,0,0,0,{0x2a,0,0,0}}),"fixed camera binding missing");
     check(camera_world.camera_clip().near==2&&camera_world.camera_clip().far==20000,"fixed camera retained the previous cut's clip instead of the new cam.ncut");
     camera_events.flags[12][0]&=~0x200u;
@@ -133,6 +134,36 @@ int main(int argc,char** argv){try{
     check(camera_world.bind({0x13,0,0,0,{0x13,1,0,0}}),"eye-view return missing");
     camera_world.tick_camera(camera_scene,camera_scene.cameras[0],0,false);
     check(camera_world.camera_clip().near==1&&camera_world.camera_clip().far==20000,"eye-view return did not install 1/20000");}
+    // bhChangeClipVolumeRM (cut.c:292/538) laeuft mit bhChangeViewClipRM am Raumschnitt,
+    // bhChangeClipVolume (event.c:965) mit bhChangeViewClip an der Ereigniskamera; der
+    // Ruecksprung (bhCamSet 1) ruft nur ueber bhCheckCut(1)/bhSetCut wieder die Raumfassung.
+    {const auto room7=read_asset_file(data/"rooms/RM_0070.RDT",64*1024*1024);
+     const auto scene7=decode_scene(room7);auto actor7=scene7.spawns.at(0);
+     RoomWorld world7(room7,scene7,actor7,motion,frame,audio,data,{},"RM_0070");
+     Inventory inventory7;MessageDialog dialog7;EventVm events7(room7,inventory7,dialog7);
+     world7.bind_player_collision(events7);
+     events7.values[0]=0;events7.values[1]=7;events7.flags[12][0]|=0x200u;
+     check(world7.clip_volume().x==320&&world7.clip_volume().y==240,"ClipVolume does not start at ps2_NaView.c:24");
+     world7.initialize_camera_clip(6);
+     check(world7.clip_volume().x==1024&&world7.clip_volume().y==960,"RM_0070 cut 6 did not install ClipVolume 1024/960");
+     world7.initialize_camera_clip(5);
+     check(world7.clip_volume().x==320&&world7.clip_volume().y==240,"RM_0070 cut 5 kept the previous cut's ClipVolume");
+     check(world7.bind({0x2a,0,0,0,{0x2a,0,6,0}}),"fixed camera binding missing");
+     check(world7.clip_volume().x==1024&&world7.clip_volume().y==960,"bhSetFixedCut did not run bhChangeClipVolumeRM for cam.ncut");
+     events7.flags[12][0]&=~0x200u;world7.initialize_camera_clip(5,false);
+     check(world7.clip_volume().x==1024&&world7.clip_volume().y==960,"bhChangeClipVolumeRM ran without ts_flg 0x200");}
+    {const auto room5=read_asset_file(data/"rooms/RM_5001.RDT",64*1024*1024);
+     const auto scene5=decode_scene(room5);auto actor5=scene5.spawns.at(0);
+     RoomWorld world5(room5,scene5,actor5,motion,frame,audio,data,{},"RM_5001");
+     Inventory inventory5;MessageDialog dialog5;EventVm events5(room5,inventory5,dialog5);
+     world5.bind_player_collision(events5);
+     events5.values[0]=5;events5.values[1]=0;events5.values[21]=1;
+     check(world5.bind({0x13,0,0,0,{0x13,0,0,0}}),"event camera binding missing");
+     check(world5.clip_volume().x==1024&&world5.clip_volume().y==960,"RM_5001 event camera 0 did not install ClipVolume 1024/960 without ts_flg 0x200");
+     events5.flags[12][0]|=0x200u;
+     check(world5.bind({0x13,0,0,0,{0x13,1,0,0}}),"room-camera return missing");
+     world5.tick_camera(scene5,scene5.cameras[0],0,false);
+     check(world5.clip_volume().x==320&&world5.clip_volume().y==240,"camera return did not run bhChangeClipVolumeRM through bhSetCut");}
     // RM_4020 Container (obwp[4], Typ 8): bhObj008 (objitm.c:1846) legt einen ATR-Quader 12x20x22
     // in sys->mwalp an und fuehrt ihn mit owP[0]; bhGetGroundPosition (hitchk.c:3572) liest walp UND
     // mwalp. Der Kranschatten (bhEff001, effsub1.c:628) landet so auf der Containeroberseite.

@@ -27,7 +27,7 @@ std::uint32_t shade(const SceneTriangle& t){
 // the colour of cut-outs. Alpha of the chain is the plain average (coverage).
 void build_mips(const SceneTexture& t){
     if(t.filter_cache->ready)t.invalidate_mips();auto& cache=*t.filter_cache;
-    cache.mips.clear();cache.max_alpha=0;std::uint32_t min_alpha=255;
+    cache.mips.clear();cache.punch_mips.clear();cache.max_alpha=0;std::uint32_t min_alpha=255;
     for(const auto p:t.pixels){const auto a=p>>24;cache.max_alpha=std::max(cache.max_alpha,a);min_alpha=std::min(min_alpha,a);}
     cache.cutout=min_alpha==0&&cache.max_alpha>0;cache.uniform_alpha=min_alpha==cache.max_alpha&&min_alpha>0;
     const std::uint32_t* src=t.pixels.data();unsigned w=t.width,h=t.height;
@@ -46,6 +46,24 @@ void build_mips(const SceneTexture& t){
     }
     cache.fingerprint=t.fingerprint();cache.ready=true;
 }
+// Only filtered Punch draws that can sample mip levels need this second RGB chain.
+// Called after fingerprint validation in the serial setup pass, never by a band worker.
+void build_punch_mips(const SceneTexture& t){
+    auto& cache=*t.filter_cache;
+    const std::uint32_t* src=t.pixels.data();unsigned w=t.width,h=t.height;
+    while(w>1||h>1){
+        const unsigned nw=std::max(1u,w/2),nh=std::max(1u,h/2);
+        std::vector<std::uint32_t> next(std::size_t(nw)*nh);
+        for(unsigned y=0;y<nh;++y)for(unsigned x=0;x<nw;++x){
+            unsigned a=0,r=0,g=0,b=0;
+            for(unsigned dy=0;dy<2;++dy)for(unsigned dx=0;dx<2;++dx){
+                const auto p=src[std::size_t(std::min(h-1,y*2+dy))*w+std::min(w-1,x*2+dx)];
+                a+=p>>24;r+=p&255;g+=(p>>8)&255;b+=(p>>16)&255;}
+            next[std::size_t(y)*nw+x]=(a/4)<<24|((b+2)/4)<<16|((g+2)/4)<<8|(r+2)/4;
+        }
+        cache.punch_mips.push_back(std::move(next));src=cache.punch_mips.back().data();w=nw;h=nh;
+    }
+}
 // Fast log2 for mip selection: exponent + quadratic fit of the mantissa (|error| < 0.01).
 inline float fast_log2(float x){
     std::uint32_t bits;std::memcpy(&bits,&x,4);const float e=float(int(bits>>23)-127);
@@ -53,12 +71,13 @@ inline float fast_log2(float x){
     return e+(-0.34484843f*m+2.02466578f)*m-0.67487759f;
 }
 struct Level {const std::uint32_t* pixels;unsigned w,h;bool clamp_u,clamp_v;};
-Level level_of(const SceneTexture& t,unsigned level){
-    if(level==0)return {t.pixels.data(),t.width,t.height,t.clamp_u,t.clamp_v};
-    return {t.filter_cache->mips[level-1].data(),std::max(1u,t.width>>level),std::max(1u,t.height>>level),t.clamp_u,t.clamp_v};
+// clamp_u/clamp_v: GS CLAMP_1 dieses Zeichenaufrufs (Texturheader oder OT-Cache, ps2_dummy.c:1420/1650).
+Level level_of(const SceneTexture& t,unsigned level,bool clamp_u,bool clamp_v,bool punch=false){
+    if(level==0)return {t.pixels.data(),t.width,t.height,clamp_u,clamp_v};
+    return {(punch?t.filter_cache->punch_mips:t.filter_cache->mips)[level-1].data(),std::max(1u,t.width>>level),std::max(1u,t.height>>level),clamp_u,clamp_v};
 }
 // Premultiplied accumulation: acc = {r*a, g*a, b*a, a} scaled by weight.
-template<bool Weighted>
+template<bool Weighted,bool Straight=false>
 void bilinear(const Level& l,float u,float v,float weight,float* acc){
     const float fx=u*float(l.w)-.5f,fy=v*float(l.h)-.5f;
     const int ix=int(fx)-(fx<0),iy=int(fy)-(fy<0);const float tx=fx-float(ix),ty=fy-float(iy);
@@ -72,15 +91,17 @@ void bilinear(const Level& l,float u,float v,float weight,float* acc){
     const float k[4]={weight*(1-tx)*(1-ty),weight*tx*(1-ty),weight*(1-tx)*ty,weight*tx*ty};
     for(int i=0;i<4;++i){
         const auto p=texel[i];float c=k[i];
-        if constexpr(Weighted){const float a=float(p>>24);acc[3]+=c*a;c*=a;}else{c*=255.f;acc[3]+=c;} // constant alpha cancels from RGB; coverage is applied separately
+        if constexpr(Straight){acc[3]+=c*float(p>>24);c*=255.f;acc[4]+=c;}
+        else if constexpr(Weighted){const float a=float(p>>24);acc[3]+=c*a;c*=a;}else{c*=255.f;acc[3]+=c;} // constant alpha cancels from RGB; coverage is applied separately
         acc[0]+=c*float(p&255);acc[1]+=c*float((p>>8)&255);acc[2]+=c*float((p>>16)&255);
     }
 }
 struct Setup {
     std::array<Projected,3> p;float area;int minx,maxx,miny,maxy;std::uint32_t color;const SceneTexture* texture;
+    bool clamp_u=false,clamp_v=false;
     bool gouraud=false;std::array<NJS_POINT3,3> light{};
     bool vertex_alpha=false;std::array<float,3> alpha{1,1,1};
-    float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
+    float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true,punch_through=false;
     bool fog_color_set=false;std::uint32_t fog_color=0;
     std::uint64_t blend_register=0x44;
     unsigned texture_color_divisor=255;
@@ -94,8 +115,8 @@ SceneVertex lerp_vertex(const SceneVertex& a,const SceneVertex& b,float t){
     return {{mix(a.position.x,b.position.x),mix(a.position.y,b.position.y),mix(a.position.z,b.position.z)},mix(a.u,b.u),mix(a.v,b.v),{},{mix(a.light.x,b.light.x),mix(a.light.y,b.light.y),mix(a.light.z,b.light.z)},mix(a.alpha,b.alpha)};
 }
 // Base colour scaled by an interpolated per-vertex light factor (GS Gouraud: screen-linear).
-// njSetFogColor haelt 0x00RRGGBB; die Leinwand ist 0xAABBGGRR.
-std::uint32_t fog_canvas_color(std::uint32_t rgb){return 0xff000000u|((rgb&255u)<<16)|(rgb&0xff00u)|((rgb>>16)&255u);}
+// njSetFogColor haelt 0x00RRGGBB, die Leinwand und SceneTexture sind 0xAARRGGBB.
+std::uint32_t fog_canvas_color(std::uint32_t rgb){return 0xff000000u|(rgb&0xffffffu);}
 std::uint32_t lit(std::uint32_t base,float r,float g,float b){
     auto ch=[&](unsigned shift,float k){return std::uint32_t(std::clamp(float((base>>shift)&255)*k+.5f,0.f,255.f));};
     return (base&0xff000000)|(ch(16,r)<<16)|(ch(8,g)<<8)|ch(0,b);
@@ -118,19 +139,40 @@ void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wi
     const float focal_y=focal*(height_/480.0f)/(width_/640.0f);
     // Ninja-Bildschirm 640x480: fSx = AspectW*x*dist/z, fSy = AspectH*y*dist/z (ps2_NinjaCnk.c:1195).
     ninja_sx_=focal*aspect_x*640.0f/float(width_);ninja_sy_=focal_y*480.0f/float(height_);
-    draw_view(scene,view,focal*aspect_x,focal_y,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far);
+    draw_view(scene,view,focal*aspect_x,focal_y,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far,camera.clip_volume_x,camera.clip_volume_y);
 }
-void SoftwareRenderer::draw_screen(const Scene& scene,const SceneCamera& camera,float dist){
+void SoftwareRenderer::draw_screen(const Scene& scene,const SceneCamera& camera,float dist,float aspect_y){
     NJS_MATRIX view;camera_view_matrix(camera,view);ninja_sx_=ninja_sy_=0;
-    draw_view(scene,view,1.174f*dist,dist,false,camera.hidden_objects,camera.clip_near,camera.clip_far);
+    draw_view(scene,view,1.174f*dist,aspect_y*dist,false,camera.hidden_objects,camera.clip_near,camera.clip_far,camera.clip_volume_x,camera.clip_volume_y);
 }
-void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far){
+void SoftwareRenderer::draw_full_screen_source(const Scene& scene,const SceneCamera& camera,float aspect_y,bool wireframe){
+    NJS_MATRIX view;camera_view_matrix(camera,view);
+    const float dist=0.8f*(320.0f/std::tan(0.0000958738f*(camera.perspective/2)));
+    ninja_sx_=1.174f*dist;ninja_sy_=aspect_y*dist;
+    draw_view_projected(scene,view,ninja_sx_,ninja_sy_,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far,camera.clip_volume_x,camera.clip_volume_y,dist);
+}
+unsigned strip_clip_code(const NJS_POINT3& v,float projection,float volume_x,float volume_y,float near,float far){
+    const float w=std::fabs(v.z),cx=v.x*projection/volume_x,cy=v.y*projection/volume_y;
+    const float cz=v.z*(far+near)/(far-near)-2.0f*far*near/(far-near);
+    return unsigned(cx>w)|unsigned(cx<-w)<<1|unsigned(cy>w)<<2|unsigned(cy<-w)<<3|unsigned(cz>w)<<4|unsigned(cz<-w)<<5;}
+void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far,float volume_x,float volume_y){
+    draw_view_projected(scene,matrix,focal_x,focal_y,wireframe,hidden,near,far,volume_x,volume_y,ninja_sy_);
+}
+void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far,float volume_x,float volume_y,float ninja_projection){
     // Supersampling renders into a larger buffer and box-filters it down (steadier edges).
     const int S=std::clamp(ss_,1,4),W=width_*S,H=height_*S;
     std::uint32_t* color=pixels_.data();float* depth=depth_.data();
     if(S>1){hi_pixels_.assign(std::size_t(W)*H,scene.background);hi_depth_.assign(std::size_t(W)*H,0.0f);color=hi_pixels_.data();depth=hi_depth_.data();}
     else{std::fill(pixels_.begin(),pixels_.end(),scene.background);std::fill(depth_.begin(),depth_.end(),0.0f);}
     NJS_MATRIX view;std::copy_n(matrix,16,view);
+    // game.c:81-83 / MdlPut.c:59-61: njSetMatrix(cam.mtxb, cam.mtx); njMirror(cam.mtx, &sys->mr_pl).
+    // Dreiecke des Spiegelpasses zeichnen mit cam.mtx * mat, alle anderen mit cam.mtx.
+    NJS_MATRIX mirror_view;std::copy_n(view,16,mirror_view);
+    if(scene.mirror_enabled){NJS_MATRIX mirror;std::copy_n(scene.mirror_matrix.data(),16,mirror);njMultiMatrix(&mirror_view,&mirror);}
+    const auto view_of=[&](const SceneTriangle& t)->NJS_MATRIX*{
+        if(!t.mirror)return &view;
+        if(!scene.mirror_enabled)throw std::runtime_error("mirror pass triangle without njMirror matrix");
+        return &mirror_view;};
     near=std::max(near,0.001f);
     last_clip_={{near,far}};
     std::vector<Setup> setups;setups.reserve(scene.triangles.size());
@@ -143,17 +185,15 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     }
     // Chunk-Streifen (SceneTriangle::strip_clip) folgen der Clipregel der Ninja-Streifen, nur
     // im Ninja-Bildschirm von draw(). Bezug: ClipMatrix2 (_Make_ClipMatrix, ps2_NaView.c:233)
-    // mit ClipVolume 320x240 (ps2_NaView.c:24) und njClipZ-Grenzen near >= 1 / far <= 65535
+    // mit dem ClipVolume der Kamera (_Make_ClipVolume, ps2_NaView.c:298; Grundwert 320x240,
+    // ps2_NaView.c:24) und njClipZ-Grenzen near >= 1 / far <= 65535
     // (ps2_NaView.c:142; Grundwert 65535, ps2_NaView.c:21).
     const float ninja_sx=ninja_sx_,ninja_sy=ninja_sy_;ninja_sx_=ninja_sy_=0;
     const bool strip_rule=ninja_sx>0&&ninja_sy>0;
     const float strip_near=std::max(near,1.0f),strip_far=far>near?std::min(far,65535.0f):65535.0f;
     // vclipw.xyz gegen ClipMatrix2: Bits +x 1, -x 2, +y 4, -y 8, +z (fern) 16, -z (nah) 32.
-    // AspectH ist im Spiel 1 (BHD_ASPECT_Y, main.c:54), also ist ninja_sy die Projektion dist.
-    const auto clip_code=[&](const NJS_POINT3& v){
-        const float w=std::fabs(v.z),cx=v.x*ninja_sy/320.0f,cy=v.y*ninja_sy/240.0f;
-        const float cz=v.z*(strip_far+strip_near)/(strip_far-strip_near)-2.0f*strip_far*strip_near/(strip_far-strip_near);
-        return unsigned(cx>w)|unsigned(cx<-w)<<1|unsigned(cy>w)<<2|unsigned(cy<-w)<<3|unsigned(cz>w)<<4|unsigned(cz<-w)<<5;};
+    // ClipMatrix2 liest dist, nicht den von bhEff110 auf 1.25 gesetzten Y-Aspekt.
+    const auto clip_code=[&](const NJS_POINT3& v){return strip_clip_code(v,ninja_projection,volume_x,volume_y,strip_near,strip_far);};
     // _Check_DisplayAreaPoint (ps2_Vu1Strip.c:766) mit dem Bildschirmversatz 2048
     // (fNaViwOffsetX/Y = cx+1728/cy+1808, ps2_NaView.c:39) und der Sicht-z (pP->fZ = fVz).
     const auto outside_display=[&](const NJS_POINT3& v){
@@ -170,7 +210,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             if(!id||!scene.triangles[i].strip_clip){++i;continue;}
             std::size_t j=i;unsigned code=63;
             for(;j<scene.triangles.size()&&scene.triangles[j].strip_segment==id;++j)
-                for(const auto& vertex:scene.triangles[j].vertices){NJS_POINT3 source=vertex.position,p;njCalcPoint(&view,&source,&p);code&=clip_code(p);}
+                for(const auto& vertex:scene.triangles[j].vertices){NJS_POINT3 source=vertex.position,p;njCalcPoint(view_of(scene.triangles[j]),&source,&p);code&=clip_code(p);}
             if(code)std::fill(strip_reject.begin()+std::ptrdiff_t(i),strip_reject.begin()+std::ptrdiff_t(j),std::uint8_t(1));
             i=j;}}
     // Effektaufrufe (SceneTriangle::ninja_primitive). Ps2AddPrim3D (ps2_dummy.c:486): vf7.xy =
@@ -189,7 +229,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             if(!id){++i;continue;}
             std::size_t j=i;bool behind=false;unsigned code=15;
             for(;j<scene.triangles.size()&&scene.triangles[j].ninja_primitive==id;++j)
-                for(const auto& vertex:scene.triangles[j].vertices){NJS_POINT3 source=vertex.position,p;njCalcPoint(&view,&source,&p);
+                for(const auto& vertex:scene.triangles[j].vertices){NJS_POINT3 source=vertex.position,p;njCalcPoint(view_of(scene.triangles[j]),&source,&p);
                     if(p.z<0){behind=true;continue;}
                     const float x=(p.x*ninja_sx/p.z)*0.75f,y=p.y*ninja_sy/p.z;
                     code&=unsigned(x>240.0f)|unsigned(x<-240.0f)<<1|unsigned(y>240.0f)<<2|unsigned(y<-240.0f)<<3;}
@@ -198,9 +238,11 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     for(std::size_t triangle_index=0;triangle_index<scene.triangles.size();++triangle_index){
         const auto& triangle=scene.triangles[triangle_index];
         // bhCkFlg numbers bits from the most significant bit.
-        if(triangle.camera_mask && triangle.object<512 && (hidden[triangle.object/32] & (0x80000000u>>(triangle.object%32))))continue;
+        // bhSetHideObject(offset): hidobj ab Wort offset (cut.c:620/641, Spiegelpass 4).
+        if(triangle.camera_mask && triangle.object/32+triangle.hidden_offset<16 && (hidden[triangle.object/32+triangle.hidden_offset] & (0x80000000u>>(triangle.object%32))))continue;
         std::vector<SceneVertex> polygon;polygon.reserve(4);
-        for(auto vertex:triangle.vertices){njCalcPoint(&view,&vertex.position,&vertex.position);polygon.push_back(vertex);}
+        NJS_MATRIX* const triangle_view=view_of(triangle);
+        for(auto vertex:triangle.vertices){njCalcPoint(triangle_view,&vertex.position,&vertex.position);polygon.push_back(vertex);}
         float clip_near=near,clip_far=far;bool clip_z=true;
         if(strip_rule&&triangle.strip_clip){
             if(strip_reject[triangle_index])continue;
@@ -257,7 +299,9 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             // Screen-space gradients of the barycentric weights (constant per triangle),
             // used to derive perspective-correct texture derivatives per pixel.
             const float dax=-(p[2].y-p[1].y)/area,day=(p[2].x-p[1].x)/area,dbx=-(p[0].y-p[2].y)/area,dby=(p[0].x-p[2].x)/area,dcx=-(dax+dbx),dcy=-(day+dby);
-            Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.texture_color_divisor=triangle.texture_color_divisor;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
+            Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.punch_through=triangle.punch_through;setup.texture_color_divisor=triangle.texture_color_divisor;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
+            if(setup.texture){setup.clamp_u=texture->clamp_u||triangle.texture_cache_clamp;
+                setup.clamp_v=texture->clamp_v||triangle.texture_cache_clamp;}
             setup.blend_register=triangle.blend_register;setup.post=triangle.after_modifiers;
             setup.filtered=triangle.texture_filter==SceneTextureFilter::Linear||(triangle.texture_filter==SceneTextureFilter::Default&&filter_);
             setup.linear_only=triangle.texture_filter==SceneTextureFilter::Linear;
@@ -272,6 +316,9 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
             setup.Wx=dax*p[0].invz+dbx*p[1].invz+dcx*p[2].invz;setup.Wy=day*p[0].invz+dby*p[1].invz+dcy*p[2].invz;
             // Mip pyramids are built here, serially, so the band workers only read them.
             if(setup.filtered&&setup.texture&&(!setup.texture->filter_cache->ready||setup.texture->filter_cache->fingerprint!=setup.texture->fingerprint()))build_mips(*setup.texture);
+            // Linear samples only level 0. Default filtered Punch also reads mip levels;
+            // identical texture copies can share the completed chain until pixels detach.
+            if(setup.filtered&&!setup.linear_only&&setup.punch_through&&setup.texture&&setup.texture->filter_cache->punch_mips.size()!=setup.texture->filter_cache->mips.size())build_punch_mips(*setup.texture);
             setups.push_back(setup);
         }
     }
@@ -284,8 +331,8 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     // Stage 2: rasterize horizontal bands, possibly on several threads. Every band visits the
     // setups in submission order, so the result does not depend on the thread count.
     std::vector<float> transported;if(zc)transported.assign(std::size_t(W)*H,0.f);
-    // njSetFogColor keeps 0x00RRGGBB; the canvas is 0xAABBGGRR.
-    const std::uint32_t fog_pixel=0xff000000u|((scene.fog_color&255u)<<16)|(scene.fog_color&0xff00u)|((scene.fog_color>>16)&255u);
+    // njSetFogColor und der ARGB-Framebuffer haben dieselbe RGB-Kanalreihenfolge.
+    const std::uint32_t fog_pixel=fog_canvas_color(scene.fog_color);
     const auto rasterize=[&](const Setup& s,int y0,int y1){
         const auto& p=s.p;const auto* texture=s.texture;
             int setup_y=-1,setup_x=0,setup_taps=1,setup_l0=0;float setup_du=0,setup_dv=0,setup_frac=0;
@@ -304,13 +351,20 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                 for(int x=begin;x<=end;++x){
                 const float a=edge(p[1],p[2],x+0.5f,y+0.5f)/s.area;
                 const float b=edge(p[2],p[0],x+0.5f,y+0.5f)/s.area;
-                const float c=s.blend!=SceneBlend::Opaque?edge(p[0],p[1],x+0.5f,y+0.5f)/s.area:1-a-b;if(a<0||b<0||c<0)continue;
-                // A transparent quad's shared edge belongs to one triangle.
-                // Without the top-left fill rule its diagonal is blended twice.
-                if(s.blend!=SceneBlend::Opaque){const auto inclusive=[](const Projected& from,const Projected& to){return to.y<from.y||(to.y==from.y&&to.x>from.x);};if((a==0&&!inclusive(p[1],p[2]))||(b==0&&!inclusive(p[2],p[0]))||(c==0&&!inclusive(p[0],p[1])))continue;}
-                const float invz=a*p[0].invz+b*p[1].invz+c*p[2].invz;
+                const float c=edge(p[0],p[1],x+0.5f,y+0.5f)/s.area;if(a<0||b<0||c<0)continue;
+                // Half-open coverage for every triangle, including opaque/punch: a shared
+                // edge has one owner, but independently submitted coincident faces still draw.
+                const auto inclusive=[](const Projected& from,const Projected& to){return to.y<from.y||(to.y==from.y&&to.x>from.x);};
+                if((a==0&&!inclusive(p[1],p[2]))||(b==0&&!inclusive(p[2],p[0]))||(c==0&&!inclusive(p[0],p[1])))continue;
+                // Affine form preserves constant vertex depth exactly, rather than letting
+                // roundoff in a+b+c turn a coplanar face into a spurious farther fragment.
+                const float invz=p[0].invz+b*(p[1].invz-p[0].invz)+c*(p[2].invz-p[0].invz);
                 const auto index=std::size_t(y)*W+x;
-                if(invz<=depth[index])continue;
+                // Ps2AddPrim3D/Ex/Ex1P/ExI and the chunk TEST state use GEQUAL.
+                // This remains native reciprocal depth, not a GS-Z quantization model.
+                if(invz<depth[index])continue;
+                const float material_alpha=float(s.color>>24)/255.f*(s.vertex_alpha?std::clamp(a*s.alpha[0]+b*s.alpha[1]+c*s.alpha[2],0.f,1.f):1.f);
+                if(material_alpha<=0.f)continue; // TEST GREATER 0 / KEEP, also without ABE
                 auto pixel=s.color;float coverage=1;
                 if(s.gouraud)pixel=lit(s.color,a*s.light[0].x+b*s.light[1].x+c*s.light[2].x,a*s.light[0].y+b*s.light[1].y+c*s.light[2].y,a*s.light[0].z+b*s.light[1].z+c*s.light[2].z);
                 if(texture) {
@@ -318,8 +372,8 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                     float u=(a*p[0].u_over_z+b*p[1].u_over_z+c*p[2].u_over_z)*rz;
                     float v=(a*p[0].v_over_z+b*p[1].v_over_z+c*p[2].v_over_z)*rz;
                     if(!s.filtered) {
-                        if(texture->clamp_u)u=std::clamp(u,0.f,1.f);else u-=std::floor(u);
-                        if(texture->clamp_v)v=std::clamp(v,0.f,1.f);else v-=std::floor(v);
+                        if(s.clamp_u)u=std::clamp(u,0.f,1.f);else u-=std::floor(u);
+                        if(s.clamp_v)v=std::clamp(v,0.f,1.f);else v-=std::floor(v);
                         const auto tx=std::min(texture->width-1,unsigned(u*texture->width));
                         const auto ty=std::min(texture->height-1,unsigned(v*texture->height));
                         const auto texel=texture->pixels[std::size_t(ty)*texture->width+tx];
@@ -348,15 +402,18 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                         }
                         const int taps=setup_taps,top=int(texture->filter_cache->mips.size());
                         const float du=s.linear_only?0:setup_du,dv=s.linear_only?0:setup_dv;const int l0=s.linear_only?0:setup_l0,l1=s.linear_only?0:std::min(l0+1,top);const float frac=s.linear_only?0:setup_frac;
-                        if(!texture->clamp_u)u-=std::floor(u);
-                        if(!texture->clamp_v)v-=std::floor(v);
-                        const Level a0=level_of(*texture,unsigned(l0)),a1=level_of(*texture,unsigned(l1));
-                        float acc[4]={0,0,0,0};
+                        if(!s.clamp_u)u-=std::floor(u);
+                        if(!s.clamp_v)v-=std::floor(v);
+                        const Level a0=level_of(*texture,unsigned(l0),s.clamp_u,s.clamp_v,s.punch_through),a1=level_of(*texture,unsigned(l1),s.clamp_u,s.clamp_v,s.punch_through);
+                        float acc[5]={0,0,0,0,0};
                         const int draw_taps=s.linear_only?1:taps;
                         const bool second=frac>1e-3f&&l1!=l0;const float inv_taps=1.f/float(draw_taps);
                         for(int tap=0;tap<draw_taps;++tap){
                             const float t=(float(tap)+.5f)*inv_taps-.5f,su=u+t*du,sv=v+t*dv;
-                            if(texture->filter_cache->uniform_alpha){bilinear<false>(a0,su,sv,(1-frac)*inv_taps,acc);if(second)bilinear<false>(a1,su,sv,frac*inv_taps,acc);}
+                            // Ps2TexLoad TFX MODULATE (ps2_dummy.c:1615-1625), ohne ABE: RGB und Alpha
+                            // werden unabhaengig gefiltert. Alphatest verwirft danach, er entmischt kein RGB.
+                            if(s.punch_through){bilinear<false,true>(a0,su,sv,(1-frac)*inv_taps,acc);if(second)bilinear<false,true>(a1,su,sv,frac*inv_taps,acc);}
+                            else if(texture->filter_cache->uniform_alpha){bilinear<false>(a0,su,sv,(1-frac)*inv_taps,acc);if(second)bilinear<false>(a1,su,sv,frac*inv_taps,acc);}
                             else{bilinear<true>(a0,su,sv,(1-frac)*inv_taps,acc);if(second)bilinear<true>(a1,su,sv,frac*inv_taps,acc);}
                         }
                         // Cut-out textures keep their coverage: partly covered pixels blend with
@@ -376,8 +433,8 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                             coverage=texture->filter_cache->uniform_alpha?float(texture->filter_cache->max_alpha)/255.f:acc[3]/255.f;
                             coverage=std::min(1.f,coverage);
                         }
-                        else if(texture->filter_cache->cutout){coverage=std::min(1.f,acc[3]/float(texture->filter_cache->max_alpha));if(coverage<1.f/32)continue;}
-                        const float inv=1.f/acc[3];
+                        else if(texture->filter_cache->cutout&&!s.punch_through){coverage=std::min(1.f,acc[3]/float(texture->filter_cache->max_alpha));if(coverage<1.f/32)continue;}
+                        const float inv=1.f/(s.punch_through?acc[4]:acc[3]);
                         auto channel=[&](float value){return std::uint32_t(std::clamp(value*inv+.5f,0.f,255.f));};
                         pixel=modulate(0xff000000|(channel(acc[2])<<16)|(channel(acc[1])<<8)|channel(acc[0]),pixel,s.texture_color_divisor);
                     }
@@ -388,12 +445,12 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
                     std::uint32_t out=pixel&0xff000000u;for(unsigned shift:{0u,8u,16u})out|=((((pixel>>shift)&255u)*F+((fog_rgb>>shift)&255u)*(255u-F))>>8)<<shift;pixel=out;}
                 if(s.blend==SceneBlend::Additive){
                     const auto below=color[index];std::uint32_t mixed=0xff000000;
-                    const float alpha=coverage*float(s.color>>24)/255.f*(s.vertex_alpha?std::clamp(a*s.alpha[0]+b*s.alpha[1]+c*s.alpha[2],0.f,1.f):1.f);
+                    const float alpha=coverage*material_alpha;
                     for(unsigned shift:{0u,8u,16u})mixed|=std::min(255u,unsigned((below>>shift)&255)+unsigned(float((pixel>>shift)&255)*alpha+.5f))<<shift;
                     color[index]=mixed;continue;
                 }
                 if(s.blend==SceneBlend::Alpha||s.blend==SceneBlend::Ninja){
-                    const float alpha=coverage*float(s.color>>24)/255.f*(s.vertex_alpha?std::clamp(a*s.alpha[0]+b*s.alpha[1]+c*s.alpha[2],0.f,1.f):1.f);
+                    const float alpha=coverage*material_alpha;
                     color[index]=blend_gs(s.blend==SceneBlend::Ninja?s.blend_register:0x44,pixel,color[index],alpha);
                     if(s.depth_write&&alpha>=.5f)depth[index]=invz;continue;
                 }

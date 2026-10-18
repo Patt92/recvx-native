@@ -897,6 +897,47 @@ Port ueberein. Ohne Originalaufnahme nicht weiter entscheidbar. (2) Grauer Balke
 (event.c:13205, ViewClipSt0) fuer Raum 2 evc 12 near -9.0 setzt; die Kamera steht ~8 ueber dem Boden. Nativ ebenso. Nebenbefunde (Ledger):
 bhChangeClipVolume/bhChangeClipVolumeRM nicht portiert (andere Stages), PRIM-Lesart in effect_particles.cpp vermutlich vertauscht.
 
+**2026-10-18 nachmittags (Unteragenten, jede Aenderung gegen das Original nachgelesen, Dev-App via `./build.sh --test`, CTest 127/127):**
+(1) Speicherbildschirm "weisses Overlay": `draw_typewriter` loeschte die Leinwand nicht; das Original loescht jedes Bild schwarz
+(bup_00.c:299-304, ps2_dummy.c:89). In den schwarz gekeyten Loechern des Hintergrunds blieb das Raumbild stehen und das Fenster
+0x18808080 mischte Bild fuer Bild erneut (Grau ~118 statt 12). Headless unsichtbar (nur letztes Bild gezeichnet). Test
+`typewriter_slot_list_draw` (Gegenprobe rot). (2) `bhChangeClipVolume`/`...RM` portiert (view_clip.cpp, Renderer-Streifenregel);
+gemessen bytegleiche Bilder in RM_0070/0090/0150/0020, nur nicht mehr verworfene Pakete ausserhalb des Bildes. Offen: ClipDispW der
+Negativzeilen (nur DoubleMain-Leser), Tuer-/Gameover-Kamera behalten 320/240. Tests `view_clip`, `native_ground_world` (Gegenprobe rot).
+(3) RM_0100 Kistensprung-Ruck: dnd setzt plp->flr_no vor py (player.c:3601); der Host nahm die Etage aus py und schrieb den
+Flagstand vom Aktionsbeginn zurueck, das Abschlussbild baute so die Kantenwand der Kiste und schob Claire 5.0-5.9 Einheiten weg.
+Jetzt `stairs.floor` waehrend Stufenaktionen und Neulesen der Flags vor jedem Tick. `tests/native/box_jump_landing_check.py`
+(alle drei Seiten 0.000, Gegenprobe rot 5.045), `tools/verify_stairs.py` (RM_2050-Erwartung korrigiert), verify_push gruen.
+(4) GS-PRIM ab Bit 47 (ELF-belegt): Blutlache jetzt Dreiecksstreifen statt acht Rechtecke, Partikel-Sprites als GS-Sprites, n/2 Sprites
+je njPtclDrawSprite und Breite /1.174 (ps2_NinjaPtcl.c:100-163). Tests `original_effect_particles`, `effect_room_sprites` (gegen HEAD rot).
+Am installierten App-Binary: Titelstart, RM_1000-Eintritt, Kistensprung, Treppen, Schieben.
+Punch-through-Nebenbefund nachgezogen: bhEff023 mdlver 0 zeichnet jetzt ohne Überblendung mit Alpha-Lochtest und Tiefe;
+RGB-Filterung unabhängig von Alpha, auch im optionalen Host-Mipfilter. Gegenproben für Liste, Coverage und RGB rot,
+CTest 129/129 grün; Kistensprung und Titel-/Raumeintritt jetzt regulär in CTest. `Start.command`-Titel/Neues Spiel
+und LOAD GAME am App-Binary geprüft. Einzelheiten und Grenzen: [Prüfbericht](work/2026-10-18-punch-through.md).
+Danach integriert (Unteragenten, jeder Diff gegen das Original nachgelesen, eigene Gegenprobe je Port rot, CTest 139/139,
+Dev-App, `Start.command` Titel/Neues Spiel, LOAD GAME, Kistensprung, Treppen, Schieben am App-Binary):
+(a) bhChangeBackColor/Evt (`native/back_color.*`, 132 Tabellenzeilen, EOR-Timer sync.c:114, 0xab sofort in rom->bak_col;
+ts_flg startet jetzt mit 0x20000 wie system.c:453). RM_7070 Kamera 3: Tabellenfarbe 0x205070 durch das Gitter. partial: globale
+njSetBackColor anderer Tasks, Zielalpha/SSAA. (b) Nebelfarbe ohne R/B-Tausch (Leinwand ist ARGB; alte AABBGGRR-Kommentare falsch;
+`ui.cpp` direct_message hat denselben Tausch noch, offen). (c) UV-Scrolls bhObj010, bhEff120 (ELF: -floor(az/32)),
+bhEffectSensyaSet 0x96 und OT-CLAMP nur an der belegten bhPutModel-Route (Panzerkette Tex 9). (d) bhEff110 Vollbild-Monitor und
+bhEff133 Thermometer (RM_1050/4030/8050, RM_7050). (e) Tiefe GEQUAL: spaetere gleich tiefe Flaeche gewinnt, Kantenregel fuer alle,
+Material-Alpha 0 verworfen; 10-Raum-Vergleich nur Kantenpixel bzw. +-1. (f) bhEff138/bhDraw138 Oel-Raetsel RM_8001 (Test `native_oil_puzzle_world`, Gegenprobe ev64 rot; bhDraw138 partial: gemeinsame OT
+anderer Zeichner). (g) pt_flg-Zeichentore Raum 0x20/Objekte 0x4/Items 0x8/gelinkt>=1210 0x1 (game.c:328, objitm.c:503/550/639), Test
+`native_presentation_gates`. (h) UI-Farbkanaele (direct_message, FE01..05 message.c:161/401), Test `ui_color_channels`.
+(i) ein Besitzer fuer Db.clear ueber Tuer/Gameover/Karte/Schreibmaschine/Film/Terminal/Status (back_color.*). CTest 142/142,
+Dev-App, verify_doors gruen. Offen: Wasserflaeche bhDrawGeneralPurposeWater ohne Zeichenpfad, bhEff112 (Spiegelpass laeuft),
+gefilterte Alphatest-Quantisierung, GS-16-Bit-Z.
+Nachtrag: (j) Spiegelpass/bhEff112/njMirror (RM_2040, Test `mirror_pass`; offen: gespiegelter bhDrawEffect game.c:91).
+(k) Kisten-Ausruestungsflaeche ArmsSet center 9 (sub1.c:4975-5105, Test `item_box_equipment_slot`). (l) Muendungslicht Typ 100/101
+(light.c:673-699, Test `native_lighter_effect`). (m) EN01-Blutlache bhSetBloodPoolLnk (en01.c:9990/9994/10122/10149, en01b.c:763,
+Tests `enemy_en01_blood_pool`, `zombie_blood_pool`). (n) GetItem-Bildschirm ohne Statuspad (sub1.c:3447-3460, Test `pickup_gap_pad`).
+RM_0050 Rueckgleiten nach Zombie-Event ist Originalverhalten (event.c:12034 Common 7 ohne spx, player.c:2127). Offen: nativ
+tick_camera vor locomote, Original bhControlPlayer vor bhControlCamera (game.c:46-56). CTest 147/147, je Fix Gegenprobe rot/gruen,
+Dev-App LOAD GAME/Raumeintritt/Tuer gruen; Zopf im Event (RM_1050) in Arbeit.
+**Kein Commit/Push.**
+
 **Zu verifizieren: RM_0090 Security Box verformt** (Nutzerbefund 2026-10-18): nach Abholen der Adlermedaille an der *anderen* Box ist die
 vordere Box (obj[5], Kamera 9) auf dem Rueckweg verformt (Klappe offen + Deckel hochgeklappt), ohne dass sie benutzt wurde; beim Untersuchen
 bewegt sich die Klappe nicht. Laut Nutzer am 2026-10-17 noch nicht vorhanden -> Regression aus den Aenderungen seit gestern. Nutzerverdacht:

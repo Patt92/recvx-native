@@ -155,4 +155,41 @@ static void grab_release_links(const std::filesystem::path& data){
     }
     std::cout<<"PlyDG00 release: effect and light links read plp->mlwP->owP; motion 410/411 never resolved in mnwPb.\n";
 }
-int main(int argc,char** argv){try{check(argc==2,"original data directory required");_Make_SinTable();flame_states();light_states();draw_contract();resources(argv[1]);grab_release_links(argv[1]);return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+// light.c:673-683 Typ 100: das Muendungslicht von bhSetGunFire (pwksub.c:2684-2735,
+// lgtp[0] mit WpnTab.ltp 100, flg 3, mode 0, an plp->mlwP->owP[jno]) setzt bhControlLight
+// im Schusspass (mode 0 -> 1) und im naechsten Pass (flg &= ~0x2, aber noch nach lsrc 4
+// light.c:788 gesetzt); ab dem dritten Pass gehoert es nicht mehr zum Lichtsatz.
+// Gemessen wird am Raumdreieck, das append() beleuchtet: derselbe Lauf ohne Schuss mit
+// demselben Zufallsstrom ist die Vergleichsbasis.
+static void gun_light_passes(const std::filesystem::path& data){
+    const auto& wt=WpnTab[4];check((wt.flg&0x4u)&&wt.ltp==100&&wt.lnr==5&&wt.lfr==20,"WpnTab[4] light fields differ");
+    RECVX_CB_LIGHT gun{};gun.flg=3;gun.aspd=0;gun.lkflg=1;gun.lkno=0;gun.lkono=9;gun.mode=0;gun.lsrc=4;gun.type=wt.ltp;
+    gun.r=wt.lr/40.0f;gun.g=wt.lg/40.0f;gun.b=wt.lb/40.0f;gun.nr=wt.lnr;gun.fr=wt.lfr;gun.lx=wt.wp_fps1.x;gun.ly=wt.wp_fps1.y;gun.lz=wt.wp_fps1.z;
+    const auto room=read_asset_file(data/"rooms/RM_1000.RDT",64*1024*1024);const auto stage=decode_scene(room);
+    auto player=PlayerAsset::load(data,10);
+    struct Pass {NJS_POINT3 light;unsigned flags;};
+    const auto run=[&](bool shoot){
+        recvx_core_random_seed(7);auto actor=stage.spawns.at(0);std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+        RoomWorld world(room,stage,actor,motion,frame,audio,data,{},"RM_1000");world.set_player_asset(&player);
+        Inventory inventory;MessageDialog dialog;EventVm events(room,inventory,dialog);world.bind_player_collision(events);
+        std::vector<BoneMatrix> model_nodes;(void)world.sample_player(player,&model_nodes);const auto nodes=player.script_nodes(model_nodes);world.commit_player_joints(nodes);
+        world.tick();
+        auto hand=nodes.at(9);NJS_POINT3 anchor{gun.lx,gun.ly,gun.lz};njCalcPoint(&hand.value,&anchor,&anchor);
+        if(shoot){world.set_gun_light(gun);check(world.light_state(0)&&same(world.light_state(0)->position,anchor),"muzzle light not linked to owP[9] + wp_fps1");}
+        std::vector<Pass> passes;
+        for(unsigned i=0;i<5;++i){world.tick();
+            // Boden 3 unter der Muendung (innerhalb nr 5), Normale zum Licht.
+            Scene probe;SceneTriangle t;t.textured=false;t.color=0xffffffffu;
+            t.vertices={SceneVertex{{anchor.x-1,anchor.y-3,anchor.z-1}},SceneVertex{{anchor.x+1,anchor.y-3,anchor.z-1}},SceneVertex{{anchor.x,anchor.y-3,anchor.z+1}}};
+            for(auto& v:t.vertices)v.normal={0,1,0};probe.triangles.push_back(t);
+            world.append(probe,model_nodes,stage.cameras.at(0));passes.push_back({probe.triangles.at(0).vertices[0].light,world.light_state(0)->flags});}
+        return passes;};
+    const auto base=run(false),shot=run(true);
+    const auto brighter=[](NJS_POINT3 a,NJS_POINT3 b){return a.x>b.x+.01f||a.y>b.y+.01f||a.z>b.z+.01f;};
+    check(base[0].light.x<1.f||base[0].light.y<1.f||base[0].light.z<1.f,"probe saturated without muzzle light");
+    check(shot[0].flags==3&&brighter(shot[0].light,base[0].light),"muzzle light missing in the shot pass (light.c:675 mode 0)");
+    check(!(shot[1].flags&2u)&&brighter(shot[1].light,base[1].light),"second pass must clear flg 0x2 and still light (light.c:680/788)");
+    for(unsigned i=2;i<5;++i)check(!(shot[i].flags&2u)&&same(shot[i].light,base[i].light),"muzzle light stays in the light set after its two passes");
+    std::cout<<"bhSetGunFire type 100: lit in two bhControlLight passes, then off.\n";
+}
+int main(int argc,char** argv){try{check(argc==2,"original data directory required");_Make_SinTable();flame_states();light_states();draw_contract();resources(argv[1]);grab_release_links(argv[1]);gun_light_passes(argv[1]);return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

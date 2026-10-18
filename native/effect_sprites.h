@@ -83,11 +83,18 @@ struct EffectSprite {
     void* owner_work=nullptr;
     // Mitgliedschaft in sys->ef_opq (effect.c:897 bhDrawOpqEffect3D: festes Blendpaar 8/6, Tiefenschreiben).
     bool opaque_queued=false;
+    // Mitgliedschaft in sys->ef_pnc (effect.c:886-892): bhDrawTrsEffect3D unter njControl3D(0x4000).
+    // Ps2_use_pt_flag (ps2_NinjaCnk.c:209) loescht dort ABE (ps2_dummy.c:510-516): die Primitive geht
+    // nicht in die OT, sondern sofort ohne Mischen mit TEST ATST GREATER 0 und Tiefenschreiben.
+    bool punch_queued=false;
     // Mitgliedschaft in sys->ef_fnc (effect.c:929): der Satz zeichnet sich mit op->func
     // selbst (quads/lines), nicht ueber bhDrawTrsEffect3D und tex_id/ani_ct.
     bool custom_queued=false;
     // O_WRK.jno[15]: the joint chain bhSetShadow copies up to its -1 terminator.
     std::array<std::int8_t,15> jno{};
+    // O_WRK.hide[4] (0x4D0) und clp_jno[8] (0x350), beide char (EE: vorzeichenbehaftet). bhEff138
+    // (effsub1b.c:1618) fuehrt darin die Sperr-/Blinkstufen und die Ziel-/Restmengen der drei Tanks.
+    std::array<std::int8_t,4> hide{};std::array<std::int8_t,8> clp_jno{};
     struct Vertex {float x=0,y=0,z=0,u=0,v=0;std::uint32_t col=0;};
     std::array<Vertex,4> tv{{{-1,-1,0},{1,-1,0},{-1,1,0},{1,1,0}}};
     // Ein Zeichenaufruf einer eigenen Zeichenfunktion (sys->ef_fnc, op->func): als
@@ -191,6 +198,12 @@ EffectWeather& effect_weather();
 // sys->gas_py: Hoehe der Gaswand. Nur bhEff127 schreibt und liest sie
 // (effsub1.c:8734 Null beim Start, :8818 Anstieg, :8778/:8784/:8792/:8823 Leser).
 float& effect_gas_height();
+// sys->mr_pl (types.h:791): die Spiegelebene. Einziger Schreiber ist bhEff112
+// (effsub1.c:7183-7190); Leser sind der Spiegelpass (game.c:83 njMirror, MdlPut.c:61/93)
+// und die Billboardzweige unter gm_flg 0x4000 (effect.c:1227/1362/1503/1636,
+// effsub2.c:4646). bhInitRoomChangeSystem (system.c:178) setzt sie nicht zurueck; das
+// zugehoerige st_flg 0x100 loescht es (system.c:187 st_flg = 0).
+NJS_PLANE& effect_mirror_plane();
 // sys->bl_ct: der Hoehenversatz, mit dem Blutflecken gegeneinander gestaffelt werden
 // (effect.c:54 und system.c:262 nullen ihn). Alle Schreiber zaehlen (x + 1) & 0x1FF und
 // addieren 0.001 * bl_ct auf die Hoehe; die Reihenfolge ist je Fundstelle verschieden:
@@ -227,6 +240,10 @@ void set_effect_link_lookup(std::function<bool(unsigned kind,unsigned index,unsi
 // Raums (effsub2.c E12: plp-Schaden/-Schub, rom->lgtp[1], bhEne12_SetFireBintaEffect,
 // bhEne_CallEffectSE). Ein leerer Dienst wird als Luecke gemeldet.
 struct EffectWorldHooks {
+    // effsub1.c:8011 bhEff120: objP[node].ang[2] und npSetOffsetUV auf
+    // lkwkp->mlwP, kein zweiter Modell-/Posenbesitzer.
+    std::function<bool(void* work,unsigned node,int& angle)> work_node_angle_z;
+    std::function<bool(void* work,unsigned node,int u,int v)> offset_work_uv;
     std::function<bool(RECVX_ENEMY_PLAYER&)> player_get;
     std::function<void(const RECVX_ENEMY_PLAYER&)> player_set;
     std::function<void(unsigned offset,float value)> player_exp0;
@@ -340,7 +357,10 @@ struct EffectOutput {std::vector<EffectSpawn> spawns;std::vector<unsigned> sound
     unsigned effect_flags=0;
     // sys->cb_flg-Bits, die eine Prozedur setzt bzw. loescht (effsub1.c:4831/4839 bhEff021: 0x40);
     // der Eventbesitzer (flags[10][0]) traegt sie ein.
-    unsigned cb_flg_set=0,cb_flg_clear=0;};
+    unsigned cb_flg_set=0,cb_flg_clear=0;
+    // sys->st_flg-Bits, die eine Prozedur setzt bzw. loescht (effsub1.c:7192/7196 bhEff112: 0x100);
+    // der Eventbesitzer (flags[5][0]) traegt sie ein.
+    unsigned st_flg_set=0,st_flg_clear=0;};
 // Fills the effect work exactly as bhSetEffectTb copies an EF_WORK.
 void initialize_effect_sprite(EffectSprite& sprite,const EffectSpawn& spawn);
 // bhSetExplosion (weapon.c): sound 534, flash light, effects 16/23/24. `view` is cam.vx/vy/vz.

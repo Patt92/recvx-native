@@ -1229,6 +1229,10 @@ void RoomWorld::bind_enemy_services(){
     en.set_blood2=[](RECVX_ENEMY_WORK* w,uint8_t type,const RECVX_ENEMY_VEC* ofp,int16_t ry){RECVX_ENEMY_VEC ofs=*ofp;recvx_t3_set_blood2(w,type,&ofs,ry);};
     en.set_blood3=[](RECVX_ENEMY_WORK* w,int lnk_obj,const RECVX_ENEMY_VEC* ofs,const RECVX_ENEMY_VEC* dv,int n,int tex_id,int type,int wcnt){recvx_t3_set_blood3(w,lnk_obj,ofs,dv,n,tex_id,type,wcnt);};
     en.set_blood4=[](RECVX_ENEMY_WORK* w,int lnk_obj,const RECVX_ENEMY_VEC* ofs,int tex_id,int type){recvx_t3_set_blood4(w,lnk_obj,ofs,tex_id,type);};
+    // effsub3.c:145 bhSetBloodPoolLnk aus den EN01-Sterbezustaenden (en01.c:9990/9994/10122/10149,
+    // en01b.c:763), pal_bnk vom Aufrufer (dort 0). lkwkp traegt spawn_pool nicht (Zweig ewP == NULL
+    // in bhEff300 case 2, siehe effect_particles.cpp struct Pool).
+    en.blood_pool_lnk=[](RECVX_ENEMY_WORK*,const RECVX_ENEMY_VEC* pos,int32_t ay,const RECVX_ENEMY_BP_WORK* tab,int pal_bnk)->int{return enemy_world->particles_.spawn_pool(tab,{pos->x,pos->y,pos->z},ay,pal_bnk);};
     en.nikuhen_effect=[](RECVX_ENEMY_WORK* w,int type,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* v,int tex_id){recvx_t3_set_nikuhen_effect(w,type,pos,v,tex_id);};
     en.nikuhen_effect2=[](RECVX_ENEMY_WORK* w,int type,const RECVX_ENEMY_VEC* pos,int n,int tex_id){recvx_t3_set_nikuhen_effect2(w,type,pos,n,tex_id);};
     en.san_effect=[](RECVX_ENEMY_WORK* w,int jno,const RECVX_EN01_BT* bt){recvx_t3_set_san_effect(w,jno,reinterpret_cast<const RECVX_T3_BT*>(bt));};
@@ -1269,7 +1273,7 @@ void RoomWorld::bind_enemy_services(){
     dog.set_san_effect=[](RECVX_ENEMY_WORK* w,int no,const RECVX_EN04_BT* bt)->int{return recvx_t3_set_san_effect(w,no,reinterpret_cast<const RECVX_T3_BT*>(bt));};
     dog.nikuhen_effect2=[](RECVX_ENEMY_WORK* w,int type,const RECVX_ENEMY_VEC* pos,int n,int tex_id){recvx_t3_set_nikuhen_effect2(w,type,pos,n,tex_id);};
     // effsub3.c:145 bhSetBloodPoolLnk: BP_WORK layout shared with EffectParticles::spawn_pool.
-    dog.blood_pool_lnk=[](RECVX_ENEMY_WORK*,const RECVX_ENEMY_VEC* pos,int32_t ay,const RECVX_ENEMY_BP_WORK* tab,int pal_bnk)->int{enemy_world->particles_.spawn_pool(tab,{pos->x,pos->y,pos->z},ay,pal_bnk);return 0;};
+    dog.blood_pool_lnk=[](RECVX_ENEMY_WORK*,const RECVX_ENEMY_VEC* pos,int32_t ay,const RECVX_ENEMY_BP_WORK* tab,int pal_bnk)->int{return enemy_world->particles_.spawn_pool(tab,{pos->x,pos->y,pos->z},ay,pal_bnk);};
     dog.player_hit_check_parts=[](const RECVX_ENEMY_VEC* pos){RECVX_T3_LINK lk;lk.w=nullptr;lk.player=1;recvx_t3_hit_check_parts(lk,pos);};
     dog.player_hit_set=x.player_hit_set;dog.player_hit_get=x.player_hit_get;
     dog.player_capsule=en.player_capsule;

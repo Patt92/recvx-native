@@ -315,6 +315,7 @@ int EventVm::instruction(Task& t){
     case 0xca:world(t,op,2);return 1; // event.c:8801 bhEffClearEvt (2 Bytes): bhClearEventEffect am Weltbesitzer (RoomWorld::clear_event_effects)
     case 0x8f:case 0x5e:world(t,op,4);return 1;
     case 0x95:case 0xa7:world(t,op,4);return 1; // bhBgmOn2/bhBgmOn2Ex
+    case 0x96:world(t,op,2);return 1; // event.c:1965 bhEffectSensyaSet (operand is padding)
     case 0x92:world(t,op,2);return 1; // bhBGSeOff2
     case 0x93:world(t,op,2);return 1;            // bhBgmOff2
     case 0x77:world(t,op,6);return 1; // bhSoundVolumeSet

@@ -78,5 +78,117 @@ int main(int argc,char** argv){try{
         far.triangles.push_back(inside);
         check(centre(far)==0xff3040a0,"packet with one vertex inside the clip volume is dropped although the AND is zero");
     }
+    {
+        // Diagnostic geometry: no room overrides. Ps2AddPrim3D/Ex/Ex1P/ExI
+        // TEST ZTST=GEQUAL, ATST=GREATER 0 / AFAIL=KEEP (ps2_dummy.c).
+        // NJS_COLOR and the actual SDL canvas are both 0xAARRGGBB
+        // (runtime.cpp SDL_PIXELFORMAT_ARGB8888), not the old AABBGGRR comment.
+        NJS_MATRIX identity;njUnitMatrix(&identity);
+        constexpr std::uint32_t background=0xff102030,first_color=0xffa02040,last_color=0xff20c080;
+        constexpr int size=32;const auto middle=std::size_t(16*size+16);
+        const auto quad=[](float z,std::uint32_t color,SceneBlend blend,bool punch=false){
+            // z-scaled coordinates keep projection exactly on 0..32.
+            SceneTriangle t;t.vertices={SceneVertex{{-z,-z,z}},SceneVertex{{z,-z,z}},SceneVertex{{z,z,z}}};
+            t.world_lit=true;t.color=color;t.blend=blend;t.punch_through=punch;
+            auto u=t;u.vertices={t.vertices[0],t.vertices[2],SceneVertex{{-z,z,z}}};
+            return std::array<SceneTriangle,2>{t,u};
+        };
+        const auto append=[](Scene& scene,const std::array<SceneTriangle,2>& q){scene.triangles.insert(scene.triangles.end(),q.begin(),q.end());};
+        unsigned failures=0;
+        for(int samples:{1,2,3,4})for(unsigned workers:{1u,4u})for(bool filtered:{false,true}){
+            SoftwareRenderer r(size,size);r.set_supersampling(samples);r.set_render_threads(workers);r.set_texture_filtering(filtered);
+            const auto render=[&](Scene scene){
+                // >=64 setups actually exercises the parallel branch. Background
+                // padding is first and never writes depth (no effect on probes).
+                auto padding=quad(2,scene.background,SceneBlend::Opaque);
+                for(auto& t:padding)t.depth_write=false;
+                for(auto& t:padding)for(auto& v:t.vertices){v.position.x=v.position.x*.1f+1.6f;v.position.y=v.position.y*.1f-1.6f;}
+                for(unsigned i=0;i<64;++i)scene.triangles.insert(scene.triangles.begin(),padding[i%2]);
+                r.draw_view(scene,identity,16,16,false,{},1,20000);
+            };
+            const auto expect=[&](bool ok,const char* reason){if(!ok){++failures;std::cerr<<"depth equality: "<<reason<<" ss="<<samples<<" threads="<<workers<<" filtered="<<filtered<<'\n';}};
+            const auto resolved=[&](std::uint32_t value){return samples>1?value|0xff000000u:value;};
+            const auto solid=[&](std::uint32_t value){value=resolved(value);return std::all_of(r.pixels().begin(),r.pixels().end(),[&](auto pixel){return pixel==value;});};
+            for(bool punch:{false,true}){
+                Scene s;s.background=background;append(s,quad(3,first_color,SceneBlend::Opaque));
+                append(s,quad(3,last_color,SceneBlend::Opaque,punch));render(s);
+                expect(solid(last_color),punch?"coplanar later punch does not win":"coplanar later opaque does not win");
+                expect(std::all_of(r.depth().begin(),r.depth().end(),[](float z){return z==1.f/3.f;}),"flat coplanar depth not preserved exactly");
+                auto no_write=quad(3,last_color,SceneBlend::Opaque,punch);for(auto& t:no_write)t.depth_write=false;
+                s.triangles.resize(2);append(s,no_write);render(s);
+                expect(solid(last_color)&&r.depth()[middle]==1.f/3.f,"depth-write-off coplanar primitive failed color/depth contract");
+                // Same plane, alternate tessellation: not an epsilon-depth test.
+                auto q=quad(3,last_color,SceneBlend::Opaque,punch);
+                q[0].vertices={SceneVertex{{-3,-3,3}},SceneVertex{{3,-3,3}},SceneVertex{{-3,3,3}}};
+                q[1].vertices={SceneVertex{{3,-3,3}},SceneVertex{{3,3,3}},SceneVertex{{-3,3,3}}};
+                s.triangles.resize(2);append(s,q);render(s);expect(solid(last_color),"alternate tessellation loses coplanar tie");
+                // Distinct depth, no near-equality tolerance or invented Z units.
+                s.triangles.resize(2);append(s,quad(4,last_color,SceneBlend::Opaque,punch));render(s);expect(solid(first_color),"farther surface passed");
+                s.triangles.resize(2);append(s,quad(2,last_color,SceneBlend::Opaque,punch));render(s);expect(solid(last_color),"nearer surface rejected");
+            }
+            for(bool reversed:{false,true})for(bool swapped:{false,true}){
+                // Opaque must use the same half-open edge rule as transparent.
+                Scene s;s.background=background;auto q=quad(2,first_color,SceneBlend::Opaque);q[1].color=last_color;
+                if(reversed)for(auto& t:q)std::swap(t.vertices[1],t.vertices[2]);
+                if(swapped)std::swap(q[0],q[1]);append(s,q);render(s);
+                const auto edge_pixels=r.pixels();
+                std::reverse(s.triangles.begin(),s.triangles.end());render(s);
+                expect(r.pixels()==edge_pixels,"opaque shared diagonal has order-dependent/double ownership");
+                if(samples==1)expect(r.pixels()[middle]==first_color,"top-left diagonal assigned to wrong triangle");
+                expect(r.covered_pixels()==size*size,"shared edge has a coverage hole");
+                for(auto& t:s.triangles)t.punch_through=true;render(s);const auto punch_edges=r.pixels();
+                std::reverse(s.triangles.begin(),s.triangles.end());render(s);
+                expect(r.pixels()==punch_edges&&punch_edges==edge_pixels,"punch shared diagonal has different/order-dependent ownership");
+                for(auto mode:{SceneBlend::Ninja,SceneBlend::Alpha,SceneBlend::Additive}){
+                    s.triangles.clear();q=quad(3,0x80a02040,mode);
+                    if(reversed)for(auto& t:q)std::swap(t.vertices[1],t.vertices[2]);
+                    if(swapped)std::swap(q[0],q[1]);append(s,q);render(s);
+                    const auto once=mode==SceneBlend::Additive?0xff603050u:blend_gs(0x44,0x80a02040,background,128.f/255.f);
+                    expect(solid(once),"transparent shared diagonal blends twice or has a hole");
+                    append(s,q);render(s);
+                    const auto twice=mode==SceneBlend::Additive?0xffb04070u:blend_gs(0x44,0x80a02040,once,128.f/255.f);
+                    expect(solid(twice),"independent identical quads do not both draw");
+                }
+            }
+            for(auto mode:{SceneBlend::Ninja,SceneBlend::Alpha,SceneBlend::Additive}){
+                Scene s;s.background=background;append(s,quad(3,first_color,SceneBlend::Opaque));
+                auto q=quad(3,0x8020c080,mode);append(s,q);render(s);
+                const auto expected=mode==SceneBlend::Additive?0xffb08080u:blend_gs(0x44,0x8020c080,first_color,128.f/255.f);
+                expect(solid(expected),"transparent primitive on opaque coplanar receiver rejected");
+                // Material alpha zero, vertex alpha zero, and texture alpha zero
+                // all preserve BOTH color and depth, including source-copy ALPHA.
+                for(int source:{0,1,2})for(bool write:{false,true}){
+                    Scene zero;zero.background=background;append(zero,quad(4,first_color,SceneBlend::Opaque));
+                    q=quad(2,last_color,mode);for(auto& t:q){t.depth_write=write;t.blend_register=0;
+                        if(source==0)t.color&=0xffffff;
+                        if(source==1){t.vertex_alpha=true;for(auto& v:t.vertices)v.alpha=0;}
+                        if(source==2){t.textured=true;t.texture_filter=filtered?SceneTextureFilter::Linear:SceneTextureFilter::Point;}}
+                    if(source==2)zero.textures={{1,1,{0x00ffffff}}};append(zero,q);render(zero);
+                    expect(solid(first_color),"alpha-zero transparent fragment changed color/alpha");
+                    expect(std::all_of(r.depth().begin(),r.depth().end(),[](float z){return z==.25f;}),"alpha-zero transparent fragment wrote depth");
+                }
+            }
+            for(bool punch:{false,true})for(int source:{0,1,2}){
+                Scene s;s.background=background;append(s,quad(4,first_color,SceneBlend::Opaque));auto q=quad(2,last_color,SceneBlend::Opaque,punch);
+                for(auto& t:q){if(source==0)t.color&=0xffffff;if(source==1){t.vertex_alpha=true;for(auto& v:t.vertices)v.alpha=0;}if(source==2)t.textured=true;}
+                if(source==2)s.textures={{1,1,{0x00ffffff}}};append(s,q);render(s);expect(solid(first_color),"alpha-zero opaque/punch changed color");
+                expect(std::all_of(r.depth().begin(),r.depth().end(),[](float z){return z==.25f;}),"alpha-zero opaque/punch wrote depth");
+            }
+            // Textured punch is full RGB/depth at every nonzero alpha, even 1.
+            for(unsigned alpha:{1u,128u,255u}){
+                Scene s;s.background=background;s.textures={{1,1,{(alpha<<24)|(last_color&0xffffff)}}};
+                append(s,quad(3,first_color,SceneBlend::Opaque));auto q=quad(3,0xffffffff,SceneBlend::Opaque,true);
+                for(auto& t:q)t.textured=true;append(s,q);render(s);expect(solid(last_color),"textured punch coplanar nonzero-alpha tie rejected or blended");
+            }
+            // Identical sloped primitive, preserving all operands instead of
+            // pretending differently rounded 1/z values are the same depth.
+            Scene slope;slope.background=background;auto t=quad(2,first_color,SceneBlend::Opaque)[0];
+            t.vertices[2].position.z=4;slope.triangles={t};render(slope);const auto before=r.pixels();const auto slope_depth=r.depth();
+            t.color=last_color;slope.triangles.push_back(t);render(slope);
+            bool exact=true;for(std::size_t i=0;i<before.size();++i)if(before[i]==first_color&&r.pixels()[i]!=last_color)exact=false;
+            expect(exact&&r.depth()==slope_depth,"identical sloped later primitive lost exact tie");
+        }
+        check(failures==0,"GEQUAL / half-open edge / alpha-zero regressions (details above)");
+    }
     std::cout<<"Original chunk/GS registers, textured transparency, shared edges, occlusion and the chunk strip clip rule verified.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

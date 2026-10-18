@@ -368,11 +368,17 @@ def main():
             #   * dnd: (35, 9, 35) stand im Eckpfosten ATR 27 (Typ 5, 34..38/34..38,
             #     Etage 1); der Koerperpass schob ihn nach (39.5, 39.5), wo die 4.5er-Sonde
             #     noch in ATR 9 liegt und das Original dnd nicht startet (hitchk.c danf).
-            #     (45, 9, 36) blickt von der -z-Kante herunter. Die Landung 21.75 haelt
-            #     anschliessend die Stufenkanten-Begrenzung aus dan_ap
-            #     (bhSetDansaLimitAtari, hitchk.c:666): spx +5.86, act_std zieht 0.9 davon nach.
+            #     (45, 9, 36) blickt von der -z-Kante herunter. Die Landung ist der
+            #     Knoten owP[0] (player.c:3688-3690) und bleibt dort: dnd case 4 setzt
+            #     plp->flr_no auf die untere Etage (player.c:3601), bhCheckFloorP
+            #     (player.c:1664) findet die obere Dansa-Flaeche deshalb nicht mehr und
+            #     loescht stflg 0x20000 (hitchk.c:5357), bevor das Abschlussbild seinen
+            #     Koerperpass rechnet; die Stufenkanten-Begrenzung (bhSetDansaLimitAtari,
+            #     hitchk.c:666) entsteht dort nicht.  Die fruehere Erwartung 21.75 -> 27.0199
+            #     (Schub um 5.86 hinter den Knoten, act_std zog zurueck) war genau dieser
+            #     Abweichungsbefund: die Etage kam aus plp->py statt aus plp->flr_no.
             ('dnd', 'RM_2050.RDX', 9, '60 position 45 9 36 0\n61 confirm\n',
-             dict(mode2=17, floor=0, unsupported=0), (45.0, 0.0, 27.0199), 0))
+             dict(mode2=17, floor=0, unsupported=0), (45.0, 0.0, 27.6055), 0))
         areas = {room: atr_entries(args.data / 'rooms' / room)
                  for room in ('RM_0050.RDT', 'RM_2050.RDT')}
         for name, room, index, replay, expect, end, depth in cases:
@@ -413,7 +419,8 @@ def main():
         check(trace[86]['active'] and trace[86]['actor'] == [45, 9, 36],
               'the work position holds the start height for the whole descent')
         check(not trace[88]['active'], 'the release frame ends the action')
-        close(trace[88]['actor'][2], 21.75, 0.001, 'the release frame moves the player by the node')
+        close(trace[88]['actor'][2], 27.6055, 0.001, 'the release frame moves the player by the node')
+        close(trace[90]['actor'][2], 27.6055, 0.001, 'the landing stays on the node (no edge-limit push, hitchk.c:5357)')
         check(trace[90]['camera_pose'][:3] != trace[88]['camera_pose'][:3],
               'the follow camera switches after the floor change, not with the release')
 

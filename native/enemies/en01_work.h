@@ -359,6 +359,14 @@ typedef struct RECVX_EN01_SERVICES {
        der Laufmotionen im Wasser (en01.c:10829/10833/10837). */
     void (*water_splash)(struct RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos,
                          int n, float sx, float sy, float sz);
+    /* effsub3.c:145 bhSetBloodPoolLnk(ewP, posP, ay, tabP, pal_bnk) — die
+       Blutlache der Sterbezustaende (en01.c:9990/9994/10122/10149,
+       en01b.c:763). EN01 ruft sie direkt mit pal_bnk 0, nicht ueber
+       bhEne_BloodPool (zonzon1.c:391, Palette BloodType[id].color). `ew` ist
+       der lkwkp der Lache; en01b.c:763 uebergibt NULL. Rueckgabe wie das
+       Original: 1 = beide eff-Arbeiten belegt, 0 = Pool voll. */
+    int (*blood_pool_lnk)(struct RECVX_ENEMY_WORK* ew, const RECVX_ENEMY_VEC* pos,
+                          int32_t ay, const RECVX_ENEMY_BP_WORK* tab, int pal_bnk);
 
     /* --- Effektvorlage sys->ef + bhSetEffectTb (effect.c:436) ------------
        Mehrere EN01-Effekte fuellen die GEMEINSAME Vorlage sys->ef und rufen

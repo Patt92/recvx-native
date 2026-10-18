@@ -205,7 +205,17 @@ void GameplayInput::menu_input(MenuInput key,bool repeat){
        st_flg & 0x1C040008 Statusbildschirm, Kiste, Terminal und Interaktion, das Pad
        liest allein MapPadMain (map.c:569) ueber sys->pad_ps. */
     if(events_&&(events_->flags[5][0]&0x40000u))return;
-    if(modal_input&&modal_input(key))return;if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;} /* Host-Abweichung: das Original liest hier kein Pad (bhStartDoorDemo loescht pad_ps/pad_on), der Skip ist gewuenscht */if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;if(dialog_.active()&&(!menu_.active||menu_.pickup)){if(menu_.active&&menu_.pickup&&menu_.slide.pad_locked())return; /* sub1.c GetItem: every testmode waits for !(statusflg & 0x40) */
+    if(modal_input&&modal_input(key))return;if(transition_active&&transition_active()){if(key==MenuInput::Confirm&&confirm_transition)confirm_transition();return;} /* Host-Abweichung: das Original liest hier kein Pad (bhStartDoorDemo loescht pad_ps/pad_on), der Skip ist gewuenscht */if(video_active&&video_active()){if((key==MenuInput::Confirm||key==MenuInput::Cancel)&&skip_video)skip_video();return;}if(!events_)return;
+    /* sub1.c:3306-3310 (StatusMain case 0x1, cb_flg 0x10): der GetItem-Bildschirm ist subscreenmode 8. Dessen
+       Zweig (sub1.c:3447-3460) ruft nur SpriteH/SpriteUV, GetItem und MultiWindowBack; CursorMove, MainCommand und
+       ItemCommand gibt es nur in subscreenmode 2 (sub1.c:3407-3418). GetItem liest das Pad allein in testmode 1/4
+       (pad_ps 0x800 bei offener Frage, sub1.c:3877/3926), die Meldung selbst bhControlMessage und SpriteOnOff
+       (sub1.c:8416-8428). Ohne offene Meldung - etwa im Durchlauf nach der Ja-Antwort, testmode 2 vor bhSetMessage(1,158)
+       (sub1.c:3898-3903) - bleibt jede Taste wirkungslos. Vorher fiel sie in CursorMove: Cancel/Links/Hoch setzten
+       MainCommand (nav), dessen Beschreibung 180 - maincsr dann unter 158 stand; OK oeffnete das Befehlsfenster,
+       Inventar schloss den Bildschirm. */
+    if(menu_.active&&menu_.pickup&&!dialog_.active())return;
+    if(dialog_.active()&&(!menu_.active||menu_.pickup)){if(menu_.active&&menu_.pickup&&menu_.slide.pad_locked())return; /* sub1.c GetItem: every testmode waits for !(statusflg & 0x40) */
         /* OK/Cancel only acknowledge the dialogue (message.c). The cinematic skip is
            never requested here: bhSysCallGame (system.c:545) reads pad_ps 0x10000
            (SELECT) alone, see Action::Select in apply(). */

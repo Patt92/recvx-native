@@ -11,6 +11,8 @@ typedef struct { Float x,y,z,w; } NJS_POINT4;
 typedef struct { Float x,y; } NJS_POINT2;
 /* ninja.h NJS_SCREEN (types.h:2112, 0x14 Bytes): dist, w, h, cx, cy. */
 typedef struct { Float dist,w,h,cx,cy; } NJS_SCREEN;
+/* ninja.h NJS_PLANE (types.h:791 sys->mr_pl, 0x18 Bytes): Punkt px/py/pz, Normale vx/vy/vz. */
+typedef struct { Float px,py,pz,vx,vy,vz; } NJS_PLANE;
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -73,6 +75,23 @@ void njSetPerspective(Angle ang);
    skaliert und um fNaViwOffsetX/Y verschoben. p2->z des Originals landet in
    einer lokalen Variablen und ist damit kein Ergebnis. */
 void njProjectScreen(NJS_MATRIX* m, NJS_POINT3* p3, NJS_POINT2* p2);
+/* ps2_NaMatrix.c:1016 njMirror (ELF 0x002D7260..0x002D74D0): m = m * mat, mat die
+   Spiegelung an pl. Nativ eigenstaendig, ohne VU-Nachbildung, nach der Disassembly:
+     n = v / sqrt(|v|^2) (vrsqrt), d = ((0 - n.x*px) - n.y*py) - n.z*pz,
+     Verschiebung T = -(v * 2d) mit dem UNNORMIERTEN v,
+     lAngleX = (int)((atan2f(vz, vy) * 32768) / 3.141592f),
+     lAngleZ = -(int)((atan2f(vx, sqrt(|vy + vz|)) * 32768) / 3.141592f).
+   Der zweite Winkel nimmt im Original vf5 (v) statt der Quadrate vf6: vaddy.x vf7, vf0, vf5y /
+   vaddz.x vf7, vf7, vf5z (0x002D73C8/0x002D73CC), vsqrt nimmt den Betrag (0x002D73E4). Der
+   Faktor 32768 ist vf3.z * vf2.w = 65536 * 0.5, der Teiler vf3.w = 3.141592f (njInitMatrix
+   0x002D66B0). atan2 rechnet njAtan2b in double (fptodp/atan2/dptofp, 0x002D7210).
+   mat = Einheitsdrehung mit T, dann njRotateX(ax), njRotateZ(az), njScale(1,-1,1),
+   njRotateZ(-az), njRotateX(-ax); zuletzt njMultiMatrix(m, &mat).
+   Zwei Originalzweige sind undefiniert und werden NICHT ausgefuehrt (Rueckgabe 0, m bleibt):
+   d == +0 (Bitmuster) springt ohne Stapelabbau mit jr ra zurueck (0x002D7324); v.y + v.z == +0
+   und 0 - n.y*d == +0 (Bitmuster) laesst lAngleX/lAngleZ ungeschrieben (0x002D7348..7370).
+   Rueckgabe 1: der belegte Zweig lief. */
+int njMirror(NJS_MATRIX* m, NJS_PLANE* pl);
 extern NJS_MATRIX* pNaMatMatrixStuckPtr;
 extern NJS_MATRIX NaViwViewMatrix;
 extern NJS_MATRIX NaViewScreenMatrix;
