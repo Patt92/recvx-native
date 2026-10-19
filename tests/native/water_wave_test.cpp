@@ -5,6 +5,11 @@
 #include "effect_sprites_internal.h"
 #include "room.h"
 #include "ninja_math.h"
+#include "renderer.h"
+#include "binary_view.h"
+#include "chunk_blend.h"
+#include <algorithm>
+#include <utility>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -84,8 +89,92 @@ static void l2_water_room(Fixture& f,const char* room){
         check(e.px==cx&&e.py==top&&e.pz==cz&&e.sx==1.6f&&e.sy==1.6f&&e.sz==1.6f,"bhSetWaterSplash4: Lage und Skalierung");}
     effect_detail::request_template().ax=0;
 }
+// bhDrawGeneralPurposeWater uses the real room object/texture/mesh and published ob_spc list.
+// Diagnostic setup: no room script is run; only bhControlObjItm (sp_flg 4) is advanced.
+struct DrawFixture {
+    std::vector<std::uint8_t> bytes;Scene stage;SceneSpawn player;std::size_t motion=42;std::int64_t frame=0;
+    AudioMixer audio;Inventory inv;MessageDialog dialog;EventVm events;RoomWorld world;
+    DrawFixture(const std::filesystem::path& data,const char* name):
+        bytes(RoomArchive(data).load(std::string(name)+".RDX",64*1024*1024)),stage(decode_scene(bytes)),player(stage.spawns.at(0)),
+        audio(data),events(bytes,inv,dialog),world(bytes,stage,player,motion,frame,audio,data,{},name){
+        world.bind_player_collision(events);events.flags[6][0]=4;world.set_simulation_flags(4);world.tick();}
+    Scene draw(const WorldDrawPass& pass={}){Scene s=stage;world.append(s,{},stage.cameras.at(0),pass);return s;}
+};
+static std::size_t water_count(const Scene& s){return std::count_if(s.triangles.begin(),s.triangles.end(),[](const auto& t){return t.general_purpose_water;});}
+static void draw_room(const std::filesystem::path& data,const char* name,unsigned index,std::size_t vertices,float y){
+    water_wave()=WaterWaveField{};DrawFixture f(data,name);
+    const auto* e=f.world.state(2,index);const auto* w=f.world.water_work(index);
+    check(e&&w&&e->object_list==3&&e->object_spc_index==0&&w->mode0==1,"real ob_spc[0] water missing");
+    check(w->base.size()==vertices&&w->base[0].y==y,"room water grid changed");
+    for(const auto& p:w->base)check(p.y==y,"unexpected vertical mesh: do not invent a water plane");
+    auto draw=f.draw();const auto n=water_count(draw);check(n>0,"bhDrawGeneralPurposeWater never submits the real grid");
+    const auto* textures=f.world.model_textures(2,index);check(textures&&!textures->empty(),"water object's mlwP->texP missing");
+    BinaryView v(f.bytes);const auto rh=v.u32(16);unsigned slot=1;
+    for(unsigned i=0;i<v.u32(rh+0x88);++i)if(v.u32(v.u32(rh+8)+i*36)&1u)++slot;
+    slot+=index-4;const auto model=v.u32(v.u32(20)+slot*4);
+    ModelGeometryOptions opt;opt.local_vertices.assign(1,w->vertices);opt.local_normals.assign(1,w->normals);
+    check(v.u16(model+6)==1,"fixture expected one water model node");
+    opt.uv_object=0;opt.uv_chunk=w->uv_chunk;opt.uv_u=w->uv_u;opt.uv_v=w->uv_v;
+    auto expected=decode_model_asset(f.bytes,model,0,opt);
+    check(n==expected.triangles.size(),"water grid duplicated/dropped or replaced by a plane");
+    NJS_MATRIX transform;njUnitMatrix(&transform);njTranslate(&transform,e->transform.position.x,e->transform.position.y,e->transform.position.z);njRotateXYZ(&transform,e->angles[0],e->angles[1],e->angles[2]);
+    std::size_t k=0;for(const auto& t:draw.triangles)if(t.general_purpose_water){const auto& ref=expected.triangles[k++];
+        check(t.material_phase==8&&t.after_modifiers&&!t.texture_cache_clamp&&t.depth_write,"late water draw state / OT bypass wrong");
+        check(t.blend==ref.blend&&t.blend_register==ref.blend_register&&t.color==ref.color,"water material/alpha register altered");
+        check(t.textured&&std::as_const(draw).textures[t.texture].pixels.data()==(*textures)[ref.texture].pixels.data(),"water texture not mlwP->texP[chunk id]");
+        for(unsigned j=0;j<3;++j){NJS_POINT3 p=ref.vertices[j].position;njCalcPoint(&transform,&p,&p);
+            const auto q=t.vertices[j].position;check(std::fabs(p.x-q.x)<1e-4f&&std::fabs(p.y-q.y)<1e-4f&&std::fabs(p.z-q.z)<1e-4f,"water does not draw current bhObj005 vertex copy");
+            check(t.vertices[j].u==ref.vertices[j].u&&t.vertices[j].v==ref.vertices[j].v,"water UV shift ignored");}}
+    f.world.set_presentation_flags(~4u);check(water_count(f.draw())==0,"pt_flg 4 not read at draw time");
+    f.world.set_presentation_flags(~0u);check(water_count(f.draw())==n,"water not restored after pt_flg gate");
+    check(water_count(f.draw({true,0}))==0,"bhAllEasyDrawModel incorrectly draws late water");
+    // With the object pass paused the same published list and wave/UV state must be drawn.
+    const auto uv=w->uv_u;f.events.flags[6][0]=0;f.world.set_simulation_flags(0);f.world.tick();
+    check(w->uv_u==uv&&water_count(f.draw())==n,"paused object pass lost its published water list/state");
+    f.events.flags[6][0]=4;f.world.set_simulation_flags(4);f.world.tick();
+    check(w->uv_u==256&&water_count(f.draw())==n,"water animation/draw did not resume");
+    // 0x24 Sub_controll hides the actual object; no alternative water owner may remain.
+    check(f.world.bind({0x24,0,0,0,{0x24,2,std::uint8_t(index),0}}),"object hide binding absent");f.world.tick();
+    check(water_count(f.draw())==0,"hidden water still drawn");
+    check(f.world.bind({0x24,0,0,0,{0x24,2,std::uint8_t(index),1}}),"object show binding absent");f.world.tick();
+    check(water_count(f.draw())==n,"water not restored after hide/show");
+    std::cout<<name<<": late grid "<<vertices<<" vertices, "<<n<<" triangles, original texture/material/UV, gates PASS\n";
+}
+static SceneTriangle cover(std::uint32_t color,float z,bool water=false){
+    SceneTriangle t;t.vertices={SceneVertex{{-100,-100,z}},SceneVertex{{100,-100,z}},SceneVertex{{0,100,z}}};
+    t.color=color;t.camera_mask=false;t.world_lit=true;t.general_purpose_water=water;t.after_modifiers=water;
+    if(color>>24!=255)t.blend=SceneBlend::Ninja;return t;
+}
+static void draw_order_unit(){
+    NJS_MATRIX view;njUnitMatrix(&view);SoftwareRenderer r(32,32);r.set_supersampling(1);r.set_texture_filtering(false);r.set_render_threads(1);
+    const auto pixel=[&](const Scene& s){r.draw_view(s,view,16,16);return r.pixels()[16*32+16];};
+    const auto water=cover(0x7f0000ffu,5,true),player=cover(0xffff0000u,10),behind=cover(0xff00ff00u,8);
+    Scene s;s.triangles={water,player,behind};s.triangles.back().blend=SceneBlend::Ninja;
+    const auto expected=blend_gs(0x44,water.color,player.color,127.f/255.f);
+    check(pixel(s)==expected,"direct water must blend after player and block the later behind-OT even below alpha 0.5");
+    s.triangles.pop_back();check(pixel(s)==expected,"water got sorted before opaque player");
+    auto front=cover(0x4000ff00u,4);s.triangles.push_back(front);
+    check(pixel(s)==blend_gs(0x44,front.color,expected,64.f/255.f),"front OT must draw after direct water");
+    // A mirror-room triangle behind the water is submitted first, but game.c:74/87 draws it later.
+    auto mirrored=cover(0xffffff00u,7);mirrored.mirror=2;s.triangles={mirrored,water,player};s.mirror_enabled=true;
+    check(pixel(s)==expected,"game.c:87 mirror room must follow direct water");s.mirror_enabled=false;
+    auto invisible=water;invisible.color&=0xffffffu;s.triangles={invisible,player};
+    check(pixel(s)==player.color,"alpha zero water must keep color/depth (TEST GREATER 0)");
+}
+static void draw_regression(const std::filesystem::path& data){
+    draw_order_unit();draw_room(data,"RM_3060",5,3135,6.f);draw_room(data,"RM_7060",5,4643,4.f);
+    // RM_3210 has the same water mesh as 7060, but is NOT one of objitm.c:479-483's late rooms.
+    water_wave()=WaterWaveField{};DrawFixture normal(data,"RM_3210");const auto s=normal.draw();check(water_count(s)==0,"normal water incorrectly routed through late pass");
+    const auto* tex=normal.world.model_textures(2,6);check(tex&&!tex->empty(),"RM_3210 normal water texture absent");bool seen=false;
+    for(const auto& t:s.triangles)if(t.textured&&s.textures[t.texture].pixels.data()==(*tex)[0].pixels.data()){seen=true;check(t.material_phase==4&&t.texture_cache_clamp&&!t.general_purpose_water,"normal water OT route changed");}
+    check(seen,"RM_3210 ordinary ob_spc disappeared");
+    DrawFixture dry(data,"RM_0000");check(water_count(dry.draw())==0,"dry room acquired synthetic water");
+    for(unsigned i=0;i<256;++i)check(!dry.world.water_work(i),"dry room acquired second wave owner");
+    water_wave()=WaterWaveField{};
+}
 int main(int argc,char** argv){try{
     check(argc==2,"data required");_Make_SinTable();const std::filesystem::path data=argv[1];
+    draw_regression(data);
     ring_unit();
     for(const char* room:{"RM_3060","RM_3210","RM_7060","RM_9130"}){
         water_wave()=WaterWaveField{}; // neuer Raum: bhGetFreeMemory-Arena

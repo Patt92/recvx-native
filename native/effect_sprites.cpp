@@ -87,6 +87,7 @@ void submit_template(int lkono,const NJS_POINT3* offset){
     e.mode1=0;e.has_color=false;e.color=0;e.has_ao=false;e.ao={};e.has_exp1=false;e.exp1_slot=-1;
     e.link_kind=-1;e.link_index=0;e.drop_link_flag=false;
     e.stflg_or=0;e.texture_from_slot=-1;e.owner_work=nullptr;
+    e.has_shp_ct=false;e.shp_ct=0;e.ct3=0;
     pending.spawns.push_back(e);
 }
 void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz,const std::function<void(int lkono)>& submit){
@@ -96,6 +97,16 @@ void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz,co
     r.ay=ang-16384;submit(1);
 }
 void submit_spawn(const EffectSpawn& spawn){pending.spawns.push_back(spawn);}
+int hook_particle(int kind,unsigned index,int node,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color,int type,const char* what){
+    if(!world_hooks.particle){report_gap(what);return -1;}
+    return world_hooks.particle(kind,index,node,offset,direction,color,type);
+}
+bool effect_slot_available(){
+    if(!pool_lookup)return true; // isolated procedure tests have no bound owner
+    unsigned free=0;
+    for(int slot=0;slot<512;++slot){const auto* w=pool_lookup(slot);if(!w||!(w->flg&3u))++free;}
+    return free>pending.spawns.size();
+}
 EffectSpawn& last_request(){
     if(pending.spawns.empty())throw std::runtime_error("effect procedure patches a request before bhSetEffectTb");
     return pending.spawns.back();
@@ -199,9 +210,19 @@ std::shared_ptr<const SceneTexture> hook_effect_texaddr(unsigned group,const cha
 }
 void hook_spark_light(NJS_POINT3 pos,NJS_POINT3 dir){if(world_hooks.spark_light)world_hooks.spark_light(pos,dir);else report_gap("rom->lgtp[2] ohne Lichtbesitzer (bhSetEffSpark)");}
 bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what){if(world_hooks.player_watr&&world_hooks.player_watr(c))return true;report_gap(what);return false;}
+int hook_player_hit_check_parts(NJS_POINT3 pos,const char* what){if(world_hooks.player_hit_check_parts){const int j=world_hooks.player_hit_check_parts(pos);if(j>=0)return j;}report_gap(what);return -1;}
 bool collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what){
     if(!effect_wall_set){report_gap(what);return false;}
     return effect_line(*effect_wall_set,effect_wall_height,start,end,normal,flags,floor).has_value();
+}
+std::optional<CollisionWall> collision_line_wall(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what){
+    if(!effect_wall_set){report_gap(what);return std::nullopt;}
+    return effect_line(*effect_wall_set,effect_wall_height,start,end,normal,flags,floor);
+}
+std::function<bool(NJS_POINT3,float&,float&)> effect_water_area_probe;
+bool water_area(NJS_POINT3 pos,float& top,float& h,const char* what){
+    if(!effect_water_area_probe){report_gap(what);return false;}
+    return effect_water_area_probe(pos,top,h);
 }
 void request_player_kill(){pending.player_killed=true;}
 void request_effect_flags(unsigned bits){pending.effect_flags|=bits;}
@@ -1175,8 +1196,44 @@ void step_light_color(unsigned type,unsigned speed,unsigned& clock,NJS_POINT3 co
     if(type>=4)delta=unsigned(float(delta)*(-recvx_core_random_next()/-2.1474836e9f));
     clock=(clock+delta)&0x7fff;
 }
+bool step_light_type(unsigned type,int speed,NJS_POINT3 color,unsigned thunder,LightTypeWork& w,NJS_POINT3& working_color,NJS_VECTOR& working_direction){
+    // -rand() / -2.1474836e9f: Ganzzahl negiert, cvt.s.w, div.s (SLUS_201.84 0x281988-0x2819ac).
+    const auto random=[](){return -recvx_core_random_next()/-2.1474836e9f;};
+    switch(type){
+    case 7:{ // :486-492 r = g = b = |njSin(sys->thunder << 6)|
+        const float flash=std::fabs(njSin(Angle(thunder<<6)));working_color={flash,flash,flash};return true;}
+    case 8:case 9:{ // :493-510 nur der Schritt ist & 0xFFFF, way selbst laeuft ungekuerzt (0x28188c-0x281898)
+        const unsigned step=unsigned(int(182.04445f*(0.5f*float(speed))))&0xffffu;
+        const unsigned yaw=unsigned(w.angles[1]);w.angles[1]=std::int32_t(type==8?yaw-step:yaw+step);
+        // bhGetLightVector (:1067-1077): Einheitsmatrix, Z, Y, X, Punkt (0, 0, -1).
+        NJS_MATRIX m;njUnitMatrix(&m);njRotateZ(&m,w.angles[2]);njRotateY(&m,w.angles[1]);njRotateX(&m,w.angles[0]);
+        NJS_POINT3 forward{0,0,-1};njCalcPoint(&m,&forward,&working_direction);working_color=color;return true;}
+    case 10:case 11:{ // :511-625; die Farbe ist spc/dif/amb nach dem Schritt
+        auto& c=w.flicker;
+        const auto dim=[&](){c.x+=0.5f*((0.333f*color.x)-c.x);c.y+=0.5f*((0.333f*color.y)-c.y);c.z+=0.5f*((0.333f*color.z)-c.z);};
+        // (float)aspd * 0.01 ist double (dpmul 0x3F847AE147AE147B, _dpfle), der Zufall float.
+        const auto chance=[&](){return double(random())<=double(float(speed))*0.01;};
+        const auto countdown=[&](){w.clock=unsigned(int(6.0f*random())+3);};
+        if(w.mode==0){c=color;++w.mode;}
+        else if(w.mode==1){
+            if(type==10)c=color;else dim();
+            if(chance()){if(type==11)c=color;countdown();++w.mode;}
+        }else if(w.mode==2||(type==10&&w.mode==3)){
+            dim();w.clock=unsigned(int(w.clock)-1);
+            if(int(w.clock)<=0){c=color;if(type==10&&w.mode==2){countdown();++w.mode;}else w.mode=1;}
+        }
+        working_color=c;return true;}
+    case 12:{ // :626-657 Halblicht im mode-1-Pass selbst, ct0 = (int)(aspd * Zufall) + 1
+        const float gain=w.mode==1?0.5f:1.0f;working_color={color.x*gain,color.y*gain,color.z*gain};
+        if(w.mode<=1){w.clock=unsigned(int(w.clock)-1);
+            if(int(w.clock)<=0){w.clock=unsigned(int(float(speed)*random())+1);w.mode=w.mode==0?1u:0u;}}
+        return true;}
+    }
+    return false;
+}
 void set_effect_walls(const std::vector<CollisionWall>* walls,float height){effect_wall_set=walls;effect_wall_height=height;}
 void set_effect_water(std::function<bool(NJS_POINT3,float&)> probe){effect_water_probe=std::move(probe);}
+void set_effect_water_area(std::function<bool(NJS_POINT3,float&,float&)> probe){effect_water_area_probe=std::move(probe);}
 void set_effect_ground(GroundCollision* ground,const std::vector<CollisionWall>* room,const std::vector<CollisionWall>* mobile){
     // bhGetGroundPosition der Raumwerke; rom->flrp/sys->mflrp fuer bhCheckFloorEffect.
     effect_ground=ground;effect_floor_room=room;effect_floor_mobile=mobile;
@@ -1258,11 +1315,13 @@ void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
     if(e.has_ao){s.aox=e.ao.x;s.aoy=e.ao.y;s.aoz=e.ao.z;}
     if(e.has_exp1)s.exp1_slot=e.exp1_slot;
     s.stflg|=e.stflg_or;s.owner_work=e.owner_work;
+    if(e.has_shp_ct)s.shp_ct=e.shp_ct;
+    s.ct3=e.ct3;
 }
 // effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
 int original_effect_slot(const std::vector<unsigned>& flags){for(unsigned i=0;i<512;++i)if(i>=flags.size()||!(flags[i]&3u))return int(i);return -1;}
-void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,std::pair<unsigned,unsigned>>& bases,std::pair<unsigned,unsigned>* fnc_blend){
+void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,std::pair<unsigned,unsigned>>& bases,std::pair<unsigned,unsigned>* fnc_blend,bool mirror){
     // Vor der ef_fnc-Schleife haben alle Zeichenpaesse 8/6 zurueckgestellt (effect.c:1268/1416).
     const std::pair<unsigned,unsigned> entry=fnc_blend?*fnc_blend:std::pair<unsigned,unsigned>{8,6};
     // DrawEff5SnowRect (effsub5.c:5804): Wind unter cam.mtx, einmal je Aufruf.
@@ -1273,6 +1332,7 @@ void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCam
         if(q.wind_aligned){
             if(!wind_ready){
                 NJS_MATRIX view;camera_view_matrix(camera,view);
+                if(mirror){NJS_MATRIX m;std::copy_n(scene.mirror_matrix.data(),16,m);njMultiMatrix(&view,&m);} // cam.mtx im Spiegelpass
                 NJS_POINT3 v=q.wind;njCalcVector(&view,&v,&v);
                 wind_z=Angle(int(10430.381f*std::atan2(v.y,v.x))+16384);wind_ready=true;
             }
@@ -1285,7 +1345,7 @@ void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCam
             // njPtclDrawPolygon: GS-Sprite scr.x/y +- h im 640x480-Ninja-Bild. Als Billboard am
             // Mittelpunkt der Kameratiefe z abgebildet: der Renderer projiziert fSx = AspectW*x*dist/z,
             // fSy = y*dist/z (renderer.cpp:115-119), also h Punkte = h*z/(AspectW*dist) bzw. h*z/dist.
-            NJS_MATRIX view;camera_view_matrix(camera,view);NJS_POINT3 c;njCalcPoint(&view,&q.center,&c);
+            NJS_MATRIX view;camera_view_matrix(camera,view);if(mirror){NJS_MATRIX m;std::copy_n(scene.mirror_matrix.data(),16,m);njMultiMatrix(&view,&m);}NJS_POINT3 c;njCalcPoint(&view,&q.center,&c);
             constexpr float aspect_w=1.174f; // SoftwareRenderer::draw aspect_x
             const float dist=320.0f/std::tan(0.0000958738f*float(camera.perspective/2));
             const float kx=c.z/(aspect_w*dist),ky=c.z/dist;
@@ -1299,7 +1359,7 @@ void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCam
         }
         EffectSprite quad;quad.id=302;quad.flg=q.world_space?0u:0x100000u;quad.tv=q.vertices;quad.bl_src=int(q.source);quad.bl_dst=int(q.destination);
         quad.fog_disabled=!q.fogged;quad.point_filter=q.point_filter;quad.untextured=!q.textured;quad.pn=q.pn;quad.gouraud=q.gouraud;quad.fog_color_set=q.fog_color_set;quad.fog_color=q.fog_color;
-        append_effect_sprite(scene,quad,q.world_space?NJS_POINT3{0,0,0}:q.center,{1,1,1},camera,texture);
+        append_effect_sprite(scene,quad,q.world_space?NJS_POINT3{0,0,0}:q.center,{1,1,1},camera,texture,nullptr,nullptr,mirror,q.mirror_plane_turn);
     }
     if(fnc_blend&&sprite.fnc_exit_src>=0&&sprite.fnc_exit_dst>=0)*fnc_blend={unsigned(sprite.fnc_exit_src),unsigned(sprite.fnc_exit_dst)};
 }
@@ -1312,9 +1372,11 @@ void push_effect_spawn(const EffectSpawn& spawn){pending.spawns.push_back(spawn)
 // Bildschirmpunkt, njGetPlaneNormal2 (ps2_NaColi.c:314) nimmt die Normale und
 // njUnitVector normiert sie; vec.z < 0 heisst Rueckseite. Die Winkelweite kommt
 // wie in camera.c:28 aus njSetPerspective(cam.pers) vor dem Zeichenpass.
-bool backface_culled(const std::array<SceneVertex,4>& world,const SceneCamera& camera){
+bool backface_culled(const std::array<SceneVertex,4>& world,const SceneCamera& camera,const Scene* mirror_scene){
     njSetPerspective(camera.perspective);
     NJS_MATRIX view;camera_view_matrix(camera,view);
+    if(mirror_scene){if(!mirror_scene->mirror_enabled)throw std::runtime_error("mirror effect backface test without njMirror matrix");
+        NJS_MATRIX m;std::copy_n(mirror_scene->mirror_matrix.data(),16,m);njMultiMatrix(&view,&m);}
     NJS_POINT3 p[3];
     for(unsigned i=0;i<3;++i){
         NJS_POINT3 point=world[i].position;
@@ -1325,12 +1387,27 @@ bool backface_culled(const std::array<SceneVertex,4>& world,const SceneCamera& c
     NJS_VECTOR vec;njGetPlaneNormal2(&p[0],&p[1],&p[2],&vec);njUnitVector(&vec);
     return vec.z<0;
 }
-void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix,unsigned* stflg_out){
+bool mirror_billboard_prefix(const Scene& scene,NJS_MATRIX& out){
+    if(!scene.mirror_enabled)return false;
+    std::copy_n(scene.mirror_matrix.data(),16,out);njUnitTransPortion(&out);
+    return njInvertMatrix(&out)!=0;
+}
+void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix,unsigned* stflg_out,bool mirror,bool mirror_plane_turn){
     if((s.flg|s.stflg)&0x1000000)return;
+    // effect.c:1181/1301/1444/1581: im Spiegelpass (gm_flg 0x4000) faellt ein Satz mit mdflg 0x40 aus.
+    if(mirror&&(s.mdflg&0x40u))return;
     // bhDrawTrsEffect3D: translation, UnitRotPortion for flag 0x100000,
     // Z rotation, scale. Invert the room view rotation to place the billboard.
     NJS_MATRIX basis;njUnitMatrix(&basis);
-    if(s.flg&0x100000){njRotateY(&basis,-camera.angles[1]);njRotateX(&basis,-camera.angles[0]);njRotateZ(&basis,-camera.angles[2]);njScale(&basis,1,-1,-1);njRotateZ(&basis,s.az);}
+    if(s.flg&0x100000){
+        // njUnitRotPortion unter cam.mtx; im Spiegelpass ist cam.mtx = cam.mtxb * njMirror (game.c:81-83),
+        // deshalb steht dessen invertierter Drehanteil links vor der ungespiegelten Basis.
+        if(mirror&&!mirror_billboard_prefix(scene,basis))throw std::runtime_error("mirror effect billboard without njMirror matrix");
+        njRotateY(&basis,-camera.angles[1]);njRotateX(&basis,-camera.angles[0]);njRotateZ(&basis,-camera.angles[2]);njScale(&basis,1,-1,-1);njRotateZ(&basis,s.az);
+        // effect.c:1225-1236 (und :1360/1501/1634, effsub2.c:4644): nach njRotateZ(az) unter gm_flg 0x4000
+        // njRotateY(32768) bei mr_pl.vx != 0, njRotateX(32768) bei mr_pl.vy != 0 (Float-Test != 0).
+        if(mirror&&mirror_plane_turn){const NJS_PLANE& plane=effect_mirror_plane();if(plane.vx!=0.0f)njRotateY(&basis,32768);if(plane.vy!=0.0f)njRotateX(&basis,32768);}
+    }
     else {if((s.flg&0x80)&&!(s.flg&0x200000)){if(!linked_matrix)throw std::runtime_error("linked effect draw missing native node matrix");std::copy(linked_matrix,linked_matrix+16,basis);}njRotateXYZ(&basis,s.ax,s.ay,s.az);}
     if(s.pn!=3&&s.pn!=4)throw std::runtime_error("original effect draw with a vertex count outside 3/4");
     std::array<SceneVertex,4> vertices;
@@ -1347,7 +1424,7 @@ void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position
     // sonst loescht er das Bit. Es wird auch ohne Zeichnung gebraucht
     // (screen.c:943 liest es am Rendertextur-Satz).
     if(s.flg&0x20000u){
-        const bool culled=backface_culled(vertices,camera);
+        const bool culled=backface_culled(vertices,camera,mirror?&scene:nullptr);
         if(stflg_out){if(culled)*stflg_out|=0x10u;else *stflg_out&=~0x10u;}
         if(culled)return;
     }
@@ -1362,7 +1439,7 @@ void append_effect_sprite(Scene& scene,const EffectSprite& s,NJS_POINT3 position
     if(original_pair){color_blending_mode(0,s.opaque_queued?8:s.bl_src);color_blending_mode(1,s.opaque_queued?6:s.bl_dst);}
     const auto register_=original_pair?color_blending_alpha():0ull;
     const std::array<std::array<unsigned,3>,2> strip{{{0,1,2},{1,3,2}}};
-    for(unsigned t=0;t<(s.pn==3?1u:2u);++t){const auto indices=strip[t];SceneTriangle triangle;for(unsigned i=0;i<3;++i)triangle.vertices[i]=vertices[indices[i]];triangle.color=vertex_alpha?0xffffffffu:s.gouraud?((s.tv[0].col&0xff000000u)|0xffffffu):s.tv[0].col;triangle.gouraud=s.gouraud;triangle.vertex_alpha=vertex_alpha;triangle.texture=texture;triangle.textured=true;triangle.camera_mask=false;triangle.world_lit=true;triangle.depth_write=s.opaque_queued||s.punch_queued;triangle.fogged=!s.fog_disabled;if(s.untextured)triangle.textured=false;
+    for(unsigned t=0;t<(s.pn==3?1u:2u);++t){const auto indices=strip[t];SceneTriangle triangle;triangle.mirror=mirror?3:0;for(unsigned i=0;i<3;++i)triangle.vertices[i]=vertices[indices[i]];triangle.color=vertex_alpha?0xffffffffu:s.gouraud?((s.tv[0].col&0xff000000u)|0xffffffu):s.tv[0].col;triangle.gouraud=s.gouraud;triangle.vertex_alpha=vertex_alpha;triangle.texture=texture;triangle.textured=true;triangle.camera_mask=false;triangle.world_lit=true;triangle.depth_write=s.opaque_queued||s.punch_queued;triangle.fogged=!s.fog_disabled;if(s.untextured)triangle.textured=false;
         triangle.fog_color_set=s.fog_color_set;triangle.fog_color=s.fog_color;
         if(original_pair){triangle.blend=SceneBlend::Ninja;triangle.blend_register=register_;}else triangle.blend=SceneBlend::Additive;
         // sys->ef_pnc: ohne ABE gilt das ALPHA-Register nicht (GS gibt Cs aus), sofort statt OT.

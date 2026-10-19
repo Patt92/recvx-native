@@ -36,7 +36,7 @@ struct Room {
   audio.mount_sound_afs(vm.values[0]); // system.c:1602 Diskwechsel vor dem Raumladen wie runtime.cpp (Stufe >= 6: Satz 2)
   if(pre)pre(vm,world);audio.begin_room_init();vm.initialize();audio.load_room_sounds(vm.values[0],vm.values[1],audio.take_room_sound_case());audio.room_fade_in();
  }
- void tick(){input.apply({});vm.check_floor(actor.position,actor.yaw,world.floor_at(actor.position));vm.tick();input.synchronize();world.set_simulation_flags(vm.flags[6][0]);world.tick();vm.flags[4][0]|=world.take_enemy_room_flags();movie.tick();audio.mix();if(!vm.errors.empty()){for(const auto& e:vm.errors)std::cerr<<e<<"\n";}check(vm.errors.empty(),"original event stream blocked");}
+ void tick(){input.apply({});vm.check_floor(actor.position,actor.yaw,world.floor_at(actor.position));vm.tick();input.synchronize();world.set_simulation_flags(vm.flags[6][0]);world.tick();if(!scene.cameras.empty())world.control_camera(scene,scene.cameras.at(0)); /* game.c:58 bhControlCamera */vm.flags[4][0]|=world.take_enemy_room_flags();movie.tick();audio.mix();if(!vm.errors.empty()){for(const auto& e:vm.errors)std::cerr<<e<<"\n";}check(vm.errors.empty(),"original event stream blocked");}
  bool task(unsigned event){for(const auto& t:vm.task_states())if(t.event==event)return true;return false;}
 };
 int main(int argc,char** argv){try{
@@ -585,6 +585,42 @@ int main(int argc,char** argv){try{
    check(cleared==live24+live25+live302+live_other_listed&&extras_freed==extras&&particles_after==0,"bhClearEventEffect did not free every listed id (24/25/302, room 159) and their extra works");
    check(kept23==live23,"bhClearEventEffect freed the explosion fireball 23 (not in bhClrEff_YT)");}
   else check(pending&&cleared==0&&extras_freed==0&&particles_after==particles_before,"counter-check: without the 0xca binding the pool must stay unchanged");
+ }
+ { // Player_controll 128 (event.c:9640): Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action.
+  Room r(data,"RM_0000");r.world.bind_player_collision(r.vm);
+  auto cmd=[&](std::vector<std::uint8_t> b){EventCommand c;c.opcode=b[0];c.bytes=std::move(b);return r.world.bind(c);};
+  check(cmd({0x65,0x00}),"bhLoadWork 0 (Spielerwork) bindet nicht");
+  check((r.world.player_mode()&0xffu)==7u,"bhLoadWork setzt mode0 nicht auf 7");
+  check((r.vm.flags[13][0]&0x10000u)&&(r.vm.flags[14][0]&0x10000u),"bhLoadWork setzt flg/stflg 0x10000 nicht");
+  check(r.world.player_scripted,"bhLoadWork setzt player_scripted nicht");
+  check(cmd({0x64,0x80}),"Player_controll 128 bindet nicht");
+  check((r.world.player_mode()&0xffu)==1u,"Player_controll 128 setzt mode0 nicht auf 1 (bleibt 7)");
+  check(!(r.vm.flags[13][0]&0x10000u)&&!(r.vm.flags[13][0]&0x200000u),"Player_controll 128 laesst flg 0x10000/0x200000 stehen");
+  check(!(r.vm.flags[14][0]&0x10000u),"Player_controll 128 laesst stflg 0x10000 stehen");
+  check((r.vm.flags[13][0]&0x10u)!=0,"Player_controll 128 setzt flg 0x10 (Koerper-Wandpass) nicht");
+  check(!r.world.player_scripted,"Player_controll 128 laesst player_scripted stehen");
+ }
+ { // bhSetDispObj (op 0x20, event.c:2283) vs bhInitModelSet (op 0x24, event.c:2826): mdflg 0x1 sperrt nur das Modell, nicht den Pass.
+  Room r(data,"RM_0000");r.world.bind_player_collision(r.vm);
+  auto cmd=[&](std::vector<std::uint8_t> b){EventCommand c;c.opcode=b[0];c.bytes=std::move(b);return r.world.bind(c);};
+  check(cmd({0x20,0x00,0x00,0x00}),"bhSetDispObj Spieler (mdflg 0x1 an) bindet nicht");
+  check(r.world.player_model_hidden(),"bhSetDispObj setzt plp->mdflg 0x1 (player_model_hidden) nicht");
+  check(!r.world.player_hidden,"bhSetDispObj setzt faelschlich player_hidden (sperrt den Pass)");
+  check(!(r.vm.flags[14][0]&0x1000000u),"bhSetDispObj setzt faelschlich stflg 0x1000000");
+  check(cmd({0x20,0x00,0x00,0x01}),"bhSetDispObj Spieler (mdflg 0x1 aus) bindet nicht");
+  check(!r.world.player_model_hidden(),"bhSetDispObj loescht plp->mdflg 0x1 nicht");
+  check(cmd({0x24,0x00,0x00,0x00}),"bhInitModelSet Spieler (stflg 0x1000000 an) bindet nicht");
+  check(r.world.player_hidden,"bhInitModelSet setzt player_hidden nicht");
+  check((r.vm.flags[14][0]&0x1000000u)!=0,"bhInitModelSet setzt stflg 0x1000000 nicht");
+  check(cmd({0x24,0x00,0x00,0x01}),"bhInitModelSet Spieler (stflg 0x1000000 aus) bindet nicht");
+  check(!r.world.player_hidden&&!(r.vm.flags[14][0]&0x1000000u),"bhInitModelSet loescht player_hidden/stflg 0x1000000 nicht");
+ }
+ { // bhEffModeSet (0x91, event.c): op->mode1 = v1 auf eff[efid[v0]] ohne Rueckfrage, auch auf einem Texturhalter
+   // (RM_7140 Effekt 11 = id 429, Prozedur bhEffDmy); vorher blieb der Befehl als unbindbar haengen (Ereignis 18).
+  Room r(data,"RM_7140");r.world.bind_player_collision(r.vm);
+  check(r.world.state(4,11)&&r.world.state(4,11)->identity==429,"RM_7140 effect 11 is the texture holder 429");
+  EventCommand c;c.opcode=0x91;c.bytes={0x91,11,2,0};check(r.world.bind(c),"bhEffModeSet on a texture-holder effect must bind");
+  check(r.world.effect_state(11)&&r.world.effect_state(11)->mode1==2,"bhEffModeSet must write mode1 on the holder work");
  }
  if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory expectation(s) failed; doors and early-Enter timings passed.\n";return 1;}
  std::cout<<"Both original dog events -> padlock -> all three exits, 14 early Enter timings -> hint/lighter/Rodrigo, five mid-scene cinematic skips and the RM_0090 laser event past its original 0xc0 opcode passed. Diagnostic event starts/floor placement; no campaign proof.\n";return 0;

@@ -4,6 +4,7 @@
 #include <memory>
 #include <set>
 #include <string>
+struct RECVX_ENEMY_WORK;
 namespace recvx {
 // Original particle emitters (effsub3.c bhSetEffParticle + bhEff302): up to six 16-point stages that
 // accelerate, fall and fade; each njPtclDrawSprite call draws its first two of four points as GS sprites (bhEff_PtclSpriteDrawB).
@@ -31,15 +32,17 @@ public:
                    const std::function<void(unsigned,unsigned,unsigned)>& write);
     // Dispatch one root in the owner's ascending effect pass; auxiliary slots
     // reserve capacity but have no effect procedure.
-    void tick_slot(unsigned slot,const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall);
+    void tick_slot(unsigned slot,const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall,unsigned presentation_flags=~0u);
     // resolve(link, offset) = joint matrix * offset, as bhControlEffect does before calling the procedure.
-    void tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall);
+    void tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall,unsigned presentation_flags=~0u);
     // bhSetBloodPoolLnk: `table` is an original BP_WORK (en01_BldTbl); the pool spreads on the floor at `position`.
     // Returns 1 when both eff works were allocated, 0 when the pool is full (effsub3.c:226/231).
-    int spawn_pool(const void* table,NJS_POINT3 position,int direction,int palette);
+    int spawn_pool(const void* table,NJS_POINT3 position,int direction,int palette,const RECVX_ENEMY_WORK* linked_work=nullptr);
     void append_pools(Scene& scene,unsigned texture_base)const;
     // Sprites use effect texture category 4 frames; `texture_base` is the index of frame 0 in scene.textures.
-    void append(Scene& scene,const SceneCamera& camera,unsigned texture_base)const;
+    // mirror: zweiter bhDrawEffect unter cam.mtx * njMirror (game.c:427); njPtclDrawSprite projiziert
+    // den Punkt durch den gespiegelten cam.mtx und kennt den mr_pl-Zweig nicht.
+    void append(Scene& scene,const SceneCamera& camera,unsigned texture_base,bool mirror=false)const;
     std::size_t active()const;
     const std::set<std::string>& unsupported()const;
     // effect.c:220 bhPushEffectWork/:234 bhPopEffectWork sichern den ganzen

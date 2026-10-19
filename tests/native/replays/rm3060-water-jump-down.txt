@@ -1,0 +1,4 @@
+30 position 30 9 58 0
+31 keys forward
+60 keys none
+70 confirm

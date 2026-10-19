@@ -120,13 +120,13 @@ target_sources(recvx_game PRIVATE native/world_enemies.cpp native/motion_set.cpp
   native/enemies/en11.c native/enemies/en12.c native/enemies/en13.c native/enemies/en02_trans_tables.c native/enemies/en14.c native/enemies/en23.c native/enemies/en03_spider.c native/enemies/en05.c native/enemies/en05_tables.c
   native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en21.c native/enemies/en24.c native/enemies/en25.c
   native/enemies/en53.c native/enemies/en56.c native/enemies/en71.c
-  native/enemies/en27.c native/enemies/en30.c
+  native/enemies/en22.c native/enemies/en26.c native/enemies/en27.c native/enemies/en30.c
   native/enemies/en19.c native/enemies/en19_tables.c native/enemies/en29.c
   native/enemies/en17.c native/enemies/en54.c native/enemies/en55.c
   native/enemies/en03_lib.c native/enemies/en03_collision.c native/enemies/en03.c native/enemies/en15.c)
 if(NOT MSVC)
   # Preserve separate float multiply/add steps also in production-only builds.
-  set_property(SOURCE native/effect_collision.cpp native/hit_model.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_tables.c native/enemies/en02.c native/enemies/en02_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en09.c native/enemies/en09_tables.c native/enemies/en09_arm_tables.c native/enemies/en10.c native/enemies/en11.c native/enemies/en12.c native/enemies/en13.c native/enemies/en14.c native/enemies/en23.c native/enemies/en03_spider.c native/enemies/en05.c native/enemies/en05_tables.c native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en21.c native/enemies/en24.c native/enemies/en25.c native/enemies/en53.c native/enemies/en56.c native/enemies/en71.c native/enemies/en27.c native/enemies/en30.c native/enemies/en19.c native/enemies/en19_tables.c native/enemies/en29.c native/enemies/en17.c native/enemies/en54.c native/enemies/en55.c native/enemies/en03_lib.c native/enemies/en03_collision.c native/enemies/en03.c native/enemies/en15.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+  set_property(SOURCE native/effect_collision.cpp native/hit_model.cpp native/geometry_motion.cpp native/motion_set.cpp native/enemies/en00.c native/enemies/en01_core.c native/enemies/en01_tables.c native/enemies/en02.c native/enemies/en02_tables.c native/enemies/en04.c native/enemies/en04_tables.c native/enemies/en07.c native/enemies/en08.c native/enemies/en09.c native/enemies/en09_tables.c native/enemies/en09_arm_tables.c native/enemies/en10.c native/enemies/en11.c native/enemies/en12.c native/enemies/en13.c native/enemies/en14.c native/enemies/en23.c native/enemies/en03_spider.c native/enemies/en05.c native/enemies/en05_tables.c native/enemies/en16.c native/enemies/en18.c native/enemies/en20.c native/enemies/en21.c native/enemies/en24.c native/enemies/en25.c native/enemies/en53.c native/enemies/en56.c native/enemies/en71.c native/enemies/en22.c native/enemies/en26.c native/enemies/en27.c native/enemies/en30.c native/enemies/en19.c native/enemies/en19_tables.c native/enemies/en29.c native/enemies/en17.c native/enemies/en54.c native/enemies/en55.c native/enemies/en03_lib.c native/enemies/en03_collision.c native/enemies/en03.c native/enemies/en15.c APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
 endif()
 target_include_directories(recvx_game PRIVATE "${RECVX_TABLES}" build-tools/ninja)
 target_compile_definitions(recvx_game PRIVATE RECVX_NATIVE=1)
@@ -366,6 +366,10 @@ if(BUILD_TESTING)
   add_executable(recvx-barrel-blast-tests tests/native/barrel_blast_test.cpp)
   target_link_libraries(recvx-barrel-blast-tests PRIVATE recvx_game)
   add_test(NAME native_barrel_blast COMMAND recvx-barrel-blast-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  # pwksub.c:244/weapon.c:614 Ziel-/Trefferfilter und pwksub.c:2172 bhCheckC2WallN (RM_0080).
+  add_executable(recvx-combat-target-rules-tests tests/native/combat_target_rules_test.cpp)
+  target_link_libraries(recvx-combat-target-rules-tests PRIVATE recvx_game)
+  add_test(NAME combat_target_rules COMMAND recvx-combat-target-rules-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_executable(recvx-effect-filter-tests tests/native/effect_filter_test.cpp)
   target_link_libraries(recvx-effect-filter-tests PRIVATE recvx_game)
   add_test(NAME effect_camera_filter COMMAND recvx-effect-filter-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
@@ -414,6 +418,38 @@ if(BUILD_TESTING)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/box_jump_landing_check.py"
       --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
+  if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3060.RDT")
+    add_test(NAME rm3060_water_action_se COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm3060_water_action_se_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  # sync.c:99-137 bhControlEOR nach Task 7/8 (main.c:196, ps2_NaSystem.c:67-86): bhBGColorSet mit
+  # bcl_ct 0 (event.c:7206) loescht schon das erste Bild der neuen Ereigniskamera (RM_1140 Hebel).
+  if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_1140.RDT")
+    add_test(NAME rm1140_lever_back_color COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm1140_lever_back_color_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    # player.c:1365: bhControlPlayerHead (:1683) und bhCalcModel(plp) (:1688) nur im Passtor sp_flg 0x1
+    # und ohne plp->stflg 0x1000000 (Meldung im RM_1140-Hebelreplay: sp_flg 0xb8).
+    add_test(NAME player_head_pass_gate COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/player_head_pass_gate_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    # game.c:48-51: bhControlEffect nach bhControlPlayer/bhCalcModel(plp) (player.c:1688, effect.c:800-812).
+    add_test(NAME effect_after_player COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/effect_after_player_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    # main.c:195-201, game.c:58/289: erstes Bild nach bhCamSet 0 in der rohen bhSetEventCamera-Lage.
+    add_test(NAME event_camera_first_frame COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/event_camera_first_frame_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  # bhJumpEnemy[26] = bhEne26 (en26.c:628): RM_0110 Ereigniszombie (Fressszene, Szene, Angriff,
+  # Init beim Wiederbetreten, Tod und bhEtcAtariEnePosSet des Schluesselgegenstands).
+  if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0110.RDT")
+    add_test(NAME rm0110_event_zombie COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm0110_event_zombie_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0080.RDT")
     add_test(NAME zombie_blood_pool COMMAND "${Python3_EXECUTABLE}" -I
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/zombie_blood_pool_check.py"
@@ -458,6 +494,12 @@ if(BUILD_TESTING)
   add_executable(recvx-effect-e03-acid-tests tests/native/effect_e03_acid_test.cpp)
   target_link_libraries(recvx-effect-e03-acid-tests PRIVATE recvx_game)
   add_test(NAME effect_e03_acid COMMAND recvx-effect-e03-acid-tests)
+  add_executable(recvx-effect-eff350-tests tests/native/effect_eff350_test.cpp)
+  target_link_libraries(recvx-effect-eff350-tests PRIVATE recvx_game)
+  add_test(NAME effect_eff350 COMMAND recvx-effect-eff350-tests)
+  add_executable(recvx-effect-eff301-tests tests/native/effect_eff301_test.cpp)
+  target_link_libraries(recvx-effect-eff301-tests PRIVATE recvx_game)
+  add_test(NAME effect_eff301 COMMAND recvx-effect-eff301-tests)
   add_executable(recvx-effect-e14-fire-tests tests/native/effect_e14_fire_test.cpp)
   target_link_libraries(recvx-effect-e14-fire-tests PRIVATE recvx_game)
   add_test(NAME effect_e14_fire COMMAND recvx-effect-e14-fire-tests)
@@ -516,6 +558,10 @@ if(BUILD_TESTING)
   add_executable(recvx-lighter-tests tests/native/lighter_test.cpp)
   target_link_libraries(recvx-lighter-tests PRIVATE recvx_game)
   add_test(NAME native_lighter_effect COMMAND recvx-lighter-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  # light.c:486-657 Lichttypen 7..12 auf dem Raumlichtbesitzer (Formeln, Zufall, w*-Tor, Raumdaten).
+  add_executable(recvx-light-types-tests tests/native/light_types_test.cpp)
+  target_link_libraries(recvx-light-types-tests PRIVATE recvx_game)
+  add_test(NAME light_types_7_12 COMMAND recvx-light-types-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_executable(recvx-gameover-tests tests/native/gameover_test.cpp)
   target_link_libraries(recvx-gameover-tests PRIVATE recvx_game)
   add_test(NAME gameover_original COMMAND recvx-gameover-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
@@ -788,6 +834,12 @@ endif()
   add_executable(recvx-camera-return-tests tests/native/camera_return_test.cpp)
   target_link_libraries(recvx-camera-return-tests PRIVATE recvx_game)
   add_test(NAME active_camera_return COMMAND recvx-camera-return-tests)
+  # game.c:50/58/289: Effektpass vor bhControlCamera, bhCheckCut nach dem Zeichnen (RM_1020 evc 20).
+  add_executable(recvx-camera-control-order-tests tests/native/camera_control_order_test.cpp)
+  target_link_libraries(recvx-camera-control-order-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_1020.RDT")
+    add_test(NAME camera_control_order COMMAND recvx-camera-control-order-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   add_executable(recvx-scene-tests tests/native/scene_test.cpp)
   target_link_libraries(recvx-scene-tests PRIVATE recvx_scene)
   add_test(NAME scene_renderer COMMAND recvx-scene-tests)
@@ -866,6 +918,14 @@ if(BUILD_TESTING)
   add_executable(recvx-player-hair-tests tests/native/player_hair_test.cpp)
   target_link_libraries(recvx-player-hair-tests PRIVATE recvx_game)
   add_test(NAME player_hair COMMAND recvx-player-hair-tests)
+  # obwp[2] folgt seinem lkwkp (bhObjLinkSet/-Ply event.c:2177/2501, objitm.c:310-321/363-371/503/635-656).
+  if(TARGET recvx_input)
+    add_executable(recvx-player-hair-link-tests tests/native/player_hair_link_test.cpp)
+    target_link_libraries(recvx-player-hair-link-tests PRIVATE recvx_input)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_1050.RDT")
+      add_test(NAME player_hair_link COMMAND recvx-player-hair-link-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
+  endif()
 
   # Kopfsteuerung des Spielers (bhControlPlayerHead/bhLookNearEnemy/bhSetHeadRotation).
   add_executable(recvx-player-head-tests tests/native/player_head_test.cpp)
@@ -885,6 +945,16 @@ if(BUILD_TESTING)
  target_link_libraries(recvx-push-tests PRIVATE recvx_game)
  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0010.bin")
   add_test(NAME player_push COMMAND recvx-push-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+ endif()
+endif()
+
+# objitm.c:1648 bhObj007 + player.c:4336 bhCPM2_act_rpsh: der Greif-und-Dreh-
+# Gegenstand (RM_0150 Eisenstatue, Typ 7).
+if(BUILD_TESTING)
+ add_executable(recvx-turn-object-tests tests/native/turn_object_test.cpp)
+ target_link_libraries(recvx-turn-object-tests PRIVATE recvx_game)
+ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0010.bin")
+  add_test(NAME turn_object COMMAND recvx-turn-object-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
  endif()
 endif()
 

@@ -102,6 +102,7 @@ struct Setup {
     bool gouraud=false;std::array<NJS_POINT3,3> light{};
     bool vertex_alpha=false;std::array<float,3> alpha{1,1,1};
     float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true,punch_through=false;
+    bool general_water=false,mirror_room=false,mirror_effect=false;
     bool fog_color_set=false;std::uint32_t fog_color=0;
     std::uint64_t blend_register=0x44;
     unsigned texture_color_divisor=255;
@@ -303,6 +304,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
             if(setup.texture){setup.clamp_u=texture->clamp_u||triangle.texture_cache_clamp;
                 setup.clamp_v=texture->clamp_v||triangle.texture_cache_clamp;}
             setup.blend_register=triangle.blend_register;setup.post=triangle.after_modifiers;
+            setup.general_water=triangle.general_purpose_water;setup.mirror_room=triangle.mirror==2;setup.mirror_effect=triangle.mirror==3;
             setup.filtered=triangle.texture_filter==SceneTextureFilter::Linear||(triangle.texture_filter==SceneTextureFilter::Default&&filter_);
             setup.linear_only=triangle.texture_filter==SceneTextureFilter::Linear;
             if(triangle.gouraud&&triangle.world_lit){setup.gouraud=true;setup.light={v[0].light,v[1].light,v[2].light};if(area_swapped)std::swap(setup.light[1],setup.light[2]);}
@@ -322,12 +324,19 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
             setups.push_back(setup);
         }
     }
-    std::size_t setups_before_modifiers=0;
-    // Ninja draws translucent polygons after the opaque pass: keep opaque order, then far-to-near.
-    {auto first=std::stable_partition(setups.begin(),setups.end(),[](const Setup& s){return s.blend==SceneBlend::Opaque;});
+    std::size_t setups_before_modifiers=0,setups_before_mirror_effects=0;
+    // The late water call draws directly even with ABE (ulDrawGeneralPurposeWater,
+    // ps2_NinjaCnk.c:1927/2359): after player/opaque, before game.c:87's mirror room
+    // and the final translucent OT. Never depth-sort it into that OT.
+    {auto first=std::stable_partition(setups.begin(),setups.end(),[](const Setup& s){return s.blend==SceneBlend::Opaque||s.general_water;});
+     if(std::any_of(setups.begin(),first,[](const Setup& s){return s.general_water;}))
+         std::stable_sort(setups.begin(),first,[](const Setup& a,const Setup& b){
+             /* game.c:427 Spiegel-bhDrawEffect nach dem Spiegelraum (:417) */ const auto phase=[](const Setup& s){return s.general_water?1:s.mirror_room?2:s.mirror_effect?3:0;};return phase(a)<phase(b);});
      std::stable_sort(first,setups.end(),[](const Setup& a,const Setup& b){return a.p[0].invz+a.p[1].invz+a.p[2].invz<b.p[0].invz+b.p[1].invz+b.p[2].invz;});
      // game.c:318 draws room, objects, then effects (modifiers) and only then enemy/player.
-     if(zc)setups_before_modifiers=std::size_t(std::stable_partition(setups.begin(),first,[](const Setup& s){return !s.post;})-setups.begin());}
+     if(zc)setups_before_modifiers=std::size_t(std::stable_partition(setups.begin(),first,[](const Setup& s){return !s.post;})-setups.begin());
+     // game.c:417/427: der Spiegel-bhDrawMdfEffect liegt hinter dem Spiegelraum (Phase 2) und vor den Spiegeleffekten (Phase 3).
+     if(zc)setups_before_mirror_effects=std::size_t(std::find_if(setups.begin(),first,[](const Setup& s){return s.mirror_effect;})-setups.begin());}
     // Stage 2: rasterize horizontal bands, possibly on several threads. Every band visits the
     // setups in submission order, so the result does not depend on the thread count.
     std::vector<float> transported;if(zc)transported.assign(std::size_t(W)*H,0.f);
@@ -452,7 +461,9 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
                 if(s.blend==SceneBlend::Alpha||s.blend==SceneBlend::Ninja){
                     const float alpha=coverage*material_alpha;
                     color[index]=blend_gs(s.blend==SceneBlend::Ninja?s.blend_register:0x44,pixel,color[index],alpha);
-                    if(s.depth_write&&alpha>=.5f)depth[index]=invz;continue;
+                    // Direct water retains TEST GREATER 0 / KEEP and Z writes, unlike
+                    // OT's Ps2ZbuffOff alpha >=128 / FB_ONLY (ps2_dummy.c:1980/2024).
+                    if(s.depth_write&&(s.general_water?alpha>0.f:alpha>=.5f))depth[index]=invz;continue;
                 }
                 if(coverage<.999f){
                     const auto below=color[index];std::uint32_t mixed=0xff000000;
@@ -496,8 +507,11 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         // bhDrawMdfEffect: per work two mask passes, then one rectangle composite.
         // Receiver Z is never written. GS compares transported integer Z with GEQUAL.
         const float aspect_x=focal_x*640.f/float(width_),aspect_y=focal_y*480.f/float(height_);
+        const auto modifiers=[&](bool mirror){
         for(const auto& shadow:scene.shadows){
-            const auto projection=project_shadow(shadow,view,1.f,aspect_x,aspect_y);
+            if(shadow.mirror!=mirror)continue;
+            if(mirror&&!scene.mirror_enabled)throw std::runtime_error("mirror pass modifier without njMirror matrix");
+            const auto projection=project_shadow(shadow,mirror?mirror_view:view,1.f,aspect_x,aspect_y);
             if(!projection.drawable)continue;
             const auto mask=raster_shadow_mask(projection,*zc,[&](int x,int y,float modifier){
                 const int sx=std::min(W-1,int((float(x)+.5f)*float(W)/640.f)),sy=std::min(H-1,int((float(y)+.5f)*float(H)/480.f));
@@ -513,11 +527,18 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
                     if(float(mx)+.5f<rx0||float(mx)+.5f>=rx1)continue;
                     const unsigned value=mask[std::size_t(my)*640+mx];if(!value)continue;
                     auto& pixel=color[std::size_t(y)*W+x];pixel=shadow_mask_composite(pixel,value,fog_power);}}
-        }
-        run(setups_before_modifiers,setups.size(),true);
+        }};
+        modifiers(false);
+        // game.c:417 Spiegelraum, :427 Spiegel-bhDrawEffect mit bhDrawMdfEffect unter cam.mtx*njMirror,
+        // danach die uebrigen Spiegeleffekte und die OT.
+        run(setups_before_modifiers,setups_before_mirror_effects,false);
+        modifiers(true);
+        run(setups_before_mirror_effects,setups.size(),true);
     }
     // njDrawLine3D: finite 3D segments, endpoint colours, depth test, no depth write.
-    for(const auto& line:scene.lines){NJS_POINT3 a=line.points[0],b=line.points[1];njCalcPoint(&view,&a,&a);njCalcPoint(&view,&b,&b);float lo=0,hi=1;
+    for(const auto& line:scene.lines){if(line.mirror&&!scene.mirror_enabled)throw std::runtime_error("mirror pass line without njMirror matrix");
+        NJS_MATRIX* const line_view=line.mirror?&mirror_view:&view;
+        NJS_POINT3 a=line.points[0],b=line.points[1];njCalcPoint(line_view,&a,&a);njCalcPoint(line_view,&b,&b);float lo=0,hi=1;
         const float dz=b.z-a.z;if(std::abs(dz)<1e-8f){if(a.z<near||(far>near&&a.z>far))continue;}
         else{float t=(near-a.z)/dz;if(dz>0)lo=std::max(lo,t);else hi=std::min(hi,t);if(far>near){t=(far-a.z)/dz;if(dz>0)hi=std::min(hi,t);else lo=std::max(lo,t);}}
         if(lo>hi)continue;auto lerp=[](float x,float y,float t){return x+(y-x)*t;};

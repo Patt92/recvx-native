@@ -122,9 +122,15 @@ struct SceneTriangle {
     // bhPutModel-Route entscheidet aus draw_tp und UA/DB, ob der OT-Cache CLAMP
     // statt des Texturheaders setzt (ps2_dummy.c:1420). Andere Besitzer bleiben offen.
     std::int16_t cnk_strip_head=-1;bool texture_cache_clamp=false;
+    // objitm.c:471-492 / game.c:371-376: ob_spc[0] of the five original water rooms.
+    // ulDrawGeneralPurposeWater bypasses the translucent OT (ps2_NinjaCnk.c:1927/2359):
+    // direct draw after the player, before bhEtcMirrorDrawModel and the final OT, no OT CLAMP;
+    // TEST GREATER 0 / KEEP with depth writes (ps2_dummy.c:2021-2025), not OT's alpha >=128.
+    bool general_purpose_water=false;
     // Spiegelpass (sys->st_flg 0x100, Ebene sys->mr_pl): 1 = zweiter bhPutModel-Aufruf unter
     // njMirror(cam.mtx) (MdlPut.c:57-79/89-111), 2 = bhEtcMirrorDrawModel (game.c:77-91). Die Lage
     // bleibt die ungespiegelte Weltlage, der Renderer zeichnet mit cam.mtx * Scene::mirror_matrix.
+    // 3 = bhDrawEffect im Spiegelpass (game.c:427): neu erzeugte Effektausgabe dieses Aufrufs.
     std::uint8_t mirror=0;
     // bhSetHideObject(offset) (cut.c:612): Wortversatz in hidobj; 4 im Spiegelpass (game.c:409).
     std::uint8_t hidden_offset=0;
@@ -138,7 +144,8 @@ void route_model_texture_cache(std::vector<SceneTriangle>& triangles,unsigned dr
 // colors as NJS_COLOR 0xAARRGGBB = canvas order (SDL_PIXELFORMAT_ARGB8888); blend_register = GS ALPHA of the draw (0x44 = njDrawLine3D default 8/6).
 // inherit_blend: die Zeichenfunktion setzt kein Blendpaar (effsub3.c bhEff308Drw); der Raumbesitzer
 // traegt das Register des ef_fnc-Vorgaengers ein.
-struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;std::uint64_t blend_register=0x44;bool inherit_blend=false;};
+// mirror != 0: njDrawLine3D im Spiegelpass (game.c:427) unter cam.mtx * Scene::mirror_matrix.
+struct SceneLine {std::array<NJS_POINT3,2> points;std::array<std::uint32_t,2> colors;std::uint64_t blend_register=0x44;bool inherit_blend=false;std::uint8_t mirror=0;};
 struct SceneCamera {
     NJS_POINT3 position{};
     std::array<std::int32_t,3> angles{};
@@ -193,6 +200,9 @@ struct ShadowGeometry;
 struct SceneShadow {
     std::shared_ptr<const ShadowGeometry> geometry;
     std::array<float,16> transform{};
+    // game.c:427 Spiegel-bhDrawEffect: bhDrawMdfEffect (effect.c:866) unter cam.mtx*njMirror, nach dem
+    // Spiegelraum (:417) und vor den uebrigen Spiegeleffekten; braucht Scene::mirror_matrix.
+    bool mirror=false;
 };
 struct Scene {
     std::vector<SceneShadow> shadows;

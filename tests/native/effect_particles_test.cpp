@@ -5,6 +5,7 @@
    (effsub3.c:234-401) und dem AllocOwork-Verhalten abgeleitet, nicht aus dem
    nativen Code. */
 #include "effect_particles.h"
+#include "enemies/enemy_work.h"
 #include "core_random.h"
 #include "chunk_blend.h"
 #include "ninja_math.h"
@@ -268,6 +269,9 @@ static void blood_pool()
     p.tick(at_rest,no_wall);
     Scene scene;
     p.append_pools(scene,17);
+    check(scene.triangles.empty(),"bhEff300 case 0 must not enter ef_trs");
+    p.tick(at_rest,no_wall);
+    p.append_pools(scene,17);
     check(scene.triangles.size()==14u,"bhEff300 did not emit one 16-vertex triangle strip");
     check(scene.triangles[0].color==0xF0808080u,"the blood pool colour differs");
     check(scene.triangles[0].texture==18u,"the blood pool texture frame 17 + pal_bnk differs");
@@ -275,7 +279,7 @@ static void blood_pool()
           "the blood pool blend register differs");
     check(std::fabs(scene.triangles[0].vertices[0].position.y-(3+0.01f+0.1f))<1e-5f,
           "the blood pool resting height differs from py += 0.01 and off_pos");
-    check(scene.triangles[0].vertices[0].position.x==2.0f,"the blood pool x does not sit on the given position");
+    check(scene.triangles[0].vertices[0].position.x!=2.0f,"bhEff300 case 1 did not spread before queuing");
 
     /* bhEff300 case 0 (effsub3.c:264-284): ang beginnt bei eff_dir + 16384 und
        springt um 4096 * i, bei geradem i negativ; u/v = 0.5 + 0.5 * cos/sin(ang).
@@ -314,6 +318,7 @@ static void blood_pool()
     q.spawn_pool(&table,{2,3,4},0,1);
     q.spawn_pool(&table,{2,3,4},0,1);
     q.tick(at_rest,no_wall);
+    q.tick(at_rest,no_wall);
     Scene staggered;
     q.append_pools(staggered,17);
     check(staggered.triangles.size()==28u,"two blood pools did not emit two strips");
@@ -328,6 +333,39 @@ static void blood_pool()
     scene.triangles.clear();
     p.append_pools(scene,17);
     check(scene.triangles.size()==14u,"the resting blood pool stopped drawing");
+}
+
+/* effsub3.c:187, 389-397: lkwkp entscheidet bei der Einreihung ueber stflg
+   und pt_flg 0x2. NULL ignoriert das Gegnertor. Der Zeichenpass liest die zuvor
+   aufgebaute ef_trs-Liste, auch wenn sich der Gegnerstatus danach aendert. */
+static void blood_pool_visibility()
+{
+    const BpWork table{{0,0.1f,0},0,0,0.06f,{0,0,0,0,0},{0,0,0,0,0}};
+    RECVX_ENEMY_WORK enemy{};
+    EffectParticles linked,unlinked;
+    linked.spawn_pool(&table,{0,0,0},0,0,&enemy);
+    unlinked.spawn_pool(&table,{0,0,0},0,0);
+    const auto draws=[](const EffectParticles& particles){Scene s;particles.append_pools(s,0);return s.triangles.size();};
+    check(draws(linked)==0&&draws(unlinked)==0,"a newly allocated blood pool was queued before control");
+    linked.tick(at_rest,no_wall,0);unlinked.tick(at_rest,no_wall,0);
+    check(draws(linked)==0&&draws(unlinked)==0,"bhEff300 init entered ef_trs");
+    linked.tick(at_rest,no_wall,0);unlinked.tick(at_rest,no_wall,0);
+    check(draws(linked)==0&&draws(unlinked)==14,"NULL link must ignore pt_flg 0x2, linked pool must obey it");
+    linked.tick(at_rest,no_wall,2);
+    check(draws(linked)==14,"visible enemy pool was not queued");
+    enemy.stflg=0x1000000u;
+    check(draws(linked)==14,"draw pass changed the already queued pool list");
+    linked.tick(at_rest,no_wall,2);
+    check(draws(linked)==0,"sleeping enemy pool entered ef_trs");
+    enemy.stflg=0;
+    check(draws(linked)==0,"draw pass requeued a suppressed blood pool");
+    linked.tick(at_rest,no_wall,2);
+    check(draws(linked)==14,"pool did not return with its enemy");
+    for(unsigned i=0;i<260;++i)linked.tick(at_rest,no_wall,2);
+    enemy.stflg=0x1000000u;linked.tick(at_rest,no_wall,2);
+    check(draws(linked)==0,"resting bhEff300 case 2 ignored the enemy stflg");
+    enemy.stflg=0;linked.tick(at_rest,no_wall,2);
+    check(draws(linked)==14,"resting bhEff300 case 2 did not resume drawing");
 }
 
 /* bhEne_SetBloodEffect4 reicht die beiden Blutfarben unveraendert durch
@@ -378,6 +416,7 @@ int main()
         linked_work();
         std::cout<<"linked work ok\n";
         blood_pool();
+        blood_pool_visibility();
         std::cout<<"blood pool ok\n";
         emitter_mk2();
         std::cout<<"emitter mk2 ok\n";

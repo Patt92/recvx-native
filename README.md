@@ -57,17 +57,17 @@ Mechanismen mit 0,5; **voll belegt** nur vollständig abgeschlossene.
 <!-- port-status:begin -->
 <!-- Fortschrittstabelle und Kennzahlen direkt aus docs/PORT_STATUS.md synchronisiert. -->
 
-Expliziter Belegumfang: **86.6 %** gewichtet, **73.9 %** voll belegt (420/568 Mechanismen; kein Gesamtfortschritt).
+Expliziter Belegumfang: **86.8 %** gewichtet, **74.1 %** voll belegt (438/591 Mechanismen; kein Gesamtfortschritt).
 
 Event-Befehle (bhScenarioJmpT): 195/223 gebunden, 17 nur konsumiert, 11 fehlen.
 
 | Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |
 |---|---:|---:|---:|---:|---:|
-| Gegner/KI | 56/87 | 82.2 % | 64.4 % | 31 | 0 |
-| Effekte | 192/210 | 95.7 % | 91.4 % | 18 | 0 |
-| Events/Skript | 47/62 | 87.9 % | 75.8 % | 15 | 0 |
-| Spieler/Kampf | 38/56 | 83.9 % | 67.9 % | 18 | 0 |
-| Raum/Kamera/Tür | 8/28 | 62.5 % | 28.6 % | 19 | 1 |
+| Gegner/KI | 61/93 | 82.8 % | 65.6 % | 32 | 0 |
+| Effekte | 197/218 | 95.2 % | 90.4 % | 21 | 0 |
+| Events/Skript | 50/65 | 88.5 % | 76.9 % | 15 | 0 |
+| Spieler/Kampf | 40/58 | 84.5 % | 69.0 % | 18 | 0 |
+| Raum/Kamera/Tür | 11/32 | 67.2 % | 34.4 % | 21 | 0 |
 | Menü/Items/Text | 43/54 | 87.0 % | 79.6 % | 8 | 3 |
 | Modelle/Animation | 9/14 | 82.1 % | 64.3 % | 5 | 0 |
 | Audio | 5/21 | 61.9 % | 23.8 % | 16 | 0 |

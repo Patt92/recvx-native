@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 // Gemeinsame Dienste der von Hand portierten Effektprozeduren. Sie liegen auf
 // den vorhandenen Besitzern (EffectSprite, Anforderungs-/Tonliste des
 // Raumbesitzers in native/effect_sprites.cpp); es gibt keinen zweiten
@@ -38,6 +39,9 @@ void setentry(unsigned id,unsigned type,const EffectSprite& s);
 // eff[lNumber] nach bhSetEffectTb: die zuletzt uebergebene Anforderung, an der die
 // Originalerzeuger Felder nachtragen (Startgeschwindigkeit, tex_id, az, Elternsatz).
 EffectSpawn& last_request();
+// bhSetEffectTb-Erfolgstor fuer Nachtraege mit rand(): freier Platz im Besitzerpool
+// einschliesslich der bereits in diesem Aufruf gestellten Anforderungen.
+bool effect_slot_available();
 // sys->ef_opq[sys->ef_opqn++] = op (effsub0.c bhEff198): die Opak-Liste dieses Passes.
 void queue_opaque(EffectSprite& s);
 // sys->ef_fnc[sys->ef_fncn++] = op: der Satz zeichnet sich mit op->func selbst.
@@ -108,6 +112,7 @@ bool hook_player_joint(unsigned joint,float* out16,const char* what);
 void hook_player_hit(int dax,int day,int djnt_no,NJS_POINT3 dp);
 // plp->watr des Spielerbesitzers (EffectWorldHooks::player_watr); ohne Besitzer benannte Luecke.
 bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what);
+int hook_player_hit_check_parts(NJS_POINT3 pos,const char* what); // -1 = Luecke gemeldet
 // cam.ofx/ofy/ofz des Kamerabesitzers (EffectWorldHooks::camera_offset_add/_set); ohne Besitzer benannte Luecke.
 void hook_camera_offset_add(NJS_POINT3 add);
 void hook_camera_offset_set(NJS_POINT3 value);
@@ -121,10 +126,15 @@ bool hook_room_effect_link(unsigned type,int& lkflg,int& lkno,const char* what);
 std::shared_ptr<const SceneTexture> hook_enemy_texaddr_get(unsigned enemy,unsigned index,const char* what);
 void hook_enemy_texaddr_set(unsigned enemy,unsigned index,const std::shared_ptr<const SceneTexture>& texaddr,const char* what);
 std::shared_ptr<const SceneTexture> hook_effect_texaddr(unsigned group,const char* what);
+int hook_particle(int kind,unsigned index,int node,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color,int type,const char* what);
 // hitchkl.c:49 bhCollisionCheckLine2(p1, p2, flg, flr_no) auf rom->walp + sys->mwalp des
 // Raumbesitzers (set_effect_walls) samt :911 bhGetHitCollisionNormal: end wird auf den Treffer
 // gekuerzt, normal ist die Flaechennormale des letzten Treffers. Ohne Wandsatz benannte Luecke.
 bool collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what);
+// bhCollisionCheckLine2 mit dem getroffenen Satz (ATR flg/type) statt nur der Normale.
+std::optional<CollisionWall> collision_line_wall(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what);
+// bhCheckWater(&pos): top = py + h, h; false ohne Flaeche oder ohne Besitzer (dann Luecke gemeldet).
+bool water_area(NJS_POINT3 pos,float& top,float& h,const char* what);
 // effsub1.c:8825 bhEff127: plp->hp = -1 am Spielerwork des Raumbesitzers.
 void request_player_kill();
 // sys->ef_flg |= bits (der Raumbesitzer haelt ef_flg).

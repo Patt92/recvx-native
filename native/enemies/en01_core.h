@@ -243,6 +243,27 @@ void recvx_en01_scope_init(RECVX_ENEMY_WORK* w);      /* :1904         */
 void recvx_en01_scope_move(RECVX_ENEMY_WORK* w);      /* :1919         */
 void recvx_en01_scope_effect(RECVX_ENEMY_WORK* w);    /* :1960         */
 
+/* --- Geteilte Originalhelfer fuer native/enemies/en26.c -------------------
+   EN26 (en26.c) ruft dieselben zonzon.c/pwksub.c/ps2_NaColi.c-Routinen wie
+   EN01. Reine Weitergaben der hier liegenden Uebersetzungen, kein zweiter
+   Zustand und keine zweite Fassung derselben Originalroutine. */
+int32_t recvx_en01_ikou3(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos,
+                         int32_t add_dir);                     /* zonzon.c:45   */
+int recvx_en01_cdir_check(int32_t my_ang, int32_t trg_ang);    /* zonzon.c:76   */
+float recvx_en01_distance_p2p(const RECVX_ENEMY_VEC* a, float bx, float by,
+                              float bz);                       /* ps2_NaColi.c:65 */
+int recvx_en01_collision_wall2(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* ps,
+                               const RECVX_ENEMY_VEC* ops, RECVX_ENEMY_VEC* pd,
+                               float ar, float ah);            /* zonzon.c:1222 */
+int recvx_en01_check_dir_wall(RECVX_ENEMY_WORK* w, int32_t ang, float step); /* zonzon.c:1255 */
+int recvx_en01_check_side_wall(RECVX_ENEMY_WORK* w, float step, int both);   /* zonzon.c:1302 */
+/* bhEne_CalcPartsPos (zonzon.c:286): `mtx16` ist die Streumatrix lcmat des
+   Aufrufers (16 Floats); sie traegt danach die Kettenmatrix. */
+int recvx_en01_calc_parts_pos(RECVX_ENEMY_WORK* w, float* mtx16,
+                              RECVX_ENEMY_VEC* pos, const int8_t* tree,
+                              int parts_num, int clr_flg);
+void recvx_en01_set_vibration(RECVX_ENEMY_WORK* w, int32_t no); /* zonzon.c:1350 */
+
 #ifdef __cplusplus
 }
 #endif

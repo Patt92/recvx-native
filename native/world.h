@@ -59,7 +59,11 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // objitm.c:1846 bhObj008: O_WRK mode0, ct0 (Platz in sys->mwalp, hier object_mobile_walls_)
     // und owP[0].mtx aus dem bhCalcModel des vorigen bhControlObjItm-Durchlaufs (objitm.c:410).
     unsigned object008_mode0=0;int object008_wall=-1;bool object008_owp_valid=false;BoneMatrix object008_owp{};
-    unsigned object_flg2=0,object_mode1=0,object_mode3=0;int object_ct0=0,object_ayp=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
+    // objitm.c:1648 bhObj007 (bhJumpObject[7]): der Greif-und-Dreh-Gegenstand. mode0 0/1
+    // Annaeherung, 2/3 Drehen, 4 fertig; ct0 ist der Annaeherungszaehler, spd der gehaltene
+    // Abstand. Nur RM_0150 Objekt 5 (die Eisenstatue) ist in allen Raeumen vom Typ 7.
+    unsigned object007_mode0=0;int object007_ct0=0;float object007_spd=0;
+    unsigned object_flg2=0,object_mode1=0,object_mode3=0;int object_ct0=0,object_ayp=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false,link_released=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
     // bhEneLookFlgSet (event.c): original BH_PWORK flg bit 0x8000. Enemy AI
     // consumers (en01.c) are still pending; the state itself is exact.
     bool look=false;
@@ -220,6 +224,11 @@ public:
     // count != 0, *len = nr, *apos = sys->apos and, on a hit, *atr = *sys->ahtp and *index
     // its position in collision_geometry() (-1 = NULL).
     int l2_wall(NJS_POINT3 origin,NJS_POINT3 vector,unsigned flg,float* len,NJS_POINT3* apos,CollisionWall* atr=nullptr,int* index=nullptr)const;
+    // pwksub.c:2172 bhCheckC2WallN(cap, flg) over rom->walp + sys->mwalp (collision_geometry
+    // order): the capsule with its own radius (0.1 at every weapon/aim caller) against all
+    // records types 0..7, attr 0x2000000 skipped with flg 0x40000000, odd types with 0x400.
+    // Not combat_wall_distance: that ray ignores cap->r and the type 6/7 records.
+    int c2_wall_n(const RECVX_CB_CAPSULE& cap,unsigned flg)const;
     // bhGetGroundPosition for the original attack path; same collision set as movement.
     float combat_ground(NJS_POINT3 probe);
     std::optional<GroundHit> ground_hit()const{return ground_.hit();}
@@ -276,8 +285,9 @@ public:
     // owner drives yet, so bit 0 stays clear until one binds it.
     void set_effect_flags(unsigned flags){effect_flags_=flags;}
     unsigned effect_flags()const{return effect_flags_;}
-    struct LightState {unsigned flags,type,clock,link,index,node;NJS_POINT3 position,color;float near_range,far_range;};
-    std::optional<LightState> light_state(unsigned index)const;
+    struct LightState {unsigned flags,type,clock,link,index,node;NJS_POINT3 position,color;float near_range,far_range;
+        NJS_POINT3 direction;unsigned mode;std::array<std::int32_t,3> working_angles;NJS_POINT3 flicker_color;unsigned speed;};
+    std::optional<LightState> light_state(unsigned index,bool event=false)const;
     ModelPose model_pose(unsigned kind,unsigned index,unsigned script_node=0)const;
     // sp_evt.c bhDrawSpEvtComCharacter: the special-event computer draws
     // rom->enep[chr_no] into its character window. The original writes the
@@ -361,6 +371,10 @@ public:
     // objitm.c:1846 bhObj008 (bhJumpObject[8]): ATR-Quader in sys->mwalp, folgt owP[0] des Objekts.
     void control_mobile_wall_objects();
     void control_uv_objects(); // objitm.c:2050 bhObj010, dispatch type 10
+    // objitm.c:1648 bhObj007 (bhJumpObject[7]): der Greif-und-Dreh-Gegenstand im
+    // bhControlObjItm-Durchlauf (nur RM_0150 Objekt 5, Typ 7).
+    void control_turn_objects();
+    void control_turn_object(class WorldEntity& e);
     bool offset_work_uv(void* work,unsigned node,int u,int v);
     bool work_node_angle_z(void* work,unsigned node,int& angle)const;
     const WaterWaveWork* water_work(unsigned object)const;
@@ -425,7 +439,13 @@ public:
     // player's EXP_WORK floats live with the runtime's action work.
     std::vector<std::pair<unsigned,float>> take_player_exp0_writes(){auto out=std::move(player_exp0_writes_);player_exp0_writes_.clear();return out;}
     void start_task(unsigned level);
+    // game.c:48-59 in zwei Teilen um den Spielerpass des Hosts: tick_enemy_pass() = bhControlEnemy und der
+    // Kopf von bhControlPlayer (player.c:1366-1387) samt Skript-/Griffmodus; tick_after_player() = Ende von
+    // bhControlPlayer (player.c:1743-1771), bhControlEffect, bhControlObjItm, bhControlLight. tick() = beide.
     void tick();
+    void tick_enemy_pass();
+    void tick_after_player();
+    void control_lights(); // light.c:332 bhControlLight (game.c:59; auch bhInitCamSet event.c:4745)
     unsigned take_enemy_room_flags(){const auto flags=enemy_spawn_.room_flags;enemy_spawn_.room_flags=0;return flags;}
     Scene sample_player(const PlayerAsset& player,std::vector<BoneMatrix>* nodes=nullptr,const ModelNodeOverrides& combat={})const;
     // screen.c:920 bhDrawSmallScreenRenderTexture -> game.c:381 bhAllEasyDrawModel: Raum,
@@ -446,6 +466,7 @@ public:
     // Flaeche mit prm0 2 liefert. Der Aufrufer reicht plp->flr_no desselben bhCheckFloorP.
     void check_player_mirror_floor(int flr_no);
     bool player_mirror_off()const{return player_mirror_off_;} // plp->mdflg 0x40
+    bool player_model_hidden()const{return player_model_hidden_;} // plp->mdflg 0x1 (bhSetDispObj, event.c:2283)
     // cut.c:22 bhCheckCut: gm_flg &= ~0x20 je Hauptschleife, nach der exm-Festkamera (game.c:274-291)
     // und vor bhControlEvent; danach setzen Schnitt-/Ereigniskameras das Bit fuer dieses Bild.
     void begin_cut_check(){if(collision_events_)collision_events_->flags[11][0]&=~0x20u;}
@@ -456,6 +477,27 @@ public:
     std::optional<NJS_POINT3> position(unsigned kind,unsigned index)const;
     // ene[n].mlwP->owP[node].mtx[12..14] (event.c:7826 bhEtcAtariEnePosSet).
     std::optional<NJS_POINT3> enemy_joint_position(unsigned index,unsigned node)const{const auto m=link_matrix(1,index,node);if(!m)return {};return NJS_POINT3{m->value[12],m->value[13],m->value[14]};}
+    // sys->obwp[index] als angehaengtes Objekt des Spielers: lkmtab (player.c:22-26, flg 0x81,
+    // id 1211/1212) bindet bhSetPlayer/bhResetPlayer an plp, lkono 5 (player.c:759-783/965-989).
+    // Ereignisse verlinken es um: bhObjLinkSet (0x32, event.c:2177) auf ene[enep[v0].wrk_no],
+    // bhObjLinkSetPly (0x34, event.c:2501) zurueck auf plp, beide mit lkono/lox/loy/loz.
+    // Ohne Linkbefehl gilt die lkmtab-Bindung mit `bound_offset` am Spieler.
+    // control: objitm.c:289 (sp_flg 0x4) und :310-321 (stflg 0x1000000 vom lkwkp, pl_sleep_cnt).
+    // listed: :363-371 (mdflg 0x1, id >= 1210 nur mit pt_flg 0x1). draw: bhDrawObjItm :503
+    // (pt_flg 0x4) und bhDrawObject :635-656 (gelinkt pt_flg 0x1, stflg ohne pl_sleep_cnt). lkmtab traegt
+    // weder flg 0x20000000 noch 0x40000000, das mdflg-0x40- und das hide[]-Tor (:654/:659) greifen nie.
+    struct AttachedObject{bool linked=true;unsigned kind=0,index=0,node=5;NJS_POINT3 offset{};bool sleeping=false,control=false,listed=false,draw=false;};
+    AttachedObject attached_object(unsigned index,NJS_POINT3 bound_offset)const;
+    // pp = lkwkp eines Gegnerworks, wie bhCalcHair/bhObjClpn es lesen (player.c:7219-7241,
+    // objitm.c:2180-2342): ax/ay/az, mlwP->objP[0..5].ang, mlwP->owP[5].mtx und flg2.
+    // Leer, solange das Work keinen nativen, berechneten Objektbaum hat.
+    struct LinkedWork{BoneMatrix head;std::array<std::array<int,3>,6> angles{};int ax=0,ay=0,az=0;unsigned flg2=0;};
+    std::optional<LinkedWork> enemy_link_work(unsigned index)const;
+    // objitm.c:2184-2186: bhObjClpn loescht pp->flg2 0x2 am gelinkten Work.
+    void clear_enemy_flg2(unsigned index,unsigned bits);
+    // Pruefnaht: das Werk-flg (ETTY flg bei bhSetEneMdl eneset.c:183 / bhSetObject / bhSetItem; e.object_flags,
+    // bei gebundenem Gegnerwerk zusaetzlich enemy.flg). Im Original hat Bit 0x1 nach dem Setzen keinen Schreiber.
+    void set_work_flags(unsigned kind,unsigned index,unsigned flg);
     // sys->itwp[n].px/py/pz (event.c:7896 bhEtcAtariEvtPosSet).
     void set_item_position(unsigned index,NJS_POINT3 pos){entity(3,index).transform.position=pos;}
     bool player_hidden=false,player_scripted=false,player_action=false;
@@ -476,6 +518,15 @@ public:
     // bhChangeClipVolume bei der Ereigniskamera); nichts sonst setzt es zurueck.
     ClipVolume clip_volume()const{return installed_volume_;}
     void tick_camera(const Scene& stage,const SceneCamera& target,std::size_t cut,bool tracking=true);
+    // game.c:53-58: bhSetPlEyeCamera und bhControlCamera (camera.c:23-59) rechnen cam.mtx/vx/wpx aus der
+    // cam-Lage dieses Zeitpunkts (nach bhCheckCut des Vorbildes und Task 8). Zeichnen, Effekte (cam.mtx,
+    // cam.vx, cam.wpx) und der Tonmonitor lesen diesen Stand bis zum naechsten Aufruf. Vor dem ersten
+    // Aufruf im Raum ist cam genullt (room.c:33 bhInitCamera, camera.c:8/18): kein Wert.
+    void control_camera(const Scene& stage,const SceneCamera& target);
+    const std::optional<SceneCamera>& controlled_camera()const{return controlled_camera_;}
+    // Diagnose: cam.ct0 und Init-Pass (cam.mode0 0) der Ereigniskamera zum Zeitpunkt von bhControlCamera.
+    unsigned controlled_event_clock()const{return controlled_event_clock_;}
+    bool controlled_event_init()const{return controlled_event_init_;}
     // effsub3.c:2401 bhSetEffGunSpark: AllocOworkOne (erster freier eff-Platz), Effekt 308.
     int gun_spark(NJS_POINT3 pos,NJS_POINT3 dir,std::uint32_t src_col,std::uint32_t dst_col,int typ_no);
     // sys->pad_on/pad_ps dieses Passes (bhSysCallMain), fuer Effektprozeduren mit Padsteuerung (bhEff134).
@@ -491,7 +542,9 @@ public:
     const std::deque<WorldEntity>& enemy_children()const{return enemy_children_;}
     // effsub1b.c:101 bhDraw134: die Kran-Anzeige (2D, Texturgruppe 44) ueber dem Bild.
     // effect.c:929 ef_fnc-2D-Anzeigen: bhDraw134 (Kran) und bhDraw137 (Ueberwachungskamera).
-    void draw_fnc_huds(SoftwareRenderer& image)const;
+    // mirror_pass: danach unter st_flg 0x100 den zweiten bhDrawEffect (game.c:427) mit seinen
+    // 2D-Listen (ntx2d, trs2d, ef_fnc) in Originalreihenfolge; false im Rendertexturbild.
+    void draw_fnc_huds(SoftwareRenderer& image,bool mirror_pass=true)const;
     // game.c:68 / screen.c:816: der gesamte bhAllDrawModel-Pass in 512x480, dann
     // die 15 Streifen aus sys->rpb ueber die 512x512-Rendertextur. true = gezeichnet.
     bool draw_full_screen(SoftwareRenderer& image,const Scene& scene,const SceneCamera& view,bool wireframe=false)const;
@@ -503,10 +556,11 @@ public:
     // effect.c:905 bhDrawNtxEffect2D(sys->ef_ntx2d): untexturierte Schirmpolygone der
     // Effektsaetze dieses Passes (bhEff130 type 3), njDrawPolygon(pvp, pn, 1) ueber das
     // fertige Bild, Tore flg/stflg 0x1000000 und gm_flg 0x4000 + mdflg 0x40.
-    void draw_ntx2d_effects(SoftwareRenderer& image)const;
+    // pass 1 = zweiter bhDrawEffect im Spiegelpass (gm_flg 0x4000), aus draw_fnc_huds.
+    void draw_ntx2d_effects(SoftwareRenderer& image,unsigned pass=0)const;
     // effect.c:912 bhDrawTrsEffect2D(sys->ef_trs2d): texturierte Schirmvierecke der Effektsaetze dieses
     // Passes (effsub1.c bhEff2D), njDrawTexture(tvp, pn, gidx, 1) mit bl_src/bl_dst ueber das fertige Bild.
-    void draw_trs2d_effects(SoftwareRenderer& image)const;
+    void draw_trs2d_effects(SoftwareRenderer& image,unsigned pass=0)const;
     // face.c:79 bhControlMask fuer einen Besitzer mit Maskendaten (Gegnerpass id > 90 oder Weltpass).
     void control_mask(WorldEntity& e,const PlayerAsset& actor);
     struct FogView {bool enabled;std::uint32_t color;float near_range,far_range;int ct;};
@@ -530,6 +584,9 @@ public:
     const RECVX_PUSH_STATE* push_state()const{return push_?&push_->state():nullptr;}
     bool pushing()const{return push_&&push_->active();}
     bool tick_push(bool forward);
+    // objitm.c:1648 bhObj007 / player.c:4336 bhCPM2_act_rpsh: Greif-und-Dreh-Gegenstand.
+    bool turning()const{return turn_active_;}
+    bool tick_turn(bool forward);
     // bhObj001 stores climb / descend ETC records in sys->metcp.  Unlike the
     // room ETC table, these records move with their O_WRK.
     std::vector<RECVX_STAIR_AREA> push_steps();
@@ -542,6 +599,7 @@ public:
     // that contains the probe, room flrp before bhObj001's mflrp. `top` then
     // receives fp->py + fp->h, the surface the original splash is placed on.
     bool water_top(NJS_POINT3 position,float& top)const;
+    bool water_area_at(NJS_POINT3 position,float& top,float& h)const; // bhCheckWater mit h
     // hitchk.c:5561 bhCheckL2Water: line (origin, vec) against the top plane of
     // the same water areas in the same order; the first hit within |vec| wins.
     bool l2_water(NJS_POINT3 origin,NJS_POINT3 vec,NJS_POINT3& hit)const;
@@ -621,7 +679,15 @@ private:
     // light.c:247, bhSetGunFire pwksub.c:2708, bhSetExplosion weapon.c:1726). lit_after_clear: der letzte
     // bhControlLight-Pass hat das Licht noch gesetzt (lsrc 4, light.c:788), obwohl er im selben
     // Durchlauf flg 0x1/0x2 geloescht hat (Typ 13/100/101, light.c:658-699).
-    struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;unsigned mode=0;bool lit_after_clear=false;};
+    struct Light {unsigned flags,type,speed,link,index,node,source,clock=0;NJS_POINT3 position,offset,direction,color;float near_range,far_range;NJS_POINT3 working_color{};bool color_sampled=false;unsigned mode=0;bool lit_after_clear=false;
+        // light.c:494-505, types.h:399-435: spc/dif/amb tragen fuer 10/11 den
+        // Flackerzustand; wax/way/waz sind fortgeschriebene, nicht auf 16 Bit
+        // begrenzte Winkel. w* wird beim Pausieren gelesen (:703-717).
+        NJS_POINT3 flicker_color{},working_position{},working_direction{};
+        std::array<std::int32_t,3> working_angles{};
+        float working_near_range=0,working_far_range=0;
+        int ct1=0; // LGT_WORK.ct1 (en22.c:2933 bhEne22_CtrLight)
+        };
     // CAM_KEYF_WORK: flg (0x8 = this key carries fog), fog_col/fog_nr/fog_fr.
     struct EventCamera {SceneCamera camera;unsigned frame=0,link,index,node;NJS_POINT3 offset;std::array<std::uint32_t,4> hidden_lights;unsigned flags=0;std::uint32_t fog_color=0;float fog_near=0,fog_far=0;};
     struct EventCameraTrack {std::vector<EventCamera> keys;unsigned next=0;};
@@ -663,12 +729,17 @@ private:
     void update_push();
     void update_ground_geometry();
     void update_player_ground_work();
+    void refresh_motion_overrides(bool enemy_phase);
+    void advance_entity_motions(bool enemy_phase);
     std::vector<CollisionWall> collision_geometry()const;
     const PlayerAsset* player_asset_=nullptr;
     bool player_room_motion_=false,player_frozen_=false;
     std::int64_t player_step_=65536;
     int* player_hp_owner_=nullptr;std::uint32_t* player_head_flags_=nullptr;RECVX_HEAD_STATE* player_head_=nullptr;
     int player_ct0_=0,player_ct1_=0,player_ayp_=0,player_hokan_rate_=0;
+    int player_azp_=0; // plp->azp: das Zielwinkel, das bhObj007 an bhCPM2_act_rpsh uebergibt
+    // bhCPM2_act_rpsh (player.c:4336): der Drehzustand der Greif-und-Dreh-Aktion (mode2 22).
+    bool turn_active_=false;unsigned turn_phase_=0;int turn_ayp_=0;unsigned turn_motion_=0;std::int64_t turn_frame_=0;int turn_hokan_rate_=0;unsigned turn_hokan_count_=0;int turn_mtn_add_=0;
     // plp im Skriptmotionsmodus: Common_controll 24/25/34 Selektor 0 (event.c:11469/10960/11802) setzt
     // mode0 7 / mode2 8 (bhCPM0_event -> pl_smove08, pl_evt.c:649) mit mode1/ct0/ct1/ct2; bhControlPlayer
     // fuehrt danach bhSetMotion(plp, mtn_add, mtn_md) (player.c:1502) auf dem einen objP.
@@ -778,8 +849,21 @@ private:
     // op->mdflg eines bhPutModel-Works fuer den Spiegeltest; nullopt ohne nativen Besitzer.
     std::optional<unsigned> put_model_mdflg(const Model& model,const WorldEntity& e)const;
     bool player_mirror_off_=false; // plp->mdflg 0x40 (player.c:1668/1674); bhSetPlayer setzt mdflg = 0x20 (player.c:698/864)
+    bool player_model_hidden_=false; // plp->mdflg 0x1 (bhSetDispObj, event.c:2283): nur das Modell, sperrt den Pass nicht
     // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP.
     void append_claw_model(Scene& scene,const EffectSprite& sprite)const;
+    // game.c:77-91: st_flg 0x100, pt_flg 0x10 und ein gueltiges njMirror(sys->mr_pl) -> bhEtcMirrorDrawModel
+    // ruft bhDrawEffect ein zweites Mal (game.c:427).
+    bool mirror_effect_pass_active()const;
+    // effect.c:929 die schreibenden ef_fnc-Zeichenteile fuer bhDrawEffect-Aufruf `pass` (0 normal, 1
+    // Spiegel) dieses Steuerbildes, genau einmal: ein erneutes Zusammensetzen desselben Bildes nimmt
+    // die gemerkte Ausgabe statt den Zustand ein weiteres Mal fortzuschreiben.
+    void draw_stateful_effects(unsigned pass,const EffectContext& context)const;
+    // game.c:61-92 zeichnet jedes Spielbild; hat der Host ein Steuerbild nicht zusammengesetzt,
+    // holt der naechste Steuerpass dessen Zeichenteile nach (Zustand wie im Original).
+    void draw_pending_stateful_effects();
+    std::uint64_t effect_control_serial_=0; // Zaehler der bhControlEffect-Aufrufe
+    unsigned effect_control_sp_flg_=0; // sys->sp_flg dieses Steuerbildes (fuer den nachgeholten Zeichenteil)
     void bind_enemy_services();
     void init_enemy_works();
     void control_enemy_works();
@@ -826,7 +910,12 @@ private:
     // txp[0] is a captured list on the room/model asset, not a copied atlas.
     // models_ is fixed after load; SpriteWork (including snapshots) keeps only
     // the reference and dies with this RoomWorld.
-    struct SpriteWork {const std::vector<SceneTexture>* texture_list=nullptr;EffectSprite sprite;NJS_POINT3 scale;bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
+    struct SpriteWork {const std::vector<SceneTexture>* texture_list=nullptr;
+        // mutable: die ef_fnc-Zeichenteile schreiben den Satz im Zeichenpass (effect.c:929).
+        mutable EffectSprite sprite;NJS_POINT3 scale;
+        // Ausgabe der schreibenden Zeichenteile je bhDrawEffect-Aufruf dieses Steuerbildes.
+        struct DrawnPass {std::uint64_t serial=~0ull;std::vector<EffectSprite::Quad> quads;std::vector<SceneLine> lines;};
+        mutable std::array<DrawnPass,2> drawn{};bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
         // Mitgliedschaft in sys->ef_thl dieses Passes (bhEff111; effect.c:902 bhDrawThlEffect3D).
         bool thl=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
@@ -846,7 +935,7 @@ private:
     std::int32_t player_axp_=0; // plp->axp (en17.c:1388/1412, bhAddSpeed)
     // player.c:1366-1387 bhControlPlayer: pxb/pyb/pzb of the previous pass and
     // EXP_WORK nlxb/nlyb/nlzb, the last settled root position (owP[0]).
-    NJS_POINT3 player_prev_pos_{},player_last_tick_pos_{},player_nl_{};bool player_prev_valid_=false;
+    NJS_POINT3 player_prev_pos_{},player_nl_{};
     // plp->djnt_no / dvx..dvz / dpx..dpz written by enemy hit routines.
     int player_hit_joint_=-1;NJS_POINT3 player_hit_dv_{},player_hit_dp_{};
     // plp->mlwP->objP[node] writes of the enemy pass; the next player motion
@@ -942,6 +1031,7 @@ private:
     // 1 = travelling, 2 = final hold (event_camera_finished_), 3 = held by
     // bhCamPauseSet (event_camera_paused_, event.c:1032; the switch has no case 3).
     bool event_camera_init_=false,event_camera_paused_=false;
+    std::optional<SceneCamera> controlled_camera_;unsigned controlled_event_clock_=0;bool controlled_event_init_=false; // control_camera()
     // cam.ips/ian/ipf/icr: the 20 Overhauser control slots of bhInitEventCamera (cut.c:1845).
     std::array<float,60> event_ips_{},event_ian_{},event_ipf_{},event_icr_{};
     struct EventCameraLock {unsigned flg=0,no=0,ono=0;NJS_POINT3 offset{};};
@@ -965,6 +1055,7 @@ private:
     NJS_POINT3 camera_target_{};bool camera_target_valid_=false;
     // cam.flg 0x8 und sys->fil_no/fil_rt (cut.c:412-421/505-514); bhInitCamera (camera.c:9) nullt cam.flg.
     bool camera_filter_=false;int filter_no_=0,filter_rate_=0;
+    bool camera_cut_wall_=false; // cam.flg 0x10 (cut.c:424/517: ci->flg 0x200)
     // Fog owner (sync.c:143-255 bhControlEOR): cam.fog_* as handed over by
     // bhSetCut/bhSetFixedCut/bhSetEventCamera, sys->fog_ct/fog_cngct, the
     // installed njGenerateFogTable3 state and the njSetFogColor colour.
@@ -1012,7 +1103,7 @@ private:
     // effsub1b.c:713 bhEff136: objP[node] von mdl[mdl] des Werks in seiner jetzigen Lage.
     std::shared_ptr<const EffectAfterimage> capture_afterimage(unsigned kind,unsigned index,unsigned mdl,unsigned node)const;
     // effsub1b.c:690 bhDraw136: ein Nachbild in die Szene, mit dem Materialalpha des Satzes.
-    void append_afterimage(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,std::pair<unsigned,unsigned>* fnc_blend)const;
+    void append_afterimage(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,std::pair<unsigned,unsigned>* fnc_blend,bool mirror=false)const;
     NJS_POINT3 link_point(unsigned kind,unsigned index,unsigned node,NJS_POINT3 offset)const;
     struct RenderScreenVertex {float x=0,y=0,z=0,u=0,v=0;std::uint32_t bcol=0,ocol=0;};
     std::array<RenderScreenVertex,256> render_screen_vertices_{}; // sys->rpb, ein Besitzer

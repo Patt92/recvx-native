@@ -20,7 +20,9 @@
 #include <stdexcept>
 using namespace recvx;
 static void check(bool v,const std::string& why){if(!v)throw std::runtime_error(why);}
-static bool near(float a,float b,float e=1e-4f){return std::fabs(a-b)<=e;}
+// 1e-3: Sicht (camera_view_matrix) und Billboardinverse rechnen ueber die njSin-Tabelle (Restfehler ~2e-4
+// an Einheitsversaetzen); die geprueften Fehlbilder (fehlender Spiegelpraefix/mr_pl-Drehung) weichen um ~1 ab.
+static bool near(float a,float b,float e=1e-3f){return std::fabs(a-b)<=e;}
 struct Room {
  std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn actor;std::size_t motion=42;std::int64_t frame=0;
  AudioMixer audio;Inventory inv;MessageDialog dialog;RoomWorld world;EventVm vm;
@@ -29,13 +31,101 @@ struct Room {
   vm.binding=[&](const EventCommand& c){return world.bind(c);};vm.task_started=[&](unsigned n){world.start_task(n);};
  }
  // Diagnose: ein isolierter Steuerpass mit sp_flg 8 (bhControlEffect, game.c:50).
- void pass(){world.set_pad(0,0);vm.flags[6][0]|=8u;world.set_simulation_flags(vm.flags[6][0]);world.tick();}
+ void pass(){world.set_pad(0,0);vm.flags[6][0]|=8u;world.set_simulation_flags(vm.flags[6][0]);world.tick();if(!scene.cameras.empty())world.control_camera(scene,scene.cameras.at(0));} // game.c:48-59
  Scene compose(std::size_t cut){Scene out;out.triangles=scene.triangles;out.ambient_writes=scene.ambient_writes;out.textures=scene.textures;out.background=scene.background;
   auto camera=scene.cameras.at(cut);world.append(out,{},camera);return out;}
 };
 static std::size_t count_mirror(const Scene& s,unsigned pass){std::size_t n=0;for(const auto& t:s.triangles)n+=t.mirror==pass;return n;}
 static std::size_t differences(const SoftwareRenderer& a,const SoftwareRenderer& b){std::size_t n=0;for(std::size_t i=0;i<a.pixels().size();++i)n+=a.pixels()[i]!=b.pixels()[i];return n;}
+// --- game.c:87 -> :427 bhDrawEffect im Spiegelpass (gm_flg 0x4000) ---
+// Unit: effect.c:1219-1239 Billboardbasis unter cam.mtx * njMirror, mr_pl-Zweig (effect.c:1225,
+// effsub2.c:4644), mdflg-0x40-Tor (effect.c:1301); effsub1.c:5474 bhDraw025 / :6299 bhDraw107 /
+// :6229 bhEff106 schreiben im Zeichenteil.
+static void mirror_effect_offsets(const Scene& sc,const SceneCamera& cam,std::size_t first,NJS_POINT3 center,std::array<NJS_POINT3,3>& out){
+ NJS_MATRIX view;camera_view_matrix(cam,view);NJS_MATRIX m;std::copy_n(sc.mirror_matrix.data(),16,m);njMultiMatrix(&view,&m);
+ NJS_POINT3 c;njCalcPoint(&view,&center,&c);
+ for(unsigned k=0;k<3;++k){NJS_POINT3 p=sc.triangles.at(first).vertices[k].position,q;njCalcPoint(&view,&p,&q);out[k]={q.x-c.x,q.y-c.y,q.z-c.z};}}
+static Scene mirror_scene(NJS_PLANE pl){Scene sc;NJS_MATRIX m;njUnitMatrix(&m);check(njMirror(&m,&pl)==1,"test plane must take the defined njMirror branch");
+ sc.mirror_enabled=true;std::copy_n(m,16,sc.mirror_matrix.begin());effect_mirror_plane()=pl;return sc;}
+static void mirror_effect_unit_tests(){
+ SceneCamera cam;cam.position={1,2,3};cam.angles={1000,20000,300};cam.distance=12;
+ EffectSprite s;s.id=302;s.flg=0x100000u; // Billboard, Eckpunkte tv (-1,-1)(1,-1)(-1,1)(1,1)
+ const NJS_POINT3 center{4,1,-2};
+ // Ebene ohne vx/vy: keine mr_pl-Drehung. Unter cam.mtx*njMirror liegt das Viereck kameraparallel.
+ {Scene sc=mirror_scene({0,0,5,0,0,1});append_effect_sprite(sc,s,center,{1,1,1},cam,0,nullptr,nullptr,true,true);
+  check(sc.triangles.size()==2&&sc.triangles[0].mirror==3&&sc.triangles[1].mirror==3,"mirror effect triangles must carry SceneTriangle::mirror 3");
+  std::array<NJS_POINT3,3> o;mirror_effect_offsets(sc,cam,0,center,o);
+  check(near(o[0].x,-1)&&near(o[0].y,-1)&&near(o[0].z,0)&&near(o[1].x,1)&&near(o[1].y,-1)&&near(o[2].x,-1)&&near(o[2].y,1)&&near(o[2].z,0),"njUnitRotPortion under cam.mtx*njMirror: billboard not screen-parallel in the mirror view");
+  // Gegenprobe: die ungespiegelte Basis liegt in der Spiegelsicht schraeg (der Test sieht den Fehler).
+  Scene wrong=sc;wrong.triangles.clear();append_effect_sprite(wrong,s,center,{1,1,1},cam,0,nullptr,nullptr,false,true);
+  std::array<NJS_POINT3,3> w;mirror_effect_offsets(wrong,cam,0,center,w);check(!(near(w[0].x,-1)&&near(w[0].y,-1)&&near(w[0].z,0)),"unmirrored basis must differ in the mirror view");}
+ // mr_pl.vx != 0: njRotateY(32768) nach njRotateZ(az) -> x und z kehren um (effect.c:1227-1230).
+ {Scene sc=mirror_scene({0,0,5,0.6f,0,0.8f});append_effect_sprite(sc,s,center,{1,1,1},cam,0,nullptr,nullptr,true,true);
+  std::array<NJS_POINT3,3> o;mirror_effect_offsets(sc,cam,0,center,o);check(near(o[0].x,1)&&near(o[0].y,-1)&&near(o[0].z,0),"mr_pl.vx: njRotateY(32768) missing");
+  Scene plain=sc;plain.triangles.clear();append_effect_sprite(plain,s,center,{1,1,1},cam,0,nullptr,nullptr,true,false);
+  mirror_effect_offsets(plain,cam,0,center,o);check(near(o[0].x,-1)&&near(o[0].y,-1),"njPtclDrawSprite/ef_fnc billboards must not take the mr_pl branch");}
+ // mr_pl.vy != 0 (vx 0): njRotateX(32768) -> y und z kehren um (effect.c:1232-1235).
+ {Scene sc=mirror_scene({0,5,0,0,0.6f,0.8f});append_effect_sprite(sc,s,center,{1,1,1},cam,0,nullptr,nullptr,true,true);
+  std::array<NJS_POINT3,3> o;mirror_effect_offsets(sc,cam,0,center,o);check(near(o[0].x,-1)&&near(o[0].y,1)&&near(o[0].z,0),"mr_pl.vy: njRotateX(32768) missing");}
+ // effect.c:1301 (|| gm_flg 0x4000 && mdflg 0x40): nur der Spiegelaufruf laesst den Satz aus.
+ {Scene sc=mirror_scene({0,0,5,0,0,1});EffectSprite m=s;m.mdflg=0x40u;
+  append_effect_sprite(sc,m,center,{1,1,1},cam,0,nullptr,nullptr,true,true);check(sc.triangles.empty(),"mdflg 0x40 must skip the mirror call");
+  append_effect_sprite(sc,m,center,{1,1,1},cam,0);check(sc.triangles.size()==2,"mdflg 0x40 must not skip the normal call");}
+ // Zeichenteile: Steuerung mit defer_custom_draw reiht nur ein; jeder Zeichenaufruf schreibt.
+ int slot=0;set_effect_extra_allocator([&slot]{return slot++;},[](int){});
+ EffectContext c;c.pt_flg=0x10;c.sp_flg=8;c.defer_custom_draw=true;c.camera_ready=true;c.camera_position={0,0,0};c.camera_view={0,0,1};
+ {EffectSpawn sp;sp.id=25;sp.flg=1;EffectSprite e;initialize_effect_sprite(e,sp);bool queued=false;
+  step_effect_sprite(e,c,&queued);for(int i=0;i<6;++i)step_effect_sprite(e,c,&queued); // ct0 6: ab hier eingereiht (effsub1.c:5600)
+  check(queued&&e.custom_queued&&e.quads.empty(),"bhEff025: deferred control must enqueue without drawing");
+  check(draw_effect_sprite_work(e,c)&&e.quads.size()==8&&near(e.quads[0].vertices[1].x,1.0f),"bhDraw025 first draw: scale 1");
+  check(draw_effect_sprite_work(e,c)&&e.quads.size()==8&&near(e.quads[0].vertices[1].x,0.8f),"bhDraw025 second draw (mirror) must see scl *= 0.8 of the first (effsub1.c:5546)");
+  EffectContext off=c;off.pt_flg=1;check(!draw_effect_sprite_work(e,off),"no draw without pt_flg 0x10 (game.c:339/347/426)");}
+ // effsub1.c:6351-6356: ay++ vor dem Test ay < 5.
+ {EffectSprite e;e.id=107;e.flg=1;e.custom_queued=true;e.extra=std::make_shared<std::array<unsigned,312>>();
+  struct Row{float px,py,pz;short ax,ay;};static_assert(sizeof(Row)==16,"ER_WORK");
+  Row rows[8]{};rows[0]={0,0,0,1,4};rows[1]={0,0,0,1,3};std::memcpy(reinterpret_cast<unsigned char*>(e.extra->data())+4,rows,sizeof rows);
+  check(draw_effect_sprite_work(e,c)&&e.quads.size()==1&&near(e.quads[0].vertices[0].u,0.328125f),"bhDraw107: ay 4 -> 5 must not draw, ay 3 -> 4 draws uvinfo[3]");
+  EffectContext still=c;still.sp_flg=0;draw_effect_sprite_work(e,still);check(e.quads.size()==1&&near(e.quads[0].vertices[0].u,0.4375f),"bhDraw107 without sp_flg 8 draws uvinfo[ay] unchanged");}
+ // effsub1.c:6248/6249: bhEff106 laesst 8/10 stehen.
+ {EffectSpawn sp;sp.id=100;sp.flg=1;EffectSprite e;initialize_effect_sprite(e,sp);bool queued=false;
+  step_effect_sprite(e,c,&queued);step_effect_sprite(e,c,&queued);
+  check(e.custom_queued&&e.lines.empty(),"bhEff100 deferred: control must not draw");
+  check(draw_effect_sprite_work(e,c)&&e.lines.size()==77,"bhEff106 draws 77 lines");}
+ set_effect_extra_allocator({},{});
+ std::cout<<"Spiegel-bhDrawEffect: Billboardbasis, mr_pl-Zweig, mdflg 0x40, Zeichenteile 025/107/100 PASS\n";}
+static unsigned trail_ct(const EffectSprite& s,unsigned row){std::int16_t ct;std::memcpy(&ct,reinterpret_cast<const unsigned char*>(s.extra->data())+4+16*row+2,2);return unsigned(ct);}
+static const EffectSprite* first_trail(RoomWorld& w){for(unsigned i=0;i<512;++i){const auto* s=w.effect_state(i);if(s&&s->id==24&&(s->flg&1u)&&s->extra)return s;}return nullptr;}
+// Daten: bhSetExplosionEffect (weapon.c:1812) erzeugt zwei bhEff024; bhDraw024 (effsub1.c:5261-5360)
+// schreibt die Spurzeile jedes Zeichenaufrufs neu und zaehlt alte Zeilen je Aufruf weiter.
+static void mirror_effect_tests(const std::filesystem::path& data){
+ // RM_1090 ohne Spiegel: ein bhDrawEffect je Bild.
+ {Room r(data,"RM_1090");r.world.tick_camera(r.scene,r.scene.cameras.at(0),0,false);r.pass();
+  check(r.world.explode_effect(r.actor.position),"RM_1090 explosion");r.pass();r.pass();
+  const auto* t=first_trail(r.world);check(t&&t->ct0==1,"RM_1090 bhEff024 after init");
+  auto x=r.compose(0);check(count_mirror(x,3)==0,"RM_1090 no mirror effect output");
+  r.pass();x=r.compose(0);check(trail_ct(*t,0)==2,"RM_1090 one draw per frame: row 0 ct 2, got "+std::to_string(trail_ct(*t,0)));
+  x=r.compose(0);check(trail_ct(*t,0)==2,"recomposing the same frame must not advance bhDraw024");
+  r.pass();r.pass();check(trail_ct(*t,0)==3,"an uncomposed frame still draws once (game.c:61-92), got "+std::to_string(trail_ct(*t,0)));
+  std::cout<<"RM_1090: bhDraw024 ein Zeichenlauf je Bild, kein Fortschritt bei Wiederzusammensetzung PASS\n";}
+ // RM_2040 mit Spiegel (Ereignis 0 +0xc4/+0xc8 wie oben): zwei bhDrawEffect je Bild.
+ {Room r(data,"RM_2040");r.vm.initialize();r.pass();
+  const auto info=inspect_room(r.bytes);const BinaryView v(r.bytes);const auto ev0=info.event_offset+v.u32(info.event_offset+8);
+  EventCommand on;on.opcode=0x43;on.bytes.assign(r.bytes.begin()+std::ptrdiff_t(ev0+0xc4),r.bytes.begin()+std::ptrdiff_t(ev0+0xc8));
+  check(on.bytes==std::vector<std::uint8_t>{0x43,0,1,0},"RM_2040 event 0 +0xc4 moved");
+  r.vm.set_flag(5,0x17,0);check(r.world.bind(on),"bhEffDispSet on");r.world.tick_camera(r.scene,r.scene.cameras.at(0),0,false);r.pass();
+  check((r.vm.flags[5][0]&0x100u)!=0,"RM_2040 mirror on");
+  check(r.world.explode_effect(r.actor.position),"RM_2040 explosion");r.pass();r.pass();
+  const auto* t=first_trail(r.world);check(t&&t->ct0==1,"RM_2040 bhEff024 after init");
+  auto x=r.compose(0);check(x.mirror_enabled&&count_mirror(x,3)>0,"RM_2040 second bhDrawEffect produced no mirrored output");
+  for(const auto& tr:x.triangles)if(tr.mirror==3)check(tr.after_modifiers&&tr.material_phase==10&&!tr.camera_mask,"mirror effect triangle state");
+  const auto& gaps=r.world.unbound_enemy_routines();
+  check(!gaps.count("game.c:91 bhEtcMirrorDrawModel: bhDrawEffect unter gm_flg 0x4000 (gespiegelte Effektpaesse) nicht portiert"),"old mirror-effect gap still reported");
+  r.pass();x=r.compose(0);check(trail_ct(*t,0)==3,"RM_2040 two draws per frame: row 0 ct 3, got "+std::to_string(trail_ct(*t,0)));
+  x=r.compose(0);check(trail_ct(*t,0)==3,"recomposing the mirror frame must not advance bhDraw024");
+  std::cout<<"RM_2040: zweiter bhDrawEffect unter gm_flg 0x4000, bhDraw024 zwei Zeichenlaeufe je Bild PASS\n";}
+}
 int main(int argc,char** argv){try{_Make_SinTable();
+ mirror_effect_unit_tests();
  // --- njMirror, Formel der Disassembly ---
  {NJS_MATRIX m;njUnitMatrix(&m);NJS_PLANE pl{0,0,5,0,0,1};check(njMirror(&m,&pl)==1,"njMirror z plane path");
   NJS_POINT3 p{1,2,3},q;njCalcPoint(&m,&p,&q);check(near(q.x,1)&&near(q.y,2)&&near(q.z,7),"njMirror z=5 reflects 3 -> 7");
@@ -137,4 +227,5 @@ int main(int argc,char** argv){try{_Make_SinTable();
  // --- Gegenprobe: ein Raum ohne 112 bleibt ohne Spiegel ---
  {Room r(data,"RM_1090");r.pass();check(!(r.vm.flags[5][0]&0x100u),"RM_1090 st_flg 0x100");auto x=r.compose(0);check(!x.mirror_enabled&&count_mirror(x,2)==0,"RM_1090 no mirror");
   std::cout<<"RM_1090: ohne bhEff112 kein Spiegelpass PASS\n";}
+ mirror_effect_tests(data);
  return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

@@ -58,6 +58,20 @@ int main(){try{
     unsigned calls=0;
     trail.append(rays,20,0,[&](NJS_POINT3,NJS_POINT3,unsigned flags)->std::optional<float>{check(flags==0x400,"wall flags changed");++calls;return 1.25f;});
     check(calls==8&&rays.triangles.size()==32&&near(trail.spd,3.4f),"trail draw/query side effect changed");
+    // bhDrawWeaponEffect draws every quad with its own njDrawTexture3DEx call
+    // (effsub1.c:1419-1648, 1789/1790) -> njDrawTextureSub3D (ps2_NaDraw.c:302):
+    // scr.z < 0 of one vertex drops the call (:327), not an njClipZ near clip. Each
+    // quad's two strip triangles must carry the same, call-unique clip-rule id.
+    {Scene calls_scene;auto spoke=flash(2,0);spoke.tick();spoke.append(calls_scene,0);
+     auto ray=flash(3,0);recvx_core_random_seed(5);ray.tick();
+     ray.append(calls_scene,0,0,[](NJS_POINT3,NJS_POINT3,unsigned)->std::optional<float>{return 2.0f;});
+     auto muzzle0=flash(0,0);muzzle0.tick();muzzle0.append(calls_scene,0);
+     check(calls_scene.triangles.size()%2==0,"weapon-flash quad split into an odd triangle count");
+     for(std::size_t i=0;i<calls_scene.triangles.size();i+=2){
+         const auto& a=calls_scene.triangles[i];const auto& b=calls_scene.triangles[i+1];
+         check(a.ninja_primitive!=0&&a.ninja_primitive==b.ninja_primitive&&a.ninja_screen_reject&&b.ninja_screen_reject,
+               "njDrawTexture3DEx call of bhDrawWeaponEffect lost the njDrawTextureSub3D clip rule");
+         if(i)check(a.ninja_primitive!=calls_scene.triangles[i-1].ninja_primitive,"two njDrawTexture3DEx calls share one clip-rule id");}}
     NJS_MATRIX after;njGetMatrix(&after);check(std::memcmp(caller,after,sizeof caller)==0,"flash corrupted caller matrix");
     std::cout<<"Native weapon-flash contracts passed (all six types; wall binding is a fixture, not runtime acceptance)\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

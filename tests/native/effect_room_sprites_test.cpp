@@ -980,7 +980,7 @@ static void group3_services(){
         step_effect_sprite(s,c,&queued);check(w.windrb==100&&close(w.windsb,2)&&w.windr==100+(int(182.04445f*(20.0f*njSin(256)))&0xffff)&&close(w.winds,2+3*njSin(256)),"bhEff102 swing differs");
         s=work(105,0);step_effect_sprite(s,c,&queued);check(take_effect_output().background_sounds.empty()&&s.mode0==0,"bhEff105 idle");
         s.mode1=1;step_effect_sprite(s,c,&queued);auto out=take_effect_output();
-        check(out.background_sounds.size()==1&&out.background_sounds[0].slot==1&&out.background_sounds[0].sound==770&&s.mode0==1&&s.ct0==16384-1536&&close(w.thunder,std::fabs(255.0f*njSin(16384-1536))),"bhEff105 thunder start differs");
+        check(out.background_sounds.size()==1&&out.background_sounds[0].slot==1&&out.background_sounds[0].sound==770&&s.mode0==1&&s.ct0==16384-1536&&w.thunder==unsigned(std::fabs(255.0f*njSin(16384-1536))),"bhEff105 thunder start differs");
         unsigned passes=0;while(s.mode0==1&&passes<100){step_effect_sprite(s,c,&queued);take_effect_output();++passes;}
         check(s.mode0==2&&w.thunder==0&&s.ct1==0,"bhEff105 decays into the afterglow");
         bool echo=false;for(unsigned pass=0;pass<200&&s.mode0==2;++pass){step_effect_sprite(s,c,&queued);for(const auto& b:take_effect_output().background_sounds)if(b.sound==771)echo=true;}
@@ -2029,6 +2029,7 @@ static void flame352_scene(const std::filesystem::path& data){
         auto camera=stage.cameras.at(0);camera.angles={view==0?0:4096,view==0?0:16384,0};
         world.tick_camera(stage,camera,0);world.tick();
         const auto* s=world.effect_state(unsigned(slot));check(s&&world.effect_visible(unsigned(slot)),"linked flame not queued");
+        // cam.vx des Effektpasses: bhControlCamera des Vorbildes (game.c:50 vor :58), danach laeuft sie fuer dieses Bild.
         const auto context=world.effect_context();NJS_POINT3 expected;njCalcPoint(&nodes.at(9).value,&spawn.offset,&expected);
         expected.x-=context.camera_view.x*spawn.velocity.z;expected.y-=context.camera_view.y*spawn.velocity.z;expected.z-=context.camera_view.z*spawn.velocity.z;
         Scene draw;world.append(draw,nodes,camera);bool found=false;
@@ -2042,6 +2043,7 @@ static void flame352_scene(const std::filesystem::path& data){
             if(close(origin.x,expected.x)&&close(origin.y,expected.y)&&close(origin.z,expected.z)){found=true;break;}
         }
         check(found,"draw ignored bhEff352's camera-adjusted lox/loy/loz");
+        world.control_camera(stage,camera); // game.c:58
     }
     {
         // effect.c:812 bhControlEffect: vor der Prozedur px = owP[lkono] * (lox,loy,loz) des Satzes,
@@ -2103,6 +2105,41 @@ static void effect_call_clip(){
     const std::array<NJS_POINT3,4> behind{{{-1,-1,5},{1,-1,5},{-1,1,5},{1,1,-1}}};
     check(pixels(quad(behind,1,true))==0,"njDrawTextureSub3D call with scr.z < 0 still drawn");
     check(pixels(quad(behind,1,false))==half,"njDrawPolygonSub3D lost the triangle without the scr.z < 0 vertex");
+}
+
+// bhDrawWeaponEffect (effsub1.c:1220) zeichnet jedes Viereck mit njDrawTexture3DEx und damit ueber
+// njDrawTextureSub3D (ps2_NaDraw.c:302): ein Eckpunkt mit scr.z < 0 beendet den ganzen Aufruf (:327).
+// RM_3000 (Steve, Waffe 8, Ereignis 12): Steve schiesst in der Nahaufnahme auf die Kamera zu; die
+// Flare-Speichen (Typ 2) reichen hinter die Kamera. Eine Nahebenen-Klippung zeichnete sie als
+// bildbreite Streifen vor dem Gesicht statt sie wie das Original ganz zu verwerfen.
+static void weapon_flash_call_clip(){
+    SceneCamera camera;camera.perspective=14016;camera.clip_near=2.0f;camera.clip_far=0;
+    NJS_MATRIX view;camera_view_matrix(camera,view);
+    // Muendung 2.2 vor der Kamera (njClipZ near 2), Lauf (+x der Gelenkmatrix) zeigt auf die Kamera.
+    WeaponFlash f;f.flg=0x1001;f.type=2;f.mdlver=0;f.flr_no=3;f.sx=2;
+    const auto toward=[&](Angle ay){NJS_MATRIX m;njUnitMatrix(&m);njRotateY(&m,ay);NJS_POINT3 x{1,0,0},w;njCalcVector(&m,&x,&w);NJS_POINT3 v;njCalcVector(&view,&w,&v);return v.z;};
+    const Angle ay=toward(16384)<toward(-16384)?Angle(16384):Angle(-16384); // Sicht-z faellt = zur Kamera
+    {NJS_POINT3 at{0.8f,0.6f,0},front{0,0,1}; /* seitlich versetzt: die Flaechen liegen nicht durch das Auge */NJS_POINT3 v;njCalcVector(&view,&front,&v); // Welt-z mit Sicht-z > 0
+     const float s=v.z>0?2.2f:-2.2f;njUnitMatrix(&f.matrix);njTranslate(&f.matrix,at.x,at.y,s);njRotateY(&f.matrix,ay);}
+    f.tick();Scene scene;f.append(scene,0);
+    check(!scene.triangles.empty(),"weapon flash fixture drew nothing");
+    std::vector<SceneTriangle> behind,ordinary;
+    for(std::size_t i=0;i<scene.triangles.size();){
+        const auto id=scene.triangles[i].ninja_primitive;
+        check(id!=0&&scene.triangles[i].ninja_screen_reject,"bhDrawWeaponEffect quad without the njDrawTextureSub3D call rule");
+        std::size_t j=i;bool back=false;
+        for(;j<scene.triangles.size()&&scene.triangles[j].ninja_primitive==id;++j)
+            for(const auto& vertex:scene.triangles[j].vertices){NJS_POINT3 p=vertex.position,q;njCalcPoint(&view,&p,&q);back=back||q.z<0;}
+        if(back)for(std::size_t k=i;k<j;++k){behind.push_back(scene.triangles[k]);auto o=scene.triangles[k];o.ninja_primitive=0;o.ninja_screen_reject=false;ordinary.push_back(o);}
+        i=j;}
+    check(!behind.empty(),"test setup: no flare spoke reaches behind the camera");
+    const auto pixels=[&](const std::vector<SceneTriangle>& triangles){
+        Scene s;s.background=0xff000000;s.triangles=triangles;
+        for(unsigned t=0;t<4;++t)s.textures.push_back(SceneTexture{1,1,TexturePixels(std::vector<std::uint32_t>(1,0xffffffffu))});
+        SoftwareRenderer image(64,48);image.set_supersampling(1);image.draw(s,camera);
+        return std::count_if(image.pixels().begin(),image.pixels().end(),[](auto p){return p!=0xff000000u;});};
+    check(pixels(ordinary)>0,"test setup: near-clipped spokes would not reach the image");
+    check(pixels(behind)==0,"weapon-flash spoke with scr.z < 0 still drawn (njDrawTextureSub3D drops the call)");
 }
 
 // effsub1.c:5197-5204 bhEff023: mdlver 0 in sys->ef_pnc, sonst sys->ef_trs. effect.c:886 zeichnet ef_pnc
@@ -2216,12 +2253,95 @@ s.textures[0].pixels.assign(16,0xffff0000);for(auto&tr:s.triangles)tr.punch_thro
 s.textures[0].invalidate_mips();check(s.textures[0].filter_cache->punch_mips.empty(),"explicit invalidation retained Punch chain");draw();check(r.pixels()[16*32+16]==0xffff0000,"explicit invalidation changed colour");
 }
 
+// effsub4.c:1432/2237, effect.c:37 registration. Diagnostic work inputs,
+// fixed original table cells/clocks; not a claim of natural combat progression.
+static void head_burst_effects(){
+    EffectContext c;bool queued=false;std::vector<CollisionWall> walls;
+    set_effect_walls(&walls,0);set_effect_pool_lookup({});take_effect_output();
+    for(unsigned id:{362u,370u,371u,372u,373u})check(supported_effect_sprite(id),"head blood effect dispatch missing");
+    for(unsigned seed=1;seed<9;++seed){
+        recvx_core_random_seed(seed);const int delay=recvx_core_random_next()%3;
+        const float speed=2.0f+effect_detail::effect_random();const auto after=recvx_core_random_next();
+        recvx_core_random_seed(seed);auto s=work(362,4,{2,3,0});s.xn=1;s.yn=2;s.zn=3;s.tex_id=7;
+        auto& r=effect_detail::request_template();r.ax=123;r.ay=456;r.flr_no=-3;
+        check(step_effect_sprite(s,c,&queued),"362 dispatch failed");
+        check(recvx_core_random_next()==after,"362 RNG order/count differs: delay before speed");
+        check(s.tex_id==7&&s.bl_src==8&&s.bl_dst==3&&(s.stflg&0x20)&&s.tv[0].col==0xff808080u,"362 texture/blend/color differs");
+        check(close(s.spd,delay?speed:speed*.97f)&&queued==(delay==0),"362 init fallthrough or random speed differs");
+        for(int k=0;k<delay;++k)step_effect_sprite(s,c,&queued);
+        check(queued&&s.mode0==2&&s.ct2==1&&close(s.px,speed*.97f),"362 delay/motion clock differs");
+        check(close(s.tv[0].u,0)&&close(s.tv[0].v,224.f/255)&&close(s.tv[3].u,31.f/255)&&close(s.sx,.64f),"362 type4 atlas UV/size differs");
+        auto out=take_effect_output();check(out.gaps.empty()&&out.spawns.size()==1,"362 first blood5 spawn count differs");
+        const auto& child=out.spawns[0];check(child.id==372&&child.mdlver==1&&child.scale.x==3&&child.scale.z==0&&child.ay==0&&child.ax==123&&child.flr_no==-3,"362 blood5 template writes/inheritance differ");
+        check(child.has_velocity&&child.velocity.x==-1&&child.velocity.y==0&&child.velocity.z==-3&&child.has_shp_ct&&child.shp_ct==.5f&&child.ao.x==.98f&&child.ao.y==-.03f,"362 blood5 child fields differ");
+        for(int k=1;k<151;++k){s.pxb=s.px;s.pyb=s.py;s.pzb=s.pz;step_effect_sprite(s,c,&queued);}
+        check(s.mode0==3&&s.ct2==151,"362 150-step ballistic lifetime differs");
+        for(int k=0;k<6;++k){step_effect_sprite(s,c,&queued);check(s.flg&&queued,"362 fade released early");}
+        step_effect_sprite(s,c,&queued);check(!s.flg&&!queued,"362 seventh fade pass (alpha 0x1f) must release");
+        take_effect_output();
+    }
+    // 370 types select linked vs detached 371/373; type9 uses original particles.
+    NJS_MATRIX matrix;njUnitMatrix(&matrix);njRotateY(&matrix,16384);matrix[12]=10;matrix[13]=20;matrix[14]=30;
+    const unsigned ids[11]={371,371,371,371,371,371,373,373,373,0,373};
+    const int lm[11]={0,0,0,1,0,1,1,1,0,2,2},wait[11]={4,4,4,4,2,3,4,3,2,3,3};
+    for(unsigned type=0;type<11;++type){
+        EffectWorldHooks hooks;int particles=0;
+        hooks.particle=[&](int kind,unsigned index,int node,NJS_POINT3 off,NJS_POINT3 dir,unsigned color,int typ){
+            check(kind==1&&index==2&&node==12&&off.x==1&&dir.x==1&&color==0xff400000u&&typ==3,"370 type9 particle binding differs");++particles;return 42;};
+        set_effect_world_hooks(std::move(hooks));
+        auto s=work(370,type,{3.5f,3.5f,0});s.flg|=0x80;s.link_kind=1;s.link_index=2;s.lkono=12;s.link_matrix=matrix;
+        s.lox=1;s.loy=2;s.loz=3;s.xn=1;s.yn=2;s.zn=3;s.tex_id=8;s.slot=22;s.ct0=2;s.ct1=3;
+        auto& r=effect_detail::request_template();r.ax=12;r.ay=34;r.flr_no=-2;
+        recvx_core_random_seed(123);const auto initial=recvx_core_random_next();recvx_core_random_seed(123);
+        for(int k=0;k<2;++k){step_effect_sprite(s,c,&queued);check(!queued&&take_effect_output().spawns.empty(),"370 initial delay drew/spawned");}
+        step_effect_sprite(s,c,&queued);auto out=take_effect_output();
+        check(!queued&&out.gaps.empty()&&s.ct2==1&&s.ct0==wait[type],"370 emitter state differs");
+        if(type==9){check(particles==1&&out.spawns.empty()&&recvx_core_random_next()==initial,"370 particle path consumed RNG/spawned sprite");}
+        else{
+            check(out.spawns.size()==1,"370 must emit one child per interval");const auto& child=out.spawns[0];
+            check(child.id==ids[type]&&child.ax==12&&child.ay==34&&child.flr_no==-2&&child.has_shp_ct&&child.has_ao,"370 template/child fields differ");
+            check(child.mdlver==(type==8?3u:(type==6||type==7)?1u:0u)&&child.type==0&&child.scale.x==3.5f,"370 color/type/scale table differs");
+            check(child.link_kind==(lm[type]==0?1:-1)&&child.has_offset==(lm[type]==0),"370 link mode differs");
+            NJS_POINT3 v{1,2,3},p{1,2,3};njCalcVector(&matrix,&v,&v);njCalcPoint(&matrix,&p,&p);
+            check(close(child.velocity.x,lm[type]==1?v.x:1)&&close(child.velocity.z,lm[type]==1?v.z:3),"370 direction transform differs");
+            if(lm[type])check(close(child.position.x,p.x)&&close(child.position.y,p.y),"370 detached origin differs");
+            else check(child.position.x==0&&child.offset.x==1&&child.lkono==12,"370 retained joint offset differs");
+            if(child.id==371)check(child.texture_from_slot==22&&child.tex_id_override==8&&(child.stflg_or&0x20),"370 model texture handoff differs");
+        }
+        int ticks=0;while(s.flg&&ticks++<30){step_effect_sprite(s,c,&queued);take_effect_output();}
+        check(!s.flg&&ticks==2*(wait[type]+1),"370 spawn count/interval/lifetime differs");
+    }
+    set_effect_world_hooks({});
+    // Full eff[512]: 370 still updates template and count, but never consumes rand.
+    EffectSprite occupied;occupied.flg=2;set_effect_pool_lookup([&](int){return &occupied;});
+    auto full=work(370,0);full.ct1=1;recvx_core_random_seed(14);const auto rng=recvx_core_random_next();recvx_core_random_seed(14);
+    step_effect_sprite(full,c,&queued);check(!full.flg&&take_effect_output().spawns.empty()&&recvx_core_random_next()==rng,"370 full pool changed RNG or count");set_effect_pool_lookup({});
+    // Child init is blank; first animation is next pass, then original terminator.
+    for(unsigned id:{371u,372u,373u}){
+        EffectSpawn e;e.id=id;e.mdlver=1;e.scale={2,3,0};e.has_velocity=true;e.velocity={1,2,3};e.has_shp_ct=true;e.shp_ct=.5f;e.has_ao=true;e.ao={.98f,-.03f,0};
+        EffectSprite s;initialize_effect_sprite(s,e);check(s.shp_ct==.5f&&s.aoy==-.03f,"blood child spawn fields lost");
+        if(id==371){s.tex_id=8;s.flg|=0x80;s.lox=10;s.px=100;}
+        step_effect_sprite(s,c,&queued);check(!queued&&s.mode0==1,"blood child init must not draw");
+        step_effect_sprite(s,c,&queued);check(queued&&s.mode0==2&&s.ct1==1,"blood child first active clock differs");
+        check(s.tex_id==(id==371?8:5)&&s.ani_ct==(id==371?0:1)&&s.bl_src==8&&s.bl_dst==3,"blood child texture/blend differs");
+        if(id==371)check(close(s.lox,10.49f)&&s.px==100,"371 must move local offset, not world origin");
+        int active=1;while(s.flg&&active<25){step_effect_sprite(s,c,&queued);++active;}
+        check(!s.flg&&!queued&&active==(id==371?15:id==372?9:11),"blood child finite animation lifetime differs");
+    }
+    // ef_trs (bhEff_SetSprite mode 0) with 8/3: ALPHA register blend, no depth write.
+    {auto s=work(373,0);bool q=false;s.ct3=0;step_effect_sprite(s,c,&q);step_effect_sprite(s,c,&q);check(q&&!s.custom_queued&&!s.punch_queued&&!s.opaque_queued,"373 must use sys->ef_trs");
+     SceneCamera camera;camera.perspective=8192;Scene scene;append_effect_sprite(scene,s,{0,0,-40.0f},{1,1,1},camera,0);
+     check(scene.triangles.size()==2,"blood ef_trs quad absent");
+     for(const auto& t:scene.triangles)check(!t.punch_through&&t.blend==SceneBlend::Ninja&&!t.depth_write,"blood translucency/depth differs");}
+    set_effect_walls(nullptr,0);take_effect_output();
+}
+
 int main(int argc,char** argv){
     try{
         _Make_SinTable();
         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
-        muzzle_weapon229();flame352();effect_call_clip();explosion_punch_through();punch_filter_rgb();punch_lazy_cache();
-        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();
+        muzzle_weapon229();flame352();effect_call_clip();weapon_flash_call_clip();explosion_punch_through();punch_filter_rgb();punch_lazy_cache();
+        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();head_burst_effects();
         if(argc>1){const std::filesystem::path data=argv[1];explosion_punch_world(data);steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);ntx2d_room(data);afterimage_room(data);published_afterimage_models(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}

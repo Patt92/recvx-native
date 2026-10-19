@@ -833,6 +833,12 @@ static int t3_check_side_wall3(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos,
     return left_hit + right_hit;
 }
 
+/* zonzon.c:1321 (exportiert fuer en22.c:1489). */
+int recvx_t3_check_side_wall3(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos, float step, int both)
+{
+    return t3_check_side_wall3(w, pos, step, both);
+}
+
 /* zonzon.c:1302. */
 int recvx_t3_check_side_wall(RECVX_ENEMY_WORK* w, float step, int both)
 {

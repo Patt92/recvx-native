@@ -155,6 +155,8 @@ int  recvx_t3_check_dir_wall3(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos, i
 /* zonzon.c:1302/1309/1321 bhEne_CheckSideWall/2/3: -1 rechts, 1 links, both. */
 int  recvx_t3_check_side_wall(RECVX_ENEMY_WORK* w, float step, int both);
 int  recvx_t3_check_side_wall2(RECVX_ENEMY_WORK* w, float step, int both);
+/* zonzon.c:1321 bhEne_CheckSideWall3(epw, &pos, step, both) — Probe um `pos` (en22.c:1489). */
+int  recvx_t3_check_side_wall3(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos, float step, int both);
 /* zonzon.c:1350 bhEne_SetVibration (0..2 -> Motor 1, Kraft 9/10/11). */
 void recvx_t3_set_vibration(int no);
 /* zonzon.c:1367 bhEne_PlayerSePlay — flg 0x10000 unterdrueckt den Ruf. */

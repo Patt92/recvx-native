@@ -107,7 +107,45 @@ int main(int argc,char** argv){
             check(renderer.pixels()[middle]==later.color,
                   "later post-modifier coplanar primitive rejected by depth test");
         }
-        std::cout<<"PASS: original volume, receiver depth, cancellation and unchanged depth buffer\n";
+        // game.c:427 Spiegel-bhDrawEffect -> bhDrawMdfEffect unter cam.mtx*njMirror (effect.c:1076
+        // njMultiMatrix(NULL, op->mtx) auf der gespiegelten Kameramatrix). Die Passwahl bleibt das
+        // Bildschirmvorzeichen von njCnkCoP3 (ps2_NinjaCnk.c:1684, lCnkModClipFace); njControl3D(0x100)
+        // in game.c:425 traegt kein 0x10000 mehr. Ein gespiegeltes geschlossenes Volumen tauscht so
+        // Vorder- und Rueckseiten und liefert dieselbe (leere) Maske wie ein vorab gespiegeltes
+        // Volumen im Normalpass; ein unter njMirror wieder rechtshaendiges Volumen (M*M*T = T) zeigt
+        // Stufe und Lage der Spiegel-Modifierstufe.
+        {renderer.set_supersampling(1);renderer.set_render_threads(1);
+         auto base=surface(10);base.mirror_enabled=true;base.mirror_matrix={-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+         renderer.draw_view(base,view,32,32,false,{},1,100);const auto plain=renderer.pixels();
+         const std::size_t left=32*64+19,right=32*64+45;
+         check(plain[left]==0xff808080u&&plain[right]==0xff808080u,"mirror diagnostic receiver not rendered at the probes");
+         recvx::SceneShadow right_shadow=shadow;right_shadow.transform={2,0,0,0,0,2,0,0,0,0,2,0,4,0,10,1}; // Bild: Spalten ~42..47
+         auto normal=base;normal.shadows.push_back(right_shadow);
+         renderer.draw_view(normal,view,32,32,false,{},1,100);const auto normal_pixels=renderer.pixels();
+         check(normal_pixels[right]!=plain[right]&&normal_pixels[left]==plain[left],"unmirrored modifier must darken only its own side");
+         // (1) mirror=true mit T == Normalpass mit M*T (beide linkshaendig): dieselbe Maske, nie die rechte Seite.
+         auto mirrored=base;recvx::SceneShadow mt=right_shadow;mt.mirror=true;mirrored.shadows.push_back(mt);
+         renderer.draw_view(mirrored,view,32,32,false,{},1,100);const auto mirrored_pixels=renderer.pixels();
+         auto pre=base;recvx::SceneShadow ps=right_shadow;ps.transform={-2,0,0,0,0,2,0,0,0,0,2,0,-4,0,10,1};pre.shadows.push_back(ps);
+         renderer.draw_view(pre,view,32,32,false,{},1,100);
+         check(mirrored_pixels==renderer.pixels(),"mirror modifier must equal the pre-mirrored volume of the normal pass (cam.mtx*njMirror, face sign from njCnkCoP3)");
+         check(mirrored_pixels[right]==plain[right],"mirror modifier must not touch the unmirrored place");
+         // (2) M*T unter dem Spiegel: wieder rechtshaendig an der Originalstelle -> sichtbar, nur ueber mirror_view.
+         recvx::SceneShadow mmt=ps;mmt.mirror=true;auto back=base;back.shadows.push_back(mmt);
+         renderer.draw_view(back,view,32,32,false,{},1,100);
+         check(renderer.pixels()[right]==normal_pixels[right]&&renderer.pixels()[right]!=plain[right],"mirror modifier stage must project through cam.mtx*njMirror");
+         // Spiegelraum (mirror 2) ist Empfaenger des Spiegel-Modifiers, die Spiegeleffekte (mirror 3) nicht (game.c:417/427).
+         auto order=base;auto room=order.triangles[0];room.mirror=2;room.after_modifiers=true;room.color=0xff606060u;for(auto& v:room.vertices)v.position.z=9.9f; /* knapp vor der Flaeche, noch im Volumen (gespiegelte Kopie: kein bitgleiches GEQUAL) */
+         order.triangles.push_back(room);
+         auto fx=room;fx.mirror=3;fx.after_modifiers=true;fx.color=0xff20a020u;for(auto& v:fx.vertices)v.position.z=9.8f;order.triangles.push_back(fx);
+         order.shadows.push_back(mmt);renderer.draw_view(order,view,32,32,false,{},1,100);
+         check(renderer.pixels()[right]==0xff20a020u,"mirror effect (phase 3) must draw after the mirror modifier (unshadowed)");
+         order.triangles.pop_back();renderer.draw_view(order,view,32,32,false,{},1,100);
+         check(renderer.pixels()[right]!=0xff606060u&&renderer.pixels()[right]!=plain[right],"mirror room (phase 2) must receive the mirror modifier");
+         bool rejected=false;auto bare=normal;bare.mirror_enabled=false;bare.shadows[0].mirror=true;
+         try{renderer.draw_view(bare,view,32,32,false,{},1,100);}catch(const std::runtime_error&){rejected=true;}
+         check(rejected,"mirror modifier without njMirror matrix must be rejected");}
+        std::cout<<"PASS: original volume, receiver depth, cancellation, unchanged depth buffer and mirror-pass modifier stage\n";
         return 0;
     }catch(const std::exception& error){
         std::cerr<<"FAIL: "<<error.what()<<"\n";

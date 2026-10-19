@@ -207,12 +207,11 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
             if(found){hit->atr={atr.flags,atr.type,atr.attributes,std::int32_t(atr.floor),atr.position.x,atr.position.y,atr.position.z,atr.extent.x,atr.extent.y,atr.extent.z,
                 std::uint8_t(atr.parameters[0]),std::uint8_t(atr.parameters[1]),std::uint8_t(atr.parameters[2]),std::uint8_t(atr.parameters[3]),std::uint8_t(atr.id)};hit->id=std::uint32_t(index);}}
         return found;};
-    // bhCheckC2WallN (pwksub.c:2172): Sichtkapsel gegen denselben Satz.
+    // bhCheckC2WallN (pwksub.c:2172): die Kapsel selbst (r 0.1, pwksub.c:259/544,
+    // playpch.c:369, weapon.c:688) gegen denselben Satz, nicht als Strahl.
     engine.c2_wall_n=[&](const RECVX_CB_CAPSULE* cap,unsigned flags)->int{
         if(!world||!cap)return 0;
-        NJS_POINT3 dir{cap->c2.x-cap->c1.x,cap->c2.y-cap->c1.y,cap->c2.z-cap->c1.z};
-        const float length=njUnitVector(&dir);if(length<=0)return 0;
-        return world->combat_wall_distance({cap->c1.x,cap->c1.y,cap->c1.z},dir,length,flags)<length?1:0;};
+        return world->c2_wall_n(*cap,flags);};
     // bhSetGunFire (pwksub.c:2670) fordert ueber bhSetEffectTb die Arbeit aus WpnEffTab[wno][0]
     // an, bhSetYakkyou (pwksub.c:3242) die aus [wno][3] und [wno][2]. flg/id/type/mdlver stammen
     // also aus der Originaltabelle; id 3 ist das Muendungsfeuer (eigener Zeichenweg), alle

@@ -1,5 +1,6 @@
 #pragma once
 #include "scene.h"
+#include <array>
 #include <optional>
 #include <set>
 #include <functional>
@@ -58,6 +59,9 @@ struct EffectSprite {
     // O_WRK.exp0 = &sys->ahtp->flg (effsub1.c:3478 bhEff013): der getroffene Wandsatz als Index
     // in den Wandsatz des Raumbesitzers; -1 = kein Satz.
     int wall_ref=-1;
+    // O_WRK.exp1 = &htP->flg (effsub3.c:501 bhEff301): der ATR-Typ (exp1[1]) des getroffenen Satzes; -1 = NULL,
+    // 256 = Wasserflaeche (:539, nur als Nicht-NULL gelesen).
+    int exp1_wall_type=-1;
     // O_WRK.exp0 as the room procedures use it: the UV table latched at init.
     const void* uv=nullptr;
     // bhSetEffectTb/bhSetEffect fields used by the generated procedures (px..pz must stay contiguous).
@@ -113,7 +117,10 @@ struct EffectSprite {
         bool inherit_blend=false;
         // DrawEff5SnowRect: njCalcVector(NULL, &wind) unter cam.mtx, Drehung
         // atan2(v.y, v.x) + 16384 um Z, danach turn_y um Y; wind ist die Weltrichtung.
-        bool wind_aligned=false;NJS_POINT3 wind{};int turn_y=0;};
+        bool wind_aligned=false;NJS_POINT3 wind{};int turn_y=0;
+        // bhEff_Draw3DSprite (effsub2.c:4644): Billboard dreht im Spiegelpass um mr_pl. Andere
+        // ef_fnc-Billboards (njUnitRotPortion ohne diesen Zweig) tun das nicht.
+        bool mirror_plane_turn=false;};
     std::shared_ptr<std::array<unsigned,312>> extra;std::vector<Quad> quads;
     // njDrawLine3D-Aufrufe einer eigenen Zeichenfunktion (effsub1.c bhEff106): Weltlinien dieses Passes.
     std::vector<SceneLine> lines;
@@ -157,6 +164,11 @@ struct EffectSprite {
     std::shared_ptr<EffectCameraShake30a> shake30a;std::shared_ptr<EffectCallback349> callback349;
     std::shared_ptr<EffectBlood309> blood309;std::shared_ptr<EffectBlood30b> blood30b;
     std::shared_ptr<EffectClawPlane307> plane307;std::shared_ptr<EffectClaw30c> claw30c;
+    // stflg 0x20 txp[0] = mlwP->texP eines Gegnerwerks fuer ef_fnc-Vierecke (bhEff_Sub354,
+    // en22.c:2638): Kategorie 0x80000000|Raumindex wie plane307; 0 = nicht gesetzt.
+    unsigned txp_category=0;
+    // O_WRK.mlwP = &ene[model_enemy].mdl[model_mdl] (en22.c:2683) fuer bhEff_ModelDraw (bhEff_Sub364).
+    int model_enemy=-1;unsigned model_mdl=0;
     // ANM_WORK von bhEff303 (im Werk bei oP + 1028, siehe die Vorwaertsdeklaration oben).
     std::shared_ptr<EffectRapAnm> rap_anm;
     bool flame_compact_uv=false; // bhEff009 latches its UV bank at initialization.
@@ -170,9 +182,12 @@ struct EffectSprite {
 // gm_flg: bhSetRoom (room.c:471) clears bit 0 on every room load and no other
 // original game source writes it, so the bhEff125 gate stays open after a load.
 struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,player_mdflg=0,cb_flg=0,sp_flg=8,yk_ct=0,gm_flg=0;
-    // cam.ax/ay/az des Bildes, in dem bhControlEffect laeuft (game.c:50 vor bhControlCamera:58,
-    // also die Lage des Vorbildes); camera_ready false = cam.mtx noch Einheitsmatrix (camera.c:18).
+    // Drehanteil von cam.mtx aus bhControlCamera des Vorbildes (game.c:50 vor :58, RoomWorld::control_camera);
+    // camera_ready false = im Raum noch kein bhControlCamera, cam.mtx Einheitsmatrix (room.c:33, camera.c:18).
     std::array<std::int32_t,3> camera_angles{};bool camera_ready=false;
+    // Der Raumbesitzer fuehrt die schreibenden ef_fnc-Zeichenteile (bhEff022/024/025/027/100/107)
+    // selbst je bhDrawEffect aus (draw_effect_sprite_work); die Steuerung reiht dann nur ein.
+    bool defer_custom_draw=false;
     // sys->stg_no/rom_no (bhEff113: Raum 1-09 hat eine andere Partikelzahl).
     unsigned stage_no=0,room_no=0;
     // rom->ene_n: Zahl der Raumgegner (bhEff236 rechnet ax % ene_n).
@@ -189,11 +204,16 @@ struct EffectContext {unsigned st_flg=0,pt_flg=1,player_flg=0,player_stflg=0,pla
     // cam.wpx/wpy/wpz (Auge) und cam.vx/vy/vz (Blickrichtung) des Vorbildes (camera.c:45-56).
     NJS_POINT3 camera_position{},camera_view{};
     // cam.flg 0x8 und sys->fil_no/fil_rt (cut.c:412-421) fuer bhEffFil (effsub1.c:28).
-    bool camera_filter=false;int filter_no=0,filter_rate=0;};
+    bool camera_filter=false;int filter_no=0,filter_rate=0;
+    // cam.mtx des Vorbildes (camera.c:28-37) als scene.cpp camera_view_matrix (= diag(1,-1,-1) * cam.mtx),
+    // fuer bhCheckCamWall2D (effsub3.c:1611); camera_matrix_ready false = vor dem ersten bhControlCamera.
+    std::array<float,16> camera_matrix{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};bool camera_matrix_ready=false;
+    // cam.flg 0x10 = ci->flg 0x200 des Schnitts (cut.c:424/517): keine Blutflecken auf der Linse (bhEff301 :463).
+    bool camera_cut_wall=false;};
 // sys->winds/windr (mit den Vorbildwerten windsb/windrb) und sys->thunder: Wetterzustand,
 // den nur die Effektprozeduren schreiben (effsub1.c bhEff102/105) und bhEff106 bzw.
 // bhDrawThunder (effect.c:1775, nur Raum 1-09) lesen. Ein Besitzer, keine Kopie.
-struct EffectWeather {float winds=0,windsb=0;int windr=0,windrb=0;float thunder=0;};
+struct EffectWeather {float winds=0,windsb=0;int windr=0,windrb=0;unsigned thunder=0;};
 EffectWeather& effect_weather();
 // sys->gas_py: Hoehe der Gaswand. Nur bhEff127 schreibt und liest sie
 // (effsub1.c:8734 Null beim Start, :8818 Anstieg, :8778/:8784/:8792/:8823 Leser).
@@ -222,6 +242,8 @@ void set_effect_context(const EffectContext& context);
 void set_effect_walls(const std::vector<CollisionWall>* walls,float room_height);
 // bhCheckWater(&px): first containing water area; top receives py + h.
 void set_effect_water(std::function<bool(NJS_POINT3,float&)> probe);
+// bhCheckWater(&px) mit dem Satz: top = py + h und h (effsub3.c:541 bhEff301 streut 0.5 * h * rand).
+void set_effect_water_area(std::function<bool(NJS_POINT3,float&,float&)> probe);
 void set_effect_ground(class GroundCollision* ground,const std::vector<CollisionWall>* water_room,const std::vector<CollisionWall>* water_mobile);
 void set_effect_link_matrix(unsigned node,const float* matrix);
 // effsub1.c:4218 bhEff017: the effect watches the EN00 work it was spawned
@@ -259,6 +281,9 @@ struct EffectWorldHooks {
     // plp->watr (player.c:1758: c1 = owP[4], c2 = owP[0], r 2.5) fuer npCollisionCheckCC
     // der Effektprozeduren (effsub2.c:1536 bhEff_E03_Acid). false = kein Spielerbaum.
     std::function<bool(RECVX_ENEMY_CAPSULE&)> player_watr;
+    // zonzon.c:1376 bhEne_HitCheckParts(plp, pos): naechstes Spielergelenk zu pos wird plp->djnt_no (mit dv/dp);
+    // Rueckgabe djnt_no, -1 = kein Spielerbaum (effsub4.c:496 bhEff_Sub350).
+    std::function<int(NJS_POINT3)> player_hit_check_parts;
     // RequestEnemySe(GetLocalEneNo(op->exp0), pos, se) (en15.c:2659): die Stimme des erzeugenden
     // Gegnerwerks (RECVX_ENEMY_WORK*).
     std::function<void(void* enemy_work,NJS_POINT3 pos,int se)> enemy_se;
@@ -287,6 +312,8 @@ struct EffectWorldHooks {
     std::function<bool(unsigned enemy,unsigned index,const std::shared_ptr<const SceneTexture>& texaddr)> enemy_texaddr_set;
     // effsub6.c:41 &sys->ef_tlist.textures[sys->ef_tn[group]]: das erste Bild der Effektgruppe.
     std::function<std::shared_ptr<const SceneTexture>(unsigned group)> effect_texaddr;
+    // effsub4.c:2298/2302 bhEff370 type 9 -> bhSetEffParticle, nicht Mk2 (andere Farbfolge).
+    std::function<int(int kind,unsigned index,int node,NJS_POINT3 offset,NJS_POINT3 direction,unsigned color,int type)> particle;
 };
 void set_effect_world_hooks(EffectWorldHooks hooks);
 // effsub3.c:1008 bhSetEffParticleMk2(lkwkp, lnk_no, off, dir, src, dst, typ) aus einer Effektprozedur (Partikelbesitzer des Raums).
@@ -314,7 +341,8 @@ void set_explosion_effect(NJS_POINT3 position,NJS_POINT3 view);
 // Texturgruppe -> {erste Szenentextur, Bildzahl}.
 // fnc_blend: das Blendpaar, das vor diesem ef_fnc-Eintrag gilt; der Aufruf schreibt das
 // Paar zurueck, das danach gilt (effect.c:929, Liste in Platzreihenfolge).
-void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,std::pair<unsigned,unsigned>>& texture_bases,std::pair<unsigned,unsigned>* fnc_blend=nullptr);
+// mirror: zweiter bhDrawEffect unter cam.mtx * njMirror (game.c:81-87, Scene::mirror_matrix).
+void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,std::pair<unsigned,unsigned>>& texture_bases,std::pair<unsigned,unsigned>* fnc_blend=nullptr,bool mirror=false);
 // bhControlPlayer lighter (wpnr_no 1): WpnEffTab[1][0] and lgttab[1].
 struct LighterSprite {EffectSprite sprite;NJS_POINT3 scale;};
 LighterSprite lighter_sprite();
@@ -340,7 +368,10 @@ struct EffectSpawn {unsigned flg=1,id=0,type=0;int flr_no=0;unsigned mdlver=0;NJ
     int slot_sink_work=-1,slot_sink_index=-1;
     // en15.c:2470-2474 _bhEne_SetPoison2: eff[eno].stflg |= 0x20, txp[0] = op->txp[0] (die Textur
     // des Elternsatzes `texture_from_slot`) und exp0 = op->exp0 (das erzeugende Gegnerwerk).
-    unsigned stflg_or=0;int texture_from_slot=-1;void* owner_work=nullptr;};
+    unsigned stflg_or=0;int texture_from_slot=-1;void* owner_work=nullptr;
+    // effsub4.c:305..314 / :2360..2369: Nachtraege am Kind, keine sys->ef-Felder.
+    bool has_shp_ct=false;float shp_ct=0;int ct3=0;
+};
 struct BombRequest {NJS_POINT3 position;float radius;int damage_max,damage_min;}; // bhCheckBombAtari
 // CallYakkyouSe(&op->px, SeNo): the owner resolves the arms bank and plays it on SE slot 10.
 struct EffectRoomSound {NJS_POINT3 position;int sound;};
@@ -378,8 +409,17 @@ std::vector<std::pair<unsigned,unsigned>> common_effect_categories(); // {first 
 bool step_effect_sprite(EffectSprite& sprite,bool* queued=nullptr);
 // Per-pass view of authoritative native flags, not a stored sys/player copy.
 bool step_effect_sprite(EffectSprite& sprite,const EffectContext& context,bool* queued=nullptr);
+// effect.c:929: Zeichenteil der schreibenden ef_fnc-Routinen eines Satzes (false = keine solche
+// Routine oder kein Zeichenpass). stateful_effect_draw: die Kennungen dieser Routinen.
+bool draw_effect_sprite_work(EffectSprite& sprite,const EffectContext& context);
+bool stateful_effect_draw(unsigned id);
 // light.c types 1..6: working RGB is sampled before advancing the clock.
 void step_light_color(unsigned type,unsigned speed,unsigned& clock,NJS_POINT3 color,NJS_POINT3& working,bool running);
+// light.c:486-657 Typen 7..12 im sp_flg-0x80-Zweig von bhControlLight. LGT_WORK-Felder:
+// mode (0x74), ct0 (0x78), spc/dif/amb (0x40..0x48, Flackerfarbe), wax/way/waz (0xc8..0xd0).
+// Rueckgabe false: kein Typ 7..12, Aufrufer behaelt seinen Pfad. thunder ist sys->thunder.
+struct LightTypeWork {unsigned mode=0,clock=0;NJS_POINT3 flicker{};std::array<std::int32_t,3> angles{};};
+bool step_light_type(unsigned type,int speed,NJS_POINT3 color,unsigned thunder,LightTypeWork& work,NJS_POINT3& working_color,NJS_VECTOR& working_direction);
 bool supported_effect_sprite(unsigned id);
 // effsub3.c:2401 bhSetEffGunSpark -> bhSetRapEff(308): fuellt einen frisch belegten eff-Satz.
 bool start_gun_spark(EffectSprite& sprite,NJS_POINT3 pos,NJS_POINT3 dir,std::uint32_t src_col,std::uint32_t dst_col,int typ_no);
@@ -393,7 +433,15 @@ int original_effect_slot(const std::vector<unsigned>& flags);
 
 // stflg_out nimmt das Rueckseitenbit 0x10 auf, das der Originalzeichenpfad in
 // den Arbeitssatz zurueckschreibt (effect.c:1391/1532/1668); nullptr verwirft es.
-void append_effect_sprite(Scene& scene,const EffectSprite& sprite,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix=nullptr,unsigned* stflg_out=nullptr);
+// mirror: Aufruf aus dem Spiegelpass (game.c:427): Billboardbasis aus cam.mtx * njMirror, Tor
+// gm_flg 0x4000 + mdflg 0x40, Dreiecke mit SceneTriangle::mirror 3. mirror_plane_turn: der
+// mr_pl-Zweig effect.c:1225/1360/1501/1634 bzw. effsub2.c:4644 (nicht njPtclDrawSprite).
+void append_effect_sprite(Scene& scene,const EffectSprite& sprite,NJS_POINT3 position,NJS_POINT3 scale,const SceneCamera& camera,unsigned texture,const float* linked_matrix=nullptr,unsigned* stflg_out=nullptr,bool mirror=false,bool mirror_plane_turn=true);
+// Drehanteil von cam.mtx * njMirror im Spiegelpass, invertiert und ohne Verschiebung: die Basis,
+// die njUnitRotPortion unter dem gespiegelten cam.mtx in Weltkoordinaten bedeutet (links vor
+// der ungespiegelten Billboardbasis). false ohne gueltige Spiegelmatrix.
+bool mirror_billboard_prefix(const Scene& scene,NJS_MATRIX& out);
 // effect.c:1378-1390 Rueckseitentest flg 0x20000 (njGetPlaneNormal2 der projizierten Ecken 0..2).
-bool backface_culled(const std::array<SceneVertex,4>& world,const SceneCamera& camera);
+// mirror_scene != nullptr: unter cam.mtx * mirror_scene->mirror_matrix (Spiegelpass).
+bool backface_culled(const std::array<SceneVertex,4>& world,const SceneCamera& camera,const Scene* mirror_scene=nullptr);
 }

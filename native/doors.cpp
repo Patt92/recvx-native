@@ -13,7 +13,7 @@ namespace recvx {
 std::string DoorRequest::room_name()const{
     return RoomIdentity{stage,room,room_case}.name();
 }
-void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem::path& mods,const DoorRequest& request){
+void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem::path& mods,const DoorRequest& request,bool install_back_color){
     if(active_)throw std::runtime_error("door transition already active");
     // bhSysCallDoordemo mode 0: attr 0x80000000 or type 255 skips the door demo (mode 10, no MRY read).
     direct_=(request.attribute&0x80000000u)||request.type==255;
@@ -68,7 +68,7 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     // reading from the MRY partition when its case runs ViewProc4.
     clip_case_=recvx_door_clip(int(request.type),RECVX_DOOR_MRY_PARTITION,int(types[1]),&clip_near_,&clip_far_)!=0;
     // bhSetDoor (door.c:243) after njClipZ/njSetAspect, like bhSysCallDoordemo mode 2 before it (system.c:982).
-    set_back_color(0);
+    if(install_back_color)set_back_color(0);
     if(request.attribute&1)core_.status|=0x4000;if(request.attribute&4)core_.status|=0x4800;if(request.attribute&16)core_.status|=0xa000;if(request.attribute&8)core_.status|=0x1000;
     if(count_<5)core_.status&=~0x3000;
     if(request.attribute&2){core_.status^=0xc00;if(count_>=5)core_.status^=0x2000;else core_.status&=~0x2000;}

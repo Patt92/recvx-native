@@ -43,10 +43,17 @@ void emit(Scene& scene,NJS_MATRIX& matrix,const Quad& points,const UV& uv,
     color_blending_mode(0,source);
     color_blending_mode(1,destination);
     const auto register_=color_blending_alpha();
+    // Each quad is one njDrawTexture3DEx call (effsub1.c:1419-1648, 1789/1790), i.e.
+    // njDrawTextureSub3D (ps2_NaDraw.c:302): a vertex with scr.z < 0 ends the whole
+    // call (:327), a screen side shared by all vertices drops it (cflag, :337/:347),
+    // and Ps2AddPrim3D (ps2_dummy.c:486) gives a strip triangle with an out-of-range
+    // vertex ADC. There is no njClipZ near clipping on this path; the renderer
+    // applies exactly that rule to triangles of one SceneTriangle::ninja_primitive.
+    const std::uint32_t call=std::uint32_t(scene.triangles.size()+1);
     for (const auto& triangle:order) {
         SceneTriangle out;out.texture=texture;out.textured=true;out.camera_mask=false;
         out.color=color;out.world_lit=true;out.depth_write=false;out.blend=SceneBlend::Ninja;
-        out.blend_register=register_;
+        out.blend_register=register_;out.ninja_primitive=call;out.ninja_screen_reject=true;
         for (unsigned i=0;i<3;++i) {
             const unsigned n=triangle[i];auto point=points[n];njCalcPoint(&matrix,&point,&point);
             const bool right=bool(n&1)^reverse;

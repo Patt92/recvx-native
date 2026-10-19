@@ -20,6 +20,7 @@
 #include "enemies/en03_lib.h"
 #include "enemies/en15.h"
 #include "combat_geometry.h"
+#include "geometry_line.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -2494,7 +2495,7 @@ void step_eff105(EffectSprite& s,const EffectContext&,bool&){
     }
     if(s.mode0!=0){
         s.ct0-=1536;if(s.ct0<0)s.ct0=0;
-        w.thunder=std::fabs(255.0f*njSin(s.ct0));
+        w.thunder=unsigned(std::fabs(255.0f*njSin(s.ct0))); // types.h:740, SLUS 0x22fa5c fptoui
     }
 }
 // ======================= Gruppe 4: Prozeduren mit eigener Zeichenfunktion =======================
@@ -2503,13 +2504,19 @@ void step_eff105(EffectSprite& s,const EffectContext&,bool&){
 // EffectSprite::quads/lines; der Raumbesitzer uebernimmt sie, solange der Satz gezeichnet wird.
 //
 // Reihenfolge: das Original fuehrt op->func erst in bhDrawEffect aus (effect.c:929), also
-// erst nach bhControlEffect und nur, wenn der Zeichenpass ueberhaupt laeuft
-// (game.c:338/426: sys->pt_flg & 0x10). Die Zeichenfunktionen von bhEff022/024/025/027/100/107
-// schreiben dabei auch Zustand (Spurzeile, Bildzaehler). Dieser Port fuehrt den Zeichenteil
-// deshalb im selben Pass aus, aber hinter demselben Tor `drawing(c)`; ohne Zeichenpass
-// bleibt der Zustand wie im Original stehen. Mehrfachdurchlaeufe des Originals je Bild
-// (Spiegelpass, game.c:340/348) hat der Host nicht.
+// nach bhControlEffect und nur, wenn der Zeichenpass laeuft (game.c:339/347: sys->pt_flg & 0x10).
+// Die Zeichenfunktionen von bhEff022/024/025/027/100/107 schreiben dabei Zustand (Spurzeile,
+// Bildzaehler, Tropfenlage, rand()). Unter sys->st_flg 0x100 laeuft bhDrawEffect ein zweites Mal
+// (game.c:87 -> :427), dann schreiben sie ein zweites Mal. Der Raumbesitzer setzt deshalb
+// EffectContext::defer_custom_draw und ruft den Zeichenteil je wirklichem Zeichenaufruf ueber
+// draw_effect_sprite_work; direkte Prozeduraufrufe ohne Besitzer behalten den alten Ablauf.
 bool drawing(const EffectContext& c){return (c.pt_flg&0x10u)!=0;}
+void draw_eff100(EffectSprite&,const EffectContext&);
+void draw_eff107(EffectSprite&,const EffectContext&);
+void draw_eff022(EffectSprite&,const EffectContext&);
+void draw_eff024(EffectSprite&,const EffectContext&);
+void draw_eff025(EffectSprite&,const EffectContext&);
+void draw_eff027(EffectSprite&,const EffectContext&);
 
 // ER_WORK (effsub1.h): ein Regentropfen im Hilfsarbeitssatz.
 struct RainRow {float px,py,pz;short ax,ay;};
@@ -2597,6 +2604,10 @@ void step_eff100(EffectSprite& s,const EffectContext& c,bool&){
         s.mode0=1;return;
     }
     queue_custom(s);
+    if(!c.defer_custom_draw)draw_eff100(s,c);
+}
+// Zeichenteil (op->func) von bhEff100; laeuft je bhDrawEffect-Aufruf.
+void draw_eff100(EffectSprite& s,const EffectContext& c){
     if(!drawing(c))return;
     const auto& w=effect_weather();
     auto* rows=extra_rows<RainRow>(s,"bhEff100");
@@ -2645,16 +2656,20 @@ void step_eff107(EffectSprite& s,const EffectContext& c,bool&){
     queue_custom(s);
     // bhDraw107 (effsub1.c:6326) setzt 8/10 und stellt nicht zurueck.
     s.fnc_exit_src=8;s.fnc_exit_dst=10;
+    if(!c.defer_custom_draw)draw_eff107(s,c);
+}
+// Zeichenteil (op->func) von bhEff107; laeuft je bhDrawEffect-Aufruf.
+void draw_eff107(EffectSprite& s,const EffectContext& c){
     if(!drawing(c))return;
     auto* rows=extra_rows<RainRow>(s,"bhEff107");
     for(int i=0;i<8;++i){
         auto& r=rows[i];
-        // Das Original liest uvinfo[ay] vor dem Vorschub; gezeichnet wird nur ay < 5,
-        // deshalb ist nur diese Zeile von Belang.
-        const bool visible=r.ay<5&&r.ax!=0;
-        const EffectUv uv=r.ay<5?eff107_uv[r.ay]:EffectUv{};
+        // effsub1.c:6337 liest uvinfo[ay] VOR dem Vorschub (:6351-6354), :6356 prueft ay < 5
+        // DANACH. Ein zweiter bhDrawEffect im selben Bild (Spiegelpass) schiebt ay erneut vor.
+        // uvinfo[5] ist der Abschluss (-1); eine Zeile ab ay 5 wird nie gezeichnet.
+        const EffectUv uv=(r.ay>=0&&r.ay<5)?eff107_uv[r.ay]:EffectUv{};
         if(c.sp_flg&8u)++r.ay;
-        if(!visible)continue;
+        if(!(r.ay<5)||r.ax==0)continue;
         std::array<EffectSprite::Vertex,4> v{};
         v[0]={-0.7f,-1.4f,0};v[1]={0.7f,-1.4f,0};v[2]={-0.7f,0,0};v[3]={0.7f,0,0};
         for(auto& p:v)p.col=0x80808080u;
@@ -2686,6 +2701,10 @@ void step_eff022(EffectSprite& s,const EffectContext& c,bool&){
         submit_template(0,&offset);
     }
     queue_custom(s);
+    if(!c.defer_custom_draw)draw_eff022(s,c);
+}
+// Zeichenteil (op->func) von bhEff022; laeuft je bhDrawEffect-Aufruf.
+void draw_eff022(EffectSprite& s,const EffectContext& c){
     if(!drawing(c))return;
     auto* rows=extra_rows<TrailRow>(s,"bhEff022");
     if(c.sp_flg&8u){
@@ -2744,6 +2763,10 @@ void step_eff024(EffectSprite& s,const EffectContext& c,bool&){
         submit_template(0);
     }
     queue_custom(s);
+    if(!c.defer_custom_draw)draw_eff024(s,c);
+}
+// Zeichenteil (op->func) von bhEff024; laeuft je bhDrawEffect-Aufruf.
+void draw_eff024(EffectSprite& s,const EffectContext& c){
     if(!drawing(c))return;
     auto* rows=extra_rows<TrailRow>(s,"bhEff024");
     if(s.ct0-1<32){
@@ -2818,6 +2841,10 @@ void step_eff025(EffectSprite& s,const EffectContext& c,bool&){
     if(s.ct0<6)return;
     if(s.ct0>14){s.flg=0;release_extra_work(s);return;}
     queue_custom(s);
+    if(!c.defer_custom_draw)draw_eff025(s,c);
+}
+// Zeichenteil (op->func) von bhEff025; laeuft je bhDrawEffect-Aufruf.
+void draw_eff025(EffectSprite& s,const EffectContext& c){
     if(!drawing(c))return;
     spark_rows_draw(s,c,extra_rows<SparkRow>(s,"bhEff025"),8,0.0f);
 }
@@ -2858,6 +2885,10 @@ void step_eff027(EffectSprite& s,const EffectContext& c,bool&){
     }
     if(s.ct0>8){s.flg=0;release_extra_work(s);return;}
     queue_custom(s);
+    if(!c.defer_custom_draw)draw_eff027(s,c);
+}
+// Zeichenteil (op->func) von bhEff027; laeuft je bhDrawEffect-Aufruf.
+void draw_eff027(EffectSprite& s,const EffectContext& c){
     if(!drawing(c))return;
     spark_rows_draw(s,c,extra_rows<SparkRow>(s,"bhEff027"),16,0.1f);
 }
@@ -3866,10 +3897,12 @@ void draw_3d_sprite(EffectSprite& out,const EffectSprite& s,unsigned group,unsig
     const bool point=(s.flg&0x20000000u)!=0;
     std::array<EffectSprite::Vertex,4> v=s.tv;
     if(s.flg&0x100000u){
-        if(c.gm_flg&0x4000u){report_gap("bhEff_Draw3DSprite: Spiegelpfad gm_flg 0x4000 (sys->mr_pl)");return;}
         NJS_MATRIX r;njUnitMatrix(&r);njRotateZ(&r,s.az);
         for(auto& p:v){NJS_POINT3 q{p.x*s.sx,p.y*s.sy,p.z*s.sz};njCalcVector(&r,&q,&q);p.x=q.x;p.y=q.y;p.z=q.z;}
         push_billboard(out,{m[12],m[13],m[14]},v,group,frame,src,dst,point);
+        // effsub2.c:4644-4655: unter gm_flg 0x4000 nach njRotateZ(az) njRotateY/X(32768) je
+        // mr_pl.vx/vy. Der Zeichenpass entscheidet (append_effect_sprite), nicht die Steuerung.
+        out.quads.back().mirror_plane_turn=true;
     }else{
         njScale(&m,s.sx,s.sy,s.sz);push_world_quad(out,m,v,group,frame,src,dst,true,false);out.quads.back().point_filter=point;
     }
@@ -4765,6 +4798,560 @@ void step_e00_mince(EffectSprite& s,const EffectContext&,bool& queued){
     quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/0.0625f;s.sy=(s.syb*uv.ys)/0.0625f;
     queued=true;
 }
+// effsub4.c:3142/3177 bhEff_SetSprite[Anime]. UV_WORK is in texels,
+// unlike the normalized effsub0 tables. The timer advances before submission.
+template<std::size_t A,std::size_t U>
+void blood_sprite_anime(EffectSprite& s,const short (&anim)[A][2],const EffectUv (&uv)[U],bool& queued){
+    if(s.ct1<0||s.ct1>=int(A)){report_gap("bhEff blood sprite: animation cursor outside table");s.flg=0;return;}
+    if(anim[s.ct1][0]==-1){s.flg=0;return;}
+    if(anim[s.ct1][0]==-2)s.ct1=anim[s.ct1][1];
+    const int pattern=anim[s.ct1][0],timer=anim[s.ct1][1];
+    if(++s.ct0==timer){s.ct0=0;if(s.spd!=0)++s.ct1;}
+    if(pattern>=100)return;
+    if(pattern<0||pattern>=int(U)){report_gap("bhEff blood sprite: UV cursor outside table");s.flg=0;return;}
+    const auto& r=uv[pattern];
+    s.sx=s.sxb*(r.xs/100.0f);s.sy=s.syb*(r.ys/100.0f);
+    s.tv[0].u=s.tv[2].u=r.u/255.0f;s.tv[0].v=s.tv[1].v=r.v/255.0f;
+    s.tv[1].u=s.tv[3].u=((r.u+r.xs)-1.0f)/255.0f;
+    s.tv[2].v=s.tv[3].v=((r.v+r.ys)-1.0f)/255.0f;
+    queued=s.flg!=0;
+}
+// effsub4.c:279 bhEff_SetBlood5. Only these EF_WORK fields are written;
+// angles/floor not mentioned here retain the last writer of the one sys->ef.
+void blood5(const EffectSprite& s){
+    auto& r=request_template();r.id=372;r.flg=1;r.scale={1.0f+s.sxb,1.0f+s.sxb,0};
+    r.position={s.px,s.py,s.pz};r.ay=0;r.type=0;r.mdlver=s.mode1<4?0:1;
+    submit_template(0);
+    auto& child=last_request();child.has_velocity=true;child.velocity={-s.xn,0,-s.zn};
+    child.ct3=0;child.has_shp_ct=true;child.shp_ct=0.5f;child.has_ao=true;child.ao={0.98f,-0.03f,0};
+}
+// effsub4.c:1432..1663 bhEff_Sub362. Owns no custom draw function: ef_trs.
+void step_eff362(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0:
+        quad_color(s,0xff808080u);s.bl_src=8;s.bl_dst=3;s.flg|=0x4180000u;s.stflg|=0x20u;
+        s.ct0=s.ct1=s.ct2=0;
+        // ELF 0x24EE04 then 0x24EE38: delay first, speed second (even while waiting).
+        s.ct3=recvx_core_random_next()%3;s.frm_no=0;s.spd=1.0f;
+        s.mode1=s.type;s.mode2=0;s.spd=2.0f+effect_random();++s.mode0;
+        [[fallthrough]];
+    case 1:
+        if(--s.ct3>=0)break;
+        s.ct3=0;s.mode2=1;++s.mode0;
+        [[fallthrough]];
+    case 2:{
+        s.spd*=0.97f;s.px+=s.xn*s.spd;s.py+=(s.yn*s.spd)-(0.05f*s.ct2);s.pz+=s.zn*s.spd;
+        if(++s.ct2>150){++s.mode0;break;}
+        NJS_POINT3 end{s.px,s.py-0.5f,s.pz},normal{};
+        if(collision_line({s.pxb,s.pyb-0.5f,s.pzb},end,normal,0x4400u,-1,"bhEff362: bhCollisionCheckLine2")){
+            s.px=end.x;s.py=0.5f+end.y;s.pz=end.z;njUnitVector(&normal);
+            if(normal.y>0.9f||s.ct3>3){s.xn=s.yn=s.zn=0;s.frm_no=0;++s.mode0;break;}
+            ++s.ct3;s.xn=s.zn=0;
+        }
+        if(s.frm_no%3==0)blood5(s);
+        ++s.frm_no;break;
+    }
+    case 3:
+        s.tv[0].col+=0xe0000000u;
+        if((s.tv[0].col&0xff000000u)<0x20000000u)s.flg=0;
+        else{
+            quad_color(s,s.tv[0].col);s.sxb*=0.9f;s.syb*=0.9f;
+            if(s.frm_no%3==0)blood5(s);
+            ++s.frm_no;
+        }
+        break;
+    default:break;
+    }
+    if(s.mode2){
+        if(s.mode1>=5){report_gap("bhEff362: type outside anim_tbl[5]");s.flg=0;return;}
+        blood_sprite_anime(s,eff362_anim[s.mode1],eff362_uv,queued);
+    }
+}
+// effsub3.c:404..808 bhEff301: der Blutfleck aus zonzon1.c:301 bhEne_SetBloodstain (viermal je Treffer,
+// type = Eff301Prm-Zeile, mdlver = BloodType-Farbe, ax/ay aus der Trefferrichtung). Fall 0 streut die
+// Richtung (ang_rand), schiesst vtx_range weit: mit mdlver 0 zuerst gegen die Kameralinse
+// (bhCheckCamWall2D, Schirmlage in aox/aoy, Abstand in spd -> Fall 24/25 als ef_trs2d), sonst gegen die
+// Waende (bhCollisionCheckLine2 0x4400; ATR flg 0x10 oder kein Treffer: Ende). Fall 1 wartet ct1 Takte,
+// setzt die Lage 0.01 + 0.001*bl_ct vor den Satz und verzweigt: Decke/Wand ohne Normale y (Fall 8),
+// Typ-6-Satz (16), Wasser (12, bhCheckWater), sonst Boden (4); 5/9/13/17 wachsen um 1.5 bis shp_ct,
+// 6/10/14 blassen ueber ct3 (die Eckfarbe) aus. Zeichnung bhDrawTrsEffect3D mit Tex5uv[ct2] (tex_id 5).
+struct Eff301Prm {std::uint32_t color;float ang_rand,vtx_range;};
+constexpr Eff301Prm eff301_prm[7]={{0xFFC0C0C0u,30.0f,90.0f},{0xFFC0C0C0u,30.0f,90.0f},{0xFFC0C0C0u,30.0f,60.0f},{0xFFC0C0C0u,50.0f,60.0f},
+    {0xFFC0C0C0u,50.0f,30.0f},{0xFFC0C0C0u,50.0f,30.0f},{0xFFC0C0C0u,50.0f,270.0f}};
+constexpr unsigned char eff301_anm[4][2]={{3,6},{4,7},{5,8},{3,6}};
+// effsub3.c:53 Tex5uv (normiert, Gruppe 5).
+struct Eff301Uv {float u,v,xs,ys;};
+constexpr Eff301Uv eff301_tex5uv[9]={{0.09375f,0.15625f,0.125f,0.125f},{0.46875f,0.0f,0.15625f,0.15625f},{0.375f,0.15625f,0.15625f,0.15625f},
+    {0.0f,0.0f,0.15625f,0.15625f},{0.0f,0.15625f,0.09375f,0.09375f},{0.21875f,0.15625f,0.15625f,0.15625f},{0.65625f,0.84375f,0.125f,0.15625f},
+    {0.8125f,0.59375f,0.1875f,0.1875f},{0.78125f,0.78125f,0.21875f,0.21875f}};
+// effsub3.c:1611 bhCheckCamWall2D: Strahl src+t*vct in cam.mtx, Ebene z = 0 (Normale +z), nur bei Annaeherung
+// (Richtung gegen die Normale) und innerhalb rng_x/rng_y; rtn = (Schirm-x, Schirm-y, Abstand).
+// camera_matrix ist diag(1,-1,-1) * cam.mtx (scene.cpp), die Rechnung laeuft im Original-Kameraraum.
+static bool eff301_cam_wall_2d(const EffectContext& c,NJS_POINT3 src,NJS_POINT3 vct,NJS_POINT3& rtn,float rng_x,float rng_y){
+    NJS_MATRIX m;std::copy_n(c.camera_matrix.begin(),16,m);
+    NJS_POINT3 lp,lv;njCalcPoint(&m,&src,&lp);njCalcVector(&m,&vct,&lv);
+    lp.y=-lp.y;lp.z=-lp.z;lv.y=-lv.y;lv.z=-lv.z;
+    const NJS_POINT3 pln_p{0,0,0},pln_n{0,0,1.0f};
+    if(!(line_geometry::dot(pln_n,lv)<0.0f))return false;
+    NJS_POINT3 hit;if(line_geometry::line_plane(lp,lv,pln_p,pln_n,hit)!=0.0f)return false; // njDistanceL2PL != 0: parallel
+    if(!((-rng_x<hit.x&&hit.x<rng_x)&&(-rng_y<hit.y&&hit.y<rng_y)))return false;
+    rtn.z=line_geometry::length(line_geometry::subtract(hit,lp));
+    rtn.x=320.0f+(320.0f*(hit.x/rng_x));rtn.y=240.0f+(240.0f*(hit.y/rng_y));
+    return true;
+}
+static void eff301_screen_quad(EffectSprite& s,float siz_x,float siz_y){
+    s.tv[0].x=s.px+siz_x;s.tv[0].y=s.py+siz_y;s.tv[1].x=s.px-siz_x;s.tv[1].y=s.py+siz_y;
+    s.tv[2].x=s.px+siz_x;s.tv[2].y=s.py;s.tv[3].x=s.px-siz_x;s.tv[3].y=s.py;
+}
+void step_eff301(EffectSprite& s,const EffectContext& c,bool& queued){
+    if(c.gm_flg&0x2000000u){s.flg=0;return;} // :427
+    const auto anm=[&](int i)->unsigned{const auto* row=static_cast<const unsigned char*>(s.uv);return row?row[i]:0u;};
+    switch(s.mode0){
+    case 0:{ // :435-521
+        if(s.type>=7){report_gap("bhEff301: type ausserhalb Eff301Prm[7]");s.flg=0;return;}
+        const auto& prm=eff301_prm[s.type];
+        s.tex_id=5;s.flg=0x200001u;s.bl_src=8;s.bl_dst=6;s.ani_ct=s.mdlver;
+        const int ax=s.ax+int(182.04445f*(0.5f*(prm.ang_rand*(effect_random()-0.5f))));
+        const int ay=s.ay+int(182.04445f*(prm.ang_rand*(effect_random()-0.5f)));
+        const float rng=prm.vtx_range;s.ayp=ay;
+        float adj=-njSin(ay)*njCos(ax);
+        s.aox=rng*adj;s.aoy=rng*njSin(ax);
+        adj=-njCos(ay)*njCos(ax);
+        s.aoz=rng*adj;
+        NJS_POINT3 pos{};
+        if(s.mdlver==0&&c.camera_matrix_ready&&eff301_cam_wall_2d(c,{s.px,s.py,s.pz},{s.aox,s.aoy,s.aoz},pos,16.0f,12.0f)&&(10.0f<pos.z&&pos.z<rng)&&!c.camera_cut_wall){
+            s.spd=pos.z;s.aox=pos.x;s.aoy=pos.y;s.aoz=0;
+            s.xn=s.yn=0;s.zn=-1.0f;
+            s.shp_ct=1.0f+(2.0f*effect_random());
+            s.uv=eff301_anm[(ax+ay)&3];s.exp1_wall_type=-1;
+            s.ct0=0;s.ct1=(int(0.05f*s.spd)+(ax+ay))&3;s.ct2=int(anm(1));s.ct3=int(prm.color+0xC0000000u);
+            ++s.mode0;
+        }else{
+            NJS_POINT3 end{s.aox+s.px,s.aoy+s.py,s.aoz+s.pz},normal{};
+            const auto wall=collision_line_wall({s.px,s.py,s.pz},end,normal,0x4400u,-1,"bhEff301: bhCollisionCheckLine2 ohne Wandsatz");
+            if(wall){
+                if(!(wall->flags&0x10u)){
+                    s.shp_ct=1.0f+(2.0f*effect_random());
+                    s.aox=end.x;s.aoy=end.y;s.aoz=end.z; // njAddVector(&aox, &px), dann p2 = Treffer
+                    s.spd=njSqrt((s.px-s.aox)*(s.px-s.aox)+(s.py-s.aoy)*(s.py-s.aoy)+(s.pz-s.aoz)*(s.pz-s.aoz)); // njDistanceP2P
+                    s.xn=normal.x;s.yn=normal.y;s.zn=normal.z; // bhGetHitCollisionNormal
+                    s.uv=eff301_anm[(ax+ay)&3];s.exp1_wall_type=int(wall->type);
+                    s.ct0=0;s.ct1=int(0.1f*float(int(s.spd)));s.ct2=int(anm(0));s.ct3=int(prm.color);
+                    ++s.mode0;
+                }else s.flg=0;
+            }else s.flg=0;
+        }
+        break;}
+    case 1: // :522-563
+        if(s.ct1>0)--s.ct1;
+        else{
+            auto& bl_ct=effect_blood_counter();
+            const float adj=0.01f+(0.001f*float(bl_ct));bl_ct=(bl_ct+1u)&0x1FFu;
+            NJS_VECTOR n{s.xn,s.yn,s.zn};njUnitVector(&n);s.xn=n.x;s.yn=n.y;s.zn=n.z;
+            s.px=s.aox+(s.xn*adj);s.py=s.aoy+(s.yn*adj);s.pz=s.aoz+(s.zn*adj);
+            float top=0,h=0;
+            if(s.exp1_wall_type<0)s.mode0=24;
+            else if(s.exp1_wall_type==6)s.mode0=16;
+            else if(s.yn==0.0f)s.mode0=8;
+            else if(water_area({s.px,s.py,s.pz},top,h,"bhEff301: bhCheckWater ohne Wasserflaechen")){
+                s.exp1_wall_type=256;s.py+=0.5f*(h*effect_random());s.mode0=12;}
+            else s.mode0=4;
+        }
+        break;
+    case 4:{ // :564-575
+        s.ax=-16384;s.ay=s.ayp;
+        const float off=0.05f*s.spd;
+        s.tv[0].y+=off;s.tv[1].y+=off;s.tv[2].y+=off;s.tv[3].y+=off;
+        s.ct2=int(anm(0));++s.mode0;}
+        [[fallthrough]];
+    case 5: // :576-585
+        s.sxb*=1.5f;s.syb*=1.5f;if(s.sxb>s.shp_ct)++s.mode0;
+        queued=true;break;
+    case 6: // :586-597
+        s.ct3=int(std::uint32_t(s.ct3)+0xFE000000u);s.sxb+=0.01f;s.syb+=0.01f;
+        if(std::uint32_t(s.ct3)<0x2000000u){s.flg=0;break;}
+        queued=true;break;
+    case 8: // :598-606
+        s.ax=int(10430.381f*std::asin(s.yn));s.ay=int(10430.381f*std::atan2(s.xn,s.zn));
+        s.tv[0].y=s.tv[1].y=-2.0f;s.tv[2].y=s.tv[3].y=0;
+        s.ct2=int(anm(1));++s.mode0;
+        [[fallthrough]];
+    case 9: // :607-616
+        s.sxb*=1.5f;s.syb*=1.5f;if(s.sxb>s.shp_ct)++s.mode0;
+        queued=true;break;
+    case 10: // :617-628
+        s.ct3=int(std::uint32_t(s.ct3)+0xFE000000u);s.sxb-=0.005f;s.syb+=0.03f;
+        if(std::uint32_t(s.ct3)<0x2000000u){s.flg=0;break;}
+        queued=true;break;
+    case 12:{ // :629-641
+        s.flg|=0x100000u;s.ct3=int((std::uint32_t(s.ct3)&0xFFFFFFu)|0xC0000000u);
+        const int ay=s.ayp+int(182.04445f*(240.0f*(effect_random()-0.5f)));
+        s.aox=0.03f*-njSin(ay);s.aoy=0.01f;s.aoz=0.03f*-njCos(ay);
+        ++s.mode0;}
+        [[fallthrough]];
+    case 13: // :642-651
+        s.sxb*=1.5f;s.syb*=1.5f;if(s.sxb>s.shp_ct)++s.mode0;
+        queued=true;break;
+    case 14: // :652-666
+        s.ct3=int(std::uint32_t(s.ct3)+0xFF000000u);s.sxb+=0.02f;s.syb+=0.02f;
+        if(std::uint32_t(s.ct3)<0x1000000u)s.flg=0;else queued=true;
+        s.px+=s.aox;s.py+=s.aoy;s.pz+=s.aoz;
+        break;
+    case 16: // :667-673
+        s.ax=-int(10430.381f*std::asin(s.yn));s.ay=int(10430.381f*std::atan2(s.xn,s.zn));
+        s.ct2=int(anm(0));++s.mode0;
+        [[fallthrough]];
+    case 17: // :674-683
+        s.sxb*=1.5f;s.syb*=1.5f;if(s.sxb>s.shp_ct)s.mode0=6;
+        queued=true;break;
+    case 24:{ // :684-738 Schirmfleck (gidx ueber tex_id/ani_ct des Zeichners), tv z = 1 + pz
+        s.tv[0].z=s.tv[1].z=s.tv[2].z=s.tv[3].z=1.0f+s.pz;
+        s.sxb*=1.5f;s.syb*=1.5f;
+        eff301_screen_quad(s,30.0f*s.sxb,2.0f*(30.0f*s.syb));
+        if(s.sxb>s.shp_ct)++s.mode0;
+        if(!(c.gm_flg&0x20u)){s.pn=4;queue_trs2d(s);queued=true;}else s.flg=0;
+        break;}
+    case 25:{ // :739-763
+        s.ct3=int(std::uint32_t(s.ct3)+0xFE000000u);s.sxb-=0.01f;s.syb+=0.03f;
+        eff301_screen_quad(s,30.0f*s.sxb,2.0f*(30.0f*s.syb));
+        if(!(c.gm_flg&0x20u)&&std::uint32_t(s.ct3)>0x2000000u){s.pn=4;queue_trs2d(s);queued=true;}else s.flg=0;
+        break;}
+    default:break;
+    }
+    { // :785-806 Tex5uv[ct2]: Groesse sxb/syb + xs/ys, UV-Ecken, Eckfarbe ct3.
+        if(s.ct2<0||s.ct2>=9){report_gap("bhEff301: ct2 ausserhalb Tex5uv[9]");s.flg=0;return;}
+        const auto& uv=eff301_tex5uv[s.ct2];
+        s.sx=s.sxb+uv.xs;s.sy=s.syb+uv.ys;
+        s.tv[0].u=uv.u+uv.xs;s.tv[0].v=uv.v+uv.ys;s.tv[1].u=uv.u;s.tv[1].v=uv.v+uv.ys;
+        s.tv[2].u=uv.u+uv.xs;s.tv[2].v=uv.v;s.tv[3].u=uv.u;s.tv[3].v=uv.v;
+        quad_color(s,std::uint32_t(s.ct3));
+    }
+}
+// effsub4.c:319..535 bhEff_Sub350: der Giftspeichel von bhEne01_PoisonEffect (en01.c:11190). Fall 0
+// richtet die Bahn nach op->ay mit 0.4 bei -5120 (leicht nach unten), Fall 1 wartet ct3 Takte, Fall 2
+// fliegt (yn - 0.08*ct2), trifft die Spielerkapsel plp->watr (Schaden 10, mode0 2 mode2 1 mode3 0, flg 0x4,
+// mode1 aus bhDGCdirCheck) oder den Boden (bhCollisionCheckLine2 0x400) und setzt dann 351-Kinder: am
+// Spieler drei Stueck an plp->djnt_no (bhEne_HitCheckParts), sonst eines an der Lage; SE 8961 ueber
+// bhEne01_SePlay(lkwkp). Zeichnung bhEff_SetSpriteAnime (ef_trs), Texturen aus txp[0]/tex_id des Gegners.
+constexpr EffectUv eff350_uv[11]={{0,96,16,16},{0,112,16,16},{0,128,16,16},{0,144,16,16},{16,96,24,24},{16,120,24,24},
+    {40,96,32,32},{72,96,32,32},{104,96,32,32},{40,128,32,32},{72,128,32,32}};
+constexpr short eff350_anim00[9][2]={{0,1},{1,1},{2,1},{3,1},{4,1},{5,1},{6,1},{7,1},{-2,6}};
+constexpr short eff350_anim01[4][2]={{8,1},{9,1},{10,1},{-1,0}};
+// effsub4.c:538..651 bhEff_Sub351: der Spritzer (am Spielergelenk oder am Boden), ct3 Takte Wartezeit,
+// dann fliegt er ohne Link (flg 0x80 weg) und verblasst ab dem neunten Takt (col += 0xF0000000).
+constexpr EffectUv eff351_uv[14]={{24,80,16,16},{0,48,24,24},{0,72,24,24},{24,48,32,32},{56,48,32,32},{88,48,40,40},{128,48,40,40},
+    {0,0,48,48},{48,0,48,48},{96,0,48,48},{144,0,48,48},{192,0,48,48},{168,48,40,40},{208,48,40,40}};
+constexpr short eff351_anim00[15][2]={{0,1},{1,1},{2,1},{3,1},{4,1},{5,1},{6,1},{7,1},{8,1},{9,1},{10,1},{11,1},{12,1},{13,1},{-1,0}};
+static void eff350_child(const EffectSprite& s,int lkono,const NJS_POINT3* offset,bool to_player,int ct3){
+    // effsub4.c:481-487 / :513-519: sys->ef (id 351, flg 1, 4.5/4.5/0, ay 0, Lage vom Rufer) und am neuen Satz
+    // stflg 0x20, txp[0]/tex_id des Elternsatzes, ct3, xn/yn/zn (ein rand je Achse, nur bei belegtem Platz).
+    if(!effect_slot_available())return;
+    submit_template(lkono,offset);auto& c=last_request();
+    if(to_player){c.link_kind=0;c.link_index=0;}
+    c.stflg_or|=0x20u;c.texture_from_slot=s.slot;c.tex_id_override=s.tex_id;c.ct3=ct3;
+    c.has_velocity=true;
+    c.velocity.x=(0.1f*effect_random())-0.05f;
+    c.velocity.y=0.5f+((0.2f*effect_random())-0.1f);
+    c.velocity.z=(0.1f*effect_random())-0.05f;
+}
+void step_eff350(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0:{ // :366-394
+        quad_color(s,0xC0C0C0C0u);s.bl_src=8;s.bl_dst=3;s.flg|=0x4180000u;s.stflg|=0x20u;
+        s.ani_ct=0;s.ct0=0;s.ct1=0;s.spd=1.0f;s.mode1=0;s.mode2=0;
+        const float wk0=0.4f*njCos(-5120),wk1=0.4f*njSin(-5120);
+        s.xn=-(wk0*njSin(s.ay));s.zn=-(wk0*njCos(s.ay));s.yn=wk1;
+        ++s.mode0;}
+        [[fallthrough]];
+    case 1: // :395-405
+        if(--s.ct3>=0)break;
+        s.mode2=1;++s.mode0;
+        [[fallthrough]];
+    case 2:{ // :406-525
+        int tmp=0;
+        s.px+=s.xn;s.py+=s.yn-(0.08f*float(s.ct2));s.pz+=s.zn;++s.ct2;
+        const RECVX_CB_SPHERE cspr{{s.px,s.py,s.pz},0.5f*s.sy};
+        RECVX_ENEMY_CAPSULE watr;
+        if(hook_player_watr(watr,"bhEff_Sub350: plp->watr")&&recvx_cb_check_sc(&cspr,reinterpret_cast<const RECVX_CB_CAPSULE*>(&watr))!=0){
+            RECVX_ENEMY_PLAYER p;
+            if(hook_player_get(p,"bhEff_Sub350: plp")&&!(p.flg&4u)&&!(p.stflg&0x80000000u)){
+                p.flg|=4u;p.mode0=2;p.mode2=1;p.mode3=0;p.hp-=10;
+                const RECVX_ENEMY_VEC p1{s.px-p.pos.x,0,s.pz-p.pos.z};
+                p.mode1=recvx_t3_dgc_dir_check(&p1,p.ay)==0?1:0;
+                hook_player_set(p);
+            }
+            tmp=2;
+        }else if(s.ct2>150){ // :449-458
+            s.mode1=1;s.ct0=0;s.ct1=0;++s.mode0;break;
+        }else{ // :459-475
+            NJS_POINT3 end{s.px,s.py-0.5f,s.pz},normal{};
+            if(collision_line({s.pxb,s.pyb-0.5f,s.pzb},end,normal,0x400u,-1,"bhEff_Sub350: bhCollisionCheckLine2")){
+                tmp=1;s.px=end.x;s.py=0.5f+end.y;s.pz=end.z;}
+        }
+        if(tmp!=0){ // :477-525
+            auto& r=request_template();r.id=351;r.flg=1;r.scale={4.5f,4.5f,0};r.ay=0;
+            // bhEne01_SePlay(lkwkp, pos, 8961): flg 0x10000 des Werks unterdrueckt den SE (en01.c:11376),
+            // 8961 liegt unter 20 (kein add_seno-Versatz).
+            if(s.lkwkp){if(!(static_cast<const RECVX_ENEMY_WORK*>(s.lkwkp)->flg&0x10000u))hook_enemy_se(s.lkwkp,{s.px,s.py,s.pz},8961);}
+            else report_gap("bhEff_Sub350: bhEne01_SePlay ohne lkwkp");
+            if(tmp==2){
+                r.position={0,0,0};
+                const int djnt=hook_player_hit_check_parts({s.px,s.py,s.pz},"bhEff_Sub350: bhEne_HitCheckParts(plp)");
+                if(djnt>=0){const NJS_POINT3 zero{0,0,0};for(int i=0;i<3;++i)eff350_child(s,djnt,&zero,true,i*3);}
+            }else{
+                r.position={s.px,s.py,s.pz};
+                eff350_child(s,0,nullptr,false,0);
+            }
+            s.mode1=1;s.ct0=0;s.ct1=0;++s.mode0;
+        }
+        break;}
+    default:break; // :527 case 3
+    }
+    if(s.mode2!=0){ // :531-534 bhEff_SetSpriteAnime(op, anim_tbl[mode1], uvinfo, 0)
+        if(s.mode1==0)blood_sprite_anime(s,eff350_anim00,eff350_uv,queued);
+        else if(s.mode1==1)blood_sprite_anime(s,eff350_anim01,eff350_uv,queued);
+        else{report_gap("bhEff_Sub350: mode1 ausserhalb anim_tbl[2]");s.flg=0;}
+    }
+}
+void step_eff351(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0: // :597-609
+        quad_color(s,0x80808080u);s.bl_src=8;s.bl_dst=10;s.flg|=0x4180000u;s.stflg|=0x20u;
+        s.ani_ct=0;s.ct0=0;s.ct1=0;s.ct2=0;s.spd=1.0f;s.mode2=0;++s.mode0;break;
+    case 1: // :610-630
+        if(--s.ct3>=0)break;
+        s.ct3=0;s.mode2=1;
+        if(s.flg&0x80u)s.flg&=~0x80u;
+        ++s.mode0;
+        [[fallthrough]];
+    case 2: // :631-644
+        s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+        if(++s.ct3>8)quad_color(s,s.tv[0].col+0xF0000000u);
+        break;
+    default:break;
+    }
+    if(s.mode2!=0)blood_sprite_anime(s,eff351_anim00,eff351_uv,queued);
+}
+// effsub4.c:837 bhEff_Sub353 — Bodenlicht des Albinoid-Blitzes (en22.c:2795, am Wurzelgelenk,
+// txp[0] = Gegnertextur 5). ax 16384 legt das Viereck waagerecht; Alpha steigt 18 Passes um 8,
+// danach waechst es 30 Passes um 8 und blendet ab. mode0 4 setzt der Gegner (en22.c:661/:1715).
+// ef_trs; uvinfo teilt durch 127 (UV-Ende (128 - 1) / 127 = 1.0).
+void step_eff353(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0: // :846-865
+        quad_color(s,0xFFFFFFu);s.bl_src=8;s.bl_dst=10;s.flg|=0x4080000u;s.stflg|=0x20u;
+        s.ani_ct=0;s.ct1=0;s.ct2=0;s.ax=16384;s.ay=0;s.az=0;++s.mode0;
+        [[fallthrough]];
+    case 1: // :866-878
+        if(--s.ct3>=0)break;
+        s.ct0=18;s.mode2=1;++s.mode0;
+        [[fallthrough]];
+    case 2: // :879-898
+        if((s.tv[0].col&0xFF000000u)>=0xC0000000u)s.tv[0].col=0xC0FFFFFFu;else s.tv[0].col+=0x8000000u;
+        quad_color(s,s.tv[0].col);
+        if(--s.ct0<0){s.ct0=30;++s.mode0;}
+        break;
+    case 3: // :899-916
+        s.sxb+=8.0f;s.syb+=8.0f;
+        if(--s.ct0<0){
+            quad_color(s,s.tv[0].col+0xF0000000u);
+            if((s.tv[0].col&0xFF000000u)<0x10000000u){s.lkwkp=nullptr;s.flg=0;}
+        }
+        break;
+    case 4: // :917-928
+        quad_color(s,s.tv[0].col+0xF0000000u);
+        if((s.tv[0].col&0xFF000000u)<0x10000000u){s.lkwkp=nullptr;s.flg=0;}
+        break;
+    default:break;
+    }
+    if(s.mode2==0)return;
+    if(s.ct1!=0){report_gap("bhEff_Sub353: ct1 ausserhalb uvinfo[1]");s.flg=0;return;}
+    const EffectUv& uv=eff353_uv[0]; // :931-947
+    s.sx=s.sxb*(uv.xs/127.0f);s.sy=s.syb*(uv.ys/127.0f);
+    s.tv[0].u=uv.u/127.0f;s.tv[0].v=uv.v/127.0f;
+    s.tv[3].u=((uv.u+uv.xs)-1.0f)/127.0f;s.tv[3].v=((uv.v+uv.ys)-1.0f)/127.0f;
+    s.tv[1].u=s.tv[3].u;s.tv[1].v=s.tv[0].v;
+    s.tv[2].u=s.tv[0].u;s.tv[2].v=s.tv[3].v;
+    if(s.flg!=0)queued=true;
+}
+// effsub4.c:958 bhEff_Sub354 — Blitzbogen des Albinoid (en22.c:2614 bhEne22_SetDengekiEffect):
+// Gelenk-Billboard mit zufaelligem Versatz um (ofx, ofy) je Pass, zur Kamera um zn versetzt.
+// Zeichnung bhEff_3DSpriteDraw (effsub4.c:3215) in der ef_fnc-Liste: op->mtx = owP[lkono] *
+// T(lox) * RotXYZ(ax), njUnitRotPortion, njRotateZ(az), njScaleEx(sx), ohne Nebel, Blend 8/10,
+// Textur txp[0] (stflg 0x20) Nummer tex_id + ani_ct.
+void step_eff354(EffectSprite& s,const EffectContext& c,bool& queued){
+    switch(s.mode0){
+    case 0: // :1029-1057
+        s.bl_src=8;s.bl_dst=10;s.flg|=0x4180000u;s.stflg|=0x20u;s.ani_ct=0;
+        quad_color(s,0xC0FFFFFFu);s.spd=1.0f;s.ct0=0;
+        s.ofx=s.lox;s.ofy=s.loy;s.ofz=s.loz;
+        s.xn=s.sxb;s.yn=s.sxb/8.0f;
+        s.mode1=s.type;s.mode2=0;++s.mode0;
+        [[fallthrough]];
+    case 1: // :1058-1070
+        if(--s.ct3>=0)break;
+        s.mode2=1;s.ct3=11;++s.mode0;
+        [[fallthrough]];
+    case 2: // :1071-1078
+        if(s.mode1==0&&--s.ct3<0)quad_color(s,s.tv[0].col+0xE0000000u);
+        break;
+    default:break;
+    }
+    if(s.mode2==0)return;
+    // bhEff_SetSpriteAnime(op, anim_tbl[mode1], uvinfo, 1): Eintrag in sys->ef_fnc.
+    bool listed=false;
+    switch(s.mode1){
+    case 0:blood_sprite_anime(s,eff354_anim00,eff354_uv,listed);break;
+    case 1:blood_sprite_anime(s,eff354_anim01,eff354_uv,listed);break;
+    case 2:blood_sprite_anime(s,eff354_anim02,eff354_uv,listed);break;
+    case 3:blood_sprite_anime(s,eff354_anim03,eff354_uv,listed);break;
+    default:report_gap("bhEff_Sub354: mode1 ausserhalb anim_tbl[4]");s.flg=0;return;
+    }
+    // :1085-1112 laeuft auch nach flg = 0 aus der Animation weiter (zwei rand() je Pass).
+    if(s.flg&0x80u){
+        if(!s.link_matrix){report_gap("bhEff_Sub354: lkwkp->mlwP->owP[lkono] ohne Link");s.flg=0;return;}
+        NJS_MATRIX owk;std::copy(s.link_matrix,s.link_matrix+16,owk);
+        NJS_POINT3 ofs;
+        ofs.x=float(double(s.ofx)+(double(effect_random())-0.5));
+        ofs.y=float(double(s.ofy)+(double(effect_random())-0.5));
+        ofs.z=s.ofz;
+        NJS_POINT3 p2;njCalcPoint(&owk,&ofs,&p2);
+        NJS_POINT3 p1{(-c.camera_view.x*s.zn+p2.x)-owk[12],(-c.camera_view.y*s.zn+p2.y)-owk[13],(-c.camera_view.z*s.zn+p2.z)-owk[14]};
+        NJS_MATRIX inv;std::copy(owk,owk+16,inv);njInvertMatrix(&inv);
+        NJS_POINT3 local;njCalcVector(&inv,&p1,&local);
+        s.lox=local.x;s.loy=local.y;s.loz=local.z;
+    }
+    if(!listed)return;
+    queue_custom(s);queued=true;
+    if(!drawing(c))return;
+    if(!s.txp_category){report_gap("bhEff_3DSpriteDraw: txp[0] ohne Gegnertexturliste");return;}
+    if((s.flg&0x1000000u)||(s.stflg&0x1000000u))return; // :3221
+    NJS_MATRIX m;if(!e12::sprite_matrix(s,m,"bhEff_3DSpriteDraw: lkwkp->mlwP->owP[lkono]"))return;
+    // flg 0x100000 (aus 0x4180000): njUnitRotPortion, njRotateZ(az), njScaleEx(sx).
+    std::array<EffectSprite::Vertex,4> v=s.tv;
+    NJS_MATRIX r;njUnitMatrix(&r);njRotateZ(&r,s.az);
+    for(auto& p:v){NJS_POINT3 q{p.x*s.sx,p.y*s.sy,p.z*s.sz};njCalcVector(&r,&q,&q);p.x=q.x;p.y=q.y;p.z=q.z;}
+    push_billboard(s,{m[12],m[13],m[14]},v,s.txp_category,unsigned(s.tex_id+s.ani_ct),s.bl_src,s.bl_dst,(s.flg&0x20000000u)!=0);
+    s.quads.back().fogged=false; // njFogDisable (:3293)
+}
+// effsub4.c:1774 bhEff_Sub364 — Blitzmodell (en22.c:2658 bhEne22_SetDengekiEffect2): ein Pass in
+// sys->ef_fnc mit bhEff_ModelDraw (effsub4.c:3306), objP[mdlver] von mlwP = epw->mdl[1..6].
+// Das Modell zeichnet der Raumbesitzer (RoomWorld::append_effect_model).
+void step_eff364(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0: // :1778-1793
+        s.bl_src=8;s.bl_dst=10;s.flg|=0x240000u;s.ani_ct=0;
+        s.ct0=1;s.ct1=0;s.ct2=0;s.ct3=0;++s.mode0;
+        [[fallthrough]];
+    case 1: // :1794-1800
+        if(--s.ct0<0)s.flg=0;
+        break;
+    default:break;
+    }
+    if(s.flg!=0){queue_custom(s);queued=true;}
+}
+// effsub4.c:2237..2385 bhEff_Sub370. Emitter only. lmode 0 retains the joint,
+// 1 transforms both offset and direction, 2 transforms only the offset.
+void step_eff370(EffectSprite& s,const EffectContext&,bool&){
+    if(s.type>=11){report_gap("bhEff370: type outside eff370_tbl[11]");return;}
+    const auto& p=eff370_params[s.type];
+    if(s.mode0==0){s.ani_ct=0;s.ct2=0;s.mode1=0;++s.mode0;}
+    if(s.mode0!=1||--s.ct0>=0)return;
+    auto& r=request_template();r.id=unsigned(p.id);r.mdlver=unsigned(p.col);r.flg=1;
+    r.type=s.mode1==5?3:0;r.scale={s.sx,s.sy,s.sz};
+    const bool linked=(s.flg&0x80u)!=0;
+    if(p.id==0){
+        const unsigned colors[4]={0xff5f0000u,0xff400000u,0xff400000u,0xff400000u};
+        if(linked&&s.link_kind<0)report_gap("bhEff370: bhSetEffParticle link owner");
+        else hook_particle(linked?s.link_kind:-1,s.link_index,linked?s.lkono:-1,
+            linked?NJS_POINT3{s.lox,s.loy,s.loz}:NJS_POINT3{s.px,s.py,s.pz},
+            {s.xn,s.yn,s.zn},colors[p.col],3,"bhEff370: bhSetEffParticle");
+    }else{
+        NJS_MATRIX m;bool have_matrix=false,can_spawn=true;
+        if(linked&&p.lmode!=0){
+            if(!s.link_matrix){report_gap("bhEff370: lkwkp->mlwP->owP[lkono].mtx");can_spawn=false;}
+            else{std::copy(s.link_matrix,s.link_matrix+16,m);have_matrix=true;
+                NJS_POINT3 off{s.lox,s.loy,s.loz};njCalcPoint(&m,&off,&r.position);}
+        }else r.position=linked?NJS_POINT3{0,0,0}:NJS_POINT3{s.px,s.py,s.pz};
+        if(linked&&p.lmode==0&&s.link_kind<0){report_gap("bhEff370: linked child without work owner");can_spawn=false;}
+        // ELF 0x250298..0x2503F4: rand is called only after successful allocation.
+        if(can_spawn&&effect_slot_available()){
+            const NJS_POINT3 off{s.lox,s.loy,s.loz};
+            submit_template(linked&&p.lmode==0?s.lkono:0,linked&&p.lmode==0?&off:nullptr);
+            auto& child=last_request();
+            if(linked&&p.lmode==0){child.link_kind=s.link_kind;child.link_index=s.link_index;child.linked_work=s.lkwkp;}
+            if(p.id==371){child.stflg_or|=0x20u;child.texture_from_slot=s.slot;child.tex_id_override=s.tex_id;}
+            child.has_velocity=true;child.velocity={s.xn,s.yn,s.zn};
+            if(p.lmode==1){
+                // This dereference is unconditional in the original, even without flg 0x80.
+                if(!have_matrix&&s.link_matrix){std::copy(s.link_matrix,s.link_matrix+16,m);have_matrix=true;}
+                if(have_matrix)njCalcVector(&m,&child.velocity,&child.velocity);
+                else report_gap("bhEff370: lmode 1 direction without lkwkp matrix");
+            }
+            child.ct3=0;child.has_shp_ct=true;child.shp_ct=p.spd+0.3f*effect_random();
+            child.has_ao=true;child.ao={p.e,p.g,0};
+        }
+    }
+    s.ct0=p.wcnt;
+    if(s.ct1<=++s.ct2)s.flg=0;
+}
+// Direct visual dependencies of 362/370 (effsub4.c:2388/2533/2622).
+// All use bhEff_SetSpriteAnime -> ef_trs, never ef_fnc; no private blend state.
+void step_blood_child(EffectSprite& s,bool& queued){
+    const bool first=s.mode0==0;
+    if(first){
+        quad_color(s,s.id==371?0xa0c0c0c0u:0xffffffffu);
+        s.bl_src=8;s.bl_dst=3;s.flg|=0x4180000u;
+        if(s.id==371){s.stflg|=0x20u;s.ani_ct=0;}else{s.tex_id=5;s.ani_ct=s.mdlver;}
+        s.ct0=s.ct1=s.ct2=0;s.spd=1.0f;s.mode1=s.id==372?0:s.type;s.mode2=0;++s.mode0;
+    }else{
+        if(s.mode0==1){if(--s.ct3>=0)return;s.ct3=0;s.mode2=1;++s.mode0;}
+        if(s.mode0==2){
+            if(s.id!=372)s.shp_ct*=s.aox;
+            if(s.id!=372&&(s.flg&0x80u)){
+                s.lox+=s.xn*s.shp_ct;s.loy+=(s.yn*s.shp_ct)+(s.aoy*s.ct3);s.loz+=s.zn*s.shp_ct;
+            }else{s.px+=s.xn*s.shp_ct;s.py+=(s.yn*s.shp_ct)+(s.aoy*s.ct3);s.pz+=s.zn*s.shp_ct;}
+            ++s.ct3;
+            if(s.id==372&&s.ct3>=5)quad_color(s,s.tv[0].col+0xd0000000u);
+            else if(s.id==373&&s.ct3>=5)quad_color(s,s.tv[0].col+0xe0000000u);
+            else if(s.id==371){
+                if(s.type==0&&s.ct3>7)quad_color(s,s.tv[0].col+0xf8000000u);
+                else if(s.type!=0&&s.ct3>6)quad_color(s,s.tv[0].col+0xe0000000u);
+            }
+        }
+    }
+    if(!s.mode2)return;
+    if(s.id==371){
+        if(s.mode1>=4){report_gap("bhEff371: type outside anim_tbl[4]");s.flg=0;return;}
+        blood_sprite_anime(s,eff371_anim[s.mode1],eff371_uv,queued);
+    }else if(s.id==372)blood_sprite_anime(s,eff372_anim,eff372_uv,queued);
+    else{
+        if(s.mode1!=0){report_gap("bhEff373: type outside anim_tbl[1]");s.flg=0;return;}
+        blood_sprite_anime(s,eff373_anim,eff372_uv,queued);
+    }
+}
+void step_eff371(EffectSprite& s,const EffectContext&,bool& queued){step_blood_child(s,queued);}
+void step_eff372(EffectSprite& s,const EffectContext&,bool& queued){step_blood_child(s,queued);}
+void step_eff373(EffectSprite& s,const EffectContext&,bool& queued){step_blood_child(s,queued);}
+
+// effect.c:929 sys->ef_fnc[i]->func: nur der Zeichenteil der sechs schreibenden Routinen.
+// Ein Aufruf je bhDrawEffect (game.c:340/348 und im Spiegelpass :427). Kein Lebenszaehler,
+// kein Erzeuger; die Steuerung bleibt in step_effect_sprite.
+bool draw_effect_sprite_work(EffectSprite& s,const EffectContext& c){
+    if(!drawing(c)||!s.custom_queued)return false;
+    void (*draw)(EffectSprite&,const EffectContext&)=nullptr;
+    switch(s.id){
+    case 22:draw=draw_eff022;break;
+    case 24:draw=draw_eff024;break;
+    case 25:draw=draw_eff025;break;
+    case 27:draw=draw_eff027;break;
+    case 100:draw=draw_eff100;break;
+    case 107:draw=draw_eff107;break;
+    default:return false;
+    }
+    s.quads.clear();s.lines.clear();draw(s,c);return true;
+}
+bool stateful_effect_draw(unsigned id){return id==22||id==24||id==25||id==27||id==100||id==107;}
 const HandEffectProcedure hand_effect_procedures[]={
     {253,step_e02_sand_dust},{254,step_e02_sand_particle},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},{13,step_eff013},{139,step_eff_dummy},{140,step_eff_dummy},{141,step_eff_dummy},{142,step_eff_dummy},
     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
@@ -4786,7 +5373,7 @@ const HandEffectProcedure hand_effect_procedures[]={
     {207,step_eff207},{209,step_eff209},{210,step_eff210},{211,step_eff211},{212,step_eff212},
     {213,step_eff213},{216,step_eff216},{220,step_eff220},{223,step_eff223},{225,step_eff225},
     {226,step_eff226},{227,step_eff227},{228,step_eff228},{229,step_eff229},{232,step_eff232},{233,step_eff233},
-    {352,step_eff352},
+    {301,step_eff301},{350,step_eff350},{351,step_eff351},{352,step_eff352},{353,step_eff353},{354,step_eff354},{364,step_eff364},{362,step_eff362},{370,step_eff370},{371,step_eff371},{372,step_eff372},{373,step_eff373},
     {234,step_eff234},{235,step_eff235},{237,step_eff237},{238,step_eff238},{239,step_eff239},
     {240,step_eff240},{242,step_eff242},{244,step_eff244},{245,step_eff245},{246,step_eff246},
     {247,step_eff247},{248,step_eff248},{249,step_eff249},{147,step_eff147},{148,step_eff148},

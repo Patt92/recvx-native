@@ -1,0 +1,7 @@
+# RM_1140 (U-Boot) Hebel: Interaktion 3 (x 10..20, z 37..46, attr 0x800e, Meldung 0 "There is a lever.").
+# Diagnoseaufstellung: Spieler bei Bild 5 vor den Hebel gestellt (kein natuerliches Durchspielen).
+# Bild 10 Untersuchen, 60 Meldung weiter, 110 "Move the lever?" mit Yes bestaetigen.
+5 position 15 0 36 32768
+10 confirm
+60 confirm
+110 confirm

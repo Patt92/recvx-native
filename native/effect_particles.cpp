@@ -2,6 +2,7 @@
 #include "chunk_blend.h"
 #include "core_random.h"
 #include "effect_sprites.h"
+#include "enemies/enemy_work.h"
 #include "ninja_matrix.h"
 #include <cstring>
 #include <stdexcept>
@@ -154,11 +155,11 @@ struct Work {
     bool draw_queued = false;   // sys->ef_fnc-Eintrag dieses Bildes
 };
 
-// effsub3.c:145-231 — E17_WORK der Blutlache. Der Originalzeiger lkwkp auf den
-// Gegnerwork ist im eingefrorenen Hostvertrag von spawn_pool nicht enthalten;
-// damit gilt fuer jede native Lache der Zweig ewP == NULL aus bhEff300 case 2.
+// effsub3.c:145-231 — E17_WORK der Blutlache. lkwkp verweist auf den vorhandenen
+// Gegnerwork; die Lache folgt seiner Lage nicht (flg 0x200001 ohne Linkbit 0x80).
 struct Pool {
-    bool live = false;
+    bool live = false, draw_queued = false;
+    const RECVX_ENEMY_WORK* linked_work = nullptr; // lkwkp, nur Sichtbarkeit (effsub3.c:389-394)
     int work_slot = -1;         // E17_WORK reserves a second shared eff slot.
     NJS_POINT3 position{};      // oP->px/py/pz
     int eff_dir = 0, srd_dir = 0;
@@ -521,7 +522,7 @@ static void step_work(Work& w)
 // effsub3.c:145-231 — bhSetBloodPoolLnk. Zwei Arbeiten aus AllocOworkOne; die
 // Hoehe staffelt sich ueber sys->bl_ct (nativ effect_blood_counter(), derselbe Besitzer,
 // den auch bhEff301/bhEff303 in native/effect_rap_blood.cpp zaehlen).
-int EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direction,int palette)
+int EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direction,int palette,const RECVX_ENEMY_WORK* linked_work)
 {
     (void)palette;
     if(!table)throw std::runtime_error("blood pool without BP_WORK table");
@@ -529,6 +530,7 @@ int EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direct
     const BP& tab=*static_cast<const BP*>(table);
     Pool* p=impl_->alloc_pool();
     if(!p)return 0;                                   // effsub3.c:228-231
+    p->linked_work=linked_work;
     p->position=position;
     p->position.y+=0.01f;
     njAddVector(reinterpret_cast<NJS_VECTOR*>(&p->position),reinterpret_cast<NJS_VECTOR*>(const_cast<NJS_POINT3*>(&tab.off_pos)));
@@ -550,8 +552,9 @@ int EffectParticles::spawn_pool(const void* table,NJS_POINT3 position,int direct
 }
 
 // effsub3.c:234-402 — bhEff300 mit VtxTbl[16].
-static void step_pool(recvx::Pool& p,const std::function<bool(NJS_POINT3)>& wall)
+static void step_pool(recvx::Pool& p,const std::function<bool(NJS_POINT3)>& wall,unsigned presentation_flags)
 {
+    p.draw_queued=false;
     static const int VtxTbl[16]={0,1,3,5,7,9,11,13,15,14,12,10,8,6,4,2};
     if(p.mode0==0){
         const float spd=p.srd_pos*p.bld_spd;
@@ -615,10 +618,10 @@ static void step_pool(recvx::Pool& p,const std::function<bool(NJS_POINT3)>& wall
             }
         }
         if(p.ct0++>256){++p.mode0;p.ct0=0;}
-        return;
     }
-    // case 2 faellt aus case 1 durch: die Lache bleibt stehen und wird
-    // gezeichnet, bis der Besitzer sie ueber bhClrEff_RY freigibt.
+    // effsub3.c:385-397: case 1 faellt nach der Ausbreitung in case 2 durch.
+    // Das Einreihen geschieht im Kontrollpass, nicht bei jedem Zeichenaufruf.
+    p.draw_queued=!p.linked_work||(!(p.linked_work->stflg&0x1000000u)&&(presentation_flags&2u));
 }
 
 // effect.c:776-845 — die gemeinsame Steuerschleife loest flg 0x80 ueber
@@ -633,7 +636,7 @@ void EffectParticles::bind_pool(const std::function<unsigned(unsigned)>& flags,
     impl_->owner_write=write;
 }
 
-void EffectParticles::tick_slot(unsigned slot,const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall)
+void EffectParticles::tick_slot(unsigned slot,const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall,unsigned presentation_flags)
 {
     if(slot>=eff_slots)throw std::runtime_error("particle dispatch outside eff[512]");
     auto& w=impl_->works[slot];
@@ -654,13 +657,13 @@ void EffectParticles::tick_slot(unsigned slot,const std::function<NJS_POINT3(con
         }
     }
     auto& p=impl_->pools[slot];
-    if(p.live)step_pool(p,wall);
+    if(p.live)step_pool(p,wall,presentation_flags);
 }
 
-void EffectParticles::tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall)
+void EffectParticles::tick(const std::function<NJS_POINT3(const ParticleLink&,NJS_POINT3)>& resolve,const std::function<bool(NJS_POINT3)>& wall,unsigned presentation_flags)
 {
     for(unsigned slot=0;slot<eff_slots;++slot)
-        if(impl_->flags(slot)&1u)tick_slot(slot,resolve,wall);
+        if(impl_->flags(slot)&1u)tick_slot(slot,resolve,wall,presentation_flags);
 }
 
 std::size_t EffectParticles::active()const{return impl_->active_count();}
@@ -723,7 +726,7 @@ static void append_work_lines(Scene& scene,const recvx::Work& w)
 // effsub3.c:1386-1429 — bhEff_PtclSpriteDrawB: je Stufe vier njPtclDrawSprite
 // ueber je vier Punkte, Texturrahmen tex_id + (stg_tim & 3). Jeder Aufruf gibt
 // nur seine Punkte 0 und 1 als GS-Sprite aus (Kopfkommentar, Punkt 2).
-void EffectParticles::append(Scene& scene,const SceneCamera& camera,unsigned texture_base)const
+void EffectParticles::append(Scene& scene,const SceneCamera& camera,unsigned texture_base,bool mirror)const
 {
     // BHD_ASPECT_X (main.c:53, system.c:272), mit dem auch der Renderer x projiziert.
     constexpr float aspect_w=1.174f;
@@ -760,7 +763,7 @@ void EffectParticles::append(Scene& scene,const SceneCamera& camera,unsigned tex
                         s.tv[i].v=(i&2u)?1.f:0.f;
                         s.tv[i].col=color;
                     }
-                    append_effect_sprite(scene,s,points[call*call_points+sprite],{scl/aspect_w,scl,scl},camera,texture,nullptr);
+                    append_effect_sprite(scene,s,points[call*call_points+sprite],{scl/aspect_w,scl,scl},camera,texture,nullptr,nullptr,mirror,false);
                 }
             }
         }
@@ -778,7 +781,7 @@ void EffectParticles::append(Scene& scene,const SceneCamera& camera,unsigned tex
 void EffectParticles::append_pools(Scene& scene,unsigned texture_base)const
 {
     for(const auto& p:impl_->pools){
-        if(!p.live)continue;
+        if(!p.live||!p.draw_queued)continue;
         const unsigned texture=texture_base+p.palette;
         const unsigned color=p.buffer[0].col;
         SceneVertex strip[16];

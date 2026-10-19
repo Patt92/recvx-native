@@ -1,0 +1,10 @@
+# RM_1140: Feuerzeug ausruesten (Statusschirm, ItemCommand "EQUIP"), dann laufen.
+# Diagnoseaufstellung, kein natuerliches Durchspielen. Ab Bild 90 steht bhEff009 (WpnEffTab[1],
+# lkono 9) am Spielerknoten 9; ab Bild 100 laeuft die Rennbewegung (Knoten 9 aendert sich je Bild).
+5 inventory
+20 confirm
+35 confirm
+50 cancel
+65 cancel
+80 cancel
+100 keys forward run

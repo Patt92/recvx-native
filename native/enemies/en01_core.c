@@ -11647,4 +11647,57 @@ void recvx_en01_ng_type00(RECVX_ENEMY_WORK* w)
     en01_nage_mode2(w, (uint32_t)w->mode2);                          /* :6748 */
 }
 
+/* --- Weitergaben fuer native/enemies/en26.c (en01_core.h) ----------------- */
+int32_t recvx_en01_ikou3(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos,
+                         int32_t add_dir)
+{
+    if (!w || !pos) return 0;
+    return en01_ikou3(w, pos, add_dir);
+}
+
+int recvx_en01_cdir_check(int32_t my_ang, int32_t trg_ang)
+{
+    return en01_cdir_check(my_ang, trg_ang);
+}
+
+float recvx_en01_distance_p2p(const RECVX_ENEMY_VEC* a, float bx, float by,
+                              float bz)
+{
+    return en01_distance_p2p(a, bx, by, bz);
+}
+
+int recvx_en01_collision_wall2(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* ps,
+                               const RECVX_ENEMY_VEC* ops, RECVX_ENEMY_VEC* pd,
+                               float ar, float ah)
+{
+    if (!w || !ps || !ops || !pd) return 0;
+    return en01_collision_wall2(w, ps, ops, pd, ar, ah);
+}
+
+int recvx_en01_check_dir_wall(RECVX_ENEMY_WORK* w, int32_t ang, float step)
+{
+    if (!w) return 0;
+    return en01_check_dir_wall(w, ang, step);
+}
+
+int recvx_en01_check_side_wall(RECVX_ENEMY_WORK* w, float step, int both)
+{
+    if (!w) return 0;
+    return en01_check_side_wall(w, step, both);
+}
+
+int recvx_en01_calc_parts_pos(RECVX_ENEMY_WORK* w, float* mtx16,
+                              RECVX_ENEMY_VEC* pos, const int8_t* tree,
+                              int parts_num, int clr_flg)
+{
+    if (!w || !mtx16 || !pos || !tree) return 0;
+    return en01_calc_parts_pos(w, (NJS_MATRIX*)mtx16, pos, tree, parts_num, clr_flg);
+}
+
+void recvx_en01_set_vibration(RECVX_ENEMY_WORK* w, int32_t no)
+{
+    if (!w) return;
+    en01_set_vibration(w, no);
+}
+
 /* RECVX_EN01_CORE_EOF */

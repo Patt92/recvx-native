@@ -104,6 +104,31 @@ int main(){try{
      for(unsigned i=0;i<150;++i){menu.input(MenuInput::Confirm,inv);menu.tick(inv);}
      check(inv.items==before&&!menu.opening_item,"case gap opened or converted an item");}
     });
+    // Nachladen über ItemCombination in beiden Richtungen (sub1.c:5450-5545):
+    // listcsr_1 ist das Item, auf dem COMBINE gewählt wurde, listcsr_0 der
+    // Cursor; gesucht wird die Cursor-ID in combidata[itemdata[listcsr_1].cmb].
+    // Waffe zuerst trifft Klasse 0 (Combi_00(moto, aite), sub1.c:5590), Munition
+    // zuerst Klasse 1 (Combi_00(aite, moto), sub1.c:5620). Magnum 32 + Item 13:
+    // 1 + 10 > 6 (getbulletmax[32]) -> Waffe 6, Rest 5 (ok 2). Pistole 9 + 12:
+    // 1 + 10 <= 15 -> Waffe 11, Munition verbraucht (ok 1, ItemSort).
+    // Item 30 ist der Inspektionszwischenstand der Magnummunition (idsettbl[5],
+    // itemview.c:532, beim Verlassen zu 13, itemview.c:770-777): nur 30 kennt
+    // die Magnum (combidata[74]), die Magnumliste combidata[253] kennt nur 13.
+    section("Nachladen beide Richtungen",[&]{
+    struct Case {unsigned weapon,ammo;bool ammo_first;unsigned rounds,left;bool found;};
+    const Case cases[]={{32,13,false,6,5,true},{32,13,true,6,5,true},{9,12,false,11,0,true},{9,12,true,11,0,true},{32,30,true,6,5,true},{32,30,false,1,10,false}};
+    for(const auto& c:cases)for(unsigned equipped=0;equipped<2;++equipped){
+        auto inv=empty();inv.slots()[2]=Inventory::pack(c.weapon,1);inv.slots()[3]=Inventory::pack(c.ammo,10);if(equipped)inv.equip(2);
+        StatusMenu menu;messages(menu);const auto saved=inv.items;
+        select_action(menu,inv,c.ammo_first?3:2,2);check(menu.combining&&menu.combine_from==(c.ammo_first?3u:2u),"Combine source lost");
+        menu.input(c.ammo_first?MenuInput::Left:MenuInput::Right,inv);menu.input(MenuInput::Confirm,inv);
+        if(!c.found){check(inv.items==saved&&menu.combining&&menu.combine_subcsr()==1&&menu.feedback_sound==1,"Magnum source accepted item 30 although combidata[253] lists only 13 (sub1.c:5531-5535)");continue;}
+        check(menu.combine_subcsr()==2,"weapon/ammo pair found no combidata rule");finish_combine(menu,inv);
+        check(Inventory::id(inv.slots()[2])==c.weapon&&Inventory::quantity(inv.slots()[2])==c.rounds,"reload loaded the wrong round count");
+        if(c.left)check(Inventory::id(inv.slots()[3])==c.ammo&&Inventory::quantity(inv.slots()[3])==c.left,"reload lost the leftover ammunition stack (Combi_00 ok 2)");
+        else check(!inv.slots()[3],"emptied ammunition stack was not removed (Combi_00 ok 1, ItemSort)");
+        check(inv.slots()[0]==(equipped?2u:0u),"reload moved the equipment index");}
+    });
     if(!failures.empty()){for(const auto& f:failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<failures.size()<<" inventory menu section(s) failed.\n";return 1;}
     std::cout<<"All herb recipes in both orders, menu failures/cancel/full capacity, partial powder conversion, full magazine and floor-trigger ItemUse passed; inspection remains a documented gap.\n";
     return 0;

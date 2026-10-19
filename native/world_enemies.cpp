@@ -33,6 +33,7 @@
 #include "effect_rap_blood.h"
 #include "effect_rap_claw.h"
 #include "enemies/en30.h"
+#include "enemies/en26.h"
 #include "effect_collision.h"
 #include "combat_geometry.h"
 #include "wall_capsule.h"
@@ -597,7 +598,7 @@ void RoomWorld::bind_enemy_services(){
     // zonzon1.c:391 -> bhSetBloodPoolLnk, palette = BloodType[id].color.
     s.blood_pool=[](RECVX_ENEMY_WORK* w,const RECVX_ENEMY_VEC* p,int ay,const RECVX_ENEMY_BP_WORK* param){
         if(w->id>=31){enemy_world->unbound_enemy_.insert("bhEne_BloodPool: BloodType[id] ausserhalb");return;}
-        enemy_world->particles_.spawn_pool(param,{p->x,p->y,p->z},ay,recvx_t3_blood_type[w->id].color);};
+        enemy_world->particles_.spawn_pool(param,{p->x,p->y,p->z},ay,recvx_t3_blood_type[w->id].color,w);};
     // CallSystemSe(0, SeNo) -> CallSystemSeBasic: bit 31 is the ExPlayMidi path.
     s.system_se=[](int se){if(std::uint32_t(se)&0x80000000u)enemy_world->audio_.play_system_midi(std::uint32_t(se));else enemy_world->unbound_enemy_.insert("CallSystemSeBasic ohne Bit 31");};
     // mlwP->obj_num; waehrend objP/owP += 8 um acht kleiner (en01.c:2801).
@@ -1230,9 +1231,8 @@ void RoomWorld::bind_enemy_services(){
     en.set_blood3=[](RECVX_ENEMY_WORK* w,int lnk_obj,const RECVX_ENEMY_VEC* ofs,const RECVX_ENEMY_VEC* dv,int n,int tex_id,int type,int wcnt){recvx_t3_set_blood3(w,lnk_obj,ofs,dv,n,tex_id,type,wcnt);};
     en.set_blood4=[](RECVX_ENEMY_WORK* w,int lnk_obj,const RECVX_ENEMY_VEC* ofs,int tex_id,int type){recvx_t3_set_blood4(w,lnk_obj,ofs,tex_id,type);};
     // effsub3.c:145 bhSetBloodPoolLnk aus den EN01-Sterbezustaenden (en01.c:9990/9994/10122/10149,
-    // en01b.c:763), pal_bnk vom Aufrufer (dort 0). lkwkp traegt spawn_pool nicht (Zweig ewP == NULL
-    // in bhEff300 case 2, siehe effect_particles.cpp struct Pool).
-    en.blood_pool_lnk=[](RECVX_ENEMY_WORK*,const RECVX_ENEMY_VEC* pos,int32_t ay,const RECVX_ENEMY_BP_WORK* tab,int pal_bnk)->int{return enemy_world->particles_.spawn_pool(tab,{pos->x,pos->y,pos->z},ay,pal_bnk);};
+    // en01b.c:763), pal_bnk vom Aufrufer (dort 0); lkwkp bleibt die Referenz auf diesen Work.
+    en.blood_pool_lnk=[](RECVX_ENEMY_WORK* epw,const RECVX_ENEMY_VEC* pos,int32_t ay,const RECVX_ENEMY_BP_WORK* tab,int pal_bnk)->int{return enemy_world->particles_.spawn_pool(tab,{pos->x,pos->y,pos->z},ay,pal_bnk,epw);};
     en.nikuhen_effect=[](RECVX_ENEMY_WORK* w,int type,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* v,int tex_id){recvx_t3_set_nikuhen_effect(w,type,pos,v,tex_id);};
     en.nikuhen_effect2=[](RECVX_ENEMY_WORK* w,int type,const RECVX_ENEMY_VEC* pos,int n,int tex_id){recvx_t3_set_nikuhen_effect2(w,type,pos,n,tex_id);};
     en.san_effect=[](RECVX_ENEMY_WORK* w,int jno,const RECVX_EN01_BT* bt){recvx_t3_set_san_effect(w,jno,reinterpret_cast<const RECVX_T3_BT*>(bt));};
@@ -1273,7 +1273,7 @@ void RoomWorld::bind_enemy_services(){
     dog.set_san_effect=[](RECVX_ENEMY_WORK* w,int no,const RECVX_EN04_BT* bt)->int{return recvx_t3_set_san_effect(w,no,reinterpret_cast<const RECVX_T3_BT*>(bt));};
     dog.nikuhen_effect2=[](RECVX_ENEMY_WORK* w,int type,const RECVX_ENEMY_VEC* pos,int n,int tex_id){recvx_t3_set_nikuhen_effect2(w,type,pos,n,tex_id);};
     // effsub3.c:145 bhSetBloodPoolLnk: BP_WORK layout shared with EffectParticles::spawn_pool.
-    dog.blood_pool_lnk=[](RECVX_ENEMY_WORK*,const RECVX_ENEMY_VEC* pos,int32_t ay,const RECVX_ENEMY_BP_WORK* tab,int pal_bnk)->int{return enemy_world->particles_.spawn_pool(tab,{pos->x,pos->y,pos->z},ay,pal_bnk);};
+    dog.blood_pool_lnk=[](RECVX_ENEMY_WORK* epw,const RECVX_ENEMY_VEC* pos,int32_t ay,const RECVX_ENEMY_BP_WORK* tab,int pal_bnk)->int{return enemy_world->particles_.spawn_pool(tab,{pos->x,pos->y,pos->z},ay,pal_bnk,epw);};
     dog.player_hit_check_parts=[](const RECVX_ENEMY_VEC* pos){RECVX_T3_LINK lk;lk.w=nullptr;lk.player=1;recvx_t3_hit_check_parts(lk,pos);};
     dog.player_hit_set=x.player_hit_set;dog.player_hit_get=x.player_hit_get;
     dog.player_capsule=en.player_capsule;
@@ -2365,6 +2365,30 @@ void RoomWorld::control_enemy_works(){
         t.player_library=en19.player_library;
         return t;}();
     recvx_en29_bind(&en29);
+    // --- EN26 (en26.h): Anatomist Zombie; Effektvorlage, Effektslot und Objektfenster ----
+    static const RECVX_EN26_SERVICES en26=[]{RECVX_EN26_SERVICES t{};
+        // effect.c:436 bhSetEffectTb(&sys->ef, ofs, epw, obj): bhEne26_LinkFireEffect beschreibt
+        // nur flg/id/type/sz/px/py/pz/ay (en26.c:816-823) und sx/sy (:835) der persistenten
+        // Vorlage; mdlver, flr_no und ax bleiben vom letzten Schreiber.
+        t.effect_tb=[](const RECVX_EN26_EF* v,const RECVX_ENEMY_VEC* ofs,RECVX_ENEMY_WORK* link,int joint)->int{auto* world=enemy_world;auto& ef=effect_detail::request_template();
+            ef.flg=v->flg;ef.id=unsigned(v->id);ef.type=unsigned(v->type);ef.position={v->px,v->py,v->pz};ef.scale={v->sx,v->sy,v->sz};ef.ay=v->ay;
+            EffectSpawn spawn;spawn.flg=ef.flg;spawn.id=ef.id;spawn.type=ef.type;spawn.flr_no=ef.flr_no;spawn.mdlver=ef.mdlver;
+            spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;spawn.lkono=joint;
+            if(ofs){spawn.has_offset=true;spawn.offset={ofs->x,ofs->y,ofs->z};}
+            unsigned kind=0,index=0;
+            if(link){if(!world->enemy_work_index(link,index)){world->unbound_enemy_.insert("bhSetEffectTb: Linkwork ohne Raumfigur (en26)");return -1;}kind=2;spawn.linked_work=link;}
+            return world->spawn_effect(spawn,kind,index);};
+        // eff[eno].zn / eff[eno].ct3 (en26.c:840-841, :847-848).
+        t.effect_zn_ct3=[](int slot,float zn,int32_t ct3){auto* world=enemy_world;
+            if(slot<0||std::size_t(slot)>=world->sprites_.size()){world->unbound_enemy_.insert("eff[slot] ausserhalb des Pools (en26)");return;}
+            auto& s=world->sprites_[std::size_t(slot)].sprite;s.zn=zn;s.ct3=ct3;};
+        // objP += n, owP += n, obj_num -= n am ML_WORK des Works (en26.c:1180-1190).
+        t.shift_object_window=[](RECVX_ENEMY_WORK* w,int32_t nodes)->int{auto& tr=tree_of(owner_of(w));
+            if(nodes>=0){tr.model_window+=unsigned(nodes);return 1;}
+            if(tr.model_window>=unsigned(-nodes)){tr.model_window-=unsigned(-nodes);return 1;}
+            enemy_world->unbound_enemy_.insert("objP -= n ohne vorheriges += n (en26)");return 0;};
+        return t;}();
+    recvx_en26_bind(&en26);
     // --- EN17 (en17.h): Monster Steve und seine zwei Kettenwerke (Arme) -----------------
     static const RECVX_EN17_SERVICES en17=[]{RECVX_EN17_SERVICES t{};
         // bhEne17_SetLinkWork (en17.c:879): bhSetEnemy(flg 0x80A1, id) mit lkwkp/lkono und mlwP = &epw->mdl[mdl_no].
@@ -2501,6 +2525,7 @@ void RoomWorld::control_enemy_works(){
     recvx_en05_bind(nullptr);
     recvx_en19_bind(nullptr);
     recvx_en29_bind(nullptr);
+    recvx_en26_bind(nullptr);
     recvx_en17_bind(nullptr);
     recvx_en03_bind(nullptr);
     recvx_en03_id_bind(nullptr);

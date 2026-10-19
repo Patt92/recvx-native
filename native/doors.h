@@ -9,7 +9,9 @@ struct DoorRequest {
 };
 class DoorSequence {
 public:
-    void begin(const std::filesystem::path& data,const std::filesystem::path& mods,const DoorRequest& request);
+    // install_back_color=false: bhInitDoor/bhReadDoorData only; njSetBackColor of
+    // bhSetDoor (door.c:243) is left to the caller's door task mode 4.
+    void begin(const std::filesystem::path& data,const std::filesystem::path& mods,const DoorRequest& request,bool install_back_color=true);
     void tick();
     // BEWUSSTE ABWEICHUNG VOM ORIGINAL - NICHT ERNEUT WEGPORTIEREN.
     // Im Original gibt es keinen Tuer-Skip: bhSysCallDoordemo (system.c:939)

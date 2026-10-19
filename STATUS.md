@@ -933,10 +933,81 @@ Nachtrag: (j) Spiegelpass/bhEff112/njMirror (RM_2040, Test `mirror_pass`; offen:
 (k) Kisten-Ausruestungsflaeche ArmsSet center 9 (sub1.c:4975-5105, Test `item_box_equipment_slot`). (l) Muendungslicht Typ 100/101
 (light.c:673-699, Test `native_lighter_effect`). (m) EN01-Blutlache bhSetBloodPoolLnk (en01.c:9990/9994/10122/10149, en01b.c:763,
 Tests `enemy_en01_blood_pool`, `zombie_blood_pool`). (n) GetItem-Bildschirm ohne Statuspad (sub1.c:3447-3460, Test `pickup_gap_pad`).
-RM_0050 Rueckgleiten nach Zombie-Event ist Originalverhalten (event.c:12034 Common 7 ohne spx, player.c:2127). Offen: nativ
-tick_camera vor locomote, Original bhControlPlayer vor bhControlCamera (game.c:46-56). CTest 147/147, je Fix Gegenprobe rot/gruen,
-Dev-App LOAD GAME/Raumeintritt/Tuer gruen; Zopf im Event (RM_1050) in Arbeit.
-**Kein Commit/Push.**
+RM_0050 Rueckgleiten nach Zombie-Event ist Originalverhalten (event.c:12034 Common 7 ohne spx, player.c:2127).
+(o) Zopf als obwp[2] am Linkwork (event.c:2177/2501, objitm.c:310), Test `player_hair_link`. (p) RM_3060 Wasser-SE ListNo char
+(types.h:1754), Test `rm3060_water_action_se`. (q) RM_1140 EOR nach Eventpass, Test `rm1140_lever_back_color`. (r) Kampf-Wandkapsel
+bhCheckC2WallN (pwksub.c:2172), Test `combat_target_rules`; Treffer/Auto-Aim sonst Original. (s) EN26 Anatomist Zombie RM_0110
+(en26.c), Test `rm0110_event_zombie`. (t) Muendungsfeuer Aufrufclip (ps2_NaDraw.c:327), Blutlache lkwkp/pt_flg-Tor (effsub3.c:389).
+(u) bhDrawGeneralPurposeWater (objitm.c:471, Test `object_water_wave`). (v) bhEff362/370/371-373 (effsub4.c). (w) Lichttypen 7-12
+und gm_flg-0x80-Ruecksprung (light.c:367/486-657, Test `light_types_7_12`). (x) bhStartDoorDemo-Blende und Tuertask-Modi
+(room.c:949-1009, system.c:939-1061, verify_doors). (y) Gespiegelter bhDrawEffect (game.c:87/427, effect.c:1225, Test `mirror_pass`).
+(z) Framefolge (game.c:48-59/289-296): "Kamera vor Spieler" war Fehlbefund (tick_camera = bhCheckCut, cut.c:12). Portiert: Gegner ->
+Spieler -> Effekt/ObjItm/Licht, Kopf/bhCalcModel nur mit sp_flg 0x1 (player.c:1365), bhCheckCut nach dem Zeichnen, Kameraschnappschuss
+game.c:58 fuer Zeichnen/Effekte. Tests player_head_pass_gate, effect_after_player, event_camera_first_frame, camera_control_order.
+(aa) bhSetDispObj Spieler (op 0x20): plp->mdflg 0x1 jetzt als player_model_hidden_ (nur Modell, sperrt den Pass nicht) statt player_hidden;
+pl_sleep_cnt-Sonderfall von op 0x20 nach bhInitModelSet (op 0x24) verschoben. Test event_lifecycle_control_release (Gegenprobe rot).
+(ab) bhInitCamSet (0x5b) ruft jetzt bhControlLight (event.c:4745): Lichtpass als RoomWorld::control_lights() ausgekoppelt, in
+tick_after_player (game.c:59) und im 0x5b-Zweig der Runtime nach control_camera. Test light_types_7_12 (RM_1020 Typ 9: Pass + Extra-Aufruf
+= 2 Schritte; Gegenprobe rot "ausserhalb des Passes"). (ac) Lichtlinktod light.c:719-748: je Licht mit flg 0x1|0x2 wird das Zielwerk
+(lkflg 1 plp, 2 ene, 3 obwp, 4 itwp; 5 eff ohne Besitzer, >5 lkflg/lkno = 0) auf flg 0x1 geprueft, sonst flg &= ~0x3 dauerhaft. Befund:
+das Werk-flg-Bit 0x1 kommt aus dem ETTY-flg und hat im Original fuer ene/obwp/itwp/plp keinen Schreiber; alle 33 gelinkten Lichter der
+Raumdaten (lk 2: 19, lk 3: 14) zeigen auf aktive Werke, die Regel ist mit Spieldaten unerreichbar und nur ueber die Pruefnaht
+set_work_flags belegt (Test light_types_7_12 RM_3230 Licht 5 -> obwp[7], Gegenprobe rot "link death") (ad) Wasserlicht draw_tp 0 (RM_9110) ohne Codeaenderung belegt: bhDrawGeneralPurposeWater ->
+bhDrawSpObject setzt Licht 1 = lgtp[aspd] selbst (objitm.c:483/696-703), Punktlichter bhSetHalfLight 0.5 (game.c:352), amb_chr (game.c:344);
+bhDrawEnemy/bhPutModel(plp)/bhDrawEffect schreiben keine EasyMulti-Farben - identisch zum nativen ob_spc-Glint-Satz. CTest 158/158, je Fix Gegenprobe
+rot/gruen, Dev-App Raumeintritt/Hebel/RM_0110/Blutlache/Kiste/LOAD GAME/Tuer gruen.
+(ae) Spiegel-bhDrawMdfEffect (game.c:427 -> effect.c:866/1076, zweite Modifierstufe unter cam.mtx*njMirror): SceneShadow::mirror,
+Renderer-Stufe zwischen Spiegelraum (Phase 2) und Spiegeleffekten (Phase 3) mit mirror_view; world.cpp markiert die im Spiegelaufruf
+erzeugten Modifier statt sie zu verwerfen. Befund: die Passwahl bleibt das Bildschirmvorzeichen von njCnkCoP3 (ps2_NinjaCnk.c:1684,
+lCnkModClipFace), game.c:425 njControl3D(0x100) traegt vor dem Spiegel-bhDrawEffect kein 0x10000 mehr -> ein gespiegeltes geschlossenes
+Volumen tauscht Vorder-/Rueckseiten und ergibt dieselbe (leere) Maske wie ein vorab gespiegeltes Volumen im Normalpass (Original-
+semantik, keine Korrektur erfunden). Test shadow_modifier_pixels: Gleichheit Spiegel-Modifier == vorgespiegeltes Volumen, M*M*T sichtbar
+nur ueber mirror_view, Spiegelraum empfaengt / Spiegeleffekte danach, Ablehnung ohne njMirror-Matrix; drei Gegenproben rot (view statt
+mirror_view, Stufe vor dem Spiegelraum, Stufe nach den Spiegeleffekten). CTest 158/158.
+(af) bhDraw134-Zweitlauf im Spiegel ohne Codeaenderung geschlossen: der Spiegelpass haengt an Effekt 112 (Raumtabellen nur RM_2040/9230,
+bhEff112 nur Stufe 2), bhDraw134 an Effekt 134 (nur RM_4020/8020); kein Raum traegt beide, Skripte spawnen weder 112 noch 134
+(bhHEffectSet2/bhSetEffect aller 205 Raumdisassemblies). Der ef_fnc-Zweitlauf (effect.c:929 unter game.c:427) ist damit fuer 134 unerreichbar.
+Offen: Bildabnahme Wasserraeume/Kopfplatzen/Spiegelraum RM_2040 (Sichtpruefung im Spiel).
+(ag) Raumscan 205/205 mit --enemy-ai on (600 Bilder, Dev-Binary 2026-10-19): 0 Laufzeitfehler. Der aeltere Scan ohne Gegner-KI meldete 94
+unbindbare Befehle (Common 24/25/34 auf uninitialisierte Werke) - Artefakt der KI-Abschaltung, mit KI 0. Verbleibende Meldungen: bhEffModeSet
+0x91 auf Texturhalter (RM_7140, jetzt gebunden, Test event_lifecycle, Gegenprobe rot); 0x23 hinter rom->etcp (RM_3100/3140/7030, Original-UB);
+bhSetMotion frm_no 9226 auf 2-Bild-Raummotion (RM_3120/3220, versteckter Gegner 2, Original-UB, Ledger); bhObj005-Nachbarzelle (12 Raeume, UB);
+unportiert: bhEff_Sub350 (RM_1120/5580), bhEff301 (RM_5810/9302), bhEne06 (RM_6030), bhEne22 (RM_7100), plp mnwPb[mtn_no] (RM_7250).
+(ah) bhEff_Sub350/351 portiert (Giftspeichel der EN01-Giftzombies, en01.c:11190 bhEne01_PoisonEffect; effsub4.c:319/538): Bahn, Wartezeit,
+Bodenaufprall (bhCollisionCheckLine2 0x400, Lage +0.5), Spielertreffer gegen plp->watr (Schaden 10, mode0 2/mode2 1/mode3 0, flg 0x4, mode1 aus
+bhDGCdirCheck) mit drei 351 am plp->djnt_no (neuer Effekthaken player_hit_check_parts = zonzon.c:1376 bhEne_HitCheckParts auf dem Spielerbaum),
+SE 8961 ueber bhEne01_SePlay(lkwkp) mit flg-0x10000-Tor, Spritzer 351 (Wartezeit, Link loesen, Ausblenden, 14 Bilder). Vorher taten die Speichel
+nativ nichts (Luecke 'bhEff350'). Test effect_eff350 (Gegenproben rot), Headless RM_1120/5580 mit Gegner-KI ohne Luecke, 350/351 lebendig.
+(ai) bhEff301 portiert (Blutfleck aus zonzon1.c:301 bhEne_SetBloodstain, viermal je Gegnertreffer; effsub3.c:404-808): Streuung/Strahl,
+Boden (Fall 4-6), Wand (8-10), Typ-6-Satz (16-17), Wasser (12-14, bhCheckWater mit h ueber neuen Dienst set_effect_water_area), Linse
+(bhCheckCamWall2D effsub3.c:1611 gegen cam.mtx, Fall 24/25 als ef_trs2d, gm_flg 0x20 und cam.flg 0x10 = ci->flg 0x200), ATR flg 0x10,
+sys->bl_ct-Staffelung, gm_flg 0x2000000. EffectContext traegt jetzt cam.mtx (camera_view_matrix) und cam.flg 0x10. Vorher entstanden nativ
+keine Blutflecken an Waenden/Boden (Luecke 'bhEff301'). Test effect_eff301 (Gegenproben rot), Headless RM_5810/9302 mit Gegner-KI ohne
+Luecke. CTest 160/160, Dev-App via `./build.sh --test`. Verbleibend aus dem KI-Scan: bhEne06 (RM_6030), bhEne22 (RM_7100), plp mnwPb[mtn_no]
+(RM_7250). **Kein Commit/Push.**
+
+**2026-10-19, Greif-und-Dreh-Statue (bhObj007 + bhCPM2_act_rpsh) portiert (Dev-App via `./build.sh --test`, CTest 158/158):**
+Nutzerbefund "ich kann die Statue nicht drehen" (als RM_1050 gemeldet). Ursache: der Greif-und-Dreh-Gegenstand ist **unportiert** — bhObj007
+(objitm.c:1648, bhJumpObject[7], 100%-matching) und die zugehoerige Spieleraktion bhCPM2_act_rpsh (player.c:4336, mode2 22). Der Objektpass
+dispatchte nur bhObj005/008/010, der Spielerpass kannte mode2 22 nicht. RDT-Scan aller 205 Raeume: einziges Typ-7-Objekt ist **RM_0150 Objekt 5**
+(ident 46, Eisenstatue; Ereignis 16 hebt sie auf py 10) — **RM_1050** (Stufe 1 Raum 05, Steve/Monitor, 18 Objekte alle Typ 0) **hat keine Statue**.
+Port: `control_turn_objects`/`control_turn_object` (bhObj007, objitm.c:1648-1845 mit Originalzeilen) + `tick_turn` (rpsh), mode2-22-Zweig in
+runtime.cpp analog bhCPM2_act_psh, Pad-Bit-Korrektur 0x21/0x42 (pad.c Analog-vorwaerts/-zurueck statt nur 0x20/0x40). Test `turn_object`
+(RM_0150, Greifen -> Drehen bis |ay|<182 -> ev_flg 2 -> Freigabe, Gegenprobe rot). StartVibrationEx als benannte Host-Luecke.
+**Nachkontrolle des Unteragenten-Diffs (2026-10-19, jede Zeile gegen objitm.c:1648-1845 / player.c:4324-4490 nachgelesen), vier Abweichungen behoben:**
+(1) Die Statue drehte nur in `angles[1]`, die Zeichenwurzel liest aber `transform.yaw` (RoomWorld::append) -> sichtbar erst der Endsprung auf 0;
+jetzt je Drehbild `transform.yaw = angles[1]` (Test prueft die Mitdrehung, Gegenprobe rot "Zeichenwurzel folgt op->ay nicht").
+(2) `ABS((short)plp->ayp - ayn)` mit `short ayn`: int-Differenz zweier shorts ohne Nachtruncation; der Port truncierte die Differenz
+auf int16 (ein Bild Unterschied an der Wrap-Grenze). (3) Kopf-Latch `head_push_owned` wurde zwischen Schiebe- und Drehzweig zurueckgesetzt,
+EXP1_I(0)-Freigabe lief so jedes Bild statt nur in Fall 0 (idempotent, aber nicht Original); Latch jetzt geteilt. (4) `plp->px = PEXP0_F(72) = ...`
+(spx/spz = collision_safe_) in Fall 1 (:1716) und 2/3 (:1786/:1826) fehlte -> nach dem Loslassen haette der Settle-Schritt von act_std
+zur alten sicheren Lage zurueckgezogen. Annahme bleibt: plp->ar = 3.5 (PlyInfo[*][0]); en19.c:501 (ar_bak) nicht gleichzeitig. CTest 158/158.
+**Nachgezogen (dieselbe Ursachenkette, Dev-App via `./build.sh --test`, CTest 158/158):** Player_controll 128 (event.c:9640) war im Port
+unvollstaendig — world.cpp op 0x64 0x80 behandelte 128 wie 139 und liess `mtn_add=65536`, `flg|=0x10` (Koerper-Wandpass, player.c:1600),
+`mnwP=plmthp`, `mode0=1`, `stflg&=~0x10000`, `flg&=~0x210000` weg. Folge: nach dem Freigabe-Cinematic blieb der Spieler in mode0 7 / flg
+0x10000 haengen und konnte nicht zur Statue laufen (alle Raeume mit Spieler-Freigabe-Cinematics). Jetzt voll portiert; Test
+`event_lifecycle_control_release` (bhLoadWork 0 -> Player_controll 128 -> mode0 1, flg/stflg 0x10000 weg, flg 0x10 an; Gegenprobe rot
+"mode0 bleibt 7"). **Kein Commit/Push.**
 
 **Zu verifizieren: RM_0090 Security Box verformt** (Nutzerbefund 2026-10-18): nach Abholen der Adlermedaille an der *anderen* Box ist die
 vordere Box (obj[5], Kamera 9) auf dem Rueckweg verformt (Klappe offen + Deckel hochgeklappt), ohne dass sie benutzt wurde; beim Untersuchen
@@ -946,8 +1017,10 @@ einzeln (mit Gegner-KI) lassen obj[5] unveraendert; Raumskripte schreiben nur Kn
 nie den Deckel. Naechster Schritt: F5-Snapshot vom Nutzer im kaputten Zustand, dann Knotenwinkel direkt auslesen; alternativ Differenz
 gegen den Stand vom 2026-10-17 (HEAD-Worktree) im selben Ablauf.
 
-**Naechster Posten:** Weiter offen in RM_9370 (nicht Ereignis 5): die Raumeffekte 35/50/54/70-76/80/400/402/405/426 dieses Raums sind nicht
-portiert (Raumtabelleneffekte ohne Prozedur melden keine Luecke). Weiter offen: sys->obwp[0..3] (Waffe rechts/links, Zopf) ueber
+**RM_9370 Raumeffekte 35/50/54/70-76/80/400/402/405/426 (2026-10-19 geprueft, keine Luecke):** das sind Texturhalter, keine Prozeduren:
+room.c:306 laedt fuer Tabelleneintraege mit id 30..99 und >= 400 den Atlas (sys->ef_tn[id]); in bhJumpEffect (effect.c:33) stehen 35/50/54/70-76/80
+auf bhEffDmy, 400+ liegen hinter bhJumpEffect4[50]. Alle 16 Halter dieses Raums sind in native ported_effect_atlas (effect_sprites.cpp:1070)
+enthalten; die Prozeduren, die sie nutzen, sind separat gefuehrt. Weiter offen: sys->obwp[0..3] (Waffe rechts/links, Zopf) ueber
 Art 2 nicht aufloesbar (Waffe ohne eigenen owP-Baum, Zopf nur als Nachbildmodell) - Typen 1/3/4/5 von 0x86 mit Art 2
 Index 0..3 (in den Daten nicht genutzt); Art-1-Knotenlagen von 0x86 nicht je Raum gemessen. **Kein Commit/Push.**
 
