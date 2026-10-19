@@ -797,7 +797,7 @@ void AudioMixer::init_spu(){
     room_fx_target_=0;fx_level_timer_=0;current_fx_level_=0;add_fx_level_=0;
     set_rev(1,5,0);set_rev(2,5,current_fx_level_);
 }
-void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume,bool loop){if(slot>=slots_.size()||!clip||!clip->channels||clip->channels>2||clip->rate<8000||clip->rate>96000||clip->samples.size()%clip->channels||!clip->frames()||!std::isfinite(volume)||volume<0||volume>8||(clip->loop_end&&(clip->loop_start>=clip->loop_end||clip->loop_end>clip->frames())))throw std::runtime_error("invalid audio channel/clip");Channel c;c.volume=volume*clip->volume;pan_gains(clip->pan,c.left,c.right);c.clip=std::move(clip);c.loop=loop;slots_[slot]=std::move(c);
+void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume,bool loop){if(slot>=slots_.size()||!clip||!clip->channels||clip->channels>2||clip->rate<8000||clip->rate>96000||clip->samples.size()%clip->channels||!clip->frames()||!std::isfinite(volume)||volume<0||volume>8||(clip->loop_end&&(clip->loop_start>=clip->loop_end||clip->loop_end>clip->frames())))throw std::runtime_error("invalid audio channel/clip");Channel c;c.volume=volume*clip->volume;pan_gains(clip->pan,c.left,c.right);c.clip_rate=clip->rate;c.clip=std::move(clip);c.loop=loop;slots_[slot]=std::move(c);
     auto& voice=slots_[slot];if(voice.clip->spu)key_on(voice.clip,voice.env,voice.core);}
 void AudioMixer::play_layers(unsigned slot,std::vector<Layer> layers,float volume,bool loop){
     if(layers.empty())throw std::runtime_error("audio voice without layers");
@@ -813,6 +813,18 @@ void AudioMixer::play(unsigned slot,const std::string& archive,unsigned id,float
 }
 void AudioMixer::stop(unsigned slot,unsigned fade_ticks){if(slot>=slots_.size()||fade_ticks>600*game_tick_hz)throw std::runtime_error("invalid audio slot");auto& s=slots_[slot];if(fade_ticks){s.target=0;s.fade=fade_ticks*audio_frames_per_tick;}else release_channel(s);}
 bool AudioMixer::active(unsigned slot)const{return slot<slots_.size()&&(bool(slots_[slot].clip)||bool(slots_[slot].sequence));}
+// adxwrap.c:650 GetAdxPlayTime: Abspielzeit des Stroms in Hundertstelsekunden. Die Position
+// des Kanals zaehlt Quellbilder (position += rate/48000 je Ausgabebild, siehe mix), also gilt
+// dieselbe Rechnung wie im Original: SampleCount / SamplingRate * 100. Ein natuerlich zu Ende
+// gelaufener Strom behaelt seine Endzeit (nur `clip` wird geloest); erst stop/release setzt den
+// Platz und damit die Zeit auf 0 zurueck. Nur die Plaetze 0 und 1 sind im Original angemeldet
+// (sdfunc.c:310 RegistAdxStreamEx(2, ..)); fuer jeden anderen gibt es dort kein Handle.
+unsigned AudioMixer::adx_play_time(unsigned slot)const{
+    if(slot>=2||slot>=slots_.size())return 0;
+    const auto& channel=slots_[slot];
+    if(!channel.clip_rate)return 0;
+    return unsigned(channel.position/double(channel.clip_rate)*100.0);
+}
 std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)throw std::runtime_error("audio mix too large");std::vector<std::int16_t> out(std::size_t(frames)*2);
     for(unsigned f=0;f<frames;++f){float left=0,right=0;
         // Effect input per SPU2 core (VMIXEL/VMIXER); ADX streams enter dry only (TSNDDRV MMIX 0xffcf/0xffcc).

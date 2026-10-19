@@ -5,6 +5,11 @@
 // Semantik aus player.c:6746-7204 und pwksub.c:395-503.
 #include "player_head.h"
 #include "player_stairs.h"
+#include "world.h"
+#include "room.h"
+#include "asset_io.h"
+#include <filesystem>
+#include <vector>
 #include "ninja_matrix.h"
 #include "ninja_math.h"
 #include <iostream>
@@ -48,7 +53,7 @@ RECVX_HEAD_INPUT frame(float px,float py,float pz,int yaw=0,int works=128){
 }
 }
 
-int main(){try{
+int main(int argc,char** argv){try{
     _Make_SinTable();
     std::int32_t out[6][3];
 
@@ -329,5 +334,38 @@ int main(){try{
      check(st.unsupported_services==RECVX_STAIR_UNBOUND_HOKAN,
            "the open stair service must stay reported");}
 
+    if(argc>1){
+        // Skriptbefehle 0x40 bhLookGsetPlStart (event.c:3488) und 0x41 bhLookGsetPlStop (:3539)
+        // am produktiven Raumbesitzer: sie schreiben denselben Kopfzustand (plp->exp1), den die
+        // Kopfsteuerung oben fuehrt. 0x40 ist 8 Byte lang (Vorzeichenbits, dann drei u16 in
+        // Hundertsteln), 0x41 zwei.
+        const std::filesystem::path data=argv[1];
+        const auto room=recvx::read_asset_file(data/"rooms/RM_0040.RDT",64*1024*1024);
+        const auto stage=recvx::decode_scene(room);auto actor=stage.spawns.at(0);
+        std::size_t motion=0;std::int64_t frame=0;recvx::AudioMixer audio(data);
+        recvx::RoomWorld world(room,stage,actor,motion,frame,audio,data,{},"RM_0040");
+        recvx::Inventory inv;recvx::MessageDialog dialog;recvx::EventVm events(room,inv,dialog);
+        world.bind_player_collision(events);
+        RECVX_HEAD_STATE head{};
+        // Ohne gebundenen Kopf bleibt der Befehl ungebunden statt zu raten.
+        check(!world.bind({0x41,0,0,0,std::vector<std::uint8_t>{0x41,0x00}}),
+              "0x41 ohne Kopfbesitzer muss ungebunden bleiben");
+        world.bind_player_head(head);
+        head.flags=RECVX_HEAD_LOOK;              // 0x4 bleibt unberuehrt
+        head.target_kind=RECVX_HEAD_TARGET_ENEMY;
+        // v1 = 0x05: x und z negativ, y positiv.
+        const std::vector<std::uint8_t> start{0x40,0x05, 0x64,0x00, 0xC8,0x00, 0x2C,0x01};
+        check(world.bind({0x40,0,0,0,start}),"0x40 bhLookGsetPlStart nicht gebunden");
+        check((head.flags&0x18u)==0x18u,"0x40: Flags 0x8 und 0x10 gesetzt");
+        check(head.flags&RECVX_HEAD_LOOK,"0x40: die uebrigen Kopfflags bleiben stehen");
+        check(head.target_kind==RECVX_HEAD_TARGET_POINT,"0x40: Zielart 1 (gespeicherter Punkt)");
+        check(std::fabs(head.target_point[0]+1.0f)<1e-6f,"0x40: x mit Vorzeichenbit 0x1");
+        check(std::fabs(head.target_point[1]-2.0f)<1e-6f,"0x40: y ohne Vorzeichenbit");
+        check(std::fabs(head.target_point[2]+3.0f)<1e-6f,"0x40: z mit Vorzeichenbit 0x4");
+        check(world.bind({0x41,0,0,0,std::vector<std::uint8_t>{0x41,0x00}}),"0x41 bhLookGsetPlStop nicht gebunden");
+        check(!(head.flags&0x18u)&&(head.flags&RECVX_HEAD_LOOK),"0x41: nur 0x8 und 0x10 geloescht");
+        check(head.target_kind==RECVX_HEAD_TARGET_POINT&&std::fabs(head.target_point[0]+1.0f)<1e-6f,
+              "0x41: Zielart und Punkt bleiben stehen");
+    }
     std::cout<<"player head control ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<"player head: "<<e.what()<<'\n';return 1;}}

@@ -48,6 +48,9 @@ public:
     std::size_t motions() const {return motions_.size();}
     const MotionClip& motion_clip(std::size_t i)const{return motions_.at(i).value();}
     bool has_motion(std::size_t i) const {return i<motions_.size() && motions_[i] && motions_[i]->positions.size()==bones();}
+    // mnwP[i] der Bibliothek ohne Knotenzahlpruefung: sys->plmthp traegt auch Motionen fremder
+    // Modelle (en27.c:61 Mottenei auf plp->mdl[6]/[7] mit den Spielermotionen 93..96).
+    const MotionClip* library_motion(std::size_t i)const{return i<motions_.size()&&motions_[i]?&*motions_[i]:nullptr;}
     unsigned motion_frames(std::size_t i) const;
     void install_weapon_motions(const std::vector<std::optional<MotionClip>>& clips);
     // bhGetTransZ tables: element zero is metadata; speed keys start at one.

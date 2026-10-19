@@ -152,7 +152,7 @@ ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset&,std::size
 }
 bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio,EventVm* events){
     body_=&player;
-    const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){original_.reset();weapon_=weapon;player_=inventory.player;asset_.reset();
+    const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){original_.reset();weapon_=weapon;player_=inventory.player;asset_.reset();right_part2_hidden_=false;weapon_models_hidden_=false;
         if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);bare_hands_=weapon?WeaponAsset::load(data_,inventory.player,0,mods_):asset_;}}
     const bool supported=weapon_==2||weapon_==3||weapon_==4||weapon_==5||weapon_==6||weapon_==7||weapon_==8||weapon_==9||weapon_==12||weapon_==13||
         weapon_==14||weapon_==15||weapon_==16||weapon_==17|| // Granatwerfer: Abschuss player.c:4990, Geschoss bhEff130
@@ -269,6 +269,9 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // schreibt sie um jeden Kernaufruf, statt eine eigene Kopie zu fuehren.
     if(events)view.stflg=events->flags[14][0];
     recvx_combat_tick(engine.core,&engine.sys,&engine.result);engine.pad=pad;accumulate_aim(engine.result);
+    // player.c:6075: der Schreibauftrag ist einmalig, nicht bei jedem spaeteren Pass erneut.
+    auto& weapon_object=*recvx_combat_weapon_object(engine.core);
+    if(weapon_object.part2_hidden_cleared){right_part2_hidden_=false;weapon_object.part2_hidden_cleared=0;}
     if(events)events->flags[14][0]=view.stflg;
     if(events)inventory.chamber_empty=(events->flags[11][0]&0x40000u)!=0;
     // cam.pe_ax/pe_pers fuer bhInitPlEyeCamera, cam.ppers und cam.ax/axp = 0 (act_scp) an die Augenkamera.
@@ -341,7 +344,7 @@ const std::set<std::string>& CombatController::unbound_routines()const{
 void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld*)const{
     if(bones.empty())return;
     const auto hands=body_?body_->script_nodes(bones):bones;
-    if(scripted){if(bare_hands_)bare_hands_->append(scene,hands);}
-    else if(asset_)asset_->append(scene,hands);
+    if(scripted){if(bare_hands_)bare_hands_->append(scene,hands,false,weapon_models_hidden_);}
+    else if(asset_)asset_->append(scene,hands,right_part2_hidden_,weapon_models_hidden_);
 }
 }

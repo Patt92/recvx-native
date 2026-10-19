@@ -42,6 +42,8 @@ void EventVm::inherit_progress(const EventVm& previous){
     // 0x1000/0x10000 Festkamera, 0x20000 bhFixEventCamPly, 0x10, 0x200000) enden mit dem Raum;
     // sonst haelt ein im Vorraum gesetztes 0x20000 jede Untersuchungskamera fest (RM_1130 -> RM_1080).
     flags[11][0]&=room_change_gm_mask;
+    // player.c:862 bhInitRoomChangePlayer: plp->stflg &= 0x78280000 (Mottenei-Marken, Gift, 0x40000000).
+    flags[14][0]=previous.flags[14][0]&0x78280000u;
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
     evt_posno=previous.evt_posno; // sys->evt_posno lebt im SYS-Bereich ueber das Raumladen hinaus
     values[21]=previous.values[21]; // sys->rcase lebt ueber das Raumladen hinaus (bhRoomCaseNo 0x37, bhSv 21; system.c:1623 waehlt damit die naechste RDX)
@@ -154,6 +156,35 @@ int EventVm::instruction(Task& t){
     // bhSetFixedCut (cut.c:448) clears gm_flg 0x1000 at once; game.c:274 must not see it later.
     case 0x2a:{const auto mode=v.u8(p+1);if(!mode){flags[5][0]|=1;fixcno=v.u8(p+2);}world(t,op,4);if(!mode)flags[11][0]&=~0x1000u;else if(mode==1){flags[5][0]&=~1u;flags[11][0]&=~0x1000u;}return 1;}
     case 0x39:world(t,op,4);return 1;
+    // event.c:3488 bhLookGsetPlStart / :3539 bhLookGsetPlStop: Blickpunkt des Spielerkopfes.
+    case 0x40:world(t,op,8);return 1;
+    case 0x41:world(t,op,2);return 1;
+    // Befehle mit bekannter Laenge, deren Wirkung nativ keinen Besitzer hat. Sie werden
+    // korrekt uebersprungen und als offene Bindung gemeldet, statt den Raum anzuhalten:
+    // ein unbekannter Befehl wirft unten und beendet den Lauf.
+    //   0x6F bhObjLinkSetObjPly (event.c:5263): plp->lkwkp = &obwp[v0], lkono, flg 0x80,
+    //        lox/loy/loz. Der Spieler waere Kind einer Objektbindung; der Port fuehrt
+    //        Bindungen nur fuer Objekte, Gegner und Items.
+    //   0x82 bhSetDebugLoopEx (:2421): st_flg 0x10, cam.ct0 aus dem u16, cam.frm 0,
+    //        cam.mode0 1, bhInitEventCamera, gm_flg 0x10, bhSetEventHideObjLgt, bhCheckCut.
+    //   0x97 bhEffectKokuenSet (:1986): Effekt 2 type 1 an bhEtask[v0].work->mlwP->objP->pos
+    //        mit den bpx/bpy/bpz-Vorzeichen der laufenden Eventaufgabe (beides ohne Besitzer).
+    //   0xAA bhEffUVSet2 (:7159): UVs in op->pvp von eff[sys->efid[v0]]; sys->efid hat
+    //        nativ keinen Besitzer (siehe world.cpp bhSetEffectLink lkflg 5).
+    //   0xAF bhPlyHandChange (:7378) bindet RoomWorld::bind (Handobjekte, Waffenmodelle);
+    //        nur das Parken eines gezogenen Feuerzeugs bleibt dort gemeldete Luecke.
+    //   0xD3 bhRankingCall (:9049): Rangliste des Battle Game ueber das Hostfrontend.
+    case 0x6f:world(t,op,12);return 1;
+    case 0x82:world(t,op,4);return 1;
+    case 0x97:world(t,op,8);return 1;
+    case 0xaa:world(t,op,10);return 1;
+    case 0xaf:world(t,op,4);return 1;
+    case 0xd3:world(t,op,2);return 1;
+    // event.c:4110 bhEffectSandSet: v0 Raumgegner, v1 Vorzeichenbits, v2 Lageart, drei u16
+    // Betraege, dann der Typ als ein Byte — bhScePtr rueckt danach um zwei (12 Byte gesamt).
+    case 0x98:world(t,op,12);return 1;
+    // event.c:8577 bhEffectSandSetMatsumoto: drei Bytes nach dem Befehl.
+    case 0xc3:world(t,op,4);return 1;
     // Original Event_T_timer: one increment per scheduler pass with active work.
     case 0x60:{const auto limit=v.u16(p+4);advance(6);return event_timer<limit;}
     case 0x61:event_timer=0;return advance(2);
@@ -198,6 +229,19 @@ int EventVm::instruction(Task& t){
     case 0xc:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");if(v.u8(p+2))floors_[index].flags&=~1u;else floors_[index].flags|=1;world(t,op,4);return 1;}
     case 0x38:{const auto kind=v.u8(p+1),index=v.u8(p+2),half=v.u8(p+3);const auto target=unsigned(v.u16(p+4))*65536u+(half?32768u:0);if(!animation_frame)throw std::runtime_error("frame condition requires native actor binding");advance(6);return animation_frame(kind,index)<target;}
     case 0x1b:{const auto slot=v.u8(p+2);if(!audio_active)throw std::runtime_error("audio condition requires native mixer binding");advance(6);return audio_active(slot);}
+    // event.c:1523 bhAdxTimeCk: Abspielzeit des ADX-Stroms gegen einen Grenzwert in
+    // Hundertstelsekunden. Sechs Byte: Platz, u16-Grenze, Modus, Fuellbyte. Die Modi 0..3
+    // liefern 0, WENN die Bedingung zutrifft (:1546-1588), die Modi 4 und 5 liefern 1
+    // (:1590-1610) — in beiden Faellen ist das Ergebnis also dieselbe Tabelle wie bei
+    // bhMovieTimeCk unten. Anders als dort hat das Original KEINE Vorpruefung auf einen
+    // laufenden Strom, und der switch hat keinen default: bei einem Modus ueber 5 bleibt die
+    // rohe Zeit stehen und gilt als wahr, sobald sie ungleich 0 ist (:1544).
+    case 0x1e:{v.require(p,6);const unsigned limit=v.u16(p+2),mode=v.u8(p+4),slot=v.u8(p+1);
+        if(!adx_time)throw std::runtime_error("ADX time condition requires native mixer binding");
+        const unsigned time=adx_time(slot);advance(6);
+        switch(mode){case 0:return time!=limit;case 1:return time<=limit;case 2:return time<limit;
+                     case 3:return time>=limit;case 4:return time>limit;case 5:return time==limit;
+                     default:return int(time);}}
     // bhMovieTimeCk compares centiseconds and returns the inverted condition.
     case 0xac:{v.require(p,6);const unsigned limit=v.u16(p+2),mode=v.u8(p+4);
         if(!movie_active||!movie_time)throw std::runtime_error("movie time condition requires native player binding");
@@ -298,7 +342,10 @@ int EventVm::instruction(Task& t){
     case 0xab:world(t,op,6);return 1; // bhBGColorSet, including deferred application.
     case 0xd1:world(t,op,10);return 1;
     case 0x17:world(t,op,8);return 1;
-    case 0x2d:case 0x2e:world(t,op,2);return 1;
+    case 0x2d:world(t,op,2);return 1;
+    // event.c:1827 bhMotionPauseSetPly: sys->sp_flg Bit 0x1, das Tor des Spielerpasses
+    // (player.c:1365 bhControlPlayer). Dieselbe Bank, die die Event-VM selbst fuehrt.
+    case 0x2e:if(v.u8(p+1)==1)flags[6][0]|=1u;else if(v.u8(p+1)==0)flags[6][0]&=~1u;return advance(2);
     case 0x30:world(t,op,4);return 1;
     case 0x48:world(t,op,6);return 1;
     case 0x86:world(t,op,16);return 1;
@@ -394,7 +441,13 @@ int EventVm::instruction(Task& t){
     case 0x89:change_player=v.u8(p+1);flags[10][0]|=0x80;advance(2);return 1; // bhPlayerChangeSet: cng_pid + cb_flg 0x80 (consumer pending)
     case 0xae:inventory_.infected=false;return advance(2); // bhPlayerPoison2Cr: ply_stflg[0] &= ~0x200000
     case 0xa0:map_parameters={v.u8(p+1),v.u8(p+2),v.u8(p+4),v.u8(p+3)};flags[10][0]|=0x10000;advance(6);return 1; // bhMapSystemOn: mp_prm[0..3] (consumed by runtime)
-    case 0x3a:case 0xa1:case 0xce:case 0xcf:case 0xc5:case 0x87:world(t,op,2);return 1;
+    case 0xce:case 0xcf:case 0xc5:case 0x87:world(t,op,2);return 1;
+    // event.c:3465 bhMutekiSetPl: plp->flg Bit 0x4. Solange es steht, ueberspringt der
+    // Gegnerpass jeden Angriff auf den Spieler (zum Beispiel en17.c:1595).
+    case 0x3a:{auto& flg=flags[13][0];if(v.u8(p+1))flg|=0x4u;else flg&=~0x4u;player_flags=flg;return advance(2);}
+    // event.c:6849 bhTrapDamageSet: plp->stflg Bit 0x1000 — v0 == 0 SETZT es, jeder andere
+    // Wert loescht es (im Original genau so herum).
+    case 0xa1:if(!v.u8(p+1))flags[14][0]|=0x1000u;else flags[14][0]&=~0x1000u;return advance(2);
     case 0x76:world(t,op,4);return 1; // bh3dSoundFlagSet
     case 0xa5:world(t,op,4);return 1; // bhEneRenderSet: mdflg 0x200 (renderer binding pending)
     case 0x2c:world(t,op,4);return 1;  // bhEffectSet: bhSetEffect im geteilten eff[512]
@@ -403,8 +456,22 @@ int EventVm::instruction(Task& t){
     case 0x56:world(t,op,6);return 1;  // bhEffBloodPoolSet: Blutlache am Gegnerwork
     case 0x58:world(t,op,14);return 1; // bhEffBloodPoolSet2: Blutlache an einer Lage
     case 0x7f:world(t,op,6);return 1; // bhSoundPanSet
-    case 0x46:world(t,op,8);return 1; // bhSetNextRoomBgm
-    case 0x47:world(t,op,10);return 1; // bhSetNextRoomBgSe
+    // event.c:2574 bhSetNextRoomBgm: Byte 1 bleibt ungelesen, dann ComNextBgm, PointNextBgm,
+    // OfsPointBgm (u16), NextBgmNo und FadeNextBgm = Byte * 10. Acht Byte.
+    case 0x46:next_sound.bgm_com=v.u8(p+2);next_sound.bgm_point=v.u8(p+3);next_sound.bgm_offset=v.u16(p+4);
+        next_sound.bgm_number=v.u8(p+6);next_sound.bgm_fade=unsigned(v.u8(p+7))*10u;return advance(8);
+    // event.c:2612 bhSetNextRoomBgSe: Byte 1 waehlt den Raumtonplatz, danach ComNextBgSe,
+    // PointNextBgSe, OfsPointBgSe (u16), NextBgSeNo (u16), FadeNextBgSe = Byte * 10 und
+    // SetNextBgSeFlag (Byte 9 == 0 ergibt 1). Zehn Byte. Die Originalfelder haben zwei
+    // Plaetze (sdfunc.c:39/40/105); ein groesserer Index schriebe dort hinter das Feld.
+    case 0x47:{const unsigned slot=v.u8(p+1);
+        // Ein groesserer Index schriebe im Original hinter das Feld; nativ wird der Befehl
+        // dann nur gemeldet, statt fremden Speicher zu beschreiben oder etwas zu erfinden.
+        if(slot>=next_sound.se_com.size()){world(t,op,10);return 1;}
+        next_sound.se_com[slot]=v.u8(p+2);next_sound.se_point[slot]=v.u8(p+3);next_sound.se_offset[slot]=v.u16(p+4);
+        next_sound.se_number[slot]=v.u16(p+6);next_sound.se_fade[slot]=unsigned(v.u8(p+8))*10u;
+        next_sound.se_set[slot]=v.u8(p+9)==0?1u:0u;
+        return advance(10);}
     // bhGameOverSet clears ts_flg bit 0x4000; the runtime starts gameover.c gov_md0.
     case 0xc6:flags[12][0]&=~0x4000u;world(t,op,2);return 1;
     // bhReturnTitleEvt (event.c:8859): two bytes; the runtime performs RequestAllStopSoundEx + bhReturnTitle.
@@ -435,7 +502,10 @@ int EventVm::instruction(Task& t){
     }
 }
 void EventVm::run(Task& t,bool scenario){
-    if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);if(result==1)continue;/* bhEventScheduler2/bhScenarioCheck (event.c:13045-13059): jede 0-Rueckgabe bei bhIfelFlg > 0, auch bhSleep/bhSleeping/bhEvtNext/bhEvtEnd und das Ende von bhEwhile, springt im selben Durchlauf auf --G_Sp. */if(ifel_>0){gsp_-=4;--ifel_;if(gsp_<0)throw std::runtime_error("event G_Sp outside script");t.pc=std::size_t(gsp_);continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
+    if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);/* event.c:13046 `while (bhScenarioJmpT[*bhScePtr]() != 0);` — JEDER Wert ungleich 0 laeuft
+       weiter, nicht nur die 1. Das zaehlt fuer Befehle, die etwas anderes als 0/1 liefern
+       koennen: bhAdxTimeCk gibt bei einem Modus ueber 5 die rohe Abspielzeit zurueck
+       (event.c:1544 ohne default), und bhCkFlg liefert mode ^ flag (event.c:4). */if(result!=0)continue;/* bhEventScheduler2/bhScenarioCheck (event.c:13045-13059): jede 0-Rueckgabe bei bhIfelFlg > 0, auch bhSleep/bhSleeping/bhEvtNext/bhEvtEnd und das Ende von bhEwhile, springt im selben Durchlauf auf --G_Sp. */if(ifel_>0){gsp_-=4;--ifel_;if(gsp_<0)throw std::runtime_error("event G_Sp outside script");t.pc=std::size_t(gsp_);continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
     catch(const std::exception& e){t.blocked=true;std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(t.pc-base_)<<" (opcode 0x"<<unsigned(room_.at(t.pc))<<"): "<<e.what();if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());}
 }
 void EventVm::advance_game_clock(unsigned vertical_blanks){

@@ -139,6 +139,8 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // mdl_n: das ML_WORK bleibt genullt (obj_num 0); bhCalcTree/Draw laufen leer, kein Fehler.
     bool model_absent=false;
     WorldEntity* model_owner=nullptr;unsigned model_window=0;int motion_library=-1;
+    // epw->mnwP = (MN_WORK*)sys->plmthp (en27.c:61): die Motionbibliothek des Spielers.
+    bool player_motion_library=false;
     // `epp->mlwP = &epw->mdl[base]` (en13.c:111-184): mdl[k] dieses Works ist
     // mdl[base+k] des Elternworks; model_bank ist dessen Modellreihe, nullptr = eigene.
     const PlayerAsset* model_bank=nullptr;unsigned model_base=0;
@@ -195,10 +197,25 @@ public:
         // Der vorige Stand von recvx_en19_bound(); als void*, damit world.h die
         // Dienststruktur des Gegnermoduls nicht kennen muss.
         const void* previous_en19_;
+        // bhEff_Sub356 (effsub4.c:1189) ruft EN01-Code: T3-Ergaenzung und EN01-Kontext wie im Gegnerpass.
+        const void* previous_ext_;const void* previous_en01_;std::shared_ptr<void> en01_ctx_;
     };
     std::size_t blood_particles()const{return particles_.active();}
     // event.c:4302 bhEffBloodSet: epw->djnt_no und bhEne_SetBlood2 am Gegnerwork.
     bool script_blood_set(unsigned index,unsigned joint,int type,unsigned flags,int turn,NJS_POINT3 offset);
+    // event.c:4110 bhEffectSandSet (0x98): bhEne02_SetSandEffect(ene[enep[index].wrk_no], &pos, type);
+    // `relative` ist v2 != 0, dann kommen x und z zur Gegnerlage (y bleibt der reine Versatz).
+    bool script_sand_effect(unsigned index,NJS_POINT3 offset,bool relative,int type);
+    // event.c:8577 bhEffectSandSetMatsumoto (0xC3): bhEne02_SetSandEffectEV(ene[work], type1, type2).
+    bool script_sand_effect_ev(unsigned work,int type1,int type2);
+    // Die EN02-Dienste gelten nur waehrend des Gegnerpasses (control_enemy_works bindet und
+    // loest sie wieder). Der Skriptbefehl merkt seinen Auftrag deshalb vor und der Gegnerpass
+    // desselben Bildes fuehrt ihn aus, bevor die Gegner laufen — dieselbe Reihenfolge wie im
+    // Original (game.c: Eventtask vor bhControlEnemy vor bhControlEffect). Lage und Typ sind
+    // schon im Skriptpass bestimmt, also aus demselben Stand wie dort.
+    struct SandRequest {RECVX_ENEMY_WORK* work=nullptr;NJS_POINT3 pos{};int type=0,type2=0;bool ev=false;};
+    std::vector<SandRequest> pending_sand_;
+    void run_pending_sand();
     bool enemy_dead(unsigned index)const;
     // bhObjDposCk (event.c:7605): obwp[index].ay und objP[physical].ang[0] eines Raumgegners.
     bool object_ay(unsigned index,int& ay)const;
@@ -421,6 +438,9 @@ public:
     bool player_killed()const{return player_killed_;}
     void set_player_attack(bool attacking){player_attacking_=attacking;player_at_flags_=(player_at_flags_&~2u)|(attacking?2u:0u);} // plp->at_flg & 2
     void set_player_weapon(unsigned wpnr_no){player_weapon_=wpnr_no;} // plp->wpnr_no for bhControlPlayer effects
+    void set_weapon_part2_hook(std::function<void()> hook){hide_weapon_part2_=std::move(hook);}
+    // sys->obwp[0]/[1].mdflg 0x1 (objitm.c:364: nicht in sys->ob_hlg) beim Waffenmodellbesitzer.
+    void set_weapon_models_hook(std::function<void(bool)> hook){weapon_models_hidden_=std::move(hook);}
     void set_player_way(std::int16_t way){player_way_=way;} // plp->way, written by the combat pass (player.c:1707/4992)
     void set_player_speed(float spd){player_spd_=spd;} // plp->spd of the native action pass
     std::optional<float> take_player_speed(){if(!player_spd_written_)return std::nullopt;player_spd_written_=false;return player_spd_;}
@@ -498,6 +518,8 @@ public:
     // Pruefnaht: das Werk-flg (ETTY flg bei bhSetEneMdl eneset.c:183 / bhSetObject / bhSetItem; e.object_flags,
     // bei gebundenem Gegnerwerk zusaetzlich enemy.flg). Im Original hat Bit 0x1 nach dem Setzen keinen Schreiber.
     void set_work_flags(unsigned kind,unsigned index,unsigned flg);
+    // Testnaht: fn im Rahmen der Gegnerrueckrufe (EnemyCallbackFrame) ausfuehren, wie aus dem Gegnerpass.
+    void run_enemy_callback(const std::function<void()>& fn){EnemyCallbackFrame frame(this);fn();}
     // sys->itwp[n].px/py/pz (event.c:7896 bhEtcAtariEvtPosSet).
     void set_item_position(unsigned index,NJS_POINT3 pos){entity(3,index).transform.position=pos;}
     bool player_hidden=false,player_scripted=false,player_action=false;
@@ -611,6 +633,20 @@ public:
     // pwksub.c:2643 bhSetWaterSplash4: two id-11 effects (type+10) from the
     // shared sys->ef template, ay = ang +/- 16384, lkono 0 and 1.
     void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz);
+    // pwksub.c:2572 bhSetWaterSplash2(pp, pos, ...): Boden unter (pos.x, pp->py, pos.z), bhCheckWater,
+    // dann drei id-11-Effekte aus sys->ef (ay = pp->ay + 16384 / - 16384 / + 32768, lkono 0/1/2).
+    void water_splash2(float pp_py,int pp_ay,NJS_POINT3 pos,int type,float sx,float sy,float sz);
+    // effsub4.c:19/35 bhEff_SetPtcl/bhEff_SetPtcl1 (Effekt 365), :117 bhEff_SetPtcl2 und
+    // :199 bhEff_SetPtcl2V (Effekt 366). Jeder Satz fuehrt seine Punkte in einem
+    // bhEff_AllocOwork-Hilfsarbeitssatz (EffectPtcl365Work/EffectPtcl366Work), den der
+    // Erzeuger anlegt und fuellt; die Prozeduren rechnen darauf weiter.
+    void set_ptcl(RECVX_ENEMY_WORK* w,NJS_POINT3 pos,int tex_id);
+    void set_ptcl1(RECVX_ENEMY_WORK* w,NJS_POINT3 pos,int tex_id,int wcnt);
+    void set_ptcl2(NJS_POINT3 pos,const float* mtx16);
+    void set_ptcl2v(NJS_POINT3 pos,NJS_POINT3* dv,int wcnt);
+    // en17.c:1689 bhEne17_AfterimageAxEffect: ein 364-Satz (bhEff_ModelDraw) mit
+    // mlwP = &epw->mdl[5], flr_no 1 (npSetAllMatColor) und tv[0].col = argb.
+    void en17_afterimage(RECVX_ENEMY_WORK* w,const float* mtx16,NJS_POINT3 ofs,std::uint32_t argb);
     void player_footstep(const PlayerAsset& player);
     void player_foot_sound(const PlayerAsset& player,unsigned node,unsigned type);
     // pl_smove01: CallPlayerFootStepSe(plp->flr_snd, type, 1) ohne bhCheckFloorSound.
@@ -748,6 +784,11 @@ private:
     void control_player_script_motion();
     unsigned player_mtn_md_=0,player_hokan_count_=0,player_at_flags_=0,player_enemy_owner_=0;
     const RECVX_ENEMY_WORK* player_enemy_work_=nullptr; // plp->mnwP: the grabbing work
+    // plp->mnwP hat zwei Schreiber: das Feld der Spielersicht (RECVX_ENEMY_PLAYER.mtn_enemy*) und
+    // die Dienste player_library (en03/en13/en15/en19/en23/en29). Ein Gegner liest die Sicht, ruft den
+    // Dienst und schreibt die Sicht danach zurueck (en03.c:6825 liegt zwischen beiden). Die Sicht
+    // uebernimmt deshalb nur, was sie gegenueber dem zuletzt ausgegebenen Stand selbst geaendert hat.
+    mutable bool player_lib_seen_motion_=false;mutable unsigned player_lib_seen_owner_=0;mutable const RECVX_ENEMY_WORK* player_lib_seen_work_=nullptr;
     unsigned player_frm_mode_=0,player_mtn_attr_=0;
     std::vector<ModelPose> player_obj_;std::vector<unsigned> player_owp_flags_;
     // plp->mlwP->objP traegt die Darstellung, solange der Takt des laufenden Pfads den
@@ -837,6 +878,10 @@ private:
     // wie ene[], stabile Adressen, weil die Tabelle nur Zeiger haelt.
     std::deque<WorldEntity> enemy_children_;
     WorldEntity* create_enemy_child(RECVX_ENEMY_WORK* parent);
+    // player.c:1042 bhCheckMothEgg (aus bhSetPlayer/bhInitRoomChangePlayer/bhResetPlayer, vor
+    // bhInitEvent): je gesetzter plp->stflg-Marke 0x8000000/0x10000000/0x20000000 ein EGG_WORK
+    // {flg 1, id 27, type 0/1/2} ueber bhSetEnemy. Ohne Elternwork und ohne Modell (mlwP NULL).
+    void check_moth_egg();
     // bhSetEnemy(tmpl) fuer ein Kind mit `mlwP = &parent->mdl[base]`; share: denselben
     // ML_WORK wie dieses Kind benutzen (en13.c:170).
     WorldEntity* create_enemy_child(RECVX_ENEMY_WORK* parent,const RECVX_ENEMY_TEMPLATE& tmpl,unsigned base,RECVX_ENEMY_WORK* share);
@@ -852,6 +897,9 @@ private:
     bool player_model_hidden_=false; // plp->mdflg 0x1 (bhSetDispObj, event.c:2283): nur das Modell, sperrt den Pass nicht
     // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP.
     void append_claw_model(Scene& scene,const EffectSprite& sprite)const;
+    // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364): objP[mdlver].model von mlwP = ene[model_enemy].mdl[model_mdl]
+    // unter T(p) * RotZ/Y/X(a) * S(s), txp[0] = mlwP->texP, Lichtzustand der ef_fnc-Modelle (Kategorie 4).
+    void append_effect_model(Scene& scene,const EffectSprite& sprite,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend)const;
     // game.c:77-91: st_flg 0x100, pt_flg 0x10 und ein gueltiges njMirror(sys->mr_pl) -> bhEtcMirrorDrawModel
     // ruft bhDrawEffect ein zweites Mal (game.c:427).
     bool mirror_effect_pass_active()const;
@@ -920,6 +968,8 @@ private:
         bool thl=false;
         // lkwkp = &hp->flg of a room/enemy ATR work (bhEff029): its place in rom->walp + sys->mwalp.
         std::optional<std::size_t> atr_link;std::optional<WeaponFlash> weapon;};
+    // bhSetEffect(id, &ps, NULL, 0) + bhEff_AllocOwork von bhEff_SetPtcl1/2/2V (effsub4.c:49/3028).
+    SpriteWork* begin_ptcl(unsigned id,NJS_POINT3 pos,const char* what);
     void draw_ufo_hud(SoftwareRenderer& image,const SpriteWork& hud)const;     // effsub1b.c:101 bhDraw134
     void draw_monitor_hud(SoftwareRenderer& image,const SpriteWork& hud)const; // effsub1b.c:828 bhDraw137
     void draw_oil_hud(SoftwareRenderer& image,const SpriteWork& hud)const;     // effsub1b.c:1258 bhDraw138
@@ -949,6 +999,7 @@ private:
     int effect_tb(unsigned flg,int id,int type,unsigned mdlver,NJS_POINT3 position,NJS_POINT3 scale,int ax,int ay,const RECVX_ENEMY_VEC* ofs,RECVX_ENEMY_WORK* link_w,bool link_player,int lkono);
     // bhSetEffect (effect.c:331) / bhSetEffectTb ohne die Prozedurpruefung.
     int allocate_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index);
+    std::function<void()> hide_weapon_part2_;std::function<void(bool)> weapon_models_hidden_;
     unsigned player_weapon_=0,effect_yk_ct_=0,presentation_flags_=~0u; // system.c initializes pt_flg to ~0u
     unsigned stage_no_=0,room_no_=0; // sys->stg_no/rom_no aus dem Raumnamen (RoomIdentity)
     unsigned enemy_count_=0; // rom->ene_n
@@ -977,7 +1028,13 @@ private:
     void control_player_effects();
     std::vector<CollisionWall> effect_walls_; // rom->walp + sys->mwalp as bhCheckWallType sees them
     const std::vector<SceneTexture>* effect_texture_list(const SpriteWork& work)const;
-    std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;std::optional<Scene> effect_model0_;std::vector<std::uint8_t> effect_model13_; // efm[13] Modellblock (bhEff013)
+    std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;
+    // sys->efm[0]/[1]/[7]/[13]: die vier Modellbloecke aus bhInitEffect (effect.c:66-80).
+    // bhDrawPolEffect zeichnet objP[op->mdlver].model von efm[op->id], deshalb je Block roh.
+    std::vector<std::uint8_t> effect_model0_block_,effect_model1_block_,effect_model7_block_,effect_model13_;
+    // sys->ef_tlist.textures: die flache gemeinsame Effekttexturliste (bhDrawPolEffect
+    // adressiert sie mit tex_id + ani_ct ohne sys->ef_tn, siehe world.cpp).
+    std::vector<SceneTexture> effect_common_textures_;
     // event.c:220 bhPushEffectWork/:234 bhPopEffectWork sichern den ganzen
     // eff[512]-Satz (hier sprites_ plus die Partikelnutzlast des Besitzers) und
     // stellen ihn auf Anforderung wieder her. Das Original kopiert in einen
@@ -1026,6 +1083,16 @@ private:
     std::array<float,32> floors_{};
     std::vector<EventCameraTrack> event_cameras_;
     unsigned event_camera_key_=0,event_camera_clock_=0;
+    // cut.c:1803 bhSetEventHideObjLgt(cno, kno) schreibt die Objekt- und Lichtmasken EINMAL
+    // in rom->mdl.objP[].evalflags und rom->evlp[].flg; sie bleiben dort bis zum naechsten
+    // Aufruf stehen. Aufgerufen wird sie bei bhSetEventCamera (:1692), bhSetEventFixedCut
+    // (:1766), im Initpass (:2020) und nach jedem Keywechsel (:2136) — NICHT aber bei dem
+    // Keywechsel, der in das Endhalten fuehrt: cut.c:2124 bricht mit `break` vor dem Aufruf
+    // ab. In der Haltephase steht die Kamera also auf dem letzten Key, die Masken aber noch
+    // auf dem vorletzten. Die Objektmaske wird aus diesem Key gelesen; die Lichtmaske schreibt
+    // set_event_camera_masks einmal in Light::flags, damit bhControlLight sie loeschen kann.
+    unsigned event_camera_mask_key_=0;
+    void set_event_camera_masks(); // cut.c:1803 bhSetEventHideObjLgt
     bool event_camera_finished_=false;
     // cam.mode0 of bhControlEventCamera (cut.c:1986): 0 = init pass (event_camera_init_),
     // 1 = travelling, 2 = final hold (event_camera_finished_), 3 = held by

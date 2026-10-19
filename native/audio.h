@@ -74,6 +74,10 @@ public:
     // sdfunc.c:1546 CallPlayerWeaponSeEx. weapon_bank is the WpnTab snd_wpno pack
     // that supplies SE bank 1; syukan is sys->gm_flg & 0x01000000.
     bool call_player_weapon_se(unsigned weapon_bank,int se_no,SoundPoint position,int slot_no,bool syukan);
+    // adxwrap.c:650 GetAdxPlayTime(SlotNo): ((double)SampleCount / SamplingRate) * 100, also
+    // Hundertstelsekunden ab Streambeginn. sdfunc.c:310 meldet genau zwei ADX-Stroeme an
+    // (Platz 0 Musik, Platz 1 Stimme); fuer jeden anderen Platz hat das Original kein Handle.
+    unsigned adx_play_time(unsigned slot)const;
     unsigned weapon_se_slot_switch()const{return weapon_slot_switch_;}
     void load_room_sounds(unsigned stage,unsigned room,unsigned variant=0);
     // RequestPlayerVoiceSoundBank: CORE key player|0xfff0; the pack supplies SE bank 4.
@@ -165,7 +169,10 @@ private:
     struct SequenceEvent {double delay=0;unsigned status=0,key=0,value=0;std::vector<Layer> layers;}; // note-on: one layer per MODHSYN voice (split)
     struct SequenceLoop {unsigned number=0;std::size_t next=0;unsigned remaining=0;bool counted=false;};
     struct Sequence {std::vector<SequenceEvent> events;std::vector<SequenceNote> notes;std::vector<SequenceLoop> loops;std::size_t next=0;double until=0;unsigned nrpn=0;};
-    struct Channel {std::shared_ptr<PcmClip> clip;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1,pan_left=1,pan_right=1;int pitch=0;std::vector<Layer> layers;std::shared_ptr<Sequence> sequence;SpuEnvelope env;unsigned core=0;bool released=false;};
+    // clip_rate ueberlebt das natuerliche Clipende (dort wird nur `clip` geloest), damit
+    // adx_play_time danach noch die erreichte Zeit melden kann; release_channel setzt das
+    // ganze Werk zurueck und damit auch die Rate.
+    struct Channel {std::shared_ptr<PcmClip> clip;unsigned clip_rate=0;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1,pan_left=1,pan_right=1;int pitch=0;std::vector<Layer> layers;std::shared_ptr<Sequence> sequence;SpuEnvelope env;unsigned core=0;bool released=false;};
     // MODHSYN-Stimmen nach Key-Off (CC 120 von sdShotStop/sdMidiStop, Fade-Ende, Sequenzende):
     // der Slot ist frei, die Stimmen klingen bis zum Release-Ende aus.
     std::vector<Channel> releasing_;

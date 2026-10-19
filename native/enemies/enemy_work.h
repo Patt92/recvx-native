@@ -237,6 +237,11 @@ typedef struct RECVX_ENEMY_WORK {
        Erzeugers, nicht als stillen Normalfall. */
     int32_t  lkono;
     struct RECVX_ENEMY_WORK* lkwkp;
+    /* lkwkp = plp (en27.c:84, en01sub.c:1417): der Elternwork ist der SPIELER,
+       der kein RECVX_ENEMY_WORK ist. Dann bleibt lkwkp NULL, diese Marke steht,
+       und die Tore lesen plp->stflg ueber sv->player_get; die Wurzel ist
+       plp->mlwP->owP[lkono] (Besitzer, bhCalcModel MdlPut.c:248). */
+    uint8_t  lk_player;
     int32_t  idx_ct;                 /* eneset.c:268 Slotindex             */
 
     /* --- Morph ------------------------------------------------------------ */
@@ -596,6 +601,12 @@ typedef struct RECVX_ENEMY_SERVICES {
     /* eneset.c:372 bhControlMask(epw) vor der Gegnerroutine (id > 90): der
        Masken-/Lippenbesitzer des Raumworks (face.c:79). */
     void  (*control_mask)(RECVX_ENEMY_WORK* w);
+
+    /* plp->stflg des einen Spielerbesitzers (kein Funktionsaufruf): die Pass-/
+       Zeichen-/Zieltore lesen damit fuer lkwkp = plp (lk_player) das Bit
+       0x1000000, auch ausserhalb des Gegnerpasses (eneset.c:362/807). NULL ->
+       der verknuepfte Work bleibt draussen. */
+    const uint32_t* player_status;
 } RECVX_ENEMY_SERVICES;
 
 /* ===========================================================================

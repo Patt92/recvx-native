@@ -7131,11 +7131,18 @@ void recvx_en01_check_mtn_tbl(RECVX_ENEMY_WORK* w, int32_t frm)
    LinkFireEffect (:11225).
    =========================================================================== */
 
-/* njRandom() (macros.h:105): -rand() / (RAND_MAX + 1) mit RAND_MAX
-   0x7FFFFFFF (macros.h:93). Der Wert ist also negativ in (-1, 0]. */
+/* njRandom() (macros.h:105): (Float)-rand() / (Float)(RAND_MAX + 1) mit
+   RAND_MAX 0x7FFFFFFF (macros.h:93); RAND_MAX + 1 laeuft als int auf -2^31
+   ueber. Disassembly bhEne01_ExpLegEffect (0x188050; :11055 bei 0x1882C8,
+   :11066 bei 0x1883D0) und bhEne01_ExpWormEffect (0x1884C0; 0x1885E8,
+   0x1886CC): `jal rand` -> `negu` -> `cvt.s.w` -> `div.s` durch 0xCF000000
+   = -2^31, durchgehend einfach genau. Die Vorzeichen heben sich auf: der
+   Wert ist positiv in [0, 1]; die cvt.s.w-Rundung macht rand() nahe
+   RAND_MAX zu genau 1.0f. */
 static float en01_nj_random(RECVX_ENEMY_WORK* w)
 {
-    return (float)(-(double)en01_rand(w) / 2147483648.0);
+    int32_t neg = (int32_t)(0u - (uint32_t)en01_rand(w));   /* negu    */
+    return (float)neg / -2147483648.0f;                      /* div.s   */
 }
 
 static void en01_nikuhen(RECVX_ENEMY_WORK* w, int type,

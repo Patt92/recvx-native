@@ -44,9 +44,10 @@ int main(int argc,char** argv){try{
     // 24 und 221 sind portiert (Gruppen 4 und 6, 2026-10-14); 229 (Muendungsfeuer der
     // Doppelwaffe, effsub5.c) ebenfalls. Nur noch wirklich ungebundene Kennungen laufen hier.
     check(supported_effect_sprite(229u),"229 (Doppelwaffe-Muendungsfeuer) meldet sich ungebunden");
-    // 21 (bhEff021) ist seit 2026-10-17 portiert (Prolog RM_0000); 26 (bhEff026) ist eine echte, noch
-    // ungebundene Originalprozedur (effect.c:33 bhJumpEffect[26]).
-    for(const unsigned id:{26u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
+    // 21 (bhEff021) ist seit 2026-10-17 portiert (Prolog RM_0000), 26 (bhEff026) seit 2026-10-19;
+    // 6 (bhEff006, effsub1.c:2214) ist eine echte, noch ungebundene Originalprozedur (effect.c:33 bhJumpEffect[6]).
+    check(supported_effect_sprite(26u),"26 (bhEff026) meldet sich ungebunden");
+    for(const unsigned id:{6u}){EffectSprite sprite;sprite.id=id;sprite.type=14;sprite.mode1=1;bool queued=true;
         check(!supported_effect_sprite(id),"effect gap reports a bound procedure");
         check(!step_effect_sprite(sprite,&queued)&&!queued,"effect gap executed a procedure or queued a draw");
         check(sprite.tex_id==-1&&!sprite.ct0&&!sprite.ani_ct&&!sprite.flg&&sprite.type==14&&sprite.tv[0].y==-1,"effect gap changed the sprite work");}

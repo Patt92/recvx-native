@@ -985,6 +985,163 @@ sys->bl_ct-Staffelung, gm_flg 0x2000000. EffectContext traegt jetzt cam.mtx (cam
 keine Blutflecken an Waenden/Boden (Luecke 'bhEff301'). Test effect_eff301 (Gegenproben rot), Headless RM_5810/9302 mit Gegner-KI ohne
 Luecke. CTest 160/160, Dev-App via `./build.sh --test`. Verbleibend aus dem KI-Scan: bhEne06 (RM_6030), bhEne22 (RM_7100), plp mnwPb[mtn_no]
 (RM_7250). **Kein Commit/Push.**
+(aj) bhEne22 portiert (Albinoid Adult, RM_7100; native/enemies/en22.c, jump[22], Dienste RECVX_EN22_SERVICES): Init/Brain/MV00-06/DG/DD,
+Spielerschaden, Kollision, Wassereffekte, Stromschlag (354), Funkenangriff mtn 9 mit bhEne22_ChgDengekiColor/GetDengekiColorAddr auf den
+beschreibbaren Stroemen mdl[1..6].objP[1], Bodenlicht 353, Blitzmodelle 364 und rom->lgtp[2] (SetLight/CtrLight, Light.ct1). Neu dazu
+bhEff_Sub353/354/364 (effsub4.c:837/958/1774; 354 als bhEff_3DSpriteDraw-Billboard mit Gegnertextur) und RoomWorld::water_splash2
+(pwksub.c:2572, jetzt auch fuer EN01 gebunden). **Offen:** bhEff_ModelDraw (effsub4.c:3306) zeichnet die 364-Blitzmodelle noch nicht
+(njCnkSimpleMultiDrawModel-Farbpfad ohne Hostpfad, benannte Luecke im Zeichenpass). Test enemy_en22_world (fuenf Gegenproben rot),
+Headless RM_7100 mit Gegner-KI ohne neue Luecke, CTest 161/161, Dev-App via `./build.sh --test`. **Kein Commit/Push.**
+(ak) bhEne06 portiert (Motte, RM_6030; native/enemies/en06.c, jump[6], Fragmente bhEne06s auf jump[31] per SetCallFunc, verdeckter
+Anfuehrer fuer den Spielergriff): Flug, Wandanlehnen, Griff mit Spielermotion 20 aus der Mottenbibliothek, Mottenei (id-27-Work + plp->stflg-
+Marke), Treffer/Absturz/Zerfetzen mit zwoelf fallenden Fragmenten auf den owP-Matrizen der Motte. Neu bhEff_E06_Rinpun (260) mit
+Teilchenzeichnung aus mdl[1].texP. Test enemy_en06_world laeuft ueber das echte Raumskript (Ereignis 16 gibt Motte 3 bei Flag 4/0 frei),
+sechs Gegenproben rot. **Offen:** (1) Staub-Spielerberuehrung: das Original mittelt mit nie gesetzten FPU-Registern $f20-$f22 (ELF belegt),
+benannte Luecke; (2) EN27 (Mottenei) ist weltseitig ungebunden und meldet seine Dienste; bhCheckMothEgg im Spielerbesitzer fehlt.
+CTest 162/162, Dev-App via `./build.sh --test`, Titelstart geprueft. **Kein Commit/Push.**
+(al) RM_7250 Spinnengriff: Ursache war ein zweiter Schreiber von plp->mnwP — der EN03-Anfuehrer haengt die Spinnenbibliothek per
+Dienst ein und schreibt danach seinen alten Spielerschnappschuss zurueck, der mnwP wieder auf mnwPb setzte (Griffmotion 62/63 fehlte
+dort). enemy_player_set uebernimmt die Bibliotheksfelder jetzt nur, wenn die Sicht sie selbst geaendert hat. Check rm7250_spider_grab.
+(am) EN27 Mottenei angebunden: Ei auf plp->mdl[6]/[7] mit Spielermotionen 93..97, Wurzel am Spielergelenk 3 (neues lk_player fuer
+lkwkp = plp, Tore lesen plp->stflg), bhCheckMothEgg vor dem ersten Gegnerpass, plp->stflg & 0x78280000 ueber den Raumwechsel (Marken
+gingen bisher verloren), Spielerreihe ohne Raum-Texturrueckfall. Test enemy_en27_world (Init, Zeichnung, Schlupf, Griff, Schaden/Gift,
+Freigabe, Fall), Gegenproben rot; EN06-Test prueft jetzt das abgelegte Ei ohne Luecke. Frischer Raumscan mit Gegner-KI (205 Raeume):
+uebrig nur benannte Original-Undefiniertheiten (bhObj005, bhCheckRoute, bhSetMotion-Kanaele/RM_3120 Common 34 frm_no 0x240A,
+en02 ang, ef_tn vor Rendercut). CTest 164/164. **Kein Commit/Push.**
+(an) bhEff_ModelDraw (effsub4.c:3306) fuer die Albinoid-Blitzmodelle (364) gezeichnet: njCnkSimpleMultiDrawModel ist der Ninja-Modus
+der Gegnerzeichnung (MdlPut.c:182), die davor gesetzten Einzellichter (Modus 2) wirken nicht; Lichtkategorie 4 wie bhEff30cDrw,
+Materialfarben aus dem von bhEne22_ChgDengekiColor beschriebenen Strom. EN22-Test prueft Bild und Farbe (zwei Gegenproben rot).
+Spiegelpass bleibt benannte Luecke. CTest 164/164. **Kein Commit/Push.**
+(ao) Fuenf nativ schon angeforderte, aber unportierte Effektprozeduren portiert: 356 Zombie-Halsblutung nach Kopfplatzen (Rueckrufe in
+EN01 aus dem Effektpass; EnemyCallbackFrame bindet dafuer T3-Ergaenzung und EN01-Kontext), 363 Fleischstuecke der Bein-/Wurmexplosion,
+252 Flamme am Gegnergelenk (bhEne_SetFireEffect), 259 Hunterblut, 26 Schirmschlieren beim Explosionstod. Tests effect_en01_exp,
+effect_e00_fire (Gegenproben rot). progression_test fuehrte 26 als ungebunden; Waechter jetzt auf 6 (bhEff006, echt unportiert).
+Naechstes: EN17 (Steve) hat ungebundene Effektdienste (SetPtcl 365/366, Beil-Nachbild 364, lgtp[2], SetBlood2(plp)). CTest 166/166.
+**Kein Commit/Push.**
+(ap) EN17 (Monster Steve): alle bisher ungebundenen Effektdienste angeschlossen. Neu portiert sind die Erzeuger bhEff_SetPtcl/SetPtcl1
+(effsub4.c:19/35) sowie bhEff_SetPtcl2/SetPtcl2V (:117/:199) als RoomWorld::set_ptcl/set_ptcl1/set_ptcl2/set_ptcl2v mit ihren
+bhEff_AllocOwork-Hilfsarbeitssaetzen (EffectPtcl365Work/EffectPtcl366Work) und die Prozeduren bhEff_Sub365 (:1812) und bhEff_Sub366
+(:1884) samt Zeichenteil bhEff_LineDraw (:3090, untexturierte Dreiecke mit eigenen Eckfarben). Gebunden sind ausserdem
+bhEne17_AfterimageAxEffect (Effekt 364, Beil-Nachbild auf epw->mdl[5]), bhEne17_SetLight (rom->lgtp[2]), bhEne_SetBlood2(plp) und
+mlwP->objP[0].pos[0/2] = 0 am Gegner- wie am Spielerbaum. Fuer das Nachbild hat bhEff_ModelDraw jetzt seinen flr_no-Zweig:
+npSetAllMatColor (njplus.c:1375) faerbt die Materialien des gezeichneten Objekts, sodass die sieben Nachbilder eines Bildes ihre
+eigenen Alphastufen behalten; der Port faerbt dafuer eine Kopie des Modellstroms statt den gemeinsamen Strom (gleichwertig, weil
+mdl[5] nur dieser Effekt zeichnet und jeder Zeichner vorher selbst faerbt). Drei Abweichungen in native/enemies/en17.c mitkorrigiert:
+plp->djnt_no = 2 mit plp->dpx..dpz = cap.c1 beim Treffer und plp->djnt_no = 3 vor bhEne_SetBlood2 fehlten ganz (en17.c:1594/1653),
+bhEne_SetVibration(1) ist StartVibrationEx(1, 0xA) und stand als (1, 11), und eine doppelte Zuweisung von cap.c1 mit falschem Index
+ist entfernt. **Offen und benannt bleibt die Anzeige von Effekt 365:** bhEff_PtclSpriteDraw uebergibt njPtclDrawSprite n = 1, und
+Ps2AddPrim3D gibt genau n Eckpunkte je GIF-Tag mit neu gesetztem PRIM aus — ein GS-Sprite braucht zwei. Der Satz laeuft deshalb,
+legt aber keine Flaeche ins Bild; ohne Hardwarebeleg wird hier nichts erfunden. Test enemy_en17_world um Partikel, Nachbild, Licht,
+Spielerblut, Gelenk und Vibration erweitert; die bisher zugelassenen Lueckennamen bhEff369/370/301 sind ersatzlos entfallen,
+weil diese Prozeduren laengst portiert sind und auf den gelaufenen Wegen gar keine Luecke mehr auftritt — der Test laesst jetzt
+keine einzige zu. Vierzehn Gegenproben rot. 205/205 Raeume laden, Gegner-KI-Sweep ueber alle Raeume meldet unveraendert nur die sechs bekannten
+Original-Undefiniertheiten. CTest 166/166. **Kein Commit/Push.**
+(aq) Magazin beim Nachladen (bhEff007) portiert und zwei Fehler im Zeichenweg sys->ef_pol behoben. bhEff007 (effsub1.c:2335) war
+nicht portiert, obwohl der Kampfkern es bei jedem Nachladen anfordert (pwksub.c:3372 bhSetMagazine, nativ cb_set_magazine): der Satz
+entstand gar nicht und der Port meldete bhEff007. Jetzt faellt das Magazin vom Handgelenk, prallt mit CallPlayerWeaponSeEx(259) auf,
+dreht sich im Fall und bleibt eine halbe Einheit tiefer liegen; im Wasser bremst es und setzt den Spritzer 15.
+Auch das Magazin IN der Waffe hat jetzt seinen Besitzer: bhEff007 schreibt bei mdlver != 0 ueber RoomWorld auf den
+Waffenassetbesitzer CombatController; WeaponAsset::append laesst nur das rechte Knotenmodell 2 aus, nicht Kinder
+oder das linke Modell. player.c:6075 loescht das Flag bei act_ct1 NUR fuer Waffe 12; der bestehende Clear-Auftrag
+wird einmal verbraucht. Waffe 13 bleibt wie im Original verborgen. Kampf-Abbruch behaelt das Flag, neues
+Waffenasset setzt es zurueck (dread.c:200-210). Test effect_magazine mit echten Reloadpfaden 12/13 und diagnostisch
+leerem Inventar, Zeichenmengen, Abbruch/Neu-Laden; sechs weitere Gegenproben rot. Auch Materialschreiber des
+verdeckten Knotenmodells entfallen, Positionen der verbleibenden Schreiber bleiben korrekt.
+[Pruefbericht](build/validation/magazine-owner-20261019/README.md). Abschliessend ./build.sh --test: 169/169 gruen,
+Dev-App gesichert/aktualisiert/signiert; Start.command-Titel und Reload geprueft (Motion 116, Effekt 7, keine
+blockierten Befehle/offenen Weltbindungen), arm64/Signatur/Policy gruen. Runtimebilder angesehen, aber Kamera
+hinter der Figur: keine getrennte visuelle Abnahme des Magazinwechsels. Kein Commit/Push.
+Beim Anschluss fielen zwei Abweichungen in bhDrawPolEffect (effect.c:949) auf, beide per Disassembly belegt: (1) die Textur ist
+sys->ef_tlist.textures[tex_id + ani_ct] OHNE sys->ef_tn (ELF 0x0021D3F8 gegen 0x0021DEBC in bhDrawTrsEffect3D) — der Port suchte die
+Kategorie, wodurch die Patronenhuelse das gemeinsame Bild 19 statt 5 und die Markierung 25 statt 8 trug; (2) gezeichnet wird nur
+objP[op->mdlver], der Port zeichnete das ganze efm[0] und damit beide Huelsenobjekte zugleich. Beides ist korrigiert, die vier
+Modellbloecke aus bhInitEffect (efm[0]/[1]/[7]/[13]) liegen dafuer einzeln vor. Neuer Test effect_magazine, dazu der Block
+pol_effect_draw in effect_room_sprites; elf Gegenproben rot. Ausserdem: die Lueckenliste im EN17-Test liess bhEff369/370/301 zu,
+obwohl diese Prozeduren portiert sind und auf den gelaufenen Wegen gar keine Luecke mehr auftritt — der Test laesst jetzt keine zu,
+Ledger und Eintrag (ap) sind entsprechend berichtigt. 205/205 Raeume laden, Gegner-KI-Sweep unveraendert bei den sechs bekannten
+Original-Undefiniertheiten. CTest 167/167. **Kein Commit/Push.**
+(ar) Die beiden Sand-Skriptbefehle des Gulp Worm portiert: 0x98 bhEffectSandSet (event.c:4110) und 0xC3
+bhEffectSandSetMatsumoto (:8577) fehlten in der Event-VM, obwohl ihre Ziele bhEne02_SetSandEffect und
+bhEne02_SetSandEffectEV nativ schon vorlagen (die EN02-Zeile nannte beide als offen). 0x98 ist 12 Byte lang:
+Vorzeichenbits fuer drei u16-Betraege in Hundertsteln, eine Lageart (Weltlage oder Versatz, der nur x und z zur
+Gegnerlage addiert) und ein Typbyte, hinter dem der Skriptzeiger um zwei rueckt — per Disassembly 0x0015CAF0
+geprueft, weil eine falsche Laenge den ganzen Skriptstrom verschieben wuerde. 0xC3 nimmt den Werkplatz von
+sys->ene, nicht den Raumindex. Weil die EN02-Dienste nativ nur waehrend des Gegnerpasses gebunden sind, merkt der
+Skriptpass den fertig aufgeloesten Auftrag vor und der Gegnerpass desselben Bildes fuehrt ihn vor den Gegnern aus —
+dieselbe Reihenfolge wie im Original. Unbekannte Ziele bleiben ungebunden statt geraten. Damit sind 197 von 223
+Skriptbefehlen gebunden (vorher 195). Test enemy_en02_world um drei Bloecke erweitert; sieben Gegenproben rot.
+205/205 Raeume laden, Gegner-KI-Sweep unveraendert. CTest 167/167. **Kein Commit/Push.**
+(as) Blickbefehle des Spielerkopfes portiert und die Lage bei den restlichen Skriptbefehlen geklaert. 0x40
+bhLookGsetPlStart (event.c:3488) und 0x41 bhLookGsetPlStop (:3539) schreiben den Kopfzustand plp->exp1, den der Port
+mit RECVX_HEAD_STATE schon fuehrt: Start setzt die beiden Blickflags, waehlt die Zielart gespeicherter Punkt und
+traegt den Punkt aus dem Skript ein, Stop loescht nur die beiden Flags. Damit sind 199 von 223 Skriptbefehlen
+gebunden. Wichtiger Befund dabei: ein unbekannter Skriptbefehl wirft in der Event-VM und haelt den Raum an, die
+verbleibenden sieben sind also moegliche harte Stopps, sobald ein Skriptzweig sie erreicht — in 205 Raeumen x 600
+Bildern Initlauf wird keiner erreicht. Ihre Laengen und Wirkungen sind jetzt in der Ledgerzeile
+event.c:bhScenarioJmpT:offen festgehalten, damit sie einzeln nachgezogen werden koennen; der teuerste ist 0x1E
+bhAdxTimeCk, eine Bedingung, die die Abspielzeit eines ADX-Stroms braucht und dafuer nativ keinen Besitzer hat.
+Ausserdem geprueft: von den 17 als 'nur konsumiert' gemeldeten Befehlen sind alle in Wahrheit am Raumbesitzer
+gebunden (die Objektbindungen ueber eine Tabelle, die der Zaehler nicht sieht). Neuer Weltblock im Test player_head
+(der jetzt das Datenverzeichnis bekommt); sieben Gegenproben rot. 205/205 Raeume laden, Gegner-KI-Sweep unveraendert.
+CTest 167/167. **Kein Commit/Push.**
+(at) Sechs der sieben verbliebenen Skriptbefehle halten den Raum nicht mehr an, und drei bisher wirkungslose sind
+gebunden. Ihre Wirkung hat nativ keinen
+Besitzer (Spieler als Kind einer Objektbindung, die beiden Handobjektwerke, sys->efid, die Eventaufgaben-Werke,
+die Debugkamera, die Battle-Game-Rangliste), aber ihre Laenge steht im Original fest: 0x6F 12, 0x82 4, 0x97 8,
+0xAA 10, 0xAF 4, 0xD3 2 Byte. Sie werden jetzt genau so weit uebersprungen und als offene Bindung gemeldet, statt
+den Lauf mit `unimplemented opcode` zu beenden. Uebrig bleibt 0x1E bhAdxTimeCk als einziger harter Stopp — das ist
+eine Bedingung, die die Abspielzeit eines ADX-Stroms an ein IF liefert; sie zu ueberspringen hiesse, den Zweig zu
+erfinden. Neuer Test event_opcode_lengths: er legt jeden der zehn in diesem Stand behandelten Befehle an den Anfang
+eines Eventskripts, setzt dahinter ein bhSet und prueft, dass genau dieses bhSet ausgefuehrt wird — eine falsche
+Laenge verschoebe den ganzen Strom dahinter. Acht Gegenproben mit falscher Laenge rot, dazu eine Gegenprobe der
+Vorrichtung selbst (ein um ein Byte verschobenes bhSet darf nicht laufen). Ausserdem gebunden: 0x3A bhMutekiSetPl (Spieler unverwundbar, plp->flg 0x4 mit Spiegelung
+nach player_flags), 0x2E bhMotionPauseSetPly (sp_flg 0x1, das Tor des Spielerpasses) und 0xA1 bhTrapDamageSet
+(plp->stflg 0x1000, im Original mit dem Wert 0 gesetzt). Alle drei schreiben nur Flagbits, die die Event-VM selbst
+fuehrt — sie wurden bisher gelesen und an den Raumbesitzer gereicht, der sie nicht band, liefen also ins Leere.
+Dazu 0x46 bhSetNextRoomBgm und 0x47 bhSetNextRoomBgSe, die Musik- und Raumtonvorgaben fuer den naechsten Raum schreiben. Dabei ein Befund, der meine Vermutung aus dem letzten Bericht widerlegt: die Zielstruktur NextSoundInfo (sdfunc.c:90) hat im Original ueberhaupt keinen Leser — ueber alle 154 Quellen steht sie nur in diesen beiden Befehlen und in ihrer Definition. Sie sind also auch im Original ohne hoerbare Wirkung; nach einer Tuer kann deshalb keine falsche Musik laufen. Der Port fuehrt den Zustand trotzdem, damit die Befehle gebunden sind und ein spaeterer Leser die richtigen Werte vorfindet. Damit sind 204 von 223 Skriptbefehlen gebunden. 205/205 Raeume laden, 0 blockierte Befehle, Gegner-KI-Sweep
+unveraendert. CTest 168/168. **Kein Commit/Push.**
+(au) Kein Skriptbefehl haelt mehr einen Raum an. 0x1E bhAdxTimeCk (event.c:1523) war der letzte ohne nativen Fall.
+Er ist eine Bedingung auf die Abspielzeit eines ADX-Stroms; die Modi 0..3 liefern 0, WENN die Bedingung zutrifft,
+die Modi 4 und 5 liefern 1, und ein Modus ueber 5 gibt die rohe Zeit zurueck (kein default im Original). Die
+Zeitquelle ist neu: AudioMixer::adx_play_time rechnet die Kanalposition des Mischers nach derselben Formel um wie
+adxwrap.c:650 (SampleCount / SamplingRate * 100). Channel::clip_rate ueberlebt das natuerliche Clipende, damit ein
+zu Ende gelaufener Strom seine Endzeit behaelt — sonst haengt eine Warteschleife im Skript an einer Zeit 0.
+NEBENBEFUND, selbst gefunden beim Nachlesen: die Ausfuehrungsschleife der Event-VM lief bei Rueckgabewert == 1
+weiter, das Original aber bei JEDEM Wert ungleich 0 (event.c:13046). Beobachtbar bei Befehlen, die etwas anderes
+als 0/1 liefern koennen — bhAdxTimeCk mit Modus ueber 5 und bhCkFlg mit `mode ^ flag`. Korrigiert; CTest unveraendert
+gruen, also kein ausgeliefertes Skript war bisher betroffen. Test event_opcode_lengths deckt jetzt sechzehn Befehle
+ab; sechs weitere Gegenproben rot. Damit: 205 von 223 Skriptbefehlen gebunden, 18 mit korrekter Laenge uebersprungen
+und gemeldet, keiner mehr unbekannt. 205/205 Raeume laden, 0 blockierte Befehle, Gegner-KI-Sweep unveraendert.
+CTest 168/168. **Kein Commit/Push.**
+(av) Verdeckungsmasken der Ereigniskamera am Spurende korrigiert. cut.c:1803 bhSetEventHideObjLgt schreibt die
+Objekt- und Lichtmaske eines Keys EINMAL; sie bleibt bis zum naechsten Aufruf stehen. Gerufen wird sie beim Setzen
+der Kamera, im Initpass und nach jedem Keywechsel — NICHT bei dem Keywechsel, der in das Endhalten fuehrt
+(cut.c:2124 bricht dort mit `break` vor dem Aufruf ab). In der Haltephase steht die Kamera also auf dem letzten Key,
+die Masken aber noch auf dem vorletzten. Der Port las die Masken je Bild aus dem aktuellen Key und zeigte am Ende
+jeder Zwischensequenz die Verdeckung des LETZTEN Keys. RoomWorld::event_camera_mask_key_ haelt jetzt den Key fest,
+mit dem das Original sie zuletzt geschrieben hat. Eigener Scan ueber alle Raumdaten: 383 von 1362 endenden
+Kameraspuren in 82 Raeumen haben dort verschiedene Masken; in RM_0000 Spur 33 verdeckt der vorletzte Key eine ganze
+Objektgruppe, der letzte nichts — diese Objekte wurden am Ende der Sequenz sichtbar. Neuer Test event_camera_hide
+(RM_0000 Spur 33); drei Gegenproben rot. Der Befund stammt aus einer der fuenf parallelen Untersuchungen und wurde
+vor der Umsetzung Zeile fuer Zeile im Original und mit einem eigenen Raumdatenscan nachgeprueft.
+Auch die Wechselwirkung mit bhControlLight ist geschlossen: set_event_camera_masks schreibt die Lichtmaske
+an den Originalaufrufstellen einmal in Light::flags Bit 0x2; Lichtpass und Zeichnung lesen diesen Zustand.
+Typ 100/101 bleiben nach dem Erloeschen aus bis zum naechsten Maskenaufruf, ohne Uhr-/Modusreset; Typ 13
+und Linktod verlieren Aktivbit 0x1, das die Maske nicht wiederherstellt (light.c:669/:680/:696/:749).
+Erweiterter Test event_camera_hide: diagnostisch veraenderte Lichtfelder/Keymasken in RM_0000, vier Typen,
+Lichtbeitrag am Raumdreieck, letzter Lichtpass, Wiederholung, Keywechsel, Endhalten und FixedCut.
+Drei weitere Gegenproben rot; [Prueflogs](build/validation/event-camera-light-20261019/).
+Frueherer Stand: 205/205 Raeume laden, 0 blockierte Befehle, Gegner-KI-Sweep unveraendert, CTest 169/169.
+Aktuell CTest 169/169, Policy/Ledger gruen; Dev-App ueber ./build.sh --test gesichert, aktualisiert und signiert.
+Start.command geprueft: Titel und RM_0000 mit Gegner-KI je 60 Bilder kopflos, Exit 0, keine blockierten Befehle/
+offenen Weltbindungen; arm64/Signatur geprueft. [Bericht](build/validation/event-camera-light-20261019/README.md).
+Keine visuelle Abnahme. **Kein Commit/Push.**
+(aw) EN01 njRandom-Vorzeichen aus der Worktree-Sitzung "Check EN01 njRandom sign" in main uebernommen und
+nachgeprueft: macros.h:105 mit RAND_MAX+1 = -2^31 und Disassembly 0x1882C8/0x1885E8 (rand -> negu -> cvt.s.w ->
+div.s durch 0xCF000000) ergeben einen POSITIVEN Wert in [0,1]; en01_core.c rechnete negativ, Groesse und
+Geschwindigkeit der ExpLeg-/ExpWorm-Splitter lagen dadurch unter dem Originalbereich. Alle anderen Gegnerports
+waren schon positiv. Neuer Test enemy_en01_exp_effect (428 Pruefungen), Gegenprobe alter Ausdruck rot.
+Der Worktree selbst ist verworfen. **Kein Commit/Push.**
 
 **2026-10-19, Greif-und-Dreh-Statue (bhObj007 + bhCPM2_act_rpsh) portiert (Dev-App via `./build.sh --test`, CTest 158/158):**
 Nutzerbefund "ich kann die Statue nicht drehen" (als RM_1050 gemeldet). Ursache: der Greif-und-Dreh-Gegenstand ist **unportiert** — bhObj007

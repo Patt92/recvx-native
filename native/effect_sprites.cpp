@@ -183,6 +183,7 @@ void hook_enemy_se(void* w,NJS_POINT3 pos,int se){if(world_hooks.enemy_se)world_
 bool hook_player_joint(unsigned joint,float* out16,const char* what){if(world_hooks.player_joint&&world_hooks.player_joint(joint,out16))return true;report_gap(what);return false;}
 void hook_player_hit(int dax,int day,int djnt_no,NJS_POINT3 dp){if(world_hooks.player_hit)world_hooks.player_hit(dax,day,djnt_no,dp);else report_gap("plp->dax/day/djnt_no/dpx ohne Spielerbesitzer");}
 void hook_effect_se(NJS_POINT3 pos,int se){if(world_hooks.effect_se)world_hooks.effect_se(pos,se);else report_gap("bhEne_CallEffectSE ohne Stimmenbesitzer");}
+void hook_weapon_se(NJS_POINT3 pos,int se,int slot,const char* what){if(world_hooks.weapon_se)world_hooks.weapon_se(pos,se,slot);else report_gap(what);}
 void hook_camera_offset_add(NJS_POINT3 add){if(world_hooks.camera_offset_add)world_hooks.camera_offset_add(add);else report_gap("cam.ofx/ofy/ofz ohne Kamerabesitzer (bhEff30a)");}
 void hook_camera_offset_set(NJS_POINT3 value){if(world_hooks.camera_offset_set)world_hooks.camera_offset_set(value);else report_gap("cam.ofx/ofy/ofz ohne Kamerabesitzer (bhEff30a)");}
 void hook_room_light0(NJS_POINT3 pos,NJS_POINT3 rgb,float nr,float fr,bool only_if_off,const char* what){if(world_hooks.room_light0)world_hooks.room_light0(pos,rgb,nr,fr,only_if_off);else report_gap(what);}
@@ -210,6 +211,7 @@ std::shared_ptr<const SceneTexture> hook_effect_texaddr(unsigned group,const cha
 }
 void hook_spark_light(NJS_POINT3 pos,NJS_POINT3 dir){if(world_hooks.spark_light)world_hooks.spark_light(pos,dir);else report_gap("rom->lgtp[2] ohne Lichtbesitzer (bhSetEffSpark)");}
 bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what){if(world_hooks.player_watr&&world_hooks.player_watr(c))return true;report_gap(what);return false;}
+bool hook_en01_effect(void* work,int kind,int arg,NJS_POINT3 pos,const char* what){if(work&&world_hooks.en01_effect&&world_hooks.en01_effect(work,kind,arg,pos))return true;report_gap(what);return false;}
 int hook_player_hit_check_parts(NJS_POINT3 pos,const char* what){if(world_hooks.player_hit_check_parts){const int j=world_hooks.player_hit_check_parts(pos);if(j>=0)return j;}report_gap(what);return -1;}
 bool collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,const char* what){
     if(!effect_wall_set){report_gap(what);return false;}
@@ -416,6 +418,58 @@ void step_eff000(EffectSprite& s,const EffectContext& c){
         if(s.ct0<2){++s.ct0;pending.room_sounds.push_back({{s.px,s.py,s.pz},262});}
         else if(s.type==1)s.flg=0;
     }else if(s.mode0==2&&s.zn>0)s.mode0=1;
+}
+// effsub1.c:2335 bhEff007 — das ausgeworfene Magazin (pwksub.c:3372 bhSetMagazine beim
+// Nachladen; mdlver 0 Standard, 1 fuer Waffe 12, 2 fuer Waffe 13). Es faellt vom Gelenk der
+// Hand, prallt einmal ab und bleibt eine halbe Einheit tiefer liegen; im Wasser bremst es und
+// setzt einen Spritzer. Wie bhEff000 steht es jeden Pass in sys->ef_pol.
+void step_eff007(EffectSprite& s,const EffectContext& c){
+    s.polygon_queued=false;
+    if(!effect_ground)throw std::runtime_error("bhEff007 without the room's bhGetGroundPosition provider");
+    switch(s.mode0){
+    case 0: // :2339-2359
+        s.tex_id=7;s.ani_ct=0;
+        // njCalcPoint(lkwkp->mlwP->owP[lkono].mtx, &op->lox, &op->px): der Raumbesitzer hat die
+        // Linklage dieses Passes schon gesetzt (effect.c:812), danach loest sich der Satz.
+        s.gpy=0.6f+effect_ground->query({s.px,s.py,s.pz});
+        s.flg&=~0x80u;
+        s.yn=-0.3f;
+        s.ct0=0;
+        // :2354-2357 schreibt auf das rechte Waffenmodell, unabhaengig vom Effektlink.
+        if(s.mdlver!=0){if(world_hooks.hide_weapon_part2)world_hooks.hide_weapon_part2();
+            else report_gap("bhEff007: sys->obwp->mlwP->objP[2].evalflags ohne Waffenbesitzer");}
+        s.mode0=1;
+        [[fallthrough]];
+    case 1:{ // :2360-2425
+        float top=0;
+        if((c.st_flg&0x40u)&&!(s.stflg&0x100000u)&&effect_water_probe&&effect_water_probe({s.px,s.py,s.pz},top)){
+            s.stflg|=0x100000u;
+            s.yn*=0.25f;
+            EffectSpawn splash;splash.flg=1;splash.id=15;splash.mdlver=0;splash.type=1;
+            splash.scale={0.8f,1.5f,0.8f};
+            splash.position={s.px,1.0f+s.py,s.pz};splash.ay=0;
+            pending.spawns.push_back(splash);
+        }
+        s.py+=s.yn;
+        if(s.stflg&0x100000u){if(s.yn>-0.3f)s.yn-=0.01f;}
+        else if(s.yn>-1.0f)s.yn-=0.05f;
+        if(s.py<s.gpy){
+            if(s.stflg&0x100000u)s.yn=0;
+            else{s.yn=0.3f*-s.yn;hook_weapon_se({s.px,s.py,s.pz},259,0,"bhEff007: CallPlayerWeaponSeEx ohne Stimmenbesitzer");}
+            s.mode0=2;
+            s.py=s.gpy;
+            s.gpy-=0.5f;
+        }
+        break;}
+    case 2: // :2426-2448
+        s.py+=s.yn;
+        if(s.yn>-1.0f)s.yn-=0.05f;
+        if(s.ax<16384)s.ax+=1024;
+        if(s.py<s.gpy){s.yn=0;s.py=s.gpy;s.flg=0;return;}
+        break;
+    default:break;
+    }
+    s.polygon_queued=true;   // sys->ef_pol[sys->ef_poln++] = op (:2451)
 }
 // effsub1.c:8488 bhEff126 — aufsteigende Dampf-/Staubwolke, Texturgruppe 35.
 void step_eff126(EffectSprite& s,bool& queued){
@@ -1069,7 +1123,7 @@ static bool step_en09_smoke(EffectSprite& s){
 bool hand_ported_effect_sprite(unsigned id){
     switch(id){
     case 110:case 133: // Besitzerprozeduren in RoomWorld, wie 111/134/137.
-    case 0:case 2:case 5:case 9:case 17:case 120:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 138:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
+    case 0:case 2:case 5:case 7:case 9:case 17:case 120:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 138:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
     default:return hand_procedure(id)!=nullptr;
     }
 }
@@ -1129,6 +1183,7 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
         bool entered=false;
         switch(s.id){
         case 0:step_eff000(s,c);break;
+        case 7:step_eff007(s,c);break;
         case 2:step_eff002(s,entered);break;
         case 5:step_eff005(s,entered);break;
         case 17:step_eff017(s);break;

@@ -3,6 +3,7 @@
 #include "messages.h"
 #include "doors.h"
 #include "scene.h"
+#include <array>
 #include <functional>
 #include <set>
 namespace recvx {
@@ -33,6 +34,17 @@ public:
     unsigned event_deadline_mode=0,event_deadline_ticks=0,event_deadline_danger=0;
     unsigned event_deadline_voice_tick=0,event_deadline_voice_count=0;
     unsigned player_flags=0; // plp->flg, used by bhCheckEvtTimer modes 2/3
+    // sdfunc.c:90 NextSoundInfo: die Vorgaben fuer Musik und Raumton des NAECHSTEN Raums,
+    // die bhSetNextRoomBgm (event.c:2574) und bhSetNextRoomBgSe (:2612) schreiben. In der
+    // ausgelieferten Fassung hat die Struktur KEINEN Leser: ueber alle 154 Originalquellen
+    // steht sie nur in diesen beiden Befehlen und in ihrer Definition. Die Befehle sind
+    // damit im Original ohne hoerbare Wirkung; der Port fuehrt den Zustand trotzdem an
+    // einer Stelle, damit sie gebunden sind und die Werte nachweisbar bleiben.
+    struct NextSound {
+        unsigned bgm_com=0,bgm_point=0,bgm_offset=0,bgm_number=0,bgm_fade=0;
+        // BgSe-Felder sind im Original zweielementig (sdfunc.c:39/40/105).
+        std::array<unsigned,2> se_com{},se_point{},se_offset{},se_number{},se_fade{},se_set{};
+    } next_sound;
     // Renderer/world bindings are distinct from opcode parsing. Unbound
     // commands are retained with exact operands and reported by the runtime.
     std::function<bool(const EventCommand&)> binding;
@@ -55,6 +67,9 @@ public:
     // rom->posp (room +0x24, pos_n +0xA4; POS 16 Bytes).
     const std::vector<NJS_POINT3>& room_positions()const{return positions_;}
     std::function<bool(unsigned)> audio_active;
+    // sdfunc.c:2178 GetTimeAdx -> adxwrap.c:650 GetAdxPlayTime: Abspielzeit des ADX-Stroms
+    // in Hundertstelsekunden, fuer bhAdxTimeCk (0x1E).
+    std::function<unsigned(unsigned)> adx_time;
     std::function<void(unsigned)> audio_stop;
     // CallSystemVoice (ADV/PatId[3], VoiceNo + 16) for timer mode 3.
     std::function<void(unsigned)> system_voice;
@@ -111,6 +126,8 @@ public:
     void check_floor(NJS_POINT3 position,Angle yaw,int floor=0);
     std::function<void(NJS_POINT3,Angle,int)> floor_binding;
     const std::vector<Interaction>& floor_areas()const{return floors_;}
+    // rom->flrp[i].prm0..3 schreiben (en27.c:101/:160 prm2). false = Index ausserhalb.
+    bool set_floor_parameter(std::size_t index,unsigned which,unsigned value){if(index>=floors_.size()||which>=4)return false;floors_[index].parameters[which]=value;return true;}
     // sys->exm_attr / fixcno / fixkno of the last bhCheckExmAtari camera (hitchk.c:4790).
     unsigned exm_attr=0,fixcno=0,fixkno=0;
     // Native owners for game.c's exm handling: sys->pt_flg (clear,set), rom->lgtp[1].flg 0x2,

@@ -4216,6 +4216,153 @@ void step_e02_sand_particle(EffectSprite& s,const EffectContext& c,bool&){
     if(!drawing(c))return;
     push_particle_sprites(s,p,0,0,s.bl_src,s.bl_dst,false,false);
 }
+// effsub1.c:5632 bhEff026 — Lichtschlieren auf dem Schirm (player.c:1284 Tod in der Explosion,
+// effsub1.c:5676 aus sich selbst nach 16 Passes neu): Viereck 1024 um einen Zufallspunkt der 640x480-
+// Flaeche, dreht je Pass um 182.04445 * spd, Alpha 128 * sin(ct0), ct0 + 1024 bis 0x7FFF -> Ende nach
+// 32 Passes. Gruppe ef_tn[2] Bild 0 (gidx), Blend 8/6, sys->ef_trs2d. Die y-Werte der Ecken 1 und 3
+// nehmen njCos(8192.0f + sz) bzw. njCos(24576.0f + sz) (Float auf Angle, nicht az) wie im Original.
+// bhSetEffect(26, &pnt, ...) liest ein uninitialisiertes POINT; der neue Satz ueberschreibt px/py in
+// mode0 0, pz/lox.. liest bhEff026/bhDrawTrsEffect2D nicht.
+void step_eff026(EffectSprite& s,const EffectContext&,bool& queued){
+    if(s.mode0==0){ // :5637-5672
+        s.tex_id=2;s.ani_ct=0;s.bl_src=8;s.bl_dst=6;
+        s.tv[0].u=0.75f;s.tv[0].v=0;s.tv[1].u=0.875f;s.tv[1].v=0;
+        s.tv[2].u=0.75f;s.tv[2].v=0.125f;s.tv[3].u=0.875f;s.tv[3].v=0.125f;
+        s.px=160.0f+(320.0f*effect_random());
+        s.py=120.0f+(240.0f*effect_random());
+        s.sx=1024.0f;s.sy=1.0f;
+        s.sz=1.0f+(0.1f*effect_random());
+        s.spd=(2.0f*effect_random())-1.0f;
+        s.mode0=1;
+    }
+    if(++s.ct1==16)request_direct(26,{0,0,0},0); // :5674-5677
+    s.az+=int(182.04445f*s.spd)&0xFFFF;
+    s.ct0=(s.ct0+1024)&0x7FFF;
+    if(s.ct0==0){s.flg=0;return;}
+    const std::uint32_t argb=(std::uint32_t(int(128.0f*njSin(s.ct0)))<<24)|0xC8B440u;
+    quad_color(s,argb);
+    const float z=1.0f/s.sz;
+    s.tv[0].x=s.px+(s.sx*njSin(s.az-8192));s.tv[0].y=s.py+(s.sx*njCos(s.az-8192));s.tv[0].z=z;
+    s.tv[1].x=s.px+(s.sx*njSin(s.az+8192));s.tv[1].y=s.py+(s.sx*njCos(Angle(8192.0f+s.sz)));s.tv[1].z=z;
+    s.tv[2].x=s.px+(s.sx*njSin(s.az-24576));s.tv[2].y=s.py+(s.sx*njCos(s.az-24576));s.tv[2].z=z;
+    s.tv[3].x=s.px+(s.sx*njSin(s.az+24576));s.tv[3].y=s.py+(s.sx*njCos(Angle(24576.0f+s.sz)));s.tv[3].z=z;
+    queue_trs2d(s);queued=true;
+}
+// effsub2.c:391 bhEff_E00_Fire (252) — Flamme am Gegnergelenk (zonzon1.c:354 bhEne_SetFireEffect:
+// lkwkp/lkono/Versatz, ct0 = Brenndauer). Ruht, solange lkwkp->stflg 0x1000000 steht. Texturgruppe
+// ef_tn[8], Grundfarbe 0x80FFFFFF, 8/10; Phasen: Aufbau (sx waechst von 0.1 auf sxb/32), Brennen ct0
+// Passes, Ausklingen (sx gegen 0.01) bis frm_no wieder 0 ist. UV-Folge uvtble[mtn_no] mit Basis 0.125.
+void step_e00_fire(EffectSprite& s,const EffectContext&,bool& queued){
+    static const EffectUv uv0[11]={{0.0f,0.375f,0.1875f,0.1875f},{0.1875f,0.375f,0.1875f,0.1875f},{0.375f,0.375f,0.1875f,0.1875f},{0.5625f,0.375f,0.1875f,0.1875f},{0.75f,0.375f,0.1875f,0.1875f},
+        {0.0f,0.5625f,0.1875f,0.1875f},{0.1875f,0.5625f,0.1875f,0.1875f},{0.375f,0.5625f,0.1875f,0.1875f},{0.5625f,0.5625f,0.1875f,0.1875f},{0.75f,0.5625f,0.1875f,0.1875f},{-1.0f,0,0,0}};
+    static const EffectUv uv1[11]={{0.0f,0.0f,0.1875f,0.1875f},{0.1875f,0.0f,0.1875f,0.1875f},{0.375f,0.0f,0.1875f,0.1875f},{0.5625f,0.0f,0.1875f,0.1875f},{0.75f,0.0f,0.1875f,0.1875f},
+        {0.0f,0.1875f,0.1875f,0.1875f},{0.1875f,0.1875f,0.1875f,0.1875f},{0.375f,0.1875f,0.1875f,0.1875f},{0.5625f,0.1875f,0.1875f,0.1875f},{0.75f,0.1875f,0.1875f,0.1875f},{-1.0f,0,0,0}};
+    static const EffectUv uv2[11]={{0.75f,0.5625f,0.1875f,0.1875f},{0.5625f,0.5625f,0.1875f,0.1875f},{0.375f,0.5625f,0.1875f,0.1875f},{0.1875f,0.5625f,0.1875f,0.1875f},{0.0f,0.5625f,0.1875f,0.1875f},
+        {0.75f,0.375f,0.1875f,0.1875f},{0.5625f,0.375f,0.1875f,0.1875f},{0.375f,0.375f,0.1875f,0.1875f},{0.1875f,0.375f,0.1875f,0.1875f},{0.0f,0.375f,0.1875f,0.1875f},{-1.0f,0,0,0}};
+    static const EffectUv* const table[3]={uv0,uv1,uv2};
+    if(s.lkwkp&&(static_cast<const RECVX_ENEMY_WORK*>(s.lkwkp)->stflg&0x1000000u))return; // :446
+    switch(s.mode0){
+    case 0: // :453-473
+        s.flg|=0x4180000u;s.tex_id=8;quad_color(s,0x80FFFFFFu);s.bl_src=8;s.bl_dst=10;
+        s.sxb=s.sx;s.syb=s.sy;s.sx=0.1f;s.sy=0.1f;s.mtn_no=0;s.frm_no=0;++s.mode0;break;
+    case 1: // :474-489
+        if(s.frm_no==0){++s.mtn_no;s.frm_no=int(10.0f*effect_random());++s.mode0;s.sx=s.sxb;s.sy=s.syb;}
+        s.sx+=(s.sxb-s.sx)/32.0f;s.sy+=(s.syb-s.sy)/32.0f;break;
+    case 2: // :490-500
+        if(s.ct0--==0){++s.mtn_no;s.frm_no=0;++s.mode0;}
+        break;
+    case 3: // :501-510
+        if(s.frm_no==0){s.flg=0;return;}
+        s.sx+=(0.01f-s.sx)/32.0f;s.sy+=(0.01f-s.sy)/32.0f;break;
+    default:break;
+    }
+    if(s.mtn_no<0||s.mtn_no>2){report_gap("bhEff_E00_Fire: mtn_no ausserhalb uvtble[3]");s.flg=0;return;}
+    // frm_no = (int)(10 * njRandom()) kann 10 sein (njRandom() == 1.0): das Original liest dann die Endmarke als UV.
+    if(s.frm_no<0||s.frm_no>=10){report_gap("bhEff_E00_Fire: frm_no auf der Endmarke von uvtble[mtn_no]");s.flg=0;return;}
+    e12::step_uv(s,table[s.mtn_no],11,0.125f,"bhEff_E00_Fire"); // :513-522
+    queued=true;
+}
+// effsub2.c:1755 bhEff_E05_Blood (259) — Blutspritzer des Hunters am Spielergelenk 3 (en05.c:5580,
+// txp[0] = Hunter-Textur, tex_id 2): Weiss, 8/3, je Pass ein Schritt durch uvtble[type] (Basis 0.0625),
+// py = Startlage + sy; u < 0 beendet den Satz.
+void step_e05_blood(EffectSprite& s,const EffectContext&,bool& queued){
+    static const EffectUv uv0[18]={{0.0f,0.0f,0.03125f,0.03125f},{0.0f,0.03125f,0.0625f,0.0625f},{0.0f,0.09375f,0.0625f,0.0625f},{0.0625f,0.09375f,0.09375f,0.09375f},
+        {0.0625f,0.0f,0.09375f,0.09375f},{0.15625f,0.0f,0.125f,0.125f},{0.28125f,0.0f,0.125f,0.125f},{0.40625f,0.0f,0.15625f,0.15625f},{0.5625f,0.0f,0.15625f,0.15625f},
+        {0.71875f,0.0f,0.1875f,0.1875f},{0.0f,0.1875f,0.1875f,0.1875f},{0.1875f,0.1875f,0.21875f,0.21875f},{0.40625f,0.1875f,0.21875f,0.21875f},{0.625f,0.1875f,0.21875f,0.21875f},
+        {0.0f,0.40625f,0.21875f,0.21875f},{0.21875f,0.40625f,0.21875f,0.21875f},{0.4375f,0.40625f,0.21875f,0.21875f},{-1.0f,0,0,0}};
+    static const EffectUv uv1[6]={{0.15625f,0.125f,0.03125f,0.03125f},{0.15625f,0.15625f,0.03125f,0.03125f},{0.1875f,0.125f,0.0625f,0.0625f},{0.25f,0.125f,0.0625f,0.0625f},{0.3125f,0.125f,0.0625f,0.0625f},{-1.0f,0,0,0}};
+    if(s.mode0==0){ // :1796-1813
+        quad_color(s,0xFFFFFFFFu);s.bl_src=8;s.bl_dst=3;s.ct0=0;s.ct1=0;
+        s.flg|=0x4180000u;s.stflg|=0x20u;s.sxb=s.sx;s.syb=s.sy;s.yn=s.py;s.mode0=1;
+    }
+    if(s.type>1){report_gap("bhEff_E05_Blood: type ausserhalb uvtble[2]");s.flg=0;return;}
+    const EffectUv* table=s.type?uv1:uv0;const int rows=s.type?6:18;
+    if(s.ct1<0||s.ct1>=rows){report_gap("bhEff_E05_Blood: ct1 ausserhalb");s.flg=0;return;}
+    const auto& uv=table[s.ct1]; // :1815
+    if(uv.u<0){s.flg=0;return;}
+    ++s.ct1;
+    quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/0.0625f;s.sy=(s.syb*uv.ys)/0.0625f; // bhEff_SetUVInfo
+    s.py=s.yn+s.sy;
+    queued=true;
+}
+// effsub2.c:1839 bhEff_E06_Rinpun (260) — Schuppenstaub der Motte (en06.c:2176
+// bhEne06_SetRinpunEffect: txp[0] = epw->mdl[1].texP). 32 Teilchen im P_WRK um px/py/pz
+// mit Drift gegen ay; Zeichnung bhEff_E00_DrawParticleSpr (effsub2.c:238): txp[0], Bild
+// tex_id, Punktfilter (flg 0x20000000), Blend 8/3, njPtclDrawSprite.
+// Die Spielerberuehrung (:1941-1975, Schaden 3, Gift 20 %, ct1 aller 260 auf 0) prueft
+// op->cspr gegen plp->watr. cspr.c ist der Mittelwert der Teilchen PLUS des Anfangswerts
+// von px/py/pz, die das Original nie setzt: im ELF sind es $f20-$f22 (0x00240C54-0x00240C60),
+// die bis _start (0x00100008) niemand belegt. Der Wert ist im Programm nicht bestimmbar;
+// der Zweig bleibt eine benannte Luecke, statt einen Mittelpunkt anzunehmen.
+void step_e06_rinpun(EffectSprite& s,const EffectContext& c,bool&){
+    static const std::uint32_t col[3]={0x000C180Au,0x000B1405u,0x000A1B07u};
+    if(s.mode0==0){
+        if(!acquire_extra_work(s)){s.flg=0;return;}
+        auto& p=particle_work(s,"bhEff_E06_Rinpun");
+        p.num=32;
+        for(int i=0;i<p.num;++i){
+            p.pos[i].x=(s.px+(10.0f*effect_random()))-5.0f;
+            p.pos[i].y=(s.py+(3.0f*effect_random()))-1.5f;
+            p.pos[i].z=(s.pz+(10.0f*effect_random()))-5.0f;
+            s.xn=0.1f+(0.2f*effect_random());
+            p.vec[i].x=s.xn*-njSin(s.ay);
+            p.vec[i].z=s.xn*-njCos(s.ay);
+            if(s.type==0)p.vec[i].y=0.1f+(-0.3f*effect_random());
+            else p.vec[i].y=(0.3f*effect_random())-0.1f;
+        }
+        p.sx=s.sx;p.sy=s.sy;
+        s.ct0=int(30.0f+(30.0f*effect_random()));
+        RECVX_ENEMY_PLAYER pl;
+        if(!hook_player_get(pl,"bhEff_E06_Rinpun: plp->flg")){s.flg=0;release_extra_work(s);return;}
+        s.ct1=(pl.flg&0x4u)?0:1;
+        s.ct2=0xFF;
+        s.tex_id=int(4.0f*effect_random())+1;
+        s.flg|=0x20000000u;s.stflg|=0x20u;
+        s.bl_src=8;s.bl_dst=3;
+        ++s.mode0;
+        return;
+    }
+    auto& p=particle_work(s,"bhEff_E06_Rinpun");
+    for(int i=0;i<p.num;++i){
+        p.pos[i].x+=p.vec[i].x+((0.3f*effect_random())-0.15f);
+        p.pos[i].y+=p.vec[i].y+((0.3f*effect_random())-0.15f);
+        p.pos[i].z+=p.vec[i].z+((0.3f*effect_random())-0.15f);
+        p.vec[i].x*=0.95f;p.vec[i].z*=0.95f;
+        p.vec[i].y-=0.01f;
+        if(p.vec[i].y<-0.1f)p.vec[i].y=-0.1f;
+    }
+    report_gap("bhEff_E06_Rinpun: op->cspr.c aus nicht initialisierten px/py/pz ($f20-$f22, effsub2.c:1932) - Spielerberuehrung nicht bestimmbar");
+    const int ci=int(3.0f*effect_random());
+    if(ci>2){report_gap("bhEff_E06_Rinpun: col[3] (njRandom() == 1.0 liest hinter die Tabelle)");s.flg=0;release_extra_work(s);return;}
+    p.col=col[ci]|(std::uint32_t(s.ct2)<<24);
+    s.tex_id+=int(2.0f*effect_random());
+    if(s.tex_id>4)s.tex_id=1;
+    if(s.ct0<30){s.ct2-=9;if(s.ct2<4)s.ct2=4;}
+    if(s.ct0--==0){s.flg=0;release_extra_work(s);return;}
+    queue_custom(s);
+    if(!drawing(c))return;
+    push_particle_sprites(s,p,kEffectOwnTextureList,unsigned(s.tex_id),s.bl_src,s.bl_dst,true,(s.flg&0x20000000u)!=0);
+}
 // effsub4.c:1117 bhEff_Sub355 — Zielfernrohr-Marke des EN01-Kindes bhEne01Scope
 // (en01sub.c:1948 bhEne01Scope_Effect: zwei Saetze an scope_ofs ueber der Zombiematrix,
 // exp0 = Elternwork, ct3 = 0, sx/sy/sz 0.18). Texturgruppe 4 Bild 2 — eine GLOBALE
@@ -5234,6 +5381,70 @@ void step_eff354(EffectSprite& s,const EffectContext& c,bool& queued){
     push_billboard(s,{m[12],m[13],m[14]},v,s.txp_category,unsigned(s.tex_id+s.ani_ct),s.bl_src,s.bl_dst,(s.flg&0x20000000u)!=0);
     s.quads.back().fogged=false; // njFogDisable (:3293)
 }
+// effsub4.c:1189 bhEff_Sub356 — Halsblutung nach dem Kopfplatzen (en01.c:10967 bhEne01_ExpHeadEffect2,
+// lkwkp = Zombie): Pass 1 Fleischfetzen (bhEne01_NikuhenEffect, 4 Stueck an op->px), Pass 3/+24/+12 die
+// drei Stufen bhEne01_NeckBloodEffect2. Kein Zeichenteil.
+void step_eff356(EffectSprite& s,const EffectContext&,bool&){
+    switch(s.mode0){
+    case 0:++s.mode0;break;
+    case 1:
+        (void)hook_en01_effect(s.lkwkp,0,4,{s.px,s.py,s.pz},"bhEff_Sub356: bhEne01_NikuhenEffect(lkwkp)");
+        ++s.mode0;break;
+    case 2:++s.mode0;break;
+    case 3:
+        (void)hook_en01_effect(s.lkwkp,1,0,{s.px,s.py,s.pz},"bhEff_Sub356: bhEne01_NeckBloodEffect2(lkwkp, 0)");
+        s.ct0=24;++s.mode0;break;
+    case 4:
+        if(--s.ct0<0){(void)hook_en01_effect(s.lkwkp,1,1,{s.px,s.py,s.pz},"bhEff_Sub356: bhEne01_NeckBloodEffect2(lkwkp, 1)");s.ct0=12;++s.mode0;}
+        break;
+    case 5:
+        if(--s.ct0<0){(void)hook_en01_effect(s.lkwkp,1,2,{s.px,s.py,s.pz},"bhEff_Sub356: bhEne01_NeckBloodEffect2(lkwkp, 2)");s.flg=0;}
+        break;
+    default:break;
+    }
+}
+// effsub4.c:1667 bhEff_Sub363 — Fleischstueck der Bein-/Wurmexplosion (en01.c:11051/:11102): Lage mit
+// gedaempfter Geschwindigkeit spd (*0.8) entlang (xn, yn, zn), Typ 0/2/4 fallen (ofy 0.05 * ct2) und
+// drehen um X; nach 16/8 Passes blendet Alpha ab. txp[0] des Zombies, ef_trs, Blend 8/3.
+void step_eff363(EffectSprite& s,const EffectContext&,bool& queued){
+    static const EffectUv uv[12]={{0,160,32,32},{32,160,32,32},{64,160,32,32},{96,160,32,32},{0,192,32,32},{32,192,32,32},
+                                  {64,192,32,32},{96,192,32,32},{0,224,32,32},{32,224,32,32},{64,224,32,32},{96,224,32,32}};
+    const bool falls=s.type==0||s.type==2||s.type==4;
+    switch(s.mode0){
+    case 0: // :1679-1717
+        quad_color(s,0xFF808080u);s.bl_src=8;s.bl_dst=3;s.flg|=0x4080000u;s.stflg|=0x20u;
+        s.ct0=falls?16:8;
+        if(s.type==0||s.type==1)s.ct1=recvx_core_random_next()%4;
+        else if(s.type==2||s.type==3)s.ct1=(recvx_core_random_next()%4)+4;
+        else s.ct1=(recvx_core_random_next()%4)+8;
+        s.ar=1.0f;s.ah=1.0f;s.ofx=0.8f;s.ofy=0.05f;
+        ++s.mode0;
+        [[fallthrough]];
+    case 1: // :1718-1749
+        if(s.ct3<=0){
+            s.spd*=s.ofx;if(s.spd<0)s.spd=0;
+            if(falls){s.py+=(s.yn*s.spd)-(s.ofy*float(s.ct2));s.ax+=4096;}
+            else s.py+=s.yn*s.spd;
+            s.px+=s.xn*s.spd;s.pz+=s.zn*s.spd;
+            ++s.ct2;
+        }else --s.ct3;
+        break;
+    default:break;
+    }
+    if(s.ct0<=0){ // :1754-1768
+        s.tv[0].col+=0xF0000000u;
+        if((s.tv[0].col&0xFF000000u)<0x10000000u)s.flg=0;
+        quad_color(s,s.tv[0].col);
+    }else --s.ct0;
+    if(s.ct1<0||s.ct1>=12){report_gap("bhEff_Sub363: ct1 ausserhalb eff_uvinfo[12]");s.flg=0;return;}
+    // bhEff_SetSprite(op, &eff_uvinfo[ct1], 0) (effsub4.c:3142).
+    const auto& r=uv[s.ct1];
+    s.sx=s.sxb*(r.xs/100.0f);s.sy=s.syb*(r.ys/100.0f);
+    s.tv[0].u=s.tv[2].u=r.u/255.0f;s.tv[0].v=s.tv[1].v=r.v/255.0f;
+    s.tv[1].u=s.tv[3].u=((r.u+r.xs)-1.0f)/255.0f;
+    s.tv[2].v=s.tv[3].v=((r.v+r.ys)-1.0f)/255.0f;
+    queued=s.flg!=0;
+}
 // effsub4.c:1774 bhEff_Sub364 — Blitzmodell (en22.c:2658 bhEne22_SetDengekiEffect2): ein Pass in
 // sys->ef_fnc mit bhEff_ModelDraw (effsub4.c:3306), objP[mdlver] von mlwP = epw->mdl[1..6].
 // Das Modell zeichnet der Raumbesitzer (RoomWorld::append_effect_model).
@@ -5249,6 +5460,114 @@ void step_eff364(EffectSprite& s,const EffectContext&,bool& queued){
     default:break;
     }
     if(s.flg!=0){queue_custom(s);queued=true;}
+}
+// effsub4.c:1812 bhEff_Sub365 — die vierzig Staubpunkte von bhEff_SetPtcl1 (en17.c:627/1126/1237:
+// Steves Tritte und Landungen). ct3 ist die Startverzoegerung; danach laufen alle Punkte mit ihrem
+// Vektor und einer je Pass wachsenden Zusatzsenkung (-0.02 * ct0), und ab dem neunten Bewegungspass
+// blendet das Alpha in Schritten von 0x10 ab. Erst ab mode2 1 steht der Satz in sys->ef_fnc.
+void step_eff365(EffectSprite& s,const EffectContext&,bool&){
+    if(!s.extra){report_gap("bhEff_Sub365: op->exp0 ohne EFFSUB365_WORK (bhEff_SetPtcl1)");s.flg=0;return;}
+    auto* w=extra_rows<EffectPtcl365Work>(s,"bhEff_Sub365");
+    switch(s.mode0){
+    case 0: // :1826-1837
+        s.tv[0].col=0xFF404040u;      // op->tv->col: nur der erste Eckpunkt, wie im Original
+        s.sx=1.0f;s.sy=1.0f;
+        s.ct0=3;s.ct1=0;s.ct2=0;
+        s.mode2=0;++s.mode0;
+        [[fallthrough]];
+    case 1: // :1838-1849
+        if(--s.ct3>=0)break;
+        s.ct0=0;s.mode2=1;++s.mode0;
+        [[fallthrough]];
+    case 2: // :1850-1872
+        for(int i=0;i<w->num;++i){
+            w->vtx_pos[i].x+=w->add_vec[i].x;
+            w->vtx_pos[i].y+=w->add_vec[i].y+(-0.02f*float(s.ct0));
+            w->vtx_pos[i].z+=w->add_vec[i].z;
+        }
+        ++s.ct0;
+        if(s.ct0>8){
+            s.tv[0].col+=0xF0000000u;
+            if((s.tv[0].col&0xFF000000u)<0x10000000u){s.flg=0;release_extra_work(s);}
+        }
+        break;
+    default:break;
+    }
+    if(s.mode2==0||s.flg==0)return;
+    queue_custom(s);
+    // bhEff_PtclSpriteDraw (effsub4.c:3051) ruft je Punkt njPtclDrawSprite(vtx_p, 1, size, size).
+    // njPtclDrawSprite legt je Punkt ZWEI Eckpunkte in seinen Puffer, uebergibt Ps2AddPrim3D aber n
+    // (ELF 0x002D8528 `paddub $s7,$a1` -> 0x002D86A4 `paddub $a2,$s7`), und Ps2AddPrim3D gibt genau n
+    // Eckpunkte aus (ps2_dummy.c:536-545: NLOOP = num, NREG 3, PACKED, 3 Quadwords je Eckpunkt;
+    // DMA-Laenge 3*num+3). Mit n = 1 erreicht den GS also ein einzelner Eckpunkt je Aufruf, und der
+    // GIF-Tag setzt dabei PRE/PRIM (SPRITE|TME|FGE|ABE) neu, was die Eckpunktfolge beginnt — ein
+    // GS-Sprite braucht zwei. Derselbe Zusammenhang steht in effect_particles.cpp fuer
+    // bhEff_PtclSpriteDrawB, das n = 4 uebergibt und deshalb zwei Sprites je Aufruf zeichnet.
+    // Dieser Satz legt damit keine Flaeche ins Bild; seine Punkte laufen trotzdem, weil er in
+    // sys->ef_fnc steht und ef_fncn mitzaehlt.
+    s.fnc_exit_src=8;s.fnc_exit_dst=6;   // njSetSystemAttr stellt den gesicherten Zustand wieder her
+}
+// effsub4.c:1884 bhEff_Sub366 — die sechzehn Funkenstriche von bhEff_SetPtcl2 (Klingentreffer an
+// der Wand, en17.c:392, type 0) bzw. bhEff_SetPtcl2V (Klingentreffer am Spieler, en17.c:1644,
+// type 1). Jeder Punkt faellt mit eigenem Schwerkraftzaehler g (-0.2 je Pass), prallt am Boden 0
+// mit 0.9 ab; type 0 verschiebt die Eckfarben in den ersten fuenf Passen, danach blenden beide ab
+// und der Satz endet mit ct1 12.
+void step_eff366(EffectSprite& s,const EffectContext& c,bool&){
+    if(!s.extra){report_gap("bhEff_Sub366: op->exp0 ohne EFFSUB366_WORK (bhEff_SetPtcl2)");s.flg=0;return;}
+    auto* w=extra_rows<EffectPtcl366Work>(s,"bhEff_Sub366");
+    switch(s.mode0){
+    case 0: // :1903-1930
+        if(s.type==0){s.tv[0].col=std::uint32_t(-0xC0);s.tv[1].col=std::uint32_t(-0xC0);s.bl_src=8;s.bl_dst=10;}
+        else{s.tv[0].col=0xFF600000u;s.tv[1].col=0xFF100000u;s.bl_src=8;s.bl_dst=3;}
+        s.sx=1.0f;s.sy=1.0f;
+        s.ct0=3;s.ct1=0;s.ct2=0;
+        s.mode2=0;++s.mode0;
+        [[fallthrough]];
+    case 1: // :1931-1943
+        if(--s.ct3>=0)break;
+        s.ct0=0;s.mode2=1;++s.mode0;
+        [[fallthrough]];
+    case 2: // :1944-1995
+        ++s.ct0;++s.ct1;
+        for(int i=0;i<w->num;++i){
+            w->g[i]+=-0.2f;
+            w->vtx_pos2[i]=w->vtx_pos[i];
+            w->vtx_pos[i].x+=w->add_vec[i].x;
+            w->vtx_pos[i].y+=w->add_vec[i].y+w->g[i];
+            w->vtx_pos[i].z+=w->add_vec[i].z;
+            if(w->vtx_pos[i].y<0){
+                w->vtx_pos[i].y=0;w->g[i]=0;
+                w->add_vec[i].x*=0.9f;w->add_vec[i].y*=0.9f;w->add_vec[i].z*=0.9f;
+            }
+        }
+        if(s.type==0&&s.ct1<5){s.tv[0].col-=0x800u;s.tv[1].col-=0x2000u;}
+        if(s.ct1>4){
+            s.tv[0].col+=0xE0000000u;s.tv[1].col+=0xE0000000u;
+            if(s.ct1>=12){s.flg=0;release_extra_work(s);}
+        }
+        break;
+    default:break;
+    }
+    if(s.mode2==0||s.flg==0)return;
+    queue_custom(s);
+    s.fnc_exit_src=8;s.fnc_exit_dst=6;   // njSetSystemAttr stellt den gesicherten Zustand wieder her
+    if(!drawing(c))return;
+    // bhEff_LineDraw (effsub4.c:3090): je Punkt ein Dreieck unter cam.mtx aus der neuen Lage, der
+    // neuen Lage + (0.2, 0.3, 0.2) und der vorherigen Lage; Eckfarben tv[0], tv[0], tv[1].
+    // njDrawPolygon3DEx(poly, 3, 1) zeichnet untexturiert mit eigenen Eckfarben
+    // (njDrawPolygonSub3D ps2_NaDraw.c:220 -> Ps2AddPrim3D 0x26 = TRISTRIP|IIP|ABE), njFogDisable
+    // davor und njFogEnable danach.
+    for(int i=0;i<w->num;++i){
+        EffectSprite::Quad q;q.center={0,0,0};q.world_space=true;q.textured=false;q.fogged=false;q.pn=3;q.gouraud=true;
+        q.source=unsigned(s.bl_src);q.destination=unsigned(s.bl_dst);
+        const NJS_POINT3 p[3]={w->vtx_pos[i],
+                               {0.2f+w->vtx_pos[i].x,0.3f+w->vtx_pos[i].y,0.2f+w->vtx_pos[i].z},
+                               w->vtx_pos2[i]};
+        const std::uint32_t col[3]={s.tv[0].col,s.tv[0].col,s.tv[1].col};
+        for(unsigned k=0;k<3;++k){q.vertices[k].x=p[k].x;q.vertices[k].y=p[k].y;q.vertices[k].z=p[k].z;q.vertices[k].col=col[k];}
+        q.vertices[3]=q.vertices[2];
+        s.quads.push_back(q);
+    }
 }
 // effsub4.c:2237..2385 bhEff_Sub370. Emitter only. lmode 0 retains the joint,
 // 1 transforms both offset and direction, 2 transforms only the offset.
@@ -5353,7 +5672,7 @@ bool draw_effect_sprite_work(EffectSprite& s,const EffectContext& c){
 }
 bool stateful_effect_draw(unsigned id){return id==22||id==24||id==25||id==27||id==100||id==107;}
 const HandEffectProcedure hand_effect_procedures[]={
-    {253,step_e02_sand_dust},{254,step_e02_sand_particle},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},{13,step_eff013},{139,step_eff_dummy},{140,step_eff_dummy},{141,step_eff_dummy},{142,step_eff_dummy},
+    {26,step_eff026},{252,step_e00_fire},{253,step_e02_sand_dust},{254,step_e02_sand_particle},{259,step_e05_blood},{260,step_e06_rinpun},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},{13,step_eff013},{139,step_eff_dummy},{140,step_eff_dummy},{141,step_eff_dummy},{142,step_eff_dummy},
     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
     {8,step_eff008},{10,step_eff010},{11,step_eff011},{14,step_eff014},{15,step_eff015},{29,step_eff029},
     {101,step_eff101},{103,step_eff103},{104,step_eff104},{116,step_eff116},{117,step_eff117},{119,step_eff119},
@@ -5373,7 +5692,7 @@ const HandEffectProcedure hand_effect_procedures[]={
     {207,step_eff207},{209,step_eff209},{210,step_eff210},{211,step_eff211},{212,step_eff212},
     {213,step_eff213},{216,step_eff216},{220,step_eff220},{223,step_eff223},{225,step_eff225},
     {226,step_eff226},{227,step_eff227},{228,step_eff228},{229,step_eff229},{232,step_eff232},{233,step_eff233},
-    {301,step_eff301},{350,step_eff350},{351,step_eff351},{352,step_eff352},{353,step_eff353},{354,step_eff354},{364,step_eff364},{362,step_eff362},{370,step_eff370},{371,step_eff371},{372,step_eff372},{373,step_eff373},
+    {301,step_eff301},{350,step_eff350},{351,step_eff351},{352,step_eff352},{353,step_eff353},{354,step_eff354},{356,step_eff356},{363,step_eff363},{364,step_eff364},{365,step_eff365},{366,step_eff366},{362,step_eff362},{370,step_eff370},{371,step_eff371},{372,step_eff372},{373,step_eff373},
     {234,step_eff234},{235,step_eff235},{237,step_eff237},{238,step_eff238},{239,step_eff239},
     {240,step_eff240},{242,step_eff242},{244,step_eff244},{245,step_eff245},{246,step_eff246},
     {247,step_eff247},{248,step_eff248},{249,step_eff249},{147,step_eff147},{148,step_eff148},

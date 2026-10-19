@@ -14,6 +14,7 @@
 #include "cnk_light.h"
 #include "weapon_flash.h"
 #include "weapon_tables.h"
+#include "player_combat_core.h"
 #include "renderer.h"
 #include <algorithm>
 #include <map>
@@ -2336,13 +2337,76 @@ static void head_burst_effects(){
     set_effect_walls(nullptr,0);take_effect_output();
 }
 
+
+// effect.c:949 bhDrawPolEffect ueber sys->ef_pol: je Satz objP[op->mdlver].model von
+// sys->efm[op->id] (njCnkEasyDrawModel, :1021). Die Textur ist
+// sys->ef_tlist.textures[op->tex_id + op->ani_ct] DIREKT, ohne sys->ef_tn — belegt an
+// ELF 0x0021D3F8..0x0021D424 (nur die Summe der Felder), waehrend bhDrawTrsEffect3D an
+// 0x0021DEBC dieselben Felder mit sys->ef_tn[tex_id] + ani_ct liest. Huelse (bhEff000,
+// tex_id 5), Magazin (bhEff007, tex_id 7) und Markierung (bhEff013, tex_id 8) liegen damit
+// alle in den neun Bildern von Kategorie 0.
+static void pol_effect_draw(const std::filesystem::path& data){
+    const auto system=read_asset_file(data/"archives/SYSTEM/0001.bin",8*1024*1024);
+    const auto at=common_effect_textures_offset(system);
+    check(at!=std::size_t(-1),"SYSTEM 0001: gemeinsame Effekttexturen nicht gefunden");
+    const auto common=decode_texture_bundle(system,at);
+    check(common.size()>9,"SYSTEM 0001: weniger als neun gemeinsame Effekttexturen");
+    const auto room=read_asset_file(data/"rooms/RM_0040.RDT",64*1024*1024);const auto stage=decode_scene(room);
+    auto actor=stage.spawns.at(0);std::size_t motion=0;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(room,stage,actor,motion,frame,audio,data,{},"RM_0040");
+    Inventory inventory;MessageDialog dialog;EventVm events(room,inventory,dialog);world.bind_player_collision(events);
+    world.tick();
+    const NJS_POINT3 at_pos{actor.position.x,actor.position.y+6.0f,actor.position.z};
+    // Derselbe Weg wie bhSetGunFire/bhSetMagazine: die bhSetEffectTb-Anforderung des Kampfkerns.
+    auto svc=world.effect_combat_services();
+    const auto place=[&](unsigned id,unsigned mdlver,unsigned type,int flr_no){
+        RECVX_CB_EFFECT req{};req.ef.flg=1;req.ef.id=std::uint16_t(id);req.ef.type=std::uint16_t(type);
+        req.ef.mdlver=std::uint16_t(mdlver);req.ef.flr_no=std::int16_t(flr_no);
+        req.ef.px=at_pos.x;req.ef.py=at_pos.y;req.ef.pz=at_pos.z;req.ef.sx=req.ef.sy=req.ef.sz=1.0f;
+        (void)svc.effect(svc.user,&req);};   // bhSetEffectTb reiht in die Passliste ein
+    // bhEff000 stirbt sofort, wenn flr_no == sys->yk_ct (effsub1.c:259); yk_ct ist hier 0.
+    place(0,0,1,1);place(0,1,1,1);place(7,0,0,0);
+    world.tick();
+    const EffectSprite *a=nullptr,*b=nullptr,*m=nullptr;
+    for(unsigned i=0;const auto* s2=world.effect_state(i);++i){
+        if(!(s2->flg&1u))continue;
+        if(s2->id==0&&s2->mdlver==0&&!a)a=s2;
+        else if(s2->id==0&&s2->mdlver==1&&!b)b=s2;
+        else if(s2->id==7&&!m)m=s2;}
+    check(a&&b&&m&&a->polygon_queued&&b->polygon_queued&&m->polygon_queued,"ef_pol: die drei Saetze stehen nicht in der Liste");
+    check(a->tex_id==5&&m->tex_id==7,"ef_pol: tex_id 5 (Huelse) / 7 (Magazin)");
+    const auto draw=[&]{Scene out;world.append(out,{},stage.cameras.at(0));return out;};
+    const Scene with=draw();
+    for(const auto* s:{a,b,m})const_cast<EffectSprite*>(s)->stflg|=0x1000000u;   // effect.c:965 verdeckt den Aufruf
+    const Scene without=draw();
+    for(const auto* s:{a,b,m})const_cast<EffectSprite*>(s)->stflg&=~0x1000000u;
+    check(with.triangles.size()>without.triangles.size(),"ef_pol: die Modelle fehlen im Bild");
+    // Die zusaetzlichen Texturen sind genau die gemeinsamen Bilder 5 (zweimal) und 7.
+    const auto same=[](const SceneTexture& x,const SceneTexture& y){
+        return x.width==y.width&&x.height==y.height&&x.pixels.size()==y.pixels.size()&&
+               (x.pixels.empty()||std::equal(x.pixels.begin(),x.pixels.end(),y.pixels.begin()));};
+    const auto count=[&](const Scene& sc,const SceneTexture& t){unsigned n=0;for(const auto& u:sc.textures)if(same(u,t))++n;return n;};
+    check(count(with,common[5])==count(without,common[5])+2,"bhDrawPolEffect: Huelse nicht mit dem gemeinsamen Bild 5");
+    check(count(with,common[7])==count(without,common[7])+1,"bhDrawPolEffect: Magazin nicht mit dem gemeinsamen Bild 7");
+    // objP[mdlver]: die beiden Huelsenobjekte von efm[0] sind verschiedene Teilmengen,
+    // zusammen das ganze Modell (zwei Objekte, 40 Dreiecke).
+    const auto added=[&](const EffectSprite* keep){
+        for(const auto* s:{a,b,m})if(s!=keep)const_cast<EffectSprite*>(s)->stflg|=0x1000000u;
+        const Scene one=draw();
+        for(const auto* s:{a,b,m})const_cast<EffectSprite*>(s)->stflg&=~0x1000000u;
+        return one.triangles.size()-without.triangles.size();};
+    const auto n0=added(a),n1=added(b),nm=added(m);
+    check(n0>0&&n1>0&&n0+n1==40,"bhDrawPolEffect: objP[mdlver] waehlt nicht das eine Objekt (efm[0] hat zwei, zusammen 40 Dreiecke)");
+    check(nm>0,"bhDrawPolEffect: das Magazinmodell efm[7] zeichnet nichts");
+    for(const auto& g:world.unbound_enemy_routines())check(g.find("bhDrawPolEffect")==std::string::npos,"bhDrawPolEffect meldet eine Luecke");
+}
 int main(int argc,char** argv){
     try{
         _Make_SinTable();
         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
         muzzle_weapon229();flame352();effect_call_clip();weapon_flash_call_clip();explosion_punch_through();punch_filter_rgb();punch_lazy_cache();
         effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();head_burst_effects();
-        if(argc>1){const std::filesystem::path data=argv[1];explosion_punch_world(data);steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);ntx2d_room(data);afterimage_room(data);published_afterimage_models(data);}
+        if(argc>1){const std::filesystem::path data=argv[1];explosion_punch_world(data);steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);ntx2d_room(data);afterimage_room(data);published_afterimage_models(data);pol_effect_draw(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}
 }

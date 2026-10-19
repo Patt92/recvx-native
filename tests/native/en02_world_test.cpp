@@ -8,6 +8,7 @@
 #include "ninja_math.h"
 #include <cmath>
 #include <iostream>
+#include <functional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -97,6 +98,68 @@ int main(int argc,char** argv){try{
         check(e.mode3==2&&e.mtn_add==0&&!(e.flg&0x48u),"DD00: Kadaverzustand nicht erreicht");
         check(e.flg&0x100000u,"DD00: nach Bild 350 wieder unter dem Boden (flg 0x100000)");
         f.no_en02_gaps("DD00");
+    }
+    {
+        // Skriptbefehle 0x98 bhEffectSandSet (event.c:4110) und 0xC3 bhEffectSandSetMatsumoto
+        // (:8577). Die Bytes sind wie im Skriptstrom gebaut (0x98 ist 12 Byte lang: v0, die
+        // Vorzeichenbits v1, die Lageart v2, drei u16-Betraege in Hundertsteln und der Typ,
+        // der als ein Byte gelesen wird, waehrend der Zeiger um zwei weiterrueckt).
+        Fixture f(data);f.tick();auto& e=f.worm();
+        unsigned index=0;{auto& t=f.world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]==&e)index=i;}
+        const auto count=[&](unsigned id){unsigned n=0;for(unsigned i=0;const auto* s2=f.world.effect_state(i);++i)if((s2->flg&1u)&&s2->id==id)++n;return n;};
+        const auto each=[&](unsigned id,const std::function<void(const EffectSprite&)>& fn){
+            for(unsigned i=0;const auto* s2=f.world.effect_state(i);++i)if((s2->flg&1u)&&s2->id==id)fn(*s2);};
+        check(count(253)==0&&count(254)==0,"vor dem Befehl liegen keine Sandsaetze");
+        // 1. Lageart 0 (Weltlage) mit x negativ und Typ 2. bhEne02_SetSandEffectMain Fall 2
+        //    (en02.c:2291) legt drei Sprites mit Radius 6, dann zweimal je einen Sprite mit
+        //    Radius 8 und drei Partikel: fuenf Saetze 253 und sechs 254.
+        const std::vector<std::uint8_t> absolute{0x98,std::uint8_t(index),0x01,0x00,
+            0xD2,0x04, 0xF4,0x01, 0x15,0x03, 0x02,0xFF};   // -12.34, 5.00, 7.89, Typ 2
+        check(f.world.bind({0x98,0,0,0,absolute}),"0x98 bhEffectSandSet nicht gebunden");
+        f.tick();   // der Gegnerpass desselben Bildes fuehrt den Auftrag aus
+        check(count(253)==5&&count(254)==6,"0x98 Typ 2: fuenf Sprites 253 und sechs Partikel 254");
+        each(253,[&](const EffectSprite& s2){
+            check(std::fabs(s2.px+12.34f)<8.01f,"0x98: x folgt dem Vorzeichenbit 0x1 nicht");
+            check(std::fabs(s2.pz-7.89f)<8.01f,"0x98: z ohne Vorzeichenbit muss positiv bleiben");
+            check(s2.py>=5.0f-1e-3f&&s2.py<=19.01f,"0x98: y ausserhalb der Streuung von Fall 2");});
+    }
+    {
+        // 2. Lageart 1: x und z kommen zur Gegnerlage, y bleibt der reine Skriptwert (:4207).
+        Fixture f(data);f.tick();auto& e=f.worm();
+        unsigned index=0;{auto& t=f.world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]==&e)index=i;}
+        // Diagnosevorbedingung: der Wurm steht in RM_5830 auf y 0, damit traegt die Pruefung
+        // unten nicht, dass y den Skriptwert behaelt. Eine Hoehe ungleich 0 macht sie messbar.
+        e.py=4.0f;
+        const float wx=e.px,wz=e.pz;
+        const std::vector<std::uint8_t> relative{0x98,std::uint8_t(index),0x00,0x01,
+            0x64,0x00, 0xC8,0x00, 0x2C,0x01, 0x00,0x00};   // 1.00, 2.00, 3.00, Typ 0
+        check(f.world.bind({0x98,0,0,0,relative}),"0x98 relative Lage nicht gebunden");
+        f.tick();
+        unsigned n=0;
+        for(unsigned i=0;const auto* s2=f.world.effect_state(i);++i){
+            if(!(s2->flg&1u)||s2->id!=253)continue;++n;
+            check(std::fabs(s2->px-(wx+1.0f))<8.01f,"0x98 relativ: x nicht um die Gegnerlage versetzt");
+            check(std::fabs(s2->pz-(wz+3.0f))<8.01f,"0x98 relativ: z nicht um die Gegnerlage versetzt");
+            check(s2->py>=2.0f-1e-3f&&s2->py<=10.01f,"0x98 relativ: y darf die Gegnerhoehe nicht aufnehmen");}
+        check(n==6,"0x98 Typ 0: sechs Sprites 253");
+    }
+    {
+        // 3. 0xC3 nimmt den Werkplatz von sys->ene und die Gegnerlage selbst (en02.c:2258).
+        Fixture f(data);f.tick();auto& e=f.worm();
+        unsigned work=0;{auto& t=f.world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]==&e)work=i;}
+        const float wx=e.px,wz=e.pz;
+        const std::vector<std::uint8_t> ev{0xC3,std::uint8_t(work),0x00,0x00};
+        check(f.world.bind({0xC3,0,0,0,ev}),"0xC3 bhEffectSandSetMatsumoto nicht gebunden");
+        f.tick();
+        unsigned n=0;
+        for(unsigned i=0;const auto* s2=f.world.effect_state(i);++i){
+            if(!(s2->flg&1u)||s2->id!=253)continue;++n;
+            check(std::fabs(s2->px-wx)<8.01f&&std::fabs(s2->pz-wz)<8.01f,"0xC3: Sprites nicht an der Gegnerlage");}
+        check(n==6,"0xC3 Typ 0: sechs Sprites 253");
+        // Ein Raumindex ausserhalb der Tabelle bleibt ungebunden statt zu raten.
+        check(!f.world.bind({0x98,0,0,0,std::vector<std::uint8_t>{0x98,0x7F,0x00,0x00,0,0,0,0,0,0,0,0}}),"0x98: unbekannter Gegner muss ungebunden bleiben");
+        check(!f.world.bind({0xC3,0,0,0,std::vector<std::uint8_t>{0xC3,0x7F,0x00,0x00}}),"0xC3: unbekannter Werkplatz muss ungebunden bleiben");
+        f.no_en02_gaps("Sandbefehle");
     }
     std::cout<<"EN02 world PASS\n";return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

@@ -997,17 +997,20 @@ static int player_dg_check(RECVX_ENEMY_WORK* w)
     if (!en17_sv || !en17_sv->capsule_capsule) { gap(w, "npCollisionCheckCC (en17.c:1593)"); return 0; }
     for (i = 0; i < 5; i++) {
         RECVX_ENEMY_CAPSULE cap;
-        cap.c1 = x->tip_curve[i + 1];                                /* exp1 + 72 + 12*i: Ausgabepunkt 6+i = tip_curve[i] */
-        cap.c1 = x->tip_curve[i];
-        cap.c2 = x->root_curve[i];
+        cap.c1 = x->tip_curve[i];                                    /* exp1 + 72 + 12*i: Ausgabepunkt 6+i */
+        cap.c2 = x->root_curve[i];                                   /* exp1 + 384 + 12*i: Ausgabepunkt 32+i */
         cap.r = 1.0f;
         if (en17_sv->capsule_capsule(&cap, &pcap) != 0) {
             RECVX_ENEMY_VEC v, pd, ps = { 0, 0, 0 };
             NJS_MATRIX m3;
             int j;
+            /* :1594-1597 plp->djnt_no = 2, plp->dpx..dpz = cap.c1 vor allen Zweigen.
+               RECVX_ENEMY_PLAYER fuehrt diese Felder nicht; ihr Besitzer ist der
+               Trefferzustand des Spielers (recvx_t3_player_hit_set, dv unveraendert). */
+            if (!recvx_t3_player_hit_set(2, NULL, &cap.c1)) { gap(w, "plp->djnt_no/dpx (en17.c:1594)"); return 0; }
             se_play(w, 0x01002308);
             if (!w->sv->vibration) { gap(w, "bhEne_SetVibration (en17.c:1599)"); return 0; }
-            w->sv->vibration(1, 11);
+            w->sv->vibration(1, 10);                                 /* bhEne_SetVibration(1) = StartVibrationEx(1, 0xA) */
             if (w->mtn_no == 11) {
                 p.mode0 = 4; p.mode1 = 0; p.mode2 = 1; p.mode3 = 0;
                 p.flg |= 4u;
@@ -1027,6 +1030,7 @@ static int player_dg_check(RECVX_ENEMY_WORK* w)
             v.x = w->px - p.pos.x; v.y = 15.0f; v.z = w->pz - p.pos.z;
             if (!en17_sv || !en17_sv->eff_ptcl2v_player) gap(w, "bhEff_SetPtcl2V (en17.c:1644)");
             else for (j = 0; j < 8; j++) en17_sv->eff_ptcl2v_player(&pd, &v, j / 2);
+            (void)recvx_t3_player_hit_set(3, NULL, NULL);            /* :1653 plp->djnt_no = 3 vor bhEne_SetBlood2 */
             put_player(w, &p);
             if (en17_sv->player_blood2) en17_sv->player_blood2(2, &ps, 0);
             else gap(w, "bhEne_SetBlood2 (en17.c:1654)");

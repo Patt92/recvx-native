@@ -34,6 +34,8 @@ struct EffectRapAnm;
 // UV_WORK (types.h:2194): eine Zeile der Original-UV-Tabellen {u, v, Breite, Hoehe}.
 struct EffectUv {float u,v,xs,ys;};
 // Fields consumed by the original bhEff200/201/218 procedures and draw path.
+// Vierecks-Kategorie: Textur aus der eigenen txp[0]-Liste des Satzes (SpriteWork::texture_list).
+constexpr unsigned kEffectOwnTextureList=0xC0000000u;
 struct EffectSprite {
     unsigned id=0,type=0,mode0=0,mode1=0,mode2=0,mode3=0,flg=0,stflg=0,ani_ct=0;bool polygon_queued=false;
     // sys->ef_ntx2d[ef_ntx2dn++] = op (effsub1.c:9908/9930 bhEff130 type 3): die untexturierte
@@ -69,6 +71,7 @@ struct EffectSprite {
     // O_WRK.aox/aoy/aoz (0x70..0x78) und ofx/ofy/ofz (0x3A4/0x3A8/0x3AC): weitere
     // Arbeitsfelder der Originalprozeduren (bhEff352 kopiert dort seine Startlage ab).
     float aox=0,aoy=0,aoz=0,ofx=0,ofy=0,ofz=0;int axp=0,azp=0;
+    float ar=0; // O_WRK.ar (bhEff_Sub363 schreibt 1.0, keine Prozedur liest es)
     // O_WRK.shp_ct (0x34C): Bodenhoehe unter dem Werk (bhEff352-Abschlusspruefung) und
     // O_WRK.mtx[13] (Y der Zeichenmatrix des letzten Bildes, ebendieselbe Pruefung).
     float shp_ct=0,mtx_world_y=0;
@@ -165,7 +168,8 @@ struct EffectSprite {
     std::shared_ptr<EffectBlood309> blood309;std::shared_ptr<EffectBlood30b> blood30b;
     std::shared_ptr<EffectClawPlane307> plane307;std::shared_ptr<EffectClaw30c> claw30c;
     // stflg 0x20 txp[0] = mlwP->texP eines Gegnerwerks fuer ef_fnc-Vierecke (bhEff_Sub354,
-    // en22.c:2638): Kategorie 0x80000000|Raumindex wie plane307; 0 = nicht gesetzt.
+    // en22.c:2638): Kategorie 0x80000000|Raumindex wie plane307; kEffectOwnTextureList = die
+    // Texturliste dieses Satzes (SpriteWork::texture_list, z. B. epw->mdl[1].texP); 0 = nicht gesetzt.
     unsigned txp_category=0;
     // O_WRK.mlwP = &ene[model_enemy].mdl[model_mdl] (en22.c:2683) fuer bhEff_ModelDraw (bhEff_Sub364).
     int model_enemy=-1;unsigned model_mdl=0;
@@ -276,6 +280,11 @@ struct EffectWorldHooks {
     std::function<void(void* enemy_work,int action)> en12_binta;
     std::function<bool(int se)> effect_se_playing;
     std::function<void(NJS_POINT3 pos,int se)> effect_se;
+    // sdfunc.c:1546 CallPlayerWeaponSeEx(&op->px, SeNo, SlotNo) aus einer Effektprozedur
+    // (effsub1.c:2415 bhEff007: das Magazin schlaegt auf dem Boden auf). Bank und Syukan
+    // bestimmt der Besitzer wie bei den Kampfstimmen (WpnTab[plp->wpnr_no].snd_wpno).
+    std::function<void(NJS_POINT3 pos,int se,int slot)> weapon_se;
+    std::function<void()> hide_weapon_part2; // effsub1.c:2356 obwp[0].objP[2].evalflags |= 8
     // plp->dvx/dvy/dvz (effsub2.c:2791/2981): derselbe Feldsatz, den bhEne_AttackHitCheck schreibt.
     std::function<void(NJS_POINT3 dv)> player_dv;
     // plp->watr (player.c:1758: c1 = owP[4], c2 = owP[0], r 2.5) fuer npCollisionCheckCC
@@ -284,6 +293,10 @@ struct EffectWorldHooks {
     // zonzon.c:1376 bhEne_HitCheckParts(plp, pos): naechstes Spielergelenk zu pos wird plp->djnt_no (mit dv/dp);
     // Rueckgabe djnt_no, -1 = kein Spielerbaum (effsub4.c:496 bhEff_Sub350).
     std::function<int(NJS_POINT3)> player_hit_check_parts;
+    // Rueckrufe in den EN01-Gegnercode aus einer Effektprozedur (effsub4.c:1189 bhEff_Sub356):
+    // kind 0 = bhEne01_NikuhenEffect(work, pos, arg), kind 1 = bhEne01_NeckBloodEffect2(work, arg).
+    // false = Gegnerwerk/Dienste nicht gebunden.
+    std::function<bool(void* enemy_work,int kind,int arg,NJS_POINT3 pos)> en01_effect;
     // RequestEnemySe(GetLocalEneNo(op->exp0), pos, se) (en15.c:2659): die Stimme des erzeugenden
     // Gegnerwerks (RECVX_ENEMY_WORK*).
     std::function<void(void* enemy_work,NJS_POINT3 pos,int se)> enemy_se;

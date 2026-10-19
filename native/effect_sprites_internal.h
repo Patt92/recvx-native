@@ -106,6 +106,8 @@ void hook_fire_light(NJS_POINT3 pos,NJS_POINT3 color,float far_divisor);
 void hook_en12_binta(void* enemy_work,int action);
 bool hook_effect_se_playing(int se);
 void hook_effect_se(NJS_POINT3 pos,int se);
+// sdfunc.c:1546 CallPlayerWeaponSeEx aus einer Effektprozedur; ohne Besitzer benannte Luecke.
+void hook_weapon_se(NJS_POINT3 pos,int se,int slot,const char* what);
 void hook_player_dv(NJS_POINT3 dv);
 void hook_enemy_se(void* enemy_work,NJS_POINT3 pos,int se);
 bool hook_player_joint(unsigned joint,float* out16,const char* what);
@@ -113,6 +115,7 @@ void hook_player_hit(int dax,int day,int djnt_no,NJS_POINT3 dp);
 // plp->watr des Spielerbesitzers (EffectWorldHooks::player_watr); ohne Besitzer benannte Luecke.
 bool hook_player_watr(RECVX_ENEMY_CAPSULE& c,const char* what);
 int hook_player_hit_check_parts(NJS_POINT3 pos,const char* what); // -1 = Luecke gemeldet
+bool hook_en01_effect(void* work,int kind,int arg,NJS_POINT3 pos,const char* what);
 // cam.ofx/ofy/ofz des Kamerabesitzers (EffectWorldHooks::camera_offset_add/_set); ohne Besitzer benannte Luecke.
 void hook_camera_offset_add(NJS_POINT3 add);
 void hook_camera_offset_set(NJS_POINT3 value);
@@ -164,6 +167,28 @@ struct EffectSpark308 {
     int mode=0,drw_num=0;float wnd_spd=0,wnd_acl=0;
     std::array<NJS_POINT3,32> VtxBuf{};std::array<NJS_POINT3,16> VtxDir{};std::array<std::uint32_t,32> VtxCol{};
     std::array<int,16> TimBuf{};std::array<std::uint32_t,16> ColAdd{},ColSub{};
+};
+// EFFSUB365_WORK / EFFSUB366_WORK (effsub4.c:37/121): die Hilfsarbeitssaetze von
+// bhEff_SetPtcl1 bzw. bhEff_SetPtcl2/2V. Das Original legt sie mit bhEff_AllocOwork
+// (effsub4.c:3028) in einen eff[512]-Platz, also ueber einen O_WRK; D_WORK dtbl steht
+// am Anfang (op->exp0 = effect, und bhEff_Sub365/366 geben den Platz mit
+// effect->dtbl.flg = 0 wieder frei, das ist O_WRK.flg bei Byte 0). acquire_extra_work
+// fuehrt dieses flg, und extra_rows beginnt bei Byte 4 — also genau bei dtbl.num.
+// dtbl.exp0/exp1 sind im Original nur die Zeiger, mit denen die Zeichenfunktion die
+// beiden Felder findet; nativ liegen die Felder hier und brauchen keine Zeiger.
+// Die Reihenfolge der Felder nach dtbl ist aus den Quellen nicht bestimmbar und
+// nativ ohne Bedeutung.
+struct EffectPtcl365Work {
+    int num=0;                       // dtbl.num = 40
+    NJS_POINT3 vtx_pos[40]{};
+    float size[40]{};
+    NJS_VECTOR add_vec[40]{};
+};
+struct EffectPtcl366Work {
+    int num=0;                       // dtbl.num = 16
+    NJS_POINT3 vtx_pos[16]{},vtx_pos2[16]{};
+    NJS_VECTOR add_vec[16]{};
+    float g[16]{};
 };
 struct EffectSnow {
     unsigned flg=2;int header_slot=-1;

@@ -35,6 +35,7 @@
 #include "en55.h"
 #include "en27.h"
 #include "en30.h"
+#include "en06.h"
 #include "en22.h"
 #include "en26.h"
 #include <string.h>
@@ -82,6 +83,7 @@ void recvx_enemy_dispatch_init(RECVX_ENEMY_DISPATCH* d)
     d->jump[22] = recvx_en22;   /* bhEne22, Albinoid Adult (en22.c) */
     d->jump[23] = recvx_en23;
     d->jump[5] = recvx_en05;
+    d->jump[6] = recvx_en06;   /* bhEne06, Moth (en06.c:229) */
     d->jump[24] = recvx_en24;
     d->jump[25] = recvx_en25;
     d->jump[26] = recvx_en26;   /* bhEne26, Anatomist Zombie (en26.c:628) */

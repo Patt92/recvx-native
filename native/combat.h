@@ -21,6 +21,11 @@ public:
     bool tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio,EventVm* events=nullptr);
     void append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted=false,const RoomWorld* world=nullptr)const;
     unsigned attacks=0,shots=0,hits=0,empty=0;
+    void set_weapon_part2_hidden(bool hidden){right_part2_hidden_=hidden;} // obwp[0].objP[2].evalflags 0x8
+    // obwp[0]/[1].mdflg 0x1: bhPlyHandChange (event.c:7413/7441) und gameover.c:304 schreiben beide
+    // gemeinsam; bhSetWeapon (weapon.c:130) nullt das O_WRK beim Laden einer neuen Waffe.
+    void set_weapon_models_hidden(bool hidden){weapon_models_hidden_=hidden;}
+    bool weapon_models_hidden()const{return weapon_models_hidden_;}
     bool aiming()const;
     unsigned original_mode()const;
     unsigned original_phase()const;
@@ -45,7 +50,7 @@ private:
     const void* aim_core_=nullptr;
     RECVX_COMBAT_RESULT aim_seen_{};
     std::filesystem::path data_,mods_;std::optional<WeaponAsset> asset_,bare_hands_;
-    unsigned weapon_=~0u,player_=~0u;int vertical_=0;bool inhibited_=false;
+    unsigned weapon_=~0u,player_=~0u;int vertical_=0;bool inhibited_=false,right_part2_hidden_=false,weapon_models_hidden_=false;
     std::set<unsigned> struck_;
     // Waffen ohne nativen Kampfweg, die gezogen/abgefeuert werden sollten (benannte Luecke),
     // und die fuer unbound_routines() zusammengefuehrte Sicht.

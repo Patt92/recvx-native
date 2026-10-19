@@ -183,6 +183,14 @@ void recvx_enemy_init_damage(RECVX_ENEMY_WORK* w)
     w->flg2     &= ~0x4u;
 }
 
+/* lkwkp = plp: ((BH_PWORK*)lkwkp)->stflg & 0x1000000 ist plp->stflg (event.c bhSetWorkStatus
+   kind 0). Ohne Spielerbesitzer kein Ersatzwert: der Work bleibt draussen. */
+static int linked_player_shown(const RECVX_ENEMY_WORK* w)
+{
+    if (!w->sv || !w->sv->player_status) return 0;
+    return (*w->sv->player_status & 0x1000000u) ? 0 : 1;
+}
+
 /* --- eneset.c:362 Passfilter -------------------------------------------
    Das Original dereferenziert lkwkp ohne NULL-Pruefung, sobald flg 0x80
    steht. Ein fehlender Elternzeiger ist deshalb ein Fehler des Erzeugers;
@@ -193,8 +201,11 @@ int recvx_enemy_pass_enabled(const RECVX_ENEMY_WORK* w)
     if (!w) return 0;
     if (w->stflg & 0x41000000u) return 0;
     if (w->flg & 0x80u) {
-        if (!w->lkwkp) return 0;
-        if (w->lkwkp->stflg & 0x1000000u) return 0;
+        if (w->lk_player) { if (!linked_player_shown(w)) return 0; }
+        else {
+            if (!w->lkwkp) return 0;
+            if (w->lkwkp->stflg & 0x1000000u) return 0;
+        }
     }
     return (w->flg & 0x1u) ? 1 : 0;
 }
@@ -210,8 +221,11 @@ int recvx_enemy_draw_enabled(const RECVX_ENEMY_WORK* w, uint32_t st_flg)
     if (w->stflg & 0x41000000u) return 0;
     if (!(st_flg & 0x20u) && (w->mdflg & 0x200u)) return 0;
     if (w->flg & 0x80u) {
-        if (!w->lkwkp) return 0;
-        if (w->lkwkp->stflg & 0x1000000u) return 0;
+        if (w->lk_player) { if (!linked_player_shown(w)) return 0; }
+        else {
+            if (!w->lkwkp) return 0;
+            if (w->lkwkp->stflg & 0x1000000u) return 0;
+        }
     }
     return 1;
 }
@@ -232,8 +246,11 @@ int recvx_enemy_targetable(const RECVX_ENEMY_WORK* w)
     if (w->flg & 0x8000u) return 0;
     if (w->stflg & 0x41000000u) return 0;
     if (w->flg & 0x80u) {
-        if (!w->lkwkp) return 0;
-        if (w->lkwkp->stflg & 0x1000000u) return 0;
+        if (w->lk_player) { if (!linked_player_shown(w)) return 0; }
+        else {
+            if (!w->lkwkp) return 0;
+            if (w->lkwkp->stflg & 0x1000000u) return 0;
+        }
     }
     return 1;
 }

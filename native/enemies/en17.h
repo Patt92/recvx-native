@@ -91,10 +91,12 @@ typedef struct {
     /* bhEne_SetBlood2(plp, type, ofs, ry). */
     void (*player_blood2)(int type, RECVX_ENEMY_VEC* ofs, int ry);
     /* bhEff_SetPtcl(epw,pos,kind) / bhEff_SetPtcl2(epw,pos,mtx16) /
-       bhEff_SetPtcl2V(plp,pos,v,kind). */
+       bhEff_SetPtcl2V(plp,pos,v,kind). `v` ist nicht const: bhEff_SetPtcl2V ruft
+       njUnitVector(dv) auf dem Vektor DES AUFRUFERS (effsub4.c:260), die acht
+       Aufrufe in PlayerDGCheck bekommen ihn deshalb ab dem zweiten normiert. */
     void (*eff_ptcl)(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos, int kind);
     void (*eff_ptcl2)(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos, const float* mtx16);
-    void (*eff_ptcl2v_player)(const RECVX_ENEMY_VEC* pos, const RECVX_ENEMY_VEC* v, int kind);
+    void (*eff_ptcl2v_player)(const RECVX_ENEMY_VEC* pos, RECVX_ENEMY_VEC* v, int kind);
     /* bhEne17_AfterimageAxEffect: Effekt Id 364, mlwP = &epw->mdl[5],
        Winkel aus der Matrix, flr_no 1, tv[0].col = argb. */
     void (*afterimage)(RECVX_ENEMY_WORK* w, const float* mtx16, const RECVX_ENEMY_VEC* ofs,
