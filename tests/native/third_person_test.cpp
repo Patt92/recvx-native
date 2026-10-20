@@ -82,6 +82,10 @@ int main(){try{
     front.input(MenuInput::Right);front.input(MenuInput::Left);front.input(MenuInput::Left);check(VideoSettings::read(video_path).quality==RenderQuality::Ultra&&applied==3,"quality down");
     // renderer bleibt beim Speichern der Qualitaet erhalten; Standard ist der GPU-Rasterer.
     check(VideoSettings::read(video_path).renderer==RenderBackend::Gpu,"renderer default lost on save");
+    // Debugmenue/Debugaktion "Rasterer": gleiche Persistenz wie die Qualitaet, Qualitaet unberuehrt.
+    const auto quality_before=video.settings().quality;
+    video.set_renderer(RenderBackend::Software);check(VideoSettings::read(video_path).renderer==RenderBackend::Software&&video.settings().renderer==RenderBackend::Software,"renderer switch not persisted");
+    video.set_renderer(RenderBackend::Gpu);check(VideoSettings::read(video_path).renderer==RenderBackend::Gpu&&video.settings().quality==quality_before,"renderer switch changed quality");
     std::filesystem::remove(video_path);
     front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.active()&&!front.settings(),"back row moved");
     std::cout<<"Third-person camera mod: defaults, persistence, chase/aim pose, smoothing, scripted handover and menu row verified.\n";return 0;

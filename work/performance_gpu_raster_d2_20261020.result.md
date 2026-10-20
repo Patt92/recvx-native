@@ -66,8 +66,20 @@ Zeit je Bild (M4 Pro, statischer Raum, `recvx-gpu-compare`):
 
 1. **Energie am Starter** (`powermetrics`, gleiche Szene wie die 12–17-W-Läufe) und Fenster/Titelstart
    — nur am Gerät des Nutzers prüfbar.
-2. Windows: Direct3D-11-Backend; D3D11 hat kein programmierbares Mischen → Rasterreihenfolge über
-   ROV (Feature Level 11.3) oder Compute-Rasterer. Bis dahin Softwarepfad (Crossbuild geprüft).
+2. Windows: `native/gpu_raster_d3d11.cpp` geschrieben (2026-10-20, **auf Hardware noch ungeprüft**).
+   Gegenstück zum programmierbaren Mischen sind Rasterizer Ordered Views: Farbe (R32_UINT), Tiefe,
+   transportierte Tiefe und Maskenfeld liegen als `RasterizerOrderedTexture2D[Array]`, der Pixelshader
+   liest den Vorgängerwert in garantierter Zeichenreihenfolge und schreibt ihn wie die Software.
+   Derselbe Shaderkörper wie MSL, dazu HLSL `precise` und `D3DCOMPILE_IEEE_STRICTNESS` gegen
+   zusammengefasste Operationen. `d3d11.dll`/`d3dcompiler_47.dll` werden zur Laufzeit geladen; ohne
+   `ID3D11Device3` oder ohne `D3D11_FEATURE_D3D11_OPTIONS2.ROVsSupported` entsteht kein Backend und
+   der Softwarepfad bleibt (NVIDIA ab Maxwell, Intel ab Gen9, AMD ab RDNA — aus den Spezifikationen,
+   nicht auf Geräten geprüft). Anders als Metal braucht D3D11 keine Renderpass-Wechsel; dafür
+   verlässt sich die Abhängigkeit zwischen Maskenzeichnung und Komposit auf die UAV-Hazard-Verfolgung
+   von D3D11 — **erster Prüfpunkt auf echter Hardware**. Crossbuild grün für `recvx_scene`,
+   `recvx-gpu-compare.exe` und `recvx-gpu-raster-tests.exe`; `recvx-runtime.exe` scheitert derzeit an
+   fremder Arbeit im Baum (`player_action.h`/`.c` 19:46 geändert, Aufrufstelle `runtime.cpp:344` noch
+   fünfstellig), nicht am Backend.
 3. Das GPU-Bild wartet synchron (`waitUntilCompleted`) und wird zurückgelesen, weil Linien/Overlays auf
    der CPU folgen; bei 30 Bildern/s unkritisch (< 1 ms), spätere direkte Präsentation möglich.
 4. Kleine Renderziele (Monitor, Terminal, Item) und Drahtgitter bleiben Software.

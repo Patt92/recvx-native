@@ -3792,9 +3792,10 @@ std::shared_ptr<const EffectAfterimage> RoomWorld::capture_afterimage(unsigned k
 }
 // effsub3.c:3600 bhEff30cDrw: njSetTexture(prm.texP = mlwP->texP), njPushMatrix(cam.mtx),
 // njMultiMatrix(mtxP), njCnkEasyMultiDrawModel(prm.mdlP = objP[obj].model) — das rohe Chunkmodell
-// des Objekts unter der gespiegelten Matrix, ohne Skin-Rechnung und ohne Knotenhierarchie. Licht:
-// Kategorie 4 (bhSetLight aus bhDrawObjItm, Umgebung amb_chr, game.c:342-348), Material-Phase 6.
-void RoomWorld::append_claw_model(Scene& scene,const EffectSprite& sprite)const{
+// des Objekts unter der gespiegelten Matrix, ohne Skin-Rechnung und ohne Knotenhierarchie. Licht und
+// Spiegelpass (game.c:344-348 / :85+:427): prepare_eff30c_model (effect_rap_claw.h), interne Kategorie 5
+// fuer den spaeten Multi-Lichtlauf, weil ef_fnc-Modelle hinter lit_triangle_count liegen.
+void RoomWorld::append_claw_model(Scene& scene,const EffectSprite& sprite,bool reflected)const{
     const auto& c=*sprite.claw30c;
     const Model* model=nullptr;for(const auto& m:models_)if(m.kind==1&&m.index==c.enemy_index&&m.actor){model=&m;break;}
     const auto found=entities_.find({1,c.enemy_index});
@@ -3806,8 +3807,7 @@ void RoomWorld::append_claw_model(Scene& scene,const EffectSprite& sprite)const{
     geometry.world_matrices.assign(asset->bones(),{});std::copy_n(&c.mtx[0],16,geometry.world_matrices[c.obj].begin());
     Scene object=decode_model_asset(asset->encoded_model(),0,0,geometry);
     object.textures=model->object.textures;
-    for(auto& t:object.triangles){t.light_category=4;t.after_modifiers=false;t.material_phase=6;}
-    for(auto& w:object.ambient_writes)w.phase=6;
+    prepare_eff30c_model(object,reflected);
     for(const auto& t:object.triangles)if(t.textured&&t.texture>=object.textures.size())throw std::runtime_error("bhEff30cDrw: Textur ausserhalb der Liste des Werks");
     const auto offset=scene.textures.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
 }
@@ -4504,7 +4504,8 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
      // ef_fnc-Vorgaenger hinterlassen hat; deshalb in derselben Listenreihenfolge.
      for(const auto& work:sprites_){if(!drawable(work))continue;const auto entry=fnc_blend;
          // effsub3.c:3600 bhEff30cDrw in der ef_fnc-Liste: objP[obj].model des Gegners unter cam.mtx * R0_WK.mtxP.
-         if(work.sprite.id==312&&work.sprite.custom_queued&&work.sprite.claw30c){if(reflected)unbound_enemy_.insert("game.c:427 Spiegel-bhDrawEffect: bhEff30cDrw-Modell (Licht/Normalen unter cam.mtx*njMirror) ohne Hostpfad");else append_claw_model(scene,work.sprite);}
+         // Kein mdflg-Tor und kein zweites Duplikat in der Zeichenfunktion: beide bhDrawEffect-Aufrufe zeichnen sie.
+         if(work.sprite.id==312&&work.sprite.custom_queued&&work.sprite.claw30c)append_claw_model(scene,work.sprite,reflected);
          // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364, en22.c:2658) in der ef_fnc-Liste.
          if(work.sprite.id==364&&work.sprite.custom_queued)append_effect_model(scene,work.sprite,work.texture_list,&fnc_blend,mirror,reflected);
          if(work.sprite.custom_queued||!work.sprite.quads.empty()){
@@ -4549,9 +4550,10 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     ambient_material_=scene.resolve_ambient_material(ambient_material_,&effect_camera);
     NJS_MATRIX view;camera_view_matrix(effect_camera,view);
     NJS_MATRIX mirror_rotation;std::copy_n(scene.mirror_matrix.begin(),16,mirror_rotation);
-    // Modelle der ef_fnc-Zeichenfunktionen (bhEff30cDrw, njCnkEasyMultiDrawModel) laufen im Lichtzustand
-    // von game.c:342-348: bhSetLight aus bhDrawObjItm (objitm.c:540), Umgebung amb_chr (game.c:344); mit
-    // sys->ef_flg 0x4 setzt bhDrawEffect vorher bhSetHalfLight (effect.c:926). Kategorie 4 = genau das.
+    // Modelle der ef_fnc-Zeichenfunktionen (bhEff30cDrw njCnkEasyMultiDrawModel, bhEff_ModelDraw
+    // njCnkSimpleMultiDrawModel) laufen im Lichtzustand von game.c:342-348: bhSetLight aus bhDrawObjItm
+    // (objitm.c:540), Umgebung amb_chr (game.c:344); mit sys->ef_flg 0x4 setzt bhDrawEffect vorher
+    // bhSetHalfLight (effect.c:926). Kategorie 4 = genau das; intern 5, weil sie hinter lit_triangle_count liegen.
     const bool effect_half_light=(effect_flags_&0x4u)!=0;
     // Only the direct MODE-3 model calls join the late lighting loop. Sprites,
     // bhDraw136 (already lit) and other ef_fnc outputs retain their existing path.
@@ -5819,8 +5821,24 @@ bool RoomWorld::search_near_enemy_b(NJS_POINT3 pos,int ay,int ar,float len)const
     return false;
 }
 bool RoomWorld::stand_player_motion(){
-    if(!stand_player_){unbound_enemy_.insert("bhStandPlayerMotion (player.c:1114) ohne Host-Besitzer");return false;}
-    player_room_motion_=false;player_enemy_motion_=false; // plp->mnwP = plp->mnwPb
-    stand_player_();return true;
+    // player.c:1114 bhStandPlayerMotion (native/player_action.c) auf dem einen Spielerwerk der Runtime.
+    if(!player_action_work_){unbound_enemy_.insert("bhStandPlayerMotion (player.c:1114): kein Spielerwerk gebunden (bind_player_action)");return false;}
+    RECVX_PLAYER_ACTION* a=player_action_work_;
+    a->px=player_.position.x;a->pz=player_.position.z; // plp->px/pz: die eine Spielerlage (player_), wie sie der Aktionspass vor jedem Lauf in das Werk uebernimmt
+    unsigned& flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
+    unsigned& stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+    RECVX_PLAYER_STAND_IO io{};io.flg=&flg;io.stflg=&stflg;io.hp=player_health();io.user=this;
+    if(player_inventory_)io.stflg_owned=player_inventory_->player_stflg();else unbound_enemy_.insert("bhStandPlayerMotion: plp->stflg 0x280000 (Inventar) nicht gebunden");
+    io.mode_reset=[](void* u){static_cast<RoomWorld*>(u)->collision_mode_=1u;}; /* :1142 *(int*)&plp->mode0 = 1 */
+    io.own_motion_bank=[](void* u){auto* w=static_cast<RoomWorld*>(u);w->player_room_motion_=false;w->player_enemy_motion_=false;}; /* :1154 plp->mnwP = plp->mnwPb */
+    // :1156/:1158 bhSetMotion(plp,0,0,NULL)/bhCalcModel(plp): mtn_no/frm_no sind motion_/frame_ der Runtime; den
+    // Knotenbaum rechnet der naechste Posenpass aus genau diesem Stand (kein Vorgriff auf einen Motionzustand).
+    io.set_motion=[](void* u,std::uint32_t m)->int{auto* w=static_cast<RoomWorld*>(u);w->motion_=m;w->frame_=0;return (!w->player_asset_||w->player_asset_->has_motion(m))?1:0;};
+    io.gap=[](void* u,const char* n){static_cast<RoomWorld*>(u)->unbound_enemy_.insert(std::string("bhStandPlayerMotion: ")+n);};
+    recvx_player_stand_motion(a,&io);
+    collision_safe_.x=a->spx;collision_safe_.z=a->spz; // :1144/:1145 EXP_WORK.spx/spz (exp0 0x48/0x50) fuehrt der Host als collision_safe_
+    if(collision_events_)collision_events_->player_flags=flg;
+    ++player_stand_count_;
+    return true;
 }
 }

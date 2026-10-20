@@ -30,6 +30,7 @@ public:
     const VideoSettings& settings()const{return settings_;}
     void cycle(int direction,bool persist=true);
     void set(RenderQuality quality,bool persist=true);
+    void set_renderer(RenderBackend renderer,bool persist=true);
     std::string describe()const{return settings_.describe();}
     const std::string& status()const{return status_;}
 private:

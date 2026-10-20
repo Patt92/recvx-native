@@ -63,6 +63,17 @@ bool step_eff30c(EffectSprite& s){
     }
 }
 
+// effsub3.c:3600 bhEff30cDrw: Metadaten des Modellaufrufs fuer den Raumbesitzer (Modus 1, EasyMulti).
+void prepare_eff30c_model(Scene& object,bool reflected){
+    route_model_texture_cache(object.triangles,0);          // njCnkEasyMultiDrawModel: Sprungtabellenspalte 0
+    for(auto& t:object.triangles){
+        t.light_category=5;                                 // spaeter Multi-Lichtlauf (game.c:344-348 / :85+:427)
+        t.material_phase=reflected?10u:6u;t.after_modifiers=reflected;
+        t.camera_mask=false;t.mirror=reflected?3:0;         // game.c:427: zweiter Aufruf unter cam.mtx*njMirror
+    }
+    for(auto& w:object.ambient_writes){w.phase=reflected?10u:6u;w.camera_mask=false;}
+}
+
 // en19.c:4801 bhEne19_SetClawPlane -> bhSetRapEff(307, &Dat307, 12): flg 1, id 307, die 12 Worte
 // EFFPRM_WORK nach free4; die R07_WORK-Felder dahinter bleiben genullt (AllocOworkOne).
 bool start_eff307(EffectSprite& s,const EffectMatrixRef& mtx,int col,int tim,float src_x,float dst_x){

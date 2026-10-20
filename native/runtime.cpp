@@ -18,7 +18,13 @@
 #include "movie.h"
 #include "timing.h"
 #if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
+// windef.h haelt die 16-Bit-Altlasten near/far als leere Makros; sie wuerden die Feldnamen
+// der njClipZ-Grenzen (ViewClip::near/far) zerstoeren.
+#undef near
+#undef far
 #else
 #include <sys/resource.h>
 #endif
@@ -50,6 +56,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <iostream>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -329,17 +336,17 @@ int main(int argc,char** argv){
         std::vector<std::int16_t> audio_frame;SDL_AudioDeviceID audio_device=0;
         std::int64_t animation=args.animation_frame*65536;
         NJS_POINT3 camera_offset{}; // cam.ofx/ofy/ofz (camera.c:36/49/81); load() nullt ihn wie bhInitCamera (room.c:33, camera.c:8)
-        // player.c:1114 bhStandPlayerMotion on the one host player (ItemTaskCheck, bhSysCallMap
-        // case 2, bhExitSpEvtComputer, Player_controll 52, bhEff134). *(int*)&plp->mode0 = 1
-        // ends any action, so the next free pass enters act_std's mode3-0 block again.
-        auto stand_player_motion=[&]{
-            if(!events)return;
-            action.px=actor.position.x;action.pz=actor.position.z;
-            recvx_player_stand_motion(&action,&events->flags[13][0],&events->flags[14][0],inventory.player_stflg(),inventory.hp);
-            events->player_flags=events->flags[13][0];
-            if(world){world->set_player_mode(1);if(world->player_safe_position_ready())world->set_player_safe_position({action.spx,world->player_safe_position().y,action.spz});}
-            if(player&&!player->has_motion(action.mtn_no))throw std::runtime_error("bhStandPlayerMotion: player motion "+std::to_string(action.mtn_no)+" missing");
-            motion=action.mtn_no;animation=0;action_resume=true;head_other_action();};
+        // player.c:1114 bhStandPlayerMotion laeuft in RoomWorld auf dem Spielerwerk `action`
+        // (bind_player_action, native/player_action.c). ItemTaskCheck (sub1.c:3105), bhSysCallMap
+        // case 2 (system.c:846) und bhExitSpEvtComputer (sp_evt.c:781) reichen dorthin durch;
+        // Player_controll 52, bhEff134 und bhEff138 rufen die Welt direkt. *(int*)&plp->mode0 = 1
+        // beendet jede Aktion: der Aktionspass liest den Zaehler und beginnt wie nach jedem
+        // fremden Besitzer bei act_std (mode2/mode3 0, Kopf: neuer mode3-0-Eintritt).
+        unsigned stand_seen=0;
+        auto stand_player_motion=[&]{if(world)world->stand_player_motion();};
+        auto stand_player_poll=[&]{if(!world||world->player_stand_count()==stand_seen)return;stand_seen=world->player_stand_count();
+            if(player&&!player->has_motion(motion))throw std::runtime_error("bhStandPlayerMotion: player motion "+std::to_string(motion)+" missing");
+            action_resume=true;head_other_action();};
         box_menu.stand_player=stand_player_motion;computer.stand_player=stand_player_motion;
         bool automatic_camera=bool(player)&&!args.camera_explicit,locomotion=false;
         auto follow=[&](){if(automatic_camera&&world&&world->fixed_camera){camera_index=*world->fixed_camera;camera=scene.cameras.at(camera_index);return;}if(automatic_camera&&world&&world->event_camera)return;if(automatic_camera){if(const auto cut=recvx::camera_for_position(scene,actor.position,std::int8_t(world?world->floor_at(actor.position):0)))camera_index=*cut; /* bhCheckCut matches cut->flr_no with plp->flr_no; ohne Treffer bleibt cam.ncut */
@@ -402,7 +409,7 @@ int main(int argc,char** argv){
             // during the room load. The outgoing player work is stored under the
             // old ply_id, sys->ply_id becomes cng_pid and the SYSTEM entry
             // ply_id + 10 + costume*4 is read into the new player.
-            bool player_change_push=false;
+            bool player_change_push=false,player_changed=false;
             if(events&&(events->flags[10][0]&0x80u)){
                 const unsigned target=events->change_player;
                 events->flags[10][0]&=~0x80u;
@@ -416,7 +423,7 @@ int main(int argc,char** argv){
                         if(!player->has_motion(motion))throw std::runtime_error("bhPlayerChangeSet: player motion "+std::to_string(motion)+" missing");
                         combat=recvx::CombatController(args.data,args.mods);
                     }
-                    action_player_set=false; // bhResetPlayer re-derives EXP_WORK.wpntp from the new wpnr_no
+                    action_player_set=false;player_changed=true; // bhResetPlayer re-derives EXP_WORK.wpntp from the new wpnr_no
                 }
             }
             auto room_name=rooms.name(room_index);room_name.replace(room_name.size()-3,3,"RDT");
@@ -438,7 +445,7 @@ int main(int argc,char** argv){
             if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4),inventory.game_mode);recvx::bind_pose_gap([&](const char* name){if(world)world->report_enemy_gap(name);});if(!restoring&&!scene.spawns.empty())world->initialize_player_spawn(); /* bhSetRoom before player setup/Event_init; saved positions retain Y. */origin=actor;follow();if(world)world->set_player_safe_position(actor.position);world->set_player_asset(player.get());{ // bhResetPlayer keeps EXP_WORK.wpntp; only bhSetPlayer (first setup, restored game) derives it from wpnr_no.
                     const bool set_player=!action_player_set||bool(restoring);const std::int32_t wpntp=set_player?(inventory.weapon()<10?0:1):action.wpntp;
                     const int hp=inventory.hp;const bool poison=(inventory.player_stflg()&0x280000u)!=0;const std::int32_t dmlvl=hp>=120?(poison?1:0):hp>=30?1:2;
-                    recvx_player_action_reset(&action,actor.position.x,actor.position.z,actor.yaw,wpntp,dmlvl,unsigned(motion));action_player_set=true;action_resume=true;action_pad=0;action_pad_old=0;}world->set_player_character((args.player-10)%4);world->set_stand_player_hook(stand_player_motion);world->set_weapon_part2_hook([&]{combat.set_weapon_part2_hidden(true);});world->set_weapon_models_hook([&](bool hidden){combat.set_weapon_models_hidden(hidden);});world->set_camera_offset_owner(&camera_offset);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);
+                    recvx_player_action_reset(&action,actor.position.x,actor.position.z,actor.yaw,wpntp,dmlvl,unsigned(motion));action_player_set=true;action_resume=true;action_pad=0;action_pad_old=0;}world->set_player_character((args.player-10)%4);world->bind_player_action(&action,&inventory);stand_seen=0;world->set_weapon_part2_hook([&]{combat.set_weapon_part2_hidden(true);});world->set_weapon_models_hook([&](bool hidden){combat.set_weapon_models_hidden(hidden);});world->set_camera_offset_owner(&camera_offset);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);
                 if(previous)events->inherit_progress(*previous);
                 // bhSysCallInit installs ts_flg 0x3df80 (system.c:453).  At
                 // this runtime's gameplay handoff the original input lock
@@ -454,6 +461,7 @@ int main(int argc,char** argv){
                 events->flags[12][0]|=0x8000u; // typewriter task blocked until a room script clears bit 15
                 world->bind_player_collision(*events);
                 world->bind_enemy_player(inventory.hp,head.flags);world->bind_player_head(head);
+                if(player_changed)world->stand_player_motion(); /* system.c:1776-1778 bhSysCallMonitor mn_md1 5 (Figurwechsel): bhReadPlayerData, bhResetPlayer, bhStandPlayerMotion vor bhInitEvent (mn_md1 10) */
                 world->set_pad_clear_callback([&](uint32_t bits){pad_on&=~bits;});
                 const auto clip_room=recvx::RoomIdentity::parse(rooms.name(room_index));
                 events->values[0]=clip_room.stage;events->values[1]=clip_room.room;
@@ -601,6 +609,10 @@ int main(int argc,char** argv){
         frontend.has_saves=[&]{for(const auto& s:recvx::list_save_slots(saves_dir))if(s.exists||s.damaged)return true;return false;};
         // Host render quality (settings screen, video.ini); --nearest/--ss override it for this run.
         recvx::VideoConfig video(args.video_config);if(!video.status().empty())std::cerr<<"Video settings ignored: "<<video.status()<<'\n';
+        // Host-Rasterer der Bandstufe (gpu_raster.h). Der Umschalter entsteht erst mit dem Bild,
+        // das Debugmenue und der Startpfad rufen denselben. Keine Spiellogik: nur, wer rastert.
+        recvx::RenderBackend active_renderer=recvx::RenderBackend::Software;
+        std::function<std::string(recvx::RenderBackend)> apply_renderer;
         if(!args.video_explicit){args.nearest=!video.settings().filtering();args.supersampling=video.settings().supersampling();}frontend.video=&video;if(args.preview||args.in_game||args.inventory){frontend.hide();load();}
         if(!frontend.active()&&args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}
         if(player)std::cout<<"Animated SYSTEM/"<<recvx::asset_number(args.player)<<".bin: "<<player->bones()<<" bones, motion "<<motion<<", "<<player->motion_frames(motion)<<" frames\n";
@@ -952,6 +964,11 @@ int main(int argc,char** argv){
         debug.add({"snapshot_save","Snapshot speichern","OK: Spielstand an dieser Position sichern; ohne Schreibmaschine, Farbband und Speicherzaehler.",snapshot_slots,[]{return 0;},[&](unsigned slot){return save_snapshot(slot);}});
         debug.add({"snapshot_load","Snapshot laden","OK: Raum mit gesichertem Fortschritt an der gesicherten Position neu laden.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
         debug.add({"video","Grafikqualitaet","OK: Host-Renderqualitaet; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Niedrig"},{2,"Hoch"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Grafik: "+video.describe();}});
+        debug.add({"renderer","Rasterer","OK: GPU-Backend der Plattform oder Software; wird in video.ini gespeichert. Gleiches Bild, nur ein anderer Rasterer.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU"},{1,"Software"}};},[&]{return active_renderer==recvx::RenderBackend::Gpu?0u:1u;},[&](unsigned value){
+            const auto backend=value?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
+            if(!apply_renderer)return std::string("Rasterer: noch nicht bereit");
+            const auto name=apply_renderer(backend);video.set_renderer(active_renderer);
+            return "Rasterer: "+name+(video.status().empty()?"":" ("+video.status()+")");}});
         debug.add({"resume","Weiter spielen","OK oder Debug-Hotkey: Menue schliessen.",[]{return std::vector<recvx::DebugChoice>{{0,"Schliessen"}};},[]{return 0;},[&](unsigned){debug.close();return std::string{};}});
         auto input=[&](recvx::MenuInput key){if(ui){if(debug.active())debug.input(key);else if(typewriter.active())typewriter_key(key);else if(frontend.active())frontend_command(frontend.input(key));else if(!game_over.active())gameplay_input.menu_input(key);}};
         int replay_move=0,replay_turn=0;bool replay_run=false;unsigned replay_pad=0; // bhSetPad equivalent for headless bhPadCheck
@@ -1331,6 +1348,7 @@ int main(int argc,char** argv){
                am Anfang des naechsten Bildes vor der Spieleraktion (das verschob spx vor
                bhCPM2_act_std case 0, player.c:2127, und damit die Freigabelage nach Szenen). */
             struct PlayerPassEnd{std::unique_ptr<recvx::RoomWorld>& w;recvx::SceneSpawn& a;~PlayerPassEnd(){if(w)w->finish_player_pass(a.position,a.yaw);}} player_pass_end{world,actor};
+            stand_player_poll(); // bhStandPlayerMotion seit dem letzten Pass (Welt, Statusschirm, Karte, Terminal): Wiedereintritt bei act_std
             if(world)world->begin_player_motion_pass(); // plp->mlwP->objP: ohne Knotenteil im Vorpass folgt es der gezeigten Pose
             bool run_pressed = run && !lever_run;
             // system.c:522 bhSysCallPad -> bhSetPad nur mit sp_flg 0x20, einmal je Bild: pad_dx/pad_dy
@@ -1524,10 +1542,18 @@ int main(int argc,char** argv){
         };
         recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);image.set_render_threads(args.render_threads);
         // Host-GPU-Rasterer (gpu_raster.h) fuer das Hauptbild; Headless-Pruefungen bleiben ohne --renderer gpu in Software.
-        if(args.renderer>=0?args.renderer==1:(!args.headless&&video.settings().renderer==recvx::RenderBackend::Gpu)){
-            std::string reason;if(auto gpu=recvx::create_gpu_raster(reason)){image.set_gpu(gpu);std::cout<<"Renderer: "<<gpu->name()<<'\n';}
-            else std::cout<<"Renderer: software ("<<reason<<")\n";}
-        else std::cout<<"Renderer: software\n";
+        {// Das Backend entsteht beim ersten Bedarf und bleibt danach bestehen; scheitert es, zeichnet die Bandstufe.
+         auto gpu_backend=std::make_shared<std::shared_ptr<recvx::GpuRaster>>();auto gpu_reason=std::make_shared<std::string>();auto gpu_tried=std::make_shared<bool>(false);
+         apply_renderer=[&image,&active_renderer,gpu_backend,gpu_reason,gpu_tried](recvx::RenderBackend backend)->std::string{
+             if(backend==recvx::RenderBackend::Gpu){
+                 if(!*gpu_backend&&!*gpu_tried){*gpu_tried=true;*gpu_backend=recvx::create_gpu_raster(*gpu_reason);}
+                 if(*gpu_backend){image.set_gpu(*gpu_backend);active_renderer=recvx::RenderBackend::Gpu;return (*gpu_backend)->name();}
+                 image.set_gpu(nullptr);active_renderer=recvx::RenderBackend::Software;return "software ("+*gpu_reason+")";}
+             image.set_gpu(nullptr);active_renderer=recvx::RenderBackend::Software;return "software";};
+         // Headless-Pruefungen bleiben ohne --renderer in Software; --renderer gilt nur fuer diesen Lauf.
+         const auto startup=args.renderer>=0?(args.renderer==1?recvx::RenderBackend::Gpu:recvx::RenderBackend::Software)
+                                            :(args.headless?recvx::RenderBackend::Software:video.settings().renderer);
+         std::cout<<"Renderer: "<<apply_renderer(startup)<<'\n';}
         auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}
         // Original enemy routines that were reached but are not bound yet.
         if(world&&!world->unbound_enemy_routines().empty()){std::cout<<"Enemy gaps: "<<world->unbound_enemy_routines().size()<<'\n';for(const auto& gap:world->unbound_enemy_routines())std::cout<<"  "<<gap<<'\n';}if(!combat.unbound_routines().empty()){std::cout<<"Combat gaps: "<<combat.unbound_routines().size()<<'\n';for(const auto& gap:combat.unbound_routines())std::cout<<"  "<<gap<<'\n';}if(!args.state.empty()){if(fs::exists(args.state))throw std::runtime_error("state output already exists");std::ofstream out(args.state);if(!out)throw std::runtime_error("cannot create state output");out<<"{\n  \"debug_open\": "<<(debug.active()?"true":"false")<<", \"debug_selected\": "<<debug.selected()<<", \"debug_status\": "<<std::quoted(debug.status())<<", \"player_entry\": "<<args.player<<", \"player_owner\": "<<inventory.player<<", \"wireframe\": "<<(wireframe?"true":"false")<<",\n  \"title_active\": "<<(frontend.active()?"true":"false")<<", \"settings_active\": "<<(frontend.settings()?"true":"false")<<", \"settings_selected\": "<<frontend.selected()<<", \"title_mode\": "<<frontend.mode()<<", \"title_cursor\": "<<frontend.cursor()<<", \"title_attract\": "<<frontend.attract_count()<<",\n  \"room\": "<<std::quoted(rooms.name(room_index))<<", \"room_changes\": "<<room_changes<<", \"door_active\": "<<(transition_pending?"true":"false")<<", \"door_ticks\": "<<door.ticks()<<", \"door_skipped\": "<<(door.skipped()?"true":"false")<<", \"door_voices_active\": ["<<audio.active(recvx::door_voice_first)<<", "<<audio.active(recvx::door_voice_first+1)<<", "<<audio.active(recvx::door_voice_last)<<"], \"system_sound_active\": ["<<audio.active(2)<<", "<<audio.active(3)<<"], \"door\": ";
@@ -1580,7 +1606,7 @@ int main(int argc,char** argv){
             audio.set_sound_monitor({wp.x,wp.y,wp.z},cam.angles[1],{actor.position.x,actor.position.y,actor.position.z});
             if(world)world->sound_monitor();};
         auto third_person_tick=[&](){third_person.tick(actor,{!args.preview&&!frontend.active()&&!transition_pending&&bool(player)&&!movie.active()&&!(world&&(world->event_camera||world->fixed_camera||world->player_scripted||world->player_hidden))&&!(events&&(events->flags[5][0]&4)),combat.aiming()},world.get()); /* Diagnose only: actual host-mod view after its tick, distinct from original CAM_WORK. */if(std::getenv("RECVX_CAM_TRACE")){const auto p=view_camera();std::fprintf(stderr,"CAMOUTPUT room=%s third_active=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",rooms.name(room_index).c_str(),int(third_person.active()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}};
-        frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());};
+        frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());if(apply_renderer)apply_renderer(settings.renderer);};
         bool pause_active=false;
         /* bhSysCallEvent (system.c:668) sperrt Pause mit st_flg 0x1C040208 (0x4 Cinematic, 0x40000 Kartentask)
            UND verlangt (ts_flg & 0x3DE00) == 0x3DE00. Darin steckt Bit 15 (0x8000): solange die
@@ -1801,6 +1827,6 @@ int main(int argc,char** argv){
                   <<", bands "<<1000.0*t.bands/frames<<", shadow "<<1000.0*t.shadow/frames<<", lines "<<1000.0*t.lines/frames<<" ms/frame\n";}
         if(image.gpu()){const auto& g=image.gpu()->timings();const double frames=std::max(1.0,double(rendered_frames));
          std::cout<<"GPU: build "<<1000.0*g.build/frames<<", upload "<<1000.0*g.upload/frames<<" ("<<g.uploads<<" textures), encode "<<1000.0*g.encode/frames
-                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
+                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
     }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';return 1;}
 }

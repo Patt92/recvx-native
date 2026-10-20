@@ -275,7 +275,8 @@ public:
         const std::uint32_t size[4]={std::uint32_t(frame.width),std::uint32_t(frame.height),std::uint32_t(S),0};[c setBytes:size length:sizeof size atIndex:2];
         [c dispatchThreads:MTLSizeMake(frame.width,frame.height,1) threadsPerThreadgroup:MTLSizeMake(16,16,1)];[c endEncoding];
         timings_.encode+=since(encode_begin);
-        {const auto t=Clock::now();wait_for(cb);check(cb);timings_.wait+=since(t);++timings_.submits;}
+        {const auto t=Clock::now();wait_for(cb);check(cb);timings_.wait+=since(t);++timings_.submits;
+         timings_.gpu+=cb.GPUEndTime-cb.GPUStartTime;}
         const auto readback_begin=Clock::now();
         const std::size_t n=std::size_t(frame.width)*frame.height;pixels.resize(n);depth.resize(n);
         std::memcpy(pixels.data(),out_color_.contents,n*4);std::memcpy(depth.data(),out_depth_.contents,n*4);

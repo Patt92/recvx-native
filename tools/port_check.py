@@ -225,25 +225,66 @@ README_BEGIN = '<!-- port-status:begin -->'
 README_END = '<!-- port-status:end -->'
 PORT_STATUS = ROOT / 'docs/PORT_STATUS.md'
 
+# README.md is written in English; docs/PORT_STATUS.md stays German. The block is parsed
+# from the German report and rendered with English labels so a later sync cannot put the
+# German wording back into the public README.
+README_AREAS = {
+    'Gegner/KI': 'Enemies/AI',
+    'Effekte': 'Effects',
+    'Events/Skript': 'Events/script',
+    'Spieler/Kampf': 'Player/combat',
+    'Raum/Kamera/Tür': 'Room/camera/door',
+    'Menü/Items/Text': 'Menu/items/text',
+    'Modelle/Animation': 'Models/animation',
+    'Audio': 'Audio',
+    'Ablauf/Speichern': 'Flow/saving',
+    'Plattform (Host-ersetzt)': 'Platform (host-replaced)',
+}
+
 def readme_block_from_status(status):
     lines = status.splitlines()
     summary_index = next((i for i, line in enumerate(lines) if line.startswith('Expliziter Belegumfang:')), None)
     events_index = next((i for i, line in enumerate(lines) if line.startswith('Event-Befehle (bhScenarioJmpT):')), None)
     table_index = next((i for i, line in enumerate(lines) if line.startswith('| Bereich | Mechanismen | Belegumfang |')), None)
     if summary_index is None or events_index is None or table_index is None:
-        raise SystemExit('PORT_STATUS: Zusammenfassung oder Event-Befehlszeile nicht lesbar')
+        raise SystemExit('PORT_STATUS: summary or event-command line not readable')
+    summary = re.fullmatch(
+        r'Expliziter Belegumfang: \*\*(.+?)\*\* gewichtet, \*\*(.+?)\*\* voll belegt \((.+?)\)\.',
+        lines[summary_index])
+    events = re.fullmatch(
+        r'Event-Befehle \(bhScenarioJmpT\): (\d+)/(\d+) gebunden, (\d+) nur konsumiert, (\d+) fehlen\.',
+        lines[events_index])
+    scope = re.fullmatch(r'(\d+)/(\d+) Mechanismen; kein Gesamtfortschritt', summary.group(3)) if summary else None
+    if not summary or not events or not scope:
+        raise SystemExit('PORT_STATUS: summary or event-command line has an unexpected shape')
     table = [lines[table_index]]
     for line in lines[table_index + 1:]:
         if not line.startswith('|'):
             break
         table.append(line)
     if len(table) < 3:
-        raise SystemExit('PORT_STATUS: Fortschrittstabelle fehlt oder ist leer')
+        raise SystemExit('PORT_STATUS: progress table missing or empty')
+    rows = ['| Area | Mechanisms | Evidence scope | Fully evidenced | Partial | Open |',
+            '|---|---:|---:|---:|---:|---:|']
+    for line in table[1:]:
+        if set(line.replace('|', '').replace(':', '').replace(' ', '')) <= {'-'}:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        if len(cells) != 6:
+            raise SystemExit(f'PORT_STATUS: unexpected table row {line!r}')
+        area = README_AREAS.get(cells[0])
+        if area is None:
+            raise SystemExit(f'PORT_STATUS: unknown area label {cells[0]!r}')
+        rows.append('| ' + ' | '.join([area, *cells[1:]]) + ' |')
     lines = [README_BEGIN,
-             '<!-- Fortschrittstabelle und Kennzahlen direkt aus docs/PORT_STATUS.md synchronisiert. -->',
+             '<!-- Progress table and figures synced directly from docs/PORT_STATUS.md. -->',
              '',
-             lines[summary_index], '', lines[events_index], '', *table, '',
-             'Nur dokumentierter Belegumfang, kein Gesamtfortschritt des Spiels.', README_END]
+             f'Explicit native evidence scope: **{summary.group(1)}** weighted, '
+             f'**{summary.group(2)}** fully evidenced '
+             f'({scope.group(1)}/{scope.group(2)} mechanisms; not overall game completion).', '',
+             f'Event commands (bhScenarioJmpT): {events.group(1)}/{events.group(2)} bound, '
+             f'{events.group(3)} consumed only, {events.group(4)} missing.', '', *rows, '',
+             'Documented evidence scope only, not overall game completion.', README_END]
     return '\n'.join(lines)
 
 def update_readme(path, status):
@@ -251,7 +292,7 @@ def update_readme(path, status):
     text = path.read_text()
     pattern = re.compile(re.escape(README_BEGIN) + r'.*?' + re.escape(README_END), re.S)
     if not pattern.search(text):
-        raise SystemExit(f'{path}: Marker {README_BEGIN} / {README_END} fehlen')
+        raise SystemExit(f'{path}: markers {README_BEGIN} / {README_END} missing')
     path.write_text(pattern.sub(lambda _: block, text, count=1))
 
 def percent(part, whole):

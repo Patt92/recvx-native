@@ -22,13 +22,13 @@ namespace {
 struct Rig {
     std::vector<std::uint8_t> room;Scene scene;SceneSpawn actor;std::size_t motion=42;std::int64_t frame=0;
     AudioMixer audio;Inventory inventory;MessageDialog dialog;EventVm events;RoomWorld world;ScreenFade fade;
-    unsigned stands=0,slot=0;std::vector<std::pair<std::uint32_t,float>> fades;
+    unsigned slot=0;std::vector<std::pair<std::uint32_t,float>> fades;RECVX_PLAYER_ACTION work{}; // das eine Spielerwerk (bind_player_action)
     explicit Rig(const std::filesystem::path& data):room(read_asset_file(data/"rooms/RM_8001.RDT",64*1024*1024)),scene(decode_scene(room)),actor(scene.spawns.at(0)),
         audio(data),events(room,inventory,dialog),world(room,scene,actor,motion,frame,audio,data,{},"RM_8001"){
         world.bind_player_collision(events);
         // runtime.cpp fade_set/fade_control: bhSetScreenFade setzt cb_flg 0x2, bhControlScreenFade loescht es.
         world.set_screen_fade_hooks([this](std::uint32_t argb,float ct){fades.emplace_back(argb,ct);fade.set(argb,ct);events.flags[10][0]|=0x2u;},[this]{return fade.previous();});
-        world.set_stand_player_hook([this]{++stands;});
+        world.bind_player_action(&work,&inventory);
         bool found=false;for(unsigned i=0;const auto* e=world.effect_state(i);++i)if(e->id==138){slot=i;found=true;break;}
         check(found,"RM_8001 hat keinen Raumeffekt 138");
     }
@@ -99,7 +99,7 @@ int main(int argc,char** argv){try{
     check(r.op().mode0==11,"cb_flg 0x2 faellt nicht, mode0 10 -> 11 fehlt");r.step(); // :2069-2073, mode0 11 im Folgebild
     check(r.op().mode0==0&&r.op().mode1==0,"mode0..3 nach Ende nicht genullt");
     check(ev.flag(1,64),"Loesung setzt ev_flg 64 nicht");
-    check(r.stands==1&&r.fades.back().second==3.0f,"bhStandPlayerMotion / bhSetScreenFade(fade_pbk, 3) fehlt");
+    check(r.world.player_stand_count()==1&&r.work.mtn_no==42&&r.motion==42&&r.frame==0&&r.fades.back().second==3.0f,"bhStandPlayerMotion / bhSetScreenFade(fade_pbk, 3) fehlt");
     check(r.world.presentation_flags()==pt0&&ev.flags[6][0]==sp0&&r.world.room_background()==bak0,"pt_flg/sp_flg/bak_col nicht zurueckgesetzt");
     check((ev.flags[11][0]&0x8800u)==0x8800u&&!(ev.flags[5][0]&0x5u)&&!(ev.flags[10][0]&0x44u),"gm/st/cb-Bits am Ende falsch");
     // Wiedereintritt: derselbe Satz beginnt neu (mode0 0), Abbruch (0x1000) setzt ev_flg 64 nicht erneut.

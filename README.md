@@ -1,126 +1,163 @@
 # RECVX Native
 
-Native Portierung von *Resident Evil CODE: Veronica X* (PS2) auf **macOS arm64**
-und **Windows x64** – aufgebaut auf der Decompilation von
+A native port of *Resident Evil CODE: Veronica X* (PS2) to **macOS arm64** and
+**Windows x64**, built on top of the decompilation published at
 [AshfordFamily/recvx-decomp](https://github.com/AshfordFamily/recvx-decomp).
 
-Das Ziel ist ein eigenständiges natives Game mit originalem Verhalten:
-Mechanismen werden eigenständig auf den vorhandenen nativen Besitzern
-implementiert. Originalquellen sind nur Semantikreferenz; Originalkern,
-generierte Funktionskörper und PS2-/VU-/GS-Nachbildung sind verboten.
+The goal is a self-contained native game with original behaviour: every
+mechanism is implemented on the existing native owners. Original sources are a
+semantics reference only; the original engine, generated function bodies and
+any PS2/VU/GS emulation are off limits.
 
-> **Status (14. Oktober 2026): aktiver Port, nicht vollständig spielbar.**
-> Der Schutzprüfer besteht für den aktuellen Quellbaum. Neue Teilstände umfassen
-> Gegner-KI (unter anderem EN09), viele handportierte Effektprozeduren,
-> Kartenrenderer und Eingabe-/Ablaufkorrekturen. Paketberichte enthalten
-> gezielte Runtime- und Testnachweise; sie stammen aus unterschiedlichen Builds.
-> Ein gemeinsamer Abnahmelauf des aktuellen Arbeitsbaums und eine neue
-> Starter-/Paketersetzung sind nicht belegt. Windows-Runtime und mehrere
-> Gegnerfamilien bleiben offen. Die Tabelle unten misst nur dokumentierte
-> Mechanismen, keinen Fertigstellungsgrad des Spiels.
+> **Status (20 October 2026): active port, not fully playable end to end.**
+> The policy checker passes on the current tree and the full native suite is
+> green (190/190). Rooms, events, enemies, items, effects and audio run on the
+> native runtime; the Metal GPU rasteriser is the default macOS renderer with a
+> software fallback. Enemy families EN02, EN06, EN09, EN19, EN21, EN22, EN26
+> and EN27 are integrated and checked in native runtime or event runs. The Windows runtime
+> and several enemy/effect branches remain open. A shared acceptance run of the
+> current tree and a new starter package are not yet evidenced. The table below
+> measures documented mechanisms only, never game completion.
 
-## Vorhandene native Teile
+## What sets this port apart
 
-- **Originaldaten nativ:** Räume, Modelle, Texturen, Animationen, Nachrichten,
-  ADX-Musik und -Stimmen, Sony-Soundbanken und alle 18 Filme – ohne ISO- oder
-  AFS-Zugriff zur Laufzeit.
-- **Event-VM:** originaler Szenario-Interpreter mit Tasks, Bedingungen, Kameras,
-  Dialogen und Türanforderungen. Alle sieben D06-Inventarbefehle sind im
-  produktiven Eventpfad angeschlossen, einschließlich Skriptgeschenk und
-  Schlüsselverbrauch. Weitere Eventwirkungen bleiben unvollständig.
-- **Inventar und Status:** Aufnahmefrage, Sortierung, Ausrüstung,
-  inventarseitiges Nachladen/Munitionszählen, Kombinationen, Itemgebrauch,
-  Kistentransfer, Mengenanzeige, Befehlsfenster und Heil-/Gift-EKG. Das ist
-  kein Nachweis eines vollständigen Spielerdurchlaufs.
-- **Untersuchung und Dateien:** originale Aktions-/Umwandlungsabläufe,
-  Sichtbarkeitsmasken, Versatz, Kameradistanzen und Skalierung der Itemansicht;
-  Dateiaufnahme, Leser und Ordner mit **24 Dateien / 167 Seiten**.
-- **Actor/Rendering/Audio:** native Modell-, Textur-, Skin-/Pose- und
-  Zeichengrundlagen, eigenständiger Face/Lip-Port, Math und Waffenblitze;
-  BGM-Discregel an beiden Raumladewegen. Viele Effektprozeduren sind jetzt
-  eigenständig handportiert; weitere Effekt-, Actor-, Shadow- und Soundpfade
-  bleiben offen.
+- **A native game, not a recompilation.** The native engine builds a standalone
+  binary for each platform that loads rooms, runs events, animates models and
+  mixes audio itself. The original engine is
+  never compiled, linked or called, and no PS2 CPU, VU or GS hardware is
+  reproduced.
+- **Hand-written implementations, line by line.** Every ported mechanism cites
+  the original source (`file.c:line`). The earlier machine-translation pipeline
+  was removed together with its output; its semantic defects (random-number
+  order, offset field order) are gone.
+- **No approximation layer.** No heuristics, placeholders, room-specific fixes
+  or reimagined logic — not even as a stopgap. Missing behaviour stays a named,
+  visible porting gap.
+- **Evidence instead of claims.** `tools/port_check.py` derives the scope below
+  from a per-function ledger, `tools/check_no_original_core.py` gates every
+  build, and 190 CTest cases, headless room sweeps, replay harnesses and
+  differential runs back the mechanisms that are done.
+- **Measured renderer work.** The Metal rasteriser reproduces the software path
+  bit for bit under point sampling, shadows included, at about 0.3–0.5 ms CPU
+  per room frame instead of 62–73 ms; `--renderer software` keeps the reference
+  path available.
+- **Original data, native I/O.** RDT rooms, models, textures, animations,
+  messages, ADX music and voice, Sony sound banks and all 18 movies are read
+  directly — no ISO or AFS access at runtime. Drop-in HD textures and mods are
+  supported.
+- **Two platforms, one core.** macOS and Windows share the native engine; only
+  the host layer is platform-specific.
+- **Host conveniences kept honest.** Door skip, cinematic skip, options,
+  controller mapping, snapshots and the debug menu live in the host layer with
+  documented deviations; they never change original game semantics.
 
-## Portierungsstand
+## Native components
 
-Fortschritt nach tatsächlichen Paketen und Prüfgrenzen, nicht nach historischen
-Generatorausgaben. **Portiert** bezeichnet den genannten Bereich, nicht das
-gesamte Spiel oder sämtliche abhängigen Abläufe.
+- **Original data, native:** rooms, models, textures, animations, messages, ADX
+  music and voice, Sony sound banks and all 18 movies — no ISO or AFS access at
+  runtime.
+- **Event VM:** the original scenario interpreter with tasks, conditions,
+  cameras, dialogs and door requests. All seven D06 inventory commands are wired
+  into the production event path, including script gifts and key consumption.
+  Other event effects remain incomplete.
+- **Inventory and status:** pickup prompt, sorting, equipment, inventory-side
+  reload and ammo counting, combinations, item use, box transfer, quantity
+  display, command window and health/poison ECG. This is not evidence of a
+  complete playthrough.
+- **Examination and files:** original action and transformation flows,
+  visibility masks, offsets, camera distances and item-view scaling; file
+  pickup, reader and folder with **24 files / 167 pages**.
+- **Actor, rendering and audio:** native model, texture, skin/pose and drawing
+  foundations, a standalone face/lip port, math and weapon flashes; BGM
+  de-clicking on both room-load paths. Many effect procedures are hand-ported;
+  further effect, actor, shadow and sound paths remain open.
+- **Renderer:** native software rasteriser and a Metal backend with a parity
+  test, selectable at runtime (`--renderer gpu|software`).
 
-Die Prozentzahlen unten werden aus dem [Portstatus](docs/PORT_STATUS.md)
-übernommen. Dieser Bericht berechnet sie mit `tools/port_check.py` aus dem
-[Funktionsledger](docs/port_ledger.tsv) und den im nativen Eventpfad gebundenen
-Event-Befehlen. Sie beschreiben nur den explizit belegten Belegumfang, keinen
-Gesamtfortschritt des Spiels. **Gewichtet** zählt teilweise belegte
-Mechanismen mit 0,5; **voll belegt** nur vollständig abgeschlossene.
+## Porting status
+
+Progress is measured by actual packages and verification boundaries, not by
+historical generator output. **Ported** describes the named area, not the whole
+game or every dependent flow.
+
+The percentages below are taken from the [port status](docs/PORT_STATUS.md).
+That report computes them with `tools/port_check.py` from the
+[function ledger](docs/port_ledger.tsv) and the event commands bound in the
+native event path. They describe only the explicitly evidenced scope, never
+overall game progress. **Weighted** counts partially evidenced mechanisms as
+0.5; **fully evidenced** counts only completed ones.
 
 <!-- port-status:begin -->
-<!-- Fortschrittstabelle und Kennzahlen direkt aus docs/PORT_STATUS.md synchronisiert. -->
+<!-- Progress table and figures synced directly from docs/PORT_STATUS.md. -->
 
-Expliziter Belegumfang: **87.3 %** gewichtet, **75.3 %** voll belegt (493/655 Mechanismen; kein Gesamtfortschritt).
+Explicit native evidence scope: **87.3 %** weighted, **75.3 %** fully evidenced (493/655 mechanisms; not overall game completion).
 
-Event-Befehle (bhScenarioJmpT): 211/223 gebunden, 12 nur konsumiert, 0 fehlen.
+Event commands (bhScenarioJmpT): 211/223 bound, 12 consumed only, 0 missing.
 
-| Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |
+| Area | Mechanisms | Evidence scope | Fully evidenced | Partial | Open |
 |---|---:|---:|---:|---:|---:|
-| Gegner/KI | 72/103 | 85.0 % | 69.9 % | 31 | 0 |
-| Effekte | 220/250 | 93.8 % | 88.0 % | 29 | 1 |
-| Events/Skript | 63/79 | 89.9 % | 79.7 % | 16 | 0 |
-| Spieler/Kampf | 44/62 | 85.5 % | 71.0 % | 18 | 0 |
-| Raum/Kamera/Tür | 14/35 | 70.0 % | 40.0 % | 21 | 0 |
-| Menü/Items/Text | 43/54 | 87.0 % | 79.6 % | 8 | 3 |
-| Modelle/Animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
+| Enemies/AI | 72/103 | 85.0 % | 69.9 % | 31 | 0 |
+| Effects | 220/250 | 93.8 % | 88.0 % | 29 | 1 |
+| Events/script | 63/79 | 89.9 % | 79.7 % | 16 | 0 |
+| Player/combat | 44/62 | 85.5 % | 71.0 % | 18 | 0 |
+| Room/camera/door | 14/35 | 70.0 % | 40.0 % | 21 | 0 |
+| Menu/items/text | 43/54 | 87.0 % | 79.6 % | 8 | 3 |
+| Models/animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
 | Audio | 5/21 | 61.9 % | 23.8 % | 16 | 0 |
-| Ablauf/Speichern | 22/36 | 80.6 % | 61.1 % | 14 | 0 |
-| Plattform (Host-ersetzt) | 16/31 | 75.8 % | 51.6 % | 15 | 0 |
+| Flow/saving | 22/36 | 80.6 % | 61.1 % | 14 | 0 |
+| Platform (host-replaced) | 16/31 | 75.8 % | 51.6 % | 15 | 0 |
 
-Nur dokumentierter Belegumfang, kein Gesamtfortschritt des Spiels.
+Documented evidence scope only, not overall game completion.
 <!-- port-status:end -->
 
 <!-- native-progress:begin -->
 
-| Bereich | Stand | Nachweis / verbleibende Grenze |
+| Area | State | Evidence / remaining limit |
 |---|---|---|
-| Schutz / Build | Quellpolicy PASS; gemeinsamer Stand offen | Der aktuelle Quellbaum besteht `check_no_original_core.py`. Die jüngsten Änderungen sind nicht gemeinsam gebaut; kein aktuelles Starter-/Paketrelease belegt. |
-| Inventar / Kiste / Status (D01/D02/D06–D09) | Portiert, Teilabläufe geprüft | Aufnahme, Gebrauch, Kombination, Transfer, Itembefehle und EKG besitzen positive Teilnachweise. Ein vollständiger Spieldurchlauf ist damit nicht belegt. |
-| Untersuchung / Dateien / Karte (D03/D10) | Portiert, Runtime-Teile geprüft | Itemansicht, Dateiabläufe sowie MAP-Geometrie, Marker und Sprites sind in eigenen Build-Runtimes geprüft; noch keine aktuelle Starter-/Paketersetzung. |
-| Spieler / Eingabe / Kampf (A/B) | Teilweise portiert | Bewegung, Kollision, Push, Treppen und Zielwahl haben eigene Nachweise. M93R-Aufschaltung/Treffer sind diagnostisch geprüft; allgemeine Spielerzustände und weitere Waffen fehlen. |
-| Gegner / Actor (C/F) | Mehrere Familien aktiv; Gesamtport offen | EN01/EN04-Angriffe und EN09/Bandersnatcher sind in nativen Runtime-Teilabläufen geprüft. EN21 ist angeschlossen, seine Tests wurden zurückgestellt. EN05, EN12, EN13/13B, EN23, EN56 und weitere Dienste bleiben offen. |
-| Effekte / Licht / Audio (E) | Viele native Prozeduren, Gesamtpfade offen | Der Regex-Übersetzer wurde entfernt; viele Effektprozeduren sind handportiert. Weitere IDs, Partikel-/Modellpfade, Licht-/Sounddienste und Renderinggrenzen bleiben offen. |
-| Shadow / Kamera / Türen (F/G/P) | Teilweise portiert | Türsequenzen und Clipaufrufe besitzen gezielte Nachweise. Shadow-Renderer, vollständiger Kamerapfad und originale Eisraumdarstellung bleiben offen. |
-| System / Speichern | Unvollständig | Eingabe- und Ablaufkorrekturen sind teilweise geprüft; originales Speichern/Laden und vollständige Systemzustände fehlen. |
-| Windows x64 | Kein aktueller Nachweis | Vorhandene Windows-Binaries stammen aus älteren Builds; der aktuelle Arbeitsbaum ist nicht auf Windows ausgeführt. |
+| Policy / build | Source policy PASS; shared acceptance open | The current tree passes `check_no_original_core.py`; the full CTest suite is 190/190 (2026-10-20); the development app was refreshed through `build.sh`. No new packaged release is evidenced. |
+| Inventory / box / status (D01/D02/D06–D09) | Ported, partial flows verified | Pickup, use, combination, transfer, item commands and ECG have positive partial evidence. A complete playthrough is not evidenced. |
+| Examination / files / map (D03/D10) | Ported, runtime parts verified | Item view, file flows, and MAP geometry, markers and sprites were verified in dedicated build runtimes; no current starter/package release yet. |
+| Player / input / combat (A/B) | Partially ported | Movement, collision, push, stairs and target selection have their own evidence; weapon numbers, HandChange, light clipping, effect 199 and the optional third-person camera were added most recently. General player states and further weapons remain open. |
+| Enemies / actors (C/F) | Several families active; full port open | EN02 Gulp Worm, EN06, EN09 Bandersnatch, EN19 Tyrant, EN21, EN22, EN26 and EN27 are integrated and checked in native runtime or event runs. EN05, EN12, EN13/13B, EN23, EN56 and further services remain open. |
+| Effects / light / audio (E) | Many hand ports; full paths open | The regex translator was removed and the procedures are hand-written, including `bhEff006` and the original empty procedures 4/28/129/174/197. `bhEff_Sub367` stays a documented gap: the original has no producer for its `exp0` helper or `op->func`. Remaining IDs, particle/model paths, light/sound services and rendering limits remain open. |
+| Shadow / camera / doors (F/G/P) | Partially ported | Door sequences, clip calls, camera offsets and follow targets have targeted evidence. The shadow renderer, the complete camera path and the original ice-room presentation remain open. |
+| System / save | Incomplete | Original save/load and complete system states are missing. |
+| Windows x64 | No current evidence | Existing Windows binaries come from older builds; the current tree has not been run on Windows. |
+| Renderer | GPU default on macOS | Metal backend with the `gpu_raster_parity` test (point sampling, shadows), software fallback, `--renderer` switch. A D3D11 backend remains open. |
 
 <!-- native-progress:end -->
 
-**Prüfstand:** Paketläufe unterscheiden sich je Build. Der Effekt-Handport meldet
-82/83 CTest, EN09 86/86 und der Gegner-Audit 85/86; die roten Fälle und ihre
-Vorherstände sind in den jeweiligen Berichten dokumentiert. Diese Zahlen sind
-keine gemeinsame Abnahme des aktuellen Arbeitsbaums. Der Policy-Quellcheck
-besteht; aktuelle Runtime-/Paket- und Windows-Abnahme fehlen.
+**Verification:** test runs differ per build. As of 20 October 2026 the full
+suite is 190/190; `gpu_raster_parity` requires a Metal device and is reported as
+skipped where none is available. Earlier build reports are kept with their red
+cases and baselines in the individual reports (effect hand port 82/83, EN09
+86/86, enemy audit 85/86). None of these numbers is a joint acceptance of the
+current tree. The policy source check passes; current runtime/package and
+Windows acceptance are missing.
 
-Ausgewählte Nachweise: [EN09/Bandersnatcher](work/native_port_EN09_world.result.md),
-[Gegner-Audit](work/native_port_enemy_audit_fixes.result.md),
-[Effektprozeduren](work/native_port_effsub0_handport.result.md),
-[MAP-Renderer](work/native_port_D10_map_render.result.md),
-[Eingabesperre RM_1020](work/native_port_discard_question.result.md).
-Die automatisch berechnete Ledger-Tabelle oben beschreibt dokumentierte
-Mechanismen, nicht Spielvollständigkeit.
+Selected evidence: [EN09/Bandersnatch](work/native_port_EN09_world.result.md),
+[enemy audit](work/native_port_enemy_audit_fixes.result.md),
+[effect procedures](work/native_port_effsub0_handport.result.md),
+[GPU rasteriser](work/performance_gpu_raster_d2_20261020.result.md),
+[MAP renderer](work/native_port_D10_map_render.result.md),
+[input lock RM_1020](work/native_port_discard_question.result.md).
+The generated ledger table above describes documented mechanisms, not game
+completeness.
 
-## Schnellstart
+## Quick start
 
-Der lokale Build ist wieder möglich, solange die verbindliche Schutzprüfung
-besteht. Die Startskripte prüfen ebenfalls die Policy und benötigen ein
-passendes natives Binary sowie lokale Spieldaten. Ein aktualisierter
-Paketstand ist für die jüngsten Änderungen noch nicht belegt; alte Pakete
-nicht mit dem aktuellen Quell-/Buildstand verwechseln.
+Local builds keep working as long as the mandatory policy check passes. The
+launcher scripts also check the policy and need a matching native binary plus
+local game data. A refreshed package for the newest changes is not yet
+evidenced; do not confuse older packages with the current source and build
+state.
 
 - **macOS:** `Start.command`
 - **Windows:** `Start.cmd`
 
-Bedienung, Tasten und Spieldaten: [STARTEN.md](STARTEN.md).
+Controls, keys and game data: [STARTEN.md](STARTEN.md).
 
-Selbst bauen (Python 3.12+, CMake, C/C++-Compiler):
+Build it yourself (Python 3.12+, CMake, C/C++ compiler):
 
 ```sh
 ./build.sh --platform macos --verify-data --package
@@ -130,55 +167,55 @@ Selbst bauen (Python 3.12+, CMake, C/C++-Compiler):
 ./build.sh --platform windows --verify-data --package
 ```
 
-`--test` baut und startet zusätzlich die Regressionstests. Details:
+`--test` also builds and runs the regression suite. Details:
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 
-Spieldaten werden nicht mit dem Quellcode veröffentlicht; ein reiner
-Quellcode-Clone ist ohne lokalen `data/`-Ordner nicht lauffähig.
+Game data is not distributed with the source code; a source-only clone does not
+run without a local `data/` folder.
 
-## Prinzipien
+## Principles
 
-- **Originalsemantik, eigene native Implementierung.** Originalcode,
-  Originaldaten und Disassembly sind die Referenz. Keine generierten
-  Funktionskörper, kein Originalkern und keine zweite Spielwelt.
-- **Keine Ersatzlogik.** Keine Heuristiken, keine Raum-Sonderfälle, keine
-  „ungefähr passenden“ Platzhalter. Fehlt ein Mechanismus, bleibt er als Lücke
-  sichtbar.
-- **Plattformcode bleibt Plattformcode.** Host-Anpassungen betreffen nur
-  Schnittstellen und Datenformate, nie Spielentscheidungen.
+- **Original semantics, own native implementation.** Original code, original
+  data and disassembly are the reference. No generated function bodies, no
+  original engine, no second game world.
+- **No substitute logic.** No heuristics, no room special cases, no
+  "approximately matching" placeholders. If a mechanism is missing, it stays
+  visible as a gap.
+- **Platform code stays platform code.** Host adaptations touch interfaces and
+  data formats only, never game decisions.
 
-Die verbindliche Prüfmethode steht in [QUALITY.md](QUALITY.md).
+The binding verification method is described in [QUALITY.md](QUALITY.md).
 
-## Dokumentation
+## Documentation
 
-| Seite | Inhalt |
+| Page | Content |
 |---|---|
-| [STARTEN.md](STARTEN.md) | Start, Bedienung, Diagnose |
-| [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md) | Build, Pakete, Architektur |
-| [docs/NATIVE_GAMEPLAY.md](docs/NATIVE_GAMEPLAY.md) | Portstand der Spielsysteme und offene Lücken |
-| [docs/NATIVE_PLAYER.md](docs/NATIVE_PLAYER.md) | Spielermodell, Skinning, Animation |
-| [docs/PS2_HARDWARE.md](docs/PS2_HARDWARE.md) | Historische Hardware-/Disassembly-Referenz, keine Runtime-Architektur |
-| [docs/AUDIO.md](docs/AUDIO.md) | Musik, Soundbanken, Filme |
-| [docs/NATIVE_ASSETS.md](docs/NATIVE_ASSETS.md) | Ressourcen, Mods, HD-Texturen |
-| [docs/CONTROLS.md](docs/CONTROLS.md) | Tastatur- und Controllerbelegung |
-| [docs/DEBUG_MENU.md](docs/DEBUG_MENU.md) | Debugmenü |
-| [docs/VALIDATION.md](docs/VALIDATION.md) | Testgruppen und Prüfwerkzeuge |
-| [docs/INVENTORY-COVERAGE.md](docs/INVENTORY-COVERAGE.md) | Historische Item-/Rezeptabdeckung, kein aktueller Portnachweis |
+| [STARTEN.md](STARTEN.md) | Launch, controls, diagnostics |
+| [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md) | Build, packages, architecture |
+| [docs/NATIVE_GAMEPLAY.md](docs/NATIVE_GAMEPLAY.md) | Porting state of the game systems and open gaps |
+| [docs/NATIVE_PLAYER.md](docs/NATIVE_PLAYER.md) | Player model, skinning, animation |
+| [docs/PS2_HARDWARE.md](docs/PS2_HARDWARE.md) | Historical hardware and disassembly reference, not runtime architecture |
+| [docs/AUDIO.md](docs/AUDIO.md) | Music, sound banks, movies |
+| [docs/NATIVE_ASSETS.md](docs/NATIVE_ASSETS.md) | Assets, mods, HD textures |
+| [docs/CONTROLS.md](docs/CONTROLS.md) | Keyboard and controller mapping |
+| [docs/DEBUG_MENU.md](docs/DEBUG_MENU.md) | Debug menu |
+| [docs/VALIDATION.md](docs/VALIDATION.md) | Test groups and verification tools |
+| [docs/INVENTORY-COVERAGE.md](docs/INVENTORY-COVERAGE.md) | Historical item/recipe coverage, not current port evidence |
 
-## Projektstruktur
+## Project layout
 
-| Pfad | Inhalt |
+| Path | Content |
 |---|---|
-| `native/` | Native Engine und Host-Schicht |
-| `src/`, `include/` | Erhaltene Original-Decompilation |
-| `tools/` | Datenwerkzeuge, Extraktion, Build und Schutz-/Prüfwerkzeuge |
-| `tests/` | Regressionstests und Replays |
-| `docs/` | Dokumentation |
-| `mods/` | Optionale austauschbare Ressourcen |
-| `data/`, `build/` | Lokale Spieldaten und Buildartefakte |
-| `archived/FORBIDDEN_DONTUSE/` | Gesperrte, recoverable Quarantäne; nicht lesen oder verwenden |
+| `native/` | Native engine and host layer |
+| `src/`, `include/` | Retained original decompilation |
+| `tools/` | Data tools, extraction, build, policy and verification tools |
+| `tests/` | Regression tests and replays |
+| `docs/` | Documentation |
+| `mods/` | Optional drop-in resources |
+| `data/`, `build/` | Local game data and build artefacts |
+| `archived/FORBIDDEN_DONTUSE/` | Locked, recoverable quarantine; do not read or use |
 
-## Lizenz
+## License
 
-Die ursprüngliche Projektlizenz liegt in [LICENSE](LICENSE). Lizenzen der
-Abhängigkeiten werden den Paketen beigelegt.
+The original project license is in [LICENSE](LICENSE). Dependency licenses are
+shipped with the packages.

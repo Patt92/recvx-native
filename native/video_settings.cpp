@@ -39,5 +39,9 @@ void VideoConfig::set(RenderQuality quality,bool persist){
     settings_.quality=quality;status_.clear();
     if(persist&&!path_.empty())try{settings_.save(path_);status_="Saved";}catch(const std::exception& e){status_=e.what();}
 }
+void VideoConfig::set_renderer(RenderBackend renderer,bool persist){
+    settings_.renderer=renderer;status_.clear();
+    if(persist&&!path_.empty())try{settings_.save(path_);status_="Saved";}catch(const std::exception& e){status_=e.what();}
+}
 void VideoConfig::cycle(int direction,bool persist){set(RenderQuality((int(settings_.quality)+4+(direction<0?-1:1))%4),persist);}
 }

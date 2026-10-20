@@ -47,7 +47,9 @@ Raumbild bei „High“, Simulation ≈ 0.26 ms/Takt). Plan und Messbasis:
 Setup-Liste auf Metal statt 62–73 ms CPU. **[GPU-Rasterer im Spiel](work/performance_gpu_raster_d2_20261020.result.md)**
 (macOS, Dev-App): `video.ini renderer = gpu` (Standard), `--renderer gpu|software`; Punktabtastung
 bitgleich inkl. Schatten (Test `gpu_raster_parity`), CPU je Bild ≈ 0,3–0,5 ms. Offen: Wattmessung
-am Starter, D3D11-Backend (Windows bis dahin Software).
+am Starter. Schattenmasken laufen ebenfalls auf der GPU (ein Befehlspuffer je Bild).
+Windows: D3D11-Backend über Rasterizer Ordered Views geschrieben, Crossbuild grün, **auf Hardware
+noch ungeprüft**; GPUs ohne ROV behalten den Softwarepfad.
 
 **Kartenbild:** MAP zeichnet MRY-Geometrie, Marker und Sprites in der eigenen
 Build-Runtime; Fade-Rückweg und Wiedereintritt gezielt geprüft. Constant-Material-

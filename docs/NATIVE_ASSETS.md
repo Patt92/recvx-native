@@ -50,8 +50,9 @@ old point sampling; `--render-threads N` fixes the raster worker count for energ
 measurements, the image is identical for every count). On macOS the band stage is rasterized by
 Metal (`native/gpu_raster.h`, `video.ini` `renderer = gpu|software`, `--renderer`): the CPU keeps
 clipping, strip rules, sorting and shadow masks, the GPU draws the same setup list; point-sampled
-output is bit-identical (`gpu_raster_parity`). Windows uses the software path until its Direct3D
-backend exists. The original punch-through effect pass instead filters RGB independently
+output is bit-identical (`gpu_raster_parity`). On Windows the same setup list is rasterized by Direct3D 11
+through rasterizer ordered views; GPUs without ROV support keep the software path. That backend is
+written but not yet verified on hardware. The original punch-through effect pass instead filters RGB independently
 of alpha, rejects alpha-zero samples and writes the remaining colour and depth without blending.
 Its host mip chain keeps the same independent RGB filtering; filtered alpha-test quantization
 and equal-depth comparisons remain open. Other material transparency gaps remain documented

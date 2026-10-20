@@ -23,7 +23,7 @@ public:
     virtual unsigned shadow_composites()const=0;
     // Summen seit Start (Sekunden): Auftragsaufbau, Texturuploads, Kodieren, Warten auf die GPU,
     // Ruecklesen. Diagnose der Plattformanpassung.
-    struct Timings {double build=0,upload=0,encode=0,wait=0,readback=0;unsigned submits=0,uploads=0;};
+    struct Timings {double build=0,upload=0,encode=0,wait=0,readback=0,gpu=0;unsigned submits=0,uploads=0;};
     virtual const Timings& timings()const=0;
 };
 // Backend der Plattform oder nullptr (kein Geraet/kein Backend); reason erklaert nullptr.

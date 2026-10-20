@@ -84,13 +84,35 @@ typedef struct RECVX_PLAYER_ACTION_IO {
 void recvx_player_action_reset(RECVX_PLAYER_ACTION* a, float px, float pz, int32_t ay,
                                int32_t wpntp, int32_t dmlvl, uint32_t mtn_no);
 
-/* player.c:1114 bhStandPlayerMotion: EXP0_I(5) nach hp/stflg 0x280000, flg &= 0xC96EFFFB,
-   flg |= 8, stflg &= ~0x18000, mode2/mode3 = 0 (mode0/mode1 setzt der Spielerbesitzer:
-   *(int*)&mode0 = 1), PEXP0_F(72/80) = px/pz, mtn_no = PlMtnAct[wpntp][dmlvl][0],
-   hokan_rate/hokan_count/frm_no = 0. mnwP = mnwPb, bhSetMotion(plp,0,0,NULL) und
-   bhCalcModel bleiben beim Posenbesitzer. `stflg_owned` wie in RECVX_PLAYER_ACTION_IO. */
-void recvx_player_stand_motion(RECVX_PLAYER_ACTION* a, uint32_t* flg, uint32_t* stflg,
-                               uint32_t stflg_owned, int32_t hp);
+/* player.c:1114 bhStandPlayerMotion. Dienste der uebrigen Besitzer; ein fehlender Dienst
+   wird ueber `gap` namentlich gemeldet, nie ersetzt. */
+typedef struct RECVX_PLAYER_STAND_IO {
+    uint32_t* flg;         /* plp->flg   (:1136/:1138) */
+    uint32_t* stflg;       /* plp->stflg (:1118 gelesen, :1140 geschrieben) */
+    uint32_t  stflg_owned; /* stflg-Bits anderer Besitzer, nur gelesen (Gift 0x80000/0x200000: Inventar) */
+    int32_t   hp;          /* plp->hp (:1116/:1126) */
+    void* user;
+    /* :1142 *(int*)&plp->mode0 = 1: mode0 1 / mode1 0 beim Besitzer von mode0/mode1
+       (mode2/mode3 = 0 schreibt die Routine selbst im Werk). */
+    void (*mode_reset)(void* user);
+    /* :1154 plp->mnwP = plp->mnwPb: die eigene Spielerbibliothek (keine Raum-/Gegnermotion). */
+    void (*own_motion_bank)(void* user);
+    /* :1156 bhSetMotion(plp, 0, 0, NULL) und :1158 bhCalcModel(plp) am Posenbesitzer, nachdem
+       mtn_no/frm_no/hokan im Werk stehen. Rueckgabe 0: mnwP[mtn_no].datP fehlt (Motion.c:29
+       tastet dann nicht ab) - wird als Luecke gemeldet. */
+    int  (*set_motion)(void* user, uint32_t mtn_no);
+    void (*gap)(void* user, const char* name);
+} RECVX_PLAYER_STAND_IO;
+
+/* player.c:1114 bhStandPlayerMotion, in Originalreihenfolge:
+   :1116-1134 EXP0_I(5) dmlvl nach hp (>= 120: stflg 0x280000 -> 1 sonst 0; >= 30: 1; sonst 2),
+   :1136 flg &= 0xC96EFFFB, :1138 flg |= 0x8, :1140 stflg &= ~0x18000,
+   :1142 *(int*)&mode0 = 1 (mode2/mode3 = 0 hier, mode0/mode1 ueber io->mode_reset),
+   :1144/:1145 PEXP0_F(72/80) = EXP_WORK.spx/spz = px/pz (a->px/pz muessen plp->px/pz sein),
+   :1147 mtn_no = PlMtnAct[wpntp][dmlvl][0], :1149/:1150 hokan_rate/hokan_count = 0,
+   :1152 frm_no = 0, :1154 mnwP = mnwPb, :1156 bhSetMotion(plp,0,0,NULL), :1158 bhCalcModel.
+   Keine Bedingung: das Original laeuft bei jedem mode0/mode1 und auch mit gezogener Waffe. */
+void recvx_player_stand_motion(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_STAND_IO* io);
 
 /* pwksub.c:144 bhGetFrameNum, Originalvergleich frm > fnm_new eingeschlossen. */
 int32_t recvx_player_action_frame_num(uint32_t fnm_old, uint32_t fnm_new, int32_t fno_now);

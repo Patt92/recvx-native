@@ -24,7 +24,7 @@ namespace {
 struct Counts{std::size_t room=0,room_ambient=0,objects=0,items=0,enemies=0,pixels=0;};
 struct Rig {
     std::vector<std::uint8_t> room;Scene scene;SceneSpawn actor;std::size_t motion=42;std::int64_t frame=0;
-    AudioMixer audio;Inventory inventory;MessageDialog dialog;EventVm events;RoomWorld world;ScreenFade fade;unsigned slot=0;
+    AudioMixer audio;Inventory inventory;MessageDialog dialog;EventVm events;RoomWorld world;ScreenFade fade;unsigned slot=0;RECVX_PLAYER_ACTION work{};
     explicit Rig(const std::filesystem::path& data):room(read_asset_file(data/"rooms/RM_8001.RDT",64*1024*1024)),scene(decode_scene(room)),actor(scene.spawns.at(0)),
         audio(data),events(room,inventory,dialog),world(room,scene,actor,motion,frame,audio,data,{},"RM_8001"){
         // runtime.cpp: stg_no/rom_no/rom_case aus dem Raumnamen (events->values[0/1/21]), dann bhChangeViewClipRM.
@@ -32,7 +32,7 @@ struct Rig {
         world.bind_player_collision(events);world.initialize_camera_clip(0);
         // runtime.cpp fade_set/fade_control: bhSetScreenFade setzt cb_flg 0x2, bhControlScreenFade loescht es.
         world.set_screen_fade_hooks([this](std::uint32_t argb,float ct){fade.set(argb,ct);events.flags[10][0]|=0x2u;},[this]{return fade.previous();});
-        world.set_stand_player_hook([]{});
+        world.bind_player_action(&work,&inventory);
         bool found=false;for(unsigned i=0;const auto* e=world.effect_state(i);++i)if(e->id==138){slot=i;found=true;break;}
         check(found,"RM_8001 hat keinen Raumeffekt 138");
     }

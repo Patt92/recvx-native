@@ -147,28 +147,51 @@ void recvx_player_action_reset(RECVX_PLAYER_ACTION* a, float px, float pz, int32
     a->rtspd = 1.0f;
 }
 
-void recvx_player_stand_motion(RECVX_PLAYER_ACTION* a, uint32_t* flg, uint32_t* stflg,
-                               uint32_t stflg_owned, int32_t hp)
+static void stand_gap(RECVX_PLAYER_STAND_IO* io, const char* name)
 {
-    if (hp >= 120) {
-        if ((*stflg | stflg_owned) & 0x280000u) a->dmlvl = 1;
+    if (io->gap) io->gap(io->user, name);
+}
+
+/* player.c:1114 bhStandPlayerMotion, siehe player_action.h. */
+void recvx_player_stand_motion(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_STAND_IO* io)
+{
+    uint32_t stflg = *io->stflg | io->stflg_owned;
+    uint32_t mtn_no;
+    /* :1116-1134: EXP0_I(5) = dmlvl. Die hp-Stufen sind die von bhCheckPlayerKegaMotion
+       (:1229), hier ohne Motionwechsel; bei hp >= 120 entscheidet Gift/Infektion 0x280000. */
+    if (io->hp >= 120) {
+        if (stflg & 0x280000u) a->dmlvl = 1;
         else if (a->dmlvl != 0) a->dmlvl = 0;
-    } else if (hp >= 30) {
+    } else if (io->hp >= 30) {
         if (a->dmlvl != 1) a->dmlvl = 1;
     } else if (a->dmlvl != 2) {
         a->dmlvl = 2;
     }
-    *flg &= 0xC96EFFFBu;
-    *flg |= 0x8u;
-    *stflg &= ~0x18000u;
+    *io->flg &= 0xC96EFFFBu;  /* :1136 loescht 0x4, 0x10000, 0x100000, 0x800000, 0x2000000, 0x4000000, 0x10000000, 0x20000000 */
+    *io->flg |= 0x8u;         /* :1138 */
+    *io->stflg &= ~0x18000u;  /* :1140 */
+    /* :1142 *(int*)&plp->mode0 = 1 */
     a->mode2 = 0;
     a->mode3 = 0;
+    if (io->mode_reset) io->mode_reset(io->user);
+    else stand_gap(io, "*(int*)&plp->mode0 = 1 (mode0/mode1 ohne Besitzer)");
+    /* :1144/:1145 */
     a->spx = a->px;
     a->spz = a->pz;
-    a->mtn_no = mtn(a->wpntp, a->dmlvl, 0);
+    /* :1147 PlMtnAct[EXP0_I(0)][EXP0_I(5)][0] */
+    mtn_no = mtn(a->wpntp, a->dmlvl, 0);
+    if (mtn_no == 0xFFFFu) stand_gap(io, "PlMtnAct: wpntp/dmlvl ausserhalb der Tabelle");
+    a->mtn_no = mtn_no;
+    /* :1149/:1150/:1152 */
     a->hokan_rate = 0;
     a->hokan_count = 0;
     a->frm_no = 0;
+    /* :1154 */
+    if (io->own_motion_bank) io->own_motion_bank(io->user);
+    else stand_gap(io, "plp->mnwP = plp->mnwPb (Bibliothek ohne Besitzer)");
+    /* :1156/:1158 */
+    if (!io->set_motion) stand_gap(io, "bhSetMotion(plp,0,0,NULL)/bhCalcModel(plp) ohne Posenbesitzer");
+    else if (!io->set_motion(io->user, a->mtn_no)) stand_gap(io, "bhSetMotion: plp->mnwP[mtn_no] fehlt in der Spielerbibliothek");
 }
 
 void recvx_player_action_pad(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_ACTION_IO* io, uint32_t* mode1)

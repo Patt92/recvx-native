@@ -1,0 +1,92 @@
+[
+  {
+    "ref": "refs/codex/turn-diffs/captures/1792427241891/13cd43a0-604a-4a59-959f-f5a426a4d0f1/base",
+    "oid": "8d0b0522274f9733493f216c8dc564e079c16236",
+    "type": "tree"
+  },
+  {
+    "ref": "refs/codex/turn-diffs/checkpoints/889f08b639c1c40e145c89bff169ca1d/498569375e09ebf0772db2fe3f18747a/1792426275918/8cfe19f2-25a3-43d6-8695-8c147694a761",
+    "oid": "ed2bcc4218f9c040b44b7629467e9535efd9ccc1",
+    "type": "tree"
+  },
+  {
+    "ref": "refs/codex/turn-diffs/checkpoints/8b82aad64e88951bf8ee235acbb98835/dbab9a5419aceff9bc7fb927ebe5cfbf/1792422680125/da522ce2-3daf-484d-8e76-25d11a6474bc",
+    "oid": "832c31b73926e4e4155fc1705b60907523054608",
+    "type": "tree"
+  },
+  {
+    "ref": "refs/codex/turn-diffs/checkpoints/938cf5c045201334a5039cf08b82155b/d2f15f7a05b7e2dab9d4cb79fa51505b/1792502714502/64aa6a94-ed38-4d49-a5c3-a97d35290eb5",
+    "oid": "e5df8e41387dc6bf74206703358a39770159c261",
+    "type": "tree"
+  },
+  {
+    "ref": "refs/codex/turn-diffs/checkpoints/981352d7d7c6bd558058149258239fd3/3f15b56b70655026b3398d47136db961/1792321844906/fe77253c-a6bf-40b0-9133-f36c4cd2ce8c",
+    "oid": "e255f3316ecb7a9cd99ccc273d50410737dad4ea",
+    "type": "tree"
+  },
+  {
+    "ref": "refs/codex/turn-diffs/checkpoints/b3826dcb1d5faa1e559ff690cc40c647/75d84fab1f9a8b34271cf9eb82996431/1792427523159/923a4d52-9c32-44a4-b9ab-4a54606a15e7",
+    "oid": "f52544348514cbdec8088c8b64850d5d79430879",
+    "type": "tree"
+  },
+  {
+    "ref": "refs/codex/turn-diffs/checkpoints/c0966ac3ea7d269f8b5947a3c82d445d/e37138072b75b0f53e1b621afaaa6c25/1792421768376/9d42f725-145a-41c6-bc5a-2b196670b441",
+    "oid": "354da56eb799a62f5cf66b1e2fc97cfeac686b11",
+    "type": "tree"
+  },
+  {
+    "ref": "refs/codex/turn-diffs/checkpoints/da877fb2534ed0561665f34325bd82e0/e0087b0d99a87027d661a3187f5ed645/1792308141064/f2bc4ff4-8ab5-400f-aca4-96e168fce756",
+    "oid": "9d050b14fd994f29ec3d957dba1c82b7b1882023",
+    "type": "tree"
+  },
+  {
+    "ref": "refs/heads/main",
+    "oid": "31fca11f014fac6ba2794f659efb777a7b95c99d",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/remotes/origin/HEAD",
+    "oid": "31fca11f014fac6ba2794f659efb777a7b95c99d",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/remotes/origin/main",
+    "oid": "31fca11f014fac6ba2794f659efb777a7b95c99d",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/t3/orchestration-v2/checkpoints/MjFkYWM5MGIwNWMxZjMxMDc5ZTAwYzg4YjdlOTdlOTA/ordinal/0",
+    "oid": "cf6779b198e96620eb81232badc2b5d53d9918dc",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/t3/orchestration-v2/checkpoints/MjFkYWM5MGIwNWMxZjMxMDc5ZTAwYzg4YjdlOTdlOTA/ordinal/1",
+    "oid": "aad0acdf44edda039b27f5fb60499d4ad94569d7",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/t3/orchestration-v2/checkpoints/MjFkYWM5MGIwNWMxZjMxMDc5ZTAwYzg4YjdlOTdlOTA/ordinal/2",
+    "oid": "7683918f2d6d501d186b40b0378522c5307fe2c5",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/t3/orchestration-v2/checkpoints/OWI5NzUzZDUyMDQ4Yjc4MjMzZWQ3ZDhmZGE0MDk5NDY/ordinal/0",
+    "oid": "4c56394001b13487c550e4c55bca35eeb31f5067",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/t3/orchestration-v2/checkpoints/OWI5NzUzZDUyMDQ4Yjc4MjMzZWQ3ZDhmZGE0MDk5NDY/ordinal/1",
+    "oid": "4df28e4838090d81abc12db4e56dc4992e5a29f9",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/t3/orchestration-v2/checkpoints/OWI5NzUzZDUyMDQ4Yjc4MjMzZWQ3ZDhmZGE0MDk5NDY/ordinal/2",
+    "oid": "4fe2213a7767900e11fbb46e6a987eacae72eee0",
+    "type": "commit"
+  },
+  {
+    "ref": "refs/t3/orchestration-v2/checkpoints/OWI5NzUzZDUyMDQ4Yjc4MjMzZWQ3ZDhmZGE0MDk5NDY/ordinal/3",
+    "oid": "a02c96ac8749c1eb4a38768b51722f91a2130452",
+    "type": "commit"
+  }
+]

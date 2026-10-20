@@ -21,6 +21,7 @@
 #include "weapon_fly.h"
 #include "object_itmbox.h"
 #include "player_head.h"
+#include "player_action.h"
 #include "view_clip.h"
 #include <deque>
 #include <set>
@@ -570,10 +571,15 @@ public:
     void set_pad(unsigned on,unsigned ps){pad_on_=on;pad_ps_=ps;}
     // screen.c bhSetScreenFade und sys->fade_pbk beim Besitzer der Runtime.
     void set_screen_fade_hooks(std::function<void(std::uint32_t,float)> set,std::function<std::uint32_t()> previous){screen_fade_set_=std::move(set);screen_fade_previous_=std::move(previous);}
-    // player.c:1114 bhStandPlayerMotion beim Spielerbesitzer der Runtime (Aktion, Motion,
-    // Flags); die Welt setzt nur mnwP = mnwPb. Ohne Besitzer: benannte Luecke, false.
-    void set_stand_player_hook(std::function<void()> hook){stand_player_=std::move(hook);}
+    // player.c:1114 bhStandPlayerMotion (native/player_action.c) auf dem einen Spielerwerk der
+    // Runtime (RECVX_PLAYER_ACTION); Gift/Infektion 0x280000 liest es beim Inventar. Flags, Modus,
+    // spx/spz, Motion/Bild und Bibliothek schreibt die Welt selbst; bhCalcModel(plp) ist der naechste
+    // Posenpass. Ohne gebundenes Werk: benannte Luecke, false.
+    void bind_player_action(RECVX_PLAYER_ACTION* work,const Inventory* inventory){player_action_work_=work;player_inventory_=inventory;}
     bool stand_player_motion();
+    // Anzahl ausgefuehrter bhStandPlayerMotion seit dem Raumaufbau: *(int*)&plp->mode0 = 1 beendet die
+    // laufende Aktion; der Aktionsbesitzer der Runtime liest den Zaehler fuer seinen Wiedereintritt.
+    unsigned player_stand_count()const{return player_stand_count_;}
     void set_camera_offset_owner(NJS_POINT3* offset){camera_offset_=offset;}
     // Kindworks aus bhSetEnemy (Diagnose: --state).
     const std::deque<WorldEntity>& enemy_children()const{return enemy_children_;}
@@ -830,7 +836,7 @@ private:
     // plp->ct1/ayp (en12.c:1710-1742 Drehung im Griff) und npSetAllMatColor(plp) (en12.c:1192).
     std::optional<std::uint32_t> player_material_; // plp ct1/ayp liegen in player_ct1_/player_ayp_ (oben)
     unsigned pad_on_=0,pad_ps_=0;
-    std::function<void()> stand_player_;
+    RECVX_PLAYER_ACTION* player_action_work_=nullptr;const Inventory* player_inventory_=nullptr;unsigned player_stand_count_=0;
     // cam.ofx/ofy/ofz (camera.c:36/49/81): Besitzer ist die Runtime; sie nullt ihn bei jedem
     // Raumladen wie bhInitCamera (room.c:33, camera.c:8). nullptr = nicht gebunden.
     NJS_POINT3* camera_offset_=nullptr;
@@ -917,8 +923,9 @@ private:
     std::optional<unsigned> put_model_mdflg(const Model& model,const WorldEntity& e)const;
     bool player_mirror_off_=false; // plp->mdflg 0x40 (player.c:1668/1674); bhSetPlayer setzt mdflg = 0x20 (player.c:698/864)
     bool player_model_hidden_=false; // plp->mdflg 0x1 (bhSetDispObj, event.c:2283): nur das Modell, sperrt den Pass nicht
-    // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP.
-    void append_claw_model(Scene& scene,const EffectSprite& sprite)const;
+    // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP; reflected ist
+    // der zweite bhDrawEffect aus bhEtcMirrorDrawModel (game.c:427), Lichtkategorie 5 wie bhEff_ModelDraw.
+    void append_claw_model(Scene& scene,const EffectSprite& sprite,bool reflected)const;
     // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364): objP[mdlver].model von mlwP = ene[model_enemy].mdl[model_mdl]
     // unter T(p) * RotZ/Y/X(a) * S(s), txp[0] = mlwP->texP, SimpleMulti-Licht (Kategorie 5).
     // gm_flg traegt das Effekt-mdflg-Tor; reflected ist der bereits geplante zweite Zeichenaufruf.

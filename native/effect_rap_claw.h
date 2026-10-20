@@ -35,6 +35,19 @@ bool start_eff30c(EffectSprite& s,unsigned enemy_index,unsigned base_joint,unsig
 // objP[obj].model des Gegners enemy_index unter cam.mtx * mtx mit mlwP->texP: das uebernimmt
 // der Raumbesitzer aus s.claw30c, der Satz haelt nur Matrix und Verweise.
 bool step_eff30c(EffectSprite& s);
+// effsub3.c:3600 bhEff30cDrw zeichnet mit njCnkEasyMultiDrawModel = Ninja-Modus 1 (ps2_NinjaCnk.c:590,
+// NaCnkLighting[1] :180: Multi-Lichtsatz Em, Umgebung AmbientEm = Funktion * Materialchunk :946).
+// Der Zeichenaufruf setzt selbst kein Licht, keinen Filter und keinen Blendzustand und hat kein
+// mdflg-Tor (anders als bhEff_ModelDraw effsub4.c:3319): er laeuft in jedem bhDrawEffect der
+// ef_fnc-Liste (effect.c:929). Lichtzustand: normal der von bhDrawObjItm hinterlassene bhSetLight
+// (objitm.c:542) mit amb_chr (game.c:344-348), unter ef_flg 0x4 bhSetHalfLight (effect.c:926);
+// im Spiegelpass bhSetLight unter cam.mtx*njMirror (game.c:81-85) und amb_rom (game.c:410-411,
+// Aufruf :427). Nativ wie bhEff_ModelDraw (effect_model_mirror.h): interne Lichtkategorie 5 fuer
+// den spaeten Multi-Lichtlauf des Raumbesitzers (oeffentlich wieder 4), Materialphase 6/10,
+// Spiegelart 0/3; die Weltlage bleibt ungespiegelt, cam.mtx*njMirror besitzt der Renderer.
+// Streifenroute des EasyMulti-Pfads (draw_tp 0, MdlPut.c:8-14 Sprungtabelle): Texturclamp aus
+// Flag 8 allein, nicht erst mit Flag 16 wie SimpleMulti (scene.cpp route_model_texture_cache).
+void prepare_eff30c_model(Scene& object,bool reflected);
 // R07_WORK (effsub3.h:374) mit EFFPRM_WORK (effsub3.h:361) am Anfang; die Felder tragen die
 // Originalnamen. mtx ersetzt EFFPRM_WORK.mtxP; textured/tex_id ersetzen texP/tex_id
 // (texP != NULL heisst: Zeichnen mit Textur, effsub3.c:2315/2355).
