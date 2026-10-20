@@ -2,6 +2,7 @@
 """Contracts for the native-port status report; never touches quarantine."""
 import importlib.util
 import sys
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -29,14 +30,39 @@ class PortCheckTest(unittest.TestCase):
         self.assertFalse(any(record['source'] == 'forbidden' for record in records))
         self.assertTrue(any(record['status'] == 'unbestaetigt' for record in records))
 
-    def test_readme_progress_is_sourced_from_port_status(self):
+    def test_landing_page_keeps_progress_in_external_report(self):
+        status = (ROOT / 'docs/PORT_STATUS.md').read_text()
+        readme = (ROOT / 'README.md').read_text()
+        self.assertIn(port_check.README_EXTERNAL, readme)
+        self.assertIn('](docs/PORT_STATUS.md)', readme)
+        self.assertNotIn(port_check.README_BEGIN, readme)
+        self.assertNotIn(port_check.README_END, readme)
+        self.assertNotIn('<!-- native-progress:begin -->', readme)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'README.md'
+            path.write_text(readme)
+            port_check.update_readme(path, status)
+            self.assertEqual(path.read_text(), readme)
+
+    def test_inline_progress_still_comes_from_report(self):
         status = (ROOT / 'docs/PORT_STATUS.md').read_text()
         block = port_check.readme_block_from_status(status)
-        readme = (ROOT / 'README.md').read_text()
-        match = port_check.re.search(port_check.re.escape(port_check.README_BEGIN) + r'.*?' +
-                                     port_check.re.escape(port_check.README_END), readme, port_check.re.S)
-        self.assertIsNotNone(match)
-        self.assertEqual(match.group(0), block)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'README.md'
+            path.write_text(f'# Inline report\n{port_check.README_BEGIN}\n{port_check.README_END}\n')
+            port_check.update_readme(path, status)
+            self.assertEqual(path.read_text(), f'# Inline report\n{block}\n')
+
+    def test_external_progress_requires_link_and_rejects_inline_markers(self):
+        status = (ROOT / 'docs/PORT_STATUS.md').read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'README.md'
+            for text in (port_check.README_EXTERNAL,
+                         port_check.README_EXTERNAL + '\n[Report](docs/PORT_STATUS.md)\n' + port_check.README_BEGIN):
+                path.write_text(text)
+                with self.assertRaises(SystemExit):
+                    port_check.update_readme(path, status)
+                self.assertEqual(path.read_text(), text)
 
 
 if __name__ == '__main__':

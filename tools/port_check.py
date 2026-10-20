@@ -223,6 +223,7 @@ def summarize(records):
 
 README_BEGIN = '<!-- port-status:begin -->'
 README_END = '<!-- port-status:end -->'
+README_EXTERNAL = '<!-- port-status:external -->'
 PORT_STATUS = ROOT / 'docs/PORT_STATUS.md'
 
 # README.md is written in English; docs/PORT_STATUS.md stays German. The block is parsed
@@ -288,8 +289,16 @@ def readme_block_from_status(status):
     return '\n'.join(lines)
 
 def update_readme(path, status):
-    block = readme_block_from_status(status)
     text = path.read_text()
+    # Landing pages can explicitly keep progress in docs/PORT_STATUS.md. Preserve the
+    # required --readme build/commit invocation without reinserting a progress table.
+    if README_EXTERNAL in text:
+        if README_BEGIN in text or README_END in text:
+            raise SystemExit(f'{path}: external status and inline status markers conflict')
+        if '](docs/PORT_STATUS.md)' not in text:
+            raise SystemExit(f'{path}: external status requires a link to docs/PORT_STATUS.md')
+        return
+    block = readme_block_from_status(status)
     pattern = re.compile(re.escape(README_BEGIN) + r'.*?' + re.escape(README_END), re.S)
     if not pattern.search(text):
         raise SystemExit(f'{path}: markers {README_BEGIN} / {README_END} missing')
