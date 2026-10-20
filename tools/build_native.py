@@ -105,6 +105,43 @@ def sync_macos_start_package(build: Path) -> None:
     print(f'Updated Start.command development app: {app}', flush=True)
 
 
+WINDOWS_TARGETS = {'windows': 'x64', 'windows-arm64': 'arm64'}
+
+
+def host_target(system: str, machine: str) -> str | None:
+    """Map the host to a build target; Windows ARM64 builds natively for ARM64."""
+    if system == 'Darwin':
+        return 'macos'
+    if system == 'Windows':
+        return 'windows-arm64' if machine.lower() in {'arm64', 'aarch64'} else 'windows'
+    if system == 'Linux':
+        return 'linux'
+    return None
+
+
+def is_windows_target(target: str) -> bool:
+    return target in WINDOWS_TARGETS
+
+
+def cross_build_directory(target: str) -> Path:
+    return ROOT / 'build' / ('windows' + ('-arm64' if WINDOWS_TARGETS[target] == 'arm64' else '-x64'))
+
+
+def native_build_directory(target: str) -> Path:
+    if target == 'macos':
+        return ROOT / 'build/macos-arm64'
+    if target == 'windows':
+        return ROOT / 'build/windows-native'
+    if target == 'windows-arm64':
+        return ROOT / 'build/windows-arm64-native'
+    return ROOT / 'build/native'
+
+
+def package_directory(target: str, version: str) -> Path:
+    label = {'macos': 'macos-arm64', 'windows': 'windows-x64', 'windows-arm64': 'windows-arm64'}[target]
+    return ROOT / 'build/packages' / f'{label}-v{version}'
+
+
 def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: int) -> None:
     """Create the complete loose data tree from ISO images only when none exists yet."""
     if (data / 'native-data.version').is_file():
@@ -112,13 +149,13 @@ def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: in
         return
     if data.exists():
         raise RuntimeError(f'--iso needs a new data directory, but {data} exists without a completed export')
-    if target == 'windows' and platform.system() != 'Windows':
+    if is_windows_target(target) and platform.system() != 'Windows':
         # The exporters run on the build host, not on the cross-compiled target.
         directories = [ROOT / 'build/macos-arm64', ROOT / 'build/native']
         suffix = ''
     else:
         directories = [binary_dir]
-        suffix = '.exe' if target == 'windows' else ''
+        suffix = '.exe' if is_windows_target(target) else ''
     names = ('recvx-assets' + suffix, 'recvx-world-assets' + suffix)
     directory = next((d for d in directories if all((d / n).is_file() for n in names)), None)
     if directory is None:
@@ -134,7 +171,7 @@ def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: in
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--platform', choices=['host', 'macos', 'windows'], default='host')
+    parser.add_argument('--platform', choices=['host', 'macos', 'windows', 'windows-arm64'], default='host')
     parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8))
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
@@ -151,30 +188,30 @@ def main():
         parser.error('--jobs must be between 1 and 256')
     target = args.platform
     if target == 'host':
-        target = {'Darwin': 'macos', 'Windows': 'windows', 'Linux': 'linux'}.get(platform.system())
+        target = host_target(platform.system(), platform.machine())
     if not target:
         parser.error('unsupported host')
     data = args.data.resolve()
-    if target == 'windows' and platform.system() != 'Windows' and (args.test or args.verify_runtime):
-        parser.error('Windows cross-builds cannot run tests; use --platform windows without test options, then test on Windows or Wine')
+    if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.verify_runtime):
+        parser.error('Windows cross-builds cannot run tests; use --platform windows or windows-arm64 without test options, then test on Windows or Wine')
     run_checks = args.test and not args.no_test
-    if target == 'windows' and platform.system() != 'Windows':
+    if is_windows_target(target) and platform.system() != 'Windows':
         # The final binary audit also invokes Zig; use the same project cache.
         os.environ['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build/toolchains/zig-cache')
-        run(sys.executable, ROOT / 'tools/build_windows.py', '--jobs', args.jobs)
-        build = ROOT / 'build/windows-x64'
-        print('Cross-built Windows x64.', flush=True)
+        run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs)
+        build = cross_build_directory(target)
+        print(f'Cross-built Windows {WINDOWS_TARGETS[target]}.', flush=True)
     else:
         if target == 'macos' and platform.system() != 'Darwin':
             parser.error('macOS builds require a macOS host')
-        build = ROOT / 'build' / ('macos-arm64' if target == 'macos' else 'windows-native' if target == 'windows' else 'native')
+        build = native_build_directory(target)
         configure = ['cmake', '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}']
         if target == 'macos':
             configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
         run(*configure)
         run('cmake', '--build', build, '--config', 'Release', '--parallel', args.jobs)
     binary_dir = build / 'Release' if (build / 'Release').is_dir() else build
-    suffix = '.exe' if target == 'windows' else ''
+    suffix = '.exe' if is_windows_target(target) else ''
     if args.iso:
         prepare_iso_data(args.iso, data, binary_dir, target, args.jobs)
     if args.verify_runtime and not (data / 'native-data.version').is_file():
@@ -185,8 +222,8 @@ def main():
         '--build-dir', build, '--binary', binary_dir / ('recvx-runtime' + suffix))
     if args.verify_data:
         run(sys.executable, ROOT / 'tools/prepare_native_data.py', '--output', data, '--verify')
-    if target != 'windows' or platform.system() == 'Windows':
-        suffix = '.exe' if target == 'windows' else ''
+    if not is_windows_target(target) or platform.system() == 'Windows':
+        suffix = '.exe' if is_windows_target(target) else ''
         if args.verify_runtime and (data / 'native-data.version').is_file():
             run(binary_dir / ('recvx-audio-tests' + suffix), data)
             run(binary_dir / ('recvx-game-tests' + suffix), data)
@@ -208,8 +245,8 @@ def main():
             run(sys.executable, ROOT / 'tools/verify_doors.py', '--runtime', binary_dir / ('recvx-runtime' + suffix), '--data', data)
     if args.package:
         if target == 'linux':
-            parser.error('the packaged targets are Windows and macOS')
-        output = args.output or ROOT / 'build/packages' / (f'macos-arm64-v{VERSION}' if target == 'macos' else f'windows-x64-v{VERSION}')
+            parser.error('the packaged targets are Windows (x64/ARM64) and macOS')
+        output = args.output or package_directory(target, VERSION)
         run(sys.executable, ROOT / 'tools/package_native.py', '--platform', target, '--build', binary_dir, '--data', data, '--output', output)
     if target == 'macos':
         sync_macos_start_package(binary_dir)

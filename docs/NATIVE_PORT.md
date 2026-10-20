@@ -30,6 +30,18 @@ Build noch das Spiel eine Netzwerkverbindung.
 ./build.ps1 --platform windows --verify-data --package
 ```
 
+Windows ARM64 wird auf macOS/Linux mit demselben geprüften Zig-Werkzeugsatz
+gekreuzt. SDL2 liegt für ARM64 nicht als offizielles MinGW-Paket vor und wird
+deshalb aus der fixierten Quelle mitgebaut:
+
+```sh
+./build.sh --platform windows-arm64 --verify-data --package
+```
+
+Das Paket entsteht unter `build/packages/windows-arm64-v<version>`. Wie jeder
+Windows-Crossbuild muss es auf Windows ARM64 oder unter passender Emulation
+getestet werden; der Build allein ist kein Laufzeitnachweis.
+
 | Option | Wirkung |
 |---|---|
 | *(keine)* | Nur Laufzeit-Binary bauen |
@@ -42,7 +54,8 @@ Build noch das Spiel eine Netzwerkverbindung.
 
 macOS-Builds sind ausschließlich arm64 (Deployment Target 11.0, SDL2 arm64,
 kein Rosetta) und lokal ad hoc signiert, nicht notarisiert. Windows-Builds
-sind x64; Crossbuilds müssen auf Windows oder unter Wine getestet werden.
+gibt es für x64 und ARM64; Crossbuilds müssen auf Windows (bzw. ARM64
+Emulation) oder unter Wine getestet werden.
 
 Direkte Entwicklungsbefehle (macOS; die Linux-CI baut als `build/native`):
 

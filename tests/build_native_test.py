@@ -12,6 +12,37 @@ build_native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build_native)
 
 
+class BuildTargetTests(unittest.TestCase):
+    def test_host_target_distinguishes_windows_arm64(self):
+        self.assertEqual(build_native.host_target('Windows', 'ARM64'), 'windows-arm64')
+        self.assertEqual(build_native.host_target('Windows', 'aarch64'), 'windows-arm64')
+        self.assertEqual(build_native.host_target('Windows', 'AMD64'), 'windows')
+        self.assertEqual(build_native.host_target('Darwin', 'arm64'), 'macos')
+        self.assertEqual(build_native.host_target('Linux', 'x86_64'), 'linux')
+        self.assertIsNone(build_native.host_target('Plan9', 'mips'))
+
+    def test_windows_arm64_directories(self):
+        self.assertTrue(build_native.is_windows_target('windows-arm64'))
+        self.assertTrue(build_native.is_windows_target('windows'))
+        self.assertFalse(build_native.is_windows_target('macos'))
+        self.assertEqual(build_native.cross_build_directory('windows-arm64').name, 'windows-arm64')
+        self.assertEqual(build_native.cross_build_directory('windows').name, 'windows-x64')
+        self.assertEqual(build_native.native_build_directory('windows-arm64').name, 'windows-arm64-native')
+        self.assertEqual(build_native.package_directory('windows-arm64', '0.5').name, 'windows-arm64-v0.5')
+
+    def test_cross_build_defines_an_arm64_zig_target_without_prebuilt_sdl(self):
+        spec = importlib.util.spec_from_file_location(
+            'build_windows', Path(build_native.ROOT) / 'tools/build_windows.py')
+        build_windows = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build_windows)
+        arm = build_windows.ARCHES['arm64']
+        self.assertEqual(arm['zig'], 'aarch64-windows-gnu')
+        self.assertEqual(arm['processor'], 'ARM64')
+        self.assertEqual(arm['rc'], 'ARM64')
+        self.assertIsNone(arm['sdl'])
+        self.assertEqual(build_windows.ARCHES['x64']['sdl'], 'x86_64-w64-mingw32')
+
+
 class DevelopmentAppTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='recvx build test ')

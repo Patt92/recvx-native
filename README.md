@@ -99,7 +99,7 @@ brought up separately from the shared gameplay code.
 |---|---|
 | **Mac / Apple Silicon** | Current development platform with Metal and software rendering; standalone Mac builds are part of the release plan. |
 | **Windows x64** | Build support and an experimental Direct3D 11 backend are present; validated Windows releases are planned. |
-| **Windows ARM64** | Planned native target. |
+| **Windows ARM64** | Cross-build option in the build tool, with SDL2 compiled from the pinned source; hardware validation is still pending. |
 | **Linux** | Planned port with an OpenGL backend. |
 | **iPad** | Planned native build using Metal. |
 | **Apple TV** | Planned native build using Metal. |

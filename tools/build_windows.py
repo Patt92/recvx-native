@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Windows x64 on macOS/Linux using pinned official Zig and SDL2 SDKs."""
+"""Cross-build Windows x64 or ARM64 on macOS/Linux with pinned Zig and SDL2."""
 import argparse
 import hashlib
 import os
@@ -20,6 +20,14 @@ ZIG_HASHES = {
     "x86_64-linux": "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00",
 }
 SDL_HASH = "83a5d74012311edc3c0d40ea6faecbe57ad692aa033fa5dc273cc937e3938ff2"
+# SDL2 ships prebuilt MinGW libraries for x86_64 only. The ARM64 build compiles the
+# pinned SDL2 source with the same Zig toolchain instead.
+ARCHES = {
+    "x64": {"zig": "x86_64-windows-gnu", "processor": "AMD64", "rc": "X64",
+            "sdl": "x86_64-w64-mingw32", "build": "windows-x64", "suffix": ""},
+    "arm64": {"zig": "aarch64-windows-gnu", "processor": "ARM64", "rc": "ARM64",
+              "sdl": None, "build": "windows-arm64", "suffix": "-arm64"},
+}
 
 
 def download(url, path, digest):
@@ -47,6 +55,8 @@ def unpack(archive, destination, expected):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--arch", choices=sorted(ARCHES), default="x64",
+                        help="Windows target architecture (default: x64)")
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()
     import sys
@@ -63,28 +73,32 @@ def main():
     zig_archive = toolchains / f"{zig_name}.tar.xz"
     download(f"https://ziglang.org/download/{ZIG_VERSION}/{zig_name}.tar.xz", zig_archive, ZIG_HASHES[host])
     unpack(zig_archive, toolchains, toolchains / zig_name / "zig")
-    sdl_archive = dependencies / f"SDL2-devel-{SDL_VERSION}-mingw.tar.gz"
-    download(f"https://github.com/libsdl-org/SDL/releases/download/release-{SDL_VERSION}/{sdl_archive.name}", sdl_archive, SDL_HASH)
-    sdl = dependencies / f"SDL2-{SDL_VERSION}/x86_64-w64-mingw32"
-    unpack(sdl_archive, dependencies, sdl / "bin/SDL2.dll")
+    arch = ARCHES[args.arch]
+    sdl = None
+    if arch["sdl"]:
+        sdl_archive = dependencies / f"SDL2-devel-{SDL_VERSION}-mingw.tar.gz"
+        download(f"https://github.com/libsdl-org/SDL/releases/download/release-{SDL_VERSION}/{sdl_archive.name}", sdl_archive, SDL_HASH)
+        sdl = dependencies / f"SDL2-{SDL_VERSION}/{arch['sdl']}"
+        unpack(sdl_archive, dependencies, sdl / "bin/SDL2.dll")
     zig = toolchains / zig_name / "zig"
     compilers = {}
-    for name, command in {"cc": "cc -target x86_64-windows-gnu", "cxx": "c++ -target x86_64-windows-gnu", "ar": "ar", "ranlib": "ranlib"}.items():
-        wrapper = toolchains / f"zig-{name}"
-        wrapper.write_text(f'#!/bin/sh\nexec {shlex.quote(str(zig))} {command} "$@"\n')
+    for name, command, targeted in (("cc", "cc", True), ("cxx", "c++", True), ("ar", "ar", False), ("ranlib", "ranlib", False)):
+        wrapper = toolchains / f"zig{arch['suffix']}-{name}"
+        target_option = f' -target {arch["zig"]}' if targeted else ""
+        wrapper.write_text(f'#!/bin/sh\nexec {shlex.quote(str(zig))} {command}{target_option} "$@"\n')
         wrapper.chmod(0o755)
         compilers[name] = wrapper.as_posix()
-    resource_compiler = toolchains / "zig-rc"
-    resource_compiler.write_text(f'#!/bin/sh\nexec {shlex.quote(str(zig))} rc /:output-format coff /:target X64 "$@"\n')
+    resource_compiler = toolchains / f"zig{arch['suffix']}-rc"
+    resource_compiler.write_text(f'#!/bin/sh\nexec {shlex.quote(str(zig))} rc /:output-format coff /:target {arch["rc"]} "$@"\n')
     resource_compiler.chmod(0o755)
-    toolchain = toolchains / "windows-zig.cmake"
+    toolchain = toolchains / f"windows{arch['suffix']}-zig.cmake"
     # Dieser Werkzeugsatz kann keine auditierbare Symboltabelle in die PE legen:
     # llvm-nm/llvm-objdump finden in der von zig/LLD erzeugten Datei weder eine
     # COFF-Symboltabelle noch .debug-Abschnitte, und -g, -fno-strip,
     # -Wl,--no-strip, -Wl,-Map sowie -Wl,--no-insert-timestamp werden
     # abgewiesen. Der Linkeingangs-/Binärnachweis ist deshalb offen; siehe
     # work/native_port_windows_audit.md. Keine Lockerung des Prüfers.
-    toolchain.write_text('set(CMAKE_SYSTEM_NAME Windows)\nset(CMAKE_SYSTEM_PROCESSOR AMD64)\n' + "".join(
+    toolchain.write_text(f'set(CMAKE_SYSTEM_NAME Windows)\nset(CMAKE_SYSTEM_PROCESSOR {arch["processor"]})\n' + "".join(
         f'set({key} "{compilers[name]}" CACHE FILEPATH "" FORCE)\n' for key, name in
         [("CMAKE_C_COMPILER", "cc"), ("CMAKE_CXX_COMPILER", "cxx"), ("CMAKE_AR", "ar"), ("CMAKE_RANLIB", "ranlib")]) +
         f'set(CMAKE_RC_COMPILER "{resource_compiler.as_posix()}" CACHE FILEPATH "" FORCE)\n' +
@@ -93,16 +107,25 @@ def main():
         print(toolchain)
         return
     env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(toolchains / "zig-cache"))
-    build = ROOT / "build/windows-x64"
+    build = ROOT / "build" / arch["build"]
     # CMake can retain the old windres compiler in its language metadata even
     # after the toolchain cache changes. Redetect RC, without clearing the build.
     for metadata in (build / "CMakeFiles").glob("*/CMakeRCCompiler.cmake"):
         if f'set(CMAKE_RC_COMPILER "{resource_compiler.as_posix()}")' not in metadata.read_text():
             metadata.unlink()
-    subprocess.run(["cmake", "-S", str(ROOT), "-B", str(build), "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
-                    f"-DCMAKE_PREFIX_PATH={sdl}", "-DCMAKE_BUILD_TYPE=Release", "-DRECVX_FETCH_SDL2=OFF"], check=True, env=env)
+    configure = ["cmake", "-S", str(ROOT), "-B", str(build), "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
+                 "-DCMAKE_BUILD_TYPE=Release"]
+    if sdl is not None:
+        configure += [f"-DCMAKE_PREFIX_PATH={sdl}", "-DRECVX_FETCH_SDL2=OFF"]
+    else:
+        configure += ["-DRECVX_FETCH_SDL2=ON"]
+        # Prefer the already unpacked pinned source; a fresh host downloads it via FetchContent.
+        source = dependencies / f"SDL2-{SDL_VERSION}"
+        if (source / "CMakeLists.txt").is_file():
+            configure += [f"-DFETCHCONTENT_SOURCE_DIR_SDL2={source}"]
+    subprocess.run(configure, check=True, env=env)
     subprocess.run(["cmake", "--build", str(build), "--parallel", str(args.jobs)], check=True, env=env)
-    print(f"Windows executable: {build / 'recvx-runtime.exe'}")
+    print(f"Windows {args.arch} executable: {build / ('recvx-runtime.exe')}")
 
 
 if __name__ == "__main__":

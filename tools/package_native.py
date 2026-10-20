@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Package the native development runtime with the complete cooked asset tree."""
 import argparse
+import os
 from pathlib import Path
 import plistlib
 import shutil
@@ -34,19 +35,23 @@ def run(*args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", choices=["windows", "macos"], required=True)
+    parser.add_argument("--platform", choices=["windows", "windows-arm64", "macos"], required=True)
     parser.add_argument("--build", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True, help="Complete cooked data from prepare_native_data.py")
     args = parser.parse_args()
     build, output = args.build.resolve(), args.output.resolve()
+    # The PE audit performs a comparison link with the pinned Zig; keep its cache inside the project.
+    os.environ.setdefault('ZIG_GLOBAL_CACHE_DIR', str(ROOT / 'build/toolchains/zig-cache'))
     if output.exists():
         raise RuntimeError("package destination already exists")
-    source = build / ("recvx-runtime.exe" if args.platform == "windows" else "recvx-runtime")
+    source = build / ("recvx-runtime.exe" if args.platform in {"windows", "windows-arm64"} else "recvx-runtime")
     if not source.is_file():
         raise RuntimeError(f"missing runtime: {source}")
+    # PE binaries can only be audited together with the build directory that proves
+    # their link inputs; the same argument is harmless for the macOS Mach-O check.
     run(sys.executable, str(ROOT / 'tools/check_no_original_core.py'), str(ROOT),
-        '--binary', str(source))
+        '--build-dir', str(build), '--binary', str(source))
     data_root = args.data.resolve()
     if not (data_root / "native-data.version").is_file() or not (data_root / "asset-manifest.json").is_file():
         raise RuntimeError("complete cooked data and its manifest are required")
@@ -57,7 +62,7 @@ def main():
     if sdl_license is None:
         raise RuntimeError('SDL2 license missing; use the pinned SDL2 build dependency')
     output.mkdir(parents=True)
-    if args.platform == "windows":
+    if args.platform in {"windows", "windows-arm64"}:
         shutil.copy2(source, output / source.name)
         shutil.copy2(build / "SDL2.dll", output / "SDL2.dll")
         shutil.copy2(build / "recvx-native.exe", output / "recvx-native.exe")
