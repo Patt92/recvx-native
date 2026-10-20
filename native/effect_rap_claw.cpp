@@ -63,7 +63,7 @@ bool step_eff30c(EffectSprite& s){
     }
 }
 
-// effsub3.c:3600 bhEff30cDrw: Metadaten des Modellaufrufs fuer den Raumbesitzer (Modus 1, EasyMulti).
+// effsub3.c:3567 bhEff30cDrw: Metadaten des Modellaufrufs fuer den Raumbesitzer (Modus 1, EasyMulti).
 void prepare_eff30c_model(Scene& object,bool reflected){
     route_model_texture_cache(object.triangles,0);          // njCnkEasyMultiDrawModel: Sprungtabellenspalte 0
     for(auto& t:object.triangles){

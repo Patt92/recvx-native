@@ -1,4 +1,4 @@
-// bhEff30cDrw (effsub3.c:3600, Effekt 312) am Original-Tyrant EN19 in RM_5840: Licht des
+// bhEff30cDrw (effsub3.c:3567, Effekt 312) am Original-Tyrant EN19 in RM_5840: Licht des
 // Klauenmodells in beiden bhDrawEffect-Aufrufen (game.c:348 und :427 aus bhEtcMirrorDrawModel).
 // Die Klauen entstehen ueber den echten Weg bhEne19 :239-275 (status 0x80000000 des Typ-2-Tyrant,
 // bhEne19_SetLeftClaw en19.c:4780). Spiegelebene, pt_flg, abgeschaltete Lichter (Opcode 0x35) und die

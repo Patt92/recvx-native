@@ -58,8 +58,8 @@ void unit(){
     {   // :1136-1152 Flags, Modus, spx/spz, Motion, Zaehler
         Host h;auto a=work();h.flg=0xFFFFFFFFu;h.stflg=0xFFFFFFFFu;
         recvx_player_stand_motion(&a,&h.io);
-        check((h.flg&0xC96EFFFBu)==(0xFFFFFFFFu&0xC96EFFFBu)&&(h.flg&0x8u),"flg &= 0xC96EFFFB / |= 0x8 falsch");
-        check((h.stflg&0x18000u)==0,"stflg &= ~0x18000 falsch");
+        check(h.flg==(0xC96EFFFBu|0x8u),"flg &= 0xC96EFFFB / |= 0x8 falsch"); // :1136-1137, Eingabe alle Bits
+        check(h.stflg==~0x18000u,"stflg &= ~0x18000 falsch");
         check(a.mode2==0&&a.mode3==0,"mode2/mode3 nicht genullt");
         check(a.spx==12.5f&&a.spz==-3.25f,"spx/spz != px/pz");
         check(a.mtn_no==recvx_player_mtn_act(1,a.dmlvl,0),"mtn_no != PlMtnAct[wpntp][dmlvl][0]");
@@ -102,13 +102,17 @@ void world_case(const std::filesystem::path& data){
     RECVX_PLAYER_ACTION action{};action.wpntp=1;
     world.bind_player_action(&action,&inventory);
     world.set_player_hp(200);
-    events.flags[13][0]=0x919;events.flags[14][0]=0x1F800;
+    // Ausgangszustand mit gesetzten Loeschbits, fremdem Modus und laufender Motion,
+    // damit jedes Schreiben der Routine sichtbar wird.
+    events.flags[13][0]=0xFFFFFFFFu;events.flags[14][0]=0xFFFFFFFFu;
+    world.set_player_mode(0x05040302u);motion=7;frame=12*65536;
     check(world.stand_player_motion(),"stand_player_motion meldet mit Werk eine Luecke");
     check(world.player_stand_count()==1,"player_stand_count nicht erhoeht");
-    check((events.flags[13][0]&0x8u)&&(events.flags[13][0]&~0xC96EFFFBu)==(0x919u&~0xC96EFFFBu),"plp->flg nicht geschrieben");
-    check((events.flags[14][0]&0x18000u)==0,"plp->stflg 0x18000 nicht geloescht");
+    check(events.flags[13][0]==(0xC96EFFFBu|0x8u),"plp->flg nicht geschrieben");
+    check(events.flags[14][0]==~0x18000u,"plp->stflg 0x18000 nicht geloescht");
     check(world.player_mode()==1,"*(int*)&plp->mode0 = 1 fehlt");
     check(action.spx==float(action.px)&&action.spz==float(action.pz),"spx/spz != px/pz");
+    check(action.mtn_no==recvx_player_mtn_act(1,action.dmlvl,0),"mtn_no != PlMtnAct[wpntp][dmlvl][0]");
     check(motion==action.mtn_no&&frame==0,"bhSetMotion(plp,0,0,NULL) nicht uebernommen");
     for(const auto& g:world.unbound_enemy_routines())check(g.find("bhStandPlayerMotion")==std::string::npos,("Luecke: "+g).c_str());
 }

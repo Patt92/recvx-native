@@ -38,7 +38,7 @@ void BoxMenu::leave(Inventory& inventory,StatusMenu& menu,EventVm* events){
     menu.reset(inventory);reset();events->menu_open=false;events->flags[10][0]&=~0x1c0000u;events->flags[12][0]|=0x200u;
     // ItemTaskCheck (sub1.c:3105): bhStandPlayerMotion at the player owner; the next
     // bhControlPlayerPad clears st_flg 0x4 set by bhCheckExmAtari for the lid.
-    if(stand_player)stand_player();else ++stand_gaps_;
+    if(stand_player){stand_player();stood_=true;}else ++stand_gaps_;
     events->flags[5][0]&=~4u;
 }
 void BoxMenu::pad(unsigned on,unsigned pressed,Inventory& inventory,StatusMenu& menu,EventVm* events,AudioMixer& audio){

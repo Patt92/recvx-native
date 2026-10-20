@@ -4,6 +4,7 @@
 #include "world.h"
 #include "room.h"
 #include "en29.h"
+#include "effect_rap_blood.h"
 #include "ninja_math.h"
 #include <cmath>
 #include <iostream>
@@ -26,10 +27,8 @@ struct Fixture {
     RECVX_ENEMY_WORK& tentacle(unsigned type){auto& t=world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]&&t.slot[i]->id==29&&t.slot[i]->type==type)return *t.slot[i];throw std::runtime_error("Original-Tentakel fehlt");}
     unsigned children(){unsigned n=0;auto& t=world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]&&t.slot[i]->id==29&&t.slot[i]->type==8&&(t.slot[i]->flg&1u))++n;return n;}
     void no_gaps(const char* phase){
-        // Nicht portierte Effektprozeduren der Treffereffekte (309/311 Blut, 301) sind erlaubt.
-        static const char* allowed[]={"bhEff309","bhEff311","bhEff301","rySetEffBlood"};
-        for(const auto& g:world.unbound_enemy_routines()){bool ok=false;for(const char* a:allowed)if(g.find(a)!=std::string::npos)ok=true;
-            if(!ok)throw std::runtime_error(std::string(phase)+": Luecke "+g);}
+        // Keine Ausnahme mehr: 309/311 (rySetEffBlood/2, effect_rap_blood.cpp) und 301 sind portiert und gebunden.
+        for(const auto& g:world.unbound_enemy_routines())throw std::runtime_error(std::string(phase)+": Luecke "+g);
     }
 };
 int main(int argc,char** argv){try{
@@ -88,7 +87,29 @@ int main(int argc,char** argv){try{
         check(!(c->flg&0x4u),"CheckDmgEne: Kapsel-Trefferbit geloescht");
         check(e.djnt_no==10&&e.wpnr_no==2,"CheckDmgEne: Treffer an den Koerper uebergeben");
         check(e.hp<=hp0&&s->br_mde0==2,"DmgCheck/Br00: BR0_DAMAGE");
-        f.no_gaps("Treffer");
+        // en29.c:1149-1164 Typ 0, ohne comb_flg 0x1: nur SetDmgEffect(DmgDat[comb_wep].eff_nml_s).
+        // DmgDat (en29.c:1121) und E29EffTbl (en29.c:113) als Originaldaten: eff 3/4/5 -> {1, typ} =
+        // rySetEffBlood (309, en29.c:1546-1554), eff 0/1/2 -> rySetEffBlood2 (311, :1535-1543), beide an
+        // ewP->mlwP->owP[djnt_no].mtx des Koerpers. Kein Wert aus dem Port uebernommen.
+        static const int dd_nml_s[21]={0,0,3,3,3,3,4,3,3,3,3,4,3,4,4,8,6,4,5,3,5};
+        static const int eff_tbl[9][2]={{0,3},{0,4},{0,5},{1,3},{1,4},{1,5},{2,1},{3,2},{4,131072}};
+        check(e.comb_wep<21u&&!(e.comb_flg&0x1u),"Treffer: comb_wep in DmgDat, ohne comb_flg 0x1");
+        const int eff=dd_nml_s[e.comb_wep];
+        check(eff_tbl[eff][0]<=1,"Treffer: Testaufstellung erreicht keinen Blutfall (eff_nml_s)");
+        const unsigned want_id=eff_tbl[eff][0]==1?309u:311u;
+        unsigned body=128;for(unsigned i=0;i<128;++i)if(f.world.state(1,i)==static_cast<const WorldEntity*>(e.owner))body=i;
+        check(body<128,"Koerper ohne Raumindex");
+        unsigned blood=0,other=0;
+        for(unsigned i=0;const auto* o=f.world.effect_state(i);++i){
+            if(!(o->flg&1u))continue;
+            if(o->id==want_id){
+                const auto* r09=o->blood309.get();const auto* r0b=o->blood30b.get();
+                const bool linked=want_id==309u?(r09&&r09->prm_b.kind==1u&&r09->prm_b.index==body&&r09->prm_b.joint==10u):
+                                                (r0b&&r0b->prm_b.kind==1u&&r0b->prm_b.index==body&&r0b->prm_b.joint==10u);
+                check(linked,"rySetEffBlood/2: Link nicht an owP[djnt_no 10] des Koerpers");++blood;}
+            else if(o->id==309u||o->id==311u)++other;
+        }
+        check(blood==1&&other==0,"SetDmgEffect: genau ein Blutsatz der Originaltabelle (309/311) am Treffer");
     }
     std::cout<<"EN29 world PASS\n";return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

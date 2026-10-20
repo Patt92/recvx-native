@@ -1,5 +1,8 @@
 #include "renderer.h"
 #include "room.h"
+#include "shadow_geometry.h"
+#include "asset_io.h"
+#include <memory>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -63,7 +66,23 @@ int main(int argc,char** argv){try{
         check(software.covered_pixels()>50000,"synthetic scene covers too little");
         same(software,hardware,"synthetic ss "+std::to_string(ss)+(wireframe?" wireframe":""));}
     for(const auto& message:gpu->unsupported())check(false,"GPU frame fell back: "+message);
-    if(argc>1){RoomArchive rooms(argv[1]);
+    if(argc>1){
+        // Phasengrenze game.c:318: ein untexturierter Empfaenger vor den Schattenmasken und eine
+        // untexturierte Spieler-/Gegnerflaeche danach teilen Textur und Sampler; die GPU darf sie
+        // nicht in einen Zeichenaufruf vor den Masken legen (Spieler wuerde verschattet).
+        const auto bytes=read_asset_file(std::filesystem::path(argv[1])/"archives/SYSTEM/0001.bin",16*1024*1024);
+        const auto models=decode_shadow_geometry(bytes);check(!models.empty(),"original shadow model missing");
+        Scene phase;phase.background=0xff000000u;
+        auto tri=[&](float z,std::uint32_t color,bool after){SceneTriangle t;t.color=color;t.world_lit=true;t.camera_mask=false;t.after_modifiers=after;
+            t.vertices={vertex(-64,-64,z),vertex(64,-64,z),vertex(0,64,z)};phase.triangles.push_back(t);};
+        tri(10,0xff808080u,false);tri(9.5f,0xff4060a0u,true);
+        SceneShadow shadow;shadow.geometry=std::make_shared<const ShadowGeometry>(models[0]);shadow.transform={4,0,0,0,0,4,0,0,0,0,4,0,0,0,10,1};phase.shadows.push_back(shadow);
+        SoftwareRenderer software(64,64),hardware(64,64);
+        for(auto* r:{&software,&hardware}){r->set_supersampling(1);r->set_texture_filtering(false);}
+        hardware.set_gpu(gpu);software.draw_view(phase,identity,32,32,false,{},1,100);hardware.draw_view(phase,identity,32,32,false,{},1,100);
+        check(software.pixels()[32*64+32]==0xff4060a0u,"after_modifiers surface must stay unshadowed in the band stage");
+        same(software,hardware,"shadow phase boundary");
+        RoomArchive rooms(argv[1]);
         for(const char* name:{"RM_0020.RDX","RM_1090.RDX"}){const auto room=decode_scene(rooms.load(name,64*1024*1024));
             for(int ss:{1,2}){SoftwareRenderer software(640,480),hardware(640,480);
                 for(auto* r:{&software,&hardware}){r->set_supersampling(ss);r->set_texture_filtering(false);}

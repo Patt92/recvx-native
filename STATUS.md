@@ -21,6 +21,12 @@ Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 
+**Review der letzten 10 Commits (2026-10-20, Arbeitsbaum, 196/196 grün):** GPU-Batches über
+Schattenphasengrenzen (Metal/D3D11), doppeltes bhStandPlayerMotion beim Kistenschließen,
+Klauen-Blendzustand, triviale Prüfungen im Stand-Test, ISO-Rohabbilder/PVD-Lage/Namen behoben.
+Offen: `verify_enemy_ai` rot seit 2de4dad (Zombie-Zeitachse, Originalreferenz nötig).
+[Bericht](build/validation/review-last10-20261020/README.md). **Kein Commit.**
+
 **CTest `script_motion` grün (2026-10-14, `build/en09-claude-20261014`, 86/86).**
 Ursache war Buchführung, nicht Darstellung: `pose_frame()` liefert für native
 Gegnerworks jetzt den Frame, den bhSetMotion vor dem Vorschub abgetastet hat

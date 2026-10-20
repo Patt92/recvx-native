@@ -10,9 +10,17 @@ from pathlib import Path
 import struct
 import sys
 
-SECTOR_LAYOUTS = ((2048, 0), (2352, 16), (2336, 8))
+# (physical sector size, user-data offset): plain 2048-byte ISO, raw Mode 1
+# (sync 12 + header 4), raw Mode 2 Form 1 (sync 12 + header 4 + subheader 8),
+# and 2336-byte Mode 2 without sync/header (subheader 8).
+SECTOR_LAYOUTS = ((2048, 0), (2352, 16), (2352, 24), (2336, 8))
+BLOCK = 2048
 MAX_DIRECTORY_BYTES = 64 * 1024 * 1024
 MAX_DEPTH = 32
+MAX_FILES = 1_000_000
+# Windows rejects these in file names; ISO9660 d-characters never contain them.
+FORBIDDEN_NAME_CHARACTERS = set('/\\:<>|?*"') | {chr(c) for c in range(32)} | {chr(127)}
+RESERVED_WINDOWS_NAMES = {'CON', 'PRN', 'AUX', 'NUL'} | {f'COM{i}' for i in range(1, 10)} | {f'LPT{i}' for i in range(1, 10)}
 CHUNK = 4 * 1024 * 1024
 
 
@@ -68,7 +76,8 @@ def _name(raw):
     name = name.split(';', 1)[0]
     if name.endswith('.'):
         name = name[:-1]
-    if not name or name in ('.', '..') or any(c in name for c in '/\\:\x00'):
+    if (not name or name in ('.', '..') or any(c in FORBIDDEN_NAME_CHARACTERS for c in name)
+            or name.endswith(' ') or name.split('.', 1)[0].upper() in RESERVED_WINDOWS_NAMES):
         raise IsoError(f'unsafe ISO file name: {name!r}')
     return name
 
@@ -94,6 +103,8 @@ class IsoImage:
             self.size = self._stream.tell()
             self._volume()
             self.files = {}
+            self._folded = {}
+            self._visited = set()
             self.total_bytes = 0
             self._directory(self._root_lba, self._root_size, '', 0)
         except Exception:
@@ -135,7 +146,7 @@ class IsoImage:
             raise IsoError(f'not an ISO9660 disc image: {self.path}')
         for sector, sector_size, data_offset in sorted(
                 candidates, key=lambda candidate: (candidate[0] != 16, candidate[0], candidate[1])):
-            pvd = self._read_at(sector * sector_size + data_offset, sector_size)
+            pvd = self._read_at(sector * sector_size + data_offset, BLOCK)
             try:
                 if pvd[0] != 1 or pvd[1:6] != b'CD001' or pvd[6] != 1 or _u16(pvd, 128) != 2048:
                     continue
@@ -149,8 +160,6 @@ class IsoImage:
                 continue
             self._sector_size = sector_size
             self._data_offset = data_offset
-            self._sector_bias = sector - 16
-            self._block_size = 2048
             self.label = pvd[40:72].decode('ascii', 'replace').strip()
             self._root_lba = root_lba
             self._root_size = root_size
@@ -158,24 +167,63 @@ class IsoImage:
         raise IsoError(f'not a supported ISO9660 image: {self.path}')
 
     def _check_extent(self, lba, size):
-        offset = self._physical(lba)
-        if offset < 0 or size < 0 or offset + size > self.size:
+        # Logical blocks are absolute (ECMA-119 6.8); the last block of the
+        # extent must lie completely inside the image.
+        if lba < 0 or size < 0:
+            raise IsoError(f'ISO extent outside image: {lba}+{size}')
+        blocks = (size + BLOCK - 1) // BLOCK
+        if blocks and self._physical(lba + blocks - 1) + BLOCK > self.size:
             raise IsoError(f'ISO extent outside image: {lba}+{size}')
 
     def _physical(self, lba):
-        return (lba + self._sector_bias) * self._sector_size + self._data_offset
+        return lba * self._sector_size + self._data_offset
+
+    def _read_logical(self, lba, size, limit=CHUNK):
+        """Yield the user data of an extent; raw sectors interleave headers/EDC."""
+        self._check_extent(lba, size)
+        remaining = size
+        if self._sector_size == BLOCK:
+            self._stream.seek(self._physical(lba))
+            while remaining:
+                data = self._stream.read(min(remaining, limit))
+                if not data:
+                    raise IsoError(f'truncated ISO image: {self.path}')
+                remaining -= len(data)
+                yield data
+            return
+        per_chunk = max(1, limit // BLOCK)
+        block = lba
+        while remaining:
+            parts = []
+            for _ in range(per_chunk):
+                if not remaining:
+                    break
+                self._stream.seek(self._physical(block))
+                take = min(remaining, BLOCK)
+                data = self._stream.read(take)
+                if len(data) != take:
+                    raise IsoError(f'truncated ISO image: {self.path}')
+                parts.append(data)
+                remaining -= take
+                block += 1
+            yield b''.join(parts)
 
     def _directory(self, lba, size, prefix, depth):
         if depth > MAX_DEPTH:
             raise IsoError(f'ISO directory nesting is too deep: {prefix}')
         if size > MAX_DIRECTORY_BYTES:
             raise IsoError(f'ISO directory is too large: {prefix or "/"}')
-        data = self._read_at(self._physical(lba), size)
+        # Every directory extent is read once: shared extents would turn a
+        # small image into an exponential path tree.
+        if lba in self._visited:
+            raise IsoError(f'ISO directory extent referenced twice: {prefix or "/"}')
+        self._visited.add(lba)
+        data = b''.join(self._read_logical(lba, size))
         position = 0
         pending = None
         while position < len(data):
             if data[position] == 0:
-                position = (position // self._block_size + 1) * self._block_size
+                position = (position // BLOCK + 1) * BLOCK
                 continue
             length, child_lba, child_size, flags, raw = _record(data, position)
             position += length
@@ -204,6 +252,13 @@ class IsoImage:
             full = prefix + name
             if full in self.files:
                 raise IsoError(f'duplicate ISO path: {full}')
+            # The extraction targets (macOS, Windows) are case-insensitive.
+            folded = full.casefold()
+            if folded in self._folded:
+                raise IsoError(f'ISO paths differ only in case: {self._folded[folded]} and {full}')
+            self._folded[folded] = full
+            if len(self.files) >= MAX_FILES:
+                raise IsoError(f'ISO lists more than {MAX_FILES} files')
             entry = IsoEntry(full, extents)
             for extent, extent_size in entry.extents:
                 self._check_extent(extent, extent_size)
@@ -214,15 +269,7 @@ class IsoImage:
 
     def chunks(self, entry):
         for lba, size in entry.extents:
-            offset = self._physical(lba)
-            self._stream.seek(offset)
-            remaining = size
-            while remaining:
-                data = self._stream.read(min(remaining, CHUNK))
-                if not data:
-                    raise IsoError(f'truncated ISO file: {entry.name}')
-                remaining -= len(data)
-                yield data
+            yield from self._read_logical(lba, size)
 
 
 def _digest(image, entry):
@@ -245,8 +292,12 @@ def extract(images, destination):
         for path in images:
             opened.append(IsoImage(path))
         owners = {}
+        folded = {}
         for image in opened:
             for name, entry in image.files.items():
+                other = folded.setdefault(name.casefold(), name)
+                if other != name:
+                    raise IsoError(f'disc paths differ only in case: {other} and {name}')
                 if name in owners:
                     previous_image, previous_entry = owners[name]
                     if previous_entry.size != entry.size or _digest(previous_image, previous_entry) != _digest(image, entry):
@@ -260,9 +311,9 @@ def extract(images, destination):
             print(f'Extracting ISO {image.path}: {image.label}, '
                   f'{len(image.files)} files / {image.total_bytes} bytes', flush=True)
             for name, entry in image.files.items():
+                if owners[name][0] is not image:
+                    continue  # identical file already written from an earlier image
                 target = destination.joinpath(*name.split('/'))
-                if target.exists():
-                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with target.open('wb') as output:
                     for data in image.chunks(entry):

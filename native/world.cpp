@@ -3794,12 +3794,12 @@ std::shared_ptr<const EffectAfterimage> RoomWorld::capture_afterimage(unsigned k
     else for(const auto& m:models_)if(m.kind==kind&&m.index==index){shot->textures=m.object.textures;break;}
     return shot;
 }
-// effsub3.c:3600 bhEff30cDrw: njSetTexture(prm.texP = mlwP->texP), njPushMatrix(cam.mtx),
+// effsub3.c:3567 bhEff30cDrw: njSetTexture(prm.texP = mlwP->texP), njPushMatrix(cam.mtx),
 // njMultiMatrix(mtxP), njCnkEasyMultiDrawModel(prm.mdlP = objP[obj].model) — das rohe Chunkmodell
 // des Objekts unter der gespiegelten Matrix, ohne Skin-Rechnung und ohne Knotenhierarchie. Licht und
 // Spiegelpass (game.c:344-348 / :85+:427): prepare_eff30c_model (effect_rap_claw.h), interne Kategorie 5
 // fuer den spaeten Multi-Lichtlauf, weil ef_fnc-Modelle hinter lit_triangle_count liegen.
-void RoomWorld::append_claw_model(Scene& scene,const EffectSprite& sprite,bool reflected)const{
+void RoomWorld::append_claw_model(Scene& scene,const EffectSprite& sprite,std::pair<unsigned,unsigned>* fnc_blend,bool reflected)const{
     const auto& c=*sprite.claw30c;
     const Model* model=nullptr;for(const auto& m:models_)if(m.kind==1&&m.index==c.enemy_index&&m.actor){model=&m;break;}
     const auto found=entities_.find({1,c.enemy_index});
@@ -3814,6 +3814,9 @@ void RoomWorld::append_claw_model(Scene& scene,const EffectSprite& sprite,bool r
     prepare_eff30c_model(object,reflected);
     for(const auto& t:object.triangles)if(t.textured&&t.texture>=object.textures.size())throw std::runtime_error("bhEff30cDrw: Textur ausserhalb der Liste des Werks");
     const auto offset=scene.textures.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
+    // njCnkEasyMultiDrawModel laeuft ueber die Materialchunks von objP[obj].model: der letzte
+    // Blendchunk bleibt fuer die folgenden ef_fnc-Zeichnungen stehen (wie bhEff_ModelDraw).
+    effect_model_detail::finish_blend(asset->encoded_model(),c.obj,fnc_blend);
 }
 // njplus.c:1375 npSetAllMatColor(objp, obj_n, argb): B, G und R jedes Materialchunks der Objekte
 // [first, first+count) werden gesetzt, A nur dort, wo das Alphabyte nicht schon 0 ist (:1424).
@@ -4507,9 +4510,9 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
      // Linien ohne eigenes Blendpaar (bhEff308Drw) zeichnen mit dem Register, das der
      // ef_fnc-Vorgaenger hinterlassen hat; deshalb in derselben Listenreihenfolge.
      for(const auto& work:sprites_){if(!drawable(work))continue;const auto entry=fnc_blend;
-         // effsub3.c:3600 bhEff30cDrw in der ef_fnc-Liste: objP[obj].model des Gegners unter cam.mtx * R0_WK.mtxP.
+         // effsub3.c:3567 bhEff30cDrw in der ef_fnc-Liste: objP[obj].model des Gegners unter cam.mtx * R0_WK.mtxP.
          // Kein mdflg-Tor und kein zweites Duplikat in der Zeichenfunktion: beide bhDrawEffect-Aufrufe zeichnen sie.
-         if(work.sprite.id==312&&work.sprite.custom_queued&&work.sprite.claw30c)append_claw_model(scene,work.sprite,reflected);
+         if(work.sprite.id==312&&work.sprite.custom_queued&&work.sprite.claw30c)append_claw_model(scene,work.sprite,&fnc_blend,reflected);
          // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364, en22.c:2658) in der ef_fnc-Liste.
          if(work.sprite.id==364&&work.sprite.custom_queued)append_effect_model(scene,work.sprite,work.texture_list,&fnc_blend,mirror,reflected);
          if(work.sprite.custom_queued||!work.sprite.quads.empty()){

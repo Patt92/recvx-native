@@ -922,9 +922,9 @@ private:
     std::optional<unsigned> put_model_mdflg(const Model& model,const WorldEntity& e)const;
     bool player_mirror_off_=false; // plp->mdflg 0x40 (player.c:1668/1674); bhSetPlayer setzt mdflg = 0x20 (player.c:698/864)
     bool player_model_hidden_=false; // plp->mdflg 0x1 (bhSetDispObj, event.c:2283): nur das Modell, sperrt den Pass nicht
-    // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP; reflected ist
+    // effsub3.c:3567 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP; reflected ist
     // der zweite bhDrawEffect aus bhEtcMirrorDrawModel (game.c:427), Lichtkategorie 5 wie bhEff_ModelDraw.
-    void append_claw_model(Scene& scene,const EffectSprite& sprite,bool reflected)const;
+    void append_claw_model(Scene& scene,const EffectSprite& sprite,std::pair<unsigned,unsigned>* fnc_blend,bool reflected)const;
     // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364): objP[mdlver].model von mlwP = ene[model_enemy].mdl[model_mdl]
     // unter T(p) * RotZ/Y/X(a) * S(s), txp[0] = mlwP->texP, SimpleMulti-Licht (Kategorie 5).
     // gm_flg traegt das Effekt-mdflg-Tor; reflected ist der bereits geplante zweite Zeichenaufruf.

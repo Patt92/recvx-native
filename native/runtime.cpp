@@ -192,7 +192,7 @@ int verify_players(const fs::path& data){
 }
 static std::string player_work_json(const recvx::RoomWorld& world){
     RECVX_ENEMY_PLAYER pl;if(!world.enemy_player_get(pl))return "";
-    std::ostringstream o;o<<", \"player_work\": {\"mode\": ["<<int(pl.mode0)<<", "<<int(pl.mode1)<<", "<<int(pl.mode2)<<", "<<int(pl.mode3)<<"], \"flg\": "<<pl.flg<<", \"stflg\": "<<pl.stflg<<", \"mtn_no\": "<<pl.mtn_no<<", \"frm_no\": "<<pl.frm_no<<", \"hokan_count\": "<<pl.hokan_count<<", \"mtn_enemy\": "<<int(pl.mtn_enemy)<<", \"mtn_enemy_owner\": "<<pl.mtn_enemy_owner<<"}";
+    std::ostringstream o;o<<", \"player_work\": {\"mode\": ["<<int(pl.mode0)<<", "<<int(pl.mode1)<<", "<<int(pl.mode2)<<", "<<int(pl.mode3)<<"], \"flg\": "<<pl.flg<<", \"stflg\": "<<pl.stflg<<", \"mtn_no\": "<<pl.mtn_no<<", \"frm_no\": "<<pl.frm_no<<", \"hokan_count\": "<<pl.hokan_count<<", \"mtn_enemy\": "<<int(pl.mtn_enemy)<<", \"mtn_enemy_owner\": "<<pl.mtn_enemy_owner<<", \"stand_count\": "<<world.player_stand_count()<<"}"; /* Diagnose: bhStandPlayerMotion-Aufrufe (player.c:1114) */
     return o.str();
 }
 namespace {
@@ -792,7 +792,7 @@ int main(int argc,char** argv){
             else if(menu.active&&menu.task.entering()){menu.task.monitor((events->flags[10][0]&0x2u)!=0);if(menu.task.game_running())recvx::control_screen_fade(events->flags[10][0]);}
             /* sub1.c:3103 ItemTaskCheck: der Abbau ruft bhStandPlayerMotion vor der Kartenwahl
                (flgchk 0x8). Die vier taskloop-Paesse davor zaehlt StatusTask::item_task_check (ui.cpp). */
-            else if(!menu.active&&menu_was_active){if(world)world->restore_background(1);if(!menu.map_requested)fade_set(screen_fade.previous(),3.0f);stand_player_motion();}
+            else if(!menu.active&&menu_was_active){if(world)world->restore_background(1);if(!menu.map_requested)fade_set(screen_fade.previous(),3.0f);if(!box_menu.take_stood())stand_player_motion();} /* Kiste: BoxMenu::leave hat sub1.c:3105 schon im Abbaubild gerufen */
             menu_was_active=menu.active;
             /* Erst wenn der Statusbildschirm abgebaut ist, startet der Kartentask: sein
                Verlassen loescht st_flg 0x8 (sub1.c:3137), worauf FtskMapWait (map.c:1757)

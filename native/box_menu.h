@@ -18,6 +18,9 @@ public:
     // ItemTaskCheck's bhStandPlayerMotion (player.c:1114), answered by the player owner.
     std::function<void()> stand_player;
     unsigned stand_gaps()const{return stand_gaps_;}
+    // sub1.c:3105 ruft bhStandPlayerMotion genau einmal; hat der Kistenabbau ihn schon
+    // gerufen, darf der allgemeine Statusaustritt (runtime map_task) ihn nicht wiederholen.
+    bool take_stood(){const bool v=stood_;stood_=false;return v;}
     bool active()const{return active_;}
     unsigned base()const{return base_;}
     // sub1.c ItemBox testmode 2 (the box list scrolls under the fixed row 3).
@@ -34,7 +37,7 @@ private:
     bool active_=false,selecting_=false,closing_=false,exit_=false,exit_pressed_=false;
     // swork.statusflg 0x80000: SpriteH hat die Ausfahrt beendet; ItemBox laeuft nicht mehr
     // (sub1.c:3463), ItemTaskCheck zaehlt taskloop bis zum Abbau (sub1.c:3103/3227).
-    bool closed_=false;
+    bool closed_=false,stood_=false;
     void leave(Inventory& inventory,StatusMenu& menu,EventVm* events);
     unsigned exit_wait_=0,note_=0,stand_gaps_=0;
     void cursor(unsigned on,Inventory& inventory,StatusMenu& menu,AudioMixer& audio);

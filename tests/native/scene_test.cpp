@@ -59,14 +59,23 @@ int main(){try{
      s.ambient_writes.push_back({3,{.7f,.8f,.9f},0,0,false});end=s.resolve_ambient_material();check(end.y==.8f,"empty final material write lost");
      s.triangles[0].material_phase=5;s.ambient_writes[0].phase=5;s.resolve_ambient_material();check(s.triangles[0].ambient_material.y==.2f,"player material executed before enemy material");
      s.triangles[1].object=9;s.erase_triangles([](const auto& t){return t.object==9;});check(s.ambient_writes[2].triangle==2,"material positions not remapped after filtering");}
-    check(scene.textures[0].pixels[1]==0x80100010&&scene.textures[0].pixels[2]==0x80080008,"CSM1 palette permutation");
-    // Real PLI/TIM2 loading color-keys black and expands ARGB4444 alpha with
-    // Ps2Alpha4to8.  Ps2AlphaIsHalf's GS 0..128 step is not stored: the engine
-    // keeps the 8-bit alpha and blends it over 255 (the same As/128 factor).
+    // The fixture TIM2 is ARGB1555 (OrgColorType 0, ClutChange 0): its palette alpha 0x80
+    // already is the GS As (no Ps2AlphaIsHalf, ps2_dummy.c:1796-1801), host alpha 2*As = 0xFF.
+    check(scene.textures[0].pixels[1]==0xFF100010&&scene.textures[0].pixels[2]==0xFF080008,"CSM1 palette permutation / ARGB1555 opaque alpha");
+    // Host alpha is 2*As for every type (blend factor alpha/255 = As/128). Ps2CheckTextureAlpha:
+    // ARGB4444 Ps2Alpha4to8+Ps2AlphaIsHalf, ARGB8888 Ps2AlphaIsHalf (value already 2*As),
+    // ARGB1555/RGB565 color key only (value is As, doubled). Banked images color-key black.
     std::vector<std::uint8_t> bank(44);auto word=[&](std::size_t p,unsigned x){for(unsigned i=0;i<4;++i)bank.at(p+i)=std::uint8_t(x>>(8*i));};word(0,0x00494c50);word(4,12);word(32,1);word(40,0x00010000);
     bank.insert(bank.end(),data.begin()+2320,data.begin()+3640);bank[76+12]=2;bank[76+144]=5;
     auto palette=recvx::decode_texture_bundle(bank);check(palette.size()==1&&palette[0].pixels[0]==0&&palette[0].pixels[1]==0x88100010,"PS2 palette alpha preparation");
+    {const std::size_t entry16_alpha=76+(2612-2352)+16*4+3;
+     auto typed=[&](unsigned type,unsigned alpha){auto b=bank;b[76+12]=std::uint8_t(type);b[entry16_alpha]=std::uint8_t(alpha);return recvx::decode_texture_bundle(b)[0].pixels[1]>>24;};
+     check(typed(0,0x80)==0xFF&&typed(1,0x80)==0xFF,"ARGB1555/RGB565 opaque As 0x80 must be host 0xFF");
+     check(typed(0,0x20)==0x40&&typed(1,0x41)==0x82,"ARGB1555/RGB565 partial As must be doubled");
+     check(typed(6,0x80)==0x80&&typed(6,0xFF)==0xFF,"ARGB8888 must keep its 8-bit value (2*As)");
+     check(typed(2,0xF0)==0xFF,"ARGB4444 Ps2Alpha4to8");}
     bank[76+15]=0x80;palette=recvx::decode_texture_bundle(bank);check(palette[0].pixels[0]==0x80000000&&palette[0].pixels[1]==0x80100010,"palette alpha converted twice");
+    bank[76+12]=1;palette=recvx::decode_texture_bundle(bank);check(palette[0].pixels[1]==0x80100010,"ClutChange set: RGB565 palette must stay untouched");
     recvx::SoftwareRenderer image(64,48);image.draw(scene,scene.cameras[0]);
     check(image.covered_pixels()>100&&image.covered_pixels()<3072,"triangle coverage");
     const auto center=image.pixels()[24*64+32];check(center!=scene.background,"center triangle missing");

@@ -105,25 +105,30 @@ def sync_macos_start_package(build: Path) -> None:
     print(f'Updated Start.command development app: {app}', flush=True)
 
 
-def prepare_iso_data(images, data: Path, binary_dir: Path, target: str) -> None:
-    """Create the loose data tree from ISO images only when none exists yet."""
+def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: int) -> None:
+    """Create the complete loose data tree from ISO images only when none exists yet."""
     if (data / 'native-data.version').is_file():
         print(f'Using existing prepared data at {data}; --iso is not extracted again.', flush=True)
         return
+    if data.exists():
+        raise RuntimeError(f'--iso needs a new data directory, but {data} exists without a completed export')
     if target == 'windows' and platform.system() != 'Windows':
-        exporter = next((candidate for candidate in (
-            ROOT / 'build/macos-arm64/recvx-assets', ROOT / 'build/native/recvx-assets')
-            if candidate.is_file()), None)
-        if exporter is None:
-            raise RuntimeError('Windows cross-build with --iso needs a host recvx-assets; run a host build first')
+        # The exporters run on the build host, not on the cross-compiled target.
+        directories = [ROOT / 'build/macos-arm64', ROOT / 'build/native']
+        suffix = ''
     else:
-        exporter = binary_dir / ('recvx-assets.exe' if target == 'windows' else 'recvx-assets')
-        if not exporter.is_file():
-            raise RuntimeError(f'ISO extraction requires the built exporter: {exporter}')
+        directories = [binary_dir]
+        suffix = '.exe' if target == 'windows' else ''
+    names = ('recvx-assets' + suffix, 'recvx-world-assets' + suffix)
+    directory = next((d for d in directories if all((d / n).is_file() for n in names)), None)
+    if directory is None:
+        raise RuntimeError('ISO extraction requires the built host exporters '
+                           f'{" and ".join(names)} in {", ".join(map(str, directories))}')
+    exporter = directory / names[0]
     command = [sys.executable, str(ROOT / 'tools/prepare_native_data.py'),
-               '--output', str(data), '--exporter', str(exporter)]
+               '--output', str(data), '--exporter', str(exporter), '--jobs', str(jobs)]
     for image in images:
-        command += ['--iso', str(image)]
+        command += ['--iso', str(image.absolute())]  # run() starts in ROOT, not in the caller's directory
     run(*command)
 
 
@@ -171,7 +176,7 @@ def main():
     binary_dir = build / 'Release' if (build / 'Release').is_dir() else build
     suffix = '.exe' if target == 'windows' else ''
     if args.iso:
-        prepare_iso_data(args.iso, data, binary_dir, target)
+        prepare_iso_data(args.iso, data, binary_dir, target, args.jobs)
     if args.verify_runtime and not (data / 'native-data.version').is_file():
         parser.error(f'--verify-runtime requires a prepared native data tree (missing {data / "native-data.version"})')
     if run_checks:

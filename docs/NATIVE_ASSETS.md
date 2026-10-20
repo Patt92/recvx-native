@@ -133,18 +133,33 @@ See AUDIO.md for conversion format and synchronization.
 ### Building from a PS2 ISO (optional)
 
 Instead of supplying an extracted disc directory, pass one or more PS2 ISO9660
-images. The build reads the container once, materializes the extracted disc
-layout in a temporary directory and runs the same `recvx-assets` exporter as
-`--source`:
+images. A source checkout plus the ISO is enough to produce the complete `data/`
+tree:
 
 ```sh
 ./build.sh --iso /path/to/game.iso
 ```
 
+The build compiles the exporters first and then runs, in a staging directory:
+
+1. ISO extraction to the original disc layout (temporary),
+2. `recvx-assets`: disc files, split AFS entries, expanded rooms and the room,
+   player, menu, font and item textures, verified against the extracted disc,
+3. `recvx-world-assets` for every exported room: NPC/enemy, object and
+   room-item textures,
+4. `tools/cook_movies.py`: native movie packets from the dumped PSS files,
+5. `asset-manifest.json`.
+
+Only a fully successful run is moved to the `--data` path; a failure leaves no
+partial tree behind. The build needs FFmpeg/ffprobe for step 4 (`--ffmpeg`,
+`--ffprobe` on `prepare_native_data.py`); the game itself does not.
+
 `--iso` is repeatable; identical files shared by both discs are merged and
 conflicting files are rejected. If `data/` already contains a completed export,
-the build keeps it and does not extract again; use a fresh `--data` directory to
-re-extract. The standalone tool lists or extracts an image without building:
+the build keeps it and does not extract again; an existing directory without a
+completed export is refused rather than overwritten. Use a fresh `--data`
+directory to re-extract. The standalone tool lists or extracts an image without
+building:
 
 ```sh
 python3 tools/iso9660.py game.iso --list
@@ -154,7 +169,7 @@ python3 tools/iso9660.py game.iso --extract build/disc-tree
 The same path is available directly:
 
 ```sh
-python3 tools/prepare_native_data.py --iso game.iso --output data-iso
+python3 tools/prepare_native_data.py --iso game.iso --output data-iso --exporter build/macos-arm64/recvx-assets
 ```
 
 The reader uses only the Python standard library, accepts 2048-byte ISO and raw

@@ -111,32 +111,59 @@ class IsoPreparationTests(unittest.TestCase):
         self.data = self.root / 'data'
         self.binary = self.root / 'build/macos-arm64'
         self.exporter = self.binary / 'recvx-assets'
+        self.world = self.binary / 'recvx-world-assets'
         self.exporter.parent.mkdir(parents=True)
         self.exporter.write_bytes(b'fixture exporter')
+        self.world.write_bytes(b'fixture world exporter')
         self.commands = []
         self.addCleanup(patch.stopall)
         patch.object(build_native, 'ROOT', self.root).start()
         patch.object(build_native, 'run', side_effect=lambda *command: self.commands.append(tuple(map(str, command)))).start()
 
+    def prepare(self, target='macos'):
+        build_native.prepare_iso_data([self.root / 'game.iso', self.root / 'disc2.iso'], self.data, self.binary, target, 3)
+
     def test_missing_data_is_extracted_from_iso(self):
-        build_native.prepare_iso_data([self.root / 'game.iso'], self.data, self.binary, 'macos')
+        self.prepare()
         self.assertEqual(len(self.commands), 1)
         command = self.commands[0]
         self.assertIn(str(self.root / 'tools/prepare_native_data.py'), command)
-        self.assertIn('--iso', command)
-        self.assertIn(str(self.root / 'game.iso'), command)
-        self.assertIn(str(self.exporter), command)
+        self.assertEqual([command[i + 1] for i, part in enumerate(command) if part == '--iso'],
+                         [str(self.root / 'game.iso'), str(self.root / 'disc2.iso')])
+        self.assertEqual(command[command.index('--exporter') + 1], str(self.exporter))
+        self.assertEqual(command[command.index('--jobs') + 1], '3')
 
     def test_existing_data_is_not_replaced(self):
         self.data.mkdir()
         (self.data / 'native-data.version').write_text('recvx-assets-1\n')
-        build_native.prepare_iso_data([self.root / 'game.iso'], self.data, self.binary, 'macos')
+        self.prepare()
         self.assertEqual(self.commands, [])
 
-    def test_missing_exporter_fails(self):
-        self.exporter.unlink()
-        with self.assertRaisesRegex(RuntimeError, 'built exporter'):
-            build_native.prepare_iso_data([self.root / 'game.iso'], self.data, self.binary, 'macos')
+    def test_incomplete_data_directory_is_not_reused(self):
+        self.data.mkdir()
+        (self.data / 'leftover.bin').write_bytes(b'user file')
+        with self.assertRaisesRegex(RuntimeError, 'without a completed export'):
+            self.prepare()
+        self.assertEqual((self.data / 'leftover.bin').read_bytes(), b'user file')
+        self.assertEqual(self.commands, [])
+
+    def test_missing_world_exporter_fails(self):
+        self.world.unlink()
+        with self.assertRaisesRegex(RuntimeError, 'recvx-world-assets'):
+            self.prepare()
+        self.assertEqual(self.commands, [])
+
+    def test_windows_cross_build_uses_host_exporters(self):
+        host = self.root / 'build/macos-arm64'
+        self.assertEqual(self.binary, host)
+        target = self.root / 'build/windows-x64'
+        target.mkdir(parents=True)
+        (target / 'recvx-assets.exe').write_bytes(b'target exporter')
+        (target / 'recvx-world-assets.exe').write_bytes(b'target world exporter')
+        with patch.object(build_native.platform, 'system', return_value='Darwin'):
+            build_native.prepare_iso_data([self.root / 'game.iso'], self.data, target, 'windows', 2)
+        command = self.commands[0]
+        self.assertEqual(command[command.index('--exporter') + 1], str(host / 'recvx-assets'))
 
 
 if __name__ == '__main__':

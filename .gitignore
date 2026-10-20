@@ -17,6 +17,10 @@ venv/
 /include/recvx-decomp-*/
 /context/
 *.iso
+*.ISO
+# Disc images of any format stay local; only the placeholder is versioned.
+/iso/*
+!/iso/.gitkeep
 *.afs
 *.AFS
 dwarfdump.txt

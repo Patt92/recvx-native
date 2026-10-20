@@ -35,9 +35,11 @@ bool start_eff30c(EffectSprite& s,unsigned enemy_index,unsigned base_joint,unsig
 // objP[obj].model des Gegners enemy_index unter cam.mtx * mtx mit mlwP->texP: das uebernimmt
 // der Raumbesitzer aus s.claw30c, der Satz haelt nur Matrix und Verweise.
 bool step_eff30c(EffectSprite& s);
-// effsub3.c:3600 bhEff30cDrw zeichnet mit njCnkEasyMultiDrawModel = Ninja-Modus 1 (ps2_NinjaCnk.c:590,
+// effsub3.c:3567 bhEff30cDrw zeichnet mit njCnkEasyMultiDrawModel = Ninja-Modus 1 (ps2_NinjaCnk.c:590,
 // NaCnkLighting[1] :180: Multi-Lichtsatz Em, Umgebung AmbientEm = Funktion * Materialchunk :946).
-// Der Zeichenaufruf setzt selbst kein Licht, keinen Filter und keinen Blendzustand und hat kein
+// Der Zeichenaufruf setzt selbst kein Licht und keinen Filter; den Blendzustand hinterlassen die
+// Materialchunks (njCnkCmA ps2_NinjaCnk.c:933-937 unter njControl3D(0x100), game.c:343/425) wie bei
+// bhEff_ModelDraw, nachfolgende ef_fnc-Zeichnungen erben ihn. Kein
 // mdflg-Tor (anders als bhEff_ModelDraw effsub4.c:3319): er laeuft in jedem bhDrawEffect der
 // ef_fnc-Liste (effect.c:929). Lichtzustand: normal der von bhDrawObjItm hinterlassene bhSetLight
 // (objitm.c:542) mit amb_chr (game.c:344-348), unter ef_flg 0x4 bhSetHalfLight (effect.c:926);

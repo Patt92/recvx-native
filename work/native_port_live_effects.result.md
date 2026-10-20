@@ -133,3 +133,6 @@ Drei belegte Abweichungen des vorherigen Stands:
 
 ## Offen (separater Prozedurport)
 Neu gemeldet, weil 0x49 jetzt echt ausgeführt wird: `bhEff2` (bhEff002) und `bhSetGunFire Waffe 21`. Weiterhin: bhEff000 Hülsen, Explosion/Trümmer, GunSpark, verknüpfte Blutlachen. Kein Pixelnachweis eines Steve-Flashes (Waffe 21 liefert keinen bhEff003). Kein Commit/Push. Kein Durchspiel- oder Vollständigkeitsnachweis.
+
+
+> Hinweis 2026-10-20: `work/live-effects-20261011/` wurde in 17278ed aus dem Arbeitsbaum entfernt; die oben verlinkten Belege `before-shared-pool/` und `shared-pool-pixels/` sind ueber `git show 17278ed^:work/live-effects-20261011/<pfad>` abrufbar.

@@ -191,16 +191,17 @@ private:
                     if(palette_offset+index*4+4>clut_size)throw std::runtime_error("TIM2 palette index outside CLUT");
                     auto rgba=view.u32(clut+palette_offset+index*4);
                     // Ps2CheckTextureAlpha runs before palettes are installed.
-                    // Banked images color-key black; the 4-bit ARGB4444 alpha
-                    // is expanded to 8 bits (Ps2Alpha4to8) unless already
-                    // changed.  The engine keeps the host alpha domain 0..255:
-                    // Ps2AlphaIsHalf's GS 0..128 step is the same factor over
-                    // 256, and the cooked TGA files store that 0..255 value.
+                    // Host alpha is 2*As (blend factor alpha/255 = As/128).
+                    // ARGB4444/8888 are halved to As by Ps2AlphaIsHalf
+                    // (ps2_dummy.c:1810-1826), so their 8-bit value already is
+                    // 2*As.  ARGB1555/RGB565 are not halved (:1796-1808): their
+                    // palette alpha already is As (0x80 opaque) and is doubled.
                     if(view.u16(payload+14)==0){
                         const auto color_type=view.u8(payload+12);
                         unsigned alpha=rgba>>24;
                         if(banked&&(rgba&0xffffff)==0)alpha=0;
                         if(color_type==2)alpha|=alpha>>4;
+                        else if(color_type==0||color_type==1)alpha=std::min(255u,alpha*2);
                         rgba=(rgba&0xffffff)|(alpha<<24);
                     }
                     texture.pixels.push_back((rgba&0xff00ff00)|((rgba&255)<<16)|((rgba>>16)&255));

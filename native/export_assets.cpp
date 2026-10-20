@@ -48,7 +48,8 @@ int main(int argc,char** argv){try{
         const auto scene=recvx::decode_scene(bytes);
         for(std::size_t t=0;t<scene.textures.size();++t){recvx::write_tga(output/"textures/rooms"/name.substr(0,name.size()-4)/(recvx::asset_number(unsigned(t))+".tga"),scene.textures[t]);++textures;}
     }
-    for(unsigned i=10;i<=14;++i){const auto player=recvx::PlayerAsset::load(source,i);
+    // The source is the extracted disc: player bodies live in SYSTEM.AFS, not as loose cooked entries.
+    for(unsigned i=10;i<=14;++i){const auto player=recvx::PlayerAsset::load(source,i,true);
         for(std::size_t t=0;t<player.textures().size();++t){recvx::write_tga(output/"textures/players"/recvx::asset_number(i)/(recvx::asset_number(unsigned(t))+".tga"),player.textures()[t]);++textures;}
     }
     textures+=export_ui(output);textures+=export_items(output);

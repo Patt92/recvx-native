@@ -429,7 +429,9 @@ private:
             ID3D11ShaderResourceView* view=s.texture?this->texture(*s.texture,variant):blank_.get();
             const unsigned sampler=unsigned(s.linear_only?4:0)|unsigned(s.clamp_u?2:0)|unsigned(s.clamp_v?1:0);
             const bool point_sampled=!s.texture||variant==Point;
-            if(!batches_.empty()&&batches_.back().texture==view&&batches_.back().sampler==sampler&&batches_.back().point==point_sampled
+            // Ein Batch darf keine Phasengrenze ueberspannen (siehe gpu_raster_metal.mm build()).
+            const bool phase_start=frame.shadows&&(i==frame.before_modifiers||i==frame.before_mirror_effects);
+            if(!phase_start&&!batches_.empty()&&batches_.back().texture==view&&batches_.back().sampler==sampler&&batches_.back().point==point_sampled
                &&batches_.back().first+batches_.back().count==i){++batches_.back().count;continue;}
             batches_.push_back({i,1,view,sampler,point_sampled});
         }

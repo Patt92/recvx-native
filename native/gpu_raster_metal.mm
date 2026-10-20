@@ -354,7 +354,10 @@ private:
             g.box[0]=s.minx;g.box[1]=s.miny;g.box[2]=s.maxx;g.box[3]=s.maxy;
             const id<MTLTexture> texture=s.texture?this->texture(*s.texture,variant):blank_;
             const id<MTLSamplerState> sampler=samplers_[s.linear_only?1:0][s.clamp_u?1:0][s.clamp_v?1:0];
-            if(!batches_.empty()&&batches_.back().texture==texture&&batches_.back().sampler==sampler&&batches_.back().first+batches_.back().count==i){++batches_.back().count;continue;}
+            // Ein Batch darf keine Phasengrenze ueberspannen: render() zeichnet ihn sonst ganz vor den
+            // Schattenmasken bzw. dem Spiegelpass (game.c:318/417, renderer.cpp Phasenfolge).
+            const bool phase_start=frame.shadows&&(i==frame.before_modifiers||i==frame.before_mirror_effects);
+            if(!phase_start&&!batches_.empty()&&batches_.back().texture==texture&&batches_.back().sampler==sampler&&batches_.back().first+batches_.back().count==i){++batches_.back().count;continue;}
             batches_.push_back({i,1,texture,sampler});
         }
     }

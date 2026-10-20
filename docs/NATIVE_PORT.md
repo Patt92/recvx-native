@@ -72,17 +72,21 @@ Filmpakete. `asset-manifest.json` enthält Größen und SHA-256 jeder Datei.
 python3 tools/prepare_native_data.py --output data --verify
 ```
 
-Optional kann der lose Datenbaum beim Build direkt aus einem PS2-ISO9660-Image
-entstehen, statt einen bereits entpackten Quellordner zu verlangen:
+Optional entsteht der vollständige lose Datenbaum beim Build direkt aus einem
+PS2-ISO9660-Image; ein Quellcode-Checkout plus ISO genügt:
 
 ```sh
 ./build.sh --iso /pfad/zum/spiel.iso
 ```
 
-`--iso` ist wiederholbar (beide Discs werden bei identischen Dateien
-zusammengeführt, Konflikte abgelehnt). Ein vorhandener vollständiger Export
-unter `data/` bleibt unangetastet; für eine Neuextraktion ein frisches
-`--data`-Verzeichnis angeben. `python3 tools/iso9660.py spiel.iso --list` bzw.
+Nach dem Kompilieren laufen ISO-Extraktion, `recvx-assets`,
+`recvx-world-assets` für alle Räume, `tools/cook_movies.py` (braucht
+FFmpeg/ffprobe zur Buildzeit) und das Manifest in einem Staging-Verzeichnis;
+erst ein vollständiger Lauf wird nach `--data` verschoben. `--iso` ist
+wiederholbar (beide Discs werden bei identischen Dateien zusammengeführt,
+Konflikte abgelehnt). Ein vorhandener vollständiger Export unter `data/` bleibt
+unangetastet, ein vorhandenes unvollständiges Verzeichnis wird abgelehnt; für
+eine Neuextraktion ein frisches `--data`-Verzeichnis angeben. `python3 tools/iso9660.py spiel.iso --list` bzw.
 `--extract <verzeichnis>` prüft das Image ohne Build. Die Runtime liest
 weiterhin ausschließlich lose Dateien.
 
