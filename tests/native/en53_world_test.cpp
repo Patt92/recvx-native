@@ -2,6 +2,7 @@
 // kein natuerlich gespielter Nosferatu-Kampf. Referenz en15.c:3350-3745.
 #include "world.h"
 #include "room.h"
+#include "screen_fade.h"
 #include "binary_view.h"
 #include "renderer.h"
 #include <cmath>
@@ -17,6 +18,7 @@ struct Fixture {
     Inventory inv;MessageDialog dialog;std::uint32_t head=0;RoomWorld world;EventVm events;
     Fixture(const std::filesystem::path& data,const char* room):bytes(RoomArchive(data).load(std::string(room)+".RDX",64*1024*1024)),stage(decode_scene(bytes)),actor(stage.spawns.at(0)),audio(data),player(PlayerAsset::load(data)),world(bytes,stage,actor,motion,frame,audio,data,{},room),events(bytes,inv,dialog){
         world.set_player_asset(&player);world.bind_player_collision(events);world.bind_enemy_player(inv.hp,head);world.set_enemy_ai(true);world.set_enemy_grab(true);
+        world.set_screen_fade_hooks([this](std::uint32_t argb,float ct){set_screen_fade(events.flags[10][0],argb,ct);},[]{return system_screen_fade().previous();}); // bhFadeSet-Besitzer, runtime.cpp:464
         events.binding=[this](const EventCommand& c){return world.bind(c);};commit();events.initialize();
     }
     void commit(){auto nodes=player.pose(motion,frame,actor.position,actor.yaw);world.commit_player_joints(player.script_nodes(nodes));}

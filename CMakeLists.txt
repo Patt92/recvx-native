@@ -232,6 +232,11 @@ if(RECVX_BUILD_RUNTIME)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0090.RDT")
       add_test(NAME rm0090_security_box_nodes COMMAND recvx-rm0090-box-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
     endif()
+    # Statusbildschirm-Taskrahmen (ui.h StatusTask): bhSysCallMonitor Modus 5, ItemTaskCheck/taskloop;
+    # mit Daten zusaetzlich RM_0090 Ereignis 19 unter st_flg 0x8 (ohne RM_0090 nur der Rahmen).
+    add_executable(recvx-status-screen-hold-tests tests/native/status_screen_hold_test.cpp)
+    target_link_libraries(recvx-status-screen-hold-tests PRIVATE recvx_input)
+    add_test(NAME status_screen_hold COMMAND recvx-status-screen-hold-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
     add_executable(recvx-room-motion-empty-slot-tests tests/native/room_motion_empty_slot_test.cpp)
     target_link_libraries(recvx-room-motion-empty-slot-tests PRIVATE recvx_input)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3130.RDT")
@@ -648,6 +653,11 @@ if(BUILD_TESTING)
   add_executable(recvx-gameover-tests tests/native/gameover_test.cpp)
   target_link_libraries(recvx-gameover-tests PRIVATE recvx_game)
   add_test(NAME gameover_original COMMAND recvx-gameover-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  # screen.c sys->fade_*: ein prozessweiter Besitzer fuer alle Aufrufer (Status, Karte, Tuer,
+  # Schreibmaschine, Game Over, bhFadeSet, Effekte, Spielstart); Folgen gegen die Originalzeilen.
+  add_executable(recvx-screen-fade-owner-tests tests/native/screen_fade_owner_test.cpp)
+  target_link_libraries(recvx-screen-fade-owner-tests PRIVATE recvx_game)
+  add_test(NAME screen_fade_owner COMMAND recvx-screen-fade-owner-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_executable(recvx-enemy-damage-tests tests/native/enemy_damage_test.cpp)
   target_link_libraries(recvx-enemy-damage-tests PRIVATE recvx_game)
   add_test(NAME enemy_damage_original_en01 COMMAND recvx-enemy-damage-tests)

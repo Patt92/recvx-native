@@ -1,5 +1,6 @@
 #include "gameover.h"
 #include "back_color.h"
+#include "screen_fade.h"
 #include "asset_io.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
@@ -10,9 +11,12 @@
 
 // Game over (gameover.c semantics) as a native mechanism: the four dispatcher
 // phases, the GV_WORK with its 16x16 point mesh, the ring UV table, the death
-// scene, the continue prompt, the screen fade of screen.c and the exit into
-// bhPopGameData or bhReturnTitle. No original procedure is linked; the small
-// constant tables below are data.
+// scene, the continue prompt and the exit into bhPopGameData or bhReturnTitle.
+// The screen fade is not part of the game over: gameover.c only calls
+// bhSetScreenFade on the one sys->fade_* work (system_screen_fade, screen_fade.h)
+// and reads cb_flg 0x2; bhControlScreenFade/bhDrawScreenFade run in Task 7
+// (game.c:40/111), which keeps running during the game over. No original
+// procedure is linked; the small constant tables below are data.
 namespace recvx {
 namespace {
 // gov_yn: per-column ripple weight of the mesh.
@@ -55,10 +59,6 @@ struct GameOver::Impl {
     int uvu[256]{},uvv[256]{};
     float pz=0,scl=0,tfn=0,tnn=0;
     int cont_x=0,count=0,cur_ct=0,exp_ct=0;
-    // screen.c fade state; `fading` is the original cb_flg bit 0x2.
-    bool fading=false;float hkn=1,fade_ct=0;
-    float an=0,rn=0,gn=0,bn=0,ao=0,ro=0,go=0,bo=0;
-    float ap=0,rp=0,gp=0,bp=0;
     // Death scene player work.
     unsigned player_motion=0,hokan=0;int hokan_rate=0;std::int64_t player_frame=0;
     unsigned blasts=0,unsupported_blasts=0;
@@ -68,24 +68,6 @@ struct GameOver::Impl {
     mutable std::vector<SceneTexture> body_textures;
     mutable bool body_textures_tried=false;
 
-    void set_fade(unsigned argb,float count){
-        fading=true;fade_ct=0;
-        hkn=count<=1.f?1.f:1.f+count;
-        ao=an;ro=rn;go=gn;bo=bn;
-        ap=float(argb>>24);rp=float((argb>>16)&0xff);gp=float((argb>>8)&0xff);bp=float(argb&0xff);
-    }
-    void control_fade(){
-        if(hkn>1.f&&fade_ct==0){fade_ct+=1.f;return;}
-        if(hkn==1.f){fading=false;an=ap;rn=rp;gn=gp;bn=bp;return;}
-        const float span=hkn-1.f;
-        an+=(ap-ao)/span;rn+=(rp-ro)/span;gn+=(gp-go)/span;bn+=(bp-bo)/span;
-        fade_ct+=1.f;
-        if(fade_ct>=span){fading=false;an=ap;rn=rp;gn=gp;bn=bp;}
-    }
-    std::uint32_t fade_color()const{
-        auto channel=[](float v){return unsigned(std::clamp(v,0.f,255.f));};
-        return (channel(an)<<24)|(channel(rn)<<16)|(channel(gn)<<8)|channel(bn);
-    }
     void ring(int index,float radius,float angle){
         uvu[index]=int(radius*njSin(degrees(angle)))+128;
         uvv[index]=int(-(radius*njCos(degrees(angle))))+128;
@@ -157,6 +139,8 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
     auto& g=*impl_;
     if(!g.running)return Result::Running;
     Result result=Result::Running;
+    // bhSetScreenFade (screen.c:21) auf dem einen sys->fade_* mit cb_flg |= 0x2.
+    auto fade=[&](std::uint32_t argb,float ct){set_screen_fade(events.flags[10][0],argb,ct);};
     switch(g.md0){
     case 1:{ // bhInitGameOver
         events.flags[12][0]|=0x100u;      // ts_flg
@@ -165,7 +149,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
         for(unsigned bit:{69u,67u,70u})events.set_flag(1,bit,1); // bhCrFlg
         events.event_deadline_mode=0;events.event_deadline_ticks=0;
         if(g.mode==3)events.flags[11][0]&=~0x80000000u;
-        g.set_fade(0xFFE0E0E0,60.f);
+        fade(0xFFE0E0E0u,60.f); // gameover.c:122
         g.pz=-40.f;g.scl=0.01f;g.tfn=50.f;g.tnn=-g.tfn/30.f;
         for(int y=0;y<16;++y)for(int x=0;x<16;++x){
             const int i=x+y*16;
@@ -189,7 +173,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                     // Death scene: the player body plays its dying motion while
                     // the self-destruct blasts walk past (gm_flg 0x400).
                     g.md1=10;
-                    g.set_fade(0,30.f);
+                    fade(0u,30.f); // gameover.c:262
                     for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,30);
                     set_back_color(0); // gameover.c:266
                     events.flags[6][0]=0x6C;events.flags[11][0]&=~0x100100u;
@@ -203,7 +187,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                     break;
                 }
                 ++g.md1;
-                g.set_fade(0,30.f);
+                fade(0u,30.f); // gameover.c:330
                 for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,60);
                 set_back_color(0); // gameover.c:334
                 events.flags[6][0]=0x20;
@@ -220,8 +204,8 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
             g.pz+=0.1f*(-14.f-g.pz);
             g.scl+=0.005f;
             ++g.ct;
-            if(g.ct>120&&!g.fading){
-                g.set_fade(0xFF000000,30.f);
+            if(g.ct>120&&!(events.flags[10][0]&0x2u)){ // gameover.c:422 !(sys->cb_flg & 0x2)
+                fade(0xFF000000u,30.f); // gameover.c:424
                 for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,30);
             } else if(g.ct>170)g.md0=3;
             break;
@@ -233,7 +217,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                 if((pressed&0x8u)&&g.cont_x<=0){++g.cont_x;audio.play_system(2);}
                 if(pressed&0x800u){
                     if(g.cont_x==0){
-                        g.set_fade(0xFF000000,10.f);
+                        fade(0xFF000000u,10.f); // gameover.c:485
                         for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,10);
                         g.md1=3;audio.play_system(3);
                     } else {
@@ -246,7 +230,8 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
             break;
         case 3:
             // bhPopGameData once the fade has finished.
-            if(!g.fading){events.flags[12][0]|=0x4000u;g.running=false;result=Result::Retry;}
+            if(!(events.flags[10][0]&0x2u)){events.flags[12][0]|=0x4000u; // gameover.c:514 !(sys->cb_flg & 0x2)
+                g.running=false;result=Result::Retry;}
             break;
         case 10:{
             events.flags[5][0]|=0x4u;
@@ -271,12 +256,12 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                 if(g.blasts==5){
                     g.player_motion=25;g.player_frame=0;g.hokan=8;g.hokan_rate=49152;
                     audio.play_dead_voice(int(g.character));
-                    g.set_fade(0xFFFFFFFF,30.f);
+                    fade(0xFFFFFFFFu,30.f); // gameover.c:556 bhSetScreenFade(-1, 30)
                 }
             }
             ++g.ct;
             if(g.ct>150){
-                g.set_fade(0,30.f);
+                fade(0u,30.f); // gameover.c:564
                 g.ct=0;g.md1=1;
                 events.flags[6][0]=0x20;
                 if(death_scene_leave)death_scene_leave(); // gameover.c:567 pt_flg = 0
@@ -292,7 +277,8 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
         break;
     default:break;
     }
-    g.control_fade();
+    // Kein bhControlScreenFade hier: gameover.c ruft es nie. Es laeuft im Spieltask (game.c:38-41,
+    // Task 7 vor Task 14, main.c:195-201), also im naechsten Bild vor diesem Dispatcher.
     return result;
 }
 
@@ -302,16 +288,6 @@ unsigned GameOver::count()const{return unsigned(impl_->count);}
 unsigned GameOver::blasts()const{return impl_->blasts;}
 unsigned GameOver::unsupported_blasts()const{return impl_->unsupported_blasts;}
 
-namespace {
-void blend_over(SoftwareRenderer& image,std::uint32_t argb){
-    const unsigned a=(argb>>24)&255;if(!a)return;
-    const unsigned r=(argb>>16)&255,g=(argb>>8)&255,b=argb&255;
-    for(auto& pixel:image.canvas()){
-        const unsigned dr=(pixel>>16)&255,dg=(pixel>>8)&255,db=pixel&255;
-        pixel=0xff000000u|((r*a+dr*(255-a))/255)<<16|((g*a+dg*(255-a))/255)<<8|((b*a+db*(255-a))/255);
-    }
-}
-}
 
 void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
     const auto& g=*impl_;
@@ -391,6 +367,15 @@ void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
         if(death)njTranslate(&view,0,-10.f,-35.f);
         image.draw_view(scene,view,focal*1.174f,focal*(float(image.height())/480.f)/(float(image.width())/640.f),false,{},2.f,20000.f);
     }
+    // game.c:109-112 (Task 7, vor Task 14): bhDrawScreenFade bei fade_an > 0 auf dem einen sys->fade_*.
+    // Der Fade-Quader (njDrawPolygon2D, attr 0x60, pri -0.81 -> -1, ps2_NaDraw2D.c:93-104) bekommt mit
+    // njClipZ(-2, -20000) (gameover.c:244) sz = Ps2_zbuff_a + Ps2_zbuff_b / -1 > 65534, geklemmt auf 65534
+    // (ps2_dummy.c:432-442), und kommt ueber Ps2AddOT (:469) ins OT-Fach 4095 (:1192-1201), das zuletzt
+    // ausgegeben wird (Schleife aufsteigend, :1312). Das Netz (njDrawTriangle3D attr 0x80000062,
+    // gameover.c:643, ebenfalls OT, ps2_NaGraphics3D.c:464-474) liegt bei z -40..-14 weit vor dem Klemmwert,
+    // also darunter; die Aufforderung (bhDispMessageEx/bhDispFontEx, njDrawPolygon2DM pri -0.9 -> -1,
+    // message.c:449/508) haengt Task 14 im selben Fach hinter den Fade (Ps2AddOT haengt an, :1203-1215).
+    {const auto& fade=system_screen_fade();if(fade.visible())fade.draw(image.canvas(),image.width(),image.height());}
     if(g.md1==2){
         // bhDispMessageEx(264, 211, -0.9, 2, 0, (count << 24) | 0xE0E0E0, 0)
         const Message prompt(std::begin(cnt_mes),std::end(cnt_mes));
@@ -402,6 +387,5 @@ void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
             ui.show_message(image,cursor,g.cont_x==0?248:328,241,(a<<24)|0xE0E0E0u);
         }
     }
-    blend_over(image,g.fade_color());
 }
 }

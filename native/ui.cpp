@@ -112,7 +112,8 @@ void StatusMenu::reset(Inventory& inventory){
     // Discard transient prompts/actions before a debug mutation can reorder slots.
     if(examining&&!inspection.running()&&selected<12&&Inventory::id(inventory.slots()[selected]))inspection.cancel(inventory,selected);
     auto progress=std::move(file_progress);auto bonus=std::move(file_bonus);auto manual=std::move(file_manual_read);auto source=std::move(message_source);auto burst=std::move(shotgun_burst);auto toggle=std::move(toggle_shotgun_burst);const auto old_stage=stage,old_room=room;
-    *this=StatusMenu{};file_progress=std::move(progress);file_bonus=std::move(bonus);file_manual_read=std::move(manual);message_source=std::move(source);shotgun_burst=std::move(burst);toggle_shotgun_burst=std::move(toggle);stage=old_stage;room=old_room;
+    const bool framed=task.owned();
+    *this=StatusMenu{};if(framed)task.frame();file_progress=std::move(progress);file_bonus=std::move(bonus);file_manual_read=std::move(manual);message_source=std::move(source);shotgun_burst=std::move(burst);toggle_shotgun_burst=std::move(toggle);stage=old_stage;room=old_room;
 }
 void StatusMenu::show_message(unsigned index){if(!message_source)throw std::runtime_error("inventory message source is not bound");message.show(message_source(index),index);}
 void StatusMenu::close_examine(Inventory& inventory){inspection.cancel(inventory,selected);examining=false;opening_item=opening_frame=0;}
@@ -212,7 +213,7 @@ void StatusMenu::step_combine(Inventory& inventory){
     if(!moved_source)selected=combine_from;
 }
 void StatusMenu::sprite_on_off(Inventory& inventory){
-    if(!active)return;
+    if(!active||(task.owned()&&!task.running()))return; // SpriteOnOff ist Teil von StatusMain (Task 9)
     // sub1.c:8293-8296: ItemSort ausser während des Verschmelzens.
     const bool merging=combining&&combine_subcsr_==3;
     if(!merging)inventory.sort();
@@ -229,6 +230,15 @@ void StatusMenu::sprite_on_off(Inventory& inventory){
     }else reset_cursor_color();
 }
 void StatusMenu::tick(Inventory& inventory){
+    // bhSysCallItemselect (system.c:911): ItemTaskCheck vor StatusMain. Solange
+    // bhSysCallMonitor Modus 5 laeuft, ruht Task 9 ganz (ts_flg 0x200); im Abbau-
+    // durchlauf (taskloop 4) laeuft StatusMain nicht mehr, st_flg 0x8 faellt mit
+    // active. Den Kistenpass zaehlt BoxMenu selbst (StatusMain case 0x4).
+    if(active&&task.owned()&&!task.box()){
+        const auto pass=task.item_task_check(task_closed_);
+        if(pass==StatusTask::Pass::Suspended)return;
+        if(pass==StatusTask::Pass::Exit){active=false;closing=false;slide_open_=false;task_closed_=false;return;}
+    }
     // fileview.c PageScroll: accelerating outgoing/incoming page, eight-frame
     // capture wait and two-frame pad wait. The text changes between the passes.
     if(files&&!file_list){
@@ -255,13 +265,16 @@ void StatusMenu::tick(Inventory& inventory){
             else if(maincsr==3)nav=false;                                   // back to CursorMove
         }
     }
-    if(!active){slide_open_=false;closing=false;}
+    if(!active){slide_open_=false;closing=false;task_closed_=false;}
     else{
         if(!slide_open_){slide=StatusSlide{};slide.open(false);slide_open_=true;closing=false;}
         const bool closed=slide.tick();
         if(file_entering&&slide.open1()==23&&slide.open2()==46)file_entering=false;
         if(const auto sound=slide.take_sound();sound!=0xffffffff)slide_sound=sound;
-        if(closed&&file_transition){file_transition=false;file_list=false;slide=StatusSlide{};file_scroll=3;file_x=708;file_move=10;file_wait=0;file_display_page=file_page=0;}else if(closed&&closing){active=false;closing=false;slide_open_=false;}
+        if(closed&&file_transition){file_transition=false;file_list=false;slide=StatusSlide{};file_scroll=3;file_x=708;file_move=10;file_wait=0;file_display_page=file_page=0;}else if(closed&&closing){
+            // SpriteH hat statusflg 0x80000 gesetzt. Im Taskrahmen baut erst ItemTaskCheck
+            // nach vier taskloop-Durchlaeufen ab (sub1.c:3103/3227); ohne Rahmen sofort.
+            if(task.owned())task_closed_=true;else{active=false;closing=false;slide_open_=false;}}
     }
     // ItemCommand testmode 2 -> ItemCombination subcsr 2/3 (StatusMain-Dispatch,
     // sub1.c:3416/4936). ItemSort und CursorSet folgen in sprite_on_off().
@@ -277,6 +290,7 @@ void StatusMenu::tick(Inventory& inventory){
     if(inspection.message_pending())show_message(inspection.take_message());
 }
 bool StatusMenu::input(MenuInput key,Inventory& inventory){
+    if(active&&task.owned()&&!task.running())return true; // Task 9 ruht (Monitor Modus 5 bzw. abgebaut): kein StatusMain liest das Pad
     if(active&&(closing||file_transition||slide.moving()))return true; // statusflg 0x40/0x4: no pad input while the screen slides
     const bool was_active=active;
     const bool handled=input_unslid(key,inventory);
@@ -627,6 +641,31 @@ void GameUi::icon(SoftwareRenderer& image,unsigned id,int x,int y,int height,int
     const bool wide=itemdata[id].type&0x100;const int width=narrow_width*(wide?2:1),u=int(n%7)*34,v=int(n/7)*24;
     blit(image,menu_[item<64?4:3],x,y,width,height,u,v,u+(wide?68:34),v+(height==19?12:24));
 }
+void StatusTask::enter(){reset();phase_=Phase::Monitor;} // mn_mode0 5, mn_md1 0
+void StatusTask::resume(){reset();phase_=Phase::Main;}  // ts_flg 0x200 frei, taskloop 0
+void StatusTask::monitor(bool fade_pending){
+    if(phase_!=Phase::Monitor)return;
+    switch(md1_){
+    case 0:md1_=1;return; // system.c:1957-1972: GetReadFileStatus() != 1, sbs_sp, bhCopyTexmem2MainmemSub
+    case 1:md1_=2;return; // :1974-1985: GetInsideFileSize(itm_partid, 145) != 0 -> RequestReadInsideFile
+    case 2:               // :1987-2013
+        if(fade_pending)return;
+        game_stopped_=true; // ts_flg |= 0x80, njSetBackColor(0, 0, 0)
+        md1_=3;return;      // GetReadFileStatus() == 0 im selben Durchlauf (native Lese synchron)
+    case 3:md1_=4;return; // :2015-2018 SbsTextureInit(3)
+    default:              // :2020-2025 ItemTaskCheck (Einstieg, sub1.c:3029-3077), SET_SYS_MN_MD(0, 0, 0, 0)
+        phase_=Phase::Main;md1_=0;taskloop_=0;return;
+    }
+}
+StatusTask::Pass StatusTask::item_task_check(bool closed){
+    if(phase_!=Phase::Main)return Pass::Suspended; // ts_flg 0x200: bhSysCallItemselect laeuft nicht
+    if(!closed)return Pass::Main;                  // statusflg 0x80000 noch frei
+    // sub1.c:3103: Abbau erst bei taskloop == 4 und mn_md0 == 0. Ein waehrend des
+    // Bildschirms angefordertes Waffenlesen (mn_mode0 3, sub1.c:4157/4585) haelt
+    // mn_md0 im Original laenger; die native Waffenlese ist synchron.
+    if(taskloop_==4){phase_=Phase::Done;return Pass::Exit;}
+    ++taskloop_;return Pass::Main;                 // sub1.c:3227-3237, StatusMain laeuft weiter
+}
 StatusSlide::StatusSlide(){for(unsigned c=0;c<12;++c)for(unsigned i=0;i<6;++i)pos_[c][i]=i<2?cen_pos99[c][i+2]:0.f;pos_[3][0]=332;}
 void StatusSlide::open(bool box){
     box_=box;closed_=false;cnt_=0;fade_=0;sound_=0xffffffff; // BgColorInit
@@ -796,7 +835,9 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
     const auto packed=selecting?inv.items[base+index]:inv.slots()[menu.selected];if(menu.message.active())text(image,menu.message.visible(),44+dx(6),342+dy(6),1,0xffffffff,true,int(menu.message.selection));else if(note)text(image,system_message(note),44+dx(6),342+dy(6),1,0xffffffff,true);else if(Inventory::id(packed))text(image,read_message(messages_,4,inventory_name_id(packed)),44+dx(6),342+dy(6),.95f);
 }
 void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick){
-    if(menu.active&&menu.files&&!menu.file_list){
+    // Waehrend bhSysCallMonitor Modus 5 laeuft Task 9 nicht und zeichnet nichts; Task 7 zeichnet
+    // den Raum samt Blende, danach bleibt das Bild schwarz (system.c:1987-2013).
+    if(menu.screen()&&menu.files&&!menu.file_list){
         // Original filescreen replaces the status sprites. parts_22b[1] is
         // the wallpaper behind bhDispMessage; [0] is a captured framebuffer,
         // not the source wallpaper stretched across a host dialog.
@@ -817,7 +858,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         text(image,system_message(original_file_message(menu.file_number,menu.file_display_page)),menu.file_x,64,1,0xffffffff,true);
         return;
     }
-    if(menu.active){
+    if(menu.screen()){
         rectangle(image,0,0,640,480,0xff101010);
         // Slide offsets of the original cen_pos centers relative to the table layout (sub1.c SpriteH/SpriteUV).
         auto dx=[&](unsigned c){return int(std::lround(menu.slide.x(c)))-centers[c][0];};

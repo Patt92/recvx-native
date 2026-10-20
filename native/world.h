@@ -502,7 +502,6 @@ public:
     void begin_cut_check(){if(collision_events_)collision_events_->flags[11][0]&=~0x20u;}
     std::size_t export_textures(const std::filesystem::path& output,const std::string& room_name)const;
     SceneCamera camera(const Scene& stage,const SceneCamera& active)const;
-    void overlay(SoftwareRenderer& image)const;
     unsigned frame(unsigned kind,unsigned index)const;
     std::optional<NJS_POINT3> position(unsigned kind,unsigned index)const;
     // ene[n].mlwP->owP[node].mtx[12..14] (event.c:7826 bhEtcAtariEnePosSet).
@@ -1181,7 +1180,6 @@ private:
     std::array<NJS_POINT3,4> ambient_{};
     mutable NJS_POINT3 ambient_material_{1,1,1}; // ps2_NinjaCnk.c:158, persists between model draws
     std::array<unsigned,4> ambient_slots_{};
-    float fade_=0,fade_target_=0,fade_step_=0;unsigned fade_color_=0;
     std::uint32_t room_background_=0; // rom->bak_col; the installed clear itself is the global Db.clear owner (back_color.h)
     unsigned background_delay_=0;bool background_enabled_=false; // BackColorFlag
     void change_background(bool event);

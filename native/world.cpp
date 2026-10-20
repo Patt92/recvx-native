@@ -21,6 +21,7 @@
 #include "effect_collision.h"
 #include "core_random.h"
 #include "player_stairs.h" // recvx_player_mtn_act (PlMtnAct)
+#include "screen_fade.h" // der eine sys->fade_* (bhFadeSet-Fallback ohne Runtime-Hook)
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -1136,7 +1137,11 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         else if(collision_events_)collision_events_->flags[5][0]&=~0x100000u;
         if(collision_events_)collision_events_->flags[11][0]|=0x10u;return true;}
     if(op==0x44){const auto slot=v.u8(4);if(slot>=4)throw std::runtime_error("ambient slot outside table");ambient_[slot]={v.u8(1)*.1f,v.u8(2)*.1f,v.u8(3)*.1f};return true;}
-    if(op==0x36){fade_target_=v.u8(1)/255.f;fade_color_=(unsigned(v.u8(2))<<16)|(unsigned(v.u8(3))<<8)|v.u8(4);const auto ticks=v.u8(5);if(ticks)fade_step_=(fade_target_-fade_)/ticks;else{fade_=fade_target_;fade_step_=0;}return true;}
+    // event.c:3189-3218 bhFadeSet: bhSetScreenFade(v3 | v2 << 8 | v0 << 24 | v1 << 16, v4) auf den einen sys->fade_* (screen_fade.h).
+    if(op==0x36){const std::uint32_t argb=(std::uint32_t(v.u8(1))<<24)|(std::uint32_t(v.u8(2))<<16)|(std::uint32_t(v.u8(3))<<8)|v.u8(4);
+        if(screen_fade_set_)screen_fade_set_(argb,float(v.u8(5)));
+        else if(collision_events_)set_screen_fade(collision_events_->flags[10][0],argb,float(v.u8(5)));
+        else unbound_enemy_.insert("bhFadeSet: bhSetScreenFade ohne Besitzer");return true;}
     // bhBgmOn/bhBgmOnEx -> PlayBgmEx; bhBgmOn2/bhBgmOn2Ex -> PlayBgm2 request; bhBgmOff/bhBgmOff2.
     if(op==0x15||op==0xa6){audio_.play_bgm_ex(v.u8(1),v.u8(2)*10,op==0xa6?-int(v.u8(3)):-45);return true;}
     if(op==0x95){audio_.request_bgm2(v.u8(1),-45);return true;}
@@ -3608,7 +3613,6 @@ void RoomWorld::tick_after_player(){
     actor_nodes_.clear();
     control_lights(); // game.c:59 bhControlLight
     advance_entity_motions(false);
-    if(fade_step_>0)fade_=std::min(fade_target_,fade_+fade_step_);if(fade_step_<0)fade_=std::max(fade_target_,fade_+fade_step_);
     calc_enemy_draw_models(); // game.c: bhDrawEnemy nach allen Steuerpaessen dieses Bildes
 }
 bool RoomWorld::player_link_root(NJS_MATRIX& root)const{
@@ -5200,7 +5204,6 @@ SceneCamera RoomWorld::camera(const Scene& stage,const SceneCamera& active)const
     if(camera_offset_){out.position.x+=camera_offset_->x;out.position.y+=camera_offset_->y;out.position.z+=camera_offset_->z;}
     return out;
 }
-void RoomWorld::overlay(SoftwareRenderer& image)const{if(fade_<=0)return;for(auto& pixel:image.canvas()){std::uint32_t out=0xff000000;for(unsigned shift:{0u,8u,16u})out|=unsigned(((pixel>>shift)&255)*(1-fade_)+((fade_color_>>shift)&255)*fade_)<<shift;pixel=out;}}
 int RoomWorld::floor_at(NJS_POINT3 pos)const{int floor=0;for(unsigned i=0;i<31;++i)if((floors_[i]!=0||i==2)&&pos.y>=floors_[i])floor=int(i)-2;return floor;}
 void RoomWorld::initialize_player_spawn(){
     // room.c bhSetRoom, before bhInitRoomChangePlayer and bhInitEvent:

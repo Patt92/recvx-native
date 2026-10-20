@@ -249,7 +249,7 @@ void GameplayInput::synchronize(){
     if(events_)events_->menu_open=menu_.active;
     // GetItem laeuft nur im stehenden Aufnahmebildschirm (sub1.c:3452: StatusMain case 8 nach
     // SpriteH ohne statusflg 0x40): vor dem Statustask und waehrend der Einfahrt ist er gesperrt.
-    if(events_&&!events_->status_busy)events_->status_busy=[this]{return !menu_.active||menu_.slide.pad_locked();};
+    if(events_&&!events_->status_busy)events_->status_busy=[this]{return !menu_.screen()||menu_.slide.pad_locked();}; /* GetItem nur aus StatusMain (Task 9), nicht waehrend bhSysCallMonitor Modus 5 */
     if(events_&&!(transition_active&&transition_active())&&!(video_active&&video_active()))events_->service_item_request();
     if(events_&&events_->acquired_file()!=~0u){
         if(!file_open_){if(sound)sound(3);menu_.acquire_file(inventory_,events_->acquired_file());events_->menu_open=true;file_open_=true;}

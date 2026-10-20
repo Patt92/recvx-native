@@ -44,6 +44,56 @@ private:
     float pos_[12][6]{};
     float fade_=0.457142857f;
 };
+// Rahmen des Statusbildschirm-Tasks, eigenständig nach dem Original. Er bestimmt,
+// wann StatusMain (Task 9) überhaupt läuft und wie lange st_flg 0x8 steht:
+//  - bhCheckSubTask (system.c:603-611, Task 7): st_flg |= 0x8, mn_mode0 = 5,
+//    sp_flg = 0x30, bhSetScreenFade(0xFF000000, 5); im selben Task-7-Lauf folgt
+//    bhMainSequence mit bhControlScreenFade (game.c:38-40). Fade und Flags setzt
+//    der Aufrufer, enter() beginnt den Monitorlauf.
+//  - bhSysCallMonitor Modus 5 (system.c:1953-2025, Task 20, nach Task 7..9 eines
+//    Bildes): mn_md1 0 Texturen sichern -> 1 Datei 145 anfordern -> 2 warten, bis
+//    cb_flg 0x2 frei ist, dann ts_flg |= 0x80 (Task 7 ruht) und mit fertigem Lesen
+//    mn_md1 3 -> SbsTextureInit, 4 -> 4 ItemTaskCheck (Einstieg: ts_flg 0x200 frei,
+//    taskloop 0, statusflg 0x80000 frei, sub1.c:3029-3077), mn_md0 = 0. Task 9
+//    läuft damit erst im Folgebild. Die native Dateilese ist synchron
+//    (GetReadFileStatus 0 sofort), wie beim Türtask.
+//  - bhSysCallItemselect (system.c:903-929, Task 9): ItemTaskCheck vor StatusMain.
+//    Nach statusflg 0x80000 (SpriteH, Ende der Ausfahrt) zählt ItemTaskCheck
+//    taskloop in vier weiteren Durchläufen hoch (sub1.c:3227-3237, StatusMain läuft
+//    dabei weiter), erst im fünften mit taskloop == 4 und mn_md0 == 0 baut es ab:
+//    bhStandPlayerMotion, ts_flg |= 0x200, st_flg &= ~0x8 (sub1.c:3103-3226); danach
+//    ruft Task 9 statt StatusMain bhSetScreenFade(fade_pbk, 3).
+// Den Rahmen treibt der Runtime (frame(), dann je Bild enter()/monitor()); ein
+// StatusMain-Prüfstand ohne Rahmen meldet owned() == false und behält den bisherigen
+// Ablauf. Im Rahmen läuft StatusMain vor enter() nicht (Task 9 ruht, ts_flg 0x200).
+class StatusTask {
+public:
+    enum class Pass {Suspended,Main,Exit}; // Task 9 ruht / StatusMain läuft / dieser Durchlauf baut ab
+    void frame(){framed_=true;}  // der Runtime besitzt Task 7/20 dieses Statusbildschirms
+    void enter();   // bhCheckSubTask: mn_mode0 5, Monitor ab mn_md1 0
+    void resume();  // system.c:917-924 case 6 nach bhExitMap: ts_flg 0x200 frei, ItemTaskCheck baut neu auf (subscreenmode 0x40)
+    void reset(){const bool framed=framed_;*this=StatusTask{};framed_=framed;}
+    // Ein Task-20-Durchlauf; fade_pending = sys->cb_flg & 0x2 nach Task 7 dieses Bildes.
+    void monitor(bool fade_pending);
+    // Kopf von Task 9 (system.c:911): ItemTaskCheck mit swork.statusflg 0x80000.
+    Pass item_task_check(bool closed);
+    bool owned()const{return framed_;}
+    bool holding()const{return phase_==Phase::Monitor||phase_==Phase::Main;} // st_flg 0x8 vom Rahmen gehalten
+    bool entering()const{return phase_==Phase::Monitor;}          // Monitor Modus 5 läuft, Task 9 ruht
+    bool running()const{return phase_==Phase::Main;}              // Task 9 läuft (StatusMain)
+    bool game_running()const{return phase_==Phase::Monitor&&!game_stopped_;} // Task 7 läuft noch (ts_flg 0x80 frei)
+    unsigned md1()const{return md1_;}
+    unsigned taskloop()const{return taskloop_;}
+    // StatusMain case 0x1 hat ItemBoxInit gewählt (cb_flg 0x40000/0x80000/0x100000):
+    // ItemTaskCheck läuft dann im Kistenpass, nicht im allgemeinen Statuspass.
+    void claim_box(){box_=true;}
+    bool box()const{return box_;}
+private:
+    enum class Phase:unsigned char {None,Monitor,Main,Done};
+    Phase phase_=Phase::None;
+    unsigned md1_=0,taskloop_=0;
+    bool framed_=false,game_stopped_=false,box_=false;
+};
 class StatusMenu {
 public:
     bool active=false,commands=false,examining=false,combining=false;
@@ -67,6 +117,7 @@ public:
     // an, wie system.c:853 bhInitMap(MP_SET_SUB) aus dem Unterbildschirm ruft.
     bool map_requested=false;
     StatusSlide slide;
+    StatusTask task; // Taskrahmen (Monitor Modus 5, ItemTaskCheck/taskloop); der Runtime treibt enter/monitor
     bool closing=false;
     unsigned slide_sound=0xffffffff;
     void begin_close(); // StatusCancel; plain close when no slide is running
@@ -95,6 +146,9 @@ public:
     std::function<bool()> shotgun_burst;
     std::function<void()> toggle_shotgun_burst;
     bool pulse_open()const{return pulse_open_;}
+    // StatusMain (Task 9) besitzt den Schirm: ohne Taskrahmen jedes aktive Menue, im Rahmen erst ab
+    // dem ItemTaskCheck-Einstieg aus bhSysCallMonitor Modus 5 bis zum Abbau.
+    bool screen()const{return active&&(!task.owned()||task.running());}
     bool busy()const{return message.active()||inspection.running();}
     void tick(Inventory& inventory);
     // SpriteOnOff (sub1.c:8176), der Zeichenteil des Statustasks, läuft im
@@ -138,6 +192,7 @@ private:
     void step_combine(Inventory& inventory);
     bool cursor_visible()const{return active&&!nav&&!pickup&&!files;}
     bool pulse_open_=false,slide_open_=false;
+    bool task_closed_=false; // swork.statusflg 0x80000 des allgemeinen Statuspasses, solange taskloop zählt
     void finish_inspection(Inventory& inventory);
     void open_file(Inventory& inventory,unsigned file,bool list=false);
     void inspect(Inventory& inventory);

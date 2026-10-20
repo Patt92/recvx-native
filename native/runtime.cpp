@@ -253,7 +253,8 @@ int main(int argc,char** argv){
         // ControlTypewriter (bup_00.c) als Host-Slotauswahl. typ_md0 laeuft,
         // sobald der Raum das ts_flg-Bit 0x8000 loescht (system.c:1224).
         recvx::Typewriter typewriter;bool typewriter_was_blocked=false;bool load_game_requested=false;
-        recvx::Inventory inventory;inventory.player=args.player==11?1:args.player==12?2:0;recvx::StatusMenu menu;menu.active=args.inventory;recvx::MessageDialog dialog;
+        bool first_game_start=false; // sys->ss_flg 0x100: bhFirstGameStart (system.c:422), verbraucht in bhFinishRoom (room.c:522-534)
+        recvx::Inventory inventory;inventory.player=args.player==11?1:args.player==12?2:0;recvx::StatusMenu menu;menu.active=args.inventory;menu.task.frame();if(args.inventory)menu.task.resume(); /* Statustask-Rahmen (ui.h StatusTask); --inventory beginnt diagnostisch direkt in StatusMain */recvx::MessageDialog dialog;
         std::unique_ptr<recvx::GameUi> ui;if(!args.preview)ui=std::make_unique<recvx::GameUi>(args.data,args.mods);if(ui)menu.message_source=[&](unsigned index){return ui->system_message(index);};
         std::unique_ptr<recvx::EventVm> events;
         std::unique_ptr<recvx::PlayerAsset> player;
@@ -459,6 +460,11 @@ int main(int argc,char** argv){
                 if(restoring)recvx::restore_events(*restoring,*events); // before Event_init, like sys flags after bhPopGameData
                 if(restoring)events->flags[12][0]|=0x4000u; // der Snapshot-Host traegt ts_flg; aeltere Staende kennen Bit 14 nicht
                 events->flags[12][0]|=0x8000u; // typewriter task blocked until a room script clears bit 15
+                // bhFadeSet (event.c:3215) und die Effektprozeduren schreiben schon in Event_init auf den einen sys->fade_*.
+                if(world)world->set_screen_fade_hooks([&](std::uint32_t argb,float ct){if(events)recvx::set_screen_fade(events->flags[10][0],argb,ct);},[]{return recvx::system_screen_fade().previous();});
+                /* room.c:522-534 bhFinishRoom, vor bhInitEvent (system.c:1723/1816): nach bhFirstGameStart (Neues Spiel,
+                   Laden, bhPopGameData -> tk_flg 0x300020, room.c:1053) fade_an = 255, rn/gn/bn = 0, bhSetScreenFade(0, 10). */
+                if(first_game_start){first_game_start=false;recvx::system_screen_fade().set_current(255.0f,0.f,0.f,0.f);recvx::set_screen_fade(events->flags[10][0],0u,10.0f);}
                 world->bind_player_collision(*events);
                 world->bind_enemy_player(inventory.hp,head.flags);world->bind_player_head(head);
                 if(player_changed)world->stand_player_motion(); /* system.c:1776-1778 bhSysCallMonitor mn_md1 5 (Figurwechsel): bhReadPlayerData, bhResetPlayer, bhStandPlayerMotion vor bhInitEvent (mn_md1 10) */
@@ -626,7 +632,7 @@ int main(int argc,char** argv){
         // das Original liest waehrend der Tuerdemo kein Pad. Der Skip bleibt eine
         // Host-Komfortfunktion; die Tuerstimmen werden unten vor dem Zielraum gestoppt.
         gameplay_input.confirm_transition=[&]{door.skip();};
-        recvx::ScreenFade screen_fade; // sys->fade_*: the door task reads fade_ap/rp/gp/bp (system.c:1031)
+        auto& screen_fade=recvx::system_screen_fade(); // sys->fade_* (prozessweit, screen_fade.h); the door task reads fade_ap/rp/gp/bp (system.c:1031)
         auto fade_set=[&](std::uint32_t argb,float ct){screen_fade.set(argb,ct);if(events)events->flags[10][0]|=0x2u;};
         auto fade_control=[&]{if(events&&(events->flags[10][0]&0x2u)&&screen_fade.control())events->flags[10][0]&=~0x2u;};
         /* bhSysCallDoordemo mode0 (system.c:947), -1 = no door task. door_game_stopped is
@@ -701,6 +707,7 @@ int main(int argc,char** argv){
         bool frontend_quit=false;
         auto frontend_command=[&](recvx::FrontendCommand command){if(command==recvx::FrontendCommand::Quit)frontend_quit=true;
             if(command==recvx::FrontendCommand::TitleCall)audio.play(13,"ADV",3); // TitleCall: PlayAdx(0,PatId,3)
+            if(command==recvx::FrontendCommand::NewGame)first_game_start=true; /* bhSysCallTitle tk_flg 0x300020 -> bhSysCallOpening -> bhFirstGameStart ss_flg |= 0x100 (system.c:402/422) */
             if(command==recvx::FrontendCommand::NewGame){recvx::set_back_color(0u); /* system.c:410 bhSysCallOpening */retry_point.reset();inventory=recvx::Inventory{};combat=recvx::CombatController(args.data,args.mods);events.reset();game_over_requested=false;audio.stop(13); /* Mode -1: StopAdx(0) */load();gameplay_input.set_events(events.get());if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}}
             if(command==recvx::FrontendCommand::LoadGame){audio.stop(13);load_game_requested=true;} /* system.c:374 -> Schreibmaschinen-Ladebildschirm */};
         auto debug_room=[&](std::size_t destination,unsigned spawn){
@@ -775,9 +782,16 @@ int main(int argc,char** argv){
            neuer Eintritt. */
         auto map_task=[&](bool transitioning){
             if(!events)return;
-            if(menu.active&&!menu_was_active){if(world)world->suspend_background();recvx::set_back_color(0u); /* sub1.c:3266-3268 BackColorFlag = 0, njSetBackColor(0,0,0) */if(!map_return_to_status)fade_set(0xFF000000u,5.0f);map_return_to_status=false;}
+            if(menu.active&&!menu_was_active){if(world)world->suspend_background();recvx::set_back_color(0u); /* sub1.c:3266-3268 BackColorFlag = 0, njSetBackColor(0,0,0) *//* bhCheckSubTask (system.c:603-611) beginnt mn_mode0 5 mit bhSetScreenFade(0xFF000000, 5);
+               bhMainSequence im selben Task 7 ruft bhControlScreenFade (game.c:38-40). Die Rueckkehr aus
+               der Karte (system.c case 6) setzt den Rahmen ohne Monitorlauf fort (StatusTask::resume). */
+            if(!menu.task.holding()){recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);}map_return_to_status=false;}
+            else if(menu.active&&!menu.task.holding()){recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);} /* Abbau und neuer Eintritt ohne Zwischenbild */
+            /* Task 20 bhSysCallMonitor Modus 5 (system.c:1953-2025) des Vorbilds, dann Task 7 dieses Bildes
+               mit bhControlScreenFade, bis Modus 5 bei freiem cb_flg 0x2 ts_flg 0x80 setzt. */
+            else if(menu.active&&menu.task.entering()){menu.task.monitor((events->flags[10][0]&0x2u)!=0);if(menu.task.game_running())recvx::control_screen_fade(events->flags[10][0]);}
             /* sub1.c:3103 ItemTaskCheck: der Abbau ruft bhStandPlayerMotion vor der Kartenwahl
-               (flgchk 0x8). Die vier taskloop-Paesse davor fuehrt der native Statustask nicht. */
+               (flgchk 0x8). Die vier taskloop-Paesse davor zaehlt StatusTask::item_task_check (ui.cpp). */
             else if(!menu.active&&menu_was_active){if(world)world->restore_background(1);if(!menu.map_requested)fade_set(screen_fade.previous(),3.0f);stand_player_motion();}
             menu_was_active=menu.active;
             /* Erst wenn der Statusbildschirm abgebaut ist, startet der Kartentask: sein
@@ -806,7 +820,7 @@ int main(int argc,char** argv){
             if(map_entry_mode==RECVX_MP_SET_SUB){
                 /* system.c case 6: nach bhExitMap uebernimmt der Statusbildschirm
                    wieder den Schirm (st_flg |= 0x8). */
-                map_return_to_status=true;menu.input(recvx::MenuInput::Open,inventory);}
+                map_return_to_status=true;menu.input(recvx::MenuInput::Open,inventory);menu.task.resume();}
             else{if(world)world->restore_background(1);fade_set(screen_fade.previous(),3.0f);stand_player_motion();} /* system.c:846-848 case 2 */
         };
         // bhSysCallCompEvent: while the terminal task owns the screen it reads
@@ -885,8 +899,9 @@ int main(int argc,char** argv){
             if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto loaded=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
                 previous_player=std::move(player);player=std::move(loaded);args.player=snap.host.body;}
             recvx::restore_inventory(snap,inventory);inventory.repair_owned_file_items();restoring=snap;if(events)events->cancel_item_request();
+            first_game_start=true; /* bup_00.c:434 tk_flg 0x300010 -> bhSysCallTitle -> bhSysCallOpening -> bhFirstGameStart (system.c:422) */
             try{debug_room(*target,unsigned(std::uint8_t(snap.save.pos_no)));}
-            catch(...){restoring.reset();inventory=previous_inventory;if(previous_player){player=std::move(previous_player);args.player=previous_body;}throw;}
+            catch(...){first_game_start=false;restoring.reset();inventory=previous_inventory;if(previous_player){player=std::move(previous_player);args.player=previous_body;}throw;}
             restoring.reset();if(previous_player)combat=recvx::CombatController(args.data,args.mods);
             frontend.hide();
         };
@@ -1323,6 +1338,7 @@ int main(int argc,char** argv){
                 snap.save.retry_ct=std::min<int>(99,snap.save.retry_ct+1);retry_point->save.retry_ct=snap.save.retry_ct;
                 std::size_t destination=rooms.size();for(std::size_t n=0;n<rooms.size();++n)if(rooms.name(n)==snap.host.room)destination=n;
                 if(destination==rooms.size())throw std::runtime_error("retry room not found");
+                first_game_start=true; // bhPopGameData tk_flg 0x300020 (room.c:1053) -> bhSysCallOpening -> bhFirstGameStart (system.c:422)
                 recvx::restore_inventory(snap,inventory);restoring=snap;debug_room(destination,unsigned(std::uint8_t(snap.save.pos_no)));restoring.reset();
             }
         };
@@ -1337,6 +1353,9 @@ int main(int argc,char** argv){
             // Gegner (0x2), aber mit bhControlEffect (effect.c:750, sp_flg 0x8), bhControlObjItm (objitm.c:289,
             // 0x4) und bhControlCamera (unter cam.flg 0x40 leer, cut.c:2802). Der Weltpass laeuft hier vor Task 14;
             // in md1 1..3 (sp_flg 0x20) tut bhMainSequence nichts, was der Host zeichnet.
+            // game.c:38-41: bhMainSequence beginnt jedes Bild mit bhControlScreenFade, vor den Steuerpaessen
+            // und vor Task 14 (main.c:195-201); die Fades von gameover.c wirken dadurch ab dem Folgebild.
+            fade_control();
             if(game_over.phase()==10&&world){world->set_simulation_flags(events->flags[6][0]);world->tick();world->control_camera(scene,camera); /* game.c:58 */world->end_of_render(); /* sync.c:143 bhControlEOR: gm_flg 0x200000 (gameover.c:323) -> njFogDisable; davor :242 njFogDisable in md1 0. Kein Nebel im Bild der Todesszene. */}
             game_over_step();return true;
         };
@@ -1629,9 +1648,9 @@ int main(int argc,char** argv){
             if(map_active&&map_initialized){map_render.draw(image,map_screen);if(screen_fade.visible())screen_fade.draw(image.canvas(),image.width(),image.height());if(ui)debug.draw(image,*ui);return;}
             /* ts_flg 0x80 kommt erst mit Modus 2/10 der Tuerdemo (system.c:984/1044): im Anforderungsbild und
                waehrend der Ausblende von bhStartDoorDemo zeichnet Task 7 noch den Raum samt Blende (game.c:61-112). */
-            if(!computer.active()&&!door_game_stopped){compose();if(!(world&&world->draw_full_screen(image,scene,view_camera(),wireframe))){image.draw(scene,view_camera(),wireframe);if(world){world->draw_ntx2d_effects(image);world->draw_trs2d_effects(image);world->draw_fnc_huds(image);}}if(world){world->draw_thermometer(image);world->overlay(image);} /* effect.c:905 bhDrawNtxEffect2D, :912 bhDrawTrsEffect2D, dann die ef_fnc-Schleife (:929, dort effsub1b.c:101 bhDraw134, effsub1.c:4756 bhDraw021), alles vor bhDrawScreenFade */}
+            if(!computer.active()&&!door_game_stopped){compose();if(!(world&&world->draw_full_screen(image,scene,view_camera(),wireframe))){image.draw(scene,view_camera(),wireframe);if(world){world->draw_ntx2d_effects(image);world->draw_trs2d_effects(image);world->draw_fnc_huds(image);}}if(world){world->draw_thermometer(image);} /* effect.c:905 bhDrawNtxEffect2D, :912 bhDrawTrsEffect2D, dann die ef_fnc-Schleife (:929, dort effsub1b.c:101 bhDraw134, effsub1.c:4756 bhDraw021), alles vor bhDrawScreenFade */}
             /* game.c:111: bhDrawScreenFade nach bhAllDrawModel, nicht waehrend der Statusbildschirm-Task den Schirm hat. */
-            if(!door_game_stopped&&!menu.active&&!computer.active()&&screen_fade.visible())screen_fade.draw(image.canvas(),image.width(),image.height());
+            if(!door_game_stopped&&!menu.screen()&&!computer.active()&&screen_fade.visible())screen_fade.draw(image.canvas(),image.width(),image.height());
             movie.draw(image);if(ui){ui->draw(image,inventory,menu,dialog,frame);box_menu.draw(image,*ui,inventory,menu);if(events){ui->draw_event_timer(image,*events);computer.draw(image,*ui,*events);}if(pause_active)ui->draw_pause(image,controllers!=0);}if(door_game_stopped)door.draw(image);if(ui)debug.draw(image,*ui);};
         // game.c:289-296 bhCheckCut eines Takts, der Task 7 (bis game.c:58) durchlaufen hat; Aufruf am Anfang des Folgetakts.
         auto check_cut=[&](){if(!camera_check_pending)return;camera_check_pending=false;if(world){follow();world->tick_camera(scene,camera,camera_index,automatic_camera);}};

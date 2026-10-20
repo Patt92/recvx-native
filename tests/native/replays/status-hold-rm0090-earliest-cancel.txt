@@ -1,0 +1,16 @@
+# Statusbildschirm-Taskrahmen (StatusTask, ui.h): RM_0090 Security Box obwp[5], Diagnoseplatzierung
+# (kein Laufweg), Startinventar mit Feuerzeug (Metall) wie rm0090-box-quick-cancel.txt.
+# 230 untersucht die Box: scd1 @2110 startet Ereignis 19 (Ebene 0, Sleep 30, dann Common 9 Klappe 0)
+# und hitchk.c:4905 setzt cb_flg 0x40000 -> bhCheckSubTask (system.c:603) im naechsten Task 7.
+# Abbrechen im fruehesten Durchlauf, in dem ItemBox das Pad liest (SpriteH-Einfahrt fertig,
+# statusflg 0x40 frei, sub1.c:2780-2786/7224): ohne Taskrahmen (alter Stand) ist das Durchlauf 239
+# (ItemBoxInit in 230), mit Monitor Modus 5 Durchlauf 247 (ItemBoxInit in 238). Der jeweils andere
+# Druck faellt in die Einfahrt bzw. Ausfahrt und bleibt wirkungslos (statusflg 0x40/0x4).
+# Erwartung Original: st_flg 0x8 haelt bis zum Abbau in Task 9 von 261, Ereignis 19 erreicht
+# Common 9 in seinem 31. Durchlauf (Bild 260) und schliesst die Klappe.
+30 position 34.5 0 5 16384
+60 position 44.5 0 5 0
+180 confirm
+230 confirm
+239 cancel
+247 cancel

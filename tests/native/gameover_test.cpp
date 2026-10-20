@@ -1,5 +1,6 @@
 #include "gameover.h"
 #include "asset_io.h"
+#include "screen_fade.h"
 #include "player_stairs.h"
 #include "world.h"
 #include <cmath>
@@ -30,8 +31,11 @@ struct Session {
     GameOver over;
     unsigned passes=0;
     GameOver::Result last=GameOver::Result::Running;
-    explicit Session(const std::filesystem::path& data):audio(data),over(data){}
-    GameOver::Result step(unsigned pad=0){last=over.tick(pad,events,audio);++passes;return last;}
+    // Jede Sitzung beginnt mit einem frischen sys->fade_* (alle Felder 0, wie sys beim Start).
+    explicit Session(const std::filesystem::path& data):audio(data),over(data){system_screen_fade()=ScreenFade{};}
+    // Ein Bild: Task 7 beginnt mit game.c:38-41 (bhControlScreenFade auf dem einen sys->fade_*),
+    // Task 14 (bhSysCallGameover) folgt im selben Bild (main.c:195-201).
+    GameOver::Result step(unsigned pad=0){control_screen_fade(events.flags[10][0]);last=over.tick(pad,events,audio);++passes;return last;}
     // Runs until `stop` holds, returning how many passes that took.
     template<typename Stop> unsigned run(unsigned limit,Stop stop,unsigned pad=0){
         for(unsigned i=0;i<limit;++i){

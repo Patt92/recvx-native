@@ -27,11 +27,15 @@ public:
     unsigned arrows()const{return selecting_?(arrows_?arrows_:3u):0u;}
     // Slide in/out running: ItemBox ignores the pad while statusflg 0x40 is set.
     bool moving()const{return active_&&slide_.moving();}
-    void reset(){active_=false;closing_=false;exit_=exit_pressed_=false;exit_wait_=0;note_=0;selecting_=false;
+    void reset(){active_=false;closing_=false;closed_=false;exit_=exit_pressed_=false;exit_wait_=0;note_=0;selecting_=false;
         ips1_=ipsdisp_=0;cell_=2;number_=flag_=0;wait_=keywait_=0;boxwait_=4;row_shift_=0.f;arrows_=0;}
 private:
     // ItemBox testmode 3 (cursor on EXIT, pressed animation) and the non-modal bhSetMessage note.
     bool active_=false,selecting_=false,closing_=false,exit_=false,exit_pressed_=false;
+    // swork.statusflg 0x80000: SpriteH hat die Ausfahrt beendet; ItemBox laeuft nicht mehr
+    // (sub1.c:3463), ItemTaskCheck zaehlt taskloop bis zum Abbau (sub1.c:3103/3227).
+    bool closed_=false;
+    void leave(Inventory& inventory,StatusMenu& menu,EventVm* events);
     unsigned exit_wait_=0,note_=0,stand_gaps_=0;
     void cursor(unsigned on,Inventory& inventory,StatusMenu& menu,AudioMixer& audio);
     StatusSlide slide_;

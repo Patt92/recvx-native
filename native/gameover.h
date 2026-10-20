@@ -6,14 +6,20 @@
 #include <functional>
 #include <memory>
 namespace recvx {
-// Original gameover.c dispatcher and GV_WORK; all decisions and mesh points are generated.
+// gameover.c dispatcher and GV_WORK as a native hand port (gameover.cpp); no generated or linked original body.
 class GameOver {
 public:
     enum class Result {Running,Retry,Title};
     GameOver(const std::filesystem::path& data,const std::filesystem::path& mods={});
     ~GameOver();
     void begin(EventVm& events,unsigned character,int mode,unsigned weapon_type=0,unsigned damage_level=0,const PlayerAsset* body=nullptr);
+    // Task 14 (bhSysCallGameover). Die Fades von gameover.c (:122/262/330/424/485/556/564) gehen
+    // als bhSetScreenFade auf den einen prozessweiten sys->fade_* (system_screen_fade, screen_fade.h)
+    // und setzen cb_flg 0x2 in events.flags[10][0]; md1 1/3 lesen dieses Bit (:422/514). Die
+    // Steuerung (game.c:38-41) gehoert dem Spieltask: der Aufrufer ruft control_screen_fade vor tick.
     Result tick(unsigned pressed,EventVm& events,AudioMixer& audio);
+    // bhDrawGameOver und in derselben Bildfolge bhDrawScreenFade des Spieltasks (game.c:109-112)
+    // auf dem gemeinsamen Fade: Netz, dann Fade, dann die Aufforderung von md1 2.
     void draw(SoftwareRenderer& image,const GameUi& ui)const;
     bool active()const;
     unsigned phase()const;

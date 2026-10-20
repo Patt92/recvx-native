@@ -23,6 +23,18 @@ bool ScreenFade::control(){
     if(ct_>=hkn){an_=float(ap_);rn_=float(rp_);gn_=float(gp_);bn_=float(bp_);return true;}
     return false;
 }
+ScreenFade& system_screen_fade(){
+    static ScreenFade fade; // sys->fade_*: eine Arbeit fuer alle Tasks
+    return fade;
+}
+void set_screen_fade(std::uint32_t& cb_flg,std::uint32_t argb,float ct){
+    cb_flg|=0x2u;                    // screen.c:23
+    system_screen_fade().set(argb,ct);
+}
+void control_screen_fade(std::uint32_t& cb_flg){
+    if(!(cb_flg&0x2u))return;        // game.c:38 / system.c:804
+    if(system_screen_fade().control())cb_flg&=~0x2u; // screen.c:67/89
+}
 void ScreenFade::draw(std::vector<std::uint32_t>& canvas,int width,int height)const{
     /* screen.c:97-139: argb from the truncated float channels (unsigned int
        casts), njDrawPolygon2D converts the alpha with (a+1)>>1 into the GS

@@ -6,6 +6,9 @@ void BoxMenu::synchronize(Inventory& inventory,StatusMenu& menu,EventVm* events,
     if(!events){reset();return;}
     if(active_&&!menu.active){reset();return;}
     if(!active_&&menu.active&&events->flags[10][0]&0x1c0000){
+        // StatusMain case 0x1 (sub1.c:3342-3349) laeuft erst, wenn Task 9 laeuft: im Taskrahmen
+        // nach dem ItemTaskCheck-Einstieg aus bhSysCallMonitor Modus 5 (system.c:2020-2025).
+        if(menu.task.owned()){if(menu.task.item_task_check(false)==StatusTask::Pass::Suspended)return;menu.task.claim_box();}
         active_=true;closing_=false;selecting_=false;ips1_=ipsdisp_=0;number_=flag_=0;wait_=keywait_=boxwait_=0;row_shift_=0.f;arrows_=0;
         base_=events->flags[10][0]&0x80000?192:events->flags[10][0]&0x100000?224:64;
         menu.commands=menu.examining=menu.combining=menu.files=false;menu.selected=cell_=2;
@@ -13,19 +16,33 @@ void BoxMenu::synchronize(Inventory& inventory,StatusMenu& menu,EventVm* events,
         return;
     }
     if(!active_)return;
+    // bhSysCallItemselect (system.c:911): ItemTaskCheck vor StatusMain. Nach statusflg
+    // 0x80000 zaehlt es taskloop in vier Durchlaeufen hoch und baut im fuenften ab;
+    // in diesem laeuft StatusMain nicht mehr (system.c:913-928).
+    if(menu.task.owned()){
+        const auto pass=menu.task.item_task_check(closed_);
+        if(pass==StatusTask::Pass::Exit){leave(inventory,menu,events);return;}
+        if(pass==StatusTask::Pass::Suspended)return;
+    }
     // SpriteH ends the opening with SE 7 (CallSystemSe(1,7)); the closing end only hands control back.
     const bool closed=slide_.tick();
     if(const auto sound=slide_.take_sound();sound!=0xffffffff&&audio)audio->play_system(sound);
-    if(closed&&closing_){ // SpriteH set statusflg 0x80000: hand control back to the script
-        menu.reset(inventory);reset();events->menu_open=false;events->flags[10][0]&=~0x1c0000u;events->flags[12][0]|=0x200u;
-        // ItemTaskCheck (sub1.c:3105): bhStandPlayerMotion at the player owner; the next
-        // bhControlPlayerPad clears st_flg 0x4 set by bhCheckExmAtari for the lid.
-        if(stand_player)stand_player();else ++stand_gaps_;
-        events->flags[5][0]&=~4u;
+    if(closed&&closing_){ // SpriteH set statusflg 0x80000
+        closed_=true;
+        if(!menu.task.owned())leave(inventory,menu,events); // StatusMain-Pruefstand ohne Taskrahmen: sofort
     }
 }
+void BoxMenu::leave(Inventory& inventory,StatusMenu& menu,EventVm* events){
+    // ItemTaskCheck-Abbau (sub1.c:3103-3226): cb_flg 0x40000/0x80000/0x100000 fallen,
+    // ts_flg |= 0x200, st_flg &= ~0x8 (menu_open); die Rueckgabe an das Skript.
+    menu.reset(inventory);reset();events->menu_open=false;events->flags[10][0]&=~0x1c0000u;events->flags[12][0]|=0x200u;
+    // ItemTaskCheck (sub1.c:3105): bhStandPlayerMotion at the player owner; the next
+    // bhControlPlayerPad clears st_flg 0x4 set by bhCheckExmAtari for the lid.
+    if(stand_player)stand_player();else ++stand_gaps_;
+    events->flags[5][0]&=~4u;
+}
 void BoxMenu::pad(unsigned on,unsigned pressed,Inventory& inventory,StatusMenu& menu,EventVm* events,AudioMixer& audio){
-    if(!active_)return;
+    if(!active_||closed_)return; // StatusMain case 0x4: ItemBox nur ohne statusflg 0x80000 (sub1.c:3463)
     // ItemBox testmode 2 reads pad_on once per tick, not host repeat events.
     // Confirm/Cancel take priority; directions remain live during row scrolling.
     if(selecting_&&!slide_.moving()&&!menu.message.active()){

@@ -5,6 +5,7 @@
 #include "renderer.h"
 #include "asset_io.h"
 #include "room.h"
+#include "screen_fade.h"
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -27,6 +28,8 @@ struct Room {
  // `pre` runs before bhInitEvent (scd0), like flags carried into the room from elsewhere.
  Room(const std::filesystem::path& data,const char* name,const std::function<void(EventVm&,RoomWorld&)>& pre={}):bytes(read_asset_file(data/"rooms"/(std::string(name)+".RDT"),64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.empty()?SceneSpawn{}:scene.spawns.at(0)) /* wie runtime.cpp:420 (RM_9360 hat keine posp) */,audio(data),movie(data,{},audio),body(PlayerAsset::load(data)),world(bytes,scene,actor,motion,frame,audio,data,{},name),vm(bytes,inventory,dialog),input(inventory,menu,dialog,&vm){
   bind_item_names(read_asset_file(data/"files/SYSMES.ALD",4*1024*1024)); // sys->mes_ip wie GameUi in der Runtime
+  // sys->fade_* ist prozessweit; bhFadeSet (0x36) meldet ohne Besitzer eine Luecke (runtime.cpp:464).
+  world.set_screen_fade_hooks([this](std::uint32_t argb,float ct){set_screen_fade(vm.flags[10][0],argb,ct);},[]{return system_screen_fade().previous();});
   world.set_player_asset(&body);{const auto id=RoomIdentity::parse(std::string(name)+".RDX");vm.values[0]=id.stage;vm.values[1]=id.room;} // runtime.cpp: sys->stage_no/room_no aus dem Raumnamen
   vm.binding=[&](const EventCommand& c){if(c.opcode==0x5e){movie.start(c.bytes[1]);return true;}if(c.opcode==0x5f){movie.stop();return true;}return world.bind(c);};
   vm.task_started=[&](unsigned n){world.start_task(n);};vm.animation_frame=[&](unsigned k,unsigned n){return world.frame(k,n);};vm.object_position=[&](unsigned k,unsigned n){return world.position(k,n);};vm.enemy_joint_position=[&](unsigned n,unsigned node){return world.enemy_joint_position(n,node);};vm.set_item_position=[&](unsigned n,NJS_POINT3 p){world.set_item_position(n,p);};vm.enemy_disable=[&](unsigned n){world.deactivate_enemy(n);};
