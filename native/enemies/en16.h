@@ -25,9 +25,8 @@ extern "C" {
      +0x64 EXP0_I(0x64)   Anzahl gueltiger Punkte (en16.c:186/389/410)
    AddEffPos schiebt P[0..n] um eins nach hinten und legt den neuen Punkt
    auf P[0]; GetEffPos/GetEffNum werden von bhEff_E16_LaserSightDraw
-   (effsub2.c:2390) ueber `op->lkwkp` gelesen. Der Effekt selbst ist nativ
-   nicht portiert; die drei Zugriffe stehen hier trotzdem bereit, damit der
-   spaetere Effekt-Port sie ohne Aenderung an dieser Datei benutzen kann.
+   (effsub2.c:2390) ueber `op->lkwkp` gelesen (nativ step_e16_laser in
+   effect_sprites.cpp).
 
    hp setzt en16 NICHT (wie en08): im Original steht die Trefferzahl im
    ETTY_WORK und bhSetEnemy (eneset.c:183-241) kopiert sie nicht in den Work.
@@ -62,8 +61,9 @@ typedef struct {
     /* effsub3.c:2401 bhSetEffGunSpark(pos, dir, src, dst, typ) */
     void (*gun_spark)(const RECVX_ENEMY_VEC* pos, const RECVX_ENEMY_VEC* dir, uint32_t src, uint32_t dst, int typ);
     int hiteff13; /* weapon.c WpnTab[13].hiteff */
-    /* weapon.c:1632 bhSetGunSplash(&gap {wpn_no, ay, v}, pos, wattr) */
-    void (*gun_splash)(int wpn_no, int32_t ay, const RECVX_ENEMY_VEC* gvec, const RECVX_ENEMY_VEC* pos, int wattr);
+    /* en16.c:265 bhSetGunSplash hat bewusst keinen Dienst: der uebergebene GA_WORK
+       traegt in vx/vy/vz uninitialisierten Stackinhalt (siehe en16.c, MV02 mode3 4);
+       en16 meldet den Aufruf als benannte Luecke. */
 } RECVX_EN16_SERVICES;
 void recvx_en16_bind(const RECVX_EN16_SERVICES* services);
 

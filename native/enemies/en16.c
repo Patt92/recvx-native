@@ -11,16 +11,14 @@
    hitchk.c:5474 (bhCheckFloorEnemy) und :5881 (bhCheckWallAttrB89).
    Kein Originalkoerper, kein Generator, keine zweite Workwelt.
 
-   Traegermechanismus ist der Laserstrahl-Effekt 270. Er ist nativ NICHT
-   portiert und der Vertrag kennt weder einen Spawn mit vollstaendiger
-   EF-Vorlage (bhSetEffectTb, effect.c:436) noch einen Zugriff auf
-   Effektfelder. Init meldet darum den fehlenden Spawn ueber `gap`, und weil
-   `EXP0_I(0)` danach wie im Original bei eff_id < 0 exakt 0 ist, wertet der
-   Rest der Datei die Originalbedingungen `if (EXP0_I(0) != 0)` wahrheits-
-   gemaess mit 0 aus: die Schussaufloesung (MV02 mode3 2/4) wartet wie im
-   Original auf `eff->ct0 > 0` und kommt ohne den Effekt nicht weiter. Nur wo
-   ein Effektfeld hinter einem erfuellten `EXP0_I(0) != 0` gelesen wuerde,
-   meldet die Datei die fehlende Sicht namentlich.
+   Traegermechanismus ist der Laserstrahl-Effekt 270 (nativ step_e16_laser,
+   effect_sprites.cpp); Spawn, Feldsicht und Modus laufen ueber
+   RECVX_EN16_SERVICES (Bindung world_enemies.cpp). Fehlt ein Dienst, meldet
+   Init den Spawn ueber `gap`, und weil `EXP0_I(0)` danach wie im Original bei
+   eff_id < 0 exakt 0 ist, wertet der Rest der Datei die Originalbedingungen
+   `if (EXP0_I(0) != 0)` wahrheitsgemaess mit 0 aus. Nur wo ein Effektfeld
+   hinter einem erfuellten `EXP0_I(0) != 0` gelesen wuerde, meldet die Datei
+   die fehlende Sicht namentlich.
 
    hp setzt diese Identitaet nicht (wie en08): die Trefferzahl steht im
    ETTY_WORK und bhSetEnemy (eneset.c:183-241) kopiert sie nicht in den Work.
@@ -434,9 +432,10 @@ static void en16_mv02(RECVX_ENEMY_WORK* w)
                         if (sv && sv->player_set) sv->player_set(&ply);
                         else if (sv && sv->gap) sv->gap("player_set (Spielerbesitzer)");
                     } else if (eff.atr != NULL) {
-                        /* :252-266 Wandtreffer: v = Position - Zielpunkt,
-                           pos = eff->lox/loy/loz, Funken 308 und
-                           bhSetGunSplash(&gap {wpn_no 0xD, ay = bhArcTan2(v.x,v.z)}, &pos, hp->prm0). */
+                        /* :252-266 Wandtreffer: hp = eff->exp0 (Disassembly
+                           0x1EA388 lw $s0, 0x2F0($v1)), bei bhCheckWallAttrB89(hp)
+                           v = Position - Zielpunkt, pos = eff->lox/loy/loz und
+                           Funken 308. */
                         int32_t prm0 = 0;
                         if (en16_extra && en16_extra->wall_attr_b89 &&
                             en16_extra->wall_attr_b89(eff.atr, &prm0)) {
@@ -444,13 +443,24 @@ static void en16_mv02(RECVX_ENEMY_WORK* w)
                             v.x = w->px - w->xn; v.y = w->py - w->yn; v.z = w->pz - w->zn;
                             at = eff.lox;
                             /* en16.c:262 bhSetEffGunSpark(&pos, &v, 0xFFF8F8A0, 0x4CE04010,
-                               WpnTab[13].hiteff - 4). */
+                               WpnTab[13].hiteff - 4); ELF 0x3560D6 (WpnTab 0x355B30
+                               + 13*0x68 + 0x5E) = 5, also Eff308Prm[1]. */
                             if (en16_extra->gun_spark)
                                 en16_extra->gun_spark(&at, &v, 0xFFF8F8A0u, 0x4CE04010u, en16_extra->hiteff13 - 4);
                             else if (sv && sv->gap) sv->gap("bhSetEffGunSpark (en16.c:262)");
-                            if (en16_extra->gun_splash)
-                                en16_extra->gun_splash(0xD, (int32_t)recvx_t3_arc_tan2(v.x, v.z), &v, &at, prm0);
-                            else if (sv && sv->gap) sv->gap("bhSetGunSplash (en16.c:265)");
+                            /* en16.c:263-265 gap.wpn_no = 0xD; gap.ay = bhArcTan2(v.x, v.z);
+                               bhSetGunSplash(&gap, &pos, hp->prm0). bhSetGunSplash
+                               (weapon.c:1636-1640, Disassembly 0x28DA58-0x28DA80) liest
+                               gap->vx/vy/vz (GA_WORK +0xC/+0x10/+0x14) als Spritzrichtung
+                               fuer lox (Faelle 0/1/2/3) bzw. px/pz (Faelle 4/5). bhEne16_MV02
+                               legt gap bei sp+0x50 an und schreibt nur wpn_no (sp+0x78) und
+                               ay (sp+0x90); sp+0x5C..0x64 beschreibt die Funktion nirgends
+                               (alle Stackstores: 0x0..0x8 Register, 0x78, 0x90, 0xA0..0xB8
+                               fuer v und pos). Die Richtung ist im Original also
+                               uninitialisierter Stackinhalt, nicht v. Ohne belegbaren Wert
+                               wird kein Spritzer erzeugt; benannte Luecke statt Ersatz. */
+                            if (sv && sv->gap)
+                                sv->gap("bhSetGunSplash (en16.c:265): GA_WORK vx/vy/vz im Original uninitialisiert");
                         } else if (!en16_extra || !en16_extra->wall_attr_b89) {
                             if (sv && sv->gap) sv->gap("bhCheckWallAttrB89 (en16.c:253)");
                         }

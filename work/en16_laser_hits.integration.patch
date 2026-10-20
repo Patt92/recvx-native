@@ -1,0 +1,25 @@
+--- a/native/world_enemies.cpp	2026-10-20 21:06:58
++++ b/native/world_enemies.cpp	2026-10-20 21:06:58
+@@ -1938,20 +1938,8 @@
+             return 1;};
+         en16.gun_spark=[](const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* dir,uint32_t src,uint32_t dst,int typ){enemy_world->gun_spark({pos->x,pos->y,pos->z},{dir->x,dir->y,dir->z},src,dst,typ);};
+         en16.hiteff13=WpnTab[13].hiteff;
+-        // weapon.c:1632 bhSetGunSplash.
+-        en16.gun_splash=[](int wpn_no,int32_t ay,const RECVX_ENEMY_VEC* gvec,const RECVX_ENEMY_VEC* pos,int wattr){auto* world=enemy_world;
+-            if(wpn_no<0||wpn_no>=23){world->unbound_enemy_.insert("bhSetGunSplash: wpn_no ausserhalb WpnTab");return;}
+-            NJS_VECTOR vec{-gvec->x,-gvec->y,-gvec->z};njUnitVector(&vec);const RECVX_ENEMY_VEC ofs{vec.x,vec.y,vec.z};
+-            const float scale=WpnTab[wpn_no].ef_scale;const NJS_POINT3 at{pos->x,pos->y,pos->z};
+-            // sys->ef ist die gemeinsame Vorlage: Faelle 4/5 setzen flr_no nicht.
+-            auto& ef=effect_detail::request_template();
+-            ef.id=11;ef.flg=1;ef.mdlver=1;ef.type=unsigned(wattr);ef.position=at;ef.ax=0;
+-            const auto tb=[&](const RECVX_ENEMY_VEC* off,int lkono){EffectSpawn e=ef;e.lkono=lkono;e.has_offset=off!=nullptr;e.offset=off?NJS_POINT3{off->x,off->y,off->z}:NJS_POINT3{};e.linked_work=nullptr;world->spawn_effect(e,0,0);};
+-            switch(wattr){
+-            case 0:case 3:ef.type=5;ef.flr_no=0;ef.scale={0.75f*scale,0.75f*scale,0.75f*scale};ef.ay=ay+32768;tb(&ofs,0);break;
+-            case 1:case 2:ef.flr_no=1;ef.scale={scale,scale,scale};ef.ay=ay+16384;tb(nullptr,0);ef.ay=ay-16384;tb(&ofs,1);break;
+-            case 4:case 5:ef.id=10;ef.flg=0x100001;ef.type=1;ef.position.x+=2.0f*vec.x;ef.position.y-=2.0f;ef.position.z+=2.0f*vec.z;ef.scale={scale,scale,scale};ef.ay=0;tb(nullptr,0);break;
+-            default:break;}};
++        // en16.c:265 bhSetGunSplash bleibt ungebunden: GA_WORK vx/vy/vz sind im Original
++        // uninitialisiert (Disassembly bhEne16_MV02), en16 meldet den Aufruf als Luecke.
+         recvx_en16_bind(&en16);
+     }
+     recvx_en21_bind(&en21);

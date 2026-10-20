@@ -3,15 +3,124 @@
 // player's original hit model (mdl[3]). The link/player providers below are test
 // providers with stated values, not a played room.
 #include "effect_sprites.h"
+#include "effect_sprites_internal.h"
 #include "hit_model.h"
 #include "actor.h"
 #include "ninja_math.h"
+#include "ninja_matrix.h"
+#include "world.h"
+#include "room.h"
 #include "enemies/en16.h"
 #include <cmath>
+#include <cstring>
 #include <iostream>
+#include <set>
 #include <stdexcept>
+#include <string>
 using namespace recvx;
 static void check(bool b,const char* text){if(!b)throw std::runtime_error(text);}
+static bool near(float a,float b,float eps=1e-3f){return std::fabs(a-b)<=eps;}
+
+// --- EN16-Schussfolge in echten Raeumen (en16.c:211-277 bhEne16_MV02 mode3 4) ----------
+// RM_3010 traegt den Scharfschuetzen (EN16 type 1, Init mode1 1/mode2 2, en16.c:63-69).
+// Diagnose-Vorbedingungen, kein natuerliches Durchspielen: (1) die Raumfigur ist beim Laden
+// per Skript zurueckgehalten (stflg 0x1000000, bhEneSetCk event.c:2847); die Freigabe durch
+// das Raumereignis ist hier durch Loeschen des Bits ersetzt. (2) Die Spielerin steht auf
+// Boden 0 bei (80, 0, 40) in einer type-2-Flaeche mit prm0 16 (bhEne16_BR00 en16.c:110-117).
+// (3) Fuer den Wandzweig wird plp->stflg 0x10 gesetzt, damit en16.c:217 `!(plp->stflg & 0x30)`
+// den Spielerzweig ausschliesst. Alle Erwartungen stammen aus den Originalzeilen.
+struct BeamRoom {
+    std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn actor;
+    std::size_t motion=42;std::int64_t frame=0;AudioMixer audio;PlayerAsset player;
+    Inventory inv;MessageDialog dialog;std::uint32_t head=0;RoomWorld world;EventVm events;NJS_POINT3 camera{};
+    std::vector<BoneMatrix> nodes;
+    BeamRoom(const std::filesystem::path& data,const char* room):bytes(RoomArchive(data).load(std::string(room)+".RDX",64*1024*1024)),scene(decode_scene(bytes)),actor(scene.spawns.at(0)),audio(data),player(PlayerAsset::load(data)),
+        world(bytes,scene,actor,motion,frame,audio,data,{},room),events(bytes,inv,dialog){
+        world.set_player_asset(&player);world.bind_player_collision(events);world.bind_enemy_player(inv.hp,head);
+        world.set_enemy_ai(true);world.set_enemy_grab(true);world.set_camera_offset_owner(&camera);
+        commit();events.binding=[this](const EventCommand& c){return world.bind(c);};events.initialize();
+    }
+    // player.c:840/1688 bhCalcModel(plp): owP des Spielers vor jedem Pass (runtime.cpp).
+    void commit(){nodes=player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw));world.commit_player_joints(nodes);}
+    void tick(){commit();world.set_simulation_flags(events.flags[6][0]);world.tick();}
+    RECVX_ENEMY_WORK* en16(){auto& t=world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]&&t.slot[i]->id==16)return t.slot[i];return nullptr;}
+    const EffectSprite& laser(RECVX_ENEMY_WORK* w){std::int32_t s=0;std::memcpy(&s,w->exp0,4);check(s>0,"EN16 EXP0_I(0) ohne eff");
+        const auto* e=world.effect_state(unsigned(s-1));check(e&&e->id==270,"EN16 eff[EXP0_I(0)] ist nicht 270");return *e;}
+    std::set<unsigned> live(unsigned id){std::set<unsigned> r;for(unsigned k=0;k<512;++k){const auto* x=world.effect_state(k);if(x&&(x->flg&3u)==1u&&x->id==id)r.insert(k);}return r;}
+    // Bis zum Pass, in dem mode3 4 schiesst: case 3 erhoeht mode3 bei ct0-- == 0 (en16.c:205-210).
+    void until_shot(RECVX_ENEMY_WORK* w){for(int i=0;i<600&&!(w->mode2==2&&w->mode3==4);++i)tick();check(w->mode2==2&&w->mode3==4,"EN16 erreicht MV02 mode3 4 nicht");}
+};
+static unsigned new_one(const std::set<unsigned>& before,const std::set<unsigned>& after,const char* what){
+    unsigned found=0,count=0;for(unsigned k:after)if(!before.count(k)){found=k;++count;}check(count==1,what);return found;}
+static void en16_room_shots(const std::filesystem::path& data){
+    {   // RM_1020: Alfred als type 0 (en16.c:57-62 mode2 1 = MV01, kein Brain); der Strahl ist an
+        // (eff mode0 2, en16.c:145-151), die Schussfolge MV02 ist dort ohne Ereignis nicht erreichbar.
+        BeamRoom r(data,"RM_1020");for(int i=0;i<3;++i)r.tick();auto* w=r.en16();
+        check(w&&w->type==0&&w->mode1==0&&w->mode2==1,"RM_1020: EN16 type 0 in MV01 erwartet");
+        check(r.laser(w).mode0==2,"RM_1020: MV01 muss den Strahl auf mode0 2 halten");
+    }
+    BeamRoom r(data,"RM_3010");r.tick();auto* w=r.en16();
+    check(w&&w->type==1&&(w->stflg&0x1000000u),"RM_3010: zurueckgehaltener EN16 type 1 fehlt");
+    w->stflg&=~0x1000000u;                                         // Diagnose (1)
+    r.actor.position={80,0,40};
+    {RECVX_ENEMY_PLAYER p;check(r.world.enemy_player_get(p),"player_get");p.pos={80,0,40};p.flr_no=0;check(r.world.enemy_player_set(p),"player_set");} // Diagnose (2)
+    // --- Spielertreffer en16.c:217-248 ---------------------------------------------------
+    r.until_shot(w);
+    const auto& eff=r.laser(w);
+    check(eff.ct0>0,"Aufstellung: der Strahl liegt beim Schusspass nicht auf einem Spielergelenk > 0");
+    const int jno=eff.ct0;const NJS_POINT3 gp{eff.gpx,eff.gpy,eff.gpz};
+    const NJS_POINT3 dv{w->xn-w->px,w->yn-w->py,w->zn-w->pz};      // :219-221 plp->dv
+    RECVX_ENEMY_PLAYER before;check(r.world.enemy_player_get(before),"player_get");
+    const int ct1=w->ct1;const auto blood_before=r.live(297);
+    r.commit();r.world.set_simulation_flags(r.events.flags[6][0]);r.world.tick_enemy_pass();
+    RECVX_ENEMY_PLAYER after;check(r.world.enemy_player_get(after),"player_get");
+    // :224-236
+    const int hp=before.hp>150?before.hp-before.hp/2:before.hp>50?before.hp-before.hp/3:-1;
+    check(after.hp==hp&&r.inv.hp==hp,"plp->hp folgt nicht en16.c:224-236");
+    check(hp>=0,"Aufstellung: erster Treffer darf nicht toeten");
+    // :237-243 flg |= 4, mode0 2, mode1 = bhEne_DGDirCheck(plp) (zonzon1.c:495/515), mode2 1, mode3 0
+    NJS_VECTOR dir{dv.x,dv.y,dv.z},rot;njUnitMatrix(nullptr);njRotateY(nullptr,-before.ay);njCalcVector(nullptr,&dir,&rot);
+    check((after.flg&4u)&&after.mode0==2&&after.mode1==(rot.z>=0?0:1)&&after.mode2==1&&after.mode3==0,"Spielerzustand nach Treffer weicht von en16.c:237-243 ab");
+    check(w->ct1==ct1-1&&w->mode3==5&&w->ct0==0,"EN16 ct1/mode3 nach dem Schuss");
+    // :223 bhEne_SetBloodEffectBurst(plp, 2, eff->ct0, &eff->gpx, 1) -> zonzon1.c:243-298
+    const unsigned b=new_one(blood_before,r.live(297),"bhEne_SetBloodEffectBurst muss genau einen eff 297 anlegen");
+    const auto& blood=*r.world.effect_state(b);
+    check(blood.type==2&&blood.lkono==jno&&blood.link_kind==0&&(blood.flg&0x80u),"Blut 297: type 2 am Spielergelenk eff->ct0 (plp-Link)");
+    check(blood.mdlver==0,"Blut 297: mdlver = BloodType[plp->id = 0].color = 0 (zonzon1.c:11, player.c:700)");
+    {   // zonzon1.c:258-266: ofp = gp - owP[jno].t, durch die Inverse von owP[jno].mtx gedreht
+        NJS_MATRIX m;std::memcpy(m,r.nodes.at(std::size_t(jno)).value,sizeof m);NJS_VECTOR o{gp.x-m[12],gp.y-m[13],gp.z-m[14]},l;
+        njInvertMatrix(&m);njCalcVector(&m,&o,&l);
+        check(near(blood.lox,l.x)&&near(blood.loy,l.y)&&near(blood.loz,l.z),"Blut 297: lox/loy/loz nicht der Gelenkversatz des Strahlendpunkts");
+    }
+    check(near(blood.xn,-dv.x)&&near(blood.yn,-dv.y)&&near(blood.zn,-dv.z),"Blut 297: xn/yn/zn != -plp->dv (zonzon1.c:292-294)");
+    r.world.tick_after_player();
+    // --- Wandtreffer en16.c:250-266 -------------------------------------------------------
+    r.until_shot(w);
+    {RECVX_ENEMY_PLAYER p;check(r.world.enemy_player_get(p),"player_get");p.stflg|=0x10u;check(r.world.enemy_player_set(p),"player_set");} // Diagnose (3)
+    const auto& eff2=r.laser(w);
+    check(eff2.line_wall.has_value(),"Aufstellung: Strahl endet beim Schusspass an keiner Flaeche (eff->exp0 NULL)");
+    const auto& hit=*eff2.line_wall;
+    // hitchk.c:5881-5905: attr 0x100 aus -> 1 (diese Aufstellung trifft eine solche Flaeche).
+    check(!(hit.attributes&0x100u),"Aufstellung: Wandattribut ohne 0x100 erwartet");
+    const NJS_POINT3 lo{eff2.lox,eff2.loy,eff2.loz},v{w->px-w->xn,w->py-w->yn,w->pz-w->zn};
+    const int hp2=r.inv.hp;const auto spark_before=r.live(308),s11=r.live(11),s10=r.live(10);
+    r.commit();r.world.set_simulation_flags(r.events.flags[6][0]);r.world.tick_enemy_pass();
+    check(r.inv.hp==hp2,"Wandzweig darf keinen Schaden machen");
+    // :262 bhSetEffGunSpark(&lo, &v, 0xFFF8F8A0, 0x4CE04010, WpnTab[13].hiteff - 4 = 1),
+    // effsub3.c:2401-2427 Eff308Prm[1] = {10, 0.6, 0.98, 2, 7, 50, 0.8, 4, -0.0326667}.
+    const unsigned sp=new_one(spark_before,r.live(308),"bhSetEffGunSpark muss genau einen eff 308 anlegen");
+    const auto& spark=*r.world.effect_state(sp)->spark308;
+    check(near(spark.vtx_pos.x,lo.x)&&near(spark.vtx_pos.y,lo.y)&&near(spark.vtx_pos.z,lo.z),"Funken: vtx_pos != eff->lox/loy/loz");
+    check(near(spark.vtx_dir.x,v.x)&&near(spark.vtx_dir.y,v.y)&&near(spark.vtx_dir.z,v.z),"Funken: vtx_dir != epw->p - epw->n");
+    check(spark.col_src==0xFFF8F8A0u&&spark.col_dst==0x4CE04010u&&near(spark.gnd_hgh,lo.y-100.0f),"Funken: Farben/gnd_hgh");
+    check(spark.prm_a.vtx_num==10&&near(spark.prm_a.speed,0.6f,1e-6f)&&spark.prm_a.time==7&&near(spark.prm_a.ang_rand,50.0f,1e-6f),"Funken: nicht Eff308Prm[WpnTab[13].hiteff - 4 = 1]");
+    // :263-265 bhSetGunSplash liest den nie beschriebenen GA_WORK vx/vy/vz: kein Spritzer, benannte Luecke.
+    check(r.live(11)==s11&&r.live(10)==s10,"bhSetGunSplash darf ohne belegte Richtung keinen Spritzer erzeugen");
+    check(r.world.unbound_enemy_routines().count("bhSetGunSplash (en16.c:265): GA_WORK vx/vy/vz im Original uninitialisiert")==1,"Luecke bhSetGunSplash nicht gemeldet");
+    r.world.tick_after_player();
+    for(const auto& g:r.world.unbound_enemy_routines())
+        if(g.rfind("bhSetGunSplash (en16.c:265)",0)!=0){std::cerr<<"unerwartete Luecke: "<<g<<'\n';throw std::runtime_error("EN16-Schussfolge meldet eine weitere Luecke");}
+}
 int main(int argc,char** argv){try{
     check(argc==2,"data required");_Make_SinTable();
     // --- player hit model -----------------------------------------------------
@@ -85,5 +194,6 @@ int main(int argc,char** argv){try{
         check(scene.triangles.size()==1&&scene.triangles[0].vertex_alpha,"per-vertex effect alpha not carried into the scene");
         check(std::fabs(scene.triangles[0].vertices[1].alpha)<1e-6f&&std::fabs(scene.triangles[0].vertices[2].alpha-128.f/255.f)<1e-6f,"vertex alpha values differ");
     }
-    std::cout<<"hit model L2MDL, laser sight 270, search light 261 and per-vertex effect alpha PASS\n";return 0;
+    en16_room_shots(argv[1]);
+    std::cout<<"hit model L2MDL, laser sight 270, search light 261, per-vertex effect alpha and EN16 shots (RM_1020/RM_3010) PASS\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
