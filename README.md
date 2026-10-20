@@ -92,7 +92,7 @@ overall game progress. **Weighted** counts partially evidenced mechanisms as
 <!-- port-status:begin -->
 <!-- Progress table and figures synced directly from docs/PORT_STATUS.md. -->
 
-Explicit native evidence scope: **87.3 %** weighted, **75.3 %** fully evidenced (493/655 mechanisms; not overall game completion).
+Explicit native evidence scope: **88.1 %** weighted, **76.8 %** fully evidenced (499/650 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 211/223 bound, 12 consumed only, 0 missing.
 
@@ -106,7 +106,7 @@ Event commands (bhScenarioJmpT): 211/223 bound, 12 consumed only, 0 missing.
 | Menu/items/text | 43/54 | 87.0 % | 79.6 % | 8 | 3 |
 | Models/animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
 | Audio | 5/21 | 61.9 % | 23.8 % | 16 | 0 |
-| Flow/saving | 22/36 | 80.6 % | 61.1 % | 14 | 0 |
+| Flow/saving | 28/31 | 95.2 % | 90.3 % | 3 | 0 |
 | Platform (host-replaced) | 16/31 | 75.8 % | 51.6 % | 15 | 0 |
 
 Documented evidence scope only, not overall game completion.
@@ -123,7 +123,7 @@ Documented evidence scope only, not overall game completion.
 | Enemies / actors (C/F) | Several families active; full port open | EN02 Gulp Worm, EN06, EN09 Bandersnatch, EN19 Tyrant, EN21, EN22, EN26 and EN27 are integrated and checked in native runtime or event runs. EN05, EN12, EN13/13B, EN23, EN56 and further services remain open. |
 | Effects / light / audio (E) | Many hand ports; full paths open | The regex translator was removed and the procedures are hand-written, including `bhEff006` and the original empty procedures 4/28/129/174/197. `bhEff_Sub367` stays a documented gap: the original has no producer for its `exp0` helper or `op->func`. Remaining IDs, particle/model paths, light/sound services and rendering limits remain open. |
 | Shadow / camera / doors (F/G/P) | Partially ported | Door sequences, clip calls, camera offsets and follow targets have targeted evidence. The shadow renderer, the complete camera path and the original ice-room presentation remain open. |
-| System / save | Incomplete | Original save/load and complete system states are missing. |
+| System / save | Finalized; 3 branches open | Ledger 28/31 (2026-10-20). Closed: both draw passes (mirror effect pass), EOR fog/background colour, main-loop pad gating, room-load handover. The host task machine, pause overlay, pad keytype/analog tables and load-screen `typ_flg` are host-replaced and scored as such. Open: save-name UB, the deliberate door skip, map draw order/pad binding. |
 | Windows x64 | No current evidence | Existing Windows binaries come from older builds; the current tree has not been run on Windows. |
 | Renderer | GPU default on macOS | Metal backend with the `gpu_raster_parity` test (point sampling, shadows), software fallback, `--renderer` switch. A D3D11 backend remains open. |
 

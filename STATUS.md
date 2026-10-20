@@ -1287,6 +1287,20 @@ Test `effect_eff006`; `engine_progression_resources` nutzt jetzt 367 als ungebun
 `./build.sh --test` 190/190 (gpu_raster_parity uebersprungen), Dev-App aktualisiert. Offener Nebenbefund:
 `initialize_effect_sprite` setzt die UV-Vorgaben von bhSetEffectTb (effect.c:522-532) nicht. **Kein Commit/Push.**
 
+**Ablauf/Speichern finalisiert (2026-10-20):** Ledger-Audit des Bereichs. Sechs Eintraege auf done, weil die
+damals offenen Punkte belegt sind: `bhAllDrawModel`/`bhEtcMirrorDrawModel` (Spiegel-Effektpass unter gm_flg 0x4000,
+mirror_pass/effect_model_mirror/claw_model_light), `bhAllEasyDrawModel` (Monitorpass, event_lifecycle),
+`bhControlEOR` (BackColor nativ ueber back_color.cpp; der GS-Palettenupload ist die Konsolen-Fadedarstellung, nativ
+Host-Fade), `bhSysCallMain` (Pad-Gating; `ss_flg 0x40000000` hat keinen Schreiber, `tk_flg 0x1000` ist der
+Host-Taskautomat) und `bhSysCallMonitor` (Raumlade-/Taskfreigabe, A/B-Messung). Fuenf weitere Eintraege
+sind als **Host-ersetzt** gewertet (Nutzerentscheidung 2026-10-20): `pad.c:bhSetPad` (SDL-Eingabe statt Keytype-/Analogtabellen),
+`ps2_LoadScreen.c:ExecuteStateLoadScreenLoadExit` (Typewriter-Slotliste statt typ_flg/tk_flg), `system.c:bhCheckSubTask`
+und `system.c:bhSysCall` (Host-Menuezugaenge statt tk_flg-Taskautomat) sowie `system.c:bhSysCallEvent:Pausetor`
+(Host-Pause statt ssv_md0 10). Bereich 22/36 -> **28/31** (95.2 % gewichtet, 90.3 % voll belegt); Gesamt
+88.1 %/76.8 %. Offen bleiben nur `ps2_McSaveFile.c:mcSetStringSaveFile` (Original-UB saveroom 0),
+`system.c:bhSysCallDoordemo` (Nutzerentscheidung Tuer-Skip) und `system.c:bhSysCallMap` (Drawreihenfolge/Padbindung).
+**Kein Commit/Push.**
+
 ## Gezielter Zugang zu bisherigen Befunden
 
 Vollständiger [Abschnittsindex](work/history/2026-10-13-instructions/README.md)
