@@ -146,8 +146,8 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     const PlayerAsset* model_bank=nullptr;unsigned model_base=0;
     // Beschreibbarer Vertexstrom des gezeichneten mlwP->objP (bhEne13_ScaleModel
     // schreibt p[0]/p[1] an Ort und Stelle). Leer = unveraenderte Modelldaten.
-    std::vector<std::uint8_t> live_model;
-    std::map<unsigned,std::vector<std::uint8_t>> live_models;
+    mutable std::vector<std::uint8_t> live_model;
+    mutable std::map<unsigned,std::vector<std::uint8_t>> live_models;
     const std::vector<std::uint8_t>* live_stream(unsigned model)const{
         if(!model)return live_model.empty()?nullptr:&live_model;
         const auto at=live_models.find(model);return at==live_models.end()?nullptr:&at->second;
@@ -166,6 +166,8 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
 // RoomWorld::append: normaler Zeichenpass oder das Monitorbild von screen.c:920 (siehe dort).
 struct WorldDrawPass{bool small_screen=false;unsigned ncut=0;};
 class RoomWorld {
+    friend struct LightEffectLinkTestAccess; // gezielte Work-/Publikationsfixture, keine Runtime-Alternative
+    friend struct EnemyJointMappingTestAccess; // nur effect_player_hit am echten Raum, keine Runtime-Alternative
 public:
     RoomWorld(const std::vector<std::uint8_t>& room,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data={},const std::filesystem::path& mods={},const std::string& room_name="RM_0000",unsigned game_mode=0);
     struct CombatTarget {unsigned index,identity;NJS_POINT3 position;float radius,height;int hp;};
@@ -370,6 +372,7 @@ public:
     void set_pad_clear_callback(std::function<void(uint32_t)> cb){pad_clear_cb_=std::move(cb);}
     void clear_pad_on(uint32_t bits){if(pad_clear_cb_)pad_clear_cb_(bits);}
     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
+    unsigned effect_counter()const{return effect_yk_ct_;} // sys->yk_ct
     int spawn_player_effect(const EffectSpawn& effect){return spawn_effect(effect,1,0);}
     // bhSetEffectTb(eft, &ops, NULL, jno) aus dem Spielerkampf: derselbe Pool, ohne Link.
     int spawn_unlinked_effect(const EffectSpawn& effect){return spawn_effect(effect,0,0);}
@@ -503,6 +506,12 @@ public:
     std::optional<NJS_POINT3> position(unsigned kind,unsigned index)const;
     // ene[n].mlwP->owP[node].mtx[12..14] (event.c:7826 bhEtcAtariEnePosSet).
     std::optional<NJS_POINT3> enemy_joint_position(unsigned index,unsigned node)const{const auto m=link_matrix(1,index,node);if(!m)return {};return NJS_POINT3{m->value[12],m->value[13],m->value[14]};}
+    // ene[slot].mlwP->owP[node].mtx (pwksub.c:455-457 bhSearchNearEnemy2, player.c:7132-7134
+    // bhSetHeadRotation): `slot` ist der Platz in sys->ene (enemy_table), nicht der Raumindex.
+    // Gelesen wird der Baum, den das letzte bhCalcModel dieses Works hinterliess - bei
+    // `epp->mlwP = epw->mdl` (en01.c:2827) der des Elternworks -, keine neue Motionpose.
+    // Leer ohne Work, ohne Modell oder vor dem ersten bhCalcModel.
+    std::optional<BoneMatrix> enemy_slot_joint_matrix(unsigned slot,unsigned node)const;
     // sys->obwp[index] als angehaengtes Objekt des Spielers: lkmtab (player.c:22-26, flg 0x81,
     // id 1211/1212) bindet bhSetPlayer/bhResetPlayer an plp, lkono 5 (player.c:759-783/965-989).
     // Ereignisse verlinken es um: bhObjLinkSet (0x32, event.c:2177) auf ene[enep[v0].wrk_no],
@@ -668,7 +677,9 @@ public:
     // Ende einer Stufen-/Treppenaktion: bpx = bpxb = px, bpy = bpyb = 12.5 + py, bpz = bpzb = pz
     // (player.c:3099/3294/3474/3692). Ohne das vergleicht der erste Koerperpass nach der
     // Landung gegen die Vorsonde der Ausgangsebene.
-    void set_player_previous_probe(NJS_POINT3 p){collision_previous_probe_={p.x,p.y+12.5f,p.z};}
+    // Dieselben Enden setzen plp->pxb/pyb/pzb = px/py/pz (player.c:3103/3298/3478/3696/4097/4292),
+    // die alte Lage des Koerper-bhCheckWallEx (:1647) im selben Pass.
+    void set_player_previous_probe(NJS_POINT3 p){collision_previous_probe_={p.x,p.y+12.5f,p.z};player_prev_pos_=p;}
     void place_player(NJS_POINT3 p){collision_safe_=p;collision_previous_probe_={p.x,p.y+12.5f,p.z};collision_front_offset_=collision_front_target_=0.f;collision_front_point_=p;collision_probe_ready_=true;}
     // EXP_WORK fpx/fpy/fpz und arn, wie sie der Koerperteil von bhControlPlayer zuletzt
     // schrieb (player.c:1578-1587): fpx = px - sin(ay)*arn mit der Lage NACH dem
@@ -681,6 +692,9 @@ public:
     // `arp` ist der Wert, den bhCPM2_act_* dieses Bildes hinterlassen hat.
     void settle_player_body(NJS_POINT3& position,float arp);
     void finish_player_pass(NJS_POINT3& position,Angle yaw);
+    // plp->pxb/pyb/pzb: Kopf von bhControlPlayer (player.c:1366-1369), Stufenenden und
+    // Ereignisbefehle (event.c:5868/9665/12044); Leser :1647 und en04.c:911, en15.c:2901/3122.
+    NJS_POINT3 player_pass_origin()const{return player_prev_pos_;}
     bool player_safe_position_ready()const{return collision_probe_ready_;}
     void report_enemy_gap(const char* name){unbound_enemy_.insert(name);}
     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f,std::optional<bool> walking={});
@@ -728,6 +742,7 @@ private:
         NJS_POINT3 flicker_color{},working_position{},working_direction{};
         std::array<std::int32_t,3> working_angles{};
         float working_near_range=0,working_far_range=0;
+        bool effect_link_resolved=false; // Ausgabe des letzten bhControlLight, kein neuer Draw-Resolver
         int ct1=0; // LGT_WORK.ct1 (en22.c:2933 bhEne22_CtrLight)
         };
     // CAM_KEYF_WORK: flg (0x8 = this key carries fog), fog_col/fog_nr/fog_fr.
@@ -816,8 +831,8 @@ private:
     std::optional<std::uint32_t> player_material_; // plp ct1/ayp liegen in player_ct1_/player_ayp_ (oben)
     unsigned pad_on_=0,pad_ps_=0;
     std::function<void()> stand_player_;
-    // cam.ofx/ofy/ofz (camera.c:36/49/81): Besitzer ist die Runtime, weil cam den
-    // Raumwechsel ueberdauert. nullptr = nicht gebunden.
+    // cam.ofx/ofy/ofz (camera.c:36/49/81): Besitzer ist die Runtime; sie nullt ihn bei jedem
+    // Raumladen wie bhInitCamera (room.c:33, camera.c:8). nullptr = nicht gebunden.
     NJS_POINT3* camera_offset_=nullptr;
     std::function<void(std::uint32_t,float)> screen_fade_set_;std::function<std::uint32_t()> screen_fade_previous_;
     void step_ufo_effect(unsigned slot);
@@ -848,6 +863,7 @@ private:
     // bhSetEffectTb from game code: `link_kind` 0 = world position, 2 = enemy joint (WorldEntity index/joint).
     int spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
     void gun_fire(unsigned kind,unsigned index,const BoneMatrix& joint,unsigned wno,unsigned jno,unsigned hand,int ang);
+    void set_yakkyou(unsigned kind,unsigned index,const BoneMatrix& joint,const BoneMatrix& root,unsigned wno,unsigned jno,unsigned hand,int ang);
     unsigned process_effect_output(); // Rueckgabe: Anforderungen, die keinen Platz bekamen (bhEff<id> gemeldet)
     void tick_shadow(unsigned slot);
     int en11_light_control(RECVX_ENEMY_WORK* w,int mode);
@@ -904,8 +920,9 @@ private:
     // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP.
     void append_claw_model(Scene& scene,const EffectSprite& sprite)const;
     // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364): objP[mdlver].model von mlwP = ene[model_enemy].mdl[model_mdl]
-    // unter T(p) * RotZ/Y/X(a) * S(s), txp[0] = mlwP->texP, Lichtzustand der ef_fnc-Modelle (Kategorie 4).
-    void append_effect_model(Scene& scene,const EffectSprite& sprite,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend)const;
+    // unter T(p) * RotZ/Y/X(a) * S(s), txp[0] = mlwP->texP, SimpleMulti-Licht (Kategorie 5).
+    // gm_flg traegt das Effekt-mdflg-Tor; reflected ist der bereits geplante zweite Zeichenaufruf.
+    void append_effect_model(Scene& scene,const EffectSprite& sprite,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend,unsigned gm_flg,bool reflected)const;
     // game.c:77-91: st_flg 0x100, pt_flg 0x10 und ein gueltiges njMirror(sys->mr_pl) -> bhEtcMirrorDrawModel
     // ruft bhDrawEffect ein zweites Mal (game.c:427).
     bool mirror_effect_pass_active()const;
@@ -967,6 +984,9 @@ private:
     struct SpriteWork {const std::vector<SceneTexture>* texture_list=nullptr;
         // mutable: die ef_fnc-Zeichenteile schreiben den Satz im Zeichenpass (effect.c:929).
         mutable EffectSprite sprite;NJS_POINT3 scale;
+        // O_WRK.mtxbuf: nach bhSetEffect(Tb) genullt, nur originale Matrixschreiber
+        // publizieren. Kein T(px)/naechster Motionframe als Ersatz fuer den letzten Zeichenpass.
+        mutable BoneMatrix effect_root{};
         // Ausgabe der schreibenden Zeichenteile je bhDrawEffect-Aufruf dieses Steuerbildes.
         struct DrawnPass {std::uint64_t serial=~0ull;std::vector<EffectSprite::Quad> quads;std::vector<SceneLine> lines;};
         mutable std::array<DrawnPass,2> drawn{};bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
@@ -992,6 +1012,7 @@ private:
     // player.c:1366-1387 bhControlPlayer: pxb/pyb/pzb of the previous pass and
     // EXP_WORK nlxb/nlyb/nlzb, the last settled root position (owP[0]).
     NJS_POINT3 player_prev_pos_{},player_nl_{};
+    bool player_pass_head_=false; // player.c:1365: der Kopf dieses Passes lief (tick_enemy_pass)
     // plp->djnt_no / dvx..dvz / dpx..dpz written by enemy hit routines.
     int player_hit_joint_=-1;NJS_POINT3 player_hit_dv_{},player_hit_dp_{};
     // plp->mlwP->objP[node] writes of the enemy pass; the next player motion
@@ -1038,6 +1059,11 @@ private:
     std::vector<CollisionWall> effect_walls_; // rom->walp + sys->mwalp as bhCheckWallType sees them
     const std::vector<SceneTexture>* effect_texture_list(const SpriteWork& work)const;
     std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;
+    // sys->efid: Raumzeile -> Platz im bestehenden eff[512]-Besitzer. Bleibt beim
+    // Freigeben/Recycling des Zielplatzes unveraendert (room.c:781).
+    std::vector<unsigned> room_effect_slots_;
+    std::optional<unsigned> light_effect_slot(unsigned index)const;
+    std::optional<BoneMatrix> light_effect_matrix(unsigned slot,unsigned node)const;
     // sys->efm[0]/[1]/[7]/[13]: die vier Modellbloecke aus bhInitEffect (effect.c:66-80).
     // bhDrawPolEffect zeichnet objP[op->mdlver].model von efm[op->id], deshalb je Block roh.
     std::vector<std::uint8_t> effect_model0_block_,effect_model1_block_,effect_model7_block_,effect_model13_;

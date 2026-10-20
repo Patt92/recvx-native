@@ -77,7 +77,6 @@ struct RECVX_COMBAT_CORE {
     RECVX_CB_WEAPON_OBJECT weapon;
     RECVX_COMBAT_SYS*      sys;      /* nur waehrend eines Passes gueltig */
     RECVX_COMBAT_RESULT    res;
-    int16_t                yk_hr, yk_hl; /* pwksub.c:3246 static hr/hl    */
     int32_t                igct;         /* weapon.c:503 static igct      */
     CB_GA                  pch_gap;      /* playpch.c:1139 static gap     */
     int                    was_active;
@@ -1463,6 +1462,11 @@ static void cb_set_gun_fire(RECVX_COMBAT_CORE* c, int32_t wno, int32_t jno,
     }
 }
 
+/* pwksub.c:3246 `static short hr, hl = 1;` ist eine Funktionsstatik von bhSetYakkyou: ein
+   Zaehlerpaar fuer alle Aufrufer (Spielerwaffe und bhYakkyouSet event.c:3113 auf Gegnerworks),
+   einmal initialisiert und nie zurueckgesetzt. */
+static int16_t cb_yk_hr, cb_yk_hl = 1;
+
 /* pwksub.c:3242 bhSetYakkyou */
 static void cb_set_yakkyou(RECVX_COMBAT_CORE* c, int32_t wno, int32_t jno,
                            int32_t hand, int32_t ang) {
@@ -1473,8 +1477,8 @@ static void cb_set_yakkyou(RECVX_COMBAT_CORE* c, int32_t wno, int32_t jno,
     RECVX_CB_VEC ops, wps, jps;
     RECVX_CB_EFFECT req;
     if (wno == 8) {
-        if (hand == 0) { c->yk_hr++; if (c->yk_hr & 1) return; }
-        else           { c->yk_hl++; if (c->yk_hl & 1) return; }
+        if (hand == 0) { cb_yk_hr++; if (cb_yk_hr & 1) return; }
+        else           { cb_yk_hl++; if (cb_yk_hl & 1) return; }
     }
     if (!eft) return;
     c->res.shells++;
@@ -2996,7 +3000,6 @@ RECVX_COMBAT_CORE* recvx_combat_create(const RECVX_CB_TABLES* tables,
     _Make_SinTable();
     if (tables) core->tables = *tables;
     if (services) core->services = *services;
-    core->yk_hl = 1;   /* pwksub.c:3246 static short hr, hl = 1 */
     core->player.src_no = -1;
     /* player.c:1416 verteilt ueber bhCtrPly_mode0[plp->mode0]; recvx_combat_tick
        IST der mode0-1-Zweig (bhCPM0_action). Der Host darf mode0 umsetzen,
@@ -3027,6 +3030,29 @@ void recvx_combat_gun_fire(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SER
     c->player.stflg = owner->stflg; c->player.at_flg = owner->at_flg; c->player.idx_ct = owner->idx_ct;
     memcpy(c->player.owp_mtx[jno], owner->mtx, sizeof owner->mtx);
     cb_set_gun_fire(c, wno, jno, hand, ang);
+    free(c);
+}
+
+/* pwksub.c:3242 bhSetYakkyou(pp, wno, jno, hand, ang) fuer bhYakkyouSet (event.c:3113): pp ist
+   plp oder ene[rom->enep[v4].wrk_no]; gelesen werden nur pp->mlwP->owP[jno].mtx und owP[0].mtx
+   (pwksub.c:3301-3304, :3330). Hr/hl und sys->yk_ct sind dieselben wie im Spielerpfad. */
+void recvx_combat_set_yakkyou(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
+                              RECVX_COMBAT_SYS* sys, const float joint_mtx[16], const float root_mtx[16],
+                              int32_t wno, int32_t jno, int32_t hand, int32_t ang) {
+    RECVX_COMBAT_CORE* c;
+    if (!joint_mtx || !root_mtx || jno < 0 || (uint32_t)jno >= RECVX_CB_NODES) {
+        if (services && services->gap) services->gap(services->user, "bhSetYakkyou owP[jno]");
+        return;
+    }
+    c = calloc(1, sizeof *c);
+    if (!c) return;
+    _Make_SinTable();
+    if (tables) c->tables = *tables;
+    if (services) c->services = *services;
+    c->sys = sys;
+    memcpy(c->player.owp_mtx[0], root_mtx, sizeof c->player.owp_mtx[0]);
+    memcpy(c->player.owp_mtx[jno], joint_mtx, sizeof c->player.owp_mtx[jno]);
+    cb_set_yakkyou(c, wno, jno, hand, ang);
     free(c);
 }
 
@@ -3078,7 +3104,6 @@ void recvx_combat_room_reset(RECVX_COMBAT_CORE* core) {
     memset(&core->player.pp, 0, sizeof core->player.pp);
     memset(&core->weapon, 0, sizeof core->weapon);
     core->player.src_no = -1;
-    core->yk_hr = 0; core->yk_hl = 1;
     core->igct = 0;
     cb_gap(core, "bhInitPlayer/bhResetPlayer owP[7]/[11].flg (player.c:850/944)");
 }

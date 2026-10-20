@@ -16,6 +16,9 @@
 #include "weapon_tables.h"
 #include "player_combat_core.h"
 #include "renderer.h"
+#include "effect_eff130.h"
+#include "effect_collision.h"
+#include <functional>
 #include <algorithm>
 #include <map>
 #include <cmath>
@@ -2400,12 +2403,189 @@ static void pol_effect_draw(const std::filesystem::path& data){
     check(nm>0,"bhDrawPolEffect: das Magazinmodell efm[7] zeichnet nichts");
     for(const auto& g:world.unbound_enemy_routines())check(g.find("bhDrawPolEffect")==std::string::npos,"bhDrawPolEffect meldet eine Luecke");
 }
+// effsub2.c, zweiter Satz (bhJumpEffect2, effect.c:35): 251 DropBlood, 266 FloorBlood2, 268 E14_Explosion,
+// 271 E14_Fire2, 272 Dust, 273 E14_Mucus, 299 DamagePoint. Die Erwartungen sind aus den Originalzeilen
+// nachgerechnet; Zufallswerte werden vorab ueber frac() aus derselben Folge gezogen.
+namespace recvx {void set_effect_work_node_matrix(std::function<bool(const void* work,unsigned node,NJS_MATRIX& out)> lookup);}
+static void effsub2_second_batch(){
+    install_group4_services();
+    for(const unsigned id:{251u,266u,268u,271u,272u,273u,299u})check(supported_effect_sprite(id),"effsub2 zweiter Satz nicht als Handport registriert");
+    EffectContext c;c.pt_flg=0x10;bool queued=false;take_effect_output();
+    std::vector<CollisionWall> walls{{1,0,0,0,0,{-50,-10,-50},{100,10,100}}};GroundCollision ground;ground.update(walls,100.f);set_effect_ground(&ground,nullptr,nullptr);
+    check(close(ground.query({0,2,0}),0.0f)&&close(ground.query({0,20,0}),0.0f),"Testboden liegt nicht bei y 0");
+    { // 251 :290 — Fall ab y 2: drei Fallbilder, Landung auf yn = 0.2, Aufprall ab ct1 3 (kein Ruecksetzen).
+        EffectSpawn e;e.id=251;e.flg=1;e.position={0,2,0};e.scale={1.5f,1.5f,1.5f};EffectSprite s;initialize_effect_sprite(s,e);
+        step_effect_sprite(s,c,&queued);
+        check(queued&&s.tex_id==5&&s.bl_src==8&&s.bl_dst==3&&s.flg==(1u|0x180000u)&&s.tv[3].col==0xFFFFFFFFu,"251 :319-:331 Start");
+        check(close(s.yn,0.2f)&&close(s.py,2.0f-0.71f)&&close(s.ofy,-0.86f)&&s.ct1==1,"251 :335/:349-:357 Boden + 0.2, erster Fallschritt");
+        check(close(s.tv[0].u,0.84375f)&&close(s.tv[0].v,0.15625f)&&close(s.tv[3].u,0.90625f)&&close(s.tv[3].v,0.21875f)&&close(s.sx,1.5f),"251 BH_UVTAB0[0], bhEff_SetUVInfo Basis 0.0625");
+        step_effect_sprite(s,c,&queued);check(queued&&s.mode0==1&&close(s.py,0.43f)&&close(s.tv[0].u,0.90625f),"251 zweiter Fallschritt");
+        step_effect_sprite(s,c,&queued);check(queued&&s.mode0==2&&close(s.py,0.2f)&&s.ct1==3&&close(s.tv[0].u,0.53125f),"251 :359 Landung auf yn, Bild noch aus BH_UVTAB0");
+        step_effect_sprite(s,c,&queued);check(queued&&s.ct1==4&&close(s.tv[0].u,0.9375f)&&close(s.tv[0].v,0.3125f),"251 :367 Aufprall beginnt bei BH_UVTAB1[ct1 = 3]");
+        step_effect_sprite(s,c,&queued);check(queued&&close(s.tv[0].v,0.375f),"251 BH_UVTAB1[4]");
+        step_effect_sprite(s,c,&queued);check(!queued&&s.flg==0,"251 :369 Endzeile beendet den Satz");
+    }
+    { // 251 langer Fall: Tabellenende -> ct1 = 1 (:345-:348), ofy sinkt je Pass um 0.15 bis unter -2.
+        EffectSpawn e;e.id=251;e.flg=1;e.position={0,20,0};EffectSprite s;initialize_effect_sprite(s,e);
+        for(int i=0;i<5;++i)step_effect_sprite(s,c,&queued);
+        check(s.ct1==5&&s.mode0==1,"251 fuenf Fallbilder");
+        step_effect_sprite(s,c,&queued);
+        check(queued&&s.ct1==2&&close(s.tv[0].u,0.90625f)&&close(s.ofy,-0.71f-6*0.15f),"251 :345-:348 Endzeile -> Zeile 1, ct1 2");
+        for(int i=0;i<6;++i)step_effect_sprite(s,c,&queued);
+        check(s.mode0==1&&close(s.ofy,-2.06f),"251 :352 ofy bleibt nach Unterschreiten von -2 stehen");
+    }
+    { // 272 :971 — Staub, Farbe aus ct0 vor dem Abzug, 22 Bilder.
+        EffectSpawn e;e.id=272;e.flg=1;e.position={0,5,0};EffectSprite s;initialize_effect_sprite(s,e);s.xn=1.0f;
+        step_effect_sprite(s,c,&queued);
+        check(queued&&s.tex_id==2&&s.bl_src==8&&s.bl_dst==10&&s.flg==(1u|0x180000u),"272 :1010-:1018 Start");
+        check(s.tv[0].y==-2&&s.tv[1].y==-2&&s.tv[2].y==0&&s.tv[3].x==1&&s.tv[0].z==0,"272 bhEff_SetAlign(op, 2)");
+        check(s.tv[0].col==0x32373737u&&s.tv[3].col==0x32373737u&&s.ct0==48&&s.ct1==1,"272 :1029-:1031 Farbe aus ct0, danach ct0 -= 2");
+        check(close(s.tv[0].u,0.25f)&&close(s.sx,0.125f/0.09375f)&&close(s.px,1.0f)&&close(s.xn,0.8f),"272 Zeile 0, Basis 0.09375, Lage += Richtung, Richtung * 0.8");
+        unsigned passes=1;
+        while(s.flg&&passes<40){step_effect_sprite(s,c,&queued);++passes;if(passes==2)check(s.tv[0].col==0x30373737u&&close(s.px,1.8f)&&close(s.tv[0].u,0.5f),"272 zweiter Pass");}
+        check(passes==23&&!queued&&s.tv[0].col==0x06373737u,"272 22 Bilder, im 23. Pass Endzeile (Farbe noch gesetzt)");
+    }
+    { // 268 :3881 — drei Saetze 19 ueber sys->ef; flr_no stammt vom letzten Schreiber.
+        effect_detail::request_template().flr_no=7;
+        EffectSpawn e;e.id=268;e.flg=1;e.position={1,2,3};EffectSprite s;initialize_effect_sprite(s,e);
+        EffectContext v=c;v.camera_view={0.5f,0.0f,-1.0f};
+        take_effect_output();step_effect_sprite(s,v,&queued);auto out=take_effect_output();
+        check(!queued&&out.spawns.size()==2,"268 :3885-:3926 zwei Saetze 19");
+        const auto a=out.spawns[0],b=out.spawns[1];
+        check(a.id==19&&a.flg==0x4100001u&&a.type==0&&a.mdlver==0&&close(a.scale.x,2.5f)&&close(a.scale.z,2.5f)&&close(a.position.x,1)&&close(a.position.y,2)&&a.ax==0&&a.ay==0&&a.flr_no==7&&a.lkono==0,"268 erster Satz type 0 Groesse 2.5");
+        check(b.id==19&&b.flg==0x4100001u&&b.type==2&&close(b.scale.y,5.0f)&&close(b.position.z,3),"268 zweiter Satz type 2 Groesse 5");
+        step_effect_sprite(s,v,&queued);step_effect_sprite(s,v,&queued);
+        check(s.flg&&s.ct0==2&&take_effect_output().spawns.empty(),"268 :3933 ct0 1 und 2 ohne Ausgabe");
+        step_effect_sprite(s,v,&queued);out=take_effect_output();
+        check(s.flg==0&&out.spawns.size()==1&&out.spawns[0].type==1&&close(out.spawns[0].scale.x,2.8f)&&close(out.spawns[0].position.x,1.5f)&&close(out.spawns[0].position.y,2.0f)&&close(out.spawns[0].position.z,2.0f),"268 :3935-:3954 dritter Satz an px + cam.vx/vy/vz, dann frei");
+    }
+    { // 271 :4214 — Flamme am Spielergelenk 3.
+        recvx_core_random_seed(31);const float r0=frac(),r1=frac();recvx_core_random_seed(31);
+        EffectSpawn e;e.id=271;e.flg=1;EffectSprite s;initialize_effect_sprite(s,e);s.stflg=0x20u;
+        step_effect_sprite(s,c,&queued);
+        check(queued&&(s.flg&0x4180081u)==0x4180081u&&s.tex_id==9&&s.bl_src==8&&s.bl_dst==10&&!(s.stflg&0x20u)&&s.tv[2].col==0xFFFFFFFFu,"271 :4242-:4251 Start");
+        check(close(s.lox,1.0f-2.0f*r0)&&close(s.loy,-0.5f+2.0f*r1)&&close(s.loz,-1.5f),"271 :4253-:4264 Versatz, Zufallsreihenfolge lox vor loy");
+        check(s.link_kind==0&&s.lkono==3&&s.lkwkp==nullptr,"271 :4266-:4267 lkwkp = plp, lkono 3");
+        check(close(s.sxb,2.0f)&&s.ct0==0xFF&&s.frm_no==1&&close(s.sx,4.0f)&&close(s.tv[0].u,0.5f)&&close(s.tv[0].v,0.5f),"271 BH_UVTAB0[0], Basis 0.125");
+        step_effect_sprite(s,c,&queued);
+        check(close(s.sxb,1.83f)&&close(s.sx,3.66f)&&close(s.tv[0].u,0.25f)&&s.frm_no==2,"271 :4284 sxb += 0.1 (0.3 - sxb) vor dem Tabellenschritt");
+        unsigned passes=2;while(s.flg&&passes<40){step_effect_sprite(s,c,&queued);++passes;}
+        check(passes==12&&!queued,"271 elf Bilder, Ruecksprung auf 0 beendet im zwoelften Pass");
+        EffectSprite t;initialize_effect_sprite(t,e);t.mode1=1;step_effect_sprite(t,c,&queued);check(close(t.loz,1.3f),"271 mode1 != 0 -> loz 1.3");
+    }
+    { // 266 :3092 — Wartezeit, ein Spielertreffer, dann Flamme am Gelenk 3.
+        struct Pl {RECVX_ENEMY_PLAYER p{};int fires=0;NJS_POINT3 first{};float size=0;int life=0;} pl;
+        EffectWorldHooks h;
+        h.player_get=[&pl](RECVX_ENEMY_PLAYER& out){out=pl.p;return true;};
+        h.player_set=[&pl](const RECVX_ENEMY_PLAYER& in){pl.p=in;};
+        h.player_fire=[&pl](int jno,NJS_POINT3 o,float size,int life){if(!pl.fires){pl.first=o;pl.size=size;pl.life=life;}check(jno==3,"266: bhEne_SetFireEffect(plp, 3, ...)");++pl.fires;};
+        set_effect_world_hooks(h);
+        pl.p.hp=100;
+        recvx_core_random_seed(41);float r[19];for(auto& x:r)x=frac();recvx_core_random_seed(41);
+        EffectSpawn e;e.id=266;e.flg=1;EffectSprite s;initialize_effect_sprite(s,e);s.mode1=1;
+        const int wait=int(10.0f*r[0])+40;
+        step_effect_sprite(s,c,&queued);
+        check(!queued&&s.mode0==1&&s.ct0==wait-1,"266 :3118 ct0 = 40 + 10r, der erste Pass zaehlt schon");
+        int passes=1;while(s.mode0==1&&passes<100){step_effect_sprite(s,c,&queued);++passes;check(!queued,"266 wartet ohne Bild");}
+        check(passes==wait+1&&s.mode0==2,"266 :3123 `ct0-- == 0` nach ct0 + 1 Passes");
+        check(pl.p.hp==80&&(pl.p.flg&0x10004u)==0x10004u&&(pl.p.stflg&0x10000u)&&pl.p.mode0==4&&pl.p.mode2==1&&pl.p.mode3==0,"266 :3127-:3134 Spielertreffer, mode2 = op->mode1");
+        check(pl.fires==4&&close(pl.first.x,1.0f-2.0f*r[1])&&close(pl.first.y,-0.5f+2.0f*r[2])&&close(pl.first.z,1.3f)&&close(pl.size,0.5f+r[3])&&pl.life==int(10.0f*r[4])+20,"266 :3136-:3158 vier Feuer, Zufallsreihenfolge x, y, Groesse, Dauer");
+        step_effect_sprite(s,c,&queued);
+        check(queued&&s.tex_id==9&&!(s.stflg&0x20u)&&(s.flg&0x4180081u)==0x4180081u&&s.bl_dst==10&&s.tv[0].col==0xFFFFFFFFu,"266 :3165-:3176 Flamme");
+        check(close(s.lox,1.0f-2.0f*r[17])&&close(s.loy,-0.5f+2.0f*r[18])&&close(s.loz,1.3f)&&s.link_kind==0&&s.lkono==3,"266 :3178-:3191 Versatz am Spielergelenk 3");
+        check(close(s.sxb,2.5f)&&close(s.sx,5.0f)&&s.frm_no==1,"266 sxb 2.5, BH_UVTAB0[0] Basis 0.125");
+        passes=0;while(s.flg&&passes<40){step_effect_sprite(s,c,&queued);++passes;}
+        check(passes==8&&!queued,"266 acht Bilder, Ruecksprung auf 0 beendet");
+        pl.p=RECVX_ENEMY_PLAYER{};pl.p.hp=50;pl.p.flg=4u;pl.fires=0;
+        EffectSprite t;initialize_effect_sprite(t,e);t.mode0=1;t.ct0=0;
+        step_effect_sprite(t,c,&queued);
+        check(t.mode0==2&&pl.p.hp==50&&pl.fires==0,"266 :3125 plp->flg 0x4 sperrt den Treffer, mode0 laeuft weiter");
+        set_effect_world_hooks({});
+    }
+    { // 273 :4311 / :4494 — Schleimfaden zwischen Raumpunkt und Gelenk der dritten Alexia-Form.
+        RECVX_ENEMY_WORK ene[3]{};ene[0].flg=1;ene[0].id=13;ene[1].flg=0;ene[1].id=14;ene[2].flg=1;ene[2].id=14;
+        EffectProjectileServices svc;svc.enemy=[&ene](int i)->RECVX_ENEMY_WORK*{return i>=0&&i<3?&ene[i]:nullptr;};set_effect_projectile_services(svc);
+        set_effect_work_node_matrix([&ene](const void* w,unsigned node,NJS_MATRIX& out){if(w!=&ene[2]||node!=11)return false;njUnitMatrix(&out);njTranslate(&out,10,20,30);njRotateY(&out,16384);return true;});
+        EffectSpawn e;e.id=273;e.flg=1;e.position={90,33,91};e.scale={0.5f,-0.25f,2.0f};e.ay=8192;e.ax=16384;
+        // :4449-:4470 mit sx/sy des Vorpasses: owP[lkono] T(sx, sy, 0) RotZ(ax) (+-sz, 0, 0).
+        const auto joint_end=[](float sx,float sy,float x){NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,10,20,30);njRotateY(&m,16384);njTranslate(&m,sx,sy,0);njRotateZ(&m,16384);NJS_POINT3 v{x,0,0},o;njCalcPoint(&m,&v,&o);return o;};
+        NJS_MATRIX ry;njUnitMatrix(&ry);njRotateY(&ry,8192);NJS_POINT3 d{2,0,0};njCalcVector(&ry,&d,&d);
+        EffectSprite s;initialize_effect_sprite(s,e);s.lkono=11;
+        step_effect_sprite(s,c,&queued);
+        check(s.lkwkp==&ene[2],"273 :4391-:4398 erstes ene[] mit flg & 1 und id 14");
+        check(s.tex_id==81&&s.ani_ct==1&&s.bl_src==8&&s.bl_dst==10&&(s.flg&0x24080001u)==0x24080001u&&s.mode0==1,"273 :4376-:4389 Start");
+        check(close(s.tv[2].x,90+d.x)&&close(s.tv[2].z,91+d.z)&&close(s.tv[3].x,90-d.x)&&close(s.tv[3].y,33),"273 :4432-:4446 Weltende px +- RotY(ay) (sz,0,0)");
+        const NJS_POINT3 a=joint_end(0.5f,-0.25f,2),b=joint_end(0.5f,-0.25f,-2);
+        check(close(s.tv[0].x,a.x)&&close(s.tv[0].y,a.y)&&close(s.tv[0].z,a.z)&&close(s.tv[1].x,b.x)&&close(s.tv[1].z,b.z),"273 :4449-:4470 Gelenkende mit sx/sy aus dem Satz");
+        check(close(s.sx,0.5f)&&close(s.sy,-0.375f)&&close(s.tv[0].u,0)&&close(s.tv[3].v,0.1875f),"273 :4472 bhEff_SetUVInfo erst nach den Ecken (sy = syb * 1.5)");
+        check(queued&&s.custom_queued&&s.quads.size()==1&&s.quads[0].world_space&&s.quads[0].category==81&&s.quads[0].frame==1&&s.quads[0].source==8&&s.quads[0].destination==10&&!s.quads[0].point_filter&&s.quads[0].fogged&&s.fnc_exit_src==8&&s.fnc_exit_dst==6,"273 :4494-:4517 MucusDraw: Weltecken, Gruppe 81 Bild 1, 8/10, bilinear, danach 8/6");
+        check(close(s.quads[0].vertices[0].x,a.x)&&close(s.quads[0].vertices[2].x,90+d.x),"273 Viereck aus tv");
+        step_effect_sprite(s,c,&queued);
+        const NJS_POINT3 a2=joint_end(0.5f,-0.375f,2);
+        check(close(s.tv[0].x,a2.x)&&close(s.tv[0].y,a2.y)&&close(s.tv[0].z,a2.z)&&s.mode0==1,"273 zweiter Pass rechnet mit dem sy aus bhEff_SetUVInfo");
+        s.mode1=2;step_effect_sprite(s,c,&queued);check(s.mode0==2&&close(s.tv[0].v,0)&&s.frm_no==0,"273 :4406 mode1 schaltet um, Bild noch BH_UVTAB0[0]");
+        unsigned passes=0;
+        while(s.mode0==2&&passes<40){step_effect_sprite(s,c,&queued);++passes;if(passes==1)check(close(s.tv[0].v,0.1875f)&&s.frm_no==1,"273 :4414 uvtble[mode1 - 1] = BH_UVTAB1");}
+        check(passes==12&&s.custom_queued,"273 BH_UVTAB1: zwoelf Bilder, dann mode0 3");
+        step_effect_sprite(s,c,&queued);check(!queued&&!s.custom_queued&&s.flg,"273 :4424 mode0 3 zeichnet nicht und bleibt belegt");
+        EffectSprite hidden;initialize_effect_sprite(hidden,e);hidden.lkono=11;hidden.flg|=0x1000000u;step_effect_sprite(hidden,c,&queued);
+        check(hidden.custom_queued&&hidden.quads.empty()&&hidden.fnc_exit_src==-1&&hidden.fnc_exit_dst==-1,"273 :4496 flg 0x1000000: eingereiht, kein Zeichenaufruf, Blendzustand unberuehrt");
+        ene[2].flg=0;EffectSprite none;initialize_effect_sprite(none,e);none.lkono=11;step_effect_sprite(none,c,&queued);
+        check(!none.lkwkp&&!queued&&none.mode0==1,"273 :4427 ohne aktiven Gegner 14 kein Faden");
+        ene[2].flg=1;
+        EffectSprite joint;initialize_effect_sprite(joint,e);joint.lkono=5;take_effect_output();step_effect_sprite(joint,c,&queued);
+        check(!queued&&!take_effect_output().gaps.empty()&&close(joint.sy,-0.375f),"273 Gelenk ohne Besitzer: benannte Luecke, Zeilenschritt laeuft weiter");
+        EffectSprite bad;initialize_effect_sprite(bad,e);bad.lkono=11;bad.mode1=4;step_effect_sprite(bad,c,&queued);take_effect_output();step_effect_sprite(bad,c,&queued);
+        check(bad.flg==0&&!take_effect_output().gaps.empty(),"273 mode1 - 1 ausserhalb uvtble[3] ist eine benannte Luecke");
+        set_effect_work_node_matrix({});set_effect_projectile_services({});
+    }
+    { // 299 :4520 — springender Punkt ohne Zeichenaufruf.
+        EffectSpawn e;e.id=299;e.flg=1;e.position={0,3,0};EffectSprite s;initialize_effect_sprite(s,e);
+        step_effect_sprite(s,c,&queued);
+        check(queued&&s.custom_queued&&s.quads.empty()&&s.fnc_exit_src==-1&&s.fnc_exit_dst==-1&&s.ct0==5&&close(s.ofy,0.6f)&&close(s.yn,0.2f)&&close(s.py,3.0f),"299 :4524-:4535 Start ohne Bewegung, ef_fnc ohne Viereck");
+        unsigned passes=1,first_bounce=0;float bounce_py=0,bounce_ofy=0;
+        while(s.flg&&passes<200){const unsigned m=s.mode0;const int ct=s.ct0;step_effect_sprite(s,c,&queued);++passes;if(!first_bounce&&m==1&&s.ct0!=ct){first_bounce=passes;bounce_py=s.py;bounce_ofy=s.ofy;}}
+        check(first_bounce==11&&close(bounce_py,0.32f)&&close(bounce_ofy,0.56f),"299 :4544-:4552 erster Bodenkontakt: ofy *= -0.4, py = yn + 0.6 (yn - py)");
+        check(passes==41,"299 sechs Bodenkontakte, dann sechs Passes Nachlauf");
+    }
+    set_effect_ground(nullptr,nullptr,nullptr);take_effect_output();
+}
+// effsub2.c:1336 bhEff_E02_SandParticle2 (255): Wartezeit 120 + 30r, danach mit r < 0.3 ein Korn 254,
+// dessen sx/sy/sz (3) und sxb/syb/szb (0.2/0.3/0.2) getrennt nachgetragen werden.
+static void sand_particle2(){
+    check(supported_effect_sprite(255),"255 nicht als Handport registriert");
+    EffectContext c;bool queued=false;take_effect_output();
+    effect_detail::request_template().scale={7,7,7};
+    recvx_core_random_seed(51);float r[40];for(auto& x:r)x=frac();recvx_core_random_seed(51);
+    EffectSpawn e;e.id=255;e.flg=1;e.position={4,5,6};EffectSprite s;initialize_effect_sprite(s,e);
+    int k=0;bool spawned=false;
+    for(int cycle=0;cycle<20&&!spawned;++cycle){
+        step_effect_sprite(s,c,&queued);
+        const int wait=int(120.0f+30.0f*r[k++]);
+        check(!queued&&s.mode0==1&&s.ct0==wait,"255 :1343 ct0 = 120 + 30r");
+        for(int i=0;i<wait;++i){step_effect_sprite(s,c,&queued);check(take_effect_output().spawns.empty(),"255 wartet ohne Ausgabe");}
+        step_effect_sprite(s,c,&queued);
+        const float roll=r[k++];const auto out=take_effect_output();
+        check(!queued&&s.mode0==0,"255 :1351 nach Ablauf mode0 = 0, zeichnet nicht");
+        if(roll<0.3f){
+            check(out.spawns.size()==1,"255 :1353 r < 0.3: genau ein 254");
+            const auto& g=out.spawns[0];
+            check(g.id==254&&g.flg==1&&g.type==0&&g.ax==0&&g.ay==0&&close(g.position.x,4)&&close(g.position.y,5)&&close(g.position.z,6),"255 :1355-:1367 sys->ef des Korns");
+            check(g.has_scale_base&&close(g.scale.x,3)&&close(g.scale.z,3)&&close(g.scale_base.x,0.2f)&&close(g.scale_base.y,0.3f)&&close(g.scale_base.z,0.2f),"255 :1371-:1379 eff[eno].sx = 3, sxb/syb/szb 0.2/0.3/0.2");
+            EffectSprite grain;initialize_effect_sprite(grain,g);
+            check(close(grain.sx,3)&&close(grain.sy,3)&&close(grain.sxb,0.2f)&&close(grain.syb,0.3f)&&close(grain.szb,0.2f),"255: der neue Satz traegt sx und sxb getrennt");
+            check(close(effect_detail::request_template().scale.x,7),"255 schreibt sys->ef.sx nicht");
+            spawned=true;
+        }else check(out.spawns.empty(),"255 r >= 0.3: kein Korn");
+    }
+    check(spawned,"255: in 20 Zyklen kein Korn (Zufallsfolge pruefen)");
+}
 int main(int argc,char** argv){
     try{
         _Make_SinTable();
         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
         muzzle_weapon229();flame352();effect_call_clip();weapon_flash_call_clip();explosion_punch_through();punch_filter_rgb();punch_lazy_cache();
-        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();head_burst_effects();
+        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();head_burst_effects();effsub2_second_batch();sand_particle2();
         if(argc>1){const std::filesystem::path data=argv[1];explosion_punch_world(data);steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);ntx2d_room(data);afterimage_room(data);published_afterimage_models(data);pol_effect_draw(data);}
         std::cout<<"effect room sprites ok\n";return 0;
     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}

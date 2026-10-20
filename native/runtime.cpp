@@ -17,6 +17,11 @@
 #include "map_objects.h"
 #include "movie.h"
 #include "timing.h"
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <sys/resource.h>
+#endif
 #include "input.h"
 #include "vibration.h"
 #include "frontend.h"
@@ -63,6 +68,8 @@ struct Options {
     std::size_t camera=0,spawn=0,motion=42;
     std::int64_t animation_frame=0;
     bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,validate_poses=false,camera_explicit=false,list_controllers=false,third_person=false,nearest=false,video_explicit=false;int supersampling=2;
+    int renderer=-1; // --renderer gpu|software; Standard: video.ini (gpu) interaktiv, Software headless
+    unsigned render_threads=0; // --render-threads: Host-Diagnose fuer Energiemessungen; 0 = Rendererstandard, Bild fuer jede Zahl identisch
 };
 Options options(int argc,char** argv){
     Options o;
@@ -88,6 +95,8 @@ Options options(int argc,char** argv){
         else if(arg=="--third-person")o.third_person=true;
         else if(arg=="--nearest"){o.nearest=true;o.video_explicit=true;}
         else if(arg=="--ss"){const auto n=number();if(!n||n>4)throw std::runtime_error("--ss must be 1 through 4");o.supersampling=int(n);o.video_explicit=true;}
+        else if(arg=="--renderer"){const auto mode=value();if(mode!="gpu"&&mode!="software")throw std::runtime_error("--renderer expects gpu or software");o.renderer=mode=="gpu"?1:0;}
+        else if(arg=="--render-threads"){const auto n=number();if(n>64)throw std::runtime_error("--render-threads must be 0 through 64");o.render_threads=unsigned(n);}
         else if(arg=="--preview")o.preview=true;
         else if(arg=="--inventory")o.inventory=true;
         else if(arg=="--room")o.room=value();
@@ -142,6 +151,8 @@ Options options(int argc,char** argv){
                        "--player <10..14> --spawn <index> --motion <index> --frame <integer>\n"
                        "--nearest: point-sample textures (no mipmaps/filtering; shimmers) for comparison\n                       "
                        "--ss <1-4>: supersampling factor per axis (default 2; 1 = off, cheaper)\n                       "
+                       "--renderer gpu|software: rasterizer (default: video.ini, gpu; headless runs use software)\n                       "
+                       "--render-threads <0-64>: raster worker threads for energy measurements (0 = default; output identical)\n                       "
                        "--third-person: enable the host 3rd-person camera mod for this run without saving it\n"
                        "--camera <1-based index> --no-player --verify-scenes --verify-players\n"
                        "Pending world bindings and unsupported event commands are reported.\n";
@@ -176,6 +187,19 @@ static std::string player_work_json(const recvx::RoomWorld& world){
     RECVX_ENEMY_PLAYER pl;if(!world.enemy_player_get(pl))return "";
     std::ostringstream o;o<<", \"player_work\": {\"mode\": ["<<int(pl.mode0)<<", "<<int(pl.mode1)<<", "<<int(pl.mode2)<<", "<<int(pl.mode3)<<"], \"flg\": "<<pl.flg<<", \"stflg\": "<<pl.stflg<<", \"mtn_no\": "<<pl.mtn_no<<", \"frm_no\": "<<pl.frm_no<<", \"hokan_count\": "<<pl.hokan_count<<", \"mtn_enemy\": "<<int(pl.mtn_enemy)<<", \"mtn_enemy_owner\": "<<pl.mtn_enemy_owner<<"}";
     return o.str();
+}
+namespace {
+// Prozess-CPU-Zeit aller Threads (Diagnose des Host-Rasterers, kein Spielzustand).
+double process_cpu_seconds(){
+#if defined(_WIN32)
+    FILETIME creation,exit,kernel,user;if(!GetProcessTimes(GetCurrentProcess(),&creation,&exit,&kernel,&user))return 0;
+    const auto ticks=[](const FILETIME& f){return double((static_cast<unsigned long long>(f.dwHighDateTime)<<32)|f.dwLowDateTime)*1e-7;};
+    return ticks(kernel)+ticks(user);
+#else
+    rusage usage{};getrusage(RUSAGE_SELF,&usage);
+    return double(usage.ru_utime.tv_sec)+double(usage.ru_utime.tv_usec)*1e-6+double(usage.ru_stime.tv_sec)+double(usage.ru_stime.tv_usec)*1e-6;
+#endif
+}
 }
 int main(int argc,char** argv){
     try{
@@ -274,57 +298,37 @@ int main(int argc,char** argv){
         auto head_random=[&]{return float(head_rng()%2147483648u)/2147483648.0f;};
         std::vector<RECVX_HEAD_CANDIDATE> head_list;
         std::set<std::string> head_unbound; // original services the head control called without a native owner
-        // bhSearchNearEnemy2 (pwksub.c:443-477) walks ene[0..ewk_n-1] in order and keeps the
-        // works with flg 0x1, without flg 0x8000 and without stflg 0x41000000.
-        auto head_candidates=[&]()->const std::vector<RECVX_HEAD_CANDIDATE>&{
-            head_list.clear();if(!world)return head_list;
-            for(unsigned i=0;i<128;++i){const auto* e=world->state(1,i);if(!e)continue;
-                RECVX_HEAD_CANDIDATE c{};c.index=int(i);
-                /* bhEne01_Init sets epw->lok_jno = 0xa, so the original aims at joint 10.  The
-                 * host has no public accessor for an enemy joint's world matrix, so this takes
-                 * the work position - the original's lok_jno == 0 branch (pwksub.c:447-452).
-                 * Reported as a missing contract; no substitute joint is invented. */
-                c.look_node=0;
-                /* The test is epw->flg and epw->stflg of the enemy work itself.  Bit 0 is set by
-                 * the work creation, bhSetEnemy, which copies the EGG_WORK template's flg
-                 * (eneset.c:183) - the room's ene_n entry, or a per-enemy static such as
-                 * `static EGG_WORK child = { 0x8001, 31, 0 }` (en02.c:223).  bhEne01_Init adds
-                 * 0x178 and clears 2 (en01.c:2712-2713) without touching bit 0; bhEne00 case 0
-                 * adds 0x8120 and clears 6 (eneset.c:401-402).  bhEneSetCk writes stflg 0x1000000
-                 * (event.c:2738), never flg.  native/en01_damage.c is a declared porting gap and
-                 * reports flg 0, so a faithful read finds no searchable work.  No host field is
-                 * substituted for the bit: an enemy without an en01 work has no bearer for it. */
-                c.eligible=0;
-                if(e->en01){RECVX_EN01_STATE st;recvx_en01_state(e->en01.get(),&st);
-                    c.eligible=(st.flg&1)&&!(st.flg&0x8000)&&!(st.stflg&0x41000000u);
-                    if(!(st.flg&1))head_unbound.insert("bhSearchNearEnemy2: epw->flg bit 0 has no native owner (en01_damage.c gap), so no enemy is searchable");}
-                else head_unbound.insert("bhSearchNearEnemy2: enemy work without an en01 state carries no epw->flg/stflg");
-                c.point[0]=e->transform.position.x;c.point[1]=e->transform.position.y;c.point[2]=e->transform.position.z;
-                if(c.eligible)head_unbound.insert("bhSearchNearEnemy2/bhSetHeadRotation: enemy lok_jno 10 world matrix has no public accessor");
-                head_list.push_back(c);}
-            return head_list;};
         struct HeadHostUser {std::unique_ptr<recvx::RoomWorld>* world;std::set<std::string>* unbound;};
         HeadHostUser head_user{&world,&head_unbound};
         RECVX_HEAD_HOST head_host{};head_host.user=&head_user;
         head_host.wall_clear=[](void* user,const float from[3],const float to[3])->int{
             auto& w=*static_cast<HeadHostUser*>(user)->world;if(!w)return 0;
-            // bhCheckC2WallN(&cap, 0x400) == 0 means nothing blocks the line.
-            NJS_POINT3 origin{from[0],from[1],from[2]},delta{to[0]-from[0],to[1]-from[1],to[2]-from[2]};
-            const float range=njSqrt(delta.x*delta.x+delta.y*delta.y+delta.z*delta.z);
-            if(range<1e-4f)return 1;
-            NJS_VECTOR direction{delta.x/range,delta.y/range,delta.z/range};
-            return w->combat_wall_distance(origin,direction,range,0x400)>=range;};
+            // pwksub.c:410-414/:477-486: NJS_CAPSULE c1 = (plp->px, EXP1_F(16), plp->pz), c2 = Zielpunkt,
+            // r = 0.1; bhCheckC2WallN(&cap, 0x400) != 0 sperrt das Ziel. Kapsel mit Radius und allen
+            // Wandtypen wie im Kampfkern (RoomWorld::c2_wall_n), nicht der Strahl combat_wall_distance.
+            const RECVX_CB_CAPSULE cap{{from[0],from[1],from[2]},{to[0],to[1],to[2]},0.1f};
+            return w->c2_wall_n(cap,0x400)==0?1:0;};
+        // pwksub.c:455-457 / player.c:7132-7134: ene[index].mlwP->owP[node].mtx[12..14], index = Platz in
+        // sys->ene. Der Baum ist der zuletzt berechnete (bhControlEnemy laeuft vor bhControlPlayer,
+        // game.c:47-49); ohne ihn meldet player_head.c die Luecke mit Slot und id.
         head_host.target_node_point=[](void* user,int kind,int index,int node,float out[3])->int{
-            auto& w=*static_cast<HeadHostUser*>(user)->world;if(!w)return 0;
-            if(kind!=int(RECVX_HEAD_TARGET_ENEMY))return 0; /* object/item/effect/room targets: see the report */
-            (void)node; /* no public accessor for a joint world matrix; the work position is used */
-            const auto* e=w->state(1,unsigned(index));if(!e)return 0;
-            out[0]=e->transform.position.x;out[1]=e->transform.position.y;out[2]=e->transform.position.z;return 1;};
+            auto& u=*static_cast<HeadHostUser*>(user);auto& w=*u.world;if(!w)return 0;
+            if(kind!=int(RECVX_HEAD_TARGET_ENEMY)){u.unbound->insert("bhSetHeadRotation: obwp/itwp/eff/posp target (EXP1_I(64) 3..6)");return 0;}
+            if(index<0||node<0)return 0;
+            const auto m=w->enemy_slot_joint_matrix(unsigned(index),unsigned(node));if(!m)return 0;
+            out[0]=m->value[12];out[1]=m->value[13];out[2]=m->value[14];return 1;};
         head_host.unbound=[](void* user,const char* name){static_cast<HeadHostUser*>(user)->unbound->insert(name);};
+        // bhSearchNearEnemy2 (pwksub.c:443-462) laeuft ueber sys->ene[0..ewk_n-1]: die Liste kommt aus
+        // der einen Gegnertabelle (RoomWorld::enemy_table) in Slotreihenfolge, EXP1_S(68) = Slot.
+        auto head_candidates=[&]()->const std::vector<RECVX_HEAD_CANDIDATE>&{
+            head_list.assign(RECVX_ENEMY_SLOTS,RECVX_HEAD_CANDIDATE{});
+            if(!world){head_list.clear();return head_list;}
+            head_list.resize(recvx_head_enemy_candidates(&world->enemy_table(),head_list.data(),unsigned(head_list.size()),&head_host));
+            return head_list;};
         std::vector<recvx::SceneTriangle> stage_geometry;std::vector<recvx::Scene::AmbientWrite> stage_ambient;std::size_t stable_textures=0;
         std::vector<std::int16_t> audio_frame;SDL_AudioDeviceID audio_device=0;
         std::int64_t animation=args.animation_frame*65536;
-        NJS_POINT3 camera_offset{}; // cam.ofx/ofy/ofz: cam outlives the room (camera.c:36)
+        NJS_POINT3 camera_offset{}; // cam.ofx/ofy/ofz (camera.c:36/49/81); load() nullt ihn wie bhInitCamera (room.c:33, camera.c:8)
         // player.c:1114 bhStandPlayerMotion on the one host player (ItemTaskCheck, bhSysCallMap
         // case 2, bhExitSpEvtComputer, Player_controll 52, bhEff134). *(int*)&plp->mode0 = 1
         // ends any action, so the next free pass enters act_std's mode3-0 block again.
@@ -428,6 +432,7 @@ int main(int argc,char** argv){
             origin=actor=scene.spawns.empty()?recvx::SceneSpawn{}:scene.spawns[args.spawn];
             camera_check_pending=false; /* der neue Raum beginnt ohne offenen bhCheckCut des alten */hair_reset=true;hair_listed=false;hair_variant=recvx_hair_begin(&hair,int((args.player-10)%4));hair_angles.clear();recvx_head_begin(&head,int((args.player-10)%4));head_pose.clear();head_action_motion=~std::size_t(0);head_push_owned=head_combat_owned=false; // bhResetPlayer rebinds obwp[2]; flg2 0x2 after a room load, mode2/mode3 fall back to act_std
             if(restoring){const auto saved=recvx::snapshot_player(*restoring);actor.position=saved.position;actor.yaw=saved.yaw;} // room.c cb_flg 0x800000: ply_pos/ply_ang
+            camera_offset={}; // system.c:1629 bhInitReadRDT -> room.c:33 bhInitCamera: camera.c:8 npSetMemory(&cam,0x4AC,0) nullt cam.ofx/ofy/ofz bei jedem Raumladen (Spielstart system.c:1396 ebenso)
             world.reset();camera_index=0;camera=scene.cameras[0];follow();stairs={};stair_etc_marked=-1;script_stairs.clear(); // bhSetRDT replaces the room-local player/stair work before bhInitEvent
             stage_geometry=scene.triangles;stage_ambient=scene.ambient_writes;stable_textures=scene.textures.size();
             if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4),inventory.game_mode);recvx::bind_pose_gap([&](const char* name){if(world)world->report_enemy_gap(name);});if(!restoring&&!scene.spawns.empty())world->initialize_player_spawn(); /* bhSetRoom before player setup/Event_init; saved positions retain Y. */origin=actor;follow();if(world)world->set_player_safe_position(actor.position);world->set_player_asset(player.get());{ // bhResetPlayer keeps EXP_WORK.wpntp; only bhSetPlayer (first setup, restored game) derives it from wpnr_no.
@@ -502,7 +507,7 @@ int main(int argc,char** argv){
             recvx::ModelNodeOverrides head_overrides;
             std::int32_t hout[6][3];
             {const auto list=head_candidates();
-             hin.enemy_count=int(list.size()); /* sys->ewk_n */
+             hin.enemy_count=int(world->enemy_table().ewk_n); /* sys->ewk_n, nicht die Listenlaenge */
              recvx_head_tick(&head,&hin,list.data(),unsigned(list.size()),&head_host,hout);}
             for(unsigned n=4;n<6;++n){std::array<Angle,3> a{hout[n][0],hout[n][1],hout[n][2]};
                 if(a[0]!=pose[n].angles[0]||a[1]!=pose[n].angles[1]||a[2]!=pose[n].angles[2])head_overrides[n].angles=a;}
@@ -574,7 +579,7 @@ int main(int argc,char** argv){
                 recvx::Scene screen;screen.background=scene.background;screen.triangles=stage_geometry;screen.ambient_writes=stage_ambient;screen.textures=scene.textures;
                 world->append(screen,nodes,rt->camera,{true,rt->cut}); /* bhAllEasyDrawModel: kein Spieler, keine Effekte */
                 if(!small_screen)small_screen.emplace(512,512); /* njSetTextureInfo(&sys->ren_info, ..., 512, 512) */
-                small_screen->set_texture_filtering(!args.nearest);small_screen->set_supersampling(args.supersampling);
+                small_screen->set_texture_filtering(!args.nearest);small_screen->set_supersampling(args.supersampling);small_screen->set_render_threads(args.render_threads);
                 small_screen->draw_screen(screen,rt->camera,rt->dist,rt->aspect_y);
                 world->commit_small_screen(small_screen->pixels(),512,512);}}
             if(world)world->append(scene,nodes,drawn_camera());};
@@ -684,7 +689,7 @@ int main(int argc,char** argv){
         bool frontend_quit=false;
         auto frontend_command=[&](recvx::FrontendCommand command){if(command==recvx::FrontendCommand::Quit)frontend_quit=true;
             if(command==recvx::FrontendCommand::TitleCall)audio.play(13,"ADV",3); // TitleCall: PlayAdx(0,PatId,3)
-            if(command==recvx::FrontendCommand::NewGame){recvx::set_back_color(0u); /* system.c:410 bhSysCallOpening */retry_point.reset();inventory=recvx::Inventory{};events.reset();game_over_requested=false;audio.stop(13); /* Mode -1: StopAdx(0) */load();gameplay_input.set_events(events.get());if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}}
+            if(command==recvx::FrontendCommand::NewGame){recvx::set_back_color(0u); /* system.c:410 bhSysCallOpening */retry_point.reset();inventory=recvx::Inventory{};combat=recvx::CombatController(args.data,args.mods);events.reset();game_over_requested=false;audio.stop(13); /* Mode -1: StopAdx(0) */load();gameplay_input.set_events(events.get());if(args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}}
             if(command==recvx::FrontendCommand::LoadGame){audio.stop(13);load_game_requested=true;} /* system.c:374 -> Schreibmaschinen-Ladebildschirm */};
         auto debug_room=[&](std::size_t destination,unsigned spawn){
             if(destination>=rooms.size())throw std::runtime_error("Raum nicht vorhanden");
@@ -1193,7 +1198,7 @@ int main(int argc,char** argv){
         auto return_title=[&](){
             for(unsigned slot=0;slot<recvx::audio_voice_count;++slot)audio.stop(slot,0); // RequestAllStopSoundEx(1,1,0)
             movie.stop();menu.reset(inventory);box_menu.reset();computer.reset();dialog=recvx::MessageDialog{};
-            retry_point.reset();inventory=recvx::Inventory{};events.reset();game_over_requested=false;return_title_requested=false;
+            retry_point.reset();inventory=recvx::Inventory{};combat=recvx::CombatController(args.data,args.mods);events.reset();game_over_requested=false;return_title_requested=false;
             frontend.show_main();
         };
         float damage_arp=0;bool damage_pad_release=false; // EXP_WORK arp of bhCPM0_damage/bhCPM0_die; bhControlPlayerPad pending
@@ -1517,7 +1522,12 @@ int main(int argc,char** argv){
             }
             follow();
         };
-        recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);
+        recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);image.set_render_threads(args.render_threads);
+        // Host-GPU-Rasterer (gpu_raster.h) fuer das Hauptbild; Headless-Pruefungen bleiben ohne --renderer gpu in Software.
+        if(args.renderer>=0?args.renderer==1:(!args.headless&&video.settings().renderer==recvx::RenderBackend::Gpu)){
+            std::string reason;if(auto gpu=recvx::create_gpu_raster(reason)){image.set_gpu(gpu);std::cout<<"Renderer: "<<gpu->name()<<'\n';}
+            else std::cout<<"Renderer: software ("<<reason<<")\n";}
+        else std::cout<<"Renderer: software\n";
         auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}
         // Original enemy routines that were reached but are not bound yet.
         if(world&&!world->unbound_enemy_routines().empty()){std::cout<<"Enemy gaps: "<<world->unbound_enemy_routines().size()<<'\n';for(const auto& gap:world->unbound_enemy_routines())std::cout<<"  "<<gap<<'\n';}if(!combat.unbound_routines().empty()){std::cout<<"Combat gaps: "<<combat.unbound_routines().size()<<'\n';for(const auto& gap:combat.unbound_routines())std::cout<<"  "<<gap<<'\n';}if(!args.state.empty()){if(fs::exists(args.state))throw std::runtime_error("state output already exists");std::ofstream out(args.state);if(!out)throw std::runtime_error("cannot create state output");out<<"{\n  \"debug_open\": "<<(debug.active()?"true":"false")<<", \"debug_selected\": "<<debug.selected()<<", \"debug_status\": "<<std::quoted(debug.status())<<", \"player_entry\": "<<args.player<<", \"player_owner\": "<<inventory.player<<", \"wireframe\": "<<(wireframe?"true":"false")<<",\n  \"title_active\": "<<(frontend.active()?"true":"false")<<", \"settings_active\": "<<(frontend.settings()?"true":"false")<<", \"settings_selected\": "<<frontend.selected()<<", \"title_mode\": "<<frontend.mode()<<", \"title_cursor\": "<<frontend.cursor()<<", \"title_attract\": "<<frontend.attract_count()<<",\n  \"room\": "<<std::quoted(rooms.name(room_index))<<", \"room_changes\": "<<room_changes<<", \"door_active\": "<<(transition_pending?"true":"false")<<", \"door_ticks\": "<<door.ticks()<<", \"door_skipped\": "<<(door.skipped()?"true":"false")<<", \"door_voices_active\": ["<<audio.active(recvx::door_voice_first)<<", "<<audio.active(recvx::door_voice_first+1)<<", "<<audio.active(recvx::door_voice_last)<<"], \"system_sound_active\": ["<<audio.active(2)<<", "<<audio.active(3)<<"], \"door\": ";
@@ -1633,6 +1643,7 @@ int main(int argc,char** argv){
    Task 8 (bhControlEvent) und der Soundmonitor laufen weiter. */
                 const bool world_pass=!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()&&!map_active&&!menu.active; /* Task 7 (bhSysCallGame) laeuft; derselbe Wert fuer beide Haelften des Passes */if(world_pass){world->set_simulation_flags(events?events->flags[6][0]:~0u);{unsigned on=pad_on,ps=pad_ps;if(events){if(!(events->flags[6][0]&0x20u))on=ps=0;if(events->flags[10][0]&4u){on&=0x1188Fu;ps&=0x1188Fu;}}world->set_pad(on,ps);} /* system.c:522-534 */world->set_screen_fade_hooks(fade_set,[&]{return screen_fade.previous();});world->set_player_weapon(inventory.weapon());world->set_player_way(combat.aim_yaw());world->set_player_speed(action.spd);world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);world->set_player_dmlvl(action.dmlvl);world->set_player_wpntp(action.wpntp);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick_enemy_pass();world_requests();} /* game.c:48 bhControlEnemy und Kopf von bhControlPlayer */{const bool playing=movie.active();movie.tick();if(playing&&!movie.active()&&world)world->restore_background(1);}audio.mix();if(!menu.active&&!map_active){locomote(replay_move,replay_run,replay_turn);(void)head_step();}if(world_pass){world_player_sync();world->tick_after_player();world_requests();}if(!menu.active&&!map_active)hair_step(); /* game.c:49-51: bhControlPlayer endet mit bhControlPlayerHead/bhCalcModel(plp) (player.c:1683-1688), dann bhControlEffect und bhControlObjItm mit bhObjClpn (objitm.c:2122) */if(!menu.active&&!map_active&&world){world->control_camera(scene,camera);camera_check_pending=true;} /* game.c:53-58 bhSetPlEyeCamera/bhControlCamera; bhCheckCut (game.c:289-296) folgt erst nach dem Zeichnen (Taktbeginn). system.c:777: die Karte stoppt Task 7 */if(!menu.active&&!map_active)third_person_tick();if(args.validate_poses)compose();game_over_step(); /* Task 14 nach Task 7 (md1 0) */if(i==frames-1)draw(unsigned(i));if(frontend_quit)break;}
             if(!args.screenshot.empty())image.save_bmp(args.screenshot);
+            if(image.gpu())std::cout<<"GPU raster last frame: "<<image.gpu()->draw_calls()<<" draws, "<<image.gpu()->shadow_composites()<<" shadow composites\n";
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
             report();return events&&!events->errors.empty()?1:0;
         }
@@ -1652,11 +1663,21 @@ int main(int argc,char** argv){
         std::unique_ptr<SDL_Texture,decltype(&SDL_DestroyTexture)> texture(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480),SDL_DestroyTexture);sdl_check(bool(texture));
         SDL_AudioSpec requested{},obtained{};requested.freq=48000;requested.format=AUDIO_S16SYS;requested.channels=2;requested.samples=1024;
         audio_device=SDL_OpenAudioDevice(nullptr,0,&requested,&obtained,0);if(!audio_device)std::cerr<<"Audio output unavailable: "<<SDL_GetError()<<'\n';else SDL_PauseAudioDevice(audio_device,0);
-        bool running=true,paused=false;bool render_dirty=true;unsigned rendered_frames=0;int frame=0;unsigned input_tick=0;double accumulator=0;auto previous=std::chrono::steady_clock::now();
+        const double startup_cpu=process_cpu_seconds();const auto startup_wall=std::chrono::steady_clock::now();
+        std::optional<SDL_Event> stashed;unsigned events_handled=0,waits=0,immediate_waits=0;double draw_seconds=0;
+        bool running=true,paused=false;bool render_dirty=true;unsigned presented_frames=0;std::string window_title;unsigned rendered_frames=0;int frame=0;unsigned input_tick=0;double accumulator=0;auto previous=std::chrono::steady_clock::now();
         while(running){
+            // Ein beim Warten entnommenes Ereignis wird direkt verarbeitet, nicht zurueckgereiht.
+            for(;;){
             SDL_Event event;
-            while(SDL_PollEvent(&event)){
-                render_dirty=true;
+            if(stashed){event=*stashed;stashed.reset();}
+            else if(!SDL_PollEvent(&event))break;
+            ++events_handled;
+                // game.c:357 zeichnet einmal je Takt (bhPutModel(plp) zaehlt pl_sleep_cnt im Zeichenpass ab).
+                // Reine Bewegungsereignisse (Maus, Stick-/Achsenrauschen) aendern ohne Takt kein Bild und
+                // duerfen keinen zusaetzlichen Zeichenpass ausloesen; nur die Titel-Tastenaufnahme liest Achsen.
+                const bool motion_event=event.type==SDL_MOUSEMOTION||event.type==SDL_CONTROLLERAXISMOTION||event.type==SDL_JOYAXISMOTION||event.type==SDL_JOYBALLMOTION||event.type==SDL_FINGERMOTION;
+                if(!motion_event||frontend.active())render_dirty=true;
                 if(ui&&!debug.active()&&event.type==SDL_KEYDOWN&&!event.key.repeat&&(event.key.keysym.scancode==SDL_SCANCODE_F5||event.key.keysym.scancode==SDL_SCANCODE_F9)){
                     try{std::cout<<(event.key.keysym.scancode==SDL_SCANCODE_F5?save_snapshot(0):load_snapshot(0))<<'\n';audio.play_system(3);}catch(const std::exception& e){std::cerr<<"Snapshot: "<<e.what()<<'\n';audio.play_system(1);}
                     devices.suppress_held();accumulator=0;continue;}
@@ -1751,14 +1772,35 @@ int main(int argc,char** argv){
                 if(!args.preview&&args.replay.empty())combat_input={physical.down(recvx::Action::Aim),physical.down(recvx::Action::Attack)||physical.hit(recvx::Action::Attack),physical.turn(),physical.move(),physical.hit(recvx::Action::NextTarget)};
                 if(!menu.active&&!map_active){locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());(void)head_step();} /* system.c:777 stoppt Task 7 waehrend der Karte */if(world_pass){world_player_sync();world->tick_after_player();world_requests();}if(!menu.active&&!map_active)hair_step(); /* game.c:49-51: bhControlPlayer endet mit bhControlPlayerHead/bhCalcModel(plp) (player.c:1683-1688), dann bhControlEffect und bhControlObjItm mit bhObjClpn (objitm.c:2122) */if(!menu.active&&!map_active&&world){world->control_camera(scene,camera);camera_check_pending=true;} /* game.c:53-58 bhSetPlEyeCamera/bhControlCamera; bhCheckCut (game.c:289-296) folgt erst nach dem Zeichnen (Taktbeginn). system.c:777: die Karte stoppt Task 7 */if(!menu.active&&!map_active)third_person_tick();if(args.validate_poses)compose();game_over_step(); /* Task 14 nach Task 7 (md1 0) */
             }
-            if(render_dirty){draw(input_tick,devices.controllers());++rendered_frames;render_dirty=false;
-            sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);}
-            sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());
-            const std::string title=frontend.active()?"Resident Evil CODE: Veronica X | Title":"RECVX native | "+rooms.name(room_index)+" | Camera "+std::to_string(camera_index+1)+(player?" | Motion "+std::to_string(motion):"")+(ui?" | Native development":" | Preview");SDL_SetWindowTitle(window.get(),title.c_str());
+            // Ein Bild je Takt (game.c): zwischen zwei Takten bleibt das zuletzt praesentierte Bild
+            // stehen. Erneut praesentieren und den Fenstertitel neu setzen waere je Display-Takt
+            // (120 Hz) doppelte Arbeit am selben Bild und weckte den Prozess unnoetig.
+            bool presented=false;
+            if(render_dirty){const auto draw_begin=std::chrono::steady_clock::now();draw(input_tick,devices.controllers());draw_seconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-draw_begin).count();++rendered_frames;render_dirty=false;
+            sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);presented=true;}
+            if(presented){
+                sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());++presented_frames;
+                const std::string title=frontend.active()?"Resident Evil CODE: Veronica X | Title":"RECVX native | "+rooms.name(room_index)+" | Camera "+std::to_string(camera_index+1)+(player?" | Motion "+std::to_string(motion):"")+(ui?" | Native development":" | Preview");
+                if(title!=window_title){SDL_SetWindowTitle(window.get(),title.c_str());window_title=title;}}
             ++frame;if(args.frames&&frame>=args.frames)running=false;
-            SDL_Delay(1);
+            // Statt jeden Millisekunden zu pollen: auf Eingabe oder den naechsten Takt warten. Das
+            // Ereignis wird zurueckgereiht und im naechsten Durchlauf mit allen anderen verarbeitet.
+            if(!presented&&running){
+                const double remaining=paused?0.1:std::max(0.001,recvx::game_tick_seconds-accumulator);
+                SDL_Event pending{};const auto wait_start=std::chrono::steady_clock::now();++waits;
+                if(SDL_WaitEventTimeout(&pending,int(std::ceil(remaining*1000.0)))==1){stashed=pending;
+                    if(std::chrono::duration<double>(std::chrono::steady_clock::now()-wait_start).count()<0.0005)++immediate_waits;}}
         }
         if(!args.screenshot.empty())image.save_bmp(args.screenshot);
-        std::cout<<"Presentation: "<<frame<<" presents, "<<rendered_frames<<" renders, "<<input_tick<<" simulation ticks.\n";if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
+                const double cpu_used=process_cpu_seconds()-startup_cpu,wall_used=std::chrono::duration<double>(std::chrono::steady_clock::now()-startup_wall).count();
+        std::cout<<"Presentation: "<<presented_frames<<" presents, "<<rendered_frames<<" renders, "<<input_tick<<" simulation ticks, "<<frame<<" loop passes, "
+                 <<cpu_used<<" s cpu over "<<wall_used<<" s ("<<(wall_used>0?100.0*cpu_used/wall_used:0)<<" % of one core), "
+                 <<events_handled<<" events, "<<waits<<" waits ("<<immediate_waits<<" immediate)\n";
+        {const auto& t=image.timings();const double frames=std::max(1.0,double(rendered_frames));
+         std::cout<<"Draw: "<<(rendered_frames?1000.0*draw_seconds/frames:0)<<" ms/frame total; setup "<<1000.0*t.setup/frames<<", gpu "<<1000.0*t.gpu/frames
+                  <<", bands "<<1000.0*t.bands/frames<<", shadow "<<1000.0*t.shadow/frames<<", lines "<<1000.0*t.lines/frames<<" ms/frame\n";}
+        if(image.gpu()){const auto& g=image.gpu()->timings();const double frames=std::max(1.0,double(rendered_frames));
+         std::cout<<"GPU: build "<<1000.0*g.build/frames<<", upload "<<1000.0*g.upload/frames<<" ("<<g.uploads<<" textures), encode "<<1000.0*g.encode/frames
+                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
     }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';return 1;}
 }

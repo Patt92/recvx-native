@@ -2,22 +2,22 @@
 
 Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.
 
-Expliziter Belegumfang: **87.3 %** gewichtet, **75.1 %** voll belegt (471/627 Mechanismen; kein Gesamtfortschritt).
+Expliziter Belegumfang: **87.3 %** gewichtet, **75.3 %** voll belegt (493/655 Mechanismen; kein Gesamtfortschritt).
 
-Event-Befehle (bhScenarioJmpT): 206/223 gebunden, 17 nur konsumiert, 0 fehlen.
+Event-Befehle (bhScenarioJmpT): 211/223 gebunden, 12 nur konsumiert, 0 fehlen.
 
 | Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |
 |---|---:|---:|---:|---:|---:|
-| Gegner/KI | 70/102 | 84.3 % | 68.6 % | 32 | 0 |
-| Effekte | 210/233 | 95.1 % | 90.1 % | 23 | 0 |
-| Events/Skript | 56/72 | 88.9 % | 77.8 % | 16 | 0 |
-| Spieler/Kampf | 43/61 | 85.2 % | 70.5 % | 18 | 0 |
-| Raum/Kamera/Tür | 12/33 | 68.2 % | 36.4 % | 21 | 0 |
+| Gegner/KI | 72/103 | 85.0 % | 69.9 % | 31 | 0 |
+| Effekte | 220/250 | 93.8 % | 88.0 % | 29 | 1 |
+| Events/Skript | 63/79 | 89.9 % | 79.7 % | 16 | 0 |
+| Spieler/Kampf | 44/62 | 85.5 % | 71.0 % | 18 | 0 |
+| Raum/Kamera/Tür | 14/35 | 70.0 % | 40.0 % | 21 | 0 |
 | Menü/Items/Text | 43/54 | 87.0 % | 79.6 % | 8 | 3 |
 | Modelle/Animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
 | Audio | 5/21 | 61.9 % | 23.8 % | 16 | 0 |
 | Ablauf/Speichern | 22/36 | 80.6 % | 61.1 % | 14 | 0 |
-| Plattform (Host-ersetzt) | 15/30 | 75.0 % | 50.0 % | 15 | 0 |
+| Plattform (Host-ersetzt) | 16/31 | 75.8 % | 51.6 % | 15 | 0 |
 
 Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichheit, Originalquellen und quarantänierte Generatoren zählen nie als Portbeleg.
 
@@ -26,18 +26,18 @@ Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichhe
 - `adv.c` Adv_GameOptionScreen (missing, Optionsbildschirm (DisplayOptionPlateLevel0-3, Sound/Vibration/Key-Config) nicht portiert; OPTION oeffnet den Host-Einstellungsbildschirm (frontend.h, dokumentierte Abweichung))
 - `adv.c` CheckMcSelectPortInfoState (missing, Originale Memory-Card-Portabfrage nicht portiert; die Host-Slotauswahl ermittelt belegte Spielstaende aus dem Benutzerdatenverzeichnis)
 - `adv.c` FindFirstVmDrive (missing, Originale Memory-Card-Suche nicht portiert; der Host ersetzt sie durch native Spielstaende im Plattform-Benutzerdatenverzeichnis und aktiviert LOAD GAME bei belegtem Slot)
+- `effsub4.c` bhEff_Sub367 (missing, effsub4.c:2007: exp0 (EFFSUB367_WORK) und op->func ohne Erzeuger im Original (kein C-/ELF-Treffer); nicht portiert, bleibt Luecke bhEff367.)
 - `MdlPut.c` bhPutModel (partial, Spiegelaufruf MdlPut.c:57-79/89-111 (2026-10-18): unter st_flg 0x100 jedes bhPutModel mit mlwP->flg 0x80 (MDL-Statusbyte [3], binfunc.c:34) und ohne ewP->mdflg 0x40 ein zweites Mal unter cam.mtx*njMirror (SceneTriangle::mirror 1), Licht aus ungespiegeltem cam.mtx (Normalen gespiegelt fuer das Einzellicht). mdflg 0x40: Spieler player.c:1666-1676 (RoomWorld::check_player_mirror_floor nach bhCheckFloorP, bhCheckFloorEffect prm0 2 an gpx/gpz, owP[0] bei stflg 0x30/mode0 7), Gegner aus dem Work (en01.c:4059 portiert), Objekte/Items objitm.c:169/233 (flg 0x20000000). Grenze: Haar obwp[2] und Waffen werden ohne eigene Statusbyte-Pruefung je Aufruf kopiert (alle Originaldaten SYSTEM 0010-0014 mdl[4] und Waffenarchive tragen 0x80, gemessen); Kindgegner pruefen ihr Statusbyte. Test mirror_pass (Spieler aussen gespiegelt, innen nicht; Gegenproben rot).)
 - `Motion.c` bhSetMotion:Spieler (partial, player.c:1502 bhSetMotion(plp) Knotenteil (SetMtnNormal/Fast/Slow und ihre Hokan-Varianten, Motion.c:131-859) seit 2026-10-16 auf dem einen plp->mlwP->objP (RoomWorld::player_obj_) ueber das vorhandene set_motion (motion_set.cpp): RoomWorld::player_set_motion_pose mit dem Stand VOR Vorschub und hokan_count-Abzug; die Uhren bleiben bei ihren Pfaden. Gebunden: Aktions-/Eventpfad (runtime vor recvx_player_action_motion, mtn_md 0 aus player.c:1779), Kampfkern (services.set_motion_pose in cb_set_motion, Luecke SetMtn*Hokan entfaellt), Schaden (bhCPM0_damage hokan 49152/4 jetzt am Spielerwerk), Griff (player_set_motion_now schreibt objP statt Wegwerfpuffer), Schieben (player_push_core hokan_sample, hokan_count sinkt je Pass; Slow-Abtastung push_->pose nur noch ohne objP). Darstellung: player_pose_edits legt objP unter alle Bearbeitungen (sample_player, Kopf, Gelenke, Fussschritt, model_pose_physical, Kampf publish_pose). Folge: Motionwechsel blenden, und die gezeigte Pose ist wie im Original das Bild VOR dem Vorschub (vorher eins weiter). Test player_motion_blend (zwei Gegenproben rot); RECVX_PLAYER_POSE_TRACE belegt Mischung in Lauf->Stand und Ziehen/Wegstecken. OFFEN: Treppe (player_stairs), Gameover, skriptgefuehrte Spielermotion (world.cpp 0x65/0x66) fuehren objP noch nicht.)
 - `adv.c` AdvGetCancelButton (partial, Host-Cancel statt keytype-Tabelle {32,128,64})
 - `adv.c` AdvGetOkButton (partial, Host-Confirm steht fuer 0x800 (Start) und den keytype-OK-Button zugleich; keytype-Tabellen {192,96,160} nicht gebunden)
 - `adv.c` ResetAdvSystem (partial, Nur die Titelfelder NextReturnCode/ExtraFlag/NextMode/GenFlag und StopAdvScreenSaver(1) (Frontend::reset_adv_system); Texturlisten, Optionsfelder und VM-Felder fehlen)
-- `camera.c` bhControlCamera (partial, cam.ofx/ofy/ofz: Besitzer Runtime (ueberdauert den Raumwechsel), RoomWorld::camera addiert ihn auf cam.px (Sicht, Effektkamera, Schallposition). Schreiber gebunden: EN13. Offen: en02/en17/event.c/effsub3.c-Schreiber.)
+- `camera.c` bhControlCamera (partial, cam.ofx/ofy/ofz: Besitzer Runtime (ueberdauert den Raumwechsel), RoomWorld::camera addiert ihn auf cam.px (Sicht, Effektkamera, Schallposition). 2026-10-20: alle Originalschreiber gebunden - EN02 (en02.c:3074), EN13 (en13.c:1105), EN17 (en17.c:1672, nur ofy; die Bindung nullte vorher ofx/ofz mit), event.c:4701 bhCamYureSet (0x5a), effsub3.c:3177/3220 bhEff30a. Raumladen nullt den Versatz wie bhInitCamera (system.c:1629 -> room.c:33 -> camera.c:8); vorher blieb ein beim Verlassen aktives Wackeln im naechsten Raum stehen. Test camera_offset (RM_9280/RM_5830). Offen: Raumwechsel-Ruecksetzung nicht zur Laufzeit beobachtet; bhGetCameraPosition (cut.c:1064) nicht eigens geprueft.)
 - `cut.c` bhControlActiveCamera (partial, Kopf :1197-1217 (cam.plx/ply/plz): RoomWorld::tick_camera uebergab camera_for_actor immer plp->px/py/pz. Unter plp->stflg 0x30 (bhCheckExmAtari Typ 1/2, hitchk.c:4677/4747) und plp->mode0 7 liest das Original owP[0] des letzten bhCalcModel (:1201-1203 / :1214-1216); die Spielerarbeit zieht in Stufenaktionen nur beim Motionumlauf nach (player.c:3258-3271, nativ player_stairs.c:410-416). Nutzerbefund 2026-10-18 'Treppenkamera stockt stueckweise' (RM_3080). Gemessen kdd ab (117,36,90), Schnitt 3: vorher 3.288 Einheiten in einem Bild und 42 von 80 Bildern Stillstand, jetzt 0.071..0.340 je Bild, kein Stillstandsbild; Endlage unveraendert, freies Gehen bitgleich (RM_1000/3080/0050), verify_stairs gruen. Test camera_follow_target (Gegenprobe rot: Strecke 0.004 statt 7.99). Offen: Zweig der freien Steuerung :1207-1209 (0.5er-Naeherung an EXP_WORK plx/plz, player.c:1657-1661, cam.ply = rom->grand[flr_no+2]) ohne Besitzer; bhCheckCutAttribute bekommt floor_at statt plp->flr_no; Augenkamera-Rueckfuehrung (world.cpp bhInitActiveCamera) ungemessen.)
 - `cut.c` bhControlEventCamera (partial, Vollstaendige mode0-Maschine in RoomWorld::control_event_camera (native/world.cpp): 0 Initpass mit st_flg 0x10/0x800000 und bhInitEventCamera (:1998-2020), 1 Fahrt, 2 Endhalten unter !(gm_flg 0x1) (:2140), 3 aus bhCamPauseSet ohne case-Zweig (Pose, cam.ct0 und cam.keyf_no halten). cam.ct0 zaehlt nur bei !(sys->st_flg & 0x80) (:2101). Alle vier Splines laufen jetzt ueber die 20 Kontrollslots cam.ips/ian/ipf/icr statt ueber die Rohkeys; Keyframe-Lock lkflg/lkno/lkono nur bei Gleichheit mit kfp[1] bzw. keyf_n==1 (:2049-2056, Fall 2 ohne den keyf_n-Zweig :2159-2166). Gemessen RM_0040 ev5 (bhCamSet 0,10,1 + bhCamPauseSet 0): vorher drehte ax 65338->54060 ueber 30 Bilder, jetzt Standbild exakt auf Key 1 (7.5,11.5,4.5 / -198,-17736,0 / pers 9102) wie im RDT. Offen: sys->pt_flg 0x1 des 0x800000-Zweigs hat keinen nativen Besitzer, und cam.pers wird ohne belegte CAM_WORK-Breite nicht genarrowt.)
 - `cut.c` bhSetCut (partial, cam.fog_* vom Schnitt, fog_ct = fog_cngct-3 (ef_flg 0x10 einmal weniger) bei st_flg 0x2 && flg 0x8, sonst 0, gm_flg 0x10 (:349-377) in RoomWorld::cut_fog_handover ueber initialize_camera_clip; sys->fog_cngct ohne ss_flg-Bit-1-Besitzer fest 2 (fog_ct ist bei 2 und 3 gleich 0). Uebrige bhSetCut-Teile (Clip/Hide) wie zuvor.)
 - `cut.c` bhSetEventCamera (partial, Opcode 0x13 Modus 0 setzt jetzt cam.px/py/pz, cam.ax/ay/az (als vorzeichenbehaftete CAM_KEYF_WORK-shorts) und cam.pers aus dem Key und bei lkflg != 0 sofort die Zielwinkel (:1660-1684), danach *(int*)&cam.mode0 = 0 (:1686) als Initpass von bhControlEventCamera. cam.fog_* nehmen den Key in BEIDEN Zweigen; nur sys->fog_ct unterscheidet sich (fog_cngct - 4, geklemmt, bei st_flg 0x2 && kfp->flg 0x8, sonst 0, :1694-1716) - vorher uebernahm der Host die Fogwerte nur im ersten Zweig und setzte fog_ct nie. gm_flg 0x10 (:1718). Splines cam.ipf/cam.icr je Bild in control_event_camera. Offen: cam.pxp/axp-Vorgaengerfelder, cam.ln, cam.flg 0x2/0x38 und bhSetEventHideObjLgt als Aufruf.)
 - `cut.c` bhSetFixedCut (partial, Fog-Uebergabe :463-484 (ohne ef_flg-Zweig) bei Opcode 0x2a Modus 0. Seit 2026-10-16 auch :486 cam.ncut = cno vor bhChangeViewClipRM (:537): die Nahgrenze kommt aus dem neuen Schnitt, nicht aus dem vorigen Raumschnitt (RM_1050 Ameisen-Juwel: Schnitt 5 behielt 20/20000 von Schnitt 1, die Vitrine lag vor der Nahgrenze, es blieb die Hintergrundfarbe). Test native_ground_world (Gegenprobe rot).)
-- `door.c` bhControlDoor (partial, native/doors.cpp tick: recvx_door_step, zwei CallDoorSe-Gruppen (0xF0000 sofort, 0xF00000 erst bei status 0x20), ControlSoundTiming-Kommandos, Ende nur ueber status 0x40 aus FadeProc1 (door.c:641). spd_mde-Schleife nur DMO_SPD_1; Zeichnung Host-Renderer.)
 
 ## Unbestätigte historische Ledger-Einträge
 

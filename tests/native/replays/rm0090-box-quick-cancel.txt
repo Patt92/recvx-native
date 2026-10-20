@@ -1,0 +1,11 @@
+# RM_0090 Security Box obwp[5]: Diagnoseplatzierung (kein Laufweg), Startinventar mit Feuerzeug (Metall).
+# Boden 6 -> Boden 4: scd1 @1490/@1498 startet Ereignis 2 (Kamera 9) und 31 (Klappe +75 Grad, relativ).
+# 180 schliesst die Meldung, 230 untersucht die Box (etc 12: scd1 @2110 Ereignis 19, Sleep 30) und
+# oeffnet den Sicherheitsbox-Schirm; 240 bricht sofort ab. Nativ endet st_flg 0x8 nach ~19 Bildern,
+# danach ersetzt scd1 @1472 (EvtOn 0,0) Ebene 0 - Ereignis 19 erreicht sein Common 9 nicht,
+# die Klappe bleibt offen (headless: --frames 420, Raumkamera zeigt obwp[5] mit offener Klappe).
+30 position 34.5 0 5 16384
+60 position 44.5 0 5 0
+180 confirm
+230 confirm
+240 cancel

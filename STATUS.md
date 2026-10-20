@@ -37,6 +37,18 @@ danach das v0.5-Paket, zuletzt das Build-Binary. Die Dokumentationstrennung änd
 keine Runtime, kein Paket, keine Konfiguration und keinen Snapshot.
 Nicht aus einem alten „im Paket“-Absatz eine aktuelle Auslieferung ableiten.
 
+**Leistung/Energie:** Der Software-Rasterer ist ≈ 99 % der CPU-Last (≈ 62–70 ms CPU je
+Raumbild bei „High“, Simulation ≈ 0.26 ms/Takt). Plan und Messbasis:
+[Plan](work/performance_optimization_plan_20261020.md),
+[Phase A + Schnitte](work/performance_phaseA_scalpel_20261020.result.md)
+(`bilinear` inline −8 % bitidentisch, ein Zeichenpass je Takt, `--render-threads` für
+`powermetrics`-A/B am Starter). Workerzahl per `powermetrics` entschieden (Automatik bleibt).
+[GPU-Machbarkeit](work/performance_gpu_feasibility_20261020.result.md) bestanden: dieselbe
+Setup-Liste auf Metal statt 62–73 ms CPU. **[GPU-Rasterer im Spiel](work/performance_gpu_raster_d2_20261020.result.md)**
+(macOS, Dev-App): `video.ini renderer = gpu` (Standard), `--renderer gpu|software`; Punktabtastung
+bitgleich inkl. Schatten (Test `gpu_raster_parity`), CPU je Bild ≈ 0,3–0,5 ms. Offen: Wattmessung
+am Starter, D3D11-Backend (Windows bis dahin Software).
+
 **Kartenbild:** MAP zeichnet MRY-Geometrie, Marker und Sprites in der eigenen
 Build-Runtime; Fade-Rückweg und Wiedereintritt gezielt geprüft. Constant-Material-
 Farbpfad und Typ-41-Normalen korrigiert. **Noch keine Starter-/Paketersetzung.**
@@ -1195,6 +1207,34 @@ objitm.c:164/:228) portiert: unter st_flg 0x2 zeichnen diese Objekte/Items ohne 
 ist wirkungslos (ps2_NinjaCnk.c:205-215 liest 0x2000/0x400 nicht). Test object_cut_restriction Abschnitt 3, zwei Gegenproben
 rot. [Logs](build/validation/light-clip-20261020/), [eff199](build/validation/eff199-20261020/),
 [Nebel](build/validation/object-fog-20261020/). **Kein Commit/Push.**
+(bd) Waffenmodell-Ladeauftrag von plp->wpnr_no getrennt (2026-10-20): bhSv 18/0xAF aendern nur den
+Spielerwert; nur mn_mode0 3 (WeaponSet/GetItem/ItemBoxChange/0x27) und Spielstart/Spielerwechsel/Laden
+ersetzen das Waffenwerk. Ein 0x27 mit identischer Nummer laedt erneut und nullt mdflg, bhSv 18 nicht.
+ply_wno wird bei bhSv 18/0x27 sofort mitgeschrieben. Test player_weapon_number erweitert, drei Gegenproben
+rot; Zwischenstand CTest 177/177. [Beleg](build/validation/weapon-reload-20261020/). **Kein Commit/Push.**
+(be) Drei Lichtluecken parallel (drei Unteragenten, vom Hauptprozess integriert und nachgeprueft, 2026-10-20). (1) Effekt-
+modelle 364 (Steve-Nachbilder, Albinoid-Blitz) zeichnen jetzt auch im zweiten bhDrawEffect des Spiegelpasses, mit dem mdflg
+des Effekts als Tor; zugleich behoben: sie wurden bisher gar nicht beleuchtet (Lichtlauf endete vor ef_fnc). (2) bhSetEasyDirLight
+Typ 100/101 schreitet im bhControlLight-Aufruf unter gm_flg 0x80 fort; die Zeichenpass-Aufrufe und getrennter Easy-/Simple-Satz
+bleiben benannte Luecke. (3) Lichtlink lkflg 5 auf eff[efid] portiert (in den Raumdaten unbenutzt); Nebeneffekt: bhDrawPolEffect
+zeichnete bei fehlender Elternmatrix mit Einheitsmatrix (Ersatz entfernt, jetzt Luecke). CTest 180/180, 12 Gegenproben rot,
+Starter: Titel, RM_7100/9280/1020/0000 ohne blockierte Befehle und ohne neue Luecken, arm64/Signatur ok. Berichte
+work/{light_effect_link,easy_dir_light,effect_model_mirror}.result.md, Logs build/validation/light-link-easydir-20261020/ und
+build/validation/effect-model-mirror/. Keine Sichtabnahme. **Kein Commit/Push.**
+(bf) Zwei Wellen mit je fuenf Unteragenten (2026-10-20), jede Integration vom Hauptprozess am Original nachgeprueft,
+CTest 188/188, Dev-App ausgeliefert, Titel/RM_0000/0080/0090/2050/3130/5810/7030/9280 ohne blockierte Befehle und ohne neue
+Luecken (RM_7030 hat 3 offene Weltbindungen, am HEAD-Stand gemessen identisch), arm64/Signatur ok. Welle 1: verify_combat-
+Erwartung korrigiert (Steve schiesst in RM_0030 dreimal ueber plp->wpnr_no, fuenf ARMS-Klaenge sind originalgetreu);
+Kopfsuche bhSearchNearEnemy2 aus ene[]/owP[lok_jno]; 15 Effektprozeduren (u. a. 273 Alexia-Schleimfaeden RM_5810/9302 mit
+eigenem Weltest, 357, 398). Welle 2: Skriptbefehle 0x6E bhHEffectSet und 0x4A bhYakkyouSet gebunden; Kamerawackeln (EN17
+nullte ofx/ofz, Raumwechsel liess Wackeln stehen); Item-Licht (Glanztor, Monitor Stufe 7 blau, Licht-1-Nachwirkung);
+Gegnergelenke der Maskenfiguren id 91..99 logisch statt physisch (Effektlinks lkono 28..30, EN16-Treffer, dam[27..30]);
+Koerper-Wandpass mit plp->pxb; Common_controll 10 schreibt kein pxb mehr. RM_0090-Box: keine Regression gefunden
+(17.10./18.10./HEAD bytegleich); belegter Kandidat: Untersuchen und sofort abbrechen laesst die Klappe von Box 5 offen,
+weil Ereignis 19 waehrend seiner 30 Bilder vom Boden-4-Neustart verdraengt wird, sobald st_flg 0x8 faellt - nativ nach
+~19 Bildern; die Haltedauer des Originals ist nicht vermessen (Statustask-Durchlaeufe sub1.c:3103/system.c:599-611 offen).
+Der Deckel wird von keinem Skript geschrieben. Test rm0090_security_box_nodes. Gegenproben build/validation/wave1-20261020/,
+wave2-20261020/. Keine Sichtabnahme. **Kein Commit/Push.**
 
 **2026-10-19, Greif-und-Dreh-Statue (bhObj007 + bhCPM2_act_rpsh) portiert (Dev-App via `./build.sh --test`, CTest 158/158):**
 Nutzerbefund "ich kann die Statue nicht drehen" (als RM_1050 gemeldet). Ursache: der Greif-und-Dreh-Gegenstand ist **unportiert** — bhObj007
@@ -1233,6 +1273,16 @@ auf bhEffDmy, 400+ liegen hinter bhJumpEffect4[50]. Alle 16 Halter dieses Raums 
 enthalten; die Prozeduren, die sie nutzen, sind separat gefuehrt. Weiter offen: sys->obwp[0..3] (Waffe rechts/links, Zopf) ueber
 Art 2 nicht aufloesbar (Waffe ohne eigenen owP-Baum, Zopf nur als Nachbildmodell) - Typen 1/3/4/5 von 0x86 mit Art 2
 Index 0..3 (in den Daten nicht genutzt); Art-1-Knotenlagen von 0x86 nicht je Raum gemessen. **Kein Commit/Push.**
+
+**Effekt 006 + leere Prozeduren 4/28/129/174/197 (2026-10-20, Worker T01/T02, geprueft):** `bhEff006`
+(effsub1.c:2214) von Hand portiert (ef_opq bei mdlver 0, sonst ef_trs; Alpha-Abbau type != 0; Hoehenende
+mtx[13] < -100 ueber `mtx_world_y` wie 352). Die leeren Originalprozeduren sind als `step_eff_empty`
+gebunden (Platz bleibt belegt, ungezeichnet; nicht bhEffDmy). Erzeuger: nur Skriptbefehle 0x2C/0x6E/0xB0;
+Byte-Obermengenscan aller Ereignisbereiche der 205 Raeume findet keinen davon (einziger Treffer RM_6070
++1306 liegt im Operanden eines 0x7c). **367 bleibt Luecke** (kein exp0-/func-Erzeuger im Original).
+Test `effect_eff006`; `engine_progression_resources` nutzt jetzt 367 als ungebundenes Beispiel.
+`./build.sh --test` 190/190 (gpu_raster_parity uebersprungen), Dev-App aktualisiert. Offener Nebenbefund:
+`initialize_effect_sprite` setzt die UV-Vorgaben von bhSetEffectTb (effect.c:522-532) nicht. **Kein Commit/Push.**
 
 ## Gezielter Zugang zu bisherigen Befunden
 

@@ -1,0 +1,140 @@
+--- a/native/world.cpp
++++ b/native/world.cpp
+@@ -1010,7 +1010,7 @@
+         /* event.c:5868/5873/5877: exp0[18] = pxb = px, flr_no = bhCheckFloorNum(py), exp0[20] = pzb = pz.
+            EXP_WORK.spx/spz (exp0 0x48/0x50) fuehrt der Host als collision_safe_; ohne diesen Abgleich
+            zog der Settle-Schritt (pl_evt.c:132-145) den Spieler nach der Szene zur Lage vor dem Event. */
+-        collision_safe_=player_.position;collision_floor_=floor_at(player_.position);
++        collision_safe_=player_.position;collision_floor_=floor_at(player_.position);player_prev_pos_=player_.position; /* pxb/pyb/pzb = px/py/pz */
+         player_.yaw=std::int16_t(std::int16_t(sum)+32768);
+         if(player_asset_){auto& edit=entity(0,0).node_overrides[0];auto angles=model_pose_physical(0,0,0).angles;angles[1]=0;edit.angles=angles;}
+         actor_nodes_.clear();return true;}
+@@ -1289,7 +1289,7 @@
+         collision_mode_=7u|(v1<<8)|(v0<<16)|((player_event_.reset?0u:(collision_mode_>>24))<<24);
+         player_scripted=false;player_frozen_=false;player_smove_.active=false;return true;}
+     if(op==0x64&&(v.u8(1)==0x80||v.u8(1)==0x8b)){player_event_.requested=false;player_smove_.active=false;} // Player_controll 128/139: zurueck zu bhCPM0_action
+-    if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
++    if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;player_prev_pos_=player_.position; /* event.c:9665-9693 pxb/pyb/pzb = px/py/pz */return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
+             player_step_=65536; // mtn_add = 65536
+             player_room_motion_=false;player_enemy_motion_=false; // mnwP = plmthp
+             collision_mode_=1u; // mode0 1, mode1/2/3 0
+@@ -1447,7 +1447,7 @@
+         if(cmd==7||cmd==11||cmd==2||cmd==4){auto& e=entity(ctx.kind,ctx.index);auto pos=ctx.kind?e.transform.position:player_.position;
+             if(cmd==7)pos={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};
+             if(cmd==2||cmd==4){pos.x+=ctx.increment.x*(ctx.pos_sign[0]?-1:1);pos.y+=ctx.increment.y*(ctx.pos_sign[1]?-1:1);pos.z+=ctx.increment.z*(ctx.pos_sign[2]?-1:1);}
+-            if(!ctx.kind)player_.position=pos;else e.transform.position=pos;
++            if(!ctx.kind){player_.position=pos;if(cmd==7)player_prev_pos_=pos;}else e.transform.position=pos; /* event.c:12044/12054/12065: nur case 7 setzt pxb/pyb/pzb */
+             // event.c:12038..12065: CommonCtr schreibt denselben eff[]-Work,
+             // den bhControlEffect/der Zeichenpass lesen, nicht nur seine Entitysicht.
+             if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;
+@@ -3136,21 +3136,24 @@
+ 
+     tick_en01();
+     control_enemy_works();
++    refresh_motion_overrides(true);advance_entity_motions(true);
++    if(player_scripted&&player_smove_.active&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u))control_player_script_motion();
++    else if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u)){if(player_room_motion_){if(const auto* clip=player_room_clip()){frame_+=player_step_;frame_%=std::int64_t(clip->frames)*65536;}} /* Motion.c:29: datP NULL zaehlt frm_no nicht weiter */ else{frame_+=player_step_;if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}}
++    control_enemy_player_motion();
++    apply_en01_flinch();
++    sync_player_grab();
+     // player.c:1366-1387 am Kopf von bhControlPlayer (game.c:49, nach bhControlEnemy :48): pxb = px
+     // vor diesem Spielerpass, nlxb/nlyb/nlzb aus owP[0] des letzten bhCalcModel(plp), erst ausserhalb
+     // eines Radius 0.3 nachgefuehrt. Der Gegnerpass desselben Bildes liest noch die Werte des Vorpasses.
++    // Erst nach sync_player_grab: die PlyDG-Linklage schreibt en01 im Gegnerpass (vor :1366) auf plp->px,
++    // pxb ist also schon die gelinkte Lage. Kopf und Koerperteil (:1578-1655) stehen im selben Tor
++    // (:1365); player_pass_head_ meldet finish_player_pass, dass dieser Pass lief.
+     {const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+      if((simulation_flags_&1u)&&!(stflg&0x1000000u)){
+-        player_prev_pos_=player_.position;
++        player_prev_pos_=player_.position;player_pass_head_=true;
+         if(!player_joint_matrices_.empty()){const auto& root=player_joint_matrices_[0].value;
+             const float px=root[12]-player_nl_.x,py=player_.position.y-player_nl_.y,pz=root[14]-player_nl_.z;
+             if(std::sqrt(px*px+py*py+pz*pz)>0.3f)player_nl_={root[12],player_.position.y,root[14]};}}}
+-    refresh_motion_overrides(true);advance_entity_motions(true);
+-    if(player_scripted&&player_smove_.active&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u))control_player_script_motion();
+-    else if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u)){if(player_room_motion_){if(const auto* clip=player_room_clip()){frame_+=player_step_;frame_%=std::int64_t(clip->frames)*65536;}} /* Motion.c:29: datP NULL zaehlt frm_no nicht weiter */ else{frame_+=player_step_;if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}}
+-    control_enemy_player_motion();
+-    apply_en01_flinch();
+-    sync_player_grab();
+     // game.c:46-47: bhControlPlayer follows bhControlEnemy in the same pass. Its
+     // tail (player.c:1600-1664) is not gated on plp->mode0, so the two
+     // enemy-driven modes get their wall/floor pass here, where the whole enemy
+@@ -5494,11 +5497,15 @@
+    zu 0,9 der ganzen Differenz an die alte Stelle zurueck. */
+ void RoomWorld::player_body_pass(NJS_POINT3& position,Angle yaw){
+     /* player.c:1622/1647 prueft auch ohne eigenen Bewegungsschritt beide
+-       Koerpersonden. bhControlEnemy hat die Lage bereits geschrieben
+-       (game.c:46 vor :47); pxb wird erst danach genommen (:1366). Derselbe
+-       Wandpfad wie beim Gehen erhaelt daher hier die aktuelle Lage als pxb.
+-       Kein Tor nach Raum, Gegner oder mode0; nur die Originalflags gelten. */
+-    position=resolve_player_motion(position,position,3.5f,player_character_?17.5f:16.5f,collision_front_target_,yaw);
++       Koerpersonden. Die alte Lage des Koerper-bhCheckWallEx ist plp->pxb
++       (:1647), genommen am Kopf dieses Passes (:1366-1369, player_prev_pos_)
++       nach bhControlEnemy (game.c:48 vor :49); Stufenenden (:3103 u. a.) und
++       Ereignisbefehle setzen sie mit px gleich. Hat bhCtrPly_mode0 die Lage
++       danach bewegt (Settle-Schritt bhCPM2_act_std :2127-2140), waehlt
++       bhCheckWallEx die Austrittsseite nach pxb, nicht nach der neuen Lage
++       (hitchk.c:789-960 liest opos). Kein Tor nach Raum, Gegner oder mode0;
++       nur die Originalflags gelten. */
++    position=resolve_player_motion(player_prev_pos_,position,3.5f,player_character_?17.5f:16.5f,collision_front_target_,yaw);
+ }
+ void RoomWorld::settle_player_body(NJS_POINT3& position,float arp){
+     collision_front_target_=arp;
+@@ -5512,6 +5519,11 @@
+    bhCPM2_act_std (player.c:2125) bzw. pl_smove00/01 (pl_evt.c:86/:130). Der Statusbildschirm
+    haelt Task 7 an (system.c:600-612). */
+ void RoomWorld::finish_player_pass(NJS_POINT3& position,Angle yaw){
++    /* player.c:1365: Kopf (:1366-1369, pxb) und Koerperteil liegen im selben Tor. Lief in diesem
++       Bild kein Spielerpass (Tuer, Terminal, Titel: Task 7 steht, tick_enemy_pass fehlt), gibt es
++       weder pxb noch den Koerperteil. */
++    const bool head=player_pass_head_;player_pass_head_=false;
++    if(!head)return;
+     if(!(simulation_flags_&1u)||(collision_events_&&!(collision_events_->flags[6][0]&1u)))return;
+     if(collision_body_pass_||(collision_events_&&collision_events_->menu_open))return;
+     collision_front_target_=0.f;player_body_pass(position,yaw);collision_body_pass_=true;
+--- a/native/world.h
++++ b/native/world.h
+@@ -675,7 +675,9 @@
+     // Ende einer Stufen-/Treppenaktion: bpx = bpxb = px, bpy = bpyb = 12.5 + py, bpz = bpzb = pz
+     // (player.c:3099/3294/3474/3692). Ohne das vergleicht der erste Koerperpass nach der
+     // Landung gegen die Vorsonde der Ausgangsebene.
+-    void set_player_previous_probe(NJS_POINT3 p){collision_previous_probe_={p.x,p.y+12.5f,p.z};}
++    // Dieselben Enden setzen plp->pxb/pyb/pzb = px/py/pz (player.c:3103/3298/3478/3696/4097/4292),
++    // die alte Lage des Koerper-bhCheckWallEx (:1647) im selben Pass.
++    void set_player_previous_probe(NJS_POINT3 p){collision_previous_probe_={p.x,p.y+12.5f,p.z};player_prev_pos_=p;}
+     void place_player(NJS_POINT3 p){collision_safe_=p;collision_previous_probe_={p.x,p.y+12.5f,p.z};collision_front_offset_=collision_front_target_=0.f;collision_front_point_=p;collision_probe_ready_=true;}
+     // EXP_WORK fpx/fpy/fpz und arn, wie sie der Koerperteil von bhControlPlayer zuletzt
+     // schrieb (player.c:1578-1587): fpx = px - sin(ay)*arn mit der Lage NACH dem
+@@ -688,6 +690,9 @@
+     // `arp` ist der Wert, den bhCPM2_act_* dieses Bildes hinterlassen hat.
+     void settle_player_body(NJS_POINT3& position,float arp);
+     void finish_player_pass(NJS_POINT3& position,Angle yaw);
++    // plp->pxb/pyb/pzb: Kopf von bhControlPlayer (player.c:1366-1369), Stufenenden und
++    // Ereignisbefehle (event.c:5868/9665/12044); Leser :1647 und en04.c:911, en15.c:2901/3122.
++    NJS_POINT3 player_pass_origin()const{return player_prev_pos_;}
+     bool player_safe_position_ready()const{return collision_probe_ready_;}
+     void report_enemy_gap(const char* name){unbound_enemy_.insert(name);}
+     NJS_POINT3 move(NJS_POINT3 from,NJS_POINT3 to,float radius=3.5f,float height=16.5f,std::optional<bool> walking={});
+@@ -1004,6 +1009,7 @@
+     // player.c:1366-1387 bhControlPlayer: pxb/pyb/pzb of the previous pass and
+     // EXP_WORK nlxb/nlyb/nlzb, the last settled root position (owP[0]).
+     NJS_POINT3 player_prev_pos_{},player_nl_{};
++    bool player_pass_head_=false; // player.c:1365: der Kopf dieses Passes lief (tick_enemy_pass)
+     // plp->djnt_no / dvx..dvz / dpx..dpz written by enemy hit routines.
+     int player_hit_joint_=-1;NJS_POINT3 player_hit_dv_{},player_hit_dp_{};
+     // plp->mlwP->objP[node] writes of the enemy pass; the next player motion
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -399,6 +399,12 @@
+   target_link_libraries(recvx-ground-world-tests PRIVATE recvx_game)
+   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
+     add_test(NAME native_ground_world COMMAND recvx-ground-world-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
++  endif()
++  # player.c:1365-1369/:1578-1655 Koerper-bhCheckWallEx mit plp->pxb an RM_0050 ATR-Wand 25.
++  add_executable(recvx-body-wall-pass-tests tests/native/body_wall_pass_test.cpp)
++  target_link_libraries(recvx-body-wall-pass-tests PRIVATE recvx_game)
++  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
++    add_test(NAME native_body_wall_pass COMMAND recvx-body-wall-pass-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+   endif()
+   # effsub1b.c:1258-2121 bhEff138/bhDraw138 (RM_8001 Treibstoffumfuellung) auf RoomWorld.
+   add_executable(recvx-oil-puzzle-world-tests tests/native/oil_puzzle_world_test.cpp)

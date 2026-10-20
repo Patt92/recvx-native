@@ -1,0 +1,6 @@
+# RM_0090 Security Box obwp[5]: Diagnoseplatzierung. Rueckweg mit Metall (Startinventar: Feuerzeug):
+# Boden 6 loescht rm_flg 1 (scd1 @1726), Boden 4 laesst Ereignis 0 rm_flg 2 setzen; danach startet
+# scd1 @1490/@1498 Ereignis 2 (bhCamSet2 Schnitt 9) und 31 (Klappe obwp[5] Knoten 1, 30 x 455).
+# Headless --frames 140 zeigt Kamera 9 mit geoeffneter Klappe; obwp[14] bleibt geschlossen (scd1 @1960).
+30 position 34.5 0 5 16384
+60 position 44 0 14 32768

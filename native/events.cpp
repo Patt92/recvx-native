@@ -143,7 +143,7 @@ int EventVm::instruction(Task& t){
     case 9:{v.require(p,4);const unsigned field=v.u8(p+1),operand=v.u16(p+2);if(field==5)inventory_.hp=operand;else if(field==9)inventory_.play_time=operand;else if(field>=11&&field<=15){if(!set_enemy_health)throw std::runtime_error("word HP assignment requires native enemy binding");set_enemy_health(field-11,-int(operand));}return advance(4);}
     case 0x37:values[21]=v.u8(p+1);return advance(2); // bhRoomCaseNo
     case 0x57:if(!v.u8(p+1))flags[11][0]|=0x20000;else flags[11][0]&=~0x20000u;return advance(2); // bhFixEventCamPly
-    case 8:{const auto key=v.u8(p+1),value=v.u8(p+2);values[key]=value;if(key==18)inventory_.wpnr_no=value; /* event.c:827-830 plp->wpnr_no/ply_wno, ohne Neuladen */if(key==22){if(value>=12)throw std::runtime_error("equipped inventory index outside slots");inventory_.slots()[0]=value;}return advance(4);}
+    case 8:{const auto key=v.u8(p+1),value=v.u8(p+2);values[key]=value;if(key==18){inventory_.wpnr_no=value;inventory_.partner_weapon.at(inventory_.player)=std::uint8_t(value);} /* event.c:827-830 plp->wpnr_no/ply_wno, ohne Neuladen */if(key==22){if(value>=12)throw std::runtime_error("equipped inventory index outside slots");inventory_.slots()[0]=value;}return advance(4);}
     // bhDieCk masks the flag index with 0x3ff before touching sys->ed_flg.
     case 0xd:{if(enemy_dead&&enemy_dead(v.u8(p+1)))set_flag(3,v.u16(p+2)&0x3ff,0);advance(4);return 1;}
     // bhEneSetCk: an enemy whose ed_flg bit is already set stays deactivated.
@@ -290,7 +290,7 @@ int EventVm::instruction(Task& t){
     case 0x7c:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");auto& a=floors_[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);world(t,op,10);return 1;}
     case 0x26:{const auto weapon=v.u8(p+1);advance(2);return inventory_.weapon()==weapon;}
     // event.c:1285 bhArmsItemChange: plp->wpnr_no und ply_wno[ply_id], mn_mode0 3 (bhReadWeaponData); pip[0] bleibt.
-    case 0x27:values[18]=v.u8(p+1);inventory_.wpnr_no=v.u8(p+1);return advance(2);
+    case 0x27:values[18]=v.u8(p+1);inventory_.wpnr_no=v.u8(p+1);inventory_.partner_weapon.at(inventory_.player)=v.u8(p+1);inventory_.request_weapon_reload();return advance(2);
     case 0x28:status_requested=true;flags[12][0]|=0x200;return advance(2);
     // event.c Inventarmutationen auf dem einzigen Bestandsbesitzer Inventory
     // (native/inventory.cpp, Vertrag work/native_port_inventory_contract.md).

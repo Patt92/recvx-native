@@ -32,6 +32,7 @@
 #include "ninja_matrix.h"
 #include "ninja_math.h"
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 /* player.c:206-209, unveraenderte Originaldaten. */
@@ -79,6 +80,58 @@ void recvx_head_release_look(RECVX_HEAD_STATE* s){
 
 void recvx_head_enable_look(RECVX_HEAD_STATE* s){
     s->flags|=RECVX_HEAD_LOOK;
+}
+
+static void head_report(const RECVX_HEAD_HOST* host,const char* name){
+    if(host&&host->unbound)host->unbound(host->user,name);
+}
+
+/* bhSearchNearEnemy2, pwksub.c:443-462: die Schleife ueber ene[0..ewk_n-1].
+ * Nur die Zielauswahl selbst (Winkel, Abstand, Sicht) bleibt in head_search;
+ * hier entsteht, was sie je Slot liest. */
+unsigned recvx_head_enemy_candidates(const RECVX_ENEMY_TABLE* t,
+                                     RECVX_HEAD_CANDIDATE* out,unsigned max,
+                                     const RECVX_HEAD_HOST* host){
+    unsigned i,n=0;
+    char name[160];
+    if(!t||!out)return 0;
+    for(i=0;i<t->ewk_n&&i<RECVX_ENEMY_SLOTS&&n<max;++i){
+        const RECVX_ENEMY_WORK* w=t->slot[i];
+        RECVX_HEAD_CANDIDATE* c;
+        /* Ein nie belegter Slot hat flg 0 und faellt im Original am Bit 0
+         * heraus (pwksub.c:445); nativ gibt es dafuer keinen Work. */
+        if(!w)continue;
+        c=&out[n++];
+        memset(c,0,sizeof *c);
+        c->index=(int32_t)i;                 /* pwksub.c:466 idx = i */
+        c->look_node=w->lok_jno;
+        c->position[0]=w->px;c->position[1]=w->py;c->position[2]=w->pz;
+        c->point[0]=w->px;c->point[1]=w->py;c->point[2]=w->pz;
+        /* pwksub.c:445.  Bei flg 0x80 liest das Original lkwkp ohne
+         * NULL-Pruefung; ein fehlender Elternwork ist eine Erzeugerluecke, die
+         * recvx_enemy_targetable als "nicht blickbar" behandelt - hier benannt. */
+        if((w->flg&0x1u)&&!(w->flg&0x8000u)&&!(w->stflg&0x41000000u)&&(w->flg&0x80u)&&!w->lk_player&&!w->lkwkp){
+            snprintf(name,sizeof name,"bhSearchNearEnemy2: ene[%u] (id %u) flg 0x80 ohne lkwkp",i,(unsigned)w->id);
+            head_report(host,name);
+        }
+        c->eligible=recvx_enemy_targetable(w)?1:0;
+        if(!c->eligible||w->lok_jno==0)continue;   /* :447-452 px/py/pz */
+        /* :455-457 epp->mlwP->owP[epp->lok_jno].mtx[12..14] */
+        {
+            float p[3];
+            if(host&&host->target_node_point&&host->target_node_point(host->user,RECVX_HEAD_TARGET_ENEMY,(int)i,w->lok_jno,p)){
+                c->point[0]=p[0];c->point[1]=p[1];c->point[2]=p[2];
+            }else{
+                /* Kein Ersatzpunkt (px waere der lok_jno-0-Zweig): genau
+                 * dieser Work nimmt an der Suche nicht teil. */
+                c->eligible=0;
+                snprintf(name,sizeof name,"bhSearchNearEnemy2: ene[%u] (id %u) mlwP->owP[%d] ohne berechneten Objektbaum",
+                         i,(unsigned)w->id,(int)w->lok_jno);
+                head_report(host,name);
+            }
+        }
+    }
+    return n;
 }
 
 /* bhSearchNearEnemy2, pwksub.c:395-503.  Liefert 1 und setzt `index`,
@@ -190,13 +243,21 @@ static void head_rotation(RECVX_HEAD_STATE* s,const RECVX_HEAD_INPUT* in,
         break;
     case RECVX_HEAD_TARGET_ENEMY:
         /* player.c:7075-7078: die Grenze ist sys->ewk_n, die Zahl der
-         * Gegnerwerke - nicht die Laenge der gefilterten Kandidatenliste. */
+         * Gegnerwerke - nicht die Laenge der gefilterten Kandidatenliste.
+         * pwp = &ene[EXP1_S(68)] wird ohne Filter gelesen (:7121-7134):
+         * ono 0 nimmt px/py/pz, sonst owP[ono] des zuletzt berechneten Baums. */
         if(in->enemy_count<=s->target_index)s->target_index=0;
         {unsigned i;for(i=0;i<count;++i)if(list[i].index==s->target_index){
-            if(node==0){look[0]=list[i].point[0];look[1]=list[i].point[1];look[2]=list[i].point[2];resolved=1;}
-            else if(host&&host->target_node_point)
+            if(node==0){look[0]=list[i].position[0];look[1]=list[i].position[1];look[2]=list[i].position[2];resolved=1;}
+            else if(host&&host->target_node_point){
                 resolved=host->target_node_point(host->user,RECVX_HEAD_TARGET_ENEMY,s->target_index,node,look);
-            break;}}
+                if(!resolved)head_report(host,"bhSetHeadRotation: ene[EXP1_S(68)].mlwP->owP[ono] ohne berechneten Objektbaum");}
+            else head_report(host,"bhSetHeadRotation: ene[].mlwP->owP ohne Knotendienst");
+            break;}
+         /* Ein freigegebener Work bleibt in seinem Slot (flg 0) und steht in
+          * der Liste.  Nur ein nie belegter Slot unter ewk_n hat nativ keinen
+          * Work; das Original liest dort den genullten ene[]-Eintrag. */
+         if(i==count)head_report(host,"bhSetHeadRotation: ene[EXP1_S(68)] ohne belegten Work");}
         break;
     case RECVX_HEAD_TARGET_OBJECT:
     case RECVX_HEAD_TARGET_ITEM:

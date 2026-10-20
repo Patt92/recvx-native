@@ -261,6 +261,10 @@ void set_effect_mobile_wall_clear(std::function<void(int index)> clear);
 void set_effect_extra_allocator(std::function<int()> reserve,std::function<void(int)> release);
 // pp->mlwP->owP[node].mtx eines Spieler-/Gegnersatzes (kind 0 Spieler, 1 Gegner nach Raumindex).
 void set_effect_link_lookup(std::function<bool(unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out)> lookup);
+// effsub2.c:4446 bhEff_E14_Mucus: opp->mlwP->owP[node].mtx eines Gegnerwerks (RECVX_ENEMY_WORK*), das
+// die Prozedur selbst in ene[] gefunden hat (kein flg-0x80-Link). false: Werk/Gelenk ohne nativen Baum.
+// Definiert in native/effect_sprite_procedures.cpp.
+void set_effect_work_node_matrix(std::function<bool(const void* work,unsigned node,NJS_MATRIX& out)> lookup);
 // effsub2.c:2296 bhEff_E11_CheckCollisionPlayer: Objektindex des getroffenen Treffermodells oder -1; kuerzt p2.
 // Zugriffe der Effektprozeduren auf Spieler-, Licht-, Gegner- und Stimmenbesitzer des
 // Raums (effsub2.c E12: plp-Schaden/-Schub, rom->lgtp[1], bhEne12_SetFireBintaEffect,
@@ -384,6 +388,9 @@ struct EffectSpawn {unsigned flg=1,id=0,type=0;int flr_no=0;unsigned mdlver=0;NJ
     unsigned stflg_or=0;int texture_from_slot=-1;void* owner_work=nullptr;
     // effsub4.c:305..314 / :2360..2369: Nachtraege am Kind, keine sys->ef-Felder.
     bool has_shp_ct=false;float shp_ct=0;int ct3=0;
+    // effsub2.c:1371-1379 bhEff_E02_SandParticle2: eff[eno].sx/sy/sz = 3 (scale) und danach
+    // eff[eno].sxb/syb/szb = 0.2/0.3/0.2 am neuen Satz; bhSetEffectTb setzt sonst sxb = sx.
+    bool has_scale_base=false;NJS_POINT3 scale_base{};
 };
 struct BombRequest {NJS_POINT3 position;float radius;int damage_max,damage_min;}; // bhCheckBombAtari
 // CallYakkyouSe(&op->px, SeNo): the owner resolves the arms bank and plays it on SE slot 10.

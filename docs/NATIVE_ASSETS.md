@@ -46,7 +46,12 @@ palette/alpha rules are applied during export; TGA uses ordinary 0–255 alpha.
 The 2D renderer blends alpha. The 3D renderer filters textures trilinearly with up to 4x anisotropic taps
 (alpha-weighted mip chains), blends partly covered cut-out pixels by their coverage
 and renders with 2x2 supersampling on all CPU cores (`--ss 1..4`, `--nearest` for the
-old point sampling). The original punch-through effect pass instead filters RGB independently
+old point sampling; `--render-threads N` fixes the raster worker count for energy
+measurements, the image is identical for every count). On macOS the band stage is rasterized by
+Metal (`native/gpu_raster.h`, `video.ini` `renderer = gpu|software`, `--renderer`): the CPU keeps
+clipping, strip rules, sorting and shadow masks, the GPU draws the same setup list; point-sampled
+output is bit-identical (`gpu_raster_parity`). Windows uses the software path until its Direct3D
+backend exists. The original punch-through effect pass instead filters RGB independently
 of alpha, rejects alpha-zero samples and writes the remaining colour and depth without blending.
 Its host mip chain keeps the same independent RGB filtering; filtered alpha-test quantization
 and equal-depth comparisons remain open. Other material transparency gaps remain documented

@@ -41,6 +41,10 @@ public:
     // system.c:1787). Spielstart: 0 (player.c:684).
     unsigned wpnr_no=0;
     unsigned weapon()const{return wpnr_no;}
+    // system.c:1571-1582 mn_mode0 3 fordert bhReadWeaponData an. Eine reine
+    // plp->wpnr_no-Schreibung (bhSv 18, bhPlyHandChange) tut das NICHT.
+    void request_weapon_reload(){weapon_reload_=true;}
+    bool take_weapon_reload(){const bool requested=weapon_reload_;weapon_reload_=false;return requested;}
     // WeaponSet (sub1.c:4460-4566): Waffennummer zum Eintrag, `previous` fuer IDs ohne eigene Nummer.
     static unsigned weapon_number(std::uint32_t entry,unsigned previous);
     bool equip(unsigned slot);
@@ -145,5 +149,6 @@ private:
     struct HerbUse {bool consumed=false;unsigned message=0,pulse=0,condition=0;};
     HerbUse use_00(unsigned item,unsigned condition,bool message_active);
     WeaponChange weapon_change_{};
+    bool weapon_reload_=false;
 };
 }

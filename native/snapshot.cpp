@@ -99,7 +99,7 @@ void restore_inventory(const Snapshot& snap,Inventory& inventory){
     // bhPlayerChangeSet saves and restores the correct values. ply_stflg holds
     // the same poison bits as player_stflg() (0x80000/0x200000).
     for(std::size_t i=0;i<inventory.ply_hp.size();++i){inventory.ply_hp[i]=s.ply_hp[i];inventory.ply_stflg[i]=unsigned(s.ply_stflg[i])&0x280000u;inventory.partner_weapon[i]=std::uint8_t(s.ply_wno[i]);} // room.c:1043 auch sys->ply_wno
-    inventory.wpnr_no=std::uint8_t(s.ply_wno[s.ply_id]); // player.c:667 bhSetPlayer (ss_flg 0x200): plp->wpnr_no = ply_wno[ply_id]
+    inventory.wpnr_no=std::uint8_t(s.ply_wno[s.ply_id]);inventory.request_weapon_reload(); // player.c:667 bhSetPlayer (ss_flg 0x200): plp->wpnr_no = ply_wno[ply_id]
     inventory.poisoned=snap.host.poisoned;inventory.infected=snap.host.infected;inventory.side_pack=snap.host.side_pack;
 }
 void restore_events(const Snapshot& snap,EventVm& events){

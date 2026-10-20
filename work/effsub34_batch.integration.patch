@@ -1,0 +1,69 @@
+--- a/native/effect_sprites.cpp
++++ b/native/effect_sprites.cpp
+@@ -3,6 +3,7 @@
+ #include "effect_rap_camera.h"
+ #include "effect_rap_blood.h"
+ #include "effect_rap_claw.h"
++#include "effect_sub3x.h"
+ #include "chunk_blend.h"
+ #include "binary_view.h"
+ #include "core_random.h"
+@@ -1124,6 +1125,8 @@
+     switch(id){
+     case 110:case 133: // Besitzerprozeduren in RoomWorld, wie 111/134/137.
+     case 0:case 2:case 5:case 7:case 9:case 17:case 120:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 138:case 181:case 182:case 199:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
++    // effsub4.c bhJumpEffect4 (effect.c:37), native/effect_sub3x.cpp: 357/360/361/368/398.
++    case 357:case 360:case 361:case 368:case 398:return true;
+     default:return hand_procedure(id)!=nullptr;
+     }
+ }
+@@ -1148,6 +1151,7 @@
+     case 440:return true; // effsub1b.c:850 bhDraw137 (sys->ef_tn[440], Texturhalter, effect.c:788)
+     case 441:return true; // effsub1b.c:1308-1543 bhDraw138 (sys->ef_tn[441] .. +3, Texturhalter RM_8001)
+     case 32:return true; // bhDraw107 (Regeneinschlag)
++    case 30:return true; // effsub4.c:2904 bhEff_Sub398 (tex_id 30, ohne stflg 0x20: sys->ef_tn[30]); Halter nur in RM_3130
+     case 90:case 91:case 92:return true; // effsub1.c:28 bhEffFil (tex_id = op->id)
+     default:return (group>=70&&group<=79)||(group>=400&&group<=407);
+     }
+@@ -1155,7 +1159,7 @@
+ bool step_effect_sprite(EffectSprite& sprite,bool* queued){
+     // Die Tabellenprozeduren (effsub0/1/5/6) lesen keine Passflags; die aelteren
+     // Schalterfaelle (Patronenhuelse, Flamme, Erzeuger 125) brauchen den Besitzerkontext.
+-    if(hand_procedure(sprite.id)||sprite.id==199||sprite.id==369||sprite.id==396||sprite.id==399){const EffectContext none;return step_effect_sprite(sprite,none,queued);} /* 199 liest keinen Kontext (effsub0.c:3478) */
++    if(hand_procedure(sprite.id)||sprite.id==199||sprite.id==369||sprite.id==396||sprite.id==399||sprite.id==357||sprite.id==360||sprite.id==361||sprite.id==368||sprite.id==398){ /* effsub4.c 357/360/361/368/398 lesen keinen Kontext */const EffectContext none;return step_effect_sprite(sprite,none,queued);} /* 199 liest keinen Kontext (effsub0.c:3478) */
+     if(supported_effect_sprite(sprite.id))throw std::runtime_error("effect step requires native flag context");
+     if(queued)*queued=false;return false;
+ }
+@@ -1215,6 +1219,11 @@
+         case 181:step_eff181(s);break;
+         case 182:step_eff182(s,entered);break;
+         case 199:step_eff199(s,c,entered);break; // effsub0.c:3478 (native/effect_eff199.cpp)
++        case 357:step_eff357(s,c,entered);break; // effsub4.c:1235 (native/effect_sub3x.cpp)
++        case 360:step_eff360(s,c,entered);break; // effsub4.c:1241
++        case 361:step_eff361(s,c,entered);break; // effsub4.c:1335
++        case 368:step_eff368(s,c,entered);break; // effsub4.c:2075
++        case 398:step_eff398(s,c,entered);break; // effsub4.c:2722
+         case 218:step_eff218(s,entered);break;
+         case 230:step_eff230(s,entered);break;
+         default:return false;
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -104,7 +104,7 @@
+ # tools/generate_effect_collision.py ist Quarantaene (Policy 2026-10-09):
+ # ATR-Boden/Wandkontakt, Reflexion und Linienabfrage sind eigenstaendig nativ;
+ # der abwaerts getestete Zylinderdeckel bleibt eine belegte Semantikluecke.
+-add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/hit_model.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/effect_sprite_procedures.cpp native/effect_rap_camera.cpp native/effect_rap_blood.cpp native/effect_rap_claw.cpp native/effect_eff30x.cpp native/effect_eff130.cpp native/effect_eff199.cpp native/effect_eff013.cpp native/weapon_fly.c native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/back_color.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_action.c native/player_event.c native/player_hair.c native/player_head.c native/adx_tables.c)
++add_library(recvx_game native/file_folder.cpp native/effect_collision.cpp native/hit_model.cpp native/gameover.cpp native/effect_particles.cpp native/computer.cpp native/computer_core.c native/computer_tables.c native/subplayer.c native/enemies/en01_damage.c native/enemies/enemy_spawn.cpp native/effect_sprites.cpp native/effect_sprite_procedures.cpp native/effect_rap_camera.cpp native/effect_rap_blood.cpp native/effect_rap_claw.cpp native/effect_eff30x.cpp native/effect_eff130.cpp native/effect_eff199.cpp native/effect_eff013.cpp native/effect_sub3x.cpp native/weapon_fly.c native/inspection.cpp native/combat.cpp native/weapon_flash.cpp native/targeting.cpp native/weapon_asset.cpp native/box_menu.cpp native/inventory.cpp native/messages.cpp native/ui.cpp native/events.cpp native/audio.cpp native/movie.cpp native/world.cpp native/back_color.cpp native/collision.cpp native/door_core.c native/doors.cpp native/item_tables.c native/status_pulse.cpp native/snapshot.cpp native/view_clip.cpp native/map_screen.cpp native/map_tables.c native/map_objects.cpp native/player_stairs.c native/player_action.c native/player_event.c native/player_hair.c native/player_head.c native/adx_tables.c)
+ target_sources(recvx_game PRIVATE native/core_random.cpp native/object_itmbox.cpp native/world_itmbox.cpp native/world_water.cpp native/geometry_motion.cpp)
+ # D10 Teil B: Kartenbild (Ps2AddPrim2D/3D-Seite von map.c) und sys->fade_* (screen.c).
+ target_sources(recvx_game PRIVATE native/map_render.cpp native/screen_fade.cpp)
+@@ -564,6 +564,9 @@
+   add_executable(recvx-effect-eff199-tests tests/native/effect_eff199_test.cpp)
+   target_link_libraries(recvx-effect-eff199-tests PRIVATE recvx_game)
+   add_test(NAME effect_eff199 COMMAND recvx-effect-eff199-tests)
++  add_executable(recvx-effect-sub3x-tests tests/native/effect_sub3x_test.cpp)
++  target_link_libraries(recvx-effect-sub3x-tests PRIVATE recvx_game)
++  add_test(NAME effect_sub3x COMMAND recvx-effect-sub3x-tests)
+   add_executable(recvx-effect-room-tests tests/native/effect_room_sprites_test.cpp)
+   target_link_libraries(recvx-effect-room-tests PRIVATE recvx_game)
+   add_test(NAME effect_room_sprites COMMAND recvx-effect-room-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")

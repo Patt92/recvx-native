@@ -220,5 +220,34 @@ int main(int argc,char** argv){try{
         std::cout<<"  RM_5810 natural 600 passes: "<<spat<<" Eff256 in "<<spit_passes<<" passes, EN14 mode2 "<<unsigned(f.e14().mode2)<<", hp "<<f.e14().hp<<'\n';
         f.no_en14_gaps("natural run");
     }
-    std::cout<<"EN14 init, retract, spit/acid, hitmark and natural run PASS\n";
+    // --- 273 bhEff_E14_Mucus (effsub2.c:4311/:4494) auf der echten RM_5810-Welt. Raumeffekte 7..20 (lkflg 0,
+    // lkono 1/11..21); das Raumskript schaltet sie mit 0x91 (Ereignisabschnitt +0x32a ff.) ein. Diagnose: die
+    // 0x91-Befehle werden direkt an den Raumbesitzer gebunden, nicht ueber den Skriptablauf erreicht.
+    // Prueft die World-Bindung des Gelenkdiensts (opp->mlwP->owP[op->lkono], :4449-:4470): das Fadenende muss
+    // am veroeffentlichten EN14-Baum haengen, gelesen ueber den unabhaengigen Slotleser enemy_slot_joint_matrix.
+    {
+        Fixture f(data);for(int i=0;i<4;++i)f.tick();
+        const auto base=inspect_room(f.bytes).event_offset;
+        // Die Szene zeigt sie zuerst mit 0x43 bhEffDispSet v2 1 (+0x2dc..+0x310); bis dahin versteckt sie
+        // 0x43 v2 0 (+0xf0) und der Effektpass ueberspringt sie (effect.c:776 stflg 0x1000000).
+        for(std::size_t o=0x2dc;o<=0x310;o+=4){
+            check(f.bytes.at(base+o)==0x43&&f.bytes.at(base+o+2)==1,"RM_5810: 0x43-Befehl nicht an der erwarteten Stelle");
+            check(f.world.bind({0x43,0,0,base+o,{f.bytes.begin()+long(base+o),f.bytes.begin()+long(base+o+3)}}),"0x43 nicht gebunden");}
+        for(std::size_t o=0x32a;o<=0x38a;o+=(o<0x382?8:4)){
+            check(f.bytes.at(base+o)==0x91,"RM_5810: 0x91-Befehl nicht an der erwarteten Stelle");
+            check(f.world.bind({0x91,0,0,base+o,{f.bytes.begin()+long(base+o),f.bytes.begin()+long(base+o+3)}}),"0x91 nicht gebunden");}
+        for(int i=0;i<3;++i)f.tick();
+        for(const auto& g:f.world.unbound_enemy_routines())check(g.find("E14_Mucus")==std::string::npos,("273 meldet eine Luecke: "+g).c_str());
+        unsigned checked=0;
+        for(unsigned idx=7;idx<=20;++idx){const auto* s=f.world.effect_state(idx);check(s&&s->id==273&&(s->flg&1u),"RM_5810: Effekt 273 fehlt");
+            check(s->mode1>=1&&s->mode0>=2,"273: 0x91 hat mode1 nicht gesetzt oder der Satz lief nicht an");
+            const auto joint=f.world.enemy_slot_joint_matrix(1,unsigned(s->lkono));check(bool(joint),"EN14-Gelenk owP[lkono] nicht veroeffentlicht");
+            const NJS_POINT3 j{joint->value[12],joint->value[13],joint->value[14]};
+            const float dx=s->tv[0].x-j.x,dy=s->tv[0].y-j.y,dz=s->tv[0].z-j.z,reach=std::fabs(s->sz)+std::fabs(s->sx)+std::fabs(s->sy)+0.01f;
+            check(dx*dx+dy*dy+dz*dz<=reach*reach,"273: Fadenende tv[0] haengt nicht am EN14-Gelenk owP[lkono]");
+            check(dx*dx+dy*dy+dz*dz>0.25f*s->sz*s->sz,"273: tv[0] liegt auf dem Gelenk statt sz entlang der Gelenk-x-Achse");
+            ++checked;}
+        check(checked==14,"273: nicht alle 14 Faeden geprueft");
+    }
+    std::cout<<"EN14 init, retract, spit/acid, hitmark, natural run and mucus link PASS\n";
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}return 0;}

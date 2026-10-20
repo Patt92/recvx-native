@@ -1,6 +1,8 @@
 #pragma once
 #include "scene.h"
+#include "gpu_raster.h"
 #include <filesystem>
+#include <functional>
 namespace recvx {
 // vclipw.xyz eines Sichtraumpunkts gegen ClipMatrix2 (_Make_ClipMatrix, ps2_NaView.c:233):
 // m[0][0] = projection/volume_x, m[1][1] = projection/volume_y, z-Zeilen aus njClipZ near/far
@@ -27,7 +29,12 @@ public:
     // caller composite an off-screen pass without a colour key.
     const std::vector<float>& depth() const {return depth_;}
     // Passive evidence of the last geometry pass, not another camera owner.
+    // Passive evidence of the last geometry pass, not another camera owner.
     const std::array<float,2>& last_clip()const{return last_clip_;}
+    // Diagnose der Bildaufbereitung (Summen seit Start), Sekunden: Setup/Clipping, Schattenmasken,
+    // GPU-Raster, Bandstufe, Linien.
+    struct Timings {double setup=0,shadow=0,gpu=0,bands=0,lines=0;unsigned frames=0;};
+    const Timings& timings()const{return timings_;}void reset_timings(){timings_=Timings{};}
     std::vector<std::uint32_t>& canvas(){return pixels_;}
     // Trilinear mipmapping with up to 4x anisotropic taps (removes texture
     // shimmer). Off reproduces the previous nearest-neighbour sampling.
@@ -35,10 +42,18 @@ public:
     bool texture_filtering()const{return filter_;}
     // Worker threads for band rasterization (0 = up to four workers). Output is identical for any value.
     void set_render_threads(unsigned count){threads_=count;}
+    unsigned render_threads()const{return threads_;}
     // NxN supersampling (1..4, default 2): the scene is rendered at N times the size and
     // box-filtered down, which steadies moving polygon edges. Overlay drawing is unaffected.
     void set_supersampling(int factor){ss_=factor;}
     int supersampling()const{return ss_;}
+    // Diagnose (GPU-Machbarkeit): wird je Bild mit der sortierten Setup-Liste aufgerufen, bevor die
+    // Bandstufe zeichnet. Die Liste lebt nur waehrend des Aufrufs; das Softwarebild bleibt unveraendert.
+    void set_raster_observer(std::function<void(const raster::Frame&)> observer){observer_=std::move(observer);}
+    // Host-GPU-Rasterer (gpu_raster.h) fuer die Bandstufe; nullptr = Software. Pixel, Tiefe, Linien und
+    // alle Overlays bleiben in pixels()/depth(); Drahtgitter zeichnet immer in Software.
+    void set_gpu(std::shared_ptr<GpuRaster> gpu){gpu_=std::move(gpu);}
+    const std::shared_ptr<GpuRaster>& gpu()const{return gpu_;}
     int width() const{return width_;}
     int height() const{return height_;}
     std::size_t covered_pixels() const;
@@ -48,6 +63,9 @@ private:
     bool filter_=true;
     unsigned threads_=0;
     int ss_=2;
+    std::function<void(const raster::Frame&)> observer_;
+    std::shared_ptr<GpuRaster> gpu_;
+    Timings timings_;
     std::array<float,2> last_clip_{{0.05f,0.f}};
     // Bildschirmmassstab der Ninja-Projektion fuer die Clipregel der Chunk-Streifen:
     // fSx = AspectW*x*dist/z, fSy = AspectH*y*dist/z in 640x480-Einheiten (ps2_NinjaCnk.c:1195).

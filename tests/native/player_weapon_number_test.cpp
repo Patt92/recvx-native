@@ -15,6 +15,8 @@
 #include "asset_io.h"
 #include "binary_view.h"
 #include "snapshot.h"
+#include "combat.h"
+#include "ninja_math.h"
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -24,7 +26,7 @@
 using namespace recvx;
 static void check(bool b,const std::string& s){if(!b)throw std::runtime_error(s);}
 int main(int argc,char** argv){try{
-    check(argc==2,"data directory required");const std::filesystem::path data=argv[1];
+    check(argc==2,"data directory required");_Make_SinTable();const std::filesystem::path data=argv[1];
     const auto original=read_asset_file(data/"rooms/RM_0040.RDT",64*1024*1024);
     const auto base=inspect_room(original).event_offset;const BinaryView probe(original);
     const auto script=base+probe.u32(base+8+4);
@@ -71,6 +73,39 @@ int main(int argc,char** argv){try{
         const auto snap=capture_snapshot(inv,vm,10,"RM_0040",{});check(snap.save.ply_wno[0]==20,"Sichern: ply_wno nicht aus plp->wpnr_no");
         Inventory loaded;restore_inventory(snap,loaded);
         check(loaded.weapon()==20&&loaded.slots()[0]==gun,"Laden: plp->wpnr_no muss aus ply_wno kommen, pip[0] aus dem Platz");
+    }
+    {   // Modellbesitzer: bhSv 18 und bhPlyHandChange schreiben KEIN mn_mode0 3.
+        // Diagnosebefehle auf realem EventVm, CombatController laedt echte SYSTEM-Waffen.
+        auto inv=armed();inv.equip(slot_of(inv,5));
+        PlayerAsset body=PlayerAsset::load(data);SceneSpawn actor{};std::size_t motion=0;std::int64_t frame=0;
+        AudioMixer audio(data);CombatController combat(data);
+        const auto tick=[&]{combat.tick({},true,inv,body,actor,motion,frame,nullptr,audio);};
+        tick();
+        const auto nodes=body.pose(0,0,{},0);
+        const auto drawn=[&]{Scene out;combat.append(out,nodes);return out.triangles.size();};
+        const auto expected=[&](unsigned w){Scene out;WeaponAsset::load(data,inv.player,w).append(out,body.script_nodes(nodes));return out.triangles.size();};
+        const auto gun=expected(3),knife=expected(20);
+        check(gun>0&&knife>0&&gun!=knife,"Vorbedingung: Waffen 3/20 haben verschiedene Modelle");
+        check(drawn()==gun,"Spielstart/WeaponSet: geladenes Modell 3");
+        combat.set_weapon_models_hidden(true);
+        check(run(inv,{0x08,18,20,0})&&inv.partner_weapon[inv.player]==20,"bhSv 18 schreibt ply_wno mit");
+        tick();check(combat.weapon_models_hidden()&&drawn()==0,"bhSv 18 darf mdflg 1 nicht nullen (kein bhSetWeapon)");
+        combat.set_weapon_models_hidden(false);
+        check(drawn()==gun,"bhSv 18: Waffennummer 20, aber Modell 3 bleibt geladen");
+        // Auch dieselbe Nummer muss bei bhArmsItemChange neu laden: system.c:1571-1582 fragt mn_mode0,
+        // nicht ob plp->wpnr_no gegenueber dem letzten Frame verschieden ist.
+        check(run(inv,{0x27,20}),"bhArmsItemChange 20");tick();
+        check(drawn()==knife,"0x27 20 laedt trotz gleicher Waffennummer das Modell 20");
+        combat.set_weapon_models_hidden(true);
+        check(run(inv,{0x27,20}),"bhArmsItemChange 20 wiederholt");tick();
+        check(!combat.weapon_models_hidden()&&drawn()==knife,"0x27 identische Waffe muss bhSetWeapon erneut ausfuehren");
+        check(run(inv,{0x08,18,3,0}),"bhSv 18 3");tick();
+        check(drawn()==knife,"bhSv 18 3 darf das Messerwerk nicht austauschen");
+        // Neuer Spieler/geladenes Spiel laedt bhReadWeaponData unabhaengig von gleicher Waffennummer.
+        inv.request_weapon_reload();tick();check(drawn()==gun,"expliziter Ladeauftrag muss das aktuelle Modell laden");
+        combat.set_weapon_models_hidden(true);
+        check(run(inv,{0xAF,0,0,0}),"Feuerzeug-Parken ohne Feuerzeug");tick();
+        check(combat.weapon_models_hidden(),"0xAF ohne mn_mode0 3 darf das Waffenwerk nicht neu initialisieren");
     }
     std::cout<<"plp->wpnr_no PASS\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

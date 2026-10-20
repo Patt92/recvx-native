@@ -97,7 +97,7 @@ void Inventory::weapon_set(unsigned slot,unsigned lt_c,unsigned previous){
     if(next==previous&&slots()[0]==lt_c){next=0;slots()[0]=0;special=false;}
     else slots()[0]=lt_c;
     wpnr_no=next; // sub1.c:4471-4572: plp->wpnr_no im switch, beim Abruesten 0
-    weapon_change_={true,next,special};
+    weapon_change_={true,next,special};request_weapon_reload();
 }
 PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,unsigned room,unsigned mode,int answer,bool busy){
     // GetItem. `control` ist sys->cb_flg. Modus 0 entscheidet Frage/Bestätigung,
@@ -224,7 +224,7 @@ PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,un
         // Sonderslot: pip[1] erhält das Item; lag die Ausrüstung dort, wird sie
         // gelöst (plp->mode3/wpnr_no = 0, mn_mode0 = 3 beim Kampfbesitzer).
         slots()[1]=(std::uint32_t(item)<<16)|getbulletmax[item][game_mode];
-        if(slots()[0]==1){slots()[0]=0;wpnr_no=0;weapon_change_={true,0,false};} /* sub1.c:4153 */
+        if(slots()[0]==1){slots()[0]=0;wpnr_no=0;weapon_change_={true,0,false};request_weapon_reload();} /* sub1.c:4153 */
         control&=~0x1000000u;result.granted=true;
     }
     return result;
@@ -388,7 +388,7 @@ unsigned Inventory::switch_player(unsigned target){
     player=target;
     hp=ply_hp[player];
     set_player_stflg(ply_stflg[player]);
-    wpnr_no=partner_weapon[player]; // system.c:1787 plp->wpnr_no = ply_wno[ply_id] (danach bhReadWeaponData)
+    wpnr_no=partner_weapon[player];request_weapon_reload(); // system.c:1787 plp->wpnr_no = ply_wno[ply_id] (danach bhReadWeaponData)
     return previous;
 }
 unsigned Inventory::occupied()const{unsigned n=0;for(unsigned i=2;i<12;++i)if(auto item=id(slots()[i]))n+=(itemdata[item].type&0x100)?2:1;return n;}
@@ -709,7 +709,7 @@ bool Inventory::transform(unsigned slot,unsigned expected,unsigned replacement){
     if(slots()[0]==slot&&(!replacement||!(itemdata[replacement].type&1)))slots()[0]=0;
     if(occupied()>capacity()){items=saved;return false;}return true;
 }
-bool Inventory::deposit(unsigned slot,unsigned box){if(slot<2||slot>=12||box!=64||!id(slots()[slot]))return false;unsigned i=0;while(i<128&&items[box+i])++i;if(i==128)return false;items[box+i]=slots()[slot];slots()[slot]=0;if(slots()[0]==slot){slots()[0]=0;wpnr_no=0;} /* wie ItemBoxChange sub1.c:7929-7931 */compact();return true;}
+bool Inventory::deposit(unsigned slot,unsigned box){if(slot<2||slot>=12||box!=64||!id(slots()[slot]))return false;unsigned i=0;while(i<128&&items[box+i])++i;if(i==128)return false;items[box+i]=slots()[slot];slots()[slot]=0;if(slots()[0]==slot){slots()[0]=0;wpnr_no=0;request_weapon_reload();} /* wie ItemBoxChange sub1.c:7929-7931 */compact();return true;}
 bool Inventory::withdraw(unsigned index,unsigned box){if(box!=64||index>=128||!items[box+index])return false;auto item=items[box+index];if(!acquire(id(item),quantity(item),(item>>16)&0xff00))return false;items[box+index]=0;return true;}
 bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* out){
     // ItemBoxChange nach dem Original-Maschinencode (0x002A53E0; die Decomp ist
@@ -759,7 +759,7 @@ bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned st
         if(slots()[0]==lt_c){
             // Ausgerüstete Waffe verlässt die Tasche: pip[0] = 0, plp->mode3 =
             // plp->wpnr_no = 0, sys->mn_mode0 = 3 (Kampfbesitzer über weapon_change).
-            slots()[0]=0;wpnr_no=0;weapon_change_={true,0,false}; /* sub1.c:7929-7931 */
+            slots()[0]=0;wpnr_no=0;weapon_change_={true,0,false};request_weapon_reload(); /* sub1.c:7929-7931 */
         }
         bxp[index]=pocket;
         slots()[lt_c2]=incoming;

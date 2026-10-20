@@ -24,6 +24,7 @@
  */
 #pragma once
 #include <stdint.h>
+#include "enemy_work.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -110,10 +111,11 @@ typedef struct {
 
 /* Ein Blickziel, wie bhSearchNearEnemy2 es prueft (pwksub.c:443-477). */
 typedef struct {
-    int32_t index;      /* Gegnerindex, = EXP1_S(68) */
+    int32_t index;      /* Slotindex in sys->ene (pwksub.c:466 idx = i), = EXP1_S(68) */
     int32_t look_node;  /* epp->lok_jno */
-    float point[3];     /* Weltpunkt: px/py/pz oder owP[lok_jno].mtx */
-    int32_t eligible;   /* flg&1, !(flg&0x8000), !(stflg&0x41000000) erfuellt */
+    float point[3];     /* Weltpunkt: px/py/pz oder owP[lok_jno].mtx[12..14] */
+    float position[3];  /* epp->px/py/pz: bhSetHeadRotation mit ono 0 (player.c:7123-7127) */
+    int32_t eligible;   /* Filter pwksub.c:445 (recvx_enemy_targetable) erfuellt */
 } RECVX_HEAD_CANDIDATE;
 
 /* Dienste, die der Host stellt.  Ohne `wall_clear` gibt es keine Sichtpruefung
@@ -122,7 +124,10 @@ typedef struct {
     void* user;
     /* bhCheckC2WallN(&cap, 0x400) == 0: freie Sicht von `from` nach `to`. */
     int (*wall_clear)(void* user,const float from[3],const float to[3]);
-    /* Knotenmatrix eines Blickziels (pwksub.c:455-457, player.c:7132-7134). */
+    /* Knotenmatrix eines Blickziels (pwksub.c:455-457, player.c:7132-7134):
+     * pwp->mlwP->owP[node].mtx[12..14] des zuletzt berechneten Objektbaums,
+     * keine neue Motionpose.  Fuer RECVX_HEAD_TARGET_ENEMY ist `index` der
+     * Slotindex in sys->ene.  0 = kein Baum; der Host meldet die Luecke. */
     int (*target_node_point)(void* user,int kind,int index,int node,float out[3]);
     /* Fuer `unbound`: ein im Original benutzter Dienst ohne nativen Besitzer. */
     void (*unbound)(void* user,const char* name);
@@ -139,6 +144,19 @@ void recvx_head_begin(RECVX_HEAD_STATE* state,int model_number);
 void recvx_head_tick(RECVX_HEAD_STATE* state,const RECVX_HEAD_INPUT* input,
                      const RECVX_HEAD_CANDIDATE* candidates,unsigned count,
                      const RECVX_HEAD_HOST* host,int32_t angles[6][3]);
+
+/* Kandidatenliste von bhSearchNearEnemy2 (pwksub.c:443-462) aus der einen
+ * Gegnertabelle sys->ene (RECVX_ENEMY_TABLE): je belegtem Slot 0..ewk_n-1 ein
+ * Eintrag in Tabellenreihenfolge, `index` = Slotindex.  `eligible` ist der
+ * Filter pwksub.c:445 (recvx_enemy_targetable).  Der Punkt eines blickbaren
+ * Works ist px/py/pz bei lok_jno 0 (:447-452), sonst
+ * host->target_node_point(RECVX_HEAD_TARGET_ENEMY, Slot, lok_jno) (:455-457);
+ * fehlt dieser Baum, bleibt genau dieser Work draussen und die Luecke wird mit
+ * Slot und id ueber host->unbound gemeldet.  Rueckgabe: Zahl der Eintraege.
+ * sys->ewk_n selbst ist table->ewk_n (RECVX_HEAD_INPUT::enemy_count). */
+unsigned recvx_head_enemy_candidates(const RECVX_ENEMY_TABLE* table,
+                                     RECVX_HEAD_CANDIDATE* out,unsigned max,
+                                     const RECVX_HEAD_HOST* host);
 
 /* Die Treppen-/Leiter-/Stufenroutinen setzen im mode3-0-Startblock
  * EXP1_I(0) &= ~0x4 und |= 0x1E0 (player.c:2891/3153/3360/3522/3948/4143).

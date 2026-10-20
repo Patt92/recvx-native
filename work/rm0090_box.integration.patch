@@ -1,0 +1,15 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -206,6 +206,12 @@
+     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
+       add_test(NAME event_lifecycle_control_release COMMAND recvx-event-lifecycle-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+     endif()
++    # RM_0090 Security Boxen obwp[5]/obwp[14]: Knotenschreiber der Ereignisse 7/18/19/30/31 und scd1.
++    add_executable(recvx-rm0090-box-tests tests/native/rm0090_box_test.cpp)
++    target_link_libraries(recvx-rm0090-box-tests PRIVATE recvx_input)
++    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0090.RDT")
++      add_test(NAME rm0090_security_box_nodes COMMAND recvx-rm0090-box-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
++    endif()
+     add_executable(recvx-room-motion-empty-slot-tests tests/native/room_motion_empty_slot_test.cpp)
+     target_link_libraries(recvx-room-motion-empty-slot-tests PRIVATE recvx_input)
+     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3130.RDT")

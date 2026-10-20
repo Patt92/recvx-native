@@ -152,8 +152,12 @@ ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset&,std::size
 }
 bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio,EventVm* events){
     body_=&player;
-    const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){original_.reset();weapon_=weapon;player_=inventory.player;asset_.reset();right_part2_hidden_=false;weapon_models_hidden_=false;
+    const auto weapon=inventory.weapon();const bool reload=inventory.take_weapon_reload();
+    // dread.c:170 bhReadWeaponData ersetzt obwp[0]/[1] und die Waffenmotions nur auf einen
+    // Ladeauftrag (system.c:1452/1582/1802), nicht bei jeder plp->wpnr_no-Schreibung.
+    if(player_==~0u||inventory.player!=player_||reload){asset_.reset();right_part2_hidden_=false;weapon_models_hidden_=false;
         if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);}}
+    if(weapon!=weapon_||inventory.player!=player_||reload){original_.reset();weapon_=weapon;player_=inventory.player;}
     const bool supported=weapon_==2||weapon_==3||weapon_==4||weapon_==5||weapon_==6||weapon_==7||weapon_==8||weapon_==9||weapon_==12||weapon_==13||
         weapon_==14||weapon_==15||weapon_==16||weapon_==17|| // Granatwerfer: Abschuss player.c:4990, Geschoss bhEff130
         weapon_==18||weapon_==20|| // Raketenwerfer (bhEff130 type 4), Linear Launcher (type 6, bhEff027 pwksub.c:3126)
@@ -255,6 +259,9 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     engine.sys.pad_dx=input.pad_dx;engine.sys.pad_dy=input.pad_dy;engine.sys.pad_ax=0;engine.sys.pad_ay=0;
     // sys->ef_flg gehoert dem Effektbesitzer (bhEff130 loescht 0x2, act_scp setzt es).
     if(world)engine.sys.ef_flg=world->effect_flags();
+    // sys->yk_ct (system.c:260 je Raumwechsel 0) gehoert ebenso dem Effektbesitzer: bhEff000 liest es,
+    // bhSetYakkyou schreibt es auch aus dem Raumskript (bhYakkyouSet event.c:3113, RoomWorld::set_yakkyou).
+    if(world)engine.sys.yk_ct=world->effect_counter();
     engine.sys.gm_flg=events?&events->flags[11][0]:nullptr;
     engine.sys.st_flg=events?&events->flags[5][0]:nullptr;
     engine.sys.sp_flg=events?&events->flags[6][0]:nullptr;
@@ -292,6 +299,7 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     if(events)view.stflg=events->flags[14][0];
     recvx_combat_after_model(engine.core,&engine.sys,&engine.result);
     if(events)events->flags[14][0]=view.stflg;
+    if(world)world->set_effect_counter(engine.sys.yk_ct);
     // PlyPchMain führt die Aufschaltung in pp.lck_tbl als RECVX_ENEMY_WORK*;
     // owner_index ist der Raumindex des vorhandenen Besitzers. Ohne die noch
     // fehlende C02-Bindung der Gegnertabelle in world bleibt sie leer.

@@ -1,0 +1,212 @@
+--- a/native/world.cpp
++++ b/native/world.cpp
+@@ -207,6 +207,10 @@
+             // die unportierten Sprites zeichnen dieselben Atlanten additiv.
+             Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
+     }
++    // Alle 3171 Effektzeilen der 205 gelieferten RDT haben flg & 3 == 1.
++    // Deshalb belegt bhSetEffectTb in dieser bestehenden Ladefolge genau Platz i;
++    // explizite efid-Identitaet, keine Suche nach Kennung/type oder dynamischem Platz.
++    for(unsigned i=0;i<effect_count;++i)room_effect_slots_.push_back(i);
+     // room.c:776 bhSetEffectTable / :787 bhSetEffectLink: lkflg 1..4 haengt den Satz an
+     // plp, ene[lkno], obwp[lkno] oder itwp[lkno]. lkno ueber der Raumanzahl wird 0; ist
+     // der Werksatz aktiv (flg & 1), traegt der Satz flg 0x80 und lkono wird auf
+@@ -3162,9 +3166,9 @@
+ // Opcode 0x5b) ruft ihn zusaetzlich direkt nach bhControlCamera, das Licht ruckt in dem Bild also
+ // einen Takt weiter (Uhr/Zufall je Typ). lit_after_clear ist je Aufruf neu.
+ void RoomWorld::control_lights(){
+-    for(auto& l:lights_)l.lit_after_clear=false;for(auto& l:event_lights_)l.lit_after_clear=false;
++    for(auto& l:lights_){l.lit_after_clear=false;l.effect_link_resolved=false;}for(auto& l:event_lights_){l.lit_after_clear=false;l.effect_link_resolved=false;}
+     // light.c:719-751: Linkaufloesung je Licht mit flg 0x1|0x2. lkflg 1 plp, 2 ene[enep[lkno].wrk_no],
+-    // 3 obwp[lkno], 4 itwp[lkno], 5 eff[efid[lkno]] (ohne nativen Besitzer), sonst lkflg/lkno = 0.
++    // 3 obwp[lkno], 4 itwp[lkno], 5 eff[efid[lkno]] desselben SpriteWork-Pools, sonst lkflg/lkno = 0.
+     // Ist das Zielwerk nicht aktiv (!(pwp->flg & 0x1)), erlischt das Licht dauerhaft (flg &= ~0x3).
+     // Das Werk-flg-Bit 0x1 kommt aus dem ETTY-flg (eneset.c:183, objitm.c bhSetObject/bhSetItem)
+     // und wird im Original fuer ene/obwp/itwp nie geloescht; in den Raumdaten zeigen alle 33
+@@ -3174,13 +3178,13 @@
+         if(l.link>5u){l.link=0;l.index=0;return std::nullopt;} // :740-743 default
+         if(l.link==0)return std::nullopt;
+         if(l.link==1)return bool((collision_events_?collision_events_->flags[13][0]:collision_flags_)&1u); // plp->flg
+-        if(l.link==5){unbound_enemy_.insert("bhControlLight: lkflg 5 (eff[efid[lkno]]) ohne nativen Besitzer");return std::nullopt;}
++        if(l.link==5)return std::nullopt; // :737-765 nach dem Typteil, siehe unten
+         const unsigned kind=l.link-1; // 2 -> ene (kind 1), 3 -> obwp (kind 2), 4 -> itwp (kind 3)
+         const auto* e=state(kind,l.index);
+         if(!e){unbound_enemy_.insert("bhControlLight: Lichtlink auf nicht geladenes Werk (ETTY flg 0x1 aus, wrk_no unbestimmt)");return std::nullopt;}
+         if(kind==1&&e->enemy_bound)return bool(e->enemy.flg&1u);
+         return bool(e->object_flags&1u);};
+-    auto animate_light=[&](Light& l,bool enabled){if(!(l.flags&1u)||!enabled)return;
++    auto animate_light_type=[&](Light& l,bool enabled){if(!(l.flags&1u)||!enabled)return;
+         if(const auto active=link_work_active(l);active&&!*active){l.flags&=~3u;return;} // :745-748
+         if(!l.color_sampled){l.working_color=l.color;l.working_position=l.position;l.working_direction=l.direction;
+             l.working_near_range=l.near_range;l.working_far_range=l.far_range;l.color_sampled=true;}
+@@ -3204,6 +3208,17 @@
+         if(l.type==101){if(simulation_flags_&0x80u){const float f=njCos(int(l.clock));l.working_color={f*l.color.x,f*l.color.y,f*l.color.z};
+             l.clock+=l.speed<<8;if(int(l.clock)>16383){l.flags&=~2u;l.lit_after_clear=true;}}return;}
+         step_light_color(l.type,l.speed,l.clock,l.color,l.working_color,bool(simulation_flags_&0x80u));
++    };
++    auto animate_light=[&](Light& l,bool enabled){
++        if(!(l.flags&1u)||!enabled)return;
++        animate_light_type(l,enabled); // Original :412-718 vor :737-765, auch beim Tod Zufall/Uhr lesen
++        if(l.link!=5)return;
++        const auto slot=light_effect_slot(l.index);if(!slot)return;
++        if(!(sprites_[*slot].sprite.flg&1u)){l.flags&=~3u;l.lit_after_clear=false;return;}
++        const auto matrix=light_effect_matrix(*slot,l.node);if(!matrix)return;
++        NJS_POINT3 local=l.offset,at;NJS_MATRIX m;std::copy_n(matrix->value,16,m);njCalcPoint(&m,&local,&at);
++        l.position=at;l.effect_link_resolved=true; // :755 schreibt lp->px; Richtung bleibt unveraendert
++        if(simulation_flags_&0x80u)l.working_position=at; // :839 wpx nur unter sp_flg 0x80
+     };
+     // light.c:367-371: bhControlLight ruft unter gm_flg 0x80 bhSetEasyDirLight(1) und kehrt
+     // zurueck. Dessen mode/ct0-Fortschritt (:288-319) ist NICHT durch sp_flg 0x80 getort.
+@@ -4192,7 +4207,9 @@
+         return !((lpos.x>=((-clp+fNaViwOffsetX)-320.0f))&&(lpos.x<=(((640.0f+clp)+fNaViwOffsetX)-320.0f))&&(lpos.y>=((-clp+fNaViwOffsetY)-240.0f))&&(lpos.y<=(((480.0f+clp)+fNaViwOffsetY)-240.0f)));};
+     auto add=[&](const Light& l,bool enabled){if(!l.lit_after_clear&&(!(l.flags&1)||!enabled))return;if(l.source==2&&directional)return;if(l.source==4&&std::count_if(active.begin(),active.end(),[](const auto& a){return a.source==4;})>=3)return;
+         if(l.source!=2&&l.source!=4)return;
+-        const auto p=l.link?link_point(l.link-1,l.index,l.node,l.offset):l.position;const NJS_POINT3 at=l.link?p:(l.color_sampled?l.working_position:l.position);
++        if(l.link==5&&!l.effect_link_resolved)return; // eingefrorenes Ergebnis des Lichtpasses, nicht neu aufloesen
++        const bool entity_link=l.link&&l.link!=5;
++        const auto p=entity_link?link_point(l.link-1,l.index,l.node,l.offset):l.position;const NJS_POINT3 at=l.link==5?l.position:entity_link?p:(l.color_sampled?l.working_position:l.position);
+         if(l.source==4&&point_light_clipped(at))return;
+         active.push_back({at,l.color_sampled?l.working_color:l.color,l.color_sampled?l.working_direction:l.direction,l.color_sampled?l.working_near_range:l.near_range,l.color_sampled?l.working_far_range:l.far_range,l.source});if(l.source==2)directional=true;};
+     if(event_camera){for(unsigned i=0;i<std::min<std::size_t>(4,lights_.size());++i)add(lights_[i],bool(lights_[i].flags&2));
+@@ -4247,7 +4264,10 @@
+         if(s.tex_id<0||at>=effect_common_textures_.size()){unbound_enemy_.insert("bhDrawPolEffect: ef_tlist.textures[tex_id + ani_ct] ausserhalb der gemeinsamen Liste");continue;}
+         const unsigned texture=unsigned(scene.textures.size());scene.textures.push_back(effect_common_textures_[at]);
+         NJS_MATRIX matrix;if((s.flg&0x200000)||!(s.flg&0x80)){njUnitMatrix(&matrix);njTranslate(&matrix,s.px,s.py,s.pz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
+-        else {njUnitMatrix(&matrix);if(work.link&&work.link<=4)if(const auto parent=link_matrix(work.link-1,work.index,work.node))std::copy(parent->value,parent->value+16,matrix);njTranslate(&matrix,s.lox,s.loy,s.loz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
++        else {const auto parent=work.link&&work.link<=4?link_matrix(work.link-1,work.index,work.node):std::nullopt;
++            if(!parent){unbound_enemy_.insert("bhDrawPolEffect: op->mtx ohne veroeffentlichte Elternmatrix");continue;}
++            std::copy_n(parent->value,16,matrix);njTranslate(&matrix,s.lox,s.loy,s.loz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
++        std::copy_n(matrix,16,work.effect_root.value); // effect.c:1006/1010, vor Skalierung
+         njScale(&matrix,s.sx,s.sy,s.sz);
+         ModelGeometryOptions geometry;geometry.draw_object=int(s.mdlver);std::copy(std::begin(matrix),std::end(matrix),std::begin(geometry.transform));
+         Scene object;try{object=decode_model_asset(block,0,0,geometry);}
+@@ -4291,6 +4311,7 @@
+             njTranslate(&matrix,s.lox,s.loy,s.loz);
+             njRotateXYZ(&matrix,s.ax,s.ay,s.az);
+         }
++        std::copy_n(matrix,16,work.effect_root.value); // effect.c:1064/1068, vor Skalierung
+         njScale(&matrix,s.sx,s.sy,s.sz);
+         SceneShadow draw;
+         draw.geometry=shadow_models_[s.mdlver];
+@@ -4313,6 +4334,13 @@
+         // effect.c:1338: flg 0x80 ohne 0x200000 setzt op->mtx aus lkwkp->mlwP->owP[lkono].mtx.
+         // Fehlt dem Host diese Matrix, ist das eine benannte Luecke, kein Abbruch des Bildes.
+         if((sprite.flg&0x80u)&&!(sprite.flg&0x200000u)&&!parent){unbound_enemy_.insert("bhDrawTrsEffect3D: lkwkp->mlwP->owP[lkono].mtx ohne nativen Knoten");continue;}
++        // effect.c:1333-1353 (Ntx/Pnc/Opq analog): op->mtx entsteht VOR
++        // Billboardrotation, Skalierung und Rueckseitentor. Nur dieser echte Zeichenpass.
++        // flg 0x200000 hat Vorrang (effect.c:1335): dann nie die Elternmatrix. Lage/Winkel
++        // sind dieselben, mit denen dieser Pass zeichnet (position/e.angles oben).
++        NJS_MATRIX root;if((sprite.flg&0x80u)&&!(sprite.flg&0x200000u)&&parent){std::copy_n(parent->value,16,root);njTranslate(&root,sprite.lox,sprite.loy,sprite.loz);}
++        else{njUnitMatrix(&root);njTranslate(&root,position.x,position.y,position.z);}
++        njRotateXYZ(&root,sprite.ax,sprite.ay,sprite.az);std::copy_n(root,16,work.effect_root.value);
+         const std::size_t ninja_first=scene.triangles.size();
+         unsigned stflg=sprite.stflg;append_effect_sprite(scene,sprite,position,work.scale,effect_camera,unsigned(base+((sprite.stflg&0x20u)?unsigned(sprite.tex_id):0u)+sprite.ani_ct),parent?parent->value:nullptr,&stflg,reflected);
+         // Clipregel des Zeichenaufrufs (SceneTriangle::ninja_primitive): ef_ntx zeichnet mit
+@@ -4337,6 +4365,8 @@
+         if(!list||frame>=list->size()||(*list)[frame].pixels.empty()){unbound_enemy_.insert("bhDrawThlEffect3D: ef_tn[tex_id] ohne gezeichnetes Bild (Inhalt vor dem ersten Rendercut undefiniert)");continue;}
+         if((s.flg&0x80u)&&!(s.flg&0x200000u)){unbound_enemy_.insert("bhDrawThlEffect3D: verlinkter Satz (owP[lkono].mtx)");continue;}
+         const auto& e=entities_.at({4,i});
++        NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&root,e.angles[0],e.angles[1],e.angles[2]);
++        std::copy_n(root,16,work.effect_root.value); // effect.c:1616, vor Billboard/Skalierung
+         NJS_MATRIX basis;njUnitMatrix(&basis);
+         if(s.flg&0x100000u){ // effect.c:1627-1643: njUnitRotPortion, njRotateZ(az), unter gm_flg 0x4000 mr_pl-Drehungen
+             if(reflected&&!mirror_billboard_prefix(scene,basis))throw std::runtime_error("bhDrawThlEffect3D mirror billboard without njMirror matrix");
+@@ -4554,6 +4584,49 @@
+                         :(fixed_camera?unsigned(*fixed_camera):clip_cut_.value_or(0u));
+     for(const auto cut:state.object_hide)if(ncut==unsigned(cut))return false;
+     return true;
++}
++// light.c:737: lkno adressiert die Raumzuordnung, NICHT direkt einen freien
++// eff-Platz und NICHT die Effektkennung. Kein Index-Clamp in bhControlLight.
++std::optional<unsigned> RoomWorld::light_effect_slot(unsigned index)const{
++    if(index>=room_effect_slots_.size()||room_effect_slots_[index]>=sprites_.size()){
++        unbound_enemy_.insert("bhControlLight: sys->efid[lkno] ausserhalb der Raumzuordnung");return {};}
++    return room_effect_slots_[index];
++}
++std::optional<BoneMatrix> RoomWorld::light_effect_matrix(unsigned slot,unsigned node)const{
++    const auto& work=sprites_.at(slot);const auto& s=work.sprite;
++    if(node==0){ // light.c:753-755: pwp->mtx, NICHT owP[0] / Linkelternmatrix
++        if(work.weapon){BoneMatrix m;std::copy_n(work.weapon->matrix,16,m.value);return m;}
++        // Eigene op->mtx-Schreiber ausserhalb der vier Effektpaesse (effsub1b.c:764 bhEff136,
++        // effsub6.c:133 bhEff146_Init/145, :365 bhEff148, effsub2.c:3364 E12_FireManager 262,
++        // :3409 FireBurstDraw/:4623-4632 Draw3DSprite 263/269/274/275/149, effsub5.c:3129 bhEff229,
++        // effsub4.c:3267 3DSpriteDraw 354, :3360 ModelDraw 364) sind noch nicht publiziert:
++        // niemals ihre letzte Lage aus px, einer Quadmitte oder einer frisch gesampelten Pose raten.
++        if(s.mode0&&(s.id==136||s.id==145||s.id==262||s.id==148||s.id==149||s.id==229||s.id==263||s.id==269||s.id==274||s.id==275||s.id==354||s.id==364)){
++            unbound_enemy_.insert("bhControlLight: Effekt "+std::to_string(s.id)+" eigener op->mtx-Schreiber noch nicht publiziert");return {};}
++        return work.effect_root; // Allokation = echte Nullmatrix, nie Einheit als Ersatz
++    }
++    // :759 liest das EIGENE mlwP des Effekts, nicht s.link_matrix (lkwkp).
++    // bhEff_ModelDraw leiht ene[model_enemy].mdl[model_mdl]; nur dessen bereits
++    // berechneter/publizierter Baum ist erlaubt, keine pose()/object_matrices().
++    if(s.model_enemy>=0){const unsigned index=unsigned(s.model_enemy);
++        const auto at=entities_.find({1,index});
++        if(at!=entities_.end()){
++            const auto& owner=tree_owner(at->second);const auto* asset=owner.enemy_asset?
++                (s.model_mdl?owner.enemy_asset->model(s.model_mdl):owner.enemy_asset):nullptr;
++            if(asset){
++                unsigned physical;try{physical=asset->model_index(node);}catch(const std::runtime_error&){
++                    unbound_enemy_.insert("bhControlLight: Effekt-mlwP->owP[lkono] ausserhalb des Modells");return {};}
++                const auto published=afterimage_models_.find({1,index,s.model_mdl});
++                if(published!=afterimage_models_.end()&&published->second.asset==asset&&physical<published->second.nodes.size())return published->second.nodes[physical];
++                const WorldEntity* tree=nullptr;
++                if(owner.enemy_asset==asset&&owner.enemy_calculated)tree=&owner;
++                if(!tree)for(const auto& child:enemy_children_){const auto& t=tree_owner(child);
++                    if(child.enemy.owner_index==index&&t.enemy_asset==asset&&t.enemy_calculated){tree=&t;break;}}
++                if(tree&&physical+tree->model_window<tree->enemy_owp_mtx.size())return tree->enemy_owp_mtx[physical+tree->model_window];
++            }
++        }
++    }
++    unbound_enemy_.insert("bhControlLight: Effekt-mlwP->owP[lkono] ohne veroeffentlichten nativen Baumbesitzer");return {};
+ }
+ std::optional<BoneMatrix> RoomWorld::link_matrix(unsigned kind,unsigned index,unsigned node,unsigned depth)const{
+     if(depth>32)throw std::runtime_error("cyclic entity attachment");
+@@ -5598,7 +5671,7 @@
+ }
+ std::optional<RoomWorld::LightState> RoomWorld::light_state(unsigned index,bool event)const{
+     const auto& table=event?event_lights_:lights_;if(index>=table.size())return {};const auto& l=table[index];
+-    return LightState{l.flags,l.type,l.clock,l.link,l.index,l.node,l.link?link_point(l.link-1,l.index,l.node,l.offset):(l.color_sampled?l.working_position:l.position),l.color_sampled?l.working_color:l.color,l.color_sampled?l.working_near_range:l.near_range,l.color_sampled?l.working_far_range:l.far_range,
++    return LightState{l.flags,l.type,l.clock,l.link,l.index,l.node,l.link==5?l.position:l.link?link_point(l.link-1,l.index,l.node,l.offset):(l.color_sampled?l.working_position:l.position),l.color_sampled?l.working_color:l.color,l.color_sampled?l.working_near_range:l.near_range,l.color_sampled?l.working_far_range:l.far_range,
+         l.color_sampled?l.working_direction:l.direction,l.mode,l.working_angles,l.flicker_color,l.speed};
+ }
+ 
+--- a/native/world.h
++++ b/native/world.h
+@@ -166,6 +166,7 @@
+ // RoomWorld::append: normaler Zeichenpass oder das Monitorbild von screen.c:920 (siehe dort).
+ struct WorldDrawPass{bool small_screen=false;unsigned ncut=0;};
+ class RoomWorld {
++    friend struct LightEffectLinkTestAccess; // gezielte Work-/Publikationsfixture, keine Runtime-Alternative
+ public:
+     RoomWorld(const std::vector<std::uint8_t>& room,const Scene& stage,SceneSpawn& player,std::size_t& motion,std::int64_t& frame,AudioMixer& audio,const std::filesystem::path& data={},const std::filesystem::path& mods={},const std::string& room_name="RM_0000",unsigned game_mode=0);
+     struct CombatTarget {unsigned index,identity;NJS_POINT3 position;float radius,height;int hp;};
+@@ -728,6 +729,7 @@
+         NJS_POINT3 flicker_color{},working_position{},working_direction{};
+         std::array<std::int32_t,3> working_angles{};
+         float working_near_range=0,working_far_range=0;
++        bool effect_link_resolved=false; // Ausgabe des letzten bhControlLight, kein neuer Draw-Resolver
+         int ct1=0; // LGT_WORK.ct1 (en22.c:2933 bhEne22_CtrLight)
+         };
+     // CAM_KEYF_WORK: flg (0x8 = this key carries fog), fog_col/fog_nr/fog_fr.
+@@ -968,6 +970,9 @@
+     struct SpriteWork {const std::vector<SceneTexture>* texture_list=nullptr;
+         // mutable: die ef_fnc-Zeichenteile schreiben den Satz im Zeichenpass (effect.c:929).
+         mutable EffectSprite sprite;NJS_POINT3 scale;
++        // O_WRK.mtxbuf: nach bhSetEffect(Tb) genullt, nur originale Matrixschreiber
++        // publizieren. Kein T(px)/naechster Motionframe als Ersatz fuer den letzten Zeichenpass.
++        mutable BoneMatrix effect_root{};
+         // Ausgabe der schreibenden Zeichenteile je bhDrawEffect-Aufruf dieses Steuerbildes.
+         struct DrawnPass {std::uint64_t serial=~0ull;std::vector<EffectSprite::Quad> quads;std::vector<SceneLine> lines;};
+         mutable std::array<DrawnPass,2> drawn{};bool hidden=false;unsigned link=0,index=0,node=0;NJS_POINT3 offset{};bool player_effect=false,queued=true,dynamic=false;
+@@ -1039,6 +1044,11 @@
+     std::vector<CollisionWall> effect_walls_; // rom->walp + sys->mwalp as bhCheckWallType sees them
+     const std::vector<SceneTexture>* effect_texture_list(const SpriteWork& work)const;
+     std::vector<SpriteWork> sprites_;std::map<unsigned,std::vector<SceneTexture>> effect_textures_;
++    // sys->efid: Raumzeile -> Platz im bestehenden eff[512]-Besitzer. Bleibt beim
++    // Freigeben/Recycling des Zielplatzes unveraendert (room.c:781).
++    std::vector<unsigned> room_effect_slots_;
++    std::optional<unsigned> light_effect_slot(unsigned index)const;
++    std::optional<BoneMatrix> light_effect_matrix(unsigned slot,unsigned node)const;
+     // sys->efm[0]/[1]/[7]/[13]: die vier Modellbloecke aus bhInitEffect (effect.c:66-80).
+     // bhDrawPolEffect zeichnet objP[op->mdlver].model von efm[op->id], deshalb je Block roh.
+     std::vector<std::uint8_t> effect_model0_block_,effect_model1_block_,effect_model7_block_,effect_model13_;

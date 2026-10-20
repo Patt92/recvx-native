@@ -1,0 +1,172 @@
+--- a/native/world.cpp
++++ b/native/world.cpp
+@@ -3,6 +3,7 @@
+ #include "back_color.h"
+ #include "chunk_blend.h"
+ #include "effect_sprites_internal.h"
++#include "effect_model_mirror.h"
+ #include "effect_rap_claw.h"
+ #include "effect_eff130.h"
+ #include "cnk_light.h"
+@@ -3759,13 +3760,14 @@
+ // effsub4.c:3306 bhEff_ModelDraw. njCnkSimpleMultiDrawModel ist der Ninja-Modus 3, mit dem auch
+ // MdlPut.c:182 die Gegner zeichnet; die vorher gesetzten njCnkSetSimpleLight* (:3311-3313) beschreiben
+ // nur das Einzellicht des Modus 2 (ps2_NinjaCnk.c:179 NaCnkLighting[2]) und wirken hier nicht. Es gilt
+-// der Lichtzustand der ef_fnc-Modelle aus game.c:342-348 (Kategorie 4, wie bhEff30cDrw).
++// der Multi-Lichtzustand des Zeichenpasses (Kategorie 5 fuer diesen direkten Modus-3-Aufruf).
+ // Matrix: flg 0x200000 (bhEff_Sub364 setzt 0x240000) -> njUnitMatrix, njTranslateEx(&px),
+ // njRotateEx(&ax, 0) = Z, Y, X (ps2_NaMatrix.c:1759), njScaleEx(&sx). flr_no != 0 faerbte das
+ // Material (npSetAllMatColor); en22 setzt flr_no 0. Die Materialfarben stammen aus dem beschriebenen
+ // Strom mdl[k] des Gegnerwerks (bhEne22_ChgDengekiColor, live_models[k]).
+-void RoomWorld::append_effect_model(Scene& scene,const EffectSprite& s,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend)const{
+-    if((s.flg&0x1000000u)||(s.stflg&0x1000000u))return; // :3319
++// game.c:427 zeichnet dieselbe Liste erneut; kein internes bhPutModel-Spiegelduplikat.
++void RoomWorld::append_effect_model(Scene& scene,const EffectSprite& s,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend,unsigned gm_flg,bool reflected)const{
++    if(!effect_model_detail::visible(s,gm_flg))return; // :3319
+     if(s.model_enemy<0){unbound_enemy_.insert("bhEff_ModelDraw: op->mlwP ohne Gegnerwerk");return;}
+     if(!(s.flg&0x200000u)&&(s.flg&0x80u)){unbound_enemy_.insert("bhEff_ModelDraw: verlinkte Lage (flg 0x80 ohne 0x200000) ohne Hostpfad");return;}
+     const auto found=entities_.find({1,unsigned(s.model_enemy)});
+@@ -3776,32 +3778,33 @@
+     if(!asset){unbound_enemy_.insert("bhEff_ModelDraw: epw->mdl[k] fehlt");return;}
+     const unsigned obj=s.mdlver;
+     if(obj>=asset->bones()){unbound_enemy_.insert("bhEff_ModelDraw: objP[mdlver] ausserhalb des Modells");return;}
++    std::vector<SceneTexture> common;
++    if(!(s.stflg&0x20u)){
++        const auto first=std::size_t(s.tex_id)+std::size_t(s.ani_ct);
++        if(s.tex_id<0||first>=effect_common_textures_.size()){unbound_enemy_.insert("bhEff_ModelDraw: ef_tlist.textures[tex_id + ani_ct] fehlt");return;}
++        common.assign(effect_common_textures_.begin()+first,effect_common_textures_.end());texture_list=&common;
++    }
+     if(!texture_list||texture_list->empty()){unbound_enemy_.insert("bhEff_ModelDraw: txp[0] = mlwP->texP fehlt");return;}
+-    NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,s.px,s.py,s.pz);njRotateZ(&m,s.az);njRotateY(&m,s.ay);njRotateX(&m,s.ax);njScale(&m,s.sx,s.sy,s.sz);
++    NJS_MATRIX m;if(!effect_model_detail::matrix(s,m))return;
+     ModelGeometryOptions geometry;geometry.draw_object=int(obj);
+     geometry.world_matrices.assign(asset->bones(),{});std::copy_n(&m[0],16,geometry.world_matrices[obj].begin());
+     const auto* live=tree.live_stream(s.model_mdl);
+     const std::vector<std::uint8_t>& source=live?*live:asset->encoded_model();
+-    // :3376 flr_no != 0 -> npSetAllMatColor(&mlp->objP[mdlver], 1, op->tv->col) vor jedem
+-    // njCnkSimpleMultiDrawModel. Das Original schreibt die Farbe in den Materialchunk des
+-    // Modellstroms und laesst sie dort stehen; nativ faerbt dieser Zeichenaufruf eine eigene
+-    // Kopie des Stroms. Gleichwertig, weil jeder Zeichner dieses Objekts die Farbe vorher
+-    // selbst setzt: der einzige Aufrufer mit flr_no != 0 ist bhEne17_AfterimageAxEffect
+-    // (en17.c:1689) mit mlwP = &epw->mdl[5], und mdl[5] zeichnet nur dieser Effekt. So
+-    // behalten die sieben Nachbilder eines Bildes ihre eigene Farbe, wie im Original.
+-    std::vector<std::uint8_t> colored;
++    // npSetAllMatColor changes the OWNER's material stream and keeps it for later
++    // entries/passes. The decoded Scene snapshots each call's colour in list order.
++    const std::vector<std::uint8_t>* drawn=&source;
+     if(s.flr_no!=0){
+-        colored=source;
++        auto& colored=s.model_mdl?tree.live_models[s.model_mdl]:tree.live_model;
++        if(colored.empty())colored=source;
+         if(!set_all_mat_color(colored,asset->bones(),obj,1,s.tv[0].col)){unbound_enemy_.insert("bhEff_ModelDraw: npSetAllMatColor ueber das Ende des Modellstroms");return;}
+-    }
+-    Scene object=decode_model_asset(s.flr_no!=0?colored:source,0,0,geometry);
++        drawn=&colored;
++    }
++    Scene object=decode_model_asset(*drawn,0,0,geometry);
+     object.textures=*texture_list;
+-    for(auto& t:object.triangles){t.light_category=4;t.after_modifiers=false;t.material_phase=6;}
+-    for(auto& w:object.ambient_writes)w.phase=6;
++    effect_model_detail::prepare(object,s,reflected);
++    effect_model_detail::finish_blend(*drawn,obj,fnc_blend);
+     for(const auto& t:object.triangles)if(t.textured&&t.texture>=object.textures.size())throw std::runtime_error("bhEff_ModelDraw: Textur ausserhalb von txp[0]");
+     const auto offset=scene.textures.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
+-    // Das Register des letzten Materialchunks bleibt fuer die naechste ef_fnc-Funktion stehen.
+-    if(fnc_blend&&!object.triangles.empty()){const auto& last=object.triangles.back();if(last.chunk_mode_src>=0&&last.chunk_mode_dst>=0)*fnc_blend={unsigned(last.chunk_mode_src),unsigned(last.chunk_mode_dst)};}
+ }
+ bool RoomWorld::mirror_effect_pass_active()const{
+     if(!(presentation_flags_&0x10u)||!collision_events_||!(collision_events_->flags[5][0]&0x100u))return false;
+@@ -4371,7 +4374,7 @@
+          // effsub3.c:3600 bhEff30cDrw in der ef_fnc-Liste: objP[obj].model des Gegners unter cam.mtx * R0_WK.mtxP.
+          if(work.sprite.id==312&&work.sprite.custom_queued&&work.sprite.claw30c){if(reflected)unbound_enemy_.insert("game.c:427 Spiegel-bhDrawEffect: bhEff30cDrw-Modell (Licht/Normalen unter cam.mtx*njMirror) ohne Hostpfad");else append_claw_model(scene,work.sprite);}
+          // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364, en22.c:2658) in der ef_fnc-Liste.
+-         if(work.sprite.id==364&&work.sprite.custom_queued){if(reflected)unbound_enemy_.insert("game.c:427 Spiegel-bhDrawEffect: bhEff_ModelDraw-Modell ohne Hostpfad");else append_effect_model(scene,work.sprite,work.texture_list,&fnc_blend);}
++         if(work.sprite.id==364&&work.sprite.custom_queued)append_effect_model(scene,work.sprite,work.texture_list,&fnc_blend,mirror,reflected);
+          if(work.sprite.custom_queued||!work.sprite.quads.empty()){
+              // bhEff307Drw (effsub3.c:2315): njSetTexture(mlwP->texP des Tyrant), njSetTextureNum(4) —
+              // Kategorie 0x80000000|Raumindex steht fuer die Texturliste dieses Gegnerwerks.
+@@ -4418,7 +4421,13 @@
+     // von game.c:342-348: bhSetLight aus bhDrawObjItm (objitm.c:540), Umgebung amb_chr (game.c:344); mit
+     // sys->ef_flg 0x4 setzt bhDrawEffect vorher bhSetHalfLight (effect.c:926). Kategorie 4 = genau das.
+     const bool effect_half_light=(effect_flags_&0x4u)!=0;
+-    for(std::size_t ti=0;ti<lit_triangle_count;++ti){auto& t=scene.triangles[ti];const auto* lights=(!t.camera_mask&&(t.light_category==1||(t.light_category==4&&effect_half_light)))?&half:&active;const EasyLight* easy=nullptr;EasyLight spc{};
++    // Only the direct MODE-3 model calls join the late lighting loop. Sprites,
++    // bhDraw136 (already lit) and other ef_fnc outputs retain their existing path.
++    const bool albinoid_early=(stage_no_==7&&room_no_==10)||(stage_no_==3&&room_no_==6); // system.c:1647-1657
++    for(std::size_t ti=0;ti<scene.triangles.size();++ti){auto& t=scene.triangles[ti];
++        const bool model_effect=t.light_category==5;
++        if(ti>=lit_triangle_count&&!model_effect)continue;
++        const auto* lights=(!t.camera_mask&&(t.light_category==1||((t.light_category==4||model_effect)&&effect_half_light)))?&half:&active;const EasyLight* easy=nullptr;EasyLight spc{};
+         for(std::size_t g=0;g<glints.size();++g)if(ti>=glints[g].begin&&ti<glints[g].end){
+             if(glints[g].easy>=0){const int m=glints[g].easy;
+                 if(m==0)easy=&easy_full;else if(m==1)easy=&easy_half;else if(m==3)easy=&easy_eye;
+@@ -4426,7 +4435,7 @@
+                 else unbound_enemy_.insert("bhDrawSpObject: rom->lgtp[aspd] ausserhalb der Raumlichter");
+                 break;}
+             lights=&glint_lights[g];}
+-        if(!easy&&(gm_flg&0x80u))easy=t.camera_mask||t.light_category==4?&easy_full:t.light_category==1?&easy_player:nullptr; // Raum, Spieler und ef_fnc-Modelle (bhSetLight) unter gm_flg 0x80
++        if(!easy&&!model_effect&&(gm_flg&0x80u))easy=t.camera_mask||t.light_category==4?&easy_full:t.light_category==1?&easy_player:nullptr; // Raum, Spieler und ef_fnc-Modelle (bhSetLight) unter gm_flg 0x80
+         if(easy){NJS_VECTOR a{t.vertices[1].position.x-t.vertices[0].position.x,t.vertices[1].position.y-t.vertices[0].position.y,t.vertices[1].position.z-t.vertices[0].position.z},b{t.vertices[2].position.x-t.vertices[0].position.x,t.vertices[2].position.y-t.vertices[0].position.y,t.vertices[2].position.z-t.vertices[0].position.z},face;njOuterProduct(&a,&b,&face);njUnitVector(&face);
+             for(auto& vertex:t.vertices){auto normal=vertex.normal;if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);
+                 NJS_VECTOR n=normal;
+@@ -4438,9 +4447,9 @@
+                 const float f=std::max(0.f,-(n.x*easy->v.x+n.y*easy->v.y+n.z*easy->v.z))*easy->intensity;
+                 vertex.light={std::clamp(easy->ambient+f*easy->color.x,0.f,1.f),std::clamp(easy->ambient+f*easy->color.y,0.f,1.f),std::clamp(easy->ambient+f*easy->color.z,0.f,1.f)};}
+             t.gouraud=true;t.world_lit=true;continue;}
+-        const unsigned category=t.camera_mask?0:t.light_category==4?1u:std::min(3u,t.light_category);const auto ambient=ambient_[ambient_slots_[category]];
++        const unsigned category=model_effect?((t.mirror==3||albinoid_early)?0u:1u):t.camera_mask?0:t.light_category==4?1u:std::min(3u,t.light_category);const auto ambient=ambient_[ambient_slots_[category]];
+         NJS_VECTOR a{t.vertices[1].position.x-t.vertices[0].position.x,t.vertices[1].position.y-t.vertices[0].position.y,t.vertices[1].position.z-t.vertices[0].position.z},b{t.vertices[2].position.x-t.vertices[0].position.x,t.vertices[2].position.y-t.vertices[0].position.y,t.vertices[2].position.z-t.vertices[0].position.z},face;njOuterProduct(&a,&b,&face);njUnitVector(&face);
+-        for(auto& vertex:t.vertices){auto normal=vertex.normal;if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);
++        for(auto& vertex:t.vertices){auto normal=vertex.normal;if(!model_effect){if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);}
+             const auto material=t.chunk_ambient?t.ambient_material:NJS_POINT3{1,1,1};
+             NJS_POINT3 color{ambient.x*material.x,ambient.y*material.y,ambient.z*material.z};
+             // njCnkCvVn (ps2_NinjaCnk.c:1226-1262): the point term with squared
+@@ -4449,6 +4449,7 @@
+                 color.x+=l.color.x*diffuse;color.y+=l.color.y*diffuse;color.z+=l.color.z*diffuse;}
+             vertex.light={std::clamp(color.x,0.f,1.f),std::clamp(color.y,0.f,1.f),std::clamp(color.z,0.f,1.f)};}
+         t.gouraud=true;t.world_lit=true;
++        if(model_effect)t.light_category=4; // public ef_fnc category; 5 only marks the late MODE-3 calculation
+     }
+ 
+     if(std::getenv("RECVX_LIGHT_DBG")){double lr=0,lg=0,lb=0,mr=0,mg=0,mb=0,amin=9,amax=-9;std::size_t n=0,room=0;
+--- a/native/world.h
++++ b/native/world.h
+@@ -146,8 +146,8 @@
+     const PlayerAsset* model_bank=nullptr;unsigned model_base=0;
+     // Beschreibbarer Vertexstrom des gezeichneten mlwP->objP (bhEne13_ScaleModel
+     // schreibt p[0]/p[1] an Ort und Stelle). Leer = unveraenderte Modelldaten.
+-    std::vector<std::uint8_t> live_model;
+-    std::map<unsigned,std::vector<std::uint8_t>> live_models;
++    mutable std::vector<std::uint8_t> live_model;
++    mutable std::map<unsigned,std::vector<std::uint8_t>> live_models;
+     const std::vector<std::uint8_t>* live_stream(unsigned model)const{
+         if(!model)return live_model.empty()?nullptr:&live_model;
+         const auto at=live_models.find(model);return at==live_models.end()?nullptr:&at->second;
+@@ -904,8 +904,9 @@
+     // effsub3.c:3600 bhEff30cDrw (Effekt 312, ef_fnc): gespiegeltes Klauenmodell unter R0_WK.mtxP.
+     void append_claw_model(Scene& scene,const EffectSprite& sprite)const;
+     // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364): objP[mdlver].model von mlwP = ene[model_enemy].mdl[model_mdl]
+-    // unter T(p) * RotZ/Y/X(a) * S(s), txp[0] = mlwP->texP, Lichtzustand der ef_fnc-Modelle (Kategorie 4).
+-    void append_effect_model(Scene& scene,const EffectSprite& sprite,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend)const;
++    // unter T(p) * RotZ/Y/X(a) * S(s), txp[0] = mlwP->texP, SimpleMulti-Licht (Kategorie 5).
++    // gm_flg traegt das Effekt-mdflg-Tor; reflected ist der bereits geplante zweite Zeichenaufruf.
++    void append_effect_model(Scene& scene,const EffectSprite& sprite,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend,unsigned gm_flg,bool reflected)const;
+     // game.c:77-91: st_flg 0x100, pt_flg 0x10 und ein gueltiges njMirror(sys->mr_pl) -> bhEtcMirrorDrawModel
+     // ruft bhDrawEffect ein zweites Mal (game.c:427).
+     bool mirror_effect_pass_active()const;
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -647,6 +647,13 @@
+   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+     add_test(NAME enemy_en02_world COMMAND recvx-en02-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+   endif()
++  add_executable(recvx-effect-model-mirror-tests tests/native/effect_model_mirror_test.cpp)
++  target_include_directories(recvx-effect-model-mirror-tests PRIVATE native native/enemies)
++  target_compile_features(recvx-effect-model-mirror-tests PRIVATE cxx_std_17)
++  target_link_libraries(recvx-effect-model-mirror-tests PRIVATE recvx_game recvx_math)
++  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
++    add_test(NAME effect_model_mirror COMMAND recvx-effect-model-mirror-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
++  endif()
+   add_executable(recvx-effect-ry-shadow-tests tests/native/effect_ry_shadow_test.cpp)
+   target_include_directories(recvx-effect-ry-shadow-tests PRIVATE native native/enemies)
+   target_compile_features(recvx-effect-ry-shadow-tests PRIVATE cxx_std_17)

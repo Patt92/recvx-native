@@ -3,9 +3,11 @@
 #include "back_color.h"
 #include "chunk_blend.h"
 #include "effect_sprites_internal.h"
+#include "effect_model_mirror.h"
 #include "effect_rap_claw.h"
 #include "effect_eff130.h"
 #include "cnk_light.h"
+#include "easy_dir_light.h"
 #include "shadow_geometry.h"
 #include "wall_capsule.h"
 #include "geometry_line.h"
@@ -205,6 +207,10 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
             // die unportierten Sprites zeichnen dieselben Atlanten additiv.
             Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
     }
+    // Alle 3171 Effektzeilen der 205 gelieferten RDT haben flg & 3 == 1.
+    // Deshalb belegt bhSetEffectTb in dieser bestehenden Ladefolge genau Platz i;
+    // explizite efid-Identitaet, keine Suche nach Kennung/type oder dynamischem Platz.
+    for(unsigned i=0;i<effect_count;++i)room_effect_slots_.push_back(i);
     // room.c:776 bhSetEffectTable / :787 bhSetEffectLink: lkflg 1..4 haengt den Satz an
     // plp, ene[lkno], obwp[lkno] oder itwp[lkno]. lkno ueber der Raumanzahl wird 0; ist
     // der Werksatz aktiv (flg & 1), traegt der Satz flg 0x80 und lkono wird auf
@@ -232,7 +238,9 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
         if(!active){work.sprite.flg&=~0x80u;continue;}
         work.sprite.flg|=0x80u;
         std::size_t obj_num=0;bool known=kind==0;
-        for(const auto& m:models_)if(m.kind==kind&&m.index==work.index){obj_num=m.actor?m.actor->bones():m.rest_pose.size();known=true;break;}
+        // pwp->mlwP->obj_num (room.c:853) zaehlt nach bhInitMask (room.c:449, vor
+        // bhSetEffectTable :469) die eingefuegten Maskenobjekte mit (face_bh.c:541-561).
+        for(const auto& m:models_)if(m.kind==kind&&m.index==work.index){obj_num=m.actor?m.actor->script_count():m.rest_pose.size();known=true;break;}
         if(known&&kind!=0&&work.node>=obj_num)work.node=0;
         work.sprite.lkono=int(work.node);
         // op->lkwkp und op->lox/loy/loz = efp->lx/ly/lz.
@@ -863,6 +871,26 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(slot<0)unbound_enemy_.insert("bhSetEffectTb: kein freier eff[512]-Platz");
         else if(!supported_effect_sprite(spawn.id))unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));
         return true;}
+    // event.c:5138 bhHEffectSet (0x6e, 22 Byte) -> effect.c:548 bhSetEffectEvt(v6, &pnt, v1, ax, ay).
+    // Byte 2 type (v1), Byte 3 Vorzeichenbits (1 x, 2 y, 4 z) fuer px/py/pz u16/100 an 4/6/8; Byte 10
+    // Vorzeichenbits fuer ax (1) und ay (2) mit den Gradbytes 11/12, ax = v * (65536.0f/360.0f) als int
+    // (O_WRK.ax/ay sind int, kein short wie bei 0xb0); Byte 13 Vorzeichenbits fuer ox/oy/oz u16/100 an
+    // 14/16/18; Effektnummer u16 an 20. bhSetEffectEvt nimmt den ersten Platz ohne flg & 3 in eff[512],
+    // nullt ihn und schreibt flg 1, id, type, tex_id -1, mdlver 0, flr_no 0, px/py/pz, lox/loy/loz = ox/oy/oz,
+    // sx/sy/sz 1, ax/ay, az 0, lkwkp NULL, lkono 0 -- sxb/syb/szb bleiben 0 (anders als bhSetEffectTb),
+    // sys->ef wird nicht beruehrt. RM_3130 Ereignis 0 @2642: bhEff_Sub398; RM_0030/0070/1090/3100/3140: bhEff113.
+    if(op==0x6e){
+        const auto hundredth=[&](unsigned signs,unsigned bit,unsigned at){const float n=float(v.u16(at))/100.0f;return (signs&bit)?-1.0f*n:n;};
+        const auto degrees=[](int value){return int(float(value)*(65536.0f/360.0f));};
+        EffectSpawn spawn;spawn.flg=1;spawn.id=v.u16(20);spawn.type=v.u8(2);spawn.mdlver=0;spawn.flr_no=0;spawn.scale={1.0f,1.0f,1.0f};
+        {const unsigned signs=v.u8(3);spawn.position={hundredth(signs,1,4),hundredth(signs,2,6),hundredth(signs,4,8)};}
+        {const unsigned signs=v.u8(10);spawn.ax=degrees((signs&1)?-int(v.u8(11)):int(v.u8(11)));spawn.ay=degrees((signs&2)?-int(v.u8(12)):int(v.u8(12)));}
+        {const unsigned signs=v.u8(13);spawn.has_offset=true;spawn.offset={hundredth(signs,1,14),hundredth(signs,2,16),hundredth(signs,4,18)};}
+        spawn.lkono=0;spawn.linked_work=nullptr;spawn.has_scale_base=true;spawn.scale_base={0.0f,0.0f,0.0f};
+        const int slot=allocate_effect(spawn,0,0);
+        if(slot<0)unbound_enemy_.insert("bhSetEffectEvt: kein freier eff[512]-Platz");
+        else if(!supported_effect_sprite(spawn.id))unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));
+        return true;}
     // event.c:8722 bhEffBakuDrmSet (Befehl 0xc8): v2 Vorzeichenbits (1 x, 2 y, 4 z), drei u16 in
     // 1/100 Einheiten als Weltlage, dann weapon.c:1812 bhSetExplosionEffect(&pPos) -> Feuerball 23 und
     // zwei Truemmer 24 bei pos - 4 * cam.v. Luecken (Kamera/Pool) meldet explode_effect selbst.
@@ -1004,7 +1032,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         /* event.c:5868/5873/5877: exp0[18] = pxb = px, flr_no = bhCheckFloorNum(py), exp0[20] = pzb = pz.
            EXP_WORK.spx/spz (exp0 0x48/0x50) fuehrt der Host als collision_safe_; ohne diesen Abgleich
            zog der Settle-Schritt (pl_evt.c:132-145) den Spieler nach der Szene zur Lage vor dem Event. */
-        collision_safe_=player_.position;collision_floor_=floor_at(player_.position);
+        collision_safe_=player_.position;collision_floor_=floor_at(player_.position);player_prev_pos_=player_.position; /* pxb/pyb/pzb = px/py/pz */
         player_.yaw=std::int16_t(std::int16_t(sum)+32768);
         if(player_asset_){auto& edit=entity(0,0).node_overrides[0];auto angles=model_pose_physical(0,0,0).angles;angles[1]=0;edit.angles=angles;}
         actor_nodes_.clear();return true;}
@@ -1268,6 +1296,19 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
                 audio_.call_player_weapon_se(bank,int(program),{joint->value[12],joint->value[13],joint->value[14]},int(se_slot),collision_events_&&(collision_events_->flags[11][0]&0x01000000u));
         }
         gun_fire(kind,index,*joint,wno,jno,hand,angle);return true;}
+    // event.c:3113 bhYakkyouSet (0x4a, 8 Byte): v0 Byte 1, v4 Byte 2, v1 Byte 3, v2 Byte 4, v3 Byte 5,
+    // v7 Byte 6 (Bit 2 negiert v5), v5 Byte 7; v6 = 182.04445f * v5. v0 0: bhSetYakkyou(plp,
+    // plp->wpnr_no, v2 ? 9 : 13, v2, v6); v0 1: bhSetYakkyou(ene[rom->enep[v4].wrk_no], v3, v1, v2, v6);
+    // jedes andere v0 tut nichts. bhSetYakkyou liest ang nicht (pwksub.c:3242-3369).
+    if(op==0x4a){
+        const unsigned mode=v.u8(1);if(mode>1)return true;
+        int degrees=v.u8(7);if(v.u8(6)&2)degrees=-degrees;const int angle=int(182.04445f*float(degrees));
+        const unsigned hand=v.u8(4),kind=mode,index=mode?v.u8(2):0;
+        const unsigned jno=mode?v.u8(3):(hand==0?13:9),wno=mode?v.u8(5):player_weapon_;
+        // pwksub.c:3301-3304: owP[jno].mtx und owP[0].mtx des Works; ohne sie keine Ersatzlage.
+        const auto joint=link_matrix(kind,index,jno),root=link_matrix(kind,index,0);
+        if(!joint||!root){unbound_enemy_.insert("bhYakkyouSet owP["+std::to_string(joint?0:jno)+"]");return true;}
+        set_yakkyou(kind,index,*joint,*root,wno,jno,hand,angle);return true;}
     /* bhCommonCtr case 7 (event.c:12038-12070) schreibt plp->px/py/pz samt pxb/pyb/pzb.
        Im Original fuehrt bhControlPlayer (player.c:1452, unter plp->flg & 0x100000 und
        EXP_WORK.yrct <= 0) EXP_WORK.spx/spz dieser einen plp-Lage nach, und die uebrigen
@@ -1283,7 +1324,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         collision_mode_=7u|(v1<<8)|(v0<<16)|((player_event_.reset?0u:(collision_mode_>>24))<<24);
         player_scripted=false;player_frozen_=false;player_smove_.active=false;return true;}
     if(op==0x64&&(v.u8(1)==0x80||v.u8(1)==0x8b)){player_event_.requested=false;player_smove_.active=false;} // Player_controll 128/139: zurueck zu bhCPM0_action
-    if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
+    if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;player_prev_pos_=player_.position; /* event.c:9665-9693 pxb/pyb/pzb = px/py/pz */return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
             player_step_=65536; // mtn_add = 65536
             player_room_motion_=false;player_enemy_motion_=false; // mnwP = plmthp
             collision_mode_=1u; // mode0 1, mode1/2/3 0
@@ -1441,7 +1482,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
         if(cmd==7||cmd==11||cmd==2||cmd==4){auto& e=entity(ctx.kind,ctx.index);auto pos=ctx.kind?e.transform.position:player_.position;
             if(cmd==7)pos={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};
             if(cmd==2||cmd==4){pos.x+=ctx.increment.x*(ctx.pos_sign[0]?-1:1);pos.y+=ctx.increment.y*(ctx.pos_sign[1]?-1:1);pos.z+=ctx.increment.z*(ctx.pos_sign[2]?-1:1);}
-            if(!ctx.kind)player_.position=pos;else e.transform.position=pos;
+            if(!ctx.kind){player_.position=pos;if(cmd==7)player_prev_pos_=pos;}else e.transform.position=pos; /* event.c:12044/12054/12065: nur case 7 setzt pxb/pyb/pzb */
             // event.c:12038..12065: CommonCtr schreibt denselben eff[]-Work,
             // den bhControlEffect/der Zeichenpass lesen, nicht nur seine Entitysicht.
             if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;
@@ -1654,8 +1695,9 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
                 return true;}
             unbound_enemy_.insert("Common_controll 53: mtn_md eines Objekt-/Item-/Effektwerks ohne nativen Besitzer");return false;}
         // Common_controll 10 (event.c:12452) / 22 (:12403): eine Achse (Byte 2: 0 x, 1 y, 2 z) aus
-        // u16/100 mit dem Vorzeichen bpx/bpy/bpz (ctx.pos_sign); 10 schreibt work->px/py/pz
-        // (wie 7), 22 objP[model_cno].pos (wie 8). Andere Achsen haben keinen Originalfall.
+        // u16/100 mit dem Vorzeichen bpx/bpy/bpz (ctx.pos_sign); 10 schreibt nur work->px/py/pz,
+        // anders als 7 (event.c:12044/12054/12065) weder pxb/pyb/pzb noch flr_no (event.c:12452-12490);
+        // 22 objP[model_cno].pos (wie 8). Andere Achsen haben keinen Originalfall.
         if(cmd==10||cmd==22){const unsigned axis=v.u8(2);if(axis>2)return true;
             const float value=v.u16(4)/100.f*(ctx.pos_sign[axis]?-1:1);
             auto& e=entity(ctx.kind,ctx.index);
@@ -1666,7 +1708,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
             auto pos=ctx.kind?e.transform.position:player_.position;(&pos.x)[axis]=value;
             if(!ctx.kind)player_.position=pos;else e.transform.position=pos;
             if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;s.px=pos.x;s.py=pos.y;s.pz=pos.z;}
-            if(ctx.kind==1&&e.enemy_bound){auto& w=e.enemy;if(axis==0)w.px=w.pxb=pos.x;else if(axis==1)w.py=w.pyb=pos.y;else w.pz=w.pzb=pos.z;}
+            if(ctx.kind==1&&e.enemy_bound){auto& w=e.enemy;if(axis==0)w.px=pos.x;else if(axis==1)w.py=pos.y;else w.pz=pos.z;}
             return true;}
         // Common_controll 51/52 (event.c:9997/10030) lesen rom->posp[sys->evt_posno[n]]; evt_posno
         // schreibt allein bhEtcAtariEnePosSet (Opcode 0xb3, event.c:7794), das der Host nicht fuehrt.
@@ -1989,6 +2031,27 @@ void RoomWorld::gun_fire(unsigned kind,unsigned index,const BoneMatrix& joint,un
     RECVX_CB_GUN_OWNER work{};work.stflg=kind?0u:0x40000000u;work.idx_ct=int32_t(index);std::copy_n(joint.value,16,work.mtx);
     recvx_combat_gun_fire(&tables,&s,&sys,&work,int32_t(wno),int32_t(jno),int32_t(hand),ang);
 }
+// pwksub.c:3242 bhSetYakkyou am vorhandenen Work (bhYakkyouSet, event.c:3113): derselbe Kampfkern wie der
+// Spielerpfad, WpnEffTab[wno][3] (Huelse, Link an den Work, lkono jno) und [wno][2] (ohne 0x80 frei);
+// sys->yk_ct ist effect_yk_ct_ und wird zurueckgeschrieben, hr/hl teilt der Kern mit dem Spielerpfad.
+void RoomWorld::set_yakkyou(unsigned kind,unsigned index,const BoneMatrix& joint,const BoneMatrix& root,unsigned wno,unsigned jno,unsigned hand,int ang){
+    RECVX_CB_TABLES tables{};tables.wpn=reinterpret_cast<const RECVX_CB_WPN_TAB*>(WpnTab);tables.eff=reinterpret_cast<RECVX_CB_EF_WORK(*)[4]>(WpnEffTab);
+    struct Owner{RoomWorld* world;unsigned kind,index;} owner{this,kind,index};
+    RECVX_COMBAT_SERVICES s{};s.user=&owner;
+    s.gap=[](void* p,const char* name){static_cast<Owner*>(p)->world->unbound_enemy_.insert(name);};
+    // bhSetEffectTb (effect.c:436) wie in gun_fire: Kennung aus WpnEffTab, Link nur mit Linkzeiger.
+    s.effect=[](void* p,const RECVX_CB_EFFECT* e)->int32_t{
+        auto* o=static_cast<Owner*>(p);
+        if(e->ef.id==3)return o->world->spawn_weapon_flash(*e,o->kind+1,o->index);
+        EffectSpawn spawn;spawn.flg=e->ef.flg;spawn.id=e->ef.id;spawn.type=e->ef.type;spawn.flr_no=e->ef.flr_no;spawn.mdlver=e->ef.mdlver;
+        spawn.position={e->ef.px,e->ef.py,e->ef.pz};spawn.scale={e->ef.sx,e->ef.sy,e->ef.sz};spawn.ax=e->ef.ax;spawn.ay=e->ef.ay;spawn.lkono=e->jno;
+        spawn.has_offset=e->has_offset!=0;spawn.offset={e->offset.x,e->offset.y,e->offset.z};
+        if(e->sys_ef)sys_ef_request(spawn,e->sys_ef==2);
+        return e->link_player?o->world->spawn_effect(spawn,o->kind+1,o->index):o->world->spawn_effect(spawn);};
+    RECVX_COMBAT_SYS sys{};sys.yk_ct=effect_yk_ct_;
+    recvx_combat_set_yakkyou(&tables,&s,&sys,joint.value,root.value,int32_t(wno),int32_t(jno),int32_t(hand),ang);
+    effect_yk_ct_=sys.yk_ct;
+}
 void RoomWorld::sound_monitor(){
     // ExecSoundSystemMonitor (sdfunc.c:3002): ExecEnemySeManager, then ExecObjectSeManager, both with CheckCollision4Sound.
     const auto collision=[this](SoundPoint camera,SoundPoint source){
@@ -2171,8 +2234,11 @@ int RoomWorld::effect_player_hit(NJS_POINT3 p1,NJS_POINT3& p2){
         if(!(w.flg&1u)||!((w.id>=41&&w.id<=43)||(w.id>=91&&w.id<=93)))continue;
         const PlayerAsset* hit=nullptr;for(const auto& m:models_)if(m.kind==1&&m.index==pair.first.second){hit=model_variant(m,1);break;}
         const auto& t=e.model_owner?*e.model_owner:e;
-        const std::size_t first=t.model_window,num=t.enemy_asset&&t.enemy_asset->bones()>first?t.enemy_asset->bones()-first:0;
-        test(hit,t.enemy_owp_mtx,first,num,"bhEff_E11_CheckCollisionPlayer(ene)");
+        // ep->mlwP->owP/obj_num sind nach bhInitMask logisch (face_bh.c:67/:541-561);
+        // mdl[1] ist in derselben Reihenfolge angelegt (id 91: 31 Objekte, 27 Modellknoten).
+        const std::size_t first=t.model_window,count=t.enemy_asset?t.enemy_asset->script_count():0,num=count>first?count-first:0;
+        const auto owp=t.enemy_asset&&t.enemy_owp_mtx.size()==t.enemy_asset->bones()?t.enemy_asset->script_nodes(t.enemy_owp_mtx):std::vector<BoneMatrix>{};
+        test(hit,owp,first,num,"bhEff_E11_CheckCollisionPlayer(ene)");
     }
     return ret;
 }
@@ -2743,7 +2809,7 @@ struct Hud2D{
 // Rasterizer wie bhDrawThlEffect3D, nicht als pauschaler Bildschirmfarbfilter.
 bool RoomWorld::draw_full_screen(SoftwareRenderer& image,const Scene& scene,const SceneCamera& view,bool wireframe)const{
     if(!collision_events_||!(collision_events_->flags[11][0]&0x100u))return false;
-    SoftwareRenderer source(512,480);source.set_texture_filtering(image.texture_filtering());source.set_supersampling(image.supersampling());
+    SoftwareRenderer source(512,480);source.set_texture_filtering(image.texture_filtering());source.set_supersampling(image.supersampling());source.set_render_threads(image.render_threads());
     source.draw_full_screen_source(scene,view,render_aspect_y_,wireframe);
     // bhAllDrawModel enthaelt die Effekt-Schirmlisten. Ihre 640er Koordinaten aendern
     // sich nicht mit njSetScreen(512,480): an der rechten Bildkante abschneiden, nicht stauchen.
@@ -3130,21 +3196,24 @@ void RoomWorld::tick_enemy_pass(){
 
     tick_en01();
     control_enemy_works();
-    // player.c:1366-1387 am Kopf von bhControlPlayer (game.c:49, nach bhControlEnemy :48): pxb = px
-    // vor diesem Spielerpass, nlxb/nlyb/nlzb aus owP[0] des letzten bhCalcModel(plp), erst ausserhalb
-    // eines Radius 0.3 nachgefuehrt. Der Gegnerpass desselben Bildes liest noch die Werte des Vorpasses.
-    {const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
-     if((simulation_flags_&1u)&&!(stflg&0x1000000u)){
-        player_prev_pos_=player_.position;
-        if(!player_joint_matrices_.empty()){const auto& root=player_joint_matrices_[0].value;
-            const float px=root[12]-player_nl_.x,py=player_.position.y-player_nl_.y,pz=root[14]-player_nl_.z;
-            if(std::sqrt(px*px+py*py+pz*pz)>0.3f)player_nl_={root[12],player_.position.y,root[14]};}}}
     refresh_motion_overrides(true);advance_entity_motions(true);
     if(player_scripted&&player_smove_.active&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u))control_player_script_motion();
     else if(player_scripted&&player_morph_.motion_mode3!=4&&!player_frozen_&&!player_enemy_motion_&&!enemy_player_driving_&&(simulation_flags_&1u)){if(player_room_motion_){if(const auto* clip=player_room_clip()){frame_+=player_step_;frame_%=std::int64_t(clip->frames)*65536;}} /* Motion.c:29: datP NULL zaehlt frm_no nicht weiter */ else{frame_+=player_step_;if(player_asset_&&player_asset_->has_motion(motion_))frame_%=std::int64_t(player_asset_->motion_frames(motion_))*65536;}}
     control_enemy_player_motion();
     apply_en01_flinch();
     sync_player_grab();
+    // player.c:1366-1387 am Kopf von bhControlPlayer (game.c:49, nach bhControlEnemy :48): pxb = px
+    // vor diesem Spielerpass, nlxb/nlyb/nlzb aus owP[0] des letzten bhCalcModel(plp), erst ausserhalb
+    // eines Radius 0.3 nachgefuehrt. Der Gegnerpass desselben Bildes liest noch die Werte des Vorpasses.
+    // Erst nach sync_player_grab: die PlyDG-Linklage schreibt en01 im Gegnerpass (vor :1366) auf plp->px,
+    // pxb ist also schon die gelinkte Lage. Kopf und Koerperteil (:1578-1655) stehen im selben Tor
+    // (:1365); player_pass_head_ meldet finish_player_pass, dass dieser Pass lief.
+    {const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+     if((simulation_flags_&1u)&&!(stflg&0x1000000u)){
+        player_prev_pos_=player_.position;player_pass_head_=true;
+        if(!player_joint_matrices_.empty()){const auto& root=player_joint_matrices_[0].value;
+            const float px=root[12]-player_nl_.x,py=player_.position.y-player_nl_.y,pz=root[14]-player_nl_.z;
+            if(std::sqrt(px*px+py*py+pz*pz)>0.3f)player_nl_={root[12],player_.position.y,root[14]};}}}
     // game.c:46-47: bhControlPlayer follows bhControlEnemy in the same pass. Its
     // tail (player.c:1600-1664) is not gated on plp->mode0, so the two
     // enemy-driven modes get their wall/floor pass here, where the whole enemy
@@ -3160,9 +3229,9 @@ void RoomWorld::tick_enemy_pass(){
 // Opcode 0x5b) ruft ihn zusaetzlich direkt nach bhControlCamera, das Licht ruckt in dem Bild also
 // einen Takt weiter (Uhr/Zufall je Typ). lit_after_clear ist je Aufruf neu.
 void RoomWorld::control_lights(){
-    for(auto& l:lights_)l.lit_after_clear=false;for(auto& l:event_lights_)l.lit_after_clear=false;
+    for(auto& l:lights_){l.lit_after_clear=false;l.effect_link_resolved=false;}for(auto& l:event_lights_){l.lit_after_clear=false;l.effect_link_resolved=false;}
     // light.c:719-751: Linkaufloesung je Licht mit flg 0x1|0x2. lkflg 1 plp, 2 ene[enep[lkno].wrk_no],
-    // 3 obwp[lkno], 4 itwp[lkno], 5 eff[efid[lkno]] (ohne nativen Besitzer), sonst lkflg/lkno = 0.
+    // 3 obwp[lkno], 4 itwp[lkno], 5 eff[efid[lkno]] desselben SpriteWork-Pools, sonst lkflg/lkno = 0.
     // Ist das Zielwerk nicht aktiv (!(pwp->flg & 0x1)), erlischt das Licht dauerhaft (flg &= ~0x3).
     // Das Werk-flg-Bit 0x1 kommt aus dem ETTY-flg (eneset.c:183, objitm.c bhSetObject/bhSetItem)
     // und wird im Original fuer ene/obwp/itwp nie geloescht; in den Raumdaten zeigen alle 33
@@ -3172,13 +3241,13 @@ void RoomWorld::control_lights(){
         if(l.link>5u){l.link=0;l.index=0;return std::nullopt;} // :740-743 default
         if(l.link==0)return std::nullopt;
         if(l.link==1)return bool((collision_events_?collision_events_->flags[13][0]:collision_flags_)&1u); // plp->flg
-        if(l.link==5){unbound_enemy_.insert("bhControlLight: lkflg 5 (eff[efid[lkno]]) ohne nativen Besitzer");return std::nullopt;}
+        if(l.link==5)return std::nullopt; // :737-765 nach dem Typteil, siehe unten
         const unsigned kind=l.link-1; // 2 -> ene (kind 1), 3 -> obwp (kind 2), 4 -> itwp (kind 3)
         const auto* e=state(kind,l.index);
         if(!e){unbound_enemy_.insert("bhControlLight: Lichtlink auf nicht geladenes Werk (ETTY flg 0x1 aus, wrk_no unbestimmt)");return std::nullopt;}
         if(kind==1&&e->enemy_bound)return bool(e->enemy.flg&1u);
         return bool(e->object_flags&1u);};
-    auto animate_light=[&](Light& l,bool enabled){if(!(l.flags&1u)||!enabled)return;
+    auto animate_light_type=[&](Light& l,bool enabled){if(!(l.flags&1u)||!enabled)return;
         if(const auto active=link_work_active(l);active&&!*active){l.flags&=~3u;return;} // :745-748
         if(!l.color_sampled){l.working_color=l.color;l.working_position=l.position;l.working_direction=l.direction;
             l.working_near_range=l.near_range;l.working_far_range=l.far_range;l.color_sampled=true;}
@@ -3203,12 +3272,31 @@ void RoomWorld::control_lights(){
             l.clock+=l.speed<<8;if(int(l.clock)>16383){l.flags&=~2u;l.lit_after_clear=true;}}return;}
         step_light_color(l.type,l.speed,l.clock,l.color,l.working_color,bool(simulation_flags_&0x80u));
     };
-    // light.c:367-371: unter sys->gm_flg 0x80 (Augenkamera cut.c:2646, Todesszene gameover.c:323)
-    // kehrt bhControlLight nach bhSetEasyDirLight zurueck: keine Uhr, kein Zufall, keine w*-Schreibung.
-    // Der dortige Typ-100/101-Fortschritt von lgtp[0] (:288-319) bleibt die bestehende Luecke.
+    auto animate_light=[&](Light& l,bool enabled){
+        if(!(l.flags&1u)||!enabled)return;
+        animate_light_type(l,enabled); // Original :412-718 vor :737-765, auch beim Tod Zufall/Uhr lesen
+        if(l.link!=5)return;
+        const auto slot=light_effect_slot(l.index);if(!slot)return;
+        if(!(sprites_[*slot].sprite.flg&1u)){l.flags&=~3u;l.lit_after_clear=false;return;}
+        const auto matrix=light_effect_matrix(*slot,l.node);if(!matrix)return;
+        NJS_POINT3 local=l.offset,at;NJS_MATRIX m;std::copy_n(matrix->value,16,m);njCalcPoint(&m,&local,&at);
+        l.position=at;l.effect_link_resolved=true; // :755 schreibt lp->px; Richtung bleibt unveraendert
+        if(simulation_flags_&0x80u)l.working_position=at; // :839 wpx nur unter sp_flg 0x80
+    };
+    // light.c:367-371: bhControlLight ruft unter gm_flg 0x80 bhSetEasyDirLight(1) und kehrt
+    // zurueck. Dessen mode/ct0-Fortschritt (:288-319) ist NICHT durch sp_flg 0x80 getort.
+    // Teilintegration: nur Seiteneffekte dieses echten Aufrufs; Einzellicht-Register und die
+    // weiteren Zeichenaufrufe bleiben offen (work/easy_dir_light.result.md). Kein RGB/w*-Write.
     const bool easy_only=collision_events_&&(collision_events_->flags[11][0]&0x80u);
-    if(!easy_only)for(unsigned i=0;i<lights_.size();++i)if(!event_camera||i<4)animate_light(lights_[i],bool(lights_[i].flags&2u));
-    if(!easy_only&&event_camera)for(auto& l:event_lights_)animate_light(l,bool(l.flags&2u));
+    if(easy_only){
+        if(lights_.empty())unbound_enemy_.insert("bhSetEasyDirLight: rom->lgtp[0] fehlt");
+        else{auto& l=lights_[0];(void)step_easy_dir_light(1.0f,l.type,l.speed,l.flags,l.mode,l.clock);
+            // Ein geloeschtes Bit darf die noch offene Zeichenbindung nicht unsichtbar machen.
+            if(l.type==100u||l.type==101u)unbound_enemy_.insert("bhSetEasyDirLight: Zeichenaufruffolge/Einzellichtzustand Typ 100/101 offen");}
+        return;
+    }
+    for(unsigned i=0;i<lights_.size();++i)if(!event_camera||i<4)animate_light(lights_[i],bool(lights_[i].flags&2u));
+    if(event_camera)for(auto& l:event_lights_)animate_light(l,bool(l.flags&2u));
 }
 void RoomWorld::tick_after_player(){
     // Der freie Spielerpass (runtime.cpp, player->pose aus plp->px/ay) kennt die Objektbindung nicht;
@@ -3220,6 +3308,10 @@ void RoomWorld::tick_after_player(){
     // bhSetExtraEffectWork: derselbe eff[512]-Pool (flg 2), bhControlEffect ueberspringt flg-2-Plaetze.
     set_effect_extra_allocator([this](){return reserve_effect_slot();},[this](int slot){if(slot>=0&&std::size_t(slot)<sprites_.size()&&(sprites_[std::size_t(slot)].sprite.flg&3u)==2u)sprites_[std::size_t(slot)].sprite.flg=0;});
     set_effect_link_lookup([this](unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out){const auto m=link_matrix(kind,index,node);if(!m)return false;std::copy(m->value,m->value+16,out);return true;});
+    // effsub2.c:4446 bhEff_E14_Mucus: owP[lkono] des selbst gefundenen ene[]-Werks (Raumindex ueber den Werksatz).
+    set_effect_work_node_matrix([this](const void* w,unsigned node,NJS_MATRIX& out){unsigned index=0;
+        if(!enemy_work_index(static_cast<const RECVX_ENEMY_WORK*>(w),index))return false;
+        const auto m=link_matrix(1,index,node);if(!m)return false;std::copy(m->value,m->value+16,out);return true;});
     set_effect_player_hit([this](NJS_POINT3 p1,NJS_POINT3& p2){return effect_player_hit(p1,p2);});
     {EffectWorldHooks h;
      h.player_get=[this](RECVX_ENEMY_PLAYER& p){return enemy_player_get(p);};
@@ -3466,6 +3558,9 @@ void RoomWorld::tick_after_player(){
                     if((work.sprite.flg&0x80u)&&work.sprite.lkwkp&&!work.link){unsigned at=0;
                         if(enemy_work_index(static_cast<const RECVX_ENEMY_WORK*>(work.sprite.lkwkp),at)){work.link=2;work.index=at;work.node=unsigned(work.sprite.lkono);work.sprite.link_kind=1;work.sprite.link_index=at;}
                         else unbound_enemy_.insert("effect.c:806: op->lkwkp ohne Raumfigur");}
+                    // lkwkp = plp (effsub2.c:3184 bhEff_E12_FloorBlood2, :4266 bhEff_E14_Fire2): der Spieler ist kein
+                    // Effekt-/Gegnerwerk; die Prozedur nennt ihn mit link_kind 0, danach gilt plp->mlwP->owP[lkono].
+                    if((work.sprite.flg&0x80u)&&!work.sprite.lkwkp&&!work.link&&work.sprite.link_kind==0){work.link=1;work.index=0;work.node=unsigned(work.sprite.lkono);}
                     auto& e=entity(4,i);e.type=work.sprite.type;
                     e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};
                     // effect.c:1374 njScaleEx(&op->sx): gezeichnet wird die aktuelle Groesse, die die Prozedur
@@ -3759,13 +3854,14 @@ static bool set_all_mat_color(std::vector<std::uint8_t>& stream,unsigned bones,u
 // effsub4.c:3306 bhEff_ModelDraw. njCnkSimpleMultiDrawModel ist der Ninja-Modus 3, mit dem auch
 // MdlPut.c:182 die Gegner zeichnet; die vorher gesetzten njCnkSetSimpleLight* (:3311-3313) beschreiben
 // nur das Einzellicht des Modus 2 (ps2_NinjaCnk.c:179 NaCnkLighting[2]) und wirken hier nicht. Es gilt
-// der Lichtzustand der ef_fnc-Modelle aus game.c:342-348 (Kategorie 4, wie bhEff30cDrw).
+// der Multi-Lichtzustand des Zeichenpasses (Kategorie 5 fuer diesen direkten Modus-3-Aufruf).
 // Matrix: flg 0x200000 (bhEff_Sub364 setzt 0x240000) -> njUnitMatrix, njTranslateEx(&px),
 // njRotateEx(&ax, 0) = Z, Y, X (ps2_NaMatrix.c:1759), njScaleEx(&sx). flr_no != 0 faerbte das
 // Material (npSetAllMatColor); en22 setzt flr_no 0. Die Materialfarben stammen aus dem beschriebenen
 // Strom mdl[k] des Gegnerwerks (bhEne22_ChgDengekiColor, live_models[k]).
-void RoomWorld::append_effect_model(Scene& scene,const EffectSprite& s,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend)const{
-    if((s.flg&0x1000000u)||(s.stflg&0x1000000u))return; // :3319
+// game.c:427 zeichnet dieselbe Liste erneut; kein internes bhPutModel-Spiegelduplikat.
+void RoomWorld::append_effect_model(Scene& scene,const EffectSprite& s,const std::vector<SceneTexture>* texture_list,std::pair<unsigned,unsigned>* fnc_blend,unsigned gm_flg,bool reflected)const{
+    if(!effect_model_detail::visible(s,gm_flg))return; // :3319
     if(s.model_enemy<0){unbound_enemy_.insert("bhEff_ModelDraw: op->mlwP ohne Gegnerwerk");return;}
     if(!(s.flg&0x200000u)&&(s.flg&0x80u)){unbound_enemy_.insert("bhEff_ModelDraw: verlinkte Lage (flg 0x80 ohne 0x200000) ohne Hostpfad");return;}
     const auto found=entities_.find({1,unsigned(s.model_enemy)});
@@ -3776,32 +3872,33 @@ void RoomWorld::append_effect_model(Scene& scene,const EffectSprite& s,const std
     if(!asset){unbound_enemy_.insert("bhEff_ModelDraw: epw->mdl[k] fehlt");return;}
     const unsigned obj=s.mdlver;
     if(obj>=asset->bones()){unbound_enemy_.insert("bhEff_ModelDraw: objP[mdlver] ausserhalb des Modells");return;}
+    std::vector<SceneTexture> common;
+    if(!(s.stflg&0x20u)){
+        const auto first=std::size_t(s.tex_id)+std::size_t(s.ani_ct);
+        if(s.tex_id<0||first>=effect_common_textures_.size()){unbound_enemy_.insert("bhEff_ModelDraw: ef_tlist.textures[tex_id + ani_ct] fehlt");return;}
+        common.assign(effect_common_textures_.begin()+first,effect_common_textures_.end());texture_list=&common;
+    }
     if(!texture_list||texture_list->empty()){unbound_enemy_.insert("bhEff_ModelDraw: txp[0] = mlwP->texP fehlt");return;}
-    NJS_MATRIX m;njUnitMatrix(&m);njTranslate(&m,s.px,s.py,s.pz);njRotateZ(&m,s.az);njRotateY(&m,s.ay);njRotateX(&m,s.ax);njScale(&m,s.sx,s.sy,s.sz);
+    NJS_MATRIX m;if(!effect_model_detail::matrix(s,m))return;
     ModelGeometryOptions geometry;geometry.draw_object=int(obj);
     geometry.world_matrices.assign(asset->bones(),{});std::copy_n(&m[0],16,geometry.world_matrices[obj].begin());
     const auto* live=tree.live_stream(s.model_mdl);
     const std::vector<std::uint8_t>& source=live?*live:asset->encoded_model();
-    // :3376 flr_no != 0 -> npSetAllMatColor(&mlp->objP[mdlver], 1, op->tv->col) vor jedem
-    // njCnkSimpleMultiDrawModel. Das Original schreibt die Farbe in den Materialchunk des
-    // Modellstroms und laesst sie dort stehen; nativ faerbt dieser Zeichenaufruf eine eigene
-    // Kopie des Stroms. Gleichwertig, weil jeder Zeichner dieses Objekts die Farbe vorher
-    // selbst setzt: der einzige Aufrufer mit flr_no != 0 ist bhEne17_AfterimageAxEffect
-    // (en17.c:1689) mit mlwP = &epw->mdl[5], und mdl[5] zeichnet nur dieser Effekt. So
-    // behalten die sieben Nachbilder eines Bildes ihre eigene Farbe, wie im Original.
-    std::vector<std::uint8_t> colored;
+    // npSetAllMatColor changes the OWNER's material stream and keeps it for later
+    // entries/passes. The decoded Scene snapshots each call's colour in list order.
+    const std::vector<std::uint8_t>* drawn=&source;
     if(s.flr_no!=0){
-        colored=source;
+        auto& colored=s.model_mdl?tree.live_models[s.model_mdl]:tree.live_model;
+        if(colored.empty())colored=source;
         if(!set_all_mat_color(colored,asset->bones(),obj,1,s.tv[0].col)){unbound_enemy_.insert("bhEff_ModelDraw: npSetAllMatColor ueber das Ende des Modellstroms");return;}
+        drawn=&colored;
     }
-    Scene object=decode_model_asset(s.flr_no!=0?colored:source,0,0,geometry);
+    Scene object=decode_model_asset(*drawn,0,0,geometry);
     object.textures=*texture_list;
-    for(auto& t:object.triangles){t.light_category=4;t.after_modifiers=false;t.material_phase=6;}
-    for(auto& w:object.ambient_writes)w.phase=6;
+    effect_model_detail::prepare(object,s,reflected);
+    effect_model_detail::finish_blend(*drawn,obj,fnc_blend);
     for(const auto& t:object.triangles)if(t.textured&&t.texture>=object.textures.size())throw std::runtime_error("bhEff_ModelDraw: Textur ausserhalb von txp[0]");
     const auto offset=scene.textures.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
-    // Das Register des letzten Materialchunks bleibt fuer die naechste ef_fnc-Funktion stehen.
-    if(fnc_blend&&!object.triangles.empty()){const auto& last=object.triangles.back();if(last.chunk_mode_src>=0&&last.chunk_mode_dst>=0)*fnc_blend={unsigned(last.chunk_mode_src),unsigned(last.chunk_mode_dst)};}
 }
 bool RoomWorld::mirror_effect_pass_active()const{
     if(!(presentation_flags_&0x10u)||!collision_events_||!(collision_events_->flags[5][0]&0x100u))return false;
@@ -4029,6 +4126,24 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     // screen.c:953/987: gm_flg |= 0x80 und st_flg |= 0x20 nur fuer bhAllEasyDrawModel des Monitorbildes.
     const unsigned gm_flg=(collision_events_?collision_events_->flags[11][0]:0u)|(pass.small_screen?0x80u:0u),st_flg_draw=(collision_events_?collision_events_->flags[5][0]:0u)|(pass.small_screen?0x20u:0u);
     const bool eye_light=(gm_flg&0x1000040u)&&!(st_flg_draw&0x20u);bool enemy_drawn=false;
+    const std::optional<unsigned> draw_ncut=pass.small_screen?std::optional<unsigned>(pass.ncut):std::nullopt; // cut.c:548 cam.ncut = cno
+    // objitm.c:471-492/531-537: ob_spc[0] dieser fuenf Raeume zeichnet bhDrawGeneralPurposeWater statt bhDrawObjItm.
+    const auto late_water=[&](const WorldEntity& o){return o.object_list==3&&o.object_spc_index==0&&
+        ((stage_no_==1&&room_no_==13)||(stage_no_==3&&room_no_==6)||(stage_no_==7&&room_no_==6)||(stage_no_==7&&room_no_==10)||(stage_no_==9&&room_no_==11));};
+    // objitm.c:683-716 bhDrawSpObject: mit op->draw_tp != 0 setzt es das Einzellicht (rom->lgtp[aspd], 1.0/0.2),
+    // mit draw_tp 0 nur Licht 1 des EasyMulti-Satzes. Unter gm_flg 0x80 zeichnet bhPutModel auch draw_tp 0 mit dem
+    // Einzellicht (MdlPut.c:33-37), also mit dem eines vorigen ob_spc-Eintrags oder dem aus bhSetHalfLight (:520).
+    // Im Monitorbild (st_flg 0x20) setzt bhDrawObjItm weder bhSetLight (:542) noch bhSetHalfLight; Items und danach
+    // bhDrawEnemy (game.c:398-402, eneset.c:817) erben das Einzellicht des letzten ob_spc mit draw_tp != 0.
+    std::map<unsigned,int> spc_easy_before;int spc_easy_after=-1;
+    if(presentation_flags_&4u)for(const auto& [key,o]:entities_){if(key.first!=2||o.object_list!=3||late_water(o)||object_cut_hidden(o,draw_ncut))continue;
+        spc_easy_before[key.second]=spc_easy_after;if(o.draw_tp!=0)spc_easy_after=int(o.aspd);}
+    // objitm.c:550-604: jedes Item, das die Tore bis :562 passiert (auch ohne objP), schreibt Licht 1 des
+    // EasyMulti-/SimpleMulti-Satzes; das des letzten bleibt fuer bhDrawEffect stehen (game.c:342-348).
+    const WorldEntity* last_item=nullptr;
+    if(presentation_flags_&8u)for(const auto& [key,o]:entities_)if(key.first==3&&!o.inactive&&(o.object_flags&1u)&&!o.hidden&&!object_cut_hidden(o,draw_ncut))last_item=&o;
+    // light.c:1067-1078 bhGetLightVector(57344, op->ayp, 0) (objitm.c:573).
+    const auto item_glint_vector=[](int ayp){NJS_MATRIX m;njUnitMatrix(&m);njRotateZ(&m,0);njRotateY(&m,ayp);njRotateX(&m,57344);NJS_POINT3 forward{0,0,-1.0f},vec;njCalcPoint(&m,&forward,&vec);return vec;};
     // Spiegelpass (sys->st_flg 0x100, bhEff112): MdlPut.c:57/89 zeichnet jedes bhPutModel ohne
     // ewP->mdflg 0x40 ein zweites Mal unter njMirror(cam.mtx, &sys->mr_pl), game.c:77-91 danach das
     // Raummodell. mat = njMirror(Einheitsmatrix): cam.mtx * mat ist genau njMirror(cam.mtx).
@@ -4054,8 +4169,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         // objitm.c:471-492/531-537: only ob_spc[0] in these five original rooms moves
         // from bhDrawObjItm to bhDrawGeneralPurposeWater, after the player (game.c:376).
         // Use the published list, not a guessed water plane or the collision water areas.
-        const bool general_water=model.kind==2&&e.object_list==3&&e.object_spc_index==0&&
-            ((stage_no_==1&&room_no_==13)||(stage_no_==3&&room_no_==6)||(stage_no_==7&&room_no_==6)||(stage_no_==7&&room_no_==10)||(stage_no_==9&&room_no_==11));
+        const bool general_water=model.kind==2&&late_water(e);
         if(model.kind==2&&!e.object_list)continue;
         if(general_water&&pass.small_screen)continue; // game.c:381-403: no late water pass
         // game.c:336/353: bhDrawEneObject and bhDrawEnemy run only with sys->pt_flg 0x2.
@@ -4130,16 +4244,20 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
             std::fprintf(stderr,"DBG kind=%u idx=%u id=%u linked=%d parent=%u/%u/%u native=%d tris=%zu bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) motion=%u room=%d frame=%lld flg=%08x stflg=%08x calculated=%d workpos=(%.4f,%.4f,%.4f) root=(%.4f,%.4f,%.4f)\n",model.kind,model.index,e.identity,int(e.linked),e.parent_kind,e.parent_index,e.parent_node,int(e.enemy_native),object.triangles.size(),mn[0],mn[1],mn[2],mx[0],mx[1],mx[2],e.motion,int(e.room_motion),(long long)e.frame,e.enemy.flg,e.enemy.stflg,int(e.enemy_calculated),e.enemy.px,e.enemy.py,e.enemy.pz,e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[12],e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[13],e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[14]);}
         const auto offset=scene.textures.size();const auto first_triangle=scene.triangles.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
         /* objitm.c:569-585 bhDrawObjItm: mdflg 0x80 ersetzt Licht 1 durch bhGetLightVector(57344, ayp, 0) mit 0.1*aspd. */
-        if(model.kind==3&&e.item_glint){NJS_MATRIX m;njUnitMatrix(&m);njRotateZ(&m,0);njRotateY(&m,e.item_ayp);njRotateX(&m,57344);NJS_POINT3 forward{0,0,-1.0f},vec;njCalcPoint(&m,&forward,&vec);
-            glints.push_back({first_triangle,scene.triangles.size(),vec,0.1f*float(e.aspd)});}
-        /* objitm.c:683-718 bhDrawSpObject (type 5, draw_tp 0): Licht 1 = rom->lgtp[aspd] auf dem halben Zustand. */
-        if(model.kind==2&&e.object_list==3)glints.push_back({first_triangle,scene.triangles.size(),{},0.f,e.aspd});
+        if(model.kind==3&&e.item_glint)glints.push_back({first_triangle,scene.triangles.size(),item_glint_vector(e.item_ayp),0.1f*float(e.aspd)});
+        /* objitm.c:698-705 bhDrawSpObject draw_tp 0: Licht 1 = rom->lgtp[aspd] auf dem halben Zustand. draw_tp 1 zeichnet
+           SimpleMulti (MdlPut.c:8-14), dessen Licht 1 bhDrawSpObject nicht beruehrt (:707-714 nur njCnkSetEasyLight*). */
+        if(model.kind==2&&e.object_list==3&&e.draw_tp==0)glints.push_back({first_triangle,scene.triangles.size(),{},0.f,e.aspd});
         if(en_obj)glints.push_back({first_triangle,scene.triangles.size(),{},0.f,-1,true});
         {int dt=(model.kind==2||model.kind==3)?e.draw_tp:0;if((gm_flg&0x80u)&&dt<2)dt+=2;
          if(model.kind==1&&!en_obj){enemy_drawn=true;if(eye_light&&e.enemy_native&&(e.enemy.mdflg&0x400u))unbound_enemy_.insert("eneset.c:826 Gegnerzeichnen: bhSetEasyDirLight aus npGetMatColor (mdflg 0x400)");}
-         /* Easy-Zustand: 0 bhSetLight, 1 bhSetHalfLight, 2 bhDrawSpObject (rom->lgtp[aspd], 0.2), 3 bhSetEasyDirLight(0.6) der Augenkamera. */
-         if(dt>=2){const int mode=model.kind==3||en_obj||(model.kind==2&&e.object_list==1)?0:model.kind==2&&e.object_list==3?2:model.kind==2?1:eye_light?3:1;
-             glints.push_back({first_triangle,scene.triangles.size(),{},0.f,model.kind==2&&e.object_list==3?e.aspd:-1,false,mode});}}
+         /* Easy-Zustand: 0 bhSetLight, 1 bhSetHalfLight, 2 bhDrawSpObject (rom->lgtp[light], 0.2), 3 bhSetEasyDirLight(0.6) der Augenkamera. */
+         if(dt>=2){int mode=model.kind==3||en_obj||(model.kind==2&&e.object_list==1)?0:model.kind==2&&e.object_list==3?2:model.kind==2?1:eye_light?3:1,light=-1;
+             if(model.kind==2&&e.object_list==3){
+                 if(e.draw_tp==0){const auto at=spc_easy_before.find(model.index);light=at!=spc_easy_before.end()?at->second:-1;mode=light>=0?2:1;} // geerbtes Einzellicht
+                 else{light=e.aspd;mode=dt==2?2:1;}} // dt 3: SimpleDrawTreeCnk mit dem unberuehrten Simple-Einzellicht
+             else if((st_flg_draw&0x20u)&&dt==2&&(model.kind==3||(model.kind==1&&!en_obj))&&spc_easy_after>=0){light=spc_easy_after;mode=2;}
+             glints.push_back({first_triangle,scene.triangles.size(),{},0.f,light,false,mode});}}
         // MdlPut.c:57/89: zweiter Aufruf mit demselben Licht- und Zeichenzustand dieses Works.
         if(mirror_on){const std::size_t last=scene.triangles.size();const auto mdflg=put_model_mdflg(model,e);
             if(!mdflg)unbound_enemy_.insert("MdlPut.c:57 Spiegelaufruf: ewP->mdflg ohne nativen Work (Art "+std::to_string(model.kind)+")");
@@ -4180,7 +4298,9 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         return !((lpos.x>=((-clp+fNaViwOffsetX)-320.0f))&&(lpos.x<=(((640.0f+clp)+fNaViwOffsetX)-320.0f))&&(lpos.y>=((-clp+fNaViwOffsetY)-240.0f))&&(lpos.y<=(((480.0f+clp)+fNaViwOffsetY)-240.0f)));};
     auto add=[&](const Light& l,bool enabled){if(!l.lit_after_clear&&(!(l.flags&1)||!enabled))return;if(l.source==2&&directional)return;if(l.source==4&&std::count_if(active.begin(),active.end(),[](const auto& a){return a.source==4;})>=3)return;
         if(l.source!=2&&l.source!=4)return;
-        const auto p=l.link?link_point(l.link-1,l.index,l.node,l.offset):l.position;const NJS_POINT3 at=l.link?p:(l.color_sampled?l.working_position:l.position);
+        if(l.link==5&&!l.effect_link_resolved)return; // eingefrorenes Ergebnis des Lichtpasses, nicht neu aufloesen
+        const bool entity_link=l.link&&l.link!=5;
+        const auto p=entity_link?link_point(l.link-1,l.index,l.node,l.offset):l.position;const NJS_POINT3 at=l.link==5?l.position:entity_link?p:(l.color_sampled?l.working_position:l.position);
         if(l.source==4&&point_light_clipped(at))return;
         active.push_back({at,l.color_sampled?l.working_color:l.color,l.color_sampled?l.working_direction:l.direction,l.color_sampled?l.working_near_range:l.near_range,l.color_sampled?l.working_far_range:l.far_range,l.source});if(l.source==2)directional=true;};
     if(event_camera){for(unsigned i=0;i<std::min<std::size_t>(4,lights_.size());++i)add(lights_[i],bool(lights_[i].flags&2));
@@ -4204,10 +4324,12 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     const auto easy_dir=[&](float it){ // light.c bhSetEasyDirLight
         if(!lights_.empty()&&(lights_[0].flags&2u)&&(lights_[0].type==100||lights_[0].type==101))unbound_enemy_.insert("bhSetEasyDirLight: rom->lgtp[0] Typ 100/101 ohne Besitzer");
         return EasyLight{true,{0,0.3f,0.7f},{1,1,1},it,0.2f};};
-    const EasyLight easy_full=(gm_flg&0x80u)?easy_dir(1.0f):has_lg?EasyLight{false,lg->direction,lg->color,1.0f,0.f}:EasyLight{}; // light.c bhSetLight
-    // objitm.c:518/540: unter st_flg 0x20 (Monitorbild) laesst bhDrawObjItm bhSetLight/bhSetHalfLight aus;
-    // es gilt das Einzellicht von screen.c:972 (Farbe 1, Intensitaet 1 / 0.2, Richtung 0/0.3/0.7).
-    const EasyLight easy_half=(st_flg_draw&0x20u)?easy_dir(1.0f):(gm_flg&0x80u)?easy_dir(0.6f):has_lg?EasyLight{false,lg->direction,{0.5f*lg->color.x,0.5f*lg->color.y,0.5f*lg->color.z},1.0f,0.f}:EasyLight{}; // bhSetHalfLight
+    // objitm.c:507/520/542: unter st_flg 0x20 (Monitorbild) laesst bhDrawObjItm bhSetLight/bhSetHalfLight aus, also
+    // auch bhSetEasyDirLight (light.c:936/1003); Raum, Objekte und Items behalten das Einzellicht von screen.c:971-990:
+    // Stufe 7 Farbe 0.3/0.3/1.0, Intensitaet 4.0 / 0.5, Richtung 0.35/-0.15/0.5, sonst 1/1/1, 1.0 / 0.2, 0/0.3/0.7.
+    const EasyLight easy_screen=stage_no_==7?EasyLight{true,{0.35f,-0.15f,0.5f},{0.3f,0.3f,1.0f},4.0f,0.5f}:EasyLight{true,{0,0.3f,0.7f},{1,1,1},1.0f,0.2f};
+    const EasyLight easy_full=(st_flg_draw&0x20u)?easy_screen:(gm_flg&0x80u)?easy_dir(1.0f):has_lg?EasyLight{false,lg->direction,lg->color,1.0f,0.f}:EasyLight{}; // light.c bhSetLight
+    const EasyLight easy_half=(st_flg_draw&0x20u)?easy_screen:(gm_flg&0x80u)?easy_dir(0.6f):has_lg?EasyLight{false,lg->direction,{0.5f*lg->color.x,0.5f*lg->color.y,0.5f*lg->color.z},1.0f,0.f}:EasyLight{}; // bhSetHalfLight
     const EasyLight easy_eye=eye_light?easy_dir(0.6f):EasyLight{}; // eneset.c:839 je Gegner
     const EasyLight easy_player=(eye_light&&enemy_drawn)?easy_eye:easy_half; // der Zustand nach bhDrawEnemy (game.c:351-358)
     const auto lit_triangle_count=scene.triangles.size();
@@ -4235,7 +4357,10 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         if(s.tex_id<0||at>=effect_common_textures_.size()){unbound_enemy_.insert("bhDrawPolEffect: ef_tlist.textures[tex_id + ani_ct] ausserhalb der gemeinsamen Liste");continue;}
         const unsigned texture=unsigned(scene.textures.size());scene.textures.push_back(effect_common_textures_[at]);
         NJS_MATRIX matrix;if((s.flg&0x200000)||!(s.flg&0x80)){njUnitMatrix(&matrix);njTranslate(&matrix,s.px,s.py,s.pz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
-        else {njUnitMatrix(&matrix);if(work.link&&work.link<=4)if(const auto parent=link_matrix(work.link-1,work.index,work.node))std::copy(parent->value,parent->value+16,matrix);njTranslate(&matrix,s.lox,s.loy,s.loz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
+        else {const auto parent=work.link&&work.link<=4?link_matrix(work.link-1,work.index,work.node):std::nullopt;
+            if(!parent){unbound_enemy_.insert("bhDrawPolEffect: op->mtx ohne veroeffentlichte Elternmatrix");continue;}
+            std::copy_n(parent->value,16,matrix);njTranslate(&matrix,s.lox,s.loy,s.loz);njRotateXYZ(&matrix,s.ax,s.ay,s.az);}
+        std::copy_n(matrix,16,work.effect_root.value); // effect.c:1006/1010, vor Skalierung
         njScale(&matrix,s.sx,s.sy,s.sz);
         ModelGeometryOptions geometry;geometry.draw_object=int(s.mdlver);std::copy(std::begin(matrix),std::end(matrix),std::begin(geometry.transform));
         Scene object;try{object=decode_model_asset(block,0,0,geometry);}
@@ -4279,6 +4404,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
             njTranslate(&matrix,s.lox,s.loy,s.loz);
             njRotateXYZ(&matrix,s.ax,s.ay,s.az);
         }
+        std::copy_n(matrix,16,work.effect_root.value); // effect.c:1064/1068, vor Skalierung
         njScale(&matrix,s.sx,s.sy,s.sz);
         SceneShadow draw;
         draw.geometry=shadow_models_[s.mdlver];
@@ -4301,6 +4427,13 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         // effect.c:1338: flg 0x80 ohne 0x200000 setzt op->mtx aus lkwkp->mlwP->owP[lkono].mtx.
         // Fehlt dem Host diese Matrix, ist das eine benannte Luecke, kein Abbruch des Bildes.
         if((sprite.flg&0x80u)&&!(sprite.flg&0x200000u)&&!parent){unbound_enemy_.insert("bhDrawTrsEffect3D: lkwkp->mlwP->owP[lkono].mtx ohne nativen Knoten");continue;}
+        // effect.c:1333-1353 (Ntx/Pnc/Opq analog): op->mtx entsteht VOR
+        // Billboardrotation, Skalierung und Rueckseitentor. Nur dieser echte Zeichenpass.
+        // flg 0x200000 hat Vorrang (effect.c:1335): dann nie die Elternmatrix. Lage/Winkel
+        // sind dieselben, mit denen dieser Pass zeichnet (position/e.angles oben).
+        NJS_MATRIX root;if((sprite.flg&0x80u)&&!(sprite.flg&0x200000u)&&parent){std::copy_n(parent->value,16,root);njTranslate(&root,sprite.lox,sprite.loy,sprite.loz);}
+        else{njUnitMatrix(&root);njTranslate(&root,position.x,position.y,position.z);}
+        njRotateXYZ(&root,sprite.ax,sprite.ay,sprite.az);std::copy_n(root,16,work.effect_root.value);
         const std::size_t ninja_first=scene.triangles.size();
         unsigned stflg=sprite.stflg;append_effect_sprite(scene,sprite,position,work.scale,effect_camera,unsigned(base+((sprite.stflg&0x20u)?unsigned(sprite.tex_id):0u)+sprite.ani_ct),parent?parent->value:nullptr,&stflg,reflected);
         // Clipregel des Zeichenaufrufs (SceneTriangle::ninja_primitive): ef_ntx zeichnet mit
@@ -4325,6 +4458,8 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         if(!list||frame>=list->size()||(*list)[frame].pixels.empty()){unbound_enemy_.insert("bhDrawThlEffect3D: ef_tn[tex_id] ohne gezeichnetes Bild (Inhalt vor dem ersten Rendercut undefiniert)");continue;}
         if((s.flg&0x80u)&&!(s.flg&0x200000u)){unbound_enemy_.insert("bhDrawThlEffect3D: verlinkter Satz (owP[lkono].mtx)");continue;}
         const auto& e=entities_.at({4,i});
+        NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&root,e.angles[0],e.angles[1],e.angles[2]);
+        std::copy_n(root,16,work.effect_root.value); // effect.c:1616, vor Billboard/Skalierung
         NJS_MATRIX basis;njUnitMatrix(&basis);
         if(s.flg&0x100000u){ // effect.c:1627-1643: njUnitRotPortion, njRotateZ(az), unter gm_flg 0x4000 mr_pl-Drehungen
             if(reflected&&!mirror_billboard_prefix(scene,basis))throw std::runtime_error("bhDrawThlEffect3D mirror billboard without njMirror matrix");
@@ -4371,7 +4506,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
          // effsub3.c:3600 bhEff30cDrw in der ef_fnc-Liste: objP[obj].model des Gegners unter cam.mtx * R0_WK.mtxP.
          if(work.sprite.id==312&&work.sprite.custom_queued&&work.sprite.claw30c){if(reflected)unbound_enemy_.insert("game.c:427 Spiegel-bhDrawEffect: bhEff30cDrw-Modell (Licht/Normalen unter cam.mtx*njMirror) ohne Hostpfad");else append_claw_model(scene,work.sprite);}
          // effsub4.c:3306 bhEff_ModelDraw (bhEff_Sub364, en22.c:2658) in der ef_fnc-Liste.
-         if(work.sprite.id==364&&work.sprite.custom_queued){if(reflected)unbound_enemy_.insert("game.c:427 Spiegel-bhDrawEffect: bhEff_ModelDraw-Modell ohne Hostpfad");else append_effect_model(scene,work.sprite,work.texture_list,&fnc_blend);}
+         if(work.sprite.id==364&&work.sprite.custom_queued)append_effect_model(scene,work.sprite,work.texture_list,&fnc_blend,mirror,reflected);
          if(work.sprite.custom_queued||!work.sprite.quads.empty()){
              // bhEff307Drw (effsub3.c:2315): njSetTexture(mlwP->texP des Tyrant), njSetTextureNum(4) —
              // Kategorie 0x80000000|Raumindex steht fuer die Texturliste dieses Gegnerwerks.
@@ -4418,7 +4553,21 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     // von game.c:342-348: bhSetLight aus bhDrawObjItm (objitm.c:540), Umgebung amb_chr (game.c:344); mit
     // sys->ef_flg 0x4 setzt bhDrawEffect vorher bhSetHalfLight (effect.c:926). Kategorie 4 = genau das.
     const bool effect_half_light=(effect_flags_&0x4u)!=0;
-    for(std::size_t ti=0;ti<lit_triangle_count;++ti){auto& t=scene.triangles[ti];const auto* lights=(!t.camera_mask&&(t.light_category==1||(t.light_category==4&&effect_half_light)))?&half:&active;const EasyLight* easy=nullptr;EasyLight spc{};
+    // Only the direct MODE-3 model calls join the late lighting loop. Sprites,
+    // bhDraw136 (already lit) and other ef_fnc outputs retain their existing path.
+    const bool albinoid_early=(stage_no_==7&&room_no_==10)||(stage_no_==3&&room_no_==6); // system.c:1647-1657
+    // objitm.c:569-604: traegt das letzte Item (last_item) mdflg 0x80, steht Licht 1 des Multi-Satzes noch auf seinem
+    // Glanz, wenn bhDrawEffect (game.c:348) zeichnet; ohne Glanz stellt :587-604 den bhSetLight-Zustand her. Nicht mit
+    // ef_flg 0x4 (bhSetHalfLight, effect.c:924-927), nicht in den Albinoid-Raeumen (bhDrawEffect vor bhDrawObjItm,
+    // game.c:339-342) und nicht im Spiegelpass (mirror 3: game.c:85 bhSetLight vor bhEtcMirrorDrawModel).
+    const bool item_light_leak=last_item&&last_item->item_glint&&!effect_half_light&&!albinoid_early;std::vector<SampleLight> item_effect_lights;
+    if(item_light_leak){item_effect_lights=active;item_effect_lights.erase(std::remove_if(item_effect_lights.begin(),item_effect_lights.end(),[](const auto& l){return l.source==2;}),item_effect_lights.end());
+        const float its=0.1f*float(last_item->aspd);item_effect_lights.push_back({NJS_POINT3{},NJS_POINT3{its,its,its},item_glint_vector(last_item->item_ayp),0.f,0.f,2u});}
+    for(std::size_t ti=0;ti<scene.triangles.size();++ti){auto& t=scene.triangles[ti];
+        const bool model_effect=t.light_category==5;
+        if(ti>=lit_triangle_count&&!model_effect)continue;
+        const auto* lights=(!t.camera_mask&&(t.light_category==1||((t.light_category==4||model_effect)&&effect_half_light)))?&half:&active;const EasyLight* easy=nullptr;EasyLight spc{};
+        if(item_light_leak&&(t.light_category==4||model_effect)&&t.mirror!=3)lights=&item_effect_lights;
         for(std::size_t g=0;g<glints.size();++g)if(ti>=glints[g].begin&&ti<glints[g].end){
             if(glints[g].easy>=0){const int m=glints[g].easy;
                 if(m==0)easy=&easy_full;else if(m==1)easy=&easy_half;else if(m==3)easy=&easy_eye;
@@ -4426,7 +4575,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
                 else unbound_enemy_.insert("bhDrawSpObject: rom->lgtp[aspd] ausserhalb der Raumlichter");
                 break;}
             lights=&glint_lights[g];}
-        if(!easy&&(gm_flg&0x80u))easy=t.camera_mask||t.light_category==4?&easy_full:t.light_category==1?&easy_player:nullptr; // Raum, Spieler und ef_fnc-Modelle (bhSetLight) unter gm_flg 0x80
+        if(!easy&&!model_effect&&(gm_flg&0x80u))easy=t.camera_mask||t.light_category==4?&easy_full:t.light_category==1?&easy_player:nullptr; // Raum, Spieler und ef_fnc-Modelle (bhSetLight) unter gm_flg 0x80
         if(easy){NJS_VECTOR a{t.vertices[1].position.x-t.vertices[0].position.x,t.vertices[1].position.y-t.vertices[0].position.y,t.vertices[1].position.z-t.vertices[0].position.z},b{t.vertices[2].position.x-t.vertices[0].position.x,t.vertices[2].position.y-t.vertices[0].position.y,t.vertices[2].position.z-t.vertices[0].position.z},face;njOuterProduct(&a,&b,&face);njUnitVector(&face);
             for(auto& vertex:t.vertices){auto normal=vertex.normal;if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);
                 NJS_VECTOR n=normal;
@@ -4438,9 +4587,9 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
                 const float f=std::max(0.f,-(n.x*easy->v.x+n.y*easy->v.y+n.z*easy->v.z))*easy->intensity;
                 vertex.light={std::clamp(easy->ambient+f*easy->color.x,0.f,1.f),std::clamp(easy->ambient+f*easy->color.y,0.f,1.f),std::clamp(easy->ambient+f*easy->color.z,0.f,1.f)};}
             t.gouraud=true;t.world_lit=true;continue;}
-        const unsigned category=t.camera_mask?0:t.light_category==4?1u:std::min(3u,t.light_category);const auto ambient=ambient_[ambient_slots_[category]];
+        const unsigned category=model_effect?((t.mirror==3||albinoid_early)?0u:1u):t.camera_mask?0:t.light_category==4?1u:std::min(3u,t.light_category);const auto ambient=ambient_[ambient_slots_[category]];
         NJS_VECTOR a{t.vertices[1].position.x-t.vertices[0].position.x,t.vertices[1].position.y-t.vertices[0].position.y,t.vertices[1].position.z-t.vertices[0].position.z},b{t.vertices[2].position.x-t.vertices[0].position.x,t.vertices[2].position.y-t.vertices[0].position.y,t.vertices[2].position.z-t.vertices[0].position.z},face;njOuterProduct(&a,&b,&face);njUnitVector(&face);
-        for(auto& vertex:t.vertices){auto normal=vertex.normal;if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);
+        for(auto& vertex:t.vertices){auto normal=vertex.normal;if(!model_effect){if(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z<.0001f)normal=face;else njUnitVector(&normal);}
             const auto material=t.chunk_ambient?t.ambient_material:NJS_POINT3{1,1,1};
             NJS_POINT3 color{ambient.x*material.x,ambient.y*material.y,ambient.z*material.z};
             // njCnkCvVn (ps2_NinjaCnk.c:1226-1262): the point term with squared
@@ -4449,6 +4598,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
                 color.x+=l.color.x*diffuse;color.y+=l.color.y*diffuse;color.z+=l.color.z*diffuse;}
             vertex.light={std::clamp(color.x,0.f,1.f),std::clamp(color.y,0.f,1.f),std::clamp(color.z,0.f,1.f)};}
         t.gouraud=true;t.world_lit=true;
+        if(model_effect)t.light_category=4; // public ef_fnc category; 5 only marks the late MODE-3 calculation
     }
 
     if(std::getenv("RECVX_LIGHT_DBG")){double lr=0,lg=0,lb=0,mr=0,mg=0,mb=0,amin=9,amax=-9;std::size_t n=0,room=0;
@@ -4494,13 +4644,13 @@ void RoomWorld::control_alpha_fade(unsigned kind,unsigned index){
 }
 void RoomWorld::control_item_glint(){
     // objitm.c:282-450 bhControlObjItm: nur mit sp_flg 0x4, die Items nicht mit cb_flg 0x40000000.
-    // Je Item (Reihenfolge rom->itwp) ohne stflg 0x1000000 (bhInitModelSet: hidden) mit flg 1 und
+    // Je Item (Reihenfolge rom->itwp) ohne stflg 0x1000000 (bhInitModelSet 0x24: inactive) mit flg 1 und
     // aspd: Pause ct2 (60..89 Bilder aus dem gemeinsamen EE-rand), dann acht Bilder mdflg 0x80
     // mit ayp += 8192 (Lichtrichtung des Glanzes in bhDrawObjItm).
     if(!(simulation_flags_&4u))return;
     if(collision_events_&&(collision_events_->flags[10][0]&0x40000000u))return;
     for(auto& pair:entities_){if(pair.first.first!=3)continue;auto& e=pair.second;
-        if(e.hidden||!(e.object_flags&1u))continue;
+        if(e.inactive||!(e.object_flags&1u))continue; // objitm.c:407; mdflg 0x1 (bhSetDispObj 0x20: hidden) sperrt nur das Zeichnen (:560)
         if(e.aspd)switch(e.item_ct0){
         case 1:if(++e.item_ct1>e.item_ct2){e.item_glint=true;e.item_ayp=0;e.item_ct1=0;++e.item_ct0;}break;
         case 2:e.item_ayp+=8192;e.item_ct1=(e.item_ct1+1)&7;if(!e.item_ct1){e.item_glint=false;++e.item_ct0;}break;
@@ -4535,6 +4685,49 @@ bool RoomWorld::object_cut_hidden(const WorldEntity& state,std::optional<unsigne
                         :(fixed_camera?unsigned(*fixed_camera):clip_cut_.value_or(0u));
     for(const auto cut:state.object_hide)if(ncut==unsigned(cut))return false;
     return true;
+}
+// light.c:737: lkno adressiert die Raumzuordnung, NICHT direkt einen freien
+// eff-Platz und NICHT die Effektkennung. Kein Index-Clamp in bhControlLight.
+std::optional<unsigned> RoomWorld::light_effect_slot(unsigned index)const{
+    if(index>=room_effect_slots_.size()||room_effect_slots_[index]>=sprites_.size()){
+        unbound_enemy_.insert("bhControlLight: sys->efid[lkno] ausserhalb der Raumzuordnung");return {};}
+    return room_effect_slots_[index];
+}
+std::optional<BoneMatrix> RoomWorld::light_effect_matrix(unsigned slot,unsigned node)const{
+    const auto& work=sprites_.at(slot);const auto& s=work.sprite;
+    if(node==0){ // light.c:753-755: pwp->mtx, NICHT owP[0] / Linkelternmatrix
+        if(work.weapon){BoneMatrix m;std::copy_n(work.weapon->matrix,16,m.value);return m;}
+        // Eigene op->mtx-Schreiber ausserhalb der vier Effektpaesse (effsub1b.c:764 bhEff136,
+        // effsub6.c:133 bhEff146_Init/145, :365 bhEff148, effsub2.c:3364 E12_FireManager 262,
+        // :3409 FireBurstDraw/:4623-4632 Draw3DSprite 263/269/274/275/149, effsub5.c:3129 bhEff229,
+        // effsub4.c:3267 3DSpriteDraw 354, :3360 ModelDraw 364) sind noch nicht publiziert:
+        // niemals ihre letzte Lage aus px, einer Quadmitte oder einer frisch gesampelten Pose raten.
+        if(s.mode0&&(s.id==136||s.id==145||s.id==262||s.id==148||s.id==149||s.id==229||s.id==263||s.id==269||s.id==274||s.id==275||s.id==354||s.id==364)){
+            unbound_enemy_.insert("bhControlLight: Effekt "+std::to_string(s.id)+" eigener op->mtx-Schreiber noch nicht publiziert");return {};}
+        return work.effect_root; // Allokation = echte Nullmatrix, nie Einheit als Ersatz
+    }
+    // :759 liest das EIGENE mlwP des Effekts, nicht s.link_matrix (lkwkp).
+    // bhEff_ModelDraw leiht ene[model_enemy].mdl[model_mdl]; nur dessen bereits
+    // berechneter/publizierter Baum ist erlaubt, keine pose()/object_matrices().
+    if(s.model_enemy>=0){const unsigned index=unsigned(s.model_enemy);
+        const auto at=entities_.find({1,index});
+        if(at!=entities_.end()){
+            const auto& owner=tree_owner(at->second);const auto* asset=owner.enemy_asset?
+                (s.model_mdl?owner.enemy_asset->model(s.model_mdl):owner.enemy_asset):nullptr;
+            if(asset){
+                unsigned physical;try{physical=asset->model_index(node);}catch(const std::runtime_error&){
+                    unbound_enemy_.insert("bhControlLight: Effekt-mlwP->owP[lkono] ausserhalb des Modells");return {};}
+                const auto published=afterimage_models_.find({1,index,s.model_mdl});
+                if(published!=afterimage_models_.end()&&published->second.asset==asset&&physical<published->second.nodes.size())return published->second.nodes[physical];
+                const WorldEntity* tree=nullptr;
+                if(owner.enemy_asset==asset&&owner.enemy_calculated)tree=&owner;
+                if(!tree)for(const auto& child:enemy_children_){const auto& t=tree_owner(child);
+                    if(child.enemy.owner_index==index&&t.enemy_asset==asset&&t.enemy_calculated){tree=&t;break;}}
+                if(tree&&physical+tree->model_window<tree->enemy_owp_mtx.size())return tree->enemy_owp_mtx[physical+tree->model_window];
+            }
+        }
+    }
+    unbound_enemy_.insert("bhControlLight: Effekt-mlwP->owP[lkono] ohne veroeffentlichten nativen Baumbesitzer");return {};
 }
 std::optional<BoneMatrix> RoomWorld::link_matrix(unsigned kind,unsigned index,unsigned node,unsigned depth)const{
     if(depth>32)throw std::runtime_error("cyclic entity attachment");
@@ -5395,11 +5588,15 @@ std::vector<CollisionWall> RoomWorld::motion_floors()const{
    zu 0,9 der ganzen Differenz an die alte Stelle zurueck. */
 void RoomWorld::player_body_pass(NJS_POINT3& position,Angle yaw){
     /* player.c:1622/1647 prueft auch ohne eigenen Bewegungsschritt beide
-       Koerpersonden. bhControlEnemy hat die Lage bereits geschrieben
-       (game.c:46 vor :47); pxb wird erst danach genommen (:1366). Derselbe
-       Wandpfad wie beim Gehen erhaelt daher hier die aktuelle Lage als pxb.
-       Kein Tor nach Raum, Gegner oder mode0; nur die Originalflags gelten. */
-    position=resolve_player_motion(position,position,3.5f,player_character_?17.5f:16.5f,collision_front_target_,yaw);
+       Koerpersonden. Die alte Lage des Koerper-bhCheckWallEx ist plp->pxb
+       (:1647), genommen am Kopf dieses Passes (:1366-1369, player_prev_pos_)
+       nach bhControlEnemy (game.c:48 vor :49); Stufenenden (:3103 u. a.) und
+       Ereignisbefehle setzen sie mit px gleich. Hat bhCtrPly_mode0 die Lage
+       danach bewegt (Settle-Schritt bhCPM2_act_std :2127-2140), waehlt
+       bhCheckWallEx die Austrittsseite nach pxb, nicht nach der neuen Lage
+       (hitchk.c:789-960 liest opos). Kein Tor nach Raum, Gegner oder mode0;
+       nur die Originalflags gelten. */
+    position=resolve_player_motion(player_prev_pos_,position,3.5f,player_character_?17.5f:16.5f,collision_front_target_,yaw);
 }
 void RoomWorld::settle_player_body(NJS_POINT3& position,float arp){
     collision_front_target_=arp;
@@ -5413,6 +5610,11 @@ void RoomWorld::settle_player_body(NJS_POINT3& position,float arp){
    bhCPM2_act_std (player.c:2125) bzw. pl_smove00/01 (pl_evt.c:86/:130). Der Statusbildschirm
    haelt Task 7 an (system.c:600-612). */
 void RoomWorld::finish_player_pass(NJS_POINT3& position,Angle yaw){
+    /* player.c:1365: Kopf (:1366-1369, pxb) und Koerperteil liegen im selben Tor. Lief in diesem
+       Bild kein Spielerpass (Tuer, Terminal, Titel: Task 7 steht, tick_enemy_pass fehlt), gibt es
+       weder pxb noch den Koerperteil. */
+    const bool head=player_pass_head_;player_pass_head_=false;
+    if(!head)return;
     if(!(simulation_flags_&1u)||(collision_events_&&!(collision_events_->flags[6][0]&1u)))return;
     if(collision_body_pass_||(collision_events_&&collision_events_->menu_open))return;
     collision_front_target_=0.f;player_body_pass(position,yaw);collision_body_pass_=true;
@@ -5579,7 +5781,7 @@ bool RoomWorld::effect_visible(unsigned index)const{
 }
 std::optional<RoomWorld::LightState> RoomWorld::light_state(unsigned index,bool event)const{
     const auto& table=event?event_lights_:lights_;if(index>=table.size())return {};const auto& l=table[index];
-    return LightState{l.flags,l.type,l.clock,l.link,l.index,l.node,l.link?link_point(l.link-1,l.index,l.node,l.offset):(l.color_sampled?l.working_position:l.position),l.color_sampled?l.working_color:l.color,l.color_sampled?l.working_near_range:l.near_range,l.color_sampled?l.working_far_range:l.far_range,
+    return LightState{l.flags,l.type,l.clock,l.link,l.index,l.node,l.link==5?l.position:l.link?link_point(l.link-1,l.index,l.node,l.offset):(l.color_sampled?l.working_position:l.position),l.color_sampled?l.working_color:l.color,l.color_sampled?l.working_near_range:l.near_range,l.color_sampled?l.working_far_range:l.far_range,
         l.color_sampled?l.working_direction:l.direction,l.mode,l.working_angles,l.flicker_color,l.speed};
 }
 

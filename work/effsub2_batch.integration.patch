@@ -1,0 +1,163 @@
+diff --git a/native/effect_sprite_procedures.cpp b/native/effect_sprite_procedures.cpp
+--- a/native/effect_sprite_procedures.cpp
++++ b/native/effect_sprite_procedures.cpp
+@@ -5258,6 +5258,36 @@
+     s.fnc_exit_src=-1;s.fnc_exit_dst=-1; // bhEff_DamagePointDraw beruehrt den Blendzustand nicht
+     queue_custom(s);                      // :4566-4571 sys->ef_fnc, ohne Viereck
+ }
++// effsub2.c:1336 bhEff_E02_SandParticle2 (255) — Quelle fuer Sandkoerner 254. Kein Erzeuger in den
++// Originalquellen, keine Raumtabelle. Wartet ct0 = 120 + 30r Passes (`ct0-- == 0`), beginnt dann
++// von vorn (mode0 0) und legt mit Wahrscheinlichkeit r < 0.3 ein 254 an: sys->ef id 254, flg 1,
++// type 0, eigene Lage, ax/ay 0 (Groesse und flr_no der Vorlage bleiben vom letzten Schreiber);
++// am neuen Satz eff[eno].sx/sy/sz = 3 und sxb/syb/szb = 0.2/0.3/0.2 (Streuung von Lage bzw.
++// Richtung in bhEff_E02_SandParticle). Zeichnet selbst nichts.
++void step_e02_sand_particle2(EffectSprite& s,const EffectContext&,bool&){
++    switch(s.mode0){
++    case 0: // :1343-1346
++        s.ct0=int(120.0f+(30.0f*effect_random()));
++        s.mode0++;
++        break;
++    case 1: // :1347-1383
++        if(s.ct0--==0){
++            s.mode0=0;
++            if(effect_random()<0.3f){
++                auto& r=request_template();
++                r.id=254;r.flg=1;r.type=0;
++                r.position={s.px,s.py,s.pz};
++                r.ax=0;r.ay=0;
++                submit_template(0);
++                auto& child=last_request(); // eno >= 0: ohne freien Platz legt der Raumbesitzer nichts an
++                child.scale={3.0f,3.0f,3.0f};
++                child.has_scale_base=true;child.scale_base={0.2f,0.3f,0.2f};
++            }
++        }
++        break;
++    default:break;
++    }
++}
+ // effsub4.c:3142/3177 bhEff_SetSprite[Anime]. UV_WORK is in texels,
+ // unlike the normalized effsub0 tables. The timer advances before submission.
+ template<std::size_t A,std::size_t U>
+@@ -5990,7 +6020,7 @@
+ const HandEffectProcedure hand_effect_procedures[]={
+     {26,step_eff026},{252,step_e00_fire},{253,step_e02_sand_dust},{254,step_e02_sand_particle},{259,step_e05_blood},{260,step_e06_rinpun},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},{13,step_eff013},{139,step_eff_dummy},{140,step_eff_dummy},{141,step_eff_dummy},{142,step_eff_dummy},
+     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
+-    {251,step_e00_drop_blood},{266,step_e12_floor_blood2},{268,step_e14_explosion},{271,step_e14_fire2},{272,step_e00_dust},{273,step_e14_mucus},{299,step_damage_point},
++    {251,step_e00_drop_blood},{266,step_e12_floor_blood2},{268,step_e14_explosion},{271,step_e14_fire2},{272,step_e00_dust},{273,step_e14_mucus},{299,step_damage_point},{255,step_e02_sand_particle2},
+     {8,step_eff008},{10,step_eff010},{11,step_eff011},{14,step_eff014},{15,step_eff015},{29,step_eff029},
+     {101,step_eff101},{103,step_eff103},{104,step_eff104},{116,step_eff116},{117,step_eff117},{119,step_eff119},
+     {121,step_eff121},{128,step_eff128},{131,step_eff131},{132,step_eff132},{144,step_eff144},
+diff --git a/native/effect_sprites.cpp b/native/effect_sprites.cpp
+--- a/native/effect_sprites.cpp
++++ b/native/effect_sprites.cpp
+@@ -88,6 +88,7 @@
+     e.link_kind=-1;e.link_index=0;e.drop_link_flag=false;
+     e.stflg_or=0;e.texture_from_slot=-1;e.owner_work=nullptr;
+     e.has_shp_ct=false;e.shp_ct=0;e.ct3=0;
++    e.has_scale_base=false;e.scale_base={};
+     pending.spawns.push_back(e);
+ }
+ void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz,const std::function<void(int lkono)>& submit){
+@@ -1373,6 +1374,7 @@
+     s.stflg|=e.stflg_or;s.owner_work=e.owner_work;
+     if(e.has_shp_ct)s.shp_ct=e.shp_ct;
+     s.ct3=e.ct3;
++    if(e.has_scale_base){s.sxb=e.scale_base.x;s.syb=e.scale_base.y;s.szb=e.scale_base.z;}
+ }
+ // effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
+ // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
+diff --git a/native/effect_sprites.h b/native/effect_sprites.h
+--- a/native/effect_sprites.h
++++ b/native/effect_sprites.h
+@@ -261,6 +261,10 @@
+ void set_effect_extra_allocator(std::function<int()> reserve,std::function<void(int)> release);
+ // pp->mlwP->owP[node].mtx eines Spieler-/Gegnersatzes (kind 0 Spieler, 1 Gegner nach Raumindex).
+ void set_effect_link_lookup(std::function<bool(unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out)> lookup);
++// effsub2.c:4446 bhEff_E14_Mucus: opp->mlwP->owP[node].mtx eines Gegnerwerks (RECVX_ENEMY_WORK*), das
++// die Prozedur selbst in ene[] gefunden hat (kein flg-0x80-Link). false: Werk/Gelenk ohne nativen Baum.
++// Definiert in native/effect_sprite_procedures.cpp.
++void set_effect_work_node_matrix(std::function<bool(const void* work,unsigned node,NJS_MATRIX& out)> lookup);
+ // effsub2.c:2296 bhEff_E11_CheckCollisionPlayer: Objektindex des getroffenen Treffermodells oder -1; kuerzt p2.
+ // Zugriffe der Effektprozeduren auf Spieler-, Licht-, Gegner- und Stimmenbesitzer des
+ // Raums (effsub2.c E12: plp-Schaden/-Schub, rom->lgtp[1], bhEne12_SetFireBintaEffect,
+@@ -384,6 +388,9 @@
+     unsigned stflg_or=0;int texture_from_slot=-1;void* owner_work=nullptr;
+     // effsub4.c:305..314 / :2360..2369: Nachtraege am Kind, keine sys->ef-Felder.
+     bool has_shp_ct=false;float shp_ct=0;int ct3=0;
++    // effsub2.c:1371-1379 bhEff_E02_SandParticle2: eff[eno].sx/sy/sz = 3 (scale) und danach
++    // eff[eno].sxb/syb/szb = 0.2/0.3/0.2 am neuen Satz; bhSetEffectTb setzt sonst sxb = sx.
++    bool has_scale_base=false;NJS_POINT3 scale_base{};
+ };
+ struct BombRequest {NJS_POINT3 position;float radius;int damage_max,damage_min;}; // bhCheckBombAtari
+ // CallYakkyouSe(&op->px, SeNo): the owner resolves the arms bank and plays it on SE slot 10.
+diff --git a/native/world.cpp b/native/world.cpp
+--- a/native/world.cpp
++++ b/native/world.cpp
+@@ -3245,6 +3245,10 @@
+     // bhSetExtraEffectWork: derselbe eff[512]-Pool (flg 2), bhControlEffect ueberspringt flg-2-Plaetze.
+     set_effect_extra_allocator([this](){return reserve_effect_slot();},[this](int slot){if(slot>=0&&std::size_t(slot)<sprites_.size()&&(sprites_[std::size_t(slot)].sprite.flg&3u)==2u)sprites_[std::size_t(slot)].sprite.flg=0;});
+     set_effect_link_lookup([this](unsigned kind,unsigned index,unsigned node,NJS_MATRIX& out){const auto m=link_matrix(kind,index,node);if(!m)return false;std::copy(m->value,m->value+16,out);return true;});
++    // effsub2.c:4446 bhEff_E14_Mucus: owP[lkono] des selbst gefundenen ene[]-Werks (Raumindex ueber den Werksatz).
++    set_effect_work_node_matrix([this](const void* w,unsigned node,NJS_MATRIX& out){unsigned index=0;
++        if(!enemy_work_index(static_cast<const RECVX_ENEMY_WORK*>(w),index))return false;
++        const auto m=link_matrix(1,index,node);if(!m)return false;std::copy(m->value,m->value+16,out);return true;});
+     set_effect_player_hit([this](NJS_POINT3 p1,NJS_POINT3& p2){return effect_player_hit(p1,p2);});
+     {EffectWorldHooks h;
+      h.player_get=[this](RECVX_ENEMY_PLAYER& p){return enemy_player_get(p);};
+@@ -3491,6 +3495,9 @@
+                     if((work.sprite.flg&0x80u)&&work.sprite.lkwkp&&!work.link){unsigned at=0;
+                         if(enemy_work_index(static_cast<const RECVX_ENEMY_WORK*>(work.sprite.lkwkp),at)){work.link=2;work.index=at;work.node=unsigned(work.sprite.lkono);work.sprite.link_kind=1;work.sprite.link_index=at;}
+                         else unbound_enemy_.insert("effect.c:806: op->lkwkp ohne Raumfigur");}
++                    // lkwkp = plp (effsub2.c:3184 bhEff_E12_FloorBlood2, :4266 bhEff_E14_Fire2): der Spieler ist kein
++                    // Effekt-/Gegnerwerk; die Prozedur nennt ihn mit link_kind 0, danach gilt plp->mlwP->owP[lkono].
++                    if((work.sprite.flg&0x80u)&&!work.sprite.lkwkp&&!work.link&&work.sprite.link_kind==0){work.link=1;work.index=0;work.node=unsigned(work.sprite.lkono);}
+                     auto& e=entity(4,i);e.type=work.sprite.type;
+                     e.angles={work.sprite.ax,work.sprite.ay,work.sprite.az};
+                     // effect.c:1374 njScaleEx(&op->sx): gezeichnet wird die aktuelle Groesse, die die Prozedur
+diff --git a/tests/native/effect_room_sprites_test.cpp b/tests/native/effect_room_sprites_test.cpp
+--- a/tests/native/effect_room_sprites_test.cpp
++++ b/tests/native/effect_room_sprites_test.cpp
+@@ -2550,12 +2550,42 @@
+     }
+     set_effect_ground(nullptr,nullptr,nullptr);take_effect_output();
+ }
++// effsub2.c:1336 bhEff_E02_SandParticle2 (255): Wartezeit 120 + 30r, danach mit r < 0.3 ein Korn 254,
++// dessen sx/sy/sz (3) und sxb/syb/szb (0.2/0.3/0.2) getrennt nachgetragen werden.
++static void sand_particle2(){
++    check(supported_effect_sprite(255),"255 nicht als Handport registriert");
++    EffectContext c;bool queued=false;take_effect_output();
++    effect_detail::request_template().scale={7,7,7};
++    recvx_core_random_seed(51);float r[40];for(auto& x:r)x=frac();recvx_core_random_seed(51);
++    EffectSpawn e;e.id=255;e.flg=1;e.position={4,5,6};EffectSprite s;initialize_effect_sprite(s,e);
++    int k=0;bool spawned=false;
++    for(int cycle=0;cycle<20&&!spawned;++cycle){
++        step_effect_sprite(s,c,&queued);
++        const int wait=int(120.0f+30.0f*r[k++]);
++        check(!queued&&s.mode0==1&&s.ct0==wait,"255 :1343 ct0 = 120 + 30r");
++        for(int i=0;i<wait;++i){step_effect_sprite(s,c,&queued);check(take_effect_output().spawns.empty(),"255 wartet ohne Ausgabe");}
++        step_effect_sprite(s,c,&queued);
++        const float roll=r[k++];const auto out=take_effect_output();
++        check(!queued&&s.mode0==0,"255 :1351 nach Ablauf mode0 = 0, zeichnet nicht");
++        if(roll<0.3f){
++            check(out.spawns.size()==1,"255 :1353 r < 0.3: genau ein 254");
++            const auto& g=out.spawns[0];
++            check(g.id==254&&g.flg==1&&g.type==0&&g.ax==0&&g.ay==0&&close(g.position.x,4)&&close(g.position.y,5)&&close(g.position.z,6),"255 :1355-:1367 sys->ef des Korns");
++            check(g.has_scale_base&&close(g.scale.x,3)&&close(g.scale.z,3)&&close(g.scale_base.x,0.2f)&&close(g.scale_base.y,0.3f)&&close(g.scale_base.z,0.2f),"255 :1371-:1379 eff[eno].sx = 3, sxb/syb/szb 0.2/0.3/0.2");
++            EffectSprite grain;initialize_effect_sprite(grain,g);
++            check(close(grain.sx,3)&&close(grain.sy,3)&&close(grain.sxb,0.2f)&&close(grain.syb,0.3f)&&close(grain.szb,0.2f),"255: der neue Satz traegt sx und sxb getrennt");
++            check(close(effect_detail::request_template().scale.x,7),"255 schreibt sys->ef.sx nicht");
++            spawned=true;
++        }else check(out.spawns.empty(),"255 r >= 0.3: kein Korn");
++    }
++    check(spawned,"255: in 20 Zyklen kein Korn (Zufallsfolge pruefen)");
++}
+ int main(int argc,char** argv){
+     try{
+         _Make_SinTable();
+         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
+         muzzle_weapon229();flame352();effect_call_clip();weapon_flash_call_clip();explosion_punch_through();punch_filter_rgb();punch_lazy_cache();
+-        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();head_burst_effects();effsub2_second_batch();
++        effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();head_burst_effects();effsub2_second_batch();sand_particle2();
+         if(argc>1){const std::filesystem::path data=argv[1];explosion_punch_world(data);steam(data);power_switch_positions(data);flame352_scene(data);production(data);muzzle_flash(data);eye_lights(data);gas_room(data);snow_room(data);ntx2d_room(data);afterimage_room(data);published_afterimage_models(data);pol_effect_draw(data);}
+         std::cout<<"effect room sprites ok\n";return 0;
+     }catch(const std::exception& error){std::cerr<<"effect room sprites failed: "<<error.what()<<"\n";return 1;}

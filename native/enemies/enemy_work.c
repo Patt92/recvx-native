@@ -232,13 +232,13 @@ int recvx_enemy_draw_enabled(const RECVX_ENEMY_WORK* w, uint32_t st_flg)
 
 /* --- pwksub.c:445 bhSearchNearEnemy2 ----------------------------------
    Belegter Unterschied zum Passfilter: hier kommt zusaetzlich
-   !(flg & 0x8000) hinzu, und das Original castet lkwkp an dieser Stelle auf
-   O_WRK* statt BH_PWORK* (eneset.c:362 castet auf BH_PWORK*). Beide lesen
-   das Bit 0x1000000 eines stflg-Feldes, aber aus unterschiedlichen
-   Strukturoffsets. Diese Abweichung ist im Original vorhanden und hier als
-   Portierungsluecke vermerkt: der Vertrag verwendet den Elternwork, weil
-   bhEne56/bhEne01 ihre Eltern als BH_PWORK anlegen. Wer einen O_WRK als
-   Elternwork verknuepft, muss das ausdruecklich klaeren. */
+   !(flg & 0x8000) hinzu. Das Original castet lkwkp an dieser Stelle auf
+   O_WRK* statt BH_PWORK* (eneset.c:362 castet auf BH_PWORK*); beide Typen
+   fuehren stflg am selben Offset 0x88 (types.h:121 O_WRK, :282 BH_PWORK),
+   der Cast liest also dasselbe Feld des Elternworks. Einzige Abweichung:
+   lkwkp == NULL bei flg 0x80 dereferenziert das Original ohne Pruefung;
+   hier gilt der Work dann als nicht blickbar (Erzeugerluecke, vom Kopfsucher
+   recvx_head_enemy_candidates benannt). */
 int recvx_enemy_targetable(const RECVX_ENEMY_WORK* w)
 {
     if (!w) return 0;

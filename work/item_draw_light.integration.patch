@@ -1,0 +1,131 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -580,6 +580,11 @@
+   add_executable(recvx-object-cut-tests tests/native/object_cut_test.cpp)
+   target_link_libraries(recvx-object-cut-tests PRIVATE recvx_game)
+   add_test(NAME object_cut_restriction COMMAND recvx-object-cut-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
++  # objitm.c:496-618 bhDrawObjItm: Itemglanz (mdflg 0x80), Zaehlertor stflg 0x1000000, Nachwirkung von Licht 1
++  # auf bhDrawEffect, Monitor-Einzellicht (screen.c:965-981) und ob_spc-Einzellicht unter gm_flg 0x80.
++  add_executable(recvx-item-draw-light-tests tests/native/item_draw_light_test.cpp)
++  target_link_libraries(recvx-item-draw-light-tests PRIVATE recvx_game)
++  add_test(NAME item_draw_light COMMAND recvx-item-draw-light-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+   add_executable(recvx-lighter-tests tests/native/lighter_test.cpp)
+   target_link_libraries(recvx-lighter-tests PRIVATE recvx_game)
+   add_test(NAME native_lighter_effect COMMAND recvx-lighter-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+--- a/native/world.cpp
++++ b/native/world.cpp
+@@ -4063,6 +4063,24 @@
+     // screen.c:953/987: gm_flg |= 0x80 und st_flg |= 0x20 nur fuer bhAllEasyDrawModel des Monitorbildes.
+     const unsigned gm_flg=(collision_events_?collision_events_->flags[11][0]:0u)|(pass.small_screen?0x80u:0u),st_flg_draw=(collision_events_?collision_events_->flags[5][0]:0u)|(pass.small_screen?0x20u:0u);
+     const bool eye_light=(gm_flg&0x1000040u)&&!(st_flg_draw&0x20u);bool enemy_drawn=false;
++    const std::optional<unsigned> draw_ncut=pass.small_screen?std::optional<unsigned>(pass.ncut):std::nullopt; // cut.c:548 cam.ncut = cno
++    // objitm.c:471-492/531-537: ob_spc[0] dieser fuenf Raeume zeichnet bhDrawGeneralPurposeWater statt bhDrawObjItm.
++    const auto late_water=[&](const WorldEntity& o){return o.object_list==3&&o.object_spc_index==0&&
++        ((stage_no_==1&&room_no_==13)||(stage_no_==3&&room_no_==6)||(stage_no_==7&&room_no_==6)||(stage_no_==7&&room_no_==10)||(stage_no_==9&&room_no_==11));};
++    // objitm.c:683-716 bhDrawSpObject: mit op->draw_tp != 0 setzt es das Einzellicht (rom->lgtp[aspd], 1.0/0.2),
++    // mit draw_tp 0 nur Licht 1 des EasyMulti-Satzes. Unter gm_flg 0x80 zeichnet bhPutModel auch draw_tp 0 mit dem
++    // Einzellicht (MdlPut.c:33-37), also mit dem eines vorigen ob_spc-Eintrags oder dem aus bhSetHalfLight (:520).
++    // Im Monitorbild (st_flg 0x20) setzt bhDrawObjItm weder bhSetLight (:542) noch bhSetHalfLight; Items und danach
++    // bhDrawEnemy (game.c:398-402, eneset.c:817) erben das Einzellicht des letzten ob_spc mit draw_tp != 0.
++    std::map<unsigned,int> spc_easy_before;int spc_easy_after=-1;
++    if(presentation_flags_&4u)for(const auto& [key,o]:entities_){if(key.first!=2||o.object_list!=3||late_water(o)||object_cut_hidden(o,draw_ncut))continue;
++        spc_easy_before[key.second]=spc_easy_after;if(o.draw_tp!=0)spc_easy_after=int(o.aspd);}
++    // objitm.c:550-604: jedes Item, das die Tore bis :562 passiert (auch ohne objP), schreibt Licht 1 des
++    // EasyMulti-/SimpleMulti-Satzes; das des letzten bleibt fuer bhDrawEffect stehen (game.c:342-348).
++    const WorldEntity* last_item=nullptr;
++    if(presentation_flags_&8u)for(const auto& [key,o]:entities_)if(key.first==3&&!o.inactive&&(o.object_flags&1u)&&!o.hidden&&!object_cut_hidden(o,draw_ncut))last_item=&o;
++    // light.c:1067-1078 bhGetLightVector(57344, op->ayp, 0) (objitm.c:573).
++    const auto item_glint_vector=[](int ayp){NJS_MATRIX m;njUnitMatrix(&m);njRotateZ(&m,0);njRotateY(&m,ayp);njRotateX(&m,57344);NJS_POINT3 forward{0,0,-1.0f},vec;njCalcPoint(&m,&forward,&vec);return vec;};
+     // Spiegelpass (sys->st_flg 0x100, bhEff112): MdlPut.c:57/89 zeichnet jedes bhPutModel ohne
+     // ewP->mdflg 0x40 ein zweites Mal unter njMirror(cam.mtx, &sys->mr_pl), game.c:77-91 danach das
+     // Raummodell. mat = njMirror(Einheitsmatrix): cam.mtx * mat ist genau njMirror(cam.mtx).
+@@ -4088,8 +4106,7 @@
+         // objitm.c:471-492/531-537: only ob_spc[0] in these five original rooms moves
+         // from bhDrawObjItm to bhDrawGeneralPurposeWater, after the player (game.c:376).
+         // Use the published list, not a guessed water plane or the collision water areas.
+-        const bool general_water=model.kind==2&&e.object_list==3&&e.object_spc_index==0&&
+-            ((stage_no_==1&&room_no_==13)||(stage_no_==3&&room_no_==6)||(stage_no_==7&&room_no_==6)||(stage_no_==7&&room_no_==10)||(stage_no_==9&&room_no_==11));
++        const bool general_water=model.kind==2&&late_water(e);
+         if(model.kind==2&&!e.object_list)continue;
+         if(general_water&&pass.small_screen)continue; // game.c:381-403: no late water pass
+         // game.c:336/353: bhDrawEneObject and bhDrawEnemy run only with sys->pt_flg 0x2.
+@@ -4164,16 +4181,20 @@
+             std::fprintf(stderr,"DBG kind=%u idx=%u id=%u linked=%d parent=%u/%u/%u native=%d tris=%zu bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) motion=%u room=%d frame=%lld flg=%08x stflg=%08x calculated=%d workpos=(%.4f,%.4f,%.4f) root=(%.4f,%.4f,%.4f)\n",model.kind,model.index,e.identity,int(e.linked),e.parent_kind,e.parent_index,e.parent_node,int(e.enemy_native),object.triangles.size(),mn[0],mn[1],mn[2],mx[0],mx[1],mx[2],e.motion,int(e.room_motion),(long long)e.frame,e.enemy.flg,e.enemy.stflg,int(e.enemy_calculated),e.enemy.px,e.enemy.py,e.enemy.pz,e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[12],e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[13],e.enemy_owp_mtx.empty()?0.f:e.enemy_owp_mtx[0].value[14]);}
+         const auto offset=scene.textures.size();const auto first_triangle=scene.triangles.size();scene.textures.insert(scene.textures.end(),object.textures.begin(),object.textures.end());append_actor(scene,object,offset);
+         /* objitm.c:569-585 bhDrawObjItm: mdflg 0x80 ersetzt Licht 1 durch bhGetLightVector(57344, ayp, 0) mit 0.1*aspd. */
+-        if(model.kind==3&&e.item_glint){NJS_MATRIX m;njUnitMatrix(&m);njRotateZ(&m,0);njRotateY(&m,e.item_ayp);njRotateX(&m,57344);NJS_POINT3 forward{0,0,-1.0f},vec;njCalcPoint(&m,&forward,&vec);
+-            glints.push_back({first_triangle,scene.triangles.size(),vec,0.1f*float(e.aspd)});}
+-        /* objitm.c:683-718 bhDrawSpObject (type 5, draw_tp 0): Licht 1 = rom->lgtp[aspd] auf dem halben Zustand. */
+-        if(model.kind==2&&e.object_list==3)glints.push_back({first_triangle,scene.triangles.size(),{},0.f,e.aspd});
++        if(model.kind==3&&e.item_glint)glints.push_back({first_triangle,scene.triangles.size(),item_glint_vector(e.item_ayp),0.1f*float(e.aspd)});
++        /* objitm.c:698-705 bhDrawSpObject draw_tp 0: Licht 1 = rom->lgtp[aspd] auf dem halben Zustand. draw_tp 1 zeichnet
++           SimpleMulti (MdlPut.c:8-14), dessen Licht 1 bhDrawSpObject nicht beruehrt (:707-714 nur njCnkSetEasyLight*). */
++        if(model.kind==2&&e.object_list==3&&e.draw_tp==0)glints.push_back({first_triangle,scene.triangles.size(),{},0.f,e.aspd});
+         if(en_obj)glints.push_back({first_triangle,scene.triangles.size(),{},0.f,-1,true});
+         {int dt=(model.kind==2||model.kind==3)?e.draw_tp:0;if((gm_flg&0x80u)&&dt<2)dt+=2;
+          if(model.kind==1&&!en_obj){enemy_drawn=true;if(eye_light&&e.enemy_native&&(e.enemy.mdflg&0x400u))unbound_enemy_.insert("eneset.c:826 Gegnerzeichnen: bhSetEasyDirLight aus npGetMatColor (mdflg 0x400)");}
+-         /* Easy-Zustand: 0 bhSetLight, 1 bhSetHalfLight, 2 bhDrawSpObject (rom->lgtp[aspd], 0.2), 3 bhSetEasyDirLight(0.6) der Augenkamera. */
+-         if(dt>=2){const int mode=model.kind==3||en_obj||(model.kind==2&&e.object_list==1)?0:model.kind==2&&e.object_list==3?2:model.kind==2?1:eye_light?3:1;
+-             glints.push_back({first_triangle,scene.triangles.size(),{},0.f,model.kind==2&&e.object_list==3?e.aspd:-1,false,mode});}}
++         /* Easy-Zustand: 0 bhSetLight, 1 bhSetHalfLight, 2 bhDrawSpObject (rom->lgtp[light], 0.2), 3 bhSetEasyDirLight(0.6) der Augenkamera. */
++         if(dt>=2){int mode=model.kind==3||en_obj||(model.kind==2&&e.object_list==1)?0:model.kind==2&&e.object_list==3?2:model.kind==2?1:eye_light?3:1,light=-1;
++             if(model.kind==2&&e.object_list==3){
++                 if(e.draw_tp==0){const auto at=spc_easy_before.find(model.index);light=at!=spc_easy_before.end()?at->second:-1;mode=light>=0?2:1;} // geerbtes Einzellicht
++                 else{light=e.aspd;mode=dt==2?2:1;}} // dt 3: SimpleDrawTreeCnk mit dem unberuehrten Simple-Einzellicht
++             else if((st_flg_draw&0x20u)&&dt==2&&(model.kind==3||(model.kind==1&&!en_obj))&&spc_easy_after>=0){light=spc_easy_after;mode=2;}
++             glints.push_back({first_triangle,scene.triangles.size(),{},0.f,light,false,mode});}}
+         // MdlPut.c:57/89: zweiter Aufruf mit demselben Licht- und Zeichenzustand dieses Works.
+         if(mirror_on){const std::size_t last=scene.triangles.size();const auto mdflg=put_model_mdflg(model,e);
+             if(!mdflg)unbound_enemy_.insert("MdlPut.c:57 Spiegelaufruf: ewP->mdflg ohne nativen Work (Art "+std::to_string(model.kind)+")");
+@@ -4240,10 +4261,12 @@
+     const auto easy_dir=[&](float it){ // light.c bhSetEasyDirLight
+         if(!lights_.empty()&&(lights_[0].flags&2u)&&(lights_[0].type==100||lights_[0].type==101))unbound_enemy_.insert("bhSetEasyDirLight: rom->lgtp[0] Typ 100/101 ohne Besitzer");
+         return EasyLight{true,{0,0.3f,0.7f},{1,1,1},it,0.2f};};
+-    const EasyLight easy_full=(gm_flg&0x80u)?easy_dir(1.0f):has_lg?EasyLight{false,lg->direction,lg->color,1.0f,0.f}:EasyLight{}; // light.c bhSetLight
+-    // objitm.c:518/540: unter st_flg 0x20 (Monitorbild) laesst bhDrawObjItm bhSetLight/bhSetHalfLight aus;
+-    // es gilt das Einzellicht von screen.c:972 (Farbe 1, Intensitaet 1 / 0.2, Richtung 0/0.3/0.7).
+-    const EasyLight easy_half=(st_flg_draw&0x20u)?easy_dir(1.0f):(gm_flg&0x80u)?easy_dir(0.6f):has_lg?EasyLight{false,lg->direction,{0.5f*lg->color.x,0.5f*lg->color.y,0.5f*lg->color.z},1.0f,0.f}:EasyLight{}; // bhSetHalfLight
++    // objitm.c:507/520/542: unter st_flg 0x20 (Monitorbild) laesst bhDrawObjItm bhSetLight/bhSetHalfLight aus, also
++    // auch bhSetEasyDirLight (light.c:936/1003); Raum, Objekte und Items behalten das Einzellicht von screen.c:971-990:
++    // Stufe 7 Farbe 0.3/0.3/1.0, Intensitaet 4.0 / 0.5, Richtung 0.35/-0.15/0.5, sonst 1/1/1, 1.0 / 0.2, 0/0.3/0.7.
++    const EasyLight easy_screen=stage_no_==7?EasyLight{true,{0.35f,-0.15f,0.5f},{0.3f,0.3f,1.0f},4.0f,0.5f}:EasyLight{true,{0,0.3f,0.7f},{1,1,1},1.0f,0.2f};
++    const EasyLight easy_full=(st_flg_draw&0x20u)?easy_screen:(gm_flg&0x80u)?easy_dir(1.0f):has_lg?EasyLight{false,lg->direction,lg->color,1.0f,0.f}:EasyLight{}; // light.c bhSetLight
++    const EasyLight easy_half=(st_flg_draw&0x20u)?easy_screen:(gm_flg&0x80u)?easy_dir(0.6f):has_lg?EasyLight{false,lg->direction,{0.5f*lg->color.x,0.5f*lg->color.y,0.5f*lg->color.z},1.0f,0.f}:EasyLight{}; // bhSetHalfLight
+     const EasyLight easy_eye=eye_light?easy_dir(0.6f):EasyLight{}; // eneset.c:839 je Gegner
+     const EasyLight easy_player=(eye_light&&enemy_drawn)?easy_eye:easy_half; // der Zustand nach bhDrawEnemy (game.c:351-358)
+     const auto lit_triangle_count=scene.triangles.size();
+@@ -4470,10 +4493,18 @@
+     // Only the direct MODE-3 model calls join the late lighting loop. Sprites,
+     // bhDraw136 (already lit) and other ef_fnc outputs retain their existing path.
+     const bool albinoid_early=(stage_no_==7&&room_no_==10)||(stage_no_==3&&room_no_==6); // system.c:1647-1657
++    // objitm.c:569-604: traegt das letzte Item (last_item) mdflg 0x80, steht Licht 1 des Multi-Satzes noch auf seinem
++    // Glanz, wenn bhDrawEffect (game.c:348) zeichnet; ohne Glanz stellt :587-604 den bhSetLight-Zustand her. Nicht mit
++    // ef_flg 0x4 (bhSetHalfLight, effect.c:924-927), nicht in den Albinoid-Raeumen (bhDrawEffect vor bhDrawObjItm,
++    // game.c:339-342) und nicht im Spiegelpass (mirror 3: game.c:85 bhSetLight vor bhEtcMirrorDrawModel).
++    const bool item_light_leak=last_item&&last_item->item_glint&&!effect_half_light&&!albinoid_early;std::vector<SampleLight> item_effect_lights;
++    if(item_light_leak){item_effect_lights=active;item_effect_lights.erase(std::remove_if(item_effect_lights.begin(),item_effect_lights.end(),[](const auto& l){return l.source==2;}),item_effect_lights.end());
++        const float its=0.1f*float(last_item->aspd);item_effect_lights.push_back({NJS_POINT3{},NJS_POINT3{its,its,its},item_glint_vector(last_item->item_ayp),0.f,0.f,2u});}
+     for(std::size_t ti=0;ti<scene.triangles.size();++ti){auto& t=scene.triangles[ti];
+         const bool model_effect=t.light_category==5;
+         if(ti>=lit_triangle_count&&!model_effect)continue;
+         const auto* lights=(!t.camera_mask&&(t.light_category==1||((t.light_category==4||model_effect)&&effect_half_light)))?&half:&active;const EasyLight* easy=nullptr;EasyLight spc{};
++        if(item_light_leak&&(t.light_category==4||model_effect)&&t.mirror!=3)lights=&item_effect_lights;
+         for(std::size_t g=0;g<glints.size();++g)if(ti>=glints[g].begin&&ti<glints[g].end){
+             if(glints[g].easy>=0){const int m=glints[g].easy;
+                 if(m==0)easy=&easy_full;else if(m==1)easy=&easy_half;else if(m==3)easy=&easy_eye;
+@@ -4550,13 +4581,13 @@
+ }
+ void RoomWorld::control_item_glint(){
+     // objitm.c:282-450 bhControlObjItm: nur mit sp_flg 0x4, die Items nicht mit cb_flg 0x40000000.
+-    // Je Item (Reihenfolge rom->itwp) ohne stflg 0x1000000 (bhInitModelSet: hidden) mit flg 1 und
++    // Je Item (Reihenfolge rom->itwp) ohne stflg 0x1000000 (bhInitModelSet 0x24: inactive) mit flg 1 und
+     // aspd: Pause ct2 (60..89 Bilder aus dem gemeinsamen EE-rand), dann acht Bilder mdflg 0x80
+     // mit ayp += 8192 (Lichtrichtung des Glanzes in bhDrawObjItm).
+     if(!(simulation_flags_&4u))return;
+     if(collision_events_&&(collision_events_->flags[10][0]&0x40000000u))return;
+     for(auto& pair:entities_){if(pair.first.first!=3)continue;auto& e=pair.second;
+-        if(e.hidden||!(e.object_flags&1u))continue;
++        if(e.inactive||!(e.object_flags&1u))continue; // objitm.c:407; mdflg 0x1 (bhSetDispObj 0x20: hidden) sperrt nur das Zeichnen (:560)
+         if(e.aspd)switch(e.item_ct0){
+         case 1:if(++e.item_ct1>e.item_ct2){e.item_glint=true;e.item_ayp=0;e.item_ct1=0;++e.item_ct0;}break;
+         case 2:e.item_ayp+=8192;e.item_ct1=(e.item_ct1+1)&7;if(!e.item_ct1){e.item_glint=false;++e.item_ct0;}break;

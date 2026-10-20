@@ -341,6 +341,11 @@ typedef struct { uint32_t stflg, at_flg; int32_t idx_ct; float mtx[16]; } RECVX_
 void recvx_combat_gun_fire(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
                            RECVX_COMBAT_SYS* sys, const RECVX_CB_GUN_OWNER* owner,
                            int32_t wno, int32_t jno, int32_t hand, int32_t ang);
+/* pwksub.c:3242 bhSetYakkyou fuer einen vorhandenen Work (bhYakkyouSet event.c:3113):
+   owP[jno].mtx und owP[0].mtx des Works; keine Kampfzustaende. */
+void recvx_combat_set_yakkyou(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
+                              RECVX_COMBAT_SYS* sys, const float joint_mtx[16], const float root_mtx[16],
+                              int32_t wno, int32_t jno, int32_t hand, int32_t ang);
 RECVX_COMBAT_CORE* recvx_combat_create(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services);
 void recvx_combat_destroy(RECVX_COMBAT_CORE* core);
 RECVX_COMBAT_PLAYER* recvx_combat_player(RECVX_COMBAT_CORE* core);

@@ -105,7 +105,7 @@ void ComputerTerminal::draw_character(SoftwareRenderer& image)const{
     njTranslate(&view,c.px,c.py,c.pz);
     njRotateXYZ(&view,c.ax,c.ay,c.az);
     njScale(&view,c.scale,c.scale,c.scale);
-    SoftwareRenderer window(w,h);window.set_supersampling(image.supersampling());
+    SoftwareRenderer window(w,h);window.set_supersampling(image.supersampling());window.set_render_threads(image.render_threads());
     window.set_texture_filtering(image.texture_filtering());
     scene->background=0;
     // njClipZ(-1, fNaViwClipFar): the host projection needs a positive near

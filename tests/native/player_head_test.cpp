@@ -39,10 +39,27 @@ RECVX_HEAD_HOST make_host(Host& h){
     host.unbound=[](void* u,const char* name){static_cast<Host*>(u)->unbound.push_back(name);};
     return host;
 }
-// Ein Gegner vor dem Spieler: der Blick zeigt bei Gier 0 nach -z.
+// Ein Gegner vor dem Spieler: der Blick zeigt bei Gier 0 nach -z.  Mit lok_jno 0
+// ist der Suchpunkt die Worklage selbst (pwksub.c:447-452).
 RECVX_HEAD_CANDIDATE enemy(int index,float x,float y,float z,int eligible=1,int node=0){
     RECVX_HEAD_CANDIDATE c{};c.index=index;c.look_node=node;c.eligible=eligible;
-    c.point[0]=x;c.point[1]=y;c.point[2]=z;return c;
+    c.point[0]=x;c.point[1]=y;c.point[2]=z;
+    c.position[0]=x;c.position[1]=y;c.position[2]=z;return c;
+}
+// Kandidatenliste-Dienst fuer die Tabellenfaelle: Slot 7 hat einen Baum, alle
+// anderen nicht.
+struct TableHost {std::vector<int> asked;std::vector<std::string> unbound;};
+RECVX_HEAD_HOST table_host(TableHost& h){
+    RECVX_HEAD_HOST host{};host.user=&h;
+    host.target_node_point=[](void* u,int kind,int index,int node,float out[3])->int{
+        auto& s=*static_cast<TableHost*>(u);s.asked.push_back(index);
+        if(kind!=RECVX_HEAD_TARGET_ENEMY||index!=7||node!=10)return 0;
+        out[0]=1.0f;out[1]=2.0f;out[2]=3.0f;return 1;};
+    host.unbound=[](void* u,const char* name){static_cast<TableHost*>(u)->unbound.push_back(name);};
+    return host;
+}
+bool reported(const std::vector<std::string>& list,const std::string& part){
+    for(const auto& n:list)if(n.find(part)!=std::string::npos)return true;return false;
 }
 RECVX_HEAD_INPUT frame(float px,float py,float pz,int yaw=0,int works=128){
     RECVX_HEAD_INPUT in{};in.ay=yaw;in.enemy_count=works; /* sys->ewk_n */
@@ -159,6 +176,72 @@ int main(int argc,char** argv){try{
      auto in=frame(0,0,0);
      for(int f=0;f<80;++f)recvx_head_tick(&s,&in,list,2,&host,out);
      check(s.target_index==2,"the search did not pick the nearest enemy");}
+
+    // --- Gleich weit entfernt: das erste Ziel in ene-Reihenfolge bleibt, weil
+    // erst ein echt kleinerer Abstand ersetzt (pwksub.c:466 `ln < nr`).
+    {RECVX_HEAD_STATE s{};recvx_head_begin(&s,0);recvx_head_enable_look(&s);
+     Host h;const auto host=make_host(h);
+     const RECVX_HEAD_CANDIDATE list[2]={enemy(4,0,0,-15),enemy(2,0,0,-15)};
+     auto in=frame(0,0,0);
+     for(int f=0;f<40;++f)recvx_head_tick(&s,&in,list,2,&host,out);
+     check(s.target_index==4,"a tie must keep the first work in table order");}
+
+    // --- bhLookNearEnemy (player.c:7033) uebernimmt lok_jno des Ziels, und
+    // bhSetHeadRotation liest dann owP[ono] (player.c:7132-7134) ueber den
+    // Knotendienst - nicht px/py/pz des Works.
+    {RECVX_HEAD_STATE s{};recvx_head_begin(&s,0);recvx_head_enable_look(&s);
+     Host h;const auto host=make_host(h); /* Knotendienst antwortet (0,0,0) */
+     auto c=enemy(6,0,0,-20,1,10);c.position[0]=0;c.position[1]=0;c.position[2]=-20;
+     c.point[0]=0;c.point[1]=9;c.point[2]=-20; /* owP[10] ueber der Worklage */
+     auto in=frame(0,0,0);
+     for(int f=0;f<40;++f)recvx_head_tick(&s,&in,&c,1,&host,out);
+     check(s.target_index==6&&s.target_node==10,"the target node is not the enemy lok_jno");
+     check(h.node_calls>0,"rotation toward lok_jno 10 did not ask for owP[10]");
+     check(std::abs(s.target_point[2])<1e-4f,"rotation took px/py/pz instead of owP[ono]");}
+
+    // --- player.c:7075-7078: EXP1_S(68) >= sys->ewk_n faellt auf 0 zurueck.
+    {RECVX_HEAD_STATE s{};recvx_head_begin(&s,0);recvx_head_enable_look(&s);
+     Host h;const auto host=make_host(h);
+     const RECVX_HEAD_CANDIDATE list[2]={enemy(0,0,0,-30),enemy(5,0,0,-20)};
+     auto in=frame(0,0,0,0,6);
+     for(int f=0;f<40;++f)recvx_head_tick(&s,&in,list,2,&host,out);
+     check(s.target_index==5,"slot 5 did not lock");
+     in.enemy_count=5; /* ewk_n schrumpft unter den Zielindex */
+     s.flags|=RECVX_HEAD_LOOK_HOLD; /* keine neue Suche in diesem Bild */
+     recvx_head_tick(&s,&in,list,2,&host,out);
+     check(s.target_index==0,"a target index at or above sys->ewk_n must fall back to 0");}
+
+    // --- Kandidatenliste aus sys->ene (pwksub.c:443-462): Tabellenreihenfolge,
+    // Slotindex, Filter :445 und lok_jno-Punkt :447-457.  Testaufstellung mit
+    // eigenen Works; der echte Raum folgt unten.
+    {std::vector<RECVX_ENEMY_WORK> w(11);
+     RECVX_ENEMY_TABLE t{};
+     for(unsigned i=0;i<11;++i){w[i].flg=1;w[i].px=float(i);w[i].py=0;w[i].pz=-float(i);w[i].id=std::uint8_t(i);}
+     for(unsigned i=0;i<11;++i)if(i!=1)t.slot[i]=&w[i];
+     t.ewk_n=10;                                  /* Slot 10 liegt hinter ewk_n */
+     w[2].flg|=0x8000u;                           /* :445 !(flg & 0x8000) */
+     w[3].stflg=0x40000000u;                      /* :445 !(stflg & 0x41000000) */
+     w[4].stflg=0x1000000u;
+     w[6].stflg=0x1000000u;                       /* versteckter Elternwork */
+     w[5].flg|=0x80u;w[5].lkwkp=&w[6];            /* :445 lkwkp->stflg & 0x1000000 */
+     w[7].flg|=0x80u;w[7].lkwkp=&w[0];w[7].lok_jno=10; /* sichtbarer Elternwork */
+     w[8].flg|=0x80u;                             /* flg 0x80 ohne lkwkp: Erzeugerluecke */
+     w[9].lok_jno=4;                              /* Baum fehlt */
+     TableHost th;const auto host=table_host(th);
+     RECVX_HEAD_CANDIDATE list[RECVX_ENEMY_SLOTS];
+     const unsigned n=recvx_head_enemy_candidates(&t,list,RECVX_ENEMY_SLOTS,&host);
+     const int order[]={0,2,3,4,5,6,7,8,9};
+     check(n==9,"the list must hold every occupied slot below ewk_n");
+     for(unsigned k=0;k<n;++k)check(list[k].index==order[k],"the list is not in ene[] slot order");
+     const int expect[]={1,0,0,0,0,0,1,0,0};
+     for(unsigned k=0;k<n;++k)check(list[k].eligible==expect[k],"pwksub.c:445 filter mismatch");
+     check(list[0].point[0]==0.0f&&list[0].look_node==0,"lok_jno 0 must take px/py/pz");
+     check(list[6].point[0]==1.0f&&list[6].point[1]==2.0f&&list[6].point[2]==3.0f,"lok_jno 10 must take owP[10]");
+     check(list[6].position[0]==7.0f&&list[6].position[2]==-7.0f,"the work position was not carried for ono 0");
+     check(list[8].eligible==0&&reported(th.unbound,"ene[9] (id 9) mlwP->owP[4]"),
+           "a missing tree must exclude exactly that work and name it");
+     check(reported(th.unbound,"ene[8] (id 8) flg 0x80 ohne lkwkp"),"flg 0x80 without lkwkp was not named");
+     for(const int i:th.asked)check(i==7||i==9,"owP was read for a work the filter rejects");}
 
     // --- Blickzielwechsel setzt den Haltezaehler zurueck (player.c:7023-7026).
     {RECVX_HEAD_STATE s{};recvx_head_begin(&s,0);recvx_head_enable_look(&s);
@@ -366,6 +449,102 @@ int main(int argc,char** argv){try{
         check(!(head.flags&0x18u)&&(head.flags&RECVX_HEAD_LOOK),"0x41: nur 0x8 und 0x10 geloescht");
         check(head.target_kind==RECVX_HEAD_TARGET_POINT&&std::fabs(head.target_point[0]+1.0f)<1e-6f,
               "0x41: Zielart und Punkt bleiben stehen");
+    }
+    if(argc>1){
+        // bhSearchNearEnemy2 im Originalraum RM_0080 (Fass id 0, fuenf Zombies id 1 mit ihren
+        // Kindworks). Testaufstellung wie barrel_blast_test: Spieler abseits bei (200,0,200),
+        // Gegner-KI an, Griff aus; die Gegnertabelle, ihre Works und ihre Objektbaeume sind die
+        // des produktiven Raumbesitzers nach einem echten Gegnerpass.
+        const std::filesystem::path data=argv[1];
+        const auto bytes=recvx::read_asset_file(data/"rooms/RM_0080.RDT",64*1024*1024);
+        const auto stage=recvx::decode_scene(bytes);auto actor=stage.spawns.at(0);
+        std::size_t motion=42;std::int64_t frame_no=0;recvx::AudioMixer audio(data);
+        recvx::RoomWorld world(bytes,stage,actor,motion,frame_no,audio,data,{},"RM_0080");
+        const auto player=recvx::PlayerAsset::load(data,10);
+        recvx::Inventory inv;recvx::MessageDialog dialog;recvx::EventVm events(bytes,inv,dialog);std::uint32_t head_flags=0;
+        world.set_player_asset(&player);world.bind_player_collision(events);
+        world.bind_enemy_player(inv.hp,head_flags);world.set_enemy_ai(true);world.set_enemy_grab(false);
+        events.values[0]=0;events.values[1]=8;
+        actor.position={200,0,200};
+        world.commit_player_joints(player.pose(motion,frame_no,actor.position,actor.yaw));
+        world.set_simulation_flags(2u|8u);world.tick();
+        auto& table=world.enemy_table();
+        struct RoomHost {recvx::RoomWorld* world;std::vector<std::string> unbound;unsigned walls=0;};
+        RoomHost rh{&world,{},0};
+        RECVX_HEAD_HOST host{};host.user=&rh;
+        host.wall_clear=[](void* u,const float*,const float*)->int{++static_cast<RoomHost*>(u)->walls;return 1;}; /* Testaufstellung: freie Sicht */
+        host.target_node_point=[](void* u,int kind,int index,int node,float out[3])->int{
+            auto& h=*static_cast<RoomHost*>(u);if(kind!=RECVX_HEAD_TARGET_ENEMY||index<0||node<0)return 0;
+            const auto m=h.world->enemy_slot_joint_matrix(unsigned(index),unsigned(node));if(!m)return 0;
+            out[0]=m->value[12];out[1]=m->value[13];out[2]=m->value[14];return 1;};
+        host.unbound=[](void* u,const char* name){static_cast<RoomHost*>(u)->unbound.push_back(name);};
+        auto build=[&](std::vector<RECVX_HEAD_CANDIDATE>& list){
+            list.assign(RECVX_ENEMY_SLOTS,RECVX_HEAD_CANDIDATE{});
+            list.resize(recvx_head_enemy_candidates(&table,list.data(),unsigned(list.size()),&host));};
+        std::vector<RECVX_HEAD_CANDIDATE> list;build(list);
+        unsigned occupied=0;for(unsigned i=0;i<table.ewk_n;++i)if(table.slot[i])++occupied;
+        check(list.size()==occupied&&occupied>=6,"RM_0080: the list does not cover ene[0..ewk_n-1]");
+        for(std::size_t k=1;k<list.size();++k)check(list[k].index>list[k-1].index,"RM_0080: list not in slot order");
+        std::vector<const RECVX_HEAD_CANDIDATE*> zombies;bool barrel=false,child=false;
+        for(const auto& c:list){const auto* w=table.slot[c.index];
+            check(w&&c.position[0]==w->px&&c.position[2]==w->pz,"RM_0080: index is not the ene[] slot of the work");
+            const auto* e=static_cast<const recvx::WorldEntity*>(w->owner);
+            if(w->id==0){barrel=true; /* bhEne00 case 0: flg |= 0x8120 (eneset.c:401) */
+                check((w->flg&0x8000u)&&!c.eligible,"RM_0080: the barrel (flg 0x8000) must not be searchable");}
+            else if(w->id==1&&e&&e->model_owner){child=true; /* en01.c:2715-2717: Kind mit flg 0x80 erhaelt 0x8000 */
+                check((w->flg&0x80u)&&(w->flg&0x8000u)&&!c.eligible,"RM_0080: a linked EN01 child must not be searchable");}
+            else if(w->id==1){check(c.look_node==10,"RM_0080: bhEne01_Init lok_jno 0xa (en01.c:2793) missing");zombies.push_back(&c);}}
+        check(barrel&&child&&zombies.size()==5,"RM_0080: barrel, zombie children or five zombies missing");
+        const RECVX_HEAD_CANDIDATE* target=nullptr;
+        for(const auto* z:zombies){if(!z->eligible)continue;const auto* w=table.slot[z->index];
+            const auto joint=world.enemy_slot_joint_matrix(unsigned(z->index),10);
+            check(joint.has_value(),"RM_0080: zombie owP[10] not published");
+            check(z->point[0]==joint->value[12]&&z->point[1]==joint->value[13]&&z->point[2]==joint->value[14],
+                  "RM_0080: the search point is not owP[lok_jno].mtx[12..14]");
+            /* Unabhaengiger Leser desselben Baums ueber den Raumindex (event.c:7826). */
+            const auto by_room=world.enemy_joint_position(w->owner_index,10);
+            check(by_room&&by_room->x==z->point[0]&&by_room->y==z->point[1]&&by_room->z==z->point[2],
+                  "RM_0080: slot and room-index readers disagree on owP[10]");
+            check(std::fabs(z->point[1]-z->position[1])>0.5f,"RM_0080: owP[10] collapses onto px/py/pz");
+            if(!target)target=z;}
+        check(target!=nullptr,"RM_0080: no zombie is searchable after the enemy pass");
+        const RECVX_HEAD_CANDIDATE goal=*target; /* `list` wird unten neu gebaut */
+        auto eligible_of=[&](int slot){std::vector<RECVX_HEAD_CANDIDATE> l;build(l);
+            for(const auto& c:l)if(c.index==slot)return c.eligible;return -1;};
+        // Filter pwksub.c:445 an einem echten Zombiework (Testaufstellung, danach zurueckgesetzt).
+        {const int slot=goal.index;auto* w=table.slot[slot];const auto flg=w->flg,stflg=w->stflg;auto* lk=w->lkwkp;
+         check(eligible_of(slot)==1,"RM_0080: target zombie not eligible");
+         w->flg|=0x8000u;check(eligible_of(slot)==0,"RM_0080: flg 0x8000 did not exclude the zombie");w->flg=flg;
+         w->stflg|=0x40000000u;check(eligible_of(slot)==0,"RM_0080: stflg 0x40000000 did not exclude the zombie");w->stflg=stflg;
+         w->stflg|=0x1000000u;check(eligible_of(slot)==0,"RM_0080: stflg 0x1000000 did not exclude the zombie");w->stflg=stflg;
+         RECVX_ENEMY_WORK* parent=nullptr;for(const auto* z:zombies)if(z->index!=slot){parent=table.slot[z->index];break;}
+         check(parent!=nullptr,"RM_0080: no second zombie for the link case");
+         const auto pstflg=parent->stflg;
+         w->flg|=0x80u;w->lkwkp=parent;
+         parent->stflg|=0x1000000u;check(eligible_of(slot)==0,"RM_0080: hidden lkwkp (stflg 0x1000000) did not exclude the zombie");
+         parent->stflg=pstflg&~0x1000000u;check(eligible_of(slot)==1,"RM_0080: a visible lkwkp must keep the zombie searchable");
+         parent->stflg=pstflg;w->flg=flg;w->lkwkp=lk;
+         check(eligible_of(slot)==1,"RM_0080: the filter arrangement was not undone");}
+        // bhLookNearEnemy -> bhSetHeadRotation am echten Kandidaten: Kopf seitlich unter und 2 Einheiten
+        // hinter owP[10], Blick nach -z; EXP1_S(68) ist der ene[]-Slot, EXP1_S(70) lok_jno, der
+        // Zielpunkt owP[10], und Knoten 4 dreht sich dorthin.
+        {build(list);
+         const float p[3]={goal.point[0],goal.point[1],goal.point[2]};
+         const float eye[3]={p[0]+1.0f,p[1]-1.0f,p[2]+2.0f};
+         auto dist=[&](const float* q){const float dx=q[0]-eye[0],dy=q[1]-eye[1],dz=q[2]-eye[2];return std::sqrt(dx*dx+dy*dy+dz*dz);};
+         for(const auto& c:list)if(c.eligible&&c.index!=goal.index)
+            check(dist(c.point)>dist(p)+0.5f,"RM_0080: arrangement ambiguous, another zombie is as near");
+         RECVX_HEAD_STATE s{};recvx_head_begin(&s,0);recvx_head_enable_look(&s);
+         auto in=frame(eye[0],eye[1]-11.0f,eye[2],0,int(table.ewk_n));
+         for(int f=0;f<40;++f){build(list);recvx_head_tick(&s,&in,list.data(),unsigned(list.size()),&host,out);}
+         check(rh.walls>0,"RM_0080: the line-of-sight service was never asked");
+         check((s.flags&RECVX_HEAD_LOCKED)&&s.target_kind==RECVX_HEAD_TARGET_ENEMY,"RM_0080: no enemy target locked");
+         check(s.target_index==goal.index&&table.slot[s.target_index]==table.slot[goal.index],
+               "RM_0080: EXP1_S(68) is not the ene[] slot of the nearest zombie");
+         check(s.target_node==10,"RM_0080: EXP1_S(70) is not ene[id].lok_jno");
+         for(unsigned a=0;a<3;++a)check(std::fabs(s.target_point[a]-p[a])<1e-4f,"RM_0080: the held look point is not owP[10]");
+         check(out[4][0]!=0||out[4][1]!=0,"RM_0080: the head did not turn toward owP[10]");
+         for(const auto& n:rh.unbound)check(n.find("ene[")==std::string::npos,"RM_0080: an unexpected head gap was reported");}
     }
     std::cout<<"player head control ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<"player head: "<<e.what()<<'\n';return 1;}}

@@ -1,0 +1,222 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -567,6 +567,11 @@
+   add_executable(recvx-effect-sub3x-tests tests/native/effect_sub3x_test.cpp)
+   target_link_libraries(recvx-effect-sub3x-tests PRIVATE recvx_game)
+   add_test(NAME effect_sub3x COMMAND recvx-effect-sub3x-tests)
++  add_executable(recvx-script-effect-opcodes-tests tests/native/script_effect_opcodes_test.cpp)
++  target_link_libraries(recvx-script-effect-opcodes-tests PRIVATE recvx_game)
++  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3130.RDT")
++    add_test(NAME script_effect_opcodes COMMAND recvx-script-effect-opcodes-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
++  endif()
+   add_executable(recvx-effect-room-tests tests/native/effect_room_sprites_test.cpp)
+   target_link_libraries(recvx-effect-room-tests PRIVATE recvx_game)
+   add_test(NAME effect_room_sprites COMMAND recvx-effect-room-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+--- a/native/combat.cpp
++++ b/native/combat.cpp
+@@ -259,6 +259,9 @@
+     engine.sys.pad_dx=input.pad_dx;engine.sys.pad_dy=input.pad_dy;engine.sys.pad_ax=0;engine.sys.pad_ay=0;
+     // sys->ef_flg gehoert dem Effektbesitzer (bhEff130 loescht 0x2, act_scp setzt es).
+     if(world)engine.sys.ef_flg=world->effect_flags();
++    // sys->yk_ct (system.c:260 je Raumwechsel 0) gehoert ebenso dem Effektbesitzer: bhEff000 liest es,
++    // bhSetYakkyou schreibt es auch aus dem Raumskript (bhYakkyouSet event.c:3113, RoomWorld::set_yakkyou).
++    if(world)engine.sys.yk_ct=world->effect_counter();
+     engine.sys.gm_flg=events?&events->flags[11][0]:nullptr;
+     engine.sys.st_flg=events?&events->flags[5][0]:nullptr;
+     engine.sys.sp_flg=events?&events->flags[6][0]:nullptr;
+@@ -296,6 +299,7 @@
+     if(events)view.stflg=events->flags[14][0];
+     recvx_combat_after_model(engine.core,&engine.sys,&engine.result);
+     if(events)events->flags[14][0]=view.stflg;
++    if(world)world->set_effect_counter(engine.sys.yk_ct);
+     // PlyPchMain führt die Aufschaltung in pp.lck_tbl als RECVX_ENEMY_WORK*;
+     // owner_index ist der Raumindex des vorhandenen Besitzers. Ohne die noch
+     // fehlende C02-Bindung der Gegnertabelle in world bleibt sie leer.
+--- a/native/player_combat_core.c
++++ b/native/player_combat_core.c
+@@ -77,7 +77,6 @@
+     RECVX_CB_WEAPON_OBJECT weapon;
+     RECVX_COMBAT_SYS*      sys;      /* nur waehrend eines Passes gueltig */
+     RECVX_COMBAT_RESULT    res;
+-    int16_t                yk_hr, yk_hl; /* pwksub.c:3246 static hr/hl    */
+     int32_t                igct;         /* weapon.c:503 static igct      */
+     CB_GA                  pch_gap;      /* playpch.c:1139 static gap     */
+     int                    was_active;
+@@ -1462,6 +1461,11 @@
+     default: break;
+     }
+ }
++
++/* pwksub.c:3246 `static short hr, hl = 1;` ist eine Funktionsstatik von bhSetYakkyou: ein
++   Zaehlerpaar fuer alle Aufrufer (Spielerwaffe und bhYakkyouSet event.c:3113 auf Gegnerworks),
++   einmal initialisiert und nie zurueckgesetzt. */
++static int16_t cb_yk_hr, cb_yk_hl = 1;
+ 
+ /* pwksub.c:3242 bhSetYakkyou */
+ static void cb_set_yakkyou(RECVX_COMBAT_CORE* c, int32_t wno, int32_t jno,
+@@ -1473,8 +1477,8 @@
+     RECVX_CB_VEC ops, wps, jps;
+     RECVX_CB_EFFECT req;
+     if (wno == 8) {
+-        if (hand == 0) { c->yk_hr++; if (c->yk_hr & 1) return; }
+-        else           { c->yk_hl++; if (c->yk_hl & 1) return; }
++        if (hand == 0) { cb_yk_hr++; if (cb_yk_hr & 1) return; }
++        else           { cb_yk_hl++; if (cb_yk_hl & 1) return; }
+     }
+     if (!eft) return;
+     c->res.shells++;
+@@ -2996,7 +3000,6 @@
+     _Make_SinTable();
+     if (tables) core->tables = *tables;
+     if (services) core->services = *services;
+-    core->yk_hl = 1;   /* pwksub.c:3246 static short hr, hl = 1 */
+     core->player.src_no = -1;
+     /* player.c:1416 verteilt ueber bhCtrPly_mode0[plp->mode0]; recvx_combat_tick
+        IST der mode0-1-Zweig (bhCPM0_action). Der Host darf mode0 umsetzen,
+@@ -3030,6 +3033,29 @@
+     free(c);
+ }
+ 
++/* pwksub.c:3242 bhSetYakkyou(pp, wno, jno, hand, ang) fuer bhYakkyouSet (event.c:3113): pp ist
++   plp oder ene[rom->enep[v4].wrk_no]; gelesen werden nur pp->mlwP->owP[jno].mtx und owP[0].mtx
++   (pwksub.c:3301-3304, :3330). Hr/hl und sys->yk_ct sind dieselben wie im Spielerpfad. */
++void recvx_combat_set_yakkyou(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
++                              RECVX_COMBAT_SYS* sys, const float joint_mtx[16], const float root_mtx[16],
++                              int32_t wno, int32_t jno, int32_t hand, int32_t ang) {
++    RECVX_COMBAT_CORE* c;
++    if (!joint_mtx || !root_mtx || jno < 0 || (uint32_t)jno >= RECVX_CB_NODES) {
++        if (services && services->gap) services->gap(services->user, "bhSetYakkyou owP[jno]");
++        return;
++    }
++    c = calloc(1, sizeof *c);
++    if (!c) return;
++    _Make_SinTable();
++    if (tables) c->tables = *tables;
++    if (services) c->services = *services;
++    c->sys = sys;
++    memcpy(c->player.owp_mtx[0], root_mtx, sizeof c->player.owp_mtx[0]);
++    memcpy(c->player.owp_mtx[jno], joint_mtx, sizeof c->player.owp_mtx[jno]);
++    cb_set_yakkyou(c, wno, jno, hand, ang);
++    free(c);
++}
++
+ int32_t recvx_combat_check_gun_atari(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
+                                      RECVX_COMBAT_SYS* sys, RECVX_CB_GA* gap) {
+     RECVX_COMBAT_CORE* c;
+@@ -3078,7 +3104,6 @@
+     memset(&core->player.pp, 0, sizeof core->player.pp);
+     memset(&core->weapon, 0, sizeof core->weapon);
+     core->player.src_no = -1;
+-    core->yk_hr = 0; core->yk_hl = 1;
+     core->igct = 0;
+     cb_gap(core, "bhInitPlayer/bhResetPlayer owP[7]/[11].flg (player.c:850/944)");
+ }
+--- a/native/player_combat_core.h
++++ b/native/player_combat_core.h
+@@ -341,6 +341,11 @@
+ void recvx_combat_gun_fire(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
+                            RECVX_COMBAT_SYS* sys, const RECVX_CB_GUN_OWNER* owner,
+                            int32_t wno, int32_t jno, int32_t hand, int32_t ang);
++/* pwksub.c:3242 bhSetYakkyou fuer einen vorhandenen Work (bhYakkyouSet event.c:3113):
++   owP[jno].mtx und owP[0].mtx des Works; keine Kampfzustaende. */
++void recvx_combat_set_yakkyou(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services,
++                              RECVX_COMBAT_SYS* sys, const float joint_mtx[16], const float root_mtx[16],
++                              int32_t wno, int32_t jno, int32_t hand, int32_t ang);
+ RECVX_COMBAT_CORE* recvx_combat_create(const RECVX_CB_TABLES* tables, const RECVX_COMBAT_SERVICES* services);
+ void recvx_combat_destroy(RECVX_COMBAT_CORE* core);
+ RECVX_COMBAT_PLAYER* recvx_combat_player(RECVX_COMBAT_CORE* core);
+--- a/native/world.cpp
++++ b/native/world.cpp
+@@ -869,6 +869,26 @@
+         if(slot<0)unbound_enemy_.insert("bhSetEffectTb: kein freier eff[512]-Platz");
+         else if(!supported_effect_sprite(spawn.id))unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));
+         return true;}
++    // event.c:5138 bhHEffectSet (0x6e, 22 Byte) -> effect.c:548 bhSetEffectEvt(v6, &pnt, v1, ax, ay).
++    // Byte 2 type (v1), Byte 3 Vorzeichenbits (1 x, 2 y, 4 z) fuer px/py/pz u16/100 an 4/6/8; Byte 10
++    // Vorzeichenbits fuer ax (1) und ay (2) mit den Gradbytes 11/12, ax = v * (65536.0f/360.0f) als int
++    // (O_WRK.ax/ay sind int, kein short wie bei 0xb0); Byte 13 Vorzeichenbits fuer ox/oy/oz u16/100 an
++    // 14/16/18; Effektnummer u16 an 20. bhSetEffectEvt nimmt den ersten Platz ohne flg & 3 in eff[512],
++    // nullt ihn und schreibt flg 1, id, type, tex_id -1, mdlver 0, flr_no 0, px/py/pz, lox/loy/loz = ox/oy/oz,
++    // sx/sy/sz 1, ax/ay, az 0, lkwkp NULL, lkono 0 -- sxb/syb/szb bleiben 0 (anders als bhSetEffectTb),
++    // sys->ef wird nicht beruehrt. RM_3130 Ereignis 0 @2642: bhEff_Sub398; RM_0030/0070/1090/3100/3140: bhEff113.
++    if(op==0x6e){
++        const auto hundredth=[&](unsigned signs,unsigned bit,unsigned at){const float n=float(v.u16(at))/100.0f;return (signs&bit)?-1.0f*n:n;};
++        const auto degrees=[](int value){return int(float(value)*(65536.0f/360.0f));};
++        EffectSpawn spawn;spawn.flg=1;spawn.id=v.u16(20);spawn.type=v.u8(2);spawn.mdlver=0;spawn.flr_no=0;spawn.scale={1.0f,1.0f,1.0f};
++        {const unsigned signs=v.u8(3);spawn.position={hundredth(signs,1,4),hundredth(signs,2,6),hundredth(signs,4,8)};}
++        {const unsigned signs=v.u8(10);spawn.ax=degrees((signs&1)?-int(v.u8(11)):int(v.u8(11)));spawn.ay=degrees((signs&2)?-int(v.u8(12)):int(v.u8(12)));}
++        {const unsigned signs=v.u8(13);spawn.has_offset=true;spawn.offset={hundredth(signs,1,14),hundredth(signs,2,16),hundredth(signs,4,18)};}
++        spawn.lkono=0;spawn.linked_work=nullptr;spawn.has_scale_base=true;spawn.scale_base={0.0f,0.0f,0.0f};
++        const int slot=allocate_effect(spawn,0,0);
++        if(slot<0)unbound_enemy_.insert("bhSetEffectEvt: kein freier eff[512]-Platz");
++        else if(!supported_effect_sprite(spawn.id))unbound_enemy_.insert("bhEff"+std::to_string(spawn.id));
++        return true;}
+     // event.c:8722 bhEffBakuDrmSet (Befehl 0xc8): v2 Vorzeichenbits (1 x, 2 y, 4 z), drei u16 in
+     // 1/100 Einheiten als Weltlage, dann weapon.c:1812 bhSetExplosionEffect(&pPos) -> Feuerball 23 und
+     // zwei Truemmer 24 bei pos - 4 * cam.v. Luecken (Kamera/Pool) meldet explode_effect selbst.
+@@ -1274,6 +1294,19 @@
+                 audio_.call_player_weapon_se(bank,int(program),{joint->value[12],joint->value[13],joint->value[14]},int(se_slot),collision_events_&&(collision_events_->flags[11][0]&0x01000000u));
+         }
+         gun_fire(kind,index,*joint,wno,jno,hand,angle);return true;}
++    // event.c:3113 bhYakkyouSet (0x4a, 8 Byte): v0 Byte 1, v4 Byte 2, v1 Byte 3, v2 Byte 4, v3 Byte 5,
++    // v7 Byte 6 (Bit 2 negiert v5), v5 Byte 7; v6 = 182.04445f * v5. v0 0: bhSetYakkyou(plp,
++    // plp->wpnr_no, v2 ? 9 : 13, v2, v6); v0 1: bhSetYakkyou(ene[rom->enep[v4].wrk_no], v3, v1, v2, v6);
++    // jedes andere v0 tut nichts. bhSetYakkyou liest ang nicht (pwksub.c:3242-3369).
++    if(op==0x4a){
++        const unsigned mode=v.u8(1);if(mode>1)return true;
++        int degrees=v.u8(7);if(v.u8(6)&2)degrees=-degrees;const int angle=int(182.04445f*float(degrees));
++        const unsigned hand=v.u8(4),kind=mode,index=mode?v.u8(2):0;
++        const unsigned jno=mode?v.u8(3):(hand==0?13:9),wno=mode?v.u8(5):player_weapon_;
++        // pwksub.c:3301-3304: owP[jno].mtx und owP[0].mtx des Works; ohne sie keine Ersatzlage.
++        const auto joint=link_matrix(kind,index,jno),root=link_matrix(kind,index,0);
++        if(!joint||!root){unbound_enemy_.insert("bhYakkyouSet owP["+std::to_string(joint?0:jno)+"]");return true;}
++        set_yakkyou(kind,index,*joint,*root,wno,jno,hand,angle);return true;}
+     /* bhCommonCtr case 7 (event.c:12038-12070) schreibt plp->px/py/pz samt pxb/pyb/pzb.
+        Im Original fuehrt bhControlPlayer (player.c:1452, unter plp->flg & 0x100000 und
+        EXP_WORK.yrct <= 0) EXP_WORK.spx/spz dieser einen plp-Lage nach, und die uebrigen
+@@ -1994,6 +2027,27 @@
+     if(collision_events_){sys.st_flg=&collision_events_->flags[5][0];sys.cam_ncut=collision_events_->values[2];}
+     RECVX_CB_GUN_OWNER work{};work.stflg=kind?0u:0x40000000u;work.idx_ct=int32_t(index);std::copy_n(joint.value,16,work.mtx);
+     recvx_combat_gun_fire(&tables,&s,&sys,&work,int32_t(wno),int32_t(jno),int32_t(hand),ang);
++}
++// pwksub.c:3242 bhSetYakkyou am vorhandenen Work (bhYakkyouSet, event.c:3113): derselbe Kampfkern wie der
++// Spielerpfad, WpnEffTab[wno][3] (Huelse, Link an den Work, lkono jno) und [wno][2] (ohne 0x80 frei);
++// sys->yk_ct ist effect_yk_ct_ und wird zurueckgeschrieben, hr/hl teilt der Kern mit dem Spielerpfad.
++void RoomWorld::set_yakkyou(unsigned kind,unsigned index,const BoneMatrix& joint,const BoneMatrix& root,unsigned wno,unsigned jno,unsigned hand,int ang){
++    RECVX_CB_TABLES tables{};tables.wpn=reinterpret_cast<const RECVX_CB_WPN_TAB*>(WpnTab);tables.eff=reinterpret_cast<RECVX_CB_EF_WORK(*)[4]>(WpnEffTab);
++    struct Owner{RoomWorld* world;unsigned kind,index;} owner{this,kind,index};
++    RECVX_COMBAT_SERVICES s{};s.user=&owner;
++    s.gap=[](void* p,const char* name){static_cast<Owner*>(p)->world->unbound_enemy_.insert(name);};
++    // bhSetEffectTb (effect.c:436) wie in gun_fire: Kennung aus WpnEffTab, Link nur mit Linkzeiger.
++    s.effect=[](void* p,const RECVX_CB_EFFECT* e)->int32_t{
++        auto* o=static_cast<Owner*>(p);
++        if(e->ef.id==3)return o->world->spawn_weapon_flash(*e,o->kind+1,o->index);
++        EffectSpawn spawn;spawn.flg=e->ef.flg;spawn.id=e->ef.id;spawn.type=e->ef.type;spawn.flr_no=e->ef.flr_no;spawn.mdlver=e->ef.mdlver;
++        spawn.position={e->ef.px,e->ef.py,e->ef.pz};spawn.scale={e->ef.sx,e->ef.sy,e->ef.sz};spawn.ax=e->ef.ax;spawn.ay=e->ef.ay;spawn.lkono=e->jno;
++        spawn.has_offset=e->has_offset!=0;spawn.offset={e->offset.x,e->offset.y,e->offset.z};
++        if(e->sys_ef)sys_ef_request(spawn,e->sys_ef==2);
++        return e->link_player?o->world->spawn_effect(spawn,o->kind+1,o->index):o->world->spawn_effect(spawn);};
++    RECVX_COMBAT_SYS sys{};sys.yk_ct=effect_yk_ct_;
++    recvx_combat_set_yakkyou(&tables,&s,&sys,joint.value,root.value,int32_t(wno),int32_t(jno),int32_t(hand),ang);
++    effect_yk_ct_=sys.yk_ct;
+ }
+ void RoomWorld::sound_monitor(){
+     // ExecSoundSystemMonitor (sdfunc.c:3002): ExecEnemySeManager, then ExecObjectSeManager, both with CheckCollision4Sound.
+--- a/native/world.h
++++ b/native/world.h
+@@ -371,6 +371,7 @@
+     void set_pad_clear_callback(std::function<void(uint32_t)> cb){pad_clear_cb_=std::move(cb);}
+     void clear_pad_on(uint32_t bits){if(pad_clear_cb_)pad_clear_cb_(bits);}
+     void set_effect_counter(unsigned yk_ct){effect_yk_ct_=yk_ct;}
++    unsigned effect_counter()const{return effect_yk_ct_;} // sys->yk_ct
+     int spawn_player_effect(const EffectSpawn& effect){return spawn_effect(effect,1,0);}
+     // bhSetEffectTb(eft, &ops, NULL, jno) aus dem Spielerkampf: derselbe Pool, ohne Link.
+     int spawn_unlinked_effect(const EffectSpawn& effect){return spawn_effect(effect,0,0);}
+@@ -856,6 +857,7 @@
+     // bhSetEffectTb from game code: `link_kind` 0 = world position, 2 = enemy joint (WorldEntity index/joint).
+     int spawn_effect(const EffectSpawn& spawn,unsigned link_kind=0,unsigned link_index=0);
+     void gun_fire(unsigned kind,unsigned index,const BoneMatrix& joint,unsigned wno,unsigned jno,unsigned hand,int ang);
++    void set_yakkyou(unsigned kind,unsigned index,const BoneMatrix& joint,const BoneMatrix& root,unsigned wno,unsigned jno,unsigned hand,int ang);
+     unsigned process_effect_output(); // Rueckgabe: Anforderungen, die keinen Platz bekamen (bhEff<id> gemeldet)
+     void tick_shadow(unsigned slot);
+     int en11_light_control(RECVX_ENEMY_WORK* w,int mode);

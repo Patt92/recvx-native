@@ -5,13 +5,15 @@
 #include <atomic>
 #include <thread>
 #include <cmath>
+#include <cstdio>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
 namespace recvx {
 namespace {
-struct Projected {float x,y,invz,u_over_z,v_over_z;float tz=0;};
+using raster::Projected;using raster::Setup;
 float edge(const Projected& a,const Projected& b,float x,float y){return(b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);}
 std::uint32_t shade(const SceneTriangle& t){
     if(t.world_lit)return t.color;
@@ -77,8 +79,15 @@ Level level_of(const SceneTexture& t,unsigned level,bool clamp_u,bool clamp_v,bo
     return {(punch?t.filter_cache->punch_mips:t.filter_cache->mips)[level-1].data(),std::max(1u,t.width>>level),std::max(1u,t.height>>level),clamp_u,clamp_v};
 }
 // Premultiplied accumulation: acc = {r*a, g*a, b*a, a} scaled by weight.
+// Inlined into the pixel loop: the call sat on the hot path (sample profile, 45 % of a
+// frame) and the arithmetic order is unchanged, so every pixel stays bit-identical.
+#if defined(_MSC_VER)
+#define RECVX_RENDER_INLINE __forceinline
+#else
+#define RECVX_RENDER_INLINE inline __attribute__((always_inline))
+#endif
 template<bool Weighted,bool Straight=false>
-void bilinear(const Level& l,float u,float v,float weight,float* acc){
+RECVX_RENDER_INLINE void bilinear(const Level& l,float u,float v,float weight,float* acc){
     const float fx=u*float(l.w)-.5f,fy=v*float(l.h)-.5f;
     const int ix=int(fx)-(fx<0),iy=int(fy)-(fy<0);const float tx=fx-float(ix),ty=fy-float(iy);
     const int w=int(l.w),h=int(l.h);
@@ -96,21 +105,6 @@ void bilinear(const Level& l,float u,float v,float weight,float* acc){
         acc[0]+=c*float(p&255);acc[1]+=c*float((p>>8)&255);acc[2]+=c*float((p>>16)&255);
     }
 }
-struct Setup {
-    std::array<Projected,3> p;float area;int minx,maxx,miny,maxy;std::uint32_t color;const SceneTexture* texture;
-    bool clamp_u=false,clamp_v=false;
-    bool gouraud=false;std::array<NJS_POINT3,3> light{};
-    bool vertex_alpha=false;std::array<float,3> alpha{1,1,1};
-    float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true,punch_through=false;
-    bool general_water=false,mirror_room=false,mirror_effect=false;
-    bool fog_color_set=false;std::uint32_t fog_color=0;
-    std::uint64_t blend_register=0x44;
-    unsigned texture_color_divisor=255;
-    bool filtered=false,linear_only=false,post=false;
-    // GS FOG: every CNK strip is drawn with FGE (ps2_NinjaCnk.c:1880); F per vertex
-    // from njCalcFogPower(fVSZ) (:1196), interpolated like the vertex colour.
-    bool fogged=false;std::array<float,3> fog{};
-};
 SceneVertex lerp_vertex(const SceneVertex& a,const SceneVertex& b,float t){
     auto mix=[t](float x,float y){return x+(y-x)*t;};
     return {{mix(a.position.x,b.position.x),mix(a.position.y,b.position.y),mix(a.position.z,b.position.z)},mix(a.u,b.u),mix(a.v,b.v),{},{mix(a.light.x,b.light.x),mix(a.light.y,b.light.y),mix(a.light.z,b.light.z)},mix(a.alpha,b.alpha)};
@@ -160,11 +154,16 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     draw_view_projected(scene,matrix,focal_x,focal_y,wireframe,hidden,near,far,volume_x,volume_y,ninja_sy_);
 }
 void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far,float volume_x,float volume_y,float ninja_projection){
+    using Clock=std::chrono::steady_clock;
+    const auto since=[](Clock::time_point from){return std::chrono::duration<double>(Clock::now()-from).count();};
+    const auto frame_begin=Clock::now();++timings_.frames;
     // Supersampling renders into a larger buffer and box-filters it down (steadier edges).
     const int S=std::clamp(ss_,1,4),W=width_*S,H=height_*S;
+    // Zielpuffer der Bandstufe; geloescht erst, wenn feststeht, dass Software zeichnet (GPU-Pfad: gpu_raster.h).
     std::uint32_t* color=pixels_.data();float* depth=depth_.data();
-    if(S>1){hi_pixels_.assign(std::size_t(W)*H,scene.background);hi_depth_.assign(std::size_t(W)*H,0.0f);color=hi_pixels_.data();depth=hi_depth_.data();}
-    else{std::fill(pixels_.begin(),pixels_.end(),scene.background);std::fill(depth_.begin(),depth_.end(),0.0f);}
+    const auto clear_targets=[&]{
+        if(S>1){hi_pixels_.assign(std::size_t(W)*H,scene.background);hi_depth_.assign(std::size_t(W)*H,0.0f);color=hi_pixels_.data();depth=hi_depth_.data();}
+        else{std::fill(pixels_.begin(),pixels_.end(),scene.background);std::fill(depth_.begin(),depth_.end(),0.0f);}};
     NJS_MATRIX view;std::copy_n(matrix,16,view);
     // game.c:81-83 / MdlPut.c:59-61: njSetMatrix(cam.mtxb, cam.mtx); njMirror(cam.mtx, &sys->mr_pl).
     // Dreiecke des Spiegelpasses zeichnen mit cam.mtx * mat, alle anderen mit cam.mtx.
@@ -339,9 +338,14 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
      if(zc)setups_before_mirror_effects=std::size_t(std::find_if(setups.begin(),first,[](const Setup& s){return s.mirror_effect;})-setups.begin());}
     // Stage 2: rasterize horizontal bands, possibly on several threads. Every band visits the
     // setups in submission order, so the result does not depend on the thread count.
-    std::vector<float> transported;if(zc)transported.assign(std::size_t(W)*H,0.f);
+    std::vector<float> transported;
     // njSetFogColor und der ARGB-Framebuffer haben dieselbe RGB-Kanalreihenfolge.
     const std::uint32_t fog_pixel=fog_canvas_color(scene.fog_color);
+    // Diagnose: ein Beobachter sieht dieselbe Liste wie die Bandstufe (GPU-Vergleich), aendert aber nichts.
+    raster::Frame frame{width_,height_,S,&setups,std::size_t(std::find_if(setups.begin(),setups.end(),[](const Setup& s){return s.blend!=SceneBlend::Opaque&&!s.general_water;})-setups.begin()),scene.background,fog_pixel,wireframe,bool(zc)};
+    frame.before_modifiers=zc?setups_before_modifiers:setups.size();frame.before_mirror_effects=zc?setups_before_mirror_effects:setups.size();
+    for(const auto& shadow:scene.shadows)frame.shadow_pass[shadow.mirror?1:0]=true;
+    if(observer_)observer_(frame);
     const auto rasterize=[&](const Setup& s,int y0,int y1){
         const auto& p=s.p;const auto* texture=s.texture;
             int setup_y=-1,setup_x=0,setup_taps=1,setup_l0=0;float setup_du=0,setup_dv=0,setup_frac=0;
@@ -501,32 +505,91 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         if(workers<=1||last-first<64)worker();
         else{std::vector<std::thread> pool;for(unsigned i=1;i<workers;++i)pool.emplace_back(worker);worker();for(auto& t:pool)t.join();}
     };
-    if(!zc)run(0,setups.size(),true);
-    else{
-        run(0,setups_before_modifiers,false);
-        // bhDrawMdfEffect: per work two mask passes, then one rectangle composite.
-        // Receiver Z is never written. GS compares transported integer Z with GEQUAL.
-        const float aspect_x=focal_x*640.f/float(width_),aspect_y=focal_y*480.f/float(height_);
-        const auto modifiers=[&](bool mirror){
+    // bhDrawMdfEffect: per work two mask passes, then one rectangle composite.
+    // Receiver Z is never written. GS compares transported integer Z with GEQUAL.
+    const float aspect_x=focal_x*640.f/float(width_),aspect_y=focal_y*480.f/float(height_);
+    const raster::ShadowPass shadow_pass=[&](bool mirror,const float* transported_depth){
+        const auto shadow_begin=Clock::now();
+        std::vector<raster::ShadowComposite> out;
         for(const auto& shadow:scene.shadows){
             if(shadow.mirror!=mirror)continue;
             if(mirror&&!scene.mirror_enabled)throw std::runtime_error("mirror pass modifier without njMirror matrix");
             const auto projection=project_shadow(shadow,mirror?mirror_view:view,1.f,aspect_x,aspect_y);
             if(!projection.drawable)continue;
-            const auto mask=raster_shadow_mask(projection,*zc,[&](int x,int y,float modifier){
+            raster::ShadowComposite c;
+            c.mask=raster_shadow_mask(projection,*zc,[&](int x,int y,float modifier){
                 const int sx=std::min(W-1,int((float(x)+.5f)*float(W)/640.f)),sy=std::min(H-1,int((float(y)+.5f)*float(H)/480.f));
-                return shadow_depth_pass(std::uint32_t(modifier),std::uint32_t(transported[std::size_t(sy)*W+sx]));});
+                return shadow_depth_pass(std::uint32_t(modifier),std::uint32_t(transported_depth[std::size_t(sy)*W+sx]));});
             const auto fog=fog_sample(scene.fog,projection.last_vertex_z);
-            const unsigned fog_power=unsigned(std::clamp(fog,0.f,255.f));
+            c.fog_power=unsigned(std::clamp(fog,0.f,255.f));
             const auto quantize=[](float v,float origin){return std::trunc(v*16.f)/16.f-origin;};
-            const float rx0=quantize(projection.bounds[0],1728.f),ry0=quantize(projection.bounds[1],1808.f);
-            const float rx1=quantize(projection.bounds[2],1728.f),ry1=quantize(projection.bounds[3],1808.f);
+            c.rx0=quantize(projection.bounds[0],1728.f);c.ry0=quantize(projection.bounds[1],1808.f);
+            c.rx1=quantize(projection.bounds[2],1728.f);c.ry1=quantize(projection.bounds[3],1808.f);
+            out.push_back(std::move(c));
+        }
+        timings_.shadow+=since(shadow_begin);
+        return out;};
+    timings_.setup+=since(frame_begin);
+    // Dieselben Schattenwerke fuer einen Rasterer, der die Maske selbst zeichnet: Projektion,
+    // Transport, Unterdrueckung, Flaeche, Eckreihenfolge und Pixelgrenzen wie raster_shadow_mask,
+    // nur ohne die Pixelschleife. Reihenfolge: je Werk Durchgang 0, dann Durchgang 1.
+    const raster::ShadowGeometry shadow_geometry=[&](bool mirror){
+        const auto shadow_begin=Clock::now();
+        std::vector<raster::ShadowWork> out;
+        for(const auto& shadow:scene.shadows){
+            if(shadow.mirror!=mirror)continue;
+            if(mirror&&!scene.mirror_enabled)throw std::runtime_error("mirror pass modifier without njMirror matrix");
+            const auto projection=project_shadow(shadow,mirror?mirror_view:view,1.f,aspect_x,aspect_y);
+            if(!projection.drawable)continue;
+            raster::ShadowWork work;
+            for(unsigned pass=0;pass<2;++pass)for(const auto& face:projection.faces){
+                if(pass==0?face.original_normal<=0:face.original_normal>=0)continue;
+                std::array<ShadowTransportVertex,3> transported;
+                for(unsigned i=0;i<3;++i)transported[i]=transport_shadow_vertex(face.vertices[i],*zc);
+                if(shadow_transport_triangle_suppressed(transported))continue;
+                auto p=transported;
+                float area=(p[1].x-p[0].x)*(p[2].y-p[0].y)-(p[1].y-p[0].y)*(p[2].x-p[0].x);
+                if(!std::isfinite(area)||area==0)continue;
+                if(area<0){std::swap(p[1],p[2]);area=-area;}
+                raster::ShadowFace f{};
+                for(unsigned i=0;i<3;++i){f.x[i]=p[i].x;f.y[i]=p[i].y;f.depth[i]=p[i].depth;}
+                f.area=area;f.subtract=pass==1;
+                f.minx=int(std::max(0.f,std::floor(std::min({p[0].x,p[1].x,p[2].x}))));
+                f.maxx=int(std::min(639.f,std::ceil(std::max({p[0].x,p[1].x,p[2].x}))));
+                f.miny=int(std::max(0.f,std::floor(std::min({p[0].y,p[1].y,p[2].y}))));
+                f.maxy=int(std::min(479.f,std::ceil(std::max({p[0].y,p[1].y,p[2].y}))));
+                work.faces.push_back(f);
+            }
+            const auto fog=fog_sample(scene.fog,projection.last_vertex_z);
+            work.fog_power=unsigned(std::clamp(fog,0.f,255.f));
+            const auto quantize=[](float v,float origin){return std::trunc(v*16.f)/16.f-origin;};
+            work.rx0=quantize(projection.bounds[0],1728.f);work.ry0=quantize(projection.bounds[1],1808.f);
+            work.rx1=quantize(projection.bounds[2],1728.f);work.ry1=quantize(projection.bounds[3],1808.f);
+            out.push_back(std::move(work));
+        }
+        timings_.shadow+=since(shadow_begin);
+        return out;};
+    // Host-GPU-Rasterer: dieselbe Liste, dieselben Phasen; ohne exakte Abbildung zeichnet die Bandstufe.
+    const auto raster_begin=Clock::now();
+    bool gpu_drawn=false;
+    if(gpu_&&!wireframe){
+        // Ein Geraetefehler (z. B. verlorene GPU) beendet nicht das Spiel: Meldung, danach Software.
+        try{gpu_drawn=gpu_->render(frame,zc?shadow_geometry:raster::ShadowGeometry{},pixels_,depth_);}
+        catch(const std::exception& e){std::fprintf(stderr,"GPU raster disabled, software from now on: %s\n",e.what());gpu_.reset();}}
+    if(gpu_drawn){}
+    else if(!zc){clear_targets();run(0,setups.size(),true);}
+    else{
+        clear_targets();transported.assign(std::size_t(W)*H,0.f);
+        run(0,setups_before_modifiers,false);
+        const auto modifiers=[&](bool mirror){
+        // Die Masken lesen nur die transportierte Tiefe, nie die Farbe: erst alle Masken, dann die Komposite.
+        for(const auto& c:shadow_pass(mirror,transported.data())){
             for(int y=0;y<H;++y){const int my=std::min(479,int((float(y)+.5f)*480.f/float(H)));
-                if(float(my)+.5f<ry0||float(my)+.5f>=ry1)continue;
+                if(float(my)+.5f<c.ry0||float(my)+.5f>=c.ry1)continue;
                 for(int x=0;x<W;++x){const int mx=std::min(639,int((float(x)+.5f)*640.f/float(W)));
-                    if(float(mx)+.5f<rx0||float(mx)+.5f>=rx1)continue;
-                    const unsigned value=mask[std::size_t(my)*640+mx];if(!value)continue;
-                    auto& pixel=color[std::size_t(y)*W+x];pixel=shadow_mask_composite(pixel,value,fog_power);}}
+                    if(float(mx)+.5f<c.rx0||float(mx)+.5f>=c.rx1)continue;
+                    const unsigned value=c.mask[std::size_t(my)*640+mx];if(!value)continue;
+                    auto& pixel=color[std::size_t(y)*W+x];pixel=shadow_mask_composite(pixel,value,c.fog_power);}}
         }};
         modifiers(false);
         // game.c:417 Spiegelraum, :427 Spiegel-bhDrawEffect mit bhDrawMdfEffect unter cam.mtx*njMirror,
@@ -535,6 +598,8 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         modifiers(true);
         run(setups_before_mirror_effects,setups.size(),true);
     }
+    (gpu_drawn?timings_.gpu:timings_.bands)+=since(raster_begin);
+    const auto line_begin=Clock::now();
     // njDrawLine3D: finite 3D segments, endpoint colours, depth test, no depth write.
     for(const auto& line:scene.lines){if(line.mirror&&!scene.mirror_enabled)throw std::runtime_error("mirror pass line without njMirror matrix");
         NJS_MATRIX* const line_view=line.mirror?&mirror_view:&view;
@@ -556,7 +621,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
             pixels_[at]=blend_gs(line.blend_register,pixel,pixels_[at],std::min(1.f,float(pixel>>24)/255.f));
         }
     }
-
+    timings_.lines+=since(line_begin);
 }
 std::size_t SoftwareRenderer::covered_pixels() const{return std::count_if(depth_.begin(),depth_.end(),[](float d){return d>0;});}
 void SoftwareRenderer::save_bmp(const std::filesystem::path& path)const{

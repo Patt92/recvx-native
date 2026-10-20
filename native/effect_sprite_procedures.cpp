@@ -170,6 +170,11 @@ void set_snow_particle_size(EffectSnow& snow,float width,float height){
 }
 }
 using namespace effect_detail;
+// effsub2.c:4446 bhEff_E14_Mucus: opp->mlwP->owP[op->lkono].mtx des Gegnerwerks, das die Prozedur
+// selbst in ene[] findet (kein flg-0x80-Link). Der Raumbesitzer bindet den Dienst; ohne ihn bleibt
+// der Strang eine benannte Luecke.
+static std::function<bool(const void* work,unsigned node,NJS_MATRIX& out)> effect_work_node_matrix;
+void set_effect_work_node_matrix(std::function<bool(const void* work,unsigned node,NJS_MATRIX& out)> lookup){effect_work_node_matrix=std::move(lookup);}
 namespace {
 #include "effect_sprite_procedure_tables.inc"
 
@@ -783,6 +788,71 @@ void step_eff352(EffectSprite& s,const EffectContext& c,bool& queued){
     s.mtx_world_y=world.y;s.ct2=1;
 }
 // ======================= effsub1.c =======================
+// Leere Originalprozeduren bhEff004/028/129 (effsub1.c:2093/5902/8995) und bhEff174/197
+// (effsub0.c:1653/3441): kein Feld, keine Liste. Anders als bhEffDmy (effsub1.c:22, flg = 0)
+// bleibt der Platz belegt und ungezeichnet, bis bhClearEffect/bhInitEffect ihn leeren
+// (effect.c:153/52). Kein Raumskript erzeugt sie (0x2C/0x6E/0xB0-Scan, T01 2026-10-20).
+void step_eff_empty(EffectSprite&,const EffectContext&,bool&){}
+// effsub1.c:2217 bhEff006 uvinfo[8]; inhaltsgleich mit uvinfo_l[2..9] von bhEff005 (:2102),
+// im Original aber eine eigene Tabelle.
+constexpr EffectUv eff006_uv[8]={{0.5f,0.4375f,0.15625f,0.15625f},{0.65625f,0.4375f,0.15625f,0.15625f},
+    {0.8125f,0.4375f,0.15625f,0.15625f},{0.0f,0.5625f,0.1875f,0.1875f},{0.1875f,0.5625f,0.1875f,0.1875f},
+    {0.375f,0.59375f,0.1875f,0.1875f},{0.5625f,0.59375f,0.1875f,0.1875f},{0.0f,0.78125f,0.21875f,0.21875f}};
+// effsub1.c:2214 bhEff006 — type 0: Dreieck (pn 3) aus Texturgruppe 6, Bild mdlver, lebt bis die
+// Zeichenmatrix unter y -100 liegt. type != 0: Viereck aus Texturgruppe 5, UV-Zeile flr_no, Alpha
+// ct0 ab 0xFF je Pass um 1 kleiner, Ende bei ct0 <= 0. mdlver 0 -> sys->ef_opq, sonst sys->ef_trs.
+// Kein flg-Bit (kein Billboard 0x100000): das Viereck liegt mit ax=ay=az=0 in der XY-Ebene.
+void step_eff006(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0: // :2231-2294
+        if(s.type==0){
+            s.tex_id=6;
+            s.tv[0].u=0.5f;s.tv[0].v=1.0f;
+            s.tv[1].u=0;s.tv[1].v=0;
+            s.tv[2].u=1.0f;s.tv[2].v=0;
+            quad_color(s,0xFFC0C0C0u); // :2245-2258, beide mdlver-Zweige derselbe Wert
+            s.pn=3;
+            s.ani_ct=s.mdlver;
+        }else{
+            // uvinfo[op->flr_no] (:2268): ausserhalb der Tabelle liest das Original fremden Speicher.
+            if(s.flr_no<0||s.flr_no>=8){report_gap("bhEff006: flr_no ausserhalb uvinfo[8]");s.flg=0;return;}
+            s.tex_id=5;
+            quad_uv(s,eff006_uv[s.flr_no]); // :2270-2280
+            s.pn=4;
+            s.ani_ct=0;
+            s.ct0=0xFF;
+        }
+        s.bl_src=8;s.bl_dst=6;
+        s.ax=s.ay=s.az=0;
+        s.mode0=1;
+        [[fallthrough]]; // :2295 kein break
+    case 1: // :2296-2310
+        if(s.type!=0){
+            quad_color(s,(std::uint32_t(s.ct0)<<24)|0xC0C0C0u); // ct0 int (types.h:177), hier 1..0xFF
+            --s.ct0;
+            if(s.ct0<=0){s.flg=0;break;}
+        }
+        [[fallthrough]];
+    default: // :2312-2330
+        // op->mtx[0][13]: Y der Zeichenmatrix des letzten Bildes, im ersten Pass 0 (effect.c:447).
+        if(s.mtx_world_y<-100.0f){s.flg=0;break;}
+        if(s.mode0!=0){
+            if(s.mdlver==0)queue_opaque(s); // :2322 sys->ef_opq
+            else queued=true;               // :2326 sys->ef_trs
+            // op->mtx schreibt erst der Zeichenpass (bhDrawOpqEffect3D effect.c:1476-1491,
+            // bhDrawTrsEffect3D :1335-1350): ohne Link bzw. flg 0x200000 Einheit * T(px) -> m[13] = py,
+            // sonst owP[lkono].mtx * T(lox,loy,loz). Wie step_eff352 haelt die Prozedur dieses Y fest.
+            if(!(s.flg&0x80u)||(s.flg&0x200000u))s.mtx_world_y=s.py;
+            else if(!s.link_matrix)report_gap("bhEff006: lkwkp->mlwP->owP[lkono] ohne Link");
+            else{
+                NJS_MATRIX owk;std::copy(s.link_matrix,s.link_matrix+16,owk);
+                NJS_POINT3 lo{s.lox,s.loy,s.loz},world;njCalcPoint(&owk,&lo,&world);
+                s.mtx_world_y=world.y;
+            }
+        }
+        break;
+    }
+}
 // Gemeinsame Zeichenform der effsub1-Sprites: UV-Zeile uebernehmen (ohne effset-Groesse/-Farbe).
 // bhSetEffectTb-Vorlage nur teilweise beschreiben, wie es die Originalprozeduren tun
 // (Rest bleibt aus dem letzten Schreiber von sys->ef).
@@ -4945,6 +5015,344 @@ void step_e00_mince(EffectSprite& s,const EffectContext&,bool& queued){
     quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/0.0625f;s.sy=(s.syb*uv.ys)/0.0625f;
     queued=true;
 }
+// ---- effsub2.c, zweiter Satz: 251 DropBlood, 266 FloorBlood2, 268 E14_Explosion, 271 E14_Fire2,
+// 272 Dust, 273 E14_Mucus, 299 DamagePoint (bhJumpEffect2, effect.c:35, Platz id - 250).
+namespace e2b {
+// effsub2.c:4702 bhEff_SetUVInfo(op, uvp, BaseSize).
+void uv_info(EffectSprite& s,const EffectUv& uv,float base){
+    quad_uv(s,uv);s.sx=(s.sxb*uv.xs)/base;s.sy=(s.syb*uv.ys)/base;
+}
+// op->lkwkp = (unsigned char*)plp; op->lkono = node (effsub2.c:3184-3185 / :4266-4267) mit flg 0x80
+// des Erzeugers: der Spieler ist kein O_WRK/BH_PWORK des Effektmoduls. link_kind 0 nennt ihn; der
+// Raumbesitzer haengt den Satz damit an plp->mlwP->owP[lkono] (effect.c:806 und der Zeichenpfad
+// effect.c:1346). lkwkp bleibt NULL, weil der Host kein plp-Werk als Zeiger fuehrt.
+void link_player(EffectSprite& s,int node){s.lkwkp=nullptr;s.link_kind=0;s.link_index=0;s.lkono=node;}
+}
+// effsub2.c:290 bhEff_E00_DropBlood (251) — fallender Blutstropfen. Kein Erzeuger in den
+// Originalquellen (src/ps2/veronica/prog/*.c), keine Raumtabelle; nur bhJumpEffect2[1].
+// Start: tex_id 5 (ef_tn[5], bhInitEffect), weiss, 8/3, flg 0x180000, yn = Boden + 0.2,
+// ofy -0.71. Fall: je Pass eine Zeile von BH_UVTAB0 ueber ct1 (Ende -> ct1 = 1, Zeile 1),
+// py += ofy, ofy -= 0.15 bis -2; unter yn auf den Boden und Aufprall. Aufprall: BH_UVTAB1 ab
+// dem ct1, mit dem der Fall endete (kein Ruecksetzen), Ende beendet den Satz. bhEff_SetUVInfo
+// mit Basis 0.0625; sys->ef_trs.
+void step_e00_drop_blood(EffectSprite& s,const EffectContext&,bool& queued){
+    const EffectUv* uvp=nullptr;
+    switch(s.mode0){
+    case 0: // :319-341
+        s.tex_id=5;
+        quad_color(s,0xFFFFFFFFu);
+        s.bl_src=8;s.bl_dst=3;
+        s.ct0=0;s.ct1=0;
+        s.flg|=0x180000u;
+        s.sxb=s.sx;s.syb=s.sy;
+        s.yn=ground_height({s.px,s.py,s.pz},"bhEff_E00_DropBlood: bhGetGroundPosition")+0.2f;
+        s.ofy=-0.71f;
+        s.mode0++;
+        [[fallthrough]];
+    case 1: // :342-364
+        if(s.ct1<0||s.ct1>5){report_gap("bhEff_E00_DropBlood: ct1 ausserhalb BH_UVTAB0[6]");s.flg=0;return;}
+        uvp=&e00_drop_uv0[s.ct1];
+        if(uvp->u==-1.0f){s.ct1=1;uvp=&e00_drop_uv0[1];}
+        s.ct1++;
+        s.py+=s.ofy;
+        if(s.ofy>-2.0f)s.ofy-=0.15f;
+        if(s.py<s.yn){s.py=s.yn;s.mode0++;}
+        break;
+    case 2: // :365-374
+        if(s.ct1<0||s.ct1>5){report_gap("bhEff_E00_DropBlood: ct1 ausserhalb BH_UVTAB1[6]");s.flg=0;return;}
+        uvp=&e00_drop_uv1[s.ct1];
+        if(uvp->u==-1.0f){s.flg=0;return;}
+        s.ct1++;
+        break;
+    default: // kein Fall im Original: uvp bliebe unbestimmt
+        report_gap("bhEff_E00_DropBlood: mode0 ausserhalb 0..2 (uvp unbestimmt)");return;
+    }
+    e2b::uv_info(s,*uvp,0.0625f); // :377
+    queued=true;                  // :379-384 sys->ef_trs
+}
+// effsub2.c:971 bhEff_E00_Dust (272) — Staubwolke. Kein Erzeuger in den Originalquellen, keine
+// Raumtabelle; bhClrEff_YG (effsub2.c:4810) loescht ihn mit 250/253/256/257. Start: tex_id 2
+// (ef_tn[2]), bhEff_SetAlign(2), 8/10, flg 0x180000, ct0 50. Je Pass Grundfarbe
+// (ct0 << 24) | 0x373737 VOR ct0 -= 2, eine Zeile BH_UVTAB0 ueber ct1 (u < 0 beendet),
+// bhEff_SetUVInfo Basis 0.09375, Lage += Richtung, Richtung *= 0.8; sys->ef_trs.
+void step_e00_dust(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0: // :1008-1026
+        s.tex_id=2;
+        e12::align2(s);
+        s.bl_src=8;s.bl_dst=10;
+        s.flg|=0x180000u;
+        s.sxb=s.sx;s.syb=s.sy;
+        s.ct0=50;s.ct1=0;
+        s.mode0=1;
+        [[fallthrough]];
+    case 1:{ // :1027-1056
+        quad_color(s,(std::uint32_t(s.ct0)<<24)|0x373737u);
+        s.ct0-=2;
+        if(s.ct1<0||s.ct1>22){report_gap("bhEff_E00_Dust: ct1 ausserhalb BH_UVTAB0[23]");s.flg=0;return;}
+        const EffectUv& uv=e00_dust_uv[s.ct1];
+        if(uv.u<0){s.flg=0;return;}
+        s.ct1++;
+        e2b::uv_info(s,uv,0.09375f);
+        s.px+=s.xn;s.py+=s.yn;s.pz+=s.zn;
+        s.xn*=0.8f;s.yn*=0.8f;s.zn*=0.8f;
+        queued=true;
+        break;}
+    default:break; // kein weiterer Fall im Original
+    }
+}
+// effsub2.c:3092 bhEff_E12_FloorBlood2 (266) — brennende Lache unter dem Spieler (Alexia-Feuer).
+// Kein Erzeuger in den Originalquellen, keine Raumtabelle. Wartet ct0 = 40 + 10r Passes
+// (`ct0-- == 0`), trifft dann den Spieler einmal (falls nicht flg 0x4 / stflg 0x80000000):
+// flg 0x10004, stflg 0x10000, mode0 4, mode2 = op->mode1, mode3 0, -20 HP, vier
+// bhEne_SetFireEffect(plp, 3, ofp, 0.5 + r, 20 + 10r); ofp.z 1.3 bei mode1 != 0, sonst -1.5.
+// Danach Flamme am Spielergelenk 3: tex_id 9 (ef_tn[9]), stflg ohne 0x20, flg 0x4000080 |
+// 0x180000, weiss, 8/10, lox 1 - 2r, loy -0.5 + 2r, loz wie ofp.z, sxb/syb 2.5. BH_UVTAB0 je
+// Pass, Ruecksprung auf 0 beendet den Satz; bhEff_SetUVInfo Basis 0.125; sys->ef_trs.
+void step_e12_floor_blood2(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0: // :3117-3120
+        s.ct0=int(10.0f*effect_random())+40;
+        s.mode0++;
+        [[fallthrough]];
+    case 1: // :3121-3163
+        if(s.ct0--==0){
+            RECVX_ENEMY_PLAYER p;
+            if(hook_player_get(p,"bhEff_E12_FloorBlood2: plp")&&!(p.flg&0x4u)&&!(p.stflg&0x80000000u)){
+                p.flg|=0x10004u;p.stflg|=0x10000u;
+                p.mode0=4;p.mode2=std::uint8_t(s.mode1);p.mode3=0;
+                p.hp-=20;
+                hook_player_set(p);
+                for(int i=0;i<4;++i){
+                    NJS_POINT3 ofp;
+                    ofp.x=1.0f-(2.0f*effect_random());
+                    ofp.y=-0.5f+(2.0f*effect_random());
+                    ofp.z=s.mode1!=0?1.3f:-1.5f;
+                    const float size=0.5f+effect_random();
+                    hook_player_fire(3,ofp,size,int(10.0f*effect_random())+20);
+                }
+            }
+            s.mode0++;
+        }
+        return;
+    case 2: // :3164-3196
+        s.tex_id=9;
+        s.stflg&=~0x20u;
+        s.flg|=0x4000080u;s.flg|=0x180000u;
+        quad_color(s,0xFFFFFFFFu);
+        s.bl_src=8;s.bl_dst=10;
+        s.lox=1.0f-(2.0f*effect_random());
+        s.loy=-0.5f+(2.0f*effect_random());
+        s.loz=s.mode1!=0?1.3f:-1.5f;
+        e2b::link_player(s,3);
+        s.sxb=2.5f;s.syb=2.5f;
+        s.mtn_no=0;s.frm_no=0;
+        s.mode0++;
+        break;
+    case 3: // :3197-3204
+        if(s.frm_no==0){s.flg=0;return;}
+        break;
+    default:break; // ohne Fall laeuft das Original in den Tabellenschritt
+    }
+    e12::step_uv(s,e12_floor_blood2_uv,9,0.125f,"bhEff_E12_FloorBlood2"); // :3206-3215
+    queued=true;
+}
+// effsub2.c:3881 bhEff_E14_Explosion (268) — Explosion aus drei Rauch-/Feuersaetzen 19 ueber sys->ef
+// (id 19, flg 0x4100001, mdlver 0, ax/ay 0; flr_no bleibt vom letzten Schreiber). Kein Erzeuger in
+// den Originalquellen, keine Raumtabelle. Pass 1: type 0 Groesse 2.5 und type 2 Groesse 5.0 an der
+// eigenen Lage; ct0 zaehlt, im dritten Folgepass (ct0 > 2) type 1 Groesse 2.8 an px + cam.vx/vy/vz
+// (EffectContext::camera_view), dann frei. Zeichnet selbst nichts.
+void step_e14_explosion(EffectSprite& s,const EffectContext& c,bool&){
+    const auto set19=[](unsigned type,float size,NJS_POINT3 at){
+        auto& r=request_template();
+        r.id=19;r.flg=0x4100001u;r.type=type;r.mdlver=0;
+        r.scale={size,size,size};r.position=at;r.ay=0;r.ax=0;
+        submit_template(0);};
+    switch(s.mode0){
+    case 0: // :3885-3930
+        set19(0,2.5f,{s.px,s.py,s.pz});
+        set19(2,5.0f,{s.px,s.py,s.pz});
+        s.ct0=0;
+        s.mode0++;
+        break;
+    case 1: // :3931-3957
+        s.ct0++;
+        if(s.ct0>2){
+            set19(1,2.8f,{s.px+c.camera_view.x,s.py+c.camera_view.y,s.pz+c.camera_view.z});
+            s.flg=0;
+        }
+        break;
+    default:break;
+    }
+}
+// effsub2.c:4214 bhEff_E14_Fire2 (271) — Flamme am Spielergelenk 3, schrumpft auf 0.3. Kein
+// Erzeuger in den Originalquellen, keine Raumtabelle. Start: flg 0x4180080, 8/10, stflg ohne
+// 0x20, tex_id 9 (ef_tn[9]), weiss, lox 1 - 2r, loy -0.5 + 2r, loz 1.3 (mode1 != 0) bzw. -1.5,
+// lkwkp = plp, lkono 3, sxb/syb 2.0, ct0 0xFF. Danach je Pass sxb/syb += 0.1 * (0.3 - s?b);
+// BH_UVTAB0 je Pass, Ruecksprung auf 0 beendet den Satz; bhEff_SetUVInfo Basis 0.125; sys->ef_trs.
+void step_e14_fire2(EffectSprite& s,const EffectContext&,bool& queued){
+    switch(s.mode0){
+    case 0: // :4240-4277
+        s.flg|=0x4180080u;
+        s.bl_src=8;s.bl_dst=10;
+        s.stflg&=~0x20u;
+        s.tex_id=9;
+        quad_color(s,0xFFFFFFFFu);
+        s.lox=1.0f-(2.0f*effect_random());
+        s.loy=-0.5f+(2.0f*effect_random());
+        s.loz=s.mode1!=0?1.3f:-1.5f;
+        e2b::link_player(s,3);
+        s.sxb=2.0f;s.syb=2.0f;
+        s.ct0=0xFF;
+        s.mtn_no=0;s.frm_no=0;
+        s.mode0++;
+        break;
+    case 1: // :4278-4287
+        if(s.frm_no==0){s.flg=0;return;}
+        s.sxb+=0.1f*(0.3f-s.sxb);
+        s.syb+=0.1f*(0.3f-s.syb);
+        break;
+    default:break;
+    }
+    e12::step_uv(s,e14_fire2_uv,12,0.125f,"bhEff_E14_Fire2"); // :4290-4299
+    queued=true;
+}
+// effsub2.c:4311 bhEff_E14_Mucus (273) / :4494 bhEff_E14_MucusDraw — Schleimfaeden der dritten
+// Alexia-Form. Daten: Raumtabellen RM_5810 und RM_9302, Eintraege 7..20 (lkflg 0, lkono 1 bzw.
+// 11..21, sx/sy 0, sz = halbe Breite, ay 8190). Start: Gruppe 81 Bild 1 (ef_tn[81] + 1), weiss,
+// 8/10, flg 0x24080000; lkwkp = erstes ene[] mit flg & 1 und id 14 (sys->ewk_n). mode0 1 zeigt
+// BH_UVTAB0[frm_no] und wartet auf mode1 (bhEffModeSet, event.c 0x91); mode0 2 laeuft
+// uvtble[mode1 - 1] einmal durch, mode0 3 zeichnet nichts mehr. Ohne lkwkp kein Strang. Ecken:
+// tv[2]/tv[3] = px +- RotY(ay) (sz,0,0) in der Welt; tv[0]/tv[1] = owP[lkono] T(sx, sy, 0) RotZ(ax)
+// (+-sz,0,0) am Gegnergelenk - sx/sy sind die des Vorpasses, erst danach setzt bhEff_SetUVInfo
+// (Basis 0.125) sie neu. Zeichnung unter cam.mtx (Weltecken), Filter bilinear, kein Nebelschalter,
+// nicht bei flg/stflg 0x1000000; stellt 8/6 zurueck (sys->ef_fnc).
+void step_e14_mucus(EffectSprite& s,const EffectContext& c,bool&){
+    const EffectUv* uvp=nullptr;
+    switch(s.mode0){
+    case 0: // :4374-4401
+        s.tex_id=81;
+        s.ani_ct=1;
+        quad_color(s,0xFFFFFFFFu);
+        s.bl_src=8;s.bl_dst=10;
+        s.flg|=0x24080000u;
+        s.mtn_no=0;s.frm_no=0;
+        {const auto& svc=effect_projectile_services();
+         if(!svc.enemy)report_gap("bhEff_E14_Mucus: ene[]/sys->ewk_n ohne Gegnerbesitzer");
+         else for(int i=0;i<int(RECVX_ENEMY_SLOTS);++i){ // :4391-4398; enemy(i) ist NULL ab sys->ewk_n
+             RECVX_ENEMY_WORK* ep=svc.enemy(i);
+             if(ep&&(ep->flg&0x1u)&&ep->id==14){s.lkwkp=ep;break;}
+         }}
+        s.mode0++;
+        [[fallthrough]];
+    case 1: // :4402-4410
+        if(s.frm_no<0||s.frm_no>7){report_gap("bhEff_E14_Mucus: frm_no ausserhalb BH_UVTAB0[9]");s.flg=0;return;}
+        uvp=&e14_mucus_uv0[s.frm_no];
+        if(s.mode1!=0)s.mode0++;
+        break;
+    case 2:{ // :4411-4423
+        if(s.mode1<1||s.mode1>3){report_gap("bhEff_E14_Mucus: mode1 - 1 ausserhalb uvtble[3]");s.flg=0;return;}
+        const int i=int(s.mode1)-1;
+        if(s.frm_no<0||s.frm_no>e14_mucus_rows[i]-2){report_gap("bhEff_E14_Mucus: frm_no ausserhalb uvtble[mode1 - 1]");s.flg=0;return;}
+        uvp=&e14_mucus_uv[i][s.frm_no];
+        s.frm_no++;
+        if(e14_mucus_uv[i][s.frm_no].u<0)s.mode0++;
+        break;}
+    case 3:return; // :4424
+    default: // kein Fall im Original: uvp bliebe unbestimmt
+        report_gap("bhEff_E14_Mucus: mode0 ausserhalb 0..3 (uvp unbestimmt)");return;
+    }
+    if(!s.lkwkp)return; // :4427
+    { // :4432-4447 Weltende des Fadens
+        NJS_MATRIX m;njUnitMatrix(&m);njRotateY(&m,s.ay);
+        NJS_POINT3 v{s.sz,0,0},o;njCalcVector(&m,&v,&o);
+        s.tv[2].x=s.px+o.x;s.tv[2].y=s.py+o.y;s.tv[2].z=s.pz+o.z;
+        s.tv[3].x=s.px-o.x;s.tv[3].y=s.py-o.y;s.tv[3].z=s.pz-o.z;
+    }
+    bool corners=false;
+    { // :4449-4470 Gelenkende am Gegner
+        NJS_MATRIX m;
+        if(!effect_work_node_matrix)report_gap("bhEff_E14_Mucus: opp->mlwP->owP[op->lkono].mtx ohne Raumbesitzer");
+        else if(s.lkono<0||!effect_work_node_matrix(s.lkwkp,unsigned(s.lkono),m))report_gap("bhEff_E14_Mucus: opp->mlwP->owP[op->lkono] ohne Gelenk");
+        else{
+            njTranslate(&m,s.sx,s.sy,0);njRotateZ(&m,s.ax);
+            NJS_POINT3 a{s.sz,0,0},b{-s.sz,0,0},pa,pb;njCalcPoint(&m,&a,&pa);njCalcPoint(&m,&b,&pb);
+            s.tv[0].x=pa.x;s.tv[0].y=pa.y;s.tv[0].z=pa.z;
+            s.tv[1].x=pb.x;s.tv[1].y=pb.y;s.tv[1].z=pb.z;
+            corners=true;
+        }
+    }
+    e2b::uv_info(s,*uvp,0.125f); // :4472
+    if(!corners)return; // ohne Gelenkende kein Viereck, statt alter Ecken zu zeichnen
+    queue_custom(s);     // :4474-4479 sys->ef_fnc
+    // bhEff_E14_MucusDraw: zurueck ohne Blendaenderung bei flg/stflg 0x1000000, sonst 8/6.
+    const bool hidden=(s.flg&0x1000000u)||(s.stflg&0x1000000u);
+    s.fnc_exit_src=hidden?-1:8;s.fnc_exit_dst=hidden?-1:6;
+    if(drawing(c)&&!hidden){
+        NJS_MATRIX id;njUnitMatrix(&id); // njSetMatrix(NULL, cam.mtx): die Ecken sind schon Weltlagen
+        push_world_quad(s,id,s.tv,unsigned(s.tex_id),unsigned(s.ani_ct),s.bl_src,s.bl_dst,true,true);
+    }
+}
+// effsub2.c:4520 bhEff_DamagePoint (299) / :4574 bhEff_DamagePointDraw — springender Punkt. Kein
+// Erzeuger in den Originalquellen, keine Raumtabelle. Start: ct0 5, ofy 0.6, yn = Boden + 0.2.
+// Je Pass py += ofy, ofy -= 0.2; unter yn Rueckprall (ofy *= -0.4, py = yn + 0.6 (yn - py)), nach
+// sechs Bodenkontakten (`ct0-- == 0`) sechs Passes Nachlauf, dann frei. Die Zeichenfunktion
+// projiziert nur op->px (njProjectScreen) und zeichnet nichts; sie setzt kein Blendpaar.
+void step_damage_point(EffectSprite& s,const EffectContext&,bool&){
+    switch(s.mode0){
+    case 0: // :4524-4535
+        s.ct0=5;
+        s.ofy=0.6f;
+        s.yn=0.2f+ground_height({s.px,s.py,s.pz},"bhEff_DamagePoint: bhGetGroundPosition");
+        s.mode0++;
+        break;
+    case 1: // :4536-4555
+        s.py+=s.ofy;
+        s.ofy-=0.2f;
+        if(s.py<s.yn){
+            if(s.ct0--==0){s.mode0++;s.ct0=5;}
+            s.ofy*=-0.4f;
+            s.py=s.yn+(0.6f*(s.yn-s.py));
+        }
+        break;
+    case 2: // :4556-4563
+        if(s.ct0--==0){s.flg=0;return;}
+        break;
+    default:break;
+    }
+    s.fnc_exit_src=-1;s.fnc_exit_dst=-1; // bhEff_DamagePointDraw beruehrt den Blendzustand nicht
+    queue_custom(s);                      // :4566-4571 sys->ef_fnc, ohne Viereck
+}
+// effsub2.c:1336 bhEff_E02_SandParticle2 (255) — Quelle fuer Sandkoerner 254. Kein Erzeuger in den
+// Originalquellen, keine Raumtabelle. Wartet ct0 = 120 + 30r Passes (`ct0-- == 0`), beginnt dann
+// von vorn (mode0 0) und legt mit Wahrscheinlichkeit r < 0.3 ein 254 an: sys->ef id 254, flg 1,
+// type 0, eigene Lage, ax/ay 0 (Groesse und flr_no der Vorlage bleiben vom letzten Schreiber);
+// am neuen Satz eff[eno].sx/sy/sz = 3 und sxb/syb/szb = 0.2/0.3/0.2 (Streuung von Lage bzw.
+// Richtung in bhEff_E02_SandParticle). Zeichnet selbst nichts.
+void step_e02_sand_particle2(EffectSprite& s,const EffectContext&,bool&){
+    switch(s.mode0){
+    case 0: // :1343-1346
+        s.ct0=int(120.0f+(30.0f*effect_random()));
+        s.mode0++;
+        break;
+    case 1: // :1347-1383
+        if(s.ct0--==0){
+            s.mode0=0;
+            if(effect_random()<0.3f){
+                auto& r=request_template();
+                r.id=254;r.flg=1;r.type=0;
+                r.position={s.px,s.py,s.pz};
+                r.ax=0;r.ay=0;
+                submit_template(0);
+                auto& child=last_request(); // eno >= 0: ohne freien Platz legt der Raumbesitzer nichts an
+                child.scale={3.0f,3.0f,3.0f};
+                child.has_scale_base=true;child.scale_base={0.2f,0.3f,0.2f};
+            }
+        }
+        break;
+    default:break;
+    }
+}
 // effsub4.c:3142/3177 bhEff_SetSprite[Anime]. UV_WORK is in texels,
 // unlike the normalized effsub0 tables. The timer advances before submission.
 template<std::size_t A,std::size_t U>
@@ -5445,9 +5853,12 @@ void step_eff363(EffectSprite& s,const EffectContext&,bool& queued){
     s.tv[2].v=s.tv[3].v=((r.v+r.ys)-1.0f)/255.0f;
     queued=s.flg!=0;
 }
-// effsub4.c:1774 bhEff_Sub364 — Blitzmodell (en22.c:2658 bhEne22_SetDengekiEffect2): ein Pass in
-// sys->ef_fnc mit bhEff_ModelDraw (effsub4.c:3306), objP[mdlver] von mlwP = epw->mdl[1..6].
-// Das Modell zeichnet der Raumbesitzer (RoomWorld::append_effect_model).
+// effsub4.c:1774 bhEff_Sub364 — ein STEUERpass, nicht nur ein Zeichenaufruf:
+// sys->ef_fnc mit bhEff_ModelDraw (:3306), objP[mdlver].model von mlwP.
+// en22.c:2658 setzt mdl[1..6], en17.c:1689 mdl[5] und flr_no 1 (Materialfarbe).
+// game.c:77-89/427 ruft dieselbe Liste unter gm_flg 0x4000 erneut auf, ohne
+// ct0 ein zweites Mal zu dekrementieren. Beide Aufrufe gehoeren dem Raumbesitzer;
+// kein bhPutModel-Spiegelduplikat (MdlPut.c:57/89) und keine neue Motionpose.
 void step_eff364(EffectSprite& s,const EffectContext&,bool& queued){
     switch(s.mode0){
     case 0: // :1778-1793
@@ -5674,6 +6085,8 @@ bool stateful_effect_draw(unsigned id){return id==22||id==24||id==25||id==27||id
 const HandEffectProcedure hand_effect_procedures[]={
     {26,step_eff026},{252,step_e00_fire},{253,step_e02_sand_dust},{254,step_e02_sand_particle},{259,step_e05_blood},{260,step_e06_rinpun},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},{13,step_eff013},{139,step_eff_dummy},{140,step_eff_dummy},{141,step_eff_dummy},{142,step_eff_dummy},
     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
+    {251,step_e00_drop_blood},{266,step_e12_floor_blood2},{268,step_e14_explosion},{271,step_e14_fire2},{272,step_e00_dust},{273,step_e14_mucus},{299,step_damage_point},{255,step_e02_sand_particle2},
+    {6,step_eff006},{4,step_eff_empty},{28,step_eff_empty},{129,step_eff_empty},{174,step_eff_empty},{197,step_eff_empty},
     {8,step_eff008},{10,step_eff010},{11,step_eff011},{14,step_eff014},{15,step_eff015},{29,step_eff029},
     {101,step_eff101},{103,step_eff103},{104,step_eff104},{116,step_eff116},{117,step_eff117},{119,step_eff119},
     {121,step_eff121},{128,step_eff128},{131,step_eff131},{132,step_eff132},{144,step_eff144},

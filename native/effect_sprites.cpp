@@ -3,6 +3,7 @@
 #include "effect_rap_camera.h"
 #include "effect_rap_blood.h"
 #include "effect_rap_claw.h"
+#include "effect_sub3x.h"
 #include "chunk_blend.h"
 #include "binary_view.h"
 #include "core_random.h"
@@ -88,6 +89,7 @@ void submit_template(int lkono,const NJS_POINT3* offset){
     e.link_kind=-1;e.link_index=0;e.drop_link_flag=false;
     e.stflg_or=0;e.texture_from_slot=-1;e.owner_work=nullptr;
     e.has_shp_ct=false;e.shp_ct=0;e.ct3=0;
+    e.has_scale_base=false;e.scale_base={};
     pending.spawns.push_back(e);
 }
 void water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz,const std::function<void(int lkono)>& submit){
@@ -1124,6 +1126,8 @@ bool hand_ported_effect_sprite(unsigned id){
     switch(id){
     case 110:case 133: // Besitzerprozeduren in RoomWorld, wie 111/134/137.
     case 0:case 2:case 5:case 7:case 9:case 17:case 120:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 138:case 181:case 182:case 199:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
+    // effsub4.c bhJumpEffect4 (effect.c:37), native/effect_sub3x.cpp: 357/360/361/368/398.
+    case 357:case 360:case 361:case 368:case 398:return true;
     default:return hand_procedure(id)!=nullptr;
     }
 }
@@ -1148,6 +1152,7 @@ bool ported_effect_atlas(unsigned group){
     case 440:return true; // effsub1b.c:850 bhDraw137 (sys->ef_tn[440], Texturhalter, effect.c:788)
     case 441:return true; // effsub1b.c:1308-1543 bhDraw138 (sys->ef_tn[441] .. +3, Texturhalter RM_8001)
     case 32:return true; // bhDraw107 (Regeneinschlag)
+    case 30:return true; // effsub4.c:2904 bhEff_Sub398 (tex_id 30, ohne stflg 0x20: sys->ef_tn[30]); Halter nur in RM_3130
     case 90:case 91:case 92:return true; // effsub1.c:28 bhEffFil (tex_id = op->id)
     default:return (group>=70&&group<=79)||(group>=400&&group<=407);
     }
@@ -1155,7 +1160,7 @@ bool ported_effect_atlas(unsigned group){
 bool step_effect_sprite(EffectSprite& sprite,bool* queued){
     // Die Tabellenprozeduren (effsub0/1/5/6) lesen keine Passflags; die aelteren
     // Schalterfaelle (Patronenhuelse, Flamme, Erzeuger 125) brauchen den Besitzerkontext.
-    if(hand_procedure(sprite.id)||sprite.id==199||sprite.id==369||sprite.id==396||sprite.id==399){const EffectContext none;return step_effect_sprite(sprite,none,queued);} /* 199 liest keinen Kontext (effsub0.c:3478) */
+    if(hand_procedure(sprite.id)||sprite.id==199||sprite.id==369||sprite.id==396||sprite.id==399||sprite.id==357||sprite.id==360||sprite.id==361||sprite.id==368||sprite.id==398){ /* effsub4.c 357/360/361/368/398 lesen keinen Kontext */const EffectContext none;return step_effect_sprite(sprite,none,queued);} /* 199 liest keinen Kontext (effsub0.c:3478) */
     if(supported_effect_sprite(sprite.id))throw std::runtime_error("effect step requires native flag context");
     if(queued)*queued=false;return false;
 }
@@ -1215,6 +1220,11 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
         case 181:step_eff181(s);break;
         case 182:step_eff182(s,entered);break;
         case 199:step_eff199(s,c,entered);break; // effsub0.c:3478 (native/effect_eff199.cpp)
+        case 357:step_eff357(s,c,entered);break; // effsub4.c:1235 (native/effect_sub3x.cpp)
+        case 360:step_eff360(s,c,entered);break; // effsub4.c:1241
+        case 361:step_eff361(s,c,entered);break; // effsub4.c:1335
+        case 368:step_eff368(s,c,entered);break; // effsub4.c:2075
+        case 398:step_eff398(s,c,entered);break; // effsub4.c:2722
         case 218:step_eff218(s,entered);break;
         case 230:step_eff230(s,entered);break;
         default:return false;
@@ -1373,6 +1383,7 @@ void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
     s.stflg|=e.stflg_or;s.owner_work=e.owner_work;
     if(e.has_shp_ct)s.shp_ct=e.shp_ct;
     s.ct3=e.ct3;
+    if(e.has_scale_base){s.sxb=e.scale_base.x;s.syb=e.scale_base.y;s.szb=e.scale_base.z;}
 }
 // effect.c:bhSetEffectTb scans the shared eff[512] pool and accepts the first
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.

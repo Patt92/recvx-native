@@ -45,6 +45,9 @@ public:
     unsigned script_index(unsigned model_node)const{return node_layout_.model_to_script.at(model_node);}
     unsigned model_index(unsigned script_node)const;
     std::size_t bones() const {return bind_pose_.size();}
+    // Logische Knotenzahl = mlwP->obj_num nach bhInitMask: Modellknoten plus die
+    // Tochterobjekte, die fmCnkInitContext einfuegt (face_bh.c:535-561 obj_num++).
+    std::size_t script_count() const {return node_layout_.script_to_model.size();}
     std::size_t motions() const {return motions_.size();}
     const MotionClip& motion_clip(std::size_t i)const{return motions_.at(i).value();}
     bool has_motion(std::size_t i) const {return i<motions_.size() && motions_[i] && motions_[i]->positions.size()==bones();}

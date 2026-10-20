@@ -85,6 +85,17 @@ const WorldEntity& owner_of(const RECVX_ENEMY_WORK* w){return *static_cast<const
 // `epp->mlwP = epw->mdl` (en01.c:2827) hat keinen eigenen.
 WorldEntity& tree_of(WorldEntity& e){return e.model_owner?*e.model_owner:e;}
 const WorldEntity& tree_of(const WorldEntity& e){return e.model_owner?*e.model_owner:e;}
+// owP[n]/obj_num des Originals im nativen Baum. bhInitMask (face.c:7, room.c:445-449
+// fuer id > 90) fuegt ueber fmCnkInitContext Zahn-/Zungen-/Augenobjekte als Kinder ein
+// (face_bh.c:535-561, je obj_num++) und legt mit _fmSetObjP (face_bh.c:67) objP und owP
+// in Baumreihenfolge neu an; bhCalcTree (MdlPut.c:268) laeuft ueber diese obj_num
+// Objekte. owP[n] ist daher der logische Knoten n (model_index), wie bei link_matrix
+// und enemy_slot_joint_matrix. objP/owP += k (en01.c:2799, en26.c:1180) verschiebt
+// im selben Indexraum. Ohne Maske ist die Abbildung die Identitaet.
+std::optional<std::size_t> owp_node(const WorldEntity& t,std::uint32_t joint){
+    if(!t.enemy_asset)return std::nullopt;
+    try{return std::size_t(t.enemy_asset->model_index(joint+t.model_window));}catch(const std::runtime_error&){return std::nullopt;}
+}
 
 // --- F03: Morph-Auswahl der portierten Gegner-Zustandsmaschinen -------------
 // njplus.c npCalcMorphing blendet obj_a gegen obj_b. Beide sind realisierte
@@ -609,8 +620,9 @@ void RoomWorld::bind_enemy_services(){
         enemy_world->particles_.spawn_pool(param,{p->x,p->y,p->z},ay,recvx_t3_blood_type[w->id].color,w);};
     // CallSystemSe(0, SeNo) -> CallSystemSeBasic: bit 31 is the ExPlayMidi path.
     s.system_se=[](int se){if(std::uint32_t(se)&0x80000000u)enemy_world->audio_.play_system_midi(std::uint32_t(se));else enemy_world->unbound_enemy_.insert("CallSystemSeBasic ohne Bit 31");};
-    // mlwP->obj_num; waehrend objP/owP += 8 um acht kleiner (en01.c:2801).
-    s.obj_num=[](const RECVX_ENEMY_WORK* w)->uint32_t{const auto& t=tree_of(owner_of(w));if(!t.enemy_asset)return 0u;const auto n=t.enemy_asset->bones();return n>t.model_window?std::uint32_t(n-t.model_window):0u;};
+    // mlwP->obj_num; waehrend objP/owP += 8 um acht kleiner (en01.c:2801). Nach
+    // bhInitMask zaehlt es die eingefuegten Maskenobjekte mit (face_bh.c:541-561).
+    s.obj_num=[](const RECVX_ENEMY_WORK* w)->uint32_t{const auto& t=tree_of(owner_of(w));if(!t.enemy_asset)return 0u;const auto n=t.enemy_asset->script_count();return n>t.model_window?std::uint32_t(n-t.model_window):0u;};
     s.motion_frames=[](const RECVX_ENEMY_WORK* w,uint32_t mtn)->uint32_t{const auto* clip=enemy_world->enemy_mn_work(owner_of(w),mtn);return clip?clip->frames:0u;};
     s.motion_obj_num=[](const RECVX_ENEMY_WORK* w,uint32_t mtn)->uint32_t{const auto* clip=enemy_world->enemy_mn_work(owner_of(w),mtn);return clip?std::uint32_t(clip->positions.size()):0u;};
     // Motion.c:21 bhSetMotion auf mlwP->objP/owP ab dem aktuellen Fenster. Ein
@@ -651,10 +663,11 @@ void RoomWorld::bind_enemy_services(){
     s.calc_model=[](RECVX_ENEMY_WORK* w){enemy_world->calc_enemy_model(owner_of(w));};
     // room.c:438-444 rechnet den Baum schon beim Raumaufbau (bhKeepObjWork +
     // bhCalcModel); Kinder ohne eigenen Raumaufbau lesen ihren genullten Satz.
-    s.joint_matrix=[](const RECVX_ENEMY_WORK* w,uint32_t joint,float* out)->int{const auto& t=tree_of(owner_of(w));joint+=t.model_window;if(joint>=t.enemy_owp_mtx.size())return 0;std::memcpy(out,t.enemy_owp_mtx[joint].value,16*sizeof(float));return 1;};
+    // mlwP->owP[joint].mtx: logischer Knoten (owp_node).
+    s.joint_matrix=[](const RECVX_ENEMY_WORK* w,uint32_t joint,float* out)->int{const auto& t=tree_of(owner_of(w));const auto node=owp_node(t,joint);if(!node||*node>=t.enemy_owp_mtx.size())return 0;std::memcpy(out,t.enemy_owp_mtx[*node].value,16*sizeof(float));return 1;};
     s.joint_point=[](const RECVX_ENEMY_WORK* w,uint32_t joint,const RECVX_ENEMY_VEC* local,RECVX_ENEMY_VEC* out)->int{
-        const auto& t=tree_of(owner_of(w));joint+=t.model_window;if(joint>=t.enemy_owp_mtx.size())return 0;
-        NJS_MATRIX m;std::memcpy(m,t.enemy_owp_mtx[joint].value,sizeof m);NJS_POINT3 a{local->x,local->y,local->z},b;njCalcPoint(&m,&a,&b);*out={b.x,b.y,b.z};return 1;};
+        const auto& t=tree_of(owner_of(w));const auto node=owp_node(t,joint);if(!node||*node>=t.enemy_owp_mtx.size())return 0;
+        NJS_MATRIX m;std::memcpy(m,t.enemy_owp_mtx[*node].value,sizeof m);NJS_POINT3 a{local->x,local->y,local->z},b;njCalcPoint(&m,&a,&b);*out={b.x,b.y,b.z};return 1;};
     // MN_WORK md2P[0].p[0] / p[1] of a motion on the integer frame.
     s.motion_root_position=[](const RECVX_ENEMY_WORK* w,uint32_t mtn,uint32_t frame,RECVX_ENEMY_VEC* out)->int{
         const auto* clip=enemy_world->enemy_mn_work(owner_of(w),mtn);if(!clip||clip->positions.empty()||clip->positions[0].empty()||frame>=clip->positions[0].size())return 0;
@@ -2513,7 +2526,8 @@ void RoomWorld::control_enemy_works(){
             const RECVX_CB_CAPSULE ca{{a->c1.x,a->c1.y,a->c1.z},{a->c2.x,a->c2.y,a->c2.z},a->r};
             const RECVX_CB_CAPSULE cb{{b->c1.x,b->c1.y,b->c1.z},{b->c2.x,b->c2.y,b->c2.z},b->r};
             return recvx_cb_check_cc(&ca,&cb);};
-        t.camera_ofy=[](float y){auto* world=enemy_world;if(!world->camera_offset_){world->unbound_enemy_.insert("cam.ofx/ofy/ofz ohne Kamerabesitzer");return;}*world->camera_offset_={0.0f,y,0.0f};};
+        // en17.c:1676 bhEne17_CameraControl schreibt nur cam.ofy; ofx/ofz bleiben vom letzten Schreiber stehen.
+        t.camera_ofy=[](float y){auto* world=enemy_world;if(!world->camera_offset_){world->unbound_enemy_.insert("cam.ofx/ofy/ofz ohne Kamerabesitzer");return;}world->camera_offset_->y=y;};
         t.camera_clear=[](){auto* world=enemy_world;if(!world->camera_offset_){world->unbound_enemy_.insert("cam.ofx/ofy/ofz ohne Kamerabesitzer");return;}*world->camera_offset_={0.0f,0.0f,0.0f};};
         t.player_library=en13.player_library;
         // plp->axp / plp->spd: spd ist das Spielerwerk der nativen Aktion; axp haelt der Besitzer ausser dem Originalblock.
@@ -2806,6 +2820,18 @@ bool RoomWorld::script_sand_effect_ev(unsigned work,int type1,int type2){
     SandRequest r;r.work=w;r.type=type1;r.type2=type2;r.ev=true;
     pending_sand_.push_back(r);
     return true;
+}
+// pwksub.c:455-457 / player.c:7132-7134: epp->mlwP->owP[node].mtx des Slots `slot`. owP-Indizes
+// des Originals sind logische Knoten (model_index, wie link_matrix/enemy_joint_position); ein
+// objP/owP-Fenster (en01.c:2799-2805) verschiebt den Zeiger im selben Indexraum.
+std::optional<BoneMatrix> RoomWorld::enemy_slot_joint_matrix(unsigned slot,unsigned node)const{
+    if(slot>=enemy_table_.ewk_n||slot>=RECVX_ENEMY_SLOTS)return {};
+    const auto* w=enemy_table_.slot[slot];if(!w||!w->owner)return {};
+    const auto& t=tree_of(owner_of(w));
+    if(!t.enemy_calculated||!t.enemy_asset)return {};
+    unsigned physical=0;try{physical=t.enemy_asset->model_index(node+t.model_window);}catch(const std::runtime_error&){return {};}
+    if(physical>=t.enemy_owp_mtx.size())return {};
+    return t.enemy_owp_mtx[physical];
 }
 // Laeuft im Gegnerpass, solange die EN02-Dienste gebunden sind.
 void RoomWorld::run_pending_sand(){
