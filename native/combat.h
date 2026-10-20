@@ -4,6 +4,7 @@
 #include "targeting.h"
 #include "weapon_flash.h"
 #include "inventory.h"
+#include <functional>
 #include <set>
 namespace recvx {
 // WpnTab[w].wp_fps1: flame/muzzle offset in the hand node (player.c).
@@ -12,6 +13,13 @@ NJS_POINT3 weapon_fire_offset(unsigned weapon);
 bool weapon_shot_sound(unsigned weapon,unsigned& bank,unsigned& program);
 // RECVX_CB_EFFECT.sys_ef: bhSetEffectTb(&sys->ef, ...) schreibt die gemeinsame Vorlage.
 void sys_ef_request(EffectSpawn& spawn,bool with_ax);
+// weapon.c:1632 bhSetGunSplash(gap, pos, wattr) auf der einen Vorlage sys->ef
+// (effect_detail::request_template). gvec/wpn_no/ay sind gap->vx..vz, gap->wpn_no und gap->ay.
+// submit(lkono, off) ist bhSetEffectTb(&sys->ef, off, NULL, lkono) des jeweiligen Besitzers
+// (Kampfpass: sofort, Effektpass: Passliste); gap meldet WpnTab ausserhalb der Tabelle.
+void gun_splash(NJS_POINT3 gvec,NJS_POINT3 pos,int wattr,int wpn_no,int ay,
+                const std::function<void(int lkono,const NJS_POINT3* offset)>& submit,
+                const std::function<void(const char*)>& gap);
 struct CombatControls {bool aim=false,attack=false;int turn=0,vertical=0;bool next_target=false;int pad_dx=0,pad_dy=0;};
 struct CombatOriginal;
 class CombatController {

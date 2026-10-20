@@ -62,9 +62,9 @@ int main(){try{
     // The fixture TIM2 is ARGB1555 (OrgColorType 0, ClutChange 0): its palette alpha 0x80
     // already is the GS As (no Ps2AlphaIsHalf, ps2_dummy.c:1796-1801), host alpha 2*As = 0xFF.
     check(scene.textures[0].pixels[1]==0xFF100010&&scene.textures[0].pixels[2]==0xFF080008,"CSM1 palette permutation / ARGB1555 opaque alpha");
-    // Host alpha is 2*As for every type (blend factor alpha/255 = As/128). Ps2CheckTextureAlpha:
-    // ARGB4444 Ps2Alpha4to8+Ps2AlphaIsHalf, ARGB8888 Ps2AlphaIsHalf (value already 2*As),
-    // ARGB1555/RGB565 color key only (value is As, doubled). Banked images color-key black.
+    // Host alpha is min(255, 2*As) for every type (blend factor alpha/255 = As/128).
+    // Ps2CheckTextureAlpha: ARGB4444 Ps2Alpha4to8+Ps2AlphaIsHalf, ARGB8888 Ps2AlphaIsHalf
+    // ((a+1)>>1), ARGB1555/RGB565 color key only (value is As). Banked images color-key black.
     std::vector<std::uint8_t> bank(44);auto word=[&](std::size_t p,unsigned x){for(unsigned i=0;i<4;++i)bank.at(p+i)=std::uint8_t(x>>(8*i));};word(0,0x00494c50);word(4,12);word(32,1);word(40,0x00010000);
     bank.insert(bank.end(),data.begin()+2320,data.begin()+3640);bank[76+12]=2;bank[76+144]=5;
     auto palette=recvx::decode_texture_bundle(bank);check(palette.size()==1&&palette[0].pixels[0]==0&&palette[0].pixels[1]==0x88100010,"PS2 palette alpha preparation");
@@ -72,8 +72,9 @@ int main(){try{
      auto typed=[&](unsigned type,unsigned alpha){auto b=bank;b[76+12]=std::uint8_t(type);b[entry16_alpha]=std::uint8_t(alpha);return recvx::decode_texture_bundle(b)[0].pixels[1]>>24;};
      check(typed(0,0x80)==0xFF&&typed(1,0x80)==0xFF,"ARGB1555/RGB565 opaque As 0x80 must be host 0xFF");
      check(typed(0,0x20)==0x40&&typed(1,0x41)==0x82,"ARGB1555/RGB565 partial As must be doubled");
-     check(typed(6,0x80)==0x80&&typed(6,0xFF)==0xFF,"ARGB8888 must keep its 8-bit value (2*As)");
-     check(typed(2,0xF0)==0xFF,"ARGB4444 Ps2Alpha4to8");}
+     check(typed(6,0x80)==0x80&&typed(6,0xFF)==0xFF,"ARGB8888 even/opaque alpha is 2*As");
+     check(typed(6,0x11)==0x12&&typed(6,0x81)==0x82,"ARGB8888 odd alpha must round through Ps2AlphaIsHalf");
+     check(typed(2,0xF0)==0xFF&&typed(2,0x10)==0x12,"ARGB4444 Ps2Alpha4to8 then Ps2AlphaIsHalf");}
     bank[76+15]=0x80;palette=recvx::decode_texture_bundle(bank);check(palette[0].pixels[0]==0x80000000&&palette[0].pixels[1]==0x80100010,"palette alpha converted twice");
     bank[76+12]=1;palette=recvx::decode_texture_bundle(bank);check(palette[0].pixels[1]==0x80100010,"ClutChange set: RGB565 palette must stay untouched");
     recvx::SoftwareRenderer image(64,48);image.draw(scene,scene.cameras[0]);

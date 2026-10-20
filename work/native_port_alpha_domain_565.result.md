@@ -50,8 +50,18 @@ Beispiel RM_0000 Textur 0: RGB565, 38 benutzte Paletteneinträge, alle 262.144 P
 - Der Bericht `work/native_port_alpha_domain.result.md` („ein erneutes Kochen erzeugt
   dieselben Dateien") trifft für Typ 0/1 nicht zu.
 
-## Offen
+## Korrektur (2026-10-20)
 
-Korrektur im gemeinsamen Decoder (`native/scene.cpp`, Palettenkopie): Typ 0/1 auf
-2·As (gekappt 255) heben, Typ 2/6 wie heute. Danach Neuexport gegen `data/` vergleichen;
-erwartet bleiben nur Einstufen-Rundungsunterschiede bei Typ 2/6. Nicht umgesetzt.
+`native/scene.cpp`, Palettenkopie: Host-Alpha ist für alle Typen `min(255, 2·As)`.
+Typ 2/6 laufen durch `Ps2AlphaIsHalf` (`(a+1)>>1`, ps2_dummy.c:1714), Typ 0/1 sind
+bereits As. Der erste Schritt (nur Typ 0/1 verdoppeln) ließ beim Neuexport noch 1.592
+Texturen mit ±1 im Alpha übrig, alle bei ungeraden Rohwerten von Typ 2/6 (z. B. 17 statt
+18): das Original quantisiert dort auf As, der Decoder behielt den ungeraden Rohwert.
+
+Prüfungen:
+- `tests/native/scene_test.cpp`: jeder Farbtyp einzeln (deckend, teiltransparent,
+  ungerade Werte, ClutChange gesetzt). Gegenprobe ohne Korrektur: rot.
+- Neuexport über `prepare_native_data.py --iso` aus einem ISO, das aus `data/` gebaut
+  wurde: **21.227 von 21.227 Dateien bytegleich**, alle 18.253 Texturen gleich. Damit
+  bleiben auch die MD5-Schlüssel der HD-Texturpakete gültig.
+- `data/` wurde nicht verändert.

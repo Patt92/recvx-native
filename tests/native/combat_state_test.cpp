@@ -57,11 +57,14 @@ struct Fixture {
     bool wall_blocks_shot = false;    /* bhCheckC2WallN 0x400 (Trefferlinie) */
     bool wall_in_shot = false;
     float wall_distance = 4.0f;
+    std::uint8_t wall_prm0 = 0;         /* ATR prm0 des Wandtreffers (bhSetGunSplash wattr) */
     /* Beobachtungen. */
     std::vector<int> sounds;
     unsigned effects = 0, muzzle = 0, shells = 0;
     unsigned vibrations = 0, lights = 0;
     unsigned sparks = 0; std::int32_t spark_type = -1;
+    struct GunSplash { RECVX_CB_VEC gvec, pos; std::int32_t wattr, wpn_no, ay; };
+    std::vector<GunSplash> gun_splashes;
     /* Wasserzweige (weapon.c:872-958, :1035-1069). */
     bool water_hit = false; RECVX_CB_VEC water_at{}; unsigned water_calls = 0;
     RECVX_CB_LINE water_line{}; bool water_inside = true; unsigned water_checks = 0;
@@ -131,6 +134,7 @@ struct Fixture {
                 hit->apos = {l->px + dir.x * f->wall_distance,
                              l->py + dir.y * f->wall_distance,
                              l->pz + dir.z * f->wall_distance};
+                hit->atr.prm0 = f->wall_prm0;
             }
             return 1;
         };
@@ -146,6 +150,10 @@ struct Fixture {
                          std::uint32_t, std::int32_t type) {
             auto* f = static_cast<Fixture*>(p);
             ++f->sparks; f->spark_type = type;
+        };
+        s.gun_splash = [](void* p, const RECVX_CB_VEC* gvec, const RECVX_CB_VEC* pos, std::int32_t wattr,
+                          std::int32_t wpn_no, std::int32_t ay) {
+            static_cast<Fixture*>(p)->gun_splashes.push_back({*gvec, *pos, wattr, wpn_no, ay});
         };
         s.l2_water = [](void* p, const RECVX_CB_LINE* l, RECVX_CB_VEC* hit) -> std::int32_t {
             auto* f = static_cast<Fixture*>(p);
@@ -936,6 +944,38 @@ void test_dual_wall_spark() {
           "Funkenart weicht von WpnTab[21].hiteff-4 ab");
 }
 
+/* weapon.c:961-989 bhCheckGunAtari: Wandtreffer ohne Gegner (id -1), walhit, WpnTab.hiteff != 0,
+ * bhCheckWallAttrB89 -> bhSetEffGunSpark und bhSetGunSplash(gap, &wps, wlp->prm0). bhSetGunSplash
+ * (weapon.c:1632) liest gap->vx/vy/vz, gap->wpn_no (WpnTab[].ef_scale) und gap->ay; der Kerndienst
+ * reichte vorher nur Richtung, Lage und wattr weiter und war im Spielerkampf ungebunden. */
+void test_gun_wall_splash() {
+    check(WpnTab[3].hiteff != 0, "WpnTab[3].hiteff ist 0: kein Wandtreffer-Zweig (weapon.c:961)");
+    Fixture f;
+    f.table.ewk_n = 0;          /* kein Gegner: id bleibt -1 */
+    f.wall_in_shot = true;
+    f.wall_distance = 4.0f;
+    f.wall_prm0 = 2;
+    f.equip(3);
+    f.player().ay = 4096;
+    f.tick(true, false);
+    check(f.run_until(65, 24), "draw never reached act_wpn");
+    f.tick(true, true);
+    f.tick(true, true);
+    check(f.res.gun_atari == 1, "bhCheckGunAtari not called");
+    check(f.sparks == 1 && f.gun_splashes.size() == 1, "Wandtreffer: genau ein Funke und ein bhSetGunSplash");
+    const auto& g = f.gun_splashes[0];
+    check(g.wattr == 2, "bhSetGunSplash: wattr ist nicht wlp->prm0");
+    check(g.wpn_no == 3, "bhSetGunSplash: gap->wpn_no ist nicht die Waffe");
+    check(g.ay == f.player().ay, "bhSetGunSplash: gap->ay ist nicht plp->ay (weapon.c bhSetGunFire)");
+    /* wps ist der Wandpunkt aus bhCheckL2Wall (weapon.c:690), gvec die Schussrichtung. */
+    const auto& l = f.last_wall_line;
+    NJS_POINT3 dir{l.vx, l.vy, l.vz}; njUnitVector(&dir);
+    check(std::fabs(g.pos.x - (l.px + dir.x * 4.0f)) < 1e-4f && std::fabs(g.pos.z - (l.pz + dir.z * 4.0f)) < 1e-4f,
+          "bhSetGunSplash: Lage ist nicht der Wandpunkt wps");
+    check(std::fabs(g.gvec.x - l.vx) < 1e-4f && std::fabs(g.gvec.z - l.vz) < 1e-4f, "bhSetGunSplash: gvec ist nicht gap->vx/vz");
+    for (const auto& n : f.gaps) check(n.find("bhSetGunSplash") == std::string::npos, "bhSetGunSplash als Luecke gemeldet");
+}
+
 int main() {
     try {
         test_tables();
@@ -948,6 +988,7 @@ int main() {
         test_shot_blocked_by_wall();
         test_auto_fire_branch();
         test_dual_wall_spark();
+        test_gun_wall_splash();
         test_water_impact();
         test_linear_launcher();
         test_scope();

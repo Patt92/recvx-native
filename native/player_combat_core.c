@@ -1130,9 +1130,11 @@ static int cb_check_gun_atari(RECVX_COMBAT_CORE* c, CB_GA* g) {
             if (c->services.gun_spark)
                 c->services.gun_spark(c->services.user, &wps, &nvec, 0xFFF8F8A0u, 0x4CE04010u, wp_hef - 4);
             else cb_gap(c, "bhSetEffGunSpark");
+            /* weapon.c:989 bhSetGunSplash(gap, &wps, wlp->prm0): walhit setzt whp immer
+               (Zweig :954), gap->wpn_no/ay sind der Stand dieses Aufrufs. */
             if (c->services.gun_splash) {
                 RECVX_CB_VEC gv = { g->vx, g->vy, g->vz };
-                c->services.gun_splash(c->services.user, &gv, &wps, whp ? whp->atr.prm0 : 0);
+                c->services.gun_splash(c->services.user, &gv, &wps, (int32_t)whp->atr.prm0, g->wpn_no, g->ay);
             } else cb_gap(c, "bhSetGunSplash (weapon.c:1632)");
         }
     }

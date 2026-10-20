@@ -97,7 +97,7 @@ int main(int argc,char** argv){try{
         const int eff=dd_nml_s[e.comb_wep];
         check(eff_tbl[eff][0]<=1,"Treffer: Testaufstellung erreicht keinen Blutfall (eff_nml_s)");
         const unsigned want_id=eff_tbl[eff][0]==1?309u:311u;
-        unsigned body=128;for(unsigned i=0;i<128;++i)if(f.world.state(1,i)==static_cast<const WorldEntity*>(e.owner))body=i;
+        unsigned body=128;for(unsigned i=0;i<128;++i)if(const auto* st=f.world.state(1,i);st&&&st->enemy==&e)body=i;
         check(body<128,"Koerper ohne Raumindex");
         unsigned blood=0,other=0;
         for(unsigned i=0;const auto* o=f.world.effect_state(i);++i){
@@ -110,6 +110,7 @@ int main(int argc,char** argv){try{
             else if(o->id==309u||o->id==311u)++other;
         }
         check(blood==1&&other==0,"SetDmgEffect: genau ein Blutsatz der Originaltabelle (309/311) am Treffer");
+        f.no_gaps("Treffer");
     }
     std::cout<<"EN29 world PASS\n";return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

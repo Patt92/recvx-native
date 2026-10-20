@@ -3,6 +3,7 @@
 #include <functional>
 #include "weapon_tables.h"
 #include "effect_sprites_internal.h"
+#include "ninja_matrix.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -29,6 +30,46 @@ void sys_ef_request(EffectSpawn& spawn,bool with_ax){auto& t=effect_detail::requ
     t.flg=spawn.flg;t.id=spawn.id;t.type=spawn.type;t.flr_no=spawn.flr_no;t.mdlver=spawn.mdlver;
     t.position=spawn.position;t.scale=spawn.scale;t.ay=spawn.ay;if(with_ax)t.ax=spawn.ax;else spawn.ax=t.ax;}
 static_assert(sizeof(WPN_TAB)==sizeof(RECVX_CB_WPN_TAB)&&sizeof(WPN_TAB)==0x68,"WPN_TAB layout");
+// weapon.c:1632 bhSetGunSplash. Alle Schreibungen gehen in sys->ef und bleiben fuer den
+// naechsten Schreiber stehen, auch wenn wattr keinen Fall trifft (dann kein bhSetEffectTb).
+// EF_WORK.ay/ax sind short (types.h:226/227): gap->ay +- 16384/32768 wird auf 16 Bit gekuerzt.
+void gun_splash(NJS_POINT3 gvec,NJS_POINT3 pos,int wattr,int wpn_no,int ay,
+                const std::function<void(int lkono,const NJS_POINT3* offset)>& submit,
+                const std::function<void(const char*)>& gap){
+    NJS_VECTOR vec{-gvec.x,-gvec.y,-gvec.z};                              // :1636-1638
+    njUnitVector(&vec);                                                    // :1640
+    auto& ef=effect_detail::request_template();
+    ef.id=11;ef.flg=1;ef.mdlver=1;ef.type=unsigned(std::uint16_t(wattr));  // :1642-1647
+    ef.position=pos;ef.ax=0;                                               // :1649-1653
+    const auto ef_scale=[&](float& out)->bool{                             // WpnTab[gap->wpn_no].ef_scale
+        if(wpn_no<0||wpn_no>=23){gap("bhSetGunSplash: WpnTab[gap->wpn_no] ausserhalb (weapon.c:1663)");return false;}
+        out=WpnTab[wpn_no].ef_scale;return true;};
+    float scl=0;
+    switch(wattr){
+    case 0:case 3:                                                         // :1657-1670
+        ef.type=5;ef.flr_no=0;
+        if(!ef_scale(scl))return;
+        ef.scale={0.75f*scl,0.75f*scl,0.75f*scl};
+        ef.ay=std::int16_t(ay+32768);
+        submit(0,&vec);
+        break;
+    case 1:case 2:                                                         // :1671-1686
+        ef.flr_no=1;
+        if(!ef_scale(scl))return;
+        ef.scale={scl,scl,scl};
+        ef.ay=std::int16_t(ay+16384);submit(0,nullptr);
+        ef.ay=std::int16_t(ay-16384);submit(1,&vec);
+        break;
+    case 4:case 5:                                                         // :1687-1701
+        ef.id=10;ef.flg=0x100001u;ef.type=1;
+        ef.position.x+=2.0f*vec.x;ef.position.y-=2.0f;ef.position.z+=2.0f*vec.z;
+        if(!ef_scale(scl))return;
+        ef.scale={scl,scl,scl};
+        ef.ay=0;submit(0,nullptr);
+        break;
+    default:break;                                                         // kein bhSetEffectTb
+    }
+}
 static_assert(sizeof(EF_WORK)==sizeof(RECVX_CB_EF_WORK)&&sizeof(EF_WORK)==0x28,"EF_WORK layout");
 struct CombatOriginal {
     RECVX_COMBAT_CORE* core=nullptr;
@@ -54,6 +95,7 @@ struct CombatOriginal {
     std::function<void(int,float,float)> footstep;
     std::function<void(const RECVX_CB_LIGHT*)> light0;
     std::function<void(const RECVX_CB_VEC*,const RECVX_CB_VEC*,uint32_t,uint32_t,int)> gun_spark;
+    std::function<void(const RECVX_CB_VEC*,const RECVX_CB_VEC*,int,int,int)> gun_splash;
     std::function<int(const RECVX_CB_LINE*,RECVX_CB_VEC*)> l2_water;
     std::function<int(const RECVX_CB_VEC*)> check_water;
     std::function<void(const RECVX_CB_VEC*,int,int,float,float,float)> water_splash4;
@@ -86,6 +128,7 @@ struct CombatOriginal {
         s.footstep=[](void* p,int32_t floor,float x,float z){auto* c=static_cast<CombatOriginal*>(p);if(c->footstep)c->footstep(floor,x,z);};
         s.light0=[](void* p,const RECVX_CB_LIGHT* l){auto* c=static_cast<CombatOriginal*>(p);if(c->light0)c->light0(l);};
         s.gun_spark=[](void* p,const RECVX_CB_VEC* pos,const RECVX_CB_VEC* vec,uint32_t c0,uint32_t c1,int32_t type){auto* c=static_cast<CombatOriginal*>(p);if(c->gun_spark)c->gun_spark(pos,vec,c0,c1,int(type));};
+        s.gun_splash=[](void* p,const RECVX_CB_VEC* gvec,const RECVX_CB_VEC* pos,int32_t wattr,int32_t wpn_no,int32_t ay){auto* c=static_cast<CombatOriginal*>(p);if(c->gun_splash)c->gun_splash(gvec,pos,int(wattr),int(wpn_no),int(ay));};
         // bhCheckL2Water/bhCheckWater/bhSetWaterSplash4 der Wasserzweige (weapon.c:872/1035).
         s.l2_water=[](void* p,const RECVX_CB_LINE* l,RECVX_CB_VEC* hit){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->l2_water?c->l2_water(l,hit):0);};
         s.check_water=[](void* p,const RECVX_CB_VEC* pos){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->check_water?c->check_water(pos):0);};
@@ -103,8 +146,7 @@ struct CombatOriginal {
             const auto& keys=clip.angles[model];
             const auto& key=keys[std::min<std::size_t>(frame,keys.size()-1)];
             ang[0]=key[0];ang[1]=key[1];ang[2]=key[2];return 1;};
-        // Ungebundene Besitzer: Wandzerstörung, Spritzer (bhSetGunSplash)
-        // und Vibration ohne Treiber. Sie bleiben
+        // Ungebundene Besitzer: Wandzerstörung und Vibration ohne Treiber. Sie bleiben
         // NULL; der Kern meldet sie namentlich über `gap`.
         core=recvx_combat_create(&tables,&s);if(!core)throw std::bad_alloc();
         // Logische Knotenzahl des Körpers (ActorNodeLayout script_to_model).
@@ -222,6 +264,16 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // uebrigen portierten ids laufen ueber den gemeinsamen bhSetEffectTb-Pfad (z. B. bhEff000).
     // effsub3.c:2401 bhSetEffGunSpark am Wandtreffer (weapon.c bhCheckGunAtari).
     engine.gun_spark=[&](const RECVX_CB_VEC* pos,const RECVX_CB_VEC* vec,uint32_t c0,uint32_t c1,int type){if(world)world->gun_spark({pos->x,pos->y,pos->z},{vec->x,vec->y,vec->z},c0,c1,type);};
+    // weapon.c:989 bhSetGunSplash am Wandtreffer: ausserhalb des Effektpasses belegt jedes
+    // bhSetEffectTb sofort einen Platz (wie RoomWorld::water_splash4), lkwkp NULL.
+    engine.gun_splash=[&](const RECVX_CB_VEC* gvec,const RECVX_CB_VEC* pos,int wattr,int wpn_no,int ay){if(!world)return;
+        gun_splash({gvec->x,gvec->y,gvec->z},{pos->x,pos->y,pos->z},wattr,wpn_no,ay,
+            [&](int lkono,const NJS_POINT3* off){const auto& ef=effect_detail::request_template();
+                EffectSpawn spawn;spawn.flg=ef.flg;spawn.id=ef.id;spawn.type=ef.type;spawn.flr_no=ef.flr_no;spawn.mdlver=ef.mdlver;
+                spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;spawn.lkono=lkono;
+                spawn.has_offset=off!=nullptr;if(off)spawn.offset=*off;
+                world->spawn_unlinked_effect(spawn);},
+            [&](const char* name){engine.unavailable.insert(name);});};
     engine.effect=[&](const RECVX_CB_EFFECT* e)->int{
         if(!world)return -1;
         world->set_effect_counter(engine.sys.yk_ct);

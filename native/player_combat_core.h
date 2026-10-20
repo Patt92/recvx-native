@@ -246,7 +246,10 @@ typedef struct {
     int32_t (*effect)(void* user, const RECVX_CB_EFFECT* request);  /* bhSetEffectTb -> Slot/-1 */
     void    (*effect_clear)(void* user, uint32_t id, int32_t flr_no); /* rld: eff[j].flg = 0 */
     void    (*gun_spark)(void* user, const RECVX_CB_VEC* pos, const RECVX_CB_VEC* vec, uint32_t col0, uint32_t col1, int32_t type); /* bhSetEffGunSpark */
-    void    (*gun_splash)(void* user, const RECVX_CB_VEC* gvec, const RECVX_CB_VEC* pos, int32_t wattr);  /* bhSetGunSplash weapon.c:1632 */
+    /* bhSetGunSplash(gap, pos, wattr) weapon.c:1632: liest gap->vx/vy/vz, gap->wpn_no
+       (WpnTab[].ef_scale) und gap->ay, jeweils der Stand beim Aufruf (weapon.c:989). */
+    void    (*gun_splash)(void* user, const RECVX_CB_VEC* gvec, const RECVX_CB_VEC* pos, int32_t wattr,
+                          int32_t wpn_no, int32_t ay);
     void    (*water_splash4)(void* user, const RECVX_CB_VEC* pos, int32_t ang, int32_t type, float sx, float sy, float sz); /* bhSetWaterSplash4 */
     void    (*player_water)(void* user, int32_t effect_param, int32_t splash_type, float scale); /* bhSetEffect(108)+bhSetWaterSplash am Spieler */
     void    (*light0)(void* user, const RECVX_CB_LIGHT* light);
