@@ -25,3 +25,7 @@ objdiff.json
 
 # Local HD/texture mods (large)
 /mods/
+
+# Local save files and snapshots
+/saves/
+/snapshots/
