@@ -101,7 +101,7 @@ brought up separately from the shared gameplay code.
 | **Windows x64** | Build support and an experimental Direct3D 11 backend are present; validated Windows releases are planned. |
 | **Windows ARM64** | Cross-build option in the build tool, with SDL2 compiled from the pinned source; hardware validation is still pending. |
 | **Linux** | Planned port with an OpenGL backend. |
-| **iPad** | Planned native build using Metal. |
+| **iOS/iPadOS** | Planned native builds using Metal. |
 | **Apple TV** | Planned native build using Metal. |
 
 These are native platform targets, not plans to ship an emulator with the game.
