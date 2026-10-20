@@ -34,7 +34,15 @@ public:
     static std::uint32_t pack(unsigned id,unsigned quantity){return (id<<16)|quantity;}
     unsigned occupied()const;
     bool contains(unsigned item)const;
-    unsigned weapon()const;
+    // plp->wpnr_no: die GEZOGENE Waffe, getrennt vom ausgeruesteten Platz pip[0] (slots()[0]).
+    // WeaponSet schreibt beides; bhArmsItemSet (0xC1) und bhSv 22 nur den Platz, bhArmsItemChange
+    // (0x27), bhSv 18 und bhPlyHandChange (0xAF) nur die Waffe. bhSv/die Schreibmaschine sichern
+    // sie in ply_wno (bup_00.c:372), bhSetPlayer/bhFinishRoom holen sie zurueck (player.c:667,
+    // system.c:1787). Spielstart: 0 (player.c:684).
+    unsigned wpnr_no=0;
+    unsigned weapon()const{return wpnr_no;}
+    // WeaponSet (sub1.c:4460-4566): Waffennummer zum Eintrag, `previous` fuer IDs ohne eigene Nummer.
+    static unsigned weapon_number(std::uint32_t entry,unsigned previous);
     bool equip(unsigned slot);
     bool reload(); // sub1.c bhSearchBullet / Combi_99 / ItemSort.
     bool count_bullet(); // weapon.c bhCountBullet; signed 16-bit count, preserves ID/flags.

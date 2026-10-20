@@ -34,6 +34,10 @@ public:
     unsigned event_deadline_mode=0,event_deadline_ticks=0,event_deadline_danger=0;
     unsigned event_deadline_voice_tick=0,event_deadline_voice_count=0;
     unsigned player_flags=0; // plp->flg, used by bhCheckEvtTimer modes 2/3
+    // bhEtask[1].wpnr_no: nur bhPlyHandChange (event.c:7418/7449) schreibt und liest es. bhEtask ist
+    // global; bhInitEvent (:345-348) und Event_init (:12956) lassen wpnr_no stehen, es ueberlebt
+    // also jeden Raumwechsel (inherit_progress).
+    unsigned parked_wpnr_no=0;
     // sdfunc.c:90 NextSoundInfo: die Vorgaben fuer Musik und Raumton des NAECHSTEN Raums,
     // die bhSetNextRoomBgm (event.c:2574) und bhSetNextRoomBgSe (:2612) schreiben. In der
     // ausgelieferten Fassung hat die Struktur KEINEN Leser: ueber alle 154 Originalquellen

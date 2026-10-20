@@ -44,6 +44,7 @@ void EventVm::inherit_progress(const EventVm& previous){
     flags[11][0]&=room_change_gm_mask;
     // player.c:862 bhInitRoomChangePlayer: plp->stflg &= 0x78280000 (Mottenei-Marken, Gift, 0x40000000).
     flags[14][0]=previous.flags[14][0]&0x78280000u;
+    parked_wpnr_no=previous.parked_wpnr_no;
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
     evt_posno=previous.evt_posno; // sys->evt_posno lebt im SYS-Bereich ueber das Raumladen hinaus
     values[21]=previous.values[21]; // sys->rcase lebt ueber das Raumladen hinaus (bhRoomCaseNo 0x37, bhSv 21; system.c:1623 waehlt damit die naechste RDX)
@@ -142,7 +143,7 @@ int EventVm::instruction(Task& t){
     case 9:{v.require(p,4);const unsigned field=v.u8(p+1),operand=v.u16(p+2);if(field==5)inventory_.hp=operand;else if(field==9)inventory_.play_time=operand;else if(field>=11&&field<=15){if(!set_enemy_health)throw std::runtime_error("word HP assignment requires native enemy binding");set_enemy_health(field-11,-int(operand));}return advance(4);}
     case 0x37:values[21]=v.u8(p+1);return advance(2); // bhRoomCaseNo
     case 0x57:if(!v.u8(p+1))flags[11][0]|=0x20000;else flags[11][0]&=~0x20000u;return advance(2); // bhFixEventCamPly
-    case 8:{const auto key=v.u8(p+1),value=v.u8(p+2);values[key]=value;if(key==22){if(value>=12)throw std::runtime_error("equipped inventory index outside slots");inventory_.slots()[0]=value;}return advance(4);}
+    case 8:{const auto key=v.u8(p+1),value=v.u8(p+2);values[key]=value;if(key==18)inventory_.wpnr_no=value; /* event.c:827-830 plp->wpnr_no/ply_wno, ohne Neuladen */if(key==22){if(value>=12)throw std::runtime_error("equipped inventory index outside slots");inventory_.slots()[0]=value;}return advance(4);}
     // bhDieCk masks the flag index with 0x3ff before touching sys->ed_flg.
     case 0xd:{if(enemy_dead&&enemy_dead(v.u8(p+1)))set_flag(3,v.u16(p+2)&0x3ff,0);advance(4);return 1;}
     // bhEneSetCk: an enemy whose ed_flg bit is already set stays deactivated.
@@ -162,23 +163,22 @@ int EventVm::instruction(Task& t){
     // Befehle mit bekannter Laenge, deren Wirkung nativ keinen Besitzer hat. Sie werden
     // korrekt uebersprungen und als offene Bindung gemeldet, statt den Raum anzuhalten:
     // ein unbekannter Befehl wirft unten und beendet den Lauf.
-    //   0x6F bhObjLinkSetObjPly (event.c:5263): plp->lkwkp = &obwp[v0], lkono, flg 0x80,
-    //        lox/loy/loz. Der Spieler waere Kind einer Objektbindung; der Port fuehrt
-    //        Bindungen nur fuer Objekte, Gegner und Items.
+    //   0x6F bhObjLinkSetObjPly (event.c:5263) bindet RoomWorld::bind (Spielerwurzel am Objekt).
     //   0x82 bhSetDebugLoopEx (:2421): st_flg 0x10, cam.ct0 aus dem u16, cam.frm 0,
     //        cam.mode0 1, bhInitEventCamera, gm_flg 0x10, bhSetEventHideObjLgt, bhCheckCut.
-    //   0x97 bhEffectKokuenSet (:1986): Effekt 2 type 1 an bhEtask[v0].work->mlwP->objP->pos
-    //        mit den bpx/bpy/bpz-Vorzeichen der laufenden Eventaufgabe (beides ohne Besitzer).
-    //   0xAA bhEffUVSet2 (:7159): UVs in op->pvp von eff[sys->efid[v0]]; sys->efid hat
-    //        nativ keinen Besitzer (siehe world.cpp bhSetEffectLink lkflg 5).
-    //   0xAF bhPlyHandChange (:7378) bindet RoomWorld::bind (Handobjekte, Waffenmodelle);
-    //        nur das Parken eines gezogenen Feuerzeugs bleibt dort gemeldete Luecke.
+    //   0x97 bhEffectKokuenSet (:1986), 0xAA bhEffUVSet2 (:7159) und 0xAF bhPlyHandChange (:7378)
+    //        bindet RoomWorld::bind; das Feuerzeug-Parken aus 0xAF fuehrt der Fall unten.
     //   0xD3 bhRankingCall (:9049): Rangliste des Battle Game ueber das Hostfrontend.
     case 0x6f:world(t,op,12);return 1;
     case 0x82:world(t,op,4);return 1;
     case 0x97:world(t,op,8);return 1;
     case 0xaa:world(t,op,10);return 1;
-    case 0xaf:world(t,op,4);return 1;
+    // event.c:7416-7465: Feuerzeug parken/zurueckgeben ueber bhEtask[1].wpnr_no (Spielerwert, nicht Task t).
+    // Die owP[7..9].flg 0x2 folgen plp->wpnr_no == 1 in jedem Spielerpass (player.c:1486).
+    case 0xaf:{const bool take=v.u8(p+3)==0;world(t,op,4);
+        if(take){if(inventory_.wpnr_no==1){parked_wpnr_no=1;inventory_.wpnr_no=0;}}
+        else if(parked_wpnr_no==1){parked_wpnr_no=0;inventory_.wpnr_no=1;}
+        return 1;}
     case 0xd3:world(t,op,2);return 1;
     // event.c:4110 bhEffectSandSet: v0 Raumgegner, v1 Vorzeichenbits, v2 Lageart, drei u16
     // Betraege, dann der Typ als ein Byte — bhScePtr rueckt danach um zwei (12 Byte gesamt).
@@ -289,7 +289,8 @@ int EventVm::instruction(Task& t){
     case 0x7b:world(t,op,10);return 1;
     case 0x7c:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");auto& a=floors_[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);world(t,op,10);return 1;}
     case 0x26:{const auto weapon=v.u8(p+1);advance(2);return inventory_.weapon()==weapon;}
-    case 0x27:values[18]=v.u8(p+1);if(!values[18])inventory_.slots()[0]=0;return advance(2);
+    // event.c:1285 bhArmsItemChange: plp->wpnr_no und ply_wno[ply_id], mn_mode0 3 (bhReadWeaponData); pip[0] bleibt.
+    case 0x27:values[18]=v.u8(p+1);inventory_.wpnr_no=v.u8(p+1);return advance(2);
     case 0x28:status_requested=true;flags[12][0]|=0x200;return advance(2);
     // event.c Inventarmutationen auf dem einzigen Bestandsbesitzer Inventory
     // (native/inventory.cpp, Vertrag work/native_port_inventory_contract.md).

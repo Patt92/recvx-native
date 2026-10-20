@@ -199,4 +199,7 @@ saved to `third_person.ini` beside `controls.ini`; `--third-person` enables it
 for one run without saving. The over-the-shoulder camera only replaces the
 fixed room camera while the player has free control; event cameras, FMVs,
 cinematics and door transitions keep the original view. Movement keeps the
-original tank controls.
+original tank controls. A wall behind the player (for example the door just
+entered) shortens and raises the boom instead of swinging the camera around;
+the boom eases back out once there is room, and the player model fades while
+the eye sits inside it.

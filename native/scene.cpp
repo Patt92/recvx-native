@@ -48,7 +48,7 @@ public:
             }
             const auto cam=cut_offset+i*0x2a8+0x20;
             SceneCamera camera;
-            camera.flags=view.u16(cam);
+            camera.flags=view.u16(cam);camera.key_frame=view.u8(cam+2); // light.c:800 (unsigned char)ci->frame
             camera.fog_color=view.u32(cam+0xb8);camera.fog_near=view.f32(cam+0xbc);camera.fog_far=view.f32(cam+0xc0);
             camera.filter_no=std::int8_t(view.u8(cam+0x51));camera.filter_rate=std::int8_t(view.u8(cam+0x52));
             camera.transition_speed=std::int8_t(view.u8(cam+3));

@@ -568,7 +568,7 @@ int main(int argc,char** argv){
                 const bool on_player=!hair_at||(hair_at->linked&&!hair_at->kind);const auto lo_link=hair_at?hair_at->offset:link.offset;
                 if(!hair_at||(hair_listed&&hair_at->draw)){if(!on_player)at=hair_root;else if(link.node<nodes.size()){
                     NJS_MATRIX head;std::copy_n(nodes[link.node].value,16,head);NJS_POINT3 p;auto lo=lo_link;njCalcPoint(&head,&lo,&p);at=p;}} // linked object: position only
-                if(at){NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,at->x,at->y,at->z);recvx::append_actor(scene,tail->sample_rest(root,hair_angles),attachment_base);hair_drawn=true;}}for(std::size_t i=stage_count;i<scene.triangles.size();++i)scene.triangles[i].after_modifiers=true; /* game.c:318 bhDrawPlayer follows bhDrawEffect */if(player_put)combat.append(scene,nodes,world&&(world->player_hidden||world->player_scripted),world.get());/* game.c:63: bhDrawSmallScreenRenderTexture vor bhAllDrawModel desselben Bildes (bhEff111, gm_flg 0x200). */
+                if(at){NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,at->x,at->y,at->z);recvx::append_actor(scene,tail->sample_rest(root,hair_angles),attachment_base);hair_drawn=true;}}for(std::size_t i=stage_count;i<scene.triangles.size();++i)scene.triangles[i].after_modifiers=true; /* game.c:318 bhDrawPlayer follows bhDrawEffect */combat.append(scene,nodes,world.get());if(const float fade=third_person.player_alpha();fade<1.f)for(std::size_t i=stage_count;i<scene.triangles.size();++i){auto& t=scene.triangles[i];const auto alpha=t.blend==recvx::SceneBlend::Opaque?255u:t.color>>24;if(t.blend==recvx::SceneBlend::Opaque)t.blend=recvx::SceneBlend::Alpha;t.color=(t.color&0x00ffffffu)|(std::uint32_t(float(alpha)*fade+.5f)<<24);} /* host 3rd-person mod only: player, hair and weapon fade while the chase camera sits inside them */ /* objitm.c:648: Waffenwerk unter pt_flg 0x1; nodes leer, wenn plp schlaeft (stflg 0x1000000 ohne pl_sleep_cnt) *//* game.c:63: bhDrawSmallScreenRenderTexture vor bhAllDrawModel desselben Bildes (bhEff111, gm_flg 0x200). */
             if(world){auto view=drawn_camera();if(events){const auto clip=world->camera_clip();view.clip_near=clip.near;view.clip_far=clip.far;const auto volume=world->clip_volume();view.clip_volume_x=volume.x;view.clip_volume_y=volume.y;}
              if(const auto rt=world->small_screen_pass(view)){
                 recvx::Scene screen;screen.background=scene.background;screen.triangles=stage_geometry;screen.ambient_writes=stage_ambient;screen.textures=scene.textures;
@@ -703,8 +703,8 @@ int main(int argc,char** argv){
             auto candidate=inventory;auto status=menu;status.reset(candidate);
             if(item){unsigned slot=1;for(;slot<12;++slot)if(recvx::Inventory::id(candidate.slots()[slot])==item)break;
                 if(slot==12){if(!candidate.acquire(item,getbulletmax[item][candidate.game_mode]))throw std::runtime_error("Inventar voll");slot=1;while(slot<12&&recvx::Inventory::id(candidate.slots()[slot])!=item)++slot;}
-                if(slot==12)throw std::runtime_error("Ausruestung nicht vorhanden");candidate.slots()[0]=slot;
-            }else candidate.slots()[0]=0;
+                if(slot==12)throw std::runtime_error("Ausruestung nicht vorhanden");candidate.slots()[0]=slot;candidate.wpnr_no=recvx::Inventory::weapon_number(candidate.slots()[slot],candidate.wpnr_no); /* Debug: Platz und gezogene Waffe wie WeaponSet */
+            }else{candidate.slots()[0]=0;candidate.wpnr_no=0;}
             inventory=std::move(candidate);menu=std::move(status);if(events){events->values[22]=inventory.slots()[0];events->menu_open=false;}
             combat=recvx::CombatController(args.data,args.mods);if(world&&!world->player_scripted){motion=42;animation=0;}return std::string(item?"Ausruestung angewendet":"Ausruestung abgelegt");
         };

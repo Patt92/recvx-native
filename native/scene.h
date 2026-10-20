@@ -157,6 +157,7 @@ struct SceneCamera {
     float clip_volume_x=320.0f,clip_volume_y=240.0f;
     std::array<std::uint32_t,16> hidden_objects{};
     std::uint16_t flags=0;
+    std::uint8_t key_frame=0; // CAM_WRK Byte 2: light.c:376/800 liest den Schnitt als CAM_KEYF_WORK, clp = 2 * (unsigned char)ci->frame
     std::uint32_t fog_color=0;float fog_near=0,fog_far=0; // RDT CAM_WRK b8/bc/c0, signed distances
     std::int8_t filter_no=0,filter_rate=0; // CAM_WRK fil_no/fil_rt (char, 0x51/0x52), gelesen unter flg 0x8000
     // Original CAM_WRK spd, am_spd and aa_spd; control runs at 30 Hz.

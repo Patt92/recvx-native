@@ -360,6 +360,18 @@ Scene PlayerAsset::sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS
     auto full=matrices(geometry.pose,position,yaw);
     return render_pose(std::move(geometry),std::move(full),matrices_out,face_param,live_model);
 }
+Scene PlayerAsset::sample_clip_root(const MotionClip& clip,std::int64_t frame_q16,const NJS_MATRIX& root,const std::vector<unsigned>& nodes,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const MorphSource* morph)const{
+    ModelGeometryOptions geometry;geometry.pose=local_pose_clip(clip,frame_q16,nodes,overrides);
+    if(morph)geometry.morph=*morph;
+    std::copy_n(root,16,geometry.transform);
+    const auto tree=tree_matrices(geometry.pose,root);std::vector<Matrix> full(tree.size());
+    for(std::size_t i=0;i<tree.size();++i)std::copy_n(tree[i].value,16,full[i].value);
+    return render_pose(std::move(geometry),std::move(full),matrices_out,nullptr);
+}
+Scene PlayerAsset::sample_root(std::size_t motion,std::int64_t frame_q16,const NJS_MATRIX& root,std::vector<BoneMatrix>* matrices_out,const ModelNodeOverrides& overrides,const MorphSource* morph)const{
+    if(!has_motion(motion))throw std::runtime_error("actor motion unavailable");
+    return sample_clip_root(*motions_.at(motion),frame_q16,root,{},matrices_out,overrides,morph);
+}
 std::vector<std::uint8_t> PlayerAsset::live_stream()const{
     std::vector<std::uint8_t> out=model_;
     BinaryView source(model_);const auto base=source.u16(4);const auto objects=source.relative(base,source.u32(12),bones()*52);

@@ -1123,7 +1123,7 @@ static bool step_en09_smoke(EffectSprite& s){
 bool hand_ported_effect_sprite(unsigned id){
     switch(id){
     case 110:case 133: // Besitzerprozeduren in RoomWorld, wie 111/134/137.
-    case 0:case 2:case 5:case 7:case 9:case 17:case 120:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 138:case 181:case 182:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
+    case 0:case 2:case 5:case 7:case 9:case 17:case 120:case 122:case 123:case 125:case 111:case 126:case 134:case 137:case 138:case 181:case 182:case 199:case 218:case 230:case 261:case 270:case 296:case 297:case 307:case 308:case 309:case 310:case 311:case 312:case 349:case 369:case 396:case 399:return true;
     default:return hand_procedure(id)!=nullptr;
     }
 }
@@ -1155,7 +1155,7 @@ bool ported_effect_atlas(unsigned group){
 bool step_effect_sprite(EffectSprite& sprite,bool* queued){
     // Die Tabellenprozeduren (effsub0/1/5/6) lesen keine Passflags; die aelteren
     // Schalterfaelle (Patronenhuelse, Flamme, Erzeuger 125) brauchen den Besitzerkontext.
-    if(hand_procedure(sprite.id)||sprite.id==369||sprite.id==396||sprite.id==399){const EffectContext none;return step_effect_sprite(sprite,none,queued);}
+    if(hand_procedure(sprite.id)||sprite.id==199||sprite.id==369||sprite.id==396||sprite.id==399){const EffectContext none;return step_effect_sprite(sprite,none,queued);} /* 199 liest keinen Kontext (effsub0.c:3478) */
     if(supported_effect_sprite(sprite.id))throw std::runtime_error("effect step requires native flag context");
     if(queued)*queued=false;return false;
 }
@@ -1214,6 +1214,7 @@ bool step_effect_sprite(EffectSprite& s,const EffectContext& c,bool* queued){
         case 126:step_eff126(s,entered);break;
         case 181:step_eff181(s);break;
         case 182:step_eff182(s,entered);break;
+        case 199:step_eff199(s,c,entered);break; // effsub0.c:3478 (native/effect_eff199.cpp)
         case 218:step_eff218(s,entered);break;
         case 230:step_eff230(s,entered);break;
         default:return false;

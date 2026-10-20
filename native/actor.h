@@ -93,6 +93,10 @@ public:
     // owP der Knoten first.. in `owp_mtx`; die uebrigen bleiben unberuehrt.
     void tree_window(const std::vector<ModelPose>& pose,const NJS_MATRIX& root,unsigned first,const std::vector<std::uint32_t>& owp_flg,std::vector<BoneMatrix>& owp_mtx)const;
     Scene sample_clip(const MotionClip& clip,std::int64_t frame_q16,NJS_POINT3 position={},Angle yaw=0,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const FaceParameter* face_param=nullptr,const MorphSource* morph=nullptr,const std::vector<std::uint8_t>* live_model=nullptr) const;
+    // Wie sample_clip, aber mit vorgegebener Wurzelmatrix statt T(position) * RY(yaw): bhCalcModel
+    // (MdlPut.c:242) mit flg 0x80 setzt lkwkp->owP[lkono].mtx * T(lox,loy,loz) * RXYZ(ax,ay,az).
+    Scene sample_clip_root(const MotionClip& clip,std::int64_t frame_q16,const NJS_MATRIX& root,const std::vector<unsigned>& nodes={},std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const MorphSource* morph=nullptr)const;
+    Scene sample_root(std::size_t motion,std::int64_t frame_q16,const NJS_MATRIX& root,std::vector<BoneMatrix>* matrices_out=nullptr,const ModelNodeOverrides& overrides={},const MorphSource* morph=nullptr)const;
     Scene sample_work(const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& matrices,const std::vector<unsigned>& flags,std::vector<BoneMatrix>* matrices_out=nullptr,const FaceParameter* face_param=nullptr,const std::vector<std::uint8_t>* live_model=nullptr,const MorphSource* morph=nullptr)const;
     // sp_evt.c:1478-1500: npRetSkinConvert, dann njCnkEasyDrawObject auf dem lokalen objP.
     // Keine Motionabtastung und kein npCalcSkin/owP; evalflags und Objekt-Skalierung bleiben wirksam.

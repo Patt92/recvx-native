@@ -34,11 +34,16 @@ public:
     std::string describe()const{return enabled()?"On":"Off";}
     const std::string& status()const{return status_;}
     std::function<void(const ThirdPersonSettings&)> changed;
+    // Distance along a unit ray to the first room wall, `range` when nothing is hit.
+    using RayQuery=std::function<float(NJS_POINT3 origin,NJS_POINT3 direction,float range)>;
     // Advance once per original 30-Hz game tick after locomotion.
     void tick(const SceneSpawn& actor,ThirdPersonState state,const RoomWorld* world);
+    void tick(const SceneSpawn& actor,ThirdPersonState state,const RayQuery& walls);
     // Returns the chase camera when active, otherwise `original` unchanged.
     SceneCamera view(const SceneCamera& original)const;
     bool active()const{return enabled()&&valid_&&state_.free;}
+    // Opacity of the player model: fades out when walls push the eye into the body.
+    float player_alpha()const{return active()?fade_:1.f;}
     void reset(){valid_=false;}
     static ThirdPersonSettings read(const std::filesystem::path& path);
     static void save(const std::filesystem::path& path,const ThirdPersonSettings& settings);
@@ -50,7 +55,9 @@ private:
     bool valid_=false;
     NJS_POINT3 eye_{},target_{},anchor_{};
     float yaw_=0;   // smoothed camera heading, radians
-    float swing_=0,lift_=0,swing_target_=0,lift_target_=0; // collision avoidance
+    float lift_=0;  // boom raised when a wall shortens it
+    float boom_=1;  // used boom length fraction: snaps in at walls, eases back out
     float blend_=0; // 0 explore .. 1 aim
+    float fade_=1;  // player opacity
 };
 }

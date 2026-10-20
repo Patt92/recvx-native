@@ -158,7 +158,7 @@ int main(){try{
     section("D01 Selektor 1 Combi_00 umgekehrt",[&]{
         {auto inv=clean();inv.slots()[2]=Inventory::pack(5,7);inv.slots()[3]=Inventory::pack(12,30);unsigned m=0,s=0;check(inv.combination_rule(2,3)==59&&inv.combine(2,3,&m,&s),"5 <- 12 refused");
             check(inv.slots()[2]==Inventory::pack(5,18)&&inv.slots()[3]==Inventory::pack(12,19),"reverse reload remainder differs");}
-        {auto inv=clean();inv.slots()[2]=Inventory::pack(12,10);inv.slots()[3]=Inventory::pack(95,1);inv.slots()[4]=Inventory::pack(5,7);inv.slots()[0]=4;unsigned m=0,s=0;check(inv.combine(4,2,&m,&s),"5 <- 12 (equipped) refused");
+        {auto inv=clean();inv.slots()[2]=Inventory::pack(12,10);inv.slots()[3]=Inventory::pack(95,1);inv.slots()[4]=Inventory::pack(5,7);inv.slots()[0]=4;inv.wpnr_no=3;unsigned m=0,s=0;check(inv.combine(4,2,&m,&s),"5 <- 12 (equipped) refused");
             check(inv.slots()[2]==Inventory::pack(95,1)&&inv.slots()[3]==Inventory::pack(5,17)&&inv.slots()[0]==3&&inv.weapon()==3,"consumed reserve before the equipped gun must lower pip[0] (subcsr 3)");}});
     section("D01 Selektor 2 Combi_01 Stapeln",[&]{
         {auto inv=clean();inv.slots()[2]=Inventory::pack(12,20);inv.slots()[3]=Inventory::pack(12,25);unsigned m=0,s=0;check(inv.combine(2,3,&m,&s),"12 + 12 refused");check(inv.slots()[2]==Inventory::pack(12,45)&&!inv.slots()[3],"ammo stacking differs");}
@@ -207,7 +207,7 @@ int main(){try{
     // D02 ItemSearch/EraseItem: EraseItem senkt pip[0] nur, wenn der Slot vor
     // dem ausgerüsteten liegt, und sortiert nur dann; sonst endet es sofort.
     section("D02 EraseItem über das Handbuch",[&]{
-        for(unsigned owner=0;owner<4;++owner){Inventory inv;inv.player=owner;std::fill(inv.slots(),inv.slots()+12,0);inv.slots()[1]=Inventory::pack(50,1);inv.slots()[2]=Inventory::pack(145,1);inv.slots()[3]=Inventory::pack(1,1);inv.slots()[0]=3;
+        for(unsigned owner=0;owner<4;++owner){Inventory inv;inv.player=owner;std::fill(inv.slots(),inv.slots()+12,0);inv.slots()[1]=Inventory::pack(50,1);inv.slots()[2]=Inventory::pack(145,1);inv.slots()[3]=Inventory::pack(1,1);inv.slots()[0]=3;inv.wpnr_no=20;
             inv.erase_read_manual(true);check(!inv.contains(145)&&inv.slots()[0]==2&&Inventory::id(inv.slots()[2])==1,"manual removal failed original EraseItem equipment decrement/sort");
             unsigned flags=0x4010;inv.pickup(12,flags,0,7);check(inv.slots()[0]==2&&inv.weapon()==20&&Inventory::id(inv.slots()[3])==12,"ammo pickup equipped the old knife slot");}
         {Inventory inv;inv.slots()[1]=Inventory::pack(145,1);inv.slots()[2]=Inventory::pack(1,1);inv.slots()[0]=2;inv.erase_read_manual(true);check(inv.slots()[1]==0&&Inventory::id(inv.slots()[2])==1&&inv.slots()[0]==1,"special slot must retain the original EraseItem/ItemSort semantics");}

@@ -441,6 +441,12 @@ public:
     void set_weapon_part2_hook(std::function<void()> hook){hide_weapon_part2_=std::move(hook);}
     // sys->obwp[0]/[1].mdflg 0x1 (objitm.c:364: nicht in sys->ob_hlg) beim Waffenmodellbesitzer.
     void set_weapon_models_hook(std::function<void(bool)> hook){weapon_models_hidden_=std::move(hook);}
+    // plp->lkwkp (obwp-Index), lkono, lox/loy/loz und flg 0x80 aus event.c:5263 bhObjLinkSetObjPly.
+    // bhSetPlayer (player.c:712/719) nullt lox..loz und lkwkp; der Raumbesitzer beginnt je Raum leer.
+    struct PlayerObjectLink{bool linked=false;unsigned object=0,node=0;NJS_POINT3 offset{};};
+    const PlayerObjectLink& player_object_link()const{return player_object_link_;}
+    // obwp[index].mlwP->owP[node].mtx des Raumbesitzers (wie enemy_joint_position fuer Gegner).
+    std::optional<BoneMatrix> object_node_matrix(unsigned index,unsigned node)const{return link_matrix(2,index,node);}
     void set_player_way(std::int16_t way){player_way_=way;} // plp->way, written by the combat pass (player.c:1707/4992)
     void set_player_speed(float spd){player_spd_=spd;} // plp->spd of the native action pass
     std::optional<float> take_player_speed(){if(!player_spd_written_)return std::nullopt;player_spd_written_=false;return player_spd_;}
@@ -887,7 +893,7 @@ private:
     WorldEntity* create_enemy_child(RECVX_ENEMY_WORK* parent,const RECVX_ENEMY_TEMPLATE& tmpl,unsigned base,RECVX_ENEMY_WORK* share);
     // eneset.c:797 bhDrawEnemy fuer die Kindworks aus bhSetEnemy (enemy_children_).
     // mirror: sys->st_flg 0x100 mit gueltigem njMirror, MdlPut.c:57/89 zeichnet jedes Kind ein zweites Mal.
-    void append_enemy_children(Scene& scene,bool mirror=false)const;
+    void append_enemy_children(Scene& scene,bool mirror=false,bool small_screen=false)const;
     // MdlPut.c:40: der Spiegelaufruf liegt im Zweig mlwP->flg & 0x80; mlwP->flg ist das Statusbyte
     // [3] des MDL-Kopfes (binfunc.c:13/34 bhMlbBinRealize).
     bool put_model_cnk(const Model& model)const;
@@ -1000,6 +1006,9 @@ private:
     // bhSetEffect (effect.c:331) / bhSetEffectTb ohne die Prozedurpruefung.
     int allocate_effect(const EffectSpawn& spawn,unsigned link_kind,unsigned link_index);
     std::function<void()> hide_weapon_part2_;std::function<void(bool)> weapon_models_hidden_;
+    PlayerObjectLink player_object_link_{};
+    // MdlPut.c:242 bhCalcModel(plp) mit flg 0x80: obwp[lkwkp].owP[lkono].mtx * T(lox,loy,loz) * RXYZ(ax,ay,az).
+    bool player_link_root(NJS_MATRIX& root)const;
     unsigned player_weapon_=0,effect_yk_ct_=0,presentation_flags_=~0u; // system.c initializes pt_flg to ~0u
     unsigned stage_no_=0,room_no_=0; // sys->stg_no/rom_no aus dem Raumnamen (RoomIdentity)
     unsigned enemy_count_=0; // rom->ene_n

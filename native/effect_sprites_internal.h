@@ -225,4 +225,6 @@ NJS_VECTOR snow_wind_vector();
 struct HandEffectProcedure {unsigned id;void (*step)(EffectSprite& s,const EffectContext& c,bool& queued);};
 extern const HandEffectProcedure hand_effect_procedures[];
 extern const std::size_t hand_effect_procedure_count;
+// effsub0.c:3478 bhEff199 (native/effect_eff199.cpp): zeichnet im Steuerpass, haelt keinen Satzzustand.
+void step_eff199(EffectSprite& s,const EffectContext& c,bool& queued);
 }

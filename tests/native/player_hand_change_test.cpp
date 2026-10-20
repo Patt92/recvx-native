@@ -8,8 +8,8 @@
 //     njCalcPoint(owP[lkono].mtx, lox) aus objitm.c:338.
 // Waffenmodelle: CombatController zeichnet bei mdflg 0x1 weder obwp[0] noch obwp[1]
 // (objitm.c:364), bhSetWeapon (weapon.c:130) nullt das Flag beim Laden einer Waffe.
-// Diagnostische Aufstellungen sind gekennzeichnet: Waffe 1 (Feuerzeug) wird per
-// set_player_weapon gesetzt, die Fehlbedienungen mit Objekt 2 und 200 sind konstruiert.
+// Diagnostische Aufstellungen sind gekennzeichnet: das Feuerzeug laeuft ueber ein
+// eingesetztes Skript 1, die Fehlbedienungen mit Objekt 2 und 200 sind konstruiert.
 #include "world.h"
 #include "room.h"
 #include "combat.h"
@@ -72,31 +72,54 @@ int main(int argc,char** argv){try{
         // Ablegen ohne vorherige Verknuepfung laesst px stehen.
         const auto before=a->transform.position;check(f.world.bind(f.command(3044,1))&&near(a->transform.position,before),"zweites Ablegen verschiebt das Objekt");
     }
-    {   // Diagnose: gezogenes Feuerzeug (plp->wpnr_no 1) hat nativ keinen getrennten Besitzer.
-        Fixture f(data);f.bind_owner();f.world.set_player_weapon(1);
-        check(f.world.bind(f.command(412,0))&&gap(f.world,"Feuerzeug parken"),"Feuerzeug-Zweig nicht als Luecke gemeldet");
-        Fixture g(data);g.bind_owner();g.world.set_player_weapon(2);
-        check(g.world.bind(g.command(412,0))&&!gap(g.world,"Feuerzeug parken"),"Feuerzeug-Luecke bei anderer Waffe gemeldet");
+    {   // event.c:7416-7465 Feuerzeug parken. Diagnose: die Befehlsbytes stehen am Anfang von Skript 1
+        // (danach bhEnd), die Bindung geht an den echten Raumbesitzer. Gezogene Waffe 1 = Feuerzeug.
+        Fixture f(data);f.bind_owner();
+        const auto run=[&](EventVm& vm,std::uint8_t v2){auto room=f.bytes;const auto base=inspect_room(room).event_offset;const BinaryView v(room);
+            const auto script=base+v.u32(base+8+4);const std::uint8_t code[]={0xAF,10,11,v2,0x00};for(unsigned i=0;i<5;++i)room[script+i]=code[i];
+            EventVm local(room,f.inv,f.dialog);local.binding=[&](const EventCommand& c){return f.world.bind(c);};local.inherit_progress(vm);
+            local.start(0,1);local.tick();vm.inherit_progress(local);};
+        f.inv.wpnr_no=1;run(f.events,0);
+        check(f.inv.wpnr_no==0&&f.events.parked_wpnr_no==1,"Feuerzeug: plp->wpnr_no 0, bhEtask[1].wpnr_no 1");
+        check(f.world.state(2,10)->linked,"Feuerzeug-Fall muss die Handobjekte trotzdem nehmen");
+        run(f.events,1);check(f.inv.wpnr_no==1&&f.events.parked_wpnr_no==0,"Ablegen gibt das Feuerzeug nicht zurueck");
+        f.inv.wpnr_no=2;run(f.events,0);check(f.inv.wpnr_no==2&&f.events.parked_wpnr_no==0,"andere Waffe darf nicht geparkt werden");
+        run(f.events,1);check(f.inv.wpnr_no==2,"Ablegen ohne geparktes Feuerzeug darf die Waffe nicht aendern");
+        // bhEtask ist global: das geparkte Feuerzeug ueberlebt einen Raumwechsel (neue EventVm).
+        f.inv.wpnr_no=1;run(f.events,0);EventVm next(f.bytes,f.inv,f.dialog);next.inherit_progress(f.events);
+        check(next.parked_wpnr_no==1,"bhEtask[1].wpnr_no geht beim Raumwechsel verloren");
+        check(!gap(f.world,"Feuerzeug"),"Feuerzeug-Fall meldet noch eine Luecke");
     }
     {   // Diagnose: obwp 0..3 (Waffen/Haar) und Indizes ausserhalb rom->obj_n sind keine Raumobjekte.
         Fixture f(data);f.bind_owner();
+        // bhSetDispObj (0x20) auf obwp[2] legt den Eintrag an; das Haarwerk bleibt trotzdem ausgeschlossen.
+        check(f.world.bind({0x20,0,0,0,{0x20,2,2,1}})&&f.world.state(2,2),"Vorbedingung: obwp[2]-Eintrag nach 0x20");
         check(!f.world.bind(f.built(2,10,0))&&!f.world.bind(f.built(10,200,0)),"Waffen-/Haarwerk bzw. fehlendes Objekt gebunden");
         check(gap(f.world,"kein geladenes Raumobjekt")&&!f.world.state(2,10)->linked&&!f.combat.weapon_models_hidden(),"Fehlbedienung veraendert Zustand");
     }
-    {   // Waffenmodellbesitzer: beide Modelle aus der Zeichenliste, Reset beim Laden einer Waffe.
+    {   // Waffenmodellbesitzer (Waffen ungeladen aufgenommen wie im Original zulaessig): beide Modelle aus der Zeichenliste, Reset beim Laden einer Waffe.
         Fixture f(data);
-        check(f.inv.acquire(8,15,0),"Handfeuerwaffe nicht aufgenommen");
+        check(f.inv.acquire(8,0,0),"Handfeuerwaffe nicht aufgenommen");
         unsigned slot=0;for(unsigned i=1;i<12;++i)if(Inventory::id(f.inv.slots()[i])==8)slot=i;
         check(slot&&f.inv.equip(slot)&&f.inv.weapon()==2,"Waffe 2 nicht ausgeruestet");
         f.combat.tick({},false,f.inv,f.player,f.actor,f.motion,f.frame,&f.world,f.audio,&f.events);
         const auto nodes=f.player.pose(f.motion,f.frame,f.actor.position,f.actor.yaw);
-        const auto count=[&](bool scripted){Scene s;f.combat.append(s,nodes,scripted);return s.triangles.size();};
+        const auto count=[&](bool){Scene s;f.combat.append(s,nodes,&f.world);return s.triangles.size();};
         check(count(false)>0,"Waffe 2 zeichnet ohne Flag nichts");
+        // Skriptsteuerung oder Gegnergriff tauschen das Waffenwerk nicht (nur bhReadWeaponData tut das):
+        // gezeichnet wird genau das Modell von Waffe 2, nicht das von Waffe 0.
+        {const auto weapon2=WeaponAsset::load(data,f.inv.player,2),weapon0=WeaponAsset::load(data,f.inv.player,0);
+         Scene a,b;weapon2.append(a,f.player.script_nodes(nodes));weapon0.append(b,f.player.script_nodes(nodes));
+         check(a.triangles.size()!=b.triangles.size(),"Vorbedingung: Waffe 0 und 2 unterscheidbar");
+         f.world.player_scripted=true;check(count(true)==a.triangles.size(),"Skriptsteuerung zeichnet nicht das ausgeruestete Waffenwerk");f.world.player_scripted=false;}
+        // objitm.c:648: Waffenwerke (id 1210) nur unter sys->pt_flg 0x1.
+        f.world.set_presentation_flags(~0u&~1u);check(count(false)==0,"pt_flg ohne 0x1: Waffe wird trotzdem gezeichnet");
+        f.world.set_presentation_flags(~0u);check(count(false)>0,"pt_flg 0x1: Waffe fehlt");
         f.combat.set_weapon_models_hidden(true);
         check(count(false)==0&&count(true)==0,"mdflg 0x1: Waffenmodelle werden trotzdem gezeichnet");
         f.combat.tick({},false,f.inv,f.player,f.actor,f.motion,f.frame,&f.world,f.audio,&f.events);
         check(count(false)==0,"Kampfpass ohne Waffenwechsel darf das Flag nicht loeschen");
-        check(f.inv.acquire(9,10,0),"zweite Waffe nicht aufgenommen");
+        check(f.inv.acquire(9,0,0),"zweite Waffe nicht aufgenommen");
         unsigned other=0;for(unsigned i=1;i<12;++i)if(Inventory::id(f.inv.slots()[i])==9)other=i;
         check(other&&f.inv.equip(other)&&f.inv.weapon()==4,"Waffe 4 nicht ausgeruestet");
         f.combat.tick({},false,f.inv,f.player,f.actor,f.motion,f.frame,&f.world,f.audio,&f.events);

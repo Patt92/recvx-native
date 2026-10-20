@@ -164,8 +164,9 @@ int main(int argc,char** argv){try{
     section("D06 Inventory::script_item_* (event.c)",[]{
         for(unsigned owner=0;owner<4;++owner)for(bool bag:{false,true}){
             const std::string at=" owner="+std::to_string(owner)+" bag="+std::to_string(bag);
-            Inventory state;state.player=owner;state.side_pack=bag;state.items.fill(0);state.slots()[0]=1;state.slots()[1]=Inventory::pack(55,1);
-            state.script_item_give(owner,34,2);check(state.slots()[0]==2&&state.slots()[2]==(Inventory::pack(34,500)|0x8000000)&&state.weapon()==8&&state.partner_weapon[owner]==8,"bhItemGetGet lost bank, ammo, lock, equipment or ply_wno"+at);
+            Inventory state;state.player=owner;state.side_pack=bag;state.items.fill(0);state.slots()[0]=1;state.slots()[1]=Inventory::pack(55,1);state.wpnr_no=1; /* Feuerzeug ausgeruestet UND gezogen */
+            // event.c:7741 bhItemGetGet schreibt pip[0] und ply_wno[v0], nicht plp->wpnr_no: die gezogene Waffe bleibt.
+            state.script_item_give(owner,34,2);check(state.slots()[0]==2&&state.slots()[2]==(Inventory::pack(34,500)|0x8000000)&&state.weapon()==1&&state.partner_weapon[owner]==8,"bhItemGetGet lost bank, ammo, lock, equipment or ply_wno"+at);
             state.script_item_change(34,33);check(state.slots()[2]==Inventory::pack(33,0)&&state.slots()[0]==2,"bhPlItemChangeM must clear quantity and packed flags"+at);
             state.script_item_amount(33,0x1234);check(state.slots()[2]==Inventory::pack(33,0x1234),"bhPlItemTamaSet amount wrong"+at);
             state.script_item_give_ex(owner,33,0,7);check(state.slots()[3]==Inventory::pack(33,7)&&state.slots()[0]==3,"bhItemGetGetEx loses shotgun increment/equipment"+at);
@@ -215,8 +216,8 @@ int main(int argc,char** argv){try{
         auto execute=[&](Inventory& state,std::vector<std::uint8_t> code){auto bytes=fixture();bytes[1118]=0;code.insert(code.end(),{5,4,31,0,0,0,0xff,0});std::copy(code.begin(),code.end(),bytes.begin()+1180);MessageDialog text;EventVm event(bytes,state,text);event.start(0,0);event.tick();
             check(event.errors.empty()&&event.flag(4,31),"inventory event operand boundary/regression");
             check(event.pending_bindings.empty(),"opcode still reported as unbound: 0x"+[&]{char b[8];std::snprintf(b,sizeof b,"%02x",code.front());return std::string(b);}());};
-        for(unsigned owner=0;owner<4;++owner){Inventory state;state.player=owner;state.items.fill(0);state.slots()[0]=1;state.slots()[1]=Inventory::pack(55,1);
-            execute(state,{0xb2,std::uint8_t(owner),34,2});check(state.slots()[0]==2&&state.slots()[2]==(Inventory::pack(34,500)|0x8000000)&&state.weapon()==8,"0xb2 through the VM did not give the item");
+        for(unsigned owner=0;owner<4;++owner){Inventory state;state.player=owner;state.items.fill(0);state.slots()[0]=1;state.slots()[1]=Inventory::pack(55,1);state.wpnr_no=1;
+            execute(state,{0xb2,std::uint8_t(owner),34,2});check(state.slots()[0]==2&&state.slots()[2]==(Inventory::pack(34,500)|0x8000000)&&state.weapon()==1&&state.partner_weapon[owner]==8,"0xb2 through the VM did not give the item");
             execute(state,{0xc7,34,33,0});check(state.slots()[2]==Inventory::pack(33,0),"0xc7 through the VM did not change the item");
             execute(state,{0xc9,33,0x34,0x12});check(state.slots()[2]==Inventory::pack(33,0x1234),"0xc9 through the VM is not little endian");
             execute(state,{0xc2,std::uint8_t(owner),33,0,7,0});check(state.slots()[3]==Inventory::pack(33,7)&&state.slots()[0]==3,"0xc2 through the VM did not give the item");

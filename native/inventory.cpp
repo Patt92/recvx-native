@@ -72,6 +72,18 @@ void Inventory::erase(unsigned slot){
     --slots()[0];
     compact();
 }
+unsigned Inventory::weapon_number(std::uint32_t entry,unsigned previous){
+    const auto item=id(entry);const auto flags=(entry>>16)&0x7000;
+    switch(item){
+    case 0:return 0;case 1:return 20;case 2:return 12;case 3:return 13;case 4:return 11;case 5:return 3;
+    case 6:return flags==0x1000?15:flags==0x2000?16:flags==0x4000?17:14;
+    case 7:return (flags&0x2000)?19:10;
+    case 8:return 2;case 9:return 4;case 10:return 5;case 11:return 18;
+    case 32:return 6;case 33:return 7;case 34:return 8;case 55:return 1;
+    case 131:return 3;case 142:return 9;
+    default:return previous; // keine eigene Nummer: plp->wpnr_no bleibt
+    }
+}
 void Inventory::weapon_set(unsigned slot,unsigned lt_c,unsigned previous){
     // WeaponSet: Waffennummer aus der ID (Sorte für 6/7); ergibt sie dieselbe
     // Nummer, die der Spieler schon trägt, rüstet derselbe Slot ab. `previous`
@@ -80,19 +92,11 @@ void Inventory::weapon_set(unsigned slot,unsigned lt_c,unsigned previous){
     // Tausch, plp->wpnr_no steht dann noch auf der alten Waffe). IDs ohne eigene
     // Nummer lassen sie unverändert. Die Inventory meldet den Wechsel über
     // take_weapon_change(); der Kampfbesitzer setzt plp->wpnr_no/mode3.
-    const auto entry=slots()[slot];const auto item=id(entry);const auto flags=(entry>>16)&0x7000;
-    unsigned next=previous;bool special=false;
-    switch(item){
-    case 0:next=0;break;case 1:next=20;break;case 2:next=12;break;case 3:next=13;break;case 4:next=11;break;case 5:next=3;break;
-    case 6:next=flags==0x1000?15:flags==0x2000?16:flags==0x4000?17:14;break;
-    case 7:next=(flags&0x2000)?19:10;break;
-    case 8:next=2;break;case 9:next=4;break;case 10:next=5;break;case 11:next=18;break;
-    case 32:next=6;break;case 33:next=7;break;case 34:next=8;break;case 55:next=1;break;
-    case 131:next=3;special=true;break;case 142:next=9;break;
-    default:break;
-    }
+    const auto entry=slots()[slot];
+    unsigned next=weapon_number(entry,previous);bool special=id(entry)==131;
     if(next==previous&&slots()[0]==lt_c){next=0;slots()[0]=0;special=false;}
     else slots()[0]=lt_c;
+    wpnr_no=next; // sub1.c:4471-4572: plp->wpnr_no im switch, beim Abruesten 0
     weapon_change_={true,next,special};
 }
 PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,unsigned room,unsigned mode,int answer,bool busy){
@@ -220,7 +224,7 @@ PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,un
         // Sonderslot: pip[1] erhält das Item; lag die Ausrüstung dort, wird sie
         // gelöst (plp->mode3/wpnr_no = 0, mn_mode0 = 3 beim Kampfbesitzer).
         slots()[1]=(std::uint32_t(item)<<16)|getbulletmax[item][game_mode];
-        if(slots()[0]==1){slots()[0]=0;weapon_change_={true,0,false};}
+        if(slots()[0]==1){slots()[0]=0;wpnr_no=0;weapon_change_={true,0,false};} /* sub1.c:4153 */
         control&=~0x1000000u;result.granted=true;
     }
     return result;
@@ -379,22 +383,17 @@ unsigned Inventory::switch_player(unsigned target){
     // keyed by the still-active ply_id.
     ply_stflg[previous]=player_stflg();
     ply_hp[previous]=hp;
-    partner_weapon[previous]=std::uint8_t(weapon());
+    partner_weapon[previous]=std::uint8_t(wpnr_no); // system.c:1747 ply_wno[ply_id] = plp->wpnr_no
     // sys->ply_id = sys->cng_pid; bhResetPlayer then restores the new player.
     player=target;
     hp=ply_hp[player];
     set_player_stflg(ply_stflg[player]);
+    wpnr_no=partner_weapon[player]; // system.c:1787 plp->wpnr_no = ply_wno[ply_id] (danach bhReadWeaponData)
     return previous;
 }
 unsigned Inventory::occupied()const{unsigned n=0;for(unsigned i=2;i<12;++i)if(auto item=id(slots()[i]))n+=(itemdata[item].type&0x100)?2:1;return n;}
 bool Inventory::contains(unsigned item)const{for(unsigned i=1;i<12;++i)if(id(slots()[i])==item)return true;return false;}
-unsigned Inventory::weapon()const{
-    if(!slots()[0]||slots()[0]>=12)return 0;
-    const auto value=slots()[slots()[0]],item=id(value),flags=(value>>16)&0x7000;
-    switch(item){case 1:return 20;case 2:return 12;case 3:return 13;case 4:return 11;case 5:case 131:return 3;
-    case 6:return flags==0x1000?15:(flags==0x2000?16:(flags==0x4000?17:14));case 7:return flags==0x2000?19:10;
-    case 8:return 2;case 9:return 4;case 10:return 5;case 11:return 18;case 32:return 6;case 33:return 7;case 34:return 8;case 55:return 1;case 142:return 9;default:return 0;}
-}
+
 bool Inventory::equip(unsigned slot){
     // ItemCommand "Ausrüsten" -> WeaponSet(slot, slot): erneutes Ausrüsten
     // derselben Waffe am selben Slot rüstet ab.
@@ -710,7 +709,7 @@ bool Inventory::transform(unsigned slot,unsigned expected,unsigned replacement){
     if(slots()[0]==slot&&(!replacement||!(itemdata[replacement].type&1)))slots()[0]=0;
     if(occupied()>capacity()){items=saved;return false;}return true;
 }
-bool Inventory::deposit(unsigned slot,unsigned box){if(slot<2||slot>=12||box!=64||!id(slots()[slot]))return false;unsigned i=0;while(i<128&&items[box+i])++i;if(i==128)return false;items[box+i]=slots()[slot];slots()[slot]=0;if(slots()[0]==slot)slots()[0]=0;compact();return true;}
+bool Inventory::deposit(unsigned slot,unsigned box){if(slot<2||slot>=12||box!=64||!id(slots()[slot]))return false;unsigned i=0;while(i<128&&items[box+i])++i;if(i==128)return false;items[box+i]=slots()[slot];slots()[slot]=0;if(slots()[0]==slot){slots()[0]=0;wpnr_no=0;} /* wie ItemBoxChange sub1.c:7929-7931 */compact();return true;}
 bool Inventory::withdraw(unsigned index,unsigned box){if(box!=64||index>=128||!items[box+index])return false;auto item=items[box+index];if(!acquire(id(item),quantity(item),(item>>16)&0xff00))return false;items[box+index]=0;return true;}
 bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* out){
     // ItemBoxChange nach dem Original-Maschinencode (0x002A53E0; die Decomp ist
@@ -760,7 +759,7 @@ bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned st
         if(slots()[0]==lt_c){
             // Ausgerüstete Waffe verlässt die Tasche: pip[0] = 0, plp->mode3 =
             // plp->wpnr_no = 0, sys->mn_mode0 = 3 (Kampfbesitzer über weapon_change).
-            slots()[0]=0;weapon_change_={true,0,false};
+            slots()[0]=0;wpnr_no=0;weapon_change_={true,0,false}; /* sub1.c:7929-7931 */
         }
         bxp[index]=pocket;
         slots()[lt_c2]=incoming;

@@ -153,7 +153,7 @@ ModelNodeOverrides CombatController::pose_overrides(const PlayerAsset&,std::size
 bool CombatController::tick(CombatControls input,bool blocked,Inventory& inventory,PlayerAsset& player,SceneSpawn& actor,std::size_t& motion,std::int64_t& frame,RoomWorld* world,AudioMixer& audio,EventVm* events){
     body_=&player;
     const auto weapon=inventory.weapon();if(weapon!=weapon_||inventory.player!=player_){original_.reset();weapon_=weapon;player_=inventory.player;asset_.reset();right_part2_hidden_=false;weapon_models_hidden_=false;
-        if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);bare_hands_=weapon?WeaponAsset::load(data_,inventory.player,0,mods_):asset_;}}
+        if(weapon<=20&&!data_.empty()){asset_=WeaponAsset::load(data_,inventory.player,weapon,mods_);if(weapon)player.install_weapon_motions(asset_->motions);}}
     const bool supported=weapon_==2||weapon_==3||weapon_==4||weapon_==5||weapon_==6||weapon_==7||weapon_==8||weapon_==9||weapon_==12||weapon_==13||
         weapon_==14||weapon_==15||weapon_==16||weapon_==17|| // Granatwerfer: Abschuss player.c:4990, Geschoss bhEff130
         weapon_==18||weapon_==20|| // Raketenwerfer (bhEff130 type 4), Linear Launcher (type 6, bhEff027 pwksub.c:3126)
@@ -341,10 +341,15 @@ const std::set<std::string>& CombatController::unbound_routines()const{
     if(original_)reported_.insert(original_->unavailable.begin(),original_->unavailable.end());
     return reported_;
 }
-void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,bool scripted,const RoomWorld*)const{
-    if(bones.empty())return;
+// obwp[0]/[1] (bhSetWeapon: id 1210, flg 0x81 an plp) zeichnet bhDrawObjItm aus sys->ob_hlg mit
+// bhDrawObject (objitm.c:364, :648): nur mit sys->pt_flg 0x1, ohne mdflg 0x1, und nicht bei
+// plp->stflg 0x1000000 ohne pl_sleep_cnt (dann liefert der Aufrufer keine Knoten). Es ist immer
+// das geladene Waffenwerk; einen Tausch bei Skriptsteuerung oder Gegnergriff hat das Original nicht,
+// das Modell wechselt nur ueber bhReadWeaponData (Ausruesten, bhArmsItemChange, Spielstart).
+void CombatController::append(Scene& scene,const std::vector<BoneMatrix>& bones,const RoomWorld* world)const{
+    if(bones.empty()||!asset_)return;
+    if(world&&!(world->presentation_flags()&1u))return;
     const auto hands=body_?body_->script_nodes(bones):bones;
-    if(scripted){if(bare_hands_)bare_hands_->append(scene,hands,false,weapon_models_hidden_);}
-    else if(asset_)asset_->append(scene,hands,right_part2_hidden_,weapon_models_hidden_);
+    asset_->append(scene,hands,right_part2_hidden_,weapon_models_hidden_);
 }
 }

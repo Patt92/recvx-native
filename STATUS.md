@@ -859,6 +859,10 @@ Schritten zurueck. Belegt RM_1000 Spawn 1 (Tor 2 Einheiten hinter Claire, Gang b
 dabei nicht ab (Raumscan: Abschalten nur bei st_flg 0x4 Treppe/Stufe und Ereigniskameras). Drei Versuche (Schwenk <= 90 Grad, Blick in
 Laufrichtung, Anheben vor Zurueckziehen) loesen die Engstelle nicht: dort ist hinten und seitlich kein Platz, Claire faellt aus dem Bild.
 Auf HEAD zurueckgesetzt; Versuchsstand $TMPDIR/tpd/third_person.experiment.cpp. **Vom Nutzer 2026-10-18 als Luecke zurueckgestellt.**
+**2026-10-20 behoben (nur Arbeitsbaum/Build, nicht ausgeliefert):** Ausweichschwenk entfernt; Arm bleibt hinter dem Spieler, wird
+an Waenden gekuerzt und angehoben, Schulterversatz schrumpft mit, Spieler/Haare/Waffe blenden bei nahem Auge aus (Alpha bis 0.2).
+Raumeintrittsscan (jeder 6. Raum, Spawn 0/1, 30 Takte): Kamera vor Claire 10 -> 0, hinter 8 -> 52 von 53 freien Faellen.
+Test `third_person_camera_mod` (Wand hinter Spawn; Gegenprobe gegen alten Stand rot), CTest 173/173.
 
 **2026-10-18, Kamerafilter (Dev-App 09:46, CTest 125/125):** Raumeffekt-Luecken neu vermessen: von 89 Raumtabellen-IDs ohne Handport
 sind 77 im Original `bhEffDmy` (ids 30-84, loeschen sich) oder id >= 400 (bhControlEffect setzt flg 0, effect.c:846); echte Luecken 12.
@@ -1142,6 +1146,55 @@ div.s durch 0xCF000000) ergeben einen POSITIVEN Wert in [0,1]; en01_core.c rechn
 Geschwindigkeit der ExpLeg-/ExpWorm-Splitter lagen dadurch unter dem Originalbereich. Alle anderen Gegnerports
 waren schon positiv. Neuer Test enemy_en01_exp_effect (428 Pruefungen), Gegenprobe alter Ausdruck rot.
 Der Worktree selbst ist verworfen. **Kein Commit/Push.**
+(ax) 0xAF bhPlyHandChange (event.c:7378) gebunden statt nur gemeldet: zwei Raumobjekte haengen an den Haenden
+(lkono 9/13, flg 0x80, stflg 0x1000000) und die Waffenmodelle obwp[0]/[1] verschwinden per mdflg 0x1 aus der
+Zeichenliste (neuer Besitzer CombatController, Ruecksetzen durch gameover.c:304 und beim Laden einer Waffe).
+Ablegen laesst das Objekt an der letzten Handlage. Daten: RM_9110, RM_9140, RM_9260. Offen und benannt: das
+Parken eines gezogenen Feuerzeugs, weil plp->wpnr_no nativ nicht vom Inventarplatz getrennt ist. Test
+player_hand_change mit echten RM_9110-Bytes, acht Gegenproben rot. **Kein Commit/Push.**
+(ay) Waffe in Zwischensequenzen und beim Gegnergriff korrigiert: der Port zeichnete bei Skriptsteuerung das
+Modell von Waffe 0 (leere Haende) statt der ausgeruesteten Waffe — Ersatzlogik vom 2026-10-05, schon damals
+ohne Originalbeleg vermerkt. Das Original wechselt das Waffenmodell nur ueber bhReadWeaponData (Ausruesten,
+bhArmsItemChange, Spielstart) und zeichnet es unter pt_flg 0x1 (objitm.c:364/:648); dieses Tor fehlte nativ
+ebenfalls. Test player_hand_change erweitert, zwei Gegenproben rot. Offen: 0x27 bhArmsItemChange nativ
+falsch abgebildet (loescht den Inventarplatz), braucht einen eigenen plp->wpnr_no-Besitzer. **Kein Commit/Push.**
+(az) Gezogene Waffe plp->wpnr_no vom ausgeruesteten Platz pip[0] getrennt (Inventory::wpnr_no). Vorher leitete
+der Port die Waffe aus dem Platz ab. Jetzt schreiben WeaponSet/GetItem/ItemBoxChange beides, bhArmsItemSet 0xC1
+und bhSv 22 nur den Platz, bhArmsItemChange 0x27 / bhSv 18 / 0xAF nur die Waffe; Spielerwechsel und Spielstand
+fuehren sie ueber ply_wno. Damit behoben: 0x27 mit 0 loeschte den Inventarplatz, andere Werte wirkten nicht; und
+das Feuerzeug-Parken aus 0xAF ist portiert (0xAF jetzt vollstaendig). Grenze: bhSv 18 laedt im Original kein
+neues Waffenmodell, nativ schon (im Raumscan nie erreicht). Vier Tests setzten nur pip[0] in der Aufstellung
+und sind ergaenzt bzw. auf das Original korrigiert. CTest 172/172, fuenf waffenrelevante Laufzeitpruefungen
+gruen, acht Gegenproben rot. [Logs](build/validation/wpnr-no-20261020/). **Kein Commit/Push.**
+(ba) 0x97 bhEffectKokuenSet korrigiert und 0xAA bhEffUVSet2 portiert. 0x97 stand ungeprueft im Arbeitsbaum und
+setzte den Rauch an die Weltlage des Taskworks; das Original nimmt die lokale Lage von objP[0]. 0xAA schreibt
+UVs als 28-Byte-H-Eckpunkte nach op->pv; bei Effekten ohne H-Eckpunkte reicht das in tv hinein. Einzige
+Datenstelle RM_9180 (Vollbildfilter bhEffFil): dort aendert das Original damit tv[1].u - nativ jetzt ebenso.
+Test event_kokuen, sechs Gegenproben rot. Damit noch uebersprungen: 0x6F, 0x82, 0xD3. **Kein Commit/Push.**
+(bb) 0x6F bhObjLinkSetObjPly portiert: das Skript haengt die Spielerin an einen Objektknoten, bhCalcModel(plp)
+baut ihre Wurzel dann aus obwp[lkwkp].owP[lkono] * T(lox,loy,loz) * RXYZ(ax,ay,az) (MdlPut.c:242). Nativ
+PlayerObjectLink + PlayerAsset::sample_root in RoomWorld::sample_player. Einzige Datenstellen RM_4011 (Objekt 6,
+Knoten 3, skriptgesteuert). Offen und benannt: Bindung im freien Spielerpass (in den Daten nicht vorhanden).
+Test player_object_link mit echten Bytes, sechs Gegenproben rot. Uebersprungen bleiben nur 0x82 (Debugkamera, in
+den Daten unbenutzt) und 0xD3 (Battle-Game-Rangliste). **Kein Commit/Push.**
+(bc) Offene Lichtluecken und parallele Aufgaben (2026-10-20). (1) Bildschirm-Clipping der Punktlichter (light.c:789-808)
+portiert: ohne Ereigniskamera und mit cutp[cam.ncut].cam[0].flg 0x10 faellt ein Punktlicht ausserhalb des 640x480-Fensters
+mit Rand 2*(u8)ci->frame (CAM_WRK Byte 2, SceneCamera::key_frame) weg, ohne einen der drei Plaetze zu belegen; 14 Schnitte in
+11 Raeumen tragen das Flag. Das Monitorbild zeichnet unter gm_flg 0x80 (screen.c:947) mit dem Einzellicht und ist nicht
+betroffen. Linktod lkflg 1..4/default war schon in control_lights, die Ledgerzeile sagte es nicht. Test light_clip
+(RM_0000-Bytes, eigene Projektionsrechnung), fuenf Gegenproben rot. (2) bhAllEasyDrawModel (game.c:391-403) ruft kein
+bhDrawEneObject: der Monitorpass laesst en_obj-Works (flg 0x80000000) jetzt weg; kein Datenfall (en_obj nur RM_7120/9290,
+Monitore nur RM_1050/7030), kein Test. (3) Parallel durch Unteragenten, nachgeprueft: bhEff199 (effsub0.c:3478) als
+native/effect_eff199.cpp mit Test effect_eff199, partial (Ps2_ptcl_spr_flag, Steuerpass-Zeichnung); in Daten/Skripten
+unerreichbar. Effekt 298 bhEff_E00_AcidGenerator ist seit 2026-10-16 portiert — der Hinweis "bhEff298 unportiert" oben
+(EN19-Eintrag) ist veraltet, ebenso "EN14-Luecken": Inventur ergab alle EN14-Dienste gebunden, EN14 nur in RM_5810/9302
+(Typ 0), neuer Test enemy_en14_world; dessen erste Erwartungen widersprachen dem Original (en14.c:297 loescht flg 0x10,
+bhSetMotion laeuft im selben Pass) und wurden korrigiert. (4) bhDrawObject/bhDrawObjItm mdflg 0x10 (ETTY flg 0x80000000,
+objitm.c:164/:228) portiert: unter st_flg 0x2 zeichnen diese Objekte/Items ohne Nebel (:664-676/:565-567; nicht ob_spc);
+23 Objekte und 5 Items in 23 Raeumen tragen das Bit (u. a. RM_0090 Objekt 20, RM_0000 Item 0). mdflg 0x8 njControl3D(0x2500)
+ist wirkungslos (ps2_NinjaCnk.c:205-215 liest 0x2000/0x400 nicht). Test object_cut_restriction Abschnitt 3, zwei Gegenproben
+rot. [Logs](build/validation/light-clip-20261020/), [eff199](build/validation/eff199-20261020/),
+[Nebel](build/validation/object-fog-20261020/). **Kein Commit/Push.**
 
 **2026-10-19, Greif-und-Dreh-Statue (bhObj007 + bhCPM2_act_rpsh) portiert (Dev-App via `./build.sh --test`, CTest 158/158):**
 Nutzerbefund "ich kann die Statue nicht drehen" (als RM_1050 gemeldet). Ursache: der Greif-und-Dreh-Gegenstand ist **unportiert** — bhObj007

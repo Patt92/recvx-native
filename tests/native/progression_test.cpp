@@ -92,7 +92,7 @@ int main(int argc,char** argv){try{
         {auto inv=pocket();inv.slots()[2]=Inventory::pack(5,18);inv.slots()[3]=Inventory::pack(95,1);inv.slots()[0]=2;inv.items[64]=Inventory::pack(21,1);unsigned message=0;
             check(inv.box_change(2,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(5,18)&&inv.slots()[0]==0&&inv.contains(21),"swapping out the equipped gun must clear pip[0]");}
         // Item vor der ausgerüsteten Waffe einlagern: pip[0] sinkt, ItemSort.
-        {auto inv=pocket();inv.slots()[2]=Inventory::pack(95,1);inv.slots()[3]=Inventory::pack(21,1);inv.slots()[4]=Inventory::pack(5,18);inv.slots()[0]=4;unsigned message=0;
+        {auto inv=pocket();inv.slots()[2]=Inventory::pack(95,1);inv.slots()[3]=Inventory::pack(21,1);inv.slots()[4]=Inventory::pack(5,18);inv.slots()[0]=4;inv.wpnr_no=3;unsigned message=0;
             // ItemBoxChange sortiert nicht (Disassembly 0x002A53E0); die Lücke bleibt bis SpriteOnOff (sub1.c:8296).
             check(inv.box_change(2,0,64,0,0,&message)&&inv.items[64]==Inventory::pack(95,1)&&!inv.slots()[2]&&inv.slots()[0]==3,"deposit before the equipped gun must lower pip[0] without sorting");
             inv.sort();check(inv.slots()[2]==Inventory::pack(21,1)&&inv.slots()[3]==Inventory::pack(5,18)&&inv.slots()[0]==3&&inv.weapon()==3,"deposit before the equipped gun must lower pip[0] and sort");}});

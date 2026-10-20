@@ -34,6 +34,26 @@ int main(){try{
     actor.yaw=16384;camera.tick(actor,{true,false},nullptr);const auto lag=camera.view(original).angles[1];
     for(int i=0;i<240;++i)camera.tick(actor,{true,false},nullptr);const auto settled=camera.view(original).angles[1];
     check(lag!=settled,"heading change was not smoothed");check(std::abs(int(settled)-(65536-16384))<400,"heading did not converge"); // Ninja view yaw is the negated actor yaw.
+    // Room entry with the door wall right behind the player: the boom shortens and rises
+    // but never swings in front of her, and the player model fades instead.
+    {ThirdPersonCamera tight;tight.configure(camera.settings(),false);tight.set_enabled(true,false);
+        auto wall_z=[](float z){return ThirdPersonCamera::RayQuery([z](NJS_POINT3 o,NJS_POINT3 d,float range){if(d.z<=1e-6f||o.z>=z)return range;return std::min(range,(z-o.z)/d.z);});};
+        SceneSpawn entry;entry.position={0,0,0};entry.yaw=0; // forward is -z, behind is +z
+        for(const float gap:{2.f,6.f,12.f}){
+            tight.reset();for(int i=0;i<60;++i)tight.tick(entry,{true,false},wall_z(gap));
+            const auto v=tight.view(original);
+            check(tight.active(),"tight entry dropped the chase camera");
+            check(v.position.z>=entry.position.z-.01f,"camera swung in front of the player at a wall");
+            check(v.position.z<=gap,"camera eye inside the wall behind the player");
+            check(std::min(v.angles[1],65536-v.angles[1])<200,"tight entry view does not look along the player heading");
+            if(gap<=6.f)check(tight.player_alpha()<1.f,"player not faded with the eye inside the model");}
+        tight.reset();for(int i=0;i<60;++i)tight.tick(entry,{true,false},ThirdPersonCamera::RayQuery{});
+        check(tight.player_alpha()==1.f,"player faded without a wall");
+        // Leaving the wall eases the boom back out instead of snapping.
+        for(int i=0;i<60;++i)tight.tick(entry,{true,false},wall_z(2));const float near_z=tight.view(original).position.z;
+        tight.tick(entry,{true,false},ThirdPersonCamera::RayQuery{});const float eased=tight.view(original).position.z;
+        for(int i=0;i<120;++i)tight.tick(entry,{true,false},ThirdPersonCamera::RayQuery{});const float settled_z=tight.view(original).position.z;
+        check(eased>near_z&&eased<settled_z-1,"boom did not ease back out");}
     // Scripted states (event camera, cinematic, door, FMV) hand the view back immediately.
     camera.tick(actor,{false,false},nullptr);view=camera.view(original);check(!camera.active()&&view.position.x==1&&view.angles[0]==10&&view.hidden_objects[0],"scripted state kept the chase camera");
     // Settings file validation and left shoulder.

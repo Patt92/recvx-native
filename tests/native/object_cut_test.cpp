@@ -79,6 +79,28 @@ int main(int argc,char** argv){try{
     // Die Beschraenkung gilt nur fuer Objekte/Items, nicht fuer Gegner.
     check(drawn(world,stage,1,1)==drawn(world,stage,7,1),"the cut restriction reached the enemy works");
 
+    // 3) objitm.c:664-676 mdflg 0x10 (ETTY flg 0x80000000, :164): unter st_flg 0x2 (Nebel an) laeuft bhPutModel
+    //    zwischen njFogDisable und njFogEnable. Objekt 20 (flg 0xC0000001) ist das einzige Objekt mit Bit 31 in
+    //    RM_0090 und zeichnet nur in Schnitt 7; sein Streifen (zwei Dreiecke) muss dort ohne Nebel stehen, alle
+    //    anderen Objekte mit Nebel. Ohne st_flg 0x2 (:665 zweite Bedingung) bleibt auch Objekt 20 nebelig.
+    //    Gegenprobe: world.cpp put_model_mdflg ohne 0x10 bzw. Nebeltor ohne st_flg 0x2 -> rot.
+    {
+        Inventory inventory;MessageDialog dialog;EventVm events(room,inventory,dialog);world.bind_player_collision(events);
+        // Mit gebundener Event-VM liest object_cut_hidden cam.ncut aus events->values[2] (bhCmpB key 2), wie runtime.cpp.
+        const auto unfogged=[&](std::size_t cut){events.values[2]=std::int32_t(cut);world.tick_camera(stage,stage.cameras.at(cut),cut);
+            Scene out;std::vector<BoneMatrix> nodes;world.append(out,nodes,stage.cameras.at(cut));
+            unsigned off=0,on=0;for(const auto& t:out.triangles)if(t.light_category==2){if(t.fogged)++on;else ++off;}
+            return std::make_pair(off,on);};
+        events.flags[5][0]|=0x2u;
+        const auto fog_on=unfogged(7);
+        check(fog_on.first==2,"mdflg 0x10: object 20 must draw its two triangles without fog while st_flg 0x2 is set");
+        check(fog_on.second==cut7-2,"mdflg 0x10: the other objects of cut 7 must keep the room fog");
+        check(unfogged(1).first==0,"mdflg 0x10: cut 1 (object 20 hidden) has no unfogged object");
+        events.flags[5][0]&=~0x2u;
+        check(unfogged(7).first==0,"mdflg 0x10: without st_flg 0x2 bhDrawObject does not touch the fog (objitm.c:665)");
+        events.flags[5][0]|=0x2u;
+    }
+
     std::cout<<"Original objitm.c cut restriction (flg 0x40000000 / hide[0..3]) passed.\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
