@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_README = """RECVX Native - Entwicklungsbuild
 
 Native Portierung von Resident Evil CODE: Veronica X (PS2). Das Paket enthaelt
-die lokal vorbereiteten Spieldaten; ISO- oder AFS-Dateien werden nicht gelesen.
+die lokal vorbereiteten Spieldaten; das Spiel liest keine ISO- oder AFS-Dateien.
 Noch kein vollstaendig spielbares Spiel.
 
 Start: macOS "RECVX Native.app", Windows Start.cmd.

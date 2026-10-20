@@ -1209,6 +1209,7 @@ objitm.c:164/:228) portiert: unter st_flg 0x2 zeichnen diese Objekte/Items ohne 
 ist wirkungslos (ps2_NinjaCnk.c:205-215 liest 0x2000/0x400 nicht). Test object_cut_restriction Abschnitt 3, zwei Gegenproben
 rot. [Logs](build/validation/light-clip-20261020/), [eff199](build/validation/eff199-20261020/),
 [Nebel](build/validation/object-fog-20261020/). **Kein Commit/Push.**
+
 (bd) Waffenmodell-Ladeauftrag von plp->wpnr_no getrennt (2026-10-20): bhSv 18/0xAF aendern nur den
 Spielerwert; nur mn_mode0 3 (WeaponSet/GetItem/ItemBoxChange/0x27) und Spielstart/Spielerwechsel/Laden
 ersetzen das Waffenwerk. Ein 0x27 mit identischer Nummer laedt erneut und nullt mdflg, bhSv 18 nicht.

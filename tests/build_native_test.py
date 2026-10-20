@@ -103,5 +103,41 @@ class DevelopmentAppTests(unittest.TestCase):
         self.assertFalse(self.app.exists())
 
 
+class IsoPreparationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='recvx iso build test ')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.data = self.root / 'data'
+        self.binary = self.root / 'build/macos-arm64'
+        self.exporter = self.binary / 'recvx-assets'
+        self.exporter.parent.mkdir(parents=True)
+        self.exporter.write_bytes(b'fixture exporter')
+        self.commands = []
+        self.addCleanup(patch.stopall)
+        patch.object(build_native, 'ROOT', self.root).start()
+        patch.object(build_native, 'run', side_effect=lambda *command: self.commands.append(tuple(map(str, command)))).start()
+
+    def test_missing_data_is_extracted_from_iso(self):
+        build_native.prepare_iso_data([self.root / 'game.iso'], self.data, self.binary, 'macos')
+        self.assertEqual(len(self.commands), 1)
+        command = self.commands[0]
+        self.assertIn(str(self.root / 'tools/prepare_native_data.py'), command)
+        self.assertIn('--iso', command)
+        self.assertIn(str(self.root / 'game.iso'), command)
+        self.assertIn(str(self.exporter), command)
+
+    def test_existing_data_is_not_replaced(self):
+        self.data.mkdir()
+        (self.data / 'native-data.version').write_text('recvx-assets-1\n')
+        build_native.prepare_iso_data([self.root / 'game.iso'], self.data, self.binary, 'macos')
+        self.assertEqual(self.commands, [])
+
+    def test_missing_exporter_fails(self):
+        self.exporter.unlink()
+        with self.assertRaisesRegex(RuntimeError, 'built exporter'):
+            build_native.prepare_iso_data([self.root / 'game.iso'], self.data, self.binary, 'macos')
+
+
 if __name__ == '__main__':
     unittest.main()

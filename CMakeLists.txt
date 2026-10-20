@@ -21,6 +21,8 @@ if(BUILD_TESTING)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_policy_test.py")
   add_test(NAME build_coverage
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_build_coverage_test.py")
+  add_test(NAME iso9660_build_extraction
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/iso9660_test.py")
   add_test(NAME native_port_status_contracts
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_check_test.py")
   # Negativpruefungen des Windows-PE-Audits; brauchen den Zig-Werkzeugsatz.

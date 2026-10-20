@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
-"""Cook all locally extracted disc data and hash the resulting standalone asset tree."""
+"""Cook disc data into the standalone asset tree.
+
+The source is either an already extracted disc directory (--source) or one or
+more PS2 ISO9660 images (--iso) extracted for this build. The runtime only sees
+the loose cooked tree."""
 import argparse
 import hashlib
 import json
 from pathlib import Path
 import struct
 import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+from iso9660 import extract
 
 
 def digest(path):
@@ -62,9 +72,23 @@ def verify_source(source, root):
     print(f'Verified all {count} extracted disc files and every archive entry.', flush=True)
 
 
+def export(source, root, exporter, resume):
+    if root.exists():
+        if not resume or not (root / 'native-data.version').is_file():
+            raise RuntimeError('destination exists; --resume requires a completed native export')
+    else:
+        subprocess.run([str(exporter.resolve()), str(source.resolve()), str(root)], check=True)
+    verify_source(source.resolve(), root)
+    result = manifest(root)
+    (root / 'asset-manifest.json').write_text(json.dumps(result, indent=2) + '\n')
+    print(f"Cooked {result['rooms']} rooms, {result['textures']} editable textures; {result['bytes']} bytes.")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source', type=Path)
+    p.add_argument('--iso', type=Path, action='append',
+                   help='PS2 ISO9660 image to extract at build time; repeat to merge discs')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--exporter', type=Path, default=Path('build/native/recvx-assets'))
     mode = p.add_mutually_exclusive_group()
@@ -72,6 +96,10 @@ def main():
     mode.add_argument('--refresh', action='store_true', help='Rebuild the manifest after cooking new loose assets; no source dump is read.')
     mode.add_argument('--verify', action='store_true', help='Verify a packaged tree against its existing manifest.')
     a = p.parse_args()
+    if a.iso and a.source:
+        p.error('--source and --iso are mutually exclusive')
+    if a.iso and (a.refresh or a.verify):
+        p.error('--iso cannot be combined with --refresh or --verify')
     root = a.output.resolve()
     if a.refresh:
         if not (root / 'native-data.version').is_file():
@@ -87,17 +115,17 @@ def main():
             raise RuntimeError('asset manifest differs from the actual file tree')
         print(f"Verified {current['files']} files / {current['bytes']} bytes.")
         return
+    if a.iso:
+        work = ROOT / 'build'
+        work.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='iso-source-', dir=work) as temporary:
+            files, total, count = extract(a.iso, temporary)
+            print(f'Extracted {files} disc files / {total} bytes from {count} ISO image(s).', flush=True)
+            export(Path(temporary), root, a.exporter, a.resume)
+        return
     if not a.source:
-        p.error('--source is required to export or verify the source dump')
-    if root.exists():
-        if not a.resume or not (root / 'native-data.version').is_file():
-            raise RuntimeError('destination exists; --resume requires a completed native export')
-    else:
-        subprocess.run([str(a.exporter.resolve()), str(a.source.resolve()), str(root)], check=True)
-    verify_source(a.source.resolve(), root)
-    result = manifest(root)
-    (root / 'asset-manifest.json').write_text(json.dumps(result, indent=2) + '\n')
-    print(f"Cooked {result['rooms']} rooms, {result['textures']} editable textures; {result['bytes']} bytes.")
+        p.error('--source or --iso is required to export or verify the source dump')
+    export(a.source, root, a.exporter, a.resume)
 
 if __name__ == '__main__':
     main()

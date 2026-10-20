@@ -105,11 +105,35 @@ def sync_macos_start_package(build: Path) -> None:
     print(f'Updated Start.command development app: {app}', flush=True)
 
 
+def prepare_iso_data(images, data: Path, binary_dir: Path, target: str) -> None:
+    """Create the loose data tree from ISO images only when none exists yet."""
+    if (data / 'native-data.version').is_file():
+        print(f'Using existing prepared data at {data}; --iso is not extracted again.', flush=True)
+        return
+    if target == 'windows' and platform.system() != 'Windows':
+        exporter = next((candidate for candidate in (
+            ROOT / 'build/macos-arm64/recvx-assets', ROOT / 'build/native/recvx-assets')
+            if candidate.is_file()), None)
+        if exporter is None:
+            raise RuntimeError('Windows cross-build with --iso needs a host recvx-assets; run a host build first')
+    else:
+        exporter = binary_dir / ('recvx-assets.exe' if target == 'windows' else 'recvx-assets')
+        if not exporter.is_file():
+            raise RuntimeError(f'ISO extraction requires the built exporter: {exporter}')
+    command = [sys.executable, str(ROOT / 'tools/prepare_native_data.py'),
+               '--output', str(data), '--exporter', str(exporter)]
+    for image in images:
+        command += ['--iso', str(image)]
+    run(*command)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--platform', choices=['host', 'macos', 'windows'], default='host')
     parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8))
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
+    parser.add_argument('--iso', type=Path, action='append',
+                        help='PS2 ISO9660 image used to create missing --data; repeat to merge discs')
     parser.add_argument('--package', action='store_true')
     parser.add_argument('--output', type=Path, help='New package directory; refuses overwrites')
     parser.add_argument('--verify-data', action='store_true')
@@ -128,8 +152,7 @@ def main():
     data = args.data.resolve()
     if target == 'windows' and platform.system() != 'Windows' and (args.test or args.verify_runtime):
         parser.error('Windows cross-builds cannot run tests; use --platform windows without test options, then test on Windows or Wine')
-    if args.verify_runtime and not (data / 'native-data.version').is_file():
-        parser.error(f'--verify-runtime requires a prepared native data tree (missing {data / "native-data.version"})')
+    run_checks = args.test and not args.no_test
     if target == 'windows' and platform.system() != 'Windows':
         # The final binary audit also invokes Zig; use the same project cache.
         os.environ['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build/toolchains/zig-cache')
@@ -140,16 +163,19 @@ def main():
         if target == 'macos' and platform.system() != 'Darwin':
             parser.error('macOS builds require a macOS host')
         build = ROOT / 'build' / ('macos-arm64' if target == 'macos' else 'windows-native' if target == 'windows' else 'native')
-        run_checks = args.test and not args.no_test
         configure = ['cmake', '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}']
         if target == 'macos':
             configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
         run(*configure)
         run('cmake', '--build', build, '--config', 'Release', '--parallel', args.jobs)
-        if run_checks:
-            run('ctest', '--test-dir', build, '-C', 'Release', '--output-on-failure')
     binary_dir = build / 'Release' if (build / 'Release').is_dir() else build
     suffix = '.exe' if target == 'windows' else ''
+    if args.iso:
+        prepare_iso_data(args.iso, data, binary_dir, target)
+    if args.verify_runtime and not (data / 'native-data.version').is_file():
+        parser.error(f'--verify-runtime requires a prepared native data tree (missing {data / "native-data.version"})')
+    if run_checks:
+        run('ctest', '--test-dir', build, '-C', 'Release', '--output-on-failure')
     run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT,
         '--build-dir', build, '--binary', binary_dir / ('recvx-runtime' + suffix))
     if args.verify_data:

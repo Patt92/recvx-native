@@ -1,7 +1,9 @@
 # Native assets and mods
 
 The productive tree is `data/`. Runtime and packages read regular loose files,
-not ISO/AFS containers. All original dumped files and split archive entries are
+not ISO/AFS containers. Builds may optionally extract a PS2 ISO9660 image into
+that tree (`./build.sh --iso game.iso`, see below); the game itself still opens
+neither ISO nor AFS. All original dumped files and split archive entries are
 included, including assets whose gameplay systems are still pending. Room,
 playable-player, menu, font and item textures are cooked, and so are the NPC, enemy,
 object and room-item textures of all 205 rooms (`recvx-world-assets`, 8,526 files
@@ -127,6 +129,38 @@ textures and refuses overwrites. `python3 tools/cook_movies.py --data data`
 converts loose dumped PSS movies with build-time FFmpeg/ffprobe; existing outputs
 are skipped. The game itself needs neither FFmpeg nor the dumped PSS files.
 See AUDIO.md for conversion format and synchronization.
+
+### Building from a PS2 ISO (optional)
+
+Instead of supplying an extracted disc directory, pass one or more PS2 ISO9660
+images. The build reads the container once, materializes the extracted disc
+layout in a temporary directory and runs the same `recvx-assets` exporter as
+`--source`:
+
+```sh
+./build.sh --iso /path/to/game.iso
+```
+
+`--iso` is repeatable; identical files shared by both discs are merged and
+conflicting files are rejected. If `data/` already contains a completed export,
+the build keeps it and does not extract again; use a fresh `--data` directory to
+re-extract. The standalone tool lists or extracts an image without building:
+
+```sh
+python3 tools/iso9660.py game.iso --list
+python3 tools/iso9660.py game.iso --extract build/disc-tree
+```
+
+The same path is available directly:
+
+```sh
+python3 tools/prepare_native_data.py --iso game.iso --output data-iso
+```
+
+The reader uses only the Python standard library, accepts 2048-byte ISO and raw
+2352/2336-byte captures, verifies both-endian ISO metadata, rejects unsafe path
+names and refuses interleaved or multi-extent directories. The runtime and the
+packaged game still read only `data/`; no ISO/AFS access is added to gameplay.
 
 ## Model import boundary
 

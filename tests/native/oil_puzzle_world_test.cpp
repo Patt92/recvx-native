@@ -110,7 +110,7 @@ int main(int argc,char** argv){try{
     check(r.op().mode0==10&&r.fades.size()==before+1&&r.fades.back()==std::make_pair(0xFF000000u,10.0f),"Abbruch :1772-1779 falsch");
     for(unsigned i=0;i<100&&r.op().mode0==10;++i)r.step();
     check(r.op().mode0==11,"cb_flg 0x2 faellt nicht, mode0 10 -> 11 fehlt");r.step(); // :2069-2073, mode0 11 im Folgebild
-    check(r.op().mode0==0&&!ev.flag(1,64)&&r.stands==2&&r.world.room_background()==bak0&&r.world.presentation_flags()==pt0,"Abbruch-Ende falsch");
+    check(r.op().mode0==0&&!ev.flag(1,64)&&r.world.player_stand_count()==2&&r.world.room_background()==bak0&&r.world.presentation_flags()==pt0,"Abbruch-Ende falsch");
     const auto& gaps=r.world.unbound_enemy_routines();
     for(const auto& g:gaps)if(g.find("138")!=std::string::npos)throw std::runtime_error("Luecke: "+g);
     std::cout<<"oil puzzle (bhEff138/bhDraw138) passed\n";return 0;

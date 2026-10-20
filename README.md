@@ -43,8 +43,10 @@ any PS2/VU/GS emulation are off limits.
   path available.
 - **Original data, native I/O.** RDT rooms, models, textures, animations,
   messages, ADX music and voice, Sony sound banks and all 18 movies are read
-  directly — no ISO or AFS access at runtime. Drop-in HD textures and mods are
-  supported.
+  directly — no ISO or AFS access at runtime. An optional build step
+  (`./build.sh --iso game.iso`) extracts a PS2 ISO9660 image into the loose
+  `data/` tree; the runtime still opens only loose files. Drop-in HD textures
+  and mods are supported.
 - **Two platforms, one core.** macOS and Windows share the native engine; only
   the host layer is platform-specific.
 - **Host conveniences kept honest.** Door skip, cinematic skip, options,
