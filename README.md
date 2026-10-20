@@ -169,6 +169,16 @@ Build it yourself (Python 3.12+, CMake, C/C++ compiler):
 ./build.sh --platform windows --verify-data --package
 ```
 
+Without an extracted disc tree, let the build read a PS2 ISO once and write the
+loose `data/` tree itself:
+
+```sh
+./build.sh --iso /path/to/game.iso --package
+```
+
+`--iso` is repeatable (both discs are merged) and only runs when `data/` is not
+yet prepared; the game still opens loose files only.
+
 `--test` also builds and runs the regression suite. Details:
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 
