@@ -146,9 +146,13 @@ tree. Repeat `--iso` to supply multiple disc images; completed data is reused.
 Install:
 
 - **Python 3.12+**, with the `py` launcher or `python` available in PowerShell.
-- **CMake 3.16+**: either on `PATH`, or the Visual Studio component
-  **C++ CMake tools for Windows** (part of the Desktop C++ workload). The build
-  finds Visual Studio's bundled CMake via `vswhere` and also checks
+- **CMake 3.16+**: either on `PATH`, or Visual Studio's bundled CMake. In the
+  Visual Studio Installer it is the **C++ CMake tools** component; depending on
+  the installation it only appears after selecting the **Linux and Mac
+  development with C++** workload. The build
+  finds Visual Studio's bundled CMake for every version and edition, including
+  Preview and Insiders (via `vswhere -prerelease` and the `Microsoft Visual Studio`
+  folders), and also checks
   `C:\Program Files\CMake\bin`.
 - **Visual Studio or Visual Studio Build Tools**, including the **Desktop
   development with C++** workload, MSVC C/C++ tools and a Windows SDK.

@@ -137,22 +137,36 @@ def host_machine() -> str:
     return machine
 
 
+VS_CMAKE = 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
+
+
+def visual_studio_major(folder: str) -> int:
+    """Folder names are years up to 2022 (major 15..17) and major versions from 18 on."""
+    years = {'2017': 15, '2019': 16, '2022': 17}
+    return years.get(folder, int(folder) if folder.isdigit() and int(folder) < 100 else 0)
+
+
 def find_cmake() -> str | None:
-    """CMake from PATH, else the copy bundled with Visual Studio or the default installer path."""
+    """CMake from PATH, else the copy bundled with any Visual Studio (release, preview, Insiders) or the CMake installer."""
     found = shutil.which('cmake')
     if found or platform.system() != 'Windows':
         return found
+    program_files = [Path(os.environ.get(name, default)) for name, default in
+                     (('ProgramFiles', r'C:\Program Files'), ('ProgramFiles(x86)', r'C:\Program Files (x86)'))]
     candidates = []
-    vswhere = Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
+    vswhere = program_files[1] / 'Microsoft Visual Studio/Installer/vswhere.exe'
     if vswhere.is_file():
         try:
-            installs = subprocess.check_output([str(vswhere), '-products', '*', '-sort', '-property', 'installationPath'],
-                                               text=True, errors='replace').splitlines()
+            installs = subprocess.check_output([str(vswhere), '-all', '-prerelease', '-products', '*', '-sort',
+                                                '-property', 'installationPath'], text=True, errors='replace').splitlines()
         except (OSError, subprocess.CalledProcessError):
             installs = []
-        candidates += [Path(i.strip()) / 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
-                       for i in installs if i.strip()]
-    candidates.append(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'CMake/bin/cmake.exe')
+        candidates += [Path(i.strip()) / VS_CMAKE for i in installs if i.strip()]
+    # Without vswhere: <Program Files>/Microsoft Visual Studio/<version>/<edition>, newest version first.
+    for base in program_files:
+        candidates += sorted((base / 'Microsoft Visual Studio').glob('*/*/' + VS_CMAKE),
+                             key=lambda c: visual_studio_major(c.parents[8].name), reverse=True)
+    candidates += [base / 'CMake/bin/cmake.exe' for base in program_files]
     return next((str(c) for c in candidates if c.is_file()), None)
 
 
@@ -241,8 +255,9 @@ def main():
         parser.error('Windows cross-builds cannot run tests; use --platform windows or windows-arm64 without test options, then test on Windows or Wine')
     cmake = find_cmake()
     if cmake is None:
-        parser.error('CMake was not found on PATH or in a Visual Studio installation. Install CMake (or the Visual Studio '
-                     'component "C++ CMake tools for Windows") and open a new terminal; verify with "cmake --version" before building.')
+        parser.error('CMake was not found on PATH or in a Visual Studio installation. Install CMake (or in the Visual Studio '
+                     'Installer the CMake tools component; on some installs it is only listed under the Linux/Mac '
+                     'development workload) and open a new terminal; verify with "cmake --version" before building.')
     print(f'Target {target}, CMake {cmake}', flush=True)
     run_checks = args.test and not args.no_test
     if is_windows_target(target) and platform.system() != 'Windows':

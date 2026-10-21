@@ -55,6 +55,17 @@ class BuildTargetTests(unittest.TestCase):
                  patch.object(build_native.subprocess, 'check_output', return_value=f'{install}\n'):
                 self.assertEqual(build_native.find_cmake(), str(cmake))
 
+    def test_windows_finds_insiders_cmake_without_vswhere(self):
+        with tempfile.TemporaryDirectory() as root:
+            for folder in ('2022/Community', '18/Insiders'):
+                cmake = Path(root) / 'Microsoft Visual Studio' / folder / build_native.VS_CMAKE
+                cmake.parent.mkdir(parents=True)
+                cmake.write_bytes(b'')
+            with patch.object(build_native.platform, 'system', return_value='Windows'), \
+                 patch.object(build_native.shutil, 'which', return_value=None), \
+                 patch.dict(build_native.os.environ, {'ProgramFiles(x86)': str(Path(root) / 'x86'), 'ProgramFiles': root}):
+                self.assertEqual(build_native.find_cmake(), str(cmake))
+
     def test_visual_studio_generator_platform_follows_target(self):
         with patch.object(build_native.platform, 'system', return_value='Windows'), \
              patch.dict(build_native.os.environ, {}, clear=True):
