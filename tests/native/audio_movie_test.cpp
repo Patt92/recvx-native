@@ -236,7 +236,7 @@ static void weapon_se(const std::filesystem::path& root){
 // sdfunc.c:1708 RequestEnemySeBasic / :2371 ExecEnemySeManager / :2301 CallEnemySeMain.
 // SE 0xF300: bank 3 list 0, MaxSeCount 15, Prio 0, Attrib 0, VolDownTbl[0].
 static void enemy_se(const std::filesystem::path& root){
-    const int se=0xF300;
+    constexpr int se=0xF300; // constexpr: MSVC verbietet lokale Variablen als Lambda-Standardargument (C2587)
     auto mixer=[&](){auto m=std::make_unique<AudioMixer>(root);m->load_room_sounds(0,2);m->set_sound_monitor({0,0,0},0,{});return m;};
     auto one=[&](SoundPoint at,int se_no=se,int fade=0,std::function<int(SoundPoint,SoundPoint)> wall={}){auto m=mixer();m->request_enemy_se(0,at,se_no,1,fade);m->exec_enemy_se(wall);check(m->active(18),"original enemy SE not served on voice 18");return peaks(*m,fade?400:6000);};
     const auto near=one({0,0,-10}),far=one({0,0,-600});

@@ -1347,7 +1347,7 @@ static void mv10(RECVX_ENEMY_WORK* w)
 static void mv11(RECVX_ENEMY_WORK* w)
 {
     RECVX_EN03_STATE* s = st(w);
-    NJS_POINT3 pos;
+    RECVX_ENEMY_VEC pos;
     switch (w->mode3) {
     case 0:
         w->mtn_no = 13; w->frm_no = 0;
@@ -1696,7 +1696,8 @@ static void mv19(RECVX_ENEMY_WORK* w)
 {
     RECVX_EN03_STATE* s = st(w);
     float dist;
-    NJS_POINT3 p1, p2;
+    RECVX_ENEMY_VEC p1;
+    NJS_POINT3 p2;
     switch (w->mode3) {
     case 0:
         w->mtn_no = (w->type == 0) ? 28u : 43u;
@@ -1722,7 +1723,7 @@ static void mv19(RECVX_ENEMY_WORK* w)
                     dist < 10.0f &&
                     recvx_t3_check_dir_target(w, p.pos.x, p.pos.z, 9102) != 0 &&
                     fabsf(w->py - p.pos.y) < 0.01f &&
-                    line_hit(w, &(RECVX_ENEMY_VEC){ p1.x, p1.y, p1.z },
+                    line_hit(w, &p1,
                              &(RECVX_ENEMY_VEC){ p2.x, p2.y, p2.z }) == 0) {
                     set_modes(w, 2, 0, 0, 0);
                     nage(w);
@@ -1736,7 +1737,7 @@ static void mv19(RECVX_ENEMY_WORK* w)
                 dist < 20.0f &&
                 recvx_t3_check_dir_target(w, p.pos.x, p.pos.z, 5461) != 0 &&
                 fabsf(w->py - p.pos.y) < 0.01f &&
-                line_hit(w, &(RECVX_ENEMY_VEC){ p1.x, p1.y, p1.z },
+                line_hit(w, &p1,
                          &(RECVX_ENEMY_VEC){ p2.x, p2.y, p2.z }) == 0) {
                 set_modes(w, 2, 0, 1, 0);
                 nage(w);
@@ -3307,7 +3308,7 @@ static int en03_collision_walls(RECVX_ENEMY_WORK* w)
 static int en03_dive_space(RECVX_ENEMY_WORK* w)
 {
     RECVX_ENEMY_PLAYER p;
-    RECVX_ENEMY_VEC pos;
+    NJS_VECTOR pos;
     NJS_VECTOR k;
     float dist;
     uint32_t i, n;

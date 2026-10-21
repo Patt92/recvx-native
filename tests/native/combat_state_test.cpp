@@ -818,7 +818,7 @@ void test_linear_launcher() {
 /* playpch2.c:13 bhCPM2_act_scp: WpnTab.flg 0x20 (Waffen 13 und 18) fuehrt aus act_wpn in
  * mode2 71. Vorher meldete der Kern dort nur eine Luecke; die Waffe schoss nie. */
 void test_scope() {
-    check((WpnTab[13].flg & 0x20) && (WpnTab[18].flg & 0x20), "WpnTab 13/18 lost the scope flag 0x20");
+    check((WpnTab[13].flg & 0x20u) != 0 && (WpnTab[18].flg & 0x20u) != 0, "WpnTab 13/18 lost the scope flag 0x20");
     for (int w : {13, 18}) {
         const std::string n = "scope " + std::to_string(w) + ": ";
         Fixture f;
