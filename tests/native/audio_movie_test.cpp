@@ -235,10 +235,12 @@ static void weapon_se(const std::filesystem::path& root){
 }
 // sdfunc.c:1708 RequestEnemySeBasic / :2371 ExecEnemySeManager / :2301 CallEnemySeMain.
 // SE 0xF300: bank 3 list 0, MaxSeCount 15, Prio 0, Attrib 0, VolDownTbl[0].
+// Dateiebene: MSVC verbietet lokale Variablen (auch constexpr) als Lambda-Standardargument (C2587).
+static constexpr int enemy_se_no=0xF300;
 static void enemy_se(const std::filesystem::path& root){
-    constexpr int se=0xF300; // constexpr: MSVC verbietet lokale Variablen als Lambda-Standardargument (C2587)
+    constexpr int se=enemy_se_no;
     auto mixer=[&](){auto m=std::make_unique<AudioMixer>(root);m->load_room_sounds(0,2);m->set_sound_monitor({0,0,0},0,{});return m;};
-    auto one=[&](SoundPoint at,int se_no=se,int fade=0,std::function<int(SoundPoint,SoundPoint)> wall={}){auto m=mixer();m->request_enemy_se(0,at,se_no,1,fade);m->exec_enemy_se(wall);check(m->active(18),"original enemy SE not served on voice 18");return peaks(*m,fade?400:6000);};
+    auto one=[&](SoundPoint at,int se_no=enemy_se_no,int fade=0,std::function<int(SoundPoint,SoundPoint)> wall={}){auto m=mixer();m->request_enemy_se(0,at,se_no,1,fade);m->exec_enemy_se(wall);check(m->active(18),"original enemy SE not served on voice 18");return peaks(*m,fade?400:6000);};
     const auto near=one({0,0,-10}),far=one({0,0,-600});
     check(near.first>0&&std::abs(double(far.first)/near.first-41.0/128.0)<0.01,"enemy SE must use Get3DSoundParameter distance (ThreeDVolTbl[509] -87)");
     const auto left=one({-10,0,0}),right=one({10,0,0});check(left.first>left.second&&right.second>right.first,"enemy SE must use PanTbl360");
