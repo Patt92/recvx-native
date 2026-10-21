@@ -62,9 +62,9 @@ _Static_assert(SUB_OFF(word14)   == 0x14 + SUB_PP, "sub exp0 word14 (EXP0_I(20))
 _Static_assert(sizeof(RECVX_EN01_SUB_EXP0) == 0x20 + SUB_PP,
                "Kopfblock bhEne_CallocWork(32, 8)");
 _Static_assert(SUBM_OFF(mtx)     == 0x30 + SUB_PP, "exp0[48] Matrix");
-_Static_assert(SUBM_OFF(mtx[12]) == 96  + SUB_PP, "EXP0_F(96) = mtx[12]");
-_Static_assert(SUBM_OFF(mtx[13]) == 100 + SUB_PP, "EXP0_F(100) = mtx[13]");
-_Static_assert(SUBM_OFF(mtx[14]) == 104 + SUB_PP, "EXP0_F(104) = mtx[14]");
+_Static_assert(SUBM_OFF(mtx) + 12u * sizeof(float) == 96  + SUB_PP, "EXP0_F(96) = mtx[12]");
+_Static_assert(SUBM_OFF(mtx) + 13u * sizeof(float) == 100 + SUB_PP, "EXP0_F(100) = mtx[13]");
+_Static_assert(SUBM_OFF(mtx) + 14u * sizeof(float) == 104 + SUB_PP, "EXP0_F(104) = mtx[14]");
 _Static_assert(sizeof(RECVX_EN01_SUB_EXP0_MTX) == 0x70 + SUB_PP,
                "Kindblock bhEne_CallocWork(112, 8)");
 
