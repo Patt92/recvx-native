@@ -143,7 +143,7 @@ bool BoxMenu::input(MenuInput key,Inventory& inventory,StatusMenu& menu,EventVm*
     if(key==MenuInput::Cancel){note_=0;if(!selecting_){slide_.cancel();closing_=true;}else selecting_=false;audio.play_system(0);return true;}
     if(key==MenuInput::Confirm){
         if(!selecting_){selecting_=true;note_=0;arrows_=0;audio.play_system(3);}
-        else{unsigned message=0;inventory.box_change(menu.selected,ips1_,base_,menu.stage,menu.room,&message);audio.play_system(3);
+        else{unsigned message=0;inventory.box_change(menu.selected,ips1_,base_,menu.stage,menu.room,&message,&menu.selected,cell_);audio.play_system(3);
             // ItemBoxChange clears statusflg 0x100000 (stay in the list) when it refuses and sets a bhSetMessage text.
             note_=message;if(!message)selecting_=false;}
         return true;

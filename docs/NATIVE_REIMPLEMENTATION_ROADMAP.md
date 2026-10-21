@@ -6,10 +6,10 @@ work plan, not completion evidence. Task IDs remain stable; preserve existing
 native work rather than porting it again. Current `AGENTS.md` and user
 decisions supersede this plan.
 
-The 2026-10-10 orchestrator handoff in `ORCHESTRATOR_HANDOVER.md` summarizes
-later package states, boundaries, and owners. Compare historical removal gaps
-below against current reports and code before assigning them again. The third
-agent's task grew to all enemies C01–C08, beyond C01 trap activation.
+The 2026-10-10 orchestrator handoff summarized later package states, boundaries,
+and owners; that handoff note has been removed from the tree. Compare historical
+removal gaps below against current reports and code before assigning them again.
+The third agent's task grew to all enemies C01–C08, beyond C01 trap activation.
 
 On 2026-10-10, P04 began installing clip ranges at evidenced camera calls
 rather than every rendered frame. Flag/Rcase retention, fixed-camera keys, and

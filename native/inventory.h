@@ -87,7 +87,9 @@ public:
     bool transform(unsigned slot,unsigned expected,unsigned replacement);
     bool deposit(unsigned slot,unsigned box=64);
     bool withdraw(unsigned index,unsigned box=64);
-    bool box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* message=nullptr);
+    // ItemBoxChange korrigiert bei einem Breitenwechsel listcsr_0, nicht listcsr_2 (ELF 0x2A5C5C).
+    // Ohne Menuebesitzer bleibt die optionale Cursor-Rueckgabe unbenutzt.
+    bool box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* message=nullptr,unsigned* cursor_slot=nullptr,unsigned cursor_cell=0);
     std::string condition()const;
     // sub1.c ItemSearch: first pip[1..11] entry with this item id (slot index),
     // 0 when absent.

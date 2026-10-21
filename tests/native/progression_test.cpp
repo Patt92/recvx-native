@@ -124,6 +124,25 @@ int main(int argc,char** argv){try{
         Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(5,18);MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);StatusMenu menu;menu.active=true;menu.stage=0;menu.room=9;vm.flags[10][0]|=0x80000;BoxMenu box;box.synchronize(inv,menu,&vm);check(box.active()&&box.base()==192&&box.moving(),"security script did not enter modal box");box.input(MenuInput::Confirm,inv,menu,&vm,audio);check(!inv.items[192],"pad accepted while the box slides in");for(int i=0;i<9&&box.moving();++i)box.synchronize(inv,menu,&vm);check(!box.moving(),"box slide-in did not finish after nine ticks");box.input(MenuInput::Confirm,inv,menu,&vm,audio);box.input(MenuInput::Confirm,inv,menu,&vm,audio);
         check(inv.items[192]==Inventory::pack(5,18),"modal security confirm did not deposit");
         box.input(MenuInput::Cancel,inv,menu,&vm,audio);check(box.active()&&box.moving()&&menu.active&&!(vm.flags[12][0]&0x200),"security close skipped the slide-out");for(int i=0;i<9;++i)box.synchronize(inv,menu,&vm);check(!box.active()&&!menu.active&&!(vm.flags[10][0]&0x1c0000)&&vm.flags[12][0]&0x200,"security close leaves original script/menu flags stuck");});
+    // ItemBoxChange listcsr_0 (ELF 0x2A5C5C-0x2A5D40, sub1.c:7984-7994): bei Breitenwechsel
+    // bleibt listcsr_2 stehen; nur der Slot wird hinter sakai bzw. auf dessen letzter ungerader Zelle angepasst.
+    section("ItemBox Breitenwechsel-Cursor",[&]{
+        for(bool bag:{false,true})for(bool incoming_wide:{false,true}){
+            auto inv=pocket();inv.side_pack=bag;inv.slots()[1]=Inventory::pack(55,1);
+            if(incoming_wide){inv.slots()[2]=Inventory::pack(95,1);inv.slots()[3]=Inventory::pack(21,1);inv.slots()[4]=Inventory::pack(22,1);inv.items[64]=Inventory::pack(3,7);}
+            else{inv.slots()[2]=Inventory::pack(3,7);inv.slots()[3]=Inventory::pack(95,1);inv.items[64]=Inventory::pack(21,1);}
+            MessageDialog dialog;auto bytes=event_fixture({0xff,0});EventVm vm(bytes,inv,dialog);StatusMenu menu;menu.active=true;vm.flags[10][0]|=0x40000;
+            BoxMenu box;box.synchronize(inv,menu,&vm);for(int i=0;i<9&&box.moving();++i)box.synchronize(inv,menu,&vm);
+            if(incoming_wide){box.input(MenuInput::Right,inv,menu,&vm,audio);box.input(MenuInput::Right,inv,menu,&vm,audio);}
+            else{box.input(MenuInput::Right,inv,menu,&vm,audio);box.input(MenuInput::Left,inv,menu,&vm,audio);} // von Slot 3/Zelle 4 zur rechten Haelfte des breiten Items: Slot 2/Zelle 3
+            check(menu.selected==(incoming_wide?4u:2u)&&box.cursor_cell()==(incoming_wide?4u:3u),"cursor fixture did not reach its original cell");
+            const auto cell=box.cursor_cell();
+            box.input(MenuInput::Confirm,inv,menu,&vm,audio);box.input(MenuInput::Confirm,inv,menu,&vm,audio);
+            check(menu.selected==3&&box.cursor_cell()==cell,"width swap must correct listcsr_0 only, retaining listcsr_2");
+            menu.sprite_on_off(inv); // ItemSort desselben Statusframes, nicht Teil von ItemBoxChange
+            check(menu.selected==3&&box.cursor_cell()==cell&&Inventory::id(inv.slots()[3])==95,"ItemSort changed the box cursor or failed to retain its cell");
+        }
+    });
     // sub1.c ItemBox testmode 2 (ItemBoxIconSet's persistent parts_20b pos[1]
     // mutation and the tail at 7688-7751): a one-row request displaces every row
     // by `number` (+-19) per frame for 38/|number| frames; the direction flag

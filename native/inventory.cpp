@@ -734,14 +734,14 @@ bool Inventory::transform(unsigned slot,unsigned expected,unsigned replacement){
 }
 bool Inventory::deposit(unsigned slot,unsigned box){if(slot<2||slot>=12||box!=64||!id(slots()[slot]))return false;unsigned i=0;while(i<128&&items[box+i])++i;if(i==128)return false;items[box+i]=slots()[slot];slots()[slot]=0;if(slots()[0]==slot){slots()[0]=0;wpnr_no=0;request_weapon_reload();} /* wie ItemBoxChange sub1.c:7929-7931 */compact();return true;}
 bool Inventory::withdraw(unsigned index,unsigned box){if(box!=64||index>=128||!items[box+index])return false;auto item=items[box+index];if(!acquire(id(item),quantity(item),(item>>16)&0xff00))return false;items[box+index]=0;return true;}
-bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* out){
+bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* out,unsigned* cursor_slot,unsigned cursor_cell){
     // ItemBoxChange nach dem Original-Maschinencode (0x002A53E0; die Decomp ist
     // nur 67,97 % matching, Ablauf belegt in work/native_port_inventory_contract.md).
     // `slot` ist listcsr_0, `index` ibcsr, st->bxp = itm[box].
     if(out)*out=0;const unsigned count=box==64?128:(box==192||box==224)?32:0;
     if(!count||slot<1||slot>=capacity()+2||index>=count||player>=3)return false;
     std::uint32_t* const bxp=items.data()+box;
-    const unsigned lt_c=slot;
+    const unsigned lt_c=slot,sakai=wide_boundary(); // letzter ItemSort-Stand vor dem Tausch
     unsigned lt_c2=lt_c,lt_c3=0,chk=0;
     const std::uint32_t pocket=slots()[lt_c];   // $t3
     std::uint32_t incoming=bxp[index];           // $t4 (itemid3)
@@ -797,6 +797,12 @@ bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned st
                 if(type_of(id2)&kWide){if(!(type_of(id1)&kWide)&&!(type_of(arms)&kWide)&&lt_c<eq)++eq;}
                 else if((type_of(id1)&kWide)&&eq<lt_c&&(type_of(arms)&kWide))--eq;
             }else if((type_of(id2)&kWide)&&!(type_of(arms)&kWide))++eq;
+        }
+        // ELF 0x2A5C5C-0x2A5D40 / sub1.c:7984-7994: sakai gilt noch VOR ItemSort. Der
+        // Slotindex listcsr_0 aendert sich beim Breitenwechsel, die Rasterzelle listcsr_2 nicht.
+        if(cursor_slot&&lt_c!=1&&(lt_c>sakai||((cursor_cell&1u)&&lt_c==sakai-1))){
+            if((type_of(id1)&kWide)&&!(type_of(id2)&kWide))*cursor_slot=lt_c+1;
+            else if((type_of(id2)&kWide)&&!(type_of(id1)&kWide))*cursor_slot=lt_c-1;
         }
         // ItemBoxChange ruft kein ItemSort (Disassembly 0x002A53E0: nur
         // bhSetMessage/Combi_01); den geparkten Eintrag holt das ItemSort
