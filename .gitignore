@@ -3,6 +3,10 @@
 /data/
 /build/
 
+# Local agent instructions
+/CLAUDE.md
+/AGENTS.md
+
 # Local tools and OS/editor caches
 /build-tools/ffmpeg.exe
 /build-tools/ffprobe.exe
