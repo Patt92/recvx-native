@@ -1341,7 +1341,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         player_scripted=false;player_frozen_=false;player_smove_.active=false;return true;}
     if(op==0x64&&v.u8(1)==0x80){player_event_.requested=false;player_smove_.active=false;turn_active_=false;} // Player_controll 128: zurueck zu bhCPM0_action; mode2 22 endet mit dem Werkfeld
     if(op==0x64&&v.u8(1)==0x8b){player_event_.requested=false;player_smove_.active=false;} // Player_controll 139: kein Modus-Reset (event.c:9640-9660)
-    if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;player_prev_pos_=player_.position; /* event.c:9665-9693 pxb/pyb/pzb = px/py/pz */return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
+    if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;player_prev_pos_=player_.position;collision_floor_=floor_at(player_.position); /* event.c:9665-9693 exp0[18]/[20] = spx/spz, pxb/pyb/pzb = px/py/pz, flr_no = bhCheckFloorNum(py) (:9679) */return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
             player_step_=65536; // mtn_add = 65536
             player_room_motion_=false;player_enemy_motion_=false; // mnwP = plmthp
             collision_mode_=1u; // mode0 1, mode1/2/3 0
@@ -1499,7 +1499,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
         if(cmd==7||cmd==11||cmd==2||cmd==4){auto& e=entity(ctx.kind,ctx.index);auto pos=ctx.kind?e.transform.position:player_.position;
             if(cmd==7)pos={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};
             if(cmd==2||cmd==4){pos.x+=ctx.increment.x*(ctx.pos_sign[0]?-1:1);pos.y+=ctx.increment.y*(ctx.pos_sign[1]?-1:1);pos.z+=ctx.increment.z*(ctx.pos_sign[2]?-1:1);}
-            if(!ctx.kind){player_.position=pos;if(cmd==7)player_prev_pos_=pos;}else e.transform.position=pos; /* event.c:12044/12054/12065: nur case 7 setzt pxb/pyb/pzb */
+            if(!ctx.kind){player_.position=pos;if(cmd==7){player_prev_pos_=pos;collision_floor_=floor_at(pos);}}else e.transform.position=pos; /* event.c:12044/12054/12065: nur case 7 setzt pxb/pyb/pzb und flr_no = bhCheckFloorNum(py) (:12053) */
             // event.c:12038..12065: CommonCtr schreibt denselben eff[]-Work,
             // den bhControlEffect/der Zeichenpass lesen, nicht nur seine Entitysicht.
             if(ctx.kind==4){auto& s=sprites_.at(ctx.index).sprite;
@@ -5299,9 +5299,9 @@ void RoomWorld::ensure_push(){
     for(const auto& pair:entities_){const auto& e=pair.second;if(pair.first.first!=2||(e.type&255)!=1||!(e.object_flags&1)||(e.object_flags&0x100000))continue;push_objects_.push_back(pair.first.second);objects.push_back({int(pair.first.second),e.object_flags,int(e.aspd),int(e.object_parameter),e.object_floor,e.transform.position.x,e.transform.position.y,e.transform.position.z});}
     // CallPlayerActionSe(sys->psh_snd, 1): bank (n>>8)&15, list n&255.
     RECVX_PUSH_HOST host{};host.user=this;host.ply_id=player_character_;host.sound=[](void* u,int sound){auto& w=*static_cast<RoomWorld*>(u);w.audio_.play_room_sound(2,unsigned(sound)&255u,6);};
-    // StartVibrationEx has no native driver; report it like door.c's shake.
-    host.vibration=[](void* u,int type,int pattern){auto& w=*static_cast<RoomWorld*>(u);const auto why="StartVibrationEx("+std::to_string(type)+", "+std::to_string(pattern)+")";
-        if(std::find(w.audio_.unavailable.begin(),w.audio_.unavailable.end(),why)==w.audio_.unavailable.end())w.audio_.unavailable.push_back(why);};
+    // player.c:3833/3844 StartVibrationEx(0, 8): die Runtime-Vibrationseinheit (vibman.c) verbraucht die
+    // Anforderung aus vibration_requests_ (wie bhPuruPuruStart und die Gegner-SetVibration).
+    host.vibration=[](void* u,int type,int pattern){static_cast<RoomWorld*>(u)->vibration_requests_.push_back({type,pattern});};
     push_=std::make_unique<PlayerPush>(room_height_,floors_,objects,*player_asset_,host);
 }
 std::vector<CollisionWall> RoomWorld::collision_geometry()const{auto out=walls_;out.insert(out.end(),enemy_mobile_walls_.begin(),enemy_mobile_walls_.end());if(push_){const auto mobile=push_->walls();out.insert(out.end(),mobile.begin(),mobile.end());}out.insert(out.end(),object_mobile_walls_.begin(),object_mobile_walls_.end());return out;}
@@ -5509,13 +5509,12 @@ bool RoomWorld::tick_turn(bool forward){
             player_room_motion_=true;motion_=1;turn_motion_=1;turn_hokan_rate_=42598;turn_hokan_count_=4;turn_mtn_add_=65536;frame_=0;
             turn_phase_=5;
             audio_.play_room_sound(2,18,6); // CallPlayerActionSe(530,1): bank 2, Liste 18
-            const auto why="StartVibrationEx(0, 8)";
-            if(std::find(audio_.unavailable.begin(),audio_.unavailable.end(),why)==audio_.unavailable.end())audio_.unavailable.push_back(why);
+            vibration_requests_.push_back({0,8});   // player.c:4430 StartVibrationEx(0, 8)
         }
         break;}
     case 5:{ /* :4419-4431 */
         flg|=0x10000000u;
-        if(flg&0x400000u)audio_.play_room_sound(2,18,6); // CallPlayerActionSe(530,1)
+        if(flg&0x400000u){audio_.play_room_sound(2,18,6);vibration_requests_.push_back({0,8});} // player.c:4440-4441 CallPlayerActionSe(530,1), StartVibrationEx(0, 8)
         if(!forward)turn_phase_=6;
         break;}
     case 6:{ /* :4432-4445 mtn_no 0 rueckwaerts */

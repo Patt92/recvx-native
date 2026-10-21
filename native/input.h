@@ -81,6 +81,8 @@ public:
     std::function<bool(MenuInput)> modal_input;
     std::function<bool(const InputFrame&)> frame_input; // raw-pad task (computer terminal); true = frame consumed
     void synchronize(); // Consume script-owned UI requests before movement.
+    // system.c:565: (plp->flg & 0x6) && !(cb_flg & 0x4) -> bhCheckSubTask kehrt vor jedem Untertask zurueck.
+    bool subtask_locked()const{return events_&&(events_->flags[13][0]&6u)&&!(events_->flags[10][0]&4u);}
     bool apply(const InputFrame& frame); // true means an explicit quit action
     // confirm_transition: bewusste Host-Abweichung (Tuer-Skip, siehe doors.h).
     std::function<void()> interact,confirm_transition;

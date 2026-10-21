@@ -2,7 +2,7 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **90.1 %** weighted, **80.9 %** fully evidenced (549/679 mechanisms; not overall game completion).
+Explicit evidence scope: **90.1 %** weighted, **81.0 %** fully evidenced (555/685 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
@@ -10,13 +10,13 @@ Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 |---|---:|---:|---:|---:|---:|
 | Enemies/AI | 83/103 | 90.3 % | 80.6 % | 20 | 0 |
 | Effects | 220/251 | 93.6 % | 87.6 % | 30 | 1 |
-| Events/script | 77/92 | 91.8 % | 83.7 % | 15 | 0 |
-| Player/combat | 48/66 | 86.4 % | 72.7 % | 18 | 0 |
-| Room/camera/door | 15/39 | 69.2 % | 38.5 % | 24 | 0 |
+| Events/script | 78/93 | 91.9 % | 83.9 % | 15 | 0 |
+| Player/combat | 50/68 | 86.8 % | 73.5 % | 18 | 0 |
+| Room/camera/door | 16/40 | 70.0 % | 40.0 % | 24 | 0 |
 | Menu/items/text | 43/56 | 84.8 % | 76.8 % | 9 | 4 |
 | Models/animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
-| Audio | 24/24 | 100.0 % | 100.0 % | 0 | 0 |
-| Flow/saving | 29/33 | 93.9 % | 87.9 % | 4 | 0 |
+| Audio | 25/25 | 100.0 % | 100.0 % | 0 | 0 |
+| Flow/saving | 30/34 | 94.1 % | 88.2 % | 4 | 0 |
 | Platform (host-replaced) | 19/34 | 77.9 % | 55.9 % | 15 | 0 |
 
 Only ledger entries with independent native evidence count. Matching names, original sources, and quarantined generators never count as port evidence.
@@ -46,8 +46,6 @@ Only ledger entries with independent native evidence count. Matching names, orig
 - `event.c` bhPlItemTamaSet: Historical extraction/generator evidence is invalid. First hit and u16 little-endian quantity were checked.
 - `hitchk.c` bhCheckWall2Box: Historical extraction/generator evidence is invalid. Original query and geometry helpers were extracted; static/mobile ATR walls and prior object position were bound, with wall and second-crate tests.
 - `hitchk.c` bhGetGroundPosition: Historical extraction/generator evidence is invalid. The generated ground query kept room/mobile index and live ATR work. Player push/stair binding, linked casing effect, EE random state, and first-free eff[512] mapping were reported; other random consumers, exact EasyLight, full effect lifecycle, and general player work remain open.
-- `objitm.c` bhObj001: Historical extraction/generator evidence is invalid. Mobile walls, side probes, work indices, speed, and box collision were tested; auxiliary metc/mflr consumers for crate climbing remain incomplete.
-- `player.c` bhCPM2_act_psh: Historical extraction/generator evidence is invalid. MTN49/50/reverse49, Hokan, and curve9 were bound and tested; physical vibration callback remains missing.
 - `ps2_NaSystem.c` njColorBlendingModeSys: Historical extraction/generator evidence is invalid. Native chunk_blend.cpp models nj/GS saved state, ALPHA register selection, and RGB=(A-B)*C+D; FBA=0, PABE, GS packet quantization, and dc_alpha remain unmodeled. Blend, effect, weapon-flash, lighter, and runtime checks are recorded.
 - `sub1.c` GetItem: Historical extraction/generator evidence is invalid. GetItem including branch 153 and subsequent ItemSort were extracted; StatusCancel, sprite transitions, and full StatusMain were not completely bound.
 - `sub1.c` ItemSort: Historical extraction/generator evidence is invalid. Standard inventory sorting after pickup and mutation was tested; special flgchk in the full StatusMain remains incomplete.

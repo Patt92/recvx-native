@@ -238,6 +238,9 @@ void GameplayInput::menu_input(MenuInput key,bool repeat){
     // The original hint ends before its task releases cinematic control. Keep
     // one inventory request across that short handover, never across a video.
     if(key==MenuInput::Open&&!menu_.active&&(events_->flags[5][0]&4)){if(inventory_grace_&&!dialog_.active())inventory_pending_=true;return;}
+    // system.c:565 bhCheckSubTask: unter plp->flg 0x6 (0x4 bhMutekiSetPl/Stufen-/Schiebeaktionen, 0x2) ohne
+    // Cinematic (cb_flg 0x4) startet kein Untertask; der Tastendruck (pad_ps-Flanke) verfaellt.
+    if(key==MenuInput::Open&&!menu_.active&&subtask_locked())return;
     if(menu_.active||key==MenuInput::Open){const bool was_active=menu_.active;menu_.input(key,inventory_);if(!was_active&&menu_.active)events_->begin_status();if(menu_.use_item){unsigned index=0;if(!events_->use(menu_.use_item,&index,menu_.selected)){menu_.active=true;menu_.abort_close();if(index)menu_.show_message(index);menu_.feedback_sound=1;}menu_.use_item=0;}events_->menu_open=menu_.active;if(sound&&menu_.feedback_sound!=0xffffffff)sound(menu_.feedback_sound);return;}
     // bhSysCallGame (system.c:545): only pad_ps 0x10000 (SELECT) requests the cinematic
     // skip; OK is not a skip. During a cinematic (cb_flg 4) bhCheckExmAtari is not
@@ -265,7 +268,7 @@ void GameplayInput::synchronize(){
             // ueberzeichnete die Aufnahmefrage.
             menu_.reset(inventory_);const auto angle=inspection_default_angles(found);menu_.examine_pitch=angle[0];menu_.examine_yaw=angle[1];menu_.examine_roll=angle[2];}menu_.pickup=found;menu_.active=true;events_->menu_open=true;}
         else if(menu_.pickup){menu_.pickup=0;menu_.begin_close();events_->menu_open=menu_.active;}}
-    if(events_&&events_->status_requested&&!dialog_.active()&&!(transition_active&&transition_active())&&(!(events_->flags[5][0]&4)||(events_->flags[10][0]&0x64010))&& /* bhCheckSubTask: cb_flg 0x64010 requests ignore st_flg 0x4 */!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(3);menu_.input(MenuInput::Open,inventory_);events_->begin_status();}if(events_->flags[10][0]&0x40000)events_->flags[12][0]&=~0x200u;events_->menu_open=menu_.active;}}
+    if(events_&&events_->status_requested&&!subtask_locked()&&!dialog_.active()&&!(transition_active&&transition_active())&&(!(events_->flags[5][0]&4)||(events_->flags[10][0]&0x64010))&& /* bhCheckSubTask: plp->flg 0x6 haelt die Anforderung (cb_flg bleibt gesetzt); cb_flg 0x64010 requests ignore st_flg 0x4 */!(video_active&&video_active())){events_->status_requested=false;inventory_pending_=false;inventory_grace_=0;if(!menu_.active){if(sound)sound(3);menu_.input(MenuInput::Open,inventory_);events_->begin_status();}if(events_->flags[10][0]&0x40000)events_->flags[12][0]&=~0x200u;events_->menu_open=menu_.active;}}
 bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))return f.hit(Action::Quit);
     /* st_flg 0x40000 (Kartentask, siehe menu_input): kein Spiel-/Menuepfad und kein
        Host-Quit; Cancel erreicht die Karte als pad_ps 0x1000 (map.c:540, Ausstieg). */
@@ -273,7 +276,7 @@ bool GameplayInput::apply(const InputFrame& f){if(frame_input&&frame_input(f))re
     /* pad_on 0x800 dieses Durchlaufs: bhControlMessage zaehlt mes_ct mit gehaltenem OK um 4 weiter (message.c:345). */
     dialog_.begin_frame(f.down(Action::Confirm));menu_.message.begin_frame(f.down(Action::Confirm));
     menu_.tick(inventory_);if(menu_.slide_sound!=0xffffffff){if(sound)sound(menu_.slide_sound);menu_.slide_sound=0xffffffff;}if(menu_.tick_sound!=0xffffffff){if(sound)sound(menu_.tick_sound);menu_.tick_sound=0xffffffff;}synchronize();if(inventory_grace_){--inventory_grace_;if(!inventory_grace_)inventory_pending_=false;}
-    if(inventory_pending_&&events_&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
+    if(inventory_pending_&&events_&&!subtask_locked()&&!(events_->flags[5][0]&4)&&!dialog_.active()&&!(transition_active&&transition_active())&&!(video_active&&video_active())){inventory_pending_=false;menu_input(MenuInput::Open);}
     if(transition_active&&transition_active()){inventory_pending_=false;inventory_grace_=0;if(f.hit(Action::Quit))return true;if(f.hit(Action::Confirm)&&confirm_transition)confirm_transition(); /* Host-Abweichung: gewuenschter Tuer-Skip, siehe doors.h */return false;}if(video_active&&video_active()){
         inventory_pending_=false;inventory_grace_=0;
         if(f.hit(Action::Confirm)||f.hit(Action::Skip)||f.hit(Action::Cancel)){if(skip_video)skip_video();return false;}

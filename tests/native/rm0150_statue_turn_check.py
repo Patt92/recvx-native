@@ -105,6 +105,9 @@ def main():
         assert all(event in completed['events'] for event in (15, 16, 17, 18, 19)), 'original gas-stop sequence not dispatched'
         assert completed['player_work']['mode'][2] != 22 and not (completed['work_flags'][14] & 0x10080)
         assert not completed['cinematic'] and not completed['player_scripted'] and not completed['dialog_open']
+        # player.c:4430/4441 StartVibrationEx(0, 8) from bhCPM2_act_rpsh reaches the
+        # runtime vibration unit (vibman.c StartVibrationBasic counts the request).
+        assert completed['vibration_requests'] > 0, ('rpsh StartVibrationEx(0, 8) never reached the vibration unit', completed['vibration_requests'])
         print('Statue rotates; ev_flg 2 dispatches original gas-stop events; player released.')
         if args.sdl:
             # SDL --frames counts host-loop iterations, not simulation ticks.
