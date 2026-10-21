@@ -117,8 +117,7 @@ BGM-/ADX-Fades laufen nicht mehr als Host-Samplerampe: `RequestAdxFadeFunction2`
 (nativ alle 800 Ausgabeframes). `ADXT_Pause` ist im Original-ELF leer
 (`jr ra; nop`), eine native Pause gibt es daher nicht.
 
-Offen: die geschlossene IOP-Pegelkurve (`se_volume_gain` ist eine lineare
-Hostskalierung). Das Gate `ss_flg & 0x4000000` vor `PlayBgmEx2`/`ExecAdxFadeManager`
+Das Gate `ss_flg & 0x4000000` vor `PlayBgmEx2`/`ExecAdxFadeManager`
 ist immer offen: kein Originalschreiber setzt dieses Bit (2026-10-21, alle
 `ss_flg |=`-Stellen geprueft).
 
@@ -128,8 +127,40 @@ Raumbanken 60; `decode_system_sound` liest es jetzt aus der Bank statt eine Kons
 
 Alle acht Originalaufrufer von `Get3DSoundParameter` (SetupSeGenericParm,
 Schritte, Gegner, Ereignis-SE Mode 0, Objekt-SE, Stimmen) sind angeschlossen
-(2026-10-21, Test `audio_gaps`). Die geschlossene IOP-Pan-/Pegelsynthese bleibt
-ungeklärt; die bisherige native Ausgabeskalierung ist kein bitgenauer Nachweis.
+(2026-10-21, Test `audio_gaps`).
+
+### SE-Shot-Pegel (TSNDDRV/MODHSYN, 2026-10-21)
+
+Aus der eigenen Disassemblierung von `TSNDDRV.IRX` und `MODHSYN.IRX` (nur Lesereferenz)
+rechnet jede SE-Shot-Stimme (`play_pcm` mit Sony-Bankklang: Raum-, Gegner-, Waffen-,
+Hülsen-, Schritt- und COMMON-SE) ihr SPU2-Register VOLL/VOLR (`sony_voice_levels`,
+`native/audio_pan.cpp`); die Stimme klingt mit Register/16384:
+
+- EE: `sdShotSetVol` legt `(Sint8)Volume + 128` als u8 ab, `SdrSeReq`/`SdrSeChg` geben
+  es als `char` weiter und markieren es nur bei `>= 0` als gültig (`CheckCmdReq/Chg`).
+  `sdShotSetPan`: `(Sint8)Pan / 2 + 64`.
+- TSNDDRV: ungültige Lautstärke im Req = 127 (0xdc4), im Chg bleibt der alte Wert
+  (0xca0/0x1508). Chg mit Pan 64 bzw. Bend 8192 speichert ohne CC10/Pitchbend
+  (0x1588/0x1670), der Kanal behält seinen Wert. `tsnd_tq_chgreq`: CC7 = min(127, 127·Vol/127),
+  CC10 = clamp(Pan), Bend = Pitch. Portlautstärke 256 für alle Ports (`sceHSyn_SetVolume`).
+  Note 60 aus Programm +0xB, Velocity 127.
+- MODHSYN: CC7/CC11 (0x978/0x9d4) `(v << 7) / 127`; Notenpegel (0x38c8)
+  `(Programm +6 · Split +0x10 · Sample +0x10 · Velocity) >> 14`; Stimme (0x426c)
+  `(CC7 · CC11 · Note) >> 14`; Ausgabe (0x40f0) `min(16383, (Panfaktor · Pegel) >> 7)`;
+  Pan (0x0c18/0x4534) `CC10 - 64` auf -63..63 plus Bankpan - 64; Bend (0x4098)
+  `(Bend · Split +6/+8) >> 13`.
+- Velocity-Kurve (Sset +0), Split-/Sample-Crossfade (Bit 7 von +2/+4) und
+  Amplituden-LFO (Sample +0x28 & 0x70) sind in allen 735 HD-Bänken 0; andere Werte
+  werden beim Dekodieren gemeldet. 251 Samples haben Lautstärke 100, die bisher fehlte.
+- Der Req-Zustand gilt bis zum nächsten `sound_sync` (sdSysServer läuft vor den
+  Fademanagern, sdfunc.c:465).
+
+Test `audio_levels` (Registerwerte, RM_0021-Bank 2 mit Sample-Lautstärke 100,
+Req/Chg-Regeln). MIDI-Sequenzen (Ereignis-, Objekt-, Hintergrund-, Tür-MIDI) laufen noch
+über die Hostskalierung: dort skaliert MODMIDI (0xf30) CC7 als
+`min(127, (Sequenz-CC7 · Kanal 128 · Port) >> 14)` mit der EE-Lautstärke als Portwert
+(`sceMidi_MidiSetVolume`, 0x1d64), und TSNDDRV schickt das EE-Pan als HsMsg `0x1fd` an
+alle 16 Kanäle; dieser Pfad ist nicht portiert.
 
 ## SPU2-Hüllkurve und Hall
 
@@ -196,9 +227,9 @@ FFmpeg wird nur bei dieser Umwandlung benutzt, nicht von der Laufzeit.
 
 - Mehrschichtige HD-Programme, phaseninvertiertes Programm-Pan und SPU-Interpolation (ADSR und Hall sind portiert).
 - SysEx in SQ und Live-Controller-Modulation laufender Noten.
-- Vollständiger Anschluss aller räumlichen Soundkategorien und originale
-  Sony-Programm-/Samplelautstärken; die Gesamtmischung ist noch nicht originalgetreu.
-- MIDI-/ADX-Lautstärke→Ausgabekurve und die Velocity-/Bereichsfade-Pfade
+- MIDI-Sequenzpegel (MODMIDI-CC7-Skalierung, HsMsg-Pan, Live-CC7/CC11 laufender
+  Noten); SE-Shots rechnen die MODHSYN-Register.
+- ADX-Lautstärke→Ausgabekurve und die Velocity-/Bereichsfade-Pfade
   anderer Bankarten; `GetAdxStatus`-PREP hat keine native Entsprechung
   (Clips laden synchron).
 - Ambient in Innenräumen: Das Original stoppt BG-Klänge nur über

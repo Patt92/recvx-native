@@ -2,6 +2,7 @@
 #include <array>
 #include "timing.h"
 #include "audio_spu.h"
+#include "audio_pan.h"
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -25,7 +26,7 @@ struct RoomSoundEnv {std::int8_t player_voice=0,player_action=0,weapon=0,cartrid
 // 0..127 each; ADX clips keep 127/64 (unity, centre).
 struct SonyPitch {int root=60,note=60,fine=0;unsigned bend_down=0,bend_up=0;};
 // spu: Sony-HD-Sample (MODHSYN-Stimme) mit ADSR1/ADSR2 (+0x12/+0x14) und sampleSpuAttr (+0x29).
-struct PcmClip {unsigned rate=0,channels=0;std::optional<SonyPitch> sony_pitch;bool spu=false;std::uint16_t adsr1=0,adsr2=0;std::uint8_t spu_attr=0;std::size_t loop_start=0,loop_end=0;std::vector<std::int16_t> samples;float volume=1;unsigned pan=64;std::size_t frames()const{return channels?samples.size()/channels:0;}};
+struct PcmClip {unsigned rate=0,channels=0;std::optional<SonyPitch> sony_pitch;bool spu=false;std::uint16_t adsr1=0,adsr2=0;std::uint8_t spu_attr=0;std::size_t loop_start=0,loop_end=0;std::vector<std::int16_t> samples;float volume=1;unsigned pan=64;std::uint32_t sony_volume=0;std::size_t frames()const{return channels?samples.size()/channels:0;}};
 PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate);
 // key<0 selects the first split; otherwise the split whose key range holds `key`. For key>=0 (MODHSYN
 // note-on) a missing/empty program or a key no split covers yields an empty clip: no voice, as in the driver.
@@ -164,6 +165,9 @@ public:
     int bgm_request()const{return req_fade_bgm_;}
     static float adx_gain(float volume);          // AdxVolTbl, 0.1 dB steps
     static unsigned adx_fade_ticks(int timer);    // RequestAdxFadeFunction2 count
+    // MODHSYN VOLL/VOLR of an SE shot voice (0 for other voices).
+    std::shared_ptr<const PcmClip> voice_clip(unsigned voice)const{return voice<slots_.size()?slots_[voice].clip:nullptr;}
+    SonyLevels voice_levels(unsigned voice)const{return voice<slots_.size()&&slots_[voice].shot&&slots_[voice].clip?slots_[voice].levels:SonyLevels{};}
     std::vector<std::string> played,unavailable;
 private:
     unsigned disc_=0;
@@ -176,11 +180,15 @@ private:
     // clip_rate ueberlebt das natuerliche Clipende (dort wird nur `clip` geloest), damit
     // adx_play_time danach noch die erreichte Zeit melden kann; release_channel setzt das
     // ganze Werk zurueck und damit auch die Rate.
-    struct Channel {std::shared_ptr<PcmClip> clip;unsigned clip_rate=0;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1,pan_left=1,pan_right=1;int pitch=0;std::vector<Layer> layers;std::shared_ptr<Sequence> sequence;SpuEnvelope env;unsigned core=0;bool released=false;};
+    struct Channel {std::shared_ptr<PcmClip> clip;unsigned clip_rate=0;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1,pan_left=1,pan_right=1;int pitch=0;std::vector<Layer> layers;std::shared_ptr<Sequence> sequence;SpuEnvelope env;unsigned core=0;bool released=false;
+        // TSNDDRV SE shot (Tsnd_tqreq/Tsnd_tqchg -> tsnd_tq_chgreq CC7/CC10/bend): `shot_request` until the next
+        // sdSysServer (sound_sync) carries SdrSeReq, afterwards SdrSeChg; levels = MODHSYN VOLL/VOLR.
+        bool shot=false,shot_request=false;unsigned shot_cc7=127,shot_cc10=64;SonyLevels levels{};};
     // MODHSYN-Stimmen nach Key-Off (CC 120 von sdShotStop/sdMidiStop, Fade-Ende, Sequenzende):
     // der Slot ist frei, die Stimmen klingen bis zum Release-Ende aus.
     std::vector<Channel> releasing_;
     void key_on(const std::shared_ptr<PcmClip>& clip,SpuEnvelope& env,unsigned& core);
+    void shot_levels(Channel& c);void shot_volume(Channel& c,float volume);bool shot_pan(Channel& c,float pan);
     unsigned spu_core(std::uint8_t attr)const;
     void release_channel(Channel& channel);
     void release_sequence_end(Channel& channel);

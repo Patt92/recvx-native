@@ -106,6 +106,13 @@ std::vector<PcmClip> decode_program_voices(const std::vector<std::uint8_t>& byte
     // Mischschalter VMIXL/R/EL/ER und Kernwahl aus sampleSpuAttr (+0x29). Siehe audio_spu.h.
     for(unsigned depth:{0x16u,0x18u,0x1au,0x1cu,0x1eu})if(v.u8(sample+depth))throw std::runtime_error("Sony sample key-follow ADSR not ported");
     out.spu=true;out.adsr1=v.u16(sample+0x12);out.adsr2=v.u16(sample+0x14);out.spu_attr=v.u8(sample+0x29);
+    // MODHSYN note volume (0x38c8): program +6 * split +0x10 * sample +0x10 * velocity curve, crossfade 0x4680.
+    // Velocity curve (Sset +0, 0x8794), split/sample crossfade (bit 7 of +2/+4, 0x4680) and the amplitude LFO
+    // (sample +0x28 & 0x70, 0x37cc) are 0 in every bank of the game; others are not ported.
+    if(v.u8(set)!=0)throw std::runtime_error("Sony velocity curve not ported");
+    if((v.u8(zone+2)|v.u8(zone+4)|v.u8(sample+2)|v.u8(sample+4))&0x80)throw std::runtime_error("Sony split/sample crossfade not ported");
+    if(v.u8(sample+0x28)&0x70)throw std::runtime_error("Sony amplitude LFO not ported");
+    out.sony_volume=std::uint32_t(v.u8(pg+6))*v.u8(zone+0x10)*v.u8(sample+0x10);
     out.volume=float(v.u8(pg+6))/127.f*float(v.u8(zone+0x10))/127.f;out.pan=unsigned(sony_bank_pan(std::int8_t(v.u8(pg+7)),std::int8_t(v.u8(zone+17)),std::int8_t(v.u8(sample+13)),((note-int(v.u8(zone+15)))*int(std::int8_t(v.u8(zone+14)))+(note-int(v.u8(pg+11)))*int(std::int8_t(v.u8(pg+10))))/12));
     voices.push_back(std::move(out));};
     if(key<0){voice(zones);return voices;}
@@ -170,7 +177,7 @@ void AudioMixer::apply_se_volume(unsigned voice,float volume){
     case 1:if(volume<state.last)request_se_fade(voice,-1,int(volume),state.remaining);state.volume=volume;break;
     case 2:break;
     }
-    if(active(voice)){auto& c=slots_[voice];c.gain=se_volume_gain(state.volume);}
+    if(active(voice)){auto& c=slots_[voice];if(c.shot)shot_volume(c,state.volume);else c.gain=se_volume_gain(state.volume);}
 }
 void AudioMixer::request_se_fade(unsigned voice,int start,int target,int frames){
     auto& state=se_volume_.at(voice);
@@ -179,6 +186,9 @@ void AudioMixer::request_se_fade(unsigned voice,int start,int target,int frames)
     state.function=state.speed<0?1:2;
 }
 void AudioMixer::sound_sync(){
+    // sdSysServer runs first (sdfunc.c:465): a shot requested since the last call leaves as SdrSeReq; every later
+    // parameter write reaches TSNDDRV as SdrSeChg.
+    for(auto& c:slots_)c.shot_request=false;for(auto& c:releasing_)c.shot_request=false;
     // ExecSoundSynchProgram -> sdSysServer (ps2_sg_sd.c:1680): FxLevelTimer steps EVOL of both cores.
     if(fx_level_timer_){--fx_level_timer_;if(!fx_level_timer_)current_fx_level_=room_fx_target_;else current_fx_level_+=add_fx_level_;
         set_rev(1,5,current_fx_level_);set_rev(2,5,current_fx_level_);}
@@ -186,7 +196,7 @@ void AudioMixer::sound_sync(){
         if(!state.function)return;
         state.volume-=state.speed;--state.remaining;
         if(state.remaining<0){state.volume=state.last;if(int(state.volume)==-127)stop(voice);state.function=0;}
-        if(active(voice))slots_[voice].gain=se_volume_gain(std::int8_t(int(state.volume)));
+        if(active(voice)){auto& c=slots_[voice];if(c.shot)shot_volume(c,state.volume);else c.gain=se_volume_gain(std::int8_t(int(state.volume)));}
     };
     for(unsigned midi=0;midi<8;++midi){const unsigned voice=midi_host_voice(midi);fade(midi_control_[midi],voice);}
     for(unsigned slot=0;slot<20;++slot)fade(se_volume_[se_host_voice(slot)],se_host_voice(slot));
@@ -258,11 +268,36 @@ AudioMixer::SoundState AudioMixer::sound_state(unsigned voice,bool midi)const{
 void AudioMixer::apply_se_pan(unsigned voice,float pan){
     se_volume_.at(voice).pan=pan;
     if(!active(voice)||!slots_[voice].clip)return;auto& c=slots_[voice];
+    if(c.shot){shot_pan(c,pan);return;}
     const int driver_pan=std::int8_t(int(pan));
     pan_gains(unsigned(std::clamp(int(c.clip->pan)+driver_pan/2,0,127)),c.left,c.right);
 }
 void AudioMixer::apply_se_pitch(unsigned voice,int pitch){
-    se_volume_.at(voice).pitch=pitch;if(active(voice))slots_[voice].pitch=pitch;
+    se_volume_.at(voice).pitch=pitch;if(!active(voice))return;auto& c=slots_[voice];
+    // Tsnd_tqchg (TSNDDRV 0x165c..0x16dc): a change to bend 8192 is stored without a pitch-bend message, so the
+    // channel keeps the previous bend; SdrSeReq always sends it. sdShotSetPitch: 3 * pitch + 8192 (u16), 512..16383.
+    if(c.shot&&!c.shot_request&&std::clamp(int(std::uint16_t(8192+3*pitch)),512,16383)==8192)return;
+    c.pitch=pitch;
+}
+void AudioMixer::shot_levels(Channel& c){
+    // SE note-on velocity is the literal 127 (Tsnd_tqreq), CC11 is never sent to an SE channel (expression 128).
+    c.levels=sony_voice_levels(c.clip->sony_volume,127,sony_controller_scale(c.shot_cc7),128,int(c.clip->pan),c.shot_cc10);
+    c.left=float(c.levels.left)/16384.f;c.right=float(c.levels.right)/16384.f;
+}
+void AudioMixer::shot_volume(Channel& c,float volume){
+    // sdShotSetVol: SND_WORK.vol (u8) = (Sint8)Volume + 128; SdrSeReq/SdrSeChg pass it as char and mark it valid only
+    // when >= 0 (CheckCmdReq/Chg). Invalid: Req uses 127 (TSNDDRV 0xdc4), Chg keeps the old value (0xca0, 0x1508).
+    // tsnd_tq_chgreq: CC7 = min(127, 127 * vol / 127).
+    const unsigned value=std::uint8_t(int(std::int8_t(int(volume)))+128);
+    if(value<128)c.shot_cc7=value;else if(c.shot_request)c.shot_cc7=127;
+    shot_levels(c);
+}
+bool AudioMixer::shot_pan(Channel& c,float pan){
+    // sdShotSetPan: (Sint8)Pan / 2 + 64; Tsnd_tqchg stores 64 without a CC10 (0x1588..0x15f4), the channel keeps
+    // its pan; SdrSeReq always sends it. tsnd_tq_chgreq: CC10 = clamp(64 + pan - 64, 0, 127).
+    const unsigned value=unsigned(int(std::int8_t(int(pan)))/2+64);
+    if(c.shot_request||value!=64)c.shot_cc10=value;
+    shot_levels(c);return true;
 }
 void AudioMixer::play_se_request(unsigned voice,std::shared_ptr<PcmClip> clip,const SeRequest& request){
     if(!clip||!clip->frames())return;play_pcm(voice,std::move(clip));
@@ -622,7 +657,7 @@ void AudioMixer::call_enemy_se_main(unsigned slot,int se_no,int pan,int volume,i
     catch(const std::exception& error){unavailable.push_back("enemy SE "+std::to_string(se_no)+": "+error.what());return;}
     apply_se_pan(voice,pan);
     if(!fade_rate){se_volume_[voice].function=0;apply_se_volume(voice,float(volume));return;}
-    if(active(voice))c.gain=se_volume_gain(se_volume_[voice].volume);
+    if(active(voice)){if(c.shot)shot_volume(c,se_volume_[voice].volume);else c.gain=se_volume_gain(se_volume_[voice].volume);}
     request_se_fade(voice,-127,volume,fade_rate);
 }
 bool AudioMixer::enemy_se_playing(unsigned enemy,int se_no)const{
@@ -815,10 +850,12 @@ void AudioMixer::init_spu(){
     set_rev(1,5,0);set_rev(2,5,current_fx_level_);
 }
 void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume,bool loop){if(slot>=slots_.size()||!clip||!clip->channels||clip->channels>2||clip->rate<8000||clip->rate>96000||clip->samples.size()%clip->channels||!clip->frames()||!std::isfinite(volume)||volume<0||volume>8||(clip->loop_end&&(clip->loop_start>=clip->loop_end||clip->loop_end>clip->frames())))throw std::runtime_error("invalid audio channel/clip");Channel c;c.volume=volume*clip->volume;pan_gains(clip->pan,c.left,c.right);c.clip_rate=clip->rate;c.clip=std::move(clip);c.loop=loop;slots_[slot]=std::move(c);
-    auto& voice=slots_[slot];if(voice.clip->spu)key_on(voice.clip,voice.env,voice.core);}
+    auto& voice=slots_[slot];if(voice.clip->spu)key_on(voice.clip,voice.env,voice.core);
+    // A Sony bank voice started by play_pcm is an SE shot (ExPlaySe -> SdrSeReq): its level is the MODHSYN register.
+    if(voice.clip->spu&&voice.clip->sony_volume){voice.shot=voice.shot_request=true;voice.volume=volume;shot_levels(voice);}}
 void AudioMixer::play_layers(unsigned slot,std::vector<Layer> layers,float volume,bool loop){
     if(layers.empty())throw std::runtime_error("audio voice without layers");
-    play_pcm(slot,layers.front().clip,volume,loop);auto& c=slots_[slot];c.volume=volume;c.left=layers.front().left;c.right=layers.front().right;
+    play_pcm(slot,layers.front().clip,volume,loop);auto& c=slots_[slot];c.shot=false;c.volume=volume;c.left=layers.front().left;c.right=layers.front().right;
     for(std::size_t i=1;i<layers.size();++i){const auto& l=layers[i].clip;if(l&&l->spu)key_on(l,layers[i].env,layers[i].core);if(!l||!l->channels||l->channels>2||l->rate<8000||l->rate>96000||!l->frames()||(l->loop_end&&(l->loop_start>=l->loop_end||l->loop_end>l->frames())))throw std::runtime_error("invalid audio layer");c.layers.push_back(layers[i]);}
 }
 void AudioMixer::play(unsigned slot,const std::string& archive,unsigned id,float volume,bool loop,unsigned fade_ticks){
