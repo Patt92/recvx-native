@@ -2,19 +2,24 @@
 
 RECVX Native führt Host-C/C++-Code aus und liest vorbereitete lose
 Spieldateien. Es gibt keine PS2-CPU-Emulation; ISO und AFS-Container werden
-zur Laufzeit nicht geöffnet. Die Originalquellen unter `src/` bleiben die
-Referenz, aus der Generatoren Routinen in den nativen Code übernehmen.
+zur Laufzeit nicht geöffnet. Die Originalquellen unter `src/` bleiben
+Semantikreferenz für eigenständige Portierungen in die native Engine.
 
 ## Voraussetzungen
 
-- Python 3.12+, CMake, C/C++-Compiler
+- Python 3.12+, CMake 3.16+ (beide im Terminal erreichbar), C/C++17-Compiler
 - macOS: Apple Command Line Tools
-- Windows: Visual Studio mit C++-Workload
+- Windows: Visual Studio mit „Desktop development with C++“; für einen nativen
+  ARM64-Build zusätzlich die ARM64-C/C++-Buildtools
 - Windows-Crossbuild von macOS/Linux: zusätzlich Ninja
+- `--iso`: FFmpeg und ffprobe im PATH
 
 Der erste Build lädt festgelegte Abhängigkeiten (SDL2 2.32.10, für den
 Crossbuild Zig 0.16.0; beide per Prüfsumme fixiert). Danach braucht weder der
 Build noch das Spiel eine Netzwerkverbindung.
+Unter Windows vor `./build.ps1` in derselben PowerShell-Sitzung
+`python --version` und `cmake --version` prüfen. Ein `WinError 2` direkt nach
+dem Policy-Check beim Start von CMake weist auf ein fehlendes `cmake` im PATH hin.
 
 ## Bauen und Pakete erzeugen
 
@@ -37,6 +42,9 @@ deshalb aus der fixierten Quelle mitgebaut:
 ```sh
 ./build.sh --platform windows-arm64 --verify-data --package
 ```
+
+Auf Windows ARM64 baut `./build.ps1` hingegen nativ für ARM64; der Crossbuild
+ist dafür nicht erforderlich.
 
 Das Paket entsteht unter `build/packages/windows-arm64-v<version>`. Wie jeder
 Windows-Crossbuild muss es auf Windows ARM64 oder unter passender Emulation

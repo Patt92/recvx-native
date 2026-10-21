@@ -131,11 +131,39 @@ Implementation details and development status live in the
 You need your own legally obtained game data. Disc images and game assets are
 not distributed with the source code.
 
-With Python 3.12+, CMake and a C/C++ compiler installed, a host build can prepare
-the data from a PS2 ISO and create a package:
+Before building, install:
+
+- **Python 3.12+** and **CMake 3.16+**, both available from your terminal.
+  Check with `python --version` and `cmake --version` on Windows; use
+  `python3 --version` on macOS/Linux. Python runs the build and data preparation
+  scripts; CMake configures the C/C++ build.
+- **A C compiler and C++17 toolchain**: Apple Command Line Tools on macOS, or Visual Studio
+  with the Desktop development with C++ workload on Windows. For a native
+  Windows ARM64 build, install its ARM64 C/C++ build tools as well.
+- **FFmpeg and ffprobe**, available from your terminal, if using `--iso` to
+  prepare game data. They are not needed when `data/` is already prepared.
+
+The first build downloads SDL2 2.32.10, so it needs network access. On
+macOS/Linux, Windows cross-builds also need Ninja; the build tool downloads its
+pinned Zig toolchain. Python packages installed with `pip` are not required for
+the normal build.
+
+On Windows ARM64, `./build.ps1` selects the native ARM64 target. If it stops
+after the policy check with `FileNotFoundError: [WinError 2]`, check that
+`cmake --version` works in the same PowerShell session. The policy check only
+confirms the source/build scope; it does not check build dependencies.
+
+With these dependencies installed, a host build can prepare the data from a
+PS2 ISO and create a package:
 
 ```bash
 ./build.sh --iso "/path/to/game.iso" --package
+```
+
+On Windows, run the PowerShell wrapper:
+
+```powershell
+./build.ps1 --iso "C:\path\to\game.iso" --package
 ```
 
 ISO preparation also needs FFmpeg/ffprobe for the movies. Repeat `--iso` to

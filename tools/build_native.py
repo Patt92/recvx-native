@@ -194,6 +194,8 @@ def main():
     data = args.data.resolve()
     if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.verify_runtime):
         parser.error('Windows cross-builds cannot run tests; use --platform windows or windows-arm64 without test options, then test on Windows or Wine')
+    if shutil.which('cmake') is None:
+        parser.error('CMake was not found on PATH. Install CMake and open a new terminal; verify with "cmake --version" before building.')
     run_checks = args.test and not args.no_test
     if is_windows_target(target) and platform.system() != 'Windows':
         # The final binary audit also invokes Zig; use the same project cache.

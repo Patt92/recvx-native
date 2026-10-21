@@ -1,8 +1,11 @@
 """Development-app publishing; macOS tools are mocked, not policy bypassed."""
 import importlib.util
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 import plistlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -13,6 +16,22 @@ spec.loader.exec_module(build_native)
 
 
 class BuildTargetTests(unittest.TestCase):
+    def test_missing_cmake_reports_dependency_before_configure(self):
+        commands = []
+        error = StringIO()
+        with patch.object(sys, 'argv', ['build_native.py']), \
+             patch.object(build_native.platform, 'system', return_value='Windows'), \
+             patch.object(build_native.platform, 'machine', return_value='ARM64'), \
+             patch.object(build_native.shutil, 'which', return_value=None), \
+             patch.object(build_native, 'run', side_effect=lambda *command: commands.append(command)), \
+             redirect_stderr(error):
+            with self.assertRaises(SystemExit) as failure:
+                build_native.main()
+        self.assertEqual(failure.exception.code, 2)
+        self.assertIn('CMake was not found on PATH', error.getvalue())
+        self.assertEqual(len(commands), 1)
+        self.assertTrue(str(commands[0][1]).endswith('check_no_original_core.py'))
+
     def test_host_target_distinguishes_windows_arm64(self):
         self.assertEqual(build_native.host_target('Windows', 'ARM64'), 'windows-arm64')
         self.assertEqual(build_native.host_target('Windows', 'aarch64'), 'windows-arm64')
