@@ -31,6 +31,7 @@
 #include "input.h"
 #include "vibration.h"
 #include "frontend.h"
+#include "window_presentation.h"
 #include "debug_menu.h"
 #include "doors.h"
 #include "back_color.h"
@@ -1733,8 +1734,7 @@ int main(int argc,char** argv){
         if(!raw_renderer)raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_SOFTWARE);
         std::unique_ptr<SDL_Renderer,decltype(&SDL_DestroyRenderer)> renderer(raw_renderer,SDL_DestroyRenderer);sdl_check(bool(renderer));
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"nearest");
-        sdl_check(SDL_RenderSetLogicalSize(renderer.get(),640,480)==0);
-        sdl_check(SDL_RenderSetIntegerScale(renderer.get(),SDL_TRUE)==0);
+        sdl_check(recvx::configure_window_presentation(renderer.get())==0);
         std::unique_ptr<SDL_Texture,decltype(&SDL_DestroyTexture)> texture(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480),SDL_DestroyTexture);sdl_check(bool(texture));
         SDL_AudioSpec requested{},obtained{};requested.freq=48000;requested.format=AUDIO_S16SYS;requested.channels=2;requested.samples=1024;
         audio_device=SDL_OpenAudioDevice(nullptr,0,&requested,&obtained,0);if(!audio_device)std::cerr<<"Audio output unavailable: "<<SDL_GetError()<<'\n';else SDL_PauseAudioDevice(audio_device,0);
