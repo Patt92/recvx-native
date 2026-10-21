@@ -36,7 +36,10 @@ current gameplay acceptance. Check the current gaps in
 
 - Original saving/loading (typewriter, memory card), difficulty selection, and
   complete title transitions. Saving and LOAD GAME have since been ported with
-  a host user-data file in place of a memory card; see current status.
+  a host user-data file in place of a memory card; see current status. The save
+  and load screen keeps the original font, positions and message flow but its
+  card-specific header/in-progress texts say `Save games` / save file
+  (`save_screen_host_message`), not `MEMORY CARD` or `PS2`.
 - Full `bhSysCallMonitor` state machine for `mn_md`; room loading and changes
   run natively in Runtime/World.
 - Host snapshots (F5/F9) are development tools, not original saving.

@@ -501,7 +501,9 @@ void GameUi::draw_typewriter(SoftwareRenderer& image,const Typewriter& screen){
     // DispBackGroundTexture, McSaveFile:977–1018; no invented flat background.
     quad(0,0,0,512,480,0,0,1,.93f,0xff909090);
     quad(1,512,0,128,480,0,0,.24f,.93f,0xff909090);
-    auto message=[&](unsigned id,float x,float y,std::uint32_t col=0xffffffffu,float scale=1,float line=1,unsigned count=0,bool spaces=false){direct_message(image,system_message(id),x,y,col,scale,scale,line,count,spaces);};
+    auto message=[&](unsigned id,float x,float y,std::uint32_t col=0xffffffffu,float scale=1,float line=1,unsigned count=0,bool spaces=false){
+        const auto host=save_screen_host_message(id);
+        direct_message(image,host.empty()?system_message(id):host,x,y,col,scale,scale,line,count,spaces);};
     auto cursor=[&](float x,float y){quad(2,x,y,16,30,.47070313f,0,.5019531f,.0625f,0xff808080);};
     auto arrow=[&](float x,float y,unsigned mode){
         // DispUpDownCursol, McSaveFile:898–974: polygon vertices, not text glyphs.
@@ -520,7 +522,9 @@ void GameUi::draw_typewriter(SoftwareRenderer& image,const Typewriter& screen){
     const auto phase=screen.phase();const bool save=screen.mode()==Typewriter::Mode::Save;
     const bool window=phase==Phase::Files||phase==Phase::Confirm||phase==Phase::Io||phase==Phase::Typing||phase==Phase::Success;
     if(window){
-        message(463,140,32);message(464,420,32);cursor(32,103+40*screen.row());
+        // Host-Kopftext (463/464 ersetzen "MEMORY CARD slot 1"): gleiche Schrift und
+        // Zeile wie das Original, mittig in der 640er-Leinwand.
+        direct_message(image,save_screen_host_message(463),320-label_width("Save games",1)/2,32,0xffffffff);cursor(32,103+40*screen.row());
         // njDrawPolygon (ps2_NaDraw.c:8-58) schreibt den Alphawert des Vertex als col>>25,
         // also die Haelfte des Farbbytes; njDrawPolygon(...,1) mischt danach mit dem
         // ALPHA-Register des vorangehenden Fonts (0x44: CS als Faktor, /128). Fuer

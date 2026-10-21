@@ -33,17 +33,16 @@ static std::vector<std::uint8_t> fixture(){
     const std::vector<std::uint8_t> scan={5,6,0x1b,0,0,0,1,22,4,4,0,0,0,1,0x26,1,5,4,0,0,0,0,0x14,0,0,0,3,0,0,0};
     std::copy(scan.begin(),scan.end(),b.begin()+1118);
     const std::vector<std::uint8_t> event={0xf8,0xf9,3,0,0x1f,0,0,1,0xff,0};std::copy(event.begin(),event.end(),b.begin()+1180);
-    // 0xe4 steht als Stellvertreter fuer einen noch nicht portierten Befehl:
-    // in der Originaltabelle ist der Platz mit dm0 belegt (event.c:437, gibt 0
-    // zurueck = der Befehl rueckt nicht vor), also von keinem Raumskript benutzt.
-    b[1210]=0xe4; // Unknown commands must block with their PC retained.
+    // 0xe4 ist in der Originaltabelle dm0 (event.c:437): gibt 0 zurueck, rueckt nicht vor.
+    // Die Aufgabe bleibt wie im Original auf dem Byte stehen (kein Hostfehler, nicht blockiert).
+    b[1210]=0xe4; // dm0: the task holds on this byte with its PC retained.
     put(b,1400,1);put(b,1404,8);b[1408]='A'-32;b[1410]=255;b[1411]=255;return b;
 }
 int main(int argc,char** argv){try{
     _Make_SinTable();Inventory inv;check(inv.slots()[1]==0x370001&&inv.slots()[2]==0x910001,"new-game items differ");
     {auto next=[](std::uint32_t& state){state=state*0x41c64e6du+0x3039u;return int(state&0x7fffffffu);};std::uint32_t state=1;check(recvx_core_random_next()==next(state),"EE rand first output differs from executable");recvx_core_random_seed(0x12345678);state=0x12345678;check(recvx_core_random_next()==next(state)&&recvx_core_random_next()==next(state),"EE rand seed/state transition differs from executable");
-        auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0x8c,0,0x34,0x12,0x78,0x56,0x63,7,0xe4,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state_items;MessageDialog text;EventVm event(bytes,state_items,text);event.start(0,0);event.tick();state=0x12345678;next(state);const int ranged=int(100.0f*(float(next(state))/2147483648.0f))%7;check(event.errors.size()==1&&event.task_states().front().blocked&&event.task_states().front().wpnl_no==unsigned(ranged)&&recvx_core_random_next()==next(state),"bhRandTest/bhRandamSet did not share the original EE RNG and task result");
-        recvx_core_random_seed(1);state=1;const std::vector<std::uint8_t> no_seed={0x8c,1,0xaa,0xbb,0xcc,0xdd,0xe4,0};std::copy(no_seed.begin(),no_seed.end(),bytes.begin()+1180);Inventory state_items2;MessageDialog text2;EventVm no_seed_event(bytes,state_items2,text2);no_seed_event.start(0,0);no_seed_event.tick();const auto first=next(state);float random_float=float(first)/2147483648.0f;unsigned expected_bits=0;std::memcpy(&expected_bits,&random_float,sizeof expected_bits);check(no_seed_event.errors.size()==1&&no_seed_event.task_states().front().wpnl_no==expected_bits&&recvx_core_random_next()==next(state),"bhRandTest nonzero mode reseeded or stored the wrong original task fields");recvx_core_random_seed(1);}
+        auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0x8c,0,0x34,0x12,0x78,0x56,0x63,7,0xe4,0};std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state_items;MessageDialog text;EventVm event(bytes,state_items,text);event.start(0,0);event.tick();state=0x12345678;next(state);const int ranged=int(100.0f*(float(next(state))/2147483648.0f))%7;check(event.errors.empty()&&!event.task_states().front().blocked&&event.task_states().front().offset==88&&event.task_states().front().wpnl_no==unsigned(ranged)&&recvx_core_random_next()==next(state),"bhRandTest/bhRandamSet did not share the original EE RNG and task result");
+        recvx_core_random_seed(1);state=1;const std::vector<std::uint8_t> no_seed={0x8c,1,0xaa,0xbb,0xcc,0xdd,0xe4,0};std::copy(no_seed.begin(),no_seed.end(),bytes.begin()+1180);Inventory state_items2;MessageDialog text2;EventVm no_seed_event(bytes,state_items2,text2);no_seed_event.start(0,0);no_seed_event.tick();const auto first=next(state);float random_float=float(first)/2147483648.0f;unsigned expected_bits=0;std::memcpy(&expected_bits,&random_float,sizeof expected_bits);check(no_seed_event.errors.empty()&&!no_seed_event.task_states().front().blocked&&no_seed_event.task_states().front().offset==86&&no_seed_event.task_states().front().wpnl_no==expected_bits&&recvx_core_random_next()==next(state),"bhRandTest nonzero mode reseeded or stored the wrong original task fields");recvx_core_random_seed(1);}
     check(inv.equip(1)&&inv.weapon()==1,"lighter equip");check(inv.equip(1)&&!inv.weapon(),"lighter unequip");check(!inv.equip(2),"manual equipped as weapon");
     check(inv.acquire(21,1)&&inv.acquire(22,1),"herb pickup");unsigned green=0,red=0;for(unsigned i=2;i<12;++i){if(Inventory::id(inv.slots()[i])==21)green=i;if(Inventory::id(inv.slots()[i])==22)red=i;}
     // D01/D07: Combi_03 (Selektor 6 nach Ja) grün+rot -> 25, danach ItemUse ->
@@ -182,6 +181,16 @@ int main(int argc,char** argv){try{
             state.items.fill(0);state.partner_weapon={};state.slots()[2]=Inventory::pack(20,1);state.slots()[0]=5;state.script_item_give(owner,9,1);
             check(state.slots()[2]==Inventory::pack(9,0)&&state.slots()[0]==5&&state.partner_weapon[owner]==0,"bhItemGetGet mode 1 equipped or kept the old entry"+at);
         }
+        // sub1.c:8553 ExtraGameItemInit (bhExGameItemInit 0xCF): Zeile aus costume/cng_pid, Bank cng_pid.
+        {Inventory state;state.items.fill(0);state.game_mode=0;const auto e=[&](unsigned id){return (std::uint32_t(id)<<16)|getbulletmax[std::uint8_t(id)][0];};
+         state.extra_game_item_init(0,0,false);
+         check(state.items[2]==e(8)&&state.items[3]==e(9)&&state.items[4]==e(10247)&&state.items[5]==e(2060)&&state.items[6]==e(29)&&state.items[9]==e(29)&&state.items[10]==0,"ExtraGameItemInit row 0 (Claire) differs from sub1.c:8561");
+         state.items.fill(0);state.extra_game_item_init(2,0,false);
+         check(state.items[34]==e(8)&&state.items[35]==e(2081)&&state.items[36]==e(2082)&&state.items[38]==e(29)&&state.items[39]==0&&state.items[2]==0,"ExtraGameItemInit row 2 must fill the cng_pid bank");
+         state.items.fill(0);state.extra_game_item_init(1,1,false);
+         check(state.items[18]==e(8)&&state.items[19]==e(6)&&state.items[20]==e(2050)&&state.items[24]==e(2065)&&state.items[25]==0,"ExtraGameItemInit with costume must use row 4 in the cng_pid bank");
+         state.items.fill(0);state.extra_game_item_init(3,0,true);
+         check(state.items[50]==0x80B0001u&&state.items[51]==e(8)&&state.items[54]==e(29)&&state.items[55]==0,"ExtraGameItemInit ssd_flg 0x80000000 branch (sub1.c:8579) differs");}
         // bhPlItemLost: die Nachführung vergleicht pip[0] mit dem Slotindex, das
         // Lösen aber mit dem absoluten itm-Index (ply_id*16 + slot). Für
         // ply_id 0 löst das Entfernen des ausgerüsteten Slots pip[0] (0), für
@@ -228,7 +237,7 @@ int main(int argc,char** argv){try{
     menu.input(MenuInput::Open,lighter);menu.skip_slide();menu.input(MenuInput::Confirm,lighter);for(int f=0;f<4;++f)menu.tick(lighter);menu.input(MenuInput::Confirm,lighter);check(lighter.weapon()==1&&menu.active&&!menu.commands&&menu.erase_frames==4,"WeaponSet keeps the status screen open and erases the command window");for(int f=0;f<4;++f)menu.tick(lighter);menu.input(MenuInput::Cancel,lighter);menu.input(MenuInput::Cancel,lighter);for(int f=0;f<40&&menu.active;++f)menu.tick(lighter);check(!menu.active,"status screen does not close after equip");
     vm.menu_open=false;vm.tick();check(vm.dispatched==std::vector<unsigned>{0},"equipment-driven script dispatch");vm.tick();vm.tick();vm.tick();check(dialog.active()&&message_text(dialog.page())=="A","sleep/resume/message");
     for(unsigned k=0;k<8&&!dialog.closable();++k)vm.tick(); // bhControlMessage: die Seite ist nach dem Aufbau schliessbar (game.c:264)
-    vm.confirm_dialog();check(!dialog.active(),"confirm dialog");vm.start(1,1);vm.tick();check(vm.errors.size()==1,"unknown command did not block");vm.tick();check(vm.errors.size()==1,"blocked command retried");
+    vm.confirm_dialog();check(!dialog.active(),"confirm dialog");vm.start(1,1);vm.tick();check(vm.errors.empty()&&vm.task_states().size()==1&&vm.task_states().front().offset==110,"dm0 did not hold the task on its byte");vm.tick();check(vm.errors.empty()&&vm.task_states().size()==1&&vm.task_states().front().offset==110,"dm0 advanced or blocked on the second pass");
     vm.set_flag(1,33,0);check(vm.flag(1,33)&&!vm.flag(1,32),"MSB flag order");vm.set_flag(1,33,2);check(!vm.flag(1,33),"flag toggle");
     {auto binary=data;binary[1118]=0;const std::vector<std::uint8_t> script={0x2b,0,5,4,13,0,0,0,0xff,0};std::copy(script.begin(),script.end(),binary.begin()+1180);
         Inventory state;MessageDialog text;EventVm pause(binary,state,text);unsigned calls=0;pause.binding=[&](const EventCommand& c){check(c.opcode==0x2b&&c.bytes==std::vector<std::uint8_t>{0x2b,0},"MotionPauseSet consumed the following opcode");++calls;return true;};pause.start(0,0);pause.tick();check(calls==1&&pause.errors.empty()&&pause.flag(4,13),"two-byte MotionPauseSet misaligns the event stream");

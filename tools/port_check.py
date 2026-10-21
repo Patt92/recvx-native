@@ -143,8 +143,10 @@ def event_opcodes():
                 pending.update(ops)
     bound = set()
     for name in ('world.cpp', 'runtime.cpp'):
-        bound.update(int(v, 0) for v in re.findall(r'\b(?:op|opcode)\s*==\s*(0x[0-9a-fA-F]+|\d+)',
-                                                    (NATIVE / name).read_text()))
+        text = (NATIVE / name).read_text()
+        bound.update(int(v, 0) for v in re.findall(r'\b(?:op|opcode)\s*==\s*(0x[0-9a-fA-F]+|\d+)', text))
+        # Tabellengebundene Befehle (z. B. die bhObjLinkSet*-Familie: {0x32,{1,2}}, ...).
+        bound.update(int(v, 0) for v in re.findall(r'\{(0x[0-9a-fA-F]+),\s*\{\d+,\s*\d+\}\}', text))
     result = {}
     for op, name in enumerate(table):
         if name.startswith('dm'):

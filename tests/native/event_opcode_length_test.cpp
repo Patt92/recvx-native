@@ -70,11 +70,24 @@ int main(int argc,char** argv){try{
         vm.start(0,event);
         vm.tick();
         check(vm.flag(1,300),std::string(c.where)+": das bhSet dahinter wurde nicht erreicht (Laenge "+std::to_string(c.length)+" stimmt nicht)");
-        static const unsigned bound[]={0x1e,0x2e,0x3a,0x40,0x41,0x46,0x47,0xa1,0x98,0xc3};
+        static const unsigned bound[]={0x1e,0x2e,0x3a,0x40,0x41,0x46,0x47,0xa1,0x98,0xc3,0xd3};
         bool is_bound=false;for(unsigned b:bound)if(b==c.op)is_bound=true;
         if(!is_bound)
             {bool reported=false;for(const auto& b:vm.pending_bindings)if(b.opcode==c.op)reported=true;
              check(reported,std::string(c.where)+": der Befehl muss als offene Bindung gemeldet werden");(void)pending_before;}
+    }
+    // event.c:437 dm0 (0xD5-0xF2, 0xF5-0xF7): return 0 ohne Vorschub. Die Aufgabe bleibt auf dem
+    // Byte stehen, erreicht das bhSet dahinter nie und wird NICHT als blockiert gemeldet.
+    for(unsigned op:{0xd5u,0xe0u,0xf2u,0xf5u,0xf7u}){
+        auto room=original;room[script]=std::uint8_t(op);
+        const std::size_t at=script+1;
+        room[at]=0x05;room[at+1]=0x01;room[at+2]=0x2C;room[at+3]=0x01;room[at+4]=0x00;room[at+5]=0x00;room[at+6]=0x00;
+        Inventory inventory;MessageDialog dialog;EventVm vm(room,inventory,dialog);
+        vm.start(0,event);vm.tick();vm.tick();
+        check(!vm.flag(1,300),"dm0 ist weitergelaufen (das Original kommt nie ueber den Platz hinaus)");
+        check(vm.errors.empty(),"dm0 wurde als blockierter Befehl gemeldet");
+        bool held=false;for(const auto& t:vm.task_states())if(t.event==event)held=!t.blocked&&t.offset==script-base;
+        check(held,"dm0: die Aufgabe steht nicht auf dem dm0-Byte");
     }
     // Die drei Befehle, die direkt auf die Flagbaenke der Event-VM schreiben.
     {
@@ -95,6 +108,8 @@ int main(int argc,char** argv){try{
         // bhMutekiSetPl: plp->flg Bit 0x4, dazu die Spiegelung in player_flags.
         {auto r=run(0x3a,1);check((r->vm->flags[13][0]&4u)&&(r->vm->player_flags&4u),"0x3a Wert 1 setzt plp->flg 0x4 nicht");}
         {auto r=run(0x3a,0);check(!(r->vm->flags[13][0]&4u),"0x3a Wert 0 loescht plp->flg 0x4 nicht");}
+        // bhRankingCall: ts_flg = 0 und die Taskanforderung an den Host (tk_flg 0x702040).
+        {auto r=run(0xd3,0);check(r->vm->flags[12][0]==0&&r->vm->ranking_requested,"0xd3 loescht ts_flg nicht oder fordert die Rangliste nicht an");}
         // bhTrapDamageSet: plp->stflg Bit 0x1000, im Original mit Wert 0 GESETZT.
         {auto r=run(0xa1,0);check(r->vm->flags[14][0]&0x1000u,"0xa1 Wert 0 setzt plp->stflg 0x1000 nicht");}
         {auto r=run(0xa1,1);check(!(r->vm->flags[14][0]&0x1000u),"0xa1 Wert 1 loescht plp->stflg 0x1000 nicht");}

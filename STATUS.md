@@ -23,6 +23,14 @@ Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 
+**EventVm-Audit und Rest-Opcodes (2026-10-21, Arbeitsbaum, 212/212 grün):** alle 223 Skriptbefehle
+gebunden (0x82 bhSetDebugLoopEx, 0xCF bhExGameItemInit, 0xD3 bhRankingCall; dm0-Plätze halten wie
+event.c:437 mit Konsolenmeldung statt Hostfehler). Statischer Skript-Walker
+`tools/walk_event_scripts.py`: Player_controll 132/140/141/143/145 und 0x82 in keinem Raum benutzt.
+Ledger-Altlasten aus der Generatorzeit (bhItemGetGet/Ex, bhPlItemLost/Ex, bhArmsItemSet,
+bhPlayerPoisonCk, bhNext) am Original neu belegt. Offen: ranking.c ControlRanking, Exm-Tor,
+Augenkamera-bhCheckCut(1). [Bericht](work/eventvm-audit-20261021.md). **Kein Commit.**
+
 **IOP-Modell: Stimmenpool, ATick, SE-Timer (2026-10-21, Arbeitsbaum):** native/audio_iop.* bildet TSNDDRV-
 Befehlsthread, TQ-Warteschlange, MODMIDI-Sequencer, MODHSYN (2x24 Stimmen, Raub, Key-On-Stapel) und die 48
 SPU2-Stimmen nach; der Mixer fuehrt nur noch EE-Handles und ADX/Host-PCM. Audiotests auf die originale

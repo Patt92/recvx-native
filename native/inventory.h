@@ -118,6 +118,8 @@ public:
     void script_item_give(unsigned owner,unsigned item,unsigned mode);     // bhItemGetGet
     void script_item_lost_ex(unsigned item,unsigned box_slot);             // bhPlItemLostEx
     void script_arms_set(unsigned item);                                   // bhArmsItemSet
+    // sub1.c:8553 ExtraGameItemInit (bhExGameItemInit 0xCF): Battle-Game-Startausruestung in itm[cng_pid*16].
+    void extra_game_item_init(unsigned cng_pid,unsigned costume,bool ssd_special);
     void script_item_give_ex(unsigned owner,unsigned item,unsigned equip,unsigned amount); // bhItemGetGetEx
     void script_item_change(unsigned item,unsigned replacement);           // bhPlItemChangeM
     void script_item_amount(unsigned item,unsigned amount);                // bhPlItemTamaSet

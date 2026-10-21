@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <sstream>
+#include <cstdio>
 namespace recvx {
 // Die sieben Event-Inventarmutationen (bhPlItemLost, bhItemGetGet,
 // bhPlItemLostEx, bhArmsItemSet, bhItemGetGetEx, bhPlItemChangeM,
@@ -164,11 +165,10 @@ int EventVm::instruction(Task& t){
     // korrekt uebersprungen und als offene Bindung gemeldet, statt den Raum anzuhalten:
     // ein unbekannter Befehl wirft unten und beendet den Lauf.
     //   0x6F bhObjLinkSetObjPly (event.c:5263) bindet RoomWorld::bind (Spielerwurzel am Objekt).
-    //   0x82 bhSetDebugLoopEx (:2421): st_flg 0x10, cam.ct0 aus dem u16, cam.frm 0,
-    //        cam.mode0 1, bhInitEventCamera, gm_flg 0x10, bhSetEventHideObjLgt, bhCheckCut.
-    //   0x97 bhEffectKokuenSet (:1986), 0xAA bhEffUVSet2 (:7159) und 0xAF bhPlyHandChange (:7378)
-    //        bindet RoomWorld::bind; das Feuerzeug-Parken aus 0xAF fuehrt der Fall unten.
-    //   0xD3 bhRankingCall (:9049): Rangliste des Battle Game ueber das Hostfrontend.
+    //   0x82 bhSetDebugLoopEx (:2421), 0x97 bhEffectKokuenSet (:1986), 0xAA bhEffUVSet2 (:7159)
+    //        und 0xAF bhPlyHandChange (:7378) bindet RoomWorld::bind; das Feuerzeug-Parken
+    //        aus 0xAF fuehrt der Fall unten. Stand 2026-10-21: keiner dieser Befehle ist
+    //        mehr ohne Besitzer; die Liste bleibt als Lesehilfe.
     case 0x6f:world(t,op,12);return 1;
     case 0x82:world(t,op,4);return 1;
     case 0x97:world(t,op,8);return 1;
@@ -179,7 +179,11 @@ int EventVm::instruction(Task& t){
         if(take){if(inventory_.wpnr_no==1){parked_wpnr_no=1;inventory_.wpnr_no=0;}}
         else if(parked_wpnr_no==1){parked_wpnr_no=0;inventory_.wpnr_no=1;}
         return 1;}
-    case 0xd3:world(t,op,2);return 1;
+    // event.c:9049 bhRankingCall: ss_flg 0x20000 nur innerhalb der Routine; njFogDisable/njSetBackColor(0)/
+    // bhReleaseMainTexture/Ps2ClearOT/bhDrawScreenFade sind die Bildpraesentation des Taskwechsels;
+    // tk_flg = 0x702040 (Pad, Ending = ranking.c ControlRanking, Monitor, SndMonitor, ScreenSaver),
+    // ts_flg = 0, typ_md0 = 0, typ_flg = 0, ssv_tim = 0, memp = mempb. Die Taskmaske traegt der Host.
+    case 0xd3:flags[12][0]=0;ranking_requested=true;return advance(2);
     // event.c:4110 bhEffectSandSet: v0 Raumgegner, v1 Vorzeichenbits, v2 Lageart, drei u16
     // Betraege, dann der Typ als ein Byte — bhScePtr rueckt danach um zwei (12 Byte gesamt).
     case 0x98:world(t,op,12);return 1;
@@ -440,10 +444,12 @@ int EventVm::instruction(Task& t){
             ay=int(std::int16_t(ay+std::int16_t(eay2)));if(eay<=int(unsigned(ay)&0xffff)){set_player_yaw(unsigned(eay)&0xffff);return 0;}set_player_yaw(unsigned(ay)&0xffff);return 1;}
         return 0;}
     case 0x83:return advance(2); // bhSoundFadeOut: the original body only skips its operands
-    case 0x89:change_player=v.u8(p+1);flags[10][0]|=0x80;advance(2);return 1; // bhPlayerChangeSet: cng_pid + cb_flg 0x80 (consumer pending)
+    case 0x89:change_player=v.u8(p+1);flags[10][0]|=0x80;advance(2);return 1; // bhPlayerChangeSet: cng_pid + cb_flg 0x80, verbraucht beim Raumladen (runtime.cpp load(), system.c:1717)
     case 0xae:inventory_.infected=false;return advance(2); // bhPlayerPoison2Cr: ply_stflg[0] &= ~0x200000
     case 0xa0:map_parameters={v.u8(p+1),v.u8(p+2),v.u8(p+4),v.u8(p+3)};flags[10][0]|=0x10000;advance(6);return 1; // bhMapSystemOn: mp_prm[0..3] (consumed by runtime)
-    case 0xce:case 0xcf:case 0xc5:case 0x87:world(t,op,2);return 1;
+    case 0xce:case 0xc5:case 0x87:world(t,op,2);return 1;
+    // event.c:8906 bhExGameItemInit -> sub1.c:8553 ExtraGameItemInit: Battle-Game-Ausruestung in itm[cng_pid*16].
+    case 0xcf:inventory_.extra_game_item_init(change_player,costume,(flags[16][0]&0x80000000u)!=0);if(change_player==inventory_.player)values[22]=inventory_.slots()[0];return advance(2);
     // event.c:3465 bhMutekiSetPl: plp->flg Bit 0x4. Solange es steht, ueberspringt der
     // Gegnerpass jeden Angriff auf den Spieler (zum Beispiel en17.c:1595).
     case 0x3a:{auto& flg=flags[13][0];if(v.u8(p+1))flg|=0x4u;else flg&=~0x4u;player_flags=flg;return advance(2);}
@@ -500,7 +506,14 @@ int EventVm::instruction(Task& t){
         const auto length=common_controll_length(command,v.u8(p+2),v.u8(p+3));
         if(!length)throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));
         world(t,op,length);return 1;}
-    default:{std::ostringstream s;s<<"unimplemented opcode 0x"<<std::hex<<op;throw std::runtime_error(s.str());}
+    default:
+        // event.c:437 dm0 (Tabellenplaetze 0xD5-0xF2 und 0xF5-0xF7): return 0 ohne Vorschub. Der Scheduler
+        // (event.c:13046) laesst die Aufgabe auf diesem Byte stehen; sie laeuft in jedem Durchlauf erneut
+        // auf dm0 und kommt nie weiter. Einmal je Fundstelle auf der Konsole gemeldet (Diagnose).
+        if((op>=0xd5&&op<=0xf2)||(op>=0xf5&&op<=0xf7)){
+            if(reported_.insert({op,p}).second)std::fprintf(stderr,"EVENT dm0: Ereignis %u, Ebene %u, Offset 0x%zx, Opcode 0x%02x: unbelegter Tabellenplatz (event.c:437), die Aufgabe steht hier dauerhaft\n",t.event,t.level,p-base_,op);
+            return 0;}
+        {std::ostringstream s;s<<"unimplemented opcode 0x"<<std::hex<<op;throw std::runtime_error(s.str());}
     }
 }
 void EventVm::run(Task& t,bool scenario){

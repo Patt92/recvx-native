@@ -1,8 +1,16 @@
 #pragma once
+#include "messages.h"
 #include "save_slots.h"
 #include <filesystem>
 #include <vector>
 namespace recvx {
+// Host-Texte des Speicher-/Ladebildschirms (Nutzerentscheidung 2026-10-21):
+// Die Originalmeldungen 463/464, 460 und 484 benennen Memory Card (PS2) und
+// MAIN POWER. Der Host schreibt eine Datei im Benutzerdatenverzeichnis
+// (AGENTS.md "Spielstaende"). Ersetzt werden nur diese Meldungstexte; Schrift,
+// Positionen, Meldungsnummern und Ablauf bleiben die des Originals.
+// Leere Message: Originalmeldung unveraendert verwenden.
+Message save_screen_host_message(unsigned id);
 // Native owner of the save/load screen (bup_00.c / ps2_SaveScreen.c /
 // ps2_LoadScreen.c). The existing host files replace the card I/O only.
 // Die Memory-Karten-Auswahl (SelectCard, Port 0/1) ist entfernt: sie ist

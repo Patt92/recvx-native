@@ -1119,6 +1119,16 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;}
         if(op==0x9a){if(!v.u8(2))e.face_flags|=2;else e.face_flags&=~2u;}return true;}
     if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;restore_camera_clip_=true;return true;}set_event_camera(v.u8(2),v.u8(3),true);return true;}
+    if(op==0x82){ // event.c:2421 bhSetDebugLoopEx: die laufende Ereigniskamera bei cam.ct0 neu aufsetzen
+        if(!event_camera){unbound_enemy_.insert("bhSetDebugLoopEx: keine laufende Ereigniskamera (cam.evc_no/keyf_no undefiniert)");return false;}
+        if(collision_events_)collision_events_->flags[5][0]|=0x10u;            // sys->st_flg |= 0x10
+        event_camera_clock_=v.u16(2);                                          // cam.ct0 = u16; cam.frm = 0 (der Splineparameter entsteht je Pass aus ct0)
+        event_camera_init_=false;event_camera_paused_=false;event_camera_finished_=false; // cam.mode0 = 1
+        init_event_camera();                                                   // bhInitEventCamera
+        if(collision_events_)collision_events_->flags[11][0]|=0x10u;           // gm_flg 0x10 (bhControlEOR)
+        set_event_camera_masks();                                              // bhSetEventHideObjLgt(cam.evc_no, cam.keyf_no)
+        if(collision_events_)collision_events_->flags[11][0]&=~0x20u;          // bhCheckCut(0/1) unter st_flg 0x1: nur gm_flg &= ~0x20 (cut.c:22-26)
+        return true;}
     if(op==0x2a){const auto mode=v.u8(1);if(mode==0)set_fixed_cut(v.u8(2));else if(mode==1){event_camera=false;fixed_camera.reset();}else throw std::runtime_error("invalid fixed camera mode");return true;}
     if(op==0x5b){event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;return true;}
     // event.c:1032 bhCamPauseSet: v0 0 -> cam.mode0 = 3 (bhControlEventCamera has no case 3: pose and

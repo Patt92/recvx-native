@@ -25,7 +25,11 @@ public:
     std::vector<unsigned> dispatched;
     bool menu_open=false,status_requested=false;
     bool game_over_requested=false; // *(int*)&sys->gov_md0 = 0 aus bhCheckEvtTimer (player.c:1305/1326); der Host verbraucht es
-    unsigned change_player=0; // sys->cng_pid (bhPlayerChangeSet, cb_flg 0x80)
+    unsigned change_player=0; // sys->cng_pid (bhPlayerChangeSet, cb_flg 0x80; verbraucht in runtime.cpp load(), system.c:1717)
+    unsigned costume=0;       // sys->costume (Runtime: SYSTEM-Eintrag ply_id + 10 + costume*4)
+    // bhRankingCall (event.c:9049): tk_flg 0x702040 = Pad, Ending (ranking.c ControlRanking), Monitor,
+    // SndMonitor, ScreenSaver. Der Host verbraucht die Anforderung; ControlRanking hat keinen nativen Besitzer.
+    bool ranking_requested=false;
     std::array<unsigned,4> map_parameters{}; // sys->mp_prm (bhMapSystemOn, cb_flg 0x10000)
     unsigned tick_count=0,event_timer=0,com_number=0; // sys->com_num
     // sys->evt_tmd/evt_tim/evt_tdg/evt_fcd/evt_fcdct.  This is distinct

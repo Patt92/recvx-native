@@ -3,6 +3,22 @@
 #include <algorithm>
 #include <stdexcept>
 namespace recvx {
+namespace {
+Message host_text(const char* text){
+    Message out;
+    for(;*text;++text){const auto c=static_cast<unsigned char>(*text);out.push_back(c=='\n'?0xff00:c==' '?0xff01:c>=32&&c<140?c-32:31);}
+    out.push_back(0xffff);return out;
+}
+}
+Message save_screen_host_message(unsigned id){
+    switch(id){
+    case 463:return host_text("Save games");                    // Ersatz fuer "MEMORY CARD " + "slot 1 "
+    case 464:return {};
+    case 460:return host_text("Now loading from the save file. \n\nDo not close the game or \nturn off the computer. ");
+    case 484:return host_text("Now saving to the save file. \n\nDo not close the game or \nturn off the computer. ");
+    default:return {};
+    }
+}
 void Typewriter::open(Mode mode,const std::filesystem::path& saves_dir){
     reset();mode_=mode;slots_=list_save_slots(saves_dir);active_=true;
     set_back_color(0); // TypeWriterTextureInit case 6 (bup_00.c:299-304): ts_flg |= 0x80, njSetBackColor(0,0,0)

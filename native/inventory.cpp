@@ -676,6 +676,29 @@ void Inventory::script_arms_set(unsigned item){
     const unsigned max=side_pack?10:8;
     for(unsigned i=0;i<max;++i)if(id(slots()[i+2])==item){slots()[0]=i+2;return;}
 }
+void Inventory::extra_game_item_init(unsigned cng_pid,unsigned costume,bool ssd_special){
+    // sub1.c:8553-8604 ExtraGameItemInit: Zeile aus sys->costume (!= 0 -> 4) oder sys->cng_pid; die Bank
+    // ist immer itm[cng_pid*16]. ssd_flg 0x80000000 (sub1.c:8579) setzt pip[2] = 0x80B0001 vor und
+    // beginnt bei i = 1; in den Originalquellen schreibt dieses Bit niemand. Die Eintraege sind
+    // (itemid << 16) | getbulletmax[(unsigned char)itemid][gm_mode] in 32 Bit, mit den Hochbytes der
+    // Tabellenwerte (z. B. 10247 = 0x2807 -> Id 7 mit Flagbits 0x28).
+    static const int itemset[5][16]={
+        {8,8,9,10247,2060,29,29,29,29,0,0,0,0,0,0,0},
+        {6,8,4,2080,2062,29,29,0,0,0,0,0,0,0,0,0},
+        {5,8,2081,2082,29,29,0,0,0,0,0,0,0,0,0,0},
+        {4,8,29,29,29,0,0,0,0,0,0,0,0,0,0,0},
+        {7,8,6,2050,29,2063,2064,2065,0,0,0,0,0,0,0,0}};
+    const unsigned row=costume!=0?4u:cng_pid;
+    if(row>=5)throw std::runtime_error("ExtraGameItemInit: cng_pid outside itemset[5]");
+    if(cng_pid*16+16>items.size())throw std::runtime_error("ExtraGameItemInit: cng_pid bank outside itm[384]");
+    auto* pip=items.data()+cng_pid*16;
+    unsigned i=0;
+    if(ssd_special){i=1;pip[2]=0x80B0001u;}
+    for(unsigned j=0;j<unsigned(itemset[row][0]);++i,++j){
+        const int itemid=itemset[row][j+1];
+        pip[i+2]=(std::uint32_t(itemid)<<16)|getbulletmax[std::uint8_t(itemid)][game_mode];
+    }
+}
 void Inventory::script_item_give_ex(unsigned owner,unsigned item,unsigned equip,unsigned amount){
     // bhItemGetGetEx (0xc2): erster freier Slot (exakt 0) in den ersten 8/10
     // Slots des Besitzers erhält (item << 16) | amount. Item 33 rückt pip[0]

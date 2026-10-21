@@ -76,6 +76,12 @@ int main(int argc,char** argv){try{
    if(r.world.event_camera&&r.world.event_camera_index==4)cam4=true;}
   check(page,"RM_1050 message 24 never raised st_flg 0x1000 for the script");
   check(cam4,"RM_1050 switch event did not reach bhCamSet 4 after the page turn");
+  // event.c:2421 bhSetDebugLoopEx auf der laufenden Ereigniskamera: cam.ct0 = u16, cam.mode0 = 1,
+  // st_flg 0x10, gm_flg 0x10, kein Schnittwechsel (gm_flg 0x20 geloescht).
+  {r.world.bind_player_collision(r.vm); // st_flg/gm_flg der VM als Kamerabesitzerflags (wie runtime.cpp)
+   EventCommand loop;loop.opcode=0x82;loop.bytes={0x82,0x00,0x07,0x00};
+   check(r.world.bind(loop),"bhSetDebugLoopEx did not bind on the running event camera");
+   check(r.world.event_camera&&r.world.event_camera_clock()==7&&(r.vm.flags[5][0]&0x10u)&&(r.vm.flags[11][0]&0x10u)&&!(r.vm.flags[11][0]&0x20u),"bhSetDebugLoopEx: cam.ct0/mode0/st_flg/gm_flg differ from event.c:2421-2446");}
   std::cout<<"RM_1050 switch event: st_flg message bits mirrored, bhCamSet 4 reached after the page turn.\n";}
  // Common_controll (event.c:9963-12710) advances the script pointer per command; the
  // whole table, including the selector-dependent 24/25/34/35 and axis-dependent 10/22

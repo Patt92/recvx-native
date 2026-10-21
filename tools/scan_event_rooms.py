@@ -33,8 +33,10 @@ def main():
 
     def run(room):
         state_path = output / (room.stem + '.json')
+        # --enemy-ai on: ohne die Gegner-KI bleiben die Gegnerwerke uninitialisiert, und
+        # Common 24/25/34 / Sub 148 melden Scheinluecken ("enemy initialization/exp1 missing").
         command = [str(runtime), '--data', str(data), '--mods', str(output / 'no-mods'),
-                   '--in-game', '--headless', '--room', room.stem + '.RDX',
+                   '--in-game', '--headless', '--room', room.stem + '.RDX', '--enemy-ai', 'on',
                    '--frames', str(args.frames), '--state', str(state_path)]
         with (output / (room.stem + '.log')).open('w') as log:
             result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
