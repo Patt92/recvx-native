@@ -420,12 +420,24 @@ def msvc_explicit_inputs(argv, build_dir: Path, environ):
     return inputs, missing
 
 
-SEARCHING = re.compile(r"^\s*Searching (.+\.lib):\s*$", re.IGNORECASE | re.MULTILINE)
+# /VERBOSE:LIB meldet jede durchsuchte Bibliothek als eigene Zeile "<Text> <Pfad>.lib:". Der Text ist
+# lokalisiert (englisch "Searching", deutsch u.a. "Durchsuchen von"; VSLANG wirkt nur mit installiertem
+# Sprachpaket), der Pfad nicht. Erkannt wird deshalb nur der Pfad am Zeilenende: absolut ab dem
+# Laufwerksbuchstaben (Leerzeichen in "Program Files" bleiben erhalten), sonst das letzte Wort.
+LIBRARY_LINE = re.compile(r"^\s*\S.*?\.lib:\s*$", re.IGNORECASE | re.MULTILINE)
+DRIVE_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\).*\.lib(?=:\s*$)", re.IGNORECASE)
 
 
 def searched_libraries(output: str):
-    """Die Bibliotheken, die link.exe /VERBOSE:LIB als durchsucht meldet (englische Meldungen, VSLANG=1033)."""
-    return [Path(match.group(1).strip()) for match in SEARCHING.finditer(output)]
+    """Die Bibliotheken, die link.exe /VERBOSE:LIB als durchsucht meldet, unabhaengig von der Meldungssprache."""
+    found = []
+    for match in LIBRARY_LINE.finditer(output):
+        line = match.group(0).strip()
+        absolute = DRIVE_PATH.search(line)
+        path = absolute.group(0) if absolute else line[:-1].split()[-1]
+        if Path(path) not in found:
+            found.append(Path(path))
+    return found
 
 
 def msvc_redirect(argv, directory: Path, name: str):
@@ -457,7 +469,8 @@ def msvc_comparison_link(argv, build_dir: Path, exe: Path, env=None):
         target = Path(directory) / exe.name
         if not target.is_file():
             raise RuntimeError("comparison link produced no binary")
-        return target.read_bytes(), searched_libraries(result.stdout)
+        output = result.stdout + result.stderr
+        return target.read_bytes(), searched_libraries(output), output
 
 
 def audit_msvc(exe: Path, build_dir: Path, argv, nm: str, forbidden, env=None):
@@ -469,12 +482,15 @@ def audit_msvc(exe: Path, build_dir: Path, argv, nm: str, forbidden, env=None):
     if not inputs:
         problems.append("link command names no auditable input")
     try:
-        rebuilt, searched = msvc_comparison_link(argv, build_dir, exe, env)
+        rebuilt, searched, output = msvc_comparison_link(argv, build_dir, exe, env)
     except RuntimeError as error:
         return problems + [str(error)]
     if not searched:
-        problems.append("link /VERBOSE:LIB reported no searched library; implicit inputs are unverifiable")
+        head = " | ".join(line.strip() for line in output.splitlines() if line.strip())[:400]
+        problems.append("link /VERBOSE:LIB reported no searched library; implicit inputs are unverifiable"
+                        f" (output: {head or 'empty'})")
     for library in searched:
+        library = library if library.is_absolute() else build_dir / library  # link.exe laeuft im Buildverzeichnis
         if not library.is_file():
             problems.append(f"library {library} searched by link.exe is missing")
         elif library.resolve() not in inputs:

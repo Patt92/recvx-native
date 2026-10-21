@@ -214,12 +214,16 @@ class MsvcLinkCommand(unittest.TestCase):
         self.assertEqual([path.name for path in inputs], ["own.lib", "kernel32.lib", "special.lib"])
         self.assertEqual(missing, ["absent.lib"])
 
-    def test_searched_libraries_are_parsed_and_localized_output_gives_none(self):
-        english = ("Searching libraries\n    Searching C:\\SDK\\um\\arm64\\kernel32.lib:\n"
-                   "    Searching C:\\VC\\lib\\arm64\\msvcrt.lib:\nFinished searching libraries\n")
-        self.assertEqual([str(path).replace("/", "\\") for path in audit.searched_libraries(english)],
-                         [r"C:\SDK\um\arm64\kernel32.lib", r"C:\VC\lib\arm64\msvcrt.lib"])
-        self.assertEqual(audit.searched_libraries("    Durchsuchen von C:\\SDK\\kernel32.lib:\n"), [])
+    def test_searched_libraries_are_parsed_in_any_message_language(self):
+        english = ("Searching libraries\n    Searching C:\\Program Files (x86)\\Windows Kits\\um\\kernel32.lib:\n"
+                   "    Searching recvx_game.lib:\nFinished searching libraries\n")
+        german = ("Bibliotheken werden durchsucht.\n    Durchsuchen von C:\\VC\\lib\\arm64\\msvcrt.lib:\n"
+                  "    Durchsuchen von C:\\VC\\lib\\arm64\\msvcrt.lib:\nDurchsuchen der Bibliotheken abgeschlossen.\n")
+        names = lambda text: [str(path).replace("/", "\\") for path in audit.searched_libraries(text)]
+        self.assertEqual(names(english), [r"C:\Program Files (x86)\Windows Kits\um\kernel32.lib", "recvx_game.lib"])
+        self.assertEqual(names(german), [r"C:\VC\lib\arm64\msvcrt.lib"])
+        # Ohne Bibliothekszeilen bleibt die Liste leer; audit_msvc meldet das fail-closed.
+        self.assertEqual(audit.searched_libraries("Generating code\nFinished generating code\n"), [])
 
     def test_outputs_are_redirected_and_out_is_required(self):
         argv = ["link.exe", "/out:recvx-runtime.exe", "/implib:recvx-runtime.lib", "/pdb:sub\\r.pdb", "a.obj"]
