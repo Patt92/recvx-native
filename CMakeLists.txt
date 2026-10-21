@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(recvx_native VERSION 0.5.0 LANGUAGES C CXX)
 include(CTest)
+# Die C-Besitzer (native/enemies/*.c, player_*.c) nutzen _Alignas und _Static_assert; MSVC braucht dafuer /std:c11.
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_original_core.py"

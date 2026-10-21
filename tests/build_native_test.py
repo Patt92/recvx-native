@@ -106,8 +106,11 @@ class BuildTargetTests(unittest.TestCase):
         self.assertEqual(environment['PATH'], 'C:\\VS\\bin;C:\\Windows')
         self.assertNotIn('', environment)
         command = call.call_args[0][0]
-        self.assertEqual(command[:4], ['cmd.exe', '/d', '/s', '/c'])
-        self.assertIn(f'"{vcvarsall}" arm64 ', command[4])
+        # A single string: a list would turn the inner quotes into \" for cmd.exe.
+        self.assertIsInstance(command, str)
+        self.assertTrue(command.startswith('cmd.exe /d /s /c ""'))
+        self.assertIn(f'"{vcvarsall}" arm64 ', command)
+        self.assertTrue(command.endswith('&& set"'))
 
     def test_windows_prefers_ninja_with_the_developer_environment(self):
         commands = []

@@ -31,7 +31,11 @@
    =========================================================================== */
 /* Getrennte Multiplikation/Addition wie auf der EE (kein FMA-Zusammenzug);
    entspricht -ffp-contract=off der uebrigen Gegnerquellen. */
+#ifdef _MSC_VER
+#pragma fp_contract (off)
+#else
 #pragma STDC FP_CONTRACT OFF
+#endif
 
 #include "en01_core.h"
 #include "ninja_matrix.h"

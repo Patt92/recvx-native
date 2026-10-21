@@ -238,13 +238,19 @@ def msvc_environment(target: str, cmake: str) -> dict[str, str] | None:
     if vcvarsall is None:
         return None
     architecture = vcvars_architecture(host_machine(), target)
+    # One command string: an argument list would escape the inner quotes as \" for cmd.exe, which does not
+    # understand them. /s strips the outer pair, leaving "<vcvarsall>" <arch> ... for cmd to run.
+    command = f'cmd.exe /d /s /c ""{vcvarsall}" {architecture} >nul 2>&1 && set"'
     try:
-        listing = subprocess.check_output(['cmd.exe', '/d', '/s', '/c', f'"{vcvarsall}" {architecture} >nul 2>&1 && set'],
-                                          text=True, errors='replace', cwd=ROOT)
-    except (OSError, subprocess.CalledProcessError):
+        listing = subprocess.check_output(command, text=True, errors='replace', cwd=ROOT)
+    except (OSError, subprocess.CalledProcessError) as error:
+        print(f'{vcvarsall} {architecture} failed: {error}', flush=True)
         return None
     environment = parse_environment(listing)
-    return environment if 'INCLUDE' in environment and 'LIB' in environment else None
+    if 'INCLUDE' in environment and 'LIB' in environment:
+        return environment
+    print(f'{vcvarsall} {architecture} set no INCLUDE/LIB (toolset for {architecture} not installed?)', flush=True)
+    return None
 
 
 def windows_generator(target: str, cmake: str) -> tuple[list[str], dict[str, str] | None, str]:
