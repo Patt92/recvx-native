@@ -103,6 +103,7 @@ int main(int argc,char** argv){try{
     check(backend=="gpu"||backend=="opengl","backend must be gpu or opengl");
     std::string reason;const auto gpu=backend=="opengl"?create_opengl_raster(reason,force_copy):create_gpu_raster(reason);
     if(!gpu){check(reason.find("shader:")==std::string::npos&&reason.find("program:")==std::string::npos&&reason.find("OpenGL error")==std::string::npos&&reason.find("framebuffer incomplete")==std::string::npos,"GPU initialisation failed: "+reason);std::cout<<"SKIP: "<<reason<<'\n';return 77;}
+    std::cout<<"Backend: "<<gpu->name()<<'\n';
     NJS_MATRIX identity;njUnitMatrix(&identity);
     const auto scene=synthetic();
     for(int ss:{1,2})for(bool wireframe:{false,true}){

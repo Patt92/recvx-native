@@ -510,9 +510,13 @@ std::shared_ptr<GpuRaster> create_gpu_raster(std::string& reason){
     if(!create||!compile){reason="Direct3D 11 entry points missing";return nullptr;}
     const D3D_FEATURE_LEVEL levels[]={D3D_FEATURE_LEVEL_11_1,D3D_FEATURE_LEVEL_11_0};
     ID3D11Device* device=nullptr;ID3D11DeviceContext* context=nullptr;D3D_FEATURE_LEVEL level{};
-    if(FAILED(create(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,levels,2,D3D11_SDK_VERSION,&device,&level,&context))){
-        reason="no Direct3D 11 hardware device";return nullptr;}
-    std::string adapter="device";
+    // RECVX_D3D11_DRIVER=warp: Microsofts Software-Referenz (in Windows enthalten, mit ROV) statt des
+    // Grafiktreibers. Trennt Fehler des Backends von Fehlern eines Treibers (z.B. VM-Uebersetzungsschichten).
+    char driver_name[16]{};
+    const bool warp=GetEnvironmentVariableA("RECVX_D3D11_DRIVER",driver_name,sizeof driver_name)>0&&std::string(driver_name)=="warp";
+    if(FAILED(create(nullptr,warp?D3D_DRIVER_TYPE_WARP:D3D_DRIVER_TYPE_HARDWARE,nullptr,0,levels,2,D3D11_SDK_VERSION,&device,&level,&context))){
+        reason=warp?"no Direct3D 11 WARP device":"no Direct3D 11 hardware device";return nullptr;}
+    std::string adapter=warp?"WARP":"device";
     {ID3D11Device3* device3=nullptr;
      // Ohne Rasterizer Ordered Views gibt es keine garantierte Zeichenreihenfolge im Pixelshader und
      // damit keine exakte Abbildung der Bandstufe: dann Softwarepfad statt aehnlichem Mischen.
