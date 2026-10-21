@@ -49,8 +49,15 @@ deshalb aus der fixierten Quelle mitgebaut:
 ./build.sh --platform windows-arm64 --verify-data --package
 ```
 
-Auf Windows ARM64 baut `./build.ps1` hingegen nativ für ARM64; der Crossbuild
-ist dafür nicht erforderlich.
+Auf Windows ARM64 baut `./build.ps1` hingegen nativ für ARM64 mit dem
+Visual-Studio-Generator; der Crossbuild ist dafür nicht erforderlich. Der
+Visual-Studio-Generator schreibt keine `compile_commands.json`; die
+Übersetzungsprüfung des Policy-Gatters liest deshalb die `ClCompile`-Einträge
+der erzeugten `.vcxproj`. Offen: der Windows-Binary-Audit
+(`tools/windows_link_audit.py`) gewinnt den Linkbefehl über
+`ninja -t commands` und prüft implizite Eingaben im Zig-Cache; er gilt damit
+bisher nur für den Zig-Crossbuild. Ein nativer MSVC-Build besteht dieses
+abschließende Gatter noch nicht.
 
 Das Paket entsteht unter `build/packages/windows-arm64-v<version>`. Wie jeder
 Windows-Crossbuild muss es auf Windows ARM64 oder unter passender Emulation
@@ -153,9 +160,26 @@ wird nur bei neuem Tick. Die getrennte 60-Hz-VSync-Zeit des Originals
 
 ### Darstellung
 
-Software-Renderer mit interner Auflösung 640×480, ganzzahlig skaliert (Fenster
-standardmäßig 1280×960). Optional Supersampling und Texturfilter
-(`video.ini`). Material- und Blendmodi folgen den originalen Chunk-/GS-Tabellen.
+Gemeinsame native Geometrie-/Auftragsstufe mit interner Auflösung 640×480,
+Fenster standardmäßig 1280×960. `renderer = gpu` in `video.ini` wählt Metal auf
+macOS, D3D11 auf Windows und OpenGL auf Linux; `renderer = opengl` wählt GL
+explizit, `software` die CPU-Referenz. `--renderer gpu|opengl|software` gilt nur
+für den Lauf. Headless bleibt ohne explizite Auswahl in Software.
+
+OpenGL braucht Core 4.1 und einen SDL-Videotreiber mit Display. Es besitzt einen
+eigenen versteckten Kontext, rastert dieselben Setup-/Schattenaufträge und gibt
+Farbe und 1/z an den vorhandenen Bildbesitzer zurück. Geordnete, nicht überlappende
+Gruppen lesen einen vorher kopierten Zustand; GL 4.5/ARB_texture_barrier kann beim
+Farbrastern die Kopien ersetzen. Masken und Komposite bleiben geordnete Kopierpässe.
+Kein Festfunktionsblending oder neuer Spielzustandsbesitzer. Fehlt das Gerät oder
+scheitert ein Bild, meldet die Runtime den Grund und zeichnet in Software.
+
+Optional Supersampling und Host-Texturfilter (`video.ini`); deren vorhandene
+CPU-/GPU-Filterunterschiede sind keine belegte Bitgleichheit. Punktabtastung muss
+Farbe einschließlich Alpha und Tiefe bitweise erhalten. Linux-/Windows-Treiber
+müssen separat geprüft werden, ein Mac-Build belegt sie nicht.
+`./build.sh --opengl off` bzw. CMake `-DRECVX_ENABLE_OPENGL=OFF` lässt GL weg;
+Metal und D3D11 bleiben dann unverändert verfügbar.
 
 ## Diagnose
 

@@ -16,7 +16,7 @@ VideoSettings VideoSettings::read(const std::filesystem::path& path){
         auto trim=[](std::string s){const auto a=s.find_first_not_of(" \t\r"),b=s.find_last_not_of(" \t\r");return a==std::string::npos?std::string():s.substr(a,b-a+1);};
         const auto key=trim(line.substr(0,eq)),value=trim(line.substr(eq+1));
         if(key=="renderer"){
-            if(value=="gpu")out.renderer=RenderBackend::Gpu;else if(value=="software")out.renderer=RenderBackend::Software;
+            if(value=="gpu")out.renderer=RenderBackend::Gpu;else if(value=="software")out.renderer=RenderBackend::Software;else if(value=="opengl")out.renderer=RenderBackend::OpenGL;
             else throw std::runtime_error("invalid video renderer: "+value);continue;}
         if(key!="quality")throw std::runtime_error("unknown video setting: "+key);
         bool found=false;for(int i=0;i<4;++i)if(value==names[i]){out.quality=RenderQuality(i);found=true;}
@@ -26,7 +26,7 @@ VideoSettings VideoSettings::read(const std::filesystem::path& path){
 }
 void VideoSettings::save(const std::filesystem::path& path)const{
     std::ostringstream text;text<<"# RECVX host render quality: original, low, high, ultra\nquality = "<<names[int(quality)]<<'\n'
-        <<"# Rasterizer: gpu (Metal on macOS, falls back to software) or software\nrenderer = "<<(renderer==RenderBackend::Gpu?"gpu":"software")<<'\n';
+        <<"# Rasterizer: gpu (platform default), opengl or software\nrenderer = "<<(renderer==RenderBackend::Gpu?"gpu":renderer==RenderBackend::OpenGL?"opengl":"software")<<'\n';
     if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
     auto temporary=path;temporary+=".tmp";
     {std::ofstream file(temporary);if(!file)throw std::runtime_error("cannot save video settings");file<<text.str();file.close();if(!file)throw std::runtime_error("video settings save failed");}

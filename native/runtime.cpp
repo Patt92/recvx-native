@@ -75,7 +75,7 @@ struct Options {
     std::size_t camera=0,spawn=0,motion=42;
     std::int64_t animation_frame=0;
     bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,validate_poses=false,camera_explicit=false,list_controllers=false,third_person=false,nearest=false,video_explicit=false;int supersampling=2;
-    int renderer=-1; // --renderer gpu|software; Standard: video.ini (gpu) interaktiv, Software headless
+    int renderer=-1; // --renderer gpu|software|opengl; Standard: video.ini (gpu) interaktiv, Software headless
     unsigned render_threads=0; // --render-threads: Host-Diagnose fuer Energiemessungen; 0 = Rendererstandard, Bild fuer jede Zahl identisch
 };
 Options options(int argc,char** argv){
@@ -102,7 +102,7 @@ Options options(int argc,char** argv){
         else if(arg=="--third-person")o.third_person=true;
         else if(arg=="--nearest"){o.nearest=true;o.video_explicit=true;}
         else if(arg=="--ss"){const auto n=number();if(!n||n>4)throw std::runtime_error("--ss must be 1 through 4");o.supersampling=int(n);o.video_explicit=true;}
-        else if(arg=="--renderer"){const auto mode=value();if(mode!="gpu"&&mode!="software")throw std::runtime_error("--renderer expects gpu or software");o.renderer=mode=="gpu"?1:0;}
+        else if(arg=="--renderer"){const auto mode=value();if(mode!="gpu"&&mode!="software"&&mode!="opengl")throw std::runtime_error("--renderer expects gpu, opengl or software");o.renderer=mode=="gpu"?1:mode=="opengl"?2:0;}
         else if(arg=="--render-threads"){const auto n=number();if(n>64)throw std::runtime_error("--render-threads must be 0 through 64");o.render_threads=unsigned(n);}
         else if(arg=="--preview")o.preview=true;
         else if(arg=="--inventory")o.inventory=true;
@@ -158,7 +158,7 @@ Options options(int argc,char** argv){
                        "--player <10..14> --spawn <index> --motion <index> --frame <integer>\n"
                        "--nearest: point-sample textures (no mipmaps/filtering; shimmers) for comparison\n                       "
                        "--ss <1-4>: supersampling factor per axis (default 2; 1 = off, cheaper)\n                       "
-                       "--renderer gpu|software: rasterizer (default: video.ini, gpu; headless runs use software)\n                       "
+                       "--renderer gpu|opengl|software: rasterizer (default: video.ini, platform GPU; headless uses software)\n                       "
                        "--render-threads <0-64>: raster worker threads for energy measurements (0 = default; output identical)\n                       "
                        "--third-person: enable the host 3rd-person camera mod for this run without saving it\n"
                        "--camera <1-based index> --no-player --verify-scenes --verify-players\n"
@@ -210,6 +210,7 @@ double process_cpu_seconds(){
 }
 int main(int argc,char** argv){
     try{
+        SdlQuit quit; // Nach allen SDL-/GL-Besitzern freigeben, auch im Fehler-/Headlesspfad.
         auto args=options(argc,argv);if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_controls);std::cout<<args.write_controls<<'\n';return 0;}_Make_SinTable();
         const auto user_paths=recvx::resolve_user_paths(args.data,args.user_dir);
         const bool explicit_controls=!args.controls.empty();
@@ -222,7 +223,7 @@ int main(int argc,char** argv){
         auto input_config=explicit_controls||fs::exists(args.controls)?recvx::InputConfig::read(args.controls):recvx::InputConfig::defaults();
         // Host camera mod; persisted in the shared user-data directory unless explicitly overridden.
         recvx::ThirdPersonCamera third_person(args.third_person_config);if(!third_person.status().empty())std::cerr<<"Third-person settings ignored: "<<third_person.status()<<'\n';if(args.third_person)third_person.set_enabled(true,false);
-        if(args.list_controllers){SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0);SdlQuit quit;
+        if(args.list_controllers){SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0);
             if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
             recvx::InputManager devices(input_config);std::cout<<devices.controllers()<<" mapped controller(s), "<<SDL_NumJoysticks()<<" joystick device(s)\n";
             for(int i=0;i<SDL_NumJoysticks();++i)std::cout<<i<<": "<<SDL_JoystickNameForIndex(i)<<" ("<<(SDL_IsGameController(i)?"gamepad mapped":"mapping required")<<")\n";return 0;}
@@ -623,7 +624,6 @@ int main(int argc,char** argv){
         recvx::VideoConfig video(args.video_config);if(!video.status().empty())std::cerr<<"Video settings ignored: "<<video.status()<<'\n';
         // Host-Rasterer der Bandstufe (gpu_raster.h). Der Umschalter entsteht erst mit dem Bild,
         // das Debugmenue und der Startpfad rufen denselben. Keine Spiellogik: nur, wer rastert.
-        recvx::RenderBackend active_renderer=recvx::RenderBackend::Software;
         std::function<std::string(recvx::RenderBackend)> apply_renderer;
         if(!args.video_explicit){args.nearest=!video.settings().filtering();args.supersampling=video.settings().supersampling();}frontend.video=&video;if(args.preview||args.in_game||args.inventory){frontend.hide();load();}
         if(!frontend.active()&&args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}
@@ -986,10 +986,10 @@ int main(int argc,char** argv){
         debug.add({"snapshot_save","Snapshot speichern","OK: Spielstand an dieser Position sichern; ohne Schreibmaschine, Farbband und Speicherzaehler.",snapshot_slots,[]{return 0;},[&](unsigned slot){return save_snapshot(slot);}});
         debug.add({"snapshot_load","Snapshot laden","OK: Raum mit gesichertem Fortschritt an der gesicherten Position neu laden.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
         debug.add({"video","Grafikqualitaet","OK: Host-Renderqualitaet; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Niedrig"},{2,"Hoch"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Grafik: "+video.describe();}});
-        debug.add({"renderer","Rasterer","OK: GPU-Backend der Plattform oder Software; wird in video.ini gespeichert. Gleiches Bild, nur ein anderer Rasterer.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU"},{1,"Software"}};},[&]{return active_renderer==recvx::RenderBackend::Gpu?0u:1u;},[&](unsigned value){
-            const auto backend=value?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
+        debug.add({"renderer","Rasterer","OK: Plattform-GPU, Software oder OpenGL; Auswahl wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (Plattform)"},{1,"Software"},{2,"OpenGL"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
+            const auto backend=value==2?recvx::RenderBackend::OpenGL:value==1?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
             if(!apply_renderer)return std::string("Rasterer: noch nicht bereit");
-            const auto name=apply_renderer(backend);video.set_renderer(active_renderer);
+            const auto name=apply_renderer(backend);video.set_renderer(backend);
             return "Rasterer: "+name+(video.status().empty()?"":" ("+video.status()+")");}});
         debug.add({"resume","Weiter spielen","OK oder Debug-Hotkey: Menue schliessen.",[]{return std::vector<recvx::DebugChoice>{{0,"Schliessen"}};},[]{return 0;},[&](unsigned){debug.close();return std::string{};}});
         auto input=[&](recvx::MenuInput key){if(ui){if(debug.active())debug.input(key);else if(typewriter.active())typewriter_key(key);else if(frontend.active())frontend_command(frontend.input(key));else if(!game_over.active())gameplay_input.menu_input(key);}};
@@ -1153,7 +1153,7 @@ int main(int argc,char** argv){
                     if(type>=2){list=type==2?5:int(std::int8_t(std::uint8_t(unsigned(sound)&0xffu)));slot=6u;}
                     else{h.foot_switch=!h.foot_switch;list=sound;slot=h.foot_switch?12u:11u;}
                     if(list==-1)return; // PlaySe: ListNo -1 spielt nichts (sdc.c:448)
-                    if(list<0||!h.audio->play_room_sound(2u,unsigned(list),slot))h.state->unsupported_services|=type>=2?RECVX_STAIR_UNBOUND_ACTION_SE:RECVX_STAIR_UNBOUND_FOOTSTEP;},
+                    if(list<0||!h.audio->play_room_sound(2u,unsigned(list),recvx::AudioMixer::se_voice(slot)))h.state->unsupported_services|=type>=2?RECVX_STAIR_UNBOUND_ACTION_SE:RECVX_STAIR_UNBOUND_FOOTSTEP;},
                 // bhCheckWater: der Originalaufruf traegt keine Fehlermeldung, ein
                 // fehlender Bereich ist einfach 0.  Ein Treffer ohne natives
                 // Wassergebiet kann nicht unterschieden werden; der Dienst ist
@@ -1235,7 +1235,7 @@ int main(int argc,char** argv){
         // (flags, inventory, retry copy) and tk_flg 0x300008 selects Adv_BioCvTitle Mode 0
         // with ss_flg 0x1000 (FromTitle 0, cursor on the first entry).
         auto return_title=[&](){
-            for(unsigned slot=0;slot<recvx::audio_voice_count;++slot)audio.stop(slot,0); // RequestAllStopSoundEx(1,1,0)
+            audio.request_all_stop_sound(true,true,0); // RequestAllStopSoundEx(1,1,0)
             movie.stop();menu.reset(inventory);box_menu.reset();computer.reset();dialog=recvx::MessageDialog{};
             retry_point.reset();inventory=recvx::Inventory{};combat=recvx::CombatController(args.data,args.mods);events.reset();game_over_requested=false;return_title_requested=false;
             frontend.show_main();
@@ -1572,19 +1572,21 @@ int main(int argc,char** argv){
         };
         recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);image.set_render_threads(args.render_threads);
         // Host-GPU-Rasterer (gpu_raster.h) fuer das Hauptbild; Headless-Pruefungen bleiben ohne --renderer gpu in Software.
-        {// Das Backend entsteht beim ersten Bedarf und bleibt danach bestehen; scheitert es, zeichnet die Bandstufe.
-         auto gpu_backend=std::make_shared<std::shared_ptr<recvx::GpuRaster>>();auto gpu_reason=std::make_shared<std::string>();auto gpu_tried=std::make_shared<bool>(false);
-         apply_renderer=[&image,&active_renderer,gpu_backend,gpu_reason,gpu_tried](recvx::RenderBackend backend)->std::string{
-             if(backend==recvx::RenderBackend::Gpu){
-                 if(!*gpu_backend&&!*gpu_tried){*gpu_tried=true;*gpu_backend=recvx::create_gpu_raster(*gpu_reason);}
-                 if(*gpu_backend){image.set_gpu(*gpu_backend);active_renderer=recvx::RenderBackend::Gpu;return (*gpu_backend)->name();}
-                 image.set_gpu(nullptr);active_renderer=recvx::RenderBackend::Software;return "software ("+*gpu_reason+")";}
-             image.set_gpu(nullptr);active_renderer=recvx::RenderBackend::Software;return "software";};
+        {// Backend je Auswahl beim ersten Bedarf erzeugen, getrennte Geraete-/Kontextbesitzer.
+         struct Backends {std::array<std::shared_ptr<recvx::GpuRaster>,2> gpu;std::array<std::string,2> reason;std::array<bool,2> tried{};};
+         auto backends=std::make_shared<Backends>();
+         apply_renderer=[&image,backends](recvx::RenderBackend backend)->std::string{
+             if(backend!=recvx::RenderBackend::Software){
+                 const unsigned i=backend==recvx::RenderBackend::OpenGL?1u:0u;
+                 if(!backends->gpu[i]&&!backends->tried[i]){backends->tried[i]=true;backends->gpu[i]=i?recvx::create_opengl_raster(backends->reason[i]):recvx::create_gpu_raster(backends->reason[i]);}
+                 if(backends->gpu[i]){image.set_gpu(backends->gpu[i]);return backends->gpu[i]->name();}
+                 image.set_gpu(nullptr);return "software ("+backends->reason[i]+")";}
+             image.set_gpu(nullptr);return "software";};
          // Headless-Pruefungen bleiben ohne --renderer in Software; --renderer gilt nur fuer diesen Lauf.
-         const auto startup=args.renderer>=0?(args.renderer==1?recvx::RenderBackend::Gpu:recvx::RenderBackend::Software)
+         const auto startup=args.renderer>=0?(args.renderer==1?recvx::RenderBackend::Gpu:args.renderer==2?recvx::RenderBackend::OpenGL:recvx::RenderBackend::Software)
                                             :(args.headless?recvx::RenderBackend::Software:video.settings().renderer);
          std::cout<<"Renderer: "<<apply_renderer(startup)<<'\n';}
-        auto report=[&](){if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}
+        auto report=[&](){std::cout<<"Raster backend: "<<(image.gpu()?image.gpu()->name():"software")<<", last scene frame "<<(image.last_gpu_frame()?"GPU":"software/no scene pass")<<'\n';if(!image.gpu_error().empty())std::cout<<"Raster fallback: "<<image.gpu_error()<<'\n';if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}
         // Original enemy routines that were reached but are not bound yet.
         if(world&&!world->unbound_enemy_routines().empty()){std::cout<<"Enemy gaps: "<<world->unbound_enemy_routines().size()<<'\n';for(const auto& gap:world->unbound_enemy_routines())std::cout<<"  "<<gap<<'\n';}if(!combat.unbound_routines().empty()){std::cout<<"Combat gaps: "<<combat.unbound_routines().size()<<'\n';for(const auto& gap:combat.unbound_routines())std::cout<<"  "<<gap<<'\n';}if(!args.state.empty()){if(fs::exists(args.state))throw std::runtime_error("state output already exists");std::ofstream out(args.state);if(!out)throw std::runtime_error("cannot create state output");out<<"{\n  \"debug_open\": "<<(debug.active()?"true":"false")<<", \"debug_selected\": "<<debug.selected()<<", \"debug_status\": "<<std::quoted(debug.status())<<", \"player_entry\": "<<args.player<<", \"player_owner\": "<<inventory.player<<", \"wireframe\": "<<(wireframe?"true":"false")<<",\n  \"title_active\": "<<(frontend.active()?"true":"false")<<", \"settings_active\": "<<(frontend.settings()?"true":"false")<<", \"settings_selected\": "<<frontend.selected()<<", \"title_mode\": "<<frontend.mode()<<", \"title_cursor\": "<<frontend.cursor()<<", \"title_attract\": "<<frontend.attract_count()<<",\n  \"room\": "<<std::quoted(rooms.name(room_index))<<", \"room_changes\": "<<room_changes<<", \"door_active\": "<<(transition_pending?"true":"false")<<", \"door_ticks\": "<<door.ticks()<<", \"door_skipped\": "<<(door.skipped()?"true":"false")<<", \"door_voices_active\": ["<<audio.active(recvx::door_voice_first)<<", "<<audio.active(recvx::door_voice_first+1)<<", "<<audio.active(recvx::door_voice_last)<<"], \"system_sound_active\": ["<<audio.active(2)<<", "<<audio.active(3)<<"], \"door\": ";
                 /* door.c state the door procedures write: camera, fade, the light slots of LightProc1/2 and the PuruProc requests. */
@@ -1710,7 +1712,7 @@ int main(int argc,char** argv){
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
             report();return events&&!events->errors.empty()?1:0;
         }
-        SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_AUDIO)==0);SdlQuit quit;
+        SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_AUDIO)==0);
         if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
         recvx::InputManager devices(input_config);frontend.changed=[&](const recvx::InputConfig& config){devices.configure(config);};
         std::cout<<"Input: keyboard and "<<devices.controllers()<<" controller(s); "<<(fs::exists(args.controls)?args.controls.string():"built-in defaults")<<'\n';

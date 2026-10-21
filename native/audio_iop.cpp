@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 namespace recvx {
 namespace {
@@ -26,7 +28,13 @@ IopSound::IopSound(){
 // ---------------------------------------------------------------------------------------------------- banks
 void IopSound::load_se_bank(unsigned bank,AudioBank data){
     if(bank>=tq_ports)throw std::runtime_error("SE bank outside the six TQ ports");
-    auto& t=tq_[bank];t.table.clear();t.loaded=bool(data);se_banks_[bank]=data;
+    auto& t=tq_[bank];t.table.clear();t.loaded=bool(data);
+    // The decoded-clip cache is keyed by the bank buffer; a replaced buffer's entries go (its address may be reused).
+    if(const auto old=se_banks_.find(bank);old!=se_banks_.end()&&old->second)for(auto it=clip_cache_.begin();it!=clip_cache_.end();)it=std::get<0>(it->first)==static_cast<const void*>(old->second.get())?clip_cache_.erase(it):std::next(it);
+    se_banks_[bank]=data;
+    // Host policy for a replaced SE bank: its TQ port stops (Tsnd_tq_portstop, the cancel bit of every busy entry, CC 120
+    // at the next ATick); the original load thread overwrites the SPU RAM the voices read.
+    for(auto& e:t.entry)if(e.flags&1)e.flags|=2;
     if(!data)return;
     // TSNDDRV treq_LOAD (0x6600..0x6bc4): per program the Vagi entry named by split 0's Sset index (the module uses
     // that index for the Smpl and Vagi tables too): Vagi offset/rate/attribute, Smpl +0x0B (root note) and the length
@@ -52,6 +60,10 @@ void IopSound::load_se_bank(unsigned bank,AudioBank data){
     }
 }
 void IopSound::load_midi_bank(unsigned bank,AudioBank programs,AudioBank sequences){
+    // Host policy for a replaced MIDI bank: every BGM port bound to it stops (port_stop type 2: play switch off,
+    // CC 64/123 to its channels), as the EE's own StopThePsgSound does for bank 3.
+    for(unsigned p=0;p<bgm_ports;++p)if(bgm_[p].hsyn_bank==int(bank)){if(seq_[p].playing)midi_switch(p,false);bgm_[p].flags&=~(1|4|0x40|0x80);midi_info_&=std::uint16_t(~(1u<<p));}
+    if(const auto old=midi_programs_.find(bank);old!=midi_programs_.end()&&old->second)for(auto it=clip_cache_.begin();it!=clip_cache_.end();)it=std::get<0>(it->first)==static_cast<const void*>(old->second.get())?clip_cache_.erase(it):std::next(it);
     if(programs)midi_programs_[bank]=std::move(programs);else midi_programs_.erase(bank);
     if(sequences)midi_sequences_[bank]=std::move(sequences);else midi_sequences_.erase(bank);
 }
@@ -62,7 +74,15 @@ AudioBank IopSound::port_bank(int port)const{
     if(hsyn_[port].bank<0)return {};
     const auto f=midi_programs_.find(unsigned(hsyn_[port].bank));return f==midi_programs_.end()?AudioBank{}:f->second;
 }
+void IopSound::load_se_clip(unsigned bank,unsigned program,std::shared_ptr<const PcmClip> clip){
+    if(bank>=tq_ports||program>127||!clip)throw std::runtime_error("synthetic SE entry outside the TQ table");
+    auto& t=tq_[bank];t.loaded=true;if(t.table.size()<=program)t.table.resize(program+1);
+    auto& e=t.table[program];e.rate=std::uint16_t(clip->rate);e.attr=clip->loop_end>clip->loop_start?1:0;e.note=60;
+    // 420 * ADPCM bytes / rate ATicks: 16 bytes per 28 samples.
+    e.length=std::uint32_t(420u*std::uint32_t(clip->frames()*16/28))/std::max<unsigned>(1,clip->rate);e.clip=std::move(clip);
+}
 std::vector<std::shared_ptr<const PcmClip>> IopSound::resolve(int port,unsigned program,unsigned key){
+    if(port>=int(bgm_ports)){const auto& t=tq_[unsigned(port)-bgm_ports].table;if(program<t.size()&&t[program].clip)return {t[program].clip};}
     const auto bank=port_bank(port);if(!bank)return {};
     const auto id=std::make_tuple(static_cast<const void*>(bank.get()),program,key);
     auto found=clip_cache_.find(id);
@@ -513,13 +533,13 @@ void IopSound::mix(float& left,float& right,std::array<std::array<float,2>,2>& w
 }
 
 // ---------------------------------------------------------------------------------------------------- diagnostics
-void IopSound::diagnostic_note(unsigned channel,std::shared_ptr<const PcmClip> clip,unsigned velocity){
-    Message m;m.kind=Message::ClipOn;m.channel=channel&15;m.a=60;m.b=velocity;m.clip=std::move(clip);hsyn_[15].queue.push_back(m);
+void IopSound::diagnostic_note(unsigned port,unsigned channel,std::shared_ptr<const PcmClip> clip,unsigned velocity){
+    Message m;m.kind=Message::ClipOn;m.channel=channel&15;m.a=60;m.b=velocity;m.clip=std::move(clip);hsyn_.at(port).queue.push_back(m);
 }
-void IopSound::diagnostic_stop(unsigned channel){Message m;m.kind=Message::Control;m.channel=channel&15;m.a=120;hsyn_[15].queue.push_back(m);}
-bool IopSound::diagnostic_busy(unsigned channel)const{
-    for(const auto& m:hsyn_[15].queue)if(m.channel==(channel&15)&&m.kind==Message::ClipOn)return true;
-    for(const auto& l:hsyn_[15].channel[channel&15].list)if(!l.empty())return true;return false;
+void IopSound::diagnostic_stop(unsigned port,unsigned channel){Message m;m.kind=Message::Control;m.channel=channel&15;m.a=120;hsyn_.at(port).queue.push_back(m);}
+bool IopSound::diagnostic_busy(unsigned port,unsigned channel)const{
+    for(const auto& m:hsyn_.at(port).queue)if(m.channel==(channel&15)&&m.kind==Message::ClipOn)return true;
+    for(const auto& l:hsyn_[port].channel[channel&15].list)if(!l.empty())return true;return false;
 }
 std::vector<IopSound::VoiceView> IopSound::voices(int port,int channel)const{
     std::vector<VoiceView> out;

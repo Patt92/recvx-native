@@ -184,6 +184,29 @@ Sequenznoten rechnen dasselbe VOLL/VOLR-Register; die Hostskalierung entfällt:
 Die Phase zwischen ATick und EE-VSync ist im Original nicht fest; nativ fällt jeder vierte
 ATick auf das sdSysServer-Bild. Test `audio_levels` (MIDI-Teil), `audio_movie`, `audio_gaps`.
 
+### IOP-Takt und Stimmenpool (2026-10-21)
+
+`native/audio_iop.*` bildet die IOP-Seite nach: den TSNDDRV-Befehlsthread (ein EE-Stapel je
+sdSysServer; `DelayATick` bei BgmReq/BgmStop), die SE-Warteschlange TQ (Laufzeit-Timer
+420·Bytes/Rate ATicks, Pitch>>9 je Tick, Loop unendlich; Flag 4 → CC7/Programm/Note-On 127 an
+MODHSYN-Port 10+Bank; Cancel → CC 120; nur die TQ-Ports 0..4 werden getaktet), den
+MODMIDI-Sequencer (4167·128 je ATick, Schritt ((Tempo·128)/PPQN·256)/256, NRPN-Schleifen,
+CC7 × Portlautstärke, Stopp per CC 64/123) und MODHSYN (16 Ports × 16 Kanäle, 2 × 24 Stimmen:
+Freiliste vom +4-Ende, Key-On-Stapel bis ENVX < 1000, Freigabe bei ENVX 0 bzw. ENDX mit
+3-Tick-Schutz, Raub nach Klasse/Priorität/ENVX-Schnappschuss, Portlimit 48). Die 48
+SPU2-Stimmen rechnen ADSR, VOLL/VOLR und Tonhöhe je Stimme.
+
+Die EE-Seite hält die originalen Handles (`SND_WORK` vol/pan/pitch/req, `use_se_info`,
+`req_se_info`, `sdShotPlay` mit Kanal ^ 8, MidiHandle[2]-Rotation). `active()` ist die
+EE-Sicht: Anforderung ausstehend oder Busy-Bit aus `get_iop_snddata`; ein Stopp wird zwei
+sdSysServer-Bilder später sichtbar, ein Stopp vor dem ersten sdSysServer verpufft (Original).
+Der SE-Fade sendet mit dem Req die alte Lautstärke des Handles (VolumeDelayTime -1).
+
+Hostpolitik, nicht Original: ein ersetzter Bankpuffer stoppt seinen TQ-Port bzw. die
+gebundenen BGM-Ports (der originale Ladethread ist nicht nachgebildet); ein Programm
+oberhalb der TSNDDRV-Tabelle wird gemeldet. Tests `audio_levels` (Pool, Raub, Key-On-Stapel
+am `IopSound`), `audio_movie`, `audio_gaps` (Latenzen, Register).
+
 ## SPU2-Hüllkurve und Hall
 
 Die SPU2-Stimmenhüllkurve (ADSR) und der Hardware-Hall laufen plattformunabhängig
@@ -249,15 +272,9 @@ FFmpeg wird nur bei dieser Umwandlung benutzt, nicht von der Laufzeit.
 
 - Mehrschichtige HD-Programme, phaseninvertiertes Programm-Pan und SPU-Interpolation (ADSR und Hall sind portiert).
 - SysEx in SQ und Live-Controller-Modulation laufender Noten.
-- Stimmenpool: 2 × 24 SPU2-Stimmen mit Freiliste, Key-On im nächsten ATick erst bei
-  ENVX < 1000 (0x32c4), Raub nach Zustand (losgelassen < Pedal < gehalten), Priorität
-  (alle Samples 10) und ENVX-Schnappschuss (0x659c), dann aus der Key-On-Warteliste
-  (0x67a0); Portlimit 48 mit Raub im Port (0x5e0c). Nativ nicht portiert: ein Key-On bei
-  24 belegten Stimmen spielt weiter und meldet `MODHSYN voice pool full on core N`.
-  Messung 2026-10-21 (Spitze belegter Stimmen je Kern beim Key-On, `spu_voice_peak` im
-  `--state`): alle 205 Räume je 900 Bilder höchstens 24 (RM_0100 Kern 0, auch über 9000
-  Bilder), Spielreplays höchstens 6. Ein exakter Port braucht das ATick-Batching der Key-Ons
-  (bis 4,2 ms später, nur bei ENVX < 1000), das nativ für alle Noten fehlt.
+- Der Stimmenpool und das ATick-Batching sind seit 2026-10-21 im IOP-Modell portiert (siehe
+  unten); offen bleibt der Ladethread von TSNDDRV (Bankersetzung während laufender Stimmen ist
+  Hostpolitik: Port-Stopp).
 - ADX-Lautstärke→Ausgabekurve und die Velocity-/Bereichsfade-Pfade
   anderer Bankarten; `GetAdxStatus`-PREP hat keine native Entsprechung
   (Clips laden synchron).

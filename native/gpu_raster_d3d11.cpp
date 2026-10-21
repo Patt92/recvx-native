@@ -381,7 +381,7 @@ private:
         D3D11_VIEWPORT vp{};vp.Width=float(W);vp.Height=float(H);vp.MaxDepth=1.f;context_->RSSetViewports(1,&vp);}
     ID3D11ShaderResourceView* texture(const SceneTexture& t,Variant variant){
         auto& cache=*t.filter_cache;const auto fingerprint=t.fingerprint();auto& slot=cache.gpu[variant];
-        if(slot&&cache.gpu_fingerprint[variant]==fingerprint)return static_cast<ID3D11ShaderResourceView*>(slot.get());
+        if(slot&&cache.gpu_owner[variant]==cache_owner()&&cache.gpu_fingerprint[variant]==fingerprint)return static_cast<ID3D11ShaderResourceView*>(slot.get());
         const auto upload_begin=std::chrono::steady_clock::now();++timings_.uploads;
         const std::size_t levels=variant==Point?1:1+(variant==Punch?cache.punch_mips.size():cache.mips.size());
         D3D11_TEXTURE2D_DESC td{};td.Width=t.width;td.Height=t.height;td.MipLevels=UINT(levels);td.ArraySize=1;
@@ -402,7 +402,7 @@ private:
         ID3D11ShaderResourceView* view=nullptr;
         require(device_->CreateShaderResourceView(texture2d.get(),nullptr,&view),"texture view");
         slot=std::shared_ptr<void>(view,[](void* p){static_cast<ID3D11ShaderResourceView*>(p)->Release();});
-        cache.gpu_fingerprint[variant]=fingerprint;
+        cache.gpu_fingerprint[variant]=fingerprint;cache.gpu_owner[variant]=cache_owner();
         timings_.upload+=std::chrono::duration<double>(std::chrono::steady_clock::now()-upload_begin).count();
         return view;
     }

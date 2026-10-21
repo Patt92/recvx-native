@@ -23,6 +23,28 @@ Es gibt drei Ebenen:
 ctest --test-dir build/macos-arm64 --output-on-failure
 ```
 
+Ein gezielter Lauf baut Testziele und führt nur passende Namen aus (leere Auswahl ist ein Fehler):
+
+```sh
+./build.sh --test-regex '^(gpu_raster.*|scene_renderer|texture_filtering|third_person_camera_mod)$'
+```
+
+`gpu_raster_parity` prüft das Plattformbackend, `gpu_raster_opengl_parity` das
+explizite GL-Backend und `gpu_raster_opengl_copy_parity` dessen erzwungenen
+GL-4.1-Kopierpfad. Sie vergleichen bei Punktabtastung gepackte Farbe inklusive
+Alpha und Float-Tiefe bitweise gegen die Bandstufe, einschließlich Schattenphasen,
+SSAA, NPOT-/mutierten Texturen und Kontextwechseln. Jeder erwartete GPU-Pass muss
+wirklich auf der GPU abgeschlossen sein; Softwarefallback zählt nicht als PASS.
+Ohne Gerät/Display enden sie mit 77 (SKIP); Shaderfehler sind Fehler, keine SKIPs.
+Ein versteckter GL-Kontext braucht weiterhin einen Displayserver. GPU-Tests in
+einer Sandbox ohne Display belegen weder Shaderkompilierung noch Bildparität.
+
+`recvx-gpu-compare` unterstützt `--backend opengl` (am Ende) und anschließend
+optional `--force-copy`; Punktabweichungen oder Softwarefallback liefern einen
+Fehlerstatus. Gefilterte Hostqualität wird getrennt ausgewertet, nicht als
+CPU-bitgleich vorausgesetzt. Messungen liefern CPU- und Wallzeit; ohne realen
+GPU-Lauf gibt es keinen Leistungsnachweis.
+
 Tests mit Originaldaten erwarten `data/`. Tests mit gemeinsamen Fixtures
 (z. B. Snapshot) nicht parallel in mehreren Buildverzeichnissen starten.
 

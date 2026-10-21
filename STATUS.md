@@ -21,6 +21,12 @@ Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 
+**IOP-Modell: Stimmenpool, ATick, SE-Timer (2026-10-21, Arbeitsbaum):** native/audio_iop.* bildet TSNDDRV-
+Befehlsthread, TQ-Warteschlange, MODMIDI-Sequencer, MODHSYN (2x24 Stimmen, Raub, Key-On-Stapel) und die 48
+SPU2-Stimmen nach; der Mixer fuehrt nur noch EE-Handles und ADX/Host-PCM. Audiotests auf die originale
+IOP-Latenz umgestellt (Req am sdSysServer, Ton im ATick, Stopp zwei Bilder spaeter). Hostpolitik: ersetzte
+Bank stoppt ihren Port. **Kein Commit.**
+
 **MIDI-Pegel und MidiHandle[2] (2026-10-21, Arbeitsbaum):** Sequenznoten rechnen das MODHSYN-Register
 (MODMIDI-CC7 x Portlautstaerke, HsMsg-Pan je 240-Hz-ATick, Pitchbend jetzt ausgewertet, Kanalzustand je Port
 ueber Sequenzen); Hintergrund-Slot 2, System-MIDI und Tuer teilen die Portrotation 2->8->9; Hintergrund-Timer,
@@ -108,6 +114,12 @@ bitgleich inkl. Schatten (Test `gpu_raster_parity`), CPU je Bild ≈ 0,3–0,5 m
 am Starter. Schattenmasken laufen ebenfalls auf der GPU (ein Befehlspuffer je Bild).
 Windows: D3D11-Backend über Rasterizer Ordered Views geschrieben, Crossbuild grün, **auf Hardware
 noch ungeprüft**; GPUs ohne ROV behalten den Softwarepfad.
+**OpenGL (2026-10-21, Arbeitsbaum):** optionales Core-4.1-Backend, Linux-Standard;
+`--renderer opengl`/INI/Debugwahl, Metal/D3D-Defaults erhalten. Mac-arm64 GL an/aus und
+Windows-x64-Crossbuild grün; 11 gezielte Tests bestanden, 3 GPU-Prüfungen wegen
+Sandbox ohne Display übersprungen. Dev-App aktualisiert, Titel/Raum nur im
+Softwarefallback geprüft. GL-Shader-/Pixelparität und Linux-Hardware offen.
+[Bericht](work/opengl_backend.result.md).
 
 **Kartenbild:** MAP zeichnet MRY-Geometrie, Marker und Sprites in der eigenen
 Build-Runtime; Fade-Rückweg und Wiedereintritt gezielt geprüft. Constant-Material-

@@ -154,6 +154,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     draw_view_projected(scene,matrix,focal_x,focal_y,wireframe,hidden,near,far,volume_x,volume_y,ninja_sy_);
 }
 void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far,float volume_x,float volume_y,float ninja_projection){
+    last_gpu_frame_=false;
     if(discard_)return;
     using Clock=std::chrono::steady_clock;
     const auto since=[](Clock::time_point from){return std::chrono::duration<double>(Clock::now()-from).count();};
@@ -576,7 +577,8 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
     if(gpu_&&!wireframe){
         // Ein Geraetefehler (z. B. verlorene GPU) beendet nicht das Spiel: Meldung, danach Software.
         try{gpu_drawn=gpu_->render(frame,zc?shadow_geometry:raster::ShadowGeometry{},pixels_,depth_);}
-        catch(const std::exception& e){std::fprintf(stderr,"GPU raster disabled, software from now on: %s\n",e.what());gpu_.reset();}}
+        catch(const std::exception& e){gpu_error_=e.what();std::fprintf(stderr,"GPU raster disabled, software from now on: %s\n",e.what());gpu_.reset();}}
+    last_gpu_frame_=gpu_drawn;
     if(gpu_drawn){}
     else if(!zc){clear_targets();run(0,setups.size(),true);}
     else{

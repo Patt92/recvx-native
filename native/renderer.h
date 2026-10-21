@@ -53,7 +53,7 @@ public:
     void set_raster_observer(std::function<void(const raster::Frame&)> observer){observer_=std::move(observer);}
     // Host-GPU-Rasterer (gpu_raster.h) fuer die Bandstufe; nullptr = Software. Pixel, Tiefe, Linien und
     // alle Overlays bleiben in pixels()/depth(); Drahtgitter zeichnet immer in Software.
-    void set_gpu(std::shared_ptr<GpuRaster> gpu){gpu_=std::move(gpu);}
+    void set_gpu(std::shared_ptr<GpuRaster> gpu){gpu_=std::move(gpu);last_gpu_frame_=false;gpu_error_.clear();}
     // Headless-Takt ohne Bild: Szene und Zeichenseiteneffekte (bhDrawEffect-Funktionen,
     // pl_sleep_cnt) laufen wie in jedem Spielbild, nur die Rasterung entfaellt.
     // Beim Wechsel auf ein gerastertes Bild startet die Leinwand wie ein frischer Renderer, damit
@@ -61,6 +61,8 @@ public:
     void set_discard(bool discard){if(discard_&&!discard){std::fill(pixels_.begin(),pixels_.end(),0u);std::fill(depth_.begin(),depth_.end(),0.0f);}discard_=discard;}
     bool discarding()const{return discard_;}
     const std::shared_ptr<GpuRaster>& gpu()const{return gpu_;}
+    bool last_gpu_frame()const{return last_gpu_frame_;}
+    const std::string& gpu_error()const{return gpu_error_;}
     int width() const{return width_;}
     int height() const{return height_;}
     std::size_t covered_pixels() const;
@@ -73,6 +75,7 @@ private:
     int ss_=2;
     std::function<void(const raster::Frame&)> observer_;
     std::shared_ptr<GpuRaster> gpu_;
+    bool last_gpu_frame_=false;std::string gpu_error_;
     Timings timings_;
     std::array<float,2> last_clip_{{0.05f,0.f}};
     // Bildschirmmassstab der Ninja-Projektion fuer die Clipregel der Chunk-Streifen:

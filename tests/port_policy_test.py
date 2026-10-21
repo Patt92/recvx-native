@@ -138,6 +138,19 @@ class PolicyTest(unittest.TestCase):
         (build / "CMakeFiles/game.dir/link.txt").write_text("c++ game.o librecvx_original_status.a")
         self.assertTrue(policy.check_build(build))
 
+    def test_visual_studio_compile_audit(self):
+        build = self.root / "build"
+        build.mkdir()
+        project = build / "recvx_native.vcxproj"
+        project.write_text('<ItemGroup><ClCompile Include="..\\native\\math.c" /></ItemGroup>')
+        self.assertEqual(policy.check_build(build), [])
+        project.write_text('<ItemGroup><ClCompile Include="..\\src\\ps2\\veronica\\prog\\item.c" /></ItemGroup>')
+        self.assertTrue(policy.check_build(build))
+        project.write_text('<ItemGroup><ProjectReference Include="recvx_core_enemy_world.vcxproj" /></ItemGroup>')
+        self.assertTrue(policy.check_build(build))
+        project.write_text('<ItemGroup><ClCompile Include="..\\generated\\enemy\\en01.c" /></ItemGroup>')
+        self.assertTrue(policy.check_build(build))
+
     def test_unknown_generated_function(self):
         build = self.root / "build"
         (build / "generated").mkdir(parents=True)

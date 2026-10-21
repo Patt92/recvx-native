@@ -20,7 +20,7 @@ namespace recvx {
 }
 using namespace recvx;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
-template<class F> static void reject(F f){bool rejected=false;try{f();}catch(const std::exception&){rejected=true;}check(rejected,"malformed media accepted");}
+static int reject_count=0;template<class F> static void reject(F f){bool rejected=false;++reject_count;try{f();}catch(const std::exception&){rejected=true;}if(!rejected)throw std::runtime_error("malformed media accepted #"+std::to_string(reject_count));}
 static void le(std::vector<std::uint8_t>& b,unsigned n){for(unsigned i=0;i<4;++i)b.push_back(std::uint8_t(n>>(i*8)));}
 // SPU2 envelope, MODHSYN key-off/CC 120, core choice, TSNDDRV/libsd HALL (audio_spu.h).
 static void spu_envelope_reverb(const std::filesystem::path& root){
@@ -59,11 +59,12 @@ static void spu_envelope_reverb(const std::filesystem::path& root){
 
     // Core choice: 0x2f pins core 1, no preference picks the core with more free voices.
     {AudioMixer m;auto core1=std::make_shared<PcmClip>(*clip);core1->spu_attr=0x2f;auto any=std::make_shared<PcmClip>(*clip);any->spu_attr=0x0f;
-        m.play_pcm(2,core1,1,true);m.play_pcm(3,core1,1,true);check(m.spu_voices(1)==2&&m.spu_voices(0)==0,"attr 0x20 pins core 1");
-        m.play_pcm(4,any,1,true);check(m.spu_voices(0)==1,"no preference -> core with more free voices");
-        m.play_pcm(5,any,1,true);check(m.spu_voices(0)==2&&m.spu_voices(1)==2,"tie -> core 0");
-        m.play_pcm(6,any,1,true);check(m.spu_voices(0)==3,"tie -> core 0 again");
-        m.play_pcm(7,any,1,true);check(m.spu_voices(1)==3,"core 1 has more free voices");}
+        // SE host voices: synthetic TQ programs, keyed at the ATick of the sdSysServer that sends them (frame 800).
+        m.play_pcm(2,core1,1,true);m.play_pcm(3,core1,1,true);m.mix(800);check(m.spu_voices(1)==2&&m.spu_voices(0)==0,"attr 0x20 pins core 1");
+        m.play_pcm(4,any,1,true);m.mix(800);check(m.spu_voices(0)==1,"no preference -> core with more free voices");
+        m.play_pcm(5,any,1,true);m.mix(800);check(m.spu_voices(0)==2&&m.spu_voices(1)==2,"tie -> core 0");
+        m.play_pcm(6,any,1,true);m.mix(800);check(m.spu_voices(0)==3,"tie -> core 0 again");
+        m.play_pcm(7,any,1,true);m.mix(800);check(m.spu_voices(1)==3,"core 1 has more free voices");}
 
     // sdShotStop/sdMidiStop -> CC 120: the slot is free at once, the voice releases (0xC021).
     {AudioMixer m;m.play_pcm(12,clip,1,true);m.mix(2000);check(m.spu_voices(0)==1,"looping voice sounding");
@@ -87,10 +88,20 @@ static void spu_envelope_reverb(const std::filesystem::path& root){
 }
 // MODHSYN register levels of a sequence note against the same voice at unit gain (clip volume 1, pan 64): the SQ voice
 // plays sample * ENVX * VOLL/16384; both outputs truncate to int16, so they agree within 2.
-static bool scaled_like(const std::vector<std::int16_t>& actual,std::size_t offset,const std::vector<std::int16_t>& unit,SonyLevels lv){
-    for(std::size_t i=offset;i<actual.size();++i){const auto u=unit.at(i-offset);const float gain=float((i&1)?lv.right:lv.left)/16384.f;if(std::abs(float(actual[i])-float(u)*gain)>2.f)return false;}
+static bool scaled_like(const std::vector<std::int16_t>& actual,std::size_t offset,const std::vector<std::int16_t>& reference,std::size_t ref_offset,SonyLevels lv,SonyLevels ref){
+    for(std::size_t i=offset;i<actual.size()&&i-offset+ref_offset<reference.size();++i){const auto u=reference[i-offset+ref_offset];
+        const float gain=(i&1)?float(lv.right)/float(ref.right):float(lv.left)/float(ref.left);if(std::abs(float(actual[i])-float(u)*gain)>2.f)return false;}
     return true;
 }
+// Synthetic MODHSYN voice: full bank volume, centred, ADSR1 0x00ff / ADSR2 0x1fc0 (3-tick attack, static sustain,
+// 2-tick release), dry L/R on core 0 (sampleSpuAttr 0x13).
+static std::shared_ptr<PcmClip> spu_clip(std::vector<std::int16_t> samples,unsigned rate=48000,bool loop=false,std::uint8_t attr=0x13){
+    auto c=std::make_shared<PcmClip>();c->rate=rate;c->channels=1;c->samples=std::move(samples);c->spu=true;c->spu_attr=attr;c->adsr1=0x00ff;c->adsr2=0x1fc0;
+    c->sony_volume=127u*127u*127u;c->pan=64;c->volume=1;if(loop){c->loop_start=0;c->loop_end=c->frames();}return c;}
+static std::size_t first_sound(const std::vector<std::int16_t>& v){for(std::size_t i=0;i<v.size();++i)if(v[i])return i;return v.size();}
+// IOP timing of a request issued right after a sync: sdSysServer at frame 800 sends it, the TSNDDRV ATick of that frame
+// keys an SE (TQ) or starts the MIDI port, whose first sequence tick runs at the next ATick (1000): 4 SQ ticks per ATick.
+static constexpr std::size_t se_start=800,midi_tick0=1000;
 static void sample_loops(const std::filesystem::path& root){
     // Original MULTSPQ1/0002 bank 2/list 6: program 6/key 60, velocity 127,
     // tempo 500000/PPQN 480. NoteOn tick 7, NoteOff tick 7687 (50 frames/tick).
@@ -101,11 +112,13 @@ static void sample_loops(const std::filesystem::path& root){
     // Both mixers carry the same room environment (SPU2 HALL on both cores, sdInit).
     AudioMixer sequence(root),reference(root),dry;sequence.load_room_sounds(0,2);reference.load_room_sounds(0,2);check(sequence.event_sound(0,0x206),"original loop sample SQ missing");auto unit=std::make_shared<PcmClip>(*clip);unit->volume=1;unit->pan=64;reference.play_pcm(12,unit,1,true);dry.play_pcm(12,unit,1,true);
     check(sequence.current_fx_level()==0&&sequence.reverb(0).mode()==5&&sequence.reverb(1).mode()==5,"sdInit HALL mode / initial CurrentFxLevel");
-    const auto actual=sequence.mix(120000),pcm=reference.mix(120000),plain=dry.mix(120000-350);
-    check(std::all_of(actual.begin(),actual.begin()+350*2,[](std::int16_t v){return v==0;}),"SQ note sounded before its NoteOn tick");
-    const std::size_t settled=(350+16*800)*2;(void)settled;
-    const auto levels=sequence.sequence_levels(12);check(levels.size()==1&&levels[0].left>0&&levels[0].left==levels[0].right,"SQ note register level missing");
-    check(scaled_like(actual,350*2,pcm,levels[0]),"SQ sample loop differs from explicit waveform loop/intro timing");
+    const auto actual=sequence.mix(120000),pcm=reference.mix(120000),plain=dry.mix(120000);
+    // NoteOn tick 7: BgmReq at frame 800, port start at that ATick, ticks 5..8 at the ATick of frame 1200.
+    const std::size_t note_at=midi_tick0+200;
+    // The ADPCM start is quiet for a few samples: both voices key at an ATick boundary, 1000 frames apart.
+    check(first_sound(actual)>=note_at*2&&first_sound(pcm)>=200*2&&first_sound(actual)-first_sound(pcm)==(note_at-200)*2,"SQ note must start at the ATick that passes tick 7");
+    const auto levels=sequence.sequence_levels(12),unit_levels=reference.sequence_levels(12);check(levels.size()==1&&unit_levels.size()==1&&levels[0].left>0&&levels[0].left==levels[0].right,"SQ note register level missing");
+    check(scaled_like(actual,note_at*2,pcm,200*2,levels[0],unit_levels[0]),"SQ sample loop differs from explicit waveform loop/intro timing");
     // MULTSPQ1/0002 carries RoomFxLevel 0: EVOL stays 0 and the result equals the dry mix.
     check(sequence.current_fx_level()==0&&reference.current_fx_level()==0,"RoomFxLevel 0 room changed EVOL");
     for(std::size_t i=0;i<plain.size();++i)check(pcm[i]==plain[i],"EVOL 0 hall changed the dry mix");
@@ -115,14 +128,18 @@ static void sample_loops(const std::filesystem::path& root){
     // shift 10), it does not stop at the NoteOff tick.
     check(std::any_of(released.begin(),released.end(),[](auto n){return n!=0;}),"NoteOff cut the voice instead of its ADSR release");
     const auto restarted=sequence.mix(2000);check(std::any_of(restarted.begin(),restarted.end(),[](auto n){return n!=0;}),"NRPN transport did not restart note after NoteOff");
-    // StopNativeEventSe -> StopMidi -> CC 120: ADSR2 0xC021 release, silent within 64 frames.
-    sequence.stop_event_sound(0);const auto stopped=sequence.mix(1600);check(!sequence.active(12)&&std::all_of(stopped.begin()+64*2,stopped.end(),[](auto n){return n==0;}),"sample loop survives slot stop");
-    check(sequence.event_sound(0,0x206),"loop sample reentry failed");sequence.mix(120000);sequence.stop(12,1);const auto faded=sequence.mix(audio_frames_per_tick);
-    check(!sequence.active(12)&&faded.back()==0&&std::any_of(faded.begin(),faded.end(),[](auto n){return n!=0;}),"sample loop fade/release failed");
+    // StopNativeEventSe -> StopMidi -> SdrBgmStop at the next sdSysServer: TSNDDRV port_stop -> sceMidi_MidiPlaySwitch off
+    // -> CC 123 (key-off, the sample's ADSR2 release), the EE sees the port free two frames later.
+    sequence.stop_event_sound(0);sequence.mix(2400);check(!sequence.active(12),"sample loop survives slot stop");
+    sequence.mix(24000);check(sequence.spu_voices(0)+sequence.spu_voices(1)==0,"CC 123 key-off: the voice must end its ADSR2 release");
+    check(sequence.event_sound(0,0x206),"loop sample reentry failed");sequence.mix(120000);
+    sequence.set_3d_sound_flag(7,0,2);check(sequence.user_sound_volume(7,0,0,-127,1),"RequestMidiFadeFunctionEx(DefEvt[0], 0, -127, 1)");
+    sequence.mix(800*5);check(!sequence.active(12),"MIDI fade to -127 must StopMidi at FadeCntMax < 0");
     check(sequence.event_sound(0,0x206),"loop sample second reentry failed");sequence.mix(120000);sequence.load_room_sounds(0,0);
     // Room 0 has RoomFxLevel 16: the HALL buffer (filled while EVOL was 0) becomes audible as EVOL
     // ramps, so the stopped voice itself is checked, not silence.
-    sequence.mix(64);check(!sequence.active(12)&&sequence.spu_voices(0)+sequence.spu_voices(1)==0,"sample loop survives room replacement");
+    sequence.mix(2400);check(!sequence.active(12),"sample loop survives room replacement");
+    sequence.mix(24000);check(sequence.spu_voices(0)+sequence.spu_voices(1)==0,"room replacement: the stopped port's voice must end its release");
     // Change only Vagi's documented attribute in a copied bank: a one-shot
     // retains exactly the decoded PCM, but never acquires sample-loop bounds.
     BinaryView hd(programs);const auto base=hd.u32(0),head=base+hd.u32(base+8),vags=base+hd.u32(head+0x20),vag=vags+hd.u32(vags+16+7*4);
@@ -133,12 +150,13 @@ static void sample_loops(const std::filesystem::path& root){
     // Original bank 2/list 0 has a one-shot program; compare both slot policies.
     const auto short_clip=std::make_shared<PcmClip>(decode_system_sound(programs,0,60));check(!short_clip->loop_end,"original one-shot unexpectedly loops");
     auto short_unit=std::make_shared<PcmClip>(*short_clip);short_unit->volume=1;short_unit->pan=64;
-    AudioMixer short_reference;short_reference.play_pcm(12,short_unit);const auto short_pcm=short_reference.mix(120000-250);
+    AudioMixer short_reference;short_reference.play_pcm(12,short_unit);const auto short_pcm=short_reference.mix(120000);const auto short_lv=short_reference.sequence_levels(12);check(short_lv.size()==1,"diagnostic one-shot level missing");
     for(bool outer:{false,true}){AudioMixer short_sequence(root);short_sequence.load_room_sounds(0,2);check(short_sequence.play_room_sequence(2,0,12,outer),"original one-shot SQ missing");
-        auto out=short_sequence.mix(251);const auto lv=short_sequence.sequence_levels(12);check(lv.size()==1&&lv[0].left>0,"one-shot SQ note register level missing");
-        check(std::all_of(out.begin(),out.begin()+250*2,[](auto n){return n==0;}),"one-shot SQ sounded before its NoteOn");
-        const auto rest=short_sequence.mix(120000-251);out.insert(out.end(),rest.begin(),rest.end());
-        check(scaled_like(out,250*2,short_pcm,lv[0]),"outer SQ slot loop repeats a one-shot waveform");short_sequence.mix(300000);check(!short_sequence.active(12),"one-shot SQ end retained slot");}
+        // NoteOn tick 5: the ATick of frame 1200 (ticks 5..8).
+        auto out=short_sequence.mix(midi_tick0+201);const auto lv=short_sequence.sequence_levels(12);check(lv.size()==1&&lv[0].left>0,"one-shot SQ note register level missing");
+        check(std::all_of(out.begin(),out.begin()+(midi_tick0+200)*2,[](auto n){return n==0;}),"one-shot SQ sounded before its NoteOn");
+        const auto rest=short_sequence.mix(120000-(midi_tick0+201));out.insert(out.end(),rest.begin(),rest.end());
+        check(scaled_like(out,(midi_tick0+200)*2,short_pcm,200*2,lv[0],short_lv[0]),"outer SQ slot loop repeats a one-shot waveform");short_sequence.mix(300000);check(!short_sequence.active(12),"one-shot SQ end retained slot");}
     // ExPlaySe keys a voice without any slot loop (CallEnemySeMain, CallSystemSe, ...); the SPU still
     // follows the VAG loop markers until key-off, like the SQ note above (en02.c:1040, Gulp Worm 70400).
     {AudioMixer se,looped;se.play_pcm(12,clip);looped.play_pcm(12,clip,1,true);
@@ -157,15 +175,22 @@ static void sample_loops(const std::filesystem::path& root){
 // sdfunc.c:847 Get3DSoundParameter. Expectations derived by hand from the
 // original tables: Ang = cam.ay + 10430.381*atan2(cam.x-src.x, cam.z-src.z).
 static void sound_3d_core(){
-    {AudioMixer fade;auto clip=std::make_shared<PcmClip>();clip->rate=48000;clip->channels=1;clip->samples.assign(20000,12700);
+    {AudioMixer fade;auto clip=spu_clip(std::vector<std::int16_t>(20000,12700));
      fade.play_pcm(weapon_voice_8,clip);fade.set_3d_sound_flag(3,0,2);fade.user_sound_volume(3,0,0,-127,2);
-     const auto first=fade.mix(800);check(first.front()==12700&&first.back()==12700,"SE fade must not interpolate between VSyncs");
-     const auto second=fade.mix(800);check(second.front()==6500&&second.back()==6500,"SE fade first VSync must subtract VolSpeed and truncate to the signed driver byte (-63.5 -> -63)");
-     check(fade.active(weapon_voice_8),"SE fade must not stop at FadeCntMax == 0");
-     const auto third=fade.mix(800);check(third.front()==100&&third.back()==100&&!fade.active(weapon_voice_8),"SE fade must stop at FadeCntMax < 0");}
+     // RequestSeFadeFunctionEx(.., 0, -127, 2): VolSpeed 63.5. VSync 1 (after SdrSeReq with the handle's old vol 127):
+     // Volume -63.5 -> sdShotSetVol((Sint8)-63) = byte 65; VSync 2: SdrSeChg(65), Volume -127 (byte 1); VSync 3:
+     // SdrSeChg(1), FadeCntMax < 0 -> StopSe (SdrSeCancel); VSync 4 sends it, the ATick cancels; VSync 5 sees it free.
+     const auto s0=fade.sound_state(weapon_voice_8);check(s0.fade==2&&s0.volume_count==2&&int(s0.volume)==0,"RequestSeFadeFunctionEx(.., 0, -127, 2)");
+     fade.mix(800);const auto s1=fade.sound_state(weapon_voice_8);check(int(s1.volume)==-63&&s1.volume_count==1,"SE fade first VSync must subtract VolSpeed (-63.5 -> driver byte -63)");
+     check(fade.voice_levels(weapon_voice_8).left==sony_voice_levels(127u*127u*127u,127,sony_controller_scale(127),128,64,64).left,"SdrSeReq carries the handle's volume before the fade step (127)");
+     fade.mix(800);check(fade.active(weapon_voice_8)&&fade.sound_state(weapon_voice_8).volume_count==0,"SE fade must not stop at FadeCntMax == 0");
+     check(fade.voice_levels(weapon_voice_8).left==sony_voice_levels(127u*127u*127u,127,sony_controller_scale(65),128,64,64).left,"SdrSeChg(65) must reach MODHSYN as CC7 65 at the ATick of that VSync");
+     fade.mix(800);const auto s3=fade.sound_state(weapon_voice_8);check(s3.fade==0&&int(s3.volume)==-127,"SE fade must stop at FadeCntMax < 0");
+     fade.mix(800*3);check(!fade.active(weapon_voice_8),"StopSe must reach the IOP (SdrSeCancel at the next sdSysServer, cleared at its ATick, reported with the following SdrSetIopData)");}
     {AudioMixer fade;fade.set_3d_sound_flag(3,0,2);fade.user_sound_volume(3,0,0,-100,4);fade.mix(1600);
-     auto clip=std::make_shared<PcmClip>();clip->rate=48000;clip->channels=1;clip->samples.assign(2000,12700);fade.play_pcm(weapon_voice_8,clip);fade.set_3d_sound_flag(3,0,2);
-     check(fade.mix(1).front()==7800,"SE fade on an idle slot must advance and retain its volume when sound starts");}
+     auto clip=spu_clip(std::vector<std::int16_t>(2000,12700));fade.play_pcm(weapon_voice_8,clip);fade.set_3d_sound_flag(3,0,2);
+     // Two VSyncs of the fade: Volume -50 -> byte 78 on the handle; SetVolumeSe(0) with FadeFunc 2 changes nothing; SdrSeReq(78).
+     fade.mix(800);check(fade.voice_levels(weapon_voice_8).left==sony_voice_levels(127u*127u*127u,127,sony_controller_scale(78),128,64,64).left,"SE fade on an idle slot must advance and retain its volume when sound starts");}
     AudioMixer m;m.set_sound_monitor({0,0,0},0,{});
     auto at=[&](float x,float y,float z,int mode=0){return m.sound_parameter_3d({x,y,z},mode);};
     const auto ahead=at(0,0,-10);check(ahead.pan==0&&ahead.volume==0&&ahead.distance==10,"Ang 0: PanTbl360[0]/ThreeDVolTbl[10]");
@@ -195,7 +220,7 @@ static void weapon_se(const std::filesystem::path& root){
         check(m.call_player_weapon_se(bank,se,{0,0,-10},2,false)&&m.active(weapon_voice_19)&&m.weapon_se_slot_switch()==0,"SlotNo != 0 must use slot 19 and keep the switch");
         check(!m.active(6),"weapon SE must not take the action voice 6");
         check(m.user_sound_volume(3,0,-127,-127,0)&&m.active(weapon_voice_8),"SetUserSoundVolume must not fade weapon slots without 3D flag 2");
-        m.set_3d_sound_flag(3,0,2);m.user_sound_volume(3,0,-127,-127,0);m.mix(800);check(!m.active(weapon_voice_8)&&!m.active(weapon_voice_9)&&!m.active(weapon_voice_19),"SetUserSoundVolume type 3 with flag 2 must reach slots 8/9/19");}
+        m.set_3d_sound_flag(3,0,2);m.user_sound_volume(3,0,-127,-127,0);m.mix(800*4);check(!m.active(weapon_voice_8)&&!m.active(weapon_voice_9)&&!m.active(weapon_voice_19),"SetUserSoundVolume type 3 with flag 2 must reach slots 8/9/19");}
     const auto near=shot({0,0,-10}),far=shot({0,0,-600});
     check(near.first>0&&std::abs(double(far.first)/near.first-41.0/127.0)<0.01,"distance attenuation must follow ThreeDVolTbl[509] (-87 -> 41/127)");
     const auto left=shot({-10,0,0}),right=shot({10,0,0});check(left.first>left.second&&right.second>right.first,"PanTbl360 must place the shot left/right");
@@ -220,7 +245,9 @@ static void enemy_se(const std::filesystem::path& root){
     check(std::abs(double(one({0,0,-10},se|0x400000).first)/near.first-120.0/128.0)<0.01,"VolDownTbl[4] must lower by 8");
     {auto m=mixer();m->request_enemy_se(0,{0,0,-10},se|0x800000,1,0);m->exec_enemy_se();check(!m->active(18)&&!m->unavailable.empty(),"VolDownTbl index 8 has no original value and must be reported");}
     check(std::abs(double(one({0,0,-10},se,0,[](SoundPoint,SoundPoint){return -0x1C;}).first)/near.first-100.0/128.0)<0.01,"CheckCollision4Sound -0x1C must lower the volume");
-    {auto plain=mixer(),faded=mixer();plain->request_enemy_se(0,{0,0,-10},se,1,0);faded->request_enemy_se(0,{0,0,-10},se,1,30);plain->exec_enemy_se();faded->exec_enemy_se();plain->mix(800);faded->mix(800);
+    {auto plain=mixer(),faded=mixer();plain->request_enemy_se(0,{0,0,-10},se,1,0);faded->request_enemy_se(0,{0,0,-10},se,1,30);plain->exec_enemy_se();faded->exec_enemy_se();plain->mix(1600);faded->mix(1600);
+     // VolumeDelayTime -1: SdrSeReq carries the handle's previous volume; the first fade step (-127 + step) reaches
+     // TSNDDRV with the SdrSeChg of the next sdSysServer.
      check(peaks(*faded,400).first*4<peaks(*plain,400).first,"FadeRate must start the voice at -0x7F (RequestSeFadeFunctionEx)");}
     {auto m=mixer();m->request_enemy_se(0,{-10,0,0},se,1,0);m->exec_enemy_se();peaks(*m,200);
      m->request_enemy_se(0,{10,0,0},se,0,0);m->exec_enemy_se();const auto moved=peaks(*m,4000);
@@ -228,13 +255,13 @@ static void enemy_se(const std::filesystem::path& root){
     {auto m=mixer();m->set_disc(0);m->room_fade_out();m->begin_room_init();m->request_enemy_se(0,{0,0,-10},se,1,0);m->exec_enemy_se();check(!m->active(18),"StartInitScriptFlag must hold enemy SE");
      m->room_fade_in();m->exec_enemy_se();check(m->active(18),"request must survive the init script");}
     {// First requests keep the BSS Prio 0; after one pass every served entry is Prio 3.
-     auto m=mixer();for(unsigned e=0;e<7;++e)m->request_enemy_se(e,{0,0,-10},se,1,0);m->exec_enemy_se();for(unsigned v=18;v<24;++v)m->stop(v);
+     auto m=mixer();for(unsigned e=0;e<7;++e)m->request_enemy_se(e,{0,0,-10},se,1,0);m->exec_enemy_se();m->mix(800);for(unsigned v=18;v<24;++v)m->stop(v);m->mix(800*3); /* StopSe after the request left, reported free after the ATick */
      // Enemy 0 has the lower priority but is farther: the original exchange sort still swaps it behind.
      m->request_enemy_se(0,{0,0,-100},se,1,0);for(unsigned e=1;e<7;++e)m->request_enemy_se(e,{0,0,-10},se|0x10000,1,0);m->exec_enemy_se();
      check(!m->enemy_se_playing(0,1)&&m->enemy_se_playing(6,1),"ExecEnemySeManager must sort with Prio > || Dist > (enemy 0 loses the sixth voice)");}
     {// sdfunc.c AllStopEnemySe: EnemySlotInfo cleared at once, the registered voice fades out with
      // RequestSeFadeFunction(..., 2, 200) = FadeCntMax 30 sound syncs (800 frames each), then the stop.
-     auto m=mixer();m->request_enemy_se(0,{0,0,-10},se,1,0);m->request_enemy_se(1,{0,0,-10},se,1,0);m->exec_enemy_se();m->stop(19);m->mix(800);m->exec_enemy_se(); /* CheckPlaySe frees slot 1 */
+     auto m=mixer();m->request_enemy_se(0,{0,0,-10},se,1,0);m->request_enemy_se(1,{0,0,-10},se,1,0);m->exec_enemy_se();m->mix(800);m->stop(19);m->mix(800*3);m->exec_enemy_se(); /* CheckPlaySe frees slot 1 once the IOP reports it */
      m->all_stop_enemy_se();const auto fade=m->sound_state(18,false);
      check(!m->enemy_se_playing(0,1)&&m->active(18)&&fade.fade==2&&fade.volume_count==30,"AllStopEnemySe must clear the slot and fade (Func 2, FadeCntMax 30), not cut");
      check(m->sound_state(19,false).fade==0,"a voice without a running SE takes StopEnemySe, not a fade");}
@@ -254,7 +281,7 @@ static void shared_3d_consumers(const std::filesystem::path& root){
      m->mix(800*3);check(m->sound_state(AudioMixer::se_voice(7)).pan==100&&m->sound_state(AudioMixer::se_voice(7)).pan_function==0,"pan fade must end at PanLast after Count < 0");}
     {auto m=mixer();m->begin_room_init();m->regist_object_se(2,{0,0,-10},0x0305,0);m->exec_object_se();check(!m->active(8),"ExecObjectSeManager must hold during the init script");
      m->room_fade_in();m->exec_object_se();check(m->active(8)||!m->sequence_unavailable.empty(),"registered object SE must be requested after the init script");
-     m->free_object_se(2);check(!m->active(8),"FreeObjectSe must stop the object's MIDI slot");}
+     m->mix(800);m->free_object_se(2);m->mix(800*3);check(!m->active(8),"FreeObjectSe must stop the object's MIDI slot (SdrBgmStop at the next sdSysServer)");}
 }
 // sdfunc.c:2087 PlayVoiceEx2 / :2160 StopVoice / :2154 ContinuePlayVoice on ADX slot 1.
 static void adx_voice(const std::filesystem::path& root){
@@ -323,7 +350,7 @@ static void midi_multi_split(const std::filesystem::path& root){
             std::filesystem::create_directories(mods/"audio/MULTSPQ1");std::ofstream(mods/"audio/MULTSPQ1"/(asset_number(pack)+".bin"),std::ios::binary).write(reinterpret_cast<const char*>(copy.data()),std::streamsize(copy.size()));}
         AudioMixer m(root,mods);m.load_room_sounds(1,10);check(m.room_fx_level()==0,"RM_1100 RoomFxLevel changed: the HALL would no longer be silent");
         check(m.event_sound(0,512)&&m.active(12)&&m.sequence_unavailable.empty(),"RM_1100 type-7 sequence not played");
-        auto pcm=m.mix(4800);voices=m.spu_voices(0)+m.spu_voices(1);const auto rest=m.mix(48000*2);pcm.insert(pcm.end(),rest.begin(),rest.end());return pcm;};
+        auto pcm=m.mix(midi_tick0+96*50);voices=m.spu_voices(0)+m.spu_voices(1);const auto rest=m.mix(48000*2);pcm.insert(pcm.end(),rest.begin(),rest.end());return pcm;};
     unsigned both=0,left=0,right=0;const auto full=run(-1,both),first=run(0,left),second=run(1,right);std::filesystem::remove_all(mods);
     check(left==2&&right==2&&both==4,"RM_1100: two notes must key two voices each (one per covering split)");
     check(std::any_of(second.begin(),second.end(),[](auto n){return n!=0;}),"RM_1100 second split silent");
@@ -352,13 +379,13 @@ int main(int argc,char** argv){try{
         const auto root=std::filesystem::u8path(argv[1]);
         for(unsigned disc:{0u,1u}){AudioMixer voices(root);voices.set_disc(disc);voices.load_room_sounds(0,2);
             std::vector<std::int16_t> previous;
-            for(unsigned player=0;player<4;++player){check(voices.load_player_sounds(player),"original CORE bank missing");check(!voices.active(7),"character change keeps old voice");
+            for(unsigned player=0;player<4;++player){check(voices.load_player_sounds(player),"original CORE bank missing");voices.mix(800*3);check(!voices.active(7),"character change keeps old voice");
                 voices.play_player_voice(1026);check(voices.active(7),"bite voice not routed to slot 7");
-                const auto pcm=voices.mix(800);check(std::any_of(pcm.begin(),pcm.end(),[](auto n){return n!=0;}),"CORE bite voice silent");
+                const auto pcm=voices.mix(1600);check(std::any_of(pcm.begin(),pcm.end(),[](auto n){return n!=0;}),"CORE bite voice silent");
                 if(!previous.empty())check(pcm!=previous,"character change retains cached CORE sample");previous=pcm;
                 const auto route=voices.played.back();voices.load_room_sounds(0,9);voices.play_player_voice(1025);
                 check(voices.active(7)&&voices.played.back().substr(0,voices.played.back().rfind('/'))==route.substr(0,route.rfind('/')),"room change loses CORE bank/provenance");
-                const auto death=voices.mix(800);check(std::any_of(death.begin(),death.end(),[](auto n){return n!=0;}),"CORE death voice silent");}
+                const auto death=voices.mix(1600);check(std::any_of(death.begin(),death.end(),[](auto n){return n!=0;}),"CORE death voice silent");}
             check(voices.unavailable.empty(),"CORE voices reported unavailable");}
         // system.c:1602 hands over to the disc change task whenever the mounted
         // sound set does not match the stage, so stages 6..9 always run from the
@@ -380,7 +407,7 @@ int main(int argc,char** argv){try{
     {AudioMixer bgm;bgm.request_bgm2(3,-45);check(bgm.current_bgm()==3&&bgm.bgm_request()==8,"PlayBgm2 new track");bgm.request_bgm2(3,-45);check(bgm.bgm_request()==8,"PlayBgm2 repeat keeps request");
         bgm.room_fade_out();check(bgm.bgm_request()==0&&bgm.current_bgm()==3,"room fade-out consumes request");bgm.request_bgm2(3,-30);check(bgm.bgm_request()==2,"PlayBgm2 volume change");
         bgm.room_fade_in();check(bgm.bgm_request()==0&&bgm.current_bgm_volume()==-30,"room fade-in volume request");bgm.stop_bgm2();check(bgm.bgm_request()==1&&bgm.current_bgm()==-1,"StopBgm2");}
-    if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto bank=read_asset_file(root/"files/COMMON.MLT",8*1024*1024);for(unsigned id=0;id<11;++id){const auto sound=decode_system_sound(bank,id);check(sound.rate==32000&&sound.frames()>0&&std::any_of(sound.samples.begin(),sound.samples.end(),[](auto value){return value!=0;}),"original system sound silent/invalid");}reject([&]{decode_system_sound(bank,11);});auto truncated=bank;truncated.resize(256);reject([&]{decode_system_sound(truncated,0);});AudioMixer effects(root);effects.play_system(2);check(effects.active(2)&&effects.played.back()=="COMMON/0002","original cursor sound not routed");effects.load_room_sounds(0,0);for(unsigned id=0;id<5;++id){check(effects.play_room_sound(2,id,4),"original floor bank missing");const auto output=effects.mix(800);check(std::any_of(output.begin(),output.end(),[](auto value){return value!=0;}),"original floor sound silent");}check(effects.played.back()=="MULTSPQ1/0000/2/0004","floor sound route mismatch");effects.load_room_sounds(0,1);check(!effects.active(4)&&effects.play_room_sound(2,2,5)&&effects.played.back()=="MULTSPQ1/0001/2/0002","room sound reload incorrect");check(!effects.play_room_sound(15,0),"missing bank fabricated");reject([&]{effects.play_room_sound(2,100);});}
+    if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto bank=read_asset_file(root/"files/COMMON.MLT",8*1024*1024);for(unsigned id=0;id<11;++id){const auto sound=decode_system_sound(bank,id);check(sound.rate==32000&&sound.frames()>0&&std::any_of(sound.samples.begin(),sound.samples.end(),[](auto value){return value!=0;}),"original system sound silent/invalid");}reject([&]{decode_system_sound(bank,11);});auto truncated=bank;truncated.resize(256);reject([&]{decode_system_sound(truncated,0);});AudioMixer effects(root);effects.play_system(2);check(effects.active(2)&&effects.played.back()=="COMMON/0002","original cursor sound not routed");effects.load_room_sounds(0,0);for(unsigned id=0;id<5;++id){check(effects.play_room_sound(2,id,4),"original floor bank missing");const auto output=effects.mix(1600);check(std::any_of(output.begin(),output.end(),[](auto value){return value!=0;}),"original floor sound silent");}check(effects.played.back()=="MULTSPQ1/0000/2/0004","floor sound route mismatch");effects.load_room_sounds(0,1);effects.mix(800*3); /* the replaced TQ bank cancels its entries at the next ATick, reported two frames later */check(!effects.active(4)&&effects.play_room_sound(2,2,5)&&effects.played.back()=="MULTSPQ1/0001/2/0002","room sound reload incorrect");check(!effects.play_room_sound(15,0),"missing bank fabricated");check(!effects.play_room_sound(2,100)&&!effects.unavailable.empty(),"a program above the TSNDDRV table must be dropped and reported");}
 
     // ps2_McSaveFile.c:577/CallSystemSeBasic: typing uses MIDI bank 2 lists 66..68, not COMMON SE, on MidiHandle[2]
     // (first sdMidiPlay rotates port 2 -> 8, host voice 28).
@@ -392,13 +419,15 @@ int main(int argc,char** argv){try{
         check(std::any_of(pcm.begin(),pcm.end(),[](auto sample){return sample!=0;}),"typewriter MIDI PCM is silent");
         check(typing.sequence_unavailable.empty(),"typewriter MIDI list unavailable");}}
 
-    if(argc>1){AudioMixer enemies(std::filesystem::u8path(argv[1]));enemies.load_room_sounds(0,2);for(unsigned slot=0;slot<6;++slot)check(enemies.enemy_sound(slot,0)&&enemies.active(18+slot),"original enemy bank or independent slot missing");check(enemies.played.back()=="MULTSPQ1/0002/3/0000","enemy bank/list selection incorrect");enemies.stop_enemy_sound(2);for(unsigned slot=0;slot<6;++slot)check(enemies.active(18+slot)==(slot!=2),"enemy sound stop steals another voice");const auto samples=enemies.mix(100);check(std::any_of(samples.begin(),samples.end(),[](auto n){return n!=0;}),"enemy PCM silent");enemies.load_room_sounds(0,0);check(!enemies.active(18),"enemy voice survives room reload");reject([&]{enemies.enemy_sound(6,0);});}
+    if(argc>1){AudioMixer enemies(std::filesystem::u8path(argv[1]));enemies.load_room_sounds(0,2);for(unsigned slot=0;slot<6;++slot)check(enemies.enemy_sound(slot,0)&&enemies.active(18+slot),"original enemy bank or independent slot missing");check(enemies.played.back()=="MULTSPQ1/0002/3/0000","enemy bank/list selection incorrect");enemies.mix(800);enemies.stop_enemy_sound(2);enemies.mix(800*3);for(unsigned slot=0;slot<6;++slot)check(enemies.active(18+slot)==(slot!=2),"enemy sound stop steals another voice");const auto samples=enemies.mix(100);check(std::any_of(samples.begin(),samples.end(),[](auto n){return n!=0;}),"enemy PCM silent");/* The original leaves a room through Com_ExecRoomFadeOut: RequestSoundFade(2, 0xA3, 400) fades the enemy voices (attribute 2) over 60 VSyncs and StopSe ends them at -127; the bank load itself stops nothing on the EE. */enemies.room_fade_out();enemies.mix(800*64);check(!enemies.active(18),"Com_ExecRoomFadeOut must fade and stop the enemy voices");enemies.load_room_sounds(0,0);reject([&]{enemies.enemy_sound(6,0);});}
     // RM_9340 bank 3 programs 60..67 carry no split. The mdlver-38 zombie (ene01_typ_tbl type 18,
     // add_seno 40) requests list 63 there: an original silent voice, not an unavailable sound.
     if(argc>1){AudioMixer silent(std::filesystem::u8path(argv[1]));silent.set_disc(1);silent.load_room_sounds(9,34);
         silent.request_enemy_se(3,{},0x0101131c);silent.exec_enemy_se();check(silent.active(18),"RM_9340 zombie voice 28 missing");
         silent.request_enemy_se(1,{},0x0101133f);silent.exec_enemy_se();check(silent.unavailable.empty(),"split-less enemy program reported unavailable");
-        check(silent.played.back()=="MULTSPQ2/0083/3/0063"&&!silent.active(19),"split-less enemy program not served silently");}
+        // TSNDDRV keys the TQ entry (its table is built from split 0's Sset index whatever the split count), MODHSYN
+        // starts no voice: the EE sees the slot busy, nothing sounds on it.
+        silent.mix(800*2);check(silent.played.back()=="MULTSPQ2/0083/3/0063"&&silent.sequence_levels(19).empty()&&silent.unavailable.empty(),"split-less enemy program not served silently");}
     // RM_9370 (MULTSPQ2 pack 9370) MIDI bank 2, the sequences of event 11's bhEasySESet type 7 (CallNativeEventSe):
     // MODHSYN.IRX program change (.text 0x75c) keeps no program for an empty table entry (0xffffffff: programs
     // 23/24/27..30) or a number above the last index (39), note-on (0x5f90) then starts no voice; the split loop
@@ -429,13 +458,13 @@ int main(int argc,char** argv){try{
         // including a room load before the closing sample is first mixed.
         for(unsigned bank:{2u,7u}){unsigned pack=0;while(pack<index.size()/2&&ids.u16(pack*2)!=(0x8000|bank))++pack;check(pack<index.size()/2,"original door SPQ not found");const auto bytes=read_asset_file(root/"archives/MULTSPQ1"/(asset_number(pack)+".bin"),32*1024*1024);BinaryView spq(bytes);std::vector<std::uint8_t> programs;
             for(unsigned i=0;i<16&&spq.u32(i*16);++i)if(spq.u32(i*16+8)==1&&spq.u32(i*16+12)==1){const auto offset=spq.u32(i*16),size=spq.u32(i*16+4);spq.require(offset,size);programs={bytes.begin()+offset,bytes.begin()+offset+size};break;}
-            for(unsigned list=0;list<(bank==2?2u:3u);++list){AudioMixer door(root),reference;door.load_door_sounds(bank);check(door.play_door_sound(list),"COMMON door sequence unresolved");auto clip=std::make_shared<PcmClip>(decode_system_sound(programs,list,60));clip->volume=1;clip->pan=64;reference.play_pcm(27,clip);door.load_room_sounds(0,6);auto actual=door.mix(301);const auto lv=door.sequence_levels(door.door_voice());const auto rest=door.mix(1299);actual.insert(actual.end(),rest.begin(),rest.end());const auto pcm=reference.mix(1300); // COMMON: 6 ticks, PPQN 480, tempo 500000 => 300 output samples
-                check(lv.size()==1,"door note register level missing");
+            for(unsigned list=0;list<(bank==2?2u:3u);++list){AudioMixer door(root),reference;door.load_door_sounds(bank);check(door.play_door_sound(list),"COMMON door sequence unresolved");auto clip=std::make_shared<PcmClip>(decode_system_sound(programs,list,60));clip->volume=1;clip->pan=64;reference.play_pcm(27,clip);door.load_room_sounds(0,6);const std::size_t note_at=midi_tick0+200;auto actual=door.mix(note_at+1);const auto lv=door.sequence_levels(door.door_voice());const auto rest=door.mix(1600-1);actual.insert(actual.end(),rest.begin(),rest.end());const auto pcm=reference.mix(1600);const auto ref_lv=reference.sequence_levels(27); // COMMON: NoteOn tick 6 -> the ATick of frame 1200 (ticks 5..8)
+                check(lv.size()==1&&ref_lv.size()==1,"door note register level missing");
                 // MODHSYN: velocity 120/110 enters the note level, (bank * velocity) >> 14 (0x38c8); the decoded split is centred.
                 const auto bank_volume=decode_system_sound(programs,list,60).sony_volume;const auto want=sony_voice_levels(bank_volume,list==1?110:120,sony_controller_scale(sony_midi_cc7(127,127)),128,64,64);
                 check(lv[0].left==want.left&&lv[0].right==want.right,(std::string("door register level ")+std::to_string(lv[0].left)+" != "+std::to_string(want.left)).c_str());
-                check(std::all_of(actual.begin(),actual.begin()+600,[](auto value){return value==0;}),"door note before its tick");
-                check(std::any_of(actual.begin(),actual.end(),[](auto value){return value!=0;}),"door PCM silent after destination load");check(scaled_like(actual,600,pcm,lv[0]),"door key/velocity/program/pan/timing differs from COMMON SQ");}
+                check(std::all_of(actual.begin(),actual.begin()+note_at*2,[](auto value){return value==0;}),"door note before its tick");
+                check(std::any_of(actual.begin(),actual.end(),[](auto value){return value!=0;}),"door PCM silent after destination load");check(scaled_like(actual,note_at*2,pcm,200*2,lv[0],ref_lv[0]),"door key/velocity/program/pan/timing differs from COMMON SQ");}
         }
         // sdMidiPlay rotates MidiHandle[2] to the next port before it plays, so the closing voice
         // is the port the handle names afterwards; Com_ExecRoomFadeIn fades that port over 250.
@@ -444,7 +473,7 @@ int main(int argc,char** argv){try{
     if(argc>1){AudioMixer detector(std::filesystem::u8path(argv[1]));detector.load_room_sounds(0,9);detector.custom_midi_slots(1,4);
         check(detector.event_sound(4,0x202),"original detector SQ missing");
         for(unsigned cycle=0;cycle<5;++cycle){const auto pcm=detector.mix(60000);check(detector.active(8)&&std::any_of(pcm.begin(),pcm.end(),[](auto sample){return sample!=0;}),"Sony NRPN alarm loop stopped or remained silent");}
-        check(detector.stop_event_sound(4)&&!detector.active(8),"script alarm stop ignored");detector.mix(64);check(detector.spu_voices(0)+detector.spu_voices(1)==0,"stopped alarm still sounds"); /* CC 120 release; the HALL tail may still ring */
+        check(detector.stop_event_sound(4),"script alarm stop ignored");detector.mix(2400);check(!detector.active(8)&&!detector.iop().sequence_playing(3),"SdrBgmStop must stop MODMIDI port 3 and free the EE slot");
         detector.custom_midi_slots(3,2);const auto count=detector.played.size();check(detector.event_sound(4,0x202)&&detector.played.size()==count,"CustomMidiSlotDef event limit ignored");
         detector.custom_midi_slots(4,5);check(detector.event_sound(4,0x202)&&detector.active(8),"invalid custom slots did not restore original defaults");
         detector.begin_room_init();detector.custom_midi_slots(3,2);detector.stop_event_sound(2);check(detector.active(8),"stopping a different event slot stole alarm voice");

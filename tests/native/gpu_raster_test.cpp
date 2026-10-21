@@ -52,10 +52,57 @@ static Scene synthetic(){
     SceneTriangle edge;edge.vertices={vertex(-30,-4,0.5f),vertex(40,5,30),vertex(-8,30,12)};edge.color=0xff3070f0;edge.world_lit=true;edge.camera_mask=false;scene.triangles.push_back(edge);
     return scene;
 }
+// Kleine Bilder fuer Kanten, koplanare unabhaengige Auftraege, Texturrevisionen, Zielgroessenwechsel und SSAA 3/4.
+static void extra_parity(const std::shared_ptr<GpuRaster>& gpu,const NJS_MATRIX& identity){
+    Scene scene;scene.background=0x40102030u;
+    SceneTexture tex;tex.width=3;tex.height=5;tex.pixels.assign(15,0x804080c0u);scene.textures.push_back(tex);
+    auto quad=[&](float x0,float y0,float x1,float y1,std::uint32_t color,SceneBlend blend,bool textured){
+        SceneTriangle a,b;a.color=b.color=color;a.blend=b.blend=blend;a.blend_register=b.blend_register=0xa000000068ull;
+        a.world_lit=b.world_lit=true;a.camera_mask=b.camera_mask=false;a.textured=b.textured=textured;
+        a.vertices={vertex(x0,y0,8,-1,-2),vertex(x1,y0,8,2,-2),vertex(x0,y1,8,-1,2)};
+        b.vertices={vertex(x1,y0,8,2,-2),vertex(x1,y1,8,2,2),vertex(x0,y1,8,-1,2)};
+        scene.triangles.push_back(a);scene.triangles.push_back(b);};
+    quad(-4,-4,4,4,0xff8090a0u,SceneBlend::Opaque,false);
+    quad(-3,-3,3,3,0x90603020u,SceneBlend::Ninja,false);
+    quad(-2,-2,2,2,0xb0a0b0c0u,SceneBlend::Ninja,true);
+    // Unabhaengige deckungsgleiche Flaechen muessen beide zeichnen, die gemeinsame Kante eines Quads nur einmal.
+    quad(-1,-1,1,1,0x80302010u,SceneBlend::Additive,false);
+    quad(-1,-1,1,1,0x80302010u,SceneBlend::Additive,false);
+    // Alpha 0 verwirft, auch wenn die Flaeche die naechste verdecken koennte.
+    quad(-4,-4,4,4,0x00112233u,SceneBlend::Opaque,false);
+    for(int ss:{1,2,3,4})for(int mutation=0;mutation<2;++mutation){
+        const int width=ss==3?71:64,height=ss==4?47:64;
+        SoftwareRenderer software(width,height),hardware(width,height);
+        for(auto* r:{&software,&hardware}){r->set_supersampling(ss);r->set_texture_filtering(false);}
+        hardware.set_gpu(gpu);
+        const auto submits=gpu->timings().submits;
+        software.draw_view(scene,identity,32,32,false,{},1,100);hardware.draw_view(scene,identity,32,32,false,{},1,100);
+        check(hardware.gpu()==gpu&&hardware.last_gpu_frame()&&gpu->timings().submits>submits,"extra GPU frame fell back: "+hardware.gpu_error());
+        same(software,hardware,"edge/NPOT/mutation ss "+std::to_string(ss));
+        scene.textures[0].pixels[7]=mutation?0x01010203u:0xffe04090u;
+    }
+    // Dieselben Scene-Texturen duerfen nach einem Instanzwechsel keinen fremden GPU-Handle liefern.
+    std::string reason;auto other=create_opengl_raster(reason,true);
+    if(other){
+        for(const auto& backend:{gpu,other,gpu}){
+            SoftwareRenderer software(64,64),hardware(64,64);
+            for(auto* r:{&software,&hardware}){r->set_supersampling(1);r->set_texture_filtering(false);}
+            hardware.set_gpu(backend);software.draw_view(scene,identity,32,32,false,{},1,100);hardware.draw_view(scene,identity,32,32,false,{},1,100);
+            check(hardware.last_gpu_frame()&&hardware.gpu()==backend,"context/API switch fell back: "+hardware.gpu_error());same(software,hardware,"context/API switch");}
+    }else check(reason.find("shader:")==std::string::npos&&reason.find("program:")==std::string::npos&&reason.find("OpenGL error")==std::string::npos&&reason.find("framebuffer incomplete")==std::string::npos,"second GL context failed: "+reason);
+    // Eine leere Setup-Liste ist ein gueltiges GPU-Bild (Hintergrund/Nulltiefe, S=1 behaelt Alpha).
+    Scene empty;empty.background=0x12345678u;
+    SoftwareRenderer software(32,24),hardware(32,24);for(auto* r:{&software,&hardware})r->set_supersampling(1);
+    hardware.set_gpu(gpu);software.draw_view(empty,identity,16,12);hardware.draw_view(empty,identity,16,12);
+    check(hardware.last_gpu_frame()&&hardware.gpu()==gpu,"empty GPU frame fell back");same(software,hardware,"empty frame");
+}
 int main(int argc,char** argv){try{
     _Make_SinTable();
-    std::string reason;const auto gpu=create_gpu_raster(reason);
-    if(!gpu){std::cout<<"SKIP: "<<reason<<'\n';return 77;}
+    std::string backend="gpu",data;bool force_copy=false;
+    for(int i=1;i<argc;++i){const std::string arg=argv[i];if(arg=="--backend"&&i+1<argc)backend=argv[++i];else if(arg=="--force-copy")force_copy=true;else if(data.empty())data=arg;else throw std::runtime_error("unexpected argument: "+arg);}
+    check(backend=="gpu"||backend=="opengl","backend must be gpu or opengl");
+    std::string reason;const auto gpu=backend=="opengl"?create_opengl_raster(reason,force_copy):create_gpu_raster(reason);
+    if(!gpu){check(reason.find("shader:")==std::string::npos&&reason.find("program:")==std::string::npos&&reason.find("OpenGL error")==std::string::npos&&reason.find("framebuffer incomplete")==std::string::npos,"GPU initialisation failed: "+reason);std::cout<<"SKIP: "<<reason<<'\n';return 77;}
     NJS_MATRIX identity;njUnitMatrix(&identity);
     const auto scene=synthetic();
     for(int ss:{1,2})for(bool wireframe:{false,true}){
@@ -64,13 +111,16 @@ int main(int argc,char** argv){try{
         hardware.set_gpu(gpu);
         software.draw_view(scene,identity,400,400,wireframe,{},0.6f,40.f);hardware.draw_view(scene,identity,400,400,wireframe,{},0.6f,40.f);
         check(software.covered_pixels()>50000,"synthetic scene covers too little");
+        if(!wireframe)check(hardware.gpu()==gpu&&hardware.last_gpu_frame()&&gpu->timings().submits>0,"synthetic GPU frame fell back: "+hardware.gpu_error());
+        else check(!hardware.last_gpu_frame(),"wireframe must use the explicit software path");
         same(software,hardware,"synthetic ss "+std::to_string(ss)+(wireframe?" wireframe":""));}
+    extra_parity(gpu,identity);
     for(const auto& message:gpu->unsupported())check(false,"GPU frame fell back: "+message);
-    if(argc>1){
+    if(!data.empty()){
         // Phasengrenze game.c:318: ein untexturierter Empfaenger vor den Schattenmasken und eine
         // untexturierte Spieler-/Gegnerflaeche danach teilen Textur und Sampler; die GPU darf sie
         // nicht in einen Zeichenaufruf vor den Masken legen (Spieler wuerde verschattet).
-        const auto bytes=read_asset_file(std::filesystem::path(argv[1])/"archives/SYSTEM/0001.bin",16*1024*1024);
+        const auto bytes=read_asset_file(std::filesystem::path(data)/"archives/SYSTEM/0001.bin",16*1024*1024);
         const auto models=decode_shadow_geometry(bytes);check(!models.empty(),"original shadow model missing");
         Scene phase;phase.background=0xff000000u;
         auto tri=[&](float z,std::uint32_t color,bool after){SceneTriangle t;t.color=color;t.world_lit=true;t.camera_mask=false;t.after_modifiers=after;
@@ -81,12 +131,30 @@ int main(int argc,char** argv){try{
         for(auto* r:{&software,&hardware}){r->set_supersampling(1);r->set_texture_filtering(false);}
         hardware.set_gpu(gpu);software.draw_view(phase,identity,32,32,false,{},1,100);hardware.draw_view(phase,identity,32,32,false,{},1,100);
         check(software.pixels()[32*64+32]==0xff4060a0u,"after_modifiers surface must stay unshadowed in the band stage");
+        check(hardware.gpu()==gpu&&hardware.last_gpu_frame(),"shadow phase fell back: "+hardware.gpu_error());
         same(software,hardware,"shadow phase boundary");
-        RoomArchive rooms(argv[1]);
+        // Beide Modifierphasen, saturierende Mehrfachmasken und getrennter transportierter Tiefenstand.
+        for(int samples:{1,2,3,4})for(int kind=0;kind<3;++kind){
+            Scene shadows;shadows.background=0x40203040u;shadows.mirror_enabled=true;
+            shadows.mirror_matrix={-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+            auto receiver=phase.triangles[0];shadows.triangles.push_back(receiver);
+            if(kind==0){for(int i=0;i<10;++i)shadows.shadows.push_back(shadow);}
+            else if(kind==1){auto mirror=shadow;mirror.mirror=true;mirror.transform[0]=-4;shadows.shadows.push_back(mirror);
+                auto room=receiver;room.mirror=2;room.after_modifiers=true;room.color=0xff606060u;for(auto& v:room.vertices)v.position.z=9.9f;shadows.triangles.push_back(room);}
+            else{auto alpha=receiver;alpha.color=0x80ffffffu;alpha.blend=SceneBlend::Alpha;alpha.general_purpose_water=true;for(auto& v:alpha.vertices)v.position.z=9.5f;shadows.triangles.push_back(alpha);
+                auto zero=receiver;zero.color=0x00ffffffu;for(auto& v:zero.vertices)v.position.z=5;shadows.triangles.push_back(zero);shadows.shadows.push_back(shadow);}
+            SoftwareRenderer sw(64,64),hw(64,64);for(auto* r:{&sw,&hw}){r->set_supersampling(samples);r->set_texture_filtering(false);}
+            hw.set_gpu(gpu);const unsigned submits=gpu->timings().submits;
+            sw.draw_view(shadows,identity,32,32,false,{},1,100);hw.draw_view(shadows,identity,32,32,false,{},1,100);
+            check(hw.last_gpu_frame()&&hw.gpu()==gpu&&gpu->timings().submits>submits,"modifier GPU fallback: "+hw.gpu_error());
+            same(sw,hw,"modifier kind "+std::to_string(kind)+" ss "+std::to_string(samples));
+        }
+        RoomArchive rooms(data);
         for(const char* name:{"RM_0020.RDX","RM_1090.RDX"}){const auto room=decode_scene(rooms.load(name,64*1024*1024));
             for(int ss:{1,2}){SoftwareRenderer software(640,480),hardware(640,480);
                 for(auto* r:{&software,&hardware}){r->set_supersampling(ss);r->set_texture_filtering(false);}
                 hardware.set_gpu(gpu);software.draw(room,room.cameras[0]);hardware.draw(room,room.cameras[0]);
+                check(hardware.gpu()==gpu&&hardware.last_gpu_frame(),std::string(name)+" fell back: "+hardware.gpu_error());
                 same(software,hardware,std::string(name)+" ss "+std::to_string(ss));}}}
     std::cout<<gpu->name()<<": point-sampled GPU raster is bit-identical to the band stage\n";return 0;
 }catch(const std::exception& e){std::cerr<<"GPU raster test failed: "<<e.what()<<'\n';return 1;}}

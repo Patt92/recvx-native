@@ -174,7 +174,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                     // the self-destruct blasts walk past (gm_flg 0x400).
                     g.md1=10;
                     fade(0u,30.f); // gameover.c:262
-                    for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,30);
+                    audio.request_all_stop_sound(true,true,30); // gameover.c:264 RequestAllStopSoundEx(1, 1, 30)
                     set_back_color(0); // gameover.c:266
                     events.flags[6][0]=0x6C;events.flags[11][0]&=~0x100100u;
                     events.flags[10][0]|=0x40000000u;
@@ -188,7 +188,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                 }
                 ++g.md1;
                 fade(0u,30.f); // gameover.c:330
-                for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,60);
+                audio.request_all_stop_sound(true,true,60); // gameover.c:332 RequestAllStopSoundEx(1, 1, 60)
                 set_back_color(0); // gameover.c:334
                 events.flags[6][0]=0x20;
                 events.flags[11][0]&=~0x100100u;
@@ -206,7 +206,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
             ++g.ct;
             if(g.ct>120&&!(events.flags[10][0]&0x2u)){ // gameover.c:422 !(sys->cb_flg & 0x2)
                 fade(0xFF000000u,30.f); // gameover.c:424
-                for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,30);
+                audio.request_all_stop_sound(true,true,30); // gameover.c:426 RequestAllStopSoundEx(1, 1, 30)
             } else if(g.ct>170)g.md0=3;
             break;
         case 2:
@@ -218,7 +218,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
                 if(pressed&0x800u){
                     if(g.cont_x==0){
                         fade(0xFF000000u,10.f); // gameover.c:485
-                        for(unsigned slot=0;slot<audio_voice_count;++slot)audio.stop(slot,10);
+                        audio.request_all_stop_sound(true,true,10); // gameover.c:487 RequestAllStopSoundEx(1, 1, 10)
                         g.md1=3;audio.play_system(3);
                     } else {
                         g.md1=1;

@@ -50,9 +50,11 @@ public:
     struct Status {std::array<std::uint16_t,tq_ports> se{};std::uint16_t midi=0;};
     const Status& status()const{return status_;}
     // Diagnostic note on MODHSYN port 15 channel `channel` with an explicit clip (synthetic test clips, not a game path).
-    void diagnostic_note(unsigned channel,std::shared_ptr<const PcmClip> clip,unsigned velocity=127);
-    void diagnostic_stop(unsigned channel); // CC 120 on that channel
-    bool diagnostic_busy(unsigned channel)const;
+    // Synthetic SE table entry (tests): program `program` of TQ bank `bank` plays `clip` through the normal TQ/MODHSYN path.
+    void load_se_clip(unsigned bank,unsigned program,std::shared_ptr<const PcmClip> clip);
+    void diagnostic_note(unsigned port,unsigned channel,std::shared_ptr<const PcmClip> clip,unsigned velocity=127);
+    void diagnostic_stop(unsigned port,unsigned channel); // CC 120 on that channel
+    bool diagnostic_busy(unsigned port,unsigned channel)const;
     std::function<void(unsigned core_mask,unsigned mode,int depth)> on_rev;
     std::vector<std::string> unavailable;
     // --- diagnostics ---
@@ -68,7 +70,7 @@ public:
     bool sequence_playing(unsigned port)const{return seq_.at(port).playing;}
     std::uint32_t sequence_tick(unsigned port)const{return seq_.at(port).tick;}
     unsigned tq_timer(unsigned port,unsigned channel)const{return tq_.at(port).entry.at(channel).timer;}
-    struct SeInfo {std::uint32_t offset=0,length=0xffff;std::uint16_t rate=0;std::uint8_t attr=0,note=0;};
+    struct SeInfo {std::uint32_t offset=0,length=0xffff;std::uint16_t rate=0;std::uint8_t attr=0,note=0;std::shared_ptr<const PcmClip> clip;}; // clip: synthetic test entry
     const std::vector<SeInfo>& se_table(unsigned port)const{return tq_.at(port).table;}
     bool rpc_waiting()const{return wait_>0;}
 private:

@@ -42,7 +42,10 @@ with a shared pipeline feeding the available backend:
   still in progress.
 - **Software** — a CPU renderer that remains available as a fallback and a
   reference for validating GPU output.
-- **OpenGL — planned** — a GPU backend for the Linux port.
+- **OpenGL** — the Linux GPU default, optionally selectable on macOS and Windows.
+  Requires OpenGL 4.1 Core and an available display; uses ordered copies (or
+  texture barriers when supported), not fixed-function blending. Driver-specific
+  parity and performance still require validation; unavailable GPUs fall back to software.
 
 The goal is to retain the game's distinctive presentation while offering native
 GPU acceleration, higher-resolution output and optional texture filtering and
@@ -100,7 +103,7 @@ brought up separately from the shared gameplay code.
 | **Mac / Apple Silicon** | Current development platform with Metal and software rendering; standalone Mac builds are part of the release plan. |
 | **Windows x64** | Build support and an experimental Direct3D 11 backend are present; validated Windows releases are planned. |
 | **Windows ARM64** | Cross-build option in the build tool, with SDL2 compiled from the pinned source; hardware validation is still pending. |
-| **Linux** | Planned port with an OpenGL backend. |
+| **Linux** | Native build with OpenGL selected by default; Linux driver/hardware validation remains open. |
 | **iOS/iPadOS** | Planned native builds using Metal. |
 | **Apple TV** | Planned native build using Metal. |
 
@@ -225,7 +228,8 @@ With prepared data:
 ./build.sh --package
 ```
 
-Launch through `Start.command`. macOS builds use Metal or software rendering.
+Launch through `Start.command`. macOS defaults to Metal; OpenGL is optional
+(`--renderer opengl`), and software remains available (`--renderer software`).
 
 ### Linux
 
@@ -235,7 +239,8 @@ Install:
   **CMake 3.16+**.
 - **pkg-config** and development packages for SDL2's host backends: **X11
   and/or Wayland** for windowing, and **ALSA and/or PulseAudio** for audio.
-  The build downloads SDL2 itself.
+  The build downloads SDL2 itself. GPU rendering additionally needs an OpenGL
+  4.1-capable driver (for example Mesa) and SDL's OpenGL build dependencies.
 - **FFmpeg**, including `ffprobe`, on `PATH` when using `--iso`.
 - **Ninja** for Windows cross-builds; Zig is downloaded automatically.
 
@@ -258,7 +263,11 @@ With prepared data:
 ./build.sh
 ```
 
-Linux currently uses the software renderer; the OpenGL backend is planned.
+Linux selects OpenGL by default (`renderer = gpu`); OpenGL 4.1 Core and a display
+are required. A missing context falls back to software with a diagnostic. The
+backend can be left out with `./build.sh --opengl off`, or explicitly selected on
+any desktop platform with `--renderer opengl`. Linux driver parity/performance
+still need hardware validation.
 Linux packaging is not yet supported, so do not pass `--package`. Run the built
 runtime with the prepared data:
 

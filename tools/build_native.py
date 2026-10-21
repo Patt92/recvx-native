@@ -230,7 +230,7 @@ def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: in
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--platform', choices=['host', 'macos', 'windows', 'windows-arm64'], default='host')
+    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64'], default='host')
     parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8))
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
@@ -239,6 +239,8 @@ def main():
     parser.add_argument('--output', type=Path, help='New package directory; refuses overwrites')
     parser.add_argument('--verify-data', action='store_true')
     parser.add_argument('--test', action='store_true', help='Build test targets and run CTest')
+    parser.add_argument('--test-regex', help='Build test targets and run only matching CTest names')
+    parser.add_argument('--opengl', choices=['on', 'off'], default='on', help='Build optional OpenGL backend (default: on)')
     parser.add_argument('--verify-runtime', action='store_true', help='Run the opt-in original-data runtime regression suite')
     parser.add_argument('--no-test', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -251,7 +253,7 @@ def main():
     if not target:
         parser.error('unsupported host')
     data = args.data.resolve()
-    if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.verify_runtime):
+    if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.test_regex or args.verify_runtime):
         parser.error('Windows cross-builds cannot run tests; use --platform windows or windows-arm64 without test options, then test on Windows or Wine')
     cmake = find_cmake()
     if cmake is None:
@@ -259,18 +261,20 @@ def main():
                      'Installer the CMake tools component; on some installs it is only listed under the Linux/Mac '
                      'development workload) and open a new terminal; verify with "cmake --version" before building.')
     print(f'Target {target}, CMake {cmake}', flush=True)
-    run_checks = args.test and not args.no_test
+    run_checks = (args.test or bool(args.test_regex)) and not args.no_test
     if is_windows_target(target) and platform.system() != 'Windows':
         # The final binary audit also invokes Zig; use the same project cache.
         os.environ['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build/toolchains/zig-cache')
-        run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs)
+        run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs, '--opengl', args.opengl)
         build = cross_build_directory(target)
         print(f'Cross-built Windows {WINDOWS_TARGETS[target]}.', flush=True)
     else:
         if target == 'macos' and platform.system() != 'Darwin':
             parser.error('macOS builds require a macOS host')
+        if target == 'linux' and platform.system() != 'Linux':
+            parser.error('Linux builds require a Linux host')
         build = native_build_directory(target)
-        configure = [cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}']
+        configure = [cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}', f'-DRECVX_ENABLE_OPENGL={args.opengl.upper()}']
         if target == 'macos':
             configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
         if is_windows_target(target):
@@ -284,7 +288,10 @@ def main():
     if args.verify_runtime and not (data / 'native-data.version').is_file():
         parser.error(f'--verify-runtime requires a prepared native data tree (missing {data / "native-data.version"})')
     if run_checks:
-        run(str(Path(cmake).with_name('ctest' + Path(cmake).suffix)), '--test-dir', build, '-C', 'Release', '--output-on-failure')
+        test_command = [str(Path(cmake).with_name('ctest' + Path(cmake).suffix)), '--test-dir', build, '-C', 'Release', '--output-on-failure']
+        if args.test_regex:
+            test_command += ['-R', args.test_regex, '--no-tests=error']
+        run(*test_command)
     run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT,
         '--build-dir', build, '--binary', binary_dir / ('recvx-runtime' + suffix))
     if args.verify_data:

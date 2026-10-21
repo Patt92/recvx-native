@@ -212,13 +212,46 @@ def check_native(root):
     return problems
 
 
+def check_visual_studio_build(directory):
+    """Compile-Audit des Visual-Studio-Generators aus seinen .vcxproj.
+
+    Der Visual-Studio-Generator erzeugt keine compile_commands.json (CMake
+    unterstuetzt das nur fuer Makefile- und Ninja-Generatoren). Die
+    ClCompile-Eintraege der erzeugten Projektdateien sind die vollstaendige
+    Uebersetzungseinheitenliste desselben Generators, Projekt- und
+    Linkverweise stehen im selben Dokument. Ohne Projektdateien bleibt der
+    Pruefer fail-closed.
+    """
+    problems = []
+    projects = sorted(path for path in directory.rglob("*.vcxproj") if path.is_file())
+    if not projects:
+        return [f"{directory}: no compile_commands.json and no Visual Studio project;"
+                " transitive compile audit unavailable"]
+    for project in projects:
+        label = project.relative_to(directory)
+        if forbidden_path(str(project.resolve()).replace("\\", "/")):
+            problems.append(f"{label}: forbidden project symlink")
+            continue
+        code = project.read_text(errors="replace")
+        for value in re.findall(r'Include="([^"]+)"', code):
+            if forbidden_path(value.replace("\\", "/")):
+                problems.append(f"{label}: forbidden project input: {value}")
+        for value in re.findall(r'<ClCompile\b[^>]*\sInclude="([^"]+)"', code):
+            normalized = value.replace("\\", "/")
+            if "generated/enemy/" in normalized or "generated/status/" in normalized:
+                problems.append(f"{label}: compiled original module set: {value}")
+        if RETIRED_TARGET.search(code) or QUARANTINE in code:
+            problems.append(f"{label}: forbidden transitive link input")
+    return problems
+
+
 def check_build(directory):
     if QUARANTINE in str(directory.resolve()):
         return ["refusing to inspect a quarantined build directory"]
     problems = []
     database = directory / "compile_commands.json"
     if not database.is_file():
-        problems.append(f"{directory}: compile_commands.json missing; transitive compile audit unavailable")
+        problems.extend(check_visual_studio_build(directory))
     else:
         if forbidden_path(database.resolve()):
             return ["compilation database points to forbidden content"]

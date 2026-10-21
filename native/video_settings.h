@@ -10,9 +10,9 @@ namespace recvx {
 //   Hoch:     filtering + 2x2 supersampling (default)
 //   Ultra:    filtering + 3x3 supersampling
 enum class RenderQuality {Original,Low,High,Ultra};
-// renderer: Host-Rasterer der Bandstufe. gpu = Plattform-Backend (gpu_raster.h, Metal auf macOS),
-// sonst Software; dasselbe Bild bis auf Grenzpixel, die CPU zeichnet nicht mehr jedes Pixel.
-enum class RenderBackend {Gpu,Software};
+// Host-Rasterer: gpu = Plattformstandard (Metal / D3D11 / OpenGL), opengl = ausdruecklich GL 4.1.
+// Software bleibt Referenz und Fehlerpfad; Qualitaet und Backendwahl sind unabhaengig.
+enum class RenderBackend {Gpu,Software,OpenGL};
 struct VideoSettings {
     RenderQuality quality=RenderQuality::High;
     RenderBackend renderer=RenderBackend::Gpu;

@@ -44,7 +44,9 @@ struct TextureFilterCache {
     std::vector<std::vector<std::uint32_t>> punch_mips; // RGB ohne Alpha-Gewichtung (ohne ABE)
     // Host-GPU-Kopien dieses Texturstands je Darstellungsart (gpu_raster.h), geprueft mit demselben
     // Fingerabdruck wie die Mips. Lebensdauer = dieser Cache: ein neuer Texturstand gibt sie frei.
-    std::array<std::shared_ptr<void>,5> gpu{};std::array<std::uint64_t,5> gpu_fingerprint{};
+    // Eindeutiger Instanzschluessel (GpuRaster::cache_owner), kein API-uebergreifendes Umdeuten eines
+    // Slots und kein Wiederverwenden nach Kontext-/Geraetewechsel, auch bei gleicher Objektadresse.
+    std::array<std::shared_ptr<void>,5> gpu{};std::array<std::uint64_t,5> gpu_fingerprint{};std::array<std::shared_ptr<const void>,5> gpu_owner{};
 };
 struct SceneTexture {
     unsigned width=0,height=0;

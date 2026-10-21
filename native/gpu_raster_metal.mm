@@ -312,7 +312,7 @@ private:
     }
     id<MTLTexture> texture(const SceneTexture& t,Variant variant){
         auto& cache=*t.filter_cache;const auto fingerprint=t.fingerprint();auto& slot=cache.gpu[variant];
-        if(slot&&cache.gpu_fingerprint[variant]==fingerprint)return (__bridge id<MTLTexture>)slot.get();
+        if(slot&&cache.gpu_owner[variant]==cache_owner()&&cache.gpu_fingerprint[variant]==fingerprint)return (__bridge id<MTLTexture>)slot.get();
         const auto upload_begin=std::chrono::steady_clock::now();++timings_.uploads;
         const std::size_t levels=variant==Point?1:1+(variant==Punch?cache.punch_mips.size():cache.mips.size());
         MTLTextureDescriptor* d=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:variant==Premultiplied?MTLPixelFormatRGBA16Unorm:MTLPixelFormatBGRA8Unorm width:t.width height:t.height mipmapped:levels>1];
@@ -328,7 +328,7 @@ private:
                 [tex replaceRegion:MTLRegionMake2D(0,0,w,h) mipmapLevel:level withBytes:wide.data() bytesPerRow:w*8];}
             else [tex replaceRegion:MTLRegionMake2D(0,0,w,h) mipmapLevel:level withBytes:src bytesPerRow:w*4];
             w=std::max(1u,w/2);h=std::max(1u,h/2);}
-        slot=std::shared_ptr<void>((__bridge_retained void*)tex,[](void* p){CFRelease(p);});cache.gpu_fingerprint[variant]=fingerprint;
+        slot=std::shared_ptr<void>((__bridge_retained void*)tex,[](void* p){CFRelease(p);});cache.gpu_fingerprint[variant]=fingerprint;cache.gpu_owner[variant]=cache_owner();
         timings_.upload+=std::chrono::duration<double>(std::chrono::steady_clock::now()-upload_begin).count();
         return tex;
     }

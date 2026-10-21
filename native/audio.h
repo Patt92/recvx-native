@@ -189,7 +189,8 @@ private:
     struct MidiWork {std::uint8_t vol=127,pan=64,req=255;std::uint16_t pitch=8192;unsigned port=0,bank=0,list=0;bool background=false,door=false;};
     std::array<MidiWork,8> midis_{};
     IopSound::Status ee_status_{}; // get_iop_snddata: the IOP's last SdrSetIopData block plus the EE's own marks
-    std::array<bool,audio_voice_count> diagnostic_{}; // host voices playing a synthetic SPU clip (play_pcm diagnostics)
+    std::array<bool,audio_voice_count> diagnostic_{}; // MIDI host voices playing a synthetic SPU clip (play_pcm diagnostics)
+    unsigned diagnostic_program_=126;             // synthetic SE entries count down from 126 in TQ bank 4 (127 = ListNo -1)
     static int se_slot_of(unsigned voice);
     int midi_handle_of(unsigned voice)const;
     static int host_port(unsigned voice);       // TSNDDRV BGM port of a MIDI host voice

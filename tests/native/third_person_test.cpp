@@ -86,6 +86,8 @@ int main(){try{
     const auto quality_before=video.settings().quality;
     video.set_renderer(RenderBackend::Software);check(VideoSettings::read(video_path).renderer==RenderBackend::Software&&video.settings().renderer==RenderBackend::Software,"renderer switch not persisted");
     video.set_renderer(RenderBackend::Gpu);check(VideoSettings::read(video_path).renderer==RenderBackend::Gpu&&video.settings().quality==quality_before,"renderer switch changed quality");
+    video.set_renderer(RenderBackend::OpenGL);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL&&video.settings().quality==quality_before,"OpenGL renderer roundtrip lost quality");
+    video.set_renderer(RenderBackend::Software,false);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL,"temporary renderer switch persisted");
     std::filesystem::remove(video_path);
     front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.active()&&!front.settings(),"back row moved");
     std::cout<<"Third-person camera mod: defaults, persistence, chase/aim pose, smoothing, scripted handover and menu row verified.\n";return 0;

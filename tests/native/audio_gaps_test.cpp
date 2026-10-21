@@ -47,7 +47,8 @@ int main(int argc,char** argv){try{
      m.set_3d_sound_flag(7,0,2);
      check(m.user_sound_volume(7,0,0,-127,2),"Typ 7 mit Flag 0x2 abgelehnt");
      const auto s=m.sound_state(7,true);check(s.fade==2&&s.volume_count==2&&int(s.volume)==0,"RequestMidiFadeFunctionEx(7, 0, -127, 2): VolSpeed = -((-127-0)/2) > 0 -> Func 2, FadeCntMax 2, Volume 0");
-     m.mix(800*4);check(!m.active(event_voice),"MIDI-Fade auf -127 muss die Stimme nach FadeCntMax < 0 stoppen (sdc.c:778)");}
+     // 2 Schritte, Stopp am 3. VSync (SdrBgmStop), gesendet am 4., der IOP meldet den freien Port am 5.
+     m.mix(800*5);check(!m.active(event_voice),"MIDI-Fade auf -127 muss die Stimme nach FadeCntMax < 0 stoppen (sdc.c:778)");}
     {AudioMixer m(root);m.load_room_sounds(0,2);m.set_sound_monitor({0,0,0},0,{});
      // Flag 0x4 Typ 7: SetPanMidi(DefEvt[0], 0, 0) -> Pan 0; danach pan-Fade nur ueber SetUserSoundPan (bit 4).
      m.set_3d_sound_flag(7,0,4);check(int(m.sound_state(7,true).pan)==0,"Typ 7 Flag 0x4: SetPanMidi(..,0,0)");
@@ -70,7 +71,7 @@ int main(int argc,char** argv){try{
      m.regist_object_se(2,{0,0,-10},0x0206,0);m.exec_object_se();
      {const auto s=m.sound_state(3,true);check(s.fade==2&&s.volume_count==3,"Objekt-Fade RequestMidiFadeFunctionEx(DefObj[0], 0, -127, 3) fehlt");}
      m.mix(800);m.regist_object_se(2,{0,0,-10},0x0206,0);m.exec_object_se();check(m.sound_state(3,true).volume_count==2,"Objektfade einmalig: Flag 0x8 muss nach dem Verbrauch geloescht sein (sdfunc.c:2597)");
-     m.mix(800*5);check(!m.active(8),"Objekt-MIDI-Fade auf -127 muss die Stimme stoppen");}
+     m.mix(800*6);check(!m.active(8),"Objekt-MIDI-Fade auf -127 muss die Stimme stoppen");}
     // --- Gegner-SE: VolDownTbl-Rand und 60-Hz-Fade --------------------------------------------------
     {AudioMixer m(root);m.load_room_sounds(0,2);m.set_sound_monitor({0,0,0},0,{});
      // VolDownTbl[7] = 245 (char -11): Vol 0 + VolEnemySe + (-11); Index 12 liest den Aufruferrahmen.
@@ -94,13 +95,18 @@ int main(int argc,char** argv){try{
      door.mix(800*20);check(door.active(door.door_voice()),"Tuerport waehrend des Fades verstummt zu frueh");
      check(door.play_door_sound(1)&&fresh.play_door_sound(1),"Tuerliste 1 nicht spielbar");const unsigned during=door.door_voice();
      check(int(door.sound_state(2,true).volume)<-30&&door.sound_state(2,true).fade==2,"MidiInfo[2]-Fade muss weiterlaufen und SetVolumeMidi(2, 0) ueberstimmen");
-     const auto pa=peaks(door.mix(2400)),pb=peaks(fresh.mix(2400));
-     check(pa.first>0&&pa.first<pb.first,"Tuer waehrend des Fades: Pegel des laufenden Fades statt voll ("+std::to_string(pa.first)+" / "+std::to_string(pb.first)+")");
-     door.mix(800*30);check(!door.active(during),"StopMidi(2) am Fadeende muss die waehrend des Fades gestartete Liste beenden");
+     // Register der neuen Note (BgmReq Bild 800, Note Takt 6 im ATick 1200) statt Spitzenpegel: der alte Port klingt nach
+     // SdrBgmStop (CC 123) mit dem Sample-Release aus.
+     // door: der SdrBgmStop des alten Ports haelt den TSNDDRV-Thread einen ATick auf (DelayATick), die Note kommt ein Bild spaeter.
+     auto wait_note=[](AudioMixer& m,unsigned voice){unsigned waited=0;while(m.sequence_levels(voice).empty()&&waited<4000){m.mix(200);waited+=200;}return waited;};
+     const auto wa=wait_note(door,during),wb=wait_note(fresh,fresh.door_voice());check(wb==1200&&wa==1400,"Tuernoten: frisch im ATick 1200, hinter SdrBgmStop im ATick 1400 ("+std::to_string(wa)+"/"+std::to_string(wb)+")");
+     const auto la=door.sequence_levels(during),lb=fresh.sequence_levels(fresh.door_voice());
+     check(la.size()==1&&lb.size()==1&&la[0].left>0&&la[0].left<lb[0].left,"Tuer waehrend des Fades: Pegel des laufenden Fades statt voll ("+(la.empty()?std::string("-"):std::to_string(la[0].left))+" / "+(lb.empty()?std::string("-"):std::to_string(lb[0].left))+")");
+     door.mix(800*30-1400);check(!door.active(during),"StopMidi(2) am Fadeende muss die waehrend des Fades gestartete Liste beenden");
      AudioMixer reference(root);reference.load_door_sounds(7);check(door.play_door_sound(1)&&reference.play_door_sound(1),"Tuerliste 1 nach dem Fade");
-     const auto qa=peaks(door.mix(2400)),qb=peaks(reference.mix(2400));
-     check(qa.first>1000&&qa==qb,"Tuer nach dem Fade: voller Pegel wie ein frischer Port");
-     check(qa.first==qa.second,"Tuer nach dem Fade: PanDelayTime -2 = Mitte");
+     check(wait_note(door,door.door_voice())==1200&&wait_note(reference,reference.door_voice())==1200,"Tuernoten nach dem Fade im ATick 1200");const auto qa=door.sequence_levels(door.door_voice()),qb=reference.sequence_levels(reference.door_voice());
+     check(qa.size()==1&&qb.size()==1&&qa[0].left>1000&&qa[0].left==qb[0].left&&qa[0].right==qb[0].right,"Tuer nach dem Fade: voller Pegel wie ein frischer Port");
+     check(qa[0].left==qa[0].right,"Tuer nach dem Fade: PanDelayTime -2 = Mitte");
     }
     std::cout<<"audio gaps PASS (Set3dSoundFlag 6/7/8, SetUserSoundVolume 6/7/8, Gegner-SE-Fade, VolDownTbl, CallDoorSe)\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

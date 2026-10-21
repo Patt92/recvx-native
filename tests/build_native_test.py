@@ -97,6 +97,37 @@ class BuildTargetTests(unittest.TestCase):
         self.assertEqual(build_windows.ARCHES['x64']['sdl'], 'x86_64-w64-mingw32')
 
 
+class BackendBuildTests(unittest.TestCase):
+    def test_linux_backend_and_test_filter_reach_cmake_and_ctest(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(build_native, 'ROOT', Path(root)), \
+             patch.object(sys, 'argv', ['build_native.py', '--platform', 'linux', '--opengl', 'off', '--test-regex', '^gpu_raster']), \
+             patch.object(build_native.platform, 'system', return_value='Linux'), \
+             patch.object(build_native, 'find_cmake', return_value='/usr/bin/cmake'), \
+             patch.object(build_native, 'run', side_effect=lambda *command: commands.append(tuple(map(str, command)))):
+            build_native.main()
+        configure = next(c for c in commands if '-S' in c)
+        self.assertIn('-DRECVX_ENABLE_OPENGL=OFF', configure)
+        self.assertIn('-DBUILD_TESTING=ON', configure)
+        tests = next(c for c in commands if c[0] == '/usr/bin/ctest')
+        self.assertIn('^gpu_raster', tests)
+        self.assertIn('--no-tests=error', tests)
+
+    def test_windows_crossbuild_receives_backend_option(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(build_native, 'ROOT', Path(root)), \
+             patch.object(sys, 'argv', ['build_native.py', '--platform', 'windows', '--opengl', 'off']), \
+             patch.object(build_native.platform, 'system', return_value='Linux'), \
+             patch.object(build_native, 'find_cmake', return_value='/usr/bin/cmake'), \
+             patch.dict(build_native.os.environ), \
+             patch.object(build_native, 'run', side_effect=lambda *command: commands.append(tuple(map(str, command)))):
+            build_native.main()
+        cross = next(c for c in commands if any(s.endswith('build_windows.py') for s in c))
+        self.assertEqual(cross[-2:], ('--opengl', 'off'))
+
+
 class DevelopmentAppTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='recvx build test ')

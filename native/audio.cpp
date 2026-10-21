@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 namespace recvx {
 namespace {
@@ -339,7 +341,7 @@ int AudioMixer::host_port(unsigned voice){
 }
 std::vector<SonyLevels> AudioMixer::sequence_levels(unsigned voice)const{
     std::vector<SonyLevels> out;if(voice>=slots_.size())return out;int port=-1,channel=-1;
-    if(diagnostic_[voice]){port=15;channel=int(voice&15);}
+    if(diagnostic_[voice]){port=host_port(voice);channel=0;}
     else if(const int se=se_slot_of(voice);se>=0){const auto& w=shots_[unsigned(se)];if(w.channel<0)return out;port=int(IopSound::bgm_ports+w.port);channel=w.channel;}
     else port=host_port(voice);
     if(port<0)return out;
@@ -348,7 +350,7 @@ std::vector<SonyLevels> AudioMixer::sequence_levels(unsigned voice)const{
 }
 std::shared_ptr<const PcmClip> AudioMixer::voice_clip(unsigned voice)const{
     if(voice>=slots_.size())return nullptr;if(slots_[voice].clip)return slots_[voice].clip;int port=-1,channel=-1;
-    if(diagnostic_[voice]){port=15;channel=int(voice&15);}
+    if(diagnostic_[voice]){port=host_port(voice);channel=0;}
     else if(const int se=se_slot_of(voice);se>=0){const auto& w=shots_[unsigned(se)];if(w.channel<0)return nullptr;port=int(IopSound::bgm_ports+w.port);channel=w.channel;}
     else port=host_port(voice);
     if(port<0)return nullptr;for(const auto& v:iop_.voices(port,channel))return v.clip;return nullptr;
@@ -428,7 +430,8 @@ void AudioMixer::reset_3d_sound_flag(){
 void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant){
     if(stage>15||room>255||variant>15)throw std::runtime_error("invalid room sound key");
     room_env_={}; // RequestRoomSoundBank: ResetRoomSoundEnvParam
-    stop(4);stop(5);for(unsigned slot=14;slot<24;++slot)stop(slot);for(unsigned slot=8;slot<13;++slot)stop(slot); /* CallDoorSe (MIDI slot 2) survives the room load */
+    // RequestRoomSoundBank/LoadSoundPackFile issue no StopSe/StopMidi (only CheckSpecialBank's StopThePsgSound below);
+    // the IOP's bank replacement (IopSound::load_se_bank/load_midi_bank) ends the voices of the replaced bank.
     const auto index=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(index);const auto key=stage*1000+room*10+variant;
     unsigned pack=0;bool found=false;for(;pack<index.size()/2;++pack){const auto id=ids.u16(pack*2);if(id==0xffff)break;if(id==key){found=true;break;}}
     if(!found)return;
@@ -460,7 +463,7 @@ void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant)
 bool AudioMixer::load_player_sounds(unsigned player){
     if(player>3)throw std::runtime_error("invalid player voice bank");
     // Replacing the character must not retain a voice or a decoded sample from the old CORE pack.
-    stop(7);room_banks_.erase(4);sound_bank_packs_.erase(4);iop_.load_se_bank(4,{});
+    room_banks_.erase(4);sound_bank_packs_.erase(4);iop_.load_se_bank(4,{});
     if(data_.empty())return false;
     const auto index=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(index);
     unsigned pack=0;bool found=false;
@@ -480,6 +483,8 @@ bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot,bo
     if(slot<3||slot>=slots_.size())throw std::runtime_error("invalid room effect channel");
     (void)loop; // a Sony SE loops by its own VAG markers (Vagi attribute 1); the request has no loop flag
     if(!room_banks_.count(bank))return false;
+    // Tsnd_tqreq drops a program above the bank's last index without a word (0x1058); reported here.
+    if(bank<IopSound::tq_ports&&program>=iop_.se_table(bank).size()){unavailable.push_back("SE bank "+std::to_string(bank)+" program "+std::to_string(program)+" outside the TSNDDRV table");return false;}
     const int se=se_slot_of(slot);if(se<0)throw std::runtime_error("room SE on a host voice without SE slot");
     if(shot_play(unsigned(se),bank,program))played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(sound_bank_packs_.at(bank))+"/"+std::to_string(bank)+"/"+asset_number(program));
     return true;
@@ -856,8 +861,13 @@ void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volu
         // Synthetic SPU clip (tests, diagnostics): a MODHSYN note on port 15, channel slot & 15, keyed at the next
         // ATick through the voice pool. Game sounds go through sdShotPlay/sdMidiPlay instead.
         if(clip->channels!=1)throw std::runtime_error("SPU voice clip must be mono");
-        if(diagnostic_[slot])iop_.diagnostic_stop(slot&15);
-        diagnostic_[slot]=true;iop_.diagnostic_note(slot&15,std::move(clip));return;}
+        // On an SE host voice: a synthetic SE program of TQ bank 4 through sdShotPlay (TQ timer, CC7/CC10, pool).
+        if(const int se=se_slot_of(slot);se>=0){if(!diagnostic_program_)throw std::runtime_error("synthetic SE programs exhausted");
+            const unsigned program=diagnostic_program_--;iop_.load_se_clip(4,program,std::move(clip));shot_play(unsigned(se),4,program);return;}
+        // On a MIDI host voice: a MODHSYN note on the handle's port, channel 0, bypassing TSNDDRV/MODMIDI.
+        const int port=host_port(slot);if(port<0)throw std::runtime_error("SPU clip on a host voice without SE slot or MIDI handle");
+        if(diagnostic_[slot])iop_.diagnostic_stop(unsigned(port),0);
+        diagnostic_[slot]=true;iop_.diagnostic_note(unsigned(port),0,std::move(clip));return;}
     Channel c;c.volume=volume*clip->volume;pan_gains(clip->pan,c.left,c.right);c.clip_rate=clip->rate;c.clip=std::move(clip);c.loop=loop;slots_[slot]=std::move(c);
 }
 void AudioMixer::play(unsigned slot,const std::string& archive,unsigned id,float volume,bool loop,unsigned fade_ticks){
@@ -871,7 +881,7 @@ void AudioMixer::stop(unsigned slot,unsigned fade_ticks){
     if(slot>=slots_.size()||fade_ticks>600*game_tick_hz)throw std::runtime_error("invalid audio slot");
     auto& s=slots_[slot];
     if(s.clip){if(fade_ticks){s.target=0;s.fade=fade_ticks*audio_frames_per_tick;}else release_channel(s);return;}
-    if(diagnostic_[slot]){if(fade_ticks)throw std::runtime_error("host fade on an SPU voice");iop_.diagnostic_stop(slot&15);diagnostic_[slot]=false;return;}
+    if(diagnostic_[slot]){if(fade_ticks)throw std::runtime_error("host fade on an SPU voice");iop_.diagnostic_stop(unsigned(host_port(slot)),0);diagnostic_[slot]=false;return;}
     if(const int se=se_slot_of(slot);se>=0){if(fade_ticks)throw std::runtime_error("host fade on an SE voice (use RequestSeFadeFunction)");shot_stop(unsigned(se));return;} // StopSe
     if(const int midi=midi_handle_of(slot);midi>=0){if(fade_ticks)throw std::runtime_error("host fade on a MIDI voice (use RequestMidiFadeFunction)");
         // StopMidi -> sdMidiStop: SdrBgmStop of the handle's port. Host 27..29 name a port; a port MidiHandle[2] no
@@ -892,7 +902,7 @@ bool AudioMixer::active(unsigned slot)const{
     // sdSysServer or the busy bit of get_iop_snddata (sdShotGetStat/sdMidiGetStat).
     if(slot>=slots_.size())return false;
     if(slots_[slot].clip)return true;
-    if(diagnostic_[slot])return iop_.diagnostic_busy(slot&15);
+    if(diagnostic_[slot])return iop_.diagnostic_busy(unsigned(host_port(slot)),0);
     if(const int se=se_slot_of(slot);se>=0){const auto& w=shots_[unsigned(se)];return w.req==1||(w.channel>=0&&((ee_status_.se[w.port]>>unsigned(w.channel))&1u));}
     if(const int midi=midi_handle_of(slot);midi>=0){const int port=midi==2?host_port(slot):int(midis_[unsigned(midi)].port);
         return (midis_[unsigned(midi)].req==1&&int(midis_[unsigned(midi)].port)==port)||((ee_status_.midi>>unsigned(port))&1u);}
