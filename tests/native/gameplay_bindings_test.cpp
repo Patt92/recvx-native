@@ -88,7 +88,11 @@ int main(int argc,char** argv){try{
  std::cout<<"Original bhEneRenderSet EventVm binding toggles the shared native draw gate.\n";
  std::cout<<"RM_0050 dogs: weapon selection, hit distance and wall query against real room data passed; aiming, firing, damage, blood and death are documented gaps.\n";
  }
- {auto bytes=read_asset_file(data/"rooms/RM_6040.RDT",64*1024*1024);Inventory inv;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.values[0]=6;vm.values[1]=4;vm.item_message=[](unsigned,unsigned){return Message{0xffff};};const auto a=vm.interactions.at(13);NJS_POINT3 pos{a.position.x+a.extent.x*.5f,a.position.y,a.position.z+a.extent.z*.5f+2};check(vm.interact(pos,0,a.floor),"original Memo file interaction failed");
+ {auto bytes=read_asset_file(data/"rooms/RM_6040.RDT",64*1024*1024);Inventory inv;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.values[0]=6;vm.values[1]=4;vm.item_message=[](unsigned,unsigned){return Message{0xffff};};const auto a=vm.interactions.at(13);NJS_POINT3 pos{a.position.x+a.extent.x*.5f,a.position.y,a.position.z+a.extent.z*.5f+2};unsigned player_mode=0;vm.set_player_mode=[&](unsigned m){player_mode=m;};check(vm.interact(pos,0,a.floor),"original Memo file interaction failed");
+// hitchk.c:4859-4880: ATR attr 0x11 setzt cb_flg 0x20000 und traegt bhCPM2_act_cro (mode2 19) ein;
+// GetFile startet erst bhCheckSubTask (system.c:600, cb_flg 0x64010), nicht die Interaktion selbst.
+check(player_mode==(1u|(19u<<16))&&(vm.flags[10][0]&0x20000)&&(vm.flags[5][0]&4)&&vm.acquired_file()==~0u,"Memo ATR attr 0x11 lacks original crouch entry/file request");
+vm.service_item_request();
 // D03: FileNumberSwitch ordnet Raum 604 mit Item 132 die Datei 17 zu.
 check(!inv.contains(132)&&vm.acquired_file()==17&&(inv.items[383]&(1u<<17)),"Memo entered inventory instead of original file 17");
 check(vm.flags[10][0]&0x800,"file pickup did not acknowledge room event");
@@ -129,7 +133,8 @@ check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<
  {auto bytes=read_asset_file(data/"rooms/RM_0000.RDT",64*1024*1024);Inventory inv;MessageDialog dialog;EventVm vm(bytes,inv,dialog);vm.item_message=[](unsigned index,unsigned){return Message{std::uint16_t(index&0x7f),0xffff};};
   StatusMenu menu;GameplayInput controls(inv,menu,dialog,&vm);controls.synchronize();
   check(vm.interact({19,0,55},0,0),"original knife interaction failed");
-  check(vm.pickup_display()==8&&!dialog.active(),"GetItem decided before the status task started");
+  // hitchk.c:4884-4885: ATR ohne attr 0x1 setzt nur sb_id und cb_flg 0x10; GetItem beginnt bhCheckSubTask.
+  check(!vm.pickup_display()&&(vm.flags[10][0]&0x10)&&vm.values[8]==8&&!dialog.active(),"knife ATR did not request GetItem through cb_flg 0x10/sb_id");
   controls.synchronize();check(menu.active&&menu.pickup==8&&!dialog.active(),"pickup status task did not open, or GetItem asked at once");
   unsigned ticks=0;for(;ticks<60&&!dialog.active();++ticks){menu.tick(inv);const bool sliding=menu.slide.pad_locked();vm.tick();controls.synchronize();if(sliding)check(!dialog.active(),"GetItem question shown while the status screen slides in (statusflg 0x40)");}
   check(dialog.active()&&dialog.index()==157&&!menu.slide.pad_locked()&&ticks>=8,"GetItem question did not follow the finished slide-in");

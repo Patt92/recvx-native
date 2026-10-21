@@ -623,6 +623,41 @@ static void act_bk2(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_ACTION_IO* io)
     }
 }
 
+/* player.c:3887 bhCPM2_act_cro (mode2 19): Hockaufnahme eines Items, eingetragen von
+   bhCheckExmAtari case 4 (hitchk.c:4870, ATR attr 0x1). Fall 0 faellt in Fall 1 durch.
+   flg 0x400000 stammt aus dem bhSetMotion des vorigen Passes (player.c:1504). */
+static void act_cro(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_ACTION_IO* io)
+{
+    *io->st_flg |= 0x4u;
+    switch (a->mode3) {
+    case 0:
+        *io->flg |= 0x10000u;
+        *io->stflg |= 0x10000u;
+        if (io->exp1) { *io->exp1 &= ~0x4u; *io->exp1 |= 0x1E0u; }
+        *io->flg2 |= 0x1u;
+        a->mtn_no = 45;
+        a->hokan_rate = 49152;
+        a->hokan_count = 4;
+        a->mtn_add = 65536;
+        a->frm_no = 0;
+        a->arp = 0.0f;
+        a->mode3++;
+        /* fall through */
+    case 1:
+        /* (int)frm_no / 65536 gegen das unsigned frm_num - 6: unsigned Vergleich */
+        if ((uint32_t)(a->frm_no / 65536) >= frames(io, a->mtn_no) - 6u) *io->flg &= ~0x8u;
+        if (*io->flg & 0x400000u) {
+            *io->flg &= ~0x10000u;
+            *io->stflg &= ~0x10000u;
+            a->mtn_add = 0;
+            *io->st_flg &= ~0x4u;
+            if (io->cb_flg) *io->cb_flg |= 0x10u;
+            else gap(io, "bhCPM2_act_cro: sys->cb_flg 0x10");
+        }
+        break;
+    }
+}
+
 int recvx_player_action_bas(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_ACTION_IO* io)
 {
     if (!(io->gm_flg & 0x40u) || (*io->stflg & 0x30u)) {
@@ -650,6 +685,7 @@ int recvx_player_action_bas(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_ACTION_IO* io)
     case 11: turn(a, 4.0f, 1); act_bak(a, io); break;
     case 12: act_bk2(a, io); break;
     case 13: act_sta(a, io); break;
+    case 19: act_cro(a, io); break;
     default: return 0;
     }
     return 1;

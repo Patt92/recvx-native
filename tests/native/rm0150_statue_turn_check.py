@@ -57,13 +57,13 @@ def main():
                        '--user-dir', str(root / 'user'), '--controls', str(controls),
                        '--debug-config', str(root / 'debug.ini'), '--in-game', '--room', 'RM_0150.RDX',
                        '--ss', '1', '--renderer', 'software', '--enemy-ai', 'on',
-                       '--frames', str(3 * frames + 100 if args.sdl else frames),
+                       '--frames', str(3 * frames + 100 if sdl else frames),
                        '--replay', str(script), '--state', str(state)]
             if args.snapshot:
                 command += ['--snapshots', str(args.snapshot.resolve().parent)]
                 assert args.snapshot.name == 'snapshot-1.rcvxsnap'
             env = os.environ.copy()
-            if args.sdl:
+            if sdl:
                 env.update(SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy', SDL_RENDER_DRIVER='software')
             else:
                 command += ['--headless']
@@ -77,6 +77,10 @@ def main():
         walking = run('walking-contact', 620)
         assert walking['player_work']['mode'][2] == 22, ('walking contact never entered rpsh', walking['player_work'])
         assert any((item >> 16) == 103 for item in walking['items']), 'sword not acquired through GetItem'
+        # GetItem hides no model; the room script's bhItmCk (cb_flg 0x800) sets
+        # itwp stflg 0x1000000 only (event.c:2127), never bhSetDispObj mdflg.
+        sword = [item for item in walking['room_items'] if item['identity'] == 103]
+        assert sword and all(item['inactive'] and not item['hidden'] for item in sword), ('sword model not script-deactivated', sword)
         assert all(event in walking['events'] for event in (5, 6, 7, 8)), 'original sword/gas events missing'
         assert not (walking['event_flags'][0] & 0x20000000), 'statue solved before rotating'
         print('Original sword pickup and gas; walking contact enters mode2 22 without forced modes.')
@@ -87,12 +91,31 @@ def main():
         assert not (released['event_flags'][0] & 0x20000000), 'short grip incorrectly solves puzzle'
         print('Releasing forward exits the grip without setting puzzle completion.')
 
+        # bhLoadWork/Player_controll 128 clear mode2 (event.c:12722-12737/
+        # :9640): the rpsh action must end with the player work, not continue
+        # as a host latch through the stop-gas events.
+        after_event = run('after-event', 1150)
+        assert 'turning' in after_event and not after_event['turning'], (
+            'rpsh remains active after the script reset', after_event.get('turning'), after_event['player_work'])
+        assert after_event['player_work']['mode'][2] == 0, (
+            'player mode2 still in rpsh after the script reset', after_event['player_work'])
+
         completed = run('complete', 1300)
         assert completed['event_flags'][0] & 0x20000000, 'rotation never sets ev_flg 2'
         assert all(event in completed['events'] for event in (15, 16, 17, 18, 19)), 'original gas-stop sequence not dispatched'
         assert completed['player_work']['mode'][2] != 22 and not (completed['work_flags'][14] & 0x10080)
         assert not completed['cinematic'] and not completed['player_scripted'] and not completed['dialog_open']
         print('Statue rotates; ev_flg 2 dispatches original gas-stop events; player released.')
+        if args.sdl:
+            # SDL --frames counts host-loop iterations, not simulation ticks.
+            # Check the completed sequence after a generous loop budget, not
+            # an intermediate pose at an assumed tick count.
+            physical = run('sdl-complete', 1800, sdl=True)
+            assert physical['event_flags'][0] & 0x20000000, 'held physical W never completes the statue'
+            assert all(event in physical['events'] for event in (15, 16, 17, 18, 19))
+            assert not physical['cinematic'] and not physical['player_scripted']
+            assert not (physical['work_flags'][14] & 0x10080)
+            print('SDL F9 + held W via InputManager: original puzzle completion and release verified.')
     if args.snapshot:
         assert hashlib.sha256(args.snapshot.read_bytes()).hexdigest() == before, 'user snapshot changed'
         print('Snapshot slot 1 unchanged: ' + before)

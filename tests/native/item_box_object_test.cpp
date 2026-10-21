@@ -45,10 +45,11 @@ int main(int argc,char** argv){try{
         const auto* work=world.state(2,object);check(work&&work->object_flags&1,"original lid work missing");
         // Real EventVm interaction with original ATR midpoint; no type-100 injection.
         actor.position={area->position.x+area->extent.x*.5f,area->position.y,area->position.z+area->extent.z*.5f+2};
-        actor.yaw=0;events.item_box_object=[&](unsigned index){return world.start_item_box(index);};
+        actor.yaw=0;events.item_box_object=[&](unsigned index){return world.start_item_box(index);};events.set_player_mode=[&](unsigned m){world.set_player_mode(m);};world.set_player_mode(3u<<16);
         check(events.interact(actor.position,actor.yaw,area->floor),"original box interaction did not start");
         check(work->type==100&&(events.flags[14][0]&0x18000)==0x18000&&(events.flags[5][0]&4),"box start lacks original object/player flags");
         check((events.flags[13][0]&0x10000)&&events.player_flags==events.flags[13][0],"box interaction omits original player work flag");
+        check(world.player_mode()==1u,"box interaction omits *(int*)&pp->mode0 = 1 (hitchk.c:4918-4921)");
         world.set_simulation_flags(~4u);world.control_item_boxes(events.flags[10][0],events.flags[14][0]);
         check(work->angles[0]==0&&!(events.flags[10][0]&0x40000),"paused object task still advances lid");
         world.set_simulation_flags(~0u);Scene closed=scene;world.append(closed);

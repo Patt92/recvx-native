@@ -17,7 +17,9 @@
    Zeiger. mode0/mode1 bleiben beim Spielerbesitzer bzw. der Kampfportierung
    (bhCPM0_action ruft diese Routinen nur mit mode1 == 0).
    Die Spezialaktionen mode2 14..22 (Treppe, Schieben, ...) haben ihre eigenen
-   nativen Besitzer; recvx_player_action_bas fuehrt sie nicht aus.
+   nativen Besitzer; recvx_player_action_bas fuehrt sie nicht aus. Ausnahme ist
+   player.c:3887 bhCPM2_act_cro (mode2 19, Hockaufnahme): sie liest und schreibt
+   nur Felder dieses Werks und laeuft deshalb hier.
 
    Nicht dargestellt (gemeldet ueber `gap`, kein Ersatzwert):
    - die Posenueberblendung selbst (hokan_rate); hokan_count wird wie in
@@ -52,6 +54,7 @@ typedef struct RECVX_PLAYER_ACTION_IO {
     uint32_t* stflg;     /* plp->stflg */
     uint32_t  stflg_owned; /* stflg-Bits anderer Besitzer, nur gelesen (Gift 0x80000/0x200000: Inventar) */
     uint32_t* st_flg;    /* sys->st_flg */
+    uint32_t* cb_flg;    /* sys->cb_flg (act_cro: 0x10 = GetItem-Anforderung an bhCheckSubTask) */
     uint32_t* exp1;      /* EXP1_I(0); NULL = vom Kopfbesitzer gefuehrt */
     uint32_t  pad_on, pad_old, pad_ps;  /* sys->pad_on/_old/_ps; act_sta loescht in pad_on */
     float     pad_dx, pad_ax;           /* sys->pad_dx/pad_ax (Analogausschlag) */
@@ -121,7 +124,7 @@ int32_t recvx_player_action_frame_num(uint32_t fnm_old, uint32_t fnm_new, int32_
    mode1 gehoert der Kampfportierung; `mode1` darf NULL sein. */
 void recvx_player_action_pad(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_ACTION_IO* io, uint32_t* mode1);
 
-/* bhCPM1_act_bas. Rueckgabe 1 = mode2 gehoert diesem Modul (0..13),
+/* bhCPM1_act_bas. Rueckgabe 1 = mode2 gehoert diesem Modul (0..13, 19),
    0 = Spezialaktion mit eigenem Besitzer (nichts ausgefuehrt). */
 int recvx_player_action_bas(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_ACTION_IO* io);
 

@@ -57,6 +57,10 @@ public:
     std::function<std::optional<int>(unsigned)> enemy_health;
     std::function<void(unsigned,int)> set_enemy_health;
     std::function<void(unsigned)> enemy_disable; // bhEneSetCk
+    std::function<void(unsigned)> item_disable; // bhItmCk/bhItmSetCk: sys->itwp[n].stflg |= 0x1000000
+    // bhCheckExmAtari case 4 liest sys->itwp[prm0].flg/id; false = kein Raumitem (itm_n ueberschritten).
+    std::function<bool(unsigned,unsigned& flg,unsigned& id)> item_work;
+    std::function<void(unsigned)> set_player_mode; // *(int*)&pp->mode0 = mode0|mode1<<8|mode2<<16|mode3<<24
     // bhCamCheck: active event camera (cam.flg & 2) with evc_no/keyf_no.
     std::function<bool(unsigned&,unsigned&)> event_camera;
     std::function<unsigned(unsigned,unsigned)> animation_frame;
@@ -178,14 +182,14 @@ private:
     std::vector<Interaction> floors_;
     Inventory& inventory_;MessageDialog& dialog_;
     bool opening_hint_=false,status_use_pending_=false;
-    unsigned pickup_item_=0,pickup_model_=~0u,pickup_display_=0,pickup_mode_=0;
+    unsigned pickup_item_=0,pickup_display_=0,pickup_mode_=0;
     bool pickup_decision_pending_=false; // GetItem testmode 0 still owed (sub1.c:3452 gate)
     unsigned acquired_file_=~0u;
-    std::vector<unsigned> room_items_;
+    std::vector<unsigned> room_items_,room_item_flags_; // rom->itmp id/flg
     std::vector<NJS_POINT3> positions_;
-    void hide_item(unsigned index);
-    void begin_pickup(unsigned item,unsigned model=~0u);
-    void begin_file(unsigned item,unsigned model=~0u);
+    void disable_item(const Task& task,unsigned op,std::size_t pc,unsigned item);
+    void begin_pickup(unsigned item);
+    void begin_file(unsigned item);
     void pickup_result(const PickupResult& result);
     void finish_pickup();
     void show_dialog(Message message,unsigned index); // bhSetMessage resets response work

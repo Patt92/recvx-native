@@ -230,6 +230,7 @@ public:
     void set_enemy_health(unsigned index,int hp);
     // bhEneSetCk: original BH_PWORK stflg 0x1000000 (not drawn, no hit/sight checks).
     void deactivate_enemy(unsigned index);
+    void deactivate_item(unsigned index); // bhItmCk/bhItmSetCk
     bool step_clear(NJS_POINT3 probe,float radius=3.5f,float height=16.5f)const;
     // Native bhCheckWallType / bhCollisionCheckLine/2/3 over the existing
     // room-then-mobile geometry. These are not bhCheckWall movement or
@@ -630,7 +631,10 @@ public:
     bool pushing()const{return push_&&push_->active();}
     bool tick_push(bool forward);
     // objitm.c:1648 bhObj007 / player.c:4336 bhCPM2_act_rpsh: Greif-und-Dreh-Gegenstand.
-    bool turning()const{return turn_active_;}
+    // bhCPM2_act_rpsh is dispatched from mode2 22 (player.c:1957). A script
+    // reset (bhLoadWork/Player_controll 128) clears that work field; the action
+    // must end with it, not with a separate host latch.
+    bool turning()const{return turn_active_&&((collision_mode_>>16)&0xffu)==0x16u;}
     bool tick_turn(bool forward);
     // bhObj001 stores climb / descend ETC records in sys->metcp.  Unlike the
     // room ETC table, these records move with their O_WRK.

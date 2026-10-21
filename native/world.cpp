@@ -430,6 +430,7 @@ std::optional<RoomWorld::JointHit> RoomWorld::enemy_capsule_hit(unsigned index,N
 }
 void RoomWorld::set_enemy_health(unsigned index,int hp){auto at=entities_.find({1,index});if(at==entities_.end())throw std::runtime_error("script HP assignment enemy unavailable");at->second.hp=hp;if(at->second.en01)recvx_en01_set_hp(at->second.en01.get(),hp);}
 void RoomWorld::deactivate_enemy(unsigned index){entity(1,index).inactive=true;}
+void RoomWorld::deactivate_item(unsigned index){entity(3,index).inactive=true;} // itwp[n].stflg 0x1000000
 void RoomWorld::set_work_flags(unsigned kind,unsigned index,unsigned flg){auto& e=entity(kind,index);e.object_flags=flg;if(kind==1&&e.enemy_bound)e.enemy.flg=flg;}
 bool RoomWorld::object_ay(unsigned index,int& ay)const{const auto it=entities_.find({2,index});if(it==entities_.end())return false;ay=it->second.angles[1];return true;}
 void RoomWorld::set_object_ay(unsigned index,int ay){auto& e=entity(2,index);e.angles[1]=ay;e.transform.yaw=Angle(ay);actor_nodes_.clear();}
@@ -979,7 +980,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     // stflg |= 0x10000 und flg |= 0x10000 ohne die drei uebrigen Schreibvorgaenge.
     auto player_work_owned=[&](bool full){unsigned& flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
         unsigned& stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
-        collision_mode_=full?((collision_mode_&~0x00ff00ffu)|7u):((collision_mode_&~0xffu)|7u);
+        collision_mode_=full?((collision_mode_&~0x00ff00ffu)|7u):((collision_mode_&~0xffu)|7u);if(full)turn_active_=false; // bhLoadWork setzt mode2 0 (event.c:12722-12737); mode2 22 endet damit
         if(full)motion_=(motion_&~std::size_t(0xffu))|42u;
         flg|=0x10000u;stflg|=0x10000u;if(full)stflg&=~0x80u;
         if(collision_events_)collision_events_->player_flags=flg;};
@@ -1328,7 +1329,8 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         player_event_.requested=true;player_event_.mode1=v1;player_event_.mode2=v0;
         collision_mode_=7u|(v1<<8)|(v0<<16)|((player_event_.reset?0u:(collision_mode_>>24))<<24);
         player_scripted=false;player_frozen_=false;player_smove_.active=false;return true;}
-    if(op==0x64&&(v.u8(1)==0x80||v.u8(1)==0x8b)){player_event_.requested=false;player_smove_.active=false;} // Player_controll 128/139: zurueck zu bhCPM0_action
+    if(op==0x64&&v.u8(1)==0x80){player_event_.requested=false;player_smove_.active=false;turn_active_=false;} // Player_controll 128: zurueck zu bhCPM0_action; mode2 22 endet mit dem Werkfeld
+    if(op==0x64&&v.u8(1)==0x8b){player_event_.requested=false;player_smove_.active=false;} // Player_controll 139: kein Modus-Reset (event.c:9640-9660)
     if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;player_prev_pos_=player_.position; /* event.c:9665-9693 pxb/pyb/pzb = px/py/pz */return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
             player_step_=65536; // mtn_add = 65536
             player_room_motion_=false;player_enemy_motion_=false; // mnwP = plmthp
@@ -1339,7 +1341,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
             stflg&=~0x10000u; // Skriptsperre weg
             flg&=~0x210000u; // Skript-/Laufsperre weg (flg 0x10000/0x200000)
             if(collision_events_)collision_events_->player_flags=flg;
-            player_scripted=false;player_frozen_=false;motion_=42;frame_=0;return true;}case 0x34:return stand_player_motion(); // event.c:9697 Player_controll 52
+            player_scripted=false;player_frozen_=false;motion_=42;frame_=0;turn_active_=false;return true;}case 0x34:return stand_player_motion(); // event.c:9697 Player_controll 52
         // event.c:9275 Player_controll 150 writes plp->exp1 (the head flags), whatever work the task holds.
         case 150:if(!player_head_)return false;if(v.u8(2)==0){player_head_->flags|=0x1E0u;player_head_->flags&=~0x14u;}else player_head_->flags|=0x14u;return true;
         // :9290 (129), :9353 (130), :9385 (142) write bhCetask->work->exp1. Only the player's exp1 is the
@@ -5450,6 +5452,7 @@ void RoomWorld::control_turn_object(WorldEntity& e){
 // Steuerung zurueck. SE 530 = CallPlayerActionSe(530,1).
 bool RoomWorld::tick_turn(bool forward){
     if(!turn_active_||!collision_events_)return false;
+    if(((collision_mode_>>16)&0xffu)!=0x16u){turn_active_=false;return false;} // bhCPM2_act_rpsh wird nur fuer mode2 22 dispatcht (player.c:1957)
     turn_phase_=(collision_mode_>>24)&0xffu; // bhObj007 Fall 2/3 setzt plp->mode3 6 am Drehende
     auto& st_flg=collision_events_->flags[5][0];auto& flg=collision_events_->flags[13][0];
     auto& stflg=collision_events_->flags[14][0];auto& flg2=collision_events_->flags[15][0];

@@ -1,4 +1,5 @@
 #include "world.h"
+#include "events.h"
 #include "asset_io.h"
 #include "room.h"
 #include "inspection.h"
@@ -36,6 +37,9 @@ int main(int argc,char** argv){try{
     vm.initialize(); // scd0 stellt die Statue (Objekt 5) auf [30,0,40], ay 180
     const auto& statue_before=*world.state(2,5);
     check(statue_before.type==7&&statue_before.transform.position.y<1.0f,"RM_0150 Objekt 5 ist nicht die Typ-7-Statue am Boden");
+    // bhItmCk/bhItmSetCk setzen nur itwp stflg 0x1000000 (inactive), das
+    // bhControlObjItm/bhDrawObjItm sperrt; mdflg 0x1 (bhSetDispObj) bleibt.
+    {const auto* item=world.state(3,0);check(item&&!item->inactive,"Raumitem ist vor dem Aufheben inaktiv");world.deactivate_item(0);check(item->inactive&&!item->hidden,"bhItmCk setzt stflg 0x1000000, nicht mdflg 0x1");}
     check(!world.turning(),"Drehaktion startet ohne Greifen");
     // Ereignis 16 (objitm-Skriptpfad, hier direkt gebunden): bhLoadWork Objekt 5,
     // bhCommonCtr 0d/0b/0c/07 -> [30,10,40], ay 0.

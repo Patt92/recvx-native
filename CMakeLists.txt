@@ -1288,6 +1288,10 @@ if(BUILD_TESTING)
    add_test(NAME rm0150_statue_turn COMMAND "${Python3_EXECUTABLE}" -I
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm0150_statue_turn_check.py"
     --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+   # hitchk.c bhCheckExmAtari case 4 / player.c bhCPM2_act_cro: Hockaufnahme vor GetItem.
+   add_test(NAME crouch_pickup COMMAND "${Python3_EXECUTABLE}" -I
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/crouch_pickup_check.py"
+    --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
  endif()
 endif()

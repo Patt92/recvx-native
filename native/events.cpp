@@ -26,7 +26,7 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
     const auto floor_count=v.u32(info.room_offset+0xa0),floor_offset=v.u32(info.room_offset+0x20);
     if(floor_count>4096)throw std::runtime_error("too many floor triggers");v.require(floor_offset,floor_count*36);
     for(unsigned i=0;i<floor_count;++i){const auto p=floor_offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};for(unsigned j=0;j<4;++j)a.parameters[j]=v.u8(p+32+j);floors_.push_back(a);}
-    const auto item_count=v.u32(info.room_offset+0x90),item_offset=v.u32(info.room_offset+16);if(item_count>4096)throw std::runtime_error("too many room items");v.require(item_offset,item_count*36);for(unsigned i=0;i<item_count;++i)room_items_.push_back(v.u16(item_offset+i*36+4));
+    const auto item_count=v.u32(info.room_offset+0x90),item_offset=v.u32(info.room_offset+16);if(item_count>4096)throw std::runtime_error("too many room items");v.require(item_offset,item_count*36);for(unsigned i=0;i<item_count;++i){room_items_.push_back(v.u16(item_offset+i*36+4));room_item_flags_.push_back(v.u32(item_offset+i*36));}
     values[23]=inventory_.game_mode;values[24]=inventory_.player;flags[6][0]=0xffffffff;flags[13][0]=1;flags[14][0]=0x40000000;if(inventory_.side_pack)flags[11][0]|=0x8000000;
 }
 // bhCk/bhSet define matrices 1..16; no original storage is defined for 0.
@@ -250,13 +250,14 @@ int EventVm::instruction(Task& t){
     case 0x9b:if(!movie_active)throw std::runtime_error("movie condition requires native player binding");advance(6);return movie_active();
     case 0xe:{const unsigned bit=v.u16(p+2)&0x3ff,interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);if(values[20]!=interaction)return 1;
         if(interaction>=interactions.size())throw std::runtime_error("pickup interaction "+std::to_string(interaction)+" outside room table of "+std::to_string(interactions.size()));
-        if(flags[10][0]&0x800){if(!flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(interactions[interaction].parameters[0]);set_flag(7,bit,0);set_flag(9,bit,1);}}
+        // ic_flg wird mit (v2 & 0x1E0) >> 5 geloescht, it_flg mit 0x3E0 gesetzt (event.c:2131-2143).
+        if(flags[10][0]&0x800){if(!flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;disable_item(t,op,p,interactions[interaction].parameters[0]);set_flag(7,bit,0);set_flag(9,bit&0x1ff,1);}}
         else if(!flag(7,bit))set_flag(9,bit,0);flags[10][0]&=~0x800u;return 1;}
-    case 0x23:{const unsigned item=v.u8(p+1),bit=v.u16(p+2)&0x3ff,interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);
+    case 0x23:{const unsigned item=v.u8(p+1),bit=v.u16(p+2)&0x1ff /* event.c:2772: (v3 & 0x1FF) >> 5 */,interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);
         // bhItmSetCk indexes rom->etcp[interaction] unchecked. Some original scripts name an entry beyond the table
         // (the PS2 would touch unrelated room memory); the ATR flag write is skipped and reported, the item part stays.
-        if(interaction>=interactions.size()){pending_bindings.push_back(EventCommand{op,t.level,t.event,p-base_,{room_.begin()+p,room_.begin()+p+6}});if(flag(7,bit))hide_item(item);return 1;}
-        if(flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;hide_item(item);}else interactions[interaction].flags|=1;return 1;}
+        if(interaction>=interactions.size()){pending_bindings.push_back(EventCommand{op,t.level,t.event,p-base_,{room_.begin()+p,room_.begin()+p+6}});if(flag(7,bit))disable_item(t,op,p,item);return 1;}
+        if(flag(7,bit)){if(!mode)interactions[interaction].flags&=~1u;disable_item(t,op,p,item);}else interactions[interaction].flags|=1;return 1;}
     case 0xf:flags[10][0]&=~0x400u;advance(2);return 0;
     case 0x10:{const auto item=v.u8(p+1);advance(2);return bool(flags[10][0]&0x400)&&values[8]==item;}
     case 0x11:{const auto item=v.u8(p+1);advance(2);for(unsigned slot=1;slot<12;++slot){const auto packed=inventory_.slots()[slot];if(Inventory::id(packed)==item){if(item==72&&(packed>>16)!=72)flags[4][0]|=0x10000;return 1;}}return 0;}
@@ -610,10 +611,16 @@ bool EventVm::request_door(const DoorRequest& request){
     flags[10][0]|=1;flags[5][0]|=4;door_scenario_pending_=true;return true;
 }
 void EventVm::finish_room_exit(){if(door_scenario_pending_)tick();}
-void EventVm::hide_item(unsigned index){if(index>=room_items_.size())throw std::runtime_error("pickup model outside room");EventCommand command{0x20,0,0,0,{0x20,std::uint8_t(index),3,0}};if(!binding||!binding(command))pending_bindings.push_back(command);}
+void EventVm::disable_item(const Task& task,unsigned op,std::size_t pc,unsigned item){
+    // bhItmCk/bhItmSetCk: sys->itwp[item].stflg |= 0x1000000 (event.c:2127/2786). Das sperrt
+    // bhControlObjItm und bhDrawObjItm (objitm.c:407/:559); mdflg (bhSetDispObj) bleibt unberuehrt.
+    if(item>=room_items_.size())throw std::runtime_error("pickup model outside room");
+    if(item_disable){item_disable(item);return;}
+    if(reported_.insert({op,pc}).second)pending_bindings.push_back(EventCommand{op,task.level,task.event,pc-base_,{room_.begin()+pc,room_.begin()+pc+6}});
+}
 std::vector<EventTaskState> EventVm::task_states()const{std::vector<EventTaskState> out;for(const auto& t:tasks_)if(t.active)out.push_back({t.event,t.level,t.delay,t.pc-base_,t.blocked,t.wpnl_no});return out;}
 void EventVm::choose_dialog(int direction){dialog_.queue_move(direction);} // pad_ps 0x4/0x8 fuer den naechsten bhControlMessage-Durchlauf
-void EventVm::finish_pickup(){if(pickup_display_)flags[10][0]&=~0x10u;pickup_item_=pickup_display_=pickup_mode_=0;pickup_model_=~0u;pickup_decision_pending_=false;}
+void EventVm::finish_pickup(){if(pickup_display_)flags[10][0]&=~0x10u;pickup_item_=pickup_display_=pickup_mode_=0;pickup_decision_pending_=false;}
 void EventVm::show_dialog(Message message,unsigned index){
     // message.c bhSetMessage: neither a previous question's end/response nor
     // its page marker may acknowledge the newly started message.
@@ -623,13 +630,14 @@ void EventVm::show_dialog(Message message,unsigned index){
 }
 void EventVm::pickup_result(const PickupResult& result){
     pickup_mode_=result.mode;
-    if(result.granted){if(pickup_model_!=~0u)hide_item(pickup_model_);values[22]=inventory_.slots()[0];values[18]=inventory_.weapon();}
+    // GetItem versteckt kein Raummodell; das tut allein bhItmCk des Raumskripts auf cb_flg 0x800.
+    if(result.granted){values[22]=inventory_.slots()[0];values[18]=inventory_.weapon();}
     if(result.message)show_dialog(item_message(result.message,pickup_display_),result.message);
     else if(result.used||result.mode==3||result.mode==5){dialog_=MessageDialog{};finish_pickup();flags[5][0]&=~0x200u;flags[10][0]|=0x2000;}
 }
-void EventVm::begin_pickup(unsigned item,unsigned model){
+void EventVm::begin_pickup(unsigned item){
     if(item==130)item=35;if(!item||item>=156)throw std::runtime_error("script pickup item outside original table");
-    pickup_display_=pickup_item_=item;pickup_model_=model;values[8]=item;
+    pickup_display_=pickup_item_=item;values[8]=item;
     // StatusMain clears the acknowledgement before starting each GetItem.
     begin_status();flags[10][0]=(flags[10][0]&~0x800u)|0x10;
     // sub1.c:3452 StatusMain case 8: GetItem laeuft erst nach SpriteH, wenn statusflg
@@ -638,12 +646,11 @@ void EventVm::begin_pickup(unsigned item,unsigned model){
     // 157/154/153 (mes_spos[1], feste Position) liegt nie ueber den einfahrenden Sprites.
     pickup_mode_=0;pickup_decision_pending_=true;service_pickup();
 }
-void EventVm::begin_file(unsigned item,unsigned model){
+void EventVm::begin_file(unsigned item){
     // StatusMain/GetFile: FILE requests acknowledge the room pickup, but only
     // set itm[383]. They never pass through GetItem's inventory-slot insertion.
     values[8]=item;begin_status();acquired_file_=original_file_number(item,values[0],values[1]);
-    inventory_.items[383]|=1u<<acquired_file_;flags[10][0]|=0x20800;
-    if(model!=~0u)hide_item(model);
+    inventory_.items[383]|=1u<<acquired_file_;flags[10][0]|=0x20800; // das Modell versteckt bhItmCk (cb_flg 0x800)
 }
 void EventVm::service_item_request(){
     // bhCheckSubTask accepts scripted acquisition even while CineSet is active.
@@ -771,22 +778,43 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor,NJS_POINT3 front,float
         /* Typen ueber 4 kommen in keiner Raumtabelle vor; pxn[type] laege dort ausserhalb
            der Tabelle (hitchk.c:4639). Sie behalten die bisherige Host-Sonde (Luecke). */
         const auto probe=a.type<5?NJS_POINT3{pxn[a.type],pos.y,pzn[a.type]}:NJS_POINT3{pos.x-2.0f*sine,pos.y,pos.z-2.0f*cosine};if(!(a.flags&1)||a.floor!=floor||a.type==1||a.type==2||probe.x<a.position.x||probe.x>a.position.x+a.extent.x||probe.z<a.position.z||probe.z>a.position.z+a.extent.z)continue;
-        if(a.type==0){if(a.floor!=floor||(direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000)))continue;
-            values[20]=i;flags[10][0]|=0x100; // original etc_idx / cb_flg, also for doors
+        // hitchk.c:4642-4644: cb_flg 0x100 und etc_idx fuer jeden Treffer vor dem switch; eine
+        // abgelehnte Blickrichtung loescht nur 0x100 wieder, etc_idx bleibt stehen.
+        values[20]=i;flags[10][0]|=0x100;
+        const bool facing_blocked=(direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000));
+        if(a.type==0){if(facing_blocked){flags[10][0]&=~0x100u;continue;}
             if(request_door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]}))return true;
             flags[10][0]&=~0x100u;return false;}
-        if((a.type==3||a.type==4)&&((direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000))))continue;
-        if(a.type==4&&(a.attribute&2)){ // hitchk.c bhCheckExmAtari type 4, attr 0x2: item box
-            values[20]=i;flags[10][0]|=0x100;
-            if(a.attribute&0xc)flags[10][0]|=(a.attribute&4)?0x80000u:0x100000u;
+        if((a.type==3||a.type==4)&&facing_blocked){flags[10][0]&=~0x100u;continue;}
+        if(a.type==4){ // hitchk.c:4847-4925
+            if(!(a.attribute&2)){
+                // Ohne Weltbesitzer (VM-Fixtures) gilt der geladene itwp-Stand aus rom->itmp (room.c:141).
+                unsigned item_flg=0,item_id=0;
+                const bool known=item_work?item_work(a.parameters[0],item_flg,item_id):a.parameters[0]<room_items_.size()&&(item_flg=room_item_flags_[a.parameters[0]],item_id=room_items_[a.parameters[0]],true);
+                if(!known){
+                    // sys->itwp ist ein fester Pool; Plaetze ab rom->itm_n behalten den Inhalt eines
+                    // frueheren Raums (room.c:141, kein Loeschen). Dieser Inhalt ist nativ nicht bestimmt.
+                    const auto gap="bhCheckExmAtari: ATR "+std::to_string(i)+" liest itwp["+std::to_string(a.parameters[0])+"] ausserhalb rom->itm_n";
+                    if(std::find(errors.begin(),errors.end(),gap)==errors.end())errors.push_back(gap);
+                    flags[10][0]&=~0x100u;return false;}
+                if(a.attribute&0x10)flags[10][0]|=0x20000; // GetFile
+                if(item_flg&1){
+                    values[8]=item_id; // sys->sb_id = op->id
+                    if(a.attribute&1){ // bhCPM2_act_cro (mode2 19) meldet cb_flg 0x10 erst am Motionende
+                        flags[13][0]|=0x10000;player_flags=flags[13][0];flags[14][0]|=0x10000;flags[5][0]|=4;
+                        if(!set_player_mode)throw std::runtime_error("crouch pickup requires native player binding");
+                        set_player_mode(1u|(19u<<16));
+                    }else{flags[5][0]&=~4u;flags[10][0]|=0x10;}
+                    return true;}
+                // Ohne itwp flg 1 laeuft das Original in den Kistenzweig weiter (prm0 dann als obwp-Index).
+            }else if(a.attribute&0xc)flags[10][0]|=(a.attribute&4)?0x80000u:0x100000u;
             if(a.parameters[0]==0xff)flags[10][0]|=0x40000;
             else{if(!item_box_object)throw std::runtime_error("item box object requires native world binding");
-                // op->type = 100; pp->flg |= 0x10000; pp->stflg |= 0x18000; sys->st_flg |= 0x4
-                if(item_box_object(a.parameters[0])){flags[13][0]|=0x10000;player_flags=flags[13][0];flags[14][0]|=0x18000;flags[5][0]|=4;}}
+                // op->type = 100; *(int*)&op->mode0 = 0; pp->flg |= 0x10000; pp->stflg |= 0x18000; sys->st_flg |= 0x4; *(int*)&pp->mode0 = 1
+                if(item_box_object(a.parameters[0])){flags[13][0]|=0x10000;player_flags=flags[13][0];flags[14][0]|=0x18000;flags[5][0]|=4;
+                    if(!set_player_mode)throw std::runtime_error("item box object requires native player binding");
+                    set_player_mode(1u);}}
             return true;}
-        if(a.type==4){const auto model=a.parameters[0];if(model>=room_items_.size())throw std::runtime_error("pickup model outside room");auto id=room_items_[model];if(id==130)id=35;if(!id||id>=156||!item_message)return false;
-            values[20]=i;flags[10][0]|=0x100;if(a.attribute&0x10)begin_file(id,model);else begin_pickup(id,model);return true;}
-        values[20]=i;flags[10][0]|=0x100;
         // hitchk.c:4786-4843 (case 3): both the camera and the message wait for st_flg 0x80 to clear.
         if(a.type==3&&!(flags[5][0]&0x80)){
             if(a.attribute&9){
