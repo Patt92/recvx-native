@@ -586,9 +586,9 @@ void EventVm::control_exm(){
     if(gm&0x1000){ // :274 bhSetFixedCut / bhSetEventFixedCut clear gm_flg 0x1000 and set st_flg 0x1
         gm&=~0x1000u;st|=1;
         if(!(gm&0x10000)){if(fixed_cut)fixed_cut(fixcno);}else if(event_fixed_cut)event_fixed_cut(fixcno,fixkno);}
-    // :286 bhCheckCut(1) (cut.c:12): only the forced return to the player's cut; the
-    // player-eye branch (gm_flg 0x40) has no native owner and keeps gm_flg 0x800.
-    if((gm&0x800)&&(sp&0x40)&&!(st&1)&&!(gm&0x40)){gm&=~0x800u;if(return_cut)return_cut();}
+    // :286 bhCheckCut(1) (cut.c:12-64): erzwungene Rueckkehr auf den Spielerschnitt, unter gm_flg 0x40
+    // der Augenzweig (RoomWorld::return_to_cut loescht gm_flg 0x800 dort selbst).
+    if((gm&0x800)&&(sp&0x40)&&!(st&1)){if(!(gm&0x40))gm&=~0x800u;if(return_cut)return_cut();}
     pad_cleared_=false;
 }
 void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;/* bhSysCallEvent: bhControlMessage vor bhControlEvent, mit den Tasten dieses Durchlaufs (message.c:50). */{const auto step=dialog_.update();if(dialog_.moved()&&system_se)system_se(2); /* message.c:275/284 */if(step==MessageDialog::Step::Answered)close_dialog(true);else if(step==MessageDialog::Step::Closed){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}if(dialog_.active())values[7]=dialog_.selection;
@@ -778,7 +778,10 @@ void EventVm::check_floor(NJS_POINT3 pos,Angle yaw,int floor){
 bool EventVm::skip_cinematic(){if(!(flags[10][0]&4)||(flags[5][0]&0x1C040008u)||(flags[10][0]&0x10000000))return false;flags[10][0]|=0x10000000;return true;}
 bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor){return interact(pos,yaw,floor,pos,0.0f);}
 bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor,NJS_POINT3 front,float arn){
-    if((flags[5][0]&4)||dialog_.active()||menu_open)return false;
+    // Das Tor steht in exm_gate (player.c:1678); st_flg 0x4 ist dort keine Bedingung (jede Sonderaktion
+    // setzt ein maskiertes Bit: cro/Kiste stflg 0x10000, rpsh/psh stflg 0x10080, kdu/hsu/psh flg 0x4).
+    // Dialog und Statusbildschirm vertreten die Originaltasks (bhMessageSet v2 0: sp_flg &= ~7; Status: sp_flg 0x30).
+    if(dialog_.active()||menu_open)return false;
     const auto direction=(yaw+8192)&0xc000;
     /* hitchk.c:4601-4618: pxn[0] und pxn[3] gehen von EXP_WORK fpx/fpz aus (vor den
        Wandpaessen, player.c:1585), pxn[1]/[2]/[4] von plp->px/pz nach ihnen. Gegen eine

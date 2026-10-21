@@ -130,3 +130,22 @@ Quelle prüfbar. Mein Vorschlag: nicht portieren, als „unbenutzt“ im Ledger 
   Original setzt Nebel/pt_flg zurück und ruft bhInitPlEyeCamera erneut; nativ
   lässt `control_exm` gm_flg 0x800 stehen. Kein beobachteter Auslöser.
 - ranking.c ControlRanking (s. o.).
+
+---
+
+# Nachtrag 2 (2026-10-21): die verbliebenen Punkte
+
+- **Tor vor bhCheckExmAtari** jetzt wie player.c:1365/1678: `EventVm::exm_gate(mode0)`
+  prüft Passtor (sp_flg 0x1, stflg 0x1000000 frei), `mode0 == 1` und die drei
+  Masken; die Host-Bedingung st_flg 0x4 ist weg. Nachgeprüft am Original: Jede
+  Sonderaktion setzt selbst ein maskiertes Bit (cro/Kiste stflg 0x10000,
+  rpsh/psh stflg 0x10080, kdu/hsu/psh flg 0x4). Meine Audit-Aussage, erneutes
+  OK starte die Hocke im Original neu, war falsch: act_cro Fall 0 setzt stflg
+  0x10000 im selben Pass. Test im Spieltest (Tor) und `crouch_pickup`.
+- **bhCheckCut(1) unter der Augenkamera** (cut.c:24-45) in `RoomWorld::return_to_cut`:
+  gm_flg 0x800 fällt, Nebel/pe_ax/pe_pers zurück, bhInitPlEyeCamera erneut, kein
+  bhSetCut. Vorher ließ `control_exm` gm_flg 0x800 stehen. Test im Lifecycle-Test.
+- **Common 24/25/34 Selektor 0 auf Gegnerwerken:** Der Walker zeigt alle 294
+  Vorkommen hinter `bhLoadWork` Art 0 (Spieler). Der gemeldete Gegnerfall hat
+  keinen Aufrufer. Ledgerzeile `event.c:Common_controll:Selektor0`.
+- **ranking.c ControlRanking** bleibt offen (Battle Game nativ nicht erreichbar).

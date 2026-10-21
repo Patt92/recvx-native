@@ -108,7 +108,7 @@ struct Room {
         vm.audio_active=[&](unsigned n){return audio.active(n);};vm.movie_active=[&]{return movie.active();};vm.movie_time=[&]{return movie.time_centiseconds();};vm.enemy_dead=[&](unsigned n){return world.enemy_dead(n);};
         input.video_active=[&]{return movie.active();};input.skip_video=[&]{movie.stop();};vm.door=[](const DoorRequest&){return true;};
         // runtime.cpp gameplay_input.interact: bhCheckExmAtari ueber das Ereignismodul
-        input.interact=[&]{if(!vm.exm_flags_clear())return;vm.interact(actor.position,actor.yaw,world.floor_at(actor.position),world.player_front_point(),world.player_front_offset());};
+        input.interact=[&]{if(!vm.exm_gate(world.player_mode()&0xffu))return;vm.interact(actor.position,actor.yaw,world.floor_at(actor.position),world.player_front_point(),world.player_front_offset());};
         input.modal_input=[&](MenuInput){return box.active();};
         if(framed)menu.task.frame();
         fade.flags=&vm.flags[10][0];

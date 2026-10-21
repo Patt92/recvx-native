@@ -399,7 +399,12 @@ bag_vm.set_flag(7,17,0);bag_vm.flags[5][0]=4;bag.hp=93;bag.poisoned=true;bag.equ
     {MessageDialog gate_message;EventVm gate(door_room,bag,gate_message);gate.flags[14][0]=gate.flags[13][0]=gate.flags[10][0]=0;
      const auto saved=gate.flags;check(gate.exm_flags_clear(),"exm gate closed without original flags");
      for(const auto& bit:{std::pair<unsigned,unsigned>{14,0x80},{14,0x10000},{13,0x4},{13,0x4000000},{10,0x1},{10,0x2},{10,0x4},{10,0x10},{10,0x4000}}){gate.flags=saved;gate.flags[bit.first][0]|=bit.second;check(!gate.exm_flags_clear(),"player.c:1678 exm gate bit ignored");}
-     gate.flags=saved;gate.flags[10][0]|=0x8;check(gate.exm_flags_clear(),"exm gate closes on a bit outside cb_flg 0x4017");}
+     gate.flags=saved;gate.flags[10][0]|=0x8;check(gate.exm_flags_clear(),"exm gate closes on a bit outside cb_flg 0x4017");
+     // player.c:1365/1678: Passtor (sp_flg 0x1, stflg 0x1000000) und plp->mode0 == 1; st_flg 0x4 ist keine Bedingung.
+     gate.flags=saved;check(gate.exm_gate(1)&&!gate.exm_gate(7)&&!gate.exm_gate(2),"exm gate ignores plp->mode0");
+     gate.flags=saved;gate.flags[6][0]&=~1u;check(!gate.exm_gate(1),"exm gate ignores the player pass gate sp_flg 0x1");
+     gate.flags=saved;gate.flags[14][0]|=0x1000000u;check(!gate.exm_gate(1),"exm gate ignores plp->stflg 0x1000000");
+     gate.flags=saved;gate.flags[5][0]|=0x4u;check(gate.exm_gate(1),"exm gate closes on st_flg 0x4, which player.c:1678 does not read");}
     auto door_script=data;const std::vector<std::uint8_t> door_call={0x33,0,6,0,0,1,1,2,0xff,0};std::copy(door_call.begin(),door_call.end(),door_script.begin()+1180);
     MessageDialog scripted_message;EventVm scripted(door_script,bag,scripted_message);scripted.set_flag(4,0,0);scripted.door=door_vm.door;scripted.start(0,0);scripted.tick();
     check(scripted.errors.empty()&&requests==2&&requested.attribute==6&&requested.room==1&&requested.spawn==1&&requested.type==2,"DoorCall operand order incorrect");

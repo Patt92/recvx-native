@@ -83,6 +83,17 @@ int main(int argc,char** argv){try{
    check(r.world.bind(loop),"bhSetDebugLoopEx did not bind on the running event camera");
    check(r.world.event_camera&&r.world.event_camera_clock()==7&&(r.vm.flags[5][0]&0x10u)&&(r.vm.flags[11][0]&0x10u)&&!(r.vm.flags[11][0]&0x20u),"bhSetDebugLoopEx: cam.ct0/mode0/st_flg/gm_flg differ from event.c:2421-2446");}
   std::cout<<"RM_1050 switch event: st_flg message bits mirrored, bhCamSet 4 reached after the page turn.\n";}
+ // cut.c:24-45 bhCheckCut(1) unter laufender Augenkamera (gm_flg 0x40): gm_flg 0x800 faellt, Nebel und
+ // pe_ax/pe_pers werden zurueckgesetzt, bhInitPlEyeCamera laeuft erneut, KEIN bhSetCut (return :45).
+ {Room r(data,"RM_0000",[](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);});
+  {std::vector<BoneMatrix> nodes=r.body.pose(42,0,r.actor.position,r.actor.yaw);r.world.commit_player_joints(r.body.script_nodes(nodes));}
+  EventCommand eye;eye.opcode=0xce;eye.bytes={0xce,0x00};check(r.world.bind(eye),"bhSyukanModeSet did not bind");
+  r.world.tick_camera(r.scene,r.scene.cameras.at(0),0,true);
+  check(r.world.eye_camera_active()&&(r.vm.flags[11][0]&0x40u),"eye camera did not start from gm_flg 0x2000");
+  r.vm.flags[6][0]|=0x40u;r.vm.flags[5][0]&=~1u;r.vm.flags[11][0]|=0x800u;r.vm.flags[11][0]&=~0x10u;r.world.set_eye_request(1234,5678);
+  EventCommand back;back.opcode=0x13;back.bytes={0x13,0x01,0x00,0x00};check(r.world.bind(back),"bhCamSet 1 did not bind");
+  check(r.world.eye_camera_active()&&!(r.vm.flags[11][0]&0x800u)&&(r.vm.flags[11][0]&0x10u)&&r.world.eye_pe_ax()==0&&r.world.eye_pe_pers()==11832,"bhCheckCut(1) under the eye camera differs from cut.c:24-45");
+  std::cout<<"bhCheckCut(1) under the eye camera: gm_flg 0x800 cleared, fog/pe reset, eye camera re-initialised.\n";}
  // Common_controll (event.c:9963-12710) advances the script pointer per command; the
  // whole table, including the selector-dependent 24/25/34/35 and axis-dependent 10/22
  // lengths, must match the original or the task desynchronizes (RM_0080 below).

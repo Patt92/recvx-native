@@ -288,7 +288,7 @@ public:
     void set_fixed_cut(unsigned cno);                       // cut.c:448 bhSetFixedCut
     void set_event_camera(unsigned cno,unsigned kno,bool lock); // cut.c:1644 / :1726
     // cut.c:12 bhCheckCut(1): bhSetCut(cam.ncut, 1) for the player's current cut.
-    void return_to_cut(){event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;}
+    void return_to_cut(); // cut.c:12-64 bhCheckCut(1): Augenzweig (gm_flg 0x40) oder erzwungener bhSetCut
     // cut.c:2472-2763 Augenkamera: cam.flg 0x4 (bhControlPlEyeCamera nach dem Abschalten) und der
     // Augenpfad unter gm_flg 0x40 (bhSetPlEyeCamera). Ein Kamerabesitzer neben Raum-/Eventkamera.
     struct EyeCamera{bool active=false,returning=false;unsigned mode0=0,ct0=0;NJS_POINT3 position{},target{};
@@ -297,6 +297,7 @@ public:
     void set_eye_request(int pe_ax,int pe_pers){eye_pe_ax_=pe_ax;eye_pe_pers_=pe_pers;}
     int eye_pe_ax()const{return eye_pe_ax_;}
     int eye_pe_pers()const{return eye_pe_pers_;}
+    bool eye_camera_active()const{return eye_.active;} // Diagnose: cut.c Augenkamera (gm_flg 0x40) laeuft
     void set_eye_ppers(int ppers){eye_.ppers=ppers;}           // cam.ppers (playpch2.c act_scp)
     void clear_eye_ax(){eye_.ax=eye_.axp=0;}                   // cam.ax = cam.axp = 0 (playpch2.c:57)
     void set_player_wax(int wax){player_wax_=std::int16_t(wax);}
@@ -1057,7 +1058,7 @@ private:
     unsigned pl_sleep_cnt_=0; // system.c:43 pl_sleep_cnt (event.c:2832, game.c:357)
     EyeCamera eye_{};std::int16_t player_wax_=0;unsigned player_aim_mode1_=0,player_aim_at_flg_=0;
     std::uint32_t room_fog_color_=0;float room_fog_near_=0,room_fog_far_=0;
-    bool eye_owp5(NJS_MATRIX& m)const;void init_eye_camera(const Scene& stage,std::size_t cut);void set_eye_camera();void control_eye_camera(const Scene& stage,std::size_t cut,bool hold);
+    bool eye_owp5(NJS_MATRIX& m)const;void init_eye_camera(const Scene& stage,std::size_t cut);void init_eye_camera();void set_eye_camera();void control_eye_camera(const Scene& stage,std::size_t cut,bool hold);
     // event.c:9391 Player_controll 131: plp mode0 7 mit mode2 (bhCPM0_event_tbl) und mode1; die Runtime
     // fuehrt pl_smove (player_event.c) ueber ihren Spielerbesitzer aus und meldet hier das Ende.
     struct PlayerEvent{bool requested=false;unsigned mode1=0,mode2=0;bool reset=false;};PlayerEvent player_event_{};

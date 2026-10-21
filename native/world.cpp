@@ -1118,7 +1118,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(op==0x8f){if(!v.u8(2))e.face_flags|=16;else e.face_flags&=~16u;}
         if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;}
         if(op==0x9a){if(!v.u8(2))e.face_flags|=2;else e.face_flags&=~2u;}return true;}
-    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;restore_camera_clip_=true;return true;}set_event_camera(v.u8(2),v.u8(3),true);return true;}
+    if(op==0x13){if(v.u8(1)==1){return_to_cut();restore_camera_clip_=true;return true;}set_event_camera(v.u8(2),v.u8(3),true);return true;}
     if(op==0x82){ // event.c:2421 bhSetDebugLoopEx: die laufende Ereigniskamera bei cam.ct0 neu aufsetzen
         if(!event_camera){unbound_enemy_.insert("bhSetDebugLoopEx: keine laufende Ereigniskamera (cam.evc_no/keyf_no undefiniert)");return false;}
         if(collision_events_)collision_events_->flags[5][0]|=0x10u;            // sys->st_flg |= 0x10
@@ -1130,7 +1130,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(collision_events_)collision_events_->flags[11][0]&=~0x20u;          // bhCheckCut(0/1) unter st_flg 0x1: nur gm_flg &= ~0x20 (cut.c:22-26)
         return true;}
     if(op==0x2a){const auto mode=v.u8(1);if(mode==0)set_fixed_cut(v.u8(2));else if(mode==1){event_camera=false;fixed_camera.reset();}else throw std::runtime_error("invalid fixed camera mode");return true;}
-    if(op==0x5b){event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;return true;}
+    if(op==0x5b){return_to_cut();return true;}
     // event.c:1032 bhCamPauseSet: v0 0 -> cam.mode0 = 3 (bhControlEventCamera has no case 3: pose and
     // cam.ct0 hold), v0 1 -> cam.mode0 = 1 (continues from cam.ct0, also out of the final hold 2).
     // Other values change nothing. cam.mode0 is shared with bhControlActiveCamera (cut.c:2487);
@@ -5033,7 +5033,21 @@ bool RoomWorld::eye_owp5(NJS_MATRIX& m)const{
     if(player_joint_matrices_.size()<=5){unbound_enemy_.insert("Augenkamera: plp->mlwP->owP[5] nicht verfuegbar");return false;}
     std::copy_n(player_joint_matrices_[5].value,16,m);return true;
 }
-void RoomWorld::init_eye_camera(const Scene& stage,std::size_t cut){
+void RoomWorld::return_to_cut(){
+    // cut.c:12 bhCheckCut(1). :22 gm_flg &= ~0x20 schreibt tick_camera je Bild.
+    if(collision_events_){auto& gm=collision_events_->flags[11][0];auto& st=collision_events_->flags[5][0];const unsigned sp=collision_events_->flags[6][0];
+        if((sp&0x40u)&&!(st&1u)&&(gm&0x40u)){ // cut.c:24-64: Augenkamera aktiv, flg != 0
+            gm&=~0x800u;
+            if(st&0x800000u){st&=~0x800000u;gm&=~0x80000u;presentation_flags_|=1u;}
+            if(room_fog_near_<=room_fog_far_){room_fog_color_=0;room_fog_near_=0;room_fog_far_=-100.0f;}
+            cam_fog_color_=room_fog_color_;cam_fog_near_=room_fog_near_;cam_fog_far_=room_fog_far_;fog_ct_=0;
+            gm|=0x10u;eye_pe_ax_=0;eye_pe_pers_=11832;
+            init_eye_camera();                                   // :44 bhInitPlEyeCamera (plp->flg 0x4 beendet die Augenkamera)
+            return;}}                                            // :45 return: kein bhSetCut
+    event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;
+}
+void RoomWorld::init_eye_camera(const Scene& stage,std::size_t cut){(void)stage;(void)cut;init_eye_camera();}
+void RoomWorld::init_eye_camera(){
     // cut.c:2621 bhInitPlEyeCamera.
     if(!collision_events_)return;auto& gm=collision_events_->flags[11][0];auto& st=collision_events_->flags[5][0];
     gm&=~0x2000u;
@@ -5054,7 +5068,6 @@ void RoomWorld::init_eye_camera(const Scene& stage,std::size_t cut){
     if(st&0x2u){fog_ct_=fog_cngct_-4;if(fog_ct_<0)fog_ct_=0;}else fog_ct_=0;
     gm|=0x10u;
     installed_clip_={player_weapon_==10||player_weapon_==19?1.1f:1.0f,20000.0f}; // njClipZ(-1.0/-1.1, -20000)
-    (void)stage;(void)cut;
 }
 void RoomWorld::set_eye_camera(){
     // cut.c:2719 bhSetPlEyeCamera.

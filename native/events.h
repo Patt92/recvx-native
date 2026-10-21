@@ -131,6 +131,9 @@ public:
     // !(plp->flg & 0x4000004), !(sys->cb_flg & 0x4017). mode0 == 1 and pad_ps 0x200
     // stay with the caller (OK edge of the free player).
     bool exm_flags_clear()const{return !(flags[14][0]&0x10080u)&&!(flags[13][0]&0x4000004u)&&!(flags[10][0]&0x4017u);}
+    // player.c:1678 vollstaendig: bhCheckExmAtari laeuft im Spielerpass (Passtor player.c:1365: sp_flg 0x1,
+    // plp->stflg 0x1000000 frei) nur mit plp->mode0 == 1 und den drei Masken; pad_ps 0x200 ist der Aufruf selbst.
+    bool exm_gate(unsigned player_mode0)const{return (flags[6][0]&1u)&&!(flags[14][0]&0x1000000u)&&player_mode0==1u&&exm_flags_clear();}
     bool use(unsigned item,unsigned* message=nullptr,unsigned slot=~0u);
     void begin_status(); // StatusMain clears the previous ItemUse request.
     // player.c:1072 bhCheckSubPack: gm_flg 0x8000000 (10 Plaetze) aus ev_flg 6/7/8 fuer ply_id 0/1/2.

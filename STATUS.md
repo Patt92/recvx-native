@@ -28,8 +28,10 @@ gebunden (0x82 bhSetDebugLoopEx, 0xCF bhExGameItemInit, 0xD3 bhRankingCall; dm0-
 event.c:437 mit Konsolenmeldung statt Hostfehler). Statischer Skript-Walker
 `tools/walk_event_scripts.py`: Player_controll 132/140/141/143/145 und 0x82 in keinem Raum benutzt.
 Ledger-Altlasten aus der Generatorzeit (bhItemGetGet/Ex, bhPlItemLost/Ex, bhArmsItemSet,
-bhPlayerPoisonCk, bhNext) am Original neu belegt. Offen: ranking.c ControlRanking, Exm-Tor,
-Augenkamera-bhCheckCut(1). [Bericht](work/eventvm-audit-20261021.md). **Kein Commit.**
+bhPlayerPoisonCk, bhNext) am Original neu belegt (02d12c1). Danach: Exm-Tor wie player.c:1678
+(mode0 1, Passtor, ohne st_flg 0x4), bhCheckCut(1)-Augenzweig (cut.c:24-45), Common-Selektor 0
+nur auf dem Spieler (Walker). Offen: ranking.c ControlRanking.
+[Bericht](work/eventvm-audit-20261021.md). **Kein Commit** fuer den zweiten Teil.
 
 **IOP-Modell: Stimmenpool, ATick, SE-Timer (2026-10-21, Arbeitsbaum):** native/audio_iop.* bildet TSNDDRV-
 Befehlsthread, TQ-Warteschlange, MODMIDI-Sequencer, MODHSYN (2x24 Stimmen, Raub, Key-On-Stapel) und die 48
