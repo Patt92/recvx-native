@@ -516,7 +516,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         for(const auto& shadow:scene.shadows){
             if(shadow.mirror!=mirror)continue;
             if(mirror&&!scene.mirror_enabled)throw std::runtime_error("mirror pass modifier without njMirror matrix");
-            const auto projection=project_shadow(shadow,mirror?mirror_view:view,1.f,aspect_x,aspect_y);
+            const auto projection=project_shadow(shadow,*(mirror?&mirror_view:&view),1.f,aspect_x,aspect_y);
             if(!projection.drawable)continue;
             raster::ShadowComposite c;
             c.mask=raster_shadow_mask(projection,*zc,[&](int x,int y,float modifier){
@@ -541,7 +541,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         for(const auto& shadow:scene.shadows){
             if(shadow.mirror!=mirror)continue;
             if(mirror&&!scene.mirror_enabled)throw std::runtime_error("mirror pass modifier without njMirror matrix");
-            const auto projection=project_shadow(shadow,mirror?mirror_view:view,1.f,aspect_x,aspect_y);
+            const auto projection=project_shadow(shadow,*(mirror?&mirror_view:&view),1.f,aspect_x,aspect_y);
             if(!projection.drawable)continue;
             raster::ShadowWork work;
             for(unsigned pass=0;pass<2;++pass)for(const auto& face:projection.faces){
