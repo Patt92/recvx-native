@@ -59,6 +59,24 @@ int main(int argc,char** argv){try{
         FrontendCommand r=FrontendCommand::None;unsigned ticks=0;for(;ticks<100&&r==FrontendCommand::None;++ticks)r=quit.apply({});check(r==FrontendCommand::Quit&&ticks>=30&&ticks<=31,"QUIT command after GetSamurai(50) = 30 frames");
         Frontend attract(quit_config,path);for(int i=0;i<400&&attract.mode()!=6;++i)attract.apply({});for(int i=0;i<1000&&attract.attract_count()==0;++i)attract.apply({});
         check(attract.attract_count()==1&&attract.title()&&attract.mode()<=1,"900-frame attract timer does not re-initialise the title");}
+    {// adv.c:1864-1898: Flag permits Cursor 0 only when a card/save is available.
+        auto title_config=InputConfig::defaults();Frontend load(title_config,path);bool saves=true;load.has_saves=[&]{return saves;};
+        auto settle_load=[&](int mode){for(int i=0;i<400&&load.mode()!=mode;++i)load.apply({});check(load.mode()==mode,"load title mode");};
+        auto navigate=[&](Action action,bool gamepad){InputFrame frame;frame.gamepad_input=gamepad;frame.pressed[unsigned(action)]=true;load.apply(frame);};
+        settle_load(6);navigate(Action::Confirm,false);settle_load(9);check(load.cursor()==Frontend::load_game_cursor,"saved game not selected initially");
+        for(bool gamepad:{false,true}){
+            navigate(Action::Down,gamepad);check(load.cursor()==Frontend::new_game_cursor,"down from LOAD GAME");
+            navigate(Action::Up,gamepad);check(load.cursor()==Frontend::load_game_cursor,"cannot return to LOAD GAME with saves");
+            navigate(Action::Up,gamepad);check(load.cursor()==Frontend::load_game_cursor,"LOAD GAME upper clamp");
+        }
+        saves=false;load.apply({});check(load.cursor()==Frontend::new_game_cursor,"removed saves leave LOAD GAME selected");
+        navigate(Action::Up,false);navigate(Action::Up,true);check(load.cursor()==Frontend::new_game_cursor,"LOAD GAME selectable without saves");
+        saves=true;navigate(Action::Up,false);check(load.cursor()==Frontend::load_game_cursor,"new saves do not unlock LOAD GAME");
+        navigate(Action::Cancel,false);settle_load(6);navigate(Action::Confirm,true);settle_load(9);check(load.cursor()==Frontend::load_game_cursor,"LOAD GAME lost across cancel/start");
+        navigate(Action::Confirm,true);check(load.starting(),"LOAD GAME does not start title fade");
+        FrontendCommand result=FrontendCommand::None;for(int i=0;i<400&&result==FrontendCommand::None;++i)result=load.apply({});
+        check(result==FrontendCommand::LoadGame&&!load.active(),"LOAD GAME return code 3 not dispatched");
+    }
     SDL_JoystickClose(joystick);SDL_JoystickDetachVirtual(index);std::filesystem::remove(path);
     // Video routing must work even without the event cinematic-skip flag.
     Inventory inventory;StatusMenu menu;MessageDialog dialog;GameplayInput gameplay(inventory,menu,dialog,nullptr);bool video=true;unsigned skips=0;gameplay.video_active=[&]{return video;};gameplay.skip_video=[&]{video=false;++skips;};InputFrame frame;frame.pressed[unsigned(Action::Confirm)]=true;

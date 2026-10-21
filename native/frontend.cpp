@@ -59,15 +59,16 @@ void Frontend::title_call(int return_code){ // adv.c:1825 TitleCall(PortId, Retu
     pending_command_=FrontendCommand::TitleCall;  // SetVolumeAdx2(0,0); PlayAdx(0, PatId, 3) -> runtime plays ADV/0003
     request_adv_fade(3,samurai(430));flush_count_=180;next_return_code_=return_code;mode_=17;gen_flag_=1;
 }
-// adv.c:1849 CheckButton(Level 0, Flag 0, MaxFlag 0). Flag is CheckMcSelectPortInfoState
-// of both ports: the host has no memory card, so LOAD GAME (Cursor 0) is skipped
-// like the original without a card. MaxFlag 0: no wrap at either end.
+// adv.c:1849 CheckButton(Level 0, Flag, MaxFlag 0). Flag is CheckMcSelectPortInfoState
+// of both ports; host save slots supply that availability. Cursor 0 is skipped
+// only without saves (adv.c:1864/1879). MaxFlag 0: no wrap at either end.
 void Frontend::check_button(){
     if(pad_on_){saver_timer_=9000;saver_command_=0;}       // CheckAdvScreenSaverStopKey -> StopAdvScreenSaver(0)
-    bool connect=true;if(cursor_==0&&!(has_saves&&has_saves())){cursor_=1;connect=false;}
+    const unsigned first=has_saves&&has_saves()?0u:1u;
+    bool connect=true;if(cursor_==0&&first!=0){cursor_=1;connect=false;}
     const unsigned last=cursor_max_;                       // original: CursorMax-1; host: +1 for the QUIT row (deviation)
     if(connect){
-        if(cursor_moves_<0){cursor_=std::max(cursor_,2u)-1;if(sound)sound(2);}       // Rept & 0x1000 (pad up): Cursor--, Cursor 0 -> 1
+        if(cursor_moves_<0){cursor_=std::max(cursor_,first+1)-1;if(sound)sound(2);}  // Rept & 0x1000: Cursor--, skip 0 only with Flag 0
         else if(cursor_moves_>0){cursor_=std::min(cursor_+1,last);if(sound)sound(2);} // Rept & 0x4000 (pad down): Cursor++, clamp
     }
     if(ok_pressed_){ // press & 0x800 (Start) || press & AdvGetOkButton()

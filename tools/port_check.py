@@ -226,9 +226,8 @@ README_END = '<!-- port-status:end -->'
 README_EXTERNAL = '<!-- port-status:external -->'
 PORT_STATUS = ROOT / 'docs/PORT_STATUS.md'
 
-# README.md is written in English; docs/PORT_STATUS.md stays German. The block is parsed
-# from the German report and rendered with English labels so a later sync cannot put the
-# German wording back into the public README.
+# The generated report and README excerpt use the same English labels. Ledger
+# domain names remain stable identifiers in the input table.
 README_AREAS = {
     'Gegner/KI': 'Enemies/AI',
     'Effekte': 'Effects',
@@ -244,18 +243,18 @@ README_AREAS = {
 
 def readme_block_from_status(status):
     lines = status.splitlines()
-    summary_index = next((i for i, line in enumerate(lines) if line.startswith('Expliziter Belegumfang:')), None)
-    events_index = next((i for i, line in enumerate(lines) if line.startswith('Event-Befehle (bhScenarioJmpT):')), None)
-    table_index = next((i for i, line in enumerate(lines) if line.startswith('| Bereich | Mechanismen | Belegumfang |')), None)
+    summary_index = next((i for i, line in enumerate(lines) if line.startswith('Explicit evidence scope:')), None)
+    events_index = next((i for i, line in enumerate(lines) if line.startswith('Event commands (bhScenarioJmpT):')), None)
+    table_index = next((i for i, line in enumerate(lines) if line.startswith('| Area | Mechanisms | Evidence scope |')), None)
     if summary_index is None or events_index is None or table_index is None:
         raise SystemExit('PORT_STATUS: summary or event-command line not readable')
     summary = re.fullmatch(
-        r'Expliziter Belegumfang: \*\*(.+?)\*\* gewichtet, \*\*(.+?)\*\* voll belegt \((.+?)\)\.',
+        r'Explicit evidence scope: \*\*(.+?)\*\* weighted, \*\*(.+?)\*\* fully evidenced \((.+?)\)\.',
         lines[summary_index])
     events = re.fullmatch(
-        r'Event-Befehle \(bhScenarioJmpT\): (\d+)/(\d+) gebunden, (\d+) nur konsumiert, (\d+) fehlen\.',
+        r'Event commands \(bhScenarioJmpT\): (\d+)/(\d+) bound, (\d+) consumed only, (\d+) missing\.',
         lines[events_index])
-    scope = re.fullmatch(r'(\d+)/(\d+) Mechanismen; kein Gesamtfortschritt', summary.group(3)) if summary else None
+    scope = re.fullmatch(r'(\d+)/(\d+) mechanisms; not overall game completion', summary.group(3)) if summary else None
     if not summary or not events or not scope:
         raise SystemExit('PORT_STATUS: summary or event-command line has an unexpected shape')
     table = [lines[table_index]]
@@ -273,8 +272,8 @@ def readme_block_from_status(status):
         cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
         if len(cells) != 6:
             raise SystemExit(f'PORT_STATUS: unexpected table row {line!r}')
-        area = README_AREAS.get(cells[0])
-        if area is None:
+        area = cells[0]
+        if area not in README_AREAS.values():
             raise SystemExit(f'PORT_STATUS: unknown area label {cells[0]!r}')
         rows.append('| ' + ' | '.join([area, *cells[1:]]) + ' |')
     lines = [README_BEGIN,
@@ -308,6 +307,49 @@ def percent(part, whole):
     return 100.0 * part / whole if whole else 0.0
 
 
+# English descriptions for entries shown in the public Markdown report. The
+# detailed, source-backed notes remain in port_ledger.tsv; this map does not
+# affect classification or scores. A new entry without a translation stays
+# visibly linked to the ledger instead of leaking German into the report.
+REPORT_NOTES_EN = {
+    ('adv.c', 'Adv_GameOptionScreen'): 'Original option plates for display, sound, vibration, and key configuration remain unported; OPTION opens documented host settings instead.',
+    ('adv.c', 'CheckMcSelectPortInfoState'): 'Original memory-card port query remains unported; host slot selection reads occupied saves from the user-data directory.',
+    ('adv.c', 'FindFirstVmDrive'): 'Original memory-card search remains unported; host saves in the platform user-data directory enable LOAD GAME when a slot is occupied.',
+    ('effsub4.c', 'bhEff_Sub367'): 'No producer of exp0 (EFFSUB367_WORK) or op->func was found in original C or ELF; bhEff367 remains open (effsub4.c:2007).',
+    ('MdlPut.c', 'bhPutModel'): 'Mirror pass from MdlPut.c:57-79/89-111 is partially connected: qualifying models draw a second time under cam.mtx*njMirror, with light based on unmirrored cam.mtx. Player floor, enemy, and object/item flags are connected; hair and weapons rely on measured status bytes. Child enemies check their own byte. mirror_pass has two red control cases.',
+    ('Motion.c', 'bhSetMotion:Spieler'): 'Player node pose uses the existing object tree before motion advance, including Hokan countdown. Action/event, combat, damage, grab, push, and draw edits are connected; player_motion_blend and pose traces cover transitions. Stairs, Game Over, and script-driven player motion still do not update this tree.',
+    ('adv.c', 'AdvGetCancelButton'): 'Host Cancel is used instead of the original keytype table {32,128,64}.',
+    ('adv.c', 'AdvGetOkButton'): 'Host Confirm represents both Start (0x800) and keytype OK; original keytype tables {192,96,160} are not bound.',
+    ('adv.c', 'ResetAdvSystem'): 'Only title fields NextReturnCode/ExtraFlag/NextMode/GenFlag and StopAdvScreenSaver(1) are connected; texture lists, option fields, and VM fields are missing.',
+    ('camera.c', 'bhControlCamera'): 'The runtime owns cam.ofx/ofy/ofz across rooms, and RoomWorld::camera adds the offset to cam.px. Original writers EN02/EN13/EN17, event 0x5a, and bhEff30a are connected. Room load clears the offset as bhInitCamera does. Runtime observation of room-change reset and a separate bhGetCameraPosition check remain open.',
+    ('cut.c', 'bhControlActiveCamera'): 'For stair state, the camera follows owP[0] from the last bhCalcModel rather than the player position. RM_3080 no longer stalls; camera_follow_target has a red control case. Free-control EXP_WORK interpolation, bhCheckCutAttribute floor input, and eye-camera return remain open.',
+    ('cut.c', 'bhControlEventCamera'): 'RoomWorld::control_event_camera follows the mode0 0/1/2/3 state machine and 20 spline slots; the paused camera holds its pose. RM_0040 event 5 now holds key 1 as in RDT. A native owner for pt_flg 0x1 and proven CAM_WORK narrowing for cam.pers remain open.',
+    ('cut.c', 'bhSetCut'): 'RoomWorld::cut_fog_handover carries cut fog and fog_ct rules through initialize_camera_clip. Other bhSetCut clip/hide portions remain as previously recorded.',
+    ('cut.c', 'bhSetEventCamera'): 'Opcode 0x13 mode 0 now installs signed key position/angles, perspective, lock angles, and fog in both branches before event-camera initialization. Previous-key fields, cam.ln/flags, and bhSetEventHideObjLgt remain open.',
+    ('cut.c', 'bhSetFixedCut'): 'Opcode 0x2a mode 0 transfers fog and installs cam.ncut before bhChangeViewClipRM, so the near plane comes from the new cut. native_ground_world has a red control case.',
+    ('en02.c', 'bhEne02'): 'Historical extraction/generator evidence is invalid for the native port. A native Gulp Worm state machine on WorldEntity covers init, movement, underground pursuit, emergence/swallowing, rocks, retreat, damage, sand effects, player control, camera offset, audio, and hit marks; en02_world and RM_5830 headless checks are recorded. The uninitialized ang in SetSandEffectMain case 8 is evidenced by disassembly; three sprites are omitted while particles run. RM_3091/RM_7220 and visible window acceptance remain open.',
+    ('event.c', 'bhArmsItemSet'): 'Historical extraction/generator evidence is invalid. First hit, bag range, and equip slot were examined; the full WeaponSet/monitor state machine remains missing.',
+    ('event.c', 'bhItemGetGet'): 'Historical extraction/generator evidence is invalid. Inventory bank, flags, quantity, and equip slot were checked; independent ply_wno/monitor behavior is incomplete.',
+    ('event.c', 'bhItemGetGetEx'): 'Historical extraction/generator evidence is invalid. Free slots, shotgun, and equipment were checked; independent ply_wno/monitor behavior is incomplete.',
+    ('event.c', 'bhPlItemChangeM'): 'Historical extraction/generator evidence is invalid. First hit, packed ID, and original quantity/flag removal were checked.',
+    ('event.c', 'bhPlItemLost'): 'Historical extraction/generator evidence is invalid. Fixed slot ranges, first hit, and compaction were examined; the full WeaponSet/monitor state machine remains missing.',
+    ('event.c', 'bhPlItemLostEx'): 'Historical extraction/generator evidence is invalid. Transfer to bank 14 and fixed compaction were examined; the full WeaponSet/monitor state machine remains missing.',
+    ('event.c', 'bhPlItemTamaSet'): 'Historical extraction/generator evidence is invalid. First hit and u16 little-endian quantity were checked.',
+    ('hitchk.c', 'bhCheckWall2Box'): 'Historical extraction/generator evidence is invalid. Original query and geometry helpers were extracted; static/mobile ATR walls and prior object position were bound, with wall and second-crate tests.',
+    ('hitchk.c', 'bhGetGroundPosition'): 'Historical extraction/generator evidence is invalid. The generated ground query kept room/mobile index and live ATR work. Player push/stair binding, linked casing effect, EE random state, and first-free eff[512] mapping were reported; other random consumers, exact EasyLight, full effect lifecycle, and general player work remain open.',
+    ('objitm.c', 'bhObj001'): 'Historical extraction/generator evidence is invalid. Mobile walls, side probes, work indices, speed, and box collision were tested; auxiliary metc/mflr consumers for crate climbing remain incomplete.',
+    ('player.c', 'bhCPM2_act_psh'): 'Historical extraction/generator evidence is invalid. MTN49/50/reverse49, Hokan, and curve9 were bound and tested; physical vibration callback remains missing.',
+    ('ps2_NaSystem.c', 'njColorBlendingModeSys'): 'Historical extraction/generator evidence is invalid. Native chunk_blend.cpp models nj/GS saved state, ALPHA register selection, and RGB=(A-B)*C+D; FBA=0, PABE, GS packet quantization, and dc_alpha remain unmodeled. Blend, effect, weapon-flash, lighter, and runtime checks are recorded.',
+    ('sub1.c', 'GetItem'): 'Historical extraction/generator evidence is invalid. GetItem including branch 153 and subsequent ItemSort were extracted; StatusCancel, sprite transitions, and full StatusMain were not completely bound.',
+    ('sub1.c', 'ItemSort'): 'Historical extraction/generator evidence is invalid. Standard inventory sorting after pickup and mutation was tested; special flgchk in the full StatusMain remains incomplete.',
+}
+
+
+def report_note(record):
+    return REPORT_NOTES_EN.get((record['file'], record['function']),
+                               'See the detailed evidence and open bindings in docs/port_ledger.tsv.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--json', type=Path, help='vollständige Funktionsliste als JSON schreiben')
@@ -329,50 +371,50 @@ def main():
 
     lines = []
     unconfirmed = [r for r in records if r['status'] == 'unbestaetigt']
-    lines.append('# Nativer Portstatus')
+    lines.append('# Native port status')
     lines.append('')
-    lines.append('Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige '
-                 'Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.')
+    lines.append('This report counts only native mechanisms with explicit evidence. The complete '
+                 'original decompilation is deliberately neither the denominator nor a list of missing work.')
     lines.append('')
-    lines.append(f'Expliziter Belegumfang: **{percent(engine["weighted"], engine["weight"]):.1f} %** gewichtet, '
-                 f'**{percent(engine["strict"], engine["weight"]):.1f} %** voll belegt '
-                 f'({engine["done_functions"]}/{engine["functions"]} Mechanismen; kein Gesamtfortschritt).')
+    lines.append(f'Explicit evidence scope: **{percent(engine["weighted"], engine["weight"]):.1f} %** weighted, '
+                 f'**{percent(engine["strict"], engine["weight"]):.1f} %** fully evidenced '
+                 f'({engine["done_functions"]}/{engine["functions"]} mechanisms; not overall game completion).')
     lines.append('')
-    lines.append(f'Event-Befehle (bhScenarioJmpT): {opcode_done}/{opcode_total} gebunden, '
-                 f'{opcode_counts["pending"]} nur konsumiert, {opcode_counts["fehlt"]} fehlen.')
+    lines.append(f'Event commands (bhScenarioJmpT): {opcode_done}/{opcode_total} bound, '
+                 f'{opcode_counts["pending"]} consumed only, {opcode_counts["fehlt"]} missing.')
     lines.append('')
-    lines.append('| Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |')
+    lines.append('| Area | Mechanisms | Evidence scope | Fully evidenced | Partial | Open |')
     lines.append('|---|---:|---:|---:|---:|---:|')
     for label, g in groups.items():
         if not g['weight']:
             continue
         half = g['status:partial'] + g['status:pending']
-        lines.append(f'| {label} | {g["done_functions"]}/{g["functions"]} | '
+        lines.append(f'| {README_AREAS[label]} | {g["done_functions"]}/{g["functions"]} | '
                      f'{percent(g["weighted"], g["weight"]):.1f} % | {percent(g["strict"], g["weight"]):.1f} % | '
                      f'{half} | {g["status:missing"]} |')
     lines.append('')
-    lines.append('Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichheit, '
-                 'Originalquellen und quarantänierte Generatoren zählen nie als Portbeleg.')
+    lines.append('Only ledger entries with independent native evidence count. Matching names, '
+                 'original sources, and quarantined generators never count as port evidence.')
     lines.append('')
     selection = [r for r in records if r['status'] in {'partial', 'missing'} and r['domain'] != PLATFORM]
     if args.domain:
         selection = [r for r in selection if args.domain.lower() in r['domain'].lower()]
     selection.sort(key=lambda r: -r['weight'] * (1 - SCORE[r['status']]))
-    lines.append(f'## Größte offene Funktionen{" (" + args.domain + ")" if args.domain else ""}')
+    lines.append(f'## Largest open functions{" (" + args.domain + ")" if args.domain else ""}')
     lines.append('')
     for r in selection[:args.top]:
-        lines.append(f'- `{r["file"]}{":" + str(r["line"]) if r["line"] else ""}` {r["function"]} ({r["status"]}'
-                     f'{", " + r["note"] if r["note"] else ""})')
+        lines.append(f'- `{r["file"]}{":" + str(r["line"]) if r["line"] else ""}` {r["function"]} '
+                     f'({r["status"]}, {report_note(r)})')
     if unconfirmed:
         lines.append('')
-        lines.append('## Unbestätigte historische Ledger-Einträge')
+        lines.append('## Unconfirmed historical ledger entries')
         lines.append('')
         for r in unconfirmed:
-            lines.append(f'- `{r["file"]}` {r["function"]}: {r["note"]}')
+            lines.append(f'- `{r["file"]}` {r["function"]}: {report_note(r)}')
     report = '\n'.join(lines)
     print(report)
     if args.markdown:
-        args.markdown.write_text(report + '\n\nErzeugt mit `python3 tools/port_check.py --markdown ' + str(args.markdown) + '`.\n')
+        args.markdown.write_text(report + '\n\nGenerated with `python3 tools/port_check.py --markdown ' + str(args.markdown) + '`.\n')
     if args.readme:
         status = report if args.markdown and args.markdown.resolve() == PORT_STATUS.resolve() else PORT_STATUS.read_text()
         update_readme(args.readme, status)

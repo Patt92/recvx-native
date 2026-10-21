@@ -265,7 +265,9 @@ recipe coverage report [INVENTORY-COVERAGE.md](INVENTORY-COVERAGE.md).
   retains its explicitly installed range independently of the camera flag.
 - Door sequences from MRY packets through independent native `FadeProc1`,
   `ViewProc1–7`, and `DoorProc1–7`; the host door-skip convenience uses Confirm.
-  Room scripts finish before `bhStartDoorDemo`.
+  Room scripts finish before `bhStartDoorDemo`. Destination filenames use the
+  live `rcase` only at room-read time (`system.c:1623`), after the source exit
+  scenario; `bhSetDoorDemo` does not capture the room variant.
 - Inventory, flags, HP, and play time survive room changes.
 - 3D scanner terminal (`sp_evt.c`) with script interpreter and on-screen
   keyboard.
@@ -295,13 +297,7 @@ recipe coverage report [INVENTORY-COVERAGE.md](INVENTORY-COVERAGE.md).
 
 ## Audio
 
-+See [AUDIO.md](AUDIO.md). At this checkpoint, ADX music and voice, Sony sound
-+banks, SQ sequences, footstep/door/weapon/enemy/event sounds, and movies ran
-+natively. Pitch, envelopes, reverb, and bit-exact SPU mixing were still listed
-+as gaps; consult the audio page for later work.
-+EOF
-+python3 - <<'PY'
-+from pathlib import Path
-+p=Path('docs/NATIVE_GAMEPLAY.md')
-+p.write_text(''.join(line[1:] if line.startswith('+') else line for line in p.read_text().splitlines(keepends=True)))
-+PY
+See [AUDIO.md](AUDIO.md). ADX music and voice, Sony sound banks, SQ
+sequences, game sound requests, and movies run natively. The IOP voice pool,
+pitch, envelopes, and reverb are connected. The audio page records the
+remaining loader, interpolation, and output-accuracy gaps.

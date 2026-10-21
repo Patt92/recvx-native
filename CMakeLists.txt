@@ -407,6 +407,11 @@ if(BUILD_TESTING)
   else()
     add_test(NAME door_transition COMMAND recvx-door-tests)
   endif()
+  if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0021.RDT")
+    add_test(NAME door_room_case COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/door_room_case_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   add_executable(recvx-collision-tests tests/native/collision_test.cpp)
   add_executable(recvx-item-box-object-tests tests/native/item_box_object_test.cpp)
   target_link_libraries(recvx-item-box-object-tests PRIVATE recvx_game)

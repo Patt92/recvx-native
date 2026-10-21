@@ -396,13 +396,10 @@ int main(int argc,char** argv){
             return bits;};
         auto request_door=[&](const recvx::DoorRequest& request){
             if(door.active()||(transition_pending&&!queued_door))return false;
-            const auto target=request.room_name();std::optional<std::size_t> target_index;for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==target)target_index=i;
-            if(!target_index)throw std::runtime_error("door room missing: "+target);
-            auto name=target;name.replace(name.size()-3,3,"RDT");const auto override=args.mods/"rooms"/name;
-            const auto bytes=fs::is_regular_file(override)?recvx::read_asset_file(override,64*1024*1024):rooms.load(*target_index,64*1024*1024);
-            const auto destination=recvx::decode_scene(bytes);
-            if(destination.cameras.empty())throw std::runtime_error("door destination has no camera: "+target);
-            if(!destination.spawns.empty()&&request.spawn>=destination.spawns.size())throw std::runtime_error("DoorCall spawn "+std::to_string(request.spawn)+" outside "+target+" position table");
+            // bhSetDoorDemo stores only stage/room/spawn/type (room.c:883-918).
+            // scd1 may still write sys->rcase after this call or during the exit
+            // pass; resolve the filename only when the room loader consumes it
+            // (system.c:1623), not with the source room's case here.
             queued_door=request;transition_pending=true;menu.active=false;return true;
         };
         auto load=[&](){
@@ -701,7 +698,20 @@ int main(int argc,char** argv){
             // StartVibrationEx(pru_vib_atrb, pru_vib_no) through the vibration unit.
             for(const auto sound:door.take_shake_sounds()){++door_shake_sounds;if(sound>=0)audio.play_system(unsigned(sound));}
             for(const auto pattern:door.take_shake_patterns()){++door_shake_patterns;vibration.start(pattern.first,pattern.second);}
-            if(door.finished()){const auto destination=door.destination();for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==destination.room_name())room_index=i;
+            if(door.finished()){auto destination=door.destination();
+                // sys->rcase is live until bhSysCallMonitor reads the filename
+                // (system.c:1623). The source scd1 finishes after bhSetDoorDemo;
+                // it is not part of DOOR_WORK (room.c:913-918).
+                if(events)destination.room_case=events->values[21];
+                const auto target=destination.room_name();std::optional<std::size_t> target_index;
+                for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==target)target_index=i;
+                if(!target_index)throw std::runtime_error("door room missing: "+target);
+                auto name=target;name.replace(name.size()-3,3,"RDT");const auto override=args.mods/"rooms"/name;
+                const auto bytes=fs::is_regular_file(override)?recvx::read_asset_file(override,64*1024*1024):rooms.load(*target_index,64*1024*1024);
+                const auto target_scene=recvx::decode_scene(bytes);
+                if(target_scene.cameras.empty())throw std::runtime_error("door destination has no camera: "+target);
+                if(!target_scene.spawns.empty()&&destination.spawn>=target_scene.spawns.size())throw std::runtime_error("DoorCall spawn "+std::to_string(destination.spawn)+" outside "+target+" position table");
+                room_index=*target_index;
                 // Nur beim Host-Skip (doors.h): die Demo bricht mitten im Tuerton ab, also
                 // enden genau die Tuerstimmen 27..29 sofort. Der regulaere Ablauf behaelt
                 // Com_ExecRoomFadeIn (room_fade_in in load()); BGM, Ambient und alle uebrigen

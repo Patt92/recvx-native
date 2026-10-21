@@ -197,5 +197,3 @@ Metal and D3D11 remain available.
 Headless runs execute every simulation step and render only the requested last
 frame. Output files are never overwritten. Diagnostic positioning does not
 prove a natural playthrough. Replays start with `0 new_game`.
-EOF
-sed -i '' 's/^+//' docs/NATIVE_PORT.md

@@ -64,7 +64,7 @@ rather than Combine. Combine selects a second item for the original recipe.
 
 ## Change bindings
 
-Start in the main menu and select **Einstellungen**. Left/Right switches between
+Start in the main menu and select **OPTION**. Left/Right switches between
 keyboard and controller pages, except on deadzone/menu-threshold rows where it
 adjusts the value. Select an action, press configured Confirm, then press a new
 key/button or move a centered stick. Escape cancels capture. Each successful edit
@@ -72,9 +72,10 @@ is saved atomically to controls.ini and applied immediately. Confirm/Cancel
 conflicts swap the previous binding so the menu remains operable. Restoring
 defaults restores both device pages. The connected-controller count is shown.
 
-Alternatively, edit `controls.ini` and restart. Packaged builds keep it next to Start.cmd or
-RECVX Native.app, outside the signed application. Do not edit the internal app
-Resources directory. Development launches look next to the selected data folder.
+Alternatively, edit `controls.ini` and restart. Release packages keep it in
+`%APPDATA%\RECVX` on Windows or `~/Library/Application Support/RECVX` on macOS.
+Development builds use the project directory. Do not edit the internal app
+Resources directory.
 An explicit `--controls <path>` selects a different file. If the default file is
 absent, built-in defaults are used; an explicitly selected missing/invalid file
 reports an error. The complete default template is included in source/packages.

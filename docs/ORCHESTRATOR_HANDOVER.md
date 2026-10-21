@@ -1,165 +1,158 @@
-# Übergabe: Orchestrierung des nativen Game-Ports
+# Historical handoff: coordinating the native game port
 
-Stand: 2026-10-10, Europe/Berlin. Repo:
+Status: 2026-10-10, Europe/Berlin. Repository:
 `/Users/patrickhoffmann/Projects/recvx-decomp`.
-Dies ist eine Arbeitsanweisung und Bestandsaufnahme, keine Gameplay-Freigabe.
+This records an earlier assignment and inventory, not gameplay acceptance.
+Current `AGENTS.md` and user decisions take precedence.
 
-## Auftrag des Nachfolgers
+## Successor assignment
 
-Übernimm die Integration und Orchestrierung der offenen Pakete. Erhalte
-bestehende Portierungen, koordiniere klare Dateibesitzer und bringe die
-Mechanismen in den produktiven nativen Ablauf. Nicht nur Tasks verteilen
-oder Tests grün machen. Das Gesamtziel bleibt:
+Take over integration and coordination of open packages. Preserve existing
+ports, coordinate clear file ownership, and connect mechanisms to productive
+native gameplay. Merely distributing tasks or making tests green is
+insufficient. The overall goal remains a standalone native port of the
+decoded/decompiled game on macOS arm64 and Windows x64, preserving original
+gameplay with **every enemy** in the productive World. No PS2 recreation,
+original core, or invented replacement logic. Preserve original order, flags,
+tables, states, and side effects; fix common causes.
 
-Das decoded/dekompilierte Game eigenständig nativ auf macOS arm64 und
-Windows x64 portieren, mit originalem Spielverhalten und **allen Gegnern**
-in der produktiven World. Keine PS2-Nachbildung, kein Originalkern und
-keine erfundene Ersatz-Spiellogik. Originale Reihenfolge, Flags, Tabellen,
-Zustände und Seiteneffekte erhalten; Fehler an gemeinsamen Ursachen beheben.
+## Non-negotiable rules
 
-## Nicht verhandelbare Regeln
+- Read the current `AGENTS.md` fully. Newer user clarifications override
+  historical states and success reports.
+- Run `python3 tools/check_no_original_core.py` before work and every build.
+  Report/resolve violations first; no bypass or new exception/allowlist.
+- Never read, search, copy, restore, or use `archived/FORBIDDEN_DONTUSE`, even
+  indirectly through history, other tasks, archives, or caches. Only new,
+  explicit user authorization could permit restoration.
+- Original sources and disassembly outside quarantine are semantic
+  references. Do not compile/link/call the original engine or use copied or
+  generated function bodies under another name. ELF/MMI evidence can clarify
+  behavior, not become a runtime component.
+- Existing native Player/RoomWorld/WorldEntity/Inventory/Effect owners remain
+  authoritative. No second sys/plp/rom/ene/eff world, mirrored `BH_PWORK`
+  table, or copy-in/copy-out original engine.
+- No heuristics, guessed constants, room/enemy special cases, or silent no-ops
+  as substitutes. Record unresolved original semantics as open.
+- Do not weaken effect tests to neutral gap responses.
+- Local changes and untracked files belong to the user/peers. No reset,
+  stashing/removing others' work, commit, push, or starter package without an
+  explicit request. This handoff requested `apply_patch` for file edits.
 
-- Aktuelles AGENTS.md vollständig lesen. Neuere Nutzerklarstellungen haben
-  Vorrang vor historischen Arbeitsständen und Erfolgsmeldungen.
-- Vor Arbeit und jedem Build `python3 tools/check_no_original_core.py`.
-  Verstoß zuerst melden/klären; kein Bypass, keine neue Ausnahme/Whitelist.
-- `archived/FORBIDDEN_DONTUSE` niemals lesen, durchsuchen, kopieren,
-  zurückholen oder verwenden; auch nicht indirekt über Historie, andere
-  Tasks, Archive oder Caches. Nur neue ausdrückliche Nutzerautorisierung
-  könnte Wiederherstellung erlauben.
-- Originalquellen und Disassembly außerhalb der Quarantäne sind
-  Semantikreferenz. Kein Kompilieren/Linken/Aufrufen der Originalengine,
-  keine kopierten oder generierten Funktionskörper unter anderem Namen.
-  ELF/MMI-Befunde dürfen Verhalten klären, sind kein Laufzeitbaustein.
-- Vorhandene native Player-/RoomWorld-/WorldEntity-/Inventory-/Effect-
-  Besitzer bleiben die Autorität. Keine zweite sys/plp/rom/ene/eff-Welt,
-  BH_PWORK-Spiegeltabelle oder Copy-in/Copy-out-Originalengine.
-- Keine Heuristik, geratenen Konstanten, Raum-/Gegner-Sonderfälle oder
-  stillen No-ops als Ersatz. Unklare Originalsemantik belegt offen lassen.
-- Wirkungsprüfungen nicht auf neutrale Lückenantworten abschwächen.
-- Lokale Änderungen und ungetrackte Dateien gehören dem Nutzer/Peers.
-  Kein Reset, fremdes Stash/Entfernen, Commit, Push oder Startpaket ohne
-  ausdrücklichen Auftrag. Dateien mit apply_patch bearbeiten.
+## Initial steps recorded by this handoff
 
-## Erstes Vorgehen
+1. Run `git status --short`, read the current `AGENTS.md`, and run the mandatory
+   checker. At this handoff it reported PASS; HEAD was `8b951f5` (savepoint).
+   Many important native files, tests, reports, and task documents were
+   untracked. Active peers could change the tree at any time.
+2. Determine active agents and their actual claimed files. Recent user
+   messages do not replace a current ownership check. Message other chats
+   only with user authorization; use agent tools for explicitly delegated
+   subtasks, and do not create new chats without a request. Avoid duplicate
+   work.
+3. Maintain a compact ownership/dependency table and enemy-ID matrix. Give
+   new parallel tasks disjoint files and minimal contracts.
+4. Compare document status with current code and newest package reports.
+   `CLAUDE_NEXT_TASKS.md` and much of the roadmap are historical: do not
+   treat claims such as “Inventory/Computer/ECG missing” or “R02 open” as new
+   tasks without checking. Resolve visible conflicts.
+5. Determine the current build state in a separate build directory without
+   disturbing peer builds. This handoff claimed no new full build; only
+   status, policy, and documents had been checked.
 
-1. `git status --short`, aktuelles AGENTS.md und Pflichtprüfer. Bei dieser
-   Übergabe: Prüfer PASS; HEAD `8b951f5` (savepoint). Zahlreiche wichtige
-   native Dateien, Tests, Berichte und Auftragsdokumente sind ungetrackt.
-   Der Stand kann durch aktive Peers jederzeit weiterlaufen.
-2. Aktive Agents und ihre tatsächlich beanspruchten Dateien feststellen.
-   Die letzten Nutzermeldungen ersetzen keine aktuelle Besitzerabfrage.
-   Andere Chats nur nach Nutzerautorisierung anschreiben; für ausdrücklich
-   delegierte Subtasks die Agent-Werkzeuge verwenden, keine neuen Chats
-   ohne Auftrag erzeugen. Keine bereits laufende Arbeit doppelt starten.
-3. Eine kompakte Besitz-/Abhängigkeitstabelle und Gegner-ID-Matrix führen.
-   Neue Parallelaufgaben nur mit disjunkten Dateien und minimalem Vertrag.
-4. Dokumentstatus mit aktuellem Code und neuesten Paketberichten abgleichen.
-   `CLAUDE_NEXT_TASKS.md` und große Teile der Roadmap sind historisch:
-   dortige Aussagen „Inventar/Computer/EKG fehlen“ oder „R02 offen“ nicht
-   ungeprüft als neue Aufgaben ausgeben. Konflikte sichtbar bereinigen.
-5. Aktuellen Buildstand in eigenem Buildverzeichnis feststellen, ohne
-   laufende Peer-Builds zu stören. Kein frischer Gesamtlauf behauptet:
-   bei dieser Übergabe wurden nur Status/Policy/Dokumente geprüft.
+## Ownership and assignment at that time
 
-## Zuständigkeiten und aktueller Auftrag
+An integrator owned `CMakeLists.txt`, `native/world.*`, `runtime.cpp`,
+`events.cpp`, shared state/asset contracts, and documentation integration.
+Renderer/Scene interfaces also required exclusive agreement. Peers provided
+their modules and small connection patches; no concurrent changes to these
+files. Any ownership transfer had to be agreed and documented first.
 
-Ein Integrator besitzt `CMakeLists.txt`, `native/world.*`, `runtime.cpp`,
-`events.cpp`, gemeinsame Zustands-/Assetverträge und Dokumentintegration.
-Renderer-/Scene-Schnittstellen ebenfalls exklusiv abstimmen. Peers liefern
-eigene Module sowie kleine Anschluss-Patches; keine konkurrierenden Änderungen
-an diesen Dateien. Eine explizit vereinbarte Übergabe ist möglich, muss aber
-vorher dokumentiert werden.
+**Enemy agent:** The user explicitly broadened the initial C01 task to
+**C01–C08 including all C07+ IDs**. The controlling handoff was
+[historical enemy assignment](../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). The agent was last analyzing zombie/dog traps
+in `enemy_spawn.*`; that was useful C01 work, not the entire assignment.
+Confirm the agent read the updated file; do not claim the change had reached
+them already.
 
-**Gegner-Agent:** Der Nutzer hat den zunächst engen C01-Auftrag ausdrücklich
-auf **C01–C08 einschließlich sämtlicher C07+-IDs** erweitert. Maßgeblich:
-`docs/THIRD_AGENT_C01_TASK.md`. Zuletzt analysierte der Agent noch Zombie-/
-Hunde-Fallen in `enemy_spawn.*`; das ist nützliche C01-Teilarbeit, nicht der
-Gesamtauftrag. Sicherstellen, dass er die aktualisierte Datei gelesen hat.
-Nicht behaupten, die Änderung sei bereits bei ihm angekommen.
+Derive the complete original ID/variant/child/dispatcher map, agree C02
+contracts on the existing owner, then port every enemy mechanism and asset:
+init, event spawn, motion/interpolation, AI, attack/grab/damage/death, child
+lifecycle, draw, and SFX where present. Separate C05/Subplayer by actual ID
+table; include EN00. Implement and integrate all enemies/assets first, then
+test/fix them together. Policy and required build/safety checks remain active.
+The first required productive acceptance was EN07 in RM_0130 through original
+spawn/events, a complete visible model, advancing animation, AI, and SFX.
+Accept the remaining enemies afterward; bat acceptance does not finish the
+overall goal.
 
-Vollständige originale ID-/Varianten-/Child-/Dispatcherzuordnung herleiten,
-C02-Verträge am vorhandenen Besitzer abstimmen, dann alle Gegnermechanismen
-und Assets portieren: Init, Eventspawn, Motion/Interpolation, KI,
-Attack/Grab/Damage/Death, Child-Lebenszyklus, Draw und SFX, soweit vorhanden.
-C05/Subplayer nach echter ID-Tabelle abgrenzen, EN00 nicht vergessen.
-Erst alle Gegner/Assets zusammen implementieren und integrieren, danach
-gesammelt testen/fixen. Pflichtprüfer und nötige Build-/Sicherheitschecks
-bleiben währenddessen verpflichtend. Erstes verbindliches produktives
-Abnahmeziel: EN07 in RM_0130 über Originalspawn/-events, vollständiges
-sichtbares Modell, fortschreitendes Animationsset, KI und SFX. Danach alle
-übrigen Gegner; Fledermäuse ersetzen das Gesamtziel nicht.
+**Smaller model, if delegated:** A source-backed enemy-ID/asset inventory in
+`work/enemy_id_asset_inventory.md` only: original routine, native site,
+model/motion, gaps, and file/line evidence for each ID. No code changes,
+invented semantics, generators, or quarantine. “File exists” is not proof of
+functionality. This subtask had been proposed, not started.
 
-**Kleineres Modell, falls delegiert:** Nur belegte Gegner-ID-/Asset-
-Bestandsaufnahme in `work/enemy_id_asset_inventory.md`: pro ID Original-
-Routine, native Implementierungsstelle, Modell/Motion, Lücken und Datei-/
-Zeilenbelege. Keine Codeänderung, keine Semantik erfinden, keine Generatoren,
-keine Quarantäne. „Datei vorhanden“ ist kein Funktionsnachweis. Dieser
-Teilauftrag wurde vorgeschlagen, noch nicht gestartet.
+**Other peers:** B04/hair and B01/stairs had been handled separately. Reports
+claimed progress and rework, but active owners needed rechecking.
+`native/player_head.c/.h` were then untracked; do not start a second head-work
+port without comparison. Combat A01–A05, remaining effects, pose, and renderer
+had their own contracts; the enemy agent must not quietly recreate them with
+replacement logic.
 
-**Weitere Peers:** B04/Haar und B01/Treppen wurden zuletzt separat bearbeitet.
-Berichte melden Fortschritt/Nacharbeit, aber laufende Besitzer neu ermitteln.
-`native/player_head.c/.h` liegen inzwischen ungetrackt im Baum: nicht ohne
-Abgleich einen zweiten Headwork-Port starten. Kampf A01–A05, restliche
-Effekte, Pose und Renderer haben eigene Verträge; nicht vom Gegner-Agenten
-unbemerkt durch Ersatzlogik nachbauen lassen.
+## Partial results and open limits at that time
 
-## Erreichte Teilstände und offene Grenzen
+These claims came from package reports, `AGENTS.md`, or user messages and were
+not all rerun at the handoff.
 
-Die folgenden Aussagen stammen aus Paketberichten/AGENTS oder Nutzer-
-meldungen. Sie wurden bei dieser Übergabe nicht alle erneut ausgeführt.
-
-| Bereich | Erhalten / Stand | Offen / nächster Abgleich |
+| Area | Reported state | Open check |
 |---|---|---|
-| R02/Policy/Daten | Laut Bericht Build-Generatoren entfernt, reine Daten eingefroren, Funktionsgeneratoren quarantiniert. Aktueller Pflichtprüfer PASS. | Historische R02-Offenmeldungen bereinigen; PASS nicht als Gameplay-Abnahme zählen. |
-| D01–D09 | Inventar, Kombinationen, Eventmutationen, EKG/UI, Untersuchung/Dateien, Computer und Gameover wurden nativ implementiert und positiv geprüft gemeldet. | Nicht neu stilllegen/portieren. Paketgrenzen und offene Details prüfen; natürlicher Kampftod und volle visuelle Gameover-Abnahme sind nicht belegt. |
-| B00/P03/E01 | Native ATR-Boden-/Wand-/Linien-/Reflexionsmechanismen und freier Player-Wandanschluss mit RM_0050-Nachweisen. Fehlender EN01-State darf HP nicht auf 1 klemmen. | Keine Behauptung vollständiger Kollision; echte bhCheckL2Wall, weitere Capsule-/Push-/Gegnerdienste und Zylinderdeckel-Semantik abgleichen. |
-| B01 | Neuer Bericht meldet sechs Treppen-/Stufen-/Leiterroutinen samt produktivem Anschluss. | Leiterpfad laut Bericht in Originaldaten nicht erreichbar, nur Komponentenprüfung. Headwork/Effektdienste und neueste Runtime-Abnahme prüfen. |
-| B04 | Nacharbeitsbericht meldet korrigierte Reihenfolge hinter locomote und gemeinsame pitch/roll-Bindung. | Früher 49/50 mit rückwärts scheiterndem player_hair; keinen alten Fehler als aktuellen Endstand übernehmen. Nacharbeit unabhängig prüfen, Headwork-Besitzer abstimmen. |
-| B05 | Native Itembox-Deckelsteuerung, Sound, Menüpass, Rückkehr; fünf Originalraumtests und RM_1080-Diagnoselauf. | Allgemeiner Objekt-/Playerdispatcher, reservierte/verknüpfte Besitzer bleiben offen; kein Storynachweis. |
-| E03/E04 | Eff009 mit UV-Banken, 40 gemeinsamen Texturen, Feuerzeug Handknoten 9/Objektflamme, RGB-Lichttypen 1–6. | Originale Armhaltung/IK bhArmIkMdk, allgemeine pt_flg-/Drawgates, andere Sprite-/Blut-/Explosions-/Partikeleffekte und SFX-/Lichtdienste fehlen teilweise. |
-| P04/Renderer | Cliptabellen und belegte Installationszeitpunkte nativ geprüft; Flagwechsel allein installieren keinen neuen Clip. Gameover 2/20000 erhalten. | Eff137, voller Kameraautomat, originale Materialidentität/-reihenfolge und sichtbare Eisraumgleichheit offen. Kein ICE/OT/GS-Kern als Ersatz. |
-| G01 | Bericht meldet native Türpaket-Sequenzen, Kamera/Flügel/Blende/Sound/Licht und weitere Verfahren. | Aktuelle Endabnahme/Grenzen aus Bericht prüfen; nicht mehr bloß sofortiger Türabschluss, aber kein vollständiges Gameplay daraus ableiten. |
-| F01–F05 | Bestehende native Decoder/Actor/Face/Lip/Math erhalten. | Face-Knotenwinkelübernahme und eyemat-Blickrichtung, Morph-Besitzer, Shadow und gemeinsame Pose-/Motiondienste abgleichen; alte Kern-Ergebnisse sind keine Abnahme. |
-| Windows | Runtime-Binary laut Bericht gebaut, Linkeingangs-/Vergleichsaudit implementiert. | Unabhängige Prüfung des Auditmechanismus und tatsächlicher Windows-Lauf offen. Mac-Erfolg und PE-Link ersetzen diese nicht. |
+| R02/policy/data | Reports said build generators were removed, pure data frozen, function generators quarantined; mandatory checker PASS. | Reconcile historical R02 gaps; PASS is not gameplay acceptance. |
+| D01–D09 | Inventory, combinations, event mutations, ECG/UI, inspection/files, computer, and Game Over were reported natively implemented and positively tested. | Do not disable/port them again. Check package limits; natural combat death and complete visible Game Over were not demonstrated. |
+| B00/P03/E01 | Native ATR ground/wall/line/reflection mechanisms and free player-wall connection had RM_0050 evidence. Missing EN01 state must not clamp HP to 1. | Do not claim complete collision; check real `bhCheckL2Wall`, other capsule/push/enemy services, and cylinder-cap semantics. |
+| B01 | New report claimed six stair/step/ladder routines and a productive connection. | Ladder path was reportedly unreachable in original data and only component-tested. Check head-work/effect services and latest runtime acceptance. |
+| B04 | Follow-up reported corrected order after locomote and shared pitch/roll binding. | Earlier 49/50 with reverse player hair failed; do not treat the old error as current. Independently check rework and agree head-work owner. |
+| B05 | Native item-box lid control, sound, menu pass, return; five original-room tests and an RM_1080 diagnostic run. | General object/player dispatcher and reserved/linked owners remain open; no story proof. |
+| E03/E04 | Eff009 with UV banks, 40 shared textures, lighter hand node 9/object flame, RGB light types 1–6. | Original arm pose/IK `bhArmIkMdk`, general `pt_flg`/draw gates, other sprite/blood/explosion/particle effects, and SFX/light services partly missing. |
+| P04/renderer | Clip tables and evidenced install times checked natively; flag changes alone install no new clip. Game Over 2/20000 retained. | Eff137, full camera state machine, original material identity/order, visible ice-room match open. No ICE/OT/GS core as a substitute. |
+| G01 | Report claimed native door packet sequences, camera/leaf/fade/sound/light, and further procedures. | Check current final acceptance and limits. Doors no longer just close immediately, but do not infer complete gameplay. |
+| F01–F05 | Existing native decoders/Actor/Face/Lip/Math preserved. | Check face-node angle transfer and eyemat gaze, morph owner, shadow, shared pose/motion services. Old original-core results are not acceptance. |
+| Windows | Report said a runtime binary was built and link-input/comparison audit implemented. | Independently check audit and actual Windows execution. Mac success and PE link do not replace this. |
 
-Bewährte Invarianten nicht regressieren: `common_effect_textures_offset ==
-size_t(-1)` vor Zugriff prüfen; fehlender Player-State hat keine HP-/Tod-
-Wirkung; aktive Lip-Streamquelle wird nicht durch bhSetLip umgelenkt;
-vorhandene BGM-Discregel und nativen Math-/WeaponFlash-Port erhalten.
+Preserve established invariants: check
+`common_effect_textures_offset == size_t(-1)` before access; absent player
+state has no HP/death effect; `bhSetLip` must not redirect an active Lip stream;
+retain existing BGM disc rule and native Math/WeaponFlash ports.
 
-## Abnahme- und Berichtspflichten
+## Acceptance and reporting duties
 
-Pro Paket eine belegte Liste aller Originalzweige, Mutationen, Flags,
-Aufrufreihenfolge und Datenabhängigkeiten. Status sauber trennen:
-fehlend / implementiert / produktiv angeschlossen / Komponenten-geprüft /
-Runtime-geprüft / Windows-geprüft. Implementierung ohne Anschluss ist offen.
+For each package, list all original branches, mutations, flags, call order,
+and data dependencies with evidence. Distinguish missing / implemented /
+connected in production / component tested / runtime tested / Windows tested.
+An unconnected implementation remains open.
 
-Zuerst gesamtes abgestimmtes Paket implementieren, dann gemeinsamen Testblock
-und Ursachenanalyse. Keine großen 205-Raum-Sweeps nach jeder Funktion.
-Ladeprüfung, diagnostische Runtime-Prüfung und natürlicher Spielablauf sind
-verschiedene Nachweise. Debug-Positionierung ausdrücklich kennzeichnen;
-Gegner-Injektion/Direktdispatch ist keine verpflichtende Spawn-Abnahme.
+Implement the agreed package first, then run a shared test block and
+root-cause analysis. No full 205-room sweep after each function. Loading,
+diagnostic runtime checks, and natural gameplay are different forms of
+evidence. Label debug positioning; enemy injection/direct dispatch is not
+required spawn acceptance.
 
-Nach Integration betroffene positive Komponenten- und Runtime-Abläufe,
-Regressionsprüfungen sowie Policy gegen Quellen, Build und tatsächlich
-genutztes Binary durchführen. Buildpfad/Binary, Plattform, Befehle, Ergebnisse
-und Logs im Paketbericht festhalten. Windows: Compile, Link, Audit und
-Ausführung getrennt ausweisen. Verbleibende rote Tests nach Ursache sortieren:
-Regression, noch fehlender Mechanismus, belegte falsche Testerwartung.
+After integration, run affected positive component and runtime flows,
+regressions, and source/build/actual-binary policy checks. Record build path,
+binary, platform, commands, results, and logs in the package report. For
+Windows, distinguish compile, link, audit, and execution. Sort red tests by
+cause: regression, missing mechanism, or evidenced wrong expectation.
 
-README/Gameplay-Doku/Ledger erst aus diesen Nachweisen aktualisieren.
-Keine aus Testanzahl geschätzte Prozentzahl oder Behauptung aller Gegner.
-Start.command kann ein älteres Paket ausführen; tatsächlich gestartetes
-Binary mit dem geprüften Build abgleichen, ohne eigenmächtig Packaging zu
-ändern. Commit/Push ist ein separater Nutzerauftrag; ungetrackte Dateien
-werden durch git push allein nicht hochgeladen.
+Update README/gameplay docs/ledger only from this evidence. Do not estimate a
+percentage from test counts or claim all enemies. `Start.command` may run an
+older package; compare the actual launched binary with the tested build
+without changing packaging on your own. Commit/push is a separate user
+request; `git push` alone does not upload untracked files.
 
-## Relevante Unterlagen
+## Related documents
 
-- `AGENTS.md` und `docs/THIRD_AGENT_C01_TASK.md` — Regeln/aktueller Gegnerauftrag.
+- `AGENTS.md` and [historical enemy assignment](../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md) — rules and enemy assignment at the time.
 - `docs/NATIVE_REIMPLEMENTATION_ROADMAP.md`, `docs/port_ledger.tsv`,
-  `docs/NATIVE_GAMEPLAY.md` — Planung/Status, teilweise historische Einträge.
+  `docs/NATIVE_GAMEPLAY.md` — planning/status, partly historical.
 - `work/native_port_B05_item_box_object.result.md`.
 - `work/native_port_P04_camera_invocations.result.md`, `work/native_port_P04_clip.result.md`.
 - `work/native_port_B04_hair_followup.result.md`, `work/native_port_B01_stairs.result.md`.
@@ -170,6 +163,6 @@ werden durch git push allein nicht hochgeladen.
   `work/native_port_D04_computer.result.md`, `work/native_port_D05_gameover.result.md`.
 - `work/native_port_R02_D09.result.md`, `work/native_port_windows_audit.md`.
 
-Historische Gegner-/Morphberichte mit Originalkernpfaden sind keine
-Abnahme des heutigen kernfreien Ports. Nicht von alten Erfolgsmeldungen
-zum Wiederaufbau verbotener Mechanismen verleiten lassen.
+Historical enemy/morph reports involving original-core paths are not
+acceptance of today's core-free port. Old success claims must not revive
+prohibited mechanisms.

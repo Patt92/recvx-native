@@ -15,9 +15,9 @@ enum class FrontendCommand {None,TitleCall,NewGame,LoadGame,Quit};
 // the host draws no text of its own for original entries.
 //
 // Documented host deviations (PC port, see CLAUDE.md "Hauptmenue 2026-10-13"):
-//  * FindFirstVmDrive() is always <0 (no memory card / PS2 save system): as in
-//    the original without a card, LOAD GAME is drawn but never selectable
-//    (CheckButton Flag 0 forces Cursor 1) and BATTLE GAME (ssd_flg & 1) is off.
+//  * Host save slots replace memory-card availability for LOAD GAME: without
+//    saves, CheckButton Flag 0 forces Cursor 1; otherwise Cursor 0 is selectable.
+//    BATTLE GAME (ssd_flg & 1, system save) remains off.
 //  * ReturnCode 4 (OPTION, Adv_GameOptionScreen) opens the host settings screen
 //    (Screen::Controls: key bindings, 3rd-person mod, render quality) instead of
 //    the original option screen, which is not ported.

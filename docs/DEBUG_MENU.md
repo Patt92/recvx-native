@@ -17,10 +17,9 @@ SDL key names such as `F6` are supported. Restart after changing the file. The
 runtime creates a missing file with F2 and never overwrites an existing one.
 Invalid or duplicate settings are reported as errors.
 
-- macOS package: next to `RECVX Native.app`, outside the signed bundle.
-- Windows package: next to `recvx-runtime.exe`.
-- Direct runtime launch: next to the executable, independent of the CWD.
-- Project starter without a package: `debug.ini` in the project directory.
+- macOS release package: `~/Library/Application Support/RECVX/debug.ini`.
+- Windows release package: `%APPDATA%\RECVX\debug.ini`.
+- Development build and project starter: `debug.ini` in the project directory.
 - `--debug-config <path>` explicitly selects another configuration file.
 
 Navigate with the configured menu actions: Up/Down selects a function,

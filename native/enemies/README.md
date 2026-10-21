@@ -41,7 +41,9 @@ genauso kurz einbinden.
 
 ## Regeln
 
-Es gelten unverändert `AGENTS.md` und `docs/THIRD_AGENT_C01_TASK.md`:
+Es gelten [AGENTS.md](../../AGENTS.md) und [QUALITY.md](../../QUALITY.md).
+Der [damalige Gegnerauftrag](../../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md)
+ist nur Historie, keine aktuelle Arbeits- oder Dateibesitzvorgabe:
 Originalquellen unter `src/ps2/veronica/prog/` sind ausschließlich
 Semantikreferenz, kein Originalkern und kein Generator; einziger Besitzer der
 Gegnerzustände bleibt die vorhandene WorldEntity/RoomWorld-Quelle, kein

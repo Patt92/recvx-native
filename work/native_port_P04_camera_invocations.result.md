@@ -75,7 +75,7 @@ wechsels scheiterte kurz der Runtime-Aufrufer; nach dem parallelen
 B04-Anschluss war die Runtime wieder baubar. Kein Haarfix beansprucht.
 
 Parallelauftrag für den dritten Agenten:
-`docs/THIRD_AGENT_C01_TASK.md`. Keine Nachricht/Session erzeugt.
+[historischer Gegnerauftrag](history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). Keine Nachricht/Session erzeugt.
 Kein Paket/Commit/Push.
 
 ## Abschlussstand dieses Durchgangs

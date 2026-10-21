@@ -1,362 +1,345 @@
-# Roadmap: eigenständige native Implementierungen, originales Verhalten
+# Roadmap: independent native implementations, original behavior
 
-Stand: 2026-10-09, aktualisiert nach Wiederherstellung von Build, Runtime-Link
-und Raumladen. Stabil, aber spielmechanisch unvollständig.
-Diese Roadmap ist ein Arbeitsplan, kein Fertigstellungsnachweis. Task-IDs
-bleiben stabil; bestehende native Teile erhalten, nicht erneut portieren.
+Status: 2026-10-09, updated after restoring the build, runtime link, and room
+loading. Technically stable, but gameplay was incomplete. This is a historical
+work plan, not completion evidence. Task IDs remain stable; preserve existing
+native work rather than porting it again. Current `AGENTS.md` and user
+decisions supersede this plan.
 
-Orchestrator-Übergabe 2026-10-10: `ORCHESTRATOR_HANDOVER.md` fasst neuere
-Paketstände, Grenzen und Zuständigkeiten zusammen. Historische Rückbau-
-Offenmeldungen unten vor erneuter Beauftragung mit aktuellen Berichten und
-Code abgleichen. Der Drittauftrag umfasst inzwischen alle Gegner C01–C08,
-nicht nur die C01-Fallenaktivierung.
+The 2026-10-10 orchestrator handoff in `ORCHESTRATOR_HANDOVER.md` summarizes
+later package states, boundaries, and owners. Compare historical removal gaps
+below against current reports and code before assigning them again. The third
+agent's task grew to all enemies C01–C08, beyond C01 trap activation.
 
-Fortsetzung 2026-10-10: P04 installiert Clipbereiche jetzt bei den belegten
-Kameraaufrufen, nicht pro Renderbild. Flag-/Rcase-Retention, Fixkamera-
-Schlüssel und Rückgabestandards sind mit zwölf Runtimefällen geprüft.
-Eff137, vollständiger Kameraautomat und Eisraum-Materialsortierung bleiben
-offen; kein Hardwarekern als Lösung. B04 läuft separat. Der nächste
-konfliktfreie Einstieg des Drittauftrags ist C01 gemäß `THIRD_AGENT_C01_TASK.md`:
-Fallenaktivierung in `enemy_spawn.*` als Teil des vollständigen Gegnerpakets,
-gemeinsame Anschlussdateien nur per abgestimmtem Patch. Ergebnisse:
+On 2026-10-10, P04 began installing clip ranges at evidenced camera calls
+rather than every rendered frame. Flag/Rcase retention, fixed-camera keys, and
+return defaults were checked in twelve runtime cases. Eff137, the full camera
+state machine, and ice-room material sorting remained open; a hardware core
+was not an answer. B04 proceeded separately. The next conflict-free entry for
+the third assignment was C01 from [historical enemy assignment](../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md): trap activation
+in `enemy_spawn.*` as part of the full enemy package, with shared connection
+files changed only by agreed patches. Evidence:
 `work/native_port_P04_camera_invocations.result.md`.
 
-## Aktueller Stand — Datenport, Rückbau und Gameplay getrennt
+## Recorded state: data ports, removal, and gameplay kept separate
 
-Der Abgleich erfolgte an den aktiven Dateien und CMake, nicht an Quarantäne-
-Inhalten oder alten Erfolgsmeldungen. **Stillgelegt bedeutet nicht portiert.**
-Die kommentierten Neutral-/No-op-Rückgaben sind offene Spielfunktionslücken
-und keine zulässige 1:1-Implementierung, auch wenn sie einen Task beenden.
+This comparison used active files and CMake, not quarantine or old success
+claims. **Disabled does not mean ported.** Commented-out neutral/no-op
+returns are open gameplay gaps, even when they end a task.
 
-| Bereich / Tasks | Tatsächlicher Stand | Konsequenz für den nächsten Auftrag |
+| Area / tasks | Recorded state | Consequence at this checkpoint |
 |---|---|---|
-| P01 Itemdaten/Header | `native/item_tables.c/.h` ersetzen die direkte `item.c`-Quelle und den nativen Gebrauch von `item.h`. Der eigene Header nutzt `ninja_matrix.h` statt der fehlenden PS2-Ninja-Header. Alle zwölf Tabellen stimmen nach erneutem Kommentar-/Whitespace-bereinigtem Vergleich mit den Originalinitialisierern überein. | Daten-/Headerablösung auf Quellenebene erledigt; nicht nochmals als `item_data.*` bauen. Regression der Werte und Layouts auf beiden Plattformen ergänzen; keine Mechanismus-/Runtime-Abnahme. |
-| P02 Raumindex | `native/room_table.c/.h` und `RoomArchive::name` ersetzen die direkte `ps2_dvd_image.c`-Quelle. Alle 205 RDX-Namen sind in Originalreihenfolge identisch. | Quellenablösung erledigt. Kein neues Disc-/ISO-Subsystem erfinden; Index-/Archivregression nachtragen. |
-| A01–A05 Kampf/Zielwahl | `targeting.cpp` und `player_combat_core.c` sind stillgelegt: keine automatische Zielwahl, kein aktiver Kampf/Schuss/Messer, keine Armsteuerung. | Mechanismen eigenständig neu implementieren; nicht nur Includes/zweite Works entfernen. WeaponFlash und reine Waffendaten erhalten. |
-| B00–B04 Bewegung | `player_push_core.c`, `player_stairs.c`, `player_hair.c` sind stillgelegt: keine dortige Wand-/Bodenauflösung, Push-, Treppen-/Leiteraktion oder Haarsimulation. | Gemeinsame Geometrie/Kollision zuerst, danach vollständige Zustandsabläufe. Neutrale Positionsrückgabe ist kein Kollisionsport. |
-| B05/D01 Itembox | B05-Deckelsteuerung eigenständig nativ: Öffnungswinkel, einmaliger Klang, folgender Menüpass und Rückkehr. Bestehender D01-Transfer bleibt angebunden. | Fünf Originalraum-Worldtests und Runtime-Öffnen/Abbruch/Wiederöffnung mit unverändertem Bestand. Allgemeine Objekt-/Playerbesitzer bleiben getrennte Aufgaben. |
-| C01/C05 Spawn/Subplayer | `activate_enemy_spawn` liefert immer false; `recvx_is_subplayer` immer 0, Init/Tick tun nichts. | Fallenaktivierung und tatsächliche Subplayer-ID-/Statebindung wieder vollständig portieren. Normale Raumplatzierung ist nicht derselbe Mechanismus. |
-| C03/C04 EN01/EN04/EN00 | Auch `en01_damage.c` ist inzwischen stillgelegt: nur Hostwerte werden in `EN01_STORE` gespeichert/zurückgespiegelt. KI, Kapselhit, Schaden, Tod, Griff/Biss und Sprengfass fehlen. | Keine funktionierenden Zombies/Hunde behaupten. Gemeinsame native Enemy-Statequelle statt Durchleitung schaffen, alle Abläufe einschließlich EN00 portieren. |
-| D02/D03/D05/D06 Inventar | Auch Pickup/Use/Box, Filefolder, Gameover und Event-Inventarmutationen sind jetzt stillgelegt. Die Event-VM meldet die fehlenden Mutationen als pending; übrige APIs sind weitgehend neutral. Native Tabellen-/Matrix-/Darstellungshelfer bestehen weiter. | Aufnahme, Gebrauch, Sortierung, Reload, Untersuchung, Leser, Tod/Retry und Eventmutationen vollständig implementieren. Keine Tests an die Neutralantworten anpassen. |
-| D07 Kombinationen | `combinations.inc` und seine Originalbrücke sind nicht mehr eingebunden. `Inventory::combine` meldet Fehlschlag und lässt Slots unverändert; der native Tabellen-Suchhelfer bleibt vorhanden. | Rückbau erledigt, sechs Kombinationsmechanismen fehlen. D07 implementiert Originalwirkung direkt auf derselben Inventory, keine Neutralantwort als Fertigkriterium. |
-| D08 EKG | `status_pulse.cpp` enthält keine `Pulse*`-Körper mehr. `tick` liefert keine Quads, `heal_mode` bleibt 0; Condition-API und Renderer-Schnittstelle bestehen weiter. | Rückbau erledigt; Kurve, Zustands-/Heil-/Gift-/Fadeverlauf und Quad-Ausgabe eigenständig implementieren. |
-| P05/D09 Item-UI | Daten aus dem gemischten 1160-Zeilen-Include liegen als `native/ui_tables_data.inc` im Baum. `BulletSet`, `TrigerSet` und `original_command_parts` fehlen: keine Mengenanzeige und leeres gezeichnetes Itembefehlsfenster. | Datenaufteilung erhalten, nicht erneut extrahieren. D09 implementiert Ziffern/Farbbank und originale Befehlsausgabe; vorhandene Menüeingabe ist kein Nachweis der fehlenden Darstellung. |
-| D04 Computer | `computer_core.c` liefert leeren Frame und sofort `finished`; Terminalskripte, Tastatur, Scanner-/Passwortflags und SFX fehlen. | Vollständigen Ablauf neu portieren; sofortige Taskfreigabe nicht als erfolgreichen Computerablauf zählen. |
-| E01–E03 Effekte | Ground/Wall/Line-Abfragen sind leer bzw. liefern -1000; Partikel werden nicht erzeugt; Sprite-/Explosions-/Feuerzeugsteuerung ist stillgelegt. Native Feldübernahme/Slotwahl/Zeichenausgabe bestehen teilweise weiter. | Gemeinsame ATR-Abfragen, Effektdaten/Atlasbindung und vollständige State-Machines portieren; bestehende native Ausgabe erhalten. |
-| P04/G01 Clip/Tür | Clip-Abfragen verwenden die originalen Stage-Tabellen und Erstrefferregeln. Event-Fehltreffer hängen von den vorhandenen Displayflags ab (2/20000 oder 1/99); der Monitor-Abfragezweig überspringt Raumtabellen (1/20000). GameOver behält seine ausdrücklich installierten 2/20000; ein Kameraflag allein ist kein Clip-Aufruf. `door_core.c` hat Parametergrößen/Prozeduren und meldet Abschluss 0x40 erst am Ablaufende. | Clip-Abfragen und gezielte Runtime-Wechsel geprüft. Monitor-Aufrufketten einschließlich unportiertem Eff137 bleiben offen; vollständiger Kamerazustandsautomat und sichtbare Tiefensortierwirkung im Eisraum sind nicht abgenommen. Kein PS2-ICE-/OT-Kern als Lösung. |
-| F01–F05 Actor/Face/Morph | Native Actor-/Basic-/Skin-/Pose-Schicht vorhanden. Morph-Events schreiben Felder, Vertexinterpolation/Draw bleibt offen; aktive Lip-Streamquelle liegt getrennt vom neu gewählten Stream auf `WorldEntity`. | Bestehende Decoder und Lip-Cursor-Semantik behalten; produktive Besitzer-/Vertex-/Face-/Shadowbindungen vervollständigen. Alte Core-Morph-Erfolge gelten nicht. |
-| Math/WeaponFlash/BGM | Native Math und sechs WeaponFlash-Typen bestehen. BGM-Discregel ist an beiden Raumladewegen gebunden. | Nicht neu anfangen. Typ-3-Wandbindung, Point-Filter und Enemy-SFX-Reihenfolge bleiben Abnahme-/Integrationsaufgaben. |
+| P01 item data/header | `native/item_tables.c/.h` replaced direct `item.c` and native use of `item.h`. Its own header uses `ninja_matrix.h` instead of missing PS2 Ninja headers. All twelve tables matched original initializers after stripping comments/whitespace. | Source-level data/header replacement done; do not recreate as `item_data.*`. Add value/layout regressions on both platforms; no mechanism/runtime acceptance. |
+| P02 room index | `native/room_table.c/.h` and `RoomArchive::name` replaced direct `ps2_dvd_image.c`. All 205 RDX names matched in original order. | Source replacement done. Do not invent a disc/ISO subsystem; add index/archive regression. |
+| A01–A05 combat/targeting | `targeting.cpp` and `player_combat_core.c` disabled: no automatic targeting, active combat/shot/knife, or arm control. | Implement mechanisms independently; removing includes/second works alone is insufficient. Preserve WeaponFlash and pure weapon data. |
+| B00–B04 movement | `player_push_core.c`, `player_stairs.c`, and `player_hair.c` disabled: no wall/floor resolution, push/stair/ladder action, or hair simulation there. | Shared geometry/collision first, then full state flows. A neutral position return is not a collision port. |
+| B05/D01 item box | B05 lid control independently native: opening angle, one sound, subsequent menu pass, and return. Existing D01 transfer remained connected. | Five original-room World tests and runtime open/cancel/reopen with unchanged inventory. General object/player owners remain separate tasks. |
+| C01/C05 spawn/subplayer | `activate_enemy_spawn` always returned false; `recvx_is_subplayer` always returned 0; init/tick did nothing. | Fully port trap activation and real subplayer ID/state binding. Normal room placement is a different mechanism. |
+| C03/C04 EN01/EN04/EN00 | `en01_damage.c` had also been disabled: only host values were stored and reflected through `EN01_STORE`. AI, capsule hit, damage, death, grab/bite, and explosive barrel were missing. | Do not claim functioning zombies/dogs. Establish a shared native Enemy state source instead of pass-through, and port all flows including EN00. |
+| D02/D03/D05/D06 inventory | Pickup/use/box, file folder, Game Over, and event inventory mutations were disabled. The event VM logged missing mutations as pending; other APIs were mostly neutral. Native table/matrix/draw helpers remained. | Implement pickup, use, sorting, reload, inspection, reader, death/retry, and event mutations. Do not change tests to accept neutral answers. |
+| D07 combinations | `combinations.inc` and its original bridge were no longer linked. `Inventory::combine` returned failure without changing slots; the native table-search helper remained. | Removal done; six combination mechanisms missing. Implement original effects on the same Inventory; a neutral return is not completion. |
+| D08 ECG | `status_pulse.cpp` had no `Pulse*` bodies. `tick` produced no quads, `heal_mode` remained 0; Condition API and renderer interface remained. | Removal done; independently implement curve, condition/heal/poison/fade progression, and quad output. |
+| P05/D09 item UI | Data from a mixed 1,160-line include lived in `native/ui_tables_data.inc`. `BulletSet`, `TrigerSet`, and `original_command_parts` were missing: no quantity display and an empty drawn item-command window. | Preserve data split; do not extract again. D09 implements digits/color bank and original command display; existing menu input does not prove rendering. |
+| D04 computer | `computer_core.c` returned an empty frame and immediate `finished`; terminal scripts, keyboard, scanner/password flags, and SFX were missing. | Port the full flow; immediate task release is not successful terminal behavior. |
+| E01–E03 effects | Ground/wall/line queries were empty or returned -1000; particles were not spawned; sprite/explosion/lighter control was disabled. Native field transfer/slot selection/draw output partly remained. | Port shared ATR queries, effect data/atlas binding, and full state machines; preserve existing native output. |
+| P04/G01 clip/door | Clip queries used original stage tables and first-hit rules. Event misses depended on display flags (2/20000 or 1/99); monitor query bypassed room tables (1/20000). Game Over retained explicitly installed 2/20000; a camera flag alone was not a clip call. `door_core.c` had parameter sizes/procedures and reported completion bit 0x40 only at sequence end. | Clip queries and focused runtime transitions checked. Monitor calls including unported Eff137, full camera state machine, and visible ice-room depth sorting remained open. No PS2 ICE/OT core. |
+| F01–F05 Actor/Face/Morph | Native Actor/Basic/Skin/Pose layer existed. Morph events wrote fields, but vertex interpolation/draw remained open; active Lip stream source was separate from the newly selected stream on `WorldEntity`. | Preserve decoders and Lip cursor semantics; complete productive owner/vertex/face/shadow bindings. Old core morph results do not count. |
+| Math/WeaponFlash/BGM | Native Math and six WeaponFlash types existed. BGM disc rule was bound to both room-load paths. | Do not restart. Type-3 wall binding, point filter, and Enemy SFX order remained acceptance/integration work. |
 
-**Technische Basis wiederhergestellt:** Claude meldet erfolgreiches Configure,
-Build und Link von `recvx-runtime`, 205/205 ladende Räume und keine blockierten
-Eventbefehle. Der Schutzprüfer wurde für diese Aktualisierung zusätzlich gegen
-Quellen, `build/gapcheck-claude` und dessen Runtime-Binary ausgeführt: **PASS**.
-Der Raumlauf wurde hier nicht erneut ausgeführt. Keine Original-C-Datei ist
-Kompilierquelle; Referenz-DEPENDS bleiben erlaubt. D07–D09-Verbraucherrückbau
-ist erledigt, nicht erneut durchführen. Diese Nachweise gelten nicht als
-Spielbarkeit, Gegnerabnahme oder Windows-Runtime-Nachweis.
+**Technical baseline restored:** Claude reported successful Configure, Build,
+and link of `recvx-runtime`, 205/205 rooms loading, and no blocked event
+commands. For this update the policy checker also ran against source,
+`build/gapcheck-claude`, and its runtime binary: **PASS**. The room run was
+not repeated here. No original C file was a compilation source; reference
+DEPENDS were allowed. D07–D09 consumer removal was done and should not be
+repeated. None of this proves playability, enemy acceptance, or Windows
+runtime behavior.
 
-CTest war bei Claudes Meldung **34/41**, sieben Fälle noch in Bearbeitung.
-Das ist ein Zwischenstand, kein endgültiges Testergebnis. Für jeden übrigen
-Fehler tatsächliche Regression, fehlenden Mechanismus oder fehlerhaften Test
-unterscheiden; fehlende Wirkung nicht durch Neutral-Erwartungen wegtesten.
+CTest was **34/41** in Claude's report, with seven cases still in progress.
+That was an interim state, not the final result. For each failure, separate a
+real regression, missing mechanism, and bad test; do not test away missing
+behavior with neutral expectations.
 
-Der Guard in `world.cpp` für `common_effect_textures_offset == size_t(-1)`
-behebt einen echten Zugriff auf einen ungültigen Datei-Offset. Er bleibt
-erhalten. Gemeinsame Effekttexturen sind trotzdem offen (E03): weder Offset 0
-noch leere/falsche Texturen als Ersatz einsetzen. Fehlender Block und gültiger
-Block benötigen getrennte Regressionen beim Integrator.
+The `common_effect_textures_offset == size_t(-1)` guard in `world.cpp` prevents
+access through an invalid file offset and must remain. Shared effect textures
+were still open (E03): neither offset 0 nor empty/wrong textures may replace
+them. The integrator needs separate regressions for missing and valid blocks.
 
-**R02 bleibt offen, mit engerem Scope:** Für `adx_tables.inc` ruft CMake
-weiter `generate_native_tables.py` auf. Dieser erzeugt zusätzlich die drei
-gesperrten Funktionsoutputs und CMake entfernt sie anschließend per `rm -f`.
-Nicht mehr eingebunden heißt hier nicht rein datenbasierter Generator.
-Die Quelle muss ohne Funktionsausgabe ADX-Daten liefern; nachträgliches
-Löschen darf weder die Erzeugerprüfung noch den Output-Audit ersetzen.
-Der aktuelle statische PASS erkennt diesen Mischgeneratorrest nicht.
+**R02 remained open with narrower scope:** CMake still called
+`generate_native_tables.py` for `adx_tables.inc`. It also emitted three
+prohibited function outputs, which CMake subsequently removed with `rm -f`.
+Not linking them did not make it a data-only generator. ADX data had to be
+provided without function output; deletion afterward could replace neither
+generator checks nor output audit. The then-current static PASS missed this
+mixed-generator remainder.
 
-Die Tests für unter anderem Munition und StatusPulse wurden inzwischen auf
-dokumentierte Lücken umgestellt (kein Pickup/Reload, keine EKG-Quads).
-Das sind Rückbau-/Lückenverträge, keine ursprünglichen Gameplay-Regressionen.
-Ihre Erfolge nicht als Portabdeckung oder 1:1-Abnahme zählen. R03 führt die
-fehlenden Wirkungsfälle wieder gegen die eigenständigen nativen Ports ein.
+Some ammunition and StatusPulse tests were changed to documented gaps (no
+pickup/reload, no ECG quads). Those were removal/gap contracts, not the
+original gameplay regressions. Their passing status was not port coverage or
+1:1 acceptance. R03 was to restore positive effects against independent
+native ports.
 
-## Verbindlicher Auftrag für jeden Agenten
+## Binding assignment for every agent at that time
 
-Ein eigenständig laufendes natives Game auf macOS arm64 und Windows x64,
-mit originalem Verhalten und allen Gegnern in der produktiven World. Keine
-PS2-/CPU-/VU-/GS-Nachbildung, kein Originalkern und keine Ersatz-Spiellogik.
+Build a standalone native game on macOS arm64 and Windows x64, with original
+behavior and all enemies in productive World. No PS2/CPU/VU/GS recreation,
+original core, or replacement game logic.
 
-`archived/FORBIDDEN_DONTUSE` darf von keinem Task gelesen, durchsucht,
-kopiert, importiert, wiederhergestellt oder verwendet werden. Auch keine
-Umwege über alte Archive, Patches, Bundles, Tasks oder Build-Caches.
-Semantik aus `src/ps2/veronica/prog`, den Originaldaten und Disassembly
-herleiten; diese Referenzquellen nicht kompilieren. Eigenständige native
-Implementierung mit nachvollziehbarer Quellenzuordnung, nicht umbenannter
-Original-Funktionskörper oder ein generierter Körper in einer neuen Datei.
+No task may read, search, copy, import, restore, or use
+`archived/FORBIDDEN_DONTUSE`, including through old archives, patches,
+bundles, tasks, or build caches. Derive semantics from permitted original
+sources, original data, and disassembly; never compile these references.
+Implement independently on native owners, not as renamed or newly generated
+original function bodies.
 
-Algorithmen, Reihenfolge, Konstanten, Flags, Tabellen, Zustandsübergänge und
-Seiteneffekte 1:1 erhalten. Keine Raum-/Gegner-Sonderfälle, Heuristiken,
-stille No-ops, Fake-Rückgaben oder "Korrekturen" am Original ohne Beleg.
+Preserve algorithms, order, constants, flags, tables, transitions, and side
+effects. No room/enemy special cases, heuristics, silent no-ops, fake returns,
+or unevidenced “fixes” to the original.
 
-Vor Arbeitsbeginn und jedem Build den Schutzprüfer ausführen und Befunde
-melden. Die technische Baubarkeit ist wieder belegt; eine Gameplay-Freigabe
-ist es nicht. R02 muss weiterhin die unnötige Funktionsausgabe des
-ADX-Mischgenerators und die entsprechende Prüflücke schließen. Der aktuelle
-PASS hebt diesen konkret belegten Rest nicht auf. Stillgelegte Bereiche
-bleiben fehlende Spielfunktionen; weder Prüfer noch Wirkungsansprüche lockern.
-Isolierte native Komponententests sind kein produktiver Spielnachweis.
+Run the policy checker before work and every build, and report findings.
+Technical buildability was restored but did not establish gameplay. R02 still
+had to remove unnecessary function output and the corresponding checker gap.
+A PASS did not erase that evidenced remainder. Disabled areas remained
+missing game functions; do not weaken the checker or positive effect claims.
+An isolated native component test is not productive game evidence.
 
-## Besitz, Parallelität und gemeinsame Abnahme
+## Ownership, parallel work, and shared acceptance
 
-- Ein Integrator besitzt `CMakeLists.txt`, `native/world.cpp/.h`,
-  `native/runtime.cpp`, `native/events.cpp`, globale Work-/Asset-Schnittstellen,
-  Packaging und gemeinsame Dokumentation. Andere Agents liefern kleine neue
-  native Module und Anschluss-Patches als getrennte Übergabe, statt diese
-  gemeinsamen Dateien gleichzeitig zu editieren.
-- P00 legt den bestehenden nativen Besitzer jedes Zustands fest und friert
-  minimale Schnittstellen ein. Keine neue parallel laufende Player-, Enemy-,
-  Room- oder Effect-Work. Views/Referenzen auf den vorhandenen Speicher sind
-  erlaubt; Spiegelwelten und Copy-in/Copy-out-Dispatcher sind es nicht.
-- Jeder Teilauftrag bekommt einen eigenen Quellen-/Disassembly-Beleg und
-  Zustands-/Ausgabevergleich in `work/native_port_<ID>.result.md` sowie einen
-  eng begrenzten Test. Gemeinsame Dateien nur durch den Integrator ändern.
-- Erst alle Module eines Pakets implementieren und integrieren, dann einen
-  gemeinsamen Regressionstestblock durchführen. Gemeinsame Ursachen global
-  beheben; nicht für jeden Gegner/Raum eine Sonderlösung bauen.
-- CMake-/Compiler-/Link-/Binaryprüfung müssen vollständig grün sein, bevor
-  produktive Runtime-Abnahme oder Paketveröffentlichung erfolgt. Kein alter
-  Kern als Vergleichsruntime; Originaldaten/Disassembly sind die Referenz.
+- One integrator owned `CMakeLists.txt`, `native/world.cpp/.h`,
+  `native/runtime.cpp`, `native/events.cpp`, global work/asset interfaces,
+  packaging, and shared docs. Other agents supplied small native modules and
+  connection patches as separate handoffs rather than editing shared files
+  concurrently.
+- P00 identified the existing native owner of each state and froze minimal
+  interfaces. No parallel Player, Enemy, Room, or Effect work. Views/references
+  into existing storage were allowed; mirrored worlds and copy-in/copy-out
+  dispatchers were not.
+- Each subtask needed original source/disassembly evidence and state/output
+  comparison in `work/native_port_<ID>.result.md`, plus a focused test.
+  Shared files were changed only by the integrator.
+- Implement and integrate all modules of a package before a shared regression
+  block. Fix common causes globally rather than adding per-enemy/room cases.
+- CMake/compiler/link/binary checks had to pass fully before productive
+  runtime acceptance or package release. No old core as comparison runtime;
+  original data and disassembly were the references.
 
-## Phase 0 — Integrationsreste bereinigen, Besitzer und Geometrie festlegen
+## Phase 0 — integration remainders, owners, and geometry
 
-R00/R01/R02/R03/P00 gehören dem Integrator. P01/P02/P05 sind keine neuen
-Implementierungsaufträge mehr. Quellenport und Datenvergleich liegen vor;
-die verankerten Daten-/Layoutregressionen fehlen noch. Der macOS-Runtime-Link
-ist wieder belegt, nicht mehr als unerledigter Rückbauauftrag führen.
+R00/R01/R02/R03/P00 belonged to the integrator. P01/P02/P05 were no longer
+new implementation tasks. Source ports and data comparisons existed; anchored
+data/layout regressions were still missing. The macOS runtime link was again
+evidenced and no longer a removal task.
 
-| ID | Kleiner Auftrag / erlaubter Schreibbereich | Abhängigkeit / Fertigkriterium |
+| ID | Small assignment / write scope | Dependency / completion criterion |
 |---|---|---|
-| R00 | Bekannte Funktionsincludes einschließlich Kombinationen, EKG und UI sind nicht mehr eingebunden; keine direkte Original-C-Quelle mehr. Integrator prüft finalen Diff und Daten-/Layout-/Funktionsklassifizierung. | Verbraucherrückbau auf Quellenebene erledigt, nicht wiederholen. ADX-Mischerzeugung ist R02; fehlendes Gameplay bleibt D07–D09. Keine Codeentfernung als Port-Erfolg zählen. |
-| R01 | Integrator: Fehlfunktionsliste der stillgelegten APIs an tatsächlichen Aufrufpfaden pflegen. Gameplay-/Abnahmetests dürfen Neutral-/Abschlussantworten nicht als erfolgreich portierte Wirkung zählen; getrennte Lückentests gehören in R03. | Parallel zu R00/P00. Kampf, Kollisionshit, Trapspawn, Subplayer, Terminal-/Türabschluss, Itembox, Inspection und Effektanforderungen bleiben sichtbar unvollständig. Prüfer-grün allein ist keine Spiel-Freigabe. |
-| R02 | Kleiner erster Restauftrag: ADX-Daten über eigenständigen Daten-only-Erzeuger oder geprüftes natives Datenmodul bereitstellen. CMake darf den Mischgenerator nicht mehr ausführen und muss keine Funktionsoutputs nachträglich löschen. Schutzprüfer um Mischgenerator-/Bodyoutput-Erkennung ergänzen. | D07–D09-Verbraucher sind bereits stillgelegt; nicht nochmals entfernen. Original-ADX-Werte exakt erhalten, pure Combat-/Chunk-/UI-Daten nicht pauschal sperren. Synthetische Negativtests auch für „erzeugen, danach löschen“ und Teilkörper; Daten-only-Ausgabe positiv prüfen. Keine Ausnahme und keine Generatorausführung zur Klassifizierung. |
-| R03 | Integrator: Testabdeckung als Daten-/Rückbau-/Lückenvertrag oder tatsächlichen Mechanismus-/Runtime-Nachweis kennzeichnen; verlorene Wirkungsregressionen pro Task erfassen und nach vollständiger Paketimplementierung wieder gegen den nativen Besitzer prüfen. | Parallel zu P00, gemeinsame Tests gebündelt nach Integration. Keine Rückkehr zu Kern-/Generator-Tests. Lückentests dürfen existieren, aber kein „0 Quads/kein Treffer/keine Mutation“ als 1:1-Erfolg; alte Gameplayfälle anhand Originalreferenzen und zulässiger Testhistorie herleiten, Quarantäne nicht lesen. |
-| P00 | Integrator: bestehende Player-/WorldEntity-/Inventory-/Effect-/Pose-Besitzer dokumentieren; kleine gemeinsame State-Views und Mutations-API definieren. Keine Logik implementieren. | Startpunkt. Feldmapping, Reihenfolge und Eigentümer für jedes Folgepaket; keine zweiten Works. |
-| P01 | Bereits vorhanden: `native/item_tables.c/.h` samt Verbrauchern behalten. Regression für zwölf Tabellen, gepackte Werte sowie native ITEM_WORK-/DSP_WORK-/NJS_POINT3-Größen, Alignment und Feldoffsets hinzufügen. | Erneuter Quellvergleich bestanden; eigenen Header nicht durch `item.h`/fehlende PS2-Ninja-Header ersetzen. macOS-arm64/Windows-x64-Layout prüfen; Itemmechanismen bleiben D02/D03/D07. |
-| P02 | Bereits vorhanden: `native/room_table.c/.h` und `RoomArchive` behalten. Regression der 205 Namen/Indizes, Bereichsfehler und tatsächlich zugeordneten Raumdaten hinzufügen. | Geordneter Quellvergleich bestanden. Keine unbelegte Behauptung eines Disc-/Dateimechanismusports und kein neues ISO-System. |
-| P03 | Native Geometrieprimitiven für folgende Pakete: zuerst benötigte Box-/Kapsel-/Linien-/Dreiecksoperationen in `native/geometry_*.*`. | P00. Originalfälle und Randfälle, keine neu erfundene Kollision. `ps2_NaColi.c` wird nicht kompiliert. |
-| P04 | Clip-Abfragen nativ portiert: 113 Event-/51 Raumzeilen, Erstreffer, Rcase-Asymmetrie, beide Displaystandards und Monitor-Tabellenbypass. Bestehende Runtime-Displayflags angebunden; Clipgrenzen und sichtbare Near/Far-Wirkung positiv geprüft. GameOver-Ausnahmepfad behält ausdrücklich 2/20000. | Kein vollständiger Kamera-/Gameplay-Abschluss: Monitor-Aufrufketten mit unportiertem Eff137 (E03), weitere Kameraübergänge und Eisraum-Tiefensortierung sind nicht vollständig abgenommen. Keine PS2-Hardwareflags oder OT-Engine nachbilden. |
-| P05 | Bereits vorhandene UI-Daten `native/ui_tables_data.inc` erhalten; PARTS-/NJS_TEXANIM-/Font-/Positionsinitialisierer und native Deklarationen gegen Originalreferenz prüfen und Datenregression nachtragen. | Keine erneute Extraktion und keine Funktionen in die Datei einsetzen. Werte/Reihenfolge/Dimensionen sind Datenabnahme, nicht BulletSet-/Befehls- oder EKG-Abnahme. |
+| R00 | Known function includes, including combinations, ECG, and UI, were no longer linked; no direct original C source remained. Integrator checked final diff and data/layout/function classification. | Source-level consumer removal done; do not repeat. ADX mixed generation was R02; missing gameplay remained D07–D09. Do not count code removal as port success. |
+| R01 | Integrator maintained a list of missing functions in disabled APIs along actual call paths. Gameplay/acceptance tests could not count neutral/completion answers as ported effects; separate gap tests belonged in R03. | Parallel to R00/P00. Combat, collision hit, trap spawn, subplayer, terminal/door completion, item box, inspection, and effect requests remained visibly incomplete. Checker PASS alone did not release the game. |
+| R02 | First small remainder: provide ADX data through an independent data-only generator or verified native data module. CMake must stop running the mixed generator and deleting function outputs. Add mixed-generator/body-output detection to the policy checker. | D07–D09 consumers already disabled; do not remove again. Preserve exact original ADX values; do not ban pure Combat/Chunk/UI data. Synthetic negative tests for “generate, then delete” and partial bodies; positive data-only output. No exception or generator execution for classification. |
+| R03 | Integrator labeled tests as data/removal/gap contracts or actual mechanism/runtime evidence; recorded lost effect regressions per task and reran them on native owners after package implementation. | Parallel with P00; shared tests after integration. No return to core/generator tests. Gap tests may exist, but “zero quads/no hit/no mutation” cannot count as 1:1 success. Derive old gameplay cases from permitted original references and test history, never quarantine. |
+| P00 | Integrator documented existing Player/WorldEntity/Inventory/Effect/Pose owners and defined small state views and mutation APIs. No game logic. | Starting point: field mapping, order, and owner for every later package; no second works. |
+| P01 | Existing `native/item_tables.c/.h` and consumers retained. Add regressions for twelve tables, packed values, and native ITEM_WORK/DSP_WORK/NJS_POINT3 sizes, alignment, and offsets. | Source comparison passed; do not replace native header with `item.h` or missing PS2 Ninja headers. Check macOS-arm64/Windows-x64 layouts; item mechanics remain D02/D03/D07. |
+| P02 | Existing `native/room_table.c/.h` and `RoomArchive` retained. Add regressions for 205 names/indices, range errors, and actual room mapping. | Ordered source comparison passed. Do not claim a disc/file mechanism port or invent an ISO system. |
+| P03 | Native geometry primitives for later packages: needed box/capsule/line/triangle operations in `native/geometry_*.*` first. | P00. Original and edge cases; no invented collision. `ps2_NaColi.c` is not compiled. |
+| P04 | Native clip queries: 113 event/51 room rows, first-hit, Rcase asymmetry, both display defaults, and monitor-table bypass. Existing runtime display flags connected; clip limits and visible near/far effect positively checked. Game Over retained explicit 2/20000 exception. | No full camera/gameplay completion: monitor calls with unported Eff137 (E03), other camera transitions, and ice-room depth sorting not fully accepted. No PS2 hardware flags or OT engine. |
+| P05 | Retain existing UI data `native/ui_tables_data.inc`; check PARTS/NJS_TEXANIM/font/position initializers and native declarations against original references; add data regression. | No re-extraction or functions in this file. Values/order/dimensions are data acceptance, not BulletSet/command/ECG acceptance. |
 
-## Nächste konfliktarme Arbeitswelle
+## Next low-conflict work wave at that time
 
-Der konkrete Folgeauftrag für Claude steht in
-[`CLAUDE_NEXT_TASKS.md`](CLAUDE_NEXT_TASKS.md). Keine weitere breite
-Stilllegungsrunde; zuerst den kleinen Erzeugerrest schließen, danach die
-fehlenden Inventar-/Status-/UI-Mechanismen als vollständiges Paket bauen.
+Claude's specific follow-up is in [`CLAUDE_NEXT_TASKS.md`](CLAUDE_NEXT_TASKS.md).
+No broad additional removal wave: close the small generator remainder first,
+then implement missing Inventory/Status/UI mechanisms as a complete package.
 
-1. Integrator: R02 mit Claude als erstem abgegrenztem Auftrag abstimmen;
-   R00/R01/R03/P00 sowie Datenregressionen P01/P02/P05 weiterführen.
-   Eigentümer und Schnittstellen festlegen, keine zweite Player-/Enemy-/Effect-Welt.
-2. Geometrie-Agent: P03 → E01 (gemeinsame ATR-Boden/Wand/Linie/Hit-Identität)
-   → B00. Primitive und Services einmal portieren; Bewegung, Zielwahl,
-   Gegner, Partikel und Typ-3-Flash konsumieren dieselbe Quelle.
-3. Actor-Agent: F01/F02 und gemeinsamer C02-Asset-/Pose-Vertrag; vorhandene
-   Decoder weiterverwenden. Danach F03/F04/F05 nach gemeinsamen Verträgen.
-4. Ablauf-Agent: P04 und G01 in getrennten vorhandenen Dateien. Echte
-   Clip-/Türparameter und Zustandsübergänge, keine sofortigen Erfolgsrückgaben.
-5. Claude: D02a/D02b → D02c/D02d → D07 → D01 → D06-Anschlussübergabe
-   → D09 → D08. Inventar nicht zwischen Agents aufteilen; die gesamte
-   Mutation läuft auf derselben `Inventory`. Danach gemeinsame Tests und
-   Ursachenfixes für das Paket. D03/D04/D05 sind nachfolgende getrennte Pakete,
-   nicht stillschweigend Teil dieses ersten Auftrags.
+1. Integrator: agree R02 as Claude's first narrow task; continue
+   R00/R01/R03/P00 and P01/P02/P05 data regressions. Set owners/interfaces;
+   no second Player/Enemy/Effect world.
+2. Geometry agent: P03 → E01 (shared ATR ground/wall/line/hit identity) →
+   B00. Port primitives/services once; movement, targeting, enemies,
+   particles, and type-3 flash consume the same source.
+3. Actor agent: F01/F02 and shared C02 asset/pose contract; reuse decoders.
+   Then F03/F04/F05 under shared contracts.
+4. Progression agent: P04 and G01 in separate existing files. Real clip/door
+   parameters and transitions, no immediate success returns.
+5. Claude: D02a/D02b → D02c/D02d → D07 → D01 → D06 connection handoff →
+   D09 → D08. Do not split Inventory across agents. All mutations use the
+   same `Inventory`; then run shared tests and root-cause fixes. D03/D04/D05
+   are separate later packages.
 
-Nach P00 sind A, C und D unabhängig vorbereitbar; Integration erst gegen
-die freigegebenen Verträge. D07/D08/D09 sind nun reine Implementierungs-
-aufträge für fehlende Mechanismen, keine erneuten Rückbauaufträge. Sie lassen
-sich nach P00 in getrennten Dateien bearbeiten: D07 `inventory.cpp`,
-D08 `status_pulse.cpp/.h`, D09 `ui.cpp`; D01/D02 dürfen nicht zeitgleich mit
-D07 dieselbe Inventory editieren. Zusätzliche Agents können D04 und D05 nach
-explizit getrennter Dateizuständigkeit übernehmen. R00/P00/G02 sowie gemeinsame
-World-/Runtime-Dateien bleiben beim Integrator. Die Aufteilung ist ein Plan;
-hierdurch werden keine Tasks gestartet oder laufende Zuständigkeiten geändert.
+After P00, A, C, and D could prepare independently; integrate only against
+approved contracts. D07/D08/D09 were implementation tasks for missing
+mechanisms, not another removal pass. They could use separate files after
+P00: D07 `inventory.cpp`, D08 `status_pulse.cpp/.h`, D09 `ui.cpp`. D01/D02
+could not edit the same Inventory concurrently with D07. Additional agents
+could take D04/D05 after explicit file ownership separation. R00/P00/G02 and
+shared World/Runtime files remained with the integrator. This division was a
+plan; it did not start tasks or change active ownership.
 
-## Phase 1 — parallele Paketimplementierungen
+## Phase 1 — parallel package implementations
 
-Pro Paket genau ein Agent; kleinere Teilaufgaben in der angegebenen Reihenfolge.
-Pakete dürfen nach P00 parallel laufen, soweit ihre Abhängigkeiten erfüllt sind.
+One agent per package, smaller subtasks in the stated order. Packages could
+run in parallel after P00 when dependencies were satisfied.
 
-### A — Kampf (Owner: `native/combat*`, `native/targeting*`)
+### A — Combat (owner: `native/combat*`, `native/targeting*`)
 
-| ID | Aufgabe | Abhängigkeit / Nachweis |
+| ID | Task | Dependency / evidence |
 |---|---|---|
-| A01 | Fehlende Zielsuche/-wechsel direkt auf vorhandenen WorldEntity-/Player-Views implementieren; Wand-Sichtprüfung und Armwinkelsteuerung einschließen. | P00/P03/E01; Gate-/Distanz-/Winkel-/Dual-Target-Tabellen exakt. `Targeting::select/arms` sind momentan neutral. |
-| A02 | Ready/Release/Reload/Bullet-Zähler und Inventarübergänge eigenständig portieren. | A01/P01; Flag-/Munitions-/Frameverlauf ohne separate COMBAT_SYS/BH_PWORK-Welt. |
-| A03 | Pistol/Burst/Dual-State-Machines in die vorhandene CombatController-Statequelle übertragen. | A02; Motion-/Latch-/Posefolgen und Sideeffects belegen. |
-| A04 | Knife-/Trefferzuweisung, Joint-/CPCL-Daten und Damage-Meldung an tatsächliche native Enemy-Works übertragen. | A03/P03/C02; keine zweite Ziel-/Schadensliste. |
-| A05 | Weitere Originalwaffen in Tabellenreihenfolge: Scope, Shotgun, Armbrust, Granaten, Launcher. Alle implementieren, anschließend gesammelt prüfen. | A04/E01–E03; Licht/SFX/Blut/Explosion nicht wegstubben. |
+| A01 | Implement missing target search/switch on existing WorldEntity/Player views, including wall visibility and arm angles. | P00/P03/E01; exact gate/distance/angle/dual-target tables. `Targeting::select/arms` were neutral. |
+| A02 | Independently port Ready/Release/Reload/Bullet count and inventory transitions. | A01/P01; flag/ammunition/frame flow without separate COMBAT_SYS/BH_PWORK world. |
+| A03 | Move Pistol/Burst/Dual state machines to existing CombatController state source. | A02; evidence motion/latch/pose consequences and side effects. |
+| A04 | Connect knife/hit assignment, Joint/CPCL data, and damage reporting to actual native Enemy works. | A03/P03/C02; no second target/damage list. |
+| A05 | Other original weapons in table order: scope, shotgun, crossbow, grenades, launcher. Implement all, then test together. | A04/E01–E03; do not stub light/SFX/blood/explosion. |
 
-Der derzeit inaktive `player_combat_core.c`-Vertrag muss dabei entweder direkt
-an dieselbe native Combat-Statequelle gebunden oder mit den Aufrufern ersetzt
-werden. Nicht die neue Implementierung pauschal quarantinieren: Nur tatsächlich
-ersetzte Altartefakte recoverable verschieben. Keine Funktion nur kopieren oder
-umbenennen; kein Wiederaktivieren des alten Funktionsgenerators.
+The inactive `player_combat_core.c` contract had to bind directly to the same
+native Combat state source or be replaced together with callers. Do not
+quarantine the new implementation wholesale: move only actually replaced
+old artifacts recoverably. Do not copy/rename a function or reactivate the
+old function generator.
 
-### B — Player-/Objektbewegung (Owner: `native/player_*`, `native/object_itmbox.cpp`)
+### B — Player/object movement (owner: `native/player_*`, `native/object_itmbox.cpp`)
 
-| ID | Aufgabe | Abhängigkeit / Nachweis |
+| ID | Task | Dependency / evidence |
 |---|---|---|
-| B00 | Player-Wand-/Boden-/Dansa-Auflösung und dynamische ETC-/FLR-Bindungen aus der stillgelegten Push-Brücke auf vorhandene Player-/RoomWorld-Daten portieren. | P00/P03/E01. Flags, ATR-Typen, `grand`, Reihenfolge ROM vor mobile Work und tatsächliche Hit-Identität. `native/collision.cpp` auf belegte Originalsemantik prüfen; keine Substep-/Polygonheuristik als Ersatz übernehmen. |
-| B01 | Fehlende Treppen-/Leiter-/Stufenaktionen, Motion, Etagenwechsel, Fußfixierung, SFX und Release auf bestehender nativer Player-Statequelle implementieren. | P00/B00; sofortiges Ende in `recvx_stairs_tick` ersetzen. Include und Ersatz-Player-Work sind bereits entfernt. |
-| B02 | Pushkontakt-/Objektinitialisierung und mobile Raumkollision direkt auf WorldEntity-Objekten implementieren. | P00/P03/B00; Reihenfolge und originale Tabellen; keine PUSH_SYS/PUSH_ROOM-Kopie. |
-| B03 | Push-State-Machine, Motionwurzel und Move-/Releasepfad eigenständig implementieren. | B00/B02; vorhandenen inaktiven `player_push_core.c`-Aufrufvertrag auf dieselbe native Quelle binden oder geordnet ersetzen. Keine zweite Positionsbuchführung als Spiellogik. |
-| B04 | Haar-/verknüpfte Objekttransformation auf tatsächliche native Actor-Pose übertragen. | P00/F01; keine eigene Player-/Allocator-Attrappe. |
-| B05 | Deckelcontroller portiert: 41 Schritte, strikter Schwellwert, separater Menüpass, SFX, Playerflags und Rückkehr im vorhandenen Objekt-/Inventarpfad. | Positive Komponenten-/World-/Runtimeprüfung; keine Originalkörper. Kein Abschluss des allgemeinen Objekt-/Playerdispatchers oder aller verknüpften/reservierten Besitzer. |
+| B00 | Port player wall/floor/Dansa resolution and dynamic ETC/FLR binding from disabled push bridge onto existing Player/RoomWorld data. | P00/P03/E01. Flags, ATR types, `grand`, ROM-before-mobile order, actual hit identity. Check `native/collision.cpp` against original semantics; no substep/polygon heuristic substitute. |
+| B01 | Implement missing stair/ladder/step actions, motion, floor changes, foot anchoring, SFX, and release on native Player state. | P00/B00; replace immediate completion in `recvx_stairs_tick`. Include and substitute Player work were removed already. |
+| B02 | Implement push contact/object initialization and mobile room collision directly on WorldEntity objects. | P00/P03/B00; original order/tables, no PUSH_SYS/PUSH_ROOM copy. |
+| B03 | Independently implement push state machine, motion root, Move/Release path. | B00/B02; bind inactive `player_push_core.c` call contract to the same native source or replace in order. No second position bookkeeping as game logic. |
+| B04 | Apply hair/linked-object transforms to the actual native Actor pose. | P00/F01; no separate Player/allocator dummy. |
+| B05 | Lid controller ported: 41 steps, strict threshold, separate menu pass, SFX, player flags, and return in existing object/inventory path. | Positive component/World/runtime checks; no original bodies. This did not finish general object/player dispatch or all linked/reserved owners. |
 
-### C — Gegner und Subplayer (Owner: neue `native/enemies/enemy_*`-Module)
+### C — Enemies and subplayers (owner: new `native/enemies/enemy_*` modules)
 
-**Verbindlicher Gesamtumfang (Nutzer, 2026-10-10): alle originalen Gegner.**
-Der konkrete Dritt-Agent-Auftrag umfasst C01–C08 einschließlich sämtlicher
-C07+-IDs; C01-Fallenaktivierung für Hunde/Zombies ist nur ein Teil davon.
-Vollständige ID-/Variantenliste aus Originaldispatcher und Raumdaten ableiten,
-gemeinsame native Besitzerverträge abstimmen, zuerst alle Gegner/Assets
-portieren, danach gesammelt testen und Ursachen global beheben. Das erste
-produktive Abnahmeziel bleibt EN07/RM_0130; es ersetzt nicht alle anderen
-Gegner. Keine Abschlussbehauptung allein aus Spawn, Link oder Ladescan.
-Aktualisierter Auftrag: `docs/THIRD_AGENT_C01_TASK.md`.
+**Required full scope (user, 2026-10-10): every original enemy.** The third
+agent assignment covered C01–C08 and all C07+ IDs; C01 trap activation for
+dogs/zombies was only part. Derive complete ID/variant list from original
+dispatcher and room data, agree shared native owner contracts, port all
+enemies/assets first, then test together and fix common causes. First
+productive acceptance remained EN07/RM_0130 but did not replace the other
+enemies. Spawn, link, or load scan alone did not finish the job. Updated
+assignment: [historical enemy assignment](../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md).
 
-| ID | Aufgabe | Abhängigkeit / Nachweis |
+| ID | Task | Dependency / evidence |
 |---|---|---|
-| C01 | Originale Raum-/Eventspawn-Daten und Initialisierungsreihenfolge für alle IDs aufnehmen; fehlende ATR-Fallenaktivierung, Etagen-/Richtungswahl und EN04-Kontaktfälle auf vorhandenem RoomWorld-Spawnweg implementieren. | P00, Kontaktfälle P03/E01/B00; `activate_enemy_spawn` ist derzeit immer false. Normale Raumplatzierung getrennt belegen; kein künstliches Spawn-Injizieren. |
-| C02 | Gemeinsame native Enemy-State-/EXP-/Child-/Motion-/Damage-Felder ausschließlich am vorhandenen Entity-Besitzer. | P00, abgestimmter F01-Vertrag; State-/Asset-Teams können parallel arbeiten. Arena/Lebenszyklus nativ, keine BH_PWORK-Spiegel-/Globalswelt. |
-| C03 | Fehlende EN01 Init/Move/Skript-/Damage-/Death-/Child-/Griff-/Bissmechanismen eigenständig portieren. | C01/C02/A04; Includes sind bereits entfernt. `EN01_STORE`-Durchleitung durch tatsächliche native Entity-Zustandsfortschreibung ersetzen; alle Zweige vor Sammeltests. |
-| C04 | EN04 Init/Move/Attack/Damage/Death auf dieselbe native Statequelle übertragen. | C01/C02/A04 sowie gemeinsame Helper-Verträge aus C03; keine unnötige Wartepflicht auf den kompletten EN01-Port. Kein fester EXP-Ersatz oder zweiter Dispatchbesitzer. |
-| C05 | Tatsächliche Subplayer-ID-Tabelle sowie Init/Move/Skript-/Motion-/Releaseabläufe eigenständig portieren. | C02/F01; `recvx_is_subplayer` erkennt momentan keine ID, Init/Tick sind leer. EventVm und Draw lesen dieselbe Work; keine pauschal geratenen ID-Bereiche. |
-| C06 | EN07 vollständig portieren: originalbelegter Spawn, Init, Animation, KI, Attack/Grab/Damage/Death, SFX und Draw. | C01/C02/E/F/G; verbindliche produktive Abnahme RM_0130 (fünf originale ID-7-Einträge), kein Direktdispatch-Test als Ersatz. |
-| C07+ | Restliche fehlende IDs in disjunkten kleinen Gruppen; erst nach gemeinsamen Schnittstellen auf andere Agents verteilen. Für jede Gruppe vollständige Originalfälle, dann Sammeltest. | C02/F/E/G. Gruppierung aus Original-Dispatch-/Abhängigkeitsdaten bestimmen, nicht nach vermuteten Gegnernamen. |
-| C08 | EN00-Sprengfass: Zustand, bewegliche Wand, Treffer-/Explosions-/Verschwindepfad eigenständig portieren. | C02/A04/E01/E03; bislang ebenfalls Teil der nun entfernten EN01-Generatorbrücke. Kein verlorener Nebenfall des Gegnerpakets. |
+| C01 | Inventory original room/event spawn data and init order for all IDs; implement missing ATR trap activation, floor/direction selection, and EN04 contact cases on existing RoomWorld spawn path. | P00, contact cases P03/E01/B00; `activate_enemy_spawn` then always returned false. Prove normal room placement separately; no artificial spawn injection. |
+| C02 | Shared native Enemy state/EXP/child/motion/damage fields only on existing Entity owner. | P00, agreed F01 contract; state and asset teams could work in parallel. Native arena/lifecycle; no mirrored BH_PWORK/global world. |
+| C03 | Independently port missing EN01 Init/Move/script/Damage/Death/child/grab/bite. | C01/C02/A04; includes already removed. Replace `EN01_STORE` pass-through with actual native Entity progression; all branches before grouped tests. |
+| C04 | Port EN04 Init/Move/Attack/Damage/Death onto the same native state source. | C01/C02/A04 plus shared C03 helper contracts; no unnecessary wait for the full EN01 port. No fixed EXP substitute or second dispatch owner. |
+| C05 | Independently port actual subplayer ID table and Init/Move/script/motion/release. | C02/F01; `recvx_is_subplayer` then recognized no ID, Init/Tick empty. EventVm and Draw read the same work; no guessed ID ranges. |
+| C06 | Fully port EN07: evidenced original spawn, init, animation, AI, attack/grab/damage/death, SFX, draw. | C01/C02/E/F/G; required productive RM_0130 acceptance (five original ID-7 entries), no direct-dispatch test as substitute. |
+| C07+ | Remaining missing IDs in disjoint small groups; delegate only after shared interfaces. Each group handles all original cases, then grouped test. | C02/F/E/G; derive grouping from original dispatch/dependency data, not guessed enemy names. |
+| C08 | Independently port EN00 explosive barrel: state, mobile wall, hit/explosion/disappearance. | C02/A04/E01/E03; then part of removed EN01 generator bridge. Do not lose this enemy-package case. |
 
-### D — Inventar/Menü/Computer (Owner: `native/inventory*`, `inspection*`, `file_folder*`, `computer*`, `gameover*`)
+### D — Inventory/menu/computer (owner: `native/inventory*`, `inspection*`, `file_folder*`, `computer*`, `gameover*`)
 
-| ID | Aufgabe | Abhängigkeit / Nachweis |
+| ID | Task | Dependency / evidence |
 |---|---|---|
-| D01 | Fehlende Itembox-Bestands-/Auswahl-/Transferzustände eigenständig auf derselben Inventory portieren. | P00/P01; `box_engine.inc` ist entfernt, Transfer neutral. Weltobjekt B05 separat anschließen. |
-| D02 | Fehlende Pickup-/Kapazitäts-/Stack-/ItemSort-/Equip-/Search-/Erase-/Reload-/CountBullet- und ItemUse00-/übrige Gebrauchsfälle portieren. | P00/P01 und A02-Vertrag; gemeinsame Bestandshelper zuerst, D01 konsumiert sie anschließend. Includes sind entfernt, Mengen-/Flag-/Slotfolgen fehlen. Kombinationen sind ein eigener Restauftrag D07. |
-| D03 | Fehlenden Inspection-Automaten, Fragen, Itemumwandlung, Zoom-/Aktionspose, Hidden-Nodes, Namens-/Dateizuordnung sowie Filefolder-Auswahl/-Drehung/-Leserübergang implementieren. | D02; beide Includes entfernt. Native Tabellen-/Matrix-/Foldergeometriehelfer erhalten und semantisch prüfen. |
-| D04 | Terminal-Skriptinterpreter mit acht Skripten, Fensterautomat, Softkeyboard, Text/Quads, Originalflags, SFX und Abbruchpfad auf native Dialog-/Eventstates portieren. | P00 und vorhandener Inventory-/Message-Vertrag; D03 nicht vollständig abwarten. Kein eigener SYS-/ROM-Wrapper; sofortiges `finished` in `computer_core.c` ersetzen. |
-| D05 | Fehlende Todesszene, 16x16-Netz-/Texturdaten, Timing/Fade, Retry, Release und Titelrückkehr in bestehenden nativen Ablauf übertragen. | P00, Texturvertrag E03; `gameover.inc` entfernt. `begin`/`draw` sind leer, `active` false; keine erfolgreiche Rückkehr behaupten. |
-| D06 | Sieben fehlende Event-Inventarmutationen für Integrator vorbereiten; Anschluss ausschließlich an dieselbe Inventory. | D01/D02; Include entfernt, VM meldet pending. Original-Slotbereiche, Ersttreffer, Ausrüstungs-/Munitionsflags; keine Schattenbestände. |
-| D07 | Fehlende sechs Kombinationsmechanismen eigenständig direkt auf Inventory-Slots, Itemdaten und Messagezustand implementieren; vorhandenen Tabellen-Suchhelfer prüfen/behalten. | P00/P01, Sortier-/Equipvertrag D02. Originalbrücke entfernt, `combine()` aktuell immer erfolglos. Mengenprüfung, Produktwechsel, Restmenge, Flags, Slots und Meldungen 1:1; gültige Kombination muss tatsächlich wirken. Keine kopierten Körper. |
-| D08 | Fehlenden Status-/Heil-/Gift-EKG-Automaten, Kurven-/Fade-/UV-/Farbausgabe eigenständig auf bestehendem `StatusPulse` implementieren. | P00, Heil-/Giftvertrag D02. Keine Körper mehr eingebunden; aktuell keine Quads und heal_mode 0. Originalzustandsfelder/Flagbits/Framefolge und vier Quads je relevantem Ausgabeschritt; keine Ersatzkurve, kein thread-local Spiegel mit Copy-in/Copy-out. |
-| D09 | Fehlenden Mengen-Ziffernaufbau/Farbbank sowie Triger-/ItemCommand-Auswahl, Sichtbarkeit, Höhe und Beschriftung direkt auf nativen UI-/Inventory-Zuständen implementieren. | P00/P01/P05, A02-/D02-Verträge. Daten stehen bereits in `ui_tables_data.inc`, Funktionskörper entfernt. Mengenanzeige und Befehlsfenster fehlen; Eingabemenü weiterhin vorhanden. Originale Item-/Cursor-/Waffenfälle, keine Teilkörperkopie. |
+| D01 | Port missing item-box inventory/selection/transfer states independently on the same Inventory. | P00/P01; `box_engine.inc` removed, transfer neutral. Connect World object B05 separately. |
+| D02 | Port missing pickup/capacity/stack/ItemSort/equip/search/erase/reload/CountBullet and ItemUse00/other use cases. | P00/P01 and A02 contract; shared inventory helpers first, D01 consumes them. Includes removed; quantity/flag/slot effects missing. Combinations are separate D07. |
+| D03 | Implement missing inspection state machine, questions, item conversion, zoom/action pose, hidden nodes, name/file mapping, and file-folder selection/rotation/reader transition. | D02; both includes removed. Retain and semantically check native table/matrix/folder-geometry helpers. |
+| D04 | Port terminal interpreter with eight scripts, window state machine, soft keyboard, text/quads, original flags, SFX, and cancel path onto native dialog/event state. | P00 and existing Inventory/Message contract; need not await all D03. No own SYS/ROM wrapper; replace immediate `finished` in `computer_core.c`. |
+| D05 | Port missing death scene, 16×16 grid/texture data, timing/fade, Retry, Release, and title return into native flow. | P00, E03 texture contract; `gameover.inc` removed. `begin`/`draw` empty, `active` false; do not claim successful return. |
+| D06 | Prepare seven missing event inventory mutations for the integrator, bound only to the same Inventory. | D01/D02; include removed, VM reported pending. Original slot ranges, first hit, equip/ammunition flags; no shadow inventory. |
+| D07 | Independently implement six missing combination mechanisms directly on Inventory slots, item data, and Message state; check/retain native table-search helper. | P00/P01, D02 sorting/equip contract. Original bridge removed, `combine()` then always failed. Exact quantity/product/remainder/flag/slot/message effects; valid combination must act. No copied bodies. |
+| D08 | Implement missing condition/heal/poison ECG state machine and curve/fade/UV/color output on existing `StatusPulse`. | P00, D02 healing/poison contract. No bodies linked; then no quads and heal_mode 0. Original state fields/flag bits/frame sequence and four quads per relevant output; no substitute curve or thread-local copy-in/copy-out mirror. |
+| D09 | Implement missing quantity digits/color bank and Triger/ItemCommand selection, visibility, height, and labels directly on native UI/Inventory state. | P00/P01/P05, A02/D02 contracts. Data already in `ui_tables_data.inc`; function bodies removed. Quantity and command window missing, input menu still present. Original item/cursor/weapon cases, no partial-body copy. |
 
-D02 wird in kleine, aufeinander aufbauende Teilaufgaben geteilt, ohne einen
-zweiten Inventarbesitzer anzulegen:
+D02 was divided into dependent subtasks without a second Inventory owner:
 
-| Teil-ID | Umfang | Grenze / Anschluss |
+| Sub-ID | Scope | Boundary / connection |
 |---|---|---|
-| D02a | Aufnahmefrage, Antworten/Modi, Kapazität, breite Items, Stack-Maxima, Geschenk-/Skript- und Sofortgebrauchsfälle. | `pickup`/Bestandsmutation; Gebrauch über denselben D02d-Vertrag, nicht als Sonderfall doppeln. |
-| D02b | Originalsortierung, Suche/Löschen, Ausrüstungsindex und Nachführung ausgewählter Slots. | Gemeinsame Helper für Aufnahme, Kombination, Kiste und Events; vorhandene Host-Helper semantisch prüfen, nicht blind übernehmen. |
-| D02c | Inventarseitiges Nachladen und Munitionszählung einschließlich gepackter Flags, signed Zähler und Slotfolge. | A02 erhält einen kleinen Vertrag auf dieselbe Inventory; keine Combat-State-Machine im Inventar neu erfinden. |
-| D02d | Alle ItemUse-/Use_00-Fälle, Heilung/Gift/Spray, Trigger, Meldung, Schließen und Pulseanforderung. | Bestehende Player-/Event-/Statuszustände verwenden; D08 konsumiert dieselbe Heil-/Giftwirkung. |
+| D02a | Pickup question, answers/modes, capacity, wide items, stack maxima, gift/script and immediate-use cases. | `pickup`/inventory mutation; use through shared D02d contract, not duplicated as a special case. |
+| D02b | Original sorting, search/deletion, equipment index, and selected-slot updates. | Shared helpers for pickup, combination, box, and events; check host helpers semantically before reuse. |
+| D02c | Inventory-side reload and ammunition count, including packed flags, signed counters, and slot sequence. | A02 uses a small contract on the same Inventory; no new combat state machine inside inventory. |
+| D02d | Every ItemUse/Use_00 case, healing/poison/spray, triggers, message, closing, and pulse request. | Use existing Player/Event/Status state; D08 consumes the same healing/poison effect. |
 
-D06 umfasst `bhPlItemLost`, `bhItemGetGet`, `bhPlItemLostEx`,
-`bhArmsItemSet`, `bhItemGetGetEx`, `bhPlItemChangeM`, `bhPlItemTamaSet`.
-Claude liefert native Mutationsverträge und belegte Anschlussänderungen;
-der Integrator besitzt `events.cpp` und integriert sie ohne Schattenbestände.
+D06 covers `bhPlItemLost`, `bhItemGetGet`, `bhPlItemLostEx`,
+`bhArmsItemSet`, `bhItemGetGetEx`, `bhPlItemChangeM`, and
+`bhPlItemTamaSet`. Claude provided native mutation contracts and evidenced
+connection changes; the integrator owned `events.cpp` and connected them
+without shadow inventory.
 
-### E — Effekte/Sound/Licht (Owner: `native/effect_*`, kleine native Service-Module)
+### E — Effects/sound/light (owner: `native/effect_*`, small native service modules)
 
-| ID | Aufgabe | Abhängigkeit / Nachweis |
+| ID | Task | Dependency / evidence |
 |---|---|---|
-| E01 | Fehlende gemeinsame ATR-Wall-/Ground-/Line-/Reflexionsmechanismen einschließlich echter `bhCheckL2Wall`-Semantik und Hit-Eintragsidentität implementieren. | P00/P03; `effect_collision.inc` ist bereits entfernt. ROM/mobile Reihenfolge, Typen 0..7/Rampen und Flagfälle; keine vereinfachte Strahlheuristik. |
-| E02 | Fehlende Partikelemitter, Stufenverlauf, Zufall, Bewegung, Farbe/Atlas, Line-/Billboardausgabe und Blutlache auf bestehender nativer Effekt-Statequelle implementieren. | P00/E01; `effect_particles.inc` ist entfernt. Bestehenden Besitzer zuerst in P00 bestimmen, keinen zusätzlichen O_WRK-/Effect-Pool voraussetzen oder erfinden. |
-| E03 | **Basis nativ angeschlossen:** ef_info, vier Modellblock-Schritte, 40 gemeinsame Texturen, Eff009 mit beiden UV-Banken und Typen, Spieler-/Objektverknüpfung und Feuerzeuglicht. Offen bleiben die übrigen Sprite-/Custom-/Explosion-/Blood-Fälle. | Positivtest native_lighter_effect und echte Eröffnung/Inventar mit verify_lighter.py. Armhaltung bhArmIkMdk und vollständige pt_flg-/Modelldraw-Gates bleiben F01/P00; keine vollständige Feuerzeug-Pose behauptet. Lichtanimation 1..6 nativ, vollständiges Lichtsystem weiterhin E04. Siehe work/native_port_E03_lighter.result.md. |
-| E04 | Gemeinsame originale Enemy-/Player-SFX-/Voice-/Light-Reihenfolge an AudioMixer/OriginalLight binden. | C02/E03; keine fehlenden Aufrufe durch Null-/No-op-Rückgaben verdecken. |
-| E05 | Waffen-Typ-3-Wandbindung und native per-Draw-Samplerwahl schließen. | E01; vorhandene WeaponFlash-Implementierung behalten, keine GS-/GIF-Transportschicht. |
+| E01 | Implement missing shared ATR wall/ground/line/reflection mechanisms, including real `bhCheckL2Wall` semantics and hit-entry identity. | P00/P03; `effect_collision.inc` removed. ROM/mobile order, types 0..7/ramps and flags; no simplified ray heuristic. |
+| E02 | Implement missing particle emitters, step progression, random, movement, color/atlas, line/billboard output, and blood pool on existing native Effect state. | P00/E01; `effect_particles.inc` removed. Identify existing owner in P00; do not assume or invent another O_WRK/Effect pool. |
+| E03 | **Native base connected:** `ef_info`, four model-block steps, 40 shared textures, Eff009 with both UV banks/types, player/object link, and lighter light. Other sprite/custom/explosion/blood cases remained open. | Positive `native_lighter_effect` and real opening/inventory `verify_lighter.py`. Arm pose `bhArmIkMdk` and full `pt_flg`/model draw gates remained F01/P00; no claim of complete lighter pose. Light animation 1..6 native; full light system still E04. See `work/native_port_E03_lighter.result.md`. |
+| E04 | Bind shared original Enemy/Player SFX/voice/light order to AudioMixer/OriginalLight. | C02/E03; do not hide missing calls with null/no-op returns. |
+| E05 | Close weapon type-3 wall binding and native per-draw sampler selection. | E01; retain WeaponFlash, no GS/GIF transport layer. |
 
-### F — Actor/Asset/Draw (Owner: `native/actor*`, `native/face*`, Renderer nur nach Integration)
+### F — Actor/asset/draw (owner: `native/actor*`, `native/face*`; renderer after integration)
 
-| ID | Aufgabe | Abhängigkeit / Nachweis |
+| ID | Task | Dependency / evidence |
 |---|---|---|
-| F01 | Vollständige MDL-/MTN-/Skin-/Basic-/Child-Assetdaten auf die vorhandene native Actor-/Assetquelle portieren. | P00; Slots, Eigentümer, Motionverzeichnis und mutable Daten direkt gebunden. |
-| F02 | Originale Motion-/Interpolation-/Flag-/Node-/Vertex-Seiteneffekte im selben nativen Actor fortschreiben. | F01; keine zweite Pose oder separat laufende Original-Work. |
-| F03 | Morph Push/Calc/Draw/Pop nativ für alle Besitzer: Player, Enemy, Subplayer, Object. | F02; kein Vertexdrift, Originalobjektwahl und Event-/KI-Flags; nicht aus Quarantäne kopieren. |
-| F04 | Face/Lip und Ownerbindungen eigenständig vervollständigen; aktiver LIP-Stream bleibt bis zur originalen Aktivierung unverändert. | F02; Originaldaten/Disassembly, Cursor-/Signed-MASK-/Lebenszyklusnachweise. |
-| F05 | Shadow vollständig in vorhandenen nativen Zeichenpfad portieren. | F02; Originalgeometrie-/Clip-/Blendalgorithmus statt GS/VU-Simulation. |
+| F01 | Port complete MDL/MTN/Skin/Basic/Child asset data onto existing native Actor/asset source. | P00; directly bind slots, owner, motion directory, mutable data. |
+| F02 | Advance original motion/interpolation/flag/node/vertex side effects in the same native Actor. | F01; no second pose or separately running original work. |
+| F03 | Native Morph Push/Calc/Draw/Pop for Player, Enemy, Subplayer, and Object owners. | F02; no vertex drift, original object selection and event/AI flags; no quarantine copying. |
+| F04 | Complete Face/Lip and owner bindings independently; active LIP stream unchanged until original activation. | F02; original data/disassembly, cursor/signed-MASK/lifecycle evidence. |
+| F05 | Fully port Shadow in existing native draw path. | F02; original geometry/clip/blend algorithm, not GS/VU simulation. |
 
-F04 ist kein erneuter Rückbau von `face.*`: der vorhandene Port ist
-policy-konform. Zwei belegte Abweichungen als getrennte Teilaufgaben beim
-Actor-/Face-Besitzer schließen: **F04a** Winkelübernahme von
-`toothsrc`/`tangorg`/`eyesrc` auf die tatsächlichen Poseknoten
-`objP[7/9/11/13]` (`face.c:232–239`), **F04b** Augenwinkel aus der durch
-`eyemat` transformierten Blickrichtung (`_fmCnkCalcEye`). Keine zweite Pose,
-keine zusätzliche Rotation desselben Ergebnisses und kein Originalkern.
-Aktiver Lip-Cursor, Signed-MASK-Daten und Pose-/Vertexfolge bleiben gemeinsame
-Regressionen; Face/Lip gehört nicht zum neuen Inventarauftrag für Claude.
+F04 was not another removal of `face.*`: the existing port was policy
+compliant. Two evidenced deviations belonged to the Actor/Face owner:
+**F04a**, transfer angles of `toothsrc`/`tangorg`/`eyesrc` to actual pose
+nodes `objP[7/9/11/13]` (`face.c:232–239`); **F04b**, derive eye angles
+from gaze direction transformed by `eyemat` (`_fmCnkCalcEye`). No second
+pose, duplicate rotation, or original core. Active Lip cursor, signed MASK
+data, and pose/vertex order remained shared regressions; Face/Lip was not
+part of Claude's Inventory assignment.
 
-### G — Raum/Tür/Kamera (Owner: `native/door_core*`, `native/doors*`, neue Raumservices)
+### G — Room/door/camera (owner: `native/door_core*`, `native/doors*`, new room services)
 
-| ID | Aufgabe | Abhängigkeit / Nachweis |
+| ID | Task | Dependency / evidence |
 |---|---|---|
-| G01 | MPAC-Parameterlayouts/-größen, verkettete Viewvalidierung, FadeProc, ViewProc1..7, DoorProc1..7 und deren Timing/SFX eigenständig portieren. | Vorhandenes `DoorState` behalten, Aufrufvertrag mit P00 abstimmen. `door_core.c` ist stillgelegt, nicht fertig. Original/Disassembly prüfen; Abschluss 0x40 erst am belegten Sequenzende. Bestehende Tür-/Inventarsortierung separat auditieren. |
-| G02 | Raumlade-/Eventstart-/Playerinit-/Enemyinit-/SFX-Reihenfolge am produktiven RoomWorld-Einstieg belegen und integrieren. | C01/F01/E04; Integrator besitzt gemeinsame Dateien. |
-| G03 | Kamera-/Clip-/Licht-Work an bestehende native Datenquelle binden, originale Übergänge schließen. | P04/G02; keine globale Kamera-Spiegelwelt. |
+| G01 | Independently port MPAC parameter layout/size, linked View validation, FadeProc, ViewProc1..7, DoorProc1..7, timing, and SFX. | Retain `DoorState`, agree call contract with P00. `door_core.c` was disabled, not complete. Check original/disassembly; completion bit 0x40 only at evidenced sequence end. Audit existing door/inventory order separately. |
+| G02 | Demonstrate and integrate room-load/event-start/player-init/enemy-init/SFX order at productive RoomWorld entry. | C01/F01/E04; integrator owns shared files. |
+| G03 | Bind camera/clip/light work to existing native data source and close original transitions. | P04/G02; no global mirrored camera world. |
 
-## Phase 2 — Integration und gemeinsame Abnahme
+## Phase 2 — integration and shared acceptance
 
-1. Verwaiste Generatoranforderungen bereits in R00 bereinigen. Verbleibende
-   aktive Altpfade nach Integration ihres vollständigen Ersatzes aus dem
-   Build entfernen und recoverable quarantinieren. Nur überprüfte Daten-/
-   Layoutgeneratoren bleiben. Vorhandene API-Namen
-   können für kompatible Aufrufer bleiben (nicht die verbotenen Original-
-   Dispatcher-/Kern-APIs); die Implementierung muss trotzdem
-   eigenständig sein, keinen Originalkern erreichen und keine Work duplizieren.
-2. Schutzprüfer: statische Quellen/CMake, frische Kompilierdatenbank,
-   transitive Linkeingaben und Symbolprüfung jedes ausgelieferten Binaries.
-   Keine alten Buildartefakte oder archivierten Engines für fehlende Symbole.
-   Zusätzlich R01-Wirkungsabnahme: Keine Spielfunktion gilt als portiert,
-   weil ein Include verschwunden ist oder ein Task sofort endet. Keinen
-   grünen Raum-Sweep über ausgelassene Kampf-/Terminal-/Tür-/Effektabläufe
-   als Originalverhalten ausgeben.
-   R03 unterscheidet dabei ausdrücklich grüne Lückenverträge von
-   wiederhergestellten Wirkungsregressionen. Kombinationen, EKG, Mengen-
-   anzeige und Befehlsfenster müssen positive Originalwirkung zeigen;
-   unveränderte Slots oder leere Ausgabe genügen nicht.
-3. Alle Komponententests, danach produktiv RM_0130 über Originalraumladen:
-   Spawnzeit, vollständiges sichtbares Modell, fortschreitende Originalpose,
-   KI und SFX gemeinsam. Anschließend Attack/Grab/Schaden/Tod prüfen.
-4. Rodrigo-/Event-/Lip-/Kampf-/Türregressionen und alle Räume/IDs gesammelt
-   prüfen; globale Ursachen beheben. Ein Raum ohne Prozessfehler beweist
-   weder vollständige Gegneraktionen noch Durchspielbarkeit.
-5. Windows x64 zuerst vollständig linken, danach tatsächlichen Runtime-Pfad
-   und Spielabläufe prüfen. Auditierten Ninja-Build mit vollständiger
-   `compile_commands.json` und COFF-fähigem `llvm-nm` verwenden; fehlende
-   Prüfevidenz ist kein Grund für eine Ausnahme. macOS-Paket und Start.command erst mit geprüftem
-   Binary aktualisieren; keine Veröffentlichung solange Schutzprüfung rot.
-   Quarantinierte Starter nicht automatisch restaurieren: neues geprüftes
-   Paket erstellen, Daten und lokale Einstellungen erhalten.
+1. R00 had removed orphaned generator requirements. After full replacement,
+   remove remaining active old paths from the build and quarantine them
+   recoverably. Keep only verified data/layout generators. Existing API names
+   may remain for compatible callers (except prohibited original dispatcher/
+   core APIs), but implementations must be independent and neither reach the
+   original core nor duplicate work.
+2. Policy checker: static source/CMake, fresh compile database, transitive
+   link inputs, and symbol audit of each delivered binary. Do not use old
+   build artifacts or archived engines for missing symbols. R01 also requires
+   positive effects: a game function is not ported because an include vanished
+   or a task ended immediately. A green room sweep over omitted combat,
+   terminal, door, or effect flows is not original behavior. R03 separates
+   green gap contracts from restored effect regressions. Combinations, ECG,
+   quantity display, and command window must show original effects; unchanged
+   slots or blank output do not suffice.
+3. Run component tests, then productive RM_0130 from original room loading:
+   spawn time, complete visible model, advancing original pose, AI, and SFX
+   together. Then check attack/grab/damage/death.
+4. Check Rodrigo/event/Lip/combat/door regressions and all rooms/IDs as a
+   group; fix global causes. A room without a process error proves neither
+   complete enemy actions nor playability.
+5. Fully link Windows x64, then check actual runtime flows and gameplay.
+   Use an audited Ninja build with complete `compile_commands.json` and
+   COFF-capable `llvm-nm`; missing audit evidence is not a reason for an
+   exception. Update macOS package/`Start.command` only with a checked
+   binary; do not release while policy is red. Never auto-restore quarantined
+   starters: create a newly checked package and preserve data/settings.
 
-## Kopierbarer Teilauftrag
+## Copyable historical subtask
 
-> Übernimm ausschließlich Aufgabe `<ID>` aus dieser Roadmap und ihren dort
-> angegebenen Schreibbereich. Ziel: eigenständig natives macOS-arm64/Windows-
-> x64-Game mit originalem Verhalten, kein Originalkern, keine PS2-Nachbildung.
-> Lies AGENTS.md und führe den Schutzprüfer aus. Quarantäne nicht lesen oder
-> verwenden. Leite Mechanismus, Reihenfolge, Flags, Tabellen und Seiteneffekte
-> aus Originalquellen/Originaldaten/Disassembly her und implementiere sie
-> eigenständig auf den vorhandenen nativen Besitzern. Keine Schatten-Works,
-> kopierten/generierten Funktionskörper, Heuristiken oder Sonderfall-Fixes.
-> Bei fehlender Schnittstelle dem Integrator den konkreten Vertrag melden,
-> nicht selbst eine zweite Welt bauen. Implementiere die vollständigen Fälle
-> des Teilauftrags, danach gebündelte Tests. Liefere Quellenbelege, Tests,
-> offene Bindungen und einen kleinen Integrations-Patch. Kein Commit/Push,
-> kein Eingriff in fremde Änderungen, keine Runtime-Abnahme behaupten, wenn
-> nur der isolierte Komponentenpfad getestet wurde.
+> Take only task `<ID>` from this roadmap and its write scope. Goal: an
+> independently native macOS-arm64/Windows-x64 game with original behavior,
+> no original core or PS2 recreation. Read AGENTS.md and run the policy
+> checker. Never read or use quarantine. Derive mechanism, order, flags,
+> tables, and side effects from permitted original sources/data/disassembly
+> and implement independently on existing native owners. No shadow works,
+> copied/generated bodies, heuristics, or special-case fixes. If an interface
+> is missing, report its concrete contract to the integrator; do not create
+> a second world. Implement every case in the subtask, then grouped tests.
+> Deliver source evidence, tests, open bindings, and a small integration
+> patch. No commit/push or disturbance of others' changes. Do not claim
+> runtime acceptance from an isolated component path.
 
-Bei allen Aufgaben, die oben als **stillgelegt** markiert sind, lautet der
-Auftrag nun: den fehlenden Mechanismus implementieren, nicht einen noch
-laufenden Generatorwrapper ersetzen. Alte `.inc`-Namen in den Detailaufgaben
-bezeichnen nur die historische Herkunft. Sie sind keine Lese-/Importfreigabe
-und kein Nachweis, dass dieser Verbraucher noch eingebunden ist. Kein
-Task darf eine neutrale Rückgabe als Erledigungskriterium übernehmen.
+For areas marked **disabled** above, the task was to implement the missing
+mechanism, not replace a still-running generator wrapper. Old `.inc` names in
+task details described historical origins only; they were not permission to
+read/import those files or proof the consumer was still linked. A neutral
+return was never a completion criterion.
