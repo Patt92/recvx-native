@@ -9,14 +9,23 @@
 //    melden vol als char nur gueltig, wenn (Sint8)Vol + 128 < 128 (CheckCmdReq/Chg, macros.h:24).
 //
 // Gegenproben (je eine Zeile, zurueck und touch):
-//   audio_pan.cpp sony_voice_levels: Klemme -63 auf -64                     -> "Bankpan 127 + CC10 0"
+//   audio_pan.cpp CC10-Untergrenze und 0x4534-Klemme beide -64 (einzeln verdeckt je die andere) -> "Bankpan 127 + CC10 0"
 //   audio.cpp decode_program_voices: Sample +0x10 aus sony_volume entfernt  -> "Sample +0x10"
 //   audio.cpp shot_volume: `else if(c.shot_request)` -> `else`               -> "Chg behaelt CC7"
 //   audio.cpp shot_pan: Bedingung `value!=64` entfernt                       -> "Chg Pan 64"
 //   audio.cpp sound_sync: shot_request-Ruecksetzen entfernt                  -> "Chg behaelt CC7"
+//   audio_pan.cpp sony_midi_cc7: Faktor 128 entfernt                         -> "MODMIDI 0xf30"
+//   audio.cpp sync_midi_port: CC7-Erneuerung bei Portlautstaerke entfernt     -> "Fadestufe"
+//   audio.cpp mix: atick() nicht aufgerufen                                  -> "ATick 400"
+//   audio.cpp atick: auch bei EE-Pan 64 Offset 0 setzen                      -> "EE-Pan 64"
+//   audio.cpp play_room_sequence: bend.fill(0) beim Req                      -> "SdrBgmReq ... Bend"
+//   audio.cpp background_sound: Slot 2 auf 24+slot statt rotate_midi2        -> "Hintergrund-Slot 2"
+//   audio.cpp key_on: Poolmeldung entfernt                                   -> "25. Stimme"
 #include "audio.h"
 #include "audio_pan.h"
+#include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -64,5 +73,47 @@ int main(int argc,char** argv){try{
      m.set_3d_sound_flag(5,0,6); // vor dem ersten sdSysServer: Teil des SdrSeReq
      const auto expect=sony_voice_levels(clip->sony_volume,127,128,128,int(clip->pan),64);
      check(same(m.voice_levels(18),expect),"Req mit ungueltiger Lautstaerke = 127 und Pan 64: "+text(m.voice_levels(18))+" statt "+text(expect));}
-    std::cout<<"audio levels PASS (MODHSYN VOLL/VOLR, Sample +0x10, CC7/CC10, SdrSeReq/SdrSeChg)\n";return 0;
+    // --- MIDI: MODMIDI CC7 * Portlautstaerke, HsMsg-Pan, Bend je Port, MidiHandle[2] -----------------------------------
+    check(sony_midi_cc7(127,127)==126&&sony_midi_cc7(64,127)==63&&sony_midi_cc7(127,128)==127&&sony_midi_cc7(127,1)==0,"MODMIDI 0xf30: min(127, CC7 * 128 * vol >> 14)");
+    {// COMMON-Tuerliste 1: Velocity 110, Sequenz-CC7 127, Mitte. Com_ExecRoomFadeIn faedet MidiInfo[2]; jede Stufe geht
+     // ueber sdMidiSetVol/SdrBgmChg als Portlautstaerke an MODMIDI und erneuert den CC7 aller Kanaele.
+     AudioMixer m(root);m.load_door_sounds(7);check(m.play_door_sound(1),"Tuerliste 1");m.mix(301);
+     const auto full=m.sequence_levels(m.door_voice());check(full.size()==1&&full[0].left==full[0].right,"Tuernote fehlt");
+     m.room_fade_in();m.mix(800*10);const auto st=m.sound_state(2,true);const unsigned u=unsigned(std::clamp(int(std::int8_t(int(st.volume)))+128,0,127));
+     check(u<127&&st.fade==2,"MidiInfo[2]-Fade laeuft nicht");
+     const auto faded=m.sequence_levels(m.door_voice());check(faded.size()==1,"Tuernote nach Fade");
+     // Mitte, CC11 128: VOLL = (128 * ((CC7 * 128 * Note) >> 14)) >> 7; Notenpegel aus dem vollen Register zurueckgerechnet.
+     const unsigned cc_full=sony_controller_scale(sony_midi_cc7(127,127)),cc_faded=sony_controller_scale(sony_midi_cc7(127,u));
+     std::uint32_t note=0;for(std::uint32_t n=1;n<65536&&!note;++n)if(((128u*((cc_full*128u*n)>>14))>>7)==full[0].left)note=n;
+     check(note>0,"Notenpegel nicht rekonstruierbar");
+     const std::uint32_t expect=(128u*((cc_faded*128u*note)>>14))>>7;
+     check(faded[0].left==expect&&faded[0].right==expect,"Fadestufe u="+std::to_string(u)+" ueber MODMIDI-CC7: "+text(faded[0])+" statt "+std::to_string(expect));}
+    {// HsMsg-Pan: CallNativeEventSe Mode 0 mit seitlicher Quelle setzt das EE-Pan != 64. Die Note (Takt 350) startet mit
+     // dem Kanal-CC10 (keine Sequenz setzt CC10: Mitte); erst der naechste 240-Hz-ATick (alle 200 Bilder) setzt alle
+     // Stimmen des Ports auf Pan - 64. Ein spaeteres EE-Pan 64 schickt nichts mehr: die Stimmen behalten den Pan.
+     AudioMixer m(root);m.load_room_sounds(0,2);m.set_sound_monitor({0,0,0},0,{});
+     check(m.event_sound(0,0x206,{200,0,0},0),"Ereignis-SE 0x206 Mode 0");m.mix(360);
+     const auto start=m.sequence_levels(12);check(start.size()==1&&start[0].left==start[0].right,"Note vor dem ATick muss mittig sein: "+(start.empty()?std::string("-"):text(start[0])));
+     m.mix(50);const auto moved=m.sequence_levels(12);check(moved.size()==1&&moved[0].left!=moved[0].right,"ATick 400 muss den HsMsg-Pan setzen: "+(moved.empty()?std::string("-"):text(moved[0])));
+     m.set_3d_sound_flag(7,0,4); // SetPanMidi(DefEvt[0], 0, 0): EE-Pan 64
+     m.mix(800);const auto kept=m.sequence_levels(12);check(kept.size()==1&&same(kept[0],moved[0]),"EE-Pan 64 darf den Stimmenpan nicht zuruecksetzen: "+(kept.empty()?std::string("-"):text(kept[0])));}
+    {// Bend bleibt am Port: RM_1140 Bank 2 Liste 1 endet auf Kanal 0 mit Bend 8396 (+204); MODHSYN setzt Kanaele nur beim
+     // Modulstart zurueck (0x6e0), SdrBgmReq nicht. Ereignisslot 0 = MidiHandle[7] = Port 7.
+     AudioMixer m(root);m.load_room_sounds(1,14,0);m.set_sound_monitor({0,0,0},0,{});check(m.event_sound(0,1),"RM_1140 Liste 1");
+     for(int i=0;i<1200&&m.midi_port_bend(7,0)!=204;++i)m.mix(480);check(m.midi_port_bend(7,0)==204,"Bendende +204 fehlt: "+std::to_string(m.midi_port_bend(7,0)));
+     check(m.stop_event_sound(0)&&!m.active(12),"StopNativeEventSe");
+     check(m.event_sound(0,0)&&m.midi_port_bend(7,0)==204,"SdrBgmReq darf den MODHSYN-Bend nicht zuruecksetzen");}
+    {// MidiHandle[2]: Hintergrund-Slot 2, System-MIDI und CallDoorSe teilen die Portrotation 2 -> 8 -> 9; jedes sdMidiPlay
+     // stoppt den bisher benannten Port. Der Host-Tuer-Skip stoppt nur Tuerlisten.
+     AudioMixer m(root);m.load_room_sounds(0,3,0);m.load_door_sounds(7);check(m.background_sound(2,0),"Hintergrund-Slot 2");
+     const unsigned bg=m.door_voice();check(bg==28&&m.active(bg),"Hintergrund-Slot 2 muss auf MidiHandle[2] (Port 8) spielen");
+     check(m.play_door_sound(1),"Tuerliste 1");const unsigned door=m.door_voice();check(door==29&&m.active(door)&&!m.active(bg),"CallDoorSe muss den Port von Hintergrund-Slot 2 stoppen");
+     check(m.background_sound(2,0),"Hintergrund-Slot 2 erneut");const unsigned again=m.door_voice();m.stop_door_voices();
+     check(m.active(again)&&!m.active(door),"Tuer-Skip darf nur Tuerlisten stoppen");}
+    {// MODHSYN-Stimmenpool: 24 Stimmen je Kern; Kern 0 erzwungen (Sample-SPU-Attribut 0x10). Die 25. Stimme muss als
+     // nicht portierter Raub gemeldet werden, 24 nicht.
+     AudioMixer m;auto clip=std::make_shared<PcmClip>();clip->rate=48000;clip->channels=1;clip->samples.assign(48000,1000);clip->spu=true;clip->spu_attr=0x13;clip->adsr1=0x00ff;clip->adsr2=0x1fc0;
+     for(unsigned v=0;v<24;++v)m.play_pcm(v,clip);check(m.spu_voices(0)==24&&m.unavailable.empty(),"24 Stimmen auf Kern 0 duerfen nichts melden");
+     m.play_pcm(24,clip);check(!m.unavailable.empty()&&m.unavailable.back().find("voice pool full on core 0")!=std::string::npos,"25. Stimme auf Kern 0 nicht gemeldet");}
+    std::cout<<"audio levels PASS (MODHSYN VOLL/VOLR, Sample +0x10, CC7/CC10, SdrSeReq/SdrSeChg, MODMIDI-CC7, HsMsg-Pan, Bend, MidiHandle[2])\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

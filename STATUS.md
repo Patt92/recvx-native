@@ -21,6 +21,21 @@ Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 
+**MIDI-Pegel und MidiHandle[2] (2026-10-21, Arbeitsbaum):** Sequenznoten rechnen das MODHSYN-Register
+(MODMIDI-CC7 x Portlautstaerke, HsMsg-Pan je 240-Hz-ATick, Pitchbend jetzt ausgewertet, Kanalzustand je Port
+ueber Sequenzen); Hintergrund-Slot 2, System-MIDI und Tuer teilen die Portrotation 2->8->9; Hintergrund-Timer,
+Hintergrund-Stopp und Raum-Fade-In laufen als MidiInfo-Fades (Host-Rampen und finish_door_sound entfernt);
+Tuer-Skip stoppt nur Tuerlisten. Stimmenpool 24/Kern gemessen (max. 24, RM_0100) und als Meldung eingezogen,
+Raub/ATick-Batching offen. Tests audio_levels/audio_gaps/audio_movie/core_continuity angepasst. **Kein Commit.**
+
+**SE-Shot-Pegel TSNDDRV/MODHSYN (2026-10-21, Arbeitsbaum, `./build.sh --test` 205/205):** eigene
+Disassemblierung von TSNDDRV/MODHSYN/MODMIDI.IRX (nur Lesereferenz). SE-Shots rechnen jetzt das
+SPU2-Register VOLL/VOLR (`sony_voice_levels`): Notenpegel inkl. Sample +0x10 (251 Samples mit 100
+fehlten), CC7/CC10, SdrSeReq/SdrSeChg-Regeln (ungueltige Lautstaerke, Chg-Pan 64, Chg-Bend 8192).
+Neuer Test `audio_levels` (5 Gegenproben rot). Ledger: Get3DSoundParameter, CallPlayerFootStepSeEx,
+CallPlayerWeaponSeEx, CallYakkyouSe done (ARMS-SPQ-Gate: nativ synchroner Transport). Offen:
+CallNativeEventSe/MIDI-Pegel (MODMIDI-CC7, HsMsg-Pan, Kanalstart) und Stimmenpool, siehe docs/AUDIO.md.
+
 **Audio-Lücken sdfunc.c (2026-10-21, Arbeitsbaum):** 11 partial-Zeilen am Original nachgeprüft und
 auf done gesetzt: `ss_flg 0x4000000` hat keinen Originalschreiber (PlayBgmEx2/ExecAdxFadeManager
 immer offen), `sdMidiSetFxLev` ist auf PS2 leer (CallDoorSe FxLevel ohne Wirkung, -2-Delays = Pegel 0/

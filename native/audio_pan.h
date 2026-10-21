@@ -14,4 +14,9 @@ struct SonyLevels {std::uint16_t left=0,right=0;};
 // channel CC10 0..127. Port master volume 256 (TSNDDRV sets every port to 256, sceHSyn_SetVolume), no
 // amplitude LFO (sample LFO attribute & 0x70 is 0 in every bank).
 SonyLevels sony_voice_levels(std::uint32_t bank_volume,unsigned velocity,unsigned channel_volume,unsigned expression,int bank_pan,unsigned pan_controller);
+// Same with the voice's pan offset (MODHSYN 0x4534 argument: CC10 - 64 or HsMsg pan - 64, clamped to -63..63).
+SonyLevels sony_voice_levels_offset(std::uint32_t bank_volume,unsigned velocity,unsigned channel_volume,unsigned expression,int bank_pan,int pan_offset);
+// MODMIDI.IRX 0xf30: CC7 sent to MODHSYN = min(127, (sequence CC7 * channel volume 128 * port volume) >> 14);
+// the port volume is the EE MIDI volume (sceMidi_MidiSetVolume(port, 255, vol), 0x1d64).
+unsigned sony_midi_cc7(unsigned sequence_cc7,unsigned port_volume);
 }

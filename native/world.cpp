@@ -1236,7 +1236,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         const auto& w=at->second.enemy;
         if(w.id==1&&w.exp1&&(static_cast<const RECVX_ENEMY_WORK*>(w.exp1)->flg&2u))collision_events_->set_flag(4,v.u16(2)&0x3ff,0);
         return true;}
-    if(op==0x1d){if(v.u8(1)>2)return false;audio_.stop_background_sound(v.u8(1),v.u8(2)?AudioMixer::adx_fade_ticks(v.u8(2)*10):0);return true;}
+    if(op==0x1d){if(v.u8(1)>2)return false;audio_.stop_background_sound(v.u8(1),v.u8(2)*10u);return true;}
     // event.c:4701 bhCamYureSet (vier Bytes): v0 = Byte 1, v1 = u16 ab Byte 2. v0 == 0 setzt
     // cam.ofx/ofy/ofz nacheinander auf (0.01f*v1)*(-rand()/-2.1474836E9f) (ein gemeinsames EE-rand()),
     // sonst 0. bhControlCamera verschiebt damit die Sicht (camera.c:36/49/81, RoomWorld::camera).

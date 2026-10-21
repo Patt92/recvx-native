@@ -113,6 +113,7 @@ std::vector<PcmClip> decode_program_voices(const std::vector<std::uint8_t>& byte
     if((v.u8(zone+2)|v.u8(zone+4)|v.u8(sample+2)|v.u8(sample+4))&0x80)throw std::runtime_error("Sony split/sample crossfade not ported");
     if(v.u8(sample+0x28)&0x70)throw std::runtime_error("Sony amplitude LFO not ported");
     out.sony_volume=std::uint32_t(v.u8(pg+6))*v.u8(zone+0x10)*v.u8(sample+0x10);
+    out.se_shot=key<0; // TSNDDRV SE request (Tsnd_tqreq); key >= 0 is a MIDI note-on
     out.volume=float(v.u8(pg+6))/127.f*float(v.u8(zone+0x10))/127.f;out.pan=unsigned(sony_bank_pan(std::int8_t(v.u8(pg+7)),std::int8_t(v.u8(zone+17)),std::int8_t(v.u8(sample+13)),((note-int(v.u8(zone+15)))*int(std::int8_t(v.u8(zone+14)))+(note-int(v.u8(pg+11)))*int(std::int8_t(v.u8(pg+10))))/12));
     voices.push_back(std::move(out));};
     if(key<0){voice(zones);return voices;}
@@ -192,14 +193,16 @@ void AudioMixer::sound_sync(){
     // ExecSoundSynchProgram -> sdSysServer (ps2_sg_sd.c:1680): FxLevelTimer steps EVOL of both cores.
     if(fx_level_timer_){--fx_level_timer_;if(!fx_level_timer_)current_fx_level_=room_fx_target_;else current_fx_level_+=add_fx_level_;
         set_rev(1,5,current_fx_level_);set_rev(2,5,current_fx_level_);}
-    auto fade=[&](SoundControl& state,unsigned voice){
+    // ExecSoundFadeManager (sdc.c:778): StopMidi/StopSe at -127, then SetVolumeMidiEx/SetVolumeSeEx with the step.
+    auto fade=[&](SoundControl& state,unsigned voice,int midi){
         if(!state.function)return;
         state.volume-=state.speed;--state.remaining;
         if(state.remaining<0){state.volume=state.last;if(int(state.volume)==-127)stop(voice);state.function=0;}
+        if(midi>=0){sync_midi_port(unsigned(midi));return;}
         if(active(voice)){auto& c=slots_[voice];if(c.shot)shot_volume(c,state.volume);else c.gain=se_volume_gain(std::int8_t(int(state.volume)));}
     };
-    for(unsigned midi=0;midi<8;++midi){const unsigned voice=midi_host_voice(midi);fade(midi_control_[midi],voice);}
-    for(unsigned slot=0;slot<20;++slot)fade(se_volume_[se_host_voice(slot)],se_host_voice(slot));
+    for(unsigned midi=0;midi<8;++midi)fade(midi_control_[midi],midi_voice(midi),int(midi));
+    for(unsigned slot=0;slot<20;++slot)fade(se_volume_[se_host_voice(slot)],se_host_voice(slot),-1);
     for(unsigned midi=0;midi<8;++midi){auto& state=midi_control_[midi];if(!state.pan_function)continue;
         state.pan-=state.pan_speed;--state.pan_remaining;if(state.pan_remaining<0){state.pan=state.pan_last;state.pan_function=0;}
         apply_midi_pan(midi,state.pan);}
@@ -245,15 +248,55 @@ void AudioMixer::apply_midi_volume(unsigned midi,float volume){
     auto& state=midi_control_.at(midi);
     if(state.function==0)state.volume=volume;
     else if(state.function==1){if(volume<state.last)request_midi_fade(midi,-1,int(volume),state.remaining);state.volume=volume;}
-    const unsigned voice=midi_host_voice(midi);if(active(voice))slots_[voice].gain=se_volume_gain(std::int8_t(int(state.volume)));
+    sync_midi_port(midi);
 }
 void AudioMixer::apply_midi_pan(unsigned midi,float pan){
     auto& state=midi_control_.at(midi);if(!state.pan_function&&state.function==2)return;state.pan=pan;
-    const unsigned voice=midi_host_voice(midi);const int encoded=std::int8_t(int(pan));pan_gains(unsigned(std::clamp(encoded/2+64,0,127)),slots_[voice].pan_left,slots_[voice].pan_right);
+    sync_midi_port(midi);
 }
-void AudioMixer::restore_midi(unsigned midi,unsigned voice){
-    slots_[voice].gain=se_volume_gain(std::int8_t(int(midi_control_.at(midi).volume)));
-    const int encoded=std::int8_t(int(midi_control_[midi].pan));pan_gains(unsigned(std::clamp(encoded/2+64,0,127)),slots_[voice].pan_left,slots_[voice].pan_right);
+void AudioMixer::restore_midi(unsigned midi,unsigned){sync_midi_port(midi);}
+unsigned AudioMixer::midi_voice(unsigned midi)const{if(midi>=8)throw std::runtime_error("MIDI slot outside MidiHandle[8]");return midi==2?door_slot_:midi_host_voice(midi);}
+int AudioMixer::voice_midi(unsigned voice)const{
+    if(voice==24)return 0;if(voice==25)return 1;if(voice>=door_voice_first&&voice<=door_voice_last)return 2;
+    if(voice>=8&&voice<=12)return int(voice)-5; // midi_host_voice(3..7) = 8..12
+    return -1;
+}
+int AudioMixer::voice_port(unsigned voice){
+    // sdMidiOpenPort (ps2_sg_sd.c:441) gives MidiHandle i port i in RegistMidiSlot order 0..7 (sdfunc.c:292); sdMidiPlay
+    // rotates MidiHandle[2] over ports 2 -> 8 -> 9 (ps2_sg_sd.c:495). Host 27/28/29 are ports 2/8/9.
+    if(voice==24)return 0;if(voice==25)return 1;if(voice==27)return 2;if(voice==28)return 8;if(voice==29)return 9;
+    if(voice>=8&&voice<=12)return int(voice)-5;
+    return -1;
+}
+void AudioMixer::sync_midi_port(unsigned midi){
+    // sdSysServer SdrBgmChg (ps2_sg_sd.c:1787) while the port plays: TSNDDRV treq_BGM Chg (0x5d1c..0x5e88) passes a
+    // changed volume to sceMidi_MidiSetVolume(port, 255, vol), which sets MODMIDI +50 and resends CC7 of all 16
+    // channels (0x1d64 -> 0x1ce0/0xf30); pan 64 clears the HsMsg flag, any other pan is sent by every ATick.
+    const unsigned voice=midi_voice(midi);if(!active(voice)||!slots_[voice].sequence||slots_[voice].released)return;
+    auto& port=midi_ports_.at(slots_[voice].sequence->port);const auto& state=midi_control_[midi];
+    // sdMidiSetVol: vol + 128 clamped to 0..127; sdMidiSetPan: pan / 2 + 64.
+    const unsigned volume=unsigned(std::clamp(int(std::int8_t(int(state.volume)))+128,0,127));
+    if(volume!=port.volume){port.volume=volume;for(unsigned ch=0;ch<16;++ch)port.cc7[ch]=std::uint8_t(sony_controller_scale(sony_midi_cc7(port.sequence_cc7[ch],volume)));}
+    port.ee_pan=unsigned(int(std::int8_t(int(state.pan)))/2+64);
+}
+unsigned AudioMixer::rotate_midi2(){
+    if(active(door_slot_))stop(door_slot_);
+    door_slot_=door_slot_==door_voice_last?door_voice_first:door_slot_+1;
+    return door_slot_;
+}
+std::vector<SonyLevels> AudioMixer::sequence_levels(unsigned voice)const{
+    std::vector<SonyLevels> out;if(voice>=slots_.size()||!slots_[voice].sequence)return out;const auto& s=*slots_[voice].sequence;const auto& port=midi_ports_[s.port];
+    for(const auto& n:s.notes)if(n.layer.clip)out.push_back(sony_voice_levels_offset(n.layer.clip->sony_volume,n.velocity,port.cc7[n.channel],port.cc11[n.channel],int(n.layer.clip->pan),n.layer.pan_offset));
+    return out;
+}
+void AudioMixer::stop_door_voices(){for(unsigned v=door_voice_first;v<=door_voice_last;++v)if(slots_[v].door)stop(v);}
+void AudioMixer::atick(){
+    // TSNDDRV ATick (0x27a0..0x2a14): a playing port with HsMsg pan (EE pan != 64) sends HsMsg 0xfd/1 to all 16
+    // channels; MODHSYN 0x0ce4 sets every voice of the port to pan - 64 (below -63: -63) through 0x4534.
+    std::array<int,10> pan{};pan.fill(-1000);
+    for(unsigned v=0;v<slots_.size();++v){const auto& c=slots_[v];if(c.sequence&&!c.released&&voice_port(v)>=0){const auto& port=midi_ports_[c.sequence->port];if(port.ee_pan!=64)pan[c.sequence->port]=std::max(int(port.ee_pan)-64,-63);}}
+    auto apply=[&](Channel& c){if(!c.sequence||pan[c.sequence->port]==-1000)return;for(auto& n:c.sequence->notes)n.layer.pan_offset=pan[c.sequence->port];};
+    for(auto& c:slots_)apply(c);for(auto& c:releasing_)apply(c);
 }
 unsigned AudioMixer::se_voice(unsigned se_slot){return se_host_voice(se_slot);}
 AudioMixer::SoundState AudioMixer::adx_state(unsigned slot)const{
@@ -403,9 +446,14 @@ bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot,bo
 bool AudioMixer::background_sound(unsigned slot,unsigned sound,unsigned timer){
     if(slot>2)throw std::runtime_error("background sound slot outside original three");
     if(room_initializing_){background_init_[slot]={true,sound,timer};return true;}
-    if(!play_room_sequence(3,sound&255,24+slot,true))return false;
+    // CallBackGroundSeEx (sdfunc.c:1603): Timer != 0 -> RequestMidiFadeFunction(SlotNo, 1, Timer) and
+    // sdMidiSetVol(-127) directly, VolumeDelayTime -1; else VolumeDelayTime -2 (SetVolumeMidi 0). PanDelayTime -2.
+    const unsigned voice=slot==2?rotate_midi2():24+slot; // SlotDef {0,1,2}: slot 2 is MidiHandle[2]
+    if(timer)request_midi_fade_timer(slot,1,int(timer));else apply_midi_volume(slot,0);
+    apply_midi_pan(slot,0);
+    if(!play_room_sequence(3,sound&255,voice,true))return false;
     current_background_[slot]=int((sound&0xffff00ffu)|0x300u); // CallBackGroundSeEx: SeNo = (SeNo & ~0xff00) | 0x300
-    if(timer){auto& c=slots_[24+slot];c.gain=0;c.target=1;c.fade=adx_fade_ticks(int(timer))*audio_frames_per_tick;}
+    slots_[voice].background=true;sync_midi_port(slot);
     return true;
 }
 void AudioMixer::request_background_sound(unsigned slot,int sound){
@@ -427,7 +475,7 @@ bool AudioMixer::play_room_sequence(unsigned bank,unsigned list,unsigned slot,bo
         for(unsigned index=0;index<=u32(midi+12);++index){const auto next=u32(midi+16+index*4);if(next!=0xffffffff&&next>offset)end=std::min(end,midi+std::size_t(next));}
         const auto decoded=decode_sony_sq(s,block,end);
         const unsigned ppqn=unsigned(s.at(block+4))|unsigned(s.at(block+5))<<8;
-        struct Part {int program=-1;unsigned volume=127,expression=127,pan=64;};std::array<Part,16> parts{};
+        struct Part {int program=-1;};std::array<Part,16> parts{};
         auto sequence=std::make_shared<Sequence>();bool ended=false;
         double tempo=500000;std::string programs_played;
         for(const auto& input:decoded){
@@ -440,21 +488,28 @@ bool AudioMixer::play_room_sequence(unsigned bank,unsigned list,unsigned slot,bo
             event.status=current;event.key=input.key;event.value=input.value;
             const unsigned char data[2]={input.key,input.value};auto& part=parts[current&15];
             switch(current&0xf0){case 0xc0:part.program=data[0];break;
-                case 0xb0:if(data[0]==7)part.volume=data[1];else if(data[0]==11)part.expression=data[1];else if(data[0]==10)part.pan=data[1];break;
                 case 0x90:if(data[1]){
                     if(part.program<0)return fail("note without program");
                     const auto id=std::make_tuple(0x100u|bank,unsigned(part.program),int(data[0]));auto found=room_sounds_.find(id);
                     // MODHSYN keys one voice per covering split (split loop 0x6098..0x64a0); each takes its own
                     // split's volume/pan with the same channel volume/expression/pan and velocity.
                     if(found==room_sounds_.end()){std::vector<std::shared_ptr<PcmClip>> voices;for(auto& clip:decode_system_note(programs->second,unsigned(part.program),int(data[0])))voices.push_back(std::make_shared<PcmClip>(std::move(clip)));found=room_sounds_.emplace(id,std::move(voices)).first;}
-                    for(const auto& clip:found->second){if(!clip->frames())continue;Layer layer;layer.clip=clip;pan_gains(unsigned(std::clamp(int(layer.clip->pan)+int(part.pan)-64,0,127)),layer.left,layer.right);
-                    const float gain=layer.clip->volume*float(data[1])/127.f*float(part.volume)/127.f*float(part.expression)/127.f;layer.left*=gain;layer.right*=gain;event.layers.push_back(std::move(layer));}
+                    // Levels follow the MODHSYN registers at mix time (channel CC7/CC11/CC10, pitch bend, HsMsg pan).
+                    for(const auto& clip:found->second){if(!clip->frames())continue;Layer layer;layer.clip=clip;event.layers.push_back(std::move(layer));}
                     if(programs_played.find("/prog"+std::to_string(part.program))==std::string::npos)programs_played+="/prog"+std::to_string(part.program);
                 }break;
                 default:break;}
             sequence->events.push_back(std::move(event));}
         if(!ended)return fail("SQ has no end");
         if(programs_played.empty())return fail("no program/note");
+        const int port=voice_port(slot),handle=voice_midi(slot);if(port<0||handle<0)throw std::runtime_error("SQ voice without TSNDDRV MIDI port");
+        // SdrBgmReq -> treq_BGM 0x20 (0x5598..0x5798): sceMidi_MidiSetLocation(port, 0) resets the MODMIDI sequence CC7 of
+        // all 16 channels to 127 (0x1994), sceMidi_MidiSetVolume(port, 255, vol) stores the port volume before the
+        // play switch (no CC7 is sent while stopped, 0x1e04). MODHSYN channel state stays from the last sequence.
+        auto& state=midi_ports_[unsigned(port)];state.sequence_cc7.fill(127);
+        state.volume=unsigned(std::clamp(int(std::int8_t(int(midi_control_[unsigned(handle)].volume)))+128,0,127));
+        state.ee_pan=unsigned(int(std::int8_t(int(midi_control_[unsigned(handle)].pan)))/2+64);
+        sequence->port=unsigned(port);
         Channel channel;channel.sequence=std::move(sequence);channel.sequence->until=channel.sequence->events.front().delay;channel.loop=loop;
         slots_.at(slot)=std::move(channel);
         played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(room_pack_)+"/"+std::to_string(bank)+"/seq"+std::to_string(list)+programs_played);return true;
@@ -465,11 +520,12 @@ void AudioMixer::custom_midi_slots(unsigned objects,unsigned events){
     max_object_slots_=objects;max_event_slots_=events;
 }
 bool AudioMixer::play_system_midi(unsigned se){
-    // StopFadeMidi(2) then PlayMidi(2, bank, (char)list); host slot 13 stands for MIDI slot 2.
-    stop(13);
-    const auto bank=(se>>8)&15,list=se&255;
-    if(!play_room_sequence(bank,list,13)){unavailable.push_back("SYSTEM/MIDI/0x"+std::to_string(se));return false;}
-    played.push_back("SYSTEM/MIDI/"+std::to_string(bank)+"/"+std::to_string(list));return true;
+    // CallSystemSeBasic (sdfunc.c:1342): ExPlayMidi on MidiHandle[2] with PanDelayTime -2, Volume 0 (every caller
+    // passes 0), VolumeDelayTime 0; sdMidiPlay stops the port the handle names and rotates it.
+    const auto bank=(se>>8)&15,list=se&255;const unsigned voice=rotate_midi2();
+    apply_midi_pan(2,0);apply_midi_volume(2,0);
+    if(!play_room_sequence(bank,list,voice)){unavailable.push_back("SYSTEM/MIDI/0x"+std::to_string(se));return false;}
+    sync_midi_port(2);played.push_back("SYSTEM/MIDI/"+std::to_string(bank)+"/"+std::to_string(list));return true;
 }
 bool AudioMixer::event_sound(unsigned slot,unsigned sound){
     // Original CallNativeEventSe's upper-bound comparison includes SlotNo==MaxSlotEventSe.
@@ -564,7 +620,8 @@ void AudioMixer::sequence_step(Channel& channel){
         if((event.status&0xf0)==0x90&&event.value){
             s.notes.erase(std::remove_if(s.notes.begin(),s.notes.end(),held),s.notes.end());
             // One MODHSYN voice per layer, keyed in split order: each core choice (0x64f8) sees the voices before it.
-            for(const auto& layer:event.layers){s.notes.push_back({layer,part,event.key});auto& on=s.notes.back().layer;if(on.clip&&on.clip->spu)key_on(on.clip,on.env,on.core);}
+            // MODHSYN note-on (0x5f90): pan offset from the channel CC10 (+49, through 0x4534 at 0x39d0), bend from +38.
+            for(const auto& layer:event.layers){s.notes.push_back({layer,part,event.key,event.value});auto& on=s.notes.back().layer;on.pan_offset=midi_ports_[s.port].pan[part];if(on.clip&&on.clip->spu)key_on(on.clip,on.env,on.core);}
         }else if((event.status&0xf0)==0x80||((event.status&0xf0)==0x90&&!event.value)){
             // MODHSYN note-off: key-off, the voice runs its sample ADSR2 release.
             for(auto& note:s.notes)if(held(note)){if(note.layer.clip&&note.layer.clip->spu)note.layer.env.key_off();else note.layer.clip.reset();}
@@ -573,12 +630,24 @@ void AudioMixer::sequence_step(Channel& channel){
             // Sony SQ loop controls: NRPN 99=0/1, Data Entry 6=number,
             // Data Entry LSB 38=count (0=infinite). Original room resources
             // supply these markers; no room IDs or alarm-specific loop rule.
+            auto& port=midi_ports_[s.port];
+            // MODMIDI CC7 (0x1238..0x1260): sequence CC7 stored, MODHSYN gets min(127, CC7 * 128 * port volume >> 14);
+            // MODHSYN CC7/CC11 (0x978/0x9d4) scale (v << 7) / 127 and update the channel's voices.
+            if(event.key==7){port.sequence_cc7[part]=std::uint8_t(event.value);port.cc7[part]=std::uint8_t(sony_controller_scale(sony_midi_cc7(event.value,port.volume)));}
+            else if(event.key==11)port.cc11[part]=std::uint8_t(sony_controller_scale(event.value));
+            // MODHSYN CC10 (0x0c18): v - 64 (below -63: -63); only a change moves the channel's voices (0x0c5c).
+            else if(event.key==10){const int offset=std::max(int(event.value)-64,-63);if(offset!=port.pan[part]){port.pan[part]=offset;
+                auto move=[&](Channel& c){if(c.sequence&&c.sequence->port==s.port)for(auto& n:c.sequence->notes)if(n.channel==part)n.layer.pan_offset=offset;};for(auto& c:slots_)move(c);for(auto& c:releasing_)move(c);}}
             if(event.key==99)s.nrpn=event.value;
             else if(event.key==6&&s.nrpn==0){s.loops.push_back({event.value,s.next,0,false});}
             else if(event.key==38&&s.nrpn==1&&!s.loops.empty()){
                 auto& loop=s.loops.back();if(!loop.counted){loop.remaining=event.value;loop.counted=true;}
                 if(!event.value||loop.remaining>1){if(event.value)--loop.remaining;s.next=loop.next;}else s.loops.pop_back();
             }
+        }else if((event.status&0xf0)==0xe0){
+            // MODHSYN pitch bend (0x7f8): channel +38 = (data2 << 7) + data1 - 8192; every voice of the channel follows
+            // (0x4098: offset * split bend range >> 13), new notes take it at note-on. Read live by the mixer.
+            midi_ports_[s.port].bend[part]=int((event.value<<7)|event.key)-8192;
         }else if(event.status==0xff&&event.key==0x2f){release_sequence_end(channel);return;}
         if(s.next<s.events.size())s.until+=s.events[s.next].delay;
     }
@@ -622,7 +691,11 @@ bool AudioMixer::user_sound_pan(unsigned type,unsigned slot,int start,int target
     }
     for(const auto slot:se)request_pan(se_volume_[se_host_voice(slot)],start,target,int(frames));return true;
 }
-void AudioMixer::stop_background_sound(unsigned slot,unsigned fade_ticks){if(slot>2)throw std::runtime_error("background sound slot outside original three");stop(24+slot,fade_ticks);current_background_[slot]=-1;}
+void AudioMixer::stop_background_sound(unsigned slot,unsigned timer){
+    if(slot>2)throw std::runtime_error("background sound slot outside original three");
+    if(timer)request_midi_fade_timer(slot,2,int(timer));else stop(midi_voice(slot)); // StopBackGroundSeEx (sdfunc.c:1661)
+    current_background_[slot]=-1;
+}
 bool AudioMixer::enemy_sound(unsigned slot,unsigned sound){
     if(slot>=6)throw std::runtime_error("enemy sound slot outside original six voices");
     // sdfunc.c CallEnemySe: force bank 3, preserve the low 8-bit list number.
@@ -754,20 +827,16 @@ bool AudioMixer::play_door_sound(unsigned program){
     // CallDoorSe (sdfunc.c:1684) -> ExPlayMidi -> PlayMidi -> sdMidiPlay (ps2_sg_sd.c:495): the port
     // MidiHandle[2] currently names is stopped if it still sounds (SdrBgmStop), then the handle
     // rotates 2 -> 8 -> 9 -> 2 and the new list plays on that port. door_slot_ is the named port.
-    if(active(door_slot_))stop(door_slot_);
-    door_slot_=door_slot_==door_voice_last?door_voice_first:door_slot_+1;
     // RequestInfo (sdfunc.c:1684-1703): Pan/Volume/PitchDelayTime -2 -> ExPlayMidi (sdc.c:230-262)
     // SetPanMidi 0, SetVolumeMidi SdcSeDefaultVolume (0, sdcwrap.c:18), SetPitchMidi 0 sofort;
     // SpeedDelayTime -1 unveraendert; FxLevel DoorFxDef[] = 40 geht an sdMidiSetFxLev, das auf PS2
     // nur den Initstatus zurueckgibt (ps2_sg_sd.c:542). Der frische Kanal (gain 1 = vol 0, Mitte) ist
-    // genau dieser Zustand.
-    if(!play_room_sequence(1,program,door_slot_)){unavailable.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return false;}
-    played.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return true;
+    // genau dieser Zustand, soweit kein MidiInfo[2]-Fade laeuft (SetVolumeMidiEx/SetPanMidi2 mit FadeFunc 2).
+    const unsigned voice=rotate_midi2();
+    apply_midi_pan(2,0);apply_midi_volume(2,0);
+    if(!play_room_sequence(1,program,voice)){unavailable.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return false;}
+    played.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));slots_[voice].door=true;sync_midi_port(2);return true;
 }
-// Com_ExecRoomFadeIn (sdfunc.c:2905): RequestMidiFadeFunction(2, 2, 250) fades MidiHandle[2], and
-// sdMidiSetVol/Volume_Control act on the one port that handle names (ps2_sg_sd.c:670, 1190);
-// earlier ports were already stopped by the rotation or have run out on their own.
-void AudioMixer::finish_door_sound(){if(active(door_slot_))stop(door_slot_,adx_fade_ticks(250));}
 PcmClip decode_adx(const std::vector<std::uint8_t>& b){
     auto need=[&](std::size_t p,std::size_t n){if(p>b.size()||n>b.size()-p)throw std::runtime_error("truncated ADX audio");};
     auto be16=[&](std::size_t p){need(p,2);return unsigned(b[p])*256+b[p+1];};
@@ -811,6 +880,13 @@ unsigned AudioMixer::spu_core(std::uint8_t attr)const{
 }
 void AudioMixer::key_on(const std::shared_ptr<PcmClip>& clip,SpuEnvelope& env,unsigned& core){
     core=spu_core(clip->spu_attr);
+    const unsigned busy=spu_voices(core);spu_voice_peak_[core]=std::max(spu_voice_peak_[core],busy+1);
+    // MODHSYN has 24 voices per core (0x3110..0x3178). A key-on with none free runs the voice collection (0x4a8c) and
+    // then steals (0x659c: released < sustained < held, priority, ENVX snapshot; 0x67a0: key-on queue), with key-ons
+    // batched to the next 240 Hz ATick once ENVX < 1000 (0x32c4). Neither is ported: the host keeps the extra voice
+    // and reports the case (measured 2026-10-21: at most 24 per core in all 205 rooms and the gameplay replays).
+    if(busy>=24){const std::string gap="MODHSYN voice pool full on core "+std::to_string(core)+": voice stealing (0x659c/0x67a0) not ported";
+        if(std::find(unavailable.begin(),unavailable.end(),gap)==unavailable.end())unavailable.push_back(gap);}
     env.key_on(clip->adsr1,clip->adsr2);
 }
 // CC 120 (MODHSYN 0x5bf4): ADSR2 := 0xC021, then key-off of every voice of the channel.
@@ -820,7 +896,7 @@ void AudioMixer::release_channel(Channel& channel){
     Channel tail=std::move(channel);channel=Channel{};bool any=false;
     if(off(tail.clip,tail.env))any=true;else tail.clip.reset();
     for(auto& l:tail.layers){if(off(l.clip,l.env))any=true;else l.clip.reset();}
-    if(tail.sequence){auto notes=std::make_shared<Sequence>();for(auto& n:tail.sequence->notes)if(off(n.layer.clip,n.layer.env)){notes->notes.push_back(n);any=true;}tail.sequence=std::move(notes);}
+    if(tail.sequence){auto notes=std::make_shared<Sequence>();notes->port=tail.sequence->port;for(auto& n:tail.sequence->notes)if(off(n.layer.clip,n.layer.env)){notes->notes.push_back(n);any=true;}tail.sequence=std::move(notes);}
     tail.fade=0;tail.released=true;
     if(any)releasing_.push_back(std::move(tail));
 }
@@ -828,7 +904,7 @@ void AudioMixer::release_channel(Channel& channel){
 void AudioMixer::release_sequence_end(Channel& channel){
     auto ended=std::move(channel.sequence);channel.sequence.reset();
     Channel tail;tail.volume=channel.volume;tail.gain=channel.gain;tail.pan_left=channel.pan_left;tail.pan_right=channel.pan_right;tail.pitch=channel.pitch;tail.released=true;
-    tail.sequence=std::make_shared<Sequence>();
+    tail.sequence=std::make_shared<Sequence>();tail.sequence->port=ended->port;
     for(const auto& n:ended->notes)if(n.layer.clip&&n.layer.clip->spu&&n.layer.env.phase==SpuEnvelope::Release)tail.sequence->notes.push_back(n);
     if(!tail.sequence->notes.empty())releasing_.push_back(std::move(tail));
 }
@@ -851,8 +927,8 @@ void AudioMixer::init_spu(){
 }
 void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume,bool loop){if(slot>=slots_.size()||!clip||!clip->channels||clip->channels>2||clip->rate<8000||clip->rate>96000||clip->samples.size()%clip->channels||!clip->frames()||!std::isfinite(volume)||volume<0||volume>8||(clip->loop_end&&(clip->loop_start>=clip->loop_end||clip->loop_end>clip->frames())))throw std::runtime_error("invalid audio channel/clip");Channel c;c.volume=volume*clip->volume;pan_gains(clip->pan,c.left,c.right);c.clip_rate=clip->rate;c.clip=std::move(clip);c.loop=loop;slots_[slot]=std::move(c);
     auto& voice=slots_[slot];if(voice.clip->spu)key_on(voice.clip,voice.env,voice.core);
-    // A Sony bank voice started by play_pcm is an SE shot (ExPlaySe -> SdrSeReq): its level is the MODHSYN register.
-    if(voice.clip->spu&&voice.clip->sony_volume){voice.shot=voice.shot_request=true;voice.volume=volume;shot_levels(voice);}}
+    // A Sony SE-request clip started by play_pcm is an SE shot (ExPlaySe -> SdrSeReq): its level is the MODHSYN register.
+    if(voice.clip->spu&&voice.clip->se_shot){voice.shot=voice.shot_request=true;voice.volume=volume;shot_levels(voice);}}
 void AudioMixer::play_layers(unsigned slot,std::vector<Layer> layers,float volume,bool loop){
     if(layers.empty())throw std::runtime_error("audio voice without layers");
     play_pcm(slot,layers.front().clip,volume,loop);auto& c=slots_[slot];c.shot=false;c.volume=volume;c.left=layers.front().left;c.right=layers.front().right;
@@ -887,13 +963,14 @@ std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)th
         if(channel.fade){channel.gain+=(channel.target-channel.gain)/channel.fade;if(!--channel.fade&&channel.target==0){release_channel(channel);return;}}
         if(channel.sequence&&!channel.released)sequence_step(channel);
         const float gain=channel.volume*channel.gain;
-        auto voice=[&](std::shared_ptr<PcmClip>& held,double& position,SpuEnvelope& env,unsigned core,float l,float r,bool loop){auto& clip=*held;
+        // sdShotSetPitch (ps2_sg_sd.c:1057): bend 3 * pitch + 8192 (u16), 512..16383, for SE shots and host voices.
+        const int shot_bend=std::clamp(int(std::uint16_t(8192+3*channel.pitch)),512,16383)-8192;
+        auto voice=[&](std::shared_ptr<PcmClip>& held,double& position,SpuEnvelope& env,unsigned core,float l,float r,bool loop,int bend){auto& clip=*held;
             // MODHSYN voice: ENVX * sample >> 15 at the SPU2 rate; release end turns the voice off.
             float envelope=1;if(clip.spu){if(!env.tick()){held.reset();return;}envelope=float(env.level)/32768.f;}
             double advance=double(clip.rate)/48000;
             if(clip.sony_pitch){const auto& p=*clip.sony_pitch;
-                const int encoded=std::clamp(int(std::uint16_t(8192+3*channel.pitch)),512,16383);
-                const int bend=encoded-8192;const int fine=p.fine+bend*int(bend<0?p.bend_down:p.bend_up)/8192;
+                const int fine=p.fine+bend*int(bend<0?p.bend_down:p.bend_up)/8192;
                 advance=double(sony_sample_pitch(clip.rate,std::uint16_t(p.root),p.note,fine))/4096;}
 
             const auto end=loop&&clip.loop_end?clip.loop_end:clip.frames();if(position>=end){if(loop){const auto begin=clip.loop_end?clip.loop_start:0;position=begin+std::fmod(position-end,double(end-begin));}else{held.reset();return;}}
@@ -905,15 +982,19 @@ std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)th
             if(attr&2)right+=sr;
             if(clip.spu){if(attr&4)wet[core][0]+=sl;if(attr&8)wet[core][1]+=sr;}
             position+=advance;};
-        if(channel.sequence){for(auto& note:channel.sequence->notes)if(note.layer.clip)voice(note.layer.clip,note.layer.position,note.layer.env,note.layer.core,note.layer.left*channel.pan_left,note.layer.right*channel.pan_right,note.layer.clip->loop_end>note.layer.clip->loop_start);
+        if(channel.sequence){const auto& port=midi_ports_[channel.sequence->port];
+            // MODHSYN voice register per note: bank volume, velocity, channel CC7/CC11, bank pan + voice pan offset.
+            for(auto& note:channel.sequence->notes)if(note.layer.clip){const auto& clip=*note.layer.clip;
+                const auto lv=sony_voice_levels_offset(clip.sony_volume,note.velocity,port.cc7[note.channel],port.cc11[note.channel],int(clip.pan),note.layer.pan_offset);
+                voice(note.layer.clip,note.layer.position,note.layer.env,note.layer.core,float(lv.left)/16384.f,float(lv.right)/16384.f,clip.loop_end>clip.loop_start,port.bend[note.channel]);}
             channel.sequence->notes.erase(std::remove_if(channel.sequence->notes.begin(),channel.sequence->notes.end(),[](const SequenceNote& n){return !n.layer.clip;}),channel.sequence->notes.end());
             if(!channel.released)channel.sequence->until-=1;return;}
         // A SPU voice loops on its own VAG markers (ADPCM loop-start/repeat flags, kept only for Vagi attribute 1,
         // decode_system_sound) until key-off, whichever request keyed it: ExPlaySe (sdfunc.c CallEnemySeMain,
         // CallSystemSe, ...) has no one-shot override. The sequence notes above already follow the markers.
         auto looping=[&](const std::shared_ptr<PcmClip>& clip){return channel.loop||(clip->spu&&clip->loop_end>clip->loop_start);};
-        if(channel.clip)voice(channel.clip,channel.position,channel.env,channel.core,channel.left,channel.right,looping(channel.clip));
-        for(auto& layer:channel.layers)if(layer.clip)voice(layer.clip,layer.position,layer.env,layer.core,layer.left,layer.right,looping(layer.clip));
+        if(channel.clip)voice(channel.clip,channel.position,channel.env,channel.core,channel.left,channel.right,looping(channel.clip),shot_bend);
+        for(auto& layer:channel.layers)if(layer.clip)voice(layer.clip,layer.position,layer.env,layer.core,layer.left,layer.right,looping(layer.clip),shot_bend);
         // A finished first note hands the slot to the next sounding layer.
         if(!channel.clip||!channel.layers.empty()){channel.layers.erase(std::remove_if(channel.layers.begin(),channel.layers.end(),[](const Layer& l){return !l.clip;}),channel.layers.end());if(!channel.clip&&!channel.layers.empty()){const auto next=channel.layers.front();channel.layers.erase(channel.layers.begin());channel.clip=next.clip;channel.position=next.position;channel.left=next.left;channel.right=next.right;channel.env=next.env;channel.core=next.core;}}
         };
@@ -925,7 +1006,10 @@ std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)th
             left+=float(l);right+=float(r);}
     out[f*2]=std::int16_t(std::clamp(left,-32768.f,32767.f));out[f*2+1]=std::int16_t(std::clamp(right,-32768.f,32767.f));
     // sync.c bhControlVSync calls ExecSoundFadeManager at 60 Hz, twice per game tick.
-    if(++sound_sync_frames_==800){sound_sync_frames_=0;sound_sync();}}
+    if(++sound_sync_frames_==800){sound_sync_frames_=0;sound_sync();}
+    // TSNDDRV ATick at 240 Hz. Its phase to the EE VSync is not fixed (separate IOP timer); here every fourth tick
+    // falls on the sdSysServer frame, after it.
+    if(++atick_frames_==200){atick_frames_=0;atick();}}
     return out;
 }
 }
@@ -989,6 +1073,8 @@ void AudioMixer::room_fade_in(){
         request_background_[slot]=0;background_init_[slot].active=false;
     }
     request_sound_fade(1,0xA3,120);
+    // RequestMidiFadeFunction(2, 2, 250): MidiInfo[2] fades the port MidiHandle[2] names (the last door list) and
+    // StopMidi(2) ends it at -127; earlier ports were stopped by the sdMidiPlay rotation or ran out.
     request_midi_fade_timer(2,2,250);
 }
 }

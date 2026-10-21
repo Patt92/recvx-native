@@ -119,6 +119,51 @@ def host_target(system: str, machine: str) -> str | None:
     return None
 
 
+def host_machine() -> str:
+    """Native CPU of the host; x64 Python under emulation on Windows ARM64 reports AMD64."""
+    machine = platform.machine()
+    if platform.system() != 'Windows':
+        return machine
+    try:
+        import ctypes
+        process, native = ctypes.c_ushort(), ctypes.c_ushort()
+        kernel = ctypes.windll.kernel32
+        kernel.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel.IsWow64Process2.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ushort), ctypes.POINTER(ctypes.c_ushort)]
+        if kernel.IsWow64Process2(kernel.GetCurrentProcess(), ctypes.byref(process), ctypes.byref(native)):
+            return {0xAA64: 'ARM64', 0x8664: 'AMD64', 0x014C: 'x86'}.get(native.value, machine)
+    except (AttributeError, OSError):
+        pass  # IsWow64Process2 needs Windows 10 1709+
+    return machine
+
+
+def find_cmake() -> str | None:
+    """CMake from PATH, else the copy bundled with Visual Studio or the default installer path."""
+    found = shutil.which('cmake')
+    if found or platform.system() != 'Windows':
+        return found
+    candidates = []
+    vswhere = Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
+    if vswhere.is_file():
+        try:
+            installs = subprocess.check_output([str(vswhere), '-products', '*', '-sort', '-property', 'installationPath'],
+                                               text=True, errors='replace').splitlines()
+        except (OSError, subprocess.CalledProcessError):
+            installs = []
+        candidates += [Path(i.strip()) / 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
+                       for i in installs if i.strip()]
+    candidates.append(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'CMake/bin/cmake.exe')
+    return next((str(c) for c in candidates if c.is_file()), None)
+
+
+def visual_studio_platform(target: str) -> list[str]:
+    """Pin the Visual Studio generator platform to the target instead of CMake's default."""
+    generator = os.environ.get('CMAKE_GENERATOR', '')
+    if platform.system() != 'Windows' or (generator and not generator.startswith('Visual Studio')):
+        return []
+    return ['-A', 'ARM64' if WINDOWS_TARGETS[target] == 'arm64' else 'x64']
+
+
 def is_windows_target(target: str) -> bool:
     return target in WINDOWS_TARGETS
 
@@ -188,14 +233,17 @@ def main():
         parser.error('--jobs must be between 1 and 256')
     target = args.platform
     if target == 'host':
-        target = host_target(platform.system(), platform.machine())
+        target = host_target(platform.system(), host_machine())
     if not target:
         parser.error('unsupported host')
     data = args.data.resolve()
     if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.verify_runtime):
         parser.error('Windows cross-builds cannot run tests; use --platform windows or windows-arm64 without test options, then test on Windows or Wine')
-    if shutil.which('cmake') is None:
-        parser.error('CMake was not found on PATH. Install CMake and open a new terminal; verify with "cmake --version" before building.')
+    cmake = find_cmake()
+    if cmake is None:
+        parser.error('CMake was not found on PATH or in a Visual Studio installation. Install CMake (or the Visual Studio '
+                     'component "C++ CMake tools for Windows") and open a new terminal; verify with "cmake --version" before building.')
+    print(f'Target {target}, CMake {cmake}', flush=True)
     run_checks = args.test and not args.no_test
     if is_windows_target(target) and platform.system() != 'Windows':
         # The final binary audit also invokes Zig; use the same project cache.
@@ -207,11 +255,13 @@ def main():
         if target == 'macos' and platform.system() != 'Darwin':
             parser.error('macOS builds require a macOS host')
         build = native_build_directory(target)
-        configure = ['cmake', '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}']
+        configure = [cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}']
         if target == 'macos':
             configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
+        if is_windows_target(target):
+            configure += visual_studio_platform(target)
         run(*configure)
-        run('cmake', '--build', build, '--config', 'Release', '--parallel', args.jobs)
+        run(cmake, '--build', build, '--config', 'Release', '--parallel', args.jobs)
     binary_dir = build / 'Release' if (build / 'Release').is_dir() else build
     suffix = '.exe' if is_windows_target(target) else ''
     if args.iso:
@@ -219,7 +269,7 @@ def main():
     if args.verify_runtime and not (data / 'native-data.version').is_file():
         parser.error(f'--verify-runtime requires a prepared native data tree (missing {data / "native-data.version"})')
     if run_checks:
-        run('ctest', '--test-dir', build, '-C', 'Release', '--output-on-failure')
+        run(str(Path(cmake).with_name('ctest' + Path(cmake).suffix)), '--test-dir', build, '-C', 'Release', '--output-on-failure')
     run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT,
         '--build-dir', build, '--binary', binary_dir / ('recvx-runtime' + suffix))
     if args.verify_data:

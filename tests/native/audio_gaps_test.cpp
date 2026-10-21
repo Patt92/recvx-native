@@ -20,7 +20,7 @@
 // Gegenproben (je eine Zeile, zurueck und touch):
 //   audio.cpp user_sound_volume Typ 7: Flagpruefung entfernt        -> "Typ 7 ohne Flag"
 //   audio.cpp call_object_sound: `o.flags&=~8u` entfernt            -> "Objektfade einmalig"
-//   audio.cpp play_door_sound: stop(door_slot_) entfernt            -> "Tuer nach Fade"
+//   audio.cpp sync_midi_port: Lautstaerke nicht an den Port uebergeben -> "Tuer waehrend des Fades"
 //   audio.cpp request_enemy_se: VolDownTbl-Grenze 8 auf 16          -> "VolDownTbl[12]"
 #include "audio.h"
 #include <algorithm>
@@ -83,19 +83,24 @@ int main(int argc,char** argv){try{
      const auto before=m.sound_state(AudioMixer::se_voice(1));check(m.active(19)&&before.fade==1&&before.volume_count==10&&int(before.volume)==-127,"Gegner-SE-Fade: VolSpeed = -((Vol+127)/10) < 0 -> Func 1, FadeCntMax 10, Start -127");
      m.mix(800*5);const auto half=m.sound_state(AudioMixer::se_voice(1));check(half.fade==1&&half.volume_count==5&&int(half.volume)>-127,"SE-Fade schreitet je 800 Bilder (60 Hz) um einen Schritt");
      m.mix(800*6);const auto done=m.sound_state(AudioMixer::se_voice(1));check(done.fade==0&&int(done.volume)>-127,"SE-Fade endet nach FadeCntMax + 1 Schritten auf VolLast");}
-    // --- CallDoorSe: voller Pegel und Mitte unabhaengig vom Fade des vorigen Ports -----------------
+    // --- CallDoorSe und MidiInfo[2]-Fade (Com_ExecRoomFadeIn: RequestMidiFadeFunction(2, 2, 250), 45 Schritte) ---------
+    // ExPlayMidi -2 setzt SetVolumeMidi(2, 0): bei FadeFunc 2 sendet SetVolumeMidiEx (sdc.c:314) MidiInfo[2].Volume,
+    // SetPanMidi2 tut nichts. Eine waehrend des Fades gestartete Tuerliste erbt den Fadepegel, StopMidi(2) am Ende
+    // (sdc.c:796) beendet sie. Nach dem Fade spielt CallDoorSe mit vollem Pegel in der Mitte.
     // Ohne Raumhall (load_room_sounds setzt EVOL/Reverb), damit nur der Tuerport verglichen wird.
+    auto peaks=[](const std::vector<std::int16_t>& out){int l=0,r=0;for(std::size_t i=0;i+1<out.size();i+=2){l=std::max(l,std::abs(int(out[i])));r=std::max(r,std::abs(int(out[i+1])));}return std::make_pair(l,r);};
     {AudioMixer door(root),fresh(root);door.load_door_sounds(7);fresh.load_door_sounds(7);
-     check(door.play_door_sound(2),"Tuerliste 2 nicht spielbar");door.finish_door_sound(); // RequestMidiFadeFunction(2, 2, 250): 45 Schritte
+     check(door.play_door_sound(2),"Tuerliste 2 nicht spielbar");door.room_fade_in();
      door.mix(800*20);check(door.active(door.door_voice()),"Tuerport waehrend des Fades verstummt zu frueh");
-     check(door.play_door_sound(1)&&fresh.play_door_sound(1),"Tuerliste 1 nicht spielbar");
-     // sdMidiPlay stoppt den alten Port per Key-off; dessen SPU-Release klingt im Original wie hier
-     // noch aus, daher Vergleich ueber Spitzenpegel je Kanal statt bitgleich: voller Pegel, Mitte.
-     const auto a=door.mix(2400),b=fresh.mix(2400);
-     auto peaks=[](const std::vector<std::int16_t>& out){int l=0,r=0;for(std::size_t i=0;i+1<out.size();i+=2){l=std::max(l,std::abs(int(out[i])));r=std::max(r,std::abs(int(out[i+1])));}return std::make_pair(l,r);};
-     const auto pa=peaks(a),pb=peaks(b);
-     check(pa.first>1000&&pa==pb,"Tuer nach Fade: CallDoorSe (VolumeDelayTime -2 = SdcSeDefaultVolume 0) muss den vollen Pegel des frischen Ports haben");
-     check(pa.first==pa.second,"Tuer nach Fade: CallDoorSe (PanDelayTime -2) muss in der Mitte spielen");
+     check(door.play_door_sound(1)&&fresh.play_door_sound(1),"Tuerliste 1 nicht spielbar");const unsigned during=door.door_voice();
+     check(int(door.sound_state(2,true).volume)<-30&&door.sound_state(2,true).fade==2,"MidiInfo[2]-Fade muss weiterlaufen und SetVolumeMidi(2, 0) ueberstimmen");
+     const auto pa=peaks(door.mix(2400)),pb=peaks(fresh.mix(2400));
+     check(pa.first>0&&pa.first<pb.first,"Tuer waehrend des Fades: Pegel des laufenden Fades statt voll ("+std::to_string(pa.first)+" / "+std::to_string(pb.first)+")");
+     door.mix(800*30);check(!door.active(during),"StopMidi(2) am Fadeende muss die waehrend des Fades gestartete Liste beenden");
+     AudioMixer reference(root);reference.load_door_sounds(7);check(door.play_door_sound(1)&&reference.play_door_sound(1),"Tuerliste 1 nach dem Fade");
+     const auto qa=peaks(door.mix(2400)),qb=peaks(reference.mix(2400));
+     check(qa.first>1000&&qa==qb,"Tuer nach dem Fade: voller Pegel wie ein frischer Port");
+     check(qa.first==qa.second,"Tuer nach dem Fade: PanDelayTime -2 = Mitte");
     }
     std::cout<<"audio gaps PASS (Set3dSoundFlag 6/7/8, SetUserSoundVolume 6/7/8, Gegner-SE-Fade, VolDownTbl, CallDoorSe)\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

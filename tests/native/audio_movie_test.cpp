@@ -85,6 +85,12 @@ static void spu_envelope_reverb(const std::filesystem::path& root){
     check(wet_tail&&dry_silent,"HALL tail continues after the voice ended");
     std::cout<<"SPU2 ADSR, MODHSYN key-off/CC 120/core choice, LIBSD HALL presets and RoomFxLevel EVOL passed.\n";
 }
+// MODHSYN register levels of a sequence note against the same voice at unit gain (clip volume 1, pan 64): the SQ voice
+// plays sample * ENVX * VOLL/16384; both outputs truncate to int16, so they agree within 2.
+static bool scaled_like(const std::vector<std::int16_t>& actual,std::size_t offset,const std::vector<std::int16_t>& unit,SonyLevels lv){
+    for(std::size_t i=offset;i<actual.size();++i){const auto u=unit.at(i-offset);const float gain=float((i&1)?lv.right:lv.left)/16384.f;if(std::abs(float(actual[i])-float(u)*gain)>2.f)return false;}
+    return true;
+}
 static void sample_loops(const std::filesystem::path& root){
     // Original MULTSPQ1/0002 bank 2/list 6: program 6/key 60, velocity 127,
     // tempo 500000/PPQN 480. NoteOn tick 7, NoteOff tick 7687 (50 frames/tick).
@@ -93,12 +99,13 @@ static void sample_loops(const std::filesystem::path& root){
     const auto clip=std::make_shared<PcmClip>(decode_system_sound(programs,6,60));
     check(clip->rate==32000&&clip->loop_start==3*28&&clip->loop_end==2159*28,"original Vagi loop bounds missing/wrong");
     // Both mixers carry the same room environment (SPU2 HALL on both cores, sdInit).
-    AudioMixer sequence(root),reference(root),dry;sequence.load_room_sounds(0,2);reference.load_room_sounds(0,2);check(sequence.event_sound(0,0x206),"original loop sample SQ missing");reference.play_pcm(12,clip,1,true);dry.play_pcm(12,clip,1,true);
+    AudioMixer sequence(root),reference(root),dry;sequence.load_room_sounds(0,2);reference.load_room_sounds(0,2);check(sequence.event_sound(0,0x206),"original loop sample SQ missing");auto unit=std::make_shared<PcmClip>(*clip);unit->volume=1;unit->pan=64;reference.play_pcm(12,unit,1,true);dry.play_pcm(12,unit,1,true);
     check(sequence.current_fx_level()==0&&sequence.reverb(0).mode()==5&&sequence.reverb(1).mode()==5,"sdInit HALL mode / initial CurrentFxLevel");
     const auto actual=sequence.mix(120000),pcm=reference.mix(120000),plain=dry.mix(120000-350);
     check(std::all_of(actual.begin(),actual.begin()+350*2,[](std::int16_t v){return v==0;}),"SQ note sounded before its NoteOn tick");
     const std::size_t settled=(350+16*800)*2;(void)settled;
-    for(std::size_t i=350*2;i<actual.size();++i)check(actual[i]==pcm[i-350*2],"SQ sample loop differs from explicit waveform loop/intro timing");
+    const auto levels=sequence.sequence_levels(12);check(levels.size()==1&&levels[0].left>0&&levels[0].left==levels[0].right,"SQ note register level missing");
+    check(scaled_like(actual,350*2,pcm,levels[0]),"SQ sample loop differs from explicit waveform loop/intro timing");
     // MULTSPQ1/0002 carries RoomFxLevel 0: EVOL stays 0 and the result equals the dry mix.
     check(sequence.current_fx_level()==0&&reference.current_fx_level()==0,"RoomFxLevel 0 room changed EVOL");
     for(std::size_t i=0;i<plain.size();++i)check(pcm[i]==plain[i],"EVOL 0 hall changed the dry mix");
@@ -125,9 +132,13 @@ static void sample_loops(const std::filesystem::path& root){
     // An outer BG/channel loop must not turn a one-shot SQ note into a loop.
     // Original bank 2/list 0 has a one-shot program; compare both slot policies.
     const auto short_clip=std::make_shared<PcmClip>(decode_system_sound(programs,0,60));check(!short_clip->loop_end,"original one-shot unexpectedly loops");
-    AudioMixer short_reference;short_reference.play_pcm(12,short_clip,118.f/127.f);const auto short_pcm=short_reference.mix(120000-250);
-    std::vector<std::int16_t> short_expected(250*2);short_expected.insert(short_expected.end(),short_pcm.begin(),short_pcm.end());
-    for(bool outer:{false,true}){AudioMixer short_sequence(root);short_sequence.load_room_sounds(0,2);check(short_sequence.play_room_sequence(2,0,12,outer),"original one-shot SQ missing");check(short_sequence.mix(120000)==short_expected,"outer SQ slot loop repeats a one-shot waveform");short_sequence.mix(300000);check(!short_sequence.active(12),"one-shot SQ end retained slot");}
+    auto short_unit=std::make_shared<PcmClip>(*short_clip);short_unit->volume=1;short_unit->pan=64;
+    AudioMixer short_reference;short_reference.play_pcm(12,short_unit);const auto short_pcm=short_reference.mix(120000-250);
+    for(bool outer:{false,true}){AudioMixer short_sequence(root);short_sequence.load_room_sounds(0,2);check(short_sequence.play_room_sequence(2,0,12,outer),"original one-shot SQ missing");
+        auto out=short_sequence.mix(251);const auto lv=short_sequence.sequence_levels(12);check(lv.size()==1&&lv[0].left>0,"one-shot SQ note register level missing");
+        check(std::all_of(out.begin(),out.begin()+250*2,[](auto n){return n==0;}),"one-shot SQ sounded before its NoteOn");
+        const auto rest=short_sequence.mix(120000-251);out.insert(out.end(),rest.begin(),rest.end());
+        check(scaled_like(out,250*2,short_pcm,lv[0]),"outer SQ slot loop repeats a one-shot waveform");short_sequence.mix(300000);check(!short_sequence.active(12),"one-shot SQ end retained slot");}
     // ExPlaySe keys a voice without any slot loop (CallEnemySeMain, CallSystemSe, ...); the SPU still
     // follows the VAG loop markers until key-off, like the SQ note above (en02.c:1040, Gulp Worm 70400).
     {AudioMixer se,looped;se.play_pcm(12,clip);looped.play_pcm(12,clip,1,true);
@@ -371,11 +382,12 @@ int main(int argc,char** argv){try{
         bgm.room_fade_in();check(bgm.bgm_request()==0&&bgm.current_bgm_volume()==-30,"room fade-in volume request");bgm.stop_bgm2();check(bgm.bgm_request()==1&&bgm.current_bgm()==-1,"StopBgm2");}
     if(argc>1){const auto root=std::filesystem::u8path(argv[1]);const auto bank=read_asset_file(root/"files/COMMON.MLT",8*1024*1024);for(unsigned id=0;id<11;++id){const auto sound=decode_system_sound(bank,id);check(sound.rate==32000&&sound.frames()>0&&std::any_of(sound.samples.begin(),sound.samples.end(),[](auto value){return value!=0;}),"original system sound silent/invalid");}reject([&]{decode_system_sound(bank,11);});auto truncated=bank;truncated.resize(256);reject([&]{decode_system_sound(truncated,0);});AudioMixer effects(root);effects.play_system(2);check(effects.active(2)&&effects.played.back()=="COMMON/0002","original cursor sound not routed");effects.load_room_sounds(0,0);for(unsigned id=0;id<5;++id){check(effects.play_room_sound(2,id,4),"original floor bank missing");const auto output=effects.mix(800);check(std::any_of(output.begin(),output.end(),[](auto value){return value!=0;}),"original floor sound silent");}check(effects.played.back()=="MULTSPQ1/0000/2/0004","floor sound route mismatch");effects.load_room_sounds(0,1);check(!effects.active(4)&&effects.play_room_sound(2,2,5)&&effects.played.back()=="MULTSPQ1/0001/2/0002","room sound reload incorrect");check(!effects.play_room_sound(15,0),"missing bank fabricated");reject([&]{effects.play_room_sound(2,100);});}
 
-    // ps2_McSaveFile.c:577/CallSystemSeBasic: typing uses MIDI bank 2 lists 66..68, not COMMON SE.
+    // ps2_McSaveFile.c:577/CallSystemSeBasic: typing uses MIDI bank 2 lists 66..68, not COMMON SE, on MidiHandle[2]
+    // (first sdMidiPlay rotates port 2 -> 8, host voice 28).
     if(argc>1){const auto root=std::filesystem::u8path(argv[1]);for(unsigned id:{0x80000242u,0x80000243u,0x80000244u}){
         AudioMixer typing(root),reference(root);typing.load_room_sounds(0,1);reference.load_room_sounds(0,1);
         reference.play_system_midi(id);typing.play_system(id);
-        check(typing.active(13)&&typing.played.back()=="SYSTEM/MIDI/2/"+std::to_string(id&255u),"typewriter high-bit sound not routed to system MIDI");
+        check(typing.active(typing.door_voice())&&typing.door_voice()==28&&typing.played.back()=="SYSTEM/MIDI/2/"+std::to_string(id&255u),"typewriter high-bit sound not routed to system MIDI");
         const auto pcm=typing.mix(8000);check(pcm==reference.mix(8000),"typewriter system dispatch differs from ExPlayMidi path");
         check(std::any_of(pcm.begin(),pcm.end(),[](auto sample){return sample!=0;}),"typewriter MIDI PCM is silent");
         check(typing.sequence_unavailable.empty(),"typewriter MIDI list unavailable");}}
@@ -417,12 +429,17 @@ int main(int argc,char** argv){try{
         // including a room load before the closing sample is first mixed.
         for(unsigned bank:{2u,7u}){unsigned pack=0;while(pack<index.size()/2&&ids.u16(pack*2)!=(0x8000|bank))++pack;check(pack<index.size()/2,"original door SPQ not found");const auto bytes=read_asset_file(root/"archives/MULTSPQ1"/(asset_number(pack)+".bin"),32*1024*1024);BinaryView spq(bytes);std::vector<std::uint8_t> programs;
             for(unsigned i=0;i<16&&spq.u32(i*16);++i)if(spq.u32(i*16+8)==1&&spq.u32(i*16+12)==1){const auto offset=spq.u32(i*16),size=spq.u32(i*16+4);spq.require(offset,size);programs={bytes.begin()+offset,bytes.begin()+offset+size};break;}
-            for(unsigned list=0;list<(bank==2?2u:3u);++list){AudioMixer door(root),reference;door.load_door_sounds(bank);check(door.play_door_sound(list),"COMMON door sequence unresolved");auto clip=std::make_shared<PcmClip>(decode_system_sound(programs,list,60));reference.play_pcm(27,clip,float(list==1?110:120)/127.f);door.load_room_sounds(0,6);const auto actual=door.mix(1600),pcm=reference.mix(1300);std::vector<std::int16_t> expected(600);expected.insert(expected.end(),pcm.begin(),pcm.end()); // COMMON: 6 ticks, PPQN 480, tempo 500000 => 300 output samples
-                check(std::any_of(actual.begin(),actual.end(),[](auto value){return value!=0;}),"door PCM silent after destination load");for(unsigned i=0;i<actual.size();++i)check(std::abs(int(actual[i])-int(expected[i]))<=1,"door key/velocity/program/pan/timing differs from COMMON SQ");}
+            for(unsigned list=0;list<(bank==2?2u:3u);++list){AudioMixer door(root),reference;door.load_door_sounds(bank);check(door.play_door_sound(list),"COMMON door sequence unresolved");auto clip=std::make_shared<PcmClip>(decode_system_sound(programs,list,60));clip->volume=1;clip->pan=64;reference.play_pcm(27,clip);door.load_room_sounds(0,6);auto actual=door.mix(301);const auto lv=door.sequence_levels(door.door_voice());const auto rest=door.mix(1299);actual.insert(actual.end(),rest.begin(),rest.end());const auto pcm=reference.mix(1300); // COMMON: 6 ticks, PPQN 480, tempo 500000 => 300 output samples
+                check(lv.size()==1,"door note register level missing");
+                // MODHSYN: velocity 120/110 enters the note level, (bank * velocity) >> 14 (0x38c8); the decoded split is centred.
+                const auto bank_volume=decode_system_sound(programs,list,60).sony_volume;const auto want=sony_voice_levels(bank_volume,list==1?110:120,sony_controller_scale(sony_midi_cc7(127,127)),128,64,64);
+                check(lv[0].left==want.left&&lv[0].right==want.right,(std::string("door register level ")+std::to_string(lv[0].left)+" != "+std::to_string(want.left)).c_str());
+                check(std::all_of(actual.begin(),actual.begin()+600,[](auto value){return value==0;}),"door note before its tick");
+                check(std::any_of(actual.begin(),actual.end(),[](auto value){return value!=0;}),"door PCM silent after destination load");check(scaled_like(actual,600,pcm,lv[0]),"door key/velocity/program/pan/timing differs from COMMON SQ");}
         }
         // sdMidiPlay rotates MidiHandle[2] to the next port before it plays, so the closing voice
         // is the port the handle names afterwards; Com_ExecRoomFadeIn fades that port over 250.
-        AudioMixer tail(root);tail.load_door_sounds(7);const unsigned before=tail.door_voice();check(tail.play_door_sound(2)&&tail.door_voice()!=before&&tail.active(tail.door_voice()),"closing door voice missing");const unsigned closing_voice=tail.door_voice();tail.load_room_sounds(0,7);tail.finish_door_sound();check(tail.active(closing_voice),"room completion cuts closing door voice immediately");const auto closing=tail.mix(1600);check(std::any_of(closing.begin(),closing.end(),[](auto value){return value!=0;}),"closing door fade starts silent");tail.mix(48000*2);check(!tail.active(closing_voice),"completed closing voice not released");
+        AudioMixer tail(root);tail.load_door_sounds(7);const unsigned before=tail.door_voice();check(tail.play_door_sound(2)&&tail.door_voice()!=before&&tail.active(tail.door_voice()),"closing door voice missing");const unsigned closing_voice=tail.door_voice();tail.load_room_sounds(0,7);tail.room_fade_in();check(tail.active(closing_voice),"room completion cuts closing door voice immediately");const auto closing=tail.mix(1600);check(std::any_of(closing.begin(),closing.end(),[](auto value){return value!=0;}),"closing door fade starts silent");tail.mix(48000*2);check(!tail.active(closing_voice),"completed closing voice not released");
     }
     if(argc>1){AudioMixer detector(std::filesystem::u8path(argv[1]));detector.load_room_sounds(0,9);detector.custom_midi_slots(1,4);
         check(detector.event_sound(4,0x202),"original detector SQ missing");

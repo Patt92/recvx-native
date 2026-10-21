@@ -146,7 +146,10 @@ tree. Repeat `--iso` to supply multiple disc images; completed data is reused.
 Install:
 
 - **Python 3.12+**, with the `py` launcher or `python` available in PowerShell.
-- **CMake 3.16+**, with its command-line tools added to `PATH`.
+- **CMake 3.16+**: either on `PATH`, or the Visual Studio component
+  **C++ CMake tools for Windows** (part of the Desktop C++ workload). The build
+  finds Visual Studio's bundled CMake via `vswhere` and also checks
+  `C:\Program Files\CMake\bin`.
 - **Visual Studio or Visual Studio Build Tools**, including the **Desktop
   development with C++** workload, MSVC C/C++ tools and a Windows SDK.
   Native Windows ARM64 builds also need the ARM64 C/C++ build tools.
@@ -179,10 +182,11 @@ With prepared data, omit `--iso`:
 ./build.ps1 --package
 ```
 
-Windows ARM64 hosts select the native ARM64 target automatically. Check that
-`python --version` (or `py -3 --version`) and `cmake --version` work in the same
-PowerShell session. A `WinError 2` when starting CMake means it could not be
-found; the source-policy check does not verify installed build dependencies.
+Windows ARM64 hosts select the native ARM64 target automatically, also when
+an x64 Python runs under emulation; the Visual Studio generator gets `-A ARM64`
+(or `-A x64`). `--platform windows` or `--platform windows-arm64` overrides the
+choice. The build prints the chosen target and CMake path before configuring;
+the source-policy check does not verify installed build dependencies.
 Launch through `Start.cmd`.
 
 ### macOS

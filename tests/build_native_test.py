@@ -40,6 +40,30 @@ class BuildTargetTests(unittest.TestCase):
         self.assertEqual(build_native.host_target('Linux', 'x86_64'), 'linux')
         self.assertIsNone(build_native.host_target('Plan9', 'mips'))
 
+    def test_windows_finds_cmake_bundled_with_visual_studio(self):
+        with tempfile.TemporaryDirectory() as root:
+            install = Path(root) / 'VS'
+            cmake = install / 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
+            cmake.parent.mkdir(parents=True)
+            cmake.write_bytes(b'')
+            vswhere = Path(root) / 'x86/Microsoft Visual Studio/Installer/vswhere.exe'
+            vswhere.parent.mkdir(parents=True)
+            vswhere.write_bytes(b'')
+            with patch.object(build_native.platform, 'system', return_value='Windows'), \
+                 patch.object(build_native.shutil, 'which', return_value=None), \
+                 patch.dict(build_native.os.environ, {'ProgramFiles(x86)': str(Path(root) / 'x86'), 'ProgramFiles': root}), \
+                 patch.object(build_native.subprocess, 'check_output', return_value=f'{install}\n'):
+                self.assertEqual(build_native.find_cmake(), str(cmake))
+
+    def test_visual_studio_generator_platform_follows_target(self):
+        with patch.object(build_native.platform, 'system', return_value='Windows'), \
+             patch.dict(build_native.os.environ, {}, clear=True):
+            self.assertEqual(build_native.visual_studio_platform('windows-arm64'), ['-A', 'ARM64'])
+            self.assertEqual(build_native.visual_studio_platform('windows'), ['-A', 'x64'])
+        with patch.object(build_native.platform, 'system', return_value='Windows'), \
+             patch.dict(build_native.os.environ, {'CMAKE_GENERATOR': 'Ninja'}):
+            self.assertEqual(build_native.visual_studio_platform('windows-arm64'), [])
+
     def test_windows_arm64_directories(self):
         self.assertTrue(build_native.is_windows_target('windows-arm64'))
         self.assertTrue(build_native.is_windows_target('windows'))

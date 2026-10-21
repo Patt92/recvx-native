@@ -156,11 +156,33 @@ Hülsen-, Schritt- und COMMON-SE) ihr SPU2-Register VOLL/VOLR (`sony_voice_level
   Fademanagern, sdfunc.c:465).
 
 Test `audio_levels` (Registerwerte, RM_0021-Bank 2 mit Sample-Lautstärke 100,
-Req/Chg-Regeln). MIDI-Sequenzen (Ereignis-, Objekt-, Hintergrund-, Tür-MIDI) laufen noch
-über die Hostskalierung: dort skaliert MODMIDI (0xf30) CC7 als
-`min(127, (Sequenz-CC7 · Kanal 128 · Port) >> 14)` mit der EE-Lautstärke als Portwert
-(`sceMidi_MidiSetVolume`, 0x1d64), und TSNDDRV schickt das EE-Pan als HsMsg `0x1fd` an
-alle 16 Kanäle; dieser Pfad ist nicht portiert.
+Req/Chg-Regeln).
+
+### MIDI-Pegel (TSNDDRV/MODMIDI/MODHSYN, 2026-10-21)
+
+Sequenznoten rechnen dasselbe VOLL/VOLR-Register; die Hostskalierung entfällt:
+
+- EE: `sdMidiSetVol` vol + 128 auf 0..127, `sdMidiSetPan` pan / 2 + 64.
+- `SdrBgmReq` (treq_BGM 0x20): `sceMidi_MidiSetLocation` setzt den MODMIDI-Sequenz-CC7 aller
+  16 Kanäle auf 127, `sceMidi_MidiSetVolume(port, 255, vol)` speichert die Portlautstärke.
+- `SdrBgmChg`: geänderte Lautstärke → CC7 aller Kanäle neu; Pan 64 schickt nichts, jedes
+  andere Pan geht je ATick (240 Hz, Hardware-Timer 0x25800 bei 36,864 MHz) als HsMsg an alle
+  Stimmen des Ports, ohne den Kanal-CC10 zu ändern. Neue Noten nehmen bis zum nächsten ATick
+  den Kanal-CC10; nach Pan 64 behalten die Stimmen den letzten HsMsg-Pan.
+- MODMIDI (0xf30): CC7 an MODHSYN = min(127, Sequenz-CC7 · 128 · Portlautstärke >> 14).
+- MODHSYN: CC7/CC11 (v << 7) / 127, CC10 v - 64 (unter -63: -63), Pitchbend
+  (Byte2 << 7) + Byte1 - 8192 für alle Stimmen des Kanals. Die Kanäle werden nur beim
+  Modulstart initialisiert und bleiben je Port über Sequenzen erhalten (`MidiPort`).
+- Daten: CC7 steht in jedem Kanal vor der ersten Note, CC10/CC11 kommen in keiner Sequenz
+  vor, 3369 Pitchbends (vorher ignoriert), vier Sequenzen enden mit Bend +204.
+- MidiHandle *i* ist Port *i*; MidiHandle[2] (Hintergrund-Slot 2, System-MIDI, Tür) rotiert
+  über die Ports 2 → 8 → 9 (Hoststimmen 27/28/29), jedes `sdMidiPlay` stoppt den bisherigen
+  Port. Der Host-Tür-Skip stoppt nur Ports mit Türliste.
+- Hintergrund-Timer, `StopBackGroundSeEx` und `Com_ExecRoomFadeIn` laufen als
+  MidiInfo-Fades über den 60-Hz-Fademanager statt als Host-Rampen.
+
+Die Phase zwischen ATick und EE-VSync ist im Original nicht fest; nativ fällt jeder vierte
+ATick auf das sdSysServer-Bild. Test `audio_levels` (MIDI-Teil), `audio_movie`, `audio_gaps`.
 
 ## SPU2-Hüllkurve und Hall
 
@@ -227,8 +249,15 @@ FFmpeg wird nur bei dieser Umwandlung benutzt, nicht von der Laufzeit.
 
 - Mehrschichtige HD-Programme, phaseninvertiertes Programm-Pan und SPU-Interpolation (ADSR und Hall sind portiert).
 - SysEx in SQ und Live-Controller-Modulation laufender Noten.
-- MIDI-Sequenzpegel (MODMIDI-CC7-Skalierung, HsMsg-Pan, Live-CC7/CC11 laufender
-  Noten); SE-Shots rechnen die MODHSYN-Register.
+- Stimmenpool: 2 × 24 SPU2-Stimmen mit Freiliste, Key-On im nächsten ATick erst bei
+  ENVX < 1000 (0x32c4), Raub nach Zustand (losgelassen < Pedal < gehalten), Priorität
+  (alle Samples 10) und ENVX-Schnappschuss (0x659c), dann aus der Key-On-Warteliste
+  (0x67a0); Portlimit 48 mit Raub im Port (0x5e0c). Nativ nicht portiert: ein Key-On bei
+  24 belegten Stimmen spielt weiter und meldet `MODHSYN voice pool full on core N`.
+  Messung 2026-10-21 (Spitze belegter Stimmen je Kern beim Key-On, `spu_voice_peak` im
+  `--state`): alle 205 Räume je 900 Bilder höchstens 24 (RM_0100 Kern 0, auch über 9000
+  Bilder), Spielreplays höchstens 6. Ein exakter Port braucht das ATick-Batching der Key-Ons
+  (bis 4,2 ms später, nur bei ENVX < 1000), das nativ für alle Noten fehlt.
 - ADX-Lautstärke→Ausgabekurve und die Velocity-/Bereichsfade-Pfade
   anderer Bankarten; `GetAdxStatus`-PREP hat keine native Entsprechung
   (Clips laden synchron).
