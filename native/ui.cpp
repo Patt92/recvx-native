@@ -115,7 +115,7 @@ void StatusMenu::reset(Inventory& inventory){
     const bool framed=task.owned();
     *this=StatusMenu{};if(framed)task.frame();file_progress=std::move(progress);file_bonus=std::move(bonus);file_manual_read=std::move(manual);message_source=std::move(source);shotgun_burst=std::move(burst);toggle_shotgun_burst=std::move(toggle);stage=old_stage;room=old_room;
 }
-void StatusMenu::show_message(unsigned index){if(!message_source)throw std::runtime_error("inventory message source is not bound");message.show(message_source(index),index);}
+void StatusMenu::show_message(unsigned index){if(!message_source)throw std::runtime_error("inventory message source is not bound");navigation_message_=false;message.show(message_source(index),index);}
 void StatusMenu::close_examine(Inventory& inventory){inspection.cancel(inventory,selected);examining=false;opening_item=opening_frame=0;}
 void StatusMenu::inspect(Inventory& inventory){
     inspection.check(inventory,selected,{examine_pitch,examine_yaw,examine_roll});
@@ -262,12 +262,12 @@ void StatusMenu::tick(Inventory& inventory){
             if(maincsr==0)begin_close();                                    // StatusCancel
             else if(maincsr==2){map_requested=true;begin_close();} // MAP: Kartentask anfordern, Statusbildschirm abbauen (st_flg 0x8 fallen lassen)
             else if(maincsr==1){files=file_list=true;file_transition=false;file_entering=true;slide.change_view();file_page=0;commands=examining=combining=nav=false;file_folder.open(inventory,file_bonus&&file_bonus());file_number=file_folder.file();}
-            else if(maincsr==3)nav=false;                                   // back to CursorMove
+            else if(maincsr==3){clear_navigation_message();nav=false;}       // back to CursorMove
         }
     }
     if(!active){slide_open_=false;closing=false;task_closed_=false;}
     else{
-        if(!slide_open_){slide=StatusSlide{};slide.open(false);slide_open_=true;closing=false;}
+        if(!slide_open_){if(!pickup){selected=2;reset_cursor_color();}slide=StatusSlide{};slide.open(false);slide_open_=true;closing=false;} // StatusMain case 1: CursorInit (:8998), auch bei --inventory
         const bool closed=slide.tick();
         if(file_entering&&slide.open1()==23&&slide.open2()==46)file_entering=false;
         if(const auto sound=slide.take_sound();sound!=0xffffffff)slide_sound=sound;
@@ -283,7 +283,11 @@ void StatusMenu::tick(Inventory& inventory){
     // StatusInit runs PulseInit on every opening; StatusMain then runs PulseMain once per frame.
     const auto condition=StatusPulse::condition(inventory.hp,(inventory.player_stflg()&0x280000u)!=0);
     if(!active)pulse_open_=false;else{if(!pulse_open_||(!pulse.healing()&&pulse.condition()!=condition)){pulse.open(condition);pulse_open_=true;}pulse.tick();}
-    const bool had_message=message.active();message.update();if(had_message&&!message.active())finish_inspection(inventory);
+    const bool had_message=message.active();message.update();if(had_message&&!message.active()&&!navigation_message_)finish_inspection(inventory);
+    // MainCommand (:4303): bhSetMessage erst ohne laufende Meldung, testmode != 2 und statusflg 0x2000 frei,
+    // also erst nach dem Ende von SpriteH. Der neue Text wird vom naechsten Nachrichtenpass aufgebaut.
+    if(active&&nav&&!files&&!closing&&!nav_pressed&&!slide.sprites_sliding()&&!message.active()&&message_source){
+        show_message(inventory.game_mode==3&&maincsr==2?199u:180u-maincsr);navigation_message_=true;}
     if(!inspection.running())return;
     inspection.tick(inventory);opening_frame=inspection.action_frame();opening_item=inspection.running()?inspection.source():0;
     if(const auto angles=inspection.take_display_reset()){examine_pitch=(*angles)[0];examine_yaw=(*angles)[1];examine_roll=(*angles)[2];}
@@ -311,7 +315,7 @@ bool StatusMenu::input_unslid(MenuInput key,Inventory& inventory){
     feedback_sound=0xffffffff;
     if(active&&command_window_moving()&&key!=MenuInput::Open)return true;
     // CursorMove/MainCommand ignore directions and decide while the cure sweep owns statusflg 0x20.
-    if(active&&pulse.healing()&&!message.active()&&key!=MenuInput::Cancel&&key!=MenuInput::Open)return true;
+    if(active&&pulse.healing()&&(!message.active()||navigation_message_)&&key!=MenuInput::Cancel&&key!=MenuInput::Open)return true;
     const auto actions_before=commands?actions(inventory):std::vector<std::string>{};
     const unsigned item_before=selected<12?Inventory::id(inventory.slots()[selected]):0;
     const bool handled=apply_input(key,inventory);
@@ -329,7 +333,7 @@ bool StatusMenu::input_unslid(MenuInput key,Inventory& inventory){
     return handled;
 }
 bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
-    if(active&&message.active()){
+    if(active&&message.active()&&!navigation_message_){
         if(key==MenuInput::Open)return true;
         // StatusMain laeuft nach bhControlMessage dieses Durchlaufs (StatusMenu::tick vor der
         // Eingabe): die Tasten wirken hier sofort auf dessen Parse, ohne zweiten Schritt.
@@ -373,12 +377,12 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     // ItemCombination liest das Pad nur in subcsr 1 (sub1.c:5301); subcsr 2/3 und der
     // Frame, in dem subcsr 2 nach 1 zurueckfaellt, nehmen keine Eingabe an.
     if(active&&combining&&(combine_subcsr_!=1||combine_settled_))return true;
-    if(key==MenuInput::Open){if(examining)close_examine(inventory);active=!active;commands=examining=false;end_combine();nav=nav_pressed=false;nav_wait=0;selected=1;command=0;inspection=ItemInspection{};return true;}if(!active)return false;
+    if(key==MenuInput::Open){if(active){if(examining)close_examine(inventory);active=false;return true;}clear_navigation_message();active=true;commands=examining=false;end_combine();nav=nav_pressed=false;nav_wait=0;selected=2;command=0;reset_cursor_color();inspection=ItemInspection{};return true;}if(!active)return false; // StatusCancel aendert listcsr_0 nicht (:4408); CursorInit startet beim Oeffnen mit Slot/Zelle 2 (:8998).
     if(key==MenuInput::Cancel){if(examining)close_examine(inventory);else if(combining){end_combine();selected=combine_from;reset_cursor_color();} /* subcsr 1, 0x1000 (sub1.c:5546-5565): testmode 1 zurueck ins Befehlsfenster, listcsr_0 = listcsr_1, SE 0 */else if(commands)commands=false;else if(!nav){nav=true;maincsr=3;nav_wait=0;feedback_sound=0;}else if(!nav_wait)active=false;return true;} // CursorMove 0x1000 enters MainCommand (maincsr 3), MainCommand 0x1000 is StatusCancel
     if(nav){ // MainCommand testmode 1: the pad is ignored while the pressed button animates (wait)
         if(nav_wait||nav_pressed)return true;
-        if(key==MenuInput::Left&&maincsr){--maincsr;feedback_sound=2;}else if(key==MenuInput::Right&&maincsr<3){++maincsr;feedback_sound=2;}
-        else if(key==MenuInput::Confirm){nav_wait=4;nav_pressed=true;feedback_sound=3;}
+        if(key==MenuInput::Left&&maincsr){--maincsr;clear_navigation_message();feedback_sound=2;}else if(key==MenuInput::Right&&maincsr<3){++maincsr;clear_navigation_message();feedback_sound=2;}
+        else if(key==MenuInput::Confirm){if(inventory.game_mode==3&&maincsr==2){feedback_sound=1;return true;}if(navigation_message_&&!message.closable())return true;clear_navigation_message();nav_wait=4;nav_pressed=true;feedback_sound=3;}
         return true;}
     if(examining){if(key==MenuInput::Left)examine_yaw-=2048;if(key==MenuInput::Right)examine_yaw+=2048;if(key==MenuInput::Up)examine_pitch+=2048;if(key==MenuInput::Down)examine_pitch-=2048;if(key==MenuInput::Confirm)inspect(inventory);return true;}
     if(commands&&!combining){auto list=actions(inventory);if(list.empty()){commands=false;return true;}if(key==MenuInput::Up)command=(command+list.size()-1)%list.size();if(key==MenuInput::Down)command=(command+1)%list.size();if(key==MenuInput::Confirm){
@@ -905,8 +909,11 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         for(const auto& c:menu.cursor_parts(inv)){if(!c.visible)continue;auto t=tables[15][c.anim];t.sx=c.sx;if(t.texid<0||unsigned(t.texid)>=menu_.size())continue;
             blit(image,menu_[t.texid],int(c.x)+centers[5][0]+dx(5),int(c.y)+centers[5][1]+dy(5),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,tint({1.f,c.color,c.color,c.color}));}
         if(inv.slots()[0]){const auto wpn=inv.slots()[inv.slots()[0]];const auto id=Inventory::id(wpn);const int x=352+((itemdata[id].type&0x100)?24:58)+dx(3),y=48+dy(3);icon(image,id,x,y);quantity(image,wpn,x,y);} // original ArmsSet: BulletSet mode 0, digits at icon x and y+32
-        const auto selected_id=menu.pickup?menu.pickup:Inventory::id(inv.slots()[menu.selected]);if(menu.nav&&!menu.files&&!menu.message.active())text(image,system_message(180-menu.maincsr),44+dx(6),342+dy(6),.95f); // MainCommand: bhSetMessage(1,180-maincsr)
-        else if(selected_id&&!menu.files&&!menu.message.active()&&!(menu.pickup&&dialog.active()))text(image,read_message(messages_,4,menu.pickup?menu.pickup:inventory_name_id(inv.slots()[menu.selected])),44+dx(6),342+dy(6),.95f);
+        const auto selected_id=menu.pickup?menu.pickup:Inventory::id(inv.slots()[menu.selected]);
+        // SpriteOnOff :8383-8411: der Itemname gehoert subscreenmode 2/4/0x80 und statusflg 0x100000,
+        // nicht dem Aufnahmebildschirm (8). MainCommand/ItemCommand loeschen das Namensbit (:4184/:4627);
+        // ihre Texte laufen allein ueber bhControlMessage, statt sofort vollstaendig hier gezeichnet zu werden.
+        if(selected_id&&!menu.pickup&&!menu.files&&!menu.nav&&!menu.commands&&(!menu.examining||!menu.slide.pad_locked())&&!menu.erase_frames&&!menu.message.active())text(image,read_message(messages_,4,inventory_name_id(inv.slots()[menu.selected])),44+dx(6),342+dy(6),.95f);
         if(menu.commands||menu.erase_frames){
             // cen_pos[11] slides 24 px per frame; 96 px is the fully opened window.
             const bool erasing=!menu.commands;const int slide=(4-int(erasing?menu.erase_frames:menu.command_frames))*24;

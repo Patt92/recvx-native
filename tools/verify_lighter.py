@@ -21,7 +21,7 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     controls = root / 'controls.ini'
     subprocess.run([str(args.runtime.resolve()), '--write-controls', str(controls)], check=True, stdout=subprocess.DEVNULL)
-    opening = '0 new_game\n1300 confirm\n1500 confirm\n1550 confirm\n1555 confirm\n1560 inventory\n'
+    opening = '0 new_game\n1300 confirm\n1500 confirm\n1548 up\n1550 confirm\n1555 confirm\n1560 inventory\n'
 
     def run(name, frames, replay, runtime=args.runtime):
         script, state = root / (name + '.txt'), root / (name + '.json')
@@ -43,7 +43,7 @@ def main():
         assert len(flames) == 1 and flames[0]['texture'] == 8 and flames[0]['atlas'] == 0, flames
         phases.append(flames[0]['phase'])
     assert set(phases) == set(range(1, 9)) and phases[0] == phases[8], phases
-    off_inputs = opening + '4000 inventory\n4060 confirm\n4065 confirm\n4070 inventory\n'
+    off_inputs = opening + '4000 inventory\n4058 up\n4060 confirm\n4065 confirm\n4070 inventory\n'
     off = run('unequipped', 4150, off_inputs)
     assert off['weapon'] == 0 and not (off['work_flags'][13] & 0x1000000), off
     assert not any(e['type'] == 2 and e['visible'] for e in off['effects']), off['effects']

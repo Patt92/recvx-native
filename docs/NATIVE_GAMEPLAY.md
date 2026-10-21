@@ -225,8 +225,10 @@ weapon hit instead of hit fields, and observation of voice/SE/`plp->dpx`.
 
 - Full `StatusMain` and `ItemCommand` state machines; some input and
   transition phases still use host control.
-- `ItemCombination` menu flow and animation (the recipes themselves follow
-  the original).
+- Full status-task flag propagation and remaining unverified `ItemCommand`
+  transitions; the implemented combination flow is not itself a missing mechanism:
+  confirmation, four waiting frames, four cursor-motion steps, equipment-index
+  update and deferred `ItemSort` are covered by `inventory_item_sort`.
 - Full analog-pad binding of the map screen (`pad_ax/ay/al/ar`) and shared
   system-task/draw order beyond the checked MAP path.
 

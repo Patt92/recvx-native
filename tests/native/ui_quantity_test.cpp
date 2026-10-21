@@ -82,7 +82,9 @@ int main(int argc,char** argv){try{
                 else for(int f=0;f<4;++f)m.tick(inv); // gleiche Tickzahl: EKG und Cursorblinken laufen identisch
                 MessageDialog d;SoftwareRenderer r(640,480);ui.draw(r,inv,m,d,0);return r.pixels();};
             const auto closed=frame(false),open=frame(true);Box b;
-            for(int y=0;y<480;++y)for(int x=0;x<640;++x)if(closed[y*640+x]!=open[y*640+x]){b.x0=std::min(b.x0,x);b.x1=std::max(b.x1,x);b.y0=std::min(b.y0,y);b.y1=std::max(b.y1,y);++b.n;}
+            // ItemCommand loescht statusflg 0x100000 (sub1.c:4627): auch der Name unten verschwindet.
+            // Hier wird nur die Rahmenhoehe von TrigerSet geprueft, nicht die Textzeile ab y=342.
+            for(int y=0;y<332;++y)for(int x=0;x<640;++x)if(closed[y*640+x]!=open[y*640+x]){b.x0=std::min(b.x0,x);b.x1=std::max(b.x1,x);b.y0=std::min(b.y0,y);b.y1=std::max(b.y1,y);++b.n;}
             if(shown)*shown=open;return b;};
         const auto herb=window(21,0,false),gun=window(5,0,false),shotgun=window(10,0,false);
         check(herb.n&&gun.n&&shotgun.n,"command window draws nothing");

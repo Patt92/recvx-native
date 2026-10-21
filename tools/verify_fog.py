@@ -73,7 +73,7 @@ def main():
     assert dark < 24, ('cell without lighter too bright', dark)
 
     lighter = run('lighter', 'RM_0000.RDX', 1700,
-                  '0 new_game\n1300 confirm\n1500 confirm\n1550 confirm\n1555 confirm\n1560 inventory\n')
+                  '0 new_game\n1300 confirm\n1500 confirm\n1548 up\n1550 confirm\n1555 confirm\n1560 inventory\n')
     assert lighter['weapon'] == 1 and lighter['event_camera'] == 1, (lighter['weapon'], lighter['event_camera'])
     assert lighter['fog']['enabled'] is False, lighter['fog']
 

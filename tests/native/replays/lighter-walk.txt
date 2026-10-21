@@ -3,6 +3,7 @@
 # Follow the original opening event, equip the lighter, then run after control returns.
 1 skip
 50 confirm
+99 up
 101 confirm
 106 confirm
 111 inventory

@@ -3,6 +3,7 @@
 # Original cell/lighter event, then backward movement with unchanged facing.
 1 skip
 50 confirm
+99 up
 101 confirm
 106 confirm
 111 inventory

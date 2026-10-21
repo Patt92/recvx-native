@@ -145,9 +145,13 @@ evidenced and no longer a removal task.
 
 ## Next low-conflict work wave at that time
 
-Claude's specific follow-up is in [`CLAUDE_NEXT_TASKS.md`](CLAUDE_NEXT_TASKS.md).
-No broad additional removal wave: close the small generator remainder first,
-then implement missing Inventory/Status/UI mechanisms as a complete package.
+The separate Claude follow-up dated 2026-10-09 has been checked and removed.
+R02 (native ADX data and mixed-generator checks), the inventory mechanisms,
+seven event mutations, quantity/command rendering and ECG are implemented.
+The item-box width-change cursor remainder was closed in `f18acea`.
+Current limits remain in [Native Gameplay](NATIVE_GAMEPLAY.md#inventory-and-items)
+and the [port ledger](port_ledger.tsv); this historical wave is not a fresh task list.
+The review is recorded in `work/next-tasks-audit.result.md`.
 
 1. Integrator: agree R02 as Claude's first narrow task; continue
    R00/R01/R03/P00 and P01/P02/P05 data regressions. Set owners/interfaces;

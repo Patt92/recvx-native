@@ -97,6 +97,7 @@ int main(int argc,char** argv){try{
             // SpriteH locks input during the opening; ItemCommand and its erase
             // animation also ignore input. Advance each frame through GameplayInput.
             for(unsigned i=0;i<120&&menu.slide.moving();++i)tick();check(!menu.slide.moving(),"status opening does not finish");
+            press_game(SDL_SCANCODE_UP);check(menu.selected==1,"lighter sequence did not move from CursorInit slot 2 to the personal slot");
             press_game(SDL_SCANCODE_RETURN);check(menu.commands,"Enter does not open the lighter commands");
             for(unsigned i=0;i<8&&menu.command_window_moving();++i)tick();
             press_game(SDL_SCANCODE_RETURN);check(inventory.weapon()==1,"Enter does not equip the lighter");

@@ -2,7 +2,7 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **90.1 %** weighted, **81.0 %** fully evidenced (555/685 mechanisms; not overall game completion).
+Explicit evidence scope: **90.2 %** weighted, **81.1 %** fully evidenced (558/688 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
@@ -13,7 +13,7 @@ Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 | Events/script | 78/93 | 91.9 % | 83.9 % | 15 | 0 |
 | Player/combat | 50/68 | 86.8 % | 73.5 % | 18 | 0 |
 | Room/camera/door | 16/40 | 70.0 % | 40.0 % | 24 | 0 |
-| Menu/items/text | 43/56 | 84.8 % | 76.8 % | 9 | 4 |
+| Menu/items/text | 46/59 | 85.6 % | 78.0 % | 9 | 4 |
 | Models/animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
 | Audio | 25/25 | 100.0 % | 100.0 % | 0 | 0 |
 | Flow/saving | 30/34 | 94.1 % | 88.2 % | 4 | 0 |
@@ -48,6 +48,5 @@ Only ledger entries with independent native evidence count. Matching names, orig
 - `hitchk.c` bhGetGroundPosition: Historical extraction/generator evidence is invalid. The generated ground query kept room/mobile index and live ATR work. Player push/stair binding, linked casing effect, EE random state, and first-free eff[512] mapping were reported; other random consumers, exact EasyLight, full effect lifecycle, and general player work remain open.
 - `ps2_NaSystem.c` njColorBlendingModeSys: Historical extraction/generator evidence is invalid. Native chunk_blend.cpp models nj/GS saved state, ALPHA register selection, and RGB=(A-B)*C+D; FBA=0, PABE, GS packet quantization, and dc_alpha remain unmodeled. Blend, effect, weapon-flash, lighter, and runtime checks are recorded.
 - `sub1.c` GetItem: Historical extraction/generator evidence is invalid. GetItem including branch 153 and subsequent ItemSort were extracted; StatusCancel, sprite transitions, and full StatusMain were not completely bound.
-- `sub1.c` ItemSort: Historical extraction/generator evidence is invalid. Standard inventory sorting after pickup and mutation was tested; special flgchk in the full StatusMain remains incomplete.
 
 Generated with `python3 tools/port_check.py --markdown docs/PORT_STATUS.md`.

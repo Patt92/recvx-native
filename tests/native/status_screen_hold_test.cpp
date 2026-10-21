@@ -25,6 +25,7 @@
 #include "room.h"
 #include "box_menu.h"
 #include "screen_fade.h"
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
@@ -91,6 +92,40 @@ void status_menu(){
     check(m.task.taskloop()==1&&m.active,"taskloop 1 fehlt nach statusflg 0x80000");
     for(unsigned k=2;k<=4;++k){m.tick(inv);check(m.task.taskloop()==k&&m.active,"taskloop "+std::to_string(k));}
     m.tick(inv);check(!m.active&&!m.task.holding(),"Abbau nicht im fuenften ItemTaskCheck");
+}
+// StatusCancel (:4408) erhaelt listcsr_0 und den Bestand; CursorInit (:8998) startet beim naechsten
+// Eintritt in Slot 2. MainCommand-Texte (:4303) laufen erst nach SpriteH ueber bhControlMessage.
+void menu_lifecycle(const std::filesystem::path& data,const std::filesystem::path& output){
+    GameUi ui(data);Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(5,18);inv.slots()[3]=Inventory::pack(21,1);inv.slots()[0]=2;inv.wpnr_no=3;
+    StatusMenu m;m.message_source=[&](unsigned n){return ui.system_message(n);};MessageDialog room;
+    const auto saved=inv.items;
+    m.input(MenuInput::Open,inv);m.tick(inv);m.sprite_on_off(inv);
+    check(m.selected==2,"CursorInit selected the lighter instead of slot 2");
+    for(unsigned n=0;n<40&&m.slide.moving();++n){m.tick(inv);m.sprite_on_off(inv);}
+    check(!m.slide.moving(),"status entry did not finish");
+    m.input(MenuInput::Right,inv);check(m.selected==3,"cursor did not reach the herb");
+    m.input(MenuInput::Open,inv);
+    check(m.closing&&m.selected==3&&inv.items==saved&&inv.weapon()==3,"StatusCancel reset the cursor or changed equipment");
+    for(unsigned n=0;n<50&&m.active;++n){m.tick(inv);m.sprite_on_off(inv);check(m.selected==3&&inv.items==saved&&inv.weapon()==3,"closing changed listcsr_0/pip[0]/wpnr_no");}
+    check(!m.active,"status close did not finish");
+    m.input(MenuInput::Open,inv);m.tick(inv);m.sprite_on_off(inv);check(m.selected==2,"reopening did not run CursorInit");
+    for(unsigned n=0;n<40&&m.slide.moving();++n){m.tick(inv);m.sprite_on_off(inv);}
+    m.input(MenuInput::Cancel,inv); // CursorMove -> MainCommand, ohne bereits gezeichnete Beschreibung
+    check(m.nav&&!m.message.active(),"navigation text started in the input callback");
+    m.slide.open(false); // Diagnose: MainCommand waehrend SpriteH (Rueckkehr/Eintritt), keine neue Zeitgrenze
+    const auto shot=[&](const char* name){SoftwareRenderer r(640,480);ui.draw(r,inv,m,room,0);if(!output.empty()){std::filesystem::create_directories(output);r.save_bmp(output/(std::string(name)+".bmp"));}return r.pixels();};
+    const auto initial=shot("navigation-entry");
+    {auto no_name=inv;no_name.slots()[m.selected]=0;SoftwareRenderer r(640,480);ui.draw(r,no_name,m,room,0);
+     for(int y=340;y<440;++y)for(int x=40;x<420;++x)check(initial[y*640+x]==r.pixels()[y*640+x],"MainCommand paints an item name/description before SpriteH ended");}
+    for(unsigned n=0;n<8;++n){m.tick(inv);check(!m.message.active(),"MainCommand text started while statusflg 0x2000 was set");}
+    m.tick(inv);check(m.message.active()&&m.message.index()==177&&m.message.visible().empty(),"MainCommand did not set message 177 when SpriteH ended (text follows in the next message pass)");
+    m.tick(inv);check(!m.message.visible().empty()&&m.message.closable(),"FE00 navigation description did not appear in the next message pass");shot("navigation-first-message"); // Originaltexte beginnen mit FE00: sofortiger Aufbau, aber erst im Nachrichtenpass.
+    for(unsigned n=0;n<100&&!m.message.closable();++n)m.tick(inv);
+    check(m.message.closable(),"navigation description never completed");shot("navigation-complete");
+    for(unsigned n=0;n<40&&m.slide.moving();++n)m.tick(inv);
+    m.input(MenuInput::Left,inv);check(m.maincsr==2&&!m.message.active(),"navigation movement retained the previous description");
+    m.tick(inv);check(m.message.index()==178&&m.message.visible().empty(),"new navigation description did not restart its parser");
+    std::puts("status menu: slot 2 entry, unchanged close cursor/equipment, delayed progressive MainCommand text");
 }
 // 3) RM_0090: dieselbe Kopplung wie rm0090_box_test.cpp, ergaenzt um Rahmen, Kiste und Fade.
 struct Room {
@@ -174,6 +209,7 @@ int main(int argc,char** argv){try{
     frame_alone();status_menu();
     if(argc<2){std::puts("status task frame: monitor mode 5 / ItemTaskCheck taskloop (no data, RM_0090 skipped)");return 0;}
     const std::filesystem::path data=argv[1];
+    menu_lifecycle(data,argc>2?std::filesystem::path(argv[2]):std::filesystem::path{});
     if(!std::filesystem::exists(data/"rooms/RM_0090.RDT")){std::puts("status task frame: RM_0090 missing, room part skipped");return 0;}
     // Mit Rahmen: st_flg 0x8 haelt, bis Ereignis 19 sein Common 9 erreicht -> Klappe 0.
     const auto held=security_box(data,true);

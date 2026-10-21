@@ -285,7 +285,7 @@ int main(int argc,char** argv){try{
   for(unsigned t=0;t<200&&!r.dialog.closable();++t)r.tick(); // erst die aufgebaute Seite nimmt OK an (message.c:345, game.c:264)
   r.input.menu_input(MenuInput::Confirm);
   for(unsigned t=0;t<100&&!r.menu.active;++t)r.tick();check(r.menu.active,"early Enter loses automatic inventory request");for(unsigned t=0;t<40;++t)r.tick();
-  r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
+  r.input.menu_input(MenuInput::Up);check(r.menu.selected==1,"lighter sequence must move from CursorInit slot 2 to slot 1");r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
   r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);for(unsigned t=0;t<4000;++t)r.tick();
   if(r.inventory.weapon()!=1||r.menu.active||r.dialog.active()||r.world.player_scripted||r.world.player_hidden||(r.vm.flags[5][0]&4)){std::cerr<<"end press="<<press<<" weapon="<<r.inventory.weapon()<<" menu="<<r.menu.active<<" dialog="<<r.dialog.index()<<" st="<<r.vm.flags[5][0]<<" cb="<<r.vm.flags[10][0]<<" tasks=";for(auto t:r.vm.task_states())std::cerr<<t.event<<":"<<t.offset<<",";std::cerr<<"\n";}
   check(r.inventory.weapon()==1&&!r.menu.active&&!r.dialog.active()&&!r.world.player_scripted&&!r.world.player_hidden&&!(r.vm.flags[5][0]&4),"early Enter / lighter / Rodrigo retains control lock");
@@ -332,7 +332,7 @@ int main(int argc,char** argv){try{
   for(unsigned t=0;t<200&&!r.dialog.closable();++t)r.tick(); // erst die aufgebaute Seite nimmt OK an (game.c:264)
   r.input.menu_input(MenuInput::Confirm);
   for(unsigned t=0;t<100&&!r.menu.active;++t)r.tick();check(r.menu.active,"natural fixture loses the automatic inventory request");for(unsigned t=0;t<40;++t)r.tick();
-  r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
+  r.input.menu_input(MenuInput::Up);check(r.menu.selected==1,"lighter sequence must move from CursorInit slot 2 to slot 1");r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
   r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);
   unsigned wait=0;while(!(r.vm.flags[4][0]&0x00400000u)&&wait++<4000)r.tick();check(r.vm.flags[4][0]&0x00400000u,"natural cell cinematic never started");
   // Der Zellenschnitt fuehrt bhLoadWork/bhLoadWorkEx Fall 0 aus (RECVX_EVENT_TRACE,
@@ -353,7 +353,7 @@ int main(int argc,char** argv){try{
   for(unsigned t=0;t<200&&!r.dialog.closable();++t)r.tick(); // erst die aufgebaute Seite nimmt OK an (game.c:264)
   r.input.menu_input(MenuInput::Confirm);
   for(unsigned t=0;t<100&&!r.menu.active;++t)r.tick();check(r.menu.active,"skip fixture loses the automatic inventory request");for(unsigned t=0;t<40;++t)r.tick();
-  r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
+  r.input.menu_input(MenuInput::Up);check(r.menu.selected==1,"lighter sequence must move from CursorInit slot 2 to slot 1");r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();r.input.menu_input(MenuInput::Confirm);for(unsigned t=0;t<8;++t)r.tick();
   r.input.menu_input(MenuInput::Cancel);r.input.menu_input(MenuInput::Cancel);
   check(r.inventory.weapon()==1,"skip fixture did not equip the original lighter");
   // rm_flg bit 9 (0x00400000) marks the running cell cinematic; the scd1 block

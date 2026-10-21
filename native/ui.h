@@ -29,6 +29,7 @@ public:
     bool tick();                // one StatusMain pass; true once SpriteH set statusflg 0x80000
     bool moving()const{return flg_&0x44;} // 0x40 blocks the pad; 0x4 = closing
     bool pad_locked()const{return flg_&0x40;} // statusflg 0x40: GetItem/CursorMove ignore the pad
+    bool sprites_sliding()const{return flg_&0x2000;} // MainCommand darf seinen Text erst nach SpriteH starten (sub1.c:4303).
     unsigned take_sound(){const auto s=sound_;sound_=0xffffffff;return s;}
     float x(unsigned center)const{return pos_[center][0];}
     float y(unsigned center)const{return pos_[center][1];}
@@ -191,6 +192,8 @@ private:
     void begin_combine(const Inventory& inventory);
     void end_combine();
     void step_combine(Inventory& inventory);
+    bool navigation_message_=false; // MainCommand-Beschreibung auf demselben MessageDialog, kein modaler Itemtext
+    void clear_navigation_message(){if(navigation_message_){message=MessageDialog{};navigation_message_=false;}}
     bool cursor_visible()const{return active&&!nav&&!pickup&&!files;}
     bool pulse_open_=false,slide_open_=false;
     bool task_closed_=false; // swork.statusflg 0x80000 des allgemeinen Statuspasses, solange taskloop zählt

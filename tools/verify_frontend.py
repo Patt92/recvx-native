@@ -117,7 +117,7 @@ def main():
         assert not any(sound.startswith('MULTSPQ1/') for sound in automatic['audio_played']), 'inventory plays walking sounds'
         # Confirm stops an already running movie, followed by original lighter equipment.
         # ItemCommand slides the command window for 4 frames; WeaponSet keeps the status screen open.
-        lighter = run('lighter', 4000, '0 new_game\n1300 confirm\n1500 confirm\n1550 confirm\n1555 confirm\n1560 inventory\n')
+        lighter = run('lighter', 4000, '0 new_game\n1300 confirm\n1500 confirm\n1548 up\n1550 confirm\n1555 confirm\n1560 inventory\n')
         assert not lighter['movie_active'] and not lighter['cinematic'] and not lighter['inventory_open']
         assert lighter['weapon'] == 1 and 0 in lighter['events'] and not lighter['blocked_commands']
         assert 'VOICE1/0016' in lighter['audio_played']

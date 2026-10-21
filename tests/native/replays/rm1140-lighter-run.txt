@@ -4,6 +4,7 @@
 # Die Menuedruecke liegen 8 Bilder nach dem frueheren Stand: StatusMain laeuft erst nach bhSysCallMonitor
 # Modus 5 (Fade 5 Steuerlaeufe, mn_md1 0..4, ui.h StatusTask); der Abbau folgt nach vier taskloop-Laeufen.
 5 inventory
+27 up
 28 confirm
 43 confirm
 58 cancel
