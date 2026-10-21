@@ -15,7 +15,9 @@ aktuellem Code, Arbeitsbaum und installierter Runtime abgleichen.
 - `work/` enthält nur laufende Arbeit (Gegner-Auftragsbrett `work/enemies/`, Briefings,
   Inventarvertrag, Leistungsplan, Quarantänemanifest). Erledigte Ergebnisse, angewendete
   Patches und die Anweisungshistorie liegen seit 2026-10-21 unter `archived/work/`;
-  Verweise in Ledger, Docs, Code und Tests sind nachgezogen.
+  Verweise in Ledger, Docs, Code und Tests sind nachgezogen. `archived/` ist seit
+  2026-10-21 nicht mehr versioniert (nur lokal, `.gitignore`); ein frischer Klon hat
+  diese Berichte nicht.
 
 ## Arbeitsbaum und Auslieferung
 

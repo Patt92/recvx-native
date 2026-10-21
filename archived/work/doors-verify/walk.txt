@@ -1,4 +1,0 @@
-0 keys forward
-60 keys back
-120 keys forward run
-180 keys none
