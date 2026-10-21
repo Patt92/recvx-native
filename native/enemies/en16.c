@@ -49,7 +49,7 @@ _Static_assert(sizeof(RECVX_EN16_EXP0) == 0x68u,
                "EXP0-Block ist 104 Byte (en16.c:74)");
 _Static_assert(offsetof(RECVX_EN16_EXP0, pts) == 0x4u,
                "EXP0_P(0) liegt bei +0x4 (macros.h:80)");
-_Static_assert(offsetof(RECVX_EN16_EXP0, pts[7]) == 0x58u,
+_Static_assert(offsetof(RECVX_EN16_EXP0, pts) + 7u * sizeof(RECVX_ENEMY_VEC) == 0x58u,
                "der achte Punkt liegt bei +0x58 (Ringpuffer, en16.c:405)");
 _Static_assert(offsetof(RECVX_EN16_EXP0, pts_num) == 0x64u,
                "EXP0_I(0x64) liegt bei +0x64 (en16.c:389)");
