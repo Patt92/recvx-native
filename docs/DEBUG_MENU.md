@@ -1,96 +1,95 @@
-# Debugmenue-Mod
+# Debug menu mod
 
-F2 oeffnet/schliesst das Debugmenue. Der Debug-Hotkey hat Vorrang vor
-Spielsteuerung und der bisherigen F2-Wireframe-Belegung. Neue Steuerungsdefaults
-legen Wireframe auf F3; vorhandene Benutzerbelegungen werden erhalten.
+F2 opens and closes the debug menu. The debug hotkey takes precedence over game
+controls and the former F2 wireframe binding. New default controls put
+wireframe on F3; existing user bindings are preserved.
 
-## Konfiguration und Bedienung
+## Configuration and controls
 
-`debug.ini` ist unabhaengig von `controls.ini`:
+`debug.ini` is independent of `controls.ini`:
 
 ```ini
 [debug]
 hotkey = F2
 ```
 
-SDL-Tastennamen wie `F6` sind moeglich. Nach Aenderung neu starten.
-Die Runtime legt eine fehlende Datei mit F2 an und ueberschreibt vorhandene
-Dateien nicht. Ungueltige oder doppelte Einstellungen werden als Fehler gemeldet.
+SDL key names such as `F6` are supported. Restart after changing the file. The
+runtime creates a missing file with F2 and never overwrites an existing one.
+Invalid or duplicate settings are reported as errors.
 
-- macOS-Paket: Datei neben `RECVX Native.app`, ausserhalb des signierten Bundles.
-- Windows-Paket: Datei neben `recvx-runtime.exe`.
-- Direkte Runtime: Datei neben dem ausfuehrbaren Programm, unabhaengig vom CWD.
-- Projekt-Starter ohne Paket: `debug.ini` im Projektordner.
-- `--debug-config <Pfad>` waehlt ausdruecklich eine andere Konfigurationsdatei.
+- macOS package: next to `RECVX Native.app`, outside the signed bundle.
+- Windows package: next to `recvx-runtime.exe`.
+- Direct runtime launch: next to the executable, independent of the CWD.
+- Project starter without a package: `debug.ini` in the project directory.
+- `--debug-config <path>` explicitly selects another configuration file.
 
-Mit den konfigurierten Menueaktionen navigieren: Hoch/Runter waehlt die Funktion,
-Links/Rechts den Wert, OK wendet an. Tastatur und Controller verwenden denselben
-Pfad. PageUp/PageDown bzw. LB/RB springen in langen Listen um 20 Werte.
-Escape/Controller-B oder der Debug-Hotkey schliesst das Menue. Gedrueckthalten
-wiederholt das Oeffnen oder Anwenden nicht.
+Navigate with the configured menu actions: Up/Down selects a function,
+Left/Right changes its value, and Confirm applies it. Keyboard and controller
+use the same path. PageUp/PageDown or LB/RB move by 20 values in long lists.
+Escape, controller B, or the debug hotkey closes the menu. Holding a button
+does not repeatedly open the menu or apply an action.
 
-Waehrend der Auswahl pausieren Event-VM, Welt, Animationen, Kampf, Video und
-Audio. Die Ansicht bleibt sichtbar. Beim Schliessen werden gehaltene
-Spielaktionen bis zum Loslassen unterdrueckt, damit OK keine Aufnahme oder
-Attacke im Hintergrund ausloest.
+While the menu is open, the event VM, world, animation, combat, video, and audio
+are paused. The scene remains visible. On closing, held gameplay actions are
+suppressed until released, so Confirm cannot trigger a pickup or attack behind
+the menu.
 
-## Funktionen
+## Functions
 
-| Aktion | Verhalten |
+| Action | Behavior |
 |---|---|
-| Charakter | Originale SYSTEM-Koerper 0010–0014, einschliesslich Claire/Chris. Modell laden und aktuellen Raum neu initialisieren. Die bereits vorhandene Zuordnung der Inventare bleibt erhalten: 0010/0013/0014 verwenden Claire, 0011 Chris, 0012 Spieler 2. Dies implementiert keine neuen Charakterkampagnen. |
-| Equip / Waffe | Vorhandenes Item ausruesten; fehlende Waffe mit Originalmenge ins Inventar geben und ausruesten. „Keine“ legt Ausruestung ab. Waffen, deren Kampf noch fehlt, erhalten durch diese Mod keinen neuen Kampfcode. |
-| Raum | Alle vorhandenen RDX-Raumnamen zur Auswahl. Zielressourcen werden vorab dekodiert/geprueft, dann Spawn 0 geladen. Inventar und globale Flags bleiben erhalten; aktive raumlokale Tasks starten neu. |
-| Spawn | Spieler an einen originalen Spawn des aktuellen Raums versetzen. |
-| Itemmenge / Item geben | Menge 1–999 und Originalitem 1–145. Originale Inventarkapazitaet/Stapellogik gelten; fehlgeschlagene Aufnahme veraendert die Items nicht. |
-| Gesundheit | HP innerhalb des derzeitigen Maximums setzen. |
-| Tasche | 8/10 Slots, einschliesslich originalem Taschenflag. Entfernen wird bei mehr als acht belegten Slots abgelehnt. |
-| Gegner-Angriff | Zombie-Greifen/Beissen ein/aus (Standard aus, braucht die Gegner-KI); `--enemy-grab on/off`. |
-| Gegner-KI | Zombie-KI ein/aus (aus: Gegner bleiben stehen; Treffer-Reaktionen laufen weiter). `--enemy-ai on/off` setzt den Start. |
-| Wireframe | Drahtgitterdarstellung umschalten. |
-| Weiter spielen | Debugmenue schliessen. |
+| Character | Load original SYSTEM bodies 0010–0014, including Claire and Chris, and reinitialize the current room. The existing inventory mapping remains: 0010/0013/0014 use Claire, 0011 uses Chris, and 0012 uses player 2. This does not implement new character campaigns. |
+| Equip / weapon | Equip an existing item; give a missing weapon with its original quantity and equip it. “None” unequips. The mod does not add combat code for weapons whose combat behavior is still missing. |
+| Room | Select from existing RDX room names. Target resources are decoded and checked before spawn 0 is loaded. Inventory and global flags remain; active room-local tasks restart. |
+| Spawn | Move the player to an original spawn in the current room. |
+| Item quantity / give item | Select a quantity from 1–999 and an original item from 1–145. Original inventory capacity and stacking rules apply; a failed pickup leaves items unchanged. |
+| Health | Set HP within the current maximum. |
+| Bag | Select 8 or 10 slots, including the original bag flag. Removal is rejected if more than eight slots are occupied. |
+| Enemy grab | Toggle zombie grabs and bites (off by default; requires enemy AI); `--enemy-grab on/off`. |
+| Enemy AI | Toggle zombie AI (when off, enemies stand still but hit reactions continue). `--enemy-ai on/off` sets the initial value. |
+| Wireframe | Toggle wireframe rendering. |
+| Continue | Close the debug menu. |
 
-Fehler werden im Debugmenue angezeigt. Ein abgelehnter Raum wird nicht einfach
-als geladen markiert. Raumspruenge sind Diagnosefunktionen; sie ergaenzen keine
-fehlenden Event- oder Weltbindungen des noch unvollstaendigen Ports.
-Aenderungen betreffen die laufende Sitzung. Save/Load ist noch nicht vollstaendig
-implementiert.
+Errors appear in the debug menu. A rejected room is never marked as loaded.
+Room jumps are diagnostics; they do not supply missing event or world bindings
+in the incomplete port. Changes affect the current session.
 
-## Erweiterung
+## Extending the menu
 
-`native/debug_menu.*` implementiert Konfiguration, Hotkey, Navigation und Overlay.
-`DebugMenu::add(DebugAction)` registriert Funktionen ohne Anpassung der UI:
+`native/debug_menu.*` implements configuration, hotkey handling, navigation,
+and the overlay. `DebugMenu::add(DebugAction)` registers functions without UI
+changes:
 
 ```cpp
 debug.add({
-    "example", "Neue Funktion", "OK: ausfuehren.",
-    [] { return std::vector<recvx::DebugChoice>{{0, "Aus"}, {1, "An"}}; },
+    "example", "New function", "Confirm: run.",
+    [] { return std::vector<recvx::DebugChoice>{{0, "Off"}, {1, "On"}}; },
     [&] { return unsigned(enabled); },
-    [&](unsigned value) { enabled = bool(value); return std::string("Gesetzt"); }
+    [&](unsigned value) { enabled = bool(value); return std::string("Set"); }
 });
 ```
 
-Jede Aktion hat eine stabile ID, dynamische Werte, einen aktuellen Wert und einen
-validierenden Ausfuehrungs-Callback. Die Spielbindungen sind in
-`native/runtime.cpp` registriert. Erst im Callback wird der Spielzustand
-veraendert. Ressourcen vorher pruefen; globale Referenzen/Actorassets bei
-Raum- oder Charakterwechsel sauber aktualisieren. Inventaraenderungen werden mit
-einer Kopie vorab geprueft; erst bei Erfolg werden Inventar und Statusmenue
-gemeinsam uebernommen. Laufende Itemfragen werden dann verworfen, damit
-Slotverschiebungen keine alten Kombinationen oder Untersuchungen ausloesen.
+Each action has a stable ID, dynamic choices, a current value, and a validating
+execution callback. Gameplay bindings are registered in `native/runtime.cpp`.
+The callback is the first place where game state changes. Check resources first;
+update global references and actor assets cleanly when changing rooms or
+characters. Inventory changes are checked on a copy before the inventory and
+status menu are updated together. Pending item questions are then discarded so
+slot shifts cannot trigger old combinations or inspections.
 
-## Pruefung
+## Verification
 
 ```sh
 build/macos-arm64/recvx-debug-tests data build/validation/debug-menu.bmp
 python3 tools/verify_debug.py --runtime build/macos-arm64/recvx-runtime --data data
 ```
 
-Der CTest-Test prueft Standard/remappten Hotkey, Wiederholungen, Softwarepfade,
-Registry-Erweiterungen, Fehler und Eingabeunterdrueckung. Die Runtime-Pruefung
-pausiert echte Originalraeume und prueft alle fuenf Koerper, Ausruestung, Items,
-HP/Tasche/Wireframe sowie Raum/Spawnwechsel. Die Replaybefehle `debug_key` und
-`debug_select` verwenden die gleichen Hotkey-/Auswahl-/Anwenden-Routinen wie die UI.
-Der Replaybefehl `sdl_key down|up <SDL-Scancode-Name>` (nur SDL-Modus, z. B. mit
-`SDL_VIDEODRIVER=dummy`) schiebt ein echtes SDL-Tastenereignis in die Ereignisschleife
-und prueft damit den physischen Eingabepfad (InputManager, controls.ini) ohne Fenster.
+The CTest test covers the default and remapped hotkeys, repeats, software path,
+registry extensions, errors, and input suppression. Runtime verification
+pauses real original rooms and checks all five bodies, equipment, items,
+HP/bag/wireframe, and room/spawn changes. Replay commands `debug_key` and
+`debug_select` use the same hotkey, selection, and application routines as the
+UI. The replay command `sdl_key down|up <SDL-scancode-name>` (SDL mode only,
+for example with `SDL_VIDEODRIVER=dummy`) injects a real SDL key event into the
+event loop and checks the physical input path (InputManager, controls.ini)
+without a window.

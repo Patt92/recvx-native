@@ -1,286 +1,307 @@
-# Gameplay-Portstand
+# Native gameplay port status
 
-Diese Seite beschreibt je Spielsystem, welche Originalmechanismen portiert
-sind und was noch fehlt. Fundstellen beziehen sich auf
-`src/ps2/veronica/prog/`. Prozentwerte je Bereich stehen in
-[PORT_STATUS.md](PORT_STATUS.md), Prüfwerkzeuge in [VALIDATION.md](VALIDATION.md).
+This page records which original mechanisms were ported in each game system
+and which were still missing when each section was written. Source references
+refer to `src/ps2/veronica/prog/`. Domain percentages are in
+[PORT_STATUS.md](PORT_STATUS.md), and verification tools are in
+[VALIDATION.md](VALIDATION.md).
 
-„Portiert“ heißt: Eine eigenständige native Implementierung erhält die
-originalen Tabellen, Flags und Aufrufreihenfolgen. Originalkörper oder daraus
-generierte Funktionen dürfen nicht gebaut oder gelinkt werden. „Offen“ heißt: Der
-Mechanismus fehlt oder ist nur teilweise gebunden. Fehlende Dienste werden
-gemeldet, nicht stillschweigend als erledigt behandelt.
+“Ported” means an independent native implementation preserves the original
+tables, flags, and call order. Original function bodies and generated copies
+must never be built or linked. “Open” means the mechanism is missing or only
+partially connected. Missing services are reported, not silently counted as
+complete.
 
-Ältere Aufzählungen außerhalb des folgenden Kollisionsabschnitts enthalten
-noch Nachweise aus der Zeit vor dem Kernrückbau. Sie sind keine aktuelle
-Gameplay-Freigabe; der aktuelle Lückenplan steht in
+Older lists below, outside the collision section, still include evidence from
+before removal of the original-core path. They are historical records, not
+current gameplay acceptance. Check the current gaps in
 [NATIVE_REIMPLEMENTATION_ROADMAP.md](NATIVE_REIMPLEMENTATION_ROADMAP.md).
 
-## Spielstart und Ablauf
+## Startup and progression
 
-**Portiert**
-- Titelbildschirm aus ADV-Ressourcen; *Neues Spiel* spielt ADV/0003 wie
-  `adv.c` TitleCall und startet die Event-VM.
-- Der Prolog läuft vollständig über die originalen Raumskripte: Film,
-  Zellenszene, Feuerzeughinweis, automatisches Öffnen des Statusbildschirms,
-  Ausrüsten, Rodrigo-Szene und Steuerungsfreigabe.
-- Cinematic-Skip wie `bhSysCallGame`/`bhSysCall` für alle CineSet-Modi,
-  gesperrt durch die originalen Statusbits `0x1C040008`.
-- Ereignis-Countdown `bhEvtTimerSet` mit allen drei `bhSetEventTimer`-Modi und
-  Ablaufzweigen aus `player.c`; Retry/Game Over über `bhGameOverSet`.
-- Disc-Wechsel: Archivsatz 1/2 folgt `sys->ss_flg & 1`.
+**Recorded as ported**
 
-**Offen**
-- Speichern/Laden des Originals (Schreibmaschine, Speicherkarte),
-  Schwierigkeitswahl und vollständige Titelübergänge.
-- `bhSysCallMonitor` als vollständige `mn_md`-Zustandsmaschine; Raumladen und
-  -wechsel laufen nativ in Runtime/World.
-- Der Host-Snapshot (F5/F9) ist ein Entwicklungswerkzeug, kein Originalspeichern.
+- Title screen from ADV resources; New Game plays ADV/0003 as in `adv.c`
+  `TitleCall` and starts the event VM.
+- The prologue follows original room scripts: movie, cell scene, lighter hint,
+  automatic status-screen opening, equipment, Rodrigo scene, and release of
+  player control.
+- Cinematic skip follows `bhSysCallGame`/`bhSysCall` for all CineSet modes,
+  gated by original status bits `0x1C040008`.
+- Event countdown `bhEvtTimerSet` with all three `bhSetEventTimer` modes and
+  expiry branches from `player.c`; Retry/Game Over through `bhGameOverSet`.
+- Disc-set selection follows `sys->ss_flg & 1`.
 
-## Events und Skripte
+**Historical gaps**
 
-**Portiert**
-- Szenario-Interpreter mit Event_init, Tasks, Bedingungen, Schleifen
-  (`FOR`/`WHILE`/`NEXT` mit gemeinsamem Stack), Wartebefehlen und
-  10-Bit-Flagmaske von `bhCk`/`bhSet`.
-- 147 von 223 Event-Befehlen gebunden, darunter Kameras (inklusive
-  Eventkamerafahrten per `njOverhauserSpline` aus `cut.c`), Dialoge,
-  Türaufrufe, Bodentrigger, Item-Befehle (`bhPlItemLost`, `bhItemGetGet`,
-  `bhArmsItemSet` u. a.), Objektverknüpfungen, Modellknotensteuerung,
-  `bhMotionPauseSet`, Lichter, Sound- und BGM-Befehle.
-- Unbekannte Befehle blockieren ihren Task an der Originaladresse und werden
-  gemeldet; bekannte, aber noch ungebundene Befehle werden mit korrekter Länge
-  übersprungen und als *pending* protokolliert.
-- Alle 205 Räume laden. `tools/verify_rooms.py` startet jeden Raum und
-  berichtet blockierte Befehle.
+- Original saving/loading (typewriter, memory card), difficulty selection, and
+  complete title transitions. Saving and LOAD GAME have since been ported with
+  a host user-data file in place of a memory card; see current status.
+- Full `bhSysCallMonitor` state machine for `mn_md`; room loading and changes
+  run natively in Runtime/World.
+- Host snapshots (F5/F9) are development tools, not original saving.
 
-**Offen**
-- 76 Event-Befehle: 46 nur mit korrekter Länge konsumiert, 30 ohne Parser.
-  Liste: `python3 tools/port_check.py --domain Events`.
-- `Common_controll` (event.c) ist nur teilweise gebunden.
-- Gesichts-/Lippenmorphs (0x3c–0x3f, 0x90, 0x9a), Kamerapause, Schatten.
+## Events and scripts
 
-## Spieler, Bewegung und Kollision
+**Recorded as ported**
 
-**Vorhandene native Mechanismen und Teilports**
+- Scenario interpreter with Event_init, tasks, conditions, loops
+  (`FOR`/`WHILE`/`NEXT` with a shared stack), waits, and the 10-bit flag mask
+  of `bhCk`/`bhSet`.
+- At this checkpoint, 147 of 223 event commands were bound: cameras
+  (including event-camera moves through `njOverhauserSpline` from `cut.c`),
+  dialogue, doors, floor triggers, item commands (`bhPlItemLost`,
+  `bhItemGetGet`, `bhArmsItemSet`, etc.), object links, model-node control,
+  `bhMotionPauseSet`, lights, sound, and BGM.
+- Unknown commands block their task at the original address and are
+  reported. Known but unbound commands are skipped at the correct length and
+  logged as *pending*.
+- All 205 rooms load. `tools/verify_rooms.py` starts each room and reports
+  blocked commands.
 
-- Bewegung mit originalen Clips und Geschwindigkeitskurven bei 30 Hz,
-  Rückwärtsschritt und 180°-Wende.
-- Eigenständige ATR-Bodenabfrage nach `bhGetGroundPosition`: Boxen,
-  Zylinder, vorzeichenbehaftete Dreiecke, alle vier Rampenrichtungen und
-  Flächen. Raum- und mobile Tabelle werden in Originalreihenfolge geprüft;
-  die getroffene ATR-Identität bleibt über Tabelle/Index nachvollziehbar.
-  Der vorhandene `RoomWorld::combat_ground`-Pfad verwendet diesen Dienst.
-- Eigenständige Wandkontaktabfrage nach `bhCheckWallType`: alle acht
-  ATR-Typen, Radius-/Höhenüberlappung und originale Abfrageflags.
-  Sie erkennt einen Kontakt, löst aber keine Spielerbewegung auf.
-- Eigenständige Wandreflexion nach `bhSetWallRefAngle` für alle acht
-  ATR-Typen und Linienabfragen nach `bhCollisionCheckLine/2/3`: originale
-  Filter, Seitenreihenfolge, Segmentverkürzung und unnormierte Polygonnormalen.
-  Zylinderseiten sind Achtecke, keine analytischen Kreisstrahlen. Der
-  abwärts gerichtete Zylinderdeckeltest bleibt ausdrücklich unportiert:
-  das Original liest dort uninitialisierte Polygonpunkte. Solche Abfragen
-  melden die Lücke, ohne Teilergebnisse an den Aufrufer zu schreiben.
-  Die bestehenden World-Liniendienste verwenden dieselbe Raum-/Mobilgeometrie;
-  ein echter Raumtest prüft auch Änderungen durch Eventbefehl 0x0a.
-- Interaktionsreichweiten und Richtungsmasken aus `bhCheckExmAtari`.
-- Eigenständige Spieler-Wandauflösung nach `bhCheckWallEx` im freien
-  Bewegungsweg: erst geglätteter Vorfühler, danach Körper, mit Originalradius,
-  Höhen, Flags, Vorpositionsregeln und Rundungen. Raum-/Mobil-ATR und
-  temporäre Stufenkanten werden in Originalreihenfolge geprüft. Wandänderungen
-  durch Events wirken auf denselben Besitzer. `bhCheckFloorP` verwendet den
-  sicheren Fühlerpunkt für gerichtete Trigger und setzt Boden-/Wasser-/
-  Trittschallfelder; die eigenständige direkte `bhCheckWall`-Abfrage enthält
-  auch deren gesonderten Rampen- und Y-Rundungszweig.
-- Zufallsfolge des EE-libc (`state * 0x41C64E6D + 0x3039`).
+**Historical gaps**
 
-**Offen**
+- At this checkpoint, 76 event commands: 46 consumed at the correct length
+  and 30 without a parser. For current counts, run
+  `python3 tools/port_check.py --domain Events`.
+- `Common_controll` (`event.c`) only partially bound.
+- Face/lip morphs (0x3c–0x3f, 0x90, 0x9a), camera pause, shadows.
 
-- Die allgemeine `bhControlPlayer`-Work mit allen Zustandsflags und Modi.
-- Vollständige Spielerzustandsmaschine, Schiebe-/Treppen-/Leiteraktionen und
-  deren mobile Geometrieproduzenten. Die freie Spieler-Wandauflösung ist
-  angebunden, nicht sämtliche geskripteten, Kampf- und Gegner-Bewegungspfade.
-- Die Semantik des abwärts gerichteten Zylinderdeckeltests und die echte
-  `bhCheckL2Wall`-Bindung (anderer Kapsel-/Inset-Vertrag als die Linienabfrage).
-  Die weiterhin analytischen Kampfstrahl-/Gegnerbewegungspfade sind damit nicht
-  portiert und ersetzen diese Mechanismen nicht.
-- Vollständige Spieler-Bodenwork und alle effekt-/gegnerseitigen Verbraucher.
-  Eine gültige Bodenabfrage allein erzeugt noch keine Partikel oder Effekte.
-- Wandkontakt-Effekt 29, Pferdeschwanz und Feuerzeugflamme mit Raumlicht.
-- Vibration und Arm-IK (`bhArmIkMdk`).
+## Player, movement, and collision
 
-## Kampf
+**Existing native mechanisms and partial ports**
 
-**Portiert**
-- Messer, Pistole, M93R, Custom Handgun, Magnum, M-100P, Dual-MPs,
-  Sturmgewehr und Scharfschützengewehr mit originalen Modellen, Clips,
-  Munitionsregeln, Nachladen und Waffenklängen.
-- Zielwahl aus `pwksub.c`/`playpch.c` (`bhSearchNearEnemy`,
-  `bhSearchNextEnemy`, `bhCalcLockEneYR`, Dual-Waffen-Teilung).
-- Mündungsfeuer (`bhEff003`), Hülsen (`bhEff000`) mit Boden-/Wandabprall.
+- Movement with original clips and speed curves at 30 Hz, backward step, and
+  180° turn.
+- Independent ATR ground query following `bhGetGroundPosition`: boxes,
+  cylinders, signed triangles, all four ramp directions, and planes. Room and
+  mobile tables are checked in original order; a hit retains its ATR table and
+  index identity. The existing `RoomWorld::combat_ground` path uses this
+  service.
+- Independent wall-contact query following `bhCheckWallType`: all eight ATR
+  types, radius/height overlap, and original query flags. It detects contact
+  but does not resolve player movement.
+- Independent wall reflection following `bhSetWallRefAngle` for all eight ATR
+  types, and line queries following `bhCollisionCheckLine/2/3`: original
+  filters, side order, segment shortening, and unnormalized polygon normals.
+  Cylinder sides are octagons, not analytic circular rays. The downward
+  cylinder-cap test remains explicitly unported: the original reads
+  uninitialized polygon points there. Such queries report the gap without
+  writing partial results to the caller. Existing World line services use the
+  same room/mobile geometry; a real room test also covers changes made by
+  event command 0x0a.
+- Interaction distances and direction masks from `bhCheckExmAtari`.
+- Independent player-wall resolution following `bhCheckWallEx` in the free
+  movement path: a smoothed forward probe followed by the body, with original
+  radius, heights, flags, previous-position rules, and rounding. Room/mobile
+  ATR and temporary step edges are tested in original order. Event-driven
+  wall changes affect the same owner. `bhCheckFloorP` uses the safe probe
+  point for directional triggers and sets ground/water/footstep fields. The
+  independent direct `bhCheckWall` query also includes its distinct ramp and
+  Y-rounding branch.
+- EE libc random sequence (`state * 0x41C64E6D + 0x3039`).
 
-- Granatwerfer (Waffen 14–17: Spreng-, Säure-, Brand-, BOW-Gas-Munition): Abschuss
-  (`player.c:4990`), Geschoss `bhEff130` mit Flug, Wand-/Gegnertreffer
-  (`bhCheckFlyAtari`), Einschlägen und `bhSetBowDamage`.
+**Open**
 
-**Offen**
-- Schrotflinte, Armbrust, Waffen 18/20, Zielfernrohr. Nicht freigegebene Waffen melden
-  ihre Lücke beim Zielen namentlich (`Combat gaps`).
-- Granatwerfer: Schirmfärbung des BOW-Gases (`sys->ef_ntx2d`), Wassereinschlag
-  (`bhCheckL2Water`), Nachladen mit Munitionswechsel ungeprüft.
-- Weitere Mündungsvarianten, Rauch, Waffenlichter, Gelenkkapseln für
-  Waffen mit `WpnTab.flg & 8`.
+- General `bhControlPlayer` work with all state flags and modes.
+- Complete player state machine, push/stair/ladder actions, and their mobile
+  geometry producers. Free player-wall resolution is connected, but not every
+  scripted, combat, or enemy movement path.
+- Semantics of the downward cylinder-cap test and the real `bhCheckL2Wall`
+  binding (a different capsule/inset contract from the line query). Existing
+  analytic combat-ray/enemy-movement paths do not port or replace them.
+- Complete player-ground work and every effect/enemy consumer. A valid ground
+  query alone creates no particles or effects.
+- Wall-contact effect 29, ponytail, and lighter flame with room lighting.
+- Vibration and arm IK (`bhArmIkMdk`).
 
-## Gegner
+## Combat
 
-**EN21 (Albinoid-Jungtier): implementiert, angebunden und am Originalraum geprüft.**
-Der vorhandene native Zustandsautomat läuft im WorldEntity-Dispatch, mit Routen,
-Spielmodus, Spielergriff und Audio. Funken/Spuren (399/396) verwenden die vom
-Gegner gesetzte Modelltexturliste statt eines gemeinsamen Ersatzatlasses.
-Die gemeinsamen Raumrouten werden auch ohne Zombie-Motionbibliothek geladen.
-`tests/native/en21_world_test.cpp` prüft in RM_3120/RM_3140 Init (Typ 0/1),
-Bewegung, Verfolgung bis zum Griff, Schaden 9, Funken 399, Spuren 396, Tod mit
-Blutpfütze und die Verteilung von Sperrzeit/Sterbemotion.
-Offen: natürliche Skriptfreigabe in RM_3120 (Test gibt per 0x24 frei), echter
-Waffentreffer statt Trefferfeldern, Beobachtung von Stimme/SE/`plp->dpx`.
+**Recorded as ported**
 
-**Portiert**
-- Zombies (`en01.c`): Wahrnehmung, Wegsuche, Verfolgung, Fußfixierung,
-  Trefferreaktionen, Niederschlag, Tod, Blut, Gegnerstimmen.
-- Greifen/Beißen mit Spielerschaden und Hebelrütteln (`EatCheck`,
-  `bhEne01_Nage`, `PlyDG00/01`) laufen im normalen Spiel (Standard an;
-  `debug.ini enemy_grab = off`, Debugmenü oder `--enemy-grab off` schalten
-  ab). Die Kette ist seit 2026-10-12 geschlossen: Spielersuche
-  (`bhSearchPlayer/2`), Bereichs-/Bodeneffektflächen
-  (`bhEne_EnemyAtariCheck`, `bhCheckFloorEffect`), Wegzonen
-  (`bhCheckRouteID/bhCheckRoute` aus `rom->rutp/ruttp`), Laufmotionswechsel
-  (`bhGetFrameNum`, `bhCalcFixOffset`, `bhEne_GetTranslateMtn/2`,
-  `bhAddSpeed`), Treppenflächen (`bhKaidanAtrCheck`), Spielerkapsel
-  (`plp->watr`, `npCollisionCheckSC`) und der Gegner-Spieler-Kontakt
-  (`bhCheckPlayer`, Bedingung `plp->flg & 8` war invertiert). Bisse ziehen
-  direkt von der Inventar-HP ab; HP < 0 führt in das native Game Over.
-  Nachweis: `tools/verify_enemy_ai.py` (RM_0080: natürlicher Spawn,
-  Diagnoseaufstellung, Hebelrütteln, Tod).
-- Fässer (`bhEne00`) mit Explosion und Kettenreaktion.
-- Hunde: Aktivierung über die originalen Bereichs-/Fallenregeln.
+- Knife, handgun, M93R, custom handgun, Magnum, M-100P, dual MPs, assault
+  rifle, and sniper rifle with original models, clips, ammunition rules,
+  reloading, and weapon sounds.
+- Target selection from `pwksub.c`/`playpch.c` (`bhSearchNearEnemy`,
+  `bhSearchNextEnemy`, `bhCalcLockEneYR`, dual-weapon split).
+- Muzzle flash (`bhEff003`) and casings (`bhEff000`) with floor/wall bounce.
+- Grenade launcher (weapons 14–17: explosive, acid, incendiary, BOW gas
+  rounds): launch (`player.c:4990`), `bhEff130` projectile flight,
+  wall/enemy hits (`bhCheckFlyAtari`), impacts, and `bhSetBowDamage`.
 
-**Offen**
-- Alle weiteren Gegnerfamilien (en02 ff.), vollständige Hunde-KI.
-- Zombie-Treppen, Kopf-/Gliedmaßenabtrennung, Feuer, Krabbler-Zweige,
-  gegenseitiges Wegschieben.
-- Auf dem Angriffspfad noch gemeldet: Blutsprite `bhEff005` (Partikel laufen),
-  Controller-Vibration (`StartVibrationEx`), `bhSetUseKaidanFlag` für
-  `sys->metcp`-Kisten, der `nlxb`-Zweig von `bhCheckPlayer` beim sterbenden
-  Spieler. Originaldefekt nachgebildet: `bhEne01_ChgWalkMtn` verschiebt den
-  rohen `bhGetFrameNum`-Wert um 16 Bit, der Startframe kann `frm_num`
-  erreichen; dieser eine Pass behält die Vorpose und wird gemeldet.
+**Open at this checkpoint**
 
-## Inventar und Items
+- Shotgun, crossbow, weapons 18/20, scope. Unreleased weapons report their
+  named gap when aiming (`Combat gaps`).
+- Grenade launcher BOW-gas screen tint (`sys->ef_ntx2d`), water impact
+  (`bhCheckL2Water`), and reload with ammunition switching unverified.
+- Other muzzle variants, smoke, weapon lights, and joint capsules for weapons
+  with `WpnTab.flg & 8`.
 
-**Portiert**
-- Statusbildschirm mit originalen Sprites, Ein-/Ausfahren (`SpriteH`,
-  `SpriteUV`, `StatusCancel`), Fensterläden, Befehlsleiste
-  EXIT/FILE/MAP/ITEM (`MainCommand`) und Cursorlogik (`CursorMove`).
-- Itemtabelle `itemdata[156]` mit Typen, Mengen und Kombinationen; alle
-  117 gerichteten Rezepte über `combidata`/`Combi_*`.
-- Kontextmenü: Sprites und Sichtbarkeit aus `ItemCommand`/`TrigerSet`.
-- Untersuchen mit Startwinkeln aus `dsptbl`, Modellwechseln, Öffnen von
-  Koffern und Namensänderungen (`ItemModelCheck`, `MdlAction00–02`).
-- Inventarmutationen über `GetItem`, `ItemSearch`, `EraseItem` und
-  `ItemSort` inklusive Korrektur des Ausrüstungsindex.
-- Zustandsanzeige/EKG (`PulseInit`, `PulseMain` u. a.) mit originaler
-  Zeichenpriorität.
-- Dateiordner (`SearchTag`, `SelectFile`, `SelectTag`, `FileSyu`) und
-  Leseansicht; Dateinummern über `FileNumberSwitch`.
-- Item-Box: Öffnen über `bhCheckExmAtari` (Typ 4, Kistenbit) mit
-  Deckelanimation `bhObjItmBox`; Tauschen, Stapeln, Restriktionen
-  (`ItemBoxChange`), Ein-/Ausfahren und EXIT-Knopf.
-  Der Deckelcontroller ist eigenständig nativ: 41 Öffnungsschritte,
-  Menüanforderung im folgenden Durchlauf, einmaliger Klang und Rückkehr
-  auf demselben Objekt. Pause-/Playerflags und Wiederöffnung sind geprüft;
-  allgemeine reservierte/verknüpfte Objektbesitzer bleiben getrennt offen.
-- Benutzen über `ItemUse` für alle Itemtypen, Heilen und Entgiften über
-  `Use_00` (inklusive Sprayzähler und Gift-Statusbits).
-- Aufnahme vom Boden und durch Skripte mit Ja/Nein, voller Tasche und
-  Abschluss über `ItemTaskCheck` (löscht GetItem- und GetFile-Anforderung).
-- Menüklänge nach `CallSystemSe`: Bestätigen 3, Abbrechen 0, Cursor 2,
-  Fehler 1.
+## Enemies
 
-**Offen**
-- `StatusMain` und `ItemCommand` als vollständige Zustandsmaschinen; Teile
-  der Eingabe- und Übergangsphasen sind noch Host-Steuerung.
-- `ItemCombination`-Menüablauf und -Animation (die Regeln selbst sind
-  original).
-- Vollständige analoge Padbindung des Kartenbildschirms (`pad_ax/ay/al/ar`)
-  und gemeinsame Systemtask-/Drawreihenfolge außerhalb des geprüften MAP-Pfads.
+**EN21 (young Albinoid): implemented, connected, and checked in an original
+room at this checkpoint.** Its native state machine runs in WorldEntity
+dispatch, including routes, game mode, player grab, and audio. Sparks/trails
+(399/396) use the model texture list set by the enemy instead of a shared
+replacement atlas. Shared room routes load without a zombie motion library.
+`tests/native/en21_world_test.cpp` checks RM_3120/RM_3140 initialization (types
+0/1), movement, pursuit through grabbing, damage 9, sparks 399, trails 396,
+death with a blood pool, and the distribution of lockout time/death motion.
+Open: natural script release in RM_3120 (the test releases with 0x24), a real
+weapon hit instead of hit fields, and observation of voice/SE/`plp->dpx`.
 
-### Kartenbildschirm
+**Recorded as ported**
 
-**Portiert:** `MapScreen` besitzt den Automaten aus `map.c`, Flag-/Etagenwahl,
-Zoom-/Nachbarzustände und Original-Zeichenliste. `MapRenderer` dekodiert MRY-
-Index und Etagenmodelle mit dem vorhandenen MDL/PVP-Pfad und zeichnet Gitter,
-Rahmen, Sprites, Marker, Etagenobjekte und Kompass. `pri` und Modellgeometrie
-teilen den Tiefenpuffer. Karten-CNKs verwenden den von `njControl3D(0x810)`
-gewählten Constant-Material-Farbpfad, nicht den Normalenlichtshader; Typ-41-
-Normalen bleiben im gemeinsamen Assetdecoder erhalten. Spritefarbe und
-Texturmodulation behalten die originale 128er-Faktordomäne.
+- Zombies (`en01.c`): perception, route finding, pursuit, foot anchoring, hit
+  reactions, knockdown, death, blood, and enemy voices.
+- Grabbing/biting with player damage and stick wiggling (`EatCheck`,
+  `bhEne01_Nage`, `PlyDG00/01`) run in normal play (on by default;
+  `debug.ini enemy_grab = off`, the debug menu, or `--enemy-grab off` disable
+  them). As of 2026-10-12, the chain included player search
+  (`bhSearchPlayer/2`), area/ground effect surfaces
+  (`bhEne_EnemyAtariCheck`, `bhCheckFloorEffect`), route zones
+  (`bhCheckRouteID/bhCheckRoute` from `rom->rutp/ruttp`), walking motion
+  changes (`bhGetFrameNum`, `bhCalcFixOffset`, `bhEne_GetTranslateMtn/2`,
+  `bhAddSpeed`), stair surfaces (`bhKaidanAtrCheck`), the player capsule
+  (`plp->watr`, `npCollisionCheckSC`), and enemy-player contact
+  (`bhCheckPlayer`; condition `plp->flg & 8` had been inverted). Bites deduct
+  inventory HP directly; HP < 0 enters native Game Over. Evidence:
+  `tools/verify_enemy_ai.py` (RM_0080: natural spawn, diagnostic setup, stick
+  wiggling, death).
+- Barrels (`bhEne00`) with explosion and chain reaction.
+- Dogs activated by original area/trap rules.
 
-Solange die Karte den Schirm besitzt, steht **Task 7** still: der
-Spieleinstieg setzt `ts_flg 0x180` (system.c:777), der Statusmenü-Einstieg hat
-Task 7 schon gestoppt und `sp_flg 0x30` hinterlassen (system.c:608), sodass
-`bhControlPlayer` (player.c:1365, `sp_flg & 0x1`) nicht läuft. Der Host wacht
-Welt-, Kamera- und Spielerpass mit derselben Bedingung; eine gehaltene Richtung
-bewegt die Figur während der offenen Karte nicht mehr.
+**Historical gaps**
 
-`ScreenFade` bildet Setzen, Vorlauf und Abschluss aus `screen.c` ab. Die
-MAP-Rückkehr wartet auf das live gelesene `cb_flg & 0x2`, auch wenn der Fade
-erst im selben Kontrollpass startet. Statusmenü → Karte → Statusmenü → Spiel
-und Wiedereintritt sind im nativen Runtime-Pfad geprüft.
+- Other enemy families (en02 onward) and full dog AI were still missing at
+  this checkpoint. Later ports must be checked individually in current code.
+- Zombie stairs, head/limb loss, fire, crawler branches, and mutual pushing.
+- Still reported on the attack path: blood sprite `bhEff005` (particles run),
+  controller vibration (`StartVibrationEx`), `bhSetUseKaidanFlag` for
+  `sys->metcp` crates, and the `nlxb` branch of `bhCheckPlayer` when the
+  player is dying. A recorded original defect was modeled:
+  `bhEne01_ChgWalkMtn` shifts raw `bhGetFrameNum` by 16 bits, so the starting
+  frame can reach `frm_num`; this pass retains the previous pose and reports
+  it.
 
-**Offen:** analoge Kartensteuerung, globaler Fade-/Taskbesitzer für sämtliche
-anderen Spieltasks, vollständige originale Primitive-/Material-Drawreihenfolge
-und Alpha-/Texturfunktion außerhalb dieser nativen Abbildung. Kein pauschaler
-1:1-Nachweis des vollständigen Kartenbildschirms.
+## Inventory and items
 
-Die vollständige Item-, Untersuchungs- und Rezeptabdeckung erzeugt
-`recvx-inventory-engine-tests` als [INVENTORY-COVERAGE.md](INVENTORY-COVERAGE.md).
+**Recorded as ported**
 
-## Räume, Kameras und Türen
+- Status screen with original sprites, slide-in/out (`SpriteH`, `SpriteUV`,
+  `StatusCancel`), shutters, EXIT/FILE/MAP/ITEM command bar (`MainCommand`),
+  and cursor logic (`CursorMove`).
+- `itemdata[156]` with types, quantities, and combinations; all 117 directed
+  recipes through `combidata`/`Combi_*`.
+- Context-menu sprites and visibility from `ItemCommand`/`TrigerSet`.
+- Examination with initial angles from `dsptbl`, model swaps, case opening,
+  and name changes (`ItemModelCheck`, `MdlAction00–02`).
+- Inventory mutations through `GetItem`, `ItemSearch`, `EraseItem`, and
+  `ItemSort`, including equipment-index correction.
+- Health/ECG display (`PulseInit`, `PulseMain`, etc.) with original draw
+  priority.
+- File folder (`SearchTag`, `SelectFile`, `SelectTag`, `FileSyu`) and reading
+  view; file numbers through `FileNumberSwitch`.
+- Item box opened by `bhCheckExmAtari` (type 4, box bit), with
+  `bhObjItmBox` lid animation; exchange, stacking, restrictions
+  (`ItemBoxChange`), slide transitions, and EXIT button. The lid controller
+  is independently native: 41 opening steps, menu request on the next pass,
+  one sound, and return on the same object. Pause/player flags and reopening
+  were checked; general reserved/linked object owners remain separately open.
+- `ItemUse` for all item types; healing and antidote through `Use_00`
+  (including spray count and poison status bits).
+- Floor/script pickup with Yes/No, full-bag handling, and completion through
+  `ItemTaskCheck` (clears GetItem/GetFile requests).
+- Menu sounds through `CallSystemSe`: confirm 3, cancel 0, cursor 2, error 1.
 
-**Portiert**
-- Raumnamen und -identität nach `system.c` (dezimal), Spawns, Kameraschnitte
-  mit Etagenvergleich (`bhCheckCut`), Clip-Ebenen (`bhChangeViewClip`).
-- Native Clip-Abfragen mit originalen Event-/Raumtabellen, Erstrefferregeln,
-  Displayflag-abhängigen Eventstandards und Monitor-Tabellenbypass. GameOver
-  behält seinen ausdrücklich installierten Bereich, unabhängig vom Kameraflag.
-- Türsequenzen aus MRY-Paketen über eigenständige native `FadeProc1`, `ViewProc1–7`
-  und `DoorProc1–7`; Überspringen mit OK; Abschluss der Raumskripte vor
-  `bhStartDoorDemo`.
-- Inventar, Flags, HP und Spielzeit bleiben über Raumwechsel erhalten.
-- 3D-Scanner-Terminal (`sp_evt.c`) mit Skriptinterpreter und Bildschirmtastatur.
+**Open**
 
-**Offen**
-- Spezielle Türbeleuchtung, Vibration.
-- 3D-Figur im Terminal (`bhDrawSpEvtComCharacter`).
-- Eff137 als weiterer Monitor-Erzeuger, vollständige Kamerazustandsübergänge
-  und Abnahme der sichtbaren Eisraum-Tiefensortierung; keine PS2-OT-Nachbildung.
+- Full `StatusMain` and `ItemCommand` state machines; some input and
+  transition phases still use host control.
+- `ItemCombination` menu flow and animation (the recipes themselves follow
+  the original).
+- Full analog-pad binding of the map screen (`pad_ax/ay/al/ar`) and shared
+  system-task/draw order beyond the checked MAP path.
 
-## Modelle und Effekte
+### Map screen
 
-**Portiert**
-- Skinning nach `npCalcSkin`/`npCalcSkinFM`, MASK-Knotenlayout,
-  zusammengesetzte Ober-/Unterkörper-Motions der Zombies.
-- Effektslots `eff[512]` mit `bhSetEffectTb`; einzelne Effekte: Flammen und
-  Funken (Eff200/201/218), Treffer (5), Blutpartikel (`bhEff302`),
-  Blutlachen (`bhEff300`), Explosion (16/23/24), Feuerzeug (9), Hülsen (0).
+**Recorded as ported:** `MapScreen` owns the `map.c` state machine,
+flag/floor selection, zoom/neighbor states, and original draw list.
+`MapRenderer` decodes the MRY index and floor models through the existing
+MDL/PVP path and draws the grid, frame, sprites, markers, floor objects, and
+compass. `pri` and model geometry share the depth buffer. Map CNKs use the
+constant-material color path selected by `njControl3D(0x810)`, not the normal
+lighting shader; type-41 normals remain in the shared asset decoder. Sprite
+color and texture modulation retain the original factor domain based on 128.
 
-**Offen**
-- Der allgemeine Effektlebenszyklus (`bhInitEffect`, `bhControlEffect`,
-  Zeichenwarteschlange) und die große Mehrheit der Effekt-IDs.
-- `bhControlLight`, exakte EasyLight-Schattierung, Gesichtsmorphs.
+While the map owns the screen, **task 7** is stopped: entering from the game
+sets `ts_flg 0x180` (`system.c:777`); entering from the status menu already
+stopped task 7 and left `sp_flg 0x30` (`system.c:608`), so `bhControlPlayer`
+(`player.c:1365`, `sp_flg & 0x1`) does not run. The host guards world, camera,
+and player passes under the same condition; holding a direction no longer
+moves the actor while the map is open.
+
+`ScreenFade` reproduces setup, progression, and completion from `screen.c`.
+MAP return waits for the live `cb_flg & 0x2`, even if the fade starts in the
+same control pass. Status menu → map → status menu → game and reentry were
+checked in the native runtime path.
+
+**Open:** analog map input, a global fade/task owner for all other game tasks,
+full original primitive/material draw order, and alpha/texture behavior beyond
+this native mapping. This is not blanket proof of a complete 1:1 map screen.
+
+`recvx-inventory-engine-tests` generates the full item, examination, and
+recipe coverage report [INVENTORY-COVERAGE.md](INVENTORY-COVERAGE.md).
+
+## Rooms, cameras, and doors
+
+**Recorded as ported**
+
+- Room names/identity from `system.c` (decimal), spawns, camera cuts with
+  floor comparison (`bhCheckCut`), clip planes (`bhChangeViewClip`).
+- Native clip queries with original event/room tables, first-hit rules,
+  display-flag-dependent event defaults, and monitor-table bypass. Game Over
+  retains its explicitly installed range independently of the camera flag.
+- Door sequences from MRY packets through independent native `FadeProc1`,
+  `ViewProc1–7`, and `DoorProc1–7`; the host door-skip convenience uses Confirm.
+  Room scripts finish before `bhStartDoorDemo`.
+- Inventory, flags, HP, and play time survive room changes.
+- 3D scanner terminal (`sp_evt.c`) with script interpreter and on-screen
+  keyboard.
+
+**Open**
+
+- Special door lighting and vibration.
+- 3D actor in the terminal (`bhDrawSpEvtComCharacter`).
+- Eff137 as another monitor producer, complete camera-state transitions, and
+  visible acceptance of ice-room depth sorting; no PS2 ordering-table clone.
+
+## Models and effects
+
+**Recorded as ported**
+
+- Skinning following `npCalcSkin`/`npCalcSkinFM`, MASK node layout, composite
+  upper/lower body zombie motions.
+- `eff[512]` slots with `bhSetEffectTb`; selected effects: flame and sparks
+  (Eff200/201/218), hits (5), blood particles (`bhEff302`), blood pools
+  (`bhEff300`), explosion (16/23/24), lighter (9), casings (0).
+
+**Open**
+
+- General effect lifecycle (`bhInitEffect`, `bhControlEffect`, draw queue) and
+  most effect IDs.
+- `bhControlLight`, exact EasyLight shading, face morphs.
 
 ## Audio
 
-Siehe [AUDIO.md](AUDIO.md). Kurz: ADX-Musik und -Stimmen, Sony-Soundbanken,
-SQ-Sequenzen, Schritt-, Tür-, Waffen-, Gegner- und Ereignisklänge sowie Filme
-laufen nativ. Tonhöhe, Hüllkurven, Hall und bitgenaue SPU-Mischung fehlen.
++See [AUDIO.md](AUDIO.md). At this checkpoint, ADX music and voice, Sony sound
++banks, SQ sequences, footstep/door/weapon/enemy/event sounds, and movies ran
++natively. Pitch, envelopes, reverb, and bit-exact SPU mixing were still listed
++as gaps; consult the audio page for later work.
++EOF
++python3 - <<'PY'
++from pathlib import Path
++p=Path('docs/NATIVE_GAMEPLAY.md')
++p.write_text(''.join(line[1:] if line.startswith('+') else line for line in p.read_text().splitlines(keepends=True)))
++PY

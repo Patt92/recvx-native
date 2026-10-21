@@ -1,48 +1,45 @@
-# Spielermodell, Skinning und Animation
+# Player models, skinning, and animation
 
-## Spielerdaten
+## Player data
 
-Spielbare Figuren kommen aus `data/archives/SYSTEM/0010.bin` bis `0014.bin`.
-Das Format folgt `dread.c::bhReadPlayerData`: längenpräfixierte Abschnitte
-für Modelle (SKIN/MDL), Motions (MTN), Translationskurven und PVP-Texturen.
-Der Port liest alle Felder begrenzt und als Little-Endian; Disc-Offsets
-werden nie als Host-Zeiger interpretiert.
+Playable characters come from `data/archives/SYSTEM/0010.bin` through
+`0014.bin`. The format follows `dread.c::bhReadPlayerData`: length-prefixed
+sections for models (SKIN/MDL), motions (MTN), translation curves, and PVP
+textures. The port reads every field with bounds checks and as little-endian;
+disc offsets are never interpreted as host pointers.
 
-`PlayerAsset` lädt alle Modelle `plp->mdl[0..n]`. Zusatzmodelle wie Claires
-Pferdeschwanz (`mdl[4]`, an Kopfknoten 5) werden wie in `bhInitPlayer` über
-`lkmtab` verbunden und von `bhCalcHair` bewegt.
+`PlayerAsset` loads all models in `plp->mdl[0..n]`. Additional models such as
+Claire's ponytail (`mdl[4]`, attached to head node 5) are linked through
+`lkmtab`, as in `bhInitPlayer`, and moved by `bhCalcHair`.
 
-## Knoten und Skinning
+## Nodes and skinning
 
-Ninja-Chunk-Knoten sind 52 Byte groß (Kind-/Geschwisterverweise,
-Bind-Translation und -Winkel). Das gepackte Skin-Wort wählt einen Knochen und
-eine Gewichtsstufe in Zehnteln. Das Skinning folgt
-`npSkinConvert`/`npInitCalcSkin`/`npCalcSkin`: Es mischt die volle animierte
-Matrix mit einer Matrix, in der die lokale Rotation des beeinflussenden
-Knochens aufgehoben ist – kein allgemeines Zwei-Knochen-Blending. Normalen
-verwenden dieselbe Mischung. Ninja-`evalflag 0x8` blendet Knoten aus.
+Ninja Chunk nodes are 52 bytes long (child/sibling references, bind
+translation, and bind angles). The packed skin word selects a bone and a weight
+step in tenths. Skinning follows `npSkinConvert`/`npInitCalcSkin`/`npCalcSkin`:
+it blends the fully animated matrix with one in which the affecting bone's
+local rotation has been canceled. This is not general two-bone blending.
+Normals use the same blend. Ninja `evalflag 0x8` hides nodes.
 
-`ActorNodeLayout` rekonstruiert das MASK-Layout aus `fmCnkInitContext`:
-Tochterknoten für Zähne, Zunge und Augen werden eingefügt und der Baum wie in
-`_fmSetObjP` abgeflacht. Skriptverknüpfungen und Motion-Kanäle werden damit
-den richtigen Skin-Knoten zugeordnet; `npCalcSkinFM` verschiebt Indizes
-größer 10 um vier.
+`ActorNodeLayout` reconstructs the MASK layout from `fmCnkInitContext`:
+child nodes for teeth, tongue, and eyes are inserted, and the tree is
+flattened as in `_fmSetObjP`. Script links and motion channels thus map to the
+correct skin nodes; `npCalcSkinFM` shifts indices above 10 by four.
 
 ## Motion
 
-16.16-Framezähler laufen über die Cliplänge um. Schnelle Clips wählen
-ganzzahlige Keys, langsame interpolieren Position und Winkel auf dem kürzesten
-Weg. Übergänge zwischen Clips nutzen die Hokan-Frames aus `Motion.c`
-(`bhSetMotion` und die SetMtn-Routinen). Knochenmatrizen stehen für
-verknüpfte Kameras, Lichter, Objekte und Schrittkontakte auch ohne
-gerendertes Bild zur Verfügung.
+16.16 frame counters wrap at the clip length. Fast clips select integer keys;
+slow clips interpolate positions and angles along the shortest path. Clip
+transitions use the Hokan frames from `Motion.c` (`bhSetMotion` and the SetMtn
+routines). Bone matrices are available to linked cameras, lights, objects, and
+footstep contacts even when no frame is rendered.
 
-Raumfiguren (NPCs, Gegner) laden Modelle und Texturen aus den Zeigertabellen
-des Raums. Texturbanken werden nach `bhSetEneMdl`-Identität geteilt. Leere
-`MN_WORK`-Tabellen behalten bei Szenenfreigabe die letzte Pose.
+Room actors (NPCs and enemies) load models and textures from the room's pointer
+tables. Texture banks are shared according to `bhSetEneMdl` identity. Empty
+`MN_WORK` tables retain the last pose when the scene is released.
 
-## Offen
+## Open work
 
-- Gesichts- und Lippenmorphs aus den MASK-Paketen.
-- Exakte PS2-Materialschattierung und EasyLight.
-- Arm-IK (`bhArmIkMdk`).
+- Face and lip morphs from MASK packets.
+- Exact PS2 material shading and EasyLight.
+- Arm IK (`bhArmIkMdk`).

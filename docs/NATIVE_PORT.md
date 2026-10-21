@@ -1,33 +1,35 @@
-# Build, Pakete und Architektur
+# Build, packages, and architecture
 
-RECVX Native führt Host-C/C++-Code aus und liest vorbereitete lose
-Spieldateien. Es gibt keine PS2-CPU-Emulation; ISO und AFS-Container werden
-zur Laufzeit nicht geöffnet. Die Originalquellen unter `src/` bleiben
-Semantikreferenz für eigenständige Portierungen in die native Engine.
+RECVX Native runs host C/C++ code and reads prepared loose game files. It does
+not emulate a PS2 CPU; the runtime never opens ISO images or AFS containers.
+Original sources under `src/` remain semantic references for independent ports
+into the native engine.
 
-## Voraussetzungen
+## Requirements
 
-- Python 3.12+, CMake 3.16+ (beide im Terminal erreichbar), C/C++17-Compiler
-- macOS: Apple Command Line Tools
-- Windows: Visual Studio mit „Desktop development with C++“; für einen nativen
-  ARM64-Build zusätzlich die ARM64-C/C++-Buildtools
-- Windows-Crossbuild von macOS/Linux: zusätzlich Ninja
-- Linux: GCC oder Clang mit C++17, Make oder Ninja sowie die SDL2-Entwicklungsabhängigkeiten
-  für X11/Wayland und ALSA/PulseAudio; siehe [README](../README.md#linux)
-- `--iso`: FFmpeg und ffprobe im PATH; unter Windows alternativ
-  `build-tools/ffmpeg.exe` und `build-tools/ffprobe.exe` im Repository ablegen.
-  PATH hat Vorrang, die lokale Ablage wird bei fehlendem PATH-Eintrag verwendet.
-  Benötigte DLLs desselben FFmpeg-Pakets daneben ablegen; ein statischer Build
-  benötigt keine separaten FFmpeg-DLLs. Keine PATH-Änderung nötig.
+- Python 3.12+, CMake 3.16+ (both accessible from the terminal), and a C/C++17
+  compiler.
+- macOS: Apple Command Line Tools.
+- Windows: Visual Studio with “Desktop development with C++”; native ARM64
+  builds also need the ARM64 C/C++ build tools.
+- Windows cross-builds from macOS/Linux: Ninja as well.
+- Linux: GCC or Clang with C++17, Make or Ninja, and the SDL2 development
+  dependencies for X11/Wayland and ALSA/PulseAudio; see the
+  [README](../README.md#linux).
+- `--iso`: FFmpeg and ffprobe on PATH. On Windows, they can instead be placed
+  at `build-tools/ffmpeg.exe` and `build-tools/ffprobe.exe` in the repository.
+  PATH takes precedence; the local copies are used when PATH has no matching
+  tools. Put the required DLLs from the same FFmpeg package beside them. A
+  static build needs no separate FFmpeg DLLs. No PATH change is needed.
 
-Der erste Build lädt festgelegte Abhängigkeiten (SDL2 2.32.10, für den
-Crossbuild Zig 0.16.0; beide per Prüfsumme fixiert). Danach braucht weder der
-Build noch das Spiel eine Netzwerkverbindung.
-Unter Windows vor `./build.ps1` in derselben PowerShell-Sitzung
-`python --version` und `cmake --version` prüfen. Ein `WinError 2` direkt nach
-dem Policy-Check beim Start von CMake weist auf ein fehlendes `cmake` im PATH hin.
+The first build downloads pinned dependencies (SDL2 2.32.10 and, for
+cross-builds, Zig 0.16.0; both checksum-verified). Neither the build nor the
+game needs a network connection after that. Before running `./build.ps1` on
+Windows, check `python --version` and `cmake --version` in the same PowerShell
+session. `WinError 2` immediately after the policy check while starting CMake
+means `cmake` is missing from PATH.
 
-## Bauen und Pakete erzeugen
+## Building and packaging
 
 ```sh
 ./build.sh --platform macos --verify-data --package
@@ -41,44 +43,43 @@ dem Policy-Check beim Start von CMake weist auf ein fehlendes `cmake` im PATH hi
 ./build.ps1 --platform windows --verify-data --package
 ```
 
-Windows ARM64 wird auf macOS/Linux mit demselben geprüften Zig-Werkzeugsatz
-gekreuzt. SDL2 liegt für ARM64 nicht als offizielles MinGW-Paket vor und wird
-deshalb aus der fixierten Quelle mitgebaut:
+Windows ARM64 can be cross-built on macOS/Linux with the same verified Zig
+toolchain. SDL2 has no official ARM64 MinGW package, so this build compiles it
+from the pinned source:
 
 ```sh
 ./build.sh --platform windows-arm64 --verify-data --package
 ```
 
-Auf Windows ARM64 baut `./build.ps1` hingegen nativ für ARM64 mit dem
-Visual-Studio-Generator; der Crossbuild ist dafür nicht erforderlich. Der
-Visual-Studio-Generator schreibt keine `compile_commands.json`; die
-Übersetzungsprüfung des Policy-Gatters liest deshalb die `ClCompile`-Einträge
-der erzeugten `.vcxproj`. Offen: der Windows-Binary-Audit
-(`tools/windows_link_audit.py`) gewinnt den Linkbefehl über
-`ninja -t commands` und prüft implizite Eingaben im Zig-Cache; er gilt damit
-bisher nur für den Zig-Crossbuild. Ein nativer MSVC-Build besteht dieses
-abschließende Gatter noch nicht.
+On Windows ARM64, `./build.ps1` instead builds natively for ARM64 with the
+Visual Studio generator. No cross-build is needed. The Visual Studio generator
+does not produce `compile_commands.json`, so the policy gate checks the
+`ClCompile` entries in the generated `.vcxproj` files. One limitation remains:
+the Windows binary audit (`tools/windows_link_audit.py`) obtains the link
+command through `ninja -t commands` and checks implicit inputs in Zig's cache.
+It currently applies only to the Zig cross-build; a native MSVC build does not
+yet pass this final gate.
 
-Das Paket entsteht unter `build/packages/windows-arm64-v<version>`. Wie jeder
-Windows-Crossbuild muss es auf Windows ARM64 oder unter passender Emulation
-getestet werden; der Build allein ist kein Laufzeitnachweis.
+The package is written to `build/packages/windows-arm64-v<version>`. As with
+any Windows cross-build, it must be tested on Windows ARM64 or under suitable
+emulation. Building alone does not establish runtime behavior.
 
-| Option | Wirkung |
+| Option | Effect |
 |---|---|
-| *(keine)* | Nur Laufzeit-Binary bauen |
-| `--test` | Testziele bauen und CTest ausführen |
-| `--verify-runtime` | Längere Replay-Suite mit Originaldaten |
-| `--verify-data` | Manifest der Spieldaten prüfen |
-| `--data <pfad>` | Anderen Datenbaum verwenden |
-| `--package` | Startfähiges Paket unter `build/packages/` erzeugen |
-| `--output <neu>` | Anderes Paketziel; vorhandene Ziele werden nie überschrieben |
+| *(none)* | Build only the runtime binary |
+| `--test` | Build test targets and run CTest |
+| `--verify-runtime` | Run the longer replay suite with original data |
+| `--verify-data` | Verify the game-data manifest |
+| `--data <path>` | Use a different data tree |
+| `--package` | Create a launchable package under `build/packages/` |
+| `--output <new-path>` | Choose another package destination; never overwrite an existing one |
 
-macOS-Builds sind ausschließlich arm64 (Deployment Target 11.0, SDL2 arm64,
-kein Rosetta) und lokal ad hoc signiert, nicht notarisiert. Windows-Builds
-gibt es für x64 und ARM64; Crossbuilds müssen auf Windows (bzw. ARM64
-Emulation) oder unter Wine getestet werden.
+macOS builds contain only arm64 code (deployment target 11.0, arm64 SDL2, no
+Rosetta). They are signed locally ad hoc, not notarized. Windows builds target
+x64 or ARM64; cross-builds need separate testing on Windows, ARM64 emulation,
+or Wine.
 
-Direkte Entwicklungsbefehle (macOS; die Linux-CI baut als `build/native`):
+Direct development commands (macOS; Linux CI uses `build/native`):
 
 ```sh
 cmake -S . -B build/macos-arm64 -DRECVX_FETCH_SDL2=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
@@ -96,104 +97,105 @@ ctest --test-dir build/macos-arm64 --output-on-failure
 build/macos-arm64/recvx-runtime --data data
 ```
 
-## Spieldaten
+## Game data
 
-`data/` ist der vollständige lokale Export: alle Disc-Dateien, aufgeteilte
-AFS-Einträge, 205 expandierte Räume, dekodierte Texturen und native
-Filmpakete. `asset-manifest.json` enthält Größen und SHA-256 jeder Datei.
+`data/` is the complete local export: every disc file, separated AFS entries,
+205 expanded rooms, decoded textures, and native movie packets.
+`asset-manifest.json` records the size and SHA-256 of every file.
 
 ```sh
 python3 tools/prepare_native_data.py --output data --verify
 ```
 
-Optional entsteht der vollständige lose Datenbaum beim Build direkt aus einem
-PS2-ISO9660-Image; ein Quellcode-Checkout plus ISO genügt:
+Optionally, the build creates the complete loose data tree directly from a PS2
+ISO9660 image; a source checkout plus the ISO is sufficient:
 
 ```sh
-./build.sh --iso /pfad/zum/spiel.iso
+./build.sh --iso /path/to/game.iso
 ```
 
-Nach dem Kompilieren laufen ISO-Extraktion, `recvx-assets`,
-`recvx-world-assets` für alle Räume, `tools/cook_movies.py` (braucht
-FFmpeg/ffprobe zur Buildzeit) und das Manifest in einem Staging-Verzeichnis;
-erst ein vollständiger Lauf wird nach `--data` verschoben. `--iso` ist
-wiederholbar (beide Discs werden bei identischen Dateien zusammengeführt,
-Konflikte abgelehnt). Ein vorhandener vollständiger Export unter `data/` bleibt
-unangetastet, ein vorhandenes unvollständiges Verzeichnis wird abgelehnt; für
-eine Neuextraktion ein frisches `--data`-Verzeichnis angeben. `python3 tools/iso9660.py spiel.iso --list` bzw.
-`--extract <verzeichnis>` prüft das Image ohne Build. Die Runtime liest
-weiterhin ausschließlich lose Dateien.
+After compilation, ISO extraction, `recvx-assets`, `recvx-world-assets` for
+every room, `tools/cook_movies.py` (which needs FFmpeg/ffprobe at build time),
+and manifest creation run in a staging directory. Only a complete run is moved
+to `--data`. `--iso` can be repeated: identical files from both discs are
+merged, conflicts are rejected. An existing complete export under `data/` is
+left untouched; an existing incomplete directory is rejected. Use a fresh
+`--data` directory to extract again. `python3 tools/iso9660.py game.iso --list`
+or `--extract <directory>` checks the image without a build. The runtime still
+reads only loose files.
 
-`archived/` enthält ISO, Quellenextraktion, alte Toolchains, historische
-Arbeitsstände und Belege. Kein normaler Build oder Start hängt davon ab.
-`data/`, `build/` und `archived/` sind nicht im Git-Repository.
+`archived/` contains ISO images, source extraction, old toolchains, historical
+work, and evidence. Normal builds and launches do not depend on it. `data/`,
+`build/`, and `archived/` are not in the Git repository. The quarantined
+`archived/FORBIDDEN_DONTUSE` tree is never a build or documentation source.
 
-## Architektur
+## Architecture
 
-| Bibliothek / Programm | Aufgabe |
+| Library / program | Role |
 |---|---|
-| `recvx_data` | Begrenztes Binärlesen, Raumexpansion, Archiv- und Exportwerkzeuge |
-| `recvx_math` | Ninja-Mathematik und Matrizen |
-| `recvx_scene` | Modell-/Texturdekodierung, Motion, Skinning, Software-Renderer |
-| `recvx_game` | Event-VM, Inventar, Nachrichten, Welt, Kampf, Gegner, Audio, Filme |
-| `recvx_input` | Tastatur/Controller, Menü- und Cinematic-Weiterleitung |
-| `recvx-runtime` | SDL-Fenster, Eingabe, Audioausgabe, Spielschleife |
+| `recvx_data` | Bounds-checked binary reading, room expansion, archive and export tools |
+| `recvx_math` | Ninja mathematics and matrices |
+| `recvx_scene` | Model/texture decoding, motion, skinning, software renderer |
+| `recvx_game` | Event VM, inventory, messages, world, combat, enemies, audio, movies |
+| `recvx_input` | Keyboard/controller input and menu/cinematic routing |
+| `recvx-runtime` | SDL window, input, audio output, game loop |
 
-### Originalcode im Port
+### Original code and the port
 
-Der Großteil der Spiellogik stammt nicht aus Nachbauten, sondern aus
-Generatoren unter `tools/generate_*.py`. Sie extrahieren Funktionen,
-Tabellen und Strukturen aus `src/ps2/veronica/prog/*.c` und erzeugen
-`.inc`-Dateien, die in dünne C-Brücken (`native/*_core.c`) eingebunden werden.
-Die Brücken liefern nur die Dienste, die im Original die Engine bereitstellt
-(Arbeitsspeicher, Ninja-Aufrufe, Zeichnen, Sound). Welche Originalfunktionen
-so gebunden sind, erfasst `docs/port_ledger.tsv`; `tools/port_check.py`
-wertet das aus.
+Original sources and disassembly are semantic references only. The productive
+runtime must use independently ported mechanisms on existing native owners;
+it must never compile, link, or call original engine functions or generated
+copies of their bodies. `tools/check_no_original_core.py` checks source, build,
+and binary scope. `docs/port_ledger.tsv` records the original source location,
+native evidence, and remaining gaps; `tools/port_check.py` reports its coverage.
+Coverage percentages are not proof of equivalent gameplay.
 
-### Takt
+### Timing
 
-Das Original wartet pro Spielschritt zwei VSyncs. Der Port läuft mit einem
-festen 30-Hz-Spieltakt (`native/timing.h`); Filme, ADX-Fades und der
-48-kHz-Mixer (1600 Stereo-Frames pro Tick) folgen derselben Uhr. Gezeichnet
-wird nur bei neuem Tick. Die getrennte 60-Hz-VSync-Zeit des Originals
-(`sys->time`) wird für Ereigniszeitgeber in VSync-Einheiten mitgeführt.
+The original waits for two VSyncs per game step. The port runs a fixed 30 Hz
+game clock (`native/timing.h`); movies, ADX fades, and the 48 kHz mixer (1,600
+stereo frames per tick) follow the same clock. A frame is rendered only on a
+new tick. The original's separate 60 Hz VSync time (`sys->time`) is retained
+for event timers measured in VSync units.
 
-### Darstellung
+### Rendering
 
-Gemeinsame native Geometrie-/Auftragsstufe mit interner Auflösung 640×480,
-Fenster standardmäßig 1280×960. `renderer = gpu` in `video.ini` wählt Metal auf
-macOS, D3D11 auf Windows und OpenGL auf Linux; `renderer = opengl` wählt GL
-explizit, `software` die CPU-Referenz. `--renderer gpu|opengl|software` gilt nur
-für den Lauf. Headless bleibt ohne explizite Auswahl in Software.
+A shared native geometry and command stage uses an internal 640×480 resolution;
+the default window is 1280×960. `renderer = gpu` in `video.ini` selects Metal on
+macOS, D3D11 on Windows, and OpenGL on Linux. `renderer = opengl` selects GL
+explicitly; `software` selects the CPU reference. `--renderer
+gpu|opengl|software` applies only to the current run. Headless mode stays on
+software unless explicitly changed.
 
-OpenGL braucht Core 4.1 und einen SDL-Videotreiber mit Display. Es besitzt einen
-eigenen versteckten Kontext, rastert dieselben Setup-/Schattenaufträge und gibt
-Farbe und 1/z an den vorhandenen Bildbesitzer zurück. Geordnete, nicht überlappende
-Gruppen lesen einen vorher kopierten Zustand; GL 4.5/ARB_texture_barrier kann beim
-Farbrastern die Kopien ersetzen. Masken und Komposite bleiben geordnete Kopierpässe.
-Kein Festfunktionsblending oder neuer Spielzustandsbesitzer. Fehlt das Gerät oder
-scheitert ein Bild, meldet die Runtime den Grund und zeichnet in Software.
+OpenGL requires Core 4.1 and an SDL video driver with a display. It has its own
+hidden context, rasterizes the same setup and shadow commands, and returns
+color and 1/z to the existing image owner. Ordered, non-overlapping groups read
+an earlier copied state; GL 4.5/ARB_texture_barrier can replace the copies for
+color rasterization. Masks and composites remain ordered copy passes. There is
+no fixed-function blending or new owner of game state. If the device is absent
+or a frame fails, the runtime reports the reason and renders in software.
 
-Optional Supersampling und Host-Texturfilter (`video.ini`); deren vorhandene
-CPU-/GPU-Filterunterschiede sind keine belegte Bitgleichheit. Punktabtastung muss
-Farbe einschließlich Alpha und Tiefe bitweise erhalten. Linux-/Windows-Treiber
-müssen separat geprüft werden, ein Mac-Build belegt sie nicht.
-`./build.sh --opengl off` bzw. CMake `-DRECVX_ENABLE_OPENGL=OFF` lässt GL weg;
-Metal und D3D11 bleiben dann unverändert verfügbar.
+Optional supersampling and host texture filters are set in `video.ini`. The
+existing CPU/GPU filter differences have not been shown bit-identical. Point
+sampling must preserve color including alpha and depth bit for bit. Linux and
+Windows drivers require separate verification; a Mac build does not verify
+them. `./build.sh --opengl off` or CMake `-DRECVX_ENABLE_OPENGL=OFF` omits GL;
+Metal and D3D11 remain available.
 
-## Diagnose
+## Diagnostics
 
-| Option | Zweck |
+| Option | Purpose |
 |---|---|
-| `--in-game` | Hauptmenü überspringen |
-| `--preview` | Raum-/Modellinspektor mit freier Kamera |
-| `--room`, `--player`, `--motion`, `--frame`, `--inventory` | Inspektion |
-| `--headless --replay <datei> --frames <n>` | Deterministischer Lauf ohne Fenster |
-| `--state <neu.json>`, `--screenshot <neu.bmp>` | Zustand bzw. Bild ausgeben |
-| `--snapshots <ordner>` | Snapshot-Ordner (F5/F9) |
-| `--enemy-ai on\|off`, `--enemy-grab on` | Gegner-Schalter |
+| `--in-game` | Skip the main menu |
+| `--preview` | Room/model inspector with a free camera |
+| `--room`, `--player`, `--motion`, `--frame`, `--inventory` | Inspection |
+| `--headless --replay <file> --frames <n>` | Deterministic run without a window |
+| `--state <new.json>`, `--screenshot <new.bmp>` | Write state or image |
+| `--snapshots <directory>` | Snapshot directory (F5/F9) |
+| `--enemy-ai on\|off`, `--enemy-grab on` | Enemy switches |
 
-Headless-Läufe führen jeden Simulationsschritt aus und zeichnen nur das
-angeforderte letzte Bild. Ausgabedateien werden nie überschrieben.
-Diagnostische Positionierung ist kein Nachweis eines echten Spielverlaufs.
-Replays beginnen mit `0 new_game`.
+Headless runs execute every simulation step and render only the requested last
+frame. Output files are never overwritten. Diagnostic positioning does not
+prove a natural playthrough. Replays start with `0 new_game`.
+EOF
+sed -i '' 's/^+//' docs/NATIVE_PORT.md

@@ -49,6 +49,9 @@ RasterizerOrderedTexture2D<float> Transported : register(u2);
 RasterizerOrderedTexture2DArray<uint> Mask : register(u3);
 cbuffer FrameCB : register(b0) { float gW,gH; uint gFogPixel,gWireframe; uint gBackground,gMaskW,gMaskH,gPad; };
 cbuffer CompositeCB : register(b1) { float cW,cH,crx0,cry0,crx1,cry1; uint cFog,cLayer; };
+// Erster Setup-Index des Zeichenaufrufs. Jeder Aufruf startet bei Vertex 0: ob SV_VertexID den
+// StartVertexLocation-Versatz enthaelt, legen Treiber verschieden aus (WARP und Parallels nicht).
+cbuffer DrawCB : register(b3) { uint dFirst,dPad0,dPad1,dPad2; };
 // Flags: 1 gouraud, 2 vertex_alpha, 4 textured, 8 filtered, 16 punch, 32 fogged, 64 fog_color_set,
 // 128 clamp_u, 256 clamp_v, 512 cutout, 1024 uniform_alpha, 2048 linear_only, 4096 nonopaque,
 // 16384 general_water, 32768 premultiplied chain, 65536 depth_write.
@@ -74,7 +77,7 @@ uint blend_gs(uint lo,uint hi,uint source,uint destination,float source_alpha){
 }
 struct VOut { float4 pos : SV_Position; nointerpolation uint index : INDEX; };
 VOut vs_raster(uint vid : SV_VertexID) {
-    uint index=vid/6u,corner=vid%6u; int4 b=Setups[index].box;
+    uint index=dFirst+vid/6u,corner=vid%6u; int4 b=Setups[index].box;
     bool right=(corner==1u||corner==2u||corner==4u),bottom=(corner==2u||corner==4u||corner==5u);
     float x=(float)(right?b.z+1:b.x),y=(float)(bottom?b.w+1:b.y);
     VOut o; o.pos=float4(x/gW*2.0f-1.0f,1.0f-y/gH*2.0f,0.0f,1.0f); o.index=index; return o;
@@ -224,6 +227,7 @@ static_assert(sizeof(GpuShadowTri)==64,"shadow triangle layout");
 struct FrameCB{float W,H;std::uint32_t fog_pixel,wireframe,background,mask_w,mask_h,pad;};
 struct CompositeCB{float W,H,rx0,ry0,rx1,ry1;std::uint32_t fog,layer;};
 struct ResolveCB{std::uint32_t size[4];};
+struct DrawCB{std::uint32_t first,pad[3];};
 // Darstellungsart einer Textur: Stufe 0 (Punktabtastung), gerade Kette, praemultiplizierte Kette
 // (alpha-gewichtete Mittelung), Punch-Kette (RGB ungewichtet).
 enum Variant{Point=1,Straight=2,Premultiplied=3,Punch=4};
@@ -249,7 +253,7 @@ public:
             sd.AddressV=cv?D3D11_TEXTURE_ADDRESS_CLAMP:D3D11_TEXTURE_ADDRESS_WRAP;
             sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;sd.MaxLOD=D3D11_FLOAT32_MAX;
             require(device_->CreateSamplerState(&sd,samplers_[linear][cu][cv].put()),"sampler");}
-        frame_cb_=constant_buffer(sizeof(FrameCB));composite_cb_=constant_buffer(sizeof(CompositeCB));resolve_cb_=constant_buffer(sizeof(ResolveCB));
+        frame_cb_=constant_buffer(sizeof(FrameCB));composite_cb_=constant_buffer(sizeof(CompositeCB));resolve_cb_=constant_buffer(sizeof(ResolveCB));draw_cb_=constant_buffer(sizeof(DrawCB));
         {// 1x1-Platzhalter fuer untexturierte Zeichnungen (der Shader liest ihn nicht).
          const std::uint32_t pixel=0;D3D11_TEXTURE2D_DESC td{};td.Width=td.Height=1;td.MipLevels=td.ArraySize=1;
          td.Format=DXGI_FORMAT_R32_UINT;td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_IMMUTABLE;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
@@ -281,6 +285,7 @@ public:
         context_->IASetInputLayout(nullptr);
         ID3D11Buffer* frame_cbs[]={frame_cb_.get()};
         context_->VSSetConstantBuffers(0,1,frame_cbs);context_->PSSetConstantBuffers(0,1,frame_cbs);
+        {ID3D11Buffer* draw_cbs[]={draw_cb_.get()};context_->VSSetConstantBuffers(3,1,draw_cbs);}
         const std::size_t ends[3]={frame.shadows?frame.before_modifiers:setups.size(),frame.shadows?frame.before_mirror_effects:setups.size(),setups.size()};
         std::size_t batch=0;std::vector<raster::ShadowWork> pending;
         for(unsigned phase=0;phase<3;++phase){
@@ -295,7 +300,8 @@ public:
                 context_->PSSetShaderResources(2,2,texture);
                 ID3D11SamplerState* sampler[]={samplers_[b.sampler>>2][(b.sampler>>1)&1][b.sampler&1].get()};
                 context_->PSSetSamplers(0,1,sampler);
-                context_->Draw(UINT(b.count*6),UINT(b.first*6));++draw_calls_;}
+                const DrawCB dc{std::uint32_t(b.first),{0,0,0}};write(draw_cb_,&dc,sizeof dc);
+                context_->Draw(UINT(b.count*6),0);++draw_calls_;}
             if(phase<2&&frame.shadows&&frame.shadow_pass[phase]&&shadows){
                 // Die Masken zeichnet die GPU aus derselben transportierten Tiefe; D3D11 synchronisiert
                 // UAV-Zugriffe zwischen Zeichenaufrufen selbst, deshalb kein Warten und kein Ruecklesen.
@@ -493,7 +499,7 @@ private:
     Com<ID3D11ComputeShader> cs_resolve_;Com<ID3D11RasterizerState> raster_state_;Com<ID3D11SamplerState> samplers_[2][2][2];
     Com<ID3D11Texture2D> color_,depth_,transported_,mask_;
     Com<ID3D11UnorderedAccessView> color_uav_,depth_uav_,transported_uav_,mask_uav_,out_color_uav_,out_depth_uav_;
-    Com<ID3D11Buffer> out_color_,out_depth_,stage_color_,stage_depth_,setup_buffer_,shadow_buffer_,frame_cb_,composite_cb_,resolve_cb_;
+    Com<ID3D11Buffer> out_color_,out_depth_,stage_color_,stage_depth_,setup_buffer_,shadow_buffer_,frame_cb_,composite_cb_,resolve_cb_,draw_cb_;
     Com<ID3D11ShaderResourceView> setup_view_,shadow_view_,blank_;
     std::vector<GpuSetup> setups_;std::vector<GpuShadowTri> triangles_;std::vector<Batch> batches_;
     std::vector<std::string> unsupported_;Timings timings_;
