@@ -136,6 +136,102 @@ class WindowsAudit(unittest.TestCase):
             audit.implicit_inputs(self.directory / "absent-cache")
 
 
+# Linkzeile von recvx-runtime.exe aus `ninja -t commands` des nativen MSVC-Builds
+# (windows-arm64, Ninja, 2026-10-21), gekuerzt auf die Teilbefehle.
+NINJA_MSVC = (
+    r'C:\WINDOWS\system32\cmd.exe /C "cd . && "C:\Program Files\Microsoft Visual Studio\18\Insiders'
+    r'\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E vs_link_exe --msvc-ver=1952'
+    r' --intdir=CMakeFiles\recvx-runtime.dir --rc=C:\PROGRA~2\WI3CF2~1\10\bin\100261~1.0\arm64\rc.exe'
+    r' --mt=C:\PROGRA~2\WI3CF2~1\10\bin\100261~1.0\arm64\mt.exe --manifests  -- C:\PROGRA~1\MIB055~1\18'
+    r'\Insiders\VC\Tools\MSVC\1452~1.370\bin\HOSTAR~1\arm64\link.exe /nologo'
+    r' CMakeFiles\recvx-runtime.dir\native\runtime.cpp.obj CMakeFiles\recvx-runtime.dir\app-icon.rc.res'
+    r'  /out:recvx-runtime.exe /implib:recvx-runtime.lib /pdb:recvx-runtime.pdb /version:0.0 /machine:ARM64'
+    r' /INCREMENTAL:NO /subsystem:console  recvx_game.lib  kernel32.lib && C:\WINDOWS\system32\cmd.exe /C'
+    r' "cd /D C:\Daten\recvx-native\build\windows-arm64-native && python.exe check_no_original_core.py'
+    r' --binary C:/Daten/recvx-native/build/windows-arm64-native/recvx-runtime.exe""'
+)
+
+
+class MsvcLinkCommand(unittest.TestCase):
+    """MSVC-Zweig ohne Werkzeugsatz: Befehlserkennung, Wrappermodell, Aufloesung, fail-closed."""
+
+    def setUp(self):
+        self.directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
+
+    def test_windows_split_keeps_backslashes_and_quoted_spaces(self):
+        self.assertEqual(audit.windows_split(r'"C:\Program Files\a.exe" /out:x.exe C:\b\c.lib'),
+                         [r'C:\Program Files\a.exe', '/out:x.exe', r'C:\b\c.lib'])
+        self.assertEqual(audit.windows_split(r'a\\"b c" d\"e'), [r'a\b c', 'd"e'])
+        with self.assertRaises(ValueError):
+            audit.windows_split('"open')
+
+    def test_link_command_is_the_wrapped_link_exe_with_its_manifest_option(self):
+        argv = audit.msvc_link_from_commands(NINJA_MSVC, "recvx-runtime.exe", self.directory)
+        self.assertEqual(Path(argv[0].replace("\\", "/")).name, "link.exe")
+        self.assertIn("/out:recvx-runtime.exe", argv)
+        self.assertIn("recvx_game.lib", argv)
+        # cmVSLink, nicht inkrementell: der Wrapper haengt genau diese Option an.
+        self.assertEqual(argv[-1], "/MANIFEST:EMBED,ID=1")
+        self.assertNotIn("vs_link_exe", argv)
+        self.assertNotIn("check_no_original_core.py", " ".join(argv))
+
+    def test_other_target_and_posix_lines_are_not_msvc(self):
+        self.assertIsNone(audit.msvc_link_from_commands(NINJA_MSVC, "recvx-assets.exe", self.directory))
+        self.assertIsNone(audit.msvc_link_from_commands("zig-cxx main.o -o probe.exe", "probe.exe", self.directory))
+
+    def test_manifest_no_and_incremental(self):
+        line = NINJA_MSVC.replace("/INCREMENTAL:NO", "/INCREMENTAL:NO /MANIFEST:NO")
+        argv = audit.msvc_link_from_commands(line, "recvx-runtime.exe", self.directory)
+        self.assertFalse(any(token.startswith("/MANIFEST:EMBED") for token in argv))
+        with self.assertRaises(RuntimeError):
+            audit.msvc_link_from_commands(NINJA_MSVC.replace("/INCREMENTAL:NO", "/INCREMENTAL"),
+                                          "recvx-runtime.exe", self.directory)
+
+    def test_out_not_from_link_exe_fails(self):
+        with self.assertRaises(RuntimeError):
+            audit.msvc_link_from_commands("lld-link.exe /out:recvx-runtime.exe a.obj", "recvx-runtime.exe",
+                                          self.directory)
+
+    def test_response_file_is_expanded_and_missing_one_fails(self):
+        (self.directory / "link.rsp").write_bytes("a.obj \"C:\\x y\\b.lib\"".encode("utf-16"))
+        argv = audit.msvc_link_from_commands("link.exe /out:t.exe @link.rsp", "t.exe", self.directory)
+        self.assertEqual(argv, ["link.exe", "/out:t.exe", "a.obj", r"C:\x y\b.lib"])
+        with self.assertRaises(RuntimeError):
+            audit.msvc_link_from_commands("link.exe /out:t.exe @absent.rsp", "t.exe", self.directory)
+
+    def test_inputs_resolve_through_build_libpath_and_lib(self):
+        sdk = self.directory / "sdk"
+        extra = self.directory / "extra"
+        sdk.mkdir()
+        extra.mkdir()
+        (self.directory / "own.lib").write_bytes(b"")
+        (sdk / "kernel32.lib").write_bytes(b"")
+        (extra / "special.lib").write_bytes(b"")
+        argv = ["link.exe", f"/LIBPATH:{extra}", "own.lib", "kernel32.lib", "special.lib", "absent.lib",
+                "app.res", "/out:t.exe"]
+        inputs, missing = audit.msvc_explicit_inputs(argv, self.directory, {"LIB": str(sdk)})
+        self.assertEqual([path.name for path in inputs], ["own.lib", "kernel32.lib", "special.lib"])
+        self.assertEqual(missing, ["absent.lib"])
+
+    def test_searched_libraries_are_parsed_and_localized_output_gives_none(self):
+        english = ("Searching libraries\n    Searching C:\\SDK\\um\\arm64\\kernel32.lib:\n"
+                   "    Searching C:\\VC\\lib\\arm64\\msvcrt.lib:\nFinished searching libraries\n")
+        self.assertEqual([str(path).replace("/", "\\") for path in audit.searched_libraries(english)],
+                         [r"C:\SDK\um\arm64\kernel32.lib", r"C:\VC\lib\arm64\msvcrt.lib"])
+        self.assertEqual(audit.searched_libraries("    Durchsuchen von C:\\SDK\\kernel32.lib:\n"), [])
+
+    def test_outputs_are_redirected_and_out_is_required(self):
+        argv = ["link.exe", "/out:recvx-runtime.exe", "/implib:recvx-runtime.lib", "/pdb:sub\\r.pdb", "a.obj"]
+        rebuilt = audit.msvc_redirect(argv, self.directory, "recvx-runtime.exe")
+        self.assertEqual(rebuilt[1], f"/out:{self.directory / 'recvx-runtime.exe'}")
+        self.assertEqual(rebuilt[2], f"/implib:{self.directory / 'recvx-runtime.lib'}")
+        self.assertEqual(rebuilt[3], f"/pdb:{self.directory / 'r.pdb'}")
+        self.assertEqual(rebuilt[4], "a.obj")
+        with self.assertRaises(RuntimeError):
+            audit.msvc_redirect(["link.exe", "a.obj"], self.directory, "t.exe")
+
+
 if __name__ == "__main__":
     if not available():
         print("zig toolchain or llvm-nm missing; the Windows audit cannot be tested here")

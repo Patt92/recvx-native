@@ -222,6 +222,11 @@ if(RECVX_BUILD_RUNTIME)
   set(RECVX_BUILD_VERSION "${PROJECT_VERSION}" CACHE STRING "Runtime version string")
   target_compile_definitions(recvx-runtime PRIVATE RECVX_BUILD_VERSION="${RECVX_BUILD_VERSION}")
   add_dependencies(recvx-runtime recvx-native-policy)
+  if(MSVC)
+    # Reproduzierbarer Link: der Vergleichslink der Binaerpruefung (tools/windows_link_audit.py)
+    # muss bytegleich ausfallen; /Brepro ersetzt die Linkzeit in allen PE-Zeitstempeln.
+    target_link_options(recvx-runtime PRIVATE /Brepro)
+  endif()
   add_custom_command(TARGET recvx-runtime POST_BUILD
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_original_core.py"
       "${CMAKE_CURRENT_SOURCE_DIR}" --build-dir "${CMAKE_CURRENT_BINARY_DIR}" --binary "$<TARGET_FILE:recvx-runtime>"
