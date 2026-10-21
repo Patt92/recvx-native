@@ -366,7 +366,10 @@ t = run('rm0050-trap-1100', 'RM_0050.RDX', 1100, trap, trap_extra)
 assert trap_event in t['events'], ('rm0050', 'Fallenereignis nicht ausgeloest', trap_event, rm9, t['events'])
 dogs = [e for e in t['enemies'] if e['identity'] == 4]
 assert len(dogs) == 2 and all(d['work']['mode'][0] >= 1 for d in dogs), ('rm0050', 'Hunde nicht freigelassen', [d['work'] for d in dogs])
-assert any(d['work']['mode'][2] == 2 or d['work']['mode'][0] == 2 for d in dogs), ('rm0050', 'kein Hund in Verfolgung/Angriff', [d['work'] for d in dogs])
+# Verfolgung/Angriff: MV02 (en04.c:1792), MV07 Angriffswahl (:2205) und MV08 Sprungangriff (:2415,
+# EXP0 0x800, Sprunghoehe 2.2) oder Griff mode0 2. Seit der Headless-Lauf jeden Takt zeichnet
+# (bhEff106-Regen zieht rand() wie im Spiel), liegt Bild 1100 in einem Sprung (MV08).
+assert any(d['work']['mode'][2] in (2, 7, 8) or d['work']['mode'][0] == 2 for d in dogs), ('rm0050', 'kein Hund in Verfolgung/Angriff', [d['work'] for d in dogs])
 assert t['hp'] < 160, ('rm0050', 'Hunde beissen nicht', t['hp'])
 results['rm0050-trap'] = {'hp': t['hp'], 'dogs': [d['work']['mode'] for d in dogs], 'events': t['events'], 'gaps': t['_gaps']}
 

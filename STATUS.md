@@ -21,6 +21,12 @@ Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 
+**RM_0090 Sicherheitsbox mit hochstehendem Deckel (2026-10-20, Arbeitsbaum, 197/197 grün):**
+Raumobjekte übernahmen jede Common-24/34-Motion im nächsten Takt; im Original schreibt nur
+bhSetMotion (v0 0/2/5/6, bhSetObjMotion) objP. Auslöser: scd1 setzt das Work der Ebene 15 auf
+obwp[14], das Fensterzombie-Common 34 (Raummotion 2) trifft danach die Box. Test `object_motion_commit`.
+Zusätzlich zeichnet der Headless-Lauf jeden Takt (rand() in bhEff106), `verify_enemy_ai` wieder grün.
+
 **Review der letzten 10 Commits (2026-10-20, Arbeitsbaum, 196/196 grün):** GPU-Batches über
 Schattenphasengrenzen (Metal/D3D11), doppeltes bhStandPlayerMotion beim Kistenschließen,
 Klauen-Blendzustand, triviale Prüfungen im Stand-Test, ISO-Rohabbilder/PVD-Lage/Namen behoben.

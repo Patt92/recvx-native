@@ -154,6 +154,7 @@ void SoftwareRenderer::draw_view(const Scene& scene,const NJS_MATRIX& matrix,flo
     draw_view_projected(scene,matrix,focal_x,focal_y,wireframe,hidden,near,far,volume_x,volume_y,ninja_sy_);
 }
 void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& matrix,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far,float volume_x,float volume_y,float ninja_projection){
+    if(discard_)return;
     using Clock=std::chrono::steady_clock;
     const auto since=[](Clock::time_point from){return std::chrono::duration<double>(Clock::now()-from).count();};
     const auto frame_begin=Clock::now();++timings_.frames;

@@ -133,12 +133,16 @@ Gameplay-Freigabe; der aktuelle Lückenplan steht in
 
 ## Gegner
 
-**EN21 (Albinoid-Jungtier): implementiert und angebunden, Laufzeitabnahme offen.**
+**EN21 (Albinoid-Jungtier): implementiert, angebunden und am Originalraum geprüft.**
 Der vorhandene native Zustandsautomat läuft im WorldEntity-Dispatch, mit Routen,
 Spielmodus, Spielergriff und Audio. Funken/Spuren (399/396) verwenden die vom
 Gegner gesetzte Modelltexturliste statt eines gemeinsamen Ersatzatlasses.
 Die gemeinsamen Raumrouten werden auch ohne Zombie-Motionbibliothek geladen.
-Tests sind bewusst zurückgestellt; dies ist keine vollständige Gegnerabnahme.
+`tests/native/en21_world_test.cpp` prüft in RM_3120/RM_3140 Init (Typ 0/1),
+Bewegung, Verfolgung bis zum Griff, Schaden 9, Funken 399, Spuren 396, Tod mit
+Blutpfütze und die Verteilung von Sperrzeit/Sterbemotion.
+Offen: natürliche Skriptfreigabe in RM_3120 (Test gibt per 0x24 frei), echter
+Waffentreffer statt Trefferfeldern, Beobachtung von Stimme/SE/`plp->dpx`.
 
 **Portiert**
 - Zombies (`en01.c`): Wahrnehmung, Wegsuche, Verfolgung, Fußfixierung,

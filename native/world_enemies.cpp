@@ -853,6 +853,11 @@ void RoomWorld::bind_enemy_services(){
         c.model_absent=!asset&&(p.model_absent||(p.enemy_asset&&slot>=p.enemy_asset->model_count()));
         if(c.model_absent){c.enemy_obj.clear();c.enemy_evalflags.clear();c.enemy_owp_flg.clear();c.enemy_owp_mtx.clear();c.enemy_calculated=false;return;}
         if(!asset){c.enemy_obj.clear();c.enemy_evalflags.clear();c.enemy_owp_flg.clear();c.enemy_owp_mtx.clear();enemy_world->unbound_enemy_.insert("bhEne01_Init: epw->mdl[slot] nicht als Modell geladen");return;}
+        // epp->mlwP = epp->mdl, mdl[0] = epw->mdl[slot] (struct-Kopie samt texP): die Modellreihe des
+        // Elternworks ab slot. bhDrawEnemy (eneset.c:807-857) zeichnet das Kind, sobald mdflg 0x1 frei
+        // ist (Kappe :2614, Wurm/Bom/Scope en01sub.c:1360/1857/1924). mdl[1..] ist im Original 0;
+        // kein EN01-Kind liest es (kein mdflg 0x2/obj_b), model_bank reicht also nur mdl[0] weiter.
+        c.model_bank=p.enemy_asset;c.model_base=slot;
         c.enemy_obj=asset->bind_pose();c.enemy_evalflags=asset->node_evalflags();c.enemy_owp_flg.assign(c.enemy_obj.size(),0u);c.enemy_owp_mtx.assign(c.enemy_obj.size(),BoneMatrix{});c.enemy_calculated=false;};
     // objP += 8, owP += 8, obj_num -= 8 am geteilten ML_WORK (en01.c:2799-2805).
     en.shift_object_window=[](RECVX_ENEMY_WORK* w,int shift){
@@ -1876,8 +1881,8 @@ void RoomWorld::control_enemy_works(){
         t.game_mode=[](int* out)->int{*out=int(enemy_world->enemy_game_mode_);return 1;};
         // en14.c:213-221: erster eff[0..511] mit flg 1, ohne stflg 0x1000000, id 130, type 4
         // (Spielerwaffe aus WpnEffTab); Handle = Platz + 1, 0 = keiner. Die Suche laeuft gegen den
-        // echten Pool: bhEff130 ist nicht portiert, spawn_effect legt solche Saetze nicht an und
-        // meldet "bhEff130" — dann findet die Suche nichts, wie im Original ohne Strahl.
+        // echten Pool: ist kein Strahl (Effekt 130, effsub1.c:9073) angelegt, findet die Suche
+        // nichts, wie im Original ohne Strahl.
         t.find_beam=[](uint32_t* handle)->int{auto* world=enemy_world;*handle=0;
             for(std::size_t i=0;i<world->sprites_.size();++i){const auto& e=world->sprites_[i].sprite;
                 if((e.flg&1u)&&!(e.stflg&0x1000000u)&&e.id==130&&e.type==4){*handle=uint32_t(i)+1u;break;}}

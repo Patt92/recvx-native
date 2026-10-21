@@ -495,6 +495,13 @@ if(BUILD_TESTING)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm0110_event_zombie_check.py"
       --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
+  # weapon.c bhCheckEnemies -> bhEne19_DmgCheck (en19.c:3193): Sofortwaffe trifft den nativen Tyrant-Work,
+  # hp -= EneDam{Near,Mid,Far}[19][6] je Treffer (Trefferzuweisung A04 am EN19-Work).
+  if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_5840.RDT")
+    add_test(NAME rm5840_tyrant_gun COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm5840_tyrant_gun_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   # en03.c:6825 plp->mnwP = epw->mnwP im Griff (Dienst player_library vor dem Zurueckschreiben der Spielersicht).
   if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_7250.RDT")
     add_test(NAME rm7250_spider_grab COMMAND "${Python3_EXECUTABLE}" -I
@@ -775,6 +782,14 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
     add_test(NAME enemy_en22_world COMMAND recvx-en22-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
+  # bhJumpEnemy[21] = bhEne21 (en21.c:88): RM_3120 Typ 0 / RM_3140 Typ 1, Griff, Funken 399, Spur 396, Blutpfuetze.
+  add_executable(recvx-en21-world-tests tests/native/en21_world_test.cpp)
+  target_include_directories(recvx-en21-world-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-en21-world-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-en21-world-tests PRIVATE recvx_game recvx_math)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+    add_test(NAME enemy_en21_world COMMAND recvx-en21-world-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   add_executable(recvx-en03-tests tests/native/en03_world_test.cpp)
   target_include_directories(recvx-en03-tests PRIVATE native native/enemies)
   target_compile_features(recvx-en03-tests PRIVATE cxx_std_17)
@@ -848,6 +863,14 @@ if(BUILD_TESTING)
   target_link_libraries(recvx-player-object-link-tests PRIVATE recvx_game recvx_math)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
     add_test(NAME player_object_link COMMAND recvx-player-object-link-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
+  # Raumobjekte: objP nur ueber bhSetMotion (Common v0 0/2/5/6, bhSetObjMotion); RM_0090-Box.
+  add_executable(recvx-object-motion-commit-tests tests/native/object_motion_commit_test.cpp)
+  target_include_directories(recvx-object-motion-commit-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-object-motion-commit-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-object-motion-commit-tests PRIVATE recvx_game recvx_math)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+    add_test(NAME object_motion_commit COMMAND recvx-object-motion-commit-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
   add_executable(recvx-effect-eff013-tests tests/native/effect_eff013_test.cpp)
   target_include_directories(recvx-effect-eff013-tests PRIVATE native native/enemies)
@@ -992,6 +1015,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
   target_link_libraries(recvx-combat-state-tests PRIVATE recvx_game recvx_math)
   target_include_directories(recvx-combat-state-tests PRIVATE native native/enemies "${RECVX_TABLES}")
   add_test(NAME combat_player_state COMMAND recvx-combat-state-tests)
+  # weapon.c:1632 bhSetGunSplash auf der sys->ef-Vorlage (native/combat.cpp gun_splash).
+  add_executable(recvx-gun-splash-tests tests/native/gun_splash_test.cpp)
+  target_link_libraries(recvx-gun-splash-tests PRIVATE recvx_game recvx_math)
+  target_include_directories(recvx-gun-splash-tests PRIVATE native native/enemies "${RECVX_TABLES}")
+  add_test(NAME gun_splash COMMAND recvx-gun-splash-tests)
+  # eneset.c:797 bhDrawEnemy: EN01-Kappe mit mdl[0] = epw->mdl[slot] (en01.c:2612-2624), RM_3160.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3160.RDT")
+    add_executable(recvx-en01-child-draw-tests tests/native/en01_child_draw_test.cpp)
+    target_include_directories(recvx-en01-child-draw-tests PRIVATE native native/enemies)
+    target_compile_features(recvx-en01-child-draw-tests PRIVATE cxx_std_17)
+    target_link_libraries(recvx-en01-child-draw-tests PRIVATE recvx_game recvx_math)
+    add_test(NAME enemy_en01_child_draw COMMAND recvx-en01-child-draw-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
 endif()
   # Das ILP32-Originalkern-Audit ist entfernt; Quellen in
   # der gesperrten Quarantaene. Kein historischer Audit-Build ist erlaubt.

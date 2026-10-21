@@ -1,6 +1,7 @@
 #pragma once
 #include "scene.h"
 #include "gpu_raster.h"
+#include <algorithm>
 #include <filesystem>
 #include <functional>
 namespace recvx {
@@ -53,6 +54,12 @@ public:
     // Host-GPU-Rasterer (gpu_raster.h) fuer die Bandstufe; nullptr = Software. Pixel, Tiefe, Linien und
     // alle Overlays bleiben in pixels()/depth(); Drahtgitter zeichnet immer in Software.
     void set_gpu(std::shared_ptr<GpuRaster> gpu){gpu_=std::move(gpu);}
+    // Headless-Takt ohne Bild: Szene und Zeichenseiteneffekte (bhDrawEffect-Funktionen,
+    // pl_sleep_cnt) laufen wie in jedem Spielbild, nur die Rasterung entfaellt.
+    // Beim Wechsel auf ein gerastertes Bild startet die Leinwand wie ein frischer Renderer, damit
+    // 2D-Schichten der verworfenen Takte (Fade, Menue) nicht aufeinander liegen.
+    void set_discard(bool discard){if(discard_&&!discard){std::fill(pixels_.begin(),pixels_.end(),0u);std::fill(depth_.begin(),depth_.end(),0.0f);}discard_=discard;}
+    bool discarding()const{return discard_;}
     const std::shared_ptr<GpuRaster>& gpu()const{return gpu_;}
     int width() const{return width_;}
     int height() const{return height_;}
@@ -61,6 +68,7 @@ public:
 private:
     int width_,height_;
     bool filter_=true;
+    bool discard_=false;
     unsigned threads_=0;
     int ss_=2;
     std::function<void(const raster::Frame&)> observer_;

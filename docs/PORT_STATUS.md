@@ -2,21 +2,21 @@
 
 Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.
 
-Expliziter Belegumfang: **88.1 %** gewichtet, **76.8 %** voll belegt (499/650 Mechanismen; kein Gesamtfortschritt).
+Expliziter Belegumfang: **88.7 %** gewichtet, **78.0 %** voll belegt (513/658 Mechanismen; kein Gesamtfortschritt).
 
 Event-Befehle (bhScenarioJmpT): 211/223 gebunden, 12 nur konsumiert, 0 fehlen.
 
 | Bereich | Mechanismen | Belegumfang | voll belegt | teilweise | offen |
 |---|---:|---:|---:|---:|---:|
-| Gegner/KI | 72/103 | 85.0 % | 69.9 % | 31 | 0 |
-| Effekte | 220/250 | 93.8 % | 88.0 % | 29 | 1 |
-| Events/Skript | 63/79 | 89.9 % | 79.7 % | 16 | 0 |
-| Spieler/Kampf | 44/62 | 85.5 % | 71.0 % | 18 | 0 |
-| Raum/Kamera/Tür | 14/35 | 70.0 % | 40.0 % | 21 | 0 |
-| Menü/Items/Text | 43/54 | 87.0 % | 79.6 % | 8 | 3 |
+| Gegner/KI | 83/103 | 90.3 % | 80.6 % | 20 | 0 |
+| Effekte | 220/251 | 93.6 % | 87.6 % | 30 | 1 |
+| Events/Skript | 65/81 | 90.1 % | 80.2 % | 16 | 0 |
+| Spieler/Kampf | 45/63 | 85.7 % | 71.4 % | 18 | 0 |
+| Raum/Kamera/Tür | 14/37 | 68.9 % | 37.8 % | 23 | 0 |
+| Menü/Items/Text | 43/55 | 86.4 % | 78.2 % | 9 | 3 |
 | Modelle/Animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
 | Audio | 5/21 | 61.9 % | 23.8 % | 16 | 0 |
-| Ablauf/Speichern | 28/31 | 95.2 % | 90.3 % | 3 | 0 |
+| Ablauf/Speichern | 28/32 | 93.8 % | 87.5 % | 4 | 0 |
 | Plattform (Host-ersetzt) | 16/31 | 75.8 % | 51.6 % | 15 | 0 |
 
 Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichheit, Originalquellen und quarantänierte Generatoren zählen nie als Portbeleg.

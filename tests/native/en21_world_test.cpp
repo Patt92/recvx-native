@@ -7,13 +7,14 @@
 #include "room.h"
 #include "en21.h"
 #include "en03_lib.h"
+#include "combat.h"
+#include "inventory.h"
 #include "effect_sprites_internal.h"
 #include "ninja_math.h"
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <map>
-#include <set>
 #include <stdexcept>
 #include <string>
 using namespace recvx;
@@ -52,6 +53,7 @@ struct Fixture {
     unsigned slot_of(unsigned id,unsigned nth=0){auto& t=world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]&&t.slot[i]->id==id&&nth--==0)return i;throw std::runtime_error("Original-EN21 fehlt");}
     RECVX_ENEMY_WORK& work(unsigned slot){return *world.enemy_table().slot[slot];}
     // 0x24 (kind 1, Satz index, an): der Raum gibt den Gegner frei (event.c bhInitModelSet).
+    // In RM_3120 ist das Jungtier Satz 0 und Tabellenplatz 0.
     void activate(unsigned index){EventCommand c;c.opcode=0x24;c.bytes={0x24,1,std::uint8_t(index),1};check(world.bind(c),"0x24 nicht gebunden");}
     std::map<unsigned,EffectSprite> effects(unsigned id){std::map<unsigned,EffectSprite> out;for(unsigned i=0;;++i){const auto* s=world.effect_state(i);if(!s)break;if((s->flg&1u)&&s->id==id)out.emplace(i,*s);}return out;}
     RECVX_ENEMY_PLAYER player_work(){RECVX_ENEMY_PLAYER q{};check(world.enemy_player_get(q),"Spielerbesitzer fehlt");return q;}
@@ -131,7 +133,7 @@ int main(int argc,char** argv){try{
             if(e.mode0==2){
                 check(dist<5.5f&&std::abs(ang)<910,"Griff ausserhalb von Abstand 5.5 / Winkel 5 Grad (en21.c:297-299)");
                 grabbed=true;}
-            else check(!(dist<5.5f&&std::abs(int(ang))<910&&std::abs(int(ang))<18204),"Griffbedingung erfuellt, aber kein Griff");
+            else check(!(dist<5.5f&&std::abs(int(ang))<910),"Griffbedingung erfuellt, aber kein Griff");
         }
         check(grabbed,"Verfolgung endet nicht im Griff");
         // NG00 case 0 (en21.c:753-776) und PlayerControl case 0 (:935-957) im selben Pass.
@@ -217,6 +219,30 @@ int main(int argc,char** argv){try{
         for(int i=0;i<33;++i){f.tick();check(e.mode0!=2,"Griff waehrend der Sperrzeit EXP0_UC(0x15)");}
         check(x.grab_wait==0,"Sperrzeit laeuft nicht ab");
         f.no_gaps("MV06/Sperrzeit");
+    }
+    {
+        // Brain (en21.c:297-320): in Sicht, Abstand < 5.5, aber |Winkel| >= 5 Grad -> MV05 (Winkel > 0)
+        // bzw. MV04, im selben Pass ay +/- NJM_DEG_ANG(7) = 1274 (:571/:608), spd 0.05 (:567/:604).
+        for(int side=0;side<2;++side){
+            Fixture f(data);const unsigned slot=f.slot_of(21);auto& e=f.work(slot);auto& x=exp0_of(e);
+            f.activate(slot);
+            const float dx=side==0?-1.5f:1.5f;f.place_player({e.px+dx,e.py,e.pz-3.0f},e.flr_no);
+            const auto q=f.player_work();const int16_t ang=angle_to(e,q.pos.x,q.pos.z);const int ay0=e.ay;
+            check(std::abs(int(ang))>=910&&std::abs(int(ang))<18204,"Testaufstellung: Winkel nicht zwischen 5 und 100 Grad");
+            f.tick();
+            const unsigned want=ang>0?5u:4u;
+            check(x.in_view==1&&x.player_ang==ang&&e.mode0==1&&e.mode1==1&&e.mode2==want&&e.mode3==1,"Brain: |Winkel| >= 5 Grad -> MV05 (> 0) / MV04");
+            check(e.ay==ay0+(want==5?1274:-1274)&&near(e.spd,0.05f)&&e.ct0>=9&&e.ct0<=18,"MV04/05: ay +/- 1274, spd 0.05, ct0 rand%10+10 - 1");
+            f.no_gaps("MV04/05");
+        }
+        {   // Grenze NJM_DEG_ANG(5) = 910 (:299): Winkel ~4.7 Grad greift noch.
+            Fixture f(data);const unsigned slot=f.slot_of(21);auto& e=f.work(slot);
+            f.activate(slot);f.place_player({e.px-3.0f*std::tan(4.7f*3.14159265f/180.0f),e.py,e.pz-3.0f},e.flr_no);
+            const auto q=f.player_work();const int16_t ang=angle_to(e,q.pos.x,q.pos.z);
+            check(ang>728&&ang<910,"Testaufstellung: Winkel nicht zwischen 4 und 5 Grad");
+            f.tick();
+            check(e.mode0==2&&exp0_of(e).controlling==1,"Brain: |Winkel| < NJM_DEG_ANG(5) greift nicht");
+        }
     }
     {
         // Spur 396 aus MV01..03 (en21.c:410/493/537, SetMarkEff :1299, bhEff_E21_Mark :1324).
@@ -320,6 +346,41 @@ int main(int argc,char** argv){try{
         f.no_gaps("Tod");
     }
     {
+        // Echter Waffentreffer: CombatController (player_combat_core.c) -> enemy_table -> dam[]/flg 0x4.
+        // VORBEDINGUNG: Handfeuerwaffe (Item 9, WeaponSet -> Waffe 4) per acquire/equip, Spieler 14 vor
+        // dem Jungtier, Zielen nach unten. Erwartung: Schaden nur im Move (en21.c:332), im Griff
+        // loescht :102 dam[] ohne Abzug; am Ende DD00 mit Pfuetze, hp -1, flg 0x2.
+        Fixture f(data);const unsigned slot=f.slot_of(21);auto& e=f.work(slot);
+        f.activate(slot);
+        check(f.inv.acquire(9,15,0),"Item 9 nicht aufgenommen");
+        unsigned item=0;for(unsigned i=1;i<12;++i)if(Inventory::id(f.inv.slots()[i])==9)item=i;
+        check(item&&f.inv.equip(item)&&f.inv.weapon()==4u,"WeaponSet: Item 9 ist nicht Waffe 4");
+        f.place_player({e.px,e.py,e.pz-14.0f},e.flr_no);
+        CombatController combat(data);
+        const auto pools0=f.effects(300).size();
+        bool moving_hit=false,grab_hit_ignored=false;unsigned pending=0;
+        for(unsigned i=0;i<900&&!(e.flg&2u);++i){
+            const int before=e.hp;const unsigned m0=e.mode0;
+            // DIAGNOSE: Magazin nachgefuellt (Nachladen ist nicht Gegenstand dieses Tests).
+            if(Inventory::quantity(f.inv.slots()[item])==0)f.inv.slots()[item]=Inventory::pack(9,15)|(f.inv.slots()[item]&0xFF000000u);
+            f.world.set_player_weapon(f.inv.weapon());f.world.set_player_way(combat.aim_yaw());f.world.set_player_attack(combat.attacking());
+            f.tick();
+            // Ein Treffer des Kampfteils wirkt im naechsten Gegnerpass (game.c:48 vor dem Spielerteil).
+            if(pending){
+                if(m0==1&&e.mode0==1&&e.hp<before)moving_hit=true;
+                if(m0==2&&e.hp==before)grab_hit_ignored=true;
+                check(!(e.flg&4u),"Treffer: flg 0x4 nach dem Gegnerpass nicht geloescht");}
+            const unsigned hits=combat.hits;
+            combat.tick(CombatControls{(i%32)<28,(i%32)>=12&&(i%8)==4,0,-1,false},false,f.inv,f.player,f.actor,f.motion,f.frame,&f.world,f.audio,&f.events);
+            pending=combat.hits-hits;
+        }
+        check(combat.hits>0&&moving_hit,"kein echter Waffentreffer mit hp-Abzug im Move");
+        check(e.hp==-1&&(e.flg&2u),"echter Waffentod: hp -1, flg 0x2 nicht erreicht");
+        check(f.effects(300).size()==pools0+1,"echter Waffentod: keine Blutpfuetze");
+        std::cout<<"  Waffe 4: Schuesse="<<combat.shots<<" Treffer="<<combat.hits<<(grab_hit_ignored?" (Treffer im Griff ohne Abzug)":"")<<'\n';
+        f.no_gaps("Waffentod");
+    }
+    {
         // Toedlicher Griff (en21.c:787-791, :829-835): plp->hp < 0 -> mode3 3, danach mode 1/0/0/0.
         Fixture f(data);const unsigned slot=f.slot_of(21);auto& e=f.work(slot);
         f.activate(slot);
@@ -346,6 +407,25 @@ int main(int argc,char** argv){try{
         check(n==6,"RM_3140: sechs Typ-1-Jungtiere");
         for(int i=0;i<60;++i)f.tick();
         f.no_gaps("RM_3140");
+        // DIAGNOSE (Zustandsschreibung): ein Jungtier im Griffabschluss NG00 case 2 bzw. im Tod DD00 case 0,
+        // um die Verteilung an ALLE lebenden Works der Identitaet 21 (en21.c:815-822, :899-911) zu pruefen.
+        std::vector<unsigned> infants;for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]&&t.slot[i]->id==21&&(t.slot[i]->flg&1u))infants.push_back(i);
+        check(infants.size()==7,"RM_3140: sieben lebende Jungtiere");
+        const unsigned k=infants[3];auto& g=f.work(k);
+        g.mode0=2;g.mode1=0;g.mode2=0;g.mode3=2;exp0_of(g).controlling=1;
+        f.tick();
+        for(unsigned i:infants)check(exp0_of(f.work(i)).grab_wait==(i<k?35u:34u),"NG00 case 2: EXP0_UC(0x15) = 35 an alle Jungtiere (spaetere Works zaehlen im selben Bild herunter)");
+        auto& d=f.work(infants[5]);d.mode0=4;d.mode1=0;d.mode2=0;d.mode3=0;exp0_of(d).death_mtn=6;
+        f.tick();
+        check(d.mtn_no==6,"DD00: mtn_no = EXP0_UC(0x16) 6");
+        for(unsigned i:infants)check(exp0_of(f.work(i)).death_mtn==4,"DD00: 6 + 1 > 6 -> 4 an alle Jungtiere (en21.c:900-911)");
+        // Das ereignisgesteuerte Jungtier spielt die Raummotionen des Skripts (0x30 bhSetEneMtn,
+        // mtn_room 1); dort gibt es keinen Eintrag 6. In dieser kuenstlichen Aufstellung ist die
+        // benannte Luecke mnwP[6].frm_num die korrekte Antwort, kein Ersatzwert.
+        for(const auto& gap:f.world.unbound_enemy_routines()){
+            if(gap=="mnwP[mtn_no].frm_num"&&d.mtn_room)continue;
+            if(gap.find("(id 1, mtn 1)")!=std::string::npos)continue;
+            throw std::runtime_error("RM_3140 Verteilung: Luecke "+gap);}
     }
     std::cout<<"EN21 world PASS\n";return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

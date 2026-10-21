@@ -1,3 +1,6 @@
+# 2026-10-20: Der Headless-Lauf zeichnet jetzt jeden Takt (bhDrawEffect-Funktionen wie bhEff106 ziehen rand()
+# wie im Spiel); danach steht Zombie 2 nach dem Zurueckweichen ausserhalb der Aufschaltung (combat_target -1).
+# Ab 4170 waehlt je ein next_target-Druck (R2/naechstes Ziel) neu; Erwartungen der Pruefung unveraendert.
 # Zombietod mit Blutlache (bhEne01_DieMode2W DD00, en01.c:9973-9995 -> bhSetBloodPoolLnk,
 # effsub3.c:145). Ablauf wie combat-aim-enemy.txt: M93R aus dem Steve-Ereignis (RM_0030),
 # Debug-Menue-Raumwechsel nach RM_0080 (Raumindex 10), --enemy-ai on, Griff aus.
@@ -29,62 +32,122 @@
 4103 keys aim
 4150 keys aim attack
 4153 keys aim
+4173 keys aim next_target
+4174 keys aim
 4200 keys aim attack
 4203 keys aim
+4223 keys aim next_target
+4224 keys aim
 4250 keys aim attack
 4253 keys aim
+4273 keys aim next_target
+4274 keys aim
 4300 keys aim attack
 4303 keys aim
+4323 keys aim next_target
+4324 keys aim
 4350 keys aim attack
 4353 keys aim
+4373 keys aim next_target
+4374 keys aim
 4400 keys aim attack
 4403 keys aim
+4423 keys aim next_target
+4424 keys aim
 4450 keys aim attack
 4453 keys aim
+4473 keys aim next_target
+4474 keys aim
 4500 keys aim attack
 4503 keys aim
+4523 keys aim next_target
+4524 keys aim
 4550 keys aim attack
 4553 keys aim
+4573 keys aim next_target
+4574 keys aim
 4600 keys aim attack
 4603 keys aim
+4623 keys aim next_target
+4624 keys aim
 4650 keys aim attack
 4653 keys aim
+4673 keys aim next_target
+4674 keys aim
 4700 keys aim attack
 4703 keys aim
+4723 keys aim next_target
+4724 keys aim
 4750 keys aim attack
 4753 keys aim
+4773 keys aim next_target
+4774 keys aim
 4800 keys aim attack
 4803 keys aim
+4823 keys aim next_target
+4824 keys aim
 4850 keys aim attack
 4853 keys aim
+4873 keys aim next_target
+4874 keys aim
 4900 keys aim attack
 4903 keys aim
+4923 keys aim next_target
+4924 keys aim
 4950 keys aim attack
 4953 keys aim
+4973 keys aim next_target
+4974 keys aim
 5000 keys aim attack
 5003 keys aim
+5023 keys aim next_target
+5024 keys aim
 5050 keys aim attack
 5053 keys aim
+5073 keys aim next_target
+5074 keys aim
 5100 keys aim attack
 5103 keys aim
+5123 keys aim next_target
+5124 keys aim
 5150 keys aim attack
 5153 keys aim
+5173 keys aim next_target
+5174 keys aim
 5200 keys aim attack
 5203 keys aim
+5223 keys aim next_target
+5224 keys aim
 5250 keys aim attack
 5253 keys aim
+5273 keys aim next_target
+5274 keys aim
 5300 keys aim attack
 5303 keys aim
+5323 keys aim next_target
+5324 keys aim
 5350 keys aim attack
 5353 keys aim
+5373 keys aim next_target
+5374 keys aim
 5400 keys aim attack
 5403 keys aim
+5423 keys aim next_target
+5424 keys aim
 5450 keys aim attack
 5453 keys aim
+5473 keys aim next_target
+5474 keys aim
 5500 keys aim attack
 5503 keys aim
+5523 keys aim next_target
+5524 keys aim
 5550 keys aim attack
 5553 keys aim
+5573 keys aim next_target
+5574 keys aim
 5600 keys aim attack
 5603 keys aim
+5623 keys aim next_target
+5624 keys aim
 5700 keys none

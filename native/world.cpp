@@ -1093,7 +1093,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         else entity(kind,index).hidden=v.u8(3)==0;return true;}
     // objitm.c never ticks room-object motions. The scenario explicitly samples
     // them through bhSetObjMotion / bhSetItmMotion, including the sp_flg gate.
-    if(op==0x50||op==0x9c){auto& e=entity(op==0x50?2:3,v.u8(1));if(e.has_motion&&e.motion_mode3==1&&(c.simulation_flags&4)){e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);actor_nodes_.clear();}return true;}
+    if(op==0x50||op==0x9c){auto& e=entity(op==0x50?2:3,v.u8(1));if(e.has_motion&&e.motion_mode3==1&&(c.simulation_flags&4)){e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);e.commit_pose(); /* bhSetMotion + bhCalcModel auf diesem Work */actor_nodes_.clear();}return true;}
     if(op==0x2b){ // event.c bhMotionPauseSet: pause (mode3=4) or resume (mode3=1) motion on task work
         const auto mode=v.u8(1);if(mode>1)return true; // Original switch has no default action.
         if(!ctx.work)return false; // No original work pointer has been bound.
@@ -1661,6 +1661,9 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
             if(!present&&!(e.subplayer_bound&&cmd!=25))throw std::runtime_error("script entity motion unavailable"); /* nur rmthp (24/34) ist als genulltes 512er-Feld belegt */
             if(present){e.room_motion=cmd!=25;e.motion=index;if(!entity_motion(e).frames)throw std::runtime_error("script entity motion unavailable");e.frame=start;e.sampled_frame=start;}
             e.step=motion_step(v.u8(2));e.scripted=true;e.has_motion=e.has_motion||present;e.motion_slow=(v.u8(2)!=1&&v.u8(2)!=2)||v.u8(7)==6;e.motion_mode3=v.u8(3)<=1?0:1;
+            // event.c:11940-11967 / :11069-11096 switch(v0 = Byte 6): nur 0, 2, 5 und 6 rufen
+            // bhSetMotion(work,0,0,0) sofort; sonst bleibt objP eines Raumobjekts/Items unveraendert.
+            if((ctx.kind==2||ctx.kind==3)&&present){const unsigned v0=v.u8(6);if(v0==0||v0==2||v0==5||v0==6){e.commit_pose();actor_nodes_.clear();}}
             if(e.subplayer_bound){
                 // event.c:11834-11909 (34) / :11501-11570 (24) / :10990-11060 (25): selector 1 writes
                 // the low byte of mtn_no, mtn_md 0x20 (|8 for steps other than 1/2) and |8 for
@@ -1980,6 +1983,12 @@ RECVX_COMBAT_SERVICES RoomWorld::effect_combat_services(){
     s.check_water=[](void* p,const RECVX_CB_VEC* pos)->int32_t{float top;return static_cast<RoomWorld*>(p)->water_top({pos->x,pos->y,pos->z},top)?1:0;};
     s.water_splash4=[](void*,const RECVX_CB_VEC* pos,int32_t ang,int32_t type,float sx,float sy,float sz){
         effect_detail::water_splash4({pos->x,pos->y,pos->z},int(ang),int(type),sx,sy,sz,[](int lkono){effect_detail::submit_template(lkono);});};
+    // weapon.c:989 bhSetGunSplash am Wandtreffer (bhEff013 -> bhCheckGunAtari): dieselbe Routine wie
+    // der Kampfpass (combat.cpp gun_splash), hier im Effektpass ueber die Passliste.
+    s.gun_splash=[](void* p,const RECVX_CB_VEC* gvec,const RECVX_CB_VEC* pos,int32_t wattr,int32_t wpn_no,int32_t ay){auto* w=static_cast<RoomWorld*>(p);
+        gun_splash({gvec->x,gvec->y,gvec->z},{pos->x,pos->y,pos->z},int(wattr),int(wpn_no),int(ay),
+            [](int lkono,const NJS_POINT3* off){effect_detail::submit_template(lkono,off);},
+            [w](const char* name){w->unbound_enemy_.insert(name);});};
     return s;
 }
 int RoomWorld::effect_gun_atari(RECVX_GA_WORK& gat){
@@ -3187,7 +3196,13 @@ void RoomWorld::advance_entity_motions(bool enemy_phase){
     // bhSetMotion/bhCalcModel write the object tree inside the control pass.
     // Committing here, and only here, is what makes a work written while the
     // pass is paused invisible until the pass runs again.
-    e.commit_pose();}
+    // Raumobjekte und Items: objitm.c ruft nie bhSetMotion. Ihr objP schreibt nur
+    // bhSetObjMotion/bhSetItmMotion (event.c:2240-2275, Opcode 0x50/0x9c) oder der
+    // sofortige v0-Zweig von Common 24/34 (event.c:11940-11967); Common mit anderem v0
+    // beschreibt nur mtn_no/frm_no des Works. Ihr gezeichneter Baum wird deshalb nur
+    // dort uebernommen, nicht in jedem Takt.
+    if(pair.first.first==2||pair.first.first==3){if(!e.pose_set){e.commit_pose();e.pose_motion_valid=false;}}
+    else e.commit_pose();}
 }
 void RoomWorld::tick_enemy_pass(){
     // The objP writes of the previous enemy pass were replaced by the player's
@@ -4019,7 +4034,9 @@ bool RoomWorld::entity_geometry(const Model& model,const WorldEntity& e,Scene& o
 // eneset.c:797 bhDrawEnemy laeuft ueber ene[] und zeichnet auch die per bhSetEnemy
 // erzeugten Kindworks mit eigenem mlwP (en13.c:111-184: mdl[base] des Elternworks)
 // und Raumworks, deren mlwP auf das ML_WORK eines anderen zeigt (en23.c:550).
-// Kinder ohne eigene Modellreihe (EN01, model_bank leer) bleiben eine offene Luecke.
+// EN01-Kinder mit mdl[0] = epw->mdl[slot] (Kappe/Wurm/Bom/Scope, en01.c:2617-2658) tragen die
+// Elternreihe ab slot als model_bank; Kopf/Arm/Bein/Eltern (mlwP = epw->mdl, mdflg 0x1, en01.c:2819)
+// zeichnet bhDrawEnemy auch im Original nicht.
 // MdlPut.c:57-79/89-111 bzw. game.c:77-91: die Dreiecke [first,last) desselben Zeichenaufrufs ein
 // zweites Mal, an Position `at` eingefuegt, mit den Umgebungsschreibern dieses Bereichs. pass 1 =
 // zweiter bhJumpCnkDraw-Aufruf in bhPutModel, 2 = bhEtcMirrorDrawModel; phase < 0 behaelt die Phase.
