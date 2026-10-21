@@ -35,12 +35,22 @@ int main(){try{
     events.values[0]=1;events.values[1]=0x02;events.values[21]=0;events.values[7]=3;events.values[18]=4;events.values[25]=5;
     events.set_flag(1,40,0);events.set_flag(2,3,0);events.set_flag(3,700,0);events.set_flag(7,100,0);events.set_flag(8,200,0);events.set_flag(9,5,0);events.set_flag(11,6,0);events.set_flag(16,1,0);
     events.flags[14][0]=0x40000000|0x08000000|0x1; // only 0x78280000 survives bhPushGameData
-    const auto snap=capture_snapshot(inventory,events,11,"RM_1020.RDX",{{10,20,30},2048,1,3,4});
+    const auto snap=capture_snapshot(inventory,events,11,"RM_1020.RDX",{{10,20,30},2048,1,3,4},1);
+    check(snap.host.room_sound_case==1,"room sound case not captured");
     check(snap.save.ply_id==1&&snap.save.ply_hp[1]==77&&snap.save.ply_stflg[1]==(0x40000000|0x08000000),"push player fields");
     check(snap.save.ply_hp[0]==140&&snap.save.ply_stflg[0]==0x80000&&snap.save.ply_wno[0]==3,"room.c:1033 copies the stored entries of the other players");
     check(snap.save.save_ct==0&&snap.save.retry_ct==0&&snap.save.clear_ct==0,"snapshot must not count saves or retries");
     const auto path=std::filesystem::temp_directory_path()/"recvx-snapshot-test.rcvxsnap";write_snapshot(path,snap);
-    const auto loaded=read_snapshot(path);check(loaded.save.encode()==snap.save.encode()&&loaded.host.room=="RM_1020.RDX"&&loaded.host.body==11,"file roundtrip");
+    const auto loaded=read_snapshot(path);check(loaded.save.encode()==snap.save.encode()&&loaded.host.room=="RM_1020.RDX"&&loaded.host.body==11&&loaded.host.room_sound_case==1,"file roundtrip");
+    // Format 1 (ohne room_sound_case) bleibt lesbar: Formatwort 1, Feld fehlt, Fall 0.
+    {std::vector<std::uint8_t> bytes;{std::ifstream f(path,std::ios::binary);bytes.assign((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());}
+     bytes.resize(bytes.size()-4-1); // CRC und das Format-2-Byte entfernen
+     bytes[8]=1;bytes[9]=bytes[10]=bytes[11]=0;
+     std::uint32_t crc=0xffffffffu;for(std::size_t i=0;i<bytes.size();++i){crc^=bytes[i];for(int k=0;k<8;++k)crc=(crc>>1)^(0xedb88320u&(0u-(crc&1)));}crc=~crc;
+     for(unsigned i=0;i<4;++i)bytes.push_back(std::uint8_t(crc>>(8*i)));
+     const auto legacy=path.parent_path()/"recvx-snapshot-test-v1.rcvxsnap";{std::ofstream f(legacy,std::ios::binary);f.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));}
+     const auto old=read_snapshot(legacy);check(old.host.room=="RM_1020.RDX"&&old.host.room_sound_case==0&&old.save.encode()==snap.save.encode(),"format 1 snapshot not readable");
+     std::filesystem::remove(legacy);}
 
     Inventory restored;MessageDialog d2;restore_inventory(loaded,restored);EventVm next(data,restored,d2);restore_events(loaded,next);
     check(restored.items==inventory.items&&restored.player==1&&restored.hp==77&&restored.poisoned&&restored.side_pack&&restored.play_time==12345,"inventory restore");

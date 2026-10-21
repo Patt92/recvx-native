@@ -38,7 +38,7 @@ def main():
     run('seed', '0 debug_key F2\n1 debug_select snapshot_save 0\n2 confirm\n', 4)
     seed = folder / 'snapshots/snapshot-1.rcvxsnap'
     snapshot = bytearray(seed.read_bytes())
-    assert snapshot[:8] == b'RCVXSNAP' and struct.unpack_from('<II', snapshot, 8) == (1, 0x838)
+    assert snapshot[:8] == b'RCVXSNAP' and struct.unpack_from('<II', snapshot, 8) in ((1, 0x838), (2, 0x838))
     # SAVEFILE itm: 0x14 header + 120 flag words. Keep every other player bank.
     at = 16 + 0x1f4
     struct.pack_into('<12I', snapshot, at, 2, 55 << 16 | 1, 5 << 16, *([0] * 9))

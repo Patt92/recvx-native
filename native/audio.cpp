@@ -430,6 +430,7 @@ void AudioMixer::reset_3d_sound_flag(){
 void AudioMixer::load_room_sounds(unsigned stage,unsigned room,unsigned variant){
     if(stage>15||room>255||variant>15)throw std::runtime_error("invalid room sound key");
     room_env_={}; // RequestRoomSoundBank: ResetRoomSoundEnvParam
+    loaded_room_sound_case_=variant;
     // RequestRoomSoundBank/LoadSoundPackFile issue no StopSe/StopMidi (only CheckSpecialBank's StopThePsgSound below);
     // the IOP's bank replacement (IopSound::load_se_bank/load_midi_bank) ends the voices of the replaced bank.
     const auto index=read_asset_file(data_/("files/MULTSPQ"+disc_digit()+".IDX"),4096);BinaryView ids(index);const auto key=stage*1000+room*10+variant;

@@ -886,7 +886,7 @@ int main(int argc,char** argv){
         auto save_snapshot=[&](unsigned slot){
             if(!events||!world||frontend.active())throw std::runtime_error("Kein laufendes Spiel");
             if(transition_pending||menu.active||dialog.active()||movie.active()||world->player_scripted||world->player_hidden||(events->flags[5][0]&4))throw std::runtime_error("Nur bei freier Spielersteuerung");
-            recvx::write_snapshot(snapshot_file(slot),recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index}));
+            recvx::write_snapshot(snapshot_file(slot),recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index},audio.loaded_room_sound_case())); // Hostfeld: geladenes Raumklangpaket (Retry-Punkte bleiben wie das Original bei Fall 0)
             return "Snapshot "+std::to_string(slot+1)+" gespeichert: "+rooms.name(room_index);
         };
         auto load_snapshot=[&](unsigned slot){
@@ -901,6 +901,7 @@ int main(int argc,char** argv){
             if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto body=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
                 previous_player=std::move(player);player=std::move(body);args.player=snap.host.body;}
             recvx::restore_inventory(snap,inventory);const auto repaired_file_items=inventory.repair_owned_file_items();restoring=snap;if(events)events->cancel_item_request();
+            audio.set_room_sound_case(snap.host.room_sound_case); // Hoststand: dasselbe Raumklangpaket wie beim Sichern (Format 1: Fall 0 wie der originale Retry)
             try{debug_room(*target,unsigned(std::uint8_t(snap.save.pos_no)));}
             catch(...){restoring.reset();inventory=previous_inventory;if(previous_player){player=std::move(previous_player);args.player=previous_body;}throw;}
             restoring.reset();if(previous_player)combat=recvx::CombatController(args.data,args.mods);

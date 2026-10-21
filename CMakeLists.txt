@@ -1292,6 +1292,10 @@ if(BUILD_TESTING)
    add_test(NAME crouch_pickup COMMAND "${Python3_EXECUTABLE}" -I
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/crouch_pickup_check.py"
     --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+   # Snapshot-Hostfeld room_sound_case (Format 2): Raumvariante RM_2011 behaelt ihr Klangpaket.
+   add_test(NAME snapshot_room_sound COMMAND "${Python3_EXECUTABLE}" -I
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/snapshot_room_sound_check.py"
+    --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
  endif()
 endif()

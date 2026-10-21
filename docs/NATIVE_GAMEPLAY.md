@@ -42,7 +42,10 @@ current gameplay acceptance. Check the current gaps in
   (`save_screen_host_message`), not `MEMORY CARD` or `PS2`.
 - Full `bhSysCallMonitor` state machine for `mn_md`; room loading and changes
   run natively in Runtime/World.
-- Host snapshots (F5/F9) are development tools, not original saving.
+- Host snapshots (F5/F9) are development tools, not original saving. Format 2 (2026-10-21) also stores the
+  room sound case of the loaded SPQ pack (bhRoomSoundCase 0xB6 of the source room), so loading a snapshot in
+  a room variant (RM_2011, RM_7071, RM_9301) restores the variant bank; format 1 files still load with case 0,
+  which is what the original retry/load does.
 
 ## Events and scripts
 

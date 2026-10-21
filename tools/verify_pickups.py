@@ -108,7 +108,7 @@ def check(runtime, data, folder):
     # Calicos only with evflag 116 (Steve's trade complete). This fixture is
     # confined to validation; the runtime never grants campaign flags.
     snapshot = bytearray((folder / 'snapshots/snapshot-2.rcvxsnap').read_bytes())
-    assert snapshot[:8] == b'RCVXSNAP' and struct.unpack_from('<II', snapshot, 8) == (1, 0x838)
+    assert snapshot[:8] == b'RCVXSNAP' and struct.unpack_from('<II', snapshot, 8) in ((1, 0x838), (2, 0x838))
     base = 16
     at = base + 0x14 + (116 // 32) * 4
     struct.pack_into('<I', snapshot, at, struct.unpack_from('<I', snapshot, at)[0] | (0x80000000 >> (116 % 32)))

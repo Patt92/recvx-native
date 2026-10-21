@@ -45,12 +45,16 @@ struct SnapshotHost {
     std::array<unsigned,3> session_values{}; // event values 7,18,25
     int max_hp=160;
     bool poisoned=false,infected=false,side_pack=false;
+    // Format 2: Fallnummer des geladenen Raumklangpakets (bhRoomSoundCase 0xB6 des Quellraums,
+    // sdfunc.c:749). Das Original haelt sie nicht im SAVEFILE (Retry/Load laden Fall 0); der
+    // Snapshot ist ein Hoststand und stellt das Paket wieder her, das beim Sichern geladen war.
+    unsigned room_sound_case=0;
 };
 struct Snapshot {SaveFile save;SnapshotHost host;};
 struct SnapshotPlayer {NJS_POINT3 position{};Angle yaw=0;int floor=0;unsigned spawn=0;std::size_t camera=0;};
 // bhPushGameData. Counters (save_ct/retry_ct/clear_ct) are never incremented:
 // a snapshot is no typewriter save and must not touch ranking counters.
-Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsigned body,const std::string& room,const SnapshotPlayer& player);
+Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsigned body,const std::string& room,const SnapshotPlayer& player,unsigned room_sound_case=0);
 // bhPopGameData, split along the native load order: inventory before the room
 // is built, flags after inherit_progress and before Event_init scripts.
 void restore_inventory(const Snapshot& snapshot,Inventory& inventory);

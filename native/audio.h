@@ -76,6 +76,9 @@ public:
     // sdfunc.c Set/GetRoomSoundCaseNo: consumed once by the next room bank request.
     void set_room_sound_case(unsigned variant){room_sound_case_=variant;}
     unsigned take_room_sound_case(){const auto value=room_sound_case_;room_sound_case_=0;return value;}
+    // Fallnummer, mit der load_room_sounds das aktuelle Raumpaket gewaehlt hat (SpqKeyCode-Rest, sdfunc.c:749).
+    // Host: ein Snapshot traegt sie, damit das Laden in einer Raumvariante dasselbe Paket waehlt.
+    unsigned loaded_room_sound_case()const{return loaded_room_sound_case_;}
     bool play_room_sound(unsigned bank,unsigned program,unsigned slot=4,bool loop=false);
     // CallBackGroundSeEx/StopBackGroundSeEx: bank 3, original slots 0..2 (looping ambience).
     bool background_sound(unsigned slot,unsigned sound,unsigned timer=0);
@@ -222,7 +225,7 @@ private:
     std::map<unsigned,AudioBank> room_banks_,midi_programs_,midi_sequences_; // type 2 SE / type 1 program / type 0 SQ
     unsigned room_pack_=0;
     std::map<unsigned,unsigned> sound_bank_packs_; // provenance of independently replaced SE banks
-    unsigned room_sound_case_=0;
+    unsigned room_sound_case_=0,loaded_room_sound_case_=0;
     bool room_initializing_=false;
     std::array<int,3> current_background_{{-1,-1,-1}};
     std::array<unsigned,3> request_background_{};

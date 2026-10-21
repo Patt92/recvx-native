@@ -122,7 +122,7 @@ def main():
     # --- Diagnose-Snapshot: Raum-Init von RM_4040, dann die Flags der Selbstzerstoerung --------
     run('seed', 4, '0 debug_key F2\n1 debug_select snapshot_save 0\n2 confirm\n')
     seed = bytearray((out / 'snapshots/snapshot-1.rcvxsnap').read_bytes())
-    assert seed[:8] == b'RCVXSNAP' and struct.unpack_from('<II', seed, 8) == (1, 0x838), 'snapshot header'
+    assert seed[:8] == b'RCVXSNAP' and struct.unpack_from('<II', seed, 8) in ((1, 0x838), (2, 0x838)), 'snapshot header'
     ev_base = 16 + 0x14  # SaveFile.ev_flg
     for bit, on in ((257, 1), (35, 1), (259, 0), (36, 0)):
         at = ev_base + (bit // 32) * 4

@@ -44,7 +44,7 @@ def main():
 
     run('seed', '0 debug_key F2\n1 debug_select snapshot_save 0\n2 confirm\n', 4)
     b = bytearray((out / 'snapshots/snapshot-1.rcvxsnap').read_bytes())
-    assert b[:8] == b'RCVXSNAP' and struct.unpack_from('<II', b, 8) == (1, 0x838)
+    assert b[:8] == b'RCVXSNAP' and struct.unpack_from('<II', b, 8) in ((1, 0x838), (2, 0x838))
     at = 16 + 0x14 + (164 // 32) * 4
     struct.pack_into('<I', b, at, struct.unpack_from('<I', b, at)[0] | (0x80000000 >> (164 % 32)))
     struct.pack_into('<I', b, len(b) - 4, zlib.crc32(b[:-4]))

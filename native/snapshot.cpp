@@ -5,7 +5,7 @@
 namespace recvx {
 namespace {
 constexpr char magic[8]={'R','C','V','X','S','N','A','P'};
-constexpr std::uint32_t format=1;
+constexpr std::uint32_t format=2;  // 1: ohne room_sound_case (wird weiter gelesen)
 struct Writer {
     std::vector<std::uint8_t> out;
     void u8(std::uint32_t v){out.push_back(std::uint8_t(v));}
@@ -65,7 +65,7 @@ SaveFile SaveFile::decode(const std::vector<std::uint8_t>& bytes){
     return s;
 }
 
-Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsigned body,const std::string& room,const SnapshotPlayer& player){
+Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsigned body,const std::string& room,const SnapshotPlayer& player,unsigned room_sound_case){
     Snapshot snap;auto& s=snap.save;
     if(inventory.player>3)throw std::runtime_error("player id outside SAVEFILE");
     s.ply_id=std::int8_t(inventory.player);s.stg_no=std::int8_t(events.values[0]);s.rom_no=std::int8_t(events.values[1]);s.rcase=std::int8_t(events.values[21]);
@@ -87,7 +87,7 @@ Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsig
     auto& h=snap.host;h.room=room;h.body=body;
     for(unsigned i=0;i<4;++i)h.session_flags[i]=events.flags[session_matrices[i]];
     for(unsigned i=0;i<3;++i)h.session_values[i]=events.values[session_values[i]];
-    h.max_hp=inventory.max_hp;h.poisoned=inventory.poisoned;h.infected=inventory.infected;h.side_pack=inventory.side_pack;
+    h.max_hp=inventory.max_hp;h.poisoned=inventory.poisoned;h.infected=inventory.infected;h.side_pack=inventory.side_pack;h.room_sound_case=room_sound_case;
     return snap;
 }
 void restore_inventory(const Snapshot& snap,Inventory& inventory){
@@ -123,6 +123,7 @@ void write_snapshot(const std::filesystem::path& path,const Snapshot& snap){
     const auto& h=snap.host;w.u32(std::uint32_t(h.room.size()));for(char c:h.room)w.u8(std::uint8_t(c));
     w.u32(h.body);for(const auto& m:h.session_flags)w.words(m);for(auto v:h.session_values)w.u32(v);
     w.u32(std::uint32_t(h.max_hp));w.u8(h.poisoned);w.u8(h.infected);w.u8(h.side_pack);
+    w.u8(h.room_sound_case); // Format 2
     w.u32(crc32(w.out.data(),w.out.size()));
     if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
     auto temporary=path;temporary+=".tmp";
@@ -136,12 +137,13 @@ Snapshot read_snapshot(const std::filesystem::path& path){
     if(bytes.size()<16||std::memcmp(bytes.data(),magic,8))throw std::runtime_error("not a RECVX snapshot");
     Reader tail{bytes,bytes.size()-4};if(tail.u32()!=crc32(bytes.data(),bytes.size()-4))throw std::runtime_error("snapshot checksum mismatch");
     bytes.resize(bytes.size()-4);Reader r{bytes,8};
-    if(r.u32()!=format)throw std::runtime_error("unsupported snapshot format");
+    const auto file_format=r.u32();if(file_format!=1&&file_format!=format)throw std::runtime_error("unsupported snapshot format");
     if(r.u32()!=SaveFile::size)throw std::runtime_error("snapshot SAVEFILE size mismatch");
     r.need(SaveFile::size);Snapshot snap;snap.save=SaveFile::decode({bytes.begin()+std::ptrdiff_t(r.at),bytes.begin()+std::ptrdiff_t(r.at+SaveFile::size)});r.at+=SaveFile::size;
     auto& h=snap.host;const auto length=r.u32();if(length>64)throw std::runtime_error("snapshot room name invalid");r.need(length);h.room.assign(bytes.begin()+std::ptrdiff_t(r.at),bytes.begin()+std::ptrdiff_t(r.at+length));r.at+=length;
     h.body=r.u32();for(auto& m:h.session_flags)r.words(m);for(auto& v:h.session_values)v=r.u32();
     h.max_hp=int(r.u32());h.poisoned=r.u8();h.infected=r.u8();h.side_pack=r.u8();
+    if(file_format>=2){h.room_sound_case=r.u8();if(h.room_sound_case>15)throw std::runtime_error("snapshot room sound case invalid");}
     if(r.at!=bytes.size())throw std::runtime_error("snapshot has trailing data");
     if(snap.save.version!=10)throw std::runtime_error("snapshot SAVEFILE version is not 10");
     return snap;

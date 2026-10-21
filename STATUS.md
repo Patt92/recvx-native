@@ -26,8 +26,8 @@ oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 **Portierungsrunde nach dem Audit (2026-10-21, Arbeitsbaum):** StartVibrationEx(0, 8) beim Schieben/Drehen
 (psh/rpsh) an die Vibrationseinheit gebunden, flr_no bei Common/Player 7, bhCheckSubTask-Tor plp->flg 0x6
 (Statustaste/Skriptanforderung). Kistenklettern (bhObj001) und bhControlPlayer :1540-1572 als gebunden
-belegt; Audio-Bank-3-Meldung im Scan ist der Direktstart ohne bhRoomSoundCase (kein Portfehler). Offen
-(Host): Snapshot speichert die Raumklang-Variante nicht. [Bericht](work/port-batch-20261021.result.md). **Kein Commit.**
+belegt; Audio-Bank-3-Meldung im Scan ist der Direktstart ohne bhRoomSoundCase (kein Portfehler). Snapshot-Format 2
+speichert die Raumklang-Variante (Test `snapshot_room_sound`, Format 1 weiter lesbar). [Bericht](work/port-batch-20261021.result.md). **Kein Commit.**
 
 **EventVm-Audit und Rest-Opcodes (2026-10-21, Arbeitsbaum, 212/212 grün):** alle 223 Skriptbefehle
 gebunden (0x82 bhSetDebugLoopEx, 0xCF bhExGameItemInit, 0xD3 bhRankingCall; dm0-Plätze halten wie
