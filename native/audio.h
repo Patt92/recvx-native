@@ -3,6 +3,8 @@
 #include "timing.h"
 #include "audio_spu.h"
 #include "audio_pan.h"
+#include "audio_clip.h"
+#include "audio_iop.h"
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -13,7 +15,9 @@
 #include <tuple>
 #include <vector>
 namespace recvx {
-inline constexpr unsigned audio_voice_count=33; // 24..25: CallBackGroundSe slots 0..1, 27..29: MidiHandle[2] ports 2/8/9 (BG slot 2, system MIDI, CallDoorSe), 30..32: SE slots 8/9/19; 26 unused
+// Host voice numbers: ADX 0/1, movie PCM 7 and the EE handles of the original (SE slots via se_voice, MidiHandle
+// 0/1 = 24/25, 3..7 = 8..12, MidiHandle[2] = 27/28/29 for TSNDDRV ports 2/8/9). 26 is unused.
+inline constexpr unsigned audio_voice_count=33;
 inline constexpr unsigned door_voice_first=27,door_voice_last=29;
 // sdfunc.c CallPlayerWeaponSeEx uses SE slots 8/9 (SlotNo 0, alternating) and 19.
 inline constexpr unsigned weapon_voice_8=30,weapon_voice_9=31,weapon_voice_19=32;
@@ -22,20 +26,6 @@ struct SoundPoint {float x=0,y=0,z=0;};
 struct Sound3D {int pan=0,volume=0;float distance=0;};
 // RM_SNDENV (sdfunc.h:6): the 16-byte type-5 record of a room sound pack.
 struct RoomSoundEnv {std::int8_t player_voice=0,player_action=0,weapon=0,cartridge=0,enemy=0,bg0=0,bg1=0,object=0,event=0,fx_level=0,fx_prog=0,max_event_slots=0,max_object_slots=0;};
-// volume/pan: original Sony HD program (+6/+7) and split (+0x10/+0x11) values,
-// 0..127 each; ADX clips keep 127/64 (unity, centre).
-struct SonyPitch {int root=60,note=60,fine=0;unsigned bend_down=0,bend_up=0;};
-// spu: Sony-HD-Sample (MODHSYN-Stimme) mit ADSR1/ADSR2 (+0x12/+0x14) und sampleSpuAttr (+0x29).
-struct PcmClip {unsigned rate=0,channels=0;std::optional<SonyPitch> sony_pitch;bool spu=false;std::uint16_t adsr1=0,adsr2=0;std::uint8_t spu_attr=0;std::size_t loop_start=0,loop_end=0;std::vector<std::int16_t> samples;float volume=1;unsigned pan=64;std::uint32_t sony_volume=0;bool se_shot=false;std::size_t frames()const{return channels?samples.size()/channels:0;}};
-PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate);
-// key<0 selects the first split; otherwise the split whose key range holds `key`. For key>=0 (MODHSYN
-// note-on) a missing/empty program or a key no split covers yields an empty clip: no voice, as in the driver.
-// A key several splits cover throws: use decode_system_note.
-PcmClip decode_system_sound(const std::vector<std::uint8_t>& bank,unsigned program,int key=-1);
-// MODHSYN note-on (.text 0x5f90, split loop 0x6098..0x64a0): one clip per voice the note keys, i.e. per
-// split whose key range holds `key`, in split-table order; empty when no voice starts.
-std::vector<PcmClip> decode_system_note(const std::vector<std::uint8_t>& bank,unsigned program,int key);
-PcmClip decode_adx(const std::vector<std::uint8_t>& bytes);
 class AudioMixer {
 public:
     explicit AudioMixer(std::filesystem::path data={},std::filesystem::path mods={}):data_(std::move(data)),mods_(std::move(mods)){init_spu();}
@@ -100,9 +90,9 @@ public:
     // sdfunc.c:1400 StopSystemSe: StopMidi(2) (host slot 13).
     void stop_system_midi(){stop(midi_voice(2));}
     // Host door skip (doors.h): stops only the MidiHandle[2] ports that sound a CallDoorSe list.
-    bool background_active(unsigned slot)const{if(slot>2)return false;const unsigned v=slot<2?24+slot:door_slot_;return active(v)&&slots_[v].background;}
+    bool background_active(unsigned slot)const;
     // Highest number of SPU voices a key-on found busy on each core (diagnostic for the 24-voice pool).
-    std::array<unsigned,2> spu_voice_peak()const{return spu_voice_peak_;}
+    std::array<unsigned,2> spu_voice_peak()const{return iop_.allocation_peak();}
     void stop_door_voices();
     bool play_room_sequence(unsigned bank,unsigned list,unsigned slot,bool loop=false);
     void custom_midi_slots(unsigned objects,unsigned events);
@@ -149,7 +139,7 @@ public:
     static unsigned se_voice(unsigned se_slot);
     void load_door_sounds(unsigned bank);
     bool play_door_sound(unsigned program);
-    unsigned door_voice()const{return door_slot_;} // the port MidiHandle[2] currently names (sdMidiPlay rotation 2 -> 8 -> 9)
+    unsigned door_voice()const{return midi_voice(2);} // the port MidiHandle[2] currently names (sdMidiPlay rotation 2 -> 8 -> 9)
     void stop(unsigned slot,unsigned fade_ticks=0);
     bool active(unsigned slot)const;
     std::vector<std::int16_t> mix(unsigned frames=audio_frames_per_tick);
@@ -170,71 +160,65 @@ public:
     int bgm_request()const{return req_fade_bgm_;}
     static float adx_gain(float volume);          // AdxVolTbl, 0.1 dB steps
     static unsigned adx_fade_ticks(int timer);    // RequestAdxFadeFunction2 count
-    // MODHSYN VOLL/VOLR of an SE shot voice (0 for other voices).
-    // MODHSYN channel pitch-bend offset (+38) of a TSNDDRV MIDI port.
-    int midi_port_bend(unsigned port,unsigned channel)const{return midi_ports_.at(port).bend.at(channel);}
-    // MODHSYN VOLL/VOLR of the sounding notes of a MIDI sequence voice, in note order.
+    // --- diagnostics on the IOP model (audio_iop.h) ---
+    const IopSound& iop()const{return iop_;}
+    // MODHSYN channel pitch-bend offset (+38) of a MODHSYN port (BGM ports 0..9, TQ ports 10..15).
+    int midi_port_bend(unsigned port,unsigned channel)const{return iop_.channel_bend(port,channel);}
+    // VOLL/VOLR of the keyed MODHSYN voices behind a host voice (SE: its TQ channel, MIDI: its port), oldest first.
     std::vector<SonyLevels> sequence_levels(unsigned voice)const;
-    std::shared_ptr<const PcmClip> voice_clip(unsigned voice)const{return voice<slots_.size()?slots_[voice].clip:nullptr;}
-    SonyLevels voice_levels(unsigned voice)const{return voice<slots_.size()&&slots_[voice].shot&&slots_[voice].clip?slots_[voice].levels:SonyLevels{};}
+    SonyLevels voice_levels(unsigned voice)const{const auto l=sequence_levels(voice);return l.empty()?SonyLevels{}:l.front();}
+    std::shared_ptr<const PcmClip> voice_clip(unsigned voice)const;
+    // sdfunc.c:2796 RequestAllStopSoundEx(AdxFlag, InSoundFlag, FadeCount).
+    void request_all_stop_sound(bool adx,bool in_sound,int fade_count);
     std::vector<std::string> played,unavailable;
 private:
     unsigned disc_=0;
-    // A voice slot plays one or more layers (simultaneous SQ notes); fades act on the slot.
-    struct Layer {std::shared_ptr<PcmClip> clip;double position=0;float left=1,right=1;SpuEnvelope env;unsigned core=0;int pan_offset=0;};
-    struct SequenceNote {Layer layer;unsigned channel=0,key=0,velocity=127;};
-    struct SequenceEvent {double delay=0;unsigned status=0,key=0,value=0;std::vector<Layer> layers;}; // note-on: one layer per MODHSYN voice (split)
-    struct SequenceLoop {unsigned number=0;std::size_t next=0;unsigned remaining=0;bool counted=false;};
-    struct Sequence {std::vector<SequenceEvent> events;std::vector<SequenceNote> notes;std::vector<SequenceLoop> loops;std::size_t next=0;double until=0;unsigned nrpn=0;unsigned port=0;};
-    // One TSNDDRV MIDI port (MidiHandle i -> port i, MidiHandle[2] rotates 2 -> 8 -> 9): MODMIDI sequence CC7 (+56, reset
-    // to 127 by sceMidi_MidiSetLocation at SdrBgmReq) and port volume (+50); MODHSYN channel CC7/CC11 (+43/+44, 128),
-    // CC10 offset (+49) and pitch-bend offset (+38). MODHSYN initialises its channels once (0x6e0, module start), so
-    // they carry over to the next sequence on the same port. ee_pan is the EE MIDI pan (sdMidiSetPan, 64 = none).
-    struct MidiPort {std::array<std::uint8_t,16> sequence_cc7{},cc7{},cc11{};std::array<int,16> pan{},bend{};unsigned volume=128,ee_pan=64;
-        MidiPort(){sequence_cc7.fill(127);cc7.fill(128);cc11.fill(128);}};
-    std::array<MidiPort,10> midi_ports_{};
-    std::array<unsigned,2> spu_voice_peak_{};
-    unsigned atick_frames_=0; // TSNDDRV hardware timer 0x25800 at 36.864 MHz: 240 Hz ATick = every 200 output frames
-    void atick();
-    unsigned midi_voice(unsigned midi)const;  // host voice MidiHandle[midi] currently names
-    int voice_midi(unsigned voice)const;       // MidiHandle owning a host MIDI voice, -1 for none
-    static int voice_port(unsigned voice);     // TSNDDRV port of a host MIDI voice, -1 for none
-    void sync_midi_port(unsigned midi);        // SdrBgmChg: EE MIDI volume/pan of the handle to its playing port
-    unsigned rotate_midi2();                   // sdMidiPlay on MidiHandle[2]: stop the named port, rotate 2 -> 8 -> 9
     // clip_rate ueberlebt das natuerliche Clipende (dort wird nur `clip` geloest), damit
     // adx_play_time danach noch die erreichte Zeit melden kann; release_channel setzt das
-    // ganze Werk zurueck und damit auch die Rate.
-    struct Channel {std::shared_ptr<PcmClip> clip;unsigned clip_rate=0;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1,pan_left=1,pan_right=1;int pitch=0;std::vector<Layer> layers;std::shared_ptr<Sequence> sequence;SpuEnvelope env;unsigned core=0;bool released=false,door=false,background=false;
-        // TSNDDRV SE shot (Tsnd_tqreq/Tsnd_tqchg -> tsnd_tq_chgreq CC7/CC10/bend): `shot_request` until the next
-        // sdSysServer (sound_sync) carries SdrSeReq, afterwards SdrSeChg; levels = MODHSYN VOLL/VOLR.
-        bool shot=false,shot_request=false;unsigned shot_cc7=127,shot_cc10=64;SonyLevels levels{};};
-    // MODHSYN-Stimmen nach Key-Off (CC 120 von sdShotStop/sdMidiStop, Fade-Ende, Sequenzende):
-    // der Slot ist frei, die Stimmen klingen bis zum Release-Ende aus.
-    std::vector<Channel> releasing_;
-    void key_on(const std::shared_ptr<PcmClip>& clip,SpuEnvelope& env,unsigned& core);
-    void shot_levels(Channel& c);void shot_volume(Channel& c,float volume);bool shot_pan(Channel& c,float pan);
-    unsigned spu_core(std::uint8_t attr)const;
-    void release_channel(Channel& channel);
-    void release_sequence_end(Channel& channel);
+    // ganze Werk zurueck und damit auch die Rate. Host channels carry ADX streams and PCM without SPU envelope.
+    struct Channel {std::shared_ptr<PcmClip> clip;unsigned clip_rate=0;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1;};
+    void release_channel(Channel& channel){channel=Channel{};}
+    // IOP side: TSNDDRV, MODMIDI, MODHSYN and the 48 SPU2 voices.
+    IopSound iop_;
+    unsigned atick_frames_=0; // TSNDDRV hardware timer 0x25800 at 36.864 MHz: 240 Hz ATick = every 200 output frames
+    // EE SND_WORK of the 20 shot handles (SE slots) and the 8 MIDI handles (ps2_sg_sd.c); vol/pan/pitch as the
+    // driver keeps them (sdShotSetVol vol + 128, sdShotSetPan pan / 2 + 64, sdShotSetPitch 3 * pitch + 8192).
+    struct ShotWork {std::uint8_t vol=127,pan=64,req=255;std::uint16_t pitch=8192;unsigned port=0,program=0;int channel=-1;};
+    std::array<ShotWork,20> shots_{};
+    std::array<std::uint16_t,6> use_se_info_{},req_se_info_{};
+    struct MidiWork {std::uint8_t vol=127,pan=64,req=255;std::uint16_t pitch=8192;unsigned port=0,bank=0,list=0;bool background=false,door=false;};
+    std::array<MidiWork,8> midis_{};
+    IopSound::Status ee_status_{}; // get_iop_snddata: the IOP's last SdrSetIopData block plus the EE's own marks
+    std::array<bool,audio_voice_count> diagnostic_{}; // host voices playing a synthetic SPU clip (play_pcm diagnostics)
+    static int se_slot_of(unsigned voice);
+    int midi_handle_of(unsigned voice)const;
+    static int host_port(unsigned voice);       // TSNDDRV BGM port of a MIDI host voice
+    unsigned midi_voice(unsigned midi)const;    // host voice MidiHandle[midi] currently names
+    bool shot_play(unsigned slot,unsigned bank,unsigned program); // sdShotPlay
+    void shot_stop(unsigned slot);              // sdShotStop
+    bool midi_play(unsigned midi,unsigned bank,unsigned list); // sdMidiPlay
+    void midi_stop(unsigned midi);              // sdMidiStop
+    bool validate_sequence(unsigned bank,unsigned list,std::string& programs);
+    void server();                              // sdSysServer
+    void ensure_common();
+    bool common_loaded_=false;
+    int weapon_bank_loaded_=-1;
+    bool load_weapon_bank(unsigned weapon);
     // Zwei SPU2-Kerne mit je eigenem Hall (TSNDDRV spucore_init(0/1), SdrSetRev Kernmaske).
     std::array<SpuReverb,2> reverb_{};std::array<unsigned,2> rev_mode_{};
     void set_rev(unsigned core_mask,unsigned mode,int depth);
     // sdfunc.c RoomFxLevel/FxLevelTimer/CurrentFxLevel/AddFxLevel (sdSysServer, ps2_sg_sd.c:1680).
     int room_fx_target_=0,fx_level_timer_=0,current_fx_level_=0,add_fx_level_=0;
     void init_spu();
-    void sequence_step(Channel& channel);
-    void play_layers(unsigned slot,std::vector<Layer> layers,float volume,bool loop);
     // Native shot/event voices are separate from CRI movie/ADX channels.
     std::array<Channel,audio_voice_count> slots_{};
-    std::map<unsigned,std::shared_ptr<PcmClip>> system_sounds_;
     unsigned effect_slot_=2;
     unsigned max_object_slots_=1,max_event_slots_=4;
     int current_bgm_=-1,current_bgm_volume_=-127,req_fade_bgm_=0;
     void play_bgm_archive(const std::string& archive,unsigned id,int fade_in_rate,int volume);
     void request_sound_fade(int function,unsigned attributes,int timer);
     void request_midi_fade_timer(unsigned midi,int function,int timer);
-    std::map<unsigned,std::vector<std::uint8_t>> room_banks_,midi_programs_,midi_sequences_; // type 2 SE / type 1 program / type 0 SQ
-    std::map<std::tuple<unsigned,unsigned,int>,std::vector<std::shared_ptr<PcmClip>>> room_sounds_; // bank (0x100|bank: MIDI), program, key -> voices
+    std::map<unsigned,AudioBank> room_banks_,midi_programs_,midi_sequences_; // type 2 SE / type 1 program / type 0 SQ
     unsigned room_pack_=0;
     std::map<unsigned,unsigned> sound_bank_packs_; // provenance of independently replaced SE banks
     unsigned room_sound_case_=0;
@@ -250,15 +234,12 @@ private:
     struct BackgroundRequest {bool active=false;unsigned sound=0,timer=0;};
     std::array<BackgroundRequest,3> background_init_{};
     std::array<bool,3> foot_switch_{};
-    unsigned door_bank_=0,door_slot_=door_voice_first;
-    std::vector<std::uint8_t> door_source_;
-    std::map<unsigned,std::vector<std::uint8_t>> weapon_banks_;
-    std::map<std::pair<unsigned,unsigned>,std::shared_ptr<PcmClip>> weapon_sounds_;
-    std::shared_ptr<PcmClip> weapon_clip(unsigned bank,unsigned program);
+    unsigned door_bank_=0;
+    std::map<unsigned,AudioBank> weapon_banks_;
     // SetupSeGenericParm + ExPlaySe for an SE voice: pan/volume per RequestInfo.
     struct SeRequest {int pan=0,volume=0;bool pan_default=false,volume_default=false;};
     SeRequest setup_se_generic(unsigned se_slot,SoundPoint position)const;
-    void play_se_request(unsigned voice,std::shared_ptr<PcmClip> clip,const SeRequest& request);
+    bool play_se_request(unsigned voice,unsigned bank,unsigned program,const SeRequest& request);
     void apply_se_volume(unsigned voice,float volume);
     void apply_se_pan(unsigned voice,float pan);
     struct SoundControl {float volume=0,speed=0,last=0,pan=0,pan_speed=0,pan_last=0;int remaining=0,function=0,pan_remaining=0,pan_function=0,pitch=0;};
