@@ -118,16 +118,17 @@ BGM-/ADX-Fades laufen nicht mehr als Host-Samplerampe: `RequestAdxFadeFunction2`
 (`jr ra; nop`), eine native Pause gibt es daher nicht.
 
 Offen: die geschlossene IOP-Pegelkurve (`se_volume_gain` ist eine lineare
-Hostskalierung), ADSR/Hall, das Gate `ss_flg & 0x4000000` (kein nativer Besitzer
-des Flags).
+Hostskalierung). Das Gate `ss_flg & 0x4000000` vor `PlayBgmEx2`/`ExecAdxFadeManager`
+ist immer offen: kein Originalschreiber setzt dieses Bit (2026-10-21, alle
+`ss_flg |=`-Stellen geprueft).
 
 SE-Note: `Tsnd_tqreq` legt die Note aus dem Programmkopf-Byte +0xB der HD-Datei ab (TSNDDRV 0x10D4,
 statisch belegt), Velocity ist das Literal 127. Dieses Byte ist in COMMON, Waffenbank und allen
 Raumbanken 60; `decode_system_sound` liest es jetzt aus der Bank statt eine Konstante anzunehmen.
 
-Der gemeinsame Parameterkern ist kein Abschluss aller 3D-Verbraucher:
-Schritt-/Aktions-/Hülsenklänge, Objekt-SE und räumliche ADX-Aufrufe sind noch
-nicht vollständig angeschlossen. Die geschlossene IOP-Pan-/Pegelsynthese bleibt
+Alle acht Originalaufrufer von `Get3DSoundParameter` (SetupSeGenericParm,
+Schritte, Gegner, Ereignis-SE Mode 0, Objekt-SE, Stimmen) sind angeschlossen
+(2026-10-21, Test `audio_gaps`). Die geschlossene IOP-Pan-/Pegelsynthese bleibt
 ungeklärt; die bisherige native Ausgabeskalierung ist kein bitgenauer Nachweis.
 
 ## SPU2-Hüllkurve und Hall

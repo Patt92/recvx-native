@@ -12,7 +12,13 @@ Semantikreferenz für eigenständige Portierungen in die native Engine.
 - Windows: Visual Studio mit „Desktop development with C++“; für einen nativen
   ARM64-Build zusätzlich die ARM64-C/C++-Buildtools
 - Windows-Crossbuild von macOS/Linux: zusätzlich Ninja
-- `--iso`: FFmpeg und ffprobe im PATH
+- Linux: GCC oder Clang mit C++17, Make oder Ninja sowie die SDL2-Entwicklungsabhängigkeiten
+  für X11/Wayland und ALSA/PulseAudio; siehe [README](../README.md#linux)
+- `--iso`: FFmpeg und ffprobe im PATH; unter Windows alternativ
+  `build-tools/ffmpeg.exe` und `build-tools/ffprobe.exe` im Repository ablegen.
+  PATH hat Vorrang, die lokale Ablage wird bei fehlendem PATH-Eintrag verwendet.
+  Benötigte DLLs desselben FFmpeg-Pakets daneben ablegen; ein statischer Build
+  benötigt keine separaten FFmpeg-DLLs. Keine PATH-Änderung nötig.
 
 Der erste Build lädt festgelegte Abhängigkeiten (SDL2 2.32.10, für den
 Crossbuild Zig 0.16.0; beide per Prüfsumme fixiert). Danach braucht weder der

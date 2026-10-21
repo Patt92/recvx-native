@@ -21,12 +21,28 @@ Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 
+**Audio-Lücken sdfunc.c (2026-10-21, Arbeitsbaum):** 11 partial-Zeilen am Original nachgeprüft und
+auf done gesetzt: `ss_flg 0x4000000` hat keinen Originalschreiber (PlayBgmEx2/ExecAdxFadeManager
+immer offen), `sdMidiSetFxLev` ist auf PS2 leer (CallDoorSe FxLevel ohne Wirkung, -2-Delays = Pegel 0/
+Mitte/Pitch 0), Set3dSoundFlag/SetUserSoundVolume 6/7/8, Objekt-SE (Type stets 0), Gegner-SE-Manager
+und 60-Hz-Fades, VolDownTbl 8..15 (Aufruferrahmen, kein Literal erreicht ihn), PlayVoiceEx2-Pan
+(reiner Zustand). Neuer Test `audio_gaps` (5 Gegenproben rot). Offen bleibt nur die geschlossene
+IOP-Pegel-/Pan-/Pitchsynthese (Get3DSoundParameter, Weapon/Yakkyou/Footstep, CallNativeEventSe
+Stimmenpool). **Kein Commit.**
+
 **RM_1090 Computer, falsches Passwort (2026-10-21, Arbeitsbaum):** Task 8 (bhSysCallEvent) läuft im
 Original während des Terminals weiter (nur Task 7 gestoppt, system.c:2121); nativ ruhte der
 Ereignistick, Ereignis 4 verdrängte das schlafende Ereignis 5, die Monitorkamera blieb stehen.
 Fix runtime.cpp, Test `rm1090_terminal_wrong_password`. **Wesker-Absturz** („player motion 9
 missing“): Motion 9 hat 20 Kanäle auf 22 Knoten; Motion.c:131 schreibt nur obj_num Knoten,
 `has_motion` jetzt `<= bones`. Test `player_short_motion`. **Kein Commit.**
+
+**Nutzerbefunde 2026-10-21 (Dev-App, 203/203 grün):** (1) Himmel schwarz beim Inventaröffnen: njSetBackColor(0)
+kam schon beim Tab statt im Monitor nach dem Abblenden (system.c:1987); (2) Calico-Mündungsfeuer bei zwei Zielen:
+PlyPchMain-Armknoten fehlten im committeten owP-Baum (beides in de1fac7 mitcommittet); (3) RM_3091-Wurmsound:
+SE-Stimmen ignorierten VAG-Loopmarker (70400 brach nach 1 s ab) – Mix folgt jetzt den Markern, dazu AllStopEnemySe
+(system.c:602/617); (4) Stufenaktion lief am Passtor player.c:1365 vorbei weiter, wenn ein Ereignis die Steuerung nimmt
+(RM_3100-Verdacht, Szene nicht nachgestellt). Autoaim auf tote Gegner nicht reproduziert. **Kein Commit.**
 
 **Gegnerzeilen-Audit und EN21-Abnahme (2026-10-21, Arbeitsbaum):** EN21 am echten Raum
 (RM_3120/RM_3140) mit `enemy_en21_world` belegt, sechs Ledger-Zeilen done. Veraltet waren

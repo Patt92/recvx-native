@@ -111,6 +111,10 @@ public:
     // Flag 1, zonzon1.c bhEne_SetSEPan Flag 0. ExecEnemySeManager serves the six enemy voices (18..23).
     void request_enemy_se(unsigned enemy,SoundPoint position,int se_no,int flag=1,int fade_rate=0);
     bool enemy_se_playing(unsigned enemy,int se_no)const;
+    // sdfunc.c AllStopEnemySe (bhCheckSubTask, system.c:602/617/634): a registered enemy voice fades out
+    // (RequestSeFadeFunction(DefEne[i], 2, 200)), a free one is stopped; EnemySlotInfo is cleared.
+    // StopVibrationEx belongs to the caller's VibrationUnit.
+    void all_stop_enemy_se();
     // sdfunc.c:2087 PlayVoiceEx2/PlayVoiceEx/PlayVoice/StopVoice/ContinuePlayVoice on ADX slot 1 (VOICE archive).
     // Mode 0 = 3D start, 1 = centred fade-in start, 2 = parameter update; ADXT_Pause is empty in the original ELF.
     bool play_voice(int sound,SoundPoint position,int mode,unsigned fade_rate,bool pause);

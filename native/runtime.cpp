@@ -791,8 +791,8 @@ int main(int argc,char** argv){
             if(menu.active&&!menu_was_active){if(world)world->suspend_background(); /* system.c:613 BackColorFlag = 0. njSetBackColor(0,0,0) folgt erst im Monitor (system.c:1987-1992, nach dem Abblenden) und in StatusMain case 1 (sub1.c:3266-3268); solange Task 7 ausblendet, bleibt der Raumhintergrund installiert *//* bhCheckSubTask (system.c:603-611) beginnt mn_mode0 5 mit bhSetScreenFade(0xFF000000, 5);
                bhMainSequence im selben Task 7 ruft bhControlScreenFade (game.c:38-40). Die Rueckkehr aus
                der Karte (system.c case 6) setzt den Rahmen ohne Monitorlauf fort (StatusTask::resume). */
-            if(!menu.task.holding()){recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);}map_return_to_status=false;}
-            else if(menu.active&&!menu.task.holding()){recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);} /* Abbau und neuer Eintritt ohne Zwischenbild */
+            if(!menu.task.holding()){audio.all_stop_enemy_se();vibration.stop(); /* system.c:602 AllStopEnemySe (mit StopVibrationEx) */recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);}map_return_to_status=false;}
+            else if(menu.active&&!menu.task.holding()){audio.all_stop_enemy_se();vibration.stop();recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);} /* Abbau und neuer Eintritt ohne Zwischenbild */
             /* Task 20 bhSysCallMonitor Modus 5 (system.c:1953-2025) des Vorbilds, dann Task 7 dieses Bildes
                mit bhControlScreenFade, bis Modus 5 bei freiem cb_flg 0x2 ts_flg 0x80 setzt. */
             else if(menu.active&&menu.task.entering()){if(menu.task.monitor((events->flags[10][0]&0x2u)!=0))recvx::set_back_color(0u);if(menu.task.game_running())recvx::control_screen_fade(events->flags[10][0]);}
@@ -813,6 +813,7 @@ int main(int argc,char** argv){
                 const bool is_event=(events->flags[10][0]&0x10000u)!=0;
                 events->flags[10][0]&=~0x10000u;events->flags[11][0]|=0x80000u;events->flags[5][0]|=0x40000u;
                 map_entry_mode=is_event?RECVX_MP_SET_EVENT:RECVX_MP_SET_GAME;
+                audio.all_stop_enemy_se();vibration.stop(); /* system.c:617 AllStopEnemySe */
                 fade_set(0xFF000000u,5.0f);map_active=true;map_initialized=false;if(world)world->suspend_background();}
             if(!map_active)return;
             if(!map_initialized){fade_control();if(!(events->flags[10][0]&0x2u)){map_screen.init(map_entry_mode,map_host(),map_services);map_screen.set_map();map_initialized=true;}return;}
@@ -1400,7 +1401,11 @@ int main(int argc,char** argv){
                 if((world->player_mode()&0xffu)==3u){
                     if(debug.active()||frontend.active()||menu.active||dialog.active()||movie.active()||computer.active())return;
                     action_resume=true;control_player_die();return;}}
-            if(stairs.active&&player&&world){if(debug.active()||frontend.active()||menu.active||dialog.active()||movie.active()||computer.active())return;head_other_action();tick_stairs();action_resume=true;return;}
+            /* Die Stufenaktion (bhCPM1_act_kdu/kdd/..., auch aus bhKaidanPlayerMotion player.c:1165) ist ein mode0-1-
+               Zweig von bhCtrPly_mode0 und liegt damit hinter dem Passtor von bhControlPlayer (player.c:1365:
+               sp_flg 0x1, plp->stflg 0x1000000 frei). Nimmt ein Ereignis dem Spieler die Steuerung, ruht die Stufe
+               wie im Original und laeuft erst nach der Freigabe weiter. */
+            if(stairs.active&&player&&world){if(debug.active()||frontend.active()||menu.active||dialog.active()||movie.active()||computer.active())return;if(events&&(!(events->flags[6][0]&1u)||(events->flags[14][0]&0x1000000u)))return;head_other_action();tick_stairs();action_resume=true;return;}
             // bhCtrPly_mode0[2] = bhCPM0_damage (player.c:6214). bhCheckWallEx
             // enters it through *(int*)&plp->mode0 = 2/0x102 at an attr-0x40
             // fire wall (hitchk.c:259); mode1 0 = hit from the front.

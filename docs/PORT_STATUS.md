@@ -2,7 +2,7 @@
 
 Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.
 
-Expliziter Belegumfang: **88.7 %** gewichtet, **78.0 %** voll belegt (514/659 Mechanismen; kein Gesamtfortschritt).
+Expliziter Belegumfang: **89.5 %** gewichtet, **79.7 %** voll belegt (526/660 Mechanismen; kein Gesamtfortschritt).
 
 Event-Befehle (bhScenarioJmpT): 211/223 gebunden, 12 nur konsumiert, 0 fehlen.
 
@@ -15,7 +15,7 @@ Event-Befehle (bhScenarioJmpT): 211/223 gebunden, 12 nur konsumiert, 0 fehlen.
 | Raum/Kamera/Tür | 14/37 | 68.9 % | 37.8 % | 23 | 0 |
 | Menü/Items/Text | 43/55 | 86.4 % | 78.2 % | 9 | 3 |
 | Modelle/Animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
-| Audio | 5/21 | 61.9 % | 23.8 % | 16 | 0 |
+| Audio | 17/22 | 88.6 % | 77.3 % | 5 | 0 |
 | Ablauf/Speichern | 29/33 | 93.9 % | 87.9 % | 4 | 0 |
 | Plattform (Host-ersetzt) | 16/31 | 75.8 % | 51.6 % | 15 | 0 |
 

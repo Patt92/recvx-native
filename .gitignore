@@ -4,6 +4,9 @@
 /build/
 
 # Local tools and OS/editor caches
+/build-tools/ffmpeg.exe
+/build-tools/ffprobe.exe
+/build-tools/*.dll
 __pycache__/
 *.py[cod]
 .DS_Store

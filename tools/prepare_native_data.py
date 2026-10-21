@@ -21,6 +21,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from iso9660 import extract
+from host_tools import find as find_host_tool
 
 
 def digest(path):
@@ -136,9 +137,11 @@ def export_iso(images, root, exporter, ffmpeg, ffprobe, jobs):
     for tool in (exporter, world):
         if not tool.is_file():
             raise RuntimeError(f'missing built exporter: {tool}')
-    tools = [shutil.which(ffmpeg), shutil.which(ffprobe)]
+    tools = [find_host_tool(ffmpeg, ROOT), find_host_tool(ffprobe, ROOT)]
     if not all(tools):
-        raise RuntimeError('--iso cooks the movies and needs ffmpeg and ffprobe (see --ffmpeg/--ffprobe)')
+        raise RuntimeError('--iso cooks the movies and needs ffmpeg and ffprobe on PATH '
+                           'or, on Windows, build-tools/ffmpeg.exe and build-tools/ffprobe.exe '
+                           '(see --ffmpeg/--ffprobe for explicit paths)')
     root.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=f'.{root.name}-staging-', dir=staging_parent(root)))
     try:

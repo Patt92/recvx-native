@@ -128,6 +128,11 @@ static void sample_loops(const std::filesystem::path& root){
     AudioMixer short_reference;short_reference.play_pcm(12,short_clip,118.f/127.f);const auto short_pcm=short_reference.mix(120000-250);
     std::vector<std::int16_t> short_expected(250*2);short_expected.insert(short_expected.end(),short_pcm.begin(),short_pcm.end());
     for(bool outer:{false,true}){AudioMixer short_sequence(root);short_sequence.load_room_sounds(0,2);check(short_sequence.play_room_sequence(2,0,12,outer),"original one-shot SQ missing");check(short_sequence.mix(120000)==short_expected,"outer SQ slot loop repeats a one-shot waveform");short_sequence.mix(300000);check(!short_sequence.active(12),"one-shot SQ end retained slot");}
+    // ExPlaySe keys a voice without any slot loop (CallEnemySeMain, CallSystemSe, ...); the SPU still
+    // follows the VAG loop markers until key-off, like the SQ note above (en02.c:1040, Gulp Worm 70400).
+    {AudioMixer se,looped;se.play_pcm(12,clip);looped.play_pcm(12,clip,1,true);
+        check(se.mix(120000)==looped.mix(120000)&&se.active(12),"ExPlaySe voice ignored the VAG loop markers");
+        AudioMixer one;one.play_pcm(12,short_clip);one.mix(300000);check(!one.active(12),"one-shot ExPlaySe voice looped");}
     // Original terminal-7 Vagi: a silent self-loop, not a guessed full loop.
     const auto terminal=read_asset_file(root/"archives/MULTSPQ1/0022.bin",32*1024*1024);BinaryView term(terminal);
     for(unsigned i=0;i<16&&term.u32(i*16);++i)if(term.u32(i*16+8)==1&&term.u32(i*16+12)==2){
@@ -216,6 +221,12 @@ static void enemy_se(const std::filesystem::path& root){
      // Enemy 0 has the lower priority but is farther: the original exchange sort still swaps it behind.
      m->request_enemy_se(0,{0,0,-100},se,1,0);for(unsigned e=1;e<7;++e)m->request_enemy_se(e,{0,0,-10},se|0x10000,1,0);m->exec_enemy_se();
      check(!m->enemy_se_playing(0,1)&&m->enemy_se_playing(6,1),"ExecEnemySeManager must sort with Prio > || Dist > (enemy 0 loses the sixth voice)");}
+    {// sdfunc.c AllStopEnemySe: EnemySlotInfo cleared at once, the registered voice fades out with
+     // RequestSeFadeFunction(..., 2, 200) = FadeCntMax 30 sound syncs (800 frames each), then the stop.
+     auto m=mixer();m->request_enemy_se(0,{0,0,-10},se,1,0);m->request_enemy_se(1,{0,0,-10},se,1,0);m->exec_enemy_se();m->stop(19);m->mix(800);m->exec_enemy_se(); /* CheckPlaySe frees slot 1 */
+     m->all_stop_enemy_se();const auto fade=m->sound_state(18,false);
+     check(!m->enemy_se_playing(0,1)&&m->active(18)&&fade.fade==2&&fade.volume_count==30,"AllStopEnemySe must clear the slot and fade (Func 2, FadeCntMax 30), not cut");
+     check(m->sound_state(19,false).fade==0,"a voice without a running SE takes StopEnemySe, not a fade");}
 }
 // sdfunc.c:1447 CallPlayerFootStepSeEx, :1583 CallYakkyouSe, :1925-2004/2669 object SE, :895 pan manager, :1830 CallNativeEventSe.
 static void shared_3d_consumers(const std::filesystem::path& root){

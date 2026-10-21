@@ -598,7 +598,11 @@ void AudioMixer::request_enemy_se(unsigned enemy,SoundPoint position,int se_no,i
     // char VolDownTbl[8] = {0,254,252,250,248,247,246,245}; MIPS char is signed.
     static constexpr std::int8_t vol_down[8]={0,-2,-4,-6,-8,-9,-10,-11};
     const unsigned down=(unsigned(se_no)&0xF00000u)>>20;
-    // Indices 8..15 read the caller's stack frame beyond the array; no original value exists.
+    // Indizes 8..15 lesen hinter das Feld: VolDownTbl liegt im Rahmen bei sp+0x58 (ELF 0x295144,
+    // Rahmen 0x60), sp+0x60.. ist der Rahmen des Aufrufers; RequestEnemySe/RequestEnemySeEx sind
+    // Sprungstummel (0x295240/0x295250) ohne eigenen Rahmen, der Inhalt haengt also vom rufenden
+    // Gegnerpass ab. Kein SeNo-Literal der Originalquellen (en*.c, zonzon*.c, effsub*.c) erreicht
+    // 8..15; der Fall wird gemeldet, nicht geraten.
     if(down>=8){unavailable.push_back("RequestEnemySeBasic VolDownTbl["+std::to_string(down)+"] SE "+std::to_string(se_no));return;}
     auto& e=enemy_info_[enemy];e.pos=position;
     const auto p=sound_parameter_3d(position,0);e.pan=std::int8_t(p.pan);e.vol=std::int8_t(p.volume);e.dist=p.distance;
@@ -623,6 +627,14 @@ void AudioMixer::call_enemy_se_main(unsigned slot,int se_no,int pan,int volume,i
 }
 bool AudioMixer::enemy_se_playing(unsigned enemy,int se_no)const{
     for(const auto& v:enemy_voices_)if(v.flag&&v.enemy==enemy){if(se_no>0)return true;if(v.se==se_no)return true;}return false;
+}
+void AudioMixer::all_stop_enemy_se(){
+    // RequestSeFadeFunction(..., 2, 0xC8): FadeCntMax = ((200/100)*30 + 0)/2, VolLast -127 (sdc.c:693);
+    // the same speed RequestSeFadeFunctionEx(-1, -127, FadeCntMax) produces, and Func 2 ends with the stop.
+    constexpr int timer=0xC8;int count=((timer/100)*30+((timer%100)*6)/10)/2;if(count==0)count=1;
+    for(unsigned i=0;i<6;++i){auto& v=enemy_voices_[i];
+        if(v.flag)request_se_fade(18+i,-1,-127,count);else stop(18+i); // DefEne[6] = {0..5}; StopEnemySe(i)
+        v.enemy=0;v.se=0;v.flag=false;}
 }
 void AudioMixer::play_player_voice(int se_no){
     // CallPlayerVoice: SetupSeGenericParm(7, SeNo, &PlayerPos, ...), + VolPlayerVoice unless 3D flag 2.
@@ -709,6 +721,11 @@ bool AudioMixer::play_door_sound(unsigned program){
     // rotates 2 -> 8 -> 9 -> 2 and the new list plays on that port. door_slot_ is the named port.
     if(active(door_slot_))stop(door_slot_);
     door_slot_=door_slot_==door_voice_last?door_voice_first:door_slot_+1;
+    // RequestInfo (sdfunc.c:1684-1703): Pan/Volume/PitchDelayTime -2 -> ExPlayMidi (sdc.c:230-262)
+    // SetPanMidi 0, SetVolumeMidi SdcSeDefaultVolume (0, sdcwrap.c:18), SetPitchMidi 0 sofort;
+    // SpeedDelayTime -1 unveraendert; FxLevel DoorFxDef[] = 40 geht an sdMidiSetFxLev, das auf PS2
+    // nur den Initstatus zurueckgibt (ps2_sg_sd.c:542). Der frische Kanal (gain 1 = vol 0, Mitte) ist
+    // genau dieser Zustand.
     if(!play_room_sequence(1,program,door_slot_)){unavailable.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return false;}
     played.push_back("DOOR/"+asset_number(door_bank_)+"/"+asset_number(program));return true;
 }
@@ -854,8 +871,12 @@ std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)th
         if(channel.sequence){for(auto& note:channel.sequence->notes)if(note.layer.clip)voice(note.layer.clip,note.layer.position,note.layer.env,note.layer.core,note.layer.left*channel.pan_left,note.layer.right*channel.pan_right,note.layer.clip->loop_end>note.layer.clip->loop_start);
             channel.sequence->notes.erase(std::remove_if(channel.sequence->notes.begin(),channel.sequence->notes.end(),[](const SequenceNote& n){return !n.layer.clip;}),channel.sequence->notes.end());
             if(!channel.released)channel.sequence->until-=1;return;}
-        if(channel.clip)voice(channel.clip,channel.position,channel.env,channel.core,channel.left,channel.right,channel.loop);
-        for(auto& layer:channel.layers)if(layer.clip)voice(layer.clip,layer.position,layer.env,layer.core,layer.left,layer.right,channel.loop);
+        // A SPU voice loops on its own VAG markers (ADPCM loop-start/repeat flags, kept only for Vagi attribute 1,
+        // decode_system_sound) until key-off, whichever request keyed it: ExPlaySe (sdfunc.c CallEnemySeMain,
+        // CallSystemSe, ...) has no one-shot override. The sequence notes above already follow the markers.
+        auto looping=[&](const std::shared_ptr<PcmClip>& clip){return channel.loop||(clip->spu&&clip->loop_end>clip->loop_start);};
+        if(channel.clip)voice(channel.clip,channel.position,channel.env,channel.core,channel.left,channel.right,looping(channel.clip));
+        for(auto& layer:channel.layers)if(layer.clip)voice(layer.clip,layer.position,layer.env,layer.core,layer.left,layer.right,looping(layer.clip));
         // A finished first note hands the slot to the next sounding layer.
         if(!channel.clip||!channel.layers.empty()){channel.layers.erase(std::remove_if(channel.layers.begin(),channel.layers.end(),[](const Layer& l){return !l.clip;}),channel.layers.end());if(!channel.clip&&!channel.layers.empty()){const auto next=channel.layers.front();channel.layers.erase(channel.layers.begin());channel.clip=next.clip;channel.position=next.position;channel.left=next.left;channel.right=next.right;channel.env=next.env;channel.core=next.core;}}
         };
@@ -879,6 +900,10 @@ void AudioMixer::play_bgm_archive(const std::string& archive,unsigned id,int fad
     play(0,archive,id,1,true,0);
     apply_adx_volume(0,adx_control_[0].volume);
 }
+// PlayBgmEx2 (sdfunc.c:2007) und ExecAdxFadeManager im Soundmonitor (sdfunc.c:477) stehen unter
+// !(ss_flg & 0x4000000); kein Originalschreiber setzt dieses Bit (alle ss_flg-|=/=-Stellen: 0x1,
+// 0x40, 0x100, 0x200, 0x1000, 0x20000, 0x30000, 0x40000, 0x100000, 0x200000, 0x400200, 0x800000,
+// 0x80000000), das Tor ist also immer offen.
 void AudioMixer::play_bgm_ex(int bgm,int fade_in_rate,int volume){
     play_bgm_archive(set_name("BGM"),unsigned(bgm),fade_in_rate,volume);
     current_bgm_=bgm;current_bgm_volume_=volume;

@@ -19,6 +19,57 @@ import iso9660_test
 spec = importlib.util.spec_from_file_location('prepare_native_data', TESTS.parent / 'tools/prepare_native_data.py')
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
+import host_tools
+import cook_movies
+
+
+class HostToolTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='recvx-host-tools-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        (self.root / 'build-tools').mkdir()
+        self.local = self.root / 'build-tools/ffmpeg.exe'
+        self.local.touch()
+        self.addCleanup(patch.stopall)
+        patch.object(host_tools.platform, 'system', return_value='Windows').start()
+        self.which = patch.object(host_tools.shutil, 'which', return_value=None).start()
+
+    def test_windows_fallback_for_bare_name_and_exe(self):
+        for name in ('ffmpeg', 'ffmpeg.exe'):
+            self.assertEqual(host_tools.find(name, self.root), str(self.local.resolve()))
+
+    def test_path_takes_precedence(self):
+        self.which.return_value = 'C:/installed/ffmpeg.exe'
+        self.assertEqual(host_tools.find('ffmpeg', self.root), self.which.return_value)
+
+    def test_explicit_path_is_preserved(self):
+        self.which.return_value = 'C:/custom/ffmpeg.exe'
+        self.assertEqual(host_tools.find('C:/custom/ffmpeg.exe', self.root), self.which.return_value)
+
+    def test_missing_explicit_path_does_not_fall_back(self):
+        self.assertIsNone(host_tools.find('C:/missing/ffmpeg.exe', self.root))
+        self.assertIsNone(host_tools.find('./ffmpeg.exe', self.root))
+
+    def test_missing_tool_returns_none(self):
+        self.assertIsNone(host_tools.find('ffprobe', self.root))
+
+    def test_other_platforms_do_not_use_windows_executable(self):
+        for system in ('Darwin', 'Linux'):
+            with patch.object(host_tools.platform, 'system', return_value=system):
+                self.assertIsNone(host_tools.find('ffmpeg', self.root))
+
+    def test_direct_movie_command_passes_resolved_tools(self):
+        data = self.root / 'data'
+        (data / 'files/MOVIE').mkdir(parents=True)
+        (data / 'files/MOVIE/MV_0000.PSS').touch()
+        (data / 'movies').mkdir()
+        tools = [str(self.local.resolve()), str(self.root / 'build-tools/ffprobe.exe')]
+        with patch.object(sys, 'argv', ['cook_movies.py', '--data', str(data)]), \
+             patch.object(cook_movies, 'find_host_tool', side_effect=tools), \
+             patch.object(cook_movies, 'cook', return_value={'frames': 1, 'seconds': 1.0}) as cook:
+            cook_movies.main()
+        self.assertEqual(cook.call_args.args[2:], tuple(tools))
 
 EXPORTER = '''#!/usr/bin/env python3
 import struct, sys
@@ -126,6 +177,37 @@ class IsoPipelineTests(unittest.TestCase):
         self.assertEqual(saved, prepare.manifest(self.output))
         self.assertIn('movies/0000.rvv', [r['path'] for r in saved['assets']])
         self.assertEqual(saved['textures'], 2)
+        self.assertEqual(self.staging_left(), [])
+
+    def test_windows_local_tools_reach_movie_step(self):
+        local = self.root / 'build-tools'
+        local.mkdir()
+        for name in ('ffmpeg.exe', 'ffprobe.exe'):
+            (local / name).touch()
+        with patch.object(host_tools.platform, 'system', return_value='Windows'), \
+             patch.object(host_tools.shutil, 'which', return_value=None):
+            prepare.export_iso([self.image], self.output, self.exporter, 'ffmpeg', 'ffprobe', 2)
+        self.assertEqual(self.movies, [('ffmpeg.exe', 'ffprobe.exe')])
+        self.assertTrue((self.output / 'asset-manifest.json').is_file())
+
+    def test_windows_mixed_path_and_local_tools(self):
+        local = self.root / 'build-tools'
+        local.mkdir()
+        (local / 'ffprobe.exe').touch()
+        with patch.object(host_tools.platform, 'system', return_value='Windows'), \
+             patch.object(host_tools.shutil, 'which', side_effect=lambda name: sys.executable if name == 'ffmpeg' else None):
+            prepare.export_iso([self.image], self.output, self.exporter, 'ffmpeg', 'ffprobe', 2)
+        self.assertEqual(self.movies, [(Path(sys.executable).name, 'ffprobe.exe')])
+
+    def test_missing_windows_ffprobe_fails_before_extraction(self):
+        local = self.root / 'build-tools'
+        local.mkdir()
+        (local / 'ffmpeg.exe').touch()
+        with patch.object(host_tools.platform, 'system', return_value='Windows'), \
+             patch.object(host_tools.shutil, 'which', return_value=None), \
+             self.assertRaisesRegex(RuntimeError, 'build-tools/ffprobe.exe'):
+            prepare.export_iso([self.image], self.output, self.exporter, 'ffmpeg', 'ffprobe', 2)
+        self.assertFalse(self.output.exists())
         self.assertEqual(self.staging_left(), [])
 
     def test_failed_world_export_publishes_nothing(self):

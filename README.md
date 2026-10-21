@@ -131,55 +131,136 @@ Implementation details and development status live in the
 You need your own legally obtained game data. Disc images and game assets are
 not distributed with the source code.
 
-Before building, install:
+All platforms need **Python 3.12+**, **CMake 3.16+**, a C compiler and a
+**C++17 toolchain**. Python runs the build and data-preparation scripts; CMake
+configures the native build. No Python packages installed with `pip` are needed
+for the normal build.
 
-- **Python 3.12+** and **CMake 3.16+**, both available from your terminal.
-  Check with `python --version` and `cmake --version` on Windows; use
-  `python3 --version` on macOS/Linux. Python runs the build and data preparation
-  scripts; CMake configures the C/C++ build.
-- **A C compiler and C++17 toolchain**: Apple Command Line Tools on macOS, or Visual Studio
-  with the Desktop development with C++ workload on Windows. For a native
-  Windows ARM64 build, install its ARM64 C/C++ build tools as well.
-- **FFmpeg and ffprobe**, available from your terminal, if using `--iso` to
-  prepare game data. They are not needed when `data/` is already prepared.
+The first build downloads the pinned **SDL2 2.32.10** dependency and needs network
+access. **FFmpeg and ffprobe** are build-time tools for preparing movies with
+`--iso`; neither is needed to play or to build with an already prepared `data/`
+tree. Repeat `--iso` to supply multiple disc images; completed data is reused.
 
-The first build downloads SDL2 2.32.10, so it needs network access. On
-macOS/Linux, Windows cross-builds also need Ninja; the build tool downloads its
-pinned Zig toolchain. Python packages installed with `pip` are not required for
-the normal build.
+### Windows
 
-On Windows ARM64, `./build.ps1` selects the native ARM64 target. If it stops
-after the policy check with `FileNotFoundError: [WinError 2]`, check that
-`cmake --version` works in the same PowerShell session. The policy check only
-confirms the source/build scope; it does not check build dependencies.
+Install:
 
-With these dependencies installed, a host build can prepare the data from a
-PS2 ISO and create a package:
+- **Python 3.12+**, with the `py` launcher or `python` available in PowerShell.
+- **CMake 3.16+**, with its command-line tools added to `PATH`.
+- **Visual Studio or Visual Studio Build Tools**, including the **Desktop
+  development with C++** workload, MSVC C/C++ tools and a Windows SDK.
+  Native Windows ARM64 builds also need the ARM64 C/C++ build tools.
+- **FFmpeg and ffprobe** for `--iso`: either install them on `PATH`, or place
+  the Windows executables directly in the repository's `build-tools/` folder:
 
-```bash
-./build.sh --iso "/path/to/game.iso" --package
+```text
+build-tools/
+  ffmpeg.exe
+  ffprobe.exe
 ```
 
-On Windows, run the PowerShell wrapper:
+Each tool is checked on `PATH` first. If it is missing there, the build uses
+its copy in `build-tools/` automatically, without changing `PATH`. Use a Windows
+FFmpeg build compatible with your host; for shared builds, put the required DLLs
+from the same distribution beside the executables. Static builds need no
+separate FFmpeg DLLs. These local executables and DLLs are ignored by Git.
+This lookup also applies when running `tools/cook_movies.py` directly; both
+preparation scripts retain `--ffmpeg` and `--ffprobe` for explicit paths.
+
+Run from PowerShell:
 
 ```powershell
 ./build.ps1 --iso "C:\path\to\game.iso" --package
 ```
 
-ISO preparation also needs FFmpeg/ffprobe for the movies. Repeat `--iso` to
-supply multiple disc images. A prepared `data/` tree is reused; the game itself
-reads only the resulting loose files.
+With prepared data, omit `--iso`:
 
-For an existing prepared data tree:
+```powershell
+./build.ps1 --package
+```
+
+Windows ARM64 hosts select the native ARM64 target automatically. Check that
+`python --version` (or `py -3 --version`) and `cmake --version` work in the same
+PowerShell session. A `WinError 2` when starting CMake means it could not be
+found; the source-policy check does not verify installed build dependencies.
+Launch through `Start.cmd`.
+
+### macOS
+
+Install:
+
+- **Apple Command Line Tools** (Clang and the macOS SDK).
+- **Python 3.12+** and **CMake 3.16+**, available as `python3` and `cmake`.
+- **FFmpeg**, including `ffprobe`, on `PATH` when using `--iso`.
+- **Ninja** if cross-building Windows binaries; the build tool downloads the
+  pinned Zig cross-toolchain automatically.
+
+For example, with Homebrew already installed:
+
+```bash
+xcode-select --install
+```
+
+```bash
+brew install python@3.12 cmake ffmpeg ninja
+```
+
+Build for Apple Silicon (arm64) and prepare a package:
+
+```bash
+./build.sh --iso "/path/to/game.iso" --package
+```
+
+With prepared data:
 
 ```bash
 ./build.sh --package
 ```
 
-The repository launchers are `Start.command` on macOS and `Start.cmd` on
-Windows. See the [build guide](docs/NATIVE_PORT.md) for platform-specific builds,
-packaging and dependencies, and the [launch guide](STARTEN.md) and
-[controls reference](docs/CONTROLS.md) for playing.
+Launch through `Start.command`. macOS builds use Metal or software rendering.
+
+### Linux
+
+Install:
+
+- **GCC or Clang** with C++17 support, **Make or Ninja**, **Python 3.12+** and
+  **CMake 3.16+**.
+- **pkg-config** and development packages for SDL2's host backends: **X11
+  and/or Wayland** for windowing, and **ALSA and/or PulseAudio** for audio.
+  The build downloads SDL2 itself.
+- **FFmpeg**, including `ffprobe`, on `PATH` when using `--iso`.
+- **Ninja** for Windows cross-builds; Zig is downloaded automatically.
+
+Example dependencies on Debian/Ubuntu (use a distribution release providing
+Python 3.12 or newer):
+
+```bash
+sudo apt install build-essential cmake ninja-build pkg-config python3 ffmpeg libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev
+```
+
+Build and prepare data:
+
+```bash
+./build.sh --iso "/path/to/game.iso"
+```
+
+With prepared data:
+
+```bash
+./build.sh
+```
+
+Linux currently uses the software renderer; the OpenGL backend is planned.
+Linux packaging is not yet supported, so do not pass `--package`. Run the built
+runtime with the prepared data:
+
+```bash
+./build/native/recvx-runtime --data data
+```
+
+See the [build guide](docs/NATIVE_PORT.md) for further build and packaging options,
+and the [launch guide](STARTEN.md) and [controls reference](docs/CONTROLS.md) for
+playing.
 
 ## Further reading
 

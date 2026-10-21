@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import struct
 import subprocess
+from host_tools import find as find_host_tool
 
 
 def demux_pcm(path):
@@ -99,6 +100,7 @@ def main():
     args = p.parse_args()
     records = []
     paths = sorted((args.data / 'files/MOVIE').glob('MV_*.PSS'))
+    tools = None
     for path in paths:
         number = int(path.stem.split('_')[1])
         if args.movie is not None and args.movie != number:
@@ -107,7 +109,13 @@ def main():
         if out.exists():
             print(f'Already cooked: {out}', flush=True)
             continue
-        record = cook(path, out, args.ffmpeg, args.ffprobe)
+        if tools is None:
+            tools = [find_host_tool(args.ffmpeg), find_host_tool(args.ffprobe)]
+            if not all(tools):
+                p.error('movie conversion needs ffmpeg and ffprobe on PATH or, on Windows, '
+                        'build-tools/ffmpeg.exe and build-tools/ffprobe.exe '
+                        '(see --ffmpeg/--ffprobe for explicit paths)')
+        record = cook(path, out, *tools)
         records.append(record)
         print(f'{out}: {record["frames"]} frames, original stereo PCM, {record["seconds"]:.3f}s', flush=True)
         (out.with_suffix('.json')).write_text(json.dumps(record, indent=2)+'\n')
