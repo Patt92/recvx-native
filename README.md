@@ -190,11 +190,22 @@ With prepared data, omit `--iso`:
 ```
 
 Windows ARM64 hosts select the native ARM64 target automatically, also when
-an x64 Python runs under emulation; the Visual Studio generator gets `-A ARM64`
-(or `-A x64`). `--platform windows` or `--platform windows-arm64` overrides the
-choice. The build prints the chosen target and CMake path before configuring;
-the source-policy check does not verify installed build dependencies.
-Launch through `Start.cmd`.
+an x64 Python runs under emulation. `--platform windows` or
+`--platform windows-arm64` overrides the choice. The build prints the chosen
+target and CMake path before configuring; the source-policy check does not
+verify installed build dependencies. Launch through `Start.cmd`.
+
+Native Windows builds use **Ninja** with the Visual Studio developer
+environment (the build runs `vcvarsall.bat` for the host/target pair itself, or
+reuses an open Developer PowerShell). Visual Studio's C++ CMake tools ship
+Ninja; the build finds it next to the bundled CMake or on `PATH`. The Visual
+Studio generator (`-A ARM64`/`-A x64`) is only the fallback without Ninja, or
+when `CMAKE_GENERATOR` names it. The fallback writes every custom build step
+(SDL2 download, header generation, DLL copies) as a `.cmd` file into the build
+directory, which AppLocker or software-restriction policies on managed
+machines block with "Dieses Programm wurde durch eine Gruppenrichtlinie
+geblockt" and MSB8066 in `sdl2-populate.vcxproj`; Ninja runs these commands
+directly. A build directory configured by a different generator is recreated.
 
 ### macOS
 

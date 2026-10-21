@@ -178,6 +178,106 @@ def visual_studio_platform(target: str) -> list[str]:
     return ['-A', 'ARM64' if WINDOWS_TARGETS[target] == 'arm64' else 'x64']
 
 
+VS_NINJA = 'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe'
+VS_VCVARSALL = 'VC/Auxiliary/Build/vcvarsall.bat'
+
+
+def visual_studio_root(cmake: str) -> Path | None:
+    """Installation root when `cmake` is the copy bundled with Visual Studio."""
+    path = Path(cmake)
+    if path.as_posix().lower().endswith(VS_CMAKE.lower()):
+        return path.parents[7]
+    return None
+
+
+def find_ninja(cmake: str) -> str | None:
+    """Ninja from PATH, else the copy Visual Studio ships next to its CMake."""
+    found = shutil.which('ninja')
+    if found:
+        return found
+    root = visual_studio_root(cmake)
+    candidate = root / VS_NINJA if root else None
+    return str(candidate) if candidate and candidate.is_file() else None
+
+
+def find_vcvarsall(cmake: str) -> Path | None:
+    root = visual_studio_root(cmake)
+    candidates = [root / VS_VCVARSALL] if root else []
+    for name, default in (('ProgramFiles', r'C:\Program Files'), ('ProgramFiles(x86)', r'C:\Program Files (x86)')):
+        base = Path(os.environ.get(name, default)) / 'Microsoft Visual Studio'
+        candidates += sorted(base.glob('*/*/' + VS_VCVARSALL), key=lambda c: visual_studio_major(c.parents[4].name), reverse=True)
+    return next((c for c in candidates if c.is_file()), None)
+
+
+def vcvars_architecture(host: str, target: str) -> str:
+    """vcvarsall.bat argument: native tools when host and target agree, else the <host>_<target> cross tools."""
+    host_arch = 'arm64' if host.lower() in {'arm64', 'aarch64'} else 'x64'
+    target_arch = WINDOWS_TARGETS[target]
+    return target_arch if host_arch == target_arch else f'{host_arch}_{target_arch}'
+
+
+def parse_environment(listing: str) -> dict[str, str]:
+    environment = {}
+    for line in listing.splitlines():
+        key, separator, value = line.partition('=')
+        if separator and key and not key.startswith(' '):
+            environment[key] = value.rstrip('\r')
+    return environment
+
+
+def msvc_environment(target: str, cmake: str) -> dict[str, str] | None:
+    """Environment of the Visual Studio developer prompt for the target (cl.exe, INCLUDE, LIB)."""
+    wanted = WINDOWS_TARGETS[target]
+    if os.environ.get('VSCMD_ARG_TGT_ARCH', '').lower() == wanted and shutil.which('cl'):
+        return dict(os.environ)
+    vcvarsall = find_vcvarsall(cmake)
+    if vcvarsall is None:
+        return None
+    architecture = vcvars_architecture(host_machine(), target)
+    try:
+        listing = subprocess.check_output(['cmd.exe', '/d', '/s', '/c', f'"{vcvarsall}" {architecture} >nul 2>&1 && set'],
+                                          text=True, errors='replace', cwd=ROOT)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    environment = parse_environment(listing)
+    return environment if 'INCLUDE' in environment and 'LIB' in environment else None
+
+
+def windows_generator(target: str, cmake: str) -> tuple[list[str], dict[str, str] | None, str]:
+    """Configure arguments, build environment and generator name for a native Windows build.
+
+    Ninja with the MSVC developer environment is preferred: it runs every build command directly. The
+    Visual Studio generator writes each custom build step (FetchContent population, SDL2 header
+    generation, DLL copies) as a .cmd file into the build directory and runs it from there, which
+    AppLocker/software-restriction script rules block on managed machines ("Dieses Programm wurde durch
+    eine Gruppenrichtlinie geblockt", MSB8066 in sdl2-populate.vcxproj).
+    """
+    generator = os.environ.get('CMAKE_GENERATOR', '')
+    if generator.startswith('Visual Studio') or (generator and generator != 'Ninja'):
+        return visual_studio_platform(target), None, generator
+    ninja = find_ninja(cmake)
+    environment = msvc_environment(target, cmake) if ninja else None
+    if ninja and environment:
+        return ['-G', 'Ninja', f'-DCMAKE_MAKE_PROGRAM={ninja}'], environment, 'Ninja'
+    if generator == 'Ninja':
+        raise RuntimeError('CMAKE_GENERATOR=Ninja needs ninja.exe (Visual Studio C++ CMake tools) and vcvarsall.bat')
+    print('Ninja or the Visual Studio developer environment was not found; using the Visual Studio generator. '
+          'Its custom build steps run as .cmd files from the build directory, which some group policies block.', flush=True)
+    return visual_studio_platform(target), None, 'Visual Studio'
+
+
+def reset_foreign_generator(build: Path, generator: str) -> None:
+    """A build directory configured by another generator cannot be re-configured; start it afresh."""
+    cache = build / 'CMakeCache.txt'
+    if not cache.is_file():
+        return
+    match = re.search(r'^CMAKE_GENERATOR:INTERNAL=(.*)$', cache.read_text(errors='replace'), re.M)
+    if not match or match.group(1).strip().startswith(generator):
+        return
+    print(f'Build directory {build} was configured with "{match.group(1).strip()}"; recreating it for {generator}.', flush=True)
+    shutil.rmtree(build)
+
+
 def is_windows_target(target: str) -> bool:
     return target in WINDOWS_TARGETS
 
@@ -278,7 +378,11 @@ def main():
         if target == 'macos':
             configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
         if is_windows_target(target):
-            configure += visual_studio_platform(target)
+            arguments, environment, generator = windows_generator(target, cmake)
+            configure += arguments
+            if environment:
+                os.environ.update(environment)
+            reset_foreign_generator(build, generator)
         run(*configure)
         run(cmake, '--build', build, '--config', 'Release', '--parallel', args.jobs)
     binary_dir = build / 'Release' if (build / 'Release').is_dir() else build

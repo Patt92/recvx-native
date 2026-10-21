@@ -75,6 +75,77 @@ class BuildTargetTests(unittest.TestCase):
              patch.dict(build_native.os.environ, {'CMAKE_GENERATOR': 'Ninja'}):
             self.assertEqual(build_native.visual_studio_platform('windows-arm64'), [])
 
+    def test_vcvars_architecture_follows_host_and_target(self):
+        self.assertEqual(build_native.vcvars_architecture('ARM64', 'windows-arm64'), 'arm64')
+        self.assertEqual(build_native.vcvars_architecture('ARM64', 'windows'), 'arm64_x64')
+        self.assertEqual(build_native.vcvars_architecture('AMD64', 'windows'), 'x64')
+        self.assertEqual(build_native.vcvars_architecture('AMD64', 'windows-arm64'), 'x64_arm64')
+
+    def test_developer_environment_is_parsed_from_vcvarsall(self):
+        with tempfile.TemporaryDirectory() as root:
+            vcvarsall = Path(root) / 'VS' / build_native.VS_VCVARSALL
+            vcvarsall.parent.mkdir(parents=True)
+            vcvarsall.write_bytes(b'')
+            cmake = Path(root) / 'VS' / build_native.VS_CMAKE
+            listing = 'INCLUDE=C:\\VS\\include\r\nLIB=C:\\VS\\lib\r\nPATH=C:\\VS\\bin;C:\\Windows\r\n=::=::\\\r\n'
+            with patch.object(build_native.platform, 'system', return_value='Windows'), \
+                 patch.object(build_native, 'host_machine', return_value='ARM64'), \
+                 patch.dict(build_native.os.environ, {}, clear=True), \
+                 patch.object(build_native.subprocess, 'check_output', return_value=listing) as call:
+                environment = build_native.msvc_environment('windows-arm64', str(cmake))
+        self.assertEqual(environment['INCLUDE'], 'C:\\VS\\include')
+        self.assertEqual(environment['PATH'], 'C:\\VS\\bin;C:\\Windows')
+        self.assertNotIn('', environment)
+        command = call.call_args[0][0]
+        self.assertEqual(command[:4], ['cmd.exe', '/d', '/s', '/c'])
+        self.assertIn(f'"{vcvarsall}" arm64 ', command[4])
+
+    def test_windows_prefers_ninja_with_the_developer_environment(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(build_native, 'ROOT', Path(root)), \
+             patch.object(sys, 'argv', ['build_native.py', '--platform', 'windows-arm64']), \
+             patch.object(build_native.platform, 'system', return_value='Windows'), \
+             patch.object(build_native, 'find_cmake', return_value=r'C:\VS\cmake.exe'), \
+             patch.object(build_native, 'find_ninja', return_value=r'C:\VS\ninja.exe'), \
+             patch.object(build_native, 'msvc_environment', return_value={'INCLUDE': 'inc', 'LIB': 'lib', 'PATH': 'bin'}), \
+             patch.dict(build_native.os.environ, {}, clear=True), \
+             patch.object(build_native, 'run', side_effect=lambda *command: commands.append(tuple(map(str, command)))):
+            build_native.main()
+            self.assertEqual(build_native.os.environ['INCLUDE'], 'inc')
+        configure = next(c for c in commands if '-S' in c)
+        self.assertIn('Ninja', configure)
+        self.assertIn(r'-DCMAKE_MAKE_PROGRAM=C:\VS\ninja.exe', configure)
+        self.assertNotIn('-A', configure)
+
+    def test_windows_falls_back_to_visual_studio_generator_without_ninja(self):
+        commands = []
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(build_native, 'ROOT', Path(root)), \
+             patch.object(sys, 'argv', ['build_native.py', '--platform', 'windows-arm64']), \
+             patch.object(build_native.platform, 'system', return_value='Windows'), \
+             patch.object(build_native, 'find_cmake', return_value=r'C:\VS\cmake.exe'), \
+             patch.object(build_native, 'find_ninja', return_value=None), \
+             patch.dict(build_native.os.environ, {}, clear=True), \
+             patch.object(build_native, 'run', side_effect=lambda *command: commands.append(tuple(map(str, command)))):
+            build_native.main()
+        configure = next(c for c in commands if '-S' in c)
+        self.assertEqual(configure[-2:], ('-A', 'ARM64'))
+        self.assertNotIn('Ninja', configure)
+
+    def test_foreign_generator_cache_is_recreated(self):
+        with tempfile.TemporaryDirectory() as root:
+            build = Path(root) / 'build'
+            build.mkdir()
+            (build / 'CMakeCache.txt').write_text('CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026\n')
+            (build / 'stale.obj').write_bytes(b'')
+            build_native.reset_foreign_generator(build, 'Ninja')
+            self.assertFalse(build.exists())
+            build.mkdir()
+            (build / 'CMakeCache.txt').write_text('CMAKE_GENERATOR:INTERNAL=Ninja\n')
+            build_native.reset_foreign_generator(build, 'Ninja')
+            self.assertTrue((build / 'CMakeCache.txt').is_file())
+
     def test_windows_arm64_directories(self):
         self.assertTrue(build_native.is_windows_target('windows-arm64'))
         self.assertTrue(build_native.is_windows_target('windows'))
