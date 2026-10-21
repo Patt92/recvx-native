@@ -75,6 +75,15 @@ class BuildTargetTests(unittest.TestCase):
              patch.dict(build_native.os.environ, {'CMAKE_GENERATOR': 'Ninja'}):
             self.assertEqual(build_native.visual_studio_platform('windows-arm64'), [])
 
+    def test_ninja_is_found_in_both_visual_studio_layouts(self):
+        for relative in build_native.VS_NINJA:
+            with tempfile.TemporaryDirectory() as root, patch.object(build_native.shutil, 'which', return_value=None):
+                cmake = Path(root) / 'VS' / build_native.VS_CMAKE
+                ninja = Path(root) / 'VS' / relative
+                ninja.parent.mkdir(parents=True, exist_ok=True)
+                ninja.write_bytes(b'')
+                self.assertEqual(build_native.find_ninja(str(cmake)), str(ninja))
+
     def test_vcvars_architecture_follows_host_and_target(self):
         self.assertEqual(build_native.vcvars_architecture('ARM64', 'windows-arm64'), 'arm64')
         self.assertEqual(build_native.vcvars_architecture('ARM64', 'windows'), 'arm64_x64')

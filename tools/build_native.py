@@ -178,7 +178,9 @@ def visual_studio_platform(target: str) -> list[str]:
     return ['-A', 'ARM64' if WINDOWS_TARGETS[target] == 'arm64' else 'x64']
 
 
-VS_NINJA = 'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe'
+# Ninja ships with the C++ CMake tools; older layouts keep it next to cmake.exe.
+VS_NINJA = ('Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe',
+            'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/ninja.exe')
 VS_VCVARSALL = 'VC/Auxiliary/Build/vcvarsall.bat'
 
 
@@ -196,8 +198,10 @@ def find_ninja(cmake: str) -> str | None:
     if found:
         return found
     root = visual_studio_root(cmake)
-    candidate = root / VS_NINJA if root else None
-    return str(candidate) if candidate and candidate.is_file() else None
+    for relative in VS_NINJA if root else ():
+        if (root / relative).is_file():
+            return str(root / relative)
+    return None
 
 
 def find_vcvarsall(cmake: str) -> Path | None:
@@ -259,9 +263,10 @@ def windows_generator(target: str, cmake: str) -> tuple[list[str], dict[str, str
     environment = msvc_environment(target, cmake) if ninja else None
     if ninja and environment:
         return ['-G', 'Ninja', f'-DCMAKE_MAKE_PROGRAM={ninja}'], environment, 'Ninja'
+    missing = 'ninja.exe' if not ninja else f'the developer environment (vcvarsall.bat: {find_vcvarsall(cmake) or "not found"})'
     if generator == 'Ninja':
-        raise RuntimeError('CMAKE_GENERATOR=Ninja needs ninja.exe (Visual Studio C++ CMake tools) and vcvarsall.bat')
-    print('Ninja or the Visual Studio developer environment was not found; using the Visual Studio generator. '
+        raise RuntimeError(f'CMAKE_GENERATOR=Ninja needs ninja.exe and vcvarsall.bat; missing {missing}')
+    print(f'Missing {missing}; using the Visual Studio generator. '
           'Its custom build steps run as .cmd files from the build directory, which some group policies block.', flush=True)
     return visual_studio_platform(target), None, 'Visual Studio'
 
