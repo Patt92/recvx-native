@@ -1,0 +1,172 @@
+# Archivierte Arbeit – Index
+
+Am 2026-10-21 aus `work/` verschoben: erledigte Ergebnisberichte, im Code angekommene
+Integrationspatches (alle 26 geprüft: unverändert angewendet oder später weiterentwickelt),
+abgeschlossene Pläne/Aufträge, Prüfskizzen und die Anweisungshistorie. Keine Autorisierung
+und kein aktueller Stand: vor Nutzung mit Code, Ledger und `docs/` abgleichen.
+
+In `work/` geblieben (laufend): `enemies/` (Gegner-Auftragsbrett, offene Abnahmen),
+`subagent_briefings_enemies.md`, `native_port_inventory_contract.md` (vom Code zitierter
+Vertrag), `performance_optimization_plan_20261020.md` (Wattmessung offen),
+`forbidden_cleanup_manifest.json` (aktives Quarantänemanifest, CMake).
+
+Verweise in Ledger, `docs/`, Code, Tests und Werkzeugen zeigen auf diese Pfade.
+`history/2026-10-13-instructions/` ist bytegleich verschoben (Hashes unverändert).
+
+## Verschoben (155 Einträge)
+
+- `00_native_enemy_integration_audit.md`
+- `01_room_spawn_evidence.md`
+- `01_room_spawn_evidence.result.md`
+- `02_enemy_work_arena.md`
+- `02_enemy_work_arena.result.md`
+- `03_motion_pose_model_state.result.md`
+- `04_collision_floor_wall.md`
+- `04_collision_floor_wall.result.md`
+- `05_native_enemy_rendering.md`
+- `05_native_enemy_rendering.result.md`
+- `06_sfx_effects_player_interaction.md`
+- `06_sfx_effects_player_interaction.result.md`
+- `07_en07_dispatch_integration.md`
+- `07_en07_dispatch_integration.result.md`
+- `08_runtime_acceptance.md`
+- `08_runtime_acceptance.result.md`
+- `09_actor_asset_port.result.md`
+- `10_native_actor_morph.result.md`
+- `11_native_weapon_flash.result.md`
+- `12_forbidden_cleanup.result.md`
+- `2026-10-18-punch-through.md`
+- `Q01_build_anschluss_pruefer.md`
+- `README.md`
+- `app_icon.result.md`
+- `audio_port_status_20261011.md`
+- `barrel_damage_20261017.md`
+- `body_wall_pass.integration.patch`
+- `camera_offset.integration.patch`
+- `claw_model_light.integration.patch`
+- `combat_weapon_se.integration.patch`
+- `common10_pxb.integration.patch`
+- `crouch-pickup.result.md`
+- `disasm_rdt.py`
+- `door-room-case.result.md`
+- `doors-verify`
+- `easy_dir_light.integration.patch`
+- `easy_dir_light.result.md`
+- `effect_model_mirror.integration.patch`
+- `effect_model_mirror.result.md`
+- `effect_procedures.generator.md`
+- `effsub2_batch.integration.patch`
+- `effsub34_batch.integration.patch`
+- `en07_native_link_audit.c`
+- `en16_laser_hits.integration.patch`
+- `en16_laser_hits.result.md`
+- `en21_acceptance.integration.patch`
+- `en21_acceptance.result.md`
+- `enemy_id_asset_inventory.md`
+- `enemy_joint_mapping.integration.patch`
+- `enemy_rows_audit.integration.patch`
+- `enemy_rows_audit.ledger.tsv`
+- `enemy_rows_audit.result.md`
+- `event_gap_inventory_20261011.md`
+- `head_enemy_search.integration.patch`
+- `history`
+- `item_draw_light.integration.patch`
+- `light_effect_link.integration.patch`
+- `light_effect_link.result.md`
+- `native_port_A01_A04_combat.md`
+- `native_port_A01_A04_combat.patch`
+- `native_port_A01_A04_combat.result.md`
+- `native_port_B00_motion.result.md`
+- `native_port_B01_stairs.result.md`
+- `native_port_B04_hair.result.md`
+- `native_port_B04_hair_followup.result.md`
+- `native_port_B05_item_box_object.result.md`
+- `native_port_B06_head.result.md`
+- `native_port_C02_enemy_work.result.md`
+- `native_port_C03_states.patch`
+- `native_port_C03_states.result.md`
+- `native_port_C05_subplayer.result.md`
+- `native_port_C05_subplayer.result.patch`
+- `native_port_D03_files_inspection.result.md`
+- `native_port_D04_computer.plan.md`
+- `native_port_D04_computer.result.md`
+- `native_port_D05_gameover.result.md`
+- `native_port_D06_events.patch`
+- `native_port_D10_map.md`
+- `native_port_D10_map.patch`
+- `native_port_D10_map.result.md`
+- `native_port_D10_map_render.result.md`
+- `native_port_E01_line_reflection.result.md`
+- `native_port_E03_lighter.result.md`
+- `native_port_E03b_room_effects.result.md`
+- `native_port_EN02_world.result.md`
+- `native_port_EN09_world.result.md`
+- `native_port_EN21_world.result.md`
+- `native_port_EN53_component.result.md`
+- `native_port_F05_semantics.plan.md`
+- `native_port_F05_semantics.result.md`
+- `native_port_G01_doors.result.md`
+- `native_port_P03_E01_ground.result.md`
+- `native_port_P04_camera_invocations.result.md`
+- `native_port_P04_clip.result.md`
+- `native_port_R02_D09.result.md`
+- `native_port_T3_large.result.md`
+- `native_port_T5_subplayer.result.md`
+- `native_port_alpha_domain.result.md`
+- `native_port_alpha_domain_565.result.md`
+- `native_port_audio_sample_loops.result.md`
+- `native_port_audio_spu_reverb.result.md`
+- `native_port_blend_state.result.md`
+- `native_port_build_starter.result.md`
+- `native_port_combat_aim.result.md`
+- `native_port_combat_barrels_muzzle.result.md`
+- `native_port_discard_question.result.md`
+- `native_port_effect_script.result.md`
+- `native_port_effsub0_handport.result.md`
+- `native_port_en05_en13_en23_stand.result.md`
+- `native_port_enemies_bats_bander_dogs.result.md`
+- `native_port_enemy_ai.result.md`
+- `native_port_enemy_audit_fixes.result.md`
+- `native_port_enemy_gap_scan.result.md`
+- `native_port_enemy_upper_body.result.md`
+- `native_port_event_effects_heli_steve.result.md`
+- `native_port_event_gaps.result.md`
+- `native_port_event_parser_audit.result.md`
+- `native_port_events_elevator_steve_wesker.result.md`
+- `native_port_events_round2.result.md`
+- `native_port_exm_camera.result.md`
+- `native_port_fog_light.result.md`
+- `native_port_heli_flicker.result.md`
+- `native_port_inventory_combine.result.md`
+- `native_port_inventory_compaction_typewriter.result.md`
+- `native_port_inventory_tests.result.md`
+- `native_port_item_box_surface.result.md`
+- `native_port_live_effects.result.md`
+- `native_port_player_owp_effect_pass.result.md`
+- `native_port_push_crates.result.md`
+- `native_port_room_render_round2.result.md`
+- `native_port_room_render_stairs_sign_bed.result.md`
+- `native_port_stairs_foot_fixing.result.md`
+- `native_port_walls_doors.result.md`
+- `native_port_weapon_se_3d.result.md`
+- `native_port_windows_audit.md`
+- `opengl_backend.result.md`
+- `performance_gpu_feasibility_20261020.result.md`
+- `performance_gpu_raster_d2_20261020.result.md`
+- `performance_phaseA_scalpel_20261020.result.md`
+- `player_native_link_audit.c`
+- `policy_audit_20261010_aufsicht.md`
+- `rm0090_box.integration.patch`
+- `rm0150-statue-turn.result.md`
+- `rm1090_clock`
+- `rm1110-ant-pickup.result.md`
+- `screen_fade_owner.integration.patch`
+- `screen_fade_owner.result.md`
+- `script_effect_opcodes.integration.patch`
+- `stand_player_motion.integration.patch`
+- `status_screen_hold.integration.patch`
+- `status_screen_hold.result.md`
+- `t3_en03_collision_check.c`
+- `t3_en03_lib_check.c`
+- `t4_tests`
+- `title-load-navigation.result.md`

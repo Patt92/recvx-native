@@ -146,7 +146,7 @@ Logs and images from individual checks are local under `build/validation/`.
 
 ## Live muzzle-flash/0x49 effects (2026-10-11)
 
-Details: `work/native_port_live_effects.result.md`. Build
+Details: `archived/work/native_port_live_effects.result.md`. Build
 `build/live-effects-20261011`, policy PASS, 13 CTest groups, `verify_combat`
 (build and package), pixel acceptance at frames 3502/3562 versus a control
 build with only flash draw disabled. arm64 package SHA256 a0adeb29…1a9c,
@@ -154,7 +154,7 @@ signed. Windows cross-built, not executed.
 
 ## Shared effect pool / ascending pass (evening 2026-10-11)
 
-Details: `work/native_port_live_effects.result.md`, addendum. Sprites,
+Details: `archived/work/native_port_live_effects.result.md`, addendum. Sprites,
 muzzle flashes, particle roots/auxiliary work, and blood pools share one
 `eff[512]` (`effsub3.c:67/92/145`). The effect pass ascends and commits
 spawn output after each procedure (`effect.c:742`). Tick gate:
@@ -179,7 +179,7 @@ spawn checked); `CallPlayerWeaponSeEx` slot/position remained a reported gap.
 
 ## Enemy attacks: dogs and player motion during grabs (evening 2026-10-12)
 
-Details: addendum to `work/native_port_enemy_ai.result.md`. Build
+Details: addendum to `archived/work/native_port_enemy_ai.result.md`. Build
 `build/enemy-ai-claude-20261011`, policy PASS. `tools/verify_enemy_ai.py`
 PASS (`build/validation/enemy-ai-20261012/verify-final`): natural zombies in
 RM_0080, RM_0060/RM_0031/RM_3070; natural dogs in RM_1000
@@ -198,7 +198,7 @@ One host texture-alpha domain (0..255, factor alpha/255 = original As/128):
 decoder without `Ps2AlphaIsHalf` halving, `write_tga` without ×2
 (lossless export/import), renderer with one divisor for every blend mode, and
 removal of four handwritten ×2 doublings in UI/computer/world. Details:
-`work/native_port_alpha_domain.result.md`. CTest 79/81; red:
+`archived/work/native_port_alpha_domain.result.md`. CTest 79/81; red:
 `script_motion` (pre-existing, confirmed with the 22:00 binary in
 `build/mapinput-claude-20261013` with identical message) and
 `original_map_render` (new incomplete parallel map work: 11 fills instead of
@@ -226,7 +226,7 @@ map/shadow/fog work. No package, commit, or push.
 unchanged; invalid pairs report `blend_unavailable` in `--state` instead of
 aborting). Bound to effect-sprite, particle, and muzzle-flash paths; ID
 allowlist and `ninja_blend_register` removed. Details:
-`work/native_port_blend_state.result.md`. CTest 79/81 (red:
+`archived/work/native_port_blend_state.result.md`. CTest 79/81 (red:
 pre-existing `script_motion`, concurrent `original_map_render`).
 `verify_lighter`, `verify_combat`, `verify_detector`, `verify_scanner`,
 `verify_doors`, `verify_continuity`, and `verify_events` PASS;
@@ -261,7 +261,7 @@ writes `epw->djnt_no` and calls the ported `zonzon.c:466 bhEne_SetBlood2`
 core. The T3 service and world pointer bind for that call
 (`EnemyExtScope` as in `control_enemy_works`); otherwise the library reports
 “[zonzon.c:493 effect.c bhSetEffectTb]” as a gap (measured). CTest remained
-80/82. Details: `work/native_port_effect_script.result.md`.
+80/82. Details: `archived/work/native_port_effect_script.result.md`.
 
 Remaining effect script surface at that time: 0x2c `bhEffectSet` allocates
 the first free slot in shared `eff[512]` (`RoomWorld::allocate_effect`) and

@@ -2,7 +2,7 @@
 """Windows-PE-Audit ohne Symbole im Binary.
 
 Der von zig/LLD erzeugte PE traegt weder eine COFF-Symboltabelle noch
-.debug-Abschnitte (Belege in work/native_port_windows_audit.md). Statt das
+.debug-Abschnitte (Belege in archived/work/native_port_windows_audit.md). Statt das
 Binary direkt zu pruefen, fuehrt dieses Modul den Nachweis in drei Stufen:
 
  1. Den tatsaechlichen Linkbefehl des Ziels aus dem Buildsystem uebernehmen,

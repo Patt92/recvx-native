@@ -1778,7 +1778,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
            player_stairs.c:918; en01/en05/en09/en12/en17/en26), ein generischer
            Modelldraw-/Link-Leser existiert in MdlPut.c/objitm.c nicht.  Das
            Bit wird exakt gespeichert; der Familien-Verbraucher bleibt als
-           Vertrag offen (work/native_port_event_gaps.result.md). */
+           Vertrag offen (archived/work/native_port_event_gaps.result.md). */
         if(cmd==41){
             auto& e=entity(ctx.kind,ctx.index);
             const bool enabled=v.u16(2)!=0;
@@ -3308,7 +3308,7 @@ void RoomWorld::control_lights(){
     // light.c:367-371: bhControlLight ruft unter gm_flg 0x80 bhSetEasyDirLight(1) und kehrt
     // zurueck. Dessen mode/ct0-Fortschritt (:288-319) ist NICHT durch sp_flg 0x80 getort.
     // Teilintegration: nur Seiteneffekte dieses echten Aufrufs; Einzellicht-Register und die
-    // weiteren Zeichenaufrufe bleiben offen (work/easy_dir_light.result.md). Kein RGB/w*-Write.
+    // weiteren Zeichenaufrufe bleiben offen (archived/work/easy_dir_light.result.md). Kein RGB/w*-Write.
     const bool easy_only=collision_events_&&(collision_events_->flags[11][0]&0x80u);
     if(easy_only){
         if(lights_.empty())unbound_enemy_.insert("bhSetEasyDirLight: rom->lgtp[0] fehlt");

@@ -150,4 +150,4 @@ in der Handfassung korrigiert und in den Tests festgehalten.
 Noch nicht portiert bleiben die Prozeduren, die der Übersetzer nie ausgab
 (`sys->`-Dienste, `cam`/`rom`/`eff`-Zugriffe, Partikel-/Modellpfade aus
 effsub2/3/4); Liste und Dienstbedarf in
-`work/native_port_effsub0_handport.result.md`.
+`archived/work/native_port_effsub0_handport.result.md`.

@@ -1,6 +1,6 @@
 /* bhSetEasyDirLight, light.c:279-328, SLUS_201.84 0x2810e0..0x28126c.
    No original source is compiled or executed. Owner tests require the separate
-   work/easy_dir_light.integration.patch (control-call side effects ONLY).
+   archived/work/easy_dir_light.integration.patch (control-call side effects ONLY).
    Draw sequence tests below are explicitly supplied calls, NOT a scheduler or
    a claim that RoomWorld::append already reproduces the original draw order.
 

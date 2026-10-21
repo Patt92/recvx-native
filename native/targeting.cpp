@@ -16,7 +16,7 @@ namespace recvx {
 // KEINE zweite Ziel- oder Besuchtliste: eine zweite Zielquelle ist genau der
 // Fehler, den die Policy verbietet. Sie bleibt nur stehen, weil
 // tests/native/combat_test.cpp ihre Rueckgabe prueft; der Integrator-Patch
-// (work/native_port_A01_A04_combat.patch, Abschnitt 8) entfernt beides.
+// (archived/work/native_port_A01_A04_combat.patch, Abschnitt 8) entfernt beides.
 //
 // Das aufgeschaltete Ziel steht im Kampf: CombatController::targets() liefert
 // AimSelection aus pp.lck_tbl (Hostindex ueber RECVX_ENEMY_WORK.owner_index)

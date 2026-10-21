@@ -21,7 +21,7 @@ namespace recvx {
    and no constant-material model call, so the port records every primitive with
    its original geometry, priority, blend attribute and resolved material in
    `MapDrawList` instead of silently dropping it.  Binding that list to the
-   renderer is the integrator contract (work/native_port_D10_map.patch). */
+   renderer is the integrator contract (archived/work/native_port_D10_map.patch). */
 
 /* One primitive as the original draw call produced it. */
 struct MapDraw {

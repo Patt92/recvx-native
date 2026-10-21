@@ -12,8 +12,10 @@ aktuellem Code, Arbeitsbaum und installierter Runtime abgleichen.
 - Aktuelles fachliches Portiert/Offen: [Gameplay](docs/NATIVE_GAMEPLAY.md),
   [Player](docs/NATIVE_PLAYER.md), [Audio](docs/AUDIO.md),
   [Assets](docs/NATIVE_ASSETS.md), [Validierung](docs/VALIDATION.md).
-- Ergebnisse/Anschlussverträge bleiben an ihren bisherigen `work/`-Pfaden;
-  Tests, Originalreferenzen, Ledger und Policy-Prüfer wurden nicht verschoben.
+- `work/` enthält nur laufende Arbeit (Gegner-Auftragsbrett `work/enemies/`, Briefings,
+  Inventarvertrag, Leistungsplan, Quarantänemanifest). Erledigte Ergebnisse, angewendete
+  Patches und die Anweisungshistorie liegen seit 2026-10-21 unter `archived/work/`;
+  Verweise in Ledger, Docs, Code und Tests sind nachgezogen.
 
 ## Arbeitsbaum und Auslieferung
 
@@ -70,8 +72,8 @@ SE-Stimmen ignorierten VAG-Loopmarker (70400 brach nach 1 s ab) – Mix folgt je
 EN26 Kopfplatzen, EN29 Blut, EN19 Schatten/Trefferzuweisung/Kamerawackel, EN12-Effekte;
 neu portiert `bhSetGunSplash` (combat.cpp, Kampf- und Effektpass) und das Zeichnen der
 EN01-Kinder mit eigener Modellreihe (Kappe/Wurm/Bom/Scope, 30 Räume). Tests `gun_splash`,
-`enemy_en01_child_draw`, `rm5840_tyrant_gun`. Berichte `work/enemy_rows_audit.result.md`,
-`work/en21_acceptance.result.md`. **Kein Commit.**
+`enemy_en01_child_draw`, `rm5840_tyrant_gun`. Berichte `archived/work/enemy_rows_audit.result.md`,
+`archived/work/en21_acceptance.result.md`. **Kein Commit.**
 
 **RM_0090 Sicherheitsbox mit hochstehendem Deckel (2026-10-20, Arbeitsbaum, 197/197 grün):**
 Raumobjekte übernahmen jede Common-24/34-Motion im nächsten Takt; im Original schreibt nur
@@ -104,11 +106,11 @@ Nicht aus einem alten „im Paket“-Absatz eine aktuelle Auslieferung ableiten.
 **Leistung/Energie:** Der Software-Rasterer ist ≈ 99 % der CPU-Last (≈ 62–70 ms CPU je
 Raumbild bei „High“, Simulation ≈ 0.26 ms/Takt). Plan und Messbasis:
 [Plan](work/performance_optimization_plan_20261020.md),
-[Phase A + Schnitte](work/performance_phaseA_scalpel_20261020.result.md)
+[Phase A + Schnitte](archived/work/performance_phaseA_scalpel_20261020.result.md)
 (`bilinear` inline −8 % bitidentisch, ein Zeichenpass je Takt, `--render-threads` für
 `powermetrics`-A/B am Starter). Workerzahl per `powermetrics` entschieden (Automatik bleibt).
-[GPU-Machbarkeit](work/performance_gpu_feasibility_20261020.result.md) bestanden: dieselbe
-Setup-Liste auf Metal statt 62–73 ms CPU. **[GPU-Rasterer im Spiel](work/performance_gpu_raster_d2_20261020.result.md)**
+[GPU-Machbarkeit](archived/work/performance_gpu_feasibility_20261020.result.md) bestanden: dieselbe
+Setup-Liste auf Metal statt 62–73 ms CPU. **[GPU-Rasterer im Spiel](archived/work/performance_gpu_raster_d2_20261020.result.md)**
 (macOS, Dev-App): `video.ini renderer = gpu` (Standard), `--renderer gpu|software`; Punktabtastung
 bitgleich inkl. Schatten (Test `gpu_raster_parity`), CPU je Bild ≈ 0,3–0,5 ms. Offen: Wattmessung
 am Starter. Schattenmasken laufen ebenfalls auf der GPU (ein Befehlspuffer je Bild).
@@ -119,12 +121,12 @@ noch ungeprüft**; GPUs ohne ROV behalten den Softwarepfad.
 Windows-x64-Crossbuild grün; 11 gezielte Tests bestanden, 3 GPU-Prüfungen wegen
 Sandbox ohne Display übersprungen. Dev-App aktualisiert, Titel/Raum nur im
 Softwarefallback geprüft. GL-Shader-/Pixelparität und Linux-Hardware offen.
-[Bericht](work/opengl_backend.result.md).
+[Bericht](archived/work/opengl_backend.result.md).
 
 **Kartenbild:** MAP zeichnet MRY-Geometrie, Marker und Sprites in der eigenen
 Build-Runtime; Fade-Rückweg und Wiedereintritt gezielt geprüft. Constant-Material-
 Farbpfad und Typ-41-Normalen korrigiert. **Noch keine Starter-/Paketersetzung.**
-Belege und verbleibende Grenzen: [D10 Kartenrenderer](work/native_port_D10_map_render.result.md).
+Belege und verbleibende Grenzen: [D10 Kartenrenderer](archived/work/native_port_D10_map_render.result.md).
 
 **Pausentaste (Host):** Escape beendet die Runtime nie. Im Menü/Dialog bricht es ab,
 im freien Spiel öffnet und schließt es die Pause (`system.c:668/691`, dieselbe
@@ -153,7 +155,7 @@ läuft trotz st_flg 0x4 unter den Originalbedingungen von bhCPM0_action, und bhC
 gibt das Bit frei (player.c:1838). Geprüft in der eigenen Build-Runtime
 `build/discard-claude-20261014`. Offen ist B: das Original-Pad-Gating statt Host-Gate.
 **Noch keine Starter-/Paketersetzung.**
-[Bericht](work/native_port_discard_question.result.md).
+[Bericht](archived/work/native_port_discard_question.result.md).
 
 **Effektprozeduren (Übersetzer abgelöst, weitere Gruppen):** alle 66 vormals
 regex-übersetzten Prozeduren sowie 68 nie übersetzte (effsub0, effsub1, effsub1b,
@@ -168,13 +170,13 @@ Familien aus effsub2/3/4 bleiben offen; `native/effect_procedures.cpp`, `native/
 Effektzeichenpfads. Zufalls- und Versatzfehler des
 Generats sind in [QUALITY.md](QUALITY.md) dokumentiert. Belege, Offenliste der nie
 übersetzten Prozeduren mit dem Scan aller 205 Raumdateien:
-[Ergebnis](work/native_port_effsub0_handport.result.md), Differenzläufe
+[Ergebnis](archived/work/native_port_effsub0_handport.result.md), Differenzläufe
 `build/validation/effproc-handport-20261014/`, Gruppen 7/8
 `build/validation/effproc-backface-20261014/`, Gruppe 9 `build/validation/effproc-snow-20261014/`, Gruppe 10 (inkl. `bhSetEffectLink` beim
 Raumladen) `build/validation/effproc-afterimage-20261014/`.
 Nachbild-Nachprüfung: belegte DifAmb-Lichtrechnung, committed Spieler-/Zusatzmodellaufnahme
 und Skin-FM; **88/88** Tests. Diagnose-A/B mit Originalraumgeometrie, keine natürliche
-Sichtabnahme. [Belege](work/native_port_effsub0_handport.result.md).
+Sichtabnahme. [Belege](archived/work/native_port_effsub0_handport.result.md).
 **Start.command-Dev-App durch `./build.sh` aktualisiert; kein Paket ersetzt.**
 
 **Gegner-KI EN21:** Albinoid-Jungtier im nativen WorldEntity-/Dispatchpfad
@@ -182,13 +184,13 @@ angebunden, mit Route/Spielmodus, Spielergriff, Audio und Effekten 396/399 auf d
 Modelltexturliste. Gemeinsame Routeninitialisierung ohne Zombie-Ressource und
 Spieler-Griffseiteneffekte ergänzt. Eigene arm64-Build `build/en21-bind-claude-20261014`.
 **Tests auf Nutzerwunsch zurückgestellt; keine Gameplay-Abnahme oder Starter-Ersetzung.**
-[Umfang und spätere Abnahme](work/native_port_EN21_world.result.md).
+[Umfang und spätere Abnahme](archived/work/native_port_EN21_world.result.md).
 
 **Bandersnatcher (EN09):** Stillstand behoben — Identität 9 fehlte im Dispatch, die
 Zustandsmaschine war nur Gerüst. KI, Motion/Fußfixierung, Arme, Griff, Schaden, Tod
 und Rauch portiert; RM_1060 A/B und `tests/native/en09_world_test.cpp` grün.
 Eigene Build `build/en09-claude-20261014`. **Noch keine Starter-/Paketersetzung.**
-[Bericht](work/native_port_EN09_world.result.md).
+[Bericht](archived/work/native_port_EN09_world.result.md).
 
 **Offene Punkte, Stand 2026-10-14 nachmittags:** ID-Karte Variante B (Original-Padsperre statt
 st_flg-0x4-Hostsperre), UFO-Kran bhEff134 + EN56-Dienste + Anzeige, Funken 308, Blutstoss 296/297,
@@ -207,7 +209,7 @@ RM_1000 meldet keine Lücke. Die verbleibenden Lücken sind **Subsysteme und Geg
 ungebundenen Einzeldienste: `bhEne02` Gulp Worm (6, Struktur bestimmt: 18 Kindworks, mobiler
 ATR-Eintrag, EXP0-Layout), `bhEne19` (4), `bhEff108`/`bhEff219` (4), `bhEne03`/`bhEne29` (3),
 `bhEff355` (3), EN53-`child_ambient` (3).
-[Bericht](work/native_port_enemy_gap_scan.result.md). **Kein Commit/Push, keine Paketersetzung.**
+[Bericht](archived/work/native_port_enemy_gap_scan.result.md). **Kein Commit/Push, keine Paketersetzung.**
 
 **EN02 Gulp Worm (2026-10-14 nachts):** vollständig portiert (`native/enemies/en02.c`, Dispatch
 `jump[2]`, 18 Kindworks auf Slot 31, mobiler ATR, Sandsprites 253/254, Effektstimme 127).
@@ -215,14 +217,14 @@ RM_5830 headless: Angriffskette läuft, Spieler-HP 160→0; CTest `enemy_en02_wo
 Effekt-Suite 32/32. Scan jetzt **35 Räume** mit Lücken. Belegte Original-UB: `ang` in
 `SetSandEffectMain` Fall 8 ist `$s3` des Aufrufers von `bhControlEnemy` (Disassembly), nativ gemeldet.
 Offen: Skript-Opcodes 0x98/0xC3 (world.cpp fremd in Arbeit), Sprite 255, RM_3091/7220 skriptgehalten.
-[Bericht](work/native_port_EN02_world.result.md). **Kein Commit/Push, keine Paketersetzung.**
+[Bericht](archived/work/native_port_EN02_world.result.md). **Kein Commit/Push, keine Paketersetzung.**
 
 **Effekt 355 (2026-10-14 nachts):** `bhEff_Sub355` portiert (Zielfernrohr-Marke des EN01-Kindes
 bhEne01Scope; globale Texturgruppe 4 aus SYSTEM/0001.bin, 16-Pass-Alpha). **Korrektur:** die frühere
 Meldung `eff[-1]` in RM_5550/5630/8000 war eine Fehldiagnose — `spawn_effect` liefert -1 für
 **nicht portierte** Effekte, und der Aufrufer meldet dann die Originalbedingung; der Pool war nie
 voll. Beide Meldungen (`bhEff355`, `eff[-1]`) sind mit dem Port verschwunden. Scan jetzt **32 Räume**
-mit Lücken. [Bericht](work/native_port_enemy_gap_scan.result.md). **Kein Commit/Push, keine Paketersetzung.**
+mit Lücken. [Bericht](archived/work/native_port_enemy_gap_scan.result.md). **Kein Commit/Push, keine Paketersetzung.**
 
 **Effekt 219 (2026-10-14 nachts):** Wartebedingung auf `camera_ready` entfernt — Fehllücke, denn
 `room.c:33 bhInitCamera` nullt bei jedem Raumladen `cam` (camera.c:8) und `game.c:50 bhControlEffect`
@@ -244,7 +246,7 @@ echte Lücke:** der Effektpass liest nativ den Spielerbaum des vorigen Bildes (R
 nach `world->tick()`), das Original den des selben Bildes (game.c:49 vor :50) — ein Bild Latenz
 für 261/270-Treffer, Spielerlinks, Nachbild 136, E12-Feuer. Fix = Spielerpass-Haken in
 `RoomWorld::tick` (world.cpp:1777-1778), nicht chirurgisch, offen.
-[Bericht](work/native_port_player_owp_effect_pass.result.md). **Kein Commit/Push.**
+[Bericht](archived/work/native_port_player_owp_effect_pass.result.md). **Kein Commit/Push.**
 
 **RM_1090 Standuhr (2026-10-15):** Sichtloch stand 22,5° neben 12 Uhr — Common_controll 9 schrieb
 für den nativen Uhr-Work in einen ungelesenen Override, jetzt wie 8/18 auf `enemy_obj`
@@ -254,7 +256,7 @@ nach L/R war die Dev-App vom 10.10. ohne 0xb1 (HEAD hat den Port). Raumdaten: Ta
 1/3/4/5/6/7/8/Emblem, L=+180°, R=−45°; L,R,LR,RRR zeigt 3,1,7,1 — „1974“ ist nicht darstellbar.
 Last: nur die Schreibtischkamera (Glasdach, bildfüllendes Alpha) kostet ~2× CPU, kein Fehler.
 Nachweis `tools/verify_clock_puzzle.py` (Build und Dev-App grün);
-[Bericht](work/rm1090_clock/README.md). `./build.sh` gelaufen. **Kein Commit/Push.**
+[Bericht](archived/work/rm1090_clock/README.md). `./build.sh` gelaufen. **Kein Commit/Push.**
 
 **Semantik-Audit Flags/Bedingungen (2026-10-15):** behoben in `world.cpp`: bhLoadWork2 Fall 2
 (Bytes 3..5, Fall 1 behaelt model_cno), Common 15/16/28-33/44/45 auf `enemy_obj` bzw. work
@@ -338,7 +340,7 @@ portiert (`effect_sprite_procedures.cpp`); dafür neu am Besitzer: `pxb/pyb/pzb`
 `control_enemy_works` gebunden. Test `effect_e03_acid`, 36/36 grün; Scan `run10` **31 Räume / 50
 Einträge** (52 → 50: `bhEne14_Acid` aus RM_5810/RM_9302 weg, sonst identisch). `./build.sh` gelaufen
 (Start.command-App aktualisiert). Offen: 269 `bhEff_E14_Fire` (Feuerkind, EN14 Typ ≠ 0).
-[Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 9. **Kein Commit/Push.**
+[Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 9. **Kein Commit/Push.**
 
 **Effekt 267/269 + EN14-Dienste (2026-10-15):** `bhEff_E13_Fluid` (Erzeuger ist EN30, Gruppe 81
 freigeschaltet) und `bhEff_E14_Fire` (Kind von 256 type 6; `fire_light`-Haken um Farbe/Reichweite
@@ -347,7 +349,7 @@ verallgemeinert) von Hand portiert; EN14 `joint_flags`/`node_angles`/`motion_ang
 Test `effect_e14_fire`, 37/37 grün; RM_9302/RM_5810 zeigen 256/257/267 sichtbar. Scan `run11` **31 Räume /
 46 Einträge** (50 → 46; neu sichtbar `bhEff250`/`bhEff301` in RM_9302, weil der Kampf jetzt weiter kommt).
 Offen: `bhEff130` (Spielerstrahl, 1120 Z.) — `find_beam` findet nativ nie einen Strahl. `./build.sh`
-gelaufen. [Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 10. **Kein Commit/Push.**
+gelaufen. [Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 10. **Kein Commit/Push.**
 
 **Effekt 250 + `model_texp_index` + Morph-Zeichenpfad (2026-10-15):** `bhEff_E00_Mince` portiert; der
 Erzeuger brauchte `RECVX_ENEMY_EXT.model_texp_index` (Blut-Texturliste), jetzt gebunden — RM_5810/RM_9302
@@ -356,7 +358,7 @@ EN14 MV02 (Objekt 1 evalflags 0xE), das `npCalcMorphing` überspringt; Quellzugr
 `morph_blend`. HEAD rendert dort nur, weil EN14 MV02 vorher nicht erreichte (Worktree-Messung). Scans sehen
 nur das Endbild — Endbild-Sweeps nach Gegnerports nötig. Scan `run12`/`run13` **31 Räume / 44 Einträge**,
 37/37 Tests, `./build.sh` gelaufen. Letzte EN14-Raumlücke `bhEff301` hängt an der fehlenden 2D-Effektliste
-`sys->ef_trs2d` (Subsystem). [Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 11.
+`sys->ef_trs2d` (Subsystem). [Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 11.
 **Kein Commit/Push.**
 
 **EN05/EN13/13B/EN23/bhStandPlayerMotion (2026-10-14 abends):** Hunter/Sweeper (EN05 +
@@ -366,7 +368,7 @@ Runtime rechnet plp vor Event_init (player.c:840) — schliesst die Erst-Pass-L�
 `plp->mlwP->owP[n]`. CTest 89/89 grün (`enemy_en05_world`, `enemy_en13_world`,
 `enemy_en23_world`). Offen: Effekte 238/256/267, EN14-Lücken, plp->txp[2], keine
 Fensterabnahme, Windows nicht gebaut. Nur Entwicklungs-Start.command aktualisiert.
-[Bericht](work/native_port_en05_en13_en23_stand.result.md).
+[Bericht](archived/work/native_port_en05_en13_en23_stand.result.md).
 
 **Gegner-Auditbefunde (2026-10-14):** `bhCheckWall` für Gegner, `bhControlMask` im
 Gegnerpass, Baum beim Raumaufbau (room.c:438), modellose Works, EN11-Dienste,
@@ -374,7 +376,7 @@ Effekte 261/270 mit `bhCollisionCheckL2MDL` (plp mdl[3]) und Eckalpha gebunden; 
 `enemy_beam_effects`. Zombie-`natural` ist Originalverhalten (RM_0080 pos_no 0 →
 Sub_controll 0x8f Typ 8), Verifier korrigiert. Offen: EN56/bhEff134, EN16-Folgeeffekte
 (EN05/EN13/EN23 und EN12-Feuereffekte siehe oben).
-[Bericht](work/native_port_enemy_audit_fixes.result.md).
+[Bericht](archived/work/native_port_enemy_audit_fixes.result.md).
 
 **Schreibmaschine / Spielstände (2026-10-14 abends):** Speicher- und Ladebildschirm nach
 `ps2_SaveScreen.c`/`ps2_LoadScreen.c` auf dem nativen Besitzer `native/typewriter.*`/`ui.cpp`:
@@ -439,13 +441,13 @@ PlySetDamage/PlyMoveMain/PlyAction*, SetDmgEffect, fuenf Schadenskapsel-Kinder a
 Tests `effect_ry_shadow` (RM_5840) und `enemy_en29_world` (RM_9000, Angriffskette bis
 PlyMoveMain); CTest 102/103 (47 fremd). Lueckenmessung alle 205 Raeume: 31/44 -> **26/37**
 (`build/validation/enemy_scan_20261014/run15`). Ledger und
-`work/native_port_enemy_gap_scan.result.md` (Abschnitt 12) fortgeschrieben.
+`archived/work/native_port_enemy_gap_scan.result.md` (Abschnitt 12) fortgeschrieben.
 **Naechster Posten:** EN17 (Monster Steve; Vertrag en17.h und en54/en55 liegen fertig),
 EN17 Monster Steve inklusive zwei Kettenwerken (Arme) ist portiert (`native/enemies/en17.c`);
 damit laufen auch die gepanzerten Ritter EN54/EN55 (beide jetzt in Build und Dispatch). Test
 `enemy_en17_world` (RM_9280); CTest 103/104 (47 fremd). Messung: 26/37 -> **25/34**
 (`run16`); `bhEne17`/`54`/`55` aus RM_9280 weg. Offen und benannt: Partikel `bhEff_SetPtcl*`,
-Nachbild 364, `rom->lgtp[2]`, Spielerblut. [Bericht](work/native_port_enemy_gap_scan.result.md)
+Nachbild 364, `rom->lgtp[2]`, Spielerblut. [Bericht](archived/work/native_port_enemy_gap_scan.result.md)
 Abschnitt 13. **Naechster Posten:** das `sys->wt_*`-Wassertiefenfeld (`bhObj005`) fuer `bhEff108`
 (4 Raeume).
 Wasserflaeche `bhObj005` (`native/world_water.cpp`: Hoehenkarte `sys->wt_*`, Eckpunkt-y/Normalen
@@ -456,7 +458,7 @@ nie jemand, alle wassergebundenen Pfade (Zombie-Wassercheck, Spritzer, Wassersch
 13 Wasserraeumen stumm; EN01 `bhCheckWater` jetzt gebunden. Test `object_water_wave`
 (RM_3060/3210/7060/9130); CTest 104/105 (47 fremd). Messung: 25/34 -> **32/42** (`run17`):
 `bhEff108` (4) weg, neu die eine belegte Original-UB "Nachbarzelle vor `wt_wvp`" (Randeckpunkte
-x/z = 0) in 12 Raeumen. [Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 14.
+x/z = 0) in 12 Raeumen. [Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 14.
 **Naechster Posten:** `bhEne03` (RM_6090/7080/7250), danach EN53 `child_ambient`. **Kein Commit/Push.**
 Schwarze Witwe `bhEne03` (`native/enemies/en03.c`, rund 4100 Zeilen) ist portiert und im Dispatch
 (`jump[3]`): Init samt acht `bhEne03s`-Beinkindern und fuenfzehn EN24-Kindern, verstecktem
@@ -472,7 +474,7 @@ meldet es); `EXP0_INT(pno,980)` schreibt im Original hinter den Kindblock (nicht
 (RM_6090; Init, Kinder, Anfuehrer, MV00-Zweig nach 96 Passen, Gelenkmatrix weicht von der Bind-Pose
 ab, GoAHead bewegt, Gegenprobe ohne Gegnerpass); CTest 105/106 (47 fremd). Messung: 32/42 -> **30/40**
 (`run18`); `bhEne03` (3) weg, neu die eine, einmalige Spielerlookup-Meldung nach dem Griffende in
-RM_7250. [Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 15.
+RM_7250. [Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 15.
 Nosferatu `bhEne15` (`native/enemies/en15.c`, `jump[15]`) ist portiert: Bewegung, drei Hiebe
 (Fluegelquader `njCollisionCheckBC2`, Kapsel), Spritzer, Wurf, Schaden/Kerntreffer, Tod, alle acht
 Spielerfuehrungen und das Gift 397 (`bhEff_E15_Poison`). Mechanismusweite Befunde:
@@ -481,7 +483,7 @@ Spielerfuehrungen und das Gift 397 (`bhEff_E15_Poison`). Mechanismusweite Befund
 vergiftet auch die Saeure 256 wie im Original), Effektsaetze tragen `exp0 = epw`. Test
 `enemy_en15_world` (RM_5800: Wurfkette, Sturz ueber den Plattformrand, Gift); CTest 106/107
 (47 fremd). Messung: 30/40 -> **30/38** (`run19`), `bhEne15` (2) weg.
-[Bericht](work/native_port_enemy_gap_scan.result.md) Abschnitt 16.
+[Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 16.
 EN53 `child_ambient` ist am vorhandenen Modellbesitzer gebunden: je `mbp[k]` ein Live-Strom,
 Patch nur auf Ambient-Gruen, geordnete Materialweitergabe und Multi-Lichtauswertung.
 `enemy_en53_world` prueft drei Originalraeume, Puls, diagnostischen Tod, Patchgrenzen und den
@@ -1002,7 +1004,7 @@ Am installierten App-Binary: Titelstart, RM_1000-Eintritt, Kistensprung, Treppen
 Punch-through-Nebenbefund nachgezogen: bhEff023 mdlver 0 zeichnet jetzt ohne Überblendung mit Alpha-Lochtest und Tiefe;
 RGB-Filterung unabhängig von Alpha, auch im optionalen Host-Mipfilter. Gegenproben für Liste, Coverage und RGB rot,
 CTest 129/129 grün; Kistensprung und Titel-/Raumeintritt jetzt regulär in CTest. `Start.command`-Titel/Neues Spiel
-und LOAD GAME am App-Binary geprüft. Einzelheiten und Grenzen: [Prüfbericht](work/2026-10-18-punch-through.md).
+und LOAD GAME am App-Binary geprüft. Einzelheiten und Grenzen: [Prüfbericht](archived/work/2026-10-18-punch-through.md).
 Danach integriert (Unteragenten, jeder Diff gegen das Original nachgelesen, eigene Gegenprobe je Port rot, CTest 139/139,
 Dev-App, `Start.command` Titel/Neues Spiel, LOAD GAME, Kistensprung, Treppen, Schieben am App-Binary):
 (a) bhChangeBackColor/Evt (`native/back_color.*`, 132 Tabellenzeilen, EOR-Timer sync.c:114, 0xab sofort in rom->bak_col;
@@ -1373,29 +1375,29 @@ und `system.c:bhSysCall` (Host-Menuezugaenge statt tk_flg-Taskautomat) sowie `sy
 
 ## Gezielter Zugang zu bisherigen Befunden
 
-Vollständiger [Abschnittsindex](work/history/2026-10-13-instructions/README.md)
+Vollständiger [Abschnittsindex](archived/work/history/2026-10-13-instructions/README.md)
 zu den unveränderten früheren Anweisungsdateien. Nicht vollständig laden; bei
 Bedarf den betreffenden Abschnitt lesen. Folgende Links sind **historische
 Befunde**, keine aktuelle Offen-/Erledigtliste:
 
 | Thema | Historischer Einstieg |
 |---|---|
-| Tür-Skip / gezielter Türton-Stopp | [CLAUDE vor Trennung:26](work/history/2026-10-13-instructions/CLAUDE.before.md:26); aktive Entscheidung in AGENTS.md |
-| SELECT-Skip / Standin-Claire | [CLAUDE vor Trennung:947](work/history/2026-10-13-instructions/CLAUDE.before.md:947) |
-| Hauptmenü / Host-Abweichungen | [CLAUDE vor Trennung:1039](work/history/2026-10-13-instructions/CLAUDE.before.md:1039) |
-| Friedhof / Skript-Gegner-Motion | [CLAUDE vor Trennung:1094](work/history/2026-10-13-instructions/CLAUDE.before.md:1094) |
-| Ereigniskamera / Pause | [CLAUDE vor Trennung:1131](work/history/2026-10-13-instructions/CLAUDE.before.md:1131) |
-| Dialog-Padflanke | [CLAUDE vor Trennung:1213](work/history/2026-10-13-instructions/CLAUDE.before.md:1213) |
-| Objekt-Cut-Gate / Leuchten | [CLAUDE vor Trennung:1285](work/history/2026-10-13-instructions/CLAUDE.before.md:1285) |
-| Körperpass / Treppen / Hundstoß | [CLAUDE vor Trennung:1346](work/history/2026-10-13-instructions/CLAUDE.before.md:1346), [Reihenfolge:1506](work/history/2026-10-13-instructions/CLAUDE.before.md:1506) |
-| Renderer-Worker / Nebelkosten | [CLAUDE vor Trennung:1421](work/history/2026-10-13-instructions/CLAUDE.before.md:1421) |
-| Karte: Eingabesperre und damaliger Draw-Vertrag | [CLAUDE vor Trennung:1539](work/history/2026-10-13-instructions/CLAUDE.before.md:1539); spätere Kartenrenderer-Arbeit nicht aus dieser alten Offenmeldung zurückbauen |
-| Audio / Gegner / Schatten / Inventar | [AGENTS-Abschnittsindex](work/history/2026-10-13-instructions/README.md); passende `work/*.result.md` gezielt lesen |
+| Tür-Skip / gezielter Türton-Stopp | [CLAUDE vor Trennung:26](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:26); aktive Entscheidung in AGENTS.md |
+| SELECT-Skip / Standin-Claire | [CLAUDE vor Trennung:947](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:947) |
+| Hauptmenü / Host-Abweichungen | [CLAUDE vor Trennung:1039](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1039) |
+| Friedhof / Skript-Gegner-Motion | [CLAUDE vor Trennung:1094](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1094) |
+| Ereigniskamera / Pause | [CLAUDE vor Trennung:1131](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1131) |
+| Dialog-Padflanke | [CLAUDE vor Trennung:1213](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1213) |
+| Objekt-Cut-Gate / Leuchten | [CLAUDE vor Trennung:1285](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1285) |
+| Körperpass / Treppen / Hundstoß | [CLAUDE vor Trennung:1346](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1346), [Reihenfolge:1506](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1506) |
+| Renderer-Worker / Nebelkosten | [CLAUDE vor Trennung:1421](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1421) |
+| Karte: Eingabesperre und damaliger Draw-Vertrag | [CLAUDE vor Trennung:1539](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1539); spätere Kartenrenderer-Arbeit nicht aus dieser alten Offenmeldung zurückbauen |
+| Audio / Gegner / Schatten / Inventar | [AGENTS-Abschnittsindex](archived/work/history/2026-10-13-instructions/README.md); passende `work/*.result.md` gezielt lesen |
 
 ## Pflege
 
 Nur aktuelle, auftragsrelevante Kurzstände mit Beleg-/Ergebnislink aktualisieren.
-Abgeschlossene Detailprotokolle nach `work/` beziehungsweise `build/validation/`,
+Abgeschlossene Detailprotokolle nach `archived/work/` beziehungsweise `build/validation/`,
 nicht in diese Tabelle oder die Pflichtdateien kopieren. Fachseiten bleiben
 undatierte Mechanismusbeschreibungen. Historische Kern-/Generatorfreigaben sind
 verworfen und heben die aktuelle Originalkern-/Emulationspolicy niemals auf.

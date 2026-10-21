@@ -1,11 +1,11 @@
 # Plan: RECVX Native sparsamer ausführen
 
 Stand: 2026-10-20. Analyse und Umsetzungsvorschlag. Phase A (Messbasis) und erste
-Schnitte aus B sind umgesetzt: [performance_phaseA_scalpel_20261020.result.md](performance_phaseA_scalpel_20261020.result.md).
-Phase D1 (GPU-Machbarkeit) ist bestanden: [performance_gpu_feasibility_20261020.result.md](performance_gpu_feasibility_20261020.result.md)
+Schnitte aus B sind umgesetzt: [performance_phaseA_scalpel_20261020.result.md](../archived/work/performance_phaseA_scalpel_20261020.result.md).
+Phase D1 (GPU-Machbarkeit) ist bestanden: [performance_gpu_feasibility_20261020.result.md](../archived/work/performance_gpu_feasibility_20261020.result.md)
 — Pixelarbeit 62–73 ms CPU → ≈ 0,2–0,7 ms GPU, Punktabtastung 99,7–99,9 % bitexakt. B1 (Workerzahl)
 ist durch `powermetrics` entschieden: weniger Worker kosten mehr Watt und laggen, Automatik bleibt.
-Phase D2 (macOS) umgesetzt: [performance_gpu_raster_d2_20261020.result.md](performance_gpu_raster_d2_20261020.result.md).
+Phase D2 (macOS) umgesetzt: [performance_gpu_raster_d2_20261020.result.md](../archived/work/performance_gpu_raster_d2_20261020.result.md).
 
 ## Ziel und Empfehlung
 

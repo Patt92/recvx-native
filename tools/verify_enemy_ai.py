@@ -33,7 +33,7 @@ Jeder Lauf verlangt 0 blockierte Skriptbefehle. Gemeldete Gegner-Luecken werden
 gegen eine erlaubte Liste (Praefix) geprueft; jede andere Luecke ist ein Fehler,
 damit kein stilles Abbrechen der Originalroutinen durchrutscht. Die erlaubten
 Eintraege sind nachgewiesene Originaldefekte oder Mechanismen ausserhalb der
-Kette (siehe work/native_port_enemy_ai.result.md).
+Kette (siehe archived/work/native_port_enemy_ai.result.md).
 """
 import argparse
 import json

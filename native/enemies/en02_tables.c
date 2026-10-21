@@ -1,6 +1,6 @@
 /* Reine Datentabellen des Gulp Worm (en02.c:184-682), unveraendert uebernommen.
    Keine Funktionskoerper. Generiert aus der Semantikreferenz; nicht von Hand editieren,
-   sondern tools-frei per Skript in work/native_port_EN02_world.result.md belegt. */
+   sondern tools-frei per Skript in archived/work/native_port_EN02_world.result.md belegt. */
 #include "en02_tables.h"
 
 const RECVX_EN02_WE recvx_en02_sd_01[38] = {

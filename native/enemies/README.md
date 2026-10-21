@@ -21,7 +21,7 @@ Stand des Builds (C02, 2026-10-10): `enemy_work.c`, `enemy_dispatch.c`,
 `native/world_enemies.cpp` an RoomWorld angeschlossen. Nicht gebaut:
 `en54.c`/`en55.c` (brauchen das fehlende `en17.c`), `en01_core.c`/
 `en01_tables.c` (C03, unvollstaendig). Angeschlossen heisst nicht fertig:
-offene Dienste stehen in `work/native_port_C02_enemy_work.result.md`.
+offene Dienste stehen in `archived/work/native_port_C02_enemy_work.result.md`.
 
 ## Include-Pfad
 
@@ -42,7 +42,7 @@ genauso kurz einbinden.
 ## Regeln
 
 Es gelten [AGENTS.md](../../AGENTS.md) und [QUALITY.md](../../QUALITY.md).
-Der [damalige Gegnerauftrag](../../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md)
+Der [damalige Gegnerauftrag](../../archived/work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md)
 ist nur Historie, keine aktuelle Arbeits- oder Dateibesitzvorgabe:
 Originalquellen unter `src/ps2/veronica/prog/` sind ausschließlich
 Semantikreferenz, kein Originalkern und kein Generator; einziger Besitzer der

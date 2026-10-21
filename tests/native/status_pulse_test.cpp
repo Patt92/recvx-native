@@ -56,7 +56,7 @@ int main(int argc,char** argv){
     // 198, startet keinen Durchlauf und wird NICHT verbraucht. Die
     // dekompilierte Quelle lässt den Rückgabewert dieses Zweigs offen; im
     // Original liefert er 0, weil der Statusbildschirm ihn vor dem Aufruf
-    // löscht (Beleg in work/native_port_inventory_tests.result.md). Ohne
+    // löscht (Beleg in archived/work/native_port_inventory_tests.result.md). Ohne
     // Verbrauchssignal lässt ItemUse den Slot unberührt.
     section("D07 Use_00 poison2",[]{
         Inventory r;std::fill(r.slots()+2,r.slots()+12,0);r.slots()[2]=Inventory::pack(23,1);r.poisoned=r.infected=true;unsigned control=0;

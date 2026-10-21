@@ -59,7 +59,7 @@ wird über `EventVm::set_flag(11,…)` synchron gehalten; Kapazität 8/10.
 ## Offene Anschlüsse außerhalb des Schreibbereichs
 
 - `events.cpp` (Integrator): D06-Anschluss-Patch, siehe
-  `work/native_port_D06_events.patch`.
+  `archived/work/native_port_D06_events.patch`.
 - `ui.cpp`/`box_menu.cpp`: nutzen `combine`, `use_item`, `box_change` bereits
   über die bestehende Schnittstelle; Rückgabewerte werden jetzt mit Originalwirkung
   gefüllt.

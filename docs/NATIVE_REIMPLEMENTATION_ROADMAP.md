@@ -16,10 +16,10 @@ rather than every rendered frame. Flag/Rcase retention, fixed-camera keys, and
 return defaults were checked in twelve runtime cases. Eff137, the full camera
 state machine, and ice-room material sorting remained open; a hardware core
 was not an answer. B04 proceeded separately. The next conflict-free entry for
-the third assignment was C01 from [historical enemy assignment](../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md): trap activation
+the third assignment was C01 from [historical enemy assignment](../archived/work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md): trap activation
 in `enemy_spawn.*` as part of the full enemy package, with shared connection
 files changed only by agreed patches. Evidence:
-`work/native_port_P04_camera_invocations.result.md`.
+`archived/work/native_port_P04_camera_invocations.result.md`.
 
 ## Recorded state: data ports, removal, and gameplay kept separate
 
@@ -214,7 +214,7 @@ dispatcher and room data, agree shared native owner contracts, port all
 enemies/assets first, then test together and fix common causes. First
 productive acceptance remained EN07/RM_0130 but did not replace the other
 enemies. Spawn, link, or load scan alone did not finish the job. Updated
-assignment: [historical enemy assignment](../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md).
+assignment: [historical enemy assignment](../archived/work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md).
 
 | ID | Task | Dependency / evidence |
 |---|---|---|
@@ -262,7 +262,7 @@ without shadow inventory.
 |---|---|---|
 | E01 | Implement missing shared ATR wall/ground/line/reflection mechanisms, including real `bhCheckL2Wall` semantics and hit-entry identity. | P00/P03; `effect_collision.inc` removed. ROM/mobile order, types 0..7/ramps and flags; no simplified ray heuristic. |
 | E02 | Implement missing particle emitters, step progression, random, movement, color/atlas, line/billboard output, and blood pool on existing native Effect state. | P00/E01; `effect_particles.inc` removed. Identify existing owner in P00; do not assume or invent another O_WRK/Effect pool. |
-| E03 | **Native base connected:** `ef_info`, four model-block steps, 40 shared textures, Eff009 with both UV banks/types, player/object link, and lighter light. Other sprite/custom/explosion/blood cases remained open. | Positive `native_lighter_effect` and real opening/inventory `verify_lighter.py`. Arm pose `bhArmIkMdk` and full `pt_flg`/model draw gates remained F01/P00; no claim of complete lighter pose. Light animation 1..6 native; full light system still E04. See `work/native_port_E03_lighter.result.md`. |
+| E03 | **Native base connected:** `ef_info`, four model-block steps, 40 shared textures, Eff009 with both UV banks/types, player/object link, and lighter light. Other sprite/custom/explosion/blood cases remained open. | Positive `native_lighter_effect` and real opening/inventory `verify_lighter.py`. Arm pose `bhArmIkMdk` and full `pt_flg`/model draw gates remained F01/P00; no claim of complete lighter pose. Light animation 1..6 native; full light system still E04. See `archived/work/native_port_E03_lighter.result.md`. |
 | E04 | Bind shared original Enemy/Player SFX/voice/light order to AudioMixer/OriginalLight. | C02/E03; do not hide missing calls with null/no-op returns. |
 | E05 | Close weapon type-3 wall binding and native per-draw sampler selection. | E01; retain WeaponFlash, no GS/GIF transport layer. |
 

@@ -8,7 +8,7 @@ menu's MAP button (sub1.c MainCommand, maincsr 2) raises the map task, the task
 runs bhInitMap -> bhControlMap -> bhExitMap, and closing it returns to the
 status menu with sys->gm_flg bit 0x80000 released again.
 
-This script needs the runtime binding from work/native_port_D10_map.patch
+This script needs the runtime binding from archived/work/native_port_D10_map.patch
 (CMake target, runtime task, MAP button, modal input). Without it the runtime
 reports no `map` section and the script fails with that reason instead of
 pretending the screen works.
@@ -107,7 +107,7 @@ def require_binding(result, name):
         raise SystemExit(
             f'{name}: the runtime reports no "map" state section.\n'
             'The map screen is implemented in native/map_screen.* but not yet wired into\n'
-            'the runtime. Apply work/native_port_D10_map.patch (CMake target, runtime task,\n'
+            'the runtime. Apply archived/work/native_port_D10_map.patch (CMake target, runtime task,\n'
             'MAP button, modal input) and run this script again.')
     return result['map']
 

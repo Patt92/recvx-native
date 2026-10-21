@@ -1,5 +1,7 @@
 # Private disc data, old history and obsolete builds
-/archived/
+/archived/*
+# Erledigte Arbeit aus work/ bleibt versioniert (Verweise in Ledger/Docs/Code).
+!/archived/work/
 /data/
 /build/
 

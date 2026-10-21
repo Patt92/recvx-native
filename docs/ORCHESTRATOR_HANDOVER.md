@@ -70,7 +70,7 @@ files. Any ownership transfer had to be agreed and documented first.
 
 **Enemy agent:** The user explicitly broadened the initial C01 task to
 **C01–C08 including all C07+ IDs**. The controlling handoff was
-[historical enemy assignment](../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). The agent was last analyzing zombie/dog traps
+[historical enemy assignment](../archived/work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). The agent was last analyzing zombie/dog traps
 in `enemy_spawn.*`; that was useful C01 work, not the entire assignment.
 Confirm the agent read the updated file; do not claim the change had reached
 them already.
@@ -87,7 +87,7 @@ Accept the remaining enemies afterward; bat acceptance does not finish the
 overall goal.
 
 **Smaller model, if delegated:** A source-backed enemy-ID/asset inventory in
-`work/enemy_id_asset_inventory.md` only: original routine, native site,
+`archived/work/enemy_id_asset_inventory.md` only: original routine, native site,
 model/motion, gaps, and file/line evidence for each ID. No code changes,
 invented semantics, generators, or quarantine. “File exists” is not proof of
 functionality. This subtask had been proposed, not started.
@@ -150,18 +150,18 @@ request; `git push` alone does not upload untracked files.
 
 ## Related documents
 
-- `AGENTS.md` and [historical enemy assignment](../work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md) — rules and enemy assignment at the time.
+- `AGENTS.md` and [historical enemy assignment](../archived/work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md) — rules and enemy assignment at the time.
 - `docs/NATIVE_REIMPLEMENTATION_ROADMAP.md`, `docs/port_ledger.tsv`,
   `docs/NATIVE_GAMEPLAY.md` — planning/status, partly historical.
-- `work/native_port_B05_item_box_object.result.md`.
-- `work/native_port_P04_camera_invocations.result.md`, `work/native_port_P04_clip.result.md`.
-- `work/native_port_B04_hair_followup.result.md`, `work/native_port_B01_stairs.result.md`.
-- `work/native_port_B00_motion.result.md`, `work/native_port_P03_E01_ground.result.md`,
-  `work/native_port_E01_line_reflection.result.md`.
-- `work/native_port_E03_lighter.result.md`, `work/native_port_G01_doors.result.md`.
-- `work/native_port_inventory_tests.result.md`, `work/native_port_D03_files_inspection.result.md`,
-  `work/native_port_D04_computer.result.md`, `work/native_port_D05_gameover.result.md`.
-- `work/native_port_R02_D09.result.md`, `work/native_port_windows_audit.md`.
+- `archived/work/native_port_B05_item_box_object.result.md`.
+- `archived/work/native_port_P04_camera_invocations.result.md`, `archived/work/native_port_P04_clip.result.md`.
+- `archived/work/native_port_B04_hair_followup.result.md`, `archived/work/native_port_B01_stairs.result.md`.
+- `archived/work/native_port_B00_motion.result.md`, `archived/work/native_port_P03_E01_ground.result.md`,
+  `archived/work/native_port_E01_line_reflection.result.md`.
+- `archived/work/native_port_E03_lighter.result.md`, `archived/work/native_port_G01_doors.result.md`.
+- `archived/work/native_port_inventory_tests.result.md`, `archived/work/native_port_D03_files_inspection.result.md`,
+  `archived/work/native_port_D04_computer.result.md`, `archived/work/native_port_D05_gameover.result.md`.
+- `archived/work/native_port_R02_D09.result.md`, `archived/work/native_port_windows_audit.md`.
 
 Historical enemy/morph reports involving original-core paths are not
 acceptance of today's core-free port. Old success claims must not revive

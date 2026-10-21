@@ -209,7 +209,7 @@ int main(int argc,char** argv){try{
          try{state.script_item_give(4,34,0);}catch(const std::exception&){threw=true;}
          check(threw,"item 34 for owner 4 leaves ply_wno and must be refused");}});
     // D06 über die Event-VM. ACHTUNG: der Anschluss-Patch
-    // work/native_port_D06_events.patch ist NICHT in native/events.cpp
+    // archived/work/native_port_D06_events.patch ist NICHT in native/events.cpp
     // integriert (Integrator). Dieser Abschnitt fordert die Originalwirkung
     // über das Skript ein und schlägt bis zur Integration fehl.
     section("D06 Event-VM-Anschluss (events.cpp, Patch nicht integriert)",[]{

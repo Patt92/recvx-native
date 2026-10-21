@@ -98,7 +98,7 @@ def main():
     # COFF-Symboltabelle noch .debug-Abschnitte, und -g, -fno-strip,
     # -Wl,--no-strip, -Wl,-Map sowie -Wl,--no-insert-timestamp werden
     # abgewiesen. Der Linkeingangs-/Binärnachweis ist deshalb offen; siehe
-    # work/native_port_windows_audit.md. Keine Lockerung des Prüfers.
+    # archived/work/native_port_windows_audit.md. Keine Lockerung des Prüfers.
     toolchain.write_text(f'set(CMAKE_SYSTEM_NAME Windows)\nset(CMAKE_SYSTEM_PROCESSOR {arch["processor"]})\n' + "".join(
         f'set({key} "{compilers[name]}" CACHE FILEPATH "" FORCE)\n' for key, name in
         [("CMAKE_C_COMPILER", "cc"), ("CMAKE_CXX_COMPILER", "cxx"), ("CMAKE_AR", "ar"), ("CMAKE_RANLIB", "ranlib")]) +

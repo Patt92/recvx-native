@@ -75,7 +75,7 @@ EN05, EN09, EN15 (einschließlich EN53 aus `en15.c:3726`), EN19, EN22, EN23, EN2
 — gemessen 67 aktive Enemy-Works in den Raumdaten.
 
 PFLICHTLEKTÜRE VOR ARBEIT: `AGENTS.md` VOLLSTÄNDIG (3109 Zeilen, seitenweise
-lesen), `QUALITY.md`, [damaliger Gegnerauftrag, nur Historie](history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). Dann `git status --short`
+lesen), `QUALITY.md`, [damaliger Gegnerauftrag, nur Historie](../archived/work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). Dann `git status --short`
 und `python3 tools/check_no_original_core.py` (vor Arbeit und vor jedem Build;
 derzeit PASS).
 
@@ -149,7 +149,7 @@ Einzelroutinen EN02, EN06, EN08, EN10, EN11, EN12, EN13, EN14, EN16, EN17, EN18,
 EN20, EN21, EN24, EN25, EN27, EN29, EN30, EN54, EN55, EN71.
 
 PFLICHTLEKTÜRE VOR ARBEIT: `AGENTS.md` VOLLSTÄNDIG (3109 Zeilen, seitenweise
-lesen), `QUALITY.md`, [damaliger Gegnerauftrag, nur Historie](history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). Dann `git status --short`
+lesen), `QUALITY.md`, [damaliger Gegnerauftrag, nur Historie](../archived/work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). Dann `git status --short`
 und `python3 tools/check_no_original_core.py` (vor Arbeit und vor jedem Build;
 derzeit PASS).
 
@@ -225,7 +225,7 @@ Originalgegner": der vollständige `bhSubpl`-Pfad (kinematische Gegner-/
 Darsteller-IDs) nativ.
 
 PFLICHTLEKTÜRE VOR ARBEIT: `AGENTS.md` VOLLSTÄNDIG (3109 Zeilen, seitenweise
-lesen), `QUALITY.md`, [damaliger Gegnerauftrag, nur Historie](history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). Dann `git status --short`
+lesen), `QUALITY.md`, [damaliger Gegnerauftrag, nur Historie](../archived/work/history/2026-10-21-enemy-assignment/THIRD_AGENT_C01_TASK.md). Dann `git status --short`
 und `python3 tools/check_no_original_core.py` (vor Arbeit und vor jedem Build;
 derzeit PASS).
 
@@ -287,6 +287,6 @@ selbst ändern.
 KEINE Builds, kein CTest, keine Runtime-Läufe bis das Gesamtpaket aller fünf
 Teilaufgaben integriert ist. Policy-Prüfer bleibt Pflicht.
 
-BERICHT: `work/native_port_T5_subplayer.result.md`, getrennt nach (a)
+BERICHT: `archived/work/native_port_T5_subplayer.result.md`, getrennt nach (a)
 implementiert, (b) produktiv angeschlossen, (c) komponentengeprüft, (d)
 Runtime-geprüft, (e) blockiert/offen, mit Originalfundstellen Datei:Zeile.

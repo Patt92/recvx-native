@@ -19,7 +19,7 @@ Drei getrennte Stufen, jede einzeln abschaltbar:
               und gebuchter Schaden gegen denselben Replay ohne Schuss.
 
 Der Runtime-Schritt braucht den Anschluss aus
-work/native_port_A01_A04_combat.patch: native/runtime.cpp nimmt sys->st_flg
+archived/work/native_port_A01_A04_combat.patch: native/runtime.cpp nimmt sys->st_flg
 0x4 in seine `blocked`-Bedingung auf, und genau dieses Bit setzt
 bhCPM1_act_atk (player.c:4483) selbst. Ohne den Patch sperrt sich der
 Kampfpass nach einem Tick selbst aus; dieses Skript meldet das namentlich.
@@ -147,7 +147,7 @@ def check_runtime(runtime, data, emulator):
             raise SystemExit(
                 'Der Kampfpass hat nicht zweimal gefeuert '
                 f"(shots={saved['combat_shots']}, attacks={saved['combat_attacks']}). "
-                'Fehlt der Anschluss aus work/native_port_A01_A04_combat.patch? '
+                'Fehlt der Anschluss aus archived/work/native_port_A01_A04_combat.patch? '
                 'native/runtime.cpp nimmt sys->st_flg 0x4 in `blocked` auf, und '
                 'bhCPM1_act_atk (player.c:4483) setzt genau dieses Bit selbst.')
         rounds = [(item & 0xffff) for item in saved['items'] if (item >> 16) & 255 == 9]

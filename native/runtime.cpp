@@ -1496,7 +1496,7 @@ int main(int argc,char** argv){
                 // bhCPM0_action (player.c:1793): the attack entry sets mode1/mode2/mode3 = 1/0x40/0
                 // and gives the look up with EXP1_I(0) &= ~0x4; |= 0x1E0.  bhControlPlayerPch then
                 // owns nodes 4/5 (playpch.c:46/73); that part lives in the quarantined combat core
-                // and stays reported, see work/native_port_B06_head.result.md.
+                // and stays reported, see archived/work/native_port_B06_head.result.md.
                 if(!head_combat_owned){head_combat_owned=true;head_other_action();recvx_head_release_look(&head);}
                 action_resume=true;follow();return;}
             head_combat_owned=false;
