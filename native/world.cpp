@@ -1117,9 +1117,9 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(op==0x8f){if(!v.u8(2))e.face_flags|=16;else e.face_flags&=~16u;}
         if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;}
         if(op==0x9a){if(!v.u8(2))e.face_flags|=2;else e.face_flags&=~2u;}return true;}
-    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;restore_camera_clip_=true;return true;}set_event_camera(v.u8(2),v.u8(3),true);return true;}
+    if(op==0x13){if(v.u8(1)==1){event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;restore_camera_clip_=true;return true;}set_event_camera(v.u8(2),v.u8(3),true);return true;}
     if(op==0x2a){const auto mode=v.u8(1);if(mode==0)set_fixed_cut(v.u8(2));else if(mode==1){event_camera=false;fixed_camera.reset();}else throw std::runtime_error("invalid fixed camera mode");return true;}
-    if(op==0x5b){event_camera=false;fixed_camera.reset();camera_force_=true;return true;}
+    if(op==0x5b){event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;return true;}
     // event.c:1032 bhCamPauseSet: v0 0 -> cam.mode0 = 3 (bhControlEventCamera has no case 3: pose and
     // cam.ct0 hold), v0 1 -> cam.mode0 = 1 (continues from cam.ct0, also out of the final hold 2).
     // Other values change nothing. cam.mode0 is shared with bhControlActiveCamera (cut.c:2487);
@@ -4065,16 +4065,35 @@ std::optional<unsigned> RoomWorld::put_model_mdflg(const Model& model,const Worl
         return ((flg&0x20000000u)?0x40u:0u)|((flg&0x80000000u)?0x10u:0u);}
     return std::nullopt;
 }
+std::optional<NJS_POINT3> RoomWorld::player_ground_point()const{
+    // player.c:1744-1752: plp->gpx/gpz = owP[0].mtx[12]/[14] unter stflg 0x30 oder mode0 7, sonst px/pz.
+    // Das Original schreibt sie am Ende jedes Spielerpasses im Tor :1365; der Host liest den letzten
+    // veroeffentlichten Knoten. gpy (bhGetGroundPosition, :1757) hat keinen nativen Besitzer: y = plp->py.
+    const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
+    NJS_POINT3 gp=player_.position;
+    if((stflg&0x30u)||(collision_mode_&0xffu)==7u){const auto root=link_matrix(0,0,0);
+        if(!root)return std::nullopt;
+        gp.x=root->value[12];gp.z=root->value[14];}
+    return gp;
+}
+void RoomWorld::init_camera_target(const Scene& stage,std::size_t cut){
+    // cut.c:681/683: cam.plx = exp0[24] = plp->gpx, cam.plz = exp0[26] = plp->gpz; :684 bhCheckCutAttribute(gpx, gpz,
+    // plp->flr_no). Die Bloecke :687-1033 ueberschreiben cam.plx/plz (Naehpunkt oder gpx/gpz), nicht exp0[24]/[26].
+    if(cut>=stage.cameras.size())return;
+    const auto gp=player_ground_point();
+    if(!gp){unbound_enemy_.insert("cut.c:681 bhInitActiveCamera: plp->gpx (owP[0]) ohne nativen Knoten");return;}
+    player_camera_point_={gp->x,gp->y,gp->z};
+    (void)camera_for_actor(stage,cut,*gp,std::int8_t(collision_floor_),nullptr,&camera_target_);
+    camera_target_valid_=true;
+}
 void RoomWorld::check_player_mirror_floor(int flr_no){
     const unsigned st=collision_events_?collision_events_->flags[5][0]:0u;
     if(!(st&0x100u))return;                                          /* player.c:1666 */
     player_mirror_off_=false;                                        /* player.c:1668 */
     // plp->gpx/gpz des letzten Spielerpasses (player.c:1744-1752): owP[0] mit stflg 0x30 oder mode0 7, sonst px/pz.
-    const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
-    NJS_POINT3 gp=player_.position;
-    if((stflg&0x30u)||(collision_mode_&0xffu)==7u){const auto root=link_matrix(0,0,0);
-        if(!root){unbound_enemy_.insert("player.c:1746 plp->gpx: plp->mlwP->owP[0].mtx ohne nativen Knoten");return;}
-        gp.x=root->value[12];gp.z=root->value[14];}
+    const auto ground=player_ground_point();
+    if(!ground){unbound_enemy_.insert("player.c:1746 plp->gpx: plp->mlwP->owP[0].mtx ohne nativen Knoten");return;}
+    const NJS_POINT3 gp=*ground;
     // hitchk.c:5503 bhCheckFloorEffect: erste Flaeche (rom->flrp, dann sys->mflrp) mit flg 1, type 3.
     for(const auto& a:motion_floors())if((a.flags&1u)&&a.type==3u&&a.position.x<=gp.x&&a.position.x+a.extent.x>=gp.x&&a.position.z<=gp.z&&a.position.z+a.extent.z>=gp.z&&a.floor==flr_no){
         if(a.parameters[0]==2)player_mirror_off_=true;               /* player.c:1672-1674 */
@@ -5065,7 +5084,12 @@ void RoomWorld::control_eye_camera(const Scene& stage,std::size_t cut,bool hold)
         eye_.ax=std::int16_t(std::int16_t(eye_.ax)+std::int16_t((std::int16_t(eye_.axp)-std::int16_t(eye_.ax))/4));eye_.ay=-player_.yaw;eye_.az=0;
         if(!hold){ // attr 0x4000 haelt die Augenkamera; sonst zurueck zur Schnittkamera (bhInitActiveCamera)
             eye_.axp=ci.angles[0];eye_.ayp=ci.angles[1];eye_.azp=ci.angles[2];eye_.target=ci.position;eye_.pln=ci.distance;eye_.ppers=ci.perspective;
-            const auto aimed=camera_for_actor(stage,cut,player_.position,std::int8_t(floor_at(player_.position)),nullptr);
+            // cut.c:2574 bhInitActiveCamera(0): Ziel aus plp->gpx/gpz und plp->flr_no (:681-684), cam.plx/plz und
+            // EXP_WORK plx/plz bleiben danach auf dem Stand des letzten Blocks stehen.
+            const auto gp=player_ground_point();
+            if(!gp)unbound_enemy_.insert("cut.c:2574 bhInitActiveCamera: plp->gpx (owP[0]) ohne nativen Knoten");
+            const auto aimed=camera_for_actor(stage,cut,gp?*gp:player_.position,std::int8_t(collision_floor_),nullptr,gp?&camera_target_:nullptr);
+            if(gp){camera_target_valid_=true;player_camera_point_={gp->x,gp->y,gp->z};}
             eye_.axp=aimed.angles[0];eye_.ayp=aimed.angles[1];eye_.azp=aimed.angles[2];eye_.target=aimed.position;eye_.pln=aimed.distance;eye_.ppers=aimed.perspective;
             eye_.mode0=2;eye_.ct0=0;}
         break;
@@ -5091,9 +5115,15 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
     // bhControlActiveCamera/bhControlEventCamera boundary (cut.c:1986 / :2487).
     if(std::getenv("RECVX_CAM_TRACE")){const auto& p=active_camera_.view();std::fprintf(stderr,"CAMBEFORE ready=%d cut=%zu force=%d evc=%d mode0=%d hct=%u blend=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d\n",int(active_camera_.ready()),cut,int(camera_force_),event_camera?int(event_camera_index):-1,event_camera?(event_camera_paused_?3:(event_camera_init_?0:(event_camera_finished_?2:1))):-1,active_camera_.clock(),int(active_camera_.transitioning()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2]);}
     if(!event_camera&&!fixed_camera&&(!clip_cut_||*clip_cut_!=cut||camera_force_)){
+        // cut.c:442 bhInitActiveCamera innerhalb bhSetCut: neuer Schnitt (bhCheckCut :126) oder
+        // bhCheckCut(1) aus dem Skript. Das Ende der Augenkamera (camera_force_ aus cut.c:2611) ruft
+        // bhSetCut nicht; cut.c:2574 initialisiert in control_eye_camera.
+        const bool set_cut=!clip_cut_||*clip_cut_!=cut||camera_target_init_;
         initialize_camera_clip(unsigned(cut));
         if(collision_events_)collision_events_->flags[11][0]|=0x20u; // cut.c:298 bhSetCut: gm_flg 0x20 (Schnittwechsel)
+        if(set_cut)init_camera_target(stage,cut);
     }
+    camera_target_init_=false;
     if(restore_camera_clip_&&collision_events_){
         installed_clip_=restored_view_clip(room_clip_,collision_events_->flags[12][0],collision_events_->flags[11][0]);
         restore_camera_clip_=false;
@@ -5118,17 +5148,24 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
     active_camera_.select(target,cut,camera_force_);camera_force_=false;
     // cut.c:1197-1217: unter plp->stflg 0x30 (Treppe/Stufe, hitchk.c:4677/4747) und in mode0 7 zielt die Kamera auf
     // owP[0] des letzten bhCalcModel, nicht auf plp->px/py/pz, das in Stufenaktionen nur beim Motionumlauf nachzieht
-    // (player.c:3258-3271). Der Zweig der freien Steuerung (:1207-1209, EXP_WORK plx/plz) hat noch keinen Besitzer.
+    // (player.c:3258-3271). Freie Steuerung (:1207-1209): cam.plx/plz naehern sich je Bild um die halbe Differenz
+    // an EXP_WORK plx/plz (spx/spz des Spielerpasses, player.c:1657-1661), cam.ply = rom->grand[plp->flr_no + 2] + ci->h.
     {const unsigned mode=collision_mode_,mode0=mode&0xffu,mode1=(mode>>8)&0xffu,mode2=(mode>>16)&0xffu;
      const unsigned flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
      const unsigned stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
      const auto owp_root=[&]{if(player_joint_matrices_.empty())return false;const auto& m=player_joint_matrices_[0].value;camera_target_=NJS_POINT3{m[12],m[13],m[14]};camera_target_valid_=true;return true;};
-     if((mode0==1&&mode1==0&&mode2!=13)||((flg&0x200000u)&&mode0!=7)){if(stflg&0x30u)owp_root();else{camera_target_=player_.position;camera_target_valid_=true;}}
+     const auto approach=[&]{
+         if(!camera_target_valid_){unbound_enemy_.insert("cut.c:1207 cam.plx ohne bhInitActiveCamera-Startwert (plp->gpx ungebunden)");return;}
+         camera_target_.x+=0.5f*(player_camera_point_.x-camera_target_.x);                                   /* :1207 */
+         camera_target_.y=floors_[std::size_t(std::clamp(collision_floor_+2,0,int(floors_.size())-1))];       /* :1208 rom->grand[flr_no + 2] (+ ci->h in camera_for_actor) */
+         camera_target_.z+=0.5f*(player_camera_point_.z-camera_target_.z);};                                 /* :1209 */
+     if((mode0==1&&mode1==0&&mode2!=13)||((flg&0x200000u)&&mode0!=7)){if(stflg&0x30u)owp_root();else approach();}
      else if(mode0==7)owp_root();}
     const auto follow=camera_target_valid_?camera_target_:player_.position;
     // bhControlActiveCamera aims from the current travelling camera, not
     // from its final target position (important during a return/zoom).
-    const auto controlled=tracking?camera_for_actor(stage,cut,follow,std::int8_t(floor_at(player_.position)),&active_camera_.view().position):target;
+    // :1219 bhCheckCutAttribute(cam.plx, cam.plz, plp->flr_no): die Etage ist plp->flr_no (collision_floor_), nicht bhCheckFloorNum(py).
+    const auto controlled=tracking?camera_for_actor(stage,cut,follow,std::int8_t(collision_floor_),&active_camera_.view().position):target;
     active_camera_.tick(controlled);
     /* Diagnose: RECVX_CAM_TRACE=1, Raumkamerapfad (bhControlActiveCamera). */
     if(std::getenv("RECVX_CAM_TRACE")){const auto& p=active_camera_.view();std::fprintf(stderr,"CAMTRACE cut=%zu fixed=%d blend=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",cut,fixed_camera?int(*fixed_camera):-1,int(active_camera_.transitioning()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}
@@ -5663,6 +5700,9 @@ void RoomWorld::check_player_floor(NJS_POINT3 position,Angle yaw,int floor){
        Das Zuruecksetzen markiert den Beginn des naechsten Passes. */
     collision_body_pass_=false;
     auto geometry=collision_geometry();const auto steps=motion_steps(),flr=motion_floors();auto actor=motion_actor();actor.yaw=yaw;
+    /* player.c:1657-1661, zwischen Koerperteil (:1655) und bhCheckFloorP (:1664), im Tor :1365
+       (sp_flg 1 oben, stflg 0x1000000 hier): unter plp->flg 0x200000 EXP_WORK plx/plz = spx/spz. */
+    if((actor.flags&0x200000u)&&!(actor.status&0x1000000u))player_camera_point_={collision_safe_.x,collision_safe_.y,collision_safe_.z};
     check_motion_floor({geometry,steps,flr,floors_,room_height_},actor,position,collision_safe_,collision_front_offset_,3.5f,collision_floor_index_);
     if(collision_events_){collision_events_->values[16]=unsigned(collision_floor_index_);collision_events_->player_flags=actor.flags;}
 }

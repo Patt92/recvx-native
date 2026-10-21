@@ -47,11 +47,10 @@
    keine Waffen-/Raum-/Gegner-Sonderregel.
    =========================================================================== */
 
-/* CMakeLists.txt gehoert einem Peer und nimmt native/combat_geometry.c nicht
-   auf. Damit die originalen Kollisionsprimitive im produktiven Link liegen,
-   wird die Uebersetzungseinheit hier mituebersetzt. Der Integrator-Patch
-   (work/native_port_A01_A04_combat.patch) traegt sie als eigene Quelle nach. */
-#include "combat_geometry.c"
+/* Die Kollisionsprimitive liegen in native/combat_geometry.c (eigene Quelle in
+   CMakeLists.txt). Ein Mituebersetzen hier definierte die recvx_cb_*-Symbole
+   doppelt; MSVC link.exe bricht damit ab (LNK2005). */
+#include "combat_geometry.h"
 
 /* --- Originaldatentabellen (reine Daten, weapon.c:118 / player.c:214) ----- */
 const int32_t RECVX_CB_WPN_ANG_TAB[21][3] = {

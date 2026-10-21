@@ -577,7 +577,7 @@ std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 pos
     }
     return std::nullopt;
 }
-SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 position,std::int8_t floor,const NJS_POINT3* eye) {
+SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 position,std::int8_t floor,const NJS_POINT3* eye,NJS_POINT3* persisted) {
     if(index>=scene.cameras.size())throw std::runtime_error("active camera outside table");
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("invalid camera target");
     const auto& original=scene.cameras[index];auto camera=original;
@@ -613,9 +613,11 @@ SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 pos
         constexpr double units=65536.0/6.2831853071795864769;
         return axis==0?-int(std::atan2(double(p.y+original.target_height-origin.y),double(njSqrt(dx*dx+dz*dz)))*units):32768-int(std::atan2(double(dx),double(dz))*units);
     };
+    bool axis_ran[2]{false,false};
     for(unsigned axis=0;axis<2;++axis){
         const int limit=signed_angle(original.angle_limits[axis]);
         if(!(original.flags&4)&&limit==0)continue;
+        axis_ran[axis]=true;
         const int desired=signed_angle(look(axis));
         int angle=desired;
         if(!(original.flags&4)){
@@ -628,6 +630,22 @@ SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 pos
     if(std::any_of(original.roll_offsets.begin(),original.roll_offsets.end(),[](float n){return n!=0;}))camera.angles[2]=(camera.angles[2]+int(interpolate(original.roll_offsets,1)))&65535;
     if(original.flags&32)camera.perspective=int(interpolate(original.perspectives,64));
     if(camera.perspective<=0||camera.perspective>=32768)camera.perspective=8192;
+    if(persisted){
+        // cut.c:681/683 cam.plx/plz = gpx/gpz, danach in Originalreihenfolge jeder gelaufene Block
+        // (:687 w/cw bit 32, :716 d/cd bit 8, :745 y0..y3 bit 16, :770 laz0..3 bit 1, :795 flg 0x20
+        // bit 64, dann ax bit 4 und ay bit 2: unter flg 0x4 beide (:820/:853), sonst je lax/lay != 0
+        // (:879/:927 bzw. :970/:1019)). Der Naehpunkt (bhCheckNearAttrOffCutRange) gilt nur unter
+        // dem attr-Bit des Blocks, sonst gpx/gpz; der letzte Schreiber bleibt in cam.plx/plz stehen.
+        NJS_POINT3 p=position;
+        if(original.follow_x&&original.cut_extent.x)p=target(32);
+        if(original.follow_z&&original.cut_extent.z)p=target(8);
+        if(std::any_of(original.y_offsets.begin(),original.y_offsets.end(),[](float n){return n!=0;}))p=target(16);
+        if(std::any_of(original.roll_offsets.begin(),original.roll_offsets.end(),[](float n){return n!=0;}))p=target(1);
+        if(original.flags&32)p=target(64);
+        if(axis_ran[0])p=target(4);
+        if(axis_ran[1])p=target(2);
+        *persisted=NJS_POINT3{p.x,position.y,p.z};
+    }
     return camera;
 }
 void ActiveCameraMotion::reset(const SceneCamera& view,std::size_t cut){view_=view;cut_=cut;blending_=false;clock_=0;}

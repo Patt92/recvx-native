@@ -240,7 +240,11 @@ std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>&
 Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint32_t model,const NJS_MATRIX& world);
 std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 position,std::int8_t floor=0);
 // bhInitActiveCamera target evaluation (no transition/event-camera state).
-SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 position,std::int8_t floor=0,const NJS_POINT3* eye=nullptr);
+// `persisted` (optional): cam.plx/plz, wie sie bhInitActiveCamera (cut.c:681-1033) zurueck-
+// laesst. :681/683 setzen gpx/gpz; jeder gelaufene Block (w/cw :687, d/cd :716, y0..y3 :745,
+// laz0..3 :770, flg 0x20 :795, ax :820/:879/:970, ay :853/:927/:1019) schreibt sie erneut
+// (Naehpunkt unter dem attr-Bit, sonst gpx/gpz) - der zuletzt gelaufene Block gewinnt. y = position.y.
+SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 position,std::int8_t floor=0,const NJS_POINT3* eye=nullptr,NJS_POINT3* persisted=nullptr);
 // camera.c:47-57 cam.wpx/wpy/wpz: pivot + RotY(ay)RotX(ax)RotZ(az)(0,0,-ln).
 // This is the sound system's CameraPos, not the eye of the view matrix.
 NJS_POINT3 camera_world_position(const SceneCamera& camera);

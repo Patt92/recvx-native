@@ -287,7 +287,7 @@ public:
     void set_fixed_cut(unsigned cno);                       // cut.c:448 bhSetFixedCut
     void set_event_camera(unsigned cno,unsigned kno,bool lock); // cut.c:1644 / :1726
     // cut.c:12 bhCheckCut(1): bhSetCut(cam.ncut, 1) for the player's current cut.
-    void return_to_cut(){event_camera=false;fixed_camera.reset();camera_force_=true;}
+    void return_to_cut(){event_camera=false;fixed_camera.reset();camera_force_=true;camera_target_init_=true;}
     // cut.c:2472-2763 Augenkamera: cam.flg 0x4 (bhControlPlEyeCamera nach dem Abschalten) und der
     // Augenpfad unter gm_flg 0x40 (bhSetPlEyeCamera). Ein Kamerabesitzer neben Raum-/Eventkamera.
     struct EyeCamera{bool active=false,returning=false;unsigned mode0=0,ct0=0;NJS_POINT3 position{},target{};
@@ -550,6 +550,9 @@ public:
     // bhSetCut (cut.c:281): clip, hide tables and the cam.fog_* hand-over. The
     // bhSetFixedCut clip call passes cam.ncut, its fog comes from cno separately.
     void initialize_camera_clip(unsigned cut,bool hand_over_fog=true);
+    // player.c:842 bhInitPlayer -> bhCheckCut(1) -> bhSetCut(ncut, 1) (cut.c:91) -> bhInitActiveCamera (cut.c:442):
+    // Raumeintritt setzt den Schnitt und den Startwert cam.plx/plz (cut.c:681/683) in einem Schritt.
+    void init_room_camera(const Scene& stage,unsigned cut){initialize_camera_clip(cut);init_camera_target(stage,cut);}
     ViewClip camera_clip()const{return installed_clip_;}
     // ClipVolume des letzten _Make_ClipVolume-Aufrufs (bhChangeClipVolumeRM beim Raumschnitt,
     // bhChangeClipVolume bei der Ereigniskamera); nichts sonst setzt es zurueck.
@@ -674,6 +677,10 @@ public:
     unsigned player_floor_sound()const{return collision_floor_sound_;} // plp->flr_snd (bhCheckFloorP Typ 1)
     bool search_near_enemy_b(NJS_POINT3 pos,int ay,int ar,float len)const;
     NJS_POINT3 player_safe_position()const{return collision_safe_;}
+    // Prueflesen: cam.plx/ply/plz (y ohne ci->h) und EXP_WORK plx/plz (nur x/z gefuehrt).
+    std::optional<NJS_POINT3> camera_follow_target()const{if(!camera_target_valid_)return std::nullopt;return camera_target_;}
+    NJS_POINT3 player_camera_point()const{return player_camera_point_;}
+    int player_floor_number()const{return collision_floor_;} // plp->flr_no
     void set_player_safe_position(NJS_POINT3 p){collision_safe_=p;}
     // Host-Diagnose-Teleport (Replay "position", Debug): der Spieler steht danach so, als
     // waere er schon dort gewesen. Wie die Original-Teleports der Aktionsenden
@@ -1160,7 +1167,22 @@ private:
     ActiveCameraMotion active_camera_;std::vector<SceneCamera> room_cameras_;
     bool camera_force_=false;
     // cut.c:1197-1217 bhControlActiveCamera: cam.plx/ply/plz, das Verfolgungsziel der Raumkamera.
+    // y ohne ci->h: camera_for_actor addiert target_height (ci->h) selbst (:1202/:1208/:1215, :682).
     NJS_POINT3 camera_target_{};bool camera_target_valid_=false;
+    // EXP_WORK plx/plz (exp0[24]/[26]): bhInitActiveCamera schreibt gpx/gpz (cut.c:681/683), der
+    // Spielerpass unter plp->flg 0x200000 spx/spz (player.c:1657-1661). ply (exp0[25]) hat im Original
+    // keinen Leser (nur cut.c:682, player.c:1660, room.c:488/505 schreiben) und wird nicht gefuehrt.
+    NJS_POINT3 player_camera_point_{};
+    // bhCheckCut(1) aus dem Skript (bhCamSet 1 / bhInitCamSet): bhSetCut(cam.ncut, 1) ruft
+    // bhInitActiveCamera (cut.c:442) auch ohne Schnittwechsel. Das Ende der Augenkamera (cut.c:2611)
+    // setzt nur cam.flg 0x4 zurueck und initialisiert nicht erneut.
+    bool camera_target_init_=false;
+    // cut.c:681-1033 bhInitActiveCamera: cam.plx/plz und EXP_WORK plx/plz aus plp->gpx/gpz; bei
+    // fehlendem owP[0]-Knoten (stflg 0x30 / mode0 7) bleibt das Ziel unveraendert und wird als Luecke gemeldet.
+    void init_camera_target(const Scene& stage,std::size_t cut);
+    // plp->gpx/gpz (player.c:1744-1752): owP[0] unter stflg 0x30 oder mode0 7, sonst px/pz. y = plp->py
+    // (gpy = bhGetGroundPosition, :1757, ohne nativen Besitzer). Nicht gebunden: kein Knoten.
+    std::optional<NJS_POINT3> player_ground_point()const;
     // cam.flg 0x8 und sys->fil_no/fil_rt (cut.c:412-421/505-514); bhInitCamera (camera.c:9) nullt cam.flg.
     bool camera_filter_=false;int filter_no_=0,filter_rate_=0;
     bool camera_cut_wall_=false; // cam.flg 0x10 (cut.c:424/517: ci->flg 0x200)
