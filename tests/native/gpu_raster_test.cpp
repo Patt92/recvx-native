@@ -52,6 +52,34 @@ static Scene synthetic(){
     SceneTriangle edge;edge.vertices={vertex(-30,-4,0.5f),vertex(40,5,30),vertex(-8,30,12)};edge.color=0xff3070f0;edge.world_lit=true;edge.camera_mask=false;scene.triangles.push_back(edge);
     return scene;
 }
+// Eingrenzung bei Abweichung: dieselbe Szene mit den ersten n Dreiecken und jedes Dreieck allein.
+// Nennt das erste abweichende Dreieck mit seinen Merkmalen; nur Diagnose, das Urteil faellt in same().
+static std::size_t differing(const Scene& scene,const std::shared_ptr<GpuRaster>& gpu,const NJS_MATRIX& identity,int ss){
+    SoftwareRenderer software(640,480),hardware(640,480);
+    for(auto* r:{&software,&hardware}){r->set_supersampling(ss);r->set_texture_filtering(false);}
+    hardware.set_gpu(gpu);
+    software.draw_view(scene,identity,400,400,false,{},0.6f,40.f);hardware.draw_view(scene,identity,400,400,false,{},0.6f,40.f);
+    std::size_t n=0;
+    for(std::size_t i=0;i<software.pixels().size();++i)
+        if(software.pixels()[i]!=hardware.pixels()[i]||std::memcmp(&software.depth()[i],&hardware.depth()[i],sizeof(float)))++n;
+    return n;
+}
+static std::string describe(const SceneTriangle& t){
+    char text[200];
+    std::snprintf(text,sizeof text,"blend %d reg %llx color %08x textured %d tex %u gouraud %d vertex_alpha %d punch %d water %d depth_write %d fog_fixed %d divisor %u",
+        int(t.blend),static_cast<unsigned long long>(t.blend_register),t.color,int(t.textured),unsigned(t.texture),int(t.gouraud),int(t.vertex_alpha),
+        int(t.punch_through),int(t.general_purpose_water),int(t.depth_write),int(t.fog_fixed),unsigned(t.texture_color_divisor));
+    return text;
+}
+static void bisect(const Scene& scene,const std::shared_ptr<GpuRaster>& gpu,const NJS_MATRIX& identity,int ss){
+    for(std::size_t n=1;n<=scene.triangles.size();++n){
+        Scene prefix=scene;prefix.triangles.resize(n);
+        if(const auto d=differing(prefix,gpu,identity,ss)){
+            std::cerr<<"bisect: first "<<n<<" triangle(s) differ in "<<d<<" pixel/depth(s); triangle "<<(n-1)<<": "<<describe(scene.triangles[n-1])<<'\n';break;}}
+    for(std::size_t i=0;i<scene.triangles.size();++i){
+        Scene single=scene;single.triangles={scene.triangles[i]};
+        if(const auto d=differing(single,gpu,identity,ss))std::cerr<<"alone: triangle "<<i<<" differs in "<<d<<": "<<describe(scene.triangles[i])<<'\n';}
+}
 // Kleine Bilder fuer Kanten, koplanare unabhaengige Auftraege, Texturrevisionen, Zielgroessenwechsel und SSAA 3/4.
 static void extra_parity(const std::shared_ptr<GpuRaster>& gpu,const NJS_MATRIX& identity){
     Scene scene;scene.background=0x40102030u;
@@ -114,7 +142,8 @@ int main(int argc,char** argv){try{
         check(software.covered_pixels()>50000,"synthetic scene covers too little");
         if(!wireframe)check(hardware.gpu()==gpu&&hardware.last_gpu_frame()&&gpu->timings().submits>0,"synthetic GPU frame fell back: "+hardware.gpu_error());
         else check(!hardware.last_gpu_frame(),"wireframe must use the explicit software path");
-        same(software,hardware,"synthetic ss "+std::to_string(ss)+(wireframe?" wireframe":""));}
+        try{same(software,hardware,"synthetic ss "+std::to_string(ss)+(wireframe?" wireframe":""));}
+        catch(const std::exception&){if(!wireframe)bisect(scene,gpu,identity,ss);throw;}}
     extra_parity(gpu,identity);
     for(const auto& message:gpu->unsupported())check(false,"GPU frame fell back: "+message);
     if(!data.empty()){
