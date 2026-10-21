@@ -39,7 +39,8 @@ with a shared pipeline feeding the available backend:
 - **Direct3D 11 — experimental** — the Windows GPU backend. It uses Rasterizer
   Ordered Views to preserve drawing order and programmable blending; hardware
   without the required support falls back to software. Hardware validation is
-  still in progress.
+  still in progress; on Windows 11 ARM64 (Parallels VM) it currently shows
+  missing and black-holed geometry, so use the software renderer there.
 - **Software** — a CPU renderer that remains available as a fallback and a
   reference for validating GPU output.
 - **OpenGL** — the Linux GPU default, optionally selectable on macOS and Windows.
@@ -102,7 +103,7 @@ brought up separately from the shared gameplay code.
 |---|---|
 | **Mac / Apple Silicon** | Current development platform with Metal and software rendering; standalone Mac builds are part of the release plan. |
 | **Windows x64** | Build support and an experimental Direct3D 11 backend are present; validated Windows releases are planned. |
-| **Windows ARM64** | Cross-build option in the build tool, with SDL2 compiled from the pinned source; hardware validation is still pending. |
+| **Windows ARM64** | Native build verified with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64; the software renderer runs correctly. The Direct3D 11 backend still shows rendering errors there (see below). |
 | **Linux** | Native build with OpenGL selected by default; Linux driver/hardware validation remains open. |
 | **iOS/iPadOS** | Planned native builds using Metal. |
 | **Apple TV** | Planned native build using Metal. |
