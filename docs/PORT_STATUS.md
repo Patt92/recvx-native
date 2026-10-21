@@ -2,7 +2,7 @@
 
 Dieser Bericht wertet nur explizit belegte native Mechanismen. Die vollständige Originaldecompilation ist absichtlich weder Nenner noch Fehlermenge.
 
-Expliziter Belegumfang: **88.7 %** gewichtet, **78.0 %** voll belegt (513/658 Mechanismen; kein Gesamtfortschritt).
+Expliziter Belegumfang: **88.7 %** gewichtet, **78.0 %** voll belegt (514/659 Mechanismen; kein Gesamtfortschritt).
 
 Event-Befehle (bhScenarioJmpT): 211/223 gebunden, 12 nur konsumiert, 0 fehlen.
 
@@ -16,7 +16,7 @@ Event-Befehle (bhScenarioJmpT): 211/223 gebunden, 12 nur konsumiert, 0 fehlen.
 | Menü/Items/Text | 43/55 | 86.4 % | 78.2 % | 9 | 3 |
 | Modelle/Animation | 10/15 | 83.3 % | 66.7 % | 5 | 0 |
 | Audio | 5/21 | 61.9 % | 23.8 % | 16 | 0 |
-| Ablauf/Speichern | 28/32 | 93.8 % | 87.5 % | 4 | 0 |
+| Ablauf/Speichern | 29/33 | 93.9 % | 87.9 % | 4 | 0 |
 | Plattform (Host-ersetzt) | 16/31 | 75.8 % | 51.6 % | 15 | 0 |
 
 Nur Ledger-Einträge mit eigenständiger nativer Evidenz zählen. Namensgleichheit, Originalquellen und quarantänierte Generatoren zählen nie als Portbeleg.

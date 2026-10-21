@@ -643,18 +643,18 @@ void GameUi::icon(SoftwareRenderer& image,unsigned id,int x,int y,int height,int
 }
 void StatusTask::enter(){reset();phase_=Phase::Monitor;} // mn_mode0 5, mn_md1 0
 void StatusTask::resume(){reset();phase_=Phase::Main;}  // ts_flg 0x200 frei, taskloop 0
-void StatusTask::monitor(bool fade_pending){
-    if(phase_!=Phase::Monitor)return;
+bool StatusTask::monitor(bool fade_pending){
+    if(phase_!=Phase::Monitor)return false;
     switch(md1_){
-    case 0:md1_=1;return; // system.c:1957-1972: GetReadFileStatus() != 1, sbs_sp, bhCopyTexmem2MainmemSub
-    case 1:md1_=2;return; // :1974-1985: GetInsideFileSize(itm_partid, 145) != 0 -> RequestReadInsideFile
-    case 2:               // :1987-2013
-        if(fade_pending)return;
-        game_stopped_=true; // ts_flg |= 0x80, njSetBackColor(0, 0, 0)
-        md1_=3;return;      // GetReadFileStatus() == 0 im selben Durchlauf (native Lese synchron)
-    case 3:md1_=4;return; // :2015-2018 SbsTextureInit(3)
-    default:              // :2020-2025 ItemTaskCheck (Einstieg, sub1.c:3029-3077), SET_SYS_MN_MD(0, 0, 0, 0)
-        phase_=Phase::Main;md1_=0;taskloop_=0;return;
+    case 0:md1_=1;return false; // system.c:1957-1972: GetReadFileStatus() != 1, sbs_sp, bhCopyTexmem2MainmemSub
+    case 1:md1_=2;return false; // :1974-1985: GetInsideFileSize(itm_partid, 145) != 0 -> RequestReadInsideFile
+    case 2:                     // :1987-2013
+        if(fade_pending)return false;
+        game_stopped_=true; // ts_flg |= 0x80, njSetBackColor(0, 0, 0) - der Aufrufer setzt Db.clear
+        md1_=3;return true; // GetReadFileStatus() == 0 im selben Durchlauf (native Lese synchron)
+    case 3:md1_=4;return false; // :2015-2018 SbsTextureInit(3)
+    default:                    // :2020-2025 ItemTaskCheck (Einstieg, sub1.c:3029-3077), SET_SYS_MN_MD(0, 0, 0, 0)
+        phase_=Phase::Main;md1_=0;taskloop_=0;return false;
     }
 }
 StatusTask::Pass StatusTask::item_task_check(bool closed){

@@ -50,7 +50,10 @@ public:
     std::size_t script_count() const {return node_layout_.script_to_model.size();}
     std::size_t motions() const {return motions_.size();}
     const MotionClip& motion_clip(std::size_t i)const{return motions_.at(i).value();}
-    bool has_motion(std::size_t i) const {return i<motions_.size() && motions_[i] && motions_[i]->positions.size()==bones();}
+    // mnwP[i].datP != NULL (Motion.c:29). SetMtn* (Motion.c:131) laeuft ueber obj_num der MOTION:
+    // weniger Kanaele als Knoten schreiben nur die ersten obj_num objP (Wesker 0013: Motion 9 mit
+    // 20 Kanaelen auf 22 Knoten), die uebrigen behalten ihren Stand; mehr Kanaele meldet set_motion.
+    bool has_motion(std::size_t i) const {return i<motions_.size() && motions_[i] && motions_[i]->positions.size()<=bones();}
     // mnwP[i] der Bibliothek ohne Knotenzahlpruefung: sys->plmthp traegt auch Motionen fremder
     // Modelle (en27.c:61 Mottenei auf plp->mdl[6]/[7] mit den Spielermotionen 93..96).
     const MotionClip* library_motion(std::size_t i)const{return i<motions_.size()&&motions_[i]?&*motions_[i]:nullptr;}

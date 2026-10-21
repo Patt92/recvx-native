@@ -74,7 +74,8 @@ public:
     void resume();  // system.c:917-924 case 6 nach bhExitMap: ts_flg 0x200 frei, ItemTaskCheck baut neu auf (subscreenmode 0x40)
     void reset(){const bool framed=framed_;*this=StatusTask{};framed_=framed;}
     // Ein Task-20-Durchlauf; fade_pending = sys->cb_flg & 0x2 nach Task 7 dieses Bildes.
-    void monitor(bool fade_pending);
+    // true im Durchlauf, der ts_flg 0x80 setzt und njSetBackColor(0,0,0) ruft (system.c:1987-1992).
+    bool monitor(bool fade_pending);
     // Kopf von Task 9 (system.c:911): ItemTaskCheck mit swork.statusflg 0x80000.
     Pass item_task_check(bool closed);
     bool owned()const{return framed_;}

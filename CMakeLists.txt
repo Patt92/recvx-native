@@ -508,6 +508,11 @@ if(BUILD_TESTING)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm7250_spider_grab_check.py"
       --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
+  if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_1090.RDT")
+    add_test(NAME rm1090_terminal_wrong_password COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm1090_terminal_wrong_password_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0080.RDT")
     add_test(NAME zombie_blood_pool COMMAND "${Python3_EXECUTABLE}" -I
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/zombie_blood_pool_check.py"
@@ -1137,6 +1142,12 @@ endif()
   add_executable(recvx-player-event-tests tests/native/player_event_test.cpp)
   target_link_libraries(recvx-player-event-tests PRIVATE recvx_game)
   add_test(NAME player_event COMMAND recvx-player-event-tests)
+  # Motion.c:29/131: weniger Motionkanaele als Modellknoten (Wesker 0013 Motion 9).
+  add_executable(recvx-player-short-motion-tests tests/native/player_short_motion_test.cpp)
+  target_link_libraries(recvx-player-short-motion-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3080.RDT")
+    add_test(NAME player_short_motion COMMAND recvx-player-short-motion-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   add_executable(recvx-player-action-tests tests/native/player_action_test.cpp)
   target_link_libraries(recvx-player-action-tests PRIVATE recvx_game)
   add_test(NAME player_action COMMAND recvx-player-action-tests)
