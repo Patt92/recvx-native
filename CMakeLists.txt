@@ -1284,6 +1284,11 @@ if(BUILD_TESTING)
  target_link_libraries(recvx-turn-object-tests PRIVATE recvx_game)
  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0010.bin")
   add_test(NAME turn_object COMMAND recvx-turn-object-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  if(TARGET recvx-runtime)
+   add_test(NAME rm0150_statue_turn COMMAND "${Python3_EXECUTABLE}" -I
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm0150_statue_turn_check.py"
+    --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
  endif()
 endif()
 

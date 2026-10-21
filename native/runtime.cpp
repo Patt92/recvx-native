@@ -1548,6 +1548,10 @@ int main(int argc,char** argv){
             if(!(events->flags[13][0]&0x10000u))recvx_player_action_pad(&action,&io,nullptr);
             if(!recvx_player_action_bas(&action,&io)){action_pad_old=io.pad_on;action_resume=true;follow();return;} // mode2 14..22: special owners
             recvx_player_action_turn(&action,&io);
+            // bhControlPlayerPad/bhCPM1_act_bas write plp->mode2/mode3
+            // (player.c:1838/1957); bhControlObjItm follows in game.c:51 and
+            // bhObj007 must see the walking state of this same player pass.
+            world->set_player_mode((world->player_mode()&0x0000ffffu)|(action.mode2<<16)|(action.mode3<<24));
             }
             // pad.c:146 liest im naechsten Bild sys->pad_on NACH diesem Pass: act_sta/act_wre loeschen
             // dort die Richtungsbits (player.c:2275/5245); sonst bliebe mode3 der Wartebewegung stehen.
