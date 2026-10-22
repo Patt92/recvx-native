@@ -179,6 +179,11 @@ public:
     std::vector<EventTaskState> task_states()const;
     bool flag(unsigned matrix,unsigned index)const;
     void set_flag(unsigned matrix,unsigned index,unsigned mode);
+    // plp->stflg (flags[14]): die Giftbits 0x80000/0x200000 gehoeren dem
+    // Inventarbesitzer (inventory.h:26); Use_00 (sub1.c:6373) loescht sie dort.
+    // Der Spieler-stflg traegt sie abgeleitet, damit Gegner (player_get) und
+    // bhCheckPlayerKegaMotion (player_action.c:118) denselben Stand sehen.
+    void sync_player_stflg();
 private:
     bool door_scenario_pending_=false;
     bool pad_cleared_=false; // hitchk.c sys->pad_ps = 0 for the rest of the pass

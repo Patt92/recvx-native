@@ -34,6 +34,7 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
 // Keep undefined selectors visible instead of inventing a scratch flag bank.
 bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size())throw std::runtime_error("event flag outside matrix");index&=0x3ff;return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
 void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||mode>5)throw std::runtime_error("invalid event flag operation");index&=0x3ff;auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
+void EventVm::sync_player_stflg(){flags[14][0]=(flags[14][0]&~0x280000u)|inventory_.player_stflg();}
 void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<15&&tasks_[level].active)++level;} /* Event_exec (event.c:13001): sind 0..14 belegt, wird Slot 15 neu belegt */if(task_started)task_started(level);const auto counts=tasks_[level].loop_counts;const auto cnt2=tasks_[level].cnt2,cnt3=tasks_[level].cnt3,wpnl_no=tasks_[level].wpnl_no;const auto addpx=tasks_[level].addpx;tasks_[level]={};tasks_[level].loop_counts=counts;tasks_[level].cnt2=cnt2;tasks_[level].cnt3=cnt3;tasks_[level].wpnl_no=wpnl_no;tasks_[level].addpx=addpx; /* Event_init (event.c:12956) leaves cnt, wpnl_no and addpx */tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
 void EventVm::inherit_progress(const EventVm& previous){
     // Original global event/key/item/map/game flags outlive a ROM_WORK load.
@@ -445,7 +446,10 @@ int EventVm::instruction(Task& t){
         return 0;}
     case 0x83:return advance(2); // bhSoundFadeOut: the original body only skips its operands
     case 0x89:change_player=v.u8(p+1);flags[10][0]|=0x80;advance(2);return 1; // bhPlayerChangeSet: cng_pid + cb_flg 0x80, verbraucht beim Raumladen (runtime.cpp load(), system.c:1717)
-    case 0xae:inventory_.infected=false;return advance(2); // bhPlayerPoison2Cr: ply_stflg[0] &= ~0x200000
+    // bhPlayerPoison2Cr (event.c:7369): loescht ausschliesslich den gespeicherten
+    // Eintrag ply_stflg[0]. plp->stflg uebernimmt ihn erst beim Spielerwechsel
+    // (player.c:663 bhPlayerChangeSet) - dieselbe Verzoegerung wie im Original.
+    case 0xae:inventory_.ply_stflg[0]&=~0x200000u;return advance(2);
     case 0xa0:map_parameters={v.u8(p+1),v.u8(p+2),v.u8(p+4),v.u8(p+3)};flags[10][0]|=0x10000;advance(6);return 1; // bhMapSystemOn: mp_prm[0..3] (consumed by runtime)
     case 0xce:case 0xc5:case 0x87:world(t,op,2);return 1;
     // event.c:8906 bhExGameItemInit -> sub1.c:8553 ExtraGameItemInit: Battle-Game-Ausruestung in itm[cng_pid*16].

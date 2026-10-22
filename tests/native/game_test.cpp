@@ -7,6 +7,7 @@
 #include "binary_view.h"
 #include "room.h"
 #include "core_random.h"
+#include "status_pulse.h"
 #include <iostream>
 #include <stdexcept>
 #include <algorithm>
@@ -221,6 +222,30 @@ int main(int argc,char** argv){try{
     // archived/work/native_port_D06_events.patch ist NICHT in native/events.cpp
     // integriert (Integrator). Dieser Abschnitt fordert die Originalwirkung
     // über das Skript ein und schlägt bis zur Integration fehl.
+    section("D07 Gift heilt am Besitzer (plp->stflg 0x80000/0x200000)",[]{
+        auto bytes=fixture();Inventory state;MessageDialog text;EventVm event(bytes,state,text);
+        // Gegner-/Effektpass meldet das Gift an den Besitzer (world_enemies.cpp:297);
+        // der Runtime-Abgriff setzt es dort, plp->stflg traegt die Bits abgeleitet.
+        std::fill(state.slots()+2,state.slots()+12,0);state.slots()[2]=Inventory::pack(23,1); // Blaukraut
+        state.poisoned=true;state.hp=160;event.sync_player_stflg();
+        check((event.flags[14][0]&0x80000u)!=0,"enemy poison missing from plp->stflg");
+        check(StatusPulse::condition(state.hp,(state.player_stflg()&0x280000u)!=0)==4,"status does not show poison");
+        unsigned control=0;const auto use=state.use_item(2,nullptr,control,0,0,4);
+        check(!state.poisoned&&use.condition==0,"blue herb does not heal the poison at its owner");
+        check(!(state.player_stflg()&0x80000u),"blue herb does not clear the poison owner bit");
+        event.sync_player_stflg();
+        check(!(event.flags[14][0]&0x280000u),"cured poison still in plp->stflg: bhCheckPlayerKegaMotion keeps dmlvl 1");
+        // bhPlayerPoison2Cr (0xae, event.c:7369) loescht nur ply_stflg[0]; der Live-Wert
+        // folgt beim Spielerwechsel (player.c:663) - nicht sofort.
+        auto bytes2=fixture();bytes2[1118]=0;
+        const std::vector<std::uint8_t> code={0xae,0,0xff,0};std::copy(code.begin(),code.end(),bytes2.begin()+1180);
+        Inventory state2;MessageDialog text2;EventVm event2(bytes2,state2,text2);
+        state2.player=1;state2.infected=false;state2.ply_stflg[0]=0x200000;
+        event2.start(0,0);event2.tick();event2.sync_player_stflg();
+        check(!(state2.ply_stflg[0]&0x200000u),"bhPlayerPoison2Cr does not clear the saved entry");
+        check(!state2.infected,"bhPlayerPoison2Cr must not cure the live bit immediately");
+        state2.switch_player(0);
+        check(!state2.infected,"player switch ignores the cured saved entry");});
     section("D06 Event-VM-Anschluss (events.cpp, Patch nicht integriert)",[]{
         auto execute=[&](Inventory& state,std::vector<std::uint8_t> code){auto bytes=fixture();bytes[1118]=0;code.insert(code.end(),{5,4,31,0,0,0,0xff,0});std::copy(code.begin(),code.end(),bytes.begin()+1180);MessageDialog text;EventVm event(bytes,state,text);event.start(0,0);event.tick();
             check(event.errors.empty()&&event.flag(4,31),"inventory event operand boundary/regression");
