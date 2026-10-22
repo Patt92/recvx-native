@@ -34,9 +34,9 @@ extern "C" {
                            C-Schreiben :121/399; alle 256 Bytewerte bleiben erhalten)
      +0x21 char            wird in Init auf 0 gesetzt (:122) und sonst nie
                            benutzt
-   Das Modell wechselt jeden dritten Pass (epw->mlwP = &epw->mdl[n]); nativ
-   ist mdl_no die Auswahl der Modellwurzel, der Zeichenpfad muss sie
-   auswerten (wie bei Identitaet 71).
+   Das Modell wechselt jeden dritten Pass (epw->mlwP = &epw->mdl[n]) ueber den
+   Dienst select_model (wie bei Identitaet 71); mdl_no ist der Skin-Index und
+   bleibt unberuehrt.
 
    Einstieg: bhEne10 (en10.c:30); der Dispatch-Eintrag 0xA der Tabelle
    (eneset.c:51) gehoert dem Dispatcher-Besitzer und wird hier nur

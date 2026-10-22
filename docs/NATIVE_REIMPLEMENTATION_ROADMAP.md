@@ -151,7 +151,7 @@ seven event mutations, quantity/command rendering and ECG are implemented.
 The item-box width-change cursor remainder was closed in `f18acea`.
 Current limits remain in [Native Gameplay](NATIVE_GAMEPLAY.md#inventory-and-items)
 and the [port ledger](port_ledger.tsv); this historical wave is not a fresh task list.
-The review is recorded in `work/next-tasks-audit.result.md`.
+The review is recorded in `archived/work/next-tasks-audit.result.md`.
 
 1. Integrator: agree R02 as Claude's first narrow task; continue
    R00/R01/R03/P00 and P01/P02/P05 data regressions. Set owners/interfaces;

@@ -44,9 +44,9 @@ void recvx_en71(RECVX_ENEMY_WORK* w)
         if (w->mode3 > 3u) w->mode3 = 0;
     }
 
-    /* en71.c:41: epw->mlwP = &epw->mdl[epw->mode3]. Nativ ist mdl_no die
-       Auswahl der Modellwurzel; der Zeichenpfad muss sie auswerten. */
-    w->mdl_no = w->mode3;
+    /* en71.c:41: epw->mlwP = &epw->mdl[epw->mode3]; mdl_no (Skin-Index) bleibt. */
+    if (!(sv && sv->select_model && sv->select_model(w, w->mode3)) && sv && sv->gap)
+        sv->gap("bhEne71: mlwP = &mdl[mode3]");
 
     if (sv && sv->set_motion) sv->set_motion(w, w->mtn_add, w->mtn_md);
     else if (sv && sv->gap)   sv->gap("bhSetMotion");

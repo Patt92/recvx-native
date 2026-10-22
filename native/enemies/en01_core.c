@@ -10352,17 +10352,13 @@ void recvx_en01_dg16(RECVX_ENEMY_WORK* w)
    ersten beiden mit (plp, epw); nativ ist `w` der Gegner und `pl` die
    Sicht auf den Spielerbesitzer.
 
-   OFFENER SCHNITTSTELLENBEDARF — plp->ayp
-   ---------------------------------------
+   plp->ayp
+   --------
    Im Original ist der Spieler derselbe BH_PWORK wie ein Gegner und hat
-   darum axp/ayp/azp. RECVX_ENEMY_WORK fuehrt diese Felder
-   (enemy_work.h:183); die Spielersicht RECVX_ENEMY_PLAYER noch nicht.
-   PlyDG00/PlyDG01 brauchen plp->ayp als Drehraten-Speicher UEBER FRAMES
-   HINWEG (en01.c:7545/7559/7566 und :7851/7883/7903). Solange das Feld
-   fehlt, melden die beiden Zugriffe unten die Luecke und der Drehanteil
-   bleibt aus; alles andere dieser Zustaende ist vollstaendig portiert.
-   Der Bedarf ist bei der C02-Sitzung eingereiht (enemy_work.h gehoert
-   dort hin, nicht hierher). Ein zweites Spielerwerk wird NICHT gebaut. */
+   darum axp/ayp/azp. PlyDG00/PlyDG01 brauchen plp->ayp als Drehraten-
+   Speicher UEBER FRAMES HINWEG (en01.c:7545/7559/7566 und :7851/7883/7903).
+   Das Feld steht im Vertrag (enemy_work.h:142) und wird ueber
+   player_get/player_set gefuehrt; ein zweites Spielerwerk gibt es nicht. */
 
 static int32_t en01_ply_ayp_get(RECVX_ENEMY_WORK* w)
 {
@@ -10993,10 +10989,8 @@ void recvx_en01_enemy_push_chk(RECVX_ENEMY_WORK* w, int mode)
    Weiche vorne/hinten, die bhEne01_NGType00 aus bhCdirCheck setzt
    (en01b.c:231 fuer die B-Variante, en01.c:6745 fuer W).
 
-   OFFEN (Schnittstellenbedarf): NG00 und NG02 schreiben plp->ct1
-   (en01.c:6876, :7432/:7436). RECVX_ENEMY_PLAYER fuehrt nur ct0; das Feld
-   wird gemeldet statt ersetzt — zusammen mit plp->ayp fuer PlyDG00/01 der
-   zweite Spielerfeld-Bedarf dieses Pakets. */
+   plp->ct1: NG00 und NG02 schreiben es (en01.c:6876, :7432/:7436); das Feld
+   steht im Vertrag (enemy_work.h:141) und geht ueber player_set. */
 
 /* Die Spielerlage + Drehung als Weltmatrix, daraus die Gegnerposition
    (en01.c:6813-6816 und :7380-7383 wortgleich). */

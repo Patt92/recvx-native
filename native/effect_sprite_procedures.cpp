@@ -6098,7 +6098,7 @@ bool draw_effect_sprite_work(EffectSprite& s,const EffectContext& c){
 }
 bool stateful_effect_draw(unsigned id){return id==22||id==24||id==25||id==27||id==100||id==107;}
 const HandEffectProcedure hand_effect_procedures[]={
-    {26,step_eff026},{252,step_e00_fire},{253,step_e02_sand_dust},{254,step_e02_sand_particle},{259,step_e05_blood},{260,step_e06_rinpun},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},{13,step_eff013},{139,step_eff_dummy},{140,step_eff_dummy},{141,step_eff_dummy},{142,step_eff_dummy},
+    {26,step_eff026},{252,step_e00_fire},{253,step_e02_sand_dust},{254,step_e02_sand_particle},{259,step_e05_blood},{260,step_e06_rinpun},{256,step_e03_acid},{397,step_e15_poison},{257,step_e00_acid},{267,step_e13_fluid},{269,step_e14_fire},{250,step_e00_mince},{355,step_eff355},{305,step_eff305},{306,step_eff306},{298,step_e00_acid_generator},{303,step_eff303},{130,step_eff130},{13,step_eff013},
     {262,step_e12_fire_manager},{263,step_e12_fire},{264,step_e12_fire_spark},{265,step_e12_frame_liquid},{274,step_e12_fire2},{275,step_e12_fire3},{276,step_e12_binta},
     {251,step_e00_drop_blood},{266,step_e12_floor_blood2},{268,step_e14_explosion},{271,step_e14_fire2},{272,step_e00_dust},{273,step_e14_mucus},{299,step_damage_point},{255,step_e02_sand_particle2},
     {6,step_eff006},{4,step_eff_empty},{28,step_eff_empty},{129,step_eff_empty},{174,step_eff_empty},{197,step_eff_empty},

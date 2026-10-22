@@ -6,7 +6,7 @@ Kein Code, kein Test, kein Ledger geändert, kein Build. Rohdaten unter
 ## 1. Methode und Datenstand
 
 - Arbeitsbaum: `main` auf 5eab955, lokal `M third_person.ini`, `?? video.ini`,
-  `?? work/rm0020-explosion-flicker.result.md` (unverändert gelassen).
+  `?? archived/work/rm0020-explosion-flicker.result.md` (unverändert gelassen).
   `python3 tools/check_no_original_core.py` → PASS.
 - Binary: `build/macos-arm64/recvx-runtime` (mtime 2026-10-22 00:01), nicht neu gebaut.
 - Original-Sprungtabellen aus `src/ps2/veronica/prog/effect.c:33-37`
@@ -211,3 +211,17 @@ verlinkte Sätze/flg 0x2000000.
 - **bhEff026 / bhCheckEvtTimer**: `EventVm::set_effect` (Laufzeit -> `spawn_unlinked_effect`) beim
   Ablaufzweig Flag (1,69); game_test prueft genau einen Spawn und keinen nach geloeschtem Flag.
 - Offen aus dem Audit: bhEff_Sub367, Halter 30..83 Freigabe, bhEff001-Schatten.
+
+## Nachtrag 2026-10-22 (2): Punkt 10 erledigt, 367 eingeordnet
+
+- **Raum-Texturhalter freigegeben:** `bhEffDmy` (effsub1.c:22, flg = 0) laeuft jetzt fuer alle 143
+  Dmy-Plaetze der fuenf Sprungtische (`effect_sprites.cpp` hand_procedure), Saetze mit id >= 400 enden
+  wie effect.c:787-790 im ersten Pass (world.cpp Effektpass). Halter geben ihren eff[512]-Platz frei;
+  spaetere Saetze ruecken nach (RM_1002: Augen 146/Nachbilder 136 auf Plaetzen 2/7/12, ein Pass spaeter).
+  Ledger `effect.c:bhEffDmy` done. Die Behauptung "0x92 auf Halterkennungen abgewiesen" war falsch:
+  0x92 ist bhBGSeOff2 (event.c Befehlstisch, Hintergrundklang aus), kein Effektbefehl.
+- **bhEff_Sub367:** nicht portierbar ohne erfundene Arbeitsdaten (exp0/op->func nie gesetzt, kein
+  Erzeuger); Ledger `skip` als unerreichbar.
+- Weiter offen: 3 (bhEff001/bhSetShadow Renderer), 4 (bhEff_Sub365 Flaeche), 5 (Monitor 110/111
+  Render-to-Texture), 6/9 (Original liest uninitialisierte Daten), 7 (130 Typ 4/6 ohne Raumlauf),
+  8 (134/138/136 Teilpfade).

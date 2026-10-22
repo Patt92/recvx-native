@@ -204,8 +204,8 @@ RoomWorld::RoomWorld(const std::vector<std::uint8_t>& b,const Scene& stage,Scene
     sprites_.reserve(512);
     for(unsigned i=0;i<effect_count;++i){const auto p=effectp+i*68;const unsigned id=v.u16(p+4);SpriteWork work;work.sprite.id=id;work.sprite.type=v.u16(p+6);work.sprite.flg=v.u32(p);work.sprite.ay=v.u16(p+36);work.sprite.ax=v.u16(p+38);work.sprite.lkono=0; /* room.c:781 bhSetEffectTb(ep, NULL, NULL, 0): lkono 0; bhSetEffectLink (:787) schreibt es danach: lkflg 0 -> efp->lkono (:877), aktiver Link -> begrenzt (:853), inaktiver Link -> bleibt 0 */work.scale={v.f32(p+24),v.f32(p+28),v.f32(p+32)};work.link=v.u32(p+40);work.index=v.u32(p+44);work.node=v.u32(p+48);work.offset={v.f32(p+52),v.f32(p+56),v.f32(p+60)};work.sprite.px=v.f32(p+12);work.sprite.py=v.f32(p+16);work.sprite.pz=v.f32(p+20);work.sprite.sx=work.sprite.sxb=work.scale.x;work.sprite.sy=work.sprite.syb=work.scale.y;work.sprite.sz=work.sprite.szb=work.scale.z;sprites_.push_back(work);auto& e=entity(4,i);e.identity=id;e.type=work.sprite.type;e.angles={work.sprite.ax,work.sprite.ay,0};e.transform.position={v.f32(p+12),v.f32(p+16),v.f32(p+20)};
         if((id>=30&&id<100)||id>=400)if(effect_ids.insert(id).second){const auto texture=v.u32(texture_table+4+texture_slot++*4);if(id==41||id==414||id==415||id==58||id==59||(id>=70&&id<=79)||eff2d_groups.count(id)||ported_effect_atlas(id)){auto atlas=decode_texture_bundle(b,texture);
-            // Eine portierte Prozedur behaelt die Alpha-Domaene des Dekoders;
-            // die unportierten Sprites zeichnen dieselben Atlanten additiv.
+            // Dekodiert wird nur, was eine portierte Prozedur ueber tex_id liest; der
+            // Haltersatz selbst endet im ersten Pass (bhEffDmy bzw. effect.c:787 fuer id >= 400).
             Scene holder;holder.textures=std::move(atlas);if(!data.empty())apply_texture_files(holder,data,mods,std::filesystem::path("effects")/room_name/asset_number(id));effect_textures_[id]=std::move(holder.textures);}}
     }
     // Alle 3171 Effektzeilen der 205 gelieferten RDT haben flg & 3 == 1.
@@ -560,7 +560,7 @@ std::optional<Scene> RoomWorld::computer_character(unsigned chr_no,unsigned moti
         if(model.kind!=1||model.index!=chr_no||!model.actor)continue;
         try{
             auto& tree=tree_owner(e);
-            const auto* asset=model_variant(model,tree.morph_obj_a);if(!asset)return {};
+            const auto* asset=model_variant(model,tree.drawn_root());if(!asset)return {};
             std::vector<ModelPose> pose;std::vector<std::uint32_t> flags;
             const bool native_tree=e.enemy_native&&(!e.scripted||(e.subplayer_bound&&tree.enemy_calculated));
             if(native_tree){
@@ -585,7 +585,7 @@ std::optional<Scene> RoomWorld::computer_character(unsigned chr_no,unsigned moti
                 flags=asset->node_evalflags();
             }
             // sp_evt.c:1478-1500: npRetSkinConvert + njCnkEasyDrawObject(objP), kein npCalcSkin.
-            Scene object=asset->sample_tree(pose,flags,tree.live_stream(tree.morph_obj_a));
+            Scene object=asset->sample_tree(pose,flags,tree.live_stream(tree.drawn_root()));
             object.textures=model.object.textures;
             for(auto& t:object.triangles)t.object=asset->script_index(t.object);
             object.erase_triangles([&](const auto& t){const auto at=e.hidden_nodes.find(t.object);return at!=e.hidden_nodes.end()&&at->second;});
@@ -3530,6 +3530,10 @@ void RoomWorld::tick_after_player(){
         if(i<sprites_.size())sprites_[i].queued=false;
         const unsigned id=eligible?sprites_[i].sprite.id:0u;
         if(!eligible){
+        }else if(id>=400){
+            // effect.c:787-790: ein Satz mit id >= 400 (Raum-Texturhalter, room.c:781) endet im
+            // ersten Pass ohne Prozedur und Linkpunkt; seine Gruppe bleibt in ef_tn.
+            sprites_[i].sprite.flg=0;
         }else if(id==300||id==302){
             particles_.tick_slot(i,
                 [this](const ParticleLink& link,NJS_POINT3 offset){return link_point(link.kind,link.index,link.node,offset);},
@@ -3832,7 +3836,7 @@ void RoomWorld::append_claw_model(Scene& scene,const EffectSprite& sprite,std::p
     const auto found=entities_.find({1,c.enemy_index});
     if(!model||found==entities_.end()){unbound_enemy_.insert("bhEff30cDrw: PRM_WRK.mdlP ohne nativen Modellbesitzer");return;}
     const auto& tree=tree_owner(found->second);
-    const PlayerAsset* asset=model_variant(*model,tree.morph_obj_a);if(!asset||asset->bones()!=model->actor->bones())asset=model->actor.get();
+    const PlayerAsset* asset=model_variant(*model,tree.drawn_root());if(!asset||asset->bones()!=model->actor->bones())asset=model->actor.get();
     if(c.obj>=asset->bones()){unbound_enemy_.insert("bhEff30cDrw: objP[obj] ausserhalb des Modells");return;}
     ModelGeometryOptions geometry;geometry.draw_object=int(c.obj);
     geometry.world_matrices.assign(asset->bones(),{});std::copy_n(&c.mtx[0],16,geometry.world_matrices[c.obj].begin());
@@ -3902,7 +3906,7 @@ void RoomWorld::append_effect_model(Scene& scene,const EffectSprite& s,const std
     if(found==entities_.end()){unbound_enemy_.insert("bhEff_ModelDraw: ene[] des mlwP fehlt");return;}
     const auto& tree=tree_owner(found->second);
     if(!tree.enemy_asset){unbound_enemy_.insert("bhEff_ModelDraw: Gegnermodell fehlt");return;}
-    const PlayerAsset* asset=s.model_mdl?tree.enemy_asset->model(s.model_mdl):tree.enemy_asset;
+    const PlayerAsset* asset=s.model_mdl?tree.model_row()->model(s.model_mdl):tree.model_row();
     if(!asset){unbound_enemy_.insert("bhEff_ModelDraw: epw->mdl[k] fehlt");return;}
     const unsigned obj=s.mdlver;
     if(obj>=asset->bones()){unbound_enemy_.insert("bhEff_ModelDraw: objP[mdlver] ausserhalb des Modells");return;}
@@ -4001,7 +4005,7 @@ void RoomWorld::append_afterimage(Scene& scene,const EffectSprite& sprite,const 
 bool RoomWorld::entity_geometry(const Model& model,const WorldEntity& e,Scene& object)const{
         const PlayerAsset* drawn=model.actor.get();MorphSource morph;const MorphSource* morph_ptr=nullptr;
         if(model.actor){
-            if(const auto* a=model_variant(model,e.morph_obj_a);a&&a->bones()==model.actor->bones())drawn=a;
+            if(const auto* a=model_variant(model,e.drawn_root());a&&a->bones()==model.actor->bones())drawn=a;
             const bool blending=e.morph||(e.enemy_bound&&(e.enemy.mdflg&2u));
             if(blending)if(const auto* b=model_variant(model,e.morph_obj_b);b&&b->bones()==drawn->bones()){morph.model=&b->encoded_model();morph.flags=e.morph_live_flags(e.morph_obj_b);morph.shape=e.morph?e.morph_shape:e.enemy.shp_ct;morph_ptr=&morph;}
         }
@@ -4013,7 +4017,7 @@ bool RoomWorld::entity_geometry(const Model& model,const WorldEntity& e,Scene& o
         if(model.kind==1&&e.enemy_native&&(!e.scripted||(e.subplayer_bound&&e.enemy_calculated))){
             // mlwP of the work (objP pose, owP matrices of bhCalcModel).
             if(!model.actor||!e.enemy_calculated)return false;
-            object=drawn->sample_work(e.enemy_obj,e.enemy_owp_mtx,e.enemy_evalflags,&actor_nodes_[{model.kind,model.index}],nullptr,e.live_stream(drawn==model.actor.get()?0u:e.morph_obj_a),morph_ptr);
+            object=drawn->sample_work(e.enemy_obj,e.enemy_owp_mtx,e.enemy_evalflags,&actor_nodes_[{model.kind,model.index}],nullptr,e.live_stream(drawn==model.actor.get()?0u:e.drawn_root()),morph_ptr);
             object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=drawn->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=drawn->script_index(t.object);for(auto& w:object.ambient_writes)w.object=drawn->script_index(w.object);
             // npSetAllMatColor hat die Materialchunks des geteilten Baums
             // gepatcht (njplus.c:1375-1450): B/G/R aus dem Auftrag, A nur,
@@ -4770,7 +4774,7 @@ std::optional<BoneMatrix> RoomWorld::light_effect_matrix(unsigned slot,unsigned 
         const auto at=entities_.find({1,index});
         if(at!=entities_.end()){
             const auto& owner=tree_owner(at->second);const auto* asset=owner.enemy_asset?
-                (s.model_mdl?owner.enemy_asset->model(s.model_mdl):owner.enemy_asset):nullptr;
+                (s.model_mdl?owner.model_row()->model(s.model_mdl):owner.model_row()):nullptr;
             if(asset){
                 unsigned physical;try{physical=asset->model_index(node);}catch(const std::runtime_error&){
                     unbound_enemy_.insert("bhControlLight: Effekt-mlwP->owP[lkono] ausserhalb des Modells");return {};}

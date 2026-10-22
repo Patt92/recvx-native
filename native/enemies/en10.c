@@ -202,9 +202,9 @@ void recvx_en10(RECVX_ENEMY_WORK* w)
         if (e->mdl_sel > 3u) e->mdl_sel = 0;
     }
 
-    /* en10.c:51 epw->mlwP = &epw->mdl[EXP0_UC(0x1)]. Nativ ist mdl_no die
-       Auswahl der Modellwurzel; der Zeichenpfad muss sie auswerten. */
-    w->mdl_no = e->mdl_sel;
+    /* en10.c:51 epw->mlwP = &epw->mdl[EXP0_UC(0x1)]; mdl_no (Skin-Index) bleibt. */
+    if (!(sv && sv->select_model && sv->select_model(w, e->mdl_sel)) && sv && sv->gap)
+        sv->gap("bhEne10: mlwP = &mdl[EXP0_UC(0x1)]");
 
     if (w->flg & 4u) {                       /* en10.c:53-61 */
         for (i = 0; i < (int)RECVX_ENEMY_DAM; ++i) w->dam[i] = 0;

@@ -1412,8 +1412,15 @@ static void eye_lights(const std::filesystem::path& data){
     // type 2 zieht 0x40000000 je Pass ab: drei gezeichnete Bilder, also drei
     // Jahrgaenge mit je zwei Augen.
     check(eyes==6,"the eye lights must settle at three passes times two");
-    unsigned visible=0;for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(s&&s->id==146&&world.effect_visible(i))++visible;}
-    check(visible==eyes,"every eye light must reach the draw pass");
+    // Die Halter 59/69/35 (Plaetze 2/7/12, bhEffDmy) enden im ersten Pass; bhSetEffect legt
+    // Augen in den kleinsten freien Platz. Ein Auge unter Platz 11 (bhEff145) laeuft erst im
+    // naechsten bhControlEffect-Pass (effect.c:778, aufsteigende Schleife), steht also mit
+    // mode0 0 in keiner Zeichenliste. Alle durchlaufenen Augen erreichen den Zeichenpass.
+    unsigned visible=0,fresh=0,low=0;for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(!s||!(s->flg&1u)||s->id!=146)continue;
+        if(i<11)++low;if(s->mode0==0){++fresh;check(i<11&&!world.effect_visible(i),"only an eye below its parent may wait for the next pass");}
+        else if(world.effect_visible(i))++visible;}
+    check(low>0,"freed holder slots below bhEff145 must take eyes");
+    check(visible+fresh==eyes,"every eye light that ran this pass must reach the draw pass");
     // Das Rueckseitentor entscheidet je Kamera. Die Augenvierecke sind an ihrer
     // Flaechenfarbe (reines Rot aus 0x00FF0000) erkennbar.
     const auto eye_triangles=[&](const SceneCamera& camera){
@@ -1423,7 +1430,7 @@ static void eye_lights(const std::filesystem::path& data){
     std::size_t drawing=0,culling=0;
     for(const auto& camera:stage.cameras){
         const auto count=eye_triangles(camera);
-        if(count==long(2*eyes))++drawing;else if(count==0)++culling;
+        if(count==long(2*visible))++drawing;else if(count==0)++culling; // nur die durchlaufenen Augen
         else check(false,"a camera drew only part of the eye quads");
     }
     check(drawing>0&&culling>0,"the backface gate must cull the eyes from at least one original camera");
@@ -1828,8 +1835,13 @@ static void afterimage_room(const std::filesystem::path& data){
             if(t.diffuse_material)++alphas[t.color>>24];
             for(const auto& v:t.vertices)check(v.light.x>=0&&v.light.x<=1.0f+1e-4f,"afterimage lit RGB outside native range");}
         check(alphas.size()==5&&alphas.count(40)&&alphas.count(200),"afterimages must draw with material alpha 200..40");
-        // Jede Stufe ist dasselbe Modell in einem anderen Pass, also dieselbe Dreieckszahl.
-        for(const auto& [alpha,count]:alphas)check(count==alphas.begin()->second,"every afterimage pass must draw the same model");
+        // Jede Stufe zeigt die Modelle der Erzeuger in einem anderen Pass. Freie Halterplaetze
+        // (bhEffDmy, RM_1002 Platz 12) unter den Erzeugern nehmen Schnappschuesse auf, die erst im
+        // naechsten Pass laufen (effect.c:778): ihre Stufe hinkt eins nach. Jede Stufe zeichnet
+        // daher etwas, und zusammen ergeben alle Stufen fuenf vollstaendige Generationen.
+        std::size_t total=0;for(const auto& [alpha,count]:alphas){check(count>0,"every afterimage pass must draw");total+=count;}
+        const unsigned drawn=fnc_room?fnc:zanzo;
+        check(drawn%5==0&&total%5==0,"the afterimage passes must hold five whole generations");
         // objitm.c:518-529: die Objektlisten ob_hlg/ob_spc gehoeren auf halbes Licht.
         for(const auto& t:draw.triangles)if(t.material_phase==3||t.material_phase==4)
             check(t.light_category==1,"ob_hlg/ob_spc must draw at half light (objitm.c:518-529)");

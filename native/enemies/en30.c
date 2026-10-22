@@ -316,6 +316,15 @@ static const RECVX_EN30_PROC en30_dead_mode2[2] = {
 
 
 /* en30.c:96 bhEne30_Init. */
+/* epw->mlwP = &epw->mdl[k] (en30.c:116/360/402/437/448) ueber select_model;
+   mdl_no ist davon getrennt der Skin-Index (MdlPut.c:48). */
+static void en30_select_model(RECVX_ENEMY_WORK* w, uint32_t k, const char* what)
+{
+    const RECVX_ENEMY_SERVICES* sv = w->sv;
+    if (!(sv && sv->select_model && sv->select_model(w, k)) && sv && sv->gap)
+        sv->gap(what);
+}
+
 static void en30_init(RECVX_ENEMY_WORK* w)
 {
     const RECVX_ENEMY_SERVICES* sv = w->sv;
@@ -334,8 +343,8 @@ static void en30_init(RECVX_ENEMY_WORK* w)
     w->car = 2.0f;
     w->cah = 1.0f;
 
-    /* en30.c:116-117 mlwP = &mdl[0], mdl_no = 0: nativ ist mdl_no die
-       Modellwahl des Zeichenbesitzers (wie en10.c). */
+    /* en30.c:116-117 mlwP = &mdl[0], mdl_no = 0. */
+    en30_select_model(w, 0u, "bhEne30_Init: mlwP = &mdl[0]");
     w->mdl_no = 0;
     w->mdflg &= ~0x2u;
 
@@ -657,7 +666,7 @@ static void en30_mv02(RECVX_ENEMY_WORK* w)
         w->mtn_no = 2;
         w->frm_no = 0;
         w->hokan_count = 0;
-        w->mdl_no = 0;                      /* en30.c:360 mlwP = epw->mdl */
+        en30_select_model(w, 0u, "bhEne30_MV02: mlwP = mdl"); /* en30.c:360 */
         en30_morph_sources(w, "bhEne30_MV02: obj_a/obj_b");
         w->mdflg |= 0x2u;
         w->shp_ct = 0.0f;
@@ -706,7 +715,7 @@ static void en30_mv02(RECVX_ENEMY_WORK* w)
         w->shp_ct += 300.0f;
         if (!(w->shp_ct < 1000.0f)) {
             w->shp_ct = 1000.0f;
-            w->mdl_no = 1;                  /* en30.c:402 mlwP = &mdl[1] */
+            en30_select_model(w, 1u, "bhEne30_MV02: mlwP = &mdl[1]"); /* en30.c:402 */
             w->mdflg &= ~0x2u;
             w->mode1 = 0;
             w->mode2 = 5;
@@ -728,7 +737,7 @@ static void en30_mv03(RECVX_ENEMY_WORK* w)
         w->frm_no = 0;
         w->hokan_count = 8;
         w->hokan_rate = 45875;
-        w->mdl_no = 0;                      /* en30.c:437 mlwP = epw->mdl */
+        en30_select_model(w, 0u, "bhEne30_MV03: mlwP = mdl"); /* en30.c:437 */
         en30_morph_sources(w, "bhEne30_MV03: obj_a/obj_b");
         w->mdflg |= 0x2u;
         w->shp_ct = 1000.0f;
@@ -738,7 +747,7 @@ static void en30_mv03(RECVX_ENEMY_WORK* w)
         w->shp_ct -= 35.0f;
         if (w->shp_ct < 0.0f) {
             w->shp_ct = 0.0f;
-            w->mdl_no = 0;
+            en30_select_model(w, 0u, "bhEne30_MV03: mlwP = mdl"); /* en30.c:448 */
             w->mdflg &= ~0x2u;
             w->flg &= ~0x80000u;
             w->flg2 &= ~0x1u;
@@ -1148,7 +1157,7 @@ static void en30_dd00(RECVX_ENEMY_WORK* w)
         }
         w->ct0 = (int32_t)frames - 1;
 
-        /* en30.c:809-810: evalflags am AKTUELLEN mlwP (mdl_no). */
+        /* en30.c:809-810: evalflags am AKTUELLEN mlwP (select_model). */
         if (sv->model_node_hidden) {
             sv->model_node_hidden(w, 1, 1);
             sv->model_node_hidden(w, 16, 1);

@@ -6,7 +6,7 @@
 #include "effect_sprites.h"
 namespace recvx {
 void step_eff013(EffectSprite& s,const EffectContext& c,bool& queued);
-// effect.c:33 bhJumpEffect[139..142] = bhEffDmy (effsub1.c:22): op->flg = 0. bhEff013
-// legt je Flugpass einen Satz 140 an, der im naechsten Pass so endet.
+// effsub1.c:22 bhEffDmy: op->flg = 0. effect_sprites.cpp hand_procedure fuehrt alle 143
+// Plaetze (darunter 139..142); bhEff013 legt je Flugpass einen Satz 140 an, der so endet.
 void step_eff_dummy(EffectSprite& s,const EffectContext& c,bool& queued);
 }

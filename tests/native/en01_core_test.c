@@ -9,17 +9,8 @@
    Lueckenmeldung sehen - eine abgeschwaechte Erwartung auf ein neutrales
    Ergebnis ist ausdruecklich nicht zulaessig.
 
-   Dieses Programm ist noch nicht in CMakeLists.txt registriert, weil
-   native/en01_core.c dort ebenfalls noch fehlt (Anschlussschritt beim
-   Integrator, siehe work/native_port_T2_en01.result.md). Bauen und laufen:
-
-     /usr/bin/cc -DRECVX_NATIVE=1 -I build/macos-arm64/generated \
-       -I build-tools/ninja -I native -I include/ps2/veronica/prog \
-       -O1 -DNDEBUG -std=gnu11 -arch arm64 -mmacosx-version-min=11.0 \
-       -Wall -Wextra -o build/en01_core_test tests/native/en01_core_test.c \
-       native/en01_core.c native/en01_tables.c build-tools/ninja/ninja_math.c \
-       build-tools/ninja/ninja_matrix.c native/core_random.c
-     ./build/en01_core_test
+   Registriert als CTest-Ziel enemy_en01_core (CMakeLists.txt); die Quellen
+   native/enemies/en01_core.c und en01_tables.c stehen in recvx_game.
    =========================================================================== */
 #include "en01_core.h"
 #include "core_random.h"
@@ -969,14 +960,18 @@ static void test_grab_states(void)
     check_eq(g_se[0], 4869, "NG02 MTN 35 nimmt SE 4869");
     check_eq((int)w.hp, -1, "NG02 MTN 35 Frame 34: hp = -1");
 
-    /* plp->ct1 fehlt in RECVX_ENEMY_PLAYER; der Zustand meldet das statt es
-       zu ersetzen (en01.c:7432). ct0 == 0 beim Eintritt erfuellt die
+    /* plp->ct1 steht seit dem Vertragsausbau in RECVX_ENEMY_PLAYER
+       (enemy_work.h:141); NG02 schreibt es ueber player_set (en01.c:7432),
+       beide Zweige :7430/:7436 setzen 5. ct0 == 0 beim Eintritt erfuellt die
        Abbruchbedingung :7404 sofort. */
     reset_logs();
     work_init(&w, &p);
+    memset(&g_player, 0, sizeof(g_player));
     w.mode3 = 2; w.ct0 = 0;
     recvx_en01_ng02(&w);
-    check(gap_seen("plp->ct1"), "NG02 meldet das fehlende plp->ct1");
+    check(!gap_seen("plp->ct1"), "plp->ct1 ist im Vertrag, keine Luecke mehr");
+    check_eq((int)g_player.ct1, 5, "NG02 setzt plp->ct1 = 5 (en01.c:7432)");
+    check_eq((int)g_player.mode3, 2, "NG02 setzt plp->mode3 = 2 (en01.c:7428)");
 
     /* NageMode2W[3] ist im Original NULL (en01.c:2303). */
     reset_logs();
@@ -986,15 +981,23 @@ static void test_grab_states(void)
     check(gap_seen("NageMode2W[3] == NULL"), "NageMode2W[3] meldet NULL");
 
     /* bhEne01_PlyDG00 (en01.c:7509): mode3 0 dreht den Spieler in den Griff.
-       plp->ayp fehlt im Vertrag und wird gemeldet; waxp am GEGNER ist
-       dagegen vorhanden und wird gesetzt (en01.c:7546). */
+       plp->ayp steht im Vertrag (enemy_work.h:142); exp0 0x4000 waehlt den
+       Zweig :7545 (ay + 180 Grad, waxp -32768) gegen :7549 (ay, waxp 0). */
     reset_logs();
     work_init(&w, &p);
     memset(&g_player, 0, sizeof(g_player));
     p.flags = 0x4000u;
     w.ay = 0;
     recvx_en01_ply_dg00(&w, &g_player);
-    check(gap_seen("plp->ayp"), "PlyDG00 meldet das fehlende plp->ayp");
+    check(!gap_seen("plp->ayp"), "plp->ayp ist im Vertrag, keine Luecke mehr");
+    /* :7545 ayp = (unsigned short)(ay + 180 Grad - plp->ay) = 32768, :7554 greift
+       nicht (nicht groesser), :7558 epw->waxp = -32768 - (short)32768 = 0,
+       :7559 plp->ayp = 32768 / 5. Fall 0 hat kein break (:7562): Fall 1 laeuft
+       im selben Pass mit plp->ct0 == 0 und legt :7566 den ersten Drehschritt
+       auf epw->waxp. */
+    check_eq((int)(uint16_t)g_player.ayp, 32768 / 5, "PlyDG00 legt plp->ayp = ayp / 5 an (en01.c:7559)");
+    check_eq((int)w.waxp, 32768 / 5, "PlyDG00 Durchfall in Fall 1 addiert den ersten Drehschritt (en01.c:7566)");
+    check_eq((int)g_player.ct0, 1, "PlyDG00 Durchfall zaehlt plp->ct0 (en01.c:7560/:7580)");
     check_eq((int)g_player.mode3, 1, "PlyDG00 geht nach mode3 1");
     check_eq((int)(g_player.flg & 0x40000u), 0, "PlyDG00 loescht plp->flg 0x40000");
     check((g_player.exp1_flags & 0x1E0u) != 0, "PlyDG00 setzt exp1 0x1E0");

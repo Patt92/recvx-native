@@ -51,4 +51,4 @@ zweites `sys`/`plp`/`rom`/`ene`/`eff` und keine `BH_PWORK`-Spiegeltabelle;
 ungebundene Dienste werden über `gap` mit dem Originalnamen gemeldet statt
 durch geratene Werte ersetzt. `archived/FORBIDDEN_DONTUSE` bleibt gesperrt.
 
-Dateibesitz je Teilaufgabe steht in `work/subagent_briefings_enemies.md`.
+Dateibesitz je Teilaufgabe steht in `archived/work/subagent_briefings_enemies.md`.

@@ -407,12 +407,13 @@ int main(int argc,char** argv){try{
   check(particles>0,"RM_0090 laser event spawned no bhSetEffParticleMk2 particles");
  }
  // event.c:7345 bhEffTypeSet (0xAD): op->type = v1 ohne Rueckfrage. RM_3010 Raumeffekt id 70 ist ein
- // Texturhalter (bhEffDmy, keine portierte Prozedur); der Befehl muss trotzdem gebunden sein und op->type setzen.
+ // Texturhalter (bhEffDmy: flg = 0 im ersten Pass); der Befehl muss trotzdem gebunden sein und op->type setzen.
  {
   Room r(data,"RM_3010");unsigned index=0;bool found=false;
   for(;const auto* s=r.world.effect_state(index);++index)if(s->id==70){found=true;break;}
   check(found,"RM_3010 hat keinen Raumeffekt 70");
-  check(!supported_effect_sprite(70),"id 70 ist nicht mehr Halter; Testraum neu waehlen");
+  {EffectSprite holder=*r.world.effect_state(index);holder.flg=1;EffectContext ctx;bool q=false;
+   check(step_effect_sprite(holder,ctx,&q)&&holder.flg==0&&!q,"id 70 ist nicht mehr bhEffDmy-Halter; Testraum neu waehlen");}
   EventCommand c;c.opcode=0xad;c.task=0;c.bytes={0xad,std::uint8_t(index),7,0,0,0};
   check(r.world.bind(c),"bhEffTypeSet (0xAD) auf Texturhalter bleibt ungebunden");
   check(r.world.effect_state(index)->type==7,"bhEffTypeSet (0xAD) schreibt op->type nicht");

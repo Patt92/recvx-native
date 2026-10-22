@@ -2,14 +2,14 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **90.2 %** weighted, **81.0 %** fully evidenced (560/691 mechanisms; not overall game completion).
+Explicit evidence scope: **90.4 %** weighted, **81.4 %** fully evidenced (564/693 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
 | Area | Mechanisms | Evidence scope | Fully evidenced | Partial | Open |
 |---|---:|---:|---:|---:|---:|
-| Enemies/AI | 83/103 | 90.3 % | 80.6 % | 20 | 0 |
-| Effects | 221/252 | 93.7 % | 87.7 % | 30 | 1 |
+| Enemies/AI | 86/106 | 90.6 % | 81.1 % | 20 | 0 |
+| Effects | 222/251 | 94.2 % | 88.4 % | 29 | 0 |
 | Events/script | 78/93 | 91.9 % | 83.9 % | 15 | 0 |
 | Player/combat | 50/68 | 86.8 % | 73.5 % | 18 | 0 |
 | Room/camera/door | 16/40 | 70.0 % | 40.0 % | 24 | 0 |
@@ -26,7 +26,6 @@ Only ledger entries with independent native evidence count. Matching names, orig
 - `adv.c` Adv_GameOptionScreen (missing, Original option plates for display, sound, vibration, and key configuration remain unported; OPTION opens documented host settings instead.)
 - `adv.c` CheckMcSelectPortInfoState (missing, Original memory-card port query remains unported; host slot selection reads occupied saves from the user-data directory.)
 - `adv.c` FindFirstVmDrive (missing, Original memory-card search remains unported; host saves in the platform user-data directory enable LOAD GAME when a slot is occupied.)
-- `effsub4.c` bhEff_Sub367 (missing, No producer of exp0 (EFFSUB367_WORK) or op->func was found in original C or ELF; bhEff367 remains open (effsub4.c:2007).)
 - `ranking.c` ControlRanking (missing, See the detailed evidence and open bindings in docs/port_ledger.tsv.)
 - `MdlPut.c` bhPutModel (partial, Mirror pass from MdlPut.c:57-79/89-111 is partially connected: qualifying models draw a second time under cam.mtx*njMirror, with light based on unmirrored cam.mtx. Player floor, enemy, and object/item flags are connected; hair and weapons rely on measured status bytes. Child enemies check their own byte. mirror_pass has two red control cases.)
 - `Motion.c` bhSetMotion:Spieler (partial, Player node pose uses the existing object tree before motion advance, including Hokan countdown. Action/event, combat, damage, grab, push, and draw edits are connected; player_motion_blend and pose traces cover transitions. Stairs, Game Over, and script-driven player motion still do not update this tree.)
@@ -38,6 +37,7 @@ Only ledger entries with independent native evidence count. Matching names, orig
 - `cut.c` bhControlEventCamera (partial, RoomWorld::control_event_camera follows the mode0 0/1/2/3 state machine and 20 spline slots; the paused camera holds its pose. RM_0040 event 5 now holds key 1 as in RDT. A native owner for pt_flg 0x1 and proven CAM_WORK narrowing for cam.pers remain open.)
 - `cut.c` bhSetCut (partial, RoomWorld::cut_fog_handover carries cut fog and fog_ct rules through initialize_camera_clip. Other bhSetCut clip/hide portions remain as previously recorded.)
 - `cut.c` bhSetEventCamera (partial, Opcode 0x13 mode 0 now installs signed key position/angles, perspective, lock angles, and fog in both branches before event-camera initialization. Previous-key fields, cam.ln/flags, and bhSetEventHideObjLgt remain open.)
+- `cut.c` bhSetFixedCut (partial, Opcode 0x2a mode 0 transfers fog and installs cam.ncut before bhChangeViewClipRM, so the near plane comes from the new cut. native_ground_world has a red control case.)
 
 ## Unconfirmed historical ledger entries
 

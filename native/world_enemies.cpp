@@ -110,15 +110,15 @@ void morph_pair_set(RECVX_ENEMY_WORK* w,unsigned a,unsigned b){
 const PlayerAsset* morph_variant(const WorldEntity& e,unsigned model){
     // mlwP = &epw->mdl[base] (en13.c:111-184): mdl[model] des Kindes ist mdl[base+model] des Elternworks.
     if(e.model_bank){const unsigned k=e.model_base+model;return k==0?e.model_bank:e.model_bank->model(k);}
-    if(!e.enemy_asset)return nullptr;
-    return model==0?e.enemy_asset:e.enemy_asset->model(model);
+    const PlayerAsset* row=e.model_row();if(!row)return nullptr; // mdl[0], auch nach select_model
+    return model==0?row:row->model(model);
 }
 int morph_variant_index(const WorldEntity& e,const PlayerAsset* variant){
     if(!variant)return -1;
     if(e.model_bank){for(unsigned k=e.model_base;k<e.model_bank->model_count();++k)if(morph_variant(e,k-e.model_base)==variant)return int(k-e.model_base);return -1;}
-    if(!e.enemy_asset)return -1;
-    if(variant==e.enemy_asset)return 0;
-    for(unsigned i=1;i<e.enemy_asset->model_count();++i)if(e.enemy_asset->model(i)==variant)return int(i);
+    const PlayerAsset* row=e.model_row();if(!row)return -1;
+    if(variant==row)return 0;
+    for(unsigned i=1;i<row->model_count();++i)if(row->model(i)==variant)return int(i);
     return -1;
 }
 void en01_select_morph_pair(RECVX_ENEMY_WORK* w){morph_pair_set(w,0,1);}
@@ -129,10 +129,22 @@ int en30_morph_sources(RECVX_ENEMY_WORK* w,uint32_t a,uint32_t b){morph_pair_set
 // mlwP->objP = mdl[0] und traegt die Pose, die bhCalcTree in owP legt; mdl[1]
 // wird nie bhCalcTree unterzogen und geht nur ueber npTransform in die
 // Rohstroemung ein.
+// objP von mdl[k] der eigenen Reihe: die Pose des aktiven mlwP oder die abgelegte eines anderen
+// mdl[k] (select_model); ein noch unberuehrtes mdl[k] beginnt mit seiner Ruhelage.
+static std::vector<ModelPose>* own_model_pose(WorldEntity& e,unsigned k){
+    if(k==(e.own_row?e.own_model:0u))return &e.enemy_obj;
+    const auto* asset=morph_variant(e,k);if(!asset)return nullptr;
+    auto& keep=e.own_models[k];
+    if(keep.obj.empty()){keep.obj=asset->bind_pose();keep.owp_flg.assign(keep.obj.size(),0u);keep.owp_mtx.assign(keep.obj.size(),BoneMatrix{});}
+    if(k==0&&keep.evalflags.empty())keep.evalflags=asset->node_evalflags();
+    return &keep.obj;
+}
+// en30.c:413/:463 objA->pos[1] = objB->pos[1] = y: obj_a = mdl[a].objP, obj_b = mdl[b].objP.
 int en30_morph_node_set_y(RECVX_ENEMY_WORK* w,uint32_t node,float y){
     if(!w)return 0;auto& e=owner_of(w);
-    if(node>=e.enemy_obj.size())return 0;
-    e.enemy_obj[node].position.y=y;return 1;
+    auto* a=own_model_pose(e,e.morph_obj_a);auto* b=own_model_pose(e,e.morph_obj_b);
+    if(!a||!b||node>=a->size()||node>=b->size())return 0;
+    (*a)[node].position.y=y;(*b)[node].position.y=y;return 1;
 }
 // en30.c:147-153: mdl[model].objP[i].pos fuer i < obj_num. Vor dem ersten
 // bhCalcModel ist objP die realisierte Ruhelage des Modells.
@@ -144,21 +156,20 @@ uint32_t en30_model_node_rest(const RECVX_ENEMY_WORK* w,uint32_t model,RECVX_ENE
 }
 int en30_model_node_set_y(RECVX_ENEMY_WORK* w,uint32_t model,uint32_t node,float y){
     if(!w)return 0;
-    // Nur mdl[0] traegt die gezeichnete Pose; mdl[1] hat nativ keinen
-    // eigenen Baum, der geschrieben werden koennte.
-    if(model!=0)return 0;
-    auto& e=owner_of(w);
-    if(node>=e.enemy_obj.size())return 0;
-    e.enemy_obj[node].position.y=y;return 1;
+    // mdl[model].objP[node].pos[1]: die aktive Reihe (mlwP) oder die abgelegte Pose von mdl[model].
+    auto* pose=own_model_pose(owner_of(w),model);if(!pose||node>=pose->size())return 0;
+    (*pose)[node].position.y=y;return 1;
 }
 // en30.c:161-164/:809-810: objP[node].evalflags Bit 0x8 je Modell.
 int en30_model_node_hidden(RECVX_ENEMY_WORK* w,uint32_t model,uint32_t node,int hidden){
     if(!w)return 0;auto& e=owner_of(w);
-    if(model==0){
+    if(model==(e.own_row?e.own_model:0u)){ // mdl[model] ist mlwP
         if(node>=e.enemy_evalflags.size())return 0;
         if(hidden)e.enemy_evalflags[node]|=8u;else e.enemy_evalflags[node]&=~8u;
         return 1;
     }
+    if(model==0){auto& flags=e.own_models[0].evalflags;if(flags.empty())flags=e.model_row()->node_evalflags();
+        if(node>=flags.size())return 0;if(hidden)flags[node]|=8u;else flags[node]&=~8u;return 1;}
     const auto* asset=morph_variant(e,model);if(!asset)return 0;
     if(e.morph_model_flags.size()<model)e.morph_model_flags.resize(model);
     auto& flags=e.morph_model_flags[model-1];
@@ -775,7 +786,7 @@ void RoomWorld::bind_enemy_services(){
     // `epw->mlwP = &ep->mdl[k]`: Reihe und Basis des Besitzers, Baum neu aus mdl[k].
     s.link_model=[](RECVX_ENEMY_WORK* w,const RECVX_ENEMY_WORK* owner,uint32_t k)->int{
         auto& e=owner_of(w);const auto& o=tree_of(owner_of(owner));
-        const PlayerAsset* bank=o.model_bank?o.model_bank:o.enemy_asset;const unsigned base=(o.model_bank?o.model_base:0u)+k;
+        const PlayerAsset* bank=o.model_bank?o.model_bank:o.model_row();const unsigned base=(o.model_bank?o.model_base:0u)+k;
         if(!bank)return 0;
         if(&e==&o&&!o.model_bank&&k==0)return 1;                           // mlwP = mdl (eigene Reihe)
         const PlayerAsset* asset=base==0?bank:bank->model(base);
@@ -787,6 +798,30 @@ void RoomWorld::bind_enemy_services(){
         if(e.enemy_asset!=asset){e.enemy_asset=asset;e.enemy_obj=asset->bind_pose();e.enemy_evalflags=asset->node_evalflags();
             e.enemy_owp_flg.assign(e.enemy_obj.size(),0u);e.enemy_owp_mtx.assign(e.enemy_obj.size(),BoneMatrix{});e.enemy_calculated=false;e.morph_obj_a=e.morph_obj_b=0;e.live_model.clear();e.live_models.clear();}
         return 1;};
+    // `epw->mlwP = &epw->mdl[k]` der eigenen Reihe (en10.c:51, en71.c:41, en30.c:116/360/402/437/448).
+    // Jedes mdl[k] ist ein eigenes ML_WORK: Pose, owP und evalflags des bisherigen bleiben liegen und
+    // sind beim Zurueckwechseln wieder da; ein noch nie gewaehltes mdl[k] beginnt mit seinem objP.
+    s.select_model=[](RECVX_ENEMY_WORK* w,uint32_t k)->int{
+        auto& e=owner_of(w);
+        if(e.model_owner||e.model_bank){enemy_world->unbound_enemy_.insert("epw->mlwP = &epw->mdl[k]: Work ohne eigene Modellreihe");return 0;}
+        const PlayerAsset* row=e.model_row();if(!row)return 0;
+        if(k==(e.own_row?e.own_model:0u))return 1;
+        const PlayerAsset* next=k==0?row:row->model(k);if(!next)return 0;
+        e.own_row=row;
+        const unsigned out=e.own_model;auto& keep=e.own_models[out];
+        keep.obj=std::move(e.enemy_obj);keep.owp_flg=std::move(e.enemy_owp_flg);keep.owp_mtx=std::move(e.enemy_owp_mtx);keep.calculated=e.enemy_calculated;
+        if(out==0)keep.evalflags=std::move(e.enemy_evalflags);
+        else{if(e.morph_model_flags.size()<out)e.morph_model_flags.resize(out);e.morph_model_flags[out-1]=std::move(e.enemy_evalflags);}
+        const auto at=e.own_models.find(k);
+        if(at!=e.own_models.end()){
+            e.enemy_obj=std::move(at->second.obj);e.enemy_owp_flg=std::move(at->second.owp_flg);e.enemy_owp_mtx=std::move(at->second.owp_mtx);e.enemy_calculated=at->second.calculated;
+            if(k==0)e.enemy_evalflags=std::move(at->second.evalflags);
+            e.own_models.erase(at);
+        }else{e.enemy_obj=next->bind_pose();e.enemy_owp_flg.assign(e.enemy_obj.size(),0u);e.enemy_owp_mtx.assign(e.enemy_obj.size(),BoneMatrix{});e.enemy_calculated=false;}
+        if(k){if(e.morph_model_flags.size()>=k&&!e.morph_model_flags[k-1].empty()){e.enemy_evalflags=std::move(e.morph_model_flags[k-1]);e.morph_model_flags[k-1].clear();}
+            else e.enemy_evalflags=next->node_evalflags();}
+        else if(e.enemy_evalflags.empty())e.enemy_evalflags=next->node_evalflags();
+        e.enemy_asset=next;e.own_model=k;return 1;};
     s.mobile_wall_alloc=[]()->int{auto* world=enemy_world;world->enemy_mobile_walls_.push_back(CollisionWall{});world->update_ground_geometry();return int(world->enemy_mobile_walls_.size()-1);};
     s.mobile_wall_get=[](int index,RECVX_ENEMY_ATR* out)->int{const auto& walls=enemy_world->enemy_mobile_walls_;if(index<0||std::size_t(index)>=walls.size())return 0;
         const auto& a=walls[std::size_t(index)];*out=RECVX_ENEMY_ATR{};out->flg=a.flags;out->type=a.type;out->attr=a.attributes;out->flr_no=a.floor;out->px=a.position.x;out->py=a.position.y;out->pz=a.position.z;out->w=a.extent.x;out->h=a.extent.y;out->d=a.extent.z;
@@ -847,10 +882,10 @@ void RoomWorld::bind_enemy_services(){
     en.child_model=[](RECVX_ENEMY_WORK* child,RECVX_ENEMY_WORK* parent,uint32_t slot,int){
         auto& c=owner_of(child);auto& p=tree_of(owner_of(parent));
         if(slot==RECVX_EN01_CHILD_SHARE_PARENT){c.model_owner=&p;c.enemy_asset=nullptr;c.enemy_obj.clear();c.enemy_evalflags.clear();c.enemy_owp_flg.clear();c.enemy_owp_mtx.clear();return;}
-        const PlayerAsset* asset=p.enemy_asset?(slot==0?p.enemy_asset:p.enemy_asset->model(slot)):nullptr;
+        const PlayerAsset* asset=p.model_row()?(slot==0?p.model_row():p.model_row()->model(slot)):nullptr;
         c.model_owner=nullptr;c.enemy_asset=asset;
         // en01.c:2617-2658 epp->mdl[0] = epw->mdl[slot]: hinter mdl_n ist das ML_WORK genullt.
-        c.model_absent=!asset&&(p.model_absent||(p.enemy_asset&&slot>=p.enemy_asset->model_count()));
+        c.model_absent=!asset&&(p.model_absent||(p.model_row()&&slot>=p.model_row()->model_count()));
         if(c.model_absent){c.enemy_obj.clear();c.enemy_evalflags.clear();c.enemy_owp_flg.clear();c.enemy_owp_mtx.clear();c.enemy_calculated=false;return;}
         if(!asset){c.enemy_obj.clear();c.enemy_evalflags.clear();c.enemy_owp_flg.clear();c.enemy_owp_mtx.clear();enemy_world->unbound_enemy_.insert("bhEne01_Init: epw->mdl[slot] nicht als Modell geladen");return;}
         // epp->mlwP = epp->mdl, mdl[0] = epw->mdl[slot] (struct-Kopie samt texP): die Modellreihe des
@@ -1228,7 +1263,7 @@ void RoomWorld::bind_enemy_services(){
     // mdl[k].texP (zonzon1.c:84 bhEne_SetMinceEffect: BloodType[id].mdlno): eigenes texP oder das
     // des letzten texturierten mdl davor (room.c bhSetEneMdl), wie en23 model_texture.
     x.model_texp_index=[](const RECVX_ENEMY_WORK* w,int k)->const void*{
-        const auto& e=tree_of(owner_of(w));const PlayerAsset* bank=e.model_bank?e.model_bank:e.enemy_asset;
+        const auto& e=tree_of(owner_of(w));const PlayerAsset* bank=e.model_bank?e.model_bank:e.model_row();
         if(k<0){enemy_world->unbound_enemy_.insert("mdl[k].texP: Index negativ");return nullptr;}
         const unsigned base=(e.model_bank?e.model_base:0u)+unsigned(k);
         if(!bank){enemy_world->unbound_enemy_.insert("mdl[k].texP: Modell fehlt");return nullptr;}
@@ -1850,7 +1885,7 @@ void RoomWorld::control_enemy_works(){
             s.stflg|=0x20u;s.tex_id=0;s.xn=v->x;s.yn=v->y;s.zn=v->z;s.px=pos->x;s.py=pos->y;s.pz=pos->z;s.mdlver=unsigned(se);
             // mdl[2].texP: eigenes texP oder das des letzten texturierten mdl davor (room.c bhSetEneMdl),
             // wie en23 model_texture. effect.c:1329: stflg 0x20 waehlt txp[0], nicht sys->ef_tn[tex_id].
-            const auto& e=tree_of(owner_of(w));const PlayerAsset* bank=e.model_bank?e.model_bank:e.enemy_asset;
+            const auto& e=tree_of(owner_of(w));const PlayerAsset* bank=e.model_bank?e.model_bank:e.model_row();
             const unsigned base=(e.model_bank?e.model_base:0u)+2u;sw.texture_list=nullptr;
             if(!bank){world->unbound_enemy_.insert("bhEne14_Acid: epw->mdl[2].texP ohne Modell");return;}
             for(unsigned i=base;i>0;--i)if(const auto* a=bank->model(i);a&&!a->textures().empty()){sw.texture_list=&a->textures();return;}
@@ -2129,7 +2164,7 @@ void RoomWorld::control_enemy_works(){
         t.effect_id=[](int slot,uint32_t id){auto* world=enemy_world;if(slot<0||std::size_t(slot)>=world->sprites_.size()){world->unbound_enemy_.insert("eff[slot].id ausserhalb");return;}world->sprites_[std::size_t(slot)].sprite.id=id;};
         // mdl[k].texP: eigenes texP oder das des letzten texturierten mdl davor (room.c bhSetEneMdl).
         t.model_texture=[](const RECVX_ENEMY_WORK* w,uint32_t k)->const void*{auto* world=enemy_world;const auto& e=tree_of(owner_of(w));
-            const PlayerAsset* bank=e.model_bank?e.model_bank:e.enemy_asset;const unsigned base=(e.model_bank?e.model_base:0u)+k;if(!bank)return nullptr;
+            const PlayerAsset* bank=e.model_bank?e.model_bank:e.model_row();const unsigned base=(e.model_bank?e.model_base:0u)+k;if(!bank)return nullptr;
             for(unsigned i=base;i>0;--i)if(const auto* a=bank->model(i);a&&!a->textures().empty())return &a->textures();
             for(const auto& m:world->models_)if(m.actor.get()==bank)return &m.object.textures;
             return nullptr;};
@@ -2177,10 +2212,10 @@ void RoomWorld::control_enemy_works(){
         // en02.c:3160 FallingRock: epp->mlwP = &epw->mdl[k] an einem bestehenden Kind — derselbe
         // Modellreihen-Anschluss wie beim Anlegen (create_enemy_child), nur spaeter.
         t.child_model=[](RECVX_ENEMY_WORK* child,RECVX_ENEMY_WORK* parent,uint32_t base)->int{
-            auto& c=owner_of(child);auto& p=tree_of(owner_of(parent));if(!p.enemy_asset)return 0;
-            c.model_owner=nullptr;c.model_bank=p.enemy_asset;c.model_base=base;
+            auto& c=owner_of(child);auto& p=tree_of(owner_of(parent));if(!p.model_row())return 0;
+            c.model_owner=nullptr;c.model_bank=p.model_row();c.model_base=base;
             const PlayerAsset* asset=morph_variant(c,0);
-            c.model_absent=!asset&&base>=p.enemy_asset->model_count();
+            c.model_absent=!asset&&base>=p.model_row()->model_count();
             if(!asset){c.enemy_asset=nullptr;c.enemy_obj.clear();c.enemy_evalflags.clear();c.enemy_owp_flg.clear();c.enemy_owp_mtx.clear();c.enemy_calculated=false;return c.model_absent?1:0;}
             if(c.enemy_asset!=asset){c.enemy_asset=asset;c.enemy_obj=asset->bind_pose();c.enemy_evalflags=asset->node_evalflags();c.enemy_owp_flg.assign(c.enemy_obj.size(),0u);c.enemy_owp_mtx.assign(c.enemy_obj.size(),BoneMatrix{});c.enemy_calculated=false;}
             return 1;};

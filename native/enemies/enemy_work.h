@@ -569,6 +569,11 @@ typedef struct RECVX_ENEMY_SERVICES {
        und zeichnet ab jetzt das ML_WORK k von `owner` (owner == w: eigene Reihe).
        0 = Modell fehlt. */
     int   (*link_model)(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_WORK* owner, uint32_t k);
+    /* `epw->mlwP = &epw->mdl[k]` innerhalb der eigenen Reihe (en10.c:51, en71.c:41,
+       en30.c:116/360/402/437/448). Jedes mdl[k] behaelt seinen objP/owP-Zustand; der
+       Wechsel setzt nichts auf die Bindepose. mdl_no ist davon unabhaengig der
+       Skin-Index (MdlPut.c:48 skp[mdl_no]). 0 = mdl[k] fehlt. */
+    int   (*select_model)(RECVX_ENEMY_WORK* w, uint32_t k);
     int   (*mobile_wall_alloc)(void);
     int   (*mobile_wall_get)(int index, RECVX_ENEMY_ATR* out);
     void  (*mobile_wall_set)(int index, const RECVX_ENEMY_ATR* atr);

@@ -1,5 +1,6 @@
 #include "effect_sprites.h"
 #include "effect_sprites_internal.h"
+#include "effect_eff013.h"
 #include "effect_rap_camera.h"
 #include "effect_rap_blood.h"
 #include "effect_rap_claw.h"
@@ -771,7 +772,17 @@ void step_eff017(EffectSprite& s){
 }
 // Die von Hand portierten Kennungen: die Tabelle in native/effect_sprite_procedures.cpp
 // und die aelteren Schalterfaelle unten (keine doppelte Implementierung derselben Kennung).
+// effect.c:33 bhJumpEffect / bhJumpEffect0/2/3/4: diese 143 Plaetze sind bhEffDmy (effsub1.c:22,
+// op->flg = 0). Darunter die Raum-Texturhalter 30..84/86..89: room.c:781 legt sie mit
+// bhSetEffectTb an, ihre Gruppe bleibt in ef_tn (nativ effect_textures_), der Satz selbst
+// endet im ersten bhControlEffect-Pass und gibt seinen eff[512]-Platz frei.
+static bool original_dummy_effect(unsigned id){
+    return (id>=30&&id<=84)||(id>=86&&id<=89)||id==106||(id>=139&&id<=142)||(id>=277&&id<=295)
+        ||(id>=313&&id<=348)||id==358||id==359||(id>=374&&id<=395);
+}
 const HandEffectProcedure* hand_procedure(unsigned id){
+    static const HandEffectProcedure dummy{0,step_eff_dummy};
+    if(original_dummy_effect(id))return &dummy;
     for(std::size_t i=0;i<hand_effect_procedure_count;++i)if(hand_effect_procedures[i].id==id)return &hand_effect_procedures[i];
     return nullptr;
 }

@@ -120,6 +120,8 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // array of both sources, not the immutable asset's.
     std::vector<std::vector<std::uint32_t>> morph_model_flags;
     const std::vector<std::uint32_t>* morph_live_flags(unsigned model)const{
+        if(own_row&&model==own_model)return model?&enemy_evalflags:nullptr; // mdl[own_model] ist mlwP
+        if(own_row&&!model){const auto at=own_models.find(0);return at!=own_models.end()&&!at->second.evalflags.empty()?&at->second.evalflags:nullptr;}
         return model&&model<=morph_model_flags.size()&&!morph_model_flags[model-1].empty()?&morph_model_flags[model-1]:nullptr;
     }
     // C02: the original BH_PWORK of a room enemy (eneset.c:170 bhSetEnemy).
@@ -130,6 +132,16 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // mlwP of that work: objP pos/ang (bhSetMotion), objP evalflags, owP
     // flg/mtx (bhCalcTree). enemy_calculated: bhCalcModel has run once.
     std::vector<ModelPose> enemy_obj;std::vector<std::uint32_t> enemy_evalflags,enemy_owp_flg;std::vector<BoneMatrix> enemy_owp_mtx;bool enemy_calculated=false;
+    // `epw->mlwP = &epw->mdl[k]` der eigenen Reihe (select_model): own_row ist mdl[0], own_model
+    // das aktive k; die Felder oben sind dann der Zustand von mdl[k]. Nicht aktive mdl[k]
+    // behalten objP-Pose und owP-flg/mtx in own_models; ihre objP-evalflags liegen fuer k > 0 in
+    // morph_model_flags[k-1], fuer k == 0 in own_models[0].
+    struct OwnModel {std::vector<ModelPose> obj;std::vector<std::uint32_t> evalflags,owp_flg;std::vector<BoneMatrix> owp_mtx;bool calculated=false;};
+    const PlayerAsset* own_row=nullptr;unsigned own_model=0;std::map<unsigned,OwnModel> own_models;
+    const PlayerAsset* model_row()const{return own_row?own_row:enemy_asset;}
+    // bhPutModel (eneset.c:843): unter mdflg 0x2 zeichnet es obj_a, sonst mlwP->objP; das ist nach
+    // select_model mdl[own_model], ohne Wechsel die Wurzel aus morph_obj_a (select_root, en18).
+    unsigned drawn_root()const{const bool blending=morph||(enemy_bound&&(enemy.mdflg&2u));return !blending&&own_row&&own_model?own_model:morph_obj_a;}
     // Verknuepfte Kindworks (bhEne01_SetLinkEnemy, en01.c:2815). model_owner:
     // `epp->mlwP = epw->mdl` — das Kind liest und schreibt den Objektbaum des
     // Elternworks, es hat keinen eigenen. model_window: objP/owP += 8 und

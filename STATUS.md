@@ -40,7 +40,7 @@ oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 (psh/rpsh) an die Vibrationseinheit gebunden, flr_no bei Common/Player 7, bhCheckSubTask-Tor plp->flg 0x6
 (Statustaste/Skriptanforderung). Kistenklettern (bhObj001) und bhControlPlayer :1540-1572 als gebunden
 belegt; Audio-Bank-3-Meldung im Scan ist der Direktstart ohne bhRoomSoundCase (kein Portfehler). Snapshot-Format 2
-speichert die Raumklang-Variante (Test `snapshot_room_sound`, Format 1 weiter lesbar). [Bericht](work/port-batch-20261021.result.md). **Kein Commit.**
+speichert die Raumklang-Variante (Test `snapshot_room_sound`, Format 1 weiter lesbar). [Bericht](archived/work/port-batch-20261021.result.md). **Kein Commit.**
 
 **EventVm-Audit und Rest-Opcodes (2026-10-21, Arbeitsbaum, 212/212 grün):** alle 223 Skriptbefehle
 gebunden (0x82 bhSetDebugLoopEx, 0xCF bhExGameItemInit, 0xD3 bhRankingCall; dm0-Plätze halten wie
@@ -50,7 +50,7 @@ Ledger-Altlasten aus der Generatorzeit (bhItemGetGet/Ex, bhPlItemLost/Ex, bhArms
 bhPlayerPoisonCk, bhNext) am Original neu belegt (02d12c1). Danach: Exm-Tor wie player.c:1678
 (mode0 1, Passtor, ohne st_flg 0x4), bhCheckCut(1)-Augenzweig (cut.c:24-45), Common-Selektor 0
 nur auf dem Spieler (Walker). Offen: ranking.c ControlRanking.
-[Bericht](work/eventvm-audit-20261021.md). **Kein Commit** fuer den zweiten Teil.
+[Bericht](archived/work/eventvm-audit-20261021.md). **Kein Commit** fuer den zweiten Teil.
 
 **IOP-Modell: Stimmenpool, ATick, SE-Timer (2026-10-21, Arbeitsbaum):** native/audio_iop.* bildet TSNDDRV-
 Befehlsthread, TQ-Warteschlange, MODMIDI-Sequencer, MODHSYN (2x24 Stimmen, Raub, Key-On-Stapel) und die 48
