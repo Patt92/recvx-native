@@ -58,7 +58,7 @@ Tests with original data expect `data/`. Do not run tests sharing fixtures
 | Events and progression | `native-gameplay-bindings`, `event_lifecycle_control_release`, `engine_progression_resources`, `door_transition`, `gameover_original`, `computer_terminal` |
 | Inventory and items | `inventory_events_assets`, `inventory_combine_inspect`, `original_inventory_table_coverage`, `original_file_reader`, `status_condition_pulse` |
 | Audio and movies | `audio_movie`, `bgm_room_transition` |
-| Input, menus, host | `keyboard_controller_config`, `main_menu_settings_video_skip`, `debug_menu_hotkey_registry`, `snapshot_savefile_roundtrip`, `snapshot_room_sound`, `third_person_camera_mod` |
+| Input, menus, host | `keyboard_controller_config`, `main_menu_settings_video_skip`, `debug_menu_hotkey_registry`, `snapshot_savefile_roundtrip`, `snapshot_room_sound`, `third_person_camera_mod`, `third_person_aim_camera` (headless: aiming/shooting keep the host chase camera, event camera/cinematic/stairs hand it back) |
 
 [INVENTORY-COVERAGE.md](INVENTORY-COVERAGE.md) is generated with original data:
 

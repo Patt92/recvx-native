@@ -1296,6 +1296,11 @@ if(BUILD_TESTING)
    add_test(NAME snapshot_room_sound COMMAND "${Python3_EXECUTABLE}" -I
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/snapshot_room_sound_check.py"
     --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+   # Host-Kameramod: Zielen/Schuss (bhCPM1_act_atk setzt st_flg 0x4, player.c:4483) behalten die
+   # Schulterkamera; Ereigniskamera/Cinematic/Stufenaktion geben die Originalkamera zurueck.
+   add_test(NAME third_person_aim_camera COMMAND "${Python3_EXECUTABLE}" -I
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/third_person_aim_check.py"
+    --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
  endif()
 endif()

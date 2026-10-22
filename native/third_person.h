@@ -18,8 +18,10 @@ struct ThirdPersonSettings {
     float smoothing=.16f;                                // 0..1 per 60-Hz step (converted to the 30-Hz game tick)
 };
 struct ThirdPersonState {
-    bool free=false;    // player owns movement this tick
-    bool aiming=false;  // weapon raised (CombatController::aiming)
+    bool free=false;    // player owns movement this tick: bhCPM0_action outside the mode2 14..22 special
+                        // actions, no event/fixed camera, cinematic, film, door, script or title (runtime.cpp)
+    bool aiming=false;  // weapon raised or firing (CombatController::aiming, plp->mode1 != 0): the chase
+                        // camera stays and blends to the aim pose; it is never a reason to hand the view back
 };
 class ThirdPersonCamera {
 public:

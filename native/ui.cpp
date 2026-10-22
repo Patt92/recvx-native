@@ -313,7 +313,9 @@ bool StatusMenu::input_unslid(MenuInput key,Inventory& inventory){
     auto snap=[&]{return Snapshot{active,commands,examining,combining,files,file_list,message.active(),selected,command,file_number,file_page,combine_from,message.index()};};
     const auto before=snap();const bool was_examining=examining&&!message.active();
     feedback_sound=0xffffffff;
-    if(active&&command_window_moving()&&key!=MenuInput::Open)return true;
+    // ItemCommand testmode 0 liest kein Pad, testmode 1 keins unter statusflg 0x802000 (sub1.c:4686),
+    // also auch nicht den Statusknopf 0x4000 waehrend Ein- und Ausfahrt des Befehlsfensters.
+    if(active&&command_window_moving())return true;
     // CursorMove/MainCommand ignore directions and decide while the cure sweep owns statusflg 0x20.
     if(active&&pulse.healing()&&(!message.active()||navigation_message_)&&key!=MenuInput::Cancel&&key!=MenuInput::Open)return true;
     const auto actions_before=commands?actions(inventory):std::vector<std::string>{};
@@ -377,8 +379,16 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     // ItemCombination liest das Pad nur in subcsr 1 (sub1.c:5301); subcsr 2/3 und der
     // Frame, in dem subcsr 2 nach 1 zurueckfaellt, nehmen keine Eingabe an.
     if(active&&combining&&(combine_subcsr_!=1||combine_settled_))return true;
-    if(key==MenuInput::Open){if(active){if(examining)close_examine(inventory);active=false;return true;}clear_navigation_message();active=true;commands=examining=false;end_combine();nav=nav_pressed=false;nav_wait=0;selected=2;command=0;reset_cursor_color();inspection=ItemInspection{};return true;}if(!active)return false; // StatusCancel aendert listcsr_0 nicht (:4408); CursorInit startet beim Oeffnen mit Slot/Zelle 2 (:8998).
-    if(key==MenuInput::Cancel){if(examining)close_examine(inventory);else if(combining){end_combine();selected=combine_from;reset_cursor_color();} /* subcsr 1, 0x1000 (sub1.c:5546-5565): testmode 1 zurueck ins Befehlsfenster, listcsr_0 = listcsr_1, SE 0 */else if(commands)commands=false;else if(!nav){nav=true;maincsr=3;nav_wait=0;feedback_sound=0;}else if(!nav_wait)active=false;return true;} // CursorMove 0x1000 enters MainCommand (maincsr 3), MainCommand 0x1000 is StatusCancel
+    if(key==MenuInput::Open){if(active){
+        // pad_ps 0x4000 schliesst nur aus CursorMove (:1989) und MainCommand (:4278, 0x5000 erst mit st_flg 0x4000).
+        // ItemCommand testmode 1 (:4686-4931) und ItemCombination subcsr 1 (:5301-5571) lesen den Statusknopf nicht.
+        if(commands)return true;
+        if(nav){if(nav_wait||nav_pressed)return true;if(navigation_message_&&!message.closable())return true;clear_navigation_message();} // SpriteOnOff :8418-8423: fertige Meldung faellt mit 0x4000
+        if(examining)close_examine(inventory);active=false;return true;}clear_navigation_message();active=true;commands=examining=false;end_combine();nav=nav_pressed=false;nav_wait=0;selected=2;command=0;reset_cursor_color();inspection=ItemInspection{};return true;}if(!active)return false; // StatusCancel aendert listcsr_0 nicht (:4408); CursorInit startet beim Oeffnen mit Slot/Zelle 2 (:8998).
+    if(key==MenuInput::Cancel){if(examining)close_examine(inventory);else if(combining){end_combine();selected=combine_from;reset_cursor_color();} /* subcsr 1, 0x1000 (sub1.c:5546-5565): testmode 1 zurueck ins Befehlsfenster, listcsr_0 = listcsr_1, SE 0 */else if(commands)commands=false;else if(!nav){nav=true;maincsr=3;nav_wait=0;feedback_sound=0;}
+        // MainCommand 0x5000 (:4278): kein Pad waehrend wait/testmode 2, StatusCancel erst mit st_flg 0x4000;
+        // SpriteOnOff (:8418-8423) loescht die fertige Beschreibung im selben Bild mit 0x1000.
+        else if(!nav_wait&&!nav_pressed){if(navigation_message_&&!message.closable())return true;clear_navigation_message();active=false;}return true;} // CursorMove 0x1000 enters MainCommand (maincsr 3), MainCommand 0x1000 is StatusCancel
     if(nav){ // MainCommand testmode 1: the pad is ignored while the pressed button animates (wait)
         if(nav_wait||nav_pressed)return true;
         if(key==MenuInput::Left&&maincsr){--maincsr;clear_navigation_message();feedback_sound=2;}else if(key==MenuInput::Right&&maincsr<3){++maincsr;clear_navigation_message();feedback_sound=2;}
@@ -921,7 +931,8 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
             const unsigned command_item=erasing?menu.erase_item:menu.combining?menu.combine_item():selected_id;const unsigned cursor=erasing?menu.erase_command:menu.command;
             const auto command_parts=item_command_parts(command_item,cursor,menu.shotgun_burst&&menu.shotgun_burst());
             for(const auto& p:command_parts){if(!(p.atr&0x20))continue;const auto& part=tables[p.parts_num][p.anim];const int nx=(p.setnum>>4)+1,ny=(p.setnum&15)+1;
-                for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]-96+(p.cen_no==11?slide:0)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
+                // SpriteDisp zeichnet an cen_pos[cen_no]: das Fenster faehrt mit Zentrum 11 (StatusCancel :4437 Ziel 660) aus.
+                for(int i=0;i<std::max(nx,ny);++i)blit(image,menu_[part.texid],int(p.pos[0])+centers[p.cen_no][0]+dx(p.cen_no)-96+(p.cen_no==11?slide:0)+int(std::min(i,nx-1)*p.move),int(p.pos[1])+centers[p.cen_no][1]+dy(p.cen_no)+int(std::min(i,ny-1)*p.move),part.sx,part.sy,part.u1,part.v1,part.u2,part.v2,tint(p.col),bool(p.atr&8),p.ang);
             }}
         if((menu.examining||menu.pickup)&&selected_id&&selected_id<145){
             const auto source=menu.pickup?menu.pickup:menu.inspection.running()?menu.inspection.item():selected_id;

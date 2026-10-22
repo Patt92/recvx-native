@@ -200,7 +200,12 @@ saved to `third_person.ini` beside `controls.ini`; `--third-person` enables it
 for one run without saving. The over-the-shoulder camera only replaces the
 fixed room camera while the player has free control; event cameras, FMVs,
 cinematics and door transitions keep the original view. Movement keeps the
-original tank controls. A wall behind the player (for example the door just
+original tank controls. Aiming and shooting stay in the shoulder view (the
+boom blends to `aim_distance`/`aim_fov`); the gate follows the player work
+(`bhCPM0_action`, mode0 1) and not `sys->st_flg 0x4`, which the combat branch
+`bhCPM1_act_atk` sets itself. The step, ladder, push, crouch and grab-turn
+actions (mode2 14..22), damage/death, the item box and scripted states keep
+the original camera. A wall behind the player (for example the door just
 entered) shortens and raises the boom instead of swinging the camera around;
 the boom eases back out once there is room, and the player model fades while
 the eye sits inside it.

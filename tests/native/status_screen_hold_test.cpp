@@ -127,6 +127,65 @@ void menu_lifecycle(const std::filesystem::path& data,const std::filesystem::pat
     m.tick(inv);check(m.message.index()==178&&m.message.visible().empty(),"new navigation description did not restart its parser");
     std::puts("status menu: slot 2 entry, unchanged close cursor/equipment, delayed progressive MainCommand text");
 }
+// Befehlsfenster und Befehlsleiste gegen den Statusknopf (pad_ps 0x4000) und Cancel (0x1000):
+//  - ItemCommand testmode 1 liest nur 0x3/0x800/0x1000 (sub1.c:4686-4931), testmode 0 und die Ausfahrt
+//    (statusflg 0x800000, :4686) gar kein Pad: der Statusknopf bleibt im Befehlsfenster ohne Wirkung.
+//  - Cancel setzt statusflg 0x800000 (:4925-4930), ItemCommandErase (:5148-5196) faehrt vier Bilder aus
+//    und kehrt nach CursorMove zurueck, das statusflg 0x100000 setzt (:1780): SpriteOnOff zeigt wieder
+//    den Itemnamen (:8408-8411), keine Meldung.
+//  - MainCommand nimmt 0x5000 erst mit st_flg 0x4000 (:4278); SpriteOnOff loescht die fertige
+//    Beschreibung im selben Bild mit 0x1000/0x4000 (:8418-8423), sie faehrt nicht mit aus.
+void context_menu(const std::filesystem::path& data,const std::filesystem::path& output){
+    GameUi ui(data);Inventory inv;std::fill(inv.slots()+2,inv.slots()+12,0);inv.slots()[2]=Inventory::pack(21,1);inv.slots()[3]=Inventory::pack(22,1);
+    StatusMenu m;m.message_source=[&](unsigned n){return ui.system_message(n);};MessageDialog room;
+    auto frame=[&]{m.tick(inv);m.sprite_on_off(inv);};
+    auto draw=[&](const StatusMenu& menu,const Inventory& items){SoftwareRenderer r(640,480);ui.draw(r,items,menu,room,0);return r.pixels();};
+    auto shot=[&](const char* name){SoftwareRenderer r(640,480);ui.draw(r,inv,m,room,0);if(!output.empty()){std::filesystem::create_directories(output);r.save_bmp(output/(std::string(name)+".bmp"));}return r.pixels();};
+    auto differ=[](const std::vector<std::uint32_t>& a,const std::vector<std::uint32_t>& b,int x0,int y0,int x1,int y1){unsigned n=0;for(int y=y0;y<y1;++y)for(int x=x0;x<x1;++x)if(a[y*640+x]!=b[y*640+x])++n;return n;};
+    // Bereiche: Befehlsfenster links der Itemliste (cen_pos[11] 452-96 = 356 .. Itemsymbole ab 460), Textkasten (cen_pos[6] 28,332).
+    auto window=[&](const std::vector<std::uint32_t>& a,const std::vector<std::uint32_t>& b){return differ(a,b,340,110,456,330);};
+    auto textbox=[&](const std::vector<std::uint32_t>& a,const std::vector<std::uint32_t>& b){return differ(a,b,40,340,420,440);};
+    auto enter=[&]{m.input(MenuInput::Open,inv);frame();for(unsigned n=0;n<40&&m.slide.moving();++n)frame();check(m.active&&!m.slide.moving()&&m.selected==2,"status entry did not finish");};
+    enter();
+    const auto list=shot("cursor-move");
+    m.input(MenuInput::Confirm,inv);check(m.commands&&m.command_frames==0&&m.command_window_moving(),"ItemCommand did not open");
+    for(unsigned n=0;n<4;++n)frame();check(m.commands&&m.command_frames==4&&!m.command_window_moving(),"command window did not finish sliding in");
+    const auto opened=shot("command-open");
+    check(window(list,opened)>0&&textbox(list,opened)>0,"command window or item-name blanking not drawn (ItemCommand testmode 0, :4627)");
+    // 1) Statusknopf im Befehlsfenster: keine Wirkung, kein Klang, Bild unveraendert.
+    m.input(MenuInput::Open,inv);
+    check(m.active&&!m.closing&&m.commands&&!m.erase_frames&&m.feedback_sound==0xffffffffu,"status key acted inside ItemCommand testmode 1 (sub1.c:4686-4931 read no 0x4000)");
+    frame();check(window(shot("command-open-after-status-key"),opened)==0,"status key changed the command window");
+    // 2) Cancel: ItemCommandErase, waehrenddessen kein Pad (auch kein Statusknopf), danach CursorMove mit Itemname.
+    m.input(MenuInput::Cancel,inv);check(!m.commands&&m.erase_frames==4&&m.feedback_sound==0,"ItemCommand cancel (0x1000) did not start ItemCommandErase with SE 0");
+    m.input(MenuInput::Open,inv);check(m.active&&!m.closing&&m.erase_frames==4,"status key accepted under statusflg 0x800000 (sub1.c:4686)");
+    for(unsigned n=0;n<4;++n){check(m.erase_frames==4-n,"ItemCommandErase frame count");frame();}
+    check(!m.erase_frames&&!m.commands&&m.active&&!m.closing&&!m.message.active(),"ItemCommandErase did not return to CursorMove without a message");
+    const auto erased=shot("after-erase");
+    check(window(erased,list)==0,"command window left behind after ItemCommandErase");
+    check(textbox(erased,list)==0,"text box after ItemCommandErase differs from CursorMove");
+    {auto nameless=inv;nameless.slots()[2]=0;check(textbox(erased,draw(m,nameless))>0,"item name missing after ItemCommandErase (CursorMove :1780, SpriteOnOff :8408)");}
+    // Statusknopf in CursorMove (:1989): StatusCancel ohne Befehlsfensterreste waehrend der Ausfahrt.
+    m.input(MenuInput::Open,inv);check(m.closing&&m.feedback_sound==0&&!m.commands&&!m.erase_frames,"status key did not cancel from CursorMove");
+    for(unsigned n=0;n<60&&m.active;++n){frame();check(!m.commands&&!m.erase_frames,"command window state survived StatusCancel");
+        StatusMenu bare=m;bare.commands=false;bare.erase_frames=0;check(draw(m,inv)==draw(bare,inv),"closing frame draws a command window");}
+    check(!m.active&&draw(m,inv)==SoftwareRenderer(640,480).pixels(),"status close did not finish cleanly");
+    // 3) Befehlsleiste: Beschreibung 177, Cancel/Statusknopf erst nach dem Ende und ohne stehende Meldung.
+    for(const auto key:{MenuInput::Cancel,MenuInput::Open}){
+        enter();
+        m.input(MenuInput::Cancel,inv);check(m.nav&&m.maincsr==3&&!m.message.active(),"CursorMove cancel did not enter MainCommand");
+        frame();check(m.message.active()&&m.message.index()==177&&!m.message.closable(),"description 177 not set in the first MainCommand pass (:4305)");
+        m.input(key,inv);check(m.active&&!m.closing&&m.nav&&m.message.active(),"StatusCancel accepted before the description reached st_flg 0x4000 (:4278)");
+        frame();check(m.message.closable(),"description did not complete");
+        {StatusMenu silent=m;silent.message=MessageDialog{};check(textbox(shot(key==MenuInput::Cancel?"navigation-cancel-before":"navigation-status-key-before"),draw(silent,inv))>0,"description text not drawn");}
+        m.input(key,inv);check(m.closing&&m.nav&&!m.message.active()&&m.feedback_sound==0,"MainCommand cancel/status key did not drop the finished description (SpriteOnOff :8418-8423)");
+        unsigned frames=0;for(;frames<60&&m.active;++frames){frame();StatusMenu silent=m;silent.message=MessageDialog{};
+            check(!m.message.active()&&textbox(draw(m,inv),draw(silent,inv))==0,"description stayed in the text box during the status slide-out");
+            if(frames==2)shot(key==MenuInput::Cancel?"navigation-cancel-sliding":"navigation-status-key-sliding");}
+        check(!m.active,"status close after MainCommand did not finish");
+    }
+    std::puts("context menu: status key idle in ItemCommand, item name after ItemCommandErase, MainCommand description dropped on cancel");
+}
 // 3) RM_0090: dieselbe Kopplung wie rm0090_box_test.cpp, ergaenzt um Rahmen, Kiste und Fade.
 struct Room {
     std::vector<std::uint8_t> bytes;Scene scene;SceneSpawn actor;std::size_t motion=42;std::int64_t frame=0;
@@ -210,6 +269,7 @@ int main(int argc,char** argv){try{
     if(argc<2){std::puts("status task frame: monitor mode 5 / ItemTaskCheck taskloop (no data, RM_0090 skipped)");return 0;}
     const std::filesystem::path data=argv[1];
     menu_lifecycle(data,argc>2?std::filesystem::path(argv[2]):std::filesystem::path{});
+    context_menu(data,argc>2?std::filesystem::path(argv[2])/"context-menu":std::filesystem::path{});
     if(!std::filesystem::exists(data/"rooms/RM_0090.RDT")){std::puts("status task frame: RM_0090 missing, room part skipped");return 0;}
     // Mit Rahmen: st_flg 0x8 haelt, bis Ereignis 19 sein Common 9 erreicht -> Klappe 0.
     const auto held=security_box(data,true);
