@@ -20,9 +20,11 @@ def _project_version():
     text = (Path(__file__).resolve().parents[1] / 'CMakeLists.txt').read_text()
     major, minor = re.search(r'project\(recvx_native VERSION (\d+)\.(\d+)', text).groups()
     try:
-        build = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'], cwd=Path(__file__).resolve().parents[1], text=True).strip()
+        build = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'], cwd=Path(__file__).resolve().parents[1], text=True,
+                                        stderr=subprocess.DEVNULL).strip()
     except (OSError, subprocess.CalledProcessError):
-        build = '0'
+        # Ohne Repository (Docker-Builder ohne .git) kommt die Nummer aus der Umgebung.
+        build = os.environ.get('RECVX_BUILD_NUMBER', '0')
     return f'{major}.{minor}', f'{major}.{minor}.{build}'
 
 

@@ -2,6 +2,7 @@
 #include "player_stairs.h"
 #include "ninja_math.h"
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <set>
 #include <stdexcept>

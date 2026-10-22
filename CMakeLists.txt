@@ -4,6 +4,17 @@ include(CTest)
 # Die C-Besitzer (native/enemies/*.c, player_*.c) nutzen _Alignas und _Static_assert; MSVC braucht dafuer /std:c11.
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+# Der PS2-EE-ABI hat ein vorzeichenbehaftetes char (WpnTab vib_tp -1, `vib_tp >= 0` in
+# player_combat_core.c). macOS, x86 und MSVC tun das ohnehin; aarch64-Linux nicht.
+if(NOT MSVC)
+  add_compile_options(-fsigned-char)
+endif()
+# GCC fasst a*b+c standardmaessig ueber Anweisungsgrenzen zu FMA zusammen (-ffp-contract=fast),
+# Clang (macOS, Zig) nicht. Ohne diese Grenze rechnen Linux-Builds Effektbahnen anders
+# (effect_eff30x: rnd = 0.1f*njSin, dann sxb*(1+rnd)).
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options(-ffp-contract=off)
+endif()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_original_core.py"

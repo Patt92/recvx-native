@@ -8,7 +8,9 @@
 #include "ninja_math.h"
 #include <iostream>
 #include <stdexcept>
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 static void check(bool b,const char* why){if(!b)throw std::runtime_error(why);}
 

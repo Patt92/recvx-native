@@ -1,0 +1,25 @@
+# Allowlist: only tracked project sources enter the builder image. archived/
+# (including the quarantine), build/, data/, iso/, mods/, saves/, snapshots/,
+# user INIs and .git stay outside the build context.
+*
+!CMakeLists.txt
+!LICENSE
+!QUALITY.md
+!README.md
+!STARTEN.md
+!STATUS.md
+!build.sh
+!controls.ini
+!debug.ini
+!third_person.ini
+!build-tools/ninja/
+!docker/
+!docs/
+!include/
+!native/
+!src/
+!tests/
+!tools/
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store

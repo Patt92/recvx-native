@@ -290,6 +290,12 @@ See the [build guide](docs/NATIVE_PORT.md) for further build and packaging optio
 and the [launch guide](STARTEN.md) and [controls reference](docs/CONTROLS.md) for
 playing.
 
+### Docker
+
+`docker compose build` and `docker compose run --rm builder` build Linux and
+Windows x64/ARM64 in a container, from a disc image in `./iso` into `./out`.
+macOS and iOS still need a Mac. Details: [Docker builder](docs/DOCKER.md).
+
 ## Further reading
 
 - [Engine and build architecture](docs/NATIVE_PORT.md)
