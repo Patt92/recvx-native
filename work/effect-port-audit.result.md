@@ -200,3 +200,14 @@ verlinkte Sätze/flg 0x2000000.
 - bhEffTypeSet-Original (0x92) und bhEffectSandSet (0x98) auf Halterkennungen nicht
   nachgelesen; bleiben als Prüfpunkte offen.
 - Kein Build, kein Test; das geprüfte Binary ist der Stand vom 2026-10-22 00:01.
+
+## Nachtrag 2026-10-22: Befunde 1 und 2 erledigt
+
+- **bhEffBG 93..99**: `step_effbg` (effect_sprite_procedures.cpp) nach effsub1.c:145, Tabelle
+  und `ported_effect_atlas` (93..99) erweitert. `effect_bg`-Test: Prozedur (flg 0x4100001, tex_id = id,
+  UV, Blende 8/6, Durchfall, Opak-Liste) und alle neun Raeume mit dekodiertem Atlas und Opak-Einreihung,
+  keine bhEff93..99-Luecke. Sichtprobe headless (`build/validation/effect-bg`): RM_7240 zeigt das
+  Hintergrundbild, RM_5001 laeuft mit Effekt 93 sichtbar; RM_1000 bleibt bis zum Skript (0x43) unsichtbar.
+- **bhEff026 / bhCheckEvtTimer**: `EventVm::set_effect` (Laufzeit -> `spawn_unlinked_effect`) beim
+  Ablaufzweig Flag (1,69); game_test prueft genau einen Spawn und keinen nach geloeschtem Flag.
+- Offen aus dem Audit: bhEff_Sub367, Halter 30..83 Freigabe, bhEff001-Schatten.

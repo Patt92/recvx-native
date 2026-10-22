@@ -21,6 +21,17 @@ aktuellem Code, Arbeitsbaum und installierter Runtime abgleichen.
 
 ## Arbeitsbaum und Auslieferung
 
+**bhEffTypeSet 0xAD (2026-10-22, Arbeitsbaum):** `world.cpp` schreibt `op->type = v1` wie event.c:7345 ohne
+Rueckfrage, auch auf Texturhaltern (id 30..99, bhEffDmy) und unportierten Kennungen; vorher blieb der Befehl dort
+ungebunden. Test in `event_lifecycle` (RM_3010 id 70); mit der alten Bedingung rot (Gegenprobe), mit Fix gruen
+(`event_lifecycle|effect_bg|game`). bhEffBG 93..99 und Effekt 26 aus bhCheckEvtTimer liegen ebenfalls im Arbeitsbaum.
+Offen aus dem Effektaudit: Halterfreigabe nach dem ersten Pass (bhEffDmy), 0x98 auf Halter 66 (RM_3091). **Kein Commit.**
+
+**iOS-Buildpfad (2026-10-22, Arbeitsbaum):** `./build.sh --platform ios|ios-simulator` (Ninja/Makefiles,
+Policy-Audit unverändert, SDL statisch, Metal, Bundle-Icons, Signatur per Profil). Simulator- und unsignierter
+Gerätebuild kompilieren, linken, PASS; Start auf Simulator/Gerät **nicht** belegt (Sandbox, keine iOS-
+Simulatorlaufzeit installiert), Touch-Steuerung offen. [Build-Doku](docs/NATIVE_PORT.md#ios-arm64-device-and-simulator). **Kein Commit.**
+
 Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short`
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.

@@ -1142,7 +1142,8 @@ bool ported_effect_atlas(unsigned group){
     case 60:case 61:case 62:case 63:case 64:case 65:case 66:case 67:case 68:case 69:
     case 42: // screen.c:592 bhDrawThermometer (sys->ond_tnm = ef_tn[42])
     case 44: // effsub1b.c:123 bhDraw134 (sys->ef_tn[44])
-    case 80:case 94:
+    case 80:
+    case 93:case 94:case 95:case 96:case 97:case 98:case 99: // effsub1.c:145 bhEffBG (tex_id = id)
     case 85: // effsub6.c:41 bhEff085 (sys->ef_tn[85], erstes Bild als Gegnertextur)
     case 81: // effsub2.c:3698 bhEff_E13_Fluid
     case 82:case 83: // effsub2.c:1061 bhEff_E02_SandDust (tex_id = mdlver + 82)

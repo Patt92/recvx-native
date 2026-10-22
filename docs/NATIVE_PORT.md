@@ -13,6 +13,8 @@ into the native engine.
 - Windows: Visual Studio with “Desktop development with C++”; native ARM64
   builds also need the ARM64 C/C++ build tools.
 - Windows cross-builds from macOS/Linux: Ninja as well.
+- iOS: Xcode with the iOS platform (simulator and device SDKs); a provisioning
+  profile and its signing identity for device installs.
 - Linux: GCC or Clang with C++17, Make or Ninja, and the SDL2 development
   dependencies for X11/Wayland and ALSA/PulseAudio; see the
   [README](../README.md#linux).
@@ -63,6 +65,49 @@ yet pass this final gate.
 The package is written to `build/packages/windows-arm64-v<version>`. As with
 any Windows cross-build, it must be tested on Windows ARM64 or under suitable
 emulation. Building alone does not establish runtime behavior.
+
+### iOS (arm64 device and simulator)
+
+iOS builds need a macOS host with Xcode and its iOS platform. The wrapper uses
+the active developer directory, or else the first `/Applications/Xcode*.app`
+with an iOS SDK; it does not change `xcode-select`. CMake runs with the same
+single-config generator as on macOS (not the Xcode generator), so the policy
+gate audits `compile_commands.json` and the final binary exactly as for the
+other platforms. SDL2 is linked statically; Metal is the only GPU rasterizer
+(no OpenGL on iOS). Only `recvx-runtime` is built as an app bundle; the export
+tools and tests stay on the host. Deployment target: iOS 15.0.
+
+```sh
+./build.sh --platform ios-simulator --install
+```
+
+```sh
+./build.sh --platform ios --ios-profile <profile.mobileprovision> --package
+```
+
+| Option | Effect |
+|---|---|
+| `--platform ios-simulator` | Build `build/ios-simulator/recvx-runtime.app`, signed ad hoc |
+| `--platform ios` | Build `build/ios-device/recvx-runtime.app`; unsigned without a profile |
+| `--ios-profile <file>` | Sign the device app with this provisioning profile and the matching keychain identity |
+| `--ios-bundle-id <id>` | Bundle identifier; must be covered by the profile (default `org.recvx.native`) |
+| `--ios-bundle-data` | Copy `--data` into the app as `data/` (7–8 GB; otherwise the app reads `Documents/data`) |
+| `--install` | Install on the booted simulator, or with `--ios-device <id>` on a device (`xcrun devicectl`) |
+| `--package` | Device only: write `build/packages/ios-arm64-v<version>/RECVX-Native.ipa` |
+
+The app has no command line. Game data comes from the bundle when it contains
+`data/native-data.version`, otherwise from `Documents/data` in the app
+container (Finder/Files file sharing is enabled; for the simulator, copy it
+into `xcrun simctl get_app_container booted org.recvx.native data`). Mods are
+read from `Documents/mods`. INIs, snapshots and save games use the shared user
+path resolution: `Library/Application Support/RECVX` inside the app container.
+
+A provisioning profile for a device build can come from Xcode (automatic
+signing of any project with the same bundle identifier and your team) or from
+the Apple developer portal. Building, signing and simulator start do not
+establish runtime behavior on iOS hardware. Open on iOS: on-screen touch
+controls (input currently needs a game controller or keyboard), app lifecycle
+during backgrounding, and memory limits on smaller devices.
 
 | Option | Effect |
 |---|---|

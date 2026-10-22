@@ -15,7 +15,8 @@ python3 tools/build_app_icons.py
 
 The optional converter uses Lanczos resampling. ICO contains 16, 24, 32, 48,
 64, 128 and 256 px images; ICNS contains the macOS/Retina representations up to
-1024 px. Both macOS bundle writers copy the ICNS before signing and set
+1024 px. `ios/AppIcon*.png` are the iOS bundle icons (120, 180, 152 and
+167 px RGB); `tools/build_native.py` copies them into the iOS app. Both macOS bundle writers copy the ICNS before signing and set
 `CFBundleIconFile`. Windows embeds the ICO in `recvx-runtime.exe` via RC;
 SDL2 also selects that first group icon for its window.
 

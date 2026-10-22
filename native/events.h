@@ -86,6 +86,8 @@ public:
     // CallSystemVoice (ADV/PatId[3], VoiceNo + 16) for timer mode 3.
     std::function<void(unsigned)> system_voice;
     std::function<void(unsigned)> system_se; // CallSystemSe(0, n) of bhControlMessage/GetItem
+    // bhSetEffect(n, &pnt, NULL, 0) ohne Link (player.c:1284 bhCheckEvtTimer).
+    std::function<void(unsigned)> set_effect;
     std::function<Message(unsigned,unsigned)> item_message;
     // RoomWorld::start_item_box: obwp[object] becomes type 100 (bhObjItmBox).
     std::function<bool(unsigned)> item_box_object;

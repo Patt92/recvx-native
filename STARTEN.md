@@ -24,6 +24,9 @@ Eigenständige Pakete mit kopierten Laufzeitdaten erzeugt zusätzlich
 `./build.sh --platform macos --package --output <neuer-Paketordner>`.
 Die Standardausgaben für Pakete liegen unter `build/packages/`; vorhandene
 Pakete werden nicht überschrieben.
+iOS/iPadOS-Builds (Gerät und Simulator, mit Xcode) erzeugt
+`./build.sh --platform ios` bzw. `--platform ios-simulator`; Signieren,
+Datenablage und Installation stehen im iOS-Abschnitt der Build-Doku.
 Details zu Build, Datenprüfung und Plattformen stehen in
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 

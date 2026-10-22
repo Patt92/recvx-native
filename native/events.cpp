@@ -554,6 +554,9 @@ void EventVm::check_event_deadline(){
     if(event_deadline_mode==0||event_deadline_ticks!=0||(flags[6][0]&0x200u)==0||(flags[11][0]&0x20000000u)==0||(flags[12][0]&0x80u)||(flags[12][0]&0x15e00u)!=0x15e00u||(flags[10][0]&1u))return; /* player.c:1272: ts_flg 0x4000 (Task 14 frei), 0x1000, 0x200, 0x400, 0x800, 0x10000 */
     if(flag(1,69)){
         if(flags[5][0]&0x200u){flags[5][0]|=0x400000u;flags[10][0]|=0x2000u;flags[10][0]&=~0x1000u;}
+        // player.c:1284 bhSetEffect(26, &pnt, NULL, 0): pnt ist uninitialisiert;
+        // bhEff026 ueberschreibt px/py in mode0 0 und liest pz/lox.. nicht.
+        if(set_effect)set_effect(26);
         inventory_.hp=-1;set_flag(1,69,1);
     }
     if(flag(1,67)){

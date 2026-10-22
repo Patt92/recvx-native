@@ -4,6 +4,9 @@ import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# iOS bundle icons (CFBundleIconFiles in tools/build_native.py): iPhone 60 pt @2x/@3x, iPad 76/83.5 pt @2x.
+IOS_ICONS = {'AppIcon60x60@2x.png': 120, 'AppIcon60x60@3x.png': 180,
+             'AppIcon76x76@2x~ipad.png': 152, 'AppIcon83.5x83.5@2x~ipad.png': 167}
 
 
 def main():
@@ -20,6 +23,9 @@ def main():
     image.save(args.output / 'app-icon.icns', format='ICNS')
     image.save(args.output / 'app-icon.ico', format='ICO',
                sizes=[(size, size) for size in (16, 24, 32, 48, 64, 128, 256)])
+    (args.output / 'ios').mkdir(exist_ok=True)
+    for name, size in IOS_ICONS.items():
+        image.resize((size, size), Image.Resampling.LANCZOS).save(args.output / 'ios' / name, format='PNG')
     print(f'Application icons: {args.output}')
 
 

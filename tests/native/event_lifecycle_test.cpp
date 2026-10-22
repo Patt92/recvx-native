@@ -406,6 +406,17 @@ int main(int argc,char** argv){try{
   for(const auto& gap:r.world.unbound_enemy_routines())if(gap.find("bhCyodanSetEx")!=std::string::npos||gap.find("PtclTbl")!=std::string::npos)throw std::runtime_error("RM_0090 laser event: "+gap);
   check(particles>0,"RM_0090 laser event spawned no bhSetEffParticleMk2 particles");
  }
+ // event.c:7345 bhEffTypeSet (0xAD): op->type = v1 ohne Rueckfrage. RM_3010 Raumeffekt id 70 ist ein
+ // Texturhalter (bhEffDmy, keine portierte Prozedur); der Befehl muss trotzdem gebunden sein und op->type setzen.
+ {
+  Room r(data,"RM_3010");unsigned index=0;bool found=false;
+  for(;const auto* s=r.world.effect_state(index);++index)if(s->id==70){found=true;break;}
+  check(found,"RM_3010 hat keinen Raumeffekt 70");
+  check(!supported_effect_sprite(70),"id 70 ist nicht mehr Halter; Testraum neu waehlen");
+  EventCommand c;c.opcode=0xad;c.task=0;c.bytes={0xad,std::uint8_t(index),7,0,0,0};
+  check(r.world.bind(c),"bhEffTypeSet (0xAD) auf Texturhalter bleibt ungebunden");
+  check(r.world.effect_state(index)->type==7,"bhEffTypeSet (0xAD) schreibt op->type nicht");
+ }
  // RM_5010 Ereignis 8 (scd1 @026c: ELSE-Zweig von IF rm_flg 0x4, den en19.c:1068 bei TY_BR0_PINCH oder
  // hp < 0 setzt; Katapulthebel mit liegendem Tyrant): Befehl 0xc8 @09ea = event.c:8722 bhEffBakuDrmSet,
  // Vorzeichenbyte 2 und drei u16/100 -> (200, -18, 22), dann weapon.c:1812 bhSetExplosionEffect am

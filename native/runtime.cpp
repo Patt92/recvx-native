@@ -75,6 +75,7 @@ struct Options {
     unsigned disc=1; // sys->ss_flg bit 0: 1 = disc-1 sound archives, 2 = disc 2
     std::size_t camera=0,spawn=0,motion=42;
     std::int64_t animation_frame=0;
+    bool data_explicit=false; // iOS: ohne --data das Bundle bzw. den Documents-Ordner waehlen
     bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,validate_poses=false,camera_explicit=false,list_controllers=false,third_person=false,nearest=false,video_explicit=false;int supersampling=2;
     int renderer=-1; // --renderer gpu|software|opengl; Standard: video.ini (gpu) interaktiv, Software headless
     unsigned render_threads=0; // --render-threads: Host-Diagnose fuer Energiemessungen; 0 = Rendererstandard, Bild fuer jede Zahl identisch
@@ -85,7 +86,7 @@ Options options(int argc,char** argv){
         const std::string arg=argv[i];
         auto value=[&](){if(i+1>=argc)throw std::runtime_error("missing value for "+arg);return std::string(argv[++i]);};
         auto number=[&](){const auto text=value();if(text.empty()||text.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("invalid integer for "+arg);return std::stoull(text);};
-        if(arg=="--data")o.data=fs::u8path(value());
+        if(arg=="--data"){o.data=fs::u8path(value());o.data_explicit=true;}
         else if(arg=="--mods")o.mods=fs::u8path(value());
         else if(arg=="--replay")o.replay=fs::u8path(value());
         else if(arg=="--state")o.state=fs::u8path(value());
@@ -209,10 +210,28 @@ double process_cpu_seconds(){
 #endif
 }
 }
-int main(int argc,char** argv){
+#if defined(RECVX_IOS)
+// iOS startet ohne Kommandozeile: Spieldaten im App-Bundle (Paket mit eingebettetem data/), sonst im
+// Documents-Ordner des App-Containers (Finder-/Dateien-Freigabe); mods/ liegt immer dort. Die
+// Benutzerdaten folgen resolve_user_paths (HOME ist der App-Container).
+static void apply_ios_locations(Options& o){
+    const char* home=std::getenv("HOME");if(!home||!*home)throw std::runtime_error("cannot locate the iOS app container (HOME unset)");
+    const auto documents=fs::path(home)/"Documents";
+    if(!o.data_explicit){
+        o.data=documents/"data";
+        if(char* base=SDL_GetBasePath()){const auto bundled=fs::u8path(base)/"data";SDL_free(base);if(fs::is_regular_file(bundled/"native-data.version"))o.data=bundled;}
+    }
+    if(o.mods.empty())o.mods=documents/"mods";
+}
+#endif
+static int recvx_runtime_main(int argc,char** argv){
     try{
         SdlQuit quit; // Nach allen SDL-/GL-Besitzern freigeben, auch im Fehler-/Headlesspfad.
-        auto args=options(argc,argv);if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_controls);std::cout<<args.write_controls<<'\n';return 0;}_Make_SinTable();
+        auto args=options(argc,argv);
+#if defined(RECVX_IOS)
+        apply_ios_locations(args);
+#endif
+if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_controls);std::cout<<args.write_controls<<'\n';return 0;}_Make_SinTable();
         const auto user_paths=recvx::resolve_user_paths(args.data,args.user_dir);
         const bool explicit_controls=!args.controls.empty();
         if(args.controls.empty())args.controls=user_paths.file("controls.ini");
@@ -472,7 +491,7 @@ int main(int argc,char** argv){
                 events->values[0]=clip_room.stage;events->values[1]=clip_room.room;
                 world->init_room_camera(scene,unsigned(camera_index)); // before Event_init can install an event-camera range
                 const auto identity=recvx::RoomIdentity::parse(rooms.name(room_index));audio.mount_sound_afs(identity.stage); /* system.c:1602 disc change task before the room loads */events->values[0]=identity.stage;events->values[1]=identity.room;menu.stage=events->values[0];menu.room=events->values[1];menu.file_progress=[&](){return events?recvx::file_page_reduction(events->flags[1]):7u;};menu.file_bonus=[&](){return events&&(events->flags[16][0]&0x1000);};menu.file_manual_read=[&](bool automatic){if(!events||(!automatic&&events->flag(9,480)))return;inventory.erase_read_manual(automatic);events->set_flag(9,480,0);};menu.shotgun_burst=[&](){return events&&events->flag(1,74);};menu.toggle_shotgun_burst=[&](){if(events)events->set_flag(1,74,2);};events->values[15]=unsigned(args.spawn);events->values[2]=unsigned(camera_index);events->values[21]=identity.variant; /* system.c:1623: die Raumdatei rm_SRRC folgt aus sys->rcase, die geladene Datei bestimmt es also */events->door=request_door;
-                events->task_started=[&](unsigned level){world->start_task(level);};events->presentation_flags=[&](unsigned clear,unsigned set){world->set_presentation_flags((world->presentation_flags()&~clear)|set);};events->exm_light_off=[&]{world->clear_exm_light();};events->exm_cut_effect=[&]{world->mark_exm_cut_effect();};events->fixed_cut=[&](unsigned cno){world->set_fixed_cut(cno);};events->event_fixed_cut=[&](unsigned cno,unsigned kno){world->set_event_camera(cno,kno,false);};events->return_cut=[&]{world->return_to_cut();}; /* game.c:115-286 bhCheckExmAtari owners */events->player_yaw=[&]{return unsigned(actor.yaw)&65535u;};events->set_player_yaw=[&](unsigned yaw){actor.yaw=yaw&65535;};events->pad_state=[&]{return std::pair<unsigned,unsigned>{pad_ps,pad_on};};events->binding=[&](const recvx::EventCommand& c){if(c.opcode==0x39){const unsigned group=c.bytes.at(2);if(group>=scene.cut_enabled.size()||!scene.cut_tables[group])throw std::runtime_error("bhCamInfoSet camera group without cut table");scene.cut_enabled[group]=c.bytes.at(1)==0;follow();return true;}if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();world->restore_background(1);return true;}
+                events->task_started=[&](unsigned level){world->start_task(level);};events->presentation_flags=[&](unsigned clear,unsigned set){world->set_presentation_flags((world->presentation_flags()&~clear)|set);};events->exm_light_off=[&]{world->clear_exm_light();};events->exm_cut_effect=[&]{world->mark_exm_cut_effect();};events->set_effect=[&](unsigned id){recvx::EffectSpawn e;e.id=id;world->spawn_unlinked_effect(e);};events->fixed_cut=[&](unsigned cno){world->set_fixed_cut(cno);};events->event_fixed_cut=[&](unsigned cno,unsigned kno){world->set_event_camera(cno,kno,false);};events->return_cut=[&]{world->return_to_cut();}; /* game.c:115-286 bhCheckExmAtari owners */events->player_yaw=[&]{return unsigned(actor.yaw)&65535u;};events->set_player_yaw=[&](unsigned yaw){actor.yaw=yaw&65535;};events->pad_state=[&]{return std::pair<unsigned,unsigned>{pad_ps,pad_on};};events->binding=[&](const recvx::EventCommand& c){if(c.opcode==0x39){const unsigned group=c.bytes.at(2);if(group>=scene.cut_enabled.size()||!scene.cut_tables[group])throw std::runtime_error("bhCamInfoSet camera group without cut table");scene.cut_enabled[group]=c.bytes.at(1)==0;follow();return true;}if(c.opcode==0x5e){movie.start(c.bytes.at(1));return true;}if(c.opcode==0x5f){movie.stop();world->restore_background(1);return true;}
                     if(c.opcode==0x13&&c.bytes.at(1)==1){const bool bound=world->bind(c);follow();world->tick_camera(scene,camera,camera_index,automatic_camera);return bound;} // bhCamSet: bhCheckCut(1), then njClipZ, before the next script command
                     if(c.opcode==0x5b){const bool bound=world->bind(c);follow();world->tick_camera(scene,camera,camera_index,automatic_camera);world->control_camera(scene,camera);world->control_lights();return bound;} // event.c:4732-4747 bhInitCamSet: bhCheckCut(1), bhControlCamera, bhControlLight (:4745)
                     if(c.opcode==0xa4){script_stairs.push_back(c);return true;} // bhPlayerKaidanMotion: same stair driver as the interaction path
@@ -1909,4 +1928,12 @@ int main(int argc,char** argv){
          std::cout<<"GPU: build "<<1000.0*g.build/frames<<", upload "<<1000.0*g.upload/frames<<" ("<<g.uploads<<" textures), encode "<<1000.0*g.encode/frames
                   <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
     }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';return 1;}
+}
+int main(int argc,char** argv){
+#if defined(RECVX_IOS)
+    // UIKit besitzt den Hauptthread; SDL ruft die Runtime aus seinem App-Delegate auf.
+    return SDL_UIKitRunApp(argc,argv,recvx_runtime_main);
+#else
+    return recvx_runtime_main(argc,argv);
+#endif
 }

@@ -16,7 +16,8 @@ struct UserPaths {
 };
 // Plattform-Benutzerdatenverzeichnis (Release): die dokumentierten Orte, ohne
 // eigene SDL-Bindung. Windows %APPDATA%\RECVX, macOS
-// ~/Library/Application Support/RECVX, sonst $XDG_DATA_HOME/RECVX.
+// ~/Library/Application Support/RECVX (iOS: dasselbe unter dem HOME des
+// App-Containers), sonst $XDG_DATA_HOME/RECVX.
 std::filesystem::path platform_user_data_dir();
 // true, wenn `data_dir` im Git-Arbeitsbaum dieses Projekts liegt (Wurzel neben
 // data/ mit .git oder CLAUDE.md): die Dev-App uebergibt --data <git-root>/data

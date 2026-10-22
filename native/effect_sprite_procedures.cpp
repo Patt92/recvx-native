@@ -3827,6 +3827,21 @@ void step_efffil(EffectSprite& s,const EffectContext& context,bool&){
     default:break;
     }
 }
+// effsub1.c:145 bhEffBG (bhJumpEffect 93..99) — Hintergrundbild in der Opak-Liste.
+// mode0 0 setzt flg absolut 0x4100001, tex_id = id (Texturgruppe ef_tn[id]), weisse
+// Ecken, UV 0..0.625 x 0..0.46875, Blende 8/6, und faellt in mode0 1 durch: jeden Pass
+// sys->ef_opq. Die Ecken bleiben die Einheitsflaeche aus bhSetEffectTb.
+void step_effbg(EffectSprite& s,const EffectContext&,bool&){
+    switch(s.mode0){
+    case 0:
+        s.flg=0x4100001u;s.tex_id=int(s.id);quad_color(s,0xffffffffu);
+        s.tv[0].u=0;s.tv[0].v=0;s.tv[1].u=0.625f;s.tv[1].v=0;s.tv[2].u=0;s.tv[2].v=0.46875f;s.tv[3].u=0.625f;s.tv[3].v=0.46875f;
+        s.bl_src=8;s.bl_dst=6;s.mode0=1;
+        [[fallthrough]];
+    case 1:queue_opaque(s);break;
+    default:break;
+    }
+}
 // effsub1.c:4826 bhEff021 — Prologbalken (RM_0000 Raumeffekt 12). mode1 != 0 (:4829-4835): sys->cb_flg
 // |= 0x40 (bhControlCinesco/bhDrawCinesco bleiben damit aus, screen.c:225/250; CineSet 1 liest es,
 // event.c:1637), op->func = bhDraw021, Satz in sys->ef_fnc. mode1 0 (:4837-4841): cb_flg &= ~0x40 und
@@ -6118,6 +6133,7 @@ const HandEffectProcedure hand_effect_procedures[]={
     {114,step_eff114},{221,step_eff221},
     {85,step_eff085},{145,step_eff145},{146,step_eff146},{127,step_eff127},{219,step_eff219},{135,step_eff135},{136,step_eff136},
     {20,step_eff2d},{21,step_eff021},{90,step_efffil},{91,step_efffil},{92,step_efffil},
+    {93,step_effbg},{94,step_effbg},{95,step_effbg},{96,step_effbg},{97,step_effbg},{98,step_effbg},{99,step_effbg},
 };
 const std::size_t hand_effect_procedure_count=sizeof(hand_effect_procedures)/sizeof(hand_effect_procedures[0]);
 }

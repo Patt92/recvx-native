@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and optionally verify or package the native port using the loose data tree."""
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import platform
@@ -289,6 +290,127 @@ def reset_foreign_generator(build: Path, generator: str) -> None:
     shutil.rmtree(build)
 
 
+IOS_TARGETS = {'ios': 'iphoneos', 'ios-simulator': 'iphonesimulator'}
+IOS_DEPLOYMENT_TARGET = '15.0'  # std::filesystem ab iOS 13; Info.plist.in MinimumOSVersion gleich halten
+IOS_ICONS = ('AppIcon60x60@2x.png', 'AppIcon60x60@3x.png', 'AppIcon76x76@2x~ipad.png', 'AppIcon83.5x83.5@2x~ipad.png')
+
+
+def is_ios_target(target: str) -> bool:
+    return target in IOS_TARGETS
+
+
+def xcode_developer_dir() -> str:
+    """iOS SDKs ship only with Xcode; an active CommandLineTools directory lacks them."""
+    def has_ios(directory) -> bool:
+        return (Path(directory) / 'Platforms/iPhoneOS.platform').is_dir()
+    explicit = os.environ.get('DEVELOPER_DIR')
+    if explicit:
+        if not has_ios(explicit):
+            raise RuntimeError(f'DEVELOPER_DIR={explicit} has no iOS platform; point it at Xcode.app/Contents/Developer')
+        return explicit
+    try:
+        active = subprocess.check_output(['xcode-select', '-p'], text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        active = ''
+    if active and has_ios(active):
+        return active
+    for application in sorted(Path('/Applications').glob('Xcode*.app'), reverse=True):
+        if has_ios(application / 'Contents/Developer'):
+            return str(application / 'Contents/Developer')
+    raise RuntimeError('iOS builds require Xcode with the iOS platform (xcode-select -p: '
+                       f'{active or "unset"}); install Xcode or set DEVELOPER_DIR')
+
+
+def ios_build_directory(target: str) -> Path:
+    return ROOT / 'build' / ('ios-device' if target == 'ios' else 'ios-simulator')
+
+
+def provisioning_profile(path: Path) -> dict:
+    return plistlib.loads(subprocess.check_output(['security', 'cms', '-D', '-i', str(path)]))
+
+
+def profile_matches_bundle(profile: dict, bundle_id: str) -> bool:
+    """application-identifier is <team>.<bundle id>, optionally ending in a wildcard."""
+    identifier = profile.get('Entitlements', {}).get('application-identifier', '')
+    _, _, pattern = identifier.partition('.')
+    return pattern == bundle_id or (pattern.endswith('*') and bundle_id.startswith(pattern[:-1]))
+
+
+def signing_identity(profile: dict) -> str:
+    """The keychain identity whose certificate the profile lists (SHA-1 of the DER certificate)."""
+    allowed = {hashlib.sha1(certificate).hexdigest().upper() for certificate in profile.get('DeveloperCertificates', [])}
+    listing = subprocess.check_output(['security', 'find-identity', '-v', '-p', 'codesigning'], text=True)
+    for match in re.finditer(r'^\s*\d+\)\s+([0-9A-F]{40})\s+"([^"]+)"', listing, re.M):
+        if match.group(1) in allowed:
+            return match.group(1)
+    raise RuntimeError(f'no keychain identity matches a certificate of the provisioning profile "{profile.get("Name", "?")}"')
+
+
+def finish_ios_app(app: Path, target: str, profile_path: Path | None, bundle_data: bool) -> bool:
+    """Complete Info.plist and icons, then sign. Returns False for an unsigned device build."""
+    executable = app / 'recvx-runtime'
+    if subprocess.check_output(['lipo', '-archs', str(executable)], text=True).split() != ['arm64']:
+        raise RuntimeError('iOS runtime must be arm64-only')
+    # LC_BUILD_VERSION platform 2 = iOS, 7 = iOS-Simulator; guards against a host-SDK fallback.
+    load_commands = subprocess.check_output(['otool', '-l', str(executable)], text=True)
+    platform_id = re.search(r'cmd LC_BUILD_VERSION\n.*?\n\s*platform (\d+)', load_commands, re.S)
+    expected = '2' if target == 'ios' else '7'
+    if not platform_id or platform_id.group(1) != expected:
+        raise RuntimeError(f'{executable} is not built for {IOS_TARGETS[target]} (platform {platform_id.group(1) if platform_id else "?"})')
+    if not bundle_data and (app / 'data').exists():
+        shutil.rmtree(app / 'data')  # stale data from an earlier --ios-bundle-data build would shadow Documents/data
+    info_path = app / 'Info.plist'
+    with info_path.open('rb') as handle:
+        info = plistlib.load(handle)
+    info.update({'CFBundleVersion': FULL_VERSION, 'CFBundleShortVersionString': FULL_VERSION,
+                 'CFBundleSupportedPlatforms': ['iPhoneOS' if target == 'ios' else 'iPhoneSimulator']})
+    for name in IOS_ICONS:  # versioned like the ICNS/ICO, see native/resources/README.md
+        shutil.copy2(ROOT / 'native/resources/ios' / name, app / name)
+    primary = {'CFBundleIconFiles': ['AppIcon60x60'], 'CFBundleIconName': 'AppIcon'}
+    info['CFBundleIcons'] = {'CFBundlePrimaryIcon': primary}
+    info['CFBundleIcons~ipad'] = {'CFBundlePrimaryIcon': {'CFBundleIconFiles': ['AppIcon60x60', 'AppIcon76x76', 'AppIcon83.5x83.5'],
+                                                          'CFBundleIconName': 'AppIcon'}}
+    with info_path.open('wb') as handle:
+        plistlib.dump(info, handle)
+    embedded = app / 'embedded.mobileprovision'
+    if target == 'ios-simulator':
+        embedded.unlink(missing_ok=True)
+        run('codesign', '--force', '--sign', '-', '--timestamp=none', app)
+    elif profile_path is None:
+        embedded.unlink(missing_ok=True)
+        subprocess.run(['codesign', '--remove-signature', str(app)], cwd=ROOT, check=False)
+        print('Device build is UNSIGNED and cannot be installed; pass --ios-profile <file.mobileprovision>.', flush=True)
+        return False
+    else:
+        profile = provisioning_profile(profile_path)
+        if not profile_matches_bundle(profile, info['CFBundleIdentifier']):
+            raise RuntimeError(f'provisioning profile "{profile.get("Name", "?")}" does not cover {info["CFBundleIdentifier"]}; '
+                               'pass the matching --ios-bundle-id')
+        identity = signing_identity(profile)
+        shutil.copy2(profile_path, embedded)
+        with tempfile.NamedTemporaryFile('wb', suffix='.entitlements', delete=False) as handle:
+            plistlib.dump(profile['Entitlements'], handle)
+        try:
+            run('codesign', '--force', '--sign', identity, '--entitlements', handle.name, '--generate-entitlement-der', app)
+        finally:
+            os.unlink(handle.name)
+    run('codesign', '--verify', '--deep', '--strict', app)
+    return True
+
+
+def package_ios_app(app: Path, output: Path) -> None:
+    """IPA = zip archive of Payload/<app>; symlinks and permissions preserved by ditto."""
+    if output.exists():
+        raise RuntimeError(f'package destination already exists: {output}')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as temporary:
+        payload = Path(temporary) / 'Payload'
+        payload.mkdir()
+        run('ditto', app, payload / app.name)
+        run('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', payload, output)
+    print(f'Packaged {output}', flush=True)
+
+
 def is_windows_target(target: str) -> bool:
     return target in WINDOWS_TARGETS
 
@@ -308,7 +430,7 @@ def native_build_directory(target: str) -> Path:
 
 
 def package_directory(target: str, version: str) -> Path:
-    label = {'macos': 'macos-arm64', 'windows': 'windows-x64', 'windows-arm64': 'windows-arm64'}[target]
+    label = {'macos': 'macos-arm64', 'windows': 'windows-x64', 'windows-arm64': 'windows-arm64', 'ios': 'ios-arm64'}[target]
     return ROOT / 'build/packages' / f'{label}-v{version}'
 
 
@@ -341,7 +463,7 @@ def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: in
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64'], default='host')
+    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64', 'ios', 'ios-simulator'], default='host')
     parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8))
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
@@ -354,6 +476,11 @@ def main():
     parser.add_argument('--opengl', choices=['on', 'off'], default='on', help='Build optional OpenGL backend (default: on)')
     parser.add_argument('--verify-runtime', action='store_true', help='Run the opt-in original-data runtime regression suite')
     parser.add_argument('--no-test', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--ios-profile', type=Path, help='iOS device: provisioning profile used for signing (else unsigned)')
+    parser.add_argument('--ios-bundle-id', default='org.recvx.native', help='iOS bundle identifier (default: org.recvx.native)')
+    parser.add_argument('--ios-bundle-data', action='store_true', help='iOS: copy --data into the app bundle (else the app reads Documents/data)')
+    parser.add_argument('--install', action='store_true', help='iOS: install the app on the booted simulator or on --ios-device')
+    parser.add_argument('--ios-device', help='iOS device identifier or name for --install (xcrun devicectl list devices)')
     args = parser.parse_args()
     run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT)
     if not 1 <= args.jobs <= 256:
@@ -364,6 +491,19 @@ def main():
     if not target:
         parser.error('unsupported host')
     data = args.data.resolve()
+    if is_ios_target(target):
+        if platform.system() != 'Darwin':
+            parser.error('iOS builds require a macOS host with Xcode')
+        if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data:
+            parser.error('iOS builds cannot run tests or prepare data; build and verify them with the macOS target')
+        if args.ios_bundle_data and not (data / 'native-data.version').is_file():
+            parser.error(f'--ios-bundle-data requires a prepared data tree (missing {data / "native-data.version"})')
+        if args.package and target != 'ios':
+            parser.error('--package for iOS creates a device IPA; use --platform ios')
+        if args.install and target == 'ios' and not args.ios_device:
+            parser.error('--install on a device needs --ios-device')
+    elif args.ios_profile or args.ios_bundle_data or args.install or args.ios_device:
+        parser.error('--ios-* and --install options apply only to --platform ios or ios-simulator')
     if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.test_regex or args.verify_runtime):
         parser.error('Windows cross-builds cannot run tests; use --platform windows or windows-arm64 without test options, then test on Windows or Wine')
     cmake = find_cmake()
@@ -379,6 +519,34 @@ def main():
         run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs, '--opengl', args.opengl)
         build = cross_build_directory(target)
         print(f'Cross-built Windows {WINDOWS_TARGETS[target]}.', flush=True)
+    elif is_ios_target(target):
+        if os.environ.get('CMAKE_GENERATOR', '').startswith('Xcode'):
+            parser.error('iOS uses a single-config generator: the policy audit needs compile_commands.json, which Xcode does not write')
+        os.environ['DEVELOPER_DIR'] = xcode_developer_dir()
+        build = ios_build_directory(target)
+        run(cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_SYSTEM_NAME=iOS',
+            f'-DCMAKE_OSX_SYSROOT={IOS_TARGETS[target]}', '-DCMAKE_OSX_ARCHITECTURES=arm64',
+            f'-DCMAKE_OSX_DEPLOYMENT_TARGET={IOS_DEPLOYMENT_TARGET}', '-DRECVX_FETCH_SDL2=ON', '-DBUILD_TESTING=OFF',
+            f'-DRECVX_BUILD_VERSION={FULL_VERSION}', '-DRECVX_ENABLE_OPENGL=OFF', f'-DRECVX_IOS_BUNDLE_ID={args.ios_bundle_id}',
+            f'-DRECVX_IOS_BUNDLE_DATA={data if args.ios_bundle_data else ""}')
+        run(cmake, '--build', build, '--config', 'Release', '--parallel', args.jobs)
+        app = build / 'recvx-runtime.app'
+        run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT, '--build-dir', build, '--binary', app / 'recvx-runtime')
+        signed = finish_ios_app(app, target, args.ios_profile.resolve() if args.ios_profile else None, args.ios_bundle_data)
+        if args.package:
+            if not signed:
+                parser.error('--package needs a signed device build; pass --ios-profile')
+            package_ios_app(app, (args.output or package_directory(target, VERSION)) / 'RECVX-Native.ipa')
+        if args.install:
+            if target == 'ios-simulator':
+                run('xcrun', 'simctl', 'install', 'booted', app)
+                print(f'Installed; start with: xcrun simctl launch booted {args.ios_bundle_id}', flush=True)
+            elif not signed:
+                parser.error('--install on a device needs a signed build; pass --ios-profile')
+            else:
+                run('xcrun', 'devicectl', 'device', 'install', 'app', '--device', args.ios_device, app)
+        print(f'Build ready: {app}', flush=True)
+        return
     else:
         if target == 'macos' and platform.system() != 'Darwin':
             parser.error('macOS builds require a macOS host')

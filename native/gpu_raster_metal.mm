@@ -207,7 +207,7 @@ public:
     explicit MetalRaster(id<MTLDevice> device):device_(device){
         queue_=[device_ newCommandQueue];
         MTLCompileOptions* options=[MTLCompileOptions new];
-        if(@available(macOS 15.0,*))options.mathMode=MTLMathModeSafe;
+        if(@available(macOS 15.0,iOS 18.0,*))options.mathMode=MTLMathModeSafe;
         else{
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"

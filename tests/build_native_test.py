@@ -365,5 +365,42 @@ class IsoPreparationTests(unittest.TestCase):
         self.assertEqual(command[command.index('--exporter') + 1], str(host / 'recvx-assets'))
 
 
+class IosTargetTests(unittest.TestCase):
+    def main_error(self, *arguments):
+        error = StringIO()
+        with patch.object(sys, 'argv', ['build_native.py', *arguments]), \
+             patch.object(build_native.platform, 'system', return_value='Darwin'), \
+             patch.object(build_native, 'run'), redirect_stderr(error):
+            with self.assertRaises(SystemExit) as failure:
+                build_native.main()
+        self.assertEqual(failure.exception.code, 2)
+        return error.getvalue()
+
+    def test_profile_application_identifier_covers_bundle(self):
+        profile = lambda identifier: {'Entitlements': {'application-identifier': identifier}}
+        self.assertTrue(build_native.profile_matches_bundle(profile('ABCDE12345.org.recvx.native'), 'org.recvx.native'))
+        self.assertTrue(build_native.profile_matches_bundle(profile('ABCDE12345.org.recvx.*'), 'org.recvx.native'))
+        self.assertTrue(build_native.profile_matches_bundle(profile('ABCDE12345.*'), 'org.recvx.native'))
+        self.assertFalse(build_native.profile_matches_bundle(profile('ABCDE12345.org.other.app'), 'org.recvx.native'))
+        self.assertFalse(build_native.profile_matches_bundle({}, 'org.recvx.native'))
+
+    def test_ios_options_rejected_for_other_platforms(self):
+        self.assertIn('apply only to --platform ios', self.main_error('--platform', 'macos', '--install'))
+
+    def test_ios_rejects_tests_and_simulator_packages(self):
+        self.assertIn('cannot run tests', self.main_error('--platform', 'ios-simulator', '--test'))
+        self.assertIn('device IPA', self.main_error('--platform', 'ios-simulator', '--package'))
+        self.assertIn('--ios-device', self.main_error('--platform', 'ios', '--install'))
+
+    def test_developer_dir_without_ios_platform_fails(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(build_native.os.environ, {'DEVELOPER_DIR': root}):
+            with self.assertRaisesRegex(RuntimeError, 'no iOS platform'):
+                build_native.xcode_developer_dir()
+
+    def test_build_directories_are_separate(self):
+        self.assertEqual(build_native.ios_build_directory('ios').name, 'ios-device')
+        self.assertEqual(build_native.ios_build_directory('ios-simulator').name, 'ios-simulator')
+
+
 if __name__ == '__main__':
     unittest.main()

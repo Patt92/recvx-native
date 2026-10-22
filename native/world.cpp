@@ -805,10 +805,10 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
             if(op==0xd1){work.scale=value;work.sprite.sx=work.sprite.sxb=value.x;work.sprite.sy=work.sprite.syb=value.y;work.sprite.sz=work.sprite.szb=value.z;} /* bhEffSSizeSet (event.c:8941): sxb = sx */
             else{work.offset=value;work.sprite.lox=value.x;work.sprite.loy=value.y;work.sprite.loz=value.z;} /* bhEffLinkOffsetSet (event.c:8998): lox/loy/loz */
             return true;}
-        // bhEffModeSet (0x91): op->mode1 = v1 auf eff[efid[v0]] ohne Rueckfrage - auch fuer Texturhalter (id 30..99/400+,
-        // Prozedur bhEffDmy) und unportierte Kennungen; nur 0x92 (type) bleibt an die portierte Prozedur gebunden.
+        // bhEffModeSet (0x91) und bhEffTypeSet (0xAD, event.c:7345): op->mode1 bzw. op->type = v1 auf eff[efid[v0]]
+        // ohne Rueckfrage - auch fuer Texturhalter (id 30..99/400+, Prozedur bhEffDmy) und unportierte Kennungen.
         if(op==0x91){work.sprite.mode1=v.u8(2);return true;}
-        if(!supported_effect_sprite(work.sprite.id))return false;work.sprite.type=v.u8(2);entity(4,index).type=work.sprite.type;return true;}
+        work.sprite.type=v.u8(2);entity(4,index).type=work.sprite.type;return true;}
     // event.c:1919 bhEffectSet: bhSetEffect(v1, &{0,0,0}, NULL, 0) — erster
     // freier Platz des geteilten eff[512]-Satzes. Der Befehl legt den Arbeitssatz
     // auch dann an, wenn seine Prozedur noch nicht portiert ist; das wird wie

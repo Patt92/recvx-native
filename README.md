@@ -104,7 +104,7 @@ brought up separately from the shared gameplay code.
 | **Windows x64** | Build support and the Direct3D 11 backend are present; validated Windows releases are planned. |
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
 | **Linux** | Native build with OpenGL selected by default; Linux driver/hardware validation remains open. |
-| **iOS/iPadOS** | Planned native builds using Metal. |
+| **iOS/iPadOS** | Build support for arm64 devices and the simulator with Metal (`./build.sh --platform ios` / `ios-simulator`); runtime on iOS hardware not yet validated, no touch controls. |
 | **Apple TV** | Planned native build using Metal. |
 
 These are native platform targets, not plans to ship an emulator with the game.
