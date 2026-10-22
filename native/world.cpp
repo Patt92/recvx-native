@@ -4604,6 +4604,18 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
      // effect.c:929: jede eingereihte Zeichenfunktion in Listenreihenfolge, auch ohne
      // Viereck, weil sie den Blendzustand fuer die naechste hinterlaesst.
      std::pair<unsigned,unsigned> fnc_blend{8,6};
+     // Host-Komfortfunktion: ausschliesslich vorab erkannte Texturfehler
+     // eines Custom-Zeicheneintrags isolieren, niemals Simulationsausnahmen.
+     const auto append_custom_checked=[&](Scene& target,const EffectSprite& sprite,const SceneCamera& camera,
+         const std::map<unsigned,std::pair<unsigned,unsigned>>& atlas,std::pair<unsigned,unsigned>* blend,bool reflected_pass){
+         try{recvx::append_custom_effect(target,sprite,camera,atlas,blend,reflected_pass);}
+         catch(const EffectTextureError& error){
+             render_warnings_.insert("Custom effect draw omitted: "+std::string(error.what()));
+             // Der bekannte Blend-Ausgang bleibt fuer nachfolgende Eintraege erhalten.
+             if(blend&&sprite.fnc_exit_src>=0&&sprite.fnc_exit_dst>=0)
+                 *blend={unsigned(sprite.fnc_exit_src),unsigned(sprite.fnc_exit_dst)};
+         }
+     };
      if(!reflected)afterimage_alpha_running_=afterimage_alpha_before_; // npSetAllMatAlphaColor bleibt ueber beide Aufrufe stehen
      std::vector<const EffectSprite*> afterimages;
      // Linien ohne eigenes Blendpaar (bhEff308Drw) zeichnen mit dem Register, das der
@@ -4624,14 +4636,14 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
                  else{auto own=work.sprite;const unsigned key=kEffectOwnTextureList|unsigned(&work-sprites_.data());
                      bases[key]={unsigned(scene.textures.size()),unsigned(work.texture_list->size())};scene.textures.insert(scene.textures.end(),work.texture_list->begin(),work.texture_list->end());
                      for(auto& q:own.quads)if(q.category==kEffectOwnTextureList)q.category=key;
-                     append_custom_effect(scene,own,effect_camera,bases,&fnc_blend,reflected);}
+                     append_custom_checked(scene,own,effect_camera,bases,&fnc_blend,reflected);}
              }else{
              bool enemy_textured=false;
              for(const auto& q:work.sprite.quads)if(q.textured&&(q.category&0x80000000u)){enemy_textured=true;
                  if(!bases.count(q.category)){const unsigned index=q.category&0x7fffffffu;const Model* model=nullptr;for(const auto& m:models_)if(m.kind==1&&m.index==index){model=&m;break;}
                      if(!model||model->object.textures.size()<=q.frame){unbound_enemy_.insert("bhEff307Drw: mlwP->texP[4] des Werks fehlt");break;}
                      bases[q.category]={unsigned(scene.textures.size()),unsigned(model->object.textures.size())};scene.textures.insert(scene.textures.end(),model->object.textures.begin(),model->object.textures.end());}}
-             if(!enemy_textured||std::all_of(work.sprite.quads.begin(),work.sprite.quads.end(),[&](const EffectSprite::Quad& q){return !q.textured||bases.count(q.category);}))append_custom_effect(scene,work.sprite,effect_camera,bases,&fnc_blend,reflected);
+             if(!enemy_textured||std::all_of(work.sprite.quads.begin(),work.sprite.quads.end(),[&](const EffectSprite::Quad& q){return !q.textured||bases.count(q.category);}))append_custom_checked(scene,work.sprite,effect_camera,bases,&fnc_blend,reflected);
              }
          }
          // bhDraw136 in der ef_fnc-Liste (Raum 1-00/2, 5-82, 9-32/1) zeichnet hier.

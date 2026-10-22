@@ -2597,6 +2597,28 @@ static void sand_particle2(){
 int main(int argc,char** argv){
     try{
         _Make_SinTable();
+        {
+            // Host-Fehlergrenze: ein spaeter ungueltiges Quad darf weder
+            // Teilgeometrie noch einen veraenderten Blendzustand hinterlassen.
+            EffectSprite sprite;sprite.id=260;
+            EffectSprite::Quad quad;quad.textured=true;quad.category=42;quad.frame=0;
+            sprite.quads.push_back(quad);quad.frame=2;sprite.quads.push_back(quad);
+            Scene out;SceneCamera camera;
+            std::map<unsigned,std::pair<unsigned,unsigned>> bases{{42,{0,1}}};
+            std::pair<unsigned,unsigned> blend{8,6};
+            bool rejected=false;
+            try{append_custom_effect(out,sprite,camera,bases,&blend);}
+            catch(const EffectTextureError& error){
+                rejected=true;
+                check(std::string(error.what()).find("effect=260")!=std::string::npos,"texture warning lacks effect identity");
+            }
+            check(rejected&&out.triangles.empty()&&out.textures.empty(),"invalid atlas frame must fail before scene mutation");
+            check(blend==std::pair<unsigned,unsigned>(8,6),"failed texture validation changed blend state");
+            rejected=false;
+            try{append_custom_effect(out,sprite,camera,{},&blend);}
+            catch(const EffectTextureError&){rejected=true;}
+            check(rejected&&out.triangles.empty(),"missing atlas must use the recoverable texture error");
+        }
         cartridge_case();sign_plate();blinking_lamp();fire();panel();smoke();puff002();
         muzzle_weapon229();flame352();effect_call_clip();weapon_flash_call_clip();explosion_punch_through();punch_filter_rgb();punch_lazy_cache();
         effsub0_producers();effsub0_sprites();effsub0_batch_b();effsub1_batch();group2_producers();group2_sprites();group3_services();group4_custom_draw();group5_rest();group6_h_vertices();group7_backface_and_eyes();group8_gas_wall();group9_snow();group10_afterimages();acid_generator();afterimage_color_contract();head_burst_effects();effsub2_second_batch();sand_particle2();

@@ -242,3 +242,21 @@ Metal and D3D11 remain available.
 Headless runs execute every simulation step and render only the requested last
 frame. Output files are never overwritten. Diagnostic positioning does not
 prove a natural playthrough. Replays start with `0 new_game`.
+
+### Render warnings (host diagnostic, not original behaviour)
+
+When a custom effect entry references a texture that is missing or a frame
+outside its atlas, the runtime omits exactly that draw entry instead of ending
+the game. Only this pre-checked texture error (`EffectTextureError`) is caught;
+simulation errors still stop the runtime. The simulation, the effect work and
+the blend state that the entry would have left are unchanged.
+
+- A small red `!` appears in the top-right corner and stays until the program
+  ends, also across room changes.
+- Each distinct warning is printed once to stderr and appended to
+  `runtime-warnings.log` in the user-data directory
+  (`<unix seconds> frame=<n> <room>: <detail>`), naming effect id, texture
+  category, frame and atlas size.
+
+The original game has no such fallback. A warning is a port defect to fix, not
+an accepted state.

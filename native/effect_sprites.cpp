@@ -1401,6 +1401,16 @@ void initialize_effect_sprite(EffectSprite& s,const EffectSpawn& e){
 // slot whose flg has neither allocation bit set. Missing tail entries are zeroed.
 int original_effect_slot(const std::vector<unsigned>& flags){for(unsigned i=0;i<512;++i)if(i>=flags.size()||!(flags[i]&3u))return int(i);return -1;}
 void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCamera& camera,const std::map<unsigned,std::pair<unsigned,unsigned>>& bases,std::pair<unsigned,unsigned>* fnc_blend,bool mirror){
+    // Host-Fehlergrenze: alle Texturverweise vor dem ersten Szenenschreibvorgang
+    // pruefen. So kann der Besitzer genau diesen Zeicheneintrag auslassen,
+    // ohne halbe Geometrie zu behalten oder die Simulation zu veraendern.
+    for(const auto& q:sprite.quads){
+        if(!q.textured)continue;
+        const auto base=bases.find(q.category);
+        const std::string detail="effect="+std::to_string(sprite.id)+", category="+std::to_string(q.category)+", frame="+std::to_string(q.frame);
+        if(base==bases.end())throw EffectTextureError("original custom-effect texture missing: "+detail);
+        if(q.frame>=base->second.second)throw EffectTextureError("original custom-effect texture frame outside its atlas: "+detail+", count="+std::to_string(base->second.second));
+    }
     // Vor der ef_fnc-Schleife haben alle Zeichenpaesse 8/6 zurueckgestellt (effect.c:1268/1416).
     const std::pair<unsigned,unsigned> entry=fnc_blend?*fnc_blend:std::pair<unsigned,unsigned>{8,6};
     // DrawEff5SnowRect (effsub5.c:5804): Wind unter cam.mtx, einmal je Aufruf.
@@ -1433,7 +1443,7 @@ void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCam
         unsigned texture=0;
         if(q.textured){
             const auto base=bases.find(q.category);if(base==bases.end())throw std::runtime_error("original custom-effect texture missing");
-            if(q.frame>=base->second.second)throw std::runtime_error("original custom-effect texture frame outside its atlas");
+            if(q.frame>=base->second.second)throw std::runtime_error("original custom-effect texture frame outside its atlas: effect="+std::to_string(sprite.id)+", category="+std::to_string(q.category)+", frame="+std::to_string(q.frame)+", count="+std::to_string(base->second.second));
             texture=base->second.first+q.frame;
         }
         EffectSprite quad;quad.id=302;quad.flg=q.world_space?0u:0x100000u;quad.tv=q.vertices;quad.bl_src=int(q.source);quad.bl_dst=int(q.destination);

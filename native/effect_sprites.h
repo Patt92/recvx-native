@@ -6,9 +6,16 @@
 #include <functional>
 #include <memory>
 #include <map>
+#include <stdexcept>
 #include "collision.h"
 #include "enemies/enemy_work.h"
 namespace recvx {
+// Host-Diagnose: nur fehlende/ungueltige Zeichentexturen sind abfangbar.
+// Simulationsfehler, Speicherfehler und andere Ausnahmen bleiben fatal.
+class EffectTextureError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
 struct EffectModelWork;
 // EFF5SNOWRECT (effsub5.h:50): die Schneebox von bhEff219; Aufbau in effect_sprites_internal.h.
 struct EffectSnow;

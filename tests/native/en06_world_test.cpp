@@ -78,6 +78,37 @@ int main(int argc,char** argv){try{
         f.no_gaps("Flug");
     }
     {
+        // Host-Negativtest: absichtlich falscher Texturframe, keine Aenderung
+        // an Spieldaten. Der Zeichenfehler darf die Simulation nicht beenden.
+        Fixture f(data);f.release();
+        EffectSprite* dust=nullptr;
+        for(int i=0;i<600&&!dust;++i){
+            f.tick();
+            for(const auto* s:f.effects(260))if(!s->quads.empty()){
+                dust=const_cast<EffectSprite*>(s);break;
+            }
+        }
+        check(dust,"Warnpfad: kein zeichnender Mottenstaub erreicht");
+        check(f.world.render_warnings().empty(),"Regulaerer Mottenstaub erzeugt bereits eine Darstellungswarnung");
+        const auto saved=dust->quads;
+        const auto flags=dust->flg;
+        const int hp=f.inv.hp;
+        for(auto& q:dust->quads)if(q.textured)q.frame=999999u;
+        Scene out;f.world.append(out,{},f.scene.cameras.at(0));
+        check(!f.world.render_warnings().empty(),"Ungueltiger Texturframe wurde nicht als Warnung gemeldet");
+        bool identified=false;
+        for(const auto& warning:f.world.render_warnings())
+            if(warning.find("effect=260")!=std::string::npos&&warning.find("frame=999999")!=std::string::npos)identified=true;
+        check(identified,"Warnung nennt Effekt und fehlerhaften Frame nicht");
+        check(dust->flg==flags&&f.inv.hp==hp,"Zeichenfehler hat Effektaktivitaet oder Spieler-HP veraendert");
+        const auto warning_count=f.world.render_warnings().size();
+        Scene again;f.world.append(again,{},f.scene.cameras.at(0));
+        check(f.world.render_warnings().size()==warning_count,"Identischer Zeichenfehler erzeugt doppelte Warnungen");
+        dust->quads=saved;
+        for(int i=0;i<30;++i)f.tick();
+        check(f.world.render_warnings().size()==warning_count,"Weiterlaufen nach Zeichenfehler erzeugt neue Warnungen");
+    }
+    {
         // Griff (BR00 :398 -> NG00 :1079) mit Anfuehrer-PlayerControl (:2112) und Mottenei (:1161).
         Fixture f(data);auto& m=f.work(3);auto* p=recvx_en06_exp0(&m);f.release();
         const auto* leader=static_cast<RECVX_ENEMY_WORK*>(m.exp2);

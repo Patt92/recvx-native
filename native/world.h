@@ -191,6 +191,8 @@ public:
     bool damage(unsigned index,int weapon,int amount,unsigned comb_flg,NJS_POINT3 position,NJS_POINT3 direction,int hit_joint=-1);
     // Original en01 routines the damage/death port called while they are still unbound (reported, never hidden).
     const std::set<std::string>& unbound_enemy_routines()const{return unbound_enemy_;}
+    // Host-Warnungen fuer isoliert ausgelassene Zeicheneintraege, keine Simulationsluecken.
+    const std::set<std::string>& render_warnings()const{return render_warnings_;}
     // effect.c:268/effsub3.c AllocOworkOne: naechster freier eff[512]-Platz ab `start`, genullt und mit
     // flg 2 vorgemerkt (-1 = voll). Die Erzeuger (bhSetRapEff, bhSetEffectTb) schreiben flg 1 selbst.
     int reserve_effect_slot(unsigned start=0);
@@ -884,6 +886,7 @@ private:
     std::array<Context,16> contexts_{};
     std::map<std::pair<unsigned,unsigned>,WorldEntity> entities_;
     mutable std::set<std::string> unbound_enemy_; // const owP/pose services report their gaps too
+    mutable std::set<std::string> render_warnings_; // Host-Diagnose fuer isolierte Darstellungsfehler
     // Plaetze, deren letzter Zeichenpass das Rueckseitentor flg 0x20000 geschlossen
     // hat (effect.c:1391 op->stflg |= 0x10). bhControlEffect traegt sie im naechsten
     // Bild in stflg ein; der Zeichenpass selbst ist const.

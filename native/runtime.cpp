@@ -1718,7 +1718,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
            Escape (Cancel UND Pause, controls.ini) im Speicherbildschirm den Pausezweig und
            erreichte den Abbruch der Slotliste nie. */
         auto pause_allowed=[&]{return world&&!frontend.active()&&!game_over.active()&&!debug.active()&&!transition_pending&&!typewriter.active()&&!computer.active()&&!menu.active&&!dialog.active()&&!movie.active()&&!stairs.active&&!world->player_scripted&&!world->player_hidden&&!(events&&(events->flags[5][0]&0x40004u));};
-        auto draw=[&](unsigned frame,std::size_t controllers=0){if(game_over.active()&&ui){if(game_over.phase()==0){compose();image.draw(scene,view_camera(),wireframe);}game_over.draw(image,*ui);debug.draw(image,*ui);return;}if(frontend.active()&&ui){frontend.draw(image,*ui,controllers);debug.draw(image,*ui);return;}
+        auto draw_content=[&](unsigned frame,std::size_t controllers){if(game_over.active()&&ui){if(game_over.phase()==0){compose();image.draw(scene,view_camera(),wireframe);}game_over.draw(image,*ui);debug.draw(image,*ui);return;}if(frontend.active()&&ui){frontend.draw(image,*ui,controllers);debug.draw(image,*ui);return;}
             /* Schreibmaschinen-Slotauswahl: eigenes Bild, solange die Aufgabe laeuft. */
             if(typewriter.active()&&ui){ui->draw_typewriter(image,typewriter);debug.draw(image,*ui);return;}
             /* sp_evt.c: bhCheckSubTask leaves sp_flg 0x30, so neither the room
@@ -1736,6 +1736,35 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             /* game.c:111: bhDrawScreenFade nach bhAllDrawModel, nicht waehrend der Statusbildschirm-Task den Schirm hat. */
             if(!door_game_stopped&&!menu.screen()&&!computer.active()&&screen_fade.visible())screen_fade.draw(image.canvas(),image.width(),image.height());
             movie.draw(image);if(ui){ui->draw(image,inventory,menu,dialog,frame);box_menu.draw(image,*ui,inventory,menu);if(events){ui->draw_event_timer(image,*events);computer.draw(image,*ui,*events);}if(pause_active)ui->draw_pause(image,controllers!=0);}if(door_game_stopped)door.draw(image);if(ui)debug.draw(image,*ui);};
+        // Host-Diagnose: Warnung bleibt bis zum Programmende sichtbar, auch nach
+        // Raumwechseln. Keine Ausnahmegrenze um Simulation oder gesamten Renderer.
+        std::set<std::string> logged_render_warnings;
+        bool render_warning_seen=false;
+        auto draw=[&](unsigned frame,std::size_t controllers=0){
+            draw_content(frame,controllers);
+            if(world)for(const auto& warning:world->render_warnings()){
+                render_warning_seen=true;
+                const auto detail=rooms.name(room_index)+": "+warning;
+                if(!logged_render_warnings.insert(detail).second)continue;
+                const auto seconds=std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+                const auto path=user_paths.file("runtime-warnings.log");
+                std::cerr<<"Render warning: "<<detail<<"; log: "<<path<<'\n';
+                std::ofstream log(path,std::ios::app);
+                if(log){log<<seconds<<" frame="<<frame<<" "<<detail<<'\n';log.flush();}
+                if(!log)std::cerr<<"Could not write render warning log: "<<path<<'\n';
+            }
+            if(!render_warning_seen||image.discarding())return;
+            // Kleines rotes Ausrufezeichen oben rechts, ohne Font-/Assetabhaengigkeit.
+            const int right=image.width()-8;
+            auto pixel=[&](int x,int y,std::uint32_t color){
+                if(x>=0&&x<image.width()&&y>=0&&y<image.height())
+                    image.canvas()[std::size_t(y)*image.width()+x]=color;
+            };
+            for(int y=7;y<26;++y)for(int x=right-8;x<right;++x)pixel(x,y,0xff180000u);
+            for(int y=9;y<19;++y)for(int x=right-6;x<right-2;++x)pixel(x,y,0xffff3030u);
+            for(int y=21;y<24;++y)for(int x=right-6;x<right-2;++x)pixel(x,y,0xffff3030u);
+        };
         // game.c:289-296 bhCheckCut eines Takts, der Task 7 (bis game.c:58) durchlaufen hat; Aufruf am Anfang des Folgetakts.
         auto check_cut=[&](){if(!camera_check_pending)return;camera_check_pending=false;if(world){follow();world->tick_camera(scene,camera,camera_index,automatic_camera);}};
         // Auftraege an Spieler, Inventar und Event aus Gegner- und Effektpass (plp->spd, PEXP0_F, plp->stflg,
