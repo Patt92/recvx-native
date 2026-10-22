@@ -89,6 +89,6 @@ int main(){try{
     video.set_renderer(RenderBackend::OpenGL);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL&&video.settings().quality==quality_before,"OpenGL renderer roundtrip lost quality");
     video.set_renderer(RenderBackend::Software,false);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL,"temporary renderer switch persisted");
     std::filesystem::remove(video_path);
-    front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.active()&&!front.settings(),"back row moved");
+    for(unsigned i=Frontend::video_row;i<Frontend::back_row;++i)front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.active()&&!front.settings(),"back row moved");
     std::cout<<"Third-person camera mod: defaults, persistence, chase/aim pose, smoothing, scripted handover and menu row verified.\n";return 0;
 }catch(const std::exception& e){std::cerr<<"Third-person test failed: "<<e.what()<<'\n';return 1;}}

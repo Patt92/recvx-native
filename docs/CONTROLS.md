@@ -72,6 +72,12 @@ is saved atomically to controls.ini and applied immediately. Confirm/Cancel
 conflicts swap the previous binding so the menu remains operable. Restoring
 defaults restores both device pages. The connected-controller count is shown.
 
+**Sound mode** switches Stereo/Mono immediately and persists in `audio.ini`
+under the same user-data root. `--audio-config <path>` selects an independent
+configuration for tests. This global setting survives room changes and game
+loads; snapshots do not replace it. Movie cancellation still follows the
+original per-movie cancel/fade flags.
+
 Alternatively, edit `controls.ini` and restart. Release packages keep it in
 `%APPDATA%\RECVX` on Windows or `~/Library/Application Support/RECVX` on macOS.
 Development builds use the project directory. Do not edit the internal app

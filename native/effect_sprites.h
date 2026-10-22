@@ -103,7 +103,9 @@ struct EffectSprite {
     // (effsub1b.c:1618) fuehrt darin die Sperr-/Blinkstufen und die Ziel-/Restmengen der drei Tanks.
     std::array<std::int8_t,4> hide{};std::array<std::int8_t,8> clp_jno{};
     struct Vertex {float x=0,y=0,z=0,u=0,v=0;std::uint32_t col=0;};
-    std::array<Vertex,4> tv{{{-1,-1,0},{1,-1,0},{-1,1,0},{1,1,0}}};
+    // effect.c:506-532 bhSetEffectTb legt Eckpunkte und UVs gemeinsam an:
+    // (-1,-1)/(1,-1)/(-1,1)/(1,1) mit (0,0)/(1,0)/(0,1)/(1,1).
+    std::array<Vertex,4> tv{{{-1,-1,0,0,0},{1,-1,0,1,0},{-1,1,0,0,1},{1,1,0,1,1}}};
     // Ein Zeichenaufruf einer eigenen Zeichenfunktion (sys->ef_fnc, op->func): als
     // Billboard um center (njUnitRotPortion) oder mit absoluten Welt-Eckpunkten
     // (world_space); category/frame = Texturgruppe und Bild, textured false =

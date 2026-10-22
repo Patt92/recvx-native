@@ -2,6 +2,7 @@
 #include "input.h"
 #include "third_person.h"
 #include "video_settings.h"
+#include "audio_settings.h"
 namespace recvx {
 // TitleCall: original adv.c TitleCall started (play ADV entry 3, white flash and
 // fade to black). NewGame follows once the fade is complete (Mode 17 -> -1).
@@ -69,8 +70,10 @@ public:
     ThirdPersonCamera* third_person=nullptr; // optional camera mod row in the settings screen
     static constexpr unsigned third_person_row=action_count+3;
     VideoConfig* video=nullptr; // host render quality row
-    static constexpr unsigned video_row=action_count+4,back_row=action_count+5,row_count=action_count+6;
+    static constexpr unsigned video_row=action_count+4,audio_row=action_count+5,back_row=action_count+6,row_count=action_count+7;
     std::function<void(const VideoSettings&)> video_changed;
+    AudioConfig* audio=nullptr;
+    std::function<void(unsigned)> audio_changed;
     static constexpr unsigned title_rows=3;          // CursorMax[0] with ExtraFlag 0: LOAD GAME, NEW GAME, OPTION
     static constexpr unsigned quit_row=title_rows;   // host QUIT row (deviation)
     static constexpr unsigned load_game_cursor=0,new_game_cursor=1,option_cursor=2;

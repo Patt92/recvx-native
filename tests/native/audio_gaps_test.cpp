@@ -39,6 +39,12 @@ static bool reported(const AudioMixer& m,const char* text){for(const auto& u:m.u
 int main(int argc,char** argv){try{
     check(argc==2,"data directory required");const std::filesystem::path root=std::filesystem::u8path(argv[1]);
     const unsigned event_voice=12; // MIDI DefEvt[0] = 7 -> Hoststimme 12 (midi_host_voice)
+    // SetupSeGenericParm -> ExPlaySe selects COMMON for every SE number below 256, without a room bank.
+    {AudioMixer m(root);m.play_player_voice(2);
+     check(m.active(7)&&m.played.back()=="COMMON/0002"&&m.unavailable.empty(),"CallPlayerVoice(2) must resolve COMMON bank 0");
+     const auto output=m.mix(4000);check(std::any_of(output.begin(),output.end(),[](auto n){return n!=0;}),"COMMON voice must reach the actual mixer");
+     m.load_room_sounds(0,2);check(m.play_room_sound(0,3,4)&&m.played.back()=="COMMON/0003","room load must retain the shared COMMON SE bank");
+     check(!m.play_room_sound(0,11,4)&&reported(m,"outside the TSNDDRV table"),"COMMON requests must retain original program bounds");}
     // --- Set3dSoundFlag / SetUserSoundVolume Typ 7 (Ereignis-MIDI) -------------------------------
     {AudioMixer m(root);m.load_room_sounds(0,2);m.set_sound_monitor({0,0,0},0,{});
      check(m.event_sound(0,0x206)&&m.active(event_voice),"RM_0002 Ereignis-SE 0x206 nicht gestartet");

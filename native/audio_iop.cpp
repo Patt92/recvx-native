@@ -81,13 +81,13 @@ void IopSound::load_se_clip(unsigned bank,unsigned program,std::shared_ptr<const
     // 420 * ADPCM bytes / rate ATicks: 16 bytes per 28 samples.
     e.length=std::uint32_t(420u*std::uint32_t(clip->frames()*16/28))/std::max<unsigned>(1,clip->rate);e.clip=std::move(clip);
 }
-std::vector<std::shared_ptr<const PcmClip>> IopSound::resolve(int port,unsigned program,unsigned key){
+std::vector<std::shared_ptr<const PcmClip>> IopSound::resolve(int port,unsigned program,unsigned key,unsigned velocity){
     if(port>=int(bgm_ports)){const auto& t=tq_[unsigned(port)-bgm_ports].table;if(program<t.size()&&t[program].clip)return {t[program].clip};}
     const auto bank=port_bank(port);if(!bank)return {};
-    const auto id=std::make_tuple(static_cast<const void*>(bank.get()),program,key);
+    const auto id=std::make_tuple(static_cast<const void*>(bank.get()),program,key,velocity);
     auto found=clip_cache_.find(id);
     if(found==clip_cache_.end()){std::vector<std::shared_ptr<const PcmClip>> clips;
-        try{for(auto& c:decode_system_note(*bank,program,int(key)))clips.push_back(std::make_shared<const PcmClip>(std::move(c)));}
+        try{for(auto& c:decode_system_note(*bank,program,int(key),velocity))clips.push_back(std::make_shared<const PcmClip>(std::move(c)));}
         catch(const std::exception& e){unavailable.push_back("MODHSYN note-on port "+std::to_string(port)+" program "+std::to_string(program)+" key "+std::to_string(key)+": "+e.what());}
         found=clip_cache_.emplace(id,std::move(clips)).first;}
     return found->second;
@@ -103,6 +103,7 @@ void IopSound::process(){
 }
 bool IopSound::run(const IopCommand& c){
     switch(c.kind){
+    case IopCommand::OutputMode:mono_=c.mode==0;return true; // TSNDDRV 0x42 -> MODHSYN 0x1f88
     case IopCommand::SeReq:tq_request(c);return true;
     case IopCommand::SeChg:tq_change(c);return true;
     case IopCommand::SeCancel:tq_cancel(c);return true;
@@ -368,6 +369,7 @@ void IopSound::hs_note_on(unsigned port,unsigned ch,unsigned key,unsigned veloci
         if(v<0)continue;
         auto& w=voice_[v];
         w.state=0x208;w.port=int(port);w.channel=int(ch);w.key=key;w.velocity=velocity;w.id=id;w.prio=std::uint16_t(prio);w.envx=0;w.type=0;w.clip=clip;w.c75=0;w.pan=C.pan;w.bend=C.bend;
+        w.mono_pan=mono_;
         ++P.count;
         C.list[0].push_front(v);w.chlist=0;       // 0x63d0 (0x3264)
         pending_[w.core].push_front(v);w.list=1;  // 0x6418 (0x320c)
@@ -405,7 +407,7 @@ void IopSound::hs_pedal(unsigned port,unsigned ch,unsigned value){
 void IopSound::hs_pan(unsigned port,unsigned ch,unsigned pan){
     // 0x0ce4 for id 127 / any key: every voice of the channel takes pan - 64 (below -63: -63); the channel CC10 stays.
     const int offset=std::max(int(pan)-64,-63);
-    for(auto& l:hsyn_[port].channel[ch].list)for(const int v:l)voice_[v].pan=offset;
+    for(auto& l:hsyn_[port].channel[ch].list)for(const int v:l){voice_[v].pan=offset;voice_[v].mono_pan=mono_;}
 }
 void IopSound::hs_voice_bend(unsigned port,unsigned ch,int offset){
     // 0x0f1c for id 127 / any key: every voice of the channel takes the bend offset (0x4098); channel +38 stays.
@@ -417,7 +419,7 @@ void IopSound::hs_control(unsigned port,unsigned ch,unsigned cc,unsigned value){
     case 7:C.cc7=std::uint8_t(sony_controller_scale(value));break;   // 0x978
     case 11:C.cc11=std::uint8_t(sony_controller_scale(value));break; // 0x9d4
     case 10:{const int offset=std::max(int(value)-64,-63); // 0x0c18: only a change moves the voices
-        if(offset!=C.pan){C.pan=offset;for(auto& l:C.list)for(const int v:l)voice_[v].pan=offset;}break;}
+        if(offset!=C.pan){C.pan=offset;for(auto& l:C.list)for(const int v:l){voice_[v].pan=offset;voice_[v].mono_pan=mono_;}}break;}
     case 64:hs_pedal(port,ch,value);break;
     case 120:hs_all_sound_off(port,ch);break;
     case 123:hs_all_notes_off(port,ch);break;
@@ -434,7 +436,7 @@ void IopSound::hs_control(unsigned port,unsigned ch,unsigned cc,unsigned value){
 void IopSound::hs_message(unsigned port,const Message& m){
     auto& C=hsyn_[port].channel[m.channel];
     switch(m.kind){
-    case Message::NoteOn:if(!m.b){hs_note_off(port,m.channel,m.a,255);break;}hs_note_on(port,m.channel,m.a,m.b,m.id,C.program<0?std::vector<std::shared_ptr<const PcmClip>>{}:resolve(int(port),unsigned(C.program),m.a));break;
+    case Message::NoteOn:if(!m.b){hs_note_off(port,m.channel,m.a,255);break;}hs_note_on(port,m.channel,m.a,m.b,m.id,C.program<0?std::vector<std::shared_ptr<const PcmClip>>{}:resolve(int(port),unsigned(C.program),m.a,m.b));break;
     case Message::ClipOn:hs_note_on(port,m.channel,m.a,m.b,m.id,{m.clip});break;
     case Message::NoteOff:hs_note_off(port,m.channel,m.a,m.id);break;
     case Message::Control:hs_control(port,m.channel,m.a,m.b);break;
@@ -447,7 +449,8 @@ void IopSound::hs_message(unsigned port,const Message& m){
 }
 SonyLevels IopSound::levels(const Voice& w)const{
     const auto& C=hsyn_[w.port].channel[w.channel];
-    return sony_voice_levels_offset(w.clip->sony_volume,w.velocity,C.cc7,C.cc11,int(w.clip->pan),w.pan);
+    // 0x4534 returns with both factors 128 in mono, including a bank's own pan.
+    return sony_voice_levels_offset(w.clip->sony_volume,w.velocity,C.cc7,C.cc11,w.mono_pan?64:int(w.clip->pan),w.mono_pan?0:w.pan);
 }
 void IopSound::update_hw(int v){
     auto& w=voice_[v];auto& h=hw_[v];if(!w.clip)return;

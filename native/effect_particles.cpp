@@ -366,6 +366,13 @@ void EffectParticles::clear_event(unsigned slot)
     impl_->free_slot(int(slot));
 }
 
+void EffectParticles::clear_all()
+{
+    std::fill(std::begin(impl_->used),std::end(impl_->used),(unsigned char)0);
+    impl_->works.assign(eff_slots,Work{});
+    impl_->pools.assign(eff_slots,Pool{});
+}
+
 // effsub3.c:1008 — bhSetEffParticleMk2: gleiche Felder, mtn_attr aus src_col und
 // mtn_no direkt aus dst_col, ohne die 0x20000000-Verknuepfung.
 int EffectParticles::spawn_mk2(unsigned type,const ParticleLink& link,NJS_POINT3 offset,NJS_POINT3 direction,unsigned source_color,unsigned destination_color)

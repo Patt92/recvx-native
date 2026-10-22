@@ -52,11 +52,23 @@ bhPlayerPoisonCk, bhNext) am Original neu belegt (02d12c1). Danach: Exm-Tor wie 
 nur auf dem Spieler (Walker). Offen: ranking.c ControlRanking.
 [Bericht](archived/work/eventvm-audit-20261021.md). **Kein Commit** fuer den zweiten Teil.
 
-**IOP-Modell: Stimmenpool, ATick, SE-Timer (2026-10-21, Arbeitsbaum):** native/audio_iop.* bildet TSNDDRV-
+**Audio und IOP-Modell (Arbeitsbaum):** native/audio_iop.* bildet TSNDDRV-
 Befehlsthread, TQ-Warteschlange, MODMIDI-Sequencer, MODHSYN (2x24 Stimmen, Raub, Key-On-Stapel) und die 48
 SPU2-Stimmen nach; der Mixer fuehrt nur noch EE-Handles und ADX/Host-PCM. Audiotests auf die originale
 IOP-Latenz umgestellt (Req am sdSysServer, Ton im ATick, Stopp zwei Bilder spaeter). Hostpolitik: ersetzte
-Bank stoppt ihren Port. **Kein Commit.**
+Bank stoppt ihren Port. COMMON-Bank0, SoundMode/OPTION/Persistenz, Film-ADX-Freigabe,
+Cancel-Gates/Screen-/Audio-Fade, quantisierte ADX-Pegel, Blockskala/Loop-Spielzeit und
+HD-Mehrschicht-/Velocity-Auswahl korrigiert. Gezielt 5/5 Tests; fuenf Rueckmutationen werden
+von den Wirkungstests erkannt. RM_7250 spielt COMMON/0002 im Gegnerlauf; OPTION und Filmstart/-Skip
+in der nativen Runtime geprueft. **Kein Audio-100-%-Nachweis:** Float-ADX, restliche Synthese-/SQ-
+Zweige, Transmission und Ausgabetakt offen. Windows-x64-Crossbuild und Policy-Binaerpruefung PASS; vier Audiotests sowie
+OPTION-/Raum-/Filmpruefungen unter Wine PASS. Frontend-Nachbarsuite unter Wine weiterhin rot: identischer Fehler `hint confirmation failed`
+auch im separat gebauten HEAD 47b4a22 (keine Erwartung abgeschwaecht).
+[Mechanismen](docs/AUDIO.md), [Restauftrag](work/audio-port.md), [Pruefartefakte](build/validation/audio-port/).
+Build macOS arm64; installierte App/Paket nicht ersetzt. 2026-10-22 gegen Original nachgeprueft
+(PlayStartMovieEx/PlayMovieMain, MovieTypeDef, SetSoundModeEx, bhClearEffect, bhSetEffectTb-UVs,
+pxb vor Linkpunkt, PS2_Render_Tex_Sub) und auf main committet; zwei Tests an die neue OPTION-Zeile
+bzw. die mitgezeichnete Raumgeometrie angepasst (Gegenprobe rot), volle Suite 223/223.
 
 **MIDI-Pegel und MidiHandle[2] (2026-10-21, Arbeitsbaum):** Sequenznoten rechnen das MODHSYN-Register
 (MODMIDI-CC7 x Portlautstaerke, HsMsg-Pan je 240-Hz-ATick, Pitchbend jetzt ausgewertet, Kanalzustand je Port

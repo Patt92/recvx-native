@@ -18,6 +18,6 @@ PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate);
 PcmClip decode_system_sound(const std::vector<std::uint8_t>& bank,unsigned program,int key=-1);
 // MODHSYN note-on (.text 0x5f90, split loop 0x6098..0x64a0): one clip per voice the note keys, i.e. per
 // split whose key range holds `key`, in split-table order; empty when no voice starts.
-std::vector<PcmClip> decode_system_note(const std::vector<std::uint8_t>& bank,unsigned program,int key);
+std::vector<PcmClip> decode_system_note(const std::vector<std::uint8_t>& bank,unsigned program,int key,unsigned velocity=127);
 PcmClip decode_adx(const std::vector<std::uint8_t>& bytes);
 }

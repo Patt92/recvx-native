@@ -15,8 +15,16 @@ game clock (1,600 frames per tick).
 - BGM control follows `sdfunc.c`: `bhBgmOn`/`bhBgmOnEx` start immediately;
   `bhBgmOn2`/`bhBgmOff2` request a change executed by the door sequence
   (SoundCommand 2) and `Com_ExecRoomFadeIn`. The same track does not restart.
-  Volumes follow `AdxVolTbl`, fades follow `RequestAdxFadeFunction2`.
+  Volumes follow `AdxVolTbl` → the original 1,000-entry `ps2rna_dbtbl`
+  (8-bit amplitude / 256), rather than a continuous exponential curve.
+  Evidence: ELF 0x3432e0, `ps2rna_sndcbf` 0x2fe7c4..0x2fe7fc;
+  TSNDDRV `psmmix_calc_vol` 0xd18c..0xd194. Fades follow `RequestAdxFadeFunction2`.
 - Resources without a loop marker end naturally.
+- ADX block scale is `(header & 0x1fff) + 1`, as in the original decoder
+  (ELF 0x2f1820/0x2f1830). Play time counts consumed source samples across
+  loop jumps; natural end retains total time, explicit stop resets it.
+  `ADXT_GetTimeSfreq2` 0x2f6ce0 and `adxsjd_decexec_end` 0x2f5088..0x2f50b0
+  establish that the sample counter is independent of the decoder's loop address.
 
 `recvx-audio <input.adx> <new.wav>` exports PCM for comparison.
 
@@ -45,9 +53,12 @@ game clock (1,600 frames per tick).
   voice a separate note layer with Key-On/Key-Off/core selection). Splits
   whose Sset index is past the last entry, Ssets without samples, Smpl indices
   past the last entry, or Vagi 0xffffffff are skipped as in the original.
-  Sset/Smpl velocity ranges are 1..127 in every bank and pass every Note-On
-  velocity; other ranges are reported. Voice allocation and stealing are
-  handled by the IOP model described below.
+  Each Sset sample index is visited in order (0x615c..0x646c). Inclusive
+  Sset velocity limits (+1/+2) precede this loop; each Smpl has its own
+  limits (+2/+4 & 0x7f). The productive resolver includes velocity in its
+  cache key. Synthetic bank/sequence tests exercise multiple layers, boundary
+  velocities and repeated keys with different velocities through MODMIDI/MODHSYN.
+  Voice allocation and stealing are handled by the IOP model described below.
 - Room packet key: `stage * 1000 + room * 10 + case`. The order Event_init →
   `RoomSoundCase` → `RequestRoomSoundBank` follows `system.c`.
 - System sounds use `CallSystemSe`; player voices use
@@ -65,6 +76,32 @@ Missing programs are reported as `audio_unavailable` or
 `sequence_unavailable`; no replacement sounds are inserted. Replacement bank:
 `mods/audio/system/COMMON.MLT`; replacement packet:
 `mods/audio/MULTSPQ1/<packet>.bin`.
+
+All SE callers can resolve bank 0 from COMMON independently of room packets;
+`SetupSeGenericParm` (`sdfunc.c:913`) selects it for numbers below 256.
+The original player-voice request 2 now reaches this bank in the native
+RM_7250 enemy run, without a special room or resource branch.
+
+## Sound output mode
+
+OPTION exposes the original Stereo/Mono setting (`sdc.c:97`). It is global
+configuration in `audio.ini` under the shared user-data directory;
+`--audio-config` overrides that path for tests. Room loads and snapshots do
+not replace it. The native UI remains the documented host OPTION screen.
+
+- EE mode 0 selects driver mode 1 (stereo); EE mode 1 selects driver mode 0
+  (mono), confirmed by ELF 0x28ef40/0x28ef5c. TSNDDRV command 0x42
+  (0x7da8..0x7de4) reaches MODHSYN's output mode (0x1f88).
+- MODHSYN mono sets both voice pan factors to 128 when pan is next calculated
+  (0x4534..0x454c). The existing calculated factors survive the mode setter;
+  new notes, changed CC10 and HsMsg pan apply the new mode. EE SE changes force
+  pan 64 (`ps2_sg_sd.c:1737`); the requested pan state remains intact.
+- ADX stereo-to-mono averages the two source channels before output pan
+  (`ADX_DecodeSteFloatAsMono`, ELF 0x2f1da0..0x2f1ddc). Native PCM mixing
+  carries this routing; the original float predictor/rounding remains an open
+  decoder dependency, so bit-exact ADX mono output is not certified.
+- Movie mono duplicates the left PCM channel (`ps2_MovieFunc.c:602`),
+  independently of the ADX average. Reverb is not folded after the mix.
 
 ## Spatial SE parameters
 
@@ -309,19 +346,43 @@ python3 tools/cook_movies.py --data data
 
 FFmpeg is used only for this conversion, not by the runtime.
 
+Film start stops BGM, stops VOICE, then sleeps both ADX streams, following
+`PlayStartMovieEx` (`sdfunc.c:3170`). Film stop/end wakes the streams and
+clears their fade functions (`adxwrap.c:465/497`); stopped tracks do not resume.
+Stopping movie PCM preserves the separate player SE handle that shares host
+number 7; the movie owner releases only its native PCM channel.
+`MovieTypeDef[22]` controls cancellation (bit 0x80) and cancel fade (bit 0x40),
+with the original MovieType override bits. Repeated cancel does not restart
+the fade. `PlayMovieMain` uses the one shared ScreenFade and cb_flg bit 2:
+check completion before control, decrement audio volume each pass, stop in
+the following pass. `SetMwVolume` maps to the linear block level
+`(unsigned)(32.8 * (volume + 999)) & 0xffff`, /32768, not ADX decibels
+(`ps2_sfd_mw.c:263`, `ps2_MovieFunc.c:642`). Pre-play loading/task timing
+and drive-tray/reset handling remain open.
+
 ## Open work
 
-The audio count in [PORT_STATUS.md](PORT_STATUS.md) covers its 24 ledger
-mechanisms; it does not certify complete audio equivalence. Remaining gaps:
+The audio count in [PORT_STATUS.md](PORT_STATUS.md) covers the explicitly
+listed ledger mechanisms; it does not certify complete audio equivalence.
+Remaining gaps are tracked in [the active audio work](../work/audio-port.md):
 
-- Multi-layer HD programs, phase-inverted program pan, and SPU interpolation
-  (ADSR and reverb have been ported).
-- SQ SysEx and live controller modulation of playing notes.
+- Phase-inverted program pan, ADSR key-follow, exclusive groups, velocity
+  curves/crossfade, amplitude LFO and unrepresented Vagi/loop-address cases.
+- SQ SysEx and the remaining live controller/NRPN/output-routing handlers.
+  CC7/CC11/pan/pitch updates already reach active voices; this is not a blanket
+  absence of all live controller modulation.
 - The TSNDDRV loader thread remains open. Replacing a bank during active
   voices follows host policy: stop the port.
-- ADX volume-to-output curve and velocity/range fade paths of other bank
-  types. `GetAdxStatus` PREP has no native equivalent because clips load
-  synchronously.
+- ADX original float predictor/coefficient/rounding and stream scheduling.
+  The previous integer predictor is still used; the original residual scale
+  and output gain tables are now corrected. `GetAdxStatus` PREP has no native
+  equivalent because clips load synchronously.
+- Linear SPU interpolation and predecoded ADPCM predictor history at loop
+  jumps remain unverified against the original output. Reverb lacks reference
+  PCM acceptance. Audio production still depends on the 30-Hz host loop;
+  late game frames can underrun the output queue.
+- Film pre-play/cancel task scheduling and ranking audio's missing ranking
+  owner. BATTLE GAME stays disabled under the existing user decision.
 - Indoor ambient: the original stops BG sounds only through `bhBGSeOff`/
   `bhBGSeOff2` or `CheckSpecialBank`. Any further behavior of `TSNDDRV.IRX`
   remains unclear.

@@ -26,7 +26,7 @@ using AudioBank=std::shared_ptr<const std::vector<std::uint8_t>>;
 
 // One EE sndque entry (ps2_snddrv.c). vol/pan/pitch < 0: the CheckCmdReq/Chg bit of that field is clear.
 struct IopCommand {
-    enum Kind:std::uint8_t {SeReq,SeChg,SeCancel,SeAllStop,BgmReq,BgmStop,BgmChg,Rev,SetIopData};
+    enum Kind:std::uint8_t {SeReq,SeChg,SeCancel,SeAllStop,BgmReq,BgmStop,BgmChg,Rev,SetIopData,OutputMode};
     Kind kind=SetIopData;
     unsigned port=0,channel=0,program=0;
     int vol=-1,pan=-1,pitch=-1;
@@ -73,12 +73,14 @@ public:
     struct SeInfo {std::uint32_t offset=0,length=0xffff;std::uint16_t rate=0;std::uint8_t attr=0,note=0;std::shared_ptr<const PcmClip> clip;}; // clip: synthetic test entry
     const std::vector<SeInfo>& se_table(unsigned port)const{return tq_.at(port).table;}
     bool rpc_waiting()const{return wait_>0;}
+    bool mono()const{return mono_;}
 private:
     // ---- SPU2 ----
     struct Hw {std::shared_ptr<const PcmClip> clip;double position=0,advance=1;SpuEnvelope env;bool endx=false,ended=false;std::uint16_t voll=0,volr=0;};
     std::array<Hw,voice_count> hw_{};
     // ---- MODHSYN ----
-    struct Voice {unsigned core=0,index=0;std::uint16_t state=0,envx=0,prio=0;std::uint8_t type=255,c75=0;int port=-1,channel=-1,id=255,pan=0,bend=0,list=0,chlist=-1;unsigned key=0,velocity=0;std::shared_ptr<const PcmClip> clip;};
+    struct Voice {unsigned core=0,index=0;std::uint16_t state=0,envx=0,prio=0;std::uint8_t type=255,c75=0;int port=-1,channel=-1,id=255,pan=0,bend=0,list=0,chlist=-1;unsigned key=0,velocity=0;bool mono_pan=false;std::shared_ptr<const PcmClip> clip;};
+    bool mono_=false; // MODHSYN 0x1f88, consumed when 0x4534 recalculates a voice's pan factors
     struct Channel {std::uint8_t cc7=128,cc11=128,nrpn_msb=255,nrpn_lsb=255;int pan=0,bend=0,program=-1;bool pedal=false;std::array<std::deque<int>,3> list;};
     struct Message {enum Kind:std::uint8_t {NoteOn,NoteOff,Control,Program,Bend,Pan,VoiceBend,ClipOn} kind=NoteOn;unsigned channel=0,a=0,b=0;int id=255;std::shared_ptr<const PcmClip> clip;};
     struct Port {std::array<Channel,16> channel;unsigned count=0,limit=48,prio=0,master=256;int bank=-1;bool se=false;std::vector<Message> queue;};
@@ -109,8 +111,8 @@ private:
     void voice_tick();         // 0x47d8
     void update_hw(int v);     // 0x3ef8 pitch and 0x40f0 VOLL/VOLR of an active voice
     SonyLevels levels(const Voice& v)const;
-    std::vector<std::shared_ptr<const PcmClip>> resolve(int port,unsigned program,unsigned key);
-    std::map<std::tuple<const void*,unsigned,unsigned>,std::vector<std::shared_ptr<const PcmClip>>> clip_cache_;
+    std::vector<std::shared_ptr<const PcmClip>> resolve(int port,unsigned program,unsigned key,unsigned velocity);
+    std::map<std::tuple<const void*,unsigned,unsigned,unsigned>,std::vector<std::shared_ptr<const PcmClip>>> clip_cache_;
     AudioBank port_bank(int port)const;
     // ---- MODMIDI ----
     struct Seq {

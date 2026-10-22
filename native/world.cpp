@@ -2137,6 +2137,11 @@ bool RoomWorld::explode_effect(NJS_POINT3 position){
 void RoomWorld::clear_effects(){
     for(unsigned slot=0;slot<sprites_.size();++slot){sprites_[slot]=SpriteWork{};sprites_[slot].sprite.flg=0;sprites_[slot].hidden=true;sprites_[slot].queued=false;entity(4,slot)=WorldEntity{};}
     effect_backface_.clear(); // stflg 0x10 je Platz, Teil des genullten Satzes
+    // effect.c:155 npSetMemoryL(eff, sizeof(eff)/4, 0): die Partikelnutzlasten liegen im
+    // Original im selben eff-Speicher und sind nach der Freigabe ebenfalls leer. Nativ
+    // haelt EffectParticles sie getrennt; ohne diesen Aufruf bleiben Werk und Pool eines
+    // freigegebenen Platzes mit ihrer alten Zeichenmitgliedschaft stehen.
+    particles_.clear_all();
 }
 void RoomWorld::clear_event_effects(){
     // effect.c:166 bhClrEff_YT
@@ -2755,10 +2760,33 @@ std::optional<RoomWorld::SmallScreenPass> RoomWorld::small_screen_pass(const Sce
 void RoomWorld::commit_small_screen(std::vector<std::uint32_t> pixels,unsigned width,unsigned height){
     if(render_texture_slots_.empty())return;const auto& s=sprites_.at(render_texture_slots_[0]).sprite;
     auto& list=effect_textures_[unsigned(s.tex_id)];if(list.empty())list.resize(1);
-    SceneTexture t;t.width=width;t.height=height;t.pixels=TexturePixels(std::move(pixels));list[0]=std::move(t);
-    // screen.c:1007-1012. PS2_Render_Tex_Sub (ps2_dummy.c:2563) kopiert das Bild mit halber Groesse
-    // und y -16 in den Texturspeicher; dieser GS-Kopierversatz ist nicht nachgebildet (Luecke).
-    if(stage_no_!=7)rendertex_init_=false;else unbound_enemy_.insert("bhDrawSmallScreenRenderTexture: Stufe 7 njRenderTextureNumG(2)");
+    SceneTexture t;
+    if(stage_no_==7){
+        // screen.c:1006 njRenderTextureNumG(2): StoreRenderTex (ps2_loadtim2.c:187) liest das Bild
+        // 512x512 ab TBP 0 in die Textur mit globalem Index 2 = sys->ren_gid des ersten Monitors
+        // (system.c:252, effsub1.c:6956), also eff[ren_idx[0]]. Zeilen ab 480 liegen im Original im
+        // naechsten Bildpuffer (FBP 150); bhEff111 tastet hoechstens v = 0.9335 ab und liest sie nie.
+        t.width=width;t.height=height;t.pixels=TexturePixels(std::move(pixels));
+    }else{
+        // screen.c:1010-1012 PS2_Render_Tex_Sub (ps2_dummy.c:2563): ein GS-Sprite (Kontext 2, FST,
+        // TEX1 linear) kopiert UV (0.5,0.5)-(640.5,480.5) des Bildpuffers (TBP 0, TBW 10) nach
+        // XY (0,-16)-(320,240) in FRAME_2 476 (TBW 4, 256 breit). Die Monitortextur liest genau dort:
+        // ps2_dummy.c:1634 TEX0 TBP (190+48)*64 = 476*32, TBW 4, TW/TH 8 = 256x256. Je Pixel steigt u um
+        // 640/320 = 2 (Texel 2x, ohne Mischanteil) und v um 480/256 = 1.875 (30/16, Mischung zweier
+        // Zeilen in Sechzehnteln). Zeilen ab 240 schreibt die Kopie nicht; bhEff111 tastet sie nie ab.
+        if(width<512||height<480)throw std::runtime_error("PS2_Render_Tex_Sub: Renderziel kleiner als 512x480");
+        constexpr unsigned size=256;std::vector<std::uint32_t> out(std::size_t(size)*size,0u);
+        for(unsigned y=0;y<240;++y){
+            const unsigned v16=(y+16u)*30u,row=v16>>4,f=v16&15u; // v - 0.5 in 1/16 Texel
+            const std::uint32_t* r0=&pixels[std::size_t(row)*width];const std::uint32_t* r1=&pixels[std::size_t(std::min(row+1u,height-1u))*width];
+            for(unsigned x=0;x<size;++x){
+                const std::uint32_t a=r0[2*x],b=r1[2*x];std::uint32_t c=0;
+                for(unsigned k=0;k<32;k+=8)c|=((((a>>k)&255u)*(16u-f)+((b>>k)&255u)*f)>>4)<<k;
+                out[std::size_t(y)*size+x]=c;}}
+        t.width=size;t.height=size;t.pixels=TexturePixels(std::move(out));
+        rendertex_init_=false;
+    }
+    list[0]=std::move(t);
 }
 // Ninja-2D-Polygone der ef_fnc-Anzeigen (ps2_NaDraw2D.c): Schirmlage in 640x480, Blend 8/6,
 // Punktfilter. Die Texelangabe wird (u*16 + Versatz) per vitof12 zu (u*16 + Versatz)/4096 und
@@ -3543,6 +3571,10 @@ void RoomWorld::tick_after_player(){
             // resize sprites_, and higher new slots run in this same pass.
             auto dispatch=[&](){
                 auto& work=sprites_[i];
+                // effect.c:794-800: pxb/pyb/pzb halten die Lage VOR der Linktransformation
+                // (:812 njCalcPoint) und vor dem Prozeduraufruf fest. Leser wie bhEff_E03_Acid
+                // messen die Strecke pxb -> px und brauchen deshalb die Ankerbewegung darin.
+                work.sprite.pxb=work.sprite.px;work.sprite.pyb=work.sprite.py;work.sprite.pzb=work.sprite.pz;
                 if(work.sprite.id==1){tick_shadow(i);return;}
                 if(work.sprite.id==258){tick_e03_shadow(i);return;}
                 if(work.sprite.id==304){tick_ry_shadow(i);return;}
@@ -3584,8 +3616,6 @@ void RoomWorld::tick_after_player(){
                     work.sprite.parent=work.sprite.parent_slot>=0&&std::size_t(work.sprite.parent_slot)<sprites_.size()?&sprites_[std::size_t(work.sprite.parent_slot)].sprite:nullptr;
                     std::optional<BoneMatrix> link_node;if(work.link&&work.link<=4)link_node=link_matrix(work.link-1,work.index,work.node);
                     work.sprite.link_matrix=link_node?link_node->value:nullptr;
-                    // effect.c:794-796: pxb/pyb/pzb = Lage des Vorbildes vor dem Prozeduraufruf.
-                    work.sprite.pxb=work.sprite.px;work.sprite.pyb=work.sprite.py;work.sprite.pzb=work.sprite.pz;
                     {auto control=effect_context();control.defer_custom_draw=true; // Zeichenteil: draw_stateful_effects
                      step_effect_sprite(work.sprite,control,&work.queued);}
                     work.sprite.link_matrix=nullptr;
@@ -4515,9 +4545,15 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
         if(work.hidden||!work.thl||((s.flg|s.stflg)&0x1000000u)||s.tex_id<0||((mirror&0x4000u)&&(s.mdflg&0x40u)))continue; // effect.c:1581
         const auto* list=effect_texture_list(work);const std::size_t frame=(s.stflg&0x20u)?std::size_t(s.tex_id)+s.ani_ct:s.ani_ct;
         if(!list||frame>=list->size()||(*list)[frame].pixels.empty()){unbound_enemy_.insert("bhDrawThlEffect3D: ef_tn[tex_id] ohne gezeichnetes Bild (Inhalt vor dem ersten Rendercut undefiniert)");continue;}
-        if((s.flg&0x80u)&&!(s.flg&0x200000u)){unbound_enemy_.insert("bhDrawThlEffect3D: verlinkter Satz (owP[lkono].mtx)");continue;}
         const auto& e=entities_.at({4,i});
-        NJS_MATRIX root;njUnitMatrix(&root);njTranslate(&root,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&root,e.angles[0],e.angles[1],e.angles[2]);
+        // effect.c:1611-1621: ohne flg 0x80 oder mit 0x200000 Einheit + px/ax, sonst
+        // lkwkp->mlwP->owP[lkono].mtx + lox/loy/loz und ax/ay/az (wie bhDrawTrsEffect3D :1338).
+        const bool linked=(s.flg&0x80u)&&!(s.flg&0x200000u);
+        std::optional<BoneMatrix> parent;if(linked&&work.link&&work.link<=4)parent=link_matrix(work.link-1,work.index,work.node);
+        if(linked&&!parent){unbound_enemy_.insert("bhDrawThlEffect3D: lkwkp->mlwP->owP[lkono].mtx ohne nativen Knoten");continue;}
+        NJS_MATRIX root;
+        if(linked){std::copy_n(parent->value,16,root);njTranslate(&root,s.lox,s.loy,s.loz);njRotateXYZ(&root,s.ax,s.ay,s.az);}
+        else{njUnitMatrix(&root);njTranslate(&root,e.transform.position.x,e.transform.position.y,e.transform.position.z);njRotateXYZ(&root,e.angles[0],e.angles[1],e.angles[2]);}
         std::copy_n(root,16,work.effect_root.value); // effect.c:1616, vor Billboard/Skalierung
         NJS_MATRIX basis;njUnitMatrix(&basis);
         if(s.flg&0x100000u){ // effect.c:1627-1643: njUnitRotPortion, njRotateZ(az), unter gm_flg 0x4000 mr_pl-Drehungen
@@ -4525,11 +4561,22 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
             njRotateY(&basis,-effect_camera.angles[1]);njRotateX(&basis,-effect_camera.angles[0]);njRotateZ(&basis,-effect_camera.angles[2]);njScale(&basis,1,-1,-1);njRotateZ(&basis,e.angles[2]);
             if(reflected){const NJS_PLANE& plane=effect_mirror_plane();if(plane.vx!=0.0f)njRotateY(&basis,32768);if(plane.vy!=0.0f)njRotateX(&basis,32768);}
         }else njRotateXYZ(&basis,e.angles[0],e.angles[1],e.angles[2]); // njRotateEx(&op->ax, 0)
+        if(linked&&!(s.flg&0x100000u)){std::copy_n(root,16,basis);basis[3]=basis[7]=basis[11]=0;basis[12]=basis[13]=basis[14]=0;basis[15]=1;} // njMultiMatrix(NULL, op->mtx) ohne Billboard
+        const NJS_POINT3 origin=linked?NJS_POINT3{root[12],root[13],root[14]}:NJS_POINT3{e.transform.position.x,e.transform.position.y,e.transform.position.z};
         std::array<SceneVertex,4> vertices;
         for(unsigned k=0;k<4;++k){NJS_POINT3 p{s.tv[k].x*work.scale.x,s.tv[k].y*work.scale.y,s.tv[k].z*work.scale.z};njCalcVector(&basis,&p,&p);
-            p.x+=e.transform.position.x;p.y+=e.transform.position.y;p.z+=e.transform.position.z;vertices[k]={p,s.tv[k].u,s.tv[k].v,{}};}
+            p.x+=origin.x;p.y+=origin.y;p.z+=origin.z;vertices[k]={p,s.tv[k].u,s.tv[k].v,{}};}
         if(s.flg&0x20000u){const bool culled=backface_culled(vertices,effect_camera,reflected?&scene:nullptr);if(culled)effect_backface_.insert(i);else effect_backface_.erase(i);if(culled)continue;}
-        if(s.flg&0x2000000u){unbound_enemy_.insert("bhDrawThlEffect3D: flg 0x2000000 Blickwinkel-ocol (effect.c:1679)");}
+        // effect.c:1679-1690 flg 0x2000000: ocol aller Ecken aus dem Blickwinkel, (0,0,-1) um ax/ay gedreht,
+        // it = |vc1 . cam.v|, pt = int(128 cos(int(182.04445 * 360 it) & 0xFFFF)) + 127, ocol = pt in allen Bytes.
+        // Das Original schreibt tvp[].ocol dauerhaft; nur bhEff111 reiht sich in ef_thl ein und setzt das Bit
+        // nie (RM_1050/RM_7030), ein spaeteres Loeschen mit Nachwirkung ist daher unerreichbar.
+        std::uint32_t fog_color=s.fog_color;
+        if(s.flg&0x2000000u){const auto context=effect_context();
+            NJS_MATRIX m;njUnitMatrix(&m);njRotateXYZ(&m,s.ax,s.ay,0);NJS_POINT3 vc0{0,0,-1.0f},vc1{};njCalcVector(&m,&vc0,&vc1);
+            const float it=std::fabs(vc1.x*context.camera_view.x+vc1.y*context.camera_view.y+vc1.z*context.camera_view.z);
+            const std::uint32_t pt=std::uint32_t(int(128.0f*njCos(int(182.04445f*(360.0f*it))&0xFFFF))+127);
+            fog_color=pt|(pt<<8)|(pt<<24)|(pt<<16);}
         const bool trans=!(s.bl_src==0&&s.bl_dst==0);
         if(trans){color_blending_mode(0,s.bl_src);color_blending_mode(1,s.bl_dst);}
         const auto register_=trans?color_blending_alpha():0ull;
@@ -4541,7 +4588,7 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
             tr.color=gs(s.tv[0].col);tr.texture_color_divisor=128;tr.texture=std::uint16_t(texture);tr.textured=true;tr.camera_mask=false;tr.world_lit=true;
             // ps2_NaDraw.c:443 njDrawTextureSub3DH: XYZF2.F = 128 fest je Eckpunkt (kein scr.fog), FOGCOL = ocol (:469);
             // der Monitor (bhEff111) ist deshalb aus jeder Entfernung halb mit ocol gemischt, auch ohne Raumnebel.
-            tr.depth_write=true;tr.fogged=false;tr.fog_fixed=true;tr.fog_fixed_value=128.f;tr.fog_color_set=true;tr.fog_color=s.fog_color&0xffffffu;
+            tr.depth_write=true;tr.fogged=false;tr.fog_fixed=true;tr.fog_fixed_value=128.f;tr.fog_color_set=true;tr.fog_color=fog_color&0xffffffu;
             tr.blend=trans?SceneBlend::Ninja:SceneBlend::Opaque;if(trans)tr.blend_register=register_;
             tr.texture_filter=(s.flg&0x20000000u)?SceneTextureFilter::Point:SceneTextureFilter::Linear; // effect.c:1586
             scene.triangles.push_back(tr);}

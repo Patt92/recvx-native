@@ -440,8 +440,8 @@ GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mo
     messages_=read_asset_file(data/"files/SYSMES.ALD",4*1024*1024);bind_item_names(messages_); /* sys->mes_ip fuer bhDispItemName im Textaufbau */BinaryView v(messages_);system_table_=8+v.u32(0);v.require(system_table_,4);
 }
 
-void GameUi::label(SoftwareRenderer& image,const std::string& str,int x,int y,float scale,std::uint32_t color)const{
-    Message message;for(unsigned char c:str)message.push_back(c=='\n'?0xff00:c==' '?0xff01:c>=32&&c<140?c-32:31);message.push_back(0xffff);text(image,message,x,y,scale,color,true);
+void GameUi::label(SoftwareRenderer& image,const std::string& str,int x,int y,float scale,std::uint32_t color,float yscale)const{
+    Message message;for(unsigned char c:str)message.push_back(c=='\n'?0xff00:c==' '?0xff01:c>=32&&c<140?c-32:31);message.push_back(0xffff);text(image,message,x,y,scale,color,true,-1,yscale);
 }
 const SceneTexture& GameUi::title_texture(unsigned index){load_title();return title_.at(index);}
 int GameUi::label_width(const std::string& str,float scale)const{float width=0;for(unsigned char c:str){const unsigned glyph=c==' '?0xff01:c>=32&&c<140?c-32:31;width+=(glyph==0xff01?14.f:(glyph<std::size(FontSz)?FontSz[glyph]:28))*scale;}return int(width);}

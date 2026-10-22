@@ -208,7 +208,24 @@ check(!(vm.flags[10][0]&0x20000),"file request retained after close");std::cout<
   check(world.bind(cmd({0x71,0})),"bhEffPop 0x71 unbound");
   check(slots()==pushed,"bhEffPop did not restore the whole original eff[512] set");
   std::cout<<"Original effect-script surface passed: 0x2c allocates the shared eff[512] slot and names the missing procedure, 0x70/0x71 restore the set.\n";
-  std::cout<<"Original blood script commands passed: 0x56/0x58 write the pool, 0x4e starts original effect 5 at the work joint and rejects an absent work.\n";}
+  std::cout<<"Original blood script commands passed: 0x56/0x58 write the pool, 0x4e starts original effect 5 at the work joint and rejects an absent work.\n";
+  // effect.c:153-156 bhClearEffect nullt eff[512] vollstaendig; die Partikelnutzlast der
+  // Blutlache liegt im Original in diesem Speicher. Nach der Freigabe darf deshalb weder
+  // eine Nutzlast noch ihre alte Zeichenmitgliedschaft uebrig bleiben, auch nicht nach dem
+  // naechsten Steuerpass. Der Game-over-Einstieg ruft genau diese Freigabe (gameover.c:278).
+  {check(world.blood_particles()>0,"Freigabepruefung ohne vorher erzeugte Blutlache");
+   SceneCamera camera;camera.perspective=8192;
+   // Die Fixture zeichnet daneben Raum, Objekte und Gegner; gemessen wird deshalb der Anteil,
+   // den die Freigabe wegnimmt, und dass er im naechsten Pass nicht zurueckkehrt.
+   const auto triangles=[&]{Scene draw;world.append(draw,{},camera);return draw.triangles.size();};
+   const auto before=triangles();
+   world.clear_effects();
+   check(world.blood_particles()==0,"bhClearEffect liess die Partikelnutzlast stehen");
+   const auto cleared=triangles();
+   check(cleared<before,"bhClearEffect liess die alte Zeichenmitgliedschaft stehen");
+   world.tick();
+   check(world.blood_particles()==0&&triangles()==cleared,"freigegebene Blutlache kehrt im naechsten Pass zurueck");
+   std::cout<<"Original bhClearEffect passed: die Partikelnutzlast der Blutlache und ihr Zeichenanteil sind nach der Freigabe und dem naechsten Pass leer.\n";}}
  if(!soft_failures.empty()){for(const auto& f:soft_failures)std::cerr<<"FAIL "<<f<<'\n';std::cerr<<soft_failures.size()<<" inventory expectation(s) failed; the remaining bindings passed.\n";return 1;}
  return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -188,7 +188,8 @@ int main(int argc,char** argv){try{
   std::cout<<"Room change masks gm_flg (system.c:185); RM_1080 Luger door camera returns after the message.\n";}
  // RM_1050 Monitor (Raumeffekt 1, bhEff111 effsub1.c:6927): scd0 schaltet ihn mit ev_flg 0x92 per
  // 0x91 01 00 live; der Effekt fordert ueber gm_flg 0x200 bhDrawSmallScreenRenderTexture (screen.c:920)
- // an, das Schnitt 6 (Steve) ohne Spieler in eine 512x512-Textur zeichnet; bhDrawThlEffect3D zeigt sie.
+ // an, das Schnitt 6 (Steve) ohne Spieler 512x512 zeichnet und per PS2_Render_Tex_Sub in die 256x256-Textur
+ // kopiert; bhDrawThlEffect3D zeigt sie.
  {Room r(data,"RM_1050",[](EventVm& vm,RoomWorld& w){w.bind_player_collision(vm);vm.set_flag(1,0x92,0);});
   for(unsigned t=0;t<3;++t)r.tick();
   check(std::none_of(r.vm.pending_bindings.begin(),r.vm.pending_bindings.end(),[](const EventCommand& c){return c.opcode==0x91;}),"RM_1050 bhEffModeSet on bhEff111 unbound");
@@ -200,9 +201,28 @@ int main(int argc,char** argv){try{
   SoftwareRenderer target(512,512);target.set_supersampling(1);target.set_render_threads(1);target.draw_screen(screen,rt->camera,rt->dist);
   check(target.covered_pixels()>1000,"cut 6 rendered nothing into the monitor texture");
   r.world.commit_small_screen(target.pixels(),512,512);
+  // PS2_Render_Tex_Sub (ps2_dummy.c:2563) + Monitortextur ps2_dummy.c:1634 (TBP 476*32, 256x256): Texel (x,y)
+  // fuer y < 240 ist Bildpixel (2x, 30 + 1.875 y) mit Zeilenmischung in Sechzehnteln.
+  {const auto* tex=r.world.effect_group_textures(111);check(tex&&!tex->empty()&&(*tex)[0].width==256&&(*tex)[0].height==256,"monitor texture is not the 256x256 PS2_Render_Tex_Sub target");
+   const auto src=target.pixels();const auto& got=(*tex)[0].pixels;
+   for(unsigned y:{0u,1u,7u,120u,239u})for(unsigned x:{0u,3u,128u,255u}){
+     const unsigned v16=(y+16u)*30u,row=v16>>4,f=v16&15u;const std::uint32_t a=src[row*512u+2u*x],b=src[std::min(row+1u,511u)*512u+2u*x];
+     std::uint32_t want=0;for(unsigned k=0;k<32;k+=8)want|=((((a>>k)&255u)*(16u-f)+((b>>k)&255u)*f)>>4)<<k;
+     check(got[std::size_t(y)*256u+x]==want,"monitor texel differs from the PS2_Render_Tex_Sub mapping");}}
   Scene shown=r.scene;const auto base=shown.triangles.size();r.world.append(shown,{},view);
-  unsigned monitor=0;for(std::size_t i=base;i<shown.triangles.size();++i){const auto& t=shown.triangles[i];if(t.textured&&t.texture<shown.textures.size()&&shown.textures[t.texture].width==512&&t.blend==SceneBlend::Opaque)++monitor;}
+  const auto& copy=(*r.world.effect_group_textures(111))[0].pixels; // Szenentextur mit dem Inhalt der Kopie
+  unsigned monitor=0;for(std::size_t i=base;i<shown.triangles.size();++i){const auto& t=shown.triangles[i];if(t.textured&&t.texture<shown.textures.size()&&shown.textures[t.texture].width==256&&shown.textures[t.texture].pixels==copy&&t.blend==SceneBlend::Opaque)++monitor;}
   check(monitor==2,"bhDrawThlEffect3D monitor quad with the render texture missing");
+  // effect.c:1679-1690 flg 0x2000000 (in den Daten nie gesetzt, Zweig fuer sich geprueft): ocol aus dem Blickwinkel.
+  {auto& mon=const_cast<EffectSprite&>(*r.world.effect_state(1));const auto saved=mon.flg;mon.flg|=0x2000000u;
+   Scene angled=r.scene;const auto b2=angled.triangles.size();r.world.append(angled,{},view);mon.flg=saved;
+   const auto c=r.world.effect_context();NJS_MATRIX m;njUnitMatrix(&m);njRotateXYZ(&m,mon.ax,mon.ay,0);NJS_POINT3 v0{0,0,-1.0f},v1{};njCalcVector(&m,&v0,&v1);
+   const float it=std::fabs(v1.x*c.camera_view.x+v1.y*c.camera_view.y+v1.z*c.camera_view.z);
+   const std::uint32_t pt=std::uint32_t(int(128.0f*njCos(int(182.04445f*(360.0f*it))&0xFFFF))+127);
+   unsigned hits=0;for(std::size_t i=b2;i<angled.triangles.size();++i){const auto& t=angled.triangles[i];if(t.textured&&t.texture<angled.textures.size()&&angled.textures[t.texture].pixels==copy){
+     check(t.fog_color_set&&t.fog_color==((pt|(pt<<8)|(pt<<16))&0xffffffu),"flg 0x2000000 ocol differs from effect.c:1688");++hits;}}
+   check(hits==2,"flg 0x2000000 monitor quad missing");
+   for(const auto& g:r.world.unbound_enemy_routines())check(g.find("0x2000000")==std::string::npos,"flg 0x2000000 still reported as gap");}
   // Fernsicht aus Schnitt 1 (Raumnebel an: CAM_WRK Nebel 0x28281C, near 0, far -105; Monitor ~85 Einheiten vor
   // der Kamera). njDrawTextureSub3DH (ps2_NaDraw.c:443) schreibt XYZF2.F = 128 fest in jeden Eckpunkt, FOGCOL =
   // ocol (:469; 0x400000 bei lkono 1): Cv = (Cs*128 + ocol*127) >> 8 unabhaengig von Entfernung und Raumnebel.
@@ -226,7 +246,7 @@ int main(int argc,char** argv){try{
   check(bool(r.world.small_screen_pass(view)),"a cut change (gm_flg 0x20) does not refresh the monitor");
   r.world.commit_small_screen(target.pixels(),512,512);r.world.begin_cut_check();
   check(!(r.vm.flags[11][0]&0x20u)&&!r.world.small_screen_pass(view),"bhCheckCut does not clear gm_flg 0x20; the monitor re-renders without initflag, st_flg 1 or a cut change");
-  std::cout<<"RM_1050 monitor: bhEff111 live, cut 6 rendered into the 512x512 texture and shown on the quad.\n";}
+  std::cout<<"RM_1050 monitor: bhEff111 live, cut 6 rendered and copied by PS2_Render_Tex_Sub into the 256x256 texture shown on the quad.\n";}
  // RM_1050 Steve-Ereignis: Ereignis 31 (@2a74) startet 12..17 (Diagnosevorbedingung: direkter Start, ev_flg 146 gesetzt).
  // Ereignis 12 ruft @144a 0xb0 bhHEffectSet2 (event.c:7472): sys->ef = {type 1, Lage 30.20/12.60/22.00, ax 5 Grad,
  // ay 180 Grad, Skalierung 1.70/1.10/4.00, id 211} -> bhSetEffectTb(&sys->ef, NULL, NULL, 0): bhEff211 (effsub5.c:1039,

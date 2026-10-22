@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 extern const short AdxVolTbl[128];
+extern const unsigned short AdxLinearTbl[1000];
 #ifdef __cplusplus
 }
 #endif

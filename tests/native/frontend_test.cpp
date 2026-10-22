@@ -17,6 +17,8 @@ int main(int argc,char** argv){try{
     // Escape aus quit heraushalten, sonst schliesst die Pausentaste ein laufendes Spiel.
     check(InputConfig::read(path).describe(Action::Pause,false)=="P / Escape"&&InputConfig::read(path).describe(Action::Quit,false)=="F10","a saved controls.ini loses the Escape pause key or keeps Escape as a quit key");
     auto event=[&](const SDL_Event& e){devices.event(e);front.event(e);};auto tick=[&]{return front.apply(devices.tick());};
+    auto audio_path=path;audio_path+=".audio";AudioConfig audio_settings(audio_path);front.audio=&audio_settings;
+    unsigned applied_mode=99;front.audio_changed=[&](unsigned mode){applied_mode=mode;};
     auto press=[&](SDL_Scancode code){event(key(code,true));const auto result=tick();event(key(code,false));tick();return result;};
     // adv.c Adv_BioCvTitle: Mode 0..3, 30-frame fade (GetSamurai(50)), PRESS START (Mode 6), Start -> plate fade -> Mode 9 with Cursor 1 (NEW GAME; LOAD GAME needs a memory card).
     auto settle=[&](int mode){for(int i=0;i<400&&front.mode()!=mode;++i)tick();check(front.mode()==mode,"title mode not reached");};
@@ -28,6 +30,11 @@ int main(int argc,char** argv){try{
     press(SDL_SCANCODE_ESCAPE);check(front.mode()==10,"Cancel does not fade the plate out");settle(6);check(front.press_start(),"Cancel does not return to PRESS START");
     press(SDL_SCANCODE_RETURN);settle(9);check(front.cursor()==Frontend::quit_row,"Cursor[0] must persist across Cancel");press(SDL_SCANCODE_UP);check(front.cursor()==Frontend::option_cursor,"OPTION row");press(SDL_SCANCODE_RETURN);check(front.mode()==17&&!front.starting(),"OPTION does not start the leave fade");
     for(int i=0;i<400&&!front.settings();++i)tick();check(front.settings()&&!front.gamepad_page(),"keyboard settings inaccessible");
+    for(unsigned i=0;i<Frontend::audio_row;++i)front.input(MenuInput::Down);
+    front.input(MenuInput::Right);check(audio_settings.mode()==1&&applied_mode==1&&AudioConfig(audio_path).mode()==1,"OPTION sound mode must reach runtime and survive reload");
+    front.input(MenuInput::Left);check(audio_settings.mode()==0&&applied_mode==0&&AudioConfig(audio_path).mode()==0,"stereo restore must replace the persisted mono setting");
+    for(unsigned i=0;i<Frontend::audio_row;++i)front.input(MenuInput::Up);
+    std::filesystem::remove(audio_path);
     for(unsigned i=0;i<12;++i)front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.capturing(),"keyboard rebinding not armed");press(SDL_SCANCODE_F9);
     check(!front.capturing()&&config.describe(Action::Skip,false)=="F9"&&config.describe(Action::Skip,true)=="Start/Options","keyboard rebind changed wrong device");
     check(InputConfig::read(path).describe(Action::Skip,false)=="F9","keyboard rebind not persistent");

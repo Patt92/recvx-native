@@ -222,7 +222,7 @@ public:
     const SceneTexture& title_texture(unsigned index);
     // Pixel width label() would use for `text` (FontSz per glyph, 14 per space).
     int label_width(const std::string& text,float scale)const;
-    void label(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=.6f,std::uint32_t color=0xffffffff)const;
+    void label(SoftwareRenderer& image,const std::string& text,int x,int y,float scale=.6f,std::uint32_t color=0xffffffff,float yscale=1.f)const;
     // bhDispMessage: a message at the given pixel origin in the dialogue font.
     void show_message(SoftwareRenderer& image,const Message& message,int x,int y,std::uint32_t tint=0xffffffff)const{text(image,message,x,y,1,tint,true);}
     void show_gameover_message(SoftwareRenderer& image,const Message& message,int x,int y,unsigned color)const{text(image,message,x,y,1,color,true);}

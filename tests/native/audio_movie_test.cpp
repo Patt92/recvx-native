@@ -1,5 +1,6 @@
 #include "audio.h"
 #include "movie.h"
+#include "screen_fade.h"
 #include "asset_io.h"
 #include "binary_view.h"
 #include <algorithm>
@@ -22,6 +23,7 @@ using namespace recvx;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static int reject_count=0;template<class F> static void reject(F f){bool rejected=false;++reject_count;try{f();}catch(const std::exception&){rejected=true;}if(!rejected)throw std::runtime_error("malformed media accepted #"+std::to_string(reject_count));}
 static void le(std::vector<std::uint8_t>& b,unsigned n){for(unsigned i=0;i<4;++i)b.push_back(std::uint8_t(n>>(i*8)));}
+static void le16(std::vector<std::uint8_t>& b,unsigned n){b.push_back(std::uint8_t(n));b.push_back(std::uint8_t(n>>8));}
 // SPU2 envelope, MODHSYN key-off/CC 120, core choice, TSNDDRV/libsd HALL (audio_spu.h).
 static void spu_envelope_reverb(const std::filesystem::path& root){
     // Hand-computed from the SPU ADSR rules: ADSR1 0x80ff = exponential attack shift 0 step 0,
@@ -359,8 +361,76 @@ static void midi_multi_split(const std::filesystem::path& root){
     // Voices add in the float mix before one int16 conversion: at most 1 LSB apart from the summed single-split outputs.
     for(std::size_t i=0;i<full.size();++i)check(std::abs(int(full[i])-int(first[i])-int(second[i]))<=1,"RM_1100 sequence is not the sum of its two splits");
 }
+static void sound_modes(){
+    auto pcm=std::make_shared<PcmClip>();pcm->rate=48000;pcm->channels=2;pcm->samples={12000,-4000,12000,-4000};
+    AudioMixer m;m.play_pcm(0,pcm,1,true);check(m.mix(1)==std::vector<std::int16_t>({12000,-4000}),"stereo ADX channels");
+    m.set_sound_mode(1);check(m.mix(1)==std::vector<std::int16_t>({4000,4000}),"ADX mono averages both channels before output pan");
+    m.stop(0);m.play_pcm(7,pcm,1,true);check(m.mix(1)==std::vector<std::int16_t>({12000,12000}),"movie mono duplicates LEFT channel instead of averaging");
+    m.set_sound_mode(0);check(m.mix(1)==std::vector<std::int16_t>({12000,-4000}),"stereo restore keeps original PCM channels");
+    m.stop(7);m.play_pcm(7,pcm,1,true);m.set_movie_volume(-500);
+    const auto attenuated=m.mix(1);check(attenuated[0]==int(12000.f*(16367.f/32768.f)),"SetMwVolume uses linear 32.8*(vol+999) block level");
+    m.set_movie_volume(-999);check(m.mix(1)==std::vector<std::int16_t>({0,0}),"movie -999 volume is silent");
+    // MODHSYN output mode changes pan factors when 0x4534 next runs (note-on / changed CC10 / HsMsg pan).
+    IopSound iop;auto note=std::make_shared<PcmClip>();note->spu=true;note->rate=48000;note->channels=1;note->samples.assign(4000,10000);
+    note->spu_attr=0x13;note->adsr1=0x000f;note->adsr2=0;note->sony_volume=127u*127u*127u;note->pan=1;
+    iop.diagnostic_note(15,0,note);iop.atick();check(iop.voices(15,0).at(0).levels.right==0,"stereo bank pan must apply");
+    IopCommand c;c.kind=IopCommand::OutputMode;c.mode=0;iop.push(c);iop.send();
+    check(iop.mono()&&iop.voices(15,0).at(0).levels.right==0,"mode setter must retain already calculated pan factors");
+    iop.diagnostic_note(15,1,note);iop.atick();const auto levels=iop.voices(15,1).at(0).levels;
+    check(levels.left>0&&levels.left==levels.right,"mono MODHSYN note-on must ignore bank and controller pan");
+    c.mode=1;iop.push(c);iop.send();iop.diagnostic_note(15,2,note);iop.atick();
+    check(!iop.mono()&&iop.voices(15,2).at(0).levels.right==0,"stereo MODHSYN restored for new notes");
+    auto loop=std::make_shared<PcmClip>();loop->rate=24000;loop->channels=1;loop->samples.assign(2400,1000);loop->loop_start=240;loop->loop_end=480;
+    AudioMixer time;time.play_pcm(0,loop,1,true);time.mix(4800);
+    check(time.adx_play_time(0)==10,"ADX play time must count consumed samples across loop jumps at the source rate");
+    time.stop(0);check(time.adx_play_time(0)==0,"explicit ADXT_Stop resets time (GetTimeSfreq2 non-playing state)");
+    time.play_pcm(1,loop);time.mix(4801);check(!time.active(1)&&time.adx_play_time(1)==10,"ADX natural end retains total stream time");
+    AudioMixer se_audio;se_audio.play_pcm(7,spu_clip(std::vector<std::int16_t>(16000,1000),48000,true));se_audio.mix(800);
+    MoviePlayer absent({}, {},se_audio);absent.stop();se_audio.mix(2400);
+    check(se_audio.active(7)&&!se_audio.sequence_levels(7).empty(),"stopping movie PCM must preserve the separate player SE handle sharing host number 7");
+}
+static void bank_layers_velocity(){
+    // Synthetic HD/BD with two Sset samples; sample 1 has the inclusive velocity interval 64..100.
+    std::vector<std::uint8_t> bank(432);
+    auto put16=[&](std::size_t p,unsigned n){bank.at(p)=std::uint8_t(n);bank.at(p+1)=std::uint8_t(n>>8);};
+    auto put32=[&](std::size_t p,unsigned n){put16(p,n);put16(p+2,n>>16);};
+    auto section=[&](std::size_t p,const char* magic,unsigned length,unsigned last){std::copy_n(magic,8,bank.begin()+p);put32(p+8,length);put32(p+12,last);};
+    put32(0,16);put32(4,384);put32(8,400);put32(12,32);
+    std::copy_n("IECSsreV",8,bank.begin()+16);put32(24,16);
+    std::copy_n("IECSdaeH",8,bank.begin()+32);put32(32+16,32);
+    for(auto f:std::vector<std::pair<unsigned,unsigned>>{{0x14,0x40},{0x18,0xb0},{0x1c,0xd0},{0x20,0x150}})put32(32+f.first,f.second);
+    constexpr unsigned prog=80,pg=100,split=140,sets=192,set=212,smpls=224,sm0=248,sm1=290,vags=352;
+    section(prog,"IECSgorP",112,0);put32(prog+16,20);put32(pg,40);bank[pg+4]=1;bank[pg+5]=20;bank[pg+6]=127;bank[pg+7]=64;bank[pg+11]=60;
+    bank[split+2]=0;bank[split+4]=127;bank[split+16]=127;bank[split+17]=64;
+    section(sets,"IECStesS",32,0);put32(sets+16,20);bank[set+1]=1;bank[set+2]=127;bank[set+3]=2;put16(set+4,0);put16(set+6,1);
+    section(smpls,"IECSlpmS",128,1);put32(smpls+16,24);put32(smpls+20,66);
+    for(unsigned s:{sm0,sm1}){bank[s+2]=1;bank[s+4]=127;bank[s+11]=60;bank[s+13]=64;bank[s+16]=127;put16(s+18,0x00ff);put16(s+20,0x1fc0);bank[s+41]=0x13;}
+    bank[sm1+2]=64;bank[sm1+4]=100;
+    section(vags,"IECSigaV",32,0);put32(vags+16,20);put16(vags+24,48000);
+    bank[400]=12;bank[402]=0x11;bank[416]=12;bank[417]=1;bank[418]=0x22;
+    check(decode_system_note(bank,0,60,63).size()==1&&decode_system_note(bank,0,60,64).size()==2&&decode_system_note(bank,0,60,100).size()==2&&decode_system_note(bank,0,60,101).size()==1,"sample velocity gates must be inclusive, with every matching Sset layer");
+    bank[set+1]=40;bank[set+2]=110;
+    check(decode_system_note(bank,0,60,39).empty()&&decode_system_note(bank,0,60,40).size()==1&&decode_system_note(bank,0,60,110).size()==1&&decode_system_note(bank,0,60,111).empty(),"Sset velocity gate must precede sample decoding");
+    // Real MODMIDI -> MODHSYN binding: two notes at the same key with different velocities must not share a resolved layer list.
+    std::vector<std::uint8_t> sq(66);auto sq32=[&](unsigned p,unsigned n){for(unsigned i=0;i<4;++i)sq.at(p+i)=std::uint8_t(n>>(8*i));};
+    std::copy_n("IECSuqeS",8,sq.begin()+16);sq32(36,40);std::copy_n("IECSidiM",8,sq.begin()+40);sq32(52,0);sq32(56,20);sq32(60,6);sq[64]=0xe0;sq[65]=1;
+    for(unsigned char b:{0,0xc0,0,0,0x90,60,40,16,0x90,60,100,64,0xff,0x2f,0})sq.push_back(b);
+    IopSound iop;iop.load_midi_bank(0,std::make_shared<const std::vector<std::uint8_t>>(bank),std::make_shared<const std::vector<std::uint8_t>>(sq));
+    IopCommand cmd;cmd.kind=IopCommand::BgmReq;cmd.port=0;cmd.program=0;cmd.channel=0;cmd.vol=127;iop.push(cmd);iop.send();
+    for(unsigned i=0;i<8;++i)iop.atick();const auto voices=iop.voices(0,0);unsigned low=0,high=0;
+    for(const auto& voice:voices){if(voice.velocity==40)++low;if(voice.velocity==100)++high;}
+    check(low==1&&high==2&&iop.unavailable.empty(),"MODMIDI velocity must select layers through the productive resolver and its cache");
+}
 int main(int argc,char** argv){try{
     sound_3d_core();
+    sound_modes();
+    bank_layers_velocity();
+    if(argc>1&&std::filesystem::is_regular_file(std::filesystem::u8path(argv[1])/"files/SLUS_201.84")){
+        // Independent original data: ELF file offsets for AdxVolTbl (0x32d700) and ps2rna_dbtbl (0x3432e0).
+        const auto original=read_asset_file(std::filesystem::u8path(argv[1])/"files/SLUS_201.84",64*1024*1024);BinaryView v(original);
+        for(unsigned i=0;i<128;++i){const auto db=std::int16_t(v.u16(0x22d780+i*2));
+            check(AudioMixer::adx_gain(-float(i))==float(v.u32(0x243360-4*db))/256.f,"ADX output gain must match both original tables for all 128 EE levels");}
+    }
     check(sony_pan_factors(32).right==62&&sony_pan_factors(96).left==62&&sony_pan_factors(64).left==128&&sony_pan_factors(64).right==128,"original Sony integer pan factors");
     check(sony_bank_pan(64,64,64,0)==64&&sony_bank_pan(-64,64,32,0)==32,"original program/split/sample signed bank pan");
     check(sony_note_pitch(60,0,60,0)==4096&&sony_note_pitch(60,0,48,0)==2048&&sony_note_pitch(60,0,72,0)==8192,"original Sony octave pitch table");
@@ -404,7 +474,7 @@ int main(int argc,char** argv){try{
             mount.mount_sound_afs(0);check(mount.set_name("BGM")=="BGM1","stage 0 does not mount the disc-1 BGM set");}
     }
     // adxwrap.c units: AdxVolTbl is 0.1 dB; RequestAdxFadeFunction2 counts.
-    check(std::abs(AudioMixer::adx_gain(0)-1)<1e-6f&&std::abs(AudioMixer::adx_gain(-25)-std::pow(10.f,-50/200.f))<1e-5f&&AudioMixer::adx_gain(-200)<AudioMixer::adx_gain(-126),"AdxVolTbl gain");
+    check(AudioMixer::adx_gain(0)==1&&AudioMixer::adx_gain(-25)==143.f/256.f&&AudioMixer::adx_gain(-200)==0&&AudioMixer::adx_gain(-126)==0,"AdxVolTbl -> original quantized PS2RNA gain (not a continuous pow curve)");
     check(AudioMixer::adx_fade_ticks(121)==21&&AudioMixer::adx_fade_ticks(400)==60&&AudioMixer::adx_fade_ticks(1)==1,"ADX fade counts");
     {AudioMixer bgm;bgm.request_bgm2(3,-45);check(bgm.current_bgm()==3&&bgm.bgm_request()==8,"PlayBgm2 new track");bgm.request_bgm2(3,-45);check(bgm.bgm_request()==8,"PlayBgm2 repeat keeps request");
         bgm.room_fade_out();check(bgm.bgm_request()==0&&bgm.current_bgm()==3,"room fade-out consumes request");bgm.request_bgm2(3,-30);check(bgm.bgm_request()==2,"PlayBgm2 volume change");
@@ -484,7 +554,9 @@ int main(int argc,char** argv){try{
     std::vector<std::uint8_t> adx(32+36);adx[0]=128;adx[3]=28;adx[4]=3;adx[5]=18;adx[6]=4;adx[7]=2;adx[10]=187;adx[11]=128;adx[15]=32;adx[18]=3;
     std::copy_n("(c)CRI",6,adx.begin()+26);adx[33]=1;adx[34]=0x10;adx[51]=1;adx[52]=0xf0;
     const auto pcm=decode_adx(adx);check(pcm.rate==48000&&pcm.channels==2&&pcm.frames()==32,"ADX header/sample count");
-    for(int i=0;i<32;++i)check(pcm.samples[i*2]==i+1&&pcm.samples[i*2+1]==-i-1,"ADX predictor/channel order");
+    for(int i=0;i<32;++i)check(pcm.samples[i*2]==2*(i+1)&&pcm.samples[i*2+1]==-2*(i+1),"ADX residual scale is (header & 0x1fff)+1, with separate channel histories");
+    auto scale_flags=adx;scale_flags[32]=0x60;scale_flags[50]=0x60;
+    check(decode_adx(scale_flags).samples==pcm.samples,"ADX block bits 13/14 must not alter the residual scale");
     auto bad=adx;bad.pop_back();reject([&]{decode_adx(bad);});bad=adx;bad[19]=8;reject([&]{decode_adx(bad);});bad=adx;bad[7]=0;reject([&]{decode_adx(bad);});
     AudioMixer mixer;auto clip=std::make_shared<PcmClip>();clip->rate=24000;clip->channels=1;clip->samples={1000,3000};mixer.play_pcm(0,clip);
     check(mixer.mix(4)==std::vector<std::int16_t>({1000,1000,2000,2000,3000,3000,3000,3000}),"stereo resampling");mixer.mix(1);check(!mixer.active(0),"completed audio retained");
@@ -496,5 +568,21 @@ int main(int argc,char** argv){try{
     for(auto pixel:image.pixels())check(((pixel>>16)&255)>=250&&((pixel>>8)&255)<=3&&(pixel&255)<=3,"native JPEG frame color");
     check(player.time_centiseconds()==0,"movie starts at nonzero script time");player.tick();check(player.active()&&player.time_centiseconds()==3,"movie time must truncate 30-Hz ticks to centiseconds");player.tick();check(!player.active()&&!mixer.active(7)&&player.time_centiseconds()==0,"movie/audio termination");
     movie.pop_back();reject([&]{player.load(movie);});check(!player.active(),"failed movie start changed state");
+    // PlayStartMovieEx / PlayMovieMain: real stream ownership, source table gates and shared fade completion.
+    std::vector<std::uint8_t> long_movie={'R','V','V','1'};for(unsigned n:{2,2,30,1,60,48000,2,96000})le(long_movie,n);
+    for(unsigned i=0;i<96000;++i){le16(long_movie,12000);le16(long_movie,4000);}
+    for(unsigned i=0;i<60;++i){le(long_movie,sizeof(jpeg_fixture));long_movie.insert(long_movie.end(),std::begin(jpeg_fixture),std::end(jpeg_fixture));}
+    std::uint32_t flags=0x80;player.fade_flags=[&]()->std::uint32_t&{return flags;};
+    clip->channels=1;clip->rate=48000;clip->samples.assign(1600,1000);mixer.play_pcm(0,clip,1,true);mixer.play_pcm(1,clip,1,true);
+    player.load(long_movie,15);check(mixer.adx_sleeping()&&!mixer.active(0)&&!mixer.active(1)&&mixer.current_bgm()==-1,"movie start must stop BGM/voice and sleep both ADX streams");
+    check(!player.cancel_allowed()&&!player.request_cancel()&&player.active(),"MovieTypeDef[15] bit 0x80 must reject cancel");
+    player.stop();check(!mixer.adx_sleeping()&&flags==0x80,"movie stop must wake ADX and retain unrelated cb_flg bits");
+    player.load(long_movie,15,1);check(player.request_cancel()&&!player.active(),"MovieType bit 1 overrides the cancellation gate");
+    system_screen_fade().clear_now();player.load(long_movie,16);check(player.request_cancel()&&player.cancelling()&&(flags&2),"MovieTypeDef[16] requires shared 30-frame fade");
+    player.tick();const auto first_volume=player.volume();player.draw(image);const auto red=image.pixels().front()>>16&255;
+    check(first_volume<0&&first_volume>-34&&red>240,"first fade pass uses initial screen hold and one audio decrement");
+    player.request_cancel();player.tick();check(player.volume()<first_volume-33&&system_screen_fade().ct()==2,"repeated cancel must not restart the fade");
+    for(unsigned i=2;i<30;++i)player.tick();check(player.active()&&!(flags&2)&&mixer.adx_sleeping(),"shared screen fade completes before the movie is stopped on next pass");
+    player.tick();check(!player.active()&&!mixer.active(7)&&!mixer.adx_sleeping()&&flags==0x80,"fade completion releases movie and wakes ADX exactly once");
     std::cout<<"ADX predictor, resampling, mixing, fades, movie frame decoding and timing passed.\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -51,6 +51,17 @@ public:
     std::string set_name(const std::string& base)const{return base+disc_digit();}
     void play(unsigned slot,const std::string& archive,unsigned id,float volume=1,bool loop=false,unsigned fade_ticks=0);
     void play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volume=1,bool loop=false);
+    // sdc.c:97 SetSoundModeEx: 0 stereo, 1 mono. Configuration persistence belongs to the caller.
+    void set_sound_mode(unsigned mode);
+    unsigned sound_mode()const{return sound_mode_;}
+    // adxwrap.c:465/497: movie ownership destroys/recreates both streams; wake clears FadeFunc/Flag.
+    void sleep_adx();
+    void wakeup_adx();
+    bool adx_sleeping()const{return adx_sleeping_;}
+    // ps2_sfd_mw.c:263 -> changeInputVolume: linear BVOLL/BVOLR, not ADX decibels.
+    void set_movie_volume(int volume);
+    // Movie PCM shares host number 7 with the EE player's SE handle; it owns only the PCM channel.
+    void stop_movie_audio(){release_channel(slots_[7]);}
     void play_system(unsigned program);
     // sdfunc.c ExecSoundSystemMonitor: CameraPos = cam.wpx/wpy/wpz, PlayerPos = plp->px/py/pz; cam.ay feeds wadGetAngle.
     void set_sound_monitor(SoundPoint camera,int camera_ay,SoundPoint player){camera_pos_=camera;camera_ay_=camera_ay;player_pos_=player;}
@@ -161,7 +172,7 @@ public:
     int current_bgm()const{return current_bgm_;}
     int current_bgm_volume()const{return current_bgm_volume_;}
     int bgm_request()const{return req_fade_bgm_;}
-    static float adx_gain(float volume);          // AdxVolTbl, 0.1 dB steps
+    static float adx_gain(float volume);          // AdxVolTbl -> PS2RNA 8-bit amplitude table
     static unsigned adx_fade_ticks(int timer);    // RequestAdxFadeFunction2 count
     // --- diagnostics on the IOP model (audio_iop.h) ---
     const IopSound& iop()const{return iop_;}
@@ -175,11 +186,13 @@ public:
     void request_all_stop_sound(bool adx,bool in_sound,int fade_count);
     std::vector<std::string> played,unavailable;
 private:
+    unsigned sound_mode_=0;
+    bool adx_sleeping_=false;
     unsigned disc_=0;
     // clip_rate ueberlebt das natuerliche Clipende (dort wird nur `clip` geloest), damit
     // adx_play_time danach noch die erreichte Zeit melden kann; release_channel setzt das
     // ganze Werk zurueck und damit auch die Rate. Host channels carry ADX streams and PCM without SPU envelope.
-    struct Channel {std::shared_ptr<PcmClip> clip;unsigned clip_rate=0;double position=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1;};
+    struct Channel {std::shared_ptr<PcmClip> clip;unsigned clip_rate=0;double position=0,played_samples=0;float volume=1,gain=1,target=1;unsigned fade=0;bool loop=false;float left=1,right=1;};
     void release_channel(Channel& channel){channel=Channel{};}
     // IOP side: TSNDDRV, MODMIDI, MODHSYN and the 48 SPU2 voices.
     IopSound iop_;

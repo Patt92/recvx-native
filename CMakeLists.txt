@@ -269,7 +269,7 @@ if(RECVX_BUILD_RUNTIME)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_original_core.py"
       "${CMAKE_CURRENT_SOURCE_DIR}" --build-dir "${CMAKE_CURRENT_BINARY_DIR}" --binary "$<TARGET_FILE:recvx-runtime>"
     VERBATIM)
-  add_library(recvx_input native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp native/vibration.cpp)
+  add_library(recvx_input native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp native/audio_settings.cpp native/vibration.cpp)
   target_link_libraries(recvx_input PUBLIC recvx_game SDL2::SDL2)
   if(BUILD_TESTING)
     add_executable(recvx-window-presentation-tests tests/native/window_presentation_test.cpp)

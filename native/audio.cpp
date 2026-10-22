@@ -53,7 +53,7 @@ PcmClip decode_ps_adpcm(const std::vector<std::uint8_t>& bytes,unsigned rate){
 namespace {
 // One clip per voice the program starts: key<0 (TSNDDRV SE request) the first split, key>=0 (MODHSYN
 // note-on) every split whose key range holds the key, in table order.
-std::vector<PcmClip> decode_program_voices(const std::vector<std::uint8_t>& bytes,unsigned program,int key){
+std::vector<PcmClip> decode_program_voices(const std::vector<std::uint8_t>& bytes,unsigned program,int key,unsigned velocity){
     BinaryView v(bytes);v.require(0,24);const auto hd=v.u32(0),hd_size=v.u32(4),bd=v.u32(8),bd_size=v.u32(12);v.require(hd,hd_size);v.require(bd,bd_size);
     auto magic=[&](std::size_t p,const char* expected){v.require(p,8);if(std::memcmp(bytes.data()+p,expected,8))throw std::runtime_error("invalid Sony sound-bank section");};
     magic(hd,"IECSsreV");const auto head=hd+v.u32(hd+8);magic(head,"IECSdaeH");
@@ -87,13 +87,17 @@ std::vector<PcmClip> decode_program_voices(const std::vector<std::uint8_t>& byte
     // sample (0x614c..0x6154), and a sample whose Smpl index is above the last (0x6164..0x6178) or whose
     // Vagi entry is 0xffffffff (0x6200..0x6208); the next split/sample follows.
     if(key>=0&&v.u16(zone)>v.u32(sets+12))return;
-    const auto set=entry(sets,v.u16(zone),6);
-    if(key>=0&&(!v.u8(set+3)||v.u16(set+4)>v.u32(samples+12)))return;
-    if(v.u8(set+3)!=1)throw std::runtime_error("layered system sound unsupported");const auto sample=entry(samples,v.u16(set+4),42);const auto vag=entry(vags,v.u16(sample),8);
+    const auto set=entry(sets,v.u16(zone),4);
+    // MODHSYN 0x6120..0x6154: inclusive velocity gate precedes the Sset sample loop.
+    if(key>=0&&(velocity<v.u8(set+1)||velocity>v.u8(set+2)))return;
+    const unsigned count=v.u8(set+3);v.require(set+4,std::size_t(count)*2);
+    auto sample_voice=[&](unsigned index){
+    if(key>=0&&index>v.u32(samples+12))return;
+    const auto sample=entry(samples,index,42);
+    // 0x6190..0x61c8: velocity gate on each sample before looking up its Vagi.
+    if(key>=0&&(velocity<(v.u8(sample+2)&0x7f)||velocity>(v.u8(sample+4)&0x7f)))return;
+    const auto vag=entry(vags,v.u16(sample),8);
     if(key>=0&&v.u32(vag)==0xffffffffu)return;
-    // Note-on also gates Sset +1..+2 (0x6120/0x6138) and Smpl +2..+4 &0x7f (0x6190/0x61b0) by velocity; every
-    // Sset/Smpl of every bank holds 1..127, so a note-on velocity (1..127) always passes. Others are not ported.
-    if(key>=0&&(v.u8(set+1)!=1||v.u8(set+2)!=127||(v.u8(sample+2)&0x7f)!=1||(v.u8(sample+4)&0x7f)!=127))throw std::runtime_error("Sony Sset/Smpl velocity range not ported");
     const auto start=v.u32(vag);std::size_t end=bd_size;for(unsigned i=0;i<=v.u32(vags+12);++i){const auto next=v.u32(entry(vags,i,8));if(next>start)end=std::min(end,std::size_t(next));}
     if(start>=end||end>bd_size)throw std::runtime_error("invalid Sony sound-bank waveform range");
     auto out=decode_ps_adpcm(std::vector<std::uint8_t>(bytes.begin()+bd+start,bytes.begin()+bd+end),v.u16(vag+4));
@@ -121,17 +125,20 @@ std::vector<PcmClip> decode_program_voices(const std::vector<std::uint8_t>& byte
     out.se_shot=key<0; // TSNDDRV SE request (Tsnd_tqreq); key >= 0 is a MIDI note-on
     out.volume=float(v.u8(pg+6))/127.f*float(v.u8(zone+0x10))/127.f;out.pan=unsigned(sony_bank_pan(std::int8_t(v.u8(pg+7)),std::int8_t(v.u8(zone+17)),std::int8_t(v.u8(sample+13)),((note-int(v.u8(zone+15)))*int(std::int8_t(v.u8(zone+14)))+(note-int(v.u8(pg+11)))*int(std::int8_t(v.u8(pg+10))))/12));
     voices.push_back(std::move(out));};
+    // 0x615c..0x646c: every sample index in table order, followed by the next split.
+    for(unsigned i=0;i<count;++i)sample_voice(v.u16(set+4+i*2));};
     if(key<0){voice(zones);return voices;}
     for(unsigned i=0;i<splits;++i){const auto z=zones+std::size_t(i)*split_size;if(key>=(v.u8(z+2)&0x7f)&&key<=(v.u8(z+4)&0x7f))voice(z);}
     return voices;
 }
 }
-std::vector<PcmClip> decode_system_note(const std::vector<std::uint8_t>& bytes,unsigned program,int key){
+std::vector<PcmClip> decode_system_note(const std::vector<std::uint8_t>& bytes,unsigned program,int key,unsigned velocity){
     if(key<0||key>127)throw std::runtime_error("MIDI note-on key outside 0..127");
-    return decode_program_voices(bytes,program,key);
+    if(velocity>127)throw std::runtime_error("MIDI velocity outside 0..127");
+    return decode_program_voices(bytes,program,key,velocity);
 }
 PcmClip decode_system_sound(const std::vector<std::uint8_t>& bytes,unsigned program,int key){
-    auto voices=decode_program_voices(bytes,program,key);
+    auto voices=decode_program_voices(bytes,program,key,127);
     if(voices.empty())return {};
     // A key several splits cover keys several voices (decode_system_note); one clip cannot stand for them.
     if(voices.size()>1)throw std::runtime_error("Sony note keys several splits; decode_system_note returns its voices");
@@ -229,7 +236,7 @@ void AudioMixer::server(){
     for(unsigned i=0;i<20;++i){auto& w=shots_[i];const std::uint16_t bit=w.channel>=0?std::uint16_t(1u<<unsigned(w.channel)):std::uint16_t(0);
         IopCommand c;c.port=w.port;c.channel=unsigned(w.channel&0xff);c.program=w.program;c.vol=field(w.vol);c.pan=field(w.pan);c.pitch=std::int16_t(w.pitch)<0?-1:int(w.pitch);
         if(w.req==1){c.kind=IopCommand::SeReq;push(c);ee_status_.se[w.port]|=bit;w.req=254;}
-        else if(bit&&(ee_status_.se[w.port]&bit)){c.kind=IopCommand::SeChg;push(c);w.req=255;}
+        else if(bit&&(ee_status_.se[w.port]&bit)){c.kind=IopCommand::SeChg;if(sound_mode_)c.pan=64;push(c);w.req=255;}
         else if(w.req==254){ee_status_.se[w.port]|=bit;w.req=255;}}
     for(unsigned i=0;i<8;++i){auto& w=midis_[i];const std::uint16_t bit=std::uint16_t(1u<<w.port);
         if(w.req==1){IopCommand c;c.kind=IopCommand::BgmReq;c.port=w.port;c.program=w.bank;c.channel=w.list;c.vol=w.vol;push(c);ee_status_.midi|=bit;w.req=254;}
@@ -483,11 +490,14 @@ bool AudioMixer::load_player_sounds(unsigned player){
 bool AudioMixer::play_room_sound(unsigned bank,unsigned program,unsigned slot,bool loop){
     if(slot<3||slot>=slots_.size())throw std::runtime_error("invalid room effect channel");
     (void)loop; // a Sony SE loops by its own VAG markers (Vagi attribute 1); the request has no loop flag
-    if(!room_banks_.count(bank))return false;
+    // SetupSeGenericParm (sdfunc.c:913) can select bank 0 from every SE caller.
+    // InitSoundDriver installs COMMON there independently of the room packets.
+    if(bank==0){ensure_common();if(iop_.se_table(0).empty())return false;}
+    else if(!room_banks_.count(bank))return false;
     // Tsnd_tqreq drops a program above the bank's last index without a word (0x1058); reported here.
     if(bank<IopSound::tq_ports&&program>=iop_.se_table(bank).size()){unavailable.push_back("SE bank "+std::to_string(bank)+" program "+std::to_string(program)+" outside the TSNDDRV table");return false;}
     const int se=se_slot_of(slot);if(se<0)throw std::runtime_error("room SE on a host voice without SE slot");
-    if(shot_play(unsigned(se),bank,program))played.push_back("MULTSPQ"+disc_digit()+"/"+asset_number(sound_bank_packs_.at(bank))+"/"+std::to_string(bank)+"/"+asset_number(program));
+    if(shot_play(unsigned(se),bank,program))played.push_back(bank==0?"COMMON/"+asset_number(program):"MULTSPQ"+disc_digit()+"/"+asset_number(sound_bank_packs_.at(bank))+"/"+std::to_string(bank)+"/"+asset_number(program));
     return true;
 }
 bool AudioMixer::background_sound(unsigned slot,unsigned sound,unsigned timer){
@@ -828,7 +838,10 @@ PcmClip decode_adx(const std::vector<std::uint8_t>& b){
     const double x=root-std::cos(angle),y=root-1,filter=(x-std::sqrt((x+y)*(x-y)))/y;
     const auto first=std::int64_t(std::lrintf(float(8192*filter))),second=std::int64_t(std::lrintf(float(-4096*filter*filter)));
     std::array<int,2> previous{},older{};out.samples.resize(std::size_t(frames)*out.channels);
-    for(std::size_t block=0;block<blocks;++block)for(unsigned ch=0;ch<out.channels;++ch){const auto p=start+(block*out.channels+ch)*18;const auto scale=be16(p);if(scale&0x8000)throw std::runtime_error("premature ADX end marker");
+    for(std::size_t block=0;block<blocks;++block)for(unsigned ch=0;ch<out.channels;++ch){const auto p=start+(block*out.channels+ch)*18;const auto header=be16(p);if(header&0x8000)throw std::runtime_error("premature ADX end marker");
+        // ADX_DecodeMonoFloat (ELF 0x2f1820/0x2f1830) and stereo mono path 0x2f1c9c..0x2f1cdc:
+        // lower 13 bits plus ONE; bits 13/14 are not part of the residual scale.
+        const unsigned scale=(header&0x1fff)+1;
         for(unsigned k=0;k<32&&block*32+k<frames;++k){int residual=(b[p+2+k/2]>>((k&1)?0:4))&15;if(residual>=8)residual-=16;
             const auto prediction=first*previous[ch]+second*older[ch];const auto rounded=prediction>=0?prediction/4096:-((-prediction+4095)/4096);
             const int sample=int(std::clamp<std::int64_t>(std::int64_t(residual)*scale+rounded,-32768,32767));older[ch]=previous[ch];previous[ch]=sample;out.samples[(block*32+k)*out.channels+ch]=std::int16_t(sample);}
@@ -872,6 +885,7 @@ void AudioMixer::play_pcm(unsigned slot,std::shared_ptr<PcmClip> clip,float volu
     Channel c;c.volume=volume*clip->volume;pan_gains(clip->pan,c.left,c.right);c.clip_rate=clip->rate;c.clip=std::move(clip);c.loop=loop;slots_[slot]=std::move(c);
 }
 void AudioMixer::play(unsigned slot,const std::string& archive,unsigned id,float volume,bool loop,unsigned fade_ticks){
+    if(slot<2&&adx_sleeping_)throw std::runtime_error("ADX stream requested while movie owns the streams");
     if(fade_ticks>600*game_tick_hz)throw std::runtime_error("audio fade too long");
     const auto relative=std::filesystem::path("audio")/archive/(asset_number(id)+".adx");auto file=mods_/relative;
     if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives"/archive/(asset_number(id)+".bin");
@@ -910,8 +924,9 @@ bool AudioMixer::active(unsigned slot)const{
     return false;
 }
 // adxwrap.c:650 GetAdxPlayTime: Abspielzeit des Stroms in Hundertstelsekunden. Die Position
-// des Kanals zaehlt Quellbilder (position += rate/48000 je Ausgabebild, siehe mix), also gilt
-// dieselbe Rechnung wie im Original: SampleCount / SamplingRate * 100. Ein natuerlich zu Ende
+// des Kanals zaehlt Quellbilder; die Spielzeit zaehlt unabhaengig vom Loop-Ruecksprung weiter
+// (ADXSJD_GetDecNumSmpl, ELF 0x2f5098..0x2f50b0: kumulierte Samples; GetTimeSfreq2 zieht
+// gepufferte Samples ab, 0x2f6d10..0x2f6d38). SampleCount / SamplingRate * 100. Ein natuerlich zu Ende
 // gelaufener Strom behaelt seine Endzeit (nur `clip` wird geloest); erst stop/release setzt den
 // Platz und damit die Zeit auf 0 zurueck. Nur die Plaetze 0 und 1 sind im Original angemeldet
 // (sdfunc.c:310 RegistAdxStreamEx(2, ..)); fuer jeden anderen gibt es dort kein Handle.
@@ -919,21 +934,50 @@ unsigned AudioMixer::adx_play_time(unsigned slot)const{
     if(slot>=2||slot>=slots_.size())return 0;
     const auto& channel=slots_[slot];
     if(!channel.clip_rate)return 0;
-    return unsigned(channel.position/double(channel.clip_rate)*100.0);
+    return unsigned(channel.played_samples/double(channel.clip_rate)*100.0);
+}
+void AudioMixer::set_sound_mode(unsigned mode){
+    if(mode>1)throw std::runtime_error("invalid sound mode");
+    // SetSoundModeEx 0 -> SDE_PAN_MODE_STEREO 1 (ELF 0x28ef40), mono -> 0 (0x28ef5c).
+    IopCommand c;c.kind=IopCommand::OutputMode;c.mode=mode?0:1;iop_.push(c);sound_mode_=mode;
+}
+void AudioMixer::sleep_adx(){
+    if(adx_sleeping_)return;
+    for(unsigned i=0;i<2;++i)release_channel(slots_[i]);
+    adx_sleeping_=true;
+}
+void AudioMixer::wakeup_adx(){
+    if(!adx_sleeping_)return;
+    for(unsigned i=0;i<2;++i)adx_control_[i].function=0;
+    adx_sleeping_=false;
+}
+void AudioMixer::set_movie_volume(int volume){
+    // ps2_sfd_mw.c:263, ps2_MovieFunc.c:642: (u_int)(32.8 * (vol + 999)), low 16 bits, BVOL / 32768.
+    const auto level=std::uint16_t(std::uint32_t(32.8*double(volume+999)));
+    slots_[7].volume=float(level)/32768.f;
 }
 std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)throw std::runtime_error("audio mix too large");std::vector<std::int16_t> out(std::size_t(frames)*2);
     for(unsigned f=0;f<frames;++f){float left=0,right=0;
         // Effect input per SPU2 core (VMIXEL/VMIXER); ADX streams and host PCM enter dry only (TSNDDRV MMIX 0xffcf/0xffcc).
         std::array<std::array<float,2>,2> wet{};
-        for(auto& channel:slots_){if(!channel.clip)continue;
+        for(unsigned slot=0;slot<slots_.size();++slot){auto& channel=slots_[slot];if(!channel.clip)continue;
             if(channel.fade){channel.gain+=(channel.target-channel.gain)/float(channel.fade);if(!--channel.fade&&channel.target==0){release_channel(channel);continue;}}
             const auto& clip=*channel.clip;const float gain=channel.volume*channel.gain;
             const auto end=channel.loop&&clip.loop_end?clip.loop_end:clip.frames();
             if(channel.position>=end){if(channel.loop){const auto begin=clip.loop_end?clip.loop_start:0;channel.position=double(begin)+std::fmod(channel.position-double(end),double(end-begin));}else{channel.clip.reset();continue;}}
             const auto i=std::size_t(channel.position),next=channel.loop&&i+1>=end?(clip.loop_end?clip.loop_start:0):std::min(i+1,clip.frames()-1);const float fraction=float(channel.position-double(i));
             auto sample=[&](unsigned ch){const float a=clip.samples[i*clip.channels+ch],b=clip.samples[next*clip.channels+ch];return (a+(b-a)*fraction)*gain;};
-            left+=sample(0)*channel.left;right+=sample(clip.channels==1?0:1)*channel.right;
-            channel.position+=double(clip.rate)/48000;}
+            float l=sample(0),r=sample(clip.channels==1?0:1);
+            if(sound_mode_){
+                // ADXT_SetOutputMono -> ADX_DecodeSteFloatAsMono (ELF 0x2f1da0..0x2f1ddc):
+                // average stereo before output pan. Movie PCM instead copies the left block (ps2_MovieFunc.c:602).
+                if(slot<2)l=r=(l+r)*.5f;
+                else if(slot==7)r=l;
+            }
+            left+=l*channel.left;right+=r*channel.right;
+            channel.position+=double(clip.rate)/48000;
+            channel.played_samples+=double(clip.rate)/48000;
+            if(!channel.loop)channel.played_samples=std::min(channel.played_samples,double(clip.frames()));}
         iop_.mix(left,right,wet);
         for(unsigned core=0;core<2;++core){std::int32_t l=0,r=0;
             reverb_[core].process(std::int16_t(std::clamp(wet[core][0],-32768.f,32767.f)),std::int16_t(std::clamp(wet[core][1],-32768.f,32767.f)),l,r);
@@ -948,7 +992,7 @@ std::vector<std::int16_t> AudioMixer::mix(unsigned frames){if(frames>48000*10)th
 }
 }
 namespace recvx {
-float AudioMixer::adx_gain(float volume){const int index=std::clamp(int(-volume),0,127);return std::pow(10.f,AdxVolTbl[index]/200.f);}
+float AudioMixer::adx_gain(float volume){const int index=std::clamp(int(-volume),0,127);return float(AdxLinearTbl[-AdxVolTbl[index]])/256.f;}
 unsigned AudioMixer::adx_fade_ticks(int timer){int count=((timer/100)*30+((timer%100)*6)/10)/2;if(count==0)count=1;return unsigned(count);}
 void AudioMixer::play_bgm_archive(const std::string& archive,unsigned id,int fade_in_rate,int volume){
     if(fade_in_rate!=-1){apply_adx_volume_ex(0,-127.f,float(volume));request_adx_fade(0,1,fade_in_rate+1);}
