@@ -1835,13 +1835,15 @@ static void afterimage_room(const std::filesystem::path& data){
             if(t.diffuse_material)++alphas[t.color>>24];
             for(const auto& v:t.vertices)check(v.light.x>=0&&v.light.x<=1.0f+1e-4f,"afterimage lit RGB outside native range");}
         check(alphas.size()==5&&alphas.count(40)&&alphas.count(200),"afterimages must draw with material alpha 200..40");
-        // Jede Stufe zeigt die Modelle der Erzeuger in einem anderen Pass. Freie Halterplaetze
-        // (bhEffDmy, RM_1002 Platz 12) unter den Erzeugern nehmen Schnappschuesse auf, die erst im
-        // naechsten Pass laufen (effect.c:778): ihre Stufe hinkt eins nach. Jede Stufe zeichnet
-        // daher etwas, und zusammen ergeben alle Stufen fuenf vollstaendige Generationen.
-        std::size_t total=0;for(const auto& [alpha,count]:alphas){check(count>0,"every afterimage pass must draw");total+=count;}
-        const unsigned drawn=fnc_room?fnc:zanzo;
-        check(drawn%5==0&&total%5==0,"the afterimage passes must hold five whole generations");
+        // effsub1b.c:727 npSetAllMatAlphaColor(..., (ct0 + 1) * 40): jede Stufe zeichnet genau die
+        // Schnappschuesse mit diesem Alpha. Freie Halterplaetze (bhEffDmy, RM_1002 Platz 12) unter
+        // den Erzeugern nehmen Schnappschuesse auf, die erst im naechsten Pass laufen (effect.c:778),
+        // so dass eine Stufe nicht je Erzeuger gleich viele Modelle tragen muss.
+        std::map<unsigned,std::size_t> expected;
+        for(unsigned i=0;i<512;++i){const auto* s=world.effect_state(i);if(!s||!(s->flg&1u)||s->id!=136||!s->afterimage)continue;
+            if(fnc_room?!s->custom_queued:s->zanzo_slot<0)continue;
+            for(const auto& t:s->afterimage->triangles)if(t.diffuse_material)++expected[s->afterimage_alpha];}
+        check(alphas==expected,"every afterimage pass must draw exactly the snapshots of its alpha");
         // objitm.c:518-529: die Objektlisten ob_hlg/ob_spc gehoeren auf halbes Licht.
         for(const auto& t:draw.triangles)if(t.material_phase==3||t.material_phase==4)
             check(t.light_category==1,"ob_hlg/ob_spc must draw at half light (objitm.c:518-529)");

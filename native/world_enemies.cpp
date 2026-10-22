@@ -806,6 +806,11 @@ void RoomWorld::bind_enemy_services(){
         if(e.model_owner||e.model_bank){enemy_world->unbound_enemy_.insert("epw->mlwP = &epw->mdl[k]: Work ohne eigene Modellreihe");return 0;}
         const PlayerAsset* row=e.model_row();if(!row)return 0;
         if(k==(e.own_row?e.own_model:0u))return 1;
+        // Ein Kind mit `epp->mlwP = epw->mdl` (model_owner) liest im Original weiter mdl[0], nativ
+        // aber den aktiven Baum dieses Works: diese Kombination ist nicht portiert, also melden.
+        auto* world=enemy_world;
+        for(const auto& c:world->enemy_children_)if(c.model_owner==&e){world->unbound_enemy_.insert("epw->mlwP = &epw->mdl[k] mit Kind auf epw->mdl (geteilter Baum)");return 0;}
+        for(const auto& [key,c]:world->entities_)if(c.model_owner==&e){world->unbound_enemy_.insert("epw->mlwP = &epw->mdl[k] mit Kind auf epw->mdl (geteilter Baum)");return 0;}
         const PlayerAsset* next=k==0?row:row->model(k);if(!next)return 0;
         e.own_row=row;
         const unsigned out=e.own_model;auto& keep=e.own_models[out];
@@ -892,7 +897,7 @@ void RoomWorld::bind_enemy_services(){
         // Elternworks ab slot. bhDrawEnemy (eneset.c:807-857) zeichnet das Kind, sobald mdflg 0x1 frei
         // ist (Kappe :2614, Wurm/Bom/Scope en01sub.c:1360/1857/1924). mdl[1..] ist im Original 0;
         // kein EN01-Kind liest es (kein mdflg 0x2/obj_b), model_bank reicht also nur mdl[0] weiter.
-        c.model_bank=p.enemy_asset;c.model_base=slot;
+        c.model_bank=p.model_row();c.model_base=slot; // epw->mdl[slot]: die Reihe, nicht mlwP
         c.enemy_obj=asset->bind_pose();c.enemy_evalflags=asset->node_evalflags();c.enemy_owp_flg.assign(c.enemy_obj.size(),0u);c.enemy_owp_mtx.assign(c.enemy_obj.size(),BoneMatrix{});c.enemy_calculated=false;};
     // objP += 8, owP += 8, obj_num -= 8 am geteilten ML_WORK (en01.c:2799-2805).
     en.shift_object_window=[](RECVX_ENEMY_WORK* w,int shift){
@@ -1631,21 +1636,21 @@ void RoomWorld::check_moth_egg(){
 WorldEntity* RoomWorld::create_enemy_child(RECVX_ENEMY_WORK* parent,const RECVX_ENEMY_TEMPLATE& t,unsigned base,RECVX_ENEMY_WORK* share){
     if(!parent)return nullptr;
     auto& p=tree_owner(owner_of(parent));
-    if(!share&&base!=~0u&&!p.enemy_asset){unbound_enemy_.insert("eneset.c:170 Kind: Elternwork ohne Modellreihe");return nullptr;}
+    if(!share&&base!=~0u&&!p.model_row()){unbound_enemy_.insert("eneset.c:170 Kind: Elternwork ohne Modellreihe");return nullptr;}
     auto& c=enemy_children_.emplace_back();
     if(!recvx_enemy_set(&enemy_table_,&c.enemy,&t,&c,parent->owner_index,&enemy_services_)){enemy_children_.pop_back();return nullptr;}
     c.enemy_bound=true;c.enemy_native=true;c.identity=t.id;
     if(share){const auto& sharer=owner_of(share);c.model_owner=&tree_owner(owner_of(share));c.model_bank=sharer.model_bank;c.model_base=sharer.model_base;return &c;}
     // bhSetEnemy laesst mlwP NULL (en23.c:492): kein Modell, kein Baum.
     if(base==~0u){c.model_absent=true;return &c;}
-    c.model_bank=p.enemy_asset;c.model_base=base;
+    c.model_bank=p.model_row();c.model_base=base; // epw->mdl[base], unabhaengig vom aktiven mlwP
     const PlayerAsset* asset=morph_variant(c,0);
     // Hinter mdl_n ist das ML_WORK genullt (room.c bhSetEneMdl): obj_num 0, kein Fehler.
     // Dasselbe gilt fuer einen Satz INNERHALB der Reihe, der 0 Objekte hat
     // (actor.cpp:493 laesst diesen Platz absichtlich leer) — im Original ein
     // ML_WORK mit obj_num 0. Nur ein gescheiterter Lesevorgang ist eine Luecke.
     c.model_absent=!asset;
-    if(!asset&&p.enemy_asset->model_failed(base)){
+    if(!asset&&p.model_row()->model_failed(base)){
         unbound_enemy_.insert("eneset.c:170 Kind: epw->mdl[base] liess sich nicht lesen");return &c;}
     if(!asset)return &c;
     c.enemy_asset=asset;
