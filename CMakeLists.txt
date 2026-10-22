@@ -262,10 +262,20 @@ if(RECVX_BUILD_RUNTIME)
       if(NOT EXISTS "${RECVX_IOS_BUNDLE_DATA}/native-data.version")
         message(FATAL_ERROR "RECVX_IOS_BUNDLE_DATA needs a prepared data tree: ${RECVX_IOS_BUNDLE_DATA}")
       endif()
+      # Plattformprofil aus tools/data_profiles.py: ungelesene Quellbaeume bleiben draussen.
+      set(recvx_bundle_excludes)
+      foreach(part IN LISTS RECVX_BUNDLE_DATA_EXCLUDE)
+        list(APPEND recvx_bundle_excludes "--exclude=/${part}")
+      endforeach()
       add_custom_command(TARGET recvx-runtime POST_BUILD
-        COMMAND rsync -a --delete "${RECVX_IOS_BUNDLE_DATA}/" "$<TARGET_BUNDLE_CONTENT_DIR:recvx-runtime>/data/"
+        COMMAND rsync -a --delete --delete-excluded ${recvx_bundle_excludes} "${RECVX_IOS_BUNDLE_DATA}/" "$<TARGET_BUNDLE_CONTENT_DIR:recvx-runtime>/data/"
         VERBATIM)
     endif()
+  endif()
+  set(RECVX_BUNDLE_DATA_EXCLUDE "" CACHE STRING "data/ subtrees left out of the app bundle (tools/data_profiles.py)")
+  option(RECVX_ENABLE_MODS "Runtime reads a mod directory (off for tvOS, tools/data_profiles.py)" ON)
+  if(NOT RECVX_ENABLE_MODS)
+    target_compile_definitions(recvx-runtime PRIVATE RECVX_NO_MODS=1)
   endif()
   # tools/build_native.py setzt major.minor.Commitzahl; ohne es gilt die Projektversion.
   set(RECVX_BUILD_VERSION "${PROJECT_VERSION}" CACHE STRING "Runtime version string")

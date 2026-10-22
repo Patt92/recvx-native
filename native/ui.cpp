@@ -937,7 +937,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         if((menu.examining||menu.pickup)&&selected_id&&selected_id<145){
             const auto source=menu.pickup?menu.pickup:menu.inspection.running()?menu.inspection.item():selected_id;
             const auto id=inspection_model_id(source);
-            if(!item_packets_.count(id)){auto file=mods_/"items"/(asset_number(id)+".bin");if(!std::filesystem::is_regular_file(file))file=data_/"archives/ITEM1"/(asset_number(id-1)+".bin");item_packets_[id]=read_asset_file(file,8*1024*1024);}
+            if(!item_packets_.count(id)){auto file=mods_/"items"/(asset_number(id)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives/ITEM1"/(asset_number(id-1)+".bin");item_packets_[id]=read_asset_file(file,8*1024*1024);}
             if(!item_models_.count(source)){auto object=decode_item_asset(item_packets_[id],inspection_geometry(item_packets_[id],source));apply_texture_files(object,data_,mods_,std::filesystem::path("items")/asset_number(id));item_models_[source]=std::move(object);}
             auto object=menu.inspection.running()?decode_item_asset(item_packets_[id],inspection_geometry(item_packets_[id],source,source==menu.inspection.source()?menu.opening_frame:0)):item_models_[source];
             if(menu.inspection.running())object.textures=item_models_[source].textures;
@@ -959,7 +959,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         }
         if(menu.files&&menu.file_list&&!menu.file_entering){
             const unsigned id=139;
-            if(!item_packets_.count(id)){auto file=mods_/"items"/(asset_number(id)+".bin");if(!std::filesystem::is_regular_file(file))file=data_/"archives/ITEM1"/(asset_number(id-1)+".bin");item_packets_[id]=read_asset_file(file,8*1024*1024);}
+            if(!item_packets_.count(id)){auto file=mods_/"items"/(asset_number(id)+".bin");if(mods_.empty()||!std::filesystem::is_regular_file(file))file=data_/"archives/ITEM1"/(asset_number(id-1)+".bin");item_packets_[id]=read_asset_file(file,8*1024*1024);}
             auto folder=menu.file_folder.scene(item_packets_[id],inv);apply_texture_files(folder,data_,mods_,std::filesystem::path("items")/asset_number(id));
             NJS_MATRIX rotation;inspection_rotation(rotation,inspection_default_angles(139),{});
             NJS_MATRIX view;njUnitMatrix(&view);njTranslate(&view,0,0,8);njMultiMatrix(&view,&rotation);

@@ -87,7 +87,11 @@ Options options(int argc,char** argv){
         auto value=[&](){if(i+1>=argc)throw std::runtime_error("missing value for "+arg);return std::string(argv[++i]);};
         auto number=[&](){const auto text=value();if(text.empty()||text.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("invalid integer for "+arg);return std::stoull(text);};
         if(arg=="--data"){o.data=fs::u8path(value());o.data_explicit=true;}
+#if defined(RECVX_NO_MODS)
+        else if(arg=="--mods")throw std::runtime_error("this platform build has no mod support");
+#else
         else if(arg=="--mods")o.mods=fs::u8path(value());
+#endif
         else if(arg=="--replay")o.replay=fs::u8path(value());
         else if(arg=="--state")o.state=fs::u8path(value());
         else if(arg=="--debug-config")o.debug_config=fs::u8path(value());
@@ -222,7 +226,9 @@ static void apply_ios_locations(Options& o){
         o.data=documents/"data";
         if(char* base=SDL_GetBasePath()){const auto bundled=fs::u8path(base)/"data";SDL_free(base);if(fs::is_regular_file(bundled/"native-data.version"))o.data=bundled;}
     }
+#if !defined(RECVX_NO_MODS)
     if(o.mods.empty())o.mods=documents/"mods";
+#endif
 }
 #endif
 static int recvx_runtime_main(int argc,char** argv){
@@ -249,7 +255,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
             recvx::InputManager devices(input_config);std::cout<<devices.controllers()<<" mapped controller(s), "<<SDL_NumJoysticks()<<" joystick device(s)\n";
             for(int i=0;i<SDL_NumJoysticks();++i)std::cout<<i<<": "<<SDL_JoystickNameForIndex(i)<<" ("<<(SDL_IsGameController(i)?"gamepad mapped":"mapping required")<<")\n";return 0;}
+#if !defined(RECVX_NO_MODS)
         if(args.mods.empty())args.mods=args.data.parent_path()/"mods";
+#endif
         if(args.verify_players)return verify_players(args.data);
         if(!args.preview&&!args.verify&&(!fs::is_regular_file(args.data/"native-data.version")||!fs::is_directory(args.data/"rooms")))throw std::runtime_error("exported native data missing: run recvx-assets on the extracted disc, or use --preview for archive inspection");
         recvx::RoomArchive rooms(args.data);
@@ -281,7 +289,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         std::unique_ptr<recvx::GameUi> ui;if(!args.preview)ui=std::make_unique<recvx::GameUi>(args.data,args.mods);if(ui)menu.message_source=[&](unsigned index){return ui->system_message(index);};
         std::unique_ptr<recvx::EventVm> events;
         std::unique_ptr<recvx::PlayerAsset> player;
-        if(!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(args.player)+".bin");player=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,args.player,args.preview));if(!player->has_motion(args.motion))throw std::runtime_error("requested body motion is unavailable");}
+        if(!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(args.player)+".bin");player=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,args.player,args.preview));if(!player->has_motion(args.motion))throw std::runtime_error("requested body motion is unavailable");}
         std::size_t room_index=rooms.size(),camera_index=0,stage_triangles=0,texture_base=0,attachment_base=0,motion=args.motion;
         bool hair_reset=true,hair_listed=false,hair_drawn=false;NJS_POINT3 hair_root{};std::vector<std::array<std::int32_t,2>> hair_angles; // obwp[2] bhObjClpn state; hair_listed: obwp[2] in sys->ob_hlg (objitm.c:363-371), hair_root: op->px (objitm.c:338)
         // owP/objP[0..5] des letzten bhCalcModel(plp): bhSetPlayer (player.c:836-840) bzw. der letzte
@@ -443,7 +451,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                     args.player=10+target;
                     if(!args.no_player){
                         const auto override=args.mods/"players"/(recvx::asset_number(args.player)+".bin");
-                        player=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,args.player));
+                        player=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,args.player));
                         if(!player->has_motion(motion))throw std::runtime_error("bhPlayerChangeSet: player motion "+std::to_string(motion)+" missing");
                         combat=recvx::CombatController(args.data,args.mods);
                     }
@@ -452,7 +460,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             }
             auto room_name=rooms.name(room_index);room_name.replace(room_name.size()-3,3,"RDT");
             const auto override=args.mods/"rooms"/room_name;
-            const auto bytes=fs::is_regular_file(override)?recvx::read_asset_file(override,64*1024*1024):rooms.load(room_index,64*1024*1024);
+            const auto bytes=!args.mods.empty()&&fs::is_regular_file(override)?recvx::read_asset_file(override,64*1024*1024):rooms.load(room_index,64*1024*1024);
             scene=recvx::decode_scene(bytes);recvx::apply_texture_files(scene,args.data,args.mods,fs::path("rooms")/room_name.substr(0,room_name.size()-4));
 
             if(scene.cameras.empty())throw std::runtime_error("room contains no camera");
@@ -732,7 +740,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==target)target_index=i;
                 if(!target_index)throw std::runtime_error("door room missing: "+target);
                 auto name=target;name.replace(name.size()-3,3,"RDT");const auto override=args.mods/"rooms"/name;
-                const auto bytes=fs::is_regular_file(override)?recvx::read_asset_file(override,64*1024*1024):rooms.load(*target_index,64*1024*1024);
+                const auto bytes=!args.mods.empty()&&fs::is_regular_file(override)?recvx::read_asset_file(override,64*1024*1024):rooms.load(*target_index,64*1024*1024);
                 const auto target_scene=recvx::decode_scene(bytes);
                 if(target_scene.cameras.empty())throw std::runtime_error("door destination has no camera: "+target);
                 if(!target_scene.spawns.empty()&&destination.spawn>=target_scene.spawns.size())throw std::runtime_error("DoorCall spawn "+std::to_string(destination.spawn)+" outside "+target+" position table");
@@ -754,7 +762,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         auto debug_room=[&](std::size_t destination,unsigned spawn){
             if(destination>=rooms.size())throw std::runtime_error("Raum nicht vorhanden");
             auto name=rooms.name(destination);name.replace(name.size()-3,3,"RDT");const auto override=args.mods/"rooms"/name;
-            const auto bytes=fs::is_regular_file(override)?recvx::read_asset_file(override,64*1024*1024):rooms.load(destination,64*1024*1024);
+            const auto bytes=!args.mods.empty()&&fs::is_regular_file(override)?recvx::read_asset_file(override,64*1024*1024):rooms.load(destination,64*1024*1024);
             const auto target=recvx::decode_scene(bytes);if(target.cameras.empty()||(!target.spawns.empty()&&spawn>=target.spawns.size()))throw std::runtime_error("Spawn oder Kamera nicht vorhanden");
             // Preflight the actual target resources before replacing a live room.
             auto candidate=target.spawns.empty()?recvx::SceneSpawn{}:target.spawns[spawn];std::size_t candidate_motion=42;std::int64_t candidate_frame=0;recvx::AudioMixer candidate_audio(args.data,args.mods);candidate_audio.mount_sound_afs(recvx::RoomIdentity::parse(name.substr(0,name.size()-4)).stage);
@@ -890,7 +898,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(!world)return std::nullopt;return world->computer_character(chr_no,motion_no,frame_no);};
         unsigned give_count=1;
         debug.add({"character","Charakter","OK: Modell wechseln und aktuellen Raum neu laden; globale Flags bleiben.",[]{return std::vector<recvx::DebugChoice>{{10,"Claire / SYSTEM 0010"},{11,"Chris / SYSTEM 0011"},{12,"Spieler / SYSTEM 0012"},{13,"Spieler / SYSTEM 0013"},{14,"Spieler / SYSTEM 0014"}};},[&]{return args.player;},[&](unsigned value){
-            const auto override=args.mods/"players"/(recvx::asset_number(value)+".bin");auto body=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,value));if(!body->has_motion(42))throw std::runtime_error("Modell ohne Idle-Bewegung");
+            const auto override=args.mods/"players"/(recvx::asset_number(value)+".bin");auto body=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,value));if(!body->has_motion(42))throw std::runtime_error("Modell ohne Idle-Bewegung");
             menu.reset(inventory);auto old=std::move(player);const auto old_id=args.player,old_owner=inventory.player;player=std::move(body);args.player=value;inventory.player=value==11?1:value==12?2:0;
             try{debug_room(room_index,unsigned(args.spawn));}catch(...){player=std::move(old);args.player=old_id;inventory.player=old_owner;throw;}combat=recvx::CombatController(args.data,args.mods);return std::string("Charakter gewechselt");}});
         debug.add({"equip","Equip / Waffe","OK: ausruesten; fehlende Waffe wird mit Originalmenge hinzugefuegt.",[&]{std::vector<recvx::DebugChoice> result={{0,"Keine"}};for(unsigned id=1;id<=145;++id)if(itemdata[id].type&1)result.push_back({id,ui?ui->item_name(id):std::to_string(id)});return result;},[&]{return inventory.slots()[0]?recvx::Inventory::id(inventory.slots()[inventory.slots()[0]]):0;},equipment});
@@ -922,7 +930,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             const auto identity=recvx::RoomIdentity{unsigned(std::uint8_t(snap.save.stg_no)),unsigned(std::uint8_t(snap.save.rom_no)),0}.name().substr(0,6);
             if(snap.host.room.rfind(identity,0)!=0)throw std::runtime_error("Snapshot-Raum passt nicht zu stg_no/rom_no");
             const auto previous_inventory=inventory;const auto previous_body=args.player;std::unique_ptr<recvx::PlayerAsset> previous_player;
-            if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto body=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
+            if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto body=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
                 previous_player=std::move(player);player=std::move(body);args.player=snap.host.body;}
             recvx::restore_inventory(snap,inventory);const auto repaired_file_items=inventory.repair_owned_file_items();restoring=snap;if(events)events->cancel_item_request();
             audio.set_room_sound_case(snap.host.room_sound_case); // Hoststand: dasselbe Raumklangpaket wie beim Sichern (Format 1: Fall 0 wie der originale Retry)
@@ -939,7 +947,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==snap.host.room)target=i;
             if(!target)throw std::runtime_error("Spielstand-Raum fehlt: "+snap.host.room);
             const auto previous_inventory=inventory;const auto previous_body=args.player;std::unique_ptr<recvx::PlayerAsset> previous_player;
-            if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto loaded=fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
+            if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto loaded=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
                 previous_player=std::move(player);player=std::move(loaded);args.player=snap.host.body;}
             recvx::restore_inventory(snap,inventory);inventory.repair_owned_file_items();restoring=snap;if(events)events->cancel_item_request();
             first_game_start=true; /* bup_00.c:434 tk_flg 0x300010 -> bhSysCallTitle -> bhSysCallOpening -> bhFirstGameStart (system.c:422) */

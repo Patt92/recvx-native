@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import sys
 
+from data_profiles import copy_data
+
 ROOT = Path(__file__).resolve().parents[1]
 
 PACKAGE_README = """RECVX Native - Entwicklungsbuild
@@ -103,7 +105,7 @@ def main():
         data_destination = contents / "Resources/data"
         run("codesign", "--force", "--sign", "-", str(frameworks / library_name))
         run("codesign", "--force", "--sign", "-", str(binaries / "recvx-runtime"))
-    shutil.copytree(data_root, data_destination)
+    copy_data(data_root, data_destination, args.platform)
     mods_destination = output / "mods"
     mods_destination.mkdir()
     shutil.copy2(ROOT / "docs/NATIVE_ASSETS.md", output / "ASSETS-AND-MODS.md")

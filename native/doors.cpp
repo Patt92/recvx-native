@@ -19,7 +19,7 @@ void DoorSequence::begin(const std::filesystem::path& data,const std::filesystem
     direct_=(request.attribute&0x80000000u)||request.type==255;
     if(direct_){request_=request;active_=false;finished_=true;skipped_=false;ticks_=0;sound_bank_=0;sounds_.clear();sound_commands_.clear();return;}
     const auto override=mods/"doors"/(asset_number(request.type)+".bin");
-    auto bytes=read_asset_file(std::filesystem::is_regular_file(override)?override:data/"archives/MRY"/(asset_number(71+request.type)+".bin"),8*1024*1024);
+    auto bytes=read_asset_file(!mods.empty()&&std::filesystem::is_regular_file(override)?override:data/"archives/MRY"/(asset_number(71+request.type)+".bin"),8*1024*1024);
     BinaryView v(bytes);if(v.u32(0)!=0x4341504d)throw std::runtime_error("door packet requires MPAC");
     std::size_t p=v.relative(4,v.u32(4),4);std::array<std::size_t,4> offsets{},sizes{};
     for(unsigned i=0;i<4;++i){sizes[i]=v.u32(p);offsets[i]=p+4;v.require(offsets[i],sizes[i]);p=offsets[i]+sizes[i];}

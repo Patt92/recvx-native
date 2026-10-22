@@ -50,19 +50,21 @@ def demux_pcm(path):
     return rate, channels, pcm
 
 
-def cook(path, output, ffmpeg, ffprobe):
+def cook(path, output, ffmpeg, ffprobe, scale=1.0, quality=2):
     probe = json.loads(subprocess.check_output([ffprobe, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,r_frame_rate', '-of', 'json', str(path)]))['streams'][0]
     num, den = map(int, probe['r_frame_rate'].split('/'))
     rate, channels, pcm = demux_pcm(path)
+    # Verkleinerte Fassung (prepare_native_data --compressed): gerade Kantenlaengen fuer MJPEG.
+    width, height = (max(2, int(probe[k] * scale) // 2 * 2) for k in ('width', 'height')) if scale != 1.0 else (probe['width'], probe['height'])
     partial = output.with_suffix('.partial')
     partial.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() or partial.exists():
         raise FileExistsError(output)
     count = 0
-    command = [ffmpeg, '-v', 'error', '-i', str(path), '-map', '0:v:0', '-an', '-fps_mode', 'passthrough', '-threads', '2', '-c:v', 'mjpeg', '-q:v', '2', '-f', 'image2pipe', '-']
+    command = [ffmpeg, '-v', 'error', '-i', str(path), '-map', '0:v:0', '-an', '-fps_mode', 'passthrough', '-threads', '2', *(['-vf', f'scale={width}:{height}:flags=lanczos'] if scale != 1.0 else []), '-c:v', 'mjpeg', '-q:v', str(quality), '-f', 'image2pipe', '-']
     try:
         with partial.open('wb') as file, subprocess.Popen(command, stdout=subprocess.PIPE) as process:
-            file.write(b'RVV1' + struct.pack('<8I', probe['width'], probe['height'], num, den, 0, rate, channels, len(pcm)//(channels*2)))
+            file.write(b'RVV1' + struct.pack('<8I', width, height, num, den, 0, rate, channels, len(pcm)//(channels*2)))
             file.write(pcm)
             pending = bytearray()
             while chunk := process.stdout.read(65536):
@@ -88,7 +90,7 @@ def cook(path, output, ffmpeg, ffprobe):
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
-    return {'source': path.name, 'source_sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'frames': count, 'fps': [num, den], 'audio_frames': len(pcm)//(channels*2), 'rate': rate, 'seconds': video_seconds}
+    return {'source': path.name, 'source_sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'frames': count, 'fps': [num, den], 'audio_frames': len(pcm)//(channels*2), 'rate': rate, 'seconds': video_seconds, 'width': width, 'height': height, 'quality': quality}
 
 
 def main():

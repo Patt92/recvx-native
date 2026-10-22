@@ -32,20 +32,46 @@ std::size_t system_texture_bundle_offset(const std::vector<std::uint8_t>& entry)
     }
     return std::size_t(-1);
 }
+// RLE-Pakete: Kopfbyte Bit7 = Wiederholung eines Bildpunkts, sonst Rohfolge; je (Kopf&0x7f)+1 Bildpunkte.
+static std::vector<std::uint8_t> rle_tga_pixels(const BinaryView& v,std::size_t in,std::size_t size,unsigned stride,const std::filesystem::path& path){
+    std::vector<std::uint8_t> raw(size);std::size_t out=0;
+    while(out<raw.size()){v.require(in,1);const auto head=v.u8(in++);const std::size_t n=std::size_t(head&0x7f)+1;
+        if(out+n*stride>raw.size())throw std::runtime_error("RLE TGA packet exceeds the image: "+path.string());
+        if(head&0x80){v.require(in,stride);for(std::size_t k=0;k<n;++k)for(unsigned c=0;c<stride;++c)raw[out+k*stride+c]=v.u8(in+c);in+=stride;}
+        else{v.require(in,n*stride);for(std::size_t k=0;k<n*stride;++k)raw[out+k]=v.u8(in+k);in+=n*stride;}
+        out+=n*stride;}
+    return raw;
+}
+// Inhaltsschluessel der HD-Ersetzung: die Bytes der unkomprimierten gekochten TGA. Ein RLE-Baum
+// (prepare_native_data.py --compressed) traegt denselben Kopf mit Typ 10; Kopf mit Typ 2 plus
+// entpackte Bildpunkte ergibt genau die Datei, aus der er entstand.
+static std::vector<std::uint8_t> cooked_tga_identity(const std::filesystem::path& path){
+    auto bytes=read_asset_file(path,256*1024*1024+65536);BinaryView v(bytes);v.require(0,18);
+    if(v.u8(2)!=10)return bytes;
+    const unsigned stride=v.u8(16)/8;const std::size_t start=18+v.u8(0),size=std::size_t(v.u16(12))*v.u16(14)*stride;
+    std::vector<std::uint8_t> raw(bytes.begin(),bytes.begin()+std::ptrdiff_t(start));raw[2]=2;
+    const auto pixels=rle_tga_pixels(v,start,size,stride,path);raw.insert(raw.end(),pixels.begin(),pixels.end());
+    return raw;
+}
 // Texture files and decoded original textures share one alpha domain: the
 // host 8-bit alpha whose blend factor is alpha/255.  Ps2AlphaIsHalf's GS
 // 0..128 ratio is the same value over 128, i.e. the same factor, so a palette
 // keeps its file alpha and the TGA carries it unchanged.
 SceneTexture read_tga(const std::filesystem::path& path){
     const auto bytes=read_asset_file(path,256*1024*1024+65536);BinaryView v(bytes);v.require(0,18);
-    if(v.u8(1)!=0||v.u8(2)!=2||(v.u8(16)!=24&&v.u8(16)!=32))throw std::runtime_error("texture must be uncompressed RGB/RGBA TGA: "+path.string());
+    // Typ 2 = unkomprimiert, Typ 10 = RLE (data_compressed, prepare_native_data.py --compressed).
+    if(v.u8(1)!=0||(v.u8(2)!=2&&v.u8(2)!=10)||(v.u8(16)!=24&&v.u8(16)!=32))throw std::runtime_error("texture must be RGB/RGBA TGA (raw or RLE): "+path.string());
     SceneTexture t;t.width=v.u16(12);t.height=v.u16(14);const auto stride=v.u8(16)/8;
     if(!t.width||!t.height||t.width>8192||t.height>8192)throw std::runtime_error("TGA dimensions outside 1..8192");
     const auto start=18+v.u8(0);const auto descriptor=v.u8(17);if(descriptor&0xc0)throw std::runtime_error("interleaved TGA is unsupported");
-    const auto count=std::size_t(t.width)*t.height;v.require(start,count*stride);t.pixels.resize(count);
+    const auto count=std::size_t(t.width)*t.height;t.pixels.resize(count);
+    // RLE (Typ 10) entpackt zur Bildpunktfolge der unkomprimierten Datei.
+    std::vector<std::uint8_t> raw;const std::uint8_t* src=nullptr;
+    if(v.u8(2)==10){raw=rle_tga_pixels(v,start,count*stride,stride,path);src=raw.data();}
+    else{v.require(start,count*stride);src=bytes.data()+start;}
     for(unsigned y=0;y<t.height;++y)for(unsigned x=0;x<t.width;++x){
-        const auto at=start+(std::size_t(y)*t.width+x)*stride;const auto row=(descriptor&32)?y:t.height-1-y,col=(descriptor&16)?t.width-1-x:x;
-        t.pixels[std::size_t(row)*t.width+col]=(stride==4?std::uint32_t(v.u8(at+3))<<24:0xff000000)|(std::uint32_t(v.u8(at+2))<<16)|(std::uint32_t(v.u8(at+1))<<8)|v.u8(at);
+        const auto at=(std::size_t(y)*t.width+x)*stride;const auto row=(descriptor&32)?y:t.height-1-y,col=(descriptor&16)?t.width-1-x:x;
+        t.pixels[std::size_t(row)*t.width+col]=(stride==4?std::uint32_t(src[at+3])<<24:0xff000000)|(std::uint32_t(src[at+2])<<16)|(std::uint32_t(src[at+1])<<8)|src[at];
     }
     return t;
 }
@@ -63,7 +89,7 @@ void apply_texture_files(Scene& scene,const std::filesystem::path& data,const st
         auto replace=[&](const std::filesystem::path& file){const bool u=scene.textures[i].clamp_u,v=scene.textures[i].clamp_v;scene.textures[i]=read_tga(file);scene.textures[i].clamp_u=u;scene.textures[i].clamp_v=v;};
         if(!mods.empty()&&std::filesystem::is_regular_file(mods/relative)){replace(mods/relative);continue;}
         if(!std::filesystem::is_regular_file(data/relative))continue;
-        if(!mods.empty()){const auto hd=mods/"textures"/"hd"/(md5_hex(read_asset_file(data/relative,256*1024*1024+65536))+".tga");
+        if(!mods.empty()){const auto hd=mods/"textures"/"hd"/(md5_hex(cooked_tga_identity(data/relative))+".tga");
             if(std::filesystem::is_regular_file(hd)){replace(hd);continue;}}
         replace(data/relative);
     }

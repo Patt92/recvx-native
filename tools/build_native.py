@@ -14,6 +14,10 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from data_profiles import profile as data_profile  # noqa: E402
+
+
 def _project_version():
     # Einzige Quelle: project(... VERSION x.y.z) in CMakeLists.txt; die Buildnummer
     # zaehlt die Commits (git rev-list --count HEAD), damit jede App ihre Version traegt.
@@ -530,7 +534,9 @@ def main():
             f'-DCMAKE_OSX_SYSROOT={IOS_TARGETS[target]}', '-DCMAKE_OSX_ARCHITECTURES=arm64',
             f'-DCMAKE_OSX_DEPLOYMENT_TARGET={IOS_DEPLOYMENT_TARGET}', '-DRECVX_FETCH_SDL2=ON', '-DBUILD_TESTING=OFF',
             f'-DRECVX_BUILD_VERSION={FULL_VERSION}', '-DRECVX_ENABLE_OPENGL=OFF', f'-DRECVX_IOS_BUNDLE_ID={args.ios_bundle_id}',
-            f'-DRECVX_IOS_BUNDLE_DATA={data if args.ios_bundle_data else ""}')
+            f'-DRECVX_IOS_BUNDLE_DATA={data if args.ios_bundle_data else ""}',
+            f'-DRECVX_BUNDLE_DATA_EXCLUDE={";".join(data_profile(target)["exclude"])}',
+            f'-DRECVX_ENABLE_MODS={"ON" if data_profile(target)["mods"] else "OFF"}')
         run(cmake, '--build', build, '--config', 'Release', '--parallel', args.jobs)
         app = build / 'recvx-runtime.app'
         run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT, '--build-dir', build, '--binary', app / 'recvx-runtime')

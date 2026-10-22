@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from iso9660 import extract
 from host_tools import find as find_host_tool
+import cook_movies as movie_cooker
 
 
 def digest(path):
@@ -162,6 +163,70 @@ def export_iso(images, root, exporter, ffmpeg, ffprobe, jobs):
           f"{result['files']} files / {result['bytes']} bytes in {root}.", flush=True)
 
 
+# Komprimierter Datenbaum (--compressed): TGA als RLE (Typ 10, bildpunktgleich), Filme verkleinert neu
+# aus den PSS gekocht. Die PSS-Quellen und das Raumarchiv liest die Runtime nicht (native/movie.cpp:18,
+# native/room.cpp:65); sie bleiben draussen.
+COMPRESSED_SKIP = ('files/MOVIE', 'archives/RDX_LNK')
+
+
+def rle_tga(job):
+    from PIL import Image
+    source, target = job
+    with Image.open(source) as image:
+        image.load()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        image.save(target, compression='tga_rle')
+    with Image.open(source) as a, Image.open(target) as b:
+        if a.mode != b.mode or a.size != b.size or a.tobytes() != b.tobytes():
+            raise RuntimeError(f'RLE TGA differs from its source: {source}')
+    return source.stat().st_size, target.stat().st_size
+
+
+def compress_tree(source, root, ffmpeg, ffprobe, jobs, movie_scale, movie_quality):
+    from concurrent.futures import ThreadPoolExecutor
+    skip = {source / part for part in COMPRESSED_SKIP} | {source / 'movies', source / 'asset-manifest.json'}
+    textures = []
+    for path in sorted(source.rglob('*')):
+        if any(path == s or s in path.parents for s in skip) or not path.is_file():
+            continue
+        relative = path.relative_to(source)
+        if relative.parts[0] == 'textures' and path.suffix.lower() == '.tga':
+            textures.append((path, root / relative))
+        else:
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, root / relative)
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        sizes = list(pool.map(rle_tga, textures, chunksize=64))
+    print(f'RLE textures: {len(sizes)} files, {sum(a for a, _ in sizes)} -> {sum(b for _, b in sizes)} bytes.', flush=True)
+    movies = sorted((source / 'files/MOVIE').glob('MV_*.PSS'))
+    if not movies:
+        raise RuntimeError(f'--compressed recooks the movies and needs the PSS sources in {source / "files/MOVIE"}')
+    for path in movies:
+        out = root / 'movies' / f'{int(path.stem.split("_")[1]):04}.rvv'
+        record = movie_cooker.cook(path, out, ffmpeg, ffprobe, movie_scale, movie_quality)
+        out.with_suffix('.json').write_text(json.dumps(record, indent=2) + '\n')
+        print(f'{out}: {record["width"]}x{record["height"]} q{movie_quality}, {out.stat().st_size} bytes', flush=True)
+
+
+def publish_compressed(source, root, ffmpeg, ffprobe, jobs, movie_scale, movie_quality):
+    if root.exists():
+        raise RuntimeError(f'destination exists; --compressed only creates a new data tree: {root}')
+    tools = [find_host_tool(ffmpeg, ROOT), find_host_tool(ffprobe, ROOT)]
+    if not all(tools):
+        raise RuntimeError('--compressed recooks the movies and needs ffmpeg and ffprobe')
+    stage = Path(tempfile.mkdtemp(prefix=f'.{root.name}-staging-', dir=staging_parent(root)))
+    try:
+        cooked = stage / root.name
+        compress_tree(source, cooked, *tools, jobs, movie_scale, movie_quality)
+        result = manifest(cooked)
+        result['compression'] = {'textures': 'tga-rle', 'movie_scale': movie_scale, 'movie_quality': movie_quality}
+        (cooked / 'asset-manifest.json').write_text(json.dumps(result, indent=2) + '\n')
+        cooked.rename(root)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    print(f"Compressed tree: {result['files']} files / {result['bytes']} bytes in {root}.", flush=True)
+
+
 def default_exporter():
     # build.sh builds into build/macos-arm64 on macOS, build/native elsewhere.
     for directory in ('build/native', 'build/macos-arm64'):
@@ -183,6 +248,11 @@ def main():
     p.add_argument('--ffprobe', default='ffprobe', help='used by --iso to cook the movies')
     p.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8),
                    help='parallel world texture exports for --iso')
+    p.add_argument('--compressed', action='store_true',
+                   help='write a compressed tree (RLE TGA, downscaled movies), e.g. --output data_compressed')
+    p.add_argument('--from-data', type=Path, help='with --compressed: derive from an existing cooked tree instead of --iso')
+    p.add_argument('--movie-scale', type=float, default=0.5, help='--compressed: movie size factor (default 0.5)')
+    p.add_argument('--movie-quality', type=int, default=5, help='--compressed: MJPEG -q:v, 2 best..31 (default 5)')
     mode = p.add_mutually_exclusive_group()
     mode.add_argument('--resume', action='store_true', help='Hash/verify an already completed export against the source dump.')
     mode.add_argument('--refresh', action='store_true', help='Rebuild the manifest after cooking new loose assets; no source dump is read.')
@@ -209,6 +279,25 @@ def main():
             raise RuntimeError('asset manifest differs from the actual file tree')
         print(f"Verified {current['files']} files / {current['bytes']} bytes.")
         return
+    if a.compressed:
+        if bool(a.iso) == bool(a.from_data) or a.source or a.refresh or a.verify or a.resume:
+            p.error('--compressed needs exactly one of --iso or --from-data')
+        if not 0.1 <= a.movie_scale <= 1.0 or not 2 <= a.movie_quality <= 31:
+            p.error('--movie-scale must be 0.1..1.0 and --movie-quality 2..31')
+        if a.from_data:
+            if not (a.from_data / 'native-data.version').is_file():
+                p.error(f'--from-data needs a cooked tree (missing {a.from_data / "native-data.version"})')
+            publish_compressed(a.from_data.resolve(), root, a.ffmpeg, a.ffprobe, a.jobs, a.movie_scale, a.movie_quality)
+            return
+        full = Path(tempfile.mkdtemp(prefix=f'.{root.name}-full-', dir=staging_parent(root))) / 'data'
+        try:
+            export_iso(a.iso, full, a.exporter, a.ffmpeg, a.ffprobe, a.jobs)
+            publish_compressed(full, root, a.ffmpeg, a.ffprobe, a.jobs, a.movie_scale, a.movie_quality)
+        finally:
+            shutil.rmtree(full.parent, ignore_errors=True)
+        return
+    if a.from_data:
+        p.error('--from-data applies only to --compressed')
     if a.iso:
         export_iso(a.iso, root, a.exporter, a.ffmpeg, a.ffprobe, a.jobs)
         return

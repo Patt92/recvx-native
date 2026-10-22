@@ -43,3 +43,4 @@ objdiff.json
 # Docker builder output (compose.yaml)
 /out/
 /snapshots/
+/data_compressed/
