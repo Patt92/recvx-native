@@ -559,6 +559,9 @@ static void en03_init(RECVX_ENEMY_WORK* w)
                    bleibt mtn_room deshalb 0. */
             }
         }
+        /* en03.c:688/694: weitere Spinnen lesen den gemeinsamen Anfuehrer
+           aus dem ersten aktiven EN03-Work, nicht aus dessen EXP0-Zustand. */
+        w->exp2 = s->leader;
         /* en03.c:708-734: acht Beinkinder auf die owP-Knoten BrokenParts[i]. */
         {
             if (!en03_sv || !en03_sv->create_child) { gap(w, "eneset.c:170 Kindwork (Bein) fehlt (en03)"); return; }
@@ -967,7 +970,7 @@ static void mv01(RECVX_ENEMY_WORK* w)
 /* en03.c:1314 MV02 — Drehung auf der Stelle. */
 static void mv02(RECVX_ENEMY_WORK* w)
 {
-    int dir;
+    int dir, timer;
     if (!rnd_mod(w, 63, &dir)) return;
     dir &= 1;
     switch (w->mode3) {
@@ -976,8 +979,10 @@ static void mv02(RECVX_ENEMY_WORK* w)
             w->mtn_no = (uint32_t)(dir + 6); w->frm_no = 0;
             w->hokan_count = 10; w->hokan_rate = 32768;
         }
-        if (!rnd_mod(w, 63, &dir)) return;
-        w->ct0 = dir;
+        /* en03.c:1332-1334: der zweite RNG-Zug setzt nur ct0;
+           das Vorzeichen bleibt vom ersten Zug (dir) abhaengig. */
+        if (!rnd_mod(w, 63, &timer)) return;
+        w->ct0 = timer;
         w->ayp = ((dir != 0) ? 1 : -1) * 819;
         w->mode3++;
         /* faellt durch */
@@ -1150,9 +1155,12 @@ static void mv05(RECVX_ENEMY_WORK* w)
 static void mv06(RECVX_ENEMY_WORK* w)
 {
     RECVX_EN03_STATE* s = st(w);
-    NJS_VECTOR up, ov;
+    NJS_VECTOR up, forward, ov;
     float out;
     up.x = s->h.m[4]; up.y = s->h.m[5]; up.z = s->h.m[6];
+    /* en03.c:1646: Kreuzprodukt mit EXP0_F(32..40), nicht der
+       Hochachse EXP0_F(16..24), die erst das Vorzeichen bestimmt. */
+    forward.x = s->h.m[8]; forward.y = s->h.m[9]; forward.z = s->h.m[10];
     switch (w->mode3) {
     case 0:
         if (xp1(w)) xp1(w)->flg |= 0x2;
@@ -1168,7 +1176,7 @@ static void mv06(RECVX_ENEMY_WORK* w)
         NJS_VECTOR dir;
         dir.x = s->dir.x; dir.y = s->dir.y; dir.z = s->dir.z;
         if (w->ct0 != 0) {
-            out = njOuterProduct(&up, &dir, &ov);
+            out = njOuterProduct(&forward, &dir, &ov);
             if (njInnerProduct(&up, &ov) > 0) w->ayp = (int)(10430.381f * asinf(out)) / w->ct0;
             else w->ayp = -(int)(10430.381f * asinf(out)) / w->ct0;
             njRotateY(bm(w), (Angle)(int16_t)w->ayp);

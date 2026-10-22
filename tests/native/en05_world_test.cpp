@@ -31,8 +31,27 @@ struct Fixture {
     void tick(){world.commit_player_joints(player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw)));
         world.set_simulation_flags(events.flags[6][0]);world.set_player_hp(inv.hp);world.tick();}
 };
+// Original en05.c:1721-1723: bhAddSpeed veraendert den Routenstart.
+// Isolierter Dienstvertragstest; keine Raum- oder Animationsannahme.
+static RECVX_ENEMY_VEC route_start;
+static int audit_player(RECVX_ENEMY_PLAYER* p){*p={};return 1;}
+static void audit_speed(RECVX_ENEMY_WORK* w,int){w->px+=3.0f;w->pz-=4.0f;}
+static int audit_route(const RECVX_ENEMY_VEC* a,const RECVX_ENEMY_VEC*,RECVX_ENEMY_VEC*){route_start=*a;return 255;}
+static void route_after_speed(){
+    RECVX_ENEMY_SERVICES base{};base.player_get=audit_player;
+    RECVX_EN05_SERVICES services{};services.add_speed=audit_speed;services.route_points=audit_route;
+    RECVX_EN05_STATE state{};RECVX_ENEMY_WORK w{};
+    w.sv=&base;w.exp0=&state;w.mode0=1;w.mode2=2;w.mode3=1;
+    w.px=10.0f;w.py=100.0f;w.pz=20.0f;w.ct0=1;
+    // Hoehenabstand verhindert Sichtsuche; mode1=0 verhindert Brain.
+    // Der fehlende Wasserdienst beendet den Hauptnachlauf erst NACH MV02.
+    recvx_en05_bind(&services);recvx_en05(&w);recvx_en05_bind(nullptr);
+    check(route_start.x==13.0f&&route_start.y==100.0f&&route_start.z==16.0f,
+          "MV02 route must start after bhAddSpeed (original en05.c:1721-1723)");
+}
 int main(int argc,char** argv){try{
     check(argc==2,"data required");_Make_SinTable();const std::filesystem::path data=argv[1];
+    route_after_speed();
     {
         Fixture f(data);f.tick();auto& a=f.enemy(0);auto& b=f.enemy(1);
         for(auto* e:{&a,&b}){

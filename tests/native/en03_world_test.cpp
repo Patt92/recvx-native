@@ -40,8 +40,37 @@ struct Fixture {
         if(!world.unbound_enemy_routines().empty()){report(phase);throw std::runtime_error(std::string(phase)+": unerwartete Luecke");}
     }
 };
+// en03.c:1318/1332/1334: Richtung und Dauer sind getrennte RNG-Zuege.
+static int rng_calls=0, rng_first=0, rng_second=0;
+static int32_t audit_rng(){return rng_calls++ == 0 ? rng_first : rng_second;}
+static void mv02_rng(const std::filesystem::path& data){
+    for(int direction=0;direction<2;++direction){
+        Fixture f(data);auto& w=f.spider();
+        auto services=*w.sv;const auto* saved=w.sv;services.random_next=audit_rng;
+        w.sv=&services;w.mode0=1;w.mode1=0;w.mode2=2;w.mode3=0;
+        rng_first=direction;rng_second=direction?0:5;rng_calls=0;
+        {RoomWorld::EnemyCallbackFrame scope(&f.world);recvx_en03(&w);}
+        w.sv=saved;
+        check(rng_calls==2,"MV02 muss genau zwei RNG-Zuege ausfuehren");
+        check(w.mtn_no==unsigned(6+direction),"MV02 Motion folgt erstem RNG-Zug");
+        check(w.ayp==(direction?819:-819),"MV02 Drehrichtung folgt erstem, nicht zweitem RNG-Zug");
+        check(w.ct0==rng_second-1,"MV02 Dauer folgt zweitem RNG-Zug und Postdekrement");
+    }
+}
 int main(int argc,char** argv){try{
     check(argc==2,"data required");_Make_SinTable();const std::filesystem::path data=argv[1];
+    mv02_rng(data);
+    {
+        // en03.c:1646-1659: vorwaerts (0,0,1) kreuz Ziel (1,0,0)
+        // ergibt +Y und Winkel 16384 / 12 = 1365 vor der Rotation.
+        Fixture f(data);auto& w=f.spider();
+        auto* s=static_cast<RECVX_EN03_STATE*>(w.exp0);
+        njUnitMatrix(reinterpret_cast<NJS_MATRIX*>(s->h.m));
+        s->dir={1.0f,0.0f,0.0f};s->h.target={12.0f,0.0f,0.0f};
+        w.mode0=1;w.mode1=0;w.mode2=6;w.mode3=0;
+        {RoomWorld::EnemyCallbackFrame scope(&f.world);recvx_en03(&w);}
+        check(w.ayp==1365,"MV06 Kreuzprodukt nutzt Vorwaertsachse, Vorzeichen Hochachse");
+    }
     {
         // bhEne03_Init (en03.c:625): Work, exp0/exp1, Anfuehrer, acht Beinkinder,
         // fuenfzehn EN24-Kinder, Schatten 258, clp_jno, Kapselfelder.
@@ -63,6 +92,15 @@ int main(int argc,char** argv){try{
         // RM_6090 stellt drei EN03 (ein ETTY-Satz je Spinne); jedes Init legt
         // seine eigenen acht Beinkinder und fuenfzehn EN24-Kinder an.
         check(f.spiders()>=1&&f.count(31)==8u*f.spiders()&&f.count(24)==15u*f.spiders(),"Init: Kinder je EN03-Work");
+        // en03.c:686-704: alle Koerper teilen den ersten Anfuehrer via exp2.
+        check(f.count(3)==f.spiders()+1u,"Init: genau ein gemeinsamer Anfuehrer");
+        auto& table=f.world.enemy_table();
+        for(unsigned i=0;i<table.ewk_n&&i<RECVX_ENEMY_SLOTS;++i){
+            auto* body=table.slot[i];
+            if(!body||body->id!=3||!(body->flg&1u)||(body->flg&0x4000000u))continue;
+            auto* state=static_cast<RECVX_EN03_STATE*>(body->exp0);
+            check(body->exp2==f.leader()&&state->leader==f.leader(),"Init: exp2 teilt Anfuehrer");
+        }
         for(int i=0;i<8;++i){
             auto* c=s->legs[i];
             check(c!=nullptr&&c->id==31&&(c->flg&1u),"Init: Beinkind vorhanden");

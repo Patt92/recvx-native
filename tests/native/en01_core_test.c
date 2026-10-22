@@ -196,6 +196,29 @@ static void work_init(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* p)
 /* ===========================================================================
    1 — ene01_typ_tbl (en01.c:2541) und die i < 30 Suchgrenze (en01.c:2696)
    =========================================================================== */
+/* en01.c:2677-2692 rettet nur sieben Kindzeiger und den Schattenslot.
+   EXP0+0x70 wird genullt, damit kein alter Sichtlinien-Treffer bleibt. */
+static void test_reinit_clears_line_hit(void)
+{
+    RECVX_ENEMY_WORK w;
+    RECVX_EN01_EXP0 p;
+    bind_services(0u, 1);
+    reset_logs();
+    g_rand_seq[0] = 0; g_rand_n = 1;
+    work_init(&w, &p);
+    p.word70 = 37;
+    p.word74 = -1;
+    p.shadow_slot = 11;
+    /* Ein Reinit trifft einen laufenden Work: flg 0x800 hat der erste Init
+       gesetzt (:2760), deshalb ruft :2758 bhSetShadow NICHT erneut und der
+       gerettete Slot bleibt stehen. Ohne das Bit legt der Zweig einen neuen
+       Schatten an (im Fixture ohne Allokator = -1). */
+    w.flg |= 0x800u;
+    recvx_en01_init_work(&w, &p);
+    check_eq(p.word70, 0, "Reinit verwirft Sichtlinien-Treffer (en01.c:2685)");
+    check_eq(p.shadow_slot, 11, "Reinit bewahrt Schattenslot (en01.c:2692)");
+}
+
 static void test_personal_type(void)
 {
     /* Erwartungswerte unabhaengig aus den ersten 30 Zeilen des Originals
@@ -1035,6 +1058,7 @@ int main(void)
 
     test_personal_type();
     test_init_hp();
+    test_reinit_clears_line_hit();
     test_init_types();
     test_se_play();
     test_check_mtn_tbl();

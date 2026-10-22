@@ -2,8 +2,8 @@
 
 Regeln: [RULES.md](RULES.md) · Querschnitt: [X_COMMON.md](X_COMMON.md) · Begleiter: [X04_SUBPL.md](X04_SUBPL.md)
 
-Einzelberichte der Fortsetzung: [EN10](EN010.result.md), [EN11](EN011.result.md),
-[EN20](EN020.result.md), [EN71](EN071.result.md), [EN53](EN053.result.md),
+Einzelberichte der Fortsetzung: [EN10](../../archived/work/enemies-EN010.result.md), [EN11](EN011.result.md),
+[EN20](EN020.result.md), [EN71](../../archived/work/enemies-EN071.result.md), [EN53](EN053.result.md),
 [EN21](EN021.result.md).
 Gemeinsame Bindungen: abgearbeitet, Blatt archiviert (`archived/work/enemies-INTEGRATION_NEXT.md`).
 Stand 2026-10-22: alle Plaetze 0..30, 53..56, 71 im Dispatch gebunden (`native/enemies/enemy_dispatch.c`).
@@ -19,9 +19,9 @@ Komponentengeprüft ist nicht gleich vollständige Runtime-Abnahme.
 | [EN005](EN005.md) Hunter/Sweeper | `bhEne05` | nativ verdrahtet + Welttest, Audit/Abnahme offen | 17 | RM_5590 |
 | [EN006](EN006.md) Moth | `bhEne06` | nativ verdrahtet + Welttest, Audit/Abnahme offen | 1 | RM_6030 |
 | [EN007](EN007.md) Bat | `bhEne07` | nativ verdrahtet, Audit/Abnahme offen | 4 | RM_0130 |
-| [EN008](EN008.md) Fish | `bhEne08` | nativ verdrahtet, Audit/Abnahme offen | 3 | RM_4000 |
+| [EN008](../../archived/work/enemies-EN008.md) Fish | `bhEne08` | abgenommen 2026-10-22 (archiviert) | 3 | RM_4000 |
 | [EN009](EN009.md) Bandersnatch | `bhEne09` | nativ verdrahtet + Welttest, Audit/Abnahme offen | 12 | RM_1060 |
-| [EN010](EN010.md) Ant A | `bhEne10` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9170 |
+| [EN010](../../archived/work/enemies-EN010.md) Ant A | `bhEne10` | abgenommen 2026-10-22 (archiviert) | 1 | RM_9170 |
 | [EN011](EN011.md) Spotter | `bhEne11` | nativ verdrahtet, Audit/Abnahme offen | 6 | RM_7081 |
 | [EN012](EN012.md) First Form Alexia | `bhEne12` | nativ verdrahtet, Audit/Abnahme offen | 3 | RM_5820 |
 | [EN013](EN013.md) Second Form Alexia | `bhEne13` | nativ verdrahtet + Welttest, Audit/Abnahme offen | 2 | RM_5810 |
@@ -46,4 +46,4 @@ Komponentengeprüft ist nicht gleich vollständige Runtime-Abnahme.
 | [EN054](EN054.md) Armored Knight A (with sword and medium shield) | `bhEne54` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9280 |
 | [EN055](EN055.md) Armored Knight B (with lance and large shield) | `bhEne55` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9280 |
 | [EN056](EN056.md) - | `bhEne56` | nativ verdrahtet, Audit/Abnahme offen | 2 | RM_4020 |
-| [EN071](EN071.md) Ant C | `bhEne71` | nativ verdrahtet, Audit/Abnahme offen | 1 | RM_9170 |
+| [EN071](../../archived/work/enemies-EN071.md) Ant C | `bhEne71` | abgenommen 2026-10-22 (archiviert) | 1 | RM_9170 |

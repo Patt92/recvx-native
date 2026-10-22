@@ -43,8 +43,43 @@ struct Fixture {
             std::cerr<<phase<<": unerwartete Luecke: "<<g<<'\n';throw std::runtime_error("EN19 meldet eine Luecke");}
     }
 };
+// Audit: Original en19.c:3440-3450 und :3748-3759 ignoriert Poolfehler.
+// Diagnose-Work benutzt die produktiven Dienste, nur Effektanlage/RNG werden
+// beobachtet. Keine Originalfunktion wird in den Test eingebunden.
+static int audit_attempts, audit_randoms;
+static int audit_reject_effect(uint32_t,const RECVX_EN19_EF*,const RECVX_ENEMY_VEC*,RECVX_ENEMY_WORK*,int){++audit_attempts;return -1;}
+static int32_t audit_random(){++audit_randoms;return 0x40000000;}
+static int audit_attribute(const RECVX_ENEMY_WORK*,uint32_t,uint32_t,int32_t* out){*out=6<<8;return 1;}
+static void pool_failure_audit(Fixture& f){
+    auto& e=f.tyrant();
+    const auto* saved=recvx_en19_bound();
+    // EnemyCallbackFrame supplies the current world's bound EN19 services.
+    RoomWorld::EnemyCallbackFrame scope(&f.world);
+    check(recvx_en19_bound()!=nullptr&&e.sv!=nullptr,"EN19-Dienste nicht gebunden");
+    auto services=*recvx_en19_bound();
+    auto base=*e.sv;
+    auto work=e;
+    auto state=*static_cast<RECVX_EN19_STATE*>(work.exp0);
+    work.exp0=&state;work.sv=&base;
+    state.status=0x400;state.br_mde0=0;state.br_mde1=0;state.br_wait1=100;
+    state.prgP=nullptr;state.ply_act.p_status=0;state.eff_tim=0;
+    work.mode0=1;work.type=2;work.flg=4;work.wpnr_no=16;
+    work.comb_flg=0x10;work.comb_pnt=0;work.comb_timeout=0;
+    work.flg2|=4;work.hp=900;work.dam[1]=1;work.djnt_no=1;
+    services.effect_tb=audit_reject_effect;services.motion_attribute=audit_attribute;
+    base.random_next=audit_random;
+    audit_attempts=audit_randoms=0;
+    recvx_en19_bind(&services);
+    recvx_en19(&work);
+    recvx_en19_bind(saved);
+    // DmgDat[16].eff_nml[0]=3 -> EffTbl[3]: five smoke attempts,
+    // two RNG draws each. Sound attribute 6 -> fifteen dust attempts.
+    check(audit_attempts==20,"EN19 pool failure must retain five smoke and fifteen dust attempts");
+    check(audit_randoms==10,"EN19 failed smoke allocations must retain ten RNG draws");
+}
 int main(int argc,char** argv){try{
     check(argc==2,"data required");_Make_SinTable();const std::filesystem::path data=argv[1];
+    {Fixture f(data);pool_failure_audit(f);}
     {
         // bhEne19_Init (en19.c:285): Koerper, Tabellen, Aktion 0, Typ-2-Statusbits. Der erste
         // Gegnerpass (Init) laeuft beim Raumaufbau (player.c:840 vor Event_init), also vor dem ersten tick().

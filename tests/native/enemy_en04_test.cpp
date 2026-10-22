@@ -890,10 +890,34 @@ void neck(){
 
 } // namespace
 
+/* en04.c:3413/3490/3500 indizieren En04_PlyMtn_OffsetTbl[4] direkt mit sys->ply_id;
+   ein Index ausserhalb ist keine Zeile 0 (Claire), sondern eine benannte Luecke.
+   en04.c:3548 vergleicht frm mit pl->mnwP[mtn].frm_num - 1; fehlt die Framezahl,
+   wird das gemeldet und der Abschluss nicht aus einer erfundenen Grenze gezogen. */
+void player_branch_gaps(){
+    for(int branch=0;branch<2;++branch){
+        reset();
+        auto w=make(); w.exp0=allocate(sizeof(RECVX_EN04_EXP0));
+        static_cast<RECVX_EN04_EXP0*>(w.exp0)->flg|=0x40000u;
+        ply.mode0=4; ply.mode1=uint8_t(branch); ply.mode3=0; ply.ply_id=4; ply.mtn_no=77;
+        recvx_en04_player_control(&w);
+        require(ply.mtn_no==77,"ungueltige ply_id darf keine Claire-Motion setzen");
+        require(!gaps.empty()&&gaps.back()=="En04_PlyMtn_OffsetTbl[sys->ply_id]","ungueltige ply_id wird nicht gemeldet");
+    }
+    reset();
+    auto d=make(); d.exp0=allocate(sizeof(RECVX_EN04_EXP0));
+    static_cast<RECVX_EN04_EXP0*>(d.exp0)->flg|=0x40000u;
+    ply.mode0=4; ply.mode1=1; ply.mode3=1; ply.ply_id=0; ply.frm_no=-65536; ply.mtn_add=65536;
+    frames_per_motion=0;
+    recvx_en04_player_control(&d);
+    require(ply.mtn_add==65536&&!(ply.flg&2u),"PlyDG01 ohne frm_num darf nicht abschliessen");
+    require(!gaps.empty()&&gaps.back()=="pl->mnwP[mtn] (EN04 PlyDG01)","fehlende frm_num wird nicht gemeldet");
+    frames_per_motion=20;
+}
 int main(){
     try {
         tables(); init(); move_mv00(); mv01_mv02(); mv11_stairs();
-        damage(); damage_states(); death(); grab(); player_damage(); frame(); neck();
+        damage(); damage_states(); death(); grab(); player_damage(); frame(); neck(); player_branch_gaps();
         clear_allocations();
         recvx_en04_set_context(nullptr); recvx_en04_set_data(nullptr);
         std::cout<<"en04 component contract ok\n";

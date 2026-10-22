@@ -1691,9 +1691,11 @@ static void set_dmg_effect(RECVX_ENEMY_WORK* w, int set_obj, int eff_typ, const 
             if (!rnd(w, &r)) return;
             off.y = eoP->off_y + eoP->rnd_y * (r - 0.5f);
             off.z = off_z;
-            if (effect_tb(w, RECVX_EN19_EF_FLG | RECVX_EN19_EF_ID | RECVX_EN19_EF_AX | RECVX_EN19_EF_AY |
-                             RECVX_EN19_EF_SX | RECVX_EN19_EF_SY | RECVX_EN19_EF_MDLVER | RECVX_EN19_EF_TYPE |
-                             RECVX_EN19_EF_POS, &ef, &off, w, set_obj) < 0) break;
+            /* Original en19.c:3440-3450 ignoriert den Rueckgabewert:
+               auch bei vollem Pool folgen alle Versuche und ihre RNG-Zuege. */
+            (void)effect_tb(w, RECVX_EN19_EF_FLG | RECVX_EN19_EF_ID | RECVX_EN19_EF_AX | RECVX_EN19_EF_AY |
+                               RECVX_EN19_EF_SX | RECVX_EN19_EF_SY | RECVX_EN19_EF_MDLVER | RECVX_EN19_EF_TYPE |
+                               RECVX_EN19_EF_POS, &ef, &off, w, set_obj);
         }
         break;
     }
@@ -1874,8 +1876,10 @@ static void sound_set(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw)
             ef.type = (uint32_t)(i & 0x3);
             if (!jpos(w, (uint32_t)recvx_en19_snd_eff_tbl[i], &p)) return;
             ef.pos = vec_of(&p);
-            if (effect_tb(w, RECVX_EN19_EF_FLG | RECVX_EN19_EF_ID | RECVX_EN19_EF_SX | RECVX_EN19_EF_SY | RECVX_EN19_EF_SZ |
-                             RECVX_EN19_EF_AX | RECVX_EN19_EF_AY | RECVX_EN19_EF_TYPE | RECVX_EN19_EF_POS, &ef, NULL, NULL, 0) < 0) break;
+            /* Original en19.c:3748-3759 legt stets alle 15 Vorlagen an,
+               ohne bei einem fehlgeschlagenen Anlegeversuch abzubrechen. */
+            (void)effect_tb(w, RECVX_EN19_EF_FLG | RECVX_EN19_EF_ID | RECVX_EN19_EF_SX | RECVX_EN19_EF_SY | RECVX_EN19_EF_SZ |
+                               RECVX_EN19_EF_AX | RECVX_EN19_EF_AY | RECVX_EN19_EF_TYPE | RECVX_EN19_EF_POS, &ef, NULL, NULL, 0);
         }
         break;
     case 74502: {                                                    /* :3766 Knie/Hand */

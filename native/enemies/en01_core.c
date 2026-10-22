@@ -384,7 +384,7 @@ void recvx_en01_init_work(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0)
     RECVX_EN01_EXP0* p;
     RECVX_ENEMY_WORK* sv_child[7];
     int32_t sv_sdw_no;
-    int32_t sv_word70, sv_word74;
+    int32_t sv_word74;
     int32_t previous_stair;
     uint32_t i;
 
@@ -563,7 +563,6 @@ void recvx_en01_init_work(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0)
         sv_child[5] = p->cap;
         sv_child[6] = p->worm;
         sv_sdw_no  = p->shadow_slot;
-        sv_word70  = p->word70;
         sv_word74  = p->word74;
 
         memset(p, 0, sizeof(*p));
@@ -576,8 +575,10 @@ void recvx_en01_init_work(RECVX_ENEMY_WORK* w, RECVX_EN01_EXP0* exp0)
         p->cap    = sv_child[5];
         p->worm   = sv_child[6];
         p->shadow_slot = sv_sdw_no;
-        /* Nativwert von NULL; siehe en01_work.h zu 0x70/0x74. */
-        p->word70 = sv_word70;
+        /* en01.c:2685-2692 rettet den Sichtlinien-Treffer (EXP0+0x70)
+           nicht: word70 bleibt nach memset NULL (= 0 im line-Dienst).
+           Den nativen Treppenindex nur bis bhClrUseKaidanFlag unten
+           aufbewahren; er bildet dort auch kdnp/kdnidx des Besitzers ab. */
         p->word74 = sv_word74;
     }
 

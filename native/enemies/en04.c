@@ -505,15 +505,17 @@ void recvx_en04_brain(RECVX_ENEMY_WORK* w) {
     RECVX_EN04_EXP0* e=ex(w);RECVX_ENEMY_PLAYER p;RECVX_ENEMY_VEC q;RECVX_ENEMY_ATR a;int hit,r;
     recvx_en04_ene_search(w);if(!player(w,&p))return;
     if(!(e->search&128)) {
-        if((e->search&64)&&e->dist<50&&!e->line_hit&&w->flr_no==p.flr_no)q=p.pos;
+        if((e->search&64)&&e->dist<50&&!e->line_hit&&w->flr_no==p.flr_no){q=p.pos;e->target.x=q.x;e->target.z=q.z;}
         else {
             XNEED(check_route,"bhCheckRoute");RECVX_ENEMY_VEC from=position(w);
-            /* rutchk.c:5 writes `pos` only for a valid zone pair; without route
-               zones the original continues with the uninitialised stack value
-               of the previous call. The last target is that value here; the
-               brain pass itself goes on as in the original. */
-            if(!context.en04->check_route(&from,&p.pos,&q)){gap(w,"bhCheckRoute: keine Wegezone (Original liest uninitialisiertes pos)");q.x=e->target.x;q.y=p.pos.y;q.z=e->target.z;}
-        }e->target.x=q.x;e->target.z=q.z;
+            /* en04.c:1426-1448: der Zielblock ist im Original unerreichbar, weil
+               bhEne04_EneSearch (:1376) Bit 0x80 immer setzt. Der Port bildet ihn
+               dennoch ab: ohne Wegezone schreibt rutchk.c:14-24 kein pos, also
+               bleibt das Ziel stehen, statt einen Wert zu erfinden; der Pass
+               laeuft wie :1449 weiter. */
+            if(context.en04->check_route(&from,&p.pos,&q)){e->target.x=q.x;e->target.z=q.z;}
+            else gap(w,"bhCheckRoute: keine Wegezone (Original liest uninitialisiertes pos)");
+        }
     }
     switch(w->mode2) {
     case 0:
@@ -779,7 +781,10 @@ int recvx_en04_ply_damage_check(RECVX_ENEMY_WORK* w, int type) {
 }
 
 static void player_grab(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl) {
-    uint32_t ply = (uint32_t)(pl->ply_id < 4 ? pl->ply_id : 0);
+    /* en04.c:3413/3490/3500: direkter Index in vier Charakterzeilen.
+       Ein ungueltiger Index ist keine Erlaubnis fuer Claires Zeile 0. */
+    if(pl->ply_id>=4) {gap(w,"En04_PlyMtn_OffsetTbl[sys->ply_id]");return;}
+    uint32_t ply = pl->ply_id;
     switch (pl->mode3) {
     case 0:
         pl->mtn_enemy = 1;
@@ -857,7 +862,10 @@ static void player_grab(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl) {
 }
 
 static void player_death(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl) {
-    uint32_t ply = (uint32_t)(pl->ply_id < 4 ? pl->ply_id : 0);
+    /* en04.c:3413/3490/3500: direkter Index in vier Charakterzeilen.
+       Ein ungueltiger Index ist keine Erlaubnis fuer Claires Zeile 0. */
+    if(pl->ply_id>=4) {gap(w,"En04_PlyMtn_OffsetTbl[sys->ply_id]");return;}
+    uint32_t ply = pl->ply_id;
     int frm;
     switch (pl->mode3) {
     case 0:
@@ -898,9 +906,13 @@ static void player_death(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl) {
         } else {
             if (frm == 9 || frm == 15 || frm == 22) recvx_en04_se_play(w, 70408);
         }
-        if (w->sv && w->sv->motion_frames) {
+        /* en04.c:3548 liest pl->mnwP[pl->mtn_no].frm_num; dieser
+           Spielerzweig verwendet hier die zuvor gebundene Gegnermotion. */
+        NEED(motion_frames,"mnwP[mtn].frm_num");
+        {
             uint32_t n = w->sv->motion_frames(w, pl->mtn_no);
-            if (n && (frm == (int32_t)n - 1)) {
+            if(!n) {gap(w,"pl->mnwP[mtn] (EN04 PlyDG01)");return;}
+            if (frm == (int32_t)n - 1) {
                 pl->mtn_add = 0;
                 pl->flg &= ~8u;
                 pl->flg |= 2u;

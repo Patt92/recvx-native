@@ -745,11 +745,14 @@ static void mv02(RECVX_ENEMY_WORK* w)
         /* fall through */
     case 1: {
         RECVX_ENEMY_VEC pos;
-        const RECVX_ENEMY_VEC a = { w->px, w->py, w->pz };
+        RECVX_ENEMY_VEC a;
         int rt;
         int32_t sp;
         SV(w, add_speed, "bhAddSpeed (en05)");
         en05_sv->add_speed(w, 0);
+        /* Original en05.c:1721-1723: Routenstart ist die Position NACH
+           bhAddSpeed; kein vor dem Bewegungsschritt erfasster Wert. */
+        a.x = w->px; a.y = w->py; a.z = w->pz;
         if (!player(w, &p)) return;
         if (!route(w, &a, &p.pos, &pos, &rt)) return;
         if ((rt & 0xFF) != 0xFF) { s->target.x = pos.x; s->target.z = pos.z; }

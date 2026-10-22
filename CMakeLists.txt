@@ -830,6 +830,13 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
     add_test(NAME enemy_en11_world COMMAND recvx-en11-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
+  add_executable(recvx-en08-world-tests tests/native/en08_world_test.cpp)
+  target_include_directories(recvx-en08-world-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-en08-world-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-en08-world-tests PRIVATE recvx_game)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms")
+    add_test(NAME enemy_en08_world COMMAND recvx-en08-world-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  endif()
   add_executable(recvx-en10-world-tests tests/native/en10_world_test.cpp)
   target_include_directories(recvx-en10-world-tests PRIVATE native native/enemies)
   target_compile_features(recvx-en10-world-tests PRIVATE cxx_std_17)
@@ -1371,6 +1378,10 @@ if(BUILD_TESTING)
    # Schulterkamera; Ereigniskamera/Cinematic/Stufenaktion geben die Originalkamera zurueck.
    add_test(NAME third_person_aim_camera COMMAND "${Python3_EXECUTABLE}" -I
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/third_person_aim_check.py"
+    --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+   # player.c:1390 plp->stflg &= ~0x300 im Passtor: 0x200/0x100 sind Ein-Pass-Impulse (en07-Weckreiz).
+   add_test(NAME player_stflg_pulse COMMAND "${Python3_EXECUTABLE}" -I
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/player_stflg_pulse_check.py"
     --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
  endif()

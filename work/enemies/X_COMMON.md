@@ -1,5 +1,20 @@
 # Gemeinsame Voraussetzungen aller Gegner (Querschnitt)
 
+## Stand 2026-10-22 (am Code nachgeprueft)
+
+- **X01 erledigt:** 0x200 setzen Aktions-, Ereignis- und Treppenpfad (player_action.c footstep,
+  player_event.c water_step, player_stairs.c), 0x100 der Kampfkern (player_combat_core.c, wie
+  player.c:4985/5690, playpch*.c); das fehlende `plp->stflg &= ~0x300` im Passtor (player.c:1390)
+  steht jetzt in runtime.cpp. Test `player_stflg_pulse` (Gegenprobe rot). mode2 6..8 = bhCPM2_act
+  wlk/run/bak-Familie, Leser en07.c:301.
+- **X02 erledigt:** `--state` fuehrt `enemy_gaps` (RoomWorld::unbound_enemy_routines).
+- **X03 erledigt:** Framezahlen je Identitaet ueber `enemy_mn_work` fuer alle gebundenen Gegner.
+- **X04:** bhControlMask ist gebunden (enemy_dispatch.c:170, world_enemies.cpp:1418); Audit je
+  Identitaet siehe X04_SUBPL.md.
+- **X05/X06 erledigt:** MTN_TBL-Abspieler in en09/en17, gemeinsame zonzon/hitchk-Dienste
+  (recvx_t3_*, en03_lib) nativ vorhanden und von en09/en22 benutzt.
+- **X07/X08:** Hinweise zur Abnahme bzw. Patchvorschlaege, kein offener Port.
+
 ## X01 – Spieler-Statusbits für Gegner-KI (blockiert u. a. EN07-Wecken)
 
 - player.c:1390 `plp->stflg &= ~0x300` je Bild in bhControlPlayer – im Host ohne Entsprechung.
