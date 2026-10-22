@@ -521,6 +521,13 @@ void append_actor(Scene& stage,const Scene& actor,std::size_t texture_base) {
         stage.triangles.push_back(triangle);
     }
 }
+const std::vector<SceneTexture>& PlayerAsset::model_textures(unsigned index)const{
+    if(index==0)return textures_;
+    if(const auto* asset=model(index))return asset->textures();
+    if(index<=model_texture_lists_.size())return model_texture_lists_[index-1];
+    static const std::vector<SceneTexture> empty;
+    return empty;
+}
 void PlayerAsset::load_models(const std::vector<std::uint8_t>& data,std::size_t model_end,std::size_t morph_end){
     // Same record walk as bhReadPlayerData: SKIN applies to the next MLB; every MLB is mdl[mdl_n++].
     BinaryView file(data);struct Record{std::vector<std::uint8_t> skin,mdl;bool textured;};std::vector<Record> records;std::vector<std::uint8_t> skin;
@@ -533,9 +540,15 @@ void PlayerAsset::load_models(const std::vector<std::uint8_t>& data,std::size_t 
     std::vector<std::vector<std::uint8_t>> bundles(records.size());std::size_t p=morph_end;
     for(std::size_t i=0;i<records.size();++i){if(!records[i].textured)continue;if(p+4>data.size())break;auto size=file.u32(p);p+=4;if(size&0x80000000u){p=(p+31)&~std::size_t(31);size&=0x7fffffffu;}if(size>data.size()-p)break;bundles[i]=slice(data,p,size);p+=size;}
     models_.resize(records.size()-1);
+    model_texture_lists_.resize(records.size()-1);
     // mdl[k] mit k >= 1: 0 = Satz gelesen, 1 = Satz liess sich nicht lesen.
     model_failed_.assign(records.size()-1,0);
-    for(std::size_t i=1;i<records.size();++i){const auto& r=records[i];if(BinaryView(r.mdl).u16(6)==0)continue;
+    for(std::size_t i=1;i<records.size();++i){const auto& r=records[i];
+        // binfunc.c:81-93 realisiert texP unabhaengig von objP (z.B. EN06 mdl[1]).
+        if(BinaryView(r.mdl).u16(6)==0){
+            if(!bundles[i].empty())model_texture_lists_[i-1]=decode_texture_bundle(bundles[i],0);
+            continue;
+        }
         std::vector<std::uint8_t> out(4);auto put=[&](std::uint32_t v){for(int k=0;k<4;++k)out.push_back(std::uint8_t(v>>(8*k)));};
         auto append=[&](const std::vector<std::uint8_t>& block){put(std::uint32_t(block.size()));out.insert(out.end(),block.begin(),block.end());};
         if(!r.skin.empty())append(r.skin);append(r.mdl);put(0xffffffffu);

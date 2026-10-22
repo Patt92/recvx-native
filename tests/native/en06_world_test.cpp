@@ -28,7 +28,9 @@ struct Fixture {
         events.flags[6][0]=0xffffffffu;
     }
     void commit(){std::vector<BoneMatrix> nodes;if(world.player_scripted)(void)world.sample_player(player,&nodes);else nodes=player.pose(motion,frame,actor.position,actor.yaw);world.commit_player_joints(player.script_nodes(nodes));}
-    void tick(){events.tick();world.set_simulation_flags(events.flags[6][0]);world.tick();commit();}
+    void tick(){events.tick();world.set_simulation_flags(events.flags[6][0]);world.tick();commit();
+        // Auch den Zeichenpfad pruefen: reine Simulation erreicht die Atlaspruefung nicht.
+        Scene out;world.append(out,{},scene.cameras.at(0));}
     RECVX_ENEMY_WORK& work(unsigned index){auto& t=world.enemy_table();check(index<t.ewk_n&&t.slot[index],"ene[index] fehlt");return *t.slot[index];}
     std::vector<const EffectSprite*> effects(unsigned id){std::vector<const EffectSprite*> out;for(unsigned i=0;;++i){const auto* s=world.effect_state(i);if(!s)break;if((s->flg&1u)&&s->id==id)out.push_back(s);}return out;}
     unsigned count(unsigned id,unsigned flg_mask=1u){unsigned n=0;auto& t=world.enemy_table();for(unsigned i=0;i<t.ewk_n;++i)if(t.slot[i]&&(t.slot[i]->flg&flg_mask)&&t.slot[i]->id==id)++n;return n;}

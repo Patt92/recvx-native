@@ -4179,7 +4179,7 @@ void RoomWorld::append_enemy_children(Scene& scene,bool mirror,bool small_screen
         }else{
         object.textures=parent->object.textures;
         {const unsigned k=c.model_base+(drawn==c.enemy_asset?0u:c.morph_obj_a);
-         for(unsigned i=k;i>0;--i)if(const auto* a=c.model_bank->model(i);a&&!a->textures().empty()){object.textures=a->textures();break;}}
+         for(unsigned i=k;i>0;--i)if(const auto& textures=c.model_bank->model_textures(i);!textures.empty()){object.textures=textures;break;}}
         }
         for(auto& t:object.triangles){t.light_category=1;t.after_modifiers=true;t.material_phase=7;}
         for(auto& write:object.ambient_writes)write.phase=7;

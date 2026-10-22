@@ -1272,7 +1272,7 @@ void RoomWorld::bind_enemy_services(){
         if(k<0){enemy_world->unbound_enemy_.insert("mdl[k].texP: Index negativ");return nullptr;}
         const unsigned base=(e.model_bank?e.model_base:0u)+unsigned(k);
         if(!bank){enemy_world->unbound_enemy_.insert("mdl[k].texP: Modell fehlt");return nullptr;}
-        for(unsigned i=base;i>0;--i)if(const auto* a=bank->model(i);a&&!a->textures().empty())return &a->textures();
+        for(unsigned i=base;i>0;--i)if(const auto& textures=bank->model_textures(i);!textures.empty())return &textures;
         for(const auto& m:enemy_world->models_)if(m.actor.get()==bank)return &m.object.textures;
         enemy_world->unbound_enemy_.insert("mdl[k].texP: Texturliste fehlt");return nullptr;};
     x.player_joint_matrix=s.player_joint_matrix;
@@ -1893,7 +1893,7 @@ void RoomWorld::control_enemy_works(){
             const auto& e=tree_of(owner_of(w));const PlayerAsset* bank=e.model_bank?e.model_bank:e.model_row();
             const unsigned base=(e.model_bank?e.model_base:0u)+2u;sw.texture_list=nullptr;
             if(!bank){world->unbound_enemy_.insert("bhEne14_Acid: epw->mdl[2].texP ohne Modell");return;}
-            for(unsigned i=base;i>0;--i)if(const auto* a=bank->model(i);a&&!a->textures().empty()){sw.texture_list=&a->textures();return;}
+            for(unsigned i=base;i>0;--i)if(const auto& textures=bank->model_textures(i);!textures.empty()){sw.texture_list=&textures;return;}
             for(const auto& m:world->models_)if(m.actor.get()==bank){sw.texture_list=&m.object.textures;return;}
             world->unbound_enemy_.insert("bhEne14_Acid: epw->mdl[2].texP ohne Texturliste");};
         // en14.c:952 bhEne14_LookPlayaer: owP[6].flg Bit 2 (mask/value), objP[6].ang, owP[6].mtx und
@@ -2170,7 +2170,7 @@ void RoomWorld::control_enemy_works(){
         // mdl[k].texP: eigenes texP oder das des letzten texturierten mdl davor (room.c bhSetEneMdl).
         t.model_texture=[](const RECVX_ENEMY_WORK* w,uint32_t k)->const void*{auto* world=enemy_world;const auto& e=tree_of(owner_of(w));
             const PlayerAsset* bank=e.model_bank?e.model_bank:e.model_row();const unsigned base=(e.model_bank?e.model_base:0u)+k;if(!bank)return nullptr;
-            for(unsigned i=base;i>0;--i)if(const auto* a=bank->model(i);a&&!a->textures().empty())return &a->textures();
+            for(unsigned i=base;i>0;--i)if(const auto& textures=bank->model_textures(i);!textures.empty())return &textures;
             for(const auto& m:world->models_)if(m.actor.get()==bank)return &m.object.textures;
             return nullptr;};
         t.effect_position=[](int slot,RECVX_ENEMY_VEC* p,int write)->int{auto* world=enemy_world;if(slot<0||std::size_t(slot)>=world->sprites_.size())return 0;auto& s=world->sprites_[std::size_t(slot)].sprite;

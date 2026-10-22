@@ -66,6 +66,8 @@ public:
     void locomotion(SceneSpawn& actor,std::size_t& motion,std::int64_t& frame_q16,int move,bool run,int turn)const;
     const FaceAsset* face()const{return face_.get();}
     const std::vector<SceneTexture>& textures() const {return textures_;}
+    // binfunc.c:81: mdl[k].texP existiert auch ohne objP; Geometrie bleibt getrennt.
+    const std::vector<SceneTexture>& model_textures(unsigned index)const;
     // Original keys are sampled on integer frames, selected by a signed 16.16 clock.
     std::vector<ModelPose> local_pose(std::size_t motion,std::int64_t frame_q16,const ModelNodeOverrides& overrides={})const;
     std::vector<ModelPose> local_pose_clip(const MotionClip& clip,std::int64_t frame_q16,const std::vector<unsigned>& nodes={},const ModelNodeOverrides& overrides={})const;
@@ -138,6 +140,7 @@ private:
     std::vector<SceneTexture> textures_;
     std::vector<std::vector<float>> translations_;
     std::vector<std::shared_ptr<PlayerAsset>> models_;
+    std::vector<std::vector<SceneTexture>> model_texture_lists_; // texP der Zusatzmodelle ohne objP
     std::vector<std::uint8_t> model_failed_;   // je models_[k], 1 = Lesefehler
     void load_models(const std::vector<std::uint8_t>& data,std::size_t model_end,std::size_t morph_end);
     std::vector<Matrix> matrices(const std::vector<ModelPose>& pose,NJS_POINT3 position,Angle yaw,bool translations_only=false) const;
