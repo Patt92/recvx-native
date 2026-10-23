@@ -74,7 +74,7 @@ void Frontend::check_button(){
     if(ok_pressed_){ // press & 0x800 (Start) || press & AdvGetOkButton()
         const int command=cursor_==quit_row?4:mode_command_id_[cursor_];
         switch(command){
-        case 0: if(sound)sound(3);from_title_=0;title_call(3);break;        // LOAD GAME: system.c:374 ss_flg 0x200, tk_flg 0x308040, typ_md0 0 -> Ladebildschirm
+        case 0: if(sound)sound(3);from_title_=1;title_call(3);break;        // LOAD GAME (adv.c:1953 FromTitle 1): system.c:374 ss_flg 0x200, tk_flg 0x308040, typ_md0 0 -> Ladebildschirm
         case 1: from_title_=0;title_call(2);break;                          // NEW GAME: AppMode 1, sys->gm_mode 0, TitleCall(PortId, 2)
         case 2: from_title_=2;next_return_code_=4;mode_=17;if(sound)sound(3);request_adv_fade(3,samurai(50));break; // OPTION: AppMode 0
         case 3: from_title_=3;title_call(6);break;                          // BATTLE GAME (ExtraFlag): sys->gm_mode 3, TitleCall(PortId, 6)

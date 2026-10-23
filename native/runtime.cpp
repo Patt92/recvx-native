@@ -1023,7 +1023,10 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 retry_point=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index});
             if(!typewriter.done())return;
             typewriter_release(typewriter.mode()==recvx::Typewriter::Mode::Save);
+            // bup_00.c:425-437: vom Titel (ss_flg 0x200) ohne geladenen Spielstand -> tk_flg 0x300008, Titeltask.
+            const bool back_to_title=typewriter.mode()==recvx::Typewriter::Mode::Load&&!events;
             typewriter.reset();
+            if(back_to_title){frontend.return_from_load();std::cout<<"Typewriter: zurueck ins Hauptmenue\n";}
         };
         auto typewriter_key=[&](recvx::MenuInput key){
             const unsigned bit=key==recvx::MenuInput::Up?1u:key==recvx::MenuInput::Down?2u:key==recvx::MenuInput::Confirm?0x800u:key==recvx::MenuInput::Cancel?0x1000u:0u;
@@ -1745,6 +1748,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         auto draw_content=[&](unsigned frame,std::size_t controllers){if(game_over.active()&&ui){if(game_over.phase()==0){compose();image.draw(scene,view_camera(),wireframe);}game_over.draw(image,*ui);debug.draw(image,*ui);return;}if(frontend.active()&&ui){frontend.draw(image,*ui,controllers);debug.draw(image,*ui);return;}
             /* Schreibmaschinen-Slotauswahl: eigenes Bild, solange die Aufgabe laeuft. */
             if(typewriter.active()&&ui){ui->draw_typewriter(image,typewriter);debug.draw(image,*ui);return;}
+            /* Ohne geladenen Raum laeuft kein bhSysCallGame (tk_flg ohne 0x80) und damit kein bhAllDrawModel:
+               zwischen Titel und Schreibmaschine (Eintritt/Austritt im selben Takt) bleibt das Bild schwarz. */
+            if(!world&&!args.preview){std::fill(image.canvas().begin(),image.canvas().end(),0xff000000u);if(ui)debug.draw(image,*ui);return;}
             /* sp_evt.c: bhCheckSubTask leaves sp_flg 0x30, so neither the room
                nor the game draw pass runs while the terminal task owns the
                screen. The terminal covers the frame with its own background. */

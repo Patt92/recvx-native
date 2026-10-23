@@ -606,7 +606,10 @@ if(BUILD_TESTING)
   endif()
   # en03.c:6825 plp->mnwP = epw->mnwP im Griff (Dienst player_library vor dem Zurueckschreiben der Spielersicht).
   if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_7250.RDT")
-    add_test(NAME status_open_first_frame COMMAND "${Python3_EXECUTABLE}" -I
+    add_test(NAME title_load_cancel COMMAND "${Python3_EXECUTABLE}" -I
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/title_load_cancel_check.py"
+    --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  add_test(NAME status_open_first_frame COMMAND "${Python3_EXECUTABLE}" -I
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/status_open_first_frame_check.py"
     --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_test(NAME rm7250_spider_grab COMMAND "${Python3_EXECUTABLE}" -I

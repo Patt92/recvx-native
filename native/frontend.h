@@ -56,6 +56,9 @@ public:
     unsigned selected()const{return screen_==Screen::Title?cursor_:selected_;}
     void hide(){screen_=Screen::Hidden;}
     void show_main(){screen_=Screen::Title;mode_=0;from_title_=0;} // bhReturnTitle: Mode 0, FromTitle 0 (ss_flg 0x100000/0x1000)
+    // bup_00.c:425-437 TypewriterExit mit ss_flg 0x200 (Ladebildschirm vom Titel, ohne Laden): tk_flg 0x300008 ->
+    // Adv_BioCvTitle Mode 0 mit dem FromTitle 1 von LOAD GAME (adv.c:1953): Mode 4 geht direkt in das Hauptmenue (Mode 8).
+    void return_from_load(){screen_=Screen::Title;mode_=0;from_title_=1;}
     FrontendCommand apply(const InputFrame& input);
     FrontendCommand input(MenuInput input,bool gamepad=false);
     void event(const SDL_Event& event);
