@@ -61,6 +61,7 @@ typedef struct RECVX_EN23_STATE {
 void recvx_en23_bind(const RECVX_EN23_SERVICES* services);
 void recvx_en23(RECVX_ENEMY_WORK* w);
 
+void recvx_en23_leg_break_for_test(RECVX_ENEMY_WORK* w);
 #ifdef __cplusplus
 }
 #endif

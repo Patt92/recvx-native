@@ -111,7 +111,10 @@ static int32_t clamp_angle(int32_t a,int32_t lo,int32_t hi)
 }
 /* NJM_RAD_ANG wird in EN14 nicht verwendet; alle direkten asin-Konversionen
    nutzen ausdrücklich 10430.381f. Ungültige Ergebnisse melden statt UB beim
-   float->int-Cast oder erfundenem Winkel. */
+   float->int-Cast oder erfundenem Winkel. Ein Argument ausserhalb [-1, 1] entsteht
+   nur durch Rundung eines Einheitsvektors bzw. Matrixelements; das Ergebnis haengt
+   dann am PS2-libm-asinf und an der Saettigung von cvt.w.s. Nach QUALITY.md
+   nicht als erreichbar belegt (kein Treffer in RM_9310/9320, enemy_en14_world). */
 static int asin_angle(Pass* p,float v,int32_t* out)
 {
     float a=10430.381f*asinf(v);

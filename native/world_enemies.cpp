@@ -1,4 +1,5 @@
 #include <optional>
+#include "combat.h"
 #include "world.h"
 #include "effect_shadow.h"
 #include "enemies/en11.h"
@@ -68,6 +69,7 @@ struct EnemyWorldScope {
     explicit EnemyWorldScope(RoomWorld* w):previous(enemy_world){enemy_world=w;}
     ~EnemyWorldScope(){enemy_world=previous;}
 };
+
 // Die EN19-Dienste von control_enemy_works. Sie liegen in einer funktionslokalen
 // static, leben also prozessweit; dieser Zeiger merkt sie fuer den Effektpass, der
 // mit bhEff349 (effsub3.c:3234) bhEne19_TyBloodSet aufruft. Vor dem ersten Gegnerpass
@@ -1993,8 +1995,17 @@ void RoomWorld::control_enemy_works(){
             return 1;};
         en16.gun_spark=[](const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* dir,uint32_t src,uint32_t dst,int typ){enemy_world->gun_spark({pos->x,pos->y,pos->z},{dir->x,dir->y,dir->z},src,dst,typ);};
         en16.hiteff13=WpnTab[13].hiteff;
-        // en16.c:265 bhSetGunSplash bleibt ungebunden: GA_WORK vx/vy/vz sind im Original
-        // uninitialisiert (Disassembly bhEne16_MV02), en16 meldet den Aufruf als Luecke.
+        // en16.c:265 bhSetGunSplash: dieselbe Routine wie der Kampfpass (combat.cpp gun_splash);
+        // die im Original uninitialisierte Richtung setzt en16 nach QUALITY.md auf 0.
+        en16.gun_splash=[](const RECVX_ENEMY_VEC* g,const RECVX_ENEMY_VEC* pos,int wattr,int wpn_no,int ay){
+            // Ausserhalb des Effektpasses belegt bhSetEffectTb sofort einen Platz (wie der Kampfpass, combat.cpp).
+            gun_splash({g->x,g->y,g->z},{pos->x,pos->y,pos->z},wattr,wpn_no,ay,
+                [](int lkono,const NJS_POINT3* off){const auto& ef=effect_detail::request_template();
+                    EffectSpawn spawn;spawn.flg=ef.flg;spawn.id=ef.id;spawn.type=ef.type;spawn.flr_no=ef.flr_no;spawn.mdlver=ef.mdlver;
+                    spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;spawn.lkono=lkono;
+                    spawn.has_offset=off!=nullptr;if(off)spawn.offset=*off;
+                    enemy_world->spawn_unlinked_effect(spawn);},
+                [](const char* name){enemy_world->unbound_enemy_.insert(name);});};
         recvx_en16_bind(&en16);
     }
     recvx_en21_bind(&en21);
@@ -2271,7 +2282,9 @@ void RoomWorld::control_enemy_works(){
         // hitchk.c:12 bhCheckWall auf dem Stapel-Dummy von bhEne02_DD00 (en02.c:1946-1962): flg 0x19,
         // stflg 0, ar 20, ah 1. dmy_ene.flr_no ist im Original uninitialisiert und wird nur fuer
         // Waende mit attr 0x1 gelesen (hitchk.c:87). Ohne solche Wand im Raum ist das Ergebnis davon
-        // unabhaengig und die Probe laeuft wie die des Works; sonst wird die Luecke gemeldet.
+        // unabhaengig und die Probe laeuft wie die des Works; sonst wird die Luecke gemeldet. Nach QUALITY.md
+        // Bedingung 3 unerreichbar: RM_3091/5830/7220/7230/7231 (alle Gulp-Worm-Raeume) haben keine
+        // attr-0x1-Wand (gemessen 2026-10-23).
         t.wall_probe=[](uint32_t flg,uint32_t* stflg,RECVX_ENEMY_VEC* pos,float ar,float ah)->int{auto* world=enemy_world;
             auto walls=world->collision_geometry();
             for(const auto& a:walls)if((a.flags&1u)&&(a.attributes&1u)){world->unbound_enemy_.insert("bhCheckWall(&dmy_ene): dmy_ene.flr_no uninitialisiert, Raum hat attr-0x1-Waende (en02.c:1915)");return 0;}
@@ -3004,4 +3017,8 @@ void RoomWorld::en17_afterimage(RECVX_ENEMY_WORK* w,const float* mtx16,NJS_POINT
     s.flr_no=1;                                                // :1719 npSetAllMatColor
     s.tv[0].col=argb;                                          // :1720 nur der erste Eckpunkt
 }
+}
+
+namespace recvx {
+void RoomWorld::run_in_enemy_scope(void (*fn)(RECVX_ENEMY_WORK*),RECVX_ENEMY_WORK* w){EnemyWorldScope scope(this);fn(w);}
 }

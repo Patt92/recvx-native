@@ -28,10 +28,10 @@ struct Fixture {
     }
     RECVX_ENEMY_WORK& worm(){auto& t=world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]&&t.slot[i]->id==2)return *t.slot[i];throw std::runtime_error("original RM_5830 gulp worm missing");}
     void tick(){world.commit_player_joints(player.script_nodes(player.pose(motion,frame,actor.position,actor.yaw)));world.set_simulation_flags(events.flags[6][0]);world.tick();}
-    // Nur die Luecken, die nicht EN02-Logik sind: die beiden unportierten Sandsprites und
-    // die dokumentierte Original-UB (ang in SetSandEffectMain Fall 8).
+    // Nur die Luecken, die nicht EN02-Logik sind: die beiden unportierten Sandsprites.
+    // Die fruehere Original-UB (ang in SetSandEffectMain Fall 8) ist nach QUALITY.md behoben.
     void no_en02_gaps(const char* phase){
-        static const std::set<std::string> allowed={"bhEff253","bhEff254","en02.c:2452 ang uninitialisiert (bhEne02_SetSandEffectMain Fall 8)"};
+        static const std::set<std::string> allowed={"bhEff253","bhEff254"};
         for(const auto& g:world.unbound_enemy_routines())if(!allowed.count(g)){std::cerr<<phase<<": unerwartete Luecke: "<<g<<'\n';throw std::runtime_error("EN02 meldet eine Luecke");}
     }
 };
@@ -121,7 +121,10 @@ int main(int argc,char** argv){try{
         each(253,[&](const EffectSprite& s2){
             check(std::fabs(s2.px+12.34f)<8.01f,"0x98: x folgt dem Vorzeichenbit 0x1 nicht");
             check(std::fabs(s2.pz-7.89f)<8.01f,"0x98: z ohne Vorzeichenbit muss positiv bleiben");
-            check(s2.py>=5.0f-1e-3f&&s2.py<=19.01f,"0x98: y ausserhalb der Streuung von Fall 2");});
+            // en02.c:2299/2312: wp.y bis pos.y + 6 + 8 = 19; der eine Effektpass danach rueckt um
+            // yn = 0.3 + 0.6*rand vor (effsub2.c:1061 py += yn), also bis 19.9. Die fruehere Grenze
+            // 19.01 hielt nur bei der Zufallsfolge ohne die Typ-8-Sprites.
+            check(s2.py>=5.0f-1e-3f&&s2.py<=19.9f+1e-3f,"0x98: y ausserhalb der Streuung von Fall 2");});
     }
     {
         // 2. Lageart 1: x und z kommen zur Gegnerlage, y bleibt der reine Skriptwert (:4207).
@@ -140,7 +143,9 @@ int main(int argc,char** argv){try{
             if(!(s2->flg&1u)||s2->id!=253)continue;++n;
             check(std::fabs(s2->px-(wx+1.0f))<8.01f,"0x98 relativ: x nicht um die Gegnerlage versetzt");
             check(std::fabs(s2->pz-(wz+3.0f))<8.01f,"0x98 relativ: z nicht um die Gegnerlage versetzt");
-            check(s2->py>=2.0f-1e-3f&&s2->py<=10.01f,"0x98 relativ: y darf die Gegnerhoehe nicht aufnehmen");}
+            // en02.c:2282: wp.y = 2 + 8*rand bis 10, plus ein Effektpass yn bis 0.9 -> 10.9.
+            // Mit aufgenommener Gegnerhoehe 4 laege jeder Sprite bei 6.3..14.9.
+            check(s2->py>=2.0f-1e-3f&&s2->py<=10.9f+1e-3f,"0x98 relativ: y darf die Gegnerhoehe nicht aufnehmen");}
         check(n==6,"0x98 Typ 0: sechs Sprites 253");
     }
     {
@@ -160,6 +165,28 @@ int main(int argc,char** argv){try{
         check(!f.world.bind({0x98,0,0,0,std::vector<std::uint8_t>{0x98,0x7F,0x00,0x00,0,0,0,0,0,0,0,0}}),"0x98: unbekannter Gegner muss ungebunden bleiben");
         check(!f.world.bind({0xC3,0,0,0,std::vector<std::uint8_t>{0xC3,0x7F,0x00,0x00}}),"0xC3: unbekannter Werkplatz muss ungebunden bleiben");
         f.no_en02_gaps("Sandbefehle");
+    }
+    {
+        // 4. Typ 8 (en02.c:2446): ORIGINAL-FIX (QUALITY.md) fuer das uninitialisierte ang.
+        //    Drei Sprites (:2452) und je Schleife zwei Sprites (:2462/2463): sieben Saetze 253,
+        //    alle mit ang 0 -> xn = -sin(0)*0.5 = 0, zn = -cos(0)*0.5 = -0.5; sechs Partikel 254.
+        //    Vorher fehlten die sieben Sprites ganz. Der Effektpass desselben Bildes (effsub2.c:1061)
+        //    hat danach einmal bewegt: Typ 2 behaelt xn/zn und yn -= 0.1, Typ 0 skaliert vorher mit 0.9.
+        Fixture f(data);f.tick();auto& e=f.worm();
+        unsigned index=0;{auto& t=f.world.enemy_table();for(unsigned i=0;i<t.ewk_n&&i<RECVX_ENEMY_SLOTS;++i)if(t.slot[i]==&e)index=i;}
+        const auto count=[&](unsigned id){unsigned n=0;for(unsigned i=0;const auto* s2=f.world.effect_state(i);++i)if((s2->flg&1u)&&s2->id==id)++n;return n;};
+        const std::vector<std::uint8_t> t8{0x98,std::uint8_t(index),0x00,0x00,
+            0x00,0x00, 0x00,0x00, 0x00,0x00, 0x08,0x00};   // Weltlage 0/0/0, Typ 8
+        check(f.world.bind({0x98,0,0,0,t8}),"0x98 Typ 8 nicht gebunden");
+        f.tick();
+        check(count(253)==7&&count(254)==6,"Typ 8: sieben Sprites 253 und sechs Partikel 254");
+        for(unsigned i=0;const auto* s2=f.world.effect_state(i);++i){
+            if(!(s2->flg&1u)||s2->id!=253)continue;
+            const bool t2=s2->type==2;const float zn=t2?-0.5f:-0.45f;
+            check(s2->xn==0.0f&&std::fabs(s2->zn-zn)<1e-6f,"Typ 8: ang 0 -> xn 0, zn -0.5 (Typ 0 nach einem Pass -0.45)");
+            const float lo=t2?0.2f:0.3f*0.9f-0.1f,hi=t2?0.8f:0.9f*0.9f-0.1f;
+            check(s2->yn>=lo-1e-5f&&s2->yn<=hi+1e-5f,"Typ 8: yn = 0.3 + 0.6*rand nach einem Pass");}
+        f.no_en02_gaps("Sand Typ 8");
     }
     std::cout<<"EN02 world PASS\n";return 0;
 }catch(const std::exception& ex){std::cerr<<ex.what()<<'\n';return 1;}}

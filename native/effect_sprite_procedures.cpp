@@ -2402,6 +2402,8 @@ void step_eff108(EffectSprite& s,const EffectContext& c,bool&){
     if(!(c.st_flg&0x40u)||(c.gm_flg&1u)){s.flg=0;return;}
     s.flg|=0x1000000u;
     auto& wt=water_wave();
+    // Nach QUALITY.md unerreichbar: 108 entsteht nur aus 109 (RM_1130/3060/3210/7060), und diese Raeume
+    // legen wt_wvp mit ihrem Wasserobjekt an, bevor das st_flg-0x40-Tor oben 108 laufen laesst.
     if(!wt.allocated){report_gap("bhEff108: sys->wt_wvp ohne bhObj005 (Original schreibt in fremden Speicher)");return;}
     if(s.mode0==0){
         s.px-=wt.px;s.pz-=wt.pz;
@@ -4036,7 +4038,12 @@ void step_e12_fire(EffectSprite& s,const EffectContext& c,bool&){
                 const float ar=p.car+1.0f; // plp->ar = PlyInfo[ply_id][0], car = ar - 1 (player.c:705-708)
                 const float dx=p.pos.x-s.px,dz=p.pos.z-s.pz,ln=njSqrt(dx*dx+dz*dz);
                 if(ln<1.5f+ar){
-                    p.pos.x=s.px+(dx*(1.5f+ar))/ln;p.pos.z=s.pz+(dz*(1.5f+ar))/ln;
+                    // ORIGINAL-FIX (QUALITY.md): effsub2.c:186-187 teilt durch ln; steht der Spieler genau auf
+                    // dem Feuer (RM_9321, beide bei 0/0/0 in der Zwischensequenz), ist ln 0. Der R5900 liefert
+                    // dann +-FLT_MAX und versetzt den Spieler ins Unendliche (hier NaN). Regel 5: Quotient 0,
+                    // der Spieler bleibt auf der Feuerlage (kein Schub ohne Richtung).
+                    const float qx=ln!=0.0f?(dx*(1.5f+ar))/ln:0.0f,qz=ln!=0.0f?(dz*(1.5f+ar))/ln:0.0f;
+                    p.pos.x=s.px+qx;p.pos.z=s.pz+qz;
                     hook_player_exp0(0x48,p.pos.x);hook_player_exp0(0x50,p.pos.z);
                     if(s.ct1==0&&!(p.flg&4u)&&!(p.stflg&0x80000000u)&&!(c.cb_flg&4u)){
                         p.flg|=0x10004u;p.stflg|=0x10000u;
@@ -4362,8 +4369,11 @@ void step_e00_fire(EffectSprite& s,const EffectContext&,bool& queued){
     default:break;
     }
     if(s.mtn_no<0||s.mtn_no>2){report_gap("bhEff_E00_Fire: mtn_no ausserhalb uvtble[3]");s.flg=0;return;}
-    // frm_no = (int)(10 * njRandom()) kann 10 sein (njRandom() == 1.0): das Original liest dann die Endmarke als UV.
-    if(s.frm_no<0||s.frm_no>=10){report_gap("bhEff_E00_Fire: frm_no auf der Endmarke von uvtble[mtn_no]");s.flg=0;return;}
+    // ORIGINAL-FIX (QUALITY.md): frm_no = (int)(10 * njRandom()) kann 10 sein (njRandom() == 1.0); das
+    // Original liest dann die Endmarke von uvtble[mtn_no] als UV (Fremdausschnitt fuer ein Bild).
+    // Regel 3: letzter gueltiger Eintrag 9.
+    if(s.frm_no>=10)s.frm_no=9;
+    if(s.frm_no<0){report_gap("bhEff_E00_Fire: frm_no negativ");s.flg=0;return;}
     e12::step_uv(s,table[s.mtn_no],11,0.125f,"bhEff_E00_Fire"); // :513-522
     queued=true;
 }
@@ -4395,10 +4405,7 @@ void step_e05_blood(EffectSprite& s,const EffectContext&,bool& queued){
 // mit Drift gegen ay; Zeichnung bhEff_E00_DrawParticleSpr (effsub2.c:238): txp[0], Bild
 // tex_id, Punktfilter (flg 0x20000000), Blend 8/3, njPtclDrawSprite.
 // Die Spielerberuehrung (:1941-1975, Schaden 3, Gift 20 %, ct1 aller 260 auf 0) prueft
-// op->cspr gegen plp->watr. cspr.c ist der Mittelwert der Teilchen PLUS des Anfangswerts
-// von px/py/pz, die das Original nie setzt: im ELF sind es $f20-$f22 (0x00240C54-0x00240C60),
-// die bis _start (0x00100008) niemand belegt. Der Wert ist im Programm nicht bestimmbar;
-// der Zweig bleibt eine benannte Luecke, statt einen Mittelpunkt anzunehmen.
+// op->cspr gegen plp->watr; ihr uninitialisierter Summenstart ist nach QUALITY.md behoben (unten).
 void step_e06_rinpun(EffectSprite& s,const EffectContext& c,bool&){
     static const std::uint32_t col[3]={0x000C180Au,0x000B1405u,0x000A1B07u};
     if(s.mode0==0){
@@ -4428,6 +4435,11 @@ void step_e06_rinpun(EffectSprite& s,const EffectContext& c,bool&){
         return;
     }
     auto& p=particle_work(s,"bhEff_E06_Rinpun");
+    // ORIGINAL-FIX (QUALITY.md): effsub2.c:1928-1934 summiert die Teilchen in px/py/pz, ohne sie
+    // zu setzen (Originalkommentar; im ELF $f20-$f22, die bis _start niemand belegt). cspr.c ist
+    // damit der Mittelwert PLUS Fremdinhalt/32 - die Giftwolke trifft je nach Registerrest nie oder
+    // an falscher Stelle. Regel 4 (Operand, keine andere Zuweisung): die Summe startet bei 0.
+    float px=0.0f,py=0.0f,pz=0.0f;
     for(int i=0;i<p.num;++i){
         p.pos[i].x+=p.vec[i].x+((0.3f*effect_random())-0.15f);
         p.pos[i].y+=p.vec[i].y+((0.3f*effect_random())-0.15f);
@@ -4435,10 +4447,27 @@ void step_e06_rinpun(EffectSprite& s,const EffectContext& c,bool&){
         p.vec[i].x*=0.95f;p.vec[i].z*=0.95f;
         p.vec[i].y-=0.01f;
         if(p.vec[i].y<-0.1f)p.vec[i].y=-0.1f;
+        px+=p.pos[i].x;py+=p.pos[i].y;pz+=p.pos[i].z;                 // :1928-1930
     }
-    report_gap("bhEff_E06_Rinpun: op->cspr.c aus nicht initialisierten px/py/pz ($f20-$f22, effsub2.c:1932) - Spielerberuehrung nicht bestimmbar");
-    const int ci=int(3.0f*effect_random());
-    if(ci>2){report_gap("bhEff_E06_Rinpun: col[3] (njRandom() == 1.0 liest hinter die Tabelle)");s.flg=0;release_extra_work(s);return;}
+    px/=float(p.num);py/=float(p.num);pz/=float(p.num);                 // :1932-1934
+    const RECVX_CB_SPHERE cspr{{px,py,pz},5.0f};                        // :1935-1938 op->cspr
+    {   // :1939-1966 npCollisionCheckSC(&op->cspr, &plp->watr), dann ct1 und plp->flg/stflg in dieser Reihenfolge.
+        RECVX_ENEMY_CAPSULE watr;RECVX_ENEMY_PLAYER pl;
+        if(hook_player_watr(watr,"bhEff_E06_Rinpun: plp->watr")&&recvx_cb_check_sc(&cspr,reinterpret_cast<const RECVX_CB_CAPSULE*>(&watr))!=0&&s.ct1!=0
+           &&hook_player_get(pl,"bhEff_E06_Rinpun: plp")&&!(pl.flg&0x4u)&&!(pl.stflg&0x80000000u)){
+            pl.mode0=2;pl.mode1=0;pl.mode2=0;pl.mode3=0;                 // :1943 *(int*)&plp->mode0 = 2
+            pl.hp-=3;if(pl.hp<0)pl.hp=0;                                 // :1944-1948
+            if(effect_random()<0.2f)pl.stflg|=0x80000u;                  // :1949-1952 Gift
+            hook_player_set(pl);
+            for(int slot=0;slot<512;++slot)                              // :1953-1960 alle Saetze dieser Kennung
+                if(auto* other=pool_work(slot);other&&(other->flg&1u)&&other->id==s.id)other->ct1=0;
+        }
+    }
+    // ORIGINAL-FIX (QUALITY.md): :1962 col[(int)(3 * rand/-2.1474836E9f)] erreicht durch die Float-Rundung
+    // fuer rand() nahe RAND_MAX den Index 3 und liest hinter die Stapeltabelle (Fremdfarbe fuer ein Bild).
+    // Regel 3 (konstante Originaldaten): auf den letzten Eintrag col[2] geklemmt. Vorher brach der Port
+    // hier den ganzen Staub ab.
+    int ci=int(3.0f*effect_random());if(ci>2)ci=2;
     p.col=col[ci]|(std::uint32_t(s.ct2)<<24);
     s.tex_id+=int(2.0f*effect_random());
     if(s.tex_id>4)s.tex_id=1;

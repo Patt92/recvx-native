@@ -593,7 +593,7 @@ bag_vm.set_flag(7,17,0);bag_vm.flags[5][0]=4;bag.hp=93;bag.poisoned=true;bag.equ
             event.start(0,0);for(unsigned i=0;i<(c.code[0]==0x85?3u:1u);++i)event.tick(); // 0x85 returns 0 and ends the pass like the original
             check(event.errors.empty()&&event.flag(4,30)&&(!clears||!(event.flags[12][0]&0x4000u)),c.what);}}
     // bhPlyDposCk (0xbe) is 6 bytes and turns plp->ay by one step per pass until the target.
-    {auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0xbe,0,90,30,0,0, 0x05,0x04,30,0,0,0, 0xff,0};
+    {auto bytes=fixture();bytes[1118]=0;const std::vector<std::uint8_t> code={0xbe,0,0,90,30,0, 0x05,0x04,30,0,0,0, 0xff,0};
         std::copy(code.begin(),code.end(),bytes.begin()+1180);Inventory state;MessageDialog text;EventVm event(bytes,state,text);unsigned yaw=0;
         event.player_yaw=[&]{return yaw;};event.set_player_yaw=[&](unsigned value){yaw=value;};event.binding=[&](const EventCommand&){return true;};
         event.start(0,0);event.tick();check(event.errors.empty()&&yaw==5461&&event.flag(4,30),"bhPlyDposCk must turn by one step and advance 6 bytes");}

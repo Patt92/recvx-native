@@ -197,6 +197,13 @@ int main(int argc,char** argv){try{
   check(r.vm.flags[11][0]&0x200u,"bhEff111 does not request the small-screen render (gm_flg 0x200)");
   SceneCamera view;view.position={24.7329f,14.44f,32.7362f};view.angles={0,0,0};view.perspective=10012;view.clip_near=1;view.clip_far=20000;
   const auto rt=r.world.small_screen_pass(view);check(rt&&rt->slot==1&&rt->cut==6,"monitor render pass missing for a camera that sees the monitor");
+  // ORIGINAL-FIX (QUALITY.md) in world.cpp bhDrawThlEffect3D: vor dem ersten Rendercut hat ef_tn[111]
+  // nie Inhalt (Original: zufaelliger GS-Speicher an TBP 476). Kein Monitorquad, keine Luecke.
+  //    Messung: dieselbe Ansicht ohne Tick vor und nach dem ersten commit_small_screen; die Differenz
+  //    sind genau die zwei Monitordreiecke (unten).
+  std::size_t before_first_cut=0;
+  {Scene before=r.scene;const auto b0=before.triangles.size();r.world.append(before,{},view);before_first_cut=before.triangles.size()-b0;
+   for(const auto& g:r.world.unbound_enemy_routines())check(g.find("bhDrawThlEffect3D")==std::string::npos,"ORIGINAL-FIX: Monitor vor dem ersten Rendercut meldet eine Luecke");}
   Scene screen=r.scene;r.world.append(screen,{},rt->camera,{true,rt->cut});
   SoftwareRenderer target(512,512);target.set_supersampling(1);target.set_render_threads(1);target.draw_screen(screen,rt->camera,rt->dist);
   check(target.covered_pixels()>1000,"cut 6 rendered nothing into the monitor texture");
@@ -213,6 +220,7 @@ int main(int argc,char** argv){try{
   const auto& copy=(*r.world.effect_group_textures(111))[0].pixels; // Szenentextur mit dem Inhalt der Kopie
   unsigned monitor=0;for(std::size_t i=base;i<shown.triangles.size();++i){const auto& t=shown.triangles[i];if(t.textured&&t.texture<shown.textures.size()&&shown.textures[t.texture].width==256&&shown.textures[t.texture].pixels==copy&&t.blend==SceneBlend::Opaque)++monitor;}
   check(monitor==2,"bhDrawThlEffect3D monitor quad with the render texture missing");
+  check(shown.triangles.size()-base==before_first_cut+2,"ORIGINAL-FIX: Monitor vor dem ersten Rendercut gezeichnet");
   // effect.c:1679-1690 flg 0x2000000 (in den Daten nie gesetzt, Zweig fuer sich geprueft): ocol aus dem Blickwinkel.
   {auto& mon=const_cast<EffectSprite&>(*r.world.effect_state(1));const auto saved=mon.flg;mon.flg|=0x2000000u;
    Scene angled=r.scene;const auto b2=angled.triangles.size();r.world.append(angled,{},view);mon.flg=saved;

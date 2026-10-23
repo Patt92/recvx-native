@@ -197,6 +197,10 @@ static void call_se(RECVX_ENEMY_WORK* w, int se)
     recvx_t3_call_se(w, &at, se);
 }
 static int parts(RECVX_ENEMY_WORK* w, int k, RECVX_ENEMY_VEC* out) { return recvx_t3_get_parts_pos(w, joint_tree[k], out); }
+/* zonzon1.c:668/:683 lesen mtn[frm_no/65536] ohne Grenze. Die Verschiebetabellen haben je Motion
+   frm_num Eintraege und frm_no bleibt unter frm_num (Motion.c:106-108); hinter die Tabelle geht es nur
+   bei einer Tabelle, die nicht zur Motion passt. Nach QUALITY.md Bedingung 3 nicht erreichbar belegt
+   (kein Treffer in allen 205 Raeumen x 900 Bildern), bleibt Bindungsschutz. */
 static void null_trans(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* t, uint32_t n)
 {
     const RECVX_T3_LINK lk = { w, 0 };
@@ -313,8 +317,10 @@ static void init(RECVX_ENEMY_WORK* w)
     if (!en05_sv->game_mode(&gm)) { gap(w, "bhEne05_Init: sys->gm_mode"); return; }
     if (!rnd(w, &r)) return;
     {
-        const int k = (int)(16.0f * r);
-        if (k > 15) { gap(w, "bhEne05_Init: ENE05_HITPOINT[16] liest hinter die Zeile"); return; }
+        /* ORIGINAL-FIX (QUALITY.md): (int)(16 * njRandom()) wird durch die Float-Rundung fuer
+           rand() nahe RAND_MAX 16 und liest hinter die Zeile (Fremd-HP). Regel 3: letzter Eintrag. */
+        int k = (int)(16.0f * r);
+        if (k > 15) k = 15;
         w->hp = ENE05_HITPOINT[gm != 2 ? 0 : 1][k];
     }
     w->mtn_md = 0; w->mtn_add = 65536; w->mtn_tp = flip_tree;
@@ -707,6 +713,9 @@ static void mv01(RECVX_ENEMY_WORK* w)
                     w->ct1 = ang;
                 }
                 dist = njSqrt((w->px - pos.x) * (w->px - pos.x) + (w->pz - pos.z) * (w->pz - pos.z));
+                /* en05.c:1632: rate bleibt bei dist == 0 ungesetzt. Nur wenn der Hunter exakt auf dem um die
+                   Normale versetzten Wandpunkt steht (Float-Gleichheit); nicht belegt erreichbar, bleibt
+                   nach QUALITY.md eine Luecke. */
                 if (!(dist > 0.0f)) { gap(w, "bhEne05_MV01: rate uninitialisiert bei dist 0 (en05.c:1632)"); return; }
                 rate = 10.0f / dist;
                 if (rate > 1.0f) rate = 1.0f;
@@ -2236,6 +2245,8 @@ static int check_jump(RECVX_ENEMY_WORK* w)
     switch (p.mode2) {
     case 3: case 6:
         if (!en05_sv || !en05_sv->player_dmlvl || !en05_sv->player_dmlvl(&dml)) { gap(w, "bhEne05_CheckJump: PEXP0_I(0x14)"); return 0; }
+        /* en05.c: dist bleibt fuer dmlvl > 2 ungesetzt. Unerreichbar: alle zwoelf Schreiber von
+           plp->exp0->dmlvl (player.c) setzen 0, 1 oder 2. Bleibt nach QUALITY.md eine Luecke. */
         if (dml < 0 || dml > 2) { gap(w, "bhEne05_CheckJump: dist uninitialisiert (PEXP0_I(0x14) > 2)"); return 0; }
         dist = p.mode2 == 3 ? (dml == 0 ? 8.0f : dml == 1 ? 7.0f : 6.0f) : (dml == 0 ? 25.0f : dml == 1 ? 23.0f : 20.0f);
         break;

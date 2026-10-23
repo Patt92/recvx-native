@@ -1119,7 +1119,9 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         if(op==0x90){e.face_keys.clear();e.face_frame=0;e.face_flags&=~0x31u;}
         if(op==0x9a){if(!v.u8(2))e.face_flags|=2;else e.face_flags&=~2u;}return true;}
     if(op==0x13){if(v.u8(1)==1){return_to_cut();restore_camera_clip_=true;return true;}set_event_camera(v.u8(2),v.u8(3),true);return true;}
-    if(op==0x82){ // event.c:2421 bhSetDebugLoopEx: die laufende Ereigniskamera bei cam.ct0 neu aufsetzen
+    // event.c:2421 bhSetDebugLoopEx: die laufende Ereigniskamera bei cam.ct0 neu aufsetzen. Ohne laufende
+    // Ereigniskamera nach QUALITY.md unerreichbar: Befehl 0x82 steht in keinem der 205 Raumskripte.
+    if(op==0x82){
         if(!event_camera){unbound_enemy_.insert("bhSetDebugLoopEx: keine laufende Ereigniskamera (cam.evc_no/keyf_no undefiniert)");return false;}
         if(collision_events_)collision_events_->flags[5][0]|=0x10u;            // sys->st_flg |= 0x10
         event_camera_clock_=v.u16(2);                                          // cam.ct0 = u16; cam.frm = 0 (der Splineparameter entsteht je Pass aus ct0)
@@ -1341,7 +1343,25 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         player_scripted=false;player_frozen_=false;player_smove_.active=false;return true;}
     if(op==0x64&&v.u8(1)==0x80){player_event_.requested=false;player_smove_.active=false;turn_active_=false;} // Player_controll 128: zurueck zu bhCPM0_action; mode2 22 endet mit dem Werkfeld
     if(op==0x64&&v.u8(1)==0x8b){player_event_.requested=false;player_smove_.active=false;} // Player_controll 139: kein Modus-Reset (event.c:9640-9660)
-    if(op==0x64){switch(v.u8(1)){case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;player_prev_pos_=player_.position;collision_floor_=floor_at(player_.position); /* event.c:9665-9693 exp0[18]/[20] = spx/spz, pxb/pyb/pzb = px/py/pz, flr_no = bhCheckFloorNum(py) (:9679) */return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
+    if(op==0x64){switch(v.u8(1)){
+        case 0:return true; // Player_controll 0 only advances the command byte.
+        case 12:case 13: // event.c:9483/9495: same task signs as Common_controll 12/13.
+            for(unsigned i=0;i<3;++i)(v.u8(1)==12?ctx.pos_sign:ctx.ang_sign)[i]=v.u8(i+2);
+            return true;
+        case 137:{ // event.c:9604-9639: POS -> current work, then pl_smove01 on the next player pass.
+            if(!ctx.work||ctx.kind!=0)return false;
+            const BinaryView room(room_);const unsigned index=v.u8(2);
+            if(index>=room.u32(header_+0xa4))throw std::runtime_error("Player_controll 137 POS outside room table");
+            const auto p=room.relative(room.u32(header_+0x24),index*16u,16);
+            const NJS_POINT3 position{room.f32(p),room.f32(p+4),room.f32(p+8)};
+            const int floor=floor_at(position);
+            if(floor!=collision_floor_)collision_floor_previous_=collision_floor_; // pwksub.c:85 bhSetFloorNum
+            collision_floor_=floor;player_.position=position;player_.yaw=room.i32(p+12);
+            collision_mode_=7u|(1u<<16);
+            player_event_.requested=true;player_event_.mode1=0;player_event_.mode2=1;player_event_.reset=true;
+            player_scripted=false;player_smove_.active=false;
+            return true;}
+        case 7:player_.position={v.u16(2)/100.f*(ctx.pos_sign[0]?-1:1),v.u16(4)/100.f*(ctx.pos_sign[1]?-1:1),v.u16(6)/100.f*(ctx.pos_sign[2]?-1:1)};collision_safe_=player_.position;player_prev_pos_=player_.position;collision_floor_=floor_at(player_.position); /* event.c:9665-9693 exp0[18]/[20] = spx/spz, pxb/pyb/pzb = px/py/pz, flr_no = bhCheckFloorNum(py) (:9679) */return true;case 0x80:{ // event.c:9640 Player_controll 128: Freigabe aus dem Skriptmodus zurueck zu bhCPM0_action (Umkehrung von bhLoadWork player_work_owned: mode0 7 -> 1, flg/stflg 0x10000 weg)
             player_step_=65536; // mtn_add = 65536
             player_room_motion_=false;player_enemy_motion_=false; // mnwP = plmthp
             collision_mode_=1u; // mode0 1, mode1/2/3 0
@@ -1653,12 +1673,14 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
                 // event.c:11600 switch(v0 = Byte 6): 0/2/5/6 bhSetMotion(plp, 0, 0, 0) auf dem neuen mnwP mit dem
                 // noch alten mtn_no; bhCalcModel/-Link zeichnet der Host aus objP. Der Host schaltet die
                 // Bibliothek (player_room_motion_) erst zusammen mit mtn_no in pl_smove08 case 0 um, damit
-                // Abtastung und Index zusammenpassen. Liegt der alte Index ausserhalb der neuen Bibliothek
-                // (das Original liest dann hinter das Feld), bleibt der Schritt aus und wird gemeldet.
+                // Abtastung und Index zusammenpassen. Liegt der alte Index hinter den Raummotionen, liest das
+                // Original einen der 512 genullten MN_WORK von sys->rmthp (room.c:405-409, 12288 Byte): datP
+                // NULL, bhSetMotion (Motion.c:29) tut nichts. Bestimmt und harmlos - treu ohne Meldung; hinter
+                // das Feld ginge es erst ab mtn_no 512.
                 {const unsigned v0=v.u8(6);if(v0==0||v0==2||v0==5||v0==6){
                     const bool room=cmd!=25;
                     const MotionClip* clip=room?(motion_<room_motions_.size()&&room_motions_[motion_].frames?&room_motions_[motion_]:nullptr):(player_asset_&&player_asset_->has_motion(motion_)?&player_asset_->motion_clip(motion_):nullptr);
-                    if(!clip&&room&&motion_>=room_motions_.size())unbound_enemy_.insert("Common_controll Spieler v0: bhSetMotion auf rmthp[alter mtn_no] hinter der Raumbibliothek (Original liest ausserhalb)");
+                    if(!clip&&room&&motion_>=512u)unbound_enemy_.insert("Common_controll Spieler v0: bhSetMotion auf rmthp[mtn_no >= 512] hinter sys->rmthp (Original liest ausserhalb)");
                     if(clip&&player_asset_){if(player_obj_.size()!=player_asset_->bones()){player_obj_=player_asset_->bind_pose();player_owp_flags_.assign(player_obj_.size(),0u);}
                         MotionWork m{std::int32_t(frame_),0u,player_hokan_count_,0u,player_hokan_rate_};std::string gap;
                         set_motion(m,0,0u,clip,nullptr,player_obj_,player_owp_flags_,&gap,0u,unsigned(motion_));if(!gap.empty())unbound_enemy_.insert(gap+" (plp, Common v0)");
@@ -3792,7 +3814,7 @@ std::vector<ModelPose> RoomWorld::player_local_pose()const{
     if(player_room_motion_){if(const auto* clip=player_room_clip())return player_asset_->local_pose_clip(*clip,frame_);return player_obj_.size()==player_asset_->bones()?player_obj_:player_asset_->bind_pose();} /* Motion.c:29: datP NULL */
     return player_asset_->local_pose(motion_,frame_);
 }
-unsigned RoomWorld::frame(unsigned kind,unsigned index)const{if(!kind)return unsigned(std::max<std::int64_t>(0,frame_));const auto at=entities_.find({kind,index});return at==entities_.end()?0:unsigned(std::max<std::int64_t>(0,at->second.frame));}
+unsigned RoomWorld::frame(unsigned kind,unsigned index)const{if(!kind)return unsigned(frame_);const auto at=entities_.find({kind,index});return at==entities_.end()?0:unsigned(at->second.frame);}
 std::optional<NJS_POINT3> RoomWorld::position(unsigned kind,unsigned index)const{if(!kind)return player_.position;const auto at=entities_.find({kind,index});if(at==entities_.end())return {};return at->second.transform.position;}
 void RoomWorld::commit_afterimage_model(unsigned kind,unsigned index,unsigned mdl,const PlayerAsset& asset,const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& nodes,const std::vector<std::uint32_t>& flags){
     if(pose.size()!=asset.bones()||nodes.size()!=asset.bones()||flags.size()!=asset.bones())throw std::runtime_error("afterimage model publication has incomplete objP/owP");
@@ -4241,6 +4263,9 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     bool mirror_on=false;scene.mirror_enabled=false;
     if(st_flg_draw&0x100u){NJS_MATRIX mat;njUnitMatrix(&mat);NJS_PLANE plane=effect_mirror_plane();
         if(njMirror(&mat,&plane)){mirror_on=true;scene.mirror_enabled=true;std::copy_n(mat,16,scene.mirror_matrix.begin());}
+        // ps2_NaMatrix.c:1016 kehrt bei d bzw. vy+vz == +0 ohne Stapelabbau zurueck (Absturz im Original).
+        // Nach QUALITY.md unerreichbar: die einzigen Spiegel (Effekt 112, RM_2040/RM_9230) haben
+        // d = 1.751 bzw. 1.984 und vy+vz ~ 1 (sys->mr_pl aus effsub1.c:7183-7190). Bleibt eine Luecke.
         else unbound_enemy_.insert("njMirror: undefinierter Originalzweig (ps2_NaMatrix.c:1016, d bzw. vy+vz bitgleich +0)");}
     // bhPutModel(plp) und die Spielerobjekte, die die Laufzeit vor diesem Pass eintraegt: der Koerper
     // (player_body) prueft plp->mdflg 0x40 (player.c:1666), Haar obwp[2] (bhSetObject(lkmtab), flg 0x81,
@@ -4546,7 +4571,12 @@ void RoomWorld::append(Scene& scene,const std::vector<BoneMatrix>& player_nodes,
     if(draw_effects)for(unsigned i=0;i<sprites_.size();++i){const auto& work=sprites_[i];const auto& s=work.sprite;
         if(work.hidden||!work.thl||((s.flg|s.stflg)&0x1000000u)||s.tex_id<0||((mirror&0x4000u)&&(s.mdflg&0x40u)))continue; // effect.c:1581
         const auto* list=effect_texture_list(work);const std::size_t frame=(s.stflg&0x20u)?std::size_t(s.tex_id)+s.ani_ct:s.ani_ct;
-        if(!list||frame>=list->size()||(*list)[frame].pixels.empty()){unbound_enemy_.insert("bhDrawThlEffect3D: ef_tn[tex_id] ohne gezeichnetes Bild (Inhalt vor dem ersten Rendercut undefiniert)");continue;}
+        if(!list||frame>=list->size()){unbound_enemy_.insert("bhDrawThlEffect3D: ef_tn[tex_id]+ani_ct ohne Texturliste");continue;}
+        // ORIGINAL-FIX (QUALITY.md): bhEff111 meldet ef_tn[op->id] per njSetTextureInfo (effsub1.c:6949-6977)
+        // an, beschrieben wird es erst vom ersten Rendercut (screen.c:1006/1010, Gate game.c:61-66). Bis
+        // dahin zeigt das Original den zufaelligen GS-Speicher an TBP 476 (RM_7030: Monitor ausserhalb
+        // des Sichtfelds). Regel 2: kein Zeichnen, bis commit_small_screen das erste Bild abgelegt hat.
+        if((*list)[frame].pixels.empty())continue;
         const auto& e=entities_.at({4,i});
         // effect.c:1611-1621: ohne flg 0x80 oder mit 0x200000 Einheit + px/ax, sonst
         // lkwkp->mlwP->owP[lkono].mtx + lox/loy/loz und ax/ay/az (wie bhDrawTrsEffect3D :1338).
@@ -5981,6 +6011,8 @@ bool RoomWorld::stand_player_motion(){
     unsigned& flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
     unsigned& stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
     RECVX_PLAYER_STAND_IO io{};io.flg=&flg;io.stflg=&stflg;io.hp=player_health();io.user=this;
+    // player.c:1114 schreibt nur 0x18000; die Giftbits 0x280000 bleiben unberuehrt
+    // und kommen ueber stflg_owned aus dem Inventar (Synchronisation im Runtime).
     if(player_inventory_)io.stflg_owned=player_inventory_->player_stflg();else unbound_enemy_.insert("bhStandPlayerMotion: plp->stflg 0x280000 (Inventar) nicht gebunden");
     io.mode_reset=[](void* u){static_cast<RoomWorld*>(u)->collision_mode_=1u;}; /* :1142 *(int*)&plp->mode0 = 1 */
     io.own_motion_bank=[](void* u){auto* w=static_cast<RoomWorld*>(u);w->player_room_motion_=false;w->player_enemy_motion_=false;}; /* :1154 plp->mnwP = plp->mnwPb */

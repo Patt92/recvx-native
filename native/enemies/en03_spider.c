@@ -147,6 +147,10 @@ int recvx_en03_bind_root_angles(RECVX_ENEMY_WORK* w, const int32_t* ang3)
     }
     return 1;
 }
+/* zonzon1.c:668/:683 lesen mtn[frm_no/65536] ohne Grenze. Die Verschiebetabellen haben je Motion
+   frm_num Eintraege und frm_no bleibt unter frm_num (Motion.c:106-108); hinter die Tabelle geht es nur
+   bei einer Tabelle, die nicht zur Motion passt. Nach QUALITY.md Bedingung 3 nicht erreichbar belegt
+   (kein Treffer in allen 205 Raeumen x 900 Bildern), bleibt Bindungsschutz. */
 void recvx_en03_add_null_trans(RECVX_ENEMY_WORK* w, const RECVX_EN03_BODY* b,
                                const RECVX_ENEMY_VEC* mtn, uint32_t n)
 {

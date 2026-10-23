@@ -274,8 +274,11 @@ static void init(RECVX_ENEMY_WORK* w)
             c->mdflg |= 0x1u;
             if (!rnd(w, &r)) return;
             {
-                const int k = i * 2 + (int)(2.0f * r);
-                if (k > 3) { gap(w, "bhEne23_Init: BrokenParts[1][2] liest hinter die Tabelle"); return; }
+                /* i == 0, Spalte 2 liest BrokenParts[1][0] (gueltiger Nachbar, treu). ORIGINAL-FIX
+                   (QUALITY.md): i == 1, Spalte 2 liest hinter BrokenParts[2][2] (Fremdknoten).
+                   Regel 3: letzter Eintrag. */
+                int k = i * 2 + (int)(2.0f * r);
+                if (k > 3) k = 3;
                 s->broken_node[i] = BrokenParts[k];
             }
             s->leg_link[i].owner = w;
@@ -1337,14 +1340,20 @@ static int check_diving(RECVX_ENEMY_WORK* w)
 }
 
 /* --- Treffer (en23.c:3266-3515) ------------------------------------------- */
+static void leg_break(RECVX_ENEMY_WORK* w);
+/* Testeinstieg fuer den ORIGINAL-FIX (QUALITY.md) in bhEne23_LegBreak. */
+void recvx_en23_leg_break_for_test(RECVX_ENEMY_WORK* w) { leg_break(w); }
 static void leg_break(RECVX_ENEMY_WORK* w)
 {
     RECVX_EN23_STATE* s = st(w);
     float r;
     int i;
     if (!rnd(w, &r)) return;
+    /* ORIGINAL-FIX (QUALITY.md): en23.c LegBreak i = (int)(2 * njRandom()) erreicht 2 (float-Rundung
+       bei rand() nahe RAND_MAX) und liest exp0[260] als Beinflag, exp0[258] als Knoten und exp0[64*4]
+       als Beinzeiger, auf den es mode0/2/3 schreibt (Absturz). Regel 3: letztes Bein (1). */
     i = (int)(2.0f * r);
-    if (i > 1) { gap(w, "bhEne23_LegBreak: exp0[258+2] liest hinter die Beinflags"); return; }
+    if (i > 1) i = 1;
     if (s->leg_broken[i] == 0) {
         const uint32_t node = s->broken_node[i];
         s->leg_broken[i] = 1;

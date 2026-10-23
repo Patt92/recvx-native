@@ -1048,6 +1048,8 @@ static void mv07(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw, int count)
         w->px += 0.1f * (pos.x - w->px);
         w->pz += 0.1f * (pos.z - w->pz);
     } else gap(w, "bhGetObjMotion: Wurzelschluessel fehlen, pos/ang uninitialisiert (en19.c:2134, Motion.c:941)");
+    /* Nach QUALITY.md unerreichbar: alle 35 Tyrant-Motionen (RM_1122/3230/5010/5840) tragen Wurzel-
+       position und -winkel (gemessen 2026-10-23). Bleibt Bindungsschutz. */
 
     if (fw->mtn_rte >= 52428) *stsP |= 0x4;                          /* :2145 */
 }
@@ -1396,6 +1398,7 @@ static int action_main(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw)
     fw->act_frm = (int32_t)(((uint32_t)(uint16_t)hi << 16) | (uint16_t)lo);
 
     if (!frames(w, w->mtn_no, &frm_num)) return 0;
+    /* frm_num - 1 == 0 bzw. frm_num == 0: nach QUALITY.md Bedingung 3 unerreichbar - der Motiondecoder verwirft Motionen ohne Bilder (actor.cpp:320), und 2026-10-23 gemessen hat keine Motion der Spielerbaenke 10..14 und der Gegnerbanken in RM_1122/3230/5010/5840/9000/9270/9300/0110 nur ein Bild. Die Pruefung bleibt Bindungsschutz. */
     if (frm_num <= 1u) { gap(w, "bhEne19_ActionMain: frm_num - 1 == 0 (en19.c:2847, divbyzerocheck)"); return 0; }
     fw->mtn_rte = w->frm_no / (int32_t)(frm_num - 1u);               /* :2847 */
     return 0;
@@ -1605,8 +1608,9 @@ static void dmg_check(RECVX_ENEMY_WORK* w, RECVX_EN19_STATE* fw)
             else if (flg & 0x40) dst = 2;
             /* :3257 `dst` ist im Original nur in diesen drei Zweigen gesetzt; sonst
                traegt $s2 den Wert des Aufrufers (Disassembly 0x1F45C8-0x1F4604).
-               weapon.c:761-773/834-846/1141/1229-1247 setzt vor jedem Treffer
-               genau eines der Bits; ohne Bit: benannte Luecke statt geratener Index. */
+               Nach QUALITY.md unerreichbar: jeder Treffer setzt vorher genau eines der
+               Bits (weapon.c:761-773/834-846/1141/1229-1247/1315/1482-1488), der zweite
+               Weg :3234 uebernimmt comb_flg eines solchen Treffers (:3319). Bleibt Luecke. */
 
             if (w->comb_wep == 17u && !(w->flg2 & 0x4u)) eff_typ = -1;
             else if (dst < 0) { gap(w, "en19.c:3257 dst uninitialisiert (bhEne19_DmgCheck, comb_flg ohne 0x10/0x20/0x40)"); eff_typ = -1; }
@@ -2241,6 +2245,7 @@ static void ply_action_main(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* p, RECVX_EN
         paw->p_act_flg &= ~0x2;
         ply_action_change(w, p, fw, paw->p_act_jmp);
     }
+    /* frm_num - 1 == 0 bzw. frm_num == 0: nach QUALITY.md Bedingung 3 unerreichbar - der Motiondecoder verwirft Motionen ohne Bilder (actor.cpp:320), und 2026-10-23 gemessen hat keine Motion der Spielerbaenke 10..14 und der Gegnerbanken in RM_1122/3230/5010/5840/9000/9270/9300/0110 nur ein Bild. Die Pruefung bleibt Bindungsschutz. */
     if (paw->p_frm_num - 1 == 0) { gap(w, "bhEne_PlyActionMain: p_frm_num - 1 == 0 (en19.c:4556, divbyzerocheck)"); return; }
     paw->p_mtn_rte = p->frm_no / (paw->p_frm_num - 1);
     if (paw->p_prgP != NULL) paw->p_prgP(p, w, fw);

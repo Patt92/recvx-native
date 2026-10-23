@@ -1011,6 +1011,7 @@ static bool step_e00_blood_burst(EffectSprite& s,const EffectContext& c){
         if(s.type>=7){report_gap("bhEff_E00_BloodBurst: type ausserhalb TypeList[7]");s.flg=0;return false;}
         if(s.link_kind<0||!s.link_matrix){report_gap("bhEff_E00_BloodBurst: lkwkp->mlwP->owP[lkono] ohne Link");s.flg=0;return false;}
         for(;;){
+            // Unerreichbar (QUALITY.md): jede TypeList endet mit wait 0xFFFF = -1 (effsub2.c), dort bricht :2108 ab.
             if(unsigned(s.frm_no)>=counts[s.type]){report_gap("bhEff_E00_BloodBurst: frm_no hinter der Typliste");s.flg=0;return false;}
             const P& p=lists[s.type][s.frm_no];
             const NJS_POINT3 lo{s.lox,s.loy,s.loz};

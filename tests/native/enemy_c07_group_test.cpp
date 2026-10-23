@@ -308,7 +308,28 @@ void data_contract(const std::filesystem::path& data){
  require(a==b14&&a==c&&a.size()==2,"C07 EN13/EN14/EN30 room overlap differs");
 }
 }
-int main(int argc,char**argv){try{_Make_SinTable();en11_contract();en12_contract();
+/* ORIGINAL-FIX (QUALITY.md) in en12.c MV04 (en12.c:973-987): plp->mode2 ausserhalb 3..12 setzt
+   angx/angz nicht. Der Sprungabstand ofx behaelt dann seinen Wert (geklemmt 20..45), mode3 laeuft
+   weiter. Mit mode2 3 zielt ofx auf plp - 15 * (sin, cos)(ay). */
+uint32_t en12_frames(const RECVX_ENEMY_WORK*,uint32_t){return 30u;}
+void en12_mv04_fix(){
+ reset();
+ auto sv=services();sv.set_motion=motion_any;sv.motion_frames=en12_frames;
+ RECVX_EN12_SERVICES ex{};ex.effect_tb=effect_tb;ex.system_flags_clear=flags_clear_bank;
+ RECVX_ENEMY_WORK w{};w.id=12;w.sv=&sv;
+ require(recvx_en12_bind(&w,&ex),"EN12 MV04: bind");
+ w.flg=1;w.mode0=1;w.mode1=1;w.mode2=4;w.mode3=0;w.px=0;w.pz=0;w.ofx=33.0f;
+ ply.mode2=0;ply.pos={100,0,0};ply.ay=0;
+ recvx_en12(&w);
+ require(w.ofx==33.0f,"EN12 MV04: ofx bei plp->mode2 0 nicht unveraendert (ORIGINAL-FIX)");
+ require(w.mode3>=1,"EN12 MV04: mode3 laeuft bei plp->mode2 0 nicht weiter");
+ for(const auto& g:gaps)require(g.find("f20/f2")==std::string::npos,"EN12 MV04: alte Luecke gemeldet");
+ w.mode2=4;w.mode3=0;w.ofx=0;ply.mode2=3;ply.pos={0,0,40};ply.ay=0;
+ recvx_en12(&w);
+ require(std::fabs(w.ofx-25.0f)<1e-4f,"EN12 MV04: ofx bei plp->mode2 3 nicht |plp - 15*cos(ay)| = 25");
+ recvx_en12_bind(nullptr,nullptr);clear_allocations();
+}
+int main(int argc,char**argv){try{_Make_SinTable();en11_contract();en12_contract();en12_mv04_fix();
  en14_contract();en18_contract();if(argc>1)data_contract(argv[1]);
  std::cout<<"C07 component and identity contracts passed (not gameplay).\n";return 0;}
  catch(const std::exception& e){clear_allocations();std::cerr<<e.what()<<'\n';return 1;}}

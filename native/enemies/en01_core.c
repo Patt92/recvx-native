@@ -3571,10 +3571,12 @@ void recvx_en01_mv00(RECVX_ENEMY_WORK* w)
     case 0: {
         uint32_t frames = en01_motion_frames(w, w->mtn_no);  /* :4949 */
         if (frames == 0u) {
-            /* Das Original dividiert hier ungeschuetzt (`rand() % frm_num`)
-               und hat deshalb `#pragma divbyzerocheck off` direkt danach
-               (en01.c:5004). Ohne gebundene Motionlaenge gibt es keinen
-               Startframe; der Mechanismus meldet das statt zu raten. */
+            /* Das Original dividiert hier ungeschuetzt (`rand() % frm_num`,
+               `#pragma divbyzerocheck off` en01.c:5004). frm_num == 0 kommt in
+               den Daten nicht vor: der Motiondecoder (actor.cpp:320) verwirft
+               Motionen ohne Bilder. 0 heisst hier nur "Motion nicht gebunden";
+               das bleibt nach QUALITY.md eine Bindungsluecke (gilt ebenso fuer
+               die frm_num-Pruefungen bei en01.c:5978/6611/6643/10043). */
             en01_gap(w, "mnwP[mtn_no].frm_num == 0 (en01.c:4949)");
             return;
         }
@@ -4199,9 +4201,11 @@ void recvx_en01_mv04(RECVX_ENEMY_WORK* w)
             mtn_no1 = 55u; mtn_no2 = 255u;                   /* :5490-5491 */
         } else {
             /* Keiner der aufgezaehlten Werte: das Original benutzt dann die
-               UNINITIALISIERTEN mtn_no1/mtn_no2 in bhEne_ChgMtn
-               (en01.c:5495). Ein Ersatzwert waere geraten, deshalb nur die
-               Meldung. */
+               UNINITIALISIERTEN mtn_no1/mtn_no2 in bhEne_ChgMtn (en01.c:5495).
+               Erreichbarkeit nicht belegt (QUALITY.md Bedingung 3): MV04 laeuft
+               nur ueber MoveMode2W[4] aus MVType00 nach einem Niederschlag; Typ 6
+               mit mtn_no 3 geht ueber MVType02 nach MV14 (en01.c:4934). Kein Treffer
+               in 72 EN01-Raeumen x 900 Bildern. Bleibt eine Luecke. */
             en01_gap(w, "bhEne01_MV04: mtn_no1 uninitialisiert (en01.c:5495)");
             return;
         }

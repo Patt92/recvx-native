@@ -448,19 +448,20 @@ static void en16_mv02(RECVX_ENEMY_WORK* w)
                             if (en16_extra->gun_spark)
                                 en16_extra->gun_spark(&at, &v, 0xFFF8F8A0u, 0x4CE04010u, en16_extra->hiteff13 - 4);
                             else if (sv && sv->gap) sv->gap("bhSetEffGunSpark (en16.c:262)");
-                            /* en16.c:263-265 gap.wpn_no = 0xD; gap.ay = bhArcTan2(v.x, v.z);
-                               bhSetGunSplash(&gap, &pos, hp->prm0). bhSetGunSplash
-                               (weapon.c:1636-1640, Disassembly 0x28DA58-0x28DA80) liest
-                               gap->vx/vy/vz (GA_WORK +0xC/+0x10/+0x14) als Spritzrichtung
-                               fuer lox (Faelle 0/1/2/3) bzw. px/pz (Faelle 4/5). bhEne16_MV02
-                               legt gap bei sp+0x50 an und schreibt nur wpn_no (sp+0x78) und
-                               ay (sp+0x90); sp+0x5C..0x64 beschreibt die Funktion nirgends
-                               (alle Stackstores: 0x0..0x8 Register, 0x78, 0x90, 0xA0..0xB8
-                               fuer v und pos). Die Richtung ist im Original also
-                               uninitialisierter Stackinhalt, nicht v. Ohne belegbaren Wert
-                               wird kein Spritzer erzeugt; benannte Luecke statt Ersatz. */
-                            if (sv && sv->gap)
-                                sv->gap("bhSetGunSplash (en16.c:265): GA_WORK vx/vy/vz im Original uninitialisiert");
+                            /* ORIGINAL-FIX (QUALITY.md): en16.c:263-265 gap.wpn_no = 0xD; gap.ay =
+                               bhArcTan2(v.x, v.z); bhSetGunSplash(&gap, &pos, hp->prm0). bhSetGunSplash
+                               (weapon.c:1636-1640, Disassembly 0x28DA58-0x28DA80) liest gap->vx/vy/vz
+                               als Spritzrichtung; bhEne16_MV02 legt gap bei sp+0x50 an und schreibt nur
+                               wpn_no (sp+0x78) und ay (sp+0x90) - die Richtung ist Stapelrest und versetzt
+                               den Spritzer (ef.px += 2 * vec.x) an eine zufaellige Stelle. Erreicht bei
+                               jedem Armtreffer an einer Wand ohne attr 0x100 (bhCheckWallAttrB89 = 1).
+                               Regel 4 (Argument eines ohnehin gemachten Aufrufs): gvec = 0. */
+                            {
+                                const RECVX_ENEMY_VEC gvec = { 0.0f, 0.0f, 0.0f };
+                                if (en16_extra->gun_splash)
+                                    en16_extra->gun_splash(&gvec, &at, prm0, 0xD, recvx_t3_arc_tan2(v.x, v.z));
+                                else if (sv && sv->gap) sv->gap("bhSetGunSplash (en16.c:265)");
+                            }
                         } else if (!en16_extra || !en16_extra->wall_attr_b89) {
                             if (sv && sv->gap) sv->gap("bhCheckWallAttrB89 (en16.c:253)");
                         }

@@ -28,6 +28,7 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
     if(floor_count>4096)throw std::runtime_error("too many floor triggers");v.require(floor_offset,floor_count*36);
     for(unsigned i=0;i<floor_count;++i){const auto p=floor_offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};for(unsigned j=0;j<4;++j)a.parameters[j]=v.u8(p+32+j);floors_.push_back(a);}
     const auto item_count=v.u32(info.room_offset+0x90),item_offset=v.u32(info.room_offset+16);if(item_count>4096)throw std::runtime_error("too many room items");v.require(item_offset,item_count*36);for(unsigned i=0;i<item_count;++i){room_items_.push_back(v.u16(item_offset+i*36+4));room_item_flags_.push_back(v.u32(item_offset+i*36));}
+    for(unsigned level=0;level<tasks_.size();++level)tasks_[level].level=level;
     values[23]=inventory_.game_mode;values[24]=inventory_.player;flags[6][0]=0xffffffff;flags[13][0]=1;flags[14][0]=0x40000000;if(inventory_.side_pack)flags[11][0]|=0x8000000;
 }
 // bhCk/bhSet define matrices 1..16; no original storage is defined for 0.
@@ -35,7 +36,14 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
 bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flags.size())throw std::runtime_error("event flag outside matrix");index&=0x3ff;return bool(flags[matrix][index/32]&(0x80000000u>>(index%32)));}
 void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||mode>5)throw std::runtime_error("invalid event flag operation");index&=0x3ff;auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
 void EventVm::sync_player_stflg(){flags[14][0]=(flags[14][0]&~0x280000u)|inventory_.player_stflg();}
-void EventVm::start(unsigned level,unsigned event){if(event>=scripts_.size())throw std::runtime_error("event index outside table");if(level>=16){level=0;while(level<15&&tasks_[level].active)++level;} /* Event_exec (event.c:13001): sind 0..14 belegt, wird Slot 15 neu belegt */if(task_started)task_started(level);const auto counts=tasks_[level].loop_counts;const auto cnt2=tasks_[level].cnt2,cnt3=tasks_[level].cnt3,wpnl_no=tasks_[level].wpnl_no;const auto addpx=tasks_[level].addpx;tasks_[level]={};tasks_[level].loop_counts=counts;tasks_[level].cnt2=cnt2;tasks_[level].cnt3=cnt3;tasks_[level].wpnl_no=wpnl_no;tasks_[level].addpx=addpx; /* Event_init (event.c:12956) leaves cnt, wpnl_no and addpx */tasks_[level].active=true;tasks_[level].level=level;tasks_[level].event=event;tasks_[level].pc=scripts_[event];dispatched.push_back(event);}
+void EventVm::start(unsigned level,unsigned event){
+    if(event>=scripts_.size())throw std::runtime_error("event index outside table");
+    if(level>=16){level=0;while(level<15&&tasks_[level].active)++level;}
+    if(task_started)task_started(level);
+    auto& task=tasks_[level];
+    // Event_init (event.c:12956): only status, mode0/1, data, loop and ips/ian reset.
+    task.active=true;task.blocked=false;task.event=event;task.pc=scripts_[event];task.loop=-1;task.delay=0;dispatched.push_back(event);
+}
 void EventVm::inherit_progress(const EventVm& previous){
     // Original global event/key/item/map/game flags outlive a ROM_WORK load.
     for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
@@ -47,6 +55,12 @@ void EventVm::inherit_progress(const EventVm& previous){
     // player.c:862 bhInitRoomChangePlayer: plp->stflg &= 0x78280000 (Mottenei-Marken, Gift, 0x40000000).
     flags[14][0]=previous.flags[14][0]&0x78280000u;
     parked_wpnr_no=previous.parked_wpnr_no;
+    // bhInitEvent resets status/wpnl_no only; the global task counters survive room loads.
+    for(unsigned i=0;i<tasks_.size();++i){
+        tasks_[i].loop_counts=previous.tasks_[i].loop_counts;
+        tasks_[i].cnt2=previous.tasks_[i].cnt2;tasks_[i].cnt3=previous.tasks_[i].cnt3;
+        tasks_[i].addpx=previous.tasks_[i].addpx;
+    }
     values[7]=previous.values[7];values[18]=previous.values[18];values[25]=previous.values[25];values[22]=inventory_.slots()[0];
     evt_posno=previous.evt_posno; // sys->evt_posno lebt im SYS-Bereich ueber das Raumladen hinaus
     values[21]=previous.values[21]; // sys->rcase lebt ueber das Raumladen hinaus (bhRoomCaseNo 0x37, bhSv 21; system.c:1623 waehlt damit die naechste RDX)
@@ -57,7 +71,22 @@ void EventVm::inherit_progress(const EventVm& previous){
     event_deadline_mode=previous.event_deadline_mode;event_deadline_ticks=previous.event_deadline_ticks;event_deadline_danger=previous.event_deadline_danger;
     event_deadline_voice_tick=previous.event_deadline_voice_tick;event_deadline_voice_count=previous.event_deadline_voice_count;
 }
-void EventVm::initialize(){check_sub_pack(); /* bhSetPlayer/bhInitRoomChangePlayer/bhResetPlayer (player.c:844/935/1035) vor bhInitEvent */if(initialize_enemies)initialize_enemies();ifel_=0;Task scenario;scenario.pc=scd0_;run(scenario,true);flags[6][0]|=0x10;if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& task:tasks_)if(task.active)run(task);flags[6][0]&=~0x10u;}
+void EventVm::initialize(){
+    check_sub_pack();
+    for(auto& task:tasks_){task.active=false;task.blocked=false;task.wpnl_no=0;}
+    if(initialize_enemies)initialize_enemies();
+    current_task_=0;ifel_=0;event_timer=0;
+    run(tasks_[current_task_],true,scd0_);
+    flags[6][0]|=0x10;schedule();flags[6][0]&=~0x10u;
+}
+void EventVm::schedule(){
+    if(!(flags[6][0]&0x10u))return;
+    bool timed=false;
+    for(unsigned level=0;level<tasks_.size();++level){
+        current_task_=level;auto& task=tasks_[level];
+        if(task.active){if(!timed){++event_timer;timed=true;}run(task);}
+    }
+}
 // Common_controll (event.c:9963-12710) advances bhScePtr itself, command by
 // command; bhCommonCtr (:9951) has consumed the 0x69 byte before. The lengths
 // below are whole instructions (0x69 included), read off every original case
@@ -112,15 +141,15 @@ std::size_t EventVm::obj_controll_length(unsigned command){
     default:return 1;
     }
 }
-void EventVm::world(Task& task,unsigned op,std::size_t length){
-    BinaryView v(room_);v.require(task.pc,length);EventCommand c{op,task.level,task.event,task.pc-base_,{room_.begin()+task.pc,room_.begin()+task.pc+length}};
+void EventVm::world(Task& task,std::size_t& cursor,unsigned op,std::size_t length){
+    BinaryView v(room_);v.require(cursor,length);EventCommand c{op,task.level,task.event,cursor-base_,{room_.begin()+cursor,room_.begin()+cursor+length}};
     c.loop_remaining=task.cnt2;c.loop_total=task.cnt3;
     c.simulation_flags=flags[6][0];
-    if((!binding||!binding(c))&&reported_.insert({op,task.pc}).second)pending_bindings.push_back(c);
-    task.pc+=length;
+    if((!binding||!binding(c))&&reported_.insert({op,cursor}).second)pending_bindings.push_back(c);
+    cursor+=length;
 }
-int EventVm::instruction(Task& t){
-    BinaryView v(room_);const auto p=t.pc;const unsigned op=v.u8(p);auto advance=[&](std::size_t n){v.require(p,n);t.pc+=n;return 1;};
+int EventVm::instruction(Task& t,std::size_t& cursor){
+    BinaryView v(room_);const auto p=cursor;const unsigned op=v.u8(p);auto advance=[&](std::size_t n){v.require(p,n);cursor+=n;return 1;};
     /* Diagnose: RECVX_EVENT_TRACE=1 protokolliert jede ausgefuehrte Skriptanweisung (Event, Ebene, Offset, Bytes). */
     if(static const bool trace=std::getenv("RECVX_EVENT_TRACE")!=nullptr;trace){std::fprintf(stderr,"EVTRACE ev=%u lvl=%u off=%zu op=%02x:",t.event,t.level,p-base_,op);for(std::size_t i=1;i<10&&p+i<room_.size();++i)std::fprintf(stderr," %02x",v.u8(p+i));std::fputc('\n',stderr);}
     switch(op){
@@ -131,9 +160,9 @@ int EventVm::instruction(Task& t){
     case 1:gsp_=std::int64_t(v.relative(p+2,v.u8(p+1),1))+4;++ifel_;return advance(2);
     // event.c:413 bhElseCk / :425 bhEndif: G_Sp--, bhIfelFlg--; ohne offenes IF geht
     // der Zaehler ins Minus.
-    case 2:gsp_-=4;--ifel_;t.pc=v.relative(p,v.u8(p+1),1);return 1;
+    case 2:gsp_-=4;--ifel_;cursor=v.relative(p,v.u8(p+1),1);return 1;
     case 3:gsp_-=4;--ifel_;return advance(2);
-    case 4:{const unsigned matrix=v.u8(p+1),bit=v.u16(p+2),extra=v.u8(p+4),mode=v.u8(p+5);advance(6);if(matrix==10&&((bit==22&&values[16]!=extra)||(bit==23&&values[20]!=extra)))return 0;return int(mode)^int(flag(matrix,bit&0x3ff));}
+    case 4:{const unsigned matrix=v.u8(p+1),bit=v.u16(p+2),extra=v.u8(p+4),mode=v.u8(p+5);advance(6);if(matrix==10&&(((bit&0xffu)==22&&values[16]!=extra)||((bit&0xffu)==23&&values[20]!=extra)))return 0;return int(mode)^int(flag(matrix,bit&0x3ff));}
     case 5:set_flag(v.u8(p+1),v.u16(p+2)&0x3ff,v.u8(p+5));return advance(6);
     // event.c:701 bhCmpB key 17 reads bhEtask->wpnl_no, i.e. task 0, whichever task compares.
     case 6:{const unsigned key=v.u8(p+1),mode=v.u8(p+2),operand=v.u8(p+3);advance(4);const unsigned value=key==17?tasks_[0].wpnl_no:values[key];switch(mode){case 0:return value==operand;case 1:return value>operand;case 2:return value>=operand;case 3:return value<operand;case 4:return value<=operand;case 5:return value!=operand;default:throw std::runtime_error("unsupported event byte comparison");}}
@@ -157,11 +186,11 @@ int EventVm::instruction(Task& t){
     // bhCamInfoSet toggles CUT_WORK.flg bit 0 of camera-switch group v1.
     // event.c:994 bhCamSet2: case 0 sets st_flg 0x1, gm_flg 0x1000 and sys->fixcno = v1, then
     // bhSetFixedCut (cut.c:448) clears gm_flg 0x1000 at once; game.c:274 must not see it later.
-    case 0x2a:{const auto mode=v.u8(p+1);if(!mode){flags[5][0]|=1;fixcno=v.u8(p+2);}world(t,op,4);if(!mode)flags[11][0]&=~0x1000u;else if(mode==1){flags[5][0]&=~1u;flags[11][0]&=~0x1000u;}return 1;}
-    case 0x39:world(t,op,4);return 1;
+    case 0x2a:{const auto mode=v.u8(p+1);if(!mode){flags[5][0]|=1;fixcno=v.u8(p+2);}world(t,cursor,op,4);if(!mode)flags[11][0]&=~0x1000u;else if(mode==1){flags[5][0]&=~1u;flags[11][0]&=~0x1000u;}return 1;}
+    case 0x39:world(t,cursor,op,4);return 1;
     // event.c:3488 bhLookGsetPlStart / :3539 bhLookGsetPlStop: Blickpunkt des Spielerkopfes.
-    case 0x40:world(t,op,8);return 1;
-    case 0x41:world(t,op,2);return 1;
+    case 0x40:world(t,cursor,op,8);return 1;
+    case 0x41:world(t,cursor,op,2);return 1;
     // Befehle mit bekannter Laenge, deren Wirkung nativ keinen Besitzer hat. Sie werden
     // korrekt uebersprungen und als offene Bindung gemeldet, statt den Raum anzuhalten:
     // ein unbekannter Befehl wirft unten und beendet den Lauf.
@@ -170,13 +199,13 @@ int EventVm::instruction(Task& t){
     //        und 0xAF bhPlyHandChange (:7378) bindet RoomWorld::bind; das Feuerzeug-Parken
     //        aus 0xAF fuehrt der Fall unten. Stand 2026-10-21: keiner dieser Befehle ist
     //        mehr ohne Besitzer; die Liste bleibt als Lesehilfe.
-    case 0x6f:world(t,op,12);return 1;
-    case 0x82:world(t,op,4);return 1;
-    case 0x97:world(t,op,8);return 1;
-    case 0xaa:world(t,op,10);return 1;
+    case 0x6f:world(t,cursor,op,12);return 1;
+    case 0x82:world(t,cursor,op,4);return 1;
+    case 0x97:world(t,cursor,op,8);return 1;
+    case 0xaa:world(t,cursor,op,10);return 1;
     // event.c:7416-7465: Feuerzeug parken/zurueckgeben ueber bhEtask[1].wpnr_no (Spielerwert, nicht Task t).
     // Die owP[7..9].flg 0x2 folgen plp->wpnr_no == 1 in jedem Spielerpass (player.c:1486).
-    case 0xaf:{const bool take=v.u8(p+3)==0;world(t,op,4);
+    case 0xaf:{const bool take=v.u8(p+3)==0;world(t,cursor,op,4);
         if(take){if(inventory_.wpnr_no==1){parked_wpnr_no=1;inventory_.wpnr_no=0;}}
         else if(parked_wpnr_no==1){parked_wpnr_no=0;inventory_.wpnr_no=1;}
         return 1;}
@@ -187,9 +216,9 @@ int EventVm::instruction(Task& t){
     case 0xd3:flags[12][0]=0;ranking_requested=true;return advance(2);
     // event.c:4110 bhEffectSandSet: v0 Raumgegner, v1 Vorzeichenbits, v2 Lageart, drei u16
     // Betraege, dann der Typ als ein Byte — bhScePtr rueckt danach um zwei (12 Byte gesamt).
-    case 0x98:world(t,op,12);return 1;
+    case 0x98:world(t,cursor,op,12);return 1;
     // event.c:8577 bhEffectSandSetMatsumoto: drei Bytes nach dem Befehl.
-    case 0xc3:world(t,op,4);return 1;
+    case 0xc3:world(t,cursor,op,4);return 1;
     // Original Event_T_timer: one increment per scheduler pass with active work.
     case 0x60:{const auto limit=v.u16(p+4);advance(6);return event_timer<limit;}
     case 0x61:event_timer=0;return advance(2);
@@ -202,27 +231,27 @@ int EventVm::instruction(Task& t){
         case 1:set_flag(1,67,0);event_deadline_ticks=18000;event_deadline_danger=3600;break;
         case 2:set_flag(1,70,0);event_deadline_ticks=18000;event_deadline_danger=3600;event_deadline_voice_tick=900;event_deadline_voice_count=0;break;
         }return advance(2);}
-    case 0xd0:world(t,op,4);return 1;
-    case 0x79:world(t,op,6);return 1;
-    case 0x7a:world(t,op,2);return 1;
-    case 0x78:world(t,op,14);return 1;
+    case 0xd0:world(t,cursor,op,4);return 1;
+    case 0x79:world(t,cursor,op,6);return 1;
+    case 0x7a:world(t,cursor,op,2);return 1;
+    case 0x78:world(t,cursor,op,14);return 1;
     // event.c:5454/5516 bhLightParameterCSet/Start, :7067/7119 bhFogParameterCSet/Start. Both Start
     // commands return 0 and end the pass inside their FOR loop.
-    case 0x73:world(t,op,22);return 1;
-    case 0x74:world(t,op,4);return 0;
-    case 0xa8:world(t,op,10);return 1;
-    case 0xa9:world(t,op,2);return 0;
-    case 0xba:world(t,op,16);return 1;
-    case 0xbb:world(t,op,2);return 0;
-    case 0x80:case 0x7e:world(t,op,4);return 1;
-    case 0x4f:world(t,op,6);return 1;
-    case 0x88:case 0xd2:world(t,op,10);return 1;
-    case 0x45:world(t,op,2);return 1;
+    case 0x73:world(t,cursor,op,22);return 1;
+    case 0x74:world(t,cursor,op,4);return 0;
+    case 0xa8:world(t,cursor,op,10);return 1;
+    case 0xa9:world(t,cursor,op,2);return 0;
+    case 0xba:world(t,cursor,op,16);return 1;
+    case 0xbb:world(t,cursor,op,2);return 0;
+    case 0x80:case 0x7e:world(t,cursor,op,4);return 1;
+    case 0x4f:world(t,cursor,op,6);return 1;
+    case 0x88:case 0xd2:world(t,cursor,op,10);return 1;
+    case 0x45:world(t,cursor,op,2);return 1;
     // bhObjCtr/Obj_controll: cases 1 and 20 act on the task work (RoomWorld::bind); the default branch has no
     // effect and consumes only the 0x66 byte, bhObjCtr still returns 1 (event.c:9709-9744).
-    case 0x66:{const auto length=obj_controll_length(v.u8(p+1));if(length==1)return advance(1);world(t,op,length);return 1;}
+    case 0x66:{const auto length=obj_controll_length(v.u8(p+1));if(length==1)return advance(1);world(t,cursor,op,length);return 1;}
 
-    case 0xb9:world(t,op,10);return 1;
+    case 0xb9:world(t,cursor,op,10);return 1;
     // bhAreaSearchObj: X/Z minima inclusive, maxima exclusive; signed
     // magnitudes use separate masks. Byte 8 is padding, not the second mask.
     case 0x72:{v.require(p,14);if(!object_position)throw std::runtime_error("object area check requires native world binding");const unsigned kind=v.u8(p+2);if(kind>3)throw std::runtime_error("object area check kind outside original table");const auto position=object_position(kind,v.u8(p+1));if(!position)throw std::runtime_error("object area check entity unavailable");
@@ -231,8 +260,8 @@ int EventVm::instruction(Task& t){
     case 0x21:{const unsigned count=v.u8(p+1),base=v.u16(p+2),mode=v.u8(p+4),operand=v.u8(p+5);advance(6);unsigned dead=0;for(unsigned i=0;i<count;++i)dead+=flag(3,(base+i)&0x1ff);
         switch(mode){case 0:return dead==operand;case 1:return dead>operand;case 2:return dead>=operand;case 3:return dead<operand;case 4:return dead<=operand;case 5:return dead!=operand;default:return 0;}}
     case 0xb:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");if(v.u8(p+2))interactions[index].flags&=~1u;else interactions[index].flags|=1;return advance(4);}
-    case 0xc:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");if(v.u8(p+2))floors_[index].flags&=~1u;else floors_[index].flags|=1;world(t,op,4);return 1;}
-    case 0x38:{const auto kind=v.u8(p+1),index=v.u8(p+2),half=v.u8(p+3);const auto target=unsigned(v.u16(p+4))*65536u+(half?32768u:0);if(!animation_frame)throw std::runtime_error("frame condition requires native actor binding");advance(6);return animation_frame(kind,index)<target;}
+    case 0xc:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");if(v.u8(p+2))floors_[index].flags&=~1u;else floors_[index].flags|=1;world(t,cursor,op,4);return 1;}
+    case 0x38:{const auto kind=v.u8(p+1),index=v.u8(p+2),half=v.u8(p+3);const auto target=unsigned(v.u16(p+4))*65536u+(half?32768u:0);if(!animation_frame)throw std::runtime_error("frame condition requires native actor binding");advance(6);return std::int32_t(animation_frame(kind,index))<std::int32_t(target);}
     case 0x1b:{const auto slot=v.u8(p+2);if(!audio_active)throw std::runtime_error("audio condition requires native mixer binding");advance(6);return audio_active(slot);}
     // event.c:1523 bhAdxTimeCk: Abspielzeit des ADX-Stroms gegen einen Grenzwert in
     // Hundertstelsekunden. Sechs Byte: Platz, u16-Grenze, Modus, Fuellbyte. Die Modi 0..3
@@ -251,7 +280,7 @@ int EventVm::instruction(Task& t){
     case 0xac:{v.require(p,6);const unsigned limit=v.u16(p+2),mode=v.u8(p+4);
         if(!movie_active||!movie_time)throw std::runtime_error("movie time condition requires native player binding");
         if(!movie_active())return advance(6);
-        const unsigned time=movie_time();int result=0;switch(mode){case 0:result=time!=limit;break;case 1:result=time<=limit;break;case 2:result=time<limit;break;case 3:result=time>=limit;break;case 4:result=time>limit;break;case 5:result=time==limit;break;default:throw std::runtime_error("invalid movie time comparison");}advance(6);return result;}
+        const unsigned time=movie_time();int result=0;switch(mode){case 0:result=time!=limit;break;case 1:result=time<=limit;break;case 2:result=time<limit;break;case 3:result=time>=limit;break;case 4:result=time>limit;break;case 5:result=time==limit;break;default:result=int(time);break;}advance(6);return result;}
     case 0x9b:if(!movie_active)throw std::runtime_error("movie condition requires native player binding");advance(6);return movie_active();
     case 0xe:{const unsigned bit=v.u16(p+2)&0x3ff,interaction=v.u8(p+4),mode=v.u8(p+5);advance(6);if(values[20]!=interaction)return 1;
         if(interaction>=interactions.size())throw std::runtime_error("pickup interaction "+std::to_string(interaction)+" outside room table of "+std::to_string(interactions.size()));
@@ -292,8 +321,8 @@ int EventVm::instruction(Task& t){
     case 0x14:{const auto packed=v.u16(p+2);advance(4);start(packed&255,packed>>8);return 1;}
     case 0x1f:{const auto mode=v.u8(p+1),index=v.u8(p+2),freeze=v.u8(p+3);advance(4);if(!mode){show_dialog(read_message(room_,messages_,index),index);opening_hint_=t.event==16&&index==4;if(!freeze)flags[6][0]&=~7u;}else flags[6][0]|=7;return 1;}
     case 0x25:{const auto index=v.u8(p+1);if(index>=interactions.size())throw std::runtime_error("script interaction outside room");auto& a=interactions[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);return advance(10);}
-    case 0x7b:world(t,op,10);return 1;
-    case 0x7c:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");auto& a=floors_[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);world(t,op,10);return 1;}
+    case 0x7b:world(t,cursor,op,10);return 1;
+    case 0x7c:{const auto index=v.u8(p+1);if(index>=floors_.size())throw std::runtime_error("script floor outside room");auto& a=floors_[index];a.attribute=v.u16(p+2);for(unsigned i=0;i<4;++i)a.parameters[i]=v.u8(p+4+i);a.type=v.u8(p+8);world(t,cursor,op,10);return 1;}
     case 0x26:{const auto weapon=v.u8(p+1);advance(2);return inventory_.weapon()==weapon;}
     // event.c:1285 bhArmsItemChange: plp->wpnr_no und ply_wno[ply_id], mn_mode0 3 (bhReadWeaponData); pip[0] bleibt.
     case 0x27:values[18]=v.u8(p+1);inventory_.wpnr_no=v.u8(p+1);inventory_.partner_weapon.at(inventory_.player)=v.u8(p+1);inventory_.request_weapon_reload();return advance(2);
@@ -307,92 +336,106 @@ int EventVm::instruction(Task& t){
     case 0xc1:inventory_.script_arms_set(v.u8(p+1));values[22]=inventory_.slots()[0];return advance(2);              // bhArmsItemSet
     case 0xc2:inventory_.script_item_give_ex(v.u8(p+1),v.u8(p+2),v.u8(p+3),v.u16(p+4));values[22]=inventory_.slots()[0];return advance(6); // bhItemGetGetEx
     case 0xc7:inventory_.script_item_change(v.u8(p+1),v.u8(p+2));return advance(4);                                 // bhPlItemChangeM
-    case 0xc8:world(t,op,8);return 1; // event.c:8722 bhEffBakuDrmSet: Vorzeichenbyte + 3 u16/100, bhSetExplosionEffect am Weltbesitzer
+    case 0xc8:world(t,cursor,op,8);return 1; // event.c:8722 bhEffBakuDrmSet: Vorzeichenbyte + 3 u16/100, bhSetExplosionEffect am Weltbesitzer
     case 0xc9:inventory_.script_item_amount(v.u8(p+1),v.u16(p+2));return advance(4);                                // bhPlItemTamaSet
 
     case 0x5c:dialog_=MessageDialog{};flags[5][0]&=~0x200u;return advance(2);
     case 0x81:{const auto mode=v.u8(p+1);advance(2);return mode==unsigned(!menu_open);}
     case 0xbc:{const auto level=v.u8(p+1);if(level>=16)throw std::runtime_error("event kill outside task table");advance(2);tasks_[level].active=false;return 1;}
-    case 0xf8:t.delay=v.u16(p+2);if(!t.delay)t.delay=0xffffffff;t.pc++;return instruction(t);
-    case 0xf9:if(t.delay>0)--t.delay;if(!t.delay)t.pc+=3;return 0;
-    case 0xfe:t.pc++;return 0;
-    case 0xf4:t.pc++;return 1;
+    case 0xf8:{ // bhSleep increments the same loop index as FOR/WHILE, then decrements once.
+        v.require(p,4);if(t.loop+1>=int(t.loop_counts.size()))throw std::runtime_error("event SLEEP counter outside original table");
+        t.loop_counts.at(++t.loop)=v.u16(p+2);++cursor;
+        t.delay=--t.loop_counts.at(t.loop);
+        if(!t.delay){cursor+=3;--t.loop;}return 0;}
+    case 0xf9:t.delay=--t.loop_counts.at(t.loop);if(!t.delay){cursor+=3;--t.loop;}return 0;
+    case 0xfe:++cursor;return 0;
+    case 0xf4:++cursor;return 1;
     case 0xff:t.active=false;advance(2);return 0;
-    case 0xfc:{if(t.loops.size()>=32)throw std::runtime_error("event WHILE nesting limit");auto end=v.relative(p,v.u8(p+1),1);t.loops.push_back({p+2,end,t.loop_counts[t.loops.size()],false});t.pc=end;return 1;}
-    case 0xfd:case 0xf3:{if(t.loops.empty()||t.loops.back().repeat)throw std::runtime_error("event EWHILE without WHILE");const auto loop=t.loops.back();t.pc=loop.condition;const auto condition=instruction(t);if(condition==1){t.pc=loop.body;return 1;}t.pc=p+1;t.loops.pop_back();return op==0xf3?1:0;}
-    case 0xfa:if(t.loops.size()>=32)throw std::runtime_error("event FOR nesting limit");t.cnt2=t.cnt3=std::uint32_t(std::int32_t(std::int16_t(v.u16(p+2))));t.loop_counts[t.loops.size()]=t.cnt2;t.loops.push_back({0,p+4,t.cnt2,true});return advance(4);
-    case 0xfb:if(t.loops.empty())throw std::runtime_error("event NEXT without loop");if(t.loops.back().count!=1){t.cnt2=--t.loops.back().count;t.loop_counts[t.loops.size()-1]=t.cnt2;t.pc=t.loops.back().body;}else{t.loop_counts[t.loops.size()-1]=0;t.loops.pop_back();advance(2);}return 1;
+    case 0xfc:{
+        if(t.loop+1>=int(t.loop_body.size()))throw std::runtime_error("event WHILE outside original stack");
+        const auto body=v.relative(p,v.u8(p+1),1);++t.loop;
+        t.loop_condition.at(t.loop)=p+2;t.loop_body.at(t.loop)=body;cursor=body;return 1;}
+    case 0xfd:case 0xf3:{
+        // bhEwhile saves bhScePtr in data; its condition may also change task state.
+        t.pc=p;cursor=t.loop_condition.at(t.loop);
+        if(instruction(t,cursor)!=0){cursor=t.loop_body.at(t.loop);return 1;}
+        cursor=t.pc+1;--t.loop;return op==0xf3?1:0;}
+    case 0xfa:{
+        v.require(p,4);if(t.loop+1>=int(t.loop_counts.size()))throw std::runtime_error("event FOR counter outside original table");
+        ++t.loop;t.cnt2=t.cnt3=t.loop_counts.at(t.loop)=std::uint32_t(std::int32_t(std::int16_t(v.u16(p+2))));
+        t.loop_body.at(t.loop)=p+4;return advance(4);}
+    case 0xfb:if(--t.loop_counts.at(t.loop)!=0){t.cnt2=t.loop_counts.at(t.loop);cursor=t.loop_body.at(t.loop);}else{advance(2);--t.loop;}return 1;
     // The binary structure is known, but these commands still need native
     // world/audio/cutscene bindings; keep them available for the next port step.
-    case 0x13:{const auto mode=v.u8(p+1);world(t,op,4);if(mode==1)flags[5][0]&=~1u;return 1;}
-    case 0xad:case 0xd4:case 0x94:case 0xa:case 0x3d:case 0x3f:case 0x20:case 0x24:case 0x2f:case 0x35:case 0x3c:case 0x3e:case 0x43:case 0x4b:case 0x65:case 0x91:case 0x9a:case 0xa6:world(t,op,4);return 1;
-    case 0x75:world(t,op,4);return 1;
-    case 0x8b:world(t,op,12);return 1;
-    case 0x8e:case 0x5a:case 0x1d:world(t,op,4);return 1;
-    case 0x9f:case 0x50:world(t,op,2);return 1;
-    case 0x6b:world(t,op,2);return 1; // bhDelYakkyou (including padding)
-    case 0x6c:world(t,op,8);return 1;
-    case 0x49:world(t,op,10);return 1;
-    case 0xa2:world(t,op,4);return 1; // bhEvtLighterFireSet
+    case 0x13:{const auto mode=v.u8(p+1);world(t,cursor,op,4);if(mode==1)flags[5][0]&=~1u;return 1;}
+    case 0xad:case 0xd4:case 0x94:case 0xa:case 0x3d:case 0x3f:case 0x20:case 0x24:case 0x2f:case 0x35:case 0x3c:case 0x3e:case 0x43:case 0x4b:case 0x65:case 0x91:case 0x9a:case 0xa6:world(t,cursor,op,4);return 1;
+    case 0x75:world(t,cursor,op,4);return 1;
+    case 0x8b:world(t,cursor,op,12);return 1;
+    case 0x8e:case 0x5a:case 0x1d:world(t,cursor,op,4);return 1;
+    case 0x9f:case 0x50:world(t,cursor,op,2);return 1;
+    case 0x6b:world(t,cursor,op,2);return 1; // bhDelYakkyou (including padding)
+    case 0x6c:world(t,cursor,op,8);return 1;
+    case 0x49:world(t,cursor,op,10);return 1;
+    case 0xa2:world(t,cursor,op,4);return 1; // bhEvtLighterFireSet
     case 0x8d:flags[10][0]|=0x400000;com_number=v.u8(p+1);return advance(2); // bhEvtComSet: cb_flg 0x400000 starts bhSysCall's computer task
-    case 0x4a:world(t,op,8);return 1;
-    case 0x1c:world(t,op,6);return 1;
-    case 0x6e:world(t,op,22);return 1;
-    case 0xb0:world(t,op,22);return 1; // event.c:7472 bhHEffectSet2: sys->ef -> bhSetEffectTb(&sys->ef, NULL, NULL, v4), 22 Byte (RM_1050 Ereignis 12/18/24, RM_5001, RM_9110)
-    case 0x6d:world(t,op,22);return 1; // event.c:5028 bhCyodanSet: bhSetEffParticle am Weltbesitzer
+    case 0x4a:world(t,cursor,op,8);return 1;
+    case 0x1c:world(t,cursor,op,6);return 1;
+    case 0x6e:world(t,cursor,op,22);return 1;
+    case 0xb0:world(t,cursor,op,22);return 1; // event.c:7472 bhHEffectSet2: sys->ef -> bhSetEffectTb(&sys->ef, NULL, NULL, v4), 22 Byte (RM_1050 Ereignis 12/18/24, RM_5001, RM_9110)
+    case 0x6d:world(t,cursor,op,22);return 1; // event.c:5028 bhCyodanSet: bhSetEffParticle am Weltbesitzer
     // event.c:8307 bhCyodanSetEx (RM_0090 event 23, the laser): same Cyodan
     // family as 0x6d plus a second colour and a work/node link. 28 bytes is
     // measured against the data: RM_0090 event 23 holds two adjacent 0xc0
     // records exactly 28 bytes apart. RoomWorld::bind spawns bhSetEffParticleMk2
     // (id 302, PtclTbl) through the native particle owner.
-    case 0xc0:world(t,op,28);return 1;
-    case 0xab:world(t,op,6);return 1; // bhBGColorSet, including deferred application.
-    case 0xd1:world(t,op,10);return 1;
-    case 0x17:world(t,op,8);return 1;
-    case 0x2d:world(t,op,2);return 1;
+    case 0xc0:world(t,cursor,op,28);return 1;
+    case 0xab:world(t,cursor,op,6);return 1; // bhBGColorSet, including deferred application.
+    case 0xd1:world(t,cursor,op,10);return 1;
+    case 0x17:world(t,cursor,op,8);return 1;
+    case 0x2d:world(t,cursor,op,2);return 1;
     // event.c:1827 bhMotionPauseSetPly: sys->sp_flg Bit 0x1, das Tor des Spielerpasses
     // (player.c:1365 bhControlPlayer). Dieselbe Bank, die die Event-VM selbst fuehrt.
     case 0x2e:if(v.u8(p+1)==1)flags[6][0]|=1u;else if(v.u8(p+1)==0)flags[6][0]&=~1u;return advance(2);
-    case 0x30:world(t,op,4);return 1;
-    case 0x48:world(t,op,6);return 1;
-    case 0x86:world(t,op,16);return 1;
-    case 0x4c:case 0x44:world(t,op,6);return 1;
+    case 0x30:world(t,cursor,op,4);return 1;
+    case 0x48:world(t,cursor,op,6);return 1;
+    case 0x86:world(t,cursor,op,16);return 1;
+    case 0x4c:case 0x44:world(t,cursor,op,6);return 1;
     case 0x33:{v.require(p,8);DoorRequest request{v.u16(p+2),v.u8(p+4),v.u8(p+5),v.u8(p+6),v.u8(p+7),values[21]};if(!request_door(request))throw std::runtime_error("DoorCall destination unavailable");return advance(8);}
-    case 0x32:case 0x34:case 0x51:case 0x52:case 0x53:case 0x54:case 0x59:case 0xa3:world(t,op,12);return 1;
-    case 0x3b:world(t,op,6);return 1;
-    case 0x36:world(t,op,6);return 1;
+    case 0x32:case 0x34:case 0x51:case 0x52:case 0x53:case 0x54:case 0x59:case 0xa3:world(t,cursor,op,12);return 1;
+    case 0x3b:world(t,cursor,op,6);return 1;
+    case 0x36:world(t,cursor,op,6);return 1;
     case 0x6a:if(!v.u8(p+1))flags[11][0]|=0x40000000u;else flags[11][0]&=~0x40000000u;return advance(2);
-    case 0x2b:world(t,op,2);return 1; // bhMotionPauseSet: length 2 (opcode + mode)
-    case 0x16:case 0x18:case 0x1a:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,op,op==0x42?4:2);return 1;
+    case 0x2b:world(t,cursor,op,2);return 1; // bhMotionPauseSet: length 2 (opcode + mode)
+    case 0x16:case 0x18:case 0x1a:case 0x42:case 0x5b:case 0x5f:case 0x29:case 0x9c:case 0x9e:world(t,cursor,op,op==0x42?4:2);return 1;
     // bhFaceReSet: one enemy index; facial control is bound in RoomWorld.
-    case 0x90:world(t,op,2);return 1;
-    case 0xca:world(t,op,2);return 1; // event.c:8801 bhEffClearEvt (2 Bytes): bhClearEventEffect am Weltbesitzer (RoomWorld::clear_event_effects)
-    case 0x8f:case 0x5e:world(t,op,4);return 1;
-    case 0x95:case 0xa7:world(t,op,4);return 1; // bhBgmOn2/bhBgmOn2Ex
-    case 0x96:world(t,op,2);return 1; // event.c:1965 bhEffectSensyaSet (operand is padding)
-    case 0x92:world(t,op,2);return 1; // bhBGSeOff2
-    case 0x93:world(t,op,2);return 1;            // bhBgmOff2
-    case 0x77:world(t,op,6);return 1; // bhSoundVolumeSet
-    case 0xb6:world(t,op,2);return 1; // bhRoomSoundCase -> SetRoomSoundCaseNo
-    case 0x19:case 0xc4:world(t,op,8);return 1;
-    case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;case 150:length=4;break;case 129:length=12;break;case 130:case 142:length=2;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
-    case 0x67:{unsigned length=0;switch(v.u8(p+1)){case 0:case 0x80:case 0x8b:case 0x90:length=2;break;case 0x8f:length=6;break;case 0x92:case 0x93:length=8;break;case 0x94:case 0x95:length=4;break;default:throw std::runtime_error("unimplemented Sub_controll command "+std::to_string(v.u8(p+1)));}world(t,op,length);return 1;}
-    case 0x15:world(t,op,4);return 1;
+    case 0x90:world(t,cursor,op,2);return 1;
+    case 0xca:world(t,cursor,op,2);return 1; // event.c:8801 bhEffClearEvt (2 Bytes): bhClearEventEffect am Weltbesitzer (RoomWorld::clear_event_effects)
+    case 0x8f:case 0x5e:world(t,cursor,op,4);return 1;
+    case 0x95:case 0xa7:world(t,cursor,op,4);return 1; // bhBgmOn2/bhBgmOn2Ex
+    case 0x96:world(t,cursor,op,2);return 1; // event.c:1965 bhEffectSensyaSet (operand is padding)
+    case 0x92:world(t,cursor,op,2);return 1; // bhBGSeOff2
+    case 0x93:world(t,cursor,op,2);return 1;            // bhBgmOff2
+    case 0x77:world(t,cursor,op,6);return 1; // bhSoundVolumeSet
+    case 0xb6:world(t,cursor,op,2);return 1; // bhRoomSoundCase -> SetRoomSoundCaseNo
+    case 0x19:case 0xc4:world(t,cursor,op,8);return 1;
+    case 0x64:{unsigned length=0;switch(v.u8(p+1)){case 7:length=8;break;case 12:case 13:length=6;break;case 0x80:case 0x34:case 0x8b:case 0:length=2;break;case 0x83:case 0x89:length=4;break;case 150:length=4;break;case 129:length=12;break;case 130:case 142:length=2;break;default:throw std::runtime_error("unimplemented Player_controll command "+std::to_string(v.u8(p+1)));}world(t,cursor,op,length);return 1;}
+    case 0x67:{unsigned length=0;switch(v.u8(p+1)){case 0:case 0x80:case 0x8b:case 0x90:length=2;break;case 0x8f:length=6;break;case 0x92:case 0x93:length=8;break;case 0x94:case 0x95:length=4;break;default:throw std::runtime_error("unimplemented Sub_controll command "+std::to_string(v.u8(p+1)));}world(t,cursor,op,length);return 1;}
+    case 0x15:world(t,cursor,op,4);return 1;
     // bhCyoutenHenkeiStart/StartEX: task work morph step inside the FOR clock
     // (shp_ct recomputed per pass). Return 0 ends the pass like the original.
-    case 0x55:world(t,op,2);return 0;
-    case 0x84:world(t,op,8);return 1; // bhCyoutenHenkeiSetEX
-    case 0x85:world(t,op,4);return 0;
-    case 0x7d:world(t,op,4);return 1; // bhMotionPosSetEnePly
-    case 0x9d:world(t,op,4);return 1; // bhObjAspdSet (object light parameter)
-    case 0xa4:world(t,op,4);return 1; // bhPlayerKaidanMotion
-    case 0xbd:world(t,op,2);return 1; // bhReTryPointSet
-    case 0xcc:world(t,op,4);return 1; // bhEneLookFlgSet
+    case 0x55:world(t,cursor,op,2);return 0;
+    case 0x84:world(t,cursor,op,8);return 1; // bhCyoutenHenkeiSetEX
+    case 0x85:world(t,cursor,op,4);return 0;
+    case 0x7d:world(t,cursor,op,4);return 1; // bhMotionPosSetEnePly
+    case 0x9d:world(t,cursor,op,4);return 1; // bhObjAspdSet (object light parameter)
+    case 0xa4:world(t,cursor,op,4);return 1; // bhPlayerKaidanMotion
+    case 0xbd:world(t,cursor,op,2);return 1; // bhReTryPointSet
+    case 0xcc:world(t,cursor,op,4);return 1; // bhEneLookFlgSet
     // Exact operand lengths from event.c. Pure system-state changes are applied
     // here; effects needing world/audio/player services are reported as pending
     // world bindings with their exact operands.
-    case 0x68:world(t,op,6);return 1; // bhLoadWork2
-    case 0xb5:world(t,op,4);return 1; // bhLoadWorkEx (event.c:12808): wie 0x65, Ziel bhEtask[0]
+    case 0x68:world(t,cursor,op,6);return 1; // bhLoadWork2
+    case 0xb5:world(t,cursor,op,4);return 1; // bhLoadWorkEx (event.c:12808): wie 0x65, Ziel bhEtask[0]
     // event.c:7605 bhObjDposCk: v4 == 0 dreht obwp[v0].ay, sonst objP[v4].ang[0] des Gegners rom->enep[v0]
     // je Durchlauf um v3 Grad auf v2 Grad (Bit 2 von v1: Gegenrichtung). 1 = laeuft noch, 0 = fertig.
     case 0xb1:{v.require(p,6);const unsigned v0=v.u8(p+1),v1=v.u8(p+2),v3=v.u8(p+4),v4=v.u8(p+5);int v2=v.u8(p+3);advance(6);
@@ -436,7 +479,7 @@ int EventVm::instruction(Task& t){
         set_item_position(v3,pos);return 1;}
     case 0xbe:{ // bhPlyDposCk: turn the player yaw towards a target by a fixed step each pass
         if(!player_yaw||!set_player_yaw)throw std::runtime_error("player yaw check requires native player binding");
-        int target=v.u8(p+2);const unsigned flags_byte=v.u8(p+1);const int step=v.u8(p+3);advance(6);
+        int target=v.u8(p+3);const unsigned flags_byte=v.u8(p+2);const int step=v.u8(p+4);advance(6);
         if((flags_byte&2)&&target)target-=360;
         const int eay=int(target*(65536.0f/360.0f)),eay2=int(step*(65536.0f/360.0f));
         int ay=int(std::int16_t(player_yaw()&0xffff));const unsigned current=unsigned(ay)&0xffff;
@@ -451,7 +494,7 @@ int EventVm::instruction(Task& t){
     // (player.c:663 bhPlayerChangeSet) - dieselbe Verzoegerung wie im Original.
     case 0xae:inventory_.ply_stflg[0]&=~0x200000u;return advance(2);
     case 0xa0:map_parameters={v.u8(p+1),v.u8(p+2),v.u8(p+4),v.u8(p+3)};flags[10][0]|=0x10000;advance(6);return 1; // bhMapSystemOn: mp_prm[0..3] (consumed by runtime)
-    case 0xce:case 0xc5:case 0x87:world(t,op,2);return 1;
+    case 0xce:case 0xc5:case 0x87:world(t,cursor,op,2);return 1;
     // event.c:8906 bhExGameItemInit -> sub1.c:8553 ExtraGameItemInit: Battle-Game-Ausruestung in itm[cng_pid*16].
     case 0xcf:inventory_.extra_game_item_init(change_player,costume,(flags[16][0]&0x80000000u)!=0);if(change_player==inventory_.player)values[22]=inventory_.slots()[0];return advance(2);
     // event.c:3465 bhMutekiSetPl: plp->flg Bit 0x4. Solange es steht, ueberspringt der
@@ -460,14 +503,14 @@ int EventVm::instruction(Task& t){
     // event.c:6849 bhTrapDamageSet: plp->stflg Bit 0x1000 — v0 == 0 SETZT es, jeder andere
     // Wert loescht es (im Original genau so herum).
     case 0xa1:if(!v.u8(p+1))flags[14][0]|=0x1000u;else flags[14][0]&=~0x1000u;return advance(2);
-    case 0x76:world(t,op,4);return 1; // bh3dSoundFlagSet
-    case 0xa5:world(t,op,4);return 1; // bhEneRenderSet: mdflg 0x200 (renderer binding pending)
-    case 0x2c:world(t,op,4);return 1;  // bhEffectSet: bhSetEffect im geteilten eff[512]
-    case 0x70:case 0x71:world(t,op,2);return 1; // bhEffPush/bhEffPop
-    case 0x4e:world(t,op,14);return 1; // bhEffBloodSet: Blutstoss am Gegnerwork
-    case 0x56:world(t,op,6);return 1;  // bhEffBloodPoolSet: Blutlache am Gegnerwork
-    case 0x58:world(t,op,14);return 1; // bhEffBloodPoolSet2: Blutlache an einer Lage
-    case 0x7f:world(t,op,6);return 1; // bhSoundPanSet
+    case 0x76:world(t,cursor,op,4);return 1; // bh3dSoundFlagSet
+    case 0xa5:world(t,cursor,op,4);return 1; // bhEneRenderSet: mdflg 0x200 (renderer binding pending)
+    case 0x2c:world(t,cursor,op,4);return 1;  // bhEffectSet: bhSetEffect im geteilten eff[512]
+    case 0x70:case 0x71:world(t,cursor,op,2);return 1; // bhEffPush/bhEffPop
+    case 0x4e:world(t,cursor,op,14);return 1; // bhEffBloodSet: Blutstoss am Gegnerwork
+    case 0x56:world(t,cursor,op,6);return 1;  // bhEffBloodPoolSet: Blutlache am Gegnerwork
+    case 0x58:world(t,cursor,op,14);return 1; // bhEffBloodPoolSet2: Blutlache an einer Lage
+    case 0x7f:world(t,cursor,op,6);return 1; // bhSoundPanSet
     // event.c:2574 bhSetNextRoomBgm: Byte 1 bleibt ungelesen, dann ComNextBgm, PointNextBgm,
     // OfsPointBgm (u16), NextBgmNo und FadeNextBgm = Byte * 10. Acht Byte.
     case 0x46:next_sound.bgm_com=v.u8(p+2);next_sound.bgm_point=v.u8(p+3);next_sound.bgm_offset=v.u16(p+4);
@@ -479,15 +522,15 @@ int EventVm::instruction(Task& t){
     case 0x47:{const unsigned slot=v.u8(p+1);
         // Ein groesserer Index schriebe im Original hinter das Feld; nativ wird der Befehl
         // dann nur gemeldet, statt fremden Speicher zu beschreiben oder etwas zu erfinden.
-        if(slot>=next_sound.se_com.size()){world(t,op,10);return 1;}
+        if(slot>=next_sound.se_com.size()){world(t,cursor,op,10);return 1;}
         next_sound.se_com[slot]=v.u8(p+2);next_sound.se_point[slot]=v.u8(p+3);next_sound.se_offset[slot]=v.u16(p+4);
         next_sound.se_number[slot]=v.u16(p+6);next_sound.se_fade[slot]=unsigned(v.u8(p+8))*10u;
         next_sound.se_set[slot]=v.u8(p+9)==0?1u:0u;
         return advance(10);}
     // bhGameOverSet clears ts_flg bit 0x4000; the runtime starts gameover.c gov_md0.
-    case 0xc6:flags[12][0]&=~0x4000u;world(t,op,2);return 1;
+    case 0xc6:flags[12][0]&=~0x4000u;world(t,cursor,op,2);return 1;
     // bhReturnTitleEvt (event.c:8859): two bytes; the runtime performs RequestAllStopSoundEx + bhReturnTitle.
-    case 0xcd:world(t,op,2);return 1;
+    case 0xcd:world(t,cursor,op,2);return 1;
     // bhPadCheck: pad_ps holds newly pressed logical bits of this pass,
     // pad_on the held ones (bhSetPad). The 0xE000 mask (Select/Start/extra)
     // suppresses every check; ts_flg 0x80 hands the pad to the save screen.
@@ -509,7 +552,7 @@ int EventVm::instruction(Task& t){
         const unsigned command=v.u8(p+1);
         const auto length=common_controll_length(command,v.u8(p+2),v.u8(p+3));
         if(!length)throw std::runtime_error("unimplemented Common_controll command "+std::to_string(command));
-        world(t,op,length);return 1;}
+        world(t,cursor,op,length);return 1;}
     default:
         // event.c:437 dm0 (Tabellenplaetze 0xD5-0xF2 und 0xF5-0xF7): return 0 ohne Vorschub. Der Scheduler
         // (event.c:13046) laesst die Aufgabe auf diesem Byte stehen; sie laeuft in jedem Durchlauf erneut
@@ -520,12 +563,30 @@ int EventVm::instruction(Task& t){
         {std::ostringstream s;s<<"unimplemented opcode 0x"<<std::hex<<op;throw std::runtime_error(s.str());}
     }
 }
-void EventVm::run(Task& t,bool scenario){
-    if(t.blocked)return;try{for(unsigned count=0;count<10000;++count){const auto result=instruction(t);/* event.c:13046 `while (bhScenarioJmpT[*bhScePtr]() != 0);` — JEDER Wert ungleich 0 laeuft
-       weiter, nicht nur die 1. Das zaehlt fuer Befehle, die etwas anderes als 0/1 liefern
-       koennen: bhAdxTimeCk gibt bei einem Modus ueber 5 die rohe Abspielzeit zurueck
-       (event.c:1544 ohne default), und bhCkFlg liefert mode ^ flag (event.c:4). */if(result!=0)continue;/* bhEventScheduler2/bhScenarioCheck (event.c:13045-13059): jede 0-Rueckgabe bei bhIfelFlg > 0, auch bhSleep/bhSleeping/bhEvtNext/bhEvtEnd und das Ende von bhEwhile, springt im selben Durchlauf auf --G_Sp. */if(ifel_>0){gsp_-=4;--ifel_;if(gsp_<0)throw std::runtime_error("event G_Sp outside script");t.pc=std::size_t(gsp_);continue;}if(scenario)t.active=false;return;}throw std::runtime_error("event instruction budget exceeded");}
-    catch(const std::exception& e){t.blocked=true;std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(t.pc-base_)<<" (opcode 0x"<<unsigned(room_.at(t.pc))<<"): "<<e.what();if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());}
+void EventVm::run(Task& t,bool scenario,std::size_t entry){
+    if(!scenario&&t.blocked)return;
+    // bhScePtr is separate from bhCetask->data. A self Event_exec changes data,
+    // but the running pass continues at its current instruction stream.
+    std::size_t cursor=scenario?entry:t.pc;
+    try{
+        for(unsigned count=0;count<10000;++count){
+            if(instruction(t,cursor)!=0)continue;
+            if(ifel_>0){
+                gsp_-=4;--ifel_;if(gsp_<0)throw std::runtime_error("event G_Sp outside script");
+                cursor=std::size_t(gsp_);continue;
+            }
+            if(!scenario)t.pc=cursor;
+            return;
+        }
+        throw std::runtime_error("event instruction budget exceeded");
+    }catch(const std::exception& e){
+        if(!scenario){t.blocked=true;t.pc=cursor;}
+        std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(cursor-base_);
+        if(cursor<room_.size())s<<" (opcode 0x"<<unsigned(room_[cursor])<<")";
+        else s<<" (outside room)";
+        s<<": "<<e.what();
+        if(std::find(errors.begin(),errors.end(),s.str())==errors.end())errors.push_back(s.str());
+    }
 }
 void EventVm::advance_game_clock(unsigned vertical_blanks){
     if(flag(1,3))inventory_.play_time+=std::min(vertical_blanks,216000000u-std::min(inventory_.play_time,216000000u));
@@ -603,10 +664,10 @@ void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10
     // Seite fertig, 0x4000 Ende, 0x8000 Auswahl, 0x800/0x400 Wartezeit, 0x80000 Vorauswahl),
     // liest das Raumskript per bhFlagCk Typ 5 (RM_1050 Ereignis 34: WHILE !(st_flg & 0x1000),
     // dann WHILE (st_flg & 0x1000) bis zum Umblaettern, erst danach bhCamSet 4).
-    flags[5][0]=(flags[5][0]&~0x8dc00u)|(dialog_.status()&0x8dc00u);}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_=0; /* bhScenarioCheck: bhIfelFlg = 0 */Task scenario;scenario.pc=scd1_;scenario.level=15; /* bhControlEvent: scd1 runs on bhCetask left by the last bhEventScheduler2 pass = bhEtask[15] */run(scenario,true);
+    flags[5][0]=(flags[5][0]&~0x8dc00u)|(dialog_.status()&0x8dc00u);}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_=0; /* bhScenarioCheck: bhIfelFlg = 0 */run(tasks_[current_task_],true,scd1_);
     // bhEventScheduler2 (event.c:13024) laeuft nur mit sp_flg 0x10; die Raeume setzen bzw. loeschen
     // das Bit selbst im scd1 (bhSet 6,27), z. B. RM_0000 in jedem Durchlauf.
-    if(flags[6][0]&0x10u){if(std::any_of(tasks_.begin(),tasks_.end(),[](const auto& task){return task.active;}))++event_timer;for(auto& t:tasks_)if(t.active)run(t);}
+    schedule();
     // ItemUse/Use_01/05 call StatusCancel, whose animated exit keeps st_flg
     // 8 for bhControlEvent. The host closes visually at once; retain that
     // handover through one complete scenario/scheduler pass.

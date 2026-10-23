@@ -1550,14 +1550,11 @@ void recvx_en01_cap_dg01(RECVX_ENEMY_WORK* w)                /* :1161 */
             break;                                           /* :1203 */
         }
 
-        /* :1206-1220 ay = epw->ay; bhCheckWallRefAngle(&pd, 1024, 2, 2, &ay)
-           liest pd, das an dieser Stelle im Original NICHT initialisiert ist
-           (erste Zuweisung erst :1226). Der Stapelinhalt ist nicht bestimmbar;
-           die Abfrage wird deshalb nicht ausgefuehrt und gemeldet. Ihre
-           einzige wirksame Folge waere die Zusatzdrehung bei hp->type == 6
-           (:1215-1218); der Zweig (type == 0 && == 2 && == 4) (:1210) ist im
-           Original immer falsch und schriebe sonst EXP0_F(96)/(104). */
-        sub_gap(w, "bhEne01Cap_DG01: pd uninitialisiert (en01sub.c:1208)");
+        /* ORIGINAL-FIX (QUALITY.md): :1206-1220 ay = epw->ay; bhCheckWallRefAngle(&pd, 1024, 2, 2, &ay)
+           prueft an pd, das hier im Original NICHT gesetzt ist (erste Zuweisung :1226): eine Wandprobe
+           an einem Stapelrest, deren einzige Folge die Zusatzdrehung der fallenden Kappe bei
+           hp->type == 6 waere (:1215-1218; der Zweig type == 0 && == 2 && == 4 bei :1210 ist immer
+           falsch). Regel 1: der eigene Zweig der Routine fuer "keine Wand" (hp == NULL). */
 
         ps.x = 0.0f;                                         /* :1222-1224 */
         ps.y = 1.2f;

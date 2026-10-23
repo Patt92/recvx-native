@@ -614,6 +614,7 @@ static int action_main(RECVX_ENEMY_WORK* w, RECVX_EN29_EAW* eaw)
     BASEI(w, motion_frames, "epw->mnwP[mtn_no].frm_num (en29.c:1011)");
     frm_num = w->sv->motion_frames(w, w->mtn_no);
     if (!frm_num) { gap(w, "epw->mnwP[mtn_no] fehlt (en29.c:1011)"); return 0; }
+    /* frm_num - 1 == 0 bzw. frm_num == 0: nach QUALITY.md Bedingung 3 unerreichbar - der Motiondecoder verwirft Motionen ohne Bilder (actor.cpp:320), und 2026-10-23 gemessen hat keine Motion der Spielerbaenke 10..14 und der Gegnerbanken in RM_1122/3230/5010/5840/9000/9270/9300/0110 nur ein Bild. Die Pruefung bleibt Bindungsschutz. */
     if (frm_num <= 1u) { gap(w, "bhEne29_ActionMain: frm_num - 1 == 0 (en29.c:1011)"); return 0; }
     eaw->mtn_rte = w->frm_no / (int32_t)(frm_num - 1u);
     return 0;
@@ -823,6 +824,7 @@ static void ply_action_main(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* p, RECVX_EN
         paw->p_act_flg &= ~0x2;
         ply_action_change(w, p, fw, paw->p_act_jmp);
     }
+    /* frm_num - 1 == 0 bzw. frm_num == 0: nach QUALITY.md Bedingung 3 unerreichbar - der Motiondecoder verwirft Motionen ohne Bilder (actor.cpp:320), und 2026-10-23 gemessen hat keine Motion der Spielerbaenke 10..14 und der Gegnerbanken in RM_1122/3230/5010/5840/9000/9270/9300/0110 nur ein Bild. Die Pruefung bleibt Bindungsschutz. */
     if (paw->p_frm_num - 1 == 0) { gap(w, "bhEne29_PlyActionMain: p_frm_num - 1 == 0 (en29.c:1406)"); return; }
     paw->p_mtn_rte = p->frm_no / (paw->p_frm_num - 1);              /* :1406 */
     if (paw->p_prgP != NULL) paw->p_prgP(p, w, fw);

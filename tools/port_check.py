@@ -139,7 +139,7 @@ def event_opcodes():
             prefix = line.split('{', 1)[0].split('world(', 1)[0]
             ops = {int(v, 0) for v in re.findall(r'case\s+(0x[0-9a-fA-F]+|\d+)\s*:', prefix)}
             handled.update(ops)
-            if re.search(r'\bworld\(t,\s*op', line) or 'pending' in line.lower() or 'remain' in line.lower():
+            if re.search(r'\bworld\(t,\s*(?:cursor,\s*)?op', line) or 'pending' in line.lower() or 'remain' in line.lower():
                 pending.update(ops)
     bound = set()
     for name in ('world.cpp', 'runtime.cpp'):

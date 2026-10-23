@@ -32,10 +32,8 @@ struct Fixture {
     std::vector<const EffectSprite*> effects(unsigned id){std::vector<const EffectSprite*> out;for(unsigned i=0;;++i){const auto* s=world.effect_state(i);if(!s)break;if((s->flg&1u)&&s->id==id)out.push_back(s);}return out;}
     void player_floor(int floor){RECVX_ENEMY_PLAYER q{};check(world.enemy_player_get(q),"Spielerbesitzer fehlt");q.flr_no=std::uint8_t(floor);check(world.enemy_player_set(q),"Spieler setzen");}
     void no_gaps(const char* phase){
-        // bhObj005 ist die bekannte, vom Albinoid unabhaengige Raumluecke von RM_7100.
-        static const char* allowed[]={"bhObj005: Nachbarzelle"};
-        for(const auto& g:world.unbound_enemy_routines()){bool ok=false;for(const char* a:allowed)if(g.find(a)!=std::string::npos)ok=true;
-            if(!ok)throw std::runtime_error(std::string(phase)+": Luecke "+g);}
+        // Die fruehere Raumluecke von RM_7100 (bhObj005 Nachbarzelle) ist nach QUALITY.md behoben.
+        for(const auto& g:world.unbound_enemy_routines())throw std::runtime_error(std::string(phase)+": Luecke "+g);
     }
 };
 // epw->mdl[k].objP[1].model->plist im Strom des Works (wie die Bindung model_plist).

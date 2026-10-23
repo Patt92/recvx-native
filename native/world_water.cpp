@@ -79,10 +79,13 @@ void RoomWorld::control_water_object(unsigned index,WorldEntity& e){
         w.ct3=(w.ct3+1)&0xF;
         // Erster Asm-Block: j = gfrm_ct & 1, t0 = nb >> 1, t1 = wt_zp Zellen je x-Schritt.
         const int nb=w.ct2;const unsigned j=(object_pass_count_-1u)&1u;
+        // ORIGINAL-FIX (QUALITY.md): objitm.c:1287/1309 + VU0_WAVE_CALC. Die Karte hat nur auf der
+        // Maximalseite zwei Zellen Rand; ein Eckpunkt mit xp == 0 bzw. zp == 0 liest c - wt_zp bzw.
+        // c - 1 vor wt_wvp, also im vorigen Heapblock - die Normale kippt dann je nach Fremdinhalt.
+        // Regel 3 (Puffer der Routine): bhGetFreeMemory loescht wt_wvp (pwksub.c:29), eine Zelle
+        // ausserhalb liest deshalb dessen Anfangswert 0 = Ruhehoehe.
         const auto height=[&](int cell)->float{
             if(cell>=0&&cell<wt.nbpt)return wt.wvp[std::size_t(cell)];
-            // Nachbarzelle vor/hinter wt_wvp: das Original liest den Nachbarblock des Heaps.
-            if(!w.neighbour_gap){w.neighbour_gap=true;unbound_enemy_.insert("bhObj005: Nachbarzelle ausserhalb wt_wvp (Original liest fremden Speicher)");}
             return 0.0f;};
         const auto in_range=[&](int v)->bool{
             if(v>=0&&v<nb)return true;

@@ -912,7 +912,8 @@ static void test_cap_dg01_gap(void)
     recvx_en01_cap(&w);                                     /* Init */
     w.mode0 = 3; w.mode2 = 1; w.mode3 = 0;
     recvx_en01_cap(&w);
-    check(gap_seen("pd uninitialisiert"), "Cap_DG01: Original liest pd uninitialisiert (:1208)");
+    /* ORIGINAL-FIX (QUALITY.md): das uninitialisierte pd (:1208) gilt als "keine Wand", keine Luecke mehr. */
+    check(!gap_seen("pd uninitialisiert"), "Cap_DG01: pd-Fix meldet noch eine Luecke (:1208)");
     check_f(w.dpx, 0.16f, "Cap_DG01 dpx 0.16 (:1172)");
     check_eq(w.waz, 0, "Cap_DG01 waz zuletzt 0 (:1187)");
     teardown();

@@ -481,6 +481,10 @@ if(BUILD_TESTING)
     add_test(NAME door_room_case COMMAND "${Python3_EXECUTABLE}" -I
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/door_room_case_check.py"
       --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    # ORIGINAL-FIX (QUALITY.md): die Originalraeume, die jeden behobenen Originalfehler erreichen.
+    add_test(NAME original_fix_rooms COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/original_fix_room_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
   add_executable(recvx-collision-tests tests/native/collision_test.cpp)
   add_executable(recvx-item-box-object-tests tests/native/item_box_object_test.cpp)
@@ -790,6 +794,18 @@ if(BUILD_TESTING)
   # Wie recvx-weapon-flash-tests bewusst OHNE recvx_game/recvx_scene: der
   # Apparat braucht nur bhSetMotion/bhCalcModel als Zeiger (setzt der Test
   # selbst) und njSin/njCos. Aus enemy_work.h kommen nur Typen, keine Koerper.
+  # Original-Fehler-Behandlung (QUALITY.md) in Gegnern ohne eigene Testdatei (en24 DeadRate).
+  add_executable(recvx-original-fix-enemy-tests tests/native/original_fix_enemy_test.cpp)
+  target_include_directories(recvx-original-fix-enemy-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-original-fix-enemy-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-original-fix-enemy-tests PRIVATE recvx_game)
+  add_test(NAME original_fix_enemy COMMAND recvx-original-fix-enemy-tests)
+  # ORIGINAL-FIX (QUALITY.md) in motion_set.cpp: ueberzaehliger Kanal und Bild ausserhalb des Clips.
+  add_executable(recvx-original-fix-motion-tests tests/native/original_fix_motion_test.cpp native/motion_set.cpp)
+  target_include_directories(recvx-original-fix-motion-tests PRIVATE native native/enemies)
+  target_compile_features(recvx-original-fix-motion-tests PRIVATE cxx_std_17)
+  target_link_libraries(recvx-original-fix-motion-tests PRIVATE recvx_math)
+  add_test(NAME original_fix_motion COMMAND recvx-original-fix-motion-tests)
   add_executable(recvx-subplayer-tests tests/native/subplayer_core_test.cpp native/subplayer.c native/enemies/enemy_work.c native/motion_set.cpp)
   target_include_directories(recvx-subplayer-tests PRIVATE native native/enemies)
   target_compile_features(recvx-subplayer-tests PRIVATE cxx_std_17)
@@ -1364,6 +1380,12 @@ if(BUILD_TESTING)
   add_executable(recvx-event-opcode-length-tests tests/native/event_opcode_length_test.cpp)
   target_link_libraries(recvx-event-opcode-length-tests PRIVATE recvx_game)
   add_test(NAME event_opcode_lengths COMMAND recvx-event-opcode-length-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  add_executable(recvx-event-scheduler-tests tests/native/event_scheduler_test.cpp)
+  target_link_libraries(recvx-event-scheduler-tests PRIVATE recvx_game)
+  add_test(NAME event_scheduler COMMAND recvx-event-scheduler-tests)
+  add_executable(recvx-event-player-bindings-tests tests/native/event_player_bindings_test.cpp)
+  target_link_libraries(recvx-event-player-bindings-tests PRIVATE recvx_game)
+  add_test(NAME event_player_bindings COMMAND recvx-event-player-bindings-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
   add_executable(recvx-event-camera-hide-tests tests/native/event_camera_hide_test.cpp)
   target_link_libraries(recvx-event-camera-hide-tests PRIVATE recvx_game)
   add_test(NAME event_camera_hide COMMAND recvx-event-camera-hide-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")

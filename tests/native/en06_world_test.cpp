@@ -35,10 +35,8 @@ struct Fixture {
     std::vector<const EffectSprite*> effects(unsigned id){std::vector<const EffectSprite*> out;for(unsigned i=0;;++i){const auto* s=world.effect_state(i);if(!s)break;if((s->flg&1u)&&s->id==id)out.push_back(s);}return out;}
     unsigned count(unsigned id,unsigned flg_mask=1u){unsigned n=0;auto& t=world.enemy_table();for(unsigned i=0;i<t.ewk_n;++i)if(t.slot[i]&&(t.slot[i]->flg&flg_mask)&&t.slot[i]->id==id)++n;return n;}
     void no_gaps(const char* phase){
-        // effsub2.c:1932: der Mittelpunkt der Staubwolke kommt aus nicht gesetzten FPU-Registern (Luecke benannt).
-        static const char* allowed[]={"bhEff_E06_Rinpun: op->cspr.c"};
-        for(const auto& g:world.unbound_enemy_routines()){bool ok=false;for(const char* a:allowed)if(g.find(a)!=std::string::npos)ok=true;
-            if(!ok)throw std::runtime_error(std::string(phase)+": Luecke "+g);}
+        // Der fruehere Staubmittelpunkt aus nicht gesetzten FPU-Registern (effsub2.c:1932) ist nach QUALITY.md behoben.
+        for(const auto& g:world.unbound_enemy_routines())throw std::runtime_error(std::string(phase)+": Luecke "+g);
     }
     // Ereignis 16: Raumflag 4/0 beendet das WHILE vor der Freigabe von Motte 3.
     void release(){events.set_flag(4,0,0);}
@@ -76,6 +74,26 @@ int main(int argc,char** argv){try{
         }
         check(flying&&dust&&leaned,"Freigabe -> MV02 -> Staub -> MV08 -> MV00 nicht vollstaendig");
         f.no_gaps("Flug");
+    }
+    {
+        // ORIGINAL-FIX (QUALITY.md) bhEff_E06_Rinpun: Summenstart 0 -> cspr.c = Mittel der 32 Teilchen, r 5.
+        // Spieler unter die frische Wolke: ein Treffer (:1943-1960) mit plp->hp -= 3 setzt im selben Pass
+        // ct1 aller lebenden 260 auf 0. Spaeter ausgestossene Wolken starten wieder mit ct1 1 (:1898).
+        Fixture f(data);f.tick();f.release();
+        const EffectSprite* cloud=nullptr;
+        for(int i=0;i<600&&!cloud;++i){f.tick();for(const auto* s:f.effects(260))if(s->mode0==1&&s->ct1!=0){cloud=s;break;}}
+        check(cloud,"Staubberuehrung: keine frische Wolke mit ct1 1");
+        const int hp=f.inv.hp;
+        // Die Gelenke (plp->watr = Gelenk 0..4, player.c:1766) sofort an der neuen Lage festschreiben.
+        // Die Wolke entsteht auf Mottenhoehe (~20) und sinkt mit vec.y bis -0.1 je Bild; sie lebt 30..60 Bilder.
+        f.world.place_player({cloud->px,0.0f,cloud->pz});f.actor.position={cloud->px,0.0f,cloud->pz};f.commit();
+        bool hit=false;
+        for(int i=0;i<60&&!hit;++i){const int before=f.inv.hp;f.tick();
+            bool all_zero=true;for(const auto* s:f.effects(260))if(s->ct1!=0)all_zero=false;
+            if(all_zero&&f.inv.hp<before){hit=true;check(before-f.inv.hp==3,"Staubberuehrung: plp->hp -= 3 (:1944)");}}
+        check(hit,"Staubberuehrung: Spieler in der Wolke wird nicht getroffen");
+        check(f.inv.hp<=hp-3,"Staubberuehrung: HP nicht gesenkt");
+        f.no_gaps("Staubberuehrung");
     }
     {
         // Host-Negativtest: absichtlich falscher Texturframe, keine Aenderung

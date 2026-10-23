@@ -508,13 +508,14 @@ void recvx_en04_brain(RECVX_ENEMY_WORK* w) {
         if((e->search&64)&&e->dist<50&&!e->line_hit&&w->flr_no==p.flr_no){q=p.pos;e->target.x=q.x;e->target.z=q.z;}
         else {
             XNEED(check_route,"bhCheckRoute");RECVX_ENEMY_VEC from=position(w);
-            /* en04.c:1426-1448: der Zielblock ist im Original unerreichbar, weil
-               bhEne04_EneSearch (:1376) Bit 0x80 immer setzt. Der Port bildet ihn
-               dennoch ab: ohne Wegezone schreibt rutchk.c:14-24 kein pos, also
-               bleibt das Ziel stehen, statt einen Wert zu erfinden; der Pass
-               laeuft wie :1449 weiter. */
+            /* en04.c:1426-1448 laeuft alle 16 Bilder: bhEne04_EneSearch setzt Bit 0x80 zwar
+               zu Beginn (:1376), loescht es aber mit &= 0x5F, sobald der Zaehler 3 erreicht (:1405).
+               ORIGINAL-FIX (QUALITY.md): liegt Gegner oder Spieler in keiner Wegezone, kehrt
+               bhCheckRoute (rutchk.c:14-24) mit 0xFF zurueck, ohne pos zu schreiben; :1438/:1445
+               uebernehmen dann den Stapelrest von bhEne04_Brain als Laufziel (Hund rennt zu einem
+               Zufallspunkt). Regel 4 (nur in den Zustand gespeichert): die Zuweisung entfaellt,
+               EXP0_F(0x24)/(0x2C) behalten das bisherige Ziel. Belegt in RM_3011/RM_3020. */
             if(context.en04->check_route(&from,&p.pos,&q)){e->target.x=q.x;e->target.z=q.z;}
-            else gap(w,"bhCheckRoute: keine Wegezone (Original liest uninitialisiertes pos)");
         }
     }
     switch(w->mode2) {
@@ -583,8 +584,13 @@ int recvx_en04_escape(RECVX_ENEMY_WORK* w,int res,int step) {
         e->flg&=~0x4000u;e->esc_ct=0;e->u48.esc_mode=1;
         /* fall through */
     case 1:
-        if(!e->wall_hit){gap(w,"bhEne04_Escape mode1 undefined return register (SLUS)");return -1;}
-        e->u48.esc_mode++;d=w->wax;if(e->esc_ct>8)e->esc_ct=8;break;
+        /* en04.c:2851-2858: ohne EXP0_I(0x3C) bleibt d_tmp ungesetzt. Im ELF ist d_tmp $s0, das
+           bhEne04_Escape (0x1AA220) auf diesem Pfad nicht schreibt; bhEne04_MV02 (0x1A7B60) schreibt
+           es vor dem jal in Fall 4 ebenfalls nicht. Die drei Aufrufer setzen $s0 vor dem jalr auf
+           einen positiven Wert ($sp + 0x58 in MVType00 0x1A6138, epw in MVType01 0x1A63E8 und
+           MVType02 0x1A64E4). Der Rueckgabewert ist damit bestimmt: d_tmp > 0 -> 2. */
+        if(e->wall_hit){e->u48.esc_mode++;d=w->wax;}else d=1;
+        if(e->esc_ct>8)e->esc_ct=8;break;
     case 2:
         if(!(e->wall_hist&15)) {
             if(!side_wall(w,3,1,&hit))return -1;
@@ -1101,7 +1107,7 @@ static void mv02(RECVX_ENEMY_WORK* w) { /* en04.c:1792 */
     default:gap(w,"bhEne04_MV02 mode3");return;
     }
     if(!have_rot) {
-        gap(w,"bhEne04_MV02 rot undefiniert (en04.c:1825)");return;
+        gap(w,"bhEne04_MV02: bhEne04_Escape ohne gebundenen Dienst");return; /* Escape meldet den Dienst selbst */
     }
     /* en04.c:1952: liegt das Ziel im vorderen 100-Grad-Sektor oder ist es
        naeher als 15 Einheiten, laeuft der Hund gerade. */

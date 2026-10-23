@@ -1101,6 +1101,9 @@ static void en22_put_dengeki_color(RECVX_ENEMY_WORK* w, int mdl, int no, uint32_
     const uint8_t c[4] = { (uint8_t)argb, (uint8_t)(argb >> 8), (uint8_t)(argb >> 16), (uint8_t)(argb >> 24) };
     int head = 0; size_t bytes = 0;
     uint8_t* mat = en22_material(w, mdl, no, &head, &bytes);
+    /* :2458 gibt ohne Materialchunk no einen undefinierten Zeiger zurueck. Nicht erreichbar belegt
+       (QUALITY.md Bedingung 3): alle Blitzmeshes mdl[1..6] des Albinoid (RM_7100) tragen die Chunks;
+       enemy_en22_world laeuft lueckenfrei. Bleibt eine Luecke. */
     if (!mat || bytes < 4u) { en22_gap(w, "bhEne22_GetDengekiColorAddr: kein Materialchunk no (Rueckgabe undefiniert, :2458)"); return; }
     memcpy(mat, c, 4);
 }

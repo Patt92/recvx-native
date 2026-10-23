@@ -313,20 +313,19 @@ static void move(RECVX_ENEMY_WORK* w)
             if (kind==3) { ++w->mode3; w->ct0=n-2; break; }
             w->gpx=w->px; w->gpy=w->py; w->gpz=w->pz;
             if (!player(w,&p)) return;
-            /* ELF 1D6900..1D6A38 bestaetigt den Decomp-Fehler NICHT als
-               sicheren Default: mode2 ausserhalb 3..12 benutzt ungesetzte
-               f20/f2. Keine geratene Spielerposition/Distanz als Ersatz. */
+            /* ORIGINAL-FIX (QUALITY.md): en12.c:973-977 default setzt angx/angz nicht; ELF 1D6900..1D6A38
+               rechnet ofx dann aus den ungesetzten $f20/$f2 (je nach Registerrest ein anderer Sprungabstand,
+               die Klemmen :979-985 halten ihn in 20..45). Regel 4 (nur in den Zustand gespeichert): die
+               Zuweisung :977 entfaellt, ofx behaelt seinen Wert; die beiden Klemmen laufen wie im Original. */
             if (p.mode2>=3 && p.mode2<=12) {
                 float prediction=p.mode2<=5?-15.0f:(p.mode2<=8?-25.0f:10.0f);
                 dx=p.pos.x+prediction*njSin(p.ay)-w->px;
                 dz=p.pos.z+prediction*njCos(p.ay)-w->pz;
                 w->ofx=njSqrt(dx*dx+dz*dz);
-                if (!(w->ofx<=45.0f)) w->ofx=45.0f;
-                if (w->ofx<20.0f) w->ofx=20.0f;
-            } else { missing(w,"bhEne12_MV04: original uninitialised f20/f2 (1D6A18)"); return; }
-            /* en12.c:987 mode3 += 1 erst NACH dem ofx-Abstand: ein Abbruch
-               oben laesst MV04 in Fall 0, statt mit altem ofx weiterzulaufen. */
-            ++w->mode3;
+            }
+            if (!(w->ofx<=45.0f)) w->ofx=45.0f;
+            if (w->ofx<20.0f) w->ofx=20.0f;
+            ++w->mode3;                                            /* en12.c:987 */
         }
         if (w->mode2==4 && w->mode3==1) {
             if (!frames(w,w->mtn_no,&n)) return; w->ct0=n-2; w->mtn_add=65536; ++w->mode3; break;

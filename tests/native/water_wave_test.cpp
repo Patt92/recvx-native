@@ -30,9 +30,9 @@ struct Fixture {
     void commit(){std::vector<BoneMatrix> nodes;if(world.player_scripted)(void)world.sample_player(player,&nodes);else nodes=player.pose(motion,frame,actor.position,actor.yaw);world.commit_player_joints(player.script_nodes(nodes));}
     void tick(){world.set_simulation_flags(events.flags[6][0]);world.tick();commit();}
     void gaps(const char* phase){
-        // Belegte Original-UB: RM_3210 hat Eckpunkte bei x/z = 0, deren Nachbarzellen vor wt_wvp
-        // liegen (objitm.c:1419-1431 liest den Heapblock davor); benannt, nicht ersetzt.
-        for(const auto& g:world.unbound_enemy_routines())if((g.find("bhObj005")!=std::string::npos||g.find("bhEff108")!=std::string::npos)&&g.find("Nachbarzelle ausserhalb wt_wvp")==std::string::npos)
+        // Die Randzellen vor wt_wvp (objitm.c:1419-1431) sind nach QUALITY.md behoben
+        // (ORIGINAL-FIX in world_water.cpp) und duerfen keine Luecke mehr melden.
+        for(const auto& g:world.unbound_enemy_routines())if(g.find("bhObj005")!=std::string::npos||g.find("bhEff108")!=std::string::npos)
             throw std::runtime_error(std::string(phase)+": Luecke "+g);
     }
 };
@@ -198,6 +198,12 @@ int main(int argc,char** argv){try{
         check(w->chunk_type==51&&w->normals.size()==w->base.size()&&w->cell.size()==w->base.size(),"vlist Chunk 51 mit Normalen");
         for(std::size_t i=0;i<w->base.size();++i)check(w->cell[i]==int(w->base[i].z)+int(w->base[i].x)*wt.zp,"Zelle je Eckpunkt = (int)z + (int)x * wt_zp");
         check(w->uv_ok,"npSetOffsetUV2 trifft den ersten Chunk 66 mit usr_num 0");
+        // ORIGINAL-FIX-Pfad (QUALITY.md): Eckpunkte, deren Nachbarzelle vor/hinter wt_wvp liegt, lesen
+        // die Anfangshoehe 0 des eigenen Puffers. RM_3210 muss solche Randpunkte haben, sonst prueft der
+        // Raum den Fix nicht.
+        {unsigned edge=0;for(const int c:w->cell)if(c-1<0||c-wt.zp<0||c+1>=wt.nbpt||c+wt.zp>=wt.nbpt)++edge;
+         std::cout<<"  Randpunkte mit Nachbar ausserhalb wt_wvp: "<<edge<<"\n";
+         if(std::string(room)=="RM_3210")check(edge>0,"RM_3210: Randpunkte fuer den ORIGINAL-FIX vorhanden");}
         check(w->ct3==0&&w->uv_u==0&&w->uv_v==0,"Init-Pass (case 0) ohne UV-Schritt");
         f.tick();
         check(w->ct3==1&&w->uv_u==256&&w->uv_v==0,"erster Pass in mode 1: npSetOffsetUV2(256, 0), ct3 1");

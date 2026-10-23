@@ -188,8 +188,16 @@ private:
     bool door_scenario_pending_=false;
     bool pad_cleared_=false; // hitchk.c sys->pad_ps = 0 for the rest of the pass
     bool request_door(const DoorRequest& request);
-    struct Loop {std::size_t condition=0,body=0;unsigned count=0;bool repeat=false;};
-    struct Task {bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0,wpnl_no=0;float addpx=0;std::size_t pc=0;std::vector<Loop> loops;std::array<unsigned,32> loop_counts{};};
+    // event.c / types.h:1956-1961: WHILE, FOR and SLEEP share one index.
+    // Counters and return/condition addresses survive Event_init.
+    struct Task {
+        bool active=false,blocked=false;unsigned event=0,level=0,delay=0,cnt2=0,cnt3=0,wpnl_no=0;
+        float addpx=0;std::size_t pc=0;int loop=-1;
+        std::array<std::size_t,6> loop_body{},loop_condition{};
+        std::array<std::uint32_t,4> loop_counts{};
+    };
+    unsigned current_task_=0; // bhCetask: even an inactive scheduler slot becomes current.
+    void schedule();
     std::vector<std::uint8_t> room_;
     std::size_t base_=0,scd0_=0,scd1_=0,messages_=0;
     std::vector<std::size_t> scripts_;
@@ -209,8 +217,8 @@ private:
     void show_dialog(Message message,unsigned index); // bhSetMessage resets response work
     std::array<Task,16> tasks_{};
     std::set<std::pair<unsigned,std::size_t>> reported_;
-    void run(Task& task,bool scenario=false);
-    int instruction(Task& task);
-    void world(Task& task,unsigned opcode,std::size_t length);
+    void run(Task& task,bool scenario=false,std::size_t entry=0);
+    int instruction(Task& task,std::size_t& cursor);
+    void world(Task& task,std::size_t& cursor,unsigned opcode,std::size_t length);
 };
 }

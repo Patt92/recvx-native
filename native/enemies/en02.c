@@ -283,23 +283,28 @@ static void sand_main(RECVX_ENEMY_WORK* w, int type0, const RECVX_ENEMY_VEC* pos
         }
         break;
     case 8:                                                         /* :2446 */
-        /* `ang` ist in diesem Fall im Original nicht initialisiert
-           (en02.c:2452/2462-2463, Kommentar im Original). Der Wert bestimmt
-           nur xn/zn der Sprites (-sin/-cos * 0.5). Portierungsluecke: die
-           Sprites werden ohne bestimmbaren Winkel nicht angelegt, die
-           Partikel (ohne ang) laufen wie im Original. */
-        gap(w, "en02.c:2452 ang uninitialisiert (bhEne02_SetSandEffectMain Fall 8)");
+        /* ORIGINAL-FIX (QUALITY.md): en02.c:2452/2462-2463 lesen `ang`, ohne es in
+           diesem Fall zu setzen (Originalkommentar). Disassembly 0x193AE8-0x193D5C:
+           ang = $s3 beim Funktionseintritt; weder die Kette bis bhControlEnemy noch
+           bhMainSequence/bhInitEvent schreiben $s3, der Wert ist also Fremdinhalt
+           und dreht xn/zn der Sprites zufaellig. Regel 4: alle anderen Faelle
+           berechnen ang aus rand() -> 0, d.h. xn 0, zn -0.5. Die sieben SetSandSpr
+           laufen wieder in Originalreihenfolge (vorher fehlten mit ihnen auch die
+           rand()-Aufrufe fuer yn und die eff[]-Plaetze). */
+        ang = 0;
         for (i = 0; i < 3; i++) {
             if (!rnd(w, &a)) return; wp.x = (pos->x + (12.0f * a)) - 6.0f;
             if (!rnd(w, &a)) return; wp.y = pos->y + a;
             if (!rnd(w, &a)) return; wp.z = (pos->z + (12.0f * a)) - 6.0f;
-            if (!rnd(w, &s)) return;                                /* 0.7f + 0.3f*rand */
-            (void)s;
+            if (!rnd(w, &s)) return;
+            sand_spr(w, type0, &wp, 2, i & 1, 0.7f + (0.3f * s), ang);  /* :2452 */
         }
         for (i = 0; i < 2; i++) {
             if (!rnd(w, &a)) return; wp.x = (pos->x + (16.0f * a)) - 8.0f;
             if (!rnd(w, &a)) return; wp.y = 2.0f + (pos->y + (8.0f * a));
             if (!rnd(w, &a)) return; wp.z = (pos->z + (16.0f * a)) - 8.0f;
+            sand_spr(w, type0, &wp, 0, 0, 1.0f, ang);               /* :2462 */
+            sand_spr(w, type0, &wp, 0, 1, 1.0f, ang);               /* :2463 */
             sand_particle(w, &wp, 3); sand_particle(w, &wp, 4); sand_particle(w, &wp, 5);
         }
         break;

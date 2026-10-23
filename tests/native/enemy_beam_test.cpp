@@ -114,12 +114,21 @@ static void en16_room_shots(const std::filesystem::path& data){
     check(near(spark.vtx_dir.x,v.x)&&near(spark.vtx_dir.y,v.y)&&near(spark.vtx_dir.z,v.z),"Funken: vtx_dir != epw->p - epw->n");
     check(spark.col_src==0xFFF8F8A0u&&spark.col_dst==0x4CE04010u&&near(spark.gnd_hgh,lo.y-100.0f),"Funken: Farben/gnd_hgh");
     check(spark.prm_a.vtx_num==10&&near(spark.prm_a.speed,0.6f,1e-6f)&&spark.prm_a.time==7&&near(spark.prm_a.ang_rand,50.0f,1e-6f),"Funken: nicht Eff308Prm[WpnTab[13].hiteff - 4 = 1]");
-    // :263-265 bhSetGunSplash liest den nie beschriebenen GA_WORK vx/vy/vz: kein Spritzer, benannte Luecke.
-    check(r.live(11)==s11&&r.live(10)==s10,"bhSetGunSplash darf ohne belegte Richtung keinen Spritzer erzeugen");
-    check(r.world.unbound_enemy_routines().count("bhSetGunSplash (en16.c:265): GA_WORK vx/vy/vz im Original uninitialisiert")==1,"Luecke bhSetGunSplash nicht gemeldet");
+    // :263-265 bhSetGunSplash(gap, lo, hp->prm0): ORIGINAL-FIX (QUALITY.md) - der nie beschriebene
+    // GA_WORK vx/vy/vz ist 0. weapon.c:1655-1700 legt je nach wattr Saetze 11 (Faelle 0..3) bzw. 10
+    // (Faelle 4/5) an; wattr = prm0 der getroffenen Wand. Alle Spritzer liegen genau auf lo
+    // (Richtung 0 versetzt nichts), ohne Fix waere die Lage Stapelrest.
+    {const int wattr=int(hit.parameters[0]);
+     unsigned new11=0,new10=0;for(const unsigned k:r.live(11))if(!s11.count(k))++new11;for(const unsigned k:r.live(10))if(!s10.count(k))++new10;
+     const unsigned want11=(wattr==0||wattr==3)?1u:(wattr==1||wattr==2)?2u:0u,want10=(wattr==4||wattr==5)?1u:0u;
+     check(new11==want11&&new10==want10,"bhSetGunSplash: Satzanzahl je wattr (weapon.c:1655-1700)");
+     for(unsigned i=0;const auto* s2=r.world.effect_state(i);++i){if(!(s2->flg&1u)||(s2->id!=11&&s2->id!=10))continue;
+        if(s2->id==10)check(near(s2->px,lo.x)&&near(s2->pz,lo.z),"Spritzer 10: Lage verschoben (gvec != 0)");
+        // bhSetEffectTb(&sys->ef, &vec, NULL, 0) legt vec als lox/loy/loz ab (effect.c:46): mit gvec 0 genau 0.
+        if(s2->id==11)check(near(s2->px,lo.x)&&near(s2->py,lo.y)&&near(s2->pz,lo.z)&&s2->lox==0.0f&&s2->loy==0.0f&&s2->loz==0.0f,"Spritzer 11: Lage/lox verschoben (gvec != 0)");}}
+    for(const auto& g:r.world.unbound_enemy_routines())check(g.find("bhSetGunSplash")==std::string::npos,"bhSetGunSplash meldet noch eine Luecke");
     r.world.tick_after_player();
-    for(const auto& g:r.world.unbound_enemy_routines())
-        if(g.rfind("bhSetGunSplash (en16.c:265)",0)!=0){std::cerr<<"unerwartete Luecke: "<<g<<'\n';throw std::runtime_error("EN16-Schussfolge meldet eine weitere Luecke");}
+    for(const auto& g:r.world.unbound_enemy_routines()){std::cerr<<"unerwartete Luecke: "<<g<<'\n';throw std::runtime_error("EN16-Schussfolge meldet eine Luecke");}
 }
 int main(int argc,char** argv){try{
     check(argc==2,"data required");_Make_SinTable();

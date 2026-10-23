@@ -192,9 +192,11 @@ static void en06_init(RECVX_ENEMY_WORK* w)
     w->flg &= ~0x9006u;
     w->flg &= ~0x800000u;
     w->ar = 5.0f; w->ah = 1.0f; w->car = 3.0f; w->cah = 3.0f;
+    /* ORIGINAL-FIX (QUALITY.md): en06.c:293 (int)(16 * njRandom()) wird bei rand() nahe RAND_MAX
+       durch die Float-Rundung 16 und liest hinter ENE06_HITPOINT. Regel 3: letzter Eintrag. */
     hp_idx = (int)(16.0f * njrand(w));                                  /* :293 */
-    if (hp_idx < 16) w->hp = ene06_hitpoint[hp_idx];
-    else gap(w, "ENE06_HITPOINT[16] (en06.c:293, njRandom() == 1.0 liest hinter die Tabelle)");
+    if (hp_idx > 15) hp_idx = 15;
+    w->hp = ene06_hitpoint[hp_idx];
     w->hokan_rate = 65536; w->hokan_count = 0;
     w->mtn_no = 4; w->mtn_md = 0; w->mtn_add = 65536; w->frm_no = 0;
     w->mode0 = 1; w->mode1 = 0; w->mode2 = 0; w->mode3 = 0;
@@ -666,7 +668,9 @@ static void en06_nage(RECVX_ENEMY_WORK* w)
             type = (int)(3.0f * njrand(w));
             if (!player(w, &pl, "plp (en06 NG00 Ei)")) return;
             for (i = 0; i < 3; i++) {
-                if (type > 2) { gap(w, "flg[type] (en06.c:1170, njRandom() == 1.0 liest hinter die Tabelle)"); return; }
+                /* ORIGINAL-FIX (QUALITY.md): en06.c:1170 type = (int)(3 * njRandom()) erreicht 3 und liest
+                   hinter flg[3] (Fremdbit in plp->stflg). Regel 3: letzter Eintrag. */
+                if (type > 2) type = 2;
                 if (!(pl.stflg & flg[type])) { pl.stflg |= flg[type]; break; }
                 type++;
                 if (2 < type) type = 0;
@@ -677,6 +681,8 @@ static void en06_nage(RECVX_ENEMY_WORK* w)
                 memset(&tmpl, 0, sizeof tmpl); tmpl.flg = 0x8001u; tmpl.id = 0x1B;
                 if (!en06_sv || !en06_sv->create_child) { gap(w, "eneset.c:170 Kindwork (ene27) fehlt (en06)"); return; }
                 egg = en06_sv->create_child(w, &tmpl);
+                /* en06.c:1182 schreibt bei voller ene[] nach NULL->type. Unerreichbar: hoechstens drei Eier
+                   gleichzeitig (je ein plp->stflg-Bit flg[type]), ene[] hat 128 Plaetze. Bleibt eine Luecke. */
                 if (!egg) { gap(w, "bhEne06_NG00: ene[] voll (ene27, en06.c:1182, Original schreibt NULL->type)"); return; }
                 egg->type = (uint16_t)type;
                 egg->mode2 = 1;
@@ -808,7 +814,9 @@ static void en06_dg(RECVX_ENEMY_WORK* w, uint32_t m_hit, uint32_t m_fall, uint32
         hit_start(w, m_hit, 0x580000u);
         if (turn) p->car_target = 1.0f;                                 /* DG01 :1379 vor pno */
         pno = (int)(4.0f * njrand(w));
-        if (pno > 3) { gap(w, "parts[pno] (en06 DG, njRandom() == 1.0)"); return; }
+        /* ORIGINAL-FIX (QUALITY.md): (int)(4 * njRandom()) erreicht 4 und liest hinter parts[4]
+           (owP-Index und Fragmentzeiger aus Fremdspeicher). Regel 3: letzter Eintrag. */
+        if (pno > 3) pno = 3;
         if (!en06_sv || !en06_sv->owp_flag_or || !en06_sv->owp_flag_or(w, (uint32_t)parts[pno], 3u)) gap(w, "owk[parts[pno]].flg |= 3 (en06)");
         if (p->parts[pno]) { p->parts[pno]->mode0 = 1; p->parts[pno]->mode2 = 1; }
         else gap(w, "exp0 + 0x34 Fragment fehlt (en06 DG)");

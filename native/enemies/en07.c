@@ -494,16 +494,11 @@ static void en07_init(RECVX_ENEMY_WORK* w)
     w->ar = 1.5f;
     w->ah = 1.5f;
 
-    /* en07.c:153 hp = ENE07_HITPOINT[(int)(16.0f * njRandom())]. njRandom()
-       kann genau 1.0f werden (siehe en07_rand01), dann traegt das Original
-       Index 16 und liest hinter die Tabelle. Alle sechzehn Eintraege sind 1,
-       darum ist der Wert eindeutig; der Port liest nicht ueber die Tabelle
-       hinaus und meldet den Originalfehler, statt ihn nachzubauen. */
+    /* ORIGINAL-FIX (QUALITY.md): en07.c:153 hp = ENE07_HITPOINT[(int)(16.0f * njRandom())].
+       njRandom() kann genau 1.0f werden (siehe en07_rand01), dann liest das Original Index 16
+       hinter der Tabelle (Fremd-HP). Regel 3: letzter Eintrag (alle sechzehn sind 1). */
     idx = (int)(16.0f * en07_rand01(w));
-    if (idx < 0 || idx > 15) {
-        en07_gap(w, "en07.c:153 ENE07_HITPOINT[16] liest hinter die Tabelle");
-        idx = 15;
-    }
+    if (idx > 15) idx = 15;
     w->hp = en07_hitpoint[idx];
 
     w->car = 3.0f;

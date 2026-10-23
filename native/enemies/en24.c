@@ -450,16 +450,21 @@ static void en24_move(RECVX_ENEMY_WORK* w)
     if (w->flg & 4u) {
         w->flg &= ~4u;
         if (w->hp > 0) {
-            /* en24.c:222 DeadRate[epw->wpnr_no] ohne Bereichspruefung;
-               weapon.c:1453 setzt wpnr_no = 20, also hinter die 19
-               Tabelleneintraege. Der Zugriff wird nicht nachgebildet. */
-            if ((w->wpnr_no >= 0) && (w->wpnr_no < 19)) {
-                if (en24_rand01(w) < en24_dead_rate[w->wpnr_no]) {
+            /* en24.c:222 njRandom() < DeadRate[epw->wpnr_no] ohne Bereichspruefung;
+               bhCheckBombAtari (weapon.c:1453, Explosion bhEff016) setzt wpnr_no = 20.
+               Im ELF liegt DeadRate bei 0x31F650 (76 Byte): Index 19 ist die Fuellung
+               0x31F69C, Index 20 CapColTab[0] = {jnt_a 0, jnt_b 0} (0x31F6A0, nur ueber
+               epw->cpcl gelesen, nirgends beschrieben). Beide Bitmuster sind 0 = 0.0f,
+               der Wert ist also bestimmt und harmlos: kein Defekt nach QUALITY.md, treu
+               portiert - njRandom() wird gezogen, der Vergleich ist nie wahr. */
+            {
+                float rate = 0.0f;
+                if (w->wpnr_no >= 0 && w->wpnr_no < 19) rate = en24_dead_rate[w->wpnr_no];
+                else if (w->wpnr_no != 19 && w->wpnr_no != 20)
+                    en24_gap(w, "DeadRate[wpnr_no] (en24.c:222): wpnr_no ausserhalb 0..20");
+                if (en24_rand01(w) < rate) {
                     w->flg |= 2u;
                 }
-            } else {
-                en24_gap(w, "DeadRate[wpnr_no] (en24.c:222): wpnr_no "
-                            "ausserhalb 0..18, Original liest hinter dem Array");
             }
             w->hp -= 1;
         } else {

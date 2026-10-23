@@ -60,5 +60,22 @@ int main(int argc,char** argv){try{
         check(e.mode3==2&&(e.flg2&1u)&&e.mtn_add==0,"DD00 corpse state not reached");
         Scene scene;f.world.append(scene,{},SceneCamera{});
     }
+    {
+        // ORIGINAL-FIX (QUALITY.md) bhEne23_LegBreak: i = (int)(2 * njRandom()) wird 2, wenn rand() so
+        // nahe an RAND_MAX liegt, dass rand/2^31 als float 1.0 ergibt. Das Original liest dann das
+        // Beinflag exp0[260] und schreibt mode0/2/3 auf den Zeiger hinter den Beinen; der Fix nimmt Bein 1.
+        // Der Zufallsdienst liefert genau diesen Wert (Diagnosefixture, kein erfundener Spielwert).
+        Fixture f(data);for(int i=0;i<60;++i)f.tick();auto& e=f.enemy();
+        auto* s=static_cast<RECVX_EN23_STATE*>(e.exp0);
+        static RECVX_ENEMY_SERVICES sv;sv=*e.sv;sv.random_next=[]()->int32_t{return 0x7fffffc0;};
+        check(float(0x7fffffc0)/2147483648.0f==1.0f,"Fixture: rand/2^31 rundet nicht auf 1.0");
+        const RECVX_ENEMY_SERVICES* saved=e.sv;e.sv=&sv;
+        s->leg_broken[0]=s->leg_broken[1]=0;
+        f.world.run_in_enemy_scope(recvx_en23_leg_break_for_test,&e);
+        e.sv=saved;
+        check(s->leg_broken[1]==1&&s->leg_broken[0]==0,"ORIGINAL-FIX LegBreak: Index 2 nicht auf Bein 1 geklemmt");
+        // Die anschliessende Freigabe (owP-Flags, :3496-3500) braucht den gerechneten Objektbaum und ist hier nicht Gegenstand.
+        for(const auto& g:f.world.unbound_enemy_routines())check(g.find("LegBreak")==std::string::npos,"LegBreak meldet noch eine Luecke");
+    }
     std::cout<<"EN23 children, EN24 model links, DG04, bhEne03s and DD00 PASS\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

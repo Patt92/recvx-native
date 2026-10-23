@@ -421,7 +421,8 @@ static void en15_init(RECVX_ENEMY_WORK* w)
         if (!w->sv->calloc_work) { gap(w, "bhGetFreeMemory (en15)"); return; }
         w->exp0 = w->sv->calloc_work((uint32_t)sizeof(RECVX_EN15_STATE));
         /* en15.c:430-434: das Original meldet den Fehlschlag und schreibt danach
-           ungeprueft EXP0_S(0x5A) — ein NULL-Zugriff. */
+           ungeprueft EXP0_S(0x5A) — ein NULL-Zugriff. Nur bei erschoepftem Freispeicher;
+           nativ ist calloc_work nicht begrenzt. Nach QUALITY.md unerreichbar, bleibt Luecke. */
         if (!w->exp0) { gap(w, "bhEne15_Init: Can't Get WorkMemory (Original schreibt danach nach NULL)"); return; }
     }
     s = st(w);
@@ -1333,7 +1334,10 @@ static void set_smoke(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos)
                        RECVX_EN15_EF_SX | RECVX_EN15_EF_SY | RECVX_EN15_EF_SZ, &ef, NULL, NULL, 0);
 }
 /* Die Schalter ueber plp->mtn_no ohne default (en15.c:2953/3066/3134/3168):
-   ein anderer Wert laesst _mtnno uninitialisiert. */
+   ein anderer Wert laesst _mtnno uninitialisiert. Nach QUALITY.md Bedingung 3 nicht
+   erreichbar belegt: waehrend des Griffs setzt nur bhEne15 selbst plp->mtn_no
+   (SetPlyMtn 14/15/19/21, :1150-1313, danach 19 -> 22 und 21 -> 20, :2986/:3002), also
+   genau die aufgezaehlten Werte. Bleibt eine Luecke. */
 static int fall_mtn(RECVX_ENEMY_WORK* w, uint32_t mtn, int* out)
 {
     switch (mtn) {

@@ -41,7 +41,7 @@ struct WaterWaveWork {unsigned mode0=0;int ct0=0,ct1=0,ct2=0,ct3=0;float xn=0,zn
     std::vector<NJS_POINT3> base,vertices;std::vector<NJS_VECTOR> base_normals,normals;std::vector<int> cell;
     bool orphan=false; // objitm.c:1230: zweites Wasserobjekt ohne eigene exp1/exp2
     bool uv_ok=false;std::size_t uv_chunk=0;int uv_u=0,uv_v=0;
-    bool neighbour_gap=false,range_gap=false;};
+    bool range_gap=false;};
 struct WorldEntity {
     std::vector<FaceParameter> face_keys;unsigned face_frame=0,face_flags=0;
     // face.c:321 bhSetLip only stores the selected stream in exp0[268];
@@ -495,6 +495,8 @@ public:
     // bhControlPlayer (player.c:1743-1771), bhControlEffect, bhControlObjItm, bhControlLight. tick() = beide.
     void tick();
     void tick_enemy_pass();
+    // Testeinstieg: eine Gegnerroutine im Dienstkontext dieses Raums ausfuehren (EnemyWorldScope).
+    void run_in_enemy_scope(void (*fn)(RECVX_ENEMY_WORK*),RECVX_ENEMY_WORK* w);
     void tick_after_player();
     void control_lights(); // light.c:332 bhControlLight (game.c:59; auch bhInitCamSet event.c:4745)
     unsigned take_enemy_room_flags(){const auto flags=enemy_spawn_.room_flags;enemy_spawn_.room_flags=0;return flags;}
@@ -796,6 +798,7 @@ private:
     unsigned collision_control_=0,collision_system_=0,collision_mode_=1;
     unsigned collision_floor_sound_=0,collision_foot_effect_=0;
     int collision_floor_=0,collision_push_count_=0,collision_push_index_=0,collision_floor_index_=0;
+    int collision_floor_previous_=0; // plp->flr_nob (pwksub.c:107), no original reader.
     float collision_front_offset_=0,collision_front_target_=0; // EXP_WORK arn/arp
     NJS_POINT3 collision_front_point_{}; // EXP_WORK fpx/fpy/fpz (player.c:1585-1587)
     NJS_POINT3 collision_previous_probe_{},collision_safe_{};

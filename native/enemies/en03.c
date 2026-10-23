@@ -1791,6 +1791,10 @@ static const RECVX_ENEMY_VEC ng01_trg[8] = {
     { 0.063656f, -0.090291f, -12.650927f }, { 0.063656f, -0.090291f, -11.614147f },
     { 0.063656f, -0.090291f, -13.150927f }, { 0.063656f, -0.090291f, -12.114147f }
 };
+/* trg_pos[sys->ply_id][...] (en03.c:2873/2931/2944/3085). Mit plp->mode2 4/5 aus NG00 (:2826/:2830)
+   liest :2931 bei ply_id 0/1 den gueltigen Nachbarn der Tabelle (treu, Original-Verhalten); hinter
+   die Tabelle geht es erst ab ply_id 2. Black-Widow-Raeume spielen Claire (0) oder Chris (1):
+   nach QUALITY.md Bedingung 3 nicht erreichbar belegt, bleibt eine Luecke. */
 static int trg_at(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* tab, int row, int col,
                   RECVX_ENEMY_VEC* out)
 {
@@ -2966,11 +2970,10 @@ static void dd03(RECVX_ENEMY_WORK* w)
                 recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[i] + 2u, 0x2u);
                 if (s->legs[i]) recvx_en03s_leg_mark(s->legs[i]);
                 s->broken[i] = 1;
-                /* EXP0_INT(i, 980) = EXP0_C(105): schreibt 768 Byte hinter den
-                   212-Byte-Block des Kindes (bhEne_CallocWork(0xD4, 8)) und
-                   damit in den Block eines spaeteren Kindes. Belegte Original-UB,
-                   kein Leser im Original; wird gemeldet, nicht nachgebildet. */
-                gap(w, "bhEne03_DD03: EXP0_INT(i,980) schreibt hinter den Kindblock (Original schreibt fremden Speicher)");
+                /* ORIGINAL-FIX (QUALITY.md): en03.c:4592 EXP0_INT(i, 980) = EXP0_C(105)
+                   schreibt 768 Byte hinter den 212-Byte-Block des Kindes
+                   (bhEne_CallocWork(0xD4, 8), macros.h:83) in fremden Heap.
+                   Kein Leser im Original. Regel 2: der Schreibzugriff entfaellt. */
             }
         }
         w->mdflg |= 0x20u;
@@ -3772,6 +3775,9 @@ static void en03_hit_mark(RECVX_ENEMY_WORK* w)
     int i, range;
     RECVX_ENEMY_VEC ofp;
     const EN03_BLOOD* blp;
+    /* Unerreichbar (QUALITY.md Bedingung 3): djnt_no = kno < mlwP->obj_num (weapon.c:744-755), das
+       Black-Widow-Modell hat genau 37 Objekte = BloodTbl[37]; wpnr_no = gap->wpn_no, dessen hoechster
+       Schreiber 20 setzt (effsub1.c:10056) = DmgReact[21]. Die Pruefungen bleiben Bindungsschutz. */
     if (w->djnt_no < 0 || w->djnt_no >= 37) {
         gap(w, "bhEne03_HitMark: BloodTbl[epw->djnt_no] hinter der Tabelle");
         return;
@@ -3881,10 +3887,9 @@ static void damage_init(RECVX_ENEMY_WORK* w)
                     recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[pno] + 1u, 0x2u);
                     recvx_en03_owp_flag_or(w, (uint32_t)BrokenParts[pno] + 2u, 0x2u);
                     if (s->legs[pno]) recvx_en03s_leg_mark(s->legs[pno]);
-                    /* EXP0_INT(pno, 980) = EXP0_C(105) liegt 768 Byte hinter
-                       dem 212-Byte-Block (bhEne_CallocWork(0xD4, 8)); belegte
-                       Original-UB, kein Leser im Original. */
-                    gap(w, "bhEne03_DamageInit: EXP0_INT(pno,980) schreibt hinter den Kindblock (Original schreibt fremden Speicher)");
+                    /* ORIGINAL-FIX (QUALITY.md): en03.c:6465 EXP0_INT(pno, 980) liegt
+                       768 Byte hinter dem 212-Byte-Block (bhEne_CallocWork(0xD4, 8)) im
+                       fremden Heap; kein Leser im Original. Regel 2: entfaellt. */
                     w->mdflg |= 0x20u;
                     if (w->sv->mince_effect) {
                         w->sv->mince_effect(w, 2, 3);

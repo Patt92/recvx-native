@@ -1444,17 +1444,15 @@ static void en26_brain00(RECVX_ENEMY_WORK* w)
     rid = (uint8_t)en->route_id(&self);                              /* :1979 */
     p->route_ct++;                                                   /* :1980 */
     if (p->route_id == rid || p->route_ct >= 255u) {                 /* :1981 */
-        /* bhCheckRoute (rutchk.c:5) schreibt `pos` nur, wenn beide Punkte
-           in einer Wegezone liegen; sonst liest das Original danach den
-           uninitialisierten Stack (en26.c:1984-1985). Dieser Fall wird
-           gemeldet und das Ziel nicht aus einem erfundenen Wert gesetzt. */
+        /* ORIGINAL-FIX (QUALITY.md): bhCheckRoute (rutchk.c:14-24) schreibt `pos` nur,
+           wenn beide Punkte in einer Wegezone liegen; sonst uebernimmt das Original in
+           :1984-1985 den Stapelrest als Laufziel. Regel 4 (nur in den Zustand gespeichert):
+           die Zuweisung entfaellt, das bisherige Ziel EXP0_F(0x58)/(0x60) bleibt. */
         const int both = en->route_id(&self) != 0xFF && en->route_id(&pp) != 0xFF;
         rid = (uint8_t)en->route_next(&self, &pp, &pos);             /* :1983 */
         if (both) {
             p->ikou_target.x = pos.x;                                /* :1984 */
             p->ikou_target.z = pos.z;                                /* :1985 */
-        } else {
-            en26_gap(w, "bhEne26_Brain00: bhCheckRoute ohne Wegezone, Original liest uninitialisiertes pos (en26.c:1984)");
         }
         p->route_id = rid;                                           /* :1986 */
         p->route_ct = 0;                                             /* :1987 */
@@ -1599,6 +1597,7 @@ static void en26_mv00(RECVX_ENEMY_WORK* w)
     switch (w->mode3) {
     case 0: {
         uint32_t frames = en26_motion_frames(w, w->mtn_no);          /* :2086 */
+        /* frm_num - 1 == 0 bzw. frm_num == 0: nach QUALITY.md Bedingung 3 unerreichbar - der Motiondecoder verwirft Motionen ohne Bilder (actor.cpp:320), und 2026-10-23 gemessen hat keine Motion der Spielerbaenke 10..14 und der Gegnerbanken in RM_1122/3230/5010/5840/9000/9270/9300/0110 nur ein Bild. Die Pruefung bleibt Bindungsschutz. */
         if (frames == 0u) { en26_gap(w, "mnwP[mtn_no].frm_num == 0 (en26.c:2086)"); return; }
         frm_no = (int32_t)((uint32_t)en26_rand(w) % frames) * 65536; /* :2086 */
         recvx_enemy_chg_mtn(w, 0u, 0, 15);                           /* :2087 */

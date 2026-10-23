@@ -113,7 +113,11 @@ int flr_at(uint32_t i,RECVX_ENEMY_ATR* out){ if(i>=floor_count) return 0; *out=f
 int stair_area_atr(RECVX_ENEMY_WORK*,float,RECVX_ENEMY_ATR* rec,int* idx){
     if(!stair_present) return 0; *rec=stair_rec; *idx=stair_index; return 1;
 }
-int check_route(const RECVX_ENEMY_VEC*,const RECVX_ENEMY_VEC* to,RECVX_ENEMY_VEC* out){ *out=*to; return 1; }
+/* route_zone 0: bhCheckRoute ohne Wegezone (rutchk.c:14-24, 0xFF, pos unberuehrt). */
+int route_zone=1; RECVX_ENEMY_VEC route_point{};
+int check_route(const RECVX_ENEMY_VEC*,const RECVX_ENEMY_VEC* to,RECVX_ENEMY_VEC* out){
+    if(!route_zone) return 0;
+    *out = route_point.x||route_point.z ? route_point : *to; return 1; }
 int collision_check_wall2(RECVX_ENEMY_WORK*,const RECVX_ENEMY_VEC*,const RECVX_ENEMY_VEC*,
                           RECVX_ENEMY_VEC* pd,float,float){ *pd={}; return 0; }
 void calc_damage(RECVX_ENEMY_WORK*,const RECVX_EN04_COMBWEP*,const RECVX_EN04_COMBJOINT*){}
@@ -339,6 +343,39 @@ void init(){
 /* ---------------------------------------------------------------------------
    3) bhEne04_Move / MVType00 / MV00 (en04.c:1020/1048/1656)
    --------------------------------------------------------------------------- */
+/* ORIGINAL-FIX (QUALITY.md) in recvx_en04_brain: en04.c:1437/1444 ohne Wegezone. Der Zielblock
+   laeuft, sobald EneSearch Bit 0x80 im Bild mit Zaehler 3 loescht (en04.c:1405). Mit Zone wird
+   das Ziel der Zonenmittelpunkt, ohne Zone bleibt das bisherige Ziel (kein Stapelrest). */
+void brain_route(){
+    reset();
+    auto w=make(); w.mode0=1; w.mode1=1; w.mode2=0; w.mode3=0;
+    w.exp0=allocate(sizeof(RECVX_EN04_EXP0));
+    auto* e=static_cast<RECVX_EN04_EXP0*>(w.exp0);
+    ply.pos={40,0,60}; ply.flr_no=0; e->dist=80.0f;
+    e->search=3;                                   /* Zaehler 3 beim Eintritt: :1405 &= 0x5F loescht Bit 0x80 */
+    route_zone=1; route_point={7,0,9}; e->target={1,0,2};
+    recvx_en04_brain(&w);
+    require(!(e->search&0x80u),"EneSearch :1405 loescht Bit 0x80 im Zaehlerstand 3");
+    require(e->target.x==7.0f&&e->target.z==9.0f,"Brain :1438 Ziel = Wegezonenpunkt");
+    e->search=3; route_zone=0; e->target={1,0,2};
+    recvx_en04_brain(&w);
+    require(e->target.x==1.0f&&e->target.z==2.0f,"ORIGINAL-FIX: ohne Wegezone bleibt das bisherige Ziel");
+    require(gaps.empty(),"ohne Wegezone keine Luecke mehr");
+    route_zone=1; route_point={};
+}
+/* bhEne04_Escape Fall 1 ohne EXP0_I(0x3C) (en04.c:2851-2858): d_tmp ist $s0, von allen drei
+   MVTypeXX vor dem jalr positiv gesetzt -> Rueckgabe 2, esc_mode bleibt 1. Mit Wandtreffer
+   d_tmp = wax und esc_mode 2. Vorher brach der Port hier mit -1 ab. */
+void escape_mode1(){
+    reset();
+    auto w=make(); w.exp0=allocate(sizeof(RECVX_EN04_EXP0));
+    auto* e=static_cast<RECVX_EN04_EXP0*>(w.exp0);
+    ply.pos={0,0,100}; e->u48.esc_mode=1; e->wall_hit=0; e->esc_ct=0; w.wax=-300;
+    const int r=recvx_en04_escape(&w,90,1152);
+    require(r==2,"Escape Fall 1 ohne 0x3C: bestimmter Rueckgabewert 2 ($s0 > 0)");
+    require(e->u48.esc_mode==1,"Escape Fall 1 ohne 0x3C: esc_mode bleibt 1");
+    require(gaps.empty(),"Escape Fall 1 ohne 0x3C meldet eine Luecke");
+}
 void move_mv00(){
     reset();
     auto w=make(); w.mode0=1; w.mode1=1; w.mode2=0; w.mode3=0; w.type=0;
@@ -916,7 +953,7 @@ void player_branch_gaps(){
 }
 int main(){
     try {
-        tables(); init(); move_mv00(); mv01_mv02(); mv11_stairs();
+        tables(); init(); brain_route(); escape_mode1(); move_mv00(); mv01_mv02(); mv11_stairs();
         damage(); damage_states(); death(); grab(); player_damage(); frame(); neck(); player_branch_gaps();
         clear_allocations();
         recvx_en04_set_context(nullptr); recvx_en04_set_data(nullptr);

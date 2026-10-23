@@ -61,6 +61,8 @@ typedef struct {
     /* effsub3.c:2401 bhSetEffGunSpark(pos, dir, src, dst, typ) */
     void (*gun_spark)(const RECVX_ENEMY_VEC* pos, const RECVX_ENEMY_VEC* dir, uint32_t src, uint32_t dst, int typ);
     int hiteff13; /* weapon.c WpnTab[13].hiteff */
+    /* weapon.c:1632 bhSetGunSplash(gap, pos, wattr) mit gap->vx/vy/vz, wpn_no, ay. */
+    void (*gun_splash)(const RECVX_ENEMY_VEC* gvec, const RECVX_ENEMY_VEC* pos, int wattr, int wpn_no, int ay);
     /* en16.c:265 bhSetGunSplash hat bewusst keinen Dienst: der uebergebene GA_WORK
        traegt in vx/vy/vz uninitialisierten Stackinhalt (siehe en16.c, MV02 mode3 4);
        en16 meldet den Aufruf als benannte Luecke. */

@@ -197,6 +197,7 @@ static void walk(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_EVENT* e, RECVX_PLAYER_EVE
         const uint32_t n = frames(io, a->mtn_no);
         const int32_t frame = a->frm_no / 65536;
         const int32_t per = n ? (int32_t)(65536u / n) : 0;
+        /* frm_num - 1 == 0 bzw. frm_num == 0: nach QUALITY.md Bedingung 3 unerreichbar - der Motiondecoder verwirft Motionen ohne Bilder (actor.cpp:320), und 2026-10-23 gemessen hat keine Motion der Spielerbaenke 10..14 und der Gegnerbanken in RM_1122/3230/5010/5840/9000/9270/9300/0110 nur ein Bild. Die Pruefung bleibt Bindungsschutz. */
         if (!n) gap(io, "pl_smove: frm_num 0 (Division durch null im Original)");
         if (kind == 1) a->spd = 0.9f + fabsf(0.1f * njSin((int32_t)((uint32_t)frame * (uint32_t)per)));
         else a->spd = (kind == 0 ? 0.18f : 0.14f) + fabsf(0.15f * (float)njCos(frame * per));
@@ -280,6 +281,7 @@ static void target(RECVX_PLAYER_ACTION* a, RECVX_PLAYER_EVENT* e, RECVX_PLAYER_E
         const int32_t frame = a->frm_no / 65536;
         const int32_t per = n ? (int32_t)(65536 / n) : 0;
         const int16_t z = (int16_t)a->ct0;
+        /* frm_num - 1 == 0 bzw. frm_num == 0: nach QUALITY.md Bedingung 3 unerreichbar - der Motiondecoder verwirft Motionen ohne Bilder (actor.cpp:320), und 2026-10-23 gemessen hat keine Motion der Spielerbaenke 10..14 und der Gegnerbanken in RM_1122/3230/5010/5840/9000/9270/9300/0110 nur ein Bild. Die Pruefung bleibt Bindungsschutz. */
         if (!n) gap(io, "pl_smove: frm_num 0 (Division durch null im Original)");
         if (run) a->spd = 0.9f + fabsf(0.10f * njSin(frame * per));
         else a->spd = 0.18f + fabsf(0.15f * njCos(frame * per));

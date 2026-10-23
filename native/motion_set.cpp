@@ -60,29 +60,32 @@ struct Pass {
         if(!datP&&at>=64)return fail("bhSetMotion:NormalTbl[64] ueberschritten");
         const std::int32_t n=datP?datP[at]:std::int32_t(at);
         if(n<0)return fail("bhSetMotion:objP/owP-Index ausserhalb des Modells");
-        // A motion with more channels than the model has objects: the original
-        // writes objP[n] past the model's object array (Motion.c:131 loops over
-        // the motion's obj_num). That write has no target here; the channel is
-        // consumed and reported as the original defect it reproduces.
-        if(std::size_t(n)>=obj.size()||std::size_t(n)>=owp.size()){fail("bhSetMotion: Motionkanal ohne Modellknoten (Original schreibt hinter objP)");out=surplus;return true;}
+        // ORIGINAL-FIX (QUALITY.md): Motion.c:119-190 laeuft ueber obj_num der Motion, nicht des
+        // Modells. Hat die Motion mehr Kanaele als das Modell Objekte (RM_3210/RM_7060 id 88:
+        // 10 Kanaele, 9 Objekte), liest das Original owP[n].flg und schreibt objP[n].pos/ang
+        // hinter das Objektfeld in die folgenden Modelldaten. Regel 2: der Kanal wird verbraucht,
+        // der Schreibzugriff entfaellt.
+        if(std::size_t(n)>=obj.size()||std::size_t(n)>=owp.size()){out=surplus;return true;}
         out=std::size_t(n);return true;}
     bool channel(std::size_t c){return c<clip.positions.size()&&c<clip.angles.size()?true:fail("bhSetMotion:md2P ausserhalb der Motion");}
-    bool frame(std::int32_t f){
+    bool frame(std::int32_t& f){
         if(f>=0&&std::uint32_t(f)<clip.frames)return true;
         // Hinter dem Ende: das Original liest den Key im MTN-Bytebild weiter
         // (Motion.c:131). Wurden die Nachbarkeys angehaengt (clip.tail_keys),
-        // tut die Portierung dasselbe; sonst bleibt es bei der Meldung.
+        // tut die Portierung dasselbe (deterministische Originaldaten).
         if(f>=0&&std::uint32_t(f)<clip.frames+clip.tail_keys)return true;
-        // Die Zahlen gehoeren in die Meldung: das Original liest hier ueber
-        // das Ende der Keyschlange hinaus; ohne Frame und Laenge laesst sich
-        // der Fall nicht von einem Hostfehler unterscheiden.
-        if(gap&&gap->empty())*gap="bhSetMotion:frm_no "+std::to_string(f)+" ausserhalb von frm_num "+std::to_string(clip.frames)+" (id "+std::to_string(motion_id)+", mtn "+std::to_string(motion_no)+")";
-        return false;}
+        // ORIGINAL-FIX (QUALITY.md): weiter vorn/hinten liest Motion.c:131 mkfP += frm_no/65536
+        // ausserhalb jedes Datenblocks (RM_3120: Common_controll 34 setzt frm_no aus den
+        // Skriptbytes 0a 24 = Bild 9226 auf einen 2-Bild-Clip, event.c:11897). Regel 3:
+        // auf das naechste gueltige Bild geklemmt; die Bilduhr (frm_no) bleibt unveraendert.
+        if(!clip.frames)return false;
+        const std::int32_t last=std::int32_t(clip.frames+clip.tail_keys)-1;
+        f=f<0?0:last;return true;}
 };
 
 // Motion.c:131 SetMtnNormal: an owP-0x4 node advances datP only.
 bool normal(Pass& p,std::int32_t frm_no,unsigned mode){
-    const std::int32_t f=frm_no/65536;const float flp_f=(mode&2)?-1.f:1.f;const std::int32_t flp_s=(mode&2)?-1:1;
+    std::int32_t f=frm_no/65536;const float flp_f=(mode&2)?-1.f:1.f;const std::int32_t flp_s=(mode&2)?-1:1;
     std::size_t at=0,ch=0;
     for(std::int32_t left=std::int32_t(p.clip.positions.size());left>0;++at){
         std::size_t n;if(!p.node(at,n))return false;
@@ -99,7 +102,7 @@ bool normal(Pass& p,std::int32_t frm_no,unsigned mode){
 }
 // Motion.c:194 SetMtnNormalHokan: every node consumes a channel (for header).
 bool normal_hokan(Pass& p,std::int32_t frm_no,unsigned mode,float rate){
-    const std::int32_t f=frm_no/65536;const float flp_f=(mode&2)?-1.f:1.f;const std::int32_t flp_s=(mode&2)?-1:1;
+    std::int32_t f=frm_no/65536;const float flp_f=(mode&2)?-1.f:1.f;const std::int32_t flp_s=(mode&2)?-1:1;
     std::size_t at=0;
     for(std::size_t ch=0;ch<p.clip.positions.size();++ch,++at){
         std::size_t n;if(!p.node(at,n))return false;
@@ -120,7 +123,7 @@ bool normal_hokan(Pass& p,std::int32_t frm_no,unsigned mode,float rate){
 }
 // Motion.c:337 SetMtnFast: the root position comes from channel 0 only.
 bool fast(Pass& p,std::int32_t frm_no,unsigned mode){
-    const std::int32_t f=frm_no/65536;const std::int32_t flp=(mode&2)?-1:1;
+    std::int32_t f=frm_no/65536;const std::int32_t flp=(mode&2)?-1:1;
     std::size_t root;if(!p.node(0,root)||root==Pass::surplus||!p.channel(0)||!p.frame(f))return false;
     if(p.clip.positions[0].empty())return p.fail("bhSetMotion:SetMtnFast ohne Wurzelschluessel");
     {const auto& k=p.clip.positions[0][std::size_t(f)];p.obj[root].position={k.x*((mode&2)?-1.f:1.f),k.y,k.z};}
@@ -137,7 +140,7 @@ bool fast(Pass& p,std::int32_t frm_no,unsigned mode){
 }
 // Motion.c:400 SetMtnFastHokan.
 bool fast_hokan(Pass& p,std::int32_t frm_no,unsigned mode,float rate){
-    const std::int32_t f=frm_no/65536;const float flp_f=(mode&2)?-1.f:1.f;const std::int32_t flp=(mode&2)?-1:1;
+    std::int32_t f=frm_no/65536;const float flp_f=(mode&2)?-1.f:1.f;const std::int32_t flp=(mode&2)?-1:1;
     std::size_t root;if(!p.node(0,root)||root==Pass::surplus||!p.channel(0)||!p.frame(f))return false;
     if(p.clip.positions[0].empty())return p.fail("bhSetMotion:SetMtnFastHokan ohne Wurzelschluessel");
     {const auto& k=p.clip.positions[0][std::size_t(f)];auto& pos=p.obj[root].position;
@@ -164,7 +167,7 @@ bool fast_hokan(Pass& p,std::int32_t frm_no,unsigned mode,float rate){
 // Motion.c:583 SetMtnSlow / :676 SetMtnSlowHokan: keys blended by the
 // fraction of frm_no; the following key wraps to 0 at frm_num.
 bool slow(Pass& p,std::int32_t frm_no,unsigned mode,bool hokan,float rate){
-    const float frac=0.000015258789f*float(frm_no&0xffff);const std::int32_t src=frm_no/65536;std::int32_t dst=src+1;if(std::uint32_t(dst)>=p.clip.frames)dst=0;
+    const float frac=0.000015258789f*float(frm_no&0xffff);std::int32_t src=frm_no/65536;std::int32_t dst=src+1;if(std::uint32_t(dst)>=p.clip.frames)dst=0;
     const float flp_f=(mode&2)?-1.f:1.f;const std::int32_t flp_s=(mode&2)?-1:1;
     std::size_t at=0,ch=0;
     for(std::int32_t left=std::int32_t(p.clip.positions.size());left>0;++at){
