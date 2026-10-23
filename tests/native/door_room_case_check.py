@@ -26,7 +26,9 @@ def scenario_room(source, destination, target_case, exit_case, direct=False):
     scan = bytes([5, 6, 27, 0, 0, 0])  # scd1 enables bhEventScheduler2 (sp_flg 0x10)
     scan += (bytes([1, 8, 4, 10, 31, 0, 0, 0, 0x37, target_case, 3, 0, 0])
              if exit_case else bytes([0]))
-    event = bytes([0xF9, 5, 0, 0x33, 0, 0, 0, 0, 2, 0, 255 if direct else 1])
+    # bhSleep 5 (event.c:9100): original encoding F8 F9 cnt_lo cnt_hi, as in every room script.
+    # A bare F9 (bhSleeping) reads cnt[loop] with loop == -1 in the original.
+    event = bytes([0xF8, 0xF9, 5, 0, 0x33, 0, 0, 0, 0, 2, 0, 255 if direct else 1])
     if not exit_case:
         event += bytes([0x37, target_case])
     event += bytes([0xFF, 0])
