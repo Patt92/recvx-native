@@ -46,6 +46,7 @@ the menu.
 | Bag | Select 8 or 10 slots, including the original bag flag. Removal is rejected if more than eight slots are occupied. |
 | Enemy grab | Toggle zombie grabs and bites (off by default; requires enemy AI); `--enemy-grab on/off`. |
 | Enemy AI | Toggle zombie AI (when off, enemies stand still but hit reactions continue). `--enemy-ai on/off` sets the initial value. |
+| Enemy attacks | Host convenience switch, not an original mechanic (default on = original behaviour). Off: enemies and enemy effects deal no HP loss, poison (`stflg` 0x80000/0x200000), grab/throw takeover (player `mode0` 4/5/6) or kill to the player; enemy AI, motions and attack animations keep running. Central gate in `RoomWorld::enemy_player_set`, `s.player_damage`, `t.player_poison`, the bomb player half (`bhCheckBombAtari`) and the EN01 facade grab state; modules with an attack-start gate (`debug_attack_disabled`: en01, en04, en07, en09, en10, en21, en26) skip the attack entirely. `--enemy-attacks on/off`, `debug.ini enemy_attacks = on/off`. Not covered: the room gas kill bhEff127 (room event, not an enemy). |
 | Wireframe | Toggle wireframe rendering. |
 | Continue | Close the debug menu. |
 

@@ -6,6 +6,8 @@ struct DebugConfig {
     SDL_Scancode hotkey=SDL_SCANCODE_F2;
     bool enemy_grab=false; // Only meaningful with enemy_grab_configured; unset lets the runtime default to the original attacks.
     bool enemy_grab_configured=false;
+    bool enemy_attacks=true; // Host switch: enemy/enemy-effect damage, poison, grab/throw and kill on the player. Default on (original behaviour).
+    bool enemy_attacks_configured=false;
     static DebugConfig read(const std::filesystem::path& path);
     static void write_defaults(const std::filesystem::path& path);
     // Utility for locating an executable/package directory; not a user-data path.

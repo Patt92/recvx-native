@@ -254,7 +254,7 @@ bool RoomWorld::enemy_player_get(RECVX_ENEMY_PLAYER& out)const{
     out.ax=player_.pitch;out.ay=player_.yaw;out.az=player_.roll;out.flr_no=collision_floor_;
     out.hp=*player_hp_owner_;
     out.flg=collision_events_?collision_events_->flags[13][0]:collision_flags_;
-    out.debug_attack_disabled=!enemy_grab_;
+    out.debug_attack_disabled=!enemy_grab_||!enemy_attacks_; // Host-Schalter Gegner-Angriff (Griff) und Gegnerangriffe (alle Wirkungen)
     out.flg2=collision_events_?collision_events_->flags[15][0]:collision_flags2_;
     out.stflg=collision_events_?collision_events_->flags[14][0]:collision_status_;
     if(player_hidden||event_camera||(player_scripted&&!grab_driving_))out.stflg|=0x80000000u;
@@ -276,6 +276,14 @@ bool RoomWorld::enemy_player_get(RECVX_ENEMY_PLAYER& out)const{
 bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
     if(!player_asset_||!player_hp_owner_||!player_head_flags_)return false;
     if(std::getenv("RECVX_POSITION_TRACE")&&(player_.position.x!=in.pos.x||player_.position.z!=in.pos.z))std::fprintf(stderr,"POSITION_WRITE mode=%u enemy=%u old=%.8g,%.8g,%.8g new=%.8g,%.8g,%.8g flg=%x stflg=%x floor=%d\n",unsigned(in.mode0),unsigned(enemy_table_.enow),player_.position.x,player_.position.y,player_.position.z,in.pos.x,in.pos.y,in.pos.z,in.flg,in.stflg,int(in.flr_no));
+    /* Host-Komfortschalter "Gegnerangriffe" (enemy_attacks_, keine Originalmechanik): ein Pass, der den
+       Spieler neu in einen gegnergefuehrten Modus (mode0 4 Griff, 5 Wurf/enedam, 6 enedie) nimmt, wird
+       bei ausgeschaltetem Schalter vollstaendig verworfen; HP-Abzug, Toetung und neue Giftbits werden
+       weiter unten verworfen. Der Gegnerzustand selbst bleibt unangetastet. */
+    const unsigned current_mode0=collision_mode_&0xffu;
+    const bool driven=in.mode0==4||in.mode0==5||in.mode0==6;
+    const bool currently_driven=current_mode0==4||current_mode0==5||current_mode0==6;
+    if(!enemy_attacks_&&driven&&!currently_driven)return true;
     player_.position={in.pos.x,in.pos.y,in.pos.z};player_.pitch=in.ax;player_.yaw=in.ay;player_.roll=in.az;
     collision_floor_=in.flr_no;
     /* Host-Schalter "Gegner-Angriff" (debug_attack_disabled == !enemy_grab_):
@@ -288,18 +296,21 @@ bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
        Fledermaeusen vor dem Tor in en07.c). Sie bleibt nur Rueckhalt fuer
        Module ohne eigenes Tor am Angriffsbeginn. Keine Annahme: nur der
        Abzug wird gesperrt, jede uebrige Spielerfeld-Uebernahme bleibt. */
-    const bool player_damage_allowed=enemy_grab_||in.hp>=*player_hp_owner_;
+    const bool player_damage_allowed=(enemy_grab_&&enemy_attacks_)||in.hp>=*player_hp_owner_;
     if(player_damage_allowed)*player_hp_owner_=in.hp;
+    std::uint32_t stflg=in.stflg;
     {   // plp->stflg 0x80000 (poison) und 0x200000 (poison2) gehoeren dem Inventarbesitzer
         // (inventory.h:26). Ein Gegner-/Effektpass, der sie neu setzt (effsub2.c:1452
         // bhEff_E03_Acid, en15.c:2572 PoisonAttack), reicht sie dorthin weiter.
         const std::uint32_t before=collision_events_?collision_events_->flags[14][0]:collision_status_;
-        if((in.stflg&0x80000u)&&!(before&0x80000u))player_poison_request_=true;
-        if((in.stflg&0x200000u)&&!(before&0x200000u))player_infect_request_=true;
+        // Gegnerangriffe aus: neu gesetzte Giftbits werden verworfen (bestehende bleiben).
+        if(!enemy_attacks_)stflg=(stflg&~0x280000u)|(before&0x280000u);
+        if((stflg&0x80000u)&&!(before&0x80000u))player_poison_request_=true;
+        if((stflg&0x200000u)&&!(before&0x200000u))player_infect_request_=true;
     }
     if(collision_events_){collision_events_->flags[13][0]=in.flg;collision_events_->player_flags=in.flg;
-        collision_events_->flags[14][0]=in.stflg;collision_events_->flags[15][0]=in.flg2;
-    }else {collision_flags_=in.flg;collision_status_=in.stflg;collision_flags2_=in.flg2;}
+        collision_events_->flags[14][0]=stflg;collision_events_->flags[15][0]=in.flg2;
+    }else {collision_flags_=in.flg;collision_status_=stflg;collision_flags2_=in.flg2;}
     player_at_flags_=in.at_flg;
     collision_mode_=unsigned(in.mode0)|(unsigned(in.mode1)<<8)|(unsigned(in.mode2)<<16)|(unsigned(in.mode3)<<24);
     player_ct0_=in.ct0;player_ct1_=in.ct1;player_ayp_=in.ayp;
@@ -315,7 +326,6 @@ bool RoomWorld::enemy_player_set(const RECVX_ENEMY_PLAYER& in){
     // mode0 5 (bhCPM0_enedam, player.c:6635) ist Zeile fuer Zeile bhCPM0_nage
     // (mode0 4, :6596): der Gegner fuehrt den Spieler (EN19 bhEne19_PlySetDamage,
     // en19.c:3827 setzt plp->mode0 = 5).
-    const bool driven=in.mode0==4||in.mode0==5||in.mode0==6;
     if(driven){enemy_player_driving_=true;grab_driving_=true;player_scripted=true;player_room_motion_=false;player_smove_.active=false;}
     else if(enemy_player_driving_){enemy_player_driving_=false;grab_driving_=false;player_scripted=false;player_enemy_motion_=false;player_enemy_work_=nullptr;player_link_matrix_valid_=false;}
     if(in.hp<0&&player_damage_allowed)player_killed_=true;
@@ -527,7 +537,7 @@ void RoomWorld::bind_enemy_services(){
         NJS_POINT3 p{local->x,local->y,local->z},q;njCalcPoint(&m.value,&p,&q);*out={q.x,q.y,q.z};return 1;};
     s.player_motion_frames=[](uint32_t mtn,int enemy)->uint32_t{return enemy_world->enemy_player_motion_frames(mtn,enemy!=0);};
     s.player_damage=[](RECVX_ENEMY_WORK*,const char*,int amount){
-        if(enemy_world&&enemy_world->player_hp_owner_)*enemy_world->player_hp_owner_-=amount;
+        if(enemy_world&&enemy_world->player_hp_owner_&&enemy_world->enemy_attacks_)*enemy_world->player_hp_owner_-=amount; // Host-Schalter Gegnerangriffe
     };
     s.lever_check=[]()->int{
         if(!enemy_world)return 0;
@@ -2304,7 +2314,7 @@ void RoomWorld::control_enemy_works(){
             if(node>=world->player_owp_flags_.size()){world->unbound_enemy_.insert("EN05 plp->owP[n].flg");return;}world->player_owp_flags_[node]&=~bits;};
         // plp->txp[2] hat keinen nativen Zeichenbesitzer: benannte Luecke statt Ersatztextur.
         t.player_texture=[](uint32_t)->int{return 0;};
-        t.player_poison=[](){enemy_world->player_poison_request_=true;};
+        t.player_poison=[](){if(enemy_world->enemy_attacks_)enemy_world->player_poison_request_=true;}; // Host-Schalter Gegnerangriffe
         t.player_dmlvl=[](int32_t* out)->int{if(!enemy_world->player_dmlvl_bound_)return 0;*out=enemy_world->player_dmlvl_;return 1;};
         t.node_angles=[](RECVX_ENEMY_WORK* w,uint32_t node,int32_t* a,int write)->int{auto& tr=tree_of(owner_of(w));node+=tr.model_window;
             if(node>=tr.enemy_obj.size())return 0;for(unsigned k=0;k<3;++k){if(write)tr.enemy_obj[node].angles[k]=a[k];else a[k]=tr.enemy_obj[node].angles[k];}return 1;};

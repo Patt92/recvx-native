@@ -1887,9 +1887,10 @@ void RoomWorld::tick_en01(){
     en01_spawn_hook=nullptr;en01_explode_hook=nullptr;en01_particle_hook=nullptr;en01_blood_hook=nullptr;
     if(simulation_flags_&1u)recvx_en01_player_tick();
     {RECVX_EN01_PLAYER_STATE state;if(recvx_en01_player_state(&state)){ // hp lost in a bound grab (the original lowers plp->hp)
+     if(enemy_attacks_){ // Host-Schalter Gegnerangriffe: aus = kein HP-Verlust, keine Toetung aus dem Griff
      if(state.hp<player_hp_){blast_damage_+=player_hp_-state.hp;player_hp_=state.hp;}
      if(state.hp<0)player_killed_=true;
-     if(state.mode0==6&&(state.flg&2))player_dead_=true;}}
+     if(state.mode0==6&&(state.flg&2))player_dead_=true;}}}
     en01_wall_probe_hook=nullptr;en01_wall_move_hook=nullptr;en01_line_hook=nullptr;en01_line_hit=nullptr;en01_fix_hook=nullptr;en01_se_request=nullptr;en01_se_playing=nullptr;en01_player_voice=nullptr;
 }
 // bhEne01_SetMtn writes object 8's X/Y angles after bhSetMotion (the Z angle keeps the motion value).
@@ -2169,7 +2170,8 @@ void RoomWorld::set_monitor_camera(unsigned cut,NJS_POINT3 position,int ax,int a
 // weapon.c bhCheckBombAtari, enemy half: every eligible work whose capsule the blast sphere touches gets the bomb hit.
 void RoomWorld::bomb_damage(const BombRequest& bomb){
     // Player half (weapon.c): sphere 0.7*ar against the player capsule, line of sight, hp -= dmax inside 0.5*r else dmin.
-    if(!player_hidden){const NJS_POINT3 p=player_.position;const float r=3.5f,h=16.5f,cy=std::clamp(bomb.position.y,p.y+r,p.y+h-r);const float dx=bomb.position.x-p.x,dy=bomb.position.y-cy,dz=bomb.position.z-p.z,dist=std::sqrt(dx*dx+dy*dy+dz*dz);
+    // Host-Schalter Gegnerangriffe aus: der Spielerteil entfaellt (Zuender bhEff016 kommt aus Gegner-/Objektwerken: en00, en01_sub).
+    if(!player_hidden&&enemy_attacks_){const NJS_POINT3 p=player_.position;const float r=3.5f,h=16.5f,cy=std::clamp(bomb.position.y,p.y+r,p.y+h-r);const float dx=bomb.position.x-p.x,dy=bomb.position.y-cy,dz=bomb.position.z-p.z,dist=std::sqrt(dx*dx+dy*dy+dz*dz);
         if(dist<=0.7f*bomb.radius+r){const float wall=combat_wall_distance(bomb.position,{p.x-bomb.position.x,cy-bomb.position.y,p.z-bomb.position.z},1.f,0x400);if(wall>=1.f){const float body=std::sqrt((p.x-bomb.position.x)*(p.x-bomb.position.x)+(p.y-bomb.position.y)*(p.y-bomb.position.y)+(p.z-bomb.position.z)*(p.z-bomb.position.z));blast_damage_+=body<0.5f*0.7f*bomb.radius?bomb.damage_max:bomb.damage_min;}}}
     bomb_enemy_damage(bomb); // weapon.c:1420: the real ene work table, not the retired EN01 facade
 

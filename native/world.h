@@ -450,6 +450,11 @@ public:
     // Zombie grab/bite (needs the AI). Default off; the debug menu switches it.
     void set_enemy_grab(bool enabled){enemy_grab_=enabled;}
     bool enemy_grab()const{return enemy_grab_;}
+    // Host-Komfortschalter "Gegnerangriffe" (debug.ini enemy_attacks, --enemy-attacks, Debugmenue), keine Originalmechanik.
+    // Aus: Gegner und Gegnereffekte senken kein HP, setzen kein Gift (stflg 0x80000/0x200000), toeten nicht und uebernehmen
+    // den Spieler nicht (mode0 4/5/6). Die Gegner-KI laeuft weiter. Standard an = Originalverhalten.
+    void set_enemy_attacks(bool enabled){enemy_attacks_=enabled;}
+    bool enemy_attacks()const{return enemy_attacks_;}
     // sys->pad_ps while grabbed: newly pressed direction bits (0xf) and buttons (0x2d00); bhEne_LeverCheck shakes the zombie off.
     void set_player_lever(unsigned pad_ps){lever_bits_=pad_ps;}
     unsigned player_lever()const{return lever_bits_;}
@@ -1034,7 +1039,7 @@ private:
     void draw_oil_hud(SoftwareRenderer& image,const SpriteWork& hud)const;     // effsub1b.c:1258 bhDraw138
     void draw_eff021_bars(SoftwareRenderer& image)const;                        // effsub1.c:4756 bhDraw021
 
-    bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false,player_infect_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
+    bool player_attacking_=false;int blast_damage_=0;std::int32_t player_dmlvl_=0;bool player_dmlvl_bound_=false,player_poison_request_=false,player_infect_request_=false;bool barrels_ready_=false,enemy_ai_=true,enemy_grab_=true,enemy_attacks_=true,player_enemy_motion_=false,grab_driving_=false,player_dead_=false,player_killed_=false;unsigned lever_bits_=0;int player_hp_=200,player_character_=0;std::int16_t player_way_=0;std::map<unsigned,std::size_t> barrel_walls_;
     float player_spd_=0; // plp->spd
     // plp->spd, das ein Gegnerpass waehrend des Griffs schreibt (en15.c:2915/3118): der Besitzer
     // ist die native Aktion (runtime action.spd); take_player_speed reicht den Wert dorthin zurueck.

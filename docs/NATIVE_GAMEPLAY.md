@@ -164,7 +164,11 @@ weapon hit instead of hit fields, and observation of voice/SE/`plp->dpx`.
 - Grabbing/biting with player damage and stick wiggling (`EatCheck`,
   `bhEne01_Nage`, `PlyDG00/01`) run in normal play (on by default;
   `debug.ini enemy_grab = off`, the debug menu, or `--enemy-grab off` disable
-  them). As of 2026-10-12, the chain included player search
+  them). The host switch `enemy_attacks` (`--enemy-attacks off`, `debug.ini
+  enemy_attacks = off`, debug menu "Enemy attacks"; default on) additionally
+  blocks every enemy/enemy-effect effect on the player (HP loss, poison bits,
+  grab/throw takeover, kill) centrally in `RoomWorld::enemy_player_set` while
+  the enemy AI keeps running; see docs/DEBUG_MENU.md. As of 2026-10-12, the chain included player search
   (`bhSearchPlayer/2`), area/ground effect surfaces
   (`bhEne_EnemyAtariCheck`, `bhCheckFloorEffect`), route zones
   (`bhCheckRouteID/bhCheckRoute` from `rom->rutp/ruttp`), walking motion

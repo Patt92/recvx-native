@@ -20,6 +20,7 @@ DebugConfig DebugConfig::read(const std::filesystem::path& path){
         if(!seen.insert(key).second)throw std::runtime_error("duplicate debug.ini setting: "+key);
         if(key=="hotkey"){result.hotkey=SDL_GetScancodeFromName(name.c_str());if(result.hotkey==SDL_SCANCODE_UNKNOWN)throw std::runtime_error("unknown debug hotkey: "+name);}
         else if(key=="enemy_grab"){if(name!="on"&&name!="off")throw std::runtime_error("debug enemy_grab expects on or off");result.enemy_grab=name=="on";result.enemy_grab_configured=true;}
+        else if(key=="enemy_attacks"){if(name!="on"&&name!="off")throw std::runtime_error("debug enemy_attacks expects on or off");result.enemy_attacks=name=="on";result.enemy_attacks_configured=true;}
         else throw std::runtime_error("unknown debug.ini setting: "+key);
     }return result;
 }

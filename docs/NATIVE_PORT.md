@@ -237,7 +237,7 @@ Metal and D3D11 remain available.
 | `--headless --replay <file> --frames <n>` | Deterministic run without a window |
 | `--state <new.json>`, `--screenshot <new.bmp>` | Write state or image |
 | `--snapshots <directory>` | Snapshot directory (F5/F9) |
-| `--enemy-ai on\|off`, `--enemy-grab on` | Enemy switches |
+| `--enemy-ai on\|off`, `--enemy-grab on`, `--enemy-attacks on\|off` | Enemy switches (`--enemy-attacks off`: host switch, no enemy/enemy-effect damage, poison, grab/throw or kill on the player; default on) |
 
 Headless runs execute every simulation step and render only the requested last
 frame. Output files are never overwritten. Diagnostic positioning does not

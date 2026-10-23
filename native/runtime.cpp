@@ -71,6 +71,7 @@ struct Options {
     int frames=0;
     int enemy_grab=-1; // --enemy-grab on|off; default: on for interactive play, off for headless/replay runs
     int enemy_ai=-1; // --enemy-ai on|off; default: on for interactive play, off for headless/replay runs
+    int enemy_attacks=-1; // --enemy-attacks on|off; host switch, default on (original behaviour); debug.ini enemy_attacks overrides the default
     unsigned player=10;
     unsigned disc=1; // sys->ss_flg bit 0: 1 = disc-1 sound archives, 2 = disc 2
     std::size_t camera=0,spawn=0,motion=42;
@@ -138,6 +139,7 @@ Options options(int argc,char** argv){
         else if(arg=="--no-player")o.no_player=true;
         else if(arg=="--headless")o.headless=true;
         else if(arg=="--enemy-grab"){const auto mode=value();if(mode!="on"&&mode!="off")throw std::runtime_error("--enemy-grab expects on or off");o.enemy_grab=mode=="on"?1:0;}
+        else if(arg=="--enemy-attacks"){const auto mode=value();if(mode!="on"&&mode!="off")throw std::runtime_error("--enemy-attacks expects on or off");o.enemy_attacks=mode=="on"?1:0;}
         else if(arg=="--enemy-ai"){const auto mode=value();if(mode!="on"&&mode!="off")throw std::runtime_error("--enemy-ai expects on or off");o.enemy_ai=mode=="on"?1:0;}
         else if(arg=="--validate-poses")o.validate_poses=true;
         else if(arg=="--verify-scenes")o.verify=true;
@@ -161,6 +163,7 @@ Options options(int argc,char** argv){
                        "--in-game: bypass main menu for gameplay diagnostics\n"
                        "--enemy-ai on|off: zombie AI (default on interactively, off for --headless/--replay)\n"
                        "--enemy-grab on|off: zombie grab/bite (default on interactively, off for --headless/--replay; debug.ini enemy_grab overrides)\n"
+                       "--enemy-attacks on|off: host switch; off = enemies and enemy effects deal no HP loss, poison, grab/throw or kill to the player (default on; debug.ini enemy_attacks overrides)\n"
                        "--preview: legacy room/animation/free-camera inspector without game UI\n"
                        "--player <10..14> --spawn <index> --motion <index> --frame <integer>\n"
                        "--nearest: point-sample textures (no mipmaps/filtering; shimmers) for comparison\n                       "
@@ -277,7 +280,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             std::cout<<"Decoded "<<passed<<'/'<<rooms.size()<<" room scenes ("<<triangles<<" triangles, "<<targets<<" active camera targets).\n";
             return passed==rooms.size()?0:1;
         }
-        const auto debug_config=recvx::DebugConfig::read(args.debug_config);recvx::DebugMenu debug(debug_config);bool wireframe=false;bool enemy_ai=args.enemy_ai>=0?args.enemy_ai!=0:(!args.headless&&args.replay.empty());bool enemy_grab=args.enemy_grab>=0?args.enemy_grab!=0:(debug_config.enemy_grab_configured?debug_config.enemy_grab:(!args.headless&&args.replay.empty()));bool game_over_requested=false,return_title_requested=false;recvx::VibrationUnit vibration; /* sdfunc.c StartVibrationEx / vibman.c / pdVibMx envelopes */
+        const auto debug_config=recvx::DebugConfig::read(args.debug_config);recvx::DebugMenu debug(debug_config);bool wireframe=false;bool enemy_ai=args.enemy_ai>=0?args.enemy_ai!=0:(!args.headless&&args.replay.empty());bool enemy_grab=args.enemy_grab>=0?args.enemy_grab!=0:(debug_config.enemy_grab_configured?debug_config.enemy_grab:(!args.headless&&args.replay.empty()));bool enemy_attacks=args.enemy_attacks>=0?args.enemy_attacks!=0:(debug_config.enemy_attacks_configured?debug_config.enemy_attacks:true);bool game_over_requested=false,return_title_requested=false;recvx::VibrationUnit vibration; /* sdfunc.c StartVibrationEx / vibman.c / pdVibMx envelopes */
         std::cout<<"Debug config: "<<args.debug_config<<'\n';
         // Eine gemeinsame Pfadauflösung für alle INIs, Snapshots und Spielstände.
         std::cout<<"User data: "<<user_paths.root<<(user_paths.dev?" (dev git tree)":" (release user dir)")<<"; saves: "<<saves_dir<<'\n';
@@ -477,7 +480,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(ui){dialog=recvx::MessageDialog{};world=std::make_unique<recvx::RoomWorld>(bytes,scene,actor,motion,animation,audio,args.data,args.mods,room_name.substr(0,room_name.size()-4),inventory.game_mode);recvx::bind_pose_gap([&](const char* name){if(world)world->report_enemy_gap(name);});if(!restoring&&!scene.spawns.empty())world->initialize_player_spawn(); /* bhSetRoom before player setup/Event_init; saved positions retain Y. */origin=actor;follow();if(world)world->set_player_safe_position(actor.position);world->set_player_asset(player.get());{ // bhResetPlayer keeps EXP_WORK.wpntp; only bhSetPlayer (first setup, restored game) derives it from wpnr_no.
                     const bool set_player=!action_player_set||bool(restoring);const std::int32_t wpntp=set_player?(inventory.weapon()<10?0:1):action.wpntp;
                     const int hp=inventory.hp;const bool poison=(inventory.player_stflg()&0x280000u)!=0;const std::int32_t dmlvl=hp>=120?(poison?1:0):hp>=30?1:2;
-                    recvx_player_action_reset(&action,actor.position.x,actor.position.z,actor.yaw,wpntp,dmlvl,unsigned(motion));action_player_set=true;action_resume=true;action_pad=0;action_pad_old=0;}world->set_player_character((args.player-10)%4);world->bind_player_action(&action,&inventory);stand_seen=0;world->set_weapon_part2_hook([&]{combat.set_weapon_part2_hidden(true);});world->set_weapon_models_hook([&](bool hidden){combat.set_weapon_models_hidden(hidden);});world->set_camera_offset_owner(&camera_offset);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);events->costume=unsigned((args.player-10)/4); /* sys->costume: SYSTEM-Eintrag ply_id + 10 + costume*4 */
+                    recvx_player_action_reset(&action,actor.position.x,actor.position.z,actor.yaw,wpntp,dmlvl,unsigned(motion));action_player_set=true;action_resume=true;action_pad=0;action_pad_old=0;}world->set_player_character((args.player-10)%4);world->bind_player_action(&action,&inventory);stand_seen=0;world->set_weapon_part2_hook([&]{combat.set_weapon_part2_hidden(true);});world->set_weapon_models_hook([&](bool hidden){combat.set_weapon_models_hidden(hidden);});world->set_camera_offset_owner(&camera_offset);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->set_enemy_attacks(enemy_attacks);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);events->costume=unsigned((args.player-10)/4); /* sys->costume: SYSTEM-Eintrag ply_id + 10 + costume*4 */
                 if(previous)events->inherit_progress(*previous);
                 // bhSysCallInit installs ts_flg 0x3df80 (system.c:453).  At
                 // this runtime's gameplay handoff the original input lock
@@ -911,6 +914,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"side_pack","Tasche / Slots","OK: 8 oder 10 Slots; Tasche mit belegten Extras wird nicht entfernt.",[]{return std::vector<recvx::DebugChoice>{{0,"8 Slots"},{1,"10 Slots"}};},[&]{return unsigned(inventory.side_pack);},[&](unsigned value){if(!value&&inventory.occupied()>8)throw std::runtime_error("Mehr als 8 Slots belegt");inventory.side_pack=bool(value);if(events){if(inventory.player<3)events->set_flag(1,6+inventory.player,value?0:1); /* Quelle ist ev_flg 6/7/8 (bhCheckSubPack, player.c:1072) */events->set_flag(11,4,value?0:1);}return std::string("Tasche gesetzt");}});
         debug.add({"enemy_ai","Gegner-KI","OK: Zombie-KI ein/aus. Aus: Gegner bleiben stehen (Reaktionen auf Treffer laufen weiter).",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(enemy_ai);},[&](unsigned value){enemy_ai=value!=0;if(world)world->set_enemy_ai(enemy_ai);return std::string("Gegner-KI: ")+(enemy_ai?"an":"aus");}});
         debug.add({"enemy_grab","Gegner-Angriff","OK: Greifen/Beissen der Zombies (braucht die Gegner-KI). Standard: an. Hebelrütteln befreit; Tod oeffnet die originale Retry-Auswahl.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(enemy_grab);},[&](unsigned value){enemy_grab=value!=0;if(world)world->set_enemy_grab(enemy_grab);return std::string("Gegner-Angriff: ")+(enemy_grab?"an":"aus");}});
+        debug.add({"enemy_attacks","Enemy attacks","OK: host switch. Off: enemies and enemy effects deal no HP loss, poison, grab/throw or kill to the player; enemy AI keeps running. Default: on.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"On"}};},[&]{return unsigned(enemy_attacks);},[&](unsigned value){enemy_attacks=value!=0;if(world)world->set_enemy_attacks(enemy_attacks);return std::string("Enemy attacks: ")+(enemy_attacks?"on":"off");}});
         debug.add({"wireframe","Wireframe","OK: Drahtgitterdarstellung umschalten.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(wireframe);},[&](unsigned value){wireframe=bool(value);return std::string("Darstellung gesetzt");}});
         debug.add({"third_person","3rd Person","OK: Host-Kameramod umschalten; wird in third_person.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(third_person.enabled());},[&](unsigned value){third_person.set_enabled(value!=0);return std::string("3rd Person: ")+third_person.describe()+(third_person.status()=="Saved"||third_person.status().empty()?"":" ("+third_person.status()+")");}});
         // Host snapshot slots on the original bhPushGameData/bhPopGameData record; see AGENTS.md "Snapshot".
