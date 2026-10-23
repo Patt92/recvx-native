@@ -151,6 +151,11 @@ public:
     // StatusMain (Task 9) besitzt den Schirm: ohne Taskrahmen jedes aktive Menue, im Rahmen erst ab
     // dem ItemTaskCheck-Einstieg aus bhSysCallMonitor Modus 5 bis zum Abbau.
     bool screen()const{return active&&(!task.owned()||task.running());}
+    // SpriteOnOff zeichnet erst, nachdem StatusMain einmal lief: Der Monitor (system.c:1987-2013)
+    // gibt Task 9 frei, StatusMain laeuft aber erst im Folgedurchlauf, und dessen erster Pass setzt
+    // mit StatusInit/CenterPositionInit die Startlage (sub1.c:1389, 3308). Davor bleibt der Schirm
+    // schwarz; sonst blitzt der fertig aufgebaute Bildschirm ein Bild vor dem Einschieben auf.
+    bool screen_drawn()const{return screen()&&(!task.owned()||slide_open_);}
     bool busy()const{return message.active()||inspection.running();}
     void tick(Inventory& inventory);
     // SpriteOnOff (sub1.c:8176), der Zeichenteil des Statustasks, läuft im

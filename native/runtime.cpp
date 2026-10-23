@@ -1758,7 +1758,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                waehrend der Ausblende von bhStartDoorDemo zeichnet Task 7 noch den Raum samt Blende (game.c:61-112). */
             if(!computer.active()&&!door_game_stopped){compose();if(!(world&&world->draw_full_screen(image,scene,view_camera(),wireframe))){image.draw(scene,view_camera(),wireframe);if(world){world->draw_ntx2d_effects(image);world->draw_trs2d_effects(image);world->draw_fnc_huds(image);}}if(world){world->draw_thermometer(image);} /* effect.c:905 bhDrawNtxEffect2D, :912 bhDrawTrsEffect2D, dann die ef_fnc-Schleife (:929, dort effsub1b.c:101 bhDraw134, effsub1.c:4756 bhDraw021), alles vor bhDrawScreenFade */}
             /* game.c:111: bhDrawScreenFade nach bhAllDrawModel, nicht waehrend der Statusbildschirm-Task den Schirm hat. */
-            if(!door_game_stopped&&!menu.screen()&&!computer.active()&&screen_fade.visible())screen_fade.draw(image.canvas(),image.width(),image.height());
+            if(!door_game_stopped&&!menu.screen_drawn()&&!computer.active()&&screen_fade.visible())screen_fade.draw(image.canvas(),image.width(),image.height());
             movie.draw(image);if(ui){ui->draw(image,inventory,menu,dialog,frame);box_menu.draw(image,*ui,inventory,menu);if(events){ui->draw_event_timer(image,*events);computer.draw(image,*ui,*events);}if(pause_active)ui->draw_pause(image,controllers!=0);}if(door_game_stopped)door.draw(image);if(ui)debug.draw(image,*ui);};
         // Host-Diagnose: Warnung bleibt bis zum Programmende sichtbar, auch nach
         // Raumwechseln. Keine Ausnahmegrenze um Simulation oder gesamten Renderer.

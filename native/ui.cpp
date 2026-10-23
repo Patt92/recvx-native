@@ -855,7 +855,7 @@ void GameUi::draw_box(SoftwareRenderer& image,const Inventory& inv,const StatusM
 void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu& menu,const MessageDialog& dialog,unsigned tick){
     // Waehrend bhSysCallMonitor Modus 5 laeuft Task 9 nicht und zeichnet nichts; Task 7 zeichnet
     // den Raum samt Blende, danach bleibt das Bild schwarz (system.c:1987-2013).
-    if(menu.screen()&&menu.files&&!menu.file_list){
+    if(menu.screen_drawn()&&menu.files&&!menu.file_list){
         // Original filescreen replaces the status sprites. parts_22b[1] is
         // the wallpaper behind bhDispMessage; [0] is a captured framebuffer,
         // not the source wallpaper stretched across a host dialog.
@@ -876,7 +876,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         text(image,system_message(original_file_message(menu.file_number,menu.file_display_page)),menu.file_x,64,1,0xffffffff,true);
         return;
     }
-    if(menu.screen()){
+    if(menu.screen_drawn()){
         rectangle(image,0,0,640,480,0xff101010);
         // Slide offsets of the original cen_pos centers relative to the table layout (sub1.c SpriteH/SpriteUV).
         auto dx=[&](unsigned c){return int(std::lround(menu.slide.x(c)))-centers[c][0];};
@@ -971,6 +971,9 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         }
         (void)tick;
     }
+    // Zwischenbild nach dem Monitor (siehe StatusMenu::screen_drawn): Task 7 ruht, StatusMain lief noch nicht,
+    // also zeichnet auch kein bhDispMessage. Die GetItem-Frage erscheint erst mit dem ersten Statusbild.
+    if(menu.screen()&&!menu.screen_drawn())return;
     const auto& visible_dialog=menu.active&&menu.message.active()?menu.message:dialog;
     // bhControlMessage mode 1 uses mes_spos[1], replacing the item name.
     // Room dialogue uses mode 0; neither mode draws a background panel.
