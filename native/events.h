@@ -187,7 +187,7 @@ public:
 private:
     bool door_scenario_pending_=false;
     bool pad_cleared_=false; // hitchk.c sys->pad_ps = 0 for the rest of the pass
-    bool request_door(const DoorRequest& request);
+    bool request_door(const DoorRequest& request,bool script); // script: DoorCall 0x33 (bhSetDoorDemo), sonst bhCheckExmAtari
     // event.c / types.h:1956-1961: WHILE, FOR and SLEEP share one index.
     // Counters and return/condition addresses survive Event_init.
     struct Task {

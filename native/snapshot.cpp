@@ -65,7 +65,7 @@ SaveFile SaveFile::decode(const std::vector<std::uint8_t>& bytes){
     return s;
 }
 
-Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsigned body,const std::string& room,const SnapshotPlayer& player,unsigned room_sound_case){
+Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsigned body,const std::string& room,const SnapshotPlayer& player,unsigned room_sound_case,bool typewriter){
     Snapshot snap;auto& s=snap.save;
     if(inventory.player>3)throw std::runtime_error("player id outside SAVEFILE");
     s.ply_id=std::int8_t(inventory.player);s.stg_no=std::int8_t(events.values[0]);s.rom_no=std::int8_t(events.values[1]);s.rcase=std::int8_t(events.values[21]);
@@ -79,8 +79,10 @@ Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsig
     // (system.c:1729/1746/1747 bhFinishRoom bei bhPlayerChangeSet). Nur der
     // aktive Eintrag wird davor aus plp neu geschrieben (room.c:1022/1030/1031).
     for(std::size_t i=0;i<s.ply_hp.size();++i){s.ply_hp[i]=std::int16_t(inventory.ply_hp[i]);s.ply_stflg[i]=inventory.ply_stflg[i];s.ply_wno[i]=std::int8_t(inventory.partner_weapon[i]);}
-    // bhPushGameData: sys->ply_stflg[ply_id] = plp->stflg & 0x78280000.
-    s.ply_stflg[s.ply_id]=events.flags[14][0]&0x78280000u;
+    // bhPushGameData (room.c:1022): sys->ply_stflg[ply_id] = plp->stflg & 0x78280000.
+    // TypewriterInit (bup_00.c:364) schreibt vor dem Kartenschreiben ungefiltert plp->stflg.
+    s.ply_stflg[s.ply_id]=typewriter?events.flags[14][0]:(events.flags[14][0]&0x78280000u);
+    s.spray_ct=inventory.spray_count;s.retry_ct=inventory.retry_count; // sys->spray_ct/retry_ct liegen im SAVEFILE-Bereich (room.c:1033)
     s.ply_pos=player.position;s.ply_ang=player.yaw;
     s.ply_wno[s.ply_id]=std::int8_t(inventory.weapon());s.ply_hp[s.ply_id]=std::int16_t(inventory.hp);
     s.stv_tm=std::int32_t(inventory.play_time);
@@ -92,13 +94,12 @@ Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsig
 }
 void restore_inventory(const Snapshot& snap,Inventory& inventory){
     const auto& s=snap.save;if(s.ply_id<0||s.ply_id>3)throw std::runtime_error("snapshot player id invalid");
-    inventory.items=s.itm;inventory.player=unsigned(s.ply_id);inventory.game_mode=unsigned(s.gm_mode);inventory.save_ct=s.save_ct;
+    inventory.spray_count=s.spray_ct;inventory.retry_count=s.retry_ct;inventory.items=s.itm;inventory.player=unsigned(s.ply_id);inventory.game_mode=unsigned(s.gm_mode);inventory.save_ct=s.save_ct;
     inventory.hp=s.ply_hp[s.ply_id];inventory.max_hp=snap.host.max_hp;inventory.play_time=std::uint32_t(s.stv_tm);
     // bhPopGameData restores sys->ply_hp / sys->ply_stflg together with the pip
     // bank. Keep the per-player arrays in step with the live player so a later
-    // bhPlayerChangeSet saves and restores the correct values. ply_stflg holds
-    // the same poison bits as player_stflg() (0x80000/0x200000).
-    for(std::size_t i=0;i<inventory.ply_hp.size();++i){inventory.ply_hp[i]=s.ply_hp[i];inventory.ply_stflg[i]=unsigned(s.ply_stflg[i])&0x280000u;inventory.partner_weapon[i]=std::uint8_t(s.ply_wno[i]);} // room.c:1043 auch sys->ply_wno
+    // bhPlayerChangeSet saves and restores the complete stored plp->stflg.
+    for(std::size_t i=0;i<inventory.ply_hp.size();++i){inventory.ply_hp[i]=s.ply_hp[i];inventory.ply_stflg[i]=unsigned(s.ply_stflg[i]);inventory.partner_weapon[i]=std::uint8_t(s.ply_wno[i]);} // room.c:1043 auch sys->ply_wno
     inventory.wpnr_no=std::uint8_t(s.ply_wno[s.ply_id]);inventory.request_weapon_reload(); // player.c:667 bhSetPlayer (ss_flg 0x200): plp->wpnr_no = ply_wno[ply_id]
     inventory.poisoned=snap.host.poisoned;inventory.infected=snap.host.infected;inventory.side_pack=snap.host.side_pack;
 }
@@ -107,6 +108,7 @@ void restore_events(const Snapshot& snap,EventVm& events){
     from_save(events.flags[1],s.ev_flg);from_save(events.flags[2],s.ky_flg);from_save(events.flags[3],s.ed_flg);
     from_save(events.flags[7],s.it_flg);from_save(events.flags[8],s.mp_flg);from_save(events.flags[9],s.ic_flg);
     events.evt_posno=s.evt_posno;
+    events.values[21]=std::uint32_t(std::uint8_t(s.rcase)); // sys->rcase (SAVEFILE 0x87) kommt mit bhPopGameData zurueck (room.c:1037-1041)
     for(unsigned i=0;i<4;++i)events.flags[session_matrices[i]]=snap.host.session_flags[i];
     events.flags[11][0]&=EventVm::room_change_gm_mask; // Raumladen nach bhPopGameData: bhInitRoomChangeSystem (system.c:185)
     for(unsigned i=0;i<3;++i)events.values[session_values[i]]=snap.host.session_values[i];

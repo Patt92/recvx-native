@@ -1914,8 +1914,7 @@ static void ng00(RECVX_ENEMY_WORK* w)
             put_player(w, &p);
             if (!joint(w, 35, &m)) return;
             at.x = m[12]; at.y = m[13]; at.z = m[14];
-            if (w->sv->blood_effect_burst) w->sv->blood_effect_burst(w, 4, 4, &at, 1);
-            else gap(w, "bhEne_SetBloodEffectBurst (en03)");
+            { const RECVX_T3_LINK lk = { NULL, 1 }; recvx_t3_set_blood_effect_burst(lk, 4, 4, &at, 1); } /* bhEne_SetBloodEffectBurst(plp, ...): Link auf den Spieler wie en02/en23 */
             if (w->sv->vibration) w->sv->vibration(1, 9);
             else gap(w, "StartVibrationEx (en03)");
         }
@@ -1955,8 +1954,7 @@ static void ng00(RECVX_ENEMY_WORK* w)
             put_player(w, &p);
             if (!joint(w, 35, &m)) return;
             at.x = m[12]; at.y = m[13]; at.z = m[14];
-            if (w->sv->blood_effect_burst) w->sv->blood_effect_burst(w, 4, 4, &at, 1);
-            else gap(w, "bhEne_SetBloodEffectBurst (en03)");
+            { const RECVX_T3_LINK lk = { NULL, 1 }; recvx_t3_set_blood_effect_burst(lk, 4, 4, &at, 1); } /* bhEne_SetBloodEffectBurst(plp, ...): Link auf den Spieler wie en02/en23 */
             if (w->sv->vibration) w->sv->vibration(1, 9);
             else gap(w, "StartVibrationEx (en03)");
         }
@@ -2069,15 +2067,13 @@ static void ng01(RECVX_ENEMY_WORK* w)
                 put_player(w, &p);
                 if (!joint(w, 35, &m)) return;
                 at.x = m[12]; at.y = m[13]; at.z = m[14];
-                if (w->sv->blood_effect_burst) w->sv->blood_effect_burst(w, 5, 4, &at, 1);
-                else gap(w, "bhEne_SetBloodEffectBurst (en03)");
+                { const RECVX_T3_LINK lk = { NULL, 1 }; recvx_t3_set_blood_effect_burst(lk, 5, 4, &at, 1); } /* bhEne_SetBloodEffectBurst(plp, ...): Link auf den Spieler wie en02/en23 */
             } else {
                 p.hp -= 12;
                 put_player(w, &p);
                 if (!joint(w, 35, &m)) return;
                 at.x = m[12]; at.y = m[13]; at.z = m[14];
-                if (w->sv->blood_effect_burst) w->sv->blood_effect_burst(w, 4, 4, &at, 1);
-                else gap(w, "bhEne_SetBloodEffectBurst (en03)");
+                { const RECVX_T3_LINK lk = { NULL, 1 }; recvx_t3_set_blood_effect_burst(lk, 4, 4, &at, 1); } /* bhEne_SetBloodEffectBurst(plp, ...): Link auf den Spieler wie en02/en23 */
             }
             if (!player(w, &p)) return;
             if (p.hp < 0) {
@@ -2128,8 +2124,7 @@ static void ng01(RECVX_ENEMY_WORK* w)
             put_player(w, &p);
             if (!joint(w, 35, &m)) return;
             at.x = m[12]; at.y = m[13]; at.z = m[14];
-            if (w->sv->blood_effect_burst) w->sv->blood_effect_burst(w, 4, 4, &at, 1);
-            else gap(w, "bhEne_SetBloodEffectBurst (en03)");
+            { const RECVX_T3_LINK lk = { NULL, 1 }; recvx_t3_set_blood_effect_burst(lk, 4, 4, &at, 1); } /* bhEne_SetBloodEffectBurst(plp, ...): Link auf den Spieler wie en02/en23 */
             if (w->sv->vibration) w->sv->vibration(1, 9);
             else gap(w, "StartVibrationEx (en03)");
         }
@@ -3434,8 +3429,8 @@ static void player_library(RECVX_ENEMY_WORK* w, uint32_t source)
 }
 static void player_voice(RECVX_ENEMY_WORK* w, int se)
 {
-    if (!w->sv || !w->sv->player_voice) { gap(w, "bhEne_CallPlayerVoice (en03)"); return; }
-    w->sv->player_voice(se);
+    (void)w;
+    recvx_t3_call_player_voice(se); /* zonzon1.c:521 bhEne_CallPlayerVoice: no |= 0x400 */
 }
 static void vibration(RECVX_ENEMY_WORK* w, int motor, int power)
 {

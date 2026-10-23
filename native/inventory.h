@@ -138,7 +138,12 @@ public:
     // work under the old ply_id, make `target` the active player and restore that
     // player's persistent state. The pip bank (slots()) and the derived weapon
     // follow from player*16 (sys->itm[ply_id*16]). Returns the previous ply_id.
-    unsigned switch_player(unsigned target);
+    // `stflg` is the live plp->stflg (EventVm flags[14][0]): the outgoing player
+    // keeps `stflg & 0x78280000` (system.c:1727-1729), the incoming player gets
+    // `ply_stflg[target] | 0x40000000` (player.c:993-994). Without it only the
+    // inventory-held bits are known (fixture use).
+    unsigned switch_player(unsigned target,std::uint32_t* stflg=nullptr);
+    std::int16_t retry_count=0; // sys->retry_ct (room.c:1045-1047), SAVEFILE
 private:
     // Original ItemSort over pip[2..11]: wide items first, then the rest; the
     // equipped index pip[0] is left unchanged, exactly as in the original.

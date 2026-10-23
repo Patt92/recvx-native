@@ -52,6 +52,9 @@ void EventVm::inherit_progress(const EventVm& previous){
     // 0x1000/0x10000 Festkamera, 0x20000 bhFixEventCamPly, 0x10, 0x200000) enden mit dem Raum;
     // sonst haelt ein im Vorraum gesetztes 0x20000 jede Untersuchungskamera fest (RM_1130 -> RM_1080).
     flags[11][0]&=room_change_gm_mask;
+    // system.c:191 bhInitRoomChangeSystem: sys->cb_flg &= 0xAF8000BB (Tuerbit 0x1 faellt erst in
+    // bhStartDoorDemo Fall 1, room.c:1003; skriptgesetzte 0x1000000/0x8000000/0x20000000 ueberleben).
+    flags[10][0]=previous.flags[10][0]&0xAF8000BBu;
     // player.c:862 bhInitRoomChangePlayer: plp->stflg &= 0x78280000 (Mottenei-Marken, Gift, 0x40000000).
     flags[14][0]=previous.flags[14][0]&0x78280000u;
     parked_wpnr_no=previous.parked_wpnr_no;
@@ -367,7 +370,7 @@ int EventVm::instruction(Task& t,std::size_t& cursor){
     case 0xfb:if(--t.loop_counts.at(t.loop)!=0){t.cnt2=t.loop_counts.at(t.loop);cursor=t.loop_body.at(t.loop);}else{advance(2);--t.loop;}return 1;
     // The binary structure is known, but these commands still need native
     // world/audio/cutscene bindings; keep them available for the next port step.
-    case 0x13:{const auto mode=v.u8(p+1);world(t,cursor,op,4);if(mode==1)flags[5][0]&=~1u;return 1;}
+    case 0x13:{const auto mode=v.u8(p+1);if(mode==1)flags[5][0]&=~1u; /* event.c:966-967: st_flg 0x1 faellt vor bhCheckCut(1) */world(t,cursor,op,4);return 1;}
     case 0xad:case 0xd4:case 0x94:case 0xa:case 0x3d:case 0x3f:case 0x20:case 0x24:case 0x2f:case 0x35:case 0x3c:case 0x3e:case 0x43:case 0x4b:case 0x65:case 0x91:case 0x9a:case 0xa6:world(t,cursor,op,4);return 1;
     case 0x75:world(t,cursor,op,4);return 1;
     case 0x8b:world(t,cursor,op,12);return 1;
@@ -400,7 +403,7 @@ int EventVm::instruction(Task& t,std::size_t& cursor){
     case 0x48:world(t,cursor,op,6);return 1;
     case 0x86:world(t,cursor,op,16);return 1;
     case 0x4c:case 0x44:world(t,cursor,op,6);return 1;
-    case 0x33:{v.require(p,8);DoorRequest request{v.u16(p+2),v.u8(p+4),v.u8(p+5),v.u8(p+6),v.u8(p+7),values[21]};if(!request_door(request))throw std::runtime_error("DoorCall destination unavailable");return advance(8);}
+    case 0x33:{v.require(p,8);DoorRequest request{v.u16(p+2),v.u8(p+4),v.u8(p+5),v.u8(p+6),v.u8(p+7),values[21]};if(!request_door(request,true))throw std::runtime_error("DoorCall destination unavailable");return advance(8);}
     case 0x32:case 0x34:case 0x51:case 0x52:case 0x53:case 0x54:case 0x59:case 0xa3:world(t,cursor,op,12);return 1;
     case 0x3b:world(t,cursor,op,6);return 1;
     case 0x36:world(t,cursor,op,6);return 1;
@@ -685,11 +688,20 @@ void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10
         if(release_cinematic_player)release_cinematic_player();
     }}
 Message EventVm::room_message(unsigned index)const{return read_message(room_,messages_,index);}
-bool EventVm::request_door(const DoorRequest& request){
+bool EventVm::request_door(const DoorRequest& request,bool script){
     if(!door||!door(request))return false;
     // bhSetDoorDemo / bhCheckExmAtari signal the request now; game.c starts
     // its fade on the following main pass, after bhControlEvent has run.
-    flags[10][0]|=1;flags[5][0]|=4;door_scenario_pending_=true;return true;
+    if(script){
+        // room.c:887-908 bhSetDoorDemo (DoorCall): sp_flg = 0x48 (|0x200) sofort, plp->stflg |= 0x80010000,
+        // cb_flg |= 1, st_flg &= ~0x400200 (st_flg 0x4 setzt nur der Untersuchungspfad).
+        flags[6][0]=(flags[6][0]&0x200u)|0x48u;
+        flags[14][0]|=0x80010000u;flags[10][0]|=1u;flags[5][0]&=~0x400200u;
+    }else{
+        // hitchk.c:4660-4663 bhCheckExmAtari: pp->stflg |= 0x80000000, cb_flg |= 1, st_flg |= 4.
+        flags[14][0]|=0x80000000u;flags[10][0]|=1u;flags[5][0]|=4u;
+    }
+    door_scenario_pending_=true;return true;
 }
 void EventVm::finish_room_exit(){if(door_scenario_pending_)tick();}
 void EventVm::disable_item(const Task& task,unsigned op,std::size_t pc,unsigned item){
@@ -867,7 +879,7 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor,NJS_POINT3 front,float
         values[20]=i;flags[10][0]|=0x100;
         const bool facing_blocked=(direction==32768&&(a.attribute&0x400))||(direction==16384&&(a.attribute&0x800))||(direction==0&&(a.attribute&0x1000))||(direction==49152&&(a.attribute&0x2000));
         if(a.type==0){if(facing_blocked){flags[10][0]&=~0x100u;continue;}
-            if(request_door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]}))return true;
+            if(request_door(DoorRequest{a.attribute,a.parameters[0],a.parameters[1],a.parameters[2],a.parameters[3],values[21]},false))return true;
             flags[10][0]&=~0x100u;return false;}
         if((a.type==3||a.type==4)&&facing_blocked){flags[10][0]&=~0x100u;continue;}
         if(a.type==4){ // hitchk.c:4847-4925

@@ -1407,6 +1407,14 @@ if(BUILD_TESTING)
 endif()
 
 # objitm.c:1648 bhObj007 + player.c:4336 bhCPM2_act_rpsh: der Greif-und-Dreh-
+# bhObj009 Wagen (RM_6050/6051, Typ 9): rm_flg Bit 31 und Softlock-Gegenprobe.
+if(BUILD_TESTING)
+ add_executable(recvx-cart-object-tests tests/native/cart_object_test.cpp)
+ target_link_libraries(recvx-cart-object-tests PRIVATE recvx_game)
+ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/archives/SYSTEM/0010.bin")
+  add_test(NAME cart_object COMMAND recvx-cart-object-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+ endif()
+endif()
 # Gegenstand (RM_0150 Eisenstatue, Typ 7).
 if(BUILD_TESTING)
  add_executable(recvx-turn-object-tests tests/native/turn_object_test.cpp)

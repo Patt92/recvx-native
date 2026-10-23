@@ -4210,8 +4210,10 @@ void recvx_en01_mv04(RECVX_ENEMY_WORK* w)
             return;
         }
 
-        w->ct0 = (en01_rand(w) % 15) +
-                 StupTimer[en01_rand(w) % 5];                /* :5494 */
+        {   /* ELF 0x17c5d8/0x17ce24: zuerst rand()%5 (StupTimer-Index), dann rand()%15. */
+            const int stup = StupTimer[en01_rand(w) % 5];
+            w->ct0 = (en01_rand(w) % 15) + stup;
+        }                /* :5494 */
         recvx_enemy_chg_mtn(w, mtn_no1, 0, 8);               /* :5495 */
         p->flags &= ~0x3000000u;                             /* :5496 */
         w->mtn_add = 0;                                      /* :5497 */
@@ -4377,8 +4379,10 @@ void recvx_en01_mv04(RECVX_ENEMY_WORK* w)
         }
 
         p->flags |= 0x40000u;                                /* :5730 */
-        w->ct0 = (en01_rand(w) % 15) +
-                 StupTimer[en01_rand(w) % 5];                /* :5731 */
+        {   /* ELF 0x17c5d8/0x17ce24: zuerst rand()%5 (StupTimer-Index), dann rand()%15. */
+            const int stup = StupTimer[en01_rand(w) % 5];
+            w->ct0 = (en01_rand(w) % 15) + stup;
+        }                /* :5731 */
         w->mode3++;                                          /* :5732 */
     /* FALLTHROUGH (en01.c:5732/5734) */
     case 5:
@@ -4867,9 +4871,10 @@ void recvx_en01_mv10(RECVX_ENEMY_WORK* w)
             if (cp) cp->flags &= ~0x3000000u;                        /* :6415 */
             else en01_gap(w, "bhEne01_MV10: Oberkoerper-exp0 (en01.c:6415)");
         }
-        /* Zwei getrennte rand()-Ziehungen in dieser Reihenfolge
-           (en01.c:6418). */
-        w->ct0 = (en01_rand(w) % 128) + (((en01_rand(w) % 10) * 20) + 15);
+        {   /* en01.c:6418, ELF 0x17e6bc: zuerst rand()%10, dann rand()%128. */
+            const int base = ((en01_rand(w) % 10) * 20) + 15;
+            w->ct0 = (en01_rand(w) % 128) + base;
+        }
         w->mode3++;                                                  /* :6419 */
         /* fallthrough — das Original hat hier kein break (en01.c:6419/6421). */
         /* FALLTHROUGH */

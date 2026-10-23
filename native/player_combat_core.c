@@ -76,7 +76,6 @@ struct RECVX_COMBAT_CORE {
     RECVX_CB_WEAPON_OBJECT weapon;
     RECVX_COMBAT_SYS*      sys;      /* nur waehrend eines Passes gueltig */
     RECVX_COMBAT_RESULT    res;
-    int32_t                igct;         /* weapon.c:503 static igct      */
     CB_GA                  pch_gap;      /* playpch.c:1139 static gap     */
     int                    was_active;
 };
@@ -428,6 +427,10 @@ static int cb_search_near_enemy(RECVX_COMBAT_CORE* c, int32_t* r, float* h, int3
 /* --------------------------------------------------------------------------
    pwksub.c:506 bhSearchNextEnemy
    -------------------------------------------------------------------------- */
+/* weapon.c:504 `static int igct`: eine Programmvariable fuer alle bhCheckGunAtari-Aufrufe
+   (Spieler und effsub1.c:3535), nie zurueckgesetzt. */
+static int32_t cb_igct;
+
 typedef struct { int32_t idx; float ln; } CB_SC;
 static int32_t cb_search_next_enemy(RECVX_COMBAT_CORE* c, int32_t r, float h) {
     RECVX_ENEMY_TABLE* t = cb_enemies(c);
@@ -1122,8 +1125,8 @@ static int cb_check_gun_atari(RECVX_COMBAT_CORE* c, CB_GA* g) {
     }
     if (((id == -1) && walhit && wp_hef && !watflg)
         || ((wp_flg & 0x80000000u) && walhit && wp_hef && !watflg)) {
-        c->igct++;
-        if (g->wpn_no == 8 && (c->igct % 3) == 0) return id != -1;
+        cb_igct++;
+        if (g->wpn_no == 8 && (cb_igct % 3) == 0) return id != -1;
         if (cb_wall_attr_b89(c, whp) != 0) {
             RECVX_CB_VEC nvec = { -gline.vx, -gline.vy, -gline.vz };
             if (c->services.gun_spark)
@@ -3105,7 +3108,6 @@ void recvx_combat_room_reset(RECVX_COMBAT_CORE* core) {
     memset(&core->player.pp, 0, sizeof core->player.pp);
     memset(&core->weapon, 0, sizeof core->weapon);
     core->player.src_no = -1;
-    core->igct = 0;
     cb_gap(core, "bhInitPlayer/bhResetPlayer owP[7]/[11].flg (player.c:850/944)");
 }
 

@@ -54,7 +54,7 @@ struct Snapshot {SaveFile save;SnapshotHost host;};
 struct SnapshotPlayer {NJS_POINT3 position{};Angle yaw=0;int floor=0;unsigned spawn=0;std::size_t camera=0;};
 // bhPushGameData. Counters (save_ct/retry_ct/clear_ct) are never incremented:
 // a snapshot is no typewriter save and must not touch ranking counters.
-Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsigned body,const std::string& room,const SnapshotPlayer& player,unsigned room_sound_case=0);
+Snapshot capture_snapshot(const Inventory& inventory,const EventVm& events,unsigned body,const std::string& room,const SnapshotPlayer& player,unsigned room_sound_case=0,bool typewriter=false);
 // bhPopGameData, split along the native load order: inventory before the room
 // is built, flags after inherit_progress and before Event_init scripts.
 void restore_inventory(const Snapshot& snapshot,Inventory& inventory);

@@ -160,7 +160,7 @@ PickupResult Inventory::pickup(unsigned item,unsigned& control,unsigned stage,un
             control|=0x800|0x400;
             // Sofortgebrauch: Use_00 auf denselben Bestand.
             const auto use=use_00(item,StatusPulse::condition(hp,(player_stflg()&0x280000u)!=0),false);
-            result.used=true;result.pulse=use.pulse;
+            result.used=true;result.pulse=use.pulse;if(use.message)result.message=use.message; // sub1.c:3939 -> Use_00 :6408 bhSetMessage(1,198) (st_flg 0x200 eben geloescht)
         }
         return result;
     }else{
@@ -287,7 +287,7 @@ ItemUseResult Inventory::use_item(unsigned slot,const std::array<unsigned,4>* pa
             if(matches()){
                 if(item==82){
                     if(bullet&0xff){result.closing=true;ok=1;}
-                    else if(stage==9&&room_number==8)say(195);
+                    else if(stage==9&&room_number==8)result.message=195; // sub1.c:6551 bhSetMessage(1,195) ohne st_flg-0x200-Pruefung
                     else result.closing=true;
                 }else{
                     if(item==4)items[224]=bullet&0xff;
@@ -375,19 +375,21 @@ Inventory::Inventory(){
     // system.c:483-489: every player starts at the game-mode HP.
     const int initial=max_hp;for(auto& v:ply_hp)v=initial;
 }
-unsigned Inventory::switch_player(unsigned target){
+unsigned Inventory::switch_player(unsigned target,std::uint32_t* stflg){
     if(target>=ply_hp.size())throw std::runtime_error("bhPlayerChangeSet target outside the original player table");
     const unsigned previous=player;
     if(previous==target)return previous;
     // system.c:1729/1746/1747: the outgoing work keeps its persistent state,
     // keyed by the still-active ply_id.
-    ply_stflg[previous]=player_stflg();
+    // system.c:1727-1729: plp->stflg &= 0x78280000; ply_stflg[ply_id] = plp->stflg.
+    ply_stflg[previous]=(stflg?*stflg:(player_stflg()|0x40000000u))&0x78280000u;
     ply_hp[previous]=hp;
     partner_weapon[previous]=std::uint8_t(wpnr_no); // system.c:1747 ply_wno[ply_id] = plp->wpnr_no
     // sys->ply_id = sys->cng_pid; bhResetPlayer then restores the new player.
     player=target;
     hp=ply_hp[player];
     set_player_stflg(ply_stflg[player]);
+    if(stflg)*stflg=ply_stflg[player]|0x40000000u; // player.c:993-994 bhResetPlayer
     wpnr_no=partner_weapon[player];request_weapon_reload(); // system.c:1787 plp->wpnr_no = ply_wno[ply_id] (danach bhReadWeaponData)
     return previous;
 }

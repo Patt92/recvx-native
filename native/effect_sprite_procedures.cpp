@@ -2975,9 +2975,9 @@ void step_eff217(EffectSprite& s,const EffectContext& c,bool&){
         p.num=16;
         if(s.type>=3)throw std::runtime_error("bhEff217 type outside its original colour table");
         for(int i=0;i<p.num;++i){
-            p.pos[i].x=(s.px+(s.sx*effect_random()))-(s.sx*effect_random());
-            p.pos[i].y=(s.py+(s.sx*effect_random()))-(s.sx*effect_random());
-            p.pos[i].z=(s.pz+(s.sx*effect_random()))-(s.sx*effect_random());
+            {const float add=s.sx*effect_random();p.pos[i].x=(s.px+add)-(s.sx*effect_random());} // ELF 0x2549FC: erste Ziehung addiert, zweite abgezogen (Reihenfolge auch unter MSVC)
+            {const float add=s.sx*effect_random();p.pos[i].y=(s.py+add)-(s.sx*effect_random());} // ELF 0x2549FC: erste Ziehung addiert, zweite abgezogen (Reihenfolge auch unter MSVC)
+            {const float add=s.sx*effect_random();p.pos[i].z=(s.pz+add)-(s.sx*effect_random());} // ELF 0x2549FC: erste Ziehung addiert, zweite abgezogen (Reihenfolge auch unter MSVC)
             NJS_POINT3 v{0,s.sz,0};
             const float deviation=65536.0f*(s.sy/360.0f);
             Basis b;

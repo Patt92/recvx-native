@@ -49,7 +49,7 @@ int recvx_player_foot_snd(int ply_id,int foot,int column)
 /* player.c:258-281. */
 static const signed char PlKDU[4][2][3]={
     {{19,6,15},{19,6,15}},{{21,10,15},{24,18,15}},
-    {{21,10,15},{21,14,15}},{{24,18,15},{24,18,15}}};
+    {{21,10,15},{21,14,15}},{{21,10,15},{24,18,15}}};
 
 /* player.c:214, unveraenderte Originaldaten: die Knotenkette vom Wurzelknoten
  * bis zum rechten bzw. linken Fuss, mit der bhFixPosition die Figur an ihrem
@@ -187,7 +187,7 @@ static void stair_effect(const RECVX_STAIR_HOST* h,const RECVX_STAIR_EFFECT* eff
  * die neue Etage setzen, Arbeit zurueckgeben, Ruhemotion aufsetzen.  `py` ist
  * die Etagenhoehe, `y_offset` der Originalzusatz (0, 0, +/-4*prm2).  kdd laeuft
  * ueber denselben Block, ruft aber bhClrUseKaidanFlag bereits vorher. */
-static void stair_finish(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,float py,unsigned clear_status,float y_offset)
+static void stair_finish(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,float py,unsigned clear_status,float y_offset,unsigned clear_flg)
 {
     NJS_POINT3 node;
     if(h->kaidan_flag)h->kaidan_flag(h->user,0);
@@ -196,7 +196,7 @@ static void stair_finish(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,float py
     s->pz=node.z;
     s->py=py+y_offset;
     s->status&=~clear_status;
-    s->flg&=~0xD0400u;
+    s->flg&=~clear_flg; /* kdu player.c:3109 ~0x80D0400 (0x8000000 aus :3033), hsu/hsd :3484/:3704 ~0xD0400 */
     s->flg|=0x118u;
     stair_set_floor(h,s);
     if(h->grand)s->py=h->grand[s->floor+2];
@@ -362,7 +362,7 @@ static void kdu(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
         break;
     case 6:
         --s->ct1;
-        if(s->ct1<=0)stair_finish(h,s,s->yn,0x80010010u,0.0f);
+        if(s->ct1<=0)stair_finish(h,s,s->yn,0x80010010u,0.0f,0x80D0400u);
         break;
     default:
         break;
@@ -741,7 +741,7 @@ static void hsu(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
         }
         break;
     case 6:
-        if(stair_frame(s)==0)stair_finish(h,s,s->area.py,0x80010010u,4.0f*s->area.prm2);
+        if(stair_frame(s)==0)stair_finish(h,s,s->area.py,0x80010010u,4.0f*s->area.prm2,0xD0400u);
         break;
     default:
         break;
@@ -813,7 +813,7 @@ static void hsd(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
         }
         break;
     case 6:
-        if(stair_frame(s)==0)stair_finish(h,s,s->area.py,0x80010010u,-(4.0f*s->area.prm2));
+        if(stair_frame(s)==0)stair_finish(h,s,s->area.py,0x80010010u,-(4.0f*s->area.prm2),0xD0400u);
         break;
     default:
         break;

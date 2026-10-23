@@ -45,6 +45,7 @@ typedef struct RECVX_PLAYER_ACTION {
     float    arp, rtspd;
     float    spx, spz, spxn, spzn;
     int32_t  yrct;
+    int32_t  dm_ct;   /* EXP_WORK 0x18, player.c:1394 Gift-/Infektionstakt */
 } RECVX_PLAYER_ACTION;
 
 typedef struct RECVX_PLAYER_ACTION_IO {

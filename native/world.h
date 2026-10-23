@@ -64,6 +64,9 @@ bool subplayer_bound=false,subplayer_no_motion=false;SceneSpawn transform{};std:
     // Annaeherung, 2/3 Drehen, 4 fertig; ct0 ist der Annaeherungszaehler, spd der gehaltene
     // Abstand. Nur RM_0150 Objekt 5 (die Eisenstatue) ist in allen Raeumen vom Typ 7.
     unsigned object007_mode0=0;int object007_ct0=0;float object007_spd=0;
+    // objitm.c:1900-2047 bhObj009 (Wagen RM_5600/6050/6051): O_WRK mode0/mode1, ct0..ct2, gpx/gpz, ayp, xn/zn, spd.
+    unsigned object004_mode0=0; // objitm.c:1193 bhObj004 (Gewitterobjekt)
+    unsigned object009_mode0=0,object009_mode1=0;int object009_ct0=0,object009_ct1=0,object009_ct2=0,object009_ayp=0;float object009_gpx=0,object009_gpz=0,object009_xn=0,object009_zn=0,object009_spd=0;
     unsigned object_flg2=0,object_mode1=0,object_mode3=0;int object_ct0=0,object_ayp=0;int hp=0;bool dead=false,combat_enabled=true;bool hidden=false,inactive=false,frozen=false,scripted=false,has_motion=false,room_motion=true;unsigned motion=0;std::int64_t frame=0,step=65536;bool linked=false,link_released=false;unsigned parent_kind=0,parent_index=0,parent_node=0;NJS_POINT3 link_offset{};std::map<unsigned,bool> hidden_nodes;ModelNodeOverrides node_overrides;std::shared_ptr<RECVX_EN01> en01;unsigned upper_motion=0;bool flinch=false;std::array<int,2> flinch_angles{};int neck_angle=0;
     // bhEneLookFlgSet (event.c): original BH_PWORK flg bit 0x8000. Enemy AI
     // consumers (en01.c) are still pending; the state itself is exact.
@@ -411,6 +414,9 @@ public:
     // objitm.c:1648 bhObj007 (bhJumpObject[7]): der Greif-und-Dreh-Gegenstand im
     // bhControlObjItm-Durchlauf (nur RM_0150 Objekt 5, Typ 7).
     void control_turn_objects();
+    void control_cart_objects(); // objitm.c:361 bhJumpObject[9] = bhObj009
+    void control_simple_objects(); // objitm.c:361 bhJumpObject[2]/[4]/[6] = bhObj002/004/006
+    void control_cart_object(WorldEntity& e);
     void control_turn_object(class WorldEntity& e);
     bool offset_work_uv(void* work,unsigned node,int u,int v);
     bool work_node_angle_z(void* work,unsigned node,int& angle)const;
@@ -817,7 +823,6 @@ private:
     std::optional<std::pair<unsigned,int>> stair_ground_state_;
     std::vector<unsigned> push_objects_;
     bool push_pose_=false,player_poisoned_=false;
-    int push_health()const{return player_health()>=120?(player_poisoned_?1:0):player_health()>=30?1:2;}
     // Die Slow-Abtastung der Schiebeaktion; solange objP die Darstellung traegt, hat es sie bereits.
     bool push_pose_current()const{return push_&&push_pose_&&!player_obj_drives_&&!player_scripted&&!player_enemy_motion_&&motion_==std::size_t(push_->state().motion)&&frame_==push_->state().frame;}
     void ensure_push();

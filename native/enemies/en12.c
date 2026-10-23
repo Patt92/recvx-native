@@ -192,19 +192,14 @@ static void brain(RECVX_ENEMY_WORK* w)
     NEED(w,wall_type,"bhCheckWallType(en12 Brain)");
     if (w->sv->wall_type(&q,0,3.0f,1.0f) || extension(w)->wait[0] ||
         !(dist<80.0f) || !in_cone(w,&p,21845)) return;
-    /* en12.c:669/671 indiziert act[?][(int)(16.0f*ratio)] mit ratio<1; nur am
-       Rand (rand nahe 0x7fffffff) rundet das float-Produkt auf genau 16.0f und
-       der Index 16 liese act[?][16], einen Wert UNHALB des 16-Felder-Feldes
-       (Stack-Muell G). Das Original kehrt auf diesem Pfad NICHT zurueck: es
-       prueft mode[G] (en12.c:674) und exp0[G+1] (en12.c:678), beides ebenfalls
-       Out-of-bounds, und erhoehnt EXP0_I(4) um +30 (en12.c:679) oder +5
-       (en12.c:688). Da G undefiniert ist, waere jeder konkrete Ersatz eine
-       Annaeherung; hier wird der Zweig angehalten und die Luecke benannt. Die
-       Timer wurden bereits wie en12.c:608-612 erniedrigt (N:180); der Rueckgabe
-       -Zweig entspricht einem der drei Originalausgaenge (kein Aufschlag). */
+    /* en12.c:669/671 indiziert act[?][(int)(16.0f*ratio)]; am Rand (rand nahe 0x7fffffff)
+       rundet das float-Produkt auf genau 16. Stapellage laut Disassembly (bhEne12_BR00
+       0x1D5A50): mode[4] bei sp+0x30, act[2][16] bei sp+0x40, inter[4] = {0,60,10,30}
+       bei sp+0xC0. act[0][16] ist damit act[1][0] = 2, act[1][16] ist inter[0] = 0:
+       definierte, gueltige Werte, also treu portiert (QUALITY.md: kein Originalfehler). */
     i=(int)(16.0f*random_unit(w));
-    if (i>=16) { missing(w,"bhEne12_BR00: rand table index 16"); return; }
-    act=acts[in_cone(w,&p,0x2000)?0:1][i];
+    { const int row=in_cone(w,&p,0x2000)?0:1;
+      act=i<16?acts[row][i]:(row==0?acts[1][0]:0); }
     if (act==1 && dist<15.0f) return;
     if (!extension(w)->wait[act]) {
         extension(w)->wait[0]+=30;
