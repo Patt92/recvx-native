@@ -608,6 +608,23 @@ std::optional<Scene> RoomWorld::computer_character(unsigned chr_no,unsigned moti
     }
     return {};
 }
+void RoomWorld::set_object_motion(WorldEntity& e){
+    // Motion.c:131-170: bhSetMotion schreibt je Motionkanal objP[n].pos (mit Positionskeys) und, ohne
+    // owP flg 0x2, objP[n].ang (ohne Winkelkeys nur ang[0] = 0). Ein vorher per Common 8/36/38 bzw.
+    // 15/16 geschriebener Knotenwert ist damit ueberschrieben; Raumobjekte/Items haben keine owP-Haltebits
+    // (Common 42 bindet nur Spieler/Gegner). RM_6060: Ereignis 16 nullt objP[0].pos des Fahrzeugs (608),
+    // Common 34 (v0 0) setzt sofort Motion 5 mit Knoten 0 auf Ebene 2 ueber dessen Schattenbild 611.
+    e.commit_pose();
+    if(!e.posed_has_motion())return;
+    const auto& clip=posed_motion_clip(e);
+    for(auto it=e.node_overrides.begin();it!=e.node_overrides.end();){
+        if(it->first<clip.positions.size()){
+            if(!clip.positions[it->first].empty())it->second.position.reset();
+            if(it->second.angles){if(clip.angles[it->first].empty())(*it->second.angles)[0]=0;else it->second.angles.reset();}
+        }
+        if(!it->second.position&&!it->second.angles)it=e.node_overrides.erase(it);else ++it;
+    }
+}
 void RoomWorld::start_task(unsigned level){auto& task=contexts_.at(level);task.mode1=0;task.positions={};task.angles={};}
 std::vector<ModelPose> RoomWorld::object_pose(const Model& model,const WorldEntity& state)const{
     if(state.posed_has_motion()&&posed_motion_clip(state).positions.size()>model.rest_pose.size())
@@ -1094,7 +1111,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
         else entity(kind,index).hidden=v.u8(3)==0;return true;}
     // objitm.c never ticks room-object motions. The scenario explicitly samples
     // them through bhSetObjMotion / bhSetItmMotion, including the sp_flg gate.
-    if(op==0x50||op==0x9c){auto& e=entity(op==0x50?2:3,v.u8(1));if(e.has_motion&&e.motion_mode3==1&&(c.simulation_flags&4)){e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);e.commit_pose(); /* bhSetMotion + bhCalcModel auf diesem Work */actor_nodes_.clear();}return true;}
+    if(op==0x50||op==0x9c){auto& e=entity(op==0x50?2:3,v.u8(1));if(e.has_motion&&e.motion_mode3==1&&(c.simulation_flags&4)){e.sampled_frame=e.frame;e.frame=(e.frame+e.step)%(std::int64_t(entity_motion(e).frames)*65536);set_object_motion(e); /* bhSetMotion + bhCalcModel auf diesem Work */actor_nodes_.clear();}return true;}
     if(op==0x2b){ // event.c bhMotionPauseSet: pause (mode3=4) or resume (mode3=1) motion on task work
         const auto mode=v.u8(1);if(mode>1)return true; // Original switch has no default action.
         if(!ctx.work)return false; // No original work pointer has been bound.
@@ -1711,7 +1728,7 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
             e.step=motion_step(v.u8(2));e.scripted=true;e.has_motion=e.has_motion||present;e.motion_slow=(v.u8(2)!=1&&v.u8(2)!=2)||v.u8(7)==6;e.motion_mode3=v.u8(3)<=1?0:1;
             // event.c:11940-11967 / :11069-11096 switch(v0 = Byte 6): nur 0, 2, 5 und 6 rufen
             // bhSetMotion(work,0,0,0) sofort; sonst bleibt objP eines Raumobjekts/Items unveraendert.
-            if((ctx.kind==2||ctx.kind==3)&&present){const unsigned v0=v.u8(6);if(v0==0||v0==2||v0==5||v0==6){e.commit_pose();actor_nodes_.clear();}}
+            if((ctx.kind==2||ctx.kind==3)&&present){const unsigned v0=v.u8(6);if(v0==0||v0==2||v0==5||v0==6){set_object_motion(e);actor_nodes_.clear();}}
             if(e.subplayer_bound){
                 // event.c:11834-11909 (34) / :11501-11570 (24) / :10990-11060 (25): selector 1 writes
                 // the low byte of mtn_no, mtn_md 0x20 (|8 for steps other than 1/2) and |8 for

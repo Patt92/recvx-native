@@ -1006,6 +1006,8 @@ private:
     void control_item_glint(); // objitm.c:397-450, item part of bhControlObjItm
     void build_object_lists(); // objitm.c:289-383, object part of bhControlObjItm
     void control_alpha_fade(unsigned kind,unsigned index); // objitm.c:740 bhControlAlphaFadeObject
+    // bhSetMotion (Motion.c:131-170) auf einem Raumobjekt/Item: schreibt objP der Motionkanaele neu.
+    void set_object_motion(WorldEntity& e);
     // pwksub.c:39 bhCalcLinkModel(pp): bhCalcModel fuer jedes aktive Work mit
     // flg 0x80, dessen lkwkp pp ist.
     void calc_enemy_link_model(WorldEntity& e);
