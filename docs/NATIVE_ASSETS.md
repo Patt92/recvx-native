@@ -43,6 +43,11 @@ original archive records remain under `archives/ARCHIVE_NAME/0000.bin`; playable
 Claire defaults to SYSTEM/0010.bin, and the lighter (item ID 55, inventory slot 1) to ITEM1/0054.bin.
 
 Use uncompressed RGB24/RGBA32 TGA without color maps, 1–8192 pixels per dimension.
+The runtime also reads RLE (type 10) and 8-bit colour-mapped TGA (types 1/9, 24/32-bit palette
+entries); both expand to the same pixels. `prepare_native_data.py --compressed` writes every cooked
+texture as colour-mapped RLE through `recvx-texture-compress` (all cooked textures have at most 256
+colours; 4.2 GB -> 0.8 GB), verifying each file against its source. HD keys (`mods/textures/hd`)
+stay the MD5 of the uncompressed cooked file, so author HD packs against `data/`, not a compressed tree.
 Higher resolution preserves original UVs and asset identities. Original PS2
 palette/alpha rules are applied during export; TGA uses ordinary 0–255 alpha.
 The 2D renderer blends alpha. The 3D renderer filters textures trilinearly with up to 4x anisotropic taps

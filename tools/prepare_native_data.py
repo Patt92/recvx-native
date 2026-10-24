@@ -163,41 +163,28 @@ def export_iso(images, root, exporter, ffmpeg, ffprobe, jobs):
           f"{result['files']} files / {result['bytes']} bytes in {root}.", flush=True)
 
 
-# Komprimierter Datenbaum (--compressed): TGA als RLE (Typ 10, bildpunktgleich), Filme verkleinert neu
-# aus den PSS gekocht. Die PSS-Quellen und das Raumarchiv liest die Runtime nicht (native/movie.cpp:18,
-# native/room.cpp:65); sie bleiben draussen.
+# Komprimierter Datenbaum (--compressed): TGA verlustfrei als 8-Bit-Farbtabelle mit RLE (Typ 9; alle
+# gekochten Texturen tragen hoechstens 256 Farben, sonst RGB/RGBA-RLE Typ 10), Filme verkleinert neu aus den
+# PSS gekocht. recvx-texture-compress prueft jede Datei gegen ihre Quelle; read_tga und der HD-Schluessel
+# ergeben dieselben Bildpunkte/Bytes. Die PSS-Quellen und das Raumarchiv liest die Runtime nicht
+# (native/movie.cpp:18, native/room.cpp:65); sie bleiben draussen.
 COMPRESSED_SKIP = ('files/MOVIE', 'archives/RDX_LNK')
 
 
-def rle_tga(job):
-    from PIL import Image
-    source, target = job
-    with Image.open(source) as image:
-        image.load()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        image.save(target, compression='tga_rle')
-    with Image.open(source) as a, Image.open(target) as b:
-        if a.mode != b.mode or a.size != b.size or a.tobytes() != b.tobytes():
-            raise RuntimeError(f'RLE TGA differs from its source: {source}')
-    return source.stat().st_size, target.stat().st_size
+def texture_compressor_for(exporter):
+    return exporter.with_name('recvx-texture-compress' + exporter.suffix)
 
 
-def compress_tree(source, root, ffmpeg, ffprobe, jobs, movie_scale, movie_quality):
-    from concurrent.futures import ThreadPoolExecutor
-    skip = {source / part for part in COMPRESSED_SKIP} | {source / 'movies', source / 'asset-manifest.json'}
-    textures = []
+def compress_tree(source, root, compressor, ffmpeg, ffprobe, jobs, movie_scale, movie_quality):
+    skip = {source / part for part in COMPRESSED_SKIP} | {source / 'movies', source / 'textures',
+                                                          source / 'asset-manifest.json'}
     for path in sorted(source.rglob('*')):
         if any(path == s or s in path.parents for s in skip) or not path.is_file():
             continue
         relative = path.relative_to(source)
-        if relative.parts[0] == 'textures' and path.suffix.lower() == '.tga':
-            textures.append((path, root / relative))
-        else:
-            (root / relative).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, root / relative)
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
-        sizes = list(pool.map(rle_tga, textures, chunksize=64))
-    print(f'RLE textures: {len(sizes)} files, {sum(a for a, _ in sizes)} -> {sum(b for _, b in sizes)} bytes.', flush=True)
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, root / relative)
+    subprocess.run([str(compressor), str(source / 'textures'), str(root / 'textures'), str(jobs)], check=True)
     movies = sorted((source / 'files/MOVIE').glob('MV_*.PSS'))
     if not movies:
         raise RuntimeError(f'--compressed recooks the movies and needs the PSS sources in {source / "files/MOVIE"}')
@@ -208,18 +195,21 @@ def compress_tree(source, root, ffmpeg, ffprobe, jobs, movie_scale, movie_qualit
         print(f'{out}: {record["width"]}x{record["height"]} q{movie_quality}, {out.stat().st_size} bytes', flush=True)
 
 
-def publish_compressed(source, root, ffmpeg, ffprobe, jobs, movie_scale, movie_quality):
+def publish_compressed(source, root, exporter, ffmpeg, ffprobe, jobs, movie_scale, movie_quality):
     if root.exists():
         raise RuntimeError(f'destination exists; --compressed only creates a new data tree: {root}')
+    compressor = texture_compressor_for(exporter.resolve())
+    if not compressor.is_file():
+        raise RuntimeError(f'missing built texture compressor: {compressor}')
     tools = [find_host_tool(ffmpeg, ROOT), find_host_tool(ffprobe, ROOT)]
     if not all(tools):
         raise RuntimeError('--compressed recooks the movies and needs ffmpeg and ffprobe')
     stage = Path(tempfile.mkdtemp(prefix=f'.{root.name}-staging-', dir=staging_parent(root)))
     try:
         cooked = stage / root.name
-        compress_tree(source, cooked, *tools, jobs, movie_scale, movie_quality)
+        compress_tree(source, cooked, compressor, *tools, jobs, movie_scale, movie_quality)
         result = manifest(cooked)
-        result['compression'] = {'textures': 'tga-rle', 'movie_scale': movie_scale, 'movie_quality': movie_quality}
+        result['compression'] = {'textures': 'tga-colormap-rle', 'movie_scale': movie_scale, 'movie_quality': movie_quality}
         (cooked / 'asset-manifest.json').write_text(json.dumps(result, indent=2) + '\n')
         cooked.rename(root)
     finally:
@@ -243,13 +233,13 @@ def main():
                    help='PS2 ISO9660 image to extract at build time; repeat to merge discs')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--exporter', type=Path, default=default_exporter(),
-                   help='recvx-assets; --iso also uses recvx-world-assets from the same directory')
+                   help='recvx-assets; --iso also uses recvx-world-assets, --compressed recvx-texture-compress from the same directory')
     p.add_argument('--ffmpeg', default='ffmpeg', help='used by --iso to cook the movies')
     p.add_argument('--ffprobe', default='ffprobe', help='used by --iso to cook the movies')
     p.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8),
                    help='parallel world texture exports for --iso')
     p.add_argument('--compressed', action='store_true',
-                   help='write a compressed tree (RLE TGA, downscaled movies), e.g. --output data_compressed')
+                   help='write a compressed tree (lossless colour-mapped RLE TGA, downscaled movies), e.g. --output data_compressed')
     p.add_argument('--from-data', type=Path, help='with --compressed: derive from an existing cooked tree instead of --iso')
     p.add_argument('--movie-scale', type=float, default=0.5, help='--compressed: movie size factor (default 0.5)')
     p.add_argument('--movie-quality', type=int, default=5, help='--compressed: MJPEG -q:v, 2 best..31 (default 5)')
@@ -287,12 +277,12 @@ def main():
         if a.from_data:
             if not (a.from_data / 'native-data.version').is_file():
                 p.error(f'--from-data needs a cooked tree (missing {a.from_data / "native-data.version"})')
-            publish_compressed(a.from_data.resolve(), root, a.ffmpeg, a.ffprobe, a.jobs, a.movie_scale, a.movie_quality)
+            publish_compressed(a.from_data.resolve(), root, a.exporter, a.ffmpeg, a.ffprobe, a.jobs, a.movie_scale, a.movie_quality)
             return
         full = Path(tempfile.mkdtemp(prefix=f'.{root.name}-full-', dir=staging_parent(root))) / 'data'
         try:
             export_iso(a.iso, full, a.exporter, a.ffmpeg, a.ffprobe, a.jobs)
-            publish_compressed(full, root, a.ffmpeg, a.ffprobe, a.jobs, a.movie_scale, a.movie_quality)
+            publish_compressed(full, root, a.exporter, a.ffmpeg, a.ffprobe, a.jobs, a.movie_scale, a.movie_quality)
         finally:
             shutil.rmtree(full.parent, ignore_errors=True)
         return

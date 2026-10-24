@@ -11,6 +11,10 @@ std::string asset_number(unsigned index);
 // terminate inside the entry.
 std::size_t system_texture_bundle_offset(const std::vector<std::uint8_t>& entry);
 SceneTexture read_tga(const std::filesystem::path& path);
+// Verlustfreie Datenbaumform einer TGA (prepare_native_data.py --compressed): 8-Bit-Farbtabelle mit RLE
+// (Typ 9), wenn die Datei hoechstens 256 Farben traegt, sonst RGB/RGBA-RLE (Typ 10). read_tga und der
+// HD-Inhaltsschluessel ergeben daraus dieselben Bildpunkte bzw. Bytes wie aus der Quelle (geprueft).
+std::vector<std::uint8_t> compress_tga(const std::vector<std::uint8_t>& bytes,const std::filesystem::path& path);
 void write_tga(const std::filesystem::path& path,const SceneTexture& texture);
 void apply_texture_files(Scene& scene,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity);
 }

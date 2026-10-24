@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <map>
 namespace recvx {
 std::vector<std::uint8_t> read_asset_file(const std::filesystem::path& path,std::size_t limit){
     const auto size=std::filesystem::file_size(path);if(size>limit)throw std::runtime_error("asset exceeds size limit: "+path.string());
@@ -42,33 +43,91 @@ static std::vector<std::uint8_t> rle_tga_pixels(const BinaryView& v,std::size_t 
         out+=n*stride;}
     return raw;
 }
-// Inhaltsschluessel der HD-Ersetzung: die Bytes der unkomprimierten gekochten TGA. Ein RLE-Baum
-// (prepare_native_data.py --compressed) traegt denselben Kopf mit Typ 10; Kopf mit Typ 2 plus
-// entpackte Bildpunkte ergibt genau die Datei, aus der er entstand.
+// Eine TGA als unkomprimierte Typ-2-Datei: Kopf (Typ 2, ohne Farbtabelle) und Bildpunkte in
+// Dateireihenfolge. Typ 10 entpackt RLE; Typ 1/9 (Farbtabelle, 8-Bit-Index, prepare_native_data.py
+// --compressed) setzt je Index den Tabelleneintrag ein. Fuer jede gekochte Datei ist das genau die
+// Datei, aus der der komprimierte Baum entstand.
+struct TgaFile {std::vector<std::uint8_t> raw;unsigned width=0,height=0,stride=0,descriptor=0;std::size_t start=0;};
+static TgaFile decode_tga_file(const std::vector<std::uint8_t>& bytes,const std::filesystem::path& path){
+    BinaryView v(bytes);v.require(0,18);TgaFile f;const unsigned type=v.u8(2),map_type=v.u8(1);
+    f.width=v.u16(12);f.height=v.u16(14);f.descriptor=v.u8(17);f.start=18+v.u8(0);
+    if(!f.width||!f.height||f.width>8192||f.height>8192)throw std::runtime_error("TGA dimensions outside 1..8192");
+    if(f.descriptor&0xc0)throw std::runtime_error("interleaved TGA is unsupported");
+    const std::size_t count=std::size_t(f.width)*f.height;
+    std::vector<std::uint8_t> pixels;
+    if(type==2||type==10){
+        if(map_type!=0||(v.u8(16)!=24&&v.u8(16)!=32))throw std::runtime_error("texture must be RGB/RGBA or 8-bit colour-mapped TGA: "+path.string());
+        f.stride=v.u8(16)/8;
+        if(type==10)pixels=rle_tga_pixels(v,f.start,count*f.stride,f.stride,path);
+        else{v.require(f.start,count*f.stride);pixels.assign(bytes.begin()+std::ptrdiff_t(f.start),bytes.begin()+std::ptrdiff_t(f.start+count*f.stride));}
+    }else if(type==1||type==9){
+        const unsigned first=v.u16(3),length=v.u16(5),entry=v.u8(7);
+        if(map_type!=1||v.u8(16)!=8||(entry!=24&&entry!=32)||!length||first+length>256)throw std::runtime_error("texture must be RGB/RGBA or 8-bit colour-mapped TGA: "+path.string());
+        f.stride=entry/8;const std::size_t map=f.start,indices=map+std::size_t(length)*f.stride;v.require(map,std::size_t(length)*f.stride);
+        const auto index=type==9?rle_tga_pixels(v,indices,count,1,path):std::vector<std::uint8_t>{};
+        if(type==1)v.require(indices,count);
+        pixels.resize(count*f.stride);
+        for(std::size_t i=0;i<count;++i){const unsigned k=type==9?index[i]:v.u8(indices+i);
+            if(k<first||k>=first+length)throw std::runtime_error("colour-mapped TGA index outside its palette: "+path.string());
+            for(unsigned c=0;c<f.stride;++c)pixels[i*f.stride+c]=v.u8(map+std::size_t(k-first)*f.stride+c);}
+    }else throw std::runtime_error("texture must be RGB/RGBA or 8-bit colour-mapped TGA: "+path.string());
+    v.require(0,f.start);f.raw.assign(bytes.begin(),bytes.begin()+std::ptrdiff_t(f.start));
+    f.raw[1]=0;f.raw[2]=2;for(unsigned i=3;i<8;++i)f.raw[i]=0;f.raw[16]=std::uint8_t(f.stride*8);
+    f.raw.insert(f.raw.end(),pixels.begin(),pixels.end());
+    return f;
+}
+// Inhaltsschluessel der HD-Ersetzung: die Bytes der unkomprimierten gekochten TGA, auch wenn der
+// Datenbaum sie komprimiert (RLE oder Farbtabelle) traegt.
 static std::vector<std::uint8_t> cooked_tga_identity(const std::filesystem::path& path){
     auto bytes=read_asset_file(path,256*1024*1024+65536);BinaryView v(bytes);v.require(0,18);
-    if(v.u8(2)!=10)return bytes;
-    const unsigned stride=v.u8(16)/8;const std::size_t start=18+v.u8(0),size=std::size_t(v.u16(12))*v.u16(14)*stride;
-    std::vector<std::uint8_t> raw(bytes.begin(),bytes.begin()+std::ptrdiff_t(start));raw[2]=2;
-    const auto pixels=rle_tga_pixels(v,start,size,stride,path);raw.insert(raw.end(),pixels.begin(),pixels.end());
-    return raw;
+    if(v.u8(2)==2)return bytes;
+    return decode_tga_file(bytes,path).raw;
+}
+// TGA-RLE: Wiederholungspakete ab zwei gleichen Bildpunkten, sonst Rohfolgen; je Paket 1..128.
+static void rle_tga_append(std::vector<std::uint8_t>& out,const std::uint8_t* src,std::size_t count,unsigned stride){
+    auto same=[&](std::size_t a,std::size_t b){return std::memcmp(src+a*stride,src+b*stride,stride)==0;};
+    std::size_t i=0;
+    while(i<count){
+        std::size_t run=1;while(i+run<count&&run<128&&same(i,i+run))++run;
+        if(run>=2){out.push_back(std::uint8_t(0x80|(run-1)));out.insert(out.end(),src+i*stride,src+(i+1)*stride);i+=run;continue;}
+        std::size_t raw=1;while(i+raw<count&&raw<128&&!(i+raw+1<count&&same(i+raw,i+raw+1)))++raw;
+        out.push_back(std::uint8_t(raw-1));out.insert(out.end(),src+i*stride,src+(i+raw)*stride);i+=raw;
+    }
+}
+std::vector<std::uint8_t> compress_tga(const std::vector<std::uint8_t>& bytes,const std::filesystem::path& path){
+    const auto f=decode_tga_file(bytes,path);const std::size_t count=std::size_t(f.width)*f.height;
+    // Nur unkomprimierte Quellen ohne Anhang (TGA-2.0-Fusszeile, Erweiterungen): deren Offsets waeren
+    // nach dem Packen falsch, und der HD-Schluessel ist die ganze Quelldatei.
+    if(bytes.size()<2||bytes[2]!=2||bytes.size()!=f.raw.size())throw std::runtime_error("compress_tga needs an uncompressed TGA without trailing data: "+path.string());
+    const std::uint8_t* px=f.raw.data()+f.start;
+    // Farbtabelle in der Reihenfolge des ersten Auftretens; mehr als 256 Farben bleiben RGB/RGBA-RLE.
+    std::map<std::uint32_t,std::uint8_t> palette;std::vector<std::uint8_t> index(count),entries;bool fits=true;
+    for(std::size_t i=0;i<count&&fits;++i){std::uint32_t key=0;std::memcpy(&key,px+i*f.stride,f.stride);
+        const auto at=palette.find(key);
+        if(at!=palette.end()){index[i]=at->second;continue;}
+        if(palette.size()==256){fits=false;break;}
+        const auto k=std::uint8_t(palette.size());palette.emplace(key,k);index[i]=k;entries.insert(entries.end(),px+i*f.stride,px+(i+1)*f.stride);}
+    std::vector<std::uint8_t> out(f.raw.begin(),f.raw.begin()+std::ptrdiff_t(f.start));
+    if(fits){
+        const auto n=unsigned(palette.size());
+        out[1]=1;out[2]=9;out[3]=0;out[4]=0;out[5]=std::uint8_t(n&255);out[6]=std::uint8_t(n>>8);out[7]=std::uint8_t(f.stride*8);out[16]=8;
+        out.insert(out.end(),entries.begin(),entries.end());rle_tga_append(out,index.data(),count,1);
+    }else{out[2]=10;rle_tga_append(out,px,count,f.stride);}
+    if(decode_tga_file(out,path).raw!=f.raw)throw std::runtime_error("compressed TGA does not reproduce its source: "+path.string());
+    return out;
 }
 // Texture files and decoded original textures share one alpha domain: the
 // host 8-bit alpha whose blend factor is alpha/255.  Ps2AlphaIsHalf's GS
 // 0..128 ratio is the same value over 128, i.e. the same factor, so a palette
 // keeps its file alpha and the TGA carries it unchanged.
 SceneTexture read_tga(const std::filesystem::path& path){
-    const auto bytes=read_asset_file(path,256*1024*1024+65536);BinaryView v(bytes);v.require(0,18);
-    // Typ 2 = unkomprimiert, Typ 10 = RLE (data_compressed, prepare_native_data.py --compressed).
-    if(v.u8(1)!=0||(v.u8(2)!=2&&v.u8(2)!=10)||(v.u8(16)!=24&&v.u8(16)!=32))throw std::runtime_error("texture must be RGB/RGBA TGA (raw or RLE): "+path.string());
-    SceneTexture t;t.width=v.u16(12);t.height=v.u16(14);const auto stride=v.u8(16)/8;
-    if(!t.width||!t.height||t.width>8192||t.height>8192)throw std::runtime_error("TGA dimensions outside 1..8192");
-    const auto start=18+v.u8(0);const auto descriptor=v.u8(17);if(descriptor&0xc0)throw std::runtime_error("interleaved TGA is unsupported");
+    const auto bytes=read_asset_file(path,256*1024*1024+65536);
+    // Typ 2 = unkomprimiert, Typ 10 = RLE, Typ 1/9 = 8-Bit-Farbtabelle (prepare_native_data.py --compressed):
+    // alle drei ergeben dieselbe Bildpunktfolge wie die unkomprimierte Datei.
+    const auto file=decode_tga_file(bytes,path);
+    SceneTexture t;t.width=file.width;t.height=file.height;const auto stride=file.stride;const auto descriptor=file.descriptor;
     const auto count=std::size_t(t.width)*t.height;t.pixels.resize(count);
-    // RLE (Typ 10) entpackt zur Bildpunktfolge der unkomprimierten Datei.
-    std::vector<std::uint8_t> raw;const std::uint8_t* src=nullptr;
-    if(v.u8(2)==10){raw=rle_tga_pixels(v,start,count*stride,stride,path);src=raw.data();}
-    else{v.require(start,count*stride);src=bytes.data()+start;}
+    const std::uint8_t* src=file.raw.data()+file.start;
     for(unsigned y=0;y<t.height;++y)for(unsigned x=0;x<t.width;++x){
         const auto at=(std::size_t(y)*t.width+x)*stride;const auto row=(descriptor&32)?y:t.height-1-y,col=(descriptor&16)?t.width-1-x:x;
         t.pixels[std::size_t(row)*t.width+col]=(stride==4?std::uint32_t(src[at+3])<<24:0xff000000)|(std::uint32_t(src[at+2])<<16)|(std::uint32_t(src[at+1])<<8)|src[at];
