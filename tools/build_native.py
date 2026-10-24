@@ -467,6 +467,27 @@ def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: in
     run(*command)
 
 
+def prepare_compressed_data(data: Path, output: Path, binary_dir: Path, target: str, jobs: int) -> None:
+    """Create the lossless compressed tree (colour-mapped TGA, recooked movies) from a prepared --data."""
+    if (output / 'native-data.version').is_file():
+        print(f'Using existing compressed data at {output}; --compressed is not written again.', flush=True)
+        return
+    if output.exists():
+        raise RuntimeError(f'--compressed needs a new directory, but {output} exists without a completed tree')
+    if not (data / 'native-data.version').is_file():
+        raise RuntimeError(f'--compressed derives from a prepared data tree (missing {data / "native-data.version"})')
+    if is_windows_target(target) and platform.system() != 'Windows':
+        directories, suffix = [ROOT / 'build/macos-arm64', ROOT / 'build/native'], ''
+    else:
+        directories, suffix = [binary_dir], '.exe' if is_windows_target(target) else ''
+    names = ('recvx-assets' + suffix, 'recvx-texture-compress' + suffix)
+    directory = next((d for d in directories if all((d / n).is_file() for n in names)), None)
+    if directory is None:
+        raise RuntimeError(f'--compressed requires the built host tools {" and ".join(names)} in {", ".join(map(str, directories))}')
+    run(sys.executable, str(ROOT / 'tools/prepare_native_data.py'), '--compressed', '--from-data', str(data),
+        '--output', str(output), '--exporter', str(directory / names[0]), '--jobs', str(jobs))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64', 'ios', 'ios-simulator'], default='host')
@@ -474,6 +495,9 @@ def main():
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
                         help='PS2 ISO9660 image used to create missing --data; repeat to merge discs')
+    parser.add_argument('--compressed', nargs='?', type=Path, const=ROOT / 'data_compressed',
+                        help='Also write the lossless compressed tree from --data (after --iso), default data_compressed; '
+                             'an existing completed tree is kept')
     parser.add_argument('--package', action='store_true')
     parser.add_argument('--output', type=Path, help='New package directory; refuses overwrites')
     parser.add_argument('--verify-data', action='store_true')
@@ -500,7 +524,7 @@ def main():
     if is_ios_target(target):
         if platform.system() != 'Darwin':
             parser.error('iOS builds require a macOS host with Xcode')
-        if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data:
+        if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data or args.compressed:
             parser.error('iOS builds cannot run tests or prepare data; build and verify them with the macOS target')
         if args.ios_bundle_data and not (data / 'native-data.version').is_file():
             parser.error(f'--ios-bundle-data requires a prepared data tree (missing {data / "native-data.version"})')
@@ -576,6 +600,8 @@ def main():
     suffix = '.exe' if is_windows_target(target) else ''
     if args.iso:
         prepare_iso_data(args.iso, data, binary_dir, target, args.jobs)
+    if args.compressed:
+        prepare_compressed_data(data, args.compressed.resolve(), binary_dir, target, args.jobs)
     if args.verify_runtime and not (data / 'native-data.version').is_file():
         parser.error(f'--verify-runtime requires a prepared native data tree (missing {data / "native-data.version"})')
     if run_checks:

@@ -7,6 +7,8 @@
 #include <sstream>
 #include <algorithm>
 #include <map>
+#include <atomic>
+#include <optional>
 namespace recvx {
 std::vector<std::uint8_t> read_asset_file(const std::filesystem::path& path,std::size_t limit){
     const auto size=std::filesystem::file_size(path);if(size>limit)throw std::runtime_error("asset exceeds size limit: "+path.string());
@@ -140,17 +142,37 @@ void write_tga(const std::filesystem::path& path,const SceneTexture& t){
     for(std::size_t i=0;i<t.pixels.size();++i){const auto p=t.pixels[i];for(unsigned c=0;c<3;++c)bytes[18+i*4+c]=(p>>(c*8))&255;bytes[18+i*4+3]=(p>>24)&255;}
     write_asset_file(path,bytes);
 }
+namespace {std::atomic<bool> texture_mods_on{true};std::atomic<std::size_t> stat_mod{0},stat_hd{0},stat_data{0},stat_original{0};}
+void set_texture_mods_enabled(bool enabled){texture_mods_on=enabled;}
+bool texture_mods_enabled(){return texture_mods_on;}
+TextureFileStats texture_file_stats(){return {stat_mod,stat_hd,stat_data,stat_original};}
+std::string texture_tree_format(const std::filesystem::path& data){
+    // Erste TGA des Baums (sortiert): gekochte Baeume schreiben alle Dateien im selben Format.
+    const auto root=data/"textures";if(!std::filesystem::is_directory(root))return "no textures/";
+    std::optional<std::filesystem::path> first;
+    for(const auto& e:std::filesystem::recursive_directory_iterator(root))if(e.is_regular_file()&&e.path().extension()==".tga"&&(!first||e.path()<*first))first=e.path();
+    if(!first)return "no TGA files";
+    std::ifstream f(*first,std::ios::binary);unsigned char head[3]{};f.read(reinterpret_cast<char*>(head),3);
+    if(!f)return "unreadable TGA";
+    switch(head[2]){case 2:return "uncompressed TGA";case 10:return "RLE TGA";case 1:return "colour-mapped TGA";case 9:return "colour-mapped RLE TGA";default:return "TGA type "+std::to_string(head[2]);}
+}
+std::size_t hd_texture_count(const std::filesystem::path& mods){
+    const auto hd=mods/"textures"/"hd";if(mods.empty()||!std::filesystem::is_directory(hd))return 0;
+    std::size_t n=0;for(const auto& e:std::filesystem::directory_iterator(hd))if(e.is_regular_file()&&e.path().extension()==".tga")++n;return n;
+}
 void apply_texture_files(Scene& scene,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity){
     // Precedence: explicit per-asset mod file > content-keyed HD replacement
     // (mods/textures/hd/<md5 of the cooked data TGA>.tga) > cooked data file > decoded original.
     // Die Datei ersetzt nur die Bildpunkte; der GS-Wickelmodus gehoert zum Originalkopf.
+    // Hostschalter (Debugmenue "Textur-Mods"): aus = beide Mod-Stufen uebergehen, PS2-Bild aus data/.
+    const bool use_mods=!mods.empty()&&texture_mods_on;
     for(std::size_t i=0;i<scene.textures.size();++i){const auto relative=std::filesystem::path("textures")/identity/(asset_number(unsigned(i))+".tga");
         auto replace=[&](const std::filesystem::path& file){const bool u=scene.textures[i].clamp_u,v=scene.textures[i].clamp_v;scene.textures[i]=read_tga(file);scene.textures[i].clamp_u=u;scene.textures[i].clamp_v=v;};
-        if(!mods.empty()&&std::filesystem::is_regular_file(mods/relative)){replace(mods/relative);continue;}
-        if(!std::filesystem::is_regular_file(data/relative))continue;
-        if(!mods.empty()){const auto hd=mods/"textures"/"hd"/(md5_hex(cooked_tga_identity(data/relative))+".tga");
-            if(std::filesystem::is_regular_file(hd)){replace(hd);continue;}}
-        replace(data/relative);
+        if(use_mods&&std::filesystem::is_regular_file(mods/relative)){replace(mods/relative);++stat_mod;continue;}
+        if(!std::filesystem::is_regular_file(data/relative)){++stat_original;continue;}
+        if(use_mods){const auto hd=mods/"textures"/"hd"/(md5_hex(cooked_tga_identity(data/relative))+".tga");
+            if(std::filesystem::is_regular_file(hd)){replace(hd);++stat_hd;continue;}}
+        replace(data/relative);++stat_data;
     }
 }
 }

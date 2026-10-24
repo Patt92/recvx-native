@@ -648,6 +648,11 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm5010_continue_retry_check.py"
         --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
     endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_1090.RDT")
+      add_test(NAME texture_mods_switch COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/texture_mods_switch_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_6060.RDT")
       add_test(NAME rm6060_gas_vehicle COMMAND "${Python3_EXECUTABLE}" -I
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm6060_gas_vehicle_check.py"

@@ -242,6 +242,16 @@ With prepared data:
 Launch through `Start.command`. macOS defaults to Metal; OpenGL is optional
 (`--renderer opengl`), and software remains available (`--renderer software`).
 
+`./build.sh` alone builds `build/start/macos-arm64/RECVX Native.app`, a small development
+app without data: its launcher passes the project's `data/` and `mods/` folders by path.
+Only `--package --output <new folder>` copies the data into a standalone app.
+`--compressed [folder]` additionally writes a lossless compressed tree from `data/`
+(colour-mapped TGA, recooked movies; default `data_compressed`, kept if it already exists),
+e.g. `./build.sh --iso "/path/to/game.iso" --compressed`.
+At startup the runtime prints the data folder with its texture format, the mods folder
+with its number of HD textures, and per room how many textures came from HD, mod files or
+`data/`; the debug menu entry "Textur-Mods (HD)" switches mods off and reloads the room in place.
+
 ### Linux
 
 Install:
