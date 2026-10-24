@@ -737,7 +737,7 @@ bool RoomWorld::bind(const EventCommand& c){BinaryView v(c.bytes);auto& ctx=cont
     // FootSeCall: die Lage der Schrittstimme ist der Fusspunkt; der
     // zusaetzliche SoundPoint-Parameter von audio_.footstep (native/audio.h)
     // erhaelt deshalb genau `point`.
-    if(op==0x48){const auto point=link_point(ctx.kind,ctx.index,v.u8(5),{});return audio_.footstep(floor_sound(point),v.u8(4),v.u8(3),v.u8(1)==0,{point.x,point.y,point.z},collision_events_&&(collision_events_->flags[11][0]&0x01000000u));}
+    if(op==0x48){if(!ctx.work)return true; /* event.c:2688: ohne bhCetask->work kein Schrittklang */const auto point=link_point(ctx.kind,ctx.index,v.u8(5),{});return audio_.footstep(floor_sound(point),v.u8(4),v.u8(3),v.u8(1)==0,{point.x,point.y,point.z},collision_events_&&(collision_events_->flags[11][0]&0x01000000u));}
     if(op==0xab){ // event.c:7206-7239 bhBGColorSet: rom->bak_col changes NOW; the later EOR re-runs camera selection.
         room_background_=(std::uint32_t(v.u8(1))<<24)|(std::uint32_t(v.u8(2))<<16)|(std::uint32_t(v.u8(3))<<8)|v.u8(4);
         restore_background(v.u8(5));return true;}
@@ -1860,6 +1860,10 @@ if(cmd==12||cmd==13){for(unsigned i=0;i<3;++i)(cmd==12?ctx.pos_sign:ctx.ang_sign
            EN09 #1: Skriptlage 40/0/45 -> 25.9/0/68.7, ausserhalb der Flaeche). Die
            Skriptschreibzugriffe der Entitaet gehen vorher wie vor jedem Pass in den Work.
            Andere Besitzer bauen ihre Matrizen beim Abtasten neu. */
+        /* Fuer bhCetask->work == plp (bhLoadWork 0) schreibt derselbe Aufruf plp->mlwP->owP aus
+           px/ay und objP neu: src von bhCalcFixOffset (Motion.c:909) im naechsten bhControlPlayer.
+           RM_0110 Ereignis 40: 69 07 (Lage 34/17), 69 2f, 69 29 01 (flg 0x40000), 64 80. */
+        if(cmd==47&&ctx.kind==0){if(player_asset_){std::vector<BoneMatrix> model_nodes;(void)sample_player(*player_asset_,&model_nodes);player_joint_matrices_=player_asset_->script_nodes(model_nodes);}return true;}
         if(cmd==47){if(ctx.kind==1){auto& e=entity(1,ctx.index);if(e.enemy_bound&&e.enemy_native){adopt_enemy_script(e);calc_enemy_model(e);}}return true;}
 
     }return false;
@@ -2950,6 +2954,7 @@ struct Hud2D{
 bool RoomWorld::draw_full_screen(SoftwareRenderer& image,const Scene& scene,const SceneCamera& view,bool wireframe)const{
     if(!collision_events_||!(collision_events_->flags[11][0]&0x100u))return false;
     SoftwareRenderer source(512,480);source.set_texture_filtering(image.texture_filtering());source.set_supersampling(image.supersampling());source.set_render_threads(image.render_threads());
+    source.set_gpu(image.gpu()); // Host-Raster (gpu_raster.h) wie das Hauptbild; sonst rastert dieser Pass bei GPU-Ausgabe in Software
     source.draw_full_screen_source(scene,view,render_aspect_y_,wireframe);
     // bhAllDrawModel enthaelt die Effekt-Schirmlisten. Ihre 640er Koordinaten aendern
     // sich nicht mit njSetScreen(512,480): an der rechten Bildkante abschneiden, nicht stauchen.
@@ -4127,6 +4132,10 @@ bool RoomWorld::entity_geometry(const Model& model,const WorldEntity& e,Scene& o
             const bool blending=e.morph||(e.enemy_bound&&(e.enemy.mdflg&2u));
             if(blending)if(const auto* b=model_variant(model,e.morph_obj_b);b&&b->bones()==drawn->bones()){morph.model=&b->encoded_model();morph.flags=e.morph_live_flags(e.morph_obj_b);morph.shape=e.morph?e.morph_shape:e.enemy.shp_ct;morph_ptr=&morph;}
         }
+        // Face deformation is shared by both drawing paths; fallback keys belong to
+        // the drawn variant. sample_work preserves the already calculated matrices.
+        FaceParameter facial;const FaceParameter* fp=nullptr;
+        if(drawn&&drawn->face()){facial=e.facial?*e.facial:sample_face_parameters(e.face_keys.empty()?drawn->face()->keys():e.face_keys,e.face_frame);fp=&facial;}
         /* Subplayer-Works (id > 90, subplayer.c) rechnet der native Gegnerpass mit bhSetMotion/
            bhCalcModel selbst; bhPutModel zeichnet mlwP->owP dieses Baums (MdlPut.c:248-256: bei
            flg 0x80 Wurzel aus lkwkp->owP[lkono], event.c:3696 bhObjLinkSetObjEne). Der Clip-Pfad
@@ -4135,7 +4144,7 @@ bool RoomWorld::entity_geometry(const Model& model,const WorldEntity& e,Scene& o
         if(model.kind==1&&e.enemy_native&&(!e.scripted||(e.subplayer_bound&&e.enemy_calculated))){
             // mlwP of the work (objP pose, owP matrices of bhCalcModel).
             if(!model.actor||!e.enemy_calculated)return false;
-            object=drawn->sample_work(e.enemy_obj,e.enemy_owp_mtx,e.enemy_evalflags,&actor_nodes_[{model.kind,model.index}],nullptr,e.live_stream(drawn==model.actor.get()?0u:e.drawn_root()),morph_ptr);
+            object=drawn->sample_work(e.enemy_obj,e.enemy_owp_mtx,e.enemy_evalflags,&actor_nodes_[{model.kind,model.index}],fp,e.live_stream(drawn==model.actor.get()?0u:e.drawn_root()),morph_ptr);
             object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=drawn->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=drawn->script_index(t.object);for(auto& w:object.ambient_writes)w.object=drawn->script_index(w.object);
             // npSetAllMatColor hat die Materialchunks des geteilten Baums
             // gepatcht (njplus.c:1375-1450): B/G/R aus dem Auftrag, A nur,
@@ -4149,7 +4158,7 @@ bool RoomWorld::entity_geometry(const Model& model,const WorldEntity& e,Scene& o
                 std::fprintf(stderr,"DBGCMP idx=%u id=%u ch=%zu bones=%zu frame=%lld wfrm=%d mtn=%u\n",model.index,e.identity,clip.positions.size(),e.enemy_owp_mtx.size(),(long long)e.frame,int(e.enemy.frm_no),unsigned(e.enemy.mtn_no));
                 for(std::size_t n=0;n<std::min(ref.size(),e.enemy_owp_mtx.size());++n){const auto* a=e.enemy_owp_mtx[n].value;const auto* b=ref[n].value;std::fprintf(stderr,"  n%02zu native(%.2f,%.2f,%.2f) actor(%.2f,%.2f,%.2f)%s\n",n,a[12],a[13],a[14],b[12],b[13],b[14],std::fabs(a[12]-b[12])+std::fabs(a[13]-b[13])+std::fabs(a[14]-b[14])>0.05f?" DIFF":"");}}
         }
-        else if(model.actor){FaceParameter facial;const FaceParameter* fp=nullptr;if(drawn->face()){facial=e.facial?*e.facial:sample_face_parameters(e.face_keys.empty()?model.actor->face()->keys():e.face_keys,e.face_frame);fp=&facial;}if(e.posed_has_motion()){const auto& clip=posed_motion_clip(e);const auto nodes=drawn->motion_nodes(clip.positions.size());try{object=drawn->sample_clip(clip,e.posed_frame(),e.transform.position,e.transform.yaw,nodes,&actor_nodes_[{model.kind,model.index}],e.node_overrides,fp,morph_ptr,e.live_stream(drawn==model.actor.get()?0u:e.morph_obj_a));}catch(const std::runtime_error& error){throw std::runtime_error(std::string(error.what())+"; entity="+std::to_string(model.kind)+"/"+std::to_string(model.index)+", identity="+std::to_string(e.identity)+", motion="+(e.posed_room_motion()?"room/":"builtin/")+std::to_string(e.posed_motion())+", frame="+std::to_string(e.posed_frame()));}}else object=drawn->sample(0,0,e.transform.position,e.transform.yaw,&actor_nodes_[{model.kind,model.index}],e.node_overrides,fp,morph_ptr,e.live_stream(drawn==model.actor.get()?0u:e.morph_obj_a));object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=drawn->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=drawn->script_index(t.object);for(auto& w:object.ambient_writes)w.object=drawn->script_index(w.object);}
+        else if(model.actor){if(e.posed_has_motion()){const auto& clip=posed_motion_clip(e);const auto nodes=drawn->motion_nodes(clip.positions.size());try{object=drawn->sample_clip(clip,e.posed_frame(),e.transform.position,e.transform.yaw,nodes,&actor_nodes_[{model.kind,model.index}],e.node_overrides,fp,morph_ptr,e.live_stream(drawn==model.actor.get()?0u:e.morph_obj_a));}catch(const std::runtime_error& error){throw std::runtime_error(std::string(error.what())+"; entity="+std::to_string(model.kind)+"/"+std::to_string(model.index)+", identity="+std::to_string(e.identity)+", motion="+(e.posed_room_motion()?"room/":"builtin/")+std::to_string(e.posed_motion())+", frame="+std::to_string(e.posed_frame()));}}else object=drawn->sample(0,0,e.transform.position,e.transform.yaw,&actor_nodes_[{model.kind,model.index}],e.node_overrides,fp,morph_ptr,e.live_stream(drawn==model.actor.get()?0u:e.morph_obj_a));object.textures=model.object.textures;actor_nodes_[{model.kind,model.index}]=drawn->script_nodes(actor_nodes_[{model.kind,model.index}]);for(auto& t:object.triangles)t.object=drawn->script_index(t.object);for(auto& w:object.ambient_writes)w.object=drawn->script_index(w.object);}
         else {object=model.object;const bool water=e.water&&e.water->mode0==1&&!e.water->orphan;if(e.has_motion||!e.node_overrides.empty()||water||room_uv_modified_){ModelGeometryOptions edited;edited.pose=object_pose(model,e);
             // bhObj005: objP[0].model->vlist ist die beschriebene Kopie, der plist traegt den npSetOffsetUV2-Versatz.
             if(water){const auto& w=*e.water;edited.local_vertices.assign(model.object.object_count,{});edited.local_vertices[0]=w.vertices;edited.local_normals.assign(model.object.object_count,{});edited.local_normals[0]=w.normals;if(w.uv_ok){edited.uv_object=0;edited.uv_chunk=w.uv_chunk;edited.uv_u=w.uv_u;edited.uv_v=w.uv_v;}}

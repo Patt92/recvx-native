@@ -105,21 +105,25 @@ def main():
         assert z['work']['mode'][0] >= 1 and z['work']['hp'] == 200, \
             ('EN26 nach Wiederbetreten ohne Init (T-Pose)', z['work'])
         # Toetbar: Treffer im Freigabefenster nach dem ersten Griff (Ziel per next_target).
+        # Nach der Szene (Ereignis 40: Common 7 px/pz 34/17, Common 47, Common 41 flg 0x40000, 64 80) haelt
+        # bhFixPosition (player.c:1538-1558) den spxn-Zug von act_std (player.c:2127) auf; die Spielerin steht
+        # rund 7.5 weiter vom Zombie, der Angriff endet 19 Bilder spaeter, und das Kopfplatzen braucht einen
+        # Treffer mit nr < 15 (weapon.c:757 -> comb_flg 0x10, en26.c:954-985): kurz vorgehen, dann zielen.
         kill_replay = (WALK.format(equip=EQUIP) +
-                       '1066 keys aim\n1072 keys aim next_target\n1075 keys aim\n1080 keys aim attack\n1083 keys aim\n'
-                       '1096 keys aim attack\n1099 keys aim\n1112 keys aim attack\n1115 keys none\n')
+                       '1081 keys forward\n1085 keys aim\n1091 keys aim next_target\n1094 keys aim\n1099 keys aim attack\n1102 keys aim\n'
+                       '1115 keys aim attack\n1118 keys aim\n1131 keys aim attack\n1134 keys none\n')
         # Kopfplatzen (bhEne26_DmgCheckType00, en26.c:864-872): hp = -1, ExpHeadEffect legt viermal
         # bhEne_SetNikuhenEffect an (en26.c:3350-3356 -> zonzon.c:768, eff id 362), NeckBloodEffect(0)
         # je Winkel zweimal bhEne_SetBlood3 (en26.c:3369-3384 -> zonzon.c:634, eff id 370), also acht.
         # EXP0_I(0x78) = -1 sperrt danach SetNikuhenEffect2 (en26.c:1085), es kommen keine weiteren 362.
-        burst = run('burst', 1086, kill_replay)
+        burst = run('burst', 1105, kill_replay)
         z = en26(burst)
         ids = [e['id'] for e in burst['effects']]
         assert z['hp'] == -1 and ids.count(362) == 4 and ids.count(370) == 8, \
             ('Kopfplatzen ohne 4x362/8x370 (en26.c:868/869)', z['hp'], sorted(set(ids)), ids.count(362), ids.count(370))
         assert 'Nikuhen' not in burst['_log'] and 'Blood3' not in burst['_log'] and 'bhEff362' not in burst['_log'] \
             and 'bhEff370' not in burst['_log'], 'Kopfplatzen meldet eine Luecke'
-        kill = run('kill', 1135, kill_replay, trace=True)
+        kill = run('kill', 1154, kill_replay, trace=True)
         z = en26(kill)
         assert kill['combat_hits'] >= 1, ('kein Treffer', kill['combat_shots'], kill['combat_hits'])
         assert z['hp'] < 0 and z['work']['mode'][0] == 4 and z['work']['flg'] & 2, \

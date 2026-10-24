@@ -127,6 +127,10 @@ struct SceneTriangle {
     // bhPutModel-Route entscheidet aus draw_tp und UA/DB, ob der OT-Cache CLAMP
     // statt des Texturheaders setzt (ps2_dummy.c:1420). Andere Besitzer bleiben offen.
     std::int16_t cnk_strip_head=-1;bool texture_cache_clamp=false;
+    // pCnkCsVu1FuncTbl[(ucFlag&0x18)|ulCnkCurrentDrawMode] (ps2_NinjaCnk.c:106/1764/1921/2353): Simple-
+    // Modi 2/3 ohne NJD_FST_DB 0x10 zeichnen mit vu1DrawTriangleStrip*Single, das ein Dreieck mit
+    // 0 < fNz an allen drei Eckpunkten (Normal-z im Kameraraum, :1214-1218) verwirft (ps2_Vu1Strip.c:939/1174).
+    bool single_sided=false;
     // objitm.c:471-492 / game.c:371-376: ob_spc[0] of the five original water rooms.
     // ulDrawGeneralPurposeWater bypasses the translucent OT (ps2_NinjaCnk.c:1927/2359):
     // direct draw after the player, before bhEtcMirrorDrawModel and the final OT, no OT CLAMP;

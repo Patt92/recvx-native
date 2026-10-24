@@ -62,6 +62,8 @@ int main(int argc,char** argv){try{
      check(out_ticks==32,"zoom-out does not take 32 passes, got "+std::to_string(out_ticks));
      check(std::abs(previous-(8.f+32.f*3.2f))<1e-2f,"zoom-out does not reach the original switch distance, got "+std::to_string(previous));
      check(state.phase()==1,"zoom-out does not continue into the zoom-in phase");
+     // DrawSubItem (itemview.c:266-273): nur 33, 34 und 142 zeichnen das Modell ein zweites Mal.
+     for(unsigned item=1;item<156;++item)check(inspection_draws_twice(item)==(item==33||item==34||item==142),"double model draw on item "+std::to_string(item));
      // Das Ergebnisitem startet auf seinem eigenen hoseipos.
      check(std::abs(state.model_offset().y-inspection_model_offset(35).y)<1e-4f,"the result item does not start on its own hoseipos");
      // Einzoomen: dieselben 32 Durchläufe zurück bis zur Ruhelage.
@@ -137,7 +139,10 @@ int main(int argc,char** argv){try{
             return render(hold,show,name);};
          const auto lowered_draw=draw_pickup(33,"offset-low"),raised_draw=draw_pickup(136,"offset-high");
          check(lowered_draw.pixels>500&&raised_draw.pixels>500,"the offset comparison frames draw nothing");
-         check(lowered_draw.cy+1.f<raised_draw.cy,"a more negative hoseipos must draw higher in the identity-basis item view: "+std::to_string(raised_draw.cy)+" -> "+std::to_string(lowered_draw.cy));}
+         // 33 zeichnet zusaetzlich die zweite Luger um +1 y (itemview.c:266-273), also tiefer; die erste
+         // Kopie liegt wie 136 nur um hoseipos verschoben. Darum die Oberkante statt des Schwerpunkts.
+         check(lowered_draw.top+1<raised_draw.top,"a more negative hoseipos must draw higher in the identity-basis item view: "+std::to_string(raised_draw.top)+" -> "+std::to_string(lowered_draw.top));
+         check(lowered_draw.pixels>raised_draw.pixels*3/2,"item 33 lacks the second model draw of DrawSubItem");}
         // Nach dem Durchlauf steht das Ergebnis wieder in Ruhelage.
         for(unsigned i=0;i<120&&menu.inspection.running();++i)menu.tick(inv);
         check(!menu.inspection.running()&&inv.contains(35),"the transformation did not finish through the menu");

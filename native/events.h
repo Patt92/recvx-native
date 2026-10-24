@@ -107,6 +107,9 @@ public:
     std::function<void()> release_cinematic_player;
     std::function<bool(const DoorRequest&)> door;
     void inherit_progress(const EventVm& previous);
+    // bhInitObjItm (objitm.c:147): beim Spielstart (bhFirstGameStart -> system.c:1394) wird der
+    // itwp-Pool genullt; danach beschreibt bhSetItem wieder die Plaetze dieses Raums.
+    void init_item_pool();
     static constexpr unsigned room_change_gm_mask=0x9B8C00CBu; // system.c:185 bhInitRoomChangeSystem
     /* bhInitEvent, event.c:352: enemy pass before scd0 and scheduler. */
     std::function<void()> initialize_enemies;
@@ -208,6 +211,10 @@ private:
     bool pickup_decision_pending_=false; // GetItem testmode 0 still owed (sub1.c:3452 gate)
     unsigned acquired_file_=~0u;
     std::vector<unsigned> room_items_,room_item_flags_; // rom->itmp id/flg
+    // sys->itwp (system.c:447): fester Pool aus 39936/0x4E0 = 32 O_WRK. bhInitObjItm (objitm.c:147,
+    // system.c:1394) nullt ihn nur beim Spielstart; bhSetItem (objitm.c:222) beschreibt je Raum nur
+    // die Plaetze unter rom->itm_n (room.c:141). Hoehere Plaetze behalten flg/id eines frueheren Raums.
+    std::array<unsigned,32> item_pool_flg_{},item_pool_id_{};
     std::vector<NJS_POINT3> positions_;
     void disable_item(const Task& task,unsigned op,std::size_t pc,unsigned item);
     void begin_pickup(unsigned item);

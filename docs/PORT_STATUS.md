@@ -2,22 +2,22 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **91.0 %** weighted, **82.7 %** fully evidenced (587/710 mechanisms; not overall game completion).
+Explicit evidence scope: **91.0 %** weighted, **82.7 %** fully evidenced (598/723 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
 | Area | Mechanisms | Evidence scope | Fully evidenced | Partial | Open |
 |---|---:|---:|---:|---:|---:|
-| Enemies/AI | 94/114 | 91.2 % | 82.5 % | 20 | 0 |
-| Effects | 232/251 | 96.2 % | 92.4 % | 19 | 0 |
+| Enemies/AI | 95/117 | 90.6 % | 81.2 % | 22 | 0 |
+| Effects | 233/251 | 96.4 % | 92.8 % | 18 | 0 |
 | Events/script | 78/93 | 91.9 % | 83.9 % | 15 | 0 |
-| Player/combat | 51/69 | 87.0 % | 73.9 % | 18 | 0 |
-| Room/camera/door | 16/40 | 70.0 % | 40.0 % | 24 | 0 |
-| Menu/items/text | 47/61 | 85.2 % | 77.0 % | 10 | 4 |
+| Player/combat | 54/73 | 87.0 % | 74.0 % | 19 | 0 |
+| Room/camera/door | 21/45 | 73.3 % | 46.7 % | 24 | 0 |
+| Menu/items/text | 48/62 | 85.5 % | 77.4 % | 10 | 4 |
 | Models/animation | 10/16 | 78.1 % | 62.5 % | 5 | 1 |
 | Audio | 29/32 | 95.3 % | 90.6 % | 3 | 0 |
 | Flow/saving | 30/34 | 94.1 % | 88.2 % | 4 | 0 |
-| Platform (host-replaced) | 22/38 | 78.9 % | 57.9 % | 16 | 0 |
+| Platform (host-replaced) | 23/39 | 79.5 % | 59.0 % | 16 | 0 |
 
 Only ledger entries with independent native evidence count. Matching names, original sources, and quarantined generators never count as port evidence.
 

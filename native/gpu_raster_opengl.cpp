@@ -92,7 +92,19 @@ struct Gl {
 
 const char* common_glsl=R"GLSL(#version 410 core
 // Gleiche Operanden wie die Bandstufe, ohne Kontraktion oder algebraische Ersatzformel.
-float div_rn(float x,float y){precise float result=x/y;return result;}
+// GLSL erlaubt fuer x/y 2.5 ULP (Apple-GL weicht messbar ab); der Quotient wird ueber den exakten fma-Rest
+// schrittweise auf den naechstliegenden Wert (Gleichstand: gerade Mantisse) gezogen, wie IEEE-Division der Bandstufe.
+float div_rn(float x,float y){
+    precise float q=x/y;
+    if(isinf(q)||isnan(q)||q==0.0||isinf(y))return q;
+    precise float best=q;precise float rest=abs(fma(-q,y,x));
+    for(int step=0;step<3;++step){precise float from=best;
+        for(int k=-1;k<=1;k+=2){
+            precise float c=uintBitsToFloat(uint(int(floatBitsToUint(from))+k));
+            precise float r=abs(fma(-c,y,x));
+            if(r<rest||(r==rest&&(floatBitsToUint(c)&1u)==0u)){best=c;rest=r;}}
+        if(best==from)break;}
+    return best;}
 uint ch(uint c,uint s){return (c>>s)&255u;}
 float edge(vec2 a,vec2 b,float x,float y){precise float r=(b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);return r;}
 bool inclusive(vec2 from,vec2 to){return to.y<from.y||(to.y==from.y&&to.x>from.x);}
@@ -387,9 +399,9 @@ public:
             bind(2,GL_TEXTURE_2D,setup_texture_);const auto* source=barrier_?a_:read_;
             bind(3,GL_TEXTURE_2D,source[0]);bind(4,GL_TEXTURE_2D,source[1]);bind(5,GL_TEXTURE_2D,source[2]);
             for(;group<groups_.size()&&groups_[group].first<ends[phase];++group){const auto& g=groups_[group];
-                if(barrier_)barrier_();else copy(fbo_a_,fbo_r_,g.bounds,3);
+                if(barrier_)barrier_();else copy_targets(g.bounds);
                 gl_.BindFramebuffer(GL_FRAMEBUFFER,fbo_a_);
-                bind(0,GL_TEXTURE_2D,g.point?g.texture:blank_point_);bind(1,GL_TEXTURE_2D,g.point?blank_:g.texture);
+                bind(0,GL_TEXTURE_2D,g.point?g.texture:blank_point_);bind(1,GL_TEXTURE_2D,g.point||!g.texture?blank_:g.texture);
                 gl_.BindSampler(1,g.point?0:g.sampler);
                 gl_.DrawArrays(GL_TRIANGLES,GLint(g.first*6),GLsizei(g.count*6));++draw_calls_;}
             if(phase<2&&frame.shadows&&frame.shadow_pass[phase]&&shadows){
@@ -454,7 +466,8 @@ private:
         if(fbo_a_&&W==width_&&H==height_)return;
         const GLenum formats[3]={GL_R32UI,GL_R32F,GL_R32F},externals[3]={GL_RED_INTEGER,GL_RED,GL_RED},types[3]={GL_UNSIGNED_INT,GL_FLOAT,GL_FLOAT};
         for(int i=0;i<3;++i){surface(a_[i],formats[i],externals[i],types[i],W,H);surface(read_[i],formats[i],externals[i],types[i],W,H);}
-        if(!fbo_a_){fbo_a_=framebuffer(a_,3);fbo_r_=framebuffer(read_,3);}
+        if(!fbo_a_){fbo_a_=framebuffer(a_,3);
+            for(int i=0;i<3;++i){fbo_a1_[i]=framebuffer(&a_[i],1);fbo_r1_[i]=framebuffer(&read_[i],1);}}
         width_=W;height_=H;}
     void out_targets(int w,int h){
         if(fbo_out_&&w==out_width_&&h==out_height_)return;
@@ -469,6 +482,9 @@ private:
             gl_.ReadBuffer(buffers[i]);gl_.DrawBuffers(i+1,buffers);
             gl_.BlitFramebuffer(r.x0,r.y0,r.x1,r.y1,r.x0,r.y0,r.x1,r.y1,GL_COLOR_BUFFER_BIT,GL_NEAREST);}
         const GLenum all[3]={GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT0+1,GL_COLOR_ATTACHMENT0+2};gl_.DrawBuffers(attachments,all);}
+    // A nach Lesesatz je Anhang ueber eigene Einzelanhang-Framebuffer: Apple-OpenGL lehnt Blits aus
+    // R32F-Anhaengen ab (GL_INVALID_OPERATION), wenn derselbe Framebuffer einen R32UI-Anhang traegt.
+    void copy_targets(const Rect& r){for(int i=0;i<3;++i)copy(fbo_a1_[i],fbo_r1_[i],r,1);}
     template<class T> void upload_rows(GLuint& texture,int& rows,const T* data,std::size_t count,int per_row,int texels){
         const int need=std::max(1,int((count+std::size_t(per_row)-1)/std::size_t(per_row)));
         if(need>max_texture_||per_row*texels>max_texture_)throw std::runtime_error("OpenGL: frame exceeds the maximum texture size");
@@ -586,7 +602,7 @@ private:
     }
     void composite(const raster::ShadowWork& c,std::size_t layer,int W,int H){
         if(c.fog_power>255u)throw std::runtime_error("shadow: invalid fog channel");
-        copy(fbo_a_,fbo_r_,{0,0,W,H},3);
+        copy_targets({0,0,W,H});
         gl_.BindFramebuffer(GL_FRAMEBUFFER,fbo_a_);gl_.Viewport(0,0,W,H);gl_.UseProgram(composite_);
         gl_.Uniform2f(gl_.GetUniformLocation(composite_,"u_size"),float(W),float(H));
         gl_.Uniform4f(gl_.GetUniformLocation(composite_,"u_rect"),c.rx0,c.ry0,c.rx1,c.ry1);
@@ -598,7 +614,7 @@ private:
     TextureBarrier barrier_=nullptr;
     std::shared_ptr<Context> ctx_;Gl& gl_;std::string renderer_,version_;bool anisotropy_=false;GLint max_texture_=0,max_layers_=0;
     GLuint raster_=0,mask_=0,composite_=0,resolve_=0,vao_=0,samplers_[2][2][2]{},blank_=0,blank_point_=0;
-    GLuint a_[3]{},read_[3]{},out_[2]{},fbo_a_=0,fbo_r_=0,fbo_out_=0,setup_texture_=0,tris_texture_=0;
+    GLuint a_[3]{},read_[3]{},out_[2]{},fbo_a_=0,fbo_a1_[3]{},fbo_r1_[3]{},fbo_out_=0,setup_texture_=0,tris_texture_=0;
     GLuint mask_a_=0,mask_r_=0,fbo_mask_a_=0,fbo_mask_r_=0;int mask_layers_=0;
     int width_=0,height_=0,out_width_=0,out_height_=0,setup_rows_=0,tris_rows_=0;
     std::vector<GpuSetup> setups_;std::vector<Group> groups_;std::vector<GpuShadowTri> tris_;std::vector<std::uint32_t> staging_;

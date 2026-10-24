@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """RM_7250 Schwarze Witwe: Griff mit plp->mnwP = epw->mnwP (en03.c:6825).
 
-Gegner 1 packt die Spielerin ohne Eingabe (Headless, --enemy-ai on). Der Griff
+Die Spielerin geht kurz auf die Spinne zu, Gegner 1 packt sie (Headless, --enemy-ai on). Ohne
+Eingabe steht sie in act_sta (flg 0x40000, player.c:2234); bhFixPosition (player.c:1538-1558) hebt dort den
+Schub aus bhCheckPlayer (hitchk.c:5765) wieder auf, die Spinne schiebt sie also nicht in Reichweite. Der Griff
 haengt die Spinnenbibliothek ueber den Dienst player_library ein und schreibt
 danach den vorher gelesenen Spielerstand zurueck. Vorher setzte genau dieses
 Zurueckschreiben plp->mnwP wieder auf mnwPb, und die Griffmotion 62/63 fehlte
@@ -21,8 +23,10 @@ def main():
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         state = Path(tmp) / 'state.json'
+        replay = Path(tmp) / 'walk.txt'
+        replay.write_text('200 keys forward\n225 keys none\n')
         run = subprocess.run([str(args.runtime.resolve()), '--data', str(args.data.resolve()), '--in-game', '--headless',
-                              '--enemy-ai', 'on', '--room', 'RM_7250.RDX', '--frames', '600', '--state', str(state)],
+                              '--enemy-ai', 'on', '--room', 'RM_7250.RDX', '--frames', '600', '--replay', str(replay), '--state', str(state)],
                              capture_output=True, text=True, timeout=600)
         assert run.returncode == 0, run.stderr[-2000:]
         assert 'bhSetMotion(plp)' not in run.stdout, 'Griff spielt die Spielermotion aus der falschen Bibliothek:\n' + run.stdout[-1500:]

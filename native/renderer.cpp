@@ -244,6 +244,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         if(triangle.camera_mask && triangle.object/32+triangle.hidden_offset<16 && (hidden[triangle.object/32+triangle.hidden_offset] & (0x80000000u>>(triangle.object%32))))continue;
         std::vector<SceneVertex> polygon;polygon.reserve(4);
         NJS_MATRIX* const triangle_view=view_of(triangle);
+        if(triangle.single_sided){bool back=true;for(const auto& vertex:triangle.vertices){NJS_VECTOR n=vertex.normal,c;njCalcVector(triangle_view,&n,&c);back=back&&0<c.z;}if(back)continue;}
         for(auto vertex:triangle.vertices){njCalcPoint(triangle_view,&vertex.position,&vertex.position);polygon.push_back(vertex);}
         float clip_near=near,clip_far=far;bool clip_z=true;
         if(strip_rule&&triangle.strip_clip){

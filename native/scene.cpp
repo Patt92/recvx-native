@@ -396,7 +396,7 @@ private:
                             // NJD_FST_UA through njSetConstantAttr (map.c:723) still blends with it.
                             triangle.blend_register=chunk_blend_register(blend_src,blend_dst);
                             if(use_alpha)triangle.blend=SceneBlend::Ninja;
-                            if(type!=64)triangle.cnk_strip_head=std::int16_t(view.u8(chunk+1));
+                            triangle.cnk_strip_head=std::int16_t(view.u8(chunk+1)); /* auch njCnkCs (64): dieselbe Tabelle, :1764 */
                             triangle.strip_clip=true;if(segment_base)triangle.strip_segment=segment_base+(i-2)/58;
                             if(((i&1)!=0)^reverse)std::swap(triangle.vertices[0],triangle.vertices[1]);
                             if(output.triangles.size()>=2000000)throw std::runtime_error("room triangle limit exceeded");
@@ -441,7 +441,7 @@ void route_model_texture_cache(std::vector<SceneTriangle>& triangles,unsigned dr
     if(draw_tp>3)throw std::runtime_error("bhPutModel draw_tp outside jump table");
     const bool simple=(draw_tp&1u)!=0; // 0 EasyMulti, 1 SimpleMulti, 2 Easy, 3 Simple
     for(auto& t:triangles)if(t.cnk_strip_head>=0){const unsigned flag=unsigned(t.cnk_strip_head);
-        t.texture_cache_clamp=(flag&8u)&&(!simple||(flag&16u));}
+        t.texture_cache_clamp=(flag&8u)&&(!simple||(flag&16u));t.single_sided=simple&&!(flag&16u);}
 }
 std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>& data,std::size_t offset){return Decoder(data).decode_bundle(offset);}
 Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint32_t model,const NJS_MATRIX& world){return Decoder(memory,size).decode_memory_model(model,world);}

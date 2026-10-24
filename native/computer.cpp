@@ -37,12 +37,14 @@ void ComputerTerminal::tick(unsigned held,unsigned pressed,EventVm& events,Audio
     // Script command 240: bhStFlg(sys->ev_flg, flag).
     for(unsigned i=0;i<frame_->flag_count;++i)events.set_flag(1,frame_->flags[i],0);
     if(!running){
-        // bhExitSpEvtComputer: st_flg, cb_flg, sp_flg, gm_flg and ts_flg as the
-        // original leaves them. Nothing else writes those words while the
-        // terminal task owns the pass, so the snapshot is written back whole.
-        events.flags[5][0]=frame_->system.st_flg;events.flags[10][0]=frame_->system.cb_flg;
-        events.flags[6][0]=frame_->system.sp_flg;events.flags[11][0]=frame_->system.gm_flg;
-        events.flags[12][0]=frame_->system.ts_flg;
+        // bhExitSpEvtComputer (sp_evt.c:762-777) changes the live sys words in
+        // place. The event task keeps running while the terminal is open
+        // (system.c:659/2121) and may change these words meanwhile (RM_1090
+        // event 5: bhCineSet 1 clears cb_flg/st_flg 0x4), so the open-time copy
+        // must not be written back.
+        events.flags[11][0]|=0x4u;events.flags[6][0]=~0u;events.flags[11][0]|=0x8000u;
+        events.flags[5][0]&=~0x4000000u;events.flags[10][0]&=~0x400000u;
+        events.flags[12][0]|=0x20000u;events.flags[12][0]&=~0x80u;
         if(frame_->stand_player){
             // sp_evt.c:781 bhStandPlayerMotion (player.c:1114) beim Spielerbesitzer.
             if(stand_player)stand_player();else ++stand_gaps_;

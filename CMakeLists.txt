@@ -620,6 +620,29 @@ if(BUILD_TESTING)
     add_test(NAME rm1090_terminal_wrong_password COMMAND "${Python3_EXECUTABLE}" -I
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm1090_terminal_wrong_password_check.py"
       --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3120.RDT")
+      add_test(NAME rm3120_card_reader COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm3120_card_reader_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_1130.RDT")
+      add_test(NAME rm1130_submarine_release COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm1130_submarine_release_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_2040.RDT")
+      add_test(NAME rm2040_alfred_skip COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm2040_alfred_skip_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3220.RDT")
+      add_test(NAME rm3220_elevator_arrival COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm3220_elevator_arrival_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
+    add_test(NAME rm1090_terminal_cancel COMMAND "${Python3_EXECUTABLE}" -I
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm1090_terminal_cancel_check.py"
+      --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
   endif()
   if(TARGET recvx-runtime AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0080.RDT")
     add_test(NAME zombie_blood_pool COMMAND "${Python3_EXECUTABLE}" -I
@@ -1331,6 +1354,9 @@ endif()
   add_executable(recvx-face-tests tests/native/face_test.cpp)
   target_link_libraries(recvx-face-tests PRIVATE recvx_game)
   add_test(NAME original_face_geometry COMMAND recvx-face-tests)
+  add_executable(recvx-face-work-tests tests/native/face_work_test.cpp)
+  target_link_libraries(recvx-face-work-tests PRIVATE recvx_game)
+  add_test(NAME original_face_work_geometry COMMAND recvx-face-work-tests "${CMAKE_SOURCE_DIR}/data")
   add_executable(recvx-actor-tests tests/native/actor_test.cpp)
   target_link_libraries(recvx-actor-tests PRIVATE recvx_scene)
   add_test(NAME player_motion_skin COMMAND recvx-actor-tests)

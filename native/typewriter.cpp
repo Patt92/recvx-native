@@ -14,8 +14,8 @@ Message save_screen_host_message(unsigned id){
     switch(id){
     case 463:return host_text("Save games");                    // Ersatz fuer "MEMORY CARD " + "slot 1 "
     case 464:return {};
-    case 460:return host_text("Now loading from the save file. \n\nDo not close the game or \nturn off the computer. ");
-    case 484:return host_text("Now saving to the save file. \n\nDo not close the game or \nturn off the computer. ");
+    case 460:return host_text("Now loading from the save file. \n\nDo not close the game or \nturn off the device. ");
+    case 484:return host_text("Now saving to the save file. \n\nDo not close the game or \nturn off the device. ");
     default:return {};
     }
 }

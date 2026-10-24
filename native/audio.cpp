@@ -766,11 +766,13 @@ void AudioMixer::exec_enemy_se(const std::function<int(SoundPoint,SoundPoint)>& 
 }
 void AudioMixer::stop_enemy_sound(unsigned slot){if(slot>=6)throw std::runtime_error("enemy sound slot outside original six voices");stop(18+slot);}
 bool AudioMixer::footstep(unsigned floor,unsigned type,unsigned actor,bool enabled,SoundPoint position,bool syukan){
-    if(actor>=foot_switch_.size()||type>3||(type<2&&floor>4))return false;
-    auto parameter=sound_parameter_3d(position,0);if(syukan){parameter.pan=0;parameter.volume=0;}
+    // sdfunc.c:1462 GetPlayerActionSeSlotNo laeuft vor der Flag-Pruefung: Typ 0/1/4/5 schaltet den Fuss um.
+    // Flag 0 (sdfunc.c:1518-1524) fordert danach nur ListNo -1 an, also keinen Klang, fuer jeden Typ.
     unsigned se_slot=6;
-    if(type<2){foot_switch_[actor]=!foot_switch_[actor];se_slot=11+actor*2+unsigned(foot_switch_[actor]);}
+    if(type<2||type==4||type==5){if(actor>=foot_switch_.size())return false;foot_switch_[actor]=!foot_switch_[actor];se_slot=11+actor*2+unsigned(foot_switch_[actor]);}
     if(!enabled)return true;
+    if(type>3||(type<2&&floor>4))return false;
+    auto parameter=sound_parameter_3d(position,0);if(syukan){parameter.pan=0;parameter.volume=0;}
     const unsigned voice=se_host_voice(se_slot),flags=se_3d_flag(se_slot);
     if(!play_room_sound(2,(type==2?5:floor)&255u,voice))return false;
     if(!(flags&2))apply_se_volume(voice,std::int8_t(parameter.volume+room_env_.player_action));

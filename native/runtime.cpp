@@ -287,6 +287,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         // ControlTypewriter (bup_00.c) als Host-Slotauswahl. typ_md0 laeuft,
         // sobald der Raum das ts_flg-Bit 0x8000 loescht (system.c:1224).
         recvx::Typewriter typewriter;bool typewriter_was_blocked=false;bool load_game_requested=false;
+        bool item_pool_reset=false; // Host-Snapshot laden: sys->itwp wie nach bhInitObjItm
         bool first_game_start=false; // sys->ss_flg 0x100: bhFirstGameStart (system.c:422), verbraucht in bhFinishRoom (room.c:522-534)
         recvx::Inventory inventory;inventory.player=args.player==11?1:args.player==12?2:0;recvx::StatusMenu menu;menu.active=args.inventory;menu.task.frame();if(args.inventory)menu.task.resume(); /* Statustask-Rahmen (ui.h StatusTask); --inventory beginnt diagnostisch direkt in StatusMain */recvx::MessageDialog dialog;
         std::unique_ptr<recvx::GameUi> ui;if(!args.preview)ui=std::make_unique<recvx::GameUi>(args.data,args.mods);if(ui)menu.message_source=[&](unsigned index){return ui->system_message(index);};
@@ -496,6 +497,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                     const int hp=inventory.hp;const bool poison=(inventory.player_stflg()&0x280000u)!=0;const std::int32_t dmlvl=hp>=120?(poison?1:0):hp>=30?1:2;
                     recvx_player_action_reset(&action,actor.position.x,actor.position.z,actor.yaw,wpntp,dmlvl,unsigned(motion));action_player_set=true;action_resume=true;action_pad=0;action_pad_old=0;}world->set_player_character((args.player-10)%4);world->bind_player_action(&action,&inventory);stand_seen=0;world->set_weapon_part2_hook([&]{combat.set_weapon_part2_hidden(true);});world->set_weapon_models_hook([&](bool hidden){combat.set_weapon_models_hidden(hidden);});world->set_camera_offset_owner(&camera_offset);world->set_enemy_ai(enemy_ai);world->set_enemy_grab(enemy_grab);world->set_enemy_attacks(enemy_attacks);world->combat_difficulty(inventory.game_mode);auto previous=std::move(events);events=std::make_unique<recvx::EventVm>(bytes,inventory,dialog);events->costume=unsigned((args.player-10)/4); /* sys->costume: SYSTEM-Eintrag ply_id + 10 + costume*4 */
                 if(previous)events->inherit_progress(*previous);
+                if(first_game_start||item_pool_reset){item_pool_reset=false;events->init_item_pool();} // bhFirstGameStart -> mn_mode0 1 -> bhInitObjItm (system.c:462/1394)
                 // bhSysCallInit installs ts_flg 0x3df80 (system.c:453).  At
                 // this runtime's gameplay handoff the original input lock
                 // 0x80 has been released (sub1.c:3153, sp_evt.c:777).
@@ -694,6 +696,21 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
            whose event pass already ran through finish_room_exit. */
         int door_task_mode=-1;bool door_game_stopped=false,door_exit_pass=false;
         std::function<void()> door_task_tick;
+        /* bhStartDoorDemo Fall 0 (room.c:949-996) als eigener Schritt: der erste Task-7-Lauf nach der Anforderung,
+           vor bhControlPlayer (game.c:24-26, main.c:195-201). Nativ laeuft der Eventpass (Task 8) vor dem Spielpass
+           desselben Takts; eine dort gestellte Anforderung (DoorCall, auch mit nachfolgendem 12 01) startet deshalb
+           unmittelbar nach dem Eventpass, sonst saehe der folgende Spielerpass noch sp_flg 0x1 (player.c:1365). */
+        std::function<void()> door_demo_start=[&]{
+                if(events){const auto before=events->tick_count;events->finish_room_exit();door_exit_pass=events->tick_count!=before;}
+                const auto request=*queued_door;queued_door.reset();
+                fade_set(0xFF000000u,10.0f);
+                if(events){events->flags[12][0]=(events->flags[12][0]|0x100000u)&~0x800u;
+                    events->flags[6][0]=(events->flags[6][0]&0x200u)|0x48u;}
+                /* bhInitDoor/bhReadDoorData (system.c:956-976): die native Dateilese ist synchron.
+                   bhSetDoor (njSetBackColor 0, Prozeduren) laeuft erst in Modus 4. */
+                door.begin(args.data,args.mods,request,false);door_task_mode=0;
+                if(!door.direct())audio.load_door_sounds(door.sound_bank());audio.room_fade_out(); /* bhStartDoorDemo: after the exit scenario's BGM/BG requests */
+        };
         auto transition_tick=[&](){door_exit_pass=false;if(!transition_pending)return false;
             /* system.c:1886: ts_flg &= ~0x180 im Bild nach dem Raumladen. Task 7 laeuft dann
                vollstaendig, beginnend mit bhStartDoorDemo Fall 1 (game.c:24-26, room.c:997-1009)
@@ -708,17 +725,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                Ausblende FF000000 ueber 10, SendSoundCommand(2), ts_flg 0x100000 an / 0x800 aus
                (Task 11 laeuft ab jetzt; bhControlEOR ruht, sync.c:115), sp_flg = 0x48 (+0x200).
                Spiel- und Eventtask laufen weiter, bis der Tuertask in Modus 2 cb_flg 0x2 frei sieht. */
-            if(queued_door&&door_task_mode<0){
-                if(events){const auto before=events->tick_count;events->finish_room_exit();door_exit_pass=events->tick_count!=before;}
-                const auto request=*queued_door;queued_door.reset();
-                fade_set(0xFF000000u,10.0f);
-                if(events){events->flags[12][0]=(events->flags[12][0]|0x100000u)&~0x800u;
-                    events->flags[6][0]=(events->flags[6][0]&0x200u)|0x48u;}
-                /* bhInitDoor/bhReadDoorData (system.c:956-976): die native Dateilese ist synchron.
-                   bhSetDoor (njSetBackColor 0, Prozeduren) laeuft erst in Modus 4. */
-                door.begin(args.data,args.mods,request,false);door_task_mode=0;
-                if(!door.direct())audio.load_door_sounds(door.sound_bank());audio.room_fade_out(); /* bhStartDoorDemo: after the exit scenario's BGM/BG requests */
-            }
+            if(queued_door&&door_task_mode<0)door_demo_start();
             /* Host-Skip (doors.h): die Eingabe liegt vor diesem Aufruf; der Abschluss laeuft wie bisher sofort
                in diesem Takt und vor jedem Spielpass, auch wenn die Ausblende noch laeuft. */
             if(door_task_mode>=0&&door.skipped()){door_task_tick();return true;}
@@ -952,8 +959,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 previous_player=std::move(player);player=std::move(body);args.player=snap.host.body;}
             recvx::restore_inventory(snap,inventory);const auto repaired_file_items=inventory.repair_owned_file_items();restoring=snap;if(events)events->cancel_item_request();
             audio.set_room_sound_case(snap.host.room_sound_case); // Hoststand: dasselbe Raumklangpaket wie beim Sichern (Format 1: Fall 0 wie der originale Retry)
+            item_pool_reset=true; /* Host-Snapshot wie ein Laden: bhInitObjItm leert sys->itwp (objitm.c:147) */
             try{debug_room(*target,unsigned(std::uint8_t(snap.save.pos_no)));}
-            catch(...){restoring.reset();inventory=previous_inventory;if(previous_player){player=std::move(previous_player);args.player=previous_body;}throw;}
+            catch(...){item_pool_reset=false;restoring.reset();inventory=previous_inventory;if(previous_player){player=std::move(previous_player);args.player=previous_body;}throw;}
             restoring.reset();if(previous_player)combat=recvx::CombatController(args.data,args.mods);
             return "Snapshot "+std::to_string(slot+1)+" geladen: "+snap.host.room+(repaired_file_items?" / doppelte Dateiitems entfernt: "+std::to_string(repaired_file_items):"");
         };
@@ -1630,11 +1638,22 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             // plp->mlwP->objP mit dem Stand vor dem Vorschub, dann die Uhr.
             world->player_set_motion_pose(motion,action.frm_no,0u,action.hokan_count,action.hokan_rate);
             recvx_player_action_motion(&action,player->motion_frames(motion));animation=action.frm_no;
-            // player.c:1538-1558 (bhFixPosition unter plp->flg 0x40000) laeuft hier nicht: offene Luecke, siehe
-            // docs/port_ledger.tsv player.c:bhControlPlayer:bhFixPosition (Startueberblendung verschiebt um 0.5).
             // player.c:1504: nach jedem bhSetMotion flg 0x400000 = letztes Bild (frm_no / 65536 gegen
             // das unsigned frm_num - 1). bhCPM2_act_cro liest es im folgenden Pass.
             {auto& flg=events->flags[13][0];if(std::uint32_t(action.frm_no/65536)>=player->motion_frames(motion)-1u)flg|=0x400000u;else flg&=~0x400000u;events->player_flags=flg;}
+            // player.c:1538-1558: unter plp->flg 0x40000 bhFixPosition(XYZ) mit PlyLegRoute[flg 0x80000];
+            // dst aus px/ax..az und den objP dieses bhSetMotion, src = owP[Fuss] des letzten bhCalcModel
+            // (commit_player_joints im Kopfpass, player.c:1688). Gilt fuer bhCPM0_action und _event gleich.
+            float fix_py=from.y;
+            if((events->flags[13][0]&0x40000u)){
+                struct FixHost{recvx::RoomWorld* world;const std::vector<recvx::BoneMatrix>* nodes;};
+                FixHost fh{world.get(),&world->player_committed_joints()};
+                RECVX_STAIR_HOST fix{};fix.user=&fh;
+                fix.obj_node=[](void* u,unsigned node,float pos[3],int ang[3])->int{return static_cast<FixHost*>(u)->world->player_obj_node(node,pos,ang)?1:0;};
+                fix.node_position=[](void* u,unsigned n,float out[3]){const auto& v=*static_cast<FixHost*>(u)->nodes;out[0]=v[n].value[12];out[1]=v[n].value[13];out[2]=v[n].value[14];};
+                if(fh.nodes->size()<=21u||!recvx_player_fix_position(&fix,events->flags[13][0],&action.px,&fix_py,&action.pz,actor.pitch,actor.yaw,actor.roll))
+                    world->report_enemy_gap("bhCalcFixOffset: PlyLegRoute-Knoten fehlt im nativen Spielermodell");
+            }
             // bhCPM2_act_wlk/_run/_bak/_bk2 carry the collided step (arp 2.0/3.0/-1.0 and
             // bhAddSpeed); act_std, act_srt and act_sta only carry EXP_WORK.spxn/spzn and run no
             // wall pass, so a scripted teleport (rom->posp) is not pushed out of its own geometry.
@@ -1642,11 +1661,11 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             const int wall_move=event_mode?(m2==4?-1:movement?1:0):(m2>=3&&m2<=6)?1:(m2>=9&&m2<=12)?-1:0;
             if(movement){
                 locomotion=true;
-                actor.position=world->move_player(from,{action.px,from.y,action.pz},wall_move,m2==6,0);
+                actor.position=world->move_player(from,{action.px,fix_py,action.pz},wall_move,m2==6,0);
                 if(world->pushing())events->flags[5][0]|=4;
             }else{
                 locomotion=false;
-                actor.position={action.px,from.y,action.pz};
+                actor.position={action.px,fix_py,action.pz};
                 /* Ohne Bewegungsschritt laeuft kein move_player, der Koerperteil
                  * von bhControlPlayer (player.c:1578-1655) gilt aber weiter: arn
                  * folgt dem arp, das bhCPM2_act_std/_srt/_sta hinterlassen hat
@@ -1837,6 +1856,10 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
    damit bhMainSequence (bhControlEnemy/Player/Effect/ObjItm/Camera/Light)
    laufen dann nicht: die Welt steht still, waehrend das Inventar offen ist.
    Task 8 (bhControlEvent) und der Soundmonitor laufen weiter. */
+                /* Takt = Task 8 (Bild N), Task 11 (N), dann Task 7 (N+1). Stellte der Eventpass gerade eine
+                   Tueranforderung (cb_flg 0x1), beginnt Task 7 (N+1) mit bhStartDoorDemo Fall 0 (game.c:24-26)
+                   vor bhControlPlayer: sp_flg 0x48 statt der vom Skript eventuell danach gesetzten -1 (12 01). */
+                if(!transitioning&&queued_door&&door_task_mode<0&&events&&(events->flags[10][0]&1u))door_demo_start();
                 const bool world_pass=!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()&&!map_active&&!menu.active; /* Task 7 (bhSysCallGame) laeuft; derselbe Wert fuer beide Haelften des Passes */if(world_pass){world->set_simulation_flags(events?events->flags[6][0]:~0u);{unsigned on=pad_on,ps=pad_ps;if(events){if(!(events->flags[6][0]&0x20u))on=ps=0;if(events->flags[10][0]&4u){on&=0x1188Fu;ps&=0x1188Fu;}}world->set_pad(on,ps);} /* system.c:522-534 */world->set_screen_fade_hooks(fade_set,[&]{return screen_fade.previous();});world->set_player_weapon(inventory.weapon());world->set_player_way(combat.aim_yaw());world->set_player_speed(action.spd);world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);world->set_player_dmlvl(action.dmlvl);world->set_player_wpntp(action.wpntp);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick_enemy_pass();world_requests();} /* game.c:48 bhControlEnemy und Kopf von bhControlPlayer */{const bool playing=movie.active();movie.tick();if(playing&&!movie.active()&&world)world->restore_background(1);}audio.mix();if(!menu.active&&!map_active){locomote(replay_move,replay_run,replay_turn);(void)head_step();}if(world_pass){world_player_sync();world->tick_after_player();world_requests();}if(!menu.active&&!map_active)hair_step(); /* game.c:49-51: bhControlPlayer endet mit bhControlPlayerHead/bhCalcModel(plp) (player.c:1683-1688), dann bhControlEffect und bhControlObjItm mit bhObjClpn (objitm.c:2122) */if(!menu.active&&!map_active&&world){world->control_camera(scene,camera);camera_check_pending=true;} /* game.c:53-58 bhSetPlEyeCamera/bhControlCamera; bhCheckCut (game.c:289-296) folgt erst nach dem Zeichnen (Taktbeginn). system.c:777: die Karte stoppt Task 7 */if(!menu.active&&!map_active)third_person_tick();game_over_step(); /* Task 14 nach Task 7 (md1 0) */image.set_discard(i!=frames-1);draw(unsigned(i)); /* bhAllDrawModel in jedem Takt (game.c:61, loop_ct 1): die Zeichenseiteneffekte (bhDrawEffect-Funktionen wie bhEff106-Regen mit rand(), pl_sleep_cnt game.c:358) laufen wie im Spielbild; gerastert wird nur das letzte. --validate-poses ist damit in jedem Takt abgedeckt. */if(frontend_quit)break;}
             if(!args.screenshot.empty())image.save_bmp(args.screenshot);
             if(image.gpu())std::cout<<"GPU raster last frame: "<<image.gpu()->draw_calls()<<" draws, "<<image.gpu()->shadow_composites()<<" shadow composites\n";
@@ -1970,6 +1993,10 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                    Ereignis 4 auf Ebene 0. Ohne diesen Durchlauf verdraengte Ereignis 4 das schlafende Ereignis 5 und die
                    Ereigniskamera blieb auf dem Monitor stehen. Task-7-Anteile (bhCheckExmAtari, bhMainSequence) ruhen. */
                 else if(terminal&&events&&!map_active&&!(events->flags[12][0]&0x100u)&&!door_exit_pass){events->values[2]=unsigned(camera_index);events->tick();}door_task_tick();background_eor.eor(); /* bhControlEOR nach Task 8, vor dem naechsten Spielpass */if(world&&!menu.active&&!map_active)world->end_of_render(); /* sync.c:143-255 Nebelteil desselben bhControlEOR, nach bhCheckCut (Taktbeginn) und Task 8 */
+                /* Takt = Task 8 (Bild N), Task 11 (N), dann Task 7 (N+1). Stellte der Eventpass gerade eine
+                   Tueranforderung (cb_flg 0x1), beginnt Task 7 (N+1) mit bhStartDoorDemo Fall 0 (game.c:24-26)
+                   vor bhControlPlayer: sp_flg 0x48 statt der vom Skript eventuell danach gesetzten -1 (12 01). */
+                if(!transitioning&&queued_door&&door_task_mode<0&&events&&(events->flags[10][0]&1u))door_demo_start();
                 const bool world_pass=!transitioning&&world&&!frontend.active()&&!terminal&&!computer.active()&&!map_active&&!menu.active; /* Task 7 (bhSysCallGame) laeuft; derselbe Wert fuer beide Haelften des Passes */if(world_pass){world->set_simulation_flags(events?events->flags[6][0]:~0u);{unsigned on=pad_on,ps=pad_ps;if(events){if(!(events->flags[6][0]&0x20u))on=ps=0;if(events->flags[10][0]&4u){on&=0x1188Fu;ps&=0x1188Fu;}}world->set_pad(on,ps);} /* system.c:522-534 */world->set_screen_fade_hooks(fade_set,[&]{return screen_fade.previous();});world->set_player_weapon(inventory.weapon());world->set_player_way(combat.aim_yaw());world->set_player_speed(action.spd);world->set_player_attack(combat.attacking());world->set_player_hp(inventory.hp);world->set_player_poisoned(inventory.poisoned);world->set_player_dmlvl(action.dmlvl);world->set_player_wpntp(action.wpntp);if(events&&!menu.active)world->control_item_boxes(events->flags[10][0],events->flags[14][0]); /* bhControlObject: type-100 lid (bhObjItmBox) */world->tick_enemy_pass();world_requests();} /* game.c:48 bhControlEnemy und Kopf von bhControlPlayer */{const bool playing=movie.active();movie.tick();if(playing&&!movie.active()&&world)world->restore_background(1);}audio_frame=audio.mix();if(audio_device&&SDL_GetQueuedAudioSize(audio_device)<48000*4/4)sdl_check(SDL_QueueAudio(audio_device,audio_frame.data(),unsigned(audio_frame.size()*2))==0);
                 if(!args.preview&&args.replay.empty())combat_input={physical.down(recvx::Action::Aim),physical.down(recvx::Action::Attack)||physical.hit(recvx::Action::Attack),physical.turn(),physical.move(),physical.hit(recvx::Action::NextTarget)};
                 if(!menu.active&&!map_active){locomote(replay_move?replay_move:args.preview?keys[SDL_SCANCODE_I]-keys[SDL_SCANCODE_K]:physical.move(),replay_run||(args.preview?bool(keys[SDL_SCANCODE_LSHIFT]):physical.down(recvx::Action::Run)),replay_turn?replay_turn:args.preview?keys[SDL_SCANCODE_L]-keys[SDL_SCANCODE_J]:physical.turn());(void)head_step();} /* system.c:777 stoppt Task 7 waehrend der Karte */if(world_pass){world_player_sync();world->tick_after_player();world_requests();}if(!menu.active&&!map_active)hair_step(); /* game.c:49-51: bhControlPlayer endet mit bhControlPlayerHead/bhCalcModel(plp) (player.c:1683-1688), dann bhControlEffect und bhControlObjItm mit bhObjClpn (objitm.c:2122) */if(!menu.active&&!map_active&&world){world->control_camera(scene,camera);camera_check_pending=true;} /* game.c:53-58 bhSetPlEyeCamera/bhControlCamera; bhCheckCut (game.c:289-296) folgt erst nach dem Zeichnen (Taktbeginn). system.c:777: die Karte stoppt Task 7 */if(!menu.active&&!map_active)third_person_tick();if(args.validate_poses)compose();game_over_step(); /* Task 14 nach Task 7 (md1 0) */

@@ -47,6 +47,7 @@ unsigned original_file_message(unsigned file,unsigned page);
 unsigned original_file_wallpaper(unsigned file);
 // Model_Read_Set: SITEM.mw.pos for an item at rest (hoseipos via itemflg).
 NJS_POINT3 inspection_model_offset(unsigned item);
+bool inspection_draws_twice(unsigned item);
 // ModelScaleSet: 1.52 (1.84 for the eight large read ids) divided by the
 // njScalor of npGetWHDSize's per-axis maxima.
 float inspection_model_scale(unsigned item,const NJS_VECTOR& whd);

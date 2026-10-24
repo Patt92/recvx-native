@@ -112,6 +112,11 @@ int recvx_stairs_begin(RECVX_STAIR_STATE* state,const RECVX_STAIR_AREA* area,int
 // frame advance and the plp->flg 0x400000 last-frame update. Returns 0 on the
 // frame whose termination block handed the player back.
 int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host);
+// player.c:1538-1558: bhFixPosition / bhFixPositionXYZ (Motion.c:857, player.c:1216) ueber
+// bhCalcFixOffset (Motion.c:868, offP NULL, flg 0x80 nicht gesetzt). `flg` ist plp->flg:
+// 0x80000 waehlt PlyLegRoute[1], 0x8000000 die XYZ-Variante. Nutzt obj_node (objP dieses
+// bhSetMotion) und node_position (owP des letzten bhCalcModel). 0, wenn ein Dienst fehlt.
+int recvx_player_fix_position(const RECVX_STAIR_HOST* host,unsigned flg,float* px,float* py,float* pz,int ax,int ay,int az);
 #ifdef __cplusplus
 }
 #endif

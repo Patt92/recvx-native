@@ -162,7 +162,16 @@ static void tank(const std::filesystem::path& data,const char* name,bool natural
 #ifdef UV_PORT_AFTER
 static void route_unit(){
     std::vector<SceneTriangle> t(5);t[0].cnk_strip_head=0;t[1].cnk_strip_head=8;t[2].cnk_strip_head=16;t[3].cnk_strip_head=24;t[4].cnk_strip_head=-1;
-    for(unsigned dt=0;dt<4;++dt){route_model_texture_cache(t,dt);check(!t[0].texture_cache_clamp&&!t[2].texture_cache_clamp&&!t[4].texture_cache_clamp&&t[3].texture_cache_clamp,"UA/DB route mismatch");check(t[1].texture_cache_clamp==!(dt&1),"EasyMulti/SimpleMulti draw mode route mismatch");}
+    for(unsigned dt=0;dt<4;++dt){route_model_texture_cache(t,dt);check(!t[0].texture_cache_clamp&&!t[2].texture_cache_clamp&&!t[4].texture_cache_clamp&&t[3].texture_cache_clamp,"UA/DB route mismatch");check(t[1].texture_cache_clamp==!(dt&1),"EasyMulti/SimpleMulti draw mode route mismatch");
+        // pCnkCsVu1FuncTbl (ps2_NinjaCnk.c:106): nur Simple (draw_tp 1/3) ohne DB 0x10 waehlt *Single.
+        check(t[0].single_sided==bool(dt&1)&&t[1].single_sided==bool(dt&1)&&!t[2].single_sided&&!t[3].single_sided&&!t[4].single_sided,"Single/Double strip route mismatch");}
+    {// ps2_Vu1Strip.c:939: Single verwirft ein Dreieck mit 0 < Normal-z im Kameraraum an allen Ecken, Double nicht.
+     Scene s;s.background=0xff000000;SceneTriangle q;q.color=0xffffffff;q.world_lit=true;
+     q.vertices={SceneVertex{{-1,-1,2},0,0,{0,0,1}},SceneVertex{{1,-1,2},0,0,{0,0,1}},SceneVertex{{0,1,2},0,0,{0,0,1}}};s.triangles.push_back(q);NJS_MATRIX view;njUnitMatrix(&view);
+     SoftwareRenderer r(64,64);r.set_supersampling(1);r.set_render_threads(1);
+     r.draw_view(s,view,32,32);check(r.pixels()[32*64+32]!=0xff000000u,"double-sided triangle not drawn");
+     s.triangles[0].single_sided=true;r.draw_view(s,view,32,32);check(r.pixels()[32*64+32]==0xff000000u,"single-sided back face drawn");
+     for(auto& v:s.triangles[0].vertices)v.normal={0,0,-1};r.draw_view(s,view,32,32);check(r.pixels()[32*64+32]!=0xff000000u,"single-sided front face culled");}
     // Renderer test: same immutable texture, repeat header. Only the triangle route
     // changes; nearest and bilinear must clamp consistently at both axes.
     Scene s;s.background=0xff000000;SceneTexture tex;tex.width=tex.height=2;tex.pixels={0xff0000ff,0xff00ff00,0xffff0000,0xffffffff};s.textures.push_back(tex);

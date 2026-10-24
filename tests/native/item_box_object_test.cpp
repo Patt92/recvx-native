@@ -64,5 +64,27 @@ int main(int argc,char** argv){try{
         world.control_item_boxes(events.flags[10][0],events.flags[14][0]);check(work->type==0&&work->angles[0]==0,"released lid is still controlled");
         ++cases;
     }
+    {
+        // RM_0160 ATR 4: type 4 ohne attr 0x2, prm0 22 >= rom->itm_n 3. hitchk.c:4863 liest itwp[22]; der
+        // Pool ist seit bhInitObjItm (objitm.c:147) genullt, flg 0x1 fehlt, der Fall geht in den
+        // Objektzweig (:4903) und startet die Kiste obwp[22]. Mit dem Weltbesitzer wie in runtime.cpp.
+        const auto bytes=read_asset_file(data/"rooms"/"RM_0160.RDT",64*1024*1024);
+        const auto scene=decode_scene(bytes);auto actor=scene.spawns.at(0);
+        std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+        RoomWorld world(bytes,scene,actor,motion,frame,audio,data,{},"RM_0160");
+        Inventory inventory;MessageDialog dialog;EventVm events(bytes,inventory,dialog);
+        world.bind_player_collision(events);events.flags[12][0]|=0x200;
+        events.item_work=[&](unsigned index,unsigned& flg,unsigned& id){const auto* e=world.state(3,index);if(!e)return false;flg=e->object_flags;id=e->identity;return true;};
+        check(events.interactions.size()>4,"RM_0160 ATR 4 missing");
+        const auto& area=events.interactions[4];
+        check((area.flags&1)&&area.type==4&&!(area.attribute&2)&&area.parameters[0]==22&&!world.state(3,22),"RM_0160 ATR 4 is not the itwp fall-through entry");
+        const auto* work=world.state(2,22);check(work&&work->identity==376&&(work->object_flags&1),"RM_0160 box work obwp[22] missing");
+        actor.position={area.position.x+area.extent.x*.5f,area.position.y,area.position.z+area.extent.z*.5f+2};
+        actor.yaw=0;events.item_box_object=[&](unsigned index){return world.start_item_box(index);};events.set_player_mode=[&](unsigned m){world.set_player_mode(m);};world.set_player_mode(3u<<16);
+        check(events.interact(actor.position,actor.yaw,area.floor),"RM_0160 box interaction did not start");
+        check(work->type==100&&(events.flags[14][0]&0x18000)==0x18000&&(events.flags[5][0]&4),"RM_0160 box start lacks original object/player flags");
+        check(events.errors.empty(),"RM_0160 box interaction reported a gap");
+        ++cases;
+    }
     std::cout<<"Native lid timing, sound/flags, pause and drawn geometry in "<<cases<<" original rooms verified.\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

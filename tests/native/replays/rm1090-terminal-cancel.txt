@@ -1,0 +1,46 @@
+# RM_1090: Computer wie rm1090-terminal-wrong-password.txt, nach dem Oeffnen der Tastatur (710)
+# mehrfach Abbrechen (pad_ps 0x1000 -> com_md1 20, sp_evt.c:544) statt Passwort; Ereignis 4 laeuft nicht.
+# Danach Rennen (1000) und Untersuchen (1100) muessen wieder wirken.
+5 position 23.5 0 10 32768
+20 confirm
+22 keys none
+60 confirm
+62 keys none
+90 confirm
+92 keys none
+120 confirm
+122 keys none
+150 confirm
+152 keys none
+710 confirm
+712 keys none
+730 cancel
+732 keys none
+734 cancel
+736 keys none
+738 cancel
+740 keys none
+742 cancel
+744 keys none
+746 cancel
+748 keys none
+750 cancel
+752 keys none
+754 cancel
+756 keys none
+758 cancel
+760 keys none
+762 cancel
+764 keys none
+766 cancel
+768 keys none
+770 cancel
+772 keys none
+774 cancel
+776 keys none
+778 cancel
+780 keys none
+782 cancel
+784 keys none
+1000 keys forward run
+1060 keys none

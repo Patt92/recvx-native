@@ -28,6 +28,7 @@ EventVm::EventVm(const std::vector<std::uint8_t>& room,Inventory& inv,MessageDia
     if(floor_count>4096)throw std::runtime_error("too many floor triggers");v.require(floor_offset,floor_count*36);
     for(unsigned i=0;i<floor_count;++i){const auto p=floor_offset+i*36;Interaction a;a.flags=v.u8(p);a.type=v.u8(p+1);a.floor=std::int8_t(v.u8(p+3));a.attribute=v.u32(p+4);a.position={v.f32(p+8),v.f32(p+12),v.f32(p+16)};a.extent={v.f32(p+20),v.f32(p+24),v.f32(p+28)};for(unsigned j=0;j<4;++j)a.parameters[j]=v.u8(p+32+j);floors_.push_back(a);}
     const auto item_count=v.u32(info.room_offset+0x90),item_offset=v.u32(info.room_offset+16);if(item_count>4096)throw std::runtime_error("too many room items");v.require(item_offset,item_count*36);for(unsigned i=0;i<item_count;++i){room_items_.push_back(v.u16(item_offset+i*36+4));room_item_flags_.push_back(v.u32(item_offset+i*36));}
+    init_item_pool();
     for(unsigned level=0;level<tasks_.size();++level)tasks_[level].level=level;
     values[23]=inventory_.game_mode;values[24]=inventory_.player;flags[6][0]=0xffffffff;flags[13][0]=1;flags[14][0]=0x40000000;if(inventory_.side_pack)flags[11][0]|=0x8000000;
 }
@@ -37,14 +38,26 @@ bool EventVm::flag(unsigned matrix,unsigned index)const{if(!matrix||matrix>=flag
 void EventVm::set_flag(unsigned matrix,unsigned index,unsigned mode){if(!matrix||matrix>=flags.size()||mode>5)throw std::runtime_error("invalid event flag operation");index&=0x3ff;auto mask=(mode<3?0x80000000u:0xffffffffu)>>(index%32);auto& word=flags[matrix][index/32];switch(mode%3){case 0:word|=mask;break;case 1:word&=~mask;break;case 2:word^=mask;break;}if(matrix==11)inventory_.side_pack=bool(flags[11][0]&0x8000000);}
 void EventVm::sync_player_stflg(){flags[14][0]=(flags[14][0]&~0x280000u)|inventory_.player_stflg();}
 void EventVm::start(unsigned level,unsigned event){
-    if(event>=scripts_.size())throw std::runtime_error("event index outside table");
+    // Event_init (event.c:12964-12965): data = evtp + ((int*)evtp)[evt_id + 2], ohne Pruefung gegen die
+    // Tabellenlaenge. Ein Index hinter der Tabelle liest das naechste u32 der Ereignisdaten als Offset
+    // (RM_2040 scd1 @0x9bc Event_exec 3/39 bei 34 Eintraegen). Nur der Lesebereich bleibt geprueft.
+    std::size_t pc;
+    if(event<scripts_.size())pc=scripts_[event];
+    else{const BinaryView v(room_);const auto entry=base_+8+std::size_t(event)*4;v.require(entry,4);pc=v.relative(base_,v.u32(entry),1);}
     if(level>=16){level=0;while(level<15&&tasks_[level].active)++level;}
     if(task_started)task_started(level);
     auto& task=tasks_[level];
     // Event_init (event.c:12956): only status, mode0/1, data, loop and ips/ian reset.
-    task.active=true;task.blocked=false;task.event=event;task.pc=scripts_[event];task.loop=-1;task.delay=0;dispatched.push_back(event);
+    task.active=true;task.blocked=false;task.event=event;task.pc=pc;task.loop=-1;task.delay=0;dispatched.push_back(event);
+}
+void EventVm::init_item_pool(){
+    item_pool_flg_={};item_pool_id_={};
+    // room.c:141-147 bhSetItmMdl -> bhSetItem: opp->flg = itp->flg, opp->id = itp->id fuer i < rom->itm_n.
+    for(std::size_t i=0;i<room_items_.size()&&i<item_pool_flg_.size();++i){item_pool_flg_[i]=room_item_flags_[i];item_pool_id_[i]=room_items_[i];}
 }
 void EventVm::inherit_progress(const EventVm& previous){
+    // sys->itwp ueberlebt den Raumwechsel; nur die Plaetze dieses Raums schreibt bhSetItem neu.
+    for(std::size_t i=room_items_.size();i<item_pool_flg_.size();++i){item_pool_flg_[i]=previous.item_pool_flg_[i];item_pool_id_[i]=previous.item_pool_id_[i];}
     // Original global event/key/item/map/game flags outlive a ROM_WORK load.
     for(unsigned matrix:{1u,2u,3u,7u,8u,9u,11u,12u,15u,16u})flags[matrix]=previous.flags[matrix];
     // bhSysCallRoomRead -> bhInitReadRDT -> bhInitRoomChangeSystem (system.c:1629, room.c:32,
@@ -583,6 +596,10 @@ void EventVm::run(Task& t,bool scenario,std::size_t entry){
         }
         throw std::runtime_error("event instruction budget exceeded");
     }catch(const std::exception& e){
+        // Ein Originalpass endet immer mit bhIfelFlg <= 0 (event.c:13082); bricht der Port einen Pass an einer
+        // Luecke ab, darf das offene IF/G_Sp nicht in den naechsten Taskpass durchschlagen (sonst springt dessen
+        // Schlaf nach bhEnd auf die Ruecksprungadresse dieses Passes).
+        ifel_=0;
         if(!scenario){t.blocked=true;t.pc=cursor;}
         std::ostringstream s;s<<"event "<<t.event<<", task "<<t.level<<", offset 0x"<<std::hex<<(cursor-base_);
         if(cursor<room_.size())s<<" (opcode 0x"<<unsigned(room_[cursor])<<")";
@@ -767,13 +784,13 @@ void EventVm::cancel_dialog(){
     // game.c:264: Cancel schliesst nur die fertige letzte Seite (st_flg 0x4000|0x1000 aus
     // dem vorigen Durchlauf). Eine Auswahl (auch GetItem, sub1.c:3877) und Zwischenseiten
     // kennen kein Cancel; das liest dort allein das Raumskript (bhPadCheck, RM_1090 Event 13).
-    if(dialog_.closable())close_dialog(false);
+    if(dialog_.closable()){flags[5][0]|=0x400000u;close_dialog(false);} // game.c:264-270: final-page completion before bhControlEvent
 }
 void EventVm::confirm_dialog(){
     // game.c:264 schliesst die fertige letzte Seite noch vor bhControlMessage; Auswahl und
     // Zwischenseite beantwortet erst bhControlMessage dieses Durchlaufs (tick).
     if(!dialog_.active())return;
-    if(dialog_.closable())close_dialog(false);else dialog_.queue_ok();
+    if(dialog_.closable()){flags[5][0]|=0x400000u;close_dialog(false);}else dialog_.queue_ok(); // game.c:264-270
 }
 void EventVm::close_dialog(bool answered){
     // bhDispMessage also acknowledges script-owned questions (st_flg 0x2000
@@ -886,10 +903,16 @@ bool EventVm::interact(NJS_POINT3 pos,Angle yaw,int floor,NJS_POINT3 front,float
             if(!(a.attribute&2)){
                 // Ohne Weltbesitzer (VM-Fixtures) gilt der geladene itwp-Stand aus rom->itmp (room.c:141).
                 unsigned item_flg=0,item_id=0;
-                const bool known=item_work?item_work(a.parameters[0],item_flg,item_id):a.parameters[0]<room_items_.size()&&(item_flg=room_item_flags_[a.parameters[0]],item_id=room_items_[a.parameters[0]],true);
-                if(!known){
-                    // sys->itwp ist ein fester Pool; Plaetze ab rom->itm_n behalten den Inhalt eines
-                    // frueheren Raums (room.c:141, kein Loeschen). Dieser Inhalt ist nativ nicht bestimmt.
+                // Raumitems (< rom->itm_n, bhSetItem room.c:141) leben im Weltbesitzer; hoehere Plaetze nur im Pool.
+                // Ein Skriptzugriff auf itwp[n >= itm_n] (Position, aspd, stflg) legt dort zwar ein Weltwork an,
+                // aendert im Original aber flg/id des Pools nicht.
+                const bool room_item=a.parameters[0]<room_items_.size();
+                const bool known=room_item&&(item_work?item_work(a.parameters[0],item_flg,item_id):(item_flg=room_item_flags_[a.parameters[0]],item_id=room_items_[a.parameters[0]],true));
+                // sys->itwp ist ein fester Pool aus 32 Plaetzen; ab rom->itm_n gilt der Inhalt eines frueheren
+                // Raums oder die Nullung von bhInitObjItm (objitm.c:147). Ohne flg 0x1 faellt hitchk.c:4865
+                // in den Objektzweig (:4903, obwp[prm0]), z. B. die Kiste in RM_0160 ATR 4.
+                if(!known&&a.parameters[0]<item_pool_flg_.size()){item_flg=item_pool_flg_[a.parameters[0]];item_id=item_pool_id_[a.parameters[0]];}
+                else if(!known){
                     const auto gap="bhCheckExmAtari: ATR "+std::to_string(i)+" liest itwp["+std::to_string(a.parameters[0])+"] ausserhalb rom->itm_n";
                     if(std::find(errors.begin(),errors.end(),gap)==errors.end())errors.push_back(gap);
                     flags[10][0]&=~0x100u;return false;}

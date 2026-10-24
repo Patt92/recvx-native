@@ -42,6 +42,20 @@ int main(){try{
         check(m.frm_no==((9226-2)<<16),"Fix veraendert die Bilduhr frm_no");
     }
     {
+        // Mit angehaengten Nachbarkeys (clip.tail_keys, Folgeblockbytes): innerhalb bleibt der
+        // Originallesezugriff, weit dahinter klemmt Regel 3 auf das letzte Clipbild, nicht auf den
+        // letzten Nachbarkey (RM_3120: dort -2.69e38, auf dem Host inf).
+        auto c=clip(2,2);c.tail_keys=1;
+        for(unsigned ch=0;ch<2;++ch){c.positions[ch].push_back({-2.69e38f,0,0});c.angles[ch].push_back({0,0,0});}
+        std::vector<ModelPose> obj(2);const std::vector<std::uint32_t> owp(2,0);
+        MotionWork m;m.frm_no=9226<<16;std::string gap;
+        set_motion(m,0,0,&c,nullptr,obj,owp,&gap);
+        check(gap.empty()&&obj[0].position.x==1.0f&&obj[1].position.x==101.0f,"weit hinter dem Clip auf einen Nachbarkey statt auf das letzte Clipbild geklemmt");
+        MotionWork tail;tail.frm_no=2<<16;
+        set_motion(tail,0,0,&c,nullptr,obj,owp,&gap);
+        check(obj[0].position.x==-2.69e38f,"Nachbarkey direkt hinter dem Clip nicht mehr gelesen (Motion.c:131)");
+    }
+    {
         // Normalfall: Bild 0 im Bereich bleibt Bild 0.
         const auto c=clip(2,2);std::vector<ModelPose> obj(2);const std::vector<std::uint32_t> owp(2,0);
         MotionWork m;m.frm_no=0;std::string gap;

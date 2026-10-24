@@ -230,7 +230,7 @@ static void stair_root_carry(RECVX_STAIR_STATE* s,const NJS_POINT3* pos,float* o
  * `route` ist im Original der Weg von der Wurzel zum Fuss, also genau dieser
  * Weg.  `motion`/`frame` waehlen die Pose, die SetMtn* in objP geschrieben
  * hat.  Rueckgabe 0, wenn ein Kettenknoten im nativen Modell fehlt. */
-static int stair_chain_point(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,const signed char* route,
+static int stair_chain_point(const RECVX_STAIR_HOST* h,const signed char* route,
                              float px,float py,float pz,int ax,int ay,int az,
                              NJS_POINT3* out)
 {
@@ -245,11 +245,7 @@ static int stair_chain_point(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,cons
     {
         float pos[3];
         int ang[3];
-        if(!h->obj_node||!h->obj_node(h->user,(unsigned)*node,pos,ang))
-        {
-            s->unsupported_services|=RECVX_STAIR_UNBOUND_FIXPOS;
-            return 0;
-        }
+        if(!h->obj_node||!h->obj_node(h->user,(unsigned)*node,pos,ang))return 0;
         njTranslate(&matrix,pos[0],pos[1],pos[2]);
         njRotateXYZ(&matrix,ang[0],ang[1],ang[2]);
     }
@@ -264,18 +260,25 @@ static int stair_chain_point(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,cons
  * die Matrix des letzten bhCalcModel.  Der Versatz wird von der Figurenlage
  * abgezogen, der Fuss bleibt also stehen und die Wurzelbewegung der Motion
  * wandert in plp->px/py/pz. */
-static void stair_fix_position(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s,int xyz)
+int recvx_player_fix_position(const RECVX_STAIR_HOST* h,unsigned flg,float* px,float* py,float* pz,int ax,int ay,int az)
 {
-    const signed char* route=PlyLegRoute[(s->flg&0x80000u)?1:0];
+    const signed char* route=PlyLegRoute[(flg&0x80000u)?1:0];
     const signed char* last=route;
     NJS_POINT3 dst,src;
     while(last[1]!=-1)++last;
-    if(!stair_chain_point(h,s,route,s->px,s->py,s->pz,s->ax,s->ay,s->az,&dst))return;
-    if(!h->node_position){s->unsupported_services|=RECVX_STAIR_UNBOUND_FIXPOS;return;}
+    if(!stair_chain_point(h,route,*px,*py,*pz,ax,ay,az,&dst))return 0;
+    if(!h->node_position)return 0;
     stair_node(h,(unsigned)*last,&src);
-    s->px-=dst.x-src.x;
-    if(xyz)s->py-=dst.y-src.y;
-    s->pz-=dst.z-src.z;
+    *px-=dst.x-src.x;
+    if(flg&0x8000000u)*py-=dst.y-src.y;
+    *pz-=dst.z-src.z;
+    return 1;
+}
+
+static void stair_fix_position(const RECVX_STAIR_HOST* h,RECVX_STAIR_STATE* s)
+{
+    if(!recvx_player_fix_position(h,s->flg,&s->px,&s->py,&s->pz,s->ax,s->ay,s->az))
+        s->unsupported_services|=RECVX_STAIR_UNBOUND_FIXPOS;
 }
 
 /* ---------------------------------------------------------------- kdu (14) */
@@ -933,7 +936,7 @@ int recvx_stairs_tick(RECVX_STAIR_STATE* state,const RECVX_STAIR_HOST* host)
     else state->flg&=~0x400000u;
     /* player.c:1538-1558: die Fussfixierung laeuft nach dem Bildvorschub.
      * plp->flg 0x80000 waehlt das Bein, 0x8000000 den XYZ-Zweig. */
-    if(state->flg&0x40000u)stair_fix_position(host,state,(state->flg&0x8000000u)!=0);
+    if(state->flg&0x40000u)stair_fix_position(host,state);
     state->sample_frame=sample;
     /* bhCalcModel (player.c:1684) am Ende des Durchlaufs rechnet der Host aus
      * objP und dieser Lage; sein owP ist der naechste src von bhCalcFixOffset. */

@@ -39,8 +39,8 @@ int main(int argc,char** argv){try{
     check(save_screen_host_message(464).empty(),"alter Slottext 464 wird noch gezeichnet");
     const auto save_text=message_text(save_screen_host_message(484));
     const auto load_text=message_text(save_screen_host_message(460));
-    check(save_text=="Now saving to the save file. \n\nDo not close the game or \nturn off the computer. ",save_text);
-    check(load_text=="Now loading from the save file. \n\nDo not close the game or \nturn off the computer. ",load_text);
+    check(save_text=="Now saving to the save file. \n\nDo not close the game or \nturn off the device. ",save_text);
+    check(load_text=="Now loading from the save file. \n\nDo not close the game or \nturn off the device. ",load_text);
     for(const auto& text:{save_text,load_text})check(text.find("PS2")==std::string::npos&&text.find("memory card")==std::string::npos&&text.find("MAIN POWER")==std::string::npos,"Speichertext nennt noch Memory Card/PS2");
     check(save_screen_host_message(461).empty()&&save_screen_host_message(483).empty(),"generische Originalmeldungen werden ersetzt");
     if(argc<2)throw std::runtime_error("usage: recvx-typewriter-draw-tests <data>");

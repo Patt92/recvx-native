@@ -307,8 +307,18 @@ int main(int argc,char** argv){try{
         auto binary=data;binary[1118]=0;Inventory state;EventVm vm(binary,state,paged);vm.cancel_dialog();vm.tick();check(paged.page()==Message{34,0xffff},"Cancel turned an intermediate page");
         vm.confirm_dialog();vm.tick();check(paged.page()==Message{35,0xffff},"OK did not turn the intermediate page");vm.tick();vm.tick();check(paged.closable(),"final page after the turn not closable");vm.cancel_dialog();check(!paged.active(),"Cancel did not close the final page");
         paged.show({0xff04,33,0xff04,34,0xffff},0);vm.tick();vm.cancel_dialog();vm.tick();check(paged.active()&&paged.choosing(),"Cancel answered a question");}
+    for(bool cancel:{false,true}){
+        auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm message(binary,state,text);
+        text.show({0xfe00,33,0xffff},0);message.tick();
+        check(text.closable()&&!message.flag(5,9),"final page completed before acknowledgement");
+        if(cancel)message.cancel_dialog();else message.confirm_dialog();
+        check(!text.active()&&message.flag(5,9)&&(message.flags[10][0]&0x2000),"final-page acknowledgement missing game.c completion handshake");
+        message.control_exm();message.tick();
+        check(message.flag(5,9),"message completion lost before bhFlagCk matrix 5 bit 9 can observe it");
+    }
     for(bool status:{false,true})for(unsigned selected:{0u,1u}){
         auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm question(binary,state,text);question.menu_open=status;text.show({0xff04,33,0xff04,34,0xffff},0);question.choose_dialog(int(selected));question.tick();question.confirm_dialog();question.tick();check(!text.active()&&question.values[7]==selected+(status?100:0),"confirmed menu answer/result lost after dialogue closes");
+        check(!question.flag(5,9),"question answer incorrectly signals final-page acknowledgement");
         text.show({0xff04,33,0xfe09,0xff04,34,0xffff},1);question.tick();check(question.values[7]==1,"new question retains previous result offset");
     }
     { // hitchk.c:4786 + game.c:196-286: examined camera (attr 0xb80e, RM_0031 medal door shape)

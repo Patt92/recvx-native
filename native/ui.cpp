@@ -954,6 +954,10 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
             const float distance=animated?menu.inspection.camera_distance():inspection_rest_camera_distance();
             const auto offset=animated?menu.inspection.model_offset():inspection_model_offset(source);
             NJS_MATRIX view;njUnitMatrix(&view);njTranslate(&view,0,0,distance);njMultiMatrix(&view,&rotation);njTranslate(&view,offset.x,offset.y,offset.z);njScale(&view,scale,scale,scale);
+            // itemview.c:266-273: zweiter njCnkEasyMultiDrawObjectI desselben Modells nach njTranslate(0.1,1,0.2)
+            // hinter der Skalierung; M*T*v = M*(v+t), also derselbe Baum um t im Modellraum verschoben.
+            if(inspection_draws_twice(source)){const auto count=object.triangles.size();object.triangles.reserve(count*2);
+                for(std::size_t i=0;i<count;++i){auto copy=object.triangles[i];for(auto& vertex:copy.vertices){vertex.position.x+=0.1f;vertex.position.y+=1.0f;vertex.position.z+=0.2f;}object.triangles.push_back(copy);}}
             object.background=0xff101010;SoftwareRenderer item_view(352,196);item_view.draw_view(object,view,500.f*1.174f,500.f);
             for(int y=0;y<196;++y){const int oy=y+132+dy(2),ox=60+dx(2);if(oy<0||oy>=480)continue;const int from=std::max(0,-ox),to=std::min(352,640-ox);if(to>from)std::copy(item_view.pixels().begin()+y*352+from,item_view.pixels().begin()+y*352+to,image.canvas().begin()+oy*640+ox+from);}
         }

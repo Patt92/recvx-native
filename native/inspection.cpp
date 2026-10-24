@@ -344,6 +344,9 @@ unsigned original_file_wallpaper(unsigned file){
     if(file>=24)throw std::runtime_error("file outside table");
     return kFileWallpaper[file];
 }
+// DrawSubItem (itemview.c:266-273): 33, 34 und 142 zeichnen das Modell ein zweites Mal nach
+// njTranslate(0.1, 1.0, 0.2) im skalierten Modellraum (das Lugerpaar ist ein Modell, zweimal gezeichnet).
+bool inspection_draws_twice(unsigned item){return item==33||item==34||item==142;}
 NJS_POINT3 inspection_model_offset(unsigned item){
     if(item>=156)throw std::runtime_error("invalid inspection item");
     const auto index=itemflg[hide_row(item)][2];

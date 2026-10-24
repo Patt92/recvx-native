@@ -77,9 +77,11 @@ struct Pass {
         // ORIGINAL-FIX (QUALITY.md): weiter vorn/hinten liest Motion.c:131 mkfP += frm_no/65536
         // ausserhalb jedes Datenblocks (RM_3120: Common_controll 34 setzt frm_no aus den
         // Skriptbytes 0a 24 = Bild 9226 auf einen 2-Bild-Clip, event.c:11897). Regel 3:
-        // auf das naechste gueltige Bild geklemmt; die Bilduhr (frm_no) bleibt unveraendert.
+        // auf das naechste gueltige Bild des Clips geklemmt (nicht auf einen angehaengten Nachbarkey:
+        // das sind Bytes des Folgeblocks, in RM_3120 als Position -2.69e38, auf dem Host inf);
+        // die Bilduhr (frm_no) bleibt unveraendert.
         if(!clip.frames)return false;
-        const std::int32_t last=std::int32_t(clip.frames+clip.tail_keys)-1;
+        const std::int32_t last=std::int32_t(clip.frames)-1;
         f=f<0?0:last;return true;}
 };
 
