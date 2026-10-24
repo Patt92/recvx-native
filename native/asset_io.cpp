@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <map>
+#include <cctype>
 #include <atomic>
 #include <optional>
 namespace recvx {
@@ -155,6 +156,16 @@ std::string texture_tree_format(const std::filesystem::path& data){
     std::ifstream f(*first,std::ios::binary);unsigned char head[3]{};f.read(reinterpret_cast<char*>(head),3);
     if(!f)return "unreadable TGA";
     switch(head[2]){case 2:return "uncompressed TGA";case 10:return "RLE TGA";case 1:return "colour-mapped TGA";case 9:return "colour-mapped RLE TGA";default:return "TGA type "+std::to_string(head[2]);}
+}
+std::size_t pcsx2_pack_count(const std::filesystem::path& mods){
+    // PCSX2-Ersatztexturen <TEX0-Hash>-[<CLUT-Hash>-]<bits>.dds direkt in textures/: die Schluessel sind
+    // xxHash-Werte ueber das GS-Speicherbild, das der Port nicht hat (tools/import_pcsx2_textures.py ordnet zu).
+    const auto root=mods/"textures";if(mods.empty()||!std::filesystem::is_directory(root))return 0;
+    std::size_t n=0;
+    for(const auto& e:std::filesystem::directory_iterator(root)){if(!e.is_regular_file())continue;
+        auto ext=e.path().extension().string();for(auto& c:ext)c=char(std::tolower(static_cast<unsigned char>(c)));
+        const auto stem=e.path().stem().string();if(ext==".dds"&&stem.find('-')!=std::string::npos)++n;}
+    return n;
 }
 std::size_t hd_texture_count(const std::filesystem::path& mods){
     const auto hd=mods/"textures"/"hd";if(mods.empty()||!std::filesystem::is_directory(hd))return 0;

@@ -28,4 +28,6 @@ bool texture_mods_enabled();
 std::string texture_tree_format(const std::filesystem::path& data);
 // Anzahl der Dateien in mods/textures/hd.
 std::size_t hd_texture_count(const std::filesystem::path& mods);
+// Anzahl PCSX2-Ersatztexturen (*.dds mit Hash-Namen) direkt in mods/textures; nicht direkt geladen.
+std::size_t pcsx2_pack_count(const std::filesystem::path& mods);
 }

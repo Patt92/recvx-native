@@ -288,6 +288,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         std::cout<<"Data: "<<args.data<<" (textures: "<<recvx::texture_tree_format(args.data)<<")\n";
         if(args.mods.empty())std::cout<<"Mods: none\n";
         else std::cout<<"Mods: "<<args.mods<<(fs::is_directory(args.mods)?"":" (missing)")<<"; textures/hd: "<<recvx::hd_texture_count(args.mods)<<" files"<<(fs::is_directory(args.mods/"textures"/"hd")?"":" (no textures/hd folder)")<<'\n';
+        if(const auto pcsx2=recvx::pcsx2_pack_count(args.mods))std::cout<<"Mods: PCSX2 pack with "<<pcsx2<<" DDS in textures/ (not read directly; "<<(fs::is_regular_file(args.mods/"textures"/"hd-manifest-pcsx2.json")?"imported into textures/hd":"import: python3 tools/import_pcsx2_textures.py --pack <mods>/textures --output <mods>")<<")\n";
         // ControlTypewriter (bup_00.c) als Host-Slotauswahl. typ_md0 laeuft,
         // sobald der Raum das ts_flg-Bit 0x8000 loescht (system.c:1224).
         recvx::Typewriter typewriter;bool typewriter_was_blocked=false;bool load_game_requested=false;

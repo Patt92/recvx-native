@@ -82,6 +82,21 @@ build/texvenv/bin/python tools/build_hd_textures.py --matches build/hd-matches.j
 build/macos-arm64/recvx-runtime --data data --mods build/hd-textures
 ```
 
+Importing a PCSX2 texture replacement pack (`<TEX0 hash>-<CLUT hash>-<bits>.dds`, e.g. copied
+straight into `mods/textures/`). Its keys are xxHash values over PCSX2's GS memory image, which the
+port does not have, so the files cannot be read directly; the importer takes the PS2 size from the
+name's `bits` (TW/TH), box-downscales each DDS to it and matches it against cooked textures of that
+size (same tiers as below, Pillow only):
+
+```sh
+python3 tools/import_pcsx2_textures.py --pack mods/textures --output mods            # --scale 4 default
+```
+
+It writes `mods/textures/hd/<md5>.tga` plus `mods/textures/hd-manifest-pcsx2.json` (matched and
+unmatched files with NCC/PSNR) and keeps existing HD files. At startup the runtime reports a pack it
+finds in `mods/textures/` and whether it was imported. Name plates and texts the pack redraws (map
+names, file screens) only match if the cooked texture still has the same layout.
+
 The runtime looks in `<mods>` first; without `--mods` it uses `mods/` beside `data/`
 (the app/Start scripts do the same), so a pack placed in `mods/textures/hd/` is
 picked up automatically. Delete the folder to go back to the original look.
