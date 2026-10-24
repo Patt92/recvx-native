@@ -306,18 +306,54 @@ int main(int argc,char** argv){try{
         paged.update();check(paged.visible()==Message{34}&&!paged.closable(),"FE08 page is not an intermediate page");
         auto binary=data;binary[1118]=0;Inventory state;EventVm vm(binary,state,paged);vm.cancel_dialog();vm.tick();check(paged.page()==Message{34,0xffff},"Cancel turned an intermediate page");
         vm.confirm_dialog();vm.tick();check(paged.page()==Message{35,0xffff},"OK did not turn the intermediate page");vm.tick();vm.tick();check(paged.closable(),"final page after the turn not closable");vm.cancel_dialog();check(!paged.active(),"Cancel did not close the final page");
+        /* Die fertige Seite wird erst im naechsten bhMainSequence-Pass freigegeben (game.c:264/147). */
+        vm.control_exm();vm.control_exm();
         paged.show({0xff04,33,0xff04,34,0xffff},0);vm.tick();vm.cancel_dialog();vm.tick();check(paged.active()&&paged.choosing(),"Cancel answered a question");}
     for(bool cancel:{false,true}){
         auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm message(binary,state,text);
         text.show({0xfe00,33,0xffff},0);message.tick();
         check(text.closable()&&!message.flag(5,9),"final page completed before acknowledgement");
+        message.pad_state=[&]{return std::pair<unsigned,unsigned>{cancel?0x1000u:0x800u,cancel?0x1000u:0x800u};};
         if(cancel)message.cancel_dialog();else message.confirm_dialog();
-        check(!text.active()&&message.flag(5,9)&&(message.flags[10][0]&0x2000),"final-page acknowledgement missing game.c completion handshake");
-        message.control_exm();message.tick();
+        /* game.c:264 wertet den Druck in bhMainSequence aus; der Host nimmt die Seite sofort vom Bild. */
+        check(!text.active()&&!message.flag(5,9),"the finishing press is visible before bhMainSequence");
+        message.control_exm();
+        check(message.flag(5,9)&&(message.flags[10][0]&0x2000)&&!(message.flags[10][0]&0x1000),"final-page acknowledgement missing game.c:264 handshake");
+        message.tick();
         check(message.flag(5,9),"message completion lost before bhFlagCk matrix 5 bit 9 can observe it");
+        /* game.c:147 gibt die Meldung im naechsten Durchlauf frei; danach darf kein zweiter Text
+           die Freigabe des vorigen erben. */
+        message.control_exm();
+        check(!text.active()&&!message.flag(5,9),"game.c:147 did not clear the completion marker");
+        message.pad_state=[]{return std::pair<unsigned,unsigned>{0u,0u};};
+        text.show({0xfe00,34,0xffff},0);message.tick();
+        check(text.closable()&&!message.flag(5,9),"second message inherited the previous acknowledgement");
+        message.control_exm();check(!message.flag(5,9),"second message completes without a press");
+    }
+    {   /* message.c:242-245: die beantwortete Frage meldet cb_flg 0x1000 und st_flg 0x4000; game.c:264
+           schliesst sie im selben Durchlauf ueber den Tastendruck, game.c:147 gibt sie danach frei. */
+        auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm message(binary,state,text);
+        message.pad_state=[]{return std::pair<unsigned,unsigned>{0x800u,0x800u};};
+        text.show({0xff04,33,0xff04,34,0xffff},0);message.tick();message.choose_dialog(1);
+        check(text.choosing(),"choice dialog not open");
+        message.confirm_dialog();message.tick();
+        check(!text.active()&&(message.flags[10][0]&0x1000)&&(message.flags[5][0]&0x4000),"answered question does not report cb_flg 0x1000");
+        message.control_exm();
+        check(message.flag(5,9)&&(message.flags[10][0]&0x2000)&&!(message.flags[10][0]&0x1000),"answered question misses the automatic game.c:264 completion");
+        message.tick();message.control_exm();
+        check(!message.flag(5,9),"answered question is not released by game.c:147");
+    }
+    {   /* game.c:264 dritter Zweig: cb_flg 0x1000 schliesst die fertige Seite auch ohne Tastendruck. */
+        auto binary=data;binary[1118]=0;MessageDialog none;Inventory state;EventVm automatic(binary,state,none);
+        automatic.pad_state=[]{return std::pair<unsigned,unsigned>{0u,0u};};
+        automatic.flags[5][0]=0x200u|0x4000u|0x1000u;automatic.flags[10][0]=0x1000u;
+        automatic.control_exm();
+        check((automatic.flags[5][0]&0x400000u)&&(automatic.flags[10][0]&0x2000u)&&!(automatic.flags[10][0]&0x1000u),"automatic game.c:264 completion missing");
+        automatic.control_exm();
+        check(!(automatic.flags[5][0]&0x400000u)&&!(automatic.flags[5][0]&0x200u),"game.c:147 did not release the automatic completion");
     }
     for(bool status:{false,true})for(unsigned selected:{0u,1u}){
-        auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm question(binary,state,text);question.menu_open=status;text.show({0xff04,33,0xff04,34,0xffff},0);question.choose_dialog(int(selected));question.tick();question.confirm_dialog();question.tick();check(!text.active()&&question.values[7]==selected+(status?100:0),"confirmed menu answer/result lost after dialogue closes");
+        auto binary=data;binary[1118]=0;MessageDialog text;Inventory state;EventVm question(binary,state,text);question.menu_open=status;text.show({0xff04,33,0xff04,34,0xffff},0);question.choose_dialog(int(selected));question.tick();question.confirm_dialog();question.tick();check(question.values[7]==selected+(status?100:0),"confirmed menu answer/result lost after dialogue closes");question.control_exm();question.control_exm();check(!text.active(),"confirmed answer is not released by game.c:147");
         check(!question.flag(5,9),"question answer incorrectly signals final-page acknowledgement");
         text.show({0xff04,33,0xfe09,0xff04,34,0xffff},1);question.tick();check(question.values[7]==1,"new question retains previous result offset");
     }
@@ -332,9 +368,10 @@ int main(int argc,char** argv){try{
         check(hit&&text.active()&&(exm.flags[5][0]&0x2284)==0x2284&&exm.exm_attr==0xb80e&&exm.fixcno==4&&exm.fixkno==7,"examined camera request incomplete");
         exm.control_exm();
         check(exm.flags[6][0]==0xb8&&!(pt&3)&&lights==1&&event_cno==4&&event_kno==7&&!cut_calls&&(exm.flags[5][0]&1)&&!(exm.flags[11][0]&0x1000)&&!(exm.flags[5][0]&0x200000),"examined camera pass differs from game.c (sp 0xb8, pt ~3, bhSetEventFixedCut)");
-        text.show({33,0xffff},0);for(unsigned k=0;k<4&&!text.closable();++k)text.update();exm.confirm_dialog(); // erst die aufgebaute Seite schliesst (game.c:264)
-        check(!(exm.flags[5][0]&0x81)&&(pt&3)==3&&exm.flags[6][0]==0xffffffffu&&(exm.flags[11][0]&0x800),"closing the examined message keeps the camera");
-        exm.control_exm();check(returns==1&&!(exm.flags[11][0]&0x800),"bhCheckCut(1) does not return to the player cut");
+        text.show({33,0xffff},0);for(unsigned k=0;k<4&&!text.closable();++k)exm.tick();exm.confirm_dialog(); // erst die aufgebaute Seite schliesst (game.c:264)
+        exm.control_exm(); // game.c:264 setzt das Meldungsende
+        exm.control_exm(); // game.c:147 gibt frei, der 0x80-Zweig beendet die Untersuchungskamera, :286 kehrt zurueck
+        check(!(exm.flags[5][0]&0x81)&&(pt&3)==3&&exm.flags[6][0]==0xffffffffu&&returns==1,"closing the examined message keeps the camera");
     }
     { // event.c:994 bhCamSet2 case 0 (RM_0090 security boxes: 2a 00 09 00): fixcno = v1, and
       // bhSetFixedCut clears gm_flg 0x1000 at once, so game.c:274 never re-cuts to a stale fixcno.
@@ -355,10 +392,11 @@ int main(int argc,char** argv){try{
         response.control_exm();check(response.flags[6][0]==0x30&&!(response.flags[10][0]&0x20),"room message leaves enemies/player simulation running (game.c cb_flg 0x20: sp_flg 0x30)");
         // bhControlMessage je Durchlauf: Zwischenseite erst nach dem Aufbau mit OK, dann Auswahl und OK in eigenen Durchlaeufen.
         text.show({33,0xff02,0,0xff04,33,0xff04,34,0xffff},0);for(unsigned k=0;k<8&&!text.turnable();++k)response.tick();response.confirm_dialog();response.tick();check(text.active()&&!(response.flags[10][0]&0x1000),"intermediate page acknowledges interaction");
-        for(unsigned k=0;k<8&&!text.choosing();++k)response.tick();response.choose_dialog(int(selected));response.tick();response.confirm_dialog();response.tick();/* Das scd1 sieht cb_flg 0x1000 im Durchlauf der Antwort (bhControlEvent nach bhControlMessage) und setzt mit 0x57 gm_flg 0x20000. */check((response.flags[11][0]&0x20000)&&(response.flags[5][0]&0x4000)&&!(response.flags[5][0]&0x2204)&&response.values[7]==selected,"interaction choice loses acknowledgement/end state");
-        check(response.flags[6][0]==0xffffffffu,"closing the room message does not restore sp_flg (message.c:312)");
-        response.tick();check(response.errors.empty()&&response.values[30]==42&&(response.flags[11][0]&0x20000)&&!(response.flags[10][0]&0x1000),"scenario does not consume room answer/camera-retention command");
-        response.values[30]=0;response.tick();check(response.values[30]==0,"interaction acknowledgement repeats");
+        for(unsigned k=0;k<8&&!text.choosing();++k)response.tick();response.choose_dialog(int(selected));response.tick();response.confirm_dialog();response.tick();/* Das scd1 sieht cb_flg 0x1000 im Durchlauf der Antwort (bhControlEvent nach bhControlMessage) und setzt mit 0x57 gm_flg 0x20000. */check(response.values[7]==selected&&(response.flags[5][0]&0x400000)&&(response.flags[10][0]&0x20000000),"interaction choice loses acknowledgement/end state");/* game.c:147 reicht cb_flg 0x20000000 als 0x1000 an das naechste bhControlEvent weiter und gibt die Meldung frei; cb_flg 0x1000 selbst raeumt erst bhSetMessage (message.c:45) ab. */
+        response.control_exm();
+        check(response.flags[6][0]==0xffffffffu&&!(response.flags[5][0]&0x2204)&&(response.flags[5][0]&0x4000),"closing the room message does not restore sp_flg (message.c:312)");
+        response.tick();check(response.errors.empty()&&response.values[30]==42&&(response.flags[11][0]&0x20000)&&(response.flags[10][0]&0x1000),"scenario does not consume room answer/camera-retention command");
+        response.values[30]=0;response.tick();/* cb_flg 0x1000 bleibt wie im Original bis zur naechsten Meldung stehen (message.c:45 raeumt es ab); ein Skript, das dieselbe Bedingung erneut prueft, laeuft deshalb erneut. */check((response.flags[10][0]&0x1000)&&response.values[30]==42,"room answer is taken back without a new message");
         const std::vector<std::uint8_t> release={0x57,1,5,4,15,0,0,0,0xff,0};std::copy(release.begin(),release.end(),binary.begin()+1180);EventVm next(binary,state,text);next.inherit_progress(response);next.start(0,0);next.tick();check(next.errors.empty()&&next.flag(4,15)&&!(next.flags[11][0]&0x20000),"camera-retention release desynchronizes event");
     }
     {auto binary=data;binary[1118]=0;const std::vector<std::uint8_t> script={0x37,7,0x33,0,0,0,0,1,0,0,0xff,0};std::copy(script.begin(),script.end(),binary.begin()+1180);MessageDialog text;Inventory state;EventVm cases(binary,state,text);unsigned calls=0;cases.door=[&](const DoorRequest& request){++calls;check(request.room_case==7,"room case never reaches door request");return true;};cases.start(0,0);cases.tick();check(cases.errors.empty()&&calls==1,"two-byte room case command desynchronizes door call");}

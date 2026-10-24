@@ -635,6 +635,14 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm2040_alfred_skip_check.py"
         --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
     endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_5010.RDT")
+      add_test(NAME rm5010_intro_release COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm5010_intro_release_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+      add_test(NAME rm5010_continue_retry COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm5010_continue_retry_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3220.RDT")
       add_test(NAME rm3220_elevator_arrival COMMAND "${Python3_EXECUTABLE}" -I
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm3220_elevator_arrival_check.py"

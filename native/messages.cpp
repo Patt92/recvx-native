@@ -67,7 +67,7 @@ MessageDialog::Step MessageDialog::pad(bool ok,int direction){
     if(st_&0x8000u){
         // message.c:231-293: OK answers (the owner adds 100 on the status screen and
         // raises the response bits); otherwise 0x4000 falls and pad_ps 0x4/0x8 move.
-        if(ok){st_&=~0x8000u;return Step::Answered;}
+        if(ok){st_&=~0x8000u;st_|=0x4000u;return Step::Answered;} /* message.c:245 st_flg |= 0x4000 */
         st_&=~0x4000u;
         if(direction){selection+=direction;moved_=true;}
         if(selection>=int(seln_))selection=0;

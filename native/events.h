@@ -160,6 +160,10 @@ public:
     void confirm_dialog();
     void cancel_dialog();
     void close_dialog(bool answered);
+    void finish_page();
+    void end_message();
+    void message_release();  // game.c:147
+    void message_complete(); // game.c:264
     void choose_dialog(int direction);
     bool skip_cinematic();
     void service_item_request(); // bhCheckSubTask cb_flg 0x4010 -> GetItem
@@ -207,6 +211,10 @@ private:
     std::vector<Interaction> floors_;
     Inventory& inventory_;MessageDialog& dialog_;
     bool opening_hint_=false,status_use_pending_=false;
+    // game.c:264/147: die fertige Seite ist hostseitig schon zu, st_flg 0x200 und 0x400000
+    // gelten aber noch fuer genau einen bhControlEvent-Pass.
+    bool message_end_pending_=false;
+    bool main_sequence_done_=false;
     unsigned pickup_item_=0,pickup_display_=0,pickup_mode_=0;
     bool pickup_decision_pending_=false; // GetItem testmode 0 still owed (sub1.c:3452 gate)
     unsigned acquired_file_=~0u;

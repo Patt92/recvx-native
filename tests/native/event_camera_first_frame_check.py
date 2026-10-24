@@ -9,7 +9,7 @@ Das naechste Bild zeichnet deshalb diese Lage ohne Kontrollpass (cam.mode0 0), d
 nach genau einem, dann zwei usw.
 
 Aufstellung (Diagnose): RM_1140-Hebelreplay, Bild 110 "Move the lever?" -> Yes, Ereignis 0 Ebene 15
-ruft bhCamSet(0, evc 3). Gemessen wird die Lage, aus der gezeichnet wird ("camera_view": Stand von
+ruft bhCamSet(0, evc 3) im Durchlauf nach der Antwort (game.c:147 reicht die Antwort weiter). Gemessen wird die Lage, aus der gezeichnet wird ("camera_view": Stand von
 bhControlCamera, mit cam.mode0/ct0 der Ereigniskamera zu diesem Zeitpunkt). Der Port fuhr den ersten
 bhControlEventCamera-Pass noch vor dem Zeichnen desselben Bildes."""
 import argparse
@@ -40,9 +40,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix='recvx-evcam-first-') as folder:
         root = Path(folder)
         (root / 'user').mkdir()
-        before = run(runtime, data, root, 110)
+        before = run(runtime, data, root, 111)
         assert before['event_camera'] == 1 and before['camera_view'] and not before['camera_view']['event_init'], before['camera_view']
-        for passes, frames in enumerate((111, 112, 113, 114)):
+        # Die beantwortete Interaktionsmeldung meldet cb_flg 0x2000 (hitchk.c:4836-4842) und damit
+        # cb_flg 0x20000000; game.c:147 reicht das erst im naechsten Durchlauf als 0x1000 an
+        # bhControlEvent weiter, bhCamSet laeuft daher ein Bild nach der Antwort.
+        for passes, frames in enumerate((112, 113, 114, 115)):
             s = run(runtime, data, root, frames)
             view = s['camera_view']
             assert s['event_camera'] == 3 and s['room_changes'] == 0, (frames, s['event_camera'], s['room_changes'])

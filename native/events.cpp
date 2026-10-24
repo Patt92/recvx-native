@@ -660,6 +660,7 @@ void EventVm::control_exm(){
         st&=~0x200080u;if(cb&0x20000000){cb|=0x1000;cb&=~0x20000000u;}if(!(cb&4))st&=~4u;
         sp=0xffffffffu;if(presentation_flags)presentation_flags(0,3);
         if(!(gm&0x20000)){st&=~1u;gm|=0x800;}}
+    message_release(); // :147
     if(cb&0x8){ // :196
         cb&=~0x8u;sp=0x38;if(!(exm_attr&0x20))sp|=0x80;
         if(exm_attr&0x2){if(presentation_flags)presentation_flags(1,0);if(exm_light_off)exm_light_off();}
@@ -671,20 +672,49 @@ void EventVm::control_exm(){
     if(cb&0x20){ // :239
         cb&=~0x20u;sp=0x30;if(st&0x80){sp|=0x8;if(!(exm_attr&0x20))sp|=0x80;}
         if(exm_attr&0x10)sp|=0x2;}
+    message_complete(); // :264
     if(gm&0x1000){ // :274 bhSetFixedCut / bhSetEventFixedCut clear gm_flg 0x1000 and set st_flg 0x1
         gm&=~0x1000u;st|=1;
         if(!(gm&0x10000)){if(fixed_cut)fixed_cut(fixcno);}else if(event_fixed_cut)event_fixed_cut(fixcno,fixkno);}
     // :286 bhCheckCut(1) (cut.c:12-64): erzwungene Rueckkehr auf den Spielerschnitt, unter gm_flg 0x40
     // der Augenzweig (RoomWorld::return_to_cut loescht gm_flg 0x800 dort selbst).
     if((gm&0x800)&&(sp&0x40)&&!(st&1)){if(!(gm&0x40))gm&=~0x800u;if(return_cut)return_cut();}
-    pad_cleared_=false;
+    pad_cleared_=false;main_sequence_done_=true;
 }
-void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;/* bhSysCallEvent: bhControlMessage vor bhControlEvent, mit den Tasten dieses Durchlaufs (message.c:50). */{const auto step=dialog_.update();if(dialog_.moved()&&system_se)system_se(2); /* message.c:275/284 */if(step==MessageDialog::Step::Answered)close_dialog(true);else if(step==MessageDialog::Step::Closed){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}if(dialog_.active())values[7]=dialog_.selection;
+void EventVm::message_release(){
+    // game.c:147: das Meldungsende ist genau einen bhControlEvent-Pass sichtbar; danach gibt
+    // bhMainSequence die Meldung frei (st_flg 0x200, CineSet 0x2000, Untersuchungskamera 0x80).
+    auto& st=flags[5][0];auto& sp=flags[6][0];auto& cb=flags[10][0];auto& gm=flags[11][0];
+    if(!(st&0x400000)||(cb&1))return;
+    if(cb&0x20000000){cb|=0x1000;cb&=~0x20000000u;}
+    if(cb&0x200000)st&=~0x200u;
+    else{
+        st&=~0x400200u;
+        if(st&0x2000){
+            sp=0xffffffffu;st&=~0x2200u;if(!(cb&4))st&=~4u;
+            pad_cleared_=true;} /* :175-177 pad_on/ps/old := pad_*b, der Host liest das Pad je Durchlauf nur einmal */
+        if(st&0x80){st&=~0x80u;if(presentation_flags)presentation_flags(0,3);if(!(gm&0x20000)){st&=~1u;gm|=0x800;}}
+        end_message();}
+}
+void EventVm::message_complete(){
+    // game.c:264: die fertige letzte Seite schliesst OK oder Cancel (pad_ps 0x800/0x1000); ohne
+    // Taste schliesst die beantwortete Frage, sobald der Text ihr Ende erreicht (cb_flg 0x1000).
+    auto& st=flags[5][0];auto& cb=flags[10][0];
+    const unsigned pad_ps=pad_cleared_||!pad_state?0u:pad_state().first;
+    if((st&0x200)&&(st&0x4000)&&(st&0x1000)&&((pad_ps&0x800)||(pad_ps&0x1000)||message_end_pending_||((cb&0x1000)&&!(cb&1)))){
+        st|=0x400000u;cb|=0x2000u;cb&=~0x1000u;message_end_pending_=false;}
+}
+void EventVm::tick(){
+    // bhMainSequence laeuft auch dann, wenn der Aufrufer nur den Ereignispass faehrt (Testharness,
+    // Terminalzweig); im Runtimepfad hat control_exm die beiden Schritte schon erledigt.
+    if(!main_sequence_done_){message_release();message_complete();pad_cleared_=false;}
+    main_sequence_done_=false;
+    ++tick_count;service_pickup();const bool cinematic=flags[10][0]&4;if(dialog_.active())values[7]=dialog_.selection;/* bhSysCallEvent: bhControlMessage vor bhControlEvent, mit den Tasten dieses Durchlaufs (message.c:50). */{const auto step=dialog_.update();if(dialog_.moved()&&system_se)system_se(2); /* message.c:275/284 */if(step==MessageDialog::Step::Answered)close_dialog(true);else if(step==MessageDialog::Step::Closed){flags[10][0]|=0x2000;if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;} /* message.c:312 */if(opening_hint_)status_requested=true;opening_hint_=false;finish_pickup();}if(dialog_.active())values[7]=dialog_.selection;
     // sys->st_flg ist eine Variable: die Meldungsbits, die bhControlMessage schreibt (0x1000
     // Seite fertig, 0x4000 Ende, 0x8000 Auswahl, 0x800/0x400 Wartezeit, 0x80000 Vorauswahl),
     // liest das Raumskript per bhFlagCk Typ 5 (RM_1050 Ereignis 34: WHILE !(st_flg & 0x1000),
     // dann WHILE (st_flg & 0x1000) bis zum Umblaettern, erst danach bhCamSet 4).
-    flags[5][0]=(flags[5][0]&~0x8dc00u)|(dialog_.status()&0x8dc00u);}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active())flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_=0; /* bhScenarioCheck: bhIfelFlg = 0 */run(tasks_[current_task_],true,scd1_);
+    flags[5][0]=(flags[5][0]&~0x8dc00u)|(dialog_.status()&0x8dc00u);}(menu_open||status_use_pending_)?flags[5][0]|=8:flags[5][0]&=~8u;if(dialog_.active()||message_end_pending_||(flags[5][0]&0x400000u))flags[5][0]|=0x200;else flags[5][0]&=~0x200u;ifel_=0; /* bhScenarioCheck: bhIfelFlg = 0 */run(tasks_[current_task_],true,scd1_);
     // bhEventScheduler2 (event.c:13024) laeuft nur mit sp_flg 0x10; die Raeume setzen bzw. loeschen
     // das Bit selbst im scd1 (bhSet 6,27), z. B. RM_0000 in jedem Durchlauf.
     schedule();
@@ -692,8 +722,8 @@ void EventVm::tick(){++tick_count;service_pickup();const bool cinematic=flags[10
     // 8 for bhControlEvent. The host closes visually at once; retain that
     // handover through one complete scenario/scheduler pass.
     status_use_pending_=false;if(!menu_open)flags[5][0]&=~8u;door_scenario_pending_=false;
-    // game.c consumes the interaction response after the scenario/scheduler pass.
-    if(!(flags[10][0]&1))flags[10][0]&=~0x1000u;
+    // game.c:270 loescht cb_flg 0x1000 nicht mehr in diesem Durchlauf: bhControlMessage setzt die
+    // Antwort (message.c:244), der naechste Durchlauf wertet sie in game.c:264 aus und loescht sie dort.
     // bhCheckSubTask after bhControlEvent (system.c:736-744): the same pass in
     // which cb_flg 4 falls releases the player work the cinematic held and drops
     // the skip request. This is the only original site that clears plp->flg
@@ -735,7 +765,7 @@ void EventVm::show_dialog(Message message,unsigned index){
     // message.c bhSetMessage: neither a previous question's end/response nor
     // its page marker may acknowledge the newly started message.
     flags[5][0]=(flags[5][0]&~0x8dc00u)|0x200;
-    flags[10][0]&=~0x20003000u;
+    flags[10][0]&=~0x20003000u;message_end_pending_=false;
     dialog_.show(std::move(message),index);values[7]=dialog_.selection;
 }
 void EventVm::pickup_result(const PickupResult& result){
@@ -781,21 +811,29 @@ void EventVm::cancel_item_request(){
     finish_pickup();finish_file();
 }
 void EventVm::cancel_dialog(){
-    // game.c:264: Cancel schliesst nur die fertige letzte Seite (st_flg 0x4000|0x1000 aus
-    // dem vorigen Durchlauf). Eine Auswahl (auch GetItem, sub1.c:3877) und Zwischenseiten
-    // kennen kein Cancel; das liest dort allein das Raumskript (bhPadCheck, RM_1090 Event 13).
-    if(dialog_.closable()){flags[5][0]|=0x400000u;close_dialog(false);} // game.c:264-270: final-page completion before bhControlEvent
+    // game.c:264: Cancel (pad_ps 0x1000) schliesst nur die fertige letzte Seite; der Druck selbst
+    // wird in bhMainSequence vor bhControlMessage ausgewertet (control_exm :264). Eine Auswahl
+    // (auch GetItem, sub1.c:3877) und Zwischenseiten kennen kein Cancel; das liest dort allein
+    // das Raumskript (bhPadCheck, RM_1090 Event 13).
+    if(dialog_.active()&&dialog_.closable())finish_page();
 }
 void EventVm::confirm_dialog(){
-    // game.c:264 schliesst die fertige letzte Seite noch vor bhControlMessage; Auswahl und
-    // Zwischenseite beantwortet erst bhControlMessage dieses Durchlaufs (tick).
+    // game.c:264 schliesst die fertige letzte Seite noch vor bhControlMessage (control_exm :264);
+    // eine offene Auswahl beantwortet dagegen bhControlMessage selbst (message.c:231-264), die
+    // Meldung bleibt bis game.c:147 stehen. Alles andere blaettert tick um.
     if(!dialog_.active())return;
-    if(dialog_.closable()){flags[5][0]|=0x400000u;close_dialog(false);}else dialog_.queue_ok(); // game.c:264-270
+    if(dialog_.choosing()){dialog_.queue_ok();return;}
+    if(dialog_.closable())finish_page();else dialog_.queue_ok();
+}
+void EventVm::finish_page(){
+    // Der Host nimmt die fertige Seite sofort vom Bild; die Skriptfreigabe bleibt wie im Original
+    // einen Durchlauf sichtbar (game.c:264 setzt st_flg 0x400000, game.c:147 loescht es).
+    dialog_.close();if(audio_stop)audio_stop(1);message_end_pending_=true;finish_pickup();
 }
 void EventVm::close_dialog(bool answered){
-    // bhDispMessage also acknowledges script-owned questions (st_flg 0x2000
-    // clear). Padlock disposal waits for this same cb_flg 0x1000 response.
-    const bool interaction_answer=answered&&!menu_open;
+    // bhControlMessage, Auswahl mit OK bestaetigt (message.c:231-262): mes_sel meldet die
+    // Wahl. Die Meldung bleibt aktiv; game.c:264 verlangt danach st_flg 0x1000 und game.c:147
+    // gibt sie im naechsten Durchlauf frei (Meldungsende, CineSet, Untersuchungskamera).
     values[7]=unsigned(dialog_.selection)+(answered&&menu_open?100u:0u);
     if(pickup_item_&&answered){
         // GetItem testmode 1/4 (sub1.c:3877/3926): CallSystemSe(0,3), dann loeschen die
@@ -806,15 +844,24 @@ void EventVm::close_dialog(bool answered){
         dialog_=MessageDialog{};flags[5][0]&=~0x200u;
         pickup_result(inventory_.pickup(pickup_item_,flags[10][0],values[0],values[1],pickup_mode_,int(answer),status_busy&&status_busy()));return;
     }
+    // message.c:242-262: die beantwortete Frage meldet cb_flg 0x1000 und st_flg 0x4000, der
+    // Abschluss der skripteigenen Meldung (st_flg 0x2000) dagegen cb_flg 0x20002000 und
+    // st_flg 0x400000. :264/:147 werten das im naechsten Durchlauf aus.
+    auto& st=flags[5][0];
+    if(!(st&0x2000)){flags[10][0]|=0x1000;st|=0x4000;}
+    else{
+        if((flags[11][0]&0x10000)&&(flags[11][0]&0x20000))flags[6][0]|=0x40;
+        flags[10][0]|=0x20002000u;
+        if(st&0x80)st|=0x200000u;
+        st|=0x400000;}
+    dialog_.close();if(audio_stop)audio_stop(1);message_end_pending_=true;finish_pickup();
+}
+void EventVm::end_message(){
+    // game.c:162/168: st_flg 0x200 erloschen. Der Host gibt die Anzeige im selben Zug frei
+    // (Meldungsstimme, Aufnahmehandover, Untersuchungshinweis).
+    message_end_pending_=false;
     dialog_.close();if(audio_stop)audio_stop(1);
-    // message.c: a confirmed interaction choice requests cb_flg 0x20000000;
-    // game.c bhSysCall converts that into 0x1000 for bhControlEvent.
-    // The script sees it once, alongside the original end marker 0x4000.
-    if(interaction_answer){flags[10][0]|=0x1000;flags[5][0]|=0x4000;}
-    if(flags[5][0]&0x2000){flags[5][0]&=~0x2204u;flags[6][0]=0xffffffff;}
-    // game.c:180-192: the examined camera ends with the message (pt_flg |= 3, bhCheckCut(1)).
-    if(flags[5][0]&0x80){flags[5][0]&=~0x80u;if(presentation_flags)presentation_flags(0,3);if(!(flags[11][0]&0x20000)){flags[5][0]&=~1u;flags[11][0]|=0x800;}}
-    finish_pickup();flags[5][0]&=~0x200u;flags[10][0]|=0x2000;if(opening_hint_)status_requested=true;opening_hint_=false;
+    finish_pickup();if(opening_hint_)status_requested=true;opening_hint_=false;
 }
 void EventVm::service_pickup(){
     // StatusMain ruft GetItem in jedem Durchlauf. Nach der Einfügung (testmode

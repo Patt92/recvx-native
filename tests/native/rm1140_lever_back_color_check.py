@@ -64,8 +64,9 @@ def main():
         before, before_px = run(runtime, data, root, 110)
         assert before['event_camera'] == 1 and before['room_changes'] == 0, (before['event_camera'], before['room_changes'])
         assert len(before_px) > 100, f'Hebelansicht ohne Geometrie: {len(before_px)} Farben'
-        # Bild der Antwort: evc 3 aktiv, DoorCall angefordert, Raum noch nicht gewechselt.
-        after, after_px = run(runtime, data, root, 111)
+        # Erstes evc-3-Bild: die beantwortete Meldung wird erst im Durchlauf nach der Antwort
+        # freigegeben (game.c:147), der DoorCall steht dann an, der Raum ist noch nicht gewechselt.
+        after, after_px = run(runtime, data, root, 112)
         assert after['event_camera'] == 3 and after['room_changes'] == 0, (after['event_camera'], after['room_changes'])
         room_clear = (0x06, 0x16, 0x28)  # RM_1140 rom->bak_col (Raumkopf +0x104)
         assert room_clear not in after_px, f'erstes evc-3-Bild loescht mit der alten Raumfarbe 0x061628: {sorted(after_px.items(), key=lambda c: -c[1])[:3]}'

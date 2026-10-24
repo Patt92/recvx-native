@@ -221,7 +221,7 @@ void GameplayInput::menu_input(MenuInput key,bool repeat){
            (SELECT) alone, see Action::Select in apply(). */
         /* Das Schliessen eines Texts spielt keinen Systemklang (game.c:264, message.c); den
            GetItem-Klang der beantworteten Aufnahmefrage spielt EventVm::close_dialog. */
-        if(key==MenuInput::Confirm||key==MenuInput::Cancel){if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active())inventory_grace_=60;synchronize();}else if(key==MenuInput::Left||key==MenuInput::Right){
+        if(key==MenuInput::Confirm||key==MenuInput::Cancel){/* game.c:264 schliesst die fertige Seite erst im naechsten Durchlauf (control_exm :147); die Hostsperre gegen die naechste Bestandstaste gilt deshalb schon fuer diesen Druck. */const bool finishing=dialog_.closable();if(key==MenuInput::Cancel)events_->cancel_dialog();else events_->confirm_dialog();if(!dialog_.active()||finishing)inventory_grace_=60;synchronize();}else if(key==MenuInput::Left||key==MenuInput::Right){
             /* bhControlMessage (message.c:269-285) bewegt mes_sel ausschliesslich mit
                sys->pad_ps 0x4 (mes_sel--) und 0x8 (mes_sel++). pad_ps ist in bhSetPad
                (pad.c:275) `pad & ~sys->pad_oncpy`, also die reine Druckflanke: eine beim
