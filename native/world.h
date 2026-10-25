@@ -318,7 +318,7 @@ public:
     void set_eye_ppers(int ppers){eye_.ppers=ppers;}           // cam.ppers (playpch2.c act_scp)
     void clear_eye_ax(){eye_.ax=eye_.axp=0;}                   // cam.ax = cam.axp = 0 (playpch2.c:57)
     void set_player_wax(int wax){player_wax_=std::int16_t(wax);}
-    void set_player_aim_mode(unsigned mode1,unsigned at_flg){player_aim_mode1_=mode1;player_aim_at_flg_=at_flg;}
+    void set_player_aim_mode(unsigned mode1,unsigned at_flg){player_aim_mode1_=mode1;player_aim_at_flg_=at_flg;player_at_flags_=at_flg;}
     // sys->ef_flg. system.c:195 initializes it to 0; its only original writer
     // is the mn_md1 room-load sequence (system.c:1830/1884), which no native
     // owner drives yet, so bit 0 stays clear until one binds it.
@@ -467,7 +467,9 @@ public:
     bool player_grabbed()const{return grab_driving_;}
     bool player_dead()const{return player_dead_;}
     bool player_killed()const{return player_killed_;}
-    void set_player_attack(bool attacking){player_attacking_=attacking;player_at_flags_=(player_at_flags_&~2u)|(attacking?2u:0u);} // plp->at_flg & 2
+    // Host attack activity is not plp->at_flg: bit 2 means horizontal aim,
+    // not firing (player.c:4764; en04.c:630 rejects it for downed dogs).
+    void set_player_attack(bool attacking){player_attacking_=attacking;}
     void set_player_weapon(unsigned wpnr_no){player_weapon_=wpnr_no;} // plp->wpnr_no for bhControlPlayer effects
     void set_weapon_part2_hook(std::function<void()> hook){hide_weapon_part2_=std::move(hook);}
     // sys->obwp[0]/[1].mdflg 0x1 (objitm.c:364: nicht in sys->ob_hlg) beim Waffenmodellbesitzer.
@@ -655,6 +657,7 @@ public:
     bool camera_transitioning()const{return active_camera_.transitioning();}
     unsigned camera_clock()const{return active_camera_.clock();}
     int floor_at(NJS_POINT3 position)const;
+    void set_player_floor(int floor){if(floor!=collision_floor_)collision_floor_previous_=collision_floor_;collision_floor_=floor;}
     const RECVX_PUSH_STATE* push_state()const{return push_?&push_->state():nullptr;}
     bool pushing()const{return push_&&push_->active();}
     bool tick_push(bool forward);
@@ -724,7 +727,7 @@ public:
     // Dieselben Enden setzen plp->pxb/pyb/pzb = px/py/pz (player.c:3103/3298/3478/3696/4097/4292),
     // die alte Lage des Koerper-bhCheckWallEx (:1647) im selben Pass.
     void set_player_previous_probe(NJS_POINT3 p){collision_previous_probe_={p.x,p.y+12.5f,p.z};player_prev_pos_=p;}
-    void place_player(NJS_POINT3 p){collision_safe_=p;collision_previous_probe_={p.x,p.y+12.5f,p.z};collision_front_offset_=collision_front_target_=0.f;collision_front_point_=p;collision_probe_ready_=true;}
+    void place_player(NJS_POINT3 p){set_player_floor(floor_at(p));collision_safe_=p;collision_previous_probe_={p.x,p.y+12.5f,p.z};collision_front_offset_=collision_front_target_=0.f;collision_front_point_=p;collision_probe_ready_=true;}
     // EXP_WORK fpx/fpy/fpz und arn, wie sie der Koerperteil von bhControlPlayer zuletzt
     // schrieb (player.c:1578-1587): fpx = px - sin(ay)*arn mit der Lage NACH dem
     // Aktionsschritt und VOR bhCheckWallEx (:1622/:1647 aendern px, fpx nicht).

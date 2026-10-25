@@ -130,6 +130,9 @@ current gameplay acceptance. Check the current gaps in
   reloading, and weapon sounds.
 - Target selection from `pwksub.c`/`playpch.c` (`bhSearchNearEnemy`,
   `bhSearchNextEnemy`, `bhCalcLockEneYR`, dual-weapon split).
+- Enemy damage checks receive the combat owner's actual `at_flg` aim bits.
+  Host firing activity does not overwrite horizontal/up/down aim; this preserves
+  the original downed-zombie/dog damage gates (`en01.c:3209`, `en04.c:630`).
 - Muzzle flash (`bhEff003`) and casings (`bhEff000`) with floor/wall bounce.
 - Grenade launcher (weapons 14–17: explosive, acid, incendiary, BOW gas
   rounds): launch (`player.c:4990`), `bhEff130` projectile flight,

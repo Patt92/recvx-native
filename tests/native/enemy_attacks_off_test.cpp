@@ -46,6 +46,16 @@ struct Fixture {
 static void direct_pass(const std::filesystem::path& data){
     for(int attacks=1;attacks>=0;--attacks){
         Fixture f(data,"RM_6030",0,attacks!=0);f.tick();
+        // Runtime synchronizes host attack activity before/after the combat pass.
+        // Preserve the actual aim bits, especially down (8) versus level (2).
+        for(unsigned flags : {0x48u,0x42u,0x44u,0u}){
+            f.world.set_player_aim_mode(flags?1u:0u,flags);
+            for(bool firing : {true,false}){
+                f.world.set_player_attack(firing);
+                RECVX_ENEMY_PLAYER aim{};check(f.world.enemy_player_get(aim),"aim player view");
+                check(aim.at_flg==flags,"host attack activity corrupts original aim flags");
+            }
+        }
         const int hp=f.inv.hp;check(hp>0,"Inventar-HP nicht gebunden");
         RECVX_ENEMY_PLAYER p{};check(f.world.enemy_player_get(p),"Spielerbesitzer fehlt");
         check(p.debug_attack_disabled==(attacks==0),"debug_attack_disabled folgt dem Schalter nicht");

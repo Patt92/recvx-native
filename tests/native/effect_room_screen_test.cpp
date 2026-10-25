@@ -86,7 +86,16 @@ int main(int argc,char** argv){try{_Make_SinTable();if(argc<2)return 0;const std
   press(8);press(0x800);check(s->mode0==2&&!r.vm.flag(1,58),"133 confirmation must defer flag until following pass");
   press(0);check(r.vm.flag(1,58)&&s->mode0==0&&s->mode1==0&&s->mode2==0&&s->mode3==0&&!(r.vm.flags[5][0]&0x40000000u)&&r.vm.flags[6][0]==previous_sp,"133 128 completion flag58/sp restore/mode reset");
   r.mode(2,1);r.pass();press(4);press(2);press(8);press(0x800);press(0);check(r.vm.flag(1,58),"133 wrong retry must NOT clear an existing solved flag");
-  r.vm.set_flag(1,58,1);r.mode(2,1);r.pass();press(0x800);press(0);check(!r.vm.flag(1,58),"133 wrong retry must not set flag58");
+  r.vm.set_flag(1,58,1);r.mode(2,1);r.pass();press(8);press(0x800);press(0);check(!r.vm.flag(1,58)&&s->mode0==0&&!(r.vm.flags[5][0]&0x40000000u),"133 wrong retry must complete without flag58");
+  // Diagnostic examine geometry; exercise the real bhCheckExmAtari input clear.
+  r.vm.control_exm();r.vm.message_release();
+  r.vm.interactions={Interaction{1,3,0,0,{0,0,0},{10,10,10},{0xff,0,0,0}}};
+  check(r.vm.interact({0,0,0},0,0),"133 repeated examination rejected");
+  r.mode(2,1);press(0x800);
+  check(s->mode0==1,"133 opening OK edge leaked from examination into Finished");
+  r.vm.control_exm();press(4);press(1);press(8);
+  check(s->mode0==1,"133 retry lost digit interaction");
+  press(0x800);check(s->mode0==2,"133 fresh OK edge must still confirm");press(0);
   for(const auto& gap:r.world.unbound_enemy_routines())check(gap.find("Thermo")==std::string::npos&&gap!="bhEff133"&&gap!="bhEff133: sys->st_flg/sp_flg/ev_flg ohne EventVm","133 unresolved production service");
   std::cout<<"RM_7050 133: original event17 @ac0, atlas42 image, digits128, deferred flag58, cancel ignored, repeat and saved sp PASS\n";
  }

@@ -1,4 +1,6 @@
 #include "world.h"
+#include <thread>
+#include <atomic>
 #include "en01_core.h"
 #include "back_color.h"
 #include "chunk_blend.h"
@@ -3249,7 +3251,10 @@ void RoomWorld::draw_trs2d_effects(SoftwareRenderer& image,unsigned pass)const{
             const float area=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);if(area==0)return;
             const int x0=std::max(0,int(std::floor(std::min({a.x,b.x,c.x})*sx))),x1=std::min(W-1,int(std::ceil(std::max({a.x,b.x,c.x})*sx)));
             const int y0=std::max(0,int(std::floor(std::min({a.y,b.y,c.y})*sy))),y1=std::min(H-1,int(std::ceil(std::max({a.y,b.y,c.y})*sy)));
-            for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
+            // Zeilen auf Arbeiter verteilt (wie die Bandstufe des Renderers): jede Zeile hat einen Schreiber, die
+            // Pixelrechnung bleibt dieselbe, das Bild ist fuer jede Arbeiterzahl identisch. Grosse Schirmplatten
+            // (bhEff122 in RM_7120 fuellt das Bild) kosteten sonst rund 5 ms je Takt auf dem Hauptthread.
+            const auto rows=[&](int ya,int yb){for(int y=ya;y<=yb;++y)for(int x=x0;x<=x1;++x){
                 const float px=(float(x)+0.5f)/sx,py=(float(y)+0.5f)/sy;
                 const float w0=((b.x-px)*(c.y-py)-(b.y-py)*(c.x-px))/area,w1=((c.x-px)*(a.y-py)-(c.y-py)*(a.x-px))/area,w2=1-w0-w1;
                 if(w0<0||w1<0||w2<0)continue;
@@ -3263,6 +3268,14 @@ void RoomWorld::draw_trs2d_effects(SoftwareRenderer& image,unsigned pass)const{
                 const auto mix=[&](float src,unsigned sh){return unsigned(std::clamp(src*alpha+float((d>>sh)&255u)*(1-alpha),0.0f,255.0f));};
                 d=0xff000000u|(mix(t[0]*mr,16)<<16)|(mix(t[1]*mg,8)<<8)|mix(t[2]*mb,0);
             }};
+            const long pixels=long(x1-x0+1)*long(y1-y0+1);
+            const unsigned available=std::max(1u,std::thread::hardware_concurrency());
+            const unsigned requested=image.render_threads()?image.render_threads():std::max(4u,available>2u?available-2u:1u);
+            const unsigned workers=pixels<16384?1u:std::min<unsigned>(requested,unsigned(std::max(1,(y1-y0+1)/8)));
+            if(workers<=1){rows(y0,y1);return;}
+            std::atomic<int> next{y0};const int band=8;
+            const auto worker=[&]{for(int ya=next.fetch_add(band);ya<=y1;ya=next.fetch_add(band))rows(ya,std::min(y1,ya+band-1));};
+            std::vector<std::thread> pool;for(unsigned i=1;i<workers;++i)pool.emplace_back(worker);worker();for(auto& t:pool)t.join();};
         tri(v[0],v[1],v[2]);if(s.pn==4)tri(v[1],v[3],v[2]);
     }
 }
@@ -3467,6 +3480,8 @@ void RoomWorld::control_lights(){
     if(event_camera)for(auto& l:event_lights_)animate_light(l,bool(l.flags&2u));
 }
 void RoomWorld::tick_after_player(){
+    // bhCheckExmAtari clears sys->pad_ps before bhControlEffect (game.c:93).
+    if(collision_events_&&collision_events_->pad_edges_cleared())pad_ps_=0;
     // Der freie Spielerpass (runtime.cpp, player->pose aus plp->px/ay) kennt die Objektbindung nicht;
     // die Daten (RM_4011) binden nur die skriptgesteuerte Spielerin (bhLoadWork 0 davor).
     if(player_object_link_.linked&&!player_scripted)unbound_enemy_.insert("bhObjLinkSetObjPly: freier Spielerpass mit flg 0x80 (bhCalcModel/bhFixPosition Motion.c:885)");
@@ -5950,6 +5965,7 @@ void RoomWorld::bind_player_collision(EventVm& events){
     collision_front_point_=player_.position;
     collision_floor_=floor_at(player_.position);
     events.floor_binding=[this](NJS_POINT3 p,Angle ay,int floor){check_player_floor(p,ay,floor);};
+    events.set_player_floor=[this](unsigned floor){set_player_floor(std::int8_t(floor));};
     /* system.c:742: plp->mode3 = 0 when cb_flg 4 falls. mode0..mode3 share one
        little-endian word, so only the top byte of the player mode is cleared. */
     events.release_cinematic_player=[this]{collision_mode_&=0x00ffffffu;};
@@ -6045,7 +6061,6 @@ void RoomWorld::check_player_floor(NJS_POINT3 position,Angle yaw,int floor){
        is suspended while plp->stflg 0x1000000 is set (bhObjSleep). Preserve
        the floor-trigger work consumed by the script instead of retriggering it. */
     if(player_hidden||(collision_events_&&(collision_events_->flags[14][0]&0x1000000u)))return;
-    collision_floor_=floor;
     if(!collision_probe_ready_)collision_safe_=position;
     /* bhCheckFloorP ist im Original die Stelle direkt NACH dem Koerperteil von
        bhControlPlayer (player.c:1578-1655 vor :1664). Lief in diesem Bild kein
@@ -6085,7 +6100,7 @@ NJS_POINT3 RoomWorld::move_player(NJS_POINT3 from,NJS_POINT3 to,int movement,boo
 NJS_POINT3 RoomWorld::resolve_player_motion(NJS_POINT3 from,NJS_POINT3 to,float radius,float height,std::optional<float> front_target,std::optional<Angle> yaw){
     ensure_push();update_push();
     auto geometry=collision_geometry();const auto steps=motion_steps(),flr=motion_floors();
-    MotionTerrain terrain{geometry,steps,flr,floors_,room_height_};auto actor=motion_actor();if(yaw)actor.yaw=*yaw;collision_floor_=floor_at(from);
+    MotionTerrain terrain{geometry,steps,flr,floors_,room_height_};auto actor=motion_actor();if(yaw)actor.yaw=*yaw;
     if(!(simulation_flags_&1u)||(collision_events_&&!(collision_events_->flags[6][0]&1u))||(actor.status&0x1000000))return to;
     if(!collision_probe_ready_){collision_safe_=from;collision_previous_probe_={from.x,from.y+12.5f,from.z};collision_probe_ready_=true;}
     if(front_target){

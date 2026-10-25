@@ -28,6 +28,21 @@ int main(int argc,char** argv){try{
     if(argc<2)return 0;
     _Make_SinTable();
     const std::filesystem::path data=argv[1];
+    {
+        // RM_7120 lift: rigid MDL pair, no skin weights. Original 0x84
+        // addresses ene[1], swapping mbp[0]/[1] at each end of the travel.
+        Room room(data,"RM_7120",0);
+        auto draw=[&](unsigned shape){EventCommand c{};c.opcode=0x84;c.bytes={0x84,1,1,0,1,0,std::uint8_t(shape),std::uint8_t(shape>>8)};
+            check(room.world->bind(c),"lift morph command rejected");Scene out;out.textures=room.scene.textures;
+            room.world->append(out,{},room.scene.cameras.at(0));return out;};
+        const auto low=draw(0),mid=draw(500),high=draw(1000);
+        check(low.triangles.size()==high.triangles.size()&&mid.triangles.size()==low.triangles.size(),"lift morph changed topology");
+        float moved=0;for(std::size_t t=0;t<low.triangles.size();++t)for(unsigned k=0;k<3;++k){
+            const auto a=low.triangles[t].vertices[k].position,b=high.triangles[t].vertices[k].position,m=mid.triangles[t].vertices[k].position;
+            moved=std::max(moved,std::fabs(a.y-b.y));
+            check(std::fabs(m.y-(a.y+b.y)*.5f)<.002f,"rigid morph midpoint not interpolated");}
+        check(moved>8.f,"rigid lift geometry did not move between endpoints");
+    }
     // en01.c:2749 bhEne01_Init: der normale Zombie waehlt obj_a = mbp[0],
     // obj_b = mbp[1]. Vor der Verdrahtung lief das in die Luecke
     // "mlwP->objP = mbp[0] (en01.c:2749)".

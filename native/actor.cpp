@@ -457,6 +457,18 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
     }
     geometry.world_vertices.resize(bones());
     geometry.world_normals.resize(bones());
+    // npTransform (njplus.c:710) deforms every eligible object's vlist,
+    // not just meshes with skin influences. Rigid machinery uses it too.
+    if(geometry.morph.model){
+        geometry.local_vertices.resize(bones());geometry.local_normals.resize(bones());
+        for(std::size_t object=0;object<bones();++object){
+            const bool skinned=std::any_of(skin_.begin(),skin_.end(),[&](const auto& mesh){return mesh.object==object;});
+            if(skinned||morph_a.stream(object)==MorphStreams::none||morph_b.stream(object)==MorphStreams::none)continue;
+            if(morph_a.count(object)!=morph_b.count(object))throw std::runtime_error("morph objects have different vertex counts");
+            for(std::size_t i=0;i<morph_a.count(object);++i){float p[3],n[3];morph_vertex(morph_a,object,morph_b,object,i,morph_factor,p,n);
+                geometry.local_vertices[object].push_back({p[0],p[1],p[2]});geometry.local_normals[object].push_back({n[0],n[1],n[2]});}
+        }
+    }
     // npInitCalcSkinFM/npCalcSkinFM (njplus.c:2049/2140): four procedural
     // face nodes consume no skin record, influence indices >10 skip them.
     const auto bind_translation=geometry.skin_fm?matrices(bind_pose_,{},0,true):std::vector<Matrix>{};

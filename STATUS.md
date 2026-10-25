@@ -33,6 +33,25 @@ der Hauptschleife (`video.ini frame_rate` 30/60/120/unlimited fuer alle Backends
 der ersten Takthaelfte), Debugmenue-Namen auf die Wertspalte gekuerzt. GPU-Pfad in der Sandbox **nicht** ausfuehrbar
 (kein Metal-Geraet), nur gebaut und per Einstellungstests belegt. Nutzerpruefung 2026-10-25 mit eigenem Build
 (M4 Pro, macOS 27): Upscaler, Frame-Interpolation (stabil bei 60 Bildern) und Post-Processing laufen anstandslos.
+Commit 09b26a7. Danach (Arbeitsbaum): Schaerfen als eigene Stufe (`sharpness` aus/leicht/mittel/stark), CRT-Filter
+in zwei Modi (`crt-light` wie bisher, `crt-full` mit Gauss-Strahlprofil, Schlitzmaske, Bloom, Helligkeitsausgleich,
+alles in linearem Licht). Nutzerbefund: full ueberbelichtet, Nachbilder mit Frame-Generation, light guter Kompromiss.
+Umbau: Maske nur halb kompensiert, Strahlbreite bei Weiss ohne Beschnitt, Bloom vor Strahl/Maske und mit eigener
+Helligkeit abklingend, light ebenfalls gamma-korrekt (breiter Strahl, schwache Maske); 2D-Ebene als uiTexture an den
+Interpolator (unverzerrt ueberlagert statt gemischt). Nutzerbefund danach: weiterhin ueberbelichtet/Nachbilder, dazu
+Stocken bei 120 (vier VSync-Wartezeiten je Takt auf dem Hauptthread plus Zeichenpass > 33 ms). Umbau: Praesentation
+und Kadenz auf eigenem Thread der Stufe (Hauptthread uebergibt nur eine Bildkopie), Strahlkompensation halbiert.
+Kein Metal-Compiler in der Sandbox: Shader uebersetzt zur Laufzeit, Fehler als "MetalFX presentation disabled:
+presentation shader" auf stderr; Sichtpruefung am Fenster offen.
+
+**RM_7120 Kameras 2..6 (2026-10-25, Arbeitsbaum):** Nutzerbefund Ruckeln in Kamera 4/5. Headless gemessen (Software,
+`--ss 1`, 60 Bilder): Kamera 1 1,3 ms Zeichenpass, Kamera 4 6,1 ms, davon 4,8 ms bhDrawTrsEffect2D auf dem Hauptthread:
+die Leuchtplatte bhEff122 (Texturgruppe 41) fuellt in diesen Kameras das ganze Bild, der Schirmpfad rechnete jedes Pixel
+einzeln. `draw_trs2d_effects` verteilt die Zeilen jetzt auf Arbeiter wie die Bandstufe (gleiche Pixelrechnung, Bild
+bytegleich, Hash aad435c7): 0,72 ms. Nutzerpruefung danach: nur noch bei genauem Hinsehen ein leichtes Stocken, allein
+mit Frame-Generation; Aenderung bleibt (spart ms). Der Headless-Lauf misst keinen GPU-/MetalFX-Anteil der App; die
+Zeilen "Draw:", "GPU:" und "MetalFX presentation:" beim Beenden der App sind fuer die Restursache offen. Headless-Bericht zeigt jetzt die Zeichenphasen
+(content, compose, ntx2d, trs2d, fnc) wie der Fensterlauf.
 [Doku](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos). **Kein Commit.**
 
 **bhEffTypeSet 0xAD (2026-10-22, Arbeitsbaum):** `world.cpp` schreibt `op->type = v1` wie event.c:7345 ohne

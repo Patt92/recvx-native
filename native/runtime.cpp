@@ -653,7 +653,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         // game.c:61-112 zeichnet mit cam.mtx aus bhControlCamera (game.c:58), nicht mit der cam-Lage nach dem
         // folgenden bhCheckCut. Ohne bhControlCamera im Raum (nur Hostbilder ohne Task 7) bleibt die cam-Lage.
         auto drawn_camera=[&](){return world?(world->controlled_camera()?*world->controlled_camera():world->camera(scene,camera)):camera;};
-        auto compose=[&](){scene.shadows.clear();scene.lines.clear(); /* njDrawLine3D-Linien gelten nur fuer dieses Bild */scene.triangles=stage_geometry;scene.ambient_writes=stage_ambient;const auto stage_count=scene.triangles.size();scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes;const auto hair_at=world&&player_attachment()?std::optional<recvx::RoomWorld::AttachedObject>(world->attached_object(2,player_link()->offset)):std::nullopt; /* bhDrawObjItm (game.c:343) liest pl_sleep_cnt vor dem Abzug in game.c:358 */ /* game.c:357: bhPutModel(plp) only with pt_flg 0x1 (or stflg 0x1000000, whose sleep counter stays with the existing owner); the pose is still sampled for links. */const bool player_put=!world||(world->presentation_flags()&1u)||(world->effect_context().player_stflg&0x1000000u);if(player&&(!world||!world->player_hidden||(player_put&&world->player_sleep_draw()))){auto sampled=world?world->sample_player(*player,&nodes,head_draw_overrides()):player->sample(motion,animation,actor.position,actor.yaw,&nodes,head_draw_overrides());if(player_put&&!(world&&world->player_model_hidden()))recvx::append_actor(scene,sampled,texture_base);}
+        double compose_seconds=0; /* Diagnose: Szenenaufbau je Bild */
+        auto compose=[&](){const auto compose_begin=std::chrono::steady_clock::now();struct ComposeTimer{double& total;std::chrono::steady_clock::time_point begin;~ComposeTimer(){total+=std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count();}} compose_timer{compose_seconds,compose_begin};scene.shadows.clear();scene.lines.clear(); /* njDrawLine3D-Linien gelten nur fuer dieses Bild */scene.triangles=stage_geometry;scene.ambient_writes=stage_ambient;const auto stage_count=scene.triangles.size();scene.textures.resize(stable_textures);std::vector<recvx::BoneMatrix> nodes;const auto hair_at=world&&player_attachment()?std::optional<recvx::RoomWorld::AttachedObject>(world->attached_object(2,player_link()->offset)):std::nullopt; /* bhDrawObjItm (game.c:343) liest pl_sleep_cnt vor dem Abzug in game.c:358 */ /* game.c:357: bhPutModel(plp) only with pt_flg 0x1 (or stflg 0x1000000, whose sleep counter stays with the existing owner); the pose is still sampled for links. */const bool player_put=!world||(world->presentation_flags()&1u)||(world->effect_context().player_stflg&0x1000000u);if(player&&(!world||!world->player_hidden||(player_put&&world->player_sleep_draw()))){auto sampled=world?world->sample_player(*player,&nodes,head_draw_overrides()):player->sample(motion,animation,actor.position,actor.yaw,&nodes,head_draw_overrides());if(player_put&&!(world&&world->player_model_hidden()))recvx::append_actor(scene,sampled,texture_base);}
             hair_drawn=false;if(player)if(const auto* tail=player_attachment()){const auto link=*player_link();std::optional<NJS_POINT3> at;
                 // obwp[2] in ob_hlg (objitm.c:363-371), gezeichnet von bhDrawObjItm/bhDrawObject (:503, :635-656)
                 // an seinem lkwkp: am Spieler aus dessen Zeichenbaum, sonst aus op->px des Objektlaufs.
@@ -1088,7 +1089,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"framerate","Bildrate","OK: Praesentationen je Spieltakt (Takt bleibt 30 Hz); unlimited ohne VSync; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"30 (Spieltakt)"},{1,"60"},{2,"120"},{3,"Unbegrenzt (kein VSync)"}};},[&]{return unsigned(video.settings().frame_rate);},[&](unsigned value){video.set_frame_rate(recvx::FrameRate(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Bildrate: "+video.settings().describe_frame_rate();}});
         debug.add({"upscaler","Upscaler","OK: MetalFX-Upscaler des Endbilds (macOS); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX spatial"},{2,"MetalFX temporal"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
         debug.add({"framegen","Frame-Generation","OK: Zwischenbild je Spieltakt (macOS 26+); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX frame interpolation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame-Generation: "+video.describe_frame_generation();}});
-        debug.add({"postfx","Post-Processing","OK: Schaerfen oder CRT-Zeilenraster der Anzeige (macOS); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"Sharpen"},{2,"CRT"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Post-Processing: "+video.describe_post_process();}});
+        debug.add({"sharpness","Schaerfen","OK: kontrastadaptives Schaerfen der Anzeige (macOS); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"Leicht"},{2,"Mittel"},{3,"Stark"}};},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Schaerfen: "+video.describe_sharpness();}});
+        debug.add({"postfx","CRT-Filter","OK: CRT light (Zeilenraster) oder CRT full (Schlitzmaske, Bloom, gamma-korrekt); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"CRT light"},{2,"CRT full"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT-Filter: "+video.describe_post_process();}});
         debug.add({"renderer","Rasterer","OK: Plattform-GPU, Software, OpenGL oder Vulkan; Auswahl wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (Plattform)"},{1,"Software"},{2,"OpenGL"},{3,"Vulkan"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
             const auto backend=value==3?recvx::RenderBackend::Vulkan:value==2?recvx::RenderBackend::OpenGL:value==1?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
             if(!apply_renderer)return std::string("Rasterer: noch nicht bereit");
@@ -1126,7 +1128,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         // EventVm::interact.  Die Stufensuche lief dort schon zuerst.
         auto begin_stairs=[&]()->bool{
             if(!player||!world||!events||stairs.active)return false;
-            const int floor=world->floor_at(actor.position);
+            const int floor=world->player_floor_number();
             const float radius=3.5f,height=int(inventory.player)?17.5f:16.5f; // plp->ar/plp->ah aus PlyInfo[sys->ply_id]
             // rom->etcp zuerst, dann die beweglichen Bereiche von bhObj001: der
             // mobile Atr bleibt in der Reihenfolge rom->etcp, sys->metcp.
@@ -1281,6 +1283,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             // Stufenkanten-Begrenzung (bhSetDansaLimitAtari, hitchk.c:666) der alten Flaeche.
             if(events){stairs.status=events->flags[14][0];stairs.flg=events->flags[13][0];stairs.st_flg=events->flags[5][0];}
             const bool running=recvx_stairs_tick(&stairs,&host)!=0;
+            world->set_player_floor(stairs.floor); // plp->flr_no written by the original stair action
             // stflg/flg/st_flg sind die eine Spielerarbeit; der C-Teil haelt nur
             // eine Sicht darauf und wird nach jedem Bild zurueckgeschrieben.
             if(events){events->flags[14][0]=stairs.status;events->flags[13][0]=stairs.flg;events->flags[5][0]=stairs.st_flg;}
@@ -1797,6 +1800,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
            Escape (Cancel UND Pause, controls.ini) im Speicherbildschirm den Pausezweig und
            erreichte den Abbruch der Slotliste nie. */
         auto pause_allowed=[&]{return world&&!frontend.active()&&!game_over.active()&&!debug.active()&&!transition_pending&&!typewriter.active()&&!computer.active()&&!menu.active&&!dialog.active()&&!movie.active()&&!stairs.active&&!world->player_scripted&&!world->player_hidden&&!(events&&(events->flags[5][0]&0x40004u));};
+        double diag_2d[3]={0,0,0}; /* Diagnose: NTX2D, TRS2D, ef_fnc-HUDs je Bild */
         auto draw_content=[&](unsigned frame,std::size_t controllers){if(game_over.active()&&ui){if(game_over.phase()==0){compose();image.draw(scene,view_camera(),wireframe);}game_over.draw(image,*ui);debug.draw(image,*ui);return;}if(frontend.active()&&ui){frontend.draw(image,*ui,controllers);debug.draw(image,*ui);return;}
             /* Schreibmaschinen-Slotauswahl: eigenes Bild, solange die Aufgabe laeuft. */
             if(typewriter.active()&&ui){ui->draw_typewriter(image,typewriter);debug.draw(image,*ui);return;}
@@ -1814,7 +1818,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(map_active&&map_initialized){map_render.draw(image,map_screen);if(screen_fade.visible())screen_fade.draw(image.canvas(),image.width(),image.height());if(ui)debug.draw(image,*ui);return;}
             /* ts_flg 0x80 kommt erst mit Modus 2/10 der Tuerdemo (system.c:984/1044): im Anforderungsbild und
                waehrend der Ausblende von bhStartDoorDemo zeichnet Task 7 noch den Raum samt Blende (game.c:61-112). */
-            if(!computer.active()&&!door_game_stopped){compose();if(!(world&&world->draw_full_screen(image,scene,view_camera(),wireframe))){image.draw(scene,view_camera(),wireframe);if(world){world->draw_ntx2d_effects(image);world->draw_trs2d_effects(image);world->draw_fnc_huds(image);}}if(world){world->draw_thermometer(image);} /* effect.c:905 bhDrawNtxEffect2D, :912 bhDrawTrsEffect2D, dann die ef_fnc-Schleife (:929, dort effsub1b.c:101 bhDraw134, effsub1.c:4756 bhDraw021), alles vor bhDrawScreenFade */}
+            if(!computer.active()&&!door_game_stopped){compose();if(!(world&&world->draw_full_screen(image,scene,view_camera(),wireframe))){image.draw(scene,view_camera(),wireframe);if(world){const auto t0=std::chrono::steady_clock::now();world->draw_ntx2d_effects(image);const auto t1=std::chrono::steady_clock::now();world->draw_trs2d_effects(image);const auto t2=std::chrono::steady_clock::now();world->draw_fnc_huds(image);const auto t3=std::chrono::steady_clock::now();diag_2d[0]+=std::chrono::duration<double>(t1-t0).count();diag_2d[1]+=std::chrono::duration<double>(t2-t1).count();diag_2d[2]+=std::chrono::duration<double>(t3-t2).count();}}if(world){world->draw_thermometer(image);} /* effect.c:905 bhDrawNtxEffect2D, :912 bhDrawTrsEffect2D, dann die ef_fnc-Schleife (:929, dort effsub1b.c:101 bhDraw134, effsub1.c:4756 bhDraw021), alles vor bhDrawScreenFade */}
             /* game.c:111: bhDrawScreenFade nach bhAllDrawModel, nicht waehrend der Statusbildschirm-Task den Schirm hat. */
             if(!door_game_stopped&&!menu.screen_drawn()&&!computer.active()&&screen_fade.visible())screen_fade.draw(image.canvas(),image.width(),image.height());
             movie.draw(image);if(ui){ui->draw(image,inventory,menu,dialog,frame);box_menu.draw(image,*ui,inventory,menu);if(events){ui->draw_event_timer(image,*events);computer.draw(image,*ui,*events);}if(pause_active)ui->draw_pause(image,controllers!=0);}if(door_game_stopped)door.draw(image);if(ui)debug.draw(image,*ui);};
@@ -1822,8 +1826,11 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         // Raumwechseln. Keine Ausnahmegrenze um Simulation oder gesamten Renderer.
         std::set<std::string> logged_render_warnings;
         bool render_warning_seen=false;
+        double draw_content_seconds=0; /* Diagnose: gesamter Zeichenpass */
         auto draw=[&](unsigned frame,std::size_t controllers=0){
+            const auto content_begin=std::chrono::steady_clock::now();
             draw_content(frame,controllers);
+            draw_content_seconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-content_begin).count();
             if(world)for(const auto& warning:world->render_warnings()){
                 render_warning_seen=true;
                 const auto detail=rooms.name(room_index)+": "+warning;
@@ -1897,6 +1904,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(!args.screenshot.empty())image.save_bmp(args.screenshot);
             if(image.gpu())std::cout<<"GPU raster last frame: "<<image.gpu()->draw_calls()<<" draws, "<<image.gpu()->shadow_composites()<<" shadow composites\n";
             std::cout<<"Rendered "<<frames<<" frames, "<<image.covered_pixels()<<" visible pixels in "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<" seconds.\n";
+            {const auto& t=image.timings();const double n=std::max(1,frames); /* Diagnose wie im Fensterlauf: Zeichenphasen je Bild */
+             std::cout<<"Draw: content "<<1000.0*draw_content_seconds/n<<" (compose "<<1000.0*compose_seconds/n<<", ntx2d "<<1000.0*diag_2d[0]/n<<", trs2d "<<1000.0*diag_2d[1]/n<<", fnc "<<1000.0*diag_2d[2]/n<<"); setup "<<1000.0*t.setup/n<<", gpu "<<1000.0*t.gpu/n<<", bands "<<1000.0*t.bands/n<<", shadow "<<1000.0*t.shadow/n<<", lines "<<1000.0*t.lines/n<<" ms/frame\n";}
             report();return events&&!events->errors.empty()?1:0;
         }
         SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_AUDIO)==0);
@@ -1939,7 +1948,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 if(ui&&!debug.active()&&event.type==SDL_KEYDOWN&&!event.key.repeat&&(event.key.keysym.scancode==SDL_SCANCODE_F5||event.key.keysym.scancode==SDL_SCANCODE_F9)){
                     try{std::cout<<(event.key.keysym.scancode==SDL_SCANCODE_F5?save_snapshot(0):load_snapshot(0))<<'\n';audio.play_system(3);}catch(const std::exception& e){std::cerr<<"Snapshot: "<<e.what()<<'\n';audio.play_system(1);}
                     devices.suppress_held();accumulator=0;continue;}
-                const bool was_debug=debug.active();if(ui&&debug.event(event)){if(was_debug!=debug.active()){devices.suppress_held();accumulator=0;if(audio_device)SDL_PauseAudioDevice(audio_device,debug.active());}continue;}
+                const bool was_debug=debug.active();if(ui&&debug.event(event)){if(event.type==SDL_CONTROLLERBUTTONUP)devices.event(event); /* keep device release state synchronized for consumed chord buttons */if(was_debug!=debug.active()){devices.suppress_held();accumulator=0;if(audio_device)SDL_PauseAudioDevice(audio_device,debug.active());}continue;}
                 devices.event(event);if(ui&&frontend.active()&&!debug.active())frontend.event(event);
                 // Host: macOS Cmd+W (Fenster schliessen) darf ein laufendes Spiel nicht beenden; SDL meldet es als
                 // Fensterschliessen und, als einziges Fenster, als SDL_QUIT. Beenden bleibt Cmd+Q/roter Knopf/Quit-Taste.
@@ -2051,7 +2060,6 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             // Mehr Praesentationen je Takt als Bildwiederholungen des Monitors blockierten im VSync die Schleife (Takte
             // fielen aus), deshalb auf die Monitorrate geklammert; Unlimited laeuft ohne VSync fortlaufend.
             const int slots=[&]{int n=video.settings().presents_per_tick();if(n>1){SDL_DisplayMode mode{};if(SDL_GetWindowDisplayMode(window.get(),&mode)==0&&mode.refresh_rate>0)n=std::clamp(mode.refresh_rate/int(recvx::game_tick_hz),1,n);}return n;}();
-            const bool interpolating=presenter&&shown_by_presenter&&video.settings().frame_generation!=recvx::FrameGeneration::Off&&slots!=1;
             bool shown_this_pass=presented;
             if(presented){
                 bool shown=false;slot_index=0;
@@ -2064,28 +2072,28 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                     recvx::PresentFrame pf;pf.pixels=image.pixels().data();pf.depth=image.depth().data();
                     const auto& projection=image.last_projection();pf.scene=projection.valid?image.scene_pixels().data():nullptr;
                     pf.projection.valid=projection.valid;std::copy_n(projection.view,16,pf.projection.view);pf.projection.focal_x=projection.focal_x;pf.projection.focal_y=projection.focal_y;pf.projection.near=projection.near;pf.projection.far=projection.far;
-                    pf.scene_key=key;pf.delta_seconds=double(std::max(1u,input_tick-presented_tick))*recvx::game_tick_seconds;
-                    shown=presenter->present(pf,slots!=1);}
+                    pf.scene_key=key;pf.delta_seconds=double(std::max(1u,input_tick-presented_tick))*recvx::game_tick_seconds;pf.slots=slots;
+                    shown=presenter->present(pf);}
                 presented_tick=input_tick;shown_by_presenter=shown;
                 if(!shown){sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);
                 sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());}++presented_frames;
                 const std::string title=frontend.active()?"Resident Evil CODE: Veronica X | Title":"RECVX native | "+rooms.name(room_index)+" | Camera "+std::to_string(camera_index+1)+(player?" | Motion "+std::to_string(motion):"")+(ui?" | Native development":" | Preview");
                 if(title!=window_title){SDL_SetWindowTitle(window.get(),title.c_str());window_title=title;}}
-            else if(rendered_frames&&!paused&&(slots==0||(slots>1&&slot_index+1<slots&&accumulator>=double(slot_index+1)*recvx::game_tick_seconds/slots))){
-                // Wiederholte Praesentation desselben Bildes im naechsten Zeitfenster des Takts; mit Frame-Interpolation
-                // zeigt die erste Takthaelfte das Zwischenbild, die zweite das gezeichnete Bild.
+            else if(rendered_frames&&!paused&&!shown_by_presenter&&(slots==0||(slots>1&&slot_index+1<slots&&accumulator>=double(slot_index+1)*recvx::game_tick_seconds/slots))){
+                // SDL-Kopierpfad: wiederholte Praesentation desselben Bildes im naechsten Zeitfenster des Takts. Ein schon
+                // verpasstes Fenster (Takt lief laenger) wird ausgelassen statt nachgeholt, sonst staut sich der VSync.
+                // Die MetalFX-Stufe fuehrt ihre Kadenz auf dem eigenen Thread (PresentFrame::slots).
                 if(slots>0)++slot_index;
-                const bool interpolated=interpolating&&(slots>0?slot_index*2<slots:accumulator*2<recvx::game_tick_seconds);
-                bool shown=false;if(shown_by_presenter)shown=presenter->represent(interpolated);
-                if(!shown){sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());}
-                ++presented_frames;++represented_frames;shown_this_pass=true;}
+                if(slots==0||accumulator<double(slot_index+1)*recvx::game_tick_seconds/slots){
+                    sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());
+                    ++presented_frames;++represented_frames;shown_this_pass=true;}}
             ++frame;if(args.frames&&frame>=args.frames)running=false;
             // Statt jeden Millisekunden zu pollen: auf Eingabe, den naechsten Takt oder das naechste
             // Praesentationsfenster warten. Das Ereignis wird zurueckgereiht und im naechsten Durchlauf mit
             // allen anderen verarbeitet. Unlimited wartet nicht (fortlaufende Praesentation).
-            if(!shown_this_pass&&running&&slots!=0){
+            if(!shown_this_pass&&running&&(slots!=0||shown_by_presenter)){
                 double remaining=paused?0.1:std::max(0.001,recvx::game_tick_seconds-accumulator);
-                if(!paused&&slots>1&&slot_index+1<slots)remaining=std::max(0.001,std::min(remaining,double(slot_index+1)*recvx::game_tick_seconds/slots-accumulator));
+                if(!paused&&!shown_by_presenter&&slots>1&&slot_index+1<slots)remaining=std::max(0.001,std::min(remaining,double(slot_index+1)*recvx::game_tick_seconds/slots-accumulator));
                 SDL_Event pending{};const auto wait_start=std::chrono::steady_clock::now();++waits;
                 if(SDL_WaitEventTimeout(&pending,int(std::ceil(remaining*1000.0)))==1){stashed=pending;
                     if(std::chrono::duration<double>(std::chrono::steady_clock::now()-wait_start).count()<0.0005)++immediate_waits;}}
@@ -2100,7 +2108,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                   <<", bands "<<1000.0*t.bands/frames<<", shadow "<<1000.0*t.shadow/frames<<", lines "<<1000.0*t.lines/frames<<" ms/frame\n";}
         if(image.gpu()){const auto& g=image.gpu()->timings();const double frames=std::max(1.0,double(rendered_frames));
          std::cout<<"GPU: build "<<1000.0*g.build/frames<<", upload "<<1000.0*g.upload/frames<<" ("<<g.uploads<<" textures), encode "<<1000.0*g.encode/frames
-                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(presenter){const auto& p=presenter->stats();std::cout<<"MetalFX presentation: "<<presenter->describe()<<"; "<<p.presents<<" presents ("<<p.repeated<<" repeated), "<<p.interpolated<<" interpolated, "<<p.resets<<" history resets, "<<p.skipped<<" skipped, GPU "<<(p.presents?1000.0*p.gpu_seconds/p.presents:0)<<" ms/frame\n";}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
+                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(presenter){const auto& p=presenter->stats();std::cout<<"MetalFX presentation: "<<presenter->describe()<<"; "<<p.presents<<" presents ("<<p.repeated<<" repeated), "<<p.interpolated<<" interpolated, "<<p.resets<<" history resets, "<<p.skipped<<" skipped, GPU "<<(p.presents?1000.0*p.gpu_seconds/p.presents:0)<<" ms/frame\n";presenter.reset(); /* Thread vor dem Fenster beenden */}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
     }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';return 1;}
 }
 int main(int argc,char** argv){

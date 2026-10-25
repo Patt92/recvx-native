@@ -21,6 +21,11 @@
 #include <cstdio>
 #include <dispatch/dispatch.h>
 #include <sstream>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
 #include <AvailabilityVersions.h>
 // Frame-Interpolation braucht das macOS-26-SDK, die Kameramatrizen des Interpolators das macOS-27-SDK.
 #if defined(__MAC_26_0)
@@ -67,6 +72,14 @@ struct DV { float4 pos [[position]]; };
 vertex DV depth_vs(uint vid [[vertex_id]]) {DV o;const float2 p=float2(vid==1u?3.0:-1.0,vid==2u?3.0:-1.0);o.pos=float4(p,0.0,1.0);return o;}
 struct DF { float depth [[depth(any)]]; };
 fragment DF depth_fs(DV in [[stage_in]], texture2d<float,access::read> src [[texture(0)]]) {DF o;o.depth=src.read(uint2(in.pos.xy)).r;return o;}
+// UI-Ebene fuer den Frame-Interpolator in Ausgabegroesse: Pixel, die 2D-Zeichner nach dem Geometriepass
+// geaendert haben (Endbild != Szenenbild), mit Alpha 1; alles andere transparent. Punktvergroesserung.
+kernel void ui_k(texture2d<float,access::read> pixels [[texture(0)]], texture2d<float,access::read> scene [[texture(1)]], texture2d<float,access::write> dst [[texture(2)]], constant uint& has_scene [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
+    if(gid.x>=dst.get_width()||gid.y>=dst.get_height())return;
+    const uint2 src=uint2(gid.x*640u/dst.get_width(),gid.y*480u/dst.get_height());
+    const float4 a=pixels.read(src);const bool ui=has_scene!=0u&&any(a!=scene.read(src));
+    dst.write(ui?float4(a.rgb,1.0):float4(0.0),gid);
+}
 // Kopie zwischen Formaten (BGRA8 <-> RGBA16Float) in gleicher Groesse.
 kernel void blit_k(texture2d<float,access::read> src [[texture(0)]], texture2d<float,access::write> dst [[texture(1)]], uint2 gid [[thread_position_in_grid]]) {
     if(gid.x>=dst.get_width()||gid.y>=dst.get_height())return;dst.write(src.read(gid),gid);
@@ -74,12 +87,38 @@ kernel void blit_k(texture2d<float,access::read> src [[texture(0)]], texture2d<f
 struct PresentU {
     float2 src_size, fit_origin, fit_size;
     uint2 dst_size;
-    uint mode, nearest, game_lines, pad;
-    float sharpness;
+    uint mode, nearest, game_lines, phosphor;
+    float sharpness, bloom, mask_strength, sigma_dark;
+    float sigma_bright, pad0, pad1, pad2;
 };
-// Post-Processing und 4:3-Einpassung: mode 0 Kopie, 1 kontrastadaptives Schaerfen (5-Tap-CAS),
-// 2 CRT (Schaerfen + Zeilenraster der game_lines Spielzeilen + Lochmaske). Rand schwarz.
-kernel void present_k(texture2d<float,access::sample> src [[texture(0)]], texture2d<float,access::write> dst [[texture(1)]], constant PresentU& u [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
+inline float3 to_linear(float3 c){return pow(max(c,float3(0.0)),float3(2.2));}
+inline float3 to_srgb(float3 c){return pow(max(c,float3(0.0)),float3(1.0/2.2));}
+// Weiches Knie gegen Beschneiden nach dem Helligkeitsausgleich: linear bis 0.8, darueber asymptotisch gegen 1.
+inline float3 knee(float3 c){return select(c,0.75+0.25*(1.0-exp(-(c-0.75)/0.25)),c>0.75);}
+// Bloom-Quelle: Hellpass in linearem Licht, Viertelaufloesung (4x4-Box ueber bilineare 2x2-Taps).
+kernel void bloom_down_k(texture2d<float,access::sample> src [[texture(0)]], texture2d<float,access::write> dst [[texture(1)]], uint2 gid [[thread_position_in_grid]]) {
+    if(gid.x>=dst.get_width()||gid.y>=dst.get_height())return;
+    constexpr sampler lin(coord::normalized,filter::linear,address::clamp_to_edge);
+    const float2 t=1.0/float2(dst.get_width(),dst.get_height());const float2 uv=(float2(gid)+0.5)*t;const float2 h=t*0.25;
+    float3 c=to_linear(src.sample(lin,uv+float2(-h.x,-h.y)).rgb)+to_linear(src.sample(lin,uv+float2(h.x,-h.y)).rgb)+to_linear(src.sample(lin,uv+float2(-h.x,h.y)).rgb)+to_linear(src.sample(lin,uv+float2(h.x,h.y)).rgb);
+    c*=0.25;const float l=dot(c,float3(0.2126,0.7152,0.0722));
+    dst.write(float4(c*smoothstep(0.5,0.9,l),1.0),gid);
+}
+// Trennbare Gauss-Unschaerfe (9 Taps), dir = (1,0) oder (0,1) in Texeln.
+constant float blur_w[5]={0.2270270270,0.1945945946,0.1216216216,0.0540540541,0.0162162162};
+kernel void bloom_blur_k(texture2d<float,access::sample> src [[texture(0)]], texture2d<float,access::write> dst [[texture(1)]], constant float2& dir [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
+    if(gid.x>=dst.get_width()||gid.y>=dst.get_height())return;
+    constexpr sampler lin(coord::normalized,filter::linear,address::clamp_to_edge);
+    const float2 t=1.0/float2(dst.get_width(),dst.get_height());const float2 uv=(float2(gid)+0.5)*t;
+    float3 c=src.sample(lin,uv).rgb*blur_w[0];
+    for(int i=1;i<5;++i){const float2 o=dir*t*float(i);c+=src.sample(lin,uv+o).rgb*blur_w[i];c+=src.sample(lin,uv-o).rgb*blur_w[i];}
+    dst.write(float4(c,1.0),gid);
+}
+// Post-Processing und 4:3-Einpassung: Schaerfen (5-Tap-CAS, Grad sharpness), dann mode 0 Kopie, sonst CRT in
+// linearem Licht: Gauss-Strahlprofil je Spielzeile mit helligkeitsabhaengiger Breite (sigma_dark..sigma_bright),
+// Maske (1 light: schwache Kanalmaske je Pixel; 2 full: Schlitzmaske mit phosphor Pixeln je Leuchtpunkt), Bloom
+// aus bloom_tex (nur full), begrenzter Helligkeitsausgleich und weiches Knie. Rand schwarz.
+kernel void present_k(texture2d<float,access::sample> src [[texture(0)]], texture2d<float,access::write> dst [[texture(1)]], texture2d<float,access::sample> bloom_tex [[texture(2)]], constant PresentU& u [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
     if(gid.x>=u.dst_size.x||gid.y>=u.dst_size.y)return;
     const float2 p=float2(gid)+0.5-u.fit_origin;
     if(p.x<0.0||p.y<0.0||p.x>=u.fit_size.x||p.y>=u.fit_size.y){dst.write(float4(0.0,0.0,0.0,1.0),gid);return;}
@@ -87,7 +126,7 @@ kernel void present_k(texture2d<float,access::sample> src [[texture(0)]], textur
     constexpr sampler pt(coord::normalized,filter::nearest,address::clamp_to_edge);
     const float2 uv=p/u.fit_size;
     float3 c=(u.nearest!=0u?src.sample(pt,uv):src.sample(lin,uv)).rgb;
-    if(u.mode>=1u){
+    if(u.sharpness>0.0){
         const float2 t=1.0/u.src_size;
         const float3 a=src.sample(lin,uv+float2(0.0,-t.y)).rgb,b=src.sample(lin,uv+float2(-t.x,0.0)).rgb,d=src.sample(lin,uv+float2(t.x,0.0)).rgb,e=src.sample(lin,uv+float2(0.0,t.y)).rgb;
         const float3 mn=min(min(min(a,b),min(d,e)),c),mx=max(max(max(a,b),max(d,e)),c);
@@ -95,17 +134,32 @@ kernel void present_k(texture2d<float,access::sample> src [[texture(0)]], textur
         const float3 w=amp*(-1.0/(8.0-3.0*u.sharpness));
         c=clamp(((a+b+d+e)*w+c)/(4.0*w+1.0),0.0,1.0);
     }
-    if(u.mode==2u){
-        const float f=fract(p.y/u.fit_size.y*float(u.game_lines));
-        c*=0.70+0.30*sin(f*3.14159265);
-        const uint k=gid.x%3u;c*=float3(k==0u?1.0:0.9,k==1u?1.0:0.9,k==2u?1.0:0.9);
+    if(u.mode!=0u){
+        float3 l=to_linear(c);
+        // Strahlprofil: Abstand zur Mitte der Spielzeile in Zeilenbreiten; hellere Zeilen sind breiter, so dass die
+        // Kompensation des Profils bei Weiss gegen 1 geht und Lichter nicht beschnitten werden.
+        const float line=p.y/u.fit_size.y*float(u.game_lines);const float f=fract(line)-0.5;
+        const float lum=dot(l,float3(0.2126,0.7152,0.0722));const float sigma=mix(u.sigma_dark,u.sigma_bright,clamp(lum,0.0,1.0));
+        const float beam=exp(-f*f/(2.0*sigma*sigma));const float beam_gain=mix(1.0,1.0/min(1.0,sigma*2.5066283),0.5); // halbe Kompensation: volle hob Zeilenmitten ueber 1
+        // Maske: light = je Ausgabepixel abwechselnd leicht gedaempfte Kanaele; full = Schlitzmaske aus Triaden mit
+        // phosphor Pixeln je Leuchtpunkt, jede zweite Zeilengruppe um eine halbe Triade versetzt. Die Maske wird nur
+        // zur Haelfte kompensiert: volle Kompensation hob einzelne Kanaele ueber 1 und ueberbelichtete helle Flaechen.
+        const uint period=3u*u.phosphor;const uint shift=(u.mode==2u&&(uint(line)&1u)!=0u)?period/2u:0u;const uint k=((gid.x+shift)%period)/u.phosphor;
+        const float3 mask=mix(float3(1.0),float3(k==0u?1.0:0.0,k==1u?1.0:0.0,k==2u?1.0:0.0),u.mask_strength);
+        const float mask_gain=1.0/(1.0-u.mask_strength*2.0/3.0*0.5);
+        if(u.bloom>0.0){
+            // Halation vor Strahl und Maske, Beitrag sinkt mit der eigenen Helligkeit des Pixels (kein Aufhellen von Weiss).
+            const float3 halo=bloom_tex.sample(lin,uv).rgb;l+=halo*u.bloom*(1.0-clamp(lum,0.0,1.0));}
+        l=l*beam*mask*beam_gain*mask_gain;
+        c=to_srgb(knee(l));
     }
-    dst.write(float4(c,1.0),gid);
+    dst.write(float4(clamp(c,0.0,1.0),1.0),gid);
 }
 )MSL";
 struct MotionU {float cur_inv[16],prev_view[16];float focal_cur[2],focal_prev[2],center[2];float depth_a,depth_b;std::uint32_t has_scene,has_prev,W,H;};
 static_assert(sizeof(MotionU)==128+24+8+16,"motion uniform layout");
-struct PresentU {float src_size[2],fit_origin[2],fit_size[2];std::uint32_t dst_size[2];std::uint32_t mode,nearest,game_lines,pad;float sharpness;float pad2[3];};
+struct PresentU {float src_size[2],fit_origin[2],fit_size[2];std::uint32_t dst_size[2];std::uint32_t mode,nearest,game_lines,phosphor;float sharpness,bloom,mask_strength,sigma_dark;float sigma_bright,pad[3];};
+static_assert(sizeof(PresentU)==80,"present uniform layout");
 simd_float4x4 to_simd(const float* m){simd_float4x4 out;for(int c=0;c<4;++c)out.columns[c]=simd_make_float4(m[c*4],m[c*4+1],m[c*4+2],m[c*4+3]);return out;}
 void from_simd(const simd_float4x4& m,float* out){for(int c=0;c<4;++c){out[c*4]=m.columns[c][0];out[c*4+1]=m.columns[c][1];out[c*4+2]=m.columns[c][2];out[c*4+3]=m.columns[c][3];}}
 class Presenter final:public MetalFxPresenter {
@@ -117,7 +171,7 @@ public:
         if(!library)throw std::runtime_error(std::string("presentation shader: ")+error.localizedDescription.UTF8String);
         const auto compute=[&](NSString* name){id<MTLComputePipelineState> p=[device_ newComputePipelineStateWithFunction:[library newFunctionWithName:name] error:&error];
             if(!p)throw std::runtime_error(std::string("presentation pipeline ")+name.UTF8String+": "+error.localizedDescription.UTF8String);return p;};
-        motion_=compute(@"motion_k");blit_=compute(@"blit_k");present_=compute(@"present_k");
+        motion_=compute(@"motion_k");blit_=compute(@"blit_k");present_=compute(@"present_k");bloom_down_=compute(@"bloom_down_k");bloom_blur_=compute(@"bloom_blur_k");ui_=compute(@"ui_k");
         {MTLRenderPipelineDescriptor* d=[MTLRenderPipelineDescriptor new];d.vertexFunction=[library newFunctionWithName:@"depth_vs"];d.fragmentFunction=[library newFunctionWithName:@"depth_fs"];
          d.depthAttachmentPixelFormat=MTLPixelFormatDepth32Float;depth_pipeline_=[device_ newRenderPipelineStateWithDescriptor:d error:&error];
          if(!depth_pipeline_)throw std::runtime_error(std::string("presentation depth pipeline: ")+error.localizedDescription.UTF8String);
@@ -127,34 +181,77 @@ public:
         if(@available(macOS 26.0,*)){frame_generation_supported_=[MTLFXFrameInterpolatorDescriptor supportsDevice:device_];}
 #endif
         inflight_=dispatch_semaphore_create(1);
+        worker_=std::thread([this]{run();});
     }
-    void configure(const VideoSettings& settings)override{settings_=settings;dirty_=true;}
+    void configure(const VideoSettings& settings)override{std::lock_guard<std::mutex> lock(mutex_);requested_=settings;requested_dirty_=true;}
     bool upscaler_supported()const override{return upscaler_supported_;}
     bool frame_generation_supported()const override{return frame_generation_supported_;}
-    const PresentStats& stats()const override{return stats_;}
+    const PresentStats& stats()const override{std::lock_guard<std::mutex> lock(state_mutex_);stats_copy_=stats_;return stats_copy_;}
     std::string describe()const override{
+        std::lock_guard<std::mutex> lock(state_mutex_);
         std::ostringstream out;
         if(chain_.temporal)out<<"MetalFX temporal "<<chain_.temporal_scale<<"x";
         if(chain_.spatial)out<<(chain_.temporal?" + ":"")<<"MetalFX spatial "<<chain_.spatial_scale<<"x";
         if(!chain_.temporal&&!chain_.spatial)out<<"nearest";
         if(chain_.interpolator)out<<", frame interpolation";
-        if(settings_.post_process==PostProcess::Sharpen)out<<", sharpen";else if(settings_.post_process==PostProcess::Crt)out<<", CRT";
+        if(settings_.sharpness!=Sharpness::Off)out<<", sharpen "<<settings_.sharpness_amount();
+        if(settings_.post_process==PostProcess::CrtLight)out<<", CRT light";else if(settings_.post_process==PostProcess::CrtFull)out<<", CRT full (phosphor "<<phosphor_<<"px, bloom)";
         if(!notes_.empty())out<<" ("<<notes_<<")";
         return out.str();
     }
-    bool present(const PresentFrame& frame,bool show_interpolated)override{@autoreleasepool{
-        if(broken_||frame.width!=640||frame.height!=480||!frame.pixels||!frame.depth)return false;
+    // Hauptthread: Bild kopieren und den Praesentations-Thread wecken. Ein noch nicht abgeholtes Bild wird ersetzt.
+    bool present(const PresentFrame& frame)override{
+        if(broken_.load()||frame.width!=640||frame.height!=480||!frame.pixels||!frame.depth)return false;
+        {std::lock_guard<std::mutex> lock(mutex_);
+         const std::size_t n=640*480;staging_.pixels.assign(frame.pixels,frame.pixels+n);staging_.depth.assign(frame.depth,frame.depth+n);
+         staging_.has_scene=frame.projection.valid&&frame.scene;if(staging_.has_scene)staging_.scene.assign(frame.scene,frame.scene+n);
+         staging_.projection=frame.projection;staging_.scene_key=frame.scene_key;staging_.delta=frame.delta_seconds;staging_.slots=frame.slots;staging_new_=true;}
+        cv_.notify_one();return true;
+    }
+    ~Presenter()override{{std::lock_guard<std::mutex> lock(mutex_);stop_=true;}cv_.notify_one();if(worker_.joinable())worker_.join();}
+private:
+    struct Pending {std::vector<std::uint32_t> pixels,scene;std::vector<float> depth;bool has_scene=false;PresentProjection projection;unsigned scene_key=0;double delta=0;int slots=1;};
+    // Praesentations-Thread: neues Bild verarbeiten und zeigen, danach die Kadenz des Takts (Wiederholungen in
+    // slots Zeitfenstern, Zwischenbild in der ersten Haelfte) bis zum naechsten Bild; unlimited (slots 0)
+    // praesentiert fortlaufend.
+    void run(){
+        using Clock=std::chrono::steady_clock;Pending job;bool have=false;Clock::time_point frame_at{};int slot=0,slots=1;double delta=1.0/30;
+        for(;;){
+            bool take=false;
+            {std::unique_lock<std::mutex> lock(mutex_);
+             const bool pending=have&&(slots==0||slot+1<slots);
+             if(!pending)cv_.wait(lock,[&]{return stop_||staging_new_;});
+             else{const auto deadline=frame_at+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(slots==0?0.0:double(slot+1)*delta/slots));cv_.wait_until(lock,deadline,[&]{return stop_||staging_new_;});}
+             if(stop_)return;
+             if(staging_new_){std::swap(job,staging_);staging_new_=false;take=true;}
+             if(requested_dirty_){std::lock_guard<std::mutex> state(state_mutex_);settings_=requested_;dirty_=true;requested_dirty_=false;}}
+            if(broken_.load()){have=false;continue;}
+            @autoreleasepool{std::lock_guard<std::mutex> state(state_mutex_);
+            if(take){
+                slots=job.slots;delta=job.delta>0?job.delta:1.0/30;slot=0;frame_at=Clock::now();have=true;
+                const bool interp_first=slots!=1;
+                if(!process(job,interp_first))have=false;
+            }else{
+                if(slots>0)++slot;
+                const double elapsed=std::chrono::duration<double>(Clock::now()-frame_at).count();
+                const bool interpolated=latest_interp_&&(slots>0?slot*2<slots:elapsed*2<delta);
+                repeat(interpolated);
+            }}
+        }
+    }
+    // Neues Bild: Upload, Bewegungsvektoren, Skalierer, Interpolator, erste Praesentation.
+    bool process(const Pending& job,bool show_interpolated){
         const CGSize ds=layer_.drawableSize;const int dw=int(ds.width),dh=int(ds.height);
-        if(dw<=0||dh<=0){++stats_.skipped;return true;}
+        if(dw<=0||dh<=0){++stats_.skipped;return false;}
         @try{try{
         if(dirty_||dw!=drawable_w_||dh!=drawable_h_){rebuild(dw,dh);}
         // Vorigen Befehlspuffer abwarten, bevor die Upload-Texturen ueberschrieben werden.
         dispatch_semaphore_wait(inflight_,DISPATCH_TIME_FOREVER);
-        const bool reset=!history_valid_||frame.scene_key!=scene_key_||chain_.reset_pending;
-        chain_.reset_pending=false;scene_key_=frame.scene_key;if(reset)++stats_.resets;
-        upload(frame);
+        const bool reset=!history_valid_||job.scene_key!=scene_key_||chain_.reset_pending;
+        chain_.reset_pending=false;scene_key_=job.scene_key;if(reset)++stats_.resets;
+        upload(job);
         id<MTLCommandBuffer> cb=[queue_ commandBuffer];cb.label=@"RECVX present";
-        encode_motion(cb,frame,reset);
+        encode_motion(cb,job,reset);
         id<MTLTexture> color=color_in_;
         if(chain_.work_format!=MTLPixelFormatBGRA8Unorm){blit(cb,color_in_,work_in_);color=work_in_;}
         const unsigned cur=current_,prev=current_^1u;
@@ -168,12 +265,19 @@ public:
         bool interpolated=false;
 #if RECVX_SDK_FRAME_INTERPOLATION
         if(@available(macOS 26.0,*)){
-            if(chain_.interpolator&&!reset&&frame.delta_seconds>0){
+            if(chain_.interpolator&&!reset&&job.delta>0){
                 id<MTLFXFrameInterpolator> fi=(id<MTLFXFrameInterpolator>)chain_.interpolator;
                 fi.colorTexture=final_[cur];fi.prevColorTexture=final_[prev];fi.depthTexture=depth_fx_;fi.motionTexture=motion_tex_;fi.outputTexture=interp_;
-                fi.motionVectorScaleX=1;fi.motionVectorScaleY=1;fi.deltaTime=float(frame.delta_seconds);fi.depthReversed=YES;fi.jitterOffsetX=0;fi.jitterOffsetY=0;
-                fi.shouldResetHistory=NO;fi.uiTexture=nil;fi.uiTextureComposited=NO;
-                const float fy=frame.projection.valid&&frame.projection.focal_y>0?frame.projection.focal_y:last_focal_[1];
+                fi.motionVectorScaleX=1;fi.motionVectorScaleY=1;fi.deltaTime=float(job.delta);fi.depthReversed=YES;fi.jitterOffsetX=0;fi.jitterOffsetY=0;
+                fi.shouldResetHistory=NO;
+                // UI-Ebene (HUD, Text, Blenden) getrennt uebergeben: der Interpolator legt sie unverzerrt ueber das
+                // Zwischenbild statt sie mit dem bewegten Hintergrund zu mischen (Nachbilder an 2D-Elementen).
+                {const std::uint32_t has_scene=job.has_scene?1u:0u;
+                 id<MTLComputeCommandEncoder> c=[cb computeCommandEncoder];c.label=@"ui layer";[c setComputePipelineState:ui_];
+                 [c setTexture:color_in_ atIndex:0];[c setTexture:scene_in_ atIndex:1];[c setTexture:ui_tex_ atIndex:2];[c setBytes:&has_scene length:sizeof has_scene atIndex:0];
+                 [c dispatchThreads:MTLSizeMake(ui_tex_.width,ui_tex_.height,1) threadsPerThreadgroup:MTLSizeMake(16,16,1)];[c endEncoding];}
+                fi.uiTexture=ui_tex_;fi.uiTextureComposited=NO;
+                const float fy=job.projection.valid&&job.projection.focal_y>0?job.projection.focal_y:last_focal_[1];
                 const float fov=fy>0?2.0f*std::atan(240.0f/fy)*180.0f/3.14159265f:60.0f;
                 fi.fieldOfView=fov;fi.aspectRatio=4.0f/3.0f;fi.nearPlane=depth_near_;fi.farPlane=depth_far_;
 #if RECVX_SDK_INTERPOLATOR_MATRICES
@@ -194,22 +298,21 @@ public:
         return true;
         }catch(const std::exception& e){fail(e.what());return false;}
         }@catch(NSException* e){fail(std::string(e.name.UTF8String)+": "+e.reason.UTF8String);return false;}
-    }}
-    bool represent(bool interpolated)override{@autoreleasepool{
-        if(broken_||!latest_real_)return false;
-        const CGSize ds=layer_.drawableSize;if(int(ds.width)!=drawable_w_||int(ds.height)!=drawable_h_)return false; /* Groesse geaendert: naechstes present() baut neu */
+    }
+    // Wiederholung im naechsten Zeitfenster des Takts.
+    void repeat(bool interpolated){
+        if(!latest_real_)return;
+        const CGSize ds=layer_.drawableSize;if(int(ds.width)!=drawable_w_||int(ds.height)!=drawable_h_)return; /* Groesse geaendert: das naechste Bild baut neu */
         dispatch_semaphore_wait(inflight_,DISPATCH_TIME_FOREVER);
         @try{try{
         id<MTLCommandBuffer> cb=[queue_ commandBuffer];cb.label=@"RECVX represent";
         show(cb,interpolated&&latest_interp_?latest_interp_:latest_real_);++stats_.repeated;
-        return true;
-        }catch(const std::exception& e){fail(e.what());return false;}
-        }@catch(NSException* e){fail(std::string(e.name.UTF8String)+": "+e.reason.UTF8String);return false;}
-    }}
-    ~Presenter()override{dispatch_semaphore_wait(inflight_,DISPATCH_TIME_FOREVER);dispatch_semaphore_signal(inflight_);}
+        }catch(const std::exception& e){fail(e.what());}
+        }@catch(NSException* e){fail(std::string(e.name.UTF8String)+": "+e.reason.UTF8String);}
+    }
 private:
     // Fehler der Stufe: einmal melden, Stufe abschalten; die Runtime praesentiert dann ueber SDL.
-    void fail(const std::string& what){broken_=true;dispatch_semaphore_signal(inflight_);notes_="disabled: "+what;std::fprintf(stderr,"MetalFX presentation disabled: %s\n",what.c_str());}
+    void fail(const std::string& what){broken_.store(true);dispatch_semaphore_signal(inflight_);notes_="disabled: "+what;std::fprintf(stderr,"MetalFX presentation disabled: %s\n",what.c_str());}
     // MetalFX-Objekte als generische id: die Protokolle sind je OS-Version verfuegbar, die Nutzung steht
     // hinter @available und Praeprozessor-Guards fuer das SDK.
     struct Chain {
@@ -231,15 +334,15 @@ private:
     id<MTLTexture> make(MTLPixelFormat format,int w,int h,MTLTextureUsage usage,MTLStorageMode storage){
         MTLTextureDescriptor* d=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:NSUInteger(w) height:NSUInteger(h) mipmapped:NO];d.usage=usage;d.storageMode=storage;
         id<MTLTexture> t=[device_ newTextureWithDescriptor:d];if(!t)throw std::runtime_error("presentation texture");return t;}
-    void upload(const PresentFrame& frame){
+    void upload(const Pending& job){
         const MTLRegion r=MTLRegionMake2D(0,0,640,480);
-        [color_in_ replaceRegion:r mipmapLevel:0 withBytes:frame.pixels bytesPerRow:640*4];
-        [scene_in_ replaceRegion:r mipmapLevel:0 withBytes:frame.scene?frame.scene:frame.pixels bytesPerRow:640*4];
-        [depth_in_ replaceRegion:r mipmapLevel:0 withBytes:frame.depth bytesPerRow:640*4];
+        [color_in_ replaceRegion:r mipmapLevel:0 withBytes:job.pixels.data() bytesPerRow:640*4];
+        [scene_in_ replaceRegion:r mipmapLevel:0 withBytes:job.has_scene?job.scene.data():job.pixels.data() bytesPerRow:640*4];
+        [depth_in_ replaceRegion:r mipmapLevel:0 withBytes:job.depth.data() bytesPerRow:640*4];
     }
-    void encode_motion(id<MTLCommandBuffer> cb,const PresentFrame& frame,bool reset){
+    void encode_motion(id<MTLCommandBuffer> cb,const Pending& job,bool reset){
         MotionU u{};u.W=640;u.H=480;u.center[0]=320.0f;u.center[1]=240.0f;
-        const auto& p=frame.projection;u.has_scene=p.valid&&frame.scene?1u:0u;
+        const auto& p=job.projection;u.has_scene=job.has_scene?1u:0u;
         if(p.valid){
             // Umgekehrte endliche Tiefe mit den njClipZ-Abstaenden; far 0 (unbegrenzt) als 100000.
             const float near=std::max(p.near,1e-3f),far=p.far>near?p.far:100000.0f;
@@ -262,9 +365,19 @@ private:
     }
     void encode_present(id<MTLCommandBuffer> cb,id<MTLTexture> src,id<MTLTexture> dst,bool nearest){
         PresentU u{};u.src_size[0]=float(src.width);u.src_size[1]=float(src.height);u.fit_origin[0]=float(fit_x_);u.fit_origin[1]=float(fit_y_);u.fit_size[0]=float(fit_w_);u.fit_size[1]=float(fit_h_);
-        u.dst_size[0]=std::uint32_t(dst.width);u.dst_size[1]=std::uint32_t(dst.height);u.mode=settings_.post_process==PostProcess::Crt?2u:settings_.post_process==PostProcess::Sharpen?1u:0u;
-        u.nearest=nearest?1u:0u;u.game_lines=480;u.sharpness=0.5f;
-        id<MTLComputeCommandEncoder> c=[cb computeCommandEncoder];c.label=@"present";[c setComputePipelineState:present_];[c setTexture:src atIndex:0];[c setTexture:dst atIndex:1];
+        u.dst_size[0]=std::uint32_t(dst.width);u.dst_size[1]=std::uint32_t(dst.height);u.mode=settings_.post_process==PostProcess::CrtFull?2u:settings_.post_process==PostProcess::CrtLight?1u:0u;
+        u.nearest=nearest?1u:0u;u.game_lines=480;u.sharpness=settings_.sharpness_amount();
+        // light: breiter Strahl, kaum Maske, kein Bloom; full: engerer Strahl, Schlitzmaske, Halation.
+        if(u.mode==2u){u.phosphor=std::uint32_t(phosphor_);u.mask_strength=0.35f;u.bloom=0.22f;u.sigma_dark=0.26f;u.sigma_bright=0.46f;}
+        else{u.phosphor=1u;u.mask_strength=0.10f;u.bloom=0.0f;u.sigma_dark=0.32f;u.sigma_bright=0.50f;}
+        id<MTLTexture> bloom=blank_;
+        if(u.mode==2u&&bloom_a_){
+            // Hellpass auf Viertelaufloesung, dann horizontal (a->b) und vertikal (b->a) verwischen.
+            const auto run=[&](id<MTLComputePipelineState> pipeline,id<MTLTexture> in,id<MTLTexture> out,const float* dir){
+                id<MTLComputeCommandEncoder> c=[cb computeCommandEncoder];c.label=@"bloom";[c setComputePipelineState:pipeline];[c setTexture:in atIndex:0];[c setTexture:out atIndex:1];
+                if(dir)[c setBytes:dir length:8 atIndex:0];[c dispatchThreads:MTLSizeMake(out.width,out.height,1) threadsPerThreadgroup:MTLSizeMake(16,16,1)];[c endEncoding];};
+            const float h[2]={1,0},v[2]={0,1};run(bloom_down_,src,bloom_a_,nullptr);run(bloom_blur_,bloom_a_,bloom_b_,h);run(bloom_blur_,bloom_b_,bloom_a_,v);bloom=bloom_a_;}
+        id<MTLComputeCommandEncoder> c=[cb computeCommandEncoder];c.label=@"present";[c setComputePipelineState:present_];[c setTexture:src atIndex:0];[c setTexture:dst atIndex:1];[c setTexture:bloom atIndex:2];
         [c setBytes:&u length:sizeof u atIndex:0];[c dispatchThreads:MTLSizeMake(dst.width,dst.height,1) threadsPerThreadgroup:MTLSizeMake(16,16,1)];[c endEncoding];
     }
     // Kette fuer Fenstergroesse und Einstellungen neu aufbauen: Einpassung, Skalierer, Interpolator, Texturen.
@@ -290,7 +403,13 @@ private:
         for(auto& t:final_)t=make(chain_.work_format,ow,oh,all,MTLStorageModePrivate);
         temporal_out_=chain_.spatial&&chain_.temporal?make(chain_.work_format,chain_.temporal_w,chain_.temporal_h,all,MTLStorageModePrivate):nil;
         work_in_=chain_.work_format!=MTLPixelFormatBGRA8Unorm?make(chain_.work_format,640,480,all,MTLStorageModePrivate):nil;
-        interp_=nil;
+        // CRT full: Leuchtpunktbreite nach Ausgabedichte (ein Pixel je Leuchtpunkt bis 2 Ausgabepixel je Spielspalte,
+        // darueber breiter), Bloom-Ketten auf Viertelaufloesung der Einpassung.
+        phosphor_=std::max(1,int(std::lround(fit_w_/640.0/2.0)));
+        if(settings_.post_process==PostProcess::CrtFull){bloom_a_=make(MTLPixelFormatRGBA16Float,std::max(1,fit_w_/4),std::max(1,fit_h_/4),all,MTLStorageModePrivate);bloom_b_=make(MTLPixelFormatRGBA16Float,std::max(1,fit_w_/4),std::max(1,fit_h_/4),all,MTLStorageModePrivate);}
+        else{bloom_a_=nil;bloom_b_=nil;}
+        if(!blank_)blank_=make(MTLPixelFormatRGBA16Float,1,1,MTLTextureUsageShaderRead,MTLStorageModeShared);
+        interp_=nil;ui_tex_=nil;
 #if RECVX_SDK_FRAME_INTERPOLATION
         if(@available(macOS 26.0,*)){
             if(settings_.frame_generation==FrameGeneration::MetalFx){
@@ -303,7 +422,7 @@ private:
                     chain_.interpolator=[d newFrameInterpolatorWithDevice:device_];
                     if(!chain_.interpolator&&d.scaler){d.scaler=nil;chain_.interpolator=[d newFrameInterpolatorWithDevice:device_];}
                     if(!chain_.interpolator)append_note("frame interpolator creation failed");
-                    else interp_=make(chain_.work_format,ow,oh,all,MTLStorageModePrivate);
+                    else{interp_=make(chain_.work_format,ow,oh,all,MTLStorageModePrivate);ui_tex_=make(chain_.work_format,ow,oh,all,MTLStorageModePrivate);}
                 }
             }
         }else if(settings_.frame_generation==FrameGeneration::MetalFx)append_note("frame interpolation needs macOS 26");
@@ -352,12 +471,15 @@ private:
         return ok;
     }
     CAMetalLayer* layer_;id<MTLDevice> device_;id<MTLCommandQueue> queue_;
-    id<MTLComputePipelineState> motion_,blit_,present_;id<MTLRenderPipelineState> depth_pipeline_;id<MTLDepthStencilState> depth_state_;
-    id<MTLTexture> color_in_,scene_in_,depth_in_,motion_tex_,depth_value_,depth_fx_,work_in_,temporal_out_,interp_,latest_real_,latest_interp_;id<MTLTexture> final_[2];
+    id<MTLComputePipelineState> motion_,blit_,present_,bloom_down_,bloom_blur_,ui_;id<MTLRenderPipelineState> depth_pipeline_;id<MTLDepthStencilState> depth_state_;
+    id<MTLTexture> color_in_,scene_in_,depth_in_,motion_tex_,depth_value_,depth_fx_,work_in_,temporal_out_,interp_,latest_real_,latest_interp_,bloom_a_,bloom_b_,blank_,ui_tex_;id<MTLTexture> final_[2];
     dispatch_semaphore_t inflight_;
     VideoSettings settings_;Chain chain_;PresentStats stats_;std::string notes_;
-    bool dirty_=true,upscaler_supported_=false,frame_generation_supported_=false,history_valid_=false,last_valid_=false,broken_=false;
-    int drawable_w_=0,drawable_h_=0,fit_x_=0,fit_y_=0,fit_w_=640,fit_h_=480;unsigned current_=0,scene_key_=0;
+    bool dirty_=true,upscaler_supported_=false,frame_generation_supported_=false,history_valid_=false,last_valid_=false;std::atomic<bool> broken_{false};
+    // Thread-Uebergabe: staging_/requested_ unter mutex_ (Hauptthread -> Thread); GPU-/Kettenzustand und stats_ unter state_mutex_.
+    std::mutex mutex_;mutable std::mutex state_mutex_;std::condition_variable cv_;Pending staging_;bool staging_new_=false,stop_=false;VideoSettings requested_;bool requested_dirty_=false;
+    std::thread worker_;mutable PresentStats stats_copy_;
+    int drawable_w_=0,drawable_h_=0,fit_x_=0,fit_y_=0,fit_w_=640,fit_h_=480,phosphor_=1;unsigned current_=0,scene_key_=0;
     float last_view_[16]{},last_focal_[2]{},depth_near_=0,depth_far_=0;
 };
 }

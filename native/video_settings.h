@@ -21,7 +21,9 @@ enum class RenderBackend {Gpu,Software,OpenGL,Vulkan};
 //   Upscaler: off = Punktvergroesserung wie bisher; MetalFX spatial; MetalFX temporal (mit
 //   Tiefe und Bewegungsvektoren aus der Kamera-Reprojektion, ohne Subpixel-Jitter).
 //   FrameGeneration: MetalFX-Frame-Interpolation (macOS 26+) erzeugt je Spieltakt ein Zwischenbild.
-//   PostProcess: Sharpen (kontrastadaptiv) oder CRT (Sharpen + Zeilenraster der 480 Spielzeilen).
+//   Sharpness: Grad des kontrastadaptiven Schaerfens (aus, leicht, mittel, stark), unabhaengig vom Modus.
+//   PostProcess: Off; CRT light (Zeilenraster der 480 Spielzeilen + einfache Maske, sRGB); CRT full (gamma-
+//   korrektes Zeilenraster mit Helligkeitsausgleich, Schlitzmaske je Ausgabepixel, Bloom/Halation).
 enum class Upscaler {Off,MetalFxSpatial,MetalFxTemporal};
 // Host-Bildrate der Praesentation (alle Backends): der Spieltakt bleibt 30 Hz (timing.h), zwischen zwei
 // Takten wird das zuletzt gezeichnete Bild erneut praesentiert (mit Frame-Interpolation das Zwischenbild
@@ -29,18 +31,22 @@ enum class Upscaler {Off,MetalFxSpatial,MetalFxTemporal};
 // Unlimited = VSync aus, fortlaufend praesentieren (hoehere CPU-/GPU-Last).
 enum class FrameRate {Hz30,Hz60,Hz120,Unlimited};
 enum class FrameGeneration {Off,MetalFx};
-enum class PostProcess {Off,Sharpen,Crt};
+enum class Sharpness {Off,Light,Medium,Strong};
+enum class PostProcess {Off,CrtLight,CrtFull};
 struct VideoSettings {
     RenderQuality quality=RenderQuality::High;
     RenderBackend renderer=RenderBackend::Gpu;
     FrameRate frame_rate=FrameRate::Hz30;
     Upscaler upscaler=Upscaler::Off;
     FrameGeneration frame_generation=FrameGeneration::Off;
+    Sharpness sharpness=Sharpness::Off;
     PostProcess post_process=PostProcess::Off;
     bool filtering()const{return quality!=RenderQuality::Original;}
     int supersampling()const{return quality==RenderQuality::Ultra?3:quality==RenderQuality::High?2:1;}
     // true: the presentation stage has work to do (otherwise the plain SDL copy presents).
-    bool presentation()const{return upscaler!=Upscaler::Off||frame_generation!=FrameGeneration::Off||post_process!=PostProcess::Off;}
+    bool presentation()const{return upscaler!=Upscaler::Off||frame_generation!=FrameGeneration::Off||post_process!=PostProcess::Off||sharpness!=Sharpness::Off;}
+    float sharpness_amount()const{return sharpness==Sharpness::Strong?1.0f:sharpness==Sharpness::Medium?0.6f:sharpness==Sharpness::Light?0.3f:0.0f;}
+    std::string describe_sharpness()const;
     // Praesentationen je Spieltakt (0 = unbegrenzt); Frame-Interpolation braucht mindestens zwei.
     int presents_per_tick()const{const int n=frame_rate==FrameRate::Hz30?1:frame_rate==FrameRate::Hz60?2:frame_rate==FrameRate::Hz120?4:0;return n&&frame_generation!=FrameGeneration::Off?std::max(n,2):n;}
     bool vsync()const{return frame_rate!=FrameRate::Unlimited;}
@@ -65,14 +71,17 @@ public:
     void set_frame_rate(FrameRate value,bool persist=true);
     void cycle_upscaler(int direction,bool persist=true);
     void cycle_frame_generation(int direction,bool persist=true);
+    void cycle_sharpness(int direction,bool persist=true);
     void cycle_post_process(int direction,bool persist=true);
     void set_upscaler(Upscaler value,bool persist=true);
     void set_frame_generation(FrameGeneration value,bool persist=true);
+    void set_sharpness(Sharpness value,bool persist=true);
     void set_post_process(PostProcess value,bool persist=true);
     std::string describe()const{return settings_.describe();}
     // Row values with the runtime's availability note ("not available" when the stage is missing).
     std::string describe_upscaler()const;
     std::string describe_frame_generation()const;
+    std::string describe_sharpness()const;
     std::string describe_post_process()const;
     // Runtime report: presentation stage (post-processing), MetalFX upscalers and frame generation usable?
     void set_availability(bool presentation,bool upscaler,bool frame_generation){presentation_available_=presentation;upscaler_available_=upscaler;frame_generation_available_=frame_generation;}

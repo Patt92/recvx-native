@@ -103,6 +103,7 @@ public:
     std::function<bool(unsigned,unsigned,int&)> enemy_node_ax_get;
     std::function<void(unsigned,unsigned,int)> enemy_node_ax_set;
     std::function<void(unsigned)> set_player_yaw;
+    std::function<void(unsigned)> set_player_floor; // bhSv 16 writes plp->flr_no, not flr_idx
     /* system.c:742 (bhCheckSubTask, pass in which cb_flg 4 falls): plp->mode3 = 0. */
     std::function<void()> release_cinematic_player;
     std::function<bool(const DoorRequest&)> door;
@@ -132,6 +133,8 @@ public:
     // The three-argument form is a standing player: fpx == px, arn == 0.
     bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
     bool interact(NJS_POINT3 position,Angle yaw,int floor,NJS_POINT3 front,float front_offset);
+    // hitchk.c:4800/4835: cleared edges remain cleared through the effect pass.
+    bool pad_edges_cleared()const{return pad_cleared_;}
     // player.c:1678, the flag part of the bhCheckExmAtari gate: !(plp->stflg & 0x10080),
     // !(plp->flg & 0x4000004), !(sys->cb_flg & 0x4017). mode0 == 1 and pad_ps 0x200
     // stay with the caller (OK edge of the free player).

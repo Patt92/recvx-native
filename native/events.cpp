@@ -190,7 +190,7 @@ int EventVm::instruction(Task& t,std::size_t& cursor){
     case 9:{v.require(p,4);const unsigned field=v.u8(p+1),operand=v.u16(p+2);if(field==5)inventory_.hp=operand;else if(field==9)inventory_.play_time=operand;else if(field>=11&&field<=15){if(!set_enemy_health)throw std::runtime_error("word HP assignment requires native enemy binding");set_enemy_health(field-11,-int(operand));}return advance(4);}
     case 0x37:values[21]=v.u8(p+1);return advance(2); // bhRoomCaseNo
     case 0x57:if(!v.u8(p+1))flags[11][0]|=0x20000;else flags[11][0]&=~0x20000u;return advance(2); // bhFixEventCamPly
-    case 8:{const auto key=v.u8(p+1),value=v.u8(p+2);values[key]=value;if(key==18){inventory_.wpnr_no=value;inventory_.partner_weapon.at(inventory_.player)=std::uint8_t(value);} /* event.c:827-830 plp->wpnr_no/ply_wno, ohne Neuladen */if(key==22){if(value>=12)throw std::runtime_error("equipped inventory index outside slots");inventory_.slots()[0]=value;}return advance(4);}
+    case 8:{const auto key=v.u8(p+1),value=v.u8(p+2);if(key==16){if(!set_player_floor)throw std::runtime_error("bhSv 16 requires player floor owner");set_player_floor(value);}else values[key]=value;if(key==18){inventory_.wpnr_no=value;inventory_.partner_weapon.at(inventory_.player)=std::uint8_t(value);} /* event.c:827-830 plp->wpnr_no/ply_wno, ohne Neuladen */if(key==22){if(value>=12)throw std::runtime_error("equipped inventory index outside slots");inventory_.slots()[0]=value;}return advance(4);}
     // bhDieCk masks the flag index with 0x3ff before touching sys->ed_flg.
     case 0xd:{if(enemy_dead&&enemy_dead(v.u8(p+1)))set_flag(3,v.u16(p+2)&0x3ff,0);advance(4);return 1;}
     // bhEneSetCk: an enemy whose ed_flg bit is already set stays deactivated.

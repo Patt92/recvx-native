@@ -45,6 +45,8 @@ private:
     std::vector<DebugAction> actions_;
     std::vector<unsigned> values_;
     bool active_=false;
+    struct ControllerChord {unsigned held=0;bool latched=false;};
+    std::map<SDL_JoystickID,ControllerChord> controller_chords_;
     unsigned selected_=0;
     std::string status_;
     std::vector<DebugChoice> choices(unsigned row)const;

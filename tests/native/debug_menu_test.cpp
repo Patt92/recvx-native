@@ -9,6 +9,16 @@ static void check(bool ok,const char* text){if(!ok)throw std::runtime_error(text
 static SDL_Event key(SDL_Scancode code,bool down,bool repeat=false){SDL_Event event{};event.type=down?SDL_KEYDOWN:SDL_KEYUP;event.key.keysym.scancode=code;event.key.repeat=repeat;return event;}
 int main(int argc,char** argv){try{
     SDL_SetMainReady();check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0,"SDL initialization failed");
+    {DebugMenu m(DebugConfig{});
+     auto b=[](int id,int button,bool down){SDL_Event e{};e.type=down?SDL_CONTROLLERBUTTONDOWN:SDL_CONTROLLERBUTTONUP;e.cbutton.which=id;e.cbutton.button=Uint8(button);return e;};
+     m.event(b(1,SDL_CONTROLLER_BUTTON_START,true));m.event(b(2,SDL_CONTROLLER_BUTTON_BACK,true));check(!m.active(),"cross-controller chord");
+     check(m.event(b(1,SDL_CONTROLLER_BUTTON_BACK,true))&&m.active(),"controller chord did not open");
+     m.event(b(1,SDL_CONTROLLER_BUTTON_START,true));check(m.active(),"repeated chord toggled");
+     m.event(b(1,SDL_CONTROLLER_BUTTON_START,false));m.event(b(1,SDL_CONTROLLER_BUTTON_START,true));check(m.active(),"partial release rearmed chord");
+     m.event(b(1,SDL_CONTROLLER_BUTTON_START,false));m.event(b(1,SDL_CONTROLLER_BUTTON_BACK,false));
+     m.event(b(1,SDL_CONTROLLER_BUTTON_BACK,true));m.event(b(1,SDL_CONTROLLER_BUTTON_START,true));check(!m.active(),"reverse chord did not close");
+     SDL_Event e{};e.type=SDL_CONTROLLERDEVICEREMOVED;e.cdevice.which=1;m.event(e);
+     m.event(b(1,SDL_CONTROLLER_BUTTON_BACK,true));check(!m.active(),"disconnect retained chord");}
     const auto dir=std::filesystem::temp_directory_path()/("recvx-debug-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));std::filesystem::create_directory(dir);const auto file=dir/"debug.ini";
     auto config=DebugConfig::read(file);check(!config.enemy_grab&&config.hotkey==SDL_SCANCODE_F2&&std::filesystem::is_regular_file(file),"default file/hotkey missing");
     std::ofstream(file)<<"[debug]\nhotkey = F6\n";config=DebugConfig::read(file);check(config.hotkey==SDL_SCANCODE_F6&&!config.enemy_grab,"legacy config loses debug default");std::ofstream(file)<<"[debug]\nhotkey = F6\nenemy_grab = on\n";config=DebugConfig::read(file);check(config.enemy_grab,"explicit grab debug override missing");std::ofstream(file)<<"[debug]\nhotkey = MissingKey\n";bool rejected=false;try{DebugConfig::read(file);}catch(...){rejected=true;}check(rejected,"invalid hotkey silently accepted");

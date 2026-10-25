@@ -111,13 +111,20 @@ int main(){try{
      check(video.describe_frame_generation()=="MetalFX frame interpolation (not available)","frame generation availability note missing");
      video.set_frame_generation(FrameGeneration::MetalFx);check(video.settings().presents_per_tick()==2,"frame interpolation needs two presents per tick at 30");video.set_frame_rate(FrameRate::Hz120);check(video.settings().presents_per_tick()==4,"frame interpolation keeps 120");video.set_frame_rate(FrameRate::Hz30);
      front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Off,"frame generation wrap");
+     front.input(MenuInput::Down);check(front.selected()==Frontend::sharpness_row,"sharpness row not selectable");
+     check(video.settings().sharpness==Sharpness::Off&&video.settings().sharpness_amount()==0.0f,"sharpness default");
+     front.input(MenuInput::Right);front.input(MenuInput::Right);check(video.settings().sharpness==Sharpness::Medium&&video.settings().sharpness_amount()==0.6f&&VideoSettings::read(video_path).sharpness==Sharpness::Medium&&video.settings().presentation(),"sharpness medium");
+     front.input(MenuInput::Right);front.input(MenuInput::Right);check(video.settings().sharpness==Sharpness::Off,"sharpness wrap");
      front.input(MenuInput::Down);check(front.selected()==Frontend::post_process_row,"post-process row not selectable");
-     front.input(MenuInput::Right);front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::Crt&&VideoSettings::read(video_path).post_process==PostProcess::Crt,"post-process crt");
-     check(video.describe_post_process()=="CRT scanlines + sharpen","post-process label");
+     front.input(MenuInput::Right);front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::CrtFull&&VideoSettings::read(video_path).post_process==PostProcess::CrtFull,"post-process crt full");
+     check(video.describe_post_process()=="CRT full (mask, bloom)","post-process label");
      front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::Off,"post-process wrap");
+     {std::ofstream old(video_path);old<<"quality = high\npost_process = sharpen\n";}check(VideoSettings::read(video_path).sharpness==Sharpness::Medium&&VideoSettings::read(video_path).post_process==PostProcess::Off,"old sharpen value not mapped");
+     {std::ofstream old(video_path);old<<"quality = high\npost_process = crt\n";}check(VideoSettings::read(video_path).post_process==PostProcess::CrtLight,"old crt value not mapped");
+     video.set_upscaler(Upscaler::MetalFxTemporal);video.set_renderer(RenderBackend::Vulkan);
      const auto reread=VideoSettings::read(video_path);check(reread.upscaler==Upscaler::MetalFxTemporal&&reread.frame_generation==FrameGeneration::Off&&reread.post_process==PostProcess::Off&&reread.quality==quality_before&&reread.renderer==RenderBackend::Vulkan,"presentation roundtrip");
      front.input(MenuInput::Down);check(front.selected()==Frontend::audio_row,"audio row must follow the presentation rows");
-     for(int i=0;i<5;++i)front.input(MenuInput::Up);check(front.selected()==Frontend::video_row,"row order above presentation rows");
+     for(int i=0;i<6;++i)front.input(MenuInput::Up);check(front.selected()==Frontend::video_row,"row order above presentation rows");
      {std::ofstream bad(video_path);bad<<"quality = high\nframe_rate = 45\n";}bool rejected_rate=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected_rate=true;}check(rejected_rate,"invalid frame rate accepted");
      {std::ofstream bad(video_path);bad<<"quality = high\nupscaler = fsr\n";}bool rejected=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected=true;}check(rejected,"invalid upscaler accepted");
      video.set_upscaler(Upscaler::Off);}

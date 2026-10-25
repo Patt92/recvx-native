@@ -27,6 +27,10 @@ std::vector<std::uint8_t> fixture(const std::vector<std::uint8_t>& first,
 int main(){unsigned failures=0,checks=0;
     auto test=[&](const char* name,const std::function<void()>& body){++checks;try{body();std::cout<<"PASS "<<name<<'\n';}
         catch(const std::exception& e){++failures;std::cerr<<"FAIL "<<name<<": "<<e.what()<<'\n';}};
+    test("bhSv 16 writes player floor without corrupting floor trigger index",[]{
+        Inventory inv;MessageDialog dialog;EventVm vm(fixture({8,16,2,0,0xff,0}),inv,dialog);
+        unsigned floor=0;vm.values[16]=7;vm.set_player_floor=[&](unsigned value){floor=value;};
+        vm.start(0,0);vm.tick();check(floor==2&&vm.values[16]==7&&vm.errors.empty(),"player floor and floor trigger index aliased");});
     for(unsigned tail:{0xfdu,0xf3u})test(tail==0xfd?"EWHILE nonzero":"EWHILE2 nonzero",[&]{
         // bhCk returns mode ^ flag = 2. Both EWHILE variants must loop.
         auto b=fixture({0xfc,8,4,1,100,0,0,2,0x15,0,0,0,0xfe,std::uint8_t(tail),0xff,0});

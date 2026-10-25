@@ -47,6 +47,16 @@ std::vector<DebugChoice> DebugMenu::choices(unsigned row)const{
 }
 void DebugMenu::toggle(){active_=!active_;if(!active_)return;selected_=std::min(selected_,unsigned(actions_.empty()?0:actions_.size()-1));status_.clear();for(unsigned i=0;i<actions_.size();++i)values_[i]=actions_[i].current();}
 bool DebugMenu::event(const SDL_Event& event){
+    if(event.type==SDL_CONTROLLERDEVICEREMOVED)controller_chords_.erase(event.cdevice.which);
+    if(event.type==SDL_CONTROLLERBUTTONDOWN||event.type==SDL_CONTROLLERBUTTONUP){
+        const unsigned bit=event.cbutton.button==SDL_CONTROLLER_BUTTON_START?1u:event.cbutton.button==SDL_CONTROLLER_BUTTON_BACK?2u:0u;
+        if(bit){auto& chord=controller_chords_[event.cbutton.which];const bool consumed=chord.latched;
+            if(event.type==SDL_CONTROLLERBUTTONDOWN)chord.held|=bit;else chord.held&=~bit;
+            if(chord.held==3&&!chord.latched){chord.latched=true;toggle();return true;}
+            if(!chord.held)chord.latched=false;
+            if(consumed)return true;
+        }
+    }
     if((event.type==SDL_KEYDOWN||event.type==SDL_KEYUP)&&event.key.keysym.scancode==config_.hotkey){if(event.type==SDL_KEYDOWN&&!event.key.repeat)toggle();return true;}
     if(active_&&event.type==SDL_KEYDOWN&&!event.key.repeat&&(event.key.keysym.scancode==SDL_SCANCODE_PAGEUP||event.key.keysym.scancode==SDL_SCANCODE_PAGEDOWN)){step(event.key.keysym.scancode==SDL_SCANCODE_PAGEUP?-20:20);return true;}
     if(active_&&event.type==SDL_CONTROLLERBUTTONDOWN&&(event.cbutton.button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER||event.cbutton.button==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)){step(event.cbutton.button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER?-20:20);return true;}return false;

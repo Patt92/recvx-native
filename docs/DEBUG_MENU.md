@@ -1,6 +1,9 @@
 # Debug menu mod
 
-F2 opens and closes the debug menu. The debug hotkey takes precedence over game
+F2 or Start+Select (Start+Back) on the same controller opens and closes the debug menu.
+Release both controller buttons before using the chord again. Individual Start/Select
+presses retain their normal actions; an action triggered before the second button
+is pressed is not undone. The debug hotkey takes precedence over game
 controls and the former F2 wireframe binding. New default controls put
 wireframe on F3; existing user bindings are preserved.
 
@@ -49,7 +52,7 @@ the menu.
 | Enemy attacks | Host convenience switch, not an original mechanic (default on = original behaviour). Off: enemies and enemy effects deal no HP loss, poison (`stflg` 0x80000/0x200000), grab/throw takeover (player `mode0` 4/5/6) or kill to the player; enemy AI, motions and attack animations keep running. Central gate in `RoomWorld::enemy_player_set`, `s.player_damage`, `t.player_poison`, the bomb player half (`bhCheckBombAtari`) and the EN01 facade grab state; modules with an attack-start gate (`debug_attack_disabled`: en01, en04, en07, en09, en10, en21, en26) skip the attack entirely. `--enemy-attacks on/off`, `debug.ini enemy_attacks = on/off`. Not covered: the room gas kill bhEff127 (room event, not an enemy). |
 | Wireframe | Toggle wireframe rendering. |
 | Bildrate | Host presentation cadence (`video.ini` `frame_rate`): 30 (one present per game tick), 60, 120 (repeated presents with vsync) or unlimited (no vsync); the 30 Hz tick is unchanged. |
-| Upscaler / Frame-Generation / Post-Processing | Host presentation stage (macOS, `video.ini` `upscaler`, `frame_generation`, `post_process`): MetalFX spatial or temporal upscaling of the presented frame, MetalFX frame interpolation (macOS 26+), sharpen or CRT post-processing. Same persistence as the quality row; see [NATIVE_PORT.md](NATIVE_PORT.md#metalfx-presentation-stage-macos). |
+| Upscaler / Frame-Generation / Schaerfen / CRT-Filter | Host presentation stage (macOS, `video.ini` `upscaler`, `frame_generation`, `sharpness`, `post_process`): MetalFX spatial or temporal upscaling of the presented frame, MetalFX frame interpolation (macOS 26+), contrast-adaptive sharpening in three strengths, CRT light (scanlines) or CRT full (slot mask, bloom, gamma-correct). Same persistence as the quality row; see [NATIVE_PORT.md](NATIVE_PORT.md#metalfx-presentation-stage-macos). |
 | Textur-Mods (HD) | Host comparison switch: off ignores `mods/textures/<asset>` and `mods/textures/hd/<md5>.tga` (PS2 textures from `data/`), on uses them again. Reloads the current room at the same position like a snapshot (room script restarts); needs free player control, otherwise it applies from the next room. Inventory and status-screen atlases (`menu`, `fonts`) and inventory item models are reloaded immediately, also outside a room. The room line in the terminal counts HD, mod-file and `data/` textures. |
 | Continue | Close the debug menu. |
 
