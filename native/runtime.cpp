@@ -989,7 +989,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             const auto snap=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index},audio.loaded_room_sound_case());
             combat=recvx::CombatController(args.data,args.mods); // weapon_asset.cpp: Waffentexturen ueber apply_texture_files
             return "Raum neu geladen: "+restore_snapshot(snap);};
-        debug.add({"texture_mods","Textur-Mods (HD)","OK: HD-/Textur-Mods an/aus und den Raum an derselben Stelle neu laden (PS2 gegen GC vergleichen). Inventarmodelle erst nach Neustart.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus (PS2)"},{1,"An"}};},[]{return unsigned(recvx::texture_mods_enabled());},[&](unsigned value){recvx::set_texture_mods_enabled(value!=0);return std::string("Textur-Mods ")+(value?"an":"aus")+": "+reload_textures_here();}});
+        debug.add({"texture_mods","Textur-Mods (HD)","OK: HD-/Textur-Mods an/aus, Inventar-/Menueatlanten neu laden und den Raum an derselben Stelle neu laden (PS2 gegen HD vergleichen).",[]{return std::vector<recvx::DebugChoice>{{0,"Aus (PS2)"},{1,"An"}};},[]{return unsigned(recvx::texture_mods_enabled());},[&](unsigned value){recvx::set_texture_mods_enabled(value!=0);if(ui)ui->reload_textures();return std::string("Textur-Mods ")+(value?"an":"aus")+": "+reload_textures_here();}});
         // Schreibmaschine (bup_00.c ControlTypewriter): Slotauswahl mit Host-
         // Speicherdatei je Slot. Der Ladevorgang nutzt denselben bhPopGameData-
         // Pfad wie der Snapshot, aber aus <saves>.

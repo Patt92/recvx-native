@@ -36,9 +36,11 @@ Jeder `./build.sh`-Lauf (alle Plattformen) prueft `mods/hd-source/`:
    (`tex1_<w>x<h>_....dds`) wird auf die Originalgroesse aus dem Namen verkleinert und per
    Bildinhalt mit den gekochten Texturen derselben Groesse in `data/textures` verglichen.
    Die Hashes in den Namen sind Emulator-Speicherabbilder und fuer den Port nicht verwendbar.
-2. Nur eindeutige Treffer werden genommen. Pro Treffer entsteht
-   `mods/textures/hd/<md5>.tga` (4-fache PS2-Groesse, Farbe aus dem Paket, Alpha aus der
-   PS2-Textur). Die DDS bleiben unveraendert in `mods/hd-source/`.
+2. Nur eindeutige Treffer werden genommen (Stufen A/B: Bildvergleich; Stufe L: neu gezeichnete
+   Atlanten wie Inventar-Icons und Statusbildschirm, erkannt an derselben Transparenzmaske). Pro
+   Treffer entsteht `mods/textures/hd/<md5>.tga` (4-fache PS2-Groesse, Farbe aus dem Paket, Alpha
+   aus dem Paket, wenn es eine eigene Maske hat, sonst aus der PS2-Textur). Die DDS bleiben
+   unveraendert in `mods/hd-source/`.
 3. `mods/textures/hd-import.json` listet jede geschriebene Datei, jeden Treffer (DDS -> PS2-Datei,
    Anzahl gleicher Texturen in anderen Raeumen) und jede nicht verwendbare DDS mit Grund.
 4. Ist nichts geaendert, wird nichts neu gerechnet ("HD import up to date"). Entfernte DDS
@@ -46,8 +48,13 @@ Jeder `./build.sh`-Lauf (alle Plattformen) prueft `mods/hd-source/`:
    Import stammen, werden nie angefasst.
 
 Wichtig: ein Paket deckt nur die Texturen ab, fuer die es ein Gegenstueck gibt. Das
-PCSX2-Paket mit 312 DDS ergab 108 Treffer (247 gekochte Dateien von 18.253) — der Rest des
-Spiels bleibt bei PS2-Texturen. Welche Raeume betroffen sind, steht in `hd-import.json`;
+PCSX2-Paket mit 312 DDS ergab 115 Treffer (270 gekochte Dateien von 18.253), darunter alle
+fuenf Inventar-/Statusatlanten (`menu/0000..0004`) und der Schriftatlas `fonts/0000`; der Rest
+des Spiels bleibt bei PS2-Texturen. Die uebrigen DDS sind zum grossen Teil Bilder, die der Port
+nicht als gekochte Textur in `data/textures` fuehrt (Titel, Karten-Namensschilder, Dateien,
+Optionsbildschirme) und deshalb nicht zuordnen kann.
+Das Inventar wird wie das ganze Spiel in 640x480 gezeichnet: HD-Atlanten zeigen dort die neu
+gezeichneten Motive, aber keine hoehere Bildaufloesung. Welche Raeume betroffen sind, steht in `hd-import.json`;
 die Runtime meldet je Raum `RM_xxxx.RDX textures: H HD, ...`.
 
 DDS direkt in `mods/textures/` werden nie gelesen; Runtime und Build-Zusammenfassung warnen dann.

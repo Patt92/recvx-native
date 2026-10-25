@@ -501,7 +501,7 @@ def import_hd_sources(mods: Path, data: Path, jobs: int) -> str:
     except ImportError as error:
         raise RuntimeError(f'HD import of {source} needs Pillow ({error}); install it: python3 -m pip install Pillow')
     lines = []
-    import_hd_textures.run(mods, data, 4, 'AB', jobs, log=lambda line: (print(line, flush=True), lines.append(line)))
+    import_hd_textures.run(mods, data, 4, 'ABL', jobs, log=lambda line: (print(line, flush=True), lines.append(line)))
     return (lines[-1] if lines else f'nothing to import from {source}') + note
 
 

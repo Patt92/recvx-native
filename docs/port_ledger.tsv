@@ -1,4 +1,6 @@
 # Geprüfte Portierungsstände für tools/port_check.py (TAB-getrennt).
+player.c:bhControlPlayer.hidden_mirror_floor_gate	done	player.c:1365/1666-1674; native/world.cpp check_player_mirror_floor; tests/native/mirror_pass_test.cpp; build/validation/event-logic-audit/mirror-real-before.log and final-tests.log: hidden/paused player preserves mirror-floor result, visible work resumes. Narrow gate evidence, not full bhControlPlayer acceptance.
+player.c:bhControlPlayer.hidden_floor_gate	done	player.c:1365/1664; native/world.cpp check_player_floor; tests/native/body_wall_pass_test.cpp; build/validation/rm7221/fixed.json: hidden player preserves floor trigger work, RM_7221 event 36 runs once and ends (snapshot plus diagnostic position, not full room acceptance).
 # Spalten: <datei.c | datei.c:Funktion | Funktion> <TAB> <done|partial|missing|skip> <TAB> <Beleg/Notiz>
 # Nur eintragen, was am nativen Code nachgeprüft ist. Ohne Eintrag gilt die automatische
 # Evidenz (original/opcode/verweis/fehlt). done = Verhalten vollständig wie im Original,

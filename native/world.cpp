@@ -4247,6 +4247,10 @@ void RoomWorld::init_camera_target(const Scene& stage,std::size_t cut){
     camera_target_valid_=true;
 }
 void RoomWorld::check_player_mirror_floor(int flr_no){
+    /* player.c:1365 encloses bhCheckFloorEffect (:1666-1674), just like
+       bhCheckFloorP: a paused or hidden player retains the last mdflg 0x40. */
+    if(!(simulation_flags_&1u)||(collision_events_&&!(collision_events_->flags[6][0]&1u)))return;
+    if(player_hidden||(collision_events_&&(collision_events_->flags[14][0]&0x1000000u)))return;
     const unsigned st=collision_events_?collision_events_->flags[5][0]:0u;
     if(!(st&0x100u))return;                                          /* player.c:1666 */
     player_mirror_off_=false;                                        /* player.c:1668 */
@@ -6035,6 +6039,10 @@ void RoomWorld::finish_player_pass(NJS_POINT3& position,Angle yaw){
 }
 void RoomWorld::check_player_floor(NJS_POINT3 position,Angle yaw,int floor){
     if(!(simulation_flags_&1u)||(collision_events_&&!(collision_events_->flags[6][0]&1u)))return;
+    /* player.c:1365: the entire player pass, including bhCheckFloorP (:1664),
+       is suspended while plp->stflg 0x1000000 is set (bhObjSleep). Preserve
+       the floor-trigger work consumed by the script instead of retriggering it. */
+    if(player_hidden||(collision_events_&&(collision_events_->flags[14][0]&0x1000000u)))return;
     collision_floor_=floor;
     if(!collision_probe_ready_)collision_safe_=position;
     /* bhCheckFloorP ist im Original die Stelle direkt NACH dem Koerperteil von

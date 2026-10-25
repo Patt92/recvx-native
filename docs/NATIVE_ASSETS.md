@@ -86,8 +86,11 @@ build/macos-arm64/recvx-runtime --data data --mods build/hd-textures
 DDS texture packs (PCSX2 `<TEX0 hash>-[<CLUT hash>-]<bits>.dds`, Dolphin `tex1_<w>x<h>_...dds`) go
 into `mods/hd-source/` (any subfolders). The runtime never reads DDS; every `./build.sh` run imports
 them with `tools/import_hd_textures.py` into `mods/textures/hd/<md5>.tga` (content match against the
-cooked textures of the size in the name, tiers below, Pillow only) and records matched, unused and
-ignored files in `mods/textures/hd-import.json`. Unchanged sources are skipped; removed DDS take their
+cooked textures of the size in the name, tiers below, plus tier L for redrawn atlases with the same
+transparency layout, Pillow only) and records matched, unused and ignored files in
+`mods/textures/hd-import.json`. Alpha comes from the pack when the pack file has its own mask. The
+inventory and status atlases (`textures/menu`, `textures/fonts`) use the same precedence as room
+textures (per-asset file, then `textures/hd`, then `data/`), including other sizes. Unchanged sources are skipped; removed DDS take their
 imported TGA with them; other files in `textures/hd/` are kept. Manual run:
 
 ```sh

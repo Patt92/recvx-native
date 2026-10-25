@@ -70,6 +70,34 @@ class ImportHdTexturesTests(unittest.TestCase):
             self.assertEqual(foreign.read_bytes(), b'from build_hd_textures')  # fremde Dateien bleiben
             self.assertFalse((mods / 'textures/hd-import.json').exists())
 
+    def test_redrawn_atlas_matches_by_layout_and_keeps_its_alpha(self):
+        # Neu gezeichneter Atlas: Bild weicht ab (Rauschen, andere Farbe unter Transparenz), Maske gleich.
+        checker = Image.new('L', (32, 32))
+        checker.putdata([255 if (x // 8 + y // 8) % 2 == 0 else 0 for y in range(32) for x in range(32)])
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            data, mods = t / 'data', t / 'mods'
+            atlas = Image.composite(pattern(5), Image.new('RGB', (32, 32)), checker).convert('RGBA')
+            atlas.putalpha(checker)
+            cooked_tga(data / 'textures/menu/0001.tga', atlas)
+            other = pattern(11).convert('RGBA')
+            other.putalpha(Image.eval(checker, lambda a: 255 - a))
+            cooked_tga(data / 'textures/menu/0002.tga', other)
+            noise = Image.effect_noise((32, 32), 120).convert('RGB')
+            redrawn = Image.composite(Image.blend(pattern(5), noise, 0.35), Image.new('RGB', (32, 32), (255, 255, 255)), checker)
+            redrawn = redrawn.resize((128, 128), Image.NEAREST).convert('RGBA')
+            redrawn.putalpha(Image.eval(checker, lambda a: 0x80 if a else 0).resize((128, 128), Image.NEAREST))  # GS-Alpha 0x80
+            (mods / 'hd-source').mkdir(parents=True)
+            redrawn.save(mods / 'hd-source/aa-bb-00001553.dds')
+            record = hd_import.run(mods, data, 4, 'ABL', 1, log=lambda _: None)
+            digest = hashlib.md5((data / 'textures/menu/0001.tga').read_bytes()).hexdigest()
+            self.assertEqual(record['matched'][digest]['tier'], 'L', record)
+            self.assertEqual(record['matched'][digest]['alpha'], 'pack')
+            written = Image.open(mods / 'textures/hd' / f'{digest}.tga')
+            self.assertEqual(written.getchannel('A').getextrema(), (0, 255))  # GS-Bereich verdoppelt
+            hd_import.run(mods, data, 4, 'AB', 1, force=True, log=lambda _: None)
+            self.assertFalse((mods / 'textures/hd' / f'{digest}.tga').exists(), 'ohne Stufe L kein Treffer')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -200,6 +200,15 @@ int main(int argc,char** argv){try{_Make_SinTable();
   // player.c:1666 ohne st_flg 0x100 laesst plp->mdflg stehen: erst mit gesetztem Bit wird es neu bestimmt.
   // player.c:1666: prm0-2-Flaeche (Bodentabelle Satz 4, x -47..63, z -54..17) schliesst den Spieler aus.
   r.actor.position={0,0,0};r.world.check_player_mirror_floor(0);check(r.world.player_mirror_off(),"RM_2040 player inside prm0 2 area keeps mdflg 0x40");
+  // player.c:1365 encloses the mirror-floor query too: task pause and hidden
+  // work preserve the last mdflg instead of querying a new ground position.
+  r.actor.position={0,0,25};
+  r.vm.flags[14][0]|=0x1000000u;r.world.check_player_mirror_floor(1);
+  check(r.world.player_mirror_off(),"hidden player changed mirror-floor work");
+  r.vm.flags[14][0]&=~0x1000000u;
+  const auto saved_sp=r.vm.flags[6][0];r.vm.flags[6][0]&=~1u;r.world.check_player_mirror_floor(1);
+  check(r.world.player_mirror_off(),"paused player changed mirror-floor work");
+  r.vm.flags[6][0]=saved_sp;
   r.actor.position={0,0,25};r.world.check_player_mirror_floor(0);check(!r.world.player_mirror_off(),"RM_2040 player outside the area clears mdflg 0x40");
   r.actor.position={0,0,0};r.world.check_player_mirror_floor(1);check(!r.world.player_mirror_off(),"RM_2040 other floor number must not match");
   std::cout<<"RM_2040: plp->mdflg 0x40 aus bhCheckFloorEffect prm0 2 (Diagnoselagen) PASS\n";

@@ -427,16 +427,24 @@ bool StatusMenu::apply_input(MenuInput key,Inventory& inventory){
     }else if(Inventory::id(inventory.slots()[selected])){commands=true;command=0;}}
     return true;
 }
-GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mods):data_(data),mods_(mods){
-    auto load=[&](const char* identity,unsigned count){std::vector<SceneTexture> out;for(unsigned i=0;i<count;++i){const auto rel=std::filesystem::path("textures")/identity/(asset_number(i)+".tga");out.push_back(read_tga(!mods.empty()&&std::filesystem::is_regular_file(mods/rel)?mods/rel:data/rel));}return out;};
-    menu_=decode_texture_bundle(read_asset_file(data/"archives/ITEM1/0145.bin",8*1024*1024));
-    auto menu_overrides=load("menu",5);for(unsigned i=0;i<menu_overrides.size();++i)menu_[i].pixels=menu_overrides[i].pixels;
-    fonts_=load("fonts",4);
+void GameUi::reload_textures(){
+    // Dieselbe Rangfolge wie Raum-/Objekttexturen (apply_texture_files): Datei je Asset unter
+    // mods/textures/<menu|fonts>/<n>.tga, dann mods/textures/hd/<md5 der gekochten Datei>.tga, dann data/.
+    // Ersetzt wird das ganze Bild samt Groesse; blit()/pulse_quad() adressieren in Atlasanteilen (u/256).
+    menu_=decode_texture_bundle(read_asset_file(data_/"archives/ITEM1/0145.bin",8*1024*1024));menu_banks_=menu_.at(0);
+    Scene menu;menu.textures=menu_;apply_texture_files(menu,data_,mods_,"menu");menu_=std::move(menu.textures);
+    Scene fonts;fonts.textures.resize(4);apply_texture_files(fonts,data_,mods_,"fonts");
+    for(const auto& font:fonts.textures)if(!font.width)throw std::runtime_error("missing cooked font atlas under "+(data_/"textures/fonts").string());
+    fonts_=std::move(fonts.textures);
     dialog_fonts_=fonts_;
     // The original atlas includes a dark edge and a muted cream glyph core.
     // Map that ramp to black/white for dialogue, retaining its antialiasing and alpha.
     for(auto& font:dialog_fonts_){unsigned low=255,high=0;for(auto c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});low=std::min(low,value);high=std::max(high,value);}
         if(high>low)for(auto& c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});const auto shade=(value-low)*255/(high-low);c=(c&0xff000000)|shade*0x010101;}}
+    item_models_.clear();file_textures_.clear();
+}
+GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mods):data_(data),mods_(mods){
+    reload_textures();
     messages_=read_asset_file(data/"files/SYSMES.ALD",4*1024*1024);bind_item_names(messages_); /* sys->mes_ip fuer bhDispItemName im Textaufbau */BinaryView v(messages_);system_table_=8+v.u32(0);v.require(system_table_,4);
 }
 
@@ -646,7 +654,7 @@ void GameUi::text(SoftwareRenderer& image,const Message& message,int x,int y,flo
         // bhDispItemName advances the actual font cursor, including variable
         // glyph widths. Character-count estimates overlap the following '?' .
         if(c==0xff03){if(i+1>=part.size())break;if(depth>=4)throw std::runtime_error("recursive item-name message");write(read_message(messages_,4,part[++i]),depth+1);continue;}
-        if(c==0xff04){if(choice++==selected_choice)blit_pixels(image,menu_[0],x,y+int(5*yscale),int(18*scale),int(18*yscale),0,28,18,46);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=font_color(c);continue;}if(c/324>=fonts_.size())continue;
+        if(c==0xff04){if(choice++==selected_choice)blit(image,menu_[0],x,y+int(5*yscale),int(18*scale),int(18*yscale),0,28,18,46);x+=int(28*scale);continue;}if(c>=0xfe00){if(c<0xff00)color=font_color(c);continue;}if(c/324>=fonts_.size())continue;
         const auto glyph=c%324;blit(image,(dialogue?dialog_fonts_:fonts_)[c/324],x,y,int(28*scale),int(28*yscale),(glyph%18)*14,(glyph/18)*14,(glyph%18)*14+14,(glyph/18)*14+14,color);
         x+=int((c<std::size(FontSz)?FontSz[c]:28)*scale);
       }
@@ -775,7 +783,7 @@ void GameUi::quantity(SoftwareRenderer& image,std::uint32_t packed,int x,int y,b
     }else if(itemdata[id].type&0x56){
         bank=id==16?9u:(id==17||id==36)?6u:id==37?7u:10u;
     }
-    auto texture=menu_[0];const auto palette=texture.palette_banks.find(bank);
+    auto texture=menu_banks_;const auto palette=texture.palette_banks.find(bank);
     if(palette==texture.palette_banks.end())throw std::runtime_error("missing original UI palette bank");
     texture.pixels=palette->second;
     unsigned column=0;bool drawn=false;

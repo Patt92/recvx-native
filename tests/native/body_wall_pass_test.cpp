@@ -97,8 +97,16 @@ int main(int argc,char** argv){try{
     //    Spielerpass (kein tick_enemy_pass, Task 7 steht) laeuft auch kein Koerperteil.
     {const NJS_POINT3 c{-57.f,0.f,60.f};auto r=make(c);r->vm->flags[14][0]|=0x1000000u;pass(*r,nullptr);
      check(r->actor.position.x==c.x&&r->actor.position.z==c.z,"body pass ran on a hidden player work");
-     r->vm->flags[14][0]&=~0x1000000u;
+     r->vm->flags[10][0]|=0x8000200u;r->vm->values[16]=123u;
      r->w->check_player_floor(r->actor.position,r->actor.yaw,r->w->floor_at(r->actor.position));
+     check((r->vm->flags[10][0]&0x8000200u)==0x8000200u&&r->vm->values[16]==123u,"hidden player floor pass changed trigger work");
+     r->vm->flags[14][0]&=~0x1000000u;
+     r->w->player_hidden=true;
+     r->w->check_player_floor(r->actor.position,r->actor.yaw,r->w->floor_at(r->actor.position));
+     check((r->vm->flags[10][0]&0x8000200u)==0x8000200u,"hidden native owner did not suspend floor pass");
+     r->w->player_hidden=false;
+     r->w->check_player_floor(r->actor.position,r->actor.yaw,r->w->floor_at(r->actor.position));
+     check(!(r->vm->flags[10][0]&0x8000200u),"visible player did not resume floor pass outside triggers");
      r->w->finish_player_pass(r->actor.position,r->actor.yaw);
      check(r->actor.position.x==c.x&&r->actor.position.z==c.z,"body pass ran in a frame without the player pass head");
      r->vm->flags[6][0]=0u;pass(*r,nullptr);

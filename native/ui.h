@@ -220,6 +220,8 @@ public:
     // parts_09b[21] lit (Down), 3 = both neutral (18).
     void draw_box(SoftwareRenderer& image,const Inventory& inventory,const StatusMenu& menu,unsigned base,unsigned index,bool selecting,const StatusSlide* slide=nullptr,unsigned exit_state=0,unsigned note=0,float row_shift=0.f,unsigned arrows=0,unsigned cursor_cell=0)const;
     void draw_title(SoftwareRenderer& image);
+    // Menue-/Schriftatlanten und Inventarmodelle neu ueber apply_texture_files laden (Debugschalter Textur-Mods).
+    void reload_textures();
     // Original bup_00 / McSaveFile / SaveScreen / LoadScreen assets and messages.
     void draw_typewriter(SoftwareRenderer& image,const Typewriter& screen);
     // ADV/0002 title textures (AdvEasySetupTextureBasic): 0 = list texture 0
@@ -245,6 +247,9 @@ private:
     void direct_message(SoftwareRenderer&,const Message&,float x,float y,std::uint32_t color,float sx=1,float sy=1,float line=1,unsigned count=0,bool spaces_count=false)const;
     std::map<unsigned,std::vector<SceneTexture>> file_textures_;
     std::vector<SceneTexture> menu_,fonts_,dialog_fonts_;
+    // menu_[0] wie aus ITEM1/0145 dekodiert: die Palettenbaenke (njSetPaletteBankNum) gehoeren zu diesem
+    // PS2-Bild; eine HD-/Mod-Datei fuer menu/0000 ersetzt nur das Bild der Grundpalette.
+    SceneTexture menu_banks_;
     std::vector<std::uint8_t> messages_;
     std::size_t system_table_=0;
     std::filesystem::path data_,mods_;
