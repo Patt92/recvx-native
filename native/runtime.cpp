@@ -21,6 +21,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <SDL_syswm.h> // HWND des SDL-Fensters fuer die FSR-Praesentationsstufe
 // windef.h haelt die 16-Bit-Altlasten near/far als leere Makros; sie wuerden die Feldnamen
 // der njClipZ-Grenzen (ViewClip::near/far) zerstoeren.
 #undef near
@@ -1107,7 +1108,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"snapshot_load","Snapshot laden","OK: Raum mit gesichertem Fortschritt an der gesicherten Position neu laden.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
         debug.add({"video","Grafikqualitaet","OK: Host-Renderqualitaet; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Niedrig"},{2,"Hoch"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Grafik: "+video.describe();}});
         debug.add({"framerate","Bildrate","OK: Praesentationen je Spieltakt (Takt bleibt 30 Hz); unlimited ohne VSync; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"30 (Spieltakt)"},{1,"60"},{2,"120"},{3,"Unbegrenzt (kein VSync)"}};},[&]{return unsigned(video.settings().frame_rate);},[&](unsigned value){video.set_frame_rate(recvx::FrameRate(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Bildrate: "+video.settings().describe_frame_rate();}});
-        debug.add({"upscaler","Upscaler","OK: MetalFX-Upscaler des Endbilds (macOS); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX spatial"},{2,"MetalFX temporal"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
+        debug.add({"upscaler","Upscaler","OK: Upscaler des Endbilds (MetalFX auf macOS, FSR 4 auf Windows); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX spatial"},{2,"MetalFX temporal"},{3,"FSR 4 (FP8)"},{4,"FSR 4 (INT8)"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
         debug.add({"framegen","Frame-Generation","OK: Zwischenbild je Spieltakt (macOS 26+); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX frame interpolation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame-Generation: "+video.describe_frame_generation();}});
         debug.add({"sharpness","Schaerfen","OK: kontrastadaptives Schaerfen der Anzeige (macOS); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"Leicht"},{2,"Mittel"},{3,"Stark"}};},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Schaerfen: "+video.describe_sharpness();}});
         debug.add({"postfx","CRT-Filter","OK: CRT light (Zeilenraster) oder CRT full (Schlitzmaske, Bloom, gamma-korrekt); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"CRT light"},{2,"CRT full"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT-Filter: "+video.describe_post_process();}});
@@ -1944,12 +1945,28 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"nearest");
         sdl_check(recvx::configure_window_presentation(renderer.get())==0);
         std::unique_ptr<SDL_Texture,decltype(&SDL_DestroyTexture)> texture(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480),SDL_DestroyTexture);sdl_check(bool(texture));
-        {// Praesentationsstufe auf der CAMetalLayer des SDL-Fensters (macOS); sonst bleibt der SDL-Kopierpfad.
-         std::string reason;void* layer=SDL_RenderGetMetalLayer(renderer.get());if(!layer)reason="SDL renderer is not Metal";
+        {// Praesentationsstufe: macOS auf der CAMetalLayer des SDL-Fensters (MetalFX), Windows auf dem HWND
+         // (eigenes D3D12-Geraet, FSR 4 aus den AMD-ffx-api-DLLs); sonst bleibt der SDL-Kopierpfad.
+         std::string reason;const char* stage_name="MetalFX";
+#if defined(_WIN32)
+         stage_name="FSR";
+         SDL_SysWMinfo wm{};SDL_VERSION(&wm.version);void* hwnd=SDL_GetWindowWMInfo(window.get(),&wm)==SDL_TRUE&&wm.subsystem==SDL_SYSWM_WINDOWS?static_cast<void*>(wm.info.win.window):nullptr;
+         if(!hwnd)reason="SDL window has no HWND";
+         // DLL-Ordner: RECVX_FSR_SDK, sonst neben der Runtime (Paket), sonst native/third_party/FidelityFX-SDK der Dev-App.
+         std::string sdk_dir;if(const char* env=std::getenv("RECVX_FSR_SDK");env&&*env)sdk_dir=env;
+         else{char module_path[MAX_PATH]{};const DWORD n=GetModuleFileNameA(nullptr,module_path,MAX_PATH);
+              const fs::path exe_dir=n?fs::path(std::string(module_path,n)).parent_path():fs::current_path();
+              for(const fs::path candidate:{exe_dir,exe_dir/"FidelityFX-SDK",args.data.parent_path()/"native/third_party/FidelityFX-SDK"})
+                  if(fs::is_regular_file(candidate/"amd_fidelityfx_upscaler_dx12.dll")){sdk_dir=candidate.string();break;}
+              if(sdk_dir.empty())sdk_dir=exe_dir.string();}
+         presenter=hwnd?recvx::create_fsr_presenter(hwnd,sdk_dir,video.settings(),reason):nullptr;
+#else
+         void* layer=SDL_RenderGetMetalLayer(renderer.get());if(!layer)reason="SDL renderer is not Metal";
          presenter=layer?recvx::create_metalfx_presenter(layer,reason):nullptr;
+#endif
          video.set_availability(bool(presenter),presenter&&presenter->upscaler_supported(),presenter&&presenter->frame_generation_supported());
          apply_vsync=[&](bool on){if(SDL_RenderSetVSync(renderer.get(),on?1:0)!=0)std::cerr<<"VSync setting ignored: "<<SDL_GetError()<<'\n';};apply_vsync(video.settings().vsync());
-         if(presenter){presenter->configure(video.settings());std::cout<<"Presentation: MetalFX stage available"<<(presenter->upscaler_supported()?"":", no MetalFX upscaling on this device")<<(presenter->frame_generation_supported()?"":", no frame interpolation on this device/OS")<<'\n';}
+         if(presenter){presenter->configure(video.settings());std::cout<<"Presentation: "<<stage_name<<" stage available"<<(presenter->upscaler_supported()?"":std::string(", no ")+stage_name+" upscaling on this device")<<(presenter->frame_generation_supported()?"":", no frame interpolation on this device/OS")<<'\n';}
          else std::cout<<"Presentation: SDL copy ("<<reason<<")\n";}
         SDL_AudioSpec requested{},obtained{};requested.freq=48000;requested.format=AUDIO_S16SYS;requested.channels=2;requested.samples=1024;
         audio_device=SDL_OpenAudioDevice(nullptr,0,&requested,&obtained,0);if(!audio_device)std::cerr<<"Audio output unavailable: "<<SDL_GetError()<<'\n';else SDL_PauseAudioDevice(audio_device,0);
@@ -2131,7 +2148,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                   <<", bands "<<1000.0*t.bands/frames<<", shadow "<<1000.0*t.shadow/frames<<", lines "<<1000.0*t.lines/frames<<" ms/frame\n";}
         if(image.gpu()){const auto& g=image.gpu()->timings();const double frames=std::max(1.0,double(rendered_frames));
          std::cout<<"GPU: build "<<1000.0*g.build/frames<<", upload "<<1000.0*g.upload/frames<<" ("<<g.uploads<<" textures), encode "<<1000.0*g.encode/frames
-                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(presenter){const auto& p=presenter->stats();std::cout<<"MetalFX presentation: "<<presenter->describe()<<"; "<<p.presents<<" presents ("<<p.repeated<<" repeated), "<<p.interpolated<<" interpolated, "<<p.resets<<" history resets, "<<p.skipped<<" skipped, GPU "<<(p.presents?1000.0*p.gpu_seconds/p.presents:0)<<" ms/frame\n";presenter.reset(); /* Thread vor dem Fenster beenden */}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
+                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(presenter){const auto& p=presenter->stats();std::cout<<"Presentation stage: "<<presenter->describe()<<"; "<<p.presents<<" presents ("<<p.repeated<<" repeated), "<<p.interpolated<<" interpolated, "<<p.resets<<" history resets, "<<p.skipped<<" skipped, GPU "<<(p.presents?1000.0*p.gpu_seconds/p.presents:0)<<" ms/frame\n";presenter.reset(); /* Thread vor dem Fenster beenden */}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
     }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';return 1;}
 }
 int main(int argc,char** argv){

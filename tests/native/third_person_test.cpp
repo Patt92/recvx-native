@@ -102,8 +102,11 @@ int main(){try{
      front.input(MenuInput::Down);check(front.selected()==Frontend::upscaler_row,"upscaler row not selectable");
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::MetalFxSpatial&&VideoSettings::read(video_path).upscaler==Upscaler::MetalFxSpatial&&applied_presentation==1,"upscaler spatial");
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::MetalFxTemporal&&VideoSettings::read(video_path).upscaler==Upscaler::MetalFxTemporal,"upscaler temporal");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr4&&VideoSettings::read(video_path).upscaler==Upscaler::Fsr4,"upscaler fsr4");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr4Int8&&VideoSettings::read(video_path).upscaler==Upscaler::Fsr4Int8,"upscaler fsr4 int8");
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Off,"upscaler wrap");
-     front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::MetalFxTemporal,"upscaler left wrap");
+     front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::Fsr4Int8,"upscaler left wrap");
+     front.input(MenuInput::Left);front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::MetalFxTemporal,"upscaler left twice");
      check(video.describe_upscaler()=="MetalFX temporal (not available)","upscaler availability note missing");
      video.set_availability(true,true,false);check(video.describe_upscaler()=="MetalFX temporal","upscaler availability note stuck");
      front.input(MenuInput::Down);check(front.selected()==Frontend::frame_generation_row,"frame generation row not selectable");
@@ -126,7 +129,7 @@ int main(){try{
      front.input(MenuInput::Down);check(front.selected()==Frontend::audio_row,"audio row must follow the presentation rows");
      for(int i=0;i<6;++i)front.input(MenuInput::Up);check(front.selected()==Frontend::video_row,"row order above presentation rows");
      {std::ofstream bad(video_path);bad<<"quality = high\nframe_rate = 45\n";}bool rejected_rate=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected_rate=true;}check(rejected_rate,"invalid frame rate accepted");
-     {std::ofstream bad(video_path);bad<<"quality = high\nupscaler = fsr\n";}bool rejected=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected=true;}check(rejected,"invalid upscaler accepted");
+     {std::ofstream bad(video_path);bad<<"quality = high\nupscaler = fsr3\n";}bool rejected=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected=true;}check(rejected,"invalid upscaler accepted");
      video.set_upscaler(Upscaler::Off);}
     video.set_renderer(RenderBackend::OpenGL);
     video.set_renderer(RenderBackend::Software,false);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL,"temporary renderer switch persisted");

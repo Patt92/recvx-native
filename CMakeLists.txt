@@ -436,6 +436,27 @@ if(RECVX_BUILD_RUNTIME)
     target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_METALFX=1)
     target_link_libraries(recvx-runtime PRIVATE "-framework Metal" "-framework QuartzCore" "-weak_framework MetalFX")
   endif()
+  # Host-Praesentationsstufe mit AMD FSR 4 (native/fsr_present_d3d12.cpp, Windows): eigenes D3D12-Geraet und
+  # DXGI-Swapchain auf dem SDL-Fenster; FSR ausschliesslich aus den signierten AMD-ffx-api-DLLs, die zur
+  # Laufzeit neben der Runtime (Paket) bzw. aus native/third_party/FidelityFX-SDK (Dev) geladen werden. Zum
+  # Bauen genuegen die ffx-api-Header (MIT, native/third_party/FidelityFX-SDK/include); DLLs werden nie gelinkt.
+  option(RECVX_ENABLE_FSR "Build the FSR 4 presentation stage on Windows (ffx-api headers)" ON)
+  if(WIN32 AND RECVX_ENABLE_FSR)
+    target_sources(recvx-runtime PRIVATE native/fsr_present_d3d12.cpp)
+    target_include_directories(recvx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/native/third_party/FidelityFX-SDK/include")
+    target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_FSR=1)
+    # Dev-Lauf aus dem Buildordner: vorhandene AMD-DLLs daneben legen (nicht Teil des Repos, siehe .gitignore).
+    set(RECVX_FSR_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/native/third_party/FidelityFX-SDK")
+    foreach(dll amd_fidelityfx_loader_dx12.dll amd_fidelityfx_dx12.dll amd_fidelityfx_upscaler_dx12.dll amd_fidelityfx_framegeneration_dx12.dll)
+      if(EXISTS "${RECVX_FSR_SDK_DIR}/${dll}")
+        add_custom_command(TARGET recvx-runtime POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "${RECVX_FSR_SDK_DIR}/${dll}" $<TARGET_FILE_DIR:recvx-runtime>)
+      endif()
+    endforeach()
+    if(EXISTS "${RECVX_FSR_SDK_DIR}/FSR4 INT8/amd_fidelityfx_upscaler_dx12.dll")
+      add_custom_command(TARGET recvx-runtime POST_BUILD COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:recvx-runtime>/FSR4 INT8"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${RECVX_FSR_SDK_DIR}/FSR4 INT8/amd_fidelityfx_upscaler_dx12.dll" "$<TARGET_FILE_DIR:recvx-runtime>/FSR4 INT8")
+    endif()
+  endif()
   if(WIN32)
     enable_language(RC)
     set(RECVX_APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/native/resources/app-icon.ico")

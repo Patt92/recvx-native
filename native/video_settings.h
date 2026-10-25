@@ -20,12 +20,14 @@ enum class RenderBackend {Gpu,Software,OpenGL,Vulkan,D3D12};
 // Zeichnen hochskaliert, zwischen zwei Takten interpoliert und nachbearbeitet. Keine Spiellogik;
 // das 640x480-Bild, Takt und Ereignisse bleiben unveraendert. Werte sind zugleich Debugmenue-Indizes.
 //   Upscaler: off = Punktvergroesserung wie bisher; MetalFX spatial; MetalFX temporal (mit
-//   Tiefe und Bewegungsvektoren aus der Kamera-Reprojektion, ohne Subpixel-Jitter).
+//   Tiefe und Bewegungsvektoren aus der Kamera-Reprojektion, ohne Subpixel-Jitter); FSR 4 (Windows,
+//   fsr_present_d3d12.h: AMD FidelityFX ueber die ffx-api-DLLs, FP8- oder INT8-Modell, FSR-3.1-Fallback
+//   des Upscaler-Providers auf GPUs ohne FSR-4-Unterstuetzung).
 //   FrameGeneration: MetalFX-Frame-Interpolation (macOS 26+) erzeugt je Spieltakt ein Zwischenbild.
 //   Sharpness: Grad des kontrastadaptiven Schaerfens (aus, leicht, mittel, stark), unabhaengig vom Modus.
 //   PostProcess: Off; CRT light (Zeilenraster der 480 Spielzeilen + einfache Maske, sRGB); CRT full (gamma-
 //   korrektes Zeilenraster mit Helligkeitsausgleich, Schlitzmaske je Ausgabepixel, Bloom/Halation).
-enum class Upscaler {Off,MetalFxSpatial,MetalFxTemporal};
+enum class Upscaler {Off,MetalFxSpatial,MetalFxTemporal,Fsr4,Fsr4Int8};
 // Host-Bildrate der Praesentation (alle Backends): der Spieltakt bleibt 30 Hz (timing.h), zwischen zwei
 // Takten wird das zuletzt gezeichnete Bild erneut praesentiert (mit Frame-Interpolation das Zwischenbild
 // in der ersten Takthaelfte). 30 = ein Bild je Takt; 60/120 = 2/4 Praesentationen je Takt mit VSync;
@@ -84,7 +86,7 @@ public:
     std::string describe_frame_generation()const;
     std::string describe_sharpness()const;
     std::string describe_post_process()const;
-    // Runtime report: presentation stage (post-processing), MetalFX upscalers and frame generation usable?
+    // Runtime report: presentation stage (post-processing), the stage's upscalers and frame generation usable?
     void set_availability(bool presentation,bool upscaler,bool frame_generation){presentation_available_=presentation;upscaler_available_=upscaler;frame_generation_available_=frame_generation;}
     bool presentation_available()const{return presentation_available_;}
     bool upscaler_available()const{return upscaler_available_;}

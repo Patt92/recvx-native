@@ -3,9 +3,11 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-// Host-Praesentationsstufe (macOS): nimmt das fertige 640x480-Bild der Runtime (nach allen 2D-Zeichnern),
-// die 1/z-Tiefe und die Projektion des letzten Geometriepasses und zeigt es ueber die CAMetalLayer des
-// SDL-Fensters an. Stufen, jede einzeln in video.ini waehlbar (VideoSettings):
+// Host-Praesentationsstufe: nimmt das fertige 640x480-Bild der Runtime (nach allen 2D-Zeichnern), die
+// 1/z-Tiefe und die Projektion des letzten Geometriepasses und zeigt es im SDL-Fenster an. Zwei
+// Implementierungen derselben Schnittstelle, je Plattform eine:
+//   macOS: MetalFX ueber die CAMetalLayer des SDL-Fensters (metalfx_present.mm). Stufen, jede einzeln in
+//   video.ini waehlbar (VideoSettings):
 //   1. MetalFX-Upscaler: spatial (MTLFXSpatialScaler) oder temporal (MTLFXTemporalScaler mit Tiefe und
 //      Bewegungsvektoren). Bewegungsvektoren entstehen aus der Kamera-Reprojektion der Tiefe mit der
 //      Projektion des vorigen Bildes; 2D-Pixel (Bild nach dem Geometriepass != Endbild) gelten als
@@ -18,6 +20,8 @@
 //      nie im VSync (vier Praesentationen je Takt auf dem Hauptthread liessen Takte ausfallen).
 //   3. Post-Processing (eigener Metal-Kernel): kontrastadaptives Schaerfen oder CRT-Zeilenraster der
 //      480 Spielzeilen, zugleich die 4:3-Einpassung in das Fenster wie SDL_RenderSetLogicalSize.
+//   Windows: AMD FSR 4 ueber ein eigenes Direct3D-12-Geraet und eine DXGI-Swapchain auf dem HWND des
+//   SDL-Fensters (fsr_present_d3d12.cpp), gleiche Bewegungsvektoren und Post-Processing-Kette.
 // Plattformanpassung, keine Spiellogik: das 640x480-Bild, Takt, Eingaben und Ereignisse bleiben
 // unveraendert; Screenshots, Headless-Laeufe und der SDL-Kopierpfad lesen weiter dasselbe Bild.
 namespace recvx {
@@ -47,7 +51,7 @@ public:
     // (Fehler gemeldet), der Aufrufer praesentiert ueber SDL.
     virtual bool present(const PresentFrame& frame)=0;
     virtual std::string describe()const=0;     // aktive Kette, z. B. "MetalFX temporal 2x + spatial 2x, frame interpolation, sharpen"
-    virtual bool upscaler_supported()const=0;  // MetalFX-Skalierer auf diesem Geraet
+    virtual bool upscaler_supported()const=0;  // Skalierer dieser Stufe auf diesem Geraet (MetalFX bzw. FSR 4)
     virtual bool frame_generation_supported()const=0;
     virtual const PresentStats& stats()const=0;
 };
@@ -55,5 +59,12 @@ public:
 std::unique_ptr<MetalFxPresenter> create_metalfx_presenter(void* layer,std::string& reason);
 #if !defined(RECVX_HAVE_METALFX)
 inline std::unique_ptr<MetalFxPresenter> create_metalfx_presenter(void*,std::string& reason){reason="MetalFX presentation is built for macOS only";return nullptr;}
+#endif
+// Windows: FSR-4-Stufe (fsr_present_d3d12.cpp) auf dem HWND des SDL-Fensters; sdk_dir ist der Ordner der
+// AMD-ffx-api-DLLs (amd_fidelityfx_loader_dx12.dll bzw. amd_fidelityfx_dx12.dll, amd_fidelityfx_upscaler_dx12.dll,
+// Unterordner "FSR4 INT8" fuer das INT8-Modell). nullptr mit Begruendung ohne D3D12-Geraet oder DLLs.
+std::unique_ptr<MetalFxPresenter> create_fsr_presenter(void* hwnd,const std::string& sdk_dir,const VideoSettings& initial,std::string& reason);
+#if !defined(RECVX_HAVE_FSR)
+inline std::unique_ptr<MetalFxPresenter> create_fsr_presenter(void*,const std::string&,const VideoSettings&,std::string& reason){reason="FSR presentation is built for Windows only";return nullptr;}
 #endif
 }

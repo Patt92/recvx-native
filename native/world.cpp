@@ -6286,7 +6286,11 @@ bool RoomWorld::stand_player_motion(){
     // player.c:1114 schreibt nur 0x18000; die Giftbits 0x280000 bleiben unberuehrt
     // und kommen ueber stflg_owned aus dem Inventar (Synchronisation im Runtime).
     if(player_inventory_)io.stflg_owned=player_inventory_->player_stflg();else unbound_enemy_.insert("bhStandPlayerMotion: plp->stflg 0x280000 (Inventar) nicht gebunden");
-    io.mode_reset=[](void* u){static_cast<RoomWorld*>(u)->collision_mode_=1u;}; /* :1142 *(int*)&plp->mode0 = 1 */
+    /* :1142 *(int*)&plp->mode0 = 1: mode0 verlaesst 7 (bhCPM0_event), bhCPM0_action liest wieder das Pad. Der Host
+       fuehrt mode0 7 als player_scripted/player_event_ mit; ohne diese Freigabe blieb der Spieler nach Events, die nur
+       mit Player_controll 52 enden (z. B. RM_7100 Event 15), dauerhaft gesperrt. */
+    io.mode_reset=[](void* u){auto* w=static_cast<RoomWorld*>(u);w->collision_mode_=1u;w->player_scripted=false;w->player_frozen_=false;
+        w->player_smove_.active=false;w->player_event_.requested=false;w->turn_active_=false;};
     io.own_motion_bank=[](void* u){auto* w=static_cast<RoomWorld*>(u);w->player_room_motion_=false;w->player_enemy_motion_=false;}; /* :1154 plp->mnwP = plp->mnwPb */
     // :1156/:1158 bhSetMotion(plp,0,0,NULL)/bhCalcModel(plp): mtn_no/frm_no sind motion_/frame_ der Runtime; den
     // Knotenbaum rechnet der naechste Posenpass aus genau diesem Stand (kein Vorgriff auf einen Motionzustand).

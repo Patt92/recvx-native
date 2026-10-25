@@ -303,7 +303,7 @@ debug-menu action and a `video.ini` key:
 | `video.ini` key | Values | Stage |
 |---|---|---|
 | `frame_rate` | `30`, `60`, `120`, `unlimited` | Presentation cadence for every backend (SDL copy path and MetalFX stage): the game tick stays 30 Hz, between two ticks the last drawn frame is presented again, so 60/120 show duplicates (no new motion) unless frame generation supplies the intermediate image. 60/120 keep vsync and are clamped to the display refresh rate divided by 30; `unlimited` turns vsync off and presents continuously (higher GPU load). On the SDL copy path the repeats run on the main thread and a slot already missed is skipped, not caught up; the MetalFX stage repeats on its own thread. Frame generation needs at least two presents per tick and raises 30 to 60 by itself. |
-| `upscaler` | `off`, `metalfx-spatial`, `metalfx-temporal` | `MTLFXSpatialScaler` or `MTLFXTemporalScaler` from 640×480 to the 4:3 fit of the drawable (Retina: 2560×1920 for the 1280×960 window). Temporal is limited to the device's scale range (2× on current devices); a spatial pass covers the rest. |
+| `upscaler` | `off`, `metalfx-spatial`, `metalfx-temporal`, `fsr4`, `fsr4-int8` | macOS: `MTLFXSpatialScaler` or `MTLFXTemporalScaler` from 640×480 to the 4:3 fit of the drawable (Retina: 2560×1920 for the 1280×960 window). Temporal is limited to the device's scale range (2× on current devices); a spatial pass covers the rest. Windows: AMD FSR 4 with the FP8 or INT8 model through the ffx-api DLLs (see the FSR stage below); the MetalFX values read "(not available)" there and the FSR values on macOS. |
 | `frame_generation` | `off`, `metalfx` | `MTLFXFrameInterpolator` (macOS 26 or newer): one intermediate frame per game tick between the previous and the current image. The stage's own presentation thread runs the cadence: intermediate image in the first half of the tick, drawn image in the second half (`frame_rate` 60: two presents, 120: four), each present immediate with vsync through the layer. The main thread only hands over a copy of the frame and never blocks on vsync; a first version presented from the main thread, where four vsync waits per tick plus the draw pass exceeded the 33 ms tick and the game stuttered at 120, and before that `presentDrawable:afterMinimumDuration:` let the display lag behind the tick. The 2D layer (pixels the HUD, text, fades and menus changed after the geometry pass) is handed to the interpolator as its UI texture, so it is overlaid unwarped instead of blended with the moving background; moving actors without own motion vectors can still ghost. Presents are immediate (vsync through the layer); the earlier `presentDrawable:afterMinimumDuration:` scheduling let the display lag behind the tick and the loop stall. Resets on every cut. |
 | `sharpness` | `off`, `light`, `medium`, `strong` | Five-tap contrast-adaptive sharpening of the presented image (amount 0.3 / 0.6 / 1.0), independent of the CRT filter. |
 | `post_process` | `off`, `crt-light`, `crt-full` | Own compute kernels on the presented image in linear light, also doing the 4:3 letterboxing. Both modes: Gaussian beam profile per game line whose width grows with brightness (so the profile compensation reaches 1 at white and highlights are not clipped), mask compensated only by half, soft knee from 0.75. `crt-light`: wide beam, faint per-pixel channel mask, no bloom. `crt-full`: narrower beam, slot mask (phosphor triads, one to several output pixels per phosphor by output density, every second line group shifted half a triad), halation from a bright pass at quarter resolution with a separable blur, added before beam and mask and fading with the pixel's own brightness. A first version compensated beam and mask fully and added bloom on top, which overexposed bright areas (user report 2026-10-25). Old values `sharpen` and `crt` map to `sharpness = medium` and `crt-light`. |
@@ -348,46 +348,74 @@ not bundled by the packaging scripts, so a standalone macOS package needs the
 loader/MoltenVK supplied by the user or embedded separately. MoltenVK 1.4.2 is
 the validated macOS loader; Windows and Linux hardware are still unverified.
 
-### FSR 3.1 / FSR 4 (not integrated)
+### FSR presentation stage (Windows)
 
-AMD FidelityFX Super Resolution is not part of the current presentation stage.
-The Direct3D 12 raster backend above supplies the DirectX 12 device FSR needs;
-everything between that device and the window is still open:
+`native/fsr_present_d3d12.cpp` is the Windows counterpart of the MetalFX stage
+behind the same `MetalFxPresenter` interface: a Direct3D 12 device of its own, a
+DXGI flip-model swap chain (three buffers, tearing for `unlimited` when the
+system supports it) on the HWND of the SDL window, and the same presentation
+thread model (the main thread hands over a copy of the frame; the thread runs
+the `frame_rate` cadence with repeats). Like MetalFX it is independent of the
+raster backend. Chain per frame: upload of colour, scene image and 1/z →
+`motion_cs` (camera-reprojected motion vectors, inverted finite depth from the
+njClipZ near/far, reactive mask = pixels the 2D drawers changed) →
+`ffxDispatch` upscale → `present_cs` (sharpen, CRT, 4:3 fit, HLSL port of
+`present_k`) into the back buffer → `Present`.
 
-- FSR 4 is DirectX 12 only, on Windows 10/11, and uses ML upscaling on Radeon
-  RX 9000 series or newer. Other GPUs fall back to FSR 3.1.5, not to FSR 4.
-- FidelityFX SDK v2 currently lists Vulkan as unsupported; there is no Metal or
-  macOS backend for FSR 4.
-- FSR 3.1 supports DirectX 12 and Vulkan, but not Metal. The Windows default
-  renderer is Direct3D 11; D3D12 and Vulkan are optional backends. All backends
-  render offscreen and return the frame through SDL, so none has an FSR
-  swapchain/presentation stage yet.
+FSR comes exclusively from AMD's signed ffx-api DLLs. The repository vendors the
+MIT headers only (`native/third_party/FidelityFX-SDK/include`: `ffx_api.h`,
+`ffx_api_types.h`, `ffx_api_loader.h`, `ffx_upscale.h`, `dx12/ffx_api_dx12.h`,
+SDK 2.1.0, upscaler API 4.0.3); the DLLs are ignored by Git. At run time the
+stage loads `amd_fidelityfx_upscaler_dx12.dll` (FP8 model, or the INT8 build
+from the `FSR4 INT8` subfolder for `fsr4-int8`) and then the loader
+`amd_fidelityfx_loader_dx12.dll` (SDK 2.x) or `amd_fidelityfx_dx12.dll` (SDK 1.x
+name) from `RECVX_FSR_SDK`, the runtime's folder, `<runtime>/FidelityFX-SDK`,
+or `native/third_party/FidelityFX-SDK` of the development tree. The loader
+resolves the upscaler DLL by name, which is why the chosen model DLL is loaded
+by path first; switching FP8 ↔ INT8 therefore takes effect after a restart and
+the status line says so. Version selection: `ffxQuery GET_VERSIONS` lists the
+providers of the upscaler DLL (FSR 4, FSR 3.1.x, FSR 2.x); the stage creates
+the context with the first entry and falls back to the next when
+`ffxCreateContext` refuses (FSR 4 needs a GPU/driver with the ML path, e.g.
+Radeon RX 9000). The provider in use is reported through
+`FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION`.
 
-**TODO (FSR on the D3D12 backend), in order:**
+Context flags: `FFX_UPSCALE_ENABLE_DEPTH_INVERTED` and
+`FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE` (the 640×480 image is sRGB).
+Dispatch: `jitterOffset` 0 (no subpixel jitter: the 2D layer is drawn at
+integer positions), `motionVectorScale` 1 (vectors in render pixels, current →
+previous, FSR convention), `renderSize` 640×480, `upscaleSize` = 4:3 fit,
+`frameTimeDelta` from the game tick, `preExposure` 1, `reset` on every cut
+(`scene_key`), camera near/far/FOV from the pass projection. No exposure,
+transparency or composition textures. Debug/warning messages of the DLL go to
+stderr. The stage is built with `RECVX_ENABLE_FSR` (`build.sh --fsr off` to
+omit); the DLLs present in the development tree are copied next to the runtime
+by the build and into Windows packages with `FIDELITYFX-LICENSE.md`.
 
-1. A D3D12 presentation stage like `metalfx_present.h`: an `IDXGISwapChain` on
-   the SDL window's HWND, fed from the backend's device instead of the SDL copy,
-   with the same `frame_rate` cadence and 4:3 fit. The raster backend must then
-   keep its resolved frame on the GPU (today it reads it back for the 2D layer),
-   and the 640×480 2D layer has to be composed on the GPU as a UI texture.
-2. The FidelityFX SDK integration (MIT samples; FSR 4 ships as prebuilt signed
-   DLLs) as an optional build input, never a bundled requirement.
-3. Inputs FSR needs that the engine does not produce yet: per-object motion
-   vectors (the MetalFX stage only reprojects the camera, so moving enemies and
-   the player would smear), subpixel jitter of the 3D pass without shaking the
-   integer-positioned 2D layer, a reactive/transparency mask for effects and
-   the HUD, and history invalidation on every cut (room, camera, screen owner).
-4. Frame generation on top (FSR 3.1 frame interpolation needs ≥ 60 fps input;
-   the game tick is 30 Hz) with the presentation-thread model of the MetalFX
-   stage, then a `video.ini`/OPTION/debug-menu row only once 1–3 are validated.
-5. Validation on hardware and WARP: raster parity first
-   (`gpu_raster_d3d12_parity`), then image comparison of the upscaled output
-   against the 640×480 reference, per driver.
+**Open items (FSR on Windows):**
 
-FSR 3.1 could alternatively attach to the Vulkan backend on Windows/Linux with
-the same items 1–5 (a Vulkan swapchain instead of DXGI). Until then there is no
-`fsr` value in `video.ini`, no menu row and no silent substitution by a
-different filter: the gap is deliberate, not a missing toggle.
+1. Validation on hardware: the stage is cross-built and the API use follows the
+   SDK 2.1.0 headers and the FSR 4 integration guide, but it has not run on a
+   Windows GPU yet (image, reset behaviour on cuts, FP8 vs INT8, FSR-3.1
+   fallback on non-RDNA4 GPUs, tearing path).
+2. Per-object motion vectors: the engine only reprojects the camera, so moving
+   characters and effects are treated as static scenery; smearing on fast
+   motion is expected until the renderer exports object motion.
+3. Subpixel jitter for the 3D pass (FSR's intended TAA input) without shaking
+   the integer-positioned 2D layer — needs a split render of 3D and 2D.
+4. Frame generation (`amd_fidelityfx_framegeneration_dx12.dll`, FSR 3.1/4
+   frame interpolation with its own swap chain): FSR expects ≥ 60 fps input at
+   30 Hz game tick, and the 2D layer must go in as a UI composition texture.
+   Not offered yet; `frame_generation = metalfx` stays macOS-only.
+5. Mipmap bias for the texture filters at render resolution (the guide
+   recommends `log2(640/fit) − 1`), only meaningful once 3 exists.
+
+**Vulkan (Linux, macOS over MoltenVK): TODO.** FSR 3.1 supports Vulkan, FSR 4
+does not. The SDK's Vulkan path (`ffx_api_vk.h` plus the FSR 3.1 upscaler
+sources and SPIR-V) is not part of this checkout; once it is, the same stage
+design applies with a Vulkan swap chain on the SDL window and the Vulkan raster
+backend's device. OpenGL has no FSR path (no SDK backend, no SDL GL/Vulkan
+interop). On macOS, MetalFX remains the supported upscaler.
 
 ## Diagnostics
 

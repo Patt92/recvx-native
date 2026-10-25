@@ -82,7 +82,8 @@ A shared **frame-rate** setting (`30`, `60`, `120`, `unlimited`) sets the
 presentation cadence for every backend while the game tick stays at the
 original 30 Hz; without frame generation, repeated presents show the same
 frame. The full setting reference is in
-[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos).
+[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos)
+and [its Windows counterpart](docs/NATIVE_PORT.md#fsr-presentation-stage-windows).
 
 ### MetalFX (macOS)
 
@@ -104,32 +105,38 @@ via MoltenVK, OpenGL, software). Needs macOS 13 or newer with Metal.
   (scanlines, or a slot mask with bloom in linear light), including the 4:3
   fit into the window.
 
-### AMD FSR 3.1 / FSR 4 — not integrated yet
+### AMD FSR 4 (Windows)
 
-FSR 3.1 and FSR 4 ship only inside the AMD FidelityFX SDK (FSR 3.1 as source
-and prebuilt libraries, FSR 4 as prebuilt signed DLLs). The SDK is not part
-of this repository and is treated as an optional external build input: without
-it the rows read "(not available)". Per-object motion vectors, subpixel jitter
-and a reactive mask for the 2D layer are inputs the engine does not produce
-yet; the open items are listed in
-[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#fsr-31--fsr-4-not-integrated).
+Presents through a DXGI flip swap chain on the SDL window's HWND from a
+Direct3D 12 device of its own, so it works on top of every Windows raster
+backend (Direct3D 11 default, Direct3D 12, Vulkan, software). FSR itself comes
+only from AMD's signed ffx-api DLLs; the repository ships the MIT ffx-api
+headers (`native/third_party/FidelityFX-SDK/include`), never the DLLs. Without
+the DLLs next to the runtime (or in `RECVX_FSR_SDK`) the rows read "(not
+available)" and the plain SDL copy presents.
 
-- **Upscaler** — planned per backend:
-  - *Windows, Direct3D 12 backend*: FSR 4 (ML upscaling on Radeon RX 9000 or
-    newer, Windows 10/11, DirectX 12 only) with the FSR 3.1.5 fallback on other
-    GPUs. The optional `--renderer d3d12` backend already provides the device;
-    the presentation stage on it is the open part.
-  - *Linux, Vulkan backend*: FSR 3.1 (DirectX 12 and Vulkan are its supported
-    APIs). FSR 4 has no Vulkan backend.
-  - *macOS, Vulkan backend (MoltenVK)*: FSR 3.1 through the Vulkan backend.
-    AMD does not support this configuration; it has to be proven here and is
-    not a replacement for MetalFX.
-  - *OpenGL*: the SDK has no OpenGL backend and SDL offers no GL/Vulkan
-    interop; FSR stays unavailable on OpenGL.
-- **Frame generation** — FSR 3.1 frame interpolation on the same backends as
-  its upscaler. It expects at least 60 fps of input; the game tick is 30 Hz, so
-  it needs the presentation-thread model of the MetalFX stage. FSR 4 frame
-  generation is DirectX 12 only. Neither is wired in yet.
+- **Upscaler** — `fsr4` (FP8 model) or `fsr4-int8` (INT8 model, for GPUs
+  without FP8 matrix support), from 640×480 to the window's 4:3 fit. FSR 4 ML
+  upscaling needs Windows 10/11 and a Radeon RX 9000 or newer (or a driver that
+  exposes it); on other GPUs the same upscaler DLL falls back to FSR 3.1.x,
+  which the status line reports. Inputs are the finished frame in sRGB
+  (`FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE`), inverted finite depth from the
+  original near/far clip, camera-reprojected motion vectors (the same as the
+  MetalFX stage) and a reactive mask that excludes the 2D layer from history.
+  No subpixel jitter and no per-object motion vectors yet: the engine does not
+  produce them, moving characters are reprojected as part of the camera.
+- **Frame generation** — not wired in yet. `amd_fidelityfx_framegeneration_dx12.dll`
+  (FSR 3.1/4 frame interpolation and swap chain) is loaded by the same loader,
+  but frame interpolation expects ≥ 60 fps of input while the game tick is
+  30 Hz; it needs the presentation-thread cadence of the MetalFX stage and a
+  UI composition path before it can be offered.
+- **Post-processing** — the same sharpening and CRT chain as the MetalFX
+  stage, ported to HLSL compute.
+
+Linux and macOS: FSR 3.1 through the Vulkan backend stays a TODO (the SDK's
+Vulkan sources are not part of this checkout; see
+[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#fsr-presentation-stage-windows)).
+OpenGL has no FSR path (no SDK backend, no SDL GL/Vulkan interop).
 
 ## Console foundations, rewritten for the host
 
@@ -256,6 +263,13 @@ Install:
   Select it with `--renderer d3d12`, `renderer = d3d12` in `video.ini` or the
   debug menu; `RECVX_D3D12_DRIVER=warp` runs it on Microsoft's WARP software
   device, `RECVX_D3D12_DEBUG=1` enables the D3D12 debug layer.
+- **Optional FSR 4 presentation stage:** built by default from the vendored
+  ffx-api headers (`--fsr off` / `-DRECVX_ENABLE_FSR=OFF` omits it). At run
+  time it loads AMD's signed `amd_fidelityfx_loader_dx12.dll` (or the SDK-1.x
+  name `amd_fidelityfx_dx12.dll`) and `amd_fidelityfx_upscaler_dx12.dll` from
+  the runtime's folder, `RECVX_FSR_SDK`, or `native/third_party/FidelityFX-SDK`
+  in the development tree; the INT8 model is the same upscaler DLL in a
+  `FSR4 INT8` subfolder. The DLLs are not part of the repository.
 - **FFmpeg and ffprobe** for `--iso`: either install them on `PATH`, or place
   the Windows executables directly in the repository's `build-tools/` folder:
 

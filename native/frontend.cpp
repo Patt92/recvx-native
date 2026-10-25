@@ -251,7 +251,7 @@ void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
         else if(i==third_person_row){label="3rd-person camera (mod)";value=third_person?third_person->describe()+"  left/right":"Not available";}
         else if(i==video_row){label="Render quality";value=video?video->describe()+"  left/right":"Not available";}
         else if(i==frame_rate_row){label="Frame rate";value=video?video->settings().describe_frame_rate()+"  left/right":"Not available";}
-        else if(i==upscaler_row){label="Upscaling (MetalFX)";value=video?video->describe_upscaler()+"  left/right":"Not available";}
+        else if(i==upscaler_row){label="Upscaling";value=video?video->describe_upscaler()+"  left/right":"Not available";}
         else if(i==frame_generation_row){label="Frame generation";value=video?video->describe_frame_generation()+"  left/right":"Not available";}
         else if(i==sharpness_row){label="Sharpening";value=video?video->describe_sharpness()+"  left/right":"Not available";}
         else if(i==post_process_row){label="CRT filter";value=video?video->describe_post_process()+"  left/right":"Not available";}

@@ -70,6 +70,15 @@ def main():
         shutil.copy2(source, output / source.name)
         shutil.copy2(build / "SDL2.dll", output / "SDL2.dll")
         shutil.copy2(build / "recvx-native.exe", output / "recvx-native.exe")
+        # AMD FidelityFX (FSR 4) ffx-api DLLs: optional external input, copied when the build has them.
+        fsr_dlls = [name for name in ("amd_fidelityfx_loader_dx12.dll", "amd_fidelityfx_dx12.dll", "amd_fidelityfx_upscaler_dx12.dll", "amd_fidelityfx_framegeneration_dx12.dll") if (build / name).is_file()]
+        for name in fsr_dlls:
+            shutil.copy2(build / name, output / name)
+        if (build / "FSR4 INT8/amd_fidelityfx_upscaler_dx12.dll").is_file():
+            (output / "FSR4 INT8").mkdir()
+            shutil.copy2(build / "FSR4 INT8/amd_fidelityfx_upscaler_dx12.dll", output / "FSR4 INT8/amd_fidelityfx_upscaler_dx12.dll")
+        if fsr_dlls:
+            shutil.copy2(ROOT / "native/third_party/FidelityFX-SDK/LICENSE.md", output / "FIDELITYFX-LICENSE.md")
         zig = next((ROOT / "build/toolchains").glob("zig-*-0.16.0"), None)
         if zig:
             shutil.copy2(zig / "lib/libcxx/LICENSE.TXT", output / "LLVM-LICENSE.txt")

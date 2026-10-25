@@ -230,9 +230,16 @@ Räume 100 % (Punkt), Runtime-Bild == Metal. Windows/Linux-Hardware offen, keine
 **Direct3D 12 (2026-10-25, Arbeitsbaum):** optionales Windows-Backend, gleiches HLSL wie D3D11
 (`native/gpu_raster_hlsl.h`), ROV, UAV-Barriere je Zeichenaufruf, Zaun vor dem Rücklesen;
 `--renderer d3d12`/INI/Debugwahl, `RECVX_D3D12_DRIVER=warp`. Crossbuild x64 geprüft, **Parität auf
-Windows-Hardware/WARP offen** (`gpu_raster_d3d12_parity`). Zweck: D3D12-Gerät für FSR; die
-FSR-Präsentationsstufe ist als TODO in [NATIVE_PORT](docs/NATIVE_PORT.md#fsr-31--fsr-4-not-integrated)
-festgehalten. [Bericht](work/d3d12_raster_backend.result.md).
+Windows-Hardware/WARP offen** (`gpu_raster_d3d12_parity`). [Bericht](work/d3d12_raster_backend.result.md).
+
+**FSR 4 (2026-10-25, Arbeitsbaum):** Windows-Präsentationsstufe `native/fsr_present_d3d12.cpp` hinter
+der MetalFX-Schnittstelle: eigenes D3D12-Gerät, DXGI-Flip-Swapchain auf dem SDL-HWND, Kamera-
+Bewegungsvektoren, Reaktivmaske der 2D-Ebene, FSR 4 FP8/INT8 (`upscaler = fsr4|fsr4-int8`) mit
+FSR-3.1-Fallback des Upscaler-Providers, Schärfen/CRT als HLSL-Port. ffx-api-Header (MIT, SDK 2.1.0)
+unter `native/third_party/FidelityFX-SDK/include`, DLLs nie im Repo. Crossbuild x64 und macOS-Tests
+grün; **auf Windows-GPU nicht gelaufen**. Offen: Objekt-Bewegungsvektoren, Jitter, Frame Generation,
+Vulkan (Linux/macOS). Details [NATIVE_PORT](docs/NATIVE_PORT.md#fsr-presentation-stage-windows),
+[Bericht](work/fsr_present_d3d12.result.md).
 
 **Kartenbild:** MAP zeichnet MRY-Geometrie, Marker und Sprites in der eigenen
 Build-Runtime; Fade-Rückweg und Wiedereintritt gezielt geprüft. Constant-Material-
