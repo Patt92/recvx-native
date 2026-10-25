@@ -233,6 +233,36 @@ time (`vulkan-1.dll`, `libvulkan.so.1`, or the Vulkan loader/MoltenVK on macOS;
 keeps MoltenVK on Metal safe math. All instances share one device and draw one
 frame at a time.
 
+### MetalFX presentation stage (macOS)
+
+`native/metalfx_present.h` presents the finished 640×480 frame through the
+CAMetalLayer of the SDL window instead of the SDL texture copy. It is a host
+display feature: the 640×480 image, the 30 Hz tick, inputs and events are
+unchanged, screenshots and headless runs read the same image. Each stage is a
+row in the settings screen (OPTION), a debug-menu action and a `video.ini` key:
+
+| `video.ini` key | Values | Stage |
+|---|---|---|
+| `frame_rate` | `30`, `60`, `120`, `unlimited` | Presentation cadence for every backend (SDL copy path and MetalFX stage): the game tick stays 30 Hz, between two ticks the last drawn frame is presented again, so 60/120 show duplicates (no new motion) unless frame generation supplies the intermediate image. 60/120 keep vsync and are clamped to the display refresh rate divided by 30; `unlimited` turns vsync off and presents continuously (busy loop, higher CPU/GPU load). Frame generation needs at least two presents per tick and raises 30 to 60 by itself. |
+| `upscaler` | `off`, `metalfx-spatial`, `metalfx-temporal` | `MTLFXSpatialScaler` or `MTLFXTemporalScaler` from 640×480 to the 4:3 fit of the drawable (Retina: 2560×1920 for the 1280×960 window). Temporal is limited to the device's scale range (2× on current devices); a spatial pass covers the rest. |
+| `frame_generation` | `off`, `metalfx` | `MTLFXFrameInterpolator` (macOS 26 or newer): one intermediate frame per game tick between the previous and the current image. The runtime's cadence shows the intermediate image in the first half of the tick and the drawn image in the second half (`frame_rate` 60: two presents, 120: four). Presents are immediate (vsync through the layer); the earlier `presentDrawable:afterMinimumDuration:` scheduling let the display lag behind the tick and the loop stall. Resets on every cut. |
+| `post_process` | `off`, `sharpen`, `crt` | Own compute kernel on the presented image: five-tap contrast-adaptive sharpening, or sharpening plus the 480 game scanlines and a subtle aperture mask. Also does the 4:3 letterboxing. |
+
+Temporal scaling and frame interpolation read the 1/z depth of the geometry
+pass and motion vectors from the camera reprojection of that depth with the
+projection of the previous frame (view matrix and focal lengths recorded by the
+renderer). Pixels that 2D drawers changed after the geometry pass (HUD, fades,
+menus, text) are treated as unmoving foreground. Objects that move relative to
+the camera carry no own motion vectors, so a moving actor can ghost in temporal
+mode; spatial mode is the robust choice. No sub-pixel jitter is applied: the
+2D layer is drawn at integer 640×480 positions and would shake against a
+jittered 3D pass. A cut (room, camera cut, event camera key, screen owner such
+as menu, map, terminal, movie, door transition) discards the MetalFX history,
+so no intermediate frame is generated across a cut. Unavailable stages show
+"(not available)" in the settings screen and the runtime falls back to the SDL
+copy; errors in the stage disable it for the run with a message on stderr.
+The MetalFX framework is weak-linked; macOS 13 is needed for the scalers.
+
 Optional supersampling and host texture filters are set in `video.ini`. The
 existing CPU/GPU filter differences have not been shown bit-identical. Point
 sampling must preserve color including alpha and depth bit for bit. Linux and

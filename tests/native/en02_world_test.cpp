@@ -39,6 +39,27 @@ static const WorldEntity& ent(const RECVX_ENEMY_WORK* w){return *static_cast<con
 int main(int argc,char** argv){try{
     check(argc==2,"data required");_Make_SinTable();const std::filesystem::path data=argv[1];
     {
+        // Diagnostic knockdown work: bhControlPlayer's bhSetMotion must remain
+        // the draw owner while EN02 controls mode0 4, including interpolation.
+        Fixture f(data);RECVX_ENEMY_PLAYER p{};
+        check(f.world.enemy_player_get(p),"player work missing");
+        p.mode0=4;p.mode1=0;p.mode2=0;p.mode3=1;
+        check(f.world.enemy_player_set(p),"knockdown work rejected");
+        f.world.player_set_motion_pose(42,0,0u,3u,32768);
+        const auto edits=f.world.player_pose_edits();
+        check(edits.size()==f.player.bones(),"enemy-controlled player discards bhSetMotion pose");
+        const auto pose=f.world.player_local_pose();
+        for(unsigned i=0;i<pose.size();++i){
+            check(edits.at(i).angles&&*edits.at(i).angles==pose[i].angles,"enemy-controlled local pose differs from draw owner");
+        }
+        // Returning mode0 to action must not drop or replace the last objP.
+        check(f.world.enemy_player_get(p),"knockdown readback missing");
+        p.mode0=1;p.mode1=p.mode2=p.mode3=0;
+        check(f.world.enemy_player_set(p),"release work rejected");
+        const auto released=f.world.player_local_pose();
+        for(unsigned i=0;i<pose.size();++i)check(released[i].angles==pose[i].angles,"release replaced last computed pose");
+    }
+    {
         // bhEne02_Init (en02.c:747): Kinder, Morphquellen, mobiler ATR-Eintrag, Startzustand.
         Fixture f(data);f.tick();auto& e=f.worm();
         check(e.exp0&&e.mode0==1&&e.mode2==0,"bhEne02_Init: mode0 1 / mode2 0");

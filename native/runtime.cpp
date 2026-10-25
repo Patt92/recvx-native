@@ -32,6 +32,7 @@
 #include "vibration.h"
 #include "frontend.h"
 #include "window_presentation.h"
+#include "metalfx_present.h"
 #include "debug_menu.h"
 #include "doors.h"
 #include "back_color.h"
@@ -1084,6 +1085,10 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"snapshot_save","Snapshot speichern","OK: Spielstand an dieser Position sichern; ohne Schreibmaschine, Farbband und Speicherzaehler.",snapshot_slots,[]{return 0;},[&](unsigned slot){return save_snapshot(slot);}});
         debug.add({"snapshot_load","Snapshot laden","OK: Raum mit gesichertem Fortschritt an der gesicherten Position neu laden.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
         debug.add({"video","Grafikqualitaet","OK: Host-Renderqualitaet; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Niedrig"},{2,"Hoch"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Grafik: "+video.describe();}});
+        debug.add({"framerate","Bildrate","OK: Praesentationen je Spieltakt (Takt bleibt 30 Hz); unlimited ohne VSync; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"30 (Spieltakt)"},{1,"60"},{2,"120"},{3,"Unbegrenzt (kein VSync)"}};},[&]{return unsigned(video.settings().frame_rate);},[&](unsigned value){video.set_frame_rate(recvx::FrameRate(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Bildrate: "+video.settings().describe_frame_rate();}});
+        debug.add({"upscaler","Upscaler","OK: MetalFX-Upscaler des Endbilds (macOS); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX spatial"},{2,"MetalFX temporal"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
+        debug.add({"framegen","Frame-Generation","OK: Zwischenbild je Spieltakt (macOS 26+); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX frame interpolation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame-Generation: "+video.describe_frame_generation();}});
+        debug.add({"postfx","Post-Processing","OK: Schaerfen oder CRT-Zeilenraster der Anzeige (macOS); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"Sharpen"},{2,"CRT"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Post-Processing: "+video.describe_post_process();}});
         debug.add({"renderer","Rasterer","OK: Plattform-GPU, Software, OpenGL oder Vulkan; Auswahl wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (Plattform)"},{1,"Software"},{2,"OpenGL"},{3,"Vulkan"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
             const auto backend=value==3?recvx::RenderBackend::Vulkan:value==2?recvx::RenderBackend::OpenGL:value==1?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
             if(!apply_renderer)return std::string("Rasterer: noch nicht bereit");
@@ -1700,6 +1705,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             follow();
         };
         recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);image.set_render_threads(args.render_threads);
+        std::unique_ptr<recvx::MetalFxPresenter> presenter; // Host-Praesentationsstufe (metalfx_present.h), erst mit dem Fenster erzeugt
+        std::function<void(bool)> apply_vsync; // SDL_RenderSetVSync des Fensters (frame_rate unlimited = aus), erst mit dem Fenster gesetzt
         // Host-GPU-Rasterer (gpu_raster.h) fuer das Hauptbild; Headless-Pruefungen bleiben ohne --renderer gpu in Software.
         {// Backend je Auswahl beim ersten Bedarf erzeugen, getrennte Geraete-/Kontextbesitzer.
          struct Backends {std::array<std::shared_ptr<recvx::GpuRaster>,3> gpu;std::array<std::string,3> reason;std::array<bool,3> tried{};};
@@ -1781,7 +1788,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(mode0!=1u||(mode2>=14u&&mode2<=22u)||stairs.active||world->pushing()||world->turning())return false;
             return true;};
         auto third_person_tick=[&](){third_person.tick(actor,{third_person_free(),combat.aiming()},world.get()); /* Diagnose only: actual host-mod view after its tick, distinct from original CAM_WORK. */if(std::getenv("RECVX_CAM_TRACE")){const auto p=view_camera();std::fprintf(stderr,"CAMOUTPUT room=%s third_active=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",rooms.name(room_index).c_str(),int(third_person.active()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}};
-        frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());if(apply_renderer)apply_renderer(settings.renderer);};
+        frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());if(apply_renderer)apply_renderer(settings.renderer);if(presenter)presenter->configure(settings);if(apply_vsync)apply_vsync(settings.vsync());};
         bool pause_active=false;
         /* bhSysCallEvent (system.c:668) sperrt Pause mit st_flg 0x1C040208 (0x4 Cinematic, 0x40000 Kartentask)
            UND verlangt (ts_flg & 0x3DE00) == 0x3DE00. Darin steckt Bit 15 (0x8000): solange die
@@ -1905,11 +1912,18 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"nearest");
         sdl_check(recvx::configure_window_presentation(renderer.get())==0);
         std::unique_ptr<SDL_Texture,decltype(&SDL_DestroyTexture)> texture(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480),SDL_DestroyTexture);sdl_check(bool(texture));
+        {// Praesentationsstufe auf der CAMetalLayer des SDL-Fensters (macOS); sonst bleibt der SDL-Kopierpfad.
+         std::string reason;void* layer=SDL_RenderGetMetalLayer(renderer.get());if(!layer)reason="SDL renderer is not Metal";
+         presenter=layer?recvx::create_metalfx_presenter(layer,reason):nullptr;
+         video.set_availability(bool(presenter),presenter&&presenter->upscaler_supported(),presenter&&presenter->frame_generation_supported());
+         apply_vsync=[&](bool on){if(SDL_RenderSetVSync(renderer.get(),on?1:0)!=0)std::cerr<<"VSync setting ignored: "<<SDL_GetError()<<'\n';};apply_vsync(video.settings().vsync());
+         if(presenter){presenter->configure(video.settings());std::cout<<"Presentation: MetalFX stage available"<<(presenter->upscaler_supported()?"":", no MetalFX upscaling on this device")<<(presenter->frame_generation_supported()?"":", no frame interpolation on this device/OS")<<'\n';}
+         else std::cout<<"Presentation: SDL copy ("<<reason<<")\n";}
         SDL_AudioSpec requested{},obtained{};requested.freq=48000;requested.format=AUDIO_S16SYS;requested.channels=2;requested.samples=1024;
         audio_device=SDL_OpenAudioDevice(nullptr,0,&requested,&obtained,0);if(!audio_device)std::cerr<<"Audio output unavailable: "<<SDL_GetError()<<'\n';else SDL_PauseAudioDevice(audio_device,0);
         const double startup_cpu=process_cpu_seconds();const auto startup_wall=std::chrono::steady_clock::now();
         std::optional<SDL_Event> stashed;unsigned events_handled=0,waits=0,immediate_waits=0;double draw_seconds=0;
-        bool running=true,paused=false;bool render_dirty=true;unsigned presented_frames=0;std::string window_title;unsigned rendered_frames=0;int frame=0;unsigned input_tick=0;double accumulator=0;auto previous=std::chrono::steady_clock::now();
+        bool running=true,paused=false;bool render_dirty=true;unsigned presented_frames=0,presented_tick=0,represented_frames=0;int slot_index=0;bool shown_by_presenter=false;std::string window_title;unsigned rendered_frames=0;int frame=0;unsigned input_tick=0;double accumulator=0;auto previous=std::chrono::steady_clock::now();
         while(running){
             // Ein beim Warten entnommenes Ereignis wird direkt verarbeitet, nicht zurueckgereiht.
             for(;;){
@@ -2031,24 +2045,54 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             // stehen. Erneut praesentieren und den Fenstertitel neu setzen waere je Display-Takt
             // (120 Hz) doppelte Arbeit am selben Bild und weckte den Prozess unnoetig.
             bool presented=false;
-            if(render_dirty){const auto draw_begin=std::chrono::steady_clock::now();draw(input_tick,devices.controllers());draw_seconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-draw_begin).count();++rendered_frames;render_dirty=false;
-            sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);presented=true;}
+            if(render_dirty){const auto draw_begin=std::chrono::steady_clock::now();image.begin_presented_frame();draw(input_tick,devices.controllers());draw_seconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-draw_begin).count();++rendered_frames;render_dirty=false;presented=true;}
+            // Praesentationskadenz (video.ini frame_rate): der Spieltakt bleibt 30 Hz; zwischen zwei Takten wird das
+            // zuletzt gezeichnete Bild erneut praesentiert (Frame-Interpolation: Zwischenbild in der ersten Takthaelfte).
+            // Mehr Praesentationen je Takt als Bildwiederholungen des Monitors blockierten im VSync die Schleife (Takte
+            // fielen aus), deshalb auf die Monitorrate geklammert; Unlimited laeuft ohne VSync fortlaufend.
+            const int slots=[&]{int n=video.settings().presents_per_tick();if(n>1){SDL_DisplayMode mode{};if(SDL_GetWindowDisplayMode(window.get(),&mode)==0&&mode.refresh_rate>0)n=std::clamp(mode.refresh_rate/int(recvx::game_tick_hz),1,n);}return n;}();
+            const bool interpolating=presenter&&shown_by_presenter&&video.settings().frame_generation!=recvx::FrameGeneration::Off&&slots!=1;
+            bool shown_this_pass=presented;
             if(presented){
-                sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());++presented_frames;
+                bool shown=false;slot_index=0;
+                if(presenter&&video.settings().presentation()){
+                    // Schnittschluessel: Raum, Kameraschnitt, Ereigniskamera und Bildschirmbesitzer; jede Aenderung verwirft die
+                    // MetalFX-Historie (kein Zwischenbild ueber einen Schnitt). Kamerafahrten desselben Schnitts laufen weiter.
+                    unsigned key=2166136261u;const auto mix=[&](unsigned v){key=(key^v)*16777619u;}; /* FNV-1a ueber die Schnittfelder */
+                    mix(unsigned(room_index));mix(unsigned(camera_index));mix((frontend.active()?1u:0u)|(menu.active?2u:0u)|(map_active?4u:0u)|(computer.active()?8u:0u)|(movie.active()?16u:0u)|(game_over.active()?32u:0u)|(door_task_mode>=0?64u:0u)|(third_person.active()?128u:0u));
+                    if(world){mix(world->event_camera?1u:0u);mix(world->event_camera_index);mix(world->event_camera_key());}
+                    recvx::PresentFrame pf;pf.pixels=image.pixels().data();pf.depth=image.depth().data();
+                    const auto& projection=image.last_projection();pf.scene=projection.valid?image.scene_pixels().data():nullptr;
+                    pf.projection.valid=projection.valid;std::copy_n(projection.view,16,pf.projection.view);pf.projection.focal_x=projection.focal_x;pf.projection.focal_y=projection.focal_y;pf.projection.near=projection.near;pf.projection.far=projection.far;
+                    pf.scene_key=key;pf.delta_seconds=double(std::max(1u,input_tick-presented_tick))*recvx::game_tick_seconds;
+                    shown=presenter->present(pf,slots!=1);}
+                presented_tick=input_tick;shown_by_presenter=shown;
+                if(!shown){sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);
+                sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());}++presented_frames;
                 const std::string title=frontend.active()?"Resident Evil CODE: Veronica X | Title":"RECVX native | "+rooms.name(room_index)+" | Camera "+std::to_string(camera_index+1)+(player?" | Motion "+std::to_string(motion):"")+(ui?" | Native development":" | Preview");
                 if(title!=window_title){SDL_SetWindowTitle(window.get(),title.c_str());window_title=title;}}
+            else if(rendered_frames&&!paused&&(slots==0||(slots>1&&slot_index+1<slots&&accumulator>=double(slot_index+1)*recvx::game_tick_seconds/slots))){
+                // Wiederholte Praesentation desselben Bildes im naechsten Zeitfenster des Takts; mit Frame-Interpolation
+                // zeigt die erste Takthaelfte das Zwischenbild, die zweite das gezeichnete Bild.
+                if(slots>0)++slot_index;
+                const bool interpolated=interpolating&&(slots>0?slot_index*2<slots:accumulator*2<recvx::game_tick_seconds);
+                bool shown=false;if(shown_by_presenter)shown=presenter->represent(interpolated);
+                if(!shown){sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());}
+                ++presented_frames;++represented_frames;shown_this_pass=true;}
             ++frame;if(args.frames&&frame>=args.frames)running=false;
-            // Statt jeden Millisekunden zu pollen: auf Eingabe oder den naechsten Takt warten. Das
-            // Ereignis wird zurueckgereiht und im naechsten Durchlauf mit allen anderen verarbeitet.
-            if(!presented&&running){
-                const double remaining=paused?0.1:std::max(0.001,recvx::game_tick_seconds-accumulator);
+            // Statt jeden Millisekunden zu pollen: auf Eingabe, den naechsten Takt oder das naechste
+            // Praesentationsfenster warten. Das Ereignis wird zurueckgereiht und im naechsten Durchlauf mit
+            // allen anderen verarbeitet. Unlimited wartet nicht (fortlaufende Praesentation).
+            if(!shown_this_pass&&running&&slots!=0){
+                double remaining=paused?0.1:std::max(0.001,recvx::game_tick_seconds-accumulator);
+                if(!paused&&slots>1&&slot_index+1<slots)remaining=std::max(0.001,std::min(remaining,double(slot_index+1)*recvx::game_tick_seconds/slots-accumulator));
                 SDL_Event pending{};const auto wait_start=std::chrono::steady_clock::now();++waits;
                 if(SDL_WaitEventTimeout(&pending,int(std::ceil(remaining*1000.0)))==1){stashed=pending;
                     if(std::chrono::duration<double>(std::chrono::steady_clock::now()-wait_start).count()<0.0005)++immediate_waits;}}
         }
         if(!args.screenshot.empty())image.save_bmp(args.screenshot);
                 const double cpu_used=process_cpu_seconds()-startup_cpu,wall_used=std::chrono::duration<double>(std::chrono::steady_clock::now()-startup_wall).count();
-        std::cout<<"Presentation: "<<presented_frames<<" presents, "<<rendered_frames<<" renders, "<<input_tick<<" simulation ticks, "<<frame<<" loop passes, "
+        std::cout<<"Presentation: "<<presented_frames<<" presents ("<<represented_frames<<" repeated), "<<rendered_frames<<" renders, "<<input_tick<<" simulation ticks, "<<frame<<" loop passes, "
                  <<cpu_used<<" s cpu over "<<wall_used<<" s ("<<(wall_used>0?100.0*cpu_used/wall_used:0)<<" % of one core), "
                  <<events_handled<<" events, "<<waits<<" waits ("<<immediate_waits<<" immediate)\n";
         {const auto& t=image.timings();const double frames=std::max(1.0,double(rendered_frames));
@@ -2056,7 +2100,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                   <<", bands "<<1000.0*t.bands/frames<<", shadow "<<1000.0*t.shadow/frames<<", lines "<<1000.0*t.lines/frames<<" ms/frame\n";}
         if(image.gpu()){const auto& g=image.gpu()->timings();const double frames=std::max(1.0,double(rendered_frames));
          std::cout<<"GPU: build "<<1000.0*g.build/frames<<", upload "<<1000.0*g.upload/frames<<" ("<<g.uploads<<" textures), encode "<<1000.0*g.encode/frames
-                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
+                  <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(presenter){const auto& p=presenter->stats();std::cout<<"MetalFX presentation: "<<presenter->describe()<<"; "<<p.presents<<" presents ("<<p.repeated<<" repeated), "<<p.interpolated<<" interpolated, "<<p.resets<<" history resets, "<<p.skipped<<" skipped, GPU "<<(p.presents?1000.0*p.gpu_seconds/p.presents:0)<<" ms/frame\n";}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
     }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';return 1;}
 }
 int main(int argc,char** argv){

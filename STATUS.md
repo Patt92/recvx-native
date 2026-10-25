@@ -21,6 +21,20 @@ aktuellem Code, Arbeitsbaum und installierter Runtime abgleichen.
 
 ## Arbeitsbaum und Auslieferung
 
+**MetalFX-Praesentationsstufe (2026-10-25, Arbeitsbaum):** `native/metalfx_present.mm` zeigt das fertige
+640x480-Bild ueber die CAMetalLayer des SDL-Fensters: MetalFX spatial/temporal Upscaler, Frame-Interpolation
+(macOS 26+, Zwischenbild je Spieltakt), Post-Processing (Sharpen/CRT); drei neue Zeilen im Einstellungsbildschirm,
+Debugmenue-Aktionen und `video.ini`-Schluessel (`upscaler`, `frame_generation`, `post_process`, Standard aus).
+Bewegungsvektoren aus Kamera-Reprojektion der Tiefe, 2D-Pixel als unbewegter Vordergrund, kein Jitter; bewegte
+Akteure ohne eigene Vektoren (dokumentierte Grenze). Nutzerbefund 2026-10-25 (M4 Pro, macOS 27): Stufe laeuft,
+Frame-Interpolation fiel nach etwa einer Minute stufenweise von 60 auf unter 30 Bilder (Metal-Praesentationszeiten
+per afterMinimumDuration liefen nach, nextDrawable blockierte die Schleife). Umbau: sofortige Praesentation, Kadenz in
+der Hauptschleife (`video.ini frame_rate` 30/60/120/unlimited fuer alle Backends, Takt bleibt 30 Hz, Zwischenbild in
+der ersten Takthaelfte), Debugmenue-Namen auf die Wertspalte gekuerzt. GPU-Pfad in der Sandbox **nicht** ausfuehrbar
+(kein Metal-Geraet), nur gebaut und per Einstellungstests belegt. Nutzerpruefung 2026-10-25 mit eigenem Build
+(M4 Pro, macOS 27): Upscaler, Frame-Interpolation (stabil bei 60 Bildern) und Post-Processing laufen anstandslos.
+[Doku](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos). **Kein Commit.**
+
 **bhEffTypeSet 0xAD (2026-10-22, Arbeitsbaum):** `world.cpp` schreibt `op->type = v1` wie event.c:7345 ohne
 Rueckfrage, auch auf Texturhaltern (id 30..99, bhEffDmy) und unportierten Kennungen; vorher blieb der Befehl dort
 ungebunden. Test in `event_lifecycle` (RM_3010 id 70); mit der alten Bedingung rot (Gegenprobe), mit Fix gruen

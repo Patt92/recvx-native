@@ -29,6 +29,15 @@ public:
     // 1/z of the nearest surface per pixel; 0 where nothing was drawn. Lets a
     // caller composite an off-screen pass without a colour key.
     const std::vector<float>& depth() const {return depth_;}
+    // Host-Praesentationsstufe (metalfx_present.h): Projektion des letzten Geometriepasses in dieses
+    // Bild (Sichtmatrix, Brennweiten in Pixeln, njClipZ-Abstaende) und das Bild unmittelbar nach diesem
+    // Pass, bevor 2D-Zeichner in canvas() schreiben. Passive Evidenz fuer Bewegungsvektoren und die
+    // 2D-Maske der Praesentation; kein Kameraeigentuemer, keine Spiellogik.
+    struct Projection {NJS_MATRIX view{};float focal_x=0,focal_y=0,near=0,far=0;bool valid=false;};
+    const Projection& last_projection()const{return projection_;}
+    const std::vector<std::uint32_t>& scene_pixels()const{return scene_pixels_;}
+    // Ein Bild beginnt (Praesentation): der naechste Geometriepass liefert wieder Projektion und Szenenbild.
+    void begin_presented_frame(){projection_.valid=false;}
     // Passive evidence of the last geometry pass, not another camera owner.
     // Passive evidence of the last geometry pass, not another camera owner.
     const std::array<float,2>& last_clip()const{return last_clip_;}
@@ -86,6 +95,8 @@ private:
     std::vector<float> hi_depth_;
     std::vector<std::uint32_t> pixels_;
     std::vector<float> depth_;
+    Projection projection_;
+    std::vector<std::uint32_t> scene_pixels_;
     void draw_view_projected(const Scene& scene,const NJS_MATRIX& view,float focal_x,float focal_y,bool wireframe,const std::array<std::uint32_t,16>& hidden,float near,float far,float volume_x,float volume_y,float projection);
 };
 }

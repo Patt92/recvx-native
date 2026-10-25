@@ -20,7 +20,8 @@ enum class FrontendCommand {None,TitleCall,NewGame,LoadGame,Quit};
 //    saves, CheckButton Flag 0 forces Cursor 1; otherwise Cursor 0 is selectable.
 //    BATTLE GAME (ssd_flg & 1, system save) remains off.
 //  * ReturnCode 4 (OPTION, Adv_GameOptionScreen) opens the host settings screen
-//    (Screen::Controls: key bindings, 3rd-person mod, render quality) instead of
+//    (Screen::Controls: key bindings, 3rd-person mod, render quality, MetalFX
+//    upscaler / frame generation / post-processing) instead of
 //    the original option screen, which is not ported.
 //  * ReturnCode 1 (attract demo after the 900-frame timer, ss_flg 0x400200) is
 //    not ported: the title re-initialises (Mode 0) as bhReturnTitle would after
@@ -73,7 +74,8 @@ public:
     ThirdPersonCamera* third_person=nullptr; // optional camera mod row in the settings screen
     static constexpr unsigned third_person_row=action_count+3;
     VideoConfig* video=nullptr; // host render quality row
-    static constexpr unsigned video_row=action_count+4,audio_row=action_count+5,back_row=action_count+6,row_count=action_count+7;
+    // Host presentation rows (video.ini): MetalFX upscaler, frame generation and post-processing.
+    static constexpr unsigned video_row=action_count+4,frame_rate_row=action_count+5,upscaler_row=action_count+6,frame_generation_row=action_count+7,post_process_row=action_count+8,audio_row=action_count+9,back_row=action_count+10,row_count=action_count+11;
     std::function<void(const VideoSettings&)> video_changed;
     AudioConfig* audio=nullptr;
     std::function<void(unsigned)> audio_changed;

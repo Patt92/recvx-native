@@ -3887,7 +3887,9 @@ void RoomWorld::begin_player_motion_pass(){
     player_obj_written_=false;
 }
 ModelNodeOverrides RoomWorld::player_pose_edits(const ModelNodeOverrides& edits)const{
-    if(!player_obj_drives_||player_obj_motion_!=motion_||(player_scripted&&!player_smove_.active)||!player_asset_||player_obj_.size()!=player_asset_->bones())return edits;
+    /* player.c:1502 also writes objP while an enemy drives the player. Draw
+       that result (including Hokan), not a fresh unblended enemy clip. */
+    if(!player_obj_drives_||player_obj_motion_!=motion_||(player_scripted&&!player_smove_.active&&!enemy_player_driving_)||!player_asset_||player_obj_.size()!=player_asset_->bones())return edits;
     ModelNodeOverrides out;
     for(unsigned i=0;i<player_obj_.size();++i)out[i]={player_obj_[i].position,player_obj_[i].angles};
     for(const auto& e:edits){auto& o=out[e.first];if(e.second.position)o.position=e.second.position;if(e.second.angles)o.angles=e.second.angles;}
@@ -3895,7 +3897,7 @@ ModelNodeOverrides RoomWorld::player_pose_edits(const ModelNodeOverrides& edits)
 }
 std::vector<ModelPose> RoomWorld::player_local_pose()const{
     if(!player_asset_)return {};
-    if(player_obj_drives_&&player_obj_motion_==motion_&&(!player_scripted||player_smove_.active)&&player_obj_.size()==player_asset_->bones())return player_obj_;
+    if(player_obj_drives_&&player_obj_motion_==motion_&&(!player_scripted||player_smove_.active||enemy_player_driving_)&&player_obj_.size()==player_asset_->bones())return player_obj_;
     if(player_enemy_motion_){const auto* c=player_enemy_clip();if(!c)throw std::runtime_error("player enemy motion without clip");return player_asset_->local_pose_clip(*c,frame_);}
     if(player_room_motion_){if(const auto* clip=player_room_clip())return player_asset_->local_pose_clip(*clip,frame_);return player_obj_.size()==player_asset_->bones()?player_obj_:player_asset_->bind_pose();} /* Motion.c:29: datP NULL */
     return player_asset_->local_pose(motion_,frame_);

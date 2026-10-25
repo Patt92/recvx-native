@@ -603,6 +603,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         run(setups_before_mirror_effects,setups.size(),true);
     }
     (gpu_drawn?timings_.gpu:timings_.bands)+=since(raster_begin);
+    std::copy_n(view,16,projection_.view);projection_.focal_x=focal_x;projection_.focal_y=focal_y;projection_.near=near;projection_.far=far;projection_.valid=true; /* Praesentationsstufe: Projektion dieses Passes */
     const auto line_begin=Clock::now();
     // njDrawLine3D: finite 3D segments, endpoint colours, depth test, no depth write.
     for(const auto& line:scene.lines){if(line.mirror&&!scene.mirror_enabled)throw std::runtime_error("mirror pass line without njMirror matrix");
@@ -626,6 +627,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         }
     }
     timings_.lines+=since(line_begin);
+    scene_pixels_=pixels_; /* Praesentationsstufe: Bild nach dem Geometriepass, vor den 2D-Zeichnern */
 }
 std::size_t SoftwareRenderer::covered_pixels() const{return std::count_if(depth_.begin(),depth_.end(),[](float d){return d>0;});}
 void SoftwareRenderer::save_bmp(const std::filesystem::path& path)const{

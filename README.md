@@ -52,6 +52,16 @@ GPU acceleration, higher-resolution output and optional texture filtering and
 supersampling. Rendering fidelity is checked against the reference path rather
 than judged solely by how close a screenshot looks.
 
+**MetalFX presentation (macOS).** The finished 640×480 frame can be presented
+through a MetalFX stage on top of the Metal backend: spatial or temporal
+upscaling to the window's 4:3 fit, frame interpolation (macOS 26 or newer, one
+generated frame per game tick, verified stable at 60 fps on an M4 Pro) and a
+sharpen or CRT post-process. A separate frame-rate setting (30, 60, 120,
+unlimited) sets the presentation cadence for every backend while the game tick
+stays at the original 30 Hz. All of it is selectable in the OPTION screen, the
+debug menu and `video.ini`, and all of it is off by default. See
+[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos).
+
 ## Console foundations, rewritten for the host
 
 A native port should use the machine it runs on. RECVX Native replaces the

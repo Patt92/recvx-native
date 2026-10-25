@@ -2,6 +2,7 @@
 #include "frontend.h"
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 using namespace recvx;
@@ -88,6 +89,38 @@ int main(){try{
     video.set_renderer(RenderBackend::Gpu);check(VideoSettings::read(video_path).renderer==RenderBackend::Gpu&&video.settings().quality==quality_before,"renderer switch changed quality");
     video.set_renderer(RenderBackend::OpenGL);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL&&video.settings().quality==quality_before,"OpenGL renderer roundtrip lost quality");
     video.set_renderer(RenderBackend::Vulkan);check(VideoSettings::read(video_path).renderer==RenderBackend::Vulkan&&video.settings().quality==quality_before,"Vulkan renderer roundtrip lost quality");
+    // Host presentation rows (MetalFX upscaler, frame generation, post-processing) follow the quality row,
+    // cycle with wrap-around, persist to video.ini and report availability set by the runtime.
+    check(video.settings().upscaler==Upscaler::Off&&video.settings().frame_generation==FrameGeneration::Off&&video.settings().post_process==PostProcess::Off&&!video.settings().presentation(),"presentation defaults");
+    {unsigned applied_presentation=0;front.video_changed=[&](const VideoSettings& s){applied=s.supersampling();applied_presentation+=s.presentation()?1u:0u;};
+     front.input(MenuInput::Down);check(front.selected()==Frontend::frame_rate_row,"frame rate row not selectable");
+     check(video.settings().frame_rate==FrameRate::Hz30&&video.settings().presents_per_tick()==1&&video.settings().vsync(),"frame rate default");
+     front.input(MenuInput::Right);check(video.settings().frame_rate==FrameRate::Hz60&&video.settings().presents_per_tick()==2&&VideoSettings::read(video_path).frame_rate==FrameRate::Hz60,"frame rate 60");
+     front.input(MenuInput::Right);check(video.settings().frame_rate==FrameRate::Hz120&&video.settings().presents_per_tick()==4,"frame rate 120");
+     front.input(MenuInput::Right);check(video.settings().frame_rate==FrameRate::Unlimited&&video.settings().presents_per_tick()==0&&!video.settings().vsync()&&video.settings().describe_frame_rate()=="Unlimited (no vsync)","frame rate unlimited");
+     front.input(MenuInput::Right);check(video.settings().frame_rate==FrameRate::Hz30,"frame rate wrap");
+     front.input(MenuInput::Down);check(front.selected()==Frontend::upscaler_row,"upscaler row not selectable");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::MetalFxSpatial&&VideoSettings::read(video_path).upscaler==Upscaler::MetalFxSpatial&&applied_presentation==1,"upscaler spatial");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::MetalFxTemporal&&VideoSettings::read(video_path).upscaler==Upscaler::MetalFxTemporal,"upscaler temporal");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Off,"upscaler wrap");
+     front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::MetalFxTemporal,"upscaler left wrap");
+     check(video.describe_upscaler()=="MetalFX temporal (not available)","upscaler availability note missing");
+     video.set_availability(true,true,false);check(video.describe_upscaler()=="MetalFX temporal","upscaler availability note stuck");
+     front.input(MenuInput::Down);check(front.selected()==Frontend::frame_generation_row,"frame generation row not selectable");
+     front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::MetalFx&&VideoSettings::read(video_path).frame_generation==FrameGeneration::MetalFx,"frame generation on");
+     check(video.describe_frame_generation()=="MetalFX frame interpolation (not available)","frame generation availability note missing");
+     video.set_frame_generation(FrameGeneration::MetalFx);check(video.settings().presents_per_tick()==2,"frame interpolation needs two presents per tick at 30");video.set_frame_rate(FrameRate::Hz120);check(video.settings().presents_per_tick()==4,"frame interpolation keeps 120");video.set_frame_rate(FrameRate::Hz30);
+     front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Off,"frame generation wrap");
+     front.input(MenuInput::Down);check(front.selected()==Frontend::post_process_row,"post-process row not selectable");
+     front.input(MenuInput::Right);front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::Crt&&VideoSettings::read(video_path).post_process==PostProcess::Crt,"post-process crt");
+     check(video.describe_post_process()=="CRT scanlines + sharpen","post-process label");
+     front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::Off,"post-process wrap");
+     const auto reread=VideoSettings::read(video_path);check(reread.upscaler==Upscaler::MetalFxTemporal&&reread.frame_generation==FrameGeneration::Off&&reread.post_process==PostProcess::Off&&reread.quality==quality_before&&reread.renderer==RenderBackend::Vulkan,"presentation roundtrip");
+     front.input(MenuInput::Down);check(front.selected()==Frontend::audio_row,"audio row must follow the presentation rows");
+     for(int i=0;i<5;++i)front.input(MenuInput::Up);check(front.selected()==Frontend::video_row,"row order above presentation rows");
+     {std::ofstream bad(video_path);bad<<"quality = high\nframe_rate = 45\n";}bool rejected_rate=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected_rate=true;}check(rejected_rate,"invalid frame rate accepted");
+     {std::ofstream bad(video_path);bad<<"quality = high\nupscaler = fsr\n";}bool rejected=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected=true;}check(rejected,"invalid upscaler accepted");
+     video.set_upscaler(Upscaler::Off);}
     video.set_renderer(RenderBackend::OpenGL);
     video.set_renderer(RenderBackend::Software,false);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL,"temporary renderer switch persisted");
     std::filesystem::remove(video_path);

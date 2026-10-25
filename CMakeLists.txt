@@ -403,6 +403,13 @@ if(RECVX_BUILD_RUNTIME)
   endif()
   # No original engine or historical console audit target is permitted.
   target_link_libraries(recvx-runtime PRIVATE recvx_input)
+  if(APPLE AND NOT IOS)
+    # Host-Praesentationsstufe mit MetalFX (native/metalfx_present.h): schwach gelinkt, Klassen hinter @available.
+    set_source_files_properties(native/metalfx_present.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-fobjc-arc")
+    target_sources(recvx-runtime PRIVATE native/metalfx_present.mm)
+    target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_METALFX=1)
+    target_link_libraries(recvx-runtime PRIVATE "-framework Metal" "-framework QuartzCore" "-weak_framework MetalFX")
+  endif()
   if(WIN32)
     enable_language(RC)
     set(RECVX_APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/native/resources/app-icon.ico")
