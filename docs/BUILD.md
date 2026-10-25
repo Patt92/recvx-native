@@ -98,7 +98,7 @@ Mod-Unterstuetzung zur Laufzeit:
 |---|---|---|
 | macOS, Windows, Linux | `data/` oder mit `--compressed` `data_compressed/` | ja: ein selbst angelegter Ordner `mods` neben `Start.cmd` bzw. neben `RECVX Native.app` wird zusaetzlich gelesen |
 | iOS/iPadOS | `data/` oder `data_compressed/` (nur mit `--ios-bundle-data`, sonst `Documents/data`) | nein (`RECVX_ENABLE_MODS=OFF`), nur eingebackene Mods |
-| tvOS | immer `data_compressed/` (App-Groessengrenze) | nein, nur eingebackene Mods. **Es gibt noch kein tvOS-Buildziel**; das Profil (`tools/data_profiles.py`) legt die Regel fest. |
+| tvOS | immer `data_compressed/` (App-Groessengrenze), immer im Bundle (kein Documents-Ordner) | nein, nur eingebackene Mods. `./build.sh --platform tvos` bzw. `tvos-simulator`, siehe [NATIVE_PORT.md](NATIVE_PORT.md#tvos-apple-tv-arm64-device-and-simulator). |
 
 ## 5. Was ein Lauf gemacht hat
 

@@ -20,7 +20,7 @@ PROFILES = {
     'tvos': {'exclude': _COOKED_SOURCES, 'mods': False, 'compressed': 'always'},
 }
 TARGET_PROFILE = {'macos': 'desktop', 'windows': 'desktop', 'windows-arm64': 'desktop', 'linux': 'desktop',
-                  'ios': 'ios', 'ios-simulator': 'ios', 'tvos': 'tvos'}
+                  'ios': 'ios', 'ios-simulator': 'ios', 'tvos': 'tvos', 'tvos-simulator': 'tvos'}
 
 
 def profile(target: str) -> dict:

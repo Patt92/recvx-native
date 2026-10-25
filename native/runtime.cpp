@@ -225,6 +225,14 @@ double process_cpu_seconds(){
 // Benutzerdaten folgen resolve_user_paths (HOME ist der App-Container).
 static void apply_ios_locations(Options& o){
     const char* home=std::getenv("HOME");if(!home||!*home)throw std::runtime_error("cannot locate the iOS app container (HOME unset)");
+#if defined(RECVX_TVOS)
+    // tvOS: kein Documents-Ordner und keine Dateifreigabe; die Daten liegen immer im Bundle (data_profiles.py: tvos).
+    if(!o.data_explicit){
+        char* base=SDL_GetBasePath();if(!base)throw std::runtime_error("cannot locate the tvOS app bundle");
+        o.data=fs::u8path(base)/"data";SDL_free(base);
+        if(!fs::is_regular_file(o.data/"native-data.version"))throw std::runtime_error("tvOS app bundle has no data/ tree (build with --ios-bundle-data)");
+    }
+#else
     const auto documents=fs::path(home)/"Documents";
     if(!o.data_explicit){
         o.data=documents/"data";
@@ -232,6 +240,7 @@ static void apply_ios_locations(Options& o){
     }
 #if !defined(RECVX_NO_MODS)
     if(o.mods.empty())o.mods=documents/"mods";
+#endif
 #endif
 }
 #endif

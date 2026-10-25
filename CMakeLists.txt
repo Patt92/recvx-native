@@ -166,6 +166,13 @@ add_library(recvx_data native/expand.cpp native/archive.cpp native/room.cpp nati
 # vorhandenen kurzen #include-Namen der Gegnerheader gueltig bleiben.
 target_include_directories(recvx_data PUBLIC native native/enemies)
 target_compile_features(recvx_data PUBLIC cxx_std_17)
+# CMake setzt IOS in Platform/iOS-Initialize, fuer tvOS aber keine Kennung: hier nachziehen, damit die
+# iOS-/tvOS-Bloecke (statisches SDL, nur Runtime-Bundle, kein OpenGL/Vulkan) greifen.
+if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+  set(TVOS 1)
+  # user_paths.cpp (recvx_game) und die Runtime sehen dieselbe Plattformkennung.
+  add_compile_definitions(RECVX_TVOS=1)
+endif()
 add_library(recvx_math native/ninja_math.c native/ninja_matrix.c)
 target_compile_definitions(recvx_math PRIVATE RECVX_NATIVE=1)
 target_include_directories(recvx_math PUBLIC native)
@@ -186,8 +193,8 @@ find_package(Threads REQUIRED)
 target_link_libraries(recvx_scene PUBLIC recvx_data recvx_math Threads::Threads)
 # Host-GPU-Rasterer: Plattformstandard plus optionales OpenGL auf allen Desktopplattformen.
 # iOS kennt kein Desktop-OpenGL 4.1; dort bleibt Metal der einzige GPU-Rasterer.
-if(IOS)
-  set(RECVX_ENABLE_OPENGL OFF CACHE BOOL "OpenGL 4.1 is unavailable on iOS" FORCE)
+if(IOS OR TVOS)
+  set(RECVX_ENABLE_OPENGL OFF CACHE BOOL "OpenGL 4.1 is unavailable on iOS/tvOS" FORCE)
 endif()
 option(RECVX_ENABLE_OPENGL "Build the optional OpenGL 4.1 raster backend (Linux GPU default)" ON)
 target_sources(recvx_scene PRIVATE native/gpu_raster_none.cpp)
@@ -199,7 +206,7 @@ endif()
 # Header und glslc (Vulkan SDK, Homebrew vulkan-headers/shaderc, Distributionspakete); der Loader bzw.
 # MoltenVK wird zur Laufzeit geoeffnet. Fehlt eines, bleibt der Rest des Builds unveraendert.
 option(RECVX_ENABLE_VULKAN "Build the optional Vulkan raster backend (fragment shader interlock)" ON)
-if(IOS)
+if(IOS OR TVOS)
   set(RECVX_ENABLE_VULKAN OFF CACHE BOOL "The Vulkan raster backend is not packaged for iOS/tvOS" FORCE)
 endif()
 if(RECVX_ENABLE_VULKAN)
@@ -273,8 +280,8 @@ option(RECVX_FETCH_SDL2 "Download and build the pinned SDL2 dependency" OFF)
 if(RECVX_BUILD_RUNTIME OR RECVX_ENABLE_OPENGL)
   if(RECVX_FETCH_SDL2)
     include(FetchContent)
-    # iOS-Apps betten keine losen dylibs ein: SDL dort statisch in die Runtime linken.
-    if(IOS)
+    # iOS-/tvOS-Apps betten keine losen dylibs ein: SDL dort statisch in die Runtime linken.
+    if(IOS OR TVOS)
       set(SDL_SHARED OFF CACHE BOOL "" FORCE)
       set(SDL_STATIC ON CACHE BOOL "" FORCE)
     else()
@@ -286,7 +293,7 @@ if(RECVX_BUILD_RUNTIME OR RECVX_ENABLE_OPENGL)
       URL https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.tar.gz
       URL_HASH SHA256=5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165)
     FetchContent_MakeAvailable(SDL2)
-    if(IOS)
+    if(IOS OR TVOS)
       add_library(SDL2::SDL2 ALIAS SDL2-static)
     endif()
   else()
@@ -301,22 +308,31 @@ if(RECVX_ENABLE_OPENGL)
 endif()
 if(RECVX_BUILD_RUNTIME)
   add_executable(recvx-runtime native/runtime.cpp)
-  if(IOS)
-    # iOS-App-Bundle: SDL startet die Runtime aus UIKit (SDL_UIKitRunApp in runtime.cpp); Spieldaten liegen
-    # im Bundle (RECVX_IOS_BUNDLE_DATA) oder im Documents-Ordner des App-Containers. Signiert wird in
-    # tools/build_native.py (Simulator ad hoc, Geraet mit Provisioning-Profil).
-    set(RECVX_IOS_BUNDLE_ID "org.recvx.native" CACHE STRING "iOS bundle identifier (must match the provisioning profile)")
-    set(RECVX_IOS_BUNDLE_DATA "" CACHE PATH "Prepared data tree copied into the iOS app bundle as data/ (empty: Documents/data)")
-    target_compile_definitions(recvx-runtime PRIVATE RECVX_IOS=1)
+  if(IOS OR TVOS)
+    # iOS-/tvOS-App-Bundle: SDL startet die Runtime aus UIKit (SDL_UIKitRunApp in runtime.cpp); Spieldaten liegen
+    # im Bundle (RECVX_IOS_BUNDLE_DATA) oder (nur iOS) im Documents-Ordner des App-Containers. Signiert wird in
+    # tools/build_native.py (Simulator ad hoc, Geraet mit Provisioning-Profil). tvOS: kein Documents-Ordner, kein
+    # CoreMotion, Benutzerdaten im purgeablen Caches-Ordner (user_paths.cpp), Eingabe ueber Bluetooth-Controller.
+    set(RECVX_IOS_BUNDLE_ID "org.recvx.native" CACHE STRING "iOS/tvOS bundle identifier (must match the provisioning profile)")
+    set(RECVX_IOS_BUNDLE_DATA "" CACHE PATH "Prepared data tree copied into the app bundle as data/ (empty: Documents/data, iOS only)")
+    if(TVOS)
+      target_compile_definitions(recvx-runtime PRIVATE RECVX_IOS=1)
+      set(recvx_apple_plist "${CMAKE_CURRENT_SOURCE_DIR}/native/resources/tvos/Info.plist.in")
+      set(recvx_apple_frameworks "-framework CoreBluetooth")
+    else()
+      target_compile_definitions(recvx-runtime PRIVATE RECVX_IOS=1)
+      set(recvx_apple_plist "${CMAKE_CURRENT_SOURCE_DIR}/native/resources/ios/Info.plist.in")
+      set(recvx_apple_frameworks "-framework CoreMotion" "-framework CoreBluetooth")
+    endif()
     set_target_properties(recvx-runtime PROPERTIES MACOSX_BUNDLE ON
-      MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/native/resources/ios/Info.plist.in"
+      MACOSX_BUNDLE_INFO_PLIST "${recvx_apple_plist}"
       MACOSX_BUNDLE_GUI_IDENTIFIER "${RECVX_IOS_BUNDLE_ID}"
       MACOSX_BUNDLE_BUNDLE_NAME "RECVX Native"
       MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
       MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
     target_link_libraries(recvx-runtime PRIVATE "-framework UIKit" "-framework QuartzCore" "-framework GameController"
       "-framework CoreHaptics" "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreAudio"
-      "-framework CoreMotion" "-framework CoreBluetooth" "-framework CoreGraphics" "-framework OpenGLES")
+      ${recvx_apple_frameworks} "-framework CoreGraphics" "-framework OpenGLES")
     if(RECVX_IOS_BUNDLE_DATA)
       if(NOT EXISTS "${RECVX_IOS_BUNDLE_DATA}/native-data.version")
         message(FATAL_ERROR "RECVX_IOS_BUNDLE_DATA needs a prepared data tree: ${RECVX_IOS_BUNDLE_DATA}")
@@ -403,7 +419,7 @@ if(RECVX_BUILD_RUNTIME)
   endif()
   # No original engine or historical console audit target is permitted.
   target_link_libraries(recvx-runtime PRIVATE recvx_input)
-  if(APPLE AND NOT IOS)
+  if(APPLE AND NOT IOS AND NOT TVOS)
     # Host-Praesentationsstufe mit MetalFX (native/metalfx_present.h): schwach gelinkt, Klassen hinter @available.
     set_source_files_properties(native/metalfx_present.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-fobjc-arc")
     target_sources(recvx-runtime PRIVATE native/metalfx_present.mm)
@@ -428,8 +444,8 @@ if(RECVX_BUILD_RUNTIME)
   endif()
   install(TARGETS recvx-runtime RUNTIME DESTINATION bin BUNDLE DESTINATION .)
 endif()
-# Export-/Diagnosewerkzeuge laufen auf dem Buildhost; iOS baut nur das Runtime-Bundle.
-if(NOT IOS)
+# Export-/Diagnosewerkzeuge laufen auf dem Buildhost; iOS/tvOS bauen nur das Runtime-Bundle.
+if(NOT IOS AND NOT TVOS)
 add_executable(recvx-native native/main.cpp)
 target_link_libraries(recvx-native PRIVATE recvx_data)
 add_executable(recvx-assets native/export_assets.cpp)
@@ -1487,7 +1503,7 @@ endif()
   target_link_libraries(recvx-morph-world-tests PRIVATE recvx_game)
   add_test(NAME enemy_morph_selection COMMAND recvx-morph-world-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
 endif()
-if(NOT IOS)
+if(NOT IOS AND NOT TVOS)
   install(TARGETS recvx-native RUNTIME DESTINATION bin)
 endif()
 

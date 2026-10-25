@@ -87,15 +87,43 @@ int main(int argc,char** argv){try{_Make_SinTable();if(argc<2)return 0;const std
   press(0);check(r.vm.flag(1,58)&&s->mode0==0&&s->mode1==0&&s->mode2==0&&s->mode3==0&&!(r.vm.flags[5][0]&0x40000000u)&&r.vm.flags[6][0]==previous_sp,"133 128 completion flag58/sp restore/mode reset");
   r.mode(2,1);r.pass();press(4);press(2);press(8);press(0x800);press(0);check(r.vm.flag(1,58),"133 wrong retry must NOT clear an existing solved flag");
   r.vm.set_flag(1,58,1);r.mode(2,1);r.pass();press(8);press(0x800);press(0);check(!r.vm.flag(1,58)&&s->mode0==0&&!(r.vm.flags[5][0]&0x40000000u),"133 wrong retry must complete without flag58");
-  // Diagnostic examine geometry; exercise the real bhCheckExmAtari input clear.
-  r.vm.control_exm();r.vm.message_release();
-  r.vm.interactions={Interaction{1,3,0,0,{0,0,0},{10,10,10},{0xff,0,0,0}}};
-  check(r.vm.interact({0,0,0},0,0),"133 repeated examination rejected");
-  r.mode(2,1);press(0x800);
-  check(s->mode0==1,"133 opening OK edge leaked from examination into Finished");
-  r.vm.control_exm();press(4);press(1);press(8);
-  check(s->mode0==1,"133 retry lost digit interaction");
-  press(0x800);check(s->mode0==2,"133 fresh OK edge must still confirm");press(0);
+  // Zweite Sitzung: ond_cx bleibt nach dem Abschluss auf "Finished" stehen; das Original
+  // setzt den Zeiger nur beim Raumwechsel (system.c:266-270, 466-470). Der OK-Druck, der
+  // bhSetMessage beantwortet, gehoert bhControlMessage und darf den im selben Takt vom
+  // Skript gestarteten Effekt nicht bestaetigen: im Original laeuft bhControlEffect
+  // (game.c:51-58) vor bhControlMessage/bhControlEvent (:298-313), der Port faehrt den
+  // Ereignispass vorher. Ebenso muss sys->pad_ps = 0 aus bhCheckExmAtari (hitchk.c:4800/4835)
+  // den Spiel-/Effektpass dieses Takts erreichen.
+  {RoomScreen q(data,"RM_7050");q.vm.initialize();q.vm.flags[6][0]=0x3cu; // Diagnose: Eingabe+Effekt, Spieler/Gegner isoliert
+   const auto* t=q.world.effect_state(2);check(t&&t->id==133,"133 second session slot2 missing");
+   // Der Takt des Originals: Hosteingang, bhMainSequence (Meldung, Skript), dann Spiel-/Effektpass.
+   const auto frame=[&](unsigned bits,bool start_effect){
+     q.world.set_pad(bits,bits);q.world.set_simulation_flags(q.vm.flags[6][0]);
+     q.vm.control_exm();q.vm.tick();
+     if(start_effect)q.mode(2,1); // 0x91 02 01 00 aus dem Ereignispass dieses Takts
+     q.world.set_simulation_flags(q.vm.flags[6][0]);q.world.set_pad(bits,bits);q.world.tick();};
+   // ond_cx 0 -> 1 -> 2 -> 3: dreimal rechts bis "Finished", Effekt laeuft.
+   frame(8,true);frame(8,false);frame(8,false);check(t->mode0==1&&(q.vm.flags[5][0]&0x40000000u),"133 cursor to Finished");
+   // Untersuchung mit Schnitt (attr 9) im selben Takt: bhCheckExmAtari nullt sys->pad_ps,
+   // sp_flg 0x38 laesst den Effektpass laufen, der Druck darf nicht bestaetigen.
+   const auto room_interactions=q.vm.interactions;
+   q.vm.interactions={Interaction{1,3,9,0,{5,0,5},{10,10,10},{0xff,0,0,0}}};
+   check(q.vm.interact({10,0,11.0f},0,0),"133 cut examination rejected"); // Typ3 prueft 6.0 voraus (pxn[3])
+   frame(0x800,false);check(t->mode0==1,"133 examine OK press confirmed the running thermostat");
+   q.vm.interactions=room_interactions;
+   // Erste Sitzung abschliessen: Cursor bleibt auf "Finished" (kein Raumwechsel).
+   frame(0x800,false);frame(0,false);check(t->mode0==0&&!(q.vm.flags[5][0]&0x40000000u),"133 first session did not complete");
+   // Echte Raummeldung 7 "Set the temperature? Yes No"; OK beantwortet sie, das Skript startet
+   // 133 im selben Takt.
+   q.dialog.show(q.vm.room_message(7),7);
+   for(int i=0;i<400&&!q.dialog.choosing();++i)frame(0,false);
+   check(q.dialog.choosing(),"133 message question did not open");
+   q.vm.confirm_dialog();frame(0x800,true);
+   check(!q.dialog.active()&&q.vm.values[7]==0,"133 question answer not consumed");
+   check(t->mode0==1&&(q.vm.flags[5][0]&0x40000000u),"133 opening OK edge leaked into the retained Finished cursor");
+   frame(0,false);check(t->mode0==1,"133 second session lost the thermostat");
+   frame(0x800,false);check(t->mode0==2,"133 fresh OK press must confirm");
+  }
   for(const auto& gap:r.world.unbound_enemy_routines())check(gap.find("Thermo")==std::string::npos&&gap!="bhEff133"&&gap!="bhEff133: sys->st_flg/sp_flg/ev_flg ohne EventVm","133 unresolved production service");
   std::cout<<"RM_7050 133: original event17 @ac0, atlas42 image, digits128, deferred flag58, cancel ignored, repeat and saved sp PASS\n";
  }

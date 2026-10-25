@@ -60,6 +60,15 @@ ungebunden. Test in `event_lifecycle` (RM_3010 id 70); mit der alten Bedingung r
 (`event_lifecycle|effect_bg|game`). bhEffBG 93..99 und Effekt 26 aus bhCheckEvtTimer liegen ebenfalls im Arbeitsbaum.
 Offen aus dem Effektaudit: Halterfreigabe nach dem ersten Pass (bhEffDmy), 0x98 auf Halter 66 (RM_3091). **Kein Commit.**
 
+**tvOS-Buildpfad (2026-10-25, Arbeitsbaum):** `./build.sh --platform tvos|tvos-simulator` ueber den iOS-Pfad
+(CMAKE_SYSTEM_NAME tvOS, statisches SDL, Metal, Bundle mit eingebackenen komprimierten Daten, da tvOS keinen
+Documents-Ordner hat). Benutzerdaten in `Library/Caches/RECVX` (nicht dauerhaft, dokumentiert), Eingabe per
+Bluetooth-Controller, MetalFX-Stufe bleibt macOS. Simulator (`build/tvos-simulator`, ad hoc signiert, Plattform 8)
+und unsigniertes Geraet (`build/tvos-device`, Plattform 3) kompilieren, linken, PASS, je 3,1 GB Daten im Bundle;
+SDL-Quelle aus dem macOS-Build wiederverwendet (Download in der Sandbox gesperrt, `RECVX_SDL2_SOURCE`). CMake setzt
+fuer tvOS keine `TVOS`-Variable, CMakeLists.txt zieht sie nach. `setMathMode:` jetzt auch fuer tvOS 18 gewacht.
+Start auf Simulator/Geraet **nicht** belegt: CoreSimulatorService aus der Sandbox nicht erreichbar, kein Profil.
+
 **iOS-Buildpfad (2026-10-22, Arbeitsbaum):** `./build.sh --platform ios|ios-simulator` (Ninja/Makefiles,
 Policy-Audit unverändert, SDL statisch, Metal, Bundle-Icons, Signatur per Profil). Simulator- und unsignierter
 Gerätebuild kompilieren, linken, PASS; Start auf Simulator/Gerät **nicht** belegt (Sandbox, keine iOS-

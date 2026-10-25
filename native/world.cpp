@@ -3480,8 +3480,15 @@ void RoomWorld::control_lights(){
     if(event_camera)for(auto& l:event_lights_)animate_light(l,bool(l.flags&2u));
 }
 void RoomWorld::tick_after_player(){
-    // bhCheckExmAtari clears sys->pad_ps before bhControlEffect (game.c:93).
-    if(collision_events_&&collision_events_->pad_edges_cleared())pad_ps_=0;
+    if(collision_events_){
+        /* game.c:51-58 (bhControlEffect) laeuft im Bild vor game.c:298-313 (bhControlMessage,
+           bhControlEvent); der Port faehrt den Ereignispass vorher. Deshalb duerfen Tasten,
+           die die Meldung in diesem Takt gelesen hat, den Effektpass nicht erneut ausloesen,
+           und sys->pad_ps = 0 aus bhCheckExmAtari (hitchk.c:4800/4835, message.c:312-320)
+           muss bis hierher gelten. */
+        pad_ps_&=~collision_events_->pad_consumed();
+        if(collision_events_->take_pad_cleared())pad_ps_=0;
+    }
     // Der freie Spielerpass (runtime.cpp, player->pose aus plp->px/ay) kennt die Objektbindung nicht;
     // die Daten (RM_4011) binden nur die skriptgesteuerte Spielerin (bhLoadWork 0 davor).
     if(player_object_link_.linked&&!player_scripted)unbound_enemy_.insert("bhObjLinkSetObjPly: freier Spielerpass mit flg 0x80 (bhCalcModel/bhFixPosition Motion.c:885)");
@@ -3917,7 +3924,15 @@ std::vector<ModelPose> RoomWorld::player_local_pose()const{
     if(player_room_motion_){if(const auto* clip=player_room_clip())return player_asset_->local_pose_clip(*clip,frame_);return player_obj_.size()==player_asset_->bones()?player_obj_:player_asset_->bind_pose();} /* Motion.c:29: datP NULL */
     return player_asset_->local_pose(motion_,frame_);
 }
-unsigned RoomWorld::frame(unsigned kind,unsigned index)const{if(!kind)return unsigned(frame_);const auto at=entities_.find({kind,index});return at==entities_.end()?0:unsigned(at->second.frame);}
+unsigned RoomWorld::frame(unsigned kind,unsigned index)const{
+    if(!kind)return unsigned(frame_);
+    const auto at=entities_.find({kind,index});
+    if(at==entities_.end())return 0;
+    // event.c:3276-3279 reads ene[rom->enep[v1].wrk_no].frm_no. A scripted work
+    // still plays its motion; e.frame only mirrors unscripted ones (publish_enemy).
+    if(kind==1&&at->second.enemy_bound)return unsigned(at->second.enemy.frm_no);
+    return unsigned(at->second.frame);
+}
 std::optional<NJS_POINT3> RoomWorld::position(unsigned kind,unsigned index)const{if(!kind)return player_.position;const auto at=entities_.find({kind,index});if(at==entities_.end())return {};return at->second.transform.position;}
 void RoomWorld::commit_afterimage_model(unsigned kind,unsigned index,unsigned mdl,const PlayerAsset& asset,const std::vector<ModelPose>& pose,const std::vector<BoneMatrix>& nodes,const std::vector<std::uint32_t>& flags){
     if(pose.size()!=asset.bones()||nodes.size()!=asset.bones()||flags.size()!=asset.bones())throw std::runtime_error("afterimage model publication has incomplete objP/owP");

@@ -42,6 +42,13 @@ with a shared pipeline feeding the available backend:
   the Parallels Display Adapter (WDDM GPU).
 - **Software** — a CPU renderer that remains available as a fallback and a
   reference for validating GPU output.
+- **Vulkan** — an optional backend, never a platform default, selectable on
+  macOS, Windows and Linux. It requires ordered fragment shader interlock (the
+  counterpart of Metal framebuffer fetch and Direct3D 11 Rasterizer Ordered
+  Views) and storage-image color, depth and shadow masks; devices without the
+  extension fall back to software rather than approximating the blend. The
+  shaders are compiled to SPIR-V at build time and the loader is opened at run
+  time. Its output is checked bit-for-bit against the software reference.
 - **OpenGL** — the Linux GPU default, optionally selectable on macOS and Windows.
   Requires OpenGL 4.1 Core and an available display; uses ordered copies (or
   texture barriers when supported), not fixed-function blending. Driver-specific
@@ -52,16 +59,56 @@ GPU acceleration, higher-resolution output and optional texture filtering and
 supersampling. Rendering fidelity is checked against the reference path rather
 than judged solely by how close a screenshot looks.
 
-**MetalFX presentation (macOS).** The finished 640×480 frame can be presented
-through a MetalFX stage on top of the Metal backend: spatial or temporal
-upscaling to the window's 4:3 fit, frame interpolation (macOS 26 or newer, one
-generated frame per game tick, verified stable at 60 fps on an M4 Pro),
-contrast-adaptive sharpening and a CRT filter (scanlines, or slot mask with
-bloom in linear light). A separate frame-rate setting (30, 60, 120,
-unlimited) sets the presentation cadence for every backend while the game tick
-stays at the original 30 Hz. All of it is selectable in the OPTION screen, the
-debug menu and `video.ini`, and all of it is off by default. See
+## MetalFX and upscaling
+
+MetalFX is a macOS presentation stage, separate from the rasterizer and its
+renderer selection. It presents through the SDL window's Metal layer,
+independent of the raster backend, and receives the finished 640×480 frame
+after every 2D drawer, together with the depth buffer and the last geometry
+projection. It changes presentation only: the game image, the 30 Hz tick,
+input, events, screenshots and headless runs are unchanged.
+
+The stage offers:
+
+- **Spatial or temporal upscaling** from 640×480 to the window's 4:3 fit.
+  Temporal upscaling uses depth and camera-reprojected motion vectors; the 2D
+  layer is treated as a stationary foreground because the 2D drawers write at
+  integer 640×480 positions. Temporal scaling is limited to the device's scale
+  range (2× on current devices), with a spatial pass covering the remainder.
+- **Frame interpolation** (`MTLFXFrameInterpolator`, macOS 26 or newer): one
+  intermediate frame per game tick between the previous and current image. It
+  runs on the stage's own presentation thread; the main thread submits a copy
+  and never blocks on vsync. Verified stable at 60 fps on an M4 Pro.
+- **Contrast-adaptive sharpening** and a **CRT filter** (scanlines, or a slot
+  mask with bloom in linear light), including the 4:3 fit into the window.
+
+A separate frame-rate setting (`30`, `60`, `120`, `unlimited`) sets the
+presentation cadence for every backend while the game tick stays at the
+original 30 Hz. On the non-MetalFX SDL copy path, repeated presents show the
+same frame; only frame interpolation adds motion between ticks. The stage and
+each of its features are off by default and selectable in the OPTION screen,
+the debug menu and `video.ini`.
+
+MetalFX needs macOS with Metal. Spatial scaling is available on supported
+devices, temporal scaling within the device's scale range, and frame
+interpolation on macOS 26 or newer. The full setting reference is in
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos).
+
+### FSR 3.1 / FSR 4
+
+FSR is not integrated. FSR 4 is DirectX 12 only on Windows 10/11, with ML
+upscaling on Radeon RX 9000 series or newer; other GPUs run the FSR 3.1.5
+fallback. It has no Vulkan or Metal backend, and the FidelityFX SDK v2 lists
+Vulkan as unsupported. FSR 3.1 supports DirectX 12 and Vulkan, but not Metal.
+
+The port's Windows renderer is Direct3D 11 and its macOS renderer is Metal, so
+FSR 4 would first need a DirectX 12 raster/presentation path. FSR 3.1 could in
+principle attach to the optional Vulkan backend on Windows or Linux, but that
+backend currently renders offscreen and returns the frame through SDL; FSR
+would require the FidelityFX SDK plus a Vulkan presentation/swapchain stage and
+frame-generation hooks, validated per driver. On macOS, MetalFX remains the
+supported upscaler. FSR stays a documented gap rather than an option that
+silently substitutes a different filter.
 
 ## Console foundations, rewritten for the host
 
@@ -118,12 +165,12 @@ brought up separately from the shared gameplay code.
 
 | Platform | Direction |
 |---|---|
-| **Mac / Apple Silicon** | Current development platform with Metal and software rendering; standalone Mac builds are part of the release plan. |
-| **Windows x64** | Build support and the Direct3D 11 backend are present; validated Windows releases are planned. |
+| **Mac / Apple Silicon** | Current development platform with Metal and software rendering, plus optional Vulkan through MoltenVK; standalone Mac builds are part of the release plan. |
+| **Windows x64** | Build support, the Direct3D 11 backend and optional Vulkan are present; validated Windows releases are planned. |
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
-| **Linux** | Native build with OpenGL selected by default; Linux driver/hardware validation remains open. |
+| **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
 | **iOS/iPadOS** | Build support for arm64 devices and the simulator with Metal (`./build.sh --platform ios` / `ios-simulator`); runtime on iOS hardware not yet validated, no touch controls. |
-| **Apple TV** | Planned native build using Metal. |
+| **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device. |
 
 These are native platform targets, not plans to ship an emulator with the game.
 
@@ -178,6 +225,10 @@ Install:
 - **Visual Studio or Visual Studio Build Tools**, including the **Desktop
   development with C++** workload, MSVC C/C++ tools and a Windows SDK.
   Native Windows ARM64 builds also need the ARM64 C/C++ build tools.
+- **Optional Vulkan backend:** the Vulkan SDK (headers and `glslc`) at build
+  time and the Vulkan loader (`vulkan-1.dll`) at run time. The Windows
+  cross-build has no Vulkan headers by default and omits the backend unless a
+  native build or an explicit SDK path supplies them.
 - **FFmpeg and ffprobe** for `--iso`: either install them on `PATH`, or place
   the Windows executables directly in the repository's `build-tools/` folder:
 
@@ -234,6 +285,9 @@ Install:
 - **FFmpeg**, including `ffprobe`, on `PATH` when using `--iso`.
 - **Ninja** if cross-building Windows binaries; the build tool downloads the
   pinned Zig cross-toolchain automatically.
+- **Optional Vulkan backend:** Vulkan headers and `glslc` at build time, plus a
+  Vulkan loader (MoltenVK on macOS) at run time. Without headers or `glslc`,
+  CMake warns and omits the backend; the rest of the build is unaffected.
 
 For example, with Homebrew already installed:
 
@@ -242,7 +296,7 @@ xcode-select --install
 ```
 
 ```bash
-brew install python@3.12 cmake ffmpeg ninja
+brew install python@3.12 cmake ffmpeg ninja vulkan-headers shaderc molten-vk
 ```
 
 Build for Apple Silicon (arm64) and prepare a package:
@@ -257,8 +311,12 @@ With prepared data:
 ./build.sh --package
 ```
 
-Launch through `Start.command`. macOS defaults to Metal; OpenGL is optional
-(`--renderer opengl`), and software remains available (`--renderer software`).
+Launch through `Start.command`. macOS defaults to Metal; OpenGL and Vulkan are
+optional (`--renderer opengl`, `--renderer vulkan`), and software remains
+available (`--renderer software`). Vulkan is built when the Vulkan headers and
+`glslc` are present and is opened at run time (the Vulkan loader, or MoltenVK on
+macOS); it is never selected automatically. `--vulkan off` or CMake
+`-DRECVX_ENABLE_VULKAN=OFF` omits it explicitly.
 
 `./build.sh` alone builds `build/start/macos-arm64/RECVX Native.app`, a small development
 app without data: its launcher passes the project's `data/` and `mods/` folders by path and
@@ -283,6 +341,9 @@ Install:
   The build downloads SDL2 itself. GPU rendering additionally needs an OpenGL
   4.1-capable driver (for example Mesa) and SDL's OpenGL build dependencies.
 - **FFmpeg**, including `ffprobe`, on `PATH` when using `--iso`.
+- **Optional Vulkan backend:** Vulkan headers, `glslc` (for example the
+  `libvulkan-dev` and `glslc`/`shaderc` packages) and the Vulkan loader
+  (`libvulkan.so.1`). Missing headers or `glslc` leave the backend out.
 - **Ninja** for Windows cross-builds; Zig is downloaded automatically.
 
 Example dependencies on Debian/Ubuntu (use a distribution release providing

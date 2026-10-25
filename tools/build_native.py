@@ -297,19 +297,32 @@ def reset_foreign_generator(build: Path, generator: str) -> None:
     shutil.rmtree(build)
 
 
-IOS_TARGETS = {'ios': 'iphoneos', 'ios-simulator': 'iphonesimulator'}
+# Apple-Geraeteziele: iOS und tvOS teilen den Buildpfad (UIKit, statisches SDL, Metal, App-Bundle).
+IOS_TARGETS = {'ios': 'iphoneos', 'ios-simulator': 'iphonesimulator', 'tvos': 'appletvos', 'tvos-simulator': 'appletvsimulator'}
 IOS_DEPLOYMENT_TARGET = '15.0'  # std::filesystem ab iOS 13; Info.plist.in MinimumOSVersion gleich halten
 IOS_ICONS = ('AppIcon60x60@2x.png', 'AppIcon60x60@3x.png', 'AppIcon76x76@2x~ipad.png', 'AppIcon83.5x83.5@2x~ipad.png')
+TVOS_ICONS = ('AppIcon400x240.png', 'AppIcon400x240@2x.png')
+# CMAKE_SYSTEM_NAME, LC_BUILD_VERSION-Plattform (otool -l) und CFBundleSupportedPlatforms je Ziel.
+APPLE_TARGETS = {'ios': ('iOS', '2', 'iPhoneOS'), 'ios-simulator': ('iOS', '7', 'iPhoneSimulator'),
+                 'tvos': ('tvOS', '3', 'AppleTVOS'), 'tvos-simulator': ('tvOS', '8', 'AppleTVSimulator')}
 
 
 def is_ios_target(target: str) -> bool:
     return target in IOS_TARGETS
 
 
+def is_tvos_target(target: str) -> bool:
+    return target in ('tvos', 'tvos-simulator')
+
+
+def is_apple_device_target(target: str) -> bool:
+    return target in ('ios', 'tvos')
+
+
 def xcode_developer_dir() -> str:
     """iOS SDKs ship only with Xcode; an active CommandLineTools directory lacks them."""
     def has_ios(directory) -> bool:
-        return (Path(directory) / 'Platforms/iPhoneOS.platform').is_dir()
+        return (Path(directory) / 'Platforms/iPhoneOS.platform').is_dir() and (Path(directory) / 'Platforms/AppleTVOS.platform').is_dir()
     explicit = os.environ.get('DEVELOPER_DIR')
     if explicit:
         if not has_ios(explicit):
@@ -329,7 +342,7 @@ def xcode_developer_dir() -> str:
 
 
 def ios_build_directory(target: str) -> Path:
-    return ROOT / 'build' / ('ios-device' if target == 'ios' else 'ios-simulator')
+    return ROOT / 'build' / {'ios': 'ios-device', 'ios-simulator': 'ios-simulator', 'tvos': 'tvos-device', 'tvos-simulator': 'tvos-simulator'}[target]
 
 
 def provisioning_profile(path: Path) -> dict:
@@ -357,11 +370,11 @@ def finish_ios_app(app: Path, target: str, profile_path: Path | None, bundle_dat
     """Complete Info.plist and icons, then sign. Returns False for an unsigned device build."""
     executable = app / 'recvx-runtime'
     if subprocess.check_output(['lipo', '-archs', str(executable)], text=True).split() != ['arm64']:
-        raise RuntimeError('iOS runtime must be arm64-only')
-    # LC_BUILD_VERSION platform 2 = iOS, 7 = iOS-Simulator; guards against a host-SDK fallback.
+        raise RuntimeError('iOS/tvOS runtime must be arm64-only')
+    # LC_BUILD_VERSION platform 2 = iOS, 7 = iOS-Simulator, 3 = tvOS, 8 = tvOS-Simulator; guards against a host-SDK fallback.
     load_commands = subprocess.check_output(['otool', '-l', str(executable)], text=True)
     platform_id = re.search(r'cmd LC_BUILD_VERSION\n.*?\n\s*platform (\d+)', load_commands, re.S)
-    expected = '2' if target == 'ios' else '7'
+    expected = APPLE_TARGETS[target][1]
     if not platform_id or platform_id.group(1) != expected:
         raise RuntimeError(f'{executable} is not built for {IOS_TARGETS[target]} (platform {platform_id.group(1) if platform_id else "?"})')
     if not bundle_data and (app / 'data').exists():
@@ -370,17 +383,22 @@ def finish_ios_app(app: Path, target: str, profile_path: Path | None, bundle_dat
     with info_path.open('rb') as handle:
         info = plistlib.load(handle)
     info.update({'CFBundleVersion': FULL_VERSION, 'CFBundleShortVersionString': FULL_VERSION,
-                 'CFBundleSupportedPlatforms': ['iPhoneOS' if target == 'ios' else 'iPhoneSimulator']})
-    for name in IOS_ICONS:  # versioned like the ICNS/ICO, see native/resources/README.md
-        shutil.copy2(ROOT / 'native/resources/ios' / name, app / name)
-    primary = {'CFBundleIconFiles': ['AppIcon60x60'], 'CFBundleIconName': 'AppIcon'}
-    info['CFBundleIcons'] = {'CFBundlePrimaryIcon': primary}
-    info['CFBundleIcons~ipad'] = {'CFBundlePrimaryIcon': {'CFBundleIconFiles': ['AppIcon60x60', 'AppIcon76x76', 'AppIcon83.5x83.5'],
-                                                          'CFBundleIconName': 'AppIcon'}}
+                 'CFBundleSupportedPlatforms': [APPLE_TARGETS[target][2]]})
+    if is_tvos_target(target):
+        for name in TVOS_ICONS:  # flat 400x240 pt icon, see native/resources/README.md
+            shutil.copy2(ROOT / 'native/resources/tvos' / name, app / name)
+        info['CFBundleIcons'] = {'CFBundlePrimaryIcon': {'CFBundleIconFiles': ['AppIcon400x240'], 'CFBundleIconName': 'AppIcon'}}
+    else:
+        for name in IOS_ICONS:  # versioned like the ICNS/ICO, see native/resources/README.md
+            shutil.copy2(ROOT / 'native/resources/ios' / name, app / name)
+        primary = {'CFBundleIconFiles': ['AppIcon60x60'], 'CFBundleIconName': 'AppIcon'}
+        info['CFBundleIcons'] = {'CFBundlePrimaryIcon': primary}
+        info['CFBundleIcons~ipad'] = {'CFBundlePrimaryIcon': {'CFBundleIconFiles': ['AppIcon60x60', 'AppIcon76x76', 'AppIcon83.5x83.5'],
+                                                              'CFBundleIconName': 'AppIcon'}}
     with info_path.open('wb') as handle:
         plistlib.dump(info, handle)
     embedded = app / 'embedded.mobileprovision'
-    if target == 'ios-simulator':
+    if target in ('ios-simulator', 'tvos-simulator'):
         embedded.unlink(missing_ok=True)
         run('codesign', '--force', '--sign', '-', '--timestamp=none', app)
     elif profile_path is None:
@@ -437,7 +455,7 @@ def native_build_directory(target: str) -> Path:
 
 
 def package_directory(target: str, version: str) -> Path:
-    label = {'macos': 'macos-arm64', 'windows': 'windows-x64', 'windows-arm64': 'windows-arm64', 'ios': 'ios-arm64'}[target]
+    label = {'macos': 'macos-arm64', 'windows': 'windows-x64', 'windows-arm64': 'windows-arm64', 'ios': 'ios-arm64', 'tvos': 'tvos-arm64'}[target]
     return ROOT / 'build/packages' / f'{label}-v{version}'
 
 
@@ -532,7 +550,7 @@ def print_summary(lines) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64', 'ios', 'ios-simulator'], default='host')
+    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64', 'ios', 'ios-simulator', 'tvos', 'tvos-simulator'], default='host')
     parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8))
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
@@ -571,17 +589,20 @@ def main():
     summary = []
     if is_ios_target(target):
         if platform.system() != 'Darwin':
-            parser.error('iOS builds require a macOS host with Xcode')
+            parser.error('iOS/tvOS builds require a macOS host with Xcode')
         if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data:
-            parser.error('iOS builds cannot run tests or prepare data; build and verify them with the macOS target')
+            parser.error('iOS/tvOS builds cannot run tests or prepare data; build and verify them with the macOS target')
+        if is_tvos_target(target) and not args.ios_bundle_data:
+            # tvOS-Apps haben keinen Documents-Ordner und keine Dateifreigabe: die Daten muessen im Bundle liegen.
+            args.ios_bundle_data = True
         if args.ios_bundle_data and not (data / 'native-data.version').is_file():
             parser.error(f'--ios-bundle-data requires a prepared data tree (missing {data / "native-data.version"})')
-        if args.package and target != 'ios':
-            parser.error('--package for iOS creates a device IPA; use --platform ios')
-        if args.install and target == 'ios' and not args.ios_device:
+        if args.package and not is_apple_device_target(target):
+            parser.error('--package for iOS/tvOS creates a device IPA; use --platform ios or tvos')
+        if args.install and is_apple_device_target(target) and not args.ios_device:
             parser.error('--install on a device needs --ios-device')
     elif args.ios_profile or args.ios_bundle_data or args.install or args.ios_device:
-        parser.error('--ios-* and --install options apply only to --platform ios or ios-simulator')
+        parser.error('--ios-* and --install options apply only to --platform ios, ios-simulator, tvos or tvos-simulator')
     if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.test_regex or args.verify_runtime):
         parser.error('Windows cross-builds cannot run tests; use --platform windows or windows-arm64 without test options, then test on Windows or Wine')
     cmake = find_cmake()
@@ -600,7 +621,7 @@ def main():
         print(f'Cross-built Windows {WINDOWS_TARGETS[target]}.', flush=True)
     elif is_ios_target(target):
         if os.environ.get('CMAKE_GENERATOR', '').startswith('Xcode'):
-            parser.error('iOS uses a single-config generator: the policy audit needs compile_commands.json, which Xcode does not write')
+            parser.error('iOS/tvOS use a single-config generator: the policy audit needs compile_commands.json, which Xcode does not write')
         os.environ['DEVELOPER_DIR'] = xcode_developer_dir()
         build = ios_build_directory(target)
         bundle = ''
@@ -613,7 +634,16 @@ def main():
                                         f'mods: {staged["bake"]}; no runtime mod support on {target}'))
         else:
             summary.append(('App data', 'not bundled: the app reads Documents/data (pass --ios-bundle-data to bundle it)'))
-        run(cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_SYSTEM_NAME=iOS',
+        # Gepinnte SDL-Quelle eines anderen Buildverzeichnisses wiederverwenden (gleiche Version, kein Download);
+        # RECVX_SDL2_SOURCE nennt sie ausdruecklich.
+        sdl_source = []
+        for candidate in [Path(os.environ['RECVX_SDL2_SOURCE'])] if os.environ.get('RECVX_SDL2_SOURCE') else \
+                [ROOT / 'build' / d / '_deps/sdl2-src' for d in ('macos-arm64', 'ios-simulator', 'ios-device', 'tvos-simulator', 'tvos-device')]:
+            version = candidate / 'include/SDL_version.h'
+            if version.is_file() and re.search(r'SDL_MINOR_VERSION\s+32\b', version.read_text()) and re.search(r'SDL_PATCHLEVEL\s+10\b', version.read_text()):
+                sdl_source = [f'-DFETCHCONTENT_SOURCE_DIR_SDL2={candidate}']
+                break
+        run(cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', f'-DCMAKE_SYSTEM_NAME={APPLE_TARGETS[target][0]}', *sdl_source,
             f'-DCMAKE_OSX_SYSROOT={IOS_TARGETS[target]}', '-DCMAKE_OSX_ARCHITECTURES=arm64',
             f'-DCMAKE_OSX_DEPLOYMENT_TARGET={IOS_DEPLOYMENT_TARGET}', '-DRECVX_FETCH_SDL2=ON', '-DBUILD_TESTING=OFF',
             f'-DRECVX_BUILD_VERSION={FULL_VERSION}', '-DRECVX_ENABLE_OPENGL=OFF', f'-DRECVX_IOS_BUNDLE_ID={args.ios_bundle_id}',
@@ -629,7 +659,7 @@ def main():
                 parser.error('--package needs a signed device build; pass --ios-profile')
             package_ios_app(app, (args.output or package_directory(target, VERSION)) / 'RECVX-Native.ipa')
         if args.install:
-            if target == 'ios-simulator':
+            if target in ('ios-simulator', 'tvos-simulator'):
                 run('xcrun', 'simctl', 'install', 'booted', app)
                 print(f'Installed; start with: xcrun simctl launch booted {args.ios_bundle_id}', flush=True)
             elif not signed:

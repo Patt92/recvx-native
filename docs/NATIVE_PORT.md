@@ -95,6 +95,42 @@ tools and tests stay on the host. Deployment target: iOS 15.0.
 | `--install` | Install on the booted simulator, or with `--ios-device <id>` on a device (`xcrun devicectl`) |
 | `--package` | Device only: write `build/packages/ios-arm64-v<version>/RECVX-Native.ipa` |
 
+### tvOS (Apple TV, arm64 device and simulator)
+
+tvOS shares the iOS build path (`--platform tvos` / `tvos-simulator`, build
+directories `build/tvos-device` and `build/tvos-simulator`, same options
+`--ios-profile`, `--ios-bundle-id`, `--install`, `--ios-device`, `--package`
+for the IPA under `build/packages/tvos-arm64-v<version>`). Differences:
+
+- Game data is always bundled (`--ios-bundle-data` is implied) from the
+  `tvos` profile in `tools/data_profiles.py`: `data_compressed/` (created on
+  first use), no `files/MOVIE` and `archives/RDX_LNK`, mods baked in. tvOS apps
+  have no Documents folder and no file sharing.
+- User data (INIs, snapshots, saves) goes to `Library/Caches/RECVX` in the app
+  container (`native/user_paths.cpp`): Application Support is limited to
+  500 KB on tvOS and Caches may be purged by the system, so save games are not
+  durable there. A durable store (iCloud key-value or CloudKit) is not ported.
+- Input is a Bluetooth game controller (`GCSupportedGameControllers`:
+  ExtendedGamepad; the Info.plist marks controller interaction as supported).
+  The Siri Remote is not bound; SDL maps its menu button to the app-switch
+  gesture. There is no keyboard or mouse path.
+- Metal is the only rasterizer; the MetalFX presentation stage is macOS-only
+  (`CMakeLists.txt`: `APPLE AND NOT IOS AND NOT TVOS`), so tvOS presents
+  through the SDL copy path. No CoreMotion framework on tvOS.
+- Icon: flat `AppIcon400x240(@2x).png` from `tools/build_app_icons.py`; the
+  layered App Store icon needs an Xcode asset catalog and is not produced.
+- SDL2 source: the pinned 2.32.10 tree of another build directory is reused
+  when present (`RECVX_SDL2_SOURCE` names one explicitly), so the build works
+  without network access.
+
+```sh
+./build.sh --platform tvos-simulator --install
+```
+
+```sh
+./build.sh --platform tvos --ios-profile <profile.mobileprovision> --package
+```
+
 The app has no command line. Game data comes from the bundle when it contains
 `data/native-data.version`, otherwise from `Documents/data` in the app
 container (Finder/Files file sharing is enabled; for the simulator, copy it
@@ -237,9 +273,10 @@ frame at a time.
 
 `native/metalfx_present.h` presents the finished 640×480 frame through the
 CAMetalLayer of the SDL window instead of the SDL texture copy. It is a host
-display feature: the 640×480 image, the 30 Hz tick, inputs and events are
-unchanged, screenshots and headless runs read the same image. Each stage is a
-row in the settings screen (OPTION), a debug-menu action and a `video.ini` key:
+display feature, independent of the rasterizer backend: the 640×480 image, the
+30 Hz tick, inputs and events are unchanged, screenshots and headless runs read
+the same image. Each stage is a row in the settings screen (OPTION), a
+debug-menu action and a `video.ini` key:
 
 | `video.ini` key | Values | Stage |
 |---|---|---|
@@ -280,6 +317,38 @@ build time (Vulkan SDK, Homebrew `vulkan-headers`/`shaderc`, distribution
 packages); without them CMake warns and omits it. `./build.sh --vulkan off` or
 `-DRECVX_ENABLE_VULKAN=OFF` omits it explicitly. The Windows crossbuild has no
 Vulkan headers by default, so packages built that way contain no Vulkan backend.
+The loader is opened at run time and is not linked. `RECVX_VULKAN_LIBRARY`
+selects one explicit library; otherwise the loader is searched in the app's
+`Frameworks` folder, the system search path and, on macOS, Homebrew. MoltenVK is
+not bundled by the packaging scripts, so a standalone macOS package needs the
+loader/MoltenVK supplied by the user or embedded separately. MoltenVK 1.4.2 is
+the validated macOS loader; Windows and Linux hardware are still unverified.
+
+### FSR 3.1 / FSR 4 (not integrated)
+
+AMD FidelityFX Super Resolution is not part of the current presentation stage.
+FSR 4 has no path through the existing renderer selections; FSR 3.1 could in
+principle use the Vulkan backend but needs a presentation path that is not
+there:
+
+- FSR 4 is DirectX 12 only, on Windows 10/11, and uses ML upscaling on Radeon
+  RX 9000 series or newer. Other GPUs fall back to FSR 3.1.5, not to FSR 4.
+- FidelityFX SDK v2 currently lists Vulkan as unsupported; there is no Metal or
+  macOS backend for FSR 4.
+- FSR 3.1 supports DirectX 12 and Vulkan, but not Metal. The Windows renderer
+  here is Direct3D 11 and macOS uses Metal; OpenGL and Vulkan are alternative
+  raster backends. The Vulkan backend renders offscreen and returns the frame
+  through SDL, so it has no FSR swapchain/presentation stage yet.
+
+Adding FSR 4 therefore means adding a DirectX 12 raster/presentation path and
+integrating the FidelityFX SDK (MIT samples; FSR 4 ships as prebuilt signed
+DLLs) before any upscaler or frame-generation row can exist. FSR 3.1 could
+attach to the Vulkan backend on Windows/Linux, which would require the SDK plus
+a Vulkan presentation/swapchain path and its own validation (motion vectors,
+history invalidation on cuts, frame-generation timing and per-driver parity).
+Neither is wired in. Until then there is no `fsr` value in `video.ini`, no menu
+row and no silent substitution by a different filter: the gap is deliberate,
+not a missing toggle.
 
 ## Diagnostics
 

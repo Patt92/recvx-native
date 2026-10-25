@@ -94,7 +94,11 @@ public:
     // CallBackGroundSeEx/StopBackGroundSeEx: bank 3, original slots 0..2 (looping ambience).
     bool background_sound(unsigned slot,unsigned sound,unsigned timer=0);
     // Com_StartInitScript: ResetEnemySeInfo (empty) and ResetObjectSeInfo (memset ObjectSlotInfo/ObjectInfo, MaxObjectReqList = 0).
-    void begin_room_init(){room_initializing_=true;custom_midi_slots(1,4);object_slots_={};object_sounds_={};object_request_count_=0;}
+    // Com_StartInitScript (sdfunc.c:2944): StartInitScriptFlag, ResetEnemySeInfo (leer), ResetObjectSeInfo,
+    // StopMidi(3..7) (Objekt-/Event-SE-Ports, DefObj/DefEvt), memset GsSlotInfoSe[20]/Mi[8]/Ax[2], CustomMidiSlotDef(1,4).
+    void begin_room_init(){room_initializing_=true;object_slots_={};object_sounds_={};object_request_count_=0;
+        for(unsigned midi=3;midi<8;++midi)stop(midi_voice(midi));
+        se_flags_={};midi_flags_={};adx_flag_=0;custom_midi_slots(1,4);}
     void request_background_sound(unsigned slot,int sound);
     // ExPlayMidi: Sony SQ transport, tempo/PPQN, running status, shortened
     // note-offs and NRPN loops. Notes resolve through the original program bank.

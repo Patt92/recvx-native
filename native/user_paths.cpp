@@ -10,6 +10,12 @@ std::filesystem::path platform_user_data_dir(){
     if(const char* appdata=env("APPDATA"))return std::filesystem::path(appdata)/"RECVX";
     if(const char* profile=env("USERPROFILE"))return std::filesystem::path(profile)/"AppData"/"Roaming"/"RECVX";
     throw std::runtime_error("cannot locate the Windows user-data directory (APPDATA/USERPROFILE unset)");
+#elif defined(RECVX_TVOS)
+    // tvOS: der App-Container hat kein Documents und Application Support ist auf 500 KB begrenzt
+    // (Apple TV Programming Guide); Caches/RECVX ist beschreibbar, kann aber vom System geleert werden.
+    // Spielstaende und INIs dort sind deshalb nicht dauerhaft (dokumentiert in NATIVE_PORT.md).
+    if(const char* home=env("HOME"))return std::filesystem::path(home)/"Library"/"Caches"/"RECVX";
+    throw std::runtime_error("cannot locate the tvOS app container (HOME unset)");
 #elif defined(__APPLE__)
     if(const char* home=env("HOME"))return std::filesystem::path(home)/"Library"/"Application Support"/"RECVX";
     throw std::runtime_error("cannot locate the macOS user-data directory (HOME unset)");

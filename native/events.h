@@ -133,8 +133,13 @@ public:
     // The three-argument form is a standing player: fpx == px, arn == 0.
     bool interact(NJS_POINT3 position,Angle yaw,int floor=0);
     bool interact(NJS_POINT3 position,Angle yaw,int floor,NJS_POINT3 front,float front_offset);
-    // hitchk.c:4800/4835: cleared edges remain cleared through the effect pass.
-    bool pad_edges_cleared()const{return pad_cleared_;}
+    // game.c:51-58 vs. :298-313: bhControlEffect laeuft im Bild VOR bhControlMessage und
+    // bhControlEvent. Der Port faehrt den Ereignispass vorher; deshalb muessen die Tasten,
+    // die bhControlMessage in diesem Takt verbraucht hat (message.c:233/327, game.c:264),
+    // fuer den Effektpass dieses Takts gesperrt bleiben. take_pad_cleared() gibt das von
+    // hitchk.c:4800/4835 gesetzte sys->pad_ps = 0 genau einmal an den Effektpass weiter.
+    unsigned pad_consumed()const{return pad_consumed_;}
+    bool take_pad_cleared(){const bool v=pad_cleared_;pad_cleared_=false;return v;}
     // player.c:1678, the flag part of the bhCheckExmAtari gate: !(plp->stflg & 0x10080),
     // !(plp->flg & 0x4000004), !(sys->cb_flg & 0x4017). mode0 == 1 and pad_ps 0x200
     // stay with the caller (OK edge of the free player).
@@ -197,6 +202,8 @@ public:
 private:
     bool door_scenario_pending_=false;
     bool pad_cleared_=false; // hitchk.c sys->pad_ps = 0 for the rest of the pass
+    bool pad_clear_request_=false; // dieselbe Anfrage aus dem Hosteingang vor dem Ereignispass
+    unsigned pad_consumed_=0; // Tastenflanken, die bhControlMessage in diesem Takt gelesen hat
     bool request_door(const DoorRequest& request,bool script); // script: DoorCall 0x33 (bhSetDoorDemo), sonst bhCheckExmAtari
     // event.c / types.h:1956-1961: WHILE, FOR and SLEEP share one index.
     // Counters and return/condition addresses survive Event_init.

@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # iOS bundle icons (CFBundleIconFiles in tools/build_native.py): iPhone 60 pt @2x/@3x, iPad 76/83.5 pt @2x.
 IOS_ICONS = {'AppIcon60x60@2x.png': 120, 'AppIcon60x60@3x.png': 180,
              'AppIcon76x76@2x~ipad.png': 152, 'AppIcon83.5x83.5@2x~ipad.png': 167}
+# tvOS: flaches App-Icon 400x240 pt @1x/@2x (das geschichtete Format braucht Xcode-Assetkataloge).
+TVOS_ICONS = {'AppIcon400x240.png': (400, 240), 'AppIcon400x240@2x.png': (800, 480)}
 
 
 def main():
@@ -26,6 +28,14 @@ def main():
     (args.output / 'ios').mkdir(exist_ok=True)
     for name, size in IOS_ICONS.items():
         image.resize((size, size), Image.Resampling.LANCZOS).save(args.output / 'ios' / name, format='PNG')
+    (args.output / 'tvos').mkdir(exist_ok=True)
+    for name, (width, height) in TVOS_ICONS.items():
+        # Das quadratische Motiv mittig in das 5:3-Feld, Rand in der Eckfarbe des Motivs.
+        corner = image.getpixel((0, 0))
+        canvas = Image.new('RGB', (width, height), corner)
+        side = height
+        canvas.paste(image.resize((side, side), Image.Resampling.LANCZOS), ((width - side) // 2, 0))
+        canvas.save(args.output / 'tvos' / name, format='PNG')
     print(f'Application icons: {args.output}')
 
 
