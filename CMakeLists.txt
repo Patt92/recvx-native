@@ -41,6 +41,14 @@ if(BUILD_TESTING)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/prepare_native_data_test.py")
   add_test(NAME native_port_status_contracts
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_check_test.py")
+  add_test(NAME data_profiles
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/data_profiles_test.py")
+  # HD-Import aus mods/hd-source braucht Pillow (wie tools/import_hd_textures.py selbst).
+  execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL" RESULT_VARIABLE RECVX_HAVE_PILLOW OUTPUT_QUIET ERROR_QUIET)
+  if(RECVX_HAVE_PILLOW EQUAL 0)
+    add_test(NAME hd_texture_import
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/import_hd_textures_test.py")
+  endif()
   # Negativpruefungen des Windows-PE-Audits; brauchen den Zig-Werkzeugsatz.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/toolchains/zig-cxx")
     add_test(NAME windows_link_audit
@@ -186,6 +194,57 @@ target_sources(recvx_scene PRIVATE native/gpu_raster_none.cpp)
 if(RECVX_ENABLE_OPENGL)
   target_sources(recvx_scene PRIVATE native/gpu_raster_opengl.cpp)
   target_compile_definitions(recvx_scene PRIVATE RECVX_HAVE_OPENGL=1)
+endif()
+# Vulkan-Rasterer: ausdruecklich waehlbar, nie Plattformstandard. Benoetigt zur Buildzeit nur die Vulkan-
+# Header und glslc (Vulkan SDK, Homebrew vulkan-headers/shaderc, Distributionspakete); der Loader bzw.
+# MoltenVK wird zur Laufzeit geoeffnet. Fehlt eines, bleibt der Rest des Builds unveraendert.
+option(RECVX_ENABLE_VULKAN "Build the optional Vulkan raster backend (fragment shader interlock)" ON)
+if(IOS)
+  set(RECVX_ENABLE_VULKAN OFF CACHE BOOL "The Vulkan raster backend is not packaged for iOS/tvOS" FORCE)
+endif()
+if(RECVX_ENABLE_VULKAN)
+  if(CMAKE_CROSSCOMPILING)
+    # Keine Header des Bauhosts (z. B. Homebrew) in ein fremdes Ziel: nur VULKAN_SDK oder ausdrueckliches
+    # -DRECVX_VULKAN_INCLUDE_DIR. glslc darf vom Host kommen (es erzeugt nur SPIR-V).
+    find_path(RECVX_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "$ENV{VULKAN_SDK}/include" "$ENV{VULKAN_SDK}/Include"
+      NO_CMAKE_SYSTEM_PATH NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_ENVIRONMENT_PATH)
+  else()
+    find_path(RECVX_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "$ENV{VULKAN_SDK}/include" "$ENV{VULKAN_SDK}/Include")
+  endif()
+  find_program(RECVX_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/Bin")
+  if(NOT RECVX_VULKAN_INCLUDE_DIR OR NOT RECVX_GLSLC)
+    message(WARNING "Vulkan raster backend disabled: vulkan/vulkan.h (${RECVX_VULKAN_INCLUDE_DIR}) or glslc (${RECVX_GLSLC}) not found")
+    set(RECVX_HAVE_VULKAN_BUILD OFF)
+  else()
+    set(RECVX_HAVE_VULKAN_BUILD ON)
+  endif()
+endif()
+if(RECVX_ENABLE_VULKAN AND RECVX_HAVE_VULKAN_BUILD)
+  set(RECVX_VULKAN_SPV_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/vulkan")
+  set(RECVX_VULKAN_SPV)
+  foreach(stage raster_vs:vert:RASTER_VS raster_fs:frag:RASTER_FS mask_vs:vert:MASK_VS mask_fs:frag:MASK_FS
+                full_vs:vert:FULL_VS composite_fs:frag:COMPOSITE_FS resolve_cs:comp:RESOLVE_CS)
+    string(REPLACE ":" ";" parts "${stage}")
+    list(GET parts 0 name)
+    list(GET parts 1 kind)
+    list(GET parts 2 macro)
+    set(output "${RECVX_VULKAN_SPV_DIR}/gpu_raster_vulkan_${name}.inc")
+    # -O0: der Optimierer darf keine Rechnung umformen; NoContraction/float_controls stehen im SPIR-V.
+    add_custom_command(OUTPUT "${output}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${RECVX_VULKAN_SPV_DIR}"
+      COMMAND "${RECVX_GLSLC}" -fshader-stage=${kind} -D${macro} --target-env=vulkan1.1 -O0 -mfmt=num
+              "${CMAKE_CURRENT_SOURCE_DIR}/native/gpu_raster_vulkan.glsl" -o "${output}"
+      DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/native/gpu_raster_vulkan.glsl"
+      COMMENT "SPIR-V ${name} (gpu_raster_vulkan.glsl)" VERBATIM)
+    list(APPEND RECVX_VULKAN_SPV "${output}")
+  endforeach()
+  target_sources(recvx_scene PRIVATE native/gpu_raster_vulkan.cpp ${RECVX_VULKAN_SPV})
+  set_source_files_properties(native/gpu_raster_vulkan.cpp PROPERTIES OBJECT_DEPENDS "${RECVX_VULKAN_SPV}")
+  target_include_directories(recvx_scene PRIVATE "${RECVX_VULKAN_INCLUDE_DIR}" "${RECVX_VULKAN_SPV_DIR}")
+  target_compile_definitions(recvx_scene PRIVATE RECVX_HAVE_VULKAN=1)
+  if(NOT WIN32)
+    target_link_libraries(recvx_scene PUBLIC ${CMAKE_DL_LIBS})
+  endif()
 endif()
 if(APPLE)
   # Als CXX-Quelle: clang waehlt Objective-C++ an der Endung; enable_language(OBJCXX) bricht SDLs .m-Build.
@@ -374,6 +433,12 @@ add_executable(recvx-world-assets native/world_assets.cpp)
 target_link_libraries(recvx-world-assets PRIVATE recvx_game)
 add_executable(recvx-texture-compress native/texture_compress.cpp)
 target_link_libraries(recvx-texture-compress PRIVATE recvx_data)
+add_executable(recvx-mod-bake native/mod_bake.cpp)
+target_link_libraries(recvx-mod-bake PRIVATE recvx_data)
+if(BUILD_TESTING)
+  add_test(NAME app_data_mod_bake COMMAND "${Python3_EXECUTABLE}" -I
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/mod_bake_check.py" --bake "$<TARGET_FILE:recvx-mod-bake>")
+endif()
 if(MSVC)
   target_compile_options(recvx-native PRIVATE /W4)
 else()
@@ -1316,6 +1381,15 @@ endif()
       add_test(NAME gpu_raster_opengl_copy_parity COMMAND recvx-gpu-raster-tests --backend opengl --force-copy)
     endif()
     set_tests_properties(gpu_raster_opengl_parity gpu_raster_opengl_copy_parity PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+  if(RECVX_ENABLE_VULKAN AND RECVX_HAVE_VULKAN_BUILD)
+    # Ohne Vulkan-Bibliothek oder Geraet mit geordnetem Fragment-Interlock uebersprungen (77).
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_1090.RDT")
+      add_test(NAME gpu_raster_vulkan_parity COMMAND recvx-gpu-raster-tests "${CMAKE_CURRENT_SOURCE_DIR}/data" --backend vulkan)
+    else()
+      add_test(NAME gpu_raster_vulkan_parity COMMAND recvx-gpu-raster-tests --backend vulkan)
+    endif()
+    set_tests_properties(gpu_raster_vulkan_parity PROPERTIES SKIP_RETURN_CODE 77)
   endif()
   add_executable(recvx-camera-return-tests tests/native/camera_return_test.cpp)
   target_link_libraries(recvx-camera-return-tests PRIVATE recvx_game)

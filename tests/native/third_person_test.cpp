@@ -87,6 +87,8 @@ int main(){try{
     video.set_renderer(RenderBackend::Software);check(VideoSettings::read(video_path).renderer==RenderBackend::Software&&video.settings().renderer==RenderBackend::Software,"renderer switch not persisted");
     video.set_renderer(RenderBackend::Gpu);check(VideoSettings::read(video_path).renderer==RenderBackend::Gpu&&video.settings().quality==quality_before,"renderer switch changed quality");
     video.set_renderer(RenderBackend::OpenGL);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL&&video.settings().quality==quality_before,"OpenGL renderer roundtrip lost quality");
+    video.set_renderer(RenderBackend::Vulkan);check(VideoSettings::read(video_path).renderer==RenderBackend::Vulkan&&video.settings().quality==quality_before,"Vulkan renderer roundtrip lost quality");
+    video.set_renderer(RenderBackend::OpenGL);
     video.set_renderer(RenderBackend::Software,false);check(VideoSettings::read(video_path).renderer==RenderBackend::OpenGL,"temporary renderer switch persisted");
     std::filesystem::remove(video_path);
     for(unsigned i=Frontend::video_row;i<Frontend::back_row;++i)front.input(MenuInput::Down);front.input(MenuInput::Confirm);check(front.active()&&!front.settings(),"back row moved");

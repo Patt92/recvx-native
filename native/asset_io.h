@@ -15,7 +15,11 @@ SceneTexture read_tga(const std::filesystem::path& path);
 // (Typ 9), wenn die Datei hoechstens 256 Farben traegt, sonst RGB/RGBA-RLE (Typ 10). read_tga und der
 // HD-Inhaltsschluessel ergeben daraus dieselben Bildpunkte bzw. Bytes wie aus der Quelle (geprueft).
 std::vector<std::uint8_t> compress_tga(const std::vector<std::uint8_t>& bytes,const std::filesystem::path& path);
+// Gekochte Form: Typ 2, 32 Bit, oben links, ohne Fusszeile.
+std::vector<std::uint8_t> encode_tga(const SceneTexture& texture);
 void write_tga(const std::filesystem::path& path,const SceneTexture& texture);
+// HD-Schluessel einer gekochten TGA: MD5 der unkomprimierten Datei (auch fuer RLE-/Farbtabellen-Baeume).
+std::string cooked_tga_md5(const std::filesystem::path& path);
 void apply_texture_files(Scene& scene,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity);
 // Herkunft der von apply_texture_files gesetzten Texturen seit Prozessstart: explizite Mod-Datei,
 // HD-Ersetzung (mods/textures/hd), gekochte Datei aus data/, decodiertes Original ohne Datei.
@@ -28,6 +32,6 @@ bool texture_mods_enabled();
 std::string texture_tree_format(const std::filesystem::path& data);
 // Anzahl der Dateien in mods/textures/hd.
 std::size_t hd_texture_count(const std::filesystem::path& mods);
-// Anzahl PCSX2-Ersatztexturen (*.dds mit Hash-Namen) direkt in mods/textures; nicht direkt geladen.
-std::size_t pcsx2_pack_count(const std::filesystem::path& mods);
+// Anzahl *.dds unter folder (rekursiv); die Runtime liest keine DDS.
+std::size_t dds_file_count(const std::filesystem::path& folder);
 }

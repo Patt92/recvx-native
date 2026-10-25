@@ -17,11 +17,17 @@ lokalen Ordner `data/` kann nicht gestartet werden.
 `./build.sh` erzeugt auf macOS die Entwicklungs-App unter
 `build/start/macos-arm64/RECVX Native.app`. `Start.command` bevorzugt diese
 App; sie nutzt die aktuellen Daten, Mods und Einstellungen im Projektordner.
+**Die Dev-App lädt `data/` und `mods/` lose aus dem Projektordner**: geänderte
+Daten oder Mods wirken beim nächsten Start ohne neuen Build. DDS-Pakete gehören
+nach `mods/hd-source/`; `./build.sh` übersetzt sie nach `mods/textures/hd/`.
 Auch ohne vorhandenes Paket wird die App erstellt. Ein fehlgeschlagener Build
 aktualisiert den Starter nicht.
 
 Eigenständige Pakete mit kopierten Laufzeitdaten erzeugt zusätzlich
-`./build.sh --platform macos --package --output <neuer-Paketordner>`.
+`./build.sh --platform macos --package --output <neuer-Paketordner>`
+(mit `--compressed` aus `data_compressed/`; die Mods des Projekts werden dabei in
+die Paketdaten eingebacken, ein `mods`-Ordner wird nicht mitgeliefert).
+Den vollständigen Ablauf beschreibt [docs/BUILD.md](docs/BUILD.md).
 Die Standardausgaben für Pakete liegen unter `build/packages/`; vorhandene
 Pakete werden nicht überschrieben.
 iOS/iPadOS-Builds (Gerät und Simulator, mit Xcode) erzeugt

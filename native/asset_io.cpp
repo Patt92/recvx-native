@@ -9,6 +9,7 @@
 #include <map>
 #include <cctype>
 #include <atomic>
+#include <mutex>
 #include <optional>
 namespace recvx {
 std::vector<std::uint8_t> read_asset_file(const std::filesystem::path& path,std::size_t limit){
@@ -137,12 +138,14 @@ SceneTexture read_tga(const std::filesystem::path& path){
     }
     return t;
 }
-void write_tga(const std::filesystem::path& path,const SceneTexture& t){
+std::vector<std::uint8_t> encode_tga(const SceneTexture& t){
     if(!t.width||!t.height||t.width>8192||t.height>8192||t.pixels.size()!=std::size_t(t.width)*t.height)throw std::runtime_error("invalid exported texture");
     std::vector<std::uint8_t> bytes(18+t.pixels.size()*4);bytes[2]=2;bytes[12]=t.width&255;bytes[13]=t.width>>8;bytes[14]=t.height&255;bytes[15]=t.height>>8;bytes[16]=32;bytes[17]=40;
     for(std::size_t i=0;i<t.pixels.size();++i){const auto p=t.pixels[i];for(unsigned c=0;c<3;++c)bytes[18+i*4+c]=(p>>(c*8))&255;bytes[18+i*4+3]=(p>>24)&255;}
-    write_asset_file(path,bytes);
+    return bytes;
 }
+void write_tga(const std::filesystem::path& path,const SceneTexture& t){write_asset_file(path,encode_tga(t));}
+std::string cooked_tga_md5(const std::filesystem::path& path){return md5_hex(cooked_tga_identity(path));}
 namespace {std::atomic<bool> texture_mods_on{true};std::atomic<std::size_t> stat_mod{0},stat_hd{0},stat_data{0},stat_original{0};}
 void set_texture_mods_enabled(bool enabled){texture_mods_on=enabled;}
 bool texture_mods_enabled(){return texture_mods_on;}
@@ -157,14 +160,13 @@ std::string texture_tree_format(const std::filesystem::path& data){
     if(!f)return "unreadable TGA";
     switch(head[2]){case 2:return "uncompressed TGA";case 10:return "RLE TGA";case 1:return "colour-mapped TGA";case 9:return "colour-mapped RLE TGA";default:return "TGA type "+std::to_string(head[2]);}
 }
-std::size_t pcsx2_pack_count(const std::filesystem::path& mods){
-    // PCSX2-Ersatztexturen <TEX0-Hash>-[<CLUT-Hash>-]<bits>.dds direkt in textures/: die Schluessel sind
-    // xxHash-Werte ueber das GS-Speicherbild, das der Port nicht hat (tools/import_pcsx2_textures.py ordnet zu).
-    const auto root=mods/"textures";if(mods.empty()||!std::filesystem::is_directory(root))return 0;
+std::size_t dds_file_count(const std::filesystem::path& folder){
+    // DDS-Pakete (PCSX2/Dolphin) liest die Runtime nie; tools/import_hd_textures.py macht daraus textures/hd.
+    if(folder.empty()||!std::filesystem::is_directory(folder))return 0;
     std::size_t n=0;
-    for(const auto& e:std::filesystem::directory_iterator(root)){if(!e.is_regular_file())continue;
+    for(const auto& e:std::filesystem::recursive_directory_iterator(folder)){if(!e.is_regular_file())continue;
         auto ext=e.path().extension().string();for(auto& c:ext)c=char(std::tolower(static_cast<unsigned char>(c)));
-        const auto stem=e.path().stem().string();if(ext==".dds"&&stem.find('-')!=std::string::npos)++n;}
+        if(ext==".dds")++n;}
     return n;
 }
 std::size_t hd_texture_count(const std::filesystem::path& mods){
@@ -177,11 +179,16 @@ void apply_texture_files(Scene& scene,const std::filesystem::path& data,const st
     // Die Datei ersetzt nur die Bildpunkte; der GS-Wickelmodus gehoert zum Originalkopf.
     // Hostschalter (Debugmenue "Textur-Mods"): aus = beide Mod-Stufen uebergehen, PS2-Bild aus data/.
     const bool use_mods=!mods.empty()&&texture_mods_on;
+    // Der MD5 der gekochten Datei kostet je Textur einen zweiten Dateilesevorgang: nur rechnen, wenn es
+    // mods/textures/hd ueberhaupt gibt (einmal je Mods-Ordner geprueft).
+    static std::mutex hd_lock;static std::map<std::filesystem::path,bool> hd_present;bool use_hd=false;
+    if(use_mods){std::lock_guard<std::mutex> lock(hd_lock);auto at=hd_present.find(mods);
+        if(at==hd_present.end())at=hd_present.emplace(mods,std::filesystem::is_directory(mods/"textures"/"hd")).first;use_hd=at->second;}
     for(std::size_t i=0;i<scene.textures.size();++i){const auto relative=std::filesystem::path("textures")/identity/(asset_number(unsigned(i))+".tga");
         auto replace=[&](const std::filesystem::path& file){const bool u=scene.textures[i].clamp_u,v=scene.textures[i].clamp_v;scene.textures[i]=read_tga(file);scene.textures[i].clamp_u=u;scene.textures[i].clamp_v=v;};
         if(use_mods&&std::filesystem::is_regular_file(mods/relative)){replace(mods/relative);++stat_mod;continue;}
         if(!std::filesystem::is_regular_file(data/relative)){++stat_original;continue;}
-        if(use_mods){const auto hd=mods/"textures"/"hd"/(md5_hex(cooked_tga_identity(data/relative))+".tga");
+        if(use_hd){const auto hd=mods/"textures"/"hd"/(md5_hex(cooked_tga_identity(data/relative))+".tga");
             if(std::filesystem::is_regular_file(hd)){replace(hd);++stat_hd;continue;}}
         replace(data/relative);++stat_data;
     }

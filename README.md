@@ -90,6 +90,13 @@ one replacement to cover shared textures across multiple rooms. Remove an
 override to return to the base asset. On macOS, external mods do not require
 modifying or re-signing the app bundle.
 
+The development app started by `Start.command` reads `data/` and `mods/` **loose**
+from the project folder, so mod and data changes need no rebuild. Packages and
+mobile apps bundle their data with the project's mods baked in at build time
+and ship no `mods/` folder; DDS packs go into `mods/hd-source/` and are imported
+by every `./build.sh` run. The complete flow (which folder is read, written and
+bundled) is in [docs/BUILD.md](docs/BUILD.md).
+
 See [assets and mod support](docs/NATIVE_ASSETS.md) for supported formats,
 replacement paths and texture-pack tools.
 
@@ -243,8 +250,10 @@ Launch through `Start.command`. macOS defaults to Metal; OpenGL is optional
 (`--renderer opengl`), and software remains available (`--renderer software`).
 
 `./build.sh` alone builds `build/start/macos-arm64/RECVX Native.app`, a small development
-app without data: its launcher passes the project's `data/` and `mods/` folders by path.
-Only `--package --output <new folder>` copies the data into a standalone app.
+app without data: its launcher passes the project's `data/` and `mods/` folders by path and
+the game reads them **loose** (no rebuild after data or mod changes).
+Only `--package` copies the data (`data/`, or `data_compressed/` with `--compressed`) into a
+standalone app, with the project's mods baked in and no mods folder; see [docs/BUILD.md](docs/BUILD.md).
 `--compressed [folder]` additionally writes a lossless compressed tree from `data/`
 (colour-mapped TGA, recooked movies; default `data_compressed`, kept if it already exists),
 e.g. `./build.sh --iso "/path/to/game.iso" --compressed`.

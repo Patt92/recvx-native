@@ -1,5 +1,7 @@
 # Plan: Erweiterung der Rasterer um Vulkan
 
+> Umgesetzt 2026-10-25, Ergebnis und Abweichungen: [vulkan_raster_backend.result.md](vulkan_raster_backend.result.md).
+
 Stand: 2026-10-24, Arbeitsbaum `main`, Policy-Gate `tools/check_no_original_core.py` = PASS.
 Auftragsklasse: Mehrstufiger Ausbau des Host-Rasterers mit neuen Build- und
 Auswahl-Schnittstellen. Kein Eingriff in Spiellogik, World oder Originalkern.

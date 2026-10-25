@@ -17,6 +17,7 @@ VideoSettings VideoSettings::read(const std::filesystem::path& path){
         const auto key=trim(line.substr(0,eq)),value=trim(line.substr(eq+1));
         if(key=="renderer"){
             if(value=="gpu")out.renderer=RenderBackend::Gpu;else if(value=="software")out.renderer=RenderBackend::Software;else if(value=="opengl")out.renderer=RenderBackend::OpenGL;
+            else if(value=="vulkan")out.renderer=RenderBackend::Vulkan;
             else throw std::runtime_error("invalid video renderer: "+value);continue;}
         if(key!="quality")throw std::runtime_error("unknown video setting: "+key);
         bool found=false;for(int i=0;i<4;++i)if(value==names[i]){out.quality=RenderQuality(i);found=true;}
@@ -26,7 +27,8 @@ VideoSettings VideoSettings::read(const std::filesystem::path& path){
 }
 void VideoSettings::save(const std::filesystem::path& path)const{
     std::ostringstream text;text<<"# RECVX host render quality: original, low, high, ultra\nquality = "<<names[int(quality)]<<'\n'
-        <<"# Rasterizer: gpu (platform default), opengl or software\nrenderer = "<<(renderer==RenderBackend::Gpu?"gpu":renderer==RenderBackend::OpenGL?"opengl":"software")<<'\n';
+        <<"# Rasterizer: gpu (platform default), opengl, vulkan or software\nrenderer = "
+        <<(renderer==RenderBackend::Gpu?"gpu":renderer==RenderBackend::OpenGL?"opengl":renderer==RenderBackend::Vulkan?"vulkan":"software")<<'\n';
     if(path.has_parent_path())std::filesystem::create_directories(path.parent_path());
     auto temporary=path;temporary+=".tmp";
     {std::ofstream file(temporary);if(!file)throw std::runtime_error("cannot save video settings");file<<text.str();file.close();if(!file)throw std::runtime_error("video settings save failed");}

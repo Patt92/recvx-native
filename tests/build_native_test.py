@@ -192,6 +192,7 @@ class BackendBuildTests(unittest.TestCase):
             build_native.main()
         configure = next(c for c in commands if '-S' in c)
         self.assertIn('-DRECVX_ENABLE_OPENGL=OFF', configure)
+        self.assertIn('-DRECVX_ENABLE_VULKAN=ON', configure)
         self.assertIn('-DBUILD_TESTING=ON', configure)
         tests = next(c for c in commands if c[0] == '/usr/bin/ctest')
         self.assertIn('^gpu_raster', tests)
@@ -209,6 +210,7 @@ class BackendBuildTests(unittest.TestCase):
             build_native.main()
         cross = next(c for c in commands if any(s.endswith('build_windows.py') for s in c))
         self.assertEqual(cross[-2:], ('--opengl', 'off'))
+        self.assertEqual(cross[-4:-2], ('--vulkan', 'on'))
 
 
 class DevelopmentAppTests(unittest.TestCase):

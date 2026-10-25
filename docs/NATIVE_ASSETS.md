@@ -59,7 +59,8 @@ Metal (`native/gpu_raster.h`, `video.ini` `renderer = gpu|software`, `--renderer
 clipping, strip rules, sorting and shadow masks, the GPU draws the same setup list; point-sampled
 output is bit-identical (`gpu_raster_parity`). On Windows the same setup list is rasterized by Direct3D 11
 through rasterizer ordered views; GPUs without ROV support keep the software path. That backend is
-written but not yet verified on hardware. The original punch-through effect pass instead filters RGB independently
+written but not yet verified on hardware. Vulkan (`renderer = vulkan`) is an explicit option on all
+desktop platforms and uses ordered fragment shader interlock in the same role. The original punch-through effect pass instead filters RGB independently
 of alpha, rejects alpha-zero samples and writes the remaining colour and depth without blending.
 Its host mip chain keeps the same independent RGB filtering; filtered alpha-test quantization
 and equal-depth comparisons remain open. Other material transparency gaps remain documented
@@ -82,24 +83,26 @@ build/texvenv/bin/python tools/build_hd_textures.py --matches build/hd-matches.j
 build/macos-arm64/recvx-runtime --data data --mods build/hd-textures
 ```
 
-Importing a PCSX2 texture replacement pack (`<TEX0 hash>-<CLUT hash>-<bits>.dds`, e.g. copied
-straight into `mods/textures/`). Its keys are xxHash values over PCSX2's GS memory image, which the
-port does not have, so the files cannot be read directly; the importer takes the PS2 size from the
-name's `bits` (TW/TH), box-downscales each DDS to it and matches it against cooked textures of that
-size (same tiers as below, Pillow only):
+DDS texture packs (PCSX2 `<TEX0 hash>-[<CLUT hash>-]<bits>.dds`, Dolphin `tex1_<w>x<h>_...dds`) go
+into `mods/hd-source/` (any subfolders). The runtime never reads DDS; every `./build.sh` run imports
+them with `tools/import_hd_textures.py` into `mods/textures/hd/<md5>.tga` (content match against the
+cooked textures of the size in the name, tiers below, Pillow only) and records matched, unused and
+ignored files in `mods/textures/hd-import.json`. Unchanged sources are skipped; removed DDS take their
+imported TGA with them; other files in `textures/hd/` are kept. Manual run:
 
 ```sh
-python3 tools/import_pcsx2_textures.py --pack mods/textures --output mods            # --scale 4 default
+python3 tools/import_hd_textures.py --mods mods --data data     # --scale 4 default, --force re-imports
 ```
 
-It writes `mods/textures/hd/<md5>.tga` plus `mods/textures/hd-manifest-pcsx2.json` (matched and
-unmatched files with NCC/PSNR) and keeps existing HD files. At startup the runtime reports a pack it
-finds in `mods/textures/` and whether it was imported. Name plates and texts the pack redraws (map
-names, file screens) only match if the cooked texture still has the same layout.
+Name plates and texts the pack redraws (map names, file screens) only match if the cooked texture
+still has the same layout. Full build/bundle flow: [BUILD.md](BUILD.md).
 
-The runtime looks in `<mods>` first; without `--mods` it uses `mods/` beside `data/`
-(the app/Start scripts do the same), so a pack placed in `mods/textures/hd/` is
-picked up automatically. Delete the folder to go back to the original look.
+The runtime looks in `<mods>` first; without `--mods` it uses `mods/` beside `data/`.
+The development app (`Start.command`) passes the project's `data/` and `mods/` and reads them loose,
+so a pack placed in `mods/textures/hd/` is picked up at the next start without a rebuild. Packages
+(`./build.sh --package`, iOS `--ios-bundle-data`) instead bake the project's `mods/` into their copied
+data at build time and ship no mods folder; only desktop runtimes still read an extra `mods` folder
+beside the app. Delete the folder (dev app) or rebuild the package to go back to the original look.
 
 Matching decodes each DDS, box-downsamples it to the GameCube size in its file
 name and compares luma correlation (NCC) with PS2 textures of the same size.

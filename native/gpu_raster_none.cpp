@@ -14,4 +14,7 @@ std::shared_ptr<GpuRaster> create_gpu_raster(std::string& reason){
 #ifndef RECVX_HAVE_OPENGL
 std::shared_ptr<GpuRaster> create_opengl_raster(std::string& reason,bool){reason="built without OpenGL (RECVX_ENABLE_OPENGL=OFF)";return nullptr;}
 #endif
+#ifndef RECVX_HAVE_VULKAN
+std::shared_ptr<GpuRaster> create_vulkan_raster(std::string& reason){reason="built without Vulkan (RECVX_ENABLE_VULKAN=OFF)";return nullptr;}
+#endif
 }

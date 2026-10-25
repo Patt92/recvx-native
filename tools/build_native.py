@@ -16,6 +16,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from data_profiles import profile as data_profile  # noqa: E402
+from bundle_data import stage_bundle_data, mods_with_content  # noqa: E402
 
 
 def _project_version():
@@ -440,52 +441,93 @@ def package_directory(target: str, version: str) -> Path:
     return ROOT / 'build/packages' / f'{label}-v{version}'
 
 
-def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: int) -> None:
+def host_tools(target: str, binary_dir: Path, names) -> list[Path]:
+    """Build-host executables (exporters, compressor, mod baker). Cross builds (Windows from macOS/Linux,
+    iOS) run the tools of the native host build, which ./build.sh --platform macos creates."""
+    if (is_windows_target(target) and platform.system() != 'Windows') or is_ios_target(target):
+        directories, suffix = [ROOT / 'build/macos-arm64', ROOT / 'build/native'], ''
+    else:
+        directories, suffix = [binary_dir], '.exe' if is_windows_target(target) else ''
+    names = [name + suffix for name in names]
+    directory = next((d for d in directories if all((d / n).is_file() for n in names)), None)
+    if directory is None:
+        raise RuntimeError(f'missing build-host tools {" and ".join(names)} in {", ".join(map(str, directories))}; '
+                           'build the host first (./build.sh --platform macos)')
+    return [directory / name for name in names]
+
+
+def prepare_iso_data(images, data: Path, binary_dir: Path, target: str, jobs: int) -> str:
     """Create the complete loose data tree from ISO images only when none exists yet."""
     if (data / 'native-data.version').is_file():
         print(f'Using existing prepared data at {data}; --iso is not extracted again.', flush=True)
-        return
+        return f'{data}: existing tree kept (--iso extracts only into a missing folder)'
     if data.exists():
         raise RuntimeError(f'--iso needs a new data directory, but {data} exists without a completed export')
-    if is_windows_target(target) and platform.system() != 'Windows':
-        # The exporters run on the build host, not on the cross-compiled target.
-        directories = [ROOT / 'build/macos-arm64', ROOT / 'build/native']
-        suffix = ''
-    else:
-        directories = [binary_dir]
-        suffix = '.exe' if is_windows_target(target) else ''
-    names = ('recvx-assets' + suffix, 'recvx-world-assets' + suffix)
-    directory = next((d for d in directories if all((d / n).is_file() for n in names)), None)
-    if directory is None:
-        raise RuntimeError('ISO extraction requires the built host exporters '
-                           f'{" and ".join(names)} in {", ".join(map(str, directories))}')
-    exporter = directory / names[0]
+    exporter, _ = host_tools(target, binary_dir, ('recvx-assets', 'recvx-world-assets'))
     command = [sys.executable, str(ROOT / 'tools/prepare_native_data.py'),
                '--output', str(data), '--exporter', str(exporter), '--jobs', str(jobs)]
     for image in images:
         command += ['--iso', str(image.absolute())]  # run() starts in ROOT, not in the caller's directory
     run(*command)
+    return f'{data}: extracted from {", ".join(str(i) for i in images)}'
 
 
-def prepare_compressed_data(data: Path, output: Path, binary_dir: Path, target: str, jobs: int) -> None:
+def prepare_compressed_data(data: Path, output: Path, binary_dir: Path, target: str, jobs: int) -> str:
     """Create the lossless compressed tree (colour-mapped TGA, recooked movies) from a prepared --data."""
     if (output / 'native-data.version').is_file():
         print(f'Using existing compressed data at {output}; --compressed is not written again.', flush=True)
-        return
+        return f'{output}: existing tree kept (delete it to rebuild it from {data})'
     if output.exists():
         raise RuntimeError(f'--compressed needs a new directory, but {output} exists without a completed tree')
     if not (data / 'native-data.version').is_file():
         raise RuntimeError(f'--compressed derives from a prepared data tree (missing {data / "native-data.version"})')
-    if is_windows_target(target) and platform.system() != 'Windows':
-        directories, suffix = [ROOT / 'build/macos-arm64', ROOT / 'build/native'], ''
-    else:
-        directories, suffix = [binary_dir], '.exe' if is_windows_target(target) else ''
-    names = ('recvx-assets' + suffix, 'recvx-texture-compress' + suffix)
-    directory = next((d for d in directories if all((d / n).is_file() for n in names)), None)
-    if directory is None:
-        raise RuntimeError(f'--compressed requires the built host tools {" and ".join(names)} in {", ".join(map(str, directories))}')
+    exporter, _ = host_tools(target, binary_dir, ('recvx-assets', 'recvx-texture-compress'))
     run(sys.executable, str(ROOT / 'tools/prepare_native_data.py'), '--compressed', '--from-data', str(data),
-        '--output', str(output), '--exporter', str(directory / names[0]), '--jobs', str(jobs))
+        '--output', str(output), '--exporter', str(exporter), '--jobs', str(jobs))
+    return f'{output}: written from {data}'
+
+
+def import_hd_sources(mods: Path, data: Path, jobs: int) -> str:
+    """mods/hd-source/**.dds -> mods/textures/hd/<md5>.tga (tools/import_hd_textures.py; skipped when unchanged)."""
+    source = mods / 'hd-source'
+    stray = sum(1 for p in (mods / 'textures').rglob('*') if p.suffix.lower() == '.dds') if (mods / 'textures').is_dir() else 0
+    note = (f'; WARNING: {stray} DDS in {mods / "textures"} are never read, move the pack to {source}' if stray else '')
+    if not source.is_dir():
+        return f'no {source} folder (DDS packs go there){note}'
+    if not (data / 'native-data.version').is_file():
+        return f'skipped, {source} needs the uncompressed tree {data}{note}'
+    try:
+        import import_hd_textures
+    except ImportError as error:
+        raise RuntimeError(f'HD import of {source} needs Pillow ({error}); install it: python3 -m pip install Pillow')
+    lines = []
+    import_hd_textures.run(mods, data, 4, 'AB', jobs, log=lambda line: (print(line, flush=True), lines.append(line)))
+    return (lines[-1] if lines else f'nothing to import from {source}') + note
+
+
+def bundle_tree(target: str, data: Path, compressed: Path | None, binary_dir: Path, jobs: int) -> tuple[Path, bool]:
+    """The tree an app bundles: data_compressed with --compressed or when the platform always needs it (tvOS)."""
+    if compressed is None and data_profile(target)['compressed'] != 'always':
+        return data, False
+    tree = (compressed or ROOT / 'data_compressed').resolve()
+    prepare_compressed_data(data, tree, binary_dir, target, jobs)
+    return tree, True
+
+
+def stage_app_data(target: str, source: Path, compressed: bool, mods: Path, binary_dir: Path) -> tuple[Path, dict]:
+    """Private copy of the bundle tree with mods baked in; the app gets no mods folder."""
+    bake = None
+    if mods_with_content(mods) is not None:
+        bake = host_tools(target, binary_dir, ('recvx-mod-bake',))[0]
+    staging = ROOT / 'build/bundle-data' / target
+    print(f'Staging app data from {source} in {staging} (mods from {mods} baked in) ...', flush=True)
+    return staging, stage_bundle_data(source, staging, target, mods, bake, compressed)
+
+
+def print_summary(lines) -> None:
+    print('\n== RECVX build summary ==', flush=True)
+    for label, text in lines:
+        print(f'{label + ":":<14}{text}', flush=True)
 
 
 def main():
@@ -495,6 +537,9 @@ def main():
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
                         help='PS2 ISO9660 image used to create missing --data; repeat to merge discs')
+    parser.add_argument('--mods', type=Path, default=ROOT / 'mods',
+                        help='mods folder: hd-source/ is imported into textures/hd, packages bake it into their data '
+                             '(default: mods/ in the project)')
     parser.add_argument('--compressed', nargs='?', type=Path, const=ROOT / 'data_compressed',
                         help='Also write the lossless compressed tree from --data (after --iso), default data_compressed; '
                              'an existing completed tree is kept')
@@ -504,6 +549,7 @@ def main():
     parser.add_argument('--test', action='store_true', help='Build test targets and run CTest')
     parser.add_argument('--test-regex', help='Build test targets and run only matching CTest names')
     parser.add_argument('--opengl', choices=['on', 'off'], default='on', help='Build optional OpenGL backend (default: on)')
+    parser.add_argument('--vulkan', choices=['on', 'off'], default='on', help='Build optional Vulkan backend when Vulkan headers and glslc are present (default: on)')
     parser.add_argument('--verify-runtime', action='store_true', help='Run the opt-in original-data runtime regression suite')
     parser.add_argument('--no-test', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--ios-profile', type=Path, help='iOS device: provisioning profile used for signing (else unsigned)')
@@ -521,10 +567,12 @@ def main():
     if not target:
         parser.error('unsupported host')
     data = args.data.resolve()
+    mods = args.mods.resolve()
+    summary = []
     if is_ios_target(target):
         if platform.system() != 'Darwin':
             parser.error('iOS builds require a macOS host with Xcode')
-        if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data or args.compressed:
+        if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data:
             parser.error('iOS builds cannot run tests or prepare data; build and verify them with the macOS target')
         if args.ios_bundle_data and not (data / 'native-data.version').is_file():
             parser.error(f'--ios-bundle-data requires a prepared data tree (missing {data / "native-data.version"})')
@@ -542,11 +590,12 @@ def main():
                      'Installer the CMake tools component; on some installs it is only listed under the Linux/Mac '
                      'development workload) and open a new terminal; verify with "cmake --version" before building.')
     print(f'Target {target}, CMake {cmake}', flush=True)
+    summary.append(('Target', target))
     run_checks = (args.test or bool(args.test_regex)) and not args.no_test
     if is_windows_target(target) and platform.system() != 'Windows':
         # The final binary audit also invokes Zig; use the same project cache.
         os.environ['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build/toolchains/zig-cache')
-        run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs, '--opengl', args.opengl)
+        run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs, '--vulkan', args.vulkan, '--opengl', args.opengl)
         build = cross_build_directory(target)
         print(f'Cross-built Windows {WINDOWS_TARGETS[target]}.', flush=True)
     elif is_ios_target(target):
@@ -554,11 +603,21 @@ def main():
             parser.error('iOS uses a single-config generator: the policy audit needs compile_commands.json, which Xcode does not write')
         os.environ['DEVELOPER_DIR'] = xcode_developer_dir()
         build = ios_build_directory(target)
+        bundle = ''
+        if args.ios_bundle_data:
+            summary.append(('HD import', import_hd_sources(mods, data, args.jobs)))
+            tree, compressed = bundle_tree(target, data, args.compressed, build, args.jobs)
+            staging, staged = stage_app_data(target, tree, compressed, mods, build)
+            bundle = str(staging)
+            summary.append(('App data', f'{tree} ({"compressed" if compressed else "uncompressed"}) copied into the app; '
+                                        f'mods: {staged["bake"]}; no runtime mod support on {target}'))
+        else:
+            summary.append(('App data', 'not bundled: the app reads Documents/data (pass --ios-bundle-data to bundle it)'))
         run(cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_SYSTEM_NAME=iOS',
             f'-DCMAKE_OSX_SYSROOT={IOS_TARGETS[target]}', '-DCMAKE_OSX_ARCHITECTURES=arm64',
             f'-DCMAKE_OSX_DEPLOYMENT_TARGET={IOS_DEPLOYMENT_TARGET}', '-DRECVX_FETCH_SDL2=ON', '-DBUILD_TESTING=OFF',
             f'-DRECVX_BUILD_VERSION={FULL_VERSION}', '-DRECVX_ENABLE_OPENGL=OFF', f'-DRECVX_IOS_BUNDLE_ID={args.ios_bundle_id}',
-            f'-DRECVX_IOS_BUNDLE_DATA={data if args.ios_bundle_data else ""}',
+            f'-DRECVX_IOS_BUNDLE_DATA={bundle}',
             f'-DRECVX_BUNDLE_DATA_EXCLUDE={";".join(data_profile(target)["exclude"])}',
             f'-DRECVX_ENABLE_MODS={"ON" if data_profile(target)["mods"] else "OFF"}')
         run(cmake, '--build', build, '--config', 'Release', '--parallel', args.jobs)
@@ -577,7 +636,8 @@ def main():
                 parser.error('--install on a device needs a signed build; pass --ios-profile')
             else:
                 run('xcrun', 'devicectl', 'device', 'install', 'app', '--device', args.ios_device, app)
-        print(f'Build ready: {app}', flush=True)
+        summary.append(('App', str(app)))
+        print_summary(summary)
         return
     else:
         if target == 'macos' and platform.system() != 'Darwin':
@@ -585,7 +645,7 @@ def main():
         if target == 'linux' and platform.system() != 'Linux':
             parser.error('Linux builds require a Linux host')
         build = native_build_directory(target)
-        configure = [cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}', f'-DRECVX_ENABLE_OPENGL={args.opengl.upper()}']
+        configure = [cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}', f'-DRECVX_ENABLE_OPENGL={args.opengl.upper()}', f'-DRECVX_ENABLE_VULKAN={args.vulkan.upper()}']
         if target == 'macos':
             configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
         if is_windows_target(target):
@@ -599,9 +659,11 @@ def main():
     binary_dir = build / 'Release' if (build / 'Release').is_dir() else build
     suffix = '.exe' if is_windows_target(target) else ''
     if args.iso:
-        prepare_iso_data(args.iso, data, binary_dir, target, args.jobs)
+        summary.append(('ISO export', prepare_iso_data(args.iso, data, binary_dir, target, args.jobs)))
+    summary.append(('Data', f'{data}' if (data / 'native-data.version').is_file() else f'{data} MISSING (build with --iso <image>)'))
+    summary.append(('HD import', import_hd_sources(mods, data, args.jobs)))
     if args.compressed:
-        prepare_compressed_data(data, args.compressed.resolve(), binary_dir, target, args.jobs)
+        summary.append(('Compressed', prepare_compressed_data(data, args.compressed.resolve(), binary_dir, target, args.jobs)))
     if args.verify_runtime and not (data / 'native-data.version').is_file():
         parser.error(f'--verify-runtime requires a prepared native data tree (missing {data / "native-data.version"})')
     if run_checks:
@@ -637,11 +699,22 @@ def main():
     if args.package:
         if target == 'linux':
             parser.error('the packaged targets are Windows (x64/ARM64) and macOS')
-        output = args.output or package_directory(target, VERSION)
-        run(sys.executable, ROOT / 'tools/package_native.py', '--platform', target, '--build', binary_dir, '--data', data, '--output', output)
+        output = (args.output or package_directory(target, VERSION)).resolve()
+        if output.exists():
+            parser.error(f'package destination already exists: {output}')
+        tree, compressed = bundle_tree(target, data, args.compressed, binary_dir, args.jobs)
+        staging, staged = stage_app_data(target, tree, compressed, mods, binary_dir)
+        run(sys.executable, ROOT / 'tools/package_native.py', '--platform', target, '--build', binary_dir, '--data', staging, '--output', output)
+        shutil.rmtree(staging)
+        summary.append(('Package', f'{output}'))
+        summary.append(('Package data', f'{tree} ({"compressed" if compressed else "uncompressed"}) copied into the package; '
+                                        f'mods: {staged["bake"]}; no mods folder shipped'))
+    summary.append(('Runtime', str(binary_dir / ('recvx-runtime' + suffix))))
     if target == 'macos':
         sync_macos_start_package(binary_dir)
-    print(f'Build ready: {binary_dir}', flush=True)
+        summary.append(('Dev app', f'{ROOT / "build/start/macos-arm64/RECVX Native.app"} (Start.command) reads LOOSE files: '
+                                   f'--data {data} --mods {mods}; nothing is copied, data/mod changes need no rebuild'))
+    print_summary(summary)
 
 
 if __name__ == '__main__':

@@ -10,9 +10,10 @@ namespace recvx {
 //   Hoch:     filtering + 2x2 supersampling (default)
 //   Ultra:    filtering + 3x3 supersampling
 enum class RenderQuality {Original,Low,High,Ultra};
-// Host-Rasterer: gpu = Plattformstandard (Metal / D3D11 / OpenGL), opengl = ausdruecklich GL 4.1.
-// Software bleibt Referenz und Fehlerpfad; Qualitaet und Backendwahl sind unabhaengig.
-enum class RenderBackend {Gpu,Software,OpenGL};
+// Host-Rasterer: gpu = Plattformstandard (Metal / D3D11 / OpenGL), opengl = ausdruecklich GL 4.1,
+// vulkan = ausdruecklich Vulkan mit geordnetem Fragment-Interlock. Software bleibt Referenz und
+// Fehlerpfad; Qualitaet und Backendwahl sind unabhaengig. Der Wert ist zugleich der Debugmenue-Index.
+enum class RenderBackend {Gpu,Software,OpenGL,Vulkan};
 struct VideoSettings {
     RenderQuality quality=RenderQuality::High;
     RenderBackend renderer=RenderBackend::Gpu;

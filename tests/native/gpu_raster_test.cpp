@@ -14,6 +14,12 @@
 // Tiefe ohne Schreiben und Drahtgitter. Rueckgabe 77 (uebersprungen) ohne GPU-Backend.
 using namespace recvx;
 static void check(bool ok,const std::string& message){if(!ok)throw std::runtime_error(message);}
+// Vulkan uebersprungen nur, wenn das System kein passendes Geraet bietet oder der Build es weglaesst
+// (create_device/open_library/gpu_raster_none.cpp); jeder andere Grund ist ein Fehlschlag.
+static bool vulkan_unavailable(const std::string& reason){
+    for(const char* prefix:{"Vulkan library not found","no Vulkan device","built without Vulkan","vkCreateInstance failed (-9)"})
+        if(reason.rfind(prefix,0)==0)return true;
+    return false;}
 static void same(SoftwareRenderer& software,SoftwareRenderer& gpu,const std::string& what){
     std::size_t colour=0,depth=0,first=~std::size_t(0);
     for(std::size_t i=0;i<software.pixels().size();++i){
@@ -118,18 +124,58 @@ static void extra_parity(const std::shared_ptr<GpuRaster>& gpu,const NJS_MATRIX&
             hardware.set_gpu(backend);software.draw_view(scene,identity,32,32,false,{},1,100);hardware.draw_view(scene,identity,32,32,false,{},1,100);
             check(hardware.last_gpu_frame()&&hardware.gpu()==backend,"context/API switch fell back: "+hardware.gpu_error());same(software,hardware,"context/API switch");}
     }else check(reason.find("shader:")==std::string::npos&&reason.find("program:")==std::string::npos&&reason.find("OpenGL error")==std::string::npos&&reason.find("framebuffer incomplete")==std::string::npos,"second GL context failed: "+reason);
+    // Ein Bild, das nach dem Aufzeichnen seiner Texturuploads scheitert (Modifierpass mit mehr Werken, als
+    // das Backend Maskenebenen hat), darf keine Kopie als vorhanden hinterlassen: das naechste Bild derselben
+    // Instanz laedt neu hoch und bleibt bitgleich. Backends mit mehr als 5000 Maskenebenen werfen nicht;
+    // dann prueft dieser Fall nichts.
+    {raster::Frame captured{};std::vector<raster::Setup> setups;
+     SoftwareRenderer software(64,64);software.set_supersampling(1);software.set_texture_filtering(false);
+     software.set_raster_observer([&](const raster::Frame& f){captured=f;setups=*f.setups;});
+     Scene fresh=scene;fresh.textures[0].invalidate_mips();fresh.textures[0].pixels[3]^=0x00010101u;
+     software.draw_view(fresh,identity,32,32,false,{},1,100);software.set_raster_observer({});captured.setups=&setups;
+     raster::Frame failing=captured;failing.shadows=true;failing.before_modifiers=setups.size();failing.before_mirror_effects=setups.size();failing.shadow_pass={true,false};
+     const raster::ShadowGeometry too_many=[](bool){return std::vector<raster::ShadowWork>(5000);};
+     std::vector<std::uint32_t> pixels;std::vector<float> depth;bool threw=false;
+     try{gpu->render(failing,too_many,pixels,depth);}catch(const std::exception&){threw=true;}
+     if(threw){check(gpu->render(captured,{},pixels,depth),"retry after failed frame fell back");
+         check(pixels==software.pixels()&&!std::memcmp(depth.data(),software.depth().data(),depth.size()*sizeof(float)),"frame after a failed frame differs (stale texture upload)");}}
     // Eine leere Setup-Liste ist ein gueltiges GPU-Bild (Hintergrund/Nulltiefe, S=1 behaelt Alpha).
     Scene empty;empty.background=0x12345678u;
     SoftwareRenderer software(32,24),hardware(32,24);for(auto* r:{&software,&hardware})r->set_supersampling(1);
     hardware.set_gpu(gpu);software.draw_view(empty,identity,16,12);hardware.draw_view(empty,identity,16,12);
     check(hardware.last_gpu_frame()&&hardware.gpu()==gpu,"empty GPU frame fell back");same(software,hardware,"empty frame");
 }
+// Nur --backend vulkan, nach Freigabe der Hauptinstanz: zwei Instanzen auf einem Geraet, dann ein neues Geraet.
+static void vulkan_instances(const Scene& scene,const NJS_MATRIX& identity){
+    // Vulkan: zweite Instanz auf demselben Geraet (Hauptbild/Quellpass) mit eigenem cache_owner. Danach sterben
+    // alle Vulkan-Instanzen vor eigenen Scene-Texturen, deren GPU-Kopien sie besitzen: das Geraet lebt ueber die
+    // Texturen weiter und gibt sie danach frei; ein neues Geraet zeichnet wieder bitgleich.
+    std::string vulkan_reason;auto first=create_vulkan_raster(vulkan_reason),second=create_vulkan_raster(vulkan_reason);
+     if(first&&second){
+         Scene copy=scene;for(auto& t:copy.textures)t.invalidate_mips();
+         for(const auto& instance:{first,second,first,second}){
+             SoftwareRenderer software(64,64),hardware(64,64);
+             for(auto* r:{&software,&hardware}){r->set_supersampling(1);r->set_texture_filtering(false);}
+             hardware.set_gpu(instance);software.draw_view(copy,identity,32,32,false,{},1,100);hardware.draw_view(copy,identity,32,32,false,{},1,100);
+             check(hardware.last_gpu_frame()&&hardware.gpu()==instance,"Vulkan instance switch fell back: "+hardware.gpu_error());same(software,hardware,"Vulkan instance switch");}
+         first.reset();second.reset();copy.textures.clear();
+     }else check(vulkan_unavailable(vulkan_reason),"second Vulkan instance failed: "+vulkan_reason);
+    // Das alte Geraet ist mit seinen Texturen gegangen; ein neues Geraet zeichnet dieselbe Szene bitgleich.
+    std::string again_reason;auto again=create_vulkan_raster(again_reason);check(bool(again),"Vulkan device after release failed: "+again_reason);
+    Scene copy=scene;for(auto& t:copy.textures)t.invalidate_mips();
+    SoftwareRenderer software(64,64),hardware(64,64);for(auto* r:{&software,&hardware}){r->set_supersampling(1);r->set_texture_filtering(false);}
+    hardware.set_gpu(again);software.draw_view(copy,identity,32,32,false,{},1,100);hardware.draw_view(copy,identity,32,32,false,{},1,100);
+    check(hardware.last_gpu_frame(),"new Vulkan device fell back: "+hardware.gpu_error());same(software,hardware,"new Vulkan device");
+}
 int main(int argc,char** argv){try{
     _Make_SinTable();
     std::string backend="gpu",data;bool force_copy=false;
     for(int i=1;i<argc;++i){const std::string arg=argv[i];if(arg=="--backend"&&i+1<argc)backend=argv[++i];else if(arg=="--force-copy")force_copy=true;else if(data.empty())data=arg;else throw std::runtime_error("unexpected argument: "+arg);}
-    check(backend=="gpu"||backend=="opengl","backend must be gpu or opengl");
-    std::string reason;const auto gpu=backend=="opengl"?create_opengl_raster(reason,force_copy):create_gpu_raster(reason);
+    check(backend=="gpu"||backend=="opengl"||backend=="vulkan","backend must be gpu, opengl or vulkan");
+    std::string reason;auto gpu=backend=="vulkan"?create_vulkan_raster(reason):backend=="opengl"?create_opengl_raster(reason,force_copy):create_gpu_raster(reason);
+    // Vulkan: uebersprungen nur ohne Bibliothek, Geraet, Interlock oder Build; Fehler danach (Pipeline,
+    // Speicher, Shader) melden sich als "Vulkan <Schritt>: <Code>" und sind ein Fehlschlag.
+    if(!gpu&&backend=="vulkan")check(vulkan_unavailable(reason),"Vulkan initialisation failed: "+reason);
     if(!gpu){check(reason.find("shader:")==std::string::npos&&reason.find("program:")==std::string::npos&&reason.find("OpenGL error")==std::string::npos&&reason.find("framebuffer incomplete")==std::string::npos,"GPU initialisation failed: "+reason);std::cout<<"SKIP: "<<reason<<'\n';return 77;}
     std::cout<<"Backend: "<<gpu->name()<<'\n';
     NJS_MATRIX identity;njUnitMatrix(&identity);
@@ -186,5 +232,7 @@ int main(int argc,char** argv){try{
                 hardware.set_gpu(gpu);software.draw(room,room.cameras[0]);hardware.draw(room,room.cameras[0]);
                 check(hardware.gpu()==gpu&&hardware.last_gpu_frame(),std::string(name)+" fell back: "+hardware.gpu_error());
                 same(software,hardware,std::string(name)+" ss "+std::to_string(ss));}}}
-    std::cout<<gpu->name()<<": point-sampled GPU raster is bit-identical to the band stage\n";return 0;
+    const auto name=gpu->name();
+    if(backend=="vulkan"){gpu.reset();vulkan_instances(scene,identity);}
+    std::cout<<name<<": point-sampled GPU raster is bit-identical to the band stage\n";return 0;
 }catch(const std::exception& e){std::cerr<<"GPU raster test failed: "<<e.what()<<'\n';return 1;}}

@@ -78,7 +78,7 @@ struct Options {
     std::int64_t animation_frame=0;
     bool data_explicit=false; // iOS: ohne --data das Bundle bzw. den Documents-Ordner waehlen
     bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,validate_poses=false,camera_explicit=false,list_controllers=false,third_person=false,nearest=false,video_explicit=false;int supersampling=2;
-    int renderer=-1; // --renderer gpu|software|opengl; Standard: video.ini (gpu) interaktiv, Software headless
+    int renderer=-1; // --renderer gpu|software|opengl|vulkan; Standard: video.ini (gpu) interaktiv, Software headless
     unsigned render_threads=0; // --render-threads: Host-Diagnose fuer Energiemessungen; 0 = Rendererstandard, Bild fuer jede Zahl identisch
 };
 Options options(int argc,char** argv){
@@ -110,7 +110,7 @@ Options options(int argc,char** argv){
         else if(arg=="--third-person")o.third_person=true;
         else if(arg=="--nearest"){o.nearest=true;o.video_explicit=true;}
         else if(arg=="--ss"){const auto n=number();if(!n||n>4)throw std::runtime_error("--ss must be 1 through 4");o.supersampling=int(n);o.video_explicit=true;}
-        else if(arg=="--renderer"){const auto mode=value();if(mode!="gpu"&&mode!="software"&&mode!="opengl")throw std::runtime_error("--renderer expects gpu, opengl or software");o.renderer=mode=="gpu"?1:mode=="opengl"?2:0;}
+        else if(arg=="--renderer"){const auto mode=value();if(mode!="gpu"&&mode!="software"&&mode!="opengl"&&mode!="vulkan")throw std::runtime_error("--renderer expects gpu, opengl, vulkan or software");o.renderer=mode=="gpu"?1:mode=="opengl"?2:mode=="vulkan"?3:0;}
         else if(arg=="--render-threads"){const auto n=number();if(n>64)throw std::runtime_error("--render-threads must be 0 through 64");o.render_threads=unsigned(n);}
         else if(arg=="--preview")o.preview=true;
         else if(arg=="--inventory")o.inventory=true;
@@ -168,7 +168,7 @@ Options options(int argc,char** argv){
                        "--player <10..14> --spawn <index> --motion <index> --frame <integer>\n"
                        "--nearest: point-sample textures (no mipmaps/filtering; shimmers) for comparison\n                       "
                        "--ss <1-4>: supersampling factor per axis (default 2; 1 = off, cheaper)\n                       "
-                       "--renderer gpu|opengl|software: rasterizer (default: video.ini, platform GPU; headless uses software)\n                       "
+                       "--renderer gpu|opengl|vulkan|software: rasterizer (default: video.ini, platform GPU; headless uses software)\n                       "
                        "--render-threads <0-64>: raster worker threads for energy measurements (0 = default; output identical)\n                       "
                        "--third-person: enable the host 3rd-person camera mod for this run without saving it\n"
                        "--camera <1-based index> --no-player --verify-scenes --verify-players\n"
@@ -286,9 +286,11 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         std::cout<<"User data: "<<user_paths.root<<(user_paths.dev?" (dev git tree)":" (release user dir)")<<"; saves: "<<saves_dir<<'\n';
         // Texturquelle und Mods, damit ein PS2/HD-Vergleich nachvollziehbar ist (Raumzeile zaehlt die Treffer).
         std::cout<<"Data: "<<args.data<<" (textures: "<<recvx::texture_tree_format(args.data)<<")\n";
+        if(fs::is_regular_file(args.data/"bundle-data.json"))std::cout<<"Data: app bundle tree, build-time mods baked in (see bundle-data.json)\n";
         if(args.mods.empty())std::cout<<"Mods: none\n";
         else std::cout<<"Mods: "<<args.mods<<(fs::is_directory(args.mods)?"":" (missing)")<<"; textures/hd: "<<recvx::hd_texture_count(args.mods)<<" files"<<(fs::is_directory(args.mods/"textures"/"hd")?"":" (no textures/hd folder)")<<'\n';
-        if(const auto pcsx2=recvx::pcsx2_pack_count(args.mods))std::cout<<"Mods: PCSX2 pack with "<<pcsx2<<" DDS in textures/ (not read directly; "<<(fs::is_regular_file(args.mods/"textures"/"hd-manifest-pcsx2.json")?"imported into textures/hd":"import: python3 tools/import_pcsx2_textures.py --pack <mods>/textures --output <mods>")<<")\n";
+        if(!args.mods.empty())if(const auto n=recvx::dds_file_count(args.mods/"hd-source"))std::cout<<"Mods: "<<n<<" DDS in hd-source/ (not read at runtime; ./build.sh imports them into textures/hd, result in textures/hd-import.json)\n";
+        if(!args.mods.empty())if(const auto n=recvx::dds_file_count(args.mods/"textures"))std::cout<<"Mods: "<<n<<" DDS in textures/ are NOT read; move the pack to "<<(args.mods/"hd-source")<<" and run ./build.sh\n";
         // ControlTypewriter (bup_00.c) als Host-Slotauswahl. typ_md0 laeuft,
         // sobald der Raum das ts_flg-Bit 0x8000 loescht (system.c:1224).
         recvx::Typewriter typewriter;bool typewriter_was_blocked=false;bool load_game_requested=false;
@@ -1082,8 +1084,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"snapshot_save","Snapshot speichern","OK: Spielstand an dieser Position sichern; ohne Schreibmaschine, Farbband und Speicherzaehler.",snapshot_slots,[]{return 0;},[&](unsigned slot){return save_snapshot(slot);}});
         debug.add({"snapshot_load","Snapshot laden","OK: Raum mit gesichertem Fortschritt an der gesicherten Position neu laden.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
         debug.add({"video","Grafikqualitaet","OK: Host-Renderqualitaet; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Niedrig"},{2,"Hoch"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Grafik: "+video.describe();}});
-        debug.add({"renderer","Rasterer","OK: Plattform-GPU, Software oder OpenGL; Auswahl wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (Plattform)"},{1,"Software"},{2,"OpenGL"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
-            const auto backend=value==2?recvx::RenderBackend::OpenGL:value==1?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
+        debug.add({"renderer","Rasterer","OK: Plattform-GPU, Software, OpenGL oder Vulkan; Auswahl wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (Plattform)"},{1,"Software"},{2,"OpenGL"},{3,"Vulkan"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
+            const auto backend=value==3?recvx::RenderBackend::Vulkan:value==2?recvx::RenderBackend::OpenGL:value==1?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
             if(!apply_renderer)return std::string("Rasterer: noch nicht bereit");
             const auto name=apply_renderer(backend);video.set_renderer(backend);
             return "Rasterer: "+name+(video.status().empty()?"":" ("+video.status()+")");}});
@@ -1700,17 +1702,18 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         recvx::SoftwareRenderer image(640,480);image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);image.set_render_threads(args.render_threads);
         // Host-GPU-Rasterer (gpu_raster.h) fuer das Hauptbild; Headless-Pruefungen bleiben ohne --renderer gpu in Software.
         {// Backend je Auswahl beim ersten Bedarf erzeugen, getrennte Geraete-/Kontextbesitzer.
-         struct Backends {std::array<std::shared_ptr<recvx::GpuRaster>,2> gpu;std::array<std::string,2> reason;std::array<bool,2> tried{};};
+         struct Backends {std::array<std::shared_ptr<recvx::GpuRaster>,3> gpu;std::array<std::string,3> reason;std::array<bool,3> tried{};};
          auto backends=std::make_shared<Backends>();
          apply_renderer=[&image,backends](recvx::RenderBackend backend)->std::string{
              if(backend!=recvx::RenderBackend::Software){
-                 const unsigned i=backend==recvx::RenderBackend::OpenGL?1u:0u;
-                 if(!backends->gpu[i]&&!backends->tried[i]){backends->tried[i]=true;backends->gpu[i]=i?recvx::create_opengl_raster(backends->reason[i]):recvx::create_gpu_raster(backends->reason[i]);}
+                 const unsigned i=backend==recvx::RenderBackend::Vulkan?2u:backend==recvx::RenderBackend::OpenGL?1u:0u;
+                 if(!backends->gpu[i]&&!backends->tried[i]){backends->tried[i]=true;
+                     backends->gpu[i]=i==2?recvx::create_vulkan_raster(backends->reason[i]):i==1?recvx::create_opengl_raster(backends->reason[i]):recvx::create_gpu_raster(backends->reason[i]);}
                  if(backends->gpu[i]){image.set_gpu(backends->gpu[i]);return backends->gpu[i]->name();}
                  image.set_gpu(nullptr);return "software ("+backends->reason[i]+")";}
              image.set_gpu(nullptr);return "software";};
          // Headless-Pruefungen bleiben ohne --renderer in Software; --renderer gilt nur fuer diesen Lauf.
-         const auto startup=args.renderer>=0?(args.renderer==1?recvx::RenderBackend::Gpu:args.renderer==2?recvx::RenderBackend::OpenGL:recvx::RenderBackend::Software)
+         const auto startup=args.renderer>=0?(args.renderer==1?recvx::RenderBackend::Gpu:args.renderer==2?recvx::RenderBackend::OpenGL:args.renderer==3?recvx::RenderBackend::Vulkan:recvx::RenderBackend::Software)
                                             :(args.headless?recvx::RenderBackend::Software:video.settings().renderer);
          std::cout<<"Renderer: "<<apply_renderer(startup)<<'\n';}
         auto report=[&](){std::cout<<"Raster backend: "<<(image.gpu()?image.gpu()->name():"software")<<", last scene frame "<<(image.last_gpu_frame()?"GPU":"software/no scene pass")<<'\n';if(!image.gpu_error().empty())std::cout<<"Raster fallback: "<<image.gpu_error()<<'\n';if(events){std::cout<<"Event VM: "<<events->dispatched.size()<<" dispatches, "<<events->pending_bindings.size()<<" pending world bindings, "<<events->errors.size()<<" blocked commands.\n";for(const auto& error:events->errors)std::cerr<<error<<'\n';}

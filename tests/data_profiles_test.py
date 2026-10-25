@@ -7,7 +7,10 @@ class DataProfileTests(unittest.TestCase):
     def test_targets_map_to_profiles(self):
         self.assertEqual(data_profiles.profile('macos')['exclude'],())
         self.assertIn('files/MOVIE',data_profiles.profile('ios-simulator')['exclude'])
-        self.assertTrue(data_profiles.profile('ios')['mods'])
+        self.assertTrue(data_profiles.profile('macos')['mods'])
+        self.assertFalse(data_profiles.profile('ios')['mods'])
+        self.assertEqual(data_profiles.profile('tvos')['compressed'],'always')
+        self.assertEqual(data_profiles.profile('windows')['compressed'],'optional')
         self.assertFalse(data_profiles.profile('tvos')['mods'])
     def test_copy_leaves_out_only_profile_subtrees(self):
         with tempfile.TemporaryDirectory() as t:

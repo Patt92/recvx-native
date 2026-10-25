@@ -59,6 +59,7 @@ def main():
                         help="Windows target architecture (default: x64)")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--opengl", choices=["on", "off"], default="on")
+    parser.add_argument("--vulkan", choices=["on", "off"], default="on")
     args = parser.parse_args()
     import sys
     subprocess.run([sys.executable, str(ROOT / 'tools/check_no_original_core.py'), str(ROOT)], check=True)
@@ -115,7 +116,7 @@ def main():
         if f'set(CMAKE_RC_COMPILER "{resource_compiler.as_posix()}")' not in metadata.read_text():
             metadata.unlink()
     configure = ["cmake", "-S", str(ROOT), "-B", str(build), "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
-                 "-DCMAKE_BUILD_TYPE=Release", f"-DRECVX_ENABLE_OPENGL={args.opengl.upper()}"]
+                 "-DCMAKE_BUILD_TYPE=Release", f"-DRECVX_ENABLE_OPENGL={args.opengl.upper()}", f"-DRECVX_ENABLE_VULKAN={args.vulkan.upper()}"]
     if sdl is not None:
         configure += [f"-DCMAKE_PREFIX_PATH={sdl}", "-DRECVX_FETCH_SDL2=OFF"]
     else:

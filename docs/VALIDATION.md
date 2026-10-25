@@ -30,8 +30,9 @@ selection is an error):
 ```
 
 `gpu_raster_parity` checks the platform backend, `gpu_raster_opengl_parity`
-checks explicit GL, and `gpu_raster_opengl_copy_parity` checks its forced
-GL 4.1 copy path. With point sampling, they compare packed color including
+checks explicit GL, `gpu_raster_opengl_copy_parity` checks its forced
+GL 4.1 copy path, and `gpu_raster_vulkan_parity` checks Vulkan (including a
+second instance on the shared device). With point sampling, they compare packed color including
 alpha and floating-point depth bit for bit against the reference, covering
 shadow phases, SSAA, NPOT/mutated textures, and context changes. Every
 expected GPU pass must actually finish on the GPU; a software fallback is
@@ -40,7 +41,7 @@ failures, not skips. A hidden GL context still needs a display server. GPU
 tests in a sandbox without a display prove neither shader compilation nor
 image parity.
 
-`recvx-gpu-compare` accepts `--backend opengl` at the end, then optionally
+`recvx-gpu-compare` accepts `--backend opengl|vulkan` at the end, then optionally
 `--force-copy`; point differences or software fallback produce failure.
 Filtered host quality is evaluated separately, without assuming CPU bit
 identity. Measurements include CPU and wall time; no real GPU run means no

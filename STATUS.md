@@ -163,6 +163,10 @@ Windows-x64-Crossbuild grün; 11 gezielte Tests bestanden, 3 GPU-Prüfungen wege
 Sandbox ohne Display übersprungen. Dev-App aktualisiert, Titel/Raum nur im
 Softwarefallback geprüft. GL-Shader-/Pixelparität und Linux-Hardware offen.
 [Bericht](archived/work/opengl_backend.result.md).
+**Vulkan (2026-10-25, Arbeitsbaum):** optionales Backend über geordneten Fragment-Interlock,
+nie Standard; `--renderer vulkan`/INI/Debugwahl. macOS (MoltenVK) bitgleich inkl. Schatten,
+Räume 100 % (Punkt), Runtime-Bild == Metal. Windows/Linux-Hardware offen, keine Paketersetzung.
+[Bericht](work/vulkan_raster_backend.result.md).
 
 **Kartenbild:** MAP zeichnet MRY-Geometrie, Marker und Sprites in der eigenen
 Build-Runtime; Fade-Rückweg und Wiedereintritt gezielt geprüft. Constant-Material-

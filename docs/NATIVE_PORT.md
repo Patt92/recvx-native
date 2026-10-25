@@ -208,8 +208,8 @@ for event timers measured in VSync units.
 A shared native geometry and command stage uses an internal 640×480 resolution;
 the default window is 1280×960. `renderer = gpu` in `video.ini` selects Metal on
 macOS, D3D11 on Windows, and OpenGL on Linux. `renderer = opengl` selects GL
-explicitly; `software` selects the CPU reference. `--renderer
-gpu|opengl|software` applies only to the current run. Headless mode stays on
+explicitly, `renderer = vulkan` selects Vulkan; `software` selects the CPU
+reference. `--renderer gpu|opengl|vulkan|software` applies only to the current run. Headless mode stays on
 software unless explicitly changed.
 
 OpenGL requires Core 4.1 and an SDL video driver with a display. It has its own
@@ -220,12 +220,29 @@ color rasterization. Masks and composites remain ordered copy passes. There is
 no fixed-function blending or new owner of game state. If the device is absent
 or a frame fails, the runtime reports the reason and renders in software.
 
+Vulkan (`native/gpu_raster_vulkan.cpp`, shaders in `gpu_raster_vulkan.glsl`) is
+never a platform default. It requires `VK_EXT_fragment_shader_interlock` with
+ordered pixel interlock, the counterpart of Metal framebuffer fetch and D3D11
+rasterizer ordered views: color, 1/z, transported depth and shadow masks are
+storage images read and written in primitive order. Devices without it get no
+Vulkan backend (software path), not an approximate blend. Rendering is
+offscreen and read back; presentation stays on SDL. The library is opened at run
+time (`vulkan-1.dll`, `libvulkan.so.1`, or the Vulkan loader/MoltenVK on macOS;
+`RECVX_VULKAN_LIBRARY` overrides the path). SPIR-V is compiled at build time with
+`glslc -O0`, uses `precise` (NoContraction) and `SignedZeroInfNanPreserve`, which
+keeps MoltenVK on Metal safe math. All instances share one device and draw one
+frame at a time.
+
 Optional supersampling and host texture filters are set in `video.ini`. The
 existing CPU/GPU filter differences have not been shown bit-identical. Point
 sampling must preserve color including alpha and depth bit for bit. Linux and
 Windows drivers require separate verification; a Mac build does not verify
 them. `./build.sh --opengl off` or CMake `-DRECVX_ENABLE_OPENGL=OFF` omits GL;
-Metal and D3D11 remain available.
+Metal and D3D11 remain available. Vulkan needs `vulkan/vulkan.h` and `glslc` at
+build time (Vulkan SDK, Homebrew `vulkan-headers`/`shaderc`, distribution
+packages); without them CMake warns and omits it. `./build.sh --vulkan off` or
+`-DRECVX_ENABLE_VULKAN=OFF` omits it explicitly. The Windows crossbuild has no
+Vulkan headers by default, so packages built that way contain no Vulkan backend.
 
 ## Diagnostics
 

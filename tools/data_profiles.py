@@ -11,13 +11,16 @@ import shutil
 # archives/RDX_LNK: Raumarchiv, ungelesen sobald rooms/ existiert (native/room.cpp:65).
 _COOKED_SOURCES = ('files/MOVIE', 'archives/RDX_LNK')
 
+# mods: die Runtime liest zur Laufzeit einen Mods-Ordner (nur Desktop). Pakete backen den Projektordner mods/
+# beim Build in ihr data/ ein (tools/bundle_data.py), deshalb landet kein Mods-Ordner in einer App.
+# compressed: 'optional' = mit --compressed aus data_compressed, 'always' = immer (Apple TV, Paketgroesse).
 PROFILES = {
-    'desktop': {'exclude': (), 'mods': True},
-    'ios': {'exclude': _COOKED_SOURCES, 'mods': True},
-    'tvos': {'exclude': _COOKED_SOURCES, 'mods': False},
+    'desktop': {'exclude': (), 'mods': True, 'compressed': 'optional'},
+    'ios': {'exclude': _COOKED_SOURCES, 'mods': False, 'compressed': 'optional'},
+    'tvos': {'exclude': _COOKED_SOURCES, 'mods': False, 'compressed': 'always'},
 }
 TARGET_PROFILE = {'macos': 'desktop', 'windows': 'desktop', 'windows-arm64': 'desktop', 'linux': 'desktop',
-                  'ios': 'ios', 'ios-simulator': 'ios'}
+                  'ios': 'ios', 'ios-simulator': 'ios', 'tvos': 'tvos'}
 
 
 def profile(target: str) -> dict:

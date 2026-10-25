@@ -26,7 +26,9 @@ Pfade fuer einzelne INIs, Snapshots und Spielstaende koennen mit
 --snapshots und --saves ueberschrieben werden; --user-dir setzt das gemeinsame
 Benutzerdatenverzeichnis.
 Portstand der Spielsysteme: GAMEPLAY-STATUS.md.
-Austauschbare Ressourcen: ASSETS-AND-MODS.md.
+Austauschbare Ressourcen: ASSETS-AND-MODS.md. Die Mods des Build-Rechners sind
+bereits in data eingebacken; ein eigener Ordner "mods" neben Start.cmd bzw.
+neben "RECVX Native.app" wird zusaetzlich gelesen, wenn man ihn anlegt.
 Debugmenue (F2): DEBUG_MENU.md.
 """
 
@@ -105,9 +107,9 @@ def main():
         data_destination = contents / "Resources/data"
         run("codesign", "--force", "--sign", "-", str(frameworks / library_name))
         run("codesign", "--force", "--sign", "-", str(binaries / "recvx-runtime"))
+    # Mods sind bereits in --data eingebacken (tools/bundle_data.py); ein mods-Ordner neben dem Paket ist
+    # optional und wird von der Desktop-Runtime nur gelesen, wenn ihn jemand anlegt.
     copy_data(data_root, data_destination, args.platform)
-    mods_destination = output / "mods"
-    mods_destination.mkdir()
     shutil.copy2(ROOT / "docs/NATIVE_ASSETS.md", output / "ASSETS-AND-MODS.md")
     shutil.copy2(ROOT / "docs/NATIVE_GAMEPLAY.md", output / "GAMEPLAY-STATUS.md")
     shutil.copy2(ROOT / "LICENSE", output / "LICENSE.txt")
