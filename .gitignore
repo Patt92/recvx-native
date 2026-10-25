@@ -44,3 +44,9 @@ objdiff.json
 /out/
 /snapshots/
 /data_compressed/
+
+# AMD FidelityFX SDK: optional external build input, binaries never committed
+/native/third_party/FidelityFX-SDK/**/*.dll
+/native/third_party/FidelityFX-SDK/**/*.lib
+/native/third_party/FidelityFX-SDK/**/*.so
+/native/third_party/FidelityFX-SDK/**/.DS_Store

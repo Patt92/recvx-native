@@ -69,3 +69,34 @@ Folge: Der erste (hängende, per Skip verlassene) Versuch setzt 356. Jeder weite
 ## Nachtrag: Herkunft von mode0 = 5
 
 `native/world.cpp` 0x2d/0x30 (bhInitMotionPause/Ex, event.c:1851/1879) setzt `w.mode0=5; w.mode3=4` — genau der Zustand des Hunter-Works. Im Original laeuft `bhControlEnemy` (game.c:46) **vor** dem Eventpass, die Identitaetsroutine initialisiert dort bei `mode0==0` (eneset.c:377, en11.c:58/133). Der Port fuehrt das Raumskript (scd0/Event 2) vor dem ersten Gegnerpass aus, daher bleibt `exp0`/`initialized` leer.
+
+## Endabnahme natuerlicher Weg (2026-10-25 abends)
+
+Startzustand `build/validation/hunter7110/natural/pre/`: Diagnosefixture mit
+geloeschtem it_flg 37 (Tuerknauf liegt wieder, Item 93 aktiv, keine Szene,
+CRC neu). Sonst unveraendert; kein Nutzersnapshot taugt (alle haben ev_flg 356
+bereits gesetzt bzw. liegen vor der Antarktis). Ablauf: Position am Knauf
+(19.1/0/49.5), OK -> Dialog -> Aufnahme (Bild ~150) -> scd1 startet Event
+0/1/2/9 (Bild ~260) -> RM_7160 Event 0/1/8 -> DoorCall `07 0b 04` zurueck nach
+RM_7110 (nicht RM_7070; RM_7070 hat keinen DoorCall) -> Event 3/4/5 -> frei.
+Mit --enemy-ai on --enemy-grab on, Build- und Start.command-App-Binary:
+ohne Skip, SELECT 280/330 (erste Hunter-Szene, Nutzerfall), 500 (RM_7160),
+280+470, 280+470+720, 4x SELECT 280..290: alle RM_7110, room_changes 2,
+player_scripted/hidden false, keine pending/blocked commands, Bewegung per
+keys verschiebt Chris. Hunter greifen danach an (stillstehend teils Tod).
+Offen: njSetBackColor alpha >128 weiter gemeldet; Bildinhalt der Szenen
+(Aufzugsschacht RM_7160 mit schwarzem Schachtgrund) ohne Originalvergleich;
+Sichtpruefung im Fenster, Windows.
+
+Fensterabnahme Nutzer (2026-10-25, Start.command-App-Binary, Fixture natural/pre):
+Start RM_7070 -> RM_7110, Knauf aufgehoben, SELECT in Szene RM_7110, RM_7160
+und Folgeszene RM_7110 -> frei, danach Tuerwechsel RM_7070/RM_7110 normal.
+Drei Laeufe mit diesem Raumverlauf, Event VM ohne offene/blockierte Befehle.
+Korrektur: Snapshotladen schreibt sehr wohl eine Raumzeile (headless belegt).
+Keiner der vier Fensterlaeufe hat die Fixture geladen; alle starteten per
+Debug-Teleport aus dem Neuspielstand RM_0000 (Laeufe 2-4 nach RM_7070, Lauf 1
+direkt nach RM_7160). Lauf 1 ("wieder an der Tuer in RM_7160", P gespammt) ist
+damit ein kuenstlicher Flagstand; headless Teleport RM_0000->RM_7160 bleibt in
+RM_7160 ohne Szene (356 frei, nur Task 15). Nicht reproduziert, kein Befund.
+P-Spam headless (alle 2/3/5/7 Bilder ab Aufnahme, je zwei Phasen) auf der
+Fixture: 8/8 RM_7110 -> RM_7160 -> RM_7110, frei, keine offenen Befehle.

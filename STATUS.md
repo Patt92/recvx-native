@@ -87,7 +87,13 @@ Obere ATR-Etage blieb 0 statt 1. Jetzt erster Spielpass vor folgendem Ereignisti
 Kante hält bei x70.25 statt Luftlauf bis x44.17; Material 3 statt 0; Abstieg y0.
 11 angrenzende CTests grün. `verify_stairs.py` blockiert durch veraltetes JSON-Feld
 `stairs.active` (KeyError); kein Gesamt-Stufennachweis. Belege `build/validation/crate-floor-root/`.
-Nicht in Starter-App installiert; kein Commit.
+RM_0110-Gegenprobe: bisheriger Schuss-Replay mit erstem Game-Pass rot (1 Schuss,
+0 Treffer), ohne ihn grün (1/1). Diagnose-Schussposition nach natürlicher Szene
+in `rm0110_event_zombie_check.py` stabilisiert; alle 4×362/8×370-, Treffer-/Tod-,
+Szenen-/Angriff-/Wiederbetreten-Prüfungen erhalten. Gegen beide Startreihenfolgen
+grün; 12 angrenzende CTests und Snapshot-2-Kistenauf-/abstieg grün.
+Belege `build/validation/first-pass-rm0110/`. Kein Zielwechsel-/Durchspielnachweis
+aus der Diagnose-Schussprobe. Nicht in Starter-App installiert; kein Commit.
 
 **Portierungsrunde nach dem Audit (2026-10-21, Arbeitsbaum):** StartVibrationEx(0, 8) beim Schieben/Drehen
 (psh/rpsh) an die Vibrationseinheit gebunden, flr_no bei Common/Player 7, bhCheckSubTask-Tor plp->flg 0x6

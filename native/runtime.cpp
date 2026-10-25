@@ -220,6 +220,9 @@ double process_cpu_seconds(){
 }
 }
 #if defined(RECVX_IOS)
+#include "ios_scene.h"
+#endif
+#if defined(RECVX_IOS)
 // iOS startet ohne Kommandozeile: Spieldaten im App-Bundle (Paket mit eingebettetem data/), sonst im
 // Documents-Ordner des App-Containers (Finder-/Dateien-Freigabe); mods/ liegt immer dort. Die
 // Benutzerdaten folgen resolve_user_paths (HOME ist der App-Container).
@@ -737,7 +740,10 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 const auto request=*queued_door;queued_door.reset();
                 fade_set(0xFF000000u,10.0f);
                 if(events){events->flags[12][0]=(events->flags[12][0]|0x100000u)&~0x800u;
-                    events->flags[6][0]=(events->flags[6][0]&0x200u)|0x48u;}
+                    events->flags[6][0]=(events->flags[6][0]&0x200u)|0x48u;
+                    // room.c:987-989: sys->stg_no/rom_no/pos_no = ddp-Ziel schon hier; scd1 (bhCmpB 0/1/15)
+                    // vergleicht bis zum Raumladen bereits das Ziel (RM_8040 scd1 startet sonst die Fahrt neu).
+                    events->values[0]=request.stage;events->values[1]=request.room;events->values[15]=request.spawn;}
                 /* bhInitDoor/bhReadDoorData (system.c:956-976): die native Dateilese ist synchron.
                    bhSetDoor (njSetBackColor 0, Prozeduren) laeuft erst in Modus 4. */
                 door.begin(args.data,args.mods,request,false);door_task_mode=0;
@@ -1927,6 +1933,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         recvx::InputManager devices(input_config);frontend.changed=[&](const recvx::InputConfig& config){devices.configure(config);};
         std::cout<<"Input: keyboard and "<<devices.controllers()<<" controller(s); "<<(fs::exists(args.controls)?args.controls.string():"built-in defaults")<<'\n';
         std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)> window(SDL_CreateWindow("RECVX native runtime",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,960,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI),SDL_DestroyWindow);sdl_check(bool(window));
+#if defined(RECVX_IOS)
+        recvx::ios_adopt_scene(window.get()); // UIScene-Lebenszyklus (iOS-27-SDK), ios_scene.mm
+#endif
         // A starter script or terminal may keep keyboard focus; take it so the menu reacts at once.
         SDL_RaiseWindow(window.get());
         auto* raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);

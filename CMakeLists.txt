@@ -337,6 +337,9 @@ if(RECVX_BUILD_RUNTIME)
       MACOSX_BUNDLE_BUNDLE_NAME "RECVX Native"
       MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
       MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+    # UIScene-Lebenszyklus (iOS-27-SDK verlangt ihn), SDL 2.32 kennt keine Scenes.
+    set_source_files_properties(native/ios_scene.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-fobjc-arc")
+    target_sources(recvx-runtime PRIVATE native/ios_scene.mm)
     target_link_libraries(recvx-runtime PRIVATE "-framework UIKit" "-framework QuartzCore" "-framework GameController"
       "-framework CoreHaptics" "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreAudio"
       ${recvx_apple_frameworks} "-framework CoreGraphics" "-framework OpenGLES")

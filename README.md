@@ -66,60 +66,70 @@ GPU acceleration, higher-resolution output and optional texture filtering and
 supersampling. Rendering fidelity is checked against the reference path rather
 than judged solely by how close a screenshot looks.
 
-## MetalFX and upscaling
+## Upscaling and frame generation
 
-MetalFX is a macOS presentation stage, separate from the rasterizer and its
-renderer selection. It presents through the SDL window's Metal layer,
-independent of the raster backend, and receives the finished 640×480 frame
-after every 2D drawer, together with the depth buffer and the last geometry
-projection. It changes presentation only: the game image, the 30 Hz tick,
-input, events, screenshots and headless runs are unchanged.
+Upscaling, frame generation and post-processing form a host presentation
+stage that sits after the rasterizer and is independent of the renderer
+selection. The stage receives the finished 640×480 frame after every 2D
+drawer, together with the depth buffer and the last geometry projection, and
+changes presentation only: the game image, the 30 Hz tick, input, events,
+screenshots and headless runs are unchanged. Every feature is off by default,
+selectable in the OPTION screen, the debug menu and `video.ini`, and falls
+back to the plain SDL copy with "(not available)" when the device or OS lacks
+it. No feature silently substitutes a different filter.
 
-The stage offers:
-
-- **Spatial or temporal upscaling** from 640×480 to the window's 4:3 fit.
-  Temporal upscaling uses depth and camera-reprojected motion vectors; the 2D
-  layer is treated as a stationary foreground because the 2D drawers write at
-  integer 640×480 positions. Temporal scaling is limited to the device's scale
-  range (2× on current devices), with a spatial pass covering the remainder.
-- **Frame interpolation** (`MTLFXFrameInterpolator`, macOS 26 or newer): one
-  intermediate frame per game tick between the previous and current image. It
-  runs on the stage's own presentation thread; the main thread submits a copy
-  and never blocks on vsync. Verified stable at 60 fps on an M4 Pro.
-- **Contrast-adaptive sharpening** and a **CRT filter** (scanlines, or a slot
-  mask with bloom in linear light), including the 4:3 fit into the window.
-
-A separate frame-rate setting (`30`, `60`, `120`, `unlimited`) sets the
+A shared **frame-rate** setting (`30`, `60`, `120`, `unlimited`) sets the
 presentation cadence for every backend while the game tick stays at the
-original 30 Hz. On the non-MetalFX SDL copy path, repeated presents show the
-same frame; only frame interpolation adds motion between ticks. The stage and
-each of its features are off by default and selectable in the OPTION screen,
-the debug menu and `video.ini`.
-
-MetalFX needs macOS with Metal. Spatial scaling is available on supported
-devices, temporal scaling within the device's scale range, and frame
-interpolation on macOS 26 or newer. The full setting reference is in
+original 30 Hz; without frame generation, repeated presents show the same
+frame. The full setting reference is in
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos).
 
-### FSR 3.1 / FSR 4
+### MetalFX (macOS)
 
-FSR is not integrated. FSR 4 is DirectX 12 only on Windows 10/11, with ML
-upscaling on Radeon RX 9000 series or newer; other GPUs run the FSR 3.1.5
-fallback. It has no Vulkan or Metal backend, and the FidelityFX SDK v2 lists
-Vulkan as unsupported. FSR 3.1 supports DirectX 12 and Vulkan, but not Metal.
+Presents through the SDL window's Metal layer. Because it consumes only the
+finished frame, it works on top of every macOS raster backend (Metal, Vulkan
+via MoltenVK, OpenGL, software). Needs macOS 13 or newer with Metal.
 
-The Windows default renderer is Direct3D 11 and the macOS renderer is Metal.
-The optional Direct3D 12 raster backend (`--renderer d3d12`) now provides the
-DirectX 12 device FSR requires, but it renders offscreen and returns the frame
-through SDL like every other backend. What remains for FSR is a presentation
-stage on that device, listed as an open TODO in
-[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#fsr-31--fsr-4-not-integrated): the
-FidelityFX SDK, a D3D12 swap chain in the SDL window, per-object motion vectors
-(the MetalFX stage only reprojects the camera), subpixel jitter, a reactive mask
-for the 2D layer, and validation on hardware. FSR 3.1 could alternatively
-attach to the Vulkan backend on Windows/Linux with the same open items. On
-macOS, MetalFX remains the supported upscaler. FSR stays a documented gap
-rather than an option that silently substitutes a different filter.
+- **Upscaler** — `metalfx-spatial` or `metalfx-temporal`, from 640×480 to
+  the window's 4:3 fit. Temporal uses depth and camera-reprojected motion
+  vectors; the 2D layer is treated as a stationary foreground because the 2D
+  drawers write at integer 640×480 positions. Temporal is limited to the
+  device's scale range (2× on current devices), a spatial pass covers the rest.
+- **Frame generation** — `metalfx` (`MTLFXFrameInterpolator`, macOS 26 or
+  newer): one intermediate frame per game tick between the previous and the
+  current image, on the stage's own presentation thread; the main thread
+  hands over a copy and never blocks on vsync. Verified stable at 60 fps on
+  an M4 Pro.
+- **Post-processing** — contrast-adaptive sharpening and a CRT filter
+  (scanlines, or a slot mask with bloom in linear light), including the 4:3
+  fit into the window.
+
+### AMD FSR 3.1 / FSR 4 — not integrated yet
+
+FSR 3.1 and FSR 4 ship only inside the AMD FidelityFX SDK (FSR 3.1 as source
+and prebuilt libraries, FSR 4 as prebuilt signed DLLs). The SDK is not part
+of this repository and is treated as an optional external build input: without
+it the rows read "(not available)". Per-object motion vectors, subpixel jitter
+and a reactive mask for the 2D layer are inputs the engine does not produce
+yet; the open items are listed in
+[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#fsr-31--fsr-4-not-integrated).
+
+- **Upscaler** — planned per backend:
+  - *Windows, Direct3D 12 backend*: FSR 4 (ML upscaling on Radeon RX 9000 or
+    newer, Windows 10/11, DirectX 12 only) with the FSR 3.1.5 fallback on other
+    GPUs. The optional `--renderer d3d12` backend already provides the device;
+    the presentation stage on it is the open part.
+  - *Linux, Vulkan backend*: FSR 3.1 (DirectX 12 and Vulkan are its supported
+    APIs). FSR 4 has no Vulkan backend.
+  - *macOS, Vulkan backend (MoltenVK)*: FSR 3.1 through the Vulkan backend.
+    AMD does not support this configuration; it has to be proven here and is
+    not a replacement for MetalFX.
+  - *OpenGL*: the SDK has no OpenGL backend and SDL offers no GL/Vulkan
+    interop; FSR stays unavailable on OpenGL.
+- **Frame generation** — FSR 3.1 frame interpolation on the same backends as
+  its upscaler. It expects at least 60 fps of input; the game tick is 30 Hz, so
+  it needs the presentation-thread model of the MetalFX stage. FSR 4 frame
+  generation is DirectX 12 only. Neither is wired in yet.
 
 ## Console foundations, rewritten for the host
 
@@ -180,7 +190,7 @@ brought up separately from the shared gameplay code.
 | **Windows x64** | Build support, the Direct3D 11 backend and optional Vulkan and Direct3D 12 backends are present; validated Windows releases are planned. |
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
-| **iOS/iPadOS** | Build support for arm64 devices and the simulator with Metal (`./build.sh --platform ios` / `ios-simulator`); runtime on iOS hardware not yet validated, no touch controls. |
+| **iOS/iPadOS** | arm64 device and simulator builds with Metal (`./build.sh --platform ios` / `ios-simulator`). Starts on an iPhone (iOS 27); gameplay needs a Bluetooth game controller, there are no touch controls yet. |
 | **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device. |
 
 These are native platform targets, not plans to ship an emulator with the game.
@@ -346,6 +356,30 @@ e.g. `./build.sh --iso "/path/to/game.iso" --compressed`.
 At startup the runtime prints the data folder with its texture format, the mods folder
 with its number of HD textures, and per room how many textures came from HD, mod files or
 `data/`; the debug menu entry "Textur-Mods (HD)" switches mods off and reloads the room in place.
+
+### iOS / iPadOS
+
+Needs a Mac with Xcode (iOS SDK) and prepared data (see macOS above).
+
+```bash
+./build.sh --platform ios --ios-bundle-data --compressed
+```
+
+- The app is written to `build/ios-device/recvx-runtime.app`. `--ios-bundle-data`
+  copies the prepared data into the app (with `--compressed` about 3 GB);
+  without it the app reads `Documents/data`, which can be filled through the
+  Finder or Files file sharing.
+- Without `--ios-profile <file.mobileprovision>` the device build is
+  **unsigned**. Sign it yourself (for example with `zsign`) and install it
+  through Xcode (Devices and Simulators), or pass a profile together with
+  `--package --output <new-dir>` to get a signed `RECVX-Native.ipa`.
+- Apps built with the iOS 27 SDK must adopt the UIKit scene lifecycle; the
+  `Info.plist` therefore declares a scene manifest and `native/ios_scene.mm`
+  attaches the SDL window to that scene. Without it the app terminates
+  immediately at launch.
+- Input: Bluetooth game controller only. Touch controls do not exist yet.
+- `./build.sh --platform ios-simulator` builds an ad hoc signed simulator app
+  (`build/ios-simulator`).
 
 ### Linux
 
