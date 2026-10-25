@@ -568,6 +568,7 @@ def main():
     parser.add_argument('--test-regex', help='Build test targets and run only matching CTest names')
     parser.add_argument('--opengl', choices=['on', 'off'], default='on', help='Build optional OpenGL backend (default: on)')
     parser.add_argument('--vulkan', choices=['on', 'off'], default='on', help='Build optional Vulkan backend when Vulkan headers and glslc are present (default: on)')
+    parser.add_argument('--d3d12', choices=['on', 'off'], default='on', help='Build optional Direct3D 12 backend on Windows (default: on)')
     parser.add_argument('--verify-runtime', action='store_true', help='Run the opt-in original-data runtime regression suite')
     parser.add_argument('--no-test', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--ios-profile', type=Path, help='iOS device: provisioning profile used for signing (else unsigned)')
@@ -616,7 +617,7 @@ def main():
     if is_windows_target(target) and platform.system() != 'Windows':
         # The final binary audit also invokes Zig; use the same project cache.
         os.environ['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build/toolchains/zig-cache')
-        run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs, '--vulkan', args.vulkan, '--opengl', args.opengl)
+        run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs, '--vulkan', args.vulkan, '--opengl', args.opengl, '--d3d12', args.d3d12)
         build = cross_build_directory(target)
         print(f'Cross-built Windows {WINDOWS_TARGETS[target]}.', flush=True)
     elif is_ios_target(target):
@@ -675,7 +676,7 @@ def main():
         if target == 'linux' and platform.system() != 'Linux':
             parser.error('Linux builds require a Linux host')
         build = native_build_directory(target)
-        configure = [cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}', f'-DRECVX_ENABLE_OPENGL={args.opengl.upper()}', f'-DRECVX_ENABLE_VULKAN={args.vulkan.upper()}']
+        configure = [cmake, '-S', ROOT, '-B', build, '-DCMAKE_BUILD_TYPE=Release', '-DRECVX_FETCH_SDL2=ON', f'-DBUILD_TESTING={"ON" if run_checks or args.verify_runtime else "OFF"}', f'-DRECVX_BUILD_VERSION={FULL_VERSION}', f'-DRECVX_ENABLE_OPENGL={args.opengl.upper()}', f'-DRECVX_ENABLE_VULKAN={args.vulkan.upper()}', f'-DRECVX_ENABLE_D3D12={args.d3d12.upper()}']
         if target == 'macos':
             configure += ['-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0']
         if is_windows_target(target):

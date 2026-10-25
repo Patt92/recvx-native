@@ -37,6 +37,7 @@ VideoSettings VideoSettings::read(const std::filesystem::path& path){
         if(key=="renderer"){
             if(value=="gpu")out.renderer=RenderBackend::Gpu;else if(value=="software")out.renderer=RenderBackend::Software;else if(value=="opengl")out.renderer=RenderBackend::OpenGL;
             else if(value=="vulkan")out.renderer=RenderBackend::Vulkan;
+            else if(value=="d3d12")out.renderer=RenderBackend::D3D12;
             else throw std::runtime_error("invalid video renderer: "+value);continue;}
         if(key=="frame_rate"){if(!parse(frame_rate_names,value,out.frame_rate))throw std::runtime_error("invalid video frame_rate: "+value);continue;}
         if(key=="upscaler"){if(!parse(upscaler_names,value,out.upscaler))throw std::runtime_error("invalid video upscaler: "+value);continue;}
@@ -51,8 +52,8 @@ VideoSettings VideoSettings::read(const std::filesystem::path& path){
 }
 void VideoSettings::save(const std::filesystem::path& path)const{
     std::ostringstream text;text<<"# RECVX host render quality: original, low, high, ultra\nquality = "<<names[int(quality)]<<'\n'
-        <<"# Rasterizer: gpu (platform default), opengl, vulkan or software\nrenderer = "
-        <<(renderer==RenderBackend::Software?"software":renderer==RenderBackend::OpenGL?"opengl":renderer==RenderBackend::Vulkan?"vulkan":"gpu")<<'\n'
+        <<"# Rasterizer: gpu (platform default), opengl, vulkan, d3d12 (Windows) or software\nrenderer = "
+        <<(renderer==RenderBackend::Software?"software":renderer==RenderBackend::OpenGL?"opengl":renderer==RenderBackend::Vulkan?"vulkan":renderer==RenderBackend::D3D12?"d3d12":"gpu")<<'\n'
         <<"# Presentation frame rate (game tick stays 30 Hz): 30, 60, 120 or unlimited\nframe_rate = "<<frame_rate_names[int(frame_rate)]<<'\n'
         <<"# Presentation upscaler (macOS, MetalFX): off, metalfx-spatial or metalfx-temporal\nupscaler = "<<upscaler_names[int(upscaler)]<<'\n'
         <<"# Frame generation (macOS 26 or newer, MetalFX frame interpolation): off or metalfx\nframe_generation = "<<frame_generation_names[int(frame_generation)]<<'\n'

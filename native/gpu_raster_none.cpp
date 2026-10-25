@@ -17,4 +17,13 @@ std::shared_ptr<GpuRaster> create_opengl_raster(std::string& reason,bool){reason
 #ifndef RECVX_HAVE_VULKAN
 std::shared_ptr<GpuRaster> create_vulkan_raster(std::string& reason){reason="built without Vulkan (RECVX_ENABLE_VULKAN=OFF)";return nullptr;}
 #endif
+#ifndef RECVX_HAVE_D3D12
+std::shared_ptr<GpuRaster> create_d3d12_raster(std::string& reason){
+#ifdef _WIN32
+    reason="built without Direct3D 12 (RECVX_ENABLE_D3D12=OFF)";
+#else
+    reason="Direct3D 12 is available on Windows only";
+#endif
+    return nullptr;}
+#endif
 }

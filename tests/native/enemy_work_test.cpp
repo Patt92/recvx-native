@@ -274,6 +274,28 @@ void event_enemy_owner_contract(const std::filesystem::path& data){
     }
 }
 
+// event.c:3276-3279 bhFrameCheck reads the live enemy work even while
+// scripts own it. RM_7110 event 9 waits for work 2 (identity 92) frame 39;
+// the entity-side frame is not published for scripted enemies.
+static void scripted_frame_owner_contract(const std::filesystem::path& data){
+    const auto bytes=read_asset_file(data/"rooms/RM_7110.RDT",64*1024*1024);
+    const auto scene=decode_scene(bytes);auto actor=scene.spawns.at(0);
+    std::size_t motion=42;std::int64_t frame=0;AudioMixer audio(data);
+    RoomWorld world(bytes,scene,actor,motion,frame,audio,data,{},"RM_7110");
+    // Diagnostic work-state injection into this non-const fixture only.
+    auto* e=const_cast<WorldEntity*>(world.state(1,2));
+    check(e&&e->enemy_bound&&e->identity==92,"RM_7110 cinematic work missing");
+    e->scripted=true;e->frame=0;
+    e->enemy.frm_no=38*65536;
+    check(world.frame(1,2)==38u*65536,"scripted frame read stale entity mirror");
+    e->enemy.frm_no=39*65536;
+    check(world.frame(1,2)==39u*65536,"scripted frame wait cannot reach frame 39");
+    e->enemy.frm_no=0;
+    check(world.frame(1,2)==0,"scripted frame restart retained previous sample");
+    e->scripted=false;e->frame=7*65536;e->enemy.frm_no=65536;
+    check(world.frame(1,2)==65536,"enemy frame ownership changed on script release");
+}
+
 }
 
 int main(int argc,char** argv){try{
@@ -284,6 +306,7 @@ int main(int argc,char** argv){try{
     const std::filesystem::path data(argv[1]);
     debug_player_flags_contract(data);
     event_enemy_owner_contract(data);
+    scripted_frame_owner_contract(data);
     room(data,"RM_0130",7,5);   // five original ID-7 entries
     room(data,"RM_0080",0,1);   // the room's one barrel next to five zombies
     mask_skip(data);            // RM_0000: Claire/Rodrigo, bhInitMask owP skip

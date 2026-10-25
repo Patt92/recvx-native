@@ -29,13 +29,13 @@ int main(int argc,char** argv){try{
     std::string backend="gpu";bool force_copy=false;
     if(argc>=2&&std::string(argv[argc-1])=="--force-copy"){force_copy=true;--argc;}
     if(argc>=3&&std::string(argv[argc-2])=="--backend"){backend=argv[argc-1];argc-=2;}
-    if(backend!="gpu"&&backend!="opengl"&&backend!="vulkan")throw std::runtime_error("backend must be gpu, opengl or vulkan");
-    if(argc<6||argc>8)throw std::runtime_error("usage: recvx-gpu-compare data RM_0020.RDX frames ss nearest|filtered [camera] [out-dir] [--backend gpu|opengl|vulkan] [--force-copy]");
+    if(backend!="gpu"&&backend!="opengl"&&backend!="vulkan"&&backend!="d3d12")throw std::runtime_error("backend must be gpu, opengl, vulkan or d3d12");
+    if(argc<6||argc>8)throw std::runtime_error("usage: recvx-gpu-compare data RM_0020.RDX frames ss nearest|filtered [camera] [out-dir] [--backend gpu|opengl|vulkan|d3d12] [--force-copy]");
     _Make_SinTable();recvx::RoomArchive rooms(argv[1]);auto scene=recvx::decode_scene(rooms.load(argv[2],64*1024*1024));
     const auto frames=std::stoul(argv[3]);const int ss=std::stoi(argv[4]);const std::string mode=argv[5];
     const std::size_t camera=argc>=7?std::stoul(argv[6]):0;const std::string out=argc==8?argv[7]:"";
     if(!frames||frames>10000||ss<1||ss>4||camera>=scene.cameras.size()||(mode!="nearest"&&mode!="filtered"))throw std::runtime_error("invalid arguments");
-    std::string reason;auto gpu=backend=="vulkan"?recvx::create_vulkan_raster(reason):backend=="opengl"?recvx::create_opengl_raster(reason,force_copy):recvx::create_gpu_raster(reason);if(!gpu){std::cout<<"SKIP: "<<reason<<'\n';return 77;}
+    std::string reason;auto gpu=backend=="d3d12"?recvx::create_d3d12_raster(reason):backend=="vulkan"?recvx::create_vulkan_raster(reason):backend=="opengl"?recvx::create_opengl_raster(reason,force_copy):recvx::create_gpu_raster(reason);if(!gpu){std::cout<<"SKIP: "<<reason<<'\n';return 77;}
     recvx::SoftwareRenderer software(640,480),hardware(640,480);
     for(auto* r:{&software,&hardware}){r->set_supersampling(ss);r->set_texture_filtering(mode=="filtered");}
     hardware.set_gpu(gpu);

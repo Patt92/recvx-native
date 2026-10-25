@@ -20,6 +20,13 @@ static bool vulkan_unavailable(const std::string& reason){
     for(const char* prefix:{"Vulkan library not found","no Vulkan device","built without Vulkan","vkCreateInstance failed (-9)"})
         if(reason.rfind(prefix,0)==0)return true;
     return false;}
+// Direct3D 12 uebersprungen nur ohne DLLs, Geraet, ROV oder Build (create_d3d12_raster/gpu_raster_none.cpp);
+// Fehler danach ("D3D12 shader", "D3D12: <Schritt>") sind ein Fehlschlag.
+static bool d3d12_unavailable(const std::string& reason){
+    for(const char* prefix:{"d3d12.dll not available","dxgi.dll not available","d3dcompiler_47.dll not available","Direct3D 12 entry points missing","no DXGI factory",
+                            "no Direct3D 12","GPU without rasterizer ordered views","built without Direct3D 12","Direct3D 12 is available on Windows only"})
+        if(reason.rfind(prefix,0)==0)return true;
+    return false;}
 static void same(SoftwareRenderer& software,SoftwareRenderer& gpu,const std::string& what){
     std::size_t colour=0,depth=0,first=~std::size_t(0);
     for(std::size_t i=0;i<software.pixels().size();++i){
@@ -171,11 +178,12 @@ int main(int argc,char** argv){try{
     _Make_SinTable();
     std::string backend="gpu",data;bool force_copy=false;
     for(int i=1;i<argc;++i){const std::string arg=argv[i];if(arg=="--backend"&&i+1<argc)backend=argv[++i];else if(arg=="--force-copy")force_copy=true;else if(data.empty())data=arg;else throw std::runtime_error("unexpected argument: "+arg);}
-    check(backend=="gpu"||backend=="opengl"||backend=="vulkan","backend must be gpu, opengl or vulkan");
-    std::string reason;auto gpu=backend=="vulkan"?create_vulkan_raster(reason):backend=="opengl"?create_opengl_raster(reason,force_copy):create_gpu_raster(reason);
+    check(backend=="gpu"||backend=="opengl"||backend=="vulkan"||backend=="d3d12","backend must be gpu, opengl, vulkan or d3d12");
+    std::string reason;auto gpu=backend=="d3d12"?create_d3d12_raster(reason):backend=="vulkan"?create_vulkan_raster(reason):backend=="opengl"?create_opengl_raster(reason,force_copy):create_gpu_raster(reason);
     // Vulkan: uebersprungen nur ohne Bibliothek, Geraet, Interlock oder Build; Fehler danach (Pipeline,
     // Speicher, Shader) melden sich als "Vulkan <Schritt>: <Code>" und sind ein Fehlschlag.
     if(!gpu&&backend=="vulkan")check(vulkan_unavailable(reason),"Vulkan initialisation failed: "+reason);
+    if(!gpu&&backend=="d3d12")check(d3d12_unavailable(reason),"Direct3D 12 initialisation failed: "+reason);
     if(!gpu){check(reason.find("shader:")==std::string::npos&&reason.find("program:")==std::string::npos&&reason.find("OpenGL error")==std::string::npos&&reason.find("framebuffer incomplete")==std::string::npos,"GPU initialisation failed: "+reason);std::cout<<"SKIP: "<<reason<<'\n';return 77;}
     std::cout<<"Backend: "<<gpu->name()<<'\n';
     NJS_MATRIX identity;njUnitMatrix(&identity);

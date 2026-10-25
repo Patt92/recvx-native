@@ -269,6 +269,28 @@ time (`vulkan-1.dll`, `libvulkan.so.1`, or the Vulkan loader/MoltenVK on macOS;
 keeps MoltenVK on Metal safe math. All instances share one device and draw one
 frame at a time.
 
+Direct3D 12 (`native/gpu_raster_d3d12.cpp`, Windows, `renderer = d3d12` /
+`--renderer d3d12`, debug-menu index 4) is never a platform default either. It
+compiles the same HLSL as the D3D11 backend (`native/gpu_raster_hlsl.h`, shader
+model 5.1, `D3DCOMPILE_IEEE_STRICTNESS`) and requires
+`D3D12_FEATURE_D3D12_OPTIONS.ROVsSupported`; without it the backend is absent
+(software path). Each frame is one direct command list: texture uploads through
+staging buffers, UAV clears, the three draw phases, mask and composite passes,
+the resolve compute pass, a copy into read-back buffers and a fence the caller
+waits on. Because D3D12 does not serialise UAV access between draw calls the way
+D3D11 does, a UAV barrier follows every draw, matching the Vulkan backend's
+fragment barriers; the ROV ordering then holds within each call. The shadow mask
+is `R32_UINT` (typed UAV loads guaranteed on every D3D12 device; values 0..255
+unchanged). Texture copies are credited to the texture cache only after the
+frame executed, so a frame that fails after recording leaves no stale upload.
+`d3d12.dll`, `dxgi.dll` and `d3dcompiler_47.dll` are loaded at run time;
+`RECVX_D3D12_DRIVER=warp` selects the WARP software adapter and
+`RECVX_D3D12_DEBUG=1` enables the debug layer (messages go to the debugger
+output). Each instance owns its device. Purpose: a DirectX 12 device and command
+stream for later presentation stages (FSR, below). Status: cross-build verified
+on macOS; parity on Windows hardware and WARP is still open (`gpu_raster_d3d12_parity`,
+`gpu_raster_d3d12_warp_parity`).
+
 ### MetalFX presentation stage (macOS)
 
 `native/metalfx_present.h` presents the finished 640×480 frame through the
@@ -315,7 +337,9 @@ them. `./build.sh --opengl off` or CMake `-DRECVX_ENABLE_OPENGL=OFF` omits GL;
 Metal and D3D11 remain available. Vulkan needs `vulkan/vulkan.h` and `glslc` at
 build time (Vulkan SDK, Homebrew `vulkan-headers`/`shaderc`, distribution
 packages); without them CMake warns and omits it. `./build.sh --vulkan off` or
-`-DRECVX_ENABLE_VULKAN=OFF` omits it explicitly. The Windows crossbuild has no
+`-DRECVX_ENABLE_VULKAN=OFF` omits it explicitly. Direct3D 12 needs only the
+Windows SDK or mingw `d3d12.h`/`dxgi1_4.h` (both cross-build and MSVC have
+them); `./build.sh --d3d12 off` or `-DRECVX_ENABLE_D3D12=OFF` omits it. The Windows crossbuild has no
 Vulkan headers by default, so packages built that way contain no Vulkan backend.
 The loader is opened at run time and is not linked. `RECVX_VULKAN_LIBRARY`
 selects one explicit library; otherwise the loader is searched in the app's
@@ -327,28 +351,43 @@ the validated macOS loader; Windows and Linux hardware are still unverified.
 ### FSR 3.1 / FSR 4 (not integrated)
 
 AMD FidelityFX Super Resolution is not part of the current presentation stage.
-FSR 4 has no path through the existing renderer selections; FSR 3.1 could in
-principle use the Vulkan backend but needs a presentation path that is not
-there:
+The Direct3D 12 raster backend above supplies the DirectX 12 device FSR needs;
+everything between that device and the window is still open:
 
 - FSR 4 is DirectX 12 only, on Windows 10/11, and uses ML upscaling on Radeon
   RX 9000 series or newer. Other GPUs fall back to FSR 3.1.5, not to FSR 4.
 - FidelityFX SDK v2 currently lists Vulkan as unsupported; there is no Metal or
   macOS backend for FSR 4.
-- FSR 3.1 supports DirectX 12 and Vulkan, but not Metal. The Windows renderer
-  here is Direct3D 11 and macOS uses Metal; OpenGL and Vulkan are alternative
-  raster backends. The Vulkan backend renders offscreen and returns the frame
-  through SDL, so it has no FSR swapchain/presentation stage yet.
+- FSR 3.1 supports DirectX 12 and Vulkan, but not Metal. The Windows default
+  renderer is Direct3D 11; D3D12 and Vulkan are optional backends. All backends
+  render offscreen and return the frame through SDL, so none has an FSR
+  swapchain/presentation stage yet.
 
-Adding FSR 4 therefore means adding a DirectX 12 raster/presentation path and
-integrating the FidelityFX SDK (MIT samples; FSR 4 ships as prebuilt signed
-DLLs) before any upscaler or frame-generation row can exist. FSR 3.1 could
-attach to the Vulkan backend on Windows/Linux, which would require the SDK plus
-a Vulkan presentation/swapchain path and its own validation (motion vectors,
-history invalidation on cuts, frame-generation timing and per-driver parity).
-Neither is wired in. Until then there is no `fsr` value in `video.ini`, no menu
-row and no silent substitution by a different filter: the gap is deliberate,
-not a missing toggle.
+**TODO (FSR on the D3D12 backend), in order:**
+
+1. A D3D12 presentation stage like `metalfx_present.h`: an `IDXGISwapChain` on
+   the SDL window's HWND, fed from the backend's device instead of the SDL copy,
+   with the same `frame_rate` cadence and 4:3 fit. The raster backend must then
+   keep its resolved frame on the GPU (today it reads it back for the 2D layer),
+   and the 640×480 2D layer has to be composed on the GPU as a UI texture.
+2. The FidelityFX SDK integration (MIT samples; FSR 4 ships as prebuilt signed
+   DLLs) as an optional build input, never a bundled requirement.
+3. Inputs FSR needs that the engine does not produce yet: per-object motion
+   vectors (the MetalFX stage only reprojects the camera, so moving enemies and
+   the player would smear), subpixel jitter of the 3D pass without shaking the
+   integer-positioned 2D layer, a reactive/transparency mask for effects and
+   the HUD, and history invalidation on every cut (room, camera, screen owner).
+4. Frame generation on top (FSR 3.1 frame interpolation needs ≥ 60 fps input;
+   the game tick is 30 Hz) with the presentation-thread model of the MetalFX
+   stage, then a `video.ini`/OPTION/debug-menu row only once 1–3 are validated.
+5. Validation on hardware and WARP: raster parity first
+   (`gpu_raster_d3d12_parity`), then image comparison of the upscaled output
+   against the 640×480 reference, per driver.
+
+FSR 3.1 could alternatively attach to the Vulkan backend on Windows/Linux with
+the same items 1–5 (a Vulkan swapchain instead of DXGI). Until then there is no
+`fsr` value in `video.ini`, no menu row and no silent substitution by a
+different filter: the gap is deliberate, not a missing toggle.
 
 ## Diagnostics
 

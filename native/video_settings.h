@@ -12,9 +12,10 @@ namespace recvx {
 //   Ultra:    filtering + 3x3 supersampling
 enum class RenderQuality {Original,Low,High,Ultra};
 // Host-Rasterer: gpu = Plattformstandard (Metal / D3D11 / OpenGL), opengl = ausdruecklich GL 4.1,
-// vulkan = ausdruecklich Vulkan mit geordnetem Fragment-Interlock. Software bleibt Referenz und
-// Fehlerpfad; Qualitaet und Backendwahl sind unabhaengig. Der Wert ist zugleich der Debugmenue-Index.
-enum class RenderBackend {Gpu,Software,OpenGL,Vulkan};
+// vulkan = ausdruecklich Vulkan mit geordnetem Fragment-Interlock, d3d12 = ausdruecklich Direct3D 12
+// (nur Windows). Software bleibt Referenz und Fehlerpfad; Qualitaet und Backendwahl sind unabhaengig.
+// Der Wert ist zugleich der Debugmenue-Index.
+enum class RenderBackend {Gpu,Software,OpenGL,Vulkan,D3D12};
 // Host-Praesentationsstufe (metalfx_present.h, macOS): das fertige 640x480-Bild wird nach dem
 // Zeichnen hochskaliert, zwischen zwei Takten interpoliert und nachbearbeitet. Keine Spiellogik;
 // das 640x480-Bild, Takt und Ereignisse bleiben unveraendert. Werte sind zugleich Debugmenue-Indizes.

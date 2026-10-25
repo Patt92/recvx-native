@@ -78,6 +78,17 @@ Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
 oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
 
+**Kisten nach Aufzugfahrt (Arbeitsbaum/arm64-Build):** Snapshot 2 RM_7160 reproduziert:
+Der rotierte native Event-N/Game-N+1-Takt begann nach Laden mit Event statt Game;
+das Aufzugskript senkte Kisten vor deren erster bhObj001-Initialisierung auf y=-5.
+Obere ATR-Etage blieb 0 statt 1. Jetzt erster Spielpass vor folgendem Ereignistick
+(main.c:195-201, game.c:48-51), beide Runtime-Schleifen. Gezielter Test
+`tests/native/lift_crate_floor_check.py --runtime build/macos-arm64/recvx-runtime --data data --snapshot snapshots/snapshot-2.rcvxsnap`:
+Kante hält bei x70.25 statt Luftlauf bis x44.17; Material 3 statt 0; Abstieg y0.
+11 angrenzende CTests grün. `verify_stairs.py` blockiert durch veraltetes JSON-Feld
+`stairs.active` (KeyError); kein Gesamt-Stufennachweis. Belege `build/validation/crate-floor-root/`.
+Nicht in Starter-App installiert; kein Commit.
+
 **Portierungsrunde nach dem Audit (2026-10-21, Arbeitsbaum):** StartVibrationEx(0, 8) beim Schieben/Drehen
 (psh/rpsh) an die Vibrationseinheit gebunden, flr_no bei Common/Player 7, bhCheckSubTask-Tor plp->flg 0x6
 (Statustaste/Skriptanforderung). Kistenklettern (bhObj001) und bhControlPlayer :1540-1572 als gebunden
@@ -209,6 +220,13 @@ Softwarefallback geprüft. GL-Shader-/Pixelparität und Linux-Hardware offen.
 nie Standard; `--renderer vulkan`/INI/Debugwahl. macOS (MoltenVK) bitgleich inkl. Schatten,
 Räume 100 % (Punkt), Runtime-Bild == Metal. Windows/Linux-Hardware offen, keine Paketersetzung.
 [Bericht](work/vulkan_raster_backend.result.md).
+
+**Direct3D 12 (2026-10-25, Arbeitsbaum):** optionales Windows-Backend, gleiches HLSL wie D3D11
+(`native/gpu_raster_hlsl.h`), ROV, UAV-Barriere je Zeichenaufruf, Zaun vor dem Rücklesen;
+`--renderer d3d12`/INI/Debugwahl, `RECVX_D3D12_DRIVER=warp`. Crossbuild x64 geprüft, **Parität auf
+Windows-Hardware/WARP offen** (`gpu_raster_d3d12_parity`). Zweck: D3D12-Gerät für FSR; die
+FSR-Präsentationsstufe ist als TODO in [NATIVE_PORT](docs/NATIVE_PORT.md#fsr-31--fsr-4-not-integrated)
+festgehalten. [Bericht](work/d3d12_raster_backend.result.md).
 
 **Kartenbild:** MAP zeichnet MRY-Geometrie, Marker und Sprites in der eigenen
 Build-Runtime; Fade-Rückweg und Wiedereintritt gezielt geprüft. Constant-Material-

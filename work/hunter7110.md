@@ -1,5 +1,37 @@
 # RM_7110: Türknauf / Hunter-Sequenz / Teleport nach RM_7160
 
+## Korrektur des bisherigen Ursachenbefunds
+
+Die unten behauptete falsche Initialisierungsreihenfolge ist widerlegt.
+Original Event_init (event.c:347-354) ruft nach scd0 bhControlEnemy auf,
+bevor der erste Schedulerpass startet. Genau diesen Callback besitzen
+EventVm::initialize und RoomWorld::bind_player_collision bereits.
+Die frueheren Headless-Laeufe hatten implizit --enemy-ai off; dadurch
+unterblieb dieser Pass. Keine Aenderung der Initialisierungsreihenfolge.
+Es ist NICHT belegt, dass der echte Nutzerstand Flag 356 bereits gesetzt
+hatte. fx356 ist eine kuenstliche Gegenprobe, keine Diagnose des Nutzerstands.
+Ein erneutes Laden eines unveraenderten Snapshots setzt nicht von selbst 356.
+
+Die bereits im aktuellen HEAD enthaltene Frame-Abfrage liest den nativen Work
+auch bei scripted=true (event.c:3276-3279). Neue Regression in
+enemy_work_test.cpp prueft 38/39, Neustart und Freigabe gegen einen absichtlich
+veralteten Entity-Spiegel. Arm64-Neubau und enemy_work_contract,
+event_scheduler, event_opcode_lengths: 3/3 PASS.
+
+Runtime mit --enemy-ai on --enemy-grab on, isolierte Diagnosefixture:
+noskip Bild 850, early SELECT 30 Bild 600, second SELECT 250 Bild 600,
+chain SELECT 30/200/400 Bild 450: jeweils RM_7110 nach zwei Raumwechseln,
+cinematic=false, player_hidden=false, player_scripted=false, keine pending
+commands. Sp_flg wieder 0xffffffff; HP 85/140/105/140. Laengere unbewegte
+Laeufe werden von Huntern getoetet; deren Game-over ist kein Cinematic-Haenger.
+Belege build/validation/hunter7110/final-*.json und ai-on-skip.trace.
+
+NICHT vollstaendig abgenommen: natuerlicher Weg RM_7070/Pickup und Nutzerstand,
+visuelle Vollstaendigkeit der RM_7160-Szene, Windows und installierte App.
+Alle Laeufe melden noch njSetBackColor alpha >128 als Renderluecke.
+Die aelteren Erfolgsaussagen zur dargestellten Szene waren zu weitgehend.
+Installierte App unveraendert; keine Spielflags repariert/zurueckgesetzt.
+
 ## Belegte Kette
 
 1. Snapshot (Batterie eingesetzt) lädt RM_7110. Aufheben des Türknaufs startet die Hunter-Sequenz (Event 2/9, Tasks 0/1/2/9/40).

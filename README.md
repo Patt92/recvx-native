@@ -40,6 +40,13 @@ with a shared pipeline feeding the available backend:
   to preserve drawing order and programmable blending; hardware without the
   required support falls back to software. Verified on Windows 11 ARM64 with
   the Parallels Display Adapter (WDDM GPU).
+- **Direct3D 12** — an optional Windows backend, never the platform default.
+  It runs the same HLSL as the Direct3D 11 backend on a D3D12 device with
+  Rasterizer Ordered Views, one command list per frame and a fence before the
+  read-back; GPUs without ROV support fall back to software. It exists to give
+  later DirectX 12 presentation stages (FSR, see below) a device to attach to;
+  its output is held to the same bit-for-bit parity as the other backends and
+  is not yet validated on hardware.
 - **Software** — a CPU renderer that remains available as a fallback and a
   reference for validating GPU output.
 - **Vulkan** — an optional backend, never a platform default, selectable on
@@ -101,14 +108,18 @@ upscaling on Radeon RX 9000 series or newer; other GPUs run the FSR 3.1.5
 fallback. It has no Vulkan or Metal backend, and the FidelityFX SDK v2 lists
 Vulkan as unsupported. FSR 3.1 supports DirectX 12 and Vulkan, but not Metal.
 
-The port's Windows renderer is Direct3D 11 and its macOS renderer is Metal, so
-FSR 4 would first need a DirectX 12 raster/presentation path. FSR 3.1 could in
-principle attach to the optional Vulkan backend on Windows or Linux, but that
-backend currently renders offscreen and returns the frame through SDL; FSR
-would require the FidelityFX SDK plus a Vulkan presentation/swapchain stage and
-frame-generation hooks, validated per driver. On macOS, MetalFX remains the
-supported upscaler. FSR stays a documented gap rather than an option that
-silently substitutes a different filter.
+The Windows default renderer is Direct3D 11 and the macOS renderer is Metal.
+The optional Direct3D 12 raster backend (`--renderer d3d12`) now provides the
+DirectX 12 device FSR requires, but it renders offscreen and returns the frame
+through SDL like every other backend. What remains for FSR is a presentation
+stage on that device, listed as an open TODO in
+[docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#fsr-31--fsr-4-not-integrated): the
+FidelityFX SDK, a D3D12 swap chain in the SDL window, per-object motion vectors
+(the MetalFX stage only reprojects the camera), subpixel jitter, a reactive mask
+for the 2D layer, and validation on hardware. FSR 3.1 could alternatively
+attach to the Vulkan backend on Windows/Linux with the same open items. On
+macOS, MetalFX remains the supported upscaler. FSR stays a documented gap
+rather than an option that silently substitutes a different filter.
 
 ## Console foundations, rewritten for the host
 
@@ -166,7 +177,7 @@ brought up separately from the shared gameplay code.
 | Platform | Direction |
 |---|---|
 | **Mac / Apple Silicon** | Current development platform with Metal and software rendering, plus optional Vulkan through MoltenVK; standalone Mac builds are part of the release plan. |
-| **Windows x64** | Build support, the Direct3D 11 backend and optional Vulkan are present; validated Windows releases are planned. |
+| **Windows x64** | Build support, the Direct3D 11 backend and optional Vulkan and Direct3D 12 backends are present; validated Windows releases are planned. |
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
 | **iOS/iPadOS** | Build support for arm64 devices and the simulator with Metal (`./build.sh --platform ios` / `ios-simulator`); runtime on iOS hardware not yet validated, no touch controls. |
@@ -229,6 +240,12 @@ Install:
   time and the Vulkan loader (`vulkan-1.dll`) at run time. The Windows
   cross-build has no Vulkan headers by default and omits the backend unless a
   native build or an explicit SDK path supplies them.
+- **Optional Direct3D 12 backend:** built by default from the Windows SDK or
+  mingw headers (`--d3d12 off` / `-DRECVX_ENABLE_D3D12=OFF` omits it);
+  `d3d12.dll`, `dxgi.dll` and `d3dcompiler_47.dll` are loaded at run time.
+  Select it with `--renderer d3d12`, `renderer = d3d12` in `video.ini` or the
+  debug menu; `RECVX_D3D12_DRIVER=warp` runs it on Microsoft's WARP software
+  device, `RECVX_D3D12_DEBUG=1` enables the D3D12 debug layer.
 - **FFmpeg and ffprobe** for `--iso`: either install them on `PATH`, or place
   the Windows executables directly in the repository's `build-tools/` folder:
 

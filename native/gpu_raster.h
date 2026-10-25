@@ -9,7 +9,8 @@
 // Bandstufe und liefert das aufgeloeste Bild und die Tiefe (1/z, Maximum je Ueberabtastblock) zurueck.
 // Plattformbackend: Metal (macOS), Direct3D 11 (Windows), OpenGL (Linux). OpenGL ist zusaetzlich auf
 // allen Desktopplattformen ausdruecklich waehlbar (gpu_raster_opengl.cpp, RECVX_ENABLE_OPENGL), ebenso
-// Vulkan (gpu_raster_vulkan.cpp, RECVX_ENABLE_VULKAN).
+// Vulkan (gpu_raster_vulkan.cpp, RECVX_ENABLE_VULKAN) und auf Windows Direct3D 12
+// (gpu_raster_d3d12.cpp, RECVX_ENABLE_D3D12).
 namespace recvx {
 class GpuRaster {
 public:
@@ -41,4 +42,7 @@ std::shared_ptr<GpuRaster> create_opengl_raster(std::string& reason,bool force_c
 // Vulkan-Backend (geordneter Fragment-Interlock, gpu_raster_vulkan.cpp) oder nullptr; ohne
 // RECVX_ENABLE_VULKAN immer nullptr mit Begruendung. Auf keiner Plattform Standardbackend.
 std::shared_ptr<GpuRaster> create_vulkan_raster(std::string& reason);
+// Direct3D-12-Backend (Rasterizer Ordered Views, gpu_raster_d3d12.cpp, nur Windows) oder nullptr;
+// nie Plattformstandard, auf anderen Plattformen oder ohne RECVX_ENABLE_D3D12 immer nullptr mit Begruendung.
+std::shared_ptr<GpuRaster> create_d3d12_raster(std::string& reason);
 }

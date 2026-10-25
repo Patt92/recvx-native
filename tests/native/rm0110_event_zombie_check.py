@@ -15,7 +15,9 @@ ev_flg 128 (scd0 @846: ev_flg 128 gesetzt, 129 frei, rm_flg 3 -> Fressszene mit
 Ereignissen 10..12). Danach natuerliches Gehen bis zum Bodenausloeser der Szene
 (Ereignisse 40..44), --enemy-ai on, --enemy-grab on. Diagnose: der Debug-Menue-
 Ausruestungseintrag gibt die Waffe 32 (wpnr 6), der Raumwechsel fuer das
-Wiederbetreten geht ueber das Debug-Menue (Raum/Teleport)."""
+Wiederbetreten geht ueber das Debug-Menue (Raum/Teleport). Nur die Schussprobe
+setzt nach der natuerlichen Szene eine Diagnoseposition; sie ist kein
+Durchspiel-/Zielwechselnachweis."""
 import argparse
 import json
 import os
@@ -104,12 +106,16 @@ def main():
         # Init setzt hp 200 (en26.c:1785) und mode0 1 (:1852); ohne Init bleibt beides 0.
         assert z['work']['mode'][0] >= 1 and z['work']['hp'] == 200, \
             ('EN26 nach Wiederbetreten ohne Init (T-Pose)', z['work'])
-        # Toetbar: Treffer im Freigabefenster nach dem ersten Griff (Ziel per next_target).
-        # Nach der Szene (Ereignis 40: Common 7 px/pz 34/17, Common 47, Common 41 flg 0x40000, 64 80) haelt
-        # bhFixPosition (player.c:1538-1558) den spxn-Zug von act_std (player.c:2127) auf; die Spielerin steht
-        # rund 7.5 weiter vom Zombie, der Angriff endet 19 Bilder spaeter, und das Kopfplatzen braucht einen
-        # Treffer mit nr < 15 (weapon.c:757 -> comb_flg 0x10, en26.c:954-985): kurz vorgehen, dann zielen.
+        # Toetbar: explizite Diagnoseposition nach dem ersten Griff, dann echter
+        # Zieleingabe-/Schusspfad. Kopfplatzen braucht nr < 15 (weapon.c:757 ->
+        # comb_flg 0x10, en26.c:954-985). Die alte Probe verliess sich auf den
+        # genauen Kampfstand nach 1080 Takten: der erste Game-Pass vor Event-0
+        # veraendert ihn, next_target fuehrte dann zu einem Fehlschuss
+        # (combat_shots=1, combat_hits=0), nicht zu fehlenden Kopfeffekten.
+        # Gleiche Diagnoseposition gegen beide Task-Startreihenfolgen geprueft;
+        # Szenenablauf/Angriff oben bleiben ohne Positionsinjektion getestet.
         kill_replay = (WALK.format(equip=EQUIP) +
+                       '1080 position 26 0 25 16384\n'
                        '1081 keys forward\n1085 keys aim\n1091 keys aim next_target\n1094 keys aim\n1099 keys aim attack\n1102 keys aim\n'
                        '1115 keys aim attack\n1118 keys aim\n1131 keys aim attack\n1134 keys none\n')
         # Kopfplatzen (bhEne26_DmgCheckType00, en26.c:864-872): hp = -1, ExpHeadEffect legt viermal
@@ -119,6 +125,8 @@ def main():
         burst = run('burst', 1105, kill_replay)
         z = en26(burst)
         ids = [e['id'] for e in burst['effects']]
+        assert burst['combat_shots'] >= 1 and burst['combat_hits'] >= 1, \
+            ('Kopfplatzprobe ohne echten Schusstreffer', burst['combat_shots'], burst['combat_hits'])
         assert z['hp'] == -1 and ids.count(362) == 4 and ids.count(370) == 8, \
             ('Kopfplatzen ohne 4x362/8x370 (en26.c:868/869)', z['hp'], sorted(set(ids)), ids.count(362), ids.count(370))
         assert 'Nikuhen' not in burst['_log'] and 'Blood3' not in burst['_log'] and 'bhEff362' not in burst['_log'] \
