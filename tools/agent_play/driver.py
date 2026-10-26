@@ -157,6 +157,8 @@ def passive(obs):
         return True
     if obs.get('dialog'):
         return False
+    if obs.get('computer'):
+        return obs['computer'].get('waits') in ('printing', 'script')
     return bool(obs.get('owner')) and set(obs['owner'].split()) <= PASSIVE
 
 
@@ -177,6 +179,7 @@ class Driver:
         self.steps = 0
         self._approach_cache = {}  # room -> zone -> [to, face]; geometry of a room does not move
         self.room = self.previous_room = None
+        self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
 
     # --- tools -----------------------------------------------------------------------------------------
     def tool(self, name, args):
@@ -354,9 +357,15 @@ class Driver:
                 obs = self.play.observe()
                 continue
             stale_since = None
-            if passive(obs):
+            view = json.dumps(trim(obs), sort_keys=True)
+            self.idle_waits = self.idle_waits + 1 if view == self.idle_view else 0
+            self.idle_view = view
+            if passive(obs) and self.idle_waits < 4:
                 action, entry = {'op': 'wait'}, dict(auto=True)
             else:
+                if self.idle_waits >= 4:
+                    # Nothing changed over several waits: the game may wait for a button after all.
+                    feedback = dict(feedback, unchanged_for=self.idle_waits)
                 user, action, usage, llm_ms = self.decide(self.with_approaches(self.mark_way_back(obs)), feedback)
                 fallback = action.pop('no_action', False)
                 note = action.pop('note', None)

@@ -103,6 +103,73 @@ def inventory(d):
     return out
 
 
+# Computer soft keyboard (computer_core.c keyboard): key = kx + ky*10, kx 0..9, ky 0..3, both wrap.
+# Row 0: 1..9,0; row 1: ESC, A..H, BS; row 2: I..Q, ENTER; row 3: R..Z, ENTER (tall key at kx 9, ky 2/3).
+KEY_ROWS = ['1234567890', '\x1bABCDEFGH\x08', 'IJKLMNOPQ\n', 'RSTUVWXYZ\n']
+KEY_NAMES = {'\x1b': 'ESC', '\x08': 'BS', '\n': 'ENTER'}
+
+
+def key_label(kx, ky):
+    if not (0 <= kx <= 9 and 0 <= ky <= 3):
+        return '?'
+    c = KEY_ROWS[ky][kx]
+    return KEY_NAMES.get(c, c)
+
+
+def key_step(kx, ky, move):
+    """One keyboard_step for up/down/left/right, including the tall ENTER key and the wrap."""
+    if move == 'up' and kx == 9 and ky == 3:
+        ky -= 2
+    elif move == 'down' and kx == 9 and ky == 2:
+        ky += 2
+    else:
+        kx += {'left': -1, 'right': 1}.get(move, 0)
+        ky += {'up': -1, 'down': 1}.get(move, 0)
+    return kx % 10, ky % 4
+
+
+def key_path(start, target_char):
+    """Shortest up/down/left/right sequence from start to a key showing target_char."""
+    from collections import deque
+    goals = {(x, y) for y, row in enumerate(KEY_ROWS) for x, ch in enumerate(row) if ch == target_char}
+    seen, queue = {start: []}, deque([start])
+    while queue:
+        at = queue.popleft()
+        if at in goals:
+            return seen[at], at
+        for move in ('up', 'down', 'left', 'right'):
+            nxt = key_step(*at, move)
+            if nxt not in seen:
+                seen[nxt] = seen[at] + [move]
+                queue.append(nxt)
+    raise PlayError('key not on the keyboard: ' + repr(target_char))
+
+
+def computer_view(c):
+    """What the terminal shows and which input it waits for (computer_core.c txflg/com_flg bits)."""
+    tx, flg = c.get('txflg', 0), c.get('flg', 0)
+    rows = [r.rstrip() for r in c.get('text', [])]
+    while rows and not rows[-1]:
+        rows.pop()
+    if tx & 0x2 or tx & 0x1:
+        waits = 'printing'           # scrolling / printing one character per pass
+    elif flg & 0x10 and tx & 0x8:
+        waits = 'keyboard'           # password entry: use op type
+    elif tx & 0x4:
+        waits = 'confirm'            # page shown, OK continues
+    else:
+        waits = 'script'
+    view = dict(screen=rows, waits=waits)
+    if c.get('md1') == 10 and not flg & 0x200:
+        view['cancel_exits'] = True  # md1 10: cancel leaves the terminal unless the script locked it (0x200)
+    if waits == 'keyboard':
+        kx, ky = (c.get('key') or [0, 0])
+        # Free letter positions are drawn as '\\' (computer_core.c: txcol|60 fills wordmax cells).
+        view.update(key=key_label(kx, ky), typed=[w for w in c.get('words', []) if w],
+                    free=sum(r.count('\\') for r in rows))
+    return view
+
+
 def compact(d, age, grid_cache=None):
     """Bound geometry/enemy output, preserve full current dialogue for the decision."""
     px, _, pz = d['actor']
@@ -167,6 +234,11 @@ def compact(d, age, grid_cache=None):
         result['typewriter'] = tw
     if d.get('movie_active'):
         result['movie_frame'] = d.get('movie_frame')
+    if d.get('files_open') and d.get('file_text', '').strip():
+        result['document'] = d['file_text']
+    c = d.get('computer')
+    if isinstance(c, dict) and c.get('active'):
+        result['computer'] = computer_view(c)
     zones = []
     room_items = {e['index']: e for e in d.get('room_items', [])}
     for a in d.get('interactions', []):
@@ -481,7 +553,8 @@ class Play:
         allowed = {'press': {'op', 'key'}, 'move': {'op', 'to', 'run', 'face', 'danger'},
                    'interact': {'op', 'zone', 'to', 'run', 'face', 'danger'},
                    'keys': {'op', 'keys', 'ticks'}, 'fire': {'op', 'shots', 'low', 'target'},
-                   'shake': {'op', 'presses', 'then'}, 'run': {'op', 'mode', 'dist'}}
+                   'shake': {'op', 'presses', 'then'}, 'run': {'op', 'mode', 'dist'},
+                   'type': {'op', 'text', 'enter'}}
         if op not in allowed or set(action)-allowed[op]:
             raise PlayError('unknown action or arguments')
         if op == 'press':
@@ -507,6 +580,22 @@ class Play:
             return [(1, self.route(d, target, run=action.get('run', True), face=face,
                                    confirm=op == 'interact', danger=action.get('danger', True),
                                    near=self.near_for(a, target, face) if op == 'interact' else 0.0))]
+        if op == 'type':
+            c = d.get('computer')
+            if not (isinstance(c, dict) and c.get('active') and computer_view(c)['waits'] == 'keyboard'):
+                raise PlayError('type needs the computer keyboard (computer.waits keyboard)')
+            text = action.get('text')
+            if not isinstance(text, str) or not text or len(text) > 15 or \
+                    any(ch not in ''.join(KEY_ROWS[0] + KEY_ROWS[1][1:9] + KEY_ROWS[2][:9] + KEY_ROWS[3][:9]) for ch in text.upper()):
+                raise PlayError('type text: 1..15 characters A-Z or 0-9')
+            # keyboard_step moves once per newly seen direction; one press every 2 ticks re-arms it.
+            at, tick, commands = tuple(c.get('key') or [0, 0]), 1, []
+            for ch in text.upper() + ('\n' if action.get('enter', True) else ''):
+                moves, at = key_path(at, ch)
+                for m in moves:
+                    commands.append((tick, m)); tick += 2
+                commands.append((tick, 'confirm')); tick += 3
+            return commands
         if op == 'run':
             # on = real time; auto = real time, but held while an active enemy is within dist and
             # nothing is queued (runtime run auto); each action then runs only for its own ticks.
@@ -565,7 +654,7 @@ class Play:
                 return [(1, fire)]
             e = min(enemies, key=lambda e: math.hypot(e['position'][0] - d['actor'][0], e['position'][2] - d['actor'][2]))
             return [(1, f"face {e['position'][0]:.4f} {e['position'][2]:.4f} then {fire}")]
-        raise PlayError('unknown action; use move/interact/press/keys/fire/shake/run/wait')
+        raise PlayError('unknown action; use move/interact/press/type/keys/fire/shake/run/wait')
 
     @staticmethod
     def compile_wait(action):
@@ -692,6 +781,11 @@ class Play:
             # Ignore an old route result when this request is a menu/button action.
             if route or before.get('control', {}).get('result') != d['control']['result']:
                 return d['control']['result']
+        c = d.get('computer')
+        if isinstance(c, dict) and c.get('active'):
+            # The terminal runs under the cinematic bit; it is a decision point once it waits for input.
+            waits = computer_view(c)['waits']
+            return 'computer' if waits in ('confirm', 'keyboard') else None
         if d.get('cinematic') or d.get('door_active') or d.get('player_scripted') or d.get('movie_active'):
             return None
         if d.get('title_active') and d.get('title_mode') not in (6, 9):

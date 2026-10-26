@@ -59,6 +59,8 @@ How the driver keeps it fast:
 | No idle calls | Scenes, doors, videos, running routes and sliding menus are waited out without asking the model; in fights the game holds (`run auto 18`) until the answer arrives. |
 | Tools | `zone(i)` returns ready approach points, `hint(cmd)` reads room scripts and texts (`room`, `zone`, `blocked`, `event`, `msg`). Without function calling use `--no-tools`; the model then replies `{"op":"zone","i":4}`. |
 | Ready points | The nearest doors, items and stairs carry `go` (standing point and facing) and the door to the room just left is marked `back`, so the model neither guesses coordinates nor mistakes the nearest door for the way on. A rejected `interact` returns the computed points as `use_one_of`. |
+| Puzzles | The model sees what the player reads: dialog pages, document pages (`document`), item texts (`menu_text`) and the terminal screen (`computer.screen`) with what it waits for (`printing`, `confirm`, `keyboard`, `script` + `cancel_exits`). `type` enters a password on the soft keyboard (`free` = letters left). The prompt states the goal (play to the end) and a fixed puzzle order: read, `hint zone`, act. |
+| No endless waiting | A terminal that waits for a button ends a `wait`; if several waits change nothing the model is asked anyway (`unchanged_for`). |
 | Save screen | `typewriter.highlighted` names the preselected Yes/No (saving over a used slot starts on No). |
 | Robust replies | The first JSON object with `"op"` is taken (code fences and prose are tolerated); a rejected action goes back to the model as `error`. |
 

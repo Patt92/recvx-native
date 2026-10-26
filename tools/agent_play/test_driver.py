@@ -254,6 +254,75 @@ class DriverTests(unittest.TestCase):
         d['typewriter']['phase_name'] = 'files'
         self.assertNotIn('highlighted', compact(d, 0)['typewriter'])
 
+    def computer(self, **kw):
+        c = dict(active=True, number=7, md0=2, md1=10, flg=0, txflg=0, key=[1, 1], words=['', ''],
+                 text=['PASSWORD:', '', ''])
+        c.update(kw)
+        return c
+
+    def test_computer_screen_and_input_wait_reach_the_model(self):
+        from play import compact
+        d = state()
+        d['cinematic'] = True
+        d['computer'] = self.computer(txflg=0x4)
+        view = compact(d, 0)['computer']
+        self.assertEqual(view['screen'], ['PASSWORD:'])
+        self.assertEqual(view['waits'], 'confirm')
+        self.assertTrue(view['cancel_exits'])
+        d['computer'] = self.computer(flg=0x10 | 0x200, txflg=0x8)
+        view = compact(d, 0)['computer']
+        self.assertEqual((view['waits'], view['key']), ('keyboard', 'A'))
+        self.assertNotIn('cancel_exits', view)
+        d['computer'] = self.computer(txflg=0x1)
+        self.assertEqual(compact(d, 0)['computer']['waits'], 'printing')
+        self.assertTrue(passive(dict(owner='CINEMATIC COMPUTER', computer=dict(waits='printing'))))
+        self.assertFalse(passive(dict(owner='CINEMATIC COMPUTER', computer=dict(waits='keyboard'))))
+
+    def test_type_walks_the_soft_keyboard_and_presses_enter(self):
+        from play import key_step, KEY_ROWS
+        self.d['cinematic'] = True
+        self.d['computer'] = self.computer(flg=0x10, txflg=0x8, key=[1, 1])
+        commands = self.play.compile(self.d, dict(op='type', text='b2'))
+        # Replay the moves on the keyboard model: every confirm must land on the wanted key.
+        at, typed = (1, 1), ''
+        for _, line in commands:
+            if line == 'confirm':
+                typed += KEY_ROWS[at[1]][at[0]]
+            else:
+                at = key_step(*at, line)
+        self.assertEqual(typed, 'B2\n')
+        ticks = [t for t, _ in commands]
+        self.assertEqual(ticks, sorted(ticks))
+        self.assertTrue(all(b - a >= 2 for a, b in zip(ticks, ticks[1:])))
+        with self.assertRaisesRegex(Exception, 'A-Z or 0-9'):
+            self.play.compile(self.d, dict(op='type', text='a-b'))
+        self.d['computer'] = self.computer(txflg=0x4)
+        with self.assertRaisesRegex(Exception, 'keyboard'):
+            self.play.compile(self.d, dict(op='type', text='AB'))
+
+    def test_computer_input_wait_ends_a_wait_action(self):
+        from play import Play
+        self.assertEqual(Play.reason(state(), dict(state(), cinematic=True, computer=self.computer(txflg=0x4)),
+                                     waiting=True), 'computer')
+        self.assertIsNone(Play.reason(state(), dict(state(), cinematic=True, computer=self.computer(txflg=0x1)),
+                                      waiting=True))
+
+    def test_unchanged_passive_state_is_handed_to_the_model(self):
+        self.d['cinematic'] = True
+        self.write(self.d)
+        drv, client = self.driver([text(dict(op='press', key='confirm'))])
+        with self.ticking():
+            drv.run(steps=5)
+        self.assertEqual(len(client.requests), 1)
+        feedback = json.loads(client.requests[0][0][-1]['content'])
+        self.assertGreaterEqual(feedback['unchanged_for'], 4)
+
+    def test_document_text_is_shown(self):
+        from play import compact
+        d = state()
+        d.update(files_open=True, inventory_open=True, file_text='The code is on the back.')
+        self.assertEqual(compact(d, 0)['document'], 'The code is on the back.')
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):
