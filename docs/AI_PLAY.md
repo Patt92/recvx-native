@@ -27,6 +27,8 @@ Driver options (pass them to `Start-AI-Play.command`/`.cmd` or `driver.py`):
 | `--no-tools` | endpoint without function calling; the model replies `{"op":"zone","i":4}` instead |
 | `--temperature`, `--max-tokens` | sampling (default 0.2, 200) |
 | `--seconds S` | game-time budget per action, at most 8 |
+| `--timeout S` | seconds per model request (default 60) |
+| `--retries N`, `--retry-delay S` | on timeout, refused connection, HTTP 408/429/5xx: retry after S seconds, doubled up to 20 s; `--retries 0` (default) retries until the endpoint answers. Bad key or model (401/404) stops at once. |
 | `--dry-run` | print the first request and exit, no endpoint call |
 
 ## AI play: how the driver works
@@ -56,6 +58,8 @@ How the driver keeps it fast:
 | Small turns | Each decision sends only the compact state (~600 characters), the last result and the model's own one-line `note`. The history grows to `--window` decisions and is then halved in one block so the cached prefix stays valid. |
 | No idle calls | Scenes, doors, videos, running routes and sliding menus are waited out without asking the model; in fights the game holds (`run auto 18`) until the answer arrives. |
 | Tools | `zone(i)` returns ready approach points, `hint(cmd)` reads room scripts and texts (`room`, `zone`, `blocked`, `event`, `msg`). Without function calling use `--no-tools`; the model then replies `{"op":"zone","i":4}`. |
+| Ready points | The nearest doors, items and stairs carry `go` (standing point and facing) and the door to the room just left is marked `back`, so the model neither guesses coordinates nor mistakes the nearest door for the way on. A rejected `interact` returns the computed points as `use_one_of`. |
+| Save screen | `typewriter.highlighted` names the preselected Yes/No (saving over a used slot starts on No). |
 | Robust replies | The first JSON object with `"op"` is taken (code fences and prose are tolerated); a rejected action goes back to the model as `error`. |
 
 Measured against the headless runtime: buttons 0.1–0.6 s, a route a few

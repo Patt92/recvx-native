@@ -181,6 +181,79 @@ class DriverTests(unittest.TestCase):
         self.assertIn('no game action', second['error'])
         self.assertIn('cancel', self.controls())
 
+    def test_timeout_is_retried_after_a_pause(self):
+        import socket
+        import urllib.error
+        from unittest import mock
+        import driver
+        calls, pauses = [], []
+        class Reply(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        def urlopen(req, timeout):
+            calls.append(1)
+            if len(calls) == 1:
+                raise socket.timeout('timed out')
+            if len(calls) == 2:
+                raise urllib.error.URLError(ConnectionRefusedError('refused'))
+            if len(calls) == 3:
+                raise urllib.error.HTTPError(req.full_url, 503, 'busy', {}, None)
+            return Reply(json.dumps(dict(choices=[dict(message=dict(content='{"op":"wait"}'))])).encode())
+        client = driver.Client('http://x/v1', 'm', out=io.StringIO(), sleep=pauses.append, retry_delay=3)
+        with mock.patch('urllib.request.urlopen', urlopen):
+            message, _ = client.complete([])
+        self.assertEqual(message['content'], '{"op":"wait"}')
+        self.assertEqual(pauses, [3, 6, 12])
+        # A request error that will not heal (bad key, bad model) is not retried.
+        def denied(req, timeout):
+            raise urllib.error.HTTPError(req.full_url, 401, 'unauthorized', {}, None)
+        with mock.patch('urllib.request.urlopen', denied), self.assertRaises(urllib.error.HTTPError):
+            client.complete([])
+        limited = driver.Client('http://x/v1', 'm', retries=2, out=io.StringIO(), sleep=lambda s: None)
+        with mock.patch('urllib.request.urlopen', lambda req, timeout: (_ for _ in ()).throw(socket.timeout())), \
+                self.assertRaises(TimeoutError):
+            limited.complete([])
+
+    def test_door_back_and_ready_approach_are_in_the_state(self):
+        self.d['interactions'] = [
+            dict(index=1, flags=1, floor=0, type=0, attribute=0, position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 1, 0, 0]),
+            dict(index=0, flags=1, floor=0, type=0, attribute=0, position=[-9, 0, -9], extent=[4, 0, 4], parameters=[0, 3, 0, 0])]
+        self.write(self.d)
+        drv, _ = self.driver([])
+        drv.room = 'RM_0010'
+        obs = drv.with_approaches(drv.mark_way_back(self.play.observe()))
+        zones = {z['i']: z for z in obs['zones']}
+        self.assertTrue(zones[1].get('back'))
+        self.assertNotIn('back', zones[0])
+        self.assertEqual(obs['came_from'], 'RM_0010')
+        self.assertEqual(len(zones[0]['go']), 2)
+
+    def test_blocked_interact_error_carries_the_computed_points(self):
+        self.d['interactions'] = [dict(index=4, flags=1, floor=0, type=4, attribute=0,
+                                       position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
+        self.write(self.d)
+        drv, client = self.driver([text(dict(op='interact', zone=4, to=[20, 0], face=[7, 7])),
+                                   text(dict(op='press', key='cancel'))])
+        with self.ticking():
+            drv.run(steps=2)
+        feedback = json.loads(client.requests[1][0][-1]['content'])
+        self.assertEqual(feedback['result'], 'error')
+        self.assertTrue(feedback['use_one_of'])
+        self.assertEqual(set(feedback['use_one_of'][0]), {'to', 'face'})
+
+    def test_save_screen_names_the_highlighted_choice(self):
+        from play import compact
+        d = state()
+        d['typewriter'] = dict(active=True, mode='save', phase_name='confirm', text='Save?', selection=1,
+                               cursor=0, slot=dict(n=0, exists=True), used_slots=[0])
+        tw = compact(d, 0)['typewriter']
+        self.assertEqual(tw['highlighted'], 'No')
+        self.assertTrue(tw['slot_used'])
+        d['typewriter']['selection'] = 0
+        self.assertEqual(compact(d, 0)['typewriter']['highlighted'], 'Yes')
+        d['typewriter']['phase_name'] = 'files'
+        self.assertNotIn('highlighted', compact(d, 0)['typewriter'])
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):

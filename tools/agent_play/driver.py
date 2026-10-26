@@ -55,12 +55,37 @@ TOOLS = [
 class Client:
     """Minimal OpenAI-compatible /chat/completions client (urllib, no dependencies)."""
 
-    def __init__(self, base_url, model, api_key='', *, temperature=0.2, max_tokens=200, timeout=60):
+    # Transient failures worth another try: timeouts, refused/reset connections, overload, server errors.
+    RETRY_HTTP = {408, 409, 425, 429, 500, 502, 503, 504}
+
+    def __init__(self, base_url, model, api_key='', *, temperature=0.2, max_tokens=200, timeout=60,
+                 retries=0, retry_delay=3.0, out=sys.stderr, sleep=time.sleep):
         self.url = base_url.rstrip('/') + '/chat/completions'
         self.model, self.api_key = model, api_key
         self.temperature, self.max_tokens, self.timeout = temperature, max_tokens, timeout
+        self.retries, self.retry_delay, self.out, self.sleep = retries, retry_delay, out, sleep
 
     def complete(self, messages, tools=None):
+        """One request; transient errors are retried after a few seconds (retries 0 = until it works)."""
+        attempt = 0
+        while True:
+            try:
+                return self._complete(messages, tools)
+            except urllib.error.HTTPError as e:
+                if e.code not in self.RETRY_HTTP:
+                    raise
+                reason = f'HTTP {e.code}'
+                e.close()
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, json.JSONDecodeError) as e:
+                reason = str(getattr(e, 'reason', e)) or type(e).__name__
+            attempt += 1
+            if self.retries and attempt > self.retries:
+                raise TimeoutError(f'LLM endpoint failed {attempt} times, last: {reason}')
+            delay = min(self.retry_delay * 2 ** min(attempt - 1, 3), 20.0)
+            print(f'LLM endpoint: {reason}; retry {attempt} in {delay:.0f} s', file=self.out, flush=True)
+            self.sleep(delay)
+
+    def _complete(self, messages, tools=None):
         body = dict(model=self.model, messages=messages, temperature=self.temperature, max_tokens=self.max_tokens)
         if tools:
             body.update(tools=tools, tool_choice='auto')
@@ -150,6 +175,8 @@ class Driver:
         self.log = log
         self.out = out
         self.steps = 0
+        self._approach_cache = {}  # room -> zone -> [to, face]; geometry of a room does not move
+        self.room = self.previous_room = None
 
     # --- tools -----------------------------------------------------------------------------------------
     def tool(self, name, args):
@@ -250,7 +277,54 @@ class Driver:
         except PlayError as e:
             obs = self.play.observe()
             feedback = dict(result='error', error=str(e))
+            if action.get('op') == 'interact' and isinstance(action.get('zone'), int):
+                # A made-up standing point is the most common error: hand over the computed ones.
+                try:
+                    z = self.play.describe_zone(action['zone'])
+                    feedback['use_one_of'] = [dict(to=a['to'], face=a['face']) for a in z.get('approach', [])]
+                    if z.get('approach_note'):
+                        feedback['approach_note'] = z['approach_note']
+                except PlayError:
+                    pass
         return obs, feedback, (time.monotonic() - started) * 1000
+
+    def mark_way_back(self, obs):
+        """Name the door that leads to the room just left, so 'nearest door' is not mistaken for 'onward'."""
+        room = obs.get('room')
+        if room and room != self.room:
+            self.previous_room, self.room = self.room, room
+        if not self.previous_room:
+            return obs
+        try:
+            back = int(self.previous_room[4:6])  # RM_SRR0: room number RR within the stage
+        except ValueError:
+            return obs
+        for z in obs.get('zones', []):
+            if z.get('kind') == 'door' and z.get('destination') == back:
+                z['back'] = True
+        obs['came_from'] = self.previous_room
+        return obs
+
+    def with_approaches(self, obs, count=3):
+        """Give the nearest door/item/stairs zones a ready `go` point (to, face) so interact needs no guess."""
+        if obs.get('owner') != 'FREE' or not obs.get('zones'):
+            return obs
+        d, _, _ = self.play.read()
+        cache = self._approach_cache.setdefault(d.get('room'), {})
+        done = 0
+        for z in obs['zones']:
+            if done >= count or z.get('kind') not in ('door', 'item', 'stairs') or z.get('item') == 'taken':
+                continue
+            if z['i'] not in cache:
+                try:
+                    found = self.play.approaches(d, self.play.zone(d, z['i']), limit=1)
+                except PlayError:
+                    found = []
+                cache[z['i']] = [found[0]['to'], found[0]['face']] if found else None
+            if cache[z['i']]:
+                z['go'] = cache[z['i']]
+            done += 1
+        return obs
 
     def ensure_auto_hold(self):
         d, _, _ = self.play.read()
@@ -283,7 +357,7 @@ class Driver:
             if passive(obs):
                 action, entry = {'op': 'wait'}, dict(auto=True)
             else:
-                user, action, usage, llm_ms = self.decide(obs, feedback)
+                user, action, usage, llm_ms = self.decide(self.with_approaches(self.mark_way_back(obs)), feedback)
                 fallback = action.pop('no_action', False)
                 note = action.pop('note', None)
                 if isinstance(note, str) and note.strip():
@@ -317,13 +391,17 @@ def main():
     ap.add_argument('--window', type=int, default=8, help='decisions kept in the prompt (cut in halves)')
     ap.add_argument('--temperature', type=float, default=0.2)
     ap.add_argument('--max-tokens', type=int, default=200)
+    ap.add_argument('--timeout', type=float, default=60.0, help='seconds per model request')
+    ap.add_argument('--retries', type=int, default=0, help='retries on timeout/connection errors (0 = until it works)')
+    ap.add_argument('--retry-delay', type=float, default=3.0, help='first retry pause, doubled up to 20 s')
     ap.add_argument('--seconds', type=float, default=6.0, help='play.py wait budget per action (<= 8)')
     ap.add_argument('--no-tools', action='store_true', help='endpoint without function calling')
     ap.add_argument('--dry-run', action='store_true', help='print the first request and exit')
     a = ap.parse_args()
     play = Play(a.dir)
     client = Client(a.base_url, a.model, os.environ.get('RECVX_LLM_API_KEY') or os.environ.get('OPENAI_API_KEY', ''),
-                    temperature=a.temperature, max_tokens=a.max_tokens)
+                    temperature=a.temperature, max_tokens=a.max_tokens, timeout=a.timeout,
+                    retries=a.retries, retry_delay=a.retry_delay)
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
                     log=Path(a.dir) / 'driver.log')
     if a.dry_run:

@@ -155,7 +155,16 @@ def compact(d, age, grid_cache=None):
                                entry=d.get('title_entry'), entries=d.get('title_entries'),
                                load_available=d.get('title_load_available'))
     if (d.get('typewriter') or {}).get('active'):
-        result['typewriter'] = d['typewriter']
+        t = d['typewriter']
+        # Save/load screen: name the highlighted choice. Typewriter::choose: selection 0 = Yes, 1 = No;
+        # saving over a used slot opens on No; up/down toggles (pad 0x1/0x2), confirm takes it.
+        tw = dict(mode=t.get('mode'), phase=t.get('phase_name'), text=t.get('text', ''),
+                  slot=(t.get('slot') or {}).get('n', t.get('cursor')),
+                  slot_used=bool((t.get('slot') or {}).get('exists')), used_slots=t.get('used_slots'))
+        if t.get('phase_name') in ('confirm', 'special_save'):
+            tw['highlighted'] = 'No' if t.get('selection') else 'Yes'
+            tw['toggle'] = 'up or down'
+        result['typewriter'] = tw
     if d.get('movie_active'):
         result['movie_frame'] = d.get('movie_frame')
     zones = []
