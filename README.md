@@ -197,7 +197,7 @@ brought up separately from the shared gameplay code.
 | **Windows x64** | Build support, the Direct3D 11 backend and optional Vulkan and Direct3D 12 backends are present; validated Windows releases are planned. |
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
-| **iOS/iPadOS** | arm64 device and simulator builds with Metal (`./build.sh --platform ios` / `ios-simulator`). Starts on an iPhone (iOS 27); gameplay needs a Bluetooth game controller, there are no touch controls yet. |
+| **iOS/iPadOS** | Runs on iPhone (iOS 27) with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`). No touch controls yet. |
 | **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device. |
 
 These are native platform targets, not plans to ship an emulator with the game.
@@ -373,27 +373,52 @@ with its number of HD textures, and per room how many textures came from HD, mod
 
 ### iOS / iPadOS
 
-Needs a Mac with Xcode (iOS SDK) and prepared data (see macOS above).
+The iOS build runs the game on an iPhone with iOS 27 and a Bluetooth game
+controller; it is played through sideloading, not the App Store. Needs a Mac
+with Xcode (iOS SDK) and prepared data (see macOS above).
+
+**Build an unsigned IPA** (the normal route; no Apple developer account needed
+to build):
 
 ```bash
-./build.sh --platform ios --ios-bundle-data --compressed
+./build.sh --platform ios --ios-bundle-data --compressed --package
 ```
 
-- The app is written to `build/ios-device/recvx-runtime.app`. `--ios-bundle-data`
-  copies the prepared data into the app (with `--compressed` about 3 GB);
-  without it the app reads `Documents/data`, which can be filled through the
-  Finder or Files file sharing.
-- Without `--ios-profile <file.mobileprovision>` the device build is
-  **unsigned**. Sign it yourself (for example with `zsign`) and install it
-  through Xcode (Devices and Simulators), or pass a profile together with
-  `--package --output <new-dir>` to get a signed `RECVX-Native.ipa`.
+- Writes `build/ios-device/recvx-runtime.app` and packages it as
+  `build/packages/ios-arm64-v<version>/RECVX-Native-unsigned.ipa`
+  (`--output <new-dir>` chooses another folder; existing packages are never
+  overwritten).
+- `--ios-bundle-data` copies the prepared data into the app (about 3 GB with
+  `--compressed`); without it the app reads `Documents/data`, which you fill
+  through Finder or Files file sharing after installing.
 - Apps built with the iOS 27 SDK must adopt the UIKit scene lifecycle; the
-  `Info.plist` therefore declares a scene manifest and `native/ios_scene.mm`
-  attaches the SDL window to that scene. Without it the app terminates
-  immediately at launch.
-- Input: Bluetooth game controller only. Touch controls do not exist yet.
-- `./build.sh --platform ios-simulator` builds an ad hoc signed simulator app
-  (`build/ios-simulator`).
+  `Info.plist` declares a scene manifest and `native/ios_scene.mm` attaches the
+  SDL window to that scene. Without it the app terminates at launch.
+
+**Install the unsigned IPA.** Apple only runs signed apps, so the IPA has to be
+signed with a certificate tied to your Apple ID before it goes on the device:
+
+- **AltStore / SideStore** (and similar sideloaders such as Sideloadly): import
+  the IPA and the store signs it with your Apple ID. A free Apple ID gives a
+  7-day certificate with 3 active apps; the store re-signs ("refreshes") it
+  before it expires, SideStore does so on the device itself. With a paid Apple
+  Developer Program membership the certificate lasts one year.
+- **zsign** with your own certificate: `zsign -k dev.p12 -p <password>
+  -m dev.mobileprovision -o RECVX-Native.ipa RECVX-Native-unsigned.ipa`, then
+  install the signed IPA through Xcode (Devices and Simulators), Apple
+  Configurator or `xcrun devicectl device install app`. The provisioning
+  profile must cover the bundle identifier (`org.recvx.native`, change it with
+  `--ios-bundle-id`). Paid certificate: valid one year; free developer
+  certificate: 7 days, then re-sign and reinstall (saves in `Documents` stay).
+- **Sign in the build** instead: `--ios-profile <file.mobileprovision>` signs
+  the app with the matching keychain identity and `--package` then writes a
+  signed `RECVX-Native.ipa`; `--install --ios-device <id>` installs it directly.
+
+Neither route touches the game: the IPA is the same native build, only the
+signature differs. Input is a Bluetooth game controller (same bindings as the
+desktop controller page); touch controls do not exist yet.
+`./build.sh --platform ios-simulator --install` builds and installs an ad hoc
+signed simulator app (`build/ios-simulator`).
 
 ### Linux
 

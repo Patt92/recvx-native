@@ -1536,6 +1536,13 @@ static int attack_hit_check(RECVX_ENEMY_WORK* w, int arm_no, float ar, int32_t* 
     int hit = 0, dir;
 
     arm_no &= 0x1;
+    /* debug_attack_disabled: Host-Schalter "Gegnerangriffe" (kein Originalflag). Wie bei en26 (Trefferpruefung
+       :3321) gilt kein Treffer; sonst setzte ply_action_change die Tyrant-Spielermotion (en19.c:4602) vor dem
+       Griffmodus, den enemy_player_set dann verwirft, und der Spieler liefe mit fremder Motion weiter. */
+    {
+        RECVX_ENEMY_PLAYER p;
+        if (player(w, &p) && p.debug_attack_disabled) return 0;
+    }
     if (!ext || !ext->player_watr || !ext->player_watr(&cap)) { gap(w, "plp->watr (en19.c:3119)"); return 0; }
 
     if (!joint(w, AtkObj[arm_no][0], &m)) return 0;

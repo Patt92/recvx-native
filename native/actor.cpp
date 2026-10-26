@@ -464,7 +464,9 @@ Scene PlayerAsset::render_pose(ModelGeometryOptions geometry,std::vector<Matrix>
         for(std::size_t object=0;object<bones();++object){
             const bool skinned=std::any_of(skin_.begin(),skin_.end(),[&](const auto& mesh){return mesh.object==object;});
             if(skinned||morph_a.stream(object)==MorphStreams::none||morph_b.stream(object)==MorphStreams::none)continue;
-            if(morph_a.count(object)!=morph_b.count(object))throw std::runtime_error("morph objects have different vertex counts");
+            // npTransform (njplus.c:732-735) kehrt bei ungleichem usIndexMax vor dem Schreiben zurueck:
+            // obj_a behaelt seine eigene vlist (wie morph_blend im Skinpfad).
+            if(morph_a.count(object)!=morph_b.count(object))continue;
             for(std::size_t i=0;i<morph_a.count(object);++i){float p[3],n[3];morph_vertex(morph_a,object,morph_b,object,i,morph_factor,p,n);
                 geometry.local_vertices[object].push_back({p[0],p[1],p[2]});geometry.local_normals[object].push_back({n[0],n[1],n[2]});}
         }

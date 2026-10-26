@@ -71,8 +71,11 @@ Start auf Simulator/Geraet **nicht** belegt: CoreSimulatorService aus der Sandbo
 
 **iOS-Buildpfad (2026-10-22, Arbeitsbaum):** `./build.sh --platform ios|ios-simulator` (Ninja/Makefiles,
 Policy-Audit unverändert, SDL statisch, Metal, Bundle-Icons, Signatur per Profil). Simulator- und unsignierter
-Gerätebuild kompilieren, linken, PASS; Start auf Simulator/Gerät **nicht** belegt (Sandbox, keine iOS-
-Simulatorlaufzeit installiert), Touch-Steuerung offen. [Build-Doku](docs/NATIVE_PORT.md#ios-arm64-device-and-simulator). **Kein Commit.**
+Gerätebuild kompilieren, linken, PASS. **Lauf auf dem Gerät (2026-10-26, Nutzerabnahme):** die iOS-Version
+läuft so wie sie ist auf dem iPhone (iOS 27) mit Bluetooth-Controller. `--package` ohne Profil schreibt jetzt
+`RECVX-Native-unsigned.ipa` zum Sideloaden (AltStore/SideStore, zsign mit eigenem Zertifikat: bezahlt 1 Jahr,
+frei 7 Tage mit Neusignieren); Touch-Steuerung offen.
+[Build-Doku](docs/NATIVE_PORT.md#ios-arm64-device-and-simulator).
 
 Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short`
 und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe

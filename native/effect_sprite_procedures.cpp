@@ -3402,9 +3402,9 @@ void h_vertex_tile(EffectSprite& s,int image){
 }
 // Gemeinsame Flugbahn von bhEff114 und bhEff221: Drehung axp/ayp, Drift lox/loz mit 6 %
 // Abbau, Fall yn bis -1 in Schritten von 0.05. Bei gesetztem st_flg 0x2000000 teilt das
-// Original alles durch sys->ef_slow. Dieses Tor hat in den Originalquellen keinen Schreiber
-// und der Teiler kommt aus event.c:836 (bhSysSet 19), den der Host nur als Laenge kennt;
-// ohne gebundenen Teiler wird die Lage als Luecke gemeldet statt geraten.
+// Original alles durch sys->ef_slow. Das Tor setzen Raumskripte per bhSet st_flg (z. B. RM_3100
+// `05 05 06`), den Teiler per bhSv 19 (event.c:836, RoomWorld::effect_context aus values[19]);
+// ein Teiler 0 bliebe eine Division durch null und wird als Luecke gemeldet.
 void h_vertex_flight(EffectSprite& s,const EffectContext& c,const char* what){
     if(c.st_flg&0x2000000u){
         if(c.ef_slow<=0)throw std::runtime_error(std::string(what)+" in slow motion without sys->ef_slow (event.c:836 bhSysSet 19) bound");

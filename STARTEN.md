@@ -31,8 +31,10 @@ Den vollständigen Ablauf beschreibt [docs/BUILD.md](docs/BUILD.md).
 Die Standardausgaben für Pakete liegen unter `build/packages/`; vorhandene
 Pakete werden nicht überschrieben.
 iOS/iPadOS-Builds (Gerät und Simulator, mit Xcode) erzeugt
-`./build.sh --platform ios` bzw. `--platform ios-simulator`; Signieren,
-Datenablage und Installation stehen im iOS-Abschnitt der Build-Doku.
+`./build.sh --platform ios` bzw. `--platform ios-simulator`;
+`--platform ios --package` schreibt ohne Profil eine unsignierte IPA zum
+Sideloaden (AltStore/SideStore oder zsign). Signieren, Datenablage und
+Installation stehen im iOS-Abschnitt der Build-Doku.
 Details zu Build, Datenprüfung und Plattformen stehen in
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 

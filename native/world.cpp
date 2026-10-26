@@ -6199,6 +6199,8 @@ EffectContext RoomWorld::effect_context()const{
     const bool camera_ready=controlled_camera_.has_value();
     if(camera_ready){context.camera_angles=controlled_camera_->angles;context.camera_ready=true;}
     context.stage_no=stage_no_;context.room_no=room_no_;context.enemy_count=enemy_count_;
+    // sys->ef_slow: bhSv 19 (event.c:836) schreibt ihn; der Eventbesitzer fuehrt ihn als values[19].
+    if(collision_events_)context.ef_slow=int(collision_events_->values[19]);
     // bhCkFlg(sys->ev_flg, 2) fuer bhEff127: Flagmatrix 1 des Eventbesitzers,
     // Bits vom hoechsten her gezaehlt (combat.cpp:158, snapshot.cpp:73).
     context.ev_flg_2=collision_events_&&(collision_events_->flags[1][0]&(0x80000000u>>2))!=0;

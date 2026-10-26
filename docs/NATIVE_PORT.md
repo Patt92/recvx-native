@@ -92,8 +92,34 @@ tools and tests stay on the host. Deployment target: iOS 15.0.
 | `--ios-profile <file>` | Sign the device app with this provisioning profile and the matching keychain identity |
 | `--ios-bundle-id <id>` | Bundle identifier; must be covered by the profile (default `org.recvx.native`) |
 | `--ios-bundle-data` | Copy `--data` into the app as `data/` (7–8 GB; otherwise the app reads `Documents/data`) |
-| `--install` | Install on the booted simulator, or with `--ios-device <id>` on a device (`xcrun devicectl`) |
-| `--package` | Device only: write `build/packages/ios-arm64-v<version>/RECVX-Native.ipa` |
+| `--install` | Install on the booted simulator, or with `--ios-device <id>` on a device (`xcrun devicectl`; needs a signed build) |
+| `--package` | Device only: write `build/packages/ios-arm64-v<version>/RECVX-Native.ipa` (signed, with `--ios-profile`) or `RECVX-Native-unsigned.ipa` (without) |
+
+Status (2026-10-26): the device build runs on an iPhone with iOS 27 and a
+Bluetooth game controller as it is; verified by the project owner on hardware.
+
+**Unsigned IPA and sideloading.** The IPA is `Payload/recvx-runtime.app`
+zipped with `ditto` (symlinks and permissions preserved). An unsigned IPA
+cannot be installed directly; it is signed with a certificate bound to an
+Apple ID first:
+
+- AltStore / SideStore / Sideloadly: import the IPA, the tool signs it with the
+  user's Apple ID and installs it. Free Apple ID: 7-day certificate, 3 active
+  apps, refreshed by the tool (SideStore refreshes on-device); paid Apple
+  Developer Program: one-year certificate.
+- zsign: `zsign -k <cert.p12> -p <password> -m <profile.mobileprovision>
+  -o RECVX-Native.ipa RECVX-Native-unsigned.ipa`; install the result with
+  Xcode (Devices and Simulators), Apple Configurator or `xcrun devicectl device
+  install app --device <id> RECVX-Native.ipa`. The profile must cover the
+  bundle identifier. A free developer certificate expires after 7 days (re-sign
+  and reinstall; `Documents` with saves and data survives a reinstall of the
+  same bundle identifier), a paid one after a year.
+- `--ios-profile` in the build does the same signing on the Mac with the
+  keychain identity of the profile and writes the signed IPA.
+
+The signature is the only difference between the routes; the app, its data
+layout and the `UIFileSharingEnabled`/`LSSupportsOpeningDocumentsInPlace` file
+sharing are identical.
 
 ### tvOS (Apple TV, arm64 device and simulator)
 

@@ -404,7 +404,7 @@ def finish_ios_app(app: Path, target: str, profile_path: Path | None, bundle_dat
     elif profile_path is None:
         embedded.unlink(missing_ok=True)
         subprocess.run(['codesign', '--remove-signature', str(app)], cwd=ROOT, check=False)
-        print('Device build is UNSIGNED and cannot be installed; pass --ios-profile <file.mobileprovision>.', flush=True)
+        print('Device build is UNSIGNED: --package writes an unsigned IPA for sideloading, --ios-profile <file.mobileprovision> signs it here.', flush=True)
         return False
     else:
         profile = provisioning_profile(profile_path)
@@ -657,9 +657,11 @@ def main():
         run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT, '--build-dir', build, '--binary', app / 'recvx-runtime')
         signed = finish_ios_app(app, target, args.ios_profile.resolve() if args.ios_profile else None, args.ios_bundle_data)
         if args.package:
+            # Unsigned IPA for sideloading (AltStore/SideStore/zsign re-sign it with the user's own certificate).
+            name = 'RECVX-Native.ipa' if signed else 'RECVX-Native-unsigned.ipa'
+            package_ios_app(app, (args.output or package_directory(target, VERSION)) / name)
             if not signed:
-                parser.error('--package needs a signed device build; pass --ios-profile')
-            package_ios_app(app, (args.output or package_directory(target, VERSION)) / 'RECVX-Native.ipa')
+                print('IPA is UNSIGNED: sideload it with AltStore/SideStore or sign it with zsign before installing.', flush=True)
         if args.install:
             if target in ('ios-simulator', 'tvos-simulator'):
                 run('xcrun', 'simctl', 'install', 'booted', app)

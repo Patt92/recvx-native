@@ -490,7 +490,7 @@ static void stand(RECVX_ENEMY_WORK* w)
     dir = target_direction(w, &p);
     if (dir >= -1820) {
         if (target_direction(w, &p) < 1820 && 7.0f > d) {
-            if (p.flg & 2u) { w->ct2 = 30; set_modes01(w, 1, 0, 0, 0); return; }
+            if (p.debug_attack_disabled || (p.flg & 2u)) { w->ct2 = 30; set_modes01(w, 1, 0, 0, 0); return; }
             w->mode2 = 0; set_modes01(w, 2, 0, 1456, 5); return;
         }
     }
@@ -498,6 +498,8 @@ static void stand(RECVX_ENEMY_WORK* w)
     set_modes01(w, 1, 1, 1456, 1);
 }
 
+/* debug_attack_disabled: Host-Schalter "Gegnerangriffe" (kein Originalflag), wirkt an jedem
+   Angriffsbeginn wie plp->flg 0x2 (en15.c:566/611/...), wie bei en01/en04/en10/en21/en26. */
 /* en15.c:595 __attack. Die Bedingungsglieder rufen target_distance mehrfach;
    der Wert aendert sich innerhalb des Aufrufs nicht. */
 static void en15_attack_choose(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_PLAYER* p)
@@ -510,7 +512,7 @@ static void en15_attack_choose(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_PLAYER* p)
     ang = target_direction(w, p);
     if (!target_distance(w, p, &d)) return;
 #define EN15_GRAB_OR(m2, way_, mtn_) do { \
-        if (p->flg & 0x2u) { w->ct2 = 30; set_modes01(w, 1, 0, 0, 0); } \
+        if (p->debug_attack_disabled || (p->flg & 0x2u)) { w->ct2 = 30; set_modes01(w, 1, 0, 0, 0); } \
         else if (w->ct0 == 0) { w->mode2 = (m2); set_modes01(w, 1, 4, (way_), (mtn_)); } \
     } while (0)
     if (w->mode0 == 1 && w->mode1 == 2) {
@@ -545,7 +547,7 @@ static void close_turn(RECVX_ENEMY_WORK* w)
     if (16.0f < d) { set_modes01(w, 1, 2, 327, 1); return; }
     if (target_direction(w, &p) >= -1820) {
         if (target_direction(w, &p) < 1820 && 7.0f > d) {
-            if (p.flg & 2u) { w->ct2 = 30; set_modes01(w, 1, 0, 0, 0); }
+            if (p.debug_attack_disabled || (p.flg & 2u)) { w->ct2 = 30; set_modes01(w, 1, 0, 0, 0); }
             else { w->mode2 = 0; set_modes01(w, 2, 0, 1456, 5); }
             return;
         }

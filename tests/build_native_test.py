@@ -209,8 +209,7 @@ class BackendBuildTests(unittest.TestCase):
              patch.object(build_native, 'run', side_effect=lambda *command: commands.append(tuple(map(str, command)))):
             build_native.main()
         cross = next(c for c in commands if any(s.endswith('build_windows.py') for s in c))
-        self.assertEqual(cross[-2:], ('--opengl', 'off'))
-        self.assertEqual(cross[-4:-2], ('--vulkan', 'on'))
+        self.assertEqual(cross[-8:], ('--vulkan', 'on', '--opengl', 'off', '--d3d12', 'on', '--fsr', 'on'))
 
 
 class DevelopmentAppTests(unittest.TestCase):
