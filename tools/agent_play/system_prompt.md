@@ -63,6 +63,9 @@ computer (terminal): {screen [lines], waits printing|confirm|keyboard|script, ke
 `free` = letters still allowed in the password field (shown as \ on screen). A wrong password closes the terminal.
 document: text of the open file/document page (FILES). menu_text: item description or menu message.
 unchanged_for n (in the result): n waits in a row changed nothing; the game waits for a button.
+seen/got on a zone, done_here: zones you already examined in this room, how often and what they said.
+Prefer zones without `seen`. Examining a zone again only makes sense after something changed (new item,
+a switch, a door opened); the driver refuses a third examine without such a change.
 recent_texts: the last texts the game showed (newest last); a hint on an earlier page is still there.
 tips: facts derived from the state that you must act on (e.g. the game opened the menu on purpose).
 far_items: item zones further away. Collect every item that is present.

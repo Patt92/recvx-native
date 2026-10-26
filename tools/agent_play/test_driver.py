@@ -539,6 +539,49 @@ class DriverTests(unittest.TestCase):
         self.assertEqual([l.split(' ', 1)[1] for l in self.controls().splitlines()],
                          ['down', 'right', 'confirm', 'keys back 1', 'confirm'])
 
+    def test_examined_zone_is_marked_and_a_third_examine_without_progress_is_refused(self):
+        self.d['interactions'] = [dict(index=3, flags=1, floor=0, type=3, attribute=0,
+                                       position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
+        self.write(self.d)
+        drv, _ = self.driver([])
+        room = 'RM_TEST.RDX'
+        shelf = dict(op='interact', zone=3, to=[1, 1], face=[7, 7])
+        page = dict(owner='DIALOG', dialog=dict(text='There are hairs\nscattered here.'))
+        for _ in range(2):
+            self.assertIsNone(drv.repeat_blocked(shelf, dict(room=room)))
+            drv.record_visit(room, 3, drv.progress(), page, 'dialog')
+        refusal = drv.repeat_blocked(shelf, dict(room=room))
+        self.assertIn('already examined 2 times', refusal)
+        self.assertIn('There are hairs scattered here.', refusal)
+        # The zone list shows what was done.
+        obs = drv.mark_seen(dict(room=room, zones=[dict(i=3, kind='text'), dict(i=5, kind='door')]))
+        self.assertEqual((obs['zones'][0]['seen'], obs['zones'][0]['got']), (2, 'There are hairs scattered here.'))
+        self.assertNotIn('seen', obs['zones'][1])
+        self.assertEqual(obs['done_here'][0]['i'], 3)
+        # Progress (a new item, a zone or wall switched by a script) lifts the refusal.
+        self.d['items'] = self.d['items'] + [(12 << 16) | 15]
+        self.write(self.d)
+        self.assertIsNone(drv.repeat_blocked(shelf, dict(room=room)))
+        drv.repeat_limit = 0
+        self.d['items'] = self.d['items'][:-1]
+        self.write(self.d)
+        self.assertIsNone(drv.repeat_blocked(shelf, dict(room=room)))
+
+    def test_refused_repeat_reaches_the_model_as_error_without_input(self):
+        self.d['interactions'] = [dict(index=3, flags=1, floor=0, type=3, attribute=0,
+                                       position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
+        self.write(self.d)
+        drv, client = self.driver([text(dict(op='interact', zone=3, to=[1, 1], face=[7, 7])),
+                                   text(dict(op='press', key='cancel'))])
+        sig = drv.progress()
+        drv.visits['RM_TEST'] = {3: dict(n=2, got='nothing happened', sig=sig)}
+        with self.ticking():
+            drv.run(steps=2)
+        feedback = json.loads(client.requests[1][0][-1]['content'])
+        self.assertIn('already examined', feedback['error'])
+        self.assertNotIn('route', self.controls())
+        self.assertIn('cancel', self.controls())
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):

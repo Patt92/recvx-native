@@ -168,7 +168,7 @@ def trim(obs):
 
 class Driver:
     def __init__(self, play, client, *, tools=True, window=8, seconds=6.0, max_tool_calls=3, log=None,
-                 out=sys.stdout, save_rooms=3):
+                 out=sys.stdout, save_rooms=3, repeat_limit=2):
         self.play, self.client, self.use_tools = play, client, tools
         self.window, self.seconds, self.max_tool_calls = window, seconds, max_tool_calls
         self.system = PROMPT.read_text()
@@ -181,6 +181,10 @@ class Driver:
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
         self.last_owner = ''
+        # Zone memory per room: what an examine gave and the progress state at that time, so the model
+        # sees what it already did and a repeat without anything new is refused.
+        self.visits = {}           # room -> zone -> dict(n, got, sig)
+        self.repeat_limit = repeat_limit
         # Save policy: a save (or a load) counts as fresh until the player has entered `save_rooms` rooms
         # not seen since. 0 disables the policy.
         self.save_rooms = save_rooms
@@ -378,6 +382,52 @@ class Driver:
                     pass
         return obs, feedback, (time.monotonic() - started) * 1000
 
+    def progress(self):
+        """What can change by playing: inventory, pickup bits, zones and walls switched by scripts."""
+        d, _, _ = self.play.read()
+        return (tuple(d.get('items', [])), tuple(d.get('item_flags', [])),
+                tuple(a.get('flags', 0) & 1 for a in d.get('interactions', [])),
+                tuple(w.get('fl', 0) & 1 for w in d.get('walls', [])))
+
+    def zone_log(self, room):
+        return self.visits.setdefault(room, {})
+
+    def record_visit(self, room, zone, before, obs, result):
+        """After an interact: keep what the zone answered (first text page, a menu, nothing)."""
+        got = ' '.join(((obs.get('dialog') or {}).get('text', '')).split())
+        if not got and 'BOX' in obs.get('owner', ''):
+            got = 'opened the item box'
+        if not got:
+            got = {'menu': 'opened a menu', 'room': 'went to another room', 'no_interaction_observed': 'nothing happened'}.get(result, result)
+        v = self.zone_log(room).setdefault(zone, dict(n=0, got='', sig=None))
+        v['n'] += 1
+        v['got'] = got[:80]
+        v['sig'] = before
+
+    def repeat_blocked(self, action, obs):
+        """An interact on a zone already examined `repeat_limit` times with no progress since is refused."""
+        if not self.repeat_limit or action.get('op') != 'interact':
+            return None
+        v = self.zone_log(obs.get('room')).get(action.get('zone'))
+        if not v or v['n'] < self.repeat_limit or v['sig'] != self.progress():
+            return None
+        return (f"zone {action['zone']} already examined {v['n']} times and nothing changed since "
+                f"(inventory, items, zones, walls); last answer: {v['got']!r}. Do something new: another zone, "
+                "a door, use an item there via inventory, or read hint zone.")
+
+    def mark_seen(self, obs):
+        """Annotate zones with what examining them gave; list examined zones of this room as `done`."""
+        log = self.zone_log(obs.get('room'))
+        if not log:
+            return obs
+        for z in obs.get('zones', []):
+            v = log.get(z['i'])
+            if v:
+                z['seen'] = v['n']
+                z['got'] = v['got']
+        obs['done_here'] = [dict(i=i, n=v['n'], got=v['got']) for i, v in sorted(log.items())]
+        return obs
+
     def correct(self, action, obs):
         """interact on a zone with a computed point: use it unless the model's point is that point.
 
@@ -474,7 +524,7 @@ class Driver:
                 if self.idle_waits >= 4:
                     # Nothing changed over several waits: the game may wait for a button after all.
                     feedback = dict(feedback, unchanged_for=self.idle_waits)
-                user, action, usage, llm_ms = self.decide(self.with_approaches(self.mark_way_back(obs)), feedback,
+                user, action, usage, llm_ms = self.decide(self.mark_seen(self.with_approaches(self.mark_way_back(obs))), feedback,
                                                           self.last_owner)
                 fallback = action.pop('no_action', False)
                 note = action.pop('note', None)
@@ -485,7 +535,14 @@ class Driver:
             owner = obs.get('owner', '')
             self.last_owner = owner
             self.remember_texts(obs)
-            obs, feedback, act_ms = self.act(self.correct(action, obs))
+            room_before, progress_before = obs.get('room'), self.progress()
+            blocked = self.repeat_blocked(action, obs)
+            if blocked:
+                obs, feedback, act_ms = self.play.observe(), dict(result='error', error=blocked), 0.0
+            else:
+                obs, feedback, act_ms = self.act(self.correct(action, obs))
+                if action.get('op') == 'interact' and feedback['result'] != 'error':
+                    self.record_visit(room_before, action.get('zone'), progress_before, obs, feedback['result'])
             if not entry.get('auto') and fallback:
                 feedback.update(result='error', error='no game action in your last reply; the driver waited instead')
                 entry['fallback'] = True
@@ -517,6 +574,8 @@ def main():
     ap.add_argument('--retries', type=int, default=0, help='retries on timeout/connection errors (0 = until it works)')
     ap.add_argument('--retry-delay', type=float, default=3.0, help='first retry pause, doubled up to 20 s')
     ap.add_argument('--seconds', type=float, default=6.0, help='play.py wait budget per action (<= 8)')
+    ap.add_argument('--repeat-limit', type=int, default=2,
+                    help='refuse examining the same zone more than N times without progress (0 = off)')
     ap.add_argument('--save-rooms', type=int, default=3,
                     help='allow saving only after N new rooms since the last save/load (0 = always allow)')
     ap.add_argument('--no-tools', action='store_true', help='endpoint without function calling')
@@ -527,7 +586,8 @@ def main():
                     temperature=a.temperature, max_tokens=a.max_tokens, timeout=a.timeout,
                     retries=a.retries, retry_delay=a.retry_delay)
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
-                    log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms)
+                    log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms,
+                    repeat_limit=a.repeat_limit)
     if a.dry_run:
         obs = play.observe()
         user = {'role': 'user', 'content': json.dumps(dict(result='start', state=trim(obs)), separators=(',', ':'))}

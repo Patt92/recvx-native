@@ -26,6 +26,7 @@ Driver options (pass them to `Start-AI-Play.command`/`.cmd` or `driver.py`):
 | `--window N` | decisions kept in the prompt before the history is halved (default 8) |
 | `--no-tools` | endpoint without function calling; the model replies `{"op":"zone","i":4}` instead |
 | `--temperature`, `--max-tokens` | sampling (default 0.2, 200) |
+| `--repeat-limit N` | refuse examining the same zone more than N times while nothing changed (inventory, pickups, zones, walls); default 2, 0 = off |
 | `--save-rooms N` | allow saving only after N new rooms since the last save or load (default 3; 0 = always allow). Too early save screens are closed without a model call. |
 | `--seconds S` | game-time budget per action, at most 8 |
 | `--timeout S` | seconds per model request (default 60) |
@@ -64,6 +65,7 @@ How the driver keeps it fast:
 | Memory for texts | The last texts the game showed travel along as `recent_texts`, so a hint read on one page survives the next screen. `tips` adds facts derived from the state: the game opened the menu on purpose after a text, or the text names an item the player carries that is not equipped. |
 | Computed points win | An `interact` on a zone with a `go` point uses that point; the model picks the zone, the geometry picks where to stand. |
 | No endless waiting | A terminal that waits for a button ends a `wait`; if several waits change nothing the model is asked anyway (`unchanged_for`). |
+| No loops | Per room the driver remembers which zone was examined, how often and what it said; zones carry `seen`/`got` and the room lists `done_here`. A third examine of the same zone without any progress since is refused with the earlier answer, so the model moves on. |
 | Item box | The open box shows its contents with names, the row under the list cursor and the game's refusal text. `{"op":"box","store":slot}` / `{"op":"box","take":row}` performs one swap; each cursor and list step is checked against the live state before the next one. |
 | Save screen | `typewriter.highlighted` names the preselected Yes/No (saving over a used slot starts on No). |
 | Robust replies | The first JSON object with `"op"` is taken (code fences and prose are tolerated); a rejected action goes back to the model as `error`. |
