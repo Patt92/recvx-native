@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Wegsuche auf den Kollisionstabellen eines Dumps (walls), wie collision.cpp move_walls sie prueft.
+"""Pathfinding over a dump's collision tables (walls), filtered the way collision.cpp move_walls checks them.
 
-Gitter 1.0 Einheit, Hindernisse um den Spielerradius 3.5 (+0.5 Sicherheit) aufgeblasen, 8er-BFS mit
-Diagonalkosten, danach Sichtlinien-Glaettung. Liefert Wegpunkte fuer die Runtime-Aktion `route`.
-Filter wie move_walls: flags&1, type<=5, attr&1 -> nur eigene Etage, attr&4 entfaellt fuer den Spieler
-(stflg 0x40000000), Hoehe: Wand muss die Koerperhoehe [y, y+16.5] schneiden (e.y 0 = Raumhoehe).
+Grid of 1.0 units, obstacles inflated by the player radius 3.5 (+0.5 margin), 8-neighbour Dijkstra with
+diagonal costs, then line-of-sight smoothing. Returns waypoints for the runtime action `route`.
+Filter as move_walls: flags&1, type<=5, attr&1 -> own floor only, attr&4 skipped for the player
+(stflg 0x40000000); height: the wall must overlap the body [y, y+16.5] (e.y 0 = room height).
 """
 import heapq, math
 
@@ -90,7 +90,7 @@ class Grid:
 
     def path(self, sx, sz, tx, tz):
         s = self.nearest_free(*self.idx(sx, sz)); g = self.nearest_free(*self.idx(tx, tz))
-        if not s or not g: return None, 'start/ziel blockiert'
+        if not s or not g: return None, 'start or goal blocked'
         dist = {s: 0.0}; prev = {}; pq = [(0.0, s)]
         while pq:
             c, u = heapq.heappop(pq)
@@ -102,7 +102,7 @@ class Grid:
                 if di and dj and not (self.free(u[0] + di, u[1]) and self.free(u[0], u[1] + dj)): continue
                 nc = c + w
                 if nc < dist.get(v, 1e18): dist[v] = nc; prev[v] = u; heapq.heappush(pq, (nc + math.hypot(v[0] - g[0], v[1] - g[1]) * 0, v))
-        if g not in dist: return None, 'kein Weg'
+        if g not in dist: return None, 'no path'
         cells = [g]
         while cells[-1] != s: cells.append(prev[cells[-1]])
         cells.reverse()

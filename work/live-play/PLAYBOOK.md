@@ -1,140 +1,155 @@
-# PLAYBOOK — Agent spielt RECVX live (Stand 2026-10-26)
+# PLAYBOOK — an agent plays RECVX live
 
-Fuer das Modell, nicht fuer Skripte. Ziel: fluessig spielen, wenig Kontext, keine Bilder.
-Nutzerregeln: Metal (`--renderer gpu`); Dialoge lesen; Snapshots nur Slot 2; keine
-festen Ablaufskripte je Raum; Screenshots nur bei Verdacht auf Darstellungsfehler.
+Written for the model, not for a script. Goal: fluent play, small context, no images.
+User rules: Metal (`--renderer gpu`), never the software rasterizer; read dialogue, do not skip
+blindly; snapshots only in slot 2; no canned per-room sequences; screenshots are the last resort.
 
-## 1. Schleife (eine Entscheidung = ein Werkzeugaufruf)
+## 1. The loop — one decision = one tool call
 
 ```
-LESEN    python3 tools/agent_play/nav.py build/play/auto.json          (10–20 Zeilen)
-PLANEN   Ziel aus Zonen/Gegnern/Dialog waehlen; Weg mit `path`, nie raten
-HANDELN  eine Zeile route/fire anhaengen, dann `wait` bis frei/Gefahr/Raumwechsel
+READ   radar.txt (or nav.py A)                      ~15 lines: input owner, enemies, zones, inventory
+PLAN   pick a target from zones/text/enemies; path with `path`, never guess angles or distances
+ACT    append one line (route / fire / confirm) and block with `wait` until something changes
 ```
 
-Ein Aufruf soll Lesen + Handeln + Warten verbinden, z. B.:
-```
+```sh
 A=build/play/auto.json; L=build/play/live.txt; N=tools/agent_play/nav.py
 python3 $N $A path 61 25 run face 75 25 then confirm >> $L && python3 $N $A wait $A $L 60 stop room danger | tail -12
 ```
-Kein `sleep` ausser beim Start. Keine Dumps mit Namen in der Schleife, nur `auto.json`.
+
+No `sleep` (except at start), no named dumps in the loop, no screenshots. If a call fails or the
+answer is unexpected, read the state first — do not resend the same line.
 
 ## 2. Start
 
-```
+```sh
 rm -f build/play/live.txt build/play/live_state.json build/play/auto.json
-printf '10 new_game\n70 select\n110 confirm\n150 select\n190 confirm\n230 select\n270 confirm\n330 cancel\n350 cancel\n370 inventory\n400 sdl_key down F2\n402 sdl_key up F2\n410 debug_select snapshot_load 1\n414 confirm\n440 autodump 10 auto\n441 run auto 18\n' > build/play/live.txt
+printf '10 new_game\n70 select\n110 confirm\n150 select\n190 confirm\n230 select\n270 confirm\n330 cancel\n350 cancel\n370 inventory\n400 sdl_key down F2\n402 sdl_key up F2\n410 debug_select snapshot_load 1\n414 confirm\n440 autodump 5 auto\n441 run auto 18\n' > build/play/live.txt
 ```
-Runtime im Terminal-Tab (Host hat Metal, Sandbox nicht):
-```
+
+Runtime in a host terminal tab (the sandbox has no Metal device):
+
+```sh
 cd /Users/patrickhoffmann/Projects/recvx-decomp && "build/start/macos-arm64/RECVX Native.app/Contents/MacOS/recvx-runtime" --data data --mods mods --controls controls.ini --debug-config debug.ini --video-config video.ini --renderer gpu --enemy-ai on --enemy-grab on --snapshots build/play/snap --control build/play/live.txt --state build/play/live_state.json
 ```
-Nach ~20 s steht `auto.json`; Zeile 1 muss `FREI` zeigen. `Renderer: Metal ...` im Terminal pruefen.
 
-## 3. Runtime-Schnittstelle (`--control <datei>`, Zeilen `<takt> <aktion>`, Takt relativ, 30 Hz)
+Check `Renderer: Metal …` in the terminal. Start the stream (section 5) in the background. After
+~20 s `radar.txt` exists; line 1 must say `FREE`, otherwise see section 9.
 
-| Aktion | Wirkung |
+## 3. Runtime interface (`--control <file>`; lines `<tick> <action>`, tick relative to reading, 30 Hz)
+
+| Action | Effect |
 |---|---|
-| `route x z [x z …] [run] [stop d] [face x z] [then <zeile>]` | laeuft Wegpunkte selbst ab (dreht, geht, naechster Punkt bei < 3), dann `face`, dann `then` (z. B. `confirm`). Stillstand 45 Takte → `control.result = stalled`, `then` verworfen |
-| `goto x z [run] [stop d]` / `face x z` | Einzelpunkt / nur drehen |
-| `keys forward\|back\|left\|right\|run\|aim\|attack\|none … [dauer]` | rohe Pads; bricht laufende route ab |
-| `confirm` `cancel` `up` `down` `left` `right` `inventory` `select` `skip` | Menue/Dialog; `select` = einziger Kinoskip |
-| `run on\|off\|auto [d]` | `auto`: Echtzeit, haelt aber an, wenn nichts ansteht UND ein aktiver Gegner < d ist (`control.held`) |
-| `autodump <takte> <name>` | Live-Rohdaten, atomar; Standard `autodump 10 auto` |
-| `dump <name> [shot]` | Einzeldump, `shot` = BMP (nur fuer Darstellungspruefung) |
-| `sdl_key down\|up F2` | echtes Debugmenue-Toggle (zuverlaessiger als `debug_key`) |
-| `debug_select <id> <wert>` + `confirm` | z. B. `snapshot_save 1` / `snapshot_load 1` (Slot 2) |
+| `route x z [x z …] [run] [stop d] [face x z] [then <line>]` | walks waypoints itself (next point at < 3), then faces, then runs one line (e.g. `confirm`). 45 ticks without progress → `control.result = stalled`, `then` dropped |
+| `goto x z [run] [stop d]` / `face x z` | single point / turn only |
+| `keys forward\|back\|left\|right\|run\|aim\|attack\|none … [ticks]` | raw pad hold; cancels a route |
+| `confirm` `cancel` `up` `down` `left` `right` `inventory` | menus and dialogue |
+| `select` / `skip` | cinematic skip (SELECT, the only one) / video skip |
+| `run on\|off\|auto [d]` | real time; `auto` holds again only when nothing is queued and an active enemy is closer than `d` |
+| `autodump <ticks> <name>` | live state file, written atomically (`autodump 5 auto`) |
+| `dump <name> [shot]` | one-off state; `shot` adds a BMP — last resort only |
+| `sdl_key down\|up F2` | real debug-menu toggle (more reliable than `debug_key`) |
+| `debug_select <id> <value>` + `confirm` | `snapshot_save 1` / `snapshot_load 1` = slot 2 |
 
-Ohne `--control` ist alles inaktiv. Fehler erscheinen nur als `Control: …` im Terminal.
+Without `--control` none of this is active. Bad lines show up only as `Control: …` in the terminal.
 
-## 4. Werkzeuge (`tools/agent_play/`)
+## 4. State fields worth knowing (`auto.json`)
 
-| Aufruf | Ausgabe |
-|---|---|
-| `nav.py A` | Raum, Pos, Blick, HP, Besitzer der Eingabe (FREI/KINO/DIALOG/INVENTAR/TUER/DEBUGMENUE/GAMEOVER), Dialogtext+Wahl, Zonen (TUER/TEXT/ITEM mit Mitte, Abstand), Gegner mit `SICHT`/`wand`, Items, Inventar |
-| `nav.py A path x z [via x z …] [run] [face x z] [then …]` | Wegsuche (Gitter 1.0, Radius 4, gleiche Wandauswahl wie `move_walls`) → genau eine `route`-Zeile auf stdout; Fehler auf stderr, Exit 2 |
-| `nav.py A wait A L s [stop] [room] [danger]` | blockiert bis Kino/Dialog/Tuer/route vorbei; quittiert fertige Dialogseiten selbst und gibt Text aus; haelt bei Ja/Nein; `room` = erst nach Raumwechsel; `danger` = frueher bei Gegner < 14; `stop` = danach `run off` |
-| `nav.py A fire n [low] [face x z]` | Zeilen fuer n Handgun-Schuesse; `low` = Ziel senken (liegende Zombies) |
-| `nav.py A map [zelle [x0 z0 x1 z1]]` | ASCII-Draufsicht (einmal je Raum, nur wenn `path` scheitert) |
-| `waitfor.py feld wert [s]` | z. B. `box_open true` |
-| `scdump.py RM_xxxx event7` | Raumskript lesbar (Ereignis einer Zone = `prm1` der TEXT-Zone) |
+`actor` `yaw` `hp` `room` · input owner: `cinematic` `dialog_open` `inventory_open` `box_open`
+`door_active` `debug_open` `gameover_active` · dialogue: `dialog_text` `dialog_choices`
+`dialog_choosing` `dialog_selection` · `interactions` (type 0 door, 1/2 stairs, 3 text, 4 item;
+`attribute` bits 0x400/0x800/0x1000/0x2000 block facing +z/−x/−z/+x) · `walls`/`floors` ·
+`enemies[].body` {`posture` standing/low/lying, `contact` ground/air/under} · `room_items` ·
+`items` (id<<16|count, [0] = equipped) · `security_items` · `control` {`steer`, `result`,
+`waypoints_left`, `held`} · `player_work.mode` ([0]==4 grab) · `vm_flags` (sparse event flags).
 
-## 4a. Debug-Stream statt Bild (Hintergrund oder Unteragent)
+## 5. Debug stream instead of images
 
+```sh
+python3 tools/agent_play/stream.py build/play/auto.json            # background task, one per log
+python3 tools/agent_play/stream.py build/play/auto.json --until near,grab,gameover,choice,room   # wake-up mode
 ```
-python3 tools/agent_play/stream.py build/play/auto.json      # run_in_background; Lock, endet nach 120 s ohne Daten
-```
-Braucht `autodump 5 auto` (oder 10). Schreibt nur Aenderungen nach `build/play/stream.log`
-(RAUM, BESITZ, DIALOG, HP, GRIFF, GEGNER Zustand/Haltung, NAH, SICHT, INVENTAR, ZONE/WAND an/aus,
-ITEM sichtbar, ROUTE angekommen/steckengeblieben, GAMEOVER) und haelt `build/play/radar.txt`
-aktuell (~15 Zeilen: Lage, 5 naechste Gegner mit Richtung links/rechts/vorn/hinten, Haltung,
-Bodenkontakt, Sicht; 5 naechste Zonen; Inventar; letzte 4 Ereignisse). Der Agent liest `radar.txt`
-(oder `tail stream.log`) statt eines Screenshots. Ein Unteragent kann den Stream halten und nur
-bei NAH/GRIFF/GAMEOVER/DIALOG [JA/NEIN] melden.
 
-Gegnerhaltung kommt aus den Knotenmatrizen der Engine relativ zum Boden unter dem Gegner:
-`body.posture` standing/low/lying (top < 11 / < 6), `body.contact` ground/air/under (Fuss > 3 ueber
-bzw. < −3 unter dem Boden). `lying` → `fire n low`. `air`/`under` ohne Skriptgrund = Auffaelligkeit
-fuer den Nutzer (z. B. RM_0030 id62 bei 60 Hoehe = Hubschrauber/Skriptobjekt, kein Fehler).
+- `stream.log`: change events only — ROOM, OWNER, DIALOG, CHOICE, HP, GRAB, GAMEOVER, ENEMY
+  (appears / state / posture), NEAR, SIGHT, ODD, INVENTORY, ZONE, WALL, ITEM, ROUTE.
+- `radar.txt`: always-current 15-line report — situation, 5 nearest enemies with bearing
+  (left 40° / ahead / behind), posture/contact, state, line of sight; 5 nearest zones; inventory;
+  last 4 events. Read this instead of looking.
+- `--until …` exits with the first matching event, so a background run wakes the agent exactly
+  when it must react (a subagent can hold the same command). Exit 3 = no data for `--idle` s.
 
-## 4b. Hinweise, wenn der naechste Schritt unklar ist (`tools/agent_play/hint.py`)
+Enemy posture comes from the engine's node matrices measured against the floor under the enemy:
+`lying` → `fire n low`. `air`/`under` without a script reason is an anomaly worth reporting
+(not every one is a bug: RM_0030 id62 at height 60 is a scripted object).
 
-Eskalation, billig zuerst: Zonentext lesen → `hint.py room` → `hint.py zone i` → `hint.py blocked x z`
-→ `hint.py event n` / `op` / `grep` → erst dann Screenshot.
+## 6. Tools (`tools/agent_play/`)
 
-| Aufruf | Liefert |
+| Call | Output |
 |---|---|
-| `hint.py room` | je Zone: Meldungstext, Item-Name (genommen/versteckt), Tuerziel, Skriptstelle |
-| `hint.py zone i` | Sperrrichtungen, direkte Meldung, Skriptblock der Zone mit Bedingungen (Flags jetzt), wo sie an/aus geht |
-| `hint.py blocked x z` | welche Wand den Weg sperrt; fest → Umweg; per Skript → welches Ereignis sie oeffnet und was es startet |
-| `hint.py event n` | Ereignis dekodiert mit Originalnamen (bhScenarioJmpT), Texten, Items, Flags |
-| `hint.py op b7` / `op bhItemPlToSBox` | Implementierung im Port und Originalstelle in event.c |
-| `hint.py grep <regex>` | begrenzte Suche in native/ und src/ps2/veronica/prog/ (Semantikreferenz, nur lesen) |
+| `nav.py A` | state in 10–20 lines (owner, dialogue, zones, enemies with state/posture/SIGHT, items, inventory) |
+| `nav.py A path x z [via x z …] [run] [face x z] [then …]` | one `route` line on stdout (~50 ms); `NO PATH` on stderr, exit 2 → `hint.py blocked` |
+| `nav.py A wait A L s [stop] [room] [danger]` | blocks until cinematic/dialogue/door/route are over; acknowledges finished pages and prints their text; stops on Yes/No; `room` = after a room change; `danger` = enemy < 14; `stop` = append `run off` |
+| `nav.py A fire n [low] [face x z]` | lines for n handgun shots; `low` lowers the aim |
+| `nav.py A map [cell [x0 z0 x1 z1]]` | ASCII top view, only when `path` and `hint` disagree with expectations |
+| `waitfor.py field value [s]` | e.g. `box_open true`, `control.result arrived` |
+| `stream.py` | section 5 |
+| `hint.py` | section 7 |
 
-Code-Peeking ist erlaubt, aber nur lesend und nur in diesen Pfaden; niemals archived/.
+## 7. When the next step is unclear — hints, then code
 
-## 4c. Screenshot = letztes Mittel
+Escalate cheap → expensive; stop as soon as the answer is clear:
 
-Nur `dump x shot`, wenn Stream/Hint widersprechen oder der Nutzer nach dem Bild fragt
-(Darstellungsfehler). Nie zur Navigation, nie fuer Menues (Box/Inventar: `box_open`,
-`security_items`, `items` im Dump lesen).
+1. Read the zone (`route … then confirm`); the game's own text usually names the solution
+   ("I must release the metal detector").
+2. `hint.py room` — per zone: message text, item name (taken/hidden), door target, script.
+3. `hint.py zone i` — facing locks, direct message, the script block reacting to the zone with
+   its flag conditions (current values), where the zone is switched on/off.
+4. `hint.py blocked x z` — which wall blocks the path; fixed → detour; script-switched → which
+   event opens it and what starts that event.
+5. `hint.py event n`, `hint.py op <hex|bhName>`, `hint.py grep <regex>` — decoded events with the
+   original opcode names, the opcode's implementation in `native/` and its reference in
+   `src/ps2/veronica/prog/`. Read-only; never `archived/`.
+6. Screenshot (`dump x shot`) only if the stream and the hints contradict each other, or to check
+   a rendering problem.
 
-## 5. Entscheidungsregeln
+## 8. Decision rules
 
-- **Hindernis/Raetsel**: erst Zonen-Texte lesen (TEXT-Zone + `confirm`), Text sagt die Loesung
-  (z. B. "release the metal detector" → Security Box). Dann `scdump.py` des Zonen-Ereignisses.
-  Nicht laufen, um zu suchen. `path` = "KEIN WEG" heisst: Tor/Wand per Skript, nicht Navigationsfehler.
-- **Gegner**: `SICHT` + Abstand 15–35 → `fire`; < 10 → erst `path` weg, dann schiessen; liegend → `fire n low`.
-  Griff (`pw[0]==4`): 20x `keys left`/`keys right` im Wechsel. Munition im Blick behalten (`inv 9,x` Handgun, `12,x` Patronen).
-- **Heilen** unter 60 HP: `inventory`, Cursor auf Kraut, `confirm`, `confirm`, 3x `cancel`.
-- **Snapshot Slot 2** nach jedem Raumwechsel ohne Gegnerkontakt und vor Kaempfen. Game Over → laden, nicht Retry.
-- **Kein Zurueckrennen ohne Plan**: Ziel vorher aus Zonen/Text bestimmen. Abkuerzungen (Vorhaengeschloss
-  RM_0050) sind spaeter; der Raum hat einen Umweg (`path` findet ihn).
-- **Budget**: Ziel ≤ 1 Aufruf je Aktion, Raum mit 2 Items und Tuer in ≤ 6 Aufrufen. Screenshots: 0.
+- **Obstacle or puzzle:** text first, then hints. `NO PATH` means a scripted gate, not a
+  navigation error — do not walk around looking. Shortcuts (RM_0050 padlock) come later; the room
+  has a detour and `path` finds it.
+- **Enemies:** SIGHT and distance 15–35 → `fire`; < 10 → `path` away first; `lying` → `fire n low`.
+  Grab: alternate `keys left`/`keys right` each tick ~20 times. Watch ammo (`inv` 9 = handgun, 12 = bullets).
+- **Heal** below 60 HP: `inventory`, cursor to the herb, `confirm`, `confirm`, 3× `cancel`.
+- **Snapshot slot 2** after each room change without enemy contact and before fights. Game over →
+  load it (the original retry restarts the room and its enemies).
+- **No running back without a target.** Decide the target from zones/text before moving.
+- **Menus after a route:** `waitfor.py control.result arrived` (or `box_open true`) first, then send
+  menu lines — fixed tick offsets after a route land in the void.
+- **Budget:** one call per action; a room with two items and an exit in ≤ 6 calls; zero screenshots.
 
-## 6. Messwerte
+## 9. Pitfalls already hit
 
-Drehen 1310 Yaw/Takt; Gehen 0.49, Laufen 1.0 Einheiten/Takt; yaw 0 = Blick −z, 16384 = −x.
-Typ-4-Item-Sonde 2.0 vor dem Spieler, muss in der Zone liegen; attr 0x400/0x800/0x1000/0x2000 sperren
-Blick +z/−x/−z/+x. Treppen (Typ 1): Sonde 0.75 vor dem Spieler, an der Zonenkante OK druecken.
-Tuer 150–600 Takte, Kinos 1200–1700. Leerlauf 4–7 % eines Kerns, `auto.json` 30–60 KB.
+- After `snapshot_load` the debug menu may stay open → owner shows `DEBUGMENU`; toggle with `sdl_key F2`.
+- `debug_select` before the menu is open is lost (opening resets values): open first, then select.
+- `wait` ignores the state file until it is newer than the call; it needs a running `autodump`.
+- Shooting a downed zombie with normal aim hits the air: `fire n low`.
+- Metal detector (RM_0090): **everything metallic** goes into the security box, including lighter
+  and ink ribbon; the release switch alone does not do it.
 
-## 7. Fortschritt / Fakten (Claire, Disc 1)
+## 10. Measured constants
 
-RM_0000–RM_0070 erledigt (Feuerzeug, Messer, Handgun, Karte, Kraeuter, Munition).
-RM_0050 → RM_0080: Umweg im Westen statt Vorhaengeschloss (`path -40 52.5`, Tuer mit Blick +x).
-RM_0080: 5 Zombies, Ostkorridor; Ausgang Tuer i1 (60,−12) Blick −z → RM_0090.
-RM_0090: Metalldetektor. Security Box i11 (Konsole 69,106 Blick +x): **alles Metallische inkl.
-Feuerzeug und Ink Ribbon einlagern**, Schalter i7 betrifft nur die Freigabe. Zweite Box i12 (44,4).
-**Offen/ungeprueft:** die Nordbox oeffnet `itm[224]` (leer), die Gegenstaende liegen in `itm[192]`
-(`security_items`). Ob das Original zwischen beiden umkopiert (sub1.c:1606-1617, Ereignis 0xb7/0xb8)
-oder der Port hier eine Luecke hat, ist nicht geklaert — erst pruefen, dann weiterspielen.
-**Snapshot 2** = RM_0090 nordseitig (41,12) mit leerem Inventar; bei Problemen neu von RM_0080.
+Turning 1310 yaw/tick (90° = 13 ticks); walking 0.49, running 1.0 units/tick; yaw 0 = facing −z,
+16384 = −x. Item probe (type 4) 2.0 ahead of the player, must lie inside the zone; stairs (type 1)
+probe 0.75 ahead, press OK at the zone edge facing the stairs. Doors 150–600 ticks, cinematics
+1200–1700. Idle runtime 4–7 % of one core; `auto.json` 30–60 KB; `path` ~50 ms.
 
-## 8. Fallen (schon passiert)
+## 11. Facts and progress (Claire, disc 1)
 
-- `path` ohne `2>/dev/null`-Trennung haengte frueher Fehlertext an live.txt (jetzt stderr).
-- Nach `snapshot_load` bleibt das Debugmenue teils offen → Zeile 1 von `nav.py` zeigt DEBUGMENUE.
-- Menuezeilen mit festen Takten nach einer `route` laufen ins Leere: erst `waitfor`, dann Menue.
-- `wait` vor dem ersten frischen `auto.json` liefert alten Stand; es wartet auf neue Dateizeit.
-- Schuesse in die Luft bei liegenden Zombies: `fire n low`.
+RM_0000–RM_0070 done (lighter, knife, handgun, prison map, herbs, ammo).
+RM_0050 → RM_0080 through the western detour (not the padlock); door faced +x.
+RM_0080: five zombies, exit door i1 (60, −12) facing −z → RM_0090.
+RM_0090: metal detector; security box at the console (69,106 facing +x), second box i12 (44,4).
+**Open, unverified:** the north box opens `itm[224]` (empty) while the deposit sits in `itm[192]`
+(`security_items`). Whether the original copies between them (sub1.c:1606-1617, opcodes 0xb7/0xb8)
+or the port has a gap is not settled — check with `hint.py op b7` / `hint.py zone 12` before playing on.
+**Snapshot 2** = RM_0090 north side (41,12) with an empty inventory; fall back to RM_0080 if needed.

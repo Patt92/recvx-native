@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Hinweise fuer Agenten, die beim naechsten Schritt nicht weiterwissen: Raumskript und Code gezielt lesen.
+"""Hints for an agent that does not know the next step: read the room script and the code, targeted and read-only.
 
-Eskalation (billig -> teuer): Zonentext lesen -> `hint.py zone` -> `hint.py blocked` -> `hint.py op/grep` -> Screenshot.
-Liest nur: data/rooms/*.RDT, native/ und die Semantikreferenz src/ps2/veronica/prog/ (nie archived/).
+Escalation (cheap -> expensive): read the zone text -> `hint.py room` -> `zone` -> `blocked` -> `event/op/grep` -> screenshot.
+Reads only data/rooms/*.RDT, native/ and the semantic reference src/ps2/veronica/prog/ (never archived/).
 
-  hint.py room   [auto.json]          Was gibt es im aktuellen Raum? je Zone: Meldungstext oder Skriptstelle
-  hint.py zone i [auto.json]          Was passiert bei Zone i (Meldung, Skriptblock mit Bedingungen, Flags jetzt)
-  hint.py blocked x z [auto.json]     Warum kein Weg? welche Wand sperrt, welche Skriptstellen sie oeffnen
-  hint.py event n [room]              Raumereignis n dekodiert (Namen, Texte, Items, Flags)
-  hint.py msg n [room]                Raummeldung n
-  hint.py op <hex|bhName>             wo ein Skriptbefehl implementiert ist (Port und Originalreferenz)
-  hint.py grep <regex>                begrenzte Suche in native/ und src/ps2/veronica/prog/ (max 40 Treffer)
+  hint.py room   [auto.json]          what is in this room: per zone its message text, item, door target or script
+  hint.py zone i [auto.json]          what zone i does: message, script block with conditions (current flags), toggles
+  hint.py blocked x z [auto.json]     why there is no path: which wall blocks, which script events open it
+  hint.py event n [room]              room event n decoded (original opcode names, texts, items, flags)
+  hint.py msg n [room]                room message n
+  hint.py op <hex|bhName>             where a script opcode is implemented (port and original reference)
+  hint.py grep <regex>                bounded search in native/ and src/ps2/veronica/prog/ (max 40 hits)
 """
 import json, os, re, struct, subprocess, sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
@@ -60,7 +60,7 @@ class Room:
 
     def message(self, n):
         d, t = self.d, self.msg; cnt = self.u32(t)
-        if n >= cnt: return f'<Meldung {n} ausserhalb>'
+        if n >= cnt: return f'<message {n} out of range>'
         p = t + self.u32(t + 4 + 4 * n); out = []
         for _ in range(4096):
             c = struct.unpack_from('<H', d, p)[0]; p += 2
@@ -99,22 +99,22 @@ def annotate(room, c, state=None):
     u8 = lambda i: c[i] if i < len(c) else 0; u16 = lambda i: c[i] | (c[i + 1] << 8) if i + 1 < len(c) else 0
     note = ''
     if op == 0x04:
-        m, b, mode = u8(1), u16(2) & 0x3ff, u8(5); note = f'wenn F[{m}:{b}]=={1 - mode} (jetzt {flag_now(state, m, b)})'
+        m, b, mode = u8(1), u16(2) & 0x3ff, u8(5); note = f'if F[{m}:{b}]=={1 - mode} (now {flag_now(state, m, b)})'
     elif op == 0x05:
-        m, b, mode = u8(1), u16(2) & 0x3ff, u8(5); note = f'F[{m}:{b}] := {1 - mode} (jetzt {flag_now(state, m, b)})'
+        m, b, mode = u8(1), u16(2) & 0x3ff, u8(5); note = f'F[{m}:{b}] := {1 - mode} (now {flag_now(state, m, b)})'
     elif op == 0x06:
         key, mode, val = u8(1), u8(2), u8(3); cmp = ['==', '>', '>=', '<', '<=', '!='][mode] if mode < 6 else '?'
-        note = f"wert[{key}{' Zone' if key == 20 else ''}] {cmp} {val}"
-    elif op == 0x0a: note = f"Wand w{u8(1)} {'aus (offen)' if u8(2) else 'an (zu)'}"
-    elif op == 0x0b: note = f"Zone i{u8(1)} {'aus' if u8(2) else 'an'}"
-    elif op == 0x0c: note = f"Boden {u8(1)} {'aus' if u8(2) else 'an'}"
-    elif op == 0x25: note = f"Zone i{u8(1)} neu belegt (attr {u16(2):#x}, prm {list(c[4:8])})"
-    elif op == 0x0e: note = f"Zone i{u8(4)} Aufnahme-Bit {u16(2) & 0x3ff}"
-    elif op in (0x10, 0x11): note = f"Item {u8(1)} {ITEMS.get(u8(1), '?')}" + (' benutzt' if op == 0x10 else ' im Inventar')
-    elif op == 0x14: note = f"startet Ereignis {u8(3)} auf Ebene {u8(2)}"
-    elif op == 0x1f: note = f'"{room.message(u8(2))}"' if not u8(1) else 'Meldung schliessen'
-    elif op in (0xb2, 0xc2): note = f"gibt Item {u8(1)} {ITEMS.get(u8(1), '?')}"
-    elif op == 0x01: note = f'IF (Laenge {u8(1)})'
+        note = f"value[{key}{' zone' if key == 20 else ''}] {cmp} {val}"
+    elif op == 0x0a: note = f"wall w{u8(1)} {'off (open)' if u8(2) else 'on (closed)'}"
+    elif op == 0x0b: note = f"zone i{u8(1)} {'off' if u8(2) else 'on'}"
+    elif op == 0x0c: note = f"floor {u8(1)} {'off' if u8(2) else 'on'}"
+    elif op == 0x25: note = f"zone i{u8(1)} redefined (attr {u16(2):#x}, prm {list(c[4:8])})"
+    elif op == 0x0e: note = f"zone i{u8(4)} pickup bit {u16(2) & 0x3ff}"
+    elif op in (0x10, 0x11): note = f"Item {u8(1)} {ITEMS.get(u8(1), '?')}" + (' used' if op == 0x10 else ' in inventory')
+    elif op == 0x14: note = f"starts event {u8(3)} on level {u8(2)}"
+    elif op == 0x1f: note = f'"{room.message(u8(2))}"' if not u8(1) else 'close message'
+    elif op in (0xb2, 0xc2): note = f"gives item {u8(1)} {ITEMS.get(u8(1), '?')}"
+    elif op == 0x01: note = f'IF (length {u8(1)})'
     return f"{name:<20s} {c.hex(' ')}" + (f'   -> {note}' if note else '')
 
 
@@ -139,28 +139,28 @@ def find_refs(room, pred):
 
 def cmd_zone(i, state):
     room = Room(state['room']); a = next((z for z in state['interactions'] if z['index'] == i), None)
-    if a is None: print('keine Zone', i); return
-    kind = {0: 'TUER', 1: 'TREPPE', 2: 'TREPPE2', 3: 'TEXT', 4: 'ITEM/OBJEKT'}.get(a['type'], a['type'])
-    locks = [n for bit, n in ((0x400, 'Blick +z gesperrt'), (0x800, '-x gesperrt'), (0x1000, '-z gesperrt'), (0x2000, '+x gesperrt')) if a['attribute'] & bit]
-    print(f"Zone i{i} {kind} {'an' if a['flags'] & 1 else 'AUS'} attr {a['attribute']:#x} prm {a['parameters']} {' '.join(locks)}")
-    if a['type'] == 3 and a['attribute'] & 0x8000: print(f"  Direkte Meldung {a['parameters'][1]}: \"{room.message(a['parameters'][1])}\"")
-    if a['type'] == 3 and a['attribute'] & 9: print(f"  Kameraschnitt cut {a['parameters'][0]} – Skript reagiert ueber wert[20]=={i}")
-    if a['type'] == 4: print(f"  Raumitem/Objekt Platz {a['parameters'][0]}")
-    if a['type'] == 0: print(f"  Tuer zu Raum-Nr {a['parameters'][1]} (Stufe {a['parameters'][0]}), Spawn {a['parameters'][2]}")
+    if a is None: print('no zone', i); return
+    kind = {0: 'DOOR', 1: 'STAIRS', 2: 'STAIRS2', 3: 'TEXT', 4: 'ITEM/OBJECT'}.get(a['type'], a['type'])
+    locks = [n for bit, n in ((0x400, 'facing +z blocked'), (0x800, '-x blocked'), (0x1000, '-z blocked'), (0x2000, '+x blocked')) if a['attribute'] & bit]
+    print(f"Zone i{i} {kind} {'on' if a['flags'] & 1 else 'OFF'} attr {a['attribute']:#x} prm {a['parameters']} {' '.join(locks)}")
+    if a['type'] == 3 and a['attribute'] & 0x8000: print(f"  direct message {a['parameters'][1]}: \"{room.message(a['parameters'][1])}\"")
+    if a['type'] == 3 and a['attribute'] & 9: print(f"  camera cut {a['parameters'][0]}; the script reacts via value[20]=={i}")
+    if a['type'] == 4: print(f"  room item/object slot {a['parameters'][0]}")
+    if a['type'] == 0: print(f"  door to room number {a['parameters'][1]} (stage {a['parameters'][0]}), spawn {a['parameters'][2]}")
     refs = list(find_refs(room, lambda c: (c[0] == 0x06 and c[1] == 20 and c[3] == i) or (c[0] == 0x0e and len(c) > 4 and c[4] == i)))
     tog = list(find_refs(room, lambda c: c[0] in (0x0b, 0x25) and c[1] == i))
-    if not refs and not tog: print('  keine Skriptstelle prueft diese Zone')
+    if not refs and not tog: print('  no script checks this zone')
     for s, o, _ in refs[:4]:
-        print(f'  Skript reagiert ({s} 0x{o:x}):'); print('\n'.join(block_after(room, s, o, state, 24)))
+        print(f'  script reacts ({s} 0x{o:x}):'); print('\n'.join(block_after(room, s, o, state, 24)))
     for s, o, ctx in tog[:6]:
-        print(f'  Zone wird geschaltet in {s} 0x{o:x}; davor:')
+        print(f'  zone switched in {s} 0x{o:x}; preceded by:')
         for oo, dd, cc in ctx: print(f'    0x{oo:x} {annotate(room, cc, state)}')
 
 
 def cmd_blocked(x, z, state):
     from pathfind import Grid
     pts, info = Grid(state).path(state['actor'][0], state['actor'][2], x, z)
-    if pts: print(f'Weg existiert ({info:.0f}) – nicht blockiert'); return
+    if pts: print(f'path exists ({info:.0f}) - not blocked'); return
     room = Room(state['room']); px, pz = state['actor'][0], state['actor'][2]
     cands = []
     for w in state['walls']:
@@ -168,41 +168,41 @@ def cmd_blocked(x, z, state):
         test = dict(state); test['walls'] = [dict(v, fl=0) if v['i'] == w['i'] else v for v in state['walls']]
         p2, _ = Grid(test).path(px, pz, x, z)
         if p2: cands.append(w)
-    if not cands: print('Keine einzelne Wand sperrt – mehrere Waende/Etage/Boden pruefen (hint.py room)'); return
+    if not cands: print('no single wall blocks - check several walls, floor level or stairs (hint.py room)'); return
     scripted = [w for w in cands if any(True for _ in find_refs(room, lambda c, wi=w['i']: c[0] == 0x0a and c[1] == wi))]
     fixed = [w for w in cands if w not in scripted]
-    if fixed: print('Feste Waende auf dem Weg (Umweg/anderer Zugang noetig): ' + ' '.join(f"w{w['i']}({w['p'][0]:.0f},{w['p'][2]:.0f})" for w in fixed))
+    if fixed: print('fixed walls on the way (detour or other access needed): ' + ' '.join(f"w{w['i']}({w['p'][0]:.0f},{w['p'][2]:.0f})" for w in fixed))
     for w in scripted:
-        print(f"Sperrende Wand w{w['i']} ty{w['ty']} p=({w['p'][0]:.0f},{w['p'][2]:.0f}) e=({w['e'][0]:.0f},{w['e'][2]:.0f}) attr {w['attr']:#x}")
+        print(f"blocking wall w{w['i']} ty{w['ty']} p=({w['p'][0]:.0f},{w['p'][2]:.0f}) e=({w['e'][0]:.0f},{w['e'][2]:.0f}) attr {w['attr']:#x}")
         refs = list(find_refs(room, lambda c, wi=w['i']: c[0] == 0x0a and c[1] == wi))
-        if not refs: print('  kein Skript schaltet sie (fest oder Objekt/Gegner-Wand)')
+        if not refs: print('  no script switches it (fixed, or an object/enemy wall)')
         for s, o, ctx in refs:
-            print(f"  {s} 0x{o:x} {annotate(room, room.d[room.ev + o:room.ev + o + 4], state)}; davor:")
+            print(f"  {s} 0x{o:x} {annotate(room, room.d[room.ev + o:room.ev + o + 4], state)}; preceded by:")
             for oo, dd, cc in ctx: print(f'    0x{oo:x} {annotate(room, cc, state)}')
         trig = [s for s, _, _ in refs]
         for s in sorted(set(trig)):
             if s.startswith('event'):
                 n = int(s[5:]); starters = list(find_refs(room, lambda c, n=n: c[0] == 0x14 and c[3] == n))
                 for ss, oo, ctx in starters[:2]:
-                    print(f'  {s} wird gestartet in {ss} 0x{oo:x}; Bedingungen davor:')
+                    print(f'  {s} is started in {ss} 0x{oo:x}; conditions before:')
                     for o3, d3, c3 in ctx: print(f'    0x{o3:x} {annotate(room, c3, state)}')
 
 
 def cmd_room(state):
-    room = Room(state['room']); print(f"{room.name}: {len(state['interactions'])} Zonen, Meldungen {room.u32(room.msg)}")
+    room = Room(state['room']); print(f"{room.name}: {len(state['interactions'])} zones, {room.u32(room.msg)} messages")
     for a in state['interactions']:
         if not (a['flags'] & 1): continue
-        k = {0: 'TUER', 1: 'TREPPE', 2: 'TREPPE2', 3: 'TEXT', 4: 'ITEM'}.get(a['type'], a['type'])
+        k = {0: 'DOOR', 1: 'STAIRS', 2: 'STAIRS2', 3: 'TEXT', 4: 'ITEM'}.get(a['type'], a['type'])
         cx, cz = a['position'][0] + a['extent'][0] / 2, a['position'][2] + a['extent'][2] / 2
         what = ''
         if a['type'] == 3 and a['attribute'] & 0x8000: what = '"' + room.message(a['parameters'][1])[:70] + '"'
         elif a['type'] == 3:
             refs = list(find_refs(room, lambda c, i=a['index']: c[0] == 0x06 and c[1] == 20 and c[3] == i))
-            what = f"Skript {refs[0][0]} 0x{refs[0][1]:x}" if refs else 'kein Skript'
+            what = f"script {refs[0][0]} 0x{refs[0][1]:x}" if refs else 'no script'
         elif a['type'] == 4:
             it = next((r for r in state['room_items'] if r['index'] == a['parameters'][0]), None)
-            what = (f"Item {it['identity']} {ITEMS.get(it['identity'], '?')}" + (' (genommen)' if it['inactive'] else '') + (' (versteckt)' if it['hidden'] else '')) if it else f"Objekt {a['parameters'][0]}"
-        elif a['type'] == 0: what = f"Tuer -> Raum {a['parameters'][1]}"
+            what = (f"Item {it['identity']} {ITEMS.get(it['identity'], '?')}" + (' (taken)' if it['inactive'] else '') + (' (hidden)' if it['hidden'] else '')) if it else f"object {a['parameters'][0]}"
+        elif a['type'] == 0: what = f"door -> room {a['parameters'][1]}"
         print(f" i{a['index']:<2} {k:<7} ({cx:.0f},{cz:.0f}) {what}")
 
 
@@ -219,7 +219,7 @@ def cmd_op(arg):
 def cmd_grep(pat):
     r = subprocess.run(['rg', '-n', '-m', '8', '--max-columns', '200', pat] + SEARCH, capture_output=True, text=True).stdout.splitlines()
     for line in r[:40]: print(os.path.relpath(line.split(':', 1)[0], ROOT) + ':' + line.split(':', 1)[1] if ':' in line else line)
-    if len(r) > 40: print(f'... {len(r) - 40} weitere')
+    if len(r) > 40: print(f'... {len(r) - 40} more')
 
 
 def main():
