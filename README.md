@@ -65,8 +65,8 @@ interpolation, CRT filter on):** the window idles at ~4–7 % of one core while
 holding; a dump is ~15–60 KB JSON depending on wall count and is read through
 `nav.py`, so one decision costs the model ~10–30 lines of text, not an image.
 Turning is 1310 yaw units per tick (90° = 13 ticks), walking 0.49 units/tick,
-running ~1.0 units/tick; a door transition takes 150–600 ticks, the Rodrigo and
-graveyard cinematics 1200–1700 ticks (`run auto` + `wait`, read once). A
+running ~1.0 units/tick; a door transition takes 150–600 ticks, longer
+cinematics 1200–1700 ticks (`run auto` + `wait`, read once). A
 pathfinding call takes ~50 ms. Target: one tool call per action, a room with two
 items and an exit in at most six.
 Screenshots are opt-in and only for checking what the raster shows, never for

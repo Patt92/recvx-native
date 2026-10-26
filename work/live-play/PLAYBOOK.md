@@ -23,9 +23,13 @@ answer is unexpected, read the state first — do not resend the same line.
 ## 2. Start
 
 ```sh
-rm -f build/play/live.txt build/play/live_state.json build/play/auto.json
-printf '10 new_game\n70 select\n110 confirm\n150 select\n190 confirm\n230 select\n270 confirm\n330 cancel\n350 cancel\n370 inventory\n400 sdl_key down F2\n402 sdl_key up F2\n410 debug_select snapshot_load 1\n414 confirm\n440 autodump 5 auto\n441 run auto 18\n' > build/play/live.txt
+rm -f build/play/live.txt build/play/live_state.json build/play/auto.json build/play/stream.log.lock
+printf '10 new_game\n70 select\n110 confirm\n150 select\n190 confirm\n230 select\n270 confirm\n330 cancel\n350 cancel\n440 autodump 5 auto\n441 run auto 18\n' > build/play/live.txt
 ```
+
+The runtime reads the control file from offset 0 at startup, so recreate it before every start.
+Load snapshot slot 2 only when the user asks for it (append once the game is running):
+`sdl_key down F2`, `sdl_key up F2`, `debug_select snapshot_load 1`, `confirm`.
 
 Runtime in a host terminal tab (the sandbox has no Metal device):
 
@@ -80,7 +84,7 @@ python3 tools/agent_play/stream.py build/play/auto.json --until near,grab,gameov
 
 Enemy posture comes from the engine's node matrices measured against the floor under the enemy:
 `lying` → `fire n low`. `air`/`under` without a script reason is an anomaly worth reporting
-(not every one is a bug: RM_0030 id62 at height 60 is a scripted object).
+(not every one is a bug: scripted objects can sit off the floor).
 
 ## 6. Tools (`tools/agent_play/`)
 
@@ -99,8 +103,7 @@ Enemy posture comes from the engine's node matrices measured against the floor u
 
 Escalate cheap → expensive; stop as soon as the answer is clear:
 
-1. Read the zone (`route … then confirm`); the game's own text usually names the solution
-   ("I must release the metal detector").
+1. Read the zone (`route … then confirm`); the game's own text usually names the solution.
 2. `hint.py room` — per zone: message text, item name (taken/hidden), door target, script.
 3. `hint.py zone i` — facing locks, direct message, the script block reacting to the zone with
    its flag conditions (current values), where the zone is switched on/off.
@@ -115,8 +118,8 @@ Escalate cheap → expensive; stop as soon as the answer is clear:
 ## 8. Decision rules
 
 - **Obstacle or puzzle:** text first, then hints. `NO PATH` means a scripted gate, not a
-  navigation error — do not walk around looking. Shortcuts (RM_0050 padlock) come later; the room
-  has a detour and `path` finds it.
+  navigation error — do not walk around looking. A locked shortcut usually has a detour, and
+  `path` finds it.
 - **Enemies:** SIGHT and distance 15–35 → `fire`; < 10 → `path` away first; `lying` → `fire n low`.
   Grab: alternate `keys left`/`keys right` each tick ~20 times. Watch ammo (`inv` 9 = handgun, 12 = bullets).
 - **Heal** below 60 HP: `inventory`, cursor to the herb, `confirm`, `confirm`, 3× `cancel`.
@@ -133,8 +136,7 @@ Escalate cheap → expensive; stop as soon as the answer is clear:
 - `debug_select` before the menu is open is lost (opening resets values): open first, then select.
 - `wait` ignores the state file until it is newer than the call; it needs a running `autodump`.
 - Shooting a downed zombie with normal aim hits the air: `fire n low`.
-- Metal detector (RM_0090): **everything metallic** goes into the security box, including lighter
-  and ink ribbon; the release switch alone does not do it.
+- A stale control file replays from the start: recreate it before every runtime start.
 
 ## 10. Measured constants
 
@@ -142,14 +144,3 @@ Turning 1310 yaw/tick (90° = 13 ticks); walking 0.49, running 1.0 units/tick; y
 16384 = −x. Item probe (type 4) 2.0 ahead of the player, must lie inside the zone; stairs (type 1)
 probe 0.75 ahead, press OK at the zone edge facing the stairs. Doors 150–600 ticks, cinematics
 1200–1700. Idle runtime 4–7 % of one core; `auto.json` 30–60 KB; `path` ~50 ms.
-
-## 11. Facts and progress (Claire, disc 1)
-
-RM_0000–RM_0070 done (lighter, knife, handgun, prison map, herbs, ammo).
-RM_0050 → RM_0080 through the western detour (not the padlock); door faced +x.
-RM_0080: five zombies, exit door i1 (60, −12) facing −z → RM_0090.
-RM_0090: metal detector; security box at the console (69,106 facing +x), second box i12 (44,4).
-**Open, unverified:** the north box opens `itm[224]` (empty) while the deposit sits in `itm[192]`
-(`security_items`). Whether the original copies between them (sub1.c:1606-1617, opcodes 0xb7/0xb8)
-or the port has a gap is not settled — check with `hint.py op b7` / `hint.py zone 12` before playing on.
-**Snapshot 2** = RM_0090 north side (41,12) with an empty inventory; fall back to RM_0080 if needed.
