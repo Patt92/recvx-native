@@ -26,6 +26,7 @@ Driver options (pass them to `Start-AI-Play.command`/`.cmd` or `driver.py`):
 | `--window N` | decisions kept in the prompt before the history is halved (default 8) |
 | `--no-tools` | endpoint without function calling; the model replies `{"op":"zone","i":4}` instead |
 | `--temperature`, `--max-tokens` | sampling (default 0.2, 200) |
+| `--save-rooms N` | allow saving only after N new rooms since the last save or load (default 3; 0 = always allow). Too early save screens are closed without a model call. |
 | `--seconds S` | game-time budget per action, at most 8 |
 | `--timeout S` | seconds per model request (default 60) |
 | `--retries N`, `--retry-delay S` | on timeout, refused connection, HTTP 408/429/5xx: retry after S seconds, doubled up to 20 s; `--retries 0` (default) retries until the endpoint answers. Bad key or model (401/404) stops at once. |

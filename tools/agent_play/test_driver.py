@@ -419,6 +419,56 @@ class DriverTests(unittest.TestCase):
         self.assertIs(drv.correct(other, obs), other)
         self.assertEqual(drv.correct(dict(op='move', to=[1, 1]), obs), dict(op='move', to=[1, 1]))
 
+    def save_screen(self, count=0):
+        return dict(active=True, mode='save', phase_name='files', text='', selection=0, cursor=0,
+                    save_count=count, slot=dict(n=0, exists=False), used_slots=[])
+
+    def test_early_save_screen_is_closed_without_a_model_call(self):
+        self.d['typewriter'] = self.save_screen()
+        self.write(self.d)
+        drv, client = self.driver([])
+        with self.ticking():
+            drv.run(steps=1)
+        self.assertEqual(client.requests, [])
+        self.assertIn('cancel', self.controls())
+        # A typewriter save screen after enough new rooms reaches the model.
+        drv2, client2 = self.driver([text(dict(op='press', key='confirm'))])
+        drv2.rooms_since_save = {'a', 'b', 'c'}
+        with self.ticking():
+            drv2.run(steps=1)
+        self.assertEqual(len(client2.requests), 1)
+
+    def test_save_is_allowed_after_enough_new_rooms_and_reset_by_a_save(self):
+        drv, _ = self.driver([], save_rooms=2)
+        for room in ('RM_0000.RDX', 'RM_0010.RDX'):
+            self.d['room'] = room; self.write(self.d)
+            drv.track_saves(dict(room=room))
+        self.assertFalse(drv.save_allowed())
+        self.d['room'] = 'RM_0020.RDX'; self.write(self.d)
+        drv.track_saves(dict(room='RM_0020.RDX'))
+        self.assertTrue(drv.save_allowed())
+        # The save itself (save_count +1) starts the count again.
+        self.d['typewriter'] = dict(active=False, save_count=0); self.write(self.d)
+        drv.track_saves(dict(room='RM_0020.RDX'))
+        self.d['typewriter'] = dict(active=False, save_count=1); self.write(self.d)
+        drv.track_saves(dict(room='RM_0020.RDX'))
+        self.assertFalse(drv.save_allowed())
+        # Loading counts as a fresh save, too.
+        drv.rooms_since_save = {'a', 'b', 'c'}
+        self.d['typewriter'] = dict(active=True, mode='load', save_count=1); self.write(self.d)
+        drv.track_saves(dict(room='RM_0020.RDX'))
+        self.assertFalse(drv.save_allowed())
+
+    def test_save_question_gets_a_tip_and_policy_can_be_switched_off(self):
+        drv, _ = self.driver([])
+        obs = dict(owner='CINEMATIC DIALOG', dialog=dict(text='Will you use an Ink Ribbon to save?', choice=True))
+        self.assertTrue(any('choose No' in t for t in drv.tips(obs, '')))
+        drv.save_rooms = 0
+        self.assertTrue(any('reasonable' in t for t in drv.tips(obs, '')))
+        drv.save_rooms = 3
+        drv.rooms_since_save = {'a', 'b', 'c'}
+        self.assertTrue(any('reasonable' in t for t in drv.tips(obs, '')))
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):

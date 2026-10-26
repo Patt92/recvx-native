@@ -168,7 +168,7 @@ def trim(obs):
 
 class Driver:
     def __init__(self, play, client, *, tools=True, window=8, seconds=6.0, max_tool_calls=3, log=None,
-                 out=sys.stdout):
+                 out=sys.stdout, save_rooms=3):
         self.play, self.client, self.use_tools = play, client, tools
         self.window, self.seconds, self.max_tool_calls = window, seconds, max_tool_calls
         self.system = PROMPT.read_text()
@@ -181,6 +181,12 @@ class Driver:
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
         self.last_owner = ''
+        # Save policy: a save (or a load) counts as fresh until the player has entered `save_rooms` rooms
+        # not seen since. 0 disables the policy.
+        self.save_rooms = save_rooms
+        self.rooms_since_save = set()  # the start of a run (new game or loaded game) counts as fresh
+        self.save_count = None
+        self.save_room_seen = None
         self.texts = []            # last game texts (dialog, menu, document, terminal) the model has seen
 
     # --- tools -----------------------------------------------------------------------------------------
@@ -219,6 +225,32 @@ class Driver:
             if len(t) > 3 and (not self.texts or self.texts[-1] != t):
                 self.texts = (self.texts + [t])[-6:]
 
+    def track_saves(self, obs):
+        """Count new rooms since the last save or load (typewriter save_count, load screen)."""
+        d, _, _ = self.play.read()
+        t = d.get('typewriter') or {}
+        count = t.get('save_count')
+        if count is not None and self.save_count is not None and count > self.save_count:
+            self.rooms_since_save = set()
+        if count is not None:
+            self.save_count = count
+        if t.get('active') and t.get('mode') == 'load':
+            self.rooms_since_save = set()  # a loaded game was saved right where it starts
+        room = obs.get('room')
+        if room and room != self.save_room_seen:
+            if self.save_room_seen is not None:
+                self.rooms_since_save.add(room)
+            self.save_room_seen = room
+
+    def save_allowed(self):
+        if not self.save_rooms:
+            return True
+        return len(self.rooms_since_save) >= self.save_rooms
+
+    def save_reason(self):
+        return (f'saved or loaded {len(self.rooms_since_save)} new room(s) ago; saves are useful after '
+                f'{self.save_rooms} new rooms or before a boss')
+
     def tips(self, obs, previous_owner):
         """Facts the model tends to miss, derived from the state only (no room knowledge)."""
         out = []
@@ -226,6 +258,10 @@ class Driver:
         if obs.get('owner') == 'INVENTORY' and previous_owner and 'DIALOG' in previous_owner and not menu.get('commands'):
             out.append('The game opened the status menu itself after the text: it expects you to use, equip or '
                        'combine something now. Do not cancel before doing what the text asked.')
+        dialog = obs.get('dialog') or {}
+        if dialog.get('choice') and any(w in dialog.get('text', '').lower() for w in ('save', 'ink ribbon')):
+            out.append('Save not needed now: choose No (' + self.save_reason() + ').' if not self.save_allowed()
+                       else 'A save is reasonable now (enough progress since the last one).')
         equipped = ((obs.get('equipped') or [''])[0] or '').lower()
         names = [row[3].lower() for row in obs.get('inv', []) if len(row) > 3 and row[3]]
         # Pickup confirmations name the item too; they are not a request to use it.
@@ -427,8 +463,13 @@ class Driver:
             view = json.dumps(trim(obs), sort_keys=True)
             self.idle_waits = self.idle_waits + 1 if view == self.idle_view else 0
             self.idle_view = view
+            self.track_saves(obs)
+            tw = obs.get('typewriter') or {}
             if passive(obs) and self.idle_waits < 4:
                 action, entry = {'op': 'wait'}, dict(auto=True)
+            elif 'TYPEWRITER' in obs.get('owner', '') and tw.get('mode') == 'save' and not self.save_allowed():
+                # Leave the save screen without a model call; the ribbon and the time stay unspent.
+                action, entry = {'op': 'press', 'key': 'cancel'}, dict(auto=True, save_skipped=self.save_reason())
             else:
                 if self.idle_waits >= 4:
                     # Nothing changed over several waits: the game may wait for a button after all.
@@ -448,6 +489,8 @@ class Driver:
             if not entry.get('auto') and fallback:
                 feedback.update(result='error', error='no game action in your last reply; the driver waited instead')
                 entry['fallback'] = True
+            if entry.get('save_skipped'):
+                feedback['save_skipped'] = entry['save_skipped']
             entry.update(owner=owner, action=action, act_ms=round(act_ms), result=feedback['result'])
             if 'error' in feedback:
                 entry['error'] = feedback['error']
@@ -474,6 +517,8 @@ def main():
     ap.add_argument('--retries', type=int, default=0, help='retries on timeout/connection errors (0 = until it works)')
     ap.add_argument('--retry-delay', type=float, default=3.0, help='first retry pause, doubled up to 20 s')
     ap.add_argument('--seconds', type=float, default=6.0, help='play.py wait budget per action (<= 8)')
+    ap.add_argument('--save-rooms', type=int, default=3,
+                    help='allow saving only after N new rooms since the last save/load (0 = always allow)')
     ap.add_argument('--no-tools', action='store_true', help='endpoint without function calling')
     ap.add_argument('--dry-run', action='store_true', help='print the first request and exit')
     a = ap.parse_args()
@@ -482,7 +527,7 @@ def main():
                     temperature=a.temperature, max_tokens=a.max_tokens, timeout=a.timeout,
                     retries=a.retries, retry_delay=a.retry_delay)
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
-                    log=Path(a.dir) / 'driver.log')
+                    log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms)
     if a.dry_run:
         obs = play.observe()
         user = {'role': 'user', 'content': json.dumps(dict(result='start', state=trim(obs)), separators=(',', ':'))}

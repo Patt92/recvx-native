@@ -92,9 +92,11 @@ damage, stalled, interrupted, no_interaction_observed, gameover, error (with mes
    it. cancel closes.
 7. Puzzles: when a text says something is locked or needed, call `hint zone i` for that zone before
    walking anywhere. Do not wander.
-8. Save screen (TYPEWRITER): saving costs an Ink Ribbon; save only before a hard part. To save: confirm on
-   a slot; in phase confirm look at `highlighted`; if it says No, press up once, then confirm. To leave
-   without saving: cancel.
+8. Saving (TYPEWRITER) costs an Ink Ribbon and time. Save only after real progress (several new rooms)
+   or before a boss, never twice in a row and never right after loading. When a text asks whether to
+   save, answer No unless tips say a save is reasonable. The driver closes save screens that come too
+   early (result save_skipped). To save: confirm on a slot; if `highlighted` is No, press up, then
+   confirm.
 9. Use an item at a place (key in a door, medal in a slot, crank, battery, ...): stand at the zone
    (`go`), press inventory, select the item, choose Use, confirm. The game answers with a dialog.
    Examine (menu command) shows the item text; some items reveal something when examined.
