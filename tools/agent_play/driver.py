@@ -183,7 +183,7 @@ def trim(obs):
 
 class Driver:
     def __init__(self, play, client, *, tools=True, window=8, seconds=6.0, max_tool_calls=3, log=None,
-                 out=sys.stdout, save_rooms=3, repeat_limit=2):
+                 out=sys.stdout, save_rooms=3, repeat_limit=2, skip_videos=False):
         self.play, self.client, self.use_tools = play, client, tools
         self.window, self.seconds, self.max_tool_calls = window, seconds, max_tool_calls
         self.system = PROMPT.read_text()
@@ -205,6 +205,8 @@ class Driver:
         # sees what it already did and a repeat without anything new is refused.
         self.visits = {}           # room -> zone -> dict(n, got, sig)
         self.repeat_limit = repeat_limit
+        self.skip_videos = skip_videos
+        self.video_skipped = False  # skip sent for the video that is playing now
         # Save policy: a save (or a load) counts as fresh until the player has entered `save_rooms` rooms
         # not seen since. 0 disables the policy.
         self.save_rooms = save_rooms
@@ -402,6 +404,11 @@ class Driver:
             feedback = dict(result=obs.pop('result', 'running'))
             if 'fire' in obs:
                 feedback['fire'] = obs.pop('fire')
+        except (TypeError, ValueError, KeyError, IndexError) as e:
+            # A malformed model value (string coordinate, wrong nesting) must cost one decision, not the run.
+            obs = self.play.observe()
+            feedback = dict(result='error', error=f'invalid action fields ({type(e).__name__}: {e}); '
+                                                  'send numbers, e.g. {"op":"interact","zone":4,"to":[1.5,2.0]}')
         except PlayError as e:
             obs = self.play.observe()
             feedback = dict(result='error', error=str(e))
@@ -492,12 +499,57 @@ class Driver:
                 self.pending_events = (self.pending_events + [text])[-2:]
         self.tasks_seen = now
 
+    @staticmethod
+    def number(v):
+        """A model value as a float: numbers and numeric strings ("3.5"); anything else None."""
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, (int, float)):
+            return float(v) if math.isfinite(v) else None
+        if isinstance(v, str):
+            try:
+                f = float(v.strip())
+            except ValueError:
+                return None
+            return f if math.isfinite(f) else None
+        return None
+
+    def normalize(self, action):
+        """Turn numeric strings in zone/to/face/shots/ticks/presses/target into numbers; keep the rest."""
+        out = dict(action)
+        for key in ('zone', 'shots', 'ticks', 'presses', 'target', 'store', 'take'):
+            if key in out and not isinstance(out[key], int):
+                f = self.number(out[key])
+                if f is not None and f == int(f):
+                    out[key] = int(f)
+        for key in ('to', 'face'):
+            v = out.get(key)
+            if isinstance(v, dict) and {'x', 'z'} <= set(v):
+                v = [v['x'], v['z']]
+            if isinstance(v, (list, tuple)) and len(v) == 3:
+                v = [v[0], v[2]]   # [x, y, z] from the 3D position fields
+            if isinstance(v, (list, tuple)) and len(v) == 2:
+                pair = [self.number(x) for x in v]
+                if None not in pair:
+                    out[key] = pair
+        then = out.get('then')
+        if isinstance(then, dict):
+            out['then'] = self.normalize(then)
+        return out
+
     def correct(self, action, obs):
         """interact: the geometry decides where to stand, and the coordinates decide which zone was meant.
 
         Invented standing points were the most common rejected action, and the model mixes up zone
         numbers (it sent the coordinates of one door with the number of the other). If the given point
-        is the ready point of another zone, or much closer to another zone's point, that zone is used."""
+        is the ready point of another zone, or much closer to another zone's point, that zone is used.
+        Never raises: anything unexpected leaves the action as the model sent it (play.py validates)."""
+        try:
+            return self._correct(self.normalize(action))
+        except Exception:
+            return action
+
+    def _correct(self, action):
         if action.get('op') != 'interact':
             return action
         try:
@@ -506,7 +558,7 @@ class Driver:
         except (PlayError, OSError, ValueError):
             return action
         zone, to = action.get('zone'), action.get('to')
-        if isinstance(to, list) and len(to) == 2 and all(isinstance(v, (int, float)) for v in to) and points:
+        if isinstance(to, list) and len(to) == 2 and all(isinstance(v, float) for v in to) and points:
             dist = {i: math.hypot(p[0][0] - to[0], p[0][1] - to[1]) for i, p in points.items()}
             best = min(dist, key=dist.get)
             own = dist.get(zone)
@@ -517,7 +569,7 @@ class Driver:
             return action if zone == action.get('zone') else dict(action, zone=zone)
         go = points[zone]
         if zone == action.get('zone') and isinstance(to, list) and len(to) == 2 and \
-                abs(to[0] - go[0][0]) < .01 and abs(to[1] - go[0][1]) < .01:
+                all(isinstance(v, float) for v in to) and abs(to[0] - go[0][0]) < .01 and abs(to[1] - go[0][1]) < .01:
             return action
         return dict(action, zone=zone, to=go[0], face=go[1])
 
@@ -617,7 +669,14 @@ class Driver:
             self.track_saves(obs)
             self.watch_events()
             tw = obs.get('typewriter') or {}
-            if passive(obs) and self.idle_waits < 4:
+            playing = 'VIDEO' in obs.get('owner', '').split()
+            if not playing:
+                self.video_skipped = False
+            if self.skip_videos and playing and not self.video_skipped:
+                # User option: skip FMV videos (the game's own video skip); scenes are not touched.
+                action, entry = {'op': 'press', 'key': 'skip'}, dict(auto=True, video_skipped=True)
+                self.video_skipped = True
+            elif passive(obs) and self.idle_waits < 4:
                 action, entry = {'op': 'wait'}, dict(auto=True)
             elif 'TYPEWRITER' in obs.get('owner', '') and tw.get('mode') == 'save' and not self.save_allowed():
                 # Leave the save screen without a model call; the ribbon and the time stay unspent.
@@ -689,6 +748,9 @@ def main():
     ap.add_argument('--seconds', type=float, default=6.0, help='play.py wait budget per action (<= 8)')
     ap.add_argument('--repeat-limit', type=int, default=2,
                     help='refuse examining the same zone more than N times without progress (0 = off)')
+    ap.add_argument('--skip-videos', action='store_true',
+                    default=os.environ.get('RECVX_SKIP_VIDEOS', '').strip().lower() in ('1', 'true', 'yes', 'on'),
+                    help='skip FMV videos automatically (also RECVX_SKIP_VIDEOS=1 in .env)')
     ap.add_argument('--save-rooms', type=int, default=3,
                     help='allow saving only after N new rooms since the last save/load (0 = always allow)')
     ap.add_argument('--no-tools', action='store_true', help='endpoint without function calling')
@@ -700,7 +762,7 @@ def main():
                     retries=a.retries, retry_delay=a.retry_delay,
                     extra_body=json.loads(a.extra_body) if a.extra_body.strip() else None)
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
-                    log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms,
+                    log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms, skip_videos=a.skip_videos,
                     repeat_limit=a.repeat_limit)
     if a.dry_run:
         obs = play.observe()

@@ -425,7 +425,7 @@ class DriverTests(unittest.TestCase):
         fixed = drv.correct(dict(op='interact', zone=14, to=[0, 12], face=[0, 30]), {})
         self.assertEqual((fixed['zone'], fixed['to'], fixed['face']), (14, points[14][0], points[14][1]))
         exact = dict(op='interact', zone=14, to=points[14][0], face=points[14][1])
-        self.assertIs(drv.correct(exact, {}), exact)
+        self.assertEqual(drv.correct(exact, {}), exact)
         self.assertEqual(drv.correct(dict(op='move', to=[1, 1]), {}), dict(op='move', to=[1, 1]))
 
     def test_zone_number_follows_the_coordinates_when_they_belong_to_another_zone(self):
@@ -691,6 +691,36 @@ class DriverTests(unittest.TestCase):
                          dict(op='press', key='up'))
         with self.assertRaises(ValueError):
             parse_action('<think>still thinking {"op":"wait"')
+
+    def test_video_is_skipped_once_only_when_enabled(self):
+        self.d.update(cinematic=True, movie_active=True)
+        self.write(self.d)
+        drv, client = self.driver([], skip_videos=True)
+        with self.ticking():
+            drv.run(steps=3)
+        self.assertEqual(client.requests, [])
+        self.assertEqual(self.controls().count('skip'), 1)
+        off, client2 = self.driver([])
+        (self.directory/'live.txt').unlink()
+        with self.ticking():
+            off.run(steps=2)
+        self.assertNotIn('skip', self.controls())
+
+    def test_string_numbers_are_accepted_and_bad_fields_cost_one_decision(self):
+        self.two_doors()
+        drv, client = self.driver([text(dict(op='interact', zone='14', to=['0', '12'], face=['0', '30'])),
+                                   text(dict(op='move', to=['north', 'door'])),
+                                   text(dict(op='press', key='cancel'))])
+        points = drv.room_points(self.play.read()[0])
+        fixed = drv.correct(dict(op='interact', zone='14', to=['0', '12'], face=['0', '30']), {})
+        self.assertEqual((fixed['zone'], fixed['to']), (14, points[14][0]))
+        self.assertEqual(drv.normalize(dict(op='move', to=[1, 0, '2']))['to'], [1.0, 2.0])
+        self.assertEqual(drv.normalize(dict(op='move', to={'x': '3', 'z': 4}))['to'], [3.0, 4.0])
+        with self.ticking():
+            drv.run(steps=3)
+        second = json.loads(client.requests[2][0][-1]['content'])
+        self.assertEqual(second['result'], 'error')
+        self.assertIn('cancel', self.controls())
 
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)

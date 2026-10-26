@@ -15,6 +15,7 @@ committed. Environment variables that are already set win over the file;
 |---|---|---|
 | `RECVX_LLM_BASE_URL` | OpenAI-compatible base URL, without `/chat/completions` | `http://localhost:8080/v1` |
 | `RECVX_LLM_MODEL` | model name the endpoint expects | `local` |
+| `RECVX_SKIP_VIDEOS` | `1` = skip FMV videos (same as `--skip-videos`) | off |
 | `RECVX_LLM_EXTRA_BODY` | JSON merged into every request; for reasoning models that think before answering, e.g. Qwen3 on llama.cpp: `{"chat_template_kwargs":{"enable_thinking":false}}` | empty |
 | `RECVX_LLM_API_KEY` | API key, sent only as `Authorization: Bearer`; empty for a local server without auth | empty |
 | `OPENAI_API_KEY` | fallback when `RECVX_LLM_API_KEY` is not set | empty |
@@ -29,6 +30,7 @@ Driver options (pass them to `Start-AI-Play.command`/`.cmd` or `driver.py`):
 | `--temperature`, `--max-tokens` | sampling (default 0.2, 200). A reply cut off at the limit (`finish_reason` length, e.g. long reasoning) is retried once with 4x the budget and an instruction to send only the JSON; unusable replies are logged as `bad_replies` in driver.log. |
 | `--extra-body JSON` | same as `RECVX_LLM_EXTRA_BODY` |
 | `--repeat-limit N` | refuse examining the same zone more than N times while nothing changed (inventory, pickups, zones, walls); default 2, 0 = off |
+| `--skip-videos` | skip FMV videos with the game's own video skip, once per video, without a model call; in-engine scenes still play. Also `RECVX_SKIP_VIDEOS=1` in `.env`. |
 | `--save-rooms N` | allow saving only after N new rooms since the last save or load (default 3; 0 = always allow). Too early save screens are closed without a model call. |
 | `--seconds S` | game-time budget per action, at most 8 |
 | `--timeout S` | seconds per model request (default 60) |
