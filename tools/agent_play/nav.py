@@ -5,8 +5,7 @@
   nav.py A path x z [via x z ...] [run] [stop d] [face x z] [then <line>]
                                              pathfinding over the room's walls -> one `route` line on stdout
   nav.py A wait A L secs [stop] [room] [danger]
-                                             block until cinematic/dialogue/door/route are over; acknowledges
-                                             finished dialogue pages, stops on Yes/No
+                                             legacy waiter; returns control at dialogue/menu/route boundary
   nav.py A fire n [low] [face x z]           control lines for n handgun shots (`low` = lowered aim)
   nav.py A map [cell [x0 z0 x1 z1]]          ASCII top view (only when `path` fails)
   nav.py A walls [x0 z0 x1 z1]               raw wall list
@@ -15,7 +14,7 @@ A = state file (build/play/auto.json), L = control file (build/play/live.txt).
 Coordinates: x right, z forward; facing (actor.cpp:312) = (-sin(yaw), -cos(yaw)), yaw 0..65535:
 yaw 0 -> -z, 16384 -> -x, 32768 -> +z, 49152 -> +x. Turning 1310/tick, walking 0.49/tick, running ~1.0/tick.
 """
-import json, math, os, re, sys, time
+import json, math, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 TURN_PER_TICK = 1310
@@ -24,9 +23,8 @@ RUN_PER_TICK = 1.0
 
 
 def load(path):
-    s = open(path).read()
-    try: return json.loads(s)
-    except json.JSONDecodeError: return json.loads(re.sub(r'[\x00-\x1f]', ' ', s))
+    with open(path) as f:
+        return json.load(f, strict=False)
 
 
 def facing(yaw):
@@ -39,9 +37,18 @@ def yaw_to(px, pz, tx, tz):
 
 
 def owner(d):
-    on = [k for k, v in [('DEBUGMENU', d.get('debug_open')), ('GAMEOVER', d.get('gameover_active')), ('CINEMATIC', d['cinematic']),
-                         ('DIALOG', d['dialog_open']), ('INVENTORY', d['inventory_open']), ('BOX', d.get('box_open')),
-                         ('DOOR', d['door_active'])] if v]
+    on = [k for k, v in [('DEBUGMENU', d.get('debug_open')), ('GAMEOVER', d.get('gameover_active')),
+                         ('TITLE', d.get('title_active')), ('SETTINGS', d.get('settings_active')),
+                         ('CINEMATIC', d.get('cinematic')), ('DIALOG', d.get('dialog_open')),
+                         ('FILES', d.get('files_open')), ('INVENTORY', d.get('inventory_open')),
+                         ('BOX', d.get('box_open')), ('DOOR', d.get('door_active')),
+                         ('VIDEO', d.get('movie_active')),
+                         ('TYPEWRITER', (d.get('typewriter') or {}).get('active')),
+                         ('COMPUTER', (d.get('computer') or {}).get('active')),
+                         ('STAIRS', bool(d.get('stairs') and d['stairs'].get('active'))) ] if v]
+    if d.get('player_work', {}).get('mode', [0])[0] == 4:
+        # Grab (player mode 4) raises the cinematic bit too; the player input still shakes free.
+        on = ['GRAB'] + [k for k in on if k != 'CINEMATIC']
     return ' '.join(on) if on else 'FREE'
 
 
@@ -136,13 +143,13 @@ def ascii_map(d, cell=4.0, box=None):
 
 
 def wait(d0, auto, live, timeout, flags):
-    """Block until the player is free again (or game over, danger, Yes/No); needs a running autodump."""
-    t0 = time.time(); last = None; ack = 0.0; start_room = d0['room']
+    """Legacy waiter. Never acknowledge dialogue or label a modal owner free."""
+    t0 = time.time(); last = None; start_room = d0['room']
     while time.time() - t0 < timeout:
         try:
             if os.path.getmtime(auto) < t0: time.sleep(0.05); continue  # only fresh autodumps count
             d = load(auto); ctl = d.get('control', {})
-            free = (not d['cinematic'] and not d['dialog_open'] and not d['door_active'] and not d.get('player_scripted')
+            free = (owner(d) == 'FREE' and not d.get('player_scripted')
                     and not ctl.get('steer') and not ctl.get('pending')) or d.get('gameover_active')
             px, _, pz = d['actor']
             near = [e for e in d['enemies'] if not e['inactive'] and e['hp'] > 0 and e.get('work', {}).get('mode', [0])[0] in (1, 2)
@@ -151,13 +158,15 @@ def wait(d0, auto, live, timeout, flags):
                 if 'stop' in flags: open(live, 'a').write("1 run off\n")
                 print("DANGER", [(e['index'], round(math.hypot(e['position'][0] - px, e['position'][2] - pz))) for e in near]); summary(d); return
             if 'room' in flags and d['room'] == start_room and not d.get('gameover_active'): free = False
+            if ctl.get('result') in ('stalled', 'cancelled') and not ctl.get('steer') and not ctl.get('pending'):
+                print('ROUTE ' + ctl['result']); summary(d); return
+            if d.get('dialog_open') and (d.get('dialog_choosing') or d.get('dialog_closable') or d.get('dialog_turnable')):
+                print('CHOICE:' if d.get('dialog_choosing') else 'DIALOG:', d.get('dialog_text', '').replace('\n', ' | ')); summary(d); return
+            if any(d.get(k) for k in ('inventory_open', 'files_open', 'box_open', 'debug_open')):
+                print('OWNER ' + owner(d)); summary(d); return
             if free:
                 if 'stop' in flags: open(live, 'a').write("1 run off\n")
                 print(f"free after {time.time()-t0:.0f}s"); summary(d); return
-            # finished page without a choice: acknowledge once and log the text; Yes/No stays for the model
-            if d['dialog_open'] and (d.get('dialog_closable') or d.get('dialog_turnable')) and not d.get('dialog_choosing') and time.time() - ack > 1.5:
-                open(live, 'a').write("1 confirm\n"); ack = time.time(); print(f"{time.time()-t0:4.0f}s ACK: " + d['dialog_text'].replace('\n', ' | ').strip())
-            if d['dialog_open'] and d.get('dialog_choosing'): print("CHOICE:", d['dialog_text'].replace('\n', ' | ')); summary(d); return
             key = (d['cinematic'], d['dialog_open'], d['hp'], d['room'])
             if key != last: last = key; print(f"{time.time()-t0:4.0f}s cin={d['cinematic']} dlg={d['dialog_open']} hp={d['hp']} {d['room'][:7]}")
         except (json.JSONDecodeError, FileNotFoundError, KeyError): pass

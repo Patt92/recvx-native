@@ -978,6 +978,14 @@ void RoomWorld::bind_enemy_services(){
     // Work haelt sie in root_mtx; ein Kind traegt die des eigenen Aufrufs.
     en.work_matrix=[](const RECVX_ENEMY_WORK* w,float* out16)->int{
         if(!w)return 0;std::memcpy(out16,w->root_mtx,sizeof(w->root_mtx));return 1;};
+    // PEXP0_F(72/80) = EXP_WORK spx/spz (en01.c:7920, en01sub.c:1529): derselbe
+    // Weg wie en19/Hund, der Aktionsbesitzer uebernimmt die Werte nach dem Gegnerpass.
+    en.player_exp0_float_set=[](uint32_t offset,float v){enemy_world->player_exp0_writes_.push_back({offset,v});};
+    // bhSetMotion(plp, add, ...) aus dem Gegnerpass (en01.c:7943), wie en15.player_set_motion.
+    en.player_set_motion=[](RECVX_ENEMY_PLAYER* p,int add)->int{auto* world=enemy_world;
+        if(!world->enemy_player_set(*p)){world->unbound_enemy_.insert("bhSetMotion(plp): Spielerbesitzer fehlt");return -2;}
+        const MotionClip* clip=nullptr;const int r=world->player_set_motion_now(add,clip);
+        world->enemy_player_get(*p);return r;};
     // plp->mlwP->objP[node].pos[0] = pos[2] = 0 (en01sub.c:1532-1534): der
     // Spielerbaum gehoert dem vorhandenen Spielerbesitzer.
     // Der Spielerbaum gehoert dem Spielerbesitzer; der Knotenwert gilt bis zum

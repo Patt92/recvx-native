@@ -9,6 +9,9 @@ In the project folder:
 
 - **macOS (Apple Silicon):** open `Start.command`.
 - **Windows x64:** open `Start.cmd`.
+- **AI play (a language model plays, you watch):** `Start-AI-Play.command` (macOS) or
+  `Start-AI-Play.cmd` (Windows). Endpoint, model and API key go into `.env` in the
+  project folder (untracked); see README, section "Let your AI play the game", details in `docs/AI_PLAY.md`.
 
 The package launchers use the runtime data shipped with each package. No ISO
 is inserted or read during play. A source clone without the local `data/`

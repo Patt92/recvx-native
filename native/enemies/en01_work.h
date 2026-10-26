@@ -585,6 +585,10 @@ typedef struct RECVX_EN01_SERVICES {
        zeile steht auch in en01.c:7643/7755/7767/7928/8956 (dort bisher als
        Luecke gemeldet). */
     void (*pad_on_clear)(uint32_t bits);
+    /* bhSetMotion(plp, add, mtn_md, mtn_tp) auf der Spielersicht (en01.c:7943):
+       der vorhandene Spielerbesitzer wendet die Motion sofort an und schreibt
+       die Sicht zurueck. Rueckgabe wie bhSetMotion, -2 = nicht gebunden. */
+    int (*player_set_motion)(RECVX_ENEMY_PLAYER* p, int add);
 } RECVX_EN01_SERVICES;
 
 /* ---------------------------------------------------------------------------

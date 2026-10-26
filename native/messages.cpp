@@ -9,8 +9,8 @@ Message read_message(const std::vector<std::uint8_t>& data,std::size_t table,uns
     for(unsigned i=0;i<16384;++i,p+=2){const auto code=v.u16(p);out.push_back(code);if(code==0xffff)return out;if(code==0xff03||code==0xff02){p+=2;out.push_back(v.u16(p));++i;}}
     throw std::runtime_error("unterminated message");
 }
-std::string message_text(const Message& text){std::string out;for(std::size_t i=0;i<text.size();++i){const auto c=text[i];if(c==0xffff)break;if(c==0xff00)out+='\n';else if(c==0xff01)out+=' ';else if(c==0xff02){++i;out+='\n';}else if(c==0xff03)++i;else if(c<108)out+=char(c+32);}return out;}
 namespace {std::shared_ptr<const std::vector<std::uint8_t>> item_names;}
+std::string message_text(const Message& text){std::string out;for(std::size_t i=0;i<text.size();++i){const auto c=text[i];if(c==0xffff)break;if(c==0xff00)out+='\n';else if(c==0xff01)out+=' ';else if(c==0xff02){++i;out+='\n';}else if(c==0xff03){++i;if(i<text.size()&&text[i]!=0xffff&&item_names)out+=message_text(item_name_message(text[i]));}else if(c<108)out+=char(c+32);}return out;}
 void bind_item_names(std::vector<std::uint8_t> system_messages){item_names=std::make_shared<const std::vector<std::uint8_t>>(std::move(system_messages));}
 Message item_name_message(unsigned id){if(!item_names)throw std::runtime_error("item-name table (sys->mes_ip) is not bound");return read_message(*item_names,4,id);}
 

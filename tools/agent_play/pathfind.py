@@ -14,13 +14,14 @@ HEIGHT = 16.5
 
 def active_walls(d):
     px, py, pz = d['actor']; floor = d.get('player_floor', 0)
+    height = 17.5 if d.get('player', 0) else HEIGHT
     out = []
     for w in d.get('walls', []):
         if not (w['fl'] & 1) or w['ty'] > 5: continue
         if (w['attr'] & 1) and w['floor'] != floor: continue
         if w['attr'] & 4: continue
         h = w['e'][1] if w['e'][1] != 0 else 1e9
-        if py + HEIGHT < w['p'][1] or py > w['p'][1] + h: continue
+        if py + height < w['p'][1] or py > w['p'][1] + h: continue
         out.append(w)
     return out
 
@@ -65,7 +66,7 @@ class Grid:
                 for i in range(max(i0, 0), min(i1, self.W - 1) + 1):
                     if not self.block[j * self.W + i] and fn(self.x0 + (i + .5) * cell, z): self.block[j * self.W + i] = 1
 
-    def idx(self, x, z): return int((x - self.x0) / self.cell), int((z - self.z0) / self.cell)
+    def idx(self, x, z): return math.floor((x - self.x0) / self.cell), math.floor((z - self.z0) / self.cell)
     def pos(self, i, j): return self.x0 + (i + .5) * self.cell, self.z0 + (j + .5) * self.cell
     def free(self, i, j): return 0 <= i < self.W and 0 <= j < self.H and not self.block[j * self.W + i]
 
@@ -87,6 +88,21 @@ class Grid:
             t = k / n
             if not self.free(int(round(i0 + (i1 - i0) * t)), int(round(j0 + (j1 - j0) * t))): return False
         return True
+
+    def distances(self, sx, sz):
+        """Dijkstra cost (units) from the start cell to every reachable free cell."""
+        s = self.nearest_free(*self.idx(sx, sz))
+        if not s: return {}
+        dist = {s: 0.0}; pq = [(0.0, s)]
+        while pq:
+            c, u = heapq.heappop(pq)
+            if c > dist[u]: continue
+            for di, dj, w in ((1, 0, 1), (-1, 0, 1), (0, 1, 1), (0, -1, 1), (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)):
+                v = (u[0] + di, u[1] + dj)
+                if not self.free(*v): continue
+                if di and dj and not (self.free(u[0] + di, u[1]) and self.free(u[0], u[1] + dj)): continue
+                if c + w < dist.get(v, 1e18): dist[v] = c + w; heapq.heappush(pq, (c + w, v))
+        return {k: v * self.cell for k, v in dist.items()}
 
     def path(self, sx, sz, tx, tz):
         s = self.nearest_free(*self.idx(sx, sz)); g = self.nearest_free(*self.idx(tx, tz))
@@ -112,3 +128,29 @@ class Grid:
             while m > k + 1 and not self.los(cells[k], cells[m]): m -= 1
             pts.append(cells[m]); k = m
         return [self.pos(*p) for p in pts[1:]], dist[g] * self.cell
+
+
+def segment_free(d, a, b, radius, step=.25):
+    """Exact wall test (no raster) along a straight segment at the given body radius."""
+    tests = [_blocked_fn(w, radius)[1] for w in active_walls(d)]
+    n = max(1, int(math.ceil(math.hypot(b[0] - a[0], b[1] - a[1]) / step)))
+    return not any(t(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n) for k in range(n + 1) for t in tests)
+
+
+class GridCache:
+    """One geometry cache per consumer; moving walls invalidate it, not just flags."""
+    def __init__(self):
+        self.key = None
+        self.grid = None
+
+    def get(self, d, cell=1.0, radius=RADIUS):
+        walls = active_walls(d)
+        key = (d['room'], d.get('player_floor', 0), d['actor'][1], cell, radius,
+               tuple((w['i'], w['ty'], w['fl'], w['attr'], w['floor'],
+                      tuple(w['p']), tuple(w['e'])) for w in walls))
+        inside = self.grid is not None and (0 <= self.grid.idx(d['actor'][0], d['actor'][2])[0] < self.grid.W
+                                            and 0 <= self.grid.idx(d['actor'][0], d['actor'][2])[1] < self.grid.H)
+        if key != self.key or not inside:
+            self.grid = Grid(d, cell=cell, radius=radius)
+            self.key = key
+        return self.grid

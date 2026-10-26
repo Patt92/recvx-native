@@ -13,70 +13,29 @@ The project is in active development. It is not yet a finished, fully playable
 release. Platform plans below describe the intended destinations, not a promise
 that every device already runs the game.
 
-## Let your Agent play the game
+## Let your AI play the game
 
-The runtime has a host-side control channel that lets a coding agent (Claude
-Code or any model with a shell) play the real game in the real window, on the
-native GPU backend, while you watch. No emulation, no screen scraping, no
-synthetic input driver: the agent appends lines to a text file and reads the
-engine's own state back as JSON. The game logic is untouched; the channel is
-inactive unless `--control` is given.
+A language model of your choice plays the real game in the normal window while
+you watch. It reads the engine's own state as numbers (no screenshots) and sends
+one action per decision. The game logic is untouched.
 
-```sh
-"build/start/macos-arm64/RECVX Native.app/Contents/MacOS/recvx-runtime" \
-  --data data --mods mods --renderer gpu --enemy-ai on --enemy-grab on \
-  --snapshots build/play/snap --control build/play/live.txt
-```
+1. Create `.env` in the project folder (untracked, never committed):
 
-| Primitive | What it does |
-|---|---|
-| `--control <file>` | Replay syntax, but the file grows while the game runs. New complete lines are read every frame; their tick numbers count from the moment they were read. With no pending lines the simulation holds (scene stays on screen, audio pauses) so the agent never falls behind real time. |
-| `route x z [x z …] [run] [face x z] [then <line>]` | The runtime walks the waypoints itself (turn, walk, next point), then faces a point and runs one follow-up line such as `confirm`. Progress is reported in the state as `control.result` (`moving`/`arrived`/`stalled`). `goto x z` and `face x z` are the single-point forms. |
-| `keys forward run 40` | Raw pad hold; a trailing number is a duration in ticks (30 Hz). Cancels a running route. |
-| `dump <name> [shot]` | Writes `<name>.json` immediately without ending the process; `shot` adds the last frame as BMP. The JSON is the same state block `--state` writes: player, camera, dialog text and choices, inventory, room items, interaction zones (doors/texts/items with position and extent), collision walls and floors, enemies with hp/mode/position, event tasks, door/fade/movie state, route state. |
-| `run on|off|auto [d]` | Real time; `auto` holds again only when nothing is queued and an active enemy is closer than `d`, so cinematics and walks play at full speed while fights wait for the agent. |
-| `autodump <ticks> <name>` | Atomic periodic state file — the live feed the agent reads instead of screenshots. |
-| Debug menu over the channel | `sdl_key down/up F2`, `debug_select <id> <value>`, `confirm`: snapshots (slot 2 for recovery), room/spawn jumps, HP, items, enemy AI/grab/attacks. Lines are delivered while the menu is open and while the game-over screen is up (a snapshot load ends game over). |
+   | Variable | Meaning |
+   |---|---|
+   | `RECVX_LLM_BASE_URL` | OpenAI-compatible endpoint, e.g. `http://localhost:8080/v1` |
+   | `RECVX_LLM_MODEL` | model name |
+   | `RECVX_LLM_API_KEY` | API key, empty for a local server |
 
-The agent works from [work/live-play/PLAYBOOK.md](work/live-play/PLAYBOOK.md)
-(loop, start recipe, interface tables, decision rules, measured constants,
-pitfalls) and the tools in [tools/agent_play/](tools/agent_play/):
-`nav.py` prints the state in 10–20 lines (who owns input, dialog text, zones,
-enemies with line of sight), plans paths over the room's own collision tables
-(`path` → one `route` line), blocks until a scene, dialog, door or route is over
-(`wait`, acknowledging finished dialogue pages and stopping on Yes/No), and
-emits shooting sequences (`fire n [low]`). `stream.py` is a debug stream an
-agent can keep in the background (or hand to a subagent): it reads the live
-state file and logs only changes — room, input owner, dialogue, HP, grabs,
-enemies appearing/closing in/losing sight, items, zones and walls switching —
-and keeps a 15-line `radar.txt` current. Enemy posture (`standing`/`low`/`lying`)
-and ground contact (`ground`/`air`/`under`) come from the engine's own node
-matrices measured against the floor below the enemy, so a downed zombie is
-known to be on the floor and gets a lowered aim. When the next step is unclear,
-`hint.py` peeks into the room script and code, read-only: per-zone texts and
-script blocks with their flag conditions, which wall blocks a path and which
-event opens it, decoded events with the original opcode names, and where an
-opcode is implemented. Screenshots are the last resort. The playbook is
-written for the model, not for a script: there are no canned sequences per room
-— one tool call reads, plans, acts and waits.
+2. Start `Start-AI-Play.command` (macOS) or `Start-AI-Play.cmd` (Windows).
+3. Watch. Every decision is printed and logged to `build/play/driver.log`.
 
-**Cost and efficiency (measured on an M4 Pro, MetalFX spatial 2–3.8x, frame
-interpolation, CRT filter on):** the window idles at ~4–7 % of one core while
-holding; a dump is ~15–60 KB JSON depending on wall count and is read through
-`nav.py`, so one decision costs the model ~10–30 lines of text, not an image.
-Turning is 1310 yaw units per tick (90° = 13 ticks), walking 0.49 units/tick,
-running ~1.0 units/tick; a door transition takes 150–600 ticks, longer
-cinematics 1200–1700 ticks (`run auto` + `wait`, read once). A
-pathfinding call takes ~50 ms. Target: one tool call per action, a room with two
-items and an exit in at most six.
-Screenshots are opt-in and only for checking what the raster shows, never for
-navigation: positions, walls, zones, dialog text and enemy state are already
-numbers.
+Works with llama.cpp, vLLM, LM Studio, Ollama, OpenAI and other compatible
+servers. A coding agent such as Claude Code can also play directly through
+`tools/agent_play/play.py` and `work/live-play/PLAYBOOK.md`.
 
-What the agent cannot do yet: react within a tick (grabs cost ~10 HP each; it
-struggles free with alternating inputs after the fact), see what the collision
-tables do not encode (stairs and pushable objects are in the tables, cosmetic
-geometry is not), or skip a cinematic that the original does not let SELECT skip.
+Details (all options, how the driver stays fast, the control channel, limits):
+[docs/AI_PLAY.md](docs/AI_PLAY.md).
 
 ## A real native port
 

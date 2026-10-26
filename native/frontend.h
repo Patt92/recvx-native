@@ -82,6 +82,10 @@ public:
     static constexpr unsigned title_rows=3;          // CursorMax[0] with ExtraFlag 0: LOAD GAME, NEW GAME, OPTION
     static constexpr unsigned quit_row=title_rows;   // host QUIT row (deviation)
     static constexpr unsigned load_game_cursor=0,new_game_cursor=1,option_cursor=2;
+    // Host-Metrik (--state): Zeilenzahl der Spielmodustafel inkl. Host-QUIT und das Kommando
+    // einer Zeile wie check_button (ModeCommandId, QUIT-Zeile 4). Keine Logik.
+    unsigned rows()const{return cursor_max_+1;}
+    int row_command(unsigned row)const{return row==quit_row?4:row<4?mode_command_id_[row]:-1;}
 private:
     enum class Screen {Title,Controls,Hidden};
     // What the current Adv_BioCvTitle frame displayed (Display* calls of the

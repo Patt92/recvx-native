@@ -10793,10 +10793,15 @@ void recvx_en01_ply_dg01(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
                 root.z = mtx[14];
                 pl->pos.x = root.x;                                  /* :7918 */
                 pl->pos.z = root.z;                                  /* :7919 */
-                /* PEXP0_F(0x48)/PEXP0_F(0x50) (en01.c:7920-7921) sind
-                   Felder des SPIELER-exp0. Der Vertrag hat dafuer keinen
-                   Weg; hier wird nichts erfunden. */
-                en01_gap(w, "plp->exp0+0x48/+0x50 = px/pz (en01.c:7920)");
+                /* PEXP0_F(0x48)/PEXP0_F(0x50) (en01.c:7920-7921) =
+                   EXP_WORK spx/spz des Spielers (player.h). */
+                const RECVX_EN01_SERVICES* en = en01_en();
+                if (en && en->player_exp0_float_set) {
+                    en->player_exp0_float_set(0x48u, pl->pos.x);     /* :7920 */
+                    en->player_exp0_float_set(0x50u, pl->pos.z);     /* :7921 */
+                } else {
+                    en01_gap(w, "plp->exp0+0x48/+0x50 = px/pz (en01.c:7920)");
+                }
             } else {
                 en01_gap(w, "plp->mlwP->owP[0] (en01.c:7917)");
             }
@@ -10827,9 +10832,14 @@ void recvx_en01_ply_dg01(RECVX_ENEMY_WORK* w, RECVX_ENEMY_PLAYER* pl)
             pl->mtn_add = 0;                                         /* :7941 */
             pl->mtn_md |= 0x100u;                                    /* :7942 */
             /* bhSetMotion(pl, pl->mtn_add, pl->mtn_md, pl->mtn_tp)
-               (en01.c:7943): set_motion des Vertrags nimmt einen
-               GEGNER-Work, nicht die Spielersicht. */
-            en01_gap(w, "bhSetMotion(plp, ...) (en01.c:7943)");
+               (en01.c:7943) auf der Spielerbibliothek (mnwP = mnwPb, :7935). */
+            {
+                const RECVX_EN01_SERVICES* en = en01_en();
+                if (en && en->player_set_motion)
+                    en->player_set_motion(pl, (int)pl->mtn_add);
+                else
+                    en01_gap(w, "bhSetMotion(plp, ...) (en01.c:7943)");
+            }
             pl->flg &= ~4u;                                          /* :7944 */
         }
         break;                                                       /* :7946 */

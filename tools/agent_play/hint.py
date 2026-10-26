@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Hints for an agent that does not know the next step: read the room script and the code, targeted and read-only.
 
-Escalation (cheap -> expensive): read the zone text -> `hint.py room` -> `zone` -> `blocked` -> `event/op/grep` -> screenshot.
+Escalation (cheap -> expensive): read zone text -> `hint.py zone` -> `blocked` -> targeted `event/op`.
+Agent play uses telemetry/stream only, never screenshots or desktop/vision observations.
 Reads only data/rooms/*.RDT, native/ and the semantic reference src/ps2/veronica/prog/ (never archived/).
 
   hint.py room   [auto.json]          what is in this room: per zone its message text, item, door target or script

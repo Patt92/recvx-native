@@ -126,6 +126,28 @@ static int t_player_link_pose(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* wp,
     return 1;
 }
 
+/* PlyDG01 (en01.c:7920/7943): PEXP0_F(0x48/0x50) und bhSetMotion(plp). */
+static uint32_t g_exp0_off[4];
+static float    g_exp0_val[4];
+static int      g_exp0_n;
+static int      g_setmtn_n;
+static uint32_t g_setmtn_mtn;
+static int      g_setmtn_add;
+static uint32_t g_setmtn_md;
+static int      g_setmtn_enemy;
+static void t_player_exp0_float_set(uint32_t off, float v)
+{
+    if (g_exp0_n < 4) { g_exp0_off[g_exp0_n] = off; g_exp0_val[g_exp0_n] = v; }
+    ++g_exp0_n;
+}
+static int t_player_set_motion(RECVX_ENEMY_PLAYER* p, int add)
+{
+    ++g_setmtn_n;
+    g_setmtn_mtn = p->mtn_no; g_setmtn_add = add;
+    g_setmtn_md = p->mtn_md; g_setmtn_enemy = (int)p->mtn_enemy;
+    return 0;
+}
+
 static RECVX_ENEMY_SERVICES g_sv;
 static RECVX_EN01_SERVICES  g_en;
 static RECVX_EN01_CONTEXT   g_ctx;
@@ -1050,6 +1072,53 @@ static void test_grab_states(void)
           "PlyDG00 meldet ply_id ausserhalb der Tabelle");
 }
 
+/* bhEne01_PlyDG01 mode3 3 bei frm_no 0 (en01.c:7915-7944): der Spieler steht
+   auf der Wurzelmatrix owP[0], PEXP0_F(0x48/0x50) = spx/spz = px/pz, dann
+   bhSetMotion(plp, mtn_add, mtn_md, mtn_tp) auf Motion 42 der eigenen
+   Bibliothek (mnwP = mnwPb). */
+static void test_ply_dg01_release(void)
+{
+    RECVX_ENEMY_WORK w;
+    RECVX_EN01_EXP0 p;
+    int bound;
+    for (bound = 1; bound >= 0; --bound) {
+        bind_services(0u, 1);
+        if (bound) {
+            g_en.player_exp0_float_set = t_player_exp0_float_set;
+            g_en.player_set_motion     = t_player_set_motion;
+        }
+        reset_logs();
+        g_exp0_n = g_setmtn_n = 0;
+        work_init(&w, &p);
+        memset(&g_player, 0, sizeof(g_player));
+        g_player_bound = 1;
+        g_player.pos.x = 12.5f; g_player.pos.z = -7.25f;
+        g_player.mode3 = 3; g_player.frm_no = 0;
+        g_player.mtn_enemy = 1; g_player.mtn_md = 0x2u;
+        p.flags = 0x4000u;
+        recvx_en01_ply_dg01(&w, &g_player);
+        if (bound) {
+            check_eq(g_exp0_n, 2, "PlyDG01 schreibt PEXP0_F zweimal (en01.c:7920-7921)");
+            check_eq((long long)g_exp0_off[0], 0x48, "erster Wert geht nach spx (0x48)");
+            check_eq((long long)g_exp0_off[1], 0x50, "zweiter Wert geht nach spz (0x50)");
+            check(g_exp0_val[0] == 12.5f && g_exp0_val[1] == -7.25f,
+                  "spx/spz = px/pz aus owP[0] (en01.c:7918-7921)");
+            check_eq(g_setmtn_n, 1, "bhSetMotion(plp) genau einmal (en01.c:7943)");
+            check_eq((long long)g_setmtn_mtn, 42, "bhSetMotion sieht mtn_no 42 (en01.c:7938)");
+            check_eq(g_setmtn_add, 0, "bhSetMotion mit mtn_add 0 (en01.c:7941)");
+            check((g_setmtn_md & 0x100u) != 0, "bhSetMotion sieht mtn_md |= 0x100 (en01.c:7942)");
+            check_eq(g_setmtn_enemy, 0, "bhSetMotion auf der Spielerbibliothek (mnwP = mnwPb, :7935)");
+            check(!gap_seen("plp->exp0+0x48/+0x50"), "keine spx/spz-Luecke mehr");
+            check(!gap_seen("bhSetMotion(plp"), "keine bhSetMotion(plp)-Luecke mehr");
+        } else {
+            check(gap_seen("plp->exp0+0x48/+0x50"), "ohne Dienst bleibt die spx/spz-Luecke sichtbar");
+            check(gap_seen("bhSetMotion(plp"), "ohne Dienst bleibt die bhSetMotion-Luecke sichtbar");
+        }
+        check_eq((int)g_player.mode0, 1, "PlyDG01 gibt den Spieler frei (mode0 1, en01.c:7935)");
+    }
+    g_player_bound = 0;
+}
+
 int main(void)
 {
     /* njSin/njCos liefern null, solange die Tabelle fehlt (ninja_math.c:7). */
@@ -1068,6 +1137,7 @@ int main(void)
     test_damage_states();
     test_b_family();
     test_grab_states();
+    test_ply_dg01_release();
 
     printf("en01_core_test: %d Pruefungen, %d Fehler\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

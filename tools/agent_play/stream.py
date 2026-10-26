@@ -15,7 +15,7 @@ body.contact ground/air/under).
 """
 import json, math, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pathfind import Grid
+from pathfind import GridCache
 from nav import load, owner, enemy_state
 
 args = [a for a in sys.argv[1:] if not a.startswith('--')]
@@ -37,11 +37,9 @@ def bearing(d, x, z):
 
 
 class Sight:
-    def __init__(self): self.key = None; self.grid = None
+    def __init__(self): self.cache = GridCache()
     def los(self, d, x, z):
-        key = (d['room'], tuple(w['fl'] for w in d.get('walls', [])), d.get('player_floor'))
-        if key != self.key: self.key = key; self.grid = Grid(d, cell=1.0, radius=0.6)
-        g = self.grid; px, _, pz = d['actor']
+        g = self.cache.get(d, cell=1.0, radius=0.6); px, _, pz = d['actor']
         return g.los(g.idx(px, pz), g.idx(x, z))
 
 

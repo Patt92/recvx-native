@@ -50,3 +50,6 @@ objdiff.json
 /native/third_party/FidelityFX-SDK/**/*.lib
 /native/third_party/FidelityFX-SDK/**/*.so
 /native/third_party/FidelityFX-SDK/**/.DS_Store
+
+# Local secrets (agent-play LLM endpoint keys)
+.env
