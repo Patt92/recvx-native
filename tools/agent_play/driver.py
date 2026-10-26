@@ -194,6 +194,8 @@ class Driver:
         self.steps = 0
         self.bad_replies = []
         self._points_key, self._points = None, {}  # zone -> [to, face] for the current room and floor
+        self._candidates = {}       # zone -> up to three [to, face] candidates
+        self._failed_points = set() # (room, zone, to) that stalled or triggered nothing
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
         self.last_owner = ''
@@ -585,7 +587,8 @@ class Driver:
             best = min(dist, key=dist.get)
             own = dist.get(zone)
             # Another zone's ready point within 3 units, while the named zone's point is 3x as far: switch.
-            if best != zone and dist[best] < 3 and (own is None or own > 3 * max(dist[best], 1)):
+            # A named zone without its own point (unreachable, other floor) is never switched away from.
+            if best != zone and own is not None and dist[best] < 3 and own > 3 * max(dist[best], 1):
                 zone = best
         if zone not in points:
             return action if zone == action.get('zone') else dict(action, zone=zone)
@@ -614,25 +617,48 @@ class Driver:
 
     def room_points(self, d):
         """Ready standing points for every active zone on this floor, once per room (geometry is fixed;
-        script-switched zones and walls change the key, so the table is rebuilt when they do)."""
-        key = (d.get('room'), d.get('player_floor', 0),
+        script-switched zones and walls change the key, so the table is rebuilt when they do).
+
+        Up to three candidates per zone; a candidate that did not work (route stalled, nothing
+        happened) is skipped from then on in this room, so the next one becomes `go`."""
+        # Points depend on what is reachable from where the player stands: the reachable area (its
+        # first free cell) is part of the key, so crossing a gate or a detector recomputes them.
+        g = self.play.grids.get(d, radius=3.5)
+        reach = g.distances(d['actor'][0], d['actor'][2])
+        area = min(reach) if reach else None
+        key = (d.get('room'), d.get('player_floor', 0), area, len(reach),
                tuple(a.get('flags', 0) & 1 for a in d.get('interactions', [])),
                tuple(w.get('fl', 0) & 1 for w in d.get('walls', [])))
         if self._points_key != key:
-            table = {}
+            candidates = {}
             for a in d.get('interactions', []):
                 if not a.get('flags', 0) & 1 or a.get('floor', 0) != d.get('player_floor', 0):
                     continue
                 if a.get('type') not in (0, 1, 2, 3, 4):
                     continue
                 try:
-                    found = self.play.approaches(d, a, limit=1)
+                    found = self.play.approaches(d, a, limit=3)
                 except PlayError:
                     found = []
                 if found:
-                    table[a['index']] = [found[0]['to'], found[0]['face']]
-            self._points_key, self._points = key, table
-        return self._points
+                    candidates[a['index']] = [[f['to'], f['face']] for f in found]
+            self._points_key, self._candidates = key, candidates
+        room = d.get('room')
+        points = {}
+        for zone, cands in self._candidates.items():
+            usable = [c for c in cands if (room, zone, tuple(c[0])) not in self._failed_points]
+            if usable:
+                points[zone] = usable[0]
+        self._points = points
+        return points
+
+    def point_failed(self, room, action, result):
+        """Remember a go point that did not trigger its zone; the next candidate is used next time."""
+        if action.get('op') != 'interact' or result not in ('stalled', 'no_interaction_observed'):
+            return
+        to = action.get('to')
+        if isinstance(to, list) and len(to) == 2:
+            self._failed_points.add((room, action.get('zone'), tuple(to)))
 
     def with_approaches(self, obs):
         """Give zones a ready `go` point (to, face); zones beyond the nearest five are listed in far_zones."""
@@ -721,11 +747,11 @@ class Driver:
             self.last_owner = owner
             self.remember_texts(obs)
             room_before, progress_before = obs.get('room'), self.progress()
-            blocked = self.repeat_blocked(action, obs)
+            fixed = self.correct(action, obs)
+            blocked = self.repeat_blocked(fixed, obs)
             if blocked:
                 obs, feedback, act_ms = self.play.observe(), dict(result='error', error=blocked), 0.0
             else:
-                fixed = self.correct(action, obs)
                 if fixed.get('zone') != action.get('zone'):
                     entry['zone_corrected'] = [action.get('zone'), fixed.get('zone')]
                 obs, feedback, act_ms = self.act(fixed)
@@ -733,7 +759,10 @@ class Driver:
                     feedback['zone_corrected'] = (f"you named zone {action.get('zone')} but stood for zone "
                                                   f"{fixed.get('zone')}; used zone {fixed.get('zone')}")
                 action = fixed
-                if action.get('op') == 'interact' and feedback['result'] != 'error':
+                if action.get('op') == 'interact' and feedback['result'] in ('stalled', 'no_interaction_observed'):
+                    # The point did not reach the zone: not an examine; try the next candidate next time.
+                    self.point_failed(room_before, action, feedback['result'])
+                elif action.get('op') == 'interact' and feedback['result'] not in ('error', 'interrupted', 'running'):
                     self.record_visit(room_before, action.get('zone'), progress_before, obs, feedback['result'])
             if not entry.get('auto') and fallback:
                 feedback.update(result='error', error='no game action in your last reply; the driver waited instead')

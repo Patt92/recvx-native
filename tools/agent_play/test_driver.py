@@ -765,6 +765,43 @@ class DriverTests(unittest.TestCase):
         self.assertNotIn(11, info)                # no direct message (item box)
         self.assertNotIn(5, info)                 # message 3 asks "Push the switch? Yes No"
 
+    def test_failed_go_point_falls_back_to_the_next_candidate(self):
+        self.two_doors()
+        drv, _ = self.driver([])
+        d = self.play.read()[0]
+        first = drv.room_points(d)[14]
+        cands = drv._candidates[14]
+        self.assertGreaterEqual(len(cands), 2)
+        drv.point_failed('RM_TEST.RDX', dict(op='interact', zone=14, to=first[0]), 'stalled')
+        self.assertEqual(drv.room_points(d)[14], cands[1])
+        # A good result does not mark the point.
+        drv.point_failed('RM_TEST.RDX', dict(op='interact', zone=14, to=cands[1][0]), 'dialog')
+        self.assertEqual(drv.room_points(d)[14], cands[1])
+
+    def test_zone_without_own_point_is_not_switched_to_a_neighbour(self):
+        self.two_doors()
+        drv, _ = self.driver([])
+        points = drv.room_points(self.play.read()[0])
+        north = points[13][0]
+        fixed = drv.correct(dict(op='interact', zone=99, to=north, face=[0, -30]), {})
+        self.assertEqual(fixed['zone'], 99)
+
+    def test_points_follow_the_side_of_a_gate_the_player_is_on(self):
+        # A wall across the room splits it; the doors are on both sides.
+        self.two_doors()
+        self.d['walls'].append(dict(i=9, fl=1, ty=0, attr=0, floor=0, p=[-20, 0, -1], e=[40, 30, 2]))
+        self.d['actor'] = [0, 0, 10]
+        self.write(self.d)
+        drv, _ = self.driver([])
+        south = drv.room_points(self.play.read()[0])
+        self.assertIn(14, south)
+        self.assertNotIn(13, south)
+        self.d['actor'] = [0, 0, -10]
+        self.write(self.d)
+        north = drv.room_points(self.play.read()[0])
+        self.assertIn(13, north)
+        self.assertNotIn(14, north)
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):
