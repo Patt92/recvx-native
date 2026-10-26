@@ -37,6 +37,7 @@ current room and the open puzzle in it ("door i2 locked: need key item; items i3
 | keys | keys [forward,back,left,right,run,aim,attack], ticks 1-90 | raw pad, rarely needed (turning on stairs) |
 | run | mode auto|on, dist 4-60 | auto: game pauses at your decisions when an enemy is within dist |
 | type | text (A-Z, 0-9, max 15), enter (bool, default true) | computer keyboard: types the word and Enter |
+| box | store (inventory slot) or take (box row) | item box: one complete swap; the driver moves cursor and list |
 | wait | ticks 1-300 optional | let the game run (scenes, doors, slow menus) |
 
 Function tools (use them instead of guessing; they cost no game time; at most 3 per decision, then
@@ -56,6 +57,8 @@ zones: nearest 5 {i, kind door|item|text|stairs, at, d, destination, item presen
 back}. `go` is a ready standing point: interact with exactly these to/face. `back` true = this door leads to
 the room you just came from (came_from); do not take it unless that room still has something to do.
 typewriter (save screen): {mode, phase, text, slot, slot_used, highlighted Yes|No}.
+box (item box open): {mode inventory|list, slot, at, at_item, contents [[row, name, count]], empty_rows,
+refused}. `refused` = the game's reason why a swap was refused (e.g. what may be stored here).
 computer (terminal): {screen [lines], waits printing|confirm|keyboard|script, key, typed, free, cancel_exits}.
 `free` = letters still allowed in the password field (shown as \ on screen). A wrong password closes the terminal.
 document: text of the open file/document page (FILES). menu_text: item description or menu message.
@@ -88,8 +91,10 @@ damage, stalled, interrupted, no_interaction_observed, gameover, error (with mes
    (menu.equipped true -> do not Equip). Reload: on Handgun Bullets choose Combine, move to Handgun,
    confirm. Heal: on Green Herb choose Use. Leave: cancel until navigation, left until cursor 0, confirm.
    If menu.locked is true, wait.
-6. Item box (BOX): confirm on an inventory slot picks it, choose an EMPTY box row (down), confirm stores
-   it. cancel closes.
+6. Item box (BOX): use `box`, not single presses. Store: {"op":"box","store":<inv slot>}. Take:
+   {"op":"box","take":<box row>}. One swap per action; check `contents`/`inv` after it. If `refused` is
+   set, read it, press cancel once (back to the inventory) and store something else. Leave the box with
+   cancel when mode is inventory. Store only what you do not need now (or what a text asks for).
 7. Puzzles: when a text says something is locked or needed, call `hint zone i` for that zone before
    walking anywhere. Do not wander.
 8. Saving (TYPEWRITER) costs an Ink Ribbon and time. Save only after real progress (several new rooms)

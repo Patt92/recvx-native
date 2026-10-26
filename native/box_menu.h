@@ -30,6 +30,11 @@ public:
     unsigned arrows()const{return selecting_?(arrows_?arrows_:3u):0u;}
     // Slide in/out running: ItemBox ignores the pad while statusflg 0x40 is set.
     bool moving()const{return active_&&slide_.moving();}
+    // Host metrics (--state): list mode (testmode 2), EXIT plate, pending scroll, refusal message.
+    bool selecting()const{return selecting_;}
+    bool exit_selected()const{return exit_;}
+    bool scrolling()const{return selecting_&&(number_!=0||wait_!=0);}
+    unsigned note()const{return note_;}
     void reset(){active_=false;closing_=false;closed_=false;exit_=exit_pressed_=false;exit_wait_=0;note_=0;selecting_=false;
         ips1_=ipsdisp_=0;cell_=2;number_=flag_=0;wait_=keywait_=0;boxwait_=4;row_shift_=0.f;arrows_=0;}
 private:

@@ -170,6 +170,27 @@ def computer_view(c):
     return view
 
 
+def box_view(d):
+    """Item box (box_menu.cpp): pick an inventory slot, confirm opens the list (selecting), up/down
+    scroll it, the middle row `at` is the one confirm swaps with; cancel steps back."""
+    rows = d.get('box_items') or []
+    index = d.get('box_index', 0)
+    view = dict(mode='list' if d.get('box_selecting') else 'inventory', at=index, slot=d.get('menu_selected'))
+    if rows:
+        view['contents'] = [[i, name, v & 0xffff] for i, (v, name) in enumerate(rows) if v]
+        view['empty_rows'] = sum(1 for v, _ in rows if not v)
+        if 0 <= index < len(rows):
+            v, name = rows[index]
+            view['at_item'] = name if v else 'empty'
+    if d.get('box_exit'):
+        view['exit'] = True
+    if d.get('box_scrolling'):
+        view['scrolling'] = True
+    if d.get('box_note'):
+        view['refused'] = d['box_note']
+    return view
+
+
 def compact(d, age, grid_cache=None):
     """Bound geometry/enemy output, preserve full current dialogue for the decision."""
     px, _, pz = d['actor']
@@ -216,7 +237,7 @@ def compact(d, age, grid_cache=None):
     if d.get('files_open'):
         result['file'] = [d.get('file_number'), d.get('file_page'), d.get('file_pages')]
     if d.get('box_open'):
-        result['box_base'] = d.get('box_base')
+        result['box'] = box_view(d)
     if d.get('title_active'):
         result['title'] = dict(mode=d.get('title_mode'), stage=d.get('title_stage'), cursor=d.get('title_cursor'),
                                entry=d.get('title_entry'), entries=d.get('title_entries'),
@@ -571,13 +592,118 @@ class Play:
             line += ' then confirm'
         return line
 
+    def box_target(self, d, action):
+        """Validate a box action and return (inventory slot, box row) for the swap (box_menu.cpp)."""
+        if not d.get('box_open') or d.get('box_selecting') or d.get('box_exit'):
+            raise PlayError('box needs the open box with the cursor in the inventory (cancel back first)')
+        rows = d.get('box_items') or []
+        if not rows:
+            raise PlayError('box contents not exported by this runtime; restart the game')
+        items = d.get('items', [])
+        store, take = action.get('store'), action.get('take')
+        if (store is None) == (take is None):
+            raise PlayError('box takes exactly one of store (inventory slot) or take (box row)')
+        if store is not None:
+            if not isinstance(store, int) or not 1 <= store < len(items) or not items[store]:
+                raise PlayError('store must be an occupied inventory slot (inv[][0])')
+            row = next((i for i, (v, _) in enumerate(rows) if not v), None)
+            if row is None:
+                raise PlayError('box is full')
+            return store, row
+        if not isinstance(take, int) or not 0 <= take < len(rows) or not rows[take][0]:
+            raise PlayError('take must be an occupied box row (box.contents[][0])')
+        # Taking swaps into an empty inventory slot (ItemBoxChange refuses a full pack with its own text).
+        slot = next((i for i in range(2, len(items)) if not items[i]), None)
+        if slot is None:
+            raise PlayError('inventory full: store something first')
+        return slot, take
+
+    def box_act(self, action, seconds):
+        """Drive one box swap against the live cursor: each press is checked before the next one."""
+        started = time.monotonic()
+        with self.exclusive():
+            d0, _, _ = self.read()
+            slot, row = self.box_target(d0, action)
+            def press(line, settle=.12):
+                before = self.read()[1]
+                self.append([(1, line)])
+                limit = time.monotonic() + 1.0
+                while time.monotonic() < limit:
+                    d, stamp, _ = self.read()
+                    if stamp != before and not d.get('menu_locked') and not d.get('box_scrolling'):
+                        time.sleep(settle)
+                        return self.read()[0]
+                    time.sleep(.02)
+                return self.read()[0]
+            d = d0
+            for _ in range(12):  # inventory cursor: one move at a time, the game decides where it lands
+                here = d.get('menu_selected')
+                if here == slot:
+                    break
+                moves = self.box_slot_moves(d, here, slot)
+                if not moves:
+                    raise PlayError(f'cannot reach inventory slot {slot} from {here}')
+                d = press(moves[0])
+            if d.get('menu_selected') != slot:
+                raise PlayError(f'inventory cursor stays at {d.get("menu_selected")}, wanted {slot}')
+            d = press('confirm')
+            if not d.get('box_selecting'):
+                raise PlayError('box list did not open')
+            count = len(d.get('box_items') or []) or 32
+            for _ in range(count):
+                at = d.get('box_index', 0)
+                if at == row:
+                    break
+                up = (at - row) % count
+                key = 'forward' if up <= count - up else 'back'
+                d = press(f'keys {key} 1')
+            if d.get('box_index') != row:
+                raise PlayError(f'box list stays at row {d.get("box_index")}, wanted {row}')
+            press('confirm', settle=.3)
+            output = self.observe()
+            output['result'] = 'refused' if (output.get('box') or {}).get('refused') else 'swapped'
+            output['elapsed_ms'] = round((time.monotonic() - started) * 1000)
+            return output
+
+    def box_slot_moves(self, d, here, slot):
+        """Cursor moves between inventory slots, using the same grid rules as the status menu."""
+        if here == slot:
+            return []
+        from collections import deque
+        seen, queue = {here: []}, deque([here])
+        while queue:
+            at = queue.popleft()
+            for m in ('up', 'down', 'left', 'right'):
+                nxt = self.slot_step(d, at, m)
+                if nxt is not None and nxt not in seen:
+                    seen[nxt] = seen[at] + [m]
+                    if nxt == slot:
+                        return seen[nxt]
+                    queue.append(nxt)
+        return None
+
+    @staticmethod
+    def slot_step(d, slot, move):
+        """Inventory grid: two columns, slot 1 is the equipment cell above; rows of two (2,3), (4,5), ..."""
+        items = d.get('items', [])
+        last = len(items) - 1
+        if move == 'left' and slot >= 2 and slot % 2 == 1:
+            return slot - 1
+        if move == 'right' and slot >= 2 and slot % 2 == 0 and slot + 1 <= last:
+            return slot + 1
+        if move == 'up':
+            return 1 if slot in (2, 3) else (slot - 2 if slot > 3 else None)
+        if move == 'down':
+            return 2 if slot == 1 else (slot + 2 if slot + 2 <= last else None)
+        return None
+
     def compile(self, d, action):
         op = action.get('op')
         allowed = {'press': {'op', 'key'}, 'move': {'op', 'to', 'run', 'face', 'danger'},
                    'interact': {'op', 'zone', 'to', 'run', 'face', 'danger'},
                    'keys': {'op', 'keys', 'ticks'}, 'fire': {'op', 'shots', 'low', 'target'},
                    'shake': {'op', 'presses', 'then'}, 'run': {'op', 'mode', 'dist'},
-                   'type': {'op', 'text', 'enter'}}
+                   'type': {'op', 'text', 'enter'}, 'box': {'op', 'store', 'take'}}
         if op not in allowed or set(action)-allowed[op]:
             raise PlayError('unknown action or arguments')
         if op == 'press':
@@ -603,6 +729,8 @@ class Play:
             return [(1, self.route(d, target, run=action.get('run', True), face=face,
                                    confirm=op == 'interact', danger=action.get('danger', True),
                                    near=self.near_for(a, target, face) if op == 'interact' else 0.0))]
+        if op == 'box':
+            raise PlayError('internal: box runs through box_act')
         if op == 'type':
             c = d.get('computer')
             if not (isinstance(c, dict) and c.get('active') and computer_view(c)['waits'] == 'keyboard'):
@@ -677,7 +805,7 @@ class Play:
                 return [(1, fire)]
             e = min(enemies, key=lambda e: math.hypot(e['position'][0] - d['actor'][0], e['position'][2] - d['actor'][2]))
             return [(1, f"face {e['position'][0]:.4f} {e['position'][2]:.4f} then {fire}")]
-        raise PlayError('unknown action; use move/interact/press/type/keys/fire/shake/run/wait')
+        raise PlayError('unknown action; use move/interact/press/type/box/keys/fire/shake/run/wait')
 
     @staticmethod
     def compile_wait(action):
@@ -693,6 +821,10 @@ class Play:
         started = time.monotonic()
         if not isinstance(action, dict) or not isinstance(action.get('op'), str):
             raise PlayError('action must be an object with op')
+        if action.get('op') == 'box':
+            if set(action) - {'op', 'store', 'take'}:
+                raise PlayError('unknown action or arguments')
+            return self.box_act(action, seconds)
         if not 0 < seconds <= 8:
             raise PlayError('action wait budget must be >0 and <=8 seconds')
         with self.exclusive():

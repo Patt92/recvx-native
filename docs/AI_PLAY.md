@@ -64,6 +64,7 @@ How the driver keeps it fast:
 | Memory for texts | The last texts the game showed travel along as `recent_texts`, so a hint read on one page survives the next screen. `tips` adds facts derived from the state: the game opened the menu on purpose after a text, or the text names an item the player carries that is not equipped. |
 | Computed points win | An `interact` on a zone with a `go` point uses that point; the model picks the zone, the geometry picks where to stand. |
 | No endless waiting | A terminal that waits for a button ends a `wait`; if several waits change nothing the model is asked anyway (`unchanged_for`). |
+| Item box | The open box shows its contents with names, the row under the list cursor and the game's refusal text. `{"op":"box","store":slot}` / `{"op":"box","take":row}` performs one swap; each cursor and list step is checked against the live state before the next one. |
 | Save screen | `typewriter.highlighted` names the preselected Yes/No (saving over a used slot starts on No). |
 | Robust replies | The first JSON object with `"op"` is taken (code fences and prose are tolerated); a rejected action goes back to the model as `error`. |
 

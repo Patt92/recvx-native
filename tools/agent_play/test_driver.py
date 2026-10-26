@@ -469,6 +469,76 @@ class DriverTests(unittest.TestCase):
         drv.rooms_since_save = {'a', 'b', 'c'}
         self.assertTrue(any('reasonable' in t for t in drv.tips(obs, '')))
 
+    def box_state(self, **kw):
+        d = state()
+        d.update(box_open=True, inventory_open=True, box_selecting=False, box_exit=False, box_index=0,
+                 menu_selected=2, items=[0, (55 << 16) | 1, (145 << 16) | 1, (12 << 16) | 15] + [0] * 8,
+                 box_items=[[(9 << 16) | 15, 'Handgun']] + [[0, '']] * 31)
+        d.update(kw)
+        return d
+
+    def test_box_view_names_rows_and_refusal(self):
+        from play import compact
+        view = compact(self.box_state(box_index=0, box_note="No need to deposit\nthis since it's\nnot metal."), 0)['box']
+        self.assertEqual(view['contents'], [[0, 'Handgun', 15]])
+        self.assertEqual(view['empty_rows'], 31)
+        self.assertEqual(view['at_item'], 'Handgun')
+        self.assertIn('not metal', view['refused'])
+        self.assertEqual(compact(self.box_state(box_selecting=True), 0)['box']['mode'], 'list')
+
+    def test_box_target_picks_empty_row_or_free_slot_and_rejects_bad_input(self):
+        d = self.box_state()
+        self.assertEqual(self.play.box_target(d, dict(store=3)), (3, 1))
+        self.assertEqual(self.play.box_target(d, dict(take=0)), (4, 0))
+        for bad, msg in ((dict(store=7), 'occupied inventory'), (dict(take=5), 'occupied box row'),
+                         (dict(store=3, take=0), 'exactly one'), (dict(), 'exactly one')):
+            with self.assertRaisesRegex(Exception, msg):
+                self.play.box_target(d, bad)
+        with self.assertRaisesRegex(Exception, 'cancel back first'):
+            self.play.box_target(self.box_state(box_selecting=True), dict(store=3))
+        full = self.box_state(box_items=[[(9 << 16) | 1, 'X']] * 32)
+        with self.assertRaisesRegex(Exception, 'box is full'):
+            self.play.box_target(full, dict(store=3))
+
+    def test_box_swap_follows_the_live_cursor(self):
+        """Fixture runtime that moves the cursor and the list like box_menu.cpp, one line at a time."""
+        d = self.box_state(menu_selected=1)
+        self.write(d)
+        stop = threading.Event()
+        def runtime():
+            seen = 0
+            while not stop.is_set():
+                lines = self.controls().splitlines()
+                for line in lines[seen:]:
+                    act = line.split(' ', 1)[1]
+                    if act == 'down' and not d['box_selecting']:
+                        d['menu_selected'] = 2 if d['menu_selected'] == 1 else d['menu_selected'] + 2
+                    elif act == 'right' and not d['box_selecting']:
+                        d['menu_selected'] += 1
+                    elif act == 'confirm' and not d['box_selecting']:
+                        d['box_selecting'] = True
+                    elif act.startswith('keys back'):
+                        d['box_index'] = (d['box_index'] + 1) % 32
+                    elif act.startswith('keys forward'):
+                        d['box_index'] = (d['box_index'] - 1) % 32
+                    elif act == 'confirm':
+                        s, r = d['menu_selected'], d['box_index']
+                        d['items'][s], d['box_items'][r] = d['box_items'][r][0], [d['items'][s], 'Bullets']
+                        d['box_selecting'] = False
+                seen = len(lines)
+                self.write(d)
+                stop.wait(.02)
+        thread = threading.Thread(target=runtime); thread.start()
+        try:
+            result = self.play.act(dict(op='box', store=3), 4)
+        finally:
+            stop.set(); thread.join()
+        self.assertEqual(result['result'], 'swapped')
+        self.assertEqual(d['items'][3], 0)
+        self.assertEqual(d['box_items'][1][0], (12 << 16) | 15)
+        self.assertEqual([l.split(' ', 1)[1] for l in self.controls().splitlines()],
+                         ['down', 'right', 'confirm', 'keys back 1', 'confirm'])
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):
