@@ -66,6 +66,10 @@ unchanged_for n (in the result): n waits in a row changed nothing; the game wait
 seen/got on a zone, done_here: zones you already examined in this room, how often and what they said.
 Prefer zones without `seen`. Examining a zone again only makes sense after something changed (new item,
 a switch, a door opened); the driver refuses a third examine without such a change.
+events_explained: when a room event just ran, what it did (texts, voice-only lines you cannot hear,
+items, doors) and why it ran (its conditions, and items you carry that trigger it). A voice line has no
+text: the explanation is your only way to know why the game reacted. If the cause is an item you carry
+and the event blocks you, put that item away (item box) or use it.
 recent_texts: the last texts the game showed (newest last); a hint on an earlier page is still there.
 tips: facts derived from the state that you must act on (e.g. the game opened the menu on purpose).
 far_items: item zones further away. Collect every item that is present.

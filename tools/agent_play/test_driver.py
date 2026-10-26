@@ -582,6 +582,55 @@ class DriverTests(unittest.TestCase):
         self.assertNotIn('route', self.controls())
         self.assertIn('cancel', self.controls())
 
+    def test_why_reads_any_room_event_from_the_script(self):
+        import os
+        import hint
+        rooms = os.path.join(hint.ROOT, 'data', 'rooms')
+        if not os.path.isdir(rooms):
+            self.skipTest('no exported room data')
+        explained = 0
+        for name in ('RM_0000.RDX', 'RM_0080.RDX', 'RM_0090.RDX'):
+            room = hint.Room(name)
+            for script in room.scripts():
+                if not script.startswith('event'):
+                    continue
+                text = hint.why(room, int(script[5:]), dict(room=name, items=[0]), limit=900)
+                self.assertTrue(text.startswith(f'event {script[5:]} does:'), text)
+                self.assertLessEqual(len(text), 904)
+                explained += 1
+        self.assertGreater(explained, 10)
+        # A condition that comes from carried items names the ones in the inventory, whatever they are.
+        room = hint.Room('RM_0090.RDX')
+        carried = None
+        for script in room.scripts():
+            if script.startswith('event'):
+                n = int(script[5:])
+                text = hint.why(room, n, dict(room='RM_0090.RDX', items=[0] + [(i << 16) | 1 for i in range(1, 12)]))
+                if 'you carry ' in text and 'you carry none' not in text:
+                    carried = text
+                    break
+        self.assertIsNotNone(carried)
+
+    def test_started_event_is_explained_once_per_room_visit(self):
+        from unittest import mock
+        import hint
+        drv, _ = self.driver([])
+        calls = []
+        def why(room, n, state, limit=0):
+            calls.append(n)
+            return f'event {n} does: text "x"'
+        self.d['events'] = [3]
+        self.write(self.d)
+        with mock.patch.object(hint, 'why', why), mock.patch.object(hint, 'Room', lambda name: name):
+            drv.watch_events()
+            self.d['events'] = [3, 3, 3, 5]; self.write(self.d)
+            drv.watch_events()
+            self.assertEqual(calls, [3, 5])
+            self.assertEqual(len(drv.pending_events), 2)
+            self.d['room'] = 'RM_OTHER.RDX'; self.d['events'] = [3]; self.write(self.d)
+            drv.watch_events()
+            self.assertEqual(calls, [3, 5, 3])
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):

@@ -10,6 +10,8 @@ Reads only data/rooms/*.RDT, native/ and the semantic reference src/ps2/veronica
   hint.py blocked x z [auto.json]     why there is no path: which wall blocks, which script events open it
   hint.py event n [room]              room event n decoded (original opcode names, texts, items, flags)
   hint.py msg n [room]                room message n
+  hint.py why n [auto.json]           why room event n runs: its start conditions, what sets those flags
+                                      (items you carry), and what the event does (texts, voice, items)
   hint.py op <hex|bhName>             where a script opcode is implemented (port and original reference)
   hint.py grep <regex>                bounded search in native/ and src/ps2/veronica/prog/ (max 40 hits)
 """
@@ -223,6 +225,129 @@ def cmd_grep(pat):
     if len(r) > 40: print(f'... {len(r) - 40} more')
 
 
+CONDITION_OPS = {0x04, 0x06, 0x07, 0x0d, 0x0e, 0x10, 0x11}  # bhCk bhCmpB bhCmpW bhDieCk bhItmCk bhUseItemCheck bhPlItemCheck
+
+
+def enclosing_conditions(cmds, k):
+    """Conditions of the IF blocks around command k: [(negated, [condition commands])], innermost first.
+
+    By byte range as event.c runs it: bhIfelCk at o with length L sends a failed test to o+2+L, so its
+    true part is [o+2, o+L) with a bhEndif or bhElseCk at o+L; a bhElseCk at e with length Le skips
+    [e+2, e+Le), its false part."""
+    at = cmds[k][0]
+    by_offset = {o: c for o, _, c in cmds}
+    out = []
+    for j in range(k - 1, -1, -1):
+        o, _, c = cmds[j]
+        if c[0] != 0x01:
+            continue
+        end = o + c[1]
+        negated = None
+        if o + 2 <= at < end:
+            negated = False
+        else:
+            tail = by_offset.get(end)
+            if tail is not None and tail[0] == 0x02 and end + 2 <= at < end + tail[1]:
+                negated = True
+        if negated is None:
+            continue
+        conds = []
+        for o2, _, c2 in cmds[j + 1:]:
+            if c2[0] not in CONDITION_OPS:
+                break
+            conds.append(c2)
+        out.append((negated, conds))
+    return out
+
+
+def inventory_ids(state):
+    return {(v >> 16) & 255 for v in (state or {}).get('items', [])[1:] if v}
+
+
+def condition_holds(c, state):
+    """True/False for flag tests with a known current value, None otherwise."""
+    if c[0] == 0x04:
+        now = flag_now(state, c[1], (c[2] | (c[3] << 8)) & 0x3ff)
+        return None if now == '?' else now == 1 - c[5]
+    if c[0] == 0x11:
+        return c[1] in inventory_ids(state)
+    return None
+
+
+def why(room, n, state, limit=1800):
+    """Explain room event n from the script alone: what it does, the start that applies now, its cause."""
+    carried = inventory_ids(state)
+    starts = []
+    for script in room.scripts():
+        cmds = list(room.commands(script))
+        for k, (o, d, c) in enumerate(cmds):
+            if c[0] == 0x14 and c[3] == n:
+                starts.append((script, o, enclosing_conditions(cmds, k)))
+    # What the event does: texts, voice, items first; walls and zones summarised.
+    said, other, walls_open, walls_close, zones = [], [], [], [], 0
+    name = f'event{n}'
+    if name in room.scripts():
+        for o, d, c in room.commands(name):
+            if c[0] == 0x1f and not c[1]:
+                text = ' '.join(room.message(c[2]).replace('|', ' ').split())
+                item = f'text "{text}"' if text else 'a voice-only line (no text in the game data)'
+                if item not in said:
+                    said.append(item)
+            elif c[0] == 0x19 and 'voice' not in ' '.join(said):
+                said.append('a voice line')
+            elif c[0] in (0xb2, 0xc2):
+                said.append(f'gives {ITEMS.get(c[1], c[1])}')
+            elif c[0] == 0x10:
+                said.append(f'uses {ITEMS.get(c[1], c[1])}')
+            elif c[0] == 0x0a:
+                (walls_close if not c[2] else walls_open).append(f'w{c[1]}')
+            elif c[0] in (0x0b, 0x25):
+                zones += 1
+            elif c[0] == 0x14:
+                other.append(f'starts event {c[3]}')
+    if any('voice-only' in x for x in said):
+        said = [x for x in said if x != 'a voice line']
+    does = said + other
+    if walls_open:
+        does.append('opens walls ' + ','.join(walls_open))
+    if walls_close:
+        does.append('closes walls ' + ','.join(walls_close))
+    if zones:
+        does.append(f'switches {zones} zones')
+    lines = [f'event {n} does: ' + ('; '.join(does) if does else 'nothing visible (camera/model/flags only)')]
+    if not starts:
+        lines.append('started by a scene, door or the system, not by a condition in this room\'s scripts')
+    else:
+        # The start whose flag tests hold now explains what just happened best.
+        def score(st):
+            tests = [condition_holds(c, state) for neg, conds in st[2] for c in conds if not neg]
+            return sum(1 for t in tests if t is True) - sum(1 for t in tests if t is False)
+        script, o, blocks = max(starts, key=score)
+        conds = []
+        flags = set()
+        for negated, cs in blocks:
+            for c in cs:
+                conds.append(('not ' if negated else '') + annotate(room, c, state).split('-> ')[-1].replace('if ', ''))
+                if c[0] == 0x04 and not negated:
+                    flags.add((c[1], (c[2] | (c[3] << 8)) & 0x3ff, 1 - c[5]))
+        lines.append(f'runs from {script} when: ' + ('; '.join(conds) if conds else 'always (no condition)'))
+        for m, b, v in sorted(flags):
+            items, setters = set(), set()
+            for scr in room.scripts():
+                cmds = list(room.commands(scr))
+                for k, (o2, d2, c2) in enumerate(cmds):
+                    if c2[0] == 0x05 and c2[1] == m and ((c2[2] | (c2[3] << 8)) & 0x3ff) == b and 1 - c2[5] == v:
+                        setters.add(scr)
+                        for _, cs in enclosing_conditions(cmds, k):
+                            items |= {x[1] for x in cs if x[0] in (0x10, 0x11)}
+            if items:
+                have = sorted(ITEMS.get(i, str(i)) for i in items & carried)
+                lines.append(f'cause F[{m}:{b}]={v}: set by {", ".join(sorted(setters))} while you carry any of {len(items)} '
+                             f'items' + (f'; you carry {", ".join(have)}' if have else '; you carry none'))
+    text = '\n'.join(lines)
+    return text if len(text) <= limit else text[:limit] + ' ...'
+
+
 def main():
     a = sys.argv[1:]; auto = os.path.join(ROOT, 'build/play/auto.json')
     if not a: print(__doc__); return
@@ -233,6 +358,8 @@ def main():
     elif c == 'event':
         st = load_state(auto) if os.path.exists(auto) else None; room = Room(a[2] if len(a) > 2 else st['room'])
         for o, d, cc in room.commands(f'event{a[1]}'): print(f"0x{o:x} {'  ' * max(d, 0)}{annotate(room, cc, st)}")
+    elif c == 'why':
+        st = load_state(a[2] if len(a) > 2 else auto); print(why(Room(st['room']), int(a[1]), st))
     elif c == 'msg': room = Room(a[2] if len(a) > 2 else load_state(auto)['room']); print(room.message(int(a[1])))
     elif c == 'op': cmd_op(a[1])
     elif c == 'grep': cmd_grep(a[1])

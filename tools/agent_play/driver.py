@@ -31,7 +31,7 @@ from play import Play, PlayError  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PROMPT = HERE / 'system_prompt.md'
-HINT_CMDS = ('room', 'zone', 'blocked', 'event', 'msg')
+HINT_CMDS = ('room', 'zone', 'blocked', 'event', 'msg', 'why')
 # Owners in which the game plays by itself; asking the model there only costs time.
 PASSIVE = {'CINEMATIC', 'DOOR', 'VIDEO'}
 # Observation fields the model does not need for a decision.
@@ -45,7 +45,8 @@ TOOLS = [
     {'type': 'function', 'function': {
         'name': 'hint',
         'description': 'Read-only room/script lookup. room: all zones with text/item/door; zone i: what it does '
-                       'and which flags gate it; blocked x z: why no path; event n / msg n: script / message.',
+                       'and which flags gate it; blocked x z: why no path; why n: why event n runs (conditions, '
+                       'items you carry that trigger it, its texts/voice); event n / msg n: script / message.',
         'parameters': {'type': 'object', 'properties': {
             'cmd': {'type': 'string', 'enum': list(HINT_CMDS)},
             'args': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['cmd']}}},
@@ -181,6 +182,10 @@ class Driver:
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
         self.last_owner = ''
+        self.tasks_seen = set()    # room events running at the last observation
+        self.dispatched_seen, self.events_room = 0, None
+        self.reported = set()      # events explained during this room visit (scripts restart some every pass)
+        self.pending_events = []   # explanations to hand over with the next decision
         # Zone memory per room: what an examine gave and the progress state at that time, so the model
         # sees what it already did and a repeat without anything new is refused.
         self.visits = {}           # room -> zone -> dict(n, got, sig)
@@ -203,7 +208,7 @@ class Driver:
                 if cmd not in HINT_CMDS:
                     return 'error: cmd must be one of ' + ', '.join(HINT_CMDS)
                 argv = [str(a) for a in args.get('args') or []]
-                if cmd in ('room', 'zone', 'blocked'):
+                if cmd in ('room', 'zone', 'blocked', 'why'):
                     argv.append(str(self.play.auto))
                 elif cmd in ('event', 'msg') and len(argv) == 1:
                     # hint.py would read the room from build/play/auto.json; use this driver's state.
@@ -281,6 +286,9 @@ class Driver:
         payload = dict(feedback, state=trim(obs))
         if self.texts:
             payload['recent_texts'] = self.texts[-4:]
+        if self.pending_events:
+            payload['events_explained'] = self.pending_events
+            self.pending_events = []
         tips = self.tips(obs, previous_owner)
         if tips:
             payload['tips'] = tips
@@ -428,6 +436,30 @@ class Driver:
         obs['done_here'] = [dict(i=i, n=v['n'], got=v['got']) for i, v in sorted(log.items())]
         return obs
 
+    def watch_events(self):
+        """Explain room events that just started and have content (text, voice, items, doors)."""
+        d, _, _ = self.play.read()
+        room = d.get('room')
+        now = {t.get('event') for t in d.get('event_tasks') or [] if isinstance(t, dict)}
+        # `events` is the runtime's list of dispatched events; it grows, so short events are not missed.
+        dispatched = d.get('events') or []
+        if len(dispatched) < self.dispatched_seen or room != self.events_room:
+            self.dispatched_seen = 0 if room != self.events_room else len(dispatched)
+        started = set(dispatched[self.dispatched_seen:]) | (now - self.tasks_seen)
+        if room != self.events_room:
+            self.reported = set()
+        self.dispatched_seen, self.events_room = len(dispatched), room
+        for n in sorted(started - self.reported):
+            self.reported.add(n)
+            try:  # fresh each visit: the cause names the items carried now
+                import hint
+                text = hint.why(hint.Room(room), n, d, limit=900)
+            except Exception as e:  # a script the decoder cannot read must not stop play
+                text = f'event {n}: no explanation ({type(e).__name__})'
+            if 'does: nothing visible' not in text and 'no explanation' not in text and text not in self.pending_events:
+                self.pending_events = (self.pending_events + [text])[-2:]
+        self.tasks_seen = now
+
     def correct(self, action, obs):
         """interact on a zone with a computed point: use it unless the model's point is that point.
 
@@ -514,6 +546,7 @@ class Driver:
             self.idle_waits = self.idle_waits + 1 if view == self.idle_view else 0
             self.idle_view = view
             self.track_saves(obs)
+            self.watch_events()
             tw = obs.get('typewriter') or {}
             if passive(obs) and self.idle_waits < 4:
                 action, entry = {'op': 'wait'}, dict(auto=True)
