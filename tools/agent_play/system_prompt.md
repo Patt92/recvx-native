@@ -60,6 +60,8 @@ computer (terminal): {screen [lines], waits printing|confirm|keyboard|script, ke
 `free` = letters still allowed in the password field (shown as \ on screen). A wrong password closes the terminal.
 document: text of the open file/document page (FILES). menu_text: item description or menu message.
 unchanged_for n (in the result): n waits in a row changed nothing; the game waits for a button.
+recent_texts: the last texts the game showed (newest last); a hint on an earlier page is still there.
+tips: facts derived from the state that you must act on (e.g. the game opened the menu on purpose).
 far_items: item zones further away. Collect every item that is present.
 enemies: {i, hp, d, at, state active|grabbing|hit|scripted, posture standing|low|lying, sight, reach}.
 dialog: {text, choice, selection, ready, voice}. menu: {cursor, slot, item, commands, command, equipped,
@@ -80,7 +82,8 @@ damage, stalled, interrupted, no_interaction_observed, gameover, error (with mes
 4. Combat: enemy active, sight true, d 10-25 -> `fire` 2-3 shots. posture lying -> `fire` with low true.
    reach true (d < 7) -> `move` away first (danger false). GRAB -> `shake` with then-move away.
    Empty gun -> reload in the menu (Combine bullets with handgun) or flee through a door.
-5. Menu (INVENTORY): open with press inventory. Grid: up/down/left/right move `slot`. confirm opens
+5. Menu (INVENTORY): if the game opened it right after a text (see tips), do what the text asked first
+   (equip/use the named item) and only then leave. Open it yourself with press inventory. Grid: up/down/left/right move `slot`. confirm opens
    `commands`; up/down chooses; confirm runs it. Equip on the already equipped item UNEQUIPS it
    (menu.equipped true -> do not Equip). Reload: on Handgun Bullets choose Combine, move to Handgun,
    confirm. Heal: on Green Herb choose Use. Leave: cancel until navigation, left until cursor 0, confirm.

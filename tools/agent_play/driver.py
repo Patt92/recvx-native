@@ -180,6 +180,8 @@ class Driver:
         self._approach_cache = {}  # room -> zone -> [to, face]; geometry of a room does not move
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
+        self.last_owner = ''
+        self.texts = []            # last game texts (dialog, menu, document, terminal) the model has seen
 
     # --- tools -----------------------------------------------------------------------------------------
     def tool(self, name, args):
@@ -193,6 +195,10 @@ class Driver:
                 argv = [str(a) for a in args.get('args') or []]
                 if cmd in ('room', 'zone', 'blocked'):
                     argv.append(str(self.play.auto))
+                elif cmd in ('event', 'msg') and len(argv) == 1:
+                    # hint.py would read the room from build/play/auto.json; use this driver's state.
+                    d, _, _ = self.play.read()
+                    argv.append(d['room'])
                 r = subprocess.run([sys.executable, str(HERE / 'hint.py'), cmd] + argv,
                                    capture_output=True, text=True, timeout=20)
                 return (r.stdout or r.stderr).strip()[:1500] or '(no output)'
@@ -204,8 +210,40 @@ class Driver:
     def messages(self, user):
         return [{'role': 'system', 'content': self.system}] + self.history + [user]
 
-    def decide(self, obs, feedback):
+    def remember_texts(self, obs):
+        """Keep the last few texts the game showed: a hint read on one page must survive the next screen."""
+        found = [(obs.get('dialog') or {}).get('text', ''), obs.get('menu_text', ''), obs.get('document', ''),
+                 '\n'.join((obs.get('computer') or {}).get('screen', []))]
+        for t in found:
+            t = ' '.join(t.split())
+            if len(t) > 3 and (not self.texts or self.texts[-1] != t):
+                self.texts = (self.texts + [t])[-6:]
+
+    def tips(self, obs, previous_owner):
+        """Facts the model tends to miss, derived from the state only (no room knowledge)."""
+        out = []
+        menu = obs.get('menu') or {}
+        if obs.get('owner') == 'INVENTORY' and previous_owner and 'DIALOG' in previous_owner and not menu.get('commands'):
+            out.append('The game opened the status menu itself after the text: it expects you to use, equip or '
+                       'combine something now. Do not cancel before doing what the text asked.')
+        equipped = ((obs.get('equipped') or [''])[0] or '').lower()
+        names = [row[3].lower() for row in obs.get('inv', []) if len(row) > 3 and row[3]]
+        # Pickup confirmations name the item too; they are not a request to use it.
+        asks = [t.lower() for t in self.texts[-2:] if not t.lower().startswith(("you've taken", 'take the'))]
+        named = [n for n in names if n and n != equipped and any(n in t for t in asks)]
+        if named:
+            out.append('The last text names an item you carry: ' + ', '.join(sorted(set(named))) +
+                       '. Equip or use it (inventory -> select it -> Equip/Use).')
+        return out
+
+    def decide(self, obs, feedback, previous_owner=''):
+        self.remember_texts(obs)
         payload = dict(feedback, state=trim(obs))
+        if self.texts:
+            payload['recent_texts'] = self.texts[-4:]
+        tips = self.tips(obs, previous_owner)
+        if tips:
+            payload['tips'] = tips
         if self.note:
             payload['note'] = self.note
         user = {'role': 'user', 'content': json.dumps(payload, separators=(',', ':'), ensure_ascii=False)}
@@ -304,6 +342,22 @@ class Driver:
                     pass
         return obs, feedback, (time.monotonic() - started) * 1000
 
+    def correct(self, action, obs):
+        """interact on a zone with a computed point: use it unless the model's point is that point.
+
+        Invented standing points were the most common rejected action; the zone and the decision stay
+        the model's, only the coordinates come from the geometry."""
+        if action.get('op') != 'interact':
+            return action
+        go = next((z.get('go') for z in obs.get('zones', []) if z.get('i') == action.get('zone')), None)
+        if not go:
+            return action
+        to = action.get('to')
+        if isinstance(to, list) and len(to) == 2 and all(isinstance(v, (int, float)) for v in to) and \
+                abs(to[0] - go[0][0]) < .01 and abs(to[1] - go[0][1]) < .01:
+            return action
+        return dict(action, to=go[0], face=go[1])
+
     def mark_way_back(self, obs):
         """Name the door that leads to the room just left, so 'nearest door' is not mistaken for 'onward'."""
         room = obs.get('room')
@@ -379,7 +433,8 @@ class Driver:
                 if self.idle_waits >= 4:
                     # Nothing changed over several waits: the game may wait for a button after all.
                     feedback = dict(feedback, unchanged_for=self.idle_waits)
-                user, action, usage, llm_ms = self.decide(self.with_approaches(self.mark_way_back(obs)), feedback)
+                user, action, usage, llm_ms = self.decide(self.with_approaches(self.mark_way_back(obs)), feedback,
+                                                          self.last_owner)
                 fallback = action.pop('no_action', False)
                 note = action.pop('note', None)
                 if isinstance(note, str) and note.strip():
@@ -387,7 +442,9 @@ class Driver:
                 self.remember(user, action)
                 entry = dict(llm_ms=round(llm_ms), usage=usage)
             owner = obs.get('owner', '')
-            obs, feedback, act_ms = self.act(action)
+            self.last_owner = owner
+            self.remember_texts(obs)
+            obs, feedback, act_ms = self.act(self.correct(action, obs))
             if not entry.get('auto') and fallback:
                 feedback.update(result='error', error='no game action in your last reply; the driver waited instead')
                 entry['fallback'] = True

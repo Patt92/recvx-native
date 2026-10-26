@@ -234,6 +234,7 @@ class DriverTests(unittest.TestCase):
         self.write(self.d)
         drv, client = self.driver([text(dict(op='interact', zone=4, to=[20, 0], face=[7, 7])),
                                    text(dict(op='press', key='cancel'))])
+        drv.with_approaches = lambda obs: obs  # zone without a precomputed go point (beyond the nearest five)
         with self.ticking():
             drv.run(steps=2)
         feedback = json.loads(client.requests[1][0][-1]['content'])
@@ -357,6 +358,66 @@ class DriverTests(unittest.TestCase):
         self.assertIn('tool hint:', client.requests[1][0][-1]['content'])
         self.assertNotIn('blocked', self.controls())
         self.assertIn('cancel', self.controls())
+
+    def test_event_and_msg_lookups_use_this_drivers_room(self):
+        from unittest import mock
+        import driver
+        drv, _ = self.driver([])
+        self.d['room'] = 'RM_0090.RDX'
+        self.write(self.d)
+        seen = {}
+        def run(argv, **kw):
+            seen['argv'] = argv
+            return mock.Mock(stdout='ok', stderr='')
+        with mock.patch.object(driver.subprocess, 'run', run):
+            drv.tool('hint', dict(cmd='event', args=['3']))
+            self.assertEqual(seen['argv'][-3:], ['event', '3', 'RM_0090.RDX'])
+            drv.tool('hint', dict(cmd='msg', args=['2', 'RM_0010.RDX']))
+            self.assertEqual(seen['argv'][-3:], ['msg', '2', 'RM_0010.RDX'])
+            drv.tool('hint', dict(cmd='zone', args=['12']))
+            self.assertEqual(seen['argv'][-1], str(self.play.auto))
+
+    def test_text_hint_survives_into_the_menu_the_game_opens(self):
+        drv, _ = self.driver([])
+        dialog = dict(owner='CINEMATIC DIALOG', dialog=dict(text='If I were equipped with a \nlighter, I could see outside...'),
+                      inv=[[1, 55, 1, 'Lighter'], [2, 145, 1, 'Playing Manual']])
+        drv.remember_texts(dialog)
+        menu = dict(owner='INVENTORY', menu=dict(cursor=3, slot=2, item='Playing Manual'),
+                    inv=dialog['inv'], equipped=None)
+        tips = drv.tips(menu, 'CINEMATIC DIALOG')
+        self.assertTrue(any('opened the status menu itself' in t for t in tips))
+        self.assertTrue(any('lighter' in t for t in tips))
+        self.assertIn('lighter, I could see outside', drv.texts[-1])
+        # Once the lighter is equipped the item tip stops; a pickup text never asks to use an item.
+        menu['equipped'] = ['Lighter', 1]
+        self.assertFalse(any('names an item' in t for t in drv.tips(menu, 'INVENTORY')))
+        drv.remember_texts(dict(dialog=dict(text="You've taken the\nHandgun Bullets.")))
+        free = dict(owner='FREE', inv=[[3, 12, 15, 'Handgun Bullets']])
+        self.assertEqual(drv.tips(free, 'DIALOG INVENTORY'), [])
+
+    def test_recent_texts_and_tips_reach_the_model(self):
+        self.d.update(inventory_open=True, main_cursor=3, menu_selected=2, menu_item_name='Playing Manual',
+                      items=[0, (55 << 16) | 1, (145 << 16) | 1], item_names=['', 'Lighter', 'Playing Manual'])
+        self.write(self.d)
+        drv, client = self.driver([text(dict(op='press', key='up'))])
+        drv.texts = ['If I were equipped with a lighter, I could see outside...']
+        drv.last_owner = 'CINEMATIC DIALOG'
+        with self.ticking():
+            drv.run(steps=1)
+        payload = json.loads(client.requests[0][0][-1]['content'])
+        self.assertIn('lighter', payload['recent_texts'][-1])
+        self.assertTrue(payload['tips'])
+
+    def test_invented_interact_point_is_replaced_by_the_computed_one(self):
+        drv, _ = self.driver([])
+        obs = dict(zones=[dict(i=4, kind='item', go=[[25.0, 24.5], [25.0, 22.5]])])
+        fixed = drv.correct(dict(op='interact', zone=4, to=[24, 17], face=[24, 20]), obs)
+        self.assertEqual((fixed['to'], fixed['face']), ([25.0, 24.5], [25.0, 22.5]))
+        same = dict(op='interact', zone=4, to=[25.0, 24.5], face=[25.0, 22.5])
+        self.assertIs(drv.correct(same, obs), same)
+        other = dict(op='interact', zone=9, to=[1, 1], face=[2, 2])
+        self.assertIs(drv.correct(other, obs), other)
+        self.assertEqual(drv.correct(dict(op='move', to=[1, 1]), obs), dict(op='move', to=[1, 1]))
 
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
