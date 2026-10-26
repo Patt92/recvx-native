@@ -1,68 +1,68 @@
-# Starten und Bedienung
+# Starting and Controls
 
-RECVX Native ist ein Entwicklungsbuild. Er benötigt lokal exportierte
-Originaldaten und ist noch kein vollständiger, spielbarer Port.
+RECVX Native is a development build. It requires locally exported
+original data and is not yet a complete, playable port.
 
-## Starten
+## Starting
 
-Im Projektordner:
+In the project folder:
 
-- **macOS (Apple Silicon):** `Start.command` öffnen.
-- **Windows x64:** `Start.cmd` öffnen.
+- **macOS (Apple Silicon):** open `Start.command`.
+- **Windows x64:** open `Start.cmd`.
 
-Die Paketstarter verwenden die jeweils mitgelieferten Laufzeitdaten. Beim
-Spielen wird keine ISO eingelegt oder gelesen. Ein Quellcode-Clone ohne den
-lokalen Ordner `data/` kann nicht gestartet werden.
+The package launchers use the runtime data shipped with each package. No ISO
+is inserted or read during play. A source clone without the local `data/`
+folder cannot be started.
 
-`./build.sh` erzeugt auf macOS die Entwicklungs-App unter
-`build/start/macos-arm64/RECVX Native.app`. `Start.command` bevorzugt diese
-App; sie nutzt die aktuellen Daten, Mods und Einstellungen im Projektordner.
-**Die Dev-App lädt `data/` und `mods/` lose aus dem Projektordner**: geänderte
-Daten oder Mods wirken beim nächsten Start ohne neuen Build. DDS-Pakete gehören
-nach `mods/hd-source/`; `./build.sh` übersetzt sie nach `mods/textures/hd/`.
-Auch ohne vorhandenes Paket wird die App erstellt. Ein fehlgeschlagener Build
-aktualisiert den Starter nicht.
+On macOS, `./build.sh` produces the development app at
+`build/start/macos-arm64/RECVX Native.app`. `Start.command` prefers this
+app; it uses the current data, mods and settings in the project folder.
+**The dev app loads `data/` and `mods/` loosely from the project folder**: changed
+data or mods take effect on the next start without a new build. DDS packs belong
+in `mods/hd-source/`; `./build.sh` converts them to `mods/textures/hd/`.
+The app is built even when no pack is present. A failed build
+does not update the launcher.
 
-Eigenständige Pakete mit kopierten Laufzeitdaten erzeugt zusätzlich
-`./build.sh --platform macos --package --output <neuer-Paketordner>`
-(mit `--compressed` aus `data_compressed/`; die Mods des Projekts werden dabei in
-die Paketdaten eingebacken, ein `mods`-Ordner wird nicht mitgeliefert).
-Den vollständigen Ablauf beschreibt [docs/BUILD.md](docs/BUILD.md).
-Die Standardausgaben für Pakete liegen unter `build/packages/`; vorhandene
-Pakete werden nicht überschrieben.
-iOS/iPadOS-Builds (Gerät und Simulator, mit Xcode) erzeugt
-`./build.sh --platform ios` bzw. `--platform ios-simulator`;
-`--platform ios --package` schreibt ohne Profil eine unsignierte IPA zum
-Sideloaden (AltStore/SideStore oder zsign). Signieren, Datenablage und
-Installation stehen im iOS-Abschnitt der Build-Doku.
-Details zu Build, Datenprüfung und Plattformen stehen in
+Standalone packages with copied runtime data are additionally produced by
+`./build.sh --platform macos --package --output <new-package-folder>`
+(with `--compressed` from `data_compressed/`; the project's mods are baked into
+the package data, no `mods` folder is shipped).
+[docs/BUILD.md](docs/BUILD.md) describes the complete procedure.
+The default package outputs are under `build/packages/`; existing
+packages are not overwritten.
+iOS/iPadOS builds (device and simulator, with Xcode) are produced by
+`./build.sh --platform ios` or `--platform ios-simulator` respectively;
+`--platform ios --package` writes an unsigned IPA for
+sideloading (AltStore/SideStore or zsign) when no profile is given. Signing, data placement and
+installation are covered in the iOS section of the build documentation.
+Details on building, data verification and platforms are in
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md).
 
-## Standardbedienung
+## Default controls
 
-| Aktion | Tastatur | Controller |
+| Action | Keyboard | Controller |
 |---|---|---|
-| Bewegen | W/S oder I/K | Linker Stick oder Steuerkreuz |
-| Drehen | A/D oder J/L | Linker Stick oder Steuerkreuz |
-| Laufen | Shift | B |
-| Bestätigen / Interagieren | Enter | A |
-| Zurück | Escape | B |
-| Pause (ein/aus) | Escape oder P | Back/Select |
-| Inventar | Tab | Y |
-| Zwischensequenz überspringen | Space | Start |
-| Debugmenü | F2 | – |
+| Move | W/S or I/K | Left stick or D-pad |
+| Turn | A/D or J/L | Left stick or D-pad |
+| Run | Shift | B |
+| Confirm / Interact | Enter | A |
+| Back | Escape | B |
+| Pause (on/off) | Escape or P | Back/Select |
+| Inventory | Tab | Y |
+| Skip cutscene | Space | Start |
+| Debug menu | F2 | – |
 
-Tastaturbelegung, Controllerbelegung, Stick-Totzone und Menütasten lassen sich
-im Hauptmenü unter **Einstellungen** ändern. Die vollständige Beschreibung
-steht in [docs/CONTROLS.md](docs/CONTROLS.md).
+Keyboard bindings, controller bindings, stick dead zone and menu keys can be
+changed in the main menu under **Settings**. The complete description
+is in [docs/CONTROLS.md](docs/CONTROLS.md).
 
-## Diagnose
+## Diagnostics
 
-Das Debugmenü ist ein Entwicklungswerkzeug, kein normaler Spielfortschritt.
-Es kann Räume, Positionen und Zustände gezielt inspizieren; solche Sprünge sind
-kein Nachweis eines authentischen Spielverlaufs. Konfiguration und Funktionen
-sind in [docs/DEBUG_MENU.md](docs/DEBUG_MENU.md) dokumentiert.
+The debug menu is a development tool, not normal game progression.
+It can inspect rooms, positions and states directly; such jumps are
+no proof of an authentic playthrough. Configuration and functions
+are documented in [docs/DEBUG_MENU.md](docs/DEBUG_MENU.md).
 
-Den aktuellen Portstand und bekannte Lücken beschreibt
-[docs/NATIVE_GAMEPLAY.md](docs/NATIVE_GAMEPLAY.md). Prüfergebnisse und ihre
-jeweilige Aussagegrenze stehen in [docs/VALIDATION.md](docs/VALIDATION.md).
+[docs/NATIVE_GAMEPLAY.md](docs/NATIVE_GAMEPLAY.md) describes the current port
+state and known gaps. Validation results and the limits of what each one
+proves are in [docs/VALIDATION.md](docs/VALIDATION.md).

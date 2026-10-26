@@ -283,6 +283,7 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
 }
 
 bool GameOver::active()const{return impl_->running;}
+void GameOver::abort(){impl_->running=false;}
 unsigned GameOver::phase()const{return impl_->md1;}
 unsigned GameOver::count()const{return unsigned(impl_->count);}
 unsigned GameOver::blasts()const{return impl_->blasts;}

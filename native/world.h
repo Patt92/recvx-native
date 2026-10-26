@@ -252,6 +252,10 @@ public:
     // Native bhCheckWallType / bhCollisionCheckLine/2/3 over the existing
     // room-then-mobile geometry. These are not bhCheckWall movement or
     // bhCheckL2Wall (which has a different capsule/inset contract).
+    // Diagnose (--control dump): die Wandtabelle, wie bhCheckL2Wall sie sieht (rom->walp + bewegliche Waende), und rom->flrp.
+    std::vector<CollisionWall> debug_walls()const{return collision_geometry();}
+    float debug_ground(NJS_POINT3 probe)const{return ground_position(collision_geometry(),room_height_,probe);} // bhGetGroundPosition-Sonde, -1000 = kein Boden
+    const std::vector<CollisionWall>& debug_floors()const{return room_floors_;}
     std::optional<CollisionWall> collision_contact(NJS_POINT3 probe,unsigned flags,float radius,float height)const;
     std::optional<CollisionWall> collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal)const;
     std::optional<CollisionWall> collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,bool omit_attribute4=false)const;

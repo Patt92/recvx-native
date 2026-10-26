@@ -22,6 +22,8 @@ public:
     // auf dem gemeinsamen Fade: Netz, dann Fade, dann die Aufforderung von md1 2.
     void draw(SoftwareRenderer& image,const GameUi& ui)const;
     bool active()const;
+    // Host: ein Snapshot-Laden ersetzt den Spielstand wie bhPopGameData und beendet Task 14 ohne Rueckgabe.
+    void abort();
     unsigned phase()const;
     unsigned count()const;
     // gov_etb explosions requested so far (gameover.c:535-541), and how many of those the

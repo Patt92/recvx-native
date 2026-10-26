@@ -1,1525 +1,1525 @@
-# Arbeitsindex
+# Work index
 
-Dieser Index ersetzt die Chronik in den Agenten-Pflichtdateien. Keine neue
-Gameplay-Abnahme: Angaben aus alten Berichten vor Bearbeitung/Auslieferung mit
-aktuellem Code, Arbeitsbaum und installierter Runtime abgleichen.
+This index replaces the chronicle in the mandatory agent files. Not a new
+gameplay acceptance: before editing/shipping, reconcile claims from old reports with
+current code, working tree and installed runtime.
 
-## Aktive Regeln und Dokumentation
+## Active rules and documentation
 
-- Verbindliche Policy: [AGENTS.md](AGENTS.md); Prüfmethode: [QUALITY.md](QUALITY.md).
-- Geprüfte Funktionsbelege: [Ledger](docs/port_ledger.tsv);
-  [Abdeckungsbericht](docs/PORT_STATUS.md) ist kein Semantik-/Durchspielnachweis.
-- Aktuelles fachliches Portiert/Offen: [Gameplay](docs/NATIVE_GAMEPLAY.md),
+- Binding policy: [AGENTS.md](AGENTS.md); verification method: [QUALITY.md](QUALITY.md).
+- Verified function evidence: [Ledger](docs/port_ledger.tsv);
+  [coverage report](docs/PORT_STATUS.md) is no proof of semantics/playthrough.
+- Current functional ported/open state: [Gameplay](docs/NATIVE_GAMEPLAY.md),
   [Player](docs/NATIVE_PLAYER.md), [Audio](docs/AUDIO.md),
-  [Assets](docs/NATIVE_ASSETS.md), [Validierung](docs/VALIDATION.md).
-- `work/` enthält nur laufende Arbeit (Gegner-Auftragsbrett `work/enemies/`, Briefings,
-  Inventarvertrag, Leistungsplan, Quarantänemanifest). Erledigte Ergebnisse, angewendete
-  Patches und die Anweisungshistorie liegen seit 2026-10-21 unter `archived/work/`;
-  Verweise in Ledger, Docs, Code und Tests sind nachgezogen. `archived/` ist seit
-  2026-10-21 nicht mehr versioniert (nur lokal, `.gitignore`); ein frischer Klon hat
-  diese Berichte nicht.
+  [Assets](docs/NATIVE_ASSETS.md), [Validation](docs/VALIDATION.md).
+- `work/` contains only ongoing work (enemy task board `work/enemies/`, briefings,
+  inventory contract, performance plan, quarantine manifest). Finished results, applied
+  patches and the instruction history are under `archived/work/` since 2026-10-21;
+  references in ledger, docs, code and tests have been updated. Since 2026-10-21 `archived/` is
+  no longer versioned (local only, `.gitignore`); a fresh clone does not have
+  these reports.
 
-## Arbeitsbaum und Auslieferung
+## Working tree and delivery
 
-**MetalFX-Praesentationsstufe (2026-10-25, Arbeitsbaum):** `native/metalfx_present.mm` zeigt das fertige
-640x480-Bild ueber die CAMetalLayer des SDL-Fensters: MetalFX spatial/temporal Upscaler, Frame-Interpolation
-(macOS 26+, Zwischenbild je Spieltakt), Post-Processing (Sharpen/CRT); drei neue Zeilen im Einstellungsbildschirm,
-Debugmenue-Aktionen und `video.ini`-Schluessel (`upscaler`, `frame_generation`, `post_process`, Standard aus).
-Bewegungsvektoren aus Kamera-Reprojektion der Tiefe, 2D-Pixel als unbewegter Vordergrund, kein Jitter; bewegte
-Akteure ohne eigene Vektoren (dokumentierte Grenze). Nutzerbefund 2026-10-25 (M4 Pro, macOS 27): Stufe laeuft,
-Frame-Interpolation fiel nach etwa einer Minute stufenweise von 60 auf unter 30 Bilder (Metal-Praesentationszeiten
-per afterMinimumDuration liefen nach, nextDrawable blockierte die Schleife). Umbau: sofortige Praesentation, Kadenz in
-der Hauptschleife (`video.ini frame_rate` 30/60/120/unlimited fuer alle Backends, Takt bleibt 30 Hz, Zwischenbild in
-der ersten Takthaelfte), Debugmenue-Namen auf die Wertspalte gekuerzt. GPU-Pfad in der Sandbox **nicht** ausfuehrbar
-(kein Metal-Geraet), nur gebaut und per Einstellungstests belegt. Nutzerpruefung 2026-10-25 mit eigenem Build
-(M4 Pro, macOS 27): Upscaler, Frame-Interpolation (stabil bei 60 Bildern) und Post-Processing laufen anstandslos.
-Commit 09b26a7. Danach (Arbeitsbaum): Schaerfen als eigene Stufe (`sharpness` aus/leicht/mittel/stark), CRT-Filter
-in zwei Modi (`crt-light` wie bisher, `crt-full` mit Gauss-Strahlprofil, Schlitzmaske, Bloom, Helligkeitsausgleich,
-alles in linearem Licht). Nutzerbefund: full ueberbelichtet, Nachbilder mit Frame-Generation, light guter Kompromiss.
-Umbau: Maske nur halb kompensiert, Strahlbreite bei Weiss ohne Beschnitt, Bloom vor Strahl/Maske und mit eigener
-Helligkeit abklingend, light ebenfalls gamma-korrekt (breiter Strahl, schwache Maske); 2D-Ebene als uiTexture an den
-Interpolator (unverzerrt ueberlagert statt gemischt). Nutzerbefund danach: weiterhin ueberbelichtet/Nachbilder, dazu
-Stocken bei 120 (vier VSync-Wartezeiten je Takt auf dem Hauptthread plus Zeichenpass > 33 ms). Umbau: Praesentation
-und Kadenz auf eigenem Thread der Stufe (Hauptthread uebergibt nur eine Bildkopie), Strahlkompensation halbiert.
-Kein Metal-Compiler in der Sandbox: Shader uebersetzt zur Laufzeit, Fehler als "MetalFX presentation disabled:
-presentation shader" auf stderr; Sichtpruefung am Fenster offen.
+**MetalFX presentation stage (2026-10-25, working tree):** `native/metalfx_present.mm` shows the finished
+640x480 image via the CAMetalLayer of the SDL window: MetalFX spatial/temporal upscaler, frame interpolation
+(macOS 26+, intermediate frame per game tick), post-processing (sharpen/CRT); three new rows in the settings screen,
+debug menu actions and `video.ini` keys (`upscaler`, `frame_generation`, `post_process`, default off).
+Motion vectors from camera reprojection of depth, 2D pixels as static foreground, no jitter; moving
+actors without their own vectors (documented limit). User finding 2026-10-25 (M4 Pro, macOS 27): stage runs,
+frame interpolation dropped step by step after about one minute from 60 to below 30 frames (Metal presentation times
+via afterMinimumDuration lagged behind, nextDrawable blocked the loop). Rework: immediate presentation, cadence in
+the main loop (`video.ini frame_rate` 30/60/120/unlimited for all backends, tick stays 30 Hz, intermediate frame in
+the first half of the tick), debug menu names shortened to the value column. GPU path **not** runnable in the sandbox
+(no Metal device), only built and covered by settings tests. User check 2026-10-25 with their own build
+(M4 Pro, macOS 27): upscaler, frame interpolation (stable at 60 frames) and post-processing run without issues.
+Commit 09b26a7. Afterwards (working tree): sharpening as its own stage (`sharpness` off/light/medium/strong), CRT filter
+in two modes (`crt-light` as before, `crt-full` with Gaussian beam profile, slot mask, bloom, brightness compensation,
+all in linear light). User finding: full overexposed, ghosting with frame generation, light a good compromise.
+Rework: mask only half compensated, beam width at white without clipping, bloom before beam/mask and decaying with its own
+brightness, light also gamma-correct (wide beam, weak mask); 2D layer as uiTexture to the
+interpolator (overlaid undistorted instead of blended). User finding afterwards: still overexposed/ghosting, plus
+stutter at 120 (four VSync waits per tick on the main thread plus draw pass > 33 ms). Rework: presentation
+and cadence on the stage's own thread (main thread only hands over an image copy), beam compensation halved.
+No Metal compiler in the sandbox: shaders compiled at runtime, errors as "MetalFX presentation disabled:
+presentation shader" on stderr; visual check at the window open.
 
-**RM_7120 Kameras 2..6 (2026-10-25, Arbeitsbaum):** Nutzerbefund Ruckeln in Kamera 4/5. Headless gemessen (Software,
-`--ss 1`, 60 Bilder): Kamera 1 1,3 ms Zeichenpass, Kamera 4 6,1 ms, davon 4,8 ms bhDrawTrsEffect2D auf dem Hauptthread:
-die Leuchtplatte bhEff122 (Texturgruppe 41) fuellt in diesen Kameras das ganze Bild, der Schirmpfad rechnete jedes Pixel
-einzeln. `draw_trs2d_effects` verteilt die Zeilen jetzt auf Arbeiter wie die Bandstufe (gleiche Pixelrechnung, Bild
-bytegleich, Hash aad435c7): 0,72 ms. Nutzerpruefung danach: nur noch bei genauem Hinsehen ein leichtes Stocken, allein
-mit Frame-Generation; Aenderung bleibt (spart ms). Der Headless-Lauf misst keinen GPU-/MetalFX-Anteil der App; die
-Zeilen "Draw:", "GPU:" und "MetalFX presentation:" beim Beenden der App sind fuer die Restursache offen. Headless-Bericht zeigt jetzt die Zeichenphasen
-(content, compose, ntx2d, trs2d, fnc) wie der Fensterlauf.
-[Doku](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos). **Kein Commit.**
+**RM_7120 cameras 2..6 (2026-10-25, working tree):** user finding stutter in camera 4/5. Measured headless (software,
+`--ss 1`, 60 frames): camera 1 1.3 ms draw pass, camera 4 6.1 ms, of which 4.8 ms bhDrawTrsEffect2D on the main thread:
+the glow plate bhEff122 (texture group 41) fills the whole image in these cameras, the screen path computed every pixel
+individually. `draw_trs2d_effects` now distributes the rows across workers like the band stage (same pixel math, image
+byte-identical, hash aad435c7): 0.72 ms. User check afterwards: only a slight stutter on close inspection, only
+with frame generation; change stays (saves ms). The headless run measures no GPU/MetalFX share of the app; the
+lines "Draw:", "GPU:" and "MetalFX presentation:" on app exit are open for the remaining cause. Headless report now shows the draw phases
+(content, compose, ntx2d, trs2d, fnc) like the windowed run.
+[Docs](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos). **No commit.**
 
-**bhEffTypeSet 0xAD (2026-10-22, Arbeitsbaum):** `world.cpp` schreibt `op->type = v1` wie event.c:7345 ohne
-Rueckfrage, auch auf Texturhaltern (id 30..99, bhEffDmy) und unportierten Kennungen; vorher blieb der Befehl dort
-ungebunden. Test in `event_lifecycle` (RM_3010 id 70); mit der alten Bedingung rot (Gegenprobe), mit Fix gruen
-(`event_lifecycle|effect_bg|game`). bhEffBG 93..99 und Effekt 26 aus bhCheckEvtTimer liegen ebenfalls im Arbeitsbaum.
-Offen aus dem Effektaudit: Halterfreigabe nach dem ersten Pass (bhEffDmy), 0x98 auf Halter 66 (RM_3091). **Kein Commit.**
+**bhEffTypeSet 0xAD (2026-10-22, working tree):** `world.cpp` writes `op->type = v1` as event.c:7345 without
+checking, also on texture holders (id 30..99, bhEffDmy) and unported ids; previously the command stayed
+unbound there. Test in `event_lifecycle` (RM_3010 id 70); red with the old condition (counter-check), green with fix
+(`event_lifecycle|effect_bg|game`). bhEffBG 93..99 and effect 26 from bhCheckEvtTimer are also in the working tree.
+Open from the effect audit: holder release after the first pass (bhEffDmy), 0x98 on holder 66 (RM_3091). **No commit.**
 
-**tvOS-Buildpfad (2026-10-25, Arbeitsbaum):** `./build.sh --platform tvos|tvos-simulator` ueber den iOS-Pfad
-(CMAKE_SYSTEM_NAME tvOS, statisches SDL, Metal, Bundle mit eingebackenen komprimierten Daten, da tvOS keinen
-Documents-Ordner hat). Benutzerdaten in `Library/Caches/RECVX` (nicht dauerhaft, dokumentiert), Eingabe per
-Bluetooth-Controller, MetalFX-Stufe bleibt macOS. Simulator (`build/tvos-simulator`, ad hoc signiert, Plattform 8)
-und unsigniertes Geraet (`build/tvos-device`, Plattform 3) kompilieren, linken, PASS, je 3,1 GB Daten im Bundle;
-SDL-Quelle aus dem macOS-Build wiederverwendet (Download in der Sandbox gesperrt, `RECVX_SDL2_SOURCE`). CMake setzt
-fuer tvOS keine `TVOS`-Variable, CMakeLists.txt zieht sie nach. `setMathMode:` jetzt auch fuer tvOS 18 gewacht.
-Start auf Simulator/Geraet **nicht** belegt: CoreSimulatorService aus der Sandbox nicht erreichbar, kein Profil.
+**tvOS build path (2026-10-25, working tree):** `./build.sh --platform tvos|tvos-simulator` via the iOS path
+(CMAKE_SYSTEM_NAME tvOS, static SDL, Metal, bundle with baked-in compressed data, since tvOS has no
+Documents folder). User data in `Library/Caches/RECVX` (not persistent, documented), input via
+Bluetooth controller, MetalFX stage stays macOS. Simulator (`build/tvos-simulator`, ad hoc signed, platform 8)
+and unsigned device (`build/tvos-device`, platform 3) compile, link, PASS, 3.1 GB data each in the bundle;
+SDL source reused from the macOS build (download blocked in the sandbox, `RECVX_SDL2_SOURCE`). CMake sets
+no `TVOS` variable for tvOS, CMakeLists.txt adds it. `setMathMode:` now also guarded for tvOS 18.
+Start on simulator/device **not** verified: CoreSimulatorService not reachable from the sandbox, no profile.
 
-**iOS-Buildpfad (2026-10-22, Arbeitsbaum):** `./build.sh --platform ios|ios-simulator` (Ninja/Makefiles,
-Policy-Audit unverändert, SDL statisch, Metal, Bundle-Icons, Signatur per Profil). Simulator- und unsignierter
-Gerätebuild kompilieren, linken, PASS. **Lauf auf dem Gerät (2026-10-26, Nutzerabnahme):** die iOS-Version
-läuft so wie sie ist auf dem iPhone (iOS 27) mit Bluetooth-Controller. `--package` ohne Profil schreibt jetzt
-`RECVX-Native-unsigned.ipa` zum Sideloaden (AltStore/SideStore, zsign mit eigenem Zertifikat: bezahlt 1 Jahr,
-frei 7 Tage mit Neusignieren); Touch-Steuerung offen.
-[Build-Doku](docs/NATIVE_PORT.md#ios-arm64-device-and-simulator).
+**iOS build path (2026-10-22, working tree):** `./build.sh --platform ios|ios-simulator` (Ninja/Makefiles,
+policy audit unchanged, SDL static, Metal, bundle icons, signing via profile). Simulator and unsigned
+device build compile, link, PASS. **Run on the device (2026-10-26, user acceptance):** the iOS version
+runs as is on the iPhone (iOS 27) with a Bluetooth controller. `--package` without a profile now writes
+`RECVX-Native-unsigned.ipa` for sideloading (AltStore/SideStore, zsign with own certificate: paid 1 year,
+free 7 days with re-signing); touch controls open.
+[Build docs](docs/NATIVE_PORT.md#ios-arm64-device-and-simulator).
 
-Gemeinsamer Arbeitsbaum mit laufender Fremdarbeit; aktuelles `git status --short`
-und den tatsächlich gestarteten Binary-Stand prüfen. Keine pauschale Freigabe
-oder Dateibesitzzuordnung aus historischer Übergabe übernehmen.
+Shared working tree with ongoing work by others; check the current `git status --short`
+and the binary state actually launched. Do not adopt blanket approvals
+or file ownership assignments from historical hand-overs.
 
-**Kisten nach Aufzugfahrt (Arbeitsbaum/arm64-Build):** Snapshot 2 RM_7160 reproduziert:
-Der rotierte native Event-N/Game-N+1-Takt begann nach Laden mit Event statt Game;
-das Aufzugskript senkte Kisten vor deren erster bhObj001-Initialisierung auf y=-5.
-Obere ATR-Etage blieb 0 statt 1. Jetzt erster Spielpass vor folgendem Ereignistick
-(main.c:195-201, game.c:48-51), beide Runtime-Schleifen. Gezielter Test
+**Crates after elevator ride (working tree/arm64 build):** snapshot 2 RM_7160 reproduced:
+the rotated native Event-N/Game-N+1 tick started with Event instead of Game after loading;
+the elevator script lowered crates to y=-5 before their first bhObj001 initialization.
+Upper ATR floor stayed 0 instead of 1. Now first game pass before the following event tick
+(main.c:195-201, game.c:48-51), both runtime loops. Targeted test
 `tests/native/lift_crate_floor_check.py --runtime build/macos-arm64/recvx-runtime --data data --snapshot snapshots/snapshot-2.rcvxsnap`:
-Kante hält bei x70.25 statt Luftlauf bis x44.17; Material 3 statt 0; Abstieg y0.
-11 angrenzende CTests grün. `verify_stairs.py` blockiert durch veraltetes JSON-Feld
-`stairs.active` (KeyError); kein Gesamt-Stufennachweis. Belege `build/validation/crate-floor-root/`.
-RM_0110-Gegenprobe: bisheriger Schuss-Replay mit erstem Game-Pass rot (1 Schuss,
-0 Treffer), ohne ihn grün (1/1). Diagnose-Schussposition nach natürlicher Szene
-in `rm0110_event_zombie_check.py` stabilisiert; alle 4×362/8×370-, Treffer-/Tod-,
-Szenen-/Angriff-/Wiederbetreten-Prüfungen erhalten. Gegen beide Startreihenfolgen
-grün; 12 angrenzende CTests und Snapshot-2-Kistenauf-/abstieg grün.
-Belege `build/validation/first-pass-rm0110/`. Kein Zielwechsel-/Durchspielnachweis
-aus der Diagnose-Schussprobe. Nicht in Starter-App installiert; kein Commit.
+edge holds at x70.25 instead of walking on air to x44.17; material 3 instead of 0; descent y0.
+11 adjacent CTests green. `verify_stairs.py` blocked by stale JSON field
+`stairs.active` (KeyError); no overall stairs proof. Evidence `build/validation/crate-floor-root/`.
+RM_0110 counter-check: previous shot replay red with first game pass (1 shot,
+0 hits), green without it (1/1). Diagnostic shot position after the natural scene
+stabilized in `rm0110_event_zombie_check.py`; all 4×362/8×370, hit/death,
+scene/attack/re-entry checks kept. Green against both start orders;
+12 adjacent CTests and snapshot 2 crate climb up/down green.
+Evidence `build/validation/first-pass-rm0110/`. No target-switch/playthrough proof
+from the diagnostic shot probe. Not installed in the launcher app; no commit.
 
-**Portierungsrunde nach dem Audit (2026-10-21, Arbeitsbaum):** StartVibrationEx(0, 8) beim Schieben/Drehen
-(psh/rpsh) an die Vibrationseinheit gebunden, flr_no bei Common/Player 7, bhCheckSubTask-Tor plp->flg 0x6
-(Statustaste/Skriptanforderung). Kistenklettern (bhObj001) und bhControlPlayer :1540-1572 als gebunden
-belegt; Audio-Bank-3-Meldung im Scan ist der Direktstart ohne bhRoomSoundCase (kein Portfehler). Snapshot-Format 2
-speichert die Raumklang-Variante (Test `snapshot_room_sound`, Format 1 weiter lesbar). [Bericht](archived/work/port-batch-20261021.result.md). **Kein Commit.**
+**Porting round after the audit (2026-10-21, working tree):** StartVibrationEx(0, 8) on push/turn
+(psh/rpsh) bound to the vibration unit, flr_no for Common/Player 7, bhCheckSubTask gate plp->flg 0x6
+(status key/script request). Crate climbing (bhObj001) and bhControlPlayer :1540-1572 shown to be
+bound; audio bank 3 message in the scan is the direct start without bhRoomSoundCase (not a port error). Snapshot format 2
+stores the room sound variant (test `snapshot_room_sound`, format 1 still readable). [Report](archived/work/port-batch-20261021.result.md). **No commit.**
 
-**EventVm-Audit und Rest-Opcodes (2026-10-21, Arbeitsbaum, 212/212 grün):** alle 223 Skriptbefehle
-gebunden (0x82 bhSetDebugLoopEx, 0xCF bhExGameItemInit, 0xD3 bhRankingCall; dm0-Plätze halten wie
-event.c:437 mit Konsolenmeldung statt Hostfehler). Statischer Skript-Walker
-`tools/walk_event_scripts.py`: Player_controll 132/140/141/143/145 und 0x82 in keinem Raum benutzt.
-Ledger-Altlasten aus der Generatorzeit (bhItemGetGet/Ex, bhPlItemLost/Ex, bhArmsItemSet,
-bhPlayerPoisonCk, bhNext) am Original neu belegt (02d12c1). Danach: Exm-Tor wie player.c:1678
-(mode0 1, Passtor, ohne st_flg 0x4), bhCheckCut(1)-Augenzweig (cut.c:24-45), Common-Selektor 0
-nur auf dem Spieler (Walker). Offen: ranking.c ControlRanking.
-[Bericht](archived/work/eventvm-audit-20261021.md). **Kein Commit** fuer den zweiten Teil.
+**EventVm audit and remaining opcodes (2026-10-21, working tree, 212/212 green):** all 223 script commands
+bound (0x82 bhSetDebugLoopEx, 0xCF bhExGameItemInit, 0xD3 bhRankingCall; dm0 slots stop as in
+event.c:437 with a console message instead of a host error). Static script walker
+`tools/walk_event_scripts.py`: Player_controll 132/140/141/143/145 and 0x82 used in no room.
+Ledger legacy entries from the generator era (bhItemGetGet/Ex, bhPlItemLost/Ex, bhArmsItemSet,
+bhPlayerPoisonCk, bhNext) re-verified against the original (02d12c1). Afterwards: Exm gate as player.c:1678
+(mode0 1, pass gate, without st_flg 0x4), bhCheckCut(1) eye branch (cut.c:24-45), Common selector 0
+only on the player (walker). Open: ranking.c ControlRanking.
+[Report](archived/work/eventvm-audit-20261021.md). **No commit** for the second part.
 
-**Audio und IOP-Modell (Arbeitsbaum):** native/audio_iop.* bildet TSNDDRV-
-Befehlsthread, TQ-Warteschlange, MODMIDI-Sequencer, MODHSYN (2x24 Stimmen, Raub, Key-On-Stapel) und die 48
-SPU2-Stimmen nach; der Mixer fuehrt nur noch EE-Handles und ADX/Host-PCM. Audiotests auf die originale
-IOP-Latenz umgestellt (Req am sdSysServer, Ton im ATick, Stopp zwei Bilder spaeter). Hostpolitik: ersetzte
-Bank stoppt ihren Port. COMMON-Bank0, SoundMode/OPTION/Persistenz, Film-ADX-Freigabe,
-Cancel-Gates/Screen-/Audio-Fade, quantisierte ADX-Pegel, Blockskala/Loop-Spielzeit und
-HD-Mehrschicht-/Velocity-Auswahl korrigiert. Gezielt 5/5 Tests; fuenf Rueckmutationen werden
-von den Wirkungstests erkannt. RM_7250 spielt COMMON/0002 im Gegnerlauf; OPTION und Filmstart/-Skip
-in der nativen Runtime geprueft. **Kein Audio-100-%-Nachweis:** Float-ADX, restliche Synthese-/SQ-
-Zweige, Transmission und Ausgabetakt offen. Windows-x64-Crossbuild und Policy-Binaerpruefung PASS; vier Audiotests sowie
-OPTION-/Raum-/Filmpruefungen unter Wine PASS. Frontend-Nachbarsuite unter Wine weiterhin rot: identischer Fehler `hint confirmation failed`
-auch im separat gebauten HEAD 47b4a22 (keine Erwartung abgeschwaecht).
-[Mechanismen](docs/AUDIO.md), [Restauftrag](work/audio-port.md), [Pruefartefakte](build/validation/audio-port/).
-Build macOS arm64; installierte App/Paket nicht ersetzt. 2026-10-22 gegen Original nachgeprueft
-(PlayStartMovieEx/PlayMovieMain, MovieTypeDef, SetSoundModeEx, bhClearEffect, bhSetEffectTb-UVs,
-pxb vor Linkpunkt, PS2_Render_Tex_Sub) und auf main committet; zwei Tests an die neue OPTION-Zeile
-bzw. die mitgezeichnete Raumgeometrie angepasst (Gegenprobe rot), volle Suite 223/223.
+**Audio and IOP model (working tree):** native/audio_iop.* models the TSNDDRV
+command thread, TQ queue, MODMIDI sequencer, MODHSYN (2x24 voices, stealing, key-on stack) and the 48
+SPU2 voices; the mixer now only carries EE handles and ADX/host PCM. Audio tests switched to the original
+IOP latency (Req at sdSysServer, sound in ATick, stop two frames later). Host policy: a replaced
+bank stops its port. COMMON bank0, SoundMode/OPTION/persistence, movie ADX release,
+cancel gates/screen/audio fade, quantized ADX levels, block scale/loop playtime and
+HD multi-layer/velocity selection corrected. Targeted 5/5 tests; five reverse mutations are
+detected by the effect tests. RM_7250 plays COMMON/0002 in the enemy run; OPTION and movie start/skip
+checked in the native runtime. **No audio 100 % proof:** float ADX, remaining synthesis/SQ
+branches, transmission and output clock open. Windows x64 cross build and policy binary check PASS; four audio tests and
+OPTION/room/movie checks under Wine PASS. Frontend neighbor suite under Wine still red: identical error `hint confirmation failed`
+also in the separately built HEAD 47b4a22 (no expectation weakened).
+[Mechanisms](docs/AUDIO.md), [remaining task](work/audio-port.md), [verification artifacts](build/validation/audio-port/).
+Build macOS arm64; installed app/package not replaced. 2026-10-22 re-checked against the original
+(PlayStartMovieEx/PlayMovieMain, MovieTypeDef, SetSoundModeEx, bhClearEffect, bhSetEffectTb UVs,
+pxb before link point, PS2_Render_Tex_Sub) and committed on main; two tests adapted to the new OPTION row
+and the co-drawn room geometry respectively (counter-check red), full suite 223/223.
 
-**MIDI-Pegel und MidiHandle[2] (2026-10-21, Arbeitsbaum):** Sequenznoten rechnen das MODHSYN-Register
-(MODMIDI-CC7 x Portlautstaerke, HsMsg-Pan je 240-Hz-ATick, Pitchbend jetzt ausgewertet, Kanalzustand je Port
-ueber Sequenzen); Hintergrund-Slot 2, System-MIDI und Tuer teilen die Portrotation 2->8->9; Hintergrund-Timer,
-Hintergrund-Stopp und Raum-Fade-In laufen als MidiInfo-Fades (Host-Rampen und finish_door_sound entfernt);
-Tuer-Skip stoppt nur Tuerlisten. Stimmenpool 24/Kern gemessen (max. 24, RM_0100) und als Meldung eingezogen,
-Raub/ATick-Batching offen. Tests audio_levels/audio_gaps/audio_movie/core_continuity angepasst. **Kein Commit.**
+**MIDI levels and MidiHandle[2] (2026-10-21, working tree):** sequence notes compute the MODHSYN register
+(MODMIDI CC7 x port volume, HsMsg pan per 240 Hz ATick, pitch bend now evaluated, channel state per port
+across sequences); background slot 2, system MIDI and door share the port rotation 2->8->9; background timer,
+background stop and room fade-in run as MidiInfo fades (host ramps and finish_door_sound removed);
+door skip stops only door lists. Voice pool 24/core measured (max. 24, RM_0100) and added as a message,
+stealing/ATick batching open. Tests audio_levels/audio_gaps/audio_movie/core_continuity adapted. **No commit.**
 
-**SE-Shot-Pegel TSNDDRV/MODHSYN (2026-10-21, Arbeitsbaum, `./build.sh --test` 205/205):** eigene
-Disassemblierung von TSNDDRV/MODHSYN/MODMIDI.IRX (nur Lesereferenz). SE-Shots rechnen jetzt das
-SPU2-Register VOLL/VOLR (`sony_voice_levels`): Notenpegel inkl. Sample +0x10 (251 Samples mit 100
-fehlten), CC7/CC10, SdrSeReq/SdrSeChg-Regeln (ungueltige Lautstaerke, Chg-Pan 64, Chg-Bend 8192).
-Neuer Test `audio_levels` (5 Gegenproben rot). Ledger: Get3DSoundParameter, CallPlayerFootStepSeEx,
-CallPlayerWeaponSeEx, CallYakkyouSe done (ARMS-SPQ-Gate: nativ synchroner Transport). Offen:
-CallNativeEventSe/MIDI-Pegel (MODMIDI-CC7, HsMsg-Pan, Kanalstart) und Stimmenpool, siehe docs/AUDIO.md.
+**SE shot levels TSNDDRV/MODHSYN (2026-10-21, working tree, `./build.sh --test` 205/205):** own
+disassembly of TSNDDRV/MODHSYN/MODMIDI.IRX (read reference only). SE shots now compute the
+SPU2 register VOLL/VOLR (`sony_voice_levels`): note level incl. sample +0x10 (251 samples with 100
+were missing), CC7/CC10, SdrSeReq/SdrSeChg rules (invalid volume, Chg pan 64, Chg bend 8192).
+New test `audio_levels` (5 counter-checks red). Ledger: Get3DSoundParameter, CallPlayerFootStepSeEx,
+CallPlayerWeaponSeEx, CallYakkyouSe done (ARMS SPQ gate: natively synchronous transport). Open:
+CallNativeEventSe/MIDI levels (MODMIDI CC7, HsMsg pan, channel start) and voice pool, see docs/AUDIO.md.
 
-**Audio-Lücken sdfunc.c (2026-10-21, Arbeitsbaum):** 11 partial-Zeilen am Original nachgeprüft und
-auf done gesetzt: `ss_flg 0x4000000` hat keinen Originalschreiber (PlayBgmEx2/ExecAdxFadeManager
-immer offen), `sdMidiSetFxLev` ist auf PS2 leer (CallDoorSe FxLevel ohne Wirkung, -2-Delays = Pegel 0/
-Mitte/Pitch 0), Set3dSoundFlag/SetUserSoundVolume 6/7/8, Objekt-SE (Type stets 0), Gegner-SE-Manager
-und 60-Hz-Fades, VolDownTbl 8..15 (Aufruferrahmen, kein Literal erreicht ihn), PlayVoiceEx2-Pan
-(reiner Zustand). Neuer Test `audio_gaps` (5 Gegenproben rot). Offen bleibt nur die geschlossene
-IOP-Pegel-/Pan-/Pitchsynthese (Get3DSoundParameter, Weapon/Yakkyou/Footstep, CallNativeEventSe
-Stimmenpool). **Kein Commit.**
+**Audio gaps sdfunc.c (2026-10-21, working tree):** 11 partial rows re-checked against the original and
+set to done: `ss_flg 0x4000000` has no original writer (PlayBgmEx2/ExecAdxFadeManager
+always open), `sdMidiSetFxLev` is empty on PS2 (CallDoorSe FxLevel without effect, -2 delays = level 0/
+center/pitch 0), Set3dSoundFlag/SetUserSoundVolume 6/7/8, object SE (type always 0), enemy SE manager
+and 60 Hz fades, VolDownTbl 8..15 (caller frame, no literal reaches it), PlayVoiceEx2 pan
+(pure state). New test `audio_gaps` (5 counter-checks red). Only the closed
+IOP level/pan/pitch synthesis remains open (Get3DSoundParameter, Weapon/Yakkyou/Footstep, CallNativeEventSe
+voice pool). **No commit.**
 
-**RM_1090 Computer, falsches Passwort (2026-10-21, Arbeitsbaum):** Task 8 (bhSysCallEvent) läuft im
-Original während des Terminals weiter (nur Task 7 gestoppt, system.c:2121); nativ ruhte der
-Ereignistick, Ereignis 4 verdrängte das schlafende Ereignis 5, die Monitorkamera blieb stehen.
-Fix runtime.cpp, Test `rm1090_terminal_wrong_password`. **Wesker-Absturz** („player motion 9
-missing“): Motion 9 hat 20 Kanäle auf 22 Knoten; Motion.c:131 schreibt nur obj_num Knoten,
-`has_motion` jetzt `<= bones`. Test `player_short_motion`. **Kein Commit.**
+**RM_1090 computer, wrong password (2026-10-21, working tree):** task 8 (bhSysCallEvent) keeps running in the
+original during the terminal (only task 7 stopped, system.c:2121); natively the
+event tick was paused, event 4 displaced the sleeping event 5, the monitor camera stood still.
+Fix runtime.cpp, test `rm1090_terminal_wrong_password`. **Wesker crash** („player motion 9
+missing“): motion 9 has 20 channels on 22 nodes; Motion.c:131 writes only obj_num nodes,
+`has_motion` now `<= bones`. Test `player_short_motion`. **No commit.**
 
-**Nutzerbefunde 2026-10-21 (Dev-App, 203/203 grün):** (1) Himmel schwarz beim Inventaröffnen: njSetBackColor(0)
-kam schon beim Tab statt im Monitor nach dem Abblenden (system.c:1987); (2) Calico-Mündungsfeuer bei zwei Zielen:
-PlyPchMain-Armknoten fehlten im committeten owP-Baum (beides in de1fac7 mitcommittet); (3) RM_3091-Wurmsound:
-SE-Stimmen ignorierten VAG-Loopmarker (70400 brach nach 1 s ab) – Mix folgt jetzt den Markern, dazu AllStopEnemySe
-(system.c:602/617); (4) Stufenaktion lief am Passtor player.c:1365 vorbei weiter, wenn ein Ereignis die Steuerung nimmt
-(RM_3100-Verdacht, Szene nicht nachgestellt). Autoaim auf tote Gegner nicht reproduziert. **Kein Commit.**
+**User findings 2026-10-21 (dev app, 203/203 green):** (1) sky black when opening the inventory: njSetBackColor(0)
+came already on Tab instead of in the monitor after fading out (system.c:1987); (2) Calico muzzle flash with two targets:
+PlyPchMain arm nodes were missing in the committed owP tree (both co-committed in de1fac7); (3) RM_3091 worm sound:
+SE voices ignored VAG loop markers (70400 cut off after 1 s) – mix now follows the markers, plus AllStopEnemySe
+(system.c:602/617); (4) stair action kept running past the pass gate player.c:1365 when an event takes control
+(RM_3100 suspicion, scene not reproduced). Autoaim on dead enemies not reproduced. **No commit.**
 
-**Gegnerzeilen-Audit und EN21-Abnahme (2026-10-21, Arbeitsbaum):** EN21 am echten Raum
-(RM_3120/RM_3140) mit `enemy_en21_world` belegt, sechs Ledger-Zeilen done. Veraltet waren
-EN26 Kopfplatzen, EN29 Blut, EN19 Schatten/Trefferzuweisung/Kamerawackel, EN12-Effekte;
-neu portiert `bhSetGunSplash` (combat.cpp, Kampf- und Effektpass) und das Zeichnen der
-EN01-Kinder mit eigener Modellreihe (Kappe/Wurm/Bom/Scope, 30 Räume). Tests `gun_splash`,
-`enemy_en01_child_draw`, `rm5840_tyrant_gun`. Berichte `archived/work/enemy_rows_audit.result.md`,
-`archived/work/en21_acceptance.result.md`. **Kein Commit.**
+**Enemy row audit and EN21 acceptance (2026-10-21, working tree):** EN21 in the real room
+(RM_3120/RM_3140) covered with `enemy_en21_world`, six ledger rows done. Stale were
+EN26 head burst, EN29 blood, EN19 shadow/hit assignment/camera shake, EN12 effects;
+newly ported `bhSetGunSplash` (combat.cpp, combat and effect pass) and drawing of the
+EN01 children with their own model row (cap/worm/bom/scope, 30 rooms). Tests `gun_splash`,
+`enemy_en01_child_draw`, `rm5840_tyrant_gun`. Reports `archived/work/enemy_rows_audit.result.md`,
+`archived/work/en21_acceptance.result.md`. **No commit.**
 
-**RM_0090 Sicherheitsbox mit hochstehendem Deckel (2026-10-20, Arbeitsbaum, 197/197 grün):**
-Raumobjekte übernahmen jede Common-24/34-Motion im nächsten Takt; im Original schreibt nur
-bhSetMotion (v0 0/2/5/6, bhSetObjMotion) objP. Auslöser: scd1 setzt das Work der Ebene 15 auf
-obwp[14], das Fensterzombie-Common 34 (Raummotion 2) trifft danach die Box. Test `object_motion_commit`.
-Zusätzlich zeichnet der Headless-Lauf jeden Takt (rand() in bhEff106), `verify_enemy_ai` wieder grün.
+**RM_0090 safety box with raised lid (2026-10-20, working tree, 197/197 green):**
+room objects adopted every Common 24/34 motion in the next tick; in the original only
+bhSetMotion (v0 0/2/5/6, bhSetObjMotion) writes objP. Trigger: scd1 sets the work of level 15 to
+obwp[14], the window zombie Common 34 (room motion 2) then hits the box. Test `object_motion_commit`.
+Additionally the headless run draws every tick (rand() in bhEff106), `verify_enemy_ai` green again.
 
-**Review der letzten 10 Commits (2026-10-20, Arbeitsbaum, 196/196 grün):** GPU-Batches über
-Schattenphasengrenzen (Metal/D3D11), doppeltes bhStandPlayerMotion beim Kistenschließen,
-Klauen-Blendzustand, triviale Prüfungen im Stand-Test, ISO-Rohabbilder/PVD-Lage/Namen behoben.
-Offen: `verify_enemy_ai` rot seit 2de4dad (Zombie-Zeitachse, Originalreferenz nötig).
-[Bericht](build/validation/review-last10-20261020/README.md). **Kein Commit.**
+**Review of the last 10 commits (2026-10-20, working tree, 196/196 green):** GPU batches across
+shadow phase boundaries (Metal/D3D11), double bhStandPlayerMotion when closing the crate,
+claw blend state, trivial checks in the stand test, ISO raw images/PVD position/names fixed.
+Open: `verify_enemy_ai` red since 2de4dad (zombie timeline, original reference needed).
+[Report](build/validation/review-last10-20261020/README.md). **No commit.**
 
-**CTest `script_motion` grün (2026-10-14, `build/en09-claude-20261014`, 86/86).**
-Ursache war Buchführung, nicht Darstellung: `pose_frame()` liefert für native
-Gegnerworks jetzt den Frame, den bhSetMotion vor dem Vorschub abgetastet hat
-(`sampled_frame`, gesetzt im Dienst `set_motion`); bhMotionPauseSet (0x2b) schreibt
-mode3 auch auf den nativen Work und exp1. Testerwartungen, die dem Original
-widersprachen, sind mit Quellbeleg korrigiert: Common 23 ist keine Pause (event.c:11971,
-nur flg 0x118), bhMotionPauseSet stoppt einen EN01-Work nicht (bhEne01_SetMtn läuft
-unabhängig von mode3, en01.c:2528); die Figur wird nach der Drag-Szene per Originalbefehl
-0x24 reaktiviert, der Zombie in RM_0070 erst nach bhEne01_Init per Common 34 gesteuert.
-Ältere Testbinärs (z. B. `build/macos-arm64`, `box0090`) vor Verwendung neu bauen.
+**CTest `script_motion` green (2026-10-14, `build/en09-claude-20261014`, 86/86).**
+The cause was bookkeeping, not rendering: `pose_frame()` now returns for native
+enemy works the frame that bhSetMotion sampled before advancing
+(`sampled_frame`, set in the service `set_motion`); bhMotionPauseSet (0x2b) writes
+mode3 also to the native work and exp1. Test expectations that contradicted the
+original are corrected with source evidence: Common 23 is not a pause (event.c:11971,
+only flg 0x118), bhMotionPauseSet does not stop an EN01 work (bhEne01_SetMtn runs
+independently of mode3, en01.c:2528); the figure is reactivated after the drag scene via original command
+0x24, the zombie in RM_0070 is only controlled via Common 34 after bhEne01_Init.
+Rebuild older test binaries (e.g. `build/macos-arm64`, `box0090`) before use.
 
-`Start.command` bevorzugt die Entwicklungs-App unter `build/start/macos-arm64`,
-danach das v0.5-Paket, zuletzt das Build-Binary. Die Dokumentationstrennung ändert
-keine Runtime, kein Paket, keine Konfiguration und keinen Snapshot.
-Nicht aus einem alten „im Paket“-Absatz eine aktuelle Auslieferung ableiten.
+`Start.command` prefers the development app under `build/start/macos-arm64`,
+then the v0.5 package, finally the build binary. The documentation split changes
+no runtime, no package, no configuration and no snapshot.
+Do not derive a current delivery from an old „in the package“ paragraph.
 
-**Leistung/Energie:** Der Software-Rasterer ist ≈ 99 % der CPU-Last (≈ 62–70 ms CPU je
-Raumbild bei „High“, Simulation ≈ 0.26 ms/Takt). Plan und Messbasis:
+**Performance/energy:** the software rasterizer is ≈ 99 % of the CPU load (≈ 62–70 ms CPU per
+room frame at „High“, simulation ≈ 0.26 ms/tick). Plan and measurement basis:
 [Plan](work/performance_optimization_plan_20261020.md),
-[Phase A + Schnitte](archived/work/performance_phaseA_scalpel_20261020.result.md)
-(`bilinear` inline −8 % bitidentisch, ein Zeichenpass je Takt, `--render-threads` für
-`powermetrics`-A/B am Starter). Workerzahl per `powermetrics` entschieden (Automatik bleibt).
-[GPU-Machbarkeit](archived/work/performance_gpu_feasibility_20261020.result.md) bestanden: dieselbe
-Setup-Liste auf Metal statt 62–73 ms CPU. **[GPU-Rasterer im Spiel](archived/work/performance_gpu_raster_d2_20261020.result.md)**
-(macOS, Dev-App): `video.ini renderer = gpu` (Standard), `--renderer gpu|software`; Punktabtastung
-bitgleich inkl. Schatten (Test `gpu_raster_parity`), CPU je Bild ≈ 0,3–0,5 ms. Offen: Wattmessung
-am Starter. Schattenmasken laufen ebenfalls auf der GPU (ein Befehlspuffer je Bild).
-Windows: D3D11-Backend über Rasterizer Ordered Views geschrieben, Crossbuild grün, **auf Hardware
-noch ungeprüft**; GPUs ohne ROV behalten den Softwarepfad.
-**OpenGL (2026-10-21, Arbeitsbaum):** optionales Core-4.1-Backend, Linux-Standard;
-`--renderer opengl`/INI/Debugwahl, Metal/D3D-Defaults erhalten. Mac-arm64 GL an/aus und
-Windows-x64-Crossbuild grün; 11 gezielte Tests bestanden, 3 GPU-Prüfungen wegen
-Sandbox ohne Display übersprungen. Dev-App aktualisiert, Titel/Raum nur im
-Softwarefallback geprüft. GL-Shader-/Pixelparität und Linux-Hardware offen.
-[Bericht](archived/work/opengl_backend.result.md).
-**Vulkan (2026-10-25, Arbeitsbaum):** optionales Backend über geordneten Fragment-Interlock,
-nie Standard; `--renderer vulkan`/INI/Debugwahl. macOS (MoltenVK) bitgleich inkl. Schatten,
-Räume 100 % (Punkt), Runtime-Bild == Metal. Windows/Linux-Hardware offen, keine Paketersetzung.
-[Bericht](work/vulkan_raster_backend.result.md).
+[Phase A + cuts](archived/work/performance_phaseA_scalpel_20261020.result.md)
+(`bilinear` inline −8 % bit-identical, one draw pass per tick, `--render-threads` for
+`powermetrics` A/B at the launcher). Worker count decided via `powermetrics` (automatic stays).
+[GPU feasibility](archived/work/performance_gpu_feasibility_20261020.result.md) passed: the same
+setup list on Metal instead of 62–73 ms CPU. **[GPU rasterizer in the game](archived/work/performance_gpu_raster_d2_20261020.result.md)**
+(macOS, dev app): `video.ini renderer = gpu` (default), `--renderer gpu|software`; point sampling
+bit-identical incl. shadows (test `gpu_raster_parity`), CPU per frame ≈ 0.3–0.5 ms. Open: wattage measurement
+at the launcher. Shadow masks also run on the GPU (one command buffer per frame).
+Windows: D3D11 backend written via Rasterizer Ordered Views, cross build green, **still unverified on
+hardware**; GPUs without ROV keep the software path.
+**OpenGL (2026-10-21, working tree):** optional Core 4.1 backend, Linux default;
+`--renderer opengl`/INI/debug selection, Metal/D3D defaults kept. Mac arm64 GL on/off and
+Windows x64 cross build green; 11 targeted tests passed, 3 GPU checks skipped because of
+sandbox without display. Dev app updated, title/room only checked in the
+software fallback. GL shader/pixel parity and Linux hardware open.
+[Report](archived/work/opengl_backend.result.md).
+**Vulkan (2026-10-25, working tree):** optional backend via ordered fragment interlock,
+never default; `--renderer vulkan`/INI/debug selection. macOS (MoltenVK) bit-identical incl. shadows,
+rooms 100 % (point), runtime image == Metal. Windows/Linux hardware open, no package replacement.
+[Report](work/vulkan_raster_backend.result.md).
 
-**Direct3D 12 (2026-10-25, Arbeitsbaum):** optionales Windows-Backend, gleiches HLSL wie D3D11
-(`native/gpu_raster_hlsl.h`), ROV, UAV-Barriere je Zeichenaufruf, Zaun vor dem Rücklesen;
-`--renderer d3d12`/INI/Debugwahl, `RECVX_D3D12_DRIVER=warp`. Crossbuild x64 geprüft, **Parität auf
-Windows-Hardware/WARP offen** (`gpu_raster_d3d12_parity`). [Bericht](work/d3d12_raster_backend.result.md).
+**Direct3D 12 (2026-10-25, working tree):** optional Windows backend, same HLSL as D3D11
+(`native/gpu_raster_hlsl.h`), ROV, UAV barrier per draw call, fence before readback;
+`--renderer d3d12`/INI/debug selection, `RECVX_D3D12_DRIVER=warp`. Cross build x64 checked, **parity on
+Windows hardware/WARP open** (`gpu_raster_d3d12_parity`). [Report](work/d3d12_raster_backend.result.md).
 
-**FSR 4 (2026-10-25, Arbeitsbaum):** Windows-Präsentationsstufe `native/fsr_present_d3d12.cpp` hinter
-der MetalFX-Schnittstelle: eigenes D3D12-Gerät, DXGI-Flip-Swapchain auf dem SDL-HWND, Kamera-
-Bewegungsvektoren, Reaktivmaske der 2D-Ebene, FSR 4 FP8/INT8 (`upscaler = fsr4|fsr4-int8`) mit
-FSR-3.1-Fallback des Upscaler-Providers, Schärfen/CRT als HLSL-Port. ffx-api-Header (MIT, SDK 2.1.0)
-unter `native/third_party/FidelityFX-SDK/include`, DLLs nie im Repo. Crossbuild x64 und macOS-Tests
-grün; **auf Windows-GPU nicht gelaufen**. Offen: Objekt-Bewegungsvektoren, Jitter, Frame Generation,
+**FSR 4 (2026-10-25, working tree):** Windows presentation stage `native/fsr_present_d3d12.cpp` behind
+the MetalFX interface: own D3D12 device, DXGI flip swapchain on the SDL HWND, camera
+motion vectors, reactive mask of the 2D layer, FSR 4 FP8/INT8 (`upscaler = fsr4|fsr4-int8`) with
+FSR 3.1 fallback of the upscaler provider, sharpen/CRT as HLSL port. ffx-api headers (MIT, SDK 2.1.0)
+under `native/third_party/FidelityFX-SDK/include`, DLLs never in the repo. Cross build x64 and macOS tests
+green; **not run on a Windows GPU**. Open: object motion vectors, jitter, frame generation,
 Vulkan (Linux/macOS). Details [NATIVE_PORT](docs/NATIVE_PORT.md#fsr-presentation-stage-windows),
-[Bericht](work/fsr_present_d3d12.result.md).
+[Report](work/fsr_present_d3d12.result.md).
 
-**Kartenbild:** MAP zeichnet MRY-Geometrie, Marker und Sprites in der eigenen
-Build-Runtime; Fade-Rückweg und Wiedereintritt gezielt geprüft. Constant-Material-
-Farbpfad und Typ-41-Normalen korrigiert. **Noch keine Starter-/Paketersetzung.**
-Belege und verbleibende Grenzen: [D10 Kartenrenderer](archived/work/native_port_D10_map_render.result.md).
+**Map screen:** MAP draws MRY geometry, markers and sprites in its own
+build runtime; fade return and re-entry checked specifically. Constant material
+color path and type 41 normals corrected. **No launcher/package replacement yet.**
+Evidence and remaining limits: [D10 map renderer](archived/work/native_port_D10_map_render.result.md).
 
-**Pausentaste (Host):** Escape beendet die Runtime nie. Im Menü/Dialog bricht es ab,
-im freien Spiel öffnet und schließt es die Pause (`system.c:668/691`, dieselbe
-Taste schaltet ein und aus); das Gate bleibt `st_flg 0x1C040208`. Quit liegt auf F10,
-und eine Taste, die Cancel ist, zählt nicht als Quit (auch nach Neubelegung; alte
-`controls.ini` mit `quit = Escape, F10` behalten F10). Belege:
-[keyboard_controller_config mit Negativkontrolle](tests/native/input_test.cpp)
-und `main_menu_settings_video_skip` in der eigenen Build-Runtime,
-[Controls](docs/CONTROLS.md). **Noch keine Starter-/Paketersetzung.**
+**Pause key (host):** Escape never quits the runtime. In menus/dialogs it cancels,
+in free play it opens and closes the pause (`system.c:668/691`, the same
+key toggles on and off); the gate stays `st_flg 0x1C040208`. Quit is on F10,
+and a key that is Cancel does not count as Quit (also after rebinding; old
+`controls.ini` with `quit = Escape, F10` keep F10). Evidence:
+[keyboard_controller_config with negative control](tests/native/input_test.cpp)
+and `main_menu_settings_video_skip` in the own build runtime,
+[Controls](docs/CONTROLS.md). **No launcher/package replacement yet.**
 
-**bhLoadWork-Fall 0 (Spielerwork):** `event.c:bhLoadWork`/`bhLoadWorkEx` Fall 0
-schreiben jetzt `mode0 7`, `mode2 0`, mtn_no-Lowbyte 42, `stflg |= 0x10000`,
-`stflg &= ~0x80` und `flg |= 0x10000`; `bhLoadWork2` Fall 0 nur `mode0 7` sowie
-`flg`/`stflg 0x10000` (jeweils mit Originalfundstelle). Damit greift das
-Spielerpad-Gate `player.c:1804` und die portierte Freigabe in
-`system.c:736-744` löscht echte Schreiber. Die rmthp-Lücke datP NULL
-(`Motion.c:29`) ist für den Spielerwork wie für Entities behandelt (kein
-Schritt, kein frm_no-Fortschritt, zuletzt geschriebener objP/owp wird
-gezeichnet). Setzen und Freigabe liegen in einem Tick; Endbild vorher/nachher
-gleich, Belege: [Messungen](build/validation/loadwork-case0/README.md),
-`event_lifecycle_control_release` und `script_motion` (Ctest 124/124).
-**Noch keine Starter-/Paketersetzung.**
+**bhLoadWork case 0 (player work):** `event.c:bhLoadWork`/`bhLoadWorkEx` case 0
+now write `mode0 7`, `mode2 0`, mtn_no low byte 42, `stflg |= 0x10000`,
+`stflg &= ~0x80` and `flg |= 0x10000`; `bhLoadWork2` case 0 only `mode0 7` and
+`flg`/`stflg 0x10000` (each with original source location). With that the
+player pad gate `player.c:1804` takes effect and the ported release in
+`system.c:736-744` clears real writers. The rmthp gap datP NULL
+(`Motion.c:29`) is handled for the player work as for entities (no
+step, no frm_no advance, the last written objP/owp is
+drawn). Set and release happen in one tick; end frame before/after
+identical, evidence: [measurements](build/validation/loadwork-case0/README.md),
+`event_lifecycle_control_release` and `script_motion` (Ctest 124/124).
+**No launcher/package replacement yet.**
 
-**ID-Karte RM_1020 (Fix A):** Der Freeze nach der Wegwerf-Frage ist behoben. Der Spielerpass
-läuft trotz st_flg 0x4 unter den Originalbedingungen von bhCPM0_action, und bhControlPlayerPad
-gibt das Bit frei (player.c:1838). Geprüft in der eigenen Build-Runtime
-`build/discard-claude-20261014`. Offen ist B: das Original-Pad-Gating statt Host-Gate.
-**Noch keine Starter-/Paketersetzung.**
-[Bericht](archived/work/native_port_discard_question.result.md).
+**ID card RM_1020 (fix A):** the freeze after the discard question is fixed. The player pass
+runs despite st_flg 0x4 under the original conditions of bhCPM0_action, and bhControlPlayerPad
+releases the bit (player.c:1838). Checked in the own build runtime
+`build/discard-claude-20261014`. B is open: the original pad gating instead of the host gate.
+**No launcher/package replacement yet.**
+[Report](archived/work/native_port_discard_question.result.md).
 
-**Effektprozeduren (Übersetzer abgelöst, weitere Gruppen):** alle 66 vormals
-regex-übersetzten Prozeduren sowie 68 nie übersetzte (effsub0, effsub1, effsub1b,
-effsub5 und effsub6, zuletzt die Augenlichter 145/146, die Gaswand 127, der Schneefall
-219 mit der Schneebibliothek aus effsub5 und die Nachbilder 135/136) sind eigenständig in
-`native/effect_sprite_procedures.cpp` portiert; 18 Prozeduren dieser Dateien und die
-Familien aus effsub2/3/4 bleiben offen; `native/effect_procedures.cpp`, `native/effect_core.*` und
-`tools/generate_effect_procedures.py` sind entfernt. Dazu sind
-`njGetPlaneNormal`/`njGetPlaneNormal2`, `njProjectScreen` und der Bildschirmzustand
-(`njSetScreen`/`njSetAspect`/`njSetPerspective`/`njViewScreenMatrix`) in
-`native/ninja_matrix.c` portiert und tragen das Rückseitentor `flg 0x20000` des
-Effektzeichenpfads. Zufalls- und Versatzfehler des
-Generats sind in [QUALITY.md](QUALITY.md) dokumentiert. Belege, Offenliste der nie
-übersetzten Prozeduren mit dem Scan aller 205 Raumdateien:
-[Ergebnis](archived/work/native_port_effsub0_handport.result.md), Differenzläufe
-`build/validation/effproc-handport-20261014/`, Gruppen 7/8
-`build/validation/effproc-backface-20261014/`, Gruppe 9 `build/validation/effproc-snow-20261014/`, Gruppe 10 (inkl. `bhSetEffectLink` beim
-Raumladen) `build/validation/effproc-afterimage-20261014/`.
-Nachbild-Nachprüfung: belegte DifAmb-Lichtrechnung, committed Spieler-/Zusatzmodellaufnahme
-und Skin-FM; **88/88** Tests. Diagnose-A/B mit Originalraumgeometrie, keine natürliche
-Sichtabnahme. [Belege](archived/work/native_port_effsub0_handport.result.md).
-**Start.command-Dev-App durch `./build.sh` aktualisiert; kein Paket ersetzt.**
+**Effect procedures (translator replaced, further groups):** all 66 formerly
+regex-translated procedures as well as 68 never translated ones (effsub0, effsub1, effsub1b,
+effsub5 and effsub6, most recently the eye lights 145/146, the gas wall 127, the snowfall
+219 with the snow library from effsub5 and the afterimages 135/136) are ported independently in
+`native/effect_sprite_procedures.cpp`; 18 procedures of these files and the
+families from effsub2/3/4 remain open; `native/effect_procedures.cpp`, `native/effect_core.*` and
+`tools/generate_effect_procedures.py` are removed. In addition
+`njGetPlaneNormal`/`njGetPlaneNormal2`, `njProjectScreen` and the screen state
+(`njSetScreen`/`njSetAspect`/`njSetPerspective`/`njViewScreenMatrix`) are ported in
+`native/ninja_matrix.c` and carry the backface gate `flg 0x20000` of the
+effect draw path. Random and offset errors of the
+generated code are documented in [QUALITY.md](QUALITY.md). Evidence, open list of the never
+translated procedures with the scan of all 205 room files:
+[Result](archived/work/native_port_effsub0_handport.result.md), differential runs
+`build/validation/effproc-handport-20261014/`, groups 7/8
+`build/validation/effproc-backface-20261014/`, group 9 `build/validation/effproc-snow-20261014/`, group 10 (incl. `bhSetEffectLink` on
+room load) `build/validation/effproc-afterimage-20261014/`.
+Afterimage re-check: verified DifAmb lighting computation, committed player/extra model capture
+and skin FM; **88/88** tests. Diagnostic A/B with original room geometry, no natural
+visual acceptance. [Evidence](archived/work/native_port_effsub0_handport.result.md).
+**Start.command dev app updated by `./build.sh`; no package replaced.**
 
-**Gegner-KI EN21:** Albinoid-Jungtier im nativen WorldEntity-/Dispatchpfad
-angebunden, mit Route/Spielmodus, Spielergriff, Audio und Effekten 396/399 auf der
-Modelltexturliste. Gemeinsame Routeninitialisierung ohne Zombie-Ressource und
-Spieler-Griffseiteneffekte ergänzt. Eigene arm64-Build `build/en21-bind-claude-20261014`.
-**Tests auf Nutzerwunsch zurückgestellt; keine Gameplay-Abnahme oder Starter-Ersetzung.**
-[Umfang und spätere Abnahme](archived/work/native_port_EN21_world.result.md).
+**Enemy AI EN21:** albinoid juvenile attached in the native WorldEntity/dispatch path,
+with route/play mode, player grab, audio and effects 396/399 on the
+model texture list. Shared route initialization without zombie resource and
+player grab side effects added. Own arm64 build `build/en21-bind-claude-20261014`.
+**Tests deferred at the user's request; no gameplay acceptance or launcher replacement.**
+[Scope and later acceptance](archived/work/native_port_EN21_world.result.md).
 
-**Bandersnatcher (EN09):** Stillstand behoben — Identität 9 fehlte im Dispatch, die
-Zustandsmaschine war nur Gerüst. KI, Motion/Fußfixierung, Arme, Griff, Schaden, Tod
-und Rauch portiert; RM_1060 A/B und `tests/native/en09_world_test.cpp` grün.
-Eigene Build `build/en09-claude-20261014`. **Noch keine Starter-/Paketersetzung.**
-[Bericht](archived/work/native_port_EN09_world.result.md).
+**Bandersnatch (EN09):** standstill fixed — identity 9 was missing in the dispatch, the
+state machine was only a skeleton. AI, motion/foot pinning, arms, grab, damage, death
+and smoke ported; RM_1060 A/B and `tests/native/en09_world_test.cpp` green.
+Own build `build/en09-claude-20261014`. **No launcher/package replacement yet.**
+[Report](archived/work/native_port_EN09_world.result.md).
 
-**Offene Punkte, Stand 2026-10-14 nachmittags:** ID-Karte Variante B (Original-Padsperre statt
-st_flg-0x4-Hostsperre), UFO-Kran bhEff134 + EN56-Dienste + Anzeige, Funken 308, Blutstoss 296/297,
-EN16-Folgeeffekte, Regen (Linien je Bild geleert), RM_1100 ENDIF ohne IF erledigt; EN12: Dienste und Feuereffekte 262-265/274-276 gebunden (Alexia kaempft in RM_9321); offen
-EN12-MV04 (Original-UB bei stehendem Spieler, Nutzerentscheidung), Effekte 256/257/266/269.
+**Open points, as of 2026-10-14 afternoon:** ID card variant B (original pad lock instead of
+st_flg 0x4 host lock), UFO crane bhEff134 + EN56 services + display, sparks 308, blood spurt 296/297,
+EN16 follow-up effects, rain (lines cleared per frame), RM_1100 ENDIF without IF done; EN12: services and fire effects 262-265/274-276 bound (Alexia fights in RM_9321); open
+EN12 MV04 (original UB with standing player, user decision), effects 256/257/266/269.
 
-**Gegner-Lückenscan (2026-10-14 abends):** Statt die Ledger-Texte zu übernehmen, meldet
-`build/validation/enemy_scan_20261014/scan_enemy_gaps.py` die tatsächlichen `Enemy gaps:` aller
-205 Räume (600 Frames, ohne Eingabe). Vorher 51 Räume mit Lücken, nach vier Fixes **38**:
-`bhEne01_FlyingCap` `owP[0].flg |= 3` (7 Räume, Dienst war längst gebunden),
-`bhCheckWallRefAngle` als `wall_ref_angle` mit beiden Originaltoren (7 Räume),
-`eff[sdw].mdlver` (4 Räume) und `bhEne03_Collision` in EN08 (3 Räume, der Dienst war ebenfalls
-gebunden). 31/31 Gegner-/Effekt-Tests grün. Die alte Ledger-Zeile zu EN04
-(„MV-Zustandsmaschine fehlt") war veraltet: mv00..mv12, ng/dg/dd und der Brain-Dispatch sind da,
-RM_1000 meldet keine Lücke. Die verbleibenden Lücken sind **Subsysteme und Gegnerfamilien**, keine
-ungebundenen Einzeldienste: `bhEne02` Gulp Worm (6, Struktur bestimmt: 18 Kindworks, mobiler
-ATR-Eintrag, EXP0-Layout), `bhEne19` (4), `bhEff108`/`bhEff219` (4), `bhEne03`/`bhEne29` (3),
-`bhEff355` (3), EN53-`child_ambient` (3).
-[Bericht](archived/work/native_port_enemy_gap_scan.result.md). **Kein Commit/Push, keine Paketersetzung.**
+**Enemy gap scan (2026-10-14 evening):** instead of adopting the ledger texts,
+`build/validation/enemy_scan_20261014/scan_enemy_gaps.py` reports the actual `Enemy gaps:` of all
+205 rooms (600 frames, without input). Before: 51 rooms with gaps, after four fixes **38**:
+`bhEne01_FlyingCap` `owP[0].flg |= 3` (7 rooms, service had long been bound),
+`bhCheckWallRefAngle` as `wall_ref_angle` with both original gates (7 rooms),
+`eff[sdw].mdlver` (4 rooms) and `bhEne03_Collision` in EN08 (3 rooms, the service was also
+bound). 31/31 enemy/effect tests green. The old ledger row for EN04
+(„MV-Zustandsmaschine fehlt") was stale: mv00..mv12, ng/dg/dd and the brain dispatch are there,
+RM_1000 reports no gap. The remaining gaps are **subsystems and enemy families**, not
+unbound individual services: `bhEne02` Gulp Worm (6, structure determined: 18 child works, mobile
+ATR entry, EXP0 layout), `bhEne19` (4), `bhEff108`/`bhEff219` (4), `bhEne03`/`bhEne29` (3),
+`bhEff355` (3), EN53 `child_ambient` (3).
+[Report](archived/work/native_port_enemy_gap_scan.result.md). **No commit/push, no package replacement.**
 
-**EN02 Gulp Worm (2026-10-14 nachts):** vollständig portiert (`native/enemies/en02.c`, Dispatch
-`jump[2]`, 18 Kindworks auf Slot 31, mobiler ATR, Sandsprites 253/254, Effektstimme 127).
-RM_5830 headless: Angriffskette läuft, Spieler-HP 160→0; CTest `enemy_en02_world` grün, Gegner-/
-Effekt-Suite 32/32. Scan jetzt **35 Räume** mit Lücken. Belegte Original-UB: `ang` in
-`SetSandEffectMain` Fall 8 ist `$s3` des Aufrufers von `bhControlEnemy` (Disassembly), nativ gemeldet.
-Offen: Skript-Opcodes 0x98/0xC3 (world.cpp fremd in Arbeit), Sprite 255, RM_3091/7220 skriptgehalten.
-[Bericht](archived/work/native_port_EN02_world.result.md). **Kein Commit/Push, keine Paketersetzung.**
+**EN02 Gulp Worm (2026-10-14 night):** fully ported (`native/enemies/en02.c`, dispatch
+`jump[2]`, 18 child works on slot 31, mobile ATR, sand sprites 253/254, effect voice 127).
+RM_5830 headless: attack chain runs, player HP 160→0; CTest `enemy_en02_world` green, enemy/
+effect suite 32/32. Scan now **35 rooms** with gaps. Verified original UB: `ang` in
+`SetSandEffectMain` case 8 is `$s3` of the caller of `bhControlEnemy` (disassembly), reported natively.
+Open: script opcodes 0x98/0xC3 (world.cpp being worked on by others), sprite 255, RM_3091/7220 held by script.
+[Report](archived/work/native_port_EN02_world.result.md). **No commit/push, no package replacement.**
 
-**Effekt 355 (2026-10-14 nachts):** `bhEff_Sub355` portiert (Zielfernrohr-Marke des EN01-Kindes
-bhEne01Scope; globale Texturgruppe 4 aus SYSTEM/0001.bin, 16-Pass-Alpha). **Korrektur:** die frühere
-Meldung `eff[-1]` in RM_5550/5630/8000 war eine Fehldiagnose — `spawn_effect` liefert -1 für
-**nicht portierte** Effekte, und der Aufrufer meldet dann die Originalbedingung; der Pool war nie
-voll. Beide Meldungen (`bhEff355`, `eff[-1]`) sind mit dem Port verschwunden. Scan jetzt **32 Räume**
-mit Lücken. [Bericht](archived/work/native_port_enemy_gap_scan.result.md). **Kein Commit/Push, keine Paketersetzung.**
+**Effect 355 (2026-10-14 night):** `bhEff_Sub355` ported (scope marker of the EN01 child
+bhEne01Scope; global texture group 4 from SYSTEM/0001.bin, 16-pass alpha). **Correction:** the earlier
+report `eff[-1]` in RM_5550/5630/8000 was a misdiagnosis — `spawn_effect` returns -1 for
+**unported** effects, and the caller then reports the original condition; the pool was never
+full. Both reports (`bhEff355`, `eff[-1]`) disappeared with the port. Scan now **32 rooms**
+with gaps. [Report](archived/work/native_port_enemy_gap_scan.result.md). **No commit/push, no package replacement.**
 
-**Effekt 219 (2026-10-14 nachts):** Wartebedingung auf `camera_ready` entfernt — Fehllücke, denn
-`room.c:33 bhInitCamera` nullt bei jedem Raumladen `cam` (camera.c:8) und `game.c:50 bhControlEffect`
-läuft vor `:58 bhControlCamera`; im ersten Effektpass ist die Kamera also 0, wie die nativen
-Defaults. Betroffen waren 4 Räume (RM_5800/5840/6100/9000); der Zähler „Räume mit Lücken" bleibt
-bei 32, weil diese Räume weitere Lücken haben — die **Lücken-Einträge** sanken 58 → 48 seit run5.
-**Kein Commit/Push, keine Paketersetzung.**
+**Effect 219 (2026-10-14 night):** wait condition on `camera_ready` removed — false gap, because
+`room.c:33 bhInitCamera` zeroes `cam` on every room load (camera.c:8) and `game.c:50 bhControlEffect`
+runs before `:58 bhControlCamera`; in the first effect pass the camera is therefore 0, like the native
+defaults. Affected were 4 rooms (RM_5800/5840/6100/9000); the counter „rooms with gaps" stays
+at 32 because these rooms have further gaps — the **gap entries** dropped 58 → 48 since run5.
+**No commit/push, no package replacement.**
 
-**EN11/EN16-Bindung (2026-10-14 nachts):** RM_9100 meldete drei EN11-Lücken mit einer Ursache —
-`en11_services` war ab dem zweiten Gegnerpass NULL, weil der Anbieter nur in `init_enemy_works`
-gebunden und am Ende jedes Passes in `control_enemy_works` wieder gelöst wurde (EN21/EN09/EN05
-binden sich dort korrekt je Pass). Beide Blöcke liegen jetzt im Pass-Scope. RM_9100 scan-lückenlos
-(3 → 0), Scan **31 Räume**. Test `enemy_en11_world`. **Kein Commit/Push, keine Paketersetzung.**
+**EN11/EN16 binding (2026-10-14 night):** RM_9100 reported three EN11 gaps with one cause —
+`en11_services` was NULL from the second enemy pass on, because the provider was only bound in `init_enemy_works`
+and released again at the end of each pass in `control_enemy_works` (EN21/EN09/EN05
+bind correctly there per pass). Both blocks are now in the pass scope. RM_9100 gap-free in the scan
+(3 → 0), scan **31 rooms**. Test `enemy_en11_world`. **No commit/push, no package replacement.**
 
-**Spieler-owP im Effektpass (2026-10-15, Subagent, geprüft):** die Test-Meldung „owP vor
-bhCalcModel" war ein Fixture-Fehler (kein `commit_player_joints` wie runtime.cpp:450/493 =
-player.c:840/1688); EN11-Fixture korrigiert, Test `player_owp_order` belegt beides. **Offen als
-echte Lücke:** der Effektpass liest nativ den Spielerbaum des vorigen Bildes (Runtime committed
-nach `world->tick()`), das Original den des selben Bildes (game.c:49 vor :50) — ein Bild Latenz
-für 261/270-Treffer, Spielerlinks, Nachbild 136, E12-Feuer. Fix = Spielerpass-Haken in
-`RoomWorld::tick` (world.cpp:1777-1778), nicht chirurgisch, offen.
-[Bericht](archived/work/native_port_player_owp_effect_pass.result.md). **Kein Commit/Push.**
+**Player owP in the effect pass (2026-10-15, subagent, checked):** the test report „owP vor
+bhCalcModel" was a fixture error (no `commit_player_joints` as in runtime.cpp:450/493 =
+player.c:840/1688); EN11 fixture corrected, test `player_owp_order` covers both. **Open as a
+real gap:** the effect pass natively reads the player tree of the previous frame (runtime commits
+after `world->tick()`), the original that of the same frame (game.c:49 before :50) — one frame latency
+for 261/270 hits, player links, afterimage 136, E12 fire. Fix = player pass hook in
+`RoomWorld::tick` (world.cpp:1777-1778), not surgical, open.
+[Report](archived/work/native_port_player_owp_effect_pass.result.md). **No commit/push.**
 
-**RM_1090 Standuhr (2026-10-15):** Sichtloch stand 22,5° neben 12 Uhr — Common_controll 9 schrieb
-für den nativen Uhr-Work in einen ungelesenen Override, jetzt wie 8/18 auf `enemy_obj`
-(event.c:12136). Escape bestätigte Skriptauswahlen mit Auswahl 0 („Links“); Cancel bestätigt
-keine Auswahl mehr, das Raumskript liest ihn selbst (bhPadCheck, Event 13). Der Reset-Freeze
-nach L/R war die Dev-App vom 10.10. ohne 0xb1 (HEAD hat den Port). Raumdaten: Tafeln
-1/3/4/5/6/7/8/Emblem, L=+180°, R=−45°; L,R,LR,RRR zeigt 3,1,7,1 — „1974“ ist nicht darstellbar.
-Last: nur die Schreibtischkamera (Glasdach, bildfüllendes Alpha) kostet ~2× CPU, kein Fehler.
-Nachweis `tools/verify_clock_puzzle.py` (Build und Dev-App grün);
-[Bericht](archived/work/rm1090_clock/README.md). `./build.sh` gelaufen. **Kein Commit/Push.**
+**RM_1090 grandfather clock (2026-10-15):** the viewing hole was 22.5° next to 12 o'clock — Common_controll 9 wrote
+for the native clock work into an unread override, now like 8/18 onto `enemy_obj`
+(event.c:12136). Escape confirmed script selections with selection 0 („Links“); Cancel no longer
+confirms a selection, the room script reads it itself (bhPadCheck, event 13). The reset freeze
+after L/R was the dev app from 10.10. without 0xb1 (HEAD has the port). Room data: plates
+1/3/4/5/6/7/8/emblem, L=+180°, R=−45°; L,R,LR,RRR shows 3,1,7,1 — „1974“ cannot be displayed.
+Load: only the desk camera (glass roof, full-screen alpha) costs ~2× CPU, not an error.
+Proof `tools/verify_clock_puzzle.py` (build and dev app green);
+[Report](archived/work/rm1090_clock/README.md). `./build.sh` ran. **No commit/push.**
 
-**Semantik-Audit Flags/Bedingungen (2026-10-15):** behoben in `world.cpp`: bhLoadWork2 Fall 2
-(Bytes 3..5, Fall 1 behaelt model_cno), Common 15/16/28-33/44/45 auf `enemy_obj` bzw. work
-px/ax, Common 40 frm_no (+exp1), Common 50 Worktyp, Sub 0x8f/0x92 nur ct2-Lowbyte, 0x93 ct2
-unberuehrt, 0x43 stflg 0x1000000, 0xd2 sx=sxb. Dialoge: Cancel beantwortet keine Auswahl
-(auch GetItem/Inspektion), schliesst nur die fertige letzte Seite; Timerseiten (FF02 n) nehmen
-keine Taste, FE08 blaettert nach Ablauf (nur RM_7240); kein Systemklang beim Textschliessen
-ausser GetItem-Antwort (SE 3); Inspektionsauswahl ohne Hoch/Runter. `bhDrawEneObject`:
-bhCalcModel fuer en_obj (RM_9290 EN25). Widerlegt: IF-Yield, Sleep/Next, Skip-Set,
-Hoehenpruefung/break in bhCheckExmAtari, metcp-Typ 3/4, Pad-Reihenfolge, ZXY/BREAK in
-bhCalcTree. Danach: Scheduler laeuft nur mit sp_flg 0x10 (event.c:13024); die Raeume setzen
-bzw. loeschen es selbst im scd1 (bhSet 6,27), nach einer Tuer setzt `runtime.cpp` wie
-bhStartDoorDemo Fall 1 sp_flg -1 (room.c:1006; RM_7050 Event 8 lief sonst nicht weiter).
-Event_exec belegt bei vollen Slots 0..14 Slot 15 neu. Leere FFFF-Seiten warten wie im Original
-auf OK/Cancel (1507 leere Raumtexte, z. B. RM_0000 Event 32 zur Stimme). Synthetische
-Ereignistabellen in verify_doors/gameover/view_clip setzen sp_flg 0x10 im scd1; verify_doors
-gruen, gameover/view_clip konnten wegen Auto-Mode-Sperre nicht laufen. Raum-Sweep (205 Raeume,
-600 Bilder) vorher/nachher: nur RM_6100/RM_7050 (Tor) bzw. offene leere Texte.
-`MessageDialog` ist jetzt bhControlMessage pro Durchlauf: Aufbau ueber mes_ct (Item-Namen
-zaehlen wie bhDispItemName, FF04/FE00 sofort, OK gehalten +4), Timer erst nach dem Aufbau,
-FE08/FE09 wie message.c. Schliessen mit OK/Cancel nur bei st_flg 0x4000|0x1000 des vorigen
-Durchlaufs (game.c:264); Auswahl-/Blaetter-OK und Links/Rechts verarbeitet EventVm::tick vor
-dem Skript (Statusmenue: sofort nach seinem Tick); Klang 2/3 aus bhControlMessage/GetItem.
-Suite 98/100 unveraendert, Sweep unveraendert. **Ungeprueft (Auto-Mode-Sperre):**
-verify_clock_puzzle, verify_doors, verify_gameover, verify_view_clip nach diesem Umbau.
-Danach: bhIfelFlg/G_Sp wie event.c (globaler Zeiger +4/-4 statt Stapel; jede 0-Rueckgabe im IF
-springt, auch Sleep/EvtNext/EvtEnd/EWHILE-Ende, die nativ 2 lieferten; RM_0090 Ev33 wartete
-nativ). Opcode-Zuordnung korrigiert: 0xd1 = bhEffSSizeSet (sx=sxb), 0xd2 = bhEffLinkOffsetSet
-(lox/loy/loz; war faelschlich Groesse). Neu gebunden: 0x2f bhInitSetKage (bhSetShadow einmal je
-Work, 51 Raeume), 0x7e bhKageSwSet (stflg 0x8; obwp/itwp-Faelle bleiben Luecke). Sweep:
-keine neuen Luecken. Item-Glanz portiert (objitm.c:404-450 nach bhControlEffect: Pause
-60..89 aus EE-rand, 8 Bilder mdflg 0x80; bhDrawObjItm ersetzt Licht 1 durch
-bhGetLightVector(57344,ayp,0) mit 0.1*aspd); Items laden aspd (short), 0x42 bhItmAspdSet
-gebunden. 144 Items in 69 Raeumen; RM_1090 waehlt danach ein anderes Zufallsevent (EE-rand
-wie im Original verbraucht). Lichtzustand je Zeichengruppe wie bhAllDrawModel/bhDrawObjItm:
-Objektlisten ob_nlg/ob_hlg/ob_spc je bhControlObjItm-Durchlauf (sp_flg 0x4, pt_flg 1/2/4,
-cb_flg 0x40000000 = nur 4 Objekte); Spieler, Gegner und Objekte id >= 1000 (347 in 70 Raeumen)
-mit bhSetHalfLight (Licht 1 und Punktlichter 0.5, amb_chr); ob_spc draw_tp 0 mit rom->lgtp[aspd]
-als Licht 1, erster ob_spc in RM_1130/3060/7060/7100/9110 ungezeichnet; en_obj (bhDrawEneObject)
-mit amb_rom und vollem Licht. Spielerschatten (player.c:791/905: bhSetShadow(NULL,plp,1,
-4.5,4,3.5) je Raum, bhEff001 liest plp flg/stflg/owP). 0x6c bhObjAlphaSet mit
-bhControlAlphaFadeObject (Startalpha = plist-Byte 7 des Knotens, dauerhaft je Knoten; RM_7050,
-RM_8030). 0x23 war schon portiert (nur Eintraege hinter rom->etcp bleiben gemeldet).
-Einzellicht-Pfad (ps2_NinjaCnk.c:252-276): draw_tp 2/3 und mit gm_flg 0x80 jedes Modell
-(Game-Over-Kamera, gameover.c:323) mit dem Easy-Zustand der Gruppe (bhSetLight/HalfLight,
-bhDrawSpObject lgtp 0.2, bhSetEasyDirLight (0,0.3,0.7) im Kameraraum, Augenkamera 0.6 je
-Gegner). Gebunden: 0x88 bhEffUVSet, 0x80 bhInitPonySet (plp->flg2 0x2 setzt den Zopf in
-bhObjClpn Fall 1 zurueck), 0x2d/0x30 bhInitMotionPause(Ex), Sub 148 bhEne11_LightControl
-(EN11-Dienste ausserhalb des Gegnerpasses), pl_sleep_cnt (RM_9302). RM_9100 Event 0 laeuft jetzt
-durch. A02 `native/player_event.c`: pl_evt.c bhCPM0_event/pl_smove00..08 (Test player_event);
-Player_controll 131 setzt plp mode0 7/mode1/mode2 (mode3-Regel event.c:9405-9420), die Runtime
-fuehrt den Pass ueber den einen Spielerbesitzer (auch waehrend eines Texts), 128/139 geben frei.
-Erreicht ohne Eingabe nur RM_7010/RM_3220 (pl_smove01 Fall 0). Spielerschatten-Test und EN02-Test
-an den neuen Besitzer angepasst; ausserdem die durch den Dialogumbau roten Tests (erst mit
-`./build.sh --test` gebaut) an bhControlMessage angepasst. Suite 99/101 (47/69 fremd).
-RM_7010 Event 37 DoorCall-Spawn 1 nach RM_7030 blockiert auch auf HEAD (Vorherstand belegt).
-0xce bhSyukanModeSet setzt/loescht die gm_flg-Bits wie event.c:8873 (erreicht RM_5500 mit 1).
-Augenkamera in RoomWorld::tick_camera: bhInitPlEyeCamera (gm_flg 0x2000; owP[5], pe_ax/pe_pers aus
-Kampfkern bzw. 0xce, ohne hidden_objects-Maske, lgtp[4..] flg 2 aus, rom->fog_* ROM 0x108..0x110,
-njClipZ 1.0/1.1), bhSetPlEyeCamera unter gm_flg 0x40 (Kopf +1.5/-1, wax, Zoom st_flg 0x800000 in
-364er-Schritten), Rueckweg ueber bhControlPlEyeCamera mode0 1/2 mit CAM_WRK.spd. Sonde RM_0010:
-Augenpose und Rueckkehr zur Schnittkamera. Kampfkern liefert plp->wax/mode1/at_flg. Ungeprueft
-im Spiel (Zielfernrohr-Replay). Offen dort: cam.flg-0x4-Einstieg aus anderen Kameras (Event/fest).
-Gemeldet: mdflg 0x400 npGetMatColor, lgtp[0] Typ 100/101 in bhSetEasyDirLight, 0x91 nur bei
-nicht portierter Effektprozedur.
-**Kein Commit/Push.**
+**Semantics audit flags/conditions (2026-10-15):** fixed in `world.cpp`: bhLoadWork2 case 2
+(bytes 3..5, case 1 keeps model_cno), Common 15/16/28-33/44/45 onto `enemy_obj` or work
+px/ax respectively, Common 40 frm_no (+exp1), Common 50 work type, sub 0x8f/0x92 only ct2 low byte, 0x93 ct2
+untouched, 0x43 stflg 0x1000000, 0xd2 sx=sxb. Dialogs: Cancel answers no selection
+(also GetItem/inspection), only closes the finished last page; timer pages (FF02 n) accept
+no key, FE08 turns the page after expiry (only RM_7240); no system sound on text close
+except the GetItem answer (SE 3); inspection selection without up/down. `bhDrawEneObject`:
+bhCalcModel for en_obj (RM_9290 EN25). Refuted: IF yield, Sleep/Next, skip set,
+height check/break in bhCheckExmAtari, metcp type 3/4, pad order, ZXY/BREAK in
+bhCalcTree. Afterwards: the scheduler only runs with sp_flg 0x10 (event.c:13024); the rooms set
+or clear it themselves in scd1 (bhSet 6,27), after a door `runtime.cpp` sets, like
+bhStartDoorDemo case 1, sp_flg -1 (room.c:1006; RM_7050 event 8 did not continue otherwise).
+Event_exec reassigns slot 15 when slots 0..14 are full. Empty FFFF pages wait as in the original
+for OK/Cancel (1507 empty room texts, e.g. RM_0000 event 32 for the voice). Synthetic
+event tables in verify_doors/gameover/view_clip set sp_flg 0x10 in scd1; verify_doors
+green, gameover/view_clip could not run because of the auto mode block. Room sweep (205 rooms,
+600 frames) before/after: only RM_6100/RM_7050 (gate) or open empty texts respectively.
+`MessageDialog` is now bhControlMessage per pass: build-up via mes_ct (item names
+count like bhDispItemName, FF04/FE00 immediately, OK held +4), timer only after build-up,
+FE08/FE09 as in message.c. Closing with OK/Cancel only with st_flg 0x4000|0x1000 of the previous
+pass (game.c:264); selection/page-turn OK and left/right are processed by EventVm::tick before
+the script (status menu: immediately after its tick); sound 2/3 from bhControlMessage/GetItem.
+Suite 98/100 unchanged, sweep unchanged. **Unverified (auto mode block):**
+verify_clock_puzzle, verify_doors, verify_gameover, verify_view_clip after this rework.
+Afterwards: bhIfelFlg/G_Sp as in event.c (global pointer +4/-4 instead of a stack; every 0 return in IF
+jumps, also Sleep/EvtNext/EvtEnd/EWHILE end, which natively returned 2; RM_0090 Ev33 waited
+natively). Opcode mapping corrected: 0xd1 = bhEffSSizeSet (sx=sxb), 0xd2 = bhEffLinkOffsetSet
+(lox/loy/loz; was wrongly size). Newly bound: 0x2f bhInitSetKage (bhSetShadow once per
+work, 51 rooms), 0x7e bhKageSwSet (stflg 0x8; obwp/itwp cases remain a gap). Sweep:
+no new gaps. Item glint ported (objitm.c:404-450 after bhControlEffect: pause
+60..89 from EE rand, 8 frames mdflg 0x80; bhDrawObjItm replaces light 1 with
+bhGetLightVector(57344,ayp,0) with 0.1*aspd); items load aspd (short), 0x42 bhItmAspdSet
+bound. 144 items in 69 rooms; RM_1090 then picks a different random event (EE rand
+consumed as in the original). Light state per draw group like bhAllDrawModel/bhDrawObjItm:
+object lists ob_nlg/ob_hlg/ob_spc per bhControlObjItm pass (sp_flg 0x4, pt_flg 1/2/4,
+cb_flg 0x40000000 = only 4 objects); player, enemies and objects id >= 1000 (347 in 70 rooms)
+with bhSetHalfLight (light 1 and point lights 0.5, amb_chr); ob_spc draw_tp 0 with rom->lgtp[aspd]
+as light 1, first ob_spc in RM_1130/3060/7060/7100/9110 undrawn; en_obj (bhDrawEneObject)
+with amb_rom and full light. Player shadow (player.c:791/905: bhSetShadow(NULL,plp,1,
+4.5,4,3.5) per room, bhEff001 reads plp flg/stflg/owP). 0x6c bhObjAlphaSet with
+bhControlAlphaFadeObject (start alpha = plist byte 7 of the node, persistent per node; RM_7050,
+RM_8030). 0x23 was already ported (only entries behind rom->etcp stay reported).
+Single-light path (ps2_NinjaCnk.c:252-276): draw_tp 2/3 and with gm_flg 0x80 every model
+(game over camera, gameover.c:323) with the easy state of the group (bhSetLight/HalfLight,
+bhDrawSpObject lgtp 0.2, bhSetEasyDirLight (0,0.3,0.7) in camera space, eye camera 0.6 per
+enemy). Bound: 0x88 bhEffUVSet, 0x80 bhInitPonySet (plp->flg2 0x2 resets the ponytail in
+bhObjClpn case 1), 0x2d/0x30 bhInitMotionPause(Ex), sub 148 bhEne11_LightControl
+(EN11 services outside the enemy pass), pl_sleep_cnt (RM_9302). RM_9100 event 0 now runs
+through. A02 `native/player_event.c`: pl_evt.c bhCPM0_event/pl_smove00..08 (test player_event);
+Player_controll 131 sets plp mode0 7/mode1/mode2 (mode3 rule event.c:9405-9420), the runtime
+runs the pass via the single player owner (also during a text), 128/139 release.
+Without input only RM_7010/RM_3220 are reached (pl_smove01 case 0). Player shadow test and EN02 test
+adapted to the new owner; in addition the tests made red by the dialog rework (only built with
+`./build.sh --test`) adapted to bhControlMessage. Suite 99/101 (47/69 others').
+RM_7010 event 37 DoorCall spawn 1 to RM_7030 also blocks on HEAD (baseline verified).
+0xce bhSyukanModeSet sets/clears the gm_flg bits as in event.c:8873 (reaches RM_5500 with 1).
+Eye camera in RoomWorld::tick_camera: bhInitPlEyeCamera (gm_flg 0x2000; owP[5], pe_ax/pe_pers from
+combat core or 0xce respectively, without hidden_objects mask, lgtp[4..] flg 2 off, rom->fog_* ROM 0x108..0x110,
+njClipZ 1.0/1.1), bhSetPlEyeCamera under gm_flg 0x40 (head +1.5/-1, wax, zoom st_flg 0x800000 in
+steps of 364), return via bhControlPlEyeCamera mode0 1/2 with CAM_WRK.spd. Probe RM_0010:
+eye pose and return to the cut camera. Combat core provides plp->wax/mode1/at_flg. Unverified
+in game (scope replay). Open there: cam.flg 0x4 entry from other cameras (event/fixed).
+Reported: mdflg 0x400 npGetMatColor, lgtp[0] type 100/101 in bhSetEasyDirLight, 0x91 only for
+unported effect procedure.
+**No commit/push.**
 
-**EN19 Tyrant T-078 portiert (2026-10-15, Subagent, vom Hauptagenten geprüft):** `jump[19]`, CMake,
-Test `enemy_en19_world`; 2353 Z. `en19.c`, Tabellen exakt wie das Original (50/21/17/28/26 …), alle
-21 Mv-Routinen. In RM_5840 läuft er (Motion 14/Bild 28, Spieler-HP 160→120); RM_1122/3230/5010 sind
-skriptgehalten. Spot-Checks (`head_turn` zeilengleich, `bhCtrPly_mode0[5] == bhCPM0_enedam`) bestanden.
-**Offen:** die Restlücken der 4 Räume sind unportierte `effsub3.c`-Effekte (303–312, 349) und hängen am
-fehlenden Subsystem **`sys->efm`** (globale Effektmodelle aus `bhInitEffect`, nativ 0 Treffer).
-Effekt-*Einträge* im Scan stiegen dadurch 45 → 52 (aus 4× „bhEne19" wurden 10 benannte Effektlücken).
-**Kein Commit/Push.**
+**EN19 Tyrant T-078 ported (2026-10-15, subagent, checked by the main agent):** `jump[19]`, CMake,
+test `enemy_en19_world`; 2353 lines `en19.c`, tables exactly as in the original (50/21/17/28/26 …), all
+21 Mv routines. In RM_5840 he runs (motion 14/frame 28, player HP 160→120); RM_1122/3230/5010 are
+held by script. Spot checks (`head_turn` line-identical, `bhCtrPly_mode0[5] == bhCPM0_enedam`) passed.
+**Open:** the remaining gaps of the 4 rooms are unported `effsub3.c` effects (303–312, 349) and depend on the
+missing subsystem **`sys->efm`** (global effect models from `bhInitEffect`, natively 0 hits).
+Effect *entries* in the scan rose from 45 → 52 because of this (4× „bhEne19" became 10 named effect gaps).
+**No commit/push.**
 
-**Effekt 256/257 Säure + EN14-Säuredienste (2026-10-15):** `bhEff_E03_Acid`/`bhEff_E00_Acid` von Hand
-portiert (`effect_sprite_procedures.cpp`); dafür neu am Besitzer: `pxb/pyb/pzb` am `EffectSprite`
-(effect.c:794), Haken `player_watr` (plp->watr, player.c:1758), `effect_detail::collision_line`
-(bhCollisionCheckLine2 kürzt die Lage auf den Treffer). EN14 `acid_alloc`/`acid_setup` in
-`control_enemy_works` gebunden. Test `effect_e03_acid`, 36/36 grün; Scan `run10` **31 Räume / 50
-Einträge** (52 → 50: `bhEne14_Acid` aus RM_5810/RM_9302 weg, sonst identisch). `./build.sh` gelaufen
-(Start.command-App aktualisiert). Offen: 269 `bhEff_E14_Fire` (Feuerkind, EN14 Typ ≠ 0).
-[Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 9. **Kein Commit/Push.**
+**Effect 256/257 acid + EN14 acid services (2026-10-15):** `bhEff_E03_Acid`/`bhEff_E00_Acid` ported
+by hand (`effect_sprite_procedures.cpp`); for that, new on the owner: `pxb/pyb/pzb` on `EffectSprite`
+(effect.c:794), hook `player_watr` (plp->watr, player.c:1758), `effect_detail::collision_line`
+(bhCollisionCheckLine2 shortens the position to the hit). EN14 `acid_alloc`/`acid_setup` bound in
+`control_enemy_works`. Test `effect_e03_acid`, 36/36 green; scan `run10` **31 rooms / 50
+entries** (52 → 50: `bhEne14_Acid` gone from RM_5810/RM_9302, otherwise identical). `./build.sh` ran
+(Start.command app updated). Open: 269 `bhEff_E14_Fire` (fire child, EN14 type ≠ 0).
+[Report](archived/work/native_port_enemy_gap_scan.result.md) section 9. **No commit/push.**
 
-**Effekt 267/269 + EN14-Dienste (2026-10-15):** `bhEff_E13_Fluid` (Erzeuger ist EN30, Gruppe 81
-freigeschaltet) und `bhEff_E14_Fire` (Kind von 256 type 6; `fire_light`-Haken um Farbe/Reichweite
-verallgemeinert) von Hand portiert; EN14 `joint_flags`/`node_angles`/`motion_angles`/`joint_matrix_set`/
-`floor_enemy`/`game_mode`/`find_beam`/`beam_line` (O_WRK +0x10/+0x64 nach `RECVX_EN16_EFF`) gebunden.
-Test `effect_e14_fire`, 37/37 grün; RM_9302/RM_5810 zeigen 256/257/267 sichtbar. Scan `run11` **31 Räume /
-46 Einträge** (50 → 46; neu sichtbar `bhEff250`/`bhEff301` in RM_9302, weil der Kampf jetzt weiter kommt).
-Offen: `bhEff130` (Spielerstrahl, 1120 Z.) — `find_beam` findet nativ nie einen Strahl. `./build.sh`
-gelaufen. [Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 10. **Kein Commit/Push.**
+**Effect 267/269 + EN14 services (2026-10-15):** `bhEff_E13_Fluid` (spawner is EN30, group 81
+enabled) and `bhEff_E14_Fire` (child of 256 type 6; `fire_light` hook generalized for color/range)
+ported by hand; EN14 `joint_flags`/`node_angles`/`motion_angles`/`joint_matrix_set`/
+`floor_enemy`/`game_mode`/`find_beam`/`beam_line` (O_WRK +0x10/+0x64 per `RECVX_EN16_EFF`) bound.
+Test `effect_e14_fire`, 37/37 green; RM_9302/RM_5810 show 256/257/267 visibly. Scan `run11` **31 rooms /
+46 entries** (50 → 46; newly visible `bhEff250`/`bhEff301` in RM_9302 because the fight now gets further).
+Open: `bhEff130` (player beam, 1120 lines) — `find_beam` natively never finds a beam. `./build.sh`
+ran. [Report](archived/work/native_port_enemy_gap_scan.result.md) section 10. **No commit/push.**
 
-**Effekt 250 + `model_texp_index` + Morph-Zeichenpfad (2026-10-15):** `bhEff_E00_Mince` portiert; der
-Erzeuger brauchte `RECVX_ENEMY_EXT.model_texp_index` (Blut-Texturliste), jetzt gebunden — RM_5810/RM_9302
-melden nur noch `bhEff301`. Dabei gefunden: `actor.cpp` warf „morph object has no vertex stream" für
-EN14 MV02 (Objekt 1 evalflags 0xE), das `npCalcMorphing` überspringt; Quellzugriff jetzt hinter
-`morph_blend`. HEAD rendert dort nur, weil EN14 MV02 vorher nicht erreichte (Worktree-Messung). Scans sehen
-nur das Endbild — Endbild-Sweeps nach Gegnerports nötig. Scan `run12`/`run13` **31 Räume / 44 Einträge**,
-37/37 Tests, `./build.sh` gelaufen. Letzte EN14-Raumlücke `bhEff301` hängt an der fehlenden 2D-Effektliste
-`sys->ef_trs2d` (Subsystem). [Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 11.
-**Kein Commit/Push.**
+**Effect 250 + `model_texp_index` + morph draw path (2026-10-15):** `bhEff_E00_Mince` ported; the
+spawner needed `RECVX_ENEMY_EXT.model_texp_index` (blood texture list), now bound — RM_5810/RM_9302
+only report `bhEff301` now. Found along the way: `actor.cpp` threw „morph object has no vertex stream" for
+EN14 MV02 (object 1 evalflags 0xE), which `npCalcMorphing` skips; source access now behind
+`morph_blend`. HEAD only renders there because EN14 MV02 was not reached before (worktree measurement). Scans see
+only the end frame — end frame sweeps needed after enemy ports. Scan `run12`/`run13` **31 rooms / 44 entries**,
+37/37 tests, `./build.sh` ran. Last EN14 room gap `bhEff301` depends on the missing 2D effect list
+`sys->ef_trs2d` (subsystem). [Report](archived/work/native_port_enemy_gap_scan.result.md) section 11.
+**No commit/push.**
 
-**EN05/EN13/13B/EN23/bhStandPlayerMotion (2026-10-14 abends):** Hunter/Sweeper (EN05 +
-bhEne05s), Alexia II (EN13/13B), Riesenspinne (EN23 + bhEne03s/EN24-Kinder) portiert und
-im Dispatch; bhStandPlayerMotion an Kiste/Karte/Status/Computer/Player_controll 52/bhEff134.
-Runtime rechnet plp vor Event_init (player.c:840) — schliesst die Erst-Pass-Lücken
-`plp->mlwP->owP[n]`. CTest 89/89 grün (`enemy_en05_world`, `enemy_en13_world`,
-`enemy_en23_world`). Offen: Effekte 238/256/267, EN14-Lücken, plp->txp[2], keine
-Fensterabnahme, Windows nicht gebaut. Nur Entwicklungs-Start.command aktualisiert.
-[Bericht](archived/work/native_port_en05_en13_en23_stand.result.md).
+**EN05/EN13/13B/EN23/bhStandPlayerMotion (2026-10-14 evening):** Hunter/Sweeper (EN05 +
+bhEne05s), Alexia II (EN13/13B), giant spider (EN23 + bhEne03s/EN24 children) ported and
+in the dispatch; bhStandPlayerMotion at crate/map/status/computer/Player_controll 52/bhEff134.
+Runtime computes plp before Event_init (player.c:840) — closes the first-pass gaps
+`plp->mlwP->owP[n]`. CTest 89/89 green (`enemy_en05_world`, `enemy_en13_world`,
+`enemy_en23_world`). Open: effects 238/256/267, EN14 gaps, plp->txp[2], no
+window acceptance, Windows not built. Only the development Start.command updated.
+[Report](archived/work/native_port_en05_en13_en23_stand.result.md).
 
-**Gegner-Auditbefunde (2026-10-14):** `bhCheckWall` für Gegner, `bhControlMask` im
-Gegnerpass, Baum beim Raumaufbau (room.c:438), modellose Works, EN11-Dienste,
-Effekte 261/270 mit `bhCollisionCheckL2MDL` (plp mdl[3]) und Eckalpha gebunden; CTest
-`enemy_beam_effects`. Zombie-`natural` ist Originalverhalten (RM_0080 pos_no 0 →
-Sub_controll 0x8f Typ 8), Verifier korrigiert. Offen: EN56/bhEff134, EN16-Folgeeffekte
-(EN05/EN13/EN23 und EN12-Feuereffekte siehe oben).
-[Bericht](archived/work/native_port_enemy_audit_fixes.result.md).
+**Enemy audit findings (2026-10-14):** `bhCheckWall` for enemies, `bhControlMask` in the
+enemy pass, tree on room build-up (room.c:438), model-less works, EN11 services,
+effects 261/270 with `bhCollisionCheckL2MDL` (plp mdl[3]) and corner alpha bound; CTest
+`enemy_beam_effects`. Zombie `natural` is original behavior (RM_0080 pos_no 0 →
+Sub_controll 0x8f type 8), verifier corrected. Open: EN56/bhEff134, EN16 follow-up effects
+(EN05/EN13/EN23 and EN12 fire effects see above).
+[Report](archived/work/native_port_enemy_audit_fixes.result.md).
 
-**Schreibmaschine / Spielstände (2026-10-14 abends):** Speicher- und Ladebildschirm nach
-`ps2_SaveScreen.c`/`ps2_LoadScreen.c` auf dem nativen Besitzer `native/typewriter.*`/`ui.cpp`:
-15 Slots im 5-Zeilen-Fenster (ITEM1/0144), Rückfragen 482/483/459, leerer
-Ladeslot 458, Tippanimation im Originaltakt (McSaveFile.c:571–584), Erfolg 485, Fehler 486/461,
-Sonderspeicher-Rückfrage 253 bei ev_flg 56. Die Memory-Karten-Auswahl (SelectCard, Port 0/1) ist
-als Konsolenverhalten entfernt — der Host hat genau einen Speicherort, der Bildschirm startet
-direkt in der Slotliste; Cancel dort führt in den Verlassen-Zustand. Panel-Fundament
-mcDispWindowFoundtion korrigiert (Argumente rechts/unten; feste GS-Alpha 96/255 in den Wirtsfarbwert
-überführt, vorher unsichtbar gezeichnet). Gegen das Original korrigiert: mcWriteStartSaveFile
-**löscht** ev_flg 56 (McSaveFile.c:168; vorher gesetzt und so in den Spielstand geschrieben),
-kein erfundener Inventar-Rollback bei Schreibfehler (stattdessen ev_flg 56, :206),
-Speicherabschluss am 2026-10-18 nachgeprüft: Continue-Punkt erst nach der Tippanimation
-(SaveScreen.c:1408), nicht beim Dateischreiben; einmalige Abschlussmeldung von Typewriter.
-Die vertauschten Flag-56-Operationen berichtigt: Schreibfehler setzt, Sonderspeichern löscht.
-`verify_typewriter_save.py` prüft RM_0010 mit isolierten Benutzerdateien: letzter Tipp-Pass
-noch alter Continue-Punkt, Erfolg neuer Punkt; echter Host-Schreibfehler, wiederholter Fehler,
-Abbruchrückfrage und erneutes Speichern in anderem Slot ohne weiteren Band-/Zählerverbrauch.
-Kartenverwaltung bleibt entfernt. CTest 122/122 grün; derselbe Prüflauf über `Start.command`
-grün, Erfolgs-/Fehler-/Rückfragebilder angesehen. Belege: `build/validation/typewriter-completion/`.
-**Gemeldeter Fehler „Speichermenü nur per Speichern verlassbar" (2026-10-18):** Escape ist im Host
-zugleich `cancel` und `pause`; das Pausetor `pause_allowed` prüfte die laufende Schreibmaschinen-
-aufgabe nicht und verschluckte die Taste, bevor sie die Slotliste erreichte (Tab ist dort keine
-Originaltaste). Das Original sperrt genau diesen Fall: `system.c:668` verlangt zusätzlich
-`(ts_flg & 0x3DE00) == 0x3DE00`, und Bit 15 ist das Taskbit der Schreibmaschine (`main.c:195`,
-Task 15). Jetzt gebunden; Pause in freier Kontrolle unverändert (gemessen: mit Escape 61 Pässe
-und Spieler steht, ohne Escape 356 Pässe und z −35.9 → 52.5). Prüfung mit echten SDL-Tasten:
-`tools/verify_typewriter_save.py --sdl-cancel` (Slotliste und Speicherrückfrage verlassen, kein
-Band-/Zählerverbrauch, keine Speicherdatei; Vorher-Binary rot), auch über `Start.command`.
-Offen: Ladeabschluss (`typ_flg 0x10`), Type_Space bei Räumen ohne RoomNameSwitch-Eintrag
-(Original liest Index −1); keine interaktive Fensterabnahme oder Windows-Lauf.
-**Start.command-Dev-App durch `./build.sh --test` aktualisiert, arm64/Signatur geprüft;
-kein Release-Paket ersetzt, kein Commit/Push.**
+**Typewriter / save games (2026-10-14 evening):** save and load screen per
+`ps2_SaveScreen.c`/`ps2_LoadScreen.c` on the native owner `native/typewriter.*`/`ui.cpp`:
+15 slots in the 5-row window (ITEM1/0144), confirmations 482/483/459, empty
+load slot 458, typing animation at the original tick rate (McSaveFile.c:571–584), success 485, errors 486/461,
+special save confirmation 253 with ev_flg 56. The memory card selection (SelectCard, port 0/1) is
+removed as console behavior — the host has exactly one storage location, the screen starts
+directly in the slot list; Cancel there leads to the leave state. Panel foundation
+mcDispWindowFoundtion corrected (arguments right/bottom; fixed GS alpha 96/255 converted into the host color value,
+previously drawn invisibly). Corrected against the original: mcWriteStartSaveFile
+**clears** ev_flg 56 (McSaveFile.c:168; previously set and thus written into the save game),
+no invented inventory rollback on write error (instead ev_flg 56, :206),
+save completion re-checked on 2026-10-18: continue point only after the typing animation
+(SaveScreen.c:1408), not on file write; one-time completion message from Typewriter.
+The swapped flag 56 operations corrected: write error sets, special save clears.
+`verify_typewriter_save.py` checks RM_0010 with isolated user files: last typing pass
+still old continue point, success new point; real host write error, repeated error,
+cancel confirmation and saving again in another slot without further ribbon/counter consumption.
+Card management stays removed. CTest 122/122 green; the same check run via `Start.command`
+green, success/error/confirmation images viewed. Evidence: `build/validation/typewriter-completion/`.
+**Reported bug „save menu can only be left by saving" (2026-10-18):** in the host Escape is
+both `cancel` and `pause`; the pause gate `pause_allowed` did not check the running typewriter
+task and swallowed the key before it reached the slot list (Tab is not an
+original key there). The original blocks exactly this case: `system.c:668` additionally requires
+`(ts_flg & 0x3DE00) == 0x3DE00`, and bit 15 is the task bit of the typewriter (`main.c:195`,
+task 15). Now bound; pause in free control unchanged (measured: with Escape 61 passes
+and player stands, without Escape 356 passes and z −35.9 → 52.5). Check with real SDL keys:
+`tools/verify_typewriter_save.py --sdl-cancel` (leave slot list and save confirmation, no
+ribbon/counter consumption, no save file; baseline binary red), also via `Start.command`.
+Open: load completion (`typ_flg 0x10`), Type_Space in rooms without a RoomNameSwitch entry
+(original reads index −1); no interactive window acceptance or Windows run.
+**Start.command dev app updated by `./build.sh --test`, arm64/signature checked;
+no release package replaced, no commit/push.**
 
-Gemeldete Fehler Schreibmaschine/Aufnahme/Scanner (Arbeitsbaum, 2026-10-15): Panel-Fundament
-mit Originalfaktor — `njDrawPolygon` (ps2_NaDraw.c:8-58) schreibt Vertexalpha `col>>25` (12 bei
-0x18808080), Kontext 1 mit dem ALPHA-Register des vorangehenden Fonts (`bhDispFont` 8/6,
-message.c:374); die bisherigen 96/128 stammten aus PS2_swaps Kontext 2. Tippzeile:
-Raumname `CountMes-(14-ply_id)` (McSaveFile.c:707; vorher `n-15`, Zählwert 0 = ganzer Text
-im ersten Bild) und Zeichnen mit dem Zählerstand vor der Erhöhung (McSaveFile.c:569-586,
-`Typewriter::drawn_count`). Scannerabsturz: `sample_motion_pose` bricht bei mehr
-Motionkanälen als Modellknoten nicht mehr das Spiel ab (Original schreibt hinter `objP`,
-Motion.c:131); überzählige Kanäle werden wie `native/motion_set.cpp:63-67` verbraucht und
-gemeldet (`bind_pose_gap`, für statische Objekte mit Werk/Identität/Motion in `object_pose`).
-Ursache **nicht nachgestellt**: Nutzerstand save-2 (RM_0010) + Debug-Teleport RM_0090 +
-Item 56/59 + Panel/Material, Headless mit `--validate-poses`, auch mit der 20:41-App,
-ohne Fehler; in RM_0090 binden nur Event 22 (Objekt 8, MTN 6) und die Zombieevents 60-98
-Raummotions. Fehlender Klick nach der Aufnahme: **nicht behoben** — sub1.c:3070 ist der
-Öffnungsklick (ItemTaskCheck-Start), GetItem spielt SE 3 nur bei der Antwort (:3879/:3928),
-die Schlussmeldung 158 schließt stumm (message.c), dann SE 9 (SpriteUV :2940); nativ gleich.
-`values[21]=identity.variant` beim Raumladen bleibt (system.c:1623: Datei folgt aus rcase).
-`native-gameplay-bindings`: sys->mes_ip gebunden, Effektlücke jetzt id 258 (E03_Shadow;
-256 ist portiert). `verify_scanner` Prüfbilder 230/1000 (Meldungsaufbau je Durchlauf):
-grün. CTest 100/101; `effect_room_sprites` auf HEAD-Worktree ebenso rot.
-`verify_typewriter_save` auf HEAD-Worktree ebenso rot (Titel-LOAD-Replay ohne Kartenschritt).
-Dev-App per `./build.sh` aktualisiert (23:10); kein Paket ersetzt.
-Gegnerpaket 2026-10-15 (Arbeitsbaum): `rySetShadow`/`bhEff304` gebunden (Modifier-Schatten ueber
-`sys->efm[1]`; drei Gelenke, Lage/ay/sx/sz/Sichtgate nach effsub3.c:1683) und EN29 Tentakel
-portiert (`native/enemies/en29.c`+`en29.h`: Mode0/BrainType, `En29ActTbl[40]` im EA_WORK-Layout,
-Mv00-04/20 mit 74498/74499, TargetAnalyze, DmgCheck, AttackHitCheck gegen `plp->watr`,
-PlySetDamage/PlyMoveMain/PlyAction*, SetDmgEffect, fuenf Schadenskapsel-Kinder als Ring).
-Tests `effect_ry_shadow` (RM_5840) und `enemy_en29_world` (RM_9000, Angriffskette bis
-PlyMoveMain); CTest 102/103 (47 fremd). Lueckenmessung alle 205 Raeume: 31/44 -> **26/37**
-(`build/validation/enemy_scan_20261014/run15`). Ledger und
-`archived/work/native_port_enemy_gap_scan.result.md` (Abschnitt 12) fortgeschrieben.
-**Naechster Posten:** EN17 (Monster Steve; Vertrag en17.h und en54/en55 liegen fertig),
-EN17 Monster Steve inklusive zwei Kettenwerken (Arme) ist portiert (`native/enemies/en17.c`);
-damit laufen auch die gepanzerten Ritter EN54/EN55 (beide jetzt in Build und Dispatch). Test
-`enemy_en17_world` (RM_9280); CTest 103/104 (47 fremd). Messung: 26/37 -> **25/34**
-(`run16`); `bhEne17`/`54`/`55` aus RM_9280 weg. Offen und benannt: Partikel `bhEff_SetPtcl*`,
-Nachbild 364, `rom->lgtp[2]`, Spielerblut. [Bericht](archived/work/native_port_enemy_gap_scan.result.md)
-Abschnitt 13. **Naechster Posten:** das `sys->wt_*`-Wassertiefenfeld (`bhObj005`) fuer `bhEff108`
-(4 Raeume).
-Wasserflaeche `bhObj005` (`native/world_water.cpp`: Hoehenkarte `sys->wt_*`, Eckpunkt-y/Normalen
-nach den ELF-geprueften Asm-Bloecken und `VU0_WAVE_INIT/CALC`, 4x4-Kachel-UV ueber `npSetOffsetUV2`,
-Abklingen) und `bhEff108` (Wasserringe) sind portiert; Zeichenpfad ueber
-`ModelGeometryOptions.local_vertices/local_normals/uv_*`. Befund: `sys->st_flg 0x40` setzte nativ
-nie jemand, alle wassergebundenen Pfade (Zombie-Wassercheck, Spritzer, Wasserschritte) waren in den
-13 Wasserraeumen stumm; EN01 `bhCheckWater` jetzt gebunden. Test `object_water_wave`
-(RM_3060/3210/7060/9130); CTest 104/105 (47 fremd). Messung: 25/34 -> **32/42** (`run17`):
-`bhEff108` (4) weg, neu die eine belegte Original-UB "Nachbarzelle vor `wt_wvp`" (Randeckpunkte
-x/z = 0) in 12 Raeumen. [Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 14.
-**Naechster Posten:** `bhEne03` (RM_6090/7080/7250), danach EN53 `child_ambient`. **Kein Commit/Push.**
-Schwarze Witwe `bhEne03` (`native/enemies/en03.c`, rund 4100 Zeilen) ist portiert und im Dispatch
-(`jump[3]`): Init samt acht `bhEne03s`-Beinkindern und fuenfzehn EN24-Kindern, verstecktem
-Anfuehrerwork, Schatten 258; Brain BR00-02, Move MV00-19, Nage NG00/01, Damage DG00-12, Die
+Reported bugs typewriter/pickup/scanner (working tree, 2026-10-15): panel foundation
+with original factor — `njDrawPolygon` (ps2_NaDraw.c:8-58) writes vertex alpha `col>>25` (12 for
+0x18808080), context 1 with the ALPHA register of the preceding font (`bhDispFont` 8/6,
+message.c:374); the previous 96/128 came from PS2_swaps context 2. Typing line:
+room name `CountMes-(14-ply_id)` (McSaveFile.c:707; previously `n-15`, count value 0 = whole text
+in the first frame) and drawing with the counter value before the increment (McSaveFile.c:569-586,
+`Typewriter::drawn_count`). Scanner crash: `sample_motion_pose` no longer aborts the game when there are more
+motion channels than model nodes (original writes past `objP`,
+Motion.c:131); surplus channels are consumed as in `native/motion_set.cpp:63-67` and
+reported (`bind_pose_gap`, for static objects with work/identity/motion in `object_pose`).
+Cause **not reproduced**: user state save-2 (RM_0010) + debug teleport RM_0090 +
+item 56/59 + panel/material, headless with `--validate-poses`, also with the 20:41 app,
+without errors; in RM_0090 only event 22 (object 8, MTN 6) and the zombie events 60-98 bind
+room motions. Missing click after pickup: **not fixed** — sub1.c:3070 is the
+opening click (ItemTaskCheck start), GetItem plays SE 3 only on the answer (:3879/:3928),
+the final message 158 closes silently (message.c), then SE 9 (SpriteUV :2940); same natively.
+`values[21]=identity.variant` on room load stays (system.c:1623: file follows from rcase).
+`native-gameplay-bindings`: sys->mes_ip bound, effect gap now id 258 (E03_Shadow;
+256 is ported). `verify_scanner` check frames 230/1000 (message build-up per pass):
+green. CTest 100/101; `effect_room_sprites` equally red on HEAD worktree.
+`verify_typewriter_save` equally red on HEAD worktree (title LOAD replay without card step).
+Dev app updated via `./build.sh` (23:10); no package replaced.
+Enemy package 2026-10-15 (working tree): `rySetShadow`/`bhEff304` bound (modifier shadow via
+`sys->efm[1]`; three joints, position/ay/sx/sz/visibility gate per effsub3.c:1683) and EN29 tentacle
+ported (`native/enemies/en29.c`+`en29.h`: Mode0/BrainType, `En29ActTbl[40]` in the EA_WORK layout,
+Mv00-04/20 with 74498/74499, TargetAnalyze, DmgCheck, AttackHitCheck against `plp->watr`,
+PlySetDamage/PlyMoveMain/PlyAction*, SetDmgEffect, five damage capsule children as a ring).
+Tests `effect_ry_shadow` (RM_5840) and `enemy_en29_world` (RM_9000, attack chain up to
+PlyMoveMain); CTest 102/103 (47 others'). Gap measurement all 205 rooms: 31/44 -> **26/37**
+(`build/validation/enemy_scan_20261014/run15`). Ledger and
+`archived/work/native_port_enemy_gap_scan.result.md` (section 12) updated.
+**Next item:** EN17 (Monster Steve; contract en17.h and en54/en55 are ready),
+EN17 Monster Steve including two chain works (arms) is ported (`native/enemies/en17.c`);
+with that the armored knights EN54/EN55 also run (both now in build and dispatch). Test
+`enemy_en17_world` (RM_9280); CTest 103/104 (47 others'). Measurement: 26/37 -> **25/34**
+(`run16`); `bhEne17`/`54`/`55` gone from RM_9280. Open and named: particles `bhEff_SetPtcl*`,
+afterimage 364, `rom->lgtp[2]`, player blood. [Report](archived/work/native_port_enemy_gap_scan.result.md)
+section 13. **Next item:** the `sys->wt_*` water depth field (`bhObj005`) for `bhEff108`
+(4 rooms).
+Water surface `bhObj005` (`native/world_water.cpp`: height map `sys->wt_*`, vertex y/normals
+per the ELF-checked asm blocks and `VU0_WAVE_INIT/CALC`, 4x4 tile UV via `npSetOffsetUV2`,
+decay) and `bhEff108` (water rings) are ported; draw path via
+`ModelGeometryOptions.local_vertices/local_normals/uv_*`. Finding: `sys->st_flg 0x40` was natively
+never set by anyone, all water-bound paths (zombie water check, splashes, water steps) were silent in the
+13 water rooms; EN01 `bhCheckWater` now bound. Test `object_water_wave`
+(RM_3060/3210/7060/9130); CTest 104/105 (47 others'). Measurement: 25/34 -> **32/42** (`run17`):
+`bhEff108` (4) gone, new is the one verified original UB "neighbor cell before `wt_wvp`" (edge vertices
+x/z = 0) in 12 rooms. [Report](archived/work/native_port_enemy_gap_scan.result.md) section 14.
+**Next item:** `bhEne03` (RM_6090/7080/7250), then EN53 `child_ambient`. **No commit/push.**
+Black widow `bhEne03` (`native/enemies/en03.c`, about 4100 lines) is ported and in the dispatch
+(`jump[3]`): init including eight `bhEne03s` leg children and fifteen EN24 children, hidden
+leader work, shadow 258; brain BR00-02, move MV00-19, nage NG00/01, damage DG00-12, die
 DD00-05, CollisionWalls/BoxEdge2/Line/Line2, DiveSpace, DamageInit, CheckJumpSpace, PlayerControl,
-CallSE, Acid, HitMark. Befunde: `CheckClimbWall`/`CheckClimbDownWall`/`AvoidWall` sind im Original
-parameterlos und geben 0 — die Zweige `mode2 6/7/8` sind damit unerreichbar (Originalverhalten).
-Ein absichtlich leerer MDL-Record **innerhalb** eines Modellsatzes ist im Original ein ML_WORK mit
-`obj_num 0`; `load_models`/`create_enemy_child` unterscheiden ihn jetzt von einem gescheiterten
-Lesevorgang (`model_failed`). `plp->dvx/dvy/dvz` hat keinen verbrauchenden Spielerbesitzer (Dienst
-meldet es); `EXP0_INT(pno,980)` schreibt im Original hinter den Kindblock (nicht nachgebildet),
-`EXP0_BYTE(...,12/14/15)` bleibt als `recvx_en03s_leg_mark` erhalten. Test `enemy_en03_world`
-(RM_6090; Init, Kinder, Anfuehrer, MV00-Zweig nach 96 Passen, Gelenkmatrix weicht von der Bind-Pose
-ab, GoAHead bewegt, Gegenprobe ohne Gegnerpass); CTest 105/106 (47 fremd). Messung: 32/42 -> **30/40**
-(`run18`); `bhEne03` (3) weg, neu die eine, einmalige Spielerlookup-Meldung nach dem Griffende in
-RM_7250. [Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 15.
-Nosferatu `bhEne15` (`native/enemies/en15.c`, `jump[15]`) ist portiert: Bewegung, drei Hiebe
-(Fluegelquader `njCollisionCheckBC2`, Kapsel), Spritzer, Wurf, Schaden/Kerntreffer, Tod, alle acht
-Spielerfuehrungen und das Gift 397 (`bhEff_E15_Poison`). Mechanismusweite Befunde:
-`bhSetMotion(plp)` aus dem Gegnerpass (`player_set_motion_now`), Rueckweg fuer `plp->spd`
-(`take_player_speed`), Giftbits `stflg 0x80000/0x200000` erreichen jetzt das Inventar (damit
-vergiftet auch die Saeure 256 wie im Original), Effektsaetze tragen `exp0 = epw`. Test
-`enemy_en15_world` (RM_5800: Wurfkette, Sturz ueber den Plattformrand, Gift); CTest 106/107
-(47 fremd). Messung: 30/40 -> **30/38** (`run19`), `bhEne15` (2) weg.
-[Bericht](archived/work/native_port_enemy_gap_scan.result.md) Abschnitt 16.
-EN53 `child_ambient` ist am vorhandenen Modellbesitzer gebunden: je `mbp[k]` ein Live-Strom,
-Patch nur auf Ambient-Gruen, geordnete Materialweitergabe und Multi-Lichtauswertung.
-`enemy_en53_world` prueft drei Originalraeume, Puls, diagnostischen Tod, Patchgrenzen und den
-produktiven Zeichen-/Lichtpfad; neun gezielte Tests gruen. Start.command-Dev-App neu gebaut,
-arm64/Signatur geprueft; RM_5800/6040/6100 bei 1/8/30/60/600 Bildern ohne Enemy gaps und
-Posenabbruch. Kein neuer Gesamtscan; Kampf/Fensterabnahme offen.
-[EN53-Bericht](work/enemies/EN053.result.md), Scanbericht Abschnitt 17.
-`bhSetRapEff 310` erledigt (2026-10-16): die ganze Effektanlage des Tyrant laeuft nativ auf dem
-vorhandenen `eff[512]`-Satz. Neu von Hand portiert: 310 `bhEff30a` Kamerawackel, 349 Rueckruf,
-308 `bhSetEffSpark` (eigene Tabelle `Eff308Prm[2]`, `gnd_hgh` aus `bhGetGroundPosition`) in
-`native/effect_rap_camera.cpp`; 307 Klauenflaeche + 312 gespiegelte Klaue in
-`native/effect_rap_claw.cpp`; 309/311 Blutstrahlen in `native/effect_rap_blood.cpp`; 305 Staub +
-306 Rauch in `native/effect_eff30x.cpp`. Kamera/Licht ueber die Haken `camera_offset_set/add` und
-`spark_light`, Bereichsueberschreitungen bleiben benannte Luecken. Tests `effect_rap_camera`,
-`effect_rap_claw`, `effect_rap_blood`, `effect_eff30x` und `enemy_en19_world` gruen
-(RM_5840: `310=1 349=0 312=3`, Typ 2 hat kein 349). Headless 600 Bilder: RM_5010 **+310/349**,
-RM_5840 **+305/307/309/310/312**, Kamerapose und Tyrant-Zustand vorher/nachher gleich, keine
-Effektluecke. Tabellen byteweise am ELF belegt (u. a. `Tex5Buv[12]` liest Sprungtabellenworte =
-Denormale ~3.4e-39, nativ `{0,0,0,0}`). Offen: `bhEff298`/`bhEff303` unportiert, `bhEne19`
-Mode0-Index 4 (im Original NULL), kein natuerlicher Durchspielnachweis (Spieler stirbt im Lauf).
-[EN19-Bericht](work/enemies/EN019.result.md). **Kein Commit/Push.**
+CallSE, Acid, HitMark. Findings: `CheckClimbWall`/`CheckClimbDownWall`/`AvoidWall` are parameterless
+in the original and return 0 — the branches `mode2 6/7/8` are thus unreachable (original behavior).
+An intentionally empty MDL record **inside** a model set is in the original an ML_WORK with
+`obj_num 0`; `load_models`/`create_enemy_child` now distinguish it from a failed
+read (`model_failed`). `plp->dvx/dvy/dvz` has no consuming player owner (service
+reports it); `EXP0_INT(pno,980)` writes past the child block in the original (not reproduced),
+`EXP0_BYTE(...,12/14/15)` is kept as `recvx_en03s_leg_mark`. Test `enemy_en03_world`
+(RM_6090; init, children, leader, MV00 branch after 96 passes, joint matrix deviates from the bind pose,
+GoAHead moves, counter-check without enemy pass); CTest 105/106 (47 others'). Measurement: 32/42 -> **30/40**
+(`run18`); `bhEne03` (3) gone, new is the single one-time player lookup report after the grab ends in
+RM_7250. [Report](archived/work/native_port_enemy_gap_scan.result.md) section 15.
+Nosferatu `bhEne15` (`native/enemies/en15.c`, `jump[15]`) is ported: movement, three slashes
+(wing box `njCollisionCheckBC2`, capsule), splashes, throw, damage/core hit, death, all eight
+player guidances and the poison 397 (`bhEff_E15_Poison`). Mechanism-wide findings:
+`bhSetMotion(plp)` from the enemy pass (`player_set_motion_now`), return path for `plp->spd`
+(`take_player_speed`), poison bits `stflg 0x80000/0x200000` now reach the inventory (so the
+acid 256 also poisons as in the original), effect sets carry `exp0 = epw`. Test
+`enemy_en15_world` (RM_5800: throw chain, fall over the platform edge, poison); CTest 106/107
+(47 others'). Measurement: 30/40 -> **30/38** (`run19`), `bhEne15` (2) gone.
+[Report](archived/work/native_port_enemy_gap_scan.result.md) section 16.
+EN53 `child_ambient` is bound to the existing model owner: one live stream per `mbp[k]`,
+patch only on ambient green, ordered material propagation and multi-light evaluation.
+`enemy_en53_world` checks three original rooms, pulse, diagnostic death, patch limits and the
+productive draw/light path; nine targeted tests green. Start.command dev app rebuilt,
+arm64/signature checked; RM_5800/6040/6100 at 1/8/30/60/600 frames without enemy gaps and
+pose abort. No new full scan; combat/window acceptance open.
+[EN53 report](work/enemies/EN053.result.md), scan report section 17.
+`bhSetRapEff 310` done (2026-10-16): the whole effect setup of the Tyrant runs natively on the
+existing `eff[512]` set. Newly ported by hand: 310 `bhEff30a` camera shake, 349 callback,
+308 `bhSetEffSpark` (own table `Eff308Prm[2]`, `gnd_hgh` from `bhGetGroundPosition`) in
+`native/effect_rap_camera.cpp`; 307 claw surface + 312 mirrored claw in
+`native/effect_rap_claw.cpp`; 309/311 blood jets in `native/effect_rap_blood.cpp`; 305 dust +
+306 smoke in `native/effect_eff30x.cpp`. Camera/light via the hooks `camera_offset_set/add` and
+`spark_light`, range overruns remain named gaps. Tests `effect_rap_camera`,
+`effect_rap_claw`, `effect_rap_blood`, `effect_eff30x` and `enemy_en19_world` green
+(RM_5840: `310=1 349=0 312=3`, type 2 has no 349). Headless 600 frames: RM_5010 **+310/349**,
+RM_5840 **+305/307/309/310/312**, camera pose and Tyrant state identical before/after, no
+effect gap. Tables verified byte by byte against the ELF (among others `Tex5Buv[12]` reads jump table words =
+denormals ~3.4e-39, natively `{0,0,0,0}`). Open: `bhEff298`/`bhEff303` unported, `bhEne19`
+Mode0 index 4 (NULL in the original), no natural playthrough proof (player dies during the run).
+[EN19 report](work/enemies/EN019.result.md). **No commit/push.**
 
-**`effect_room_sprites` wieder grün (2026-10-16), zwei vorbestehende Befunde geklaert:** (1) seit
-`7d1f366` meldet `step_eff219` die Kameraluecke bewusst nicht mehr, weil `room.c:33`
-`bhInitCamera` das ganze `cam`-Objekt beim Raumladen nullt und `game.c:50` vor `:58` laeuft – die
-Box liegt im ersten Pass am Ursprung; drei veraltete Pruefungen nachgezogen. (2) Der danach
-sichtbare Nachbildfehler stammt aus `f7f6c67` und ist **gemessen** eingegrenzt (`7b81215` gruen,
-`7d1f366` + 219-Korrektur gruen, erst `f7f6c67` rot): die fuenf Nachbildalphas sind korrekt
-(je 2704 Dreiecke, Materialphase 6), aber `f7f6c67` gibt Objektlistenwerken
-(`kind==2 && object_list>=2`) `light_category = 1` – **belegt richtig**, denn `objitm.c:518-529`
-zeichnet `ob_hlg`/`ob_spc` nach `bhSetHalfLight()` mit `amb_chr`. Zu grob war der Test; die
-Alphapruefung laeuft jetzt auf `material_phase == 6`, dazu gleiche Dreieckszahl je Stufe und eine
-ausdrueckliche Pruefung, dass Phase 3/4 auf halbem Licht liegt. Gegenprobe mit abgeschaltetem
-Alphaschreiben schlaegt fehl. **Voller CTest 112/112 gruen.**
-Scanbericht Abschnitt 18. **Kein Commit/Push.**
+**`effect_room_sprites` green again (2026-10-16), two pre-existing findings clarified:** (1) since
+`7d1f366` `step_eff219` intentionally no longer reports the camera gap, because `room.c:33`
+`bhInitCamera` zeroes the whole `cam` object on room load and `game.c:50` runs before `:58` – the
+box sits at the origin in the first pass; three stale checks updated. (2) The afterimage error
+visible afterwards comes from `f7f6c67` and is narrowed down by **measurement** (`7b81215` green,
+`7d1f366` + 219 correction green, only `f7f6c67` red): the five afterimage alphas are correct
+(2704 triangles each, material phase 6), but `f7f6c67` gives object list works
+(`kind==2 && object_list>=2`) `light_category = 1` – **verified correct**, because `objitm.c:518-529`
+draws `ob_hlg`/`ob_spc` after `bhSetHalfLight()` with `amb_chr`. The test was too coarse; the
+alpha check now runs on `material_phase == 6`, plus the same triangle count per stage and an
+explicit check that phase 3/4 is at half light. Counter-check with alpha writing
+disabled fails. **Full CTest 112/112 green.**
+Scan report section 18. **No commit/push.**
 
-**`bhEff298`/`bhEff303` portiert (2026-10-16), die EN19-Effektkette ist damit vollstaendig:**
+**`bhEff298`/`bhEff303` ported (2026-10-16), the EN19 effect chain is thus complete:**
 298 `bhEff_E00_AcidGenerator` (effsub2.c:623) in `native/effect_sprite_procedures.cpp`, 303
-Blutfleck (effsub3.c:1507) in `native/effect_rap_blood.cpp`; `enemy_en19_world` laesst **keine**
-Effektluecke mehr zu. Zwei Besitzerfragen mitgeklaert: `sys->bl_ct` liegt jetzt bei
-`effect_blood_counter()` (ein Zaehler fuer Partikelpfad und bhEff301/303, Schnappschuss
-erhalten), und `RoomWorld::EnemyCallbackFrame` bindet im Effektpass Weltzeiger und
-EN19-Dienste, weil `bhEff349` dort Gegnercode ausfuehrt (`bhEne19_TyBloodSet` ruft
-`bhGetGroundPosition`/`objP[18]`/`bhSetEffectTb`) — **ohne den Rahmen stuerzt der Weltest ab**.
-Belegte Eigenheiten: 303 zaehlt `bl_ct` erst und nutzt es dann (umgekehrt zu bhClrEff_RY/301),
-`sy` waechst gegen `szb` statt `syb`, `flg = 0x200001` ist eine Zuweisung; 298 haelt bei
-`stflg 0x1000000` des Erzeugers auch den Wartezaehler an. Voller CTest **112/112** gruen,
-vier Gegenproben greifen; RM_5010/5840/3230 headless je 600 Bilder mit identischen Satz-IDs,
-Kamerapose, HP und Motion (kein natuerlicher Lauf erreicht die beiden Saetze).
-Gemessen offen: RM_5010/3230 halten den Tyrant in `mode0 5`, RM_5840 ist Typ 2 ohne 349,
-RM_1122 nicht im Kampf; der 303-Nachweis laeuft ueber das gekennzeichnete `status`-Bit, und der
-Erzeugerzweig von 298 braucht einen Treffer mit Waffe 15 (`comb_wep` aus en03_lib.c:1314).
-Scanbericht Abschnitt 19, [EN19-Bericht](work/enemies/EN019.result.md). **Kein Commit/Push.**
+blood stain (effsub3.c:1507) in `native/effect_rap_blood.cpp`; `enemy_en19_world` allows **no**
+effect gap anymore. Two ownership questions clarified along the way: `sys->bl_ct` now lives at
+`effect_blood_counter()` (one counter for the particle path and bhEff301/303, snapshot
+preserved), and `RoomWorld::EnemyCallbackFrame` binds the world pointer and
+EN19 services in the effect pass, because `bhEff349` executes enemy code there (`bhEne19_TyBloodSet` calls
+`bhGetGroundPosition`/`objP[18]`/`bhSetEffectTb`) — **without the frame the world test crashes**.
+Verified peculiarities: 303 first counts `bl_ct` and then uses it (reverse of bhClrEff_RY/301),
+`sy` grows toward `szb` instead of `syb`, `flg = 0x200001` is an assignment; 298 also stops the wait counter
+on the spawner's `stflg 0x1000000`. Full CTest **112/112** green,
+four counter-checks take effect; RM_5010/5840/3230 headless 600 frames each with identical set IDs,
+camera pose, HP and motion (no natural run reaches the two sets).
+Measured open: RM_5010/3230 keep the Tyrant in `mode0 5`, RM_5840 is type 2 without 349,
+RM_1122 not in combat; the 303 proof runs via the marked `status` bit, and the
+spawner branch of 298 needs a hit with weapon 15 (`comb_wep` from en03_lib.c:1314).
+Scan report section 19, [EN19 report](work/enemies/EN019.result.md). **No commit/push.**
 
-**Ledgerbereinigung (2026-10-16):** `docs/port_ledger.tsv` hatte zehn doppelte Schluessel, und
-`tools/port_check.py` wertete still die jeweils letzte Zeile. Drei verfaelschten den Bericht:
-`rySetShadow` (veraltetes `missing` ueberdeckte den belegten Port), `bhEff219` (`partial`
-ueberdeckte `done`) und `bhDrawTrsEffect3D` (eine falsch einsortierte `eff[-1]`-Notiz hob den
-Zeichenpass auf `done`; jetzt wieder `partial`, die Notiz steht bei `bhSetEffect`). Alle zehn
-zusammengefuehrt, und `port_check.py` lehnt doppelte Schluessel jetzt ab. `rySetShadow`/`bhEff304`
-gegen effsub3.c:1640/1683 geprueft (Gegenprobe Vorzeichen `ay` greift) -> `done`. `bhEff219`
-Bildabnahme im Schneehof RM_5840 (natuerlicher Lauf, einzige Flockenquelle) -> `done`; in RM_9090
-schaltet das Raumskript alle drei Boxen per `0x43` aus, das leere Bild dort ist Originalverhalten
-(Laufzeitspur `build/validation/snow219_20261016/`). Effekte jetzt 176/190, kein offener Posten.
-CTest 112/112. **Kein Commit/Push.**
+**Ledger cleanup (2026-10-16):** `docs/port_ledger.tsv` had ten duplicate keys, and
+`tools/port_check.py` silently evaluated the last row of each. Three distorted the report:
+`rySetShadow` (stale `missing` covered the verified port), `bhEff219` (`partial`
+covered `done`) and `bhDrawTrsEffect3D` (a misfiled `eff[-1]` note raised the
+draw pass to `done`; now `partial` again, the note is at `bhSetEffect`). All ten
+merged, and `port_check.py` now rejects duplicate keys. `rySetShadow`/`bhEff304`
+checked against effsub3.c:1640/1683 (counter-check sign `ay` takes effect) -> `done`. `bhEff219`
+image acceptance in the snow courtyard RM_5840 (natural run, only snowflake source) -> `done`; in RM_9090
+the room script switches all three boxes off via `0x43`, the empty image there is original behavior
+(runtime trace `build/validation/snow219_20261016/`). Effects now 176/190, no open item.
+CTest 112/112. **No commit/push.**
 
-**Granatwerfer und der 298-Erzeugerzweig (2026-10-16):** Waffe 15 ist der Saeure-Granatwerfer
-(sub1.c:4489-4492). Der Erzeugerzweig war nicht erreichbar, weil `CombatController` die Waffen
-14..17 still abwies (`return false` ohne Meldung). Jetzt: nicht freigegebene Waffen melden
-`Combat gaps` (auch in der Runtime-Ausgabe); der Abschuss player.c:4990-5120 ist im Kern portiert
-(vorher benannte Luecke), das Geschoss `bhEff130` (effsub1.c:9001, alle Typen) in
-`native/effect_eff130.cpp`, `bhCheckFlyAtari`/`bhSetBowDamage` in `native/weapon_fly.c`; Waffen
-14..17 freigegeben. `enemy_en19_world` belegt die **ganze Kette ueber einen echten Treffer**:
-Saeureschuss -> Geschoss -> `bhCheckFlyAtari` (wpnr_no 15) -> `comb_wep 15` -> 298 -> 257
-(Tyrant-HP 900 -> 860). Mitgeklaert: `bhEff019`/`bhEff130` schreiben `rom->lgtp[0]` ueber einen
-Lichtbesitzer (`room_light0`, bhEff019 jetzt `done`); der Spielerkampf haengte Effekte aus
-`bhSetEffectTb(..., NULL, ...)` (pwksub.c:2810/2919) faelschlich an den Spieler — `link_player`
-entscheidet jetzt wie im Gegnerpfad. Tests `effect_eff130` (neu), `enemy_en19_world`,
-`effect_room_sprites`; Gegenproben greifen; nach erzwungenem Neubau **CTest 113/113**,
-`verify_combat` gruen, RM_5010/5840 vorher/nachher identisch. Offen: `sys->ef_ntx2d`,
-`bhCheckL2Water` (beide inzwischen portiert, s. u.), Waffen 18/20, Mündungsrauch nicht bildlich abgenommen.
-**Kein Commit/Push.**
+**Grenade launcher and the 298 spawner branch (2026-10-16):** weapon 15 is the acid grenade launcher
+(sub1.c:4489-4492). The spawner branch was not reachable because `CombatController` silently rejected weapons
+14..17 (`return false` without a message). Now: weapons not enabled report
+`Combat gaps` (also in the runtime output); the launch player.c:4990-5120 is ported in the core
+(previously a named gap), the projectile `bhEff130` (effsub1.c:9001, all types) in
+`native/effect_eff130.cpp`, `bhCheckFlyAtari`/`bhSetBowDamage` in `native/weapon_fly.c`; weapons
+14..17 enabled. `enemy_en19_world` covers the **whole chain via a real hit**:
+acid shot -> projectile -> `bhCheckFlyAtari` (wpnr_no 15) -> `comb_wep 15` -> 298 -> 257
+(Tyrant HP 900 -> 860). Clarified along the way: `bhEff019`/`bhEff130` write `rom->lgtp[0]` via a
+light owner (`room_light0`, bhEff019 now `done`); player combat wrongly attached effects from
+`bhSetEffectTb(..., NULL, ...)` (pwksub.c:2810/2919) to the player — `link_player`
+now decides as in the enemy path. Tests `effect_eff130` (new), `enemy_en19_world`,
+`effect_room_sprites`; counter-checks take effect; after a forced rebuild **CTest 113/113**,
+`verify_combat` green, RM_5010/5840 identical before/after. Open: `sys->ef_ntx2d`,
+`bhCheckL2Water` (both since ported, see below), weapons 18/20, muzzle smoke not accepted visually.
+**No commit/push.**
 
-**Zwei Fremdbefunde geprueft und behoben (2026-10-16):** (1) `bhLoadWork` 0x65 nahm fuer alle Arten
-Byte 3 als Knoten; das Original setzt ihn fuer Spieler/Item/Effekt auf 0 (event.c:12733/12785/12799).
-Reale Folge in RM_4010/4011/8010: `65 03 03 01` + Unterbefehl 18 drehte Item 3 um Knoten 1 statt um die
-Wurzel (anderer Drehpunkt). Korrigiert in `native/world.cpp`; `script_motion` spielt die echten
-Befehlsfolgen der drei Raeume ab (vorher rot gemessen) plus Gegenfaelle Spieler/Effekt/Objekt. `bhLoadWorkEx`
-0xB5 (gleiche Regel, bhEtask) ist weiterhin nicht portiert und jetzt als `missing` gefuehrt. (2) Das
-Computer-Figurenfenster tastete eine Motionpose neu ab; das Original zeichnet den vorhandenen lokalen
-objP-Baum nach npRetSkinConvert und nullt objP[1].ang dauerhaft (sp_evt.c:1478-1500). Neu
-`PlayerAsset::sample_tree` (direkter Baum-Zeichenweg mit npRetSkinConvert-Translationen),
-`computer_character` liest enemy_obj/evalflags/live_stream bzw. committed Pose + node_overrides und
-schreibt mtn_no/frm_no/px..az ans Gegnerwerk. Betroffen nur Skript 3 (Albinoid-Datenbank); Scanner 4-6
-nutzen das Fenster nicht. Tests actor/computer_terminal/script_motion, Gegenproben rot, **CTest 113/113**,
-`verify_computer` gruen. **Kein Commit/Push.**
+**Two findings by others checked and fixed (2026-10-16):** (1) `bhLoadWork` 0x65 took byte 3 as the node for all kinds;
+the original sets it to 0 for player/item/effect (event.c:12733/12785/12799).
+Real consequence in RM_4010/4011/8010: `65 03 03 01` + sub-command 18 rotated item 3 around node 1 instead of around the
+root (different pivot). Corrected in `native/world.cpp`; `script_motion` plays the real
+command sequences of the three rooms (measured red before) plus counter-cases player/effect/object. `bhLoadWorkEx`
+0xB5 (same rule, bhEtask) is still not ported and now tracked as `missing`. (2) The
+computer figure window re-sampled a motion pose; the original draws the existing local
+objP tree after npRetSkinConvert and zeroes objP[1].ang permanently (sp_evt.c:1478-1500). New
+`PlayerAsset::sample_tree` (direct tree draw path with npRetSkinConvert translations),
+`computer_character` reads enemy_obj/evalflags/live_stream or committed pose + node_overrides respectively and
+writes mtn_no/frm_no/px..az to the enemy work. Affects only script 3 (albinoid database); scanners 4-6
+do not use the window. Tests actor/computer_terminal/script_motion, counter-checks red, **CTest 113/113**,
+`verify_computer` green. **No commit/push.**
 
-**`bhLoadWorkEx` 0xB5 portiert (2026-10-16):** derselbe Auswahlzweig wie 0x65, Ziel `bhEtask[0]`
-(Task-Ebene 0) statt des laufenden Tasks; Knotenregel identisch. Test `script_motion` (Zielkontext
-messbar getrennt, Gegenprobe rot). Fall 0 teilt weiter die bekannte Luecke mit `bhLoadWork`.
-**Baufalle gefunden:** `./build.sh` ohne `--test` konfiguriert `BUILD_TESTING=OFF`; danach sind alle
-Testziele im Makefile leer (`make: Nothing to be done`, rc 0) und ein Testlauf trifft das alte Binary.
-Ein vorheriger "gruener" Lauf von 0xB5 war dadurch ungueltig; nach `cmake -DBUILD_TESTING=ON` neu gebaut
-und mit `strings` am Binary belegt. Vor jedem Testlauf nach build.sh: Cache pruefen oder
-`./build.sh --test`. **Kein Commit/Push.**
+**`bhLoadWorkEx` 0xB5 ported (2026-10-16):** the same selection branch as 0x65, target `bhEtask[0]`
+(task level 0) instead of the running task; node rule identical. Test `script_motion` (target context
+measurably separated, counter-check red). Case 0 still shares the known gap with `bhLoadWork`.
+**Build trap found:** `./build.sh` without `--test` configures `BUILD_TESTING=OFF`; afterwards all
+test targets in the Makefile are empty (`make: Nothing to be done`, rc 0) and a test run hits the old binary.
+A previous "green" run of 0xB5 was invalid because of this; rebuilt after `cmake -DBUILD_TESTING=ON`
+and verified with `strings` on the binary. Before every test run after build.sh: check the cache or
+`./build.sh --test`. **No commit/push.**
 
-**Granatwerfer-Rest (2026-10-16):** (1) **Kein Nachladen im Original** — `bhSearchBullet` (sub1.c:8907)
-laedt nur Combi-Zeilen mit Flag `0xF000`; alle Granatenzeilen tragen `0x4/0x5`, nur Bogenmunition `0xF005`.
-Das zuvor hier vermutete "Nachladen mit Munitionswechsel" ist kein Portposten; der Port prueft dasselbe
-Tor. Festgenagelt in `ammunition` (leerer Werfer laedt/feuert nicht, Armbrust laedt). (2) **`sys->ef_ntx2d`
-portiert:** `bhEff130` type 3 reiht den Schirmsatz je Pass ein (`ntx2d_queued`), `RoomWorld::draw_ntx2d_effects`
-= effect.c:905 `bhDrawNtxEffect2D` -> `njDrawPolygon` (Alpha `col>>25`/128 unter 8/6) zeichnet ihn im
-Runtime-Zeichenpass vor HUD und Fade. Tests `effect_eff130` (Eintrag erst ab ct0 > 7, Farben exakt) und
-`effect_room_sprites ntx2d_room` (RM_5840, Pixelnachweis ueber die ganze Leinwand, Tore pt_flg/stflg);
-zwei Gegenproben rot. `./build.sh --test`: **CTest 113/113**, Dev-App 16:58. **Kein Commit/Push.**
+**Grenade launcher remainder (2026-10-16):** (1) **No reloading in the original** — `bhSearchBullet` (sub1.c:8907)
+only loads combi rows with flag `0xF000`; all grenade rows carry `0x4/0x5`, only bow ammunition `0xF005`.
+The "reloading with ammunition switch" suspected here before is not a port item; the port checks the same
+gate. Pinned in `ammunition` (empty launcher does not load/fire, crossbow loads). (2) **`sys->ef_ntx2d`
+ported:** `bhEff130` type 3 enqueues the screen set per pass (`ntx2d_queued`), `RoomWorld::draw_ntx2d_effects`
+= effect.c:905 `bhDrawNtxEffect2D` -> `njDrawPolygon` (alpha `col>>25`/128 under 8/6) draws it in the
+runtime draw pass before HUD and fade. Tests `effect_eff130` (entry only from ct0 > 7, colors exact) and
+`effect_room_sprites ntx2d_room` (RM_5840, pixel proof across the whole canvas, gates pt_flg/stflg);
+two counter-checks red. `./build.sh --test`: **CTest 113/113**, dev app 16:58. **No commit/push.**
 
-**Wassereinschlag portiert (2026-10-16):** `bhCheckL2Water` (hitchk.c:5561) = `RoomWorld::l2_water` auf
-denselben Flaechen/derselben Reihenfolge wie `bhCheckWater`; `bhSetWaterSplash4` (pwksub.c:2643) =
-`effect_detail::water_splash4` (im Effektpass ueber `submit_template`, sonst direkt). Gebunden und damit
-geschlossen: Kampfkern Schuss (weapon.c:872-958, id 15 + Splash4, Waffe 11 mit 32 Saetzen) und Messer
-(:1035-1069, zwei id-11-Saetze), `bhEff130`, EN01 `water_line` (4 Stellen), T3 `water_line`. Mitbehoben:
-T3 uebergab einen **Endpunkt** statt des Vektors (0,20,0) (zonzon.c:921); der Kampfkern zog `rand()` aus der
-libc statt aus dem EE-Generator (auch player.c:4950). `RECVX_CB_EFFECT.sys_ef_keep_ax`: Wasserzweige
-schreiben `sys->ef`, ax bleibt Vorlagenwert. Tests `object_water_wave` (RM_3060/3210/7060/9130 echte
-Flaechen) und `combat_player_state test_water_impact`; vier Gegenproben rot. `./build.sh --test`:
-**CTest 113/113**, `verify_combat` gruen, Dev-App 18:56. Nicht belegt: Waffe 11 (32 Saetze) nur im Code,
-kein Bild-/Durchspielnachweis im Wasserraum. Befund: Skriptbefehl 0x7c aendert nur die Event-Flaechenliste,
-nicht `floor_sounds_` (Quelle von bhCheckWater/L2Water) — moeglicher zweiter Besitzer, ungeprueft.
-**Kein Commit/Push.**
+**Water impact ported (2026-10-16):** `bhCheckL2Water` (hitchk.c:5561) = `RoomWorld::l2_water` on
+the same surfaces/in the same order as `bhCheckWater`; `bhSetWaterSplash4` (pwksub.c:2643) =
+`effect_detail::water_splash4` (in the effect pass via `submit_template`, otherwise directly). Bound and thereby
+closed: combat core shot (weapon.c:872-958, id 15 + Splash4, weapon 11 with 32 sets) and knife
+(:1035-1069, two id 11 sets), `bhEff130`, EN01 `water_line` (4 places), T3 `water_line`. Also fixed:
+T3 passed an **end point** instead of the vector (0,20,0) (zonzon.c:921); the combat core drew `rand()` from the
+libc instead of the EE generator (also player.c:4950). `RECVX_CB_EFFECT.sys_ef_keep_ax`: water branches
+write `sys->ef`, ax stays the template value. Tests `object_water_wave` (RM_3060/3210/7060/9130 real
+surfaces) and `combat_player_state test_water_impact`; four counter-checks red. `./build.sh --test`:
+**CTest 113/113**, `verify_combat` green, dev app 18:56. Not verified: weapon 11 (32 sets) only in code,
+no image/playthrough proof in the water room. Finding: script command 0x7c only changes the event surface list,
+not `floor_sounds_` (source of bhCheckWater/L2Water) — possible second owner, unverified.
+**No commit/push.**
 
-**Bodenflaechentabelle rom->flrp vereinheitlicht (2026-10-16):** Der 0x7c-Befund war echt. `RoomWorld` hielt
-drei Kopien (`floor_sounds_`, `enemy_areas_`, `effect_water_room_`); 0x7c (bhFlrAtariSet2) erreichte keine,
-0x0c nicht die Effekt-/Gegnerboden-Kopie (bhCheckFloorEnemy, Effektboden). Jetzt eine Tabelle
-`room_floors_`, `enemy_areas()` als Sicht, 0x7c an die Welt weitergeleitet. Realfall **RM_0070**: das
-Init-Skript setzt bei Flag 1/0x74 den Bodenklang von Flaeche 2 auf 2 — vorher blieb nativ Klang 1.
-Ebenso RM_4020 (Flaeche 2 -> Klang 3, nicht einzeln geprueft). Test `world_floor_table` (neu), zwei
-Gegenproben rot. `./build.sh --test`: **CTest 114/114**, Dev-App aktualisiert. Weiter getrennt: die
-Eventsicht `EventVm::floors_` (beide Schreiber spiegeln jetzt), `activate_enemy_spawn` ignoriert sys->mflrp
-(ungeprueft). **Kein Commit/Push.**
+**Floor surface table rom->flrp unified (2026-10-16):** the 0x7c finding was real. `RoomWorld` held
+three copies (`floor_sounds_`, `enemy_areas_`, `effect_water_room_`); 0x7c (bhFlrAtariSet2) reached none,
+0x0c did not reach the effect/enemy floor copy (bhCheckFloorEnemy, effect floor). Now one table
+`room_floors_`, `enemy_areas()` as a view, 0x7c forwarded to the world. Real case **RM_0070**: the
+init script sets the floor sound of surface 2 to 2 at flag 1/0x74 — previously sound 1 stayed natively.
+Likewise RM_4020 (surface 2 -> sound 3, not checked individually). Test `world_floor_table` (new), two
+counter-checks red. `./build.sh --test`: **CTest 114/114**, dev app updated. Still separate: the
+event view `EventVm::floors_` (both writers now mirror), `activate_enemy_spawn` ignores sys->mflrp
+(unverified). **No commit/push.**
 
-**Waffen 13/18/20 und Zielfernrohr (2026-10-16):** Befund: `WpnTab.flg 0x20` schickt Waffe **13** (bisher als
-"unterstuetzt" gefuehrt) und 18 nach mode2 71 `bhCPM2_act_scp` (playpch2.c:13) — dort stand im Kern nur eine
-Luecke, Waffe 13 schoss nativ also nie. Portiert: Ich-Perspektive (gm 0x80000/st 0x800000, pt_flg 0x1 aus),
-Schuss (13: Gun-Atari ab owP[5]; 18: Rakete bhEff130 type 4, ef_flg 0x2), 30-Schritt-Rueckstoss, Zoom
-cam.ppers 3640 auf pad 0x80, Zielen ueber pad_dx/pad_dy, Freigabe nach ct0 > 5. Waffe 20: bhSetGunFire-Funken
-bhEff027 (pwksub.c:3126). CombatController gibt 18/20 frei. Mitbehoben: sys->pad_dx/pad_dy jetzt ein
-Besitzer (Runtime, nur mit sp_flg 0x20 wie bhSysCallPad); pt_flg und sys->ef_flg im Kampf gebunden (vorher
-Luecke bzw. immer 0, das Raketen-Nachladetor player.c fuer 18 griff nie). Tests `combat_player_state`
-test_scope/test_linear_launcher, drei Gegenproben rot; `./build.sh --test` **CTest 114/114**, `verify_combat
---unit/--runtime` gruen. Nicht belegt: kein Bild der Ich-Perspektive in der Runtime, kein natuerlicher Erwerb
-von 13/18/20 durchgespielt. Offen/Befund: der Kampf-Pad bildet "vorwaerts" nur auf 0x20 ab, das Original
-setzt 0x1|0x20 (pad.c pad_tab: Steuerkreuz oben = Bit 0 und Bit 5) — wirkt auf bhControlPlayerPad
-(player.c:1818); Analogstick pad_ax/pad_ay fehlt im Host. **Kein Commit/Push.**
+**Weapons 13/18/20 and scope (2026-10-16):** finding: `WpnTab.flg 0x20` sends weapon **13** (previously tracked as
+"supported") and 18 to mode2 71 `bhCPM2_act_scp` (playpch2.c:13) — the core only had a
+gap there, so weapon 13 never fired natively. Ported: first-person view (gm 0x80000/st 0x800000, pt_flg 0x1 off),
+shot (13: gun atari from owP[5]; 18: rocket bhEff130 type 4, ef_flg 0x2), 30-step recoil, zoom
+cam.ppers 3640 on pad 0x80, aiming via pad_dx/pad_dy, release after ct0 > 5. Weapon 20: bhSetGunFire sparks
+bhEff027 (pwksub.c:3126). CombatController enables 18/20. Also fixed: sys->pad_dx/pad_dy now one
+owner (runtime, only with sp_flg 0x20 like bhSysCallPad); pt_flg and sys->ef_flg bound in combat (previously
+a gap or always 0 respectively, the rocket reload gate player.c for 18 never took effect). Tests `combat_player_state`
+test_scope/test_linear_launcher, three counter-checks red; `./build.sh --test` **CTest 114/114**, `verify_combat
+--unit/--runtime` green. Not verified: no image of the first-person view in the runtime, no natural acquisition
+of 13/18/20 played through. Open/finding: the combat pad maps "forward" only to 0x20, the original
+sets 0x1|0x20 (pad.c pad_tab: D-pad up = bit 0 and bit 5) — affects bhControlPlayerPad
+(player.c:1818); analog stick pad_ax/pad_ay missing in the host. **No commit/push.**
 
-**plp->stflg im Kampf vereinheitlicht (2026-10-16):** Bei der Pad-Pruefung gefunden: die Kampfsicht hielt
-plp->stflg als eigene Kopie. Das Zielbit 0x400 (player.c:1789), das en05/en09/en17 lesen, erreichte die
-Gegner nie; das Item-Kisten-Tor 0x10000 sperrte das Zielen nicht. Jetzt liest/schreibt der CombatController
-Eventbank 14 um jeden Kernaufruf. Kampf-Pad: Steuerkreuz oben/unten = 0x21/0x42 wie pad_tab (Wirkung im Host
-nicht beobachtbar, s. Ledger). Test `combat_player_work` (neu), Gegenprobe rot; `./build.sh --test`
-**CTest 115/115**, `verify_combat --runtime` gruen. OFFEN: plp->flg (Bank 13) ist weiter privat in der
-Kampfsicht. **Kein Commit/Push.**
+**plp->stflg unified in combat (2026-10-16):** found during the pad check: the combat view held
+plp->stflg as its own copy. The aim bit 0x400 (player.c:1789), which en05/en09/en17 read, never reached the
+enemies; the item crate gate 0x10000 did not block aiming. Now the CombatController reads/writes
+event bank 14 around every core call. Combat pad: D-pad up/down = 0x21/0x42 like pad_tab (effect in the host
+not observable, see ledger). Test `combat_player_work` (new), counter-check red; `./build.sh --test`
+**CTest 115/115**, `verify_combat --runtime` green. OPEN: plp->flg (bank 13) is still private in the
+combat view. **No commit/push.**
 
-**Waffe 11 und plp->flg-Pruefung (2026-10-16):** `bhSetGunFire` Waffe 11 (pwksub.c:2981) portiert: fuenf
-bhEff014- und acht bhEff002-Saetze ueber sys->ef mit der Vorlagenvererbung des Originals (type 3 nimmt die Lage
-von Satz 4). CombatController gibt 11 frei. Test `test_weapon11_fire`, zwei Gegenproben rot; `./build.sh --test`
-**CTest 115/115**, `verify_combat` gruen. plp->flg: geprueft und **bewusst nicht** an Bank 13 gebunden — kein
-externer Leser eines Kampf-flg-Bits ausser dem Passtor 0x10000, und eine Bindung wuerde nach einem Menue/Event
-(Kern wird verworfen) 0x10000 stehen lassen und den Bewegungspfad sperren. Voraussetzung waere, den Kern bei
-Sperren zu behalten wie das Original den Spielerwork (Ledger `player.c:BH_PWORK.flg:Kampf`). **Kein Commit/Push.**
+**Weapon 11 and plp->flg check (2026-10-16):** `bhSetGunFire` weapon 11 (pwksub.c:2981) ported: five
+bhEff014 and eight bhEff002 sets via sys->ef with the template inheritance of the original (type 3 takes the position
+of set 4). CombatController enables 11. Test `test_weapon11_fire`, two counter-checks red; `./build.sh --test`
+**CTest 115/115**, `verify_combat` green. plp->flg: checked and **deliberately not** bound to bank 13 — no
+external reader of a combat flg bit except the pass gate 0x10000, and a binding would leave 0x10000 set after a menu/event
+(core is discarded) and block the movement path. Prerequisite would be to keep the core during
+locks like the original keeps the player work (ledger `player.c:BH_PWORK.flg:Kampf`). **No commit/push.**
 
-**Bogengewehr (Waffen 10/19) portiert (2026-10-16):** `bhEff013` (effsub1.c:3352) in `native/effect_eff013.cpp`
-mit Flug, Zielverfolgung, Wand-/Gegner-/Wassertreffer, Stecken (121 Paesse) und Sprengpfeil-Explosion; gezeichnet
-ueber bhDrawPolEffect mit `efm[13].objP[mdlver]` (vierter Modellblock aus SYSTEM 0001). Dabei geschlossen:
-**`bhCheckCapCol2Capsule`** (weapon.c:1496, CPCL-Gelenkkapseln) war im Kern nur eine Luecke — **auch Waffe 13
-konnte deshalb keinen Gegner treffen**. `bhLinkBlood` ist im Original leer, EN01 meldete es faelschlich als
-Luecke. Neu: `recvx_combat_check_gun_atari`/`recvx_combat_search_near_enemy` fuer Effekte, bhEffDmy 139..142,
-Laufzeitanhaengen eines Effekts an einen Gegnerwork. CombatController gibt 10/19 frei. Test
-`effect_eff013_world` (RM_0080, drei Faelle, drei Gegenproben rot); `./build.sh --test` **CTest 116/116**,
-`verify_combat` gruen, Dev-App 20:29. Nicht belegt: Bild, Wasserraum, natuerlicher Erwerb. **Kein Commit/Push.**
+**Bow gun (weapons 10/19) ported (2026-10-16):** `bhEff013` (effsub1.c:3352) in `native/effect_eff013.cpp`
+with flight, homing, wall/enemy/water hits, sticking (121 passes) and explosive arrow explosion; drawn
+via bhDrawPolEffect with `efm[13].objP[mdlver]` (fourth model block from SYSTEM 0001). Closed along the way:
+**`bhCheckCapCol2Capsule`** (weapon.c:1496, CPCL joint capsules) was only a gap in the core — **so weapon 13
+could not hit any enemy either**. `bhLinkBlood` is empty in the original, EN01 wrongly reported it as a
+gap. New: `recvx_combat_check_gun_atari`/`recvx_combat_search_near_enemy` for effects, bhEffDmy 139..142,
+runtime attaching of an effect to an enemy work. CombatController enables 10/19. Test
+`effect_eff013_world` (RM_0080, three cases, three counter-checks red); `./build.sh --test` **CTest 116/116**,
+`verify_combat` green, dev app 20:29. Not verified: image, water room, natural acquisition. **No commit/push.**
 
-**Semantikabgleich Treffer (2026-10-16):** `bhCheckGunAtari` (weapon.c:473-870) und `bhCheckKnifeAtari`
-(:1002-1146) Zeile fuer Zeile gegen den Kern: Filter, Kegeltest, Gelenkkapsel-/Kapselzweig, Sichtwand, naechster
-Treffer, Durchschlagszweig (nimmt wie das Original px/nr des bisher naechsten), Gelenkwahl, Schadensstufen und die
-Gelenkkoordinaten-Rueckgabe stimmen ueberein. Einzige Restluecke dort: Wandzerstoerung attr 0x1000000
-(:552-566, bhSetExplosion/obwp[prm3].mdflg/ahtp->flg) ist im Spielerkampf ungebunden — Befund: nur `bhObj012`
-(objitm.c:2069) erzeugt solche Waende, und **kein Raum fuehrt ein Typ-12-Objekt** (alle RDX geprueft); bhObj012 ist
-nativ nicht portiert. **Kein Commit/Push.**
+**Semantic alignment of hits (2026-10-16):** `bhCheckGunAtari` (weapon.c:473-870) and `bhCheckKnifeAtari`
+(:1002-1146) line by line against the core: filter, cone test, joint capsule/capsule branch, sight wall, nearest
+hit, penetration branch (takes px/nr of the previously nearest one, as in the original), joint choice, damage levels and the
+joint coordinate return match. The only remaining gap there: wall destruction attr 0x1000000
+(:552-566, bhSetExplosion/obwp[prm3].mdflg/ahtp->flg) is unbound in player combat — finding: only `bhObj012`
+(objitm.c:2069) creates such walls, and **no room carries a type 12 object** (all RDX checked); bhObj012 is
+not ported natively. **No commit/push.**
 
-**Spieler-Bewegungsmischung (SetMtn*Hokan) portiert (2026-10-16):** plp->mlwP->objP ist jetzt dauerhaft
-(`RoomWorld::player_obj_`); Aktion/Event, Kampf, Schaden, Griff und Schieben schreiben den Knotenteil von
-bhSetMotion mit dem Stand vor dem Vorschub ueber das vorhandene `set_motion`, alle Abtaststellen legen objP unter
-ihre Bearbeitungen. Motionwechsel blenden wie im Original (Protokoll: Lauf->Stand ueber 5 Paesse, Ziehen/Wegstecken
-ueber 4/12); die gezeigte Pose ist das Bild vor dem Vorschub (vorher eins voraus). Kampf-Luecke `SetMtn*Hokan`
-und Push-Bit HOKAN entfallen. Test `player_motion_blend` (neu, zwei Gegenproben rot). `./build.sh --test`
-**CTest 117/117**, `verify_combat` gruen (gleiche 6 Schuesse/4 Treffer; Aufschaltwinkel 3521 -> 3366, weil der
-Kern jetzt die objP-Pose liest), `verify_push`, `verify_stairs`, `verify_lighter` gruen. Rot, aber mit
-abgeschalteter Mischung identisch rot gemessen: `verify_events` (window sequence), `verify_enemy_ai` (Hunde-
-Todesbiss bei Bild 3000); `verify_crate_edge` erwartet veraltet Opcode 0x8b als offen (seit 7023885 gebunden).
-Offen: Treppe, Gameover, skriptgefuehrte Spielermotion fuehren objP noch nicht. Dev-App 21:10. **Kein Commit/Push.**
+**Player motion blending (SetMtn*Hokan) ported (2026-10-16):** plp->mlwP->objP is now persistent
+(`RoomWorld::player_obj_`); action/event, combat, damage, grab and push write the node part of
+bhSetMotion with the state before advancing via the existing `set_motion`, all sampling sites put objP under
+their edits. Motion changes blend as in the original (log: run->stand over 5 passes, draw/holster
+over 4/12); the displayed pose is the frame before advancing (previously one ahead). Combat gap `SetMtn*Hokan`
+and push bit HOKAN dropped. Test `player_motion_blend` (new, two counter-checks red). `./build.sh --test`
+**CTest 117/117**, `verify_combat` green (same 6 shots/4 hits; lock-on angle 3521 -> 3366, because the
+core now reads the objP pose), `verify_push`, `verify_stairs`, `verify_lighter` green. Red, but measured identically red
+with blending disabled: `verify_events` (window sequence), `verify_enemy_ai` (dog
+death bite at frame 3000); `verify_crate_edge` expects, stale, opcode 0x8b as open (bound since 7023885).
+Open: stairs, game over, script-driven player motion do not carry objP yet. Dev app 21:10. **No commit/push.**
 
-**2026-10-16, drei gemeldete Fehler (RM_1050 / Inventar), Ursachen belegt und behoben:**
-(1) *Ameisen-Juwel, blaue Flaeche:* `RoomWorld::set_fixed_cut` schlug die Nahgrenze mit dem vorigen Raumschnitt
-nach (Schnitt 1: 20/20000) statt mit `cam.ncut = cno` (cut.c:486 vor bhChangeViewClipRM :537); die Vitrine lag
-vor der Nahgrenze, es blieb die Hintergrundfarbe. Jetzt Schnitt 5 -> 2/20000, Bild zeigt die Vitrine.
-(2) *Steve-Schalter ohne Bilder:* die Meldungsbits von `sys->st_flg` (0x1000 Seite fertig, 0x4000, 0x8000, 0x800,
-0x400, 0x80000) lebten nur im `MessageDialog`; das Skript (Ereignis 34, @2ba2) wartet per bhFlagCk Typ 5 auf
-0x1000 und dessen Fall beim Umblaettern von Meldung 24 und setzt erst dann bhCamSet 4 (Schaltertafel mit den
-sechs Waffenbildern). `EventVm` spiegelt `MessageDialog::status()` jetzt nach jedem Pass in flags[5]; Kamera 4
-und die Bilder erscheinen. Dabei festgestellt: der Monitor (bhEff111, Rendertextur aus Schnitt 6, nur RM_1050)
-ist nicht gebunden und bleibt schwarz (Ledger `effsub1.c:bhEff111`, missing).
-(3) *Inventartext vor der UI:* GetItem laeuft im Original erst im stehenden Aufnahmebildschirm (sub1.c:3452,
-StatusMain case 8 nach SpriteH ohne statusflg 0x40); `begin_pickup` entschied sofort, die Frage 157 stand an
-ihrer festen Position (mes_spos[1] 44/342) ueber den einfahrenden Sprites. Die Entscheidung wartet jetzt auf den
-Statustask und das Ende der Einfahrt. Der Itemname selbst faehrt mit cen_pos[6] mit (unveraendert).
-Tests: `native_ground_world` (Clip), `event_lifecycle` (RM_1050 Ereignis 34 bis bhCamSet 4),
-`native-gameplay-bindings` (RM_0000 Messer); alle drei mit Gegenprobe rot. Headless-Bilder: Vitrine, Schaltertafel.
+**2026-10-16, three reported bugs (RM_1050 / inventory), causes verified and fixed:**
+(1) *Ant jewel, blue surface:* `RoomWorld::set_fixed_cut` looked up the near limit with the previous room cut
+(cut 1: 20/20000) instead of with `cam.ncut = cno` (cut.c:486 before bhChangeViewClipRM :537); the display case was
+in front of the near limit, only the background color remained. Now cut 5 -> 2/20000, the image shows the display case.
+(2) *Steve switch without images:* the message bits of `sys->st_flg` (0x1000 page finished, 0x4000, 0x8000, 0x800,
+0x400, 0x80000) lived only in `MessageDialog`; the script (event 34, @2ba2) waits via bhFlagCk type 5 for
+0x1000 and its clearing when turning the page of message 24 and only then sets bhCamSet 4 (switch panel with the
+six weapon images). `EventVm` now mirrors `MessageDialog::status()` into flags[5] after every pass; camera 4
+and the images appear. Found along the way: the monitor (bhEff111, render texture from cut 6, only RM_1050)
+is not bound and stays black (ledger `effsub1.c:bhEff111`, missing).
+(3) *Inventory text before the UI:* in the original GetItem only runs in the standing pickup screen (sub1.c:3452,
+StatusMain case 8 after SpriteH without statusflg 0x40); `begin_pickup` decided immediately, question 157 stood at
+its fixed position (mes_spos[1] 44/342) above the incoming sprites. The decision now waits for the
+status task and the end of the slide-in. The item name itself slides in with cen_pos[6] (unchanged).
+Tests: `native_ground_world` (clip), `event_lifecycle` (RM_1050 event 34 up to bhCamSet 4),
+`native-gameplay-bindings` (RM_0000 knife); all three red with counter-check. Headless images: display case, switch panel.
 
-**2026-10-16, RM_0080 Rolltor-Zombies (Nutzerbefund "bewegende Dummies"):** Der Schalter (Interaktion 8, nach
-geloester Sperre `ev_flg 110`) startet Ereignisse 5-11/40/41; 7 und 8 sind die zwei Zombies: Common 25 Lauf,
-`Common_controll 53` (@132a/@1360), dann `Sub_controll 0x8f` Modus 1. Die native VM kannte Befehl 53 nicht,
-der Task blieb stehen ("unimplemented Common_controll command 53"), die Zombies blieben in mode0 5. Ursache
-ist das Parsing: die 0x69-Laengentabelle war ein Teilstand. Jetzt `EventVm::common_controll_length` mit allen
-49 Originalbefehlen aus event.c:9963-12710 (Zeigervorschub je Fall, Selektorabhaengigkeit 24/25/34/35,
-Achsenabhaengigkeit 10/22); nativ gebunden 0, 53, 10/22, 43, 35 Selektor 1; benannte Luecken 51/52
-(`sys->evt_posno`, Opcodes 0xb3/0xb4 ohne Besitzer) und 35 Selektor 0/Spieler. Test `event_lifecycle`
-(Tabelle gegen die Originalvorschuebe; RM_0080 Rolltor bis beide Zombies im Brain laufen; Gegenprobe rot).
-Headless-Nachweis (`--enemy-ai on`, Snapshot mit ev_flg 110): Bild 300 Rolltor oeffnet, 500 beide laufen
-auf die Spielerin zu (mtn 125/117), 800 Griff (mode 1/0/5/1). CTest 117/117.
+**2026-10-16, RM_0080 roller door zombies (user finding "moving dummies"):** the switch (interaction 8, after
+the lock `ev_flg 110` is resolved) starts events 5-11/40/41; 7 and 8 are the two zombies: Common 25 walk,
+`Common_controll 53` (@132a/@1360), then `Sub_controll 0x8f` mode 1. The native VM did not know command 53,
+the task stood still ("unimplemented Common_controll command 53"), the zombies stayed in mode0 5. The cause
+is the parsing: the 0x69 length table was a partial state. Now `EventVm::common_controll_length` with all
+49 original commands from event.c:9963-12710 (pointer advance per case, selector dependence 24/25/34/35,
+axis dependence 10/22); natively bound 0, 53, 10/22, 43, 35 selector 1; named gaps 51/52
+(`sys->evt_posno`, opcodes 0xb3/0xb4 without owner) and 35 selector 0/player. Test `event_lifecycle`
+(table against the original advances; RM_0080 roller door until both zombies run in the brain; counter-check red).
+Headless proof (`--enemy-ai on`, snapshot with ev_flg 110): frame 300 roller door opens, 500 both walk
+toward the player (mtn 125/117), 800 grab (mode 1/0/5/1). CTest 117/117.
 
-**2026-10-17, neun Nutzerbefunde (Diagnose durch Unteragenten, Fixes geprueft):** (1) Leerlauf->Laufen:
-pad_old nach dem Pass (pad.c:146), `tools/verify_idle_walk.py`. (2) RM_4050 Tasche: `bhCheckSubPack`.
-(3) RM_3091 Wurm: `njPtclDrawPolygon` in Bildschirmpunkten. (4) RM_4020 Kranschatten: `bhObj008`.
-(5) Leiter im ersten Uebergangsbild: Tuermodell nur ohne Status 0x40 (door.c:395). (6) RM_1080
-Lugertuer-Kamera: gm_flg-Maske beim Raumladen (system.c:185); Lugertuer ohne Einsetzfrage und RM_3030
-Kartenleser offen sind originalgetreu. (7) RM_3140 Kameraevent: `bhEff137` (Monitoranzeige bhDraw137
-offen). (8) RM_1050 Monitor: `bhEff111` + Rendertextur (Headless-Bild zeigt Steve). (9) Steve: bhSetDispObj
-mdflg 0x1, bhEneRenderSet am Work, Subplayer-Motionswechsel nach Original. Details im Ledger. CTest 117/117,
-alle Gegenproben rot.
+**2026-10-17, nine user findings (diagnosis by subagents, fixes checked):** (1) idle->walk:
+pad_old after the pass (pad.c:146), `tools/verify_idle_walk.py`. (2) RM_4050 bag: `bhCheckSubPack`.
+(3) RM_3091 worm: `njPtclDrawPolygon` in screen points. (4) RM_4020 crane shadow: `bhObj008`.
+(5) Ladder in the first transition frame: door model only without status 0x40 (door.c:395). (6) RM_1080
+Luger door camera: gm_flg mask on room load (system.c:185); Luger door without insert question and RM_3030
+card reader open are faithful to the original. (7) RM_3140 camera event: `bhEff137` (monitor display bhDraw137
+open). (8) RM_1050 monitor: `bhEff111` + render texture (headless image shows Steve). (9) Steve: bhSetDispObj
+mdflg 0x1, bhEneRenderSet on the work, subplayer motion changes per original. Details in the ledger. CTest 117/117,
+all counter-checks red.
 
-**2026-10-17, Nachtrag:** bhDraw137 (RM_3140 Monitoranzeige) portiert; der gemeinsame 2D-Rasterer der
-ef_fnc-Anzeigen rechnet Texel normiert auf 256 (GS-ST, ps2_NaDraw2D.c) -- das korrigiert auch die Kran-Anzeige
-bhDraw134 (Gruppe 44 ist 128x128, vorher nur ein Ausschnitt). gm_flg 0x20 (Schnittwechsel) hat jetzt Schreiber
-und die bhCheckCut-Loeschung; der RM_1050-Monitor frischt bei Schnittwechseln auf. Offen bleibt nur die
-PS2-Framebufferkopie (PS2_Render_Tex_Sub), die ohne GS-Nachbildung nicht bestimmbar ist.
+**2026-10-17, addendum:** bhDraw137 (RM_3140 monitor display) ported; the shared 2D rasterizer of the
+ef_fnc displays computes texels normalized to 256 (GS ST, ps2_NaDraw2D.c) -- this also corrects the crane display
+bhDraw134 (group 44 is 128x128, previously only a section). gm_flg 0x20 (cut change) now has writers
+and the bhCheckCut clearing; the RM_1050 monitor refreshes on cut changes. Only the
+PS2 framebuffer copy (PS2_Render_Tex_Sub) remains open, which cannot be determined without GS emulation.
 
-**2026-10-17, weiter offene (Arbeitsbaum gebaut 09:01, CTest 117/117; Dev-App noch 02:34, nicht
-ausgeliefert):** (1) Opcodes 0xb3 `bhEtcAtariEnePosSet` (event.c:7794) und 0xb4 (event.c:7865) mit
-`sys->evt_posno` (Snapshot, Raumwechsel) und rom->posp; Common 51/52 gebunden. Test `event_lifecycle`
-(RM_0110). (2) Skriptgefuehrte Spielermotion: `pl_smove08` (Common 24/25/34 Selektor 0) fuehrt objP ueber
-`set_motion`; Test `player_motion_blend`. (3) `verify_events` gruen: cb_flg 0x4000 verbraucht GetItem
-selbst (sub1.c:3830-3857), Replay-Takt fuer Meldung 158. (4) `verify_enemy_ai`: die Erwartung mode0 6 beim
-Hundetod hatte keine Originalquelle (EN07 setzt nur mode0 4, Bisse klemmen hp auf 1; der Tod kommt aus dem
-Sprungangriff, Schadensmodus 2, hp 6 -> 0 -> -6 bei Bild ~2420/~2497). Portiert: player.c:1405 (hp < 0 ->
-mode0 3, mnwP = mnwPb) und `bhCPM0_die` (Fallmotion 25/27 mit objP ueber set_motion, Bodenlage, Stimme 1025,
-Game-Over-Start beim Bildwechsel ueber ts_flg 0x4000, Liegemotion 26/28; laeuft in gov_md1 0 weiter).
-Dabei zwei Host-Fehler: der Todesmelder las plp->flg 0x2 in jedem Modus (nur bhCPM0_enedie/mode0 6 liest es),
-und ts_flg 0x4000 fehlte im nativen Raumladen. Der RM_0050-Teil des Pruefers war mit dem Baseline-Binary
-ebenfalls rot (feste Lockposition -142, rm_flg 9 wuerfelt die Falle) und folgt jetzt dem Wurf.
-`verify_enemy_ai` gruen; verify_events/event_freeze/stairs/push/lighter/continuity/doors/idle_walk gruen;
-CTest 117/117; Gegenproben rot (kein Uebergang -> kein Game Over; altes Flag -> enemy_work rot). Dev-App 09:53.
+**2026-10-17, further open items (working tree built 09:01, CTest 117/117; dev app still 02:34, not
+delivered):** (1) opcodes 0xb3 `bhEtcAtariEnePosSet` (event.c:7794) and 0xb4 (event.c:7865) with
+`sys->evt_posno` (snapshot, room change) and rom->posp; Common 51/52 bound. Test `event_lifecycle`
+(RM_0110). (2) Script-driven player motion: `pl_smove08` (Common 24/25/34 selector 0) carries objP via
+`set_motion`; test `player_motion_blend`. (3) `verify_events` green: cb_flg 0x4000 is consumed by GetItem
+itself (sub1.c:3830-3857), replay tick for message 158. (4) `verify_enemy_ai`: the expectation mode0 6 at the
+dog death had no original source (EN07 only sets mode0 4, bites clamp hp to 1; death comes from the
+jump attack, damage mode 2, hp 6 -> 0 -> -6 at frame ~2420/~2497). Ported: player.c:1405 (hp < 0 ->
+mode0 3, mnwP = mnwPb) and `bhCPM0_die` (fall motion 25/27 with objP via set_motion, ground position, voice 1025,
+game over start at the frame change via ts_flg 0x4000, lying motion 26/28; continues running in gov_md1 0).
+Two host errors along the way: the death reporter read plp->flg 0x2 in every mode (only bhCPM0_enedie/mode0 6 reads it),
+and ts_flg 0x4000 was missing in the native room load. The RM_0050 part of the checker was also red with the baseline binary
+(fixed lure position -142, rm_flg 9 randomizes the trap) and now follows the roll.
+`verify_enemy_ai` green; verify_events/event_freeze/stairs/push/lighter/continuity/doors/idle_walk green;
+CTest 117/117; counter-checks red (no transition -> no game over; old flag -> enemy_work red). Dev app 09:53.
 
-**2026-10-17, Treppe auf objP:** die sechs Stufenroutinen fuehren den bhSetMotion-Knotenteil (Mischung,
-hokan_count-Abzug) jetzt auf plp->mlwP->objP, auch im Abschlussbild; bhCalcFixOffset liest objP dieses
-Passes gegen owP des letzten bhCalcModel (vorher ungemischte Rekonstruktion). hokan geht an act_std zurueck.
-Lueckenbit HOKAN entfaellt (0x280 -> 0x200). `verify_stairs` mit POSETRACE-Pruefung gruen, Endlagen wie vorher;
-`core_continuity` mit Knotenteil-/owP-Fixture (Gegenprobe rot). CTest 117/117, Nachbarlaeufe gruen. Dev-App.
+**2026-10-17, stairs on objP:** the six stair routines now carry the bhSetMotion node part (blending,
+hokan_count deduction) on plp->mlwP->objP, also in the final frame; bhCalcFixOffset reads objP of this
+pass against owP of the last bhCalcModel (previously unblended reconstruction). hokan goes back to act_std.
+Gap bit HOKAN dropped (0x280 -> 0x200). `verify_stairs` with POSETRACE check green, end positions as before;
+`core_continuity` with node part/owP fixture (counter-check red). CTest 117/117, neighbor runs green. Dev app.
 
-**2026-10-17, Todesszene (gov_md1 10) auf objP:** bhSetMotion-Knotenteil je Pass beim Spielerbesitzer,
-frm_no schiebt auch waehrend der Mischung (vorher gehalten), Eintritt mit mnwP = mnwPb, bhDrawGameOver zeichnet
-den objP-Baum. Test `gameover_original` mit SYSTEM/0010 (Gegenprobe rot), CTest 117/117, alle Prueflaeufe gruen,
-Dev-App 10:23. Offen: Laufzeitmessung der Selbstzerstoerungsszene (kein headless erreichbarer Ausloeser).
+**2026-10-17, death scene (gov_md1 10) on objP:** bhSetMotion node part per pass at the player owner,
+frm_no also advances during blending (previously held), entry with mnwP = mnwPb, bhDrawGameOver draws
+the objP tree. Test `gameover_original` with SYSTEM/0010 (counter-check red), CTest 117/117, all check runs green,
+dev app 10:23. Open: runtime measurement of the self-destruct scene (no trigger reachable headless).
 
-**2026-10-17, Task 7 in gov_md1 0:** das Spielbild laeuft in den 70 Bildern vor der Game-Over-Maske weiter
-(main.c:197, nur Task 8 ueber ts_flg 0x100 gesperrt), der Game-Over-Pass folgt am Bildende. Dabei: NG00 mode3 7
-ist im Original eine Leerstelle (keine Luecke), bhCPM0_enedie loescht ts_flg 0x4000. `verify_enemy_ai` prueft
-die Hundebewegung in md1 0 (Gegenprobe rot); alle Prueflaeufe gruen, CTest 117/117, Dev-App 10:56.
+**2026-10-17, task 7 in gov_md1 0:** the game image keeps running in the 70 frames before the game over mask
+(main.c:197, only task 8 blocked via ts_flg 0x100), the game over pass follows at the end of the frame. Along the way: NG00 mode3 7
+is an empty slot in the original (not a gap), bhCPM0_enedie clears ts_flg 0x4000. `verify_enemy_ai` checks
+the dog movement in md1 0 (counter-check red); all check runs green, CTest 117/117, dev app 10:56.
 
-**2026-10-17, Griff-Tod RM_0080 geprueft:** Spieler mode0 6 / mode3 7 mit Motion 412 ist PlyDG00 case 7, Zombie 1
-in MV16 -- originalgetreu. Fehler war der native Game-Over-Start: in mode0 6 schon bei hp < 0 statt mit plp->flg 0x2
-am Ende der Todesmotion (player.c:6711, en01.c:7748); jetzt Start bei Bild ~1072 statt ~1008. `verify_enemy_ai`
-death-1050 (Gegenprobe Baseline rot), alle Prueflaeufe gruen, CTest 117/117, Dev-App 13:19.
+**2026-10-17, grab death RM_0080 checked:** player mode0 6 / mode3 7 with motion 412 is PlyDG00 case 7, zombie 1
+in MV16 -- faithful to the original. The error was the native game over start: in mode0 6 already at hp < 0 instead of with plp->flg 0x2
+at the end of the death motion (player.c:6711, en01.c:7748); now start at frame ~1072 instead of ~1008. `verify_enemy_ai`
+death-1050 (counter-check baseline red), all check runs green, CTest 117/117, dev app 13:19.
 
-**2026-10-17, Treppe mtn_attr:** plp->mtn_attr hat im Original keinen Leser (nur Motion.c:76 schreibt es); der
-Knotenteil fuehrt es mit, das Lueckenbit 0x200 entfaellt, die Stufenaktionen melden keine offenen Dienste mehr.
-CTest 117/117, Dev-App 14:00.
+**2026-10-17, stairs mtn_attr:** plp->mtn_attr has no reader in the original (only Motion.c:76 writes it); the
+node part carries it along, the gap bit 0x200 is dropped, the stair actions no longer report open services.
+CTest 117/117, dev app 14:00.
 
-**2026-10-17, Selbstzerstoerungsszene gemessen:** `tools/verify_self_destruct.py` (Diagnose-Snapshot RM_4040 mit
-ev_flg 257/35 gesetzt, 259/36 frei; Untersuchung von Eintrag 1 loest scd1 @0452 aus: EvtStart 5 + 0xcb Modus 1; die
-Tuer in Event 5 fuehrt nach RM_3230, deren Fluchtszene per SELECT uebersprungen wird, dann RM_3091). Gemessen: evt_tim
-16202 bei Bild 1100, Ablauf bei Bild 9200 (ev_flg 67 frei, gm_flg 0x400, ts_flg 0x4000 frei, sp_flg 0x20 -> kein
-Spielerpass mehr, player.c:1365), md1 0 71 Paesse, md1 10 ab Bild 9273 mit genau einem Knotenteil je Pass: Motion 4
-(20 Bilder) ohne Mischung, fuenfte Explosion in Pass 96 -> Motion 25 ab frm_no 0 mit hokan 8..1 bei schiebendem frm_no,
-Umbruch nach 40 Bildern -> Motion 26 ab Pass 137, md1 1 nach Pass 150; mit ply_hp 100 Motion 7 (zweite PlMtnAct-Zeile).
-Drei native Fehler behoben: der Zaehler evt_tmd/evt_tim ging beim Raumwechsel verloren (system.c:178 laesst ihn stehen;
-`inherit_progress`), bhCheckEvtTimer verlangte ts_flg 0x4000 nicht (player.c:1272), die Todesszene nahm wpntp/dmlvl 0/0
-aus begin() statt exp0 beim Eintritt (gameover.c:289) und schrieb plp->px/py/pz/ay nicht (:303-308). `--state` traegt
-jetzt `event_deadline_mode/ticks`. Tests game_test/gameover_original (Gegenproben rot), CTest 117/117,
-verify_self_destruct/enemy_ai/stairs/events gruen. Dev-App 14:43.
+**2026-10-17, self-destruct scene measured:** `tools/verify_self_destruct.py` (diagnostic snapshot RM_4040 with
+ev_flg 257/35 set, 259/36 clear; examining entry 1 triggers scd1 @0452: EvtStart 5 + 0xcb mode 1; the
+door in event 5 leads to RM_3230, whose escape scene is skipped via SELECT, then RM_3091). Measured: evt_tim
+16202 at frame 1100, expiry at frame 9200 (ev_flg 67 clear, gm_flg 0x400, ts_flg 0x4000 clear, sp_flg 0x20 -> no more
+player pass, player.c:1365), md1 0 71 passes, md1 10 from frame 9273 with exactly one node part per pass: motion 4
+(20 frames) without blending, fifth explosion in pass 96 -> motion 25 from frm_no 0 with hokan 8..1 with advancing frm_no,
+wrap after 40 frames -> motion 26 from pass 137, md1 1 after pass 150; with ply_hp 100 motion 7 (second PlMtnAct row).
+Three native errors fixed: the counter evt_tmd/evt_tim was lost on room change (system.c:178 leaves it in place;
+`inherit_progress`), bhCheckEvtTimer did not require ts_flg 0x4000 (player.c:1272), the death scene took wpntp/dmlvl 0/0
+from begin() instead of exp0 on entry (gameover.c:289) and did not write plp->px/py/pz/ay (:303-308). `--state` now carries
+`event_deadline_mode/ticks`. Tests game_test/gameover_original (counter-checks red), CTest 117/117,
+verify_self_destruct/enemy_ai/stairs/events green. Dev app 14:43.
 
-**2026-10-17, RM_3230 Fluchtszene:** kein Enginefehler. Die Szene laeuft nativ durch, sobald der Gegnerpass laeuft:
-Event 2 (rel 0a22) haelt EN19 (Art 1 Index 1) per Common_controll 24 (event.c:11299-11500: mnwP = sys->rmthp, mtn_no 1,
-mtn_add 0x10000, mode0 5) 569 Bilder auf frm_no 0, danach warten die Tasks 0/1/2/4/5 mit bhFrameCheck (event.c:3237,
-Befehl 0x38) auf frm_no 35/80/463; den Vortrieb liefert bhEne19_Event (en19.c, bhEne19_Mode0[5] -> bhSetMotion) im
-Gegnerpass bhControlEnemy, der nur bei sys->sp_flg 0x2 laeuft (eneset.c:352, nativ enemy_dispatch.c:144). Der alte
-Befund (frm_no 0, alle Tasks in 0x38) ist die Headless-/Replay-Vorgabe `--enemy-ai off` (runtime.cpp, world_enemies.cpp
-maskiert sp_flg 0x2), die `verify_self_destruct.py` nicht ueberschrieb. Gemessen mit `--enemy-ai on --enemy-grab on`:
-Raumeintritt RM_3230 Bild 450, Schleife bis 1018, Warten 35/80/463 enden bei 1053/1098/1481 (Skriptarithmetik
-450+569+463), EN19 frm_no 82 bei Bild 1100 und 464 bei 1500, EEVT der Tasks 1/2/4 bei 1482, 5/7 bei 1572, Tuer ab 1573,
-RM_3091 bei Bild 1869 ohne Eingabe (mit Tuer-Skip-Confirm 1580). Pruefer ohne SELECT-Zeile, mit Szenenmessung und
-`--enemy-ai on`; Ablauf jetzt bei Bild 9956, md1 10 ab 10029, Motion 4/25/26 wie vorher (Gegenprobe ohne `--enemy-ai on`
-rot: frm_no 0). Native Quellen unveraendert; `./build.sh --test` CTest 117/117, verify_self_destruct/enemy_ai/events/
-stairs gruen, Dev-App 14:59. **2026-10-17, bhSetExplosionEffect:** weapon.c:1812 (23 Art 1 Groesse 6 an pos - 4 * cam.v, zwei 24 mit
-Zufallsfolge sx/ay/ax, Versatz (0,0,-2) gedreht) war in `native/effect_sprites.cpp` bereits portiert, aber ohne
-Weltbesitzer: `RoomWorld::explode_effect` (cam.v aus effect_context, unter cam.flg 0x40 aus der direkt
-geschriebenen Lage) legt die Saetze an, `GameOver::death_blast` bindet gameover.c:539 (gov_etb, sechs Aufrufe bei
-gov_ct 40/54/68/82/96/110, Test gameover_original). Dazu die Szene selbst: gameover.c:278 bhClearEffect
-(`RoomWorld::clear_effects`), :296-297 pt_flg 0x15, :301-302 sp_flg 0x6C (Task 7 laeuft: `world->tick()` in md1 10
-vor Task 14), :313-327 Kamera cam.flg 0x40 0/10/35 pers 11832 (`set_monitor_camera`, effect_context liest sie),
-game.c:318 Effektzeichnen in das Bild der Todesszene (`death_scene_append`, Szene des Raumbesitzers uebernommen),
-:313 txp[0] Spielertexturen (`death_body_textures`), :567 pt_flg 0. Messung `verify_self_destruct`: eff[512] bei
-gov_ct 10 leer (vorher Raumeffekt 122 belegt), bei gov_ct 100 Saetze 23/24/25 = 4/18/86, keine bhEff23/24/25- oder
-bhSetExplosionEffect-Luecke im Protokoll, Endbilder mit 2582/30020 warmen Pixeln bei gov_ct 45/100 (Vorherstand
-0/0 mit dem Binary 14:42). Gegenprobe Bindung entfernt: rot bei den Effektsaetzen, zurueck gruen. `./build.sh --test`
-CTest 117/117, verify_self_destruct/enemy_ai/events/stairs/combat gruen, Dev-App 15:33. Keine neue Effektprozedur
-noetig (23/24/25 waren done). **2026-10-17, Todesszene Spielerkoerper/Nebel:** Der Koerper stand in md1 10 an der Kameralage statt am Ursprung:
-native/gameover.cpp verschob die Koerperecken wie das cmat-Netz um (0,10,35), game.c:357 bhPutModel zeichnet aber den
-bhCalcModel-Baum (MdlPut.c:240-264, px/py/pz 0, ay 35499) im Weltraum unter cam.mtx (camera.c:28-37, cmat * T(0,-10,-35));
-Versatz entfernt. Messung 640x480 bei gov_ct 36: vorher Fragment x 48..134 / Zeilen 0..31 (oben beschnitten), nachher
-x 278..356 / Zeilen 141..394 (Fuesse 394 gegen 383.5 fuer y 0, Kopf 141 = 16.3 Einheiten). Nebel: kein Nebel im Original
-(gameover.c:242 njFogDisable, :323 gm_flg 0x200000 -> sync.c:143 bhControlEOR njFogDisable je Bild); nativ laeuft der
-EOR-Nebelteil in md1 10 jetzt mit (`world->end_of_render()`), fog.enabled false bei gov_ct 10 (vorher true). Tests
-gameover_original (Koerperpixel-Differenz mit/ohne PlayerAsset; Gegenprobe Versatz zurueck rot), CTest 117/117,
-verify_self_destruct/enemy_ai/events/stairs/combat gruen, Dev-App 15:52. **2026-10-17, Event-Explosion und RM_3230 Event 3:** Skriptbefehl 0xc8 = event.c:8722 bhEffBakuDrmSet (bhScenarioJmpT[200],
-Vorzeichenbyte + 3 u16/100) war in der nativen VM unimplementiert (Task blockierte mit "unimplemented opcode 0xc8"); jetzt
-native/events.cpp case 0xc8 (8 Bytes) + RoomWorld::bind op 0xc8 -> explode_effect (weapon.c:1812, cam.v aus effect_context).
-Nutzer laut Disassembler ueber alle 205 Raumskripte (Laengentabelle vervollstaendigt, keine Abbrueche): RM_5010 Ereignis 8 @09ea
-(Katapulthebel mit Tyrant in TY_BR0_PINCH/hp < 0, scd1 @026c = ELSE von IF rm_flg 0x4, en19.c:1068) und RM_9370 Ereignis 5
-(10 Aufrufe). Headless RM_5010 (Snapshot ev_flg 269, 3700 Bilder bis ct_pinch 0, zwei Hebelzuege): vorher Task 8 @0x9ea
-blockiert und Szene eingefroren, nachher @0x9fb bei Bild 5360 mit 2x23/3x24/14x25 im Pool, Szene endet bei 5600, einzige
-Luecke der vorbestehende bhEasySESet owP[0]. RM_3230 Event 3: Originalverhalten, kein Fix. Ereignis 1 pausiert enep[2]
-(bhSubpl id 96, subpl.c:357 mv00_subpl0_1 ohne mode3-4-Zweig) per bhMotionPauseSet 0 sobald frm_no >= 123; bhEwhile
-(event.c:9147) gibt beim Schleifenende 0 zurueck, der naechste Gegnerpass (bhSysCallGame vor bhSysCallEvent, main.c:195)
-schiebt noch um 0x8000 auf 123.5, danach steht der Work; 124<<16 wird nie erreicht, der Raumwechsel beendet die Task.
-Nativ gemessen: 123.0 bei Bild 509, 123.5/Schleife verlassen bei 510, mode3 4 ab 511, Task 3 bei 0afd bis RM_3091.
-Tests event_lifecycle (RM_5010 Ereignis 8 mit 23/24, Gegenprobe ohne Bindung pending/leer; RM_3230 Haltepunkt 123.5),
-CTest 117/117, verify_self_destruct/enemy_ai/events/stairs/event_freeze gruen, Dev-App 16:58. **2026-10-17, Event-VM 0x86/Obj_controll:** 0x86 = event.c:6117 bhEasySESet
-(16 Bytes, Art 0 plp/1 ene[enep.wrk_no]/2 obwp/3 itwp, Knoten v7) ruft sdfunc.c:1279 PlayGameSe4Event; Typ 7 =
-CallNativeEventSe Mode 1 liest pPos nie (sdfunc.c:1861). Nativ verlangte auch Typ 7 eine owP-Lage und verwarf den Ruf;
-RM_5010 Ereignis 8 @0908 nennt obwp[0] (Waffe, room.c:210 Raumobjekte erst ab 4, nativ kein Waffen-owP) -> Luecke
-`bhEasySESet owP[0]` und fehlender Ton. Jetzt Typ 7 ohne Lageaufloesung (native/world.cpp). 2002 Aufrufe in 205 Raeumen,
-Art 2 nur mit Typ 7, obwp[0] nur RM_3070 @06fc/RM_5010 @0908. Headless RM_5010 (Aufstellung wie 0xc8): vorher 1 Luecke,
-Bank-2-Folge in Ereignis 8 seq2/3/7/11/8; nachher 0 Luecken, seq2/3/6/7/11/8, 0 blockiert. 0x66 = event.c:9708
-bhObjCtr/Obj_controll: nur Faelle 1 (2 Bytes) und 20 (4 Bytes), Default ohne Vorschub und ohne Wirkung, Rueckgabe 1 -
-das Kommandobyte laeuft als naechster Opcode (event.c:13047). `EventVm::obj_controll_length` + Default `advance(1)`
-statt Ausnahme. Einziger Nicht-1/20-Fall aller Raeume: RM_3020 Ereignis 6 Kommando 12 -> 0x0c bhFlrAtariSet @040f ->
-bhEnd @0413 (Task bleibt dort wie im Original); kein Skript in RM_3020 startet Ereignis 6. Tests event_lifecycle
-(Obj_controll-Laengentabelle, RM_3020 Ereignis 6 explizit ohne Fehler bei 0x413, RM_5010 Ereignis 8 ohne
-bhEasySESet-Luecke mit Bank 2 seq6 genau einmal; beide Gegenproben rot/gruen), CTest 117/117,
-verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors gruen, Dev-App 17:37.
-**2026-10-17, RM_9370 Ereignis 5 / Licht der Todesszene:** Ereignis 5 hat keinen eigenen Ausloeser: scd0 @0054 loescht
-ev_flg 458, scd1 @0430 startet bei 458 frei mit allen Szenentasks @044c Ebene 5 Ereignis 5 (Eintritt aus RM_9091 Ereignis 2
-@036e, Tuer 09/25); es wartet mit bhCamCheck (event.c:4881) auf die Kameras von Ereignis 2 und mit bhFrameCheck auf
-enep[0/1] (bhSubpl 92/97, --enemy-ai on). Headless lief es schon durch (10x 0xc8, bhEvtEnd @23f2), liess aber alle 22
-0x6d = event.c:5028 bhCyodanSet (Treffer, bhSetEffParticle effsub3.c:911) pending; jetzt RoomWorld::bind op 0x6d ->
-EffectParticles::spawn. Nachher: 10x 0xc8, 22x 0x6d, Ende ~Bild 4760, blocked 0, keine Luecke, lebende 23/24/25 (neues
-Zustandsfeld effects[].flg) Bild 3620 7/12/110, 3800 0, 4700 4/10/48. Test event_lifecycle RM_9370 (natuerlicher
-scd1-Start, genau 10 Anforderungen/10 Feuerbaelle 23 Art 1, keine pending Befehle von Ereignis 5, Partikel > 0; Gegenproben
-ohne 0xc8-Bindung bzw. ohne 0x6d-Bindung rot/gruen); Testgeruest laedt Diskwechsel/Raumbank jetzt aus RoomIdentity wie
-runtime.cpp. verify_events prueft 0x6d jetzt als gebunden. Todesszene: md1 10 setzt gm_flg 0x80 (gameover.c:323), daher
-bhSetHalfLight = bhSetEasyDirLight(0.6) (light.c:992/279, MdlPut.c:33); der Koerper geht jetzt ueber death_scene_append
-durch RoomWorld::append (Kategorie 1, kein zweiter Lichtweg) statt der Renderer-Hostschattierung; Koerper gov_ct 36
-Mittel RGB 21.0/14.2/17.0 -> 16.8/11.5/14.1, Licht grau 0.2..0.657. Netz: njDrawTriangle3D ohne Licht (Eckfarbe -1),
-jetzt world_lit ohne Hostschattierung (md1 2 Mittel R 18.1 -> 24.9). Test gameover_original (RM_3091-Besitzer; Gegenprobe
-rot/gruen). CTest 117/117, verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors gruen, Dev-App 18:22.
-**2026-10-17, bhEffClearEvt/bhEff085:** 0xca = event.c:8801 bhEffClearEvt (2 Bytes) -> effect.c:159 bhClearEventEffect,
-eine selektive Freigabe (nicht bhClearEffect): bhClrEff_YT (effect.c:166: 5/11/113/114/136/159/225/398, dazu 22/24/25/27 mit
-Hilfssatz exp0), bhClrEff_RY (effsub3.c:117: 301, Partikelwurzel 302 mit exp0/exp1), bhClrEff_YG (effsub2.c:4793:
-250/253/256/257/272/296-298, 254/260 mit exp0), je nur flg & 1. Jetzt RoomWorld::bind op 0xca -> RoomWorld::clear_event_effects
-(+ EffectParticles::clear_event). 51 Aufrufe in 27 Raeumen. Test event_lifecycle RM_9360 Ereignis 14 (Eintritt mit ev_flg 458,
-Aufstellung Explosion + Treffer): um 0xca 3x24/31x25/2x302 und 29 Raumeffekte 159 frei, 33 Hilfssaetze frei, 23 und alles andere
-unveraendert; Gegenprobe rot/gruen. Headless RM_9370 -> RM_9360 (7000 Bilder): pending 1 -> 0. 0x91 bhEffModeSet war schon
-gebunden und scheiterte nur an der fehlenden Prozedur: bhEff085 (effsub6.c:18) jetzt handportiert - zeichnet nie, mode1 1 tauscht
-ene[rom->effp[type].lkno].mlwP->texP->textures[3].texaddr gegen sys->ef_tn[85] (Sicherung in exp0, alle Werke derselben
-et_lp-Liste), mode1 2 stellt her. In RM_9370 laufen 0x91 2 und 0 (Ereignis 0 @07ee/@07f2) im selben Schedulerpass vor dem
-naechsten bhControlEffect, daher bleibt der Tausch wie im Original stehen. Tests effect_eff085 (neu) und event_lifecycle RM_9370
-(1 @Pass 3646, 2/0 @4551, Texturtausch geteilt mit ef_tn[85]); Gegenprobe rot/gruen. Headless RM_9370 4700 Bilder: pending 7 -> 4
-(nur 0x86). CTest 118/118, verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors gruen, Dev-App 19:02.
-**2026-10-17, 0x86 Raumsoundbank:** bhEasySESet (event.c:6117) gibt nach PlayGameSe4Event immer 1 zurueck (event.c:6205);
-Typ 7 -> CallNativeEventSe (sdfunc.c:1830) -> ExPlayMidi. MODHSYN.IRX (nur gelesen): Programmwechsel .text 0x75c behaelt kein
-Programm fuer Eintrag 0xffffffff / Nummer > letzter Index / 0 Splits, Note-On 0x5f90 startet dann keine Stimme; die Splitschleife
-(0x6098) vergleicht Tastengrenzen &0x7f, ungedeckte Taste = keine Stimme. Die Sequenz laeuft weiter. Kein Formatfehler der Basis:
-MULTSPQ2/0086 Bank 2 Programme 23/24/27..30 sind leere Eintraege, Programm 11 hat nur Taste 60 (seq 11 spielt 60 und 61). Nativ
-warf decode_system_sound fuer MIDI-Noten und brach die ganze Sequenz ab; jetzt stumme Note (native/audio.cpp), und op 0x86 gilt
-immer als ausgefuehrt, ein nicht bedienter Ruf ist audio_unavailable 'bhEasySESet type T slot S SeNo N' (native/world.cpp).
-Messung aller 205 Raumskripte gegen das Raumpaket Fall 0: 9 Typ-7-Aufrufe betroffen (RM_3020/3130/6080x2/7100/9370x4), nachher 0;
-RM_3150 @0cae/@0cc8 (seq 116/117) liegen hinter der Tabelle von Paket Fall 0 (der Raum setzt per 0xb6 Fall 1, Paket 3151 fehlt
-im IDX; Bankwahl dort offen) und waeren jetzt Luecke statt pending. Tests audio_movie und
-event_lifecycle (RM_9370 Ereignis 11), Gegenproben rot/gruen. Headless RM_9370 4700 Bilder: pending 4 -> 0, keine Luecke.
-**2026-10-17, MIDI Mehrfach-Splits:** MODHSYN.IRX Note-On (0x5f90, Splitschleife 0x6098..0x64a0) startet fuer jeden Split, der
-die Taste deckt, eine eigene Stimme (kein Abbruch nach Treffer; Stimme 0x6264, Key-On 0x63d0). Nativ jetzt `decode_system_note`
-(native/audio.cpp/.h): je Split ein Clip mit eigener Lautstaerke/Pan, im Sequenzer je Stimme ein Notenlayer. Messung: 80 Paket-
-Sequenzen, 1757 Noten mit >1 Stimme (Stimmen 13347 -> 15104); 7 Typ-7-Aufrufe (RM_0100/1100/1130x2/1140/2000/4050), Stimmen 88 -> 104.
-RM_1100 seq 0: rechter Kanal vorher stumm (RMS R 0 -> 831, L 833 unveraendert). Test audio_movie (Summe der Einzelsplits), Gegenprobe
-rot/gruen; CTest 118/118, verify_audio_state/bgm_rooms/events/event_freeze/enemy_ai/doors gruen, Dev-App 19:46. Offen: Stimmenpool/Stealing (24 je Kern) nativ unbegrenzt.
-**2026-10-17, vier Nutzerbefunde (Dev-App 21:19, CTest 121/121):** (1) Fassexplosion ohne Schaden: der Gegnerteil von
-bhCheckBombAtari (weapon.c:1420) lief ueber die stillgelegte EN01-Fassade mit leerem recvx_en01_bomb; jetzt am echten
-Gegnerwork (`RoomWorld::bomb_enemy_damage`) mit watr-Kapsel, bhCheckC2WallN 0x400 (neu `check_c2_wall_n`, Kapselradius 0.1
-statt Strahl), Gelenkwahl und dam[]/comb_flg. Test `native_barrel_blast` (RM_0080 ueber den echten Trefferpfad).
-(2) RM_1130 Wasserspritzer: der Zeichenpass nahm die Startgroesse der Raumtabelle statt der von bhEff249 fortgeschriebenen
-(effect.c:1374 zeichnet op->sx/sy/sz); Bild 350 vorher bildfuellende Flaechen, jetzt kleine Tropfenwolken (Gegenprobe rot).
-(3) Schreibmaschine: die Tipptoene (0x80000242-244) haben Bit 31 und gehen ueber ExPlayMidi auf MIDI-Slot 2
-(sdfunc.c:1344-1385); `play_system` nahm sie als COMMON-SE-Programm und verwarf sie. Gemessen RM_0010: 24 Sequenzen 2/66..68.
-(4) Ueberlappender Text im Aufnahmebildschirm: er erbte den Zustand des vorigen Statusbildschirms (FILE/Examine), und die
-Befehlsbeschreibung 180 - maincsr zeichnete ueber die Frage; sub1.c:3308 startet ihn mit StatusInit. Test `pickup_status_reset`.
+**2026-10-17, RM_3230 escape scene:** not an engine error. The scene runs through natively as soon as the enemy pass runs:
+event 2 (rel 0a22) holds EN19 (kind 1 index 1) via Common_controll 24 (event.c:11299-11500: mnwP = sys->rmthp, mtn_no 1,
+mtn_add 0x10000, mode0 5) 569 frames at frm_no 0, then tasks 0/1/2/4/5 wait with bhFrameCheck (event.c:3237,
+command 0x38) for frm_no 35/80/463; the advance is provided by bhEne19_Event (en19.c, bhEne19_Mode0[5] -> bhSetMotion) in the
+enemy pass bhControlEnemy, which only runs with sys->sp_flg 0x2 (eneset.c:352, natively enemy_dispatch.c:144). The old
+finding (frm_no 0, all tasks in 0x38) is the headless/replay default `--enemy-ai off` (runtime.cpp, world_enemies.cpp
+masks sp_flg 0x2), which `verify_self_destruct.py` did not override. Measured with `--enemy-ai on --enemy-grab on`:
+room entry RM_3230 frame 450, loop until 1018, waits 35/80/463 end at 1053/1098/1481 (script arithmetic
+450+569+463), EN19 frm_no 82 at frame 1100 and 464 at 1500, EEVT of tasks 1/2/4 at 1482, 5/7 at 1572, door from 1573,
+RM_3091 at frame 1869 without input (with door skip confirm 1580). Checker without SELECT row, with scene measurement and
+`--enemy-ai on`; expiry now at frame 9956, md1 10 from 10029, motion 4/25/26 as before (counter-check without `--enemy-ai on`
+red: frm_no 0). Native sources unchanged; `./build.sh --test` CTest 117/117, verify_self_destruct/enemy_ai/events/
+stairs green, dev app 14:59. **2026-10-17, bhSetExplosionEffect:** weapon.c:1812 (23 kind 1 size 6 at pos - 4 * cam.v, two 24 with
+random sequence sx/ay/ax, offset (0,0,-2) rotated) was already ported in `native/effect_sprites.cpp`, but without a
+world owner: `RoomWorld::explode_effect` (cam.v from effect_context, under cam.flg 0x40 from the directly
+written position) creates the sets, `GameOver::death_blast` binds gameover.c:539 (gov_etb, six calls at
+gov_ct 40/54/68/82/96/110, test gameover_original). Plus the scene itself: gameover.c:278 bhClearEffect
+(`RoomWorld::clear_effects`), :296-297 pt_flg 0x15, :301-302 sp_flg 0x6C (task 7 runs: `world->tick()` in md1 10
+before task 14), :313-327 camera cam.flg 0x40 0/10/35 pers 11832 (`set_monitor_camera`, effect_context reads it),
+game.c:318 effect drawing into the image of the death scene (`death_scene_append`, scene of the room owner adopted),
+:313 txp[0] player textures (`death_body_textures`), :567 pt_flg 0. Measurement `verify_self_destruct`: eff[512] empty at
+gov_ct 10 (previously room effect 122 occupied), at gov_ct 100 sets 23/24/25 = 4/18/86, no bhEff23/24/25 or
+bhSetExplosionEffect gap in the log, end frames with 2582/30020 warm pixels at gov_ct 45/100 (baseline
+0/0 with the binary 14:42). Counter-check binding removed: red at the effect sets, back to green. `./build.sh --test`
+CTest 117/117, verify_self_destruct/enemy_ai/events/stairs/combat green, dev app 15:33. No new effect procedure
+needed (23/24/25 were done). **2026-10-17, death scene player body/fog:** in md1 10 the body stood at the camera position instead of at the origin:
+native/gameover.cpp shifted the body corners like the cmat net by (0,10,35), but game.c:357 bhPutModel draws the
+bhCalcModel tree (MdlPut.c:240-264, px/py/pz 0, ay 35499) in world space under cam.mtx (camera.c:28-37, cmat * T(0,-10,-35));
+offset removed. Measurement 640x480 at gov_ct 36: before fragment x 48..134 / rows 0..31 (clipped at the top), after
+x 278..356 / rows 141..394 (feet 394 against 383.5 for y 0, head 141 = 16.3 units). Fog: no fog in the original
+(gameover.c:242 njFogDisable, :323 gm_flg 0x200000 -> sync.c:143 bhControlEOR njFogDisable per frame); natively the
+EOR fog part now runs along in md1 10 (`world->end_of_render()`), fog.enabled false at gov_ct 10 (previously true). Tests
+gameover_original (body pixel difference with/without PlayerAsset; counter-check offset back red), CTest 117/117,
+verify_self_destruct/enemy_ai/events/stairs/combat green, dev app 15:52. **2026-10-17, event explosion and RM_3230 event 3:** script command 0xc8 = event.c:8722 bhEffBakuDrmSet (bhScenarioJmpT[200],
+sign byte + 3 u16/100) was unimplemented in the native VM (task blocked with "unimplemented opcode 0xc8"); now
+native/events.cpp case 0xc8 (8 bytes) + RoomWorld::bind op 0xc8 -> explode_effect (weapon.c:1812, cam.v from effect_context).
+Users per disassembler across all 205 room scripts (length table completed, no aborts): RM_5010 event 8 @09ea
+(catapult lever with Tyrant in TY_BR0_PINCH/hp < 0, scd1 @026c = ELSE of IF rm_flg 0x4, en19.c:1068) and RM_9370 event 5
+(10 calls). Headless RM_5010 (snapshot ev_flg 269, 3700 frames until ct_pinch 0, two lever pulls): before task 8 @0x9ea
+blocked and scene frozen, after @0x9fb at frame 5360 with 2x23/3x24/14x25 in the pool, scene ends at 5600, only
+gap the pre-existing bhEasySESet owP[0]. RM_3230 event 3: original behavior, no fix. Event 1 pauses enep[2]
+(bhSubpl id 96, subpl.c:357 mv00_subpl0_1 without mode3 4 branch) via bhMotionPauseSet 0 as soon as frm_no >= 123; bhEwhile
+(event.c:9147) returns 0 at loop end, the next enemy pass (bhSysCallGame before bhSysCallEvent, main.c:195)
+still advances by 0x8000 to 123.5, after that the work stands; 124<<16 is never reached, the room change ends the task.
+Measured natively: 123.0 at frame 509, 123.5/loop left at 510, mode3 4 from 511, task 3 at 0afd until RM_3091.
+Tests event_lifecycle (RM_5010 event 8 with 23/24, counter-check without binding pending/empty; RM_3230 hold point 123.5),
+CTest 117/117, verify_self_destruct/enemy_ai/events/stairs/event_freeze green, dev app 16:58. **2026-10-17, event VM 0x86/Obj_controll:** 0x86 = event.c:6117 bhEasySESet
+(16 bytes, kind 0 plp/1 ene[enep.wrk_no]/2 obwp/3 itwp, node v7) calls sdfunc.c:1279 PlayGameSe4Event; type 7 =
+CallNativeEventSe mode 1 never reads pPos (sdfunc.c:1861). Natively type 7 also required an owP position and discarded the call;
+RM_5010 event 8 @0908 names obwp[0] (weapon, room.c:210 room objects only from 4, natively no weapon owP) -> gap
+`bhEasySESet owP[0]` and missing sound. Now type 7 without position resolution (native/world.cpp). 2002 calls in 205 rooms,
+kind 2 only with type 7, obwp[0] only RM_3070 @06fc/RM_5010 @0908. Headless RM_5010 (setup as for 0xc8): before 1 gap,
+bank 2 sequence in event 8 seq2/3/7/11/8; after 0 gaps, seq2/3/6/7/11/8, 0 blocked. 0x66 = event.c:9708
+bhObjCtr/Obj_controll: only cases 1 (2 bytes) and 20 (4 bytes), default without advance and without effect, return 1 -
+the command byte runs as the next opcode (event.c:13047). `EventVm::obj_controll_length` + default `advance(1)`
+instead of an exception. The only non-1/20 case of all rooms: RM_3020 event 6 command 12 -> 0x0c bhFlrAtariSet @040f ->
+bhEnd @0413 (task stays there as in the original); no script in RM_3020 starts event 6. Tests event_lifecycle
+(Obj_controll length table, RM_3020 event 6 explicitly without error at 0x413, RM_5010 event 8 without
+bhEasySESet gap with bank 2 seq6 exactly once; both counter-checks red/green), CTest 117/117,
+verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors green, dev app 17:37.
+**2026-10-17, RM_9370 event 5 / light of the death scene:** event 5 has no trigger of its own: scd0 @0054 clears
+ev_flg 458, scd1 @0430 starts with 458 clear with all scene tasks @044c level 5 event 5 (entry from RM_9091 event 2
+@036e, door 09/25); it waits with bhCamCheck (event.c:4881) for the cameras of event 2 and with bhFrameCheck for
+enep[0/1] (bhSubpl 92/97, --enemy-ai on). Headless it already ran through (10x 0xc8, bhEvtEnd @23f2), but left all 22
+0x6d = event.c:5028 bhCyodanSet (hits, bhSetEffParticle effsub3.c:911) pending; now RoomWorld::bind op 0x6d ->
+EffectParticles::spawn. After: 10x 0xc8, 22x 0x6d, end ~frame 4760, blocked 0, no gap, live 23/24/25 (new
+state field effects[].flg) frame 3620 7/12/110, 3800 0, 4700 4/10/48. Test event_lifecycle RM_9370 (natural
+scd1 start, exactly 10 requests/10 fireballs 23 kind 1, no pending commands of event 5, particles > 0; counter-checks
+without 0xc8 binding or without 0x6d binding respectively red/green); test scaffold now loads disc change/room bank from RoomIdentity like
+runtime.cpp. verify_events now checks 0x6d as bound. Death scene: md1 10 sets gm_flg 0x80 (gameover.c:323), hence
+bhSetHalfLight = bhSetEasyDirLight(0.6) (light.c:992/279, MdlPut.c:33); the body now goes via death_scene_append
+through RoomWorld::append (category 1, no second light path) instead of the renderer host shading; body gov_ct 36
+mean RGB 21.0/14.2/17.0 -> 16.8/11.5/14.1, light gray 0.2..0.657. Net: njDrawTriangle3D without light (corner color -1),
+now world_lit without host shading (md1 2 mean R 18.1 -> 24.9). Test gameover_original (RM_3091 owner; counter-check
+red/green). CTest 117/117, verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors green, dev app 18:22.
+**2026-10-17, bhEffClearEvt/bhEff085:** 0xca = event.c:8801 bhEffClearEvt (2 bytes) -> effect.c:159 bhClearEventEffect,
+a selective release (not bhClearEffect): bhClrEff_YT (effect.c:166: 5/11/113/114/136/159/225/398, plus 22/24/25/27 with
+helper set exp0), bhClrEff_RY (effsub3.c:117: 301, particle root 302 with exp0/exp1), bhClrEff_YG (effsub2.c:4793:
+250/253/256/257/272/296-298, 254/260 with exp0), each only flg & 1. Now RoomWorld::bind op 0xca -> RoomWorld::clear_event_effects
+(+ EffectParticles::clear_event). 51 calls in 27 rooms. Test event_lifecycle RM_9360 event 14 (entry with ev_flg 458,
+setup explosion + hits): around 0xca 3x24/31x25/2x302 and 29 room effects 159 released, 33 helper sets released, 23 and everything else
+unchanged; counter-check red/green. Headless RM_9370 -> RM_9360 (7000 frames): pending 1 -> 0. 0x91 bhEffModeSet was already
+bound and only failed because of the missing procedure: bhEff085 (effsub6.c:18) now hand-ported - never draws, mode1 1 swaps
+ene[rom->effp[type].lkno].mlwP->texP->textures[3].texaddr with sys->ef_tn[85] (backup in exp0, all works of the same
+et_lp list), mode1 2 restores. In RM_9370 0x91 2 and 0 (event 0 @07ee/@07f2) run in the same scheduler pass before the
+next bhControlEffect, hence the swap stays in place as in the original. Tests effect_eff085 (new) and event_lifecycle RM_9370
+(1 @pass 3646, 2/0 @4551, texture swap shared with ef_tn[85]); counter-check red/green. Headless RM_9370 4700 frames: pending 7 -> 4
+(only 0x86). CTest 118/118, verify_events/event_freeze/enemy_ai/self_destruct/stairs/doors green, dev app 19:02.
+**2026-10-17, 0x86 room sound bank:** bhEasySESet (event.c:6117) always returns 1 after PlayGameSe4Event (event.c:6205);
+type 7 -> CallNativeEventSe (sdfunc.c:1830) -> ExPlayMidi. MODHSYN.IRX (read only): program change .text 0x75c keeps no
+program for entry 0xffffffff / number > last index / 0 splits, note-on 0x5f90 then starts no voice; the split loop
+(0x6098) compares key limits &0x7f, uncovered key = no voice. The sequence keeps running. Not a format error of the base:
+MULTSPQ2/0086 bank 2 programs 23/24/27..30 are empty entries, program 11 has only key 60 (seq 11 plays 60 and 61). Natively
+decode_system_sound threw for MIDI notes and aborted the whole sequence; now a silent note (native/audio.cpp), and op 0x86 always
+counts as executed, an unserved call is audio_unavailable 'bhEasySESet type T slot S SeNo N' (native/world.cpp).
+Measurement of all 205 room scripts against the room package case 0: 9 type 7 calls affected (RM_3020/3130/6080x2/7100/9370x4), after 0;
+RM_3150 @0cae/@0cc8 (seq 116/117) lie beyond the table of package case 0 (the room sets case 1 via 0xb6, package 3151 is missing
+in the IDX; bank choice there open) and would now be a gap instead of pending. Tests audio_movie and
+event_lifecycle (RM_9370 event 11), counter-checks red/green. Headless RM_9370 4700 frames: pending 4 -> 0, no gap.
+**2026-10-17, MIDI multiple splits:** MODHSYN.IRX note-on (0x5f90, split loop 0x6098..0x64a0) starts a voice of its own for every split that
+covers the key (no abort after a hit; voice 0x6264, key-on 0x63d0). Natively now `decode_system_note`
+(native/audio.cpp/.h): one clip per split with its own volume/pan, in the sequencer one note layer per voice. Measurement: 80 package
+sequences, 1757 notes with >1 voice (voices 13347 -> 15104); 7 type 7 calls (RM_0100/1100/1130x2/1140/2000/4050), voices 88 -> 104.
+RM_1100 seq 0: right channel previously silent (RMS R 0 -> 831, L 833 unchanged). Test audio_movie (sum of the individual splits), counter-check
+red/green; CTest 118/118, verify_audio_state/bgm_rooms/events/event_freeze/enemy_ai/doors green, dev app 19:46. Open: voice pool/stealing (24 per core) natively unlimited.
+**2026-10-17, four user findings (dev app 21:19, CTest 121/121):** (1) barrel explosion without damage: the enemy part of
+bhCheckBombAtari (weapon.c:1420) ran via the decommissioned EN01 facade with an empty recvx_en01_bomb; now on the real
+enemy work (`RoomWorld::bomb_enemy_damage`) with watr capsule, bhCheckC2WallN 0x400 (new `check_c2_wall_n`, capsule radius 0.1
+instead of a ray), joint choice and dam[]/comb_flg. Test `native_barrel_blast` (RM_0080 via the real hit path).
+(2) RM_1130 water splashes: the draw pass took the start size of the room table instead of the one updated by bhEff249
+(effect.c:1374 draws op->sx/sy/sz); frame 350 before: full-screen surfaces, now small droplet clouds (counter-check red).
+(3) Typewriter: the typing sounds (0x80000242-244) have bit 31 and go via ExPlayMidi to MIDI slot 2
+(sdfunc.c:1344-1385); `play_system` took them as a COMMON SE program and discarded them. Measured RM_0010: 24 sequences 2/66..68.
+(4) Overlapping text in the pickup screen: it inherited the state of the previous status screen (FILE/Examine), and the
+command description 180 - maincsr drew over the question; sub1.c:3308 starts it with StatusInit. Test `pickup_status_reset`.
 
-**2026-10-17 spaet, RM_4020 Greifarm und RM_1050 Steve (Dev-App 23:32, CTest 122/122):** (5) Greifarm: dieselbe lkono-Regression
-wie bei den Wasserspritzern (Lader setzte bei lkflg 0 lkono 0 statt efp->lkono, room.c:877); bhEff134 prueft die Greifentfernung
-gegen sys->obwp[op->lkono] (effsub1b.c:453-471) und las obwp[0] statt der Kiste obj[4]. Mit dem Fix von 21:18 misst der Lauf
-Klammern px 13/pz 10, Abstieg py -40.5, nn 1.97 < 4 -> ev_flg 59, EN56 mode0 2; Fehlgriff px 27 ohne Flag. Test `crane_ufo_event`
-(Gegenprobe rot), Replay build/validation/crane-rm4020-20261017. (6) Steve-Haenger: Opcode 0xb0 bhHEffectSet2 (event.c:7472) war
-nicht implementiert; Ereignis 12 blieb @0x144a stehen und erreichte CineSet 1 (@0x14b0) nie - daher lief das Cinematic bis SELECT.
-Die e.frame/frm_no-Vermutung ist widerlegt. 0xb0 schreibt sys->ef (22 Byte) und belegt bhEff211 (Monitorrauschen) mit lkono v4.
-(7) Monitor aus der Ferne schwarz: njDrawTextureSub3DH schreibt XYZF2.F = 128 fest (ps2_NaDraw.c:443, FGE an), der Port nebelte
-den Thl-Quad distanzabhaengig (aus 85 Einheiten blieb in Schnitt 1 nur Nebelfarbe). Jetzt SceneTriangle::fog_fixed, gemessen
-Schnitt 1: 497 px, mittleres RGB 95/64/64 bei grauem Testbild (= Cs*128 + ocol*127 >> 8). Beides in `event_lifecycle_control_release`.
-Runtime-Endbild Schnitt 1 vorher RGB 54/6/6, nachher 42/13/12. Gegenproben: 0xb0 entfernt -> rot (unimplemented @0x144a), F=128 sabotiert -> rot (128/128/128).
-Offen: Headless-Replay des Steve-Ereignisses ueber den Dialogpfad abgebrochen (Auswahl wechselt per right/left, nicht down); bhEff110 (Vollbildansicht) unportiert.
+**2026-10-17 late, RM_4020 grab arm and RM_1050 Steve (dev app 23:32, CTest 122/122):** (5) grab arm: the same lkono regression
+as with the water splashes (loader set lkono 0 instead of efp->lkono at lkflg 0, room.c:877); bhEff134 checks the grab distance
+against sys->obwp[op->lkono] (effsub1b.c:453-471) and read obwp[0] instead of the crate obj[4]. With the fix from 21:18 the run measures
+clamps px 13/pz 10, descent py -40.5, nn 1.97 < 4 -> ev_flg 59, EN56 mode0 2; missed grab px 27 without flag. Test `crane_ufo_event`
+(counter-check red), replay build/validation/crane-rm4020-20261017. (6) Steve hang: opcode 0xb0 bhHEffectSet2 (event.c:7472) was
+not implemented; event 12 stopped at @0x144a and never reached CineSet 1 (@0x14b0) - hence the cinematic ran until SELECT.
+The e.frame/frm_no hypothesis is refuted. 0xb0 writes sys->ef (22 bytes) and occupies bhEff211 (monitor noise) with lkono v4.
+(7) Monitor black from a distance: njDrawTextureSub3DH writes XYZF2.F = 128 fixed (ps2_NaDraw.c:443, FGE on), the port fogged
+the Thl quad depending on distance (from 85 units only fog color remained in cut 1). Now SceneTriangle::fog_fixed, measured
+cut 1: 497 px, mean RGB 95/64/64 with a gray test image (= Cs*128 + ocol*127 >> 8). Both in `event_lifecycle_control_release`.
+Runtime end frame cut 1 before RGB 54/6/6, after 42/13/12. Counter-checks: 0xb0 removed -> red (unimplemented @0x144a), F=128 sabotaged -> red (128/128/128).
+Open: headless replay of the Steve event via the dialog path aborted (selection changes via right/left, not down); bhEff110 (full-screen view) unported.
 
-**2026-10-18, Gameover-Retry (Dev-App 01:18, CTest 122/122):** Nutzerbefund „nach Retry sterbe ich am respawnten Punkt direkt wieder, der zweite Retry klappt".
-Ursache: `ts_flg` Bit 0x4000 ist die Einmal-Eintrittskarte des Game-Over-Starts (player.c:6709-6714 verlangt `plp->flg 0x2` UND das Bit und
-verbraucht es; gameover.c:516/593 gibt es erst vor `bhPopGameData` zurueck). Der Port loeschte das Bit, pruefte es aber nicht, und weil
-`plp->flg 0x2` nach dem Tod stehen bleibt (Riegel `player_dead_`, world.h:394, faellt erst bei hp > 0), forderte jeder Pass der 70 Bilder von
-`bhMainGameOver` md1 0 den Start neu an -> nach `bhPopGameData` sofort ein zweites Game Over. Gemessen RM_0080 Griff-Tod: Bild 1800 hp -20/md1 2,
-nach Retry 1 hp 160/Lage sauber, aber md1 0->1->2 erneut; erst Retry 2 frei. Dieselbe Luecke im Skriptbefehl `bhGameOverSet` (event.c:8681-8689).
-Beides in `native/runtime.cpp` behoben. Gegenprobe am sabotierten O3-Binary gegen dieselben Archive: rot; `verify_gameover` und
-`verify_self_destruct` weiter PASS. Neuer Pruefer `tests/native/gameover_retry_death_check.py`.
-Nebenbefund Retry-Punkt geprueft und **widerlegt**: `bhInitPlayer` (player.c:848, bhPushGameData) laeuft nur in mn_md0 1 (Spielstart/Laden,
-system.c:1397); Raumwechsel laufen ueber mn_md0 4 mit `bhResetPlayer` (system.c:1776) ohne Push. Weitere Pushes: Figurenwechsel (system.c:1824),
-Speichern (ps2_SaveScreen.c:1408), Skript 0xbd (event.c:8176); ss_flg 0x400 (system.c:1901) hat in den Quellen keinen Setzer. Der Port bildet
-genau diese Stellen ab (runtime.cpp `!retry_point || player_change_push`, 0xbd, Schreibmaschine).
+**2026-10-18, game over retry (dev app 01:18, CTest 122/122):** user finding „after retry I die again right at the respawn point, the second retry works".
+Cause: `ts_flg` bit 0x4000 is the one-time entry ticket of the game over start (player.c:6709-6714 requires `plp->flg 0x2` AND the bit and
+consumes it; gameover.c:516/593 only returns it before `bhPopGameData`). The port cleared the bit but did not check it, and because
+`plp->flg 0x2` stays set after death (latch `player_dead_`, world.h:394, only drops at hp > 0), every pass of the 70 frames of
+`bhMainGameOver` md1 0 requested the start again -> a second game over immediately after `bhPopGameData`. Measured RM_0080 grab death: frame 1800 hp -20/md1 2,
+after retry 1 hp 160/position clean, but md1 0->1->2 again; only retry 2 free. The same gap in the script command `bhGameOverSet` (event.c:8681-8689).
+Both fixed in `native/runtime.cpp`. Counter-check on the sabotaged O3 binary against the same archives: red; `verify_gameover` and
+`verify_self_destruct` still PASS. New checker `tests/native/gameover_retry_death_check.py`.
+Side finding about the retry point checked and **refuted**: `bhInitPlayer` (player.c:848, bhPushGameData) only runs in mn_md0 1 (game start/load,
+system.c:1397); room changes go via mn_md0 4 with `bhResetPlayer` (system.c:1776) without push. Further pushes: character change (system.c:1824),
+saving (ps2_SaveScreen.c:1408), script 0xbd (event.c:8176); ss_flg 0x400 (system.c:1901) has no setter in the sources. The port models
+exactly these places (runtime.cpp `!retry_point || player_change_push`, 0xbd, typewriter).
 
-**2026-10-18, Treppen (Dev-App 01:41, CTest 123/123):** (1) Kamera stockt auf langen Treppen (RM_3080): `tick_camera` folgte immer
-`plp->px/py/pz`, das in Stufenaktionen nur beim Motionumlauf nachzieht (player.c:3258-3271); das Original zielt unter `plp->stflg 0x30` und
-in mode0 7 auf `owP[0]` (cut.c:1197-1217). Vorher 42/80 Bilder Stillstand und 3.3-Einheiten-Spruenge, jetzt 0.07..0.34 je Bild. Test
-`camera_follow_target` (Gegenprobe rot), `verify_stairs` gruen. Offen: freie Steuerung cut.c:1207-1209 (EXP_WORK plx/plz) ohne Besitzer.
-(2) RM_1000 Treppeneinstieg "nur im 90-Grad-Winkel": nicht reproduziert; Typ 1 hat im Original keine Winkelpruefung (hitchk.c:4677),
-Port float-genau gleich, Einstiegsfenster 271 Grad an der natuerlichen Standlage.
+**2026-10-18, stairs (dev app 01:41, CTest 123/123):** (1) camera stutters on long stairs (RM_3080): `tick_camera` always followed
+`plp->px/py/pz`, which in stair actions only catches up at the motion wrap (player.c:3258-3271); the original targets `owP[0]` under `plp->stflg 0x30` and
+in mode0 7 (cut.c:1197-1217). Before 42/80 frames standstill and 3.3-unit jumps, now 0.07..0.34 per frame. Test
+`camera_follow_target` (counter-check red), `verify_stairs` green. Open: free control cut.c:1207-1209 (EXP_WORK plx/plz) without owner.
+(2) RM_1000 stair entry "only at a 90-degree angle": not reproduced; type 1 has no angle check in the original (hitchk.c:4677),
+port float-exact identical, entry window 271 degrees at the natural standing position.
 
-**2026-10-18, RM_3130-Absturz und Kamera-Eintritt (Dev-App 02:01, CTest 124/124):** (1) RM_3130 "Native runtime error: vector" nach dem
-Raum-verlassen-Ereignis: Ereignis 2 setzt per Common 24 (Sel. 1) mtn_no 5 auf das Subplayerwerk, der Raum hat aber nur 3 Raummotionen;
-`room_motions_.at(5)` warf. Original: `sys->rmthp` sind 512 genullte MN_WORK (room.c:700-706), `bhSetMotion` tut bei datP NULL nichts
-(Motion.c:29). Test `room_motion_empty_rmthp_slot`. Nachgestellt ueber it_flg 232 + Bodentrigger 0, nicht im natuerlichen Spielablauf.
-(2) RM_1000 Tuer links: Kamera schwenkte von ausserhalb herein. Spawn 2 liegt laut Tabelle knapp ausserhalb jeder Schnittflaeche,
-`follow()` liess dann die rohe CAM_WRK-Lage stehen; cut.c:663-710 rechnet die Verfolgungspose ohne Bereichsgrenze. Vorher 24 Einheiten
-Schwenk, jetzt keiner. `tests/native/room_entry_camera_check.py` (Gegenprobe rot).
-(3) Third-Person "wechselt an Ecken und beim Raumeintritt auf einen festen Punkt": Ursache ist die Ausweichlogik der Host-Mod
-(native/third_person.cpp `consider`): Wand direkt hinter dem Spieler -> Arm schwenkt bis 180 Grad nach vorn (Frontalansicht), nach einigen
-Schritten zurueck. Belegt RM_1000 Spawn 1 (Tor 2 Einheiten hinter Claire, Gang beidseits eng): Bild 2/20 frontal, ab 45 hinten. Die Mod schaltet
-dabei nicht ab (Raumscan: Abschalten nur bei st_flg 0x4 Treppe/Stufe und Ereigniskameras). Drei Versuche (Schwenk <= 90 Grad, Blick in
-Laufrichtung, Anheben vor Zurueckziehen) loesen die Engstelle nicht: dort ist hinten und seitlich kein Platz, Claire faellt aus dem Bild.
-Auf HEAD zurueckgesetzt; Versuchsstand $TMPDIR/tpd/third_person.experiment.cpp. **Vom Nutzer 2026-10-18 als Luecke zurueckgestellt.**
-**2026-10-20 behoben (nur Arbeitsbaum/Build, nicht ausgeliefert):** Ausweichschwenk entfernt; Arm bleibt hinter dem Spieler, wird
-an Waenden gekuerzt und angehoben, Schulterversatz schrumpft mit, Spieler/Haare/Waffe blenden bei nahem Auge aus (Alpha bis 0.2).
-Raumeintrittsscan (jeder 6. Raum, Spawn 0/1, 30 Takte): Kamera vor Claire 10 -> 0, hinter 8 -> 52 von 53 freien Faellen.
-Test `third_person_camera_mod` (Wand hinter Spawn; Gegenprobe gegen alten Stand rot), CTest 173/173.
+**2026-10-18, RM_3130 crash and camera entry (dev app 02:01, CTest 124/124):** (1) RM_3130 "Native runtime error: vector" after the
+leave-room event: event 2 sets mtn_no 5 on the subplayer work via Common 24 (sel. 1), but the room only has 3 room motions;
+`room_motions_.at(5)` threw. Original: `sys->rmthp` are 512 zeroed MN_WORK (room.c:700-706), `bhSetMotion` does nothing with datP NULL
+(Motion.c:29). Test `room_motion_empty_rmthp_slot`. Reproduced via it_flg 232 + floor trigger 0, not in natural gameplay.
+(2) RM_1000 door left: camera swung in from outside. According to the table spawn 2 lies just outside every cut surface,
+`follow()` then left the raw CAM_WRK position in place; cut.c:663-710 computes the follow pose without a range limit. Before 24 units
+of swing, now none. `tests/native/room_entry_camera_check.py` (counter-check red).
+(3) Third person "switches to a fixed point at corners and on room entry": the cause is the avoidance logic of the host mod
+(native/third_person.cpp `consider`): wall directly behind the player -> arm swings up to 180 degrees forward (frontal view), back after a few
+steps. Verified RM_1000 spawn 1 (gate 2 units behind Claire, corridor narrow on both sides): frame 2/20 frontal, from 45 behind. The mod does
+not switch off there (room scan: switch-off only at st_flg 0x4 stairs/steps and event cameras). Three attempts (swing <= 90 degrees, look in
+walking direction, raise before retracting) do not solve the bottleneck: there is no space behind and to the side there, Claire drops out of the image.
+Reset to HEAD; experimental state $TMPDIR/tpd/third_person.experiment.cpp. **Deferred as a gap by the user on 2026-10-18.**
+**2026-10-20 fixed (only working tree/build, not delivered):** avoidance swing removed; arm stays behind the player, is
+shortened and raised at walls, shoulder offset shrinks along, player/hair/weapon fade out when the eye is close (alpha down to 0.2).
+Room entry scan (every 6th room, spawn 0/1, 30 ticks): camera in front of Claire 10 -> 0, behind 8 -> 52 of 53 free cases.
+Test `third_person_camera_mod` (wall behind spawn; counter-check against old state red), CTest 173/173.
 
-**2026-10-18, Kamerafilter (Dev-App 09:46, CTest 125/125):** Raumeffekt-Luecken neu vermessen: von 89 Raumtabellen-IDs ohne Handport
-sind 77 im Original `bhEffDmy` (ids 30-84, loeschen sich) oder id >= 400 (bhControlEffect setzt flg 0, effect.c:846); echte Luecken 12.
-Groesste: `bhEffFil` 90..92 (effsub1.c:28), der Vollbildfilter, den 140 Kameraschnitte in 61 Raeumen per CAM_WRK flg 0x8000 einschalten
-(cut.c:412-421). Jetzt portiert (Vignette, Laufzeit RM_0070 Bildrand 14.9 -> 10.0). Test `effect_camera_filter` (Gegenprobe rot).
-Rest: 110 (3 Raeume), bhEffBG 93-97 (je 1-3 Raeume), 273 E14_Mucus, 112, 133, 138.
+**2026-10-18, camera filter (dev app 09:46, CTest 125/125):** room effect gaps re-measured: of 89 room table IDs without a hand port
+77 are `bhEffDmy` in the original (ids 30-84, delete themselves) or id >= 400 (bhControlEffect sets flg 0, effect.c:846); real gaps 12.
+Largest: `bhEffFil` 90..92 (effsub1.c:28), the full-screen filter that 140 camera cuts in 61 rooms switch on via CAM_WRK flg 0x8000
+(cut.c:412-421). Now ported (vignette, runtime RM_0070 image edge 14.9 -> 10.0). Test `effect_camera_filter` (counter-check red).
+Rest: 110 (3 rooms), bhEffBG 93-97 (1-3 rooms each), 273 E14_Mucus, 112, 133, 138.
 
-**2026-10-18 11:09, Startabsturz behoben (Dev-App 11:09, CTest 125/125):** "Native runtime error: active camera outside table" sofort
-beim Start. Verursacht vom Kamera-Eintrittsfix 02:01: `follow()` rechnete die Verfolgungspose jetzt auch ohne Schnitttreffer, beim Titel
-gibt es aber keinen Raum und keine Kameratabelle. Alle Pruefungen liefen mit `--in-game` und haben den Titelpfad uebersprungen. Jetzt nur bei
-vorhandener Kamera; `tests/native/room_entry_camera_check.py` startet zusaetzlich ohne Raum (Gegenprobe rot mit genau dieser Meldung).
-Am installierten App-Binary geprueft: Titel, Neues Spiel bis RM_0000, LOAD GAME aus dem Titel, Raumeintritt RM_1000.
+**2026-10-18 11:09, start crash fixed (dev app 11:09, CTest 125/125):** "Native runtime error: active camera outside table" immediately
+at start. Caused by the camera entry fix 02:01: `follow()` now computed the follow pose also without a cut hit, but at the title
+there is no room and no camera table. All checks ran with `--in-game` and skipped the title path. Now only with an
+existing camera; `tests/native/room_entry_camera_check.py` additionally starts without a room (counter-check red with exactly this message).
+Checked on the installed app binary: title, New Game up to RM_0000, LOAD GAME from the title, room entry RM_1000.
 
-**2026-10-18 12:3x, Flammenstreifen Friedhof (Dev-App, CTest 126/126):** Nutzerbefund RM_0020 Kinoszene: fliegende Flammenstriche um den
-brennenden Zombie und seinen Kopf. Quelle eindeutig die Gelenkflammen `bhEff_Sub352` (ohne diese Sprites keine Striche). Ursache: der
-Renderer kachelte jede Textur (REPEAT); bilinear holte an den 48-px-Zellraendern des Effektatlas 8 Flammentexel der Gegenkante. Das Original
-setzt GS CLAMP_1 aus dem TIM2-Kopf: `Ps2TexLoad` (ps2_dummy.c:1650) uebergibt ClampFlag, `Ps2CheckTextureAlpha` (:1749-1844) setzt bei
-ClutChange 0 `0xFF000FF5` (WMS/WMT CLAMP), nur Gindex 20500/15205..15209 `0xFF000FF0` (REPEAT); sonst bleibt der Dateiwert (0xCC). Jetzt
-`SceneTexture::clamp_u/clamp_v` im einzigen TIM2-Decoder (scene.cpp), im Renderer (gefiltert und ungefiltert) und erhalten bei TGA-/HD-/
-Mod-Ersatz. Beleg: Bild 650 vorher/nachher 366 Punkte Unterschied, genau die drei Striche; 37 Raeume Bild 45 sonst hoechstens 22 Punkte.
-Test `gs_texture_clamp` (synthetisch + echte RM_6050-Textur Gindex 20500), Gegenprobe dreifach rot (Renderer, Gindex-Ausnahme, ClutChange).
-Am installierten App-Binary: Bild 650 identisch zum Pruefbild, Titelstart, Neues Spiel bis RM_0000, LOAD GAME. **Offen:** der
-Texturcache-Pfad `Ps2DrawOTagSub` (ps2_dummy.c:1420) setzt fest CLAMP/CLAMP, auch fuer die sechs REPEAT-Gindices (RM_6050/5600/7000/3020),
-falls diese ueber die OT gezeichnet werden - nicht zugeordnet. Ebenfalls offen aus demselben Befund: grauer Balken unten (Kinobilder ~410-426,
-Kamera 12) und schwarzes Flackern (Bilder 358-378). Achtung Gegenprobe: `make` vergleicht Sekunden; Zurueckholen + touch in derselben Sekunde
-wie der Sabotagebau liess das sabotierte Objekt stehen (einmal so ausgeliefert, sofort neu gebaut) - vor touch mindestens 1 s warten.
+**2026-10-18 12:3x, flame streaks graveyard (dev app, CTest 126/126):** user finding RM_0020 cinematic scene: flying flame strokes around the
+burning zombie and its head. Source clearly the joint flames `bhEff_Sub352` (without these sprites no strokes). Cause: the
+renderer tiled every texture (REPEAT); bilinear fetched 8 flame texels of the opposite edge at the 48 px cell borders of the effect atlas. The original
+sets GS CLAMP_1 from the TIM2 header: `Ps2TexLoad` (ps2_dummy.c:1650) passes ClampFlag, `Ps2CheckTextureAlpha` (:1749-1844) sets for
+ClutChange 0 `0xFF000FF5` (WMS/WMT CLAMP), only Gindex 20500/15205..15209 `0xFF000FF0` (REPEAT); otherwise the file value stays (0xCC). Now
+`SceneTexture::clamp_u/clamp_v` in the single TIM2 decoder (scene.cpp), in the renderer (filtered and unfiltered) and preserved with TGA/HD/
+mod replacement. Evidence: frame 650 before/after 366 points difference, exactly the three strokes; 37 rooms frame 45 otherwise at most 22 points.
+Test `gs_texture_clamp` (synthetic + real RM_6050 texture Gindex 20500), counter-check red three times (renderer, Gindex exception, ClutChange).
+On the installed app binary: frame 650 identical to the check image, title start, New Game up to RM_0000, LOAD GAME. **Open:** the
+texture cache path `Ps2DrawOTagSub` (ps2_dummy.c:1420) sets CLAMP/CLAMP fixed, also for the six REPEAT Gindices (RM_6050/5600/7000/3020),
+in case these are drawn via the OT - not assigned. Also open from the same finding: gray bar at the bottom (cinematic frames ~410-426,
+camera 12) and black flicker (frames 358-378). Caution counter-check: `make` compares seconds; restoring + touch in the same second
+as the sabotage build left the sabotaged object in place (delivered like that once, rebuilt immediately) - wait at least 1 s before touch.
 
-**2026-10-18, Friedhof Kistenszene (Ereigniskamera 12), Flackern und grauer Balken - kein Portfehler gefunden:** Messung je Bild
-(Proberuntime in $TMPDIR, Produktquellen unberuehrt). (1) Schwarzflackern Bilder ~383-406: im 2-Bild-Takt ist das ganze Bild ~30 %
-dunkler. Allein Effekt 119 (Rauch, Blend 11/3 = Cd*(1-As)) verursacht es; ausgeblendet bleibt die Helligkeit gleichmaessig. Erzeuger
-`bhEff103` Art 2 (effsub1.c:6080) setzt jeden zweiten Pass eine Rauchwolke 119 Art 1; die jeweils neueste sitzt 14.5 Einheiten vor der
-Kamera, Ecken +-1*sx (effect.c:506-520, sx 33) - sie deckt das ganze Bild. 119 (effsub1.c:7890), 103, Ecken, bhDrawTrsEffect3D
-(effect.c:1287), njDrawTextureSub3D-Verwerfen (ps2_NaDraw.c:300-358, _Clip_Screen ps2_Vu1Strip.c:1202) und Tiefentest stimmen mit dem
-Port ueberein. Ohne Originalaufnahme nicht weiter entscheidbar. (2) Grauer Balken unten (Bilder ~407-428): Hintergrundfarbe 0x181E2D
-(rom->bak_col; bhChangeBackColor ps2_event.c:8 hat fuer Stage 0 Raum 2 keinen Eintrag). Der Boden fehlt dort, weil bhChangeViewClip
-(event.c:13205, ViewClipSt0) fuer Raum 2 evc 12 near -9.0 setzt; die Kamera steht ~8 ueber dem Boden. Nativ ebenso. Nebenbefunde (Ledger):
-bhChangeClipVolume/bhChangeClipVolumeRM nicht portiert (andere Stages), PRIM-Lesart in effect_particles.cpp vermutlich vertauscht.
+**2026-10-18, graveyard crate scene (event camera 12), flicker and gray bar - no port error found:** measurement per frame
+(probe runtime in $TMPDIR, product sources untouched). (1) Black flicker frames ~383-406: in a 2-frame rhythm the whole image is ~30 %
+darker. Effect 119 alone (smoke, blend 11/3 = Cd*(1-As)) causes it; hidden, the brightness stays even. Spawner
+`bhEff103` kind 2 (effsub1.c:6080) sets a smoke cloud 119 kind 1 every second pass; the newest one sits 14.5 units in front of the
+camera, corners +-1*sx (effect.c:506-520, sx 33) - it covers the whole image. 119 (effsub1.c:7890), 103, corners, bhDrawTrsEffect3D
+(effect.c:1287), njDrawTextureSub3D discard (ps2_NaDraw.c:300-358, _Clip_Screen ps2_Vu1Strip.c:1202) and depth test match the
+port. Not further decidable without an original recording. (2) Gray bar at the bottom (frames ~407-428): background color 0x181E2D
+(rom->bak_col; bhChangeBackColor ps2_event.c:8 has no entry for stage 0 room 2). The floor is missing there because bhChangeViewClip
+(event.c:13205, ViewClipSt0) sets near -9.0 for room 2 evc 12; the camera stands ~8 above the floor. Same natively. Side findings (ledger):
+bhChangeClipVolume/bhChangeClipVolumeRM not ported (other stages), PRIM reading in effect_particles.cpp probably swapped.
 
-**2026-10-18 nachmittags (Unteragenten, jede Aenderung gegen das Original nachgelesen, Dev-App via `./build.sh --test`, CTest 127/127):**
-(1) Speicherbildschirm "weisses Overlay": `draw_typewriter` loeschte die Leinwand nicht; das Original loescht jedes Bild schwarz
-(bup_00.c:299-304, ps2_dummy.c:89). In den schwarz gekeyten Loechern des Hintergrunds blieb das Raumbild stehen und das Fenster
-0x18808080 mischte Bild fuer Bild erneut (Grau ~118 statt 12). Headless unsichtbar (nur letztes Bild gezeichnet). Test
-`typewriter_slot_list_draw` (Gegenprobe rot). (2) `bhChangeClipVolume`/`...RM` portiert (view_clip.cpp, Renderer-Streifenregel);
-gemessen bytegleiche Bilder in RM_0070/0090/0150/0020, nur nicht mehr verworfene Pakete ausserhalb des Bildes. Offen: ClipDispW der
-Negativzeilen (nur DoubleMain-Leser), Tuer-/Gameover-Kamera behalten 320/240. Tests `view_clip`, `native_ground_world` (Gegenprobe rot).
-(3) RM_0100 Kistensprung-Ruck: dnd setzt plp->flr_no vor py (player.c:3601); der Host nahm die Etage aus py und schrieb den
-Flagstand vom Aktionsbeginn zurueck, das Abschlussbild baute so die Kantenwand der Kiste und schob Claire 5.0-5.9 Einheiten weg.
-Jetzt `stairs.floor` waehrend Stufenaktionen und Neulesen der Flags vor jedem Tick. `tests/native/box_jump_landing_check.py`
-(alle drei Seiten 0.000, Gegenprobe rot 5.045), `tools/verify_stairs.py` (RM_2050-Erwartung korrigiert), verify_push gruen.
-(4) GS-PRIM ab Bit 47 (ELF-belegt): Blutlache jetzt Dreiecksstreifen statt acht Rechtecke, Partikel-Sprites als GS-Sprites, n/2 Sprites
-je njPtclDrawSprite und Breite /1.174 (ps2_NinjaPtcl.c:100-163). Tests `original_effect_particles`, `effect_room_sprites` (gegen HEAD rot).
-Am installierten App-Binary: Titelstart, RM_1000-Eintritt, Kistensprung, Treppen, Schieben.
-Punch-through-Nebenbefund nachgezogen: bhEff023 mdlver 0 zeichnet jetzt ohne Überblendung mit Alpha-Lochtest und Tiefe;
-RGB-Filterung unabhängig von Alpha, auch im optionalen Host-Mipfilter. Gegenproben für Liste, Coverage und RGB rot,
-CTest 129/129 grün; Kistensprung und Titel-/Raumeintritt jetzt regulär in CTest. `Start.command`-Titel/Neues Spiel
-und LOAD GAME am App-Binary geprüft. Einzelheiten und Grenzen: [Prüfbericht](archived/work/2026-10-18-punch-through.md).
-Danach integriert (Unteragenten, jeder Diff gegen das Original nachgelesen, eigene Gegenprobe je Port rot, CTest 139/139,
-Dev-App, `Start.command` Titel/Neues Spiel, LOAD GAME, Kistensprung, Treppen, Schieben am App-Binary):
-(a) bhChangeBackColor/Evt (`native/back_color.*`, 132 Tabellenzeilen, EOR-Timer sync.c:114, 0xab sofort in rom->bak_col;
-ts_flg startet jetzt mit 0x20000 wie system.c:453). RM_7070 Kamera 3: Tabellenfarbe 0x205070 durch das Gitter. partial: globale
-njSetBackColor anderer Tasks, Zielalpha/SSAA. (b) Nebelfarbe ohne R/B-Tausch (Leinwand ist ARGB; alte AABBGGRR-Kommentare falsch;
-`ui.cpp` direct_message hat denselben Tausch noch, offen). (c) UV-Scrolls bhObj010, bhEff120 (ELF: -floor(az/32)),
-bhEffectSensyaSet 0x96 und OT-CLAMP nur an der belegten bhPutModel-Route (Panzerkette Tex 9). (d) bhEff110 Vollbild-Monitor und
-bhEff133 Thermometer (RM_1050/4030/8050, RM_7050). (e) Tiefe GEQUAL: spaetere gleich tiefe Flaeche gewinnt, Kantenregel fuer alle,
-Material-Alpha 0 verworfen; 10-Raum-Vergleich nur Kantenpixel bzw. +-1. (f) bhEff138/bhDraw138 Oel-Raetsel RM_8001 (Test `native_oil_puzzle_world`, Gegenprobe ev64 rot; bhDraw138 partial: gemeinsame OT
-anderer Zeichner). (g) pt_flg-Zeichentore Raum 0x20/Objekte 0x4/Items 0x8/gelinkt>=1210 0x1 (game.c:328, objitm.c:503/550/639), Test
-`native_presentation_gates`. (h) UI-Farbkanaele (direct_message, FE01..05 message.c:161/401), Test `ui_color_channels`.
-(i) ein Besitzer fuer Db.clear ueber Tuer/Gameover/Karte/Schreibmaschine/Film/Terminal/Status (back_color.*). CTest 142/142,
-Dev-App, verify_doors gruen. Offen: Wasserflaeche bhDrawGeneralPurposeWater ohne Zeichenpfad, bhEff112 (Spiegelpass laeuft),
-gefilterte Alphatest-Quantisierung, GS-16-Bit-Z.
-Nachtrag: (j) Spiegelpass/bhEff112/njMirror (RM_2040, Test `mirror_pass`; offen: gespiegelter bhDrawEffect game.c:91).
-(k) Kisten-Ausruestungsflaeche ArmsSet center 9 (sub1.c:4975-5105, Test `item_box_equipment_slot`). (l) Muendungslicht Typ 100/101
-(light.c:673-699, Test `native_lighter_effect`). (m) EN01-Blutlache bhSetBloodPoolLnk (en01.c:9990/9994/10122/10149, en01b.c:763,
-Tests `enemy_en01_blood_pool`, `zombie_blood_pool`). (n) GetItem-Bildschirm ohne Statuspad (sub1.c:3447-3460, Test `pickup_gap_pad`).
-RM_0050 Rueckgleiten nach Zombie-Event ist Originalverhalten (event.c:12034 Common 7 ohne spx, player.c:2127).
-(o) Zopf als obwp[2] am Linkwork (event.c:2177/2501, objitm.c:310), Test `player_hair_link`. (p) RM_3060 Wasser-SE ListNo char
-(types.h:1754), Test `rm3060_water_action_se`. (q) RM_1140 EOR nach Eventpass, Test `rm1140_lever_back_color`. (r) Kampf-Wandkapsel
-bhCheckC2WallN (pwksub.c:2172), Test `combat_target_rules`; Treffer/Auto-Aim sonst Original. (s) EN26 Anatomist Zombie RM_0110
-(en26.c), Test `rm0110_event_zombie`. (t) Muendungsfeuer Aufrufclip (ps2_NaDraw.c:327), Blutlache lkwkp/pt_flg-Tor (effsub3.c:389).
-(u) bhDrawGeneralPurposeWater (objitm.c:471, Test `object_water_wave`). (v) bhEff362/370/371-373 (effsub4.c). (w) Lichttypen 7-12
-und gm_flg-0x80-Ruecksprung (light.c:367/486-657, Test `light_types_7_12`). (x) bhStartDoorDemo-Blende und Tuertask-Modi
-(room.c:949-1009, system.c:939-1061, verify_doors). (y) Gespiegelter bhDrawEffect (game.c:87/427, effect.c:1225, Test `mirror_pass`).
-(z) Framefolge (game.c:48-59/289-296): "Kamera vor Spieler" war Fehlbefund (tick_camera = bhCheckCut, cut.c:12). Portiert: Gegner ->
-Spieler -> Effekt/ObjItm/Licht, Kopf/bhCalcModel nur mit sp_flg 0x1 (player.c:1365), bhCheckCut nach dem Zeichnen, Kameraschnappschuss
-game.c:58 fuer Zeichnen/Effekte. Tests player_head_pass_gate, effect_after_player, event_camera_first_frame, camera_control_order.
-(aa) bhSetDispObj Spieler (op 0x20): plp->mdflg 0x1 jetzt als player_model_hidden_ (nur Modell, sperrt den Pass nicht) statt player_hidden;
-pl_sleep_cnt-Sonderfall von op 0x20 nach bhInitModelSet (op 0x24) verschoben. Test event_lifecycle_control_release (Gegenprobe rot).
-(ab) bhInitCamSet (0x5b) ruft jetzt bhControlLight (event.c:4745): Lichtpass als RoomWorld::control_lights() ausgekoppelt, in
-tick_after_player (game.c:59) und im 0x5b-Zweig der Runtime nach control_camera. Test light_types_7_12 (RM_1020 Typ 9: Pass + Extra-Aufruf
-= 2 Schritte; Gegenprobe rot "ausserhalb des Passes"). (ac) Lichtlinktod light.c:719-748: je Licht mit flg 0x1|0x2 wird das Zielwerk
-(lkflg 1 plp, 2 ene, 3 obwp, 4 itwp; 5 eff ohne Besitzer, >5 lkflg/lkno = 0) auf flg 0x1 geprueft, sonst flg &= ~0x3 dauerhaft. Befund:
-das Werk-flg-Bit 0x1 kommt aus dem ETTY-flg und hat im Original fuer ene/obwp/itwp/plp keinen Schreiber; alle 33 gelinkten Lichter der
-Raumdaten (lk 2: 19, lk 3: 14) zeigen auf aktive Werke, die Regel ist mit Spieldaten unerreichbar und nur ueber die Pruefnaht
-set_work_flags belegt (Test light_types_7_12 RM_3230 Licht 5 -> obwp[7], Gegenprobe rot "link death") (ad) Wasserlicht draw_tp 0 (RM_9110) ohne Codeaenderung belegt: bhDrawGeneralPurposeWater ->
-bhDrawSpObject setzt Licht 1 = lgtp[aspd] selbst (objitm.c:483/696-703), Punktlichter bhSetHalfLight 0.5 (game.c:352), amb_chr (game.c:344);
-bhDrawEnemy/bhPutModel(plp)/bhDrawEffect schreiben keine EasyMulti-Farben - identisch zum nativen ob_spc-Glint-Satz. CTest 158/158, je Fix Gegenprobe
-rot/gruen, Dev-App Raumeintritt/Hebel/RM_0110/Blutlache/Kiste/LOAD GAME/Tuer gruen.
-(ae) Spiegel-bhDrawMdfEffect (game.c:427 -> effect.c:866/1076, zweite Modifierstufe unter cam.mtx*njMirror): SceneShadow::mirror,
-Renderer-Stufe zwischen Spiegelraum (Phase 2) und Spiegeleffekten (Phase 3) mit mirror_view; world.cpp markiert die im Spiegelaufruf
-erzeugten Modifier statt sie zu verwerfen. Befund: die Passwahl bleibt das Bildschirmvorzeichen von njCnkCoP3 (ps2_NinjaCnk.c:1684,
-lCnkModClipFace), game.c:425 njControl3D(0x100) traegt vor dem Spiegel-bhDrawEffect kein 0x10000 mehr -> ein gespiegeltes geschlossenes
-Volumen tauscht Vorder-/Rueckseiten und ergibt dieselbe (leere) Maske wie ein vorab gespiegeltes Volumen im Normalpass (Original-
-semantik, keine Korrektur erfunden). Test shadow_modifier_pixels: Gleichheit Spiegel-Modifier == vorgespiegeltes Volumen, M*M*T sichtbar
-nur ueber mirror_view, Spiegelraum empfaengt / Spiegeleffekte danach, Ablehnung ohne njMirror-Matrix; drei Gegenproben rot (view statt
-mirror_view, Stufe vor dem Spiegelraum, Stufe nach den Spiegeleffekten). CTest 158/158.
-(af) bhDraw134-Zweitlauf im Spiegel ohne Codeaenderung geschlossen: der Spiegelpass haengt an Effekt 112 (Raumtabellen nur RM_2040/9230,
-bhEff112 nur Stufe 2), bhDraw134 an Effekt 134 (nur RM_4020/8020); kein Raum traegt beide, Skripte spawnen weder 112 noch 134
-(bhHEffectSet2/bhSetEffect aller 205 Raumdisassemblies). Der ef_fnc-Zweitlauf (effect.c:929 unter game.c:427) ist damit fuer 134 unerreichbar.
-Offen: Bildabnahme Wasserraeume/Kopfplatzen/Spiegelraum RM_2040 (Sichtpruefung im Spiel).
-(ag) Raumscan 205/205 mit --enemy-ai on (600 Bilder, Dev-Binary 2026-10-19): 0 Laufzeitfehler. Der aeltere Scan ohne Gegner-KI meldete 94
-unbindbare Befehle (Common 24/25/34 auf uninitialisierte Werke) - Artefakt der KI-Abschaltung, mit KI 0. Verbleibende Meldungen: bhEffModeSet
-0x91 auf Texturhalter (RM_7140, jetzt gebunden, Test event_lifecycle, Gegenprobe rot); 0x23 hinter rom->etcp (RM_3100/3140/7030, Original-UB);
-bhSetMotion frm_no 9226 auf 2-Bild-Raummotion (RM_3120/3220, versteckter Gegner 2, Original-UB, Ledger); bhObj005-Nachbarzelle (12 Raeume, UB);
-unportiert: bhEff_Sub350 (RM_1120/5580), bhEff301 (RM_5810/9302), bhEne06 (RM_6030), bhEne22 (RM_7100), plp mnwPb[mtn_no] (RM_7250).
-(ah) bhEff_Sub350/351 portiert (Giftspeichel der EN01-Giftzombies, en01.c:11190 bhEne01_PoisonEffect; effsub4.c:319/538): Bahn, Wartezeit,
-Bodenaufprall (bhCollisionCheckLine2 0x400, Lage +0.5), Spielertreffer gegen plp->watr (Schaden 10, mode0 2/mode2 1/mode3 0, flg 0x4, mode1 aus
-bhDGCdirCheck) mit drei 351 am plp->djnt_no (neuer Effekthaken player_hit_check_parts = zonzon.c:1376 bhEne_HitCheckParts auf dem Spielerbaum),
-SE 8961 ueber bhEne01_SePlay(lkwkp) mit flg-0x10000-Tor, Spritzer 351 (Wartezeit, Link loesen, Ausblenden, 14 Bilder). Vorher taten die Speichel
-nativ nichts (Luecke 'bhEff350'). Test effect_eff350 (Gegenproben rot), Headless RM_1120/5580 mit Gegner-KI ohne Luecke, 350/351 lebendig.
-(ai) bhEff301 portiert (Blutfleck aus zonzon1.c:301 bhEne_SetBloodstain, viermal je Gegnertreffer; effsub3.c:404-808): Streuung/Strahl,
-Boden (Fall 4-6), Wand (8-10), Typ-6-Satz (16-17), Wasser (12-14, bhCheckWater mit h ueber neuen Dienst set_effect_water_area), Linse
-(bhCheckCamWall2D effsub3.c:1611 gegen cam.mtx, Fall 24/25 als ef_trs2d, gm_flg 0x20 und cam.flg 0x10 = ci->flg 0x200), ATR flg 0x10,
-sys->bl_ct-Staffelung, gm_flg 0x2000000. EffectContext traegt jetzt cam.mtx (camera_view_matrix) und cam.flg 0x10. Vorher entstanden nativ
-keine Blutflecken an Waenden/Boden (Luecke 'bhEff301'). Test effect_eff301 (Gegenproben rot), Headless RM_5810/9302 mit Gegner-KI ohne
-Luecke. CTest 160/160, Dev-App via `./build.sh --test`. Verbleibend aus dem KI-Scan: bhEne06 (RM_6030), bhEne22 (RM_7100), plp mnwPb[mtn_no]
-(RM_7250). **Kein Commit/Push.**
-(aj) bhEne22 portiert (Albinoid Adult, RM_7100; native/enemies/en22.c, jump[22], Dienste RECVX_EN22_SERVICES): Init/Brain/MV00-06/DG/DD,
-Spielerschaden, Kollision, Wassereffekte, Stromschlag (354), Funkenangriff mtn 9 mit bhEne22_ChgDengekiColor/GetDengekiColorAddr auf den
-beschreibbaren Stroemen mdl[1..6].objP[1], Bodenlicht 353, Blitzmodelle 364 und rom->lgtp[2] (SetLight/CtrLight, Light.ct1). Neu dazu
-bhEff_Sub353/354/364 (effsub4.c:837/958/1774; 354 als bhEff_3DSpriteDraw-Billboard mit Gegnertextur) und RoomWorld::water_splash2
-(pwksub.c:2572, jetzt auch fuer EN01 gebunden). **Offen:** bhEff_ModelDraw (effsub4.c:3306) zeichnet die 364-Blitzmodelle noch nicht
-(njCnkSimpleMultiDrawModel-Farbpfad ohne Hostpfad, benannte Luecke im Zeichenpass). Test enemy_en22_world (fuenf Gegenproben rot),
-Headless RM_7100 mit Gegner-KI ohne neue Luecke, CTest 161/161, Dev-App via `./build.sh --test`. **Kein Commit/Push.**
-(ak) bhEne06 portiert (Motte, RM_6030; native/enemies/en06.c, jump[6], Fragmente bhEne06s auf jump[31] per SetCallFunc, verdeckter
-Anfuehrer fuer den Spielergriff): Flug, Wandanlehnen, Griff mit Spielermotion 20 aus der Mottenbibliothek, Mottenei (id-27-Work + plp->stflg-
-Marke), Treffer/Absturz/Zerfetzen mit zwoelf fallenden Fragmenten auf den owP-Matrizen der Motte. Neu bhEff_E06_Rinpun (260) mit
-Teilchenzeichnung aus mdl[1].texP. Test enemy_en06_world laeuft ueber das echte Raumskript (Ereignis 16 gibt Motte 3 bei Flag 4/0 frei),
-sechs Gegenproben rot. **Offen:** (1) Staub-Spielerberuehrung: das Original mittelt mit nie gesetzten FPU-Registern $f20-$f22 (ELF belegt),
-benannte Luecke; (2) EN27 (Mottenei) ist weltseitig ungebunden und meldet seine Dienste; bhCheckMothEgg im Spielerbesitzer fehlt.
-CTest 162/162, Dev-App via `./build.sh --test`, Titelstart geprueft. **Kein Commit/Push.**
-(al) RM_7250 Spinnengriff: Ursache war ein zweiter Schreiber von plp->mnwP — der EN03-Anfuehrer haengt die Spinnenbibliothek per
-Dienst ein und schreibt danach seinen alten Spielerschnappschuss zurueck, der mnwP wieder auf mnwPb setzte (Griffmotion 62/63 fehlte
-dort). enemy_player_set uebernimmt die Bibliotheksfelder jetzt nur, wenn die Sicht sie selbst geaendert hat. Check rm7250_spider_grab.
-(am) EN27 Mottenei angebunden: Ei auf plp->mdl[6]/[7] mit Spielermotionen 93..97, Wurzel am Spielergelenk 3 (neues lk_player fuer
-lkwkp = plp, Tore lesen plp->stflg), bhCheckMothEgg vor dem ersten Gegnerpass, plp->stflg & 0x78280000 ueber den Raumwechsel (Marken
-gingen bisher verloren), Spielerreihe ohne Raum-Texturrueckfall. Test enemy_en27_world (Init, Zeichnung, Schlupf, Griff, Schaden/Gift,
-Freigabe, Fall), Gegenproben rot; EN06-Test prueft jetzt das abgelegte Ei ohne Luecke. Frischer Raumscan mit Gegner-KI (205 Raeume):
-uebrig nur benannte Original-Undefiniertheiten (bhObj005, bhCheckRoute, bhSetMotion-Kanaele/RM_3120 Common 34 frm_no 0x240A,
-en02 ang, ef_tn vor Rendercut). CTest 164/164. **Kein Commit/Push.**
-(an) bhEff_ModelDraw (effsub4.c:3306) fuer die Albinoid-Blitzmodelle (364) gezeichnet: njCnkSimpleMultiDrawModel ist der Ninja-Modus
-der Gegnerzeichnung (MdlPut.c:182), die davor gesetzten Einzellichter (Modus 2) wirken nicht; Lichtkategorie 4 wie bhEff30cDrw,
-Materialfarben aus dem von bhEne22_ChgDengekiColor beschriebenen Strom. EN22-Test prueft Bild und Farbe (zwei Gegenproben rot).
-Spiegelpass bleibt benannte Luecke. CTest 164/164. **Kein Commit/Push.**
-(ao) Fuenf nativ schon angeforderte, aber unportierte Effektprozeduren portiert: 356 Zombie-Halsblutung nach Kopfplatzen (Rueckrufe in
-EN01 aus dem Effektpass; EnemyCallbackFrame bindet dafuer T3-Ergaenzung und EN01-Kontext), 363 Fleischstuecke der Bein-/Wurmexplosion,
-252 Flamme am Gegnergelenk (bhEne_SetFireEffect), 259 Hunterblut, 26 Schirmschlieren beim Explosionstod. Tests effect_en01_exp,
-effect_e00_fire (Gegenproben rot). progression_test fuehrte 26 als ungebunden; Waechter jetzt auf 6 (bhEff006, echt unportiert).
-Naechstes: EN17 (Steve) hat ungebundene Effektdienste (SetPtcl 365/366, Beil-Nachbild 364, lgtp[2], SetBlood2(plp)). CTest 166/166.
-**Kein Commit/Push.**
-(ap) EN17 (Monster Steve): alle bisher ungebundenen Effektdienste angeschlossen. Neu portiert sind die Erzeuger bhEff_SetPtcl/SetPtcl1
-(effsub4.c:19/35) sowie bhEff_SetPtcl2/SetPtcl2V (:117/:199) als RoomWorld::set_ptcl/set_ptcl1/set_ptcl2/set_ptcl2v mit ihren
-bhEff_AllocOwork-Hilfsarbeitssaetzen (EffectPtcl365Work/EffectPtcl366Work) und die Prozeduren bhEff_Sub365 (:1812) und bhEff_Sub366
-(:1884) samt Zeichenteil bhEff_LineDraw (:3090, untexturierte Dreiecke mit eigenen Eckfarben). Gebunden sind ausserdem
-bhEne17_AfterimageAxEffect (Effekt 364, Beil-Nachbild auf epw->mdl[5]), bhEne17_SetLight (rom->lgtp[2]), bhEne_SetBlood2(plp) und
-mlwP->objP[0].pos[0/2] = 0 am Gegner- wie am Spielerbaum. Fuer das Nachbild hat bhEff_ModelDraw jetzt seinen flr_no-Zweig:
-npSetAllMatColor (njplus.c:1375) faerbt die Materialien des gezeichneten Objekts, sodass die sieben Nachbilder eines Bildes ihre
-eigenen Alphastufen behalten; der Port faerbt dafuer eine Kopie des Modellstroms statt den gemeinsamen Strom (gleichwertig, weil
-mdl[5] nur dieser Effekt zeichnet und jeder Zeichner vorher selbst faerbt). Drei Abweichungen in native/enemies/en17.c mitkorrigiert:
-plp->djnt_no = 2 mit plp->dpx..dpz = cap.c1 beim Treffer und plp->djnt_no = 3 vor bhEne_SetBlood2 fehlten ganz (en17.c:1594/1653),
-bhEne_SetVibration(1) ist StartVibrationEx(1, 0xA) und stand als (1, 11), und eine doppelte Zuweisung von cap.c1 mit falschem Index
-ist entfernt. **Offen und benannt bleibt die Anzeige von Effekt 365:** bhEff_PtclSpriteDraw uebergibt njPtclDrawSprite n = 1, und
-Ps2AddPrim3D gibt genau n Eckpunkte je GIF-Tag mit neu gesetztem PRIM aus — ein GS-Sprite braucht zwei. Der Satz laeuft deshalb,
-legt aber keine Flaeche ins Bild; ohne Hardwarebeleg wird hier nichts erfunden. Test enemy_en17_world um Partikel, Nachbild, Licht,
-Spielerblut, Gelenk und Vibration erweitert; die bisher zugelassenen Lueckennamen bhEff369/370/301 sind ersatzlos entfallen,
-weil diese Prozeduren laengst portiert sind und auf den gelaufenen Wegen gar keine Luecke mehr auftritt — der Test laesst jetzt
-keine einzige zu. Vierzehn Gegenproben rot. 205/205 Raeume laden, Gegner-KI-Sweep ueber alle Raeume meldet unveraendert nur die sechs bekannten
-Original-Undefiniertheiten. CTest 166/166. **Kein Commit/Push.**
-(aq) Magazin beim Nachladen (bhEff007) portiert und zwei Fehler im Zeichenweg sys->ef_pol behoben. bhEff007 (effsub1.c:2335) war
-nicht portiert, obwohl der Kampfkern es bei jedem Nachladen anfordert (pwksub.c:3372 bhSetMagazine, nativ cb_set_magazine): der Satz
-entstand gar nicht und der Port meldete bhEff007. Jetzt faellt das Magazin vom Handgelenk, prallt mit CallPlayerWeaponSeEx(259) auf,
-dreht sich im Fall und bleibt eine halbe Einheit tiefer liegen; im Wasser bremst es und setzt den Spritzer 15.
-Auch das Magazin IN der Waffe hat jetzt seinen Besitzer: bhEff007 schreibt bei mdlver != 0 ueber RoomWorld auf den
-Waffenassetbesitzer CombatController; WeaponAsset::append laesst nur das rechte Knotenmodell 2 aus, nicht Kinder
-oder das linke Modell. player.c:6075 loescht das Flag bei act_ct1 NUR fuer Waffe 12; der bestehende Clear-Auftrag
-wird einmal verbraucht. Waffe 13 bleibt wie im Original verborgen. Kampf-Abbruch behaelt das Flag, neues
-Waffenasset setzt es zurueck (dread.c:200-210). Test effect_magazine mit echten Reloadpfaden 12/13 und diagnostisch
-leerem Inventar, Zeichenmengen, Abbruch/Neu-Laden; sechs weitere Gegenproben rot. Auch Materialschreiber des
-verdeckten Knotenmodells entfallen, Positionen der verbleibenden Schreiber bleiben korrekt.
-[Pruefbericht](build/validation/magazine-owner-20261019/README.md). Abschliessend ./build.sh --test: 169/169 gruen,
-Dev-App gesichert/aktualisiert/signiert; Start.command-Titel und Reload geprueft (Motion 116, Effekt 7, keine
-blockierten Befehle/offenen Weltbindungen), arm64/Signatur/Policy gruen. Runtimebilder angesehen, aber Kamera
-hinter der Figur: keine getrennte visuelle Abnahme des Magazinwechsels. Kein Commit/Push.
-Beim Anschluss fielen zwei Abweichungen in bhDrawPolEffect (effect.c:949) auf, beide per Disassembly belegt: (1) die Textur ist
-sys->ef_tlist.textures[tex_id + ani_ct] OHNE sys->ef_tn (ELF 0x0021D3F8 gegen 0x0021DEBC in bhDrawTrsEffect3D) — der Port suchte die
-Kategorie, wodurch die Patronenhuelse das gemeinsame Bild 19 statt 5 und die Markierung 25 statt 8 trug; (2) gezeichnet wird nur
-objP[op->mdlver], der Port zeichnete das ganze efm[0] und damit beide Huelsenobjekte zugleich. Beides ist korrigiert, die vier
-Modellbloecke aus bhInitEffect (efm[0]/[1]/[7]/[13]) liegen dafuer einzeln vor. Neuer Test effect_magazine, dazu der Block
-pol_effect_draw in effect_room_sprites; elf Gegenproben rot. Ausserdem: die Lueckenliste im EN17-Test liess bhEff369/370/301 zu,
-obwohl diese Prozeduren portiert sind und auf den gelaufenen Wegen gar keine Luecke mehr auftritt — der Test laesst jetzt keine zu,
-Ledger und Eintrag (ap) sind entsprechend berichtigt. 205/205 Raeume laden, Gegner-KI-Sweep unveraendert bei den sechs bekannten
-Original-Undefiniertheiten. CTest 167/167. **Kein Commit/Push.**
-(ar) Die beiden Sand-Skriptbefehle des Gulp Worm portiert: 0x98 bhEffectSandSet (event.c:4110) und 0xC3
-bhEffectSandSetMatsumoto (:8577) fehlten in der Event-VM, obwohl ihre Ziele bhEne02_SetSandEffect und
-bhEne02_SetSandEffectEV nativ schon vorlagen (die EN02-Zeile nannte beide als offen). 0x98 ist 12 Byte lang:
-Vorzeichenbits fuer drei u16-Betraege in Hundertsteln, eine Lageart (Weltlage oder Versatz, der nur x und z zur
-Gegnerlage addiert) und ein Typbyte, hinter dem der Skriptzeiger um zwei rueckt — per Disassembly 0x0015CAF0
-geprueft, weil eine falsche Laenge den ganzen Skriptstrom verschieben wuerde. 0xC3 nimmt den Werkplatz von
-sys->ene, nicht den Raumindex. Weil die EN02-Dienste nativ nur waehrend des Gegnerpasses gebunden sind, merkt der
-Skriptpass den fertig aufgeloesten Auftrag vor und der Gegnerpass desselben Bildes fuehrt ihn vor den Gegnern aus —
-dieselbe Reihenfolge wie im Original. Unbekannte Ziele bleiben ungebunden statt geraten. Damit sind 197 von 223
-Skriptbefehlen gebunden (vorher 195). Test enemy_en02_world um drei Bloecke erweitert; sieben Gegenproben rot.
-205/205 Raeume laden, Gegner-KI-Sweep unveraendert. CTest 167/167. **Kein Commit/Push.**
-(as) Blickbefehle des Spielerkopfes portiert und die Lage bei den restlichen Skriptbefehlen geklaert. 0x40
-bhLookGsetPlStart (event.c:3488) und 0x41 bhLookGsetPlStop (:3539) schreiben den Kopfzustand plp->exp1, den der Port
-mit RECVX_HEAD_STATE schon fuehrt: Start setzt die beiden Blickflags, waehlt die Zielart gespeicherter Punkt und
-traegt den Punkt aus dem Skript ein, Stop loescht nur die beiden Flags. Damit sind 199 von 223 Skriptbefehlen
-gebunden. Wichtiger Befund dabei: ein unbekannter Skriptbefehl wirft in der Event-VM und haelt den Raum an, die
-verbleibenden sieben sind also moegliche harte Stopps, sobald ein Skriptzweig sie erreicht — in 205 Raeumen x 600
-Bildern Initlauf wird keiner erreicht. Ihre Laengen und Wirkungen sind jetzt in der Ledgerzeile
-event.c:bhScenarioJmpT:offen festgehalten, damit sie einzeln nachgezogen werden koennen; der teuerste ist 0x1E
-bhAdxTimeCk, eine Bedingung, die die Abspielzeit eines ADX-Stroms braucht und dafuer nativ keinen Besitzer hat.
-Ausserdem geprueft: von den 17 als 'nur konsumiert' gemeldeten Befehlen sind alle in Wahrheit am Raumbesitzer
-gebunden (die Objektbindungen ueber eine Tabelle, die der Zaehler nicht sieht). Neuer Weltblock im Test player_head
-(der jetzt das Datenverzeichnis bekommt); sieben Gegenproben rot. 205/205 Raeume laden, Gegner-KI-Sweep unveraendert.
-CTest 167/167. **Kein Commit/Push.**
-(at) Sechs der sieben verbliebenen Skriptbefehle halten den Raum nicht mehr an, und drei bisher wirkungslose sind
-gebunden. Ihre Wirkung hat nativ keinen
-Besitzer (Spieler als Kind einer Objektbindung, die beiden Handobjektwerke, sys->efid, die Eventaufgaben-Werke,
-die Debugkamera, die Battle-Game-Rangliste), aber ihre Laenge steht im Original fest: 0x6F 12, 0x82 4, 0x97 8,
-0xAA 10, 0xAF 4, 0xD3 2 Byte. Sie werden jetzt genau so weit uebersprungen und als offene Bindung gemeldet, statt
-den Lauf mit `unimplemented opcode` zu beenden. Uebrig bleibt 0x1E bhAdxTimeCk als einziger harter Stopp — das ist
-eine Bedingung, die die Abspielzeit eines ADX-Stroms an ein IF liefert; sie zu ueberspringen hiesse, den Zweig zu
-erfinden. Neuer Test event_opcode_lengths: er legt jeden der zehn in diesem Stand behandelten Befehle an den Anfang
-eines Eventskripts, setzt dahinter ein bhSet und prueft, dass genau dieses bhSet ausgefuehrt wird — eine falsche
-Laenge verschoebe den ganzen Strom dahinter. Acht Gegenproben mit falscher Laenge rot, dazu eine Gegenprobe der
-Vorrichtung selbst (ein um ein Byte verschobenes bhSet darf nicht laufen). Ausserdem gebunden: 0x3A bhMutekiSetPl (Spieler unverwundbar, plp->flg 0x4 mit Spiegelung
-nach player_flags), 0x2E bhMotionPauseSetPly (sp_flg 0x1, das Tor des Spielerpasses) und 0xA1 bhTrapDamageSet
-(plp->stflg 0x1000, im Original mit dem Wert 0 gesetzt). Alle drei schreiben nur Flagbits, die die Event-VM selbst
-fuehrt — sie wurden bisher gelesen und an den Raumbesitzer gereicht, der sie nicht band, liefen also ins Leere.
-Dazu 0x46 bhSetNextRoomBgm und 0x47 bhSetNextRoomBgSe, die Musik- und Raumtonvorgaben fuer den naechsten Raum schreiben. Dabei ein Befund, der meine Vermutung aus dem letzten Bericht widerlegt: die Zielstruktur NextSoundInfo (sdfunc.c:90) hat im Original ueberhaupt keinen Leser — ueber alle 154 Quellen steht sie nur in diesen beiden Befehlen und in ihrer Definition. Sie sind also auch im Original ohne hoerbare Wirkung; nach einer Tuer kann deshalb keine falsche Musik laufen. Der Port fuehrt den Zustand trotzdem, damit die Befehle gebunden sind und ein spaeterer Leser die richtigen Werte vorfindet. Damit sind 204 von 223 Skriptbefehlen gebunden. 205/205 Raeume laden, 0 blockierte Befehle, Gegner-KI-Sweep
-unveraendert. CTest 168/168. **Kein Commit/Push.**
-(au) Kein Skriptbefehl haelt mehr einen Raum an. 0x1E bhAdxTimeCk (event.c:1523) war der letzte ohne nativen Fall.
-Er ist eine Bedingung auf die Abspielzeit eines ADX-Stroms; die Modi 0..3 liefern 0, WENN die Bedingung zutrifft,
-die Modi 4 und 5 liefern 1, und ein Modus ueber 5 gibt die rohe Zeit zurueck (kein default im Original). Die
-Zeitquelle ist neu: AudioMixer::adx_play_time rechnet die Kanalposition des Mischers nach derselben Formel um wie
-adxwrap.c:650 (SampleCount / SamplingRate * 100). Channel::clip_rate ueberlebt das natuerliche Clipende, damit ein
-zu Ende gelaufener Strom seine Endzeit behaelt — sonst haengt eine Warteschleife im Skript an einer Zeit 0.
-NEBENBEFUND, selbst gefunden beim Nachlesen: die Ausfuehrungsschleife der Event-VM lief bei Rueckgabewert == 1
-weiter, das Original aber bei JEDEM Wert ungleich 0 (event.c:13046). Beobachtbar bei Befehlen, die etwas anderes
-als 0/1 liefern koennen — bhAdxTimeCk mit Modus ueber 5 und bhCkFlg mit `mode ^ flag`. Korrigiert; CTest unveraendert
-gruen, also kein ausgeliefertes Skript war bisher betroffen. Test event_opcode_lengths deckt jetzt sechzehn Befehle
-ab; sechs weitere Gegenproben rot. Damit: 205 von 223 Skriptbefehlen gebunden, 18 mit korrekter Laenge uebersprungen
-und gemeldet, keiner mehr unbekannt. 205/205 Raeume laden, 0 blockierte Befehle, Gegner-KI-Sweep unveraendert.
-CTest 168/168. **Kein Commit/Push.**
-(av) Verdeckungsmasken der Ereigniskamera am Spurende korrigiert. cut.c:1803 bhSetEventHideObjLgt schreibt die
-Objekt- und Lichtmaske eines Keys EINMAL; sie bleibt bis zum naechsten Aufruf stehen. Gerufen wird sie beim Setzen
-der Kamera, im Initpass und nach jedem Keywechsel — NICHT bei dem Keywechsel, der in das Endhalten fuehrt
-(cut.c:2124 bricht dort mit `break` vor dem Aufruf ab). In der Haltephase steht die Kamera also auf dem letzten Key,
-die Masken aber noch auf dem vorletzten. Der Port las die Masken je Bild aus dem aktuellen Key und zeigte am Ende
-jeder Zwischensequenz die Verdeckung des LETZTEN Keys. RoomWorld::event_camera_mask_key_ haelt jetzt den Key fest,
-mit dem das Original sie zuletzt geschrieben hat. Eigener Scan ueber alle Raumdaten: 383 von 1362 endenden
-Kameraspuren in 82 Raeumen haben dort verschiedene Masken; in RM_0000 Spur 33 verdeckt der vorletzte Key eine ganze
-Objektgruppe, der letzte nichts — diese Objekte wurden am Ende der Sequenz sichtbar. Neuer Test event_camera_hide
-(RM_0000 Spur 33); drei Gegenproben rot. Der Befund stammt aus einer der fuenf parallelen Untersuchungen und wurde
-vor der Umsetzung Zeile fuer Zeile im Original und mit einem eigenen Raumdatenscan nachgeprueft.
-Auch die Wechselwirkung mit bhControlLight ist geschlossen: set_event_camera_masks schreibt die Lichtmaske
-an den Originalaufrufstellen einmal in Light::flags Bit 0x2; Lichtpass und Zeichnung lesen diesen Zustand.
-Typ 100/101 bleiben nach dem Erloeschen aus bis zum naechsten Maskenaufruf, ohne Uhr-/Modusreset; Typ 13
-und Linktod verlieren Aktivbit 0x1, das die Maske nicht wiederherstellt (light.c:669/:680/:696/:749).
-Erweiterter Test event_camera_hide: diagnostisch veraenderte Lichtfelder/Keymasken in RM_0000, vier Typen,
-Lichtbeitrag am Raumdreieck, letzter Lichtpass, Wiederholung, Keywechsel, Endhalten und FixedCut.
-Drei weitere Gegenproben rot; [Prueflogs](build/validation/event-camera-light-20261019/).
-Frueherer Stand: 205/205 Raeume laden, 0 blockierte Befehle, Gegner-KI-Sweep unveraendert, CTest 169/169.
-Aktuell CTest 169/169, Policy/Ledger gruen; Dev-App ueber ./build.sh --test gesichert, aktualisiert und signiert.
-Start.command geprueft: Titel und RM_0000 mit Gegner-KI je 60 Bilder kopflos, Exit 0, keine blockierten Befehle/
-offenen Weltbindungen; arm64/Signatur geprueft. [Bericht](build/validation/event-camera-light-20261019/README.md).
-Keine visuelle Abnahme. **Kein Commit/Push.**
-(aw) EN01 njRandom-Vorzeichen aus der Worktree-Sitzung "Check EN01 njRandom sign" in main uebernommen und
-nachgeprueft: macros.h:105 mit RAND_MAX+1 = -2^31 und Disassembly 0x1882C8/0x1885E8 (rand -> negu -> cvt.s.w ->
-div.s durch 0xCF000000) ergeben einen POSITIVEN Wert in [0,1]; en01_core.c rechnete negativ, Groesse und
-Geschwindigkeit der ExpLeg-/ExpWorm-Splitter lagen dadurch unter dem Originalbereich. Alle anderen Gegnerports
-waren schon positiv. Neuer Test enemy_en01_exp_effect (428 Pruefungen), Gegenprobe alter Ausdruck rot.
-Der Worktree selbst ist verworfen. **Kein Commit/Push.**
-(ax) 0xAF bhPlyHandChange (event.c:7378) gebunden statt nur gemeldet: zwei Raumobjekte haengen an den Haenden
-(lkono 9/13, flg 0x80, stflg 0x1000000) und die Waffenmodelle obwp[0]/[1] verschwinden per mdflg 0x1 aus der
-Zeichenliste (neuer Besitzer CombatController, Ruecksetzen durch gameover.c:304 und beim Laden einer Waffe).
-Ablegen laesst das Objekt an der letzten Handlage. Daten: RM_9110, RM_9140, RM_9260. Offen und benannt: das
-Parken eines gezogenen Feuerzeugs, weil plp->wpnr_no nativ nicht vom Inventarplatz getrennt ist. Test
-player_hand_change mit echten RM_9110-Bytes, acht Gegenproben rot. **Kein Commit/Push.**
-(ay) Waffe in Zwischensequenzen und beim Gegnergriff korrigiert: der Port zeichnete bei Skriptsteuerung das
-Modell von Waffe 0 (leere Haende) statt der ausgeruesteten Waffe — Ersatzlogik vom 2026-10-05, schon damals
-ohne Originalbeleg vermerkt. Das Original wechselt das Waffenmodell nur ueber bhReadWeaponData (Ausruesten,
-bhArmsItemChange, Spielstart) und zeichnet es unter pt_flg 0x1 (objitm.c:364/:648); dieses Tor fehlte nativ
-ebenfalls. Test player_hand_change erweitert, zwei Gegenproben rot. Offen: 0x27 bhArmsItemChange nativ
-falsch abgebildet (loescht den Inventarplatz), braucht einen eigenen plp->wpnr_no-Besitzer. **Kein Commit/Push.**
-(az) Gezogene Waffe plp->wpnr_no vom ausgeruesteten Platz pip[0] getrennt (Inventory::wpnr_no). Vorher leitete
-der Port die Waffe aus dem Platz ab. Jetzt schreiben WeaponSet/GetItem/ItemBoxChange beides, bhArmsItemSet 0xC1
-und bhSv 22 nur den Platz, bhArmsItemChange 0x27 / bhSv 18 / 0xAF nur die Waffe; Spielerwechsel und Spielstand
-fuehren sie ueber ply_wno. Damit behoben: 0x27 mit 0 loeschte den Inventarplatz, andere Werte wirkten nicht; und
-das Feuerzeug-Parken aus 0xAF ist portiert (0xAF jetzt vollstaendig). Grenze: bhSv 18 laedt im Original kein
-neues Waffenmodell, nativ schon (im Raumscan nie erreicht). Vier Tests setzten nur pip[0] in der Aufstellung
-und sind ergaenzt bzw. auf das Original korrigiert. CTest 172/172, fuenf waffenrelevante Laufzeitpruefungen
-gruen, acht Gegenproben rot. [Logs](build/validation/wpnr-no-20261020/). **Kein Commit/Push.**
-(ba) 0x97 bhEffectKokuenSet korrigiert und 0xAA bhEffUVSet2 portiert. 0x97 stand ungeprueft im Arbeitsbaum und
-setzte den Rauch an die Weltlage des Taskworks; das Original nimmt die lokale Lage von objP[0]. 0xAA schreibt
-UVs als 28-Byte-H-Eckpunkte nach op->pv; bei Effekten ohne H-Eckpunkte reicht das in tv hinein. Einzige
-Datenstelle RM_9180 (Vollbildfilter bhEffFil): dort aendert das Original damit tv[1].u - nativ jetzt ebenso.
-Test event_kokuen, sechs Gegenproben rot. Damit noch uebersprungen: 0x6F, 0x82, 0xD3. **Kein Commit/Push.**
-(bb) 0x6F bhObjLinkSetObjPly portiert: das Skript haengt die Spielerin an einen Objektknoten, bhCalcModel(plp)
-baut ihre Wurzel dann aus obwp[lkwkp].owP[lkono] * T(lox,loy,loz) * RXYZ(ax,ay,az) (MdlPut.c:242). Nativ
-PlayerObjectLink + PlayerAsset::sample_root in RoomWorld::sample_player. Einzige Datenstellen RM_4011 (Objekt 6,
-Knoten 3, skriptgesteuert). Offen und benannt: Bindung im freien Spielerpass (in den Daten nicht vorhanden).
-Test player_object_link mit echten Bytes, sechs Gegenproben rot. Uebersprungen bleiben nur 0x82 (Debugkamera, in
-den Daten unbenutzt) und 0xD3 (Battle-Game-Rangliste). **Kein Commit/Push.**
-(bc) Offene Lichtluecken und parallele Aufgaben (2026-10-20). (1) Bildschirm-Clipping der Punktlichter (light.c:789-808)
-portiert: ohne Ereigniskamera und mit cutp[cam.ncut].cam[0].flg 0x10 faellt ein Punktlicht ausserhalb des 640x480-Fensters
-mit Rand 2*(u8)ci->frame (CAM_WRK Byte 2, SceneCamera::key_frame) weg, ohne einen der drei Plaetze zu belegen; 14 Schnitte in
-11 Raeumen tragen das Flag. Das Monitorbild zeichnet unter gm_flg 0x80 (screen.c:947) mit dem Einzellicht und ist nicht
-betroffen. Linktod lkflg 1..4/default war schon in control_lights, die Ledgerzeile sagte es nicht. Test light_clip
-(RM_0000-Bytes, eigene Projektionsrechnung), fuenf Gegenproben rot. (2) bhAllEasyDrawModel (game.c:391-403) ruft kein
-bhDrawEneObject: der Monitorpass laesst en_obj-Works (flg 0x80000000) jetzt weg; kein Datenfall (en_obj nur RM_7120/9290,
-Monitore nur RM_1050/7030), kein Test. (3) Parallel durch Unteragenten, nachgeprueft: bhEff199 (effsub0.c:3478) als
-native/effect_eff199.cpp mit Test effect_eff199, partial (Ps2_ptcl_spr_flag, Steuerpass-Zeichnung); in Daten/Skripten
-unerreichbar. Effekt 298 bhEff_E00_AcidGenerator ist seit 2026-10-16 portiert — der Hinweis "bhEff298 unportiert" oben
-(EN19-Eintrag) ist veraltet, ebenso "EN14-Luecken": Inventur ergab alle EN14-Dienste gebunden, EN14 nur in RM_5810/9302
-(Typ 0), neuer Test enemy_en14_world; dessen erste Erwartungen widersprachen dem Original (en14.c:297 loescht flg 0x10,
-bhSetMotion laeuft im selben Pass) und wurden korrigiert. (4) bhDrawObject/bhDrawObjItm mdflg 0x10 (ETTY flg 0x80000000,
-objitm.c:164/:228) portiert: unter st_flg 0x2 zeichnen diese Objekte/Items ohne Nebel (:664-676/:565-567; nicht ob_spc);
-23 Objekte und 5 Items in 23 Raeumen tragen das Bit (u. a. RM_0090 Objekt 20, RM_0000 Item 0). mdflg 0x8 njControl3D(0x2500)
-ist wirkungslos (ps2_NinjaCnk.c:205-215 liest 0x2000/0x400 nicht). Test object_cut_restriction Abschnitt 3, zwei Gegenproben
-rot. [Logs](build/validation/light-clip-20261020/), [eff199](build/validation/eff199-20261020/),
-[Nebel](build/validation/object-fog-20261020/). **Kein Commit/Push.**
+**2026-10-18 afternoon (subagents, every change re-read against the original, dev app via `./build.sh --test`, CTest 127/127):**
+(1) Save screen "white overlay": `draw_typewriter` did not clear the canvas; the original clears every frame to black
+(bup_00.c:299-304, ps2_dummy.c:89). The room image stayed in the black-keyed holes of the background and the window
+0x18808080 blended again frame by frame (gray ~118 instead of 12). Invisible headless (only the last frame drawn). Test
+`typewriter_slot_list_draw` (counter-check red). (2) `bhChangeClipVolume`/`...RM` ported (view_clip.cpp, renderer strip rule);
+measured byte-identical images in RM_0070/0090/0150/0020, only no longer discarded packets outside the image. Open: ClipDispW of the
+negative rows (only DoubleMain reader), door/game over camera keep 320/240. Tests `view_clip`, `native_ground_world` (counter-check red).
+(3) RM_0100 crate jump jolt: dnd sets plp->flr_no before py (player.c:3601); the host took the floor from py and wrote back the
+flag state from the start of the action, so the final frame built the edge wall of the crate and pushed Claire 5.0-5.9 units away.
+Now `stairs.floor` during stair actions and re-reading the flags before every tick. `tests/native/box_jump_landing_check.py`
+(all three sides 0.000, counter-check red 5.045), `tools/verify_stairs.py` (RM_2050 expectation corrected), verify_push green.
+(4) GS PRIM from bit 47 (ELF-verified): blood pool now a triangle strip instead of eight rectangles, particle sprites as GS sprites, n/2 sprites
+per njPtclDrawSprite and width /1.174 (ps2_NinjaPtcl.c:100-163). Tests `original_effect_particles`, `effect_room_sprites` (red against HEAD).
+On the installed app binary: title start, RM_1000 entry, crate jump, stairs, pushing.
+Punch-through side finding followed up: bhEff023 mdlver 0 now draws without blending with alpha hole test and depth;
+RGB filtering independent of alpha, also in the optional host mip filter. Counter-checks for list, coverage and RGB red,
+CTest 129/129 green; crate jump and title/room entry now regularly in CTest. `Start.command` title/New Game
+and LOAD GAME checked on the app binary. Details and limits: [check report](archived/work/2026-10-18-punch-through.md).
+Integrated afterwards (subagents, every diff re-read against the original, own counter-check per port red, CTest 139/139,
+dev app, `Start.command` title/New Game, LOAD GAME, crate jump, stairs, pushing on the app binary):
+(a) bhChangeBackColor/Evt (`native/back_color.*`, 132 table rows, EOR timer sync.c:114, 0xab immediately into rom->bak_col;
+ts_flg now starts with 0x20000 as in system.c:453). RM_7070 camera 3: table color 0x205070 through the grating. partial: global
+njSetBackColor of other tasks, target alpha/SSAA. (b) Fog color without R/B swap (canvas is ARGB; old AABBGGRR comments wrong;
+`ui.cpp` direct_message still has the same swap, open). (c) UV scrolls bhObj010, bhEff120 (ELF: -floor(az/32)),
+bhEffectSensyaSet 0x96 and OT CLAMP only on the verified bhPutModel route (tank tread tex 9). (d) bhEff110 full-screen monitor and
+bhEff133 thermometer (RM_1050/4030/8050, RM_7050). (e) Depth GEQUAL: a later surface of equal depth wins, edge rule for all,
+material alpha 0 discarded; 10-room comparison only edge pixels or +-1 respectively. (f) bhEff138/bhDraw138 oil puzzle RM_8001 (test `native_oil_puzzle_world`, counter-check ev64 red; bhDraw138 partial: shared OT
+of other drawers). (g) pt_flg draw gates room 0x20/objects 0x4/items 0x8/linked>=1210 0x1 (game.c:328, objitm.c:503/550/639), test
+`native_presentation_gates`. (h) UI color channels (direct_message, FE01..05 message.c:161/401), test `ui_color_channels`.
+(i) one owner for Db.clear across door/game over/map/typewriter/movie/terminal/status (back_color.*). CTest 142/142,
+dev app, verify_doors green. Open: water surface bhDrawGeneralPurposeWater without draw path, bhEff112 (mirror pass runs),
+filtered alpha test quantization, GS 16-bit Z.
+Addendum: (j) mirror pass/bhEff112/njMirror (RM_2040, test `mirror_pass`; open: mirrored bhDrawEffect game.c:91).
+(k) Crate equipment slot ArmsSet center 9 (sub1.c:4975-5105, test `item_box_equipment_slot`). (l) Muzzle light type 100/101
+(light.c:673-699, test `native_lighter_effect`). (m) EN01 blood pool bhSetBloodPoolLnk (en01.c:9990/9994/10122/10149, en01b.c:763,
+tests `enemy_en01_blood_pool`, `zombie_blood_pool`). (n) GetItem screen without status pad (sub1.c:3447-3460, test `pickup_gap_pad`).
+RM_0050 sliding back after the zombie event is original behavior (event.c:12034 Common 7 without spx, player.c:2127).
+(o) Ponytail as obwp[2] on the link work (event.c:2177/2501, objitm.c:310), test `player_hair_link`. (p) RM_3060 water SE ListNo char
+(types.h:1754), test `rm3060_water_action_se`. (q) RM_1140 EOR after the event pass, test `rm1140_lever_back_color`. (r) Combat wall capsule
+bhCheckC2WallN (pwksub.c:2172), test `combat_target_rules`; hits/auto-aim otherwise original. (s) EN26 Anatomist zombie RM_0110
+(en26.c), test `rm0110_event_zombie`. (t) Muzzle flash call clip (ps2_NaDraw.c:327), blood pool lkwkp/pt_flg gate (effsub3.c:389).
+(u) bhDrawGeneralPurposeWater (objitm.c:471, test `object_water_wave`). (v) bhEff362/370/371-373 (effsub4.c). (w) Light types 7-12
+and gm_flg 0x80 return (light.c:367/486-657, test `light_types_7_12`). (x) bhStartDoorDemo fade and door task modes
+(room.c:949-1009, system.c:939-1061, verify_doors). (y) Mirrored bhDrawEffect (game.c:87/427, effect.c:1225, test `mirror_pass`).
+(z) Frame order (game.c:48-59/289-296): "camera before player" was a false finding (tick_camera = bhCheckCut, cut.c:12). Ported: enemies ->
+player -> effect/ObjItm/light, head/bhCalcModel only with sp_flg 0x1 (player.c:1365), bhCheckCut after drawing, camera snapshot
+game.c:58 for drawing/effects. Tests player_head_pass_gate, effect_after_player, event_camera_first_frame, camera_control_order.
+(aa) bhSetDispObj player (op 0x20): plp->mdflg 0x1 now as player_model_hidden_ (model only, does not block the pass) instead of player_hidden;
+pl_sleep_cnt special case moved from op 0x20 to bhInitModelSet (op 0x24). Test event_lifecycle_control_release (counter-check red).
+(ab) bhInitCamSet (0x5b) now calls bhControlLight (event.c:4745): light pass split out as RoomWorld::control_lights(), in
+tick_after_player (game.c:59) and in the 0x5b branch of the runtime after control_camera. Test light_types_7_12 (RM_1020 type 9: pass + extra call
+= 2 steps; counter-check red "outside the pass"). (ac) Light link death light.c:719-748: for each light with flg 0x1|0x2 the target work
+(lkflg 1 plp, 2 ene, 3 obwp, 4 itwp; 5 eff without owner, >5 lkflg/lkno = 0) is checked for flg 0x1, otherwise flg &= ~0x3 permanently. Finding:
+the work flg bit 0x1 comes from the ETTY flg and has no writer in the original for ene/obwp/itwp/plp; all 33 linked lights of the
+room data (lk 2: 19, lk 3: 14) point to active works, the rule is unreachable with game data and only verified via the check seam
+set_work_flags (test light_types_7_12 RM_3230 light 5 -> obwp[7], counter-check red "link death") (ad) water light draw_tp 0 (RM_9110) verified without code change: bhDrawGeneralPurposeWater ->
+bhDrawSpObject sets light 1 = lgtp[aspd] itself (objitm.c:483/696-703), point lights bhSetHalfLight 0.5 (game.c:352), amb_chr (game.c:344);
+bhDrawEnemy/bhPutModel(plp)/bhDrawEffect write no EasyMulti colors - identical to the native ob_spc glint set. CTest 158/158, counter-check per fix
+red/green, dev app room entry/lever/RM_0110/blood pool/crate/LOAD GAME/door green.
+(ae) Mirror bhDrawMdfEffect (game.c:427 -> effect.c:866/1076, second modifier stage under cam.mtx*njMirror): SceneShadow::mirror,
+renderer stage between mirror room (phase 2) and mirror effects (phase 3) with mirror_view; world.cpp marks the modifiers created in the mirror call
+instead of discarding them. Finding: the pass choice remains the screen sign of njCnkCoP3 (ps2_NinjaCnk.c:1684,
+lCnkModClipFace), game.c:425 njControl3D(0x100) no longer carries 0x10000 before the mirror bhDrawEffect -> a mirrored closed
+volume swaps front/back faces and yields the same (empty) mask as a pre-mirrored volume in the normal pass (original
+semantics, no correction invented). Test shadow_modifier_pixels: equality mirror modifier == pre-mirrored volume, M*M*T visible
+only via mirror_view, mirror room receives / mirror effects afterwards, rejection without njMirror matrix; three counter-checks red (view instead of
+mirror_view, stage before the mirror room, stage after the mirror effects). CTest 158/158.
+(af) bhDraw134 second run in the mirror closed without code change: the mirror pass depends on effect 112 (room tables only RM_2040/9230,
+bhEff112 only stage 2), bhDraw134 on effect 134 (only RM_4020/8020); no room carries both, scripts spawn neither 112 nor 134
+(bhHEffectSet2/bhSetEffect of all 205 room disassemblies). The ef_fnc second run (effect.c:929 under game.c:427) is thus unreachable for 134.
+Open: image acceptance water rooms/head burst/mirror room RM_2040 (visual check in game).
+(ag) Room scan 205/205 with --enemy-ai on (600 frames, dev binary 2026-10-19): 0 runtime errors. The older scan without enemy AI reported 94
+unbindable commands (Common 24/25/34 on uninitialized works) - artifact of the AI switch-off, 0 with AI. Remaining reports: bhEffModeSet
+0x91 on texture holders (RM_7140, now bound, test event_lifecycle, counter-check red); 0x23 behind rom->etcp (RM_3100/3140/7030, original UB);
+bhSetMotion frm_no 9226 on a 2-frame room motion (RM_3120/3220, hidden enemy 2, original UB, ledger); bhObj005 neighbor cell (12 rooms, UB);
+unported: bhEff_Sub350 (RM_1120/5580), bhEff301 (RM_5810/9302), bhEne06 (RM_6030), bhEne22 (RM_7100), plp mnwPb[mtn_no] (RM_7250).
+(ah) bhEff_Sub350/351 ported (poison spit of the EN01 poison zombies, en01.c:11190 bhEne01_PoisonEffect; effsub4.c:319/538): trajectory, wait time,
+floor impact (bhCollisionCheckLine2 0x400, position +0.5), player hit against plp->watr (damage 10, mode0 2/mode2 1/mode3 0, flg 0x4, mode1 from
+bhDGCdirCheck) with three 351 at plp->djnt_no (new effect hook player_hit_check_parts = zonzon.c:1376 bhEne_HitCheckParts on the player tree),
+SE 8961 via bhEne01_SePlay(lkwkp) with flg 0x10000 gate, splash 351 (wait time, unlink, fade out, 14 frames). Before, the spit did
+nothing natively (gap 'bhEff350'). Test effect_eff350 (counter-checks red), headless RM_1120/5580 with enemy AI without gap, 350/351 alive.
+(ai) bhEff301 ported (blood stain from zonzon1.c:301 bhEne_SetBloodstain, four times per enemy hit; effsub3.c:404-808): scatter/ray,
+floor (case 4-6), wall (8-10), type 6 set (16-17), water (12-14, bhCheckWater with h via new service set_effect_water_area), lens
+(bhCheckCamWall2D effsub3.c:1611 against cam.mtx, case 24/25 as ef_trs2d, gm_flg 0x20 and cam.flg 0x10 = ci->flg 0x200), ATR flg 0x10,
+sys->bl_ct staggering, gm_flg 0x2000000. EffectContext now carries cam.mtx (camera_view_matrix) and cam.flg 0x10. Previously natively
+no blood stains appeared on walls/floor (gap 'bhEff301'). Test effect_eff301 (counter-checks red), headless RM_5810/9302 with enemy AI without
+gap. CTest 160/160, dev app via `./build.sh --test`. Remaining from the AI scan: bhEne06 (RM_6030), bhEne22 (RM_7100), plp mnwPb[mtn_no]
+(RM_7250). **No commit/push.**
+(aj) bhEne22 ported (Albinoid adult, RM_7100; native/enemies/en22.c, jump[22], services RECVX_EN22_SERVICES): init/brain/MV00-06/DG/DD,
+player damage, collision, water effects, electric shock (354), spark attack mtn 9 with bhEne22_ChgDengekiColor/GetDengekiColorAddr on the
+writable streams mdl[1..6].objP[1], floor light 353, lightning models 364 and rom->lgtp[2] (SetLight/CtrLight, Light.ct1). New as well
+bhEff_Sub353/354/364 (effsub4.c:837/958/1774; 354 as bhEff_3DSpriteDraw billboard with enemy texture) and RoomWorld::water_splash2
+(pwksub.c:2572, now also bound for EN01). **Open:** bhEff_ModelDraw (effsub4.c:3306) does not yet draw the 364 lightning models
+(njCnkSimpleMultiDrawModel color path without host path, named gap in the draw pass). Test enemy_en22_world (five counter-checks red),
+headless RM_7100 with enemy AI without a new gap, CTest 161/161, dev app via `./build.sh --test`. **No commit/push.**
+(ak) bhEne06 ported (moth, RM_6030; native/enemies/en06.c, jump[6], fragments bhEne06s on jump[31] via SetCallFunc, hidden
+leader for the player grab): flight, leaning on walls, grab with player motion 20 from the moth library, moth egg (id 27 work + plp->stflg
+mark), hit/crash/shredding with twelve falling fragments on the owP matrices of the moth. New bhEff_E06_Rinpun (260) with
+particle drawing from mdl[1].texP. Test enemy_en06_world runs via the real room script (event 16 releases moth 3 at flag 4/0),
+six counter-checks red. **Open:** (1) dust player contact: the original averages with never-set FPU registers $f20-$f22 (ELF verified),
+named gap; (2) EN27 (moth egg) is unbound on the world side and reports its services; bhCheckMothEgg is missing in the player owner.
+CTest 162/162, dev app via `./build.sh --test`, title start checked. **No commit/push.**
+(al) RM_7250 spider grab: the cause was a second writer of plp->mnwP — the EN03 leader hooks in the spider library via a
+service and afterwards writes back its old player snapshot, which set mnwP back to mnwPb (grab motion 62/63 was missing
+there). enemy_player_set now adopts the library fields only if the view changed them itself. Check rm7250_spider_grab.
+(am) EN27 moth egg attached: egg on plp->mdl[6]/[7] with player motions 93..97, root at player joint 3 (new lk_player for
+lkwkp = plp, gates read plp->stflg), bhCheckMothEgg before the first enemy pass, plp->stflg & 0x78280000 across the room change (marks
+were lost so far), player row without room texture fallback. Test enemy_en27_world (init, drawing, hatching, grab, damage/poison,
+release, fall), counter-checks red; the EN06 test now checks the laid egg without a gap. Fresh room scan with enemy AI (205 rooms):
+only named original undefined behaviors remain (bhObj005, bhCheckRoute, bhSetMotion channels/RM_3120 Common 34 frm_no 0x240A,
+en02 ang, ef_tn before render cut). CTest 164/164. **No commit/push.**
+(an) bhEff_ModelDraw (effsub4.c:3306) drawn for the albinoid lightning models (364): njCnkSimpleMultiDrawModel is the Ninja mode
+of the enemy drawing (MdlPut.c:182), the single lights set before (mode 2) have no effect; light category 4 like bhEff30cDrw,
+material colors from the stream written by bhEne22_ChgDengekiColor. EN22 test checks image and color (two counter-checks red).
+Mirror pass remains a named gap. CTest 164/164. **No commit/push.**
+(ao) Five effect procedures already requested natively but unported are now ported: 356 zombie neck bleeding after head burst (callbacks in
+EN01 from the effect pass; EnemyCallbackFrame binds the T3 supplement and EN01 context for that), 363 flesh chunks of the leg/worm explosion,
+252 flame at the enemy joint (bhEne_SetFireEffect), 259 Hunter blood, 26 screen streaks on explosion death. Tests effect_en01_exp,
+effect_e00_fire (counter-checks red). progression_test tracked 26 as unbound; guard now on 6 (bhEff006, really unported).
+Next: EN17 (Steve) has unbound effect services (SetPtcl 365/366, axe afterimage 364, lgtp[2], SetBlood2(plp)). CTest 166/166.
+**No commit/push.**
+(ap) EN17 (Monster Steve): all previously unbound effect services attached. Newly ported are the spawners bhEff_SetPtcl/SetPtcl1
+(effsub4.c:19/35) as well as bhEff_SetPtcl2/SetPtcl2V (:117/:199) as RoomWorld::set_ptcl/set_ptcl1/set_ptcl2/set_ptcl2v with their
+bhEff_AllocOwork helper work sets (EffectPtcl365Work/EffectPtcl366Work) and the procedures bhEff_Sub365 (:1812) and bhEff_Sub366
+(:1884) including the draw part bhEff_LineDraw (:3090, untextured triangles with their own corner colors). Also bound are
+bhEne17_AfterimageAxEffect (effect 364, axe afterimage on epw->mdl[5]), bhEne17_SetLight (rom->lgtp[2]), bhEne_SetBlood2(plp) and
+mlwP->objP[0].pos[0/2] = 0 on the enemy as well as on the player tree. For the afterimage bhEff_ModelDraw now has its flr_no branch:
+npSetAllMatColor (njplus.c:1375) colors the materials of the drawn object, so that the seven afterimages of a frame keep their
+own alpha levels; for this the port colors a copy of the model stream instead of the shared stream (equivalent, because
+only this effect draws mdl[5] and every drawer colors it itself beforehand). Three deviations in native/enemies/en17.c corrected along the way:
+plp->djnt_no = 2 with plp->dpx..dpz = cap.c1 on hit and plp->djnt_no = 3 before bhEne_SetBlood2 were missing entirely (en17.c:1594/1653),
+bhEne_SetVibration(1) is StartVibrationEx(1, 0xA) and stood as (1, 11), and a duplicate assignment of cap.c1 with the wrong index
+is removed. **The display of effect 365 remains open and named:** bhEff_PtclSpriteDraw passes n = 1 to njPtclDrawSprite, and
+Ps2AddPrim3D emits exactly n vertices per GIF tag with a newly set PRIM — a GS sprite needs two. The set therefore runs,
+but puts no surface into the image; without hardware evidence nothing is invented here. Test enemy_en17_world extended by particles, afterimage, light,
+player blood, joint and vibration; the previously allowed gap names bhEff369/370/301 have been dropped without replacement,
+because these procedures have long been ported and no gap occurs at all on the paths run — the test now allows
+not a single one. Fourteen counter-checks red. 205/205 rooms load, the enemy AI sweep over all rooms still reports only the six known
+original undefined behaviors. CTest 166/166. **No commit/push.**
+(aq) Magazine on reload (bhEff007) ported and two errors in the draw path sys->ef_pol fixed. bhEff007 (effsub1.c:2335) was
+not ported, although the combat core requests it on every reload (pwksub.c:3372 bhSetMagazine, natively cb_set_magazine): the set
+was never created and the port reported bhEff007. Now the magazine falls from the wrist, bounces with CallPlayerWeaponSeEx(259),
+rotates while falling and comes to rest half a unit lower; in water it slows down and sets splash 15.
+The magazine IN the weapon now also has its owner: bhEff007 writes, with mdlver != 0, via RoomWorld to the
+weapon asset owner CombatController; WeaponAsset::append only omits the right node model 2, not children
+or the left model. player.c:6075 clears the flag at act_ct1 ONLY for weapon 12; the existing clear request
+is consumed once. Weapon 13 stays hidden as in the original. A combat abort keeps the flag, a new
+weapon asset resets it (dread.c:200-210). Test effect_magazine with real reload paths 12/13 and diagnostically
+empty inventory, draw counts, abort/reload; six further counter-checks red. Material writers of the
+hidden node model are also dropped, positions of the remaining writers stay correct.
+[Check report](build/validation/magazine-owner-20261019/README.md). Finally ./build.sh --test: 169/169 green,
+dev app backed up/updated/signed; Start.command title and reload checked (motion 116, effect 7, no
+blocked commands/open world bindings), arm64/signature/policy green. Runtime images viewed, but camera
+behind the figure: no separate visual acceptance of the magazine change. No commit/push.
+On attaching, two deviations in bhDrawPolEffect (effect.c:949) stood out, both verified via disassembly: (1) the texture is
+sys->ef_tlist.textures[tex_id + ani_ct] WITHOUT sys->ef_tn (ELF 0x0021D3F8 against 0x0021DEBC in bhDrawTrsEffect3D) — the port looked up the
+category, which made the cartridge case carry the shared image 19 instead of 5 and the marking 25 instead of 8; (2) only
+objP[op->mdlver] is drawn, the port drew the whole efm[0] and thus both case objects at once. Both are corrected, the four
+model blocks from bhInitEffect (efm[0]/[1]/[7]/[13]) are available individually for that. New test effect_magazine, plus the block
+pol_effect_draw in effect_room_sprites; eleven counter-checks red. In addition: the gap list in the EN17 test allowed bhEff369/370/301,
+although these procedures are ported and no gap occurs at all on the paths run — the test now allows none,
+ledger and entry (ap) are corrected accordingly. 205/205 rooms load, enemy AI sweep unchanged at the six known
+original undefined behaviors. CTest 167/167. **No commit/push.**
+(ar) The two sand script commands of the Gulp Worm ported: 0x98 bhEffectSandSet (event.c:4110) and 0xC3
+bhEffectSandSetMatsumoto (:8577) were missing in the event VM, although their targets bhEne02_SetSandEffect and
+bhEne02_SetSandEffectEV already existed natively (the EN02 row named both as open). 0x98 is 12 bytes long:
+sign bits for three u16 amounts in hundredths, a position kind (world position or offset, which only adds x and z to the
+enemy position) and a type byte, after which the script pointer advances by two — checked via disassembly 0x0015CAF0,
+because a wrong length would shift the whole script stream. 0xC3 takes the work slot of
+sys->ene, not the room index. Because the EN02 services are only bound natively during the enemy pass, the
+script pass queues the fully resolved request and the enemy pass of the same frame executes it before the enemies —
+the same order as in the original. Unknown targets stay unbound instead of guessed. With that 197 of 223
+script commands are bound (previously 195). Test enemy_en02_world extended by three blocks; seven counter-checks red.
+205/205 rooms load, enemy AI sweep unchanged. CTest 167/167. **No commit/push.**
+(as) Look commands of the player head ported and the situation for the remaining script commands clarified. 0x40
+bhLookGsetPlStart (event.c:3488) and 0x41 bhLookGsetPlStop (:3539) write the head state plp->exp1, which the port
+already carries with RECVX_HEAD_STATE: start sets the two look flags, picks the target kind stored point and
+enters the point from the script, stop only clears the two flags. With that 199 of 223 script commands are
+bound. Important finding along the way: an unknown script command throws in the event VM and stops the room, so the
+remaining seven are possible hard stops as soon as a script branch reaches them — in 205 rooms x 600
+frames of init run none is reached. Their lengths and effects are now recorded in the ledger row
+event.c:bhScenarioJmpT:offen, so that they can be followed up individually; the most expensive is 0x1E
+bhAdxTimeCk, a condition that needs the playback time of an ADX stream and has no owner for it natively.
+Also checked: of the 17 commands reported as 'only consumed', all are in truth bound to the room owner
+(the object bindings via a table that the counter does not see). New world block in the test player_head
+(which now gets the data directory); seven counter-checks red. 205/205 rooms load, enemy AI sweep unchanged.
+CTest 167/167. **No commit/push.**
+(at) Six of the seven remaining script commands no longer stop the room, and three previously ineffective ones are
+bound. Their effect has no owner
+natively (player as child of an object binding, the two hand object works, sys->efid, the event task works,
+the debug camera, the Battle Game ranking), but their length is fixed in the original: 0x6F 12, 0x82 4, 0x97 8,
+0xAA 10, 0xAF 4, 0xD3 2 bytes. They are now skipped exactly that far and reported as an open binding, instead of
+ending the run with `unimplemented opcode`. What remains is 0x1E bhAdxTimeCk as the only hard stop — that is
+a condition that delivers the playback time of an ADX stream to an IF; skipping it would mean inventing
+the branch. New test event_opcode_lengths: it puts each of the ten commands handled in this state at the beginning
+of an event script, places a bhSet behind it and checks that exactly this bhSet is executed — a wrong
+length would shift the whole stream behind it. Eight counter-checks with wrong length red, plus a counter-check of the
+fixture itself (a bhSet shifted by one byte must not run). Also bound: 0x3A bhMutekiSetPl (player invulnerable, plp->flg 0x4 with mirroring
+to player_flags), 0x2E bhMotionPauseSetPly (sp_flg 0x1, the gate of the player pass) and 0xA1 bhTrapDamageSet
+(plp->stflg 0x1000, set with the value 0 in the original). All three only write flag bits that the event VM itself
+carries — so far they were read and handed to the room owner, which did not bind them, so they went nowhere.
+Plus 0x46 bhSetNextRoomBgm and 0x47 bhSetNextRoomBgSe, which write the music and room sound presets for the next room. Along the way a finding that refutes my assumption from the last report: the target structure NextSoundInfo (sdfunc.c:90) has no reader at all in the original — across all 154 sources it appears only in these two commands and in its definition. So they have no audible effect in the original either; therefore no wrong music can play after a door. The port still carries the state, so that the commands are bound and a later reader finds the right values. With that 204 of 223 script commands are bound. 205/205 rooms load, 0 blocked commands, enemy AI sweep
+unchanged. CTest 168/168. **No commit/push.**
+(au) No script command stops a room anymore. 0x1E bhAdxTimeCk (event.c:1523) was the last one without a native case.
+It is a condition on the playback time of an ADX stream; modes 0..3 return 0 IF the condition holds,
+modes 4 and 5 return 1, and a mode above 5 returns the raw time (no default in the original). The
+time source is new: AudioMixer::adx_play_time converts the mixer's channel position with the same formula as
+adxwrap.c:650 (SampleCount / SamplingRate * 100). Channel::clip_rate survives the natural clip end, so that a
+stream that ran to the end keeps its end time — otherwise a wait loop in the script hangs on a time of 0.
+SIDE FINDING, found myself while re-reading: the execution loop of the event VM continued on return value == 1,
+but the original on EVERY value other than 0 (event.c:13046). Observable for commands that can return something other
+than 0/1 — bhAdxTimeCk with mode above 5 and bhCkFlg with `mode ^ flag`. Corrected; CTest still
+green, so no shipped script was affected so far. Test event_opcode_lengths now covers sixteen commands;
+six further counter-checks red. With that: 205 of 223 script commands bound, 18 skipped with correct length
+and reported, none unknown anymore. 205/205 rooms load, 0 blocked commands, enemy AI sweep unchanged.
+CTest 168/168. **No commit/push.**
+(av) Hide masks of the event camera at the end of the track corrected. cut.c:1803 bhSetEventHideObjLgt writes the
+object and light mask of a key ONCE; it stays until the next call. It is called when the
+camera is set, in the init pass and after every key change — NOT at the key change that leads into the final hold
+(cut.c:2124 breaks off there with `break` before the call). In the hold phase the camera therefore stands on the last
+key, but the masks still on the second to last. The port read the masks per frame from the current key and showed at the end
+of every cutscene the occlusion of the LAST key. RoomWorld::event_camera_mask_key_ now holds the key
+with which the original last wrote them. Own scan over all room data: 383 of 1362 ending
+camera tracks in 82 rooms have different masks there; in RM_0000 track 33 the second to last key hides a whole
+object group, the last one nothing — these objects became visible at the end of the sequence. New test event_camera_hide
+(RM_0000 track 33); three counter-checks red. The finding comes from one of the five parallel investigations and was
+re-checked line by line in the original and with an own room data scan before implementation.
+The interaction with bhControlLight is also closed: set_event_camera_masks writes the light mask
+once into Light::flags bit 0x2 at the original call sites; light pass and drawing read this state.
+Type 100/101 stay off after going out until the next mask call, without clock/mode reset; type 13
+and link death lose active bit 0x1, which the mask does not restore (light.c:669/:680/:696/:749).
+Extended test event_camera_hide: diagnostically changed light fields/key masks in RM_0000, four types,
+light contribution on the room triangle, last light pass, repetition, key change, final hold and FixedCut.
+Three further counter-checks red; [check logs](build/validation/event-camera-light-20261019/).
+Earlier state: 205/205 rooms load, 0 blocked commands, enemy AI sweep unchanged, CTest 169/169.
+Currently CTest 169/169, policy/ledger green; dev app backed up, updated and signed via ./build.sh --test.
+Start.command checked: title and RM_0000 with enemy AI 60 frames each headless, exit 0, no blocked commands/
+open world bindings; arm64/signature checked. [Report](build/validation/event-camera-light-20261019/README.md).
+No visual acceptance. **No commit/push.**
+(aw) EN01 njRandom sign adopted into main from the worktree session "Check EN01 njRandom sign" and
+re-checked: macros.h:105 with RAND_MAX+1 = -2^31 and disassembly 0x1882C8/0x1885E8 (rand -> negu -> cvt.s.w ->
+div.s by 0xCF000000) yield a POSITIVE value in [0,1]; en01_core.c computed it negative, so size and
+speed of the ExpLeg/ExpWorm fragments were below the original range. All other enemy ports
+were already positive. New test enemy_en01_exp_effect (428 checks), counter-check with old expression red.
+The worktree itself is discarded. **No commit/push.**
+(ax) 0xAF bhPlyHandChange (event.c:7378) bound instead of only reported: two room objects hang on the hands
+(lkono 9/13, flg 0x80, stflg 0x1000000) and the weapon models obwp[0]/[1] disappear from the
+draw list via mdflg 0x1 (new owner CombatController, reset by gameover.c:304 and when loading a weapon).
+Putting down leaves the object at the last hand position. Data: RM_9110, RM_9140, RM_9260. Open and named: the
+parking of a drawn lighter, because plp->wpnr_no is natively not separated from the inventory slot. Test
+player_hand_change with real RM_9110 bytes, eight counter-checks red. **No commit/push.**
+(ay) Weapon in cutscenes and during enemy grabs corrected: under script control the port drew the
+model of weapon 0 (empty hands) instead of the equipped weapon — substitute logic from 2026-10-05, already noted back then
+without original evidence. The original changes the weapon model only via bhReadWeaponData (equip,
+bhArmsItemChange, game start) and draws it under pt_flg 0x1 (objitm.c:364/:648); this gate was also missing
+natively. Test player_hand_change extended, two counter-checks red. Open: 0x27 bhArmsItemChange natively
+mapped wrongly (clears the inventory slot), needs its own plp->wpnr_no owner. **No commit/push.**
+(az) Drawn weapon plp->wpnr_no separated from the equipped slot pip[0] (Inventory::wpnr_no). Previously
+the port derived the weapon from the slot. Now WeaponSet/GetItem/ItemBoxChange write both, bhArmsItemSet 0xC1
+and bhSv 22 only the slot, bhArmsItemChange 0x27 / bhSv 18 / 0xAF only the weapon; player change and save game
+carry it via ply_wno. Fixed with that: 0x27 with 0 cleared the inventory slot, other values had no effect; and
+the lighter parking from 0xAF is ported (0xAF now complete). Limit: bhSv 18 loads no new
+weapon model in the original, natively it does (never reached in the room scan). Four tests set only pip[0] in their setup
+and are supplemented or corrected to the original respectively. CTest 172/172, five weapon-relevant runtime checks
+green, eight counter-checks red. [Logs](build/validation/wpnr-no-20261020/). **No commit/push.**
+(ba) 0x97 bhEffectKokuenSet corrected and 0xAA bhEffUVSet2 ported. 0x97 was unchecked in the working tree and
+set the smoke at the world position of the task work; the original takes the local position of objP[0]. 0xAA writes
+UVs as 28-byte H vertices to op->pv; for effects without H vertices this reaches into tv. The only
+data location RM_9180 (full-screen filter bhEffFil): there the original thereby changes tv[1].u - now natively as well.
+Test event_kokuen, six counter-checks red. Still skipped with that: 0x6F, 0x82, 0xD3. **No commit/push.**
+(bb) 0x6F bhObjLinkSetObjPly ported: the script hangs the player onto an object node, bhCalcModel(plp)
+then builds her root from obwp[lkwkp].owP[lkono] * T(lox,loy,loz) * RXYZ(ax,ay,az) (MdlPut.c:242). Natively
+PlayerObjectLink + PlayerAsset::sample_root in RoomWorld::sample_player. Only data locations RM_4011 (object 6,
+node 3, script-controlled). Open and named: binding in the free player pass (not present in the data).
+Test player_object_link with real bytes, six counter-checks red. Only 0x82 (debug camera, unused in
+the data) and 0xD3 (Battle Game ranking) remain skipped. **No commit/push.**
+(bc) Open light gaps and parallel tasks (2026-10-20). (1) Screen clipping of the point lights (light.c:789-808)
+ported: without an event camera and with cutp[cam.ncut].cam[0].flg 0x10 a point light outside the 640x480 window
+with margin 2*(u8)ci->frame (CAM_WRK byte 2, SceneCamera::key_frame) is dropped without occupying one of the three slots; 14 cuts in
+11 rooms carry the flag. The monitor image draws under gm_flg 0x80 (screen.c:947) with the single light and is not
+affected. Link death lkflg 1..4/default was already in control_lights, the ledger row did not say so. Test light_clip
+(RM_0000 bytes, own projection computation), five counter-checks red. (2) bhAllEasyDrawModel (game.c:391-403) calls no
+bhDrawEneObject: the monitor pass now leaves out en_obj works (flg 0x80000000); no data case (en_obj only RM_7120/9290,
+monitors only RM_1050/7030), no test. (3) In parallel by subagents, re-checked: bhEff199 (effsub0.c:3478) as
+native/effect_eff199.cpp with test effect_eff199, partial (Ps2_ptcl_spr_flag, control pass drawing); unreachable in data/scripts.
+Effect 298 bhEff_E00_AcidGenerator has been ported since 2026-10-16 — the note "bhEff298 unported" above
+(EN19 entry) is stale, as is "EN14 gaps": inventory showed all EN14 services bound, EN14 only in RM_5810/9302
+(type 0), new test enemy_en14_world; its first expectations contradicted the original (en14.c:297 clears flg 0x10,
+bhSetMotion runs in the same pass) and were corrected. (4) bhDrawObject/bhDrawObjItm mdflg 0x10 (ETTY flg 0x80000000,
+objitm.c:164/:228) ported: under st_flg 0x2 these objects/items draw without fog (:664-676/:565-567; not ob_spc);
+23 objects and 5 items in 23 rooms carry the bit (among others RM_0090 object 20, RM_0000 item 0). mdflg 0x8 njControl3D(0x2500)
+has no effect (ps2_NinjaCnk.c:205-215 does not read 0x2000/0x400). Test object_cut_restriction section 3, two counter-checks
+red. [Logs](build/validation/light-clip-20261020/), [eff199](build/validation/eff199-20261020/),
+[Fog](build/validation/object-fog-20261020/). **No commit/push.**
 
-(bd) Waffenmodell-Ladeauftrag von plp->wpnr_no getrennt (2026-10-20): bhSv 18/0xAF aendern nur den
-Spielerwert; nur mn_mode0 3 (WeaponSet/GetItem/ItemBoxChange/0x27) und Spielstart/Spielerwechsel/Laden
-ersetzen das Waffenwerk. Ein 0x27 mit identischer Nummer laedt erneut und nullt mdflg, bhSv 18 nicht.
-ply_wno wird bei bhSv 18/0x27 sofort mitgeschrieben. Test player_weapon_number erweitert, drei Gegenproben
-rot; Zwischenstand CTest 177/177. [Beleg](build/validation/weapon-reload-20261020/). **Kein Commit/Push.**
-(be) Drei Lichtluecken parallel (drei Unteragenten, vom Hauptprozess integriert und nachgeprueft, 2026-10-20). (1) Effekt-
-modelle 364 (Steve-Nachbilder, Albinoid-Blitz) zeichnen jetzt auch im zweiten bhDrawEffect des Spiegelpasses, mit dem mdflg
-des Effekts als Tor; zugleich behoben: sie wurden bisher gar nicht beleuchtet (Lichtlauf endete vor ef_fnc). (2) bhSetEasyDirLight
-Typ 100/101 schreitet im bhControlLight-Aufruf unter gm_flg 0x80 fort; die Zeichenpass-Aufrufe und getrennter Easy-/Simple-Satz
-bleiben benannte Luecke. (3) Lichtlink lkflg 5 auf eff[efid] portiert (in den Raumdaten unbenutzt); Nebeneffekt: bhDrawPolEffect
-zeichnete bei fehlender Elternmatrix mit Einheitsmatrix (Ersatz entfernt, jetzt Luecke). CTest 180/180, 12 Gegenproben rot,
-Starter: Titel, RM_7100/9280/1020/0000 ohne blockierte Befehle und ohne neue Luecken, arm64/Signatur ok. Berichte
-work/{light_effect_link,easy_dir_light,effect_model_mirror}.result.md, Logs build/validation/light-link-easydir-20261020/ und
-build/validation/effect-model-mirror/. Keine Sichtabnahme. **Kein Commit/Push.**
-(bf) Zwei Wellen mit je fuenf Unteragenten (2026-10-20), jede Integration vom Hauptprozess am Original nachgeprueft,
-CTest 188/188, Dev-App ausgeliefert, Titel/RM_0000/0080/0090/2050/3130/5810/7030/9280 ohne blockierte Befehle und ohne neue
-Luecken (RM_7030 hat 3 offene Weltbindungen, am HEAD-Stand gemessen identisch), arm64/Signatur ok. Welle 1: verify_combat-
-Erwartung korrigiert (Steve schiesst in RM_0030 dreimal ueber plp->wpnr_no, fuenf ARMS-Klaenge sind originalgetreu);
-Kopfsuche bhSearchNearEnemy2 aus ene[]/owP[lok_jno]; 15 Effektprozeduren (u. a. 273 Alexia-Schleimfaeden RM_5810/9302 mit
-eigenem Weltest, 357, 398). Welle 2: Skriptbefehle 0x6E bhHEffectSet und 0x4A bhYakkyouSet gebunden; Kamerawackeln (EN17
-nullte ofx/ofz, Raumwechsel liess Wackeln stehen); Item-Licht (Glanztor, Monitor Stufe 7 blau, Licht-1-Nachwirkung);
-Gegnergelenke der Maskenfiguren id 91..99 logisch statt physisch (Effektlinks lkono 28..30, EN16-Treffer, dam[27..30]);
-Koerper-Wandpass mit plp->pxb; Common_controll 10 schreibt kein pxb mehr. RM_0090-Box: keine Regression gefunden
-(17.10./18.10./HEAD bytegleich); belegter Kandidat: Untersuchen und sofort abbrechen laesst die Klappe von Box 5 offen,
-weil Ereignis 19 waehrend seiner 30 Bilder vom Boden-4-Neustart verdraengt wird, sobald st_flg 0x8 faellt - nativ nach
-~19 Bildern; die Haltedauer des Originals ist nicht vermessen (Statustask-Durchlaeufe sub1.c:3103/system.c:599-611 offen).
-Der Deckel wird von keinem Skript geschrieben. Test rm0090_security_box_nodes. Gegenproben build/validation/wave1-20261020/,
-wave2-20261020/. Keine Sichtabnahme. **Kein Commit/Push.**
+(bd) Weapon model load request separated from plp->wpnr_no (2026-10-20): bhSv 18/0xAF only change the
+player value; only mn_mode0 3 (WeaponSet/GetItem/ItemBoxChange/0x27) and game start/player change/load
+replace the weapon work. A 0x27 with an identical number reloads and zeroes mdflg, bhSv 18 does not.
+ply_wno is written along immediately at bhSv 18/0x27. Test player_weapon_number extended, three counter-checks
+red; intermediate state CTest 177/177. [Evidence](build/validation/weapon-reload-20261020/). **No commit/push.**
+(be) Three light gaps in parallel (three subagents, integrated and re-checked by the main process, 2026-10-20). (1) Effect
+models 364 (Steve afterimages, albinoid lightning) now also draw in the second bhDrawEffect of the mirror pass, with the mdflg
+of the effect as the gate; fixed at the same time: they were not lit at all so far (light run ended before ef_fnc). (2) bhSetEasyDirLight
+type 100/101 advances in the bhControlLight call under gm_flg 0x80; the draw pass calls and the separate easy/simple set
+remain a named gap. (3) Light link lkflg 5 onto eff[efid] ported (unused in the room data); side effect: bhDrawPolEffect
+drew with an identity matrix when the parent matrix was missing (substitute removed, now a gap). CTest 180/180, 12 counter-checks red,
+launcher: title, RM_7100/9280/1020/0000 without blocked commands and without new gaps, arm64/signature ok. Reports
+work/{light_effect_link,easy_dir_light,effect_model_mirror}.result.md, logs build/validation/light-link-easydir-20261020/ and
+build/validation/effect-model-mirror/. No visual acceptance. **No commit/push.**
+(bf) Two waves with five subagents each (2026-10-20), each integration re-checked against the original by the main process,
+CTest 188/188, dev app delivered, title/RM_0000/0080/0090/2050/3130/5810/7030/9280 without blocked commands and without new
+gaps (RM_7030 has 3 open world bindings, measured identically on the HEAD state), arm64/signature ok. Wave 1: verify_combat
+expectation corrected (Steve shoots three times in RM_0030 via plp->wpnr_no, five ARMS sounds are faithful to the original);
+head search bhSearchNearEnemy2 from ene[]/owP[lok_jno]; 15 effect procedures (among others 273 Alexia mucus threads RM_5810/9302 with
+its own world test, 357, 398). Wave 2: script commands 0x6E bhHEffectSet and 0x4A bhYakkyouSet bound; camera shake (EN17
+zeroed ofx/ofz, room change left the shake in place); item light (glint gate, monitor stage 7 blue, light 1 after-effect);
+enemy joints of the mask figures id 91..99 logical instead of physical (effect links lkono 28..30, EN16 hits, dam[27..30]);
+body wall pass with plp->pxb; Common_controll 10 no longer writes pxb. RM_0090 box: no regression found
+(17.10./18.10./HEAD byte-identical); verified candidate: examining and immediately cancelling leaves the flap of box 5 open,
+because event 19 is displaced during its 30 frames by the floor 4 restart as soon as st_flg 0x8 drops - natively after
+~19 frames; the hold duration of the original is not measured (status task passes sub1.c:3103/system.c:599-611 open).
+The lid is written by no script. Test rm0090_security_box_nodes. Counter-checks build/validation/wave1-20261020/,
+wave2-20261020/. No visual acceptance. **No commit/push.**
 
-**2026-10-19, Greif-und-Dreh-Statue (bhObj007 + bhCPM2_act_rpsh) portiert (Dev-App via `./build.sh --test`, CTest 158/158):**
-Nutzerbefund "ich kann die Statue nicht drehen" (als RM_1050 gemeldet). Ursache: der Greif-und-Dreh-Gegenstand ist **unportiert** — bhObj007
-(objitm.c:1648, bhJumpObject[7], 100%-matching) und die zugehoerige Spieleraktion bhCPM2_act_rpsh (player.c:4336, mode2 22). Der Objektpass
-dispatchte nur bhObj005/008/010, der Spielerpass kannte mode2 22 nicht. RDT-Scan aller 205 Raeume: einziges Typ-7-Objekt ist **RM_0150 Objekt 5**
-(ident 46, Eisenstatue; Ereignis 16 hebt sie auf py 10) — **RM_1050** (Stufe 1 Raum 05, Steve/Monitor, 18 Objekte alle Typ 0) **hat keine Statue**.
-Port: `control_turn_objects`/`control_turn_object` (bhObj007, objitm.c:1648-1845 mit Originalzeilen) + `tick_turn` (rpsh), mode2-22-Zweig in
-runtime.cpp analog bhCPM2_act_psh, Pad-Bit-Korrektur 0x21/0x42 (pad.c Analog-vorwaerts/-zurueck statt nur 0x20/0x40). Test `turn_object`
-(RM_0150, Greifen -> Drehen bis |ay|<182 -> ev_flg 2 -> Freigabe, Gegenprobe rot). StartVibrationEx als benannte Host-Luecke.
-**Nachkontrolle des Unteragenten-Diffs (2026-10-19, jede Zeile gegen objitm.c:1648-1845 / player.c:4324-4490 nachgelesen), vier Abweichungen behoben:**
-(1) Die Statue drehte nur in `angles[1]`, die Zeichenwurzel liest aber `transform.yaw` (RoomWorld::append) -> sichtbar erst der Endsprung auf 0;
-jetzt je Drehbild `transform.yaw = angles[1]` (Test prueft die Mitdrehung, Gegenprobe rot "Zeichenwurzel folgt op->ay nicht").
-(2) `ABS((short)plp->ayp - ayn)` mit `short ayn`: int-Differenz zweier shorts ohne Nachtruncation; der Port truncierte die Differenz
-auf int16 (ein Bild Unterschied an der Wrap-Grenze). (3) Kopf-Latch `head_push_owned` wurde zwischen Schiebe- und Drehzweig zurueckgesetzt,
-EXP1_I(0)-Freigabe lief so jedes Bild statt nur in Fall 0 (idempotent, aber nicht Original); Latch jetzt geteilt. (4) `plp->px = PEXP0_F(72) = ...`
-(spx/spz = collision_safe_) in Fall 1 (:1716) und 2/3 (:1786/:1826) fehlte -> nach dem Loslassen haette der Settle-Schritt von act_std
-zur alten sicheren Lage zurueckgezogen. Annahme bleibt: plp->ar = 3.5 (PlyInfo[*][0]); en19.c:501 (ar_bak) nicht gleichzeitig. CTest 158/158.
-**Nachgezogen (dieselbe Ursachenkette, Dev-App via `./build.sh --test`, CTest 158/158):** Player_controll 128 (event.c:9640) war im Port
-unvollstaendig — world.cpp op 0x64 0x80 behandelte 128 wie 139 und liess `mtn_add=65536`, `flg|=0x10` (Koerper-Wandpass, player.c:1600),
-`mnwP=plmthp`, `mode0=1`, `stflg&=~0x10000`, `flg&=~0x210000` weg. Folge: nach dem Freigabe-Cinematic blieb der Spieler in mode0 7 / flg
-0x10000 haengen und konnte nicht zur Statue laufen (alle Raeume mit Spieler-Freigabe-Cinematics). Jetzt voll portiert; Test
-`event_lifecycle_control_release` (bhLoadWork 0 -> Player_controll 128 -> mode0 1, flg/stflg 0x10000 weg, flg 0x10 an; Gegenprobe rot
-"mode0 bleibt 7"). **Kein Commit/Push.**
+**2026-10-19, grab-and-turn statue (bhObj007 + bhCPM2_act_rpsh) ported (dev app via `./build.sh --test`, CTest 158/158):**
+User finding "I can't turn the statue" (reported as RM_1050). Cause: the grab-and-turn object is **unported** — bhObj007
+(objitm.c:1648, bhJumpObject[7], 100%-matching) and the associated player action bhCPM2_act_rpsh (player.c:4336, mode2 22). The object pass
+only dispatched bhObj005/008/010, the player pass did not know mode2 22. RDT scan of all 205 rooms: the only type 7 object is **RM_0150 object 5**
+(ident 46, iron statue; event 16 raises it to py 10) — **RM_1050** (stage 1 room 05, Steve/monitor, 18 objects all type 0) **has no statue**.
+Port: `control_turn_objects`/`control_turn_object` (bhObj007, objitm.c:1648-1845 with original lines) + `tick_turn` (rpsh), mode2 22 branch in
+runtime.cpp analogous to bhCPM2_act_psh, pad bit correction 0x21/0x42 (pad.c analog forward/backward instead of only 0x20/0x40). Test `turn_object`
+(RM_0150, grab -> turn until |ay|<182 -> ev_flg 2 -> release, counter-check red). StartVibrationEx as a named host gap.
+**Re-check of the subagent diff (2026-10-19, every line re-read against objitm.c:1648-1845 / player.c:4324-4490), four deviations fixed:**
+(1) The statue only turned in `angles[1]`, but the draw root reads `transform.yaw` (RoomWorld::append) -> only the final jump to 0 was visible;
+now `transform.yaw = angles[1]` per turn frame (test checks the co-rotation, counter-check red "draw root does not follow op->ay").
+(2) `ABS((short)plp->ayp - ayn)` with `short ayn`: int difference of two shorts without re-truncation; the port truncated the difference
+to int16 (one frame difference at the wrap boundary). (3) Head latch `head_push_owned` was reset between the push and turn branch,
+EXP1_I(0) release thus ran every frame instead of only in case 0 (idempotent, but not original); latch now shared. (4) `plp->px = PEXP0_F(72) = ...`
+(spx/spz = collision_safe_) in case 1 (:1716) and 2/3 (:1786/:1826) was missing -> after letting go the settle step of act_std would have
+pulled back to the old safe position. Assumption remains: plp->ar = 3.5 (PlyInfo[*][0]); en19.c:501 (ar_bak) not at the same time. CTest 158/158.
+**Followed up (same cause chain, dev app via `./build.sh --test`, CTest 158/158):** Player_controll 128 (event.c:9640) was incomplete in the port
+— world.cpp op 0x64 0x80 treated 128 like 139 and left out `mtn_add=65536`, `flg|=0x10` (body wall pass, player.c:1600),
+`mnwP=plmthp`, `mode0=1`, `stflg&=~0x10000`, `flg&=~0x210000`. Consequence: after the release cinematic the player stayed stuck in mode0 7 / flg
+0x10000 and could not walk to the statue (all rooms with player release cinematics). Now fully ported; test
+`event_lifecycle_control_release` (bhLoadWork 0 -> Player_controll 128 -> mode0 1, flg/stflg 0x10000 gone, flg 0x10 on; counter-check red
+"mode0 stays 7"). **No commit/push.**
 
-**Zu verifizieren: RM_0090 Security Box verformt** (Nutzerbefund 2026-10-18): nach Abholen der Adlermedaille an der *anderen* Box ist die
-vordere Box (obj[5], Kamera 9) auf dem Rueckweg verformt (Klappe offen + Deckel hochgeklappt), ohne dass sie benutzt wurde; beim Untersuchen
-bewegt sich die Klappe nicht. Laut Nutzer am 2026-10-17 noch nicht vorhanden -> Regression aus den Aenderungen seit gestern. Nutzerverdacht:
-3D-Scanner/Fraese (Ereignis 23) oder Zombie-Fensterspawn. Headless nicht nachgestellt: alle 99 Ereignisse und 20 Interaktionen von RM_0090
-einzeln (mit Gegner-KI) lassen obj[5] unveraendert; Raumskripte schreiben nur Knoten 1 (Ereignis 31 +75 Grad relativ, 7/19 absolut 0),
-nie den Deckel. Naechster Schritt: F5-Snapshot vom Nutzer im kaputten Zustand, dann Knotenwinkel direkt auslesen; alternativ Differenz
-gegen den Stand vom 2026-10-17 (HEAD-Worktree) im selben Ablauf.
+**To verify: RM_0090 Security Box deformed** (user finding 2026-10-18): after picking up the eagle medal at the *other* box the
+front box (obj[5], camera 9) is deformed on the way back (flap open + lid raised), without having been used; when examining
+the flap does not move. According to the user not yet present on 2026-10-17 -> regression from the changes since yesterday. User suspicion:
+3D scanner/milling machine (event 23) or zombie window spawn. Not reproduced headless: all 99 events and 20 interactions of RM_0090
+individually (with enemy AI) leave obj[5] unchanged; room scripts only write node 1 (event 31 +75 degrees relative, 7/19 absolute 0),
+never the lid. Next step: F5 snapshot from the user in the broken state, then read out the node angles directly; alternatively a diff
+against the state of 2026-10-17 (HEAD worktree) in the same sequence.
 
-**RM_9370 Raumeffekte 35/50/54/70-76/80/400/402/405/426 (2026-10-19 geprueft, keine Luecke):** das sind Texturhalter, keine Prozeduren:
-room.c:306 laedt fuer Tabelleneintraege mit id 30..99 und >= 400 den Atlas (sys->ef_tn[id]); in bhJumpEffect (effect.c:33) stehen 35/50/54/70-76/80
-auf bhEffDmy, 400+ liegen hinter bhJumpEffect4[50]. Alle 16 Halter dieses Raums sind in native ported_effect_atlas (effect_sprites.cpp:1070)
-enthalten; die Prozeduren, die sie nutzen, sind separat gefuehrt. Weiter offen: sys->obwp[0..3] (Waffe rechts/links, Zopf) ueber
-Art 2 nicht aufloesbar (Waffe ohne eigenen owP-Baum, Zopf nur als Nachbildmodell) - Typen 1/3/4/5 von 0x86 mit Art 2
-Index 0..3 (in den Daten nicht genutzt); Art-1-Knotenlagen von 0x86 nicht je Raum gemessen. **Kein Commit/Push.**
+**RM_9370 room effects 35/50/54/70-76/80/400/402/405/426 (checked 2026-10-19, no gap):** these are texture holders, not procedures:
+room.c:306 loads the atlas (sys->ef_tn[id]) for table entries with id 30..99 and >= 400; in bhJumpEffect (effect.c:33) 35/50/54/70-76/80
+point to bhEffDmy, 400+ lie behind bhJumpEffect4[50]. All 16 holders of this room are contained in native ported_effect_atlas (effect_sprites.cpp:1070);
+the procedures that use them are tracked separately. Still open: sys->obwp[0..3] (weapon right/left, ponytail) not resolvable via
+kind 2 (weapon without its own owP tree, ponytail only as afterimage model) - types 1/3/4/5 of 0x86 with kind 2
+index 0..3 (not used in the data); kind 1 node positions of 0x86 not measured per room. **No commit/push.**
 
-**Effekt 006 + leere Prozeduren 4/28/129/174/197 (2026-10-20, Worker T01/T02, geprueft):** `bhEff006`
-(effsub1.c:2214) von Hand portiert (ef_opq bei mdlver 0, sonst ef_trs; Alpha-Abbau type != 0; Hoehenende
-mtx[13] < -100 ueber `mtx_world_y` wie 352). Die leeren Originalprozeduren sind als `step_eff_empty`
-gebunden (Platz bleibt belegt, ungezeichnet; nicht bhEffDmy). Erzeuger: nur Skriptbefehle 0x2C/0x6E/0xB0;
-Byte-Obermengenscan aller Ereignisbereiche der 205 Raeume findet keinen davon (einziger Treffer RM_6070
-+1306 liegt im Operanden eines 0x7c). **367 bleibt Luecke** (kein exp0-/func-Erzeuger im Original).
-Test `effect_eff006`; `engine_progression_resources` nutzt jetzt 367 als ungebundenes Beispiel.
-`./build.sh --test` 190/190 (gpu_raster_parity uebersprungen), Dev-App aktualisiert. Offener Nebenbefund:
-`initialize_effect_sprite` setzt die UV-Vorgaben von bhSetEffectTb (effect.c:522-532) nicht. **Kein Commit/Push.**
+**Effect 006 + empty procedures 4/28/129/174/197 (2026-10-20, workers T01/T02, checked):** `bhEff006`
+(effsub1.c:2214) ported by hand (ef_opq at mdlver 0, otherwise ef_trs; alpha decay type != 0; height end
+mtx[13] < -100 via `mtx_world_y` like 352). The empty original procedures are bound as `step_eff_empty`
+(slot stays occupied, undrawn; not bhEffDmy). Spawners: only script commands 0x2C/0x6E/0xB0;
+a byte superset scan of all event ranges of the 205 rooms finds none of them (the only hit RM_6070
++1306 lies in the operand of a 0x7c). **367 remains a gap** (no exp0/func spawner in the original).
+Test `effect_eff006`; `engine_progression_resources` now uses 367 as the unbound example.
+`./build.sh --test` 190/190 (gpu_raster_parity skipped), dev app updated. Open side finding:
+`initialize_effect_sprite` does not set the UV defaults of bhSetEffectTb (effect.c:522-532). **No commit/push.**
 
-**Ablauf/Speichern finalisiert (2026-10-20):** Ledger-Audit des Bereichs. Sechs Eintraege auf done, weil die
-damals offenen Punkte belegt sind: `bhAllDrawModel`/`bhEtcMirrorDrawModel` (Spiegel-Effektpass unter gm_flg 0x4000,
-mirror_pass/effect_model_mirror/claw_model_light), `bhAllEasyDrawModel` (Monitorpass, event_lifecycle),
-`bhControlEOR` (BackColor nativ ueber back_color.cpp; der GS-Palettenupload ist die Konsolen-Fadedarstellung, nativ
-Host-Fade), `bhSysCallMain` (Pad-Gating; `ss_flg 0x40000000` hat keinen Schreiber, `tk_flg 0x1000` ist der
-Host-Taskautomat) und `bhSysCallMonitor` (Raumlade-/Taskfreigabe, A/B-Messung). Fuenf weitere Eintraege
-sind als **Host-ersetzt** gewertet (Nutzerentscheidung 2026-10-20): `pad.c:bhSetPad` (SDL-Eingabe statt Keytype-/Analogtabellen),
-`ps2_LoadScreen.c:ExecuteStateLoadScreenLoadExit` (Typewriter-Slotliste statt typ_flg/tk_flg), `system.c:bhCheckSubTask`
-und `system.c:bhSysCall` (Host-Menuezugaenge statt tk_flg-Taskautomat) sowie `system.c:bhSysCallEvent:Pausetor`
-(Host-Pause statt ssv_md0 10). Bereich 22/36 -> **28/31** (95.2 % gewichtet, 90.3 % voll belegt); Gesamt
-88.1 %/76.8 %. Offen bleiben nur `ps2_McSaveFile.c:mcSetStringSaveFile` (Original-UB saveroom 0),
-`system.c:bhSysCallDoordemo` (Nutzerentscheidung Tuer-Skip) und `system.c:bhSysCallMap` (Drawreihenfolge/Padbindung).
-**Kein Commit/Push.**
+**Flow/saving finalized (2026-10-20):** ledger audit of the area. Six entries set to done, because the
+points open back then are verified: `bhAllDrawModel`/`bhEtcMirrorDrawModel` (mirror effect pass under gm_flg 0x4000,
+mirror_pass/effect_model_mirror/claw_model_light), `bhAllEasyDrawModel` (monitor pass, event_lifecycle),
+`bhControlEOR` (BackColor natively via back_color.cpp; the GS palette upload is the console fade display, natively
+host fade), `bhSysCallMain` (pad gating; `ss_flg 0x40000000` has no writer, `tk_flg 0x1000` is the
+host task automaton) and `bhSysCallMonitor` (room load/task release, A/B measurement). Five further entries
+are rated as **host-replaced** (user decision 2026-10-20): `pad.c:bhSetPad` (SDL input instead of keytype/analog tables),
+`ps2_LoadScreen.c:ExecuteStateLoadScreenLoadExit` (typewriter slot list instead of typ_flg/tk_flg), `system.c:bhCheckSubTask`
+and `system.c:bhSysCall` (host menu accesses instead of the tk_flg task automaton) as well as `system.c:bhSysCallEvent:Pausetor`
+(host pause instead of ssv_md0 10). Area 22/36 -> **28/31** (95.2 % weighted, 90.3 % fully verified); overall
+88.1 %/76.8 %. Only `ps2_McSaveFile.c:mcSetStringSaveFile` (original UB saveroom 0),
+`system.c:bhSysCallDoordemo` (user decision door skip) and `system.c:bhSysCallMap` (draw order/pad binding) remain open.
+**No commit/push.**
 
-## Gezielter Zugang zu bisherigen Befunden
+## Targeted access to earlier findings
 
-Vollständiger [Abschnittsindex](archived/work/history/2026-10-13-instructions/README.md)
-zu den unveränderten früheren Anweisungsdateien. Nicht vollständig laden; bei
-Bedarf den betreffenden Abschnitt lesen. Folgende Links sind **historische
-Befunde**, keine aktuelle Offen-/Erledigtliste:
+Complete [section index](archived/work/history/2026-10-13-instructions/README.md)
+of the unchanged earlier instruction files. Do not load completely; when
+needed, read the relevant section. The following links are **historical
+findings**, not a current open/done list:
 
-| Thema | Historischer Einstieg |
+| Topic | Historical entry point |
 |---|---|
-| Tür-Skip / gezielter Türton-Stopp | [CLAUDE vor Trennung:26](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:26); aktive Entscheidung in AGENTS.md |
-| SELECT-Skip / Standin-Claire | [CLAUDE vor Trennung:947](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:947) |
-| Hauptmenü / Host-Abweichungen | [CLAUDE vor Trennung:1039](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1039) |
-| Friedhof / Skript-Gegner-Motion | [CLAUDE vor Trennung:1094](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1094) |
-| Ereigniskamera / Pause | [CLAUDE vor Trennung:1131](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1131) |
-| Dialog-Padflanke | [CLAUDE vor Trennung:1213](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1213) |
-| Objekt-Cut-Gate / Leuchten | [CLAUDE vor Trennung:1285](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1285) |
-| Körperpass / Treppen / Hundstoß | [CLAUDE vor Trennung:1346](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1346), [Reihenfolge:1506](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1506) |
-| Renderer-Worker / Nebelkosten | [CLAUDE vor Trennung:1421](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1421) |
-| Karte: Eingabesperre und damaliger Draw-Vertrag | [CLAUDE vor Trennung:1539](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1539); spätere Kartenrenderer-Arbeit nicht aus dieser alten Offenmeldung zurückbauen |
-| Audio / Gegner / Schatten / Inventar | [AGENTS-Abschnittsindex](archived/work/history/2026-10-13-instructions/README.md); passende `work/*.result.md` gezielt lesen |
+| Door skip / targeted door sound stop | [CLAUDE before split:26](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:26); active decision in AGENTS.md |
+| SELECT skip / stand-in Claire | [CLAUDE before split:947](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:947) |
+| Main menu / host deviations | [CLAUDE before split:1039](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1039) |
+| Graveyard / script enemy motion | [CLAUDE before split:1094](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1094) |
+| Event camera / pause | [CLAUDE before split:1131](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1131) |
+| Dialog pad edge | [CLAUDE before split:1213](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1213) |
+| Object cut gate / glow | [CLAUDE before split:1285](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1285) |
+| Body pass / stairs / dog push | [CLAUDE before split:1346](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1346), [order:1506](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1506) |
+| Renderer workers / fog cost | [CLAUDE before split:1421](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1421) |
+| Map: input lock and draw contract at the time | [CLAUDE before split:1539](archived/work/history/2026-10-13-instructions/CLAUDE.before.md:1539); do not roll back later map renderer work based on this old open report |
+| Audio / enemies / shadows / inventory | [AGENTS section index](archived/work/history/2026-10-13-instructions/README.md); read the matching `work/*.result.md` selectively |
 
-## Pflege
+## Maintenance
 
-Nur aktuelle, auftragsrelevante Kurzstände mit Beleg-/Ergebnislink aktualisieren.
-Abgeschlossene Detailprotokolle nach `archived/work/` beziehungsweise `build/validation/`,
-nicht in diese Tabelle oder die Pflichtdateien kopieren. Fachseiten bleiben
-undatierte Mechanismusbeschreibungen. Historische Kern-/Generatorfreigaben sind
-verworfen und heben die aktuelle Originalkern-/Emulationspolicy niemals auf.
-- **Datenprofile je Plattform (2026-10-22, Arbeitsbaum):** `tools/data_profiles.py` legt fest, was von `data/` ausgeliefert wird: `desktop` alles, `ios` (iPhone/iPad) ohne `files/MOVIE` (PSS, Runtime liest nur `movies/*.rvv`) und `archives/RDX_LNK` (ungelesen neben `rooms/`), `tvos` zusaetzlich ohne Mod-Ordner (`RECVX_ENABLE_MODS=OFF` → `RECVX_NO_MODS`, `--mods` abgelehnt). Spart rund 1,15 GB. Titelstart und RM_1000 headless mit schlankem Baum rc=0. tvOS-Buildziel und WebGL2-Profil fehlen noch; Dazu `prepare_native_data.py --compressed` (TGA als RLE, Filme optional verkleinert) und RLE-Lader in `read_tga`; HD-Mod-Schluessel aus den entpackten Bytes, damit `data_compressed` bildgleich mit `data` rendert (RM_1000 mit Mods byte-gleich). Committet 2026-10-22.
+Only update current, task-relevant short status entries with an evidence/result link.
+Move finished detailed logs to `archived/work/` or `build/validation/` respectively,
+do not copy them into this table or the mandatory files. Topic pages remain
+undated mechanism descriptions. Historical core/generator approvals are
+rejected and never override the current original-core/emulation policy.
+- **Data profiles per platform (2026-10-22, working tree):** `tools/data_profiles.py` defines what is shipped from `data/`: `desktop` everything, `ios` (iPhone/iPad) without `files/MOVIE` (PSS, the runtime only reads `movies/*.rvv`) and `archives/RDX_LNK` (unread next to `rooms/`), `tvos` additionally without the mod folder (`RECVX_ENABLE_MODS=OFF` → `RECVX_NO_MODS`, `--mods` rejected). Saves about 1.15 GB. Title start and RM_1000 headless with the slim tree rc=0. tvOS build target and WebGL2 profile are still missing; plus `prepare_native_data.py --compressed` (TGA as RLE, movies optionally downscaled) and RLE loader in `read_tga`; HD mod keys from the unpacked bytes, so that `data_compressed` renders image-identically to `data` (RM_1000 with mods byte-identical). Committed 2026-10-22.
