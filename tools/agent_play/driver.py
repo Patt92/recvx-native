@@ -61,18 +61,19 @@ class Client:
     RETRY_HTTP = {408, 409, 425, 429, 500, 502, 503, 504}
 
     def __init__(self, base_url, model, api_key='', *, temperature=0.2, max_tokens=200, timeout=60,
-                 retries=0, retry_delay=3.0, out=sys.stderr, sleep=time.sleep):
+                 retries=0, retry_delay=3.0, out=sys.stderr, sleep=time.sleep, extra_body=None):
         self.url = base_url.rstrip('/') + '/chat/completions'
         self.model, self.api_key = model, api_key
         self.temperature, self.max_tokens, self.timeout = temperature, max_tokens, timeout
         self.retries, self.retry_delay, self.out, self.sleep = retries, retry_delay, out, sleep
+        self.extra_body = dict(extra_body or {})
 
-    def complete(self, messages, tools=None):
+    def complete(self, messages, tools=None, max_tokens=None):
         """One request; transient errors are retried after a few seconds (retries 0 = until it works)."""
         attempt = 0
         while True:
             try:
-                return self._complete(messages, tools)
+                return self._complete(messages, tools, max_tokens)
             except urllib.error.HTTPError as e:
                 if e.code not in self.RETRY_HTTP:
                     raise
@@ -87,8 +88,9 @@ class Client:
             print(f'LLM endpoint: {reason}; retry {attempt} in {delay:.0f} s', file=self.out, flush=True)
             self.sleep(delay)
 
-    def _complete(self, messages, tools=None):
-        body = dict(model=self.model, messages=messages, temperature=self.temperature, max_tokens=self.max_tokens)
+    def _complete(self, messages, tools=None, max_tokens=None):
+        body = dict(self.extra_body, model=self.model, messages=messages, temperature=self.temperature,
+                    max_tokens=max_tokens or self.max_tokens)
         if tools:
             body.update(tools=tools, tool_choice='auto')
         headers = {'Content-Type': 'application/json'}
@@ -97,7 +99,10 @@ class Client:
         req = urllib.request.Request(self.url, json.dumps(body).encode(), headers)
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             data = json.load(r)
-        return data['choices'][0]['message'], data.get('usage') or {}
+        choice = data['choices'][0]
+        message = dict(choice.get('message') or {})
+        message['_finish'] = choice.get('finish_reason')
+        return message, data.get('usage') or {}
 
 
 def load_env(path):
@@ -118,9 +123,17 @@ def load_env(path):
             os.environ[key] = value
 
 
+def strip_thinking(text):
+    """Remove <think>...</think> blocks; an unterminated block means the reply was cut while thinking."""
+    import re
+    text = re.sub(r'<think>.*?</think>', '', text or '', flags=re.S)
+    return text.split('<think>')[0]
+
+
 def parse_action(text):
-    """First balanced JSON object in the reply (tolerates code fences and stray prose)."""
-    if not text:
+    """First balanced JSON object in the reply (tolerates code fences, stray prose and think blocks)."""
+    text = strip_thinking(text)
+    if not text.strip():
         raise ValueError('empty reply')
     start = text.find('{')
     while start >= 0:
@@ -179,6 +192,7 @@ class Driver:
         self.log = log
         self.out = out
         self.steps = 0
+        self.bad_replies = []
         self._points_key, self._points = None, {}  # zone -> [to, face] for the current room and floor
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
@@ -302,7 +316,8 @@ class Driver:
             payload['note'] = self.note
         user = {'role': 'user', 'content': json.dumps(payload, separators=(',', ':'), ensure_ascii=False)}
         turn, usage, llm_ms = [], {}, 0.0
-        lookups = 0
+        lookups, budget = 0, None
+        self.bad_replies = []
         for attempt in range(self.max_tool_calls + 3):
             # Once the lookup budget is spent the model gets no tools and must answer with an action.
             final = lookups >= self.max_tool_calls
@@ -311,7 +326,7 @@ class Driver:
                                                         'JSON game action (press/interact/move/fire/shake/keys/run/wait).'})
             started = time.monotonic()
             message, u = self.client.complete(self.messages(user) + turn,
-                                              TOOLS if self.use_tools and not final else None)
+                                              TOOLS if self.use_tools and not final else None, budget)
             llm_ms += (time.monotonic() - started) * 1000
             for k, v in u.items():
                 if isinstance(v, (int, float)):
@@ -335,8 +350,19 @@ class Driver:
             try:
                 action = parse_action(text)
             except ValueError as e:
-                turn.append({'role': 'assistant', 'content': text})
-                turn.append({'role': 'user', 'content': 'error: ' + str(e) + '. Reply with one JSON action.'})
+                finish = message.get('_finish')
+                thought = message.get('reasoning_content') or ''
+                self.bad_replies.append(dict(finish=finish, text=(text or thought)[:160]))
+                if finish == 'length':
+                    # Cut off before the JSON (long reasoning or prose): retry with a larger budget and do not
+                    # feed the cut text back, it only primes more of the same.
+                    budget = max(4 * self.client.max_tokens, 600) if hasattr(self.client, 'max_tokens') else None
+                    turn.append({'role': 'assistant', 'content': '(reply cut off at the token limit)'})
+                    turn.append({'role': 'user', 'content': 'Your reply was cut off before the action. Reply with '
+                                 'ONLY the JSON object, no explanation and no reasoning, e.g. {"op":"press","key":"confirm"}.'})
+                else:
+                    turn.append({'role': 'assistant', 'content': strip_thinking(text)[:400]})
+                    turn.append({'role': 'user', 'content': 'error: ' + str(e) + '. Reply with ONLY one JSON action object.'})
                 continue
             if action['op'] in HINT_CMDS and action['op'] != 'zone':
                 # {"op":"blocked","x":..} or {"op":"room"}: a hint command written as an action.
@@ -608,6 +634,8 @@ class Driver:
                     self.note = note.strip()[:160]
                 self.remember(user, action)
                 entry = dict(llm_ms=round(llm_ms), usage=usage)
+                if self.bad_replies:
+                    entry['bad_replies'] = self.bad_replies
             owner = obs.get('owner', '')
             self.last_owner = owner
             self.remember_texts(obs)
@@ -653,6 +681,8 @@ def main():
     ap.add_argument('--window', type=int, default=8, help='decisions kept in the prompt (cut in halves)')
     ap.add_argument('--temperature', type=float, default=0.2)
     ap.add_argument('--max-tokens', type=int, default=200)
+    ap.add_argument('--extra-body', default=os.environ.get('RECVX_LLM_EXTRA_BODY', ''),
+                    help='JSON merged into every request, e.g. \'{"chat_template_kwargs":{"enable_thinking":false}}\'')
     ap.add_argument('--timeout', type=float, default=60.0, help='seconds per model request')
     ap.add_argument('--retries', type=int, default=0, help='retries on timeout/connection errors (0 = until it works)')
     ap.add_argument('--retry-delay', type=float, default=3.0, help='first retry pause, doubled up to 20 s')
@@ -667,7 +697,8 @@ def main():
     play = Play(a.dir)
     client = Client(a.base_url, a.model, os.environ.get('RECVX_LLM_API_KEY') or os.environ.get('OPENAI_API_KEY', ''),
                     temperature=a.temperature, max_tokens=a.max_tokens, timeout=a.timeout,
-                    retries=a.retries, retry_delay=a.retry_delay)
+                    retries=a.retries, retry_delay=a.retry_delay,
+                    extra_body=json.loads(a.extra_body) if a.extra_body.strip() else None)
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
                     log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms,
                     repeat_limit=a.repeat_limit)

@@ -15,6 +15,7 @@ committed. Environment variables that are already set win over the file;
 |---|---|---|
 | `RECVX_LLM_BASE_URL` | OpenAI-compatible base URL, without `/chat/completions` | `http://localhost:8080/v1` |
 | `RECVX_LLM_MODEL` | model name the endpoint expects | `local` |
+| `RECVX_LLM_EXTRA_BODY` | JSON merged into every request; for reasoning models that think before answering, e.g. Qwen3 on llama.cpp: `{"chat_template_kwargs":{"enable_thinking":false}}` | empty |
 | `RECVX_LLM_API_KEY` | API key, sent only as `Authorization: Bearer`; empty for a local server without auth | empty |
 | `OPENAI_API_KEY` | fallback when `RECVX_LLM_API_KEY` is not set | empty |
 
@@ -25,7 +26,8 @@ Driver options (pass them to `Start-AI-Play.command`/`.cmd` or `driver.py`):
 | `--steps N` | stop after N decisions (0 = until stopped) |
 | `--window N` | decisions kept in the prompt before the history is halved (default 8) |
 | `--no-tools` | endpoint without function calling; the model replies `{"op":"zone","i":4}` instead |
-| `--temperature`, `--max-tokens` | sampling (default 0.2, 200) |
+| `--temperature`, `--max-tokens` | sampling (default 0.2, 200). A reply cut off at the limit (`finish_reason` length, e.g. long reasoning) is retried once with 4x the budget and an instruction to send only the JSON; unusable replies are logged as `bad_replies` in driver.log. |
+| `--extra-body JSON` | same as `RECVX_LLM_EXTRA_BODY` |
 | `--repeat-limit N` | refuse examining the same zone more than N times while nothing changed (inventory, pickups, zones, walls); default 2, 0 = off |
 | `--save-rooms N` | allow saving only after N new rooms since the last save or load (default 3; 0 = always allow). Too early save screens are closed without a model call. |
 | `--seconds S` | game-time budget per action, at most 8 |

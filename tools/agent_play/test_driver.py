@@ -20,8 +20,9 @@ class Scripted:
     def __init__(self, replies):
         self.replies, self.requests = list(replies), []
 
-    def complete(self, messages, tools=None):
+    def complete(self, messages, tools=None, max_tokens=None):
         self.requests.append((deepcopy(messages), tools))
+        self.budgets = getattr(self, 'budgets', []) + [max_tokens]
         return self.replies.pop(0), dict(prompt_tokens=100, completion_tokens=10,
                                           prompt_tokens_details=dict(cached_tokens=80))
 
@@ -134,7 +135,7 @@ class DriverTests(unittest.TestCase):
         with self.ticking():
             drv.run(steps=1)
         self.assertEqual(len(client.requests), 2)
-        self.assertIn('Reply with one JSON action', client.requests[1][0][-1]['content'])
+        self.assertIn('Reply with ONLY one JSON action', client.requests[1][0][-1]['content'])
         self.assertIn('confirm', self.controls())
 
     def test_no_tools_mode_accepts_zone_as_pseudo_action(self):
@@ -672,6 +673,24 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(any('Inventory full' in t and 'FILES' in t for t in tips))
         d['inventory_used'] = 6
         self.assertFalse(any('Inventory full' in t for t in drv.tips(compact(d, 0), '')))
+
+    def test_cut_off_reply_is_retried_with_a_larger_budget_and_logged(self):
+        cut = dict(role='assistant', content='<think>The player stands near the door and I should', _finish='length')
+        drv, client = self.driver([cut, text(dict(op='press', key='confirm'))])
+        client.max_tokens = 200
+        with self.ticking():
+            drv.run(steps=1)
+        self.assertEqual(client.budgets, [None, 800])
+        self.assertIn('cut off', client.requests[1][0][-1]['content'])
+        self.assertNotIn('<think>', json.dumps(client.requests[1][0]))
+        self.assertIn('confirm', self.controls())
+
+    def test_think_blocks_are_ignored_when_parsing(self):
+        from driver import parse_action
+        self.assertEqual(parse_action('<think>maybe {"op":"wait"}</think>{"op":"press","key":"up"}'),
+                         dict(op='press', key='up'))
+        with self.assertRaises(ValueError):
+            parse_action('<think>still thinking {"op":"wait"')
 
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
