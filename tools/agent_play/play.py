@@ -496,6 +496,29 @@ class Play:
             raise PlayError('zone is on another floor')
         return a
 
+    def free_near(self, d, target, limit=3, radius=3.5):
+        """Closest reachable standing points around a blocked or unreachable target (move suggestions)."""
+        x, z = finite_pair(list(target))
+        g = self.grids.get(d, radius=radius)
+        reach = g.distances(d['actor'][0], d['actor'][2])
+        walls = active_walls(d)
+        tests = [_blocked_fn(w, radius)[1] for w in walls]
+        out = []
+        for (i, j), cost in reach.items():
+            px, pz = g.pos(i, j)
+            if any(t(px, pz) for t in tests):
+                continue
+            out.append((math.hypot(px - x, pz - z), cost, [round(px, 1), round(pz, 1)]))
+        out.sort()
+        picked = []
+        for dist, _, p in out:
+            # Spread the suggestions: skip points within 2 units of an earlier pick.
+            if all(math.hypot(p[0] - q[0], p[1] - q[1]) >= 2 for q in picked):
+                picked.append(p)
+            if len(picked) == limit:
+                break
+        return picked
+
     def route(self, d, target, *, run=True, face=None, confirm=False, radius=3.5, danger=True, near=0.0):
         x, z = finite_pair(list(target))
         # Do not silently substitute the nearest free cell for a blocked goal.

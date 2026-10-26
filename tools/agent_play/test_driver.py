@@ -323,6 +323,41 @@ class DriverTests(unittest.TestCase):
         d.update(files_open=True, inventory_open=True, file_text='The code is on the back.')
         self.assertEqual(compact(d, 0)['document'], 'The code is on the back.')
 
+    def test_text_zones_get_a_go_point(self):
+        self.d['interactions'] = [dict(index=3, flags=1, floor=0, type=3, attribute=0,
+                                       position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
+        self.write(self.d)
+        drv, _ = self.driver([])
+        zones = drv.with_approaches(self.play.observe())['zones']
+        self.assertEqual(zones[0]['kind'], 'text')
+        self.assertEqual(len(zones[0]['go']), 2)
+
+    def test_blocked_move_returns_free_reachable_points(self):
+        drv, client = self.driver([text(dict(op='move', to=[20, 0])), text(dict(op='press', key='cancel'))])
+        with self.ticking():
+            drv.run(steps=2)
+        feedback = json.loads(client.requests[1][0][-1]['content'])
+        self.assertIn('target blocked', feedback['error'])
+        points = [p['to'] for p in feedback['use_one_of']]
+        self.assertTrue(points)
+        from pathfind import _blocked_fn, active_walls
+        tests = [_blocked_fn(w, 3.5)[1] for w in active_walls(self.d)]
+        for x, z in points:
+            self.assertFalse(any(t(x, z) for t in tests), (x, z))
+        # Closest first, and the suggestions are spread apart.
+        self.assertLess(abs(points[0][0] - 20), 6)
+        self.assertTrue(all(abs(a[0] - b[0]) + abs(a[1] - b[1]) >= 2 for a, b in zip(points, points[1:])))
+        # The suggestion is accepted as a move target.
+        self.play.compile(self.d, dict(op='move', to=points[0]))
+
+    def test_hint_command_written_as_op_is_answered(self):
+        drv, client = self.driver([text(dict(op='blocked', at=[70, 100])), text(dict(op='press', key='cancel'))])
+        with self.ticking():
+            drv.run(steps=1)
+        self.assertIn('tool hint:', client.requests[1][0][-1]['content'])
+        self.assertNotIn('blocked', self.controls())
+        self.assertIn('cancel', self.controls())
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):

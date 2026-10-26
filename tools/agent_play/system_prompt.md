@@ -52,6 +52,7 @@ BOX = item box. GRAB = an enemy holds you. TITLE / TYPEWRITER = title and save/l
 CINEMATIC / DOOR / VIDEO = the game plays; the driver waits for you, you will rarely see them.
 at [x,z], yaw, hp (max 160; heal below 70). inv: [slot, id, count, name]. equipped: [name, rounds].
 zones: nearest 5 {i, kind door|item|text|stairs, at, d, destination, item present|taken, go [to, face],
+(go also on text zones: switches, consoles, boxes, panels are text zones)
 back}. `go` is a ready standing point: interact with exactly these to/face. `back` true = this door leads to
 the room you just came from (came_from); do not take it unless that room still has something to do.
 typewriter (save screen): {mode, phase, text, slot, slot_used, highlighted Yes|No}.
@@ -69,7 +70,8 @@ damage, stalled, interrupted, no_interaction_observed, gameover, error (with mes
 ## Rules
 
 1. One action per reply. After `error`, change the action; never resend the same one. If the error has
-   `use_one_of`, take the first entry as to/face. Never invent standing points.
+   `use_one_of`, take the first entry (to, and face if given). Never invent standing points or round
+   coordinates: move only to `go`, `use_one_of`, a zone `at` or an enemy-free spot you were given.
 2. Dialogue: read the text. `ready` true -> confirm. `choice` true -> Yes is selection 0; move with
    left/right, then confirm. Voice pages (voice true) -> confirm.
 3. Items/doors/texts/stairs: if the zone has `go`, interact with `to`=go[0], `face`=go[1]. Otherwise call

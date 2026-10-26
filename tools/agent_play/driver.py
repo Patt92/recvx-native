@@ -246,6 +246,13 @@ class Driver:
                 turn.append({'role': 'assistant', 'content': text})
                 turn.append({'role': 'user', 'content': 'error: ' + str(e) + '. Reply with one JSON action.'})
                 continue
+            if action['op'] in HINT_CMDS and action['op'] != 'zone':
+                # {"op":"blocked","x":..} or {"op":"room"}: a hint command written as an action.
+                rest = []
+                for k, v in action.items():
+                    if k not in ('op', 'note', 'cmd', 'args'):
+                        rest += [str(x) for x in v] if isinstance(v, list) else [str(v)]
+                action = dict(op='hint', cmd=action['op'], args=action.get('args') or rest)
             if action['op'] in ('zone', 'hint'):
                 # A lookup written as an action (with or without function calling) is answered, not dispatched.
                 args = {k: v for k, v in action.items() if k not in ('op', 'note')}
@@ -280,6 +287,12 @@ class Driver:
         except PlayError as e:
             obs = self.play.observe()
             feedback = dict(result='error', error=str(e))
+            if action.get('op') == 'move' and ('blocked' in str(e) or 'no path' in str(e)):
+                try:
+                    d, _, _ = self.play.read()
+                    feedback['use_one_of'] = [dict(to=p) for p in self.play.free_near(d, action.get('to'))]
+                except (PlayError, TypeError, ValueError):
+                    pass
             if action.get('op') == 'interact' and isinstance(action.get('zone'), int):
                 # A made-up standing point is the most common error: hand over the computed ones.
                 try:
@@ -308,15 +321,15 @@ class Driver:
         obs['came_from'] = self.previous_room
         return obs
 
-    def with_approaches(self, obs, count=3):
-        """Give the nearest door/item/stairs zones a ready `go` point (to, face) so interact needs no guess."""
+    def with_approaches(self, obs, count=5):
+        """Give the nearest door/item/stairs/text zones a ready `go` point (to, face) so interact needs no guess."""
         if obs.get('owner') != 'FREE' or not obs.get('zones'):
             return obs
         d, _, _ = self.play.read()
         cache = self._approach_cache.setdefault(d.get('room'), {})
         done = 0
         for z in obs['zones']:
-            if done >= count or z.get('kind') not in ('door', 'item', 'stairs') or z.get('item') == 'taken':
+            if done >= count or z.get('kind') not in ('door', 'item', 'stairs', 'text') or z.get('item') == 'taken':
                 continue
             if z['i'] not in cache:
                 try:
