@@ -140,6 +140,27 @@ def find_refs(room, pred):
             prev.append((o, depth, c))
 
 
+def informational_zones(room, state):
+    """Text zones no room script reacts to (no value[20]==i test, no pickup check): reading them only
+    shows their message. Zones another script redefines or toggles count too; their text can change,
+    which the caller sees as a changed zone attribute/parameters."""
+    out = set()
+    for a in state.get('interactions', []):
+        # Only plain message zones: type 3 with a direct message (attribute 0x8000), no script hook
+        # (attribute & 9: the script reacts via value[20]) and no Yes/No question in the message.
+        if a.get('type') != 3 or not a.get('attribute', 0) & 0x8000 or a.get('attribute', 0) & 9:
+            continue
+        message = room.message(a['parameters'][1]) if len(a.get('parameters', [])) > 1 else ''
+        if not message.strip() or 'Yes' in message and 'No' in message:
+            continue
+        i = a['index']
+        if any(True for _ in find_refs(room, lambda c, i=i: (c[0] == 0x06 and c[1] == 20 and c[3] == i) or
+                                        (c[0] == 0x0e and len(c) > 4 and c[4] == i))):
+            continue
+        out.add(i)
+    return out
+
+
 def cmd_zone(i, state):
     room = Room(state['room']); a = next((z for z in state['interactions'] if z['index'] == i), None)
     if a is None: print('no zone', i); return

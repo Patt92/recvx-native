@@ -729,6 +729,42 @@ class DriverTests(unittest.TestCase):
         self.assertIsNone(Play.reason(dict(state(), cinematic=True, movie_active=True),
                                       dict(state(), cinematic=True, movie_active=True), waiting=True))
 
+    def test_information_only_zone_is_read_once(self):
+        from unittest import mock
+        import hint
+        self.d['interactions'] = [dict(index=3, flags=1, floor=0, type=3, attribute=0x8000,
+                                       position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 2, 0, 0])]
+        self.write(self.d)
+        drv, _ = self.driver([])
+        shelf = dict(op='interact', zone=3, to=[1, 1], face=[7, 7])
+        with mock.patch.object(hint, 'informational_zones', lambda room, d: {3}), \
+                mock.patch.object(hint, 'Room', lambda name: name):
+            self.assertIsNone(drv.repeat_blocked(shelf, dict(room='RM_TEST')))
+            drv.record_visit('RM_TEST', 3, drv.progress(), dict(dialog=dict(text='Nothing useful here.')), 'dialog')
+            refusal = drv.repeat_blocked(shelf, dict(room='RM_TEST'))
+            self.assertIn('information only', refusal)
+            self.assertIn('Nothing useful here.', refusal)
+            self.assertTrue(drv.mark_seen(dict(room='RM_TEST', zones=[dict(i=3)]))['zones'][0]['read'])
+            # A script redefining the zone (new message) counts as progress and frees it again.
+            self.d['interactions'][0]['parameters'] = [0, 5, 0, 0]
+            self.write(self.d)
+            self.assertIsNone(drv.repeat_blocked(shelf, dict(room='RM_TEST')))
+
+    def test_informational_zones_exclude_switches_questions_and_boxes(self):
+        import os
+        import hint
+        if not os.path.isdir(os.path.join(hint.ROOT, 'data', 'rooms')):
+            self.skipTest('no exported room data')
+        room = hint.Room('RM_0090.RDX')
+        zones = [dict(index=i, type=3, attribute=attr, parameters=[0, msg, 0, 0]) for i, attr, msg in
+                 ((8, 0x8800, 0), (6, 0x800e, 2), (10, 0x900e, 4), (11, 0x1c00, 0), (5, 0x8000, 3))]
+        info = hint.informational_zones(room, dict(interactions=zones))
+        self.assertIn(8, info)                    # plain message
+        self.assertNotIn(6, info)                 # script hook (attribute & 9)
+        self.assertNotIn(10, info)
+        self.assertNotIn(11, info)                # no direct message (item box)
+        self.assertNotIn(5, info)                 # message 3 asks "Push the switch? Yes No"
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):

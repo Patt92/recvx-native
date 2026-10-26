@@ -80,6 +80,7 @@ computer (terminal): {screen [lines], waits printing|confirm|keyboard|script, ke
 `free` = letters still allowed in the password field (shown as \ on screen). A wrong password closes the terminal.
 document: text of the open file/document page (FILES). menu_text: item description or menu message.
 unchanged_for n (in the result): n waits in a row changed nothing; the game waits for a button.
+read true on a zone: information only (no script reacts to it) and already read; never examine it again.
 seen/got on a zone, done_here: zones you already examined in this room, how often and what they said.
 Prefer zones without `seen`. Examining a zone again only makes sense after something changed (new item,
 a switch, a door opened); the driver refuses a third examine without such a change.

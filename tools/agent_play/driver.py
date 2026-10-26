@@ -205,6 +205,7 @@ class Driver:
         # sees what it already did and a repeat without anything new is refused.
         self.visits = {}           # room -> zone -> dict(n, got, sig)
         self.repeat_limit = repeat_limit
+        self._info_room, self._info = None, set()
         self.skip_videos = skip_videos
         self.video_skipped = False  # skip sent for the video that is playing now
         # Save policy: a save (or a load) counts as fresh until the player has entered `save_rooms` rooms
@@ -433,7 +434,8 @@ class Driver:
         """What can change by playing: inventory, pickup bits, zones and walls switched by scripts."""
         d, _, _ = self.play.read()
         return (tuple(d.get('items', [])), tuple(d.get('item_flags', [])),
-                tuple(a.get('flags', 0) & 1 for a in d.get('interactions', [])),
+                tuple((a.get('flags', 0) & 1, a.get('attribute'), tuple(a.get('parameters', [])))
+                      for a in d.get('interactions', [])),
                 tuple(w.get('fl', 0) & 1 for w in d.get('walls', [])))
 
     def zone_log(self, room):
@@ -456,22 +458,42 @@ class Driver:
         if not self.repeat_limit or action.get('op') != 'interact':
             return None
         v = self.zone_log(obs.get('room')).get(action.get('zone'))
-        if not v or v['n'] < self.repeat_limit or v['sig'] != self.progress():
+        limit = 1 if action.get('zone') in self.info_zones() else self.repeat_limit
+        if not v or v['n'] < limit or v['sig'] != self.progress():
             return None
+        if limit == 1:
+            return (f"zone {action['zone']} is information only (no script reacts to it) and was read already: "
+                    f"{v['got']!r}. Do something new: another zone, a door, or use what it told you.")
         return (f"zone {action['zone']} already examined {v['n']} times and nothing changed since "
                 f"(inventory, items, zones, walls); last answer: {v['got']!r}. Do something new: another zone, "
                 "a door, use an item there via inventory, or read hint zone.")
+
+    def info_zones(self):
+        """Text zones of this room that only show a message (cached per room)."""
+        d, _, _ = self.play.read()
+        room = d.get('room')
+        if self._info_room != room:
+            try:
+                import hint
+                self._info = hint.informational_zones(hint.Room(room), d)
+            except Exception:
+                self._info = set()
+            self._info_room = room
+        return self._info
 
     def mark_seen(self, obs):
         """Annotate zones with what examining them gave; list examined zones of this room as `done`."""
         log = self.zone_log(obs.get('room'))
         if not log:
             return obs
+        info = self.info_zones()
         for z in obs.get('zones', []):
             v = log.get(z['i'])
             if v:
                 z['seen'] = v['n']
                 z['got'] = v['got']
+                if z['i'] in info:
+                    z['read'] = True  # information only, already read: no reason to examine it again
         obs['done_here'] = [dict(i=i, n=v['n'], got=v['got']) for i, v in sorted(log.items())]
         return obs
 
