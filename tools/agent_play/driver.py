@@ -18,6 +18,7 @@ Every step is logged to <dir>/driver.log (JSON lines: llm_ms, act_ms, tokens, ac
 """
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -178,7 +179,7 @@ class Driver:
         self.log = log
         self.out = out
         self.steps = 0
-        self._approach_cache = {}  # room -> zone -> [to, face]; geometry of a room does not move
+        self._points_key, self._points = None, {}  # zone -> [to, face] for the current room and floor
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
         self.last_owner = ''
@@ -461,20 +462,33 @@ class Driver:
         self.tasks_seen = now
 
     def correct(self, action, obs):
-        """interact on a zone with a computed point: use it unless the model's point is that point.
+        """interact: the geometry decides where to stand, and the coordinates decide which zone was meant.
 
-        Invented standing points were the most common rejected action; the zone and the decision stay
-        the model's, only the coordinates come from the geometry."""
+        Invented standing points were the most common rejected action, and the model mixes up zone
+        numbers (it sent the coordinates of one door with the number of the other). If the given point
+        is the ready point of another zone, or much closer to another zone's point, that zone is used."""
         if action.get('op') != 'interact':
             return action
-        go = next((z.get('go') for z in obs.get('zones', []) if z.get('i') == action.get('zone')), None)
-        if not go:
+        try:
+            d, _, _ = self.play.read()
+            points = self.room_points(d)
+        except (PlayError, OSError, ValueError):
             return action
-        to = action.get('to')
-        if isinstance(to, list) and len(to) == 2 and all(isinstance(v, (int, float)) for v in to) and \
+        zone, to = action.get('zone'), action.get('to')
+        if isinstance(to, list) and len(to) == 2 and all(isinstance(v, (int, float)) for v in to) and points:
+            dist = {i: math.hypot(p[0][0] - to[0], p[0][1] - to[1]) for i, p in points.items()}
+            best = min(dist, key=dist.get)
+            own = dist.get(zone)
+            # Another zone's ready point within 3 units, while the named zone's point is 3x as far: switch.
+            if best != zone and dist[best] < 3 and (own is None or own > 3 * max(dist[best], 1)):
+                zone = best
+        if zone not in points:
+            return action if zone == action.get('zone') else dict(action, zone=zone)
+        go = points[zone]
+        if zone == action.get('zone') and isinstance(to, list) and len(to) == 2 and \
                 abs(to[0] - go[0][0]) < .01 and abs(to[1] - go[0][1]) < .01:
             return action
-        return dict(action, to=go[0], face=go[1])
+        return dict(action, zone=zone, to=go[0], face=go[1])
 
     def mark_way_back(self, obs):
         """Name the door that leads to the room just left, so 'nearest door' is not mistaken for 'onward'."""
@@ -493,25 +507,49 @@ class Driver:
         obs['came_from'] = self.previous_room
         return obs
 
-    def with_approaches(self, obs, count=5):
-        """Give the nearest door/item/stairs/text zones a ready `go` point (to, face) so interact needs no guess."""
-        if obs.get('owner') != 'FREE' or not obs.get('zones'):
-            return obs
-        d, _, _ = self.play.read()
-        cache = self._approach_cache.setdefault(d.get('room'), {})
-        done = 0
-        for z in obs['zones']:
-            if done >= count or z.get('kind') not in ('door', 'item', 'stairs', 'text') or z.get('item') == 'taken':
-                continue
-            if z['i'] not in cache:
+    def room_points(self, d):
+        """Ready standing points for every active zone on this floor, once per room (geometry is fixed;
+        script-switched zones and walls change the key, so the table is rebuilt when they do)."""
+        key = (d.get('room'), d.get('player_floor', 0),
+               tuple(a.get('flags', 0) & 1 for a in d.get('interactions', [])),
+               tuple(w.get('fl', 0) & 1 for w in d.get('walls', [])))
+        if self._points_key != key:
+            table = {}
+            for a in d.get('interactions', []):
+                if not a.get('flags', 0) & 1 or a.get('floor', 0) != d.get('player_floor', 0):
+                    continue
+                if a.get('type') not in (0, 1, 2, 3, 4):
+                    continue
                 try:
-                    found = self.play.approaches(d, self.play.zone(d, z['i']), limit=1)
+                    found = self.play.approaches(d, a, limit=1)
                 except PlayError:
                     found = []
-                cache[z['i']] = [found[0]['to'], found[0]['face']] if found else None
-            if cache[z['i']]:
-                z['go'] = cache[z['i']]
-            done += 1
+                if found:
+                    table[a['index']] = [found[0]['to'], found[0]['face']]
+            self._points_key, self._points = key, table
+        return self._points
+
+    def with_approaches(self, obs):
+        """Give zones a ready `go` point (to, face); zones beyond the nearest five are listed in far_zones."""
+        if obs.get('owner') != 'FREE':
+            return obs
+        d, _, _ = self.play.read()
+        points = self.room_points(d)
+        shown = set()
+        for z in obs.get('zones', []):
+            if z['i'] in points and z.get('item') != 'taken':
+                z['go'] = points[z['i']]
+            shown.add(z['i'])
+        kinds = {0: 'door', 1: 'stairs', 2: 'stairs', 3: 'text', 4: 'item'}
+        far = []
+        for a in d.get('interactions', []):
+            i = a['index']
+            if i in shown or i not in points:
+                continue
+            far.append(dict(i=i, kind=kinds.get(a['type'], '?'), go=points[i],
+                            **({'destination': a['parameters'][1]} if a['type'] == 0 else {})))
+        if far:
+            obs['far_zones'] = far
         return obs
 
     def ensure_auto_hold(self):
@@ -573,7 +611,14 @@ class Driver:
             if blocked:
                 obs, feedback, act_ms = self.play.observe(), dict(result='error', error=blocked), 0.0
             else:
-                obs, feedback, act_ms = self.act(self.correct(action, obs))
+                fixed = self.correct(action, obs)
+                if fixed.get('zone') != action.get('zone'):
+                    entry['zone_corrected'] = [action.get('zone'), fixed.get('zone')]
+                obs, feedback, act_ms = self.act(fixed)
+                if 'zone_corrected' in entry:
+                    feedback['zone_corrected'] = (f"you named zone {action.get('zone')} but stood for zone "
+                                                  f"{fixed.get('zone')}; used zone {fixed.get('zone')}")
+                action = fixed
                 if action.get('op') == 'interact' and feedback['result'] != 'error':
                     self.record_visit(room_before, action.get('zone'), progress_before, obs, feedback['result'])
             if not entry.get('auto') and fallback:

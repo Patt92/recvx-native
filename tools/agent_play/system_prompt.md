@@ -54,6 +54,7 @@ CINEMATIC / DOOR / VIDEO = the game plays; the driver waits for you, you will ra
 at [x,z], yaw, hp (max 160; heal below 70). inv: [slot, id, count, name]. equipped: [name, rounds].
 zones: nearest 5 {i, kind door|item|text|stairs, at, d, destination, item present|taken, go [to, face],
 (go also on text zones: switches, consoles, boxes, panels are text zones)
+far_zones: every other zone of this room with its go point. Use these for far doors instead of guessing.
 back}. `go` is a ready standing point: interact with exactly these to/face. `back` true = this door leads to
 the room you just came from (came_from); do not take it unless that room still has something to do.
 typewriter (save screen): {mode, phase, text, slot, slot_used, highlighted Yes|No}.

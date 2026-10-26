@@ -234,7 +234,8 @@ class DriverTests(unittest.TestCase):
         self.write(self.d)
         drv, client = self.driver([text(dict(op='interact', zone=4, to=[20, 0], face=[7, 7])),
                                    text(dict(op='press', key='cancel'))])
-        drv.with_approaches = lambda obs: obs  # zone without a precomputed go point (beyond the nearest five)
+        drv.with_approaches = lambda obs: obs
+        drv.correct = lambda action, obs: action  # the error path itself is under test here
         with self.ticking():
             drv.run(steps=2)
         feedback = json.loads(client.requests[1][0][-1]['content'])
@@ -408,16 +409,45 @@ class DriverTests(unittest.TestCase):
         self.assertIn('lighter', payload['recent_texts'][-1])
         self.assertTrue(payload['tips'])
 
+    def two_doors(self):
+        # Two doors far apart in the 40x40 fixture room, like the north and south doors of a hall.
+        self.d['interactions'] = [
+            dict(index=13, flags=1, floor=0, type=0, attribute=0, position=[-2, 0, -19], extent=[4, 0, 2], parameters=[0, 4, 0, 0]),
+            dict(index=14, flags=1, floor=0, type=0, attribute=0, position=[-2, 0, 17], extent=[4, 0, 2], parameters=[0, 8, 0, 0])]
+        self.write(self.d)
+
     def test_invented_interact_point_is_replaced_by_the_computed_one(self):
+        self.two_doors()
         drv, _ = self.driver([])
-        obs = dict(zones=[dict(i=4, kind='item', go=[[25.0, 24.5], [25.0, 22.5]])])
-        fixed = drv.correct(dict(op='interact', zone=4, to=[24, 17], face=[24, 20]), obs)
-        self.assertEqual((fixed['to'], fixed['face']), ([25.0, 24.5], [25.0, 22.5]))
-        same = dict(op='interact', zone=4, to=[25.0, 24.5], face=[25.0, 22.5])
-        self.assertIs(drv.correct(same, obs), same)
-        other = dict(op='interact', zone=9, to=[1, 1], face=[2, 2])
-        self.assertIs(drv.correct(other, obs), other)
-        self.assertEqual(drv.correct(dict(op='move', to=[1, 1]), obs), dict(op='move', to=[1, 1]))
+        points = drv.room_points(self.play.read()[0])
+        self.assertEqual(set(points), {13, 14})
+        fixed = drv.correct(dict(op='interact', zone=14, to=[0, 12], face=[0, 30]), {})
+        self.assertEqual((fixed['zone'], fixed['to'], fixed['face']), (14, points[14][0], points[14][1]))
+        exact = dict(op='interact', zone=14, to=points[14][0], face=points[14][1])
+        self.assertIs(drv.correct(exact, {}), exact)
+        self.assertEqual(drv.correct(dict(op='move', to=[1, 1]), {}), dict(op='move', to=[1, 1]))
+
+    def test_zone_number_follows_the_coordinates_when_they_belong_to_another_zone(self):
+        self.two_doors()
+        drv, _ = self.driver([])
+        points = drv.room_points(self.play.read()[0])
+        north = points[13][0]
+        # Zone 14 named, but standing at the north door's point: the north door was meant.
+        fixed = drv.correct(dict(op='interact', zone=14, to=[north[0], north[1] + .5], face=[0, -30]), {})
+        self.assertEqual((fixed['zone'], fixed['to']), (13, north))
+        # Coordinates in the middle of the room keep the named zone.
+        kept = drv.correct(dict(op='interact', zone=14, to=[0, 0], face=[0, 30]), {})
+        self.assertEqual(kept['zone'], 14)
+
+    def test_far_zones_carry_go_points(self):
+        self.two_doors()
+        drv, _ = self.driver([])
+        obs = self.play.observe()
+        obs['zones'] = [z for z in obs['zones'] if z['i'] == 13]   # as if 14 were beyond the nearest five
+        obs = drv.with_approaches(obs)
+        self.assertEqual([z['i'] for z in obs['far_zones']], [14])
+        self.assertEqual(obs['far_zones'][0]['destination'], 8)
+        self.assertEqual(len(obs['far_zones'][0]['go']), 2)
 
     def save_screen(self, count=0):
         return dict(active=True, mode='save', phase_name='files', text='', selection=0, cursor=0,
