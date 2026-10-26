@@ -200,6 +200,9 @@ def compact(d, age, grid_cache=None):
                   route=c.get('result'), busy=busy(d),
                   weapon=d.get('weapon', 0),
                   inv=inventory(d))
+    if 'inventory_capacity' in d:
+        # Grid units (wide items take two; the equipped cell is extra): [used, capacity].
+        result['space'] = [d.get('inventory_used', 0), d['inventory_capacity']]
     eq = equipped(d)
     if eq:
         result['equipped'] = [eq[3] or eq[1], eq[2]]

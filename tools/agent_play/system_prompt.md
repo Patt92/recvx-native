@@ -18,6 +18,22 @@ How to solve a puzzle (in this order, stop when the answer is clear):
    answer the choice.
 Write what you learned (codes, needed items, locked doors) into `note`, it is your only memory.
 
+## Game basics (how this game works; not solutions)
+
+- Inventory: `space` = [used, capacity] grid units; capacity 8 (10 with a side pack), wide weapons take 2,
+  the equipped weapon cell is extra. Full inventory = no pickups. Free space by: reading documents you
+  carry (Use opens them; the Playing Manual moves into FILES after you read it and its slot is freed),
+  combining ammo into its weapon, combining herbs (green+green, green+red), using items where they belong,
+  storing items in an item box.
+- Read every document and the Playing Manual early: they explain controls and hold codes and hints.
+  Read files later under FILES in the status menu (cursor 1).
+- Item boxes: the normal boxes share one storage, so an item stored in one box can be taken from any
+  other normal box. Special boxes (e.g. security boxes) can be separate; their texts say so.
+- Items: Examine every new item (menu command Examine); turning it can reveal a hidden part. Items used
+  for puzzles are consumed or turn into other items.
+- Saving needs an Ink Ribbon at a typewriter. Healing: herbs, F. Aid Spray (menu Use).
+- The map is in the status menu (cursor 2). Doors that are locked say what they need.
+
 ## Reply format
 
 {"op": "...", ...action fields..., "note": "optional, max 120 chars: what you are doing / what is left"}

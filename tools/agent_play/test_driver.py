@@ -661,6 +661,18 @@ class DriverTests(unittest.TestCase):
             drv.watch_events()
             self.assertEqual(calls, [3, 5, 3])
 
+    def test_full_inventory_shows_space_and_ways_to_free_a_slot(self):
+        from play import compact
+        d = state()
+        d.update(inventory_capacity=8, inventory_used=8)
+        obs = compact(d, 0)
+        self.assertEqual(obs['space'], [8, 8])
+        drv, _ = self.driver([])
+        tips = drv.tips(obs, '')
+        self.assertTrue(any('Inventory full' in t and 'FILES' in t for t in tips))
+        d['inventory_used'] = 6
+        self.assertFalse(any('Inventory full' in t for t in drv.tips(compact(d, 0), '')))
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):

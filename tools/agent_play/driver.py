@@ -268,6 +268,11 @@ class Driver:
         if obs.get('owner') == 'INVENTORY' and previous_owner and 'DIALOG' in previous_owner and not menu.get('commands'):
             out.append('The game opened the status menu itself after the text: it expects you to use, equip or '
                        'combine something now. Do not cancel before doing what the text asked.')
+        space = obs.get('space')
+        if space and space[0] >= space[1] and obs.get('owner') in ('FREE', 'DIALOG', 'CINEMATIC DIALOG'):
+            out.append('Inventory full: before picking up more, free a slot: read documents you carry (Use; a read '
+                       'manual moves to FILES), combine ammo into its weapon, combine or use herbs, or store items '
+                       'you do not need now in an item box.')
         dialog = obs.get('dialog') or {}
         if dialog.get('choice') and any(w in dialog.get('text', '').lower() for w in ('save', 'ink ribbon')):
             out.append('Save not needed now: choose No (' + self.save_reason() + ').' if not self.save_allowed()
