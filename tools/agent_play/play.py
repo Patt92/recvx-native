@@ -929,6 +929,8 @@ class Play:
         if not route and not fighting and danger(d) and not danger(before):
             # Routes report 'danger' from the runtime corridor test (route option danger).
             return 'danger'
+        if d.get('movie_active') and not before.get('movie_active'):
+            return 'video'  # a video just started: a decision point for skipping
         if d.get('dialog_choosing'):
             return 'choice'
         if d.get('dialog_open'):

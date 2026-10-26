@@ -722,6 +722,13 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(second['result'], 'error')
         self.assertIn('cancel', self.controls())
 
+    def test_wait_returns_when_a_video_starts(self):
+        from play import Play
+        self.assertEqual(Play.reason(dict(state(), cinematic=True), dict(state(), cinematic=True, movie_active=True),
+                                     waiting=True), 'video')
+        self.assertIsNone(Play.reason(dict(state(), cinematic=True, movie_active=True),
+                                      dict(state(), cinematic=True, movie_active=True), waiting=True))
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):
