@@ -26,6 +26,7 @@ one action per decision. The game logic is untouched.
    | `RECVX_LLM_BASE_URL` | OpenAI-compatible endpoint, e.g. `http://localhost:8080/v1` |
    | `RECVX_LLM_MODEL` | model name |
    | `RECVX_LLM_API_KEY` | API key, empty for a local server |
+   | `RECVX_LLM_EXTRA_BODY` | optional JSON added to every request; for models that think before answering (e.g. Qwen3 on llama.cpp) `{"chat_template_kwargs":{"enable_thinking":false}}` keeps replies short |
 
 2. Start `Start-AI-Play.command` (macOS) or `Start-AI-Play.cmd` (Windows).
 3. Watch. Every decision is printed and logged to `build/play/driver.log`.
