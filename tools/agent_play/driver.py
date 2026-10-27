@@ -17,6 +17,7 @@ read from the environment or the untracked repo .env (--env FILE); the key is se
 Every step is logged to <dir>/driver.log (JSON lines: llm_ms, act_ms, tokens, action, result).
 """
 import argparse
+from collections import Counter
 import json
 import math
 import os
@@ -235,6 +236,70 @@ def answered(obs, result):
     return result in ANSWERS or bool(obs.get('dialog')) or 'DOOR' in ui or 'BOX' in ui
 
 
+def action_text(action):
+    """The action in a few words, as the model would say it."""
+    op = action.get('op')
+    if op == 'move':
+        return f"move to {action.get('to')}"
+    if op == 'interact':
+        return f"examine zone {action.get('zone')}"
+    if op == 'box':
+        return f"box store slot {action['store']}" if 'store' in action else f"box take row {action.get('take')}"
+    if op == 'press':
+        return f"press {action.get('key')}"
+    return json.dumps(action, separators=(',', ':'))
+
+
+def describe_change(before, after, action, result, names):
+    """One sentence on what the last action changed, from two raw runtime states (no game knowledge):
+    inventory and box contents, walls and zones the scripts switched, room and HP."""
+    def inv(d):
+        out = Counter()
+        for v in (d.get('items') or [])[1:]:
+            if v:
+                out[names.get((v >> 16) & 255, f'item {(v >> 16) & 255}')] += 1
+        return out
+    def box(d):
+        return Counter(n for v, n in (d.get('box_items') or []) if v) if d.get('box_open') else None
+    parts = []
+    lost, got = inv(before) - inv(after), inv(after) - inv(before)
+    b0, b1 = box(before), box(after)
+    if b0 is not None and b1 is not None:
+        into, out_of = b1 - b0, b0 - b1
+        if into:
+            parts.append('put into the box: ' + ', '.join(sorted(into)))
+            lost -= into
+        if out_of:
+            parts.append('taken out of the box: ' + ', '.join(sorted(out_of)))
+            got -= out_of
+    if got:
+        parts.append('now in your inventory: ' + ', '.join(sorted(got)))
+    if lost:
+        parts.append('gone from your inventory: ' + ', '.join(sorted(lost)))
+    w0 = {w['i']: w.get('fl', 0) & 1 for w in before.get('walls', [])}
+    w1 = {w['i']: w.get('fl', 0) & 1 for w in after.get('walls', [])}
+    opened = sorted(i for i, f in w1.items() if not f and w0.get(i) == 1)
+    closed = sorted(i for i, f in w1.items() if f and w0.get(i) == 0)
+    if opened:
+        parts.append('walls opened: ' + ', '.join(f'w{i}' for i in opened))
+    if closed:
+        parts.append('walls closed: ' + ', '.join(f'w{i}' for i in closed))
+    z0 = {a['index']: a.get('flags', 0) & 1 for a in before.get('interactions', [])}
+    z1 = {a['index']: a.get('flags', 0) & 1 for a in after.get('interactions', [])}
+    on = sorted(i for i, f in z1.items() if f and z0.get(i) == 0)
+    off = sorted(i for i, f in z1.items() if not f and z0.get(i) == 1)
+    if on:
+        parts.append('zones switched on: ' + ', '.join(map(str, on)))
+    if off:
+        parts.append('zones switched off: ' + ', '.join(map(str, off)))
+    if before.get('room') != after.get('room'):
+        parts.append(f"room changed {str(before.get('room'))[:7]} -> {str(after.get('room'))[:7]}")
+    if before.get('hp') is not None and after.get('hp') is not None and before['hp'] != after['hp']:
+        parts.append(f"HP {before['hp']} -> {after['hp']}")
+    what = '; '.join(parts) if parts else 'nothing in inventory, box, walls, zones or room changed'
+    return f'Last action: {action_text(action)} -> {result}. Changed: {what}.'
+
+
 def trim(obs):
     return {k: v for k, v in obs.items() if k not in DROP}
 
@@ -258,6 +323,8 @@ class Driver:
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
         self.last_owner = ''
+        self.last_change = None    # one sentence: what the last action changed (describe_change)
+        self._labels_key, self._labels = None, {}
         # Run journal: what happened in this run, shown with every decision (no game knowledge, only
         # what the game itself showed): per room the zones read and their answers, open items/doors,
         # important texts (locks, needs, codes) and the causes of events that reacted to the player.
@@ -360,18 +427,6 @@ class Driver:
         if obs.get('owner') == 'INVENTORY' and previous_owner and 'DIALOG' in previous_owner and not menu.get('commands'):
             out.append('The game opened the status menu itself after the text: it expects you to use, equip or '
                        'combine something now. Do not cancel before doing what the text asked.')
-        # If the room rule says the south/west passage is closed by carried items, and the matching
-        # forward door is known, state the concrete action to the model (do not leave it to infer it
-        # from two door numbers or re-enter the previous room).
-        rule = next((r for r in self._rules if 'stays CLOSED' in r.get('rule', '')), None)
-        rj = self.journal_rooms.get(obs.get('room'), {})
-        if rule:
-            closes = __import__('re').search(r'wall(?:s)? ((?:w\d+[, ]*)+)', rule['rule'])
-            if closes:
-                out.append('Detector/item gate: do NOT try the closed detector door or go back to the previous '
-                           'room. Put every carried item named in the room rule into the special security box '
-                           '(store one slot at a time; check the inventory and box after each). Do not take them '
-                           'back yet. Then use the north/forward door and verify the walls/room change.')
         space = obs.get('space')
         if space and space[0] >= space[1] and obs.get('owner') in ('FREE', 'DIALOG', 'CINEMATIC DIALOG'):
             out.append('Inventory full: before picking up more, free a slot: read documents you carry (Use; a read '
@@ -393,22 +448,138 @@ class Driver:
         return out
 
     def room_rule_tips(self):
-        rules = self.room_rules()
-        if not rules:
-            return []
-        return ['ROOM PUZZLE RULE: ' + ' '.join(r['rule'] + ' ' + r.get('how', '') for r in rules) +
-                ' Follow this before examining more objects or doors. Do not take gated items back '
-                'until the passage is open and you have crossed it; verify wall flags/room change.']
+        """Item gates of this room as a checklist of the carried items they check, with current slots."""
+        tips = []
+        d, _, _ = self.play.read()
+        try:
+            import hint
+            names = hint.ITEMS
+        except Exception:
+            names = {}
+        for r in self.room_rules():
+            listed = set(r.get('all_items') or [])
+            if not listed:
+                tips.append('ROOM RULE: ' + r['rule'] + ' ' + r.get('how', ''))
+                continue
+            carried = [(slot, names.get((v >> 16) & 255, '?')) for slot, v in enumerate(d.get('items', [])[1:], 1)
+                       if v and names.get((v >> 16) & 255) in listed]
+            if carried:
+                tips.append('ROOM RULE checklist: the gated passage needs you to carry none of the listed items. '
+                            'Still carried: ' + ', '.join(f'slot {s} {n}' for s, n in carried) + '. Store each '
+                            'of these once in an item box (one box store per item; slots move up after each '
+                            'store, so read inv again). Do not take them back before you crossed the passage.')
+            else:
+                tips.append('ROOM RULE checklist: you carry none of the listed items; stop storing, go to the '
+                            'gated passage and check whether its walls opened (situation says).')
+        return tips
+
+    def zone_labels(self, d):
+        """What each active zone is, from the room data (hint.zone_labels), cached per room and zone switches."""
+        key = (d.get('room'), tuple((a['index'], a.get('flags', 0) & 1, a.get('attribute'), tuple(a.get('parameters', [])))
+                                    for a in d.get('interactions', [])))
+        if key != self._labels_key:
+            try:
+                import hint
+                labels = hint.zone_labels(hint.Room(d['room']), d)
+            except Exception:
+                labels = {}
+            self._labels_key, self._labels = key, labels
+        return self._labels
+
+    SCREENS = {
+        'FREE': 'You can move freely.',
+        'INVENTORY': 'The status menu (inventory) is open.',
+        'CINEMATIC': 'A scene is playing; wait for it.',
+        'VIDEO': 'A video is playing.',
+        'DOOR': 'You are going through a door.',
+        'GRAB': 'An enemy is holding you: shake free.',
+        'TYPEWRITER': 'The typewriter (save/load) screen is open.',
+        'COMPUTER': 'A computer screen is open.',
+    }
+
+    def situation(self, obs):
+        """The moment in short plain sentences (fragments), read before the JSON state. Only what the
+        state, the room data and the last action show; no solutions."""
+        d, _, _ = self.play.read()
+        out = []
+        where = f"You are in {obs.get('room')}"
+        if obs.get('came_from'):
+            where += f" (you came from {str(obs['came_from'])[:7]})"
+        out.append(f"{where}, at {obs.get('at')}, HP {obs.get('hp')}.")
+        owner = obs.get('owner') or ''
+        box = obs.get('box') or {}
+        dialog = obs.get('dialog') or {}
+        if 'BOX' in owner.split():
+            if box.get('mode') == 'list':
+                out.append(f"The item box is open; the box list cursor is on row {box.get('at')} "
+                           f"({box.get('at_item')}). confirm swaps it with your inventory slot {box.get('slot')}; "
+                           'cancel goes back to the inventory side.')
+            else:
+                out.append(f"The item box is open; your inventory cursor is on slot {box.get('slot')}. "
+                           'Use box store/take; cancel closes the box.')
+            stored = ', '.join(f'row {r} {n}' + (f' x{c}' if c and c > 1 else '') for r, n, c in box.get('contents', []))
+            out.append('Box contents: ' + (stored or 'empty') + f". Free rows: {box.get('empty_rows')}.")
+            if box.get('refused'):
+                out.append('The game refused the last swap: "' + ' '.join(box['refused'].split()) + '"')
+        elif dialog:
+            text = ' '.join((dialog.get('text') or '').split())
+            out.append('A text is shown: "' + (text[:160] + '...' if len(text) > 160 else text) + '"' +
+                       (f" It asks a choice; highlighted: {dialog.get('highlighted')}." if dialog.get('choice') else
+                        ' Press confirm to go on.'))
+        else:
+            first = owner.split()[0] if owner else ''
+            out.append(self.SCREENS.get(owner) or self.SCREENS.get(first) or f'Screen: {owner}.')
+        inv = obs.get('inv') or []
+        carried = ', '.join(f'slot {r[0]} {r[3]}' + (f' x{r[2]}' if r[2] and r[2] > 1 else '') for r in inv if len(r) > 3)
+        equipped = (obs.get('equipped') or [None])[0]
+        out.append('You carry: ' + (carried or 'nothing') + '.' + (f' Equipped: {equipped}.' if equipped else ''))
+        if self.last_change:
+            out.append(self.last_change)
+        walls = {w['i']: w.get('fl', 0) & 1 for w in d.get('walls', [])}
+        for r in self.room_rules():
+            gate = sorted(int(w) for w in __import__('re').findall(r'w(\d+)', r['rule'].split(') opens')[0]))
+            shut = [w for w in gate if walls.get(w) == 1]
+            state = ('closed now: ' + ', '.join(f'w{w}' for w in shut)) if shut else 'open now'
+            listed = set(r.get('all_items') or [])
+            have = [row[3] for row in inv if len(row) > 3 and row[3] in listed]
+            if listed:
+                head = r['rule'].split(' opens only')[0]
+                total = len(r['all_items'])
+                out.append(f'Room rule: {head} opens only while you carry none of {total} listed items; '
+                           + (f"you still carry {len(have)} of them: {', '.join(have)}" if have else
+                              'you carry none of them') + f'. Its walls are {state}.')
+            else:
+                out.append(f'Room rule: {r["rule"]} Its walls are {state}.')
+        labels = self.zone_labels(d)
+        log = self.zone_log((obs.get('room') or '')[:7]) if obs.get('room') else {}
+        near, away = [], []
+        for z in obs.get('zones', []):
+            label = labels.get(z['i'], z.get('kind', ''))
+            seen = log.get(z['i'])
+            text = f"zone {z['i']} ({z.get('d')} m): {label}" + (f"; you got: {seen['got']}" if seen else '')
+            (away if z.get('approach_note') else near).append(text)
+        if near:
+            out.append('Near you: ' + ' | '.join(near) + '.')
+        if away:
+            out.append('Not reachable from where you stand now: ' + ' | '.join(away) + '.')
+        enemies = obs.get('enemies') or []
+        if enemies:
+            out.append('Enemies: ' + ', '.join(f"#{e['i']} {e.get('d')} m {e.get('state')}" +
+                                                (' IN GRAB REACH' if e.get('reach') else '') for e in enemies) + '.')
+        if self.since_progress >= 5:
+            out.append(f'No progress for {self.since_progress} decisions: do something you have not tried.')
+        return out
 
     def decide(self, obs, feedback, previous_owner=''):
         self.remember_texts(obs)
-        payload = dict(feedback, state=trim(obs))
+        payload = dict(situation=self.situation(obs))
+        payload.update(feedback, state=trim(obs))
         if self.texts:
             payload['recent_texts'] = self.texts[-4:]
         payload['journal'] = self.journal()
         rules = self.room_rules()
         if rules:
-            payload['room_rules'] = rules
+            payload['room_rules'] = [{k: v for k, v in r.items() if k != 'all_items'} for r in rules]
         alert = self.alert(obs)
         if alert:
             payload['alert'] = alert
@@ -515,6 +686,10 @@ class Driver:
     def act(self, action):
         started = time.monotonic()
         try:
+            before = self.play.read()[0]
+        except PlayError:
+            before = None
+        try:
             obs = self.play.act(action, self.seconds)
             feedback = dict(result=obs.pop('result', 'running'))
             # Outcome details of the action (shots/hits, hp lost, a resent route, healed hp, rounds, snapshot).
@@ -548,6 +723,13 @@ class Driver:
                         feedback['approach_note'] = z['approach_note']
                 except PlayError:
                     pass
+        try:
+            if before is not None:
+                import hint
+                self.last_change = describe_change(before, self.play.read()[0], action, feedback.get('result'),
+                                                   hint.ITEMS)
+        except Exception:  # a description must never cost the action
+            self.last_change = None
         return obs, feedback, (time.monotonic() - started) * 1000
 
     def progress(self):
@@ -583,7 +765,7 @@ class Driver:
                 not (isinstance(to, list) and len(to) == 2) or (self._points_key or [''])[0][:7] != room:
             return None
         for zone, cands in self._candidates.items():
-            if any(math.hypot(c[0][0] - to[0], c[0][1] - to[1]) < .05 for c in cands):
+            if any(math.hypot(c[0][0] - to[0], c[0][1] - to[1]) < .05 for c in cands or []):
                 return room, zone
         return None
 
@@ -697,7 +879,7 @@ class Driver:
             for r in rules:
                 if r not in self._rules:
                     print(f"RULE {d.get('room', '')[:7]}: {r['rule']}", file=self.out, flush=True)
-            self._rules_key, self._rules = key, [{k: v for k, v in r.items() if k != 'all_items'} for r in rules]
+            self._rules_key, self._rules = key, rules
         return self._rules
 
     def track_progress(self, obs, result):
@@ -853,14 +1035,14 @@ class Driver:
             return action
         zone, to = action.get('zone'), action.get('to')
         if isinstance(to, list) and len(to) == 2 and all(isinstance(v, float) for v in to) and points:
-            dist = {i: math.hypot(p[0][0] - to[0], p[0][1] - to[1]) for i, p in points.items()}
-            best = min(dist, key=dist.get)
+            dist = {i: math.hypot(p[0][0] - to[0], p[0][1] - to[1]) for i, p in points.items() if p}
+            best = min(dist, key=dist.get) if dist else zone
             own = dist.get(zone)
             # Another zone's ready point within 3 units, while the named zone's point is 3x as far: switch.
             # A named zone without its own point (unreachable, other floor) is never switched away from.
             if best != zone and own is not None and dist[best] < 3 and own > 3 * max(dist[best], 1):
                 zone = best
-        if zone not in points:
+        if not points.get(zone):  # no zone or no reachable point: unreachable_interact answers
             return action if zone == action.get('zone') else dict(action, zone=zone)
         go = points[zone]
         if zone == action.get('zone') and isinstance(to, list) and len(to) == 2 and \

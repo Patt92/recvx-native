@@ -162,6 +162,33 @@ def informational_zones(room, state):
     return out
 
 
+def zone_labels(room, state):
+    """Short label per active zone from the room data: its message, item, door target or script hook.
+    Same sources as `hint.py room`, one line each, for the driver's situation text."""
+    out = {}
+    for a in state.get('interactions', []):
+        if not a.get('flags', 0) & 1:
+            continue
+        i, t, prm = a['index'], a.get('type'), a.get('parameters', [0, 0])
+        if t == 3 and a.get('attribute', 0) & 0x8000 and len(prm) > 1:
+            text = ' '.join(room.message(prm[1]).replace('|', ' ').split())
+            out[i] = 'text: "' + (text[:110] + '...' if len(text) > 110 else text) + '"'
+        elif t == 3:
+            refs = list(find_refs(room, lambda c, i=i: c[0] == 0x06 and c[1] == 20 and c[3] == i))
+            hooks = [c for _, _, prev in find_refs(room, lambda c, i=i: c[0] == 0x0b and c[1] == i) for c in prev]
+            out[i] = 'object the room script reacts to when examined' if refs or a.get('attribute', 0) & 9 or hooks \
+                else 'object without text (examine it to see what it is)'
+        elif t == 4:
+            it = next((r for r in state.get('room_items', []) if r.get('index') == prm[0]), None)
+            out[i] = (f"item: {ITEMS.get(it['identity'], '?')}" + (' (taken)' if it.get('inactive') else '') +
+                      (' (hidden)' if it.get('hidden') else '')) if it else 'object to examine'
+        elif t == 0 and len(prm) > 1:
+            out[i] = f'door to room {prm[1]}'
+        elif t in (1, 2):
+            out[i] = 'stairs/ladder/step'
+    return out
+
+
 def cmd_zone(i, state):
     room = Room(state['room']); a = next((z for z in state['interactions'] if z['index'] == i), None)
     if a is None: print('no zone', i); return

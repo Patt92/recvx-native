@@ -571,6 +571,99 @@ class DriverTests(unittest.TestCase):
         self.assertEqual([l.split(' ', 1)[1] for l in self.controls().splitlines()],
                          ['down', 'right', 'confirm', 'keys back 1', 'confirm'])
 
+    def test_box_swap_waits_for_slow_cursor_and_list(self):
+        """Live: cursor and list index change ~10 ticks after a key, box_scrolling in between. A press per
+        changed value only; the old loop pressed twice and swapped the item on the next (occupied) row."""
+        d = self.box_state(menu_selected=3, box_items=[[(9 << 16) | 15, 'Handgun'], [0, ''], [(8 << 16), 'Knife']] +
+                           [[0, '']] * 29)
+        self.write(d)
+        stop, pending = threading.Event(), []
+        def runtime():
+            seen = 0
+            while not stop.is_set():
+                now = time.monotonic()
+                lines = self.controls().splitlines()
+                for line in lines[seen:]:
+                    act = line.split(' ', 1)[1]
+                    if act == 'up' and not d['box_selecting']:
+                        pending.append((now + .15, 'menu_selected', 1 if d['menu_selected'] in (2, 3) else d['menu_selected'] - 2))
+                    elif act == 'confirm' and not d['box_selecting']:
+                        d['box_selecting'] = True
+                    elif act.startswith('keys back'):
+                        d['box_scrolling'] = True
+                        pending.append((now + .15, 'box_index', (d['box_index'] + 1) % 32))
+                    elif act == 'confirm':
+                        s, r = d['menu_selected'], d['box_index']
+                        d['items'][s], d['box_items'][r] = d['box_items'][r][0], [d['items'][s], 'Lighter']
+                        d['box_selecting'] = False
+                seen = len(lines)
+                for due in [x for x in pending if x[0] <= now]:
+                    d[due[1]] = due[2]
+                    d['box_scrolling'] = False
+                    pending.remove(due)
+                self.write(d)
+                stop.wait(.02)
+        thread = threading.Thread(target=runtime); thread.start()
+        try:
+            result = self.play.act(dict(op='box', store=1), 6)
+        finally:
+            stop.set(); thread.join()
+        self.assertEqual(result['result'], 'swapped')
+        self.assertEqual(d['box_items'][1][0], (55 << 16) | 1)   # the lighter went to the first empty row
+        self.assertEqual(d['box_items'][2][0], 8 << 16)          # the knife stayed in the box
+        self.assertEqual([l.split(' ', 1)[1] for l in self.controls().splitlines()],
+                         ['up', 'confirm', 'keys back 1', 'confirm'])
+
+    def test_unreachable_zone_entries_do_not_break_move_or_correct(self):
+        # Live crash: room_points keeps None for zones without a reachable point; zone_of_move and
+        # correct iterated over it.
+        self.two_doors()
+        drv, _ = self.driver([])
+        d = self.play.read()[0]
+        drv.room_points(d)
+        drv._candidates[99] = None
+        drv._points_key = drv._points_key  # keep the table
+        self.assertIsNone(drv.zone_of_move('RM_TEST', dict(op='move', to=[1.0, 1.0]), 'settled'))
+        drv.room_points = lambda d: {99: None, 14: [[0.0, 14.0], [0.0, 18.0]]}
+        fixed = drv.correct(dict(op='interact', zone=99, to=[0.5, 13.5], face=[0, 18]), {})
+        self.assertEqual(fixed['zone'], 99)
+
+    def test_describe_change_names_what_moved(self):
+        from driver import describe_change
+        names = {55: 'Lighter', 145: 'Playing Manual', 9: 'Handgun'}
+        before = dict(room='RM_0090.RDX', hp=160, box_open=True, items=[0, (55 << 16) | 1, (145 << 16) | 1],
+                      box_items=[[0, '']] * 3, walls=[dict(i=56, fl=1)], interactions=[])
+        after = dict(before, items=[0, 0, (145 << 16) | 1], box_items=[[(55 << 16) | 1, 'Lighter'], [0, ''], [0, '']],
+                     walls=[dict(i=56, fl=0)])
+        text = describe_change(before, after, dict(op='box', store=1), 'swapped', names)
+        self.assertIn('box store slot 1 -> swapped', text)
+        self.assertIn('put into the box: Lighter', text)
+        self.assertNotIn('gone from your inventory', text)
+        self.assertIn('walls opened: w56', text)
+        same = describe_change(before, before, dict(op='interact', zone=4), 'no_interaction_observed', names)
+        self.assertIn('nothing in inventory, box, walls, zones or room changed', same)
+
+    def test_situation_speaks_box_rule_and_zones(self):
+        drv, _ = self.driver([])
+        d = self.box_state(box_selecting=False, walls=[dict(i=56, fl=1)])
+        self.write(d)
+        drv.room_rules = lambda: [dict(rule='A passage here (walls w56) opens only if you carry NONE of these 2 '
+                                            'items: Lighter, Knife. You carry Lighter, so it stays CLOSED.',
+                                       all_items=['Lighter', 'Knife'])]
+        drv.zone_labels = lambda d: {11: 'object without text'}
+        drv.last_change = 'Last action: box store slot 3 -> swapped. Changed: put into the box: Bullets.'
+        obs = dict(room='RM_TEST', at=[1, 2], hp=160, owner='INVENTORY BOX',
+                   box=dict(mode='inventory', slot=1, contents=[[0, 'Handgun', 15]], empty_rows=31),
+                   inv=[[1, 55, 1, 'Lighter'], [2, 145, 1, 'Playing Manual']],
+                   zones=[dict(i=11, kind='text', d=2.0, go=[[0, 0], [1, 1]])])
+        text = '\n'.join(drv.situation(obs))
+        self.assertIn('The item box is open; your inventory cursor is on slot 1', text)
+        self.assertIn('Box contents: row 0 Handgun x15. Free rows: 31.', text)
+        self.assertIn('You carry: slot 1 Lighter, slot 2 Playing Manual.', text)
+        self.assertIn('put into the box: Bullets', text)
+        self.assertIn('you still carry 1 of them: Lighter. Its walls are closed now: w56.', text)
+        self.assertIn('zone 11 (2.0 m): object without text', text)
+
     def test_examined_zone_is_marked_and_a_third_examine_without_progress_is_refused(self):
         self.d['interactions'] = [dict(index=3, flags=1, floor=0, type=3, attribute=0,
                                        position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
@@ -914,26 +1007,17 @@ class DriverTests(unittest.TestCase):
         drv.track_progress(obs, 'choice')
         self.assertEqual(drv.since_progress, 0)
 
-    def test_item_gate_tip_orders_store_then_forward_door(self):
+    def test_room_rule_checklist_names_carried_items_with_slots(self):
         drv, _ = self.driver([])
-        drv._rules = [dict(rule='A passage here (walls w5, w15) opens only if you carry NONE of these 55 items: Knife. You carry Knife, so it stays CLOSED.',
-                           how='Put every listed carried item into the item box.')]
-        obs = dict(owner='FREE', room='RM_TEST', equipped=['Handgun', 9], inv=[[1, 8, 1, 'Knife']],
-                   zones=[dict(i=14, kind='door', destination=4, go=[[1, 1], [1, 2]])])
-        tips = drv.tips(obs, '')
-        gate = next(t for t in tips if t.startswith('Detector/item gate'))
-        self.assertIn('store one slot at a time', gate)
-        self.assertIn('Do not take them back yet', gate)
-        self.assertIn('north/forward door', gate)
-
-    def test_room_rule_is_a_prominent_tip_before_exploration(self):
-        drv, _ = self.driver([])
-        drv.room_rules = lambda: [dict(rule='The gate stays CLOSED while you carry Handgun and Lighter.',
-                                       how='Store all listed items, go north, verify the wall opens.')]
-        tips = drv.room_rule_tips()
-        rule = next(t for t in tips if t.startswith('ROOM PUZZLE RULE'))
-        self.assertIn('Do not take gated items back', rule)
-        self.assertIn('verify wall flags', rule)
+        self.write(self.box_state())  # carries Lighter (1), Playing Manual (2), Handgun Bullets (3)
+        drv.room_rules = lambda: [dict(rule='A passage (walls w5) opens only if ...', how='store them',
+                                       all_items=['Lighter', 'Handgun Bullets', 'Combat Knife'])]
+        tip = drv.room_rule_tips()[0]
+        self.assertIn('Still carried: slot 1 Lighter, slot 3 Handgun Bullets.', tip)
+        self.assertNotIn('Playing Manual', tip)
+        self.assertIn('slots move up after each store', tip)
+        self.write(self.box_state(items=[0, 0, (145 << 16) | 1] + [0] * 9))
+        self.assertIn('you carry none of the listed items', drv.room_rule_tips()[0])
 
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)

@@ -92,6 +92,12 @@ you must reply with a game action):
 
 ## State fields
 
+situation (first field of every message): the moment in short plain sentences. Where you are, what the
+screen shows, what you carry, what your last action changed ("Last action: ... -> ... Changed: ..."),
+room rules with the current state of their walls, what each nearby zone is (its text, item or door) and
+what you already got from it, which zones you cannot reach from here, enemies. Read it first; the JSON
+fields below carry the same facts in numbers. If "Changed" says nothing changed, do not repeat that action.
+
 owner: who has input. FREE = you walk. DIALOG / CINEMATIC DIALOG = a text page. INVENTORY = status menu.
 BOX = item box. GRAB = an enemy holds you. TITLE / TYPEWRITER = title and save/load screens.
 CINEMATIC / DOOR / VIDEO = the game plays; the driver waits for you, you will rarely see them.

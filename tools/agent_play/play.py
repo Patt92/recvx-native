@@ -696,7 +696,12 @@ class Play:
                 moves = self.box_slot_moves(d, here, slot)
                 if not moves:
                     raise PlayError(f'cannot reach inventory slot {slot} from {here}')
-                d = press(moves[0])
+                # Same latency as the list: wait for the cursor to leave `here`, else a second move
+                # overshoots (slot 1 -> 2 swapped the Playing Manual instead of the equipped item).
+                d = self.menu_press(moves[0], settle=.05, timeout=1.0, tries=1,
+                                    until=lambda x, here=here: x.get('menu_selected') != here)
+            time.sleep(.15)
+            d = self.read()[0]
             if d.get('menu_selected') != slot:
                 raise PlayError(f'inventory cursor stays at {d.get("menu_selected")}, wanted {slot}')
             # The list opens on confirm; a press right after the box slid in can be swallowed: retry checked.
@@ -704,15 +709,24 @@ class Play:
             if not d.get('box_selecting'):
                 raise PlayError('box list did not open')
             count = len(d.get('box_items') or []) or 32
-            for _ in range(count):
+            for _ in range(count + 4):
                 at = d.get('box_index', 0)
                 if at == row:
                     break
                 up = (at - row) % count
                 key = 'forward' if up <= count - up else 'back'
-                d = press(f'keys {key} 1')
+                # The list index changes ~10 ticks after the key and box_scrolling runs in between:
+                # wait for the new index, else the next press overshoots onto an occupied row.
+                d = self.menu_press(f'keys {key} 1', settle=.05, timeout=1.0, tries=1,
+                                    until=lambda x, at=at: x.get('box_index') != at and not x.get('box_scrolling'))
+            d = self.wait_menu(lambda x: not x.get('box_scrolling'), timeout=1.0)
             if d.get('box_index') != row:
                 raise PlayError(f'box list stays at row {d.get("box_index")}, wanted {row}')
+            under = (d.get('box_items') or [])[row] if row < len(d.get('box_items') or []) else (0, '')
+            if action.get('store') is not None and under[0]:
+                raise PlayError(f'box row {row} is not empty ({under[1]}); nothing swapped, cancel back once')
+            if d.get('menu_selected') != slot:
+                raise PlayError(f'inventory cursor moved to {d.get("menu_selected")} (wanted {slot}); nothing swapped, cancel back once')
             press('confirm', settle=.3)
             output = self.observe()
             output['result'] = 'refused' if (output.get('box') or {}).get('refused') else 'swapped'
