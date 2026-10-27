@@ -685,6 +685,10 @@ class Play:
                     time.sleep(.02)
                 return self.read()[0]
             d = d0
+            # Right after the box opens (or a menu returns to it) the cursor is not exported yet: wait for it.
+            d = self.wait_menu(lambda x: isinstance(x.get('menu_selected'), int), timeout=1.5)
+            if not isinstance(d.get('menu_selected'), int):
+                raise PlayError('box cursor not ready yet; wait one step')
             for _ in range(12):  # inventory cursor: one move at a time, the game decides where it lands
                 here = d.get('menu_selected')
                 if here == slot:
@@ -695,7 +699,8 @@ class Play:
                 d = press(moves[0])
             if d.get('menu_selected') != slot:
                 raise PlayError(f'inventory cursor stays at {d.get("menu_selected")}, wanted {slot}')
-            d = press('confirm')
+            # The list opens on confirm; a press right after the box slid in can be swallowed: retry checked.
+            d = self.menu_press('confirm', until=lambda x: x.get('box_selecting'), timeout=1.0, tries=3)
             if not d.get('box_selecting'):
                 raise PlayError('box list did not open')
             count = len(d.get('box_items') or []) or 32
