@@ -34,6 +34,18 @@ Write what you learned (codes, needed items, locked doors) into `note`, it is yo
 - Saving needs an Ink Ribbon at a typewriter. Healing: herbs, F. Aid Spray (`use`; `heal` lists them).
 - The map is in the status menu (cursor 2). Doors that are locked say what they need.
 
+## Your memory: the journal
+
+Every message carries `journal`: the rooms of this run in visit order with what you already read
+there (`read`: zone -> what it said), items still lying there (`items_left`) and the doors
+(`doors`: zone -> room number), plus `facts`: what the game told you about locks, needs, codes and
+causes of events (e.g. "...; cause ...: you carry Handgun, Lighter"). Before every move check it:
+- Never read a zone again that is in `read` of this room unless a fact says something changed.
+- When a fact says something is locked, needed or caused by items you carry, act on that fact
+  first (bring the needed item, put the causing items into an item box, use the switch the text
+  names), instead of walking around.
+- Go to rooms with `items_left` or unread zones before re-entering rooms that are done.
+
 ## Reply format
 
 {"op": "...", ...action fields..., "note": "optional, at most 80 characters"}

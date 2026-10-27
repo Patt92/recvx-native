@@ -257,6 +257,12 @@ class Driver:
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
         self.last_owner = ''
+        # Run journal: what happened in this run, shown with every decision (no game knowledge, only
+        # what the game itself showed): per room the zones read and their answers, open items/doors,
+        # important texts (locks, needs, codes) and the causes of events that reacted to the player.
+        self.journal_rooms = {}    # room -> dict(seen=[...], open_items=[...], doors={i: dest})
+        self.journal_facts = []    # short lines, newest last, deduplicated
+        self.journal_order = []    # rooms in visit order
         self.tasks_seen = set()    # room events running at the last observation
         self.dispatched_seen, self.events_room = 0, None
         self.reported = set()      # events explained during this room visit (scripts restart some every pass)
@@ -372,6 +378,7 @@ class Driver:
         payload = dict(feedback, state=trim(obs))
         if self.texts:
             payload['recent_texts'] = self.texts[-4:]
+        payload['journal'] = self.journal()
         if self.pending_events:
             payload['events_explained'] = self.pending_events
             self.pending_events = []
@@ -590,6 +597,57 @@ class Driver:
         obs['done_here'] = [dict(i=i, n=v['n'], got=v['got']) for i, v in sorted(log.items())]
         return obs
 
+    FACT_WORDS = ('locked', 'need', 'must', 'cannot', "can't", 'password', 'code', 'release', 'require',
+                  'only', 'missing', 'key', 'emblem', 'switch', 'down', 'blocked', 'metal')
+
+    def note_fact(self, text):
+        line = ' '.join(text.replace('|', ' ').split())[:140]
+        if line and line not in self.journal_facts:
+            self.journal_facts = (self.journal_facts + [line])[-12:]
+
+    def update_journal(self, obs):
+        """Keep the run journal current from the compact observation."""
+        room = obs.get('room')
+        if not room:
+            return
+        if room not in self.journal_rooms:
+            self.journal_rooms[room] = dict(seen={}, open_items=[], doors={})
+        if not self.journal_order or self.journal_order[-1] != room:
+            self.journal_order = (self.journal_order + [room])[-10:]
+        r = self.journal_rooms[room]
+        for z in obs.get('zones', []) + obs.get('far_zones', []):
+            if z.get('kind') == 'door' and z.get('destination') is not None:
+                r['doors'][z['i']] = z['destination']
+        items = [z['i'] for z in obs.get('zones', []) + obs.get('far_zones', [])
+                 if z.get('kind') == 'item' and z.get('item') in (None, 'present')]
+        if obs.get('owner') == 'FREE':
+            r['open_items'] = sorted(set(items))
+        for i, v in self.zone_log(room).items():
+            r['seen'][i] = v['got'][:60]
+        dialog = (obs.get('dialog') or {}).get('text', '')
+        for t in (dialog, obs.get('menu_text', ''), obs.get('document', '')):
+            low = (t or '').lower()
+            if any(w in low for w in self.FACT_WORDS) and not low.startswith(("you've taken", 'take the')):
+                self.note_fact(f'{room}: {t}')
+
+    def journal(self):
+        """Compact journal for the model: rooms visited with what is done and open, then facts."""
+        rooms = []
+        for room in self.journal_order:
+            r = self.journal_rooms.get(room, {})
+            entry = dict(room=room)
+            if r.get('seen'):
+                entry['read'] = {str(i): got for i, got in sorted(r['seen'].items())}
+            if r.get('open_items'):
+                entry['items_left'] = r['open_items']
+            if r.get('doors'):
+                entry['doors'] = {str(i): d for i, d in sorted(r['doors'].items())}
+            rooms.append(entry)
+        out = dict(rooms=rooms)
+        if self.journal_facts:
+            out['facts'] = self.journal_facts
+        return out
+
     def watch_events(self):
         """Explain room events that just started and have content (text, voice, items, doors)."""
         d, _, _ = self.play.read()
@@ -612,6 +670,12 @@ class Driver:
                 text = f'event {n}: no explanation ({type(e).__name__})'
             if 'does: nothing visible' not in text and 'no explanation' not in text and text not in self.pending_events:
                 self.pending_events = (self.pending_events + [text])[-2:]
+                cause = next((l for l in text.splitlines() if l.startswith('cause ')), '')
+                if cause:
+                    # Keep what matters to the player: what the event did and which carried items trigger it.
+                    does = text.splitlines()[0].split('does: ', 1)[-1]
+                    carried = cause.split('; ')[-1]
+                    self.note_fact(f"{(room or '')[:7]}: event {n} ({does[:50]}) runs because {carried}")
         self.tasks_seen = now
 
     @staticmethod
@@ -857,7 +921,9 @@ class Driver:
                 if self.idle_waits >= 4:
                     # Nothing changed over several waits: the game may wait for a button after all.
                     feedback = dict(feedback, unchanged_for=self.idle_waits)
-                user, action, usage, llm_ms = self.decide(self.mark_seen(self.with_approaches(self.mark_way_back(obs))), feedback,
+                view = self.mark_seen(self.with_approaches(self.mark_way_back(obs)))
+                self.update_journal(view)
+                user, action, usage, llm_ms = self.decide(view, feedback,
                                                           self.last_owner)
                 fallback = action.pop('no_action', False)
                 note = action.pop('note', None)

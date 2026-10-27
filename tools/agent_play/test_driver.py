@@ -846,6 +846,35 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(lines[0], 'keys none')
         self.assertIn('confirm', lines)
 
+    def test_journal_keeps_rooms_reads_and_facts_across_rooms(self):
+        drv, _ = self.driver([])
+        drv.visits['RM_0010'] = {3: dict(n=1, got='Nothing useful here.', sig=None)}
+        drv.update_journal(dict(room='RM_0010', owner='FREE',
+                                zones=[dict(i=3, kind='text'), dict(i=0, kind='door', destination=2)],
+                                far_zones=[dict(i=5, kind='item')]))
+        drv.update_journal(dict(room='RM_0020', owner='CINEMATIC DIALOG',
+                                dialog=dict(text='The security shutter is down.\nI must release the switch.')))
+        drv.note_fact('RM_0020: event 1 does: a voice-only line; cause F[4:2]=1: you carry Handgun, Lighter')
+        j = drv.journal()
+        self.assertEqual([r['room'] for r in j['rooms']], ['RM_0010', 'RM_0020'])
+        first = j['rooms'][0]
+        self.assertEqual(first['read'], {'3': 'Nothing useful here.'})
+        self.assertEqual(first['items_left'], [5])
+        self.assertEqual(first['doors'], {'0': 2})
+        self.assertTrue(any('must release' in f for f in j['facts']))
+        self.assertTrue(any('you carry Handgun' in f for f in j['facts']))
+        # Pickup confirmations are not facts.
+        drv.update_journal(dict(room='RM_0020', owner='DIALOG', dialog=dict(text="You've taken the\nKey.")))
+        self.assertFalse(any('taken' in f for f in drv.journal()['facts']))
+
+    def test_journal_is_sent_with_every_decision(self):
+        drv, client = self.driver([text(dict(op='press', key='cancel'))])
+        with self.ticking():
+            drv.run(steps=1)
+        payload = json.loads(client.requests[0][0][-1]['content'])
+        self.assertIn('journal', payload)
+        self.assertEqual(payload['journal']['rooms'][0]['room'], 'RM_TEST')
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):
