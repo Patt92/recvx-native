@@ -46,6 +46,13 @@ causes of events (e.g. "...; cause ...: you carry Handgun, Lighter"). Before eve
   names), instead of walking around.
 - Go to rooms with `items_left` or unread zones before re-entering rooms that are done.
 
+## Room rules and alerts
+
+`room_rules` (when present) are mechanics of the current room read from its script, e.g. a passage
+that opens only if you carry none of certain items. They are facts, not hints: follow `how`.
+`alert` appears when you made no progress for a while; it repeats the rule, the facts and what is
+still unread here. When you see an alert, do NOT repeat your last actions: do what the alert names.
+
 ## Reply format
 
 {"op": "...", ...action fields..., "note": "optional, at most 80 characters"}

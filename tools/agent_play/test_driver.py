@@ -875,6 +875,41 @@ class DriverTests(unittest.TestCase):
         self.assertIn('journal', payload)
         self.assertEqual(payload['journal']['rooms'][0]['room'], 'RM_TEST')
 
+    def test_item_gate_rule_is_read_from_the_room_script(self):
+        import os
+        import hint
+        if not os.path.isdir(os.path.join(hint.ROOT, 'data', 'rooms')):
+            self.skipTest('no exported room data')
+        carrying = dict(items=[0, (55 << 16) | 1, (9 << 16) | 15])
+        rules = hint.room_rules(hint.Room('RM_0090.RDX'), carrying)
+        self.assertEqual(len(rules), 1)
+        self.assertIn('NONE of these', rules[0]['rule'])
+        self.assertIn('You carry Handgun, Lighter', rules[0]['rule'])
+        self.assertIn('item box', rules[0]['how'])
+        empty = hint.room_rules(hint.Room('RM_0090.RDX'), dict(items=[0, (145 << 16) | 1]))
+        self.assertIn('so it OPENS', empty[0]['rule'])
+        # Rooms without such a gate get no rule.
+        self.assertEqual(hint.room_rules(hint.Room('RM_0080.RDX'), carrying), [])
+
+    def test_alert_after_decisions_without_progress(self):
+        drv, _ = self.driver([], alert_after=4)
+        obs = dict(room='RM_TEST', owner='FREE', zones=[dict(i=3, kind='text'), dict(i=4, kind='item')])
+        drv.update_journal(obs)
+        for _ in range(3):                          # the first state is the baseline and counts as no progress
+            drv.track_progress(obs, 'settled')
+            self.assertIsNone(drv.alert(obs))
+        drv.track_progress(obs, 'settled')
+        alert = drv.alert(obs)
+        self.assertIn('No progress for 4 decisions', alert)
+        self.assertIn('Zones not read yet here: [3, 4]', alert)
+        self.assertIsNone(drv.alert(obs))            # not again right away
+        self.assertIn('ALERT', drv.out.getvalue())
+        # Progress (a new item) resets the counter.
+        self.d['items'] = self.d['items'] + [(12 << 16) | 15]
+        self.write(self.d)
+        drv.track_progress(obs, 'choice')
+        self.assertEqual(drv.since_progress, 0)
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):

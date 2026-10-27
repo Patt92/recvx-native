@@ -10,6 +10,7 @@ Reads only data/rooms/*.RDT, native/ and the semantic reference src/ps2/veronica
   hint.py blocked x z [auto.json]     why there is no path: which wall blocks, which script events open it
   hint.py event n [room]              room event n decoded (original opcode names, texts, items, flags)
   hint.py msg n [room]                room message n
+  hint.py rules [auto.json]           item gates of this room: what happens with / without carried items
   hint.py why n [auto.json]           why room event n runs: its start conditions, what sets those flags
                                       (items you carry), and what the event does (texts, voice, items)
   hint.py op <hex|bhName>             where a script opcode is implemented (port and original reference)
@@ -369,6 +370,107 @@ def why(room, n, state, limit=1800):
     return text if len(text) <= limit else text[:limit] + ' ...'
 
 
+def event_summary(room, n):
+    """First line of why() without the condition part: what event n does."""
+    return why(room, n, {}, limit=400).splitlines()[0].split('does: ', 1)[-1]
+
+
+def item_gates(room, state):
+    """Generic item checks of a room: a flag that a script sets while the player carries any item of a list
+    (bhPlItemCheck around bhSet), and the events whose start depends on that flag. Returns
+    [dict(flag, items, carried, with_items, without_items)] with event summaries; read from the scripts only."""
+    carried = inventory_ids(state)
+    gates = {}
+    for script in room.scripts():
+        cmds = list(room.commands(script))
+        for k, (o, d, c) in enumerate(cmds):
+            if c[0] != 0x05:
+                continue
+            m, b, v = c[1], (c[2] | (c[3] << 8)) & 0x3ff, 1 - c[5]
+            items = {x[1] for _, cs in enclosing_conditions(cmds, k) for x in cs if x[0] == 0x11}
+            if items:
+                g = gates.setdefault((m, b, v), set())
+                g |= items
+    out = []
+    for (m, b, v), items in gates.items():
+        on, off = set(), set()
+        for script in room.scripts():
+            cmds = list(room.commands(script))
+            for k, (o, d, c) in enumerate(cmds):
+                if c[0] != 0x14:
+                    continue
+                for negated, cs in enclosing_conditions(cmds, k):
+                    for x in cs:
+                        if x[0] == 0x04 and x[1] == m and ((x[2] | (x[3] << 8)) & 0x3ff) == b:
+                            holds_when_set = (1 - x[5]) == v
+                            (on if holds_when_set != negated else off).add(c[3])
+        def describe(evs):
+            res = []
+            for n in sorted(evs):
+                text = event_summary(room, n)
+                if not text.startswith('nothing visible'):
+                    res.append(f'event {n}: {text}')
+            return res[:4]
+        out.append(dict(flag=f'F[{m}:{b}]', items=sorted(ITEMS.get(i, str(i)) for i in items),
+                        carried=sorted(ITEMS.get(i, str(i)) for i in items & carried),
+                        with_items=describe(on), without_items=describe(off),
+                        with_items_all=[f'event {n}:' for n in sorted(on)],
+                        without_items_all=[f'event {n}:' for n in sorted(off)]))
+    return out
+
+
+def event_walls(room, n, seen=None):
+    """Walls event n (and events it starts) opens and closes: (opened, closed) sets of wall indices."""
+    seen = seen if seen is not None else set()
+    if n in seen or f'event{n}' not in room.scripts():
+        return set(), set()
+    seen.add(n)
+    opened, closed = set(), set()
+    for o, d, c in room.commands(f'event{n}'):
+        if c[0] == 0x0a:
+            (opened if c[2] else closed).add(c[1])
+            (closed if c[2] else opened).discard(c[1])
+        elif c[0] == 0x14:
+            o2, c2 = event_walls(room, c[3], seen)
+            opened |= o2; closed |= c2
+    return opened, closed
+
+
+def room_rules(room, state):
+    """Short, model-facing rules of a room derived from its scripts: item checks whose branches open or
+    close walls (a passage that depends on what the player carries)."""
+    rules = []
+    for g in item_gates(room, state):
+        def walls(evs):
+            o, c = set(), set()
+            for line in evs:
+                n = int(line.split(':')[0].split()[1])
+                o2, c2 = event_walls(room, n)
+                o |= o2; c |= c2
+            return o, c
+        o_with, c_with = walls(g['with_items_all'])
+        o_without, c_without = walls(g['without_items_all'])
+        # A passage gated by the items: some event of the 'with items' branch closes it and some event of the
+        # 'without items' branch opens it (the branches run in order, so both may also touch it otherwise).
+        gate = c_with & o_without
+        if not gate:
+            continue
+        n = len(g['items'])
+        names = ', '.join(g['items'][:10]) + (', ...' if n > 10 else '')
+        now = (f"You carry {', '.join(g['carried'])}, so it stays CLOSED." if g['carried']
+               else 'You carry none of them, so it OPENS.')
+        if g['carried']:
+            names = ', '.join(g['carried']) + f' (and {n - len(g["carried"])} other listed items)'
+        rules.append(dict(
+            rule=(f"A passage here (walls {', '.join('w%d' % w for w in sorted(gate))}) opens only if you carry "
+                  f"NONE of these {n} items: {names}. {now}"),
+            how=("Put every listed item you carry into an item box (op box store), keep only what is not on "
+                 "the list, then walk through. Take the items back from a box on the other side if the game "
+                 "allows it (its texts say so)."),
+            all_items=g['items']))
+    return rules
+
+
 def main():
     a = sys.argv[1:]; auto = os.path.join(ROOT, 'build/play/auto.json')
     if not a: print(__doc__); return
@@ -381,6 +483,8 @@ def main():
         for o, d, cc in room.commands(f'event{a[1]}'): print(f"0x{o:x} {'  ' * max(d, 0)}{annotate(room, cc, st)}")
     elif c == 'why':
         st = load_state(a[2] if len(a) > 2 else auto); print(why(Room(st['room']), int(a[1]), st))
+    elif c == 'rules':
+        st = load_state(a[1] if len(a) > 1 else auto); print(json.dumps(room_rules(Room(st['room']), st), indent=1))
     elif c == 'msg': room = Room(a[2] if len(a) > 2 else load_state(auto)['room']); print(room.message(int(a[1])))
     elif c == 'op': cmd_op(a[1])
     elif c == 'grep': cmd_grep(a[1])

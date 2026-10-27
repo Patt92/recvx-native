@@ -32,7 +32,7 @@ from play import Play, PlayError  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PROMPT = HERE / 'system_prompt.md'
-HINT_CMDS = ('room', 'zone', 'blocked', 'event', 'msg', 'why')
+HINT_CMDS = ('room', 'zone', 'blocked', 'event', 'msg', 'why', 'rules')
 # Owners in which the game plays by itself; asking the model there only costs time.
 PASSIVE = {'CINEMATIC', 'DOOR', 'VIDEO'}
 # Longest note kept as the model's memory (the prompt asks for at most this many characters).
@@ -241,7 +241,7 @@ def trim(obs):
 
 class Driver:
     def __init__(self, play, client, *, tools=True, window=8, seconds=6.0, max_tool_calls=3, log=None,
-                 out=sys.stdout, save_rooms=3, repeat_limit=2, skip_videos=False):
+                 out=sys.stdout, save_rooms=3, repeat_limit=2, skip_videos=False, alert_after=20):
         self.play, self.client, self.use_tools = play, client, tools
         self.window, self.seconds, self.max_tool_calls = window, seconds, max_tool_calls
         self.system = PROMPT.read_text()
@@ -263,6 +263,11 @@ class Driver:
         self.journal_rooms = {}    # room -> dict(seen=[...], open_items=[...], doors={i: dest})
         self.journal_facts = []    # short lines, newest last, deduplicated
         self.journal_order = []    # rooms in visit order
+        self._rules_key, self._rules = None, []
+        self.alert_after = alert_after  # decisions without progress before an alert (0 = off)
+        self.since_progress = 0
+        self.progress_marks = set()
+        self.alerted_at = 0
         self.tasks_seen = set()    # room events running at the last observation
         self.dispatched_seen, self.events_room = 0, None
         self.reported = set()      # events explained during this room visit (scripts restart some every pass)
@@ -295,7 +300,7 @@ class Driver:
                 if cmd not in HINT_CMDS:
                     return 'error: cmd must be one of ' + ', '.join(HINT_CMDS)
                 argv = [str(a) for a in args.get('args') or []]
-                if cmd in ('room', 'zone', 'blocked', 'why'):
+                if cmd in ('room', 'zone', 'blocked', 'why', 'rules'):
                     argv.append(str(self.play.auto))
                 elif cmd in ('event', 'msg') and len(argv) == 1:
                     # hint.py would read the room from build/play/auto.json; use this driver's state.
@@ -379,6 +384,12 @@ class Driver:
         if self.texts:
             payload['recent_texts'] = self.texts[-4:]
         payload['journal'] = self.journal()
+        rules = self.room_rules()
+        if rules:
+            payload['room_rules'] = rules
+        alert = self.alert(obs)
+        if alert:
+            payload['alert'] = alert
         if self.pending_events:
             payload['events_explained'] = self.pending_events
             self.pending_events = []
@@ -629,6 +640,68 @@ class Driver:
             low = (t or '').lower()
             if any(w in low for w in self.FACT_WORDS) and not low.startswith(("you've taken", 'take the')):
                 self.note_fact(f'{room}: {t}')
+
+    def room_rules(self):
+        """Rules of the current room derived from its scripts (hint.room_rules), cached per room and
+        carried items; printed to the console when they change."""
+        d, _, _ = self.play.read()
+        key = (d.get('room'), tuple(sorted({(v >> 16) & 255 for v in d.get('items', [])[1:] if v})))
+        if key != self._rules_key:
+            try:
+                import hint
+                rules = hint.room_rules(hint.Room(d['room']), d)
+            except Exception:
+                rules = []
+            for r in rules:
+                if r not in self._rules:
+                    print(f"RULE {d.get('room', '')[:7]}: {r['rule']}", file=self.out, flush=True)
+            self._rules_key, self._rules = key, [{k: v for k, v in r.items() if k != 'all_items'} for r in rules]
+        return self._rules
+
+    def track_progress(self, obs, result):
+        """Progress = something new: a room, an item picked up, a zone answering for the first time, a
+        wall or zone switched by a script. No progress for `alert_after` decisions raises an alert."""
+        d, _, _ = self.play.read()
+        marks = {('room', d.get('room'))}
+        marks |= {('item', (v >> 16) & 255) for v in d.get('items', [])[1:] if v}
+        marks |= {('flag', i, f) for i, f in enumerate(d.get('item_flags', [])) if f}
+        marks |= {('wall', w['i'], w.get('fl', 0) & 1) for w in d.get('walls', [])}
+        for room, zones in self.visits.items():
+            marks |= {('read', room, z) for z in zones}
+        first = not self.progress_marks
+        new = marks - self.progress_marks
+        self.progress_marks |= marks
+        if new and not first:
+            self.since_progress = 0
+            self.alerted_at = 0
+        else:
+            self.since_progress += 1
+
+    def alert(self, obs):
+        """No progress for a while: say so, and what is known that could help (rules, facts, open work)."""
+        if not self.alert_after or self.since_progress < self.alert_after or \
+                (self.alerted_at and self.since_progress - self.alerted_at < max(1, self.alert_after // 2)):
+            return None
+        self.alerted_at = self.since_progress
+        room = obs.get('room')
+        r = self.journal_rooms.get(room, {})
+        unread = [z['i'] for z in obs.get('zones', []) + obs.get('far_zones', [])
+                  if z.get('kind') in ('text', 'item') and z['i'] not in r.get('seen', {})]
+        lines = [f'No progress for {self.since_progress} decisions in {room}.']
+        if self._rules:
+            lines.append('Room rule: ' + self._rules[0]['rule'] + ' ' + self._rules[0].get('how', ''))
+        facts = [f for f in self.journal_facts if f.startswith(room or '?')]
+        if facts:
+            lines.append('Facts here: ' + ' | '.join(facts[-3:]))
+        if unread:
+            lines.append(f'Zones not read yet here: {unread}.')
+        if r.get('open_items'):
+            lines.append(f"Items still lying here: {r['open_items']}.")
+        lines.append('Stop repeating the same actions. Act on the rule/facts above, or try a zone or door you '
+                     'have not used, or call hint zone/rules.')
+        text = ' '.join(lines)
+        print('ALERT ' + text, file=self.out, flush=True)
+        return text
 
     def journal(self):
         """Compact journal for the model: rooms visited with what is done and open, then facts."""
@@ -973,6 +1046,8 @@ class Driver:
                 entry['damage'] = feedback['damage']
             if entry.get('save_skipped'):
                 feedback['save_skipped'] = entry['save_skipped']
+            if not entry.get('auto'):
+                self.track_progress(obs, feedback['result'])
             entry.update(owner=owner, action=action, act_ms=round(act_ms), result=feedback['result'])
             if 'error' in feedback:
                 entry['error'] = feedback['error']
@@ -1005,6 +1080,8 @@ def main():
     ap.add_argument('--seconds', type=float, default=6.0, help='play.py wait budget per action (<= 8)')
     ap.add_argument('--repeat-limit', type=int, default=2,
                     help='refuse examining the same zone more than N times without progress (0 = off)')
+    ap.add_argument('--alert-after', type=int, default=20,
+                    help='alert the model after N decisions without progress (0 = off)')
     ap.add_argument('--skip-videos', action='store_true',
                     default=os.environ.get('RECVX_SKIP_VIDEOS', '').strip().lower() in ('1', 'true', 'yes', 'on'),
                     help='skip FMV videos automatically (also RECVX_SKIP_VIDEOS=1 in .env)')
@@ -1020,6 +1097,7 @@ def main():
                     extra_body=json.loads(a.extra_body) if a.extra_body.strip() else None)
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
                     log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms, skip_videos=a.skip_videos,
+                    alert_after=a.alert_after,
                     repeat_limit=a.repeat_limit)
     if a.dry_run:
         obs = play.observe()
