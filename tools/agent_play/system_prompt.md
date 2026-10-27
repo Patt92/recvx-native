@@ -95,7 +95,9 @@ enemies: {i, hp, d, at, state active|grabbing|hit|scripted, posture standing|low
 dialog: {text, choice, selection, ready, voice}. menu: {cursor, slot, item, commands, command, equipped,
 combine_from, locked}. title: {stage, entry, entries}.
 result of your last action: arrived, arrived_near, settled, dialog, choice, menu, room, danger, grab,
-damage, stalled, interrupted, no_interaction_observed, gameover, error (with message).
+damage, stalled, interrupted, no_interaction_observed, gameover, retry, error (with message).
+Game over is handled by the driver (it continues from the retry point); afterwards events_explained
+tells you that you died and that progress since the retry point is lost.
 
 ## Rules
 

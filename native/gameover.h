@@ -25,6 +25,9 @@ public:
     // Host: ein Snapshot-Laden ersetzt den Spielstand wie bhPopGameData und beendet Task 14 ohne Rueckgabe.
     void abort();
     unsigned phase()const;
+    // Host metrics: continue prompt shown (md1 2 with count at 0xFF) and its cursor (0 = continue).
+    bool prompt()const;
+    int choice()const;
     unsigned count()const;
     // gov_etb explosions requested so far (gameover.c:535-541), and how many of those the
     // world owner could not place: death_blast unbound or it returned false.

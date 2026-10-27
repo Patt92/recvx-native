@@ -285,6 +285,8 @@ GameOver::Result GameOver::tick(unsigned pressed,EventVm& events,AudioMixer& aud
 bool GameOver::active()const{return impl_->running;}
 void GameOver::abort(){impl_->running=false;}
 unsigned GameOver::phase()const{return impl_->md1;}
+bool GameOver::prompt()const{return impl_->running&&impl_->md1==2&&impl_->count>=0xFF;}
+int GameOver::choice()const{return impl_->cont_x;}
 unsigned GameOver::count()const{return unsigned(impl_->count);}
 unsigned GameOver::blasts()const{return impl_->blasts;}
 unsigned GameOver::unsupported_blasts()const{return impl_->unsupported_blasts;}

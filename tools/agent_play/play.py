@@ -314,7 +314,9 @@ def compact(d, age, grid_cache=None):
     if d.get('gameover_active'):
         # Retry restores the retry point (bhPopGameData); after a fresh start that is the game start.
         r = d.get('gameover_retry') or {}
-        result['gameover'] = dict(retry_room=(r.get('room') or '')[:7] or None, retry_play_time=r.get('play_time'))
+        result['gameover'] = dict(retry_room=(r.get('room') or '')[:7] or None, retry_play_time=r.get('play_time'),
+                                  prompt=bool(d.get('gameover_prompt')),
+                                  highlighted='Continue' if not d.get('gameover_choice') else 'Exit')
     return result
 
 
@@ -820,6 +822,23 @@ class Play:
             raise PlayError('wait ticks must be 1..300')
         return [(ticks, 'tick')]
 
+    def stuck_route(self, d):
+        """A pending route that cannot finish: game over owns the screen, or the player did not move for
+        the last 10 s while the route kept steering."""
+        c = d.get('control', {})
+        if not c.get('steer'):
+            self._route_watch = None
+            return False
+        if d.get('gameover_active'):
+            return True
+        at = (round(d['actor'][0], 1), round(d['actor'][2], 1))
+        now = time.monotonic()
+        watch = getattr(self, '_route_watch', None)
+        if not watch or watch[0] != at:
+            self._route_watch = (at, now)
+            return False
+        return now - watch[1] > 10
+
     def act(self, action, seconds=4.0):
         started = time.monotonic()
         if not isinstance(action, dict) or not isinstance(action.get('op'), str):
@@ -837,6 +856,14 @@ class Play:
             waiting = action.get('op') == 'wait'
             if waiting and set(action) - {'op', 'ticks'}:
                 raise PlayError('wait takes only ticks')
+            if (not waiting or 'ticks' in action) and busy(d0) and self.stuck_route(d0):
+                # A route that can no longer move (game over, menu took over) would block every action:
+                # `keys none` ends it in the runtime (keys cancels a route), then the action goes through.
+                self.append([(1, 'keys none')])
+                limit = time.monotonic() + 1.0
+                while time.monotonic() < limit and busy(self.read()[0]):
+                    time.sleep(.03)
+                d0, stamp0, age = self.read()
             if (not waiting or 'ticks' in action) and busy(d0):
                 raise PlayError('action already pending; use wait, do not resend')
             commands = self.compile_wait(action) if waiting else self.compile(d0, action)
@@ -918,7 +945,13 @@ class Play:
     @staticmethod
     def reason(before, d, *, route=False, waiting=False, fighting=False):
         if d.get('gameover_active'):
-            return 'gameover'
+            # Report game over once when it starts and once when its continue prompt is up; the scene in
+            # between is waited out.
+            if not before.get('gameover_active'):
+                return 'gameover'
+            return 'gameover' if d.get('gameover_prompt') and not before.get('gameover_prompt') else None
+        if before.get('gameover_active'):
+            return 'room' if d['room'] != before['room'] else 'retry'
         if d['room'] != before['room']:
             return 'room'
         if d['hp'] < before['hp']:

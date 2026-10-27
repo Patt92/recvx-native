@@ -717,6 +717,26 @@ class Driver:
             self.track_saves(obs)
             self.watch_events()
             tw = obs.get('typewriter') or {}
+            gameover = obs.get('gameover') or {}
+            if gameover:
+                # Game over: the game plays its scene, then asks Continue/Exit. The driver continues by
+                # itself (the retry point restores the room); the model is told afterwards.
+                if not gameover.get('prompt'):
+                    action, entry = {'op': 'wait'}, dict(auto=True)
+                elif gameover.get('highlighted') != 'Continue':
+                    action, entry = {'op': 'press', 'key': 'left'}, dict(auto=True)
+                else:
+                    action, entry = {'op': 'press', 'key': 'confirm'}, dict(auto=True, continued=gameover)
+                    self.pending_events = (self.pending_events + [
+                        'You died (game over) and continued from the retry point '
+                        f"({gameover.get('retry_room') or 'last save'}). Items and progress since then are lost. "
+                        'Avoid what killed you: heal earlier, shoot from range, do not walk into enemies.'])[-2:]
+                owner = obs.get('owner', '')
+                self.last_owner = owner
+                obs, feedback, act_ms = self.act(action)
+                entry.update(owner=owner, action=action, act_ms=round(act_ms), result=feedback['result'])
+                self.record(entry)
+                continue
             playing = 'VIDEO' in obs.get('owner', '').split()
             if not playing:
                 self.video_skipped = False

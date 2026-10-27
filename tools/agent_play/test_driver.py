@@ -802,6 +802,49 @@ class DriverTests(unittest.TestCase):
         self.assertIn(13, north)
         self.assertNotIn(14, north)
 
+    def test_game_over_is_continued_without_the_model(self):
+        self.d.update(gameover_active=True, cinematic=True, gameover_prompt=False, gameover_choice=0,
+                      gameover_retry=dict(room='RM_0080.RDX', play_time=0))
+        self.write(self.d)
+        drv, client = self.driver([])
+        with self.ticking():
+            drv.run(steps=1)
+        self.assertNotIn('confirm', self.controls())          # scene still running: wait
+        self.d['gameover_prompt'] = True
+        self.d['gameover_choice'] = 1                          # cursor on Exit
+        self.write(self.d)
+        with self.ticking():
+            drv.run(steps=2)
+        self.assertEqual(client.requests, [])
+        lines = [l.split(' ', 1)[1] for l in self.controls().splitlines()]
+        self.assertIn('left', lines)
+        self.d['gameover_choice'] = 0
+        self.write(self.d)
+        with self.ticking():
+            drv.run(steps=3)
+        self.assertIn('confirm', self.controls())
+        self.assertTrue(any('game over' in t for t in drv.pending_events))
+
+    def test_route_left_over_at_game_over_does_not_block_actions(self):
+        self.d.update(gameover_active=True, cinematic=True)
+        self.d['control'].update(steer=True, result='moving')
+        self.write(self.d)
+        stop = threading.Event()
+        def runtime():
+            while not stop.is_set():
+                if 'keys none' in self.controls():
+                    self.d['control'].update(steer=False, result='cancelled')
+                self.write(self.d)
+                stop.wait(.02)
+        thread = threading.Thread(target=runtime); thread.start()
+        try:
+            self.play.act(dict(op='press', key='confirm'), .5)
+        finally:
+            stop.set(); thread.join()
+        lines = [l.split(' ', 1)[1] for l in self.controls().splitlines()]
+        self.assertEqual(lines[0], 'keys none')
+        self.assertIn('confirm', lines)
+
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
         for i in range(8):
