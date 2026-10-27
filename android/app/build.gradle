@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Vorgaben aus tools/build_native.py: vorab gebaute, policy-gepruefte native Bibliotheken (jniLibs/arm64-v8a:
+// libmain.so, libSDL2.so, libc++_shared.so) und die Java-Quellen der gleichen gepinnten SDL-Version.
+def jniLibsDir = providers.gradleProperty('recvx.jniLibs').orNull
+def sdlJavaDir = providers.gradleProperty('recvx.sdlJava').orNull
+if (jniLibsDir == null || sdlJavaDir == null) {
+    throw new GradleException('Build through tools/build_native.py --platform android (recvx.jniLibs/recvx.sdlJava missing)')
+}
+
+android {
+    namespace 'org.recvx.nativeport'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'org.recvx.nativeport'
+        minSdk 26
+        targetSdk 36
+        versionCode Integer.parseInt(providers.gradleProperty('recvx.versionCode').getOrElse('1'))
+        versionName providers.gradleProperty('recvx.versionName').getOrElse('0.0.0')
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    sourceSets {
+        main {
+            java.srcDirs += [sdlJavaDir]
+            jniLibs.srcDirs = [jniLibsDir]
+        }
+    }
+    packaging {
+        // Unkomprimiert und seitenausgerichtet im APK (kein Entpacken bei der Installation). Das Policy-Audit
+        // laeuft vorher am unbereinigten libmain.so in build/android-arm64/native; AGP strippt nur die APK-Kopie.
+        jniLibs { useLegacyPackaging = false }
+    }
+    buildTypes {
+        debug { minifyEnabled false }
+        release {
+            minifyEnabled false
+            // Ohne eigenen Schluessel mit dem Debug-Schluessel signiert (Sideload); Store-Signatur ist offen.
+            signingConfig signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint { abortOnError false; checkReleaseBuilds false }
+}

@@ -1,10 +1,13 @@
 #include "gpu_raster.h"
 namespace recvx {
 // Plattformen ohne eigenes GPU-Backend (macOS: gpu_raster_metal.mm, Windows: gpu_raster_d3d11.cpp):
-// Linux nimmt OpenGL, sofern gebaut; sonst zeichnet die Bandstufe in Software.
+// Linux nimmt OpenGL, sofern gebaut; Android (kein Desktop-OpenGL) Vulkan, sofern gebaut; sonst zeichnet die
+// Bandstufe in Software.
 #if !defined(__APPLE__)&&!defined(_WIN32)
 std::shared_ptr<GpuRaster> create_gpu_raster(std::string& reason){
-#ifdef RECVX_HAVE_OPENGL
+#if defined(__ANDROID__)
+    return create_vulkan_raster(reason);
+#elif defined(RECVX_HAVE_OPENGL)
     return create_opengl_raster(reason);
 #else
     reason="no GPU raster backend on this platform";return nullptr;

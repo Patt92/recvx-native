@@ -12,6 +12,8 @@ class DataProfileTests(unittest.TestCase):
         self.assertEqual(data_profiles.profile('tvos')['compressed'],'always')
         self.assertEqual(data_profiles.profile('windows')['compressed'],'optional')
         self.assertFalse(data_profiles.profile('tvos')['mods'])
+        self.assertIn('archives/RDX_LNK',data_profiles.profile('android')['exclude'])
+        self.assertTrue(data_profiles.profile('android')['mods'])
     def test_copy_leaves_out_only_profile_subtrees(self):
         with tempfile.TemporaryDirectory() as t:
             s=Path(t)/'s'

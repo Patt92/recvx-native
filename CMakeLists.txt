@@ -173,6 +173,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
   # user_paths.cpp (recvx_game) und die Runtime sehen dieselbe Plattformkennung.
   add_compile_definitions(RECVX_TVOS=1)
 endif()
+# Android (NDK-Toolchain setzt ANDROID): wie iOS/tvOS nur die Runtime, hier als libmain.so, die SDLs
+# SDLActivity laedt (android/, tools/build_native.py --platform android). Kein Desktop-OpenGL 4.1; der
+# Vulkan-Rasterer ist nicht fuer Android geprueft. Ohne GPU-Backend zeichnet die Bandstufe in Software.
+if(ANDROID)
+  set(RECVX_DEVICE_ONLY_RUNTIME ON)
+elseif(IOS OR TVOS)
+  set(RECVX_DEVICE_ONLY_RUNTIME ON)
+else()
+  set(RECVX_DEVICE_ONLY_RUNTIME OFF)
+endif()
 add_library(recvx_math native/ninja_math.c native/ninja_matrix.c)
 target_compile_definitions(recvx_math PRIVATE RECVX_NATIVE=1)
 target_include_directories(recvx_math PUBLIC native)
@@ -195,6 +205,8 @@ target_link_libraries(recvx_scene PUBLIC recvx_data recvx_math Threads::Threads)
 # iOS kennt kein Desktop-OpenGL 4.1; dort bleibt Metal der einzige GPU-Rasterer.
 if(IOS OR TVOS)
   set(RECVX_ENABLE_OPENGL OFF CACHE BOOL "OpenGL 4.1 is unavailable on iOS/tvOS" FORCE)
+elseif(ANDROID)
+  set(RECVX_ENABLE_OPENGL OFF CACHE BOOL "Desktop OpenGL 4.1 is unavailable on Android" FORCE)
 endif()
 option(RECVX_ENABLE_OPENGL "Build the optional OpenGL 4.1 raster backend (Linux GPU default)" ON)
 target_sources(recvx_scene PRIVATE native/gpu_raster_none.cpp)
@@ -210,7 +222,14 @@ if(IOS OR TVOS)
   set(RECVX_ENABLE_VULKAN OFF CACHE BOOL "The Vulkan raster backend is not packaged for iOS/tvOS" FORCE)
 endif()
 if(RECVX_ENABLE_VULKAN)
-  if(CMAKE_CROSSCOMPILING)
+  if(ANDROID)
+    # Android: Header aus dem NDK-Sysroot (die Toolchain setzt CMAKE_SYSROOT); der System-Loader libvulkan.so
+    # wird wie auf Linux zur Laufzeit geoeffnet, nicht gelinkt. SPIR-V ist zielunabhaengig: dasselbe Host-glslc
+    # wie die Desktopbuilds (VULKAN_SDK/PATH). Das aeltere glslc der NDK-Shader-Tools erzeugt andere Module und
+    # wird nicht verwendet; fehlt ein Host-glslc, bleibt das Backend aus (Warnung unten).
+    find_path(RECVX_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "${CMAKE_SYSROOT}/usr/include" NO_DEFAULT_PATH)
+    find_program(RECVX_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/bin" PATHS ENV PATH NO_CMAKE_FIND_ROOT_PATH)
+  elseif(CMAKE_CROSSCOMPILING)
     # Keine Header des Bauhosts (z. B. Homebrew) in ein fremdes Ziel: nur VULKAN_SDK oder ausdrueckliches
     # -DRECVX_VULKAN_INCLUDE_DIR. glslc darf vom Host kommen (es erzeugt nur SPIR-V).
     find_path(RECVX_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "$ENV{VULKAN_SDK}/include" "$ENV{VULKAN_SDK}/Include"
@@ -314,7 +333,15 @@ if(RECVX_ENABLE_OPENGL)
   endif()
 endif()
 if(RECVX_BUILD_RUNTIME)
-  add_executable(recvx-runtime native/runtime.cpp)
+  if(ANDROID)
+    # SDLActivity laedt libmain.so und ruft SDL_main (runtime.cpp); c++_shared liegt daneben im APK.
+    add_library(recvx-runtime SHARED native/runtime.cpp)
+    set_target_properties(recvx-runtime PROPERTIES OUTPUT_NAME main)
+    target_compile_definitions(recvx-runtime PRIVATE RECVX_ANDROID=1)
+    target_link_libraries(recvx-runtime PRIVATE log android)
+  else()
+    add_executable(recvx-runtime native/runtime.cpp)
+  endif()
   if(IOS OR TVOS)
     # iOS-/tvOS-App-Bundle: SDL startet die Runtime aus UIKit (SDL_UIKitRunApp in runtime.cpp); Spieldaten liegen
     # im Bundle (RECVX_IOS_BUNDLE_DATA) oder (nur iOS) im Documents-Ordner des App-Containers. Signiert wird in
@@ -475,8 +502,8 @@ if(RECVX_BUILD_RUNTIME)
   endif()
   install(TARGETS recvx-runtime RUNTIME DESTINATION bin BUNDLE DESTINATION .)
 endif()
-# Export-/Diagnosewerkzeuge laufen auf dem Buildhost; iOS/tvOS bauen nur das Runtime-Bundle.
-if(NOT IOS AND NOT TVOS)
+# Export-/Diagnosewerkzeuge laufen auf dem Buildhost; iOS/tvOS/Android bauen nur die Runtime.
+if(NOT RECVX_DEVICE_ONLY_RUNTIME)
 add_executable(recvx-native native/main.cpp)
 target_link_libraries(recvx-native PRIVATE recvx_data)
 add_executable(recvx-assets native/export_assets.cpp)
@@ -1546,7 +1573,7 @@ endif()
   target_link_libraries(recvx-morph-world-tests PRIVATE recvx_game)
   add_test(NAME enemy_morph_selection COMMAND recvx-morph-world-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
 endif()
-if(NOT IOS AND NOT TVOS)
+if(NOT RECVX_DEVICE_ONLY_RUNTIME)
   install(TARGETS recvx-native RUNTIME DESTINATION bin)
 endif()
 

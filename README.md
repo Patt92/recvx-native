@@ -75,8 +75,8 @@ with a shared pipeline feeding the available backend:
   is not yet validated on hardware.
 - **Software** — a CPU renderer that remains available as a fallback and a
   reference for validating GPU output.
-- **Vulkan** — an optional backend, never a platform default, selectable on
-  macOS, Windows and Linux. It requires ordered fragment shader interlock (the
+- **Vulkan** — an optional backend on macOS, Windows and Linux, and the GPU
+  default on Android (no desktop OpenGL or Metal there). It requires ordered fragment shader interlock (the
   counterpart of Metal framebuffer fetch and Direct3D 11 Rasterizer Ordered
   Views) and storage-image color, depth and shadow masks; devices without the
   extension fall back to software rather than approximating the blend. The
@@ -224,6 +224,7 @@ brought up separately from the shared gameplay code.
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
 | **iOS/iPadOS** | Runs on iPhone (iOS 27) with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`). No touch controls yet. |
+| **Android** | Native arm64 APK (`./build.sh --platform android`, API 26+) with optional Vulkan as GPU default and software fallback; game data loose on the device. Runs in the arm64 emulator; real devices, touch controls and release signing are open. |
 | **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device. |
 
 These are native platform targets, not plans to ship an emulator with the game.
@@ -445,6 +446,79 @@ signature differs. Input is a Bluetooth game controller (same bindings as the
 desktop controller page); touch controls do not exist yet.
 `./build.sh --platform ios-simulator --install` builds and installs an ad hoc
 signed simulator app (`build/ios-simulator`).
+
+### Android
+
+The Android build is a native arm64 APK (`arm64-v8a`, Android 8.0 / API 26 or
+newer). It has been started in the Android emulator (API 35, arm64): title,
+keyboard input, intro movie and the first room load and run. It has **not**
+yet been checked on a real phone or tablet, with a real controller or for
+performance. Built on a Mac; the game data stays outside the APK.
+
+**1. Install the toolchain once** (Homebrew, no administrator password):
+
+```bash
+brew install openjdk@17 gradle shaderc
+brew install --cask android-commandlinetools
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+yes | sdkmanager --licenses
+sdkmanager "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" platform-tools
+```
+
+The build finds the SDK through `ANDROID_HOME`/`ANDROID_SDK_ROOT` or the
+Homebrew and Android Studio default locations, the NDK through
+`ANDROID_NDK_HOME` or the newest r28 in the SDK, and Java through `JAVA_HOME`
+or Homebrew `openjdk@21`/`openjdk@17`. `shaderc` provides `glslc` for the
+Vulkan shaders (the Vulkan SDK works as well).
+
+**2. Build the APK:**
+
+```bash
+./build.sh --platform android
+```
+
+- Writes `build/android-arm64/RECVX-Native.apk` (the runtime as `libmain.so`,
+  SDL2 and the C++ runtime). The native-port policy audit runs on the
+  unstripped `libmain.so` before packaging.
+- `--install` installs it on the device connected through `adb` (USB
+  debugging) or a running emulator. `--vulkan off` builds without the Vulkan
+  backend.
+- The APK is signed with the local debug key: fine for sideloading, not for a
+  store. Release signing and `--package` are not implemented yet.
+
+**3. Copy the game data** (prepared as for macOS, see above) into the app's
+own folder on the device. No storage permission is needed:
+
+```bash
+adb shell mkdir -p /sdcard/Android/data/org.recvx.nativeport/files/data
+adb push data/. /sdcard/Android/data/org.recvx.nativeport/files/data/
+```
+
+`files/MOVIE` and `archives/RDX_LNK` are not read by the runtime and can be
+left out (about 1.1 GB less). Mods go to `.../files/mods/`.
+
+**4. Start** the app from the launcher, or:
+
+```bash
+adb shell am start -n org.recvx.nativeport/.RecvxActivity
+adb logcat -s RECVX
+```
+
+- Settings, save games, snapshots and `runtime-warnings.log` live in the app's
+  internal storage (`files/RECVX`) and are removed when the app is uninstalled.
+- The game's console output appears in logcat with the tag `RECVX`.
+- **Rendering:** the Vulkan backend is the Android GPU default. It needs ordered
+  fragment shader interlock (`VK_EXT_fragment_shader_interlock`) and
+  `VK_KHR_shader_float_controls`, as on the desktop. Most Android GPU drivers do
+  not expose interlock; there the game draws with the software rasterizer and
+  logs why (`Renderer: software (...)`). There is no blend approximation. The
+  emulator falls back to software.
+- **Input:** keyboard and game controllers (USB/Bluetooth) with the same
+  bindings as on the desktop. Touch controls do not exist yet. Landscape only.
+- Runtime arguments for diagnostics:
+  `adb shell am start -n org.recvx.nativeport/.RecvxActivity --esa args --renderer,software`.
+
+Build details: [Native Port → Android](docs/NATIVE_PORT.md#android-arm64-v8a-api-26).
 
 ### Linux
 

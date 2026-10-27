@@ -1,0 +1,8 @@
+plugins {
+    id 'com.android.application' version '9.4.1' apply false
+}
+// Buildausgaben unter build/android-arm64/gradle (tools/build_native.py), nicht im Quellbaum android/.
+def outputRoot = providers.gradleProperty('recvx.outputDir').orNull
+if (outputRoot != null) {
+    allprojects { layout.buildDirectory = file("${outputRoot}/${project.name}") }
+}

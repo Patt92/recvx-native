@@ -15,6 +15,8 @@ into the native engine.
 - Windows cross-builds from macOS/Linux: Ninja as well.
 - iOS: Xcode with the iOS platform (simulator and device SDKs); a provisioning
   profile and its signing identity for device installs.
+- Android: JDK 17/21, Gradle, Android SDK with NDK r28; see
+  [Android](#android-arm64-v8a-api-26).
 - Linux: GCC or Clang with C++17, Make or Ninja, and the SDL2 development
   dependencies for X11/Wayland and ALSA/PulseAudio; see the
   [README](../README.md#linux).
@@ -155,6 +157,61 @@ for the IPA under `build/packages/tvos-arm64-v<version>`). Differences:
 
 ```sh
 ./build.sh --platform tvos --ios-profile <profile.mobileprovision> --package
+```
+
+### Android (arm64-v8a, API 26+)
+
+`--platform android` builds only the runtime as `libmain.so` with the Android
+NDK (r28, `c++_shared`) and wraps it with Gradle (AGP 9.4, JDK 17/21) in
+`android/` into `build/android-arm64/RECVX-Native.apk`. SDL's own
+`SDLActivity` (Java sources from the same pinned SDL 2.32.10 tree, not copied)
+loads `libc++_shared`, `libSDL2`, `libmain` and calls `SDL_main`
+(`native/runtime.cpp`). The policy audit runs on the unstripped `libmain.so`
+with the NDK `llvm-nm` before packaging.
+
+Requirements (macOS host): `brew install openjdk@17 gradle shaderc` and
+`brew install --cask android-commandlinetools`, then `sdkmanager "ndk;28.2.13676358"
+"platforms;android-36" "build-tools;36.0.0" platform-tools`. The SDK is found
+through `ANDROID_HOME`/`ANDROID_SDK_ROOT` or the Homebrew/Android Studio
+default locations; the NDK through `ANDROID_NDK_HOME` or the newest r28 in the
+SDK; Java through `JAVA_HOME` or Homebrew `openjdk@21`/`openjdk@17`.
+
+- Game data is **not** in the APK. The runtime reads `data/` loose from the
+  app-specific external directory, `mods/` next to it (no storage permission):
+  `adb push <data>/... /sdcard/Android/data/org.recvx.nativeport/files/data/`.
+  The `android` profile in `tools/data_profiles.py` names the unread sources
+  (`files/MOVIE`, `archives/RDX_LNK`) that need not be copied.
+- User data (INIs, snapshots, saves, `runtime-warnings.log`) lives in the
+  internal app storage `files/RECVX` (`native/user_paths.cpp`, reported by the
+  runtime from `SDL_AndroidGetInternalStoragePath`); removed on uninstall.
+- stdout/stderr of the runtime go to logcat with tag `RECVX`.
+- Rendering: the Vulkan raster backend (`native/gpu_raster_vulkan.cpp`) is
+  built and is the Android GPU default (`renderer = gpu` or `vulkan`). Headers
+  come from the NDK sysroot, SPIR-V from the same host `glslc` as the desktop
+  builds (Vulkan SDK or Homebrew `shaderc`; byte-identical shader modules, the
+  older NDK `glslc` is deliberately not used), and the system `libvulkan.so` is
+  opened at run time. It keeps its hard requirement of ordered
+  `VK_EXT_fragment_shader_interlock` plus `VK_KHR_shader_float_controls`;
+  devices without them use the software rasterizer instead of an approximated
+  blend, and the runtime logs the reason (`Renderer: software (...)`). Most
+  Android GPU drivers do not expose the interlock extension, so the software path
+  is the common case. `--vulkan off` builds without it. There is no desktop
+  OpenGL 4.1 or Metal. Presentation goes through the SDL renderer (OpenGL ES 2).
+  Landscape only (`sensorLandscape`).
+- Diagnostic command line: `adb shell am start -n
+  org.recvx.nativeport/.RecvxActivity --esa args --renderer,software` passes
+  runtime arguments (comma-separated); the launcher starts without arguments.
+- Input: keyboard and SDL game controllers. On-screen touch controls are not
+  implemented.
+- The APK is signed with the local debug key (sideload); release signing and
+  `--package` are open.
+
+```sh
+./build.sh --platform android --install
+```
+
+```sh
+adb shell am start -n org.recvx.nativeport/.RecvxActivity
 ```
 
 The app has no command line. Game data comes from the bundle when it contains

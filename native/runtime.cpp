@@ -252,12 +252,50 @@ static void apply_ios_locations(Options& o){
 #endif
 }
 #endif
+#if defined(RECVX_ANDROID)
+#include <android/log.h>
+#include <unistd.h>
+#include <thread>
+// Android startet ohne Kommandozeile und ohne Konsole. Spieldaten liegen lose im app-eigenen externen
+// Verzeichnis (Android/data/<paket>/files/data, per adb push befuellbar, keine Speicherberechtigung noetig),
+// mods/ daneben. Benutzerdaten (INIs, Spielstaende, Snapshots) im internen App-Speicher (user_paths.cpp).
+static void apply_android_locations(Options& o){
+    const char* internal=SDL_AndroidGetInternalStoragePath();
+    if(!internal||!*internal)throw std::runtime_error(std::string("cannot locate the Android internal storage: ")+SDL_GetError());
+    recvx::set_android_files_dir(fs::u8path(internal));
+    const char* external=SDL_AndroidGetExternalStoragePath();
+    if(!external||!*external)throw std::runtime_error(std::string("cannot locate the Android app external storage: ")+SDL_GetError());
+    const auto base=fs::u8path(external);
+    if(!o.data_explicit)o.data=base/"data";
+#if !defined(RECVX_NO_MODS)
+    if(o.mods.empty())o.mods=base/"mods";
+#endif
+}
+// stdout/stderr der Runtime (Statuszeilen, Fehler) zeilenweise ins logcat (Tag RECVX).
+static void redirect_android_output(){
+    static int pipe_fd[2]={-1,-1};
+    if(pipe_fd[0]>=0||pipe(pipe_fd)!=0)return;
+    setvbuf(stdout,nullptr,_IOLBF,0);setvbuf(stderr,nullptr,_IONBF,0);
+    dup2(pipe_fd[1],STDOUT_FILENO);dup2(pipe_fd[1],STDERR_FILENO);
+    std::thread([]{
+        std::string line;char buffer[512];ssize_t n;
+        while((n=read(pipe_fd[0],buffer,sizeof buffer))>0){
+            line.append(buffer,size_t(n));
+            for(size_t end;(end=line.find('\n'))!=std::string::npos;line.erase(0,end+1))
+                __android_log_print(ANDROID_LOG_INFO,"RECVX","%s",line.substr(0,end).c_str());
+        }
+    }).detach();
+}
+#endif
 static int recvx_runtime_main(int argc,char** argv){
     try{
         SdlQuit quit; // Nach allen SDL-/GL-Besitzern freigeben, auch im Fehler-/Headlesspfad.
         auto args=options(argc,argv);
 #if defined(RECVX_IOS)
         apply_ios_locations(args);
+#endif
+#if defined(RECVX_ANDROID)
+        apply_android_locations(args);
 #endif
 if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_controls);std::cout<<args.write_controls<<'\n';return 0;}_Make_SinTable();
         const auto user_paths=recvx::resolve_user_paths(args.data,args.user_dir);
@@ -2337,6 +2375,14 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                   <<", wait "<<1000.0*g.wait/frames<<" ("<<(g.submits/frames)<<" submits, davon GPU "<<1000.0*g.gpu/frames<<"), readback "<<1000.0*g.readback/frames<<" ms/frame\n";}if(presenter){const auto& p=presenter->stats();std::cout<<"Presentation stage: "<<presenter->describe()<<"; "<<p.presents<<" presents ("<<p.repeated<<" repeated), "<<p.interpolated<<" interpolated, "<<p.resets<<" history resets, "<<p.skipped<<" skipped, GPU "<<(p.presents?1000.0*p.gpu_seconds/p.presents:0)<<" ms/frame\n";presenter.reset(); /* Thread vor dem Fenster beenden */}if(audio_device)SDL_CloseAudioDevice(audio_device);report();return 0;
     }catch(const std::exception& e){std::cerr<<"Native runtime error: "<<e.what()<<'\n';return 1;}
 }
+#if defined(RECVX_ANDROID)
+// SDLActivity (android/) laedt libmain.so und ruft SDL_main im SDL-Thread (SDLActivity.getMainFunction).
+// Kein exit(): Android beendet die Activity selbst, die Rueckkehr aus SDL_main schliesst sie.
+extern "C" __attribute__((visibility("default"))) int SDL_main(int argc,char** argv){
+    redirect_android_output();
+    return recvx_runtime_main(argc,argv);
+}
+#else
 int main(int argc,char** argv){
 #if defined(RECVX_IOS)
     // UIKit besitzt den Hauptthread; SDL ruft die Runtime aus seinem App-Delegate auf.
@@ -2345,3 +2391,4 @@ int main(int argc,char** argv){
     return recvx_runtime_main(argc,argv);
 #endif
 }
+#endif

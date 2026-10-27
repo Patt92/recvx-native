@@ -18,9 +18,11 @@ PROFILES = {
     'desktop': {'exclude': (), 'mods': True, 'compressed': 'optional'},
     'ios': {'exclude': _COOKED_SOURCES, 'mods': False, 'compressed': 'optional'},
     'tvos': {'exclude': _COOKED_SOURCES, 'mods': False, 'compressed': 'always'},
+    # Android: data/ und mods/ liegen lose im app-eigenen externen Speicher (runtime.cpp apply_android_locations).
+    'android': {'exclude': _COOKED_SOURCES, 'mods': True, 'compressed': 'optional'},
 }
 TARGET_PROFILE = {'macos': 'desktop', 'windows': 'desktop', 'windows-arm64': 'desktop', 'linux': 'desktop',
-                  'ios': 'ios', 'ios-simulator': 'ios', 'tvos': 'tvos', 'tvos-simulator': 'tvos'}
+                  'ios': 'ios', 'ios-simulator': 'ios', 'tvos': 'tvos', 'tvos-simulator': 'tvos', 'android': 'android'}
 
 
 def profile(target: str) -> dict:

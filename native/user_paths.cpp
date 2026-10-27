@@ -4,7 +4,13 @@
 namespace recvx {
 namespace {
 const char* env(const char* name){const char* v=std::getenv(name);return v&&*v?v:nullptr;}
+#if defined(__ANDROID__)
+std::filesystem::path& android_files_dir(){static std::filesystem::path files;return files;}
+#endif
 }
+#if defined(__ANDROID__)
+void set_android_files_dir(const std::filesystem::path& files){android_files_dir()=files;}
+#endif
 std::filesystem::path platform_user_data_dir(){
 #ifdef _WIN32
     if(const char* appdata=env("APPDATA"))return std::filesystem::path(appdata)/"RECVX";
@@ -16,6 +22,10 @@ std::filesystem::path platform_user_data_dir(){
     // Spielstaende und INIs dort sind deshalb nicht dauerhaft (dokumentiert in NATIVE_PORT.md).
     if(const char* home=env("HOME"))return std::filesystem::path(home)/"Library"/"Caches"/"RECVX";
     throw std::runtime_error("cannot locate the tvOS app container (HOME unset)");
+#elif defined(__ANDROID__)
+    // Interner App-Speicher: privat, ueberlebt Updates, wird erst beim Deinstallieren geloescht.
+    if(!android_files_dir().empty())return android_files_dir()/"RECVX";
+    throw std::runtime_error("cannot locate the Android app files directory (set_android_files_dir not called)");
 #elif defined(__APPLE__)
     if(const char* home=env("HOME"))return std::filesystem::path(home)/"Library"/"Application Support"/"RECVX";
     throw std::runtime_error("cannot locate the macOS user-data directory (HOME unset)");

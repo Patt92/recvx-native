@@ -9,12 +9,16 @@ IOS_ICONS = {'AppIcon60x60@2x.png': 120, 'AppIcon60x60@3x.png': 180,
              'AppIcon76x76@2x~ipad.png': 152, 'AppIcon83.5x83.5@2x~ipad.png': 167}
 # tvOS: flaches App-Icon 400x240 pt @1x/@2x (das geschichtete Format braucht Xcode-Assetkataloge).
 TVOS_ICONS = {'AppIcon400x240.png': (400, 240), 'AppIcon400x240@2x.png': (800, 480)}
+# Android-Launcher (android/app/src/main/res/mipmap-*/ic_launcher.png): 48 dp je Dichtestufe.
+ANDROID_ICONS = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
+ANDROID_RES = ROOT / 'android/app/src/main/res'
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=ROOT / 'data/app-resources/app-icon.jpg')
     parser.add_argument('--output', type=Path, default=ROOT / 'native/resources')
+    parser.add_argument('--android-res', type=Path, default=ANDROID_RES)
     args = parser.parse_args()
     from PIL import Image
     with Image.open(args.source) as source:
@@ -36,6 +40,10 @@ def main():
         side = height
         canvas.paste(image.resize((side, side), Image.Resampling.LANCZOS), ((width - side) // 2, 0))
         canvas.save(args.output / 'tvos' / name, format='PNG')
+    for density, size in ANDROID_ICONS.items():
+        folder = args.android_res / f'mipmap-{density}'
+        folder.mkdir(parents=True, exist_ok=True)
+        image.resize((size, size), Image.Resampling.LANCZOS).save(folder / 'ic_launcher.png', format='PNG')
     print(f'Application icons: {args.output}')
 
 

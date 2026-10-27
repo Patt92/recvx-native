@@ -60,6 +60,18 @@ unbound there. Test in `event_lifecycle` (RM_3010 id 70); red with the old condi
 (`event_lifecycle|effect_bg|game`). bhEffBG 93..99 and effect 26 from bhCheckEvtTimer are also in the working tree.
 Open from the effect audit: holder release after the first pass (bhEffDmy), 0x98 on holder 66 (RM_3091). **No commit.**
 
+**Android build path (2026-10-27, working tree, started):** `./build.sh --platform android [--install]`:
+NDK r28 arm64-v8a API 26, runtime as `libmain.so` (`SDL_main`), SDL shared, Gradle shell `android/`
+(SDLActivity from pinned SDL source), APK `build/android-arm64/RECVX-Native.apk` (debug key). Policy PASS on
+unstripped libmain.so. Data loose in `Android/data/org.recvx.nativeport/files/data`, user data internal
+`files/RECVX`, output to logcat `RECVX`. **Emulator (API 35 arm64, not hardware):** title, keyboard input,
+intro FMV, RM_0000 load, pause/resume of the surface observed. **Vulkan:** backend built for Android and GPU
+default there (NDK headers, host glslc, SPIR-V byte-identical to the macOS build, libvulkan.so at run time); the
+emulator (gfxstream on Apple M4 Pro) lacks fragmentShaderPixelInterlock + float_controls, so it falls back to
+software with logged reason. Vulkan raster on a real Android GPU **not** verified (needs an interlock driver). No
+touch controls, no release signing/`--package`, no real device/controller/performance check.
+[Build docs](docs/NATIVE_PORT.md#android-arm64-v8a-api-26).
+
 **tvOS build path (2026-10-25, working tree):** `./build.sh --platform tvos|tvos-simulator` via the iOS path
 (CMAKE_SYSTEM_NAME tvOS, static SDL, Metal, bundle with baked-in compressed data, since tvOS has no
 Documents folder). User data in `Library/Caches/RECVX` (not persistent, documented), input via

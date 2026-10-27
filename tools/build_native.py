@@ -436,6 +436,120 @@ def package_ios_app(app: Path, output: Path) -> None:
     print(f'Packaged {output}', flush=True)
 
 
+# Android: nur arm64-v8a, minSdk 26 (AAudio, std::filesystem im NDK-libc++). Die Runtime ist libmain.so,
+# geladen von SDLActivity (android/). data/ liegt lose im app-eigenen externen Speicher, nicht im APK.
+ANDROID_ABI = 'arm64-v8a'
+ANDROID_API = 26
+ANDROID_NDK_MAJOR = 28  # erprobt mit r28 (28.2.13676358)
+ANDROID_PACKAGE = 'org.recvx.nativeport'
+ANDROID_TRIPLE = 'aarch64-linux-android'
+
+
+def android_sdk_root() -> Path:
+    for name in ('ANDROID_HOME', 'ANDROID_SDK_ROOT'):
+        value = os.environ.get(name)
+        if value:
+            return Path(value)
+    for candidate in (Path.home() / 'Library/Android/sdk', Path('/opt/homebrew/share/android-commandlinetools'),
+                      Path.home() / 'Android/Sdk'):
+        if (candidate / 'platform-tools').is_dir() or (candidate / 'ndk').is_dir():
+            return candidate
+    raise RuntimeError('Android SDK not found: set ANDROID_HOME (needs ndk, platforms;android-36, build-tools)')
+
+
+def android_ndk(sdk: Path) -> Path:
+    explicit = os.environ.get('ANDROID_NDK_HOME') or os.environ.get('ANDROID_NDK_ROOT')
+    if explicit:
+        return Path(explicit)
+    versions = sorted((p for p in (sdk / 'ndk').glob(f'{ANDROID_NDK_MAJOR}.*') if (p / 'build/cmake/android.toolchain.cmake').is_file()),
+                      key=lambda p: [int(x) for x in p.name.split('.') if x.isdigit()])
+    if not versions:
+        raise RuntimeError(f'Android NDK r{ANDROID_NDK_MAJOR} not found under {sdk / "ndk"} '
+                           f'(sdkmanager "ndk;{ANDROID_NDK_MAJOR}.2.13676358") or set ANDROID_NDK_HOME')
+    return versions[-1]
+
+
+def android_java_home() -> str:
+    """AGP 9 braucht JDK 17 oder 21; neuere Homebrew-JDKs (Standard-java) lehnt Gradle ab."""
+    explicit = os.environ.get('JAVA_HOME')
+    if explicit:
+        return explicit
+    for candidate in ('/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home',
+                      '/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home'):
+        if Path(candidate, 'bin/java').is_file():
+            return candidate
+    try:
+        return subprocess.check_output(['/usr/libexec/java_home', '-v', '17+'], text=True, stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.CalledProcessError):
+        raise RuntimeError('JDK 17 or 21 not found: brew install openjdk@17 or set JAVA_HOME')
+
+
+def build_android(cmake: str, jobs: int, build: Path, summary: list, install: bool, vulkan: bool = True) -> Path:
+    sdk = android_sdk_root()
+    ndk = android_ndk(sdk)
+    native = build / 'native'
+    # Gepinnte SDL-Quelle wiederverwenden (gleiche Version, kein Download); die Java-Seite kommt aus derselben.
+    sdl_source = []
+    for candidate in [Path(os.environ['RECVX_SDL2_SOURCE'])] if os.environ.get('RECVX_SDL2_SOURCE') else \
+            [ROOT / 'build' / d / '_deps/sdl2-src' for d in ('macos-arm64', 'ios-simulator', 'ios-device')]:
+        version = candidate / 'include/SDL_version.h'
+        if version.is_file() and re.search(r'SDL_MINOR_VERSION\s+32\b', version.read_text()) and re.search(r'SDL_PATCHLEVEL\s+10\b', version.read_text()):
+            sdl_source = [f'-DFETCHCONTENT_SOURCE_DIR_SDL2={candidate}']
+            break
+    generator = ['-G', 'Ninja'] if shutil.which('ninja') else []
+    run(cmake, '-S', ROOT, '-B', native, *generator, '-DCMAKE_BUILD_TYPE=Release',
+        f'-DCMAKE_TOOLCHAIN_FILE={ndk / "build/cmake/android.toolchain.cmake"}', f'-DANDROID_ABI={ANDROID_ABI}',
+        f'-DANDROID_PLATFORM=android-{ANDROID_API}', '-DANDROID_STL=c++_shared', *sdl_source,
+        '-DRECVX_FETCH_SDL2=ON', '-DBUILD_TESTING=OFF', f'-DRECVX_BUILD_VERSION={FULL_VERSION}',
+        '-DRECVX_ENABLE_OPENGL=OFF', f'-DRECVX_ENABLE_VULKAN={"ON" if vulkan else "OFF"}')
+    run(cmake, '--build', native, '--parallel', jobs)
+    cache = (native / 'CMakeCache.txt').read_text()
+    vulkan_built = vulkan and bool(re.search(r'^RECVX_GLSLC:FILEPATH=(?!.*NOTFOUND).+$', cache, re.M)) and \
+        bool(re.search(r'^RECVX_VULKAN_INCLUDE_DIR:PATH=(?!.*NOTFOUND).+$', cache, re.M))
+    if vulkan and not vulkan_built:
+        raise RuntimeError('Vulkan backend requested but vulkan/vulkan.h (NDK sysroot) or glslc was not found; pass --vulkan off')
+    summary.append(('Vulkan', 'built, platform GPU default (needs VK_EXT_fragment_shader_interlock, else software)'
+                    if vulkan_built else 'off (--vulkan off)'))
+    runtime = native / 'libmain.so'
+    # Policy-Audit am unbereinigten ELF (mit Symbolen) - vor jeder Verpackung.
+    nm = ndk / 'toolchains/llvm/prebuilt' / f'{platform.system().lower()}-x86_64' / 'bin/llvm-nm'
+    run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT, '--build-dir', native, '--binary', runtime,
+        *(['--nm', nm] if nm.is_file() else []))
+    sdl_root = Path(re.search(r'^SDL2_SOURCE_DIR:STATIC=(.*)$', (native / 'CMakeCache.txt').read_text(), re.M).group(1))
+    libs = build / 'jniLibs' / ANDROID_ABI
+    if libs.exists():
+        shutil.rmtree(libs)
+    libs.mkdir(parents=True)
+    sysroot_lib = ndk / 'toolchains/llvm/prebuilt' / f'{platform.system().lower()}-x86_64' / 'sysroot/usr/lib' / ANDROID_TRIPLE
+    for source in (runtime, native / '_deps/sdl2-build/libSDL2.so', sysroot_lib / 'libc++_shared.so'):
+        if not source.is_file():
+            raise RuntimeError(f'Android native library missing: {source}')
+        shutil.copy2(source, libs / source.name)
+    gradle = shutil.which('gradle')
+    if not gradle:
+        raise RuntimeError('Gradle not found on PATH (brew install gradle)')
+    env = dict(os.environ, JAVA_HOME=android_java_home(), ANDROID_HOME=str(sdk))
+    version_code = FULL_VERSION.rsplit('.', 1)[-1]
+    subprocess.run([gradle, '--no-daemon', '-p', str(ROOT / 'android'), f'-Precvx.outputDir={build / "gradle"}',
+                    f'--project-cache-dir={build / "gradle-cache"}',
+                    f'-Precvx.jniLibs={build / "jniLibs"}', f'-Precvx.sdlJava={sdl_root / "android-project/app/src/main/java"}',
+                    f'-Precvx.versionCode={max(1, int(version_code) if version_code.isdigit() else 1)}',
+                    f'-Precvx.versionName={FULL_VERSION}', 'assembleRelease'], cwd=ROOT, env=env, check=True)
+    apks = sorted((build / 'gradle/app/outputs/apk/release').glob('*.apk'))
+    if not apks:
+        raise RuntimeError('Gradle produced no release APK')
+    apk = build / 'RECVX-Native.apk'
+    shutil.copy2(apks[-1], apk)
+    summary.append(('Native', f'{runtime} (NDK {ndk.name}, {ANDROID_ABI}, API {ANDROID_API})'))
+    summary.append(('APK', f'{apk} (debug-key signed, sideload only)'))
+    summary.append(('Game data', f'not in the APK: adb push <data> /sdcard/Android/data/{ANDROID_PACKAGE}/files/data'))
+    if install:
+        adb = sdk / 'platform-tools/adb'
+        run(adb, 'install', '-r', apk)
+        summary.append(('Installed', f'start with: {adb} shell am start -n {ANDROID_PACKAGE}/.RecvxActivity'))
+    return apk
+
+
 def is_windows_target(target: str) -> bool:
     return target in WINDOWS_TARGETS
 
@@ -550,7 +664,7 @@ def print_summary(lines) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64', 'ios', 'ios-simulator', 'tvos', 'tvos-simulator'], default='host')
+    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64', 'ios', 'ios-simulator', 'tvos', 'tvos-simulator', 'android'], default='host')
     parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8))
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
@@ -575,7 +689,7 @@ def main():
     parser.add_argument('--ios-profile', type=Path, help='iOS device: provisioning profile used for signing (else unsigned)')
     parser.add_argument('--ios-bundle-id', default='org.recvx.native', help='iOS bundle identifier (default: org.recvx.native)')
     parser.add_argument('--ios-bundle-data', action='store_true', help='iOS: copy --data into the app bundle (else the app reads Documents/data)')
-    parser.add_argument('--install', action='store_true', help='iOS: install the app on the booted simulator or on --ios-device')
+    parser.add_argument('--install', action='store_true', help='iOS: install the app on the booted simulator or on --ios-device; Android: adb install on the connected device')
     parser.add_argument('--ios-device', help='iOS device identifier or name for --install (xcrun devicectl list devices)')
     args = parser.parse_args()
     run(sys.executable, ROOT / 'tools/check_no_original_core.py', ROOT)
@@ -603,6 +717,13 @@ def main():
             parser.error('--package for iOS/tvOS creates a device IPA; use --platform ios or tvos')
         if args.install and is_apple_device_target(target) and not args.ios_device:
             parser.error('--install on a device needs --ios-device')
+    elif target == 'android':
+        if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data or args.compressed:
+            parser.error('Android builds cannot run tests or prepare data; build and verify them with the host target')
+        if args.ios_profile or args.ios_bundle_data or args.ios_device:
+            parser.error('--ios-* options apply only to --platform ios, ios-simulator, tvos or tvos-simulator')
+        if args.package or args.output:
+            parser.error('Android builds write build/android-arm64/RECVX-Native.apk; --package/--output are not supported yet')
     elif args.ios_profile or args.ios_bundle_data or args.install or args.ios_device:
         parser.error('--ios-* and --install options apply only to --platform ios, ios-simulator, tvos or tvos-simulator')
     if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.test_regex or args.verify_runtime):
@@ -621,6 +742,13 @@ def main():
         run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs, '--vulkan', args.vulkan, '--opengl', args.opengl, '--d3d12', args.d3d12, '--fsr', args.fsr)
         build = cross_build_directory(target)
         print(f'Cross-built Windows {WINDOWS_TARGETS[target]}.', flush=True)
+    elif target == 'android':
+        try:
+            build_android(cmake, args.jobs, ROOT / 'build/android-arm64', summary, args.install, args.vulkan == 'on')
+        except RuntimeError as error:
+            parser.error(str(error))
+        print_summary(summary)
+        return
     elif is_ios_target(target):
         if os.environ.get('CMAKE_GENERATOR', '').startswith('Xcode'):
             parser.error('iOS/tvOS use a single-config generator: the policy audit needs compile_commands.json, which Xcode does not write')

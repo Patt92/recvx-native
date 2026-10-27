@@ -393,6 +393,22 @@ class IosTargetTests(unittest.TestCase):
         self.assertIn('device IPA', self.main_error('--platform', 'ios-simulator', '--package'))
         self.assertIn('--ios-device', self.main_error('--platform', 'ios', '--install'))
 
+    def test_android_rejects_tests_data_preparation_and_ios_options(self):
+        self.assertIn('cannot run tests', self.main_error('--platform', 'android', '--test'))
+        self.assertIn('cannot run tests', self.main_error('--platform', 'android', '--verify-data'))
+        self.assertIn('--ios-* options', self.main_error('--platform', 'android', '--ios-bundle-data'))
+        self.assertIn('RECVX-Native.apk', self.main_error('--platform', 'android', '--package'))
+
+    def test_android_ndk_selects_newest_pinned_major(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(build_native.os.environ, {}, clear=True):
+            for version in ('27.3.1', '28.0.5', '28.2.13676358', '29.0.1'):
+                toolchain = Path(root) / 'ndk' / version / 'build/cmake/android.toolchain.cmake'
+                toolchain.parent.mkdir(parents=True)
+                toolchain.write_text('')
+            self.assertEqual(build_native.android_ndk(Path(root)).name, '28.2.13676358')
+            with self.assertRaisesRegex(RuntimeError, 'NDK r28 not found'):
+                build_native.android_ndk(Path(root) / 'missing')
+
     def test_developer_dir_without_ios_platform_fails(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(build_native.os.environ, {'DEVELOPER_DIR': root}):
             with self.assertRaisesRegex(RuntimeError, 'no iOS platform'):

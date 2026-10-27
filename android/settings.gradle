@@ -1,0 +1,19 @@
+// RECVX Native fuer Android: duenne Java-Huelle um die native Runtime (libmain.so, CMakeLists.txt).
+// Gebaut ueber tools/build_native.py --platform android; dort wird die native Seite vorab mit dem NDK
+// gebaut, vom Policy-Audit geprueft und als jniLibs uebergeben (-Precvx.jniLibs, -Precvx.sdlJava).
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = 'recvx-native'
+include ':app'

@@ -19,6 +19,12 @@ struct UserPaths {
 // ~/Library/Application Support/RECVX (iOS: dasselbe unter dem HOME des
 // App-Containers), sonst $XDG_DATA_HOME/RECVX.
 std::filesystem::path platform_user_data_dir();
+#if defined(__ANDROID__)
+// Android: das app-interne Dateiverzeichnis (Context.getFilesDir) kennt nur die Java-Seite; die
+// Runtime meldet es vor jeder Pfadaufloesung aus SDL_AndroidGetInternalStoragePath. Benutzerdaten
+// liegen dann in <files>/RECVX; ohne Meldung wirft platform_user_data_dir.
+void set_android_files_dir(const std::filesystem::path& files);
+#endif
 // true, wenn `data_dir` im Git-Arbeitsbaum dieses Projekts liegt (Wurzel neben
 // data/ mit .git oder CLAUDE.md): die Dev-App uebergibt --data <git-root>/data
 // (tools/build_native.py), waehrend das Release-Paket --data <bundle>/data und
