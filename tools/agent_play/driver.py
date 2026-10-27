@@ -793,6 +793,10 @@ class Driver:
         if not self.repeat_limit or action.get('op') != 'interact':
             return None
         v = self.zone_log(obs.get('room')).get(action.get('zone'))
+        # Doors and stairs lead somewhere every time: walking back and forth is not a repeated examine.
+        d, _, _ = self.play.read()
+        if any(a['index'] == action.get('zone') and a.get('type') in (0, 1, 2) for a in d.get('interactions', [])):
+            return None
         limit = 1 if action.get('zone') in self.info_zones() else self.repeat_limit
         if not v or v['n'] < limit or v['sig'] != self.progress():
             return None

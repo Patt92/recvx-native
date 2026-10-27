@@ -628,6 +628,14 @@ class DriverTests(unittest.TestCase):
         fixed = drv.correct(dict(op='interact', zone=99, to=[0.5, 13.5], face=[0, 18]), {})
         self.assertEqual(fixed['zone'], 99)
 
+    def test_a_door_is_never_refused_as_a_repeated_examine(self):
+        # Live: 384 refusals in a row; the door back had been used four times between two rooms.
+        self.two_doors()
+        drv, _ = self.driver([])
+        obs = dict(room=self.play.read()[0]['room'])
+        drv.zone_log(obs['room'])[14] = dict(n=9, got='went through the door', sig=drv.progress())
+        self.assertIsNone(drv.repeat_blocked(dict(op='interact', zone=14), obs))
+
     def test_describe_change_names_what_moved(self):
         from driver import describe_change
         names = {55: 'Lighter', 145: 'Playing Manual', 9: 'Handgun'}
