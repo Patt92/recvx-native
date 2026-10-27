@@ -180,11 +180,25 @@ python3 tools/agent_play/play.py act '{"op":"box","store":4}' # store inventory 
 python3 tools/agent_play/play.py act '{"op":"box","take":2}'  # take box row 2 into the first free inventory slot
 ```
 
-**Before each swap:** inspect `inv`, `box.contents`, `box.empty_rows` and the room's text/rule. On a metal
-detector, store every item named by the detector's room rule; keep keys or items needed for the next step
-if the rule allows it. Do not put the same item in and take it back out unless a new game message changes
-the plan. After a `refused` result, do not send the same swap again: cancel back once and follow the
-refusal text. Do not try to store an item when the box is full or the inventory is full when taking one.
+**Before each swap:** inspect `inv`, `box.contents`, `box.empty_rows` and any `room_rules`.
+
+1. Read the rule before touching the box. Only store an item if the rule says its presence blocks progress,
+   or a game message explicitly asks you to deposit it. A detector rule may name many metal items; the
+   inventory slots tell you exactly which of those items you actually carry.
+2. Make a checklist from that intersection. Store each needed carried item exactly once, in a currently
+   empty row; after every swap check both `inv` and `box.contents` and remove that item from the checklist.
+   Do not repeatedly store, take back or swap items already checked off.
+3. A successful `box` action returns `swapped`; `refused` means nothing moved. Read `refused`, cancel back
+   once and do not retry that item unless something changed. `box` automatically scrolls to the first empty
+   row for `store` and the selected occupied row for `take`.
+4. When the checklist is empty, close the box with `cancel`, then try the route/door specified by the rule.
+   Check whether its wall/zone flags actually changed. If the route is still blocked, inspect the current
+   `room_rules`, carried-item list and `hint zone`/`hint event`; do not start swapping checked-off items again.
+5. Special boxes may have separate storage. Follow their in-game text; do not assume an item stored in a
+   special security box can be retrieved from a normal box (or vice versa). If the game says the items are
+   transferred between two special boxes, still verify the destination's `box.contents` before proceeding.
+
+Do not try to store an item when the box is full, or take one when the inventory has no free slot.
 
 Only when really needed, read the details of exactly one zone:
 
@@ -212,8 +226,31 @@ for type 2 additionally the 6-unit indent point. The step search runs before zon
 therefore wins on overlap. An empty `approach` carries `approach_note` (e.g. all four facings
 blocked, attribute 0x3c00).
 
+## Solving script-driven puzzles
+
+Do not infer the mechanism from a voice line, a visual change or a vague text. When dialogue, a document,
+a zone, an event explanation or a stalled route says that a passage is locked, a switch is required, or
+an item must be deposited/used:
+
+1. Read the message and note the exact requirement in the run journal. If the event explanation says
+   `voice-only`, the game has no printable transcript for that line; do not guess what it said.
+2. Inspect the zone with `hint zone <i>` to see its script checks and current flags. For a wider puzzle,
+   inspect `hint room` once to list all zone messages and destinations.
+3. Follow an item gate or event condition through the room scripts:
+   - `hint rules` summarizes room-script item gates whose branches open/close walls.
+   - `hint event <n>` shows the opcodes and effects of an event that was started.
+   - `hint why <n>` explains why that event starts: current branch conditions, item checks and the
+     event's texts, voice-only lines, item uses and wall/zone changes.
+   These are general decoders over the current room data, not room-specific solutions.
+4. Act on the printed cause. For example, if a rule says the current inventory keeps a wall closed,
+   identify the listed items actually carried, check what the game says about storing them, then use
+   `box store` for the necessary items. Do not repeatedly open/close a box or re-examine the switch.
+5. Verify progress from the next observation: changed wall/zone flags, changed room, or a changed event
+   condition. If the expected change did not happen, reread the refusal text/current flags and try a
+   different allowed action; do not assume success from a voice or animation alone.
+
 Do not regularly print `nav.py` full lists, complete JSON dumps or `hint.py room`.
-`hint.py zone`, then `blocked` or a targeted event, remain tools for unclear cases.
+Use targeted `hint zone`, `rules`, `event` and `why` calls only when the puzzle state is unclear.
 No image/desktop fallback route. Name missing metrics as a tool gap.
 
 ## Handling results correctly
