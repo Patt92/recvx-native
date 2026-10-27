@@ -57,8 +57,16 @@ The driver does not start the game; the runtime runs as below with `--control` a
 - Read AGENTS.md before the work phase; keep its rules, do not reload history per action.
 - Read dialogue text and confirm it deliberately. No automatic ACK and no blind SELECT.
   SELECT is the only cinematic skip; video and door have their own mechanisms.
-- Snapshots only in slot 2. Load only on request or for authorized recovery after game over.
-  Do not automatically assume an old snapshot as the starting point.
+- Snapshot slot 2 is the playing agent's own: it may save and load it whenever it helps,
+  without asking. Save after real progress (new rooms, a solved puzzle) and before a risky fight;
+  load after game over or when stuck, instead of replaying from the retry point. Never use any
+  other slot; those belong to the user. A new run still starts from the title screen; do not
+  assume an existing slot-2 snapshot as its starting point unless the user says so.
+  Control lines (value 1 = slot 2), sent only while no action is pending (`busy` false):
+  `sdl_key down F2`, `sdl_key up F2`, `debug_select snapshot_save 1` or
+  `debug_select snapshot_load 1`, `confirm`, then `sdl_key down F2`, `sdl_key up F2` to close the
+  debug menu. Save only with owner `FREE`; loading also works on the game-over screen and ends it.
+  The debug menu reports the outcome in `debug_status` ("Snapshot 2 gespeichert/geladen: <room>").
 - On abort, end all automatic continuation. No restart after the game was closed. No periodic
   heartbeats that interrupt running control decisions.
 - No subagents/new chats without an explicit request. A control process only executes the
@@ -100,6 +108,15 @@ released between calls). The result additionally has `fire`: `shots`/`hits` of t
 `"then": {"op":"move",...}` appends the escape route without a decision gap; the runtime waits
 out the grab scene running at start and only steers afterwards (without a `danger` abort).
 `move`/`interact` with `"danger": false` run without a danger abort.
+A hit does not end `fire`, `shake`, `move`, `interact`, `keys` or `wait`: they run to their own end
+and report the hp lost as `damage` beside the result; `damage` is the result only when nothing else
+happened. `danger` is judged against the state at the start of the call, also when it began in a
+hit stagger. An `interact` that the runtime reports `stalled` while the player stands within the
+zone's `near` of the point is sent once more from there (`retried`).
+`use`/`equip` (`item`: inventory slot) and `reload` drive the status menu press by press and wait
+for each press to show in the state; `reload` combines the matching ammo (combine table) into the
+equipped weapon and returns `rounds` [before, after]; `equip` on the equipped slot sends nothing.
+`snapshot` (`do`: `save`/`load`) uses slot 2 only, with the debug-menu lines listed above.
 
 Default budget per call: 4 seconds, at most 8 with `--seconds`. This is a bounded wait for
 metrics, not a thinking budget. The call returns earlier at a decision point. Do not wait on the
@@ -112,10 +129,14 @@ Fields of the compact observation (only while the respective owner is active):
 
 - `inv`: `[slot, id, count, name]`; name as in the status list (`item_names` in the dump).
 - `equipped`: `[name, count]` of the equipped slot (`items[0]`).
+- `heal`: `[slot, name]` of carried items whose Use restores hp (Use_00 cure table).
+- `file`: `{n, page: "x/y"}` in the document reader (`document` = text of that page), `{n, list: true}`
+  in the file list. A document is read page by page with right; cancel closes it.
 - `enemies[].reach` / `in_reach`: enemy closer than 7 (grabs observed to start at 5.8–6.3);
   walking past is not free there.
 - `gameover`: `retry_room`/`retry_play_time` of the retry point (`bhPopGameData`). Without a later
-  retry point this is the game start; retry then replaces the progress (consider snapshot 2).
+  retry point this is the game start; retry then replaces the progress (load snapshot 2 instead
+  when it is newer).
 - `title`: `stage` (`fade_in`/`press_start`/`game_mode`/`fade_out`/`settings`), `cursor`,
   `entry` = entry under the cursor, `entries` = rows of the panel, `load_available`.
 - `menu`: `cursor`/`navigation` (bar EXIT/FILE/MAP/ITEM), `slot` + `item` = slot and name under
@@ -152,7 +173,9 @@ named in `overlap`. `interact` runs with `near s`; `s` is the distance the playe
 of the target without the probe leaving the zone. If the route stops within `s` (45 ticks
 without progress, or 8 ticks of walking on the spot, e.g. in front of a door/wall), facing and
 confirm are still executed (result `arrived_near`). The final stretch under 3 units is walked,
-not run.
+not run. The runtime accepts `near` only after 8 ticks of walking in place or in the tick it gives up
+(45 ticks without progress); a player that turns around the point and comes to rest within `s`
+only afterwards is reported `stalled`; play.py then resends the interact once.
 Stairs/ladders (type 1) and steps (type 2, only prm0 0) also have `approach`: probe 0.75 resp.
 4.5 in front of the player; for type 1 only facings within 45° of the partner zone (other floor),
 for type 2 additionally the 6-unit indent point. The step search runs before zones 0/3/4 and

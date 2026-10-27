@@ -37,6 +37,10 @@ DANGER = 15.0
 # Observed grab starts at d 5.8..6.3 (live runs); inside this the enemy can grab, passing is not free.
 GRAB_REACH = 7.0
 FINAL_APPROACH = 8.0
+# Actions that run to their own end under attack; the hp lost is reported as `damage`.
+THROUGH_DAMAGE = ('fire', 'shake', 'move', 'interact', 'keys', 'wait')
+# Status-menu actions driven press by press (item_act).
+ITEM_OPS = ('use', 'equip', 'reload')
 BUTTONS = {'confirm', 'cancel', 'up', 'down', 'left', 'right', 'inventory', 'select', 'skip'}
 KEYS = {'forward', 'back', 'left', 'right', 'run', 'aim', 'attack', 'next_target', 'none'}
 
@@ -72,9 +76,10 @@ def threats(d):
     return out
 
 
-def danger(d, radius=DANGER):
-    """An active or grabbing enemy within radius, only while the player owns the input (FREE/GRAB)."""
-    if owner(d) not in ('FREE', 'GRAB'):
+def danger(d, radius=DANGER, any_owner=False):
+    """An active or grabbing enemy within radius, only while the player owns the input (FREE/GRAB);
+    any_owner: also inside scenes and hit staggers (was the enemy already this close?)."""
+    if not any_owner and owner(d) not in ('FREE', 'GRAB'):
         return False
     px, _, pz = d['actor']
     return any(math.hypot(e['position'][0] - px, e['position'][2] - pz) < radius for e in threats(d))
@@ -88,6 +93,38 @@ def equipped(d):
         return None
     names = d.get('item_names', [])
     return slot, (items[slot] >> 16) & 255, items[slot] & 0xffff, names[slot] if slot < len(names) else ''
+
+
+# item_tables.c curedata[sb_id-20] (Use_00, items 20..29): low nibble = heal level, 0x10 = cures poison.
+CURE = (4, 1, 0, 16, 2, 4, 17, 18, 3, 20)
+
+
+def healing(d):
+    """[slot, name] of carried items whose Use heals hp (Use_00 with a heal level)."""
+    names = d.get('item_names', [])
+    out = []
+    for i, v in enumerate(d.get('items', [])[1:], 1):
+        item = (v >> 16) & 255
+        if 20 <= item < 30 and CURE[item - 20] & 0xf:
+            out.append([i, names[i] if i < len(names) and names[i] else item])
+    return out
+
+
+_TABLES = None
+
+
+def item_tables():
+    """combidata and itemdata[].cmb from the native data tables (native/item_tables.c, initializers only)."""
+    global _TABLES
+    if _TABLES is None:
+        import re
+        text = (Path(__file__).resolve().parents[2] / 'native' / 'item_tables.c').read_text()
+        def values(name):
+            body = re.search(r'\b' + name + r'\[\d+\]\s*=\s*\{(.*?)\};', text, re.S).group(1)
+            return [int(v) for v in re.findall(r'-?\d+', body)]
+        items = values('itemdata')
+        _TABLES = values('combidata'), items[1::3]
+    return _TABLES
 
 
 def inventory(d):
@@ -206,6 +243,9 @@ def compact(d, age, grid_cache=None):
     eq = equipped(d)
     if eq:
         result['equipped'] = [eq[3] or eq[1], eq[2]]
+    heal = healing(d)
+    if heal:
+        result['heal'] = heal
     if age > 2:
         result['stale'] = True
     if c.get('held'):
@@ -238,7 +278,11 @@ def compact(d, age, grid_cache=None):
         if d.get('menu_combining'):
             menu['combine_from'] = [d.get('menu_combine_from'), d.get('menu_combine_name')]
     if d.get('files_open'):
-        result['file'] = [d.get('file_number'), d.get('file_page'), d.get('file_pages')]
+        if d.get('file_folder_open'):
+            result['file'] = dict(n=d.get('file_number'), list=True)
+        else:
+            # Reader: file_page is 0-based; right turns pages, right on the last one selects EXIT.
+            result['file'] = dict(n=d.get('file_number'), page=f"{(d.get('file_page') or 0) + 1}/{d.get('file_pages')}")
     if d.get('box_open'):
         result['box'] = box_view(d)
     if d.get('title_active'):
@@ -702,6 +746,230 @@ class Play:
             return 2 if slot == 1 else (slot + 2 if slot + 2 <= last else None)
         return None
 
+    def menu_press(self, line, settle=.12, until=None, timeout=1.0, tries=2):
+        """Send one control line and return the first fresh state that is unlocked (and meets `until`).
+
+        A press that lands in the frames right after the screen opened can be swallowed although the
+        metrics already show it unlocked; when `until` is given and does not come true, the same line
+        is sent once more."""
+        for attempt in range(tries if until is not None else 1):
+            before = self.read()[1]
+            self.append([(1, line)])
+            limit = time.monotonic() + timeout
+            while time.monotonic() < limit:
+                d, stamp, _ = self.read()
+                if stamp != before and not d.get('menu_locked') and (until is None or until(d)):
+                    time.sleep(settle)
+                    return self.read()[0]
+                time.sleep(.02)
+        return self.read()[0]
+
+    def wait_menu(self, until, timeout=1.0):
+        """First fresh unlocked state that meets `until` (or the last one after timeout)."""
+        limit = time.monotonic() + timeout
+        while time.monotonic() < limit:
+            d = self.read()[0]
+            if not d.get('menu_locked') and until(d):
+                return d
+            time.sleep(.02)
+        return self.read()[0]
+
+    def menu_cursor(self, d, slot):
+        """Step the status-menu item cursor to `slot`, one press at a time, re-reading where it landed.
+        Right/left move one pip index (sub1.c CursorMove); up from the equipment cell or left from slot 1
+        would enter the top bar, so the cursor never presses those there. Each press waits for the
+        cursor to move: a dump written before the runtime took the line still shows the old slot."""
+        for _ in range(14):
+            here = d.get('menu_selected')
+            if here == slot:
+                return d
+            moved = lambda x, here=here: x.get('menu_selected') != here
+            d = self.menu_press('right' if here < slot else 'left', until=moved)
+            if d.get('menu_selected') == here:
+                d = self.menu_press('down' if here < slot else 'up', until=moved)
+            if d.get('menu_navigation') or not d.get('inventory_open'):
+                raise PlayError('status cursor left the item list')
+        raise PlayError(f'status cursor stays at {d.get("menu_selected")}, wanted slot {slot}')
+
+    def menu_command(self, d, name):
+        """Open the command window on the selected item and confirm the command called `name`."""
+        d = self.menu_press('confirm', until=lambda x: x.get('menu_commands_open'))
+        commands = d.get('menu_commands') or []
+        if not d.get('menu_commands_open') or name not in commands:
+            raise PlayError(f'item has no {name} command (commands {commands})')
+        for _ in range(len(commands)):
+            k = d.get('menu_command', 0)
+            if 0 <= k < len(commands) and commands[k] == name:
+                break
+            down = (commands.index(name) - k) % len(commands)
+            d = self.menu_press('down' if down <= len(commands) - down else 'up',
+                                until=lambda x, k=k: x.get('menu_command') != k)
+        if commands[d.get('menu_command', 0)] != name:
+            raise PlayError(f'command cursor stays at {d.get("menu_command")}, wanted {name}')
+        # Combine keeps the command flag set while combining (ui.cpp: commands only drop without combining).
+        return self.menu_press('confirm', settle=.3,
+                               until=lambda x: not x.get('menu_commands_open') or x.get('menu_combining'))
+
+    def ammo_slot(self, d):
+        """Inventory slot whose item loads into the equipped weapon: the combine rule the game checks for
+        the weapon as target and the item as source (Inventory::combination_rule). Classes 0/1 load the
+        same ammo (Combi_00) and win; 2..5 swap the loaded ammo type (Combi_01/02)."""
+        eq = equipped(d)
+        if not eq:
+            raise PlayError('no weapon equipped')
+        combidata, cmb = item_tables()
+        items = d.get('items', [])
+        def effective(v):
+            item, flags = (v >> 16) & 255, (v >> 16) & 0x7000
+            if item == 6:
+                return {0x1000: 152, 0x2000: 153, 0x4000: 154}.get(flags, 6)
+            return 155 if item == 7 and flags == 0x2000 else item
+        weapon = effective(items[eq[0]])
+        found = []
+        for slot in range(1, min(len(items), 12)):
+            if slot == eq[0] or not items[slot]:
+                continue
+            source = effective(items[slot])
+            if not 0 < source < len(cmb) or cmb[source] < 0:
+                continue
+            pos = cmb[source]
+            for k in range(combidata[pos]):
+                at = pos + 1 + 3 * k
+                if at + 2 < len(combidata) and combidata[at] == weapon and combidata[at + 2] & 255 <= 5:
+                    found.append((combidata[at + 2] & 255 > 1, slot))
+        if not found:
+            raise PlayError('no ammo for the equipped weapon in the inventory')
+        return min(found)[1]
+
+    def item_act(self, action, seconds):
+        """use / equip / reload through the real status menu, each press checked against the live cursor.
+        Opened from FREE, the menu is closed again afterwards."""
+        op = action['op']
+        if set(action) - ({'op'} if op == 'reload' else {'op', 'item'}):
+            raise PlayError('unknown action or arguments')
+        started = time.monotonic()
+        with self.exclusive():
+            d0, _, age = self.read()
+            if age > self.max_age:
+                raise PlayError('stale metrics: runtime stopped or paused; no input sent')
+            if busy(d0):
+                raise PlayError('action already pending; use wait, do not resend')
+            items = d0.get('items', [])
+            if op == 'reload':
+                slot = self.ammo_slot(d0)
+            else:
+                slot = action.get('item')
+                if not isinstance(slot, int) or not 1 <= slot < min(len(items), 12) or not items[slot]:
+                    raise PlayError('item must be an occupied inventory slot (inv[][0])')
+            eq = equipped(d0)
+            if op == 'equip' and eq and eq[0] == slot:
+                output = self.observe()
+                output['result'] = 'equipped'
+                output['info'] = 'already equipped; nothing sent (Equip on it again would unequip it)'
+                return output
+            ui = owner(d0)
+            if ui not in ('FREE', 'INVENTORY'):
+                raise PlayError(f'{op} needs owner FREE or INVENTORY, not {ui}')
+            opened = ui == 'FREE'
+            d = d0
+            if opened:
+                d = self.menu_press('inventory', settle=.2, timeout=2.0,
+                                    until=lambda x: x.get('inventory_open') and not x.get('menu_locked'))
+                if not d.get('inventory_open'):
+                    raise PlayError('status menu did not open')
+            sub = ('menu_commands_open', 'menu_combining', 'menu_examining')
+            for _ in range(3):  # leave an open command, combine or examine window
+                if not any(d.get(k) for k in sub):
+                    break
+                before = tuple(d.get(k) for k in sub)
+                d = self.menu_press('cancel', until=lambda x, b=before: tuple(x.get(k) for k in sub) != b)
+            if d.get('menu_navigation') or d.get('files_open') or d.get('menu_commands_open') or d.get('menu_combining'):
+                raise PlayError('status cursor is not in the item list; cancel back to FREE and send it again')
+            d = self.menu_cursor(d, slot)
+            if op == 'reload':
+                rounds = eq[2]
+                d = self.menu_command(d, 'Combine')
+                if not d.get('menu_combining'):
+                    d = self.wait_menu(lambda x: x.get('menu_combining'))
+                if not d.get('menu_combining'):
+                    raise PlayError('combine did not start')
+                d = self.menu_cursor(d, eq[0])
+                d = self.menu_press('confirm', settle=.3, timeout=2.0, until=lambda x: not x.get('menu_combining'))
+            else:
+                d = self.menu_command(d, 'Use' if op == 'use' else 'Equip')
+            text = d.get('menu_message_text') or ''
+            keys = ('menu_commands_open', 'menu_combining', 'menu_navigation', 'inventory_open')
+            for _ in range(4):
+                now = self.read()[0]
+                if not opened or not now.get('inventory_open'):
+                    break
+                was = tuple(now.get(k) for k in keys)
+                self.menu_press('cancel', settle=.2, until=lambda x, w=was: tuple(x.get(k) for k in keys) != w)
+            output = self.observe()
+            if text:
+                output['menu_text'] = text
+            if op == 'use':
+                output['result'] = 'used'
+                if output['hp'] != d0['hp']:
+                    output['healed'] = output['hp'] - d0['hp']
+            elif op == 'equip':
+                now = equipped(self.read()[0])
+                output['result'] = 'equipped' if now and now[0] == slot else 'unchanged'
+            else:
+                now = equipped(self.read()[0])
+                output['rounds'] = [rounds, now[2] if now else None]
+                output['result'] = 'reloaded' if now and (now[2], now[1]) != (rounds, eq[1]) else 'unchanged'
+            output['elapsed_ms'] = round((time.monotonic() - started) * 1000)
+            return output
+
+    def snapshot_act(self, action):
+        """Save or load snapshot slot 2 (debug value 1) through the real debug menu, step by step."""
+        do = action.get('do')
+        if set(action) - {'op', 'do'} or do not in ('save', 'load'):
+            raise PlayError('snapshot takes do save|load (slot 2 only)')
+        started = time.monotonic()
+        with self.exclusive():
+            d0, _, age = self.read()
+            if age > self.max_age:
+                raise PlayError('stale metrics: runtime stopped or paused; no input sent')
+            if busy(d0):
+                raise PlayError('action already pending; use wait, do not resend')
+            if d0.get('debug_open'):
+                raise PlayError('debug menu is open; close it first')
+            ui = owner(d0)
+            if do == 'save' and ui != 'FREE':
+                raise PlayError(f'snapshot save needs owner FREE, not {ui}')
+            if do == 'load' and ui != 'FREE' and 'GAMEOVER' not in ui.split():
+                raise PlayError(f'snapshot load needs owner FREE or GAMEOVER, not {ui}')
+            def step(lines, until, what, timeout=2.0):
+                before = self.read()[1]
+                self.append(lines)
+                limit = time.monotonic() + timeout
+                while time.monotonic() < limit:
+                    d, stamp, _ = self.read()
+                    if stamp != before and until(d):
+                        return d
+                    time.sleep(.02)
+                raise PlayError(what)
+            toggle = [(1, 'sdl_key down F2'), (2, 'sdl_key up F2')]
+            step(toggle, lambda d: d.get('debug_open'), 'debug menu did not open')
+            step([(1, f'debug_select snapshot_{do} 1')], lambda d: True, 'debug selection not taken')
+            expected = 'Snapshot 2 ' + ('gespeichert' if do == 'save' else 'geladen')
+            try:
+                d = step([(1, 'confirm')], lambda d: (d.get('debug_status') or '').startswith((expected, 'Fehler')),
+                         f'no snapshot status after confirm', timeout=4.0)
+            finally:
+                if self.read()[0].get('debug_open'):  # snapshot_load closes the menu itself
+                    step(toggle, lambda d: not d.get('debug_open'), 'debug menu did not close')
+            status = d.get('debug_status') or ''
+            if not status.startswith(expected):
+                raise PlayError(f'snapshot {do} refused: {status}')
+            output = self.observe()
+            output['result'] = 'saved' if do == 'save' else 'loaded'
+            output['snapshot_room'] = status.split(': ', 1)[-1][:7]
+            output['elapsed_ms'] = round((time.monotonic() - started) * 1000)
+            return output
+
     def compile(self, d, action):
         op = action.get('op')
         allowed = {'press': {'op', 'key'}, 'move': {'op', 'to', 'run', 'face', 'danger'},
@@ -841,8 +1109,42 @@ class Play:
 
     def act(self, action, seconds=4.0):
         started = time.monotonic()
+        output = self.act_once(action, seconds)
+        if isinstance(action, dict) and action.get('op') == 'interact' and output.get('result') == 'stalled':
+            # The runtime accepts `near` only after 8 ticks walking in place or in the tick it gives up
+            # (45 ticks without progress); a player turning around the point (no walk input) that comes
+            # to rest within near only afterwards is reported stalled. The same interact from there is a
+            # short final approach (faces, confirms). Once.
+            short = self.stalled_within_near(action)
+            left = seconds - (time.monotonic() - started)
+            if short is not None and left > .5:
+                lost = output.get('damage', 0)
+                output = self.act_once(action, left)
+                output['retried'] = f'route stalled {short:g} from the point, within near; sent once more from there'
+                if lost:
+                    output['damage'] = output.get('damage', 0) + lost
+        return output
+
+    def stalled_within_near(self, action):
+        """Distance to the interact point when the player stands within its `near`, else None."""
+        try:
+            d, _, _ = self.read()
+            a = self.zone(d, action.get('zone'))
+            to = finite_pair(action.get('to'))
+        except (PlayError, FileNotFoundError, TypeError, ValueError, KeyError):
+            return None
+        face = action.get('face') or [a['position'][0] + a['extent'][0]/2, a['position'][2] + a['extent'][2]/2]
+        dist = math.hypot(d['actor'][0] - to[0], d['actor'][2] - to[1])
+        return round(dist, 2) if dist <= self.near_for(a, to, face) else None
+
+    def act_once(self, action, seconds=4.0):
+        started = time.monotonic()
         if not isinstance(action, dict) or not isinstance(action.get('op'), str):
             raise PlayError('action must be an object with op')
+        if action.get('op') in ITEM_OPS:
+            return self.item_act(action, seconds)
+        if action.get('op') == 'snapshot':
+            return self.snapshot_act(action)
         if action.get('op') == 'box':
             if set(action) - {'op', 'store', 'take'}:
                 raise PlayError('unknown action or arguments')
@@ -911,7 +1213,8 @@ class Play:
                     reason = 'ticked'
                     break
                 reason = self.reason(d0, d, route=action.get('op') in ('move', 'interact'), waiting=waiting,
-                                     fighting=action.get('op') in ('fire', 'shake'))
+                                     fighting=action.get('op') in ('fire', 'shake'),
+                                     through_damage=action.get('op') in THROUGH_DAMAGE)
                 if reason:
                     if commands and time.monotonic()-started < .1:
                         continue
@@ -940,10 +1243,17 @@ class Play:
                                       target=None if target < 0 else target, target_hp=hp)
             if commands and action.get('op') == 'interact' and output['result'] == 'settled':
                 output['result'] = 'no_interaction_observed'
+            lost = d0['hp'] - output['hp']
+            if lost > 0:
+                output['damage'] = lost
+                if output['result'] in ('settled', 'held', 'no_interaction_observed'):
+                    output['result'] = 'damage'  # the hit is the only news
             return output
 
     @staticmethod
-    def reason(before, d, *, route=False, waiting=False, fighting=False):
+    def reason(before, d, *, route=False, waiting=False, fighting=False, through_damage=False):
+        # through_damage: a hit does not end the action (fire bursts, routes, timed keys and waits run to
+        # their own end); act reports the hp lost as `damage`.
         if d.get('gameover_active'):
             # Report game over once when it starts and once when its continue prompt is up; the scene in
             # between is waited out.
@@ -954,12 +1264,14 @@ class Play:
             return 'room' if d['room'] != before['room'] else 'retry'
         if d['room'] != before['room']:
             return 'room'
-        if d['hp'] < before['hp']:
+        if d['hp'] < before['hp'] and not through_damage:
             return 'damage'
         if d.get('player_work', {}).get('mode', [0])[0] == 4:
             # Let a dispatched shake sequence finish before reporting the grab again.
             return None if busy(d) else 'grab'
-        if not route and not fighting and danger(d) and not danger(before):
+        # New means: not already this close when the action began, also if it began inside a scene or a
+        # hit stagger (owner CINEMATIC), so the end of a stagger next to the same enemy is no news.
+        if not route and not fighting and danger(d) and not danger(before, any_owner=True):
             # Routes report 'danger' from the runtime corridor test (route option danger).
             return 'danger'
         if d.get('movie_active') and not before.get('movie_active'):

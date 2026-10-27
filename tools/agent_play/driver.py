@@ -35,6 +35,8 @@ PROMPT = HERE / 'system_prompt.md'
 HINT_CMDS = ('room', 'zone', 'blocked', 'event', 'msg', 'why')
 # Owners in which the game plays by itself; asking the model there only costs time.
 PASSIVE = {'CINEMATIC', 'DOOR', 'VIDEO'}
+# Longest note kept as the model's memory (the prompt asks for at most this many characters).
+NOTE_MAX = 80
 # Observation fields the model does not need for a decision.
 DROP = ('age_s', 'busy', 'held', 'elapsed_ms', 'stale', 'weapon')
 
@@ -166,6 +168,52 @@ def parse_action(text):
     raise ValueError('no JSON action with "op" in reply')
 
 
+def salvage_cut(text):
+    """A reply cut at the token limit inside its trailing `note`: the action fields before it are complete.
+    Returns the action without the note, or None when the cut is anywhere else."""
+    text = strip_thinking(text)
+    start = text.find('{')
+    if start < 0:
+        return None
+    depth, quoted, escape = 0, False, False
+    for i in range(start, len(text)):
+        c = text[i]
+        if quoted:
+            if escape:
+                escape = False
+            elif c == '\\':
+                escape = True
+            elif c == '"':
+                quoted = False
+            continue
+        if c == '"':
+            quoted = True
+        elif c in '{[':
+            depth += 1
+        elif c in '}]':
+            depth -= 1
+        elif c == ',' and depth == 1 and text[i + 1:].lstrip().startswith('"note"'):
+            try:
+                value = json.loads(text[start:i] + '}')
+            except json.JSONDecodeError:
+                return None
+            return value if isinstance(value, dict) and isinstance(value.get('op'), str) else None
+    return None
+
+
+def default_action(obs):
+    """What the driver does after two empty cut replies in a row, by owner (never a game decision)."""
+    dialog = obs.get('dialog') or {}
+    if dialog:
+        return {'op': 'press', 'key': 'confirm'} if dialog.get('ready') and not dialog.get('choice') else {'op': 'wait'}
+    ui = set((obs.get('owner') or '').split())
+    if ui & {'INVENTORY', 'BOX', 'FILES'}:
+        return {'op': 'press', 'key': 'cancel'}
+    if obs.get('owner') == 'FREE':
+        return {'op': 'wait', 'ticks': 15}
+    return {'op': 'wait'}
+
+
 def passive(obs):
     """True when the game owns the input and no answer is possible or needed."""
     if obs.get('busy') or (obs.get('menu') or {}).get('locked'):
@@ -175,6 +223,16 @@ def passive(obs):
     if obs.get('computer'):
         return obs['computer'].get('waits') in ('printing', 'script')
     return bool(obs.get('owner')) and set(obs['owner'].split()) <= PASSIVE
+
+
+# Results that show what a zone answers (text, choice, menu, terminal, another room, a new owner); a
+# danger/grab/damage/stall/interruption/hold stopped the player before the zone could answer.
+ANSWERS = ('dialog', 'choice', 'menu', 'room', 'computer', 'owner')
+
+
+def answered(obs, result):
+    ui = (obs.get('owner') or '').split()
+    return result in ANSWERS or bool(obs.get('dialog')) or 'DOOR' in ui or 'BOX' in ui
 
 
 def trim(obs):
@@ -192,7 +250,7 @@ class Driver:
         self.log = log
         self.out = out
         self.steps = 0
-        self.bad_replies = []
+        self.bad_replies, self.note_cut = [], False  # note_cut: last reply was cut inside its note
         self._points_key, self._points = None, {}  # zone -> [to, face] for the current room and floor
         self._candidates = {}       # zone -> up to three [to, face] candidates
         self._failed_points = set() # (room, zone, to) that stalled or triggered nothing
@@ -217,6 +275,9 @@ class Driver:
         self.save_count = None
         self.save_room_seen = None
         self.texts = []            # last game texts (dialog, menu, document, terminal) the model has seen
+        self.move_zone = None      # (room, zone) whose ready point the last move ended on (move + confirm)
+        self.snapshot = None       # slot-2 snapshot saved in this run: dict(room, play_time)
+        self.snapshot_tried = None # retry play time of the game over a load was already tried for
 
     # --- tools -----------------------------------------------------------------------------------------
     def tool(self, name, args):
@@ -321,14 +382,14 @@ class Driver:
             payload['note'] = self.note
         user = {'role': 'user', 'content': json.dumps(payload, separators=(',', ':'), ensure_ascii=False)}
         turn, usage, llm_ms = [], {}, 0.0
-        lookups, budget = 0, None
-        self.bad_replies = []
+        lookups, budget, empty_cuts = 0, None, 0
+        self.bad_replies, self.note_cut = [], False
         for attempt in range(self.max_tool_calls + 3):
             # Once the lookup budget is spent the model gets no tools and must answer with an action.
             final = lookups >= self.max_tool_calls
             if final and turn and turn[-1]['role'] != 'user':
                 turn.append({'role': 'user', 'content': 'Lookup budget used up. Reply now with exactly one '
-                                                        'JSON game action (press/interact/move/fire/shake/keys/run/wait).'})
+                                                        'JSON game action (press/interact/move/fire/shake/keys/run/wait/use/reload).'})
             started = time.monotonic()
             message, u = self.client.complete(self.messages(user) + turn,
                                               TOOLS if self.use_tools and not final else None, budget)
@@ -355,9 +416,20 @@ class Driver:
             try:
                 action = parse_action(text)
             except ValueError as e:
+                error = str(e)
                 finish = message.get('_finish')
                 thought = message.get('reasoning_content') or ''
                 self.bad_replies.append(dict(finish=finish, text=(text or thought)[:160]))
+                action = salvage_cut(text) if finish == 'length' else None
+                if action is not None:
+                    # Cut inside the trailing note: the action is complete, only the note is lost.
+                    self.bad_replies[-1]['salvaged'] = self.note_cut = True
+            if action is None:
+                empty_cuts = empty_cuts + 1 if finish == 'length' and not strip_thinking(text).strip() else 0
+                if empty_cuts >= 2:
+                    # Two empty cut replies in a row (reasoning or whitespace only): do not spend another
+                    # long request; take the owner's safe default and tell the model.
+                    return user, dict(default_action(obs), no_action=True), usage, llm_ms
                 if finish == 'length':
                     # Cut off before the JSON (long reasoning or prose): retry with a larger budget and do not
                     # feed the cut text back, it only primes more of the same.
@@ -367,7 +439,7 @@ class Driver:
                                  'ONLY the JSON object, no explanation and no reasoning, e.g. {"op":"press","key":"confirm"}.'})
                 else:
                     turn.append({'role': 'assistant', 'content': strip_thinking(text)[:400]})
-                    turn.append({'role': 'user', 'content': 'error: ' + str(e) + '. Reply with ONLY one JSON action object.'})
+                    turn.append({'role': 'user', 'content': 'error: ' + error + '. Reply with ONLY one JSON action object.'})
                 continue
             if action['op'] in HINT_CMDS and action['op'] != 'zone':
                 # {"op":"blocked","x":..} or {"op":"room"}: a hint command written as an action.
@@ -389,8 +461,8 @@ class Driver:
                     turn.append({'role': 'user', 'content': 'tool ' + action['op'] + ': ' + self.tool(action['op'], args)})
                 continue
             return user, action, usage, llm_ms
-        # No usable action: let the game run briefly and report it back instead of stopping the run.
-        return user, dict(op='wait', no_action=True), usage, llm_ms
+        # No usable action: take the owner's safe default and report it back instead of stopping the run.
+        return user, dict(default_action(obs), no_action=True), usage, llm_ms
 
     def remember(self, user, action):
         # Tool exchanges stay out of the history; only the decision and its state are kept.
@@ -405,8 +477,10 @@ class Driver:
         try:
             obs = self.play.act(action, self.seconds)
             feedback = dict(result=obs.pop('result', 'running'))
-            if 'fire' in obs:
-                feedback['fire'] = obs.pop('fire')
+            # Outcome details of the action (shots/hits, hp lost, a resent route, healed hp, rounds, snapshot).
+            for key in ('fire', 'damage', 'retried', 'healed', 'rounds', 'snapshot_room', 'info'):
+                if key in obs:
+                    feedback[key] = obs.pop(key)
         except (TypeError, ValueError, KeyError, IndexError) as e:
             # A malformed model value (string coordinate, wrong nesting) must cost one decision, not the run.
             obs = self.play.observe()
@@ -418,7 +492,11 @@ class Driver:
             if action.get('op') == 'move' and ('blocked' in str(e) or 'no path' in str(e)):
                 try:
                     d, _, _ = self.play.read()
-                    feedback['use_one_of'] = [dict(to=p) for p in self.play.free_near(d, action.get('to'))]
+                    points = self.play.free_near(d, action.get('to'))
+                    feedback['use_one_of'] = [dict(to=p) for p in points]
+                    if points:
+                        # Small models skim fields; the free points also go into the error text itself.
+                        feedback['error'] += f'. Move to one of these free points instead: {points}'
                 except (PlayError, TypeError, ValueError):
                     pass
             if action.get('op') == 'interact' and isinstance(action.get('zone'), int):
@@ -448,12 +526,25 @@ class Driver:
         got = ' '.join(((obs.get('dialog') or {}).get('text', '')).split())
         if not got and 'BOX' in obs.get('owner', ''):
             got = 'opened the item box'
+        if not got and 'DOOR' in obs.get('owner', '').split():
+            got = 'went through the door'
         if not got:
             got = {'menu': 'opened a menu', 'room': 'went to another room', 'no_interaction_observed': 'nothing happened'}.get(result, result)
         v = self.zone_log(room).setdefault(zone, dict(n=0, got='', sig=None))
         v['n'] += 1
         v['got'] = got[:80]
         v['sig'] = before
+
+    def zone_of_move(self, room, action, result):
+        """(room, zone) when a finished move ended on a zone's ready point (a candidate of this room)."""
+        to = action.get('to')
+        if action.get('op') != 'move' or result not in ('settled', 'held', 'damage') or \
+                not (isinstance(to, list) and len(to) == 2) or (self._points_key or [''])[0][:7] != room:
+            return None
+        for zone, cands in self._candidates.items():
+            if any(math.hypot(c[0][0] - to[0], c[0][1] - to[1]) < .05 for c in cands):
+                return room, zone
+        return None
 
     def repeat_blocked(self, action, obs):
         """An interact on a zone already examined `repeat_limit` times with no progress since is refused."""
@@ -643,7 +734,7 @@ class Driver:
                 if found:
                     candidates[a['index']] = [[f['to'], f['face']] for f in found]
             self._points_key, self._candidates = key, candidates
-        room = d.get('room')
+        room = (d.get('room') or '')[:7]  # same key as the compact state ('RM_0080'), used by point_failed
         points = {}
         for zone, cands in self._candidates.items():
             usable = [c for c in cands if (room, zone, tuple(c[0])) not in self._failed_points]
@@ -658,7 +749,7 @@ class Driver:
             return
         to = action.get('to')
         if isinstance(to, list) and len(to) == 2:
-            self._failed_points.add((room, action.get('zone'), tuple(to)))
+            self._failed_points.add(((room or '')[:7], action.get('zone'), tuple(to)))
 
     def with_approaches(self, obs):
         """Give zones a ready `go` point (to, face); zones beyond the nearest five are listed in far_zones."""
@@ -721,8 +812,15 @@ class Driver:
             if gameover:
                 # Game over: the game plays its scene, then asks Continue/Exit. The driver continues by
                 # itself (the retry point restores the room); the model is told afterwards.
+                retry = gameover.get('retry_play_time')
+                newer = self.snapshot and self.snapshot.get('play_time') is not None and \
+                    (retry is None or retry < 0 or self.snapshot['play_time'] > retry)
                 if not gameover.get('prompt'):
                     action, entry = {'op': 'wait'}, dict(auto=True)
+                elif newer and self.snapshot_tried != retry:
+                    # A slot-2 snapshot saved in this run is newer than the retry point: load it instead.
+                    self.snapshot_tried = retry
+                    action, entry = {'op': 'snapshot', 'do': 'load'}, dict(auto=True, snapshot_loaded=self.snapshot)
                 elif gameover.get('highlighted') != 'Continue':
                     action, entry = {'op': 'press', 'key': 'left'}, dict(auto=True)
                 else:
@@ -734,6 +832,12 @@ class Driver:
                 owner = obs.get('owner', '')
                 self.last_owner = owner
                 obs, feedback, act_ms = self.act(action)
+                if feedback['result'] == 'loaded':
+                    self.pending_events = (self.pending_events + [
+                        f"You died (game over). The driver loaded snapshot slot 2 (saved in {self.snapshot.get('room')}), "
+                        'which is newer than the retry point. Avoid what killed you: heal earlier, shoot from range.'])[-2:]
+                elif 'error' in feedback:
+                    entry['error'] = feedback['error']  # a failed load falls back to Continue next time
                 entry.update(owner=owner, action=action, act_ms=round(act_ms), result=feedback['result'])
                 self.record(entry)
                 continue
@@ -758,7 +862,7 @@ class Driver:
                 fallback = action.pop('no_action', False)
                 note = action.pop('note', None)
                 if isinstance(note, str) and note.strip():
-                    self.note = note.strip()[:160]
+                    self.note = note.strip()[:NOTE_MAX]
                 self.remember(user, action)
                 entry = dict(llm_ms=round(llm_ms), usage=usage)
                 if self.bad_replies:
@@ -782,16 +886,32 @@ class Driver:
                 if action.get('op') == 'interact' and feedback['result'] in ('stalled', 'no_interaction_observed'):
                     # The point did not reach the zone: not an examine; try the next candidate next time.
                     self.point_failed(room_before, action, feedback['result'])
-                elif action.get('op') == 'interact' and feedback['result'] not in ('error', 'interrupted', 'running'):
+                elif action.get('op') == 'interact' and answered(obs, feedback['result']):
                     self.record_visit(room_before, action.get('zone'), progress_before, obs, feedback['result'])
+                elif action == {'op': 'press', 'key': 'confirm'} and owner == 'FREE' and self.move_zone and \
+                        self.move_zone[0] == room_before and answered(obs, feedback['result']):
+                    # move to a zone's ready point + confirm is the same examine as interact.
+                    self.record_visit(room_before, self.move_zone[1], progress_before, obs, feedback['result'])
+                if feedback['result'] == 'saved':
+                    self.snapshot = dict(room=feedback.get('snapshot_room'), play_time=self.play.read()[0].get('play_time'))
+            self.move_zone = self.zone_of_move(room_before, action, feedback['result'])
             if not entry.get('auto') and fallback:
-                feedback.update(result='error', error='no game action in your last reply; the driver waited instead')
+                feedback.update(result='error', error='no game action in your last reply; the driver sent '
+                                f"{json.dumps(action, separators=(',', ':'))} instead. Reply with only the JSON action.")
                 entry['fallback'] = True
+            if not entry.get('auto') and self.note_cut:
+                feedback['note_cut'] = f'your reply was cut inside note; keep note under {NOTE_MAX} characters'
+            if 'fire' in feedback:
+                entry['fire'] = feedback['fire']
+            if feedback.get('damage'):
+                entry['damage'] = feedback['damage']
             if entry.get('save_skipped'):
                 feedback['save_skipped'] = entry['save_skipped']
             entry.update(owner=owner, action=action, act_ms=round(act_ms), result=feedback['result'])
             if 'error' in feedback:
                 entry['error'] = feedback['error']
+            if 'use_one_of' in feedback:
+                entry['use_one_of'] = feedback['use_one_of']
             self.record(entry)
         return 0
 

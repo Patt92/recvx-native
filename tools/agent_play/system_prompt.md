@@ -31,12 +31,15 @@ Write what you learned (codes, needed items, locked doors) into `note`, it is yo
   other normal box. Special boxes (e.g. security boxes) can be separate; their texts say so.
 - Items: Examine every new item (menu command Examine); turning it can reveal a hidden part. Items used
   for puzzles are consumed or turn into other items.
-- Saving needs an Ink Ribbon at a typewriter. Healing: herbs, F. Aid Spray (menu Use).
+- Saving needs an Ink Ribbon at a typewriter. Healing: herbs, F. Aid Spray (`use`; `heal` lists them).
 - The map is in the status menu (cursor 2). Doors that are locked say what they need.
 
 ## Reply format
 
-{"op": "...", ...action fields..., "note": "optional, max 120 chars: what you are doing / what is left"}
+{"op": "...", ...action fields..., "note": "optional, at most 80 characters"}
+
+Put `note` last and keep it under 80 characters (the driver keeps only 80); a long note gets the reply cut
+off at the token limit. Write the action first, then a short note, then stop.
 
 `note` is your memory. It is shown back to you every turn; old turns are dropped. Keep the goal of the
 current room and the open puzzle in it ("door i2 locked: need key item; items i3, i5 still present").
@@ -54,6 +57,10 @@ current room and the open puzzle in it ("door i2 locked: need key item; items i3
 | run | mode auto|on, dist 4-60 | auto: game pauses at your decisions when an enemy is within dist |
 | type | text (A-Z, 0-9, max 15), enter (bool, default true) | computer keyboard: types the word and Enter |
 | box | store (inventory slot) or take (box row) | item box: one complete swap; the driver moves cursor and list |
+| use | item (inventory slot) | Use on that slot through the status menu, from FREE or INVENTORY (heal: a `heal` slot) |
+| equip | item (inventory slot) | Equip that weapon; nothing happens if it is already equipped |
+| reload | (none) | combine the matching ammo into the equipped weapon; result rounds [before, after] |
+| snapshot | do: save or load | snapshot slot 2 (the only slot you may use) through the debug menu |
 | wait | ticks 1-300 optional | let the game run (scenes, doors, slow menus) |
 
 Function tools (use them instead of guessing; they cost no game time; at most 3 per decision, then
@@ -78,7 +85,9 @@ box (item box open): {mode inventory|list, slot, at, at_item, contents [[row, na
 refused}. `refused` = the game's reason why a swap was refused (e.g. what may be stored here).
 computer (terminal): {screen [lines], waits printing|confirm|keyboard|script, key, typed, free, cancel_exits}.
 `free` = letters still allowed in the password field (shown as \ on screen). A wrong password closes the terminal.
-document: text of the open file/document page (FILES). menu_text: item description or menu message.
+document: text of the open file page (FILES). file: {n, page "x/y"} in the reader, {n, list true} in the
+file list. menu_text: item description or menu message.
+heal: [slot, name] of carried items that restore hp (herbs, F. Aid Spray); heal with {"op":"use","item":slot}.
 unchanged_for n (in the result): n waits in a row changed nothing; the game waits for a button.
 read true on a zone: information only (no script reacts to it) and already read; never examine it again.
 seen/got on a zone, done_here: zones you already examined in this room, how often and what they said.
@@ -95,9 +104,11 @@ enemies: {i, hp, d, at, state active|grabbing|hit|scripted, posture standing|low
 dialog: {text, choice, selection, ready, voice}. menu: {cursor, slot, item, commands, command, equipped,
 combine_from, locked}. title: {stage, entry, entries}.
 result of your last action: arrived, arrived_near, settled, dialog, choice, menu, room, danger, grab,
-damage, stalled, interrupted, no_interaction_observed, gameover, retry, error (with message).
-Game over is handled by the driver (it continues from the retry point); afterwards events_explained
-tells you that you died and that progress since the retry point is lost.
+damage, stalled, interrupted, no_interaction_observed, used, equipped, reloaded, unchanged, saved, loaded,
+gameover, retry, error (with message). `damage` n next to any result: hp lost while the action ran (fire,
+moves and waits run to their end under attack). `fire`: {shots, hits, target, target_hp}.
+Game over is handled by the driver: it loads your slot-2 snapshot when you saved one after the retry
+point, otherwise it continues from the retry point; events_explained tells you which.
 
 ## Rules
 
@@ -111,13 +122,15 @@ tells you that you died and that progress since the retry point is lost.
    `no path` -> `hint blocked`.
 4. Combat: enemy active, sight true, d 10-25 -> `fire` 2-3 shots. posture lying -> `fire` with low true.
    reach true (d < 7) -> `move` away first (danger false). GRAB -> `shake` with then-move away.
-   Empty gun -> reload in the menu (Combine bullets with handgun) or flee through a door.
+   Empty or low gun -> {"op":"reload"}. hp below 70 and `heal` not empty -> {"op":"use","item":<heal slot>}
+   (move out of reach first when an enemy has reach true).
 5. Menu (INVENTORY): if the game opened it right after a text (see tips), do what the text asked first
    (equip/use the named item) and only then leave. Open it yourself with press inventory. Grid: up/down/left/right move `slot`. confirm opens
    `commands`; up/down chooses; confirm runs it. Equip on the already equipped item UNEQUIPS it
-   (menu.equipped true -> do not Equip). Reload: on Handgun Bullets choose Combine, move to Handgun,
-   confirm. Heal: on Green Herb choose Use. Leave: cancel until navigation, left until cursor 0, confirm.
-   If menu.locked is true, wait.
+   (menu.equipped true -> do not Equip). Prefer `use`, `equip` and `reload` over single presses: they
+   step the menu for you and close it again when they opened it. Key path they follow: inventory ->
+   slot -> confirm -> command (Use / Equip / Combine, then the weapon) -> confirm. If menu.locked is
+   true, wait.
 6. Item box (BOX): use `box`, not single presses. Store: {"op":"box","store":<inv slot>}. Take:
    {"op":"box","take":<box row>}. One swap per action; check `contents`/`inv` after it. If `refused` is
    set, read it, press cancel once (back to the inventory) and store something else. Leave the box with
@@ -135,11 +148,15 @@ tells you that you died and that progress since the retry point is lost.
 10. Computer terminal (owner COMPUTER): waits printing -> wait. waits confirm -> confirm (next page).
    waits keyboard -> `type` the password (read it from documents/notes/screen first; never guess
    wildly). waits script and cancel_exits -> the terminal is done: cancel leaves it. Read `screen`.
-11. Documents (FILES): read `document`; right/left turn pages; cancel closes. Keep codes in `note`.
+11. Documents (FILES): a document is read page by page. Read `document`, press right for the next page
+   until `file.page` is y/y (the last page), then cancel closes it. Keep codes in `note`.
 12. Never wait twice in a row while owner shows DIALOG, COMPUTER, TYPEWRITER, INVENTORY or BOX, or
    when the result has unchanged_for: press something (confirm, or cancel to leave).
 13. New room: decide from zones/far_items/enemies what to do; first collect items, then use the door the
    puzzle needs. Keep the note current.
+14. Snapshot slot 2 is yours: {"op":"snapshot","do":"save"} with owner FREE after real progress (new
+   rooms, a solved puzzle) and before a risky fight. {"op":"snapshot","do":"load"} when you are stuck
+   (also on the game-over screen). It costs no Ink Ribbon. Never ask for another slot.
 
 ## Examples
 
@@ -190,3 +207,12 @@ reply: {"op":"shake","presses":20,"then":{"op":"move","to":[40,62]}}
 
 state: {"owner":"FREE","enemies":[{"i":2,"d":19,"state":"active","posture":"lying","sight":true}]}
 reply: {"op":"fire","shots":3,"low":true}
+
+state: {"owner":"FREE","hp":55,"heal":[[4,"Green Herb"]],"enemies":[{"i":1,"d":21,"state":"active"}]}
+reply: {"op":"use","item":4,"note":"healed; then fire"}
+
+state: {"owner":"FREE","equipped":["Handgun",0],"inv":[[1,9,0,"Handgun"],[3,12,30,"Handgun Bullets"]]}
+reply: {"op":"reload"}
+
+state: {"owner":"FILES INVENTORY","file":{"n":0,"page":"3/7"},"document":"..."}
+reply: {"op":"press","key":"right","note":"manual p3/7 read"}

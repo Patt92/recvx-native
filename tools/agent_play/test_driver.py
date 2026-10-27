@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import threading
+import time
 import unittest
 
 from driver import Driver, parse_action, passive, trim
@@ -884,6 +885,386 @@ class DriverTests(unittest.TestCase):
         obs = dict(owner='FREE', at=[1, 2], age_s=.1, busy=False, held=True, weapon=4, elapsed_ms=3)
         self.assertEqual(trim(obs), dict(owner='FREE', at=[1, 2]))
 
+
+    # --- control gaps seen in live runs -------------------------------------------------------------
+    @contextmanager
+    def reacting(self, handle, lag=0.0):
+        """Fixture runtime: every new control line goes to handle(line, d, elapsed) before the next write.
+        lag: a line takes effect only that long after it was written (dumps keep coming meanwhile)."""
+        stop, began = threading.Event(), time.monotonic()
+        def tick():
+            seen, arrived = 0, {}
+            while not stop.is_set():
+                lines = self.controls().splitlines()
+                for k in range(seen, len(lines)):
+                    arrived.setdefault(k, time.monotonic())
+                    if time.monotonic() - arrived[k] < lag:
+                        break
+                    handle(lines[k].split(' ', 1)[1], self.d)
+                    seen = k + 1
+                handle(None, self.d, time.monotonic() - began) if handle.__code__.co_argcount == 3 else None
+                self.write(self.d)
+                stop.wait(.02)
+        thread = threading.Thread(target=tick); thread.start()
+        try:
+            yield
+        finally:
+            stop.set(); thread.join()
+
+    def item_zone(self):
+        self.d['interactions'] = [dict(index=4, flags=1, floor=0, type=4, attribute=0,
+                                       position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
+        self.write(self.d)
+
+    def test_reply_cut_inside_the_note_is_used_without_a_second_request(self):
+        cut = dict(role='assistant', content='{"op":"press","key":"up","note":"Lighter equipped. Go to Playing',
+                   _finish='length')
+        drv, client = self.driver([cut, text(dict(op='press', key='cancel'))])
+        with self.ticking():
+            drv.run(steps=2)
+        self.assertEqual(len(client.requests), 2)  # one per decision, no retry
+        self.assertIn('1 up', self.controls())
+        self.assertTrue(drv.note in (None, ''))
+        feedback = json.loads(client.requests[1][0][-1]['content'])
+        self.assertIn('note_cut', feedback)
+        from driver import salvage_cut
+        self.assertEqual(salvage_cut('{"op":"interact","zone":4,"to":[54.5,135.5],"note":"RM_0020: read'),
+                         dict(op='interact', zone=4, to=[54.5, 135.5]))
+        # Cut anywhere but in the trailing note: not an action.
+        self.assertIsNone(salvage_cut('{"op":"shake","presses":20,"then":{"op":"move","to":[44'))
+        self.assertIsNone(salvage_cut('{"op":"interact","zone":4,"to":[54.5,13'))
+
+    def test_two_empty_cut_replies_fall_back_to_the_owner_default(self):
+        empty = dict(role='assistant', content='', _finish='length')
+        drv, client = self.driver([empty, dict(empty)])
+        client.max_tokens = 200
+        with self.ticking():
+            drv.run(steps=1)
+        self.assertEqual(len(client.requests), 2)
+        self.assertGreater(client.budgets[1], 200)  # the retry already had the larger budget
+        self.assertIn('15 tick', self.controls())
+        from driver import default_action
+        self.assertEqual(default_action(dict(owner='INVENTORY')), dict(op='press', key='cancel'))
+        self.assertEqual(default_action(dict(owner='FILES INVENTORY')), dict(op='press', key='cancel'))
+        self.assertEqual(default_action(dict(owner='DIALOG', dialog=dict(ready=True, choice=False))),
+                         dict(op='press', key='confirm'))
+        self.assertEqual(default_action(dict(owner='DIALOG', dialog=dict(ready=True, choice=True))), dict(op='wait'))
+        self.assertEqual(default_action(dict(owner='DIALOG', dialog=dict(ready=False))), dict(op='wait'))
+
+    def test_interact_that_stalls_within_near_is_sent_once_more(self):
+        # Live: stalled 0.26 from the point (near 1.0); the same interact from there reached the zone.
+        self.item_zone()
+        def handle(line, d):
+            if not line.startswith('route'):
+                return
+            if self.controls().count('route') == 1:
+                d['control'] = dict(d['control'], result='stalled', steer=False)
+                d['actor'] = [7.26, 0, 3.5]
+            else:
+                d['control'] = dict(d['control'], result='arrived')
+                d.update(dialog_open=True, dialog_text='A key.', dialog_closable=True)
+        action = dict(op='interact', zone=4, to=[7.0, 3.5], face=[7.0, 7.0])
+        self.assertEqual(Play.near_for(self.d['interactions'][0], action['to'], action['face']), .5)
+        with self.reacting(handle):
+            out = self.play.act(action, 3)
+        self.assertEqual(out['result'], 'dialog')
+        self.assertIn('within near', out['retried'])
+        self.assertEqual(self.controls().count('route 7.0000 3.5000'), 2)
+
+    def test_stall_outside_near_is_reported(self):
+        self.item_zone()
+        def handle(line, d):
+            if line.startswith('route'):
+                d['control'] = dict(d['control'], result='stalled', steer=False)
+                d['actor'] = [7.0, 0, 1.5]  # 2 short: outside near 0.5
+        with self.reacting(handle):
+            out = self.play.act(dict(op='interact', zone=4, to=[7.0, 3.5], face=[7.0, 7.0]), 2)
+        self.assertEqual(out['result'], 'stalled')
+        self.assertEqual(self.controls().count('route'), 1)
+
+    def fake_act(self, results):
+        """Driver.act stand-in: each call returns the next (result, extra observation fields)."""
+        queue = list(results)
+        def act(action):
+            result, extra = queue.pop(0)
+            obs = dict(self.play.observe(), **extra)
+            return obs, dict(result=result), 10.0
+        return act
+
+    def test_cut_off_interacts_are_no_examine_and_are_not_refused(self):
+        # Live: danger, grab and stalls on a door counted as examines; the guard then refused the door.
+        self.item_zone()
+        go = self.driver([])[0].room_points(self.d)[4]
+        reply = text(dict(op='interact', zone=4, to=go[0], face=go[1]))
+        drv, client = self.driver([reply] * 4)
+        drv.act = self.fake_act([('danger', {}), ('grab', {}), ('damage', {}), ('interrupted', {})])
+        with self.ticking():
+            drv.run(steps=4)
+        self.assertNotIn(4, drv.visits.get('RM_TEST', {}))
+        from driver import answered
+        for result in ('danger', 'grab', 'damage', 'stalled', 'interrupted', 'held', 'running', 'error'):
+            self.assertFalse(answered(dict(owner='FREE'), result), result)
+        for result in ('dialog', 'choice', 'menu', 'room', 'computer'):
+            self.assertTrue(answered(dict(owner='FREE'), result), result)
+        self.assertTrue(answered(dict(owner='CINEMATIC DOOR'), 'running'))
+        self.assertTrue(answered(dict(owner='BOX'), 'owner'))
+
+    def test_move_to_a_ready_point_and_confirm_counts_as_examine(self):
+        self.item_zone()
+        go = self.driver([])[0].room_points(self.d)[4]
+        drv, _ = self.driver([text(dict(op='move', to=go[0], face=go[1])), text(dict(op='press', key='confirm'))])
+        drv.act = self.fake_act([('settled', {}), ('dialog', dict(dialog=dict(text='A key.')))])
+        with self.ticking():
+            drv.run(steps=2)
+        self.assertEqual(drv.visits['RM_TEST'][4]['n'], 1)
+        self.assertEqual(drv.visits['RM_TEST'][4]['got'], 'A key.')
+
+    def test_failed_point_is_skipped_although_state_room_has_the_extension(self):
+        # Live: room_points keyed by 'RM_0080.RDX', point_failed by 'RM_0080': the dead point came back.
+        self.item_zone()
+        self.d['room'] = 'RM_0080.RDX'
+        self.write(self.d)
+        drv, _ = self.driver([])
+        drv.room_points(self.d)
+        cands = drv._candidates[4]
+        self.assertGreater(len(cands), 1)
+        drv.point_failed('RM_0080', dict(op='interact', zone=4, to=cands[0][0]), 'stalled')
+        self.assertEqual(drv.room_points(self.d)[4], cands[1])
+
+    def test_document_page_is_shown_as_x_of_y(self):
+        from play import compact
+        d = deepcopy(self.d)
+        d.update(files_open=True, inventory_open=True, file_number=0, file_page=2, file_pages=7, file_text='Page 3')
+        self.assertEqual(compact(d, 0)['file'], dict(n=0, page='3/7'))
+        self.assertEqual(compact(d, 0)['document'], 'Page 3')
+        d.update(file_folder_open=True, file_text='')
+        self.assertEqual(compact(d, 0)['file'], dict(n=0, list=True))
+        prompt = (Path(__file__).with_name('system_prompt.md')).read_text()
+        self.assertIn('read page by page', prompt)
+
+    def test_heal_lists_items_whose_use_restores_hp(self):
+        from play import compact
+        d = deepcopy(self.d)
+        # 21 green herb (curedata 1), 22 red herb (0: no heal alone), 20 F. Aid Spray (4).
+        d.update(items=[1, (9 << 16) | 5, (21 << 16) | 1, (22 << 16) | 1, (20 << 16) | 1],
+                 item_names=['', 'Handgun', 'Green Herb', 'Red Herb', 'F. Aid Spray'])
+        self.assertEqual(compact(d, 0)['heal'], [[2, 'Green Herb'], [4, 'F. Aid Spray']])
+        self.assertNotIn('heal', compact(self.d, 0))
+
+    def test_fire_under_attack_runs_its_burst_and_reports_damage_and_shots(self):
+        self.d.update(items=[1, (9 << 16) | 10], combat_shots=0, combat_hits=0)
+        self.write(self.d)
+        state = {}
+        def handle(line, d, elapsed=None):
+            if line and line.startswith('fire'):
+                state['t'] = time.monotonic()
+                d.update(hp=80)  # hit right away
+                d['control'] = dict(d['control'], pending=1)
+            if line is None and 't' in state and time.monotonic() - state['t'] > .4 and d['control'].get('pending'):
+                d['control'] = dict(d['control'], pending=0, held=True, tick=1)
+                d.update(combat_shots=3, combat_hits=2)
+        with self.reacting(handle):
+            out = self.play.act(dict(op='fire', shots=3), 3)
+        self.assertEqual(out['result'], 'damage')
+        self.assertEqual(out['damage'], 20)
+        self.assertEqual(out['fire']['shots'], 3)
+        self.assertGreater(out['elapsed_ms'], 350)  # not cut at the first hit
+
+    def test_wait_through_a_hit_stagger_ends_after_it(self):
+        enemy = dict(index=1, hp=50, position=[5, 0, 0], work=dict(mode=[1, 0, 0, 0]))
+        self.d.update(cinematic=True, hp=80, enemies=[enemy])
+        self.write(self.d)
+        before = deepcopy(self.d); before['hp'] = 100
+        during = deepcopy(self.d)
+        def handle(line, d, elapsed=None):
+            if elapsed is not None and elapsed > .4:
+                d['cinematic'] = False  # stagger over, the enemy is still there
+        with self.reacting(handle):
+            self.play._state, self.play._stamp = None, None
+            out = self.play.act(dict(op='wait'), 3)
+        self.assertEqual(out['result'], 'settled')
+        self.assertGreater(out['elapsed_ms'], 350)
+        # Inside the stagger the hit and the enemy end nothing; without through_damage the hit would.
+        self.assertIsNone(Play.reason(before, during, waiting=True, through_damage=True))
+        self.assertEqual(Play.reason(before, during, waiting=True), 'damage')
+        # After the stagger next to the same enemy: no new danger.
+        self.assertNotEqual(Play.reason(during, dict(during, cinematic=False), waiting=True), 'danger')
+
+    def menu_runtime(self, lag=0.0, items=None, names=None):
+        """Status menu stand-in: cursor, command window and combine follow the control lines."""
+        def handle(line, d):
+            sel = d.get('menu_selected', 2)
+            if line == 'inventory':
+                d.update(inventory_open=True, menu_selected=2, menu_commands_open=False, menu_combining=False,
+                         menu_navigation=False)
+            elif not d.get('inventory_open'):
+                return
+            elif line in ('right', 'left', 'down', 'up') and (d['menu_combining'] or not d['menu_commands_open']):
+                d['menu_selected'] = max(1, min(6, sel + {'right': 1, 'left': -1, 'down': 2, 'up': -2}[line]))
+            elif line in ('down', 'up'):
+                d['menu_command'] = (d['menu_command'] + (1 if line == 'down' else -1)) % len(d['menu_commands'])
+            elif line == 'cancel':
+                if d['menu_combining']:
+                    d['menu_combining'] = False  # back to the command window
+                elif d['menu_commands_open']:
+                    d['menu_commands_open'] = False
+                elif not d['menu_navigation']:
+                    d['menu_navigation'] = True  # item list -> top bar, a second cancel closes
+                else:
+                    d.update(inventory_open=False, menu_navigation=False)
+            elif line == 'confirm' and d['menu_combining']:
+                ammo = d['menu_combine_from']
+                if sel == d['items'][0]:
+                    d['items'][sel] += d['items'][ammo] & 0xffff
+                    d['items'][ammo] = 0
+                d.update(menu_combining=False, menu_commands_open=False)
+            elif line == 'confirm' and d['menu_commands_open']:
+                name = d['menu_commands'][d['menu_command']]
+                d['menu_commands_open'] = name == 'Combine'  # ui.cpp: commands stay set while combining
+                if name == 'Use' and (d['items'][sel] >> 16) & 255 == 21:
+                    d['hp'] += 50
+                    d['items'][sel] = 0
+                elif name == 'Equip':
+                    d['items'][0] = sel
+                elif name == 'Combine':
+                    d.update(menu_combining=True, menu_combine_from=sel)
+            elif line == 'confirm' and d['items'][sel]:
+                weapon = (d['items'][sel] >> 16) & 255 == 9
+                d.update(menu_commands_open=True, menu_command=0,
+                         menu_commands=['Equip', 'Examine', 'Combine', 'Use'] if weapon else ['Use', 'Examine', 'Combine'])
+        self.d.update(items=items or [1, (9 << 16) | 5, (12 << 16) | 30, (21 << 16) | 1, 0], hp=50,
+                      item_names=names or ['', 'Handgun', 'Handgun Bullets', 'Green Herb', ''])
+        self.write(self.d)
+        return self.reacting(handle, lag)
+
+    def test_reload_combines_the_matching_ammo_into_the_equipped_weapon(self):
+        with self.menu_runtime():
+            out = self.play.act(dict(op='reload'), 4)
+        self.assertEqual(out['result'], 'reloaded')
+        self.assertEqual(out['rounds'], [5, 35])
+        self.assertFalse(self.d['inventory_open'])  # opened from FREE, closed again
+        lines = [l.split(' ', 1)[1] for l in self.controls().splitlines()]
+        self.assertEqual(lines[:2], ['inventory', 'confirm'])  # cursor starts on slot 2 (the bullets)
+        self.assertIn('Combine', [c for c in self.d['menu_commands']])
+
+    def test_reload_waits_for_each_press_to_take_effect(self):
+        # Live: handgun equipped in slot 5, bullets in slot 2; dumps written before the runtime took a press
+        # still showed the old cursor, the next press went to the wrong command and nothing was combined.
+        with self.menu_runtime(lag=.2, items=[5, 0, (12 << 16) | 20, (21 << 16) | 1, 0, (9 << 16) | 1, 0],
+                               names=['', '', 'Handgun Bullets', 'Green Herb', '', 'Handgun', '']):
+            out = self.play.act(dict(op='reload'), 8)
+        self.assertEqual((out['result'], out['rounds']), ('reloaded', [1, 21]))
+        lines = [l.split(' ', 1)[1] for l in self.controls().splitlines()]
+        self.assertEqual(lines, ['inventory', 'confirm', 'up', 'confirm', 'right', 'right', 'right', 'confirm',
+                                 'cancel', 'cancel'])
+
+    def test_use_heals_from_the_slot_and_equip_keeps_an_equipped_weapon(self):
+        with self.menu_runtime():
+            out = self.play.act(dict(op='use', item=3), 4)
+            self.assertEqual(out['result'], 'used')
+            self.assertEqual(out['healed'], 50)
+            sent = self.controls()
+            out = self.play.act(dict(op='equip', item=1), 2)
+        self.assertEqual(out['result'], 'equipped')
+        self.assertIn('already equipped', out['info'])
+        self.assertEqual(self.controls(), sent)  # nothing sent for the equipped weapon
+        with self.assertRaises(Exception):
+            self.play.act(dict(op='use', item=4), 1)  # empty slot
+
+    def snapshot_runtime(self):
+        def handle(line, d):
+            if line == 'sdl_key down F2':
+                d['debug_open'] = not d.get('debug_open')
+                d['debug_status'] = ''
+            elif line.startswith('debug_select'):
+                d['debug_choice'] = line.split()[1:]
+            elif line == 'confirm' and d.get('debug_open'):
+                name, value = d['debug_choice']
+                if value != '1':
+                    d['debug_status'] = 'Fehler: wrong slot'
+                elif name == 'snapshot_save':
+                    d['debug_status'] = 'Snapshot 2 gespeichert: RM_TEST.RDX'
+                else:
+                    d.update(debug_status='Snapshot 2 geladen: RM_TEST.RDX', debug_open=False,
+                             gameover_active=False, gameover_prompt=False, hp=100)
+        return self.reacting(handle)
+
+    def test_snapshot_save_and_load_use_slot_2_through_the_debug_menu(self):
+        with self.snapshot_runtime():
+            out = self.play.act(dict(op='snapshot', do='save'), 2)
+            self.assertEqual((out['result'], out['snapshot_room']), ('saved', 'RM_TEST'))
+            self.assertFalse(self.d['debug_open'])
+            saved = self.controls()
+            self.assertEqual([l.split(' ', 1)[1] for l in saved.splitlines()],
+                             ['sdl_key down F2', 'sdl_key up F2', 'debug_select snapshot_save 1', 'confirm',
+                              'sdl_key down F2', 'sdl_key up F2'])
+            out = self.play.act(dict(op='snapshot', do='load'), 2)
+        self.assertEqual(out['result'], 'loaded')
+        # snapshot_load closes the debug menu itself: no second toggle that would open it again.
+        self.assertEqual(self.controls()[len(saved):].count('sdl_key down F2'), 1)
+        self.assertFalse(self.d['debug_open'])
+        self.d['dialog_open'] = True
+        self.write(self.d)
+        with self.assertRaises(Exception):
+            self.play.act(dict(op='snapshot', do='save'), 1)  # only with owner FREE
+        with self.assertRaises(Exception):
+            self.play.act(dict(op='snapshot', do='save', slot=3), 1)
+
+    def test_game_over_loads_a_newer_slot_2_snapshot_instead_of_continue(self):
+        self.d.update(gameover_active=True, gameover_prompt=True, gameover_choice=0,
+                      gameover_retry=dict(room='RM_TEST.RDX', play_time=100))
+        self.write(self.d)
+        drv, client = self.driver([])
+        drv.snapshot = dict(room='RM_TEST', play_time=200)
+        with self.snapshot_runtime():
+            drv.run(steps=1)
+        self.assertIn('debug_select snapshot_load 1', self.controls())
+        self.assertEqual(client.requests, [])
+        self.assertIn('loaded snapshot slot 2', drv.pending_events[-1])
+
+    def test_game_over_continues_when_the_snapshot_is_older_than_the_retry_point(self):
+        self.d.update(gameover_active=True, gameover_prompt=True, gameover_choice=0,
+                      gameover_retry=dict(room='RM_TEST.RDX', play_time=100))
+        self.write(self.d)
+        drv, _ = self.driver([])
+        drv.snapshot = dict(room='RM_TEST', play_time=50)
+        with self.ticking():
+            drv.run(steps=1)
+        self.assertNotIn('sdl_key', self.controls())
+        self.assertIn('confirm', self.controls())
+
+    def test_blocked_move_next_to_a_stair_block_names_free_points(self):
+        # A solid stair block beside the player; the model aims at a point inside it.
+        self.d['walls'].append(dict(i=4, fl=1, ty=0, attr=0, floor=0, p=[5, 0, -5], e=[4, 30, 10]))
+        self.d['actor'] = [0.5, 0, 0]
+        self.write(self.d)
+        drv, client = self.driver([text(dict(op='move', to=[7, 0])), text(dict(op='press', key='cancel'))])
+        with self.ticking():
+            drv.run(steps=2)
+        feedback = json.loads(client.requests[1][0][-1]['content'])
+        points = [p['to'] for p in feedback['use_one_of']]
+        self.assertTrue(points)
+        self.assertIn('free points instead', feedback['error'])
+        from pathfind import _blocked_fn, active_walls
+        tests = [_blocked_fn(w, 3.5)[1] for w in active_walls(self.d)]
+        for x, z in points:
+            self.assertFalse(any(t(x, z) for t in tests), (x, z))
+            self.play.compile(self.d, dict(op='move', to=[x, z]))
+
+    def test_fire_result_and_damage_reach_feedback_and_log(self):
+        log = self.directory/'driver.log'
+        drv, client = self.driver([text(dict(op='fire', shots=3)), text(dict(op='wait'))], log=log)
+        def act(action, seconds):
+            return dict(self.play.observe(), result='held', damage=12,
+                        fire=dict(shots=3, hits=1, target=2, target_hp=40))
+        self.play.act = act
+        with self.ticking():
+            drv.run(steps=2)
+        feedback = json.loads(client.requests[1][0][-1]['content'])
+        self.assertEqual(feedback['fire']['shots'], 3)
+        self.assertEqual(feedback['damage'], 12)
+        entry = json.loads(log.read_text().splitlines()[0])
+        self.assertEqual((entry['fire']['hits'], entry['damage']), (1, 12))
 
 if __name__ == '__main__':
     unittest.main()
