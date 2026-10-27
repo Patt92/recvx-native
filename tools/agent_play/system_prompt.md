@@ -51,7 +51,9 @@ causes of events (e.g. "...; cause ...: you carry Handgun, Lighter"). Before eve
 `room_rules` (when present) are mechanics of the current room read from its script, e.g. a passage
 that opens only if you carry none of certain items. They are facts, not hints: follow `how`.
 `alert` appears when you made no progress for a while; it repeats the rule, the facts and what is
-still unread here. When you see an alert, do NOT repeat your last actions: do what the alert names.
+still unread here. When you see an alert, do NOT repeat your last actions: do what the alert names. If `approach_note` says
+there is no reachable standing point from your area, do not invent or move to a guessed coordinate; use
+`hint zone`, `hint rules`, or find a route/event that changes the gate first.
 
 ## Reply format
 

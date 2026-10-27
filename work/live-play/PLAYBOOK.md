@@ -194,6 +194,9 @@ python3 tools/agent_play/play.py act '{"op":"box","take":2}'  # take box row 2 i
 4. When the checklist is empty, close the box with `cancel`, then try the route/door specified by the rule.
    Check whether its wall/zone flags actually changed. If the route is still blocked, inspect the current
    `room_rules`, carried-item list and `hint zone`/`hint event`; do not start swapping checked-off items again.
+   If a zone has `approach_note` saying no reachable standing point from the current area/floor, stop
+   interacting with it: do not invent a nearby coordinate. Use `hint zone`/`hint rules` and find the
+   route/event that changes the gate. The driver recomputes all `go` points as you move to a new area.
 5. Special boxes may have separate storage. Follow their in-game text; do not assume an item stored in a
    special security box can be retrieved from a normal box (or vice versa). If the game says the items are
    transferred between two special boxes, still verify the destination's `box.contents` before proceeding.

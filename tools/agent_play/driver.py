@@ -254,6 +254,7 @@ class Driver:
         self._points_key, self._points = None, {}  # zone -> [to, face] for the current room and floor
         self._candidates = {}       # zone -> up to three [to, face] candidates
         self._failed_points = set() # (room, zone, to) that stalled or triggered nothing
+        self._go_attempts = {}     # (room, zone) -> last candidate index tried; reset on progress/room geometry change
         self.room = self.previous_room = None
         self.idle_waits, self.idle_view = 0, None  # passive waits in a row without any visible change
         self.last_owner = ''
@@ -359,6 +360,18 @@ class Driver:
         if obs.get('owner') == 'INVENTORY' and previous_owner and 'DIALOG' in previous_owner and not menu.get('commands'):
             out.append('The game opened the status menu itself after the text: it expects you to use, equip or '
                        'combine something now. Do not cancel before doing what the text asked.')
+        # If the room rule says the south/west passage is closed by carried items, and the matching
+        # forward door is known, state the concrete action to the model (do not leave it to infer it
+        # from two door numbers or re-enter the previous room).
+        rule = next((r for r in self._rules if 'stays CLOSED' in r.get('rule', '')), None)
+        rj = self.journal_rooms.get(obs.get('room'), {})
+        if rule:
+            closes = __import__('re').search(r'wall(?:s)? ((?:w\d+[, ]*)+)', rule['rule'])
+            if closes:
+                out.append('Detector/item gate: do NOT try the closed detector door or go back to the previous '
+                           'room. Put every carried item named in the room rule into the special security box '
+                           '(store one slot at a time; check the inventory and box after each). Do not take them '
+                           'back yet. Then use the north/forward door and verify the walls/room change.')
         space = obs.get('space')
         if space and space[0] >= space[1] and obs.get('owner') in ('FREE', 'DIALOG', 'CINEMATIC DIALOG'):
             out.append('Inventory full: before picking up more, free a slot: read documents you carry (Use; a read '
@@ -376,7 +389,16 @@ class Driver:
         if named:
             out.append('The last text names an item you carry: ' + ', '.join(sorted(set(named))) +
                        '. Equip or use it (inventory -> select it -> Equip/Use).')
+        out.extend(self.room_rule_tips())
         return out
+
+    def room_rule_tips(self):
+        rules = self.room_rules()
+        if not rules:
+            return []
+        return ['ROOM PUZZLE RULE: ' + ' '.join(r['rule'] + ' ' + r.get('how', '') for r in rules) +
+                ' Follow this before examining more objects or doors. Do not take gated items back '
+                'until the passage is open and you have crossed it; verify wall flags/room change.']
 
     def decide(self, obs, feedback, previous_owner=''):
         self.remember_texts(obs)
@@ -552,6 +574,7 @@ class Driver:
         v['n'] += 1
         v['got'] = got[:80]
         v['sig'] = before
+        v['result'] = result
 
     def zone_of_move(self, room, action, result):
         """(room, zone) when a finished move ended on a zone's ready point (a candidate of this room)."""
@@ -563,6 +586,25 @@ class Driver:
             if any(math.hypot(c[0][0] - to[0], c[0][1] - to[1]) < .05 for c in cands):
                 return room, zone
         return None
+
+    def unreachable_interact(self, action, obs):
+        """Do not let the model repeatedly guess coordinates for a zone with no reachable go point."""
+        if action.get('op') != 'interact':
+            return None
+        points = self.room_points(self.play.read()[0])
+        zone = action.get('zone')
+        if zone not in points or points[zone] is not None:
+            return None
+        a = next((a for a in self.play.read()[0].get('interactions', []) if a['index'] == zone), None)
+        detail = ''
+        if a:
+            try:
+                detail = ' ' + self.play.describe_zone(zone).get('approach_note', '')
+            except PlayError:
+                pass
+        return (f'zone {zone} has no reachable standing point from your current position/floor; '
+                f'the driver did not send the guessed coordinates.{detail} Find the missing event/route with '
+                'hint zone, hint room or hint event, take a reachable route, then try again only when the gates change.')
 
     def repeat_blocked(self, action, obs):
         """An interact on a zone already examined `repeat_limit` times with no progress since is refused."""
@@ -853,8 +895,11 @@ class Driver:
         # first free cell) is part of the key, so crossing a gate or a detector recomputes them.
         g = self.play.grids.get(d, radius=3.5)
         reach = g.distances(d['actor'][0], d['actor'][2])
-        area = min(reach) if reach else None
-        key = (d.get('room'), d.get('player_floor', 0), area, len(reach),
+        # Points need to be useful from here, not merely somewhere on the same connected floor:
+        # a probe can reach a far zone even though its route target is behind a wall. Recompute as
+        # the player moves; the underlying wall grid remains cached.
+        key = (d.get('room'), d.get('player_floor', 0),
+               round(d['actor'][0] / 4), round(d['actor'][2] / 4),
                tuple(a.get('flags', 0) & 1 for a in d.get('interactions', [])),
                tuple(w.get('fl', 0) & 1 for w in d.get('walls', [])))
         if self._points_key != key:
@@ -868,15 +913,17 @@ class Driver:
                     found = self.play.approaches(d, a, limit=3)
                 except PlayError:
                     found = []
-                if found:
-                    candidates[a['index']] = [[f['to'], f['face']] for f in found]
+                candidates[a['index']] = [[f['to'], f['face']] for f in found] if found else None
             self._points_key, self._candidates = key, candidates
         room = (d.get('room') or '')[:7]  # same key as the compact state ('RM_0080'), used by point_failed
         points = {}
         for zone, cands in self._candidates.items():
+            if cands is None:
+                points[zone] = None
+                continue
             usable = [c for c in cands if (room, zone, tuple(c[0])) not in self._failed_points]
             if usable:
-                points[zone] = usable[0]
+                points[zone] = usable[0]  # failed points are already filtered; take the first remaining candidate
         self._points = points
         return points
 
@@ -897,13 +944,20 @@ class Driver:
         shown = set()
         for z in obs.get('zones', []):
             if z['i'] in points and z.get('item') != 'taken':
-                z['go'] = points[z['i']]
+                if points[z['i']] is None:
+                    z['approach_note'] = 'no reachable standing point from your current area/floor; do not invent coordinates; use hint zone/blocked or another route'
+                else:
+                    z['go'] = points[z['i']]
+                failed = sum(1 for rr, zz, _ in self._failed_points if rr == d.get('room')[:7] and zz == z['i'])
+                if failed:
+                    z['go_attempt'] = failed + 1
+                    z['go_note'] = f'Previous {failed} approach point(s) failed; this is alternative {failed + 1}. Use its exact to/face.'
             shown.add(z['i'])
         kinds = {0: 'door', 1: 'stairs', 2: 'stairs', 3: 'text', 4: 'item'}
         far = []
         for a in d.get('interactions', []):
             i = a['index']
-            if i in shown or i not in points:
+            if i in shown or i not in points or points[i] is None:
                 continue
             far.append(dict(i=i, kind=kinds.get(a['type'], '?'), go=points[i],
                             **({'destination': a['parameters'][1]} if a['type'] == 0 else {})))
@@ -1012,8 +1066,14 @@ class Driver:
             room_before, progress_before = obs.get('room'), self.progress()
             fixed = self.correct(action, obs)
             blocked = self.repeat_blocked(fixed, obs)
+            denied = self.unreachable_interact(fixed, obs)
+            if denied:
+                blocked = denied
             if blocked:
                 obs, feedback, act_ms = self.play.observe(), dict(result='error', error=blocked), 0.0
+                if denied:
+                    self.record_visit(room_before, fixed.get('zone'), progress_before,
+                                      dict(owner='FREE', dialog=None), 'unreachable')
             else:
                 if fixed.get('zone') != action.get('zone'):
                     entry['zone_corrected'] = [action.get('zone'), fixed.get('zone')]

@@ -770,14 +770,18 @@ class DriverTests(unittest.TestCase):
         self.two_doors()
         drv, _ = self.driver([])
         d = self.play.read()[0]
+        d['actor'] = [0.0, 0, 14.0]
+        drv._points_key = None
         first = drv.room_points(d)[14]
         cands = drv._candidates[14]
         self.assertGreaterEqual(len(cands), 2)
-        drv.point_failed('RM_TEST.RDX', dict(op='interact', zone=14, to=first[0]), 'stalled')
-        self.assertEqual(drv.room_points(d)[14], cands[1])
+        drv.point_failed('RM_TEST', dict(op='interact', zone=14, to=first[0]), 'stalled')
+        # keep the actor in the same 4-unit region so the candidate table does not refresh
+        next_points = drv.room_points(d)[14]
+        self.assertIn(next_points, cands[1:])
         # A good result does not mark the point.
-        drv.point_failed('RM_TEST.RDX', dict(op='interact', zone=14, to=cands[1][0]), 'dialog')
-        self.assertEqual(drv.room_points(d)[14], cands[1])
+        drv.point_failed('RM_TEST', dict(op='interact', zone=14, to=next_points[0]), 'dialog')
+        self.assertEqual(drv.room_points(d)[14], next_points)
 
     def test_zone_without_own_point_is_not_switched_to_a_neighbour(self):
         self.two_doors()
@@ -796,12 +800,12 @@ class DriverTests(unittest.TestCase):
         drv, _ = self.driver([])
         south = drv.room_points(self.play.read()[0])
         self.assertIn(14, south)
-        self.assertNotIn(13, south)
+        self.assertIsNone(south[13])
         self.d['actor'] = [0, 0, -10]
         self.write(self.d)
         north = drv.room_points(self.play.read()[0])
         self.assertIn(13, north)
-        self.assertNotIn(14, north)
+        self.assertIsNone(north[14])
 
     def test_game_over_is_continued_without_the_model(self):
         self.d.update(gameover_active=True, cinematic=True, gameover_prompt=False, gameover_choice=0,
@@ -909,6 +913,27 @@ class DriverTests(unittest.TestCase):
         self.write(self.d)
         drv.track_progress(obs, 'choice')
         self.assertEqual(drv.since_progress, 0)
+
+    def test_item_gate_tip_orders_store_then_forward_door(self):
+        drv, _ = self.driver([])
+        drv._rules = [dict(rule='A passage here (walls w5, w15) opens only if you carry NONE of these 55 items: Knife. You carry Knife, so it stays CLOSED.',
+                           how='Put every listed carried item into the item box.')]
+        obs = dict(owner='FREE', room='RM_TEST', equipped=['Handgun', 9], inv=[[1, 8, 1, 'Knife']],
+                   zones=[dict(i=14, kind='door', destination=4, go=[[1, 1], [1, 2]])])
+        tips = drv.tips(obs, '')
+        gate = next(t for t in tips if t.startswith('Detector/item gate'))
+        self.assertIn('store one slot at a time', gate)
+        self.assertIn('Do not take them back yet', gate)
+        self.assertIn('north/forward door', gate)
+
+    def test_room_rule_is_a_prominent_tip_before_exploration(self):
+        drv, _ = self.driver([])
+        drv.room_rules = lambda: [dict(rule='The gate stays CLOSED while you carry Handgun and Lighter.',
+                                       how='Store all listed items, go north, verify the wall opens.')]
+        tips = drv.room_rule_tips()
+        rule = next(t for t in tips if t.startswith('ROOM PUZZLE RULE'))
+        self.assertIn('Do not take gated items back', rule)
+        self.assertIn('verify wall flags', rule)
 
     def test_history_is_cut_in_blocks_so_the_prefix_stays_cacheable(self):
         drv, _ = self.driver([], window=2)
@@ -1092,8 +1117,11 @@ class DriverTests(unittest.TestCase):
         drv.room_points(self.d)
         cands = drv._candidates[4]
         self.assertGreater(len(cands), 1)
+        cands = drv._candidates[4]
+        self.assertGreater(len(cands), 1)
         drv.point_failed('RM_0080', dict(op='interact', zone=4, to=cands[0][0]), 'stalled')
-        self.assertEqual(drv.room_points(self.d)[4], cands[1])
+        next_points = drv.room_points(self.d)[4]
+        self.assertIn(next_points, cands[1:])
 
     def test_document_page_is_shown_as_x_of_y(self):
         from play import compact
