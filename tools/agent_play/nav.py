@@ -92,6 +92,12 @@ def summary(d):
 
 
 def ascii_map(d, cell=4.0, box=None):
+    for line in map_lines(d, cell, box):
+        print(line)
+
+
+def map_lines(d, cell=4.0, box=None):
+    """The room as text lines (walls, floors, zones, enemies, player); ascii_map prints them."""
     from pathfind import active_walls
     walls = active_walls(d)  # same selection as pathfinding / move_walls (floor, height, attr 4)
     floors = d.get('floors', [])
@@ -132,14 +138,15 @@ def ascii_map(d, cell=4.0, box=None):
         if e['inactive'] and e['hp'] == 0: continue
         put(e['position'][0], e['position'][2], 'z' if e['inactive'] else 'Z')
     fx, fz = facing(d['yaw']); put(px, pz, 'P'); put(px + fx * cell * 1.5, pz + fz * cell * 1.5, '^')
-    print(f"map {d['room']} cell {cell}: x {x0:.0f}..{x0+W*cell:.0f}, z {z0:.0f}..{z0+H*cell:.0f} (top = small z). "
-          "# wall, o cylinder, . floor, D door, T text, I item, digit zone%10, Z enemy, z inactive, P player, ^ facing")
+    lines = [f"map {d['room']} cell {cell}: x {x0:.0f}..{x0+W*cell:.0f}, z {z0:.0f}..{z0+H*cell:.0f} (top = small z). "
+             "# wall, o cylinder, . floor, D door, T text, I item, digit zone%10, Z enemy, z inactive, P player, ^ facing"]
     head = [' '] * W
     for i in range(0, W, 10):
         for k, ch in enumerate(f"{int(x0 + i * cell)}"):
             if i + k < W: head[i + k] = ch
-    print("      " + "".join(head))
-    for j in range(H): print(f"{int(z0 + j * cell):5d} " + "".join(grid[j]))
+    lines.append("      " + "".join(head))
+    for j in range(H): lines.append(f"{int(z0 + j * cell):5d} " + "".join(grid[j]))
+    return lines
 
 
 def wait(d0, auto, live, timeout, flags):

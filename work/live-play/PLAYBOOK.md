@@ -41,6 +41,16 @@ RECVX_LLM_BASE_URL=http://localhost:8080/v1 RECVX_LLM_MODEL=<name> python3 tools
   variables that are already set take precedence; the key is only sent as
   `Authorization: Bearer` and appears in no log. Other file: `--env PATH`.
 
+- Every request is a bundle: `situation` (the moment in sentences), `zones_all` (every zone of the
+  floor with what examining it does now, decoded from the room script), `board` (open gates, locks,
+  doors and items of all visited rooms), `map` (the room as text) and `history` (last actions with
+  their effect). The model may answer with one action or a plan of steps, each with `expect`; the
+  driver runs the plan while the expectations hold and asks for the next decision while the last
+  step still runs (prefetch). Macros (`explore_room`, `collect_items`, `satisfy_gate`, `goto_room`)
+  are expanded by the driver from the live state. Details in `docs/AI_PLAY.md`.
+- An MCP client (e.g. Claude Code) can play through `tools/agent_play/mcp_server.py` with the same
+  observe/act/plan/zone/hint/board/map tools, without shell commands.
+
 The driver does not start the game; the runtime runs as below with `--control` and
 `autodump 5 auto`. Agent playmode with `play.py` remains for diagnosis and tool development.
 

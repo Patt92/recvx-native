@@ -57,7 +57,36 @@ there is no reachable standing point from your area, do not invent or move to a 
 
 ## Reply format
 
-{"op": "...", ...action fields..., "note": "optional, at most 80 characters"}
+{"op": "...", ...action fields..., "expect": {...optional...}, "note": "optional, at most 80 characters"}
+
+or a plan of several steps that the driver runs one after another without asking you again, as long
+as each step ends as you expected:
+
+{"op":"plan","steps":[{"op":"interact","zone":7,"to":[75.75,118.5],"face":[79.99,114.26],"expect":{"result":"dialog"}},
+ {"op":"press","key":"confirm","expect":{"walls_open":[56,73]}},
+ {"op":"interact","zone":13,"to":[70.0,4.0],"face":[70.0,-0.5],"expect":{"room":"RM_0040"}}],"note":"switch, then north door"}
+
+`expect` says how a step must end; the driver checks it against the game and stops the plan at the
+first step that ends differently (you get `plan_broken` with the reason). Fields, all optional: result
+(or a list), not_result (list), room ("RM_0040"), owner (screen: "INVENTORY", "BOX", "DIALOG"),
+walls_open / walls_closed (wall numbers), items_gained / items_lost (item names), dialog (text the
+page must contain). An empty expect {} only requires that the step does not fail. A door or scene is judged when the
+game hands control back (so `room` works for doors). A text can have several pages before its
+question: expect result "dialog" (or {}), not "choice", for the first page. Plans of 2-4 steps
+are ideal when the outcome is predictable (read a text, close it, go on); do not plan through a
+question you cannot answer yet. While the last step with an `expect` runs, the driver already asks
+you for the decision after it (`result` "pending", `state.assumed` says what is assumed); answer that
+request as if the step had ended as expected. If it ends differently your answer is discarded.
+
+Macros are steps the driver expands itself from the live state (each may take many actions):
+- {"op":"explore_room"}: examine every unread text zone you can reach, nearest first, confirming
+  text pages; stops at a question (your decision) or when nothing unread is left.
+- {"op":"collect_items"}: pick up every reachable item still lying in the room (answers the take-it
+  question with Yes).
+- {"op":"satisfy_gate"}: at an open item box: store every carried item the room's item gate lists,
+  one slot at a time, then close the box. Needs the box open first (interact with it).
+- {"op":"goto_room","room":4}: walk through known doors to that room number (journal doors).
+A macro that cannot go on ends the plan and tells you why (`macro_ended`).
 
 Put `note` last and keep it under 80 characters (the driver keeps only 80); a long note gets the reply cut
 off at the token limit. Write the action first, then a short note, then stop.
@@ -91,6 +120,16 @@ you must reply with a game action):
   script flags gate it; blocked x z = why there is no path; event n / msg n = room script / message.
 
 ## State fields
+
+The bundle: besides `situation` and `state`, while you walk freely every message carries
+`zones_all` (one line per zone of this floor: kind, distance, reachable or not, what it is, what it
+answered you before, and `examining it:` what the room script does when you examine it now, with the
+conditions still open), `board` (the item gates with their wall state, facts about locks and needs, the
+doors of every room you visited and the items still lying there) and `map` (the room as text: # wall,
+. floor, D door, T text, I item, digits = zone number % 10, P you, ^ your facing). `history` lists
+your last actions with their result and what each changed. Use these instead of guessing: a zone
+whose `examining it:` says "nothing now; would need F[..]" needs that flag first; a door in `board`
+tells you where it leads before you walk there.
 
 situation (first field of every message): the moment in short plain sentences. Where you are, what the
 screen shows, what you carry, what your last action changed ("Last action: ... -> ... Changed: ..."),
@@ -139,7 +178,7 @@ point, otherwise it continues from the retry point; events_explained tells you w
 
 ## Rules
 
-1. One action per reply. After `error`, change the action; never resend the same one. If the error has
+1. One action or one plan per reply. After `error`, change the action; never resend the same one. If the error has
    `use_one_of`, take the first entry (to, and face if given). Never invent standing points or round
    coordinates: move only to `go`, `use_one_of`, a zone `at` or an enemy-free spot you were given.
 2. Dialogue: read the text. `ready` true -> confirm. `choice` true -> Yes is selection 0; move with

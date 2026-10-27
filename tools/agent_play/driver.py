@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -300,6 +301,54 @@ def describe_change(before, after, action, result, names):
     return f'Last action: {action_text(action)} -> {result}. Changed: {what}.'
 
 
+MACROS = ('explore_room', 'collect_items', 'satisfy_gate', 'goto_room')
+
+
+def item_names_of(d, names):
+    return sorted(names.get((v >> 16) & 255, f'item {(v >> 16) & 255}') for v in (d.get('items') or [])[1:] if v)
+
+
+def expectation_met(expect, before, after, feedback, obs, names=None):
+    """Did the action end as the model expected? `expect` is a dict of checkable fields (result,
+    not_result, room, owner, walls_open, walls_closed, items_gained, items_lost, dialog); a string or an
+    empty expect only requires that the action did not fail. Returns (ok, reason)."""
+    result = feedback.get('result')
+    if result == 'error':
+        return False, 'the action failed: ' + str(feedback.get('error', ''))[:120]
+    if not expect or not isinstance(expect, dict):
+        return True, ''
+    names = names or {}
+    want = expect.get('result')
+    if want and result not in (want if isinstance(want, list) else [want]):
+        return False, f"expected result {want}, got {result}"
+    if result in (expect.get('not_result') or []):
+        return False, f"result {result} was excluded"
+    room = expect.get('room')
+    if room and not str(after.get('room', '')).startswith(str(room)[:7]):
+        return False, f"expected room {room}, still in {str(after.get('room', ''))[:7]}"
+    owner = expect.get('owner')
+    if owner and str(owner).upper() not in (obs.get('owner') or '').upper():
+        return False, f"expected screen {owner}, got {obs.get('owner')}"
+    walls = {w['i']: w.get('fl', 0) & 1 for w in after.get('walls', [])}
+    for w in expect.get('walls_open') or []:
+        if walls.get(int(w)) != 0:
+            return False, f'wall w{w} is still closed'
+    for w in expect.get('walls_closed') or []:
+        if walls.get(int(w)) != 1:
+            return False, f'wall w{w} is still open'
+    have, had = item_names_of(after, names), item_names_of(before, names)
+    for name in expect.get('items_gained') or []:
+        if name not in have:
+            return False, f'{name} is not in the inventory'
+    for name in expect.get('items_lost') or []:
+        if name in have and had.count(name) <= have.count(name):
+            return False, f'{name} is still in the inventory'
+    text = expect.get('dialog')
+    if text and str(text).lower() not in ((obs.get('dialog') or {}).get('text') or '').lower():
+        return False, f'the text does not contain {text!r}'
+    return True, ''
+
+
 def trim(obs):
     return {k: v for k, v in obs.items() if k not in DROP}
 
@@ -325,6 +374,17 @@ class Driver:
         self.last_owner = ''
         self.last_change = None    # one sentence: what the last action changed (describe_change)
         self._labels_key, self._labels = None, {}
+        self._effects_key, self._effects = None, {}
+        self._map_key, self._map = None, []
+        self.history_lines = []    # "step: action -> result; what changed", newest last (bundle `history`)
+        # Plans: the model may answer with several steps, each with what it expects; the driver runs
+        # them without further requests while the expectations hold. Macros expand to steps lazily.
+        self.plan, self.plan_total, self.plan_done = [], 0, 0
+        self.pending_feedback = {}  # what a macro or a broken plan tells the next decision
+        # Prefetch: while the last planned step runs, the next decision is already requested with the
+        # expected outcome assumed; it is used when the outcome matches, else discarded.
+        self.prefetch_thread, self.prefetched = None, None
+        self.deferred = None        # an expectation to re-check once the game hands control back (doors, scenes)
         # Run journal: what happened in this run, shown with every decision (no game knowledge, only
         # what the game itself showed): per room the zones read and their answers, open items/doors,
         # important texts (locks, needs, codes) and the causes of events that reacted to the player.
@@ -570,22 +630,133 @@ class Driver:
             out.append(f'No progress for {self.since_progress} decisions: do something you have not tried.')
         return out
 
-    def decide(self, obs, feedback, previous_owner=''):
-        self.remember_texts(obs)
+    # --- the bundle: everything the model may need, sent with every request (prefill is cheap) -----------
+    def zone_effects(self, d):
+        """What examining each active text zone does now (hint.zone_effects), cached per room, flags and items."""
+        key = (d.get('room'), tuple(tuple(x) for x in d.get('vm_flags', [])),
+               tuple(sorted({(v >> 16) & 255 for v in d.get('items', [])[1:] if v})),
+               tuple((a['index'], a.get('flags', 0) & 1) for a in d.get('interactions', [])))
+        if key != self._effects_key:
+            effects = {}
+            try:
+                import hint
+                room = hint.Room(d['room'])
+                for a in d.get('interactions', []):
+                    if a.get('flags', 0) & 1 and a.get('type') == 3:
+                        try:
+                            effects[a['index']] = hint.zone_effects(room, a['index'], d, limit=220)
+                        except Exception:
+                            effects[a['index']] = ''
+            except Exception:
+                effects = {}
+            self._effects_key, self._effects = key, effects
+        return self._effects
+
+    def room_map(self, d):
+        """The room as text, cell size chosen so the map stays under ~60 columns; cached per room, walls,
+        zones and the player's 8-unit cell."""
+        key = (d.get('room'), tuple(w.get('fl', 0) & 1 for w in d.get('walls', [])),
+               tuple(a.get('flags', 0) & 1 for a in d.get('interactions', [])),
+               round(d['actor'][0] / 8), round(d['actor'][2] / 8))
+        if key != self._map_key:
+            try:
+                import nav
+                xs, zs = [], []
+                for w in d.get('walls', []):
+                    xs += [w['p'][0], w['p'][0] + w['e'][0]]; zs += [w['p'][2], w['p'][2] + w['e'][2]]
+                span = max(max(xs) - min(xs) if xs else 0, max(zs) - min(zs) if zs else 0)
+                cell = max(4.0, math.ceil(span / 56 / 2) * 2.0)
+                lines = nav.map_lines(d, cell)
+            except Exception:
+                lines = []
+            self._map_key, self._map = key, lines
+        return self._map
+
+    def zones_all(self, obs, d):
+        """One line per active zone on the player's floor: kind, distance, reachability, what it is, what
+        it answered before, what examining it does now."""
+        labels, effects = self.zone_labels(d), self.zone_effects(d)
+        points = self.room_points(d)
+        log = self.zone_log((obs.get('room') or '')[:7]) if obs.get('room') else {}
+        px, pz = d['actor'][0], d['actor'][2]
+        kinds = {0: 'door', 1: 'stairs', 2: 'stairs', 3: 'text', 4: 'item'}
+        out = []
+        for a in sorted(d.get('interactions', []), key=lambda a: a['index']):
+            if not a.get('flags', 0) & 1 or a.get('floor', 0) != d.get('player_floor', 0):
+                continue
+            i = a['index']
+            cx, cz = a['position'][0] + a['extent'][0] / 2, a['position'][2] + a['extent'][2] / 2
+            dist = math.hypot(cx - px, cz - pz)
+            if i in points:
+                reach = 'reachable' if points[i] else 'NOT reachable from here'
+            else:
+                reach = 'no standing point'
+            label = labels.get(i)
+            if not label:  # room data unavailable: what the zone record itself says
+                prm = a.get('parameters') or [0, 0]
+                label = {0: f'door to room {prm[1] if len(prm) > 1 else "?"}', 1: 'stairs/ladder', 2: 'step',
+                         3: 'text or object', 4: 'item or object'}.get(a.get('type'), '?')
+            line = f"i{i} {kinds.get(a.get('type'), '?')} {dist:.0f}m {reach}: {label}"
+            if i in log:
+                line += f"; you got: {log[i]['got']}"
+            if effects.get(i):
+                line += f"; examining it: {effects[i]}"
+            out.append(line)
+        return out
+
+    def board(self, obs, d):
+        """Open obstacles and the door graph over the rooms of this run, from rules, facts and the
+        journal only (no room knowledge)."""
+        out = []
+        walls = {w['i']: w.get('fl', 0) & 1 for w in d.get('walls', [])}
+        room = (obs.get('room') or '')[:7]
+        for r in self.room_rules():
+            gate = sorted(int(w) for w in __import__('re').findall(r'w(\d+)', r['rule'].split(') opens')[0]))
+            shut = [w for w in gate if walls.get(w) == 1]
+            carried = [row[3] for row in obs.get('inv', []) if len(row) > 3 and row[3] in set(r.get('all_items') or [])]
+            out.append(f"{room}: item gate on walls {','.join('w%d' % w for w in gate)}: "
+                       + (f"CLOSED (w{','.join(map(str, shut))}); " if shut else 'open; ')
+                       + (f"you carry listed items: {', '.join(carried)}" if carried else 'you carry none of the listed items'))
+        for fact in self.journal_facts[-8:]:
+            low = fact.lower()
+            if any(w in low for w in ('locked', 'need', 'must', 'require', 'missing', 'only')):
+                out.append('fact: ' + fact)
+        stage = room[3] if len(room) > 3 else '0'
+        for visited in self.journal_order:
+            j = self.journal_rooms.get(visited, {})
+            doors = ', '.join(f"i{i} -> RM_{stage}{dest:02d}0" for i, dest in sorted(j.get('doors', {}).items()))
+            items = f"; items left: {j['open_items']}" if j.get('open_items') else ''
+            out.append(f"{visited}: doors {doors or '?'}{items}")
+        return out
+
+    def decide(self, obs, feedback, previous_owner='', prefetch=False):
+        if not prefetch:
+            self.remember_texts(obs)
         payload = dict(situation=self.situation(obs))
         payload.update(feedback, state=trim(obs))
+        if obs.get('owner') == 'FREE':
+            try:
+                d, _, _ = self.play.read()
+                payload['zones_all'] = self.zones_all(obs, d)
+                payload['board'] = self.board(obs, d)
+                payload['map'] = self.room_map(d)
+            except (PlayError, OSError, ValueError, KeyError):
+                pass
+        if self.history_lines:
+            payload['history'] = self.history_lines[-10:]
         if self.texts:
             payload['recent_texts'] = self.texts[-4:]
         payload['journal'] = self.journal()
         rules = self.room_rules()
         if rules:
             payload['room_rules'] = [{k: v for k, v in r.items() if k != 'all_items'} for r in rules]
-        alert = self.alert(obs)
+        alert = None if prefetch else self.alert(obs)
         if alert:
             payload['alert'] = alert
         if self.pending_events:
             payload['events_explained'] = self.pending_events
-            self.pending_events = []
+            if not prefetch:
+                self.pending_events = []
         tips = self.tips(obs, previous_owner)
         if tips:
             payload['tips'] = tips
@@ -1156,8 +1327,228 @@ class Driver:
         if (d.get('control') or {}).get('run') != 'auto':
             self.act({'op': 'run', 'mode': 'auto', 'dist': 18})
 
+    # --- plans, macros and the prefetched next decision ------------------------------------------------
+    def choose(self, view, feedback):
+        """The next action: a planned step (no request), the prefetched decision, or a fresh decision.
+        Returns (user message or None, action, usage, llm_ms, log entry)."""
+        step = self.next_plan_step(view)
+        if step is not None:
+            return None, step, {}, 0.0, dict(llm_ms=0, usage={}, plan_step=f'{self.plan_done}/{self.plan_total}')
+        if self.prefetched:
+            user, action, usage, llm_ms = self.prefetched
+            self.prefetched = None
+            return user, action, usage, llm_ms, dict(llm_ms=round(llm_ms), usage=usage, prefetched=True)
+        if self.client is None:  # no model (MCP server): nothing planned means nothing to do
+            return None, dict(op='wait', ticks=1), {}, 0.0, dict(llm_ms=0, usage={}, auto=True)
+        user, action, usage, llm_ms = self.decide(view, feedback, self.last_owner)
+        entry = dict(llm_ms=round(llm_ms), usage=usage)
+        if self.bad_replies:
+            entry['bad_replies'] = self.bad_replies
+        if action.get('op') == 'plan':
+            steps = [st for st in (action.get('steps') or []) if isinstance(st, dict) and isinstance(st.get('op'), str)]
+            note = action.get('note')
+            if isinstance(note, str) and note.strip():
+                self.note = note.strip()[:NOTE_MAX]
+            self.remember(user, action)
+            self.plan, self.plan_total, self.plan_done = steps, len(steps), 0
+            step = self.next_plan_step(view)
+            if step is None:
+                self.pending_feedback['plan_broken'] = 'the plan had no runnable step'
+                return None, dict(default_action(view), no_action=True), usage, llm_ms, entry
+            entry['plan_step'] = f'{self.plan_done}/{self.plan_total}'
+            return None, step, usage, llm_ms, entry
+        return user, action, usage, llm_ms, entry
+
+    def next_plan_step(self, view):
+        """Pop the next concrete step of the plan; macros are expanded against the current state."""
+        while self.plan:
+            step = self.plan[0]
+            if step.get('op') in MACROS:
+                try:
+                    concrete, reason = self.expand_macro(step, view)
+                except (PlayError, OSError, ValueError, KeyError, TypeError) as e:
+                    concrete, reason = None, str(e)
+                if concrete is None:
+                    self.plan.pop(0)
+                    self.plan_done += 1
+                    if reason:
+                        self.pending_feedback['macro_ended'] = f"{step['op']}: {reason}"
+                    if reason and reason != 'done':
+                        self.plan = []  # a macro that cannot go on hands the decision back
+                    continue
+                self.plan_done += (0 if step.get('_started') else 1)
+                step['_started'] = True
+                return dict(concrete, macro=step['op'])
+            self.plan.pop(0)
+            self.plan_done += 1
+            return dict(step)
+        return None
+
+    def expand_macro(self, step, view):
+        """(next concrete action, None) or (None, reason) for a macro step; reads the live state."""
+        op, owner = step['op'], view.get('owner') or ''
+        dialog = view.get('dialog') or {}
+        if op in ('explore_room', 'collect_items'):
+            if dialog:
+                if dialog.get('choice'):
+                    if op == 'collect_items' and dialog.get('selection', 0) == 0 and 'save' not in dialog.get('text', '').lower():
+                        return dict(op='press', key='confirm'), None  # the take-it question, Yes selected
+                    return None, 'a question needs your answer'
+                if dialog.get('ready'):
+                    return dict(op='press', key='confirm'), None
+                return dict(op='wait'), None
+            if owner != 'FREE':
+                return None, f'not in free play ({owner})'
+            d, _, _ = self.play.read()
+            points = self.room_points(d)
+            log = self.zone_log((view.get('room') or '')[:7])
+            px, pz = d['actor'][0], d['actor'][2]
+            best = None
+            for a in d.get('interactions', []):
+                i = a['index']
+                if not a.get('flags', 0) & 1 or a.get('floor', 0) != d.get('player_floor', 0) or not points.get(i):
+                    continue
+                if op == 'explore_room' and (a.get('type') != 3 or i in log):
+                    continue
+                if op == 'collect_items':
+                    if a.get('type') != 4:
+                        continue
+                    item = next((r for r in d.get('room_items', []) if r.get('index') == a['parameters'][0]), None)
+                    if not item or item.get('inactive') or item.get('hidden'):
+                        continue
+                    if i in log and log[i].get('sig') == self.progress():
+                        continue  # examined already and nothing came of it
+                dist = math.hypot(a['position'][0] + a['extent'][0] / 2 - px, a['position'][2] + a['extent'][2] / 2 - pz)
+                if best is None or dist < best[0]:
+                    best = (dist, i)
+            if best is None:
+                return None, 'done'
+            to, face = points[best[1]]
+            return dict(op='interact', zone=best[1], to=to, face=face, expect=dict(not_result=['stalled', 'no_interaction_observed'])), None
+        if op == 'satisfy_gate':
+            if 'BOX' not in owner.split():
+                return None, 'needs the open item box: interact with the box first'
+            box = view.get('box') or {}
+            if box.get('mode') == 'list':
+                return dict(op='press', key='cancel'), None
+            listed = set()
+            for r in self.room_rules():
+                listed |= set(r.get('all_items') or [])
+            carried = [row[0] for row in view.get('inv', []) if len(row) > 3 and row[3] in listed]
+            if carried:
+                return dict(op='box', store=min(carried), expect=dict(result='swapped')), None
+            if not step.get('_closed'):
+                step['_closed'] = True
+                return dict(op='press', key='cancel'), None
+            return None, 'done'
+        if op == 'goto_room':
+            target = step.get('room')
+            room = (view.get('room') or '')[:7]
+            try:
+                number = int(str(target)[4:6]) if str(target).startswith('RM_') else int(target)
+            except (TypeError, ValueError):
+                return None, f'goto_room needs a room number or RM_ name, not {target!r}'
+            if room and room[4:6].isdigit() and int(room[4:6]) == number:
+                return None, 'done'
+            if str(target).startswith('RM_') and str(target)[:7] == room:
+                return None, 'done'
+            if owner != 'FREE':
+                return None, f'not in free play ({owner})'
+            hop = self.next_hop(room, number)
+            if hop is None:
+                return None, f'no known door path to room {number}; explore first'
+            d, _, _ = self.play.read()
+            points = self.room_points(d)
+            if not points.get(hop):
+                return None, f'door i{hop} towards room {number} has no reachable standing point from here'
+            to, face = points[hop]
+            return dict(op='interact', zone=hop, to=to, face=face, expect=dict(not_result=['stalled', 'no_interaction_observed'])), None
+        return None, f'unknown macro {op}'
+
+    def next_hop(self, room, number):
+        """Door zone of `room` on the shortest known path (journal doors) to room `number`, or None."""
+        if not room or not room[4:6].isdigit():
+            return None
+        stage = room[3]
+        name = lambda n: f'RM_{stage}{n:02d}0'
+        start = int(room[4:6])
+        queue, seen = [(start, None)], {start}
+        while queue:
+            here, first = queue.pop(0)
+            for zone, dest in sorted((self.journal_rooms.get(name(here), {}).get('doors') or {}).items()):
+                if dest in seen:
+                    continue
+                seen.add(dest)
+                hop = first if first is not None else zone
+                if dest == number:
+                    return hop
+                queue.append((dest, hop))
+        return None
+
+    def settle_deferred(self, obs):
+        """Re-check an expectation that was left open while the game was busy, now that it answers again."""
+        d = self.deferred
+        self.deferred = None
+        try:
+            import hint
+            names = hint.ITEMS
+        except Exception:
+            names = {}
+        try:
+            after = self.play.read()[0]
+        except PlayError:
+            after = {}
+        ok, why = expectation_met(d['expect'], d['before'], after, dict(result='settled'), obs, names)
+        if ok:
+            self.pending_feedback['expect_met_later'] = action_text(d['action'])
+        elif self.plan or d['planned']:
+            self.plan = []
+            self.pending_feedback['plan_broken'] = f"{action_text(d['action'])}: {why}"
+        else:
+            self.pending_feedback['expect_failed'] = f"{action_text(d['action'])}: {why}"
+        entry = {}
+        self.finish_prefetch(ok, entry)
+        if entry.get('prefetch'):
+            self.pending_feedback['prefetch'] = entry['prefetch']
+
+    def start_prefetch(self, view, action, expect):
+        """Ask for the next decision now, assuming `action` ends as `expect` says (last planned step only)."""
+        if self.client is None or self.prefetch_thread or self.plan or not isinstance(expect, dict):
+            return
+        assumed = dict(view)
+        assumed['assumed'] = (f"The step '{action_text(action)}' is running now; assume it ends as expected "
+                              f"({json.dumps(expect, separators=(',', ':'))}). Decide the action that comes AFTER it.")
+        feedback = dict(result='pending', assumed=expect)
+        holder = {}
+        def work():
+            try:
+                holder['decision'] = self.decide(assumed, feedback, self.last_owner, prefetch=True)
+            except Exception as e:  # a failed prefetch only costs the shortcut
+                holder['error'] = str(e)
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        self.prefetch_thread = (thread, holder)
+
+    def finish_prefetch(self, ok, entry):
+        if not self.prefetch_thread:
+            return
+        thread, holder = self.prefetch_thread
+        self.prefetch_thread = None
+        thread.join()
+        if ok and 'decision' in holder:
+            self.prefetched = holder['decision']
+            entry['prefetch'] = 'kept'
+        else:
+            entry['prefetch'] = 'discarded' + (': ' + holder['error'] if holder.get('error') else '')
+
     def record(self, entry):
         self.steps += 1
+        line = f"{self.steps}: {action_text(entry['action'])} -> {entry['result']}"
+        if entry.get('error'):
+            line += ' (' + str(entry['error'])[:120] + ')'
+        elif self.last_change and 'Changed: ' in self.last_change:
+            line += '; ' + self.last_change.split('Changed: ', 1)[1].rstrip('.')
+        self.history_lines = (self.history_lines + [line])[-12:]
         line = (f"{self.steps:4d} {entry.get('llm_ms', 0):6.0f}ms llm {entry['act_ms']:6.0f}ms act "
                 f"{entry['owner']:<18.18} {json.dumps(entry['action'], separators=(',', ':'))[:90]:<90} -> {entry['result']}")
         print(line, file=self.out, flush=True)
@@ -1165,11 +1556,15 @@ class Driver:
             with open(self.log, 'a') as f:
                 f.write(json.dumps(entry, separators=(',', ':')) + '\n')
 
-    def run(self, steps=0):
+    def run(self, steps=0, until_plan_done=False):
+        """Play until `steps` decisions were made (0 = forever). With until_plan_done the loop ends as
+        soon as the current plan is finished or broken (the MCP server runs plans this way, no model)."""
         self.ensure_auto_hold()
         obs, feedback = self.play.observe(), dict(result='start')
         stale_since = None
         while not steps or self.steps < steps:
+            if until_plan_done and not self.plan:
+                return 0
             if obs.get('stale'):
                 stale_since = stale_since or time.monotonic()
                 if time.monotonic() - stale_since > 10:
@@ -1236,16 +1631,22 @@ class Driver:
                     feedback = dict(feedback, unchanged_for=self.idle_waits)
                 view = self.mark_seen(self.with_approaches(self.mark_way_back(obs)))
                 self.update_journal(view)
-                user, action, usage, llm_ms = self.decide(view, feedback,
-                                                          self.last_owner)
+                if self.deferred:
+                    self.settle_deferred(obs)
+                if self.pending_feedback:
+                    feedback = dict(feedback, **self.pending_feedback)
+                    self.pending_feedback = {}
+                user, action, usage, llm_ms, entry = self.choose(view, feedback)
                 fallback = action.pop('no_action', False)
                 note = action.pop('note', None)
                 if isinstance(note, str) and note.strip():
                     self.note = note.strip()[:NOTE_MAX]
-                self.remember(user, action)
-                entry = dict(llm_ms=round(llm_ms), usage=usage)
-                if self.bad_replies:
-                    entry['bad_replies'] = self.bad_replies
+                if user is not None:
+                    self.remember(user, action)
+            expect = action.pop('expect', None) if isinstance(action, dict) else None
+            planned = entry.get('plan_step') is not None
+            if expect is not None:
+                entry['expect'] = expect
             owner = obs.get('owner', '')
             self.last_owner = owner
             self.remember_texts(obs)
@@ -1255,6 +1656,10 @@ class Driver:
             denied = self.unreachable_interact(fixed, obs)
             if denied:
                 blocked = denied
+            try:
+                before_raw = self.play.read()[0]
+            except PlayError:
+                before_raw = {}
             if blocked:
                 obs, feedback, act_ms = self.play.observe(), dict(result='error', error=blocked), 0.0
                 if denied:
@@ -1263,6 +1668,8 @@ class Driver:
             else:
                 if fixed.get('zone') != action.get('zone'):
                     entry['zone_corrected'] = [action.get('zone'), fixed.get('zone')]
+                if not entry.get('auto') and (expect is not None or planned):
+                    self.start_prefetch(view if not entry.get('auto') else obs, fixed, expect)
                 obs, feedback, act_ms = self.act(fixed)
                 if 'zone_corrected' in entry:
                     feedback['zone_corrected'] = (f"you named zone {action.get('zone')} but stood for zone "
@@ -1280,6 +1687,32 @@ class Driver:
                 if feedback['result'] == 'saved':
                     self.snapshot = dict(room=feedback.get('snapshot_room'), play_time=self.play.read()[0].get('play_time'))
             self.move_zone = self.zone_of_move(room_before, action, feedback['result'])
+            if not entry.get('auto') and (expect is not None or planned):
+                try:
+                    import hint
+                    names = hint.ITEMS
+                except Exception:
+                    names = {}
+                try:
+                    after_raw = self.play.read()[0]
+                except PlayError:
+                    after_raw = {}
+                ok, why = expectation_met(expect, before_raw, after_raw, feedback, obs, names)
+                if not ok and feedback['result'] != 'error' and (passive(obs) or feedback['result'] in ('running', 'room')):
+                    # The game is still busy (door, scene): judge the step when control comes back.
+                    self.deferred = dict(expect=expect, before=before_raw, action=action, planned=planned, why=why)
+                    entry['expect_deferred'] = why
+                elif ok:
+                    entry['expect_met'] = True
+                elif self.plan or planned:
+                    self.plan = []
+                    self.pending_feedback['plan_broken'] = f"step {entry.get('plan_step', '?')} ({action_text(action)}): {why}"
+                    entry['plan_broken'] = why
+                else:
+                    self.pending_feedback['expect_failed'] = f'{action_text(action)}: {why}'
+                    entry['expect_failed'] = why
+                if not self.deferred:
+                    self.finish_prefetch(ok, entry)
             if not entry.get('auto') and fallback:
                 feedback.update(result='error', error='no game action in your last reply; the driver sent '
                                 f"{json.dumps(action, separators=(',', ':'))} instead. Reply with only the JSON action.")

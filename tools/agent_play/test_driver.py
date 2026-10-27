@@ -10,7 +10,7 @@ import threading
 import time
 import unittest
 
-from driver import Driver, parse_action, passive, trim
+from driver import Driver, expectation_met, parse_action, passive, trim
 from play import Play
 from test_play import state
 
@@ -635,6 +635,204 @@ class DriverTests(unittest.TestCase):
         obs = dict(room=self.play.read()[0]['room'])
         drv.zone_log(obs['room'])[14] = dict(n=9, got='went through the door', sig=drv.progress())
         self.assertIsNone(drv.repeat_blocked(dict(op='interact', zone=14), obs))
+
+    # --- bundle, plans, macros, prefetch ---------------------------------------------------------------
+    def test_expectation_met_checks_only_the_given_fields(self):
+        before = dict(room='RM_0090.RDX', items=[0, (55 << 16) | 1], walls=[dict(i=56, fl=1)])
+        after = dict(room='RM_0090.RDX', items=[0, 0], walls=[dict(i=56, fl=0)])
+        names = {55: 'Lighter'}
+        ok, why = expectation_met(dict(walls_open=[56], items_lost=['Lighter']), before, after, dict(result='swapped'),
+                                  dict(owner='INVENTORY BOX'), names)
+        self.assertTrue(ok, why)
+        ok, why = expectation_met(dict(room='RM_0040'), before, after, dict(result='settled'), dict(owner='FREE'), names)
+        self.assertFalse(ok); self.assertIn('still in RM_0090', why)
+        ok, why = expectation_met({}, before, after, dict(result='error', error='no path'), {}, names)
+        self.assertFalse(ok); self.assertIn('no path', why)
+        ok, why = expectation_met(dict(not_result=['stalled']), before, after, dict(result='stalled'), {}, names)
+        self.assertFalse(ok)
+        ok, _ = expectation_met(dict(dialog='metal detector'), before, after, dict(result='dialog'),
+                                dict(dialog=dict(text='I must release the Metal Detector.')), names)
+        self.assertTrue(ok)
+
+    def test_plan_runs_its_steps_without_further_requests_until_an_expectation_fails(self):
+        self.two_doors()
+        drv, client = self.driver([
+            text(dict(op='plan', steps=[dict(op='press', key='inventory', expect=dict(owner='INVENTORY')),
+                                        dict(op='press', key='cancel'), dict(op='wait', ticks=5)],
+                      note='open and close the menu')),
+            text(dict(op='wait'))])
+        # The runtime never opens the menu: step 1 fails its expectation, the rest of the plan is dropped.
+        with self.ticking():
+            drv.run(steps=2)
+        self.assertEqual(len(client.requests), 2)
+        second = json.loads(client.requests[1][0][-1]['content'])
+        self.assertIn('plan_broken', second)
+        self.assertIn('expected screen INVENTORY', second['plan_broken'])
+        self.assertEqual(drv.plan, [])
+        self.assertEqual(drv.note, 'open and close the menu')
+        lines = [l.split(' ', 1)[1] for l in self.controls().splitlines()]
+        self.assertIn('inventory', lines)
+        self.assertNotIn('cancel', lines)
+
+    def test_plan_steps_that_meet_their_expectations_run_back_to_back(self):
+        drv, client = self.driver([
+            text(dict(op='plan', steps=[dict(op='wait', ticks=3), dict(op='wait', ticks=4, expect={})])),
+            text(dict(op='wait'))])
+        with self.ticking():
+            drv.run(steps=3)
+        self.assertEqual(len(client.requests), 2)   # one for the plan, one after it
+        self.assertIn('"ticks":3', drv.history_lines[0])
+        self.assertIn('"ticks":4', drv.history_lines[1])
+
+    def test_explore_room_macro_examines_unread_text_zones_nearest_first_then_ends(self):
+        self.d['interactions'] = [
+            dict(index=4, flags=1, floor=0, type=3, attribute=0x8000, position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 0, 0, 0]),
+            dict(index=5, flags=1, floor=0, type=3, attribute=0x8000, position=[-15, 0, -15], extent=[4, 0, 4], parameters=[0, 1, 0, 0])]
+        self.write(self.d)
+        drv, _ = self.driver([])
+        view = drv.with_approaches(self.play.observe())
+        step, why = drv.expand_macro(dict(op='explore_room'), view)
+        self.assertEqual((step['op'], step['zone']), ('interact', 4))
+        self.assertIn('not_result', step['expect'])
+        drv.zone_log('RM_TEST')[4] = dict(n=1, got='a dust box', sig=None)
+        step, _ = drv.expand_macro(dict(op='explore_room'), view)
+        self.assertEqual(step['zone'], 5)
+        drv.zone_log('RM_TEST')[5] = dict(n=1, got='x', sig=None)
+        self.assertEqual(drv.expand_macro(dict(op='explore_room'), view), (None, 'done'))
+        # A text page in the way is confirmed; a question is handed back to the model.
+        step, _ = drv.expand_macro(dict(op='explore_room'), dict(owner='DIALOG', dialog=dict(text='x', ready=True)))
+        self.assertEqual(step, dict(op='press', key='confirm'))
+        self.assertEqual(drv.expand_macro(dict(op='explore_room'), dict(owner='DIALOG', dialog=dict(text='Save?', choice=True)))[0], None)
+
+    def test_satisfy_gate_macro_stores_listed_items_one_slot_at_a_time_then_closes(self):
+        drv, _ = self.driver([])
+        drv.room_rules = lambda: [dict(rule='A passage (walls w5) opens only if ...', all_items=['Lighter', 'Handgun Bullets'])]
+        view = dict(owner='INVENTORY BOX', box=dict(mode='inventory'),
+                    inv=[[1, 55, 1, 'Lighter'], [2, 145, 1, 'Playing Manual'], [3, 12, 15, 'Handgun Bullets']])
+        macro = dict(op='satisfy_gate')
+        step, _ = drv.expand_macro(macro, view)
+        self.assertEqual((step['op'], step['store'], step['expect']), ('box', 1, dict(result='swapped')))
+        view['inv'] = [[2, 145, 1, 'Playing Manual'], [3, 12, 15, 'Handgun Bullets']]
+        self.assertEqual(drv.expand_macro(macro, view)[0]['store'], 3)
+        view['inv'] = [[2, 145, 1, 'Playing Manual']]
+        self.assertEqual(drv.expand_macro(macro, view)[0], dict(op='press', key='cancel'))
+        self.assertEqual(drv.expand_macro(macro, view), (None, 'done'))
+        self.assertIn('needs the open item box', drv.expand_macro(dict(op='satisfy_gate'), dict(owner='FREE'))[1])
+
+    def test_goto_room_macro_walks_the_known_door_graph(self):
+        self.two_doors()
+        drv, _ = self.driver([])
+        self.d['room'] = 'RM_0090.RDX'
+        self.write(self.d)
+        drv.journal_rooms = {'RM_0090': dict(doors={13: 4, 14: 8}), 'RM_0040': dict(doors={2: 3, 9: 9})}
+        self.assertEqual(drv.next_hop('RM_0090', 3), 13)
+        self.assertEqual(drv.next_hop('RM_0090', 8), 14)
+        self.assertIsNone(drv.next_hop('RM_0090', 7))
+        view = drv.with_approaches(self.play.observe())
+        step, _ = drv.expand_macro(dict(op='goto_room', room=3), view)
+        self.assertEqual((step['op'], step['zone']), ('interact', 13))
+        self.assertEqual(drv.expand_macro(dict(op='goto_room', room='RM_0090'), view), (None, 'done'))
+        self.assertIn('no known door path', drv.expand_macro(dict(op='goto_room', room=7), view)[1])
+
+    def test_prefetched_decision_is_used_when_the_expectation_holds(self):
+        drv, client = self.driver([
+            text(dict(op='wait', ticks=3, expect={})),   # step 1 with an expectation: the next decision is prefetched
+            text(dict(op='wait', ticks=4)),                                  # prefetched: the next decision
+            text(dict(op='wait', ticks=5))])
+        with self.ticking():
+            drv.run(steps=2)
+        self.assertEqual(len(client.requests), 2)
+        assumed = json.loads(client.requests[1][0][-1]['content'])
+        self.assertEqual(assumed['result'], 'pending')
+        self.assertIn('assume it ends as expected', assumed['state']['assumed'])
+        self.assertIn('"ticks":3', drv.history_lines[0])
+        self.assertIn('"ticks":4', drv.history_lines[1])
+
+    def test_prefetched_decision_is_discarded_when_the_expectation_fails(self):
+        drv, client = self.driver([
+            text(dict(op='wait', ticks=3, expect=dict(room='RM_0040'))),
+            text(dict(op='wait', ticks=4)),   # prefetched, must be dropped
+            text(dict(op='wait', ticks=5))])  # the real next decision
+        with self.ticking():
+            drv.run(steps=2)
+        self.assertEqual(len(client.requests), 3)
+        third = json.loads(client.requests[2][0][-1]['content'])
+        self.assertIn('expect_failed', third)
+        self.assertIn('"ticks":3', drv.history_lines[0])
+        self.assertIn('"ticks":5', drv.history_lines[1])
+
+    def test_bundle_carries_zones_board_map_and_history(self):
+        self.two_doors()
+        drv, client = self.driver([text(dict(op='wait', ticks=2)), text(dict(op='wait', ticks=2))])
+        with self.ticking():
+            drv.run(steps=2)
+        second = json.loads(client.requests[1][0][-1]['content'])
+        self.assertTrue(any(z.startswith('i13 door') and 'door to room 4' in z for z in second['zones_all']))
+        self.assertTrue(any('doors i13 -> RM_T040' in b or 'doors' in b for b in second['board']))
+        self.assertTrue(second['map'][0].startswith('map RM_TEST'))
+        self.assertTrue(second['history'][0].startswith('1: '))
+        self.assertIn('wait', second['history'][0])
+
+    def test_mcp_server_lists_tools_and_runs_a_plan(self):
+        import mcp_server
+        server = mcp_server.Server(self.play, seconds=.2, log=None)
+        r = server.handle(dict(jsonrpc='2.0', id=1, method='initialize', params={}))
+        self.assertEqual(r['result']['serverInfo']['name'], 'recvx-play')
+        r = server.handle(dict(jsonrpc='2.0', id=2, method='tools/list'))
+        self.assertEqual([t['name'] for t in r['result']['tools']], ['observe', 'act', 'plan', 'zone', 'hint', 'board', 'map'])
+        self.assertIsNone(server.handle(dict(jsonrpc='2.0', method='notifications/initialized')))
+        with self.ticking():
+            r = server.handle(dict(jsonrpc='2.0', id=3, method='tools/call',
+                                   params=dict(name='plan', arguments=dict(steps=[dict(op='wait', ticks=2), dict(op='wait', ticks=3)]))))
+        out = json.loads(r['result']['content'][0]['text'])
+        self.assertEqual(len(out['ran']), 2)
+        self.assertIn('"ticks":3', out['ran'][1])
+        self.assertIn('situation', out['observation'])
+        with self.ticking():
+            r = server.handle(dict(jsonrpc='2.0', id=4, method='tools/call', params=dict(name='observe', arguments={})))
+        self.assertIn('zones_all', json.loads(r['result']['content'][0]['text']))
+        r = server.handle(dict(jsonrpc='2.0', id=5, method='tools/call', params=dict(name='nope', arguments={})))
+        self.assertTrue(r['result'].get('isError'))
+
+    def test_zone_effects_decodes_what_examining_a_zone_does_now(self):
+        import hint, nav
+        room = hint.Room('RM_0090.RDX')
+        st = dict(room='RM_0090.RDX', items=[0, (55 << 16) | 1], vm_flags=[], interactions=[])
+        # Dispatcher form bhCk matrix 10 bit 23 (the examined zone), not only bhCmpB value[20].
+        self.assertTrue(hint.reacts_to_zone(bytes([4, 10, 23, 0, 7, 0]), 7))
+        self.assertFalse(hint.reacts_to_zone(bytes([4, 10, 23, 0, 7, 0]), 8))
+        self.assertTrue(hint.reacts_to_zone(bytes([6, 20, 0, 7]), 7))
+        text = hint.zone_effects(room, 11, st)
+        self.assertIn('starts event 11 (opens walls w56,w73', text)
+        self.assertIn('if standing on floor == 3', text)   # undecidable here: kept as a condition
+        self.assertNotIn('(now', text)
+        # A branch gated by a flag that is 0 now is dropped; what it would need is reported.
+        self.assertTrue(hint.zone_effects(room, 7, st).startswith('nothing now; would need F[1:53]==1'))
+        self.assertEqual(hint.zone_effects(room, 0, st), '')   # plain message zone: no script reacts
+        self.assertIn('text: "The security shutter is down.', hint.zone_labels(room, dict(interactions=[
+            dict(index=0, flags=1, type=3, attribute=0x8000, parameters=[0, 21, 0, 0])]))[0])
+        lines = nav.map_lines(dict(self.d, floors=[]), 4.0)
+        self.assertTrue(lines[0].startswith('map RM_TEST'))
+        self.assertTrue(any('P' in l for l in lines[2:]))
+
+    def test_door_expectation_is_judged_when_the_game_hands_control_back(self):
+        drv, client = self.driver([
+            text(dict(op='wait', ticks=2, expect=dict(room='RM_0040'))),   # "the door": judged after the scene
+            text(dict(op='wait', ticks=4)),                                  # prefetched during the scene
+            text(dict(op='wait', ticks=5))])
+        def scene():
+            time.sleep(.05)
+            self.d['cinematic'] = True
+            time.sleep(.6)
+            self.d['room'] = 'RM_0040.RDX'
+            self.d['cinematic'] = False
+        thread = threading.Thread(target=scene); thread.start()
+        with self.ticking():
+            drv.run(steps=5)   # the door wait, three scene waits, then the prefetched decision
+        thread.join()
+        self.assertEqual(len(client.requests), 2)
+        self.assertIn('"ticks":4', drv.history_lines[-1])
+        self.assertNotIn('"ticks":5', ' '.join(drv.history_lines))
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change

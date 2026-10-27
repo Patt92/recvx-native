@@ -103,12 +103,22 @@ def annotate(room, c, state=None):
     u8 = lambda i: c[i] if i < len(c) else 0; u16 = lambda i: c[i] | (c[i + 1] << 8) if i + 1 < len(c) else 0
     note = ''
     if op == 0x04:
-        m, b, mode = u8(1), u16(2) & 0x3ff, u8(5); note = f'if F[{m}:{b}]=={1 - mode} (now {flag_now(state, m, b)})'
+        m, b, mode = u8(1), u16(2) & 0x3ff, u8(5)
+        if m == 10 and (b & 0xff) == 23:  # events.cpp bhCk: matrix 10 bit 23 compares the examined zone (values[20])
+            note = f"if examined zone {'==' if mode == 0 else '!='} i{u8(4)}"
+        elif m == 10 and (b & 0xff) == 22:  # values[16] = the floor the player stands on (events.cpp)
+            note = f"if standing on floor {'==' if mode == 0 else '!='} {u8(4)}"
+        else:
+            note = f'if F[{m}:{b}]=={1 - mode} (now {flag_now(state, m, b)})'
     elif op == 0x05:
         m, b, mode = u8(1), u16(2) & 0x3ff, u8(5); note = f'F[{m}:{b}] := {1 - mode} (now {flag_now(state, m, b)})'
     elif op == 0x06:
         key, mode, val = u8(1), u8(2), u8(3); cmp = ['==', '>', '>=', '<', '<=', '!='][mode] if mode < 6 else '?'
         note = f"value[{key}{' zone' if key == 20 else ''}] {cmp} {val}"
+    elif op == 0x07:  # bhCmpW (events.cpp case 7): field 5 hp, 7 dialogue answer (0 = Yes), 9 play time, 10 enemy hp
+        field, mode, operand = u8(2), u8(3), u16(4); cmp = ['==', '>', '>=', '<', '<=', '!='][mode] if mode < 6 else '?'
+        what = {5: 'hp', 7: 'answer', 9: 'play time', 10: f'enemy {u8(1)} hp'}.get(field, f'word field {field}')
+        note = f"if {what} {cmp} {operand}" + (' (0 = Yes, 1 = No)' if field == 7 else '')
     elif op == 0x0a: note = f"wall w{u8(1)} {'off (open)' if u8(2) else 'on (closed)'}"
     elif op == 0x0b: note = f"zone i{u8(1)} {'off' if u8(2) else 'on'}"
     elif op == 0x0c: note = f"floor {u8(1)} {'off' if u8(2) else 'on'}"
@@ -155,11 +165,132 @@ def informational_zones(room, state):
         if not message.strip() or 'Yes' in message and 'No' in message:
             continue
         i = a['index']
-        if any(True for _ in find_refs(room, lambda c, i=i: (c[0] == 0x06 and c[1] == 20 and c[3] == i) or
-                                        (c[0] == 0x0e and len(c) > 4 and c[4] == i))):
+        if zone_reactions(room, i):
             continue
         out.add(i)
     return out
+
+
+def reacts_to_zone(c, i):
+    """A script command that tests whether zone i was examined: bhCmpB value[20]==i, bhItmCk on zone i, or
+    bhCk matrix 10 bit 23 (events.cpp compares values[20] with the extra byte)."""
+    return (c[0] == 0x06 and c[1] == 20 and c[3] == i) or (c[0] == 0x0e and len(c) > 4 and c[4] == i) or \
+        (c[0] == 0x04 and c[1] == 10 and (c[2] & 0xff) == 23 and len(c) > 5 and c[4] == i and c[5] == 0)
+
+
+def zone_reactions(room, i):
+    """[(script, offset)] of every command that reacts to examining zone i."""
+    return [(s, o) for s, o, _ in find_refs(room, lambda c, i=i: reacts_to_zone(c, i))]
+
+
+EFFECT_EVENT_LIMIT = 3
+
+
+def zone_effects(room, i, state, limit=420):
+    """What examining zone i does, from the room script: texts it shows, walls and zones it switches,
+    flags it sets, events it starts (with what those do) and items it gives, under the conditions that
+    guard them. Conditions with a known current value are evaluated: branches that cannot run now are
+    dropped, the rest keeps only the undecidable conditions (dialogue answer, floor). '' when no
+    script reacts. Generic decoder, no room knowledge."""
+    groups = []  # [(conditions [(text, truth)], negated, [effects])]
+    for script, off in zone_reactions(room, i)[:3]:
+        cmds = list(room.commands(script))
+        k = next(j for j, (o, _, _) in enumerate(cmds) if o == off)
+        base = cmds[k][1]
+        conds, branch, current = {}, {}, None
+        for o, depth, c in cmds[k + 1:]:
+            if depth < base:
+                break
+            op = c[0]
+            if depth == base and op in (0x04, 0x06, 0x0e) and not reacts_to_zone(c, i) and \
+                    (op != 0x04 or (c[1] == 10 and (c[2] & 0xff) == 23)):
+                break  # the next zone's section of the same dispatcher
+            if op in CONDITION_OPS:
+                truth = condition_holds(c, state)
+                if op == 0x04 and c[1] == 10 and (c[2] & 0xff) in (22, 23):
+                    truth = None
+                if op == 0x11:
+                    txt = f"carrying {ITEMS.get(c[1], c[1])}"
+                elif op == 0x10:
+                    txt = f"using {ITEMS.get(c[1], c[1])} here"
+                else:
+                    txt = annotate(room, c, state).split('-> ', 1)[-1].removeprefix('if ')
+                    txt = re.sub(r' \(now [^)]*\)', '', txt)
+                conds.setdefault(depth, []).append((txt, truth))
+                continue
+            if op == 0x01:
+                continue
+            if op == 0x02:
+                branch[depth] = True
+                continue
+            if op in (0x03, 0xfb):
+                conds.pop(depth + 1, None)
+                branch.pop(depth + 1, None)
+                continue
+            effect = None
+            if op == 0x1f and not c[1]:
+                text = ' '.join(room.message(c[2]).replace('|', ' ').split())
+                effect = f'shows "{text[:90]}"' if text else 'a voice-only line'
+            elif op == 0x0a:
+                effect = f"{'opens' if c[2] else 'closes'} wall w{c[1]}"
+            elif op == 0x0b:
+                effect = f"zone i{c[1]} {'off' if c[2] else 'on'}"
+            elif op == 0x25:
+                effect = f'zone i{c[1]} redefined'
+            elif op == 0x05:
+                m, b = c[1], (c[2] | (c[3] << 8)) & 0x3ff
+                effect = f'sets F[{m}:{b}]:={1 - c[5]}'
+            elif op == 0x14:
+                n = c[3]
+                try:
+                    does = event_summary(room, n)
+                except Exception:
+                    does = '?'
+                effect = f'starts event {n} ({does})' if not does.startswith('nothing visible') else f'starts event {n}'
+            elif op in (0xb2, 0xc2):
+                effect = f'gives {ITEMS.get(c[1], c[1])}'
+            if effect is None:
+                continue
+            # The IF conditions sit one level above their block; an ELSE at that level negates them.
+            levels = sorted(d2 for d2 in conds if d2 <= depth)
+            key = tuple((d2, tuple(conds[d2]), bool(branch.get(d2))) for d2 in levels)
+            if current is None or current[0] != key:
+                current = (key, [])
+                groups.append(current)
+            if effect not in current[1]:
+                current[1].append(effect)
+    out, needs = [], []
+    gate_flags = {g['flag'] for g in item_gates(room, state)} if groups else set()
+    for key, effects in groups:
+        open_conds, possible = [], True
+        for _, cs, negated in key:
+            truths = [t for _, t in cs]
+            if not negated:
+                if False in truths:
+                    possible = False
+                    for txt, t in cs:
+                        if t is False:
+                            flag = txt.split('==')[0]
+                            txt += ' (an item check sets it)' if flag in gate_flags else ''
+                            if txt not in needs:
+                                needs.append(txt)
+                    break
+                open_conds += [txt for txt, t in cs if t is None]
+            else:
+                if False in truths:
+                    continue  # the IF part cannot run: the ELSE part does
+                if all(t is True for t in truths):
+                    possible = False
+                    break
+                open_conds.append('not(' + '; '.join(txt for txt, t in cs if t is not True) + ')')
+        if not possible:
+            continue
+        cond = '; '.join(open_conds)
+        out.append((f'if {cond}: ' if cond else '') + ', '.join(effects))
+    text = ' | '.join(out)
+    if not text and needs:
+        text = 'nothing now; would need ' + ' or '.join(needs[:3])
+    return text[:limit] + ('...' if len(text) > limit else '')
 
 
 def zone_labels(room, state):
@@ -174,9 +305,8 @@ def zone_labels(room, state):
             text = ' '.join(room.message(prm[1]).replace('|', ' ').split())
             out[i] = 'text: "' + (text[:110] + '...' if len(text) > 110 else text) + '"'
         elif t == 3:
-            refs = list(find_refs(room, lambda c, i=i: c[0] == 0x06 and c[1] == 20 and c[3] == i))
-            hooks = [c for _, _, prev in find_refs(room, lambda c, i=i: c[0] == 0x0b and c[1] == i) for c in prev]
-            out[i] = 'object the room script reacts to when examined' if refs or a.get('attribute', 0) & 9 or hooks \
+            refs = zone_reactions(room, i)
+            out[i] = 'object the room script reacts to when examined' if refs or a.get('attribute', 0) & 9 \
                 else 'object without text (examine it to see what it is)'
         elif t == 4:
             it = next((r for r in state.get('room_items', []) if r.get('index') == prm[0]), None)
@@ -199,7 +329,7 @@ def cmd_zone(i, state):
     if a['type'] == 3 and a['attribute'] & 9: print(f"  camera cut {a['parameters'][0]}; the script reacts via value[20]=={i}")
     if a['type'] == 4: print(f"  room item/object slot {a['parameters'][0]}")
     if a['type'] == 0: print(f"  door to room number {a['parameters'][1]} (stage {a['parameters'][0]}), spawn {a['parameters'][2]}")
-    refs = list(find_refs(room, lambda c: (c[0] == 0x06 and c[1] == 20 and c[3] == i) or (c[0] == 0x0e and len(c) > 4 and c[4] == i)))
+    refs = list(find_refs(room, lambda c: reacts_to_zone(c, i)))
     tog = list(find_refs(room, lambda c: c[0] in (0x0b, 0x25) and c[1] == i))
     if not refs and not tog: print('  no script checks this zone')
     for s, o, _ in refs[:4]:
