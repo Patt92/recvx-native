@@ -156,6 +156,36 @@ Fields of the compact observation (only while the respective owner is active):
   (`present`/`hidden`/`inactive`/`none`/`object`). `far_items` lists all item zones beyond the
   nearest five as `[zone, at, d, state]`.
 
+## Using an item box correctly
+
+An item box is a two-sided **swap**, not a deposit menu. The status screen shows the inventory on the
+left; the box list is on the right. A swap exchanges the selected inventory slot with the selected box
+row, including when that row is empty.
+
+The compact `box` view shows:
+- `mode: inventory`: the left inventory cursor is active; `slot` is the inventory slot under it.
+- `mode: list`: the right box-list cursor is active; `at` is its row (0-based), `at_item` is that row's
+  item or `empty`, and `contents` lists occupied rows as `[row, name, count]`.
+- `refused`: the game's message. The item did not move. Read the reason, press `cancel` once to return
+  to the inventory cursor, then choose a different item or stop.
+- `empty_rows`: free rows in this box. `box_base` identifies which storage it is; normal boxes share
+  storage, special boxes can be separate.
+
+Use one `box` action per swap. The driver performs the inventory-cursor movement, opens the box list,
+scrolls to the chosen row, confirms, and returns the compact result; do not send separate `down`/`confirm`
+presses while it is executing that swap:
+
+```sh
+python3 tools/agent_play/play.py act '{"op":"box","store":4}' # store inventory slot 4 in the first empty box row
+python3 tools/agent_play/play.py act '{"op":"box","take":2}'  # take box row 2 into the first free inventory slot
+```
+
+**Before each swap:** inspect `inv`, `box.contents`, `box.empty_rows` and the room's text/rule. On a metal
+detector, store every item named by the detector's room rule; keep keys or items needed for the next step
+if the rule allows it. Do not put the same item in and take it back out unless a new game message changes
+the plan. After a `refused` result, do not send the same swap again: cancel back once and follow the
+refusal text. Do not try to store an item when the box is full or the inventory is full when taking one.
+
 Only when really needed, read the details of exactly one zone:
 
 ```sh
