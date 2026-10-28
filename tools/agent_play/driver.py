@@ -361,6 +361,10 @@ def expectation_met(expect, before, after, feedback, obs, names=None):
     return True, ''
 
 
+def owner_free(obs):
+    return (obs.get('owner') or '') == 'FREE'
+
+
 def trim(obs):
     return {k: v for k, v in obs.items() if k not in DROP}
 
@@ -414,6 +418,8 @@ class Driver:
         # The model's current goal ("take the handgun from security box A"), sent back with every
         # request; asked for when missing or stale, so every action is chosen for a stated purpose.
         self.goal, self.goal_age = '', 0
+        self.model_stored = set()   # items the model itself stored in the box that is open now
+        self.gun_reflex_takes = 0   # gun reflex takes during this box opening
         self.last_refusal, self.refusals = None, 0
         # Reflexes: the model needs seconds per decision, a zombie closes 10 m in that time. The driver
         # shakes off grabs and fights active enemies in sight within `engage` itself, then tells the
@@ -590,13 +596,10 @@ class Driver:
             carried = [(slot, names.get((v >> 16) & 255, '?')) for slot, v in enumerate(d.get('items', [])[1:], 1)
                        if v and names.get((v >> 16) & 255) in listed]
             if carried:
-                tips.append('ROOM RULE checklist: the gated passage needs you to carry none of the listed items. '
-                            'Still carried: ' + ', '.join(f'slot {s} {n}' for s, n in carried) + '. Store each '
-                            'of these once in an item box (one box store per item; slots move up after each '
-                            'store, so read inv again). Do not take them back before you crossed the passage.')
+                tips.append('ROOM RULE: the gated passage is closed while you carry ' +
+                            ', '.join(f'slot {s} {n}' for s, n in carried) + '. ' + r.get('how', ''))
             else:
-                tips.append('ROOM RULE checklist: you carry none of the listed items; stop storing, go to the '
-                            'gated passage and check whether its walls opened (situation says).')
+                tips.append('ROOM RULE: you carry none of the listed items. ' + r.get('how', ''))
         return tips
 
     def zone_labels(self, d):
@@ -631,6 +634,17 @@ class Driver:
         first = self.priority(obs, d) if obs.get('room') else None
         if first:
             out.insert(0, first)
+        if owner_free(obs) and not self.combat:
+            try:
+                goals = self.goal_list(obs, d)
+            except Exception:
+                goals = []
+            if goals:
+                g = goals[0]
+                out.append('NEXT GOAL: ' + g['text'] + (f" ({g['how']})" if g.get('how') else '') + '.')
+                if len(goals) > 1:
+                    out.append('Other goals: ' + ' | '.join(x['text'] + (f" ({x['how']})" if x.get('how') else '')
+                                                             for x in goals[1:3]) + '.')
         where = f"You are in {obs.get('room')}"
         if obs.get('came_from'):
             where += f" (you came from {str(obs['came_from'])[:7]})"
@@ -692,6 +706,12 @@ class Driver:
         near, away = [], []
         for z in obs.get('zones', []):
             label = labels.get(z['i'], z.get('kind', ''))
+            if z.get('kind') == 'door' and z.get('destination') is not None:
+                try:
+                    target = f"{d['room'][3]}{int(z['destination']):02d}"
+                    label += f' ({self.room_status(target, d)})'
+                except (PlayError, KeyError, ValueError, TypeError):
+                    pass
             seen = log.get(z['i'])
             text = f"zone {z['i']} ({z.get('d')} m): {label}" + (f"; you got: {seen['got']}" if seen else '')
             (away if z.get('approach_note') else near).append(text)
@@ -703,7 +723,7 @@ class Driver:
         out += warn
         out += self.combat_lines(obs)
         if self.reflex_log:
-            out.append('The driver fought for you since your last decision (reflexes): ' + '; '.join(self.reflex_log) + '.')
+            out.append('The driver acted for you since your last decision (reflexes): ' + '; '.join(self.reflex_log) + '.')
             self.reflex_log = []
         if self.since_progress >= 5:
             out.append(f'No progress for {self.since_progress} decisions: do something you have not tried.')
@@ -791,6 +811,153 @@ class Driver:
                 lines = [f'guide unavailable ({type(e).__name__})']
             self._guide_key, self._guide = key, lines
         return self._guide
+
+    # --- goals: what a player would do next, from the game data and this run ----------------------------
+    def item_name(self, item):
+        import hint
+        return hint.ITEMS.get(item, f'item {item}')
+
+    def route_text(self, d, node):
+        """'RM_0080 -> RM_0050 -> RM_0020; first: zone 14 (door to room 8)' or None (no known way)."""
+        import hint
+        path = hint.route(d['room'], node)
+        if path is None:
+            return None
+        if not path:
+            return 'you are there'
+        first = path[0]
+        zone = None
+        for a in d.get('interactions', []):
+            if a.get('type') == 0 and a.get('flags', 0) & 1 and f"{a['parameters'][0]}{a['parameters'][1]:02d}" == first:
+                zone = f"zone {a['index']} (door to room {a['parameters'][1]})"
+                break
+        if zone is None:
+            for variant, z, active in hint.world_graph().get(hint.room_node(d['room']), {}).get(first, []):
+                if variant == d['room'][6] and z is not None:
+                    zone = f'zone {z} (opens the way to room {int(first[1:])})'
+                    break
+        rooms = ' -> '.join(hint.node_name(n) for n in path)
+        return f"route {rooms}" + (f"; first: {zone}" if zone else '')
+
+    def note_news(self, before, after):
+        """Tell the model what an action changed in the world, like a player would notice it: an item
+        picked up and where the game uses it; a story flag set and which places react to it now."""
+        import hint
+        news = []
+        had = {(v >> 16) & 255 for v in (before.get('items') or [])[1:] if v}
+        for v in (after.get('items') or [])[1:]:
+            item = (v >> 16) & 255
+            if v and item not in had:
+                uses = hint.all_item_uses().get(item, [])
+                if uses:
+                    sites = []
+                    for room, zone, floor in uses[:2]:
+                        r = self.route_text(after, room[3:6]) or 'no known route yet'
+                        sites.append(f'{room}' + (f' zone {zone}' if zone is not None else '') + f' ({r})')
+                    news.append(f'You got {self.item_name(item)}. The game uses it at: ' + '; '.join(sites) + '.')
+        old_bits, new_bits = hint.flag_bits(before), hint.flag_bits(after)
+        index = hint.flag_index()
+        here = (after.get('room') or '')[:7]
+        for key, value in new_bits.items():
+            if old_bits.get(key) == value:
+                continue
+            places = [(r, z) for r, z in index.get((key[0], key[1], value), []) if not (r == here and z is None)]
+            if not places:
+                continue
+            entry = dict(flag=f'F[{key[0]}:{key[1]}]=={value}', places=places[:6], by=here)
+            self.memory.setdefault('unlocks', []).append(entry)
+            self.memory['unlocks'] = self.memory['unlocks'][-20:]
+            self.save_memory()
+            where = ', '.join(r + (f' zone {z}' if z is not None else ' (room setup)') for r, z in places[:4])
+            news.append(f'Your action changed something in the game ({entry["flag"]}). Places that react to it now: {where}.')
+        if news:
+            self.pending_feedback['news'] = ' '.join(news)[:600]
+
+    def room_status(self, node, d):
+        """What is left in room `node` as far as this run knows: not visited / items left / a goal there /
+        done for now."""
+        known = (self.memory.get('rooms') or {}).get(node)
+        if not known:
+            return 'not visited yet'
+        bits = []
+        if known.get('items_left'):
+            bits.append('items left: ' + ', '.join(known['items_left'][:3]))
+        targets = {g['node'] for g in self.goal_list(None, d, lookahead=False) if g.get('node')}
+        if node in targets:
+            bits.append('a goal is there')
+        return '; '.join(bits) if bits else 'done for now'
+
+    def goal_list(self, obs, d, lookahead=True):
+        """Ranked goals (dicts: text, node, how). Here first (items lying here, items you carry that are used
+        here, places here that your actions unlocked), then elsewhere with a route (uses of carried items,
+        unlocked places, items left in visited rooms), then the nearest room not visited yet."""
+        import hint
+        here_node = hint.room_node(d['room'])
+        here = d['room'][:7]
+        carried = [(v >> 16) & 255 for v in (d.get('items') or [])[1:] if v]
+        goals = []
+        def add(text, node=None, how=''):
+            if all(g['text'] != text for g in goals):
+                goals.append(dict(text=text, node=node, how=how))
+        if obs is not None:
+            for z in obs.get('zones', []) + obs.get('far_zones', []):
+                if z.get('kind') == 'item' and z.get('item') in (None, 'present') and not z.get('approach_note'):
+                    a = next((a for a in d.get('interactions', []) if a['index'] == z['i']), None)
+                    it = next((x for x in d.get('room_items', []) if a and x.get('index') == a['parameters'][0]), None)
+                    add(f"Pick up {self.item_name(it['identity']) if it else 'the item'} here (zone {z['i']})")
+        uses = hint.all_item_uses()
+        for item in dict.fromkeys(carried):
+            for room, zone, floor in uses.get(item, []):
+                if room[3:6] == here_node:
+                    where = f'zone {zone}' if zone is not None else (hint.floor_area(hint.Room(d['room']), floor) if floor is not None else 'this room')
+                    add(f'Use {self.item_name(item)} here ({where})', here_node,
+                        'examine the zone' if zone is not None else 'stand there, then Use it from the inventory')
+        for u in reversed(self.memory.get('unlocks') or []):
+            for room, zone in u['places']:
+                if room[3:6] == here_node and zone is not None and zone not in self.zone_log(here):
+                    add(f"Zone {zone} here reacts to {u['flag']} (changed in {u['by']}): examine it", here_node)
+        if not lookahead:
+            for item in dict.fromkeys(carried):
+                for room, zone, floor in uses.get(item, []):
+                    add(f'use {self.item_name(item)}', room[3:6])
+            for u in self.memory.get('unlocks') or []:
+                for room, zone in u['places']:
+                    add(f'unlocked {room}', room[3:6])
+            return goals
+        for item in dict.fromkeys(carried):
+            for room, zone, floor in uses.get(item, [])[:2]:
+                if room[3:6] != here_node:
+                    r = self.route_text(d, room[3:6])
+                    if r:
+                        add(f'Use {self.item_name(item)} at {room}' + (f' zone {zone}' if zone is not None else ''), room[3:6], r)
+        for u in reversed(self.memory.get('unlocks') or []):
+            for room, zone in u['places'][:3]:
+                if room[3:6] != here_node:
+                    r = self.route_text(d, room[3:6])
+                    if r:
+                        add(f"{room}" + (f' zone {zone}' if zone is not None else '') +
+                            f" reacts to {u['flag']} (changed in {u['by']})", room[3:6], r)
+        for node, info in sorted((self.memory.get('rooms') or {}).items()):
+            if node != here_node and info.get('items_left'):
+                r = self.route_text(d, node)
+                if r:
+                    add(f"Items left in {hint.node_name(node)}: {', '.join(info['items_left'][:3])}", node, r)
+        graph = hint.world_graph()
+        queue, seen = [here_node], {here_node}
+        while queue:
+            n = queue.pop(0)
+            for t, doors in sorted(graph.get(n, {}).items()):
+                if t in seen or not any(active for _, _, active in doors):
+                    continue
+                seen.add(t)
+                if t not in (self.memory.get('rooms') or {}):
+                    r = self.route_text(d, t)
+                    if r:
+                        add(f'Explore {hint.node_name(t)} (not visited yet)', t, r)
+                        queue = []
+                        break
+                queue.append(t)
+        return goals[:6]
 
     def zones_all(self, obs, d):
         """One line per active zone on the player's floor: kind, distance, reachability, what it is, what
@@ -905,10 +1072,17 @@ class Driver:
         if 'BOX' in owner.split():
             rows = (obs.get('box') or {}).get('contents') or []
             ids = {r: (v >> 16) & 255 for r, (v, _) in enumerate(d.get('box_items') or []) if v}
+            if self.model_stored & set(ids.values()):
+                return None  # stored on purpose just now; do not tell it to take it back
             guns = [r for r, i in ids.items() if i in gun_ids]
             if guns:
                 gun = ids[guns[0]]
                 ammo = [r for r, i in ids.items() if self.loads_into(i, gun)]
+                gated = [r for r in self.room_rules() if names.get(gun) in set(r.get('all_items') or [])]
+                if gated:
+                    return (f'Your gun ({names.get(gun, gun)}, box row {guns[0]}) is here, but this room has a passage '
+                            'that closes while you carry it. Going through the passage: leave the gun here for now. '
+                            'Leaving through a door on this side: take it along.')
                 if (obs.get('box') or {}).get('mode') == 'list':
                     return ('PRIORITY: this box holds your gun. Press cancel once (back to the inventory side), '
                             f'then {{"op":"box","take":{guns[0]}}}' + (f' and {{"op":"box","take":{ammo[0]}}}' if ammo else '') + '.')
@@ -943,8 +1117,15 @@ class Driver:
         gun_ids = hint.guns()
         carried = {(v >> 16) & 255 for v in d.get('items', [])[1:] if v}
         ids = {r: (v >> 16) & 255 for r, (v, _) in enumerate(d.get('box_items') or []) if v}
+        if self.model_stored & set(ids.values()):
+            return None  # the model put it there on purpose (e.g. to pass a gate): never undo its decision
+        if self.gun_reflex_takes >= 2:
+            return None  # gun and ammo once per box opening; the rest is the model's decision
+        gated = set()
+        for r in self.room_rules():
+            gated |= set(r.get('all_items') or [])
         if not carried & gun_ids:
-            guns = [r for r, i in ids.items() if i in gun_ids]
+            guns = [r for r, i in ids.items() if i in gun_ids and hint.ITEMS.get(i) not in gated]
             return dict(op='box', take=guns[0]) if guns else None
         gun = next(i for i in carried if i in gun_ids)
         if any(self.loads_into(i, gun) for i in carried):
@@ -1111,7 +1292,7 @@ class Driver:
 
     # --- memory across runs ------------------------------------------------------------------------------
     def load_memory(self):
-        empty = dict(worked=[], failed=[], deaths=[], info_zones={}, boxes={})
+        empty = dict(worked=[], failed=[], deaths=[], info_zones={}, boxes={}, rooms={}, unlocks=[])
         if not self.memory_path or not self.memory_path.exists():
             return empty
         try:
@@ -1119,6 +1300,8 @@ class Driver:
             out = {k: [str(x) for x in m.get(k, [])] for k in ('worked', 'failed', 'deaths')}
             out['info_zones'] = m.get('info_zones', {}) if isinstance(m.get('info_zones', {}), dict) else {}
             out['boxes'] = m.get('boxes', {}) if isinstance(m.get('boxes', {}), dict) else {}
+            out['rooms'] = m.get('rooms', {}) if isinstance(m.get('rooms', {}), dict) else {}
+            out['unlocks'] = m.get('unlocks', []) if isinstance(m.get('unlocks', []), list) else []
             return out
         except (ValueError, OSError, AttributeError):
             return empty
@@ -1410,8 +1593,9 @@ class Driver:
         try:
             if before is not None:
                 import hint
-                self.last_change = describe_change(before, self.play.read()[0], action, feedback.get('result'),
-                                                   hint.ITEMS)
+                after = self.play.read()[0]
+                self.last_change = describe_change(before, after, action, feedback.get('result'), hint.ITEMS)
+                self.note_news(before, after)
         except Exception:  # a description must never cost the action
             self.last_change = None
         return obs, feedback, (time.monotonic() - started) * 1000
@@ -1586,6 +1770,23 @@ class Driver:
                  if z.get('kind') == 'item' and z.get('item') in (None, 'present')]
         if obs.get('owner') == 'FREE':
             r['open_items'] = sorted(set(items))
+            try:
+                d = self.play.read()[0]
+                left = []
+                for z in obs.get('zones', []) + obs.get('far_zones', []):
+                    if z.get('kind') == 'item' and z.get('item') in (None, 'present'):
+                        a = next((a for a in d.get('interactions', []) if a['index'] == z['i']), None)
+                        it = next((x for x in d.get('room_items', []) if a and x.get('index') == a['parameters'][0]), None)
+                        if it:
+                            left.append(self.item_name(it['identity']))
+                node = room[3:6]
+                before = self.memory.setdefault('rooms', {}).get(node)
+                now = dict(visited=True, items_left=sorted(set(left)))
+                if before != now:
+                    self.memory['rooms'][node] = now
+                    self.save_memory()
+            except (PlayError, KeyError, TypeError):
+                pass
         for i, v in self.zone_log(room).items():
             r['seen'][i] = v['got'][:60]
         dialog = (obs.get('dialog') or {}).get('text', '')
@@ -2169,6 +2370,11 @@ class Driver:
         return None
 
     def note_reflex(self, action, feedback):
+        if action.get('op') == 'box' and 'take' in action:
+            self.reflex_failed = None
+            self.reflex_log = (self.reflex_log + [f"the driver took box row {action['take']} out of the box "
+                                                  f"(gun reflex) -> {feedback.get('result')}"])[-6:]
+            return
         if feedback.get('result') == 'error':
             self.reflex_failed = getattr(self, 'reflex_signature', None)
         else:
@@ -2182,9 +2388,25 @@ class Driver:
         self.reflex_log = (self.reflex_log + [line])[-6:]
 
     def next_hop(self, room, number):
-        """Door zone of `room` on the shortest known path (journal doors) to room `number`, or None."""
+        """Door zone of `room` on the shortest path to room `number` (world graph of all room files, the
+        live door zones of this room for the first step); falls back to the journal doors."""
         if not room or not room[4:6].isdigit():
             return None
+        try:
+            import hint
+            d = self.play.read()[0]
+            if (d.get('room') or '')[:7] == room[:7]:
+                path = hint.route(d['room'], f'{room[3]}{int(number):02d}')
+                if path:
+                    for a in d.get('interactions', []):
+                        if a.get('type') == 0 and a.get('flags', 0) & 1 and \
+                                f"{a['parameters'][0]}{a['parameters'][1]:02d}" == path[0]:
+                            return a['index']
+                    for variant, z, active in hint.world_graph().get(hint.room_node(d['room']), {}).get(path[0], []):
+                        if variant == d['room'][6] and z is not None:
+                            return z
+        except Exception:
+            pass
         stage = room[3]
         name = lambda n: f'RM_{stage}{n:02d}0'
         start = int(room[4:6])
@@ -2339,6 +2561,8 @@ class Driver:
                 if Driver._box_places_cache is None:
                     Driver._box_places_cache = hint.all_box_places()
                 hint.guns()
+                hint.world_graph()
+                hint.flag_index()
             except Exception:
                 pass
         threading.Thread(target=work, daemon=True).start()
@@ -2419,7 +2643,7 @@ class Driver:
                 # User option: skip FMV videos (the game's own video skip); scenes are not touched.
                 action, entry = {'op': 'press', 'key': 'skip'}, dict(auto=True, video_skipped=True)
                 self.video_skipped = True
-            elif passive(obs) and self.idle_waits < 4:
+            elif ((obs.get('box') or {}).get('mode') == 'closing' or passive(obs)) and self.idle_waits < 4:
                 action, entry = {'op': 'wait'}, dict(auto=True)
             elif not self.plan and (grab_gun := self.gun_reflex(obs)) is not None:
                 action, entry = grab_gun, dict(auto=True, reflex=True)
@@ -2446,9 +2670,12 @@ class Driver:
                 if isinstance(note, str) and note.strip():
                     self.note = note.strip()[:NOTE_MAX]
                 goal = action.pop('goal', None)
+                alias = action.pop('your_goal', None)  # the request's field name, copied back by the model
+                goal = goal if isinstance(goal, str) and goal.strip() else alias
                 if isinstance(goal, str) and goal.strip():
                     self.goal = ' '.join(goal.split())[:160]
                     self.goal_age = 0
+                    entry['goal'] = self.goal
                 elif not entry.get('auto') and user is not None:
                     self.goal_age += 1
                 if user is not None:
@@ -2515,6 +2742,18 @@ class Driver:
                     self.snapshot = dict(room=feedback.get('snapshot_room'), play_time=self.play.read()[0].get('play_time'))
             if entry.get('reflex'):
                 self.note_reflex(action, feedback)
+            elif action.get('op') == 'box' and 'store' in action and feedback['result'] == 'swapped':
+                try:
+                    before_items = before_raw.get('items') or []
+                    slot = action['store']
+                    if 0 < slot < len(before_items) and before_items[slot]:
+                        self.model_stored.add((before_items[slot] >> 16) & 255)
+                except (AttributeError, TypeError):
+                    pass
+            if entry.get('reflex') and action.get('op') == 'box':
+                self.gun_reflex_takes += 1
+            if 'BOX' not in (obs.get('owner') or '').split():
+                self.model_stored, self.gun_reflex_takes = set(), 0
             self.move_zone = self.zone_of_move(room_before, action, feedback['result'])
             if not entry.get('auto'):
                 self.note_progress((room_before or '')[:7], action, self.last_change)

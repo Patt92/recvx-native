@@ -212,6 +212,15 @@ class PlayTests(unittest.TestCase):
         self.assertEqual(commands[-1][0], 8)
         self.assertTrue(commands[-1][1].startswith('route ') and 'danger' not in commands[-1][1])
 
+    def test_box_errors_say_what_to_do(self):
+        d = dict(self.d, box_open=False, items=[0, (145 << 16) | 1], box_items=[[0, '']] * 8)
+        with self.assertRaisesRegex(PlayError, 'no item box is open'):
+            self.play.box_target(d, dict(store=1))
+        with self.assertRaisesRegex(PlayError, 'closing: wait'):
+            self.play.box_target(dict(d, box_open=True, box_exit=True), dict(store=1))
+        with self.assertRaisesRegex(PlayError, 'press cancel once'):
+            self.play.box_target(dict(d, box_open=True, box_selecting=True), dict(store=1))
+
     def test_shake_runs_even_when_its_escape_is_unusable(self):
         # Live: 44 shakes were refused for an extra "danger" in the escape and 19 for a blocked target,
         # each a lost decision while grabbed.

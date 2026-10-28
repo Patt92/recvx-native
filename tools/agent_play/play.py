@@ -221,6 +221,7 @@ def box_view(d):
             view['at_item'] = name if v else 'empty'
     if d.get('box_exit'):
         view['exit'] = True
+        view['mode'] = 'closing'
     if d.get('box_scrolling'):
         view['scrolling'] = True
     if d.get('box_note'):
@@ -644,8 +645,12 @@ class Play:
 
     def box_target(self, d, action):
         """Validate a box action and return (inventory slot, box row) for the swap (box_menu.cpp)."""
-        if not d.get('box_open') or d.get('box_selecting') or d.get('box_exit'):
-            raise PlayError('box needs the open box with the cursor in the inventory (cancel back first)')
+        if not d.get('box_open'):
+            raise PlayError('no item box is open: interact with the box zone first')
+        if d.get('box_exit'):
+            raise PlayError('the item box is closing: wait, then interact with the box zone to open it again')
+        if d.get('box_selecting'):
+            raise PlayError('the cursor is on the box list: press cancel once to get back to the inventory side')
         rows = d.get('box_items') or []
         if not rows:
             raise PlayError('box contents not exported by this runtime; restart the game')

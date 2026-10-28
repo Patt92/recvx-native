@@ -79,6 +79,7 @@ class DriverTests(unittest.TestCase):
         drv._door_graph = {}
         Driver._item_uses_cache = {}
         Driver._box_places_cache = {}
+        drv.goal_list = lambda obs, d, lookahead=True: []   # the goal tests switch it back on
         return drv, client
 
     def test_parse_action_tolerates_fences_prose_and_escaped_quotes(self):
@@ -532,7 +533,7 @@ class DriverTests(unittest.TestCase):
                          (dict(store=3, take=0), 'exactly one'), (dict(), 'exactly one')):
             with self.assertRaisesRegex(Exception, msg):
                 self.play.box_target(d, bad)
-        with self.assertRaisesRegex(Exception, 'cancel back first'):
+        with self.assertRaisesRegex(Exception, 'press cancel once'):
             self.play.box_target(self.box_state(box_selecting=True), dict(store=3))
         full = self.box_state(box_items=[[(9 << 16) | 1, 'X']] * 32)
         with self.assertRaisesRegex(Exception, 'box is full'):
@@ -731,14 +732,22 @@ class DriverTests(unittest.TestCase):
         self.d['room'] = 'RM_0090.RDX'
         self.write(self.d)
         drv.journal_rooms = {'RM_0090': dict(doors={13: 4, 14: 8}), 'RM_0040': dict(doors={2: 3, 9: 9})}
-        self.assertEqual(drv.next_hop('RM_0090', 3), 13)
-        self.assertEqual(drv.next_hop('RM_0090', 8), 14)
-        self.assertIsNone(drv.next_hop('RM_0090', 7))
-        view = drv.with_approaches(self.play.observe())
-        step, _ = drv.expand_macro(dict(op='goto_room', room=3), view)
-        self.assertEqual((step['op'], step['zone']), ('interact', 13))
-        self.assertEqual(drv.expand_macro(dict(op='goto_room', room='RM_0090'), view), (None, 'done'))
-        self.assertIn('no known door path', drv.expand_macro(dict(op='goto_room', room=7), view)[1])
+        import hint
+        from unittest import mock
+        graph = {'009': {'004': [('0', 13, True)], '008': [('0', 14, True)]}, '004': {'003': [('0', 2, True)]},
+                 '008': {'005': [('0', 0, True)]}, '005': {'003': [('0', None, True)]}}
+        with mock.patch.object(hint, 'world_graph', lambda: graph):
+            self.assertEqual(drv.next_hop('RM_0090', 3), 13)   # the shorter way, from the room files
+            self.assertEqual(drv.next_hop('RM_0090', 5), 14)
+            view = drv.with_approaches(self.play.observe())
+            step, _ = drv.expand_macro(dict(op='goto_room', room=3), view)
+            self.assertEqual((step['op'], step['zone']), ('interact', 13))
+            self.assertEqual(drv.expand_macro(dict(op='goto_room', room='RM_0090'), view), (None, 'done'))
+        # Without a route in the room files the journal doors are used; unknown rooms are refused.
+        with mock.patch.object(hint, 'world_graph', lambda: {}):
+            self.assertEqual(drv.next_hop('RM_0090', 3), 13)
+            self.assertIsNone(drv.next_hop('RM_0090', 7))
+            self.assertIn('no known door path', drv.expand_macro(dict(op='goto_room', room=7), view)[1])
 
     def test_prefetched_decision_is_used_when_the_expectation_holds(self):
         drv, client = self.driver([
@@ -800,7 +809,7 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(r['result']['serverInfo']['name'], 'recvx-play')
         r = server.handle(dict(jsonrpc='2.0', id=2, method='tools/list'))
         self.assertEqual([t['name'] for t in r['result']['tools']],
-                         ['observe', 'act', 'plan', 'zone', 'hint', 'board', 'map', 'guide', 'near', 'memory'])
+                         ['observe', 'act', 'plan', 'zone', 'hint', 'board', 'map', 'goals', 'route', 'guide', 'near', 'memory'])
         self.assertIsNone(server.handle(dict(jsonrpc='2.0', method='notifications/initialized')))
         with self.ticking():
             r = server.handle(dict(jsonrpc='2.0', id=3, method='tools/call',
@@ -1151,7 +1160,7 @@ class DriverTests(unittest.TestCase):
         self.assertIn('fire 3', self.controls())
         self.assertTrue(drv.reflex_log and drv.reflex_log[0].startswith('{"op":"fire"'))
         lines = drv.situation(dict(room='RM_TEST', at=[0, 0], hp=100, owner='FREE', inv=[]))
-        self.assertTrue(any(l.startswith('The driver fought for you') for l in lines))
+        self.assertTrue(any(l.startswith('The driver acted for you') for l in lines))
         self.assertEqual(drv.reflex_log, [])
 
     def test_box_storage_is_decoded_from_the_room_script(self):
@@ -1199,10 +1208,12 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith('You carry no gun: Handgun lies in security box A (opened at RM_0090 zone 11)'))
         self.assertTrue(any('closed although you carry none' in l for l in lines))
         box_a = next(l for l in lines if l.startswith('Zone 11 (security box A) also:'))
-        self.assertIn('if standing in floor area 3 (x 59..85, z 100..112): starts event 11 (opens walls', box_a)
+        self.assertIn('if standing in floor area 3 (x 59..85, z 100..112; walk in: move to [72.0, 106.0]): '
+                      'starts event 11 (opens walls', box_a)
         switch = next(l for l in lines if l.startswith('Zone 7 does nothing yet'))
-        self.assertIn('carry any of 55 checked items', switch)
-        self.assertIn('stand in floor area 5 (x 59..85, z 90..100)', switch)
+        self.assertIn('carry one of the 55 checked items (such as Handgun)', switch)
+        self.assertIn('then stand in floor area 5 (x 59..85, z 90..100; walk in: move to [72.0, 95.0])', switch)
+        self.assertTrue(switch.endswith('then examine zone 7.'))
         # Carrying a gun: no weapon step; zones already answered are not repeated.
         armed = hint.guide(dict(state, items=[1, (9 << 16) | 15]), done_zones={4})
         self.assertFalse(any(l.startswith('You carry no gun') for l in armed))
@@ -1256,6 +1267,43 @@ class DriverTests(unittest.TestCase):
         self.assertIn('Do not enter rooms with enemies', drv.priority(dict(free, room='RM_0080'), self.d))
         self.assertTrue(drv.situation(dict(free, at=[0, 0], hp=100))[0].startswith('PRIORITY'))
 
+    def test_gun_reflex_never_undoes_a_store_and_respects_a_gate(self):
+        # Live: the model stored the gun to pass the detector, the reflex took it back, 130 times.
+        drv, _ = self.driver([])
+        rows = [[(55 << 16) | 1, 'Lighter'], [(12 << 16) | 30, 'Handgun Bullets'], [(8 << 16), 'Combat Knife'],
+                [(9 << 16) | 15, 'Handgun']] + [[0, '']] * 28
+        self.d.update(box_open=True, box_base=192, box_items=rows, items=[0, 0, (145 << 16) | 1])
+        self.write(self.d)
+        obs = dict(room='RM_0090', owner='INVENTORY BOX', inv=[[2, 145, 1, 'Playing Manual']], box=dict(mode='inventory'))
+        drv.room_rules = lambda: []
+        self.assertEqual(drv.gun_reflex(obs), dict(op='box', take=3))
+        drv.model_stored = {9}
+        self.assertIsNone(drv.gun_reflex(obs))
+        self.assertIsNone(drv.priority(obs, self.d))
+        drv.model_stored = set()
+        drv.gun_reflex_takes = 2
+        self.assertIsNone(drv.gun_reflex(obs))
+        drv.gun_reflex_takes = 0
+        drv.room_rules = lambda: [dict(rule='A passage here (walls w56) opens only if ...', how='Carry none ..., OR examine zone 7.',
+                                       all_items=['Handgun', 'Handgun Bullets'])]
+        self.assertIsNone(drv.gun_reflex(obs))
+        line = drv.priority(obs, self.d)
+        self.assertIn('a passage that closes while you carry it', line)
+        self.assertIn('Leaving through a door on this side: take it along', line)
+
+    def test_your_goal_in_a_reply_is_taken_as_goal_and_logged(self):
+        log = self.directory / 'driver.log'
+        drv, client = self.driver([text(dict(op='wait', ticks=2, your_goal='take the gun')),
+                                   text(dict(op='wait', ticks=2))], log=log)
+        with self.ticking():
+            drv.run(steps=2)
+        self.assertEqual(drv.goal, 'take the gun')
+        first = json.loads(log.read_text().splitlines()[0])
+        self.assertEqual(first['goal'], 'take the gun')
+        self.assertNotIn('your_goal', first['action'])
+        self.assertEqual(first['result'], 'ticked' if first['result'] == 'ticked' else first['result'])
+        self.assertNotEqual(first.get('error', ''), 'unknown action or arguments')
+
     def test_goal_is_kept_sent_back_and_asked_for(self):
         drv, client = self.driver([text(dict(op='wait', ticks=2, goal='take the handgun from box A')),
                                    text(dict(op='wait', ticks=2))])
@@ -1293,6 +1341,71 @@ class DriverTests(unittest.TestCase):
         self.assertIn('refused 2 times in a row', third['instead'])
         self.assertIn('Pick up Handgun (zone 9).', third['instead'])
         self.assertNotIn('Zone 3 does nothing', third['instead'])
+
+    def test_world_route_uses_script_doors_and_variants(self):
+        import hint
+        # RM_0050 has no door zone back to room 3; its script calls the door (bhDoorCall 0x33).
+        self.assertIn('003', hint.world_graph()['005'])
+        self.assertEqual(hint.route('RM_0090.RDX', '002'), ['008', '005', '003', '002'])
+        self.assertEqual(hint.route('RM_0090.RDX', 'RM_0040'), ['004'])
+        self.assertEqual(hint.route('RM_0090.RDX', '009'), [])
+        self.assertIn(('RM_0090', 7), hint.flag_index()[(1, 53, 1)])
+
+    def test_gate_ways_name_what_a_player_can_do(self):
+        import hint
+        st = hint.room_static('RM_0090.RDT')
+        state = dict(room='RM_0090.RDX', items=[0, (145 << 16) | 1], vm_flags=[], room_items=[],
+                     interactions=[dict(z) for z in st['zones']], walls=[dict(i=56, fl=1)],
+                     security_items=[(9 << 16) | 15] + [0] * 31, security_items_2=[0] * 32)
+        how = hint.room_rules(hint.Room('RM_0090.RDX'), state)[0]['how']
+        self.assertIn('carry one of the 55 checked items (such as Handgun)', how)
+        self.assertIn('then stand in floor area 5 (x 59..85, z 90..100; walk in: move to [72.0, 95.0]), '
+                      'then examine zone 7, then answer Yes', how)
+        self.assertNotIn('F[', how)
+
+    def test_news_names_item_uses_and_unlocked_places(self):
+        import hint
+        drv, _ = self.driver([], log=self.directory / 'driver.log')
+        before = dict(room='RM_0080.RDX', items=[0, 0], vm_flags=[[1, 1, 0]], interactions=[])
+        after = dict(before, items=[0, 82 << 16 | 1], vm_flags=[[1, 1, 0x80000000 >> 21]])
+        from unittest import mock
+        with mock.patch.object(hint, 'all_item_uses', lambda: {82: [('RM_0021', None, 1)]}), \
+                mock.patch.object(hint, 'flag_index', lambda: {(1, 53, 1): [('RM_0090', 7), ('RM_0080', None)]}), \
+                mock.patch.object(hint, 'route', lambda frm, to, avoid=(): ['005', '003', '002']):
+            drv.note_news(before, after)
+        news = drv.pending_feedback['news']
+        self.assertIn('You got Extinguisher. The game uses it at: RM_0021 (route RM_0050 -> RM_0030 -> RM_0020', news)
+        self.assertIn('Places that react to it now: RM_0090 zone 7', news)
+        self.assertNotIn('RM_0080 (room setup)', news)   # setup of the room you are in is not news
+        self.assertEqual(drv.memory['unlocks'][-1]['flag'], 'F[1:53]==1')
+
+    def test_goals_and_door_status_from_run_memory(self):
+        import hint
+        from unittest import mock
+        drv, _ = self.driver([], log=self.directory / 'driver.log')
+        del drv.goal_list   # the real one
+        d = dict(self.d, room='RM_0080.RDX', items=[0, 82 << 16 | 1],
+                 interactions=[dict(index=1, flags=1, floor=0, type=0, attribute=0, position=[-2, 0, -19],
+                                    extent=[4, 0, 2], parameters=[0, 9, 0, 6]),
+                               dict(index=0, flags=1, floor=0, type=0, attribute=0, position=[-2, 0, 17],
+                                    extent=[4, 0, 2], parameters=[0, 5, 1, 2])])
+        drv.memory['rooms'] = {'009': dict(visited=True, items_left=[]), '005': dict(visited=True, items_left=['Green Herb'])}
+        graph = {'008': {'009': [('0', 1, True)], '005': [('0', 0, True)]}, '005': {'003': [('0', 0, True)]},
+                 '003': {'002': [('0', 1, True)]}, '009': {}, '002': {}}
+        with mock.patch.object(hint, 'all_item_uses', lambda: {82: [('RM_0021', None, 1)]}), \
+                mock.patch.object(hint, 'world_graph', lambda: graph):
+            goals = drv.goal_list(dict(zones=[], far_zones=[]), d)
+            texts = [g['text'] for g in goals]
+            self.assertEqual(texts[0], 'Use Extinguisher at RM_0021')
+            self.assertIn('route RM_0050 -> RM_0030 -> RM_0020; first: zone 0 (door to room 5)', goals[0]['how'])
+            self.assertIn('Items left in RM_0050: Green Herb', texts)
+            self.assertIn('Explore RM_0030 (not visited yet)', texts)
+            self.assertEqual(drv.room_status('009', d), 'done for now')
+            self.assertEqual(drv.room_status('003', d), 'not visited yet')
+            self.assertIn('items left: Green Herb', drv.room_status('005', d))
+            self.assertEqual(drv.room_status('002', d), 'not visited yet')
+            drv.memory['rooms']['002'] = dict(visited=True, items_left=[])
+            self.assertEqual(drv.room_status('002', d), 'a goal is there')
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change
@@ -1703,12 +1816,13 @@ class DriverTests(unittest.TestCase):
     def test_room_rule_checklist_names_carried_items_with_slots(self):
         drv, _ = self.driver([])
         self.write(self.box_state())  # carries Lighter (1), Playing Manual (2), Handgun Bullets (3)
-        drv.room_rules = lambda: [dict(rule='A passage (walls w5) opens only if ...', how='store them',
+        drv.room_rules = lambda: [dict(rule='A passage (walls w5) opens only if ...',
+                                       how='Carry none ..., OR examine zone 7.',
                                        all_items=['Lighter', 'Handgun Bullets', 'Combat Knife'])]
         tip = drv.room_rule_tips()[0]
-        self.assertIn('Still carried: slot 1 Lighter, slot 3 Handgun Bullets.', tip)
+        self.assertIn('closed while you carry slot 1 Lighter, slot 3 Handgun Bullets.', tip)
         self.assertNotIn('Playing Manual', tip)
-        self.assertIn('slots move up after each store', tip)
+        self.assertIn('OR examine zone 7', tip)   # the other ways from the script, not only "store them"
         self.write(self.box_state(items=[0, 0, (145 << 16) | 1] + [0] * 9))
         self.assertIn('you carry none of the listed items', drv.room_rule_tips()[0])
 

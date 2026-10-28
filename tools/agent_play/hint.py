@@ -555,6 +555,126 @@ def all_box_places():
     return out
 
 
+# --- the world: rooms as places, routes between them, flags that unlock zones elsewhere ------------------
+# Story flags that live across rooms (event.c flag matrices): 1 ev_flg, 2 ky_flg, 3 ed_flg, 7 it_flg,
+# 8 mp_flg, 9 ic_flg. Matrix 4 (rm_flg) is cleared on every room load (system.c:189); 5, 6, 10-12 are
+# states of the running game, not progress.
+STORY_MATRICES = (1, 2, 3, 7, 8, 9)
+
+
+def room_node(name):
+    """'RM_0021.RDX' -> '002': stage digit and room number; the last digit is the room's variant (case)."""
+    return name[3:6]
+
+
+def node_name(node, variant='0'):
+    return f'RM_{node}{variant}'
+
+
+@functools.lru_cache(maxsize=1)
+def world_graph():
+    """{room node: {target node: [(variant, door zone, active at room start)]}} over every room file:
+    the doors of all variants of a room, merged. Which variant loads depends on the story; a route
+    through a later room names the room, the door is read when the player is there."""
+    out = {}
+    for name, doors in door_graph().items():
+        node = room_node(name)
+        for zone, stage, target, active in doors:
+            out.setdefault(node, {}).setdefault(f'{stage}{target:02d}', []).append((name[6], zone, active))
+        # Exits through a script door (bhDoorCall, op 0x33: u16 type, u8 stage, u8 room, u8 spawn, u8 ...),
+        # e.g. a gate the script opens: the zone whose examine block calls it, or None.
+        try:
+            room = Room(name)
+            for script in room.scripts():
+                zone_at = {}
+                for o, depth, c in room.commands(script):
+                    for k in [k for k in zone_at if k > depth or (k == depth and c[0] == 0x02)]:
+                        zone_at.pop(k, None)
+                    for a in range(64):
+                        if c[0] in (0x04, 0x06, 0x0e) and reacts_to_zone(c, a):
+                            zone_at[depth] = a
+                            break
+                    if c[0] == 0x33 and len(c) >= 6:
+                        entry = (name[6], zone_at[max(zone_at)] if zone_at else None, True)
+                        lst = out.setdefault(node, {}).setdefault(f'{c[4]}{c[5]:02d}', [])
+                        if entry not in lst:
+                            lst.append(entry)
+        except Exception:
+            pass
+    return out
+
+
+def route(from_room, to_node, avoid=()):
+    """Shortest room sequence from the room the player is in to room node `to_node` over the world
+    graph (doors active at room start in any variant): [node, ...] without the start, or None."""
+    start = room_node(from_room)
+    to_node = to_node[3:6] if to_node.startswith('RM_') else to_node
+    if start == to_node:
+        return []
+    graph = world_graph()
+    queue, seen = [(start, [])], {start}
+    while queue:
+        here, path = queue.pop(0)
+        for target, doors in sorted(graph.get(here, {}).items()):
+            if target in seen or target in avoid or not any(active for _, _, active in doors):
+                continue
+            seen.add(target)
+            if target == to_node:
+                return path + [target]
+            queue.append((target, path + [target]))
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def flag_index():
+    """{(matrix, bit, value): [(room name, zone or None)]}: where the room scripts of the whole game test a
+    story flag for that value, with the zone whose examine block holds the test (None: room setup or an
+    event). Answers "this flag just changed: which places react to it now?"."""
+    out = {}
+    for name in sorted(os.listdir(os.path.join(ROOT, 'data/rooms'))):
+        if not name.endswith('.RDT'):
+            continue
+        try:
+            room = Room(name)
+            scripts = room.scripts()
+        except Exception:
+            continue
+        for script in scripts:
+            zone_at = {}
+            testing = {}
+            for o, depth, c in room.commands(script):
+                for k in [k for k in zone_at if k > depth or (k == depth and c[0] == 0x02)]:
+                    zone_at.pop(k, None)
+                if c[0] == 0x01:
+                    testing[depth + 1] = True
+                    continue
+                if c[0] not in CONDITION_OPS:
+                    testing[depth] = False
+                    continue
+                for a in range(64):
+                    if reacts_to_zone(c, a):
+                        zone_at[depth] = a
+                        break
+                else:
+                    if c[0] == 0x04 and c[1] in STORY_MATRICES:
+                        key = (c[1], (c[2] | (c[3] << 8)) & 0x3ff, 1 - c[5])
+                        place = (room.name, zone_at[max(zone_at)] if zone_at else None)
+                        lst = out.setdefault(key, [])
+                        if place not in lst:
+                            lst.append(place)
+    return out
+
+
+def flag_bits(state):
+    """{(matrix, bit): value} of the story flags in a runtime state (vm_flags rows [matrix, word, bits])."""
+    out = {}
+    for m, w, v in state.get('vm_flags', []) or []:
+        if m in STORY_MATRICES:
+            for k in range(32):
+                out[(m, w * 32 + k)] = int(bool(v & (0x80000000 >> k)))
+    return out
+
+
 def zone_labels(room, state):
     """Short label per active zone from the room data: its message, item, door target or script hook.
     Same sources as `hint.py room`, one line each, for the driver's situation text."""
@@ -725,8 +845,9 @@ def floor_area(room, n):
     try:
         f = room_static(room.name + '.RDT')['floors'][n]
         x0, z0 = f['position'][0], f['position'][2]
-        return f"floor area {n} (x {min(x0, x0 + f['extent'][0]):.0f}..{max(x0, x0 + f['extent'][0]):.0f}, " \
-               f"z {min(z0, z0 + f['extent'][2]):.0f}..{max(z0, z0 + f['extent'][2]):.0f})"
+        x1, z1 = x0 + f['extent'][0], z0 + f['extent'][2]
+        return f"floor area {n} (x {min(x0, x1):.0f}..{max(x0, x1):.0f}, z {min(z0, z1):.0f}..{max(z0, z1):.0f}; " \
+               f"walk in: move to [{(x0 + x1) / 2:.1f}, {(z0 + z1) / 2:.1f}])"
     except (IndexError, KeyError, OSError, struct.error):
         return f'floor area {n}'
 
@@ -841,6 +962,44 @@ def how_to_set(room, m, b, value, state, depth=0, seen=None):
     return ways
 
 
+def doable_steps(room, m, b, value, state, depth=0, seen=None):
+    """The first way to make F[m:b]==value as a list of things a player can do (stand, carry, use,
+    examine, answer); flags in it are resolved into what sets them, story flags set elsewhere are left
+    out. [] when the scripts of this room do not set it."""
+    seen = seen if seen is not None else set()
+    if (m, b, value) in seen or depth > 3:
+        return []
+    seen.add((m, b, value))
+    for g in item_gates(room, state):
+        if g['flag'] == f'F[{m}:{b}]' and value:
+            # Name the checked items the player owns (inventory or a box) first.
+            owned = {(v >> 16) & 255 for key in ('items', 'security_items', 'security_items_2', 'box_items')
+                     for v in ([x[0] if isinstance(x, list) else x for x in state.get(key) or []]) if v}
+            mine = [ITEMS[i] for i in sorted(owned) if ITEMS.get(i) in set(g['items'])]
+            return [f"carry one of the {len(g['items'])} checked items (such as {', '.join((mine or g['items'])[:3])})"]
+    for script, off, conds in setters(room, m, b, value):
+        steps, impossible = [], False
+        for negated, cs in reversed(conds):
+            texts = [condition_text(room, c, state) for c in cs]
+            if negated:
+                if texts and all(t is True for _, t in texts):
+                    impossible = True
+                break_out = False
+                continue
+            for c, (x, t) in zip(cs, texts):
+                if t is True:
+                    continue
+                if c[0] == 0x04 and c[1] == 10 and (c[2] & 0xff) not in (22, 23):
+                    continue  # a state of the running game
+                if c[0] == 0x04 and not (c[1] == 10 and (c[2] & 0xff) in (22, 23)):
+                    steps += doable_steps(room, c[1], (c[2] | (c[3] << 8)) & 0x3ff, 1 - c[5], state, depth + 1, seen)
+                else:
+                    steps.append(x)
+        if not impossible and steps:
+            return list(dict.fromkeys(steps))
+    return []
+
+
 def door_openers(room, i, state):
     """How a switched-off door zone i gets switched on (bhEtcAtariSet on / bhEtcAtariSet2), as steps."""
     ways = []
@@ -887,7 +1046,7 @@ def guide(state, done_zones=(), limit=12):
         have = [ITEMS.get(i, str(i)) for i in carried if ITEMS.get(i) in set(r.get('all_items') or [])]
         if shut and have:
             out.append(f"Passage (walls {','.join('w%d' % w for w in gate)}) is closed while you carry "
-                       f"{', '.join(have)}: put them into an item box here, then go through.")
+                       f"{', '.join(have)}. {r.get('how', '')}")
         elif shut:
             out.append(f"Passage (walls {','.join('w%d' % w for w in gate)}) is closed although you carry none of "
                        "its items: something else keeps it shut (see the zones below).")
@@ -917,10 +1076,15 @@ def guide(state, done_zones=(), limit=12):
             needs = re.findall(r'F\[(\d+):(\d+)\]==(\d)', eff)
             hows = []
             for m, b, v in needs[:2]:
-                ways = how_to_set(room, int(m), int(b), int(v), state)
-                hows += [w for w in ways if w not in hows]
+                steps = doable_steps(room, int(m), int(b), int(v), state)
+                if steps:
+                    rank = lambda x: (0 if x.startswith('carry') else 3 if x.startswith('examine') else
+                                      4 if x.startswith('answer') else 1)
+                    line = ', then '.join(sorted(steps, key=rank))
+                    if line not in hows:
+                        hows.append(line)
             if hows:
-                out.append(f"Zone {i} does nothing yet; to make it work: " + ' OR '.join(hows[:2]) + '.')
+                out.append(f"Zone {i} does nothing yet; first: " + ' OR '.join(hows[:2]) + f', then examine zone {i}.')
             else:
                 out.append(f"Zone {i} does nothing yet (needs {', '.join(f'F[{m}:{b}]=={v}' for m, b, v in needs)}; "
                            "set elsewhere or by an event).")
@@ -1096,6 +1260,53 @@ def event_walls(room, n, seen=None):
     return opened, closed
 
 
+def gate_other_ways(room, gate, state):
+    """Every event of the room that opens the gate's walls, with its start conditions as steps: the
+    passage may also open by a switch or a place, not only by carrying nothing. Plain text."""
+    ways = []
+    for n in range(256):
+        if f'event{n}' not in room.scripts():
+            continue
+        opened, _ = event_walls(room, n)
+        if not set(gate) & opened:
+            continue
+        for script in room.scripts():
+            cmds = list(room.commands(script))
+            for k, (o, d, c) in enumerate(cmds):
+                if c[0] != 0x14 or c[3] != n:
+                    continue
+                steps = []
+                # Outermost condition first: that is the order in which they have to come true.
+                for negated, cs in reversed(enclosing_conditions(cmds, k)):
+                    for c2 in cs:
+                        x, t = condition_text(room, c2, state)
+                        if t is True or negated:
+                            continue
+                        if c2[0] == 0x04 and c2[1] == 10 and (c2[2] & 0xff) not in (22, 23):
+                            continue  # a state of the game itself (examining, answering): not a step
+                        if c2[0] == 0x04 and not (c2[1] == 10 and (c2[2] & 0xff) in (22, 23)):
+                            steps += doable_steps(room, c2[1], (c2[2] | (c2[3] << 8)) & 0x3ff, 1 - c2[5], state) or [x]
+                            continue
+                        steps.append(x)
+                if steps:  # a start without open conditions is the item check itself
+                    # What a player can do (stand, carry, use, examine, answer), the trigger last; flag
+                    # states the scripts set elsewhere are summed up, not listed.
+                    doable = [x for x in dict.fromkeys(steps) if not x.startswith('F[')]
+                    if not doable:
+                        continue
+                    rank = lambda x: (0 if x.startswith('carry') else 3 if x.startswith('examine') else
+                                      4 if x.startswith('answer') else 1)
+                    line = ', then '.join(sorted(doable, key=rank))
+                    if len(doable) < len(set(steps)):
+                        line += ' (when the story allows it)'
+                    if all(w.split(' (when')[0] != line.split(' (when')[0] for w in ways):
+                        ways.append(line)
+    base = 'Carry none of the listed items (store them in an item box)'
+    if not ways:
+        return base + '.'
+    return base + ', OR (from the room script): ' + ' OR '.join(ways[:2]) + '.'
+
+
 def room_rules(room, state):
     """Short, model-facing rules of a room derived from its scripts: item checks whose branches open or
     close walls (a passage that depends on what the player carries)."""
@@ -1124,9 +1335,7 @@ def room_rules(room, state):
         rules.append(dict(
             rule=(f"A passage here (walls {', '.join('w%d' % w for w in sorted(gate))}) opens only if you carry "
                   f"NONE of these {n} items: {names}. {now}"),
-            how=("Put every listed item you carry into an item box (op box store), keep only what is not on "
-                 "the list, then walk through. Take the items back from a box on the other side if the game "
-                 "allows it (its texts say so)."),
+            how=gate_other_ways(room, gate, state),
             all_items=g['items']))
     return rules
 

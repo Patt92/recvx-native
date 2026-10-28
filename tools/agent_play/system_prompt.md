@@ -59,10 +59,22 @@ there is no reachable standing point from your area, do not invent or move to a 
 
 {"op": "...", ...action fields..., "goal": "what you want to achieve and why", "expect": {...optional...}, "note": "optional, at most 80 characters"}
 
-Think before you act: what is my goal right now, what blocks it, which action brings me closer? Put
-that goal into `goal` (one sentence) whenever you set or change it; it is sent back to you as
-`your_goal` with every message. Each action must serve that goal. A line starting with PRIORITY in
-`situation` overrides your goal: do that first (e.g. take your gun out of a box before anything else).
+Example at an open box: {"op":"box","take":3,"goal":"take the handgun along before I leave this room"}
+
+Play like a person. Before each action ask yourself, using `situation`:
+- Is there an enemy? Combat mode and reflexes handle the fight; otherwise keep away or leave.
+- What did my last action change? (`news`: an item you got and where the game uses it; a switch that
+  unlocked places elsewhere.) That is usually your next goal.
+- What lies here that I can use? Items to pick up, a box with something I need, a zone that reacts.
+- Where do these doors lead, and is that room done? Every door shows "(not visited yet)", "(items
+  left: ...)", "(a goal is there)" or "(done for now)". Do not walk into a room that is done for now
+  unless your goal's route goes through it.
+- Do I carry something that blocks a passage here? Leave it in a box on this side only if you go
+  through that passage; take it along when you leave by a door on this side.
+`situation` names a NEXT GOAL with its route (rooms and the first door) and other goals. Take the next
+goal unless you have a better one; say which in `goal` (one sentence, with the reason). It comes back
+as `your_goal` with every message; every action must serve it. To walk a long route send
+{"op":"goto_room","room":"RM_0020"}. A PRIORITY line overrides your goal.
 
 or a plan of several steps that the driver runs one after another without asking you again, as long
 as each step ends as you expected:

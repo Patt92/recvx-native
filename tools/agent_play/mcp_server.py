@@ -39,6 +39,13 @@ TOOLS = [
     {'name': 'board', 'description': 'Open obstacles: item gates with wall state, facts about locks and needs, '
              'doors and items of every visited room.', 'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'map', 'description': 'The current room as text lines.', 'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'goals', 'description': 'Ranked goals from the game data and this run: items here, carried items '
+             'and where the game uses them, places your actions unlocked, items left in visited rooms, the next '
+             'room not visited yet; each with its route (rooms, first door).',
+     'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'route', 'description': 'Route from the current room to a room (e.g. RM_0020): the rooms in between '
+             'and the first door zone here.',
+     'inputSchema': {'type': 'object', 'properties': {'room': {'type': 'string'}}, 'required': ['room']}},
     {'name': 'guide', 'description': 'The next steps of the current room, derived from its scripts: weapon left '
              'in a box, item gates, items to pick up, zones that act now, zones that need something first and '
              'how to get it, closed doors and what opens them, where carried items are used.',
@@ -112,6 +119,11 @@ class Server:
             return self.driver.board(view, self.play.read()[0])
         if name == 'map':
             return self.driver.room_map(self.play.read()[0])
+        if name == 'goals':
+            return self.driver.goal_list(self.view(), self.play.read()[0])
+        if name == 'route':
+            room = str(args.get('room') or '')
+            return self.driver.route_text(self.play.read()[0], room[3:6] if room.startswith('RM_') else room) or 'no known route'
         if name == 'guide':
             return self.driver.guide(self.view(), self.play.read()[0])
         if name == 'near':
