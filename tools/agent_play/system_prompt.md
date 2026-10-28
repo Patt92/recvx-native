@@ -75,8 +75,11 @@ game hands control back (so `room` works for doors). A text can have several pag
 question: expect result "dialog" (or {}), not "choice", for the first page. Plans of 2-4 steps
 are ideal when the outcome is predictable (read a text, close it, go on); do not plan through a
 question you cannot answer yet. While the last step with an `expect` runs, the driver already asks
-you for the decision after it (`result` "pending", `state.assumed` says what is assumed); answer that
-request as if the step had ended as expected. If it ends differently your answer is discarded.
+you for the decision after it when the expectation names the next screen (`result` "pending",
+`state.assumed` says what is assumed and which screen follows); answer that request as if the step had
+ended as expected, or with {"op":"wait","ticks":1} if you first need to see the text, the box or the
+new room. If the step ends differently your answer is discarded. A macro or a plan is also accepted
+as that answer.
 
 Macros are steps the driver expands itself from the live state (each may take many actions):
 - {"op":"explore_room"}: examine every unread text zone you can reach, nearest first, confirming
@@ -103,7 +106,7 @@ current room and the open puzzle in it ("door i2 locked: need key item; items i3
 | move | to [x,z], face [x,z] optional, run, danger (bool, default true) | walk/run somewhere |
 | fire | shots 1-8, low (bool), target (enemy i) optional | handgun: turns to nearest/target enemy, aims, fires |
 | shake | presses 1-30, then {"op":"move","to":[x,z]} optional | only when owner is GRAB: break free, optionally run away at once |
-| keys | keys [forward,back,left,right,run,aim,attack], ticks 1-90 | raw pad, rarely needed (turning on stairs) |
+| keys | keys: list of names, e.g. ["forward","run"] (forward, back, left, right, run, aim, attack), ticks 1-90 | raw pad, rarely needed (turning on stairs) |
 | run | mode auto|on, dist 4-60 | auto: game pauses at your decisions when an enemy is within dist |
 | type | text (A-Z, 0-9, max 15), enter (bool, default true) | computer keyboard: types the word and Enter |
 | box | store (inventory slot) or take (box row) | item box: one complete swap; the driver moves cursor and list |

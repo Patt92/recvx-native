@@ -563,7 +563,8 @@ class Play:
         if a is None or not a['flags'] & 1:
             raise PlayError('zone absent or inactive')
         if a.get('floor', 0) != d.get('player_floor', 0):
-            raise PlayError('zone is on another floor')
+            raise PlayError(f"zone {index} is on floor {a.get('floor', 0)}, you are on floor {d.get('player_floor', 0)}: "
+                            'take the stairs/ladder to that floor first')
         return a
 
     def free_near(self, d, target, limit=3, radius=3.5):
@@ -1072,14 +1073,23 @@ class Play:
                 raise PlayError('keys require FREE or GRAB input owner')
             keys = action.get('keys', [])
             ticks = action.get('ticks', 1)
-            if not keys or any(k not in KEYS for k in keys) or not isinstance(ticks, int) or not 1 <= ticks <= 90:
-                raise PlayError('keys require known keys and 1..90 ticks')
+            if not isinstance(keys, list) or not keys or any(k not in KEYS for k in keys) or \
+                    not isinstance(ticks, int) or not 1 <= ticks <= 90:
+                raise PlayError('keys must be a list of names from ' + ', '.join(sorted(KEYS)) +
+                                ' (e.g. ["forward","run"]) with ticks 1..90')
             return [(1, 'keys ' + ' '.join(keys) + f' {ticks}')]
         if op == 'fire':
             if owner(d) != 'FREE':
                 raise PlayError('fire requires FREE input owner')
             eq = equipped(d)
             if not eq or eq[1] != 9:
+                items = d.get('items', [])
+                guns = [slot for slot in range(1, len(items)) if ((items[slot] >> 16) & 255) == 9]
+                if guns:
+                    raise PlayError(f'no weapon equipped: the handgun is in slot {guns[0]}; '
+                                    f'{{"op":"equip","item":{guns[0]}}} first')
+                if not eq:
+                    raise PlayError('you have no weapon: fire is impossible; avoid or outrun enemies')
                 raise PlayError('fire cadence currently supports the equipped handgun (item 9) only')
             shots = action.get('shots', 1)
             if not isinstance(shots, int) or not 1 <= shots <= 8:

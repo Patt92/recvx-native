@@ -736,7 +736,7 @@ class DriverTests(unittest.TestCase):
 
     def test_prefetched_decision_is_used_when_the_expectation_holds(self):
         drv, client = self.driver([
-            text(dict(op='wait', ticks=3, expect={})),   # step 1 with an expectation: the next decision is prefetched
+            text(dict(op='wait', ticks=3, expect=dict(result='running'))),   # names the next screen: prefetched
             text(dict(op='wait', ticks=4)),                                  # prefetched: the next decision
             text(dict(op='wait', ticks=5))])
         with self.ticking():
@@ -833,6 +833,58 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(len(client.requests), 2)
         self.assertIn('"ticks":4', drv.history_lines[-1])
         self.assertNotIn('"ticks":5', ' '.join(drv.history_lines))
+
+    def test_macro_and_plan_from_a_prefetched_decision_run_as_plans(self):
+        # Live: a prefetched {"op":"explore_room"} or plan went straight to play.act -> "unknown action".
+        self.d['interactions'] = [dict(index=4, flags=1, floor=0, type=3, attribute=0x8000, position=[5, 0, 5],
+                                       extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
+        self.write(self.d)
+        drv, client = self.driver([
+            # In this fixture the control tick never advances, so a wait ends as 'running'.
+            text(dict(op='wait', ticks=2, expect=dict(result='running'))),  # prefetches the next decision
+            text(dict(op='explore_room', note='look around')),              # the prefetched answer: a macro
+            text(dict(op='wait', ticks=9))])
+        with self.ticking():
+            drv.run(steps=2)
+        self.assertEqual(len(client.requests), 2)
+        entries = [json.loads(l) for l in (self.directory / 'driver.log').read_text().splitlines()] \
+            if (self.directory / 'driver.log').exists() else []
+        self.assertEqual(drv.note, 'look around')
+        self.assertIn('examine zone 4', drv.history_lines[-1])
+        self.assertNotIn('unknown action', ' '.join(drv.history_lines))
+        self.assertIn('route', self.controls())
+
+    def test_prefetch_assumes_the_screen_the_expectation_names(self):
+        drv, _ = self.driver([])
+        view = dict(owner='FREE', room='RM_0090', at=[1, 2], hp=160, inv=[], zones=[dict(i=7, kind='text')], doors=[13])
+        a = drv.assumed_view(view, dict(op='interact', zone=7), dict(result='dialog'))
+        self.assertEqual(a['owner'], 'DIALOG')
+        self.assertTrue(a['dialog']['ready']); self.assertNotIn('zones', a)
+        self.assertIn('the screen is then DIALOG', a['assumed'])
+        a = drv.assumed_view(view, dict(op='interact', zone=13), dict(room='RM_0040'))
+        self.assertEqual((a['owner'], a['room'], a['at']), ('FREE', 'RM_0040', '?'))
+        self.assertTrue(a['assumed_unknown_room'])
+        a = drv.assumed_view(view, dict(op='wait', ticks=2), dict(result='ticked'))
+        self.assertEqual(a['owner'], 'FREE'); self.assertIn('zones', a)
+        # Without a named screen the next state is a guess: no prefetch.
+        self.assertIsNone(drv.assumed_view(view, dict(op='interact', zone=7), dict(not_result=['grab'])))
+        self.assertIsNone(drv.assumed_view(view, dict(op='interact', zone=7), {}))
+        self.assertIsNone(drv.assumed_view(view, dict(op='interact', zone=7), dict(result=['dialog', 'menu'])))
+
+    def test_history_keeps_the_decision_without_the_bundle(self):
+        drv, _ = self.driver([])
+        user = dict(role='user', content=json.dumps(dict(situation=['s'], state={'owner': 'FREE'}, zones_all=['i1 door'],
+                                                         board=['b'], map=['m'] * 40, history=['h'], journal={}, room_rules=[])))
+        drv.remember(user, dict(op='wait'))
+        kept = json.loads(drv.history[0]['content'])
+        self.assertEqual(set(kept), {'situation', 'state'})
+
+    def test_weapon_state_is_said_in_the_situation(self):
+        drv, _ = self.driver([])
+        text_ = ' '.join(drv.situation(dict(room='RM_TEST', at=[0, 0], hp=1, owner='FREE', inv=[[2, 145, 1, 'Playing Manual']])))
+        self.assertIn('No weapon at all', text_)
+        text_ = ' '.join(drv.situation(dict(room='RM_TEST', at=[0, 0], hp=1, owner='FREE', inv=[[3, 9, 15, 'Handgun']])))
+        self.assertIn('Handgun in slot 3: equip it', text_)
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change

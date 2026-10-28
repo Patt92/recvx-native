@@ -592,11 +592,18 @@ class Driver:
         inv = obs.get('inv') or []
         carried = ', '.join(f'slot {r[0]} {r[3]}' + (f' x{r[2]}' if r[2] and r[2] > 1 else '') for r in inv if len(r) > 3)
         equipped = (obs.get('equipped') or [None])[0]
-        out.append('You carry: ' + (carried or 'nothing') + '.' + (f' Equipped: {equipped}.' if equipped else ''))
+        line = 'You carry: ' + (carried or 'nothing') + '.'
+        if equipped:
+            line += f' Equipped: {equipped}.'
+        else:
+            guns = [r[0] for r in inv if len(r) > 3 and r[1] == 9]
+            line += (f' No weapon equipped (Handgun in slot {guns[0]}: equip it before you can fire).' if guns
+                     else ' No weapon at all: you cannot fire; avoid or outrun enemies.')
+        out.append(line)
         if self.last_change:
             out.append(self.last_change)
         walls = {w['i']: w.get('fl', 0) & 1 for w in d.get('walls', [])}
-        for r in self.room_rules():
+        for r in ([] if obs.get('assumed_unknown_room') else self.room_rules()):
             gate = sorted(int(w) for w in __import__('re').findall(r'w(\d+)', r['rule'].split(') opens')[0]))
             shut = [w for w in gate if walls.get(w) == 1]
             state = ('closed now: ' + ', '.join(f'w{w}' for w in shut)) if shut else 'open now'
@@ -734,7 +741,7 @@ class Driver:
             self.remember_texts(obs)
         payload = dict(situation=self.situation(obs))
         payload.update(feedback, state=trim(obs))
-        if obs.get('owner') == 'FREE':
+        if obs.get('owner') == 'FREE' and not obs.get('assumed_unknown_room'):
             try:
                 d, _, _ = self.play.read()
                 payload['zones_all'] = self.zones_all(obs, d)
@@ -800,7 +807,7 @@ class Driver:
             except ValueError as e:
                 error = str(e)
                 finish = message.get('_finish')
-                thought = message.get('reasoning_content') or ''
+                thought = message.get('reasoning_content') or message.get('reasoning') or ''
                 self.bad_replies.append(dict(finish=finish, text=(text or thought)[:160]))
                 action = salvage_cut(text) if finish == 'length' else None
                 if action is not None:
@@ -846,8 +853,19 @@ class Driver:
         # No usable action: take the owner's safe default and report it back instead of stopping the run.
         return user, dict(default_action(obs), no_action=True), usage, llm_ms
 
+    HISTORY_DROP = ('zones_all', 'board', 'map', 'history', 'journal', 'room_rules')
+
     def remember(self, user, action):
-        # Tool exchanges stay out of the history; only the decision and its state are kept.
+        # Tool exchanges stay out of the history; only the decision and its state are kept. The bundle
+        # (zones, board, map, history, journal, rules) is rebuilt for every request: in the history it
+        # would repeat itself `window` times (a live run reached 130k prompt tokens that way).
+        try:
+            payload = json.loads(user['content'])
+            if isinstance(payload, dict):
+                kept = {k: v for k, v in payload.items() if k not in self.HISTORY_DROP}
+                user = dict(user, content=json.dumps(kept, separators=(',', ':'), ensure_ascii=False))
+        except (ValueError, TypeError, KeyError):
+            pass
         self.history += [user, {'role': 'assistant', 'content': json.dumps(action, separators=(',', ':'))}]
         if len(self.history) > 4 * self.window:
             # Cut in one block so the cached prefix (system + kept turns) survives the next steps.
@@ -1330,31 +1348,39 @@ class Driver:
     # --- plans, macros and the prefetched next decision ------------------------------------------------
     def choose(self, view, feedback):
         """The next action: a planned step (no request), the prefetched decision, or a fresh decision.
-        Returns (user message or None, action, usage, llm_ms, log entry)."""
+        A plan or a bare macro from either source becomes the plan. Returns (user message or None,
+        action, usage, llm_ms, log entry)."""
         step = self.next_plan_step(view)
         if step is not None:
             return None, step, {}, 0.0, dict(llm_ms=0, usage={}, plan_step=f'{self.plan_done}/{self.plan_total}')
         if self.prefetched:
             user, action, usage, llm_ms = self.prefetched
             self.prefetched = None
-            return user, action, usage, llm_ms, dict(llm_ms=round(llm_ms), usage=usage, prefetched=True)
-        if self.client is None:  # no model (MCP server): nothing planned means nothing to do
+            entry = dict(llm_ms=round(llm_ms), usage=usage, prefetched=True)
+        elif self.client is None:  # no model (MCP server): nothing planned means nothing to do
             return None, dict(op='wait', ticks=1), {}, 0.0, dict(llm_ms=0, usage={}, auto=True)
-        user, action, usage, llm_ms = self.decide(view, feedback, self.last_owner)
-        entry = dict(llm_ms=round(llm_ms), usage=usage)
-        if self.bad_replies:
-            entry['bad_replies'] = self.bad_replies
-        if action.get('op') == 'plan':
-            steps = [st for st in (action.get('steps') or []) if isinstance(st, dict) and isinstance(st.get('op'), str)]
+        else:
+            user, action, usage, llm_ms = self.decide(view, feedback, self.last_owner)
+            entry = dict(llm_ms=round(llm_ms), usage=usage)
+            if self.bad_replies:
+                entry['bad_replies'] = self.bad_replies
+        if action.get('op') == 'plan' or action.get('op') in MACROS:
+            if action.get('op') in MACROS:
+                steps = [{k: v for k, v in action.items() if k not in ('note', 'no_action')}]
+            else:
+                steps = [st for st in (action.get('steps') or []) if isinstance(st, dict) and isinstance(st.get('op'), str)]
             note = action.get('note')
             if isinstance(note, str) and note.strip():
                 self.note = note.strip()[:NOTE_MAX]
-            self.remember(user, action)
+            if user is not None:
+                self.remember(user, action)
             self.plan, self.plan_total, self.plan_done = steps, len(steps), 0
             step = self.next_plan_step(view)
             if step is None:
-                self.pending_feedback['plan_broken'] = 'the plan had no runnable step'
-                return None, dict(default_action(view), no_action=True), usage, llm_ms, entry
+                if not self.pending_feedback.get('macro_ended'):
+                    self.pending_feedback['plan_broken'] = 'the plan had no runnable step'
+                entry['plan_step'] = f'{self.plan_done}/{self.plan_total}'
+                return None, dict(op='wait', ticks=1), usage, llm_ms, entry
             entry['plan_step'] = f'{self.plan_done}/{self.plan_total}'
             return None, step, usage, llm_ms, entry
         return user, action, usage, llm_ms, entry
@@ -1511,13 +1537,54 @@ class Driver:
         if entry.get('prefetch'):
             self.pending_feedback['prefetch'] = entry['prefetch']
 
+    PREFETCH_SCREENS = {'dialog': 'DIALOG', 'choice': 'DIALOG', 'menu': 'INVENTORY', 'room': 'FREE',
+                        'settled': 'FREE', 'arrived': 'FREE', 'ticked': 'FREE', 'running': 'FREE', 'held': 'FREE',
+                        'swapped': 'INVENTORY BOX', 'refused': 'INVENTORY BOX'}
+
+    def assumed_view(self, view, action, expect):
+        """The state after `action` as `expect` describes it: the screen it names (a dialogue page, a
+        menu, the box, free play in a room). None when the expectation does not say which screen
+        follows (not_result alone, an empty expect): then a prefetched decision would be a guess."""
+        want = expect.get('result')
+        if isinstance(want, list):
+            want = want[0] if len(want) == 1 else None
+        owner = str(expect.get('owner') or '').upper() or self.PREFETCH_SCREENS.get(want)
+        if expect.get('room') and not owner:
+            owner = 'FREE'
+        if not owner:
+            return None
+        unknown_room = bool(expect.get('room')) and str(expect['room'])[:7] != str(view.get('room') or '')[:7]
+        assumed = {k: v for k, v in view.items()
+                   if k not in ('zones', 'far_zones', 'far_items', 'enemies', 'dialog', 'menu', 'box', 'route',
+                                'came_from', 'done_here', 'other_zones', 'doors')}
+        assumed['owner'] = owner
+        if unknown_room:
+            assumed.update(room=str(expect['room'])[:7], at='?', assumed_unknown_room=True)
+        elif owner == 'FREE':
+            for k in ('zones', 'far_zones', 'far_items', 'doors', 'other_zones'):
+                if k in view:
+                    assumed[k] = view[k]
+        if 'DIALOG' in owner:
+            assumed['dialog'] = dict(text='(the page this step opens; its text is not known yet)', ready=True,
+                                     choice=want == 'choice')
+        elif owner == 'INVENTORY BOX':
+            assumed['box'] = dict(mode='inventory', note='contents after the swap are not known yet')
+        elif owner == 'INVENTORY':
+            assumed['menu'] = dict(note='the menu this step opens')
+        assumed['assumed'] = (f"The step '{action_text(action)}' is running now; assume it ends as expected "
+                              f"({json.dumps(expect, separators=(',', ':'))}): the screen is then {owner}. "
+                              'Decide the action that comes AFTER it. What a text says, what a box holds or '
+                              'what a new room looks like is not known yet: if you need that, answer '
+                              '{"op":"wait","ticks":1} and decide with the real state.')
+        return assumed
+
     def start_prefetch(self, view, action, expect):
         """Ask for the next decision now, assuming `action` ends as `expect` says (last planned step only)."""
         if self.client is None or self.prefetch_thread or self.plan or not isinstance(expect, dict):
             return
-        assumed = dict(view)
-        assumed['assumed'] = (f"The step '{action_text(action)}' is running now; assume it ends as expected "
-                              f"({json.dumps(expect, separators=(',', ':'))}). Decide the action that comes AFTER it.")
+        assumed = self.assumed_view(view, action, expect)
+        if assumed is None:
+            return
         feedback = dict(result='pending', assumed=expect)
         holder = {}
         def work():
@@ -1644,6 +1711,9 @@ class Driver:
                 if user is not None:
                     self.remember(user, action)
             expect = action.pop('expect', None) if isinstance(action, dict) else None
+            macro = action.pop('macro', None) if isinstance(action, dict) else None
+            if macro:
+                entry['macro'] = macro
             planned = entry.get('plan_step') is not None
             if expect is not None:
                 entry['expect'] = expect
