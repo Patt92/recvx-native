@@ -1278,6 +1278,22 @@ void RoomWorld::bind_enemy_services(){
     x.water_line=en.water_line; // zonzon.c:925 bhCheckL2Water, dieselbe Linie (Lage, Vektor)
     x.player_id=[]()->int{return 0;}; // player.c:700 plp->id = 0
     x.player_obj_num=[]()->uint32_t{return uint32_t(enemy_world->player_joint_matrices_.size());};
+    // en01.c:3278-3308: damage interrupts an enemy-owned player grab.
+    en.player_hurt_state=[](RECVX_ENEMY_WORK*,int knocked_down){
+        auto* world=enemy_world;RECVX_ENEMY_PLAYER pl{};
+        if(!world->enemy_player_get(pl))return;
+        pl.exp1_flags|=4u;
+        world->clear_pad_on(0xfu);
+        pl.flg=(pl.flg&~0x10000u)|8u;
+        pl.stflg&=~0x50000u;pl.at_flg=0;
+        pl.mtn_enemy=0;pl.mtn_enemy_work=nullptr;
+        if(knocked_down){
+            pl.mode0=2;pl.mode2=1;pl.mode3=0;
+            const RECVX_ENEMY_VEC dv{world->player_hit_dv_.x,world->player_hit_dv_.y,world->player_hit_dv_.z};
+            pl.mode1=recvx_en01_dgc_dir_check(&dv,pl.ay)==0?0:1;
+        }else{pl.mode0=2;pl.mode1=2;pl.mode2=0;pl.mode3=0;}
+        world->enemy_player_set(pl);
+    };
     x.player_hit_set=[](int djnt_no,const RECVX_ENEMY_VEC* dv,const RECVX_ENEMY_VEC* dp){auto* world=enemy_world;world->player_hit_joint_=djnt_no;if(dv)world->player_hit_dv_={dv->x,dv->y,dv->z};if(dp)world->player_hit_dp_={dp->x,dp->y,dp->z};};
     x.player_hit_get=[](int* djnt_no,RECVX_ENEMY_VEC* dv,RECVX_ENEMY_VEC* dp)->int{auto* world=enemy_world;if(djnt_no)*djnt_no=world->player_hit_joint_;if(dv)*dv={world->player_hit_dv_.x,world->player_hit_dv_.y,world->player_hit_dv_.z};if(dp)*dp={world->player_hit_dp_.x,world->player_hit_dp_.y,world->player_hit_dp_.z};return 1;};
     x.model_texp=[](const RECVX_ENEMY_WORK* w)->const void*{

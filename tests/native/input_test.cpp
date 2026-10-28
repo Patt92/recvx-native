@@ -26,6 +26,16 @@ static void axis(InputManager& input,SDL_Joystick* joystick,SDL_GameControllerAx
 static int attach(){const auto index=SDL_JoystickAttachVirtual(SDL_JOYSTICK_TYPE_GAMECONTROLLER,SDL_CONTROLLER_AXIS_MAX,SDL_CONTROLLER_BUTTON_MAX,0);check(index>=0,"virtual controller attach failed");check(SDL_IsGameController(index),"SDL does not recognize virtual gamepad");return index;}
 static void detach(SDL_JoystickID id){for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_JoystickGetDeviceInstanceID(i)==id){check(SDL_JoystickDetachVirtual(i)==0,"virtual detach failed");return;}throw std::runtime_error("virtual device not found");}
 struct Quit{~Quit(){SDL_Quit();}};
+static void player_release_frame(){
+    InputManager input(InputConfig::defaults());
+    key(input,SDL_SCANCODE_R,true);
+    check(input.player_input_pending(),"aim press must bypass host hold");
+    check(input.tick().down(Action::Aim),"aim press missing");
+    key(input,SDL_SCANCODE_R,false);
+    check(input.player_input_pending(),"aim release must bypass host hold until sampled");
+    check(!input.tick().down(Action::Aim),"aim remains held after release");
+    check(!input.player_input_pending(),"host hold must resume after release frame");
+}
 // Unabhaengiger Aufruf, damit die Dialogregression nicht hinter dem RM_0000-Select-
 // Ablauf verschwindet. message.c:269-295 liest nur pad_ps 0x4/0x8, pad.c:275 bildet
 // diese Flanken ohne Wiederholung. Der bestehende Cinematic-Test bleibt unveraendert.
@@ -195,6 +205,7 @@ int main(int argc,char** argv){try{
     SDL_SetMainReady();SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");check(SDL_Init(SDL_INIT_GAMECONTROLLER)==0,"SDL controller init failed");Quit quit;_Make_SinTable();
     if(argc==3&&std::string(argv[1])=="--dialog-edges"){dialog_edges(std::filesystem::u8path(argv[2]));return 0;}
     if(argc==3&&std::string(argv[1])=="--box-pad"){box_pad_frames(std::filesystem::u8path(argv[2]));return 0;}
+    player_release_frame();
     const auto config=InputConfig::defaults();const int index=attach();SDL_Joystick* joystick=SDL_JoystickOpen(index);check(joystick,"virtual joystick open failed");const auto id=SDL_JoystickInstanceID(joystick);
     SDL_JoystickSetVirtualAxis(joystick,SDL_CONTROLLER_AXIS_TRIGGERLEFT,-32768);SDL_JoystickSetVirtualAxis(joystick,SDL_CONTROLLER_AXIS_TRIGGERRIGHT,-32768);SDL_GameControllerUpdate();
     {InputManager input(config);pump(input);check(input.controllers()>=1,"controller present at startup not opened");input.tick();

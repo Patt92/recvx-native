@@ -53,6 +53,8 @@ public:
     void suppress_held();
     // Gameplay keys the player holds right now (movement, run, aim, attack), from the last
     // evaluation: lets a host hold (agent control) give way to the person at the keyboard.
+    // Include the release frame so the simulation can consume the cleared buttons before pausing.
+    bool player_input_pending()const{return player_input()||player_input_sampled_;}
     bool player_input()const{for(const auto a:{Action::Forward,Action::Back,Action::TurnLeft,Action::TurnRight,Action::Run,Action::Aim,Action::Attack})if(held_[unsigned(a)])return true;return false;}
     std::size_t controllers()const{return pads_.size();}
     // scePadSetActDirect of the frame: big motor (low frequency) and small motor.
@@ -64,7 +66,7 @@ private:
     std::map<SDL_JoystickID,Pad> pads_;
     std::array<bool,action_count> held_{},pending_{},suppressed_{};
     std::array<unsigned,action_count> age_{};
-    bool focused_=true,last_gamepad_=false;
+    bool focused_=true,last_gamepad_=false,player_input_sampled_=false;
     void open(int index);
     void refresh(Pad& pad);
     void evaluate(bool edges=true);
