@@ -800,7 +800,7 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(r['result']['serverInfo']['name'], 'recvx-play')
         r = server.handle(dict(jsonrpc='2.0', id=2, method='tools/list'))
         self.assertEqual([t['name'] for t in r['result']['tools']],
-                         ['observe', 'act', 'plan', 'zone', 'hint', 'board', 'map', 'near', 'memory'])
+                         ['observe', 'act', 'plan', 'zone', 'hint', 'board', 'map', 'guide', 'near', 'memory'])
         self.assertIsNone(server.handle(dict(jsonrpc='2.0', method='notifications/initialized')))
         with self.ticking():
             r = server.handle(dict(jsonrpc='2.0', id=3, method='tools/call',
@@ -1183,6 +1183,42 @@ class DriverTests(unittest.TestCase):
         self.assertIn('Stored in the item box (shared by every normal box): F. Aid Spray (opened at RM_0100 zone 3)',
                       again.box_lines(obs, self.d))
         self.assertIn(9, again.weapons()); self.assertNotIn(12, again.weapons())   # the gun, not its ammo
+
+    def test_guide_derives_the_next_steps_from_the_room_script(self):
+        import hint
+        st = hint.room_static('RM_0090.RDT')
+        state = dict(room='RM_0090.RDX', items=[0, (145 << 16) | 1], vm_flags=[], room_items=[],
+                     interactions=[dict(z) for z in st['zones']], walls=[dict(i=56, fl=1), dict(i=73, fl=1)],
+                     security_items=[(9 << 16) | 15] + [0] * 31, security_items_2=[0] * 32, player_floor=0)
+        lines = hint.guide(state)
+        self.assertTrue(lines[0].startswith('You carry no gun: Handgun lies in security box A (opened at RM_0090 zone 11)'))
+        self.assertTrue(any('closed although you carry none' in l for l in lines))
+        box_a = next(l for l in lines if l.startswith('Zone 11 (security box A) also:'))
+        self.assertIn('if standing in floor area 3 (x 59..85, z 100..112): starts event 11 (opens walls', box_a)
+        switch = next(l for l in lines if l.startswith('Zone 7 does nothing yet'))
+        self.assertIn('carry any of 55 checked items', switch)
+        self.assertIn('stand in floor area 5 (x 59..85, z 90..100)', switch)
+        # Carrying a gun: no weapon step; zones already answered are not repeated.
+        armed = hint.guide(dict(state, items=[1, (9 << 16) | 15]), done_zones={4})
+        self.assertFalse(any(l.startswith('You carry no gun') for l in armed))
+        self.assertFalse(any(l.startswith('Examine zone 4') for l in armed))
+        self.assertTrue(hint.how_to_set(hint.Room('RM_0090.RDX'), 10, 19, 1, state)[0].startswith('F[10:19] is a state the game sets'))
+        self.assertIn(9, hint.guns()); self.assertNotIn(12, hint.guns()); self.assertNotIn(8, hint.guns())
+
+    def test_driver_guide_is_cached_offered_and_shown_when_stuck(self):
+        drv, client = self.driver([call('look', dict(what='guide')), text(dict(op='wait', ticks=2))])
+        import hint
+        from unittest import mock
+        with mock.patch.object(hint, 'guide', lambda d, done_zones=(): ['Examine zone 4: opens wall w1']):
+            obs = dict(room='RM_TEST', owner='FREE', at=[0, 0], hp=100, inv=[])
+            self.assertEqual(drv.guide(obs, self.d), ['Examine zone 4: opens wall w1'])
+            drv.since_progress = 6
+            self.assertTrue(any(l.startswith("Guide (from this room's scripts): Examine zone 4") for l in drv.situation(obs)))
+            with self.ticking():
+                drv.run(steps=1)
+        answered = client.requests[1][0][-1]
+        self.assertEqual(answered['role'], 'tool')
+        self.assertIn('Examine zone 4', answered['content'])
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change

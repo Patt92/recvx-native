@@ -34,7 +34,7 @@ from play import Play, PlayError, equipped, item_tables, threats  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PROMPT = HERE / 'system_prompt.md'
-HINT_CMDS = ('room', 'zone', 'blocked', 'event', 'msg', 'why', 'rules', 'near', 'uses')
+HINT_CMDS = ('guide', 'need', 'room', 'zone', 'blocked', 'event', 'msg', 'why', 'rules', 'near', 'uses')
 # Owners in which the game plays by itself; asking the model there only costs time.
 PASSIVE = {'CINEMATIC', 'DOOR', 'VIDEO'}
 # Longest note kept as the model's memory (the prompt asks for at most this many characters).
@@ -57,14 +57,15 @@ TOOLS = [
             'args': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['cmd']}}},
     {'type': 'function', 'function': {
         'name': 'look',
-        'description': 'The bigger picture, on demand: zones = every zone of this floor with what examining it '
+        'description': 'The bigger picture, on demand: guide = the next steps of this room derived from its '
+                       'scripts (what opens what, what a zone needs first and how to get it); zones = every zone of this floor with what examining it '
                        'does now; board = open gates, locks, where your items are used, rooms within three '
                        'doors, memory of earlier runs; map = the room as text; history = your last actions '
                        'with their effect; all = everything.',
         'parameters': {'type': 'object', 'properties': {
-            'what': {'type': 'string', 'enum': ['zones', 'board', 'map', 'history', 'all']}}, 'required': ['what']}}},
+            'what': {'type': 'string', 'enum': ['guide', 'zones', 'board', 'map', 'history', 'all']}}, 'required': ['what']}}},
 ]
-LOOKS = ('zones', 'board', 'map', 'history', 'all')
+LOOKS = ('guide', 'zones', 'board', 'map', 'history', 'all')
 
 
 class Client:
@@ -468,7 +469,7 @@ class Driver:
                 if cmd not in HINT_CMDS:
                     return 'error: cmd must be one of ' + ', '.join(HINT_CMDS)
                 argv = [str(a) for a in args.get('args') or []]
-                if cmd in ('room', 'zone', 'blocked', 'why', 'rules', 'near', 'uses'):
+                if cmd in ('guide', 'need', 'room', 'zone', 'blocked', 'why', 'rules', 'near', 'uses'):
                     argv.append(str(self.play.auto))
                 elif cmd in ('event', 'msg') and len(argv) == 1:
                     # hint.py would read the room from build/play/auto.json; use this driver's state.
@@ -699,6 +700,10 @@ class Driver:
             self.reflex_log = []
         if self.since_progress >= 5:
             out.append(f'No progress for {self.since_progress} decisions: do something you have not tried.')
+            if owner == 'FREE' and not self.combat:
+                steps = self.guide(obs, d)[:3]
+                if steps:
+                    out.append('Guide (from this room\'s scripts): ' + ' | '.join(steps))
         return out
 
     # --- the bundle: everything the model may need, sent with every request (prefill is cheap) -----------
@@ -749,6 +754,8 @@ class Driver:
         if obs is None:
             obs = self.mark_seen(self.with_approaches(self.mark_way_back(self.play.observe())))
         out = {}
+        if what in ('guide', 'all'):
+            out['guide'] = self.guide(obs, d)
         if what in ('zones', 'all'):
             out['zones_all'] = self.zones_all(obs, d) if obs.get('owner') == 'FREE' else ['zones: only while you walk freely']
         if what in ('board', 'all'):
@@ -760,6 +767,23 @@ class Driver:
         if not out:
             out['error'] = 'what must be one of ' + ', '.join(LOOKS)
         return out
+
+    def guide(self, obs, d):
+        """hint.guide for this room: the next steps derived from its scripts, without examine steps for
+        zones that already answered and nothing changed since. Cached per room, progress and floor."""
+        log = self.zone_log((obs.get('room') or '')[:7]) if obs.get('room') else {}
+        progress = self.progress()
+        done = tuple(sorted(i for i, v in log.items() if v.get('sig') == progress))
+        key = (d.get('room'), progress, d.get('player_floor'), done,
+               tuple(d.get('security_items') or []), tuple(d.get('security_items_2') or []))
+        if key != getattr(self, '_guide_key', None):
+            try:
+                import hint
+                lines = hint.guide(d, done_zones=set(done))
+            except Exception as e:
+                lines = [f'guide unavailable ({type(e).__name__})']
+            self._guide_key, self._guide = key, lines
+        return self._guide
 
     def zones_all(self, obs, d):
         """One line per active zone on the player's floor: kind, distance, reachability, what it is, what
@@ -854,24 +878,9 @@ class Driver:
         return [f'zone {p.split(" zone ")[1]} of this room' if p.startswith(room + ' ') else p for p in found]
 
     def weapons(self):
-        """Item ids that ammunition (itemdata type 0x2) loads into, by the combine rules of the native item
-        tables: the guns."""
-        if getattr(self, '_weapons', None) is None:
-            import hint
-            types = hint.item_types()
-            combidata, cmb = item_tables()
-            guns = set()
-            for source, pos in enumerate(cmb):
-                if pos is None or pos < 0 or pos >= len(combidata) or not (source < len(types) and types[source] & 2):
-                    continue
-                for k in range(combidata[pos]):
-                    at = pos + 1 + 3 * k
-                    target = combidata[at] if at < len(combidata) else -1
-                    if at + 2 < len(combidata) and combidata[at + 2] & 255 <= 5 and 0 < target < len(types) \
-                            and not types[target] & 2:
-                        guns.add(target)
-            self._weapons = guns
-        return self._weapons
+        """The guns (hint.guns: what ammunition loads into by the native combine table)."""
+        import hint
+        return hint.guns()
 
     def box_lines(self, obs, d):
         """What lies in which box and where that box is opened; a warning when you carry no gun but a box
@@ -2089,10 +2098,23 @@ class Driver:
         stage = room[3]
         name = lambda n: f'RM_{stage}{n:02d}0'
         start = int(room[4:6])
+        if self._door_graph is None:
+            try:
+                import hint
+                self._door_graph = hint.door_graph()
+            except Exception:
+                self._door_graph = {}
+        def doors(here):
+            known = self.journal_rooms.get(name(here), {}).get('doors') or {}
+            if known:
+                return sorted(known.items())
+            # A room not visited yet: its active doors from the room file (same stage).
+            return sorted((z, dest) for z, st, dest, active in self._door_graph.get(name(here), [])
+                          if active and str(st) == stage)
         queue, seen = [(start, None)], {start}
         while queue:
             here, first = queue.pop(0)
-            for zone, dest in sorted((self.journal_rooms.get(name(here), {}).get('doors') or {}).items()):
+            for zone, dest in doors(here):
                 if dest in seen:
                     continue
                 seen.add(dest)
@@ -2226,6 +2248,7 @@ class Driver:
                     Driver._item_uses_cache = hint.all_item_uses()
                 if Driver._box_places_cache is None:
                     Driver._box_places_cache = hint.all_box_places()
+                hint.guns()
             except Exception:
                 pass
         threading.Thread(target=work, daemon=True).start()

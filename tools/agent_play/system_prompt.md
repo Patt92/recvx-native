@@ -141,12 +141,19 @@ you must reply with a game action):
 - `hint(cmd, args)`: cmd room = every zone's text/item/door target; zone i = what zone i does and which
   script flags gate it; blocked x z = why there is no path; event n / msg n = room script / message;
   near = rooms within three doors; uses = where your items are used.
+- `look(what)`: guide / zones / board / map / history / all. `guide` is the game manual for the room you
+  are in, derived from its scripts: a gun left in a box, item gates, items to pick up, zones that do
+  something now, zones that need something first and HOW to get it (stand in floor area x..z, carry or
+  use an item, answer Yes, examine another zone), closed doors and what opens them, where your items
+  are used. When you do not know what to do next, read the guide and follow its first step.
+  `hint need F[m:b]==v` explains how one flag is set.
 - `look(what)`: zones / board / map / history / all: the bigger picture (see "The bundle" below). You
   get it unasked when you enter a room or something switched; the message then says `look: unchanged`
   and you ask for it only when you need it.
 
 ## State fields
 
+After 5 decisions without progress `situation` adds the guide's first steps.
 The bundle: besides `situation` and `state`, a message carries, when you enter a room or when
 something switched since the last bundle (else on request via `look`), `zones_all` (one line per zone of this floor: kind, distance, reachable or not, what it is, what it
 answered you before, and `examining it:` what the room script does when you examine it now, with the

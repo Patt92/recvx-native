@@ -13,12 +13,15 @@ Reads only data/rooms/*.RDT, native/ and the semantic reference src/ps2/veronica
   hint.py rules [auto.json]           item gates of this room: what happens with / without carried items
   hint.py why n [auto.json]           why room event n runs: its start conditions, what sets those flags
                                       (items you carry), and what the event does (texts, voice, items)
+  hint.py guide [auto.json]           next steps in this room from its scripts: gates, items, zones that act,
+                                      zones that need something first (and how), closed doors, item uses
+  hint.py need F[m:b][==v] [auto.json] how the scripts of this room set that flag (conditions as steps)
   hint.py near [RM_xxxx|auto.json]    rooms within three doors (RDT door tables) and the items their files list
   hint.py uses [auto.json]            where the carried items are used (bhUseItemCheck sites of all rooms)
   hint.py op <hex|bhName>             where a script opcode is implemented (port and original reference)
   hint.py grep <regex>                bounded search in native/ and src/ps2/veronica/prog/ (max 40 hits)
 """
-import json, os, re, struct, subprocess, sys
+import functools, json, os, re, struct, subprocess, sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 sys.path.insert(0, os.path.join(ROOT, 'tools')); sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import walk_event_scripts as W
@@ -356,6 +359,26 @@ def item_types():
     return _ITEM_TYPES
 
 
+@functools.lru_cache(maxsize=1)
+def guns():
+    """Item ids that ammunition (itemdata type 0x2) loads into by the native combine table: the guns."""
+    from play import item_tables
+    types = item_types()
+    combidata, cmb = item_tables()
+    out = set()
+    for source, pos in enumerate(cmb):
+        if pos is None or pos < 0 or pos >= len(combidata) or not (source < len(types) and types[source] & 2):
+            continue
+        for k in range(combidata[pos]):
+            at = pos + 1 + 3 * k
+            target = combidata[at] if at < len(combidata) else -1
+            if at + 2 < len(combidata) and combidata[at + 2] & 255 <= 5 and 0 < target < 150 \
+                    and not types[target] & 2 and ITEMS.get(target):  # 150+: loaded-ammo variants
+                out.add(target)
+    return frozenset(out)
+
+
+@functools.lru_cache(maxsize=1)
 def all_item_uses():
     """Use sites of every item over all room scripts: {item id: [(room, zone or None)]}. Read once from the
     game data (data/rooms/*.RDT); a cache for the driver, no room knowledge in the code."""
@@ -376,6 +399,7 @@ def all_item_uses():
     return out
 
 
+@functools.lru_cache(maxsize=None)
 def room_static(name):
     """Zones and items of a room from its RDT alone (no runtime state): the same tables EventVm reads
     (room offset +0x1c/+0x9c zones of 36 bytes, +0x10/+0x90 items). For rooms the player has not
@@ -392,7 +416,13 @@ def room_static(name):
                           extent=list(struct.unpack_from('<3f', d, p + 20)), parameters=list(d[p + 32:p + 36])))
     icount, ioffset = u32(ro + 0x90), u32(ro + 16)
     items = [struct.unpack_from('<H', d, ioffset + i * 36 + 4)[0] for i in range(min(icount, 4096))]
-    return dict(room=room.name, zones=zones, items=items)
+    fcount, foffset = u32(ro + 0xa0), u32(ro + 0x20)  # floor areas (EventVm floors_, bhCheckFloorP)
+    floors = []
+    for i in range(min(fcount, 4096)):
+        p = foffset + i * 36
+        floors.append(dict(index=i, flags=d[p], type=d[p + 1], position=list(struct.unpack_from('<3f', d, p + 8)),
+                           extent=list(struct.unpack_from('<3f', d, p + 20))))
+    return dict(room=room.name, zones=zones, items=items, floors=floors)
 
 
 def door_graph():
@@ -503,6 +533,7 @@ def zone_box(room, i, state):
     return None
 
 
+@functools.lru_cache(maxsize=1)
 def all_box_places():
     """Every zone of the game that opens a security box, from the room files: {base: [(room, zone)]}.
     Normal item boxes are objects bound at runtime; their places are learnt while playing."""
@@ -686,6 +717,243 @@ def condition_holds(c, state):
     if c[0] == 0x11:
         return c[1] in inventory_ids(state)
     return None
+
+
+# --- guide: next steps derived from the scripts ----------------------------------------------------------
+def floor_area(room, n):
+    """'floor area n (x a..b, z c..d)' from the room file; the area bhCheckFloorP reports as values[16]."""
+    try:
+        f = room_static(room.name + '.RDT')['floors'][n]
+        x0, z0 = f['position'][0], f['position'][2]
+        return f"floor area {n} (x {min(x0, x0 + f['extent'][0]):.0f}..{max(x0, x0 + f['extent'][0]):.0f}, " \
+               f"z {min(z0, z0 + f['extent'][2]):.0f}..{max(z0, z0 + f['extent'][2]):.0f})"
+    except (IndexError, KeyError, OSError, struct.error):
+        return f'floor area {n}'
+
+
+def condition_text(room, c, state):
+    """A script condition as something to do or to have; (text, holds now: True/False/None)."""
+    op = c[0]
+    if op == 0x04 and c[1] == 10 and (c[2] & 0xff) == 23 and len(c) > 5:
+        return (f'examine zone {c[4]}' if c[5] == 0 else f'examine another zone than {c[4]}'), None
+    if op == 0x04 and c[1] == 10 and (c[2] & 0xff) == 22 and len(c) > 5:
+        return (('stand in ' if c[5] == 0 else 'stand outside ') + floor_area(room, c[4])), None
+    if op == 0x06 and c[1] == 20 and c[2] == 0:
+        return f'examine zone {c[3]}', None
+    if op == 0x07 and c[2] == 7:
+        return ('answer Yes' if c[4] == 0 else 'answer No'), None
+    if op == 0x10:
+        return f'use {ITEMS.get(c[1], c[1])} there (from the inventory)', None
+    if op == 0x11:
+        return f'carry {ITEMS.get(c[1], c[1])}', c[1] in inventory_ids(state)
+    if op == 0x04:
+        m, b = c[1], (c[2] | (c[3] << 8)) & 0x3ff
+        return f'F[{m}:{b}]=={1 - c[5]}', condition_holds(c, state)
+    return annotate(room, c, state).split('-> ', 1)[-1], condition_holds(c, state)
+
+
+def setters(room, m, b, value):
+    """Where flag F[m:b] gets `value`: [(script, offset, [(negated, [conditions])])], with the start
+    conditions of an event appended (the bhEvtOn that starts it)."""
+    out = []
+    for script in room.scripts():
+        cmds = list(room.commands(script))
+        for k, (o, d, c) in enumerate(cmds):
+            if c[0] == 0x05 and c[1] == m and ((c[2] | (c[3] << 8)) & 0x3ff) == b and 1 - c[5] == value:
+                conds = enclosing_conditions(cmds, k)
+                if script.startswith('event'):
+                    n = int(script[5:])
+                    for s2 in room.scripts():
+                        cmds2 = list(room.commands(s2))
+                        for k2, (o2, d2, c2) in enumerate(cmds2):
+                            if c2[0] == 0x14 and c2[3] == n:
+                                out.append((script, o, conds + enclosing_conditions(cmds2, k2)))
+                                break
+                        else:
+                            continue
+                        break
+                    else:
+                        out.append((script, o, conds))
+                else:
+                    out.append((script, o, conds))
+    return out
+
+
+def how_to_set(room, m, b, value, state, depth=0, seen=None):
+    """Plain steps that make F[m:b]==value, from the scripts (one line per way, at most three), the
+    conditions already true left out, flags in them resolved one level further."""
+    seen = seen if seen is not None else set()
+    if (m, b, value) in seen or depth > 2:
+        return []
+    seen.add((m, b, value))
+    found = setters(room, m, b, value)
+    # A flag the room's item gate sets while the player carries any of its items (bhPlItemCheck).
+    for g in item_gates(room, state):
+        if g['flag'] == f'F[{m}:{b}]':
+            carried = g.get('carried') or []
+            return [f"carry any of {len(g['items'])} checked items (such as {', '.join(g['items'][:4])})" +
+                    (f"; you carry {', '.join(carried)}" if carried else '; you carry none of them') if value
+                    else f"carry none of the {len(g['items'])} checked items" +
+                    (f"; you carry {', '.join(carried)}" if carried else '')]
+    # An item check (bhPlItemCheck around bhSet, one IF per item): "carry any of these items".
+    items = set()
+    for script, off, conds in found:
+        cs = [c for negated, group in conds for c in group if not negated]
+        if len(cs) == 1 and cs[0][0] == 0x11:
+            items.add(cs[0][1])
+    if items and len(items) == len(found):
+        have = [ITEMS.get(i, str(i)) for i in sorted(items & inventory_ids(state))]
+        names = [ITEMS.get(i, str(i)) for i in sorted(items)]
+        return [f"carry any of {len(names)} checked items (such as {', '.join(names[:4])})" +
+                (f"; you carry {', '.join(have)}" if have else '; you carry none of them')]
+    if not found and m == 10:
+        return [f'F[10:{b}] is a state the game sets itself (an action such as examining or using an item), '
+                'not a script of this room']
+    ways = []
+    for script, off, conds in found:
+        steps, impossible = [], False
+        for negated, cs in conds:
+            texts = [condition_text(room, c, state) for c in cs]
+            if negated:
+                if all(t is True for _, t in texts) and texts:
+                    impossible = True
+                    break
+                open_ = [x for x, t in texts if t is not True]
+                if open_:
+                    steps.append('not (' + ' and '.join(open_) + ')')
+                continue
+            for c, (x, t) in zip(cs, texts):
+                if t is True:
+                    continue
+                if c[0] == 0x04 and not (c[1] == 10 and (c[2] & 0xff) in (22, 23)) and t is False and depth < 2:
+                    m2, b2 = c[1], (c[2] | (c[3] << 8)) & 0x3ff
+                    sub = how_to_set(room, m2, b2, 1 - c[5], state, depth + 1, seen)
+                    steps.append(x + (' (' + sub[0] + ')' if sub else ''))
+                else:
+                    steps.append(x)
+        if impossible:
+            continue
+        line = ', '.join(dict.fromkeys(steps)) or 'happens by itself in this room'
+        if line not in ways:
+            ways.append(line)
+        if len(ways) == 3:
+            break
+    return ways
+
+
+def door_openers(room, i, state):
+    """How a switched-off door zone i gets switched on (bhEtcAtariSet on / bhEtcAtariSet2), as steps."""
+    ways = []
+    for script in room.scripts():
+        cmds = list(room.commands(script))
+        for k, (o, d, c) in enumerate(cmds):
+            if (c[0] == 0x0b and c[1] == i and c[2] == 0) or (c[0] == 0x25 and c[1] == i):
+                steps = []
+                for negated, cs in enclosing_conditions(cmds, k):
+                    for c2 in cs:
+                        x, t = condition_text(room, c2, state)
+                        if t is not True and not negated:
+                            steps.append(x)
+                line = ', '.join(dict.fromkeys(steps)) or 'a room event'
+                if script.startswith('event'):
+                    line += f' (event {script[5:]})'
+                if line not in ways:
+                    ways.append(line)
+    return ways[:3]
+
+
+def guide(state, done_zones=(), limit=12):
+    """The next steps in the current room, derived from its scripts and the state: weapon, item gates,
+    items to pick up, zones that act now, zones that need something first (with how to get it),
+    closed doors (with what opens them), carried items and where they are used. No room knowledge."""
+    room = Room(state['room'])
+    out = []
+    carried = inventory_ids(state)
+    # 0. A gun left in a security box (guns: what ammunition loads into, native combine table).
+    gun_ids = guns()
+    if not carried & gun_ids:
+        for base, key in ((192, 'security_items'), (224, 'security_items_2')):
+            boxed = [(v >> 16) & 255 for v in state.get(key) or [] if v and ((v >> 16) & 255) in gun_ids]
+            if boxed:
+                places = [f'{r} zone {z}' for r, z in all_box_places().get(base, [])]
+                out.append(f"You carry no gun: {', '.join(ITEMS.get(g, g) for g in boxed)} lies in security box "
+                           f"{'A' if base == 192 else 'B'} (opened at {', '.join(places) or '?'}); take it out first.")
+                break
+    # 1. Item gates of this room (a passage open only without / with listed items).
+    walls = {w['i']: w.get('fl', 0) & 1 for w in state.get('walls', [])}
+    for r in room_rules(room, state):
+        gate = sorted(int(w) for w in re.findall(r'w(\d+)', r['rule'].split(') opens')[0]))
+        shut = [w for w in gate if walls.get(w) == 1]
+        have = [ITEMS.get(i, str(i)) for i in carried if ITEMS.get(i) in set(r.get('all_items') or [])]
+        if shut and have:
+            out.append(f"Passage (walls {','.join('w%d' % w for w in gate)}) is closed while you carry "
+                       f"{', '.join(have)}: put them into an item box here, then go through.")
+        elif shut:
+            out.append(f"Passage (walls {','.join('w%d' % w for w in gate)}) is closed although you carry none of "
+                       "its items: something else keeps it shut (see the zones below).")
+    # 2. Items lying here.
+    zones = [a for a in state.get('interactions', []) if a.get('flags', 0) & 1]
+    for a in zones:
+        if a.get('type') == 4:
+            it = next((x for x in state.get('room_items', []) if x.get('index') == a['parameters'][0]), None)
+            if it and not it.get('inactive') and not it.get('hidden'):
+                out.append(f"Pick up {ITEMS.get(it['identity'], it['identity'])} (zone {a['index']}).")
+    # 3. Zones that act now / that need something first.
+    for a in zones:
+        i = a['index']
+        if a.get('type') != 3 or i in done_zones or not zone_reactions(room, i):
+            continue
+        box = zone_box(room, i, state)
+        eff = zone_effects(room, i, state, limit=260)
+        eff = re.sub(r'standing on floor == (\d+)', lambda m_: 'standing in ' + floor_area(room, int(m_.group(1))), eff)
+        if box:
+            rest = ' | '.join(p for p in eff.split(' | ') if 'opens walls' in p or 'gives ' in p)
+            if rest:
+                out.append(f"Zone {i} ({BOX_NAMES[box].split(' (')[0]}) also: {rest}")
+            continue
+        if not eff:
+            continue
+        if eff.startswith('nothing now; would need '):
+            needs = re.findall(r'F\[(\d+):(\d+)\]==(\d)', eff)
+            hows = []
+            for m, b, v in needs[:2]:
+                ways = how_to_set(room, int(m), int(b), int(v), state)
+                hows += [w for w in ways if w not in hows]
+            if hows:
+                out.append(f"Zone {i} does nothing yet; to make it work: " + ' OR '.join(hows[:2]) + '.')
+            else:
+                out.append(f"Zone {i} does nothing yet (needs {', '.join(f'F[{m}:{b}]=={v}' for m, b, v in needs)}; "
+                           "set elsewhere or by an event).")
+        elif any(k in eff for k in ('opens wall', 'gives ', 'starts event', 'zone i')):
+            out.append(f"Examine zone {i}: {eff}")
+    # 4. Doors that are switched off.
+    static = {z['index']: z for z in room_static(room.name + '.RDT')['zones']}
+    for i, z in sorted(static.items()):
+        if z['type'] != 0:
+            continue
+        live = next((a for a in state.get('interactions', []) if a['index'] == i), None)
+        if live and live.get('flags', 0) & 1:
+            continue
+        ways = door_openers(room, i, state)
+        out.append(f"Door zone {i} (to room {z['parameters'][1]}) is closed" +
+                   (': it opens when ' + ' OR '.join(ways) + '.' if ways else '.'))
+    # 5. Carried items and where the game uses them.
+    uses = all_item_uses()
+    listed = set()
+    for v in state.get('items', [])[1:]:
+        item = (v >> 16) & 255
+        if v and item in uses and item not in listed:
+            listed.add(item)
+            sites = []
+            for r, z, f in uses[item][:3]:
+                where = 'here' if r == room.name else r
+                if z is not None:
+                    where += f' zone {z}'
+                if f is not None:
+                    where += ' in ' + (floor_area(room, f) if r == room.name else f'floor area {f}')
+                sites.append(where)
+            out.append(f"{ITEMS.get(item, item)} is used at: {', '.join(sites)}.")
+    return out[:limit]
 
 
 def why(room, n, state, limit=1800):
@@ -878,6 +1146,15 @@ def main():
     elif c == 'rules':
         st = load_state(a[1] if len(a) > 1 else auto); print(json.dumps(room_rules(Room(st['room']), st), indent=1))
     elif c == 'msg': room = Room(a[2] if len(a) > 2 else load_state(auto)['room']); print(room.message(int(a[1])))
+    elif c == 'guide':
+        st = load_state(a[1] if len(a) > 1 else auto)
+        for line in guide(st):
+            print('- ' + line)
+    elif c == 'need':
+        st = load_state(a[2] if len(a) > 2 else auto)
+        m, b, v = re.match(r'F?\[?(\d+):(\d+)\]?(?:==(\d))?', a[1]).groups()
+        for w in how_to_set(Room(st['room']), int(m), int(b), int(v or 1), st):
+            print('- ' + w)
     elif c == 'near':
         st = load_state(a[2] if len(a) > 2 else auto) if not (len(a) > 1 and a[1].startswith('RM_')) else None
         room = a[1] if len(a) > 1 and a[1].startswith('RM_') else st['room']

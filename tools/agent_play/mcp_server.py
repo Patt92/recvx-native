@@ -39,6 +39,10 @@ TOOLS = [
     {'name': 'board', 'description': 'Open obstacles: item gates with wall state, facts about locks and needs, '
              'doors and items of every visited room.', 'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'map', 'description': 'The current room as text lines.', 'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'guide', 'description': 'The next steps of the current room, derived from its scripts: weapon left '
+             'in a box, item gates, items to pick up, zones that act now, zones that need something first and '
+             'how to get it, closed doors and what opens them, where carried items are used.',
+     'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'near', 'description': 'Rooms within three doors of the current room (door tables of the game '
              'data) with the items their files list, and whether they were visited in this run.',
      'inputSchema': {'type': 'object', 'properties': {}}},
@@ -108,6 +112,8 @@ class Server:
             return self.driver.board(view, self.play.read()[0])
         if name == 'map':
             return self.driver.room_map(self.play.read()[0])
+        if name == 'guide':
+            return self.driver.guide(self.view(), self.play.read()[0])
         if name == 'near':
             return self.driver.neighbour_lines(self.view())
         if name == 'memory':
