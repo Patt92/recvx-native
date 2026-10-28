@@ -411,6 +411,10 @@ class Driver:
         self.memory = self.load_memory()
         self._death_noted = False
         self.bundle_sig = None      # (room, progress) the bundle was last sent for
+        # The model's current goal ("take the handgun from security box A"), sent back with every
+        # request; asked for when missing or stale, so every action is chosen for a stated purpose.
+        self.goal, self.goal_age = '', 0
+        self.last_refusal, self.refusals = None, 0
         # Reflexes: the model needs seconds per decision, a zombie closes 10 m in that time. The driver
         # shakes off grabs and fights active enemies in sight within `engage` itself, then tells the
         # model what it did. Off with --no-reflexes.
@@ -624,6 +628,9 @@ class Driver:
         state, the room data and the last action show; no solutions."""
         d, _, _ = self.play.read()
         out = self.combat_lines_head(obs) if self.combat else []
+        first = self.priority(obs, d) if obs.get('room') else None
+        if first:
+            out.insert(0, first)
         where = f"You are in {obs.get('room')}"
         if obs.get('came_from'):
             where += f" (you came from {str(obs['came_from'])[:7]})"
@@ -882,6 +889,81 @@ class Driver:
         import hint
         return hint.guns()
 
+    def priority(self, obs, d):
+        """The one thing that must come first, from the state (or None): a gun in reach while unarmed.
+        - the open box holds a gun and you carry none: take it (and its ammo) now, rows named;
+        - you carry no gun, a box holds one and this room shows the box: go to that box;
+        - otherwise, unarmed with a gun in a box: get it before rooms with enemies.
+        Ammo for that gun is named too (native combine table: what loads into it)."""
+        import hint
+        carried = {row[1] for row in obs.get('inv', []) if len(row) > 1}
+        gun_ids = hint.guns()
+        if carried & gun_ids:
+            return None
+        names = hint.ITEMS
+        owner = obs.get('owner') or ''
+        if 'BOX' in owner.split():
+            rows = (obs.get('box') or {}).get('contents') or []
+            ids = {r: (v >> 16) & 255 for r, (v, _) in enumerate(d.get('box_items') or []) if v}
+            guns = [r for r, i in ids.items() if i in gun_ids]
+            if guns:
+                gun = ids[guns[0]]
+                ammo = [r for r, i in ids.items() if self.loads_into(i, gun)]
+                if (obs.get('box') or {}).get('mode') == 'list':
+                    return ('PRIORITY: this box holds your gun. Press cancel once (back to the inventory side), '
+                            f'then {{"op":"box","take":{guns[0]}}}' + (f' and {{"op":"box","take":{ammo[0]}}}' if ammo else '') + '.')
+                return (f'PRIORITY: this box holds your gun ({names.get(gun, gun)}, row {guns[0]}). Take it NOW: '
+                        f'{{"op":"box","take":{guns[0]}}}' + (f', then its ammo {{"op":"box","take":{ammo[0]}}}' if ammo else '') +
+                        '. Then close the box with cancel and equip it.')
+            return None
+        stored = self.box_contents(d)
+        for base, rows in sorted(stored.items()):
+            boxed = [n for i, n, _ in rows if i in gun_ids]
+            if not boxed:
+                continue
+            room = (obs.get('room') or '')[:7]
+            here = [p for p in self.box_places(base, room, d) if p.endswith('of this room')]
+            if here:
+                return (f'PRIORITY: you carry no gun; {boxed[0]} lies in {self.box_name(base)} at {here[0]}. '
+                        'Open that box and take it before anything else.')
+            return (f'PRIORITY: you carry no gun; {boxed[0]} lies in {self.box_name(base)}. Do not enter rooms '
+                    'with enemies before you have it.')
+        return None
+
+    def gun_reflex(self, obs):
+        """At an open box that holds a gun while unarmed: take the gun, then its ammo, without asking.
+        Only inside an open box on the inventory side, so it never walks anywhere on its own."""
+        if not self.reflexes or 'BOX' not in (obs.get('owner') or '').split():
+            return None
+        box = obs.get('box') or {}
+        if box.get('mode') != 'inventory' or not (obs.get('space') is None or obs['space'][0] < obs['space'][1]):
+            return None
+        import hint
+        d = self.play.read()[0]
+        gun_ids = hint.guns()
+        carried = {(v >> 16) & 255 for v in d.get('items', [])[1:] if v}
+        ids = {r: (v >> 16) & 255 for r, (v, _) in enumerate(d.get('box_items') or []) if v}
+        if not carried & gun_ids:
+            guns = [r for r, i in ids.items() if i in gun_ids]
+            return dict(op='box', take=guns[0]) if guns else None
+        gun = next(i for i in carried if i in gun_ids)
+        if any(self.loads_into(i, gun) for i in carried):
+            return None
+        ammo = [r for r, i in ids.items() if self.loads_into(i, gun)]
+        return dict(op='box', take=ammo[0]) if ammo else None
+
+    def loads_into(self, ammo, gun):
+        """True when item `ammo` loads into `gun` by the native combine table."""
+        try:
+            combidata, cmb = item_tables()
+            pos = cmb[ammo] if ammo < len(cmb) else -1
+            if pos is None or pos < 0:
+                return False
+            return any(combidata[pos + 1 + 3 * k] == gun and combidata[pos + 3 + 3 * k] & 255 <= 5
+                       for k in range(combidata[pos]) if pos + 3 + 3 * k < len(combidata))
+        except Exception:
+            return False
+
     def box_lines(self, obs, d):
         """What lies in which box and where that box is opened; a warning when you carry no gun but a box
         holds one. From the live state, the room script and what this run saw."""
@@ -980,7 +1062,7 @@ class Driver:
         has_gun = any(len(r) > 1 and r[1] == 9 for r in obs.get('inv', []))
         if not eq:
             verdict = 'COMBAT NOT POSSIBLE: no weapon equipped' + (' (equip the handgun first)' if has_gun else
-                                                                   '; avoid, run past, leave through a door')
+                                                                   '; get your gun first (see PRIORITY), avoid enemies, leave')
         elif not active:
             verdict = 'no active enemy near'
         elif hp < 40 and not heals:
@@ -1160,6 +1242,11 @@ class Driver:
             payload['tips'] = tips
         if self.note:
             payload['note'] = self.note
+        if self.goal:
+            payload['your_goal'] = self.goal + (f' (set {self.goal_age} decisions ago; still right?)'
+                                                if self.goal_age >= 8 else '')
+        else:
+            payload['your_goal'] = 'none yet: add "goal" to your reply (what you want to achieve next and why)'
         user = {'role': 'user', 'content': json.dumps(payload, separators=(',', ':'), ensure_ascii=False)}
         turn, usage, llm_ms = [], {}, 0.0
         lookups, budget, empty_cuts = 0, None, 0
@@ -1260,7 +1347,8 @@ class Driver:
 
     # Earlier decisions keep the sentences and the feedback, not the numbers: a decision's user
     # message shrinks from ~2.5k to ~0.7k characters, so eight of them stay under the system prompt.
-    HISTORY_KEEP = ('situation', 'result', 'error', 'plan_broken', 'expect_failed', 'macro_ended', 'alert')
+    HISTORY_KEEP = ('situation', 'result', 'error', 'plan_broken', 'expect_failed', 'macro_ended', 'alert', 'priority',
+                    'instead')
 
     def remember(self, user, action):
         # Tool exchanges stay out of the history; only the decision and its state are kept. The bundle
@@ -1429,6 +1517,8 @@ class Driver:
         d, _, _ = self.play.read()
         if any(a['index'] == action.get('zone') and a.get('type') in (0, 1, 2) for a in d.get('interactions', [])):
             return None
+        if v and 'item box' in (v.get('got') or ''):
+            return None  # boxes are opened again and again by design (store, take)
         limit = 1 if action.get('zone') in self.info_zones() else self.repeat_limit
         if not v or v['n'] < limit or v['sig'] != self.progress():
             return None
@@ -2331,6 +2421,8 @@ class Driver:
                 self.video_skipped = True
             elif passive(obs) and self.idle_waits < 4:
                 action, entry = {'op': 'wait'}, dict(auto=True)
+            elif not self.plan and (grab_gun := self.gun_reflex(obs)) is not None:
+                action, entry = grab_gun, dict(auto=True, reflex=True)
             elif not self.plan and (reflex := self.reflex(obs)) is not None:
                 action, entry = reflex, dict(auto=True, reflex=True)
                 self.prefetched = None  # decided for a calmer moment
@@ -2353,6 +2445,12 @@ class Driver:
                 note = action.pop('note', None)
                 if isinstance(note, str) and note.strip():
                     self.note = note.strip()[:NOTE_MAX]
+                goal = action.pop('goal', None)
+                if isinstance(goal, str) and goal.strip():
+                    self.goal = ' '.join(goal.split())[:160]
+                    self.goal_age = 0
+                elif not entry.get('auto') and user is not None:
+                    self.goal_age += 1
                 if user is not None:
                     self.remember(user, action)
             expect = action.pop('expect', None) if isinstance(action, dict) else None
@@ -2380,6 +2478,20 @@ class Driver:
                 if denied:
                     self.record_visit(room_before, fixed.get('zone'), progress_before,
                                       dict(owner='FREE', dialog=None), 'unreachable')
+                # The same refusal again: a refusal alone did not change the model's mind (live: 52 and
+                # 46 identical refusals in a row). Name what to do instead, from the guide.
+                key = (fixed.get('op'), fixed.get('zone'), blocked[:40])
+                self.refusals = self.refusals + 1 if key == self.last_refusal else 1
+                self.last_refusal = key
+                if self.refusals >= 2:
+                    try:
+                        other = [l for l in self.guide(obs, self.play.read()[0])
+                                 if f"zone {fixed.get('zone')} " not in l.lower()][:2]
+                    except Exception:
+                        other = []
+                    feedback['instead'] = (f'refused {self.refusals} times in a row: stop sending it. ' +
+                                           ('Do this instead: ' + ' | '.join(other) if other else
+                                            'Take another door or call look(guide).'))
             else:
                 if fixed.get('zone') != action.get('zone'):
                     entry['zone_corrected'] = [action.get('zone'), fixed.get('zone')]

@@ -57,7 +57,12 @@ there is no reachable standing point from your area, do not invent or move to a 
 
 ## Reply format
 
-{"op": "...", ...action fields..., "expect": {...optional...}, "note": "optional, at most 80 characters"}
+{"op": "...", ...action fields..., "goal": "what you want to achieve and why", "expect": {...optional...}, "note": "optional, at most 80 characters"}
+
+Think before you act: what is my goal right now, what blocks it, which action brings me closer? Put
+that goal into `goal` (one sentence) whenever you set or change it; it is sent back to you as
+`your_goal` with every message. Each action must serve that goal. A line starting with PRIORITY in
+`situation` overrides your goal: do that first (e.g. take your gun out of a box before anything else).
 
 or a plan of several steps that the driver runs one after another without asking you again, as long
 as each step ends as you expected:

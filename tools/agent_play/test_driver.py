@@ -841,15 +841,20 @@ class DriverTests(unittest.TestCase):
             text(dict(op='wait', ticks=2, expect=dict(room='RM_0040'))),   # "the door": judged after the scene
             text(dict(op='wait', ticks=4)),                                  # prefetched during the scene
             text(dict(op='wait', ticks=5))])
+        # The scene starts with the first control line (the door step) instead of a fixed delay, so the
+        # step always ends while the game is busy, however fast the machine is.
         def scene():
-            time.sleep(.05)
+            limit = time.monotonic() + 3
+            while not self.controls() and time.monotonic() < limit:
+                time.sleep(.005)
             self.d['cinematic'] = True
             time.sleep(.6)
             self.d['room'] = 'RM_0040.RDX'
             self.d['cinematic'] = False
         thread = threading.Thread(target=scene); thread.start()
         with self.ticking():
-            drv.run(steps=5)   # the door wait, three scene waits, then the prefetched decision
+            while drv.steps < 12 and not any('"ticks":4' in l for l in drv.history_lines):
+                drv.run(steps=drv.steps + 1)
         thread.join()
         self.assertEqual(len(client.requests), 2)
         self.assertIn('"ticks":4', drv.history_lines[-1])
@@ -959,7 +964,7 @@ class DriverTests(unittest.TestCase):
         base = dict(room='RM_TEST', enemies=[dict(i=0, hp=60, d=7.1, state='active', sight=True)])
         lines = drv.combat_lines(dict(base, inv=[[2, 145, 1, 'Manual']], hp=100))
         self.assertIn('#0 Zombie Dog hp 60 at 7.1 m, active', lines[0])
-        self.assertTrue(lines[1].startswith('COMBAT NOT POSSIBLE: no weapon equipped; avoid'))
+        self.assertTrue(lines[1].startswith('COMBAT NOT POSSIBLE: no weapon equipped; get your gun first'))
         lines = drv.combat_lines(dict(base, inv=[[2, 9, 15, 'Handgun']], hp=100))
         self.assertIn('(equip the handgun first)', lines[1])
         lines = drv.combat_lines(dict(base, inv=[[1, 9, 15, 'Handgun']], equipped=['Handgun', 15], hp=100, heal=[[3, 'Green Herb']]))
@@ -1219,6 +1224,75 @@ class DriverTests(unittest.TestCase):
         answered = client.requests[1][0][-1]
         self.assertEqual(answered['role'], 'tool')
         self.assertIn('Examine zone 4', answered['content'])
+
+    def test_priority_and_gun_reflex_take_the_gun_out_of_an_open_box(self):
+        drv, _ = self.driver([])
+        rows = [[(55 << 16) | 1, 'Lighter'], [(12 << 16) | 30, 'Handgun Bullets'], [(8 << 16), 'Combat Knife'],
+                [(9 << 16) | 15, 'Handgun']] + [[0, '']] * 28
+        self.d.update(box_open=True, box_base=192, box_items=rows, items=[0, 0, (145 << 16) | 1],
+                      security_items=[r[0] for r in rows])
+        self.write(self.d)
+        obs = dict(room='RM_0090', owner='INVENTORY BOX', inv=[[2, 145, 1, 'Playing Manual']],
+                   box=dict(mode='inventory', contents=[[3, 'Handgun', 15]]))
+        line = drv.priority(obs, self.d)
+        self.assertIn('Take it NOW: {"op":"box","take":3}, then its ammo {"op":"box","take":1}', line)
+        self.assertEqual(drv.gun_reflex(obs), dict(op='box', take=3))
+        self.assertIn("cancel once", drv.priority(dict(obs, box=dict(mode='list')), self.d))
+        self.assertIsNone(drv.gun_reflex(dict(obs, box=dict(mode='list'))))
+        # Gun taken: the ammo next; both: nothing.
+        self.d['items'] = [0, 0, (145 << 16) | 1, (9 << 16) | 15]
+        self.write(self.d)
+        self.assertEqual(drv.gun_reflex(obs), dict(op='box', take=1))
+        self.assertIsNone(drv.priority(dict(obs, inv=[[3, 9, 15, 'Handgun']]), self.d))
+        self.d['items'] = [0, 0, (145 << 16) | 1, (9 << 16) | 15, (12 << 16) | 30]
+        self.write(self.d)
+        self.assertIsNone(drv.gun_reflex(obs))
+        # Away from the box: where to go.
+        Driver._box_places_cache = {192: [('RM_0090', 11)]}
+        self.d.update(box_open=False, items=[0, 0, (145 << 16) | 1])
+        self.write(self.d)
+        free = dict(obs, owner='FREE')
+        self.assertIn('lies in security box A at zone 11 of this room', drv.priority(free, self.d))
+        self.assertIn('Do not enter rooms with enemies', drv.priority(dict(free, room='RM_0080'), self.d))
+        self.assertTrue(drv.situation(dict(free, at=[0, 0], hp=100))[0].startswith('PRIORITY'))
+
+    def test_goal_is_kept_sent_back_and_asked_for(self):
+        drv, client = self.driver([text(dict(op='wait', ticks=2, goal='take the handgun from box A')),
+                                   text(dict(op='wait', ticks=2))])
+        with self.ticking():
+            drv.run(steps=2)
+        first = json.loads(client.requests[0][0][-1]['content'])
+        self.assertIn('none yet', first['your_goal'])
+        second = json.loads(client.requests[1][0][-1]['content'])
+        self.assertEqual(second['your_goal'], 'take the handgun from box A')
+        self.assertNotIn('goal', json.loads(drv.history[1]['content']))
+
+    def test_an_item_box_is_never_refused_as_a_repeat(self):
+        drv, _ = self.driver([])
+        self.d['interactions'] = [dict(index=11, flags=1, floor=0, type=3, attribute=0x9, position=[5, 0, 5],
+                                       extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
+        self.write(self.d)
+        drv.zone_log('RM_TEST')[11] = dict(n=9, got='opened the item box', sig=drv.progress())
+        self.assertIsNone(drv.repeat_blocked(dict(op='interact', zone=11), dict(room='RM_TEST')))
+
+    def test_a_repeated_refusal_names_what_to_do_instead(self):
+        import hint
+        from unittest import mock
+        self.d['interactions'] = [dict(index=3, flags=1, floor=0, type=3, attribute=0x9, position=[5, 0, 5],
+                                       extent=[4, 0, 4], parameters=[0, 0, 0, 0])]
+        self.write(self.d)
+        same = dict(op='interact', zone=3, to=[1.0, 1.0], face=[7.0, 7.0])
+        drv, client = self.driver([text(same), text(same), text(dict(op='wait', ticks=2))])
+        drv.zone_log('RM_TEST')[3] = dict(n=5, got='nothing', sig=drv.progress())
+        with mock.patch.object(hint, 'guide', lambda d, done_zones=(): ['Zone 3 does nothing yet', 'Pick up Handgun (zone 9).']):
+            with self.ticking():
+                drv.run(steps=3)
+        second = json.loads(client.requests[1][0][-1]['content'])
+        self.assertNotIn('instead', second)
+        third = json.loads(client.requests[2][0][-1]['content'])
+        self.assertIn('refused 2 times in a row', third['instead'])
+        self.assertIn('Pick up Handgun (zone 9).', third['instead'])
+        self.assertNotIn('Zone 3 does nothing', third['instead'])
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change
