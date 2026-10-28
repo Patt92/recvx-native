@@ -66,6 +66,9 @@ as each step ends as you expected:
  {"op":"press","key":"confirm","expect":{"walls_open":[56,73]}},
  {"op":"interact","zone":13,"to":[70.0,4.0],"face":[70.0,-0.5],"expect":{"room":"RM_0040"}}],"note":"switch, then north door"}
 
+Stairs and ladders: interact with their `go` point; the result `floor` (with `floor` [from, to]) means
+you climbed to another floor. Zones of the other floor are reachable from there, not from here.
+
 `expect` says how a step must end; the driver checks it against the game and stops the plan at the
 first step that ends differently (you get `plan_broken` with the reason). Fields, all optional: result
 (or a list), not_result (list), room ("RM_0040"), owner (screen: "INVENTORY", "BOX", "DIALOG"),
@@ -109,7 +112,7 @@ current room and the open puzzle in it ("door i2 locked: need key item; items i3
 | interact | zone, to [x,z], face [x,z], run (bool, default true), danger (bool) | walk to a zone, face it, confirm (items, doors, texts, stairs) |
 | move | to [x,z], face [x,z] optional, run, danger (bool, default true) | walk/run somewhere |
 | fire | shots 1-8, low (bool), target (enemy i) optional | handgun: turns to nearest/target enemy, aims, fires |
-| shake | presses 1-30, then {"op":"move","to":[x,z]} optional | only when owner is GRAB: break free, optionally run away at once |
+| shake | presses 1-30, then {"op":"move","to":[x,z]} optional | only when owner is GRAB: break free, optionally run away at once (a blocked escape is dropped, the shake still runs) |
 | keys | keys: list of names, e.g. ["forward","run"] (forward, back, left, right, run, aim, attack), ticks 1-90 | raw pad, rarely needed (turning on stairs) |
 | run | mode auto|on, dist 4-60 | auto: game pauses at your decisions when an enemy is within dist |
 | type | text (A-Z, 0-9, max 15), enter (bool, default true) | computer keyboard: types the word and Enter |
@@ -124,12 +127,16 @@ Function tools (use them instead of guessing; they cost no game time; at most 3 
 you must reply with a game action):
 - `zone(i)`: exact bounds of zone i and up to 3 ready `approach` points {to, face}. Use one for interact.
 - `hint(cmd, args)`: cmd room = every zone's text/item/door target; zone i = what zone i does and which
-  script flags gate it; blocked x z = why there is no path; event n / msg n = room script / message.
+  script flags gate it; blocked x z = why there is no path; event n / msg n = room script / message;
+  near = rooms within three doors; uses = where your items are used.
+- `look(what)`: zones / board / map / history / all: the bigger picture (see "The bundle" below). You
+  get it unasked when you enter a room or something switched; the message then says `look: unchanged`
+  and you ask for it only when you need it.
 
 ## State fields
 
-The bundle: besides `situation` and `state`, while you walk freely every message carries
-`zones_all` (one line per zone of this floor: kind, distance, reachable or not, what it is, what it
+The bundle: besides `situation` and `state`, a message carries, when you enter a room or when
+something switched since the last bundle (else on request via `look`), `zones_all` (one line per zone of this floor: kind, distance, reachable or not, what it is, what it
 answered you before, and `examining it:` what the room script does when you examine it now, with the
 conditions still open), `board` (the item gates with their wall state, facts about locks and needs, the
 doors of every room you visited and the items still lying there) and `map` (the room as text: # wall,

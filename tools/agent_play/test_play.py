@@ -212,6 +212,31 @@ class PlayTests(unittest.TestCase):
         self.assertEqual(commands[-1][0], 8)
         self.assertTrue(commands[-1][1].startswith('route ') and 'danger' not in commands[-1][1])
 
+    def test_shake_runs_even_when_its_escape_is_unusable(self):
+        # Live: 44 shakes were refused for an extra "danger" in the escape and 19 for a blocked target,
+        # each a lost decision while grabbed.
+        self.d.update(cinematic=True, player_work=dict(mode=[4, 0, 0, 0]))
+        commands = self.play.compile(self.d, dict(op='shake', presses=2, then=dict(op='move', to=[-12, -12], danger=False)))
+        self.assertTrue(commands[-1][1].startswith('route '))
+        self.assertIsNone(self.play.shake_note)
+        commands = self.play.compile(self.d, dict(op='shake', presses=2, then=dict(op='move', to=[90, 90])))
+        self.assertEqual([c[1] for c in commands], ['keys left', 'keys right', 'keys none'])
+        self.assertIn('shook free without the escape move', self.play.shake_note)
+        commands = self.play.compile(self.d, dict(op='shake', presses=2, then=dict(op='fire', shots=2)))
+        self.assertEqual(commands[-1][1], 'keys none')
+
+    def test_interact_on_stairs_reports_the_floor_change(self):
+        stairs = dict(index=3, flags=1, floor=0, type=1, attribute=0, position=[-2, 0, -6], extent=[4, 0, 4],
+                      parameters=[0, 1, 4, 255])
+        self.d['interactions'] = [stairs]
+        self.write(self.d)
+        up = deepcopy(self.d); up['actor'] = [0, 3.0, -4]
+        top = deepcopy(self.d); top['actor'] = [0, 8.0, -8]; top['player_floor'] = 2
+        with self.runtime([(0, self.d), (.2, up), (.5, top)]):
+            out = self.play.act(dict(op='interact', zone=3, to=[0.0, -1.0], face=[0.0, -5.0]), 2)
+        self.assertEqual(out['result'], 'floor')
+        self.assertEqual(out['floor'], [0, 2])
+
     def test_door_approach_prefers_centre_of_door_face(self):
         # Door zone in front of a wall at x >= 44; centre line z = 69.5.
         self.d['walls'] = [dict(i=0, fl=1, ty=0, attr=0, floor=0, p=[44, 0, 40], e=[2, 30, 60]),

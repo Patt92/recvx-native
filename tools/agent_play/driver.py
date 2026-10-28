@@ -55,7 +55,16 @@ TOOLS = [
         'parameters': {'type': 'object', 'properties': {
             'cmd': {'type': 'string', 'enum': list(HINT_CMDS)},
             'args': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['cmd']}}},
+    {'type': 'function', 'function': {
+        'name': 'look',
+        'description': 'The bigger picture, on demand: zones = every zone of this floor with what examining it '
+                       'does now; board = open gates, locks, where your items are used, rooms within three '
+                       'doors, memory of earlier runs; map = the room as text; history = your last actions '
+                       'with their effect; all = everything.',
+        'parameters': {'type': 'object', 'properties': {
+            'what': {'type': 'string', 'enum': ['zones', 'board', 'map', 'history', 'all']}}, 'required': ['what']}}},
 ]
+LOOKS = ('zones', 'board', 'map', 'history', 'all')
 
 
 class Client:
@@ -229,7 +238,7 @@ def passive(obs):
 
 # Results that show what a zone answers (text, choice, menu, terminal, another room, a new owner); a
 # danger/grab/damage/stall/interruption/hold stopped the player before the zone could answer.
-ANSWERS = ('dialog', 'choice', 'menu', 'room', 'computer', 'owner')
+ANSWERS = ('dialog', 'choice', 'menu', 'room', 'computer', 'owner', 'floor')
 
 
 def answered(obs, result):
@@ -295,6 +304,8 @@ def describe_change(before, after, action, result, names):
         parts.append('zones switched off: ' + ', '.join(map(str, off)))
     if before.get('room') != after.get('room'):
         parts.append(f"room changed {str(before.get('room'))[:7]} -> {str(after.get('room'))[:7]}")
+    elif before.get('player_floor', 0) != after.get('player_floor', 0):
+        parts.append(f"floor changed {before.get('player_floor', 0)} -> {after.get('player_floor', 0)} (stairs/ladder)")
     if before.get('hp') is not None and after.get('hp') is not None and before['hp'] != after['hp']:
         parts.append(f"HP {before['hp']} -> {after['hp']}")
     what = '; '.join(parts) if parts else 'nothing in inventory, box, walls, zones or room changed'
@@ -358,10 +369,12 @@ class Driver:
 
     def __init__(self, play, client, *, tools=True, window=8, seconds=6.0, max_tool_calls=3, log=None,
                  out=sys.stdout, save_rooms=3, repeat_limit=2, skip_videos=False, alert_after=20,
-                 context_chars=0):
+                 context_chars=0, context_tokens=0):
         self.play, self.client, self.use_tools = play, client, tools
         self.window, self.seconds, self.max_tool_calls = window, seconds, max_tool_calls
-        self.context_chars = int(context_chars or 0)  # request size cap in characters (~4 per token)
+        self.context_chars = int(context_chars or 0)    # request size cap in characters
+        self.context_tokens = int(context_tokens or 0)  # request size cap in tokens (preferred)
+        self.chars_per_token = None                     # measured from the endpoint's usage
         self.system = PROMPT.read_text()
         self.history = []          # [user, assistant] pairs of earlier decisions, append-only
         self.note = ''
@@ -396,6 +409,7 @@ class Driver:
         self.memory_path = (Path(log).parent / 'memory.json') if log else None
         self.memory = self.load_memory()
         self._death_noted = False
+        self.bundle_sig = None      # (room, progress) the bundle was last sent for
         self._item_uses = None      # item id -> [(room, zone, floor)] from all room scripts (class cache)
         # Run journal: what happened in this run, shown with every decision (no game knowledge, only
         # what the game itself showed): per room the zones read and their answers, open items/doors,
@@ -433,6 +447,8 @@ class Driver:
     # --- tools -----------------------------------------------------------------------------------------
     def tool(self, name, args):
         try:
+            if name == 'look':
+                return json.dumps(self.look(args.get('what') or 'all'), separators=(',', ':'), ensure_ascii=False)
             if name == 'zone':
                 return json.dumps(self.play.describe_zone(int(args['i'])), separators=(',', ':'))
             if name == 'hint':
@@ -454,16 +470,27 @@ class Driver:
         return 'error: unknown tool ' + str(name)
 
     # --- one model decision ----------------------------------------------------------------------------
+    def context_limit_chars(self):
+        """The request cap in characters: --context-tokens converted with the characters per token this
+        endpoint really counts (prompt_chars / prompt_tokens of the last answers, ~2.5 for this JSON;
+        3.0 until measured), or --context-chars as given. 0 = no cap."""
+        if self.context_tokens:
+            return int(self.context_tokens * (self.chars_per_token or 3.0))
+        return self.context_chars
+
     def messages(self, user):
-        """System prompt, the kept decisions, the current request; the oldest decisions are dropped in
-        user+assistant pairs until the whole request fits `context_chars` (RECVX_LLM_CONTEXT_CHARS or
-        --context-chars, 0 = no limit). The newest request is never cut."""
+        """System prompt, the kept decisions, the current request. Over the cap the oldest decisions are
+        dropped in one block down to half the room left for history, so the cached prefix stays the
+        same for the following requests instead of changing every time. The newest request is never cut."""
         history = self.history
-        if self.context_chars:
+        limit = self.context_limit_chars()
+        if limit:
             fixed = len(self.system) + len(user.get('content') or '')
-            while history and fixed + sum(len(m.get('content') or '') for m in history) > self.context_chars:
-                history = history[2:]
-            if history is not self.history:
+            size = lambda h: sum(len(m.get('content') or '') for m in h)
+            if history and fixed + size(history) > limit:
+                room = max(0, limit - fixed) // 2
+                while history and size(history) > room:
+                    history = history[2:]
                 self.history = history  # cut for good: the cached prefix stays stable from here on
         return [{'role': 'system', 'content': self.system}] + history + [user]
 
@@ -698,6 +725,24 @@ class Driver:
             self._map_key, self._map = key, lines
         return self._map
 
+    def look(self, what='all', obs=None):
+        """The bundle or one part of it, from the live state (tool `look`, bundle on room/progress change)."""
+        d, _, _ = self.play.read()
+        if obs is None:
+            obs = self.mark_seen(self.with_approaches(self.mark_way_back(self.play.observe())))
+        out = {}
+        if what in ('zones', 'all'):
+            out['zones_all'] = self.zones_all(obs, d) if obs.get('owner') == 'FREE' else ['zones: only while you walk freely']
+        if what in ('board', 'all'):
+            out['board'] = self.board(obs, d)
+        if what in ('map', 'all'):
+            out['map'] = self.room_map(d)
+        if what in ('history', 'all'):
+            out['history'] = self.history_lines[-10:]
+        if not out:
+            out['error'] = 'what must be one of ' + ', '.join(LOOKS)
+        return out
+
     def zones_all(self, obs, d):
         """One line per active zone on the player's floor: kind, distance, reachability, what it is, what
         it answered before, what examining it does now."""
@@ -883,7 +928,7 @@ class Driver:
         what = change.split('Changed: ', 1)[1].rstrip('.')
         if what.startswith('nothing'):
             return
-        if any(k in what for k in ('walls opened', 'zones switched', 'now in your inventory', 'room changed')):
+        if any(k in what for k in ('walls opened', 'zones switched', 'now in your inventory', 'room changed', 'floor changed')):
             self.remember_outcome('worked', f'{room}: {action_text(action)} -> {what}')
 
     def note_death(self, obs):
@@ -947,16 +992,19 @@ class Driver:
             self.remember_texts(obs)
         payload = dict(situation=self.situation(obs))
         payload.update(feedback, state=trim(obs))
-        if obs.get('owner') == 'FREE' and not obs.get('assumed_unknown_room'):
+        # The bundle (zones, board, map, history) is offered, not pushed: it goes along only when the
+        # room was entered or something switched since it was last sent; otherwise the model asks with
+        # the look tool. Prefill of a 20k-token request cost 12-16 s per decision on a cloud endpoint.
+        if obs.get('owner') == 'FREE' and not obs.get('assumed_unknown_room') and not prefetch:
             try:
-                d, _, _ = self.play.read()
-                payload['zones_all'] = self.zones_all(obs, d)
-                payload['board'] = self.board(obs, d)
-                payload['map'] = self.room_map(d)
+                sig = ((obs.get('room') or '')[:7], self.progress())
+                if sig != self.bundle_sig:
+                    self.bundle_sig = sig
+                    payload.update(self.look('all', obs))
+                else:
+                    payload['look'] = 'unchanged since the bundle you got; call look(zones|board|map|history) for it'
             except (PlayError, OSError, ValueError, KeyError):
                 pass
-        if self.history_lines:
-            payload['history'] = self.history_lines[-10:]
         if self.texts:
             payload['recent_texts'] = self.texts[-4:]
         payload['journal'] = self.journal()
@@ -990,6 +1038,9 @@ class Driver:
             self.last_prompt_chars = sum(len(m.get('content') or '') for m in request)
             message, u = self.client.complete(request, TOOLS if self.use_tools and not final else None, budget)
             llm_ms += (time.monotonic() - started) * 1000
+            if isinstance(u.get('prompt_tokens'), int) and u['prompt_tokens'] > 1000:
+                ratio = self.last_prompt_chars / u['prompt_tokens']
+                self.chars_per_token = ratio if self.chars_per_token is None else .8 * self.chars_per_token + .2 * ratio
             for k, v in u.items():
                 if isinstance(v, (int, float)):
                     usage[k] = usage.get(k, 0) + v
@@ -1052,7 +1103,9 @@ class Driver:
                     if k not in ('op', 'note', 'cmd', 'args'):
                         rest += [str(x) for x in v] if isinstance(v, list) else [str(v)]
                 action = dict(op='hint', cmd=action['op'], args=action.get('args') or rest)
-            if action['op'] in ('zone', 'hint'):
+            if action['op'] == 'look' and 'what' not in action:
+                action['what'] = 'all'
+            if action['op'] in ('zone', 'hint', 'look'):
                 # A lookup written as an action (with or without function calling) is answered, not dispatched.
                 args = {k: v for k, v in action.items() if k not in ('op', 'note')}
                 if action['op'] == 'hint' and 'args' not in args:
@@ -1068,7 +1121,9 @@ class Driver:
         # No usable action: take the owner's safe default and report it back instead of stopping the run.
         return user, dict(default_action(obs), no_action=True), usage, llm_ms
 
-    HISTORY_DROP = ('zones_all', 'board', 'map', 'history', 'journal', 'room_rules')
+    # Earlier decisions keep the sentences and the feedback, not the numbers: a decision's user
+    # message shrinks from ~2.5k to ~0.7k characters, so eight of them stay under the system prompt.
+    HISTORY_KEEP = ('situation', 'result', 'error', 'plan_broken', 'expect_failed', 'macro_ended', 'alert')
 
     def remember(self, user, action):
         # Tool exchanges stay out of the history; only the decision and its state are kept. The bundle
@@ -1077,7 +1132,7 @@ class Driver:
         try:
             payload = json.loads(user['content'])
             if isinstance(payload, dict):
-                kept = {k: v for k, v in payload.items() if k not in self.HISTORY_DROP}
+                kept = {k: v for k, v in payload.items() if k in self.HISTORY_KEEP}
                 user = dict(user, content=json.dumps(kept, separators=(',', ':'), ensure_ascii=False))
         except (ValueError, TypeError, KeyError):
             pass
@@ -1097,7 +1152,7 @@ class Driver:
             obs = self.play.act(action, self.seconds)
             feedback = dict(result=obs.pop('result', 'running'))
             # Outcome details of the action (shots/hits, hp lost, a resent route, healed hp, rounds, snapshot).
-            for key in ('fire', 'damage', 'retried', 'healed', 'rounds', 'snapshot_room', 'info'):
+            for key in ('fire', 'damage', 'retried', 'healed', 'rounds', 'snapshot_room', 'info', 'floor'):
                 if key in obs:
                     feedback[key] = obs.pop(key)
         except (TypeError, ValueError, KeyError, IndexError) as e:
@@ -1154,6 +1209,8 @@ class Driver:
             got = 'opened the item box'
         if not got and 'DOOR' in obs.get('owner', '').split():
             got = 'went through the door'
+        if not got and result == 'floor':
+            got = 'took the stairs to another floor'
         if not got:
             got = {'menu': 'opened a menu', 'room': 'went to another room', 'no_interaction_observed': 'nothing happened'}.get(result, result)
         v = self.zone_log(room).setdefault(zone, dict(n=0, got='', sig=None))
@@ -1797,6 +1854,7 @@ class Driver:
 
     PREFETCH_SCREENS = {'dialog': 'DIALOG', 'choice': 'DIALOG', 'menu': 'INVENTORY', 'room': 'FREE',
                         'settled': 'FREE', 'arrived': 'FREE', 'ticked': 'FREE', 'running': 'FREE', 'held': 'FREE',
+                        'floor': 'FREE',
                         'swapped': 'INVENTORY BOX', 'refused': 'INVENTORY BOX'}
 
     def assumed_view(self, view, action, expect):
@@ -2087,10 +2145,12 @@ def main():
     ap.add_argument('--dir', default='build/play')
     ap.add_argument('--steps', type=int, default=0, help='0 = until stopped')
     ap.add_argument('--window', type=int, default=8, help='decisions kept in the prompt (cut in halves)')
+    ap.add_argument('--context-tokens', type=int, default=int(os.environ.get('RECVX_LLM_CONTEXT_TOKENS', '0') or 0),
+                    help='cap on the request size in tokens, converted with the characters per token the endpoint '
+                         'reports; the oldest kept decisions are dropped first (in one block), the system prompt and '
+                         'the current request never. 0 = off. Also RECVX_LLM_CONTEXT_TOKENS in .env')
     ap.add_argument('--context-chars', type=int, default=int(os.environ.get('RECVX_LLM_CONTEXT_CHARS', '0') or 0),
-                    help='cap on the request size in characters (~4 per token); the oldest kept decisions are '
-                         'dropped first, the system prompt and the current request never. 0 = off. '
-                         'Also RECVX_LLM_CONTEXT_CHARS in .env')
+                    help='the same cap in characters (used when no token cap is set). Also RECVX_LLM_CONTEXT_CHARS')
     ap.add_argument('--temperature', type=float, default=0.2)
     ap.add_argument('--max-tokens', type=int, default=200)
     ap.add_argument('--extra-body', default=os.environ.get('RECVX_LLM_EXTRA_BODY', ''),
@@ -2119,7 +2179,7 @@ def main():
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
                     log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms, skip_videos=a.skip_videos,
                     alert_after=a.alert_after,
-                    repeat_limit=a.repeat_limit, context_chars=a.context_chars)
+                    repeat_limit=a.repeat_limit, context_chars=a.context_chars, context_tokens=a.context_tokens)
     if a.dry_run:
         obs = play.observe()
         user = {'role': 'user', 'content': json.dumps(dict(result='start', state=trim(obs)), separators=(',', ':'))}

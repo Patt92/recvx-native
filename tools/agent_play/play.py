@@ -1060,13 +1060,19 @@ class Play:
             commands = [(1 + 3 * k, 'keys ' + ('left' if k % 2 == 0 else 'right')) for k in range(presses)] + \
                 [(1 + 3 * presses, 'keys none')]
             then = action.get('then')
+            self.shake_note = None
             if then is not None:
                 # Escape move without a decision gap: the route follows the last press; the runtime waits
                 # out the grab scene that is running at its start and only then steers (no danger cut).
-                if not isinstance(then, dict) or then.get('op') != 'move' or set(then) - {'op', 'to', 'run', 'face'}:
-                    raise PlayError('shake then must be a move {"op":"move","to":[x,z]}')
-                commands.append((2 + 3 * presses, self.route(d, finite_pair(then.get('to')), run=then.get('run', True),
-                                                             face=then.get('face'), danger=False)))
+                # The shake itself never fails because of its escape move: while grabbed every lost
+                # decision costs hp. A bad or blocked escape is dropped and reported.
+                try:
+                    if not isinstance(then, dict) or then.get('op') not in (None, 'move') or 'to' not in then:
+                        raise PlayError('escape must be {"op":"move","to":[x,z]}')
+                    commands.append((2 + 3 * presses, self.route(d, finite_pair(then.get('to')), run=then.get('run', True),
+                                                                 face=then.get('face'), danger=False)))
+                except (PlayError, TypeError, ValueError) as e:
+                    self.shake_note = f'shook free without the escape move ({e})'
             return commands
         if op == 'keys':
             if owner(d) not in ('FREE', 'GRAB'):
@@ -1222,6 +1228,7 @@ class Play:
             seen_fresh = False
             settled_at = None
             reason = 'waiting'
+            last_y = d0['actor'][1]
             while time.monotonic() - started < seconds:
                 try:
                     d, stamp, age = self.read()
@@ -1236,6 +1243,10 @@ class Play:
                     continue
                 last_stamp = stamp
                 seen_fresh = True
+                # A stair or ladder climb (runtime begin_stairs) moves the player vertically under its own
+                # control while the owner stays FREE: not settled until the height stops changing.
+                climbing = abs(d['actor'][1] - last_y) > .02
+                last_y = d['actor'][1]
                 if waiting and 'ticks' in action and not busy(d) and \
                         d.get('control', {}).get('tick', 0) - d0.get('control', {}).get('tick', 0) >= action['ticks']:
                     # wait ticks n: the requested game time has run; report it instead of idling the budget.
@@ -1244,6 +1255,9 @@ class Play:
                 reason = self.reason(d0, d, route=action.get('op') in ('move', 'interact'), waiting=waiting,
                                      fighting=action.get('op') in ('fire', 'shake'),
                                      through_damage=action.get('op') in THROUGH_DAMAGE)
+                if reason in ('settled', 'held') and climbing:
+                    settled_at = None
+                    continue
                 if reason:
                     if commands and time.monotonic()-started < .1:
                         continue
@@ -1262,6 +1276,9 @@ class Play:
             output = self.observe()
             output['result'] = reason or 'running'
             output['elapsed_ms'] = round((time.monotonic()-started)*1000)
+            if action.get('op') == 'shake' and getattr(self, 'shake_note', None):
+                output['info'] = self.shake_note
+                self.shake_note = None
             if commands and action.get('op') == 'fire':
                 d1, _, _ = self.read()
                 c0, c1 = d0, d1
@@ -1270,6 +1287,12 @@ class Play:
                 output['fire'] = dict(shots=c1.get('combat_shots', 0) - c0.get('combat_shots', 0),
                                       hits=c1.get('combat_hits', 0) - c0.get('combat_hits', 0),
                                       target=None if target < 0 else target, target_hp=hp)
+            if commands and action.get('op') == 'interact' and output['result'] in ('settled', 'running', 'held'):
+                d1, _, _ = self.read()
+                if d1.get('player_floor', 0) != d0.get('player_floor', 0) or abs(d1['actor'][1] - d0['actor'][1]) > 1.0:
+                    # The stairs/ladder were taken: a floor change, not a missed examine.
+                    output['result'] = 'floor'
+                    output['floor'] = [d0.get('player_floor', 0), d1.get('player_floor', 0)]
             if commands and action.get('op') == 'interact' and output['result'] == 'settled':
                 output['result'] = 'no_interaction_observed'
             lost = d0['hp'] - output['hp']

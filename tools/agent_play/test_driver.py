@@ -116,7 +116,7 @@ class DriverTests(unittest.TestCase):
         first, tools = client.requests[0]
         self.assertEqual(first[0]['role'], 'system')
         self.assertIn('play Resident Evil', first[0]['content'])
-        self.assertEqual({t['function']['name'] for t in tools}, {'zone', 'hint'})
+        self.assertEqual({t['function']['name'] for t in tools}, {'zone', 'hint', 'look'})
         second = client.requests[1][0]
         self.assertEqual(second[-1]['role'], 'tool')
         self.assertIn('approach', second[-1]['content'])
@@ -766,17 +766,31 @@ class DriverTests(unittest.TestCase):
         self.assertIn('"ticks":3', drv.history_lines[0])
         self.assertIn('"ticks":5', drv.history_lines[1])
 
-    def test_bundle_carries_zones_board_map_and_history(self):
+    def test_bundle_comes_once_per_room_or_change_then_on_request(self):
         self.two_doors()
-        drv, client = self.driver([text(dict(op='wait', ticks=2)), text(dict(op='wait', ticks=2))])
+        drv, client = self.driver([text(dict(op='wait', ticks=2)), text(dict(op='wait', ticks=2)),
+                                   call('look', dict(what='board')), text(dict(op='wait', ticks=2))])
         with self.ticking():
-            drv.run(steps=2)
+            drv.run(steps=3)
+        first = json.loads(client.requests[0][0][-1]['content'])
+        self.assertTrue(any(z.startswith('i13 door') and 'door to room 4' in z for z in first['zones_all']))
+        self.assertTrue(first['map'][0].startswith('map RM_TEST'))
         second = json.loads(client.requests[1][0][-1]['content'])
-        self.assertTrue(any(z.startswith('i13 door') and 'door to room 4' in z for z in second['zones_all']))
-        self.assertTrue(any('doors i13 -> RM_T040' in b or 'doors' in b for b in second['board']))
-        self.assertTrue(second['map'][0].startswith('map RM_TEST'))
-        self.assertTrue(second['history'][0].startswith('1: '))
-        self.assertIn('wait', second['history'][0])
+        self.assertNotIn('zones_all', second)   # nothing switched: offered, not pushed
+        self.assertIn('look(zones|board|map|history)', second['look'])
+        self.assertTrue(second['history'] if 'history' in second else True)
+        # The model asked with the look tool and got the board.
+        answered = client.requests[3][0][-1]
+        self.assertEqual(answered['role'], 'tool')
+        self.assertIn('board', answered['content'])
+        # A switch (a wall opened) brings the bundle again unasked.
+        self.d['walls'][0]['fl'] = 0
+        self.write(self.d)
+        drv.client.replies.append(text(dict(op='wait', ticks=2)))
+        with self.ticking():
+            drv.run(steps=4)
+        last = json.loads(client.requests[-1][0][-1]['content'])
+        self.assertIn('zones_all', last)
 
     def test_mcp_server_lists_tools_and_runs_a_plan(self):
         import mcp_server
@@ -883,7 +897,7 @@ class DriverTests(unittest.TestCase):
                                                          board=['b'], map=['m'] * 40, history=['h'], journal={}, room_rules=[])))
         drv.remember(user, dict(op='wait'))
         kept = json.loads(drv.history[0]['content'])
-        self.assertEqual(set(kept), {'situation', 'state'})
+        self.assertEqual(set(kept), {'situation'})
 
     def test_weapon_state_is_said_in_the_situation(self):
         drv, _ = self.driver([])
@@ -990,17 +1004,36 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(any('examining zone 4 did nothing' in l for l in lines))
         self.assertEqual(again.memory_lines(dict(room='RM_0010')), ['Memory, progress elsewhere: RM_TEST: examine zone 7 -> walls opened: w56'])
 
+    def test_context_cap_in_tokens_uses_the_measured_ratio_and_cuts_in_one_block(self):
+        system = len(Driver(self.play, None, out=io.StringIO()).system)
+        drv, _ = self.driver([], context_tokens=(system + 900) // 3)   # 3.0 chars per token until measured
+        self.assertEqual(drv.context_limit_chars(), (system + 900) // 3 * 3)
+        for i in range(12):
+            drv.remember(dict(role='user', content=json.dumps(dict(situation=[f'step {i}', 'x' * 100]))), dict(op='wait'))
+        user = dict(role='user', content='{"state":{"now":true}}')
+        msgs = drv.messages(user)
+        kept = msgs[1:-1]
+        self.assertLessEqual(sum(len(m['content']) for m in msgs), drv.context_limit_chars())
+        self.assertIn('step 11', kept[-2]['content'])
+        # One block down to half the room: the next requests keep the same prefix.
+        before = list(drv.history)
+        drv.remember(dict(role='user', content=json.dumps(dict(situation=['step 12']))), dict(op='wait'))
+        drv.messages(user)
+        self.assertEqual(drv.history[:len(before)], before)
+        drv.chars_per_token = 2.5
+        self.assertEqual(drv.context_limit_chars(), int((system + 900) // 3 * 2.5))
+
     def test_context_cap_drops_the_oldest_decisions_in_pairs(self):
         drv, _ = self.driver([], context_chars=len(Driver(self.play, None, out=io.StringIO()).system) + 400)
         for i in range(6):
-            drv.remember(dict(role='user', content=json.dumps(dict(state=dict(step=i, pad='x' * 100)))), dict(op='wait'))
+            drv.remember(dict(role='user', content=json.dumps(dict(situation=[f'step {i}', 'x' * 100]))), dict(op='wait'))
         user = dict(role='user', content='{"state":{"now":true}}')
         msgs = drv.messages(user)
         self.assertEqual(msgs[0]['role'], 'system'); self.assertIs(msgs[-1], user)
         kept = msgs[1:-1]
         self.assertEqual(len(kept) % 2, 0)
         self.assertLessEqual(sum(len(m['content']) for m in msgs), drv.context_chars)
-        self.assertIn('"step":5', kept[-2]['content'])
+        self.assertIn('step 5', kept[-2]['content'])
         self.assertEqual(drv.history, kept)  # cut for good, prefix stable afterwards
 
     def test_describe_change_names_what_moved(self):
@@ -1015,6 +1048,9 @@ class DriverTests(unittest.TestCase):
         self.assertIn('put into the box: Lighter', text)
         self.assertNotIn('gone from your inventory', text)
         self.assertIn('walls opened: w56', text)
+        up = dict(before, player_floor=2)
+        self.assertIn('floor changed 0 -> 2 (stairs/ladder)', describe_change(dict(before, player_floor=0), up,
+                                                                              dict(op='interact', zone=3), 'floor', names))
         same = describe_change(before, before, dict(op='interact', zone=4), 'no_interaction_observed', names)
         self.assertIn('nothing in inventory, box, walls, zones or room changed', same)
 
