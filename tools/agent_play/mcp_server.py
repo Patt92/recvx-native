@@ -19,6 +19,8 @@ from play import Play, PlayError  # noqa: E402
 PROTOCOL = '2025-06-18'
 
 TOOLS = [
+    {"name": "dialog", "description": "Read collected dialogue and current choice without selecting an answer.",
+     "inputSchema": {"type": "object", "properties": {}}},
     {'name': 'observe', 'description': 'The moment: situation sentences, every zone of the floor with what '
              'examining it does, the obstacle board, the room map, your last actions and the compact state.',
      'inputSchema': {'type': 'object', 'properties': {}}},
@@ -104,6 +106,8 @@ class Server:
         return out
 
     def call(self, name, args):
+        if name == 'dialog':
+            return self.driver.dialog_view()
         if name == 'observe':
             return self.observe()
         if name == 'act':

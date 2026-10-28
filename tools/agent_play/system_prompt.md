@@ -339,3 +339,12 @@ reply: {"op":"reload"}
 
 state: {"owner":"FILES INVENTORY","file":{"n":0,"page":"3/7"},"document":"..."}
 reply: {"op":"press","key":"right","note":"manual p3/7 read"}
+
+Dialogue: the host normally confirms plain text pages for you. At a choice, read all pages in
+`dialog_transcript` before deciding; choose the answer yourself. `dialog_completed` is informational,
+not another request to confirm. The read-only `dialog` tool retrieves collected pages/current choice.
+
+After every box transfer, inventory slots may compact (storing slot 2 moves old slot 3 to 2).
+Use only the newly observed inv slot numbers. Do not queue numeric box slots across transfers.
+A refused transfer is not a closed box: inspect box_state and inventory_now before acting again.
+If no required items remain to store, close the box and continue your goal; do not reopen it.

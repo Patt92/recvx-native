@@ -43,6 +43,7 @@ NOTE_MAX = 80
 DROP = ('age_s', 'busy', 'held', 'elapsed_ms', 'stale', 'weapon')
 
 TOOLS = [
+    {"type": "function", "function": {"name": "dialog", "description": "Read accumulated dialogue and the current choice; never selects an answer.", "parameters": {"type": "object", "properties": {}}}},
     {'type': 'function', 'function': {
         'name': 'zone',
         'description': 'Exact bounds of zone i and up to 3 ready approach points {to, face} for interact.',
@@ -366,6 +367,11 @@ def hint_use_ready(room, item, zone, floor, state):
     return hint.use_ready(room, item, zone, floor, state)
 
 
+def hint_use_unlock(room, item, zone, floor, state):
+    import hint
+    return hint.use_unlock(room, item, zone, floor, state)
+
+
 def owner_free(obs):
     return (obs.get('owner') or '') == 'FREE'
 
@@ -379,7 +385,7 @@ class Driver:
 
     def __init__(self, play, client, *, tools=True, window=8, seconds=6.0, max_tool_calls=3, log=None,
                  out=sys.stdout, save_rooms=3, repeat_limit=2, skip_videos=False, alert_after=20,
-                 context_chars=0, context_tokens=0, reflexes=True, engage=20.0, combat_radius=25.0):
+                 context_chars=0, context_tokens=0, reflexes=True, engage=20.0, combat_radius=25.0, dialog_auto=None):
         self.play, self.client, self.use_tools = play, client, tools
         self.window, self.seconds, self.max_tool_calls = window, seconds, max_tool_calls
         self.context_chars = int(context_chars or 0)    # request size cap in characters
@@ -390,6 +396,12 @@ class Driver:
         self.note = ''
         self.log = log
         self.out = out
+        self.dialog_auto = dialog_auto or os.environ.get("RECVX_DIALOG_AUTO", "choices_only")
+        if self.dialog_auto not in ("off", "choices_only", "all"):
+            raise ValueError("RECVX_DIALOG_AUTO must be off, choices_only or all")
+        self.dialog_pages = []
+        self.dialog_room = None
+        self.last_dialog = None
         self.steps = 0
         self.bad_replies, self.note_cut = [], False  # note_cut: last reply was cut inside its note
         self._points_key, self._points = None, {}  # zone -> [to, face] for the current room and floor
@@ -475,6 +487,8 @@ class Driver:
     # --- tools -----------------------------------------------------------------------------------------
     def tool(self, name, args):
         try:
+            if name == 'dialog':
+                return json.dumps(self.dialog_view(), ensure_ascii=False)
             if name == 'look':
                 return json.dumps(self.look(args.get('what') or 'all'), separators=(',', ':'), ensure_ascii=False)
             if name == 'zone':
@@ -913,10 +927,15 @@ class Driver:
         uses = hint.all_item_uses()
         for item in dict.fromkeys(carried):
             for room, zone, floor in uses.get(item, []):
+                where = f'zone {zone}' if zone is not None else (hint.floor_area(hint.Room(d['room']), floor) if floor is not None else 'this room')
                 if hint.use_ready(room, item, zone, floor, d) is False:
+                    if room[3:6] == here_node:
+                        steps = hint.use_unlock(room, item, zone, floor, d)
+                        if steps:
+                            add(f"Make the {self.item_name(item)} usable here ({where})", here_node,
+                                'first ' + ', then '.join(steps))
                     continue
                 if room[3:6] == here_node:
-                    where = f'zone {zone}' if zone is not None else (hint.floor_area(hint.Room(d['room']), floor) if floor is not None else 'this room')
                     add(f'Use {self.item_name(item)} here ({where})', here_node,
                         'examine the zone' if zone is not None else 'stand there, then Use it from the inventory')
         for u in reversed(self.memory.get('unlocks') or []):
@@ -1179,9 +1198,26 @@ class Driver:
                     break
         return out
 
+    def use_place(self, where, zone, floor, room, floors):
+        """An item use site in words: room, zone to examine or floor area to stand in."""
+        place = 'this room' if where == room else where
+        if zone is not None:
+            place += f' zone {zone} (examine it)'
+        elif floor is not None:
+            area = ''
+            if where == room and floor < len(floors):
+                f = floors[floor]
+                x0, z0 = f['p'][0], f['p'][2]
+                area = f" (x {x0:.0f}..{x0 + f['e'][0]:.0f}, z {z0:.0f}..{z0 + f['e'][2]:.0f}; stand in it, then Use it from the inventory)"
+            place += f' while standing on floor area {floor}' + (area or ' (Use it from the inventory there)')
+        else:
+            place += ' (Use it from the inventory)'
+        return place
+
     def item_use_lines(self, obs, d):
         """Where the carried items are used, from the room scripts of the whole game (hint.item_uses:
-        bhUseItemCheck sites, attributed to the zone whose examine block holds them). Read once."""
+        bhUseItemCheck sites, attributed to the zone whose examine block holds them). A site whose story
+        flags do not hold yet names the steps that unlock it (hint.use_unlock). Read once."""
         if Driver._item_uses_cache is None:  # once per process (1.5 s over all rooms)
             try:
                 import hint
@@ -1195,30 +1231,24 @@ class Driver:
         for row in obs.get('inv') or []:
             if len(row) < 4 or row[1] not in self._item_uses:
                 continue
-            sites = []
-            later = 0
+            sites, later = [], []
             for where, zone, floor in self._item_uses[row[1]]:
+                place = self.use_place(where, zone, floor, room, floors)
                 if hint_use_ready(where, row[1], zone, floor, d) is False:
-                    later += 1
+                    later.append((where, place, hint_use_unlock(where, row[1], zone, floor, d)))
                     continue
-                place = 'this room' if where == room else where
-                if zone is not None:
-                    place += f' zone {zone} (examine it)'
-                elif floor is not None:
-                    area = ''
-                    if where == room and floor < len(floors):
-                        f = floors[floor]
-                        x0, z0 = f['p'][0], f['p'][2]
-                        area = f" (x {x0:.0f}..{x0 + f['e'][0]:.0f}, z {z0:.0f}..{z0 + f['e'][2]:.0f}; stand in it, then Use it from the inventory)"
-                    place += f' while standing on floor area {floor}' + (area or ' (Use it from the inventory there)')
-                else:
-                    place += ' (Use it from the inventory)'
                 sites.append(place)
             if sites:
                 out.append(f"{row[3]} (slot {row[0]}) is used at: " + ', '.join(sites) + ' (from the game data)')
             elif later:
-                out.append(f"{row[3]} (slot {row[0]}): its use comes later in the story (no use site is ready yet); "
-                           'keep it, or leave it in a box if it blocks your way')
+                where, place, steps = later[0]
+                if steps:
+                    out.append(f"{row[3]} (slot {row[0]}) is used at {place}, but that is not possible yet — "
+                               f"first, {'here' if where == room else 'in ' + where}: " +
+                               ', then '.join(steps) + ' (from the game data)')
+                else:
+                    out.append(f"{row[3]} (slot {row[0]}): its use at {place} comes later in the story; "
+                               'keep it, or leave it in a box if it blocks your way')
         return out
 
     # eneset.c bhJumpEnemy[ep->id]: the identity is the enemy module number; names from the port ledger.
@@ -1308,7 +1338,7 @@ class Driver:
 
     # --- memory across runs ------------------------------------------------------------------------------
     def load_memory(self):
-        empty = dict(worked=[], failed=[], deaths=[], info_zones={}, boxes={}, rooms={}, unlocks=[])
+        empty = dict(worked=[], failed=[], deaths=[], info_zones={}, boxes={}, rooms={}, unlocks=[], dialogs=[])
         if not self.memory_path or not self.memory_path.exists():
             return empty
         try:
@@ -1317,6 +1347,7 @@ class Driver:
             out['info_zones'] = m.get('info_zones', {}) if isinstance(m.get('info_zones', {}), dict) else {}
             out['boxes'] = m.get('boxes', {}) if isinstance(m.get('boxes', {}), dict) else {}
             out['rooms'] = m.get('rooms', {}) if isinstance(m.get('rooms', {}), dict) else {}
+            out['dialogs'] = m.get('dialogs', []) if isinstance(m.get('dialogs', []), list) else []
             out['unlocks'] = m.get('unlocks', []) if isinstance(m.get('unlocks', []), list) else []
             return out
         except (ValueError, OSError, AttributeError):
@@ -1566,6 +1597,43 @@ class Driver:
             self.history = self.history[-2 * self.window:]
 
     # --- the loop --------------------------------------------------------------------------------------
+    def dialog_view(self):
+        obs = self.play.observe()
+        dialog = obs.get('dialog') or {}
+        pages = list(self.dialog_pages)
+        text = dialog.get('text')
+        if text and (not pages or pages[-1] != text):
+            pages.append(text)
+        return dict(active=bool(dialog), text=pages if dialog else (self.last_dialog or {}).get('text', []),
+                    choice=dialog if dialog.get('choice') else None,
+                    last=self.last_dialog)
+
+    def dialog_tick(self, obs):
+        """Collect text before any confirm. Return a host action, never decide in choices_only mode."""
+        dialog = obs.get('dialog') or {}
+        if dialog:
+            if self.dialog_room is None:
+                self.dialog_room = obs.get('room')
+            text = dialog.get('text')
+            if text and (not self.dialog_pages or self.dialog_pages[-1] != text):
+                self.dialog_pages.append(text)
+            self.pending_feedback['dialog_transcript'] = list(self.dialog_pages)
+            if dialog.get('choice') and self.dialog_auto == 'choices_only':
+                self.plan = []
+                self.prefetched = None
+            if self.dialog_auto != 'off' and (not dialog.get('choice') or self.dialog_auto == 'all'):
+                return dict(op='press', key='confirm') if dialog.get('ready') or dialog.get('choice') else dict(op='wait')
+        elif self.dialog_room is not None:
+            self.last_dialog = dict(room=self.dialog_room, text=list(self.dialog_pages))
+            self.pending_feedback['dialog_completed'] = self.last_dialog
+            dialogs = self.memory.setdefault('dialogs', [])
+            if self.last_dialog not in dialogs:
+                self.memory['dialogs'] = (dialogs + [self.last_dialog])[-40:]
+                self.save_memory()
+            self.dialog_pages = []
+            self.dialog_room = None
+        return None
+
     def act(self, action):
         started = time.monotonic()
         try:
@@ -1606,6 +1674,16 @@ class Driver:
                         feedback['approach_note'] = z['approach_note']
                 except PlayError:
                     pass
+        if action.get('op') == 'box':
+            # A swap compacts the inventory; no queued slot or prefetched answer remains trustworthy.
+            self.plan = []
+            self.prefetched = None
+            self.deferred = None
+            feedback['box_state'] = obs.get('box')
+            feedback['inventory_now'] = obs.get('inv', [])
+            feedback['box_next'] = ('Re-read inventory_now and box_state: slot numbers can shift after a transfer. '
+                                    'A refused transfer does not mean the box is closed. Do not reopen an open box; '
+                                    'choose a currently occupied slot, or close the box and continue if nothing remains to store.')
         try:
             if before is not None:
                 import hint
@@ -2652,10 +2730,13 @@ class Driver:
                 self.pending_feedback['combat'] = 'combat mode ended: no enemy close any more; carry on exploring'
                 self.bundle_sig = None  # the next request carries the full picture again
                 print('COMBAT mode ended', file=self.out, flush=True)
+            dialog_action = self.dialog_tick(obs)
             playing = 'VIDEO' in obs.get('owner', '').split()
             if not playing:
                 self.video_skipped = False
-            if self.skip_videos and playing and not self.video_skipped:
+            if dialog_action is not None:
+                action, entry = dialog_action, dict(auto=True, dialog_auto=self.dialog_auto)
+            elif self.skip_videos and playing and not self.video_skipped:
                 # User option: skip FMV videos (the game's own video skip); scenes are not touched.
                 action, entry = {'op': 'press', 'key': 'skip'}, dict(auto=True, video_skipped=True)
                 self.video_skipped = True

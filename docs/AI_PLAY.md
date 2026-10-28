@@ -173,3 +173,29 @@ items and an exit in at most six.
 Screenshots are opt-in and only for checking what the raster shows, never for
 navigation: positions, walls, zones, dialog text and enemy state are already
 numbers.
+
+## Dialogautomator
+
+`RECVX_DIALOG_AUTO=choices_only` ist der Standard (Environment oder lokale `.env`).
+Die Datei mit API-Schlüsseln wird dafür nicht verändert.
+
+| Wert | Verhalten |
+|---|---|
+| `off` | Keine automatischen Dialogbestätigungen; jede Seite bleibt beim Modell. |
+| `choices_only` | Textseiten automatisch bestätigen, bei Auswahl stoppen und das Modell entscheiden lassen. |
+| `all` | Auch die aktuell markierte Auswahl bestätigen; nur für bewusst unbeaufsichtigte Abläufe. |
+
+Der Host sammelt die sichtbaren Seiten vor jeder Bestätigung. Bei einer Auswahl bekommt das Modell
+`dialog_transcript` mit dem bisherigen Text sowie die aktuelle Auswahl im normalen Spielzustand.
+Nach Dialogende folgt `dialog_completed` mit Raum und gesammelten Texten. Gleiche aufeinanderfolgende
+Textstände werden nicht wiederholt. Die letzten 40 unterschiedlichen abgeschlossenen Dialoge bleiben
+unter `dialogs` in der bestehenden `memory.json` erhalten. Videos und Cinematic-Skip bleiben getrennt.
+
+Das zusätzliche lesende MCP-/LLM-Tool `dialog` liefert `active`, die gesammelten `text`-Seiten,
+`choice` (aktueller Dialogzustand mit Auswahl/Markierung, sonst null) und `last` (letzter abgeschlossener
+Dialog). Es wählt keine Antwort. Die Automatisierung läuft im AI-Play-Driver; ein allein verwendeter
+MCP-Server bestätigt durch diesen Leseaufruf keine Spieltexte.
+
+Nach jeder Boxaktion verwirft der Driver vorausgeplante Slotaktionen und Prefetch-Antworten.
+`inventory_now` und `box_state` zeigen den frischen Zustand: Einlagern kann Slots nachrücken lassen;
+`refused` bedeutet nicht, dass die Box geschlossen ist. Weitere Transfers müssen aktuelle Slots verwenden.

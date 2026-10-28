@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from driver import Driver, expectation_met, parse_action, passive, trim
 from play import Play
@@ -82,6 +83,42 @@ class DriverTests(unittest.TestCase):
         drv.goal_list = lambda obs, d, lookahead=True: []   # the goal tests switch it back on
         return drv, client
 
+    def test_dialog_automator_collects_stops_at_choice_and_remembers(self):
+        drv, _ = self.driver([])
+        drv.dialog_auto = 'choices_only'
+        page = dict(room='RM_0090', dialog=dict(text='Scanner panel.', ready=False))
+        self.assertEqual(drv.dialog_tick(page), dict(op='wait'))
+        page['dialog']['ready'] = True
+        self.assertEqual(drv.dialog_tick(page), dict(op='press', key='confirm'))
+        choice = dict(room='RM_0090', dialog=dict(text='Push the switch?', ready=True, choice=True, highlighted=0))
+        self.assertIsNone(drv.dialog_tick(choice))
+        self.assertEqual(drv.pending_feedback['dialog_transcript'], ['Scanner panel.', 'Push the switch?'])
+        self.assertIsNone(drv.dialog_tick(dict(room='RM_0090')))
+        self.assertEqual(drv.memory['dialogs'][-1]['text'], ['Scanner panel.', 'Push the switch?'])
+        self.assertIn('dialog_completed', drv.pending_feedback)
+
+    def test_dialog_auto_off_and_all(self):
+        drv, _ = self.driver([])
+        choice = dict(room='RM_0090', dialog=dict(text='Yes or No?', ready=True, choice=True))
+        drv.dialog_auto = 'off'
+        self.assertIsNone(drv.dialog_tick(choice))
+        drv.dialog_auto = 'all'
+        self.assertEqual(drv.dialog_tick(choice), dict(op='press', key='confirm'))
+
+    def test_box_transfer_discards_stale_slots_and_reports_live_state(self):
+        drv, _ = self.driver([])
+        for result in ('swapped', 'refused'):
+            drv.plan = [dict(op='box', store=3)]
+            drv.prefetched = dict(action=dict(op='box', store=3))
+            live = dict(owner='INVENTORY BOX', box=dict(mode='inventory'), inv=[[2, 55, 1, 'Lighter']], result=result)
+            with patch.object(self.play, 'act', return_value=live):
+                obs, feedback, _ = drv.act(dict(op='box', store=2))
+            self.assertEqual(drv.plan, [])
+            self.assertIsNone(drv.prefetched)
+            self.assertEqual(feedback['inventory_now'][0][0], 2)
+            self.assertEqual(feedback['box_state']['mode'], 'inventory')
+            self.assertIn('does not mean the box is closed', feedback['box_next'])
+
     def test_parse_action_tolerates_fences_prose_and_escaped_quotes(self):
         self.assertEqual(parse_action('```json\n{"op":"press","key":"confirm"}\n```'), dict(op='press', key='confirm'))
         self.assertEqual(parse_action('I go. {"op":"move","to":[1,2],"note":"say \\"hi\\" {x}"} done')['note'],
@@ -118,7 +155,7 @@ class DriverTests(unittest.TestCase):
         first, tools = client.requests[0]
         self.assertEqual(first[0]['role'], 'system')
         self.assertIn('play Resident Evil', first[0]['content'])
-        self.assertEqual({t['function']['name'] for t in tools}, {'zone', 'hint', 'look'})
+        self.assertEqual({t['function']['name'] for t in tools}, {'zone', 'hint', 'look', 'dialog'})
         second = client.requests[1][0]
         self.assertEqual(second[-1]['role'], 'tool')
         self.assertIn('approach', second[-1]['content'])
@@ -809,7 +846,7 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(r['result']['serverInfo']['name'], 'recvx-play')
         r = server.handle(dict(jsonrpc='2.0', id=2, method='tools/list'))
         self.assertEqual([t['name'] for t in r['result']['tools']],
-                         ['observe', 'act', 'plan', 'zone', 'hint', 'board', 'map', 'goals', 'route', 'guide', 'near', 'memory'])
+                         ['dialog', 'observe', 'act', 'plan', 'zone', 'hint', 'board', 'map', 'goals', 'route', 'guide', 'near', 'memory'])
         self.assertIsNone(server.handle(dict(jsonrpc='2.0', method='notifications/initialized')))
         with self.ticking():
             r = server.handle(dict(jsonrpc='2.0', id=3, method='tools/call',
@@ -1407,20 +1444,34 @@ class DriverTests(unittest.TestCase):
             drv.memory['rooms']['002'] = dict(visited=True, items_left=[])
             self.assertEqual(drv.room_status('002', d), 'a goal is there')
 
-    def test_a_use_site_whose_story_flags_do_not_hold_is_later(self):
+    def test_a_use_site_whose_story_flags_do_not_hold_names_what_unlocks_it(self):
         # Live: the model fetched the Hawk Emblem back from a box because "the game uses it here"; the
-        # script needs F[1:123] (later in the story) for that use.
+        # script needs F[1:123], which the scanner panel sets after answering Yes.
         import hint
         drv, _ = self.driver([])
         hint.item_uses(hint.Room('RM_0090.RDX'))
         Driver._item_uses_cache = {59: [('RM_0090', None, 7)]}
         state = dict(self.d, room='RM_0090.RDX', items=[0, (59 << 16) | 1], vm_flags=[], floors=[])
         self.assertIs(hint.use_ready('RM_0090', 59, None, 7, state), False)
+        self.assertEqual(hint.use_unlock('RM_0090', 59, None, 7, state), ['examine zone 10', 'answer Yes'])
         line = drv.item_use_lines(dict(room='RM_0090', inv=[[1, 59, 1, 'Hawk Emblem']]), state)[0]
-        self.assertIn('its use comes later in the story', line)
+        self.assertIn('but that is not possible yet — first, here: examine zone 10, then answer Yes', line)
+        goals = Driver.goal_list(drv, None, state)  # the fixture turns the goal list off by default
+        goal = next(g for g in goals if g['text'].startswith('Make the Hawk Emblem usable here'))
+        self.assertIn('first examine zone 10, then answer Yes', goal['how'])
         ready = dict(state, vm_flags=[[1, 3, 0x80000000 >> (123 - 96)]])
         self.assertIs(hint.use_ready('RM_0090', 59, None, 7, ready), True)
+        self.assertEqual(hint.use_unlock('RM_0090', 59, None, 7, ready), [])
         self.assertIn('is used at: this room', drv.item_use_lines(dict(room='RM_0090', inv=[[1, 59, 1, 'Hawk Emblem']]), ready)[0])
+
+    def test_doable_steps_follow_the_else_part_of_a_block(self):
+        # RM_0090 scd1: F[1:123] is set in the ELSE part of `if F[4:14]==0`, and F[4:14] comes from
+        # event 20 (examining the scanner panel and answering Yes).
+        import hint
+        room = hint.Room('RM_0090.RDX')
+        self.assertEqual(hint.doable_steps(room, 1, 123, 1, None), ['examine zone 10', 'answer Yes'])
+        # With F[4:14] already set, the ELSE part holds: nothing left to do.
+        self.assertEqual(hint.doable_steps(room, 1, 123, 1, {'vm_flags': [[4, 0, 0x80000000 >> 14]]}), [])
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change

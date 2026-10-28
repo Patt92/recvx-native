@@ -218,6 +218,8 @@ def zone_effects(room, i, state, limit=420):
                     txt = f"carrying {ITEMS.get(c[1], c[1])}"
                 elif op == 0x10:
                     txt = f"using {ITEMS.get(c[1], c[1])} here"
+                elif op == 0x04 and (c[1], (c[2] | (c[3] << 8)) & 0x3ff) in MESSAGE_FLAGS:
+                    txt = 'the message is confirmed'
                 else:
                     txt = annotate(room, c, state).split('-> ', 1)[-1].removeprefix('if ')
                     txt = re.sub(r' \(now [^)]*\)', '', txt)
@@ -290,7 +292,7 @@ def zone_effects(room, i, state, limit=420):
                 open_conds.append('not(' + '; '.join(txt for txt, t in cs if t is not True) + ')')
         if not possible:
             continue
-        cond = '; '.join(open_conds)
+        cond = '; '.join(dict.fromkeys(open_conds))
         out.append((f'if {cond}: ' if cond else '') + ', '.join(effects))
     text = ' | '.join(out)
     if not text and needs:
@@ -313,6 +315,11 @@ def item_types():
 
 
 STORY_MATRICES = (1, 2, 3, 7, 8, 9)  # flag matrices that live across rooms (see world section)
+
+# message.c: cb_flg 0x1000 and st_flg 0x4000 are cleared when a message opens and set when the player
+# confirms it; st_flg 0x8 is the confirm key. A script that tests them asks "did the player confirm the
+# message it just showed", so they never block a step on their own.
+MESSAGE_FLAGS = {(10, 19), (5, 17), (5, 28)}
 
 
 def if_blocks(cmds):
@@ -381,6 +388,28 @@ def use_ready(room, item, zone, floor, state):
         return None
     bits = flag_bits(state)
     return all(bits.get((m, b), 0) == v for m, b, v in conds)
+
+
+def use_blockers(room, item, zone, floor, state):
+    """Story conditions of a use site that do not hold now: [(matrix, bit, value)]."""
+    bits = flag_bits(state or {})
+    return [(m, b, v) for m, b, v in USE_STORY.get((room[:7], item, zone, floor), ()) if bits.get((m, b), 0) != v]
+
+
+def use_unlock(room, item, zone, floor, state):
+    """Player steps that make a not-ready use possible: one way per unresolved story condition, resolved
+    in the site's own room scripts by doable_steps. [] when no decoded step reaches it."""
+    blockers = use_blockers(room, item, zone, floor, state)
+    if not blockers:
+        return []
+    try:
+        site = Room(room[:7])
+    except (OSError, struct.error):
+        return []
+    steps = []
+    for m, b, v in blockers:
+        steps += doable_steps(site, m, b, v, state)
+    return list(dict.fromkeys(steps))
 
 
 @functools.lru_cache(maxsize=1)
@@ -855,6 +884,8 @@ def inventory_ids(state):
 def condition_holds(c, state):
     """True/False for flag tests with a known current value, None otherwise."""
     if c[0] == 0x04:
+        if (c[1], (c[2] | (c[3] << 8)) & 0x3ff) in MESSAGE_FLAGS:
+            return None  # message.c decides this while a message is on screen, not the world state
         now = flag_now(state, c[1], (c[2] | (c[3] << 8)) & 0x3ff)
         return None if now == '?' else now == 1 - c[5]
     if c[0] == 0x11:
@@ -967,8 +998,8 @@ def how_to_set(room, m, b, value, state, depth=0, seen=None):
                     steps.append('not (' + ' and '.join(open_) + ')')
                 continue
             for c, (x, t) in zip(cs, texts):
-                if t is True:
-                    continue
+                if t is True or (c[0] == 0x04 and (c[1], (c[2] | (c[3] << 8)) & 0x3ff) in MESSAGE_FLAGS):
+                    continue  # holds, or the message flow sets it while the step runs
                 if c[0] == 0x04 and not (c[1] == 10 and (c[2] & 0xff) in (22, 23)) and t is False and depth < 2:
                     m2, b2 = c[1], (c[2] | (c[3] << 8)) & 0x3ff
                     sub = how_to_set(room, m2, b2, 1 - c[5], state, depth + 1, seen)
@@ -1001,13 +1032,19 @@ def doable_steps(room, m, b, value, state, depth=0, seen=None):
             mine = [ITEMS[i] for i in sorted(owned) if ITEMS.get(i) in set(g['items'])]
             return [f"carry one of the {len(g['items'])} checked items (such as {', '.join((mine or g['items'])[:3])})"]
     for script, off, conds in setters(room, m, b, value):
-        steps, impossible = [], False
+        steps = []
         for negated, cs in reversed(conds):
             texts = [condition_text(room, c, state) for c in cs]
             if negated:
-                if texts and all(t is True for _, t in texts):
-                    impossible = True
-                break_out = False
+                # The ELSE part of a block: its flag test has to hold with the other value, so the way
+                # goes through making that value true first (a standing or zone test cannot be flipped).
+                for c in cs:
+                    if c[0] != 0x04 or c[1] == 10:
+                        continue
+                    m2, b2, v2 = c[1], (c[2] | (c[3] << 8)) & 0x3ff, c[5]
+                    if flag_now(state, m2, b2) == v2:
+                        continue
+                    steps += doable_steps(room, m2, b2, v2, state, depth + 1, seen)
                 continue
             for c, (x, t) in zip(cs, texts):
                 if t is True:
@@ -1018,7 +1055,7 @@ def doable_steps(room, m, b, value, state, depth=0, seen=None):
                     steps += doable_steps(room, c[1], (c[2] | (c[3] << 8)) & 0x3ff, 1 - c[5], state, depth + 1, seen)
                 else:
                     steps.append(x)
-        if not impossible and steps:
+        if steps:
             return list(dict.fromkeys(steps))
     return []
 
@@ -1138,6 +1175,9 @@ def guide(state, done_zones=(), limit=12):
                     where += f' zone {z}'
                 if f is not None:
                     where += ' in ' + (floor_area(room, f) if r == room.name else f'floor area {f}')
+                if use_ready(r, item, z, f, state) is False:
+                    steps = use_unlock(r, item, z, f, state)
+                    where += (' (not yet: first ' + ', then '.join(steps) + ')') if steps else ' (later in the story)'
                 sites.append(where)
             out.append(f"{ITEMS.get(item, item)} is used at: {', '.join(sites)}.")
     return out[:limit]
