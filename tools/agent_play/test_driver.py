@@ -78,6 +78,7 @@ class DriverTests(unittest.TestCase):
         # tests; the tests of those features set them up themselves.
         drv._door_graph = {}
         Driver._item_uses_cache = {}
+        Driver._box_places_cache = {}
         return drv, client
 
     def test_parse_action_tolerates_fences_prose_and_escaped_quotes(self):
@@ -1147,6 +1148,41 @@ class DriverTests(unittest.TestCase):
         lines = drv.situation(dict(room='RM_TEST', at=[0, 0], hp=100, owner='FREE', inv=[]))
         self.assertTrue(any(l.startswith('The driver fought for you') for l in lines))
         self.assertEqual(drv.reflex_log, [])
+
+    def test_box_storage_is_decoded_from_the_room_script(self):
+        import hint
+        room = hint.Room('RM_0090.RDX')
+        zones = dict(interactions=hint.room_static('RM_0090.RDT')['zones'])
+        self.assertEqual(hint.zone_box(room, 11, zones), 192)   # event 18 sets F[10:12] (cb_flg 0x80000)
+        self.assertEqual(hint.zone_box(room, 12, zones), 224)   # event 19 sets F[10:11] (cb_flg 0x100000)
+        self.assertIsNone(hint.zone_box(room, 7, zones))        # the release switch is no box
+        self.assertEqual(hint.zone_labels(room, zones)[11], hint.BOX_NAMES[192])
+
+    def test_box_lines_say_what_lies_where_and_warn_without_a_gun(self):
+        drv, _ = self.driver([], log=self.directory / 'driver.log')
+        Driver._box_places_cache = {192: [('RM_0090', 11)], 224: [('RM_0090', 12)]}
+        self.d['security_items'] = [(55 << 16) | 1, (12 << 16) | 30, (9 << 16) | 15] + [0] * 29
+        self.d['security_items_2'] = [0] * 32
+        self.write(self.d)
+        obs = dict(room='RM_0080', inv=[[2, 145, 1, 'Playing Manual']])
+        lines = drv.box_lines(obs, self.d)
+        self.assertEqual(lines[0], 'Stored in security box A: Lighter, Handgun Bullets x30, Handgun x15 '
+                                   '(opened at RM_0090 zone 11)')
+        self.assertTrue(lines[1].startswith('YOU CARRY NO GUN: Handgun lies in security box A (opened at RM_0090 zone 11)'))
+        here = drv.box_lines(dict(obs, room='RM_0090'), self.d)
+        self.assertIn('(opened at zone 11 of this room)', here[0])
+        armed = drv.box_lines(dict(obs, inv=[[1, 9, 15, 'Handgun']]), self.d)
+        self.assertFalse(any(l.startswith('YOU CARRY NO GUN') for l in armed))
+        self.assertTrue(any(l.startswith('YOU CARRY NO GUN') for l in drv.situation(dict(obs, at=[0, 0], hp=100, owner='FREE'))))
+        # A normal box: its place and contents are learnt when it is opened, and survive a restart.
+        self.d.update(box_open=True, box_base=64, box_items=[[(20 << 16) | 1, 'F. Aid Spray']] + [[0, '']] * 7)
+        self.write(self.d)
+        drv.note_box('RM_0100', 3)
+        again, _ = self.driver([], log=self.directory / 'driver.log')
+        Driver._box_places_cache = {}
+        self.assertIn('Stored in the item box (shared by every normal box): F. Aid Spray (opened at RM_0100 zone 3)',
+                      again.box_lines(obs, self.d))
+        self.assertIn(9, again.weapons()); self.assertNotIn(12, again.weapons())   # the gun, not its ammo
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change

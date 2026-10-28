@@ -437,6 +437,93 @@ def neighbours(graph, room, radius=3):
     return out
 
 
+# sub1.c:1606-1615 (ItemBox open): cb_flg 0x80000 selects the storage itm[192], 0x100000 itm[224], neither
+# the shared box itm[64]; cb_flg 0x40000 opens a box. As flags: F[10:12], F[10:11], F[10:13]
+# (flag word bit b = 0x80000000 >> b). Zones of type 4 select the storage by attribute 4 / 8
+# (events.cpp EventVm::interact, hitchk.c item box branch).
+BOX_NAMES = {64: 'item box (one storage shared by every normal item box)',
+             192: 'security box A (its own storage, itm[192])',
+             224: 'security box B (its own storage, itm[224])'}
+
+
+def _box_flags(room, cmds, seen):
+    found = set()
+    for o, depth, c in cmds:
+        if c[0] == 0x05 and c[1] == 10 and len(c) > 5 and c[5] == 0:
+            b = (c[2] | (c[3] << 8)) & 0x3ff
+            if b in (11, 12, 13):
+                found.add(b)
+        elif c[0] == 0x14 and c[3] not in seen and f'event{c[3]}' in room.scripts():
+            seen.add(c[3])
+            found |= _box_flags(room, room.commands(f'event{c[3]}'), seen)
+    return found
+
+
+def zone_box(room, i, state):
+    """Storage base (64, 192, 224) of the item box zone i opens, or None. From the zone record (type 4,
+    attribute 4/8) or from the room script: the examine block of zone i (without branches that test
+    another zone) and the events it starts, setting the box flags. Generic decoder."""
+    a = next((z for z in state.get('interactions', []) if z['index'] == i), None)
+    if a is None:  # not in the live table (other floor, switched off): the room file's record
+        a = next((z for z in room_static(room.name + '.RDT')['zones'] if z['index'] == i), None)
+    if a is None:
+        return None
+    if a.get('type') == 4 and a.get('attribute', 0) & 0xc:
+        return 192 if a['attribute'] & 4 else 224
+    bits = set()
+    for script, off in zone_reactions(room, i)[:3]:
+        cmds = list(room.commands(script))
+        k = next(j for j, (o, _, _) in enumerate(cmds) if o == off)
+        base = cmds[k][1]
+        other = {}  # depth -> an enclosing condition there tests another zone
+        body = []
+        for o, depth, c in cmds[k + 1:]:
+            if depth < base:
+                break
+            if depth == base and c[0] in (0x04, 0x06, 0x0e) and not reacts_to_zone(c, i) and \
+                    (c[0] != 0x04 or (c[1] == 10 and (c[2] & 0xff) == 23)):
+                break  # the next zone's section of the same dispatcher
+            for d2 in [d2 for d2 in other if d2 > depth]:
+                other.pop(d2, None)
+            if c[0] == 0x02:
+                other.pop(depth, None)  # ELSE: the other-zone test of this level is negated from here
+                continue
+            if c[0] in (0x04, 0x06, 0x0e) and any(reacts_to_zone(c, j) for j in range(64) if j != i):
+                other[depth] = True
+                continue
+            if not any(other.values()):
+                body.append((o, depth, c))
+        bits |= _box_flags(room, body, set())
+    if 12 in bits:
+        return 192
+    if 11 in bits:
+        return 224
+    if 13 in bits:
+        return 64
+    return None
+
+
+def all_box_places():
+    """Every zone of the game that opens a security box, from the room files: {base: [(room, zone)]}.
+    Normal item boxes are objects bound at runtime; their places are learnt while playing."""
+    out = {}
+    for name in sorted(os.listdir(os.path.join(ROOT, 'data/rooms'))):
+        if not name.endswith('.RDT'):
+            continue
+        try:
+            room = Room(name)
+            zones = room_static(name)['zones']
+        except Exception:
+            continue
+        state = dict(interactions=zones)
+        for z in zones:
+            if (z['type'] == 3 and zone_reactions(room, z['index'])) or (z['type'] == 4 and z['attribute'] & 0xc):
+                base = zone_box(room, z['index'], state)
+                if base in (192, 224):
+                    out.setdefault(base, []).append((room.name, z['index']))
+    return out
+
+
 def zone_labels(room, state):
     """Short label per active zone from the room data: its message, item, door target or script hook.
     Same sources as `hint.py room`, one line each, for the driver's situation text."""
@@ -450,8 +537,12 @@ def zone_labels(room, state):
             out[i] = 'text: "' + (text[:110] + '...' if len(text) > 110 else text) + '"'
         elif t == 3:
             refs = zone_reactions(room, i)
-            out[i] = 'object the room script reacts to when examined' if refs or a.get('attribute', 0) & 9 \
-                else 'object without text (examine it to see what it is)'
+            box = zone_box(room, i, state) if refs else None
+            out[i] = BOX_NAMES[box] if box else ('object the room script reacts to when examined'
+                                                 if refs or a.get('attribute', 0) & 9 else
+                                                 'object without text (examine it to see what it is)')
+        elif t == 4 and a.get('attribute', 0) & 0xc:
+            out[i] = BOX_NAMES[zone_box(room, i, state)]
         elif t == 4:
             it = next((r for r in state.get('room_items', []) if r.get('index') == prm[0]), None)
             out[i] = (f"item: {ITEMS.get(it['identity'], '?')}" + (' (taken)' if it.get('inactive') else '') +

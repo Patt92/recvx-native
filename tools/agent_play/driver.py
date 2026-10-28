@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from play import Play, PlayError, equipped, threats  # noqa: E402
+from play import Play, PlayError, equipped, item_tables, threats  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PROMPT = HERE / 'system_prompt.md'
@@ -631,6 +631,7 @@ class Driver:
         box = obs.get('box') or {}
         dialog = obs.get('dialog') or {}
         if 'BOX' in owner.split():
+            out.append('This is ' + self.box_name(d.get('box_base', 64)) + '.')
             if box.get('mode') == 'list':
                 out.append(f"The item box is open; the box list cursor is on row {box.get('at')} "
                            f"({box.get('at_item')}). confirm swaps it with your inventory slot {box.get('slot')}; "
@@ -690,6 +691,8 @@ class Driver:
             out.append('Near you: ' + ' | '.join(near) + '.')
         if away:
             out.append('Not reachable from where you stand now: ' + ' | '.join(away) + '.')
+        warn = [l for l in self.box_lines(obs, d) if l.startswith('YOU CARRY NO GUN')] if obs.get('room') else []
+        out += warn
         out += self.combat_lines(obs)
         if self.reflex_log:
             out.append('The driver fought for you since your last decision (reflexes): ' + '; '.join(self.reflex_log) + '.')
@@ -790,6 +793,112 @@ class Driver:
             out.append(line)
         return out
 
+    # --- item boxes: where your things are ----------------------------------------------------------------
+    BOX_STATE = {192: 'security_items', 224: 'security_items_2'}
+
+    @staticmethod
+    def box_name(base):
+        return {64: 'the item box (shared by every normal box)', 192: 'security box A', 224: 'security box B'}.get(base, f'box {base}')
+
+    def note_box(self, room, zone):
+        """The box just opened: where it is (room, zone) and, for the shared box, what it holds now."""
+        d = self.play.read()[0]
+        if not d.get('box_open'):
+            return
+        base = d.get('box_base', 64)
+        entry = self.memory.setdefault('boxes', {}).setdefault(str(base), dict(places=[], contents=None))
+        place = f'{room} zone {zone}'
+        if place not in entry['places']:
+            entry['places'] = (entry['places'] + [place])[-6:]
+        if base == 64:
+            entry['contents'] = [[(v >> 16) & 255, name, v & 0xffff] for v, name in (d.get('box_items') or []) if v]
+        self.save_memory()
+
+    def box_contents(self, d):
+        """{base: [(item id, name, count)]}: the security boxes from the live state, the shared box as last seen."""
+        names = getattr(self, '_item_names', None)
+        if names is None:
+            try:
+                import hint
+                names = self._item_names = hint.ITEMS
+            except Exception:
+                names = self._item_names = {}
+        out = {}
+        for base, key in self.BOX_STATE.items():
+            rows = [((v >> 16) & 255, names.get((v >> 16) & 255, str((v >> 16) & 255)), v & 0xffff)
+                    for v in d.get(key) or [] if v]
+            if rows:
+                out[base] = rows
+        shared = (self.memory.get('boxes', {}).get('64') or {}).get('contents')
+        if shared:
+            out[64] = [tuple(r) for r in shared]
+        return out
+
+    _box_places_cache = None  # hint.all_box_places(), once per process (~6 s over all rooms)
+
+    def box_places(self, base, room, d):
+        """Where box `base` is opened: security boxes from the room files of the whole game, normal boxes
+        from the places this run (and earlier runs) opened them; 'this room' when it is here."""
+        found = []
+        if base in (192, 224):
+            if Driver._box_places_cache is None:
+                try:
+                    import hint
+                    Driver._box_places_cache = hint.all_box_places()
+                except Exception:
+                    Driver._box_places_cache = {}
+            found = [f'{r} zone {z}' for r, z in Driver._box_places_cache.get(base, [])]
+        for p in (self.memory.get('boxes', {}).get(str(base)) or {}).get('places', []):
+            if p not in found:
+                found.append(p)
+        return [f'zone {p.split(" zone ")[1]} of this room' if p.startswith(room + ' ') else p for p in found]
+
+    def weapons(self):
+        """Item ids that ammunition (itemdata type 0x2) loads into, by the combine rules of the native item
+        tables: the guns."""
+        if getattr(self, '_weapons', None) is None:
+            import hint
+            types = hint.item_types()
+            combidata, cmb = item_tables()
+            guns = set()
+            for source, pos in enumerate(cmb):
+                if pos is None or pos < 0 or pos >= len(combidata) or not (source < len(types) and types[source] & 2):
+                    continue
+                for k in range(combidata[pos]):
+                    at = pos + 1 + 3 * k
+                    target = combidata[at] if at < len(combidata) else -1
+                    if at + 2 < len(combidata) and combidata[at + 2] & 255 <= 5 and 0 < target < len(types) \
+                            and not types[target] & 2:
+                        guns.add(target)
+            self._weapons = guns
+        return self._weapons
+
+    def box_lines(self, obs, d):
+        """What lies in which box and where that box is opened; a warning when you carry no gun but a box
+        holds one. From the live state, the room script and what this run saw."""
+        room = (obs.get('room') or '')[:7]
+        stored = self.box_contents(d)
+        if not stored:
+            return []
+        out = []
+        for base, rows in sorted(stored.items()):
+            places = self.box_places(base, room, d)
+            what = ', '.join(n + (f' x{c}' if c > 1 else '') for _, n, c in rows)
+            out.append(f"Stored in {self.box_name(base)}: {what}" +
+                       (f" (opened at {', '.join(places)})" if places else ' (where it is opened: not seen yet)'))
+        carried = {row[1] for row in obs.get('inv', []) if len(row) > 1}
+        guns = self.weapons()
+        if not carried & guns:
+            for base, rows in sorted(stored.items()):
+                boxed = [n for i, n, _ in rows if i in guns]
+                if boxed:
+                    places = self.box_places(base, room, d)
+                    out.append(f"YOU CARRY NO GUN: {', '.join(boxed)} {'lie' if len(boxed) > 1 else 'lies'} in "
+                               f"{self.box_name(base)}" + (f" (opened at {', '.join(places)})" if places else '') +
+                               '. Take the gun and its ammo out with box take as soon as you may carry them again.')
+                    break
+        return out
+
     def item_use_lines(self, obs, d):
         """Where the carried items are used, from the room scripts of the whole game (hint.item_uses:
         bhUseItemCheck sites, attributed to the zone whose examine block holds them). Read once."""
@@ -832,7 +941,7 @@ class Driver:
         """Enemies and whether a fight is a reasonable choice: equipped weapon and rounds, spare ammo,
         hp and healing items against the enemies' hp. Numbers from the state; the verdict is a plain
         rule of thumb the model may override."""
-        enemies = obs.get('enemies') or []
+        enemies = [e for e in (obs.get('enemies') or []) if (e.get('hp') or 0) > 0]
         if not enemies:
             return []
         d, _, _ = self.play.read()
@@ -911,13 +1020,14 @@ class Driver:
 
     # --- memory across runs ------------------------------------------------------------------------------
     def load_memory(self):
-        empty = dict(worked=[], failed=[], deaths=[], info_zones={})
+        empty = dict(worked=[], failed=[], deaths=[], info_zones={}, boxes={})
         if not self.memory_path or not self.memory_path.exists():
             return empty
         try:
             m = json.loads(self.memory_path.read_text())
             out = {k: [str(x) for x in m.get(k, [])] for k in ('worked', 'failed', 'deaths')}
             out['info_zones'] = m.get('info_zones', {}) if isinstance(m.get('info_zones', {}), dict) else {}
+            out['boxes'] = m.get('boxes', {}) if isinstance(m.get('boxes', {}), dict) else {}
             return out
         except (ValueError, OSError, AttributeError):
             return empty
@@ -993,6 +1103,7 @@ class Driver:
             low = fact.lower()
             if any(w in low for w in ('locked', 'need', 'must', 'require', 'missing', 'only')):
                 out.append('fact: ' + fact)
+        out += self.box_lines(obs, d)
         out += self.item_use_lines(obs, d)
         out += self.neighbour_lines(obs)
         out += self.memory_lines(obs)
@@ -1256,6 +1367,8 @@ class Driver:
         v['got'] = got[:80]
         v['sig'] = before
         v['result'] = result
+        if 'BOX' in (obs.get('owner') or '').split():
+            self.note_box((room or '')[:7], zone)
         key = self.info_zone_key(room, zone) if (obs.get('dialog') or {}).get('text') else None
         if key:
             self.memory.setdefault('info_zones', {}).setdefault((room or '')[:7], {})[str(zone)] = dict(
@@ -2102,6 +2215,21 @@ class Driver:
             with open(self.log, 'a') as f:
                 f.write(json.dumps(entry, separators=(',', ':')) + '\n')
 
+    @staticmethod
+    def warm_game_data():
+        """Read the whole-game tables (door graph, item uses, security box places, ~10 s) once in the
+        background, so the first decision that needs them does not wait."""
+        def work():
+            try:
+                import hint
+                if Driver._item_uses_cache is None:
+                    Driver._item_uses_cache = hint.all_item_uses()
+                if Driver._box_places_cache is None:
+                    Driver._box_places_cache = hint.all_box_places()
+            except Exception:
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
     def run(self, steps=0, until_plan_done=False):
         """Play until `steps` decisions were made (0 = forever). With until_plan_done the loop ends as
         soon as the current plan is finished or broken (the MCP server runs plans this way, no model)."""
@@ -2364,6 +2492,7 @@ def main():
                     alert_after=a.alert_after,
                     repeat_limit=a.repeat_limit, context_chars=a.context_chars, context_tokens=a.context_tokens,
                     reflexes=not a.no_reflexes, engage=a.engage, combat_radius=a.combat_radius)
+    Driver.warm_game_data()
     if a.dry_run:
         obs = play.observe()
         user = {'role': 'user', 'content': json.dumps(dict(result='start', state=trim(obs)), separators=(',', ':'))}

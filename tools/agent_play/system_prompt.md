@@ -158,6 +158,9 @@ whose `examining it:` says "nothing now; would need F[..]" needs that flag first
 tells you where it leads before you walk there. `board` also lists where your carried items are used
 (from the game's scripts), the rooms within three doors with the items their files hold, and
 `Memory` lines from earlier runs of this save: what brought progress, what did nothing, how you died.
+`board` also says what lies in which item box and where that box is opened; security boxes have
+their own storage each, normal boxes share one. "YOU CARRY NO GUN" means your gun lies in a box: go
+there and take it (and its ammo) out as soon as you may carry it again.
 `situation` ends with a combat verdict (COMBAT POSSIBLE / RISKY / NOT POSSIBLE) from your weapon,
 rounds, hp and healing items against the enemies' hp.
 
