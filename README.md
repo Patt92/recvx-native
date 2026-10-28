@@ -13,35 +13,6 @@ The project is in active development. It is not yet a finished, fully playable
 release. Platform plans below describe the intended destinations, not a promise
 that every device already runs the game.
 
-## Let your AI play the game
-
-A language model of your choice plays the real game in the normal window while
-you watch. It reads the engine's own state as numbers (no screenshots) and sends
-one action per decision. The game logic is untouched.
-
-1. Create `.env` in the project folder (untracked, never committed):
-
-   | Variable | Meaning |
-   |---|---|
-   | `RECVX_LLM_BASE_URL` | OpenAI-compatible endpoint, e.g. `http://localhost:8080/v1` |
-   | `RECVX_LLM_MODEL` | model name |
-   | `RECVX_LLM_API_KEY` | API key, empty for a local server |
-   | `RECVX_SKIP_VIDEOS` | optional, `1` = skip FMV videos automatically (in-engine scenes still play) |
-   | `RECVX_COMBAT_RADIUS` | optional, metres for combat mode (default 25): enemies in sight that close make the model fight or leave first |
-   | `RECVX_REFLEXES` | optional, `0` = the model fights alone (default: the driver shakes off grabs and shoots enemies in sight within `RECVX_ENGAGE` m, 20) |
-   | `RECVX_LLM_CONTEXT_TOKENS` | optional request size cap in tokens (e.g. `15000`), oldest decisions dropped first; 0 = off |
-   | `RECVX_LLM_EXTRA_BODY` | optional JSON added to every request; for models that think before answering: llama.cpp/vLLM `{"chat_template_kwargs":{"enable_thinking":false}}`, Ollama `/v1` `{"reasoning_effort":"none"}` |
-
-2. Start `Start-AI-Play.command` (macOS) or `Start-AI-Play.cmd` (Windows).
-3. Watch. Every decision is printed and logged to `build/play/driver.log`.
-
-Works with llama.cpp, vLLM, LM Studio, Ollama, OpenAI and other compatible
-servers. A coding agent such as Claude Code can also play directly through
-`tools/agent_play/play.py` and `work/live-play/PLAYBOOK.md`.
-
-Details (all options, how the driver stays fast, the control channel, limits):
-[docs/AI_PLAY.md](docs/AI_PLAY.md).
-
 ## A real native port
 
 The engine runs the game itself: room scripts, enemy AI, player movement,
@@ -598,3 +569,32 @@ reverse-engineering work described above.
 The project license is in [LICENSE](LICENSE). Dependency licenses accompany the
 packages. Resident Evil and CODE: Veronica X belong to their respective rights
 holders; this is an independent, unofficial project.
+
+## Let your AI play the game
+
+A language model of your choice plays the real game in the normal window while
+you watch. It reads the engine's own state as numbers (no screenshots) and sends
+one action per decision. The game logic is untouched.
+
+1. Create `.env` in the project folder (untracked, never committed):
+
+   | Variable | Meaning |
+   |---|---|
+   | `RECVX_LLM_BASE_URL` | OpenAI-compatible endpoint, e.g. `http://localhost:8080/v1` |
+   | `RECVX_LLM_MODEL` | model name |
+   | `RECVX_LLM_API_KEY` | API key, empty for a local server |
+   | `RECVX_SKIP_VIDEOS` | optional, `1` = skip FMV videos automatically (in-engine scenes still play) |
+   | `RECVX_COMBAT_RADIUS` | optional, metres for combat mode (default 25): enemies in sight that close make the model fight or leave first |
+   | `RECVX_REFLEXES` | optional, `0` = the model fights alone (default: the driver shakes off grabs and shoots enemies in sight within `RECVX_ENGAGE` m, 20) |
+   | `RECVX_LLM_CONTEXT_TOKENS` | optional request size cap in tokens (e.g. `15000`), oldest decisions dropped first; 0 = off |
+   | `RECVX_LLM_EXTRA_BODY` | optional JSON added to every request; for models that think before answering: llama.cpp/vLLM `{"chat_template_kwargs":{"enable_thinking":false}}`, Ollama `/v1` `{"reasoning_effort":"none"}` |
+
+2. Start `Start-AI-Play.command` (macOS) or `Start-AI-Play.cmd` (Windows).
+3. Watch. Every decision is printed and logged to `build/play/driver.log`.
+
+Works with llama.cpp, vLLM, LM Studio, Ollama, OpenAI and other compatible
+servers. A coding agent such as Claude Code can also play directly through
+`tools/agent_play/play.py` and `work/live-play/PLAYBOOK.md`.
+
+Details (all options, how the driver stays fast, the control channel, limits):
+[docs/AI_PLAY.md](docs/AI_PLAY.md).
