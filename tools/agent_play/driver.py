@@ -361,6 +361,11 @@ def expectation_met(expect, before, after, feedback, obs, names=None):
     return True, ''
 
 
+def hint_use_ready(room, item, zone, floor, state):
+    import hint
+    return hint.use_ready(room, item, zone, floor, state)
+
+
 def owner_free(obs):
     return (obs.get('owner') or '') == 'FREE'
 
@@ -908,6 +913,8 @@ class Driver:
         uses = hint.all_item_uses()
         for item in dict.fromkeys(carried):
             for room, zone, floor in uses.get(item, []):
+                if hint.use_ready(room, item, zone, floor, d) is False:
+                    continue
                 if room[3:6] == here_node:
                     where = f'zone {zone}' if zone is not None else (hint.floor_area(hint.Room(d['room']), floor) if floor is not None else 'this room')
                     add(f'Use {self.item_name(item)} here ({where})', here_node,
@@ -919,13 +926,14 @@ class Driver:
         if not lookahead:
             for item in dict.fromkeys(carried):
                 for room, zone, floor in uses.get(item, []):
-                    add(f'use {self.item_name(item)}', room[3:6])
+                    if hint.use_ready(room, item, zone, floor, d) is not False:
+                        add(f'use {self.item_name(item)}', room[3:6])
             for u in self.memory.get('unlocks') or []:
                 for room, zone in u['places']:
                     add(f'unlocked {room}', room[3:6])
             return goals
         for item in dict.fromkeys(carried):
-            for room, zone, floor in uses.get(item, [])[:2]:
+            for room, zone, floor in [u for u in uses.get(item, []) if hint.use_ready(u[0], item, u[1], u[2], d) is not False][:2]:
                 if room[3:6] != here_node:
                     r = self.route_text(d, room[3:6])
                     if r:
@@ -1188,7 +1196,11 @@ class Driver:
             if len(row) < 4 or row[1] not in self._item_uses:
                 continue
             sites = []
+            later = 0
             for where, zone, floor in self._item_uses[row[1]]:
+                if hint_use_ready(where, row[1], zone, floor, d) is False:
+                    later += 1
+                    continue
                 place = 'this room' if where == room else where
                 if zone is not None:
                     place += f' zone {zone} (examine it)'
@@ -1202,7 +1214,11 @@ class Driver:
                 else:
                     place += ' (Use it from the inventory)'
                 sites.append(place)
-            out.append(f"{row[3]} (slot {row[0]}) is used at: " + ', '.join(sites) + ' (from the game data)')
+            if sites:
+                out.append(f"{row[3]} (slot {row[0]}) is used at: " + ', '.join(sites) + ' (from the game data)')
+            elif later:
+                out.append(f"{row[3]} (slot {row[0]}): its use comes later in the story (no use site is ready yet); "
+                           'keep it, or leave it in a box if it blocks your way')
         return out
 
     # eneset.c bhJumpEnemy[ep->id]: the identity is the enemy module number; names from the port ledger.

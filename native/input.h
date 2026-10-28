@@ -51,6 +51,9 @@ public:
     InputFrame tick();
     void configure(InputConfig config);
     void suppress_held();
+    // Gameplay keys the player holds right now (movement, run, aim, attack), from the last
+    // evaluation: lets a host hold (agent control) give way to the person at the keyboard.
+    bool player_input()const{for(const auto a:{Action::Forward,Action::Back,Action::TurnLeft,Action::TurnRight,Action::Run,Action::Aim,Action::Attack})if(held_[unsigned(a)])return true;return false;}
     std::size_t controllers()const{return pads_.size();}
     // scePadSetActDirect of the frame: big motor (low frequency) and small motor.
     void rumble(unsigned low,unsigned high,unsigned milliseconds);

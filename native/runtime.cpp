@@ -2241,7 +2241,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 // Spielermodus 4) oder einer noch druckenden Meldung; dort laeuft der Takt weiter bis zur naechsten Entscheidung.
                 bool decision=true;if(danger){RECVX_ENEMY_PLAYER pl{};const bool grab=world&&world->enemy_player_get(pl)&&pl.mode0==4;
                     decision=!movie.active()&&!transition_pending&&!(menu.active&&(menu.task.entering()||menu.slide.pad_locked()||menu.closing||menu.command_window_moving()))&&(grab||!(events&&(events->flags[5][0]&4u)))&&!(dialog.active()&&!dialog.closable()&&!dialog.turnable()&&!dialog.choosing());}
-                const bool idle=control.pending.empty()&&!control.steer&&(!control.run||(control.run_auto&&danger&&decision));if(idle)accumulator=0;control.auto_held=idle&&control.run_auto;
+                // Der Mensch an Tastatur/Pad geht vor: haelt er Bewegungs-, Lauf-, Ziel- oder Angriffstaste, laeuft
+                // der Takt weiter (sonst friert der Danger-Halt seine Eingabe ein, z. B. R zum Zielen beim nahen Gegner).
+                const bool idle=control.pending.empty()&&!control.steer&&!devices.player_input()&&(!control.run||(control.run_auto&&danger&&decision));if(idle)accumulator=0;control.auto_held=idle&&control.run_auto;
                 // Im Halt laeuft kein Takt und damit kein autodump: Herzschlag alle 200 ms, damit der Agent frische Metriken sieht.
                 if(control.auto_held&&control.autodump_every&&now-control.held_dump>=std::chrono::milliseconds(200)){control.held_dump=now;++control.heartbeat;control_autodump();}
                 if(audio_device&&idle!=control.audio_paused&&!debug.active()){SDL_PauseAudioDevice(audio_device,idle?1:0);control.audio_paused=idle;}}

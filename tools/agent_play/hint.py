@@ -298,53 +298,6 @@ def zone_effects(room, i, state, limit=420):
     return text[:limit] + ('...' if len(text) > limit else '')
 
 
-def item_uses(room):
-    """Where items are used in this room, from the scripts: [(item id, name, zone or None, floor or None)]
-    for every bhUseItemCheck, with the zone test and the floor test (standing on floor N) whose IF
-    blocks enclose it. One linear pass: Room.commands yields an IF's conditions and body one level
-    deeper than the IF, so a test at depth k guards everything deeper or equal until a command at a
-    lower depth (bhEndif, the next IF) or a bhElseCk at its own depth. Generic decoder."""
-    out, seen = [], set()
-    for script in room.scripts():
-        zone_at, floor_at = {}, {}  # depth -> value of the test still in force
-        testing = {}                # depth -> still in the condition list of the IF that opened it
-        for o, depth, c in room.commands(script):
-            for table in (zone_at, floor_at):
-                for k in [k for k in table if k > depth or (k == depth and c[0] == 0x02)]:
-                    table.pop(k, None)
-            if c[0] == 0x01:
-                testing[depth + 1] = True
-                continue
-            if c[0] not in CONDITION_OPS:
-                testing[depth] = False  # a condition op after the body began guards nothing (bhItmCk at top level)
-            if not testing.get(depth):
-                if c[0] == 0x10:
-                    zone = zone_at[max(zone_at)] if zone_at else None
-                    floor = floor_at[max(floor_at)] if floor_at else None
-                    key = (c[1], zone, floor)
-                    if key not in seen:
-                        seen.add(key)
-                        out.append((c[1], ITEMS.get(c[1], str(c[1])), zone, floor))
-                continue
-            if c[0] == 0x04 and c[1] == 10 and len(c) > 5 and c[5] == 0:
-                if (c[2] & 0xff) == 23:
-                    zone_at[depth] = c[4]
-                elif (c[2] & 0xff) == 22:
-                    floor_at[depth] = c[4]
-            elif c[0] == 0x06 and c[1] == 20 and c[2] == 0:
-                zone_at[depth] = c[3]
-            elif c[0] == 0x0e and len(c) > 4:
-                zone_at[depth] = c[4]
-            elif c[0] == 0x10:  # a use test inside an IF's condition list: the use site itself
-                zone = zone_at[max(zone_at)] if zone_at else None
-                floor = floor_at[max(floor_at)] if floor_at else None
-                key = (c[1], zone, floor)
-                if key not in seen:
-                    seen.add(key)
-                    out.append((c[1], ITEMS.get(c[1], str(c[1])), zone, floor))
-    return out
-
-
 _ITEM_TYPES = None
 
 
@@ -357,6 +310,98 @@ def item_types():
         rows = re.findall(r'\{\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\}', src[i:src.index('};', i)])
         _ITEM_TYPES = [int(r[2]) for r in rows]
     return _ITEM_TYPES
+
+
+STORY_MATRICES = (1, 2, 3, 7, 8, 9)  # flag matrices that live across rooms (see world section)
+
+
+def if_blocks(cmds):
+    """IF blocks of a script as event.c runs them: [(true part start, end, [condition commands])]. A
+    bhIfelCk at o with length L tests the conditions that follow it; its true part is [o+2, o+L)."""
+    blocks = []
+    for j, (o, _, c) in enumerate(cmds):
+        if c[0] != 0x01:
+            continue
+        conds = []
+        for o2, _, c2 in cmds[j + 1:]:
+            if c2[0] not in CONDITION_OPS:
+                break
+            conds.append(c2)
+        blocks.append((o + 2, o + c[1], conds))
+    return blocks
+
+
+def item_uses(room):
+    """Where items are used in this room, from the scripts: [(item id, name, zone or None, floor or None)]
+    for every bhUseItemCheck, with the zone test and the floor test (standing on floor N) of the IF
+    blocks whose true part encloses it (byte ranges as event.c runs them; one sweep per script). A use
+    with a floor test is "stand in floor area N, then Use it from the inventory". Generic decoder."""
+    out, seen = [], set()
+    for script in room.scripts():
+        cmds = list(room.commands(script))
+        blocks = sorted(if_blocks(cmds))
+        stack, nxt = [], 0
+        for o, depth, c in cmds:
+            while nxt < len(blocks) and blocks[nxt][0] <= o:
+                stack.append(blocks[nxt])
+                nxt += 1
+            stack = [blk for blk in stack if o < blk[1]]
+            if c[0] != 0x10:
+                continue
+            zone = floor = None
+            story = []  # story-flag conditions of the enclosing IF blocks: when this use becomes possible
+            for start, end, conds in reversed(stack):
+                for cc in conds:
+                    if cc[0] == 0x04 and cc[1] in STORY_MATRICES:
+                        story.append((cc[1], (cc[2] | (cc[3] << 8)) & 0x3ff, 1 - cc[5]))
+                    if cc[0] == 0x04 and cc[1] == 10 and len(cc) > 5 and cc[5] == 0:
+                        if (cc[2] & 0xff) == 23 and zone is None:
+                            zone = cc[4]
+                        elif (cc[2] & 0xff) == 22 and floor is None:
+                            floor = cc[4]
+                    elif cc[0] == 0x06 and cc[1] == 20 and cc[2] == 0 and zone is None:
+                        zone = cc[3]
+            key = (c[1], zone, floor)
+            if key not in seen:
+                seen.add(key)
+                out.append((c[1], ITEMS.get(c[1], str(c[1])), zone, floor))
+                USE_STORY[(room.name, c[1], zone, floor)] = tuple(story)
+    return out
+
+
+# (room, item, zone, floor) -> story-flag conditions [(matrix, bit, value)] the use needs (item_uses).
+USE_STORY = {}
+
+
+def use_ready(room, item, zone, floor, state):
+    """True when the story flags a use site needs hold now; False when one does not (the use comes later
+    in the story); None when unknown (the use was not decoded with its conditions)."""
+    conds = USE_STORY.get((room[:7], item, zone, floor))
+    if conds is None:
+        return None
+    bits = flag_bits(state)
+    return all(bits.get((m, b), 0) == v for m, b, v in conds)
+
+
+@functools.lru_cache(maxsize=1)
+def all_item_uses():
+    """Use sites of every item over all room scripts: {item id: [(room, zone or None, floor or None)]}.
+    Ammunition is left out (its use checks are reload paths, not puzzle sites)."""
+    out = {}
+    types = item_types()
+    for name in sorted(os.listdir(os.path.join(ROOT, 'data/rooms'))):
+        if not name.endswith('.RDT'):
+            continue
+        try:
+            room = Room(name)
+            uses = item_uses(room)
+        except Exception:
+            continue
+        for item, _, zone, floor in uses:
+            if item < len(types) and types[item] & 0x2:
+                continue
+            out.setdefault(item, []).append((room.name, zone, floor))
+    return out
 
 
 @functools.lru_cache(maxsize=1)
@@ -376,27 +421,6 @@ def guns():
                     and not types[target] & 2 and ITEMS.get(target):  # 150+: loaded-ammo variants
                 out.add(target)
     return frozenset(out)
-
-
-@functools.lru_cache(maxsize=1)
-def all_item_uses():
-    """Use sites of every item over all room scripts: {item id: [(room, zone or None)]}. Read once from the
-    game data (data/rooms/*.RDT); a cache for the driver, no room knowledge in the code."""
-    out = {}
-    for name in sorted(os.listdir(os.path.join(ROOT, 'data/rooms'))):
-        if not name.endswith('.RDT'):
-            continue
-        try:
-            room = Room(name)
-            uses = item_uses(room)
-        except Exception:
-            continue
-        types = item_types()
-        for item, _, zone, floor in uses:
-            if item < len(types) and types[item] & 0x2:
-                continue  # ammunition: its use checks are reload/combine paths, not puzzle sites
-            out.setdefault(item, []).append((room.name, zone, floor))
-    return out
 
 
 @functools.lru_cache(maxsize=None)
@@ -559,7 +583,6 @@ def all_box_places():
 # Story flags that live across rooms (event.c flag matrices): 1 ev_flg, 2 ky_flg, 3 ed_flg, 7 it_flg,
 # 8 mp_flg, 9 ic_flg. Matrix 4 (rm_flg) is cleared on every room load (system.c:189); 5, 6, 10-12 are
 # states of the running game, not progress.
-STORY_MATRICES = (1, 2, 3, 7, 8, 9)
 
 
 def room_node(name):

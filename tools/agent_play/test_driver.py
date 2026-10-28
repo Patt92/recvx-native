@@ -1407,6 +1407,21 @@ class DriverTests(unittest.TestCase):
             drv.memory['rooms']['002'] = dict(visited=True, items_left=[])
             self.assertEqual(drv.room_status('002', d), 'a goal is there')
 
+    def test_a_use_site_whose_story_flags_do_not_hold_is_later(self):
+        # Live: the model fetched the Hawk Emblem back from a box because "the game uses it here"; the
+        # script needs F[1:123] (later in the story) for that use.
+        import hint
+        drv, _ = self.driver([])
+        hint.item_uses(hint.Room('RM_0090.RDX'))
+        Driver._item_uses_cache = {59: [('RM_0090', None, 7)]}
+        state = dict(self.d, room='RM_0090.RDX', items=[0, (59 << 16) | 1], vm_flags=[], floors=[])
+        self.assertIs(hint.use_ready('RM_0090', 59, None, 7, state), False)
+        line = drv.item_use_lines(dict(room='RM_0090', inv=[[1, 59, 1, 'Hawk Emblem']]), state)[0]
+        self.assertIn('its use comes later in the story', line)
+        ready = dict(state, vm_flags=[[1, 3, 0x80000000 >> (123 - 96)]])
+        self.assertIs(hint.use_ready('RM_0090', 59, None, 7, ready), True)
+        self.assertIn('is used at: this room', drv.item_use_lines(dict(room='RM_0090', inv=[[1, 59, 1, 'Hawk Emblem']]), ready)[0])
+
     def test_describe_change_names_what_moved(self):
         from driver import describe_change
         names = {55: 'Lighter', 145: 'Playing Manual', 9: 'Handgun'}
