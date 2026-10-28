@@ -34,7 +34,7 @@ from play import Play, PlayError  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PROMPT = HERE / 'system_prompt.md'
-HINT_CMDS = ('room', 'zone', 'blocked', 'event', 'msg', 'why', 'rules')
+HINT_CMDS = ('room', 'zone', 'blocked', 'event', 'msg', 'why', 'rules', 'near', 'uses')
 # Owners in which the game plays by itself; asking the model there only costs time.
 PASSIVE = {'CINEMATIC', 'DOOR', 'VIDEO'}
 # Longest note kept as the model's memory (the prompt asks for at most this many characters).
@@ -301,7 +301,7 @@ def describe_change(before, after, action, result, names):
     return f'Last action: {action_text(action)} -> {result}. Changed: {what}.'
 
 
-MACROS = ('explore_room', 'collect_items', 'satisfy_gate', 'goto_room')
+MACROS = ('explore_room', 'collect_items', 'satisfy_gate', 'goto_room', 'fight')
 
 
 def item_names_of(d, names):
@@ -354,10 +354,14 @@ def trim(obs):
 
 
 class Driver:
+    _item_uses_cache = None  # hint.all_item_uses(), read once per process
+
     def __init__(self, play, client, *, tools=True, window=8, seconds=6.0, max_tool_calls=3, log=None,
-                 out=sys.stdout, save_rooms=3, repeat_limit=2, skip_videos=False, alert_after=20):
+                 out=sys.stdout, save_rooms=3, repeat_limit=2, skip_videos=False, alert_after=20,
+                 context_chars=0):
         self.play, self.client, self.use_tools = play, client, tools
         self.window, self.seconds, self.max_tool_calls = window, seconds, max_tool_calls
+        self.context_chars = int(context_chars or 0)  # request size cap in characters (~4 per token)
         self.system = PROMPT.read_text()
         self.history = []          # [user, assistant] pairs of earlier decisions, append-only
         self.note = ''
@@ -385,6 +389,14 @@ class Driver:
         # expected outcome assumed; it is used when the outcome matches, else discarded.
         self.prefetch_thread, self.prefetched = None, None
         self.deferred = None        # an expectation to re-check once the game hands control back (doors, scenes)
+        self.reasoning_cuts = 0     # replies that were all reasoning and no action (thinking left on)
+        self._door_graph = None     # hint.door_graph(): every door of every room from the RDT files
+        # Memory across runs, reloads and game overs: <dir>/memory.json (what brought progress, what
+        # did nothing, how the player died). Short lines from this driver's own observations.
+        self.memory_path = (Path(log).parent / 'memory.json') if log else None
+        self.memory = self.load_memory()
+        self._death_noted = False
+        self._item_uses = None      # item id -> [(room, zone, floor)] from all room scripts (class cache)
         # Run journal: what happened in this run, shown with every decision (no game knowledge, only
         # what the game itself showed): per room the zones read and their answers, open items/doors,
         # important texts (locks, needs, codes) and the causes of events that reacted to the player.
@@ -428,7 +440,7 @@ class Driver:
                 if cmd not in HINT_CMDS:
                     return 'error: cmd must be one of ' + ', '.join(HINT_CMDS)
                 argv = [str(a) for a in args.get('args') or []]
-                if cmd in ('room', 'zone', 'blocked', 'why', 'rules'):
+                if cmd in ('room', 'zone', 'blocked', 'why', 'rules', 'near', 'uses'):
                     argv.append(str(self.play.auto))
                 elif cmd in ('event', 'msg') and len(argv) == 1:
                     # hint.py would read the room from build/play/auto.json; use this driver's state.
@@ -443,7 +455,17 @@ class Driver:
 
     # --- one model decision ----------------------------------------------------------------------------
     def messages(self, user):
-        return [{'role': 'system', 'content': self.system}] + self.history + [user]
+        """System prompt, the kept decisions, the current request; the oldest decisions are dropped in
+        user+assistant pairs until the whole request fits `context_chars` (RECVX_LLM_CONTEXT_CHARS or
+        --context-chars, 0 = no limit). The newest request is never cut."""
+        history = self.history
+        if self.context_chars:
+            fixed = len(self.system) + len(user.get('content') or '')
+            while history and fixed + sum(len(m.get('content') or '') for m in history) > self.context_chars:
+                history = history[2:]
+            if history is not self.history:
+                self.history = history  # cut for good: the cached prefix stays stable from here on
+        return [{'role': 'system', 'content': self.system}] + history + [user]
 
     def remember_texts(self, obs):
         """Keep the last few texts the game showed: a hint read on one page must survive the next screen."""
@@ -629,10 +651,7 @@ class Driver:
             out.append('Near you: ' + ' | '.join(near) + '.')
         if away:
             out.append('Not reachable from where you stand now: ' + ' | '.join(away) + '.')
-        enemies = obs.get('enemies') or []
-        if enemies:
-            out.append('Enemies: ' + ', '.join(f"#{e['i']} {e.get('d')} m {e.get('state')}" +
-                                                (' IN GRAB REACH' if e.get('reach') else '') for e in enemies) + '.')
+        out += self.combat_lines(obs)
         if self.since_progress >= 5:
             out.append(f'No progress for {self.since_progress} decisions: do something you have not tried.')
         return out
@@ -711,6 +730,190 @@ class Driver:
             out.append(line)
         return out
 
+    def item_use_lines(self, obs, d):
+        """Where the carried items are used, from the room scripts of the whole game (hint.item_uses:
+        bhUseItemCheck sites, attributed to the zone whose examine block holds them). Read once."""
+        if Driver._item_uses_cache is None:  # once per process (1.5 s over all rooms)
+            try:
+                import hint
+                Driver._item_uses_cache = hint.all_item_uses()
+            except Exception:
+                Driver._item_uses_cache = {}
+        self._item_uses = Driver._item_uses_cache
+        out = []
+        room = (obs.get('room') or '')[:7]
+        floors = d.get('floors') or []
+        for row in obs.get('inv') or []:
+            if len(row) < 4 or row[1] not in self._item_uses:
+                continue
+            sites = []
+            for where, zone, floor in self._item_uses[row[1]]:
+                place = 'this room' if where == room else where
+                if zone is not None:
+                    place += f' zone {zone} (examine it)'
+                elif floor is not None:
+                    area = ''
+                    if where == room and floor < len(floors):
+                        f = floors[floor]
+                        x0, z0 = f['p'][0], f['p'][2]
+                        area = f" (x {x0:.0f}..{x0 + f['e'][0]:.0f}, z {z0:.0f}..{z0 + f['e'][2]:.0f}; stand in it, then Use it from the inventory)"
+                    place += f' while standing on floor area {floor}' + (area or ' (Use it from the inventory there)')
+                else:
+                    place += ' (Use it from the inventory)'
+                sites.append(place)
+            out.append(f"{row[3]} (slot {row[0]}) is used at: " + ', '.join(sites) + ' (from the game data)')
+        return out
+
+    # eneset.c bhJumpEnemy[ep->id]: the identity is the enemy module number; names from the port ledger.
+    ENEMY_NAMES = {1: 'Zombie', 2: 'Gulp Worm', 3: 'Black Widow spider', 4: 'Zombie Dog', 6: 'Moth',
+                   15: 'Nosferatu', 17: 'Steve monster'}
+
+    def combat_lines(self, obs):
+        """Enemies and whether a fight is a reasonable choice: equipped weapon and rounds, spare ammo,
+        hp and healing items against the enemies' hp. Numbers from the state; the verdict is a plain
+        rule of thumb the model may override."""
+        enemies = obs.get('enemies') or []
+        if not enemies:
+            return []
+        d, _, _ = self.play.read()
+        ids = {e['index']: e.get('identity') for e in d.get('enemies', [])}
+        parts = []
+        for e in enemies:
+            name = self.ENEMY_NAMES.get(ids.get(e['i']), f"enemy type {ids.get(e['i'])}")
+            parts.append(f"#{e['i']} {name} hp {e.get('hp')} at {e.get('d')} m, {e.get('state')}"
+                         + (', lying' if e.get('posture') == 'lying' else '')
+                         + (', no line of sight' if e.get('sight') is False else '')
+                         + (' IN GRAB REACH' if e.get('reach') else ''))
+        out = ['Enemies: ' + '; '.join(parts) + '.']
+        eq = obs.get('equipped') or []
+        rounds = eq[1] if len(eq) > 1 and isinstance(eq[1], int) else 0
+        spare = 0
+        try:
+            slot = self.play.ammo_slot(d)
+            spare = next((row[2] for row in obs.get('inv', []) if row[0] == slot), 0)
+        except Exception:
+            pass
+        hp = obs.get('hp') or 0
+        heals = len(obs.get('heal') or [])
+        active = [e for e in enemies if e.get('state') in ('active', 'grabbing')]
+        enemy_hp = sum(e.get('hp') or 0 for e in active)
+        need = max(1, enemy_hp // 10)  # a handgun hit takes roughly 10-15 hp; misses happen
+        have = rounds + spare
+        has_gun = any(len(r) > 1 and r[1] == 9 for r in obs.get('inv', []))
+        if not eq:
+            verdict = 'COMBAT NOT POSSIBLE: no weapon equipped' + (' (equip the handgun first)' if has_gun else
+                                                                   '; avoid, run past, leave through a door')
+        elif not active:
+            verdict = 'no active enemy near'
+        elif hp < 40 and not heals:
+            verdict = f'COMBAT RISKY: hp {hp} and nothing to heal; keep distance, leave through a door'
+        elif have < need // 2:
+            verdict = f'COMBAT RISKY: {have} rounds for ~{enemy_hp} enemy hp; shoot only what blocks the way'
+        else:
+            verdict = (f'COMBAT POSSIBLE: {rounds} rounds loaded + {spare} spare, hp {hp}, {heals} healing item(s) '
+                       f'vs ~{enemy_hp} enemy hp. Fire at 8-20 m with line of sight, step back when one is in '
+                       'reach, reload when empty; or send the fight macro.')
+        out.append(verdict)
+        return out
+
+    def neighbour_lines(self, obs):
+        """Rooms within three doors from the RDT door tables, with the items their files list for rooms
+        not yet visited: what lies ahead. Static game data, no run knowledge."""
+        if self._door_graph is None:
+            try:
+                import hint
+                self._door_graph = hint.door_graph()
+            except Exception:
+                self._door_graph = {}
+        room = (obs.get('room') or '')[:7]
+        if not room or room not in self._door_graph:
+            return []
+        try:
+            import hint
+            near = hint.neighbours(self._door_graph, room, 3)
+        except Exception:
+            return []
+        lines = []
+        for name, dist, via in near[:12]:
+            visited = name in self.journal_rooms
+            items = ''
+            if not visited:
+                try:
+                    ids = hint.room_static(name + '.RDT')['items']
+                    names = [hint.ITEMS.get(i, str(i)) for i in ids if i]
+                    if names:
+                        items = '; items in its file: ' + ', '.join(names[:6])
+                except Exception:
+                    pass
+            lines.append(f"{name} ({dist} door{'s' if dist > 1 else ''} away via zone {via}, "
+                         f"{'visited' if visited else 'not visited'}{items})")
+        return ['Nearby rooms: ' + ' | '.join(lines)] if lines else []
+
+    # --- memory across runs ------------------------------------------------------------------------------
+    def load_memory(self):
+        empty = dict(worked=[], failed=[], deaths=[])
+        if not self.memory_path or not self.memory_path.exists():
+            return empty
+        try:
+            m = json.loads(self.memory_path.read_text())
+            return {k: [str(x) for x in m.get(k, [])] for k in empty}
+        except (ValueError, OSError, AttributeError):
+            return empty
+
+    def save_memory(self):
+        if not self.memory_path:
+            return
+        try:
+            self.memory_path.write_text(json.dumps(self.memory, indent=1, ensure_ascii=False))
+        except OSError:
+            pass
+
+    def remember_outcome(self, kind, line):
+        """kind worked|failed|deaths; each line once, newest last, 40 per kind."""
+        line = ' '.join(str(line).split())[:160]
+        if not line or line in self.memory[kind]:
+            return
+        self.memory[kind] = (self.memory[kind] + [line])[-40:]
+        self.save_memory()
+
+    def note_progress(self, room, action, change):
+        """An action that changed the world (walls, zones, items, room) is worth keeping."""
+        if not change or 'Changed: ' not in change:
+            return
+        what = change.split('Changed: ', 1)[1].rstrip('.')
+        if what.startswith('nothing'):
+            return
+        if any(k in what for k in ('walls opened', 'zones switched', 'now in your inventory', 'room changed')):
+            self.remember_outcome('worked', f'{room}: {action_text(action)} -> {what}')
+
+    def note_death(self, obs):
+        d, _, _ = self.play.read()
+        room = (d.get('room') or '')[:7]
+        ids = {e['index']: e.get('identity') for e in d.get('enemies', [])}
+        near = [self.ENEMY_NAMES.get(ids.get(e['i']), 'an enemy') for e in (obs.get('enemies') or [])[:2]]
+        eq = obs.get('equipped') or ['no weapon']
+        last = '; '.join(l.split(' -> ')[0].split(': ', 1)[-1] for l in self.history_lines[-3:])
+        self.remember_outcome('deaths', f"{room}: died near {', '.join(near) or 'no enemy in view'} with {eq[0]}, "
+                                        f"{len(obs.get('heal') or [])} healing items; last actions: {last}")
+
+    def memory_lines(self, obs):
+        m = self.memory
+        if not (m['worked'] or m['failed'] or m['deaths']):
+            return []
+        room = (obs.get('room') or '')[:7]
+        here = lambda lines: [l for l in lines if l.startswith(room)][-4:]
+        out = []
+        if here(m['worked']):
+            out.append('Memory, what brought progress here in earlier runs: ' + ' | '.join(here(m['worked'])))
+        if here(m['deaths']):
+            out.append('Memory, deaths here: ' + ' | '.join(here(m['deaths'])) + ' (do not repeat that)')
+        if here(m['failed']):
+            out.append('Memory, what did nothing here: ' + ' | '.join(here(m['failed'])))
+        elsewhere = [l for l in m['worked'] if not l.startswith(room)][-3:]
+        if elsewhere:
+            out.append('Memory, progress elsewhere: ' + ' | '.join(elsewhere))
+        return out
+
     def board(self, obs, d):
         """Open obstacles and the door graph over the rooms of this run, from rules, facts and the
         journal only (no room knowledge)."""
@@ -728,6 +931,9 @@ class Driver:
             low = fact.lower()
             if any(w in low for w in ('locked', 'need', 'must', 'require', 'missing', 'only')):
                 out.append('fact: ' + fact)
+        out += self.item_use_lines(obs, d)
+        out += self.neighbour_lines(obs)
+        out += self.memory_lines(obs)
         stage = room[3] if len(room) > 3 else '0'
         for visited in self.journal_order:
             j = self.journal_rooms.get(visited, {})
@@ -780,8 +986,9 @@ class Driver:
                 turn.append({'role': 'user', 'content': 'Lookup budget used up. Reply now with exactly one '
                                                         'JSON game action (press/interact/move/fire/shake/keys/run/wait/use/reload).'})
             started = time.monotonic()
-            message, u = self.client.complete(self.messages(user) + turn,
-                                              TOOLS if self.use_tools and not final else None, budget)
+            request = self.messages(user) + turn
+            self.last_prompt_chars = sum(len(m.get('content') or '') for m in request)
+            message, u = self.client.complete(request, TOOLS if self.use_tools and not final else None, budget)
             llm_ms += (time.monotonic() - started) * 1000
             for k, v in u.items():
                 if isinstance(v, (int, float)):
@@ -809,6 +1016,14 @@ class Driver:
                 finish = message.get('_finish')
                 thought = message.get('reasoning_content') or message.get('reasoning') or ''
                 self.bad_replies.append(dict(finish=finish, text=(text or thought)[:160]))
+                if thought and not text.strip() and finish == 'length':
+                    self.bad_replies[-1]['reasoning'] = True
+                    self.reasoning_cuts += 1
+                    if self.reasoning_cuts == 3:
+                        print('WARNING: the model spends its whole reply budget on reasoning and sends no action. '
+                              'Turn thinking off at the endpoint (ollama /v1: RECVX_LLM_EXTRA_BODY={"reasoning_effort":"none"}; '
+                              'llama.cpp/vLLM: {"chat_template_kwargs":{"enable_thinking":false}}) or raise --max-tokens.',
+                              file=self.out, flush=True)
                 action = salvage_cut(text) if finish == 'length' else None
                 if action is not None:
                     # Cut inside the trailing note: the action is complete, only the note is lost.
@@ -1361,7 +1576,7 @@ class Driver:
             return None, dict(op='wait', ticks=1), {}, 0.0, dict(llm_ms=0, usage={}, auto=True)
         else:
             user, action, usage, llm_ms = self.decide(view, feedback, self.last_owner)
-            entry = dict(llm_ms=round(llm_ms), usage=usage)
+            entry = dict(llm_ms=round(llm_ms), usage=usage, prompt_chars=getattr(self, 'last_prompt_chars', 0))
             if self.bad_replies:
                 entry['bad_replies'] = self.bad_replies
         if action.get('op') == 'plan' or action.get('op') in MACROS:
@@ -1467,6 +1682,49 @@ class Driver:
                 step['_closed'] = True
                 return dict(op='press', key='cancel'), None
             return None, 'done'
+        if op == 'fight':
+            if owner == 'GRAB':
+                return dict(op='shake', presses=20), None
+            if dialog:
+                if dialog.get('ready') and not dialog.get('choice'):
+                    return dict(op='press', key='confirm'), None
+                return None, 'a question interrupts the fight'
+            if owner != 'FREE':
+                return None, f'not in free play ({owner})'
+            active = [e for e in (view.get('enemies') or []) if e.get('state') in ('active', 'grabbing')]
+            if not active:
+                return None, 'done'
+            eq = view.get('equipped') or []
+            if not eq:
+                guns = [r[0] for r in view.get('inv', []) if len(r) > 1 and r[1] == 9]
+                if guns:
+                    return dict(op='equip', item=guns[0]), None
+                return None, 'no weapon: cannot fight'
+            hp, heals = view.get('hp') or 0, view.get('heal') or []
+            if hp < 50 and heals and not any(e.get('reach') for e in active):
+                return dict(op='use', item=heals[0][0]), None
+            rounds = eq[1] if len(eq) > 1 and isinstance(eq[1], int) else 0
+            if rounds <= 0:
+                try:
+                    self.play.ammo_slot(self.play.read()[0])
+                except PlayError:
+                    return None, 'out of ammo: cannot fight'
+                return dict(op='reload'), None
+            nearest = min(active, key=lambda e: e.get('d', 99))
+            if nearest.get('reach'):
+                # Out of grab reach first: 10 units straight away from the enemy, snapped to a free point.
+                d, _, _ = self.play.read()
+                px, pz = d['actor'][0], d['actor'][2]
+                ex, ez = nearest['at']
+                n = math.hypot(px - ex, pz - ez) or 1
+                try:
+                    pts = self.play.free_near(d, [px + (px - ex) / n * 10, pz + (pz - ez) / n * 10], limit=1)
+                except Exception:
+                    pts = []
+                if pts:
+                    return dict(op='move', to=pts[0], danger=False, run=True), None
+            return dict(op='fire', shots=3 if nearest.get('d', 99) < 20 else 2,
+                        low=nearest.get('posture') == 'lying', target=nearest['i']), None
         if op == 'goto_room':
             target = step.get('room')
             room = (view.get('room') or '')[:7]
@@ -1654,6 +1912,9 @@ class Driver:
                 retry = gameover.get('retry_play_time')
                 newer = self.snapshot and self.snapshot.get('play_time') is not None and \
                     (retry is None or retry < 0 or self.snapshot['play_time'] > retry)
+                if not self._death_noted:
+                    self._death_noted = True
+                    self.note_death(obs)
                 if not gameover.get('prompt'):
                     action, entry = {'op': 'wait'}, dict(auto=True)
                 elif newer and self.snapshot_tried != retry:
@@ -1680,6 +1941,7 @@ class Driver:
                 entry.update(owner=owner, action=action, act_ms=round(act_ms), result=feedback['result'])
                 self.record(entry)
                 continue
+            self._death_noted = False
             playing = 'VIDEO' in obs.get('owner', '').split()
             if not playing:
                 self.video_skipped = False
@@ -1757,6 +2019,12 @@ class Driver:
                 if feedback['result'] == 'saved':
                     self.snapshot = dict(room=feedback.get('snapshot_room'), play_time=self.play.read()[0].get('play_time'))
             self.move_zone = self.zone_of_move(room_before, action, feedback['result'])
+            if not entry.get('auto'):
+                self.note_progress((room_before or '')[:7], action, self.last_change)
+                if feedback['result'] == 'no_interaction_observed' and action.get('op') == 'interact':
+                    v = self.zone_log((room_before or '')[:7]).get(action.get('zone')) or {}
+                    if v.get('n', 0) >= 3:
+                        self.remember_outcome('failed', f"{(room_before or '')[:7]}: examining zone {action.get('zone')} did nothing (x{v['n']})")
             if not entry.get('auto') and (expect is not None or planned):
                 try:
                     import hint
@@ -1819,6 +2087,10 @@ def main():
     ap.add_argument('--dir', default='build/play')
     ap.add_argument('--steps', type=int, default=0, help='0 = until stopped')
     ap.add_argument('--window', type=int, default=8, help='decisions kept in the prompt (cut in halves)')
+    ap.add_argument('--context-chars', type=int, default=int(os.environ.get('RECVX_LLM_CONTEXT_CHARS', '0') or 0),
+                    help='cap on the request size in characters (~4 per token); the oldest kept decisions are '
+                         'dropped first, the system prompt and the current request never. 0 = off. '
+                         'Also RECVX_LLM_CONTEXT_CHARS in .env')
     ap.add_argument('--temperature', type=float, default=0.2)
     ap.add_argument('--max-tokens', type=int, default=200)
     ap.add_argument('--extra-body', default=os.environ.get('RECVX_LLM_EXTRA_BODY', ''),
@@ -1847,7 +2119,7 @@ def main():
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
                     log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms, skip_videos=a.skip_videos,
                     alert_after=a.alert_after,
-                    repeat_limit=a.repeat_limit)
+                    repeat_limit=a.repeat_limit, context_chars=a.context_chars)
     if a.dry_run:
         obs = play.observe()
         user = {'role': 'user', 'content': json.dumps(dict(result='start', state=trim(obs)), separators=(',', ':'))}

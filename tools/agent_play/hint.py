@@ -13,6 +13,8 @@ Reads only data/rooms/*.RDT, native/ and the semantic reference src/ps2/veronica
   hint.py rules [auto.json]           item gates of this room: what happens with / without carried items
   hint.py why n [auto.json]           why room event n runs: its start conditions, what sets those flags
                                       (items you carry), and what the event does (texts, voice, items)
+  hint.py near [RM_xxxx|auto.json]    rooms within three doors (RDT door tables) and the items their files list
+  hint.py uses [auto.json]            where the carried items are used (bhUseItemCheck sites of all rooms)
   hint.py op <hex|bhName>             where a script opcode is implemented (port and original reference)
   hint.py grep <regex>                bounded search in native/ and src/ps2/veronica/prog/ (max 40 hits)
 """
@@ -291,6 +293,148 @@ def zone_effects(room, i, state, limit=420):
     if not text and needs:
         text = 'nothing now; would need ' + ' or '.join(needs[:3])
     return text[:limit] + ('...' if len(text) > limit else '')
+
+
+def item_uses(room):
+    """Where items are used in this room, from the scripts: [(item id, name, zone or None, floor or None)]
+    for every bhUseItemCheck, with the zone test and the floor test (standing on floor N) whose IF
+    blocks enclose it. One linear pass: Room.commands yields an IF's conditions and body one level
+    deeper than the IF, so a test at depth k guards everything deeper or equal until a command at a
+    lower depth (bhEndif, the next IF) or a bhElseCk at its own depth. Generic decoder."""
+    out, seen = [], set()
+    for script in room.scripts():
+        zone_at, floor_at = {}, {}  # depth -> value of the test still in force
+        testing = {}                # depth -> still in the condition list of the IF that opened it
+        for o, depth, c in room.commands(script):
+            for table in (zone_at, floor_at):
+                for k in [k for k in table if k > depth or (k == depth and c[0] == 0x02)]:
+                    table.pop(k, None)
+            if c[0] == 0x01:
+                testing[depth + 1] = True
+                continue
+            if c[0] not in CONDITION_OPS:
+                testing[depth] = False  # a condition op after the body began guards nothing (bhItmCk at top level)
+            if not testing.get(depth):
+                if c[0] == 0x10:
+                    zone = zone_at[max(zone_at)] if zone_at else None
+                    floor = floor_at[max(floor_at)] if floor_at else None
+                    key = (c[1], zone, floor)
+                    if key not in seen:
+                        seen.add(key)
+                        out.append((c[1], ITEMS.get(c[1], str(c[1])), zone, floor))
+                continue
+            if c[0] == 0x04 and c[1] == 10 and len(c) > 5 and c[5] == 0:
+                if (c[2] & 0xff) == 23:
+                    zone_at[depth] = c[4]
+                elif (c[2] & 0xff) == 22:
+                    floor_at[depth] = c[4]
+            elif c[0] == 0x06 and c[1] == 20 and c[2] == 0:
+                zone_at[depth] = c[3]
+            elif c[0] == 0x0e and len(c) > 4:
+                zone_at[depth] = c[4]
+            elif c[0] == 0x10:  # a use test inside an IF's condition list: the use site itself
+                zone = zone_at[max(zone_at)] if zone_at else None
+                floor = floor_at[max(floor_at)] if floor_at else None
+                key = (c[1], zone, floor)
+                if key not in seen:
+                    seen.add(key)
+                    out.append((c[1], ITEMS.get(c[1], str(c[1])), zone, floor))
+    return out
+
+
+_ITEM_TYPES = None
+
+
+def item_types():
+    """itemdata[].type from native/item_tables.c (a data table, no original code): bit 0x2 = ammunition."""
+    global _ITEM_TYPES
+    if _ITEM_TYPES is None:
+        src = open(os.path.join(ROOT, 'native/item_tables.c')).read()
+        i = src.index('const ITEM_WORK itemdata[156]')
+        rows = re.findall(r'\{\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\}', src[i:src.index('};', i)])
+        _ITEM_TYPES = [int(r[2]) for r in rows]
+    return _ITEM_TYPES
+
+
+def all_item_uses():
+    """Use sites of every item over all room scripts: {item id: [(room, zone or None)]}. Read once from the
+    game data (data/rooms/*.RDT); a cache for the driver, no room knowledge in the code."""
+    out = {}
+    for name in sorted(os.listdir(os.path.join(ROOT, 'data/rooms'))):
+        if not name.endswith('.RDT'):
+            continue
+        try:
+            room = Room(name)
+            uses = item_uses(room)
+        except Exception:
+            continue
+        types = item_types()
+        for item, _, zone, floor in uses:
+            if item < len(types) and types[item] & 0x2:
+                continue  # ammunition: its use checks are reload/combine paths, not puzzle sites
+            out.setdefault(item, []).append((room.name, zone, floor))
+    return out
+
+
+def room_static(name):
+    """Zones and items of a room from its RDT alone (no runtime state): the same tables EventVm reads
+    (room offset +0x1c/+0x9c zones of 36 bytes, +0x10/+0x90 items). For rooms the player has not
+    entered: doors with targets, items lying there, text zones with their messages."""
+    room = Room(name)
+    d, u32 = room.d, room.u32
+    ro = u32(16)
+    count, offset = u32(ro + 0x9c), u32(ro + 0x1c)
+    zones = []
+    for i in range(min(count, 4096)):
+        p = offset + i * 36
+        zones.append(dict(index=i, flags=d[p], type=d[p + 1], floor=struct.unpack_from('<b', d, p + 3)[0],
+                          attribute=u32(p + 4), position=list(struct.unpack_from('<3f', d, p + 8)),
+                          extent=list(struct.unpack_from('<3f', d, p + 20)), parameters=list(d[p + 32:p + 36])))
+    icount, ioffset = u32(ro + 0x90), u32(ro + 16)
+    items = [struct.unpack_from('<H', d, ioffset + i * 36 + 4)[0] for i in range(min(icount, 4096))]
+    return dict(room=room.name, zones=zones, items=items)
+
+
+def door_graph():
+    """Every door of every room from the RDT files: {room: [(zone, stage, target room number)]}. The
+    initial zone flags decide whether a door is active at room start; scripts may switch others on."""
+    out = {}
+    for name in sorted(os.listdir(os.path.join(ROOT, 'data/rooms'))):
+        if not name.endswith('.RDT'):
+            continue
+        try:
+            st = room_static(name)
+        except Exception:
+            continue
+        out[st['room']] = [(z['index'], z['parameters'][0], z['parameters'][1], bool(z['flags'] & 1))
+                           for z in st['zones'] if z['type'] == 0]
+    return out
+
+
+def neighbours(graph, room, radius=3):
+    """Rooms within `radius` doors of `room` (BFS over the door graph, active doors only):
+    [(room, distance, via zone of the first hop)]."""
+    room = room[:7]
+    if room not in graph:
+        return []
+    stage = room[3]
+    name = lambda stage_, n: f'RM_{stage_}{n:02d}0'
+    seen, queue, out = {room}, [(room, 0, None)], []
+    while queue:
+        here, dist, first = queue.pop(0)
+        if dist >= radius:
+            continue
+        for zone, stage_no, target, active in graph.get(here, []):
+            if not active:
+                continue
+            nxt = name(str(stage_no) if here == room or stage_no != int(stage) else stage, target)
+            if nxt in seen or nxt not in graph:
+                continue
+            seen.add(nxt)
+            hop = first if first is not None else zone
+            out.append((nxt, dist + 1, hop))
+            queue.append((nxt, dist + 1, hop))
+    return out
 
 
 def zone_labels(room, state):
@@ -643,6 +787,20 @@ def main():
     elif c == 'rules':
         st = load_state(a[1] if len(a) > 1 else auto); print(json.dumps(room_rules(Room(st['room']), st), indent=1))
     elif c == 'msg': room = Room(a[2] if len(a) > 2 else load_state(auto)['room']); print(room.message(int(a[1])))
+    elif c == 'near':
+        st = load_state(a[2] if len(a) > 2 else auto) if not (len(a) > 1 and a[1].startswith('RM_')) else None
+        room = a[1] if len(a) > 1 and a[1].startswith('RM_') else st['room']
+        for name, dist, via in neighbours(door_graph(), room, 3):
+            items = [ITEMS.get(i, str(i)) for i in room_static(name + '.RDT')['items'] if i]
+            print(f"{name}: {dist} door(s) away via zone {via}; items in its file: {', '.join(items) or 'none'}")
+    elif c == 'uses':
+        st = load_state(a[1] if len(a) > 1 else auto)
+        uses = all_item_uses()
+        for v in st.get('items', [])[1:]:
+            if v and ((v >> 16) & 255) in uses:
+                print(ITEMS.get((v >> 16) & 255, '?') + ': ' + ', '.join(
+                    f"{r}" + (f" zone {z}" if z is not None else '') + (f" floor area {f}" if f is not None else '')
+                    for r, z, f in uses[(v >> 16) & 255]))
     elif c == 'op': cmd_op(a[1])
     elif c == 'grep': cmd_grep(a[1])
     else: print(__doc__)

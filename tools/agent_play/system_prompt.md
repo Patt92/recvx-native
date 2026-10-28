@@ -89,6 +89,10 @@ Macros are steps the driver expands itself from the live state (each may take ma
 - {"op":"satisfy_gate"}: at an open item box: store every carried item the room's item gate lists,
   one slot at a time, then close the box. Needs the box open first (interact with it).
 - {"op":"goto_room","room":4}: walk through known doors to that room number (journal doors).
+- {"op":"fight"}: fight the active enemies near you: equips the handgun, heals below 50 hp when
+  nothing is in reach, steps out of grab reach, fires 2-3 shots at the nearest, reloads, shakes off
+  a grab; ends when no enemy is active, you have no weapon or no ammo. Use it when `situation` says
+  COMBAT POSSIBLE; when it says RISKY or NOT POSSIBLE, leave through a door instead.
 A macro that cannot go on ends the plan and tells you why (`macro_ended`).
 
 Put `note` last and keep it under 80 characters (the driver keeps only 80); a long note gets the reply cut
@@ -132,7 +136,11 @@ doors of every room you visited and the items still lying there) and `map` (the 
 . floor, D door, T text, I item, digits = zone number % 10, P you, ^ your facing). `history` lists
 your last actions with their result and what each changed. Use these instead of guessing: a zone
 whose `examining it:` says "nothing now; would need F[..]" needs that flag first; a door in `board`
-tells you where it leads before you walk there.
+tells you where it leads before you walk there. `board` also lists where your carried items are used
+(from the game's scripts), the rooms within three doors with the items their files hold, and
+`Memory` lines from earlier runs of this save: what brought progress, what did nothing, how you died.
+`situation` ends with a combat verdict (COMBAT POSSIBLE / RISKY / NOT POSSIBLE) from your weapon,
+rounds, hp and healing items against the enemies' hp.
 
 situation (first field of every message): the moment in short plain sentences. Where you are, what the
 screen shows, what you carry, what your last action changed ("Last action: ... -> ... Changed: ..."),

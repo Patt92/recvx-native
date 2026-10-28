@@ -73,7 +73,12 @@ class DriverTests(unittest.TestCase):
 
     def driver(self, replies, **kw):
         client = Scripted(replies)
-        return Driver(self.play, client, seconds=.2, out=io.StringIO(), **kw), client
+        drv = Driver(self.play, client, seconds=.2, out=io.StringIO(), **kw)
+        # The game-data tables (door graph, item uses over 205 rooms) are not read in timing-sensitive
+        # tests; the tests of those features set them up themselves.
+        drv._door_graph = {}
+        Driver._item_uses_cache = {}
+        return drv, client
 
     def test_parse_action_tolerates_fences_prose_and_escaped_quotes(self):
         self.assertEqual(parse_action('```json\n{"op":"press","key":"confirm"}\n```'), dict(op='press', key='confirm'))
@@ -779,7 +784,8 @@ class DriverTests(unittest.TestCase):
         r = server.handle(dict(jsonrpc='2.0', id=1, method='initialize', params={}))
         self.assertEqual(r['result']['serverInfo']['name'], 'recvx-play')
         r = server.handle(dict(jsonrpc='2.0', id=2, method='tools/list'))
-        self.assertEqual([t['name'] for t in r['result']['tools']], ['observe', 'act', 'plan', 'zone', 'hint', 'board', 'map'])
+        self.assertEqual([t['name'] for t in r['result']['tools']],
+                         ['observe', 'act', 'plan', 'zone', 'hint', 'board', 'map', 'near', 'memory'])
         self.assertIsNone(server.handle(dict(jsonrpc='2.0', method='notifications/initialized')))
         with self.ticking():
             r = server.handle(dict(jsonrpc='2.0', id=3, method='tools/call',
@@ -885,6 +891,117 @@ class DriverTests(unittest.TestCase):
         self.assertIn('No weapon at all', text_)
         text_ = ' '.join(drv.situation(dict(room='RM_TEST', at=[0, 0], hp=1, owner='FREE', inv=[[3, 9, 15, 'Handgun']])))
         self.assertIn('Handgun in slot 3: equip it', text_)
+
+    def test_item_uses_come_from_the_scripts_with_zone_or_floor(self):
+        import hint
+        uses = hint.item_uses(hint.Room('RM_0080.RDX'))
+        self.assertEqual([(i, n, z, f) for i, n, z, f in uses], [(56, 'Eagle Plate', None, 3)])
+        drv, _ = self.driver([])
+        d = dict(self.d, floors=[dict(p=[0, 0, 0], e=[1, 0, 1])] * 3 + [dict(p=[10, 0, 20], e=[4, 0, 6])])
+        drv._item_uses = None
+        Driver._item_uses_cache = {56: [('RM_0080', None, 3)], 59: [('RM_0090', 14, None)]}
+        try:
+            lines = drv.item_use_lines(dict(room='RM_0080', inv=[[2, 56, 1, 'Eagle Plate'], [3, 59, 1, 'Hawk Emblem'], [4, 145, 1, 'Manual']]), d)
+        finally:
+            Driver._item_uses_cache = None
+        self.assertEqual(len(lines), 2)
+        self.assertIn('Eagle Plate (slot 2) is used at: this room while standing on floor area 3 (x 10..14, z 20..26; stand in it', lines[0])
+        self.assertIn('Hawk Emblem (slot 3) is used at: RM_0090 zone 14 (examine it)', lines[1])
+
+    def test_reasoning_only_replies_are_marked_and_warned_about(self):
+        think = dict(role='assistant', content='', reasoning_content='Let me think about the door...', _finish='length')
+        drv, client = self.driver([think, think, text(dict(op='wait', ticks=2))] * 3)
+        with self.ticking():
+            drv.run(steps=3)
+        entries = [json.loads(l) for l in (self.directory / 'driver.log').read_text().splitlines()] \
+            if drv.log else []
+        self.assertEqual(drv.reasoning_cuts, 4)  # two cut replies per decision, then the safe default
+        self.assertIn('WARNING: the model spends its whole reply budget on reasoning', drv.out.getvalue())
+        self.assertTrue(all(b.get('reasoning') for b in drv.bad_replies))
+        self.assertGreater(getattr(drv, 'last_prompt_chars', 0), 1000)
+
+    def test_door_graph_neighbours_and_room_static_come_from_the_rdt_files(self):
+        import hint
+        st = hint.room_static('RM_0090.RDT')
+        self.assertEqual([(z['index'], z['parameters'][1]) for z in st['zones'] if z['type'] == 0], [(13, 4), (14, 8)])
+        g = {'RM_0090': [(13, 0, 4, True), (14, 0, 8, True)], 'RM_0040': [(2, 0, 9, True), (5, 0, 11, True)],
+             'RM_0080': [(1, 0, 9, True), (0, 0, 5, False)], 'RM_0110': [], 'RM_0050': []}
+        near = hint.neighbours(g, 'RM_0090.RDX', 3)
+        self.assertEqual(near, [('RM_0040', 1, 13), ('RM_0080', 1, 14), ('RM_0110', 2, 13)])  # inactive door skipped
+        drv, _ = self.driver([])
+        drv._door_graph = g
+        drv.journal_rooms = {'RM_0040': {}}
+        lines = drv.neighbour_lines(dict(room='RM_0090'))
+        self.assertEqual(len(lines), 1)
+        self.assertIn('RM_0040 (1 door away via zone 13, visited)', lines[0])
+        self.assertIn('RM_0080 (1 door away via zone 14, not visited; items in its file: Extinguisher, Eagle Plate)', lines[0])
+
+    def test_combat_verdict_from_weapon_rounds_hp_and_heals(self):
+        drv, _ = self.driver([])
+        self.d['enemies'] = [dict(index=0, identity=4, hp=60, position=[5, 0, 5], hidden=False, inactive=False,
+                                  work=dict(mode=[1, 0, 0, 0]))]
+        self.write(self.d)
+        base = dict(room='RM_TEST', enemies=[dict(i=0, hp=60, d=7.1, state='active', sight=True)])
+        lines = drv.combat_lines(dict(base, inv=[[2, 145, 1, 'Manual']], hp=100))
+        self.assertIn('#0 Zombie Dog hp 60 at 7.1 m, active', lines[0])
+        self.assertTrue(lines[1].startswith('COMBAT NOT POSSIBLE: no weapon equipped; avoid'))
+        lines = drv.combat_lines(dict(base, inv=[[2, 9, 15, 'Handgun']], hp=100))
+        self.assertIn('(equip the handgun first)', lines[1])
+        lines = drv.combat_lines(dict(base, inv=[[1, 9, 15, 'Handgun']], equipped=['Handgun', 15], hp=100, heal=[[3, 'Green Herb']]))
+        self.assertTrue(lines[1].startswith('COMBAT POSSIBLE: 15 rounds loaded + 0 spare, hp 100, 1 healing item(s) vs ~60 enemy hp'))
+        lines = drv.combat_lines(dict(base, inv=[[1, 9, 15, 'Handgun']], equipped=['Handgun', 15], hp=30))
+        self.assertTrue(lines[1].startswith('COMBAT RISKY: hp 30 and nothing to heal'))
+        lines = drv.combat_lines(dict(base, inv=[[1, 9, 1, 'Handgun']], equipped=['Handgun', 1], hp=100))
+        self.assertTrue(lines[1].startswith('COMBAT RISKY: 1 rounds for ~60 enemy hp'))
+
+    def test_fight_macro_equips_heals_steps_back_fires_and_ends(self):
+        drv, _ = self.driver([])
+        self.write(self.d)
+        enemy = dict(i=0, hp=60, d=12.0, state='active', at=[12.0, 0.0], sight=True)
+        view = dict(owner='FREE', room='RM_TEST', hp=100, inv=[[2, 9, 15, 'Handgun']], enemies=[enemy])
+        self.assertEqual(drv.expand_macro(dict(op='fight'), view)[0], dict(op='equip', item=2))
+        view.update(inv=[[1, 9, 15, 'Handgun']], equipped=['Handgun', 15])
+        self.assertEqual(drv.expand_macro(dict(op='fight'), view)[0], dict(op='fire', shots=3, low=False, target=0))
+        view.update(enemies=[dict(enemy, d=25.0)])
+        self.assertEqual(drv.expand_macro(dict(op='fight'), view)[0]['shots'], 2)
+        view.update(hp=40, heal=[[3, 'Green Herb']], enemies=[enemy])
+        self.assertEqual(drv.expand_macro(dict(op='fight'), view)[0], dict(op='use', item=3))
+        view.update(hp=100, heal=[], enemies=[dict(enemy, d=5.0, reach=True)])
+        step, _ = drv.expand_macro(dict(op='fight'), view)
+        self.assertEqual(step['op'], 'move'); self.assertFalse(step['danger'])
+        self.assertLess(step['to'][0], 0)   # away from the enemy at x=12
+        self.assertEqual(drv.expand_macro(dict(op='fight'), dict(view, owner='GRAB'))[0], dict(op='shake', presses=20))
+        self.assertEqual(drv.expand_macro(dict(op='fight'), dict(view, enemies=[])), (None, 'done'))
+        self.assertIn('no weapon', drv.expand_macro(dict(op='fight'), dict(view, inv=[], equipped=None))[1])
+
+    def test_memory_survives_a_new_driver_and_is_shown_for_the_room(self):
+        log = self.directory / 'driver.log'
+        drv, _ = self.driver([], log=log)
+        drv.note_progress('RM_TEST', dict(op='interact', zone=7), 'Last action: x -> dialog. Changed: walls opened: w56.')
+        drv.note_progress('RM_TEST', dict(op='interact', zone=8), 'Last action: x -> y. Changed: nothing in inventory, box, walls, zones or room changed.')
+        drv.remember_outcome('failed', 'RM_TEST: examining zone 4 did nothing (x3)')
+        drv.history_lines = ['1: examine zone 2 -> grab', '2: press confirm -> settled']
+        drv.note_death(dict(enemies=[dict(i=0)], equipped=['Handgun', 3], heal=[]))
+        again, _ = self.driver([], log=log)
+        self.assertEqual(again.memory['worked'], ['RM_TEST: examine zone 7 -> walls opened: w56'])
+        lines = again.memory_lines(dict(room='RM_TEST'))
+        self.assertIn('Memory, what brought progress here in earlier runs: RM_TEST: examine zone 7 -> walls opened: w56', lines[0])
+        self.assertTrue(any(l.startswith('Memory, deaths here: RM_TEST: died near') and 'with Handgun' in l for l in lines))
+        self.assertTrue(any('examining zone 4 did nothing' in l for l in lines))
+        self.assertEqual(again.memory_lines(dict(room='RM_0010')), ['Memory, progress elsewhere: RM_TEST: examine zone 7 -> walls opened: w56'])
+
+    def test_context_cap_drops_the_oldest_decisions_in_pairs(self):
+        drv, _ = self.driver([], context_chars=len(Driver(self.play, None, out=io.StringIO()).system) + 400)
+        for i in range(6):
+            drv.remember(dict(role='user', content=json.dumps(dict(state=dict(step=i, pad='x' * 100)))), dict(op='wait'))
+        user = dict(role='user', content='{"state":{"now":true}}')
+        msgs = drv.messages(user)
+        self.assertEqual(msgs[0]['role'], 'system'); self.assertIs(msgs[-1], user)
+        kept = msgs[1:-1]
+        self.assertEqual(len(kept) % 2, 0)
+        self.assertLessEqual(sum(len(m['content']) for m in msgs), drv.context_chars)
+        self.assertIn('"step":5', kept[-2]['content'])
+        self.assertEqual(drv.history, kept)  # cut for good, prefix stable afterwards
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change

@@ -39,6 +39,13 @@ TOOLS = [
     {'name': 'board', 'description': 'Open obstacles: item gates with wall state, facts about locks and needs, '
              'doors and items of every visited room.', 'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'map', 'description': 'The current room as text lines.', 'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'near', 'description': 'Rooms within three doors of the current room (door tables of the game '
+             'data) with the items their files list, and whether they were visited in this run.',
+     'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'memory', 'description': 'What brought progress, what did nothing and how the player died in '
+             'earlier runs (build/play/memory.json); optional note to add under worked|failed.',
+     'inputSchema': {'type': 'object', 'properties': {'kind': {'type': 'string', 'enum': ['worked', 'failed']},
+                                                      'note': {'type': 'string'}}}},
 ]
 
 
@@ -101,6 +108,12 @@ class Server:
             return self.driver.board(view, self.play.read()[0])
         if name == 'map':
             return self.driver.room_map(self.play.read()[0])
+        if name == 'near':
+            return self.driver.neighbour_lines(self.view())
+        if name == 'memory':
+            if args.get('note'):
+                self.driver.remember_outcome(args.get('kind') or 'worked', args['note'])
+            return self.driver.memory
         raise PlayError(f'unknown tool {name}')
 
     # --- JSON-RPC -----------------------------------------------------------------------------------------
