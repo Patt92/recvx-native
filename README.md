@@ -27,6 +27,8 @@ one action per decision. The game logic is untouched.
    | `RECVX_LLM_MODEL` | model name |
    | `RECVX_LLM_API_KEY` | API key, empty for a local server |
    | `RECVX_SKIP_VIDEOS` | optional, `1` = skip FMV videos automatically (in-engine scenes still play) |
+   | `RECVX_COMBAT_RADIUS` | optional, metres for combat mode (default 25): enemies in sight that close make the model fight or leave first |
+   | `RECVX_REFLEXES` | optional, `0` = the model fights alone (default: the driver shakes off grabs and shoots enemies in sight within `RECVX_ENGAGE` m, 20) |
    | `RECVX_LLM_CONTEXT_TOKENS` | optional request size cap in tokens (e.g. `15000`), oldest decisions dropped first; 0 = off |
    | `RECVX_LLM_EXTRA_BODY` | optional JSON added to every request; for models that think before answering: llama.cpp/vLLM `{"chat_template_kwargs":{"enable_thinking":false}}`, Ollama `/v1` `{"reasoning_effort":"none"}` |
 

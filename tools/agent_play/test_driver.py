@@ -975,6 +975,8 @@ class DriverTests(unittest.TestCase):
         view = dict(owner='FREE', room='RM_TEST', hp=100, inv=[[2, 9, 15, 'Handgun']], enemies=[enemy])
         self.assertEqual(drv.expand_macro(dict(op='fight'), view)[0], dict(op='equip', item=2))
         view.update(inv=[[1, 9, 15, 'Handgun']], equipped=['Handgun', 15])
+        self.d['items'] = [1, (9 << 16) | 15]   # the runtime state now has the handgun in hand
+        self.write(self.d)
         self.assertEqual(drv.expand_macro(dict(op='fight'), view)[0], dict(op='fire', shots=3, low=False, target=0))
         view.update(enemies=[dict(enemy, d=25.0)])
         self.assertEqual(drv.expand_macro(dict(op='fight'), view)[0]['shots'], 2)
@@ -986,7 +988,9 @@ class DriverTests(unittest.TestCase):
         self.assertLess(step['to'][0], 0)   # away from the enemy at x=12
         self.assertEqual(drv.expand_macro(dict(op='fight'), dict(view, owner='GRAB'))[0], dict(op='shake', presses=20))
         self.assertEqual(drv.expand_macro(dict(op='fight'), dict(view, enemies=[])), (None, 'done'))
-        self.assertIn('no weapon', drv.expand_macro(dict(op='fight'), dict(view, inv=[], equipped=None))[1])
+        self.d['items'] = [0, (145 << 16) | 1]
+        self.write(self.d)
+        self.assertIn('no handgun', drv.expand_macro(dict(op='fight'), dict(view, inv=[], equipped=None))[1])
 
     def test_memory_survives_a_new_driver_and_is_shown_for_the_room(self):
         log = self.directory / 'driver.log'
@@ -1035,6 +1039,114 @@ class DriverTests(unittest.TestCase):
         self.assertLessEqual(sum(len(m['content']) for m in msgs), drv.context_chars)
         self.assertIn('step 5', kept[-2]['content'])
         self.assertEqual(drv.history, kept)  # cut for good, prefix stable afterwards
+
+    def test_reflexes_shake_fight_and_step_away_without_asking(self):
+        drv, _ = self.driver([])
+        self.d['items'] = [1, (9 << 16) | 13, (8 << 16)]   # handgun equipped (slot 1), knife in slot 2
+        self.d['enemies'] = [dict(index=0, hp=90, position=[12, 0, 0], work=dict(mode=[1, 0, 0, 0]))]
+        self.write(self.d)
+        z = dict(i=0, hp=90, d=12.0, state='active', at=[12.0, 0.0], sight=True)
+        base = dict(owner='FREE', room='RM_TEST', hp=120, inv=[[1, 9, 13, 'Handgun'], [2, 8, 0, 'Combat Knife']],
+                    equipped=['Handgun', 13])
+        self.assertEqual(drv.reflex(dict(base, owner='GRAB')), dict(op='shake', presses=20))
+        self.assertEqual(drv.reflex(dict(base, enemies=[z])), dict(op='fire', shots=3, low=False, target=0))
+        self.assertIsNone(drv.reflex(dict(base, enemies=[dict(z, d=35.0)])))            # beyond engage
+        self.assertIsNone(drv.reflex(dict(base, enemies=[dict(z, sight=False)])))       # behind a wall
+        self.assertIsNone(drv.reflex(dict(base, enemies=[dict(z, state='scripted')])))
+        # Knife in hand: draw the handgun first (fire only supports it).
+        self.d['items'] = [2, (9 << 16) | 13, (8 << 16)]
+        self.write(self.d)
+        self.assertEqual(drv.reflex(dict(base, enemies=[z])), dict(op='equip', item=1))
+        # No gun at all and the zombie in reach: step away from it.
+        self.d['items'] = [0, (145 << 16) | 1]
+        self.write(self.d)
+        step = drv.reflex(dict(base, inv=[[1, 145, 1, 'Playing Manual']], equipped=None,
+                               enemies=[dict(z, d=5.0, at=[5.0, 0.0], reach=True)]))
+        self.assertEqual(step['op'], 'move'); self.assertLess(step['to'][0], 0)
+        drv.reflexes = False
+        self.assertIsNone(drv.reflex(dict(base, owner='GRAB')))
+
+    def test_reflex_ignores_zero_hp_and_stops_after_an_error(self):
+        drv, _ = self.driver([])
+        self.d['items'] = [1, (9 << 16) | 13]
+        enemy = dict(index=0, hp=0, position=[12, 0, 0], work=dict(mode=[1, 1, 2, 1]))
+        self.d['enemies'] = [enemy]
+        self.write(self.d)
+        obs = dict(owner='FREE', hp=100, equipped=['Handgun', 13], inv=[[1, 9, 13, 'Handgun']],
+                   enemies=[dict(i=0, hp=0, d=12, state='active', at=[12, 0], sight=True)])
+        self.assertIsNone(drv.reflex(obs))
+        enemy['hp'] = 90
+        self.write(self.d)
+        action = drv.reflex(obs)
+        self.assertEqual(action['op'], 'fire')
+        drv.note_reflex(action, dict(result='error', error='target is not an active enemy'))
+        self.assertIsNone(drv.reflex(obs))
+        enemy['hp'] = 80
+        self.write(self.d)
+        self.assertEqual(drv.reflex(obs)['op'], 'fire')
+
+    def test_combat_mode_enters_slims_the_request_blocks_examines_and_ends(self):
+        drv, _ = self.driver([])
+        self.d['items'] = [1, (9 << 16) | 13]
+        self.d['interactions'] = [dict(index=3, flags=1, floor=0, type=3, attribute=0x8000, position=[5, 0, 5],
+                                       extent=[4, 0, 4], parameters=[0, 2, 0, 0]),
+                                  dict(index=13, flags=1, floor=0, type=0, attribute=0, position=[-2, 0, -19],
+                                       extent=[4, 0, 2], parameters=[0, 4, 0, 0])]
+        zombie = dict(index=0, hp=90, position=[0, 0, 15], work=dict(mode=[1, 0, 0, 0]))
+        self.d['enemies'] = [zombie]
+        self.write(self.d)
+        near = dict(owner='FREE', room='RM_TEST', at=[0, 0], hp=100, inv=[],
+                    enemies=[dict(i=0, hp=90, d=15.0, state='active', at=[0, 15], sight=True)])
+        drv.plan = [dict(op='explore_room')]
+        self.assertEqual(drv.update_combat(near), 'entered')
+        self.assertTrue(drv.combat)
+        self.assertEqual(drv.plan, [])
+        self.assertIn('combat mode', drv.pending_feedback['plan_broken'])
+        self.assertTrue(drv.situation(near)[0].startswith('COMBAT MODE: 1 enemy'))
+        self.assertIn('combat mode', drv.combat_blocked(dict(op='interact', zone=3), near))
+        self.assertIsNone(drv.combat_blocked(dict(op='interact', zone=13), near))   # leaving is fine
+        # Behind a wall or far away it calms down; three calm looks end it.
+        calm = dict(near, enemies=[dict(i=0, hp=90, d=15.0, state='active', at=[0, 15], sight=False)])
+        self.assertIsNone(drv.update_combat(calm))
+        self.assertIsNone(drv.update_combat(calm))
+        self.assertEqual(drv.update_combat(calm), 'ended')
+        self.assertFalse(drv.combat)
+        # A zombie with 0 hp but an active work mode does not start it.
+        zombie['hp'] = 0
+        self.write(self.d)
+        self.assertIsNone(drv.update_combat(near))
+        # A grab always does; a room change ends it.
+        self.assertEqual(drv.update_combat(dict(near, owner='GRAB')), 'entered')
+        self.assertEqual(drv.update_combat(dict(near, room='RM_0040', enemies=[])), 'ended')
+
+    def test_combat_mode_requests_carry_no_bundle(self):
+        self.two_doors()
+        self.d['items'] = [1, (9 << 16) | 13]
+        self.d['enemies'] = [dict(index=0, identity=1, hp=90, position=[0, 0, 10], hidden=False, inactive=False,
+                                  scripted=False, work=dict(mode=[1, 0, 0, 0]))]
+        self.write(self.d)
+        drv, client = self.driver([text(dict(op='wait', ticks=2))], reflexes=False)
+        with self.ticking():
+            drv.run(steps=1)
+        first = json.loads(client.requests[0][0][-1]['content'])
+        self.assertNotIn('zones_all', first)
+        self.assertTrue(first['situation'][0].startswith('COMBAT MODE'))
+        self.assertIn('combat mode entered', first['combat'])
+
+    def test_reflex_runs_before_the_model_and_is_reported(self):
+        self.d['items'] = [1, (9 << 16) | 13]
+        self.d['enemies'] = [dict(index=0, identity=1, hp=90, position=[0, 0, 12], hidden=False, inactive=False,
+                                  scripted=False, work=dict(mode=[1, 0, 0, 0]))]
+        self.write(self.d)
+        drv, client = self.driver([text(dict(op='wait', ticks=2))])
+        with self.ticking():
+            drv.run(steps=1)
+        self.assertEqual(client.requests, [])          # no model call: the driver shot
+        self.assertIn('fire 3', self.controls())
+        self.assertTrue(drv.reflex_log and drv.reflex_log[0].startswith('{"op":"fire"'))
+        lines = drv.situation(dict(room='RM_TEST', at=[0, 0], hp=100, owner='FREE', inv=[]))
+        self.assertTrue(any(l.startswith('The driver fought for you') for l in lines))
+        self.assertEqual(drv.reflex_log, [])
 
     def test_describe_change_names_what_moved(self):
         from driver import describe_change
@@ -1254,6 +1366,30 @@ class DriverTests(unittest.TestCase):
             self.d['interactions'][0]['parameters'] = [0, 5, 0, 0]
             self.write(self.d)
             self.assertIsNone(drv.repeat_blocked(shelf, dict(room='RM_TEST')))
+
+    def test_information_read_survives_restart_and_unrelated_progress(self):
+        from unittest import mock
+        import hint
+        self.d['interactions'] = [dict(index=3, flags=1, floor=0, type=3, attribute=0x8000,
+                                       position=[5, 0, 5], extent=[4, 0, 4], parameters=[0, 2, 0, 0])]
+        self.write(self.d)
+        with mock.patch.object(hint, 'informational_zones', lambda room, d: {3}), \
+                mock.patch.object(hint, 'Room', lambda name: name):
+            drv, _ = self.driver([], log=self.directory / 'driver.log')
+            drv.record_visit('RM_TEST', 3, drv.progress(), dict(dialog=dict(text='Nothing useful here.')), 'dialog')
+            self.d['items'].append(12 << 16 | 30)
+            self.d['walls'][0]['fl'] = 0
+            self.write(self.d)
+            again, _ = self.driver([], log=self.directory / 'driver.log')
+            action = dict(op='interact', zone=3)
+            self.assertIn('already read', again.repeat_blocked(action, dict(room='RM_TEST')))
+            marked = again.mark_seen(dict(room='RM_TEST', zones=[dict(i=3)]))
+            self.assertTrue(marked['zones'][0]['read'])
+            self.assertEqual(marked['zones'][0]['last_answer'], 'Nothing useful here.')
+            self.assertIsNone(again.read_info_zone('RM_OTHER', 3))
+            self.d['interactions'][0]['parameters'][1] = 5
+            self.write(self.d)
+            self.assertIsNone(again.repeat_blocked(action, dict(room='RM_TEST')))
 
     def test_informational_zones_exclude_switches_questions_and_boxes(self):
         import os

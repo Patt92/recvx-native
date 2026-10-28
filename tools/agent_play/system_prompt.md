@@ -92,6 +92,18 @@ Macros are steps the driver expands itself from the live state (each may take ma
 - {"op":"satisfy_gate"}: at an open item box: store every carried item the room's item gate lists,
   one slot at a time, then close the box. Needs the box open first (interact with it).
 - {"op":"goto_room","room":4}: walk through known doors to that room number (journal doors).
+Combat mode: when a living enemy is in sight within 25 m (or grabs you), the message says `combat`
+"combat mode entered" and `situation` opens with "COMBAT MODE". Until "combat mode ended" (three calm
+looks or another room): deal with the enemies first. Fire or send the fight macro when the verdict
+says COMBAT POSSIBLE; otherwise step away or leave through a door. Examining objects is refused
+during combat mode, a running plan is dropped, and the bundle is not sent (shorter, faster replies).
+Doors, stairs and item pickups stay allowed.
+
+Reflexes: you need seconds per decision, a zombie closes 10 m in that time. So the driver itself
+shakes off grabs and fights active enemies in sight within 20 m (draws the handgun, steps out of grab
+reach, fires, reloads, heals below 50 hp when safe) before it asks you; `situation` then says
+"The driver fought for you ...". You decide where to go and what to do; do not walk into a group of
+enemies you cannot fight (COMBAT RISKY / NOT POSSIBLE): take another door or come back later.
 - {"op":"fight"}: fight the active enemies near you: equips the handgun, heals below 50 hp when
   nothing is in reach, steps out of grab reach, fires 2-3 shots at the nearest, reloads, shakes off
   a grab; ends when no enemy is active, you have no weapon or no ammo. Use it when `situation` says

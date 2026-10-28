@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from play import Play, PlayError  # noqa: E402
+from play import Play, PlayError, equipped, threats  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PROMPT = HERE / 'system_prompt.md'
@@ -369,7 +369,7 @@ class Driver:
 
     def __init__(self, play, client, *, tools=True, window=8, seconds=6.0, max_tool_calls=3, log=None,
                  out=sys.stdout, save_rooms=3, repeat_limit=2, skip_videos=False, alert_after=20,
-                 context_chars=0, context_tokens=0):
+                 context_chars=0, context_tokens=0, reflexes=True, engage=20.0, combat_radius=25.0):
         self.play, self.client, self.use_tools = play, client, tools
         self.window, self.seconds, self.max_tool_calls = window, seconds, max_tool_calls
         self.context_chars = int(context_chars or 0)    # request size cap in characters
@@ -410,6 +410,18 @@ class Driver:
         self.memory = self.load_memory()
         self._death_noted = False
         self.bundle_sig = None      # (room, progress) the bundle was last sent for
+        # Reflexes: the model needs seconds per decision, a zombie closes 10 m in that time. The driver
+        # shakes off grabs and fights active enemies in sight within `engage` itself, then tells the
+        # model what it did. Off with --no-reflexes.
+        self.reflexes, self.engage = reflexes, engage
+        self.reflex_log = []
+        self.reflex_failed = None
+        # Combat mode: entered when a living enemy is in sight within `combat_radius` m (or in grab
+        # reach, or grabbing); ended after three calm observations or a room change. While it lasts the
+        # requests carry no bundle, a running plan is dropped, examining text zones is refused, and
+        # `situation` opens with the enemies and the choice: fight or leave.
+        self.combat, self.combat_calm, self.combat_radius = False, 0, combat_radius
+        self.combat_room = None
         self._item_uses = None      # item id -> [(room, zone, floor)] from all room scripts (class cache)
         # Run journal: what happened in this run, shown with every decision (no game knowledge, only
         # what the game itself showed): per room the zones read and their answers, open items/doors,
@@ -545,7 +557,7 @@ class Driver:
         if dialog.get('choice') and any(w in dialog.get('text', '').lower() for w in ('save', 'ink ribbon')):
             out.append('Save not needed now: choose No (' + self.save_reason() + ').' if not self.save_allowed()
                        else 'A save is reasonable now (enough progress since the last one).')
-        equipped = ((obs.get('equipped') or [''])[0] or '').lower()
+        equipped = str((obs.get('equipped') or [''])[0] or '').lower()  # an item id when the name is unknown
         names = [row[3].lower() for row in obs.get('inv', []) if len(row) > 3 and row[3]]
         # Pickup confirmations name the item too; they are not a request to use it.
         asks = [t.lower() for t in self.texts[-2:] if not t.lower().startswith(("you've taken", 'take the'))]
@@ -610,7 +622,7 @@ class Driver:
         """The moment in short plain sentences (fragments), read before the JSON state. Only what the
         state, the room data and the last action show; no solutions."""
         d, _, _ = self.play.read()
-        out = []
+        out = self.combat_lines_head(obs) if self.combat else []
         where = f"You are in {obs.get('room')}"
         if obs.get('came_from'):
             where += f" (you came from {str(obs['came_from'])[:7]})"
@@ -679,6 +691,9 @@ class Driver:
         if away:
             out.append('Not reachable from where you stand now: ' + ' | '.join(away) + '.')
         out += self.combat_lines(obs)
+        if self.reflex_log:
+            out.append('The driver fought for you since your last decision (reflexes): ' + '; '.join(self.reflex_log) + '.')
+            self.reflex_log = []
         if self.since_progress >= 5:
             out.append(f'No progress for {self.since_progress} decisions: do something you have not tried.')
         return out
@@ -896,12 +911,14 @@ class Driver:
 
     # --- memory across runs ------------------------------------------------------------------------------
     def load_memory(self):
-        empty = dict(worked=[], failed=[], deaths=[])
+        empty = dict(worked=[], failed=[], deaths=[], info_zones={})
         if not self.memory_path or not self.memory_path.exists():
             return empty
         try:
             m = json.loads(self.memory_path.read_text())
-            return {k: [str(x) for x in m.get(k, [])] for k in empty}
+            out = {k: [str(x) for x in m.get(k, [])] for k in ('worked', 'failed', 'deaths')}
+            out['info_zones'] = m.get('info_zones', {}) if isinstance(m.get('info_zones', {}), dict) else {}
+            return out
         except (ValueError, OSError, AttributeError):
             return empty
 
@@ -995,7 +1012,7 @@ class Driver:
         # The bundle (zones, board, map, history) is offered, not pushed: it goes along only when the
         # room was entered or something switched since it was last sent; otherwise the model asks with
         # the look tool. Prefill of a 20k-token request cost 12-16 s per decision on a cloud endpoint.
-        if obs.get('owner') == 'FREE' and not obs.get('assumed_unknown_room') and not prefetch:
+        if obs.get('owner') == 'FREE' and not obs.get('assumed_unknown_room') and not prefetch and not self.combat:
             try:
                 sig = ((obs.get('room') or '')[:7], self.progress())
                 if sig != self.bundle_sig:
@@ -1202,6 +1219,27 @@ class Driver:
     def zone_log(self, room):
         return self.visits.setdefault(room, {})
 
+    def info_zone_key(self, room, zone):
+        """Room-scoped identity of this informational zone, independent of inventory and other zones."""
+        d = self.play.read()[0]
+        if (d.get('room') or '')[:7] != (room or '')[:7]:
+            return None
+        a = next((a for a in d.get('interactions', []) if a['index'] == zone), None)
+        if not a or zone not in self.info_zones():
+            return None
+        identity = [a.get(k) for k in ('type', 'attribute', 'floor', 'position', 'extent', 'parameters')]
+        try:
+            import hint
+            identity.append(hint.Room(d['room']).message(a['parameters'][1]))
+        except Exception:
+            pass
+        return json.dumps(identity, separators=(',', ':'))
+
+    def read_info_zone(self, room, zone):
+        key = self.info_zone_key(room, zone)
+        saved = self.memory.get('info_zones', {}).get((room or '')[:7], {}).get(str(zone))
+        return saved if key and isinstance(saved, dict) and saved.get('identity') == key else None
+
     def record_visit(self, room, zone, before, obs, result):
         """After an interact: keep what the zone answered (first text page, a menu, nothing)."""
         got = ' '.join(((obs.get('dialog') or {}).get('text', '')).split())
@@ -1218,6 +1256,11 @@ class Driver:
         v['got'] = got[:80]
         v['sig'] = before
         v['result'] = result
+        key = self.info_zone_key(room, zone) if (obs.get('dialog') or {}).get('text') else None
+        if key:
+            self.memory.setdefault('info_zones', {}).setdefault((room or '')[:7], {})[str(zone)] = dict(
+                identity=key, text=got[:240], status='read_information_only')
+            self.save_memory()
 
     def zone_of_move(self, room, action, result):
         """(room, zone) when a finished move ended on a zone's ready point (a candidate of this room)."""
@@ -1251,7 +1294,13 @@ class Driver:
 
     def repeat_blocked(self, action, obs):
         """An interact on a zone already examined `repeat_limit` times with no progress since is refused."""
-        if not self.repeat_limit or action.get('op') != 'interact':
+        if action.get('op') != 'interact':
+            return None
+        saved = self.read_info_zone(obs.get('room'), action.get('zone'))
+        if saved:
+            return (f"zone {action['zone']} is information only and already read in this room: {saved['text']!r}. "
+                    "No script reacts to it; it remains checked off until this zone changes.")
+        if not self.repeat_limit:
             return None
         v = self.zone_log(obs.get('room')).get(action.get('zone'))
         # Doors and stairs lead somewhere every time: walking back and forth is not a repeated examine.
@@ -1271,11 +1320,12 @@ class Driver:
     def info_zones(self):
         """Text zones of this room that only show a message (cached per room)."""
         d, _, _ = self.play.read()
-        room = d.get('room')
+        room = (d.get('room'), tuple((a['index'], a.get('type'), a.get('attribute'), tuple(a.get('parameters', [])))
+                                    for a in d.get('interactions', [])))
         if self._info_room != room:
             try:
                 import hint
-                self._info = hint.informational_zones(hint.Room(room), d)
+                self._info = hint.informational_zones(hint.Room(d['room']), d)
             except Exception:
                 self._info = set()
             self._info_room = room
@@ -1284,9 +1334,11 @@ class Driver:
     def mark_seen(self, obs):
         """Annotate zones with what examining them gave; list examined zones of this room as `done`."""
         log = self.zone_log(obs.get('room'))
-        if not log:
-            return obs
         info = self.info_zones()
+        for z in obs.get('zones', []) + obs.get('far_zones', []):
+            saved = self.read_info_zone(obs.get('room'), z['i']) if z['i'] in info else None
+            if saved:
+                z.update(read=True, information_only=True, last_answer=saved['text'])
         for z in obs.get('zones', []):
             v = log.get(z['i'])
             if v:
@@ -1706,7 +1758,7 @@ class Driver:
                 i = a['index']
                 if not a.get('flags', 0) & 1 or a.get('floor', 0) != d.get('player_floor', 0) or not points.get(i):
                     continue
-                if op == 'explore_room' and (a.get('type') != 3 or i in log):
+                if op == 'explore_room' and (a.get('type') != 3 or i in log or self.read_info_zone(view.get('room'), i)):
                     continue
                 if op == 'collect_items':
                     if a.get('type') != 4:
@@ -1752,15 +1804,17 @@ class Driver:
             if not active:
                 return None, 'done'
             eq = view.get('equipped') or []
-            if not eq:
+            held = equipped(self.play.read()[0])
+            if not held or held[1] != 9:
+                # fire supports the handgun; a knife or nothing in hand means: draw the handgun first.
                 guns = [r[0] for r in view.get('inv', []) if len(r) > 1 and r[1] == 9]
                 if guns:
                     return dict(op='equip', item=guns[0]), None
-                return None, 'no weapon: cannot fight'
+                return None, 'no handgun: cannot fight'
             hp, heals = view.get('hp') or 0, view.get('heal') or []
             if hp < 50 and heals and not any(e.get('reach') for e in active):
                 return dict(op='use', item=heals[0][0]), None
-            rounds = eq[1] if len(eq) > 1 and isinstance(eq[1], int) else 0
+            rounds = held[2]  # the handgun in hand, from the runtime state
             if rounds <= 0:
                 try:
                     self.play.ammo_slot(self.play.read()[0])
@@ -1805,6 +1859,115 @@ class Driver:
             to, face = points[hop]
             return dict(op='interact', zone=hop, to=to, face=face, expect=dict(not_result=['stalled', 'no_interaction_observed'])), None
         return None, f'unknown macro {op}'
+
+    def threats_near(self, obs):
+        """Living enemies (same filter as fire) in sight within combat_radius, in reach or grabbing."""
+        d = self.play.read()[0]
+        valid = {e['index'] for e in threats(d)}
+        return [e for e in (obs.get('enemies') or []) if e['i'] in valid and (
+            e.get('reach') or e.get('state') == 'grabbing' or
+            (e.get('d', 99) <= self.combat_radius and e.get('sight') is not False))]
+
+    def update_combat(self, obs):
+        """Enter or leave combat mode from the live state; returns 'entered' / 'ended' / None."""
+        room = (obs.get('room') or '')[:7]
+        owner = obs.get('owner') or ''
+        if obs.get('gameover') or (self.combat and room != self.combat_room):
+            if self.combat:
+                self.combat, self.combat_calm = False, 0
+                return 'ended'
+            return None
+        hot = owner.split()[:1] == ['GRAB'] or (owner == 'FREE' and bool(self.threats_near(obs)))
+        if hot:
+            self.combat_calm = 0
+            if not self.combat:
+                self.combat, self.combat_room = True, room
+                if self.plan:
+                    self.plan = []
+                    self.pending_feedback['plan_broken'] = 'combat mode: enemies came close; the plan was dropped'
+                return 'entered'
+            return None
+        if self.combat and owner == 'FREE':
+            self.combat_calm += 1
+            if self.combat_calm >= 3:
+                self.combat, self.combat_calm = False, 0
+                return 'ended'
+        return None
+
+    def combat_blocked(self, action, obs):
+        """In combat mode examining text zones and the item box waits: deal with the enemies first."""
+        if not self.combat or action.get('op') != 'interact':
+            return None
+        d = self.play.read()[0]
+        a = next((a for a in d.get('interactions', []) if a['index'] == action.get('zone')), None)
+        if a is None or a.get('type') != 3:
+            return None  # doors, stairs and items stay allowed: leaving and picking up ammo are fine
+        return ('combat mode: enemies are close. Fight them (fire, or the fight macro), step away, or leave '
+                'through a door; examine objects after the fight.')
+
+    def combat_lines_head(self, obs):
+        near = self.threats_near(obs)
+        lines = ['COMBAT MODE: ' + (f'{len(near)} enemy/enemies close. ' if near else 'enemies were close. ') +
+                 'Deal with them first: fire / the fight macro when the verdict says possible, otherwise move '
+                 'away or leave through a door. Exploring waits until combat mode ends.']
+        return lines
+
+    def reflex(self, obs):
+        """A fight action the driver takes without asking (or None): shake off a grab; with an active enemy
+        in sight within `engage` m and a handgun with rounds, the next step of the fight macro (draw the
+        gun, step out of reach, fire, reload). Out of ammo or without a gun: step out of grab reach."""
+        if not self.reflexes:
+            return None
+        d = self.play.read()[0]
+        signature = (d.get('room'), d.get('hp'), tuple(d.get('items', [])),
+                     tuple((e['index'], e.get('hp'), e.get('scripted'), tuple((e.get('work') or {}).get('mode', [])))
+                           for e in d.get('enemies', [])))
+        if self.reflex_failed == signature:
+            return None  # the same state cannot make a rejected action valid; let the model decide
+        self.reflex_signature = signature
+        owner = obs.get('owner') or ''
+        if owner == 'GRAB' or owner.split()[:1] == ['GRAB']:
+            return dict(op='shake', presses=20)
+        if owner != 'FREE':
+            return None
+        valid = {e['index'] for e in threats(d)}
+        near = [e for e in (obs.get('enemies') or []) if e['i'] in valid and e.get('state') in ('active', 'grabbing')
+                and (e.get('reach') or (e.get('d', 99) <= self.engage and e.get('sight') is not False))]
+        if not near:
+            return None
+        try:
+            step, why = self.expand_macro(dict(op='fight'), dict(obs, enemies=near))
+        except Exception:
+            step, why = None, 'error'
+        if step is not None:
+            return step
+        # Cannot fight (no gun, no ammo): at least get out of grab reach.
+        close = [e for e in near if e.get('reach')]
+        if close:
+            d, _, _ = self.play.read()
+            px, pz = d['actor'][0], d['actor'][2]
+            ex, ez = close[0]['at']
+            n = math.hypot(px - ex, pz - ez) or 1
+            try:
+                pts = self.play.free_near(d, [px + (px - ex) / n * 12, pz + (pz - ez) / n * 12], limit=1)
+            except Exception:
+                pts = []
+            if pts:
+                return dict(op='move', to=pts[0], danger=False, run=True)
+        return None
+
+    def note_reflex(self, action, feedback):
+        if feedback.get('result') == 'error':
+            self.reflex_failed = getattr(self, 'reflex_signature', None)
+        else:
+            self.reflex_failed = None
+        line = f"{action_text(action)} -> {feedback.get('result')}"
+        if feedback.get('fire'):
+            f = feedback['fire']
+            line += f" ({f.get('hits', 0)}/{f.get('shots', 0)} hits)"
+        if feedback.get('damage'):
+            line += f", lost {feedback['damage']} hp"
+        self.reflex_log = (self.reflex_log + [line])[-6:]
 
     def next_hop(self, room, number):
         """Door zone of `room` on the shortest known path (journal doors) to room `number`, or None."""
@@ -2000,6 +2163,14 @@ class Driver:
                 self.record(entry)
                 continue
             self._death_noted = False
+            event = self.update_combat(obs)
+            if event == 'entered':
+                self.pending_feedback['combat'] = 'combat mode entered: enemies close; fight or leave first'
+                print('COMBAT mode entered', file=self.out, flush=True)
+            elif event == 'ended':
+                self.pending_feedback['combat'] = 'combat mode ended: no enemy close any more; carry on exploring'
+                self.bundle_sig = None  # the next request carries the full picture again
+                print('COMBAT mode ended', file=self.out, flush=True)
             playing = 'VIDEO' in obs.get('owner', '').split()
             if not playing:
                 self.video_skipped = False
@@ -2009,6 +2180,9 @@ class Driver:
                 self.video_skipped = True
             elif passive(obs) and self.idle_waits < 4:
                 action, entry = {'op': 'wait'}, dict(auto=True)
+            elif not self.plan and (reflex := self.reflex(obs)) is not None:
+                action, entry = reflex, dict(auto=True, reflex=True)
+                self.prefetched = None  # decided for a calmer moment
             elif 'TYPEWRITER' in obs.get('owner', '') and tw.get('mode') == 'save' and not self.save_allowed():
                 # Leave the save screen without a model call; the ribbon and the time stay unspent.
                 action, entry = {'op': 'press', 'key': 'cancel'}, dict(auto=True, save_skipped=self.save_reason())
@@ -2042,7 +2216,7 @@ class Driver:
             self.remember_texts(obs)
             room_before, progress_before = obs.get('room'), self.progress()
             fixed = self.correct(action, obs)
-            blocked = self.repeat_blocked(fixed, obs)
+            blocked = self.combat_blocked(fixed, obs) or self.repeat_blocked(fixed, obs)
             denied = self.unreachable_interact(fixed, obs)
             if denied:
                 blocked = denied
@@ -2076,6 +2250,8 @@ class Driver:
                     self.record_visit(room_before, self.move_zone[1], progress_before, obs, feedback['result'])
                 if feedback['result'] == 'saved':
                     self.snapshot = dict(room=feedback.get('snapshot_room'), play_time=self.play.read()[0].get('play_time'))
+            if entry.get('reflex'):
+                self.note_reflex(action, feedback)
             self.move_zone = self.zone_of_move(room_before, action, feedback['result'])
             if not entry.get('auto'):
                 self.note_progress((room_before or '')[:7], action, self.last_change)
@@ -2145,6 +2321,13 @@ def main():
     ap.add_argument('--dir', default='build/play')
     ap.add_argument('--steps', type=int, default=0, help='0 = until stopped')
     ap.add_argument('--window', type=int, default=8, help='decisions kept in the prompt (cut in halves)')
+    ap.add_argument('--no-reflexes', action='store_true',
+                    default=os.environ.get('RECVX_REFLEXES', '1').strip().lower() in ('0', 'false', 'no', 'off'),
+                    help='do not let the driver shake off grabs and shoot enemies in reach by itself (RECVX_REFLEXES=0)')
+    ap.add_argument('--engage', type=float, default=float(os.environ.get('RECVX_ENGAGE', '20') or 20),
+                    help='reflex fight distance in metres for active enemies in sight (default 20)')
+    ap.add_argument('--combat-radius', type=float, default=float(os.environ.get('RECVX_COMBAT_RADIUS', '25') or 25),
+                    help='combat mode starts when a living enemy is in sight within this many metres (default 25)')
     ap.add_argument('--context-tokens', type=int, default=int(os.environ.get('RECVX_LLM_CONTEXT_TOKENS', '0') or 0),
                     help='cap on the request size in tokens, converted with the characters per token the endpoint '
                          'reports; the oldest kept decisions are dropped first (in one block), the system prompt and '
@@ -2179,7 +2362,8 @@ def main():
     driver = Driver(play, client, tools=not a.no_tools, window=a.window, seconds=a.seconds,
                     log=Path(a.dir) / 'driver.log', save_rooms=a.save_rooms, skip_videos=a.skip_videos,
                     alert_after=a.alert_after,
-                    repeat_limit=a.repeat_limit, context_chars=a.context_chars, context_tokens=a.context_tokens)
+                    repeat_limit=a.repeat_limit, context_chars=a.context_chars, context_tokens=a.context_tokens,
+                    reflexes=not a.no_reflexes, engage=a.engage, combat_radius=a.combat_radius)
     if a.dry_run:
         obs = play.observe()
         user = {'role': 'user', 'content': json.dumps(dict(result='start', state=trim(obs)), separators=(',', ':'))}
