@@ -93,7 +93,7 @@ def check(runtime, data, folder):
     released(retried)
     saved = run('map-save', 'RM_0060.RDX', MAP +
         '250 debug_key F2\n251 debug_select snapshot_save 1\n252 confirm\n253 debug_key F2\n', 270)
-    assert saved['debug_status'].startswith('Snapshot 2 gespeichert')
+    assert saved['debug_status'].startswith('Snapshot 2 saved')
     restored = run('map-restore', 'RM_0060.RDX',
         '0 debug_key F2\n1 debug_select snapshot_load 1\n2 confirm\n60 confirm\n', 90, True)
     assert acquired(restored, 133) and restored['room'] == 'RM_0060.RDX'

@@ -482,10 +482,14 @@ Vulkan shaders (the Vulkan SDK works as well).
   store. Release signing and `--package` are not implemented yet.
 
 **3. Copy the game data** (prepared as for macOS, see above) into the app's
-own folder on the device. No storage permission is needed:
+own folder on the device. No storage permission is needed. Start the app once
+first (it stops with "exported native data missing"): Android then creates its
+folder `Android/data/org.recvx.nativeport` with the app as owner. A folder that
+`adb` created before the first start can stay unreadable for the app
+("Permission denied"); then uninstall, reinstall and start once.
 
 ```bash
-adb shell mkdir -p /sdcard/Android/data/org.recvx.nativeport/files/data
+adb shell am start -n org.recvx.nativeport/.RecvxActivity
 adb push data/. /sdcard/Android/data/org.recvx.nativeport/files/data/
 ```
 

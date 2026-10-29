@@ -50,20 +50,20 @@ def main():
         state=run('actions',script,extra=extra)
         assert state['debug_open'] and state['weapon']==2 and state['hp']==80 and state['wireframe']
         assert state['room']=='RM_0020.RDX' and any((item>>16)&255==12 and item&65535==30 for item in state['items'])
-        assert not state['blocked_commands'] and not state['debug_status'].startswith('Fehler:')
+        assert not state['blocked_commands'] and not state['debug_status'].startswith('Error:')
         for character in range(10,15):
             state=run('character-'+str(character),'0 debug_key F2\n1 debug_select character '+str(character)+'\n2 confirm\n')
-            assert state['debug_open'] and state['player_entry']==character and not state['debug_status'].startswith('Fehler:'),state
+            assert state['debug_open'] and state['player_entry']==character and not state['debug_status'].startswith('Error:'),state
         # Failed grants retain both inventory and the underlying status screen.
         setup='0 inventory\n1 confirm\n2 down\n3 confirm\n4 debug_key F2\n5 debug_select give_count 999\n6 confirm\n'
         before=run('full-before',setup)
         failed=run('full-failure',setup+'7 debug_select give 95\n8 confirm\n')
-        assert failed['debug_status'].startswith('Fehler:') and failed['items']==before['items'] and failed['inventory_open']==before['inventory_open']
+        assert failed['debug_status'].startswith('Error:') and failed['items']==before['items'] and failed['inventory_open']==before['inventory_open']
         granted=run('status-grant',setup+'7 debug_select give_count 1\n8 confirm\n9 debug_select give 21\n10 confirm\n')
-        assert not granted['inventory_open'] and not granted['debug_status'].startswith('Fehler:')
+        assert not granted['inventory_open'] and not granted['debug_status'].startswith('Error:')
         mods=folder/'bad-mods';(mods/'rooms').mkdir(parents=True);(mods/'rooms/RM_0020.RDT').write_bytes(b'bad')
         failed=run('bad-room','0 debug_key F2\n1 debug_select room 2\n2 confirm\n',extra=['--mods',str(mods)])
-        assert failed['room']=='RM_0010.RDX' and failed['debug_status'].startswith('Fehler:'),'failed resource preflight replaced the live room'
+        assert failed['room']=='RM_0010.RDX' and failed['debug_status'].startswith('Error:'),'failed resource preflight replaced the live room'
         closed=run('close','0 debug_key F2\n1 debug_key F2\n',3)
         assert not closed['debug_open'] and not closed['wireframe'],'hotkey toggles wireframe or cannot close'
         for name,script,expected in [('old-key','0 debug_key F2\n',False),('new-key','0 debug_key F6\n',True)]:

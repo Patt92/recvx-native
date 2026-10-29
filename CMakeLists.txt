@@ -833,6 +833,11 @@ if(BUILD_TESTING)
   target_link_libraries(recvx-audio-sq-tests PRIVATE recvx_game)
   add_test(NAME sony_sq_dictionary COMMAND recvx-audio-sq-tests)
   add_executable(recvx-audio-tests tests/native/audio_movie_test.cpp)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0031.RDT")
+      add_test(NAME rm0031_emblem_freeze COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm0031_emblem_freeze_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
   target_link_libraries(recvx-audio-tests PRIVATE recvx_game)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/files/COMMON.MLT")
     add_test(NAME audio_movie COMMAND recvx-audio-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")

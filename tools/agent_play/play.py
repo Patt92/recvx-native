@@ -979,9 +979,9 @@ class Play:
             toggle = [(1, 'sdl_key down F2'), (2, 'sdl_key up F2')]
             step(toggle, lambda d: d.get('debug_open'), 'debug menu did not open')
             step([(1, f'debug_select snapshot_{do} 1')], lambda d: True, 'debug selection not taken')
-            expected = 'Snapshot 2 ' + ('gespeichert' if do == 'save' else 'geladen')
+            expected = 'Snapshot 2 ' + ('saved' if do == 'save' else 'loaded')
             try:
-                d = step([(1, 'confirm')], lambda d: (d.get('debug_status') or '').startswith((expected, 'Fehler')),
+                d = step([(1, 'confirm')], lambda d: (d.get('debug_status') or '').startswith((expected, 'Error')),
                          f'no snapshot status after confirm', timeout=4.0)
             finally:
                 if self.read()[0].get('debug_open'):  # snapshot_load closes the menu itself

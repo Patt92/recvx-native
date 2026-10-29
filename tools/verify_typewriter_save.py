@@ -76,7 +76,7 @@ def main():
             ):
                 state = run(name, 5000, entry + keys + '250 sdl_key down F10\n', room_args,
                             screenshot=True, sdl=True)
-                assert 'Typewriter: Speicherbildschirm' in (output / (name + '.log')).read_text(), 'Speichermenue wurde nicht erreicht'
+                assert 'Typewriter: save screen' in (output / (name + '.log')).read_text(), 'Speichermenue wurde nicht erreicht'
                 assert not state['typewriter']['active'], state['typewriter']
                 assert state['typewriter']['save_count'] == state['typewriter']['checkpoint_save_count'] == 0, state['typewriter']
                 assert not state['work_flags'][5] & 0x8000000 and not state['work_flags'][10] & 0x200000, state['work_flags']
@@ -90,7 +90,7 @@ def main():
         #    dasselbe SAVEFILE-Format wie die Schreibmaschinen-Slots).
         saved = run('save', 3310, '\n'.join(walk) + '\n3200 debug_key F2\n3201 debug_select room 5\n3202 confirm\n3203 debug_key F2\n'
                     '3260 keys forward\n3290 keys none\n3300 debug_key F2\n3301 debug_select snapshot_save 0\n3302 confirm\n3303 debug_key F2\n')
-        assert saved['debug_status'].startswith('Snapshot 1 gespeichert'), saved['debug_status']
+        assert saved['debug_status'].startswith('Snapshot 1 saved'), saved['debug_status']
         snapshot = root / 'slots' / 'snapshot-1.rcvxsnap'
         assert snapshot.is_file(), 'Snapshot-Datei fehlt'
         # 2) Als Schreibmaschinen-Slot 1 bereitstellen.

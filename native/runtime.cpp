@@ -267,6 +267,11 @@ static void apply_android_locations(Options& o){
     if(!external||!*external)throw std::runtime_error(std::string("cannot locate the Android app external storage: ")+SDL_GetError());
     const auto base=fs::u8path(external);
     if(!o.data_explicit)o.data=base/"data";
+    // Ohne Leserecht wirft fs::is_regular_file spaeter einen rohen filesystem_error; hier mit Ort und Abhilfe.
+    {std::error_code ec;fs::status(o.data/"native-data.version",ec);
+     if(ec==std::errc::permission_denied)throw std::runtime_error("no read access to "+(o.data/"native-data.version").string()+
+        ": the app cannot read its data folder. Uninstall the app, install it again, start it once so that Android creates "
+        "Android/data/org.recvx.nativeport itself, then copy data/ with adb push (README, Android step 3).");}
 #if !defined(RECVX_NO_MODS)
     if(o.mods.empty())o.mods=base/"mods";
 #endif
@@ -973,14 +978,17 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(menu.active&&!menu_was_active){if(world)world->suspend_background(); /* system.c:613 BackColorFlag = 0. njSetBackColor(0,0,0) folgt erst im Monitor (system.c:1987-1992, nach dem Abblenden) und in StatusMain case 1 (sub1.c:3266-3268); solange Task 7 ausblendet, bleibt der Raumhintergrund installiert *//* bhCheckSubTask (system.c:603-611) beginnt mn_mode0 5 mit bhSetScreenFade(0xFF000000, 5);
                bhMainSequence im selben Task 7 ruft bhControlScreenFade (game.c:38-40). Die Rueckkehr aus
                der Karte (system.c case 6) setzt den Rahmen ohne Monitorlauf fort (StatusTask::resume). */
-            if(!menu.task.holding()){audio.all_stop_enemy_se();vibration.stop(); /* system.c:602 AllStopEnemySe (mit StopVibrationEx) */recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);}map_return_to_status=false;}
-            else if(menu.active&&!menu.task.holding()){audio.all_stop_enemy_se();vibration.stop();recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);} /* Abbau und neuer Eintritt ohne Zwischenbild */
+            if(!menu.task.holding()){audio.all_stop_enemy_se();vibration.stop(); /* system.c:602 AllStopEnemySe (mit StopVibrationEx) */events->flags[6][0]=0x30u; /* system.c:606-607 sp_flg = 0x30 */recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);}map_return_to_status=false;}
+            else if(menu.active&&!menu.task.holding()){audio.all_stop_enemy_se();vibration.stop();events->flags[6][0]=0x30u;recvx::set_screen_fade(events->flags[10][0],0xFF000000u,5.0f);menu.task.enter();recvx::control_screen_fade(events->flags[10][0]);} /* Abbau und neuer Eintritt ohne Zwischenbild */
             /* Task 20 bhSysCallMonitor Modus 5 (system.c:1953-2025) des Vorbilds, dann Task 7 dieses Bildes
                mit bhControlScreenFade, bis Modus 5 bei freiem cb_flg 0x2 ts_flg 0x80 setzt. */
             else if(menu.active&&menu.task.entering()){if(menu.task.monitor((events->flags[10][0]&0x2u)!=0))recvx::set_back_color(0u);if(menu.task.game_running())recvx::control_screen_fade(events->flags[10][0]);}
             /* sub1.c:3103 ItemTaskCheck: der Abbau ruft bhStandPlayerMotion vor der Kartenwahl
                (flgchk 0x8). Die vier taskloop-Paesse davor zaehlt StatusTask::item_task_check (ui.cpp). */
-            else if(!menu.active&&menu_was_active){if(world)world->restore_background(1);if(!menu.map_requested)fade_set(screen_fade.previous(),3.0f);if(!box_menu.take_stood())stand_player_motion();} /* Kiste: BoxMenu::leave hat sub1.c:3105 schon im Abbaubild gerufen */
+            else if(!menu.active&&menu_was_active){if(world)world->restore_background(1);if(!menu.map_requested)fade_set(screen_fade.previous(),3.0f);
+                /* sub1.c:3212-3220: ohne laufende Szene sp_flg = -1; startete die Benutzung eine Szene (bhCineSet 0/3/5,
+                   cb_flg 0x4), bleiben Spieler- und Gegnerpass (sp_flg 0x1/0x2) stehen, bis bhCineSet 1/4 sp_flg |= ~0 setzt. */
+                if(!menu.map_requested){if(events->flags[10][0]&4u)events->flags[6][0]|=0xCCu;else events->flags[6][0]=~0u;}if(!box_menu.take_stood())stand_player_motion();} /* Kiste: BoxMenu::leave hat sub1.c:3105 schon im Abbaubild gerufen */
             menu_was_active=menu.active;
             /* Erst wenn der Statusbildschirm abgebaut ist, startet der Kartentask: sein
                Verlassen loescht st_flg 0x8 (sub1.c:3137), worauf FtskMapWait (map.c:1757)
@@ -993,7 +1001,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                    Schwarz in 5 Bildern; bhSysCallMap case 0 initialisiert die Karte erst,
                    wenn cb_flg 0x2 gefallen ist. */
                 const bool is_event=(events->flags[10][0]&0x10000u)!=0;
-                events->flags[10][0]&=~0x10000u;events->flags[11][0]|=0x80000u;events->flags[5][0]|=0x40000u;
+                events->flags[10][0]&=~0x10000u;events->flags[11][0]|=0x80000u;events->flags[5][0]|=0x40000u;events->flags[6][0]=0x10u; /* system.c:621-622 */
                 map_entry_mode=is_event?RECVX_MP_SET_EVENT:RECVX_MP_SET_GAME;
                 audio.all_stop_enemy_se();vibration.stop(); /* system.c:617 AllStopEnemySe */
                 fade_set(0xFF000000u,5.0f);map_active=true;map_initialized=false;if(world)world->suspend_background();}
@@ -1006,6 +1014,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             fade_control(); /* system.c:806/866 */
             if(running)return;
             map_screen.exit();if(map_screen.game_map_flag_cleared())events->flags[11][0]&=~0x80000u;events->flags[5][0]&=~0x40000u;map_active=false;map_initialized=false;
+            if(map_entry_mode!=RECVX_MP_SET_SUB)events->flags[6][0]=~0u; /* system.c:823 bhSysCallMap case 2: sp_flg = ~0 */
             if(map_entry_mode==RECVX_MP_SET_SUB){
                 /* system.c case 6: nach bhExitMap uebernimmt der Statusbildschirm
                    wieder den Schirm (st_flg |= 0x8). */
@@ -1036,38 +1045,37 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         computer.character_scene=[&](unsigned chr_no,unsigned motion_no,unsigned frame_no)->std::optional<recvx::Scene>{
             if(!world)return std::nullopt;return world->computer_character(chr_no,motion_no,frame_no);};
         unsigned give_count=1;
-        debug.add({"character","Charakter","OK: Modell wechseln und aktuellen Raum neu laden; globale Flags bleiben.",[]{return std::vector<recvx::DebugChoice>{{10,"Claire / SYSTEM 0010"},{11,"Chris / SYSTEM 0011"},{12,"Spieler / SYSTEM 0012"},{13,"Spieler / SYSTEM 0013"},{14,"Spieler / SYSTEM 0014"}};},[&]{return args.player;},[&](unsigned value){
-            const auto override=args.mods/"players"/(recvx::asset_number(value)+".bin");auto body=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,value));if(!body->has_motion(42))throw std::runtime_error("Modell ohne Idle-Bewegung");
+        debug.add({"character","Character","OK: switch model and reload the current room; global flags stay.",[]{return std::vector<recvx::DebugChoice>{{10,"Claire / SYSTEM 0010"},{11,"Chris / SYSTEM 0011"},{12,"Player / SYSTEM 0012"},{13,"Player / SYSTEM 0013"},{14,"Player / SYSTEM 0014"}};},[&]{return args.player;},[&](unsigned value){
+            const auto override=args.mods/"players"/(recvx::asset_number(value)+".bin");auto body=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,value));if(!body->has_motion(42))throw std::runtime_error("Model without idle motion");
             menu.reset(inventory);auto old=std::move(player);const auto old_id=args.player,old_owner=inventory.player;player=std::move(body);args.player=value;inventory.player=value==11?1:value==12?2:0;
-            try{debug_room(room_index,unsigned(args.spawn));}catch(...){player=std::move(old);args.player=old_id;inventory.player=old_owner;throw;}combat=recvx::CombatController(args.data,args.mods);return std::string("Charakter gewechselt");}});
-        debug.add({"equip","Equip / Waffe","OK: ausruesten; fehlende Waffe wird mit Originalmenge hinzugefuegt.",[&]{std::vector<recvx::DebugChoice> result={{0,"Keine"}};for(unsigned id=1;id<=145;++id)if(itemdata[id].type&1)result.push_back({id,ui?ui->item_name(id):std::to_string(id)});return result;},[&]{return inventory.slots()[0]?recvx::Inventory::id(inventory.slots()[inventory.slots()[0]]):0;},equipment});
-        debug.add({"room","Raum / Teleport","OK: Zielraum an Spawn 0 laden; Inventar und globale Flags bleiben.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=0;i<rooms.size();++i)result.push_back({i,rooms.name(i)});return result;},[&]{return unsigned(room_index);},[&](unsigned value){debug_room(value,0);return std::string("Raum geladen: ")+rooms.name(value);}});
-        debug.add({"spawn","Spawn / Position","OK: Original-Spawn im aktuellen Raum; laufende Events bleiben aktiv.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=0;i<scene.spawns.size();++i)result.push_back({i,"Spawn "+std::to_string(i)});return result;},[&]{return unsigned(args.spawn);},[&](unsigned value){actor=scene.spawns.at(value);args.spawn=value;if(world)world->set_player_safe_position(actor.position);follow(true);return std::string("Position angewendet");}});
-        debug.add({"computer","Computer-Terminal","OK: bhEvtComSet mit dieser com_num; der Task laeuft wie aus dem Raumskript.",[]{return std::vector<recvx::DebugChoice>{{0,"0 Testskript"},{1,"1 Selbstzerstoerung"},{2,"2 Security Lock"},{3,"3 Albinoid-Datenbank"},{4,"4 Scanner"},{5,"5 Scanner Uebertragung"},{6,"6 Duplikat fertig"},{7,"7 Passwort"}};},[&]{return events?events->com_number:0u;},[&](unsigned value){if(!events)throw std::runtime_error("Kein Raum geladen");events->flags[10][0]|=0x400000u;events->com_number=value;debug.close();return std::string("Terminal angefordert: com_num ")+std::to_string(value);}});
-        debug.add({"give_count","Itemmenge","Links/Rechts: Menge einstellen. OK uebernimmt die Menge fuer Item geben.",[]{std::vector<recvx::DebugChoice> result;for(unsigned i=1;i<=999;++i)result.push_back({i,std::to_string(i)});return result;},[&]{return give_count;},[&](unsigned value){give_count=value;return std::string("Itemmenge gesetzt");}});
-        debug.add({"give","Item / File geben","OK: Item ins Inventar oder Datei nach FILE; Originaltypen und Dateititel.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned id=1;id<=145;++id)if(!recvx::original_file_model_mask(id)){std::ostringstream label;label<<id<<" "<<(ui?ui->item_name(id):"")<<" [0x"<<std::hex<<itemdata[id].type<<"]";result.push_back({id,label.str()});}for(unsigned file=0;file<24;++file)result.push_back({256+file,"FILE "+std::to_string(file)+" "+(ui?recvx::message_text(ui->system_message(159+file)):"")});return result;},[]{return 21;},[&](unsigned value){auto candidate=inventory;auto status=menu;status.reset(candidate);if(!candidate.debug_acquire(value,give_count))throw std::runtime_error("Inventar voll oder ungueltiger Item-/Dateieintrag");candidate.repair_owned_file_items();inventory=std::move(candidate);menu=std::move(status);if(events){events->cancel_item_request();events->menu_open=false;}return std::string(value>=256?"Datei unter FILE hinzugefuegt":"Item hinzugefuegt");}});
-        debug.add({"hp","Gesundheit / HP","OK: HP auf gewaehlten Wert setzen.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=1;i<=unsigned(inventory.max_hp);++i)result.push_back({i,std::to_string(i)});return result;},[&]{return unsigned(std::max(1,inventory.hp));},[&](unsigned value){inventory.hp=int(value);return std::string("HP gesetzt");}});
-        debug.add({"side_pack","Tasche / Slots","OK: 8 oder 10 Slots; Tasche mit belegten Extras wird nicht entfernt.",[]{return std::vector<recvx::DebugChoice>{{0,"8 Slots"},{1,"10 Slots"}};},[&]{return unsigned(inventory.side_pack);},[&](unsigned value){if(!value&&inventory.occupied()>8)throw std::runtime_error("Mehr als 8 Slots belegt");inventory.side_pack=bool(value);if(events){if(inventory.player<3)events->set_flag(1,6+inventory.player,value?0:1); /* Quelle ist ev_flg 6/7/8 (bhCheckSubPack, player.c:1072) */events->set_flag(11,4,value?0:1);}return std::string("Tasche gesetzt");}});
-        debug.add({"enemy_ai","Gegner-KI","OK: Zombie-KI ein/aus. Aus: Gegner bleiben stehen (Reaktionen auf Treffer laufen weiter).",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(enemy_ai);},[&](unsigned value){enemy_ai=value!=0;if(world)world->set_enemy_ai(enemy_ai);return std::string("Gegner-KI: ")+(enemy_ai?"an":"aus");}});
-        debug.add({"enemy_grab","Gegner-Angriff","OK: Greifen/Beissen der Zombies (braucht die Gegner-KI). Standard: an. Hebelrütteln befreit; Tod oeffnet die originale Retry-Auswahl.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(enemy_grab);},[&](unsigned value){enemy_grab=value!=0;if(world)world->set_enemy_grab(enemy_grab);return std::string("Gegner-Angriff: ")+(enemy_grab?"an":"aus");}});
+            try{debug_room(room_index,unsigned(args.spawn));}catch(...){player=std::move(old);args.player=old_id;inventory.player=old_owner;throw;}combat=recvx::CombatController(args.data,args.mods);return std::string("Character changed");}});
+        debug.add({"equip","Equip / weapon","OK: equip; a missing weapon is added with its original quantity.",[&]{std::vector<recvx::DebugChoice> result={{0,"None"}};for(unsigned id=1;id<=145;++id)if(itemdata[id].type&1)result.push_back({id,ui?ui->item_name(id):std::to_string(id)});return result;},[&]{return inventory.slots()[0]?recvx::Inventory::id(inventory.slots()[inventory.slots()[0]]):0;},equipment});
+        debug.add({"room","Room / teleport","OK: load the room at spawn 0; inventory and global flags stay.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=0;i<rooms.size();++i)result.push_back({i,rooms.name(i)});return result;},[&]{return unsigned(room_index);},[&](unsigned value){debug_room(value,0);return std::string("Room loaded: ")+rooms.name(value);}});
+        debug.add({"spawn","Spawn / Position","OK: original spawn in the current room; running events stay active.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=0;i<scene.spawns.size();++i)result.push_back({i,"Spawn "+std::to_string(i)});return result;},[&]{return unsigned(args.spawn);},[&](unsigned value){actor=scene.spawns.at(value);args.spawn=value;if(world)world->set_player_safe_position(actor.position);follow(true);return std::string("Position applied");}});
+        debug.add({"computer","Computer terminal","OK: bhEvtComSet with this com_num; the task runs as from the room script.",[]{return std::vector<recvx::DebugChoice>{{0,"0 Test script"},{1,"1 Self-destruct"},{2,"2 Security Lock"},{3,"3 Albinoid database"},{4,"4 Scanner"},{5,"5 Scanner transfer"},{6,"6 Duplicate finished"},{7,"7 Password"}};},[&]{return events?events->com_number:0u;},[&](unsigned value){if(!events)throw std::runtime_error("No room loaded");events->flags[10][0]|=0x400000u;events->com_number=value;debug.close();return std::string("Terminal requested: com_num ")+std::to_string(value);}});
+        debug.add({"give_count","Item quantity","Left/Right: set the quantity. OK takes it for Give item.",[]{std::vector<recvx::DebugChoice> result;for(unsigned i=1;i<=999;++i)result.push_back({i,std::to_string(i)});return result;},[&]{return give_count;},[&](unsigned value){give_count=value;return std::string("Item quantity set");}});
+        debug.add({"give","Give item / file","OK: item into the inventory or file into FILE; original types and file titles.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned id=1;id<=145;++id)if(!recvx::original_file_model_mask(id)){std::ostringstream label;label<<id<<" "<<(ui?ui->item_name(id):"")<<" [0x"<<std::hex<<itemdata[id].type<<"]";result.push_back({id,label.str()});}for(unsigned file=0;file<24;++file)result.push_back({256+file,"FILE "+std::to_string(file)+" "+(ui?recvx::message_text(ui->system_message(159+file)):"")});return result;},[]{return 21;},[&](unsigned value){auto candidate=inventory;auto status=menu;status.reset(candidate);if(!candidate.debug_acquire(value,give_count))throw std::runtime_error("Inventory full or invalid item/file entry");candidate.repair_owned_file_items();inventory=std::move(candidate);menu=std::move(status);if(events){events->cancel_item_request();events->menu_open=false;}return std::string(value>=256?"File added to FILE":"Item added");}});
+        debug.add({"hp","Health / HP","OK: set HP to the chosen value.",[&]{std::vector<recvx::DebugChoice> result;for(unsigned i=1;i<=unsigned(inventory.max_hp);++i)result.push_back({i,std::to_string(i)});return result;},[&]{return unsigned(std::max(1,inventory.hp));},[&](unsigned value){inventory.hp=int(value);return std::string("HP set");}});
+        debug.add({"side_pack","Bag / slots","OK: 8 or 10 slots; a bag with occupied extra slots is not removed.",[]{return std::vector<recvx::DebugChoice>{{0,"8 Slots"},{1,"10 Slots"}};},[&]{return unsigned(inventory.side_pack);},[&](unsigned value){if(!value&&inventory.occupied()>8)throw std::runtime_error("More than 8 slots occupied");inventory.side_pack=bool(value);if(events){if(inventory.player<3)events->set_flag(1,6+inventory.player,value?0:1); /* Quelle ist ev_flg 6/7/8 (bhCheckSubPack, player.c:1072) */events->set_flag(11,4,value?0:1);}return std::string("Bag set");}});
+        debug.add({"enemy_ai","Enemy AI","OK: enemy AI on/off. Off: enemies stand still (hit reactions keep running).",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"On"}};},[&]{return unsigned(enemy_ai);},[&](unsigned value){enemy_ai=value!=0;if(world)world->set_enemy_ai(enemy_ai);return std::string("Enemy AI: ")+(enemy_ai?"an":"aus");}});
         debug.add({"enemy_attacks","Enemy attacks","OK: host switch. Off: enemies and enemy effects deal no HP loss, poison, grab/throw or kill to the player; enemy AI keeps running. Default: on.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"On"}};},[&]{return unsigned(enemy_attacks);},[&](unsigned value){enemy_attacks=value!=0;if(world)world->set_enemy_attacks(enemy_attacks);return std::string("Enemy attacks: ")+(enemy_attacks?"on":"off");}});
-        debug.add({"wireframe","Wireframe","OK: Drahtgitterdarstellung umschalten.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(wireframe);},[&](unsigned value){wireframe=bool(value);return std::string("Darstellung gesetzt");}});
-        debug.add({"third_person","3rd Person","OK: Host-Kameramod umschalten; wird in third_person.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"An"}};},[&]{return unsigned(third_person.enabled());},[&](unsigned value){third_person.set_enabled(value!=0);return std::string("3rd Person: ")+third_person.describe()+(third_person.status()=="Saved"||third_person.status().empty()?"":" ("+third_person.status()+")");}});
+        debug.add({"wireframe","Wireframe","OK: toggle wireframe rendering.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"On"}};},[&]{return unsigned(wireframe);},[&](unsigned value){wireframe=bool(value);return std::string("Rendering set");}});
+        debug.add({"third_person","3rd Person","OK: toggle the host camera mod; saved in third_person.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"On"}};},[&]{return unsigned(third_person.enabled());},[&](unsigned value){third_person.set_enabled(value!=0);return std::string("3rd Person: ")+third_person.describe()+(third_person.status()=="Saved"||third_person.status().empty()?"":" ("+third_person.status()+")");}});
         // Host snapshot slots on the original bhPushGameData/bhPopGameData record; see AGENTS.md "Snapshot".
         auto snapshot_file=[&](unsigned slot){return args.snapshots/("snapshot-"+std::to_string(slot+1)+".rcvxsnap");};
         auto save_snapshot=[&](unsigned slot){
-            if(!events||!world||frontend.active())throw std::runtime_error("Kein laufendes Spiel");
-            if(transition_pending||menu.active||dialog.active()||movie.active()||world->player_scripted||world->player_hidden||(events->flags[5][0]&4))throw std::runtime_error("Nur bei freier Spielersteuerung");
+            if(!events||!world||frontend.active())throw std::runtime_error("No game running");
+            if(transition_pending||menu.active||dialog.active()||movie.active()||world->player_scripted||world->player_hidden||(events->flags[5][0]&4))throw std::runtime_error("Only while the player is free to move");
             recvx::write_snapshot(snapshot_file(slot),recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index},audio.loaded_room_sound_case())); // Hostfeld: geladenes Raumklangpaket (Retry-Punkte bleiben wie das Original bei Fall 0)
-            return "Snapshot "+std::to_string(slot+1)+" gespeichert: "+rooms.name(room_index);
+            return "Snapshot "+std::to_string(slot+1)+" saved: "+rooms.name(room_index);
         };
         auto restore_snapshot=[&](const recvx::Snapshot& snap){std::optional<std::size_t> target;
             for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==snap.host.room)target=i;
-            if(!target)throw std::runtime_error("Snapshot-Raum fehlt: "+snap.host.room);
+            if(!target)throw std::runtime_error("Snapshot room missing: "+snap.host.room);
             // Raumnamen sind dezimal (ps2_dvd_image.c:5-9 "RM_1100.RDX" = stg 1, rom 10; RoomIdentity::name);
             // das fruehere "RM_%X%02X" wies jeden Snapshot aus rom_no >= 10 (RM_1100, RM_3160 ...) ab.
             const auto identity=recvx::RoomIdentity{unsigned(std::uint8_t(snap.save.stg_no)),unsigned(std::uint8_t(snap.save.rom_no)),0}.name().substr(0,6);
-            if(snap.host.room.rfind(identity,0)!=0)throw std::runtime_error("Snapshot-Raum passt nicht zu stg_no/rom_no");
+            if(snap.host.room.rfind(identity,0)!=0)throw std::runtime_error("Snapshot room does not match stg_no/rom_no");
             const auto previous_inventory=inventory;const auto previous_body=args.player;std::unique_ptr<recvx::PlayerAsset> previous_player;
             if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto body=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
                 previous_player=std::move(player);player=std::move(body);args.player=snap.host.body;}
@@ -1078,25 +1086,25 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             try{debug_room(*target,unsigned(std::uint8_t(snap.save.pos_no)));}
             catch(...){item_pool_reset=false;restoring.reset();inventory=previous_inventory;if(previous_player){player=std::move(previous_player);args.player=previous_body;}throw;}
             restoring.reset();if(previous_player)combat=recvx::CombatController(args.data,args.mods);
-            return snap.host.room+(repaired_file_items?" / doppelte Dateiitems entfernt: "+std::to_string(repaired_file_items):"");
+            return snap.host.room+(repaired_file_items?" / duplicate file items removed: "+std::to_string(repaired_file_items):"");
         };
-        auto load_snapshot=[&](unsigned slot){return "Snapshot "+std::to_string(slot+1)+" geladen: "+restore_snapshot(recvx::read_snapshot(snapshot_file(slot)));};
-        // Hostschalter "Textur-Mods": den laufenden Stand wie einen Snapshot im Speicher sichern und an derselben
+        auto load_snapshot=[&](unsigned slot){return "Snapshot "+std::to_string(slot+1)+" loaded: "+restore_snapshot(recvx::read_snapshot(snapshot_file(slot)));};
+        // Hostschalter "Texture mods": den laufenden Stand wie einen Snapshot im Speicher sichern und an derselben
         // Stelle neu laden, damit Raum, Objekte, Gegner, Effekte, Spieler und Waffe ihre Texturen neu lesen.
         auto reload_textures_here=[&]()->std::string{
-            if(!events||!world||frontend.active())return "gilt ab dem naechsten Raum";
-            if(transition_pending||menu.active||dialog.active()||movie.active()||world->player_scripted||world->player_hidden||(events->flags[5][0]&4))return "gilt ab dem naechsten Raum (Raum jetzt nicht neu ladbar)";
+            if(!events||!world||frontend.active())return "applies from the next room";
+            if(transition_pending||menu.active||dialog.active()||movie.active()||world->player_scripted||world->player_hidden||(events->flags[5][0]&4))return "applies from the next room (room cannot be reloaded now)";
             const auto snap=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index},audio.loaded_room_sound_case());
             combat=recvx::CombatController(args.data,args.mods); // weapon_asset.cpp: Waffentexturen ueber apply_texture_files
-            return "Raum neu geladen: "+restore_snapshot(snap);};
-        debug.add({"texture_mods","Textur-Mods (HD)","OK: HD-/Textur-Mods an/aus, Inventar-/Menueatlanten neu laden und den Raum an derselben Stelle neu laden (PS2 gegen HD vergleichen).",[]{return std::vector<recvx::DebugChoice>{{0,"Aus (PS2)"},{1,"An"}};},[]{return unsigned(recvx::texture_mods_enabled());},[&](unsigned value){recvx::set_texture_mods_enabled(value!=0);if(ui)ui->reload_textures();return std::string("Textur-Mods ")+(value?"an":"aus")+": "+reload_textures_here();}});
+            return "Room reloaded: "+restore_snapshot(snap);};
+        debug.add({"texture_mods","Texture mods (HD)","OK: HD/texture mods on/off; reloads inventory/menu atlases and the room at the same spot (compare PS2 and HD).",[]{return std::vector<recvx::DebugChoice>{{0,"Off (PS2)"},{1,"On"}};},[]{return unsigned(recvx::texture_mods_enabled());},[&](unsigned value){recvx::set_texture_mods_enabled(value!=0);if(ui)ui->reload_textures();return std::string("Texture mods ")+(value?"an":"aus")+": "+reload_textures_here();}});
         // Schreibmaschine (bup_00.c ControlTypewriter): Slotauswahl mit Host-
         // Speicherdatei je Slot. Der Ladevorgang nutzt denselben bhPopGameData-
         // Pfad wie der Snapshot, aber aus <saves>.
         auto typewriter_apply=[&](const recvx::Snapshot& snap){
             std::optional<std::size_t> target;
             for(std::size_t i=0;i<rooms.size();++i)if(rooms.name(i)==snap.host.room)target=i;
-            if(!target)throw std::runtime_error("Spielstand-Raum fehlt: "+snap.host.room);
+            if(!target)throw std::runtime_error("Save room missing: "+snap.host.room);
             const auto previous_inventory=inventory;const auto previous_body=args.player;std::unique_ptr<recvx::PlayerAsset> previous_player;
             if(snap.host.body!=args.player&&!args.no_player){const auto override=args.mods/"players"/(recvx::asset_number(snap.host.body)+".bin");auto loaded=!args.mods.empty()&&fs::is_regular_file(override)?std::make_unique<recvx::PlayerAsset>(recvx::read_asset_file(override,8*1024*1024)):std::make_unique<recvx::PlayerAsset>(recvx::PlayerAsset::load(args.data,snap.host.body));
                 previous_player=std::move(player);player=std::move(loaded);args.player=snap.host.body;}
@@ -1123,7 +1131,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 const unsigned slot=typewriter.slot();
                 try{
                 if(typewriter.mode()==recvx::Typewriter::Mode::Save){
-                    if(!events||!world)throw std::runtime_error("Schreibmaschine ohne laufendes Spiel");
+                    if(!events||!world)throw std::runtime_error("Typewriter without a running game");
                     // mcWriteStartSaveFile (0x271A50), vor dem memcpy von sys->version..save_end:
                     // ohne ev_flg 56 save_ct bis 99 erhoehen und ein Farbband (31) abziehen
                     // (nicht bei Unendlich-Bit 0x8000000, EraseItem erst bei Zahl 0); mit
@@ -1137,7 +1145,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                     auto snap=recvx::capture_snapshot(inventory,*events,args.player,rooms.name(room_index),{actor.position,actor.yaw,world->floor_at(actor.position),unsigned(args.spawn),camera_index},0,true);
                     if(special){snap.save.stg_no=6;snap.save.rom_no=0;snap.save.rcase=0;snap.save.pos_no=0;snap.host.room=recvx::RoomIdentity{6,0,0}.name();}
                     recvx::write_save_slot(saves_dir,slot,snap);
-                    std::cout<<"Typewriter: Spielstand in Slot "<<slot<<" gespeichert ("<<snap.host.room<<")\n";
+                    std::cout<<"Typewriter: game saved in slot "<<slot<<" ("<<snap.host.room<<")\n";
                 }else{
                     typewriter_apply(recvx::read_save_slot(saves_dir,slot));
                 }
@@ -1159,7 +1167,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             // bup_00.c:425-437: vom Titel (ss_flg 0x200) ohne geladenen Spielstand -> tk_flg 0x300008, Titeltask.
             const bool back_to_title=typewriter.mode()==recvx::Typewriter::Mode::Load&&!events;
             typewriter.reset();
-            if(back_to_title){frontend.return_from_load();std::cout<<"Typewriter: zurueck ins Hauptmenue\n";}
+            if(back_to_title){frontend.return_from_load();std::cout<<"Typewriter: back to the main menu\n";}
         };
         auto typewriter_key=[&](recvx::MenuInput key){
             const unsigned bit=key==recvx::MenuInput::Up?1u:key==recvx::MenuInput::Down?2u:key==recvx::MenuInput::Confirm?0x800u:key==recvx::MenuInput::Cancel?0x1000u:0u;
@@ -1167,8 +1175,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         };
         auto typewriter_enter=[&]{
             if(typewriter.active())return;
-            if(load_game_requested){load_game_requested=false;typewriter.open(recvx::Typewriter::Mode::Load,saves_dir);std::cout<<"Typewriter: Ladebildschirm\n";return;}
-            if(events&&!frontend.active()&&!(events->flags[12][0]&0x8000u)&&typewriter_was_blocked){typewriter.open(recvx::Typewriter::Mode::Save,saves_dir);std::cout<<"Typewriter: Speicherbildschirm\n";}
+            if(load_game_requested){load_game_requested=false;typewriter.open(recvx::Typewriter::Mode::Load,saves_dir);std::cout<<"Typewriter: load screen\n";return;}
+            if(events&&!frontend.active()&&!(events->flags[12][0]&0x8000u)&&typewriter_was_blocked){typewriter.open(recvx::Typewriter::Mode::Save,saves_dir);std::cout<<"Typewriter: save screen\n";}
         };
         // bhCheckSubTask (system.c:561-580): das Raumskript setzt nach "USE AN INK RIBBON" ->
         // Ja cb_flg 0x200000 (z. B. RM_0010 05 0a 0a 00 00 00). Der Zweig steht vor dem
@@ -1181,20 +1189,20 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             events->flags[6][0]=0x30u;events->flags[5][0]|=0x8000000u;events->flags[12][0]&=~0x8000u;fade_set(0xFF000000u,5.0f);if(world)world->suspend_background();
             return true;};
         auto snapshot_slots=[]{return std::vector<recvx::DebugChoice>{{0,"Slot 1 (F5/F9)"},{1,"Slot 2"},{2,"Slot 3"}};};
-        debug.add({"snapshot_save","Snapshot speichern","OK: Spielstand an dieser Position sichern; ohne Schreibmaschine, Farbband und Speicherzaehler.",snapshot_slots,[]{return 0;},[&](unsigned slot){return save_snapshot(slot);}});
-        debug.add({"snapshot_load","Snapshot laden","OK: Raum mit gesichertem Fortschritt an der gesicherten Position neu laden.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
-        debug.add({"video","Grafikqualitaet","OK: Host-Renderqualitaet; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Niedrig"},{2,"Hoch"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Grafik: "+video.describe();}});
-        debug.add({"framerate","Bildrate","OK: Praesentationen je Spieltakt (Takt bleibt 30 Hz); unlimited ohne VSync; wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"30 (Spieltakt)"},{1,"60"},{2,"120"},{3,"Unbegrenzt (kein VSync)"}};},[&]{return unsigned(video.settings().frame_rate);},[&](unsigned value){video.set_frame_rate(recvx::FrameRate(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Bildrate: "+video.settings().describe_frame_rate();}});
-        debug.add({"upscaler","Upscaler","OK: Upscaler des Endbilds (MetalFX auf macOS, FSR 4 auf Windows); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX spatial"},{2,"MetalFX temporal"},{3,"FSR 4 (FP8)"},{4,"FSR 4 (INT8)"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
-        debug.add({"framegen","Frame-Generation","OK: Zwischenbild je Spieltakt (macOS 26+); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"MetalFX frame interpolation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame-Generation: "+video.describe_frame_generation();}});
-        debug.add({"sharpness","Schaerfen","OK: kontrastadaptives Schaerfen der Anzeige (macOS); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"Leicht"},{2,"Mittel"},{3,"Stark"}};},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Schaerfen: "+video.describe_sharpness();}});
-        debug.add({"postfx","CRT-Filter","OK: CRT light (Zeilenraster) oder CRT full (Schlitzmaske, Bloom, gamma-korrekt); wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"Aus"},{1,"CRT light"},{2,"CRT full"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT-Filter: "+video.describe_post_process();}});
-        debug.add({"renderer","Rasterer","OK: Plattform-GPU, Software, OpenGL, Vulkan oder Direct3D 12 (Windows); Auswahl wird in video.ini gespeichert.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (Plattform)"},{1,"Software"},{2,"OpenGL"},{3,"Vulkan"},{4,"Direct3D 12"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
+        debug.add({"snapshot_save","Save snapshot","OK: save the game at this position; no typewriter, ink ribbon or save counter.",snapshot_slots,[]{return 0;},[&](unsigned slot){return save_snapshot(slot);}});
+        debug.add({"snapshot_load","Load snapshot","OK: reload the room with the saved progress at the saved position.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
+        debug.add({"video","Graphics quality","OK: host render quality; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Low"},{2,"High"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Graphics: "+video.describe();}});
+        debug.add({"framerate","Frame rate","OK: presentations per game tick (the tick stays 30 Hz); unlimited without VSync; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"30 (game tick)"},{1,"60"},{2,"120"},{3,"Unlimited (no VSync)"}};},[&]{return unsigned(video.settings().frame_rate);},[&](unsigned value){video.set_frame_rate(recvx::FrameRate(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame rate: "+video.settings().describe_frame_rate();}});
+        debug.add({"upscaler","Upscaler","OK: upscaler of the final image (MetalFX on macOS, FSR 4 on Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX spatial"},{2,"MetalFX temporal"},{3,"FSR 4 (FP8)"},{4,"FSR 4 (INT8)"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
+        debug.add({"framegen","Frame generation","OK: interpolated frame per game tick (macOS 26+); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX frame interpolation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame generation: "+video.describe_frame_generation();}});
+        debug.add({"sharpness","Sharpen","OK: contrast-adaptive sharpening of the display (macOS); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"Light"},{2,"Medium"},{3,"Strong"}};},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Sharpen: "+video.describe_sharpness();}});
+        debug.add({"postfx","CRT filter","OK: CRT light (scanlines) or CRT full (slot mask, bloom, gamma-correct); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"CRT light"},{2,"CRT full"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT filter: "+video.describe_post_process();}});
+        debug.add({"renderer","Renderer","OK: platform GPU, software, OpenGL, Vulkan or Direct3D 12 (Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (platform)"},{1,"Software"},{2,"OpenGL"},{3,"Vulkan"},{4,"Direct3D 12"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
             const auto backend=value==4?recvx::RenderBackend::D3D12:value==3?recvx::RenderBackend::Vulkan:value==2?recvx::RenderBackend::OpenGL:value==1?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
-            if(!apply_renderer)return std::string("Rasterer: noch nicht bereit");
+            if(!apply_renderer)return std::string("Renderer: not ready yet");
             const auto name=apply_renderer(backend);video.set_renderer(backend);
-            return "Rasterer: "+name+(video.status().empty()?"":" ("+video.status()+")");}});
-        debug.add({"resume","Weiter spielen","OK oder Debug-Hotkey: Menue schliessen.",[]{return std::vector<recvx::DebugChoice>{{0,"Schliessen"}};},[]{return 0;},[&](unsigned){debug.close();return std::string{};}});
+            return "Renderer: "+name+(video.status().empty()?"":" ("+video.status()+")");}});
+        debug.add({"resume","Resume","OK or debug hotkey: close the menu.",[]{return std::vector<recvx::DebugChoice>{{0,"Close"}};},[]{return 0;},[&](unsigned){debug.close();return std::string{};}});
         auto input=[&](recvx::MenuInput key){if(ui){if(debug.active())debug.input(key);else if(typewriter.active())typewriter_key(key);else if(frontend.active())frontend_command(frontend.input(key));else if(!game_over.active())gameplay_input.menu_input(key);}};
         int replay_move=0,replay_turn=0;bool replay_run=false;unsigned replay_pad=0; // bhSetPad equivalent for headless bhPadCheck
         std::function<void(const fs::path&)> write_state,write_screenshot; // defined with report()/the renderer below; used by the control action "dump"

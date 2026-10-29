@@ -40,7 +40,7 @@ def main():
         shutil.copy(root / 'snaps' / 'snapshot-1.rcvxsnap', root / 'saves' / 'save-1.rcvxsav')
 
         opened, out = run('open', 400, ['100 confirm', '200 confirm'], [])
-        assert opened['typewriter']['active'] and 'Ladebildschirm' in out, ('LOAD GAME oeffnet den Ladebildschirm nicht', opened['typewriter'])
+        assert opened['typewriter']['active'] and 'Typewriter: load screen' in out, ('LOAD GAME oeffnet den Ladebildschirm nicht', opened['typewriter'])
 
         back, out = run('cancel', 600, ['100 confirm', '200 confirm', '400 cancel'], [])
         assert not back['typewriter']['active'] and back['title_active'], ('Abbruch fuehrt nicht in den Titel', back['typewriter'], back['title_active'])

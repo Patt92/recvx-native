@@ -2244,11 +2244,11 @@ class DriverTests(unittest.TestCase):
             elif line == 'confirm' and d.get('debug_open'):
                 name, value = d['debug_choice']
                 if value != '1':
-                    d['debug_status'] = 'Fehler: wrong slot'
+                    d['debug_status'] = 'Error: wrong slot'
                 elif name == 'snapshot_save':
-                    d['debug_status'] = 'Snapshot 2 gespeichert: RM_TEST.RDX'
+                    d['debug_status'] = 'Snapshot 2 saved: RM_TEST.RDX'
                 else:
-                    d.update(debug_status='Snapshot 2 geladen: RM_TEST.RDX', debug_open=False,
+                    d.update(debug_status='Snapshot 2 loaded: RM_TEST.RDX', debug_open=False,
                              gameover_active=False, gameover_prompt=False, hp=100)
         return self.reacting(handle)
 

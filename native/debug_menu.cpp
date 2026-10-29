@@ -62,7 +62,7 @@ bool DebugMenu::event(const SDL_Event& event){
     if(active_&&event.type==SDL_CONTROLLERBUTTONDOWN&&(event.cbutton.button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER||event.cbutton.button==SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)){step(event.cbutton.button==SDL_CONTROLLER_BUTTON_LEFTSHOULDER?-20:20);return true;}return false;
 }
 void DebugMenu::step(int amount){if(actions_.empty())return;const auto options=choices(selected_);if(options.empty())return;const auto found=std::find_if(options.begin(),options.end(),[&](const auto& c){return c.value==values_[selected_];});const auto index=found==options.end()?0:int(found-options.begin());const int count=int(options.size());values_[selected_]=options[(index+amount%count+count)%count].value;status_.clear();}
-void DebugMenu::execute(){if(actions_.empty())return;try{const auto options=choices(selected_);if(std::none_of(options.begin(),options.end(),[&](const auto& c){return c.value==values_[selected_];}))throw std::runtime_error("selection is unavailable");status_=actions_[selected_].execute(values_[selected_]);}catch(const std::exception& e){status_=std::string("Fehler: ")+e.what();}}
+void DebugMenu::execute(){if(actions_.empty())return;try{const auto options=choices(selected_);if(std::none_of(options.begin(),options.end(),[&](const auto& c){return c.value==values_[selected_];}))throw std::runtime_error("selection is unavailable");status_=actions_[selected_].execute(values_[selected_]);}catch(const std::exception& e){status_=std::string("Error: ")+e.what();}}
 void DebugMenu::select(const std::string& id,unsigned value){
     for(unsigned i=0;i<actions_.size();++i)if(actions_[i].id==id){const auto options=choices(i);if(std::none_of(options.begin(),options.end(),[&](const auto& c){return c.value==value;}))throw std::runtime_error("unavailable debug value for "+id);selected_=i;values_[i]=value;return;}throw std::runtime_error("unknown debug action: "+id);
 }
@@ -75,10 +75,10 @@ void DebugMenu::apply(const InputFrame& frame){if(!active_)return;if(frame.hit(A
 }
 void DebugMenu::draw(SoftwareRenderer& image,const GameUi& ui)const{
     if(!active_)return;for(auto& pixel:image.canvas())pixel=0xff000000|((pixel&0xfefefe)>>1);
-    panel(image,24,24,592,432,0xff121c24);panel(image,24,24,592,3,0xff52c9dd);ui.label(image,"RECVX DEBUG",44,42,1);ui.label(image,std::string(SDL_GetScancodeName(config_.hotkey))+" / Zurueck: schliessen / Spiel pausiert",44,78,.65f);
+    panel(image,24,24,592,432,0xff121c24);panel(image,24,24,592,3,0xff52c9dd);ui.label(image,"RECVX DEBUG",44,42,1);ui.label(image,std::string(SDL_GetScancodeName(config_.hotkey))+" / Back: close / game paused",44,78,.65f);
     const unsigned first=selected_>=8?selected_-7:0;for(unsigned i=first;i<std::min(unsigned(actions_.size()),first+8);++i){const int y=114+int(i-first)*30;if(i==selected_)panel(image,36,y-2,568,29,0xff244657);{std::string label=actions_[i].label;while(!label.empty()&&ui.label_width(label,.68f)>192)label.pop_back();ui.label(image,label,44,y,.68f);} /* Wertspalte ab x 244: lange Namen abschneiden statt ueberlagern */
         const auto options=choices(i);const auto choice=std::find_if(options.begin(),options.end(),[&](const auto& c){return c.value==values_[i];});const auto value=choice==options.end()?"-":choice->label;ui.label(image,value.substr(0,38),244,y,.62f,i==selected_?0xff9ae5f0:0xffffffff);}
-    ui.label(image,"Hoch/Runter: Auswahl / Links/Rechts: Wert / OK: anwenden",44,364,.58f);ui.label(image,"PageUp/PageDown oder LB/RB: 20 Werte weiter",44,386,.58f);
+    ui.label(image,"Up/Down: select / Left/Right: value / OK: apply",44,364,.58f);ui.label(image,"PageUp/PageDown or LB/RB: 20 values",44,386,.58f);
     if(!actions_.empty())ui.label(image,actions_[selected_].help.substr(0,84),44,410,.5f,0xffb7d1db);ui.label(image,status_.substr(0,90),44,432,.5f,0xfff1cc73);
 }
 }

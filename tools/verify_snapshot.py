@@ -35,9 +35,9 @@ def main():
 
         saved = run('save', 3310, '\n'.join(walk) + '\n3200 debug_key F2\n3201 debug_select room 5\n3202 confirm\n3203 debug_key F2\n'
                     '3260 keys forward\n3290 keys none\n3300 debug_key F2\n3301 debug_select snapshot_save 1\n3302 confirm\n3303 debug_key F2\n')
-        assert saved['debug_status'].startswith('Snapshot 2 gespeichert'), saved['debug_status']
+        assert saved['debug_status'].startswith('Snapshot 2 saved'), saved['debug_status']
         loaded = run('load', 12, '0 debug_key F2\n1 debug_select snapshot_load 1\n2 confirm\n')
-        assert loaded['debug_status'].startswith('Snapshot 2 geladen'), loaded['debug_status']
+        assert loaded['debug_status'].startswith('Snapshot 2 loaded'), loaded['debug_status']
         assert not loaded['title_active'] and not loaded['debug_open']
         for key in ('room', 'actor', 'yaw', 'items', 'weapon', 'hp'):
             assert saved[key] == loaded[key], f'{key}: {saved[key]} != {loaded[key]}'

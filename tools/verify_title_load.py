@@ -58,7 +58,7 @@ def main():
         # Ein kurzer Entwicklungs-Snapshot stellt einen lesbaren Host-Slot bereit.
         fixture = run('fixture', '5 debug_key F2\n6 debug_select snapshot_save 0\n7 confirm\n8 debug_key F2\n',
                       frames=20, extra=('--in-game', '--room', 'RM_0010.RDX'))
-        assert fixture['debug_status'].startswith('Snapshot 1 gespeichert'), fixture['debug_status']
+        assert fixture['debug_status'].startswith('Snapshot 1 saved'), fixture['debug_status']
         shutil.copyfile(root / 'snapshots/snapshot-1.rcvxsnap', saves / 'save-1.rcvxsav')
         initial = run('saved-initial', '60 confirm\n')
         down = run('saved-down', '60 confirm\n90 down\n')
