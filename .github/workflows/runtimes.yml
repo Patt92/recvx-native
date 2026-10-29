@@ -32,10 +32,10 @@ jobs:
             platform: windows-arm64
             build: build/windows-arm64-native
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # build number = git rev-list --count HEAD
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Policy check
@@ -56,7 +56,7 @@ jobs:
           if (Test-Path $fsr) { Copy-Item $fsr $out -Recurse }
           Copy-Item README.md, STARTEN.md $out -ErrorAction SilentlyContinue
           Get-ChildItem $out -Recurse | Select-Object -ExpandProperty FullName
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: recvx-windows-${{ matrix.arch }}
           path: dist/recvx-windows-${{ matrix.arch }}
@@ -66,7 +66,7 @@ jobs:
     name: Linux x64
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Dependencies
@@ -89,7 +89,7 @@ jobs:
           cp README.md STARTEN.md "$out/" 2>/dev/null || true
           ls -lR "$out"
           tar -C dist -czf dist/recvx-linux-x64.tar.gz recvx-linux-x64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: recvx-linux-x64
           path: dist/recvx-linux-x64.tar.gz  # tar keeps the executable bit and SDL symlinks
@@ -101,14 +101,14 @@ jobs:
     env:
       NDK_VERSION: 28.2.13676358  # ANDROID_NDK_MAJOR in tools/build_native.py
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'  # AGP 9 needs JDK 17 or 21
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.8.2'
       - name: Dependencies
@@ -125,8 +125,48 @@ jobs:
         run: python3 tools/check_no_original_core.py
       - name: Build APK
         run: ./build.sh --platform android
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: recvx-android-arm64
           path: build/android-arm64/RECVX-Native.apk
           if-no-files-found: error
+
+  # Publishes the four artifacts once every build job succeeded:
+  # a tag v* becomes a regular release; every push to main replaces the rolling prerelease `nightly`.
+  release:
+    name: Release
+    needs: [windows, linux, android]
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - name: Pack assets
+        run: |
+          mkdir -p assets
+          for arch in x64 arm64; do
+            (cd artifacts && zip -qr "../assets/recvx-windows-$arch.zip" "recvx-windows-$arch")
+          done
+          cp artifacts/recvx-linux-x64/recvx-linux-x64.tar.gz assets/
+          cp artifacts/recvx-android-arm64/RECVX-Native.apk assets/recvx-android-arm64.apk
+          (cd assets && sha256sum * > SHA256SUMS)
+          ls -l assets
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          notes="Runtimes only, no game data. Prepare data/ yourself with ./build.sh --iso (see README, section GitHub Actions)."
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            gh release create "${GITHUB_REF_NAME}" assets/* --title "RECVX Native ${GITHUB_REF_NAME}" --notes "$notes" --verify-tag
+          else
+            gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
+            gh release create nightly assets/* --prerelease --target "${GITHUB_SHA}" \
+              --title "Nightly (${GITHUB_SHA::7})" --notes "Latest build of main at ${GITHUB_SHA::7}. $notes"
+          fi

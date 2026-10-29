@@ -555,12 +555,40 @@ macOS and iOS still need a Mac. Details: [Docker builder](docs/DOCKER.md).
 
 [`.github/workflows/runtimes.yml`](.github/workflows/runtimes.yml) builds the runtimes without
 game data on every push to `main`, on pull requests, on `v*` tags and on demand
-(*Run workflow*): Windows x64 and Windows ARM64 (native MSVC, Direct3D 12 and FSR),
-Linux x64 (OpenGL and Vulkan) and the Android arm64 APK. Each job runs the policy
-check and the regular `build.sh`/`build.ps1`; no ISO, no `data/`, no tests that need
-disc files. The artifacts (`recvx-windows-x64`, `recvx-windows-arm64`, `recvx-linux-x64`,
-`recvx-android-arm64`) contain the runtime only; prepare your own data with
-`--iso` as described above. The Android APK is signed with the debug key (sideload).
+(*Run workflow*). Each job runs the policy check and the regular `build.sh`/`build.ps1`;
+no ISO, no `data/`, no tests that need disc files.
+
+**Downloads:**
+
+- [Releases](https://github.com/Patt92/recvx-native/releases): every push to `main` replaces
+  the prerelease **nightly**; a `v*` tag publishes a regular release. Both carry
+  `recvx-windows-x64.zip`, `recvx-windows-arm64.zip`, `recvx-linux-x64.tar.gz`,
+  `recvx-android-arm64.apk` and `SHA256SUMS`.
+- [Actions artifacts](https://github.com/Patt92/recvx-native/actions/workflows/runtimes.yml):
+  open a run and download the artifacts at the bottom of its summary page (kept 90 days,
+  also for pull requests).
+
+| Artifact | Contents |
+|---|---|
+| `recvx-windows-x64`, `recvx-windows-arm64` | `recvx-runtime.exe`, `SDL2.dll`, tool executables; Direct3D 12 and FSR 4 built in (AMD's FSR DLLs are not included) |
+| `recvx-linux-x64` | `bin/recvx-runtime`, `lib/libSDL2*.so`; OpenGL and Vulkan |
+| `recvx-android-arm64` | `RECVX-Native.apk`, signed with the debug key (sideload) |
+
+**What else you need: the game data.** The downloads contain no game files. Prepare
+`data/` once from your own disc image with a source checkout (`./build.sh --iso
+"/path/to/game.iso"`, see [Build and run](#build-and-run) or the [Docker builder](docs/DOCKER.md)).
+The prepared `data/` folder is the same on every platform; copy it where the runtime
+looks for it:
+
+| Platform | Game data (`data/`) | Mods | Saves, settings, snapshots |
+|---|---|---|---|
+| Windows | `recvx-runtime.exe --data C:\path\to\data` (default: `data` in the current folder) | `--mods <folder>` | `%APPDATA%\RECVX` |
+| Linux | `./bin/recvx-runtime --data /path/to/data` (default: `data` in the current folder) | `--mods <folder>` | `$XDG_DATA_HOME/RECVX`, else `~/.local/share/RECVX` |
+| Android | `/sdcard/Android/data/org.recvx.nativeport/files/data` (`adb push`, see [Android](#android)) | `.../files/mods` | app-internal storage, removed on uninstall |
+
+Linux additionally needs SDL2's runtime libraries for X11 or Wayland and ALSA or
+PulseAudio, and an OpenGL 4.1 driver (for example Mesa); Windows needs a Direct3D 11
+capable GPU, Direct3D 12 and Vulkan are optional.
 
 ## Further reading
 
