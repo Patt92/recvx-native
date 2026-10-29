@@ -551,6 +551,17 @@ playing.
 Windows x64/ARM64 in a container, from a disc image in `./iso` into `./out`.
 macOS and iOS still need a Mac. Details: [Docker builder](docs/DOCKER.md).
 
+### GitHub Actions
+
+[`.github/workflows/runtimes.yml`](.github/workflows/runtimes.yml) builds the runtimes without
+game data on every push to `main`, on pull requests, on `v*` tags and on demand
+(*Run workflow*): Windows x64 and Windows ARM64 (native MSVC, Direct3D 12 and FSR),
+Linux x64 (OpenGL and Vulkan) and the Android arm64 APK. Each job runs the policy
+check and the regular `build.sh`/`build.ps1`; no ISO, no `data/`, no tests that need
+disc files. The artifacts (`recvx-windows-x64`, `recvx-windows-arm64`, `recvx-linux-x64`,
+`recvx-android-arm64`) contain the runtime only; prepare your own data with
+`--iso` as described above. The Android APK is signed with the debug key (sideload).
+
 ## Further reading
 
 - [Engine and build architecture](docs/NATIVE_PORT.md)

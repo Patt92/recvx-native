@@ -1,0 +1,132 @@
+# Builds the native runtimes without game data: no ISO, no data/, no packaging and no tests
+# that need disc files. Every job runs the policy check (tools/check_no_original_core.py)
+# through the regular build entry point (build.sh / build.ps1 -> tools/build_native.py).
+name: Runtimes
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtimes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            platform: windows
+            build: build/windows-native
+          - arch: arm64
+            platform: windows-arm64
+            build: build/windows-arm64-native
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # build number = git rev-list --count HEAD
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Policy check
+        run: python tools/check_no_original_core.py
+      - name: Build runtime
+        shell: pwsh
+        run: ./build.ps1 --platform ${{ matrix.platform }}
+      - name: Stage runtime
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem '${{ matrix.build }}' -Recurse -Filter recvx-runtime.exe |
+                 Where-Object { $_.FullName -notmatch '[\\/]_deps[\\/]' } | Select-Object -First 1
+          if (-not $exe) { throw 'recvx-runtime.exe not found' }
+          $out = 'dist/recvx-windows-${{ matrix.arch }}'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item (Join-Path $exe.DirectoryName '*.exe'), (Join-Path $exe.DirectoryName '*.dll') $out
+          $fsr = Join-Path $exe.DirectoryName 'FSR4 INT8'
+          if (Test-Path $fsr) { Copy-Item $fsr $out -Recurse }
+          Copy-Item README.md, STARTEN.md $out -ErrorAction SilentlyContinue
+          Get-ChildItem $out -Recurse | Select-Object -ExpandProperty FullName
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recvx-windows-${{ matrix.arch }}
+          path: dist/recvx-windows-${{ matrix.arch }}
+          if-no-files-found: error
+
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config python3 \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev \
+            libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev \
+            libgl-dev libegl-dev libgles-dev libvulkan-dev glslc
+      - name: Policy check
+        run: python3 tools/check_no_original_core.py
+      - name: Build runtime
+        run: ./build.sh --platform linux
+      - name: Stage runtime
+        run: |
+          out=dist/recvx-linux-x64
+          cmake --install build/native --prefix "$out"   # bin/recvx-runtime, RPATH $ORIGIN/../lib
+          mkdir -p "$out/lib"
+          find build/native/_deps/sdl2-build -maxdepth 1 -name 'libSDL2*.so*' -exec cp -P {} "$out/lib/" \;
+          cp README.md STARTEN.md "$out/" 2>/dev/null || true
+          ls -lR "$out"
+          tar -C dist -czf dist/recvx-linux-x64.tar.gz recvx-linux-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recvx-linux-x64
+          path: dist/recvx-linux-x64.tar.gz  # tar keeps the executable bit and SDL symlinks
+          if-no-files-found: error
+
+  android:
+    name: Android arm64
+    runs-on: ubuntu-24.04
+    env:
+      NDK_VERSION: 28.2.13676358  # ANDROID_NDK_MAJOR in tools/build_native.py
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'  # AGP 9 needs JDK 17 or 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.8.2'
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build glslc  # host glslc for the Vulkan SPIR-V
+      - name: Android SDK packages
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null
+          "$sdkmanager" "ndk;$NDK_VERSION" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Policy check
+        run: python3 tools/check_no_original_core.py
+      - name: Build APK
+        run: ./build.sh --platform android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recvx-android-arm64
+          path: build/android-arm64/RECVX-Native.apk
+          if-no-files-found: error
