@@ -1,0 +1,40 @@
+# RECVX Native builder (Linux + Windows x64/ARM64 cross-builds), its own Compose project
+# (recvx-builder), separate from the web server in compose.yaml. macOS/iOS: ./build.sh on a Mac.
+#
+#   RECVX_BUILD_NUMBER=$(git rev-list --count HEAD) docker compose -f compose.builder.yaml build
+#   docker compose -f compose.builder.yaml run --rm builder                      # linux windows windows-arm64
+#   docker compose -f compose.builder.yaml run --rm builder windows --no-package
+#   docker compose -f compose.builder.yaml run --rm builder linux --test
+#
+# Host folders (override with RECVX_ISO_DIR / RECVX_OUTPUT_DIR):
+#   ./iso         disc image(s), read-only
+#   ./out         cooked data, Linux install tree and Windows packages
+name: recvx-builder
+services:
+  builder:
+    build:
+      context: .
+      args:
+        RECVX_BUILD_NUMBER: ${RECVX_BUILD_NUMBER:-0}
+        UID: ${RECVX_UID:-1000}
+        GID: ${RECVX_GID:-1000}
+    image: recvx-builder
+    # Container architecture = Linux target architecture (DOCKER_DEFAULT_PLATFORM=linux/amd64
+    # for an x86_64 Linux build on Apple silicon). Windows targets are cross-compiled.
+    environment:
+      RECVX_JOBS: ${RECVX_JOBS:-}
+    volumes:
+      - type: bind
+        source: ${RECVX_ISO_DIR:-./iso}
+        target: /iso
+        read_only: true
+      - type: bind
+        source: ${RECVX_OUTPUT_DIR:-./out}
+        target: /out
+        bind:
+          create_host_path: true
+      # Incremental build trees, Zig cache and downloaded SDL2 sources between runs.
+      - build-cache:/src/build
+
+volumes:
+  build-cache:

@@ -1,49 +1,17 @@
-# RECVX Native builder (Linux + Windows x64/ARM64 cross-builds). macOS/iOS: ./build.sh on a Mac.
+# RECVX Native in the browser (Firefox/Chrome), served on http://localhost:8722 — docs/WEB.md.
+# Its own Compose project (recvx-web); the Linux/Windows builder is compose.builder.yaml.
 #
-#   RECVX_BUILD_NUMBER=$(git rev-list --count HEAD) docker compose build
-#   docker compose run --rm builder                      # linux windows windows-arm64
-#   docker compose run --rm builder windows --no-package
-#   docker compose run --rm builder linux --test
-#
-# Host folders (override with RECVX_ISO_DIR / RECVX_OUTPUT_DIR):
-#   ./iso         disc image(s), read-only
-#   ./out         cooked data, Linux install tree and Windows packages
+#   python3 tools/web_site.py --index-only     # once per data/ change: writes data/web-files.txt
+#   docker compose build                       # build the web image
+#   docker compose up -d                       # start; docker compose down stops it again
+name: recvx-web
 services:
-  builder:
-    build:
-      context: .
-      args:
-        RECVX_BUILD_NUMBER: ${RECVX_BUILD_NUMBER:-0}
-        UID: ${RECVX_UID:-1000}
-        GID: ${RECVX_GID:-1000}
-    image: recvx-builder
-    # Container architecture = Linux target architecture (DOCKER_DEFAULT_PLATFORM=linux/amd64
-    # for an x86_64 Linux build on Apple silicon). Windows targets are cross-compiled.
-    environment:
-      RECVX_JOBS: ${RECVX_JOBS:-}
-    volumes:
-      - type: bind
-        source: ${RECVX_ISO_DIR:-./iso}
-        target: /iso
-        read_only: true
-      - type: bind
-        source: ${RECVX_OUTPUT_DIR:-./out}
-        target: /out
-        bind:
-          create_host_path: true
-      # Incremental build trees, Zig cache and downloaded SDL2 sources between runs.
-      - build-cache:/src/build
-
-  # Browser build (Firefox/Chrome) served on http://localhost:8722 — docs/WEB.md.
-  #   python3 tools/web_site.py --index-only     # once per data/ change: writes data/web-files.txt
-  #   docker compose up -d --build web
   # Game data is mounted read-only, never baked into the image (RECVX_DATA_DIR / RECVX_MODS_DIR override).
   web:
     build:
       context: .
       dockerfile: docker/web.Dockerfile
     image: recvx-web
-    profiles: ["web"]
     ports:
       - "${RECVX_WEB_PORT:-8722}:8722"
     volumes:
@@ -58,6 +26,3 @@ services:
         bind:
           create_host_path: true
     restart: unless-stopped
-
-volumes:
-  build-cache:

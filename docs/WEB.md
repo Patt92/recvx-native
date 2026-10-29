@@ -13,11 +13,15 @@ You need prepared game data in `data/` (see [README → Build and run](../README
 
 ```sh
 python3 tools/web_site.py --index-only      # once per data/ change: writes data/web-files.txt
-docker compose --profile web up -d --build web
+docker compose build                        # build the web image (again after source changes)
+docker compose up -d                        # start the server
 ```
 
 Open **http://localhost:8722/** and click *Click to start*. Stop it with
-`docker compose --profile web down`.
+`docker compose down`; `docker compose up -d` starts it again. `compose.yaml`
+contains only this web server (Compose project `recvx-web`); the Linux/Windows
+builder is a separate project in `compose.builder.yaml` ([Docker builder](DOCKER.md)),
+so neither starts, stops or removes the other.
 
 - The image (~100 MB) contains only the web runtime and nginx. **Game data is
   never copied into it**: `data/` (and `mods/`, if present) are mounted

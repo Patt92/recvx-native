@@ -49,7 +49,7 @@ no game files.
 `data` to the device with `adb` as described in [Android](#install-and-play).
 
 **Browser (Firefox, Chrome):** with prepared `data/` in a source checkout, run
-`python3 tools/web_site.py --index-only` and `docker compose --profile web up -d --build web`,
+`python3 tools/web_site.py --index-only` and `docker compose up -d --build`,
 then open http://localhost:8722/ — see [Web](#web-firefox-chrome).
 
 Building from source, macOS and iOS: see [Build and run](#build-and-run).
@@ -230,7 +230,7 @@ brought up separately from the shared gameplay code.
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
 | **iOS/iPadOS** | Runs on iPhone (iOS 27) with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`). No touch controls yet. |
 | **Android** | Native arm64 APK (`./build.sh --platform android`, API 26+) with optional Vulkan as GPU default and software fallback; game data loose on the device. Runs in the arm64 emulator; real devices, touch controls and release signing are open. |
-| **Web (Firefox, Chrome)** | The native engine as WebAssembly, served by a Docker container on port 8722 (`docker compose --profile web up`); software rasterizer on worker threads, WebGL 2 presentation, saves in the browser. Verified in Firefox and Chromium on macOS from the title through free play and LOAD GAME. |
+| **Web (Firefox, Chrome)** | The native engine as WebAssembly, served by a Docker container on port 8722 (`docker compose up -d`); software rasterizer on worker threads, WebGL 2 presentation, saves in the browser. Verified in Firefox and Chromium on macOS from the title through free play and LOAD GAME. |
 | **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device. |
 
 These are native platform targets, not plans to ship an emulator with the game.
@@ -613,7 +613,8 @@ WebAssembly, served by a container on port **8722**. With prepared game data in
 
 ```bash
 python3 tools/web_site.py --index-only      # once per data/ change
-docker compose --profile web up -d --build web
+docker compose build
+docker compose up -d
 ```
 
 Then open **http://localhost:8722/** and click *Click to start*.
@@ -642,7 +643,8 @@ Architecture, server requirements and the browser checks (`tests/web`):
 
 ### Docker
 
-`docker compose build` and `docker compose run --rm builder` build Linux and
+`docker compose -f compose.builder.yaml build` and
+`docker compose -f compose.builder.yaml run --rm builder` build Linux and
 Windows x64/ARM64 in a container, from a disc image in `./iso` into `./out`.
 macOS and iOS still need a Mac. Details: [Docker builder](docs/DOCKER.md).
 

@@ -1,6 +1,6 @@
 # Docker builder
 
-`Dockerfile` and `compose.yaml` build an image with every toolchain for the
+`Dockerfile` and `compose.builder.yaml` (Compose project `recvx-builder`) build an image with every toolchain for the
 targets that can be built on Linux:
 
 | Target | In the container | Result |
@@ -9,7 +9,7 @@ targets that can be built on Linux:
 | `windows` | cross-build, pinned Zig 0.16.0 + SDL2 MinGW | package `out/packages/windows-x64-v<version>/` |
 | `windows-arm64` | cross-build, pinned Zig 0.16.0, SDL2 from source | package `out/packages/windows-arm64-v<version>/` |
 | `macos`, `ios`, `ios-simulator` | **not supported** | build on a Mac with `./build.sh` |
-| web (browser) | separate service `web` (`docker/web.Dockerfile`, profile `web`) | nginx on port 8722 serving the WebAssembly runtime; game data mounted read-only — see [Web](WEB.md) |
+| web (browser) | separate project in `compose.yaml` (`docker/web.Dockerfile`) | nginx on port 8722 serving the WebAssembly runtime; game data mounted read-only — see [Web](WEB.md) |
 
 macOS and iOS need Xcode, the Apple SDK frameworks (Cocoa, Metal, UIKit),
 `lipo`/`codesign` and for devices a provisioning profile. Apple's SDK license
@@ -19,16 +19,16 @@ Cross-toolchains such as osxcross would need a copied Xcode SDK and are not used
 ## Use
 
 ```bash
-RECVX_BUILD_NUMBER=$(git rev-list --count HEAD) docker compose build
+RECVX_BUILD_NUMBER=$(git rev-list --count HEAD) docker compose -f compose.builder.yaml build
 ```
 
 ```bash
-docker compose run --rm builder
+docker compose -f compose.builder.yaml run --rm builder
 ```
 
 Targets and options can be given explicitly, e.g.
-`docker compose run --rm builder windows --no-package` or
-`docker compose run --rm builder linux --test`.
+`docker compose -f compose.builder.yaml run --rm builder windows --no-package` or
+`docker compose -f compose.builder.yaml run --rm builder linux --test`.
 
 Folders on the host:
 

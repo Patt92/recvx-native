@@ -597,7 +597,7 @@ def build_web(cmake: str, jobs: int, build: Path, data: Path, mods: Path, summar
         web_site.assemble_site(build, site)
         summary.append(('Data index', f'not written: {data} has no prepared data tree'))
     summary.append(('Site', f'{build / "site"} (recvx.js, recvx.wasm, index.html)'))
-    summary.append(('Serve', 'docker compose --profile web up -d --build web  ->  http://localhost:8722/'))
+    summary.append(('Serve', 'docker compose up -d --build  ->  http://localhost:8722/'))
     return build / 'site'
 
 
@@ -782,7 +782,7 @@ def main():
         if args.ios_profile or args.ios_bundle_data or args.ios_device or args.install:
             parser.error('--ios-* and --install options do not apply to --platform web')
         if args.package or args.output:
-            parser.error('Web builds write build/web/site; serve it with docker compose --profile web up (docs/WEB.md)')
+            parser.error('Web builds write build/web/site; serve it with docker compose up -d --build (docs/WEB.md)')
     elif args.ios_profile or args.ios_bundle_data or args.install or args.ios_device:
         parser.error('--ios-* and --install options apply only to --platform ios, ios-simulator, tvos or tvos-simulator')
     if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.test_regex or args.verify_runtime):
