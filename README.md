@@ -46,7 +46,7 @@ no game files.
 3. **Play.** Start `recvx-runtime.exe` (Windows) or `./bin/recvx-runtime` (Linux).
 
 **Android:** prepare `data` on a computer as in step 2, install the APK and copy
-`data` to the device with `adb` as described in [Android](#android), step 3.
+`data` to the device with `adb` as described in [Android](#install-and-play).
 
 Building from source, macOS and iOS: see [Build and run](#build-and-run).
 
@@ -444,68 +444,52 @@ signed simulator app (`build/ios-simulator`).
 
 ### Android
 
-The Android build is a native arm64 APK (`arm64-v8a`, Android 8.0 / API 26 or
-newer). It has been started in the Android emulator (API 35, arm64): title,
-keyboard input, intro movie and the first room load and run. It has **not**
-yet been checked on a real phone or tablet, with a real controller or for
-performance. Built on a Mac; the game data stays outside the APK.
+A native arm64 APK (`arm64-v8a`, Android 8.0 / API 26 or newer). It has run in
+the Android emulator (title, input, intro movie, first room); real phones,
+tablets, controllers and performance are **not** checked yet. The game data stays
+outside the APK.
 
-**1. Install the toolchain once** (Homebrew, no administrator password):
+#### Install and play
 
-```bash
-brew install openjdk@17 gradle shaderc
-brew install --cask android-commandlinetools
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-yes | sdkmanager --licenses
-sdkmanager "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" platform-tools
-```
+You need a computer with **adb** ([Android platform tools](https://developer.android.com/tools/releases/platform-tools))
+and USB debugging enabled on the device.
 
-The build finds the SDK through `ANDROID_HOME`/`ANDROID_SDK_ROOT` or the
-Homebrew and Android Studio default locations, the NDK through
-`ANDROID_NDK_HOME` or the newest r28 in the SDK, and Java through `JAVA_HOME`
-or Homebrew `openjdk@21`/`openjdk@17`. `shaderc` provides `glslc` for the
-Vulkan shaders (the Vulkan SDK works as well).
+1. **Prepare `data`** on Windows or Linux with the extractor of the release package
+   (see [Quick start](#quick-start), step 2). The folder is the same for every platform.
+2. **Install** `recvx-android-arm64.apk` from the
+   [latest release](https://github.com/Patt92/recvx-native/releases):
 
-**2. Build the APK:**
+   ```bash
+   adb install recvx-android-arm64.apk
+   ```
 
-```bash
-./build.sh --platform android
-```
+3. **Start the app once.** It stops with "exported native data missing"; this first
+   start makes Android create the app's folder `Android/data/org.recvx.nativeport`
+   with the app as owner:
 
-- Writes `build/android-arm64/RECVX-Native.apk` (the runtime as `libmain.so`,
-  SDL2 and the C++ runtime). The native-port policy audit runs on the
-  unstripped `libmain.so` before packaging.
-- `--install` installs it on the device connected through `adb` (USB
-  debugging) or a running emulator. `--vulkan off` builds without the Vulkan
-  backend.
-- The APK is signed with the local debug key: fine for sideloading, not for a
-  store. Release signing and `--package` are not implemented yet.
+   ```bash
+   adb shell am start -n org.recvx.nativeport/.RecvxActivity
+   ```
 
-**3. Copy the game data** (prepared as for macOS, see above) into the app's
-own folder on the device. No storage permission is needed. Start the app once
-first (it stops with "exported native data missing"): Android then creates its
-folder `Android/data/org.recvx.nativeport` with the app as owner. A folder that
-`adb` created before the first start can stay unreadable for the app
-("Permission denied"); then uninstall, reinstall and start once.
+4. **Copy the data** into that folder (no storage permission needed). Do not create
+   the folder with `adb` before step 3: the app could not read it ("Permission
+   denied"); then uninstall, reinstall and start once.
 
-```bash
-adb shell am start -n org.recvx.nativeport/.RecvxActivity
-adb push data/. /sdcard/Android/data/org.recvx.nativeport/files/data/
-```
+   ```bash
+   adb push data/. /sdcard/Android/data/org.recvx.nativeport/files/data/
+   ```
 
-`files/MOVIE` and `archives/RDX_LNK` are not read by the runtime and can be
-left out (about 1.1 GB less). Mods go to `.../files/mods/`.
+   `files/MOVIE` and `archives/RDX_LNK` are not read by the runtime and can be left
+   out (about 1.1 GB less). Mods go to `.../files/mods/`.
 
-**4. Start** the app from the launcher, or:
+5. **Play:** start the app from the launcher. Console output: `adb logcat -s RECVX`.
 
-```bash
-adb shell am start -n org.recvx.nativeport/.RecvxActivity
-adb logcat -s RECVX
-```
+Every build of the release is signed with its own debug key, so a newer APK only
+installs after `adb uninstall org.recvx.nativeport`, which also deletes the data
+on the device; repeat steps 3 and 4.
 
 - Settings, save games, snapshots and `runtime-warnings.log` live in the app's
   internal storage (`files/RECVX`) and are removed when the app is uninstalled.
-- The game's console output appears in logcat with the tag `RECVX`.
 - **Rendering:** the Vulkan backend is the Android GPU default. It needs ordered
   fragment shader interlock (`VK_EXT_fragment_shader_interlock`) and
   `VK_KHR_shader_float_controls`, as on the desktop. Most Android GPU drivers do
@@ -516,6 +500,46 @@ adb logcat -s RECVX
   bindings as on the desktop. Touch controls do not exist yet. Landscape only.
 - Runtime arguments for diagnostics:
   `adb shell am start -n org.recvx.nativeport/.RecvxActivity --esa args --renderer,software`.
+
+#### Build the APK yourself
+
+Needs JDK 17 or 21, Gradle, the Android command-line tools with NDK r28,
+platform 36 and build-tools 36, and `glslc` (shaderc or the Vulkan SDK) for the
+Vulkan shaders.
+
+Linux (Debian/Ubuntu), with the [command-line tools](https://developer.android.com/studio#command-line-tools-only)
+unpacked to `$ANDROID_HOME/cmdline-tools/latest`:
+
+```bash
+sudo apt install openjdk-21-jdk glslc ninja-build
+export ANDROID_HOME=$HOME/Android/Sdk
+yes | sdkmanager --licenses
+sdkmanager "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" platform-tools
+```
+
+macOS (Homebrew):
+
+```bash
+brew install openjdk@17 gradle shaderc
+brew install --cask android-commandlinetools
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+yes | sdkmanager --licenses
+sdkmanager "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" platform-tools
+```
+
+Gradle 9.8 must be on `PATH`. The build finds the SDK through `ANDROID_HOME`/`ANDROID_SDK_ROOT`
+or the default Homebrew and Android Studio locations, the NDK through
+`ANDROID_NDK_HOME` or the newest r28 in the SDK, and Java through `JAVA_HOME`.
+Then:
+
+```bash
+./build.sh --platform android
+```
+
+This writes `build/android-arm64/RECVX-Native.apk` (the runtime as `libmain.so`,
+SDL2 and the C++ runtime; the native-port policy audit runs on the unstripped
+`libmain.so` first). `--install` installs it on the connected device or emulator,
+`--vulkan off` builds without Vulkan. Continue with step 3 above.
 
 Build details: [Native Port → Android](docs/NATIVE_PORT.md#android-arm64-v8a-api-26).
 
@@ -632,7 +656,7 @@ same on every platform.
 |---|---|---|---|
 | Windows | `data\` in the main folder (or `--data C:\path\to\data`) | `mods\` beside `data\` (or `--mods`) | `%APPDATA%\RECVX` |
 | Linux | `data/` in the main folder (or `--data /path/to/data`) | `mods/` beside `data/` (or `--mods`) | `$XDG_DATA_HOME/RECVX`, else `~/.local/share/RECVX` |
-| Android | `/sdcard/Android/data/org.recvx.nativeport/files/data` (`adb push`, see [Android](#android)) | `.../files/mods` | app-internal storage, removed on uninstall |
+| Android | `/sdcard/Android/data/org.recvx.nativeport/files/data` (`adb push`, see [Android](#install-and-play)) | `.../files/mods` | app-internal storage, removed on uninstall |
 
 Linux additionally needs SDL2's runtime libraries for X11 or Wayland and ALSA or
 PulseAudio, and an OpenGL 4.1 driver (for example Mesa); Windows needs a Direct3D 11
