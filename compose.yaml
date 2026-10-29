@@ -11,7 +11,8 @@ services:
     build:
       context: .
       dockerfile: docker/web.Dockerfile
-    image: recvx-web
+    # Prebuilt image from GitHub Actions instead of a local build: RECVX_WEB_IMAGE (docs/WEB.md).
+    image: ${RECVX_WEB_IMAGE:-recvx-web}
     ports:
       - "${RECVX_WEB_PORT:-8722}:8722"
     volumes:

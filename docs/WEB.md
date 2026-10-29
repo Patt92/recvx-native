@@ -29,6 +29,15 @@ so neither starts, stops or removes the other.
   another port: `RECVX_WEB_PORT=9000`.
 - The image builds the runtime itself from the repository (pinned
   `emscripten/emsdk:6.0.13`), so Docker alone is enough; no local Emscripten.
+- **Prebuilt image:** GitHub Actions builds the same image for `linux/amd64` and
+  `linux/arm64` and publishes it as `ghcr.io/patt92/recvx-native-web` (tag `main`
+  for the latest `main` build, `sha-<commit>` per build, `<version>` and `latest`
+  for `v*` releases; pull requests only build). Use it without a local build:
+
+  ```sh
+  docker pull ghcr.io/patt92/recvx-native-web:main
+  RECVX_WEB_IMAGE=ghcr.io/patt92/recvx-native-web:main docker compose up -d --no-build
+  ```
 - Remote access: browsers only allow the required features (shared memory,
   private storage) on `http://localhost` or **HTTPS**. To play from another
   machine, put the container behind an HTTPS reverse proxy that keeps the

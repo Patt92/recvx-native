@@ -2,7 +2,9 @@
 # Stufe 1 baut recvx.js/recvx.wasm mit dem gepinnten Emscripten (emsdk 6.0.13, enthaelt den SDL2-2.32.10-Port).
 # Stufe 2 liefert die statische Seite mit nginx auf Port 8722 aus. Spieldaten sind NICHT im Image: data/ (und
 # optional mods/) werden zur Laufzeit read-only eingehaengt (compose.yaml, docs/WEB.md).
-FROM emscripten/emsdk:6.0.13 AS build
+# Die Build-Stufe laeuft auf der Plattform des Bauenden: recvx.wasm ist architekturunabhaengig und wird
+# fuer ein Mehrarchitektur-Image (amd64/arm64, GitHub Actions) nur einmal und ohne Emulation gebaut.
+FROM --platform=$BUILDPLATFORM emscripten/emsdk:6.0.13 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends ninja-build && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . /src

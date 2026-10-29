@@ -661,6 +661,11 @@ no ISO, no `data/`, no tests that need disc files.
   prerelease **build-<version>** (older builds stay); a `v*` tag publishes a regular release. Both carry
   `recvx-windows-x64.zip`, `recvx-windows-arm64.zip`, `recvx-linux-x64.tar.gz`,
   `recvx-android-arm64.apk` and `SHA256SUMS`.
+- Web container: the job *Web image* builds `docker/web.Dockerfile` for `linux/amd64` and
+  `linux/arm64` and publishes it as
+  [`ghcr.io/patt92/recvx-native-web`](https://github.com/Patt92/recvx-native/pkgs/container/recvx-native-web)
+  (tags `main`, `sha-<commit>`, and `<version>`/`latest` for `v*` tags; pull requests only build).
+  Usage: [Web](docs/WEB.md#quick-start-docker).
 - [Actions artifacts](https://github.com/Patt92/recvx-native/actions/workflows/runtimes.yml):
   open a run and download the artifacts at the bottom of its summary page (kept 90 days,
   also for pull requests).
