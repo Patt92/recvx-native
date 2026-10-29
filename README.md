@@ -110,6 +110,12 @@ frame. The full setting reference is in
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#metalfx-presentation-stage-macos)
 and [its Windows counterpart](docs/NATIVE_PORT.md#fsr-presentation-stage-windows).
 
+**Widescreen (mod):** `widescreen = on` in `video.ini`, the OPTION screen or
+the debug menu switches to 16:9 like the GameCube and PS2 widescreen patches:
+a wider 3D view at the same height, HUD and menus stretched as on the
+consoles, movies kept at 4:3 with side bars. It works with every renderer and
+presentation path.
+
 ### MetalFX (macOS)
 
 Presents through the SDL window's Metal layer. Because it consumes only the

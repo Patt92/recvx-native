@@ -126,8 +126,13 @@ int main(){try{
      {std::ofstream old(video_path);old<<"quality = high\npost_process = crt\n";}check(VideoSettings::read(video_path).post_process==PostProcess::CrtLight,"old crt value not mapped");
      video.set_upscaler(Upscaler::MetalFxTemporal);video.set_renderer(RenderBackend::Vulkan);
      const auto reread=VideoSettings::read(video_path);check(reread.upscaler==Upscaler::MetalFxTemporal&&reread.frame_generation==FrameGeneration::Off&&reread.post_process==PostProcess::Off&&reread.quality==quality_before&&reread.renderer==RenderBackend::Vulkan,"presentation roundtrip");
+     front.input(MenuInput::Down);check(front.selected()==Frontend::widescreen_row,"widescreen row must follow the CRT filter row");
+     check(!video.settings().widescreen&&video.settings().describe_widescreen()=="4:3 (original)","widescreen default");
+     front.input(MenuInput::Right);check(video.settings().widescreen&&VideoSettings::read(video_path).widescreen,"widescreen not persisted");
+     front.input(MenuInput::Left);check(!video.settings().widescreen&&!VideoSettings::read(video_path).widescreen,"widescreen toggle back");
+     {std::ofstream bad(video_path);bad<<"quality = high\nwidescreen = 21:9\n";}bool rejected_wide=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected_wide=true;}check(rejected_wide,"invalid widescreen value accepted");
      front.input(MenuInput::Down);check(front.selected()==Frontend::audio_row,"audio row must follow the presentation rows");
-     for(int i=0;i<6;++i)front.input(MenuInput::Up);check(front.selected()==Frontend::video_row,"row order above presentation rows");
+     for(int i=0;i<7;++i)front.input(MenuInput::Up);check(front.selected()==Frontend::video_row,"row order above presentation rows");
      {std::ofstream bad(video_path);bad<<"quality = high\nframe_rate = 45\n";}bool rejected_rate=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected_rate=true;}check(rejected_rate,"invalid frame rate accepted");
      {std::ofstream bad(video_path);bad<<"quality = high\nupscaler = fsr3\n";}bool rejected=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected=true;}check(rejected,"invalid upscaler accepted");
      video.set_upscaler(Upscaler::Off);}

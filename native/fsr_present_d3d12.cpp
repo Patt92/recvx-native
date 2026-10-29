@@ -404,7 +404,8 @@ private:
             wait_idle();for(auto& b:backbuffers_)b.reset();
             require(swapchain_->ResizeBuffers(backbuffers,UINT(dw),UINT(dh),DXGI_FORMAT_B8G8R8A8_UNORM,tearing_?DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING:0u),"resize swap chain");
             acquire_backbuffers();backbuffer_w_=dw;backbuffer_h_=dh;}
-        const double scale=std::min(dw/640.0,dh/480.0);fit_w_=std::max(1,int(std::lround(640*scale)));fit_h_=std::max(1,int(std::lround(480*scale)));fit_x_=(dw-fit_w_)/2;fit_y_=(dh-fit_h_)/2;
+        const double aw=settings_.widescreen?640.0*4.0/3.0:640.0; /* Host-Mod Breitbild: 16:9-Einpassung (widescreen.h) */
+        const double scale=std::min(dw/aw,dh/480.0);fit_w_=std::max(1,int(std::lround(aw*scale)));fit_h_=std::max(1,int(std::lround(480*scale)));fit_x_=(dw-fit_w_)/2;fit_y_=(dh-fit_h_)/2;
         out_w_=640;out_h_=480;
         if(!build_context())destroy_context();
         if(context_){upscaled_=texture(UINT(out_w_),UINT(out_h_),DXGI_FORMAT_B8G8R8A8_UNORM,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,"upscaled");}

@@ -4,6 +4,7 @@
 #include "asset_io.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
+#include "widescreen.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -368,7 +369,7 @@ void GameOver::draw(SoftwareRenderer& image,const GameUi& ui)const{
         // angles 0) for the body and the effects in world space; the mesh is built
         // in cmat space and was moved by (0, 10, 35) above so the same view serves it.
         if(death)njTranslate(&view,0,-10.f,-35.f);
-        image.draw_view(scene,view,focal*1.174f,focal*(float(image.height())/480.f)/(float(image.width())/640.f),false,{},2.f,20000.f);
+        image.draw_view(scene,view,focal*recvx_aspect_x(),focal*(float(image.height())/480.f)/(float(image.width())/640.f),false,{},2.f,20000.f);
     }
     // game.c:109-112 (Task 7, vor Task 14): bhDrawScreenFade bei fade_an > 0 auf dem einen sys->fade_*.
     // Der Fade-Quader (njDrawPolygon2D, attr 0x60, pri -0.81 -> -1, ps2_NaDraw2D.c:93-104) bekommt mit

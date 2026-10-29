@@ -4,6 +4,7 @@
 #include "effect_sprites.h"
 #include "enemies/enemy_work.h"
 #include "ninja_matrix.h"
+#include "widescreen.h"
 #include <cstring>
 #include <stdexcept>
 
@@ -736,7 +737,7 @@ static void append_work_lines(Scene& scene,const recvx::Work& w)
 void EffectParticles::append(Scene& scene,const SceneCamera& camera,unsigned texture_base,bool mirror)const
 {
     // BHD_ASPECT_X (main.c:53, system.c:272), mit dem auch der Renderer x projiziert.
-    constexpr float aspect_w=1.174f;
+    const float aspect_w=recvx_aspect_x(); // Host-Mod Breitbild (widescreen.h)
     constexpr unsigned call_points=4;                 // njPtclDrawSprite(&bufP[4k], 4, scl, scl)
     constexpr unsigned call_sprites=call_points/2;    // Ps2AddPrim3D(.., num = 4): vier Eckpunkte
     for(const auto& w:impl_->works){

@@ -2,24 +2,25 @@
 #include "back_color.h"
 #include "binary_view.h"
 #include "map_tables.h"
+#include "widescreen.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 namespace recvx {
 namespace {
 constexpr float kDist=500.0f;        /* njSetScreen dist (map.c:361) */
-constexpr float kAspect=1.174f;      /* njSetAspect (map.c:358) */
+float kAspect(){return recvx_aspect_x();} /* njSetAspect 1.174 (map.c:358); Host-Mod Breitbild */
 constexpr float kNear=2.0f,kFar=20000.0f; /* njClipZ(-2,-20000) (map.c:356) */
 constexpr float kCenterX=320.0f,kCenterY=240.0f;
 
 /* Screen point at depth -pri back into the camera space draw_view projects
-   with focal (kDist*kAspect, kDist). 2D primitives are not 3D-clipped in the
+   with focal (kDist*kAspect(), kDist). 2D primitives are not 3D-clipped in the
    original (Ps2AddPrim clip_3d_on 0); a depth inside the near plane keeps the
    point by sitting on the plane. */
 NJS_POINT3 screen_point(float sx,float sy,float pri,MapRenderStats& stats){
     float z=-pri;
     if(z<kNear){z=kNear;++stats.draws_below_near;}
-    return {(sx-kCenterX)*z/(kDist*kAspect),(sy-kCenterY)*z/kDist,z};
+    return {(sx-kCenterX)*z/(kDist*kAspect()),(sy-kCenterY)*z/kDist,z};
 }
 std::uint32_t material_color(const RECVX_MAP_ARGB& m){
     const auto channel=[](float v){return std::uint32_t(std::clamp(std::lround(255.0f*v),0l,255l));};
@@ -208,6 +209,6 @@ void MapRenderer::draw(SoftwareRenderer& image,const MapScreen& map){
         }
     }
     NJS_MATRIX unit;njUnitMatrix(&unit);
-    image.draw_view(scene_,unit,kDist*kAspect,kDist,false,{},kNear,kFar);
+    image.draw_view(scene_,unit,kDist*kAspect(),kDist,false,{},kNear,kFar);
 }
 }

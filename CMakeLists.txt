@@ -636,6 +636,9 @@ if(BUILD_TESTING)
   add_executable(recvx-view-clip-tests tests/native/view_clip_test.cpp)
   target_link_libraries(recvx-view-clip-tests PRIVATE recvx_game)
   add_test(NAME original_view_clip COMMAND recvx-view-clip-tests)
+  add_executable(recvx-widescreen-tests tests/native/widescreen_test.cpp)
+  target_link_libraries(recvx-widescreen-tests PRIVATE recvx_game)
+  add_test(NAME host_widescreen_mod COMMAND recvx-widescreen-tests)
   add_executable(recvx-inventory-tests tests/native/inventory_menu_test.cpp)
   target_link_libraries(recvx-inventory-tests PRIVATE recvx_game)
   add_test(NAME inventory_combine_inspect COMMAND recvx-inventory-tests)
@@ -835,6 +838,11 @@ if(BUILD_TESTING)
     add_test(NAME rm1090_terminal_wrong_password COMMAND "${Python3_EXECUTABLE}" -I
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm1090_terminal_wrong_password_check.py"
       --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0031.RDT")
+      add_test(NAME rm0031_emblem_freeze COMMAND "${Python3_EXECUTABLE}" -I
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm0031_emblem_freeze_check.py"
+        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_3120.RDT")
       add_test(NAME rm3120_card_reader COMMAND "${Python3_EXECUTABLE}" -I
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm3120_card_reader_check.py"
@@ -891,11 +899,6 @@ if(BUILD_TESTING)
   target_link_libraries(recvx-audio-sq-tests PRIVATE recvx_game)
   add_test(NAME sony_sq_dictionary COMMAND recvx-audio-sq-tests)
   add_executable(recvx-audio-tests tests/native/audio_movie_test.cpp)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0031.RDT")
-      add_test(NAME rm0031_emblem_freeze COMMAND "${Python3_EXECUTABLE}" -I
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/rm0031_emblem_freeze_check.py"
-        --runtime "$<TARGET_FILE:recvx-runtime>" --data "${CMAKE_CURRENT_SOURCE_DIR}/data")
-    endif()
   target_link_libraries(recvx-audio-tests PRIVATE recvx_game)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/files/COMMON.MLT")
     add_test(NAME audio_movie COMMAND recvx-audio-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")

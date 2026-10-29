@@ -1,5 +1,6 @@
 #include "map_screen.h"
 #include "back_color.h"
+#include "widescreen.h"
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -1306,7 +1307,7 @@ int MapScreen::fsub_compass(int index){
     if(func.mode==0){
         func.w[2].f=-4.0f;
         func.w[5].f=std::fabs(-4.0f)/host_.screen_dist;
-        func.w[4].f=func.w[5].f/1.174f;
+        func.w[4].f=func.w[5].f/recvx_aspect_x();
         func.w[0].f=(585.0f-320.0f)*func.w[4].f;
         func.w[1].f=(240.0f-62.0f)*func.w[5].f;
         func.w[3].i=0;
@@ -1551,7 +1552,7 @@ int MapScreen::fsub_gauge_draw_x(int index){
     /* FsubGaugeDrawX (map.c:2075): the horizontal ruler, aspect corrected. */
     auto& func=funcs_[index];
     const float gx=func.w[1].f,gy=func.w[2].f,gz=func.w[3].f;
-    const float dist=1.174f*((host_.screen_dist*(5.0f/vew_mtx_[14]))/5.0f);
+    const float dist=recvx_aspect_x()*((host_.screen_dist*(5.0f/vew_mtx_[14]))/5.0f);
     const std::uint32_t color=col_[2];
     const auto emit=[&](const float* p0,const float* p1){
         MapDraw draw;
@@ -1595,7 +1596,7 @@ int MapScreen::fsub_gauge_draw(int index){
     draw_sprite(position,-1,RECVX_MP_SPR_10M_L);
     position={gx-2.0f,1.0f+gy,gz};
     draw_sprite(position,-1,RECVX_MP_SPR_0M);
-    position={(gx+100.0f*(1.174f*scale))-8.0f,gy-2.0f,gz};
+    position={(gx+100.0f*(recvx_aspect_x()*scale))-8.0f,gy-2.0f,gz};
     draw_sprite(position,-1,RECVX_MP_SPR_10M_D);
     if(map_mode_!=RECVX_MP_MOD_WAIT_ZOOM)func_free(index);
     return 1;

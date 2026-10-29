@@ -48,6 +48,7 @@
 #include "player_event.h"
 #include "player_hair.h"
 #include "player_head.h"
+#include "widescreen.h"
 #include <random>
 #include <cctype>
 #include <cstdio>
@@ -81,7 +82,7 @@ struct Options {
     std::size_t camera=0,spawn=0,motion=42;
     std::int64_t animation_frame=0;
     bool data_explicit=false; // iOS: ohne --data das Bundle bzw. den Documents-Ordner waehlen
-    bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,validate_poses=false,camera_explicit=false,list_controllers=false,third_person=false,nearest=false,video_explicit=false;int supersampling=2;
+    bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,validate_poses=false,camera_explicit=false,list_controllers=false,third_person=false,nearest=false,video_explicit=false;int widescreen=-1;int supersampling=2;
     int renderer=-1; // --renderer gpu|software|opengl|vulkan|d3d12; Standard: video.ini (gpu) interaktiv, Software headless
     unsigned render_threads=0; // --render-threads: Host-Diagnose fuer Energiemessungen; 0 = Rendererstandard, Bild fuer jede Zahl identisch
 };
@@ -114,6 +115,8 @@ Options options(int argc,char** argv){
         else if(arg=="--in-game")o.in_game=true;
         else if(arg=="--third-person")o.third_person=true;
         else if(arg=="--nearest"){o.nearest=true;o.video_explicit=true;}
+        else if(arg=="--widescreen"){o.widescreen=1;}
+        else if(arg=="--no-widescreen"){o.widescreen=0;}
         else if(arg=="--ss"){const auto n=number();if(!n||n>4)throw std::runtime_error("--ss must be 1 through 4");o.supersampling=int(n);o.video_explicit=true;}
         else if(arg=="--renderer"){const auto mode=value();if(mode!="gpu"&&mode!="software"&&mode!="opengl"&&mode!="vulkan"&&mode!="d3d12")throw std::runtime_error("--renderer expects gpu, opengl, vulkan, d3d12 or software");o.renderer=mode=="gpu"?1:mode=="opengl"?2:mode=="vulkan"?3:mode=="d3d12"?4:0;}
         else if(arg=="--render-threads"){const auto n=number();if(n>64)throw std::runtime_error("--render-threads must be 0 through 64");o.render_threads=unsigned(n);}
@@ -173,6 +176,7 @@ Options options(int argc,char** argv){
                        "--preview: legacy room/animation/free-camera inspector without game UI\n"
                        "--player <10..14> --spawn <index> --motion <index> --frame <integer>\n"
                        "--nearest: point-sample textures (no mipmaps/filtering; shimmers) for comparison\n                       "
+                       "--widescreen / --no-widescreen: 16:9 widescreen mod on/off for this run (video.ini widescreen)\n                       "
                        "--ss <1-4>: supersampling factor per axis (default 2; 1 = off, cheaper)\n                       "
                        "--renderer gpu|opengl|vulkan|d3d12|software: rasterizer (default: video.ini, platform GPU; headless uses software)\n                       "
                        "--render-threads <0-64>: raster worker threads for energy measurements (0 = default; output identical)\n                       "
@@ -769,6 +773,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         frontend.has_saves=[&]{for(const auto& s:recvx::list_save_slots(saves_dir))if(s.exists||s.damaged)return true;return false;};
         // Host render quality (settings screen, video.ini); --nearest/--ss override it for this run.
         recvx::VideoConfig video(args.video_config);if(!video.status().empty())std::cerr<<"Video settings ignored: "<<video.status()<<'\n';
+        if(args.widescreen>=0)video.set_widescreen(args.widescreen!=0,false);
+        recvx_set_widescreen(video.settings().widescreen); // Host-Mod Breitbild (widescreen.h)
         // Host-Rasterer der Bandstufe (gpu_raster.h). Der Umschalter entsteht erst mit dem Bild,
         // das Debugmenue und der Startpfad rufen denselben. Keine Spiellogik: nur, wer rastert.
         std::function<std::string(recvx::RenderBackend)> apply_renderer;
@@ -1197,6 +1203,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"framegen","Frame generation","OK: interpolated frame per game tick (macOS 26+); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX frame interpolation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame generation: "+video.describe_frame_generation();}});
         debug.add({"sharpness","Sharpen","OK: contrast-adaptive sharpening of the display (macOS); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"Light"},{2,"Medium"},{3,"Strong"}};},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Sharpen: "+video.describe_sharpness();}});
         debug.add({"postfx","CRT filter","OK: CRT light (scanlines) or CRT full (slot mask, bloom, gamma-correct); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"CRT light"},{2,"CRT full"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT filter: "+video.describe_post_process();}});
+        debug.add({"widescreen","Widescreen","OK: 16:9 widescreen mod like the GameCube/PS2 patches (wider 3D view, HUD stretched, movies 4:3); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off (4:3)"},{1,"16:9"}};},[&]{return unsigned(video.settings().widescreen);},[&](unsigned value){video.set_widescreen(value!=0);if(frontend.video_changed)frontend.video_changed(video.settings());return "Widescreen: "+video.settings().describe_widescreen();}});
         debug.add({"renderer","Renderer","OK: platform GPU, software, OpenGL, Vulkan or Direct3D 12 (Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (platform)"},{1,"Software"},{2,"OpenGL"},{3,"Vulkan"},{4,"Direct3D 12"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
             const auto backend=value==4?recvx::RenderBackend::D3D12:value==3?recvx::RenderBackend::Vulkan:value==2?recvx::RenderBackend::OpenGL:value==1?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
             if(!apply_renderer)return std::string("Renderer: not ready yet");
@@ -1908,6 +1915,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         recvx::SoftwareRenderer image(640,480);write_screenshot=[&](const fs::path& path){image.save_bmp(path);};image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);image.set_render_threads(args.render_threads);
         std::unique_ptr<recvx::MetalFxPresenter> presenter; // Host-Praesentationsstufe (metalfx_present.h), erst mit dem Fenster erzeugt
         std::function<void(bool)> apply_vsync; // SDL_RenderSetVSync des Fensters (frame_rate unlimited = aus), erst mit dem Fenster gesetzt
+        std::function<void(bool)> apply_widescreen; // logische 16:9-Flaeche des Fensters (widescreen.h), erst mit dem Fenster gesetzt
         // Host-GPU-Rasterer (gpu_raster.h) fuer das Hauptbild; Headless-Pruefungen bleiben ohne --renderer gpu in Software.
         {// Backend je Auswahl beim ersten Bedarf erzeugen, getrennte Geraete-/Kontextbesitzer.
          struct Backends {std::array<std::shared_ptr<recvx::GpuRaster>,4> gpu;std::array<std::string,4> reason;std::array<bool,4> tried{};};
@@ -2040,7 +2048,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(mode0!=1u||(mode2>=14u&&mode2<=22u)||stairs.active||world->pushing()||world->turning())return false;
             return true;};
         auto third_person_tick=[&](){third_person.tick(actor,{third_person_free(),combat.aiming()},world.get()); /* Diagnose only: actual host-mod view after its tick, distinct from original CAM_WORK. */if(std::getenv("RECVX_CAM_TRACE")){const auto p=view_camera();std::fprintf(stderr,"CAMOUTPUT room=%s third_active=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",rooms.name(room_index).c_str(),int(third_person.active()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}};
-        frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());if(apply_renderer)apply_renderer(settings.renderer);if(presenter)presenter->configure(settings);if(apply_vsync)apply_vsync(settings.vsync());};
+        frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());if(apply_renderer)apply_renderer(settings.renderer);if(presenter)presenter->configure(settings);if(apply_vsync)apply_vsync(settings.vsync());recvx_set_widescreen(settings.widescreen);if(apply_widescreen)apply_widescreen(settings.widescreen);};
         bool pause_active=false;
         /* bhSysCallEvent (system.c:668) sperrt Pause mit st_flg 0x1C040208 (0x4 Cinematic, 0x40000 Kartentask)
            UND verlangt (ts_flg & 0x3DE00) == 0x3DE00. Darin steckt Bit 15 (0x8000): solange die
@@ -2171,7 +2179,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         if(!raw_renderer)raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_SOFTWARE);
         std::unique_ptr<SDL_Renderer,decltype(&SDL_DestroyRenderer)> renderer(raw_renderer,SDL_DestroyRenderer);sdl_check(bool(renderer));
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"nearest");
-        sdl_check(recvx::configure_window_presentation(renderer.get())==0);
+        sdl_check(recvx::configure_window_presentation(renderer.get(),video.settings().widescreen)==0);
+        apply_widescreen=[&](bool on){sdl_check(recvx::configure_window_presentation(renderer.get(),on)==0);};
         std::unique_ptr<SDL_Texture,decltype(&SDL_DestroyTexture)> texture(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480),SDL_DestroyTexture);sdl_check(bool(texture));
         {// Praesentationsstufe: macOS auf der CAMetalLayer des SDL-Fensters (MetalFX), Windows auf dem HWND
          // (eigenes D3D12-Geraet, FSR 4 aus den AMD-ffx-api-DLLs); sonst bleibt der SDL-Kopierpfad.

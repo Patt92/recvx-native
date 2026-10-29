@@ -12,6 +12,7 @@
 #define STBI_NO_STDIO
 #define STBI_MAX_DIMENSIONS 8192
 #include "third_party/stb/stb_image.h"
+#include "widescreen.h"
 namespace recvx {
 void MoviePlayer::start(unsigned id,unsigned type) {
     if(active_)return; // PlayStartMovieEx: ExecMovieSystemFlag -> error 2, existing movie remains
@@ -82,8 +83,11 @@ void MoviePlayer::draw(SoftwareRenderer& image){if(!active_)return;
         for(std::size_t i=0;i<pixels_.size();++i)pixels_[i]=0xff000000|(unsigned(rgb[i*3])<<16)|(unsigned(rgb[i*3+1])<<8)|rgb[i*3+2];
         stbi_image_free(rgb);decoded_=frame_;
     }
+    // Host-Mod Breitbild (widescreen.h): die Praesentation dehnt das Bild auf 16:9, der Film bleibt 4:3
+    // in der Mitte (3/4 der Breite) mit schwarzen Seitenbalken, wie die FMV-Abmessungen des PS2-Patches.
+    const int w=int(float(image.width())*recvx_widescreen_scale+0.5f),x0=(image.width()-w)/2;
     auto& out=image.canvas();for(int y=0;y<image.height();++y)for(int x=0;x<image.width();++x)
-        out[std::size_t(y)*image.width()+x]=pixels_[(std::size_t(y)*height_/image.height())*width_+std::size_t(x)*width_/image.width()];
+        out[std::size_t(y)*image.width()+x]=x<x0||x>=x0+w?0xff000000u:pixels_[(std::size_t(y)*height_/image.height())*width_+std::size_t(x-x0)*width_/unsigned(w)];
     if(cancelling_&&system_screen_fade().visible())system_screen_fade().draw(out,image.width(),image.height());
 }
 }

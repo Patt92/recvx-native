@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "chunk_blend.h"
 #include "shadow_raster.h"
+#include "widescreen.h"
 #include <algorithm>
 #include <atomic>
 #include <thread>
@@ -130,21 +131,23 @@ void SoftwareRenderer::draw(const Scene& scene,const SceneCamera& camera,bool wi
     // bhControlCamera order: initial Ninja view, dolly, Z/X/Y, camera translation.
     NJS_MATRIX view;camera_view_matrix(camera,view);
     const float focal=(width_*0.5f)/std::tan(0.0000958738f*(camera.perspective/2));
-    const float aspect_x=1.174f;
+    const float aspect_x=recvx_aspect_x(); // Host-Mod Breitbild: 1.174*0.75 (widescreen.h)
     const float focal_y=focal*(height_/480.0f)/(width_/640.0f);
     // Ninja-Bildschirm 640x480: fSx = AspectW*x*dist/z, fSy = AspectH*y*dist/z (ps2_NinjaCnk.c:1195).
     ninja_sx_=focal*aspect_x*640.0f/float(width_);ninja_sy_=focal_y*480.0f/float(height_);
-    draw_view(scene,view,focal*aspect_x,focal_y,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far,camera.clip_volume_x,camera.clip_volume_y);
+    // Breitbild: das ClipVolume waechst waagerecht mit, sonst verwirft der Streifentest am Bildrand.
+    draw_view(scene,view,focal*aspect_x,focal_y,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far,camera.clip_volume_x/recvx_widescreen_scale,camera.clip_volume_y);
 }
 void SoftwareRenderer::draw_screen(const Scene& scene,const SceneCamera& camera,float dist,float aspect_y){
+    // Render-Textur in der Welt: bleibt auch mit dem Breitbild-Mod beim Originalaspekt 1.174.
     NJS_MATRIX view;camera_view_matrix(camera,view);ninja_sx_=ninja_sy_=0;
     draw_view(scene,view,1.174f*dist,aspect_y*dist,false,camera.hidden_objects,camera.clip_near,camera.clip_far,camera.clip_volume_x,camera.clip_volume_y);
 }
 void SoftwareRenderer::draw_full_screen_source(const Scene& scene,const SceneCamera& camera,float aspect_y,bool wireframe){
     NJS_MATRIX view;camera_view_matrix(camera,view);
     const float dist=0.8f*(320.0f/std::tan(0.0000958738f*(camera.perspective/2)));
-    ninja_sx_=1.174f*dist;ninja_sy_=aspect_y*dist;
-    draw_view_projected(scene,view,ninja_sx_,ninja_sy_,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far,camera.clip_volume_x,camera.clip_volume_y,dist);
+    ninja_sx_=recvx_aspect_x()*dist;ninja_sy_=aspect_y*dist;
+    draw_view_projected(scene,view,ninja_sx_,ninja_sy_,wireframe,camera.hidden_objects,camera.clip_near,camera.clip_far,camera.clip_volume_x/recvx_widescreen_scale,camera.clip_volume_y,dist);
 }
 unsigned strip_clip_code(const NJS_POINT3& v,float projection,float volume_x,float volume_y,float near,float far){
     const float w=std::fabs(v.z),cx=v.x*projection/volume_x,cy=v.y*projection/volume_y;

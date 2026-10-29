@@ -21,6 +21,7 @@ static bool bhCkFlg(const unsigned* flags,unsigned bit){return (flags[bit/32]&(0
 // Semantik BulletSet) und Befehlsfenster (item_command_parts, Semantik
 // ItemCommand testmode 0 + TrigerSet + Cursorschleife).
 #include "ui_tables_data.inc"
+#include "widescreen.h"
 // Befehlsfenster parts_06b nach ItemCommand testmode 0: alle 18 Teile
 // sichtbar (atr |= 0x20), dann je Itemtyp wieder aus. Waffen: Beschriftung 13
 // = Ausrüsten (anim 7); außer der Schrotflinte (Item 10) entfällt Teil 17
@@ -966,7 +967,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
             // hinter der Skalierung; M*T*v = M*(v+t), also derselbe Baum um t im Modellraum verschoben.
             if(inspection_draws_twice(source)){const auto count=object.triangles.size();object.triangles.reserve(count*2);
                 for(std::size_t i=0;i<count;++i){auto copy=object.triangles[i];for(auto& vertex:copy.vertices){vertex.position.x+=0.1f;vertex.position.y+=1.0f;vertex.position.z+=0.2f;}object.triangles.push_back(copy);}}
-            object.background=0xff101010;SoftwareRenderer item_view(352,196);item_view.draw_view(object,view,500.f*1.174f,500.f);
+            object.background=0xff101010;SoftwareRenderer item_view(352,196);item_view.draw_view(object,view,500.f*recvx_aspect_x(),500.f);
             for(int y=0;y<196;++y){const int oy=y+132+dy(2),ox=60+dx(2);if(oy<0||oy>=480)continue;const int from=std::max(0,-ox),to=std::min(352,640-ox);if(to>from)std::copy(item_view.pixels().begin()+y*352+from,item_view.pixels().begin()+y*352+to,image.canvas().begin()+oy*640+ox+from);}
         }
         if(menu.files&&menu.file_list&&!menu.file_entering){
@@ -976,7 +977,7 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
             NJS_MATRIX rotation;inspection_rotation(rotation,inspection_default_angles(139),{});
             NJS_MATRIX view;njUnitMatrix(&view);njTranslate(&view,0,0,8);njMultiMatrix(&view,&rotation);
             const auto hide=itemflg[dsptbl[139].hide][2];njTranslate(&view,hoseipos[hide].x,hoseipos[hide].y,hoseipos[hide].z);njScale(&view,.58f,.58f,.58f);
-            folder.background=0xff101010;SoftwareRenderer frame(352,184);frame.draw_view(folder,view,500.f*1.174f,500.f);
+            folder.background=0xff101010;SoftwareRenderer frame(352,184);frame.draw_view(folder,view,500.f*recvx_aspect_x(),500.f);
             for(int y=menu.slide.open2()*2;y<184-menu.slide.open2()*2;++y){const int oy=y+132+dy(2),ox=60+dx(2);if(oy<0||oy>=480)continue;const int from=std::max(menu.slide.open1()*2,-ox),to=std::min(352-menu.slide.open1()*2,640-ox);if(to>from)std::copy(frame.pixels().begin()+y*352+from,frame.pixels().begin()+y*352+to,image.canvas().begin()+oy*640+ox+from);}
             if(menu.file_folder.arrows()&&!menu.file_transition){for(unsigned i:{13u,14u}){const auto& p=parts_10b[i];const auto& t=tables[p.parts_num][p.anim];const auto level=unsigned(menu.file_folder.arrow_brightness(i-13)*255);const auto color=0xff000000u|(level<<16)|(level<<8)|level;blit(image,menu_[t.texid],int(p.pos[0])+centers[p.cen_no][0]+dx(p.cen_no),int(p.pos[1])+centers[p.cen_no][1]+dy(p.cen_no),t.sx,t.sy,t.u1,t.v1,t.u2,t.v2,color,false,p.ang);}}
             if(menu.file_folder.registers()&&!menu.file_folder.moving())text(image,read_message(messages_,4,159+menu.file_number),42+dx(6),342+dy(6),1);

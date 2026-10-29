@@ -186,6 +186,7 @@ FrontendCommand Frontend::controls_input(MenuInput key,bool pad){
             if(selected_==frame_rate_row)video->cycle_frame_rate(direction);else if(selected_==upscaler_row)video->cycle_upscaler(direction);else if(selected_==frame_generation_row)video->cycle_frame_generation(direction);else if(selected_==sharpness_row)video->cycle_sharpness(direction);else video->cycle_post_process(direction);
             status_=video->status();if(video_changed)video_changed(video->settings());}
         return FrontendCommand::None;}
+    if((key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Confirm)&&selected_==widescreen_row){if(video){video->set_widescreen(!video->settings().widescreen);status_="Widescreen: "+video->settings().describe_widescreen();if(video_changed)video_changed(video->settings());}return FrontendCommand::None;}
     if((key==MenuInput::Left||key==MenuInput::Right||key==MenuInput::Confirm)&&selected_==audio_row){if(audio){audio->toggle();status_=audio->status();if(audio_changed)audio_changed(audio->mode());}return FrontendCommand::None;}
     if(key==MenuInput::Left||key==MenuInput::Right){
         if(selected_==action_count||selected_==action_count+1){auto candidate=config_;const float increment=key==MenuInput::Left?-.05f:.05f;
@@ -243,7 +244,7 @@ void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
     ui.draw_title(image);
     panel(image,10,10,620,462);ui.label(image,"OPTION",26,14,.9f,0xffffffff,.9f);ui.label(image,gamepad_?"Controller":"Keyboard",26,44,.65f,0xffffffff,.65f);
     ui.label(image,std::to_string(controllers)+(controllers==1?" controller connected":" controllers connected"),342,49,.48f,0xffffffff,.48f);
-    for(unsigned i=0;i<row_count;++i){const int y=66+int(i)*12; /* 12 px pitch: with the five presentation rows the last row starts at 438, above the status lines at 450/465 */const auto color=i==selected_?0xffffff70:0xffffffff;
+    for(unsigned i=0;i<row_count;++i){const int y=64+int(i)*11; /* 11 px pitch: with the six presentation rows the last row starts at 416, above the status lines at 450/465 */const auto color=i==selected_?0xffffff70:0xffffffff;
         std::string label,value;if(i<action_count){label=labels[i];value=config_.describe(Action(i),gamepad_);}
         else if(i==action_count){label="Stick dead zone";value=percent(config_.deadzone)+"  left/right";}
         else if(i==action_count+1){label="Menu stick threshold";value=percent(config_.menu_threshold)+"  left/right";}
@@ -255,11 +256,12 @@ void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
         else if(i==frame_generation_row){label="Frame generation";value=video?video->describe_frame_generation()+"  left/right":"Not available";}
         else if(i==sharpness_row){label="Sharpening";value=video?video->describe_sharpness()+"  left/right":"Not available";}
         else if(i==post_process_row){label="CRT filter";value=video?video->describe_post_process()+"  left/right":"Not available";}
+        else if(i==widescreen_row){label="Widescreen (mod)";value=video?video->settings().describe_widescreen()+"  left/right":"Not available";}
         else if(i==audio_row){label="Sound mode";value=audio?audio->describe()+"  left/right":"Not available";}else label="Back to title";
-        if(i==selected_)for(int yy=y+5;yy<y+12;++yy)for(int x=20;x<24;++x)image.canvas()[yy*640+x]=0xffffff70;ui.label(image,label,32,y,.48f,color,.48f);ui.label(image,value,245,y,.48f,color,.48f);
+        if(i==selected_)for(int yy=y+4;yy<y+11;++yy)for(int x=20;x<24;++x)image.canvas()[yy*640+x]=0xffffff70;ui.label(image,label,32,y,.48f,color,.48f);ui.label(image,value,245,y,.48f,color,.48f);
     }
     if(capture_){panel(image,28,188,584,96);ui.label(image,gamepad_?"Press a controller button or move a stick":"Press a new keyboard key",48,209,.68f,0xffffffff,.68f);ui.label(image,"Escape: cancel",48,243,.58f,0xffffffff,.58f);}
-    ui.label(image,status_.empty()?(selected_==action_count||selected_==action_count+1||selected_==third_person_row||selected_==video_row||selected_==frame_rate_row||selected_==upscaler_row||selected_==frame_generation_row||selected_==sharpness_row||selected_==post_process_row||selected_==audio_row?"Left/Right: change value":"OK: rebind; Left/Right: keyboard/controller"):status_,22,450,.45f,0xffffffff,.45f);
+    ui.label(image,status_.empty()?(selected_==action_count||selected_==action_count+1||selected_==third_person_row||selected_==video_row||selected_==frame_rate_row||selected_==upscaler_row||selected_==frame_generation_row||selected_==sharpness_row||selected_==post_process_row||selected_==widescreen_row||selected_==audio_row?"Left/Right: change value":"OK: rebind; Left/Right: keyboard/controller"):status_,22,450,.45f,0xffffffff,.45f);
     ui.label(image,"Back: "+config_.describe(Action::Cancel,false)+" / "+config_.describe(Action::Cancel,true),22,465,.45f,0xffffffff,.45f);
 }
 }

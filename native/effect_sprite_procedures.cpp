@@ -21,6 +21,7 @@
 #include "enemies/en15.h"
 #include "combat_geometry.h"
 #include "geometry_line.h"
+#include "widescreen.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -2641,7 +2642,7 @@ void push_world_quad(EffectSprite& s,const NJS_MATRIX& m,std::array<EffectSprite
 void push_particle_sprites(EffectSprite& s,const ParticleWork& p,unsigned group,unsigned frame,
                            int src,int dst,bool textured,bool point_filter){
     if(p.num<0||p.num>48)throw std::runtime_error("particle work count outside P_WRK");
-    constexpr float aspect_w=1.174f; // BHD_ASPECT_X (main.c:53)
+    const float aspect_w=recvx_aspect_x(); // BHD_ASPECT_X (main.c:53), Host-Mod Breitbild
     const float hx=textured?p.sx/aspect_w:p.sx;
     for(int i=0;i<p.num/2;++i){
         std::array<EffectSprite::Vertex,4> v{};

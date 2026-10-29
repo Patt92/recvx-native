@@ -37,6 +37,7 @@ constexpr std::pair<unsigned,unsigned> categories[]={{1,9},{1,0},{0,2},{0,4},{0,
 struct EffectFireUv {short u,v;};
 struct EffectFireTable {const EffectFireUv* table;int count,tex_id,ani_ct,palette_bank;short w,h;};
 #include "effect_sprite_tables_data.inc"
+#include "widescreen.h"
 // bhGetGroundPosition-Anbieter des Raumbesitzers (kein eigener ATR-Satz).
 GroundCollision* effect_ground=nullptr;
 // rom->walp + sys->mwalp und bhCheckWater des Raumbesitzers (pro Tick gesetzt).
@@ -1436,7 +1437,7 @@ void append_custom_effect(Scene& scene,const EffectSprite& sprite,const SceneCam
             // Mittelpunkt der Kameratiefe z abgebildet: der Renderer projiziert fSx = AspectW*x*dist/z,
             // fSy = y*dist/z (renderer.cpp:115-119), also h Punkte = h*z/(AspectW*dist) bzw. h*z/dist.
             NJS_MATRIX view;camera_view_matrix(camera,view);if(mirror){NJS_MATRIX m;std::copy_n(scene.mirror_matrix.data(),16,m);njMultiMatrix(&view,&m);}NJS_POINT3 c;njCalcPoint(&view,&q.center,&c);
-            constexpr float aspect_w=1.174f; // SoftwareRenderer::draw aspect_x
+            const float aspect_w=recvx_aspect_x(); // SoftwareRenderer::draw aspect_x
             const float dist=320.0f/std::tan(0.0000958738f*float(camera.perspective/2));
             const float kx=c.z/(aspect_w*dist),ky=c.z/dist;
             for(auto& v:q.vertices){v.x*=kx;v.y*=ky;}

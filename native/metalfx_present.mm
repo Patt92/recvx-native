@@ -279,7 +279,7 @@ private:
                 fi.uiTexture=ui_tex_;fi.uiTextureComposited=NO;
                 const float fy=job.projection.valid&&job.projection.focal_y>0?job.projection.focal_y:last_focal_[1];
                 const float fov=fy>0?2.0f*std::atan(240.0f/fy)*180.0f/3.14159265f:60.0f;
-                fi.fieldOfView=fov;fi.aspectRatio=4.0f/3.0f;fi.nearPlane=depth_near_;fi.farPlane=depth_far_;
+                fi.fieldOfView=fov;fi.aspectRatio=settings_.widescreen?16.0f/9.0f:4.0f/3.0f;fi.nearPlane=depth_near_;fi.farPlane=depth_far_;
 #if RECVX_SDK_INTERPOLATOR_MATRICES
                 if(@available(macOS 27.0,*)){
                     fi.worldToViewMatrix=to_simd(last_view_);
@@ -383,7 +383,8 @@ private:
     // Kette fuer Fenstergroesse und Einstellungen neu aufbauen: Einpassung, Skalierer, Interpolator, Texturen.
     void rebuild(int dw,int dh){
         dirty_=false;drawable_w_=dw;drawable_h_=dh;notes_.clear();
-        const double scale=std::min(dw/640.0,dh/480.0);fit_w_=std::max(1,int(std::floor(640.0*scale)));fit_h_=std::max(1,int(std::floor(480.0*scale)));fit_x_=(dw-fit_w_)/2;fit_y_=(dh-fit_h_)/2;
+        const double aw=settings_.widescreen?640.0*4.0/3.0:640.0; /* Host-Mod Breitbild: 16:9-Einpassung (widescreen.h) */
+        const double scale=std::min(dw/aw,dh/480.0);fit_w_=std::max(1,int(std::floor(aw*scale)));fit_h_=std::max(1,int(std::floor(480.0*scale)));fit_x_=(dw-fit_w_)/2;fit_y_=(dh-fit_h_)/2;
         chain_=Chain{};chain_.reset_pending=true;history_valid_=false;latest_real_=nil;latest_interp_=nil;
         const MTLTextureUsage all=MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite|MTLTextureUsageRenderTarget;
         if(!color_in_){

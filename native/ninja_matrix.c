@@ -1,6 +1,7 @@
 // Host translation of the affine matrix/vector operations in ps2_NaMatrix.c.
 // Column-major storage and rotation signs follow the original VU operations.
 #include "ninja_matrix.h"
+#include "widescreen.h"
 #include <string.h>
 #include <math.h>
 #include <float.h>
@@ -173,11 +174,18 @@ Float fNaViwOffsetY=2048.0f;
 Float fNaViwAspectW=1.174000025f;
 Float fNaViwAspectH=1.0f;
 NJS_MATRIX NaViewScreenMatrix={1.174000025f,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,500.0f};
+// Host-Mod Breitbild (widescreen.h): die waagerechte Bildschirmabbildung traegt den Faktor wie
+// der GameCube-Patch auf dem gespeicherten Aspekt; 1.0 laesst das Original unveraendert.
+float recvx_widescreen_scale=1.0f;
+void recvx_set_widescreen(int on){
+    recvx_widescreen_scale=on?0.75f:1.0f;
+    njViewScreenMatrix(&NaViewScreenMatrix);
+}
 // ps2_NaView.c:217 njViewScreenMatrix.
 void njViewScreenMatrix(NJS_MATRIX* vs){
     Float* p=*vs;
     njUnitMatrix(vs);
-    p[0]=fNaViwAspectW;p[5]=fNaViwAspectH;
+    p[0]=fNaViwAspectW*recvx_widescreen_scale;p[5]=fNaViwAspectH;
     p[10]=1.0f;p[12]=0;p[13]=0;p[14]=0;
     p[15]=_nj_screen_.dist;
 }

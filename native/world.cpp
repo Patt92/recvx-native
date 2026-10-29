@@ -24,6 +24,7 @@
 #include "core_random.h"
 #include "player_stairs.h" // recvx_player_mtn_act (PlMtnAct)
 #include "screen_fade.h" // der eine sys->fade_* (bhFadeSet-Fallback ohne Runtime-Hook)
+#include "widescreen.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -2849,7 +2850,7 @@ bool RoomWorld::clip_point(const SceneCamera& view,NJS_POINT3 pos)const{
     NJS_MATRIX m;camera_view_matrix(view,m);NJS_POINT3 c;njCalcPoint(&m,&pos,&c);
     if(c.z==0.0f)return true;
     const float dist=320.0f/std::tan(0.0000958738f*float(view.perspective/2));
-    const float sx=1.174f*c.x*dist/c.z,sy=c.y*dist/c.z;
+    const float sx=recvx_aspect_x()*c.x*dist/c.z,sy=c.y*dist/c.z; // Breitbild: widescreen.h
     return !((sx>-576.0f&&sx<576.0f)&&(sy>-416.0f&&sy<576.0f)&&(c.z>-1.0f));
 }
 std::optional<RoomWorld::SmallScreenPass> RoomWorld::small_screen_pass(const SceneCamera& view){
