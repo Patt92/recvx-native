@@ -516,6 +516,12 @@ add_executable(recvx-texture-compress native/texture_compress.cpp)
 target_link_libraries(recvx-texture-compress PRIVATE recvx_data)
 add_executable(recvx-mod-bake native/mod_bake.cpp)
 target_link_libraries(recvx-mod-bake PRIVATE recvx_data)
+# tools/extract_iso.py in den Laufzeitpaketen (GitHub-Artefakte): die beiden Exporter neben der Runtime,
+# unter Linux wie recvx-runtime mit RPATH auf ../lib (SDL2).
+install(TARGETS recvx-assets recvx-world-assets RUNTIME DESTINATION bin)
+if(NOT APPLE AND NOT WIN32)
+  set_target_properties(recvx-assets recvx-world-assets PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
+endif()
 if(BUILD_TESTING)
   add_test(NAME app_data_mod_bake COMMAND "${Python3_EXECUTABLE}" -I
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/native/mod_bake_check.py" --bake "$<TARGET_FILE:recvx-mod-bake>")

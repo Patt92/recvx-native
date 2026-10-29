@@ -55,6 +55,10 @@ jobs:
           $fsr = Join-Path $exe.DirectoryName 'FSR4 INT8'
           if (Test-Path $fsr) { Copy-Item $fsr $out -Recurse }
           Copy-Item README.md, STARTEN.md $out -ErrorAction SilentlyContinue
+          # ISO extractor (tools/extract_iso.py): data\ and mods\ go into this folder, the images into iso\.
+          New-Item -ItemType Directory -Force "$out/tools", "$out/iso" | Out-Null
+          Copy-Item tools/extract_iso.py, tools/prepare_native_data.py, tools/iso9660.py, tools/host_tools.py, tools/cook_movies.py "$out/tools"
+          Copy-Item Extract-ISO.cmd $out
           Get-ChildItem $out -Recurse | Select-Object -ExpandProperty FullName
       - uses: actions/upload-artifact@v7
         with:
@@ -87,6 +91,13 @@ jobs:
           mkdir -p "$out/lib"
           find build/native/_deps/sdl2-build -maxdepth 1 -name 'libSDL2*.so*' -exec cp -P {} "$out/lib/" \;
           cp README.md STARTEN.md "$out/" 2>/dev/null || true
+          # ISO extractor (tools/extract_iso.py): data/ and mods/ go into this folder, the images into iso/.
+          mkdir -p "$out/tools" "$out/iso"
+          cp tools/extract_iso.py tools/prepare_native_data.py tools/iso9660.py tools/host_tools.py tools/cook_movies.py "$out/tools/"
+          cp extract-iso.sh "$out/"
+          # Smoke test without a disc: the extractor finds its exporters and asks for an image in iso/.
+          if "$out/extract-iso.sh" > extract.log 2>&1; then echo "extractor ran without an image"; exit 1; fi
+          grep -q "put your .iso file(s) into" extract.log || { cat extract.log; exit 1; }
           ls -lR "$out"
           tar -C dist -czf dist/recvx-linux-x64.tar.gz recvx-linux-x64
       - uses: actions/upload-artifact@v7

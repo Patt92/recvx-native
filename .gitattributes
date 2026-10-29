@@ -1,1 +1,2 @@
 native/third_party/** linguist-vendored
+Extract-ISO.cmd text eol=crlf

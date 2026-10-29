@@ -124,9 +124,11 @@ def cook_movies(root, ffmpeg, ffprobe):
 
 
 def staging_parent(root):
-    # A rename into place must stay on one volume; prefer the ignored build tree.
+    # A rename into place must stay on one volume; prefer the ignored build tree of a source checkout.
+    # A downloaded runtime (tools/extract_iso.py) has no build/ and stages beside the target instead.
     build = ROOT / 'build'
-    build.mkdir(parents=True, exist_ok=True)
+    if not build.is_dir():
+        return root.parent
     return build if build.stat().st_dev == root.parent.stat().st_dev else root.parent
 
 

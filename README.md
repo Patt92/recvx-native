@@ -29,6 +29,27 @@ This separation is the foundation for portability: a shared game core with
 platform-specific graphics and host services, rather than a different gameplay
 implementation for every operating system.
 
+## Quick start
+
+You need your own copy of the game as a disc image (`.iso`). The downloads contain
+no game files.
+
+1. **Download** the build for your platform from the
+   [latest release](https://github.com/Patt92/recvx-native/releases):
+   `recvx-windows-x64.zip`, `recvx-windows-arm64.zip`, `recvx-linux-x64.tar.gz` or
+   `recvx-android-arm64.apk`.
+2. **Prepare the game data** (Windows and Linux). Unpack the download, put your disc
+   image into its `iso` folder, install [Python 3.12+](https://www.python.org/downloads/)
+   and [FFmpeg](https://ffmpeg.org/download.html), then run `Extract-ISO.cmd` (Windows) or
+   `./extract-iso.sh` (Linux). This creates `data` and `mods` next to the runtime;
+   expect a few minutes and about 8 GB.
+3. **Play.** Start `recvx-runtime.exe` (Windows) or `./bin/recvx-runtime` (Linux).
+
+**Android:** prepare `data` on a computer as in step 2, install the APK and copy
+`data` to the device with `adb` as described in [Android](#android), step 3.
+
+Building from source, macOS and iOS: see [Build and run](#build-and-run).
+
 ## Native rendering, multiple backends
 
 The renderer translates the game's drawing rules into native rendering work,
@@ -570,20 +591,43 @@ no ISO, no `data/`, no tests that need disc files.
 
 | Artifact | Contents |
 |---|---|
-| `recvx-windows-x64`, `recvx-windows-arm64` | `recvx-runtime.exe`, `SDL2.dll`, tool executables; Direct3D 12 and FSR 4 built in (AMD's FSR DLLs are not included) |
-| `recvx-linux-x64` | `bin/recvx-runtime`, `lib/libSDL2*.so`; OpenGL and Vulkan |
+| `recvx-windows-x64`, `recvx-windows-arm64` | `recvx-runtime.exe`, `SDL2.dll`, the exporters, `Extract-ISO.cmd`, `tools/`, an empty `iso\` folder; Direct3D 12 and FSR 4 built in (AMD's FSR DLLs are not included) |
+| `recvx-linux-x64` | `bin/recvx-runtime`, the exporters, `lib/libSDL2*.so`, `extract-iso.sh`, `tools/`, an empty `iso/` folder; OpenGL and Vulkan |
 | `recvx-android-arm64` | `RECVX-Native.apk`, signed with the debug key (sideload) |
 
-**What else you need: the game data.** The downloads contain no game files. Prepare
-`data/` once from your own disc image with a source checkout (`./build.sh --iso
-"/path/to/game.iso"`, see [Build and run](#build-and-run) or the [Docker builder](docs/DOCKER.md)).
-The prepared `data/` folder is the same on every platform; copy it where the runtime
-looks for it:
+**What else you need: the game data.** The downloads contain no game files; the Windows
+and Linux packages prepare them from your own disc image, without a build:
 
-| Platform | Game data (`data/`) | Mods | Saves, settings, snapshots |
+1. Unpack the download. Its top folder is the **main folder**.
+2. Put your disc image(s) into the folder **`iso`** inside the main folder
+   (`iso\game.iso` / `iso/game.iso`; with both discs put both images there, they are merged).
+3. Install **Python 3.12+** and **FFmpeg** (`ffmpeg` and `ffprobe` on `PATH`; on Windows they
+   may instead lie in `build-tools\` inside the main folder). FFmpeg cooks the movies.
+4. Run **`Extract-ISO.cmd`** (Windows, double-click) or **`./extract-iso.sh`** (Linux).
+   It writes **`data`** and an empty **`mods`** folder directly into the main folder.
+   This takes a few minutes and about 8 GB; the images in `iso` are only read and can be
+   removed afterwards.
+5. Start `recvx-runtime.exe` (Windows) or `./bin/recvx-runtime` (Linux). Without `--data` it
+   finds `data` in the current folder, next to the runtime or one level above it.
+
+```text
+recvx-windows-x64\              recvx-linux-x64/
+  recvx-runtime.exe               bin/recvx-runtime
+  Extract-ISO.cmd                 extract-iso.sh
+  iso\game.iso      <- you        iso/game.iso       <- you
+  data\             <- extractor  data/              <- extractor
+  mods\             <- extractor  mods/              <- extractor
+```
+
+Android has no extractor: prepare `data` with a Windows/Linux package or a source checkout
+(`./build.sh --iso "/path/to/game.iso"`, see [Build and run](#build-and-run) or the
+[Docker builder](docs/DOCKER.md)) and copy it to the device. The prepared `data` folder is the
+same on every platform.
+
+| Platform | Game data (`data`) | Mods | Saves, settings, snapshots |
 |---|---|---|---|
-| Windows | `recvx-runtime.exe --data C:\path\to\data` (default: `data` in the current folder) | `--mods <folder>` | `%APPDATA%\RECVX` |
-| Linux | `./bin/recvx-runtime --data /path/to/data` (default: `data` in the current folder) | `--mods <folder>` | `$XDG_DATA_HOME/RECVX`, else `~/.local/share/RECVX` |
+| Windows | `data\` in the main folder (or `--data C:\path\to\data`) | `mods\` beside `data\` (or `--mods`) | `%APPDATA%\RECVX` |
+| Linux | `data/` in the main folder (or `--data /path/to/data`) | `mods/` beside `data/` (or `--mods`) | `$XDG_DATA_HOME/RECVX`, else `~/.local/share/RECVX` |
 | Android | `/sdcard/Android/data/org.recvx.nativeport/files/data` (`adb push`, see [Android](#android)) | `.../files/mods` | app-internal storage, removed on uninstall |
 
 Linux additionally needs SDL2's runtime libraries for X11 or Wayland and ALSA or

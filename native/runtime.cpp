@@ -287,6 +287,18 @@ static void redirect_android_output(){
     }).detach();
 }
 #endif
+#if !defined(RECVX_IOS) && !defined(RECVX_ANDROID)
+// Desktop-Pakete (GitHub-Artefakte): ohne --data gilt data/ im Arbeitsverzeichnis, sonst neben der Runtime
+// oder eine Ebene darueber (Linux bin/recvx-runtime); dort legt tools/extract_iso.py data/ und mods/ an.
+// mods/ folgt dann wie bisher dem gefundenen data/ (args.data.parent_path()/"mods").
+static void apply_desktop_locations(Options& o){
+    if(o.data_explicit||fs::is_regular_file(o.data/"native-data.version"))return;
+    char* base=SDL_GetBasePath();if(!base)return;
+    const auto exe=fs::u8path(base);SDL_free(base);
+    for(const auto& root:{exe,exe.parent_path().parent_path()})
+        if(fs::is_regular_file(root/"data"/"native-data.version")){o.data=root/"data";return;}
+}
+#endif
 static int recvx_runtime_main(int argc,char** argv){
     try{
         SdlQuit quit; // Nach allen SDL-/GL-Besitzern freigeben, auch im Fehler-/Headlesspfad.
@@ -296,6 +308,9 @@ static int recvx_runtime_main(int argc,char** argv){
 #endif
 #if defined(RECVX_ANDROID)
         apply_android_locations(args);
+#endif
+#if !defined(RECVX_IOS) && !defined(RECVX_ANDROID)
+        apply_desktop_locations(args);
 #endif
 if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_controls);std::cout<<args.write_controls<<'\n';return 0;}_Make_SinTable();
         const auto user_paths=recvx::resolve_user_paths(args.data,args.user_dir);
