@@ -3,6 +3,8 @@
 // sonst RGB/RGBA-RLE) an denselben relativen Pfad. Jede Datei wird vor dem Schreiben gegen ihre
 // Quelle geprueft; der Zielbaum darf noch nicht existieren (prepare_native_data.py --compressed).
 #include "asset_io.h"
+#include <algorithm>
+#include <string>
 #include <atomic>
 #include <iostream>
 #include <mutex>

@@ -15,6 +15,8 @@
 // tree untouched. Anything else in mods (hd-source/, DDS, manifests) is not part of the runtime lookups
 // and is ignored.
 #include "asset_io.h"
+#include <algorithm>
+#include <string>
 #include <atomic>
 #include <iostream>
 #include <map>
