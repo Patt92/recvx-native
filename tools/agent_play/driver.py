@@ -1272,6 +1272,23 @@ class Driver:
                          + (', no line of sight' if e.get('sight') is False else '')
                          + (' IN GRAB REACH' if e.get('reach') else ''))
         out = ['Enemies: ' + '; '.join(parts) + '.']
+        unavailable = []
+        import hint
+        for row in obs.get('inv') or []:
+            if len(row) < 4 or row[1] not in hint.guns() or row[2]:
+                continue
+            probe = dict(d, items=list(d.get('items') or []))
+            if not probe['items'] or not 0 < row[0] < len(probe['items']):
+                continue
+            probe['items'][0] = row[0]
+            try:
+                self.play.ammo_slot(probe)
+            except PlayError:
+                unavailable.append(f'{row[3]} (slot {row[0]})')
+        if unavailable:
+            out.append('NOT usable for shooting: ' + ', '.join(unavailable) +
+                       ': 0 rounds and no compatible reserve ammunition. Do not equip these guns.')
+
         eq = obs.get('equipped') or []
         rounds = eq[1] if len(eq) > 1 and isinstance(eq[1], int) else 0
         spare = 0
@@ -2401,6 +2418,29 @@ class Driver:
                 return 'ended'
         return None
 
+    def equip_blocked(self, action):
+        if action.get('op') != 'equip':
+            return None
+        d = self.play.read()[0]
+        slot = action.get('slot')
+        items = d.get('items') or []
+        if not isinstance(slot, int) or not 0 < slot < len(items) or not items[slot]:
+            return None  # normal action validation reports malformed slots
+        if items[0] == slot:
+            return 'That weapon is already equipped. Do not reopen the inventory; fire, reload, or leave.'
+        import hint
+        item = (items[slot] >> 16) & 255
+        if item not in hint.guns() or items[slot] & 0xffff:
+            return None
+        probe = dict(d, items=list(items))
+        probe['items'][0] = slot
+        try:
+            self.play.ammo_slot(probe)
+        except PlayError:
+            return ('That gun has 0 rounds and no compatible reserve ammunition: it cannot fire or reload. '
+                    'Keep a usable weapon, use the knife if appropriate, or leave; do not equip this gun.')
+        return None
+
     def combat_blocked(self, action, obs):
         """In combat mode examining text zones and the item box waits: deal with the enemies first."""
         if not self.combat or action.get('op') != 'interact':
@@ -2789,7 +2829,7 @@ class Driver:
             self.remember_texts(obs)
             room_before, progress_before = obs.get('room'), self.progress()
             fixed = self.correct(action, obs)
-            blocked = self.combat_blocked(fixed, obs) or self.repeat_blocked(fixed, obs)
+            blocked = self.equip_blocked(fixed) or self.combat_blocked(fixed, obs) or self.repeat_blocked(fixed, obs)
             denied = self.unreachable_interact(fixed, obs)
             if denied:
                 blocked = denied

@@ -119,6 +119,20 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(feedback['box_state']['mode'], 'inventory')
             self.assertIn('does not mean the box is closed', feedback['box_next'])
 
+    def test_equip_rejects_empty_gun_without_reload_and_redundant_equip(self):
+        from play import PlayError
+        drv, _ = self.driver([])
+        self.d['items'] = [1, (4 << 16) | 1, (9 << 16)]
+        self.write(self.d)
+        self.assertIn('already equipped', drv.equip_blocked(dict(op='equip', slot=1)))
+        with patch.object(self.play, 'ammo_slot', side_effect=PlayError('no compatible ammo')):
+            self.assertIn('0 rounds', drv.equip_blocked(dict(op='equip', slot=2)))
+        with patch.object(self.play, 'ammo_slot', return_value=3):
+            self.assertIsNone(drv.equip_blocked(dict(op='equip', slot=2)))
+        self.d['items'][2] |= 5
+        self.write(self.d)
+        self.assertIsNone(drv.equip_blocked(dict(op='equip', slot=2)))
+
     def test_parse_action_tolerates_fences_prose_and_escaped_quotes(self):
         self.assertEqual(parse_action('```json\n{"op":"press","key":"confirm"}\n```'), dict(op='press', key='confirm'))
         self.assertEqual(parse_action('I go. {"op":"move","to":[1,2],"note":"say \\"hi\\" {x}"} done')['note'],

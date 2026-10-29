@@ -348,3 +348,9 @@ After every box transfer, inventory slots may compact (storing slot 2 moves old 
 Use only the newly observed inv slot numbers. Do not queue numeric box slots across transfers.
 A refused transfer is not a closed box: inspect box_state and inventory_now before acting again.
 If no required items remain to store, close the box and continue your goal; do not reopen it.
+
+Do not equip an empty gun unless you carry compatible reload ammunition. Zero rounds without a reload
+is not a shooting option. An already equipped weapon needs no inventory visit: fire or reload directly.
+
+Occasionally save a snapshot after meaningful progress, in a safe free moment (not combat, dialogue,
+or cinematic): {"op":"snapshot","do":"save"}. Use snapshot slot 2 only; do not overwrite other slots.

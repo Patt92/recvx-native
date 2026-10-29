@@ -32,8 +32,6 @@ rm -f "$recvx_play/auto.json" "$recvx_play/stream.log.lock"
 printf '1 autodump 5 auto\n2 run auto 18\n' > "$recvx_play/live.txt" || exit 1
 recvx_ai_args="--control
 $recvx_play/live.txt
---state
-$recvx_play/live_state.json
 --snapshots
 $recvx_play/snap
 --video-config
