@@ -139,7 +139,7 @@ inactive unless `--control` is given.
 | `autodump <ticks> <name>` | Atomic periodic state file — the live feed the agent reads instead of screenshots. |
 | Debug menu over the channel | `sdl_key down/up F2`, `debug_select <id> <value>`, `confirm`: snapshots (slot 2 for recovery), room/spawn jumps, HP, items, enemy AI/grab/attacks. Lines are delivered while the menu is open and while the game-over screen is up (a snapshot load ends game over). |
 
-The agent works from [work/live-play/PLAYBOOK.md](work/live-play/PLAYBOOK.md)
+The agent works from [AI_PLAYBOOK.md](AI_PLAYBOOK.md)
 (loop, start recipe, interface tables, decision rules, measured constants,
 pitfalls) and the tools in [tools/agent_play/](tools/agent_play/):
 `nav.py` prints the state in 10–20 lines (who owns input, dialog text, zones,

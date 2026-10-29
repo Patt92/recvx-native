@@ -620,6 +620,8 @@ void RoomWorld::bind_enemy_services(){
         if(rec)*rec=atr_of(collision_record(*hit));
         if(id){*id=0;const auto geometry=world->collision_geometry();for(std::size_t i=0;i<geometry.size();++i)if(same_wall(geometry[i],*hit)){*id=std::uint32_t(i+1);break;}}
         return 1;};
+    // hitchkl.c:911 bhGetHitCollisionNormal: PLANE of the last clipped face (en01.c:11517, en24.c:524).
+    s.hit_normal=[](RECVX_ENEMY_VEC* n)->int{const auto p=enemy_world->collision_line_plane();*n={p.x,p.y,p.z};return 1;};
     s.ground=[](const RECVX_ENEMY_VEC* p)->float{return enemy_world->combat_ground({p->x,p->y,p->z});};
     s.floor_num=[](float py)->int{return enemy_world->floor_at({0,py,0});};
     s.grand=[](uint32_t i)->float{return i<enemy_world->floors_.size()?enemy_world->floors_[i]:0.f;};
@@ -921,6 +923,9 @@ void RoomWorld::bind_enemy_services(){
     // dem zusaetzlichen attr-0x20-Tor (effect_wall_ref_angle) und Antwort wie
     // bhSetWallRefAngle (reflect_effect_wall). Aufrufer en01sub.c:937 (flg 0)
     // und :1118 (flg 0x400); `rec` bleibt bei NULL unberuehrt.
+    // hitchk.c:1939 bhCheckWallType with the ATR record of the touched wall (en01sub.c:751).
+    en.wall_type_atr=[](const RECVX_ENEMY_VEC* p,uint32_t flg,float ar,float ah,RECVX_ENEMY_ATR* rec)->int{
+        const auto hit=enemy_world->collision_contact({p->x,p->y,p->z},flg,ar,ah);if(!hit)return 0;if(rec)*rec=atr_of(collision_record(*hit));return 1;};
     en.wall_ref_angle=[](RECVX_ENEMY_VEC* pos,uint32_t flg,float ar,float ah,
                          int32_t* ay,RECVX_ENEMY_ATR* rec)->int{
         auto* world=enemy_world;if(!world||!pos||!ay)return 0;
@@ -1317,6 +1322,10 @@ void RoomWorld::bind_enemy_services(){
     // Effektstimme 127 ohne Work (RequestEnemySe(127, ..)); EnemyInfo[128] traegt sie.
     x.effect_se=[](uint32_t voice,const RECVX_ENEMY_VEC* p,int se){enemy_world->audio_.request_enemy_se(voice,{p->x,p->y,p->z},se);};
     x.effect_se_playing=[](uint32_t voice,int se)->int{return enemy_world->audio_.enemy_se_playing(voice,se)?1:0;};
+    // zonzon1.c:916 bhEne_EraseArrow: every live arrow (id 13) linked to this work at obj_no ends.
+    x.effect_erase_arrow=[](RECVX_ENEMY_WORK* w,int obj_no){auto* world=enemy_world;unsigned at=0;
+        if(!world->enemy_work_index(w,at)){world->unbound_enemy_.insert("bhEne_EraseArrow: epw ohne Raumfigur");return;}
+        for(auto& work:world->sprites_)if((work.sprite.flg&1u)&&!(work.sprite.flg&2u)&&work.sprite.id==13&&work.link==2&&work.index==at&&work.node==unsigned(obj_no)){work.sprite.flg=0;work.queued=false;}};
     x.player_get=s.player_get;x.player_set=s.player_set;x.sphere_capsule=s.sphere_capsule;
     x.flr_count=[]()->int{auto* world=enemy_world;world->enemy_floor_cache_=world->motion_floors();return int(world->enemy_floor_cache_.size());};
     x.flr_at=[](uint32_t i,RECVX_ENEMY_ATR* out)->int{const auto& c=enemy_world->enemy_floor_cache_;if(i>=c.size())return 0;*out=atr_of(c[i]);return 1;};
@@ -2070,7 +2079,7 @@ void RoomWorld::control_enemy_works(){
     static RECVX_EN12_SERVICES en12=[]{RECVX_EN12_SERVICES t=en12_services();
         // rutchk.c:5 bhCheckRoute: out nur fuer gueltige Zonen (sonst Original unbestimmt).
         t.route_points=[](const RECVX_ENEMY_VEC* from,const RECVX_ENEMY_VEC* to,RECVX_ENEMY_VEC* out)->int{
-            const auto& e=en01_services();if(e.route_id(from)==0xFF||e.route_id(to)==0xFF){enemy_world->unbound_enemy_.insert("bhCheckRoute(en12): Lage ausserhalb rom->rutp");return 0;}e.route_next(from,to,out);return 1;};
+            const auto& e=en01_services();if(e.route_id(from)==0xFF||e.route_id(to)==0xFF)return 0; /* rutchk.c:12-19: 0xFF, ps2 unveraendert (en12.c:764 behaelt xn) */e.route_next(from,to,out);return 1;};
         t.local_node=en01_services().node_local;
         // MN_WORK md2P[node].p[1][frame] (en12.c:1453 Kopfwinkel aus der Motion).
         t.motion_angles=[](const RECVX_ENEMY_WORK* w,uint32_t mtn,uint32_t node,uint32_t frame,int32_t* out)->int{

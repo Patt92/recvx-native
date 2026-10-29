@@ -364,7 +364,7 @@ and drive-tray/reset handling remain open.
 
 The audio count in [PORT_STATUS.md](PORT_STATUS.md) covers the explicitly
 listed ledger mechanisms; it does not certify complete audio equivalence.
-Remaining gaps are tracked in [the active audio work](../work/audio-port.md):
+Remaining gaps are tracked in [the open items](OPEN_ITEMS.md#audio-aus-audio-portmd-details-audiomd):
 
 - Phase-inverted program pan, ADSR key-follow, exclusive groups, velocity
   curves/crossfade, amplitude LFO and unrepresented Vagi/loop-address cases.

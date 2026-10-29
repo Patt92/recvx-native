@@ -257,6 +257,9 @@ public:
     float debug_ground(NJS_POINT3 probe)const{return ground_position(collision_geometry(),room_height_,probe);} // bhGetGroundPosition-Sonde, -1000 = kein Boden
     const std::vector<CollisionWall>& debug_floors()const{return room_floors_;}
     std::optional<CollisionWall> collision_contact(NJS_POINT3 probe,unsigned flags,float radius,float height)const;
+    // hitchkl.c PLANE: the plane of the last face a bhCollisionCheckLine* clipped to
+    // (bhGetHitCollisionNormal, hitchkl.c:911). Global in the original; kept across calls.
+    NJS_POINT3 collision_line_plane()const{return line_plane_;}
     std::optional<CollisionWall> collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal)const;
     std::optional<CollisionWall> collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,bool omit_attribute4=false)const;
     float shot_distance(NJS_POINT3 origin,NJS_POINT3 direction,float range)const{return wall_ray_distance(collision_geometry(),room_height_,origin,direction,range,floor_at(origin));}
@@ -496,6 +499,7 @@ public:
     // StartVibrationEx(AtrbId, VibNo) requests of enemies, zonzon helpers and
     // event opcode 0x9f; SetEventVibrationMode of opcode 0x9e. The runtime owns
     // the vibration unit and drains these once per tick.
+    void request_vibration(int port,int pattern){vibration_requests_.push_back({port,pattern});} // StartVibrationEx
     std::vector<std::pair<int,int>> take_vibration_requests(){auto out=std::move(vibration_requests_);vibration_requests_.clear();return out;}
     std::optional<int> take_vibration_mode(){auto out=vibration_mode_request_;vibration_mode_request_.reset();return out;}
     // PEXP0_F(offset) writes by enemy grab routines (en04.c:3448/3449); the
@@ -1073,6 +1077,7 @@ private:
     // plp->mlwP->objP[node] writes of the enemy pass; the next player motion
     // write replaces them, so they are removed at the next world tick.
     std::vector<unsigned> player_transient_nodes_;
+    mutable NJS_POINT3 line_plane_{};
     std::vector<std::pair<int,int>> vibration_requests_;std::optional<int> vibration_mode_request_;
     std::vector<std::pair<unsigned,float>> player_exp0_writes_;
     std::vector<CollisionWall> enemy_floor_cache_,enemy_step_cache_;

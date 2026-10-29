@@ -2,9 +2,9 @@
 
 Regeln: [RULES.md](RULES.md) · Querschnitt: [X_COMMON.md](X_COMMON.md) · Begleiter: [X04_SUBPL.md](X04_SUBPL.md)
 
-Einzelberichte der Fortsetzung: [EN10](../../archived/work/enemies-EN010.result.md), [EN11](EN011.result.md),
-[EN20](EN020.result.md), [EN71](../../archived/work/enemies-EN071.result.md), [EN53](EN053.result.md),
-[EN21](EN021.result.md).
+Einzelberichte der Fortsetzung: [EN10](../../archived/work/enemies-EN010.result.md), [EN11](../../archived/work/enemies-EN011.result.md),
+[EN20](../../archived/work/enemies-EN020.result.md), [EN71](../../archived/work/enemies-EN071.result.md), [EN53](../../archived/work/enemies-EN053.result.md),
+[EN21](../../archived/work/enemies-EN021.result.md).
 Gemeinsame Bindungen: abgearbeitet, Blatt archiviert (`archived/work/enemies-INTEGRATION_NEXT.md`).
 Stand 2026-10-22: alle Plaetze 0..30, 53..56, 71 im Dispatch gebunden (`native/enemies/enemy_dispatch.c`).
 Komponentengeprüft ist nicht gleich vollständige Runtime-Abnahme.

@@ -106,7 +106,7 @@ set(RECVX_TABLES "${CMAKE_CURRENT_BINARY_DIR}/generated")
 # nativen Neubestimmung, siehe native/effect_sprites.cpp.
 # tools/generate_pickup_engine.py ist Quarantäne (Policy 2026-10-09).
 # generate_item_use.py liegt seit 2026-10-09 in archived/FORBIDDEN_DONTUSE/tools
-# (work/forbidden_cleanup_manifest.json). GetItem/ItemSort/ItemSearch/EraseItem,
+# (docs/forbidden_cleanup_manifest.json). GetItem/ItemSort/ItemSearch/EraseItem,
 # bhSearchBullet/bhCountBullet und ItemUse/Use_00 sind eigenständig nativ
 # bestimmt, siehe native/inventory.cpp.
 # tools/generate_object_itmbox.py ist Quarantäne (Policy 2026-10-09):

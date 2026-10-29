@@ -344,7 +344,7 @@ int EventVm::instruction(Task& t,std::size_t& cursor){
     case 0x27:values[18]=v.u8(p+1);inventory_.wpnr_no=v.u8(p+1);inventory_.partner_weapon.at(inventory_.player)=v.u8(p+1);inventory_.request_weapon_reload();return advance(2);
     case 0x28:status_requested=true;flags[12][0]|=0x200;return advance(2);
     // event.c Inventarmutationen auf dem einzigen Bestandsbesitzer Inventory
-    // (native/inventory.cpp, Vertrag work/native_port_inventory_contract.md).
+    // (native/inventory.cpp, Vertrag docs/INVENTORY_CONTRACT.md).
     // Operandenlängen aus dem bhScePtr-Vorschub; Rückgabe 1 wie im Original.
     case 0x31:inventory_.script_item_lost(v.u8(p+1));values[22]=inventory_.slots()[0];return advance(2);            // bhPlItemLost
     case 0xb2:inventory_.script_item_give(v.u8(p+1),v.u8(p+2),v.u8(p+3));values[22]=inventory_.slots()[0];return advance(4); // bhItemGetGet

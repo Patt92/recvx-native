@@ -5556,8 +5556,8 @@ int RoomWorld::l2_wall(NJS_POINT3 origin,NJS_POINT3 vector,unsigned flg,float* l
     return hit;
 }
 std::optional<CollisionWall> RoomWorld::collision_contact(NJS_POINT3 probe,unsigned flags,float radius,float height)const{return effect_wall(collision_geometry(),room_height_,probe,flags,radius,height);}
-std::optional<CollisionWall> RoomWorld::collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal)const{return effect_line(collision_geometry(),room_height_,start,end,normal);}
-std::optional<CollisionWall> RoomWorld::collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,bool omit_attribute4)const{return effect_line(collision_geometry(),room_height_,start,end,normal,flags,floor,omit_attribute4);}
+std::optional<CollisionWall> RoomWorld::collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal)const{auto hit=effect_line(collision_geometry(),room_height_,start,end,normal);if(hit)line_plane_=normal;return hit;}
+std::optional<CollisionWall> RoomWorld::collision_line(NJS_POINT3 start,NJS_POINT3& end,NJS_POINT3& normal,unsigned flags,int floor,bool omit_attribute4)const{auto hit=effect_line(collision_geometry(),room_height_,start,end,normal,flags,floor,omit_attribute4);if(hit)line_plane_=normal;return hit;}
 float RoomWorld::combat_ground(NJS_POINT3 probe){
     ensure_push();update_push();
     return ground_.query(probe);

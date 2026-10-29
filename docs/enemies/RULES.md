@@ -6,4 +6,4 @@
 4. Dienste über `RECVX_ENEMY_SERVICES`; fehlender Dienst = `gap(name)`, nie ein Ersatzwert. Keine Heuristik, keine Raum-/Gegnerregel, keine abgeschwächten Tests.
 5. Originalquirks unverändert übernehmen und mit Datei:Zeile kommentieren; Unklares per Disassembly klären oder als Lücke berichten.
 6. Eigener Buildordner `build/enNN-<agent>`; keine parallelen Builds im selben Verzeichnis. Kein Commit, Push, Paket.
-7. Bericht `work/enemies/ENNN.result.md` und Ledgerzeilen.
+7. Bericht `archived/work/enemies-ENNNN.result.md` (Board: `docs/enemies/`) und Ledgerzeilen.

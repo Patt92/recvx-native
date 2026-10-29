@@ -5,6 +5,7 @@
 #include "room.h"
 #include "en23.h"
 #include "ninja_math.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -36,6 +37,20 @@ int main(int argc,char** argv){try{
         check(s->babies_n==30,"thirty EN24 works must be linked");
         for(int i=0;i<s->babies_n;++i){check(s->babies[i]->lkwkp==&e,"EN24 lkwkp not set");
             const auto& b=*f.world.state(1,s->babies[i]->owner_index);check(b.model_bank&&b.model_base>=2&&b.model_base<=5&&b.enemy_asset,"EN24 mlwP is not mdl[2..5] of EN23");}
+    }
+    {
+        // en24.c:517-530 bhEne24_CollisionLine: a falling baby (MV05, flg 0x100000) stops at the
+        // first face whose PLANE normal points up (bhGetHitCollisionNormal, hitchkl.c:911).
+        Fixture f(data);for(int i=0;i<60;++i)f.tick();auto& e=f.enemy();
+        const auto* s=static_cast<const RECVX_EN23_STATE*>(e.exp0);
+        // en23.c:3478-3505 bhEne23_InitChild writes these fields; vertical start only.
+        for(int i=0;i<s->babies_n;++i){auto* b=s->babies[i];b->mode0=1;b->mode1=1;b->mode2=5;b->mode3=0;b->mdflg&=~1u;
+            b->xn=0;b->yn=1.0f;b->zn=0;b->px=b->pxb=e.px;b->py=b->pyb=e.py+10.0f;b->pz=b->pzb=e.pz;}
+        for(int i=0;i<120;++i)f.tick();
+        unsigned landed=0;float lowest=1e9f;
+        for(int i=0;i<s->babies_n;++i){if(!(s->babies[i]->flg&0x100000u))++landed;lowest=std::min(lowest,s->babies[i]->py);}
+        check(landed==unsigned(s->babies_n),"EN24 MV05 never lands: bhGetHitCollisionNormal unbound");
+        check(lowest>-1.0f,"EN24 fell through the floor");
     }
     {
         Fixture f(data);for(int i=0;i<60;++i)f.tick();auto& e=f.enemy();

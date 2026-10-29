@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent reader and planner for --control runs (see work/live-play/PLAYBOOK.md).
+"""Agent reader and planner for --control runs (see docs/AI_PLAYBOOK.md).
 
   nav.py A                                   compact state: player, input owner, dialogue, zones, enemies, items
   nav.py A path x z [via x z ...] [run] [stop d] [face x z] [then <line>]

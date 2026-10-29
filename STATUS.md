@@ -12,8 +12,10 @@ current code, working tree and installed runtime.
 - Current functional ported/open state: [Gameplay](docs/NATIVE_GAMEPLAY.md),
   [Player](docs/NATIVE_PLAYER.md), [Audio](docs/AUDIO.md),
   [Assets](docs/NATIVE_ASSETS.md), [Validation](docs/VALIDATION.md).
-- `work/` contains only ongoing work (enemy task board `work/enemies/`, briefings,
-  inventory contract, performance plan, quarantine manifest). Finished results, applied
+- `work/` is empty since 2026-10-29: the enemy board moved to [docs/enemies/](docs/enemies/README.md),
+  the inventory contract to [docs/INVENTORY_CONTRACT.md](docs/INVENTORY_CONTRACT.md), the AI playbook to
+  [docs/AI_PLAYBOOK.md](docs/AI_PLAYBOOK.md), the quarantine manifest to `docs/`; still open points of the
+  archived work items are in [docs/OPEN_ITEMS.md](docs/OPEN_ITEMS.md). Finished results, applied
   patches and the instruction history are under `archived/work/` since 2026-10-21;
   references in ledger, docs, code and tests have been updated. Since 2026-10-21 `archived/` is
   no longer versioned (local only, `.gitignore`); a fresh clone does not have
@@ -138,7 +140,7 @@ checked in the native runtime. **No audio 100 % proof:** float ADX, remaining sy
 branches, transmission and output clock open. Windows x64 cross build and policy binary check PASS; four audio tests and
 OPTION/room/movie checks under Wine PASS. Frontend neighbor suite under Wine still red: identical error `hint confirmation failed`
 also in the separately built HEAD 47b4a22 (no expectation weakened).
-[Mechanisms](docs/AUDIO.md), [remaining task](work/audio-port.md), [verification artifacts](build/validation/audio-port/).
+[Mechanisms](docs/AUDIO.md), [remaining task](docs/OPEN_ITEMS.md), [verification artifacts](build/validation/audio-port/).
 Build macOS arm64; installed app/package not replaced. 2026-10-22 re-checked against the original
 (PlayStartMovieEx/PlayMovieMain, MovieTypeDef, SetSoundModeEx, bhClearEffect, bhSetEffectTb UVs,
 pxb before link point, PS2_Render_Tex_Sub) and committed on main; two tests adapted to the new OPTION row
@@ -220,7 +222,7 @@ Do not derive a current delivery from an old „in the package“ paragraph.
 
 **Performance/energy:** the software rasterizer is ≈ 99 % of the CPU load (≈ 62–70 ms CPU per
 room frame at „High“, simulation ≈ 0.26 ms/tick). Plan and measurement basis:
-[Plan](work/performance_optimization_plan_20261020.md),
+[Plan](archived/work/performance_optimization_plan_20261020.md),
 [Phase A + cuts](archived/work/performance_phaseA_scalpel_20261020.result.md)
 (`bilinear` inline −8 % bit-identical, one draw pass per tick, `--render-threads` for
 `powermetrics` A/B at the launcher). Worker count decided via `powermetrics` (automatic stays).
@@ -240,12 +242,12 @@ software fallback. GL shader/pixel parity and Linux hardware open.
 **Vulkan (2026-10-25, working tree):** optional backend via ordered fragment interlock,
 never default; `--renderer vulkan`/INI/debug selection. macOS (MoltenVK) bit-identical incl. shadows,
 rooms 100 % (point), runtime image == Metal. Windows/Linux hardware open, no package replacement.
-[Report](work/vulkan_raster_backend.result.md).
+[Report](archived/work/vulkan_raster_backend.result.md).
 
 **Direct3D 12 (2026-10-25, working tree):** optional Windows backend, same HLSL as D3D11
 (`native/gpu_raster_hlsl.h`), ROV, UAV barrier per draw call, fence before readback;
 `--renderer d3d12`/INI/debug selection, `RECVX_D3D12_DRIVER=warp`. Cross build x64 checked, **parity on
-Windows hardware/WARP open** (`gpu_raster_d3d12_parity`). [Report](work/d3d12_raster_backend.result.md).
+Windows hardware/WARP open** (`gpu_raster_d3d12_parity`). [Report](archived/work/d3d12_raster_backend.result.md).
 
 **FSR 4 (2026-10-25, working tree):** Windows presentation stage `native/fsr_present_d3d12.cpp` behind
 the MetalFX interface: own D3D12 device, DXGI flip swapchain on the SDL HWND, camera
@@ -254,7 +256,7 @@ FSR 3.1 fallback of the upscaler provider, sharpen/CRT as HLSL port. ffx-api hea
 under `native/third_party/FidelityFX-SDK/include`, DLLs never in the repo. Cross build x64 and macOS tests
 green; **not run on a Windows GPU**. Open: object motion vectors, jitter, frame generation,
 Vulkan (Linux/macOS). Details [NATIVE_PORT](docs/NATIVE_PORT.md#fsr-presentation-stage-windows),
-[Report](work/fsr_present_d3d12.result.md).
+[Report](archived/work/fsr_present_d3d12.result.md).
 
 **Map screen:** MAP draws MRY geometry, markers and sprites in its own
 build runtime; fade return and re-entry checked specifically. Constant material
@@ -623,7 +625,7 @@ patch only on ambient green, ordered material propagation and multi-light evalua
 productive draw/light path; nine targeted tests green. Start.command dev app rebuilt,
 arm64/signature checked; RM_5800/6040/6100 at 1/8/30/60/600 frames without enemy gaps and
 pose abort. No new full scan; combat/window acceptance open.
-[EN53 report](work/enemies/EN053.result.md), scan report section 17.
+[EN53 report](archived/work/enemies-EN053.result.md), scan report section 17.
 `bhSetRapEff 310` done (2026-10-16): the whole effect setup of the Tyrant runs natively on the
 existing `eff[512]` set. Newly ported by hand: 310 `bhEff30a` camera shake, 349 callback,
 308 `bhSetEffSpark` (own table `Eff308Prm[2]`, `gnd_hgh` from `bhGetGroundPosition`) in
@@ -637,7 +639,7 @@ RM_5840 **+305/307/309/310/312**, camera pose and Tyrant state identical before/
 effect gap. Tables verified byte by byte against the ELF (among others `Tex5Buv[12]` reads jump table words =
 denormals ~3.4e-39, natively `{0,0,0,0}`). Open: `bhEff298`/`bhEff303` unported, `bhEne19`
 Mode0 index 4 (NULL in the original), no natural playthrough proof (player dies during the run).
-[EN19 report](work/enemies/EN019.result.md). **No commit/push.**
+[EN19 report](archived/work/enemies-EN019.result.md). **No commit/push.**
 
 **`effect_room_sprites` green again (2026-10-16), two pre-existing findings clarified:** (1) since
 `7d1f366` `step_eff219` intentionally no longer reports the camera gap, because `room.c:33`
@@ -669,7 +671,7 @@ camera pose, HP and motion (no natural run reaches the two sets).
 Measured open: RM_5010/3230 keep the Tyrant in `mode0 5`, RM_5840 is type 2 without 349,
 RM_1122 not in combat; the 303 proof runs via the marked `status` bit, and the
 spawner branch of 298 needs a hit with weapon 15 (`comb_wep` from en03_lib.c:1314).
-Scan report section 19, [EN19 report](work/enemies/EN019.result.md). **No commit/push.**
+Scan report section 19, [EN19 report](archived/work/enemies-EN019.result.md). **No commit/push.**
 
 **Ledger cleanup (2026-10-16):** `docs/port_ledger.tsv` had ten duplicate keys, and
 `tools/port_check.py` silently evaluated the last row of each. Three distorted the report:
@@ -1427,7 +1429,7 @@ type 100/101 advances in the bhControlLight call under gm_flg 0x80; the draw pas
 remain a named gap. (3) Light link lkflg 5 onto eff[efid] ported (unused in the room data); side effect: bhDrawPolEffect
 drew with an identity matrix when the parent matrix was missing (substitute removed, now a gap). CTest 180/180, 12 counter-checks red,
 launcher: title, RM_7100/9280/1020/0000 without blocked commands and without new gaps, arm64/signature ok. Reports
-work/{light_effect_link,easy_dir_light,effect_model_mirror}.result.md, logs build/validation/light-link-easydir-20261020/ and
+archived/work/{light_effect_link,easy_dir_light,effect_model_mirror}.result.md, logs build/validation/light-link-easydir-20261020/ and
 build/validation/effect-model-mirror/. No visual acceptance. **No commit/push.**
 (bf) Two waves with five subagents each (2026-10-20), each integration re-checked against the original by the main process,
 CTest 188/188, dev app delivered, title/RM_0000/0080/0090/2050/3130/5810/7030/9280 without blocked commands and without new

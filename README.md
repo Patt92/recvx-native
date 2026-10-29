@@ -594,7 +594,7 @@ one action per decision. The game logic is untouched.
 
 Works with llama.cpp, vLLM, LM Studio, Ollama, OpenAI and other compatible
 servers. A coding agent such as Claude Code can also play directly through
-`tools/agent_play/play.py` and `work/live-play/PLAYBOOK.md`.
+`tools/agent_play/play.py` and `docs/AI_PLAYBOOK.md`.
 
 Details (all options, how the driver stays fast, the control channel, limits):
 [docs/AI_PLAY.md](docs/AI_PLAY.md).

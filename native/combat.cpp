@@ -92,6 +92,7 @@ struct CombatOriginal {
     std::function<int(const RECVX_CB_CAPSULE*,unsigned)> c2_wall_n;
     std::function<int(const RECVX_CB_EFFECT*)> effect;
     std::function<void(const RECVX_CB_VEC*,int,int)> weapon_se;
+    std::function<void(int,int)> vibration;
     std::function<void(int,float,float)> footstep;
     std::function<void(const RECVX_CB_LIGHT*)> light0;
     std::function<void(const RECVX_CB_VEC*,const RECVX_CB_VEC*,uint32_t,uint32_t,int)> gun_spark;
@@ -125,6 +126,7 @@ struct CombatOriginal {
         s.c2_wall_n=[](void* p,const RECVX_CB_CAPSULE* cap,uint32_t f){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->c2_wall_n?c->c2_wall_n(cap,f):0);};
         s.effect=[](void* p,const RECVX_CB_EFFECT* e){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->effect?c->effect(e):-1);};
         s.weapon_se=[](void* p,const RECVX_CB_VEC* pos,int32_t se,int32_t slot){auto* c=static_cast<CombatOriginal*>(p);if(c->weapon_se)c->weapon_se(pos,se,slot);};
+        s.vibration=[](void* p,int32_t port,int32_t type){auto* c=static_cast<CombatOriginal*>(p);if(c->vibration)c->vibration(int(port),int(type));};
         s.footstep=[](void* p,int32_t floor,float x,float z){auto* c=static_cast<CombatOriginal*>(p);if(c->footstep)c->footstep(floor,x,z);};
         s.light0=[](void* p,const RECVX_CB_LIGHT* l){auto* c=static_cast<CombatOriginal*>(p);if(c->light0)c->light0(l);};
         s.gun_spark=[](void* p,const RECVX_CB_VEC* pos,const RECVX_CB_VEC* vec,uint32_t c0,uint32_t c1,int32_t type){auto* c=static_cast<CombatOriginal*>(p);if(c->gun_spark)c->gun_spark(pos,vec,c0,c1,int(type));};
@@ -239,6 +241,8 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
     // Slotwahl 8/9/19 und Get3DSoundParameter im gemeinsamen Mixerpfad, gm_flg 0x01000000 = Syukan.
     engine.weapon_se=[&](const RECVX_CB_VEC* pos,int se,int slot){
         audio.call_player_weapon_se(unsigned(WpnTab[weapon_].snd_wpno),se,{pos->x,pos->y,pos->z},slot,events&&(events->flags[11][0]&0x01000000u));};
+    // StartVibrationEx(0, WpnTab[].vib_tp) (weapon.c): the shared request queue of the room owner.
+    engine.vibration=[&](int port,int type){if(world)world->request_vibration(port,type);};
     // CallPlayerFootStepSe(bhCheckFloorSound(...),1,1).
     // CallPlayerFootStepSe(bhCheckFloorSound(...),1,1) -> CallPlayerFootStepSeEx(..,&PlayerPos); x/z bestimmen nur den Bodenklang.
     engine.footstep=[&](int,float x,float z){if(!world)return;const unsigned surface=world->floor_sound({x,0,z});if(surface<=4)audio.player_footstep_se(surface,1,true,events&&(events->flags[11][0]&0x01000000u));};

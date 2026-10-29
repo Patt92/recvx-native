@@ -9,7 +9,7 @@ namespace recvx {
 // Semantikreferenz: sub1.c (GetItem, ItemSort, ItemSearch, EraseItem,
 // bhSearchBullet, Combi_99, ItemUse, Use_00/01/02/04/05, Combi_00..05,
 // ItemBoxChange, WeaponSet) und weapon.c (bhCountBullet). Feld-/Flagvertrag:
-// work/native_port_inventory_contract.md. Kein Funktionskörper übernommen,
+// docs/INVENTORY_CONTRACT.md. Kein Funktionskörper übernommen,
 // kein Originalkern, keine zweite Work.
 namespace {
 constexpr unsigned kWide=0x100,kStack=0x200,kEndless=0x800;
@@ -738,7 +738,7 @@ bool Inventory::deposit(unsigned slot,unsigned box){if(slot<2||slot>=12||box!=64
 bool Inventory::withdraw(unsigned index,unsigned box){if(box!=64||index>=128||!items[box+index])return false;auto item=items[box+index];if(!acquire(id(item),quantity(item),(item>>16)&0xff00))return false;items[box+index]=0;return true;}
 bool Inventory::box_change(unsigned slot,unsigned index,unsigned box,unsigned stage,unsigned room,unsigned* out,unsigned* cursor_slot,unsigned cursor_cell){
     // ItemBoxChange nach dem Original-Maschinencode (0x002A53E0; die Decomp ist
-    // nur 67,97 % matching, Ablauf belegt in work/native_port_inventory_contract.md).
+    // nur 67,97 % matching, Ablauf belegt in docs/INVENTORY_CONTRACT.md).
     // `slot` ist listcsr_0, `index` ibcsr, st->bxp = itm[box].
     if(out)*out=0;const unsigned count=box==64?128:(box==192||box==224)?32:0;
     if(!count||slot<1||slot>=capacity()+2||index>=count||player>=3)return false;

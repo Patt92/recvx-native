@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 #include <vector>
-// Host-GPU-Rasterer (Plan work/performance_optimization_plan_20261020.md, Phase D). Plattformanpassung,
+// Host-GPU-Rasterer (Plan archived/work/performance_optimization_plan_20261020.md, Phase D). Plattformanpassung,
 // keine Spiellogik: der SoftwareRenderer entscheidet Transformation, Clipping, Streifenregeln,
 // Sortierung und Phasen; das Backend rastert dieselbe raster::Setup-Liste mit den Pixelregeln der
 // Bandstufe und liefert das aufgeloeste Bild und die Tiefe (1/z, Maximum je Ueberabtastblock) zurueck.

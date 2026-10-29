@@ -64,7 +64,7 @@ int main(int argc,char** argv){try{
     {Inventory inv;inv.player=1;inv.slots()[0]=3;inv.slots()[1]=Inventory::pack(18,1);inv.slots()[2]=Inventory::pack(5,18);inv.slots()[3]=0x80480001;const auto personal=inv.slots()[1];inv.items[200]=123;MessageDialog dialog;auto bytes=event_fixture({0xb7,1,0xff,0});EventVm vm(bytes,inv,dialog);vm.start(0,0);vm.tick();check(vm.errors.empty()&&inv.slots()[1]==personal&&inv.items[192]==Inventory::pack(5,18)&&inv.items[193]==0x80480001&&inv.items[200]==0&&inv.slots()[2]==0,"security deposit loses player selection/personal item/raw item state");auto transfer=event_fixture({0xb8,0,0xff,0});EventVm box(transfer,inv,dialog);box.start(0,0);box.tick();check(box.errors.empty()&&inv.items[64]==Inventory::pack(5,18)&&inv.items[65]==0x80480001&&!inv.items[192],"security-to-item-box transfer wrong range/order");}
     {Inventory inv;std::fill(inv.items.begin()+64,inv.items.begin()+192,Inventory::pack(20,1));inv.items[70]=0;inv.items[192]=Inventory::pack(5,18);inv.items[193]=Inventory::pack(12,30);const auto saved=inv.items;MessageDialog dialog;auto bytes=event_fixture({0xb8,0,0xff,0});EventVm vm(bytes,inv,dialog);vm.start(0,0);vm.tick();check(!vm.errors.empty()&&inv.items==saved,"overflow transfer partially loses security inventory");}
     // D02 ItemBoxChange (sub1.c; tragende Zweige nach Disassembly, siehe
-    // work/native_port_inventory_contract.md): Einlagern/Entnehmen, Lösen der
+    // docs/INVENTORY_CONTRACT.md): Einlagern/Entnehmen, Lösen der
     // Ausrüstung, Restriktionen 150/151/200, Stapeln über Combi_01, Kapazität
     // 159, pip[0]-Nachführung und Sonderslot. Abschnitte einzeln gesammelt.
     std::vector<std::string> failures;

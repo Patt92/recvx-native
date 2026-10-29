@@ -3,7 +3,7 @@
 
   driver.py [--base-url URL] [--model NAME] [--dir build/play] [--steps N] [--window 8] [--no-tools]
 
-The runtime must already run with --control <dir>/live.txt and `autodump 5 auto` (see PLAYBOOK).
+The runtime must already run with --control <dir>/live.txt and `autodump 5 auto` (see docs/AI_PLAYBOOK.md).
 The driver never launches or restarts the game, never takes screenshots, never touches the desktop.
 
 Per decision: compact state (play.py) -> one chat completion -> one JSON action -> play.act.
