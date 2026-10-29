@@ -649,8 +649,8 @@ no ISO, no `data/`, no tests that need disc files.
 
 **Downloads:**
 
-- [Releases](https://github.com/Patt92/recvx-native/releases): every push to `main` replaces
-  the prerelease **nightly**; a `v*` tag publishes a regular release. Both carry
+- [Releases](https://github.com/Patt92/recvx-native/releases): every push to `main` adds a
+  prerelease **build-<version>** (older builds stay); a `v*` tag publishes a regular release. Both carry
   `recvx-windows-x64.zip`, `recvx-windows-arm64.zip`, `recvx-linux-x64.tar.gz`,
   `recvx-android-arm64.apk` and `SHA256SUMS`.
 - [Actions artifacts](https://github.com/Patt92/recvx-native/actions/workflows/runtimes.yml):

@@ -142,8 +142,9 @@ jobs:
           path: build/android-arm64/RECVX-Native.apk
           if-no-files-found: error
 
-  # Publishes the four artifacts once every build job succeeded:
-  # a tag v* becomes a regular release; every push to main replaces the rolling prerelease `nightly`.
+  # Publishes the four artifacts once every build job succeeded: a tag v* becomes a regular release,
+  # every push to main its own prerelease build-<version> (the version the binaries carry). Nothing
+  # is deleted; older builds stay listed.
   release:
     name: Release
     needs: [windows, linux, android]
@@ -155,6 +156,11 @@ jobs:
       group: release-${{ github.ref }}
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # build number = git rev-list --count HEAD, as in tools/build_native.py
+      - name: Version
+        run: echo "RECVX_VERSION=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import build_native; print(build_native.FULL_VERSION)')" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v7
         with:
           path: artifacts
@@ -177,7 +183,11 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
             gh release create "${GITHUB_REF_NAME}" assets/* --title "RECVX Native ${GITHUB_REF_NAME}" --notes "$notes" --verify-tag
           else
-            gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
-            gh release create nightly assets/* --prerelease --target "${GITHUB_SHA}" \
-              --title "Nightly (${GITHUB_SHA::7})" --notes "Latest build of main at ${GITHUB_SHA::7}. $notes"
+            tag="build-${RECVX_VERSION}"
+            if gh release view "$tag" > /dev/null 2>&1; then
+              echo "release $tag exists already (re-run of the same commit); not replaced"
+              exit 0
+            fi
+            gh release create "$tag" assets/* --prerelease --target "${GITHUB_SHA}" \
+              --title "Build ${RECVX_VERSION} (${GITHUB_SHA::7})" --notes "Build of main at ${GITHUB_SHA::7}. $notes"
           fi
