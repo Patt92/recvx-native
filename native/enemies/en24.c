@@ -2,6 +2,7 @@
    Originalkoerper, kein Generator, keine zweite Workwelt.
    Fundstellen und Eigenheiten stehen in en24.h. */
 #include "en24.h"
+#include "en03_lib.h"
 #include "ninja_math.h"
 #include "ninja_matrix.h"
 #include <math.h>
@@ -239,25 +240,18 @@ static int32_t en24_search_player(RECVX_ENEMY_WORK* w, int32_t r)
     return yr;
 }
 
+static const RECVX_EN24_SERVICES* en24_sv;
+void recvx_en24_bind(const RECVX_EN24_SERVICES* services) { en24_sv = services; }
+
 /* ---------------------------------------------------------------------------
-   zonzon1.c:611 bhEne_AttackHitCheck(plp, pos, ar) — Trefferpunkt gegen die
-   WAFFENKAPSEL DES SPIELERS, danach das naechstgelegene Spielergelenk.
-   Der gemeinsame Vertrag in enemy_work.h fuehrt drei dafuer notwendige
-   Groessen NICHT: plp->watr (Kapsel), plp->mlwP->obj_num (Gelenkzahl des
-   Spielermodells) und die Trefferfelder plp->djnt_no/dvx../dpx.., die die
-   Routine schreibt. Ohne sie ist das Praedikat nicht bestimmbar. Es wird
-   darum namentlich gemeldet und liefert kein Ergebnis; ein geratener
-   Treffer oder ein pauschales 0 als "kein Treffer" waere beides erfunden.
-   Schnittstellenbedarf steht im Bericht (T3 hat genau diese drei Groessen in
-   en03_lib.h bereits deklariert).
+   zonzon1.c:611 bhEne_AttackHitCheck(plp, &epw->px, 2.0f) (en24.c:422): dieselbe
+   portierte Routine wie bei EN02/EN03 (recvx_t3_attack_hit_check, en03_lib.c),
+   die plp->watr, das naechste Spielergelenk und plp->djnt_no/dv/dp fuehrt.
    --------------------------------------------------------------------------- */
 static int en24_attack_hit_check(RECVX_ENEMY_WORK* w, const RECVX_ENEMY_VEC* pos, float ar)
 {
-    (void)pos;
-    (void)ar;
-    en24_gap(w, "bhEne_AttackHitCheck (zonzon1.c:611): plp->watr, "
-                "plp->mlwP->obj_num und plp->djnt_no/dvx/dpx fehlen im Vertrag");
-    return -1;   /* unbestimmbar, nicht "kein Treffer" */
+    (void)w;
+    return recvx_t3_attack_hit_check(pos, ar);
 }
 
 /* en24.c:76 bhEne24. */
@@ -493,13 +487,12 @@ static void en24_move(RECVX_ENEMY_WORK* w)
             en24_gap(w, "bhEne_SetBloodEffect4 (en24.c:246)");
         }
 
-        /* en24.c:248-263: sys->ef wird vollstaendig gesetzt und dann
-           bhSetEffectTb(&sys->ef, NULL, NULL, 0) gerufen. Der gemeinsame
-           Vertrag hat nur set_effect (effect.c:331 bhSetEffect) und kann
-           weder id/flg/type noch sx/sy/sz oder ay uebergeben. Der Aufruf
-           wird namentlich gemeldet und nicht durch bhSetEffect ersetzt. */
-        en24_gap(w, "bhSetEffectTb(&sys->ef,id 303,flg 1,type 1,"
-                    "sx=sy=sz 2.0,ay=epw->ay) (en24.c:263)");
+        if (en24_sv && en24_sv->effect_tb) {
+            const RECVX_ENEMY_VEC at = { w->px, w->py, w->pz }, size = { 2.0f, 2.0f, 2.0f };
+            (void)en24_sv->effect_tb(303u, 1u, 1u, &at, &size, 0, w->ay);   /* en24.c:249-263 */
+        } else {
+            en24_gap(w, "bhSetEffectTb(&sys->ef, 303) (en24.c:263)");
+        }
 
         w->mdflg |= 1u;                  /* en24.c:265 */
 
@@ -706,12 +699,6 @@ static void en24_mv04(RECVX_ENEMY_WORK* w)
                       && (plp.hp >= 0)
                       ? en24_attack_hit_check(w, &self, 2.0f)
                       : 0;
-
-                if (hit < 0) {
-                    /* Praedikat unbestimmbar (siehe en24_attack_hit_check);
-                       der Schadenszweig en24.c:424-442 bleibt offen. */
-                    break;
-                }
 
                 if (hit) {
                     RECVX_ENEMY_VEC vec;

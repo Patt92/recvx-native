@@ -1806,6 +1806,15 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             io.search_near_enemy_b=[](void* u,std::int32_t ay)->int{auto* h=static_cast<ActionHost*>(u);
                 const NJS_POINT3 head_point{h->head->head[0],h->head->head[1],h->head->head[2]}; // EXP1_F(12/16/20)
                 return h->world->search_near_enemy_b(head_point,ay,13653,30.0f)?1:0;};
+            // player.c:2196-2220 in water (stflg 0x100000, flg2 0x8 footeff): bhSetEffect(108, &plp->px, NULL, ct),
+            // bhSetWaterSplash(plp, jno, ...) at owP[jno] over the ground/water, bhSetWaterSplash3 at owP[node].
+            io.effect108=[](void* u,std::int32_t ct){static_cast<ActionHost*>(u)->world->player_effect(108,ct);};
+            io.water_splash=[](void* u,std::int32_t node,std::int32_t type,float sc){auto* h=static_cast<ActionHost*>(u);const auto& ow=h->world->player_committed_joints();
+                if(node<0||std::size_t(node)>=ow.size()){h->world->report_enemy_gap("bhSetWaterSplash: plp->mlwP->owP[jno] nicht berechnet");return;}
+                h->world->water_splash2(h->actor->position.y,int(h->actor->yaw),{ow[std::size_t(node)].value[12],0,ow[std::size_t(node)].value[14]},type,sc,sc,sc);};
+            io.water_splash3=[](void* u,std::uint32_t node,std::int32_t ay){auto* h=static_cast<ActionHost*>(u);const auto& ow=h->world->player_committed_joints();
+                if(node>=ow.size()){h->world->report_enemy_gap("bhSetWaterSplash3: plp->mlwP->owP[node] nicht berechnet");return;}
+                const auto& m=ow[node].value;h->world->water_splash3({m[12],m[13],m[14]},int(ay),int(h->world->player_foot_effect()),0.8f,0.8f,0.8f);};
             io.gap=[](void* u,const char* name){static_cast<ActionHost*>(u)->world->report_enemy_gap(name);};
             if(event_mode){
                 // pl_evt.c:62 bhCPM0_event an Stelle von bhCtrPly_mode0[0]; Ende ueber Player_controll 128/139.

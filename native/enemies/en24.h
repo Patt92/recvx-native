@@ -51,6 +51,13 @@ extern "C" {
    Einstieg: bhEne24 (en24.c:76); der Dispatch-Eintrag 0x18 der Tabelle
    (eneset.c:51) gehoert dem Dispatcher-Besitzer und wird hier nur
    beschrieben, nicht angelegt. */
+/* en24.c:249-263: id/flg/type/px..pz/sx..sz/ax/ay in sys->ef schreiben, dann
+   bhSetEffectTb(&sys->ef, NULL, NULL, 0); mdlver/flr_no bleiben aus der Vorlage. */
+typedef struct RECVX_EN24_SERVICES {
+    int (*effect_tb)(uint32_t id, uint32_t type, uint32_t flg, const RECVX_ENEMY_VEC* pos,
+                     const RECVX_ENEMY_VEC* scale, int32_t ax, int32_t ay);
+} RECVX_EN24_SERVICES;
+void recvx_en24_bind(const RECVX_EN24_SERVICES* services);
 void recvx_en24(RECVX_ENEMY_WORK* w);
 
 #ifdef __cplusplus

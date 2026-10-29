@@ -702,6 +702,12 @@ public:
     // pwksub.c:2572 bhSetWaterSplash2(pp, pos, ...): Boden unter (pos.x, pp->py, pos.z), bhCheckWater,
     // dann drei id-11-Effekte aus sys->ef (ay = pp->ay + 16384 / - 16384 / + 32768, lkono 0/1/2).
     void water_splash2(float pp_py,int pp_ay,NJS_POINT3 pos,int type,float sx,float sy,float sz);
+    // pwksub.c:2616 bhSetWaterSplash3(pos, ang, type, ...): two id-11 effects from sys->ef at pos,
+    // ay = ang +/- 16384, lkono 0 and 1; no ground or water test (unlike 2 and 4's type + 10).
+    void water_splash3(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz);
+    // player.c:2199 bhSetEffect(id, (POINT*)&plp->px, NULL, lkono): an unlinked set at the player.
+    int player_effect(unsigned id,int lkono){EffectSpawn e;e.flg=1;e.id=id;e.type=0;e.flr_no=0;e.mdlver=0;e.position=player_.position;e.scale={1,1,1};e.ax=0;e.ay=0;e.lkono=lkono;return spawn_effect(e);}
+    unsigned player_foot_effect()const{return collision_foot_effect_;} // plp->footeff (bhCheckFloorP Typ 3 prm0 3)
     // effsub4.c:19/35 bhEff_SetPtcl/bhEff_SetPtcl1 (Effekt 365), :117 bhEff_SetPtcl2 und
     // :199 bhEff_SetPtcl2V (Effekt 366). Jeder Satz fuehrt seine Punkte in einem
     // bhEff_AllocOwork-Hilfsarbeitssatz (EffectPtcl365Work/EffectPtcl366Work), den der

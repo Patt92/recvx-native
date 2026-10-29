@@ -507,6 +507,11 @@ void RoomWorld::water_splash4(NJS_POINT3 pos,int ang,int type,float sx,float sy,
         EffectSpawn spawn;spawn.flg=ef.flg;spawn.id=ef.id;spawn.type=ef.type;spawn.flr_no=ef.flr_no;spawn.mdlver=ef.mdlver;
         spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;spawn.lkono=lkono;spawn_effect(spawn);});
 }
+void RoomWorld::water_splash3(NJS_POINT3 pos,int ang,int type,float sx,float sy,float sz){
+    auto& ef=effect_detail::request_template();ef.id=11;ef.flg=1;ef.mdlver=0;ef.type=unsigned(type);ef.flr_no=0;ef.scale={sx,sy,sz};ef.position=pos;
+    for(int k=0;k<2;++k){ef.ay=ang+(k?-16384:16384);EffectSpawn spawn;spawn.flg=ef.flg;spawn.id=ef.id;spawn.type=ef.type;spawn.flr_no=ef.flr_no;spawn.mdlver=ef.mdlver;
+        spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;spawn.lkono=k;spawn_effect(spawn);}
+}
 void RoomWorld::water_splash2(float pp_py,int pp_ay,NJS_POINT3 pos,int type,float sx,float sy,float sz){
     NJS_POINT3 ps{pos.x,pp_py,pos.z};ps.y=combat_ground(ps);float top;if(!water_top(ps,top))return;
     auto& ef=effect_detail::request_template();ef.id=11;ef.flg=1;ef.mdlver=0;ef.type=unsigned(type);ef.flr_no=0;ef.scale={sx,sy,sz};ef.position={pos.x,top,pos.z};

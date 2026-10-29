@@ -138,29 +138,26 @@ static int en25_root_y(RECVX_ENEMY_WORK* w, float* out_y)
 }
 
 /* ---------------------------------------------------------------------------
-   en25.c:192-204 — Systemzustand beim Zuschnappen der Falle.
-   Original:
-       if ((sys->gm_flg & 0x40) && (sys->st_flg & 0x800000))
-       {
-           if ((sys->gm_flg & 0x1000000) == 0)
-           {
-               sys->gm_flg &= ~0x40; sys->gm_flg &= ~0x80; sys->gm_flg |= 0x800;
-           }
-           sys->st_flg &= ~0x800000;
-           sys->gm_flg &= ~0x80000;
-           sys->pt_flg |= 0x1;
-       }
-   Der Vertrag kennt nur system_flags(which) und system_flags_or
-   (enemy_work.h:408-411) mit which 0 = cb_flg, 1 = rm_flg, 2 = st_flg,
-   3 = sp_flg. sys->gm_flg und sys->pt_flg haben keinen Dienstcode und zum
-   Loeschen von Bits fehlt das Gegenstueck zu system_flags_or. Der Zweig wird
-   deshalb namentlich gemeldet und NICHT durch einen Ersatzwert belegt
-   (Schnittstellenbedarf im Bericht).
+   en25.c:192-207: beim Zuschnappen endet ein laufendes Zielen wie in
+   bhCPM0_nage (player.c:6596) und das Spielermodell wird ausgeblendet.
    --------------------------------------------------------------------------- */
-static void en25_trap_flags(RECVX_ENEMY_WORK* w)
+static const RECVX_EN25_SERVICES* en25_sv;
+void recvx_en25_bind(const RECVX_EN25_SERVICES* services) { en25_sv = services; }
+
+static int en25_trap_flags(RECVX_ENEMY_WORK* w)
 {
-    en25_gap(w, "sys->gm_flg/st_flg/pt_flg: which 4/5 und Bit-Loeschen fehlen "
-                "im Vertrag (en25.c:192-204)");
+    if (!en25_sv || !en25_sv->sys_flags || !en25_sv->sys_flags_set) {
+        en25_gap(w, "sys->gm_flg/st_flg/pt_flg (en25.c:192-207)");
+        return 0;
+    }
+    if ((en25_sv->sys_flags(0) & 0x40u) && (en25_sv->sys_flags(1) & 0x800000u)) {  /* :192 */
+        if (!(en25_sv->sys_flags(0) & 0x1000000u))                                  /* :194 */
+            en25_sv->sys_flags_set(0, 0x800u, 0x40u | 0x80u);                       /* :196-198 */
+        en25_sv->sys_flags_set(1, 0u, 0x800000u);                                   /* :200 */
+        en25_sv->sys_flags_set(0, 0u, 0x80000u);                                    /* :201 */
+        en25_sv->sys_flags_set(2, 0x1u, 0u);                                        /* :202 */
+    }
+    return 1;
 }
 
 /* en25.c:39 bhEne25. */
@@ -399,12 +396,11 @@ static void en25_mv01(RECVX_ENEMY_WORK* w)
         if ((e->inside_tight == 1u) && ((w->frm_no >> 16) == 6) && (e->caught == 0u)) {
             RECVX_ENEMY_PLAYER plp;
 
-            en25_trap_flags(w);          /* en25.c:192-204 */
+            const int flags = en25_trap_flags(w);  /* en25.c:192-204 */
 
             w->flg |= 0x2u;              /* en25.c:206 */
 
-            /* en25.c:207: sys->pt_flg &= ~0x1; — kein Dienst (which 5). */
-            en25_gap(w, "sys->pt_flg &= ~0x1 (en25.c:207, Dienst fehlt)");
+            if (flags) en25_sv->sys_flags_set(2, 0u, 0x1u);   /* en25.c:207 sys->pt_flg &= ~0x1 */
 
             if (sv && sv->player_get && sv->player_set && sv->player_get(&plp)) {
                 plp.flg &= ~0x18u;       /* en25.c:208 */

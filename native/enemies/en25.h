@@ -25,6 +25,13 @@ extern "C" {
    Einstieg: bhEne25 (en25.c:39); der Dispatch-Eintrag 25 (eneset.c:51)
    gehoert dem Dispatcher-Besitzer und wird hier nur beschrieben, nicht
    angelegt. */
+/* sys->gm_flg / sys->st_flg / sys->pt_flg, die en25.c:192-207 beim Zuschnappen
+   schreibt. which 0 = gm_flg, 1 = st_flg, 2 = pt_flg (wie RECVX_EN15_SERVICES). */
+typedef struct RECVX_EN25_SERVICES {
+    uint32_t (*sys_flags)(uint32_t which);
+    void     (*sys_flags_set)(uint32_t which, uint32_t set, uint32_t clear);
+} RECVX_EN25_SERVICES;
+void recvx_en25_bind(const RECVX_EN25_SERVICES* services);
 void recvx_en25(RECVX_ENEMY_WORK* w);
 
 #ifdef __cplusplus

@@ -28,6 +28,8 @@
 #include "enemies/en03.h"
 #include "enemies/en15.h"
 #include "enemies/en18.h"
+#include "enemies/en24.h"
+#include "enemies/en25.h"
 #include "enemies/en21.h"
 #include "effect_sprites_internal.h"
 #include "effect_rap_camera.h"
@@ -209,7 +211,9 @@ const RECVX_EN18_SERVICES& en18_services(){static const RECVX_EN18_SERVICES s=[]
     RECVX_EN18_SERVICES t{};t.model_root=en18_model_root;t.select_root=en18_select_root;t.morph_pair=en18_morph_pair;
     // en13.c:1033-1094: die EN13-Routinen, die bhEne18 ruft.
     t.parent_hatch_no=recvx_en13_hatch_no;t.parent_tenta_no=recvx_en13_tenta_no;
-    t.parent_put_attacker=recvx_en13_put_attacker;t.parent_tentacle=recvx_en13_tentacle;return t;}();return s;}
+    t.parent_put_attacker=recvx_en13_put_attacker;t.parent_tentacle=recvx_en13_tentacle;
+    t.bloodstain=recvx_t3_set_bloodstain; // zonzon1.c:301 bhEne_SetBloodstain
+    return t;}();return s;}
 RECVX_EN01_SERVICES& en01_services();
 const RECVX_EN30_SERVICES& en30_services(){static const RECVX_EN30_SERVICES s=[]{
     RECVX_EN30_SERVICES t{};t.model_node_rest=en30_model_node_rest;t.model_node_set_y=en30_model_node_set_y;
@@ -923,6 +927,10 @@ void RoomWorld::bind_enemy_services(){
     // dem zusaetzlichen attr-0x20-Tor (effect_wall_ref_angle) und Antwort wie
     // bhSetWallRefAngle (reflect_effect_wall). Aufrufer en01sub.c:937 (flg 0)
     // und :1118 (flg 0x400); `rec` bleibt bei NULL unberuehrt.
+    // en01sub.c:1417 epw->lkwkp = plp / :1322,:1723 lkwkp = epw->exp1: the player is not an enemy
+    // work, so the link is carried as lk_player (as for EN27, en27.c:84) and bhCalcModel follows
+    // plp->mlwP->owP[lkono]; the caller writes lkwkp itself.
+    en.link_player=[](RECVX_ENEMY_WORK* w,int link)->int{w->lk_player=link?1:0;return 1;};
     // hitchk.c:1939 bhCheckWallType with the ATR record of the touched wall (en01sub.c:751).
     en.wall_type_atr=[](const RECVX_ENEMY_VEC* p,uint32_t flg,float ar,float ah,RECVX_ENEMY_ATR* rec)->int{
         const auto hit=enemy_world->collision_contact({p->x,p->y,p->z},flg,ar,ah);if(!hit)return 0;if(rec)*rec=atr_of(collision_record(*hit));return 1;};
@@ -2800,6 +2808,15 @@ void RoomWorld::control_enemy_works(){
             if(p->fields&RECVX_EN15_P_TVXY)for(unsigned k=0;k<4;++k){s.tv[k].x=p->tv[k][0];s.tv[k].y=p->tv[k][1];}};
         return t;}();
     recvx_en15_bind(&en15);
+    // en25.c:192-207: dieselben Besitzer von gm_flg/st_flg/pt_flg wie EN15 (sys_flags).
+    static const RECVX_EN25_SERVICES en25{en15.sys_flags,en15.sys_flags_set};
+    recvx_en25_bind(&en25);
+    // en24.c:249-263: sys->ef (effect_detail::request_template) wie EN23 effect_tb, mit ax/ay.
+    static const RECVX_EN24_SERVICES en24{[](uint32_t id,uint32_t type,uint32_t flg,const RECVX_ENEMY_VEC* pos,const RECVX_ENEMY_VEC* scale,int32_t ax,int32_t ay)->int{
+        auto& ef=effect_detail::request_template();ef.id=id;ef.flg=flg;ef.type=type;ef.position={pos->x,pos->y,pos->z};ef.scale={scale->x,scale->y,scale->z};ef.ax=ax;ef.ay=ay;
+        EffectSpawn spawn;spawn.flg=ef.flg;spawn.id=ef.id;spawn.type=ef.type;spawn.flr_no=ef.flr_no;spawn.mdlver=ef.mdlver;
+        spawn.position=ef.position;spawn.scale=ef.scale;spawn.ax=ef.ax;spawn.ay=ef.ay;return enemy_world->spawn_effect(spawn);}};
+    recvx_en24_bind(&en24);
     RECVX_EN01_CONTEXT en01_ctx{};
     en01_ctx.table = &enemy_table_;
     en01_ctx.services = &enemy_services_;
@@ -2832,6 +2849,8 @@ void RoomWorld::control_enemy_works(){
     recvx_en22_bind(nullptr);
     recvx_en06_bind(nullptr);
     recvx_en27_bind(nullptr);
+    recvx_en25_bind(nullptr);
+    recvx_en24_bind(nullptr);
     recvx_en17_bind(nullptr);
     recvx_en03_bind(nullptr);
     recvx_en03_id_bind(nullptr);
