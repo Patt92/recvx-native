@@ -53,3 +53,6 @@ objdiff.json
 
 # Local secrets (agent-play LLM endpoint keys)
 .env
+
+# Web-Pruefung (tests/web): npm-Abhaengigkeiten lokal
+node_modules/

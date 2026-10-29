@@ -14,6 +14,8 @@ class DataProfileTests(unittest.TestCase):
         self.assertFalse(data_profiles.profile('tvos')['mods'])
         self.assertIn('archives/RDX_LNK',data_profiles.profile('android')['exclude'])
         self.assertTrue(data_profiles.profile('android')['mods'])
+        self.assertIn('files/MOVIE',data_profiles.profile('web')['exclude'])
+        self.assertTrue(data_profiles.profile('web')['mods'])
     def test_copy_leaves_out_only_profile_subtrees(self):
         with tempfile.TemporaryDirectory() as t:
             s=Path(t)/'s'

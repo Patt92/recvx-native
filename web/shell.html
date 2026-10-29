@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resident Evil CODE: Veronica X — RECVX Native</title>
+<link rel="icon" href="favicon.png">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #ccc; font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  /* 4:3 wie das Original, gleichmaessig skaliert; das 640x480-Bild skaliert SDL (RenderSetLogicalSize). */
+  canvas#canvas { width: min(100vw, calc(100vh * 4 / 3)); height: min(100vh, calc(100vw * 3 / 4)); display: block; outline: none; background: #000; }
+  #overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: rgba(0,0,0,.88); text-align: center; padding: 24px; }
+  #overlay.hidden { display: none; }
+  #overlay h1 { font-size: 20px; font-weight: 600; color: #ddd; margin: 0; }
+  #status { min-height: 1.4em; }
+  #status.error { color: #ff6b6b; max-width: 720px; white-space: pre-wrap; }
+  button { font: inherit; padding: 10px 22px; border: 1px solid #777; background: #222; color: #eee; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #333; }
+  #hint { position: fixed; right: 10px; bottom: 8px; font-size: 12px; color: #666; }
+  #hint button { padding: 3px 10px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
+<div id="overlay">
+  <h1>Resident Evil CODE: Veronica X — RECVX Native</h1>
+  <div id="status">Loading…</div>
+  <button id="start" hidden>Click to start</button>
+</div>
+<div id="hint"><button id="fullscreen" title="Fullscreen">Fullscreen</button></div>
+<script>
+  const overlay = document.getElementById('overlay'), statusEl = document.getElementById('status');
+  const startButton = document.getElementById('start'), canvas = document.getElementById('canvas');
+  function show(text, error) { statusEl.textContent = text; statusEl.className = error ? 'error' : ''; overlay.classList.remove('hidden'); }
+  function fail(text) { startButton.hidden = true; show(text, true); }
+
+  // Pflichtfunktionen pruefen, bevor die Runtime laedt (Meldungen statt stiller Haenger).
+  const missing = [];
+  if (!self.crossOriginIsolated) missing.push('cross-origin isolation (the server must send COOP/COEP headers)');
+  if (typeof SharedArrayBuffer === 'undefined') missing.push('SharedArrayBuffer');
+  if (!navigator.storage || !navigator.storage.getDirectory) missing.push('Origin Private File System');
+  if (!document.createElement('canvas').getContext('webgl2')) missing.push('WebGL 2');
+  try { WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])) || missing.push('WebAssembly SIMD'); }
+  catch (e) { missing.push('WebAssembly SIMD'); }
+
+  var Module = {
+    canvas: canvas,
+    print: (text) => console.log(text),
+    printErr: (text) => console.warn(text),
+    // Startstufen aus web_main.cpp (status()).
+    recvxStatus: (stage, detail) => {
+      if (stage === 'error') fail('Error: ' + detail);
+      else if (stage === 'exit') show(detail, false);
+      else if (stage === 'start') { overlay.classList.add('hidden'); canvas.focus(); }
+      else show(detail, false);
+    },
+    // ?args=a,b,c -> zusaetzliche Runtime-Argumente (Diagnose), als malloc-String an web_main.cpp; 0 ohne Angabe.
+    recvxArgs: () => {
+      const value = new URLSearchParams(location.search).get('args');
+      if (!value) return 0;
+      const size = lengthBytesUTF8(value) + 1, pointer = _malloc(size);
+      stringToUTF8(value, pointer, size);
+      return pointer;
+    },
+    onAbort: (what) => fail('The game stopped: ' + what + '\nSee the browser console for details.'),
+    setStatus: (text) => { if (text) show(text, false); },
+  };
+
+  function boot() {
+    startButton.hidden = true; show('Loading the game…');
+    const script = document.createElement('script');
+    script.src = 'recvx.js';
+    script.onerror = () => fail('recvx.js could not be loaded.');
+    document.body.appendChild(script);
+  }
+  if (missing.length) {
+    fail('This browser cannot run the game. Missing: ' + missing.join(', ') + '.\nUse a current Firefox or Chrome over http://localhost or HTTPS.');
+  } else {
+    // Audio darf erst nach einer Nutzeraktion starten (Autoplay-Regeln); ein Klick startet Spiel und Ton gemeinsam.
+    show('Ready. Click to start; keyboard or game controller to play.');
+    startButton.hidden = false;
+    startButton.onclick = boot;
+  }
+  document.getElementById('fullscreen').onclick = () => { (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {}); canvas.focus(); };
+  canvas.addEventListener('click', () => canvas.focus());
+  // Pfeil-/Leertaste duerfen die Seite nicht scrollen.
+  window.addEventListener('keydown', (e) => { if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Tab'].includes(e.key)) e.preventDefault(); }, { passive: false });
+</script>
+<!-- recvx.js wird erst nach dem Start-Klick geladen (boot); der Emscripten-Skriptplatzhalter entfaellt bewusst. -->
+</body>
+</html>

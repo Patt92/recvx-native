@@ -62,6 +62,17 @@ unbound there. Test in `event_lifecycle` (RM_3010 id 70); red with the old condi
 (`event_lifecycle|effect_bg|game`). bhEffBG 93..99 and effect 26 from bhCheckEvtTimer are also in the working tree.
 Open from the effect audit: holder release after the first pass (bhEffDmy), 0x98 on holder 66 (RM_3091). **No commit.**
 
+**Web build (2026-10-29, working tree):** `./build.sh --platform web` / `docker compose --profile web up` (port 8722,
+nginx, data/mods mounted read-only, never in the image). Emscripten 6.0.13 (pinned emsdk), pthreads + SIMD + wasm
+exceptions; runtime unchanged on a pthread, SDL calls proxied to the browser main thread (`web_sdl_proxy.cpp`,
+`--wrap`); WasmFS fetch for /data and /mods (index `web-files.txt`), OPFS for /user. Fixed a block bug of the
+Emscripten fetch backend (`web/wasmfs_fetch_fix.js`, zeros past 16 MB). Policy PASS on recvx.wasm (symbol audit).
+**Verified** (`tests/web/run.js`, Firefox 158 + Chromium 154 on macOS, against the Docker image, 12/12 PASS):
+new game to free control in RM_0000, walking/running, audio level, 29.6 Hz tick, F5/F9 across reloads (OPFS),
+LOAD GAME live and the `verify_typewriter_save` replay with room/position/inventory equal to native. Software
+raster only (WebGPU/WebGL lack ordered per-pixel blending), no Safari/mobile/touch, no real browser gamepad,
+no long play. [Web](docs/WEB.md).
+
 **Android build path (2026-10-27, working tree, started):** `./build.sh --platform android [--install]`:
 NDK r28 arm64-v8a API 26, runtime as `libmain.so` (`SDL_main`), SDL shared, Gradle shell `android/`
 (SDLActivity from pinned SDL source), APK `build/android-arm64/RECVX-Native.apk` (debug key). Policy PASS on

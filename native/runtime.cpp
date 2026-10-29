@@ -2417,6 +2417,9 @@ extern "C" __attribute__((visibility("default"))) int SDL_main(int argc,char** a
     redirect_android_output();
     return recvx_runtime_main(argc,argv);
 }
+#elif defined(RECVX_WEB)
+// Browser: main() gehoert web_main.cpp (Hauptthread, Datei-Einhaengung, Spielthread); dieser ruft die Runtime.
+int recvx_web_runtime_main(int argc,char** argv){return recvx_runtime_main(argc,argv);}
 #else
 int main(int argc,char** argv){
 #if defined(RECVX_IOS)

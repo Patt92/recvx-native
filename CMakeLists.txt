@@ -9,6 +9,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT MSVC)
   add_compile_options(-fsigned-char)
 endif()
+# Web: gemeinsamer Speicher fuer die Rasterworker (pthreads) und WASM-SIMD in jedem Objekt; ohne -pthread
+# ueberall verweigert der Linker das Zusammenfuegen mit dem gemeinsamen Speicher.
+if(EMSCRIPTEN)
+  # C++-Ausnahmen sind Teil des Kontrollflusses (Startfehler, EffectTextureError-Warnpfad, Konfigurationsfehler);
+  # Emscripten schaltet das Fangen sonst ab. Native WebAssembly-Ausnahmen (Firefox/Chrome) statt JS-Emulation.
+  add_compile_options(-pthread -msimd128 -fwasm-exceptions)
+  add_link_options(-pthread -fwasm-exceptions)
+endif()
 # GCC fasst a*b+c standardmaessig ueber Anweisungsgrenzen zu FMA zusammen (-ffp-contract=fast),
 # Clang (macOS, Zig) nicht. Ohne diese Grenze rechnen Linux-Builds Effektbahnen anders
 # (effect_eff30x: rnd = 0.1f*njSin, dann sxb*(1+rnd)).
@@ -43,6 +51,8 @@ if(BUILD_TESTING)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_check_test.py")
   add_test(NAME data_profiles
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/data_profiles_test.py")
+  add_test(NAME web_site_index
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/web_site_test.py")
   # HD-Import aus mods/hd-source braucht Pillow (wie tools/import_hd_textures.py selbst).
   execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL" RESULT_VARIABLE RECVX_HAVE_PILLOW OUTPUT_QUIET ERROR_QUIET)
   if(RECVX_HAVE_PILLOW EQUAL 0)
@@ -176,7 +186,8 @@ endif()
 # Android (NDK-Toolchain setzt ANDROID): wie iOS/tvOS nur die Runtime, hier als libmain.so, die SDLs
 # SDLActivity laedt (android/, tools/build_native.py --platform android). Kein Desktop-OpenGL 4.1; der
 # Vulkan-Rasterer ist nicht fuer Android geprueft. Ohne GPU-Backend zeichnet die Bandstufe in Software.
-if(ANDROID)
+# Web (Emscripten-Toolchain setzt EMSCRIPTEN): nur die Runtime als recvx.js/.wasm (docs/WEB.md).
+if(ANDROID OR EMSCRIPTEN)
   set(RECVX_DEVICE_ONLY_RUNTIME ON)
 elseif(IOS OR TVOS)
   set(RECVX_DEVICE_ONLY_RUNTIME ON)
@@ -207,6 +218,8 @@ if(IOS OR TVOS)
   set(RECVX_ENABLE_OPENGL OFF CACHE BOOL "OpenGL 4.1 is unavailable on iOS/tvOS" FORCE)
 elseif(ANDROID)
   set(RECVX_ENABLE_OPENGL OFF CACHE BOOL "Desktop OpenGL 4.1 is unavailable on Android" FORCE)
+elseif(EMSCRIPTEN)
+  set(RECVX_ENABLE_OPENGL OFF CACHE BOOL "Desktop OpenGL 4.1 is unavailable in browsers" FORCE)
 endif()
 option(RECVX_ENABLE_OPENGL "Build the optional OpenGL 4.1 raster backend (Linux GPU default)" ON)
 target_sources(recvx_scene PRIVATE native/gpu_raster_none.cpp)
@@ -220,6 +233,8 @@ endif()
 option(RECVX_ENABLE_VULKAN "Build the optional Vulkan raster backend (fragment shader interlock)" ON)
 if(IOS OR TVOS)
   set(RECVX_ENABLE_VULKAN OFF CACHE BOOL "The Vulkan raster backend is not packaged for iOS/tvOS" FORCE)
+elseif(EMSCRIPTEN)
+  set(RECVX_ENABLE_VULKAN OFF CACHE BOOL "Vulkan is unavailable in browsers" FORCE)
 endif()
 if(RECVX_ENABLE_VULKAN)
   if(ANDROID)
@@ -303,7 +318,14 @@ else()
 endif()
 option(RECVX_BUILD_RUNTIME "Build the native SDL window and room renderer" ON)
 option(RECVX_FETCH_SDL2 "Download and build the pinned SDL2 dependency" OFF)
-if(RECVX_BUILD_RUNTIME OR RECVX_ENABLE_OPENGL)
+if(EMSCRIPTEN)
+  # Web: SDL 2.32.10 (dieselbe gepinnte Version) als Emscripten-Port mit pthread-Variante (libSDL2-mt);
+  # Videotreiber Emscripten (WebGL2), Audio WebAudio, Gamepad-API.
+  add_library(recvx_web_sdl INTERFACE)
+  target_compile_options(recvx_web_sdl INTERFACE -sUSE_SDL=2)
+  target_link_options(recvx_web_sdl INTERFACE -sUSE_SDL=2)
+  add_library(SDL2::SDL2 ALIAS recvx_web_sdl)
+elseif(RECVX_BUILD_RUNTIME OR RECVX_ENABLE_OPENGL)
   if(RECVX_FETCH_SDL2)
     include(FetchContent)
     # iOS-/tvOS-Apps betten keine losen dylibs ein: SDL dort statisch in die Runtime linken.
@@ -339,6 +361,32 @@ if(RECVX_BUILD_RUNTIME)
     set_target_properties(recvx-runtime PROPERTIES OUTPUT_NAME main)
     target_compile_definitions(recvx-runtime PRIVATE RECVX_ANDROID=1)
     target_link_libraries(recvx-runtime PRIVATE log android)
+  elseif(EMSCRIPTEN)
+    # Browser (docs/WEB.md): recvx.js + recvx.wasm, Runtime auf einem pthread, SDL auf dem Hauptthread.
+    add_executable(recvx-runtime native/runtime.cpp native/web_main.cpp native/web_sdl_proxy.cpp)
+    set_target_properties(recvx-runtime PROPERTIES OUTPUT_NAME recvx SUFFIX ".js")
+    target_compile_definitions(recvx-runtime PRIVATE RECVX_WEB=1)
+    # Jeder SDL-Aufruf der Runtime geht ueber web_sdl_proxy.cpp auf den Hauptthread (--wrap beim Linken).
+    set(RECVX_WEB_SDL_WRAPS SDL_Init SDL_Quit SDL_SetHint SDL_CreateWindow SDL_DestroyWindow SDL_RaiseWindow
+      SDL_SetWindowTitle SDL_GetWindowDisplayMode SDL_GetWindowWMInfo SDL_CreateRenderer SDL_DestroyRenderer
+      SDL_RenderSetIntegerScale SDL_RenderSetLogicalSize SDL_RenderSetVSync SDL_CreateTexture SDL_DestroyTexture
+      SDL_UpdateTexture SDL_RenderClear SDL_RenderCopy SDL_RenderPresent SDL_PollEvent SDL_PushEvent
+      SDL_WaitEventTimeout SDL_GetKeyboardState SDL_GetModState SDL_OpenAudioDevice SDL_CloseAudioDevice
+      SDL_PauseAudioDevice SDL_QueueAudio SDL_GetQueuedAudioSize SDL_ClearQueuedAudio SDL_NumJoysticks
+      SDL_IsGameController SDL_JoystickGetDeviceInstanceID SDL_JoystickNameForIndex SDL_GameControllerOpen
+      SDL_GameControllerClose SDL_GameControllerFromInstanceID SDL_GameControllerGetAxis
+      SDL_GameControllerGetButton SDL_GameControllerName SDL_GameControllerRumble SDL_GameControllerAddMappingsFromRW)
+    foreach(fn IN LISTS RECVX_WEB_SDL_WRAPS)
+      target_link_options(recvx-runtime PRIVATE "-Wl,--wrap=${fn}")
+    endforeach()
+    # 2 GiB Startgrenze, wachsend bis 4 GiB (wasm32); Rasterworker und WasmFS-Hilfsthreads im Pool.
+    target_link_options(recvx-runtime PRIVATE -sWASMFS -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2
+      -sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=512MB -sMAXIMUM_MEMORY=4GB -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=4MB
+      -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency+4 -sPTHREAD_POOL_SIZE_STRICT=0
+      -sENVIRONMENT=web,worker -sEXIT_RUNTIME=0 -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8 -sEXPORTED_FUNCTIONS=_main,_malloc,_free
+      # Korrigierter Blockzugriff des WasmFS-Fetch-Backends (Fehler in Emscripten 6.0.13, siehe Kopf der Datei).
+      --js-library "${CMAKE_CURRENT_SOURCE_DIR}/web/wasmfs_fetch_fix.js")
+    set_property(TARGET recvx-runtime APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web/wasmfs_fetch_fix.js")
   else()
     add_executable(recvx-runtime native/runtime.cpp)
   endif()
@@ -398,9 +446,19 @@ if(RECVX_BUILD_RUNTIME)
     # muss bytegleich ausfallen; /Brepro ersetzt die Linkzeit in allen PE-Zeitstempeln.
     target_link_options(recvx-runtime PRIVATE /Brepro)
   endif()
+  if(EMSCRIPTEN)
+    # Das Programm ist recvx.wasm (recvx.js laedt es nur); --profiling-funcs behaelt die Funktionsnamen fuer den
+    # Symbolaudit, ohne die Optimierung zu aendern. llvm-nm aus dem emsdk liest wasm-Objekte.
+    target_link_options(recvx-runtime PRIVATE --profiling-funcs)
+    set(recvx_runtime_audited "$<TARGET_FILE_DIR:recvx-runtime>/recvx.wasm")
+    set(recvx_runtime_audit_nm --nm "${EMSCRIPTEN_ROOT_PATH}/../bin/llvm-nm")
+  else()
+    set(recvx_runtime_audited "$<TARGET_FILE:recvx-runtime>")
+    set(recvx_runtime_audit_nm)
+  endif()
   add_custom_command(TARGET recvx-runtime POST_BUILD
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_original_core.py"
-      "${CMAKE_CURRENT_SOURCE_DIR}" --build-dir "${CMAKE_CURRENT_BINARY_DIR}" --binary "$<TARGET_FILE:recvx-runtime>"
+      "${CMAKE_CURRENT_SOURCE_DIR}" --build-dir "${CMAKE_CURRENT_BINARY_DIR}" --binary "${recvx_runtime_audited}" ${recvx_runtime_audit_nm}
     VERBATIM)
   add_library(recvx_input native/input.cpp native/frontend.cpp native/debug_menu.cpp native/third_person.cpp native/video_settings.cpp native/audio_settings.cpp native/vibration.cpp)
   target_link_libraries(recvx_input PUBLIC recvx_game SDL2::SDL2)

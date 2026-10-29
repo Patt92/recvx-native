@@ -17,6 +17,8 @@ into the native engine.
   profile and its signing identity for device installs.
 - Android: JDK 17/21, Gradle, Android SDK with NDK r28; see
   [Android](#android-arm64-v8a-api-26).
+- Web: Docker alone (image builds itself), or the pinned Emscripten 6.0.13
+  (`./build.sh --platform web` installs it); see [Web](WEB.md).
 - Linux: GCC or Clang with C++17, Make or Ninja, and the SDL2 development
   dependencies for X11/Wayland and ALSA/PulseAudio; see the
   [README](../README.md#linux).

@@ -9,6 +9,7 @@ targets that can be built on Linux:
 | `windows` | cross-build, pinned Zig 0.16.0 + SDL2 MinGW | package `out/packages/windows-x64-v<version>/` |
 | `windows-arm64` | cross-build, pinned Zig 0.16.0, SDL2 from source | package `out/packages/windows-arm64-v<version>/` |
 | `macos`, `ios`, `ios-simulator` | **not supported** | build on a Mac with `./build.sh` |
+| web (browser) | separate service `web` (`docker/web.Dockerfile`, profile `web`) | nginx on port 8722 serving the WebAssembly runtime; game data mounted read-only — see [Web](WEB.md) |
 
 macOS and iOS need Xcode, the Apple SDK frameworks (Cocoa, Metal, UIKit),
 `lipo`/`codesign` and for devices a provisioning profile. Apple's SDK license

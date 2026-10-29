@@ -34,5 +34,30 @@ services:
       # Incremental build trees, Zig cache and downloaded SDL2 sources between runs.
       - build-cache:/src/build
 
+  # Browser build (Firefox/Chrome) served on http://localhost:8722 — docs/WEB.md.
+  #   python3 tools/web_site.py --index-only     # once per data/ change: writes data/web-files.txt
+  #   docker compose up -d --build web
+  # Game data is mounted read-only, never baked into the image (RECVX_DATA_DIR / RECVX_MODS_DIR override).
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    image: recvx-web
+    profiles: ["web"]
+    ports:
+      - "${RECVX_WEB_PORT:-8722}:8722"
+    volumes:
+      - type: bind
+        source: ${RECVX_DATA_DIR:-./data}
+        target: /srv/recvx/data
+        read_only: true
+      - type: bind
+        source: ${RECVX_MODS_DIR:-./mods}
+        target: /srv/recvx/mods
+        read_only: true
+        bind:
+          create_host_path: true
+    restart: unless-stopped
+
 volumes:
   build-cache:

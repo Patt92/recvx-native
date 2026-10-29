@@ -1,0 +1,11 @@
+{
+  "name": "recvx-web-tests",
+  "private": true,
+  "description": "Browser checks of the RECVX Native web build (Chromium and Firefox via Playwright). See docs/WEB.md.",
+  "scripts": {
+    "check": "node run.js"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

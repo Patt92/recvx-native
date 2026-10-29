@@ -48,6 +48,10 @@ no game files.
 **Android:** prepare `data` on a computer as in step 2, install the APK and copy
 `data` to the device with `adb` as described in [Android](#install-and-play).
 
+**Browser (Firefox, Chrome):** with prepared `data/` in a source checkout, run
+`python3 tools/web_site.py --index-only` and `docker compose --profile web up -d --build web`,
+then open http://localhost:8722/ — see [Web](#web-firefox-chrome).
+
 Building from source, macOS and iOS: see [Build and run](#build-and-run).
 
 ## Native rendering, multiple backends
@@ -220,6 +224,7 @@ brought up separately from the shared gameplay code.
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
 | **iOS/iPadOS** | Runs on iPhone (iOS 27) with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`). No touch controls yet. |
 | **Android** | Native arm64 APK (`./build.sh --platform android`, API 26+) with optional Vulkan as GPU default and software fallback; game data loose on the device. Runs in the arm64 emulator; real devices, touch controls and release signing are open. |
+| **Web (Firefox, Chrome)** | The native engine as WebAssembly, served by a Docker container on port 8722 (`docker compose --profile web up`); software rasterizer on worker threads, WebGL 2 presentation, saves in the browser. Verified in Firefox and Chromium on macOS from the title through free play and LOAD GAME. |
 | **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device. |
 
 These are native platform targets, not plans to ship an emulator with the game.
@@ -594,6 +599,41 @@ See the [build guide](docs/NATIVE_PORT.md) for further build and packaging optio
 and the [launch guide](STARTEN.md) and [controls reference](docs/CONTROLS.md) for
 playing.
 
+### Web (Firefox, Chrome)
+
+The game also runs in the browser: the same native engine compiled to
+WebAssembly, served by a container on port **8722**. With prepared game data in
+`data/`:
+
+```bash
+python3 tools/web_site.py --index-only      # once per data/ change
+docker compose --profile web up -d --build web
+```
+
+Then open **http://localhost:8722/** and click *Click to start*.
+
+- **Game data stays outside the image.** The container mounts `data/` (and
+  `mods/`) read-only and the browser loads files on demand. Other folders or
+  port: `RECVX_DATA_DIR`, `RECVX_MODS_DIR`, `RECVX_WEB_PORT`.
+- **Controls:** keyboard and game controllers with the desktop bindings. There
+  are no touch controls.
+- **Saves:** save games, snapshots and settings live in the browser's private
+  storage for this address (per browser; cleared together with the site data).
+- **Rendering:** the original-faithful software rasterizer on worker threads,
+  presented through WebGL 2. WebGPU/WebGL cannot reproduce the game's ordered
+  per-pixel blending, so there is no approximated GPU path.
+- **Access:** `http://localhost` or HTTPS only. Browsers block the required
+  shared memory on plain HTTP from other hosts.
+- **Verified** in Firefox 158 and Chromium 154 on macOS: title, new game, intro,
+  free control, walking/running, inventory, sound, snapshots across reloads,
+  LOAD GAME with the same room, position and inventory as the native runtime,
+  and a steady 30 Hz game tick. Safari, mobile browsers and other machines are
+  not verified.
+
+Without Docker: `./build.sh --platform web` builds `build/web/site`.
+Architecture, server requirements and the browser checks (`tests/web`):
+[Web](docs/WEB.md).
+
 ### Docker
 
 `docker compose build` and `docker compose run --rm builder` build Linux and
@@ -657,6 +697,7 @@ same on every platform.
 | Windows | `data\` in the main folder (or `--data C:\path\to\data`) | `mods\` beside `data\` (or `--mods`) | `%APPDATA%\RECVX` |
 | Linux | `data/` in the main folder (or `--data /path/to/data`) | `mods/` beside `data/` (or `--mods`) | `$XDG_DATA_HOME/RECVX`, else `~/.local/share/RECVX` |
 | Android | `/sdcard/Android/data/org.recvx.nativeport/files/data` (`adb push`, see [Android](#install-and-play)) | `.../files/mods` | app-internal storage, removed on uninstall |
+| Web (Firefox, Chrome) | `data/` on the server, mounted read-only into the container (`RECVX_DATA_DIR`), indexed by `tools/web_site.py --index-only`; see [Web](#web-firefox-chrome) | `mods/` on the server (`RECVX_MODS_DIR`) | the browser's private storage (OPFS) for this address, per browser; removed with the site data |
 
 Linux additionally needs SDL2's runtime libraries for X11 or Wayland and ALSA or
 PulseAudio, and an OpenGL 4.1 driver (for example Mesa); Windows needs a Direct3D 11
@@ -669,6 +710,7 @@ capable GPU, Direct3D 12 and Vulkan are optional.
 - [Audio and movies](docs/AUDIO.md)
 - [Gameplay systems](docs/NATIVE_GAMEPLAY.md)
 - [Player models and animation](docs/NATIVE_PLAYER.md)
+- [Web (browser) build and hosting](docs/WEB.md)
 
 ## Credits and license
 

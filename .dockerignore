@@ -20,6 +20,9 @@
 !src/
 !tests/
 !tools/
+# Web-Build (docker/web.Dockerfile): Seite/nginx-Konfiguration und das Launcher-Icon als Favicon.
+!web/
+!android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 **/__pycache__
 **/*.py[cod]
 **/.DS_Store

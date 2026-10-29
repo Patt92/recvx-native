@@ -550,6 +550,57 @@ def build_android(cmake: str, jobs: int, build: Path, summary: list, install: bo
     return apk
 
 
+# Web (Browser): Emscripten aus dem gepinnten emsdk (build/toolchains/emsdk, EMSDK_VERSION) oder einem aktiven
+# emsdk-Umfeld (EMSDK); docs/WEB.md.
+EMSDK_VERSION = '6.0.13'
+
+
+def emscripten_toolchain() -> Path:
+    """emcmake des gepinnten emsdk; installiert es bei Bedarf nach build/toolchains/emsdk (Netz nur beim ersten Mal)."""
+    candidates = []
+    if os.environ.get('EMSDK'):
+        candidates.append(Path(os.environ['EMSDK']))
+    candidates.append(ROOT / 'build/toolchains/emsdk')
+    for emsdk in candidates:
+        emcmake = emsdk / 'upstream/emscripten/emcmake'
+        if emcmake.is_file():
+            version = (emsdk / 'upstream/emscripten/emscripten-version.txt')
+            found = version.read_text().strip().strip('"') if version.is_file() else '?'
+            if found != EMSDK_VERSION:
+                raise RuntimeError(f'emsdk at {emsdk} is Emscripten {found}; the web build is pinned to {EMSDK_VERSION} '
+                                   f'(./emsdk install {EMSDK_VERSION} && ./emsdk activate {EMSDK_VERSION})')
+            return emcmake
+    emsdk = ROOT / 'build/toolchains/emsdk'
+    if not emsdk.is_dir():
+        run('git', 'clone', '--depth', '1', 'https://github.com/emscripten-core/emsdk.git', emsdk)
+    run(emsdk / 'emsdk', 'install', EMSDK_VERSION)
+    run(emsdk / 'emsdk', 'activate', EMSDK_VERSION)
+    return emsdk / 'upstream/emscripten/emcmake'
+
+
+def build_web(cmake: str, jobs: int, build: Path, data: Path, mods: Path, summary: list) -> Path:
+    emcmake = emscripten_toolchain()
+    emsdk_bin = emcmake.parent.parent / 'bin'
+    env = dict(os.environ, PATH=os.pathsep.join([str(emcmake.parent), str(emsdk_bin), os.environ.get('PATH', '')]))
+    generator = ['-G', 'Ninja'] if shutil.which('ninja') else []
+    subprocess.run([str(emcmake), cmake, '-S', str(ROOT), '-B', str(build), *generator, '-DCMAKE_BUILD_TYPE=Release',
+                    '-DBUILD_TESTING=OFF', f'-DRECVX_BUILD_VERSION={FULL_VERSION}'], cwd=ROOT, env=env, check=True)
+    subprocess.run([cmake, '--build', str(build), '--target', 'recvx-runtime', '--parallel', str(jobs)], cwd=ROOT, env=env, check=True)
+    site_args = [sys.executable, ROOT / 'tools/web_site.py', '--build', build, '--mods', mods]
+    if (data / 'native-data.version').is_file():
+        run(*site_args, '--data', data)
+        summary.append(('Data index', f'{data / "web-files.txt"} (served by the web container; data is never copied)'))
+    else:
+        # Ohne vorbereitete Daten nur die Seite; der Index entsteht, sobald data/ vorliegt (tools/web_site.py --index-only).
+        site = build / 'site'
+        import web_site
+        web_site.assemble_site(build, site)
+        summary.append(('Data index', f'not written: {data} has no prepared data tree'))
+    summary.append(('Site', f'{build / "site"} (recvx.js, recvx.wasm, index.html)'))
+    summary.append(('Serve', 'docker compose --profile web up -d --build web  ->  http://localhost:8722/'))
+    return build / 'site'
+
+
 def is_windows_target(target: str) -> bool:
     return target in WINDOWS_TARGETS
 
@@ -664,7 +715,7 @@ def print_summary(lines) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64', 'ios', 'ios-simulator', 'tvos', 'tvos-simulator', 'android'], default='host')
+    parser.add_argument('--platform', choices=['host', 'macos', 'linux', 'windows', 'windows-arm64', 'ios', 'ios-simulator', 'tvos', 'tvos-simulator', 'android', 'web'], default='host')
     parser.add_argument('--jobs', type=int, default=min(os.cpu_count() or 4, 8))
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
@@ -724,6 +775,14 @@ def main():
             parser.error('--ios-* options apply only to --platform ios, ios-simulator, tvos or tvos-simulator')
         if args.package or args.output:
             parser.error('Android builds write build/android-arm64/RECVX-Native.apk; --package/--output are not supported yet')
+    elif target == 'web':
+        if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data or args.compressed:
+            parser.error('Web builds cannot run tests or prepare data here; prepare data with the host target and check the '
+                         'site with tests/web (docs/WEB.md)')
+        if args.ios_profile or args.ios_bundle_data or args.ios_device or args.install:
+            parser.error('--ios-* and --install options do not apply to --platform web')
+        if args.package or args.output:
+            parser.error('Web builds write build/web/site; serve it with docker compose --profile web up (docs/WEB.md)')
     elif args.ios_profile or args.ios_bundle_data or args.install or args.ios_device:
         parser.error('--ios-* and --install options apply only to --platform ios, ios-simulator, tvos or tvos-simulator')
     if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.test_regex or args.verify_runtime):
@@ -742,6 +801,13 @@ def main():
         run(sys.executable, ROOT / 'tools/build_windows.py', '--arch', WINDOWS_TARGETS[target], '--jobs', args.jobs, '--vulkan', args.vulkan, '--opengl', args.opengl, '--d3d12', args.d3d12, '--fsr', args.fsr)
         build = cross_build_directory(target)
         print(f'Cross-built Windows {WINDOWS_TARGETS[target]}.', flush=True)
+    elif target == 'web':
+        try:
+            build_web(cmake, args.jobs, ROOT / 'build/web', data, mods, summary)
+        except RuntimeError as error:
+            parser.error(str(error))
+        print_summary(summary)
+        return
     elif target == 'android':
         try:
             build_android(cmake, args.jobs, ROOT / 'build/android-arm64', summary, args.install, args.vulkan == 'on')

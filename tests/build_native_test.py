@@ -399,6 +399,25 @@ class IosTargetTests(unittest.TestCase):
         self.assertIn('--ios-* options', self.main_error('--platform', 'android', '--ios-bundle-data'))
         self.assertIn('RECVX-Native.apk', self.main_error('--platform', 'android', '--package'))
 
+    def test_web_rejects_tests_data_preparation_and_device_options(self):
+        self.assertIn('cannot run tests', self.main_error('--platform', 'web', '--test'))
+        self.assertIn('cannot run tests', self.main_error('--platform', 'web', '--iso', 'disc.iso'))
+        self.assertIn('do not apply to --platform web', self.main_error('--platform', 'web', '--install'))
+        self.assertIn('build/web/site', self.main_error('--platform', 'web', '--package'))
+
+    def test_web_requires_the_pinned_emscripten(self):
+        with tempfile.TemporaryDirectory() as root:
+            emsdk = Path(root)
+            (emsdk / 'upstream/emscripten').mkdir(parents=True)
+            (emsdk / 'upstream/emscripten/emcmake').write_text('')
+            (emsdk / 'upstream/emscripten/emscripten-version.txt').write_text('"5.0.0"\n')
+            with patch.dict(build_native.os.environ, {'EMSDK': root}):
+                with self.assertRaisesRegex(RuntimeError, 'pinned to ' + build_native.EMSDK_VERSION):
+                    build_native.emscripten_toolchain()
+            (emsdk / 'upstream/emscripten/emscripten-version.txt').write_text(f'"{build_native.EMSDK_VERSION}"\n')
+            with patch.dict(build_native.os.environ, {'EMSDK': root}):
+                self.assertEqual(build_native.emscripten_toolchain(), emsdk / 'upstream/emscripten/emcmake')
+
     def test_android_ndk_selects_newest_pinned_major(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(build_native.os.environ, {}, clear=True):
             for version in ('27.3.1', '28.0.5', '28.2.13676358', '29.0.1'):
