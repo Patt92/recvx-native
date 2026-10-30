@@ -12,6 +12,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import stat
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -424,15 +426,33 @@ def finish_ios_app(app: Path, target: str, profile_path: Path | None, bundle_dat
 
 
 def package_ios_app(app: Path, output: Path) -> None:
-    """IPA = zip archive of Payload/<app>; symlinks and permissions preserved by ditto."""
+    """IPA = zip archive of Payload/<app>, written with zipfile: real Zip64 headers (ditto -c -k
+    wrapped offsets past 4 GB, which unzip rejects), Unix permissions and symlinks kept, no __MACOSX."""
     if output.exists():
         raise RuntimeError(f'package destination already exists: {output}')
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as temporary:
-        payload = Path(temporary) / 'Payload'
-        payload.mkdir()
-        run('ditto', app, payload / app.name)
-        run('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', payload, output)
+    partial = output.with_name(output.name + '.partial')
+    partial.unlink(missing_ok=True)
+    root = Path('Payload') / app.name
+    with zipfile.ZipFile(partial, 'w', allowZip64=True) as archive:
+        for path in sorted([app, *app.rglob('*')]):
+            name = (root / path.relative_to(app)).as_posix()
+            mode = path.lstat().st_mode
+            if path.is_symlink():
+                info = zipfile.ZipInfo(name)
+                info.create_system = 3
+                info.external_attr = (stat.S_IFLNK | 0o755) << 16
+                archive.writestr(info, os.readlink(path))
+            elif path.is_dir():
+                info = zipfile.ZipInfo(name + '/')
+                info.create_system = 3
+                info.external_attr = (stat.S_IFDIR | stat.S_IMODE(mode)) << 16 | 0x10
+                archive.writestr(info, b'')
+            else:
+                # Bundled game data is already compressed; storing it keeps packaging fast.
+                stored = 'data' in path.relative_to(app).parts[:1]
+                archive.write(path, name, zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED)
+    partial.rename(output)
     print(f'Packaged {output}', flush=True)
 
 

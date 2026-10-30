@@ -46,6 +46,8 @@ struct VideoSettings {
     PostProcess post_process=PostProcess::Off;
     // Host-Mod 16:9 (widescreen.h): anamorphes 640x480-Bild, Praesentation auf 16:9 gedehnt.
     bool widescreen=false;
+    // Host-Fenster: Vollbild auf dem Desktop (SDL_WINDOW_FULLSCREEN_DESKTOP, randlos) statt Fenster; Standard an.
+    bool fullscreen=true;
     bool filtering()const{return quality!=RenderQuality::Original;}
     int supersampling()const{return quality==RenderQuality::Ultra?3:quality==RenderQuality::High?2:1;}
     // true: the presentation stage has work to do (otherwise the plain SDL copy presents).
@@ -84,6 +86,7 @@ public:
     void set_sharpness(Sharpness value,bool persist=true);
     void set_post_process(PostProcess value,bool persist=true);
     void set_widescreen(bool value,bool persist=true);
+    void set_fullscreen(bool value,bool persist=true);
     std::string describe()const{return settings_.describe();}
     // Row values with the runtime's availability note ("not available" when the stage is missing).
     std::string describe_upscaler()const;

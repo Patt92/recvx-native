@@ -131,6 +131,8 @@ int main(){try{
      front.input(MenuInput::Right);check(video.settings().widescreen&&VideoSettings::read(video_path).widescreen,"widescreen not persisted");
      front.input(MenuInput::Left);check(!video.settings().widescreen&&!VideoSettings::read(video_path).widescreen,"widescreen toggle back");
      {std::ofstream bad(video_path);bad<<"quality = high\nwidescreen = 21:9\n";}bool rejected_wide=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected_wide=true;}check(rejected_wide,"invalid widescreen value accepted");
+     check(VideoSettings{}.fullscreen,"fullscreen must be the default");video.set_fullscreen(true);check(VideoSettings::read(video_path).fullscreen,"fullscreen not persisted");video.set_fullscreen(false);check(!VideoSettings::read(video_path).fullscreen,"fullscreen not cleared");
+     {std::ofstream bad(video_path);bad<<"quality = high\nfullscreen = yes\n";}bool rejected_full=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected_full=true;}check(rejected_full,"invalid fullscreen value accepted");
      front.input(MenuInput::Down);check(front.selected()==Frontend::audio_row,"audio row must follow the presentation rows");
      for(int i=0;i<7;++i)front.input(MenuInput::Up);check(front.selected()==Frontend::video_row,"row order above presentation rows");
      {std::ofstream bad(video_path);bad<<"quality = high\nframe_rate = 45\n";}bool rejected_rate=false;try{VideoSettings::read(video_path);}catch(const std::exception&){rejected_rate=true;}check(rejected_rate,"invalid frame rate accepted");
