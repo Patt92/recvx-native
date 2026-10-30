@@ -42,7 +42,7 @@ brought up separately from the shared gameplay code.
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
 | **iOS/iPadOS** | Runs on iPhone (iOS 27) with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`). No touch controls yet. |
 | **Android** | Native arm64 APK (`./build.sh --platform android`, API 26+) with optional Vulkan as GPU default and software fallback; game data loose on the device. Runs in the arm64 emulator; real devices, touch controls and release signing are open. |
-| **Web (Firefox, Chrome)** | The native engine as WebAssembly, served by a Docker container on port 8722 (`docker compose up -d`); software rasterizer on worker threads, WebGL 2 presentation, saves in the browser. Verified in Firefox and Chromium on macOS from the title through free play and LOAD GAME. |
+| **Web (Firefox, Chrome)** | The native engine as WebAssembly, served by a Docker container on port 8722 (`docker compose up -d`, or the prebuilt [`ghcr.io/patt92/recvx-native-web`](https://github.com/Patt92/recvx-native/pkgs/container/recvx-native-web) image); software rasterizer on worker threads, WebGL 2 presentation, saves in the browser. Verified in Firefox and Chromium on macOS from the title through free play and LOAD GAME. |
 | **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device. |
 
 These are native platform targets, not plans to ship an emulator with the game.
@@ -618,6 +618,39 @@ docker compose up -d
 ```
 
 Then open **http://localhost:8722/** and click *Click to start*.
+
+**Prebuilt image:** GitHub Actions publishes the web container for `linux/amd64`
+and `linux/arm64` as [`ghcr.io/patt92/recvx-native-web`](https://github.com/Patt92/recvx-native/pkgs/container/recvx-native-web)
+(`main` = latest `main` build, `sha-<commit>` per build, `<version>`/`latest` for
+releases). It needs no local build; in a repository checkout:
+
+```bash
+RECVX_WEB_IMAGE=ghcr.io/patt92/recvx-native-web:main docker compose up -d --no-build
+```
+
+Or in any folder, with this `compose.yaml`:
+
+```yaml
+services:
+  web:
+    image: ghcr.io/patt92/recvx-native-web:main
+    ports:
+      - "8722:8722"
+    volumes:
+      - ./data:/srv/recvx/data:ro
+      - ./mods:/srv/recvx/mods:ro
+    restart: unless-stopped
+```
+
+```bash
+docker compose up -d
+```
+
+**`data/` and `mods/` must exist in that folder** before `up` (`mods/` may be
+empty): the container mounts both read-only. `data/` is the prepared game data
+including its index `data/web-files.txt` from `python3 tools/web_site.py
+--index-only` (run it in a checkout; `--data`/`--mods` point it at other
+folders), again after every data or mod change.
 
 - **Game data stays outside the image.** The container mounts `data/` (and
   `mods/`) read-only and the browser loads files on demand. Other folders or
