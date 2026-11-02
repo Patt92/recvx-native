@@ -571,18 +571,25 @@ std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 pos
         case 3:x0=cut.minx;z0=cut.minz;x1=cut.maxx;z1=cut.maxz;break;
         default:x0=cut.maxx;z0=cut.minz;x1=cut.minx;z1=cut.maxz;break;
         }
-        if(x1==x0)continue;
-        const float side=std::abs((z1-z0)*(x-x0)/(x1-x0));
-        if(std::abs(z1-z)>side)return cut.camera;
+        // cut.c:235-246 in derselben Rechenfolge (d / ((x1-x0) / (px-x0)), z0 + d): Rundung und die
+        // Division durch 0 (Breite 0: d/inf = 0, NaN faellt in den Treffer) wie im Original.
+        const float d=z1-z0,p2x=x-x0,p2z=std::fabs(d/((x1-x0)/p2x));
+        if(!(std::fabs((z0+d)-z)<=p2z))return cut.camera;
     }
     return std::nullopt;
 }
-SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 position,std::int8_t floor,const NJS_POINT3* eye,NJS_POINT3* persisted) {
+std::uint32_t cut_attribute(const Scene& scene,std::size_t ncut,float px,float pz,int floor,std::uint32_t fallback){
+    if(ncut<scene.cut_enabled.size()&&!scene.cut_enabled[ncut])return fallback; // cut.c:264 cp->flg & 1
+    for(const auto& cut:scene.cuts)
+        if(cut.camera==ncut&&cut.minx<=px&&cut.maxx>px&&cut.minz<=pz&&cut.maxz>pz&&cut.floor==floor)return cut.attributes; // :270-273
+    return fallback; // :277 return cam.attr
+}
+SceneCamera camera_for_actor(const Scene& scene,std::size_t index,NJS_POINT3 position,std::int8_t floor,const NJS_POINT3* eye,NJS_POINT3* persisted,const std::uint32_t* attr_in) {
     if(index>=scene.cameras.size())throw std::runtime_error("active camera outside table");
     if(!std::isfinite(position.x)||!std::isfinite(position.y)||!std::isfinite(position.z))throw std::runtime_error("invalid camera target");
     const auto& original=scene.cameras[index];auto camera=original;
-    std::uint32_t attr=0;
-    for(const auto& cut:scene.cuts)if(cut.camera==index&&cut.floor==floor&&position.x>=cut.minx&&position.x<cut.maxx&&position.z>=cut.minz&&position.z<cut.maxz){attr=cut.attributes&65535;break;}
+    // cut.c:1222-1229: camver 0 nutzt die unteren 16 Bit (camver 1 kommt in den Raumdaten nicht vor).
+    const std::uint32_t attr=(attr_in?*attr_in:cut_attribute(scene,index,position.x,position.z,floor,0u))&65535u;
     auto target=[&](unsigned bit){
         auto point=position;
         if(!(attr&bit))return point;

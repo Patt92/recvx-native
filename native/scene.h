@@ -248,7 +248,11 @@ std::optional<std::size_t> camera_for_position(const Scene& scene,NJS_POINT3 pos
 // laesst. :681/683 setzen gpx/gpz; jeder gelaufene Block (w/cw :687, d/cd :716, y0..y3 :745,
 // laz0..3 :770, flg 0x20 :795, ax :820/:879/:970, ay :853/:927/:1019) schreibt sie erneut
 // (Naehpunkt unter dem attr-Bit, sonst gpx/gpz) - der zuletzt gelaufene Block gewinnt. y = position.y.
-SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 position,std::int8_t floor=0,const NJS_POINT3* eye=nullptr,NJS_POINT3* persisted=nullptr);
+// cut.c:252 bhCheckCutAttribute: attr des ersten Rechtecks (min <= p < max, Etage) im Schnitt ncut, nur wenn
+// CUT_WORK.flg & 1; sonst bleibt cam.attr (fallback) - im Original der zuletzt gespeicherte Wert.
+std::uint32_t cut_attribute(const Scene& scene,std::size_t ncut,float px,float pz,int floor,std::uint32_t fallback);
+// attr: bereits ermitteltes bhCheckCutAttribute-Ergebnis; ohne Angabe wie ein Aufruf mit cam.attr 0.
+SceneCamera camera_for_actor(const Scene& scene,std::size_t camera,NJS_POINT3 position,std::int8_t floor=0,const NJS_POINT3* eye=nullptr,NJS_POINT3* persisted=nullptr,const std::uint32_t* attr=nullptr);
 // camera.c:47-57 cam.wpx/wpy/wpz: pivot + RotY(ay)RotX(ax)RotZ(az)(0,0,-ln).
 // This is the sound system's CameraPos, not the eye of the view matrix.
 NJS_POINT3 camera_world_position(const SceneCamera& camera);

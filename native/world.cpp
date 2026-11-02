@@ -4284,7 +4284,11 @@ void RoomWorld::init_camera_target(const Scene& stage,std::size_t cut){
     const auto gp=player_ground_point();
     if(!gp){unbound_enemy_.insert("cut.c:681 bhInitActiveCamera: plp->gpx (owP[0]) ohne nativen Knoten");return;}
     player_camera_point_={gp->x,gp->y,gp->z};
-    (void)camera_for_actor(stage,cut,*gp,std::int8_t(collision_floor_),nullptr,&camera_target_);
+    // cut.c:300-304 bhSetCut: ohne gm_flg 0x1 cam.attr = bhCheckCutAttribute(gpx, gpz, flr_no) fuer den neuen
+    // Schnitt; :685 bhInitActiveCamera liest denselben Wert (bzw. bei Fehltreffer cam.attr).
+    if(!collision_events_||!(collision_events_->flags[11][0]&0x1u))cam_attr_=cut_attribute(stage,cut,gp->x,gp->z,collision_floor_,cam_attr_);
+    const auto attr=cut_attribute(stage,cut,gp->x,gp->z,collision_floor_,cam_attr_);
+    (void)camera_for_actor(stage,cut,*gp,std::int8_t(collision_floor_),nullptr,&camera_target_,&attr);
     camera_target_valid_=true;
 }
 void RoomWorld::check_player_mirror_floor(int flr_no){
@@ -5343,7 +5347,8 @@ void RoomWorld::control_eye_camera(const Scene& stage,std::size_t cut,bool hold)
             // EXP_WORK plx/plz bleiben danach auf dem Stand des letzten Blocks stehen.
             const auto gp=player_ground_point();
             if(!gp)unbound_enemy_.insert("cut.c:2574 bhInitActiveCamera: plp->gpx (owP[0]) ohne nativen Knoten");
-            const auto aimed=camera_for_actor(stage,cut,gp?*gp:player_.position,std::int8_t(collision_floor_),nullptr,gp?&camera_target_:nullptr);
+            const auto aim_at=gp?*gp:player_.position;const auto attr=cut_attribute(stage,cut,aim_at.x,aim_at.z,collision_floor_,cam_attr_); // :685, ohne Speichern
+            const auto aimed=camera_for_actor(stage,cut,aim_at,std::int8_t(collision_floor_),nullptr,gp?&camera_target_:nullptr,&attr);
             if(gp){camera_target_valid_=true;player_camera_point_={gp->x,gp->y,gp->z};}
             eye_.axp=aimed.angles[0];eye_.ayp=aimed.angles[1];eye_.azp=aimed.angles[2];eye_.target=aimed.position;eye_.pln=aimed.distance;eye_.ppers=aimed.perspective;
             eye_.mode0=2;eye_.ct0=0;}
@@ -5439,7 +5444,10 @@ void RoomWorld::tick_camera(const Scene& stage,const SceneCamera& target,std::si
     // bhControlActiveCamera aims from the current travelling camera, not
     // from its final target position (important during a return/zoom).
     // :1219 bhCheckCutAttribute(cam.plx, cam.plz, plp->flr_no): die Etage ist plp->flr_no (collision_floor_), nicht bhCheckFloorNum(py).
-    const auto controlled=tracking?camera_for_actor(stage,cut,follow,std::int8_t(collision_floor_),&active_camera_.view().position):target;
+    // :1219-1220 attr = bhCheckCutAttribute(cam.plx, cam.plz, plp->flr_no); cam.attr = attr - ausserhalb jedes
+    // Rechtecks des Schnitts bleibt das zuletzt gespeicherte cam.attr stehen (:277).
+    if(tracking)cam_attr_=cut_attribute(stage,cut,follow.x,follow.z,collision_floor_,cam_attr_);
+    const auto controlled=tracking?camera_for_actor(stage,cut,follow,std::int8_t(collision_floor_),&active_camera_.view().position,nullptr,&cam_attr_):target;
     active_camera_.tick(controlled);
     /* Diagnose: RECVX_CAM_TRACE=1, Raumkamerapfad (bhControlActiveCamera). */
     if(std::getenv("RECVX_CAM_TRACE")){const auto& p=active_camera_.view();std::fprintf(stderr,"CAMTRACE cut=%zu fixed=%d blend=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",cut,fixed_camera?int(*fixed_camera):-1,int(active_camera_.transitioning()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}

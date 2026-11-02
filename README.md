@@ -166,9 +166,14 @@ a fallback, so upscaling, frame generation, sharpening and CRT are actually
 available (before, SDL's own Direct3D 11 swap chain on the same window made the
 stage fail and every row read "(not available)"). FSR itself comes
 only from AMD's signed ffx-api DLLs; the repository ships the MIT ffx-api
-headers (`native/third_party/FidelityFX-SDK/include`), never the DLLs. Without
-the DLLs next to the runtime (or in `RECVX_FSR_SDK`) the rows read "(not
-available)" and the plain SDL copy presents.
+headers (`native/third_party/FidelityFX-SDK/include`), never the DLLs. Windows
+x64 builds (local and GitHub Actions) download the signed loader, upscaler and
+frame-generation DLLs of the pinned FidelityFX SDK v2.1.0 once, check their
+SHA-256 and put them next to the runtime with AMD's license; own DLLs in
+`native/third_party/FidelityFX-SDK` take precedence, `-DRECVX_FETCH_FIDELITYFX=OFF`
+turns the download off. Windows ARM64 has no AMD DLLs. Without the DLLs next to
+the runtime (or in `RECVX_FSR_SDK`) the rows read "(not available)" and the
+plain SDL copy presents.
 
 - **Upscaler** — `fsr4` (FP8 model) or `fsr4-int8` (INT8 model, for GPUs
   without FP8 matrix support), from 640×480 to the window's 4:3 fit. FSR 4 ML

@@ -1239,6 +1239,7 @@ private:
     // cam.flg 0x8 und sys->fil_no/fil_rt (cut.c:412-421/505-514); bhInitCamera (camera.c:9) nullt cam.flg.
     bool camera_filter_=false;int filter_no_=0,filter_rate_=0;
     bool camera_cut_wall_=false; // cam.flg 0x10 (cut.c:424/517: ci->flg 0x200)
+    std::uint32_t cam_attr_=0; // cam.attr (camera.c:15 0 bei Raumladen; cut.c:304/:1220 geschrieben, :277 Rueckfall)
     // Fog owner (sync.c:143-255 bhControlEOR): cam.fog_* as handed over by
     // bhSetCut/bhSetFixedCut/bhSetEventCamera, sys->fog_ct/fog_cngct, the
     // installed njGenerateFogTable3 state and the njSetFogColor colour.

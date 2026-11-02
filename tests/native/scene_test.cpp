@@ -123,6 +123,20 @@ int main(){try{
     check(!recvx::camera_for_position(zones,{5,0,5},1),"cut floor ignored");
     const NJS_POINT3 inside[]{{8,0,8},{2,0,8},{2,0,2},{8,0,2}};
     for(unsigned type=1;type<=4;++type){zones.cuts={{0,0,type,0,0,10,10}};check(recvx::camera_for_position(zones,inside[type-1])==0,"triangular cut interior");check(!recvx::camera_for_position(zones,{5,0,5}),"diagonal cut boundary accepted");}
+    {   // cut.c:194-246 Breite 0 (minx == maxx): px == x0 ergibt 0/0 = NaN, der Vergleich <= ist falsch -> Treffer;
+        // daneben (px != x0) d/inf = 0 bzw. die Rechteckpruefung verwirft.
+        recvx::Scene thin;thin.cameras.resize(1);thin.cuts={{0,0,1,5,0,5,10}};
+        check(recvx::camera_for_position(thin,{5,0,5})==0,"zero-width triangular cut: NaN path is a hit as in the original");
+        check(!recvx::camera_for_position(thin,{6,0,5}),"zero-width triangular cut outside accepted");
+        // cut.c:252-278 bhCheckCutAttribute: nur Schnitt ncut mit flg & 1, min <= p < max und Etage; sonst cam.attr.
+        recvx::Scene attr;attr.cameras.resize(2);attr.cut_enabled={true,true};
+        attr.cuts={{0,0,0,0,0,10,10,0x22},{1,0,0,10,0,20,10,0x8}};
+        check(recvx::cut_attribute(attr,0,5,5,0,0x99)==0x22,"cut attribute of ncut");
+        check(recvx::cut_attribute(attr,0,15,5,0,0x99)==0x99,"other cut's area must keep cam.attr");
+        check(recvx::cut_attribute(attr,0,10,5,0,0x99)==0x99,"exclusive maximum keeps cam.attr");
+        check(recvx::cut_attribute(attr,0,5,5,1,0x99)==0x99,"other floor keeps cam.attr");
+        attr.cut_enabled[0]=false;check(recvx::cut_attribute(attr,0,5,5,0,0x99)==0x99,"disabled cut (flg & 1 clear) keeps cam.attr");
+    }
     zones.cuts={{0,0,0,0,0,10,10}};auto& active=zones.cameras[0];active.cut_extent={10,0,10};active.position={0,10,10};active.follow_x=100;active.follow_z=100;
     auto evaluated=recvx::camera_for_actor(zones,0,{7.5f,0,7.5f});check(std::abs(evaluated.position.x-2.5f)<0.001f&&std::abs(evaluated.position.z-12.5f)<0.001f,"active camera translation");
     active.follow_x=active.follow_z=0;active.flags=4;evaluated=recvx::camera_for_actor(zones,0,{0,0,0});check(std::abs(evaluated.angles[0]-8192)<=1&&evaluated.angles[1]==0,"active camera look angles");

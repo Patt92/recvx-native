@@ -54,6 +54,9 @@ jobs:
           Copy-Item (Join-Path $exe.DirectoryName '*.exe'), (Join-Path $exe.DirectoryName '*.dll') $out
           $fsr = Join-Path $exe.DirectoryName 'FSR4 INT8'
           if (Test-Path $fsr) { Copy-Item $fsr $out -Recurse }
+          # FidelityFX SDK v2.1.0 DLLs (CMake RECVX_FETCH_FIDELITYFX, x64): AMD's MIT license goes with them.
+          if (Test-Path "$out/amd_fidelityfx_upscaler_dx12.dll") { Copy-Item native/third_party/FidelityFX-SDK/LICENSE.md "$out/FIDELITYFX-LICENSE.md" }
+          elseif ('${{ matrix.arch }}' -eq 'x64') { Write-Warning 'FidelityFX DLLs missing: FSR unavailable in this package' }
           Copy-Item README.md, STARTEN.md $out -ErrorAction SilentlyContinue
           # ISO extractor (tools/extract_iso.py): data\ and mods\ go into this folder, the images into iso\.
           New-Item -ItemType Directory -Force "$out/tools", "$out/iso" | Out-Null
