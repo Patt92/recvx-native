@@ -5,7 +5,7 @@
 RECVX Native brings the PS2 game to a standalone C/C++ engine, preserving its
 original gameplay while replacing its console-specific foundations with native
 rendering, audio, input and storage. The aim is to make CODE: Veronica X at home
-on modern computers and, eventually, across the Apple device family.
+on modern computers and across the Apple device family, starting with iPhone and iPad.
 
 **No emulator. No translated PS2 executable. No console required at runtime.**
 
@@ -40,10 +40,10 @@ brought up separately from the shared gameplay code.
 | **Windows x64** | Build support, the Direct3D 11 backend and optional Vulkan and Direct3D 12 backends are present; validated Windows releases are planned. |
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
-| **iOS/iPadOS** | Runs on iPhone (iOS 27) with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`). No touch controls yet. |
+| **iOS/iPadOS** | Runs on iPhone (iOS 27) and iPad with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`); tested by hand by the project owner on both devices. No touch controls and no automated iOS tests yet. |
 | **Android** | Native arm64 APK (`./build.sh --platform android`, API 26+) with optional Vulkan as GPU default and software fallback; game data loose on the device. Runs in the arm64 emulator; real devices, touch controls and release signing are open. |
 | **Web (Firefox, Chrome)** | The native engine as WebAssembly, served by a Docker container on port 8722 (`docker compose up -d`, or the prebuilt [`ghcr.io/patt92/recvx-native-web`](https://github.com/Patt92/recvx-native/pkgs/container/recvx-native-web) image); software rasterizer on worker threads, WebGL 2 presentation, saves in the browser. Verified in Firefox and Chromium on macOS from the title through free play and LOAD GAME. |
-| **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device. |
+| **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device (the iPhone/iPad tests do not cover tvOS). |
 
 These are native platform targets, not plans to ship an emulator with the game.
 
@@ -77,8 +77,8 @@ Building from source, macOS and iOS: see [Build and run](#build-and-run).
 The renderer translates the game's drawing rules into native rendering work,
 with a shared pipeline feeding the available backend:
 
-- **Metal** — the macOS GPU backend, designed for Apple Silicon and the basis
-  for planned Apple-device builds.
+- **Metal** — the GPU backend on macOS, iOS/iPadOS and tvOS, designed for
+  Apple Silicon. The iOS/iPadOS build runs on iPhone and iPad.
 - **Direct3D 11** — the Windows GPU backend. It uses Rasterizer Ordered Views
   to preserve drawing order and programmable blending; hardware without the
   required support falls back to software. Verified on Windows 11 ARM64 with
@@ -97,8 +97,8 @@ with a shared pipeline feeding the available backend:
   counterpart of Metal framebuffer fetch and Direct3D 11 Rasterizer Ordered
   Views) and storage-image color, depth and shadow masks; devices without the
   extension fall back to software rather than approximating the blend. The
-  shaders are compiled to SPIR-V at build time and the loader is opened at run
-  time. Its output is checked bit-for-bit against the software reference.
+  SPIR-V is checked in (the same shader bytes on every platform) and the loader
+  is opened at run time. Its output is checked bit-for-bit against the software reference.
 - **OpenGL** — the Linux GPU default, optionally selectable on macOS and Windows.
   Requires OpenGL 4.1 Core and an available display; uses ordered copies (or
   texture barriers when supported), not fixed-function blending. Driver-specific
@@ -139,8 +139,9 @@ presentation path.
 Presents through the SDL window's Metal layer. Because it consumes only the
 finished frame, it works on top of every macOS raster backend (Metal, Vulkan
 via MoltenVK, OpenGL, software). Needs macOS 13 or newer with Metal. The same
-stage runs on iPhone, iPad and Apple TV (MetalFX from iOS/tvOS 16, frame
-interpolation from iOS/tvOS 26); not yet checked on a device.
+stage is built for iPhone, iPad and Apple TV (MetalFX from iOS/tvOS 16, frame
+interpolation from iOS/tvOS 26). The game runs on iPhone and iPad; MetalFX
+upscaling and frame interpolation are not yet checked there.
 
 - **Upscaler** — `metalfx-spatial` or `metalfx-temporal`, from 640×480 to
   the window's 4:3 fit. Temporal uses depth and camera-reprojected motion
@@ -214,7 +215,8 @@ plain SDL copy presents.
 Linux and macOS: FSR 3.1 through the Vulkan backend stays a TODO (the SDK's
 Vulkan sources are not part of this checkout; see
 [docs/NATIVE_PORT.md](docs/NATIVE_PORT.md#fsr-presentation-stage-windows)).
-OpenGL has no FSR path (no SDK backend, no SDL GL/Vulkan interop).
+OpenGL has no FSR 3.1/4 path (no SDK backend, no SDL GL/Vulkan interop); the
+Android/Linux GL stage has the built-in FSR 1.
 
 ## Console foundations, rewritten for the host
 
@@ -434,9 +436,11 @@ with its number of HD textures, and per room how many textures came from HD, mod
 
 ### iOS / iPadOS
 
-The iOS build runs the game on an iPhone with iOS 27 and a Bluetooth game
-controller; it is played through sideloading, not the App Store. Needs a Mac
-with Xcode (iOS SDK) and prepared data (see macOS above).
+The iOS build runs the game on iPhone (iOS 27) and iPad with a Bluetooth game
+controller; the project owner has tested both by hand. It is played through
+sideloading, not the App Store. There are no automated iOS tests yet (iOS
+builds configure with `BUILD_TESTING=OFF`, GitHub Actions has no iOS job).
+Needs a Mac with Xcode (iOS SDK) and prepared data (see macOS above).
 
 **Build an unsigned IPA** (the normal route; no Apple developer account needed
 to build):
@@ -559,7 +563,7 @@ Linux (Debian/Ubuntu), with the [command-line tools](https://developer.android.c
 unpacked to `$ANDROID_HOME/cmdline-tools/latest`:
 
 ```bash
-sudo apt install openjdk-21-jdk glslc ninja-build
+sudo apt install openjdk-21-jdk ninja-build
 export ANDROID_HOME=$HOME/Android/Sdk
 yes | sdkmanager --licenses
 sdkmanager "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" platform-tools
@@ -568,7 +572,7 @@ sdkmanager "ndk;28.2.13676358" "platforms;android-36" "build-tools;36.0.0" platf
 macOS (Homebrew):
 
 ```bash
-brew install openjdk@17 gradle shaderc
+brew install openjdk@17 gradle
 brew install --cask android-commandlinetools
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 yes | sdkmanager --licenses
@@ -699,8 +703,10 @@ folders), again after every data or mod change.
 - **Saves:** save games, snapshots and settings live in the browser's private
   storage for this address (per browser; cleared together with the site data).
 - **Rendering:** the original-faithful software rasterizer on worker threads,
-  presented through WebGL 2. WebGPU/WebGL cannot reproduce the game's ordered
-  per-pixel blending, so there is no approximated GPU path.
+  presented through WebGL 2 (the GPU only scales the final image). There is no
+  GPU rasterizer on the web: WebGL 2 and WebGPU shaders cannot guarantee the
+  bit-exact rounding the native GPU backends rely on (`precise`/`fma`), so there
+  is no approximated GPU path.
 - **Access:** `http://localhost` or HTTPS only. Browsers block the required
   shared memory on plain HTTP from other hosts.
 - **Verified** in Firefox 158 and Chromium 154 on macOS: title, new game, intro,
@@ -718,7 +724,7 @@ Architecture, server requirements and the browser checks (`tests/web`):
 `docker compose -f compose.builder.yaml build` and
 `docker compose -f compose.builder.yaml run --rm builder` build Linux and
 Windows x64/ARM64 in a container, from a disc image in `./iso` into `./out`.
-macOS and iOS still need a Mac. Details: [Docker builder](docs/DOCKER.md).
+macOS, iOS/iPadOS and tvOS still need a Mac. Details: [Docker builder](docs/DOCKER.md).
 
 ### GitHub Actions
 
@@ -744,8 +750,8 @@ no ISO, no `data/`, no tests that need disc files.
 
 | Artifact | Contents |
 |---|---|
-| `recvx-windows-x64`, `recvx-windows-arm64` | `recvx-runtime.exe`, `SDL2.dll`, the exporters, `Extract-ISO.cmd`, `tools/`, an empty `iso\` folder; Direct3D 12 and FSR 4 built in (AMD's FSR DLLs are not included) |
-| `recvx-linux-x64` | `bin/recvx-runtime`, the exporters, `lib/libSDL2*.so`, `extract-iso.sh`, `tools/`, an empty `iso/` folder; OpenGL and Vulkan |
+| `recvx-windows-x64`, `recvx-windows-arm64` | `recvx-runtime.exe`, `SDL2.dll`, the exporters, `Extract-ISO.cmd`, `tools/`, an empty `iso\` folder; Direct3D 12, Vulkan and built-in FSR 1; x64 also carries AMD's signed FSR 4 / frame-generation DLLs with their license (ARM64 has none) |
+| `recvx-linux-x64` | `bin/recvx-runtime`, the exporters, `lib/libSDL2*.so`, `extract-iso.sh`, `tools/`, an empty `iso/` folder; OpenGL, Vulkan and the GL presentation stage (FSR 1, sharpening, CRT) |
 | `recvx-android-arm64` | `RECVX-Native.apk`, signed with the debug key (sideload) |
 
 **What else you need: the game data.** The downloads contain no game files; the Windows

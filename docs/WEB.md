@@ -80,11 +80,16 @@ so neither starts, stops or removes the other.
   never blocks. No game logic is involved.
 - **Rendering**: the original-faithful software band stage (the reference of all
   GPU backends) rasterizes on worker threads; the 640×480 image is presented
-  through SDL's WebGL 2 renderer. A WebGPU or WebGL rasterizer is **not**
-  possible without approximation: the GPU backends need ordered per-pixel
-  read-modify-write (fragment shader interlock, rasterizer ordered views or
-  framebuffer fetch), and neither WebGPU nor WebGL 2 offers it. It stays an open
-  item, not an approximated blend.
+  through SDL's WebGL 2 renderer, so the GPU only scales the final image. There
+  is no GPU rasterizer on the web. Ordering alone is not the blocker: the
+  OpenGL backend's copy path (disjoint pixel groups, A/R surfaces, blits) needs
+  no interlock and maps onto WebGL 2. The blocker is bit-exactness: the native
+  shaders rely on `precise` and `fma` for exactly rounded division, which GLSL ES
+  3.00 (WebGL 2) and WGSL (WebGPU, which also allows reordering and fusion) do not
+  offer, and the browser's shader translation cannot be told not to contract.
+  WebGPU ordering features (fragment interlock, framebuffer fetch, pixel local
+  storage) are experimental only. It stays an open item, not an approximated
+  blend.
 - **Files**: `/data` and `/mods` use the WasmFS fetch backend (HTTP range
   requests). It cannot list directories, so `tools/web_site.py` writes
   `web-files.txt` (and `mods-files.txt`) and the runtime creates the tree from it

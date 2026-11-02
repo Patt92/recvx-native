@@ -101,6 +101,8 @@ tools and tests stay on the host. Deployment target: iOS 15.0.
 
 Status (2026-10-26): the device build runs on an iPhone with iOS 27 and a
 Bluetooth game controller as it is; verified by the project owner on hardware.
+Status (2026-11-02): also tested by the project owner on an iPad, runs well. There
+are no automated iOS tests yet (`BUILD_TESTING=OFF` for iOS, no iOS CI job).
 
 **Unsigned IPA and sideloading.** The IPA is `Payload/recvx-runtime.app`
 zipped with `ditto` (symlinks and permissions preserved). An unsigned IPA
@@ -144,9 +146,9 @@ for the IPA under `build/packages/tvos-arm64-v<version>`). Differences:
   ExtendedGamepad; the Info.plist marks controller interaction as supported).
   The Siri Remote is not bound; SDL maps its menu button to the app-switch
   gesture. There is no keyboard or mouse path.
-- Metal is the only rasterizer; the MetalFX presentation stage is macOS-only
-  (`CMakeLists.txt`: `APPLE AND NOT IOS AND NOT TVOS`), so tvOS presents
-  through the SDL copy path. No CoreMotion framework on tvOS.
+- Metal is the only rasterizer; since 2026-11-02 the MetalFX presentation stage
+  is built for all Apple platforms (`CMakeLists.txt`: `if(APPLE)`; MetalFX from
+  tvOS 16, frame interpolation from tvOS 26), not yet run on tvOS. No CoreMotion framework on tvOS.
 - Icon: flat `AppIcon400x240(@2x).png` from `tools/build_app_icons.py`; the
   layered App Store icon needs an Xcode asset catalog and is not produced.
 - SDL2 source: the pinned 2.32.10 tree of another build directory is reused
@@ -171,7 +173,7 @@ loads `libc++_shared`, `libSDL2`, `libmain` and calls `SDL_main`
 (`native/runtime.cpp`). The policy audit runs on the unstripped `libmain.so`
 with the NDK `llvm-nm` before packaging.
 
-Requirements (macOS host): `brew install openjdk@17 gradle shaderc` and
+Requirements (macOS host): `brew install openjdk@17 gradle` and
 `brew install --cask android-commandlinetools`, then `sdkmanager "ndk;28.2.13676358"
 "platforms;android-36" "build-tools;36.0.0" platform-tools`. The SDK is found
 through `ANDROID_HOME`/`ANDROID_SDK_ROOT` or the Homebrew/Android Studio
@@ -449,9 +451,9 @@ packages bundle MoltenVK (`Contents/Frameworks/libMoltenVK.dylib`, Homebrew
 `molten-vk` or `MOLTENVK_DYLIB`) with its license.
 The loader is opened at run time and is not linked. `RECVX_VULKAN_LIBRARY`
 selects one explicit library; otherwise the loader is searched in the app's
-`Frameworks` folder, the system search path and, on macOS, Homebrew. MoltenVK is
-not bundled by the packaging scripts, so a standalone macOS package needs the
-loader/MoltenVK supplied by the user or embedded separately. MoltenVK 1.4.2 is
+`Frameworks` folder, the system search path and, on macOS, Homebrew. macOS
+packages bundle MoltenVK from Homebrew `molten-vk` or `MOLTENVK_DYLIB`
+(`tools/package_native.py`). MoltenVK 1.4.2 is
 the validated macOS loader; Windows and Linux hardware are still unverified.
 
 ### FSR presentation stage (Windows)
