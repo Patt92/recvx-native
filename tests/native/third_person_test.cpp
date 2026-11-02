@@ -113,6 +113,8 @@ int main(){try{
      front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::MetalFx&&VideoSettings::read(video_path).frame_generation==FrameGeneration::MetalFx,"frame generation on");
      check(video.describe_frame_generation()=="MetalFX frame interpolation (not available)","frame generation availability note missing");
      video.set_frame_generation(FrameGeneration::MetalFx);check(video.settings().presents_per_tick()==2,"frame interpolation needs two presents per tick at 30");video.set_frame_rate(FrameRate::Hz120);check(video.settings().presents_per_tick()==4,"frame interpolation keeps 120");video.set_frame_rate(FrameRate::Hz30);
+     front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Fsr&&video.describe_frame_generation()=="FSR frame generation (not available)","FSR frame generation is the third value and not available on a MetalFX stage");
+     video.set_availability(true,true,true,FrameGeneration::Fsr);check(video.describe_frame_generation()=="FSR frame generation","FSR frame generation available on the FSR stage");video.set_availability(true,true,false);
      front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Off,"frame generation wrap");
      front.input(MenuInput::Down);check(front.selected()==Frontend::sharpness_row,"sharpness row not selectable");
      check(video.settings().sharpness==Sharpness::Off&&video.settings().sharpness_amount()==0.0f,"sharpness default");

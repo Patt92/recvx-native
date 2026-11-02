@@ -10,8 +10,8 @@ constexpr const char* frame_rate_names[]={"30","60","120","unlimited"};
 constexpr const char* frame_rate_labels[]={"30 (game tick)","60","120","Unlimited (no vsync)"};
 constexpr const char* upscaler_names[]={"off","metalfx-spatial","metalfx-temporal","fsr4","fsr4-int8"};
 constexpr const char* upscaler_labels[]={"Off (nearest)","MetalFX spatial","MetalFX temporal","FSR 4 (FP8)","FSR 4 (INT8)"};
-constexpr const char* frame_generation_names[]={"off","metalfx"};
-constexpr const char* frame_generation_labels[]={"Off","MetalFX frame interpolation"};
+constexpr const char* frame_generation_names[]={"off","metalfx","fsr"};
+constexpr const char* frame_generation_labels[]={"Off","MetalFX frame interpolation","FSR frame generation"};
 constexpr const char* sharpness_names[]={"off","light","medium","strong"};
 constexpr const char* sharpness_labels[]={"Off","Light","Medium","Strong"};
 constexpr const char* post_process_names[]={"off","crt-light","crt-full"};
@@ -58,7 +58,7 @@ void VideoSettings::save(const std::filesystem::path& path)const{
         <<(renderer==RenderBackend::Software?"software":renderer==RenderBackend::OpenGL?"opengl":renderer==RenderBackend::Vulkan?"vulkan":renderer==RenderBackend::D3D12?"d3d12":"gpu")<<'\n'
         <<"# Presentation frame rate (game tick stays 30 Hz): 30, 60, 120 or unlimited\nframe_rate = "<<frame_rate_names[int(frame_rate)]<<'\n'
         <<"# Presentation upscaler: off, metalfx-spatial, metalfx-temporal (macOS), fsr4 or fsr4-int8 (Windows)\nupscaler = "<<upscaler_names[int(upscaler)]<<'\n'
-        <<"# Frame generation (macOS 26 or newer, MetalFX frame interpolation): off or metalfx\nframe_generation = "<<frame_generation_names[int(frame_generation)]<<'\n'
+        <<"# Frame generation: off, metalfx (macOS/iOS 26 or newer) or fsr (Windows, AMD FSR frame generation DLL)\nframe_generation = "<<frame_generation_names[int(frame_generation)]<<'\n'
         <<"# Sharpening of the presented image (contrast-adaptive): off, light, medium or strong\nsharpness = "<<sharpness_names[int(sharpness)]<<'\n'
         <<"# CRT post-processing of the presented image: off, crt-light or crt-full\npost_process = "<<post_process_names[int(post_process)]<<'\n'
         <<"# Widescreen mod (16:9, like the GameCube/PS2 patches; HUD is stretched): off or on\nwidescreen = "<<(widescreen?"on":"off")<<'\n'
@@ -87,11 +87,11 @@ void VideoConfig::set_fullscreen(bool value,bool persist){settings_.fullscreen=v
 void VideoConfig::cycle(int direction,bool persist){set(RenderQuality((int(settings_.quality)+4+(direction<0?-1:1))%4),persist);}
 void VideoConfig::cycle_frame_rate(int direction,bool persist){set_frame_rate(FrameRate((int(settings_.frame_rate)+4+(direction<0?-1:1))%4),persist);}
 void VideoConfig::cycle_upscaler(int direction,bool persist){set_upscaler(Upscaler((int(settings_.upscaler)+5+(direction<0?-1:1))%5),persist);}
-void VideoConfig::cycle_frame_generation(int direction,bool persist){set_frame_generation(FrameGeneration((int(settings_.frame_generation)+2+(direction<0?-1:1))%2),persist);}
+void VideoConfig::cycle_frame_generation(int direction,bool persist){set_frame_generation(FrameGeneration((int(settings_.frame_generation)+3+(direction<0?-1:1))%3),persist);}
 void VideoConfig::cycle_sharpness(int direction,bool persist){set_sharpness(Sharpness((int(settings_.sharpness)+4+(direction<0?-1:1))%4),persist);}
 void VideoConfig::cycle_post_process(int direction,bool persist){set_post_process(PostProcess((int(settings_.post_process)+3+(direction<0?-1:1))%3),persist);}
 std::string VideoConfig::describe_upscaler()const{return settings_.describe_upscaler()+(settings_.upscaler!=Upscaler::Off&&!upscaler_available_?" (not available)":"");}
-std::string VideoConfig::describe_frame_generation()const{return settings_.describe_frame_generation()+(settings_.frame_generation!=FrameGeneration::Off&&!frame_generation_available_?" (not available)":"");}
+std::string VideoConfig::describe_frame_generation()const{return settings_.describe_frame_generation()+(settings_.frame_generation!=FrameGeneration::Off&&(!frame_generation_available_||settings_.frame_generation!=frame_generation_kind_)?" (not available)":"");}
 std::string VideoConfig::describe_sharpness()const{return settings_.describe_sharpness()+(settings_.sharpness!=Sharpness::Off&&!presentation_available_?" (not available)":"");}
 std::string VideoConfig::describe_post_process()const{return settings_.describe_post_process()+(settings_.post_process!=PostProcess::Off&&!presentation_available_?" (not available)":"");}
 }

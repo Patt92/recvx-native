@@ -1204,7 +1204,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"video","Graphics quality","OK: host render quality; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Low"},{2,"High"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Graphics: "+video.describe();}});
         debug.add({"framerate","Frame rate","OK: presentations per game tick (the tick stays 30 Hz); unlimited without VSync; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"30 (game tick)"},{1,"60"},{2,"120"},{3,"Unlimited (no VSync)"}};},[&]{return unsigned(video.settings().frame_rate);},[&](unsigned value){video.set_frame_rate(recvx::FrameRate(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame rate: "+video.settings().describe_frame_rate();}});
         debug.add({"upscaler","Upscaler","OK: upscaler of the final image (MetalFX on macOS, FSR 4 on Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX spatial"},{2,"MetalFX temporal"},{3,"FSR 4 (FP8)"},{4,"FSR 4 (INT8)"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
-        debug.add({"framegen","Frame generation","OK: interpolated frame per game tick (macOS 26+); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX frame interpolation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame generation: "+video.describe_frame_generation();}});
+        debug.add({"framegen","Frame generation","OK: interpolated frame per game tick (MetalFX on macOS/iOS 26+, AMD FSR on Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX frame interpolation"},{2,"FSR frame generation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame generation: "+video.describe_frame_generation();}});
         debug.add({"sharpness","Sharpen","OK: contrast-adaptive sharpening of the display (macOS); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"Light"},{2,"Medium"},{3,"Strong"}};},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Sharpen: "+video.describe_sharpness();}});
         debug.add({"postfx","CRT filter","OK: CRT light (scanlines) or CRT full (slot mask, bloom, gamma-correct); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"CRT light"},{2,"CRT full"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT filter: "+video.describe_post_process();}});
         debug.add({"widescreen","Widescreen","OK: 16:9 widescreen mod like the GameCube/PS2 patches (wider 3D view, HUD stretched, movies 4:3); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off (4:3)"},{1,"16:9"}};},[&]{return unsigned(video.settings().widescreen);},[&](unsigned value){video.set_widescreen(value!=0);if(frontend.video_changed)frontend.video_changed(video.settings());return "Widescreen: "+video.settings().describe_widescreen();}});
@@ -2181,7 +2181,28 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
 #endif
         // A starter script or terminal may keep keyboard focus; take it so the menu reacts at once.
         SDL_RaiseWindow(window.get());
-        auto* raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
+        std::string presenter_reason;
+#if defined(_WIN32)
+        // Windows: die FSR-Stufe (eigenes D3D12-Geraet) braucht die einzige Flip-Swapchain des HWND. SDLs
+        // Direct3D-11-Renderer legt sonst selbst eine an, und CreateSwapChainForHwnd der Stufe scheitert
+        // (DXGI_ERROR_ACCESS_DENIED): Upscaler, Frame-Generation, Schaerfen und CRT blieben "not available".
+        // Deshalb zuerst die Stufe; steht sie, zeichnet SDL nur noch in Software (GDI-Fensterflaeche ohne
+        // Swapchain, nur als Ausweichweg) und die Stufe praesentiert jedes Bild, auch ohne aktive Funktion.
+        {SDL_SysWMinfo wm{};SDL_VERSION(&wm.version);void* hwnd=SDL_GetWindowWMInfo(window.get(),&wm)==SDL_TRUE&&wm.subsystem==SDL_SYSWM_WINDOWS?static_cast<void*>(wm.info.win.window):nullptr;
+         if(!hwnd)presenter_reason="SDL window has no HWND";
+         // DLL-Ordner: RECVX_FSR_SDK, sonst neben der Runtime (Paket), sonst native/third_party/FidelityFX-SDK der Dev-App.
+         std::string sdk_dir;if(const char* env=std::getenv("RECVX_FSR_SDK");env&&*env)sdk_dir=env;
+         else{char module_path[MAX_PATH]{};const DWORD n=GetModuleFileNameA(nullptr,module_path,MAX_PATH);
+              const fs::path exe_dir=n?fs::path(std::string(module_path,n)).parent_path():fs::current_path();
+              for(const fs::path candidate:{exe_dir,exe_dir/"FidelityFX-SDK",args.data.parent_path()/"native/third_party/FidelityFX-SDK"})
+                  if(fs::is_regular_file(candidate/"amd_fidelityfx_upscaler_dx12.dll")){sdk_dir=candidate.string();break;}
+              if(sdk_dir.empty())sdk_dir=exe_dir.string();}
+         if(hwnd)presenter=recvx::create_fsr_presenter(hwnd,sdk_dir,video.settings(),presenter_reason);}
+        const bool presenter_owns_window=bool(presenter);
+#else
+        const bool presenter_owns_window=false;
+#endif
+        auto* raw_renderer=presenter_owns_window?nullptr:SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
         if(!raw_renderer)raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_SOFTWARE);
         std::unique_ptr<SDL_Renderer,decltype(&SDL_DestroyRenderer)> renderer(raw_renderer,SDL_DestroyRenderer);sdl_check(bool(renderer));
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"nearest");
@@ -2194,25 +2215,20 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         std::unique_ptr<SDL_Texture,decltype(&SDL_DestroyTexture)> texture(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480),SDL_DestroyTexture);sdl_check(bool(texture));
         {// Praesentationsstufe: macOS auf der CAMetalLayer des SDL-Fensters (MetalFX), Windows auf dem HWND
          // (eigenes D3D12-Geraet, FSR 4 aus den AMD-ffx-api-DLLs); sonst bleibt der SDL-Kopierpfad.
-         std::string reason;const char* stage_name="MetalFX";
+         std::string reason=presenter_reason;const char* stage_name="MetalFX";
 #if defined(_WIN32)
-         stage_name="FSR";
-         SDL_SysWMinfo wm{};SDL_VERSION(&wm.version);void* hwnd=SDL_GetWindowWMInfo(window.get(),&wm)==SDL_TRUE&&wm.subsystem==SDL_SYSWM_WINDOWS?static_cast<void*>(wm.info.win.window):nullptr;
-         if(!hwnd)reason="SDL window has no HWND";
-         // DLL-Ordner: RECVX_FSR_SDK, sonst neben der Runtime (Paket), sonst native/third_party/FidelityFX-SDK der Dev-App.
-         std::string sdk_dir;if(const char* env=std::getenv("RECVX_FSR_SDK");env&&*env)sdk_dir=env;
-         else{char module_path[MAX_PATH]{};const DWORD n=GetModuleFileNameA(nullptr,module_path,MAX_PATH);
-              const fs::path exe_dir=n?fs::path(std::string(module_path,n)).parent_path():fs::current_path();
-              for(const fs::path candidate:{exe_dir,exe_dir/"FidelityFX-SDK",args.data.parent_path()/"native/third_party/FidelityFX-SDK"})
-                  if(fs::is_regular_file(candidate/"amd_fidelityfx_upscaler_dx12.dll")){sdk_dir=candidate.string();break;}
-              if(sdk_dir.empty())sdk_dir=exe_dir.string();}
-         presenter=hwnd?recvx::create_fsr_presenter(hwnd,sdk_dir,video.settings(),reason):nullptr;
+         stage_name="FSR"; // vor dem SDL-Renderer erzeugt (oben)
 #else
          void* layer=SDL_RenderGetMetalLayer(renderer.get());if(!layer)reason="SDL renderer is not Metal";
          presenter=layer?recvx::create_metalfx_presenter(layer,reason):nullptr;
 #endif
-         video.set_availability(bool(presenter),presenter&&presenter->upscaler_supported(),presenter&&presenter->frame_generation_supported());
-         apply_vsync=[&](bool on){if(SDL_RenderSetVSync(renderer.get(),on?1:0)!=0)std::cerr<<"VSync setting ignored: "<<SDL_GetError()<<'\n';};apply_vsync(video.settings().vsync());
+         video.set_availability(bool(presenter),presenter&&presenter->upscaler_supported(),presenter&&presenter->frame_generation_supported(),
+#if defined(_WIN32)
+             recvx::FrameGeneration::Fsr);
+#else
+             recvx::FrameGeneration::MetalFx);
+#endif
+         apply_vsync=[&](bool on){if(presenter_owns_window)return; /* die Stufe synchronisiert selbst (frame_rate) */if(SDL_RenderSetVSync(renderer.get(),on?1:0)!=0)std::cerr<<"VSync setting ignored: "<<SDL_GetError()<<'\n';};apply_vsync(video.settings().vsync());
          if(presenter){presenter->configure(video.settings());std::cout<<"Presentation: "<<stage_name<<" stage available"<<(presenter->upscaler_supported()?"":std::string(", no ")+stage_name+" upscaling on this device")<<(presenter->frame_generation_supported()?"":", no frame interpolation on this device/OS")<<'\n';}
          else std::cout<<"Presentation: SDL copy ("<<reason<<")\n";}
         SDL_AudioSpec requested{},obtained{};requested.freq=48000;requested.format=AUDIO_S16SYS;requested.channels=2;requested.samples=1024;
@@ -2381,7 +2397,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             bool shown_this_pass=presented;
             if(presented){
                 bool shown=false;slot_index=0;
-                if(presenter&&video.settings().presentation()){
+                if(presenter&&(presenter_owns_window||video.settings().presentation())){
                     // Schnittschluessel: Raum, Kameraschnitt, Ereigniskamera und Bildschirmbesitzer; jede Aenderung verwirft die
                     // MetalFX-Historie (kein Zwischenbild ueber einen Schnitt). Kamerafahrten desselben Schnitts laufen weiter.
                     unsigned key=2166136261u;const auto mix=[&](unsigned v){key=(key^v)*16777619u;}; /* FNV-1a ueber die Schnittfelder */
@@ -2391,7 +2407,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                     const auto& projection=image.last_projection();pf.scene=projection.valid?image.scene_pixels().data():nullptr;
                     pf.projection.valid=projection.valid;std::copy_n(projection.view,16,pf.projection.view);pf.projection.focal_x=projection.focal_x;pf.projection.focal_y=projection.focal_y;pf.projection.near=projection.near;pf.projection.far=projection.far;
                     pf.scene_key=key;pf.delta_seconds=double(std::max(1u,input_tick-presented_tick))*recvx::game_tick_seconds;pf.slots=slots;
-                    shown=presenter->present(pf);}
+                    shown=presenter->present(pf);
+                    // Gebrochene Stufe, die das Fenster besitzt: freigeben, damit die SDL-Software-Ausgabe (GDI) wieder sichtbar wird.
+                    if(!shown&&presenter_owns_window){std::cerr<<"Presentation stage failed, falling back to the SDL copy: "<<presenter->describe()<<'\n';presenter.reset();video.set_availability(false,false,false);}}
                 presented_tick=input_tick;shown_by_presenter=shown;
                 if(!shown){sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);
                 sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());}++presented_frames;

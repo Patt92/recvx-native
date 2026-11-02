@@ -20,6 +20,13 @@
 // ausgenommen. Kein Subpixel-Jitter (jitterOffset 0): die 2D-Zeichner schreiben an ganzzahligen
 // 640x480-Positionen. Farbe ist sRGB (FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE), Tiefe umgekehrt und
 // endlich mit den njClipZ-Abstaenden; ein Schnitt (scene_key) setzt reset.
+//
+// Frame-Generation (video.ini frame_generation = fsr): AMD FSR Frame Generation aus
+// amd_fidelityfx_framegeneration_dx12.dll ueber denselben Loader. Ist der Provider vorhanden, entsteht die
+// Swapchain als FSR-Frame-Generation-Swapchain (ffx-Proxy fuer IDXGISwapChain4, ohne Frame-Generation nur
+// durchgereicht); je Spielbild Configure (frameID +1, Einpassung als generationRect) und PrepareV2 mit Tiefe,
+// Bewegungsvektoren und Kamera, die Swapchain erzeugt und taktet das Zwischenbild selbst. Die 2D-Ebene ist
+// im Endbild enthalten (kein HUD-loses Bild): bewegte 2D-Elemente koennen im Zwischenbild nachziehen.
 #include "metalfx_present.h"
 #include <algorithm>
 #include <atomic>
@@ -46,10 +53,12 @@
 #include "ffx_api.h"
 #include "ffx_api_types.h"
 #include "ffx_upscale.h"
+#include "ffx_framegeneration.h"
 // ffx_api_loader.h (nur _WINDOWS/MSBuild) wird nicht gebraucht: Funktionszeiger stehen in ffx_api.h, die
 // Eintritte holt GetProcAddress aus der per Pfad geladenen DLL.
 struct FfxFunctions{PfnFfxCreateContext CreateContext=nullptr;PfnFfxDestroyContext DestroyContext=nullptr;PfnFfxConfigure Configure=nullptr;PfnFfxQuery Query=nullptr;PfnFfxDispatch Dispatch=nullptr;};
 #include "dx12/ffx_api_dx12.h"
+#include "dx12/ffx_api_framegeneration_dx12.h"
 namespace recvx {
 namespace {
 // Shaderquelle: motion_cs/ui wie motion_k/ui_k, present_cs/bloom wie present_k/bloom_*_k der Metal-Stufe.
@@ -264,27 +273,48 @@ public:
          DXGI_SWAP_CHAIN_DESC1 sd{};sd.Width=UINT(backbuffer_w_);sd.Height=UINT(backbuffer_h_);sd.Format=DXGI_FORMAT_B8G8R8A8_UNORM;sd.SampleDesc.Count=1;
          sd.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT|DXGI_USAGE_UNORDERED_ACCESS;sd.BufferCount=backbuffers;sd.Scaling=DXGI_SCALING_NONE;sd.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;
          sd.AlphaMode=DXGI_ALPHA_MODE_IGNORE;sd.Flags=tearing_?DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING:0u;
-         Com<IDXGISwapChain1> chain1;require(factory->CreateSwapChainForHwnd(queue_.get(),hwnd,&sd,nullptr,nullptr,chain1.put()),"swap chain");
-         require(chain1->QueryInterface(__uuidof(IDXGISwapChain3),swapchain_.put_void()),"swap chain 3");
+         load_ffx();
+         // Mit Frame-Generation-Provider: die ffx-Swapchain (IDXGISwapChain4-Proxy) statt der DXGI-Swapchain.
+         if(fg_supported_){
+             IDXGISwapChain4* proxy=nullptr;
+             ffxCreateContextDescFrameGenerationSwapChainForHwndDX12 cd{};cd.header.type=FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_FOR_HWND_DX12;
+             cd.swapchain=&proxy;cd.hwnd=hwnd;cd.desc=&sd;cd.fullscreenDesc=nullptr;cd.dxgiFactory=factory.get();cd.gameQueue=queue_.get();
+             ffxCreateContextDescFrameGenerationSwapChainVersionDX12 version{};version.header.type=FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_VERSION_DX12;version.version=FFX_FRAMEGENERATION_SWAPCHAIN_DX12_VERSION;
+             cd.header.pNext=&version.header;
+             if(ffx_.CreateContext(&swapchain_context_,&cd.header,nullptr)==FFX_API_RETURN_OK&&proxy){
+                 const HRESULT hr=proxy->QueryInterface(__uuidof(IDXGISwapChain3),swapchain_.put_void());proxy->Release();
+                 if(FAILED(hr)){ffx_.DestroyContext(&swapchain_context_,nullptr);swapchain_context_=nullptr;swapchain_.reset();}
+             }else{swapchain_context_=nullptr;}
+             if(!swapchain_){fg_supported_=false;append_note("FSR frame generation swap chain unavailable");}
+         }
+         if(!swapchain_){
+             Com<IDXGISwapChain1> chain1;require(factory->CreateSwapChainForHwnd(queue_.get(),hwnd,&sd,nullptr,nullptr,chain1.put()),"swap chain");
+             require(chain1->QueryInterface(__uuidof(IDXGISwapChain3),swapchain_.put_void()),"swap chain 3");}
          factory->MakeWindowAssociation(hwnd,DXGI_MWA_NO_ALT_ENTER);
          acquire_backbuffers();}
-        load_ffx();
         worker_=std::thread([this]{run();});
     }
     ~FsrPresenter()override{
         {std::lock_guard<std::mutex> lock(mutex_);stop_=true;}cv_.notify_all();if(worker_.joinable())worker_.join();
-        wait_idle();destroy_context();
+        wait_idle();destroy_context();destroy_frame_generation();
+        if(swapchain_context_){
+            ffxDispatchDescFrameGenerationSwapChainWaitForPresentsDX12 w{};w.header.type=FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATIONSWAPCHAIN_WAIT_FOR_PRESENTS_DX12;
+            ffx_.Dispatch(&swapchain_context_,&w.header);
+            for(auto& b:backbuffers_)b.reset();
+            ffx_.DestroyContext(&swapchain_context_,nullptr);swapchain_context_=nullptr;}
+        swapchain_.reset();
         if(event_)CloseHandle(event_);
         if(upscaler_module_)FreeLibrary(upscaler_module_);if(loader_module_)FreeLibrary(loader_module_);
     }
     void configure(const VideoSettings& settings)override{std::lock_guard<std::mutex> lock(mutex_);requested_=settings;requested_dirty_=true;}
     bool upscaler_supported()const override{return upscaler_supported_;}
-    bool frame_generation_supported()const override{return false;}
+    bool frame_generation_supported()const override{return fg_supported_;}
     const PresentStats& stats()const override{std::lock_guard<std::mutex> lock(state_mutex_);stats_copy_=stats_;return stats_copy_;}
     std::string describe()const override{
         std::lock_guard<std::mutex> lock(state_mutex_);
         std::ostringstream out;
         if(context_)out<<provider_name_<<" "<<out_w_<<"x"<<out_h_;else out<<"nearest";
+        if(fg_context_)out<<", FSR frame generation";
         if(settings_.sharpness!=Sharpness::Off)out<<", sharpen "<<settings_.sharpness_amount();
         if(settings_.post_process==PostProcess::CrtLight)out<<", CRT light";else if(settings_.post_process==PostProcess::CrtFull)out<<", CRT full (phosphor "<<phosphor_<<"px, bloom)";
         if(!notes_.empty())out<<" ("<<notes_<<")";
@@ -352,6 +382,11 @@ private:
         ffx_.Query=reinterpret_cast<PfnFfxQuery>(reinterpret_cast<void*>(GetProcAddress(loader_module_,"ffxQuery")));
         ffx_.Dispatch=reinterpret_cast<PfnFfxDispatch>(reinterpret_cast<void*>(GetProcAddress(loader_module_,"ffxDispatch")));
         if(!ffx_.CreateContext||!ffx_.DestroyContext||!ffx_.Configure||!ffx_.Query||!ffx_.Dispatch){upscaler_supported_=false;append_note("FidelityFX loader DLL without ffx-api entry points");return;}
+        // Frame-Generation-Provider (amd_fidelityfx_framegeneration_dx12.dll), unabhaengig vom Upscaler.
+        {std::uint64_t fg_count=0;
+         ffxQueryDescGetVersions fq{};fq.header.type=FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;fq.createDescType=FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;fq.device=device_.get();fq.outputCount=&fg_count;
+         fg_supported_=ffx_.Query(nullptr,&fq.header)==FFX_API_RETURN_OK&&fg_count>0;
+         if(!fg_supported_)append_note("no FidelityFX frame generation provider (amd_fidelityfx_framegeneration_dx12.dll missing?)");}
         // Verfuegbare Upscaler-Versionen des Providers (FSR 4, FSR 3.1.x, FSR 2.x); ohne Eintrag kein Skalierer.
         std::uint64_t count=0;
         ffxQueryDescGetVersions q{};q.header.type=FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;q.createDescType=FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;q.device=device_.get();q.outputCount=&count;
@@ -365,6 +400,55 @@ private:
         char text[512]{};WideCharToMultiByte(CP_UTF8,0,message,-1,text,sizeof text-1,nullptr,nullptr);
         std::fprintf(stderr,"FSR %s: %s\n",type==FFX_API_MESSAGE_TYPE_ERROR?"error":"warning",text);}
     void destroy_context(){if(context_){ffx_.DestroyContext(&context_,nullptr);context_=nullptr;}}
+    // Frame-Generation abschalten (Configure mit frameGenerationEnabled false), dann den Kontext freigeben.
+    void destroy_frame_generation(){
+        if(!fg_context_)return;
+        ffxConfigureDescFrameGeneration c{};c.header.type=FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;c.swapChain=swapchain_.get();c.frameGenerationEnabled=false;c.frameID=++fg_frame_id_;
+        ffx_.Configure(&fg_context_,&c.header);
+        ffx_.DestroyContext(&fg_context_,nullptr);fg_context_=nullptr;}
+    // Kontext fuer die Fenstergroesse (displaySize = Backbuffer, Spielbild 640x480, umgekehrte endliche Tiefe).
+    void build_frame_generation(){
+        destroy_frame_generation();
+        if(settings_.frame_generation!=FrameGeneration::Fsr)return;
+        if(!fg_supported_||!swapchain_context_){append_note("FSR frame generation unavailable (no FidelityFX frame generation DLL)");return;}
+        ffxCreateBackendDX12Desc backend{};backend.header.type=FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;backend.device=device_.get();
+        ffxCreateContextDescFrameGenerationVersion version{};version.header.type=FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_VERSION;version.version=FFX_FRAMEGENERATION_VERSION;
+        ffxCreateContextDescFrameGeneration desc{};desc.header.type=FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
+        desc.flags=FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED;
+        desc.displaySize={std::uint32_t(backbuffer_w_),std::uint32_t(backbuffer_h_)};desc.maxRenderSize={640,480};desc.backBufferFormat=FFX_API_SURFACE_FORMAT_B8G8R8A8_UNORM;
+        desc.header.pNext=&backend.header;backend.header.pNext=&version.header;
+        if(ffx_.CreateContext(&fg_context_,&desc.header,nullptr)!=FFX_API_RETURN_OK){fg_context_=nullptr;append_note("FSR frame generation context failed");return;}
+        fg_reset_=true;}
+    static ffxReturnCode_t fg_dispatch(ffxDispatchDescFrameGeneration* params,void* user){
+        auto* self=static_cast<FsrPresenter*>(user);return self->ffx_.Dispatch(&self->fg_context_,&params->header);}
+    // Je Spielbild vor dem Present: Configure (frameID +1, Einpassung) und PrepareV2 in die Befehlsliste.
+    void encode_frame_generation(const Pending& job,bool reset){
+        if(!fg_context_)return;
+        ++fg_frame_id_;
+        ffxConfigureDescFrameGeneration c{};c.header.type=FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
+        c.swapChain=swapchain_.get();c.frameGenerationEnabled=true;c.allowAsyncWorkloads=false;
+        c.frameGenerationCallback=&FsrPresenter::fg_dispatch;c.frameGenerationCallbackUserContext=this;
+        c.generationRect={fit_x_,fit_y_,fit_w_,fit_h_};c.frameID=fg_frame_id_;c.onlyPresentGenerated=false;
+        require_ffx(ffx_.Configure(&fg_context_,&c.header),"frame generation configure");
+        transition(motion_.get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transition(depth_fx_.get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        ffxDispatchDescFrameGenerationPrepareV2 d{};d.header.type=FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_V2;
+        d.frameID=fg_frame_id_;d.flags=0;d.commandList=cmd_.get();d.renderSize={640,480};d.jitterOffset={0.0f,0.0f};d.motionVectorScale={1.0f,1.0f};
+        d.frameTimeDelta=float((job.delta>0?job.delta:1.0/30)*1000.0);d.reset=reset||fg_reset_;fg_reset_=false;
+        d.cameraNear=depth_near_>0?depth_near_:1.0f;d.cameraFar=depth_far_>d.cameraNear?depth_far_:100000.0f;
+        const float fy=job.projection.valid&&job.projection.focal_y>0?job.projection.focal_y:last_focal_[1];
+        d.cameraFovAngleVertical=fy>0?2.0f*std::atan(240.0f/fy):1.0f;d.viewSpaceToMetersFactor=0.0f;
+        d.depth=ffxApiGetResourceDX12(depth_fx_.get(),FFX_API_RESOURCE_STATE_COMPUTE_READ);
+        d.motionVectors=ffxApiGetResourceDX12(motion_.get(),FFX_API_RESOURCE_STATE_COMPUTE_READ);
+        if(job.projection.valid){
+            // Sicht -> Welt: Spalten der inversen Sichtmatrix (x rechts, y unten, z vorn wie im Bewegungs-Shader).
+            float inv[16];invert4(job.projection.view,inv);
+            for(int i=0;i<3;++i){d.cameraRight[i]=inv[i];d.cameraUp[i]=-inv[4+i];d.cameraForward[i]=inv[8+i];d.cameraPosition[i]=inv[12+i];}
+        }
+        require_ffx(ffx_.Dispatch(&fg_context_,&d.header),"frame generation prepare");
+        transition(motion_.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        transition(depth_fx_.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    }
     // Kontext fuer die Einpassungsgroesse. Versionswahl: der erste Eintrag ist der neueste Provider (FSR 4);
     // FSR 4 verlangt eine passende GPU/Treiber, sonst schlaegt ffxCreateContext fehl und der naechste
     // Eintrag (FSR 3.1.x) wird genommen. Beide sind in der DLL ("Fallback des Upscaler-Providers").
@@ -401,7 +485,7 @@ private:
     void rebuild(int dw,int dh){
         notes_.clear();
         if(dw!=backbuffer_w_||dh!=backbuffer_h_){
-            wait_idle();for(auto& b:backbuffers_)b.reset();
+            wait_idle();destroy_frame_generation();for(auto& b:backbuffers_)b.reset();
             require(swapchain_->ResizeBuffers(backbuffers,UINT(dw),UINT(dh),DXGI_FORMAT_B8G8R8A8_UNORM,tearing_?DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING:0u),"resize swap chain");
             acquire_backbuffers();backbuffer_w_=dw;backbuffer_h_=dh;}
         const double aw=settings_.widescreen?640.0*4.0/3.0:640.0; /* Host-Mod Breitbild: 16:9-Einpassung (widescreen.h) */
@@ -416,6 +500,7 @@ private:
             bloom_b_=texture(UINT(std::max(1,fit_w_/4)),UINT(std::max(1,fit_h_/4)),DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,"bloom b");}
         else{bloom_a_.reset();bloom_b_.reset();}
         if(!blank_)blank_=texture(1,1,DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,"blank");
+        build_frame_generation();
         dirty_=false;
     }
     // Praesentations-Thread: wie die Metal-Stufe ein Bild in slots Zeitfenstern (ohne Frame-Generation nur
@@ -435,7 +520,7 @@ private:
             {std::lock_guard<std::mutex> state(state_mutex_);
              try{
                  if(take){slots=job.slots;delta=job.delta>0?job.delta:1.0/30;slot=0;frame_at=Clock::now();have=process(job);}
-                 else{if(slots>0)++slot;represent();}
+                 else{if(slots>0)++slot;if(!fg_context_)represent();} // mit Frame-Generation taktet die FSR-Swapchain selbst
              }catch(const std::exception& e){fail(e.what());have=false;}}
         }
     }
@@ -518,6 +603,10 @@ private:
             cmd_->SetComputeRootDescriptorTable(RootSrvTable,gpu(0));cmd_->SetComputeRootDescriptorTable(RootUavTable,gpu(SlotMotionOut));cmd_->SetComputeRootDescriptorTable(RootSamplers,sampler_heap_->GetGPUDescriptorHandleForHeapStart());
             src=upscaled_.get();src_w=out_w_;src_h=out_h_;
         }
+        if(fg_context_){
+            encode_frame_generation(job,reset);
+            ID3D12DescriptorHeap* heaps[]={heap_.get(),sampler_heap_.get()};cmd_->SetDescriptorHeaps(2,heaps);cmd_->SetComputeRootSignature(root_.get());
+            cmd_->SetComputeRootDescriptorTable(RootSrvTable,gpu(0));cmd_->SetComputeRootDescriptorTable(RootUavTable,gpu(SlotMotionOut));cmd_->SetComputeRootDescriptorTable(RootSamplers,sampler_heap_->GetGPUDescriptorHandleForHeapStart());}
         latest_src_=src;latest_w_=src_w;latest_h_=src_h;
         show(src,src_w,src_h);
         submit();present();
@@ -577,7 +666,8 @@ private:
     Com<IDXGISwapChain3> swapchain_;Com<ID3D12Resource> backbuffers_[backbuffers];bool tearing_=false;int backbuffer_w_=0,backbuffer_h_=0;
     Com<ID3D12Resource> color_in_,scene_in_,depth_in_,motion_,depth_fx_,reactive_,upscaled_,bloom_a_,bloom_b_,blank_;Com<ID3D12Resource> uploads_[frames_in_flight];bool inputs_uploaded_=false;
     ID3D12Resource* latest_src_=nullptr;int latest_w_=640,latest_h_=480;
-    HMODULE loader_module_=nullptr,upscaler_module_=nullptr;FfxFunctions ffx_{};ffxContext context_=nullptr;std::vector<std::uint64_t> version_ids_;std::vector<std::string> version_names_;std::string provider_name_;
+    HMODULE loader_module_=nullptr,upscaler_module_=nullptr;FfxFunctions ffx_{};ffxContext context_=nullptr;
+    ffxContext swapchain_context_=nullptr,fg_context_=nullptr;std::uint64_t fg_frame_id_=0;bool fg_supported_=false,fg_reset_=true;std::vector<std::uint64_t> version_ids_;std::vector<std::string> version_names_;std::string provider_name_;
     VideoSettings settings_;PresentStats stats_;std::string notes_;
     bool dirty_=true,upscaler_supported_=false,history_valid_=false,last_valid_=false,int8_loaded_=false;std::atomic<bool> broken_{false};
     std::mutex mutex_;mutable std::mutex state_mutex_;std::condition_variable cv_;Pending staging_;bool staging_new_=false,stop_=false;VideoSettings requested_;bool requested_dirty_=false;

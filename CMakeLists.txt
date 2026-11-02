@@ -514,8 +514,9 @@ if(RECVX_BUILD_RUNTIME)
   endif()
   # No original engine or historical console audit target is permitted.
   target_link_libraries(recvx-runtime PRIVATE recvx_input)
-  if(APPLE AND NOT IOS AND NOT TVOS)
-    # Host-Praesentationsstufe mit MetalFX (native/metalfx_present.h): schwach gelinkt, Klassen hinter @available.
+  if(APPLE)
+    # Host-Praesentationsstufe mit MetalFX (native/metalfx_present.h) auf macOS, iOS/iPadOS und tvOS:
+    # schwach gelinkt, Klassen hinter @available (MetalFX ab macOS 13 / iOS 16 / tvOS 16).
     set_source_files_properties(native/metalfx_present.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-fobjc-arc")
     target_sources(recvx-runtime PRIVATE native/metalfx_present.mm)
     target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_METALFX=1)

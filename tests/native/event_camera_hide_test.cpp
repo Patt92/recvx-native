@@ -159,6 +159,43 @@ int main(int argc,char** argv){try{
         check(entered==hidden(2),"Einstieg auf Key 2: die Masken dieses Keys gelten sofort");
         check(entered!=hidden(0),"Einstieg auf Key 2 darf nicht die Masken von Key 0 tragen");
     }
+    for(const bool armed:{true,false}){
+        // cut.c:1998-2005 Initpass: st_flg 0x800000 loescht sich mit gm_flg 0x80000 und setzt pt_flg 0x1
+        // (bhPutModel(plp) wieder an); ohne 0x800000 bleibt pt_flg unberuehrt. Diagnosevorbedingung:
+        // die Flags werden gezielt gesetzt.
+        RoomWorld fresh(bytes,stage,actor,motion,frame,audio,data,{},"RM_0000");
+        Inventory inv2;MessageDialog dlg2;EventVm ev2(bytes,inv2,dlg2);
+        fresh.bind_player_collision(ev2);fresh.set_presentation_flags(0u);
+        if(armed){ev2.flags[5][0]|=0x800000u;ev2.flags[11][0]|=0x80000u;}
+        check(fresh.bind({0x13,0,0,0,std::vector<std::uint8_t>{0x13,0x00,std::uint8_t(track),0x00}}),"0x13 nicht gebunden");
+        // cut.c:1720 cam.flg &= ~0x38: weder Kamerafilter (0x8) noch Linsenschutz (0x10) gelten unter der Ereigniskamera.
+        check(!fresh.effect_context().camera_filter&&!fresh.effect_context().camera_cut_wall,"bhSetEventCamera: cam.flg 0x8/0x10 bleiben");
+        fresh.tick_camera(stage,stage.cameras.at(0),0);
+        check(((fresh.presentation_flags()&1u)!=0)==armed,armed?"Initpass: pt_flg 0x1 fehlt nach st_flg 0x800000":"Initpass: pt_flg 0x1 ohne st_flg 0x800000");
+        check(!(ev2.flags[5][0]&0x800000u)&&(ev2.flags[5][0]&0x10u),"Initpass: st_flg 0x800000 loeschen, 0x10 setzen");
+        check(!armed||!(ev2.flags[11][0]&0x80000u),"Initpass: gm_flg 0x80000 bleibt");
+    }
+    {   // cut.c:1720 cam.flg &= ~0x38 an einem echten Schnitt mit Filter (CAM_WRK flg 0x8000 -> cam.flg 0x8)
+        // bzw. Linsenschutz (flg 0x200 -> cam.flg 0x10): erster solcher Schnitt in einem Raum mit Ereigniskameras.
+        bool found=false;
+        for(const auto& entry:std::filesystem::directory_iterator(data/"rooms")){
+            const auto name=entry.path().stem().string();if(entry.path().extension()!=".RDT"||found)continue;
+            const auto rb=read_asset_file(entry.path(),64*1024*1024);Scene rs;try{rs=decode_scene(rb);}catch(const std::exception&){continue;}
+            const BinaryView rv(rb);if(!rv.u32(inspect_room(rb).room_offset+0x34))continue;
+            for(unsigned cut=0;cut<rs.cameras.size()&&!found;++cut){
+                if(!(rs.cameras[cut].flags&0x8200u)||rs.spawns.empty())continue;
+                auto ra=rs.spawns.at(0);std::size_t rm=0;std::int64_t rf=0;
+                RoomWorld w(rb,rs,ra,rm,rf,audio,data,{},name);Inventory i3;MessageDialog d3;EventVm e3(rb,i3,d3);
+                w.bind_player_collision(e3);
+                try{w.set_fixed_cut(cut);}catch(const std::exception&){continue;}
+                const auto before=w.effect_context();
+                if(!before.camera_filter&&!before.camera_cut_wall)continue;
+                if(!w.bind({0x13,0,0,0,std::vector<std::uint8_t>{0x13,0x00,0x00,0x00}}))continue;
+                check(!w.effect_context().camera_filter&&!w.effect_context().camera_cut_wall,name+" Schnitt "+std::to_string(cut)+": cam.flg 0x8/0x10 bleiben unter bhSetEventCamera");
+                std::cout<<name<<" cut "<<cut<<": cam.flg 0x38 cleared by bhSetEventCamera\n";found=true;}
+        }
+        check(found,"kein Schnitt mit flg 0x8000/0x200 in einem Raum mit Ereigniskameras gefunden");
+    }
     light_masks(data);
     std::cout<<"event camera hide masks ok\n";return 0;
 }catch(const std::exception& e){std::cerr<<"event camera hide masks: "<<e.what()<<'\n';return 1;}}

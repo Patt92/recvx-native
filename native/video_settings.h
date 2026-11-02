@@ -23,7 +23,8 @@ enum class RenderBackend {Gpu,Software,OpenGL,Vulkan,D3D12};
 //   Tiefe und Bewegungsvektoren aus der Kamera-Reprojektion, ohne Subpixel-Jitter); FSR 4 (Windows,
 //   fsr_present_d3d12.h: AMD FidelityFX ueber die ffx-api-DLLs, FP8- oder INT8-Modell, FSR-3.1-Fallback
 //   des Upscaler-Providers auf GPUs ohne FSR-4-Unterstuetzung).
-//   FrameGeneration: MetalFX-Frame-Interpolation (macOS 26+) erzeugt je Spieltakt ein Zwischenbild.
+//   FrameGeneration: MetalFX-Frame-Interpolation (macOS/iOS 26+) bzw. AMD FSR Frame Generation (Windows,
+//   fsr_present_d3d12.cpp) erzeugt je Spieltakt ein Zwischenbild.
 //   Sharpness: Grad des kontrastadaptiven Schaerfens (aus, leicht, mittel, stark), unabhaengig vom Modus.
 //   PostProcess: Off; CRT light (Zeilenraster der 480 Spielzeilen + einfache Maske, sRGB); CRT full (gamma-
 //   korrektes Zeilenraster mit Helligkeitsausgleich, Schlitzmaske je Ausgabepixel, Bloom/Halation).
@@ -33,7 +34,7 @@ enum class Upscaler {Off,MetalFxSpatial,MetalFxTemporal,Fsr4,Fsr4Int8};
 // in der ersten Takthaelfte). 30 = ein Bild je Takt; 60/120 = 2/4 Praesentationen je Takt mit VSync;
 // Unlimited = VSync aus, fortlaufend praesentieren (hoehere CPU-/GPU-Last).
 enum class FrameRate {Hz30,Hz60,Hz120,Unlimited};
-enum class FrameGeneration {Off,MetalFx};
+enum class FrameGeneration {Off,MetalFx,Fsr};
 enum class Sharpness {Off,Light,Medium,Strong};
 enum class PostProcess {Off,CrtLight,CrtFull};
 struct VideoSettings {
@@ -94,7 +95,8 @@ public:
     std::string describe_sharpness()const;
     std::string describe_post_process()const;
     // Runtime report: presentation stage (post-processing), the stage's upscalers and frame generation usable?
-    void set_availability(bool presentation,bool upscaler,bool frame_generation){presentation_available_=presentation;upscaler_available_=upscaler;frame_generation_available_=frame_generation;}
+    // frame_generation_kind: welche Frame-Generation die Stufe dieser Plattform kann (MetalFX bzw. FSR).
+    void set_availability(bool presentation,bool upscaler,bool frame_generation,FrameGeneration frame_generation_kind=FrameGeneration::MetalFx){presentation_available_=presentation;upscaler_available_=upscaler;frame_generation_available_=frame_generation;frame_generation_kind_=frame_generation_kind;}
     bool presentation_available()const{return presentation_available_;}
     bool upscaler_available()const{return upscaler_available_;}
     bool frame_generation_available()const{return frame_generation_available_;}
@@ -104,6 +106,6 @@ private:
     std::filesystem::path path_;
     VideoSettings settings_;
     std::string status_;
-    bool presentation_available_=false,upscaler_available_=false,frame_generation_available_=false;
+    bool presentation_available_=false,upscaler_available_=false,frame_generation_available_=false;FrameGeneration frame_generation_kind_=FrameGeneration::MetalFx;
 };
 }

@@ -138,7 +138,9 @@ presentation path.
 
 Presents through the SDL window's Metal layer. Because it consumes only the
 finished frame, it works on top of every macOS raster backend (Metal, Vulkan
-via MoltenVK, OpenGL, software). Needs macOS 13 or newer with Metal.
+via MoltenVK, OpenGL, software). Needs macOS 13 or newer with Metal. The same
+stage runs on iPhone, iPad and Apple TV (MetalFX from iOS/tvOS 16, frame
+interpolation from iOS/tvOS 26); not yet checked on a device.
 
 - **Upscaler** — `metalfx-spatial` or `metalfx-temporal`, from 640×480 to
   the window's 4:3 fit. Temporal uses depth and camera-reprojected motion
@@ -158,7 +160,11 @@ via MoltenVK, OpenGL, software). Needs macOS 13 or newer with Metal.
 
 Presents through a DXGI flip swap chain on the SDL window's HWND from a
 Direct3D 12 device of its own, so it works on top of every Windows raster
-backend (Direct3D 11 default, Direct3D 12, Vulkan, software). FSR itself comes
+backend (Direct3D 11 default, Direct3D 12, Vulkan, software). When the stage
+starts it owns the window's only swap chain; SDL then draws in software only as
+a fallback, so upscaling, frame generation, sharpening and CRT are actually
+available (before, SDL's own Direct3D 11 swap chain on the same window made the
+stage fail and every row read "(not available)"). FSR itself comes
 only from AMD's signed ffx-api DLLs; the repository ships the MIT ffx-api
 headers (`native/third_party/FidelityFX-SDK/include`), never the DLLs. Without
 the DLLs next to the runtime (or in `RECVX_FSR_SDK`) the rows read "(not
@@ -174,11 +180,14 @@ available)" and the plain SDL copy presents.
   MetalFX stage) and a reactive mask that excludes the 2D layer from history.
   No subpixel jitter and no per-object motion vectors yet: the engine does not
   produce them, moving characters are reprojected as part of the camera.
-- **Frame generation** — not wired in yet. `amd_fidelityfx_framegeneration_dx12.dll`
-  (FSR 3.1/4 frame interpolation and swap chain) is loaded by the same loader,
-  but frame interpolation expects ≥ 60 fps of input while the game tick is
-  30 Hz; it needs the presentation-thread cadence of the MetalFX stage and a
-  UI composition path before it can be offered.
+- **Frame generation** — `fsr` (AMD FSR frame generation from
+  `amd_fidelityfx_framegeneration_dx12.dll`, loaded by the same loader). With
+  that DLL present the stage creates its swap chain as the FSR frame-generation
+  swap chain; per game frame it configures generation for the fitted image and
+  prepares it with the same depth, motion vectors and camera, and the swap
+  chain inserts and paces the generated frame. The 2D layer is part of the
+  image (no HUD-less input yet), so moving 2D elements can smear. Not yet run
+  on Windows hardware.
 - **Post-processing** — the same sharpening and CRT chain as the MetalFX
   stage, ported to HLSL compute.
 

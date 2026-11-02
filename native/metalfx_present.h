@@ -58,7 +58,7 @@ public:
 // layer: CAMetalLayer* (SDL_RenderGetMetalLayer). nullptr mit Begruendung, wenn kein Metal-Layer/Geraet.
 std::unique_ptr<MetalFxPresenter> create_metalfx_presenter(void* layer,std::string& reason);
 #if !defined(RECVX_HAVE_METALFX)
-inline std::unique_ptr<MetalFxPresenter> create_metalfx_presenter(void*,std::string& reason){reason="MetalFX presentation is built for macOS only";return nullptr;}
+inline std::unique_ptr<MetalFxPresenter> create_metalfx_presenter(void*,std::string& reason){reason="MetalFX presentation is built for Apple platforms only";return nullptr;}
 #endif
 // Windows: FSR-4-Stufe (fsr_present_d3d12.cpp) auf dem HWND des SDL-Fensters; sdk_dir ist der Ordner der
 // AMD-ffx-api-DLLs (amd_fidelityfx_loader_dx12.dll bzw. amd_fidelityfx_dx12.dll, amd_fidelityfx_upscaler_dx12.dll,

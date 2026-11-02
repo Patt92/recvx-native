@@ -700,7 +700,10 @@ void RoomWorld::set_event_camera(unsigned cno,unsigned kno,bool lock){
          if(collision_events_&&(collision_events_->flags[5][0]&0x2u)&&(k.flags&0x8u)){fog_ct_=fog_cngct_-4;if(fog_ct_<0)fog_ct_=0;}
          else fog_ct_=0;
          // cut.c:1718 / :2018: gm_flg 0x10 arms the bhControlEOR fog pass.
-         if(collision_events_)collision_events_->flags[11][0]|=0x10u;}if(collision_events_){const auto& e=*collision_events_;installed_clip_=event_view_clip(e.values[0],e.values[1],e.values[21],event_camera_index,e.flags[12][0]);
+         if(collision_events_)collision_events_->flags[11][0]|=0x10u;
+         // cut.c:1720 / :1795 cam.flg &= ~0x38: Filter (0x8, bhEffFil) und Linsenschutz (0x10, bhEff301) des
+         // vorigen Raumschnitts enden mit der Ereigniskamera; 0x20 bildet !event_camera ab (mark_exm_cut_effect).
+         camera_filter_=false;camera_cut_wall_=false;}if(collision_events_){const auto& e=*collision_events_;installed_clip_=event_view_clip(e.values[0],e.values[1],e.values[21],event_camera_index,e.flags[12][0]);
          // event.c:965 / cut.c:1797: bhChangeClipVolume direkt nach bhChangeViewClip, ohne ts_flg-Bedingung.
          installed_volume_=event_clip_volume(e.values[0],e.values[1],e.values[21],event_camera_index);}
     change_background(true); // cut.c:1722/1799, after the new key fog
@@ -5192,7 +5195,7 @@ void RoomWorld::control_event_camera(){
     if(event_camera_init_){ // case 0 (:1998-2020), falls through into case 1
         camera_filter_=false; // cut.c:2008 cam.flg &= ~0x8 (0x10 bleibt stehen)
         if(collision_events_){auto& st=collision_events_->flags[5][0];st|=0x10u;
-            if(st&0x800000u){st&=~0x800000u;collision_events_->flags[11][0]&=~0x80000u;}}
+            if(st&0x800000u){st&=~0x800000u;collision_events_->flags[11][0]&=~0x80000u;presentation_flags_|=1u;}} // :2000-2005 pt_flg 0x1
         event_camera_clock_=0;event_camera_init_=false;
         set_event_camera_masks(); // cut.c:2020 bhSetEventHideObjLgt
         init_event_camera();

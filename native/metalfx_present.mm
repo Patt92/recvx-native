@@ -27,11 +27,11 @@
 #include <thread>
 #include <vector>
 #include <AvailabilityVersions.h>
-// Frame-Interpolation braucht das macOS-26-SDK, die Kameramatrizen des Interpolators das macOS-27-SDK.
-#if defined(__MAC_26_0)
+// Frame-Interpolation braucht das macOS/iOS/tvOS-26-SDK, die Kameramatrizen des Interpolators das 27er-SDK.
+#if defined(__MAC_26_0)||defined(__IPHONE_26_0)||defined(__TVOS_26_0)
 #define RECVX_SDK_FRAME_INTERPOLATION 1
 #endif
-#if defined(__MAC_27_0)
+#if defined(__MAC_27_0)||defined(__IPHONE_27_0)||defined(__TVOS_27_0)
 #define RECVX_SDK_INTERPOLATOR_MATRICES 1
 #endif
 namespace recvx {
@@ -176,9 +176,9 @@ public:
          d.depthAttachmentPixelFormat=MTLPixelFormatDepth32Float;depth_pipeline_=[device_ newRenderPipelineStateWithDescriptor:d error:&error];
          if(!depth_pipeline_)throw std::runtime_error(std::string("presentation depth pipeline: ")+error.localizedDescription.UTF8String);
          MTLDepthStencilDescriptor* ds=[MTLDepthStencilDescriptor new];ds.depthWriteEnabled=YES;ds.depthCompareFunction=MTLCompareFunctionAlways;depth_state_=[device_ newDepthStencilStateWithDescriptor:ds];}
-        if(@available(macOS 13.0,*)){upscaler_supported_=[MTLFXSpatialScalerDescriptor supportsDevice:device_]&&[MTLFXTemporalScalerDescriptor supportsDevice:device_];}
+        if(@available(macOS 13.0,iOS 16.0,tvOS 16.0,*)){upscaler_supported_=[MTLFXSpatialScalerDescriptor supportsDevice:device_]&&[MTLFXTemporalScalerDescriptor supportsDevice:device_];}
 #if RECVX_SDK_FRAME_INTERPOLATION
-        if(@available(macOS 26.0,*)){frame_generation_supported_=[MTLFXFrameInterpolatorDescriptor supportsDevice:device_];}
+        if(@available(macOS 26.0,iOS 26.0,tvOS 26.0,*)){frame_generation_supported_=[MTLFXFrameInterpolatorDescriptor supportsDevice:device_];}
 #endif
         inflight_=dispatch_semaphore_create(1);
         worker_=std::thread([this]{run();});
@@ -255,7 +255,7 @@ private:
         id<MTLTexture> color=color_in_;
         if(chain_.work_format!=MTLPixelFormatBGRA8Unorm){blit(cb,color_in_,work_in_);color=work_in_;}
         const unsigned cur=current_,prev=current_^1u;
-        if(@available(macOS 13.0,*)){
+        if(@available(macOS 13.0,iOS 16.0,tvOS 16.0,*)){
             if(chain_.temporal){id<MTLFXTemporalScaler> t=(id<MTLFXTemporalScaler>)chain_.temporal;t.colorTexture=color;t.depthTexture=depth_fx_;t.motionTexture=motion_tex_;
                 t.outputTexture=chain_.spatial?temporal_out_:final_[cur];t.jitterOffsetX=0;t.jitterOffsetY=0;t.motionVectorScaleX=1;t.motionVectorScaleY=1;
                 t.reset=reset;t.depthReversed=YES;t.inputContentWidth=640;t.inputContentHeight=480;[t encodeToCommandBuffer:cb];color=t.outputTexture;}
@@ -264,7 +264,7 @@ private:
         if(!chain_.temporal&&!chain_.spatial&&color!=final_[cur]){blit(cb,color,final_[cur]);color=final_[cur];}
         bool interpolated=false;
 #if RECVX_SDK_FRAME_INTERPOLATION
-        if(@available(macOS 26.0,*)){
+        if(@available(macOS 26.0,iOS 26.0,tvOS 26.0,*)){
             if(chain_.interpolator&&!reset&&job.delta>0){
                 id<MTLFXFrameInterpolator> fi=(id<MTLFXFrameInterpolator>)chain_.interpolator;
                 fi.colorTexture=final_[cur];fi.prevColorTexture=final_[prev];fi.depthTexture=depth_fx_;fi.motionTexture=motion_tex_;fi.outputTexture=interp_;
@@ -281,7 +281,7 @@ private:
                 const float fov=fy>0?2.0f*std::atan(240.0f/fy)*180.0f/3.14159265f:60.0f;
                 fi.fieldOfView=fov;fi.aspectRatio=settings_.widescreen?16.0f/9.0f:4.0f/3.0f;fi.nearPlane=depth_near_;fi.farPlane=depth_far_;
 #if RECVX_SDK_INTERPOLATOR_MATRICES
-                if(@available(macOS 27.0,*)){
+                if(@available(macOS 27.0,iOS 27.0,tvOS 27.0,*)){
                     fi.worldToViewMatrix=to_simd(last_view_);
                     const float a=depth_near_*depth_far_/(depth_far_-depth_near_),b=depth_near_/(depth_far_-depth_near_);
                     const float fx=last_focal_[0]>0?last_focal_[0]:fy;
@@ -412,7 +412,7 @@ private:
         if(!blank_)blank_=make(MTLPixelFormatRGBA16Float,1,1,MTLTextureUsageShaderRead,MTLStorageModeShared);
         interp_=nil;ui_tex_=nil;
 #if RECVX_SDK_FRAME_INTERPOLATION
-        if(@available(macOS 26.0,*)){
+        if(@available(macOS 26.0,iOS 26.0,tvOS 26.0,*)){
             if(settings_.frame_generation==FrameGeneration::MetalFx){
                 if(!frame_generation_supported_)append_note("frame interpolation unsupported on this device/OS");
                 else{
@@ -440,11 +440,11 @@ private:
         const double fit=std::min(fit_w_/640.0,fit_h_/480.0);
         if(fit<=1.0){append_note("window not larger than 640x480");return true;}
         bool ok=true;
-        if(@available(macOS 13.0,*)){
+        if(@available(macOS 13.0,iOS 16.0,tvOS 16.0,*)){
             int w=640,h=480;
             if(settings_.upscaler==Upscaler::MetalFxTemporal){
                 float lo=1.0f,hi=2.0f; // macOS 13: fester Bereich 1..2; ab 14 fragt das Geraet
-                if(@available(macOS 14.0,*)){lo=[MTLFXTemporalScalerDescriptor supportedInputContentMinScaleForDevice:device_];hi=[MTLFXTemporalScalerDescriptor supportedInputContentMaxScaleForDevice:device_];}
+                if(@available(macOS 14.0,iOS 17.0,tvOS 17.0,*)){lo=[MTLFXTemporalScalerDescriptor supportedInputContentMinScaleForDevice:device_];hi=[MTLFXTemporalScalerDescriptor supportedInputContentMaxScaleForDevice:device_];}
                 const double s=std::clamp(fit,double(std::max(lo,1.0f)),double(std::max(hi,std::max(lo,1.0f))));
                 MTLFXTemporalScalerDescriptor* d=[MTLFXTemporalScalerDescriptor new];
                 d.colorTextureFormat=format;d.outputTextureFormat=format;d.depthTextureFormat=MTLPixelFormatDepth32Float;d.motionTextureFormat=MTLPixelFormatRG16Float;
