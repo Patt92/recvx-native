@@ -167,6 +167,12 @@ only so far; neither platform has been run with it yet.
 
 ### AMD FSR 4 (Windows)
 
+The Windows D3D12 presentation stage also offers **FSR 1** (`upscaler = fsr1`):
+EASU edge-adaptive scaling plus RCAS, compiled into the runtime as HLSL compute
+shaders. It needs no AMD DLLs and is available to ARM64 builds too. Select it
+explicitly; it never silently replaces FSR 4. Windows x64 cross-build and shader
+compilation checked; GPU execution and Windows ARM64 remain unverified.
+
 Presents through a DXGI flip swap chain on the SDL window's HWND from a
 Direct3D 12 device of its own, so it works on top of every Windows raster
 backend (Direct3D 11 default, Direct3D 12, Vulkan, software). When the stage

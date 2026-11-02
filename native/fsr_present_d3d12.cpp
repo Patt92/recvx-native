@@ -168,6 +168,96 @@ void present_cs(uint3 gid : SV_DispatchThreadID) {
     Dst[gid.xy]=float4(c,1.0);
 }
 )HLSL";
+constexpr const char* fsr1_hlsl=R"HLSL(// AMD FSR 1 EASU/RCAS, same arithmetic as the GLSL ES implementation in gles_present.cpp.
+cbuffer Fsr1CB:register(b0){uint2 fsr_size;uint2 fsr_pad;};
+Texture2D<float4> FsrSource:register(t0);
+RWTexture2D<float4> FsrOutput:register(u0);
+
+
+
+
+float3 tap(int2 q){return FsrSource.Load(int3(clamp(q,int2(0,0),int2(639,479)),0)).rgb;}
+float approx_rcp(float v){return asfloat(0x7ef07ebbu-asuint(v));}
+float approx_rsqrt(float v){return asfloat(0x5f347d74u-(asuint(v)>>1u));}
+void easu_tap(inout float3 aC,inout float aW,float2 off,float2 dir,float2 len,float lob,float clp,float3 c){
+    float2 v;v.x=(off.x*dir.x)+(off.y*dir.y);v.y=(off.x*(-dir.y))+(off.y*dir.x);v*=len;
+    float d2=v.x*v.x+v.y*v.y;d2=min(d2,clp);
+    float wB=(2.0/5.0)*d2+(-1.0);float wA=lob*d2+(-1.0);wB*=wB;wA*=wA;wB=(25.0/16.0)*wB+(-(25.0/16.0-1.0));
+    float w=wB*wA;aC+=c*w;aW+=w;}
+void easu_set(inout float2 dir,inout float len,float2 pp,bool biS,bool biT,bool biU,bool biV,float lA,float lB,float lC,float lD,float lE){
+    float w=0.0;
+    if(biS)w=(1.0-pp.x)*(1.0-pp.y);
+    if(biT)w=pp.x*(1.0-pp.y);
+    if(biU)w=(1.0-pp.x)*pp.y;
+    if(biV)w=pp.x*pp.y;
+    float dc=lD-lC;float cb=lC-lB;float lenX=max(abs(dc),abs(cb));lenX=approx_rcp(lenX);
+    float dirX=lD-lB;dir.x+=dirX*w;lenX=clamp(abs(dirX)*lenX,0.0,1.0);lenX*=lenX;len+=lenX*w;
+    float ec=lE-lC;float ca=lC-lA;float lenY=max(abs(ec),abs(ca));lenY=approx_rcp(lenY);
+    float dirY=lE-lA;dir.y+=dirY*w;lenY=clamp(abs(dirY)*lenY,0.0,1.0);lenY*=lenY;len+=lenY*w;}
+float easu_cs_luma(float3 c){return c.b*0.5+(c.r*0.5+c.g);}
+[numthreads(8,8,1)]
+void easu_cs(uint3 gid:SV_DispatchThreadID){
+    if(any(gid.xy>=fsr_size))return;
+    float2 ip=float2(gid.xy);
+    float4 con0=float4(640.0/float(fsr_size.x),480.0/float(fsr_size.y),320.0/float(fsr_size.x)-0.5,240.0/float(fsr_size.y)-0.5);
+    float2 pp=ip*con0.xy+con0.zw;float2 fp=floor(pp);pp-=fp;int2 f=int2(fp);
+    float3 b=tap(f+int2(0,-1)),c=tap(f+int2(1,-1));
+    float3 e=tap(f+int2(-1,0)),ff=tap(f),g=tap(f+int2(1,0)),h=tap(f+int2(2,0));
+    float3 i=tap(f+int2(-1,1)),j=tap(f+int2(0,1)),k=tap(f+int2(1,1)),l=tap(f+int2(2,1));
+    float3 n=tap(f+int2(0,2)),oo=tap(f+int2(1,2));
+    float bL=easu_cs_luma(b),cL=easu_cs_luma(c),iL=easu_cs_luma(i),jL=easu_cs_luma(j),fL=easu_cs_luma(ff),eL=easu_cs_luma(e),kL=easu_cs_luma(k),lL=easu_cs_luma(l),hL=easu_cs_luma(h),gL=easu_cs_luma(g),oL=easu_cs_luma(oo),nL=easu_cs_luma(n);
+    float2 dir=float2(0.0);float len=0.0;
+    easu_set(dir,len,pp,true,false,false,false,bL,eL,fL,gL,jL);
+    easu_set(dir,len,pp,false,true,false,false,cL,fL,gL,hL,kL);
+    easu_set(dir,len,pp,false,false,true,false,fL,iL,jL,kL,nL);
+    easu_set(dir,len,pp,false,false,false,true,gL,jL,kL,lL,oL);
+    float2 dir2=dir*dir;float dirR=dir2.x+dir2.y;bool zro=dirR<(1.0/32768.0);
+    dirR=approx_rsqrt(dirR);dirR=zro?1.0:dirR;dir.x=zro?1.0:dir.x;dir*=float2(dirR);
+    len=len*0.5;len*=len;
+    float stretch=(dir.x*dir.x+dir.y*dir.y)*approx_rcp(max(abs(dir.x),abs(dir.y)));
+    float2 len2=float2(1.0+(stretch-1.0)*len,1.0+(-0.5)*len);
+    float lob=0.5+((1.0/4.0-0.04)-0.5)*len;float clp=approx_rcp(lob);
+    float3 min4=min(min(min(ff,g),j),k),max4=max(max(max(ff,g),j),k);
+    float3 aC=float3(0.0);float aW=0.0;
+    easu_tap(aC,aW,float2(0.0,-1.0)-pp,dir,len2,lob,clp,b);
+    easu_tap(aC,aW,float2(1.0,-1.0)-pp,dir,len2,lob,clp,c);
+    easu_tap(aC,aW,float2(-1.0,1.0)-pp,dir,len2,lob,clp,i);
+    easu_tap(aC,aW,float2(0.0,1.0)-pp,dir,len2,lob,clp,j);
+    easu_tap(aC,aW,float2(0.0,0.0)-pp,dir,len2,lob,clp,ff);
+    easu_tap(aC,aW,float2(-1.0,0.0)-pp,dir,len2,lob,clp,e);
+    easu_tap(aC,aW,float2(1.0,1.0)-pp,dir,len2,lob,clp,k);
+    easu_tap(aC,aW,float2(2.0,1.0)-pp,dir,len2,lob,clp,l);
+    easu_tap(aC,aW,float2(2.0,0.0)-pp,dir,len2,lob,clp,h);
+    easu_tap(aC,aW,float2(1.0,0.0)-pp,dir,len2,lob,clp,g);
+    easu_tap(aC,aW,float2(1.0,2.0)-pp,dir,len2,lob,clp,oo);
+    easu_tap(aC,aW,float2(0.0,2.0)-pp,dir,len2,lob,clp,n);
+    FsrOutput[gid.xy]=float4(min(max4,max(min4,aC*float3(1.0/aW))),1.0);
+}
+
+
+
+
+
+float3 rcas_tap(int2 q){return FsrSource.Load(int3(clamp(q,int2(0,0),int2(fsr_size)-1),0)).rgb;}
+float approx_rcp_medium(float v){float b=asfloat(0x7ef19fffu-asuint(v));return b*(-b*v+2.0);}
+float rcas_cs_luma(float3 c){return c.b*0.5+(c.r*0.5+c.g);}
+[numthreads(8,8,1)]
+void rcas_cs(uint3 gid:SV_DispatchThreadID){
+    if(any(gid.xy>=fsr_size))return;
+    int2 sp=int2(gid.xy);
+    float3 b=rcas_tap(sp+int2(0,-1)),d=rcas_tap(sp+int2(-1,0)),e=rcas_tap(sp),f=rcas_tap(sp+int2(1,0)),h=rcas_tap(sp+int2(0,1));
+    float bL=rcas_cs_luma(b),dL=rcas_cs_luma(d),eL=rcas_cs_luma(e),fL=rcas_cs_luma(f),hL=rcas_cs_luma(h);
+    float3 mn4=min(min(min(b,d),f),h),mx4=max(max(max(b,d),f),h);
+    float2 peakC=float2(1.0,-1.0*4.0);
+    float lowerLimiterMultiplier=clamp(eL/min(min(min(bL,dL),fL),hL),0.0,1.0);
+    float3 hitMin=mn4*(1.0/(4.0*mx4))*lowerLimiterMultiplier;
+    float3 hitMax=(peakC.x-mx4)*(1.0/(4.0*mn4+peakC.y));
+    float3 lobeRGB=max(-hitMin,hitMax);
+    float lobe=max(-(0.25-(1.0/16.0)),min(max(max(lobeRGB.r,lobeRGB.g),lobeRGB.b),0.0))*exp2(-0.25);
+    float rcpL=approx_rcp_medium(4.0*lobe+1.0);
+    FsrOutput[gid.xy]=float4((lobe*b+lobe*d+lobe*h+lobe*f+e)*rcpL,1.0);
+}
+)HLSL";
 template<class T> struct Com {
     T* p=nullptr;
     Com()=default; ~Com(){reset();}
@@ -222,7 +312,7 @@ void transpose4(const float* m,float* out){for(int c=0;c<4;++c)for(int r=0;r<4;+
 struct Pending{std::vector<std::uint32_t> pixels,scene;std::vector<float> depth;bool has_scene=false;PresentProjection projection;unsigned scene_key=0;double delta=0;int slots=1;};
 // Deskriptorplaetze im sichtbaren Heap: erst t0..t4, dann u0..u4. Die beiden
 // Root-Tabellen adressieren je fuenf zusammenhaengende Deskriptoren.
-enum Slot{SlotDepthIn=0,SlotPixelsIn,SlotSceneIn,SlotSrc,SlotBloomTex,SlotMotionOut,SlotDepthOut,SlotReactiveOut,SlotDst,SlotBloomDst,SlotCount};
+enum Slot{SlotDepthIn=0,SlotPixelsIn,SlotSceneIn,SlotSrc,SlotBloomTex,SlotMotionOut,SlotDepthOut,SlotReactiveOut,SlotDst,SlotBloomDst,SlotEasuSrc,SlotEasuDst,SlotRcasSrc,SlotRcasDst,SlotCount};
 static_assert(SlotSrc==SlotDepthIn+3&&SlotBloomTex==SlotDepthIn+4,"SRV registers t0..t4");
 static_assert(SlotDst==SlotMotionOut+3&&SlotBloomDst==SlotMotionOut+4,"UAV registers u0..u4");
 enum Root{RootMotionCB=0,RootPresentCB,RootBlurCB,RootSrvTable,RootUavTable,RootSamplers};
@@ -257,6 +347,15 @@ public:
          Com<ID3DBlob> blob,errors;
          if(FAILED(serialize(&rd,D3D_ROOT_SIGNATURE_VERSION_1,blob.put(),errors.put())))throw std::runtime_error(std::string("FSR presentation root signature: ")+(errors?static_cast<const char*>(errors->GetBufferPointer()):"serialize failed"));
          require(device_->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),__uuidof(ID3D12RootSignature),root_.put_void()),"root signature");}
+        {D3D12_DESCRIPTOR_RANGE ranges[2]{};
+         ranges[0].RangeType=D3D12_DESCRIPTOR_RANGE_TYPE_SRV;ranges[0].NumDescriptors=1;
+         ranges[1].RangeType=D3D12_DESCRIPTOR_RANGE_TYPE_UAV;ranges[1].NumDescriptors=1;
+         D3D12_ROOT_PARAMETER params[3]{};params[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;params[0].Constants.Num32BitValues=4;
+         for(int i=0;i<2;++i){params[i+1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;params[i+1].DescriptorTable.NumDescriptorRanges=1;params[i+1].DescriptorTable.pDescriptorRanges=&ranges[i];}
+         D3D12_ROOT_SIGNATURE_DESC rd{};rd.NumParameters=3;rd.pParameters=params;Com<ID3DBlob> blob,errors;
+         require(serialize(&rd,D3D_ROOT_SIGNATURE_VERSION_1,blob.put(),errors.put()),"FSR 1 root signature");
+         require(device_->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),__uuidof(ID3D12RootSignature),fsr1_root_.put_void()),"FSR 1 root signature");}
+        easu_pso_=compute("easu_cs",fsr1_hlsl,fsr1_root_.get());rcas_pso_=compute("rcas_cs",fsr1_hlsl,fsr1_root_.get());
         motion_pso_=compute("motion_cs");present_pso_=compute("present_cs");bloom_down_pso_=compute("bloom_down_cs");bloom_blur_pso_=compute("bloom_blur_cs");
         // Feste 640x480-Eingaben und Zwischenbilder der Stufe.
         color_in_=texture(640,480,DXGI_FORMAT_B8G8R8A8_UNORM,D3D12_RESOURCE_FLAG_NONE,D3D12_RESOURCE_STATE_COPY_DEST,"colour input");
@@ -310,14 +409,14 @@ public:
         if(upscaler_module_)FreeLibrary(upscaler_module_);if(loader_module_)FreeLibrary(loader_module_);
     }
     void configure(const VideoSettings& settings)override{std::lock_guard<std::mutex> lock(mutex_);requested_=settings;requested_dirty_=true;}
-    bool upscaler_supported()const override{return upscaler_supported_;}
+    bool upscaler_supported()const override{return true;}
     bool frame_generation_supported()const override{return fg_supported_;}
-    std::uint32_t upscalers()const override{return (1u<<unsigned(Upscaler::Fsr4))|(1u<<unsigned(Upscaler::Fsr4Int8));}
+    std::uint32_t upscalers()const override{return (1u<<unsigned(Upscaler::Fsr1))|(upscaler_supported_?((1u<<unsigned(Upscaler::Fsr4))|(1u<<unsigned(Upscaler::Fsr4Int8))):0u);}
     const PresentStats& stats()const override{std::lock_guard<std::mutex> lock(state_mutex_);stats_copy_=stats_;return stats_copy_;}
     std::string describe()const override{
         std::lock_guard<std::mutex> lock(state_mutex_);
         std::ostringstream out;
-        if(context_)out<<provider_name_<<" "<<out_w_<<"x"<<out_h_;else out<<"nearest";
+        if(context_)out<<provider_name_<<" "<<out_w_<<"x"<<out_h_;else if(settings_.upscaler==Upscaler::Fsr1)out<<"FSR 1 EASU + RCAS";else out<<"nearest";
         if(fg_context_)out<<", FSR frame generation";
         if(settings_.sharpness!=Sharpness::Off)out<<", sharpen "<<settings_.sharpness_amount();
         if(settings_.post_process==PostProcess::CrtLight)out<<", CRT light";else if(settings_.post_process==PostProcess::CrtFull)out<<", CRT full (phosphor "<<phosphor_<<"px, bloom)";
@@ -335,11 +434,11 @@ public:
     }
 private:
     static constexpr unsigned frames_in_flight=2,backbuffers=3;static constexpr std::size_t upload_pitch=(640*4+D3D12_TEXTURE_DATA_PITCH_ALIGNMENT-1)/D3D12_TEXTURE_DATA_PITCH_ALIGNMENT*D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
-    Com<ID3D12PipelineState> compute(const char* entry){
+    Com<ID3D12PipelineState> compute(const char* entry,const char* source=nullptr,ID3D12RootSignature* signature=nullptr){
         Com<ID3DBlob> code,errors;
-        const HRESULT hr=compile_(present_hlsl,std::strlen(present_hlsl),"fsr_present",nullptr,nullptr,entry,"cs_5_1",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,code.put(),errors.put());
+        const HRESULT hr=compile_(source?source:present_hlsl,std::strlen(source?source:present_hlsl),"fsr_present",nullptr,nullptr,entry,"cs_5_1",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,code.put(),errors.put());
         if(FAILED(hr))throw std::runtime_error(std::string("FSR presentation shader ")+entry+": "+(errors?static_cast<const char*>(errors->GetBufferPointer()):"compile failed"));
-        D3D12_COMPUTE_PIPELINE_STATE_DESC cd{};cd.pRootSignature=root_.get();cd.CS={code->GetBufferPointer(),code->GetBufferSize()};
+        D3D12_COMPUTE_PIPELINE_STATE_DESC cd{};cd.pRootSignature=signature?signature:root_.get();cd.CS={code->GetBufferPointer(),code->GetBufferSize()};
         Com<ID3D12PipelineState> pso;require(device_->CreateComputePipelineState(&cd,__uuidof(ID3D12PipelineState),pso.put_void()),entry);return pso;}
     Com<ID3D12Resource> texture(UINT w,UINT h,DXGI_FORMAT format,D3D12_RESOURCE_FLAGS flags,D3D12_RESOURCE_STATES state,const char* what){
         D3D12_HEAP_PROPERTIES hp{};hp.Type=D3D12_HEAP_TYPE_DEFAULT;
@@ -487,6 +586,8 @@ private:
     void fail(const std::string& what){broken_.store(true);notes_="disabled: "+what;std::fprintf(stderr,"FSR presentation disabled: %s\n",what.c_str());}
     // Einpassung und Zwischenbilder fuer die Fenstergroesse; Swapchain bei Groessenaenderung neu.
     void rebuild(int dw,int dh){
+        // Auch reine Einstellungswechsel ersetzen Texturen und SDK-Kontexte. Erst alle GPU-Leser beenden.
+        wait_idle();
         notes_.clear();
         if(dw!=backbuffer_w_||dh!=backbuffer_h_){
             wait_idle();destroy_frame_generation();for(auto& b:backbuffers_)b.reset();
@@ -498,6 +599,10 @@ private:
         if(!build_context())destroy_context();
         if(context_){upscaled_=texture(UINT(out_w_),UINT(out_h_),DXGI_FORMAT_B8G8R8A8_UNORM,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,"upscaled");}
         else upscaled_.reset();
+        fsr1_easu_.reset();fsr1_rcas_.reset();
+        if(settings_.upscaler==Upscaler::Fsr1){
+            fsr1_easu_=texture(UINT(fit_w_),UINT(fit_h_),DXGI_FORMAT_R8G8B8A8_UNORM,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,"FSR 1 EASU");
+            fsr1_rcas_=texture(UINT(fit_w_),UINT(fit_h_),DXGI_FORMAT_R8G8B8A8_UNORM,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,"FSR 1 RCAS");}
         phosphor_=std::max(1,int(std::lround(fit_w_/640.0/2.0)));
         if(settings_.post_process==PostProcess::CrtFull){
             bloom_a_=texture(UINT(std::max(1,fit_w_/4)),UINT(std::max(1,fit_h_/4)),DXGI_FORMAT_R16G16B16A16_FLOAT,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,"bloom a");
@@ -607,6 +712,20 @@ private:
             cmd_->SetComputeRootDescriptorTable(RootSrvTable,gpu(0));cmd_->SetComputeRootDescriptorTable(RootUavTable,gpu(SlotMotionOut));cmd_->SetComputeRootDescriptorTable(RootSamplers,sampler_heap_->GetGPUDescriptorHandleForHeapStart());
             src=upscaled_.get();src_w=out_w_;src_h=out_h_;
         }
+        if(fsr1_easu_&&fsr1_rcas_){
+            srv(SlotEasuSrc,color_in_.get(),DXGI_FORMAT_B8G8R8A8_UNORM);uav(SlotEasuDst,fsr1_easu_.get(),DXGI_FORMAT_R8G8B8A8_UNORM);
+            srv(SlotRcasSrc,fsr1_easu_.get(),DXGI_FORMAT_R8G8B8A8_UNORM);uav(SlotRcasDst,fsr1_rcas_.get(),DXGI_FORMAT_R8G8B8A8_UNORM);
+            const UINT dimensions[4]={UINT(fit_w_),UINT(fit_h_),0,0};
+            cmd_->SetComputeRootSignature(fsr1_root_.get());cmd_->SetComputeRoot32BitConstants(0,4,dimensions,0);
+            cmd_->SetComputeRootDescriptorTable(1,gpu(SlotEasuSrc));cmd_->SetComputeRootDescriptorTable(2,gpu(SlotEasuDst));
+            cmd_->SetPipelineState(easu_pso_.get());cmd_->Dispatch(UINT((fit_w_+7)/8),UINT((fit_h_+7)/8),1);
+            transition(fsr1_easu_.get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            cmd_->SetComputeRootDescriptorTable(1,gpu(SlotRcasSrc));cmd_->SetComputeRootDescriptorTable(2,gpu(SlotRcasDst));
+            cmd_->SetPipelineState(rcas_pso_.get());cmd_->Dispatch(UINT((fit_w_+7)/8),UINT((fit_h_+7)/8),1);
+            transition(fsr1_rcas_.get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            transition(fsr1_easu_.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            src=fsr1_rcas_.get();src_w=fit_w_;src_h=fit_h_;
+            cmd_->SetComputeRootSignature(root_.get());cmd_->SetComputeRootDescriptorTable(RootSrvTable,gpu(0));cmd_->SetComputeRootDescriptorTable(RootUavTable,gpu(SlotMotionOut));cmd_->SetComputeRootDescriptorTable(RootSamplers,sampler_heap_->GetGPUDescriptorHandleForHeapStart());}
         if(fg_context_){
             encode_frame_generation(job,reset);
             ID3D12DescriptorHeap* heaps[]={heap_.get(),sampler_heap_.get()};cmd_->SetDescriptorHeaps(2,heaps);cmd_->SetComputeRootSignature(root_.get());
@@ -621,7 +740,11 @@ private:
     void represent(){
         if(!latest_src_)return;
         RECT rc{};GetClientRect(hwnd_,&rc);if(std::max<int>(1,rc.right-rc.left)!=backbuffer_w_||std::max<int>(1,rc.bottom-rc.top)!=backbuffer_h_)return;
-        begin();show(latest_src_,latest_w_,latest_h_);submit();present();++stats_.repeated;++stats_.presents;
+        begin();
+        // show() stellt die Upscaler-Ausgabe nach dem Lesen wieder auf UAV. Wiederholungen lesen dasselbe Bild.
+        if(latest_src_==fsr1_rcas_.get()||latest_src_==upscaled_.get())
+            transition(latest_src_,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        show(latest_src_,latest_w_,latest_h_);submit();present();++stats_.repeated;++stats_.presents;
     }
     void present(){
         const UINT sync=settings_.vsync()?1u:0u;const UINT flags=!settings_.vsync()&&tearing_?DXGI_PRESENT_ALLOW_TEARING:0u;
@@ -632,7 +755,7 @@ private:
     // Post-Processing und 4:3-Einpassung von src in den aktuellen Backbuffer.
     void show(ID3D12Resource* src,int src_w,int src_h){
         const UINT index=swapchain_->GetCurrentBackBufferIndex();ID3D12Resource* back=backbuffers_[index].get();
-        srv(SlotSrc,src,DXGI_FORMAT_B8G8R8A8_UNORM);
+        srv(SlotSrc,src,src==fsr1_rcas_.get()?DXGI_FORMAT_R8G8B8A8_UNORM:DXGI_FORMAT_B8G8R8A8_UNORM);
         uav(SlotDst,back,DXGI_FORMAT_B8G8R8A8_UNORM);
         PresentCB u{};u.src_size[0]=float(src_w);u.src_size[1]=float(src_h);u.fit_origin[0]=float(fit_x_);u.fit_origin[1]=float(fit_y_);u.fit_size[0]=float(fit_w_);u.fit_size[1]=float(fit_h_);
         u.dst_size[0]=std::uint32_t(backbuffer_w_);u.dst_size[1]=std::uint32_t(backbuffer_h_);
@@ -660,11 +783,13 @@ private:
         cmd_->SetPipelineState(present_pso_.get());cmd_->Dispatch(UINT((backbuffer_w_+7)/8),UINT((backbuffer_h_+7)/8),1);
         transition(back,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_PRESENT);
         if(settings_.post_process==PostProcess::CrtFull&&bloom_a_)transition(bloom_a_.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if(src==fsr1_rcas_.get())transition(fsr1_rcas_.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         if(src==upscaled_.get())transition(upscaled_.get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
     HWND hwnd_;std::string sdk_dir_;Com<ID3D12Device> device_;PFN_Compile compile_;std::string adapter_;
     Com<ID3D12CommandQueue> queue_;Com<ID3D12CommandAllocator> allocators_[frames_in_flight];Com<ID3D12GraphicsCommandList> cmd_;Com<ID3D12Fence> fence_;HANDLE event_=nullptr;
     UINT64 fence_value_=0,frame_fence_[frames_in_flight]{};unsigned frame_index_=0;
+    Com<ID3D12RootSignature> fsr1_root_;Com<ID3D12PipelineState> easu_pso_,rcas_pso_;Com<ID3D12Resource> fsr1_easu_,fsr1_rcas_;
     Com<ID3D12RootSignature> root_;Com<ID3D12PipelineState> motion_pso_,present_pso_,bloom_down_pso_,bloom_blur_pso_;
     Com<ID3D12DescriptorHeap> heap_,sampler_heap_;UINT descriptor_size_=0;
     Com<IDXGISwapChain3> swapchain_;Com<ID3D12Resource> backbuffers_[backbuffers];bool tearing_=false;int backbuffer_w_=0,backbuffer_h_=0;
