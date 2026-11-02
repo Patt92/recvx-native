@@ -220,8 +220,11 @@ void invert4(const float* m,float* out){
 }
 void transpose4(const float* m,float* out){for(int c=0;c<4;++c)for(int r=0;r<4;++r)out[r*4+c]=m[c*4+r];}
 struct Pending{std::vector<std::uint32_t> pixels,scene;std::vector<float> depth;bool has_scene=false;PresentProjection projection;unsigned scene_key=0;double delta=0;int slots=1;};
-// Deskriptorplaetze im sichtbaren Heap (CBV_SRV_UAV): feste Belegung je Bild.
-enum Slot{SlotDepthIn=0,SlotPixelsIn,SlotSceneIn,SlotMotionOut,SlotDepthOut,SlotReactiveOut,SlotSrc,SlotBloomTex,SlotDst,SlotBloomDst,SlotCount};
+// Deskriptorplaetze im sichtbaren Heap: erst t0..t4, dann u0..u4. Die beiden
+// Root-Tabellen adressieren je fuenf zusammenhaengende Deskriptoren.
+enum Slot{SlotDepthIn=0,SlotPixelsIn,SlotSceneIn,SlotSrc,SlotBloomTex,SlotMotionOut,SlotDepthOut,SlotReactiveOut,SlotDst,SlotBloomDst,SlotCount};
+static_assert(SlotSrc==SlotDepthIn+3&&SlotBloomTex==SlotDepthIn+4,"SRV registers t0..t4");
+static_assert(SlotDst==SlotMotionOut+3&&SlotBloomDst==SlotMotionOut+4,"UAV registers u0..u4");
 enum Root{RootMotionCB=0,RootPresentCB,RootBlurCB,RootSrvTable,RootUavTable,RootSamplers};
 class FsrPresenter final:public MetalFxPresenter{
 public:
