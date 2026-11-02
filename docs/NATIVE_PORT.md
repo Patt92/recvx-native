@@ -187,6 +187,18 @@ SDK; Java through `JAVA_HOME` or Homebrew `openjdk@21`/`openjdk@17`.
   internal app storage `files/RECVX` (`native/user_paths.cpp`, reported by the
   runtime from `SDL_AndroidGetInternalStoragePath`); removed on uninstall.
 - stdout/stderr of the runtime go to logcat with tag `RECVX`.
+- Presentation: `native/gles_present.cpp` (2026-11-02), a synchronous OpenGL ES
+  3.0 stage with its own context on SDL's EGL window, created before any SDL
+  renderer (SDL's GLES2 renderer only appears as fallback when the stage is
+  missing or breaks). Chain per frame: upload 640×480 (red/blue swizzle) →
+  `fsr1`: EASU to the fit size, then RCAS at 0.25 stops (GLSL ES ports of
+  `ffxFsrEasuFloat`/`FsrRcasF` from the MIT FidelityFX SDK 2.1.0 in the same
+  arithmetic order, the EASU gather as twelve clamped `texelFetch`) → CRT full:
+  bright pass and separable Gauss at quarter size (RGBA16F when renderable) →
+  present pass (same kernel as `present_cs`: sharpening, beam profile, masks,
+  bloom, 4:3/16:9 fit) → `SDL_GL_SwapWindow`. It runs on the main thread so
+  SDL's pause/resume context backup applies; repeats between ticks go through
+  `represent()`. Shaders are checked with `glslc`; device and emulator runs open.
 - Rendering: the Vulkan raster backend (`native/gpu_raster_vulkan.cpp`) is
   built and is the Android GPU default (`renderer = gpu` or `vulkan`). Headers
   come from the NDK sysroot, SPIR-V from the same host `glslc` as the desktop

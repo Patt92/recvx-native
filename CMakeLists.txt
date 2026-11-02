@@ -361,6 +361,10 @@ if(RECVX_BUILD_RUNTIME)
     set_target_properties(recvx-runtime PROPERTIES OUTPUT_NAME main)
     target_compile_definitions(recvx-runtime PRIVATE RECVX_ANDROID=1)
     target_link_libraries(recvx-runtime PRIVATE log android)
+    # Host-Praesentationsstufe mit OpenGL ES 3.0 (native/gles_present.cpp): FSR 1, Schaerfen, CRT, Einpassung.
+    target_sources(recvx-runtime PRIVATE native/gles_present.cpp)
+    target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_GLES_PRESENT=1)
+    target_link_libraries(recvx-runtime PRIVATE GLESv3)
   elseif(EMSCRIPTEN)
     # Browser (docs/WEB.md): recvx.js + recvx.wasm, Runtime auf einem pthread, SDL auf dem Hauptthread.
     add_executable(recvx-runtime native/runtime.cpp native/web_main.cpp native/web_sdl_proxy.cpp)

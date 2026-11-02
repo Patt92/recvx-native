@@ -28,7 +28,7 @@ enum class RenderBackend {Gpu,Software,OpenGL,Vulkan,D3D12};
 //   Sharpness: Grad des kontrastadaptiven Schaerfens (aus, leicht, mittel, stark), unabhaengig vom Modus.
 //   PostProcess: Off; CRT light (Zeilenraster der 480 Spielzeilen + einfache Maske, sRGB); CRT full (gamma-
 //   korrektes Zeilenraster mit Helligkeitsausgleich, Schlitzmaske je Ausgabepixel, Bloom/Halation).
-enum class Upscaler {Off,MetalFxSpatial,MetalFxTemporal,Fsr4,Fsr4Int8};
+enum class Upscaler {Off,MetalFxSpatial,MetalFxTemporal,Fsr4,Fsr4Int8,Fsr1}; // Fsr1: AMD FSR 1 (EASU + RCAS), GLES-Stufe auf Android
 // Host-Bildrate der Praesentation (alle Backends): der Spieltakt bleibt 30 Hz (timing.h), zwischen zwei
 // Takten wird das zuletzt gezeichnete Bild erneut praesentiert (mit Frame-Interpolation das Zwischenbild
 // in der ersten Takthaelfte). 30 = ein Bild je Takt; 60/120 = 2/4 Praesentationen je Takt mit VSync;
@@ -96,7 +96,7 @@ public:
     std::string describe_post_process()const;
     // Runtime report: presentation stage (post-processing), the stage's upscalers and frame generation usable?
     // frame_generation_kind: welche Frame-Generation die Stufe dieser Plattform kann (MetalFX bzw. FSR).
-    void set_availability(bool presentation,bool upscaler,bool frame_generation,FrameGeneration frame_generation_kind=FrameGeneration::MetalFx){presentation_available_=presentation;upscaler_available_=upscaler;frame_generation_available_=frame_generation;frame_generation_kind_=frame_generation_kind;}
+    void set_availability(bool presentation,bool upscaler,bool frame_generation,FrameGeneration frame_generation_kind=FrameGeneration::MetalFx,std::uint32_t upscalers=~0u){presentation_available_=presentation;upscaler_available_=upscaler;frame_generation_available_=frame_generation;frame_generation_kind_=frame_generation_kind;upscaler_mask_=upscalers;}
     bool presentation_available()const{return presentation_available_;}
     bool upscaler_available()const{return upscaler_available_;}
     bool frame_generation_available()const{return frame_generation_available_;}
@@ -106,6 +106,6 @@ private:
     std::filesystem::path path_;
     VideoSettings settings_;
     std::string status_;
-    bool presentation_available_=false,upscaler_available_=false,frame_generation_available_=false;FrameGeneration frame_generation_kind_=FrameGeneration::MetalFx;
+    bool presentation_available_=false,upscaler_available_=false,frame_generation_available_=false;FrameGeneration frame_generation_kind_=FrameGeneration::MetalFx;std::uint32_t upscaler_mask_=~0u;
 };
 }

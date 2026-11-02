@@ -104,8 +104,15 @@ int main(){try{
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::MetalFxTemporal&&VideoSettings::read(video_path).upscaler==Upscaler::MetalFxTemporal,"upscaler temporal");
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr4&&VideoSettings::read(video_path).upscaler==Upscaler::Fsr4,"upscaler fsr4");
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr4Int8&&VideoSettings::read(video_path).upscaler==Upscaler::Fsr4Int8,"upscaler fsr4 int8");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr1&&VideoSettings::read(video_path).upscaler==Upscaler::Fsr1,"upscaler fsr1");
+     // Je Stufe nur ihre Skalierer: auf einer MetalFX-Stufe ist FSR 1 nicht verfuegbar, auf der GLES-Stufe schon.
+     video.set_availability(true,true,false,FrameGeneration::MetalFx,(1u<<unsigned(Upscaler::MetalFxSpatial))|(1u<<unsigned(Upscaler::MetalFxTemporal)));
+     check(video.describe_upscaler()=="FSR 1 (spatial) (not available)","FSR 1 must be unavailable on a MetalFX stage");
+     video.set_availability(true,true,false,FrameGeneration::MetalFx,1u<<unsigned(Upscaler::Fsr1));
+     check(video.describe_upscaler()=="FSR 1 (spatial)","FSR 1 available on the GLES stage");
+     video.set_availability(false,false,false);
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Off,"upscaler wrap");
-     front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::Fsr4Int8,"upscaler left wrap");
+     front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::Fsr1,"upscaler left wrap");front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::Fsr4Int8,"upscaler left to fsr4 int8");
      front.input(MenuInput::Left);front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::MetalFxTemporal,"upscaler left twice");
      check(video.describe_upscaler()=="MetalFX temporal (not available)","upscaler availability note missing");
      video.set_availability(true,true,false);check(video.describe_upscaler()=="MetalFX temporal","upscaler availability note stuck");

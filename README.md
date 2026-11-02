@@ -156,6 +156,11 @@ interpolation from iOS/tvOS 26); not yet checked on a device.
   (scanlines, or a slot mask with bloom in linear light), including the 4:3
   fit into the window.
 
+### OpenGL ES (Android)
+
+See [Android](#android): FSR 1 (EASU + RCAS), sharpening, CRT and the frame-rate
+setting on an OpenGL ES 3.0 stage with its own context on the SDL window.
+
 ### AMD FSR 4 (Windows)
 
 Presents through a DXGI flip swap chain on the SDL window's HWND from a
@@ -521,6 +526,15 @@ on the device; repeat steps 3 and 4.
   not expose interlock; there the game draws with the software rasterizer and
   logs why (`Renderer: software (...)`). There is no blend approximation. The
   emulator falls back to software.
+- **Presentation (GPU):** independent of the rasterizer, an OpenGL ES 3.0 stage
+  owns the window and scales the finished 640×480 image: upscaler `fsr1` (AMD
+  FSR 1, EASU edge-adaptive upscaling plus RCAS sharpening, ported from the
+  FidelityFX SDK to GLSL ES), the contrast-adaptive sharpening, the CRT filters
+  (scanlines, slot mask with bloom), the 16:9 widescreen fit and the frame-rate
+  setting (repeats between game ticks). Same rows as on the desktop: OPTION
+  screen, debug menu, `video.ini`. No frame generation on Android. Without
+  OpenGL ES 3.0 the plain SDL copy presents. Built and shader-checked, not yet
+  run on a device or the emulator.
 - **Input:** keyboard and game controllers (USB/Bluetooth) with the same
   bindings as on the desktop. Touch controls do not exist yet. Landscape only.
 - Runtime arguments for diagnostics:

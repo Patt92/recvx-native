@@ -186,6 +186,7 @@ public:
     void configure(const VideoSettings& settings)override{std::lock_guard<std::mutex> lock(mutex_);requested_=settings;requested_dirty_=true;}
     bool upscaler_supported()const override{return upscaler_supported_;}
     bool frame_generation_supported()const override{return frame_generation_supported_;}
+    std::uint32_t upscalers()const override{return (1u<<unsigned(Upscaler::MetalFxSpatial))|(1u<<unsigned(Upscaler::MetalFxTemporal));}
     const PresentStats& stats()const override{std::lock_guard<std::mutex> lock(state_mutex_);stats_copy_=stats_;return stats_copy_;}
     std::string describe()const override{
         std::lock_guard<std::mutex> lock(state_mutex_);

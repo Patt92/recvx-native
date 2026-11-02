@@ -1203,7 +1203,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"snapshot_load","Load snapshot","OK: reload the room with the saved progress at the saved position.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
         debug.add({"video","Graphics quality","OK: host render quality; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Low"},{2,"High"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Graphics: "+video.describe();}});
         debug.add({"framerate","Frame rate","OK: presentations per game tick (the tick stays 30 Hz); unlimited without VSync; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"30 (game tick)"},{1,"60"},{2,"120"},{3,"Unlimited (no VSync)"}};},[&]{return unsigned(video.settings().frame_rate);},[&](unsigned value){video.set_frame_rate(recvx::FrameRate(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame rate: "+video.settings().describe_frame_rate();}});
-        debug.add({"upscaler","Upscaler","OK: upscaler of the final image (MetalFX on macOS, FSR 4 on Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX spatial"},{2,"MetalFX temporal"},{3,"FSR 4 (FP8)"},{4,"FSR 4 (INT8)"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
+        debug.add({"upscaler","Upscaler","OK: upscaler of the final image (MetalFX on macOS/iOS, FSR 4 on Windows, FSR 1 on Android); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX spatial"},{2,"MetalFX temporal"},{3,"FSR 4 (FP8)"},{4,"FSR 4 (INT8)"},{5,"FSR 1 (spatial)"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
         debug.add({"framegen","Frame generation","OK: interpolated frame per game tick (MetalFX on macOS/iOS 26+, AMD FSR on Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX frame interpolation"},{2,"FSR frame generation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame generation: "+video.describe_frame_generation();}});
         debug.add({"sharpness","Sharpen","OK: contrast-adaptive sharpening of the display (macOS); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"Light"},{2,"Medium"},{3,"Strong"}};},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Sharpen: "+video.describe_sharpness();}});
         debug.add({"postfx","CRT filter","OK: CRT light (scanlines) or CRT full (slot mask, bloom, gamma-correct); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"CRT light"},{2,"CRT full"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT filter: "+video.describe_post_process();}});
@@ -2175,6 +2175,11 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
         recvx::InputManager devices(input_config);frontend.changed=[&](const recvx::InputConfig& config){devices.configure(config);};
         std::cout<<"Input: keyboard and "<<devices.controllers()<<" controller(s); "<<(fs::exists(args.controls)?args.controls.string():"built-in defaults")<<'\n';
+#if defined(RECVX_ANDROID)
+        // Die EGL-Konfiguration waehlt SDL beim Anlegen des Fensters: ES 3.0 fuer die GLES-Stufe (gles_present.cpp);
+        // SDLs GLES2-Renderer des Rueckfalls laeuft mit derselben Konfiguration.
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_ES);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,0);
+#endif
         std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)> window(SDL_CreateWindow("RECVX native runtime",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,960,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI),SDL_DestroyWindow);sdl_check(bool(window));
 #if defined(RECVX_IOS)
         recvx::ios_adopt_scene(window.get()); // UIScene-Lebenszyklus (iOS-27-SDK), ios_scene.mm
@@ -2198,37 +2203,56 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                   if(fs::is_regular_file(candidate/"amd_fidelityfx_upscaler_dx12.dll")){sdk_dir=candidate.string();break;}
               if(sdk_dir.empty())sdk_dir=exe_dir.string();}
          if(hwnd)presenter=recvx::create_fsr_presenter(hwnd,sdk_dir,video.settings(),presenter_reason);}
-        const bool presenter_owns_window=bool(presenter);
+        bool presenter_owns_window=bool(presenter);
+#elif defined(RECVX_ANDROID)
+        // Android: die GLES-Stufe (gles_present.cpp) bekommt den einzigen EGL-Kontext des Fensters. SDLs GLES2-Renderer
+        // entsteht nur, wenn sie fehlt oder ausfaellt (create_sdl_output); ein Softwarerenderer gaebe es hier nicht ohne
+        // eigenen GLES2-Kontext auf derselben Oberflaeche.
+        presenter=recvx::create_gles_presenter(window.get(),video.settings(),presenter_reason);
+        bool presenter_owns_window=bool(presenter);
 #else
-        const bool presenter_owns_window=false;
+        bool presenter_owns_window=false;
 #endif
-        auto* raw_renderer=presenter_owns_window?nullptr:SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
-        if(!raw_renderer)raw_renderer=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_SOFTWARE);
-        std::unique_ptr<SDL_Renderer,decltype(&SDL_DestroyRenderer)> renderer(raw_renderer,SDL_DestroyRenderer);sdl_check(bool(renderer));
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY,"nearest");
-        sdl_check(recvx::configure_window_presentation(renderer.get(),video.settings().widescreen)==0);
-        apply_widescreen=[&](bool on){sdl_check(recvx::configure_window_presentation(renderer.get(),on)==0);};
+        std::unique_ptr<SDL_Renderer,decltype(&SDL_DestroyRenderer)> renderer(nullptr,SDL_DestroyRenderer);
+        std::unique_ptr<SDL_Texture,decltype(&SDL_DestroyTexture)> texture(nullptr,SDL_DestroyTexture);
+        // SDL-Kopierpfad: Renderer und 640x480-Streamingtextur. Bei einer fensterbesitzenden Stufe zeichnet SDL
+        // nur in Software (Windows, GDI) bzw. gar nicht (Android, erst nach einem Ausfall der Stufe).
+        const auto create_sdl_output=[&](bool software_only){
+            auto* raw=software_only?nullptr:SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
+            if(!raw)raw=SDL_CreateRenderer(window.get(),-1,SDL_RENDERER_SOFTWARE);
+            texture.reset();renderer.reset(raw);sdl_check(bool(renderer));
+            sdl_check(recvx::configure_window_presentation(renderer.get(),video.settings().widescreen)==0);
+            texture.reset(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480));sdl_check(bool(texture));};
+#if defined(RECVX_ANDROID)
+        if(!presenter_owns_window)create_sdl_output(false);
+#else
+        create_sdl_output(presenter_owns_window);
+#endif
+        apply_widescreen=[&](bool on){if(renderer)sdl_check(recvx::configure_window_presentation(renderer.get(),on)==0);};
         // Host-Fenster: randloses Vollbild auf dem aktuellen Bildschirm; die Praesentation passt sich der neuen Groesse an.
         apply_fullscreen=[&](bool on){const bool now=(SDL_GetWindowFlags(window.get())&SDL_WINDOW_FULLSCREEN_DESKTOP)==SDL_WINDOW_FULLSCREEN_DESKTOP;
             if(now!=on&&SDL_SetWindowFullscreen(window.get(),on?SDL_WINDOW_FULLSCREEN_DESKTOP:0)!=0)std::cerr<<"Fullscreen setting ignored: "<<SDL_GetError()<<'\n';};
         apply_fullscreen(video.settings().fullscreen);
-        std::unique_ptr<SDL_Texture,decltype(&SDL_DestroyTexture)> texture(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480),SDL_DestroyTexture);sdl_check(bool(texture));
         {// Praesentationsstufe: macOS auf der CAMetalLayer des SDL-Fensters (MetalFX), Windows auf dem HWND
          // (eigenes D3D12-Geraet, FSR 4 aus den AMD-ffx-api-DLLs); sonst bleibt der SDL-Kopierpfad.
          std::string reason=presenter_reason;const char* stage_name="MetalFX";
 #if defined(_WIN32)
          stage_name="FSR"; // vor dem SDL-Renderer erzeugt (oben)
+#elif defined(RECVX_ANDROID)
+         stage_name="GLES"; // vor einem SDL-Renderer erzeugt (oben)
 #else
          void* layer=SDL_RenderGetMetalLayer(renderer.get());if(!layer)reason="SDL renderer is not Metal";
          presenter=layer?recvx::create_metalfx_presenter(layer,reason):nullptr;
 #endif
          video.set_availability(bool(presenter),presenter&&presenter->upscaler_supported(),presenter&&presenter->frame_generation_supported(),
 #if defined(_WIN32)
-             recvx::FrameGeneration::Fsr);
+             recvx::FrameGeneration::Fsr,
 #else
-             recvx::FrameGeneration::MetalFx);
+             recvx::FrameGeneration::MetalFx,
 #endif
-         apply_vsync=[&](bool on){if(presenter_owns_window)return; /* die Stufe synchronisiert selbst (frame_rate) */if(SDL_RenderSetVSync(renderer.get(),on?1:0)!=0)std::cerr<<"VSync setting ignored: "<<SDL_GetError()<<'\n';};apply_vsync(video.settings().vsync());
+             presenter?presenter->upscalers():0u);
+         apply_vsync=[&](bool on){if(presenter_owns_window||!renderer)return; /* die Stufe synchronisiert selbst (frame_rate) */if(SDL_RenderSetVSync(renderer.get(),on?1:0)!=0)std::cerr<<"VSync setting ignored: "<<SDL_GetError()<<'\n';};apply_vsync(video.settings().vsync());
          if(presenter){presenter->configure(video.settings());std::cout<<"Presentation: "<<stage_name<<" stage available"<<(presenter->upscaler_supported()?"":std::string(", no ")+stage_name+" upscaling on this device")<<(presenter->frame_generation_supported()?"":", no frame interpolation on this device/OS")<<'\n';}
          else std::cout<<"Presentation: SDL copy ("<<reason<<")\n";}
         SDL_AudioSpec requested{},obtained{};requested.freq=48000;requested.format=AUDIO_S16SYS;requested.channels=2;requested.samples=1024;
@@ -2409,8 +2433,12 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                     pf.scene_key=key;pf.delta_seconds=double(std::max(1u,input_tick-presented_tick))*recvx::game_tick_seconds;pf.slots=slots;
                     shown=presenter->present(pf);
                     // Gebrochene Stufe, die das Fenster besitzt: freigeben, damit die SDL-Software-Ausgabe (GDI) wieder sichtbar wird.
-                    if(!shown&&presenter_owns_window){std::cerr<<"Presentation stage failed, falling back to the SDL copy: "<<presenter->describe()<<'\n';presenter.reset();video.set_availability(false,false,false);}}
-                presented_tick=input_tick;shown_by_presenter=shown;
+                    if(!shown&&presenter_owns_window){std::cerr<<"Presentation stage failed, falling back to the SDL copy: "<<presenter->describe()<<'\n';presenter.reset();video.set_availability(false,false,false);
+                        presenter_owns_window=false;if(!renderer)create_sdl_output(false);apply_vsync(video.settings().vsync());}}
+                presented_tick=input_tick;
+                // Synchrone Stufe (GLES): hat schon praesentiert, die Wiederholungen des Takts fuehrt die Runtime.
+                const bool synchronous_shown=shown&&presenter&&presenter->synchronous();
+                shown_by_presenter=shown&&!synchronous_shown;if(synchronous_shown)shown=true;
                 if(!shown){sdl_check(SDL_UpdateTexture(texture.get(),nullptr,image.pixels().data(),640*4)==0);
                 sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());}++presented_frames;
                 const std::string title=frontend.active()?"Resident Evil CODE: Veronica X | Title":"RECVX native | "+rooms.name(room_index)+" | Camera "+std::to_string(camera_index+1)+(player?" | Motion "+std::to_string(motion):"")+(ui?" | Native development":" | Preview");
@@ -2421,8 +2449,9 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 // Die MetalFX-Stufe fuehrt ihre Kadenz auf dem eigenen Thread (PresentFrame::slots).
                 if(slots>0)++slot_index;
                 if(slots==0||accumulator<double(slot_index+1)*recvx::game_tick_seconds/slots){
-                    sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());
-                    ++presented_frames;++represented_frames;shown_this_pass=true;}}
+                    if(presenter&&presenter->synchronous()){presenter->represent();++presented_frames;++represented_frames;shown_this_pass=true;}
+                    else{sdl_check(SDL_RenderClear(renderer.get())==0);sdl_check(SDL_RenderCopy(renderer.get(),texture.get(),nullptr,nullptr)==0);SDL_RenderPresent(renderer.get());
+                    ++presented_frames;++represented_frames;shown_this_pass=true;}}}
             ++frame;if(args.frames&&frame>=args.frames)running=false;
             // Statt jeden Millisekunden zu pollen: auf Eingabe, den naechsten Takt oder das naechste
             // Praesentationsfenster warten. Das Ereignis wird zurueckgereiht und im naechsten Durchlauf mit
