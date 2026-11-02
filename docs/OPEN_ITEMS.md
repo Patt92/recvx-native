@@ -44,8 +44,8 @@ Arbeitsstände: [Gegnerboard](enemies/README.md), [Inventarvertrag](INVENTORY_CO
   Schnitten, FP8/INT8, FSR-3.1-Fallback, Tearing), Objekt-Bewegungsvektoren, Subpixel-Jitter,
   Frame Generation, Mip-Bias. Vulkan-FSR braucht die FSR-3.1-Quellen des SDK.
 - **Vulkan** (aus `vulkan_raster_backend.result.md`): Windows-/Linux-Treiber (Interlock,
-  Bitgleichheit) ungeprüft; Windows-Crossbuild ohne Vulkan-Header; Fenster/Controller nicht geprüft;
-  Mac-Pakete ohne MoltenVK.
+  Bitgleichheit) ungeprüft; Fenster/Controller nicht geprüft. Header und SPIR-V seit 2026-11-02 eingecheckt
+  (alle Builds inkl. Windows-Crossbuild/CI mit Vulkan), Mac-Pakete mit MoltenVK.
 - **Energie** (aus `performance_optimization_plan_20261020.md`): Phase B3 (Präsentationsschleife,
   ereignisgesteuertes Schlafen, keine doppelten Draw-Seiteneffekte), Phase C (Asset-Aufbereitung
   bei Bedarf) und die Windows-Abnahme des GPU-Pfads offen. A, B1/B2, D1 und D2 (macOS) sind umgesetzt.

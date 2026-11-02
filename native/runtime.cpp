@@ -2175,12 +2175,17 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
         recvx::InputManager devices(input_config);frontend.changed=[&](const recvx::InputConfig& config){devices.configure(config);};
         std::cout<<"Input: keyboard and "<<devices.controllers()<<" controller(s); "<<(fs::exists(args.controls)?args.controls.string():"built-in defaults")<<'\n';
+#if defined(RECVX_HAVE_GLES_PRESENT)
+        constexpr Uint32 recvx_presentation_window_flags=SDL_WINDOW_OPENGL; // GL-Stufe: Kontext auf dem Spielfenster
+#else
+        constexpr Uint32 recvx_presentation_window_flags=0;
+#endif
 #if defined(RECVX_ANDROID)
         // Die EGL-Konfiguration waehlt SDL beim Anlegen des Fensters: ES 3.0 fuer die GLES-Stufe (gles_present.cpp);
         // SDLs GLES2-Renderer des Rueckfalls laeuft mit derselben Konfiguration.
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_ES);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,0);
 #endif
-        std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)> window(SDL_CreateWindow("RECVX native runtime",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,960,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI),SDL_DestroyWindow);sdl_check(bool(window));
+        std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)> window(SDL_CreateWindow("RECVX native runtime",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,960,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|recvx_presentation_window_flags),SDL_DestroyWindow);sdl_check(bool(window));
 #if defined(RECVX_IOS)
         recvx::ios_adopt_scene(window.get()); // UIScene-Lebenszyklus (iOS-27-SDK), ios_scene.mm
 #endif
@@ -2204,10 +2209,10 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
               if(sdk_dir.empty())sdk_dir=exe_dir.string();}
          if(hwnd)presenter=recvx::create_fsr_presenter(hwnd,sdk_dir,video.settings(),presenter_reason);}
         bool presenter_owns_window=bool(presenter);
-#elif defined(RECVX_ANDROID)
-        // Android: die GLES-Stufe (gles_present.cpp) bekommt den einzigen EGL-Kontext des Fensters. SDLs GLES2-Renderer
-        // entsteht nur, wenn sie fehlt oder ausfaellt (create_sdl_output); ein Softwarerenderer gaebe es hier nicht ohne
-        // eigenen GLES2-Kontext auf derselben Oberflaeche.
+#elif defined(RECVX_HAVE_GLES_PRESENT)
+        // Android/Linux: die GL-Stufe (gles_present.cpp, GLES 3.0 bzw. GL 3.3 Core) bekommt den Fensterkontext. SDLs
+        // Renderer entsteht nur, wenn sie fehlt oder ausfaellt (create_sdl_output); auf Android gaebe es ohne eigenen
+        // GLES2-Kontext auf derselben Oberflaeche auch keinen Softwarerenderer.
         presenter=recvx::create_gles_presenter(window.get(),video.settings(),presenter_reason);
         bool presenter_owns_window=bool(presenter);
 #else
@@ -2224,7 +2229,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             texture.reset();renderer.reset(raw);sdl_check(bool(renderer));
             sdl_check(recvx::configure_window_presentation(renderer.get(),video.settings().widescreen)==0);
             texture.reset(SDL_CreateTexture(renderer.get(),SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,640,480));sdl_check(bool(texture));};
-#if defined(RECVX_ANDROID)
+#if defined(RECVX_HAVE_GLES_PRESENT)
         if(!presenter_owns_window)create_sdl_output(false);
 #else
         create_sdl_output(presenter_owns_window);
@@ -2239,8 +2244,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
          std::string reason=presenter_reason;const char* stage_name="MetalFX";
 #if defined(_WIN32)
          stage_name="FSR"; // vor dem SDL-Renderer erzeugt (oben)
-#elif defined(RECVX_ANDROID)
-         stage_name="GLES"; // vor einem SDL-Renderer erzeugt (oben)
+#elif defined(RECVX_HAVE_GLES_PRESENT)
+         stage_name="GL"; // vor einem SDL-Renderer erzeugt (oben)
 #else
          void* layer=SDL_RenderGetMetalLayer(renderer.get());if(!layer)reason="SDL renderer is not Metal";
          presenter=layer?recvx::create_metalfx_presenter(layer,reason):nullptr;

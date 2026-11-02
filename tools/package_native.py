@@ -115,6 +115,23 @@ def main():
                           "CFBundlePackageType": "APPL", "CFBundleIconFile": "app-icon.icns", "CFBundleVersion": "0.5.0", "CFBundleShortVersionString": "0.5.0", "LSMinimumSystemVersion": "11.0", "NSHighResolutionCapable": True}, info)
         data_destination = contents / "Resources/data"
         run("codesign", "--force", "--sign", "-", str(frameworks / library_name))
+        # Vulkan-Rasterer (renderer = vulkan): MoltenVK als ICD neben die Runtime; gpu_raster_vulkan.cpp oeffnet zuerst
+        # @executable_path/../Frameworks/libMoltenVK.dylib. Quelle MOLTENVK_DYLIB oder Homebrew (molten-vk), Apache-2.0.
+        moltenvk = Path(os.environ["MOLTENVK_DYLIB"]) if os.environ.get("MOLTENVK_DYLIB") else next(
+            (p for p in (Path("/opt/homebrew/opt/molten-vk/lib/libMoltenVK.dylib"), Path("/usr/local/opt/molten-vk/lib/libMoltenVK.dylib")) if p.is_file()), None)
+        if moltenvk and moltenvk.is_file():
+            if "arm64" not in subprocess.check_output(["lipo", "-archs", str(moltenvk.resolve())], text=True).split():
+                raise RuntimeError(f"{moltenvk} has no arm64 slice")
+            shutil.copy2(moltenvk.resolve(), frameworks / "libMoltenVK.dylib")
+            (frameworks / "libMoltenVK.dylib").chmod(0o755)
+            run("install_name_tool", "-id", "@rpath/libMoltenVK.dylib", str(frameworks / "libMoltenVK.dylib"))
+            run("codesign", "--force", "--sign", "-", str(frameworks / "libMoltenVK.dylib"))
+            license_file = moltenvk.resolve().parents[1] / "LICENSE"
+            if license_file.is_file():
+                shutil.copy2(license_file, resources / "MoltenVK-LICENSE.txt")
+            print(f"Bundled MoltenVK from {moltenvk} (Vulkan renderer)", flush=True)
+        else:
+            print("MoltenVK not found (brew install molten-vk or MOLTENVK_DYLIB): the package's Vulkan renderer stays unavailable", flush=True)
         run("codesign", "--force", "--sign", "-", str(binaries / "recvx-runtime"))
     # Mods sind bereits in --data eingebacken (tools/bundle_data.py); ein mods-Ordner neben dem Paket ist
     # optional und wird von der Desktop-Runtime nur gelesen, wenn ihn jemand anlegt.

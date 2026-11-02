@@ -82,7 +82,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config python3 \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev \
             libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev \
-            libgl-dev libegl-dev libgles-dev libvulkan-dev glslc
+            libgl-dev libegl-dev libgles-dev libvulkan-dev
       - name: Policy check
         run: python3 tools/check_no_original_core.py
       - name: Build runtime
@@ -128,7 +128,7 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build glslc  # host glslc for the Vulkan SPIR-V
+          sudo apt-get install -y --no-install-recommends ninja-build  # Vulkan SPIR-V is checked in, no glslc
       - name: Android SDK packages
         run: |
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"

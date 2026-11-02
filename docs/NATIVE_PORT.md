@@ -187,7 +187,9 @@ SDK; Java through `JAVA_HOME` or Homebrew `openjdk@21`/`openjdk@17`.
   internal app storage `files/RECVX` (`native/user_paths.cpp`, reported by the
   runtime from `SDL_AndroidGetInternalStoragePath`); removed on uninstall.
 - stdout/stderr of the runtime go to logcat with tag `RECVX`.
-- Presentation: `native/gles_present.cpp` (2026-11-02), a synchronous OpenGL ES
+- Presentation: `native/gles_present.cpp` (2026-11-02; also Linux on desktop
+  OpenGL 3.3 core, same shaders with another version line, all GL entry points
+  through `SDL_GL_GetProcAddress`), a synchronous OpenGL ES
   3.0 stage with its own context on SDL's EGL window, created before any SDL
   renderer (SDL's GLES2 renderer only appears as fallback when the stage is
   missing or breaks). Chain per frame: upload 640×480 (red/blue swizzle) →
@@ -201,9 +203,9 @@ SDK; Java through `JAVA_HOME` or Homebrew `openjdk@21`/`openjdk@17`.
   `represent()`. Shaders are checked with `glslc`; device and emulator runs open.
 - Rendering: the Vulkan raster backend (`native/gpu_raster_vulkan.cpp`) is
   built and is the Android GPU default (`renderer = gpu` or `vulkan`). Headers
-  come from the NDK sysroot, SPIR-V from the same host `glslc` as the desktop
-  builds (Vulkan SDK or Homebrew `shaderc`; byte-identical shader modules, the
-  older NDK `glslc` is deliberately not used), and the system `libvulkan.so` is
+  come from the NDK sysroot, SPIR-V is the checked-in
+  `native/third_party/vulkan_spirv` (byte-identical modules on every platform),
+  and the system `libvulkan.so` is
   opened at run time. It keeps its hard requirement of ordered
   `VK_EXT_fragment_shader_interlock` plus `VK_KHR_shader_float_controls`;
   devices without them use the software rasterizer instead of an approximated
@@ -433,13 +435,18 @@ existing CPU/GPU filter differences have not been shown bit-identical. Point
 sampling must preserve color including alpha and depth bit for bit. Linux and
 Windows drivers require separate verification; a Mac build does not verify
 them. `./build.sh --opengl off` or CMake `-DRECVX_ENABLE_OPENGL=OFF` omits GL;
-Metal and D3D11 remain available. Vulkan needs `vulkan/vulkan.h` and `glslc` at
-build time (Vulkan SDK, Homebrew `vulkan-headers`/`shaderc`, distribution
-packages); without them CMake warns and omits it. `./build.sh --vulkan off` or
+Metal and D3D11 remain available. Vulkan is built everywhere except iOS/tvOS and
+the web: headers from the NDK, `VULKAN_SDK` or the system, otherwise the
+checked-in Khronos Vulkan-Headers v1.4.357 (`native/third_party/Vulkan-Headers`,
+Apache-2.0 OR MIT); SPIR-V is checked in (`native/third_party/vulkan_spirv`,
+regenerated with the pinned glslc by `tools/update_vulkan_spirv.py`; the test
+`vulkan_spirv_current` compares it with `gpu_raster_vulkan.glsl`), so every
+platform runs the same shader bytes. `./build.sh --vulkan off` or
 `-DRECVX_ENABLE_VULKAN=OFF` omits it explicitly. Direct3D 12 needs only the
 Windows SDK or mingw `d3d12.h`/`dxgi1_4.h` (both cross-build and MSVC have
-them); `./build.sh --d3d12 off` or `-DRECVX_ENABLE_D3D12=OFF` omits it. The Windows crossbuild has no
-Vulkan headers by default, so packages built that way contain no Vulkan backend.
+them); `./build.sh --d3d12 off` or `-DRECVX_ENABLE_D3D12=OFF` omits it. macOS
+packages bundle MoltenVK (`Contents/Frameworks/libMoltenVK.dylib`, Homebrew
+`molten-vk` or `MOLTENVK_DYLIB`) with its license.
 The loader is opened at run time and is not linked. `RECVX_VULKAN_LIBRARY`
 selects one explicit library; otherwise the loader is searched in the app's
 `Frameworks` folder, the system search path and, on macOS, Homebrew. MoltenVK is

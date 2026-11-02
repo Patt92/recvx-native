@@ -70,10 +70,10 @@ inline std::unique_ptr<MetalFxPresenter> create_metalfx_presenter(void*,std::str
 // AMD-ffx-api-DLLs (amd_fidelityfx_loader_dx12.dll bzw. amd_fidelityfx_dx12.dll, amd_fidelityfx_upscaler_dx12.dll,
 // Unterordner "FSR4 INT8" fuer das INT8-Modell). nullptr mit Begruendung ohne D3D12-Geraet oder DLLs.
 std::unique_ptr<MetalFxPresenter> create_fsr_presenter(void* hwnd,const std::string& sdk_dir,const VideoSettings& initial,std::string& reason);
-// Android: GLES-3.0-Stufe (gles_present.cpp) mit eigenem Kontext auf dem SDL-Fenster: FSR 1, Schaerfen, CRT.
+// Android/Linux: GL-Stufe (gles_present.cpp, GLES 3.0 bzw. GL 3.3 Core) auf dem SDL-Fenster: FSR 1, Schaerfen, CRT.
 std::unique_ptr<MetalFxPresenter> create_gles_presenter(void* window,const VideoSettings& initial,std::string& reason);
 #if !defined(RECVX_HAVE_GLES_PRESENT)
-inline std::unique_ptr<MetalFxPresenter> create_gles_presenter(void*,const VideoSettings&,std::string& reason){reason="GLES presentation is built for Android only";return nullptr;}
+inline std::unique_ptr<MetalFxPresenter> create_gles_presenter(void*,const VideoSettings&,std::string& reason){reason="GL presentation is built for Android and Linux only";return nullptr;}
 #endif
 #if !defined(RECVX_HAVE_FSR)
 inline std::unique_ptr<MetalFxPresenter> create_fsr_presenter(void*,const std::string&,const VideoSettings&,std::string& reason){reason="FSR presentation is built for Windows only";return nullptr;}

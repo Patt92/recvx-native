@@ -156,10 +156,14 @@ interpolation from iOS/tvOS 26); not yet checked on a device.
   (scanlines, or a slot mask with bloom in linear light), including the 4:3
   fit into the window.
 
-### OpenGL ES (Android)
+### OpenGL (Android, Linux)
 
-See [Android](#android): FSR 1 (EASU + RCAS), sharpening, CRT and the frame-rate
-setting on an OpenGL ES 3.0 stage with its own context on the SDL window.
+The same stage (`native/gles_present.cpp`) on OpenGL ES 3.0 (Android) and
+desktop OpenGL 3.3 core (Linux), with its own context on the SDL window:
+upscaler `fsr1` (AMD FSR 1, EASU + RCAS), sharpening, both CRT filters, the
+widescreen fit and the frame-rate setting. No frame generation. Without the
+needed GL version the plain SDL copy presents. Linux is built by GitHub Actions
+only so far; neither platform has been run with it yet.
 
 ### AMD FSR 4 (Windows)
 
@@ -305,10 +309,9 @@ Install:
 - **Visual Studio or Visual Studio Build Tools**, including the **Desktop
   development with C++** workload, MSVC C/C++ tools and a Windows SDK.
   Native Windows ARM64 builds also need the ARM64 C/C++ build tools.
-- **Optional Vulkan backend:** the Vulkan SDK (headers and `glslc`) at build
-  time and the Vulkan loader (`vulkan-1.dll`) at run time. The Windows
-  cross-build has no Vulkan headers by default and omits the backend unless a
-  native build or an explicit SDK path supplies them.
+- **Vulkan backend:** built in every Windows build (native, cross-build, x64
+  and ARM64, GitHub Actions) from the checked-in Khronos headers and SPIR-V; no
+  Vulkan SDK needed. At run time it opens the driver's loader (`vulkan-1.dll`).
 - **Optional Direct3D 12 backend:** built by default from the Windows SDK or
   mingw headers (`--d3d12 off` / `-DRECVX_ENABLE_D3D12=OFF` omits it);
   `d3d12.dll`, `dxgi.dll` and `d3dcompiler_47.dll` are loaded at run time.
@@ -378,9 +381,9 @@ Install:
 - **FFmpeg**, including `ffprobe`, on `PATH` when using `--iso`.
 - **Ninja** if cross-building Windows binaries; the build tool downloads the
   pinned Zig cross-toolchain automatically.
-- **Optional Vulkan backend:** Vulkan headers and `glslc` at build time, plus a
-  Vulkan loader (MoltenVK on macOS) at run time. Without headers or `glslc`,
-  CMake warns and omits the backend; the rest of the build is unaffected.
+- **Vulkan backend:** built from the checked-in Khronos headers and SPIR-V (no
+  SDK or `glslc` needed); at run time it needs MoltenVK (`brew install
+  molten-vk`). `--package` bundles MoltenVK into the app when it is installed.
 
 For example, with Homebrew already installed:
 
@@ -389,7 +392,7 @@ xcode-select --install
 ```
 
 ```bash
-brew install python@3.12 cmake ffmpeg ninja vulkan-headers shaderc molten-vk
+brew install python@3.12 cmake ffmpeg ninja molten-vk
 ```
 
 Build for Apple Silicon (arm64) and prepare a package:
@@ -406,9 +409,9 @@ With prepared data:
 
 Launch through `Start.command`. macOS defaults to Metal; OpenGL and Vulkan are
 optional (`--renderer opengl`, `--renderer vulkan`), and software remains
-available (`--renderer software`). Vulkan is built when the Vulkan headers and
-`glslc` are present and is opened at run time (the Vulkan loader, or MoltenVK on
-macOS); it is never selected automatically. `--vulkan off` or CMake
+available (`--renderer software`). Vulkan is always built (checked-in headers
+and SPIR-V, the same shader bytes on every platform) and opened at run time (the
+Vulkan loader, or MoltenVK on macOS); it is never selected automatically. `--vulkan off` or CMake
 `-DRECVX_ENABLE_VULKAN=OFF` omits it explicitly.
 
 `./build.sh` alone builds `build/start/macos-arm64/RECVX Native.app`, a small development
@@ -542,9 +545,9 @@ on the device; repeat steps 3 and 4.
 
 #### Build the APK yourself
 
-Needs JDK 17 or 21, Gradle, the Android command-line tools with NDK r28,
-platform 36 and build-tools 36, and `glslc` (shaderc or the Vulkan SDK) for the
-Vulkan shaders.
+Needs JDK 17 or 21, Gradle and the Android command-line tools with NDK r28,
+platform 36 and build-tools 36. The Vulkan shaders are checked in, so no `glslc`
+is needed.
 
 Linux (Debian/Ubuntu), with the [command-line tools](https://developer.android.com/studio#command-line-tools-only)
 unpacked to `$ANDROID_HOME/cmdline-tools/latest`:
@@ -593,16 +596,18 @@ Install:
   The build downloads SDL2 itself. GPU rendering additionally needs an OpenGL
   4.1-capable driver (for example Mesa) and SDL's OpenGL build dependencies.
 - **FFmpeg**, including `ffprobe`, on `PATH` when using `--iso`.
-- **Optional Vulkan backend:** Vulkan headers, `glslc` (for example the
-  `libvulkan-dev` and `glslc`/`shaderc` packages) and the Vulkan loader
-  (`libvulkan.so.1`). Missing headers or `glslc` leave the backend out.
+- **Vulkan backend:** always built (system or checked-in headers, checked-in
+  SPIR-V); at run time the Vulkan loader (`libvulkan.so.1`).
+- **Presentation stage:** with `GLES3/gl3.h` (`libgles-dev`) the build adds the
+  OpenGL presentation stage (FSR 1, sharpening, CRT); see
+  [OpenGL (Android, Linux)](#opengl-android-linux).
 - **Ninja** for Windows cross-builds; Zig is downloaded automatically.
 
 Example dependencies on Debian/Ubuntu (use a distribution release providing
 Python 3.12 or newer):
 
 ```bash
-sudo apt install build-essential cmake ninja-build pkg-config python3 ffmpeg libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev
+sudo apt install build-essential cmake ninja-build pkg-config python3 ffmpeg libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev libgl-dev libegl-dev libgles-dev libvulkan-dev
 ```
 
 Build and prepare data:

@@ -524,10 +524,10 @@ def build_android(cmake: str, jobs: int, build: Path, summary: list, install: bo
         '-DRECVX_ENABLE_OPENGL=OFF', f'-DRECVX_ENABLE_VULKAN={"ON" if vulkan else "OFF"}')
     run(cmake, '--build', native, '--parallel', jobs)
     cache = (native / 'CMakeCache.txt').read_text()
-    vulkan_built = vulkan and bool(re.search(r'^RECVX_GLSLC:FILEPATH=(?!.*NOTFOUND).+$', cache, re.M)) and \
-        bool(re.search(r'^RECVX_VULKAN_INCLUDE_DIR:PATH=(?!.*NOTFOUND).+$', cache, re.M))
+    # Header aus dem NDK-Sysroot oder eingecheckt, SPIR-V eingecheckt: kein Host-glslc mehr noetig.
+    vulkan_built = vulkan and bool(re.search(r'^RECVX_VULKAN_INCLUDE_DIR:PATH=(?!.*NOTFOUND).+$', cache, re.M))
     if vulkan and not vulkan_built:
-        raise RuntimeError('Vulkan backend requested but vulkan/vulkan.h (NDK sysroot) or glslc was not found; pass --vulkan off')
+        raise RuntimeError('Vulkan backend requested but no vulkan/vulkan.h was found; pass --vulkan off')
     summary.append(('Vulkan', 'built, platform GPU default (needs VK_EXT_fragment_shader_interlock, else software)'
                     if vulkan_built else 'off (--vulkan off)'))
     runtime = native / 'libmain.so'
@@ -752,7 +752,7 @@ def main():
     parser.add_argument('--test', action='store_true', help='Build test targets and run CTest')
     parser.add_argument('--test-regex', help='Build test targets and run only matching CTest names')
     parser.add_argument('--opengl', choices=['on', 'off'], default='on', help='Build optional OpenGL backend (default: on)')
-    parser.add_argument('--vulkan', choices=['on', 'off'], default='on', help='Build optional Vulkan backend when Vulkan headers and glslc are present (default: on)')
+    parser.add_argument('--vulkan', choices=['on', 'off'], default='on', help='Build the optional Vulkan raster backend (system or checked-in headers, checked-in SPIR-V; default: on)')
     parser.add_argument('--d3d12', choices=['on', 'off'], default='on', help='Build optional Direct3D 12 backend on Windows (default: on)')
     parser.add_argument('--fsr', choices=['on', 'off'], default='on', help='Build the FSR 4 presentation stage on Windows from the vendored ffx-api headers (default: on)')
     parser.add_argument('--verify-runtime', action='store_true', help='Run the opt-in original-data runtime regression suite')

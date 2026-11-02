@@ -1,4 +1,6 @@
-// Host-Praesentationsstufe fuer Android (metalfx_present.h): OpenGL ES 3.0 auf dem EGL-Fenster von SDL.
+// Host-Praesentationsstufe fuer Android und Linux (metalfx_present.h): OpenGL ES 3.0 auf dem EGL-Fenster von SDL
+// (Android) bzw. Desktop-OpenGL 3.3 Core auf dem SDL-Fenster (Linux). Dieselben Shader (Versionszeile je Ziel), alle
+// GL-Einsprungpunkte ueber SDL_GL_GetProcAddress des eigenen Kontexts, keine Linkbibliothek.
 // Plattformanpassung, keine Spiellogik: das 640x480-Bild der Runtime wird unveraendert hochgeladen; die Stufe
 // skaliert und bearbeitet nur die Anzeige. Gegenstueck zu metalfx_present.mm / fsr_present_d3d12.cpp.
 //
@@ -12,9 +14,11 @@
 // Kits/FidelityFX/upscalers/fsr3/include/gpu/fsr1/ffx_fsr1.h): ffxFsrEasuFloat und FsrRcasF als GLSL-ES-Port in
 // derselben Rechenfolge, das Textur-Gather von EASU als texelFetch der zwoelf Taps mit Randklemmung. Die
 // Praesentation (Schaerfen, Strahlprofil, Maske, Bloom) ist derselbe Kern wie present_cs der FSR-Stufe.
-// Frame-Generation gibt es auf Android nicht; Bildraten ueber 30 wiederholen das Bild (represent).
+// Frame-Generation gibt es hier nicht; Bildraten ueber 30 wiederholen das Bild (represent).
 #include "metalfx_present.h"
 #include <SDL.h>
+// Nur Typen und Konstanten; die Funktionen kommen als Zeiger (unten), damit dieselbe Datei Desktop-GL bedient.
+#define GL_GLES_PROTOTYPES 0
 #include <GLES3/gl3.h>
 #include <algorithm>
 #include <cmath>
@@ -25,11 +29,109 @@
 #include <vector>
 namespace recvx {
 namespace {
-constexpr const char* vertex_shader=R"GLSL(#version 300 es
+// GL-Einsprungpunkte des Stufenkontexts (GLES 3.0 bzw. GL 3.3 Core haben dieselben Signaturen).
+PFNGLCREATESHADERPROC glCreateShader=nullptr;
+PFNGLSHADERSOURCEPROC glShaderSource=nullptr;
+PFNGLCOMPILESHADERPROC glCompileShader=nullptr;
+PFNGLGETSHADERIVPROC glGetShaderiv=nullptr;
+PFNGLGETSHADERINFOLOGPROC glGetShaderInfoLog=nullptr;
+PFNGLDELETESHADERPROC glDeleteShader=nullptr;
+PFNGLCREATEPROGRAMPROC glCreateProgram=nullptr;
+PFNGLATTACHSHADERPROC glAttachShader=nullptr;
+PFNGLLINKPROGRAMPROC glLinkProgram=nullptr;
+PFNGLGETPROGRAMIVPROC glGetProgramiv=nullptr;
+PFNGLGETPROGRAMINFOLOGPROC glGetProgramInfoLog=nullptr;
+PFNGLDELETEPROGRAMPROC glDeleteProgram=nullptr;
+PFNGLGETSTRINGPROC glGetString=nullptr;
+PFNGLGETINTEGERVPROC glGetIntegerv=nullptr;
+PFNGLGENVERTEXARRAYSPROC glGenVertexArrays=nullptr;
+PFNGLBINDVERTEXARRAYPROC glBindVertexArray=nullptr;
+PFNGLDELETEVERTEXARRAYSPROC glDeleteVertexArrays=nullptr;
+PFNGLGENSAMPLERSPROC glGenSamplers=nullptr;
+PFNGLSAMPLERPARAMETERIPROC glSamplerParameteri=nullptr;
+PFNGLBINDSAMPLERPROC glBindSampler=nullptr;
+PFNGLDELETESAMPLERSPROC glDeleteSamplers=nullptr;
+PFNGLGENTEXTURESPROC glGenTextures=nullptr;
+PFNGLBINDTEXTUREPROC glBindTexture=nullptr;
+PFNGLTEXIMAGE2DPROC glTexImage2D=nullptr;
+PFNGLTEXSUBIMAGE2DPROC glTexSubImage2D=nullptr;
+PFNGLTEXPARAMETERIPROC glTexParameteri=nullptr;
+PFNGLDELETETEXTURESPROC glDeleteTextures=nullptr;
+PFNGLGETERRORPROC glGetError=nullptr;
+PFNGLPIXELSTOREIPROC glPixelStorei=nullptr;
+PFNGLDISABLEPROC glDisable=nullptr;
+PFNGLUSEPROGRAMPROC glUseProgram=nullptr;
+PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation=nullptr;
+PFNGLUNIFORM1IPROC glUniform1i=nullptr;
+PFNGLUNIFORM1FPROC glUniform1f=nullptr;
+PFNGLUNIFORM2IPROC glUniform2i=nullptr;
+PFNGLUNIFORM2FPROC glUniform2f=nullptr;
+PFNGLUNIFORM4FPROC glUniform4f=nullptr;
+PFNGLDRAWARRAYSPROC glDrawArrays=nullptr;
+PFNGLACTIVETEXTUREPROC glActiveTexture=nullptr;
+PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers=nullptr;
+PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer=nullptr;
+PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D=nullptr;
+PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus=nullptr;
+PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers=nullptr;
+PFNGLVIEWPORTPROC glViewport=nullptr;
+const char* load_gl(){
+    if(!(glCreateShader=reinterpret_cast<PFNGLCREATESHADERPROC>(SDL_GL_GetProcAddress("glCreateShader"))))return "glCreateShader";
+    if(!(glShaderSource=reinterpret_cast<PFNGLSHADERSOURCEPROC>(SDL_GL_GetProcAddress("glShaderSource"))))return "glShaderSource";
+    if(!(glCompileShader=reinterpret_cast<PFNGLCOMPILESHADERPROC>(SDL_GL_GetProcAddress("glCompileShader"))))return "glCompileShader";
+    if(!(glGetShaderiv=reinterpret_cast<PFNGLGETSHADERIVPROC>(SDL_GL_GetProcAddress("glGetShaderiv"))))return "glGetShaderiv";
+    if(!(glGetShaderInfoLog=reinterpret_cast<PFNGLGETSHADERINFOLOGPROC>(SDL_GL_GetProcAddress("glGetShaderInfoLog"))))return "glGetShaderInfoLog";
+    if(!(glDeleteShader=reinterpret_cast<PFNGLDELETESHADERPROC>(SDL_GL_GetProcAddress("glDeleteShader"))))return "glDeleteShader";
+    if(!(glCreateProgram=reinterpret_cast<PFNGLCREATEPROGRAMPROC>(SDL_GL_GetProcAddress("glCreateProgram"))))return "glCreateProgram";
+    if(!(glAttachShader=reinterpret_cast<PFNGLATTACHSHADERPROC>(SDL_GL_GetProcAddress("glAttachShader"))))return "glAttachShader";
+    if(!(glLinkProgram=reinterpret_cast<PFNGLLINKPROGRAMPROC>(SDL_GL_GetProcAddress("glLinkProgram"))))return "glLinkProgram";
+    if(!(glGetProgramiv=reinterpret_cast<PFNGLGETPROGRAMIVPROC>(SDL_GL_GetProcAddress("glGetProgramiv"))))return "glGetProgramiv";
+    if(!(glGetProgramInfoLog=reinterpret_cast<PFNGLGETPROGRAMINFOLOGPROC>(SDL_GL_GetProcAddress("glGetProgramInfoLog"))))return "glGetProgramInfoLog";
+    if(!(glDeleteProgram=reinterpret_cast<PFNGLDELETEPROGRAMPROC>(SDL_GL_GetProcAddress("glDeleteProgram"))))return "glDeleteProgram";
+    if(!(glGetString=reinterpret_cast<PFNGLGETSTRINGPROC>(SDL_GL_GetProcAddress("glGetString"))))return "glGetString";
+    if(!(glGetIntegerv=reinterpret_cast<PFNGLGETINTEGERVPROC>(SDL_GL_GetProcAddress("glGetIntegerv"))))return "glGetIntegerv";
+    if(!(glGenVertexArrays=reinterpret_cast<PFNGLGENVERTEXARRAYSPROC>(SDL_GL_GetProcAddress("glGenVertexArrays"))))return "glGenVertexArrays";
+    if(!(glBindVertexArray=reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(SDL_GL_GetProcAddress("glBindVertexArray"))))return "glBindVertexArray";
+    if(!(glDeleteVertexArrays=reinterpret_cast<PFNGLDELETEVERTEXARRAYSPROC>(SDL_GL_GetProcAddress("glDeleteVertexArrays"))))return "glDeleteVertexArrays";
+    if(!(glGenSamplers=reinterpret_cast<PFNGLGENSAMPLERSPROC>(SDL_GL_GetProcAddress("glGenSamplers"))))return "glGenSamplers";
+    if(!(glSamplerParameteri=reinterpret_cast<PFNGLSAMPLERPARAMETERIPROC>(SDL_GL_GetProcAddress("glSamplerParameteri"))))return "glSamplerParameteri";
+    if(!(glBindSampler=reinterpret_cast<PFNGLBINDSAMPLERPROC>(SDL_GL_GetProcAddress("glBindSampler"))))return "glBindSampler";
+    if(!(glDeleteSamplers=reinterpret_cast<PFNGLDELETESAMPLERSPROC>(SDL_GL_GetProcAddress("glDeleteSamplers"))))return "glDeleteSamplers";
+    if(!(glGenTextures=reinterpret_cast<PFNGLGENTEXTURESPROC>(SDL_GL_GetProcAddress("glGenTextures"))))return "glGenTextures";
+    if(!(glBindTexture=reinterpret_cast<PFNGLBINDTEXTUREPROC>(SDL_GL_GetProcAddress("glBindTexture"))))return "glBindTexture";
+    if(!(glTexImage2D=reinterpret_cast<PFNGLTEXIMAGE2DPROC>(SDL_GL_GetProcAddress("glTexImage2D"))))return "glTexImage2D";
+    if(!(glTexSubImage2D=reinterpret_cast<PFNGLTEXSUBIMAGE2DPROC>(SDL_GL_GetProcAddress("glTexSubImage2D"))))return "glTexSubImage2D";
+    if(!(glTexParameteri=reinterpret_cast<PFNGLTEXPARAMETERIPROC>(SDL_GL_GetProcAddress("glTexParameteri"))))return "glTexParameteri";
+    if(!(glDeleteTextures=reinterpret_cast<PFNGLDELETETEXTURESPROC>(SDL_GL_GetProcAddress("glDeleteTextures"))))return "glDeleteTextures";
+    if(!(glGetError=reinterpret_cast<PFNGLGETERRORPROC>(SDL_GL_GetProcAddress("glGetError"))))return "glGetError";
+    if(!(glPixelStorei=reinterpret_cast<PFNGLPIXELSTOREIPROC>(SDL_GL_GetProcAddress("glPixelStorei"))))return "glPixelStorei";
+    if(!(glDisable=reinterpret_cast<PFNGLDISABLEPROC>(SDL_GL_GetProcAddress("glDisable"))))return "glDisable";
+    if(!(glUseProgram=reinterpret_cast<PFNGLUSEPROGRAMPROC>(SDL_GL_GetProcAddress("glUseProgram"))))return "glUseProgram";
+    if(!(glGetUniformLocation=reinterpret_cast<PFNGLGETUNIFORMLOCATIONPROC>(SDL_GL_GetProcAddress("glGetUniformLocation"))))return "glGetUniformLocation";
+    if(!(glUniform1i=reinterpret_cast<PFNGLUNIFORM1IPROC>(SDL_GL_GetProcAddress("glUniform1i"))))return "glUniform1i";
+    if(!(glUniform1f=reinterpret_cast<PFNGLUNIFORM1FPROC>(SDL_GL_GetProcAddress("glUniform1f"))))return "glUniform1f";
+    if(!(glUniform2i=reinterpret_cast<PFNGLUNIFORM2IPROC>(SDL_GL_GetProcAddress("glUniform2i"))))return "glUniform2i";
+    if(!(glUniform2f=reinterpret_cast<PFNGLUNIFORM2FPROC>(SDL_GL_GetProcAddress("glUniform2f"))))return "glUniform2f";
+    if(!(glUniform4f=reinterpret_cast<PFNGLUNIFORM4FPROC>(SDL_GL_GetProcAddress("glUniform4f"))))return "glUniform4f";
+    if(!(glDrawArrays=reinterpret_cast<PFNGLDRAWARRAYSPROC>(SDL_GL_GetProcAddress("glDrawArrays"))))return "glDrawArrays";
+    if(!(glActiveTexture=reinterpret_cast<PFNGLACTIVETEXTUREPROC>(SDL_GL_GetProcAddress("glActiveTexture"))))return "glActiveTexture";
+    if(!(glGenFramebuffers=reinterpret_cast<PFNGLGENFRAMEBUFFERSPROC>(SDL_GL_GetProcAddress("glGenFramebuffers"))))return "glGenFramebuffers";
+    if(!(glBindFramebuffer=reinterpret_cast<PFNGLBINDFRAMEBUFFERPROC>(SDL_GL_GetProcAddress("glBindFramebuffer"))))return "glBindFramebuffer";
+    if(!(glFramebufferTexture2D=reinterpret_cast<PFNGLFRAMEBUFFERTEXTURE2DPROC>(SDL_GL_GetProcAddress("glFramebufferTexture2D"))))return "glFramebufferTexture2D";
+    if(!(glCheckFramebufferStatus=reinterpret_cast<PFNGLCHECKFRAMEBUFFERSTATUSPROC>(SDL_GL_GetProcAddress("glCheckFramebufferStatus"))))return "glCheckFramebufferStatus";
+    if(!(glDeleteFramebuffers=reinterpret_cast<PFNGLDELETEFRAMEBUFFERSPROC>(SDL_GL_GetProcAddress("glDeleteFramebuffers"))))return "glDeleteFramebuffers";
+    if(!(glViewport=reinterpret_cast<PFNGLVIEWPORTPROC>(SDL_GL_GetProcAddress("glViewport"))))return "glViewport";
+    return nullptr;}
+#if defined(__ANDROID__)
+constexpr const char* glsl_version="#version 300 es\n";
+#else
+constexpr const char* glsl_version="#version 330 core\n";
+#endif
+constexpr const char* vertex_shader=R"GLSL(
 void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}
 )GLSL";
 // Zeilen eines Zielpuffers (FBO) zaehlen wie das Spielbild von oben: Zeile 0 ist v = 0.
-constexpr const char* easu_shader=R"GLSL(#version 300 es
+constexpr const char* easu_shader=R"GLSL(
 precision highp float;precision highp int;
 uniform highp sampler2D src;uniform vec4 con0;uniform ivec2 src_max;
 out vec4 o;
@@ -88,7 +190,7 @@ void main(){
     o=vec4(min(max4,max(min4,aC*vec3(1.0/aW))),1.0);
 }
 )GLSL";
-constexpr const char* rcas_shader=R"GLSL(#version 300 es
+constexpr const char* rcas_shader=R"GLSL(
 precision highp float;precision highp int;
 uniform highp sampler2D src;uniform float sharp;uniform ivec2 src_max;
 out vec4 o;
@@ -110,7 +212,7 @@ void main(){
     o=vec4((lobe*b+lobe*d+lobe*h+lobe*f+e)*rcpL,1.0);
 }
 )GLSL";
-constexpr const char* bloom_down_shader=R"GLSL(#version 300 es
+constexpr const char* bloom_down_shader=R"GLSL(
 precision highp float;
 uniform highp sampler2D src;uniform vec2 dst_size;
 out vec4 o;
@@ -122,7 +224,7 @@ void main(){
     o=vec4(c*smoothstep(0.5,0.9,l),1.0);
 }
 )GLSL";
-constexpr const char* bloom_blur_shader=R"GLSL(#version 300 es
+constexpr const char* bloom_blur_shader=R"GLSL(
 precision highp float;
 uniform highp sampler2D src;uniform vec2 dst_size;uniform vec2 dir;
 out vec4 o;
@@ -135,7 +237,7 @@ void main(){
 }
 )GLSL";
 // Fensterpuffer: gl_FragCoord.y zaehlt von unten; gid ist die Pixelzeile von oben wie in present_cs.
-constexpr const char* present_shader=R"GLSL(#version 300 es
+constexpr const char* present_shader=R"GLSL(
 precision highp float;precision highp int;
 uniform highp sampler2D src_lin;uniform highp sampler2D src_pt;uniform highp sampler2D bloom_tex;
 uniform vec2 src_size,fit_origin,fit_size;uniform ivec2 dst_size;
@@ -176,7 +278,7 @@ void main(){
 }
 )GLSL";
 GLuint compile(GLenum type,const char* source,const char* name){
-    const GLuint s=glCreateShader(type);glShaderSource(s,1,&source,nullptr);glCompileShader(s);
+    const GLuint s=glCreateShader(type);const char* parts[2]={glsl_version,source};glShaderSource(s,2,parts,nullptr);glCompileShader(s);
     GLint ok=0;glGetShaderiv(s,GL_COMPILE_STATUS,&ok);
     if(!ok){char log[2048]{};glGetShaderInfoLog(s,sizeof log,nullptr,log);glDeleteShader(s);throw std::runtime_error(std::string("GLES presentation shader ")+name+": "+log);}
     return s;}
@@ -190,11 +292,28 @@ struct Target {GLuint tex=0,fbo=0;int w=0,h=0;};
 class GlesPresenter final:public MetalFxPresenter {
 public:
     GlesPresenter(SDL_Window* window,const VideoSettings& initial):window_(window),settings_(initial){
-        context_=SDL_GL_CreateContext(window_);if(!context_)throw std::runtime_error(std::string("GLES 3.0 context: ")+SDL_GetError());
-        if(SDL_GL_MakeCurrent(window_,context_)!=0){SDL_GL_DeleteContext(context_);throw std::runtime_error(std::string("GLES make current: ")+SDL_GetError());}
+#if defined(__ANDROID__)
+        context_=SDL_GL_CreateContext(window_); // ES 3.0 aus der Fensterkonfiguration (runtime.cpp)
+#else
+        // Linux: GL 3.3 Core nur fuer diesen Kontext; die Attribute des Prozesses bleiben wie vorher.
+        const SDL_GLattr attributes[]={SDL_GL_CONTEXT_MAJOR_VERSION,SDL_GL_CONTEXT_MINOR_VERSION,SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_SHARE_WITH_CURRENT_CONTEXT};
+        int saved[4]{};for(int i=0;i<4;++i)SDL_GL_GetAttribute(attributes[i],&saved[i]);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_CORE);SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT,0);
+        context_=SDL_GL_CreateContext(window_);
+        for(int i=0;i<4;++i)SDL_GL_SetAttribute(attributes[i],saved[i]);
+#endif
+        if(!context_)throw std::runtime_error(std::string("GL presentation context: ")+SDL_GetError());
+        if(SDL_GL_MakeCurrent(window_,context_)!=0){SDL_GL_DeleteContext(context_);context_=nullptr;throw std::runtime_error(std::string("GL make current: ")+SDL_GetError());}
         try{
+            if(const char* missing=load_gl())throw std::runtime_error(std::string("GL entry point missing: ")+missing);
             const char* version=reinterpret_cast<const char*>(glGetString(GL_VERSION));
+#if defined(__ANDROID__)
             if(!version||std::strncmp(version,"OpenGL ES 3",11)!=0)throw std::runtime_error(std::string("OpenGL ES 3.0 required, driver reports ")+(version?version:"nothing"));
+#else
+            GLint major=0,minor=0;glGetIntegerv(GL_MAJOR_VERSION,&major);glGetIntegerv(GL_MINOR_VERSION,&minor);
+            if(major*10+minor<33)throw std::runtime_error(std::string("OpenGL 3.3 core required, driver reports ")+(version?version:"nothing"));
+#endif
             renderer_name_=reinterpret_cast<const char*>(glGetString(GL_RENDERER));
             easu_=program(easu_shader,"easu");rcas_=program(rcas_shader,"rcas");bloom_down_=program(bloom_down_shader,"bloom down");
             bloom_blur_=program(bloom_blur_shader,"bloom blur");present_=program(present_shader,"present");
@@ -204,12 +323,16 @@ public:
             glGenSamplers(1,&pt_);glSamplerParameteri(pt_,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glSamplerParameteri(pt_,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
             glSamplerParameteri(pt_,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glSamplerParameteri(pt_,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
             // Spielbild 0xAARRGGBB (Bytes B,G,R,A) als GL_RGBA: Swizzle tauscht Rot und Blau beim Lesen.
-            glGenTextures(1,&src_);glBindTexture(GL_TEXTURE_2D,src_);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA8,640,480);
+            glGenTextures(1,&src_);glBindTexture(GL_TEXTURE_2D,src_);glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,640,480,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_SWIZZLE_R,GL_BLUE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_SWIZZLE_B,GL_RED);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
             // Bloom in Halbfloat, wenn der Treiber darauf zeichnen kann (EXT_color_buffer_half_float/float), sonst RGBA8.
+#if defined(__ANDROID__)
             const char* ext=reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
             half_float_target_=ext&&(std::strstr(ext,"GL_EXT_color_buffer_half_float")||std::strstr(ext,"GL_EXT_color_buffer_float"));
+#else
+            half_float_target_=true; // Desktop-GL 3.x: RGBA16F ist immer zeichenbar (Core-Profil kennt kein GL_EXTENSIONS-String)
+#endif
             if(GLenum e=glGetError();e!=GL_NO_ERROR)throw std::runtime_error("GLES presentation setup failed (GL error "+std::to_string(e)+")");
         }catch(...){release();throw;}
         apply_swap_interval();
@@ -222,7 +345,7 @@ public:
     bool synchronous()const override{return true;}
     const PresentStats& stats()const override{return stats_;}
     std::string describe()const override{
-        std::ostringstream out;out<<"GLES "<<renderer_name_<<": ";
+        std::ostringstream out;out<<"GL "<<renderer_name_<<": ";
         if(source_upscaled_)out<<"FSR 1 "<<fit_w_<<"x"<<fit_h_;else out<<(settings_.upscaler==Upscaler::Off&&settings_.post_process==PostProcess::Off?"nearest":"bilinear");
         if(settings_.sharpness!=Sharpness::Off)out<<", sharpen "<<settings_.sharpness_amount();
         if(settings_.post_process==PostProcess::CrtLight)out<<", CRT light";else if(settings_.post_process==PostProcess::CrtFull)out<<", CRT full (phosphor "<<phosphor_<<"px, bloom)";
@@ -264,7 +387,7 @@ private:
     static void destroy(Target& t){if(t.fbo)glDeleteFramebuffers(1,&t.fbo);if(t.tex)glDeleteTextures(1,&t.tex);t={};}
     Target target(int w,int h,bool half){
         Target t;t.w=std::max(w,1);t.h=std::max(h,1);
-        glGenTextures(1,&t.tex);glBindTexture(GL_TEXTURE_2D,t.tex);glTexStorage2D(GL_TEXTURE_2D,1,half?GL_RGBA16F:GL_RGBA8,t.w,t.h);
+        glGenTextures(1,&t.tex);glBindTexture(GL_TEXTURE_2D,t.tex);glTexImage2D(GL_TEXTURE_2D,0,half?GL_RGBA16F:GL_RGBA8,t.w,t.h,0,GL_RGBA,half?GL_HALF_FLOAT:GL_UNSIGNED_BYTE,nullptr);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
         glGenFramebuffers(1,&t.fbo);glBindFramebuffer(GL_FRAMEBUFFER,t.fbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,t.tex,0);
         if(glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE){destroy(t);glBindFramebuffer(GL_FRAMEBUFFER,0);throw std::runtime_error("GLES render target incomplete");}
@@ -284,8 +407,8 @@ private:
         if(settings_.upscaler==Upscaler::Fsr1){
             if(fit_w_<=640&&fit_h_<=480)notes_="FSR 1: window not larger than 640x480";
             else{easu_target_=target(fit_w_,fit_h_,false);rcas_target_=target(fit_w_,fit_h_,false);}}
-        else if(settings_.upscaler!=Upscaler::Off)notes_="this upscaler is not available on Android";
-        if(settings_.frame_generation!=FrameGeneration::Off)notes_+=std::string(notes_.empty()?"":", ")+"no frame generation on Android";
+        else if(settings_.upscaler!=Upscaler::Off)notes_="only FSR 1 on this platform";
+        if(settings_.frame_generation!=FrameGeneration::Off)notes_+=std::string(notes_.empty()?"":", ")+"no frame generation on this platform";
         if(settings_.post_process==PostProcess::CrtFull){bloom_a_=target(fit_w_/4,fit_h_/4,half_float_target_);bloom_b_=target(fit_w_/4,fit_h_/4,half_float_target_);}}
     void show(){
         glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,drawable_w_,drawable_h_);glUseProgram(present_);

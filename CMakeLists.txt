@@ -237,55 +237,37 @@ elseif(EMSCRIPTEN)
   set(RECVX_ENABLE_VULKAN OFF CACHE BOOL "Vulkan is unavailable in browsers" FORCE)
 endif()
 if(RECVX_ENABLE_VULKAN)
+  # Header: NDK-Sysroot (Android), sonst VULKAN_SDK bzw. Systemheader; fehlen sie (Windows-Runner, Zig-Cross-
+  # builds), die eingecheckten Khronos-Header v1.4.357 (native/third_party/Vulkan-Headers, Apache-2.0 OR MIT).
+  # Keine Header des Bauhosts in ein fremdes Ziel. Der Loader (vulkan-1.dll, libvulkan.so, MoltenVK) wird zur
+  # Laufzeit geoeffnet, nie gelinkt.
   if(ANDROID)
-    # Android: Header aus dem NDK-Sysroot (die Toolchain setzt CMAKE_SYSROOT); der System-Loader libvulkan.so
-    # wird wie auf Linux zur Laufzeit geoeffnet, nicht gelinkt. SPIR-V ist zielunabhaengig: dasselbe Host-glslc
-    # wie die Desktopbuilds (VULKAN_SDK/PATH). Das aeltere glslc der NDK-Shader-Tools erzeugt andere Module und
-    # wird nicht verwendet; fehlt ein Host-glslc, bleibt das Backend aus (Warnung unten).
     find_path(RECVX_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "${CMAKE_SYSROOT}/usr/include" NO_DEFAULT_PATH)
-    find_program(RECVX_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/bin" PATHS ENV PATH NO_CMAKE_FIND_ROOT_PATH)
   elseif(CMAKE_CROSSCOMPILING)
-    # Keine Header des Bauhosts (z. B. Homebrew) in ein fremdes Ziel: nur VULKAN_SDK oder ausdrueckliches
-    # -DRECVX_VULKAN_INCLUDE_DIR. glslc darf vom Host kommen (es erzeugt nur SPIR-V).
     find_path(RECVX_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "$ENV{VULKAN_SDK}/include" "$ENV{VULKAN_SDK}/Include"
       NO_CMAKE_SYSTEM_PATH NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_ENVIRONMENT_PATH)
   else()
     find_path(RECVX_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "$ENV{VULKAN_SDK}/include" "$ENV{VULKAN_SDK}/Include")
   endif()
-  find_program(RECVX_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/Bin")
-  if(NOT RECVX_VULKAN_INCLUDE_DIR OR NOT RECVX_GLSLC)
-    message(WARNING "Vulkan raster backend disabled: vulkan/vulkan.h (${RECVX_VULKAN_INCLUDE_DIR}) or glslc (${RECVX_GLSLC}) not found")
-    set(RECVX_HAVE_VULKAN_BUILD OFF)
-  else()
-    set(RECVX_HAVE_VULKAN_BUILD ON)
+  if(NOT RECVX_VULKAN_INCLUDE_DIR)
+    set(RECVX_VULKAN_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/native/third_party/Vulkan-Headers/include" CACHE PATH "Vulkan headers" FORCE)
   endif()
+  set(RECVX_HAVE_VULKAN_BUILD ON)
 endif()
 if(RECVX_ENABLE_VULKAN AND RECVX_HAVE_VULKAN_BUILD)
-  set(RECVX_VULKAN_SPV_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/vulkan")
-  set(RECVX_VULKAN_SPV)
-  foreach(stage raster_vs:vert:RASTER_VS raster_fs:frag:RASTER_FS mask_vs:vert:MASK_VS mask_fs:frag:MASK_FS
-                full_vs:vert:FULL_VS composite_fs:frag:COMPOSITE_FS resolve_cs:comp:RESOLVE_CS)
-    string(REPLACE ":" ";" parts "${stage}")
-    list(GET parts 0 name)
-    list(GET parts 1 kind)
-    list(GET parts 2 macro)
-    set(output "${RECVX_VULKAN_SPV_DIR}/gpu_raster_vulkan_${name}.inc")
-    # -O0: der Optimierer darf keine Rechnung umformen; NoContraction/float_controls stehen im SPIR-V.
-    add_custom_command(OUTPUT "${output}"
-      COMMAND "${CMAKE_COMMAND}" -E make_directory "${RECVX_VULKAN_SPV_DIR}"
-      COMMAND "${RECVX_GLSLC}" -fshader-stage=${kind} -D${macro} --target-env=vulkan1.1 -O0 -mfmt=num
-              "${CMAKE_CURRENT_SOURCE_DIR}/native/gpu_raster_vulkan.glsl" -o "${output}"
-      DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/native/gpu_raster_vulkan.glsl"
-      COMMENT "SPIR-V ${name} (gpu_raster_vulkan.glsl)" VERBATIM)
-    list(APPEND RECVX_VULKAN_SPV "${output}")
-  endforeach()
-  target_sources(recvx_scene PRIVATE native/gpu_raster_vulkan.cpp ${RECVX_VULKAN_SPV})
+  # SPIR-V: eingecheckt (native/third_party/vulkan_spirv, tools/update_vulkan_spirv.py mit dem gepinnten glslc),
+  # damit jede Plattform dieselben Shader-Bytes nutzt und kein Build glslc braucht. vulkan_spirv_current prueft
+  # sie gegen gpu_raster_vulkan.glsl, wo genau dieses glslc installiert ist.
+  set(RECVX_VULKAN_SPV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/native/third_party/vulkan_spirv")
+  file(GLOB RECVX_VULKAN_SPV "${RECVX_VULKAN_SPV_DIR}/gpu_raster_vulkan_*.inc")
+  target_sources(recvx_scene PRIVATE native/gpu_raster_vulkan.cpp)
   set_source_files_properties(native/gpu_raster_vulkan.cpp PROPERTIES OBJECT_DEPENDS "${RECVX_VULKAN_SPV}")
   target_include_directories(recvx_scene PRIVATE "${RECVX_VULKAN_INCLUDE_DIR}" "${RECVX_VULKAN_SPV_DIR}")
   target_compile_definitions(recvx_scene PRIVATE RECVX_HAVE_VULKAN=1)
   if(NOT WIN32)
     target_link_libraries(recvx_scene PUBLIC ${CMAKE_DL_LIBS})
   endif()
+  message(STATUS "Vulkan raster backend: headers ${RECVX_VULKAN_INCLUDE_DIR}, checked-in SPIR-V")
 endif()
 if(APPLE)
   # Als CXX-Quelle: clang waehlt Objective-C++ an der Endung; enable_language(OBJCXX) bricht SDLs .m-Build.
@@ -364,7 +346,6 @@ if(RECVX_BUILD_RUNTIME)
     # Host-Praesentationsstufe mit OpenGL ES 3.0 (native/gles_present.cpp): FSR 1, Schaerfen, CRT, Einpassung.
     target_sources(recvx-runtime PRIVATE native/gles_present.cpp)
     target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_GLES_PRESENT=1)
-    target_link_libraries(recvx-runtime PRIVATE GLESv3)
   elseif(EMSCRIPTEN)
     # Browser (docs/WEB.md): recvx.js + recvx.wasm, Runtime auf einem pthread, SDL auf dem Hauptthread.
     add_executable(recvx-runtime native/runtime.cpp native/web_main.cpp native/web_sdl_proxy.cpp)
@@ -525,6 +506,18 @@ if(RECVX_BUILD_RUNTIME)
     target_sources(recvx-runtime PRIVATE native/metalfx_present.mm)
     target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_METALFX=1)
     target_link_libraries(recvx-runtime PRIVATE "-framework Metal" "-framework QuartzCore" "-weak_framework MetalFX")
+  endif()
+  # Linux: dieselbe GL-Stufe (native/gles_present.cpp) auf Desktop-OpenGL 3.3 Core; Einsprungpunkte ueber
+  # SDL_GL_GetProcAddress, aus <GLES3/gl3.h> nur Typen/Konstanten (Mesa libgles-dev bzw. Khronos-Header).
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    find_path(RECVX_GLES3_INCLUDE_DIR GLES3/gl3.h)
+    if(RECVX_GLES3_INCLUDE_DIR)
+      target_sources(recvx-runtime PRIVATE native/gles_present.cpp)
+      target_include_directories(recvx-runtime PRIVATE "${RECVX_GLES3_INCLUDE_DIR}")
+      target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_GLES_PRESENT=1)
+    else()
+      message(WARNING "GL presentation stage disabled: GLES3/gl3.h not found (libgles-dev)")
+    endif()
   endif()
   # Host-Praesentationsstufe mit AMD FSR 4 (native/fsr_present_d3d12.cpp, Windows): eigenes D3D12-Geraet und
   # DXGI-Swapchain auf dem SDL-Fenster; FSR ausschliesslich aus den signierten AMD-ffx-api-DLLs, die zur
@@ -1605,6 +1598,12 @@ endif()
       add_test(NAME gpu_raster_vulkan_parity COMMAND recvx-gpu-raster-tests --backend vulkan)
     endif()
     set_tests_properties(gpu_raster_vulkan_parity PROPERTIES SKIP_RETURN_CODE 77)
+    # Eingechecktes SPIR-V gegen gpu_raster_vulkan.glsl, wenn das gepinnte glslc vorhanden ist (sonst 2 = uebersprungen).
+    find_program(RECVX_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/Bin")
+    if(RECVX_GLSLC)
+      add_test(NAME vulkan_spirv_current COMMAND "${Python3_EXECUTABLE}" -I "${CMAKE_CURRENT_SOURCE_DIR}/tools/update_vulkan_spirv.py" --check --glslc "${RECVX_GLSLC}")
+      set_tests_properties(vulkan_spirv_current PROPERTIES SKIP_RETURN_CODE 2)
+    endif()
   endif()
   add_executable(recvx-camera-return-tests tests/native/camera_return_test.cpp)
   target_link_libraries(recvx-camera-return-tests PRIVATE recvx_game)
