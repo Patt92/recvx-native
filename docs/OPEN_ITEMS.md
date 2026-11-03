@@ -10,12 +10,11 @@ Arbeitsstände: [Gegnerboard](enemies/README.md), [Inventarvertrag](INVENTORY_CO
 
 - **Alle Identitäten:** nativ verdrahtet; Audit und Fensterabnahme je Gegner offen
   ([Gegnerboard](enemies/README.md)).
-- **Skriptgesteuerte Gegner vor ihrer Initialisierung** (aus `hunter7110.md`): Im Original läuft
-  `bhControlEnemy` jedes Work über `bhJumpEnemy[id]`, die Identitätsroutine initialisiert bei
-  `mode0 == 0` (eneset.c:337-383, en11.c:58/133). Setzt ein Raumskript `mode0 = 5`, bevor diese
-  Initialisierung lief, fehlen `exp0`/Initialisierung und `bhEne_Event` läuft nie. Zu klären:
-  schreibt das Skript den Modus vor dem ersten Gegnerpass (Reihenfolge des Ports), oder muss die
-  Initialisierung wie `bhSetEnemy` beim Raumanlegen erfolgen; danach EN11 und alle Identitäten.
+- ~~**Skriptgesteuerte Gegner vor ihrer Initialisierung**~~ (aus `hunter7110.md`): 2026-11-03
+  widerlegt. bhInitEvent (event.c:352) ruft bhControlEnemy vor scd0; nativ `EventVm::initialize` ->
+  `initialize_enemies`. Test `scripted_enemy_init`: EN11 in RM_7110 vor scd0 initialisiert, Skript-mode0 5
+  erreicht bhEne_Event; alle 200 Raeume ohne uninitialisiertes Work ausser den Originalwaechtern
+  (EN29 type 8, EN03/EN06 im Spielerpfad). Ledger `event.c:bhInitEvent:bhControlEnemy`.
 - **Disc 2, dynamisch** (aus `gap-audit-disc2.md`): Griffabläufe ab Stufe 6 ohne Spielstände in den
   Räumen nicht im Spiel geprüft. `bhItmSetCk` in RM_7030 (Ereignis 0, Offsets 34/40/46) mit
   Interaktionsindex hinter `rom->etcp`: Original liest unkontrolliert, nativ wird nur der
