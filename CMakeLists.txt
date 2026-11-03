@@ -64,6 +64,13 @@ if(BUILD_TESTING)
   if(RECVX_HAVE_PILLOW EQUAL 0)
     add_test(NAME hd_texture_import
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/import_hd_textures_test.py")
+    add_test(NAME hd_texture_build
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/build_hd_textures_test.py")
+    execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import numpy" RESULT_VARIABLE RECVX_HAVE_NUMPY OUTPUT_QUIET ERROR_QUIET)
+    if(RECVX_HAVE_NUMPY EQUAL 0)
+      add_test(NAME hd_texture_matching
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/match_hd_textures_test.py")
+    endif()
   endif()
   # Negativpruefungen des Windows-PE-Audits; brauchen den Zig-Werkzeugsatz.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/toolchains/zig-cxx")
@@ -472,6 +479,11 @@ if(RECVX_BUILD_RUNTIME)
     target_link_libraries(recvx-event-lifecycle-tests PRIVATE recvx_input)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/rooms/RM_0050.RDT")
       add_test(NAME event_lifecycle_control_release COMMAND recvx-event-lifecycle-tests "${CMAKE_CURRENT_SOURCE_DIR}/data")
+      # Statischer Skriptlauf ueber alle Raeume (beide IF-Zweige, bhEvtOn, bhLoadWork-Arten, WHILE): jeder
+      # Befehl, Controller-Unterbefehl und Operandenbereich muss dem nativen EventVm/world bekannt sein, sonst
+      # bliebe ein Task fuer den Rest des Raums stehen (Spielblockade). Gegenprobe mit bhCk-Matrix 73.
+      add_test(NAME script_reach_static
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/scan_script_reach_test.py")
     endif()
     # RM_0090 Security Boxen obwp[5]/obwp[14]: Knotenschreiber der Ereignisse 7/18/19/30/31 und scd1.
     add_executable(recvx-rm0090-box-tests tests/native/rm0090_box_test.cpp)

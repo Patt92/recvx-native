@@ -20,9 +20,17 @@ int main(){try{
     Scene scene;scene.textures={solid(2,2,0x11111111),solid(2,2,0x22222222),solid(2,2,0x33333333)};
     apply_texture_files(scene,data,{},identity);
     check(scene.textures[0].width==4&&scene.textures[1].width==4&&scene.textures[2].width==2,"cooked data textures not applied");
+    // Runtime-only identities (weapons/doors/effects/title) have no cooked
+    // file to hash. Explicit overrides must work with their decoded originals.
+    const fs::path weapon_identity="weapons/0021/right";
+    write_tga(mods/"textures"/weapon_identity/"0000.tga",solid(8,8,0xff123456));
+    Scene weapon;weapon.textures={solid(2,2,0xff654321)};weapon.textures[0].clamp_u=true;
     // Content-keyed HD replacement applies by pixel-file identity, wherever the texture is used.
     const auto key=md5_hex(read_asset_file(data/"textures"/identity/"0000.tga",1<<20));
     write_tga(mods/"textures/hd"/(key+".tga"),solid(16,16,0x80ffffff));
+    apply_texture_files(weapon,data,mods,weapon_identity);
+    check(weapon.textures[0].width==8&&weapon.textures[0].pixels[0]==0xff123456,"explicit uncooked identity override missing");
+    check(weapon.textures[0].clamp_u,"override changed original wrap mode");
     scene.textures={solid(2,2,0),solid(2,2,0),solid(2,2,0)};apply_texture_files(scene,data,mods,identity);
     check(scene.textures[0].width==16&&scene.textures[1].width==4,"HD replacement did not apply by content key");
     // Another room using the same cooked content gets the same replacement; different content does not.

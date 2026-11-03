@@ -23,6 +23,20 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**Static script reach scan for game-blocking event gaps (2026-11-03, working tree):**
+`tools/scan_script_reach.py` walks every script of all 205 rooms (scd0, scd1, Event_init table; both
+IF branches, bhEvtOn targets, bhLoadWork work kinds, WHILE condition and body as event.c:9132) with the
+native instruction lengths and the original Player/Sub/Obj/Common_controll case lengths, and checks each
+operand against the domains the native VM rejects (flag matrices 1..16, bhCmpB keys/modes, bhCmpW fields,
+bhPadCheck/bhCineSet modes, room interaction/floor/wall/effect/position tables). Result: no script command,
+controller sub-command or operand that `EventVm`/`RoomWorld::bind` does not know; Player_controll 132/140/141/
+143/145 and Common 14/21/22/35/43/45 occur in no room. Test `script_reach_static`
+(`tests/scan_script_reach_test.py`, counter-check with bhCk matrix 73 and the WHILE body offset). First walker
+pass had reported bhCk matrix 73 / bhCmpW 39/46/48 / bhCmpB 119/140/252: all walker misalignment (body at
+p+2+rel instead of p+rel), none in the data. Still unverifiable statically: throws that depend on runtime
+state (DoorCall destination, pad/enemy-health bindings, item-box capacity) — those are host bindings, all set
+in runtime.cpp/world.cpp. **No commit.**
+
 **MetalFX presentation stage (2026-10-25, working tree):** `native/metalfx_present.mm` shows the finished
 640x480 image via the CAMetalLayer of the SDL window: MetalFX spatial/temporal upscaler, frame interpolation
 (macOS 26+, intermediate frame per game tick), post-processing (sharpen/CRT); three new rows in the settings screen,

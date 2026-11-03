@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Match Dolphin HD texture-pack DDS files (GameCube) to cooked PS2 textures.
 
-The pack's file name carries the ORIGINAL GameCube texture size (tex1_<w>x<h>_...);
-the DDS itself is an integer multiple of it. Each DDS is box-downscaled to the
-original size and compared with cooked PS2 textures of the same size by RGB error.
+The pack's file name carries the ORIGINAL GameCube texture size (tex1_<w>x<h>_...).
+Replacement images may use any resolution with the same aspect ratio. Candidates
+are compared by image content; a reported candidate is NOT an accepted match.
 Output is a JSON match table, never a modification of data/.
 
 Needs Pillow + numpy (see docs/NATIVE_ASSETS.md "HD texture packs").
@@ -23,6 +23,7 @@ from PIL import Image
 
 NAME = re.compile(r'tex1_(\d+)x(\d+)_')
 THUMB = 8
+SEARCH_SIZE = 32
 
 
 def load_rgb(path):
@@ -61,11 +62,12 @@ def luma(arr):
 
 
 def ncc(a, b):
+    difference = float(np.mean((a - b) ** 2))
     a = a - a.mean()
     b = b - b.mean()
     denominator = float(np.sqrt((a * a).sum() * (b * b).sum()))
-    if denominator < 1e-3:  # both flat: decide by mean colour elsewhere
-        return 1.0 if abs(float(a.std()) - float(b.std())) < 1.0 else 0.0
+    if denominator < 1e-3:
+        return 1.0 if difference < 1e-3 else 0.0
     return float((a * b).sum() / denominator)
 
 
@@ -82,56 +84,123 @@ def worker(args):
         hd = load_rgb(path)
     except Exception as exc:  # decoder failure is reported, not hidden
         return path, {'status': 'decode-error', 'error': str(exc)}
-    if hd.size[0] % w or hd.size[1] % h or hd.size[0] // w != hd.size[1] // h:
+    if hd.width * h != hd.height * w:
         return path, {'status': 'bad-scale', 'size': hd.size}
-    scale = hd.size[0] // w
-    small = np.asarray(hd.reduce(scale) if scale > 1 else hd, dtype=np.float32)
+    scale = hd.width / w
+    small = np.asarray(hd.resize((w, h), Image.Resampling.BOX), dtype=np.float32)
     key = thumb(small)
     # Shortlist by thumbnail correlation plus colour distance, then verify at full size.
     ranked = sorted(((-ncc(key, c[1]) + float(np.mean((key - c[1]) ** 2)) / 20000.0, c[0]) for c in cands))[:8]
+    # The old eight-colour-thumbnail shortlist drops genuine matches. Search ALL
+    # candidates by spatial luminance as well, then verify the union at full size.
+    matrix = search_matrix(textures_root, cands)
+    query = search_vector(hd)
+    scores = matrix @ query
+    selected = {d for _, d in ranked}
+    selected.update(cands[int(i)][0] for i in np.argsort(scores)[-32:])
     luma_small = luma(small)
     scored = []
-    for _, digest in ranked:
+    for digest in sorted(selected):
         ref = ps2_pixels(textures_root, digest, cands)
         mse = float(np.mean((small - ref) ** 2))
         # Colour checks keep e.g. red and green herb variants apart: luma alone ignores hue.
         rgb = float(np.mean([ncc(small[..., c], ref[..., c]) for c in range(3)]))
         mean_delta = float(np.max(np.abs(small.reshape(-1, 3).mean(0) - ref.reshape(-1, 3).mean(0))))
         scored.append((ncc(luma_small, luma(ref)), mse, digest, rgb, mean_delta))
-    scored.sort(reverse=True)
-    best, second = scored[0], scored[1] if len(scored) > 1 else None
+    scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+    # Correlation ignores offsets and can prefer a wrong colour variant. A close
+    # RGB reconstruction with at least a 2:1 squared-error lead is independent
+    # evidence; record it separately instead of lowering the correlation gap.
+    by_error = sorted(scored, key=lambda item: (item[1], item[2]))
+    error_best = by_error[0]
+    error_second = by_error[1] if len(by_error) > 1 else None
+    error_ratio = error_best[1] / max(error_second[1], 1e-9) if error_second else 0.0
+    error_psnr = 99.0 if error_best[1] == 0 else 10 * np.log10(255 * 255 / error_best[1])
+    decisive_rgb = (error_best[0] >= .95 and error_best[3] >= .90 and error_best[4] <= 15
+                    and error_psnr >= 26 and (error_second is None or error_ratio <= .5)
+                    and (error_second is None or error_second[1] > 1e-9))
+    best = error_best if decisive_rgb else scored[0]
+    # Tiny export/lighting variants of the SAME original picture are not a
+    # competing identity. Do not merge colour variants or propagate replacements:
+    # only the selected digest is written; all alternates stay in the report.
+    ref_best = ps2_pixels(textures_root, best[2], cands)
+    distinct = []
+    equivalent = []
+    for candidate in scored:
+        if candidate[2] == best[2]:
+            continue
+        ref = ps2_pixels(textures_root, candidate[2], cands)
+        colour_delta = float(np.max(np.abs(ref.mean((0, 1)) - ref_best.mean((0, 1)))))
+        rgb_similarity = min(ncc(ref[..., c], ref_best[..., c]) for c in range(3))
+        if (ncc(luma(ref), luma(ref_best)) >= .98 and rgb_similarity >= .98 and colour_delta <= 8
+                and np.array_equal(ps2_alpha(textures_root, candidate[2], cands), ps2_alpha(textures_root, best[2], cands))):
+            equivalent.append(candidate[2])
+        else:
+            distinct.append(candidate)
+    second = distinct[0] if distinct else None
     psnr = 99.0 if best[1] == 0 else 10 * np.log10(255 * 255 / best[1])
     return path, {'status': 'ok', 'ps2': best[2], 'ncc': round(best[0], 4), 'psnr': round(float(psnr), 2), 'scale': scale,
                   'ncc2': round(second[0], 4) if second else None,
+                  'rgb_ncc': round(best[3], 4), 'mean_delta': round(best[4], 2),
+                  'equivalent_candidates': equivalent,
+                  'colour_ok': best[3] >= .80 and best[4] <= 25,
+                  'decisive_rgb': bool(decisive_rgb), 'rgb_error_ratio': round(float(error_ratio), 5),
                   'top': [[d, round(n, 4), round(r, 4), round(md, 2)] for n, _, d, r, md in scored[:4]]}
 
 
 _PIXELS = {}
+_SEARCH = {}
+_ALPHAS = {}
+
+
+def ps2_alpha(root, digest, candidates):
+    key = (str(root), digest)
+    if key not in _ALPHAS:
+        rel = next(c[2] for c in candidates if c[0] == digest)
+        with Image.open(Path(root) / rel) as image:
+            _ALPHAS[key] = np.asarray(image.convert('RGBA').getchannel('A'))
+    return _ALPHAS[key]
+
+
+def search_vector(image):
+    pixels = np.asarray(image.resize((SEARCH_SIZE, SEARCH_SIZE), Image.Resampling.BOX), dtype=np.float32)
+    values = luma(pixels).reshape(-1)
+    values -= values.mean()
+    return values / max(float(np.linalg.norm(values)), 1e-8)
+
+
+def search_matrix(root, candidates):
+    key = (str(root), tuple(c[0] for c in candidates))
+    if key not in _SEARCH:
+        _SEARCH[key] = np.stack([search_vector(Image.fromarray(ps2_pixels(root, c[0], candidates).astype(np.uint8))) for c in candidates])
+    return _SEARCH[key]
 
 
 def ps2_pixels(root, digest, cands):
-    if digest not in _PIXELS:
+    key = (str(root), digest)
+    if key not in _PIXELS:
         rel = next(c[2] for c in cands if c[0] == digest)
-        _PIXELS[digest] = np.asarray(load_rgb(Path(root) / rel), dtype=np.float32)
-    return _PIXELS[digest]
+        _PIXELS[key] = np.asarray(load_rgb(Path(root) / rel), dtype=np.float32)
+    return _PIXELS[key]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pack', type=Path, required=True, help='.../Load/Textures/GCDE08')
     parser.add_argument('--textures', type=Path, default=Path('data/textures'))
-    parser.add_argument('--categories', nargs='+', default=['rooms', 'items', 'menu', 'fonts', 'players', 'npcs', 'objects', 'room-items'])
+    parser.add_argument('--categories', nargs='+', help='default: every category under --textures')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--limit', type=int, default=0, help='first N DDS files (sampling)')
     parser.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     args = parser.parse_args()
-    ps2 = index_ps2(args.textures, args.categories)
+    categories = args.categories or sorted(p.name for p in args.textures.iterdir() if p.is_dir() and not p.name.startswith('.'))
+    ps2 = index_ps2(args.textures, categories)
     by_size = collections.defaultdict(list)
     for digest, entry in ps2.items():
         if entry['thumb'] is not None:
             by_size[entry['size']].append((digest, entry['thumb'], entry['paths'][0]))
     print(f'PS2: {len(ps2)} unique textures, {sum(len(e["paths"]) for e in ps2.values())} files', file=sys.stderr)
-    files = sorted(str(p) for p in args.pack.rglob('*.dds'))
+    files = sorted(str(p) for p in args.pack.rglob('*') if p.is_file() and p.suffix.lower() == '.dds')
     if not files:
         raise SystemExit(f'no DDS files under {args.pack} (pack missing or volume not mounted); output left unchanged')
     if args.limit:
@@ -145,6 +214,7 @@ def main():
             if i % 200 == 0:
                 print(f'{i}/{len(files)}', file=sys.stderr)
     table = {'ps2': {d: e['paths'] for d, e in ps2.items()}, 'matches': results}
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(table))
     ok = [r for r in results.values() if r and r.get('status') == 'ok']
     print(f'{len(files)} DDS; matched candidates {len(ok)}; statuses', collections.Counter((r or {}).get('status') for r in results.values()))
