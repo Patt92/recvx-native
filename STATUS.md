@@ -23,6 +23,14 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**iOS bundles the game data by default (2026-11-03, working tree):** `./build.sh --platform ios [--compressed]
+--package` now writes a complete IPA; `--ios-no-bundle-data` builds the slim app that reads `Documents/data`
+(`--ios-bundle-data` still accepted, both together refused, tvOS refuses the slim variant). A rebuild replaces the
+IPA in the default `build/packages/ios-arm64-v<version>/` (failed before with "package destination already exists");
+`--output` still never overwrites. `check_ios_bundle.py` infers the variant (`--bundle-data`/`--slim` to force),
+CI builds the slim app explicitly. README platform table links the bundled command. Tests in
+`development_app_packaging`. `--no-mods` builds without any mods (no HD import, nothing baked into packages/iOS/tvOS, dev app gets an empty mods folder, web index skipped); default still bakes the project's `mods/`. **No commit.**
+
 **Ultra shadows and per-platform presentation rows (2026-11-03, working tree):** `quality = ultra` rasters the
 bhDrawMdfEffect mask at render resolution and softens its edge depth-aware before the original darkening
 (`native/shadow_soft.h`, CPU + Metal/D3D11/D3D12/Vulkan/OpenGL; Original/Low/High unchanged bit for bit; test

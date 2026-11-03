@@ -2215,6 +2215,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         std::unique_ptr<SDL_Window,decltype(&SDL_DestroyWindow)> window(SDL_CreateWindow("RECVX native runtime",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,1280,960,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|recvx_presentation_window_flags),SDL_DestroyWindow);sdl_check(bool(window));
 #if defined(RECVX_IOS)
         recvx::ios_adopt_scene(window.get()); // UIScene-Lebenszyklus (iOS-27-SDK), ios_scene.mm
+        recvx::ios_fit_view(window.get());     // Startrahmen; danach nur bei RESIZED (Ereignisschleife)
 #endif
         // A starter script or terminal may keep keyboard focus; take it so the menu reacts at once.
         SDL_RaiseWindow(window.get());
@@ -2302,6 +2303,13 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 // Host-Lebenszyklus (iOS/iPadOS/tvOS, Android): im Hintergrund kein Takt, kein Ton, keine Praesentation.
                 // Reiner Halt wie pausiert; kein Spielzustand wird geschrieben. SDL meldet WILLENTERBACKGROUND vor dem
                 // Einfrieren durch das System und DIDENTERFOREGROUND nach der Rueckkehr.
+#if defined(RECVX_IOS)
+                // SDL setzt die Ansicht im Vollbild hochkant (ios_scene.h). Jede Rahmenaenderung meldet SDL ueber
+                // viewDidLayoutSubviews als RESIZED (Vollbildwechsel, Rueckkehr aus dem Hintergrund, Split View):
+                // nur dann zurueck auf die UIWindow-Grenzen legen.
+                if(event.type==SDL_WINDOWEVENT&&(event.window.event==SDL_WINDOWEVENT_RESIZED||event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED)
+                   &&recvx::ios_fit_view(window.get()))render_dirty=true;
+#endif
                 if(event.type==SDL_APP_WILLENTERBACKGROUND||event.type==SDL_APP_DIDENTERBACKGROUND){
                     if(!app_backgrounded){app_backgrounded=true;if(audio_device)SDL_PauseAudioDevice(audio_device,1);}continue;}
                 if(event.type==SDL_APP_WILLENTERFOREGROUND||event.type==SDL_APP_DIDENTERFOREGROUND){

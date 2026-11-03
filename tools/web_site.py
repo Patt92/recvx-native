@@ -66,6 +66,7 @@ def main() -> int:
     parser.add_argument('--site', type=Path, help='output directory (default: <build>/site)')
     parser.add_argument('--data', type=Path, default=ROOT / 'data', help='prepared data tree to index')
     parser.add_argument('--mods', type=Path, default=ROOT / 'mods', help='mods tree to index (optional)')
+    parser.add_argument('--no-mods', action='store_true', help='do not index any mods folder')
     parser.add_argument('--index-only', action='store_true', help='only write the data/mods index files')
     args = parser.parse_args()
     data = args.data.resolve()
@@ -74,7 +75,9 @@ def main() -> int:
     count = write_listing(data, LISTING, data_profiles.profile('web')['exclude'])
     print(f'Data index: {data / LISTING} ({count} files)')
     mods = args.mods.resolve()
-    if mods.is_dir():
+    if args.no_mods:
+        print('Mods index: skipped (--no-mods)')
+    elif mods.is_dir():
         # hd-source/ is a build-time import source (tools/import_hd_textures.py), never read at run time.
         print(f'Mods index: {mods / MODS_LISTING} ({write_listing(mods, MODS_LISTING, ("hd-source",))} files)')
     if not args.index_only:

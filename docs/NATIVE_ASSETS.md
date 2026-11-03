@@ -158,7 +158,7 @@ still has the same layout. Full build/bundle flow: [BUILD.md](BUILD.md).
 The runtime looks in `<mods>` first; without `--mods` it uses `mods/` beside `data/`.
 The development app (`Start.command`) passes the project's `data/` and `mods/` and reads them loose,
 so a pack placed in `mods/textures/hd/` is picked up at the next start without a rebuild. Packages
-(`./build.sh --package`, iOS `--ios-bundle-data`) instead bake the project's `mods/` into their copied
+(`./build.sh --package`, iOS by default) instead bake the project's `mods/` into their copied
 data at build time and ship no mods folder; only desktop runtimes still read an extra `mods` folder
 beside the app. Delete the folder (dev app) or rebuild the package to go back to the original look.
 

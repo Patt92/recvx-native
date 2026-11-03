@@ -166,13 +166,13 @@ jobs:
       - name: Packaging and version tests
         run: python3 tests/build_native_test.py
       - name: Build device app and unsigned IPA
-        run: ./build.sh --platform ios --package --output "$RUNNER_TEMP/ipa"
+        run: ./build.sh --platform ios --ios-no-bundle-data --package --output "$RUNNER_TEMP/ipa"
       - name: Check app and IPA structure
-        run: python3 tools/check_ios_bundle.py --target ios --ipa "$RUNNER_TEMP/ipa/RECVX-Native-unsigned.ipa"
+        run: python3 tools/check_ios_bundle.py --target ios --slim --ipa "$RUNNER_TEMP/ipa/RECVX-Native-unsigned.ipa"
       - name: Build simulator app
         run: |
-          ./build.sh --platform ios-simulator
-          python3 tools/check_ios_bundle.py --target ios-simulator
+          ./build.sh --platform ios-simulator --ios-no-bundle-data
+          python3 tools/check_ios_bundle.py --target ios-simulator --slim
       - uses: actions/upload-artifact@v7
         with:
           name: recvx-ios-unsigned

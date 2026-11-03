@@ -32,6 +32,14 @@ void ios_adopt_scene(SDL_Window* window){
     uiwindow.windowScene=recvx_window_scene;
     [uiwindow makeKeyAndVisible];
 }
+bool ios_fit_view(SDL_Window* window){
+    SDL_SysWMinfo info;SDL_VERSION(&info.version);
+    if(!SDL_GetWindowWMInfo(window,&info)||info.subsystem!=SDL_SYSWM_UIKIT)return false;
+    UIWindow* uiwindow=info.info.uikit.window;UIView* view=uiwindow.rootViewController.view;
+    if(!view||CGRectEqualToRect(view.frame,uiwindow.bounds))return false;
+    view.frame=uiwindow.bounds;[view setNeedsLayout];[view layoutIfNeeded]; // layoutSubviews setzt drawableSize neu
+    return true;
+}
 bool ios_exclude_from_backup(const char* path,std::string& reason){
     NSURL* url=[NSURL fileURLWithPath:[NSString stringWithUTF8String:path] isDirectory:YES];
     NSError* error=nil;

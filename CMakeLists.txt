@@ -425,9 +425,13 @@ if(RECVX_BUILD_RUNTIME)
       foreach(part IN LISTS RECVX_BUNDLE_DATA_EXCLUDE)
         list(APPEND recvx_bundle_excludes "--exclude=/${part}")
       endforeach()
-      add_custom_command(TARGET recvx-runtime POST_BUILD
+      # Bei jedem Build abgleichen (rsync inkrementell), nicht nur nach dem Linken: sonst bliebe nach einer reinen
+      # Daten-/Mod-Aenderung (z. B. --no-mods) der alte Stand im Bundle.
+      add_custom_target(recvx-bundle-data ALL
         COMMAND rsync -a --delete --delete-excluded ${recvx_bundle_excludes} "${RECVX_IOS_BUNDLE_DATA}/" "$<TARGET_BUNDLE_CONTENT_DIR:recvx-runtime>/data/"
+        COMMENT "Syncing bundled game data into the app"
         VERBATIM)
+      add_dependencies(recvx-bundle-data recvx-runtime)
     endif()
   endif()
   set(RECVX_BUNDLE_DATA_EXCLUDE "" CACHE STRING "data/ subtrees left out of the app bundle (tools/data_profiles.py)")

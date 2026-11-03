@@ -95,7 +95,7 @@ tools and tests stay on the host. Deployment target: iOS 15.0.
 | `--platform ios` | Build `build/ios-device/recvx-runtime.app`; unsigned without a profile |
 | `--ios-profile <file>` | Sign the device app with this provisioning profile and the matching keychain identity |
 | `--ios-bundle-id <id>` | Bundle identifier; must be covered by the profile (default `org.recvx.native`) |
-| `--ios-bundle-data` | Copy `--data` into the app as `data/` (7–8 GB; otherwise the app reads `Documents/data`) |
+| `--ios-no-bundle-data` | Slim app without game data; it reads `Documents/data`. Default: `--data` is copied into the app as `data/` (7–8 GB, about 3 GB with `--compressed`); `--ios-bundle-data` still accepted |
 | `--install` | Install on the booted simulator, or with `--ios-device <id>` on a device (`xcrun devicectl`; needs a signed build) |
 | `--package` | Device only: write `build/packages/ios-arm64-v<version>/RECVX-Native.ipa` (signed, with `--ios-profile`) or `RECVX-Native-unsigned.ipa` (without) |
 
@@ -134,7 +134,7 @@ directories `build/tvos-device` and `build/tvos-simulator`, same options
 `--ios-profile`, `--ios-bundle-id`, `--install`, `--ios-device`, `--package`
 for the IPA under `build/packages/tvos-arm64-v<version>`). Differences:
 
-- Game data is always bundled (`--ios-bundle-data` is implied) from the
+- Game data is always bundled (`--ios-no-bundle-data` is refused) from the
   `tvos` profile in `tools/data_profiles.py`: `data_compressed/` (created on
   first use), no `files/MOVIE` and `archives/RDX_LNK`, mods baked in. tvOS apps
   have no Documents folder and no file sharing.

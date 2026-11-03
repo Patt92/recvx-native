@@ -42,12 +42,13 @@ def run(*args):
     subprocess.run([str(a) for a in args], cwd=ROOT, check=True)
 
 
-def sync_macos_start_package(build: Path) -> None:
+def sync_macos_start_package(build: Path, mods: Path | None = ROOT / 'mods') -> None:
     """Create a verified development app, independently of retired packages.
 
     Development uses the current loose data and settings in the project. The
     separate --package workflow still creates standalone copies of the data.
     No files are restored from a retired app or from quarantine.
+    mods None (--no-mods): the app gets an empty mods folder, so the project's mods/ is not read.
     """
     source = build / 'recvx-runtime'
     if not source.is_file():
@@ -81,8 +82,11 @@ def sync_macos_start_package(build: Path) -> None:
         run('install_name_tool', '-change', linked, '@executable_path/../Frameworks/' + library_name, runtime)
         run('install_name_tool', '-id', '@rpath/' + library_name, bundled_library)
         launcher = binaries / 'Start'
+        if mods is None:
+            mods = ROOT / 'build/start/no-mods'
+            mods.mkdir(parents=True, exist_ok=True)
         options = ' '.join(shlex.quote(str(value)) for value in (
-            '--data', ROOT / 'data', '--mods', ROOT / 'mods',
+            '--data', ROOT / 'data', '--mods', mods,
             '--controls', ROOT / 'controls.ini', '--debug-config', ROOT / 'debug.ini'))
         launcher.write_text('#!/bin/sh\nrecvx_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
                             f'exec "$recvx_dir/recvx-runtime" {options} "$@"\n')
@@ -425,10 +429,12 @@ def finish_ios_app(app: Path, target: str, profile_path: Path | None, bundle_dat
     return True
 
 
-def package_ios_app(app: Path, output: Path) -> None:
+def package_ios_app(app: Path, output: Path, replace: bool = False) -> None:
     """IPA = zip archive of Payload/<app>, written with zipfile: real Zip64 headers (ditto -c -k
-    wrapped offsets past 4 GB, which unzip rejects), Unix permissions and symlinks kept, no __MACOSX."""
-    if output.exists():
+    wrapped offsets past 4 GB, which unzip rejects), Unix permissions and symlinks kept, no __MACOSX.
+    replace: the default build/packages directory is per version, so a rebuild replaces its own IPA
+    (only after the new one is complete); an explicit --output never overwrites."""
+    if output.exists() and not replace:
         raise RuntimeError(f'package destination already exists: {output}')
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(output.name + '.partial')
@@ -452,8 +458,8 @@ def package_ios_app(app: Path, output: Path) -> None:
                 # Bundled game data is already compressed; storing it keeps packaging fast.
                 stored = 'data' in path.relative_to(app).parts[:1]
                 archive.write(path, name, zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED)
-    partial.rename(output)
-    print(f'Packaged {output}', flush=True)
+    partial.replace(output)
+    print(f'Packaged {output} ({output.stat().st_size / 1e6:.1f} MB)', flush=True)
 
 
 # Android: nur arm64-v8a, minSdk 26 (AAudio, std::filesystem im NDK-libc++). Die Runtime ist libmain.so,
@@ -598,7 +604,7 @@ def emscripten_toolchain() -> Path:
     return emsdk / 'upstream/emscripten/emcmake'
 
 
-def build_web(cmake: str, jobs: int, build: Path, data: Path, mods: Path, summary: list) -> Path:
+def build_web(cmake: str, jobs: int, build: Path, data: Path, mods: Path | None, summary: list) -> Path:
     emcmake = emscripten_toolchain()
     emsdk_bin = emcmake.parent.parent / 'bin'
     env = dict(os.environ, PATH=os.pathsep.join([str(emcmake.parent), str(emsdk_bin), os.environ.get('PATH', '')]))
@@ -606,7 +612,7 @@ def build_web(cmake: str, jobs: int, build: Path, data: Path, mods: Path, summar
     subprocess.run([str(emcmake), cmake, '-S', str(ROOT), '-B', str(build), *generator, '-DCMAKE_BUILD_TYPE=Release',
                     '-DBUILD_TESTING=OFF', f'-DRECVX_BUILD_VERSION={FULL_VERSION}'], cwd=ROOT, env=env, check=True)
     subprocess.run([cmake, '--build', str(build), '--target', 'recvx-runtime', '--parallel', str(jobs)], cwd=ROOT, env=env, check=True)
-    site_args = [sys.executable, ROOT / 'tools/web_site.py', '--build', build, '--mods', mods]
+    site_args = [sys.executable, ROOT / 'tools/web_site.py', '--build', build] + (['--no-mods'] if mods is None else ['--mods', mods])
     if (data / 'native-data.version').is_file():
         run(*site_args, '--data', data)
         summary.append(('Data index', f'{data / "web-files.txt"} (served by the web container; data is never copied)'))
@@ -690,8 +696,10 @@ def prepare_compressed_data(data: Path, output: Path, binary_dir: Path, target: 
     return f'{output}: written from {data}'
 
 
-def import_hd_sources(mods: Path, data: Path, jobs: int) -> str:
+def import_hd_sources(mods: Path | None, data: Path, jobs: int) -> str:
     """mods/hd-source/**.dds -> mods/textures/hd/<md5>.tga (tools/import_hd_textures.py; skipped when unchanged)."""
+    if mods is None:
+        return 'skipped (--no-mods)'
     source = mods / 'hd-source'
     stray = sum(1 for p in (mods / 'textures').rglob('*') if p.suffix.lower() == '.dds') if (mods / 'textures').is_dir() else 0
     note = (f'; WARNING: {stray} DDS in {mods / "textures"} are never read, move the pack to {source}' if stray else '')
@@ -717,13 +725,13 @@ def bundle_tree(target: str, data: Path, compressed: Path | None, binary_dir: Pa
     return tree, True
 
 
-def stage_app_data(target: str, source: Path, compressed: bool, mods: Path, binary_dir: Path) -> tuple[Path, dict]:
+def stage_app_data(target: str, source: Path, compressed: bool, mods: Path | None, binary_dir: Path) -> tuple[Path, dict]:
     """Private copy of the bundle tree with mods baked in; the app gets no mods folder."""
     bake = None
     if mods_with_content(mods) is not None:
         bake = host_tools(target, binary_dir, ('recvx-mod-bake',))[0]
     staging = ROOT / 'build/bundle-data' / target
-    print(f'Staging app data from {source} in {staging} (mods from {mods} baked in) ...', flush=True)
+    print(f'Staging app data from {source} in {staging} ' + (f'(mods from {mods} baked in)' if mods else '(--no-mods: no mods)') + ' ...', flush=True)
     return staging, stage_bundle_data(source, staging, target, mods, bake, compressed)
 
 
@@ -740,9 +748,12 @@ def main():
     parser.add_argument('--data', type=Path, default=ROOT / 'data')
     parser.add_argument('--iso', type=Path, action='append',
                         help='PS2 ISO9660 image used to create missing --data; repeat to merge discs')
-    parser.add_argument('--mods', type=Path, default=ROOT / 'mods',
+    parser.add_argument('--mods', type=Path,
                         help='mods folder: hd-source/ is imported into textures/hd, packages bake it into their data '
                              '(default: mods/ in the project)')
+    parser.add_argument('--no-mods', action='store_true',
+                        help='build without any mods: no HD import, packages and iOS/tvOS apps bake nothing in, the '
+                             'development app and the web index ignore the mods folder')
     parser.add_argument('--compressed', nargs='?', type=Path, const=ROOT / 'data_compressed',
                         help='Also write the lossless compressed tree from --data (after --iso), default data_compressed; '
                              'an existing completed tree is kept')
@@ -759,7 +770,9 @@ def main():
     parser.add_argument('--no-test', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--ios-profile', type=Path, help='iOS device: provisioning profile used for signing (else unsigned)')
     parser.add_argument('--ios-bundle-id', default='org.recvx.native', help='iOS bundle identifier (default: org.recvx.native)')
-    parser.add_argument('--ios-bundle-data', action='store_true', help='iOS: copy --data into the app bundle (else the app reads Documents/data)')
+    parser.add_argument('--ios-bundle-data', action='store_true', help='iOS: copy --data into the app bundle (the default; kept for older command lines)')
+    parser.add_argument('--ios-no-bundle-data', action='store_true',
+                        help='iOS: slim app without game data (a few MB); the app then reads Documents/data, filled via Finder/Files')
     parser.add_argument('--install', action='store_true', help='iOS: install the app on the booted simulator or on --ios-device; Android: adb install on the connected device')
     parser.add_argument('--ios-device', help='iOS device identifier or name for --install (xcrun devicectl list devices)')
     args = parser.parse_args()
@@ -772,26 +785,35 @@ def main():
     if not target:
         parser.error('unsupported host')
     data = args.data.resolve()
-    mods = args.mods.resolve()
+    if args.no_mods and args.mods:
+        parser.error('--mods and --no-mods exclude each other')
+    mods = None if args.no_mods else (args.mods or ROOT / 'mods').resolve()
     summary = []
     if is_ios_target(target):
         if platform.system() != 'Darwin':
             parser.error('iOS/tvOS builds require a macOS host with Xcode')
         if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data:
             parser.error('iOS/tvOS builds cannot run tests or prepare data; build and verify them with the macOS target')
-        if is_tvos_target(target) and not args.ios_bundle_data:
-            # tvOS-Apps haben keinen Documents-Ordner und keine Dateifreigabe: die Daten muessen im Bundle liegen.
-            args.ios_bundle_data = True
-        if args.ios_bundle_data and not (data / 'native-data.version').is_file():
-            parser.error(f'--ios-bundle-data requires a prepared data tree (missing {data / "native-data.version"})')
         if args.package and not is_apple_device_target(target):
             parser.error('--package for iOS/tvOS creates a device IPA; use --platform ios or tvos')
         if args.install and is_apple_device_target(target) and not args.ios_device:
             parser.error('--install on a device needs --ios-device')
+        if args.ios_bundle_data and args.ios_no_bundle_data:
+            parser.error('--ios-bundle-data and --ios-no-bundle-data exclude each other')
+        if is_tvos_target(target) and args.ios_no_bundle_data:
+            # tvOS-Apps haben keinen Documents-Ordner und keine Dateifreigabe: die Daten muessen im Bundle liegen.
+            parser.error('tvOS has no Documents folder: the data must be bundled (drop --ios-no-bundle-data)')
+        # Standard: die Spieldaten liegen im App-Bundle (vollstaendige IPA). Nur --ios-no-bundle-data baut die
+        # schlanke App, die Documents/data liest.
+        args.ios_bundle_data = not args.ios_no_bundle_data
+        if args.ios_bundle_data and not (data / 'native-data.version').is_file():
+            parser.error(f'iOS/tvOS apps bundle the game data by default, but {data / "native-data.version"} is missing: '
+                         'prepare data/ (./build.sh --iso <disc.iso> on the macOS target) or pass --ios-no-bundle-data '
+                         'for a slim app that reads Documents/data')
     elif target == 'android':
         if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data or args.compressed:
             parser.error('Android builds cannot run tests or prepare data; build and verify them with the host target')
-        if args.ios_profile or args.ios_bundle_data or args.ios_device:
+        if args.ios_profile or args.ios_bundle_data or args.ios_no_bundle_data or args.ios_device:
             parser.error('--ios-* options apply only to --platform ios, ios-simulator, tvos or tvos-simulator')
         if args.package or args.output:
             parser.error('Android builds write build/android-arm64/RECVX-Native.apk; --package/--output are not supported yet')
@@ -799,11 +821,11 @@ def main():
         if args.test or args.test_regex or args.verify_runtime or args.iso or args.verify_data or args.compressed:
             parser.error('Web builds cannot run tests or prepare data here; prepare data with the host target and check the '
                          'site with tests/web (docs/WEB.md)')
-        if args.ios_profile or args.ios_bundle_data or args.ios_device or args.install:
+        if args.ios_profile or args.ios_bundle_data or args.ios_no_bundle_data or args.ios_device or args.install:
             parser.error('--ios-* and --install options do not apply to --platform web')
         if args.package or args.output:
             parser.error('Web builds write build/web/site; serve it with docker compose up -d --build (docs/WEB.md)')
-    elif args.ios_profile or args.ios_bundle_data or args.install or args.ios_device:
+    elif args.ios_profile or args.ios_bundle_data or args.ios_no_bundle_data or args.install or args.ios_device:
         parser.error('--ios-* and --install options apply only to --platform ios, ios-simulator, tvos or tvos-simulator')
     if is_windows_target(target) and platform.system() != 'Windows' and (args.test or args.test_regex or args.verify_runtime):
         parser.error('Windows cross-builds cannot run tests; use --platform windows or windows-arm64 without test options, then test on Windows or Wine')
@@ -849,7 +871,7 @@ def main():
             summary.append(('App data', f'{tree} ({"compressed" if compressed else "uncompressed"}) copied into the app; '
                                         f'mods: {staged["bake"]}; no runtime mod support on {target}'))
         else:
-            summary.append(('App data', 'not bundled: the app reads Documents/data (pass --ios-bundle-data to bundle it)'))
+            summary.append(('App data', 'not bundled (--ios-no-bundle-data): the app reads Documents/data; drop the option for a complete IPA'))
         # Gepinnte SDL-Quelle eines anderen Buildverzeichnisses wiederverwenden (gleiche Version, kein Download);
         # RECVX_SDL2_SOURCE nennt sie ausdruecklich.
         sdl_source = []
@@ -873,7 +895,7 @@ def main():
         if args.package:
             # Unsigned IPA for sideloading (AltStore/SideStore/zsign re-sign it with the user's own certificate).
             name = 'RECVX-Native.ipa' if signed else 'RECVX-Native-unsigned.ipa'
-            package_ios_app(app, (args.output or package_directory(target, VERSION)) / name)
+            package_ios_app(app, (args.output or package_directory(target, VERSION)) / name, replace=args.output is None)
             if not signed:
                 print('IPA is UNSIGNED: sideload it with AltStore/SideStore or sign it with zsign before installing.', flush=True)
         if args.install:
@@ -959,9 +981,9 @@ def main():
                                         f'mods: {staged["bake"]}; no mods folder shipped'))
     summary.append(('Runtime', str(binary_dir / ('recvx-runtime' + suffix))))
     if target == 'macos':
-        sync_macos_start_package(binary_dir)
+        sync_macos_start_package(binary_dir, mods)
         summary.append(('Dev app', f'{ROOT / "build/start/macos-arm64/RECVX Native.app"} (Start.command) reads LOOSE files: '
-                                   f'--data {data} --mods {mods}; nothing is copied, data/mod changes need no rebuild'))
+                                   f'--data {data} ' + (f'--mods {mods}' if mods else 'without mods (--no-mods)') + '; nothing is copied, data/mod changes need no rebuild'))
     print_summary(summary)
 
 

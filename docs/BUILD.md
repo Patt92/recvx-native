@@ -75,7 +75,8 @@ Beide Baeume werden nur erzeugt, wenn sie fehlen; zum Neuerzeugen den Ordner loe
 ```bash
 ./build.sh --package [--output <neuer Ordner>]                # macOS/Windows: data/
 ./build.sh --package --compressed [--output <neuer Ordner>]   # macOS/Windows: data_compressed/
-./build.sh --platform ios --ios-bundle-data [--compressed]    # iOS: Daten im App-Bundle
+./build.sh --platform ios [--compressed] [--package]         # iOS: Daten im App-Bundle (Standard)
+./build.sh --platform ios --no-mods --package               # ohne Mods (kein HD-Import, nichts eingebacken)
 ```
 
 Ablauf beim Paketbau:
@@ -97,7 +98,7 @@ Mod-Unterstuetzung zur Laufzeit:
 | Plattform | Daten im Paket | Mods zur Laufzeit |
 |---|---|---|
 | macOS, Windows, Linux | `data/` oder mit `--compressed` `data_compressed/` | ja: ein selbst angelegter Ordner `mods` neben `Start.cmd` bzw. neben `RECVX Native.app` wird zusaetzlich gelesen |
-| iOS/iPadOS | `data/` oder `data_compressed/` (nur mit `--ios-bundle-data`, sonst `Documents/data`) | nein (`RECVX_ENABLE_MODS=OFF`), nur eingebackene Mods |
+| iOS/iPadOS | `data/` oder `data_compressed/` (Standard; mit `--ios-no-bundle-data` schlanke App, die `Documents/data` liest) | nein (`RECVX_ENABLE_MODS=OFF`), nur eingebackene Mods |
 | tvOS | immer `data_compressed/` (App-Groessengrenze), immer im Bundle (kein Documents-Ordner) | nein, nur eingebackene Mods. `./build.sh --platform tvos` bzw. `tvos-simulator`, siehe [NATIVE_PORT.md](NATIVE_PORT.md#tvos-apple-tv-arm64-device-and-simulator). |
 
 ## 5. Was ein Lauf gemacht hat

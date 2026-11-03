@@ -4,7 +4,7 @@
 Checks what an in-place IPA update and the app start depend on: bundle id, a CFBundleVersion that matches
 tools/build_native.py FULL_VERSION, platform and architecture of the executable, the UIScene delegate
 (iOS 27 SDK), file sharing for Documents/data, ProMotion, iPhone+iPad device families, icons, weakly linked
-MetalFX and no stale data/ in a bundle built without --ios-bundle-data. It reads only; Xcode command-line
+MetalFX and no stale data/ in a slim bundle (--ios-no-bundle-data). It reads only; Xcode command-line
 tools (otool, nm, lipo) are required. Exit 0 = ok, 1 = finding, 77 = no bundle to check (CTest skip)."""
 import argparse
 import importlib.util
@@ -26,7 +26,7 @@ def tool(*command):
     return subprocess.run(command, check=True, capture_output=True, text=True).stdout
 
 
-def check_app(app: Path, target: str, bundle_data: bool, bundle_id: str) -> list[str]:
+def check_app(app: Path, target: str, bundle_data: bool | None, bundle_id: str) -> list[str]:
     findings = []
     expect = lambda ok, text: ok or findings.append(text)
     with (app / 'Info.plist').open('rb') as handle:
@@ -61,8 +61,10 @@ def check_app(app: Path, target: str, bundle_data: bool, bundle_id: str) -> list
     else:
         expect(bool(metalfx) and all('weak' in line for line in metalfx), 'MetalFX is not weakly linked (app would not start below iOS 16)')
     has_data = (app / 'data/native-data.version').is_file()
+    if bundle_data is None:  # nicht vorgegeben: Variante aus dem Bundle, ein data/ ohne Versionsdatei bleibt ein Fund
+        bundle_data = (app / 'data').exists()
     if bundle_data:
-        expect(has_data, 'bundled data/ expected (--ios-bundle-data) but missing')
+        expect(has_data, 'bundled data/ expected (default build) but missing')
     else:
         expect(not (app / 'data').exists(), 'data/ inside the bundle shadows Documents/data and is re-sent on every update')
     return findings
@@ -89,7 +91,11 @@ def main():
     p.add_argument('--target', choices=sorted(build_native.IOS_TARGETS), default='ios')
     p.add_argument('--app', type=Path, help='app bundle (default: build/<target dir>/recvx-runtime.app)')
     p.add_argument('--ipa', type=Path, help='also check this IPA')
-    p.add_argument('--bundle-data', action='store_true', help='the bundle was built with --ios-bundle-data')
+    variant = p.add_mutually_exclusive_group()
+    variant.add_argument('--bundle-data', dest='bundle_data', action='store_true', default=None,
+                         help='expect the game data in the bundle (default build)')
+    variant.add_argument('--slim', dest='bundle_data', action='store_false',
+                         help='expect no data/ in the bundle (--ios-no-bundle-data); without either option the bundle decides')
     p.add_argument('--bundle-id', default='org.recvx.native')
     a = p.parse_args()
     app = a.app or build_native.ios_build_directory(a.target) / 'recvx-runtime.app'

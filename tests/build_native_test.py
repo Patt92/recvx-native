@@ -1,6 +1,6 @@
 """Development-app publishing; macOS tools are mocked, not policy bypassed."""
 import importlib.util
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 import plistlib
@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('build_native', Path(__file__).resolve().parents[1] / 'tools/build_native.py')
@@ -377,6 +378,31 @@ class IosTargetTests(unittest.TestCase):
         self.assertEqual(failure.exception.code, 2)
         return error.getvalue()
 
+    def test_no_mods_skips_hd_import_and_bakes_nothing(self):
+        self.assertEqual(build_native.import_hd_sources(None, Path('data'), 1), 'skipped (--no-mods)')
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'data'; (source / 'textures').mkdir(parents=True)
+            (source / 'native-data.version').write_text('1'); (source / 'textures/0000.tga').write_bytes(b'tga')
+            staging = Path(tmp) / 'staging'
+            with patch.object(build_native, 'ROOT', Path(tmp)), redirect_stdout(StringIO()), \
+                 patch.object(build_native, 'host_tools', side_effect=AssertionError('no bake tool without mods')):
+                path, staged = build_native.stage_app_data('ios', source, False, None, Path(tmp) / 'build')
+            self.assertIsNone(staged['mods'])
+            self.assertEqual((path / 'textures/0000.tga').read_bytes(), b'tga')
+
+    def test_ios_package_replaces_only_in_the_default_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / 'recvx-runtime.app'; app.mkdir(); (app / 'recvx-runtime').write_bytes(b'new')
+            ipa = Path(tmp) / 'out' / 'RECVX-Native-unsigned.ipa'; ipa.parent.mkdir(); ipa.write_bytes(b'old')
+            with redirect_stdout(StringIO()):
+                with self.assertRaises(RuntimeError):
+                    build_native.package_ios_app(app, ipa)
+                self.assertEqual(ipa.read_bytes(), b'old')
+                build_native.package_ios_app(app, ipa, replace=True)
+            with zipfile.ZipFile(ipa) as archive:
+                self.assertEqual(archive.read('Payload/recvx-runtime.app/recvx-runtime'), b'new')
+            self.assertFalse(ipa.with_name(ipa.name + '.partial').exists())
+
     def test_profile_application_identifier_covers_bundle(self):
         profile = lambda identifier: {'Entitlements': {'application-identifier': identifier}}
         self.assertTrue(build_native.profile_matches_bundle(profile('ABCDE12345.org.recvx.native'), 'org.recvx.native'))
@@ -397,6 +423,15 @@ class IosTargetTests(unittest.TestCase):
         self.assertIn('cannot run tests', self.main_error('--platform', 'android', '--test'))
         self.assertIn('cannot run tests', self.main_error('--platform', 'android', '--verify-data'))
         self.assertIn('--ios-* options', self.main_error('--platform', 'android', '--ios-bundle-data'))
+        self.assertIn('--ios-* options', self.main_error('--platform', 'android', '--ios-no-bundle-data'))
+        self.assertIn('exclude each other', self.main_error('--platform', 'ios', '--ios-bundle-data', '--ios-no-bundle-data'))
+        self.assertIn('--mods and --no-mods', self.main_error('--platform', 'ios', '--mods', 'mods', '--no-mods'))
+        self.assertIn('no Documents folder', self.main_error('--platform', 'tvos', '--ios-no-bundle-data'))
+        # Standard bundelt die Daten: ohne vorbereitetes data/ ein klarer Hinweis auf die schlanke App.
+        with tempfile.TemporaryDirectory() as empty:
+            message = self.main_error('--platform', 'ios', '--data', empty)
+            self.assertIn('bundle the game data by default', message)
+            self.assertIn('--ios-no-bundle-data', message)
         self.assertIn('RECVX-Native.apk', self.main_error('--platform', 'android', '--package'))
 
     def test_web_rejects_tests_data_preparation_and_device_options(self):
