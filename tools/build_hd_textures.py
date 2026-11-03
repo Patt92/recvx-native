@@ -27,7 +27,7 @@ def gap(match):
 
 
 def tier(match):
-    if match.get('colour_ok') is False:
+    if match.get('colour_ok') is False or match.get('cross_size_ok') is False or match.get('alpha_ok') is False:
         return None
     if match.get('decisive_rgb'):
         return 'A'
@@ -53,7 +53,7 @@ def select_matches(matches, existing=None, tiers='AB'):
         t = tier(match)
         key = match['ps2']
         if t is None or t not in tiers:
-            report[path] = {'status': 'colour-mismatch' if match.get('colour_ok') is False else 'ambiguous-or-low-similarity',
+            report[path] = {'status': 'alpha-evidence-insufficient' if match.get('alpha_ok') is False else 'cross-size-evidence-insufficient' if match.get('cross_size_ok') is False else 'colour-mismatch' if match.get('colour_ok') is False else 'ambiguous-or-low-similarity',
                             'ncc': match['ncc'], 'ncc2': match['ncc2'], 'target': key}
             continue
         if key in existing:
@@ -99,6 +99,17 @@ def convert(job):
     result.save(temporary, 'TGA')
     os.replace(temporary, out_path)
     return key, 'written', os.path.getsize(out_path)
+
+
+def existing_image(manifest_path, key, entry):
+    """Content-keyed and explicit-only entries both have authoritative images."""
+    root = manifest_path.parent.parent
+    paths = [manifest_path.parent / 'hd' / (key + '.tga')]
+    paths.extend(root / p for p in entry.get('overrides', []))
+    source = next((p for p in paths if p.is_file()), None)
+    if source is None:
+        raise FileNotFoundError(f'existing HD replacement missing for {key}')
+    return source
 
 
 def main():
@@ -165,13 +176,11 @@ def main():
         # Existing content-hash replacements cannot reach an uncooked runtime
         # identity. Project their exact bytes into explicit overrides as well.
         if digest in existing and args.existing_manifest:
-            source = args.existing_manifest.parent / 'hd' / (digest + '.tga')
             for relative in ps2.get(digest, []):
                 if relative.split('/')[0] not in per_asset:
                     continue
                 destination = args.output / 'textures' / relative
-                if not source.is_file():
-                    raise FileNotFoundError(f'existing HD replacement missing: {source}')
+                source = existing_image(args.existing_manifest, digest, entry)
                 if not destination.exists():
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     temporary = destination.with_suffix('.tga.tmp')

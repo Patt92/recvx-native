@@ -85,10 +85,23 @@ build/macos-arm64/recvx-runtime --data data --mods build/hd-textures
 
 The offline Dolphin matcher also searches spatial luminance across every original
 candidate of the declared size before full-size RGB verification. Non-integer HD
-scales with the original aspect ratio are supported. Near-identical original
+scales with the original aspect ratio and the Dolphin `_m_` mipmap flag are supported.
+`match_hd_textures.py --cross-size` additionally searches different original sizes
+with the same aspect ratio. Each candidate is checked at its own PS2 resolution;
+changed-size matches require strong full-size RGB evidence and compatible alpha
+layout when both images contain a nontrivial mask. Source size, target size and
+alpha evidence remain in the match table. An image candidate is not automatically
+an accepted match. Near-identical original
 variants only cease to compete when their RGB content and alpha masks agree;
 colour variants remain separate. Strong RGB-error separation is recorded as
-independent evidence. These are content-match candidates,
+independent evidence. `--alpha-mask` searches alpha-premultiplied content and verifies
+only texels both images show (pack and original alpha >= 128), so colour noise under
+transparent texels no longer hides a match; a source showing less than 3 % must instead
+reproduce the original alpha channel (`alpha_ok`, builder status
+`alpha-evidence-insufficient`). `--claimed <hd-manifest.json>` removes originals already
+assigned to a different pack file with a higher score (one pack file per original) and
+lists them under `eliminated`; this resolves sources whose best candidates are
+near-identical variants. These are content-match candidates,
 not an exact GameCube-to-PS2 identity proof; unresolved sources remain unresolved.
 
 `build_hd_textures.py --existing-manifest mods/textures/hd-manifest.json`
@@ -106,14 +119,24 @@ build/macos-arm64/recvx-world-assets --effect-catalog data build/validation/effe
 ```
 
 Both write new files only and refuse to overwrite existing output. The first uses
-native weapon, door, title and typewriter decoders; the second inventories room
+native weapon, door, title, typewriter, computer and file-wallpaper decoders, and
+exports the original quantity palette banks; the second inventories room
 effect groups loaded by the native world (no frame/event/enemy simulation). Combine
 their `textures/` categories with the cooked catalogue for matching. Categories
-without cooked runtime files need explicit overrides, not only content hashes:
-`build_hd_textures.py --per-asset weapons,doors,title,typewriter,effects` writes
-every known asset identity for those matches. This does not add support for effect
-resources that the runtime does not load, palette-bank-specific replacements or
-GameCube-only/rearranged atlases.
+without cooked runtime files can use the MD5 of `encode_tga` of the decoded original,
+or explicit overrides. `build_hd_textures.py --per-asset computer,files,palettes`
+writes each known asset identity for those matches. Existing explicit-only manifest
+entries remain usable when extending a pack. Original data are never rewritten.
+
+Computer images use `textures/computer/NNNN.tga`; file wallpapers use
+`textures/files/<ITEM1 archive entry>/NNNN.tga`, not the inventory file number.
+Inventory quantity variants use
+`textures/palettes/menu/0000/<original bank>/0000.tga`. Each bank may have its own
+resolution; original bank selection is unchanged. The shared texture-mod switch
+also reloads these caches; it does not advance the terminal/file state machines.
+No replacement for one bank is propagated into another. Additional actor model
+texture lists and GameCube-only/rearranged atlases remain open; this does not add
+support for effect resources the runtime does not load.
 
 DDS texture packs (PCSX2 `<TEX0 hash>-[<CLUT hash>-]<bits>.dds`, Dolphin `tex1_<w>x<h>_...dds`) go
 into `mods/hd-source/` (any subfolders). The runtime never reads DDS; every `./build.sh` run imports

@@ -21,6 +21,127 @@ class MatchHdTexturesTests(unittest.TestCase):
         self.assertEqual(matcher.ncc(np.zeros(16), np.ones(16) * 200), 0)
         self.assertEqual(matcher.ncc(np.ones(16), np.ones(16)), 1)
 
+    def test_cross_size_uses_ps2_resolution_and_preserves_gc_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(31)
+            image = Image.fromarray(rng.integers(20, 200, (32, 32, 3), dtype=np.uint8))
+            candidates = self.candidates(root, [image])
+            source = root / 'tex1_64x64_m_example_14.dds'
+            image.resize((256, 256), Image.Resampling.NEAREST).save(source)
+            _, same_size = matcher.worker((str(source), candidates, root))
+            self.assertEqual(same_size['status'], 'no-size')
+            _, cross = matcher.worker((str(source), candidates, root, True))
+            self.assertEqual(cross['source_size'], [64, 64])
+            self.assertEqual(cross['target_size'], [32, 32])
+            self.assertEqual(cross['scale'], 4)
+            self.assertEqual(cross['ncc'], 1)
+            self.assertTrue(cross['cross_size_ok'])
+
+    def test_cross_size_does_not_accept_random_same_aspect_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(76)
+            originals = [Image.fromarray(rng.integers(0, 256, (32, 32, 3), dtype=np.uint8))]
+            candidates = self.candidates(root, originals)
+            source = root / 'tex1_64x64_other_14.dds'
+            Image.fromarray(rng.integers(0, 256, (256, 256, 3), dtype=np.uint8)).save(source)
+            _, result = matcher.worker((str(source), candidates, root, True))
+            self.assertFalse(result['cross_size_ok'])
+
+    def test_cross_size_rejects_incompatible_visible_alpha_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(78)
+            original = Image.fromarray(rng.integers(20, 200, (32, 32, 3), dtype=np.uint8)).convert('RGBA')
+            mask = np.zeros((32, 32), dtype=np.uint8);mask[:, :16] = 255
+            original.putalpha(Image.fromarray(mask))
+            candidates = self.candidates(root, [original])
+            source = root / 'tex1_64x64_alpha_14.dds'
+            pack = original.copy();pack.putalpha(Image.fromarray(255-mask))
+            pack.resize((256, 256), Image.Resampling.NEAREST).save(source)
+            _, result = matcher.worker((str(source), candidates, root, True))
+            self.assertEqual(result['ncc'], 1)
+            self.assertFalse(result['cross_size_ok'])
+            self.assertLess(result['alpha_layout_ncc'], 0)
+
+    def test_alpha_mask_ignores_noise_under_transparent_texels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(91)
+            pixels = rng.integers(20, 220, (32, 32, 3), dtype=np.uint8)
+            pixels[:, 16:] = 0            # original fill under transparent texels
+            mask = np.zeros((32, 32), dtype=np.uint8);mask[:, :16] = 255
+            original = Image.fromarray(pixels).convert('RGBA');original.putalpha(Image.fromarray(mask))
+            other = Image.fromarray(rng.integers(0, 256, (32, 32, 3), dtype=np.uint8))
+            candidates = self.candidates(root, [original, other])
+            noisy = pixels.copy();noisy[:, 16:] = rng.integers(0, 256, (32, 16, 3), dtype=np.uint8)
+            pack = Image.fromarray(noisy).convert('RGBA');pack.putalpha(Image.fromarray(mask))
+            source = root / 'tex1_32x32_noise_14.dds'
+            pack.resize((128, 128), Image.Resampling.NEAREST).save(source)
+            _, plain = matcher.worker((str(source), candidates, root, False, False))
+            _, masked = matcher.worker((str(source), candidates, root, False, True))
+            self.assertLess(plain['ncc'], .9)
+            self.assertEqual(masked['ps2'], '0')
+            self.assertEqual(masked['ncc'], 1)
+            self.assertTrue(masked['masked'])
+            self.assertEqual(masked['coverage'], .5)
+            self.assertTrue(masked['alpha_ok'])
+            self.assertTrue(masked['colour_ok'])
+            self.assertNotIn('alpha_ok', plain)
+
+    def test_alpha_mask_requires_alpha_channel_for_nearly_invisible_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(92)
+            pixels = rng.integers(20, 220, (32, 32, 3), dtype=np.uint8)
+            alpha = np.zeros((32, 32), dtype=np.uint8);alpha[2:6, 2:6] = 40   # 1.6 % faint, nothing >= 128
+            original = Image.fromarray(pixels).convert('RGBA');original.putalpha(Image.fromarray(alpha))
+            candidates = self.candidates(root, [original])
+            same = root / 'tex1_32x32_same_14.dds'
+            original.save(same)
+            _, result = matcher.worker((str(same), candidates, root, False, True))
+            self.assertFalse(result['masked'])
+            self.assertTrue(result['alpha_ok'])
+            self.assertGreaterEqual(result['alpha_full_ncc'], .99)
+            moved = original.copy();moved.putalpha(Image.fromarray(np.roll(alpha, 16, axis=1)))
+            elsewhere = root / 'tex1_32x32_moved_14.dds'
+            moved.save(elsewhere)
+            _, result = matcher.worker((str(elsewhere), candidates, root, False, True))
+            self.assertFalse(result['alpha_ok'])
+
+    def test_claimed_original_no_longer_competes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rng = np.random.default_rng(93)
+            pixels = rng.integers(20, 220, (32, 32, 3), dtype=np.uint8)
+            lit = Image.fromarray(pixels)
+            dark = Image.fromarray((pixels * 0.9).astype(np.uint8))   # near-identical lighting variant
+            far = Image.fromarray(rng.integers(0, 256, (32, 32, 3), dtype=np.uint8))
+            candidates = self.candidates(root, [lit, dark, far])
+            source = root / 'tex1_32x32_dark_14.dds'
+            upscaled = np.asarray(dark.resize((128, 128), Image.Resampling.NEAREST), dtype=np.int16)
+            Image.fromarray(np.clip(upscaled + rng.integers(-40, 41, upscaled.shape), 0, 255).astype(np.uint8)).save(source)
+            _, free = matcher.worker((str(source), candidates, root))
+            self.assertEqual(free['ps2'], '1')
+            self.assertLess(free['ncc'], 1)
+            self.assertGreater(free['ncc2'], .95)          # variants compete: ambiguous for the builder
+            claimed = {'1': {'dds': 'tex1_32x32_other_14.dds', 'ncc': 1.0}}
+            _, displaced = matcher.worker((str(source), candidates, root, False, False, claimed))
+            self.assertEqual(displaced['ps2'], '0')
+            self.assertEqual(displaced['eliminated'], [['1', free['ncc'], 'tex1_32x32_other_14.dds']])
+            self.assertLess(displaced['ncc2'], .5)
+            _, displaced = matcher.worker((str(source), candidates, root, False, True, claimed))
+            self.assertEqual(displaced['ps2'], '0')   # alpha mode records the elimination too
+            self.assertEqual(displaced['eliminated'][0][::2], ['1', 'tex1_32x32_other_14.dds'])
+            own = {'1': {'dds': 'tex1_32x32_dark_14.dds', 'ncc': 1.0}}
+            _, kept = matcher.worker((str(source), candidates, root, False, False, own))
+            self.assertEqual(kept['ps2'], '1')
+            self.assertNotIn('eliminated', kept)
+            weaker = {'1': {'dds': 'tex1_32x32_other_14.dds', 'ncc': free['ncc'] - .01}}
+            _, kept = matcher.worker((str(source), candidates, root, False, False, weaker))
+            self.assertEqual(kept['ps2'], '1')
+
     def candidates(self, root, images):
         values = []
         for i, image in enumerate(images):

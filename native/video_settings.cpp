@@ -1,11 +1,12 @@
 #include "video_settings.h"
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 namespace recvx {
 namespace {
 constexpr const char* names[]={"original","low","high","ultra"};
-constexpr const char* labels[]={"Original (sharp, shimmers)","Low (filter)","High (filter + 2x SSAA)","Ultra (filter + 3x SSAA)"};
+constexpr const char* labels[]={"Original (sharp, shimmers)","Low (filter)","High (filter + 2x SSAA)","Ultra (3x SSAA, soft shadows)"};
 constexpr const char* frame_rate_names[]={"30","60","120","unlimited"};
 constexpr const char* frame_rate_labels[]={"30 (game tick)","60","120","Unlimited (no vsync)"};
 constexpr const char* upscaler_names[]={"off","metalfx-spatial","metalfx-temporal","fsr4","fsr4-int8","fsr1"};
@@ -86,10 +87,30 @@ void VideoConfig::set_widescreen(bool value,bool persist){settings_.widescreen=v
 void VideoConfig::set_fullscreen(bool value,bool persist){settings_.fullscreen=value;this->persist(persist);}
 void VideoConfig::cycle(int direction,bool persist){set(RenderQuality((int(settings_.quality)+4+(direction<0?-1:1))%4),persist);}
 void VideoConfig::cycle_frame_rate(int direction,bool persist){set_frame_rate(FrameRate((int(settings_.frame_rate)+4+(direction<0?-1:1))%4),persist);}
-void VideoConfig::cycle_upscaler(int direction,bool persist){set_upscaler(Upscaler((int(settings_.upscaler)+6+(direction<0?-1:1))%6),persist);}
-void VideoConfig::cycle_frame_generation(int direction,bool persist){set_frame_generation(FrameGeneration((int(settings_.frame_generation)+3+(direction<0?-1:1))%3),persist);}
-void VideoConfig::cycle_sharpness(int direction,bool persist){set_sharpness(Sharpness((int(settings_.sharpness)+4+(direction<0?-1:1))%4),persist);}
-void VideoConfig::cycle_post_process(int direction,bool persist){set_post_process(PostProcess((int(settings_.post_process)+3+(direction<0?-1:1))%3),persist);}
+std::vector<Upscaler> VideoConfig::upscaler_choices()const{
+    std::vector<Upscaler> out{Upscaler::Off};
+    if(upscaler_available_)for(unsigned i=1;i<6;++i)if(upscaler_mask_&(1u<<i))out.push_back(Upscaler(i));
+    return out;
+}
+std::vector<FrameGeneration> VideoConfig::frame_generation_choices()const{
+    std::vector<FrameGeneration> out{FrameGeneration::Off};if(frame_generation_available_)out.push_back(frame_generation_kind_);return out;
+}
+std::vector<Sharpness> VideoConfig::sharpness_choices()const{
+    if(!presentation_available_)return {Sharpness::Off};return {Sharpness::Off,Sharpness::Light,Sharpness::Medium,Sharpness::Strong};
+}
+std::vector<PostProcess> VideoConfig::post_process_choices()const{
+    if(!presentation_available_)return {PostProcess::Off};return {PostProcess::Off,PostProcess::CrtLight,PostProcess::CrtFull};
+}
+// Naechster Wert in choices; ein gespeicherter, hier nicht verfuegbarer Wert springt auf den ersten bzw. letzten.
+template<class T> static T cycle_in(const std::vector<T>& choices,T current,int direction){
+    const auto found=std::find(choices.begin(),choices.end(),current);const int n=int(choices.size());
+    if(found==choices.end())return direction<0?choices.back():choices.front();
+    return choices[std::size_t((int(found-choices.begin())+n+(direction<0?-1:1))%n)];
+}
+void VideoConfig::cycle_upscaler(int direction,bool persist){set_upscaler(cycle_in(upscaler_choices(),settings_.upscaler,direction),persist);}
+void VideoConfig::cycle_frame_generation(int direction,bool persist){set_frame_generation(cycle_in(frame_generation_choices(),settings_.frame_generation,direction),persist);}
+void VideoConfig::cycle_sharpness(int direction,bool persist){set_sharpness(cycle_in(sharpness_choices(),settings_.sharpness,direction),persist);}
+void VideoConfig::cycle_post_process(int direction,bool persist){set_post_process(cycle_in(post_process_choices(),settings_.post_process,direction),persist);}
 std::string VideoConfig::describe_upscaler()const{return settings_.describe_upscaler()+(settings_.upscaler!=Upscaler::Off&&(!upscaler_available_||!(upscaler_mask_&(1u<<unsigned(settings_.upscaler))))?" (not available)":"");}
 std::string VideoConfig::describe_frame_generation()const{return settings_.describe_frame_generation()+(settings_.frame_generation!=FrameGeneration::Off&&(!frame_generation_available_||settings_.frame_generation!=frame_generation_kind_)?" (not available)":"");}
 std::string VideoConfig::describe_sharpness()const{return settings_.describe_sharpness()+(settings_.sharpness!=Sharpness::Off&&!presentation_available_?" (not available)":"");}

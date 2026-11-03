@@ -30,10 +30,11 @@ struct ShadowTri { vec4 v01; vec4 v2a; uvec4 depth; ivec4 box; }; // depth.w = E
 layout(std430,set=0,binding=0) readonly buffer Setups { Setup setups[]; };
 layout(std430,set=0,binding=1) readonly buffer Tris { ShadowTri tris[]; };
 // size: Zielbild W x H; mask_w/h: Groesse der transportierten Tiefe; rect/fog_power/layer: Komposit;
-// scale/out_w/out_h: Aufloesung.
+// scale/out_w/out_h: Aufloesung; mask_scale/soft/reach: Host-Ultra-Schatten (shadow_soft.h).
 layout(push_constant) uniform Push {
     vec2 size; uint fog_pixel,wireframe,background,mask_w,mask_h,layer;
     vec4 rect; uint fog_power,scale,out_w,out_h;
+    uint mask_scale,soft; float reach,pad0;
 } pc;
 #if defined(RASTER_FS)||defined(MASK_FS)||defined(COMPOSITE_FS)||defined(RESOLVE_CS)
 layout(set=0,binding=2,r32ui) uniform coherent uimage2D Color;
@@ -199,7 +200,8 @@ layout(pixel_interlock_ordered) in;
 layout(location=0) flat in uint v_index;
 void main(){
     ShadowTri t=tris[v_index];
-    vec2 p0=t.v01.xy,p1=t.v01.zw,p2=t.v2a.xy;float X=gl_FragCoord.x,Y=gl_FragCoord.y;
+    // Host-Ultra (shadow_soft.h): Maske mask_scale-fach, Abtastpunkt (x+.5)/scale im 640x480-Raum.
+    vec2 p0=t.v01.xy,p1=t.v01.zw,p2=t.v2a.xy;precise float X=div_rn(gl_FragCoord.x,float(pc.mask_scale));precise float Y=div_rn(gl_FragCoord.y,float(pc.mask_scale));
     precise float a=edge(p1,p2,X,Y);precise float b=edge(p2,p0,X,Y);precise float c=edge(p0,p1,X,Y);
     if(a<0.0||b<0.0||c<0.0)discard;
     if((a==0.0&&!inclusive(p1,p2))||(b==0.0&&!inclusive(p2,p0))||(c==0.0&&!inclusive(p0,p1)))discard;
@@ -223,15 +225,33 @@ void main(){vec2 p=vec2(float((gl_VertexIndex<<1)&2),float(gl_VertexIndex&2));gl
 
 #ifdef COMPOSITE_FS
 layout(pixel_interlock_ordered) in;
+// Weiche Maskenkante (shadow_soft.h shadow_soft_value): gewichtetes Mittel der Nachbarmaske auf derselben
+// Empfaengerflaeche; die Maske ist dann das Bildraster. Maske und transportierte Tiefe schreibt hier niemand.
+const uint soft_weights[4]=uint[4](64u,51u,26u,9u);
+uint soft_value(int x,int y,int width,int height){
+    float centre=imageLoad(Transported,ivec2(x,y)).r;
+    if(!(centre>0.0))return imageLoad(Mask,ivec3(x,y,int(pc.layer))).r;
+    uint sum=0u,weight=0u;int step=int(max(1u,2u*pc.mask_scale/3u));
+    for(int j=-3;j<=3;++j){int py=y+j*step;if(py<0||py>=height)continue;
+        for(int i=-3;i<=3;++i){int px=x+i*step;if(px<0||px>=width)continue;
+            float other=imageLoad(Transported,ivec2(px,py)).r;
+            precise float limit=centre*0.125+1.0;
+            if(!(other>0.0&&abs(other-centre)<=limit))continue;
+            uint w=soft_weights[abs(i)]*soft_weights[abs(j)];
+            sum+=w*imageLoad(Mask,ivec3(px,py,int(pc.layer))).r;weight+=w;}}
+    return (sum+weight/2u)/weight;}
 void main(){
     ivec2 at=ivec2(gl_FragCoord.xy);
     float y=gl_FragCoord.y-0.5,x=gl_FragCoord.x-0.5;
-    precise float fy=div_rn((y+0.5)*480.0,pc.size.y);int my=min(479,int(fy));
-    precise float fx=div_rn((x+0.5)*640.0,pc.size.x);int mx=min(639,int(fx));
-    // Maske aus dem abgeschlossenen Maskenpass (Barriere davor), Zelle des 640x480-Bildes.
+    precise float MH=480.0*float(pc.mask_scale);precise float MW=640.0*float(pc.mask_scale);precise float M=float(pc.mask_scale);
+    precise float fy=div_rn((y+0.5)*MH,pc.size.y);int my=min(int(MH)-1,int(fy));
+    precise float fx=div_rn((x+0.5)*MW,pc.size.x);int mx=min(int(MW)-1,int(fx));
+    precise float cy=div_rn(float(my)+0.5,M);precise float cx=div_rn(float(mx)+0.5,M);
+    precise float ry0=pc.rect.y-pc.reach;precise float ry1=pc.rect.w+pc.reach;precise float rx0=pc.rect.x-pc.reach;precise float rx1=pc.rect.z+pc.reach;
+    // Maske aus dem abgeschlossenen Maskenpass (Barriere davor), Zelle des (640*scale)x(480*scale)-Bildes.
     uint value=0u;
-    if(!(float(my)+0.5<pc.rect.y||float(my)+0.5>=pc.rect.w)&&!(float(mx)+0.5<pc.rect.x||float(mx)+0.5>=pc.rect.z))
-        value=imageLoad(Mask,ivec3(mx,my,int(pc.layer))).r;
+    if(!(cy<ry0||cy>=ry1)&&!(cx<rx0||cx>=rx1))
+        value=pc.soft!=0u?soft_value(mx,my,int(MW),int(MH)):imageLoad(Mask,ivec3(mx,my,int(pc.layer))).r;
     beginInvocationInterlockARB();
     if(value!=0u){
         uint below=imageLoad(Color,at).r;

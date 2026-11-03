@@ -17,6 +17,7 @@
 // Lader: die Vulkan-Bibliothek wird zur Laufzeit geoeffnet (Loader oder MoltenVK als ICD); fehlt sie,
 // liefert create_vulkan_raster nullptr mit Begruendung.
 #include "gpu_raster.h"
+#include "shadow_soft.h"
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <algorithm>
@@ -127,8 +128,8 @@ static_assert(sizeof(GpuSetup)==208,"setup layout");
 struct alignas(16) GpuShadowTri{float v01[4],v2a[4];std::uint32_t depth[4];std::int32_t box[4];};
 static_assert(sizeof(GpuShadowTri)==64,"shadow triangle layout");
 // Push-Konstanten wie Push in gpu_raster_vulkan.glsl (std430: vec2 auf 8, vec4 auf 16 ausgerichtet).
-struct Push{float W,H;std::uint32_t fog_pixel,wireframe,background,mask_w,mask_h,layer;float rect[4];std::uint32_t fog_power,scale,out_w,out_h;};
-static_assert(sizeof(Push)==64,"push constant layout");
+struct Push{float W,H;std::uint32_t fog_pixel,wireframe,background,mask_w,mask_h,layer;float rect[4];std::uint32_t fog_power,scale,out_w,out_h;std::uint32_t mask_scale,soft;float reach,pad0;};
+static_assert(sizeof(Push)==80,"push constant layout");
 // Darstellungsart einer Textur, Index in TextureFilterCache::gpu wie bei Metal/D3D11/OpenGL.
 enum Variant{Point=1,Straight=2,Premultiplied=3,Punch=4};
 // GPU-Kopie einer Scene-Textur. Haelt das Geraet am Leben: Caches koennen jedes Backend ueberleben.
@@ -238,7 +239,7 @@ private:
         // Alle Bindungen vor dem Aufzeichnen: Setups, Ausgabe (hostsichtbar, direkt gelesen), Maske, Dreiecke.
         write(setup_buffer_,setups_.data(),setups_.size()*sizeof(GpuSetup),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         ensure(out_color_,std::max<std::size_t>(n,1)*4,VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);ensure(out_depth_,std::max<std::size_t>(n,1)*4,VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-        ensure(tri_buffer_,sizeof(GpuShadowTri),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);mask_target(1);
+        ensure(tri_buffer_,sizeof(GpuShadowTri),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);mask_target(1,frame.shadow_scale);
         begin();
         // Uploads (Texturen dieses Bildes) vor allem anderen; dann Farbe = Hintergrund, beide Tiefen = 0.
         for(const auto& u:uploads_)record_copy(u.image,staging_uploads_[u.buffer].buffer,u.regions);
@@ -248,7 +249,9 @@ private:
          d_.vkCmdClearColorImage(cmd_,depth_.image,VK_IMAGE_LAYOUT_GENERAL,&zero,1,&range);
          d_.vkCmdClearColorImage(cmd_,transported_.image,VK_IMAGE_LAYOUT_GENERAL,&zero,1,&range);}
         barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT|VK_PIPELINE_STAGE_VERTEX_SHADER_BIT);
-        const Push push{float(W),float(H),frame.fog_pixel,frame.wireframe?1u:0u,frame.background,std::uint32_t(W),std::uint32_t(H),0,{0,0,0,0},0,std::uint32_t(S),std::uint32_t(frame.width),std::uint32_t(frame.height)};
+        if(frame.soft_shadows&&(int(640*frame.shadow_scale)!=W||int(480*frame.shadow_scale)!=H))throw std::runtime_error("soft shadows need the mask at the render resolution");
+        const Push push{float(W),float(H),frame.fog_pixel,frame.wireframe?1u:0u,frame.background,std::uint32_t(W),std::uint32_t(H),0,{0,0,0,0},0,std::uint32_t(S),std::uint32_t(frame.width),std::uint32_t(frame.height),
+            frame.shadow_scale,frame.soft_shadows?1u:0u,frame.soft_shadows?shadow_soft_reach(frame.shadow_scale):0.f,0.f};
         VkDescriptorSet frame_set=frame_descriptors();
         const std::size_t ends[3]={frame.shadows?frame.before_modifiers:setups.size(),frame.shadows?frame.before_mirror_effects:setups.size(),setups.size()};
         std::size_t batch=0;
@@ -277,7 +280,7 @@ private:
                 if(works.size()>mask_layers_||(tri_offset_+faces*sizeof(GpuShadowTri))>tri_buffer_.size){
                     // Wachsen ersetzt gebundene Objekte: das Aufgezeichnete zuerst ausfuehren, dann neu binden.
                     submit_and_wait(cmd_);tri_offset_=0;
-                    mask_target(std::uint32_t(works.size()));ensure(tri_buffer_,faces*sizeof(GpuShadowTri),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+                    mask_target(std::uint32_t(works.size()),frame.shadow_scale);ensure(tri_buffer_,faces*sizeof(GpuShadowTri),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
                     begin();frame_set=frame_descriptors();}
                 masks(works,W,H,push,frame_set);}
         }
@@ -385,15 +388,17 @@ private:
     VkFramebuffer empty_framebuffer(std::uint32_t w,std::uint32_t h){
         auto ci=info<VkFramebufferCreateInfo>(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);ci.renderPass=pass_;ci.width=w;ci.height=h;ci.layers=1;
         VkFramebuffer f;require(d_.vkCreateFramebuffer(d_.device,&ci,nullptr,&f),"framebuffer");return f;}
-    void mask_target(std::uint32_t layers){
-        if(mask_image_.image&&mask_layers_>=layers)return;
+    void mask_target(std::uint32_t layers,std::uint32_t scale){
+        if(mask_image_.image&&mask_layers_>=layers&&mask_scale_==scale)return;
         destroy(mask_image_);
+        if(mask_scale_!=scale&&mask_framebuffer_){d_.vkDestroyFramebuffer(d_.device,mask_framebuffer_,nullptr);mask_framebuffer_=VK_NULL_HANDLE;}
+        mask_scale_=scale;
         if(layers>d_.max_layers)throw std::runtime_error("too many shadow works in one pass");
         mask_layers_=std::min(d_.max_layers,std::max(layers,mask_layers_*2));
         // R32UI statt R8UI: Storage-Images mit 8 Bit sind nicht ueberall formatlos les-/schreibbar; Werte bleiben 0..255.
-        mask_image_=image(VK_FORMAT_R32_UINT,640,480,mask_layers_,1,VK_IMAGE_USAGE_STORAGE_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+        mask_image_=image(VK_FORMAT_R32_UINT,640*scale,480*scale,mask_layers_,1,VK_IMAGE_USAGE_STORAGE_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_VIEW_TYPE_2D_ARRAY);
         to_general({{mask_image_.image,mask_layers_}});
-        if(!mask_framebuffer_)mask_framebuffer_=empty_framebuffer(640,480);}
+        if(!mask_framebuffer_)mask_framebuffer_=empty_framebuffer(int(640*scale),int(480*scale));}
     void begin_pass(VkFramebuffer framebuffer,int w,int h){
         auto bi=info<VkRenderPassBeginInfo>(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);bi.renderPass=pass_;bi.framebuffer=framebuffer;bi.renderArea={{0,0},{std::uint32_t(w),std::uint32_t(h)}};
         d_.vkCmdBeginRenderPass(cmd_,&bi,VK_SUBPASS_CONTENTS_INLINE);
@@ -546,7 +551,7 @@ private:
          d_.vkCmdClearColorImage(cmd_,mask_image_.image,VK_IMAGE_LAYOUT_GENERAL,&zero,1,&range);
          barrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT|VK_PIPELINE_STAGE_VERTEX_SHADER_BIT);}
         if(!tris_.empty()){
-            begin_pass(mask_framebuffer_,640,480);
+            begin_pass(mask_framebuffer_,int(640*mask_scale_),int(480*mask_scale_));
             d_.vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,mask_);
             d_.vkCmdBindDescriptorSets(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,layout_,0,1,&set,0,nullptr);
             d_.vkCmdPushConstants(cmd_,layout_,all_stages,0,sizeof push,&push);
@@ -571,7 +576,7 @@ private:
     VkRenderPass pass_=VK_NULL_HANDLE;VkPipeline raster_=VK_NULL_HANDLE,mask_=VK_NULL_HANDLE,composite_=VK_NULL_HANDLE,resolve_=VK_NULL_HANDLE;
     std::array<std::array<std::array<VkSampler,2>,2>,2> samplers_{};VkSampler nearest_=VK_NULL_HANDLE;
     Image blank_,blank_point_,color_,depth_,transported_,mask_image_;std::uint32_t mask_layers_=0;
-    VkFramebuffer framebuffer_=VK_NULL_HANDLE,mask_framebuffer_=VK_NULL_HANDLE;int width_=0,height_=0;
+    VkFramebuffer framebuffer_=VK_NULL_HANDLE,mask_framebuffer_=VK_NULL_HANDLE;int width_=0,height_=0;std::uint32_t mask_scale_=0;
     Buffer setup_buffer_,tri_buffer_,out_color_,out_depth_;std::vector<Buffer> staging_uploads_;std::vector<Upload> uploads_;
     std::vector<VkDescriptorPool> pools_;std::size_t pool_used_=0;std::size_t tri_offset_=0;
     std::vector<GpuSetup> setups_;std::vector<Batch> batches_;std::vector<GpuShadowTri> tris_;

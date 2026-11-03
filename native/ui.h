@@ -250,6 +250,7 @@ private:
     // menu_[0] wie aus ITEM1/0145 dekodiert: die Palettenbaenke (njSetPaletteBankNum) gehoeren zu diesem
     // PS2-Bild; eine HD-/Mod-Datei fuer menu/0000 ersetzt nur das Bild der Grundpalette.
     SceneTexture menu_banks_;
+    std::map<unsigned,SceneTexture> menu_bank_textures_;
     std::vector<std::uint8_t> messages_;
     std::size_t system_table_=0;
     std::filesystem::path data_,mods_;

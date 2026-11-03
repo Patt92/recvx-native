@@ -39,5 +39,26 @@ int main(){try{
     // Explicit per-asset file wins over the content-keyed HD file.
     write_tga(mods/"textures"/identity/"0000.tga",solid(8,8,0x80000000));
     scene.textures={solid(2,2,0),solid(2,2,0),solid(2,2,0)};apply_texture_files(scene,data,mods,identity);check(scene.textures[0].width==8,"explicit mod file lost precedence");
+    // Decoded-only resources use the ORIGINAL canonical image as identity.
+    const auto decoded=solid(4,4,0xff334455);const auto decoded_key=md5_hex(encode_tga(decoded));
+    write_tga(mods/"textures/hd"/(decoded_key+".tga"),solid(12,12,0xff778899));
+    Scene terminal;terminal.textures={decoded};terminal.textures[0].clamp_v=true;
+    apply_texture_files(terminal,data,mods,"computer");
+    check(terminal.textures[0].width==12&&terminal.textures[0].clamp_v,"decoded-only content identity not replaced");
+    // Original palette bank identity stays independent of base override and
+    // of every other bank, including when one bank changes resolution.
+    auto banked=solid(4,4,0xff000000);banked.palette_banks[5]=decoded.pixels;
+    banked.palette_banks[9]=solid(4,4,0xffff0000).pixels;
+    auto banks=load_texture_palette_files(banked,data,mods,"menu",0);
+    check(banks.at(5).width==12&&banks.at(9).width==4,"bank overrides leaked to another bank");
+    write_tga(mods/"textures/palettes/menu/0000/0009/0000.tga",solid(16,16,0xff00ff00));
+    banks=load_texture_palette_files(banked,data,mods,"menu",0);
+    check(banks.at(9).width==16&&banks.at(9).pixels[0]==0xff00ff00,"explicit palette override missing");
+    set_texture_mods_enabled(false);
+    terminal.textures={decoded};apply_texture_files(terminal,data,mods,"computer");
+    check(terminal.textures[0].width==4&&terminal.textures[0].pixels[0]==0xff334455,"decoded mod switch failed");
+    banks=load_texture_palette_files(banked,data,mods,"menu",0);
+    check(banks.at(5).width==4&&banks.at(9).pixels[0]==0xffff0000,"palette mod switch failed");
+    set_texture_mods_enabled(true);
     std::cout<<"HD texture replacement: MD5 vectors, content-keyed lookup, shared use and precedence verified.\n";return 0;
 }catch(const std::exception& e){std::cerr<<"HD texture test failed: "<<e.what()<<'\n';return 1;}}

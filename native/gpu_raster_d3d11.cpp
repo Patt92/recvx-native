@@ -8,6 +8,7 @@
 // Wert in garantierter Zeichenreihenfolge und schreibt ihn wie die Software. Ohne ROV gibt es
 // kein Backend (Softwarepfad), statt eines nur aehnlich wirkenden Mischens.
 #include "gpu_raster.h"
+#include "shadow_soft.h"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -44,7 +45,7 @@ static_assert(sizeof(GpuSetup)==208,"setup layout");
 struct alignas(16) GpuShadowTri{float v01[4],v2a[4];std::uint32_t depth[4];std::int32_t box[4];};
 static_assert(sizeof(GpuShadowTri)==64,"shadow triangle layout");
 struct FrameCB{float W,H;std::uint32_t fog_pixel,wireframe,background,mask_w,mask_h,pad;};
-struct CompositeCB{float W,H,rx0,ry0,rx1,ry1;std::uint32_t fog,layer;};
+struct CompositeCB{float W,H,rx0,ry0,rx1,ry1;std::uint32_t fog,layer,scale,soft;float reach,pad;};
 struct ResolveCB{std::uint32_t size[4];};
 struct DrawCB{std::uint32_t first,pad[3];};
 // Darstellungsart einer Textur: Stufe 0 (Punktabtastung), gerade Kette, praemultiplizierte Kette
@@ -97,7 +98,9 @@ public:
         // Farbe mit der Hintergrundfarbe, Tiefe und transportierte Tiefe mit 0 vorbelegen.
         {const UINT background[4]={frame.background,0,0,0};context_->ClearUnorderedAccessViewUint(color_uav_.get(),background);}
         {const FLOAT zero[4]={0,0,0,0};context_->ClearUnorderedAccessViewFloat(depth_uav_.get(),zero);context_->ClearUnorderedAccessViewFloat(transported_uav_.get(),zero);}
-        const FrameCB fu{float(W),float(H),frame.fog_pixel,frame.wireframe?1u:0u,frame.background,std::uint32_t(W),std::uint32_t(H),0};
+        shadow_scale_=frame.shadow_scale;soft_shadows_=frame.soft_shadows;
+        if(soft_shadows_&&(int(640*shadow_scale_)!=W||int(480*shadow_scale_)!=H))throw std::runtime_error("soft shadows need the mask at the render resolution");
+        const FrameCB fu{float(W),float(H),frame.fog_pixel,frame.wireframe?1u:0u,frame.background,std::uint32_t(W),std::uint32_t(H),shadow_scale_};
         write(frame_cb_,&fu,sizeof fu);
         context_->RSSetState(raster_state_.get());
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -278,7 +281,7 @@ private:
         {const UINT zero[4]={0,0,0,0};context_->ClearUnorderedAccessViewUint(mask_uav_.get(),zero);}
         if(triangles_.empty())return;
         upload(shadow_buffer_,shadow_capacity_,triangles_.data(),triangles_.size(),sizeof(GpuShadowTri),shadow_view_);
-        bind_targets(640,480);
+        bind_targets(int(640*shadow_scale_),int(480*shadow_scale_));
         context_->VSSetShader(vs_mask_.get(),nullptr,0);context_->PSSetShader(ps_mask_.get(),nullptr,0);
         ID3D11ShaderResourceView* views[]={shadow_view_.get()};
         context_->VSSetShaderResources(1,1,views);context_->PSSetShaderResources(1,1,views);
@@ -286,16 +289,16 @@ private:
         bind_targets(W,H);
     }
     void mask_target(unsigned layers){
-        if(mask_&&mask_layers_>=layers)return;
-        mask_layers_=layers;
-        D3D11_TEXTURE2D_DESC td{};td.Width=640;td.Height=480;td.MipLevels=1;td.ArraySize=layers;td.Format=DXGI_FORMAT_R8_UINT;
+        if(mask_&&mask_layers_>=layers&&mask_scale_==shadow_scale_)return;
+        mask_layers_=std::max(layers,mask_layers_);mask_scale_=shadow_scale_;layers=mask_layers_;
+        D3D11_TEXTURE2D_DESC td{};td.Width=640*shadow_scale_;td.Height=480*shadow_scale_;td.MipLevels=1;td.ArraySize=layers;td.Format=DXGI_FORMAT_R8_UINT;
         td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_UNORDERED_ACCESS|D3D11_BIND_SHADER_RESOURCE;
         require(device_->CreateTexture2D(&td,nullptr,mask_.put()),"mask texture");
         D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};ud.Format=DXGI_FORMAT_R8_UINT;ud.ViewDimension=D3D11_UAV_DIMENSION_TEXTURE2DARRAY;
         ud.Texture2DArray.ArraySize=layers;require(device_->CreateUnorderedAccessView(mask_.get(),&ud,mask_uav_.put()),"mask view");}
     void composite(const raster::ShadowWork& c,std::size_t index,int W,int H){
         if(c.fog_power>255u)throw std::runtime_error("shadow: invalid fog channel");
-        const CompositeCB u{float(W),float(H),c.rx0,c.ry0,c.rx1,c.ry1,c.fog_power,std::uint32_t(index)};
+        const CompositeCB u{float(W),float(H),c.rx0,c.ry0,c.rx1,c.ry1,c.fog_power,std::uint32_t(index),shadow_scale_,soft_shadows_?1u:0u,soft_shadows_?shadow_soft_reach(shadow_scale_):0.f,0};
         write(composite_cb_,&u,sizeof u);
         ID3D11Buffer* buffers[]={composite_cb_.get()};context_->PSSetConstantBuffers(1,1,buffers);
         bind_targets(W,H);
@@ -322,7 +325,7 @@ private:
     Com<ID3D11ShaderResourceView> setup_view_,shadow_view_,blank_;
     std::vector<GpuSetup> setups_;std::vector<GpuShadowTri> triangles_;std::vector<Batch> batches_;
     std::vector<std::string> unsupported_;Timings timings_;
-    std::size_t setup_capacity_=0,shadow_capacity_=0;unsigned draw_calls_=0,composites_=0,mask_layers_=0;int target_w_=0,target_h_=0;
+    std::size_t setup_capacity_=0,shadow_capacity_=0;unsigned draw_calls_=0,composites_=0,mask_layers_=0,mask_scale_=0,shadow_scale_=1;bool soft_shadows_=false;int target_w_=0,target_h_=0;
 };
 }
 std::shared_ptr<GpuRaster> create_gpu_raster(std::string& reason){

@@ -18,7 +18,7 @@ class GameUi;
 // interpreter, soft keyboard and quad list are native (computer_core.c).
 class ComputerTerminal {
 public:
-    explicit ComputerTerminal(std::filesystem::path data):data_(std::move(data)){}
+    explicit ComputerTerminal(std::filesystem::path data,std::filesystem::path mods={}):data_(std::move(data)),mods_(std::move(mods)){}
     bool active()const{return active_;}
     // bhSysCall: start when a script requested the terminal.
     bool begin(EventVm& events);
@@ -45,13 +45,14 @@ public:
     const std::vector<std::string>& text()const{return text_;}
     const std::array<std::string,2>& words()const{return words_;}
 private:
-    std::filesystem::path data_;
+    std::filesystem::path data_,mods_;
     bool active_=false;
     unsigned pending_=0;
     mutable unsigned character_gaps_=0,message_gaps_=0;
     unsigned stand_gaps_=0;
     std::unique_ptr<RECVX_COM_FRAME> frame_;
     mutable std::vector<SceneTexture> textures_;
+    mutable bool textures_mods_=false;
     std::vector<std::string> text_;
     std::array<std::string,2> words_;
     void draw_character(SoftwareRenderer& image)const;

@@ -432,6 +432,16 @@ identical for any worker count (`--render-threads`). Large plates such as bhEff1
 on the main thread before. Headless runs print the draw phases (`Draw: content (compose, ntx2d, trs2d, fnc); setup, gpu,
 bands, shadow, lines`) like the windowed exit report.
 
+**Ultra shadows (host improvement, not original).** With `quality = ultra` (3x supersampling) the bhDrawMdfEffect
+shadow mask is rastered at the render resolution instead of 640x480 (same triangles, edge rules, saturation and
+GEQUAL depth test, sample point (x+.5)/3), and its edge is softened before the original Ps2ShadowDraw darkening:
+each mask value becomes a fixed-point Gaussian mean of a 7x7 neighbourhood (taps 2 render pixels apart, about two
+original pixels of penumbra each side). Neighbours count only on the same receiver surface (transported depth within
+1/8 of the centre plus one unit), so the edge does not bleed onto walls or the caster. Original, Low and High keep
+the original mask bit for bit. CPU rasterer and the Metal (compute pass), Direct3D 11/12, Vulkan and OpenGL
+composites share `native/shadow_soft.h`; headless runs use `--fine-shadows`. Test `shadow_soft_ultra`. The GPU
+variants are not run in the sandbox (no device); D3D/Metal shader compilation is checked only on the target.
+
 Optional supersampling and host texture filters are set in `video.ini`. The
 existing CPU/GPU filter differences have not been shown bit-identical. Point
 sampling must preserve color including alpha and depth bit for bit. Linux and

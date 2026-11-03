@@ -82,7 +82,7 @@ struct Options {
     std::size_t camera=0,spawn=0,motion=42;
     std::int64_t animation_frame=0;
     bool data_explicit=false; // iOS: ohne --data das Bundle bzw. den Documents-Ordner waehlen
-    bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,validate_poses=false,camera_explicit=false,list_controllers=false,third_person=false,nearest=false,video_explicit=false;int widescreen=-1,fullscreen=-1;int supersampling=2;
+    bool in_game=false,preview=false,inventory=false,headless=false,verify=false,verify_players=false,no_player=false,validate_poses=false,camera_explicit=false,list_controllers=false,third_person=false,nearest=false,video_explicit=false;int widescreen=-1,fullscreen=-1;int supersampling=2;bool fine_shadows=false;
     int renderer=-1; // --renderer gpu|software|opengl|vulkan|d3d12; Standard: video.ini (gpu) interaktiv, Software headless
     unsigned render_threads=0; // --render-threads: Host-Diagnose fuer Energiemessungen; 0 = Rendererstandard, Bild fuer jede Zahl identisch
 };
@@ -119,6 +119,7 @@ Options options(int argc,char** argv){
         else if(arg=="--no-widescreen"){o.widescreen=0;}
         else if(arg=="--fullscreen"){o.fullscreen=1;}
         else if(arg=="--windowed"){o.fullscreen=0;}
+        else if(arg=="--fine-shadows"){o.fine_shadows=true;o.video_explicit=true;}
         else if(arg=="--ss"){const auto n=number();if(!n||n>4)throw std::runtime_error("--ss must be 1 through 4");o.supersampling=int(n);o.video_explicit=true;}
         else if(arg=="--renderer"){const auto mode=value();if(mode!="gpu"&&mode!="software"&&mode!="opengl"&&mode!="vulkan"&&mode!="d3d12")throw std::runtime_error("--renderer expects gpu, opengl, vulkan, d3d12 or software");o.renderer=mode=="gpu"?1:mode=="opengl"?2:mode=="vulkan"?3:mode=="d3d12"?4:0;}
         else if(arg=="--render-threads"){const auto n=number();if(n>64)throw std::runtime_error("--render-threads must be 0 through 64");o.render_threads=unsigned(n);}
@@ -181,6 +182,7 @@ Options options(int argc,char** argv){
                        "--widescreen / --no-widescreen: 16:9 widescreen mod on/off for this run (video.ini widescreen)\n                       "
                        "--fullscreen / --windowed: borderless fullscreen or window for this run (video.ini fullscreen)\n                       "
                        "--ss <1-4>: supersampling factor per axis (default 2; 1 = off, cheaper)\n                       "
+                       "--fine-shadows: Ultra shadows (mask at render resolution, soft edge; needs --ss 2 or more)\n                       "
                        "--renderer gpu|opengl|vulkan|d3d12|software: rasterizer (default: video.ini, platform GPU; headless uses software)\n                       "
                        "--render-threads <0-64>: raster worker threads for energy measurements (0 = default; output identical)\n                       "
                        "--third-person: enable the host 3rd-person camera mod for this run without saving it\n"
@@ -311,6 +313,13 @@ static void apply_desktop_locations(Options& o){
         if(fs::is_regular_file(root/"data"/"native-data.version")){o.data=root/"data";return;}
 }
 #endif
+// Debugmenue-Auswahl einer Praesentationseinstellung: nur die Werte, die die Stufe dieser Plattform/dieses
+// Geraets kann (VideoConfig::*_choices); bleibt nur Off, steht dort "Not available".
+template<class T,class Label> static std::vector<recvx::DebugChoice> presentation_choices(const std::vector<T>& values,Label label){
+    std::vector<recvx::DebugChoice> out;for(const auto v:values)out.push_back({unsigned(v),label(v)});
+    if(out.size()==1)out[0].label="Not available";
+    return out;
+}
 static int recvx_runtime_main(int argc,char** argv){
     try{
         SdlQuit quit; // Nach allen SDL-/GL-Besitzern freigeben, auch im Fehler-/Headlesspfad.
@@ -405,7 +414,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         if(room_index==rooms.size())throw std::runtime_error("unknown room: "+args.room);
         recvx::Scene scene;recvx::SceneCamera camera;recvx::SceneSpawn origin,actor;
         recvx::CombatController combat(args.data,args.mods);recvx::CombatControls combat_input;
-        recvx::BoxMenu box_menu;recvx::ComputerTerminal computer(args.data);recvx::MapScreen map_screen;bool map_active=false;int map_entry_mode=RECVX_MP_SET_SUB;recvx::GameOver game_over(args.data,args.mods);recvx::AudioMixer audio(args.data,args.mods);audio.set_disc(args.disc-1);recvx::MoviePlayer movie(args.data,args.mods,audio);std::unique_ptr<recvx::RoomWorld> world;
+        recvx::BoxMenu box_menu;recvx::ComputerTerminal computer(args.data,args.mods);recvx::MapScreen map_screen;bool map_active=false;int map_entry_mode=RECVX_MP_SET_SUB;recvx::GameOver game_over(args.data,args.mods);recvx::AudioMixer audio(args.data,args.mods);audio.set_disc(args.disc-1);recvx::MoviePlayer movie(args.data,args.mods,audio);std::unique_ptr<recvx::RoomWorld> world;
         recvx::AudioConfig audio_config(args.audio_config);audio.set_sound_mode(audio_config.mode());
         if(!audio_config.status().empty())std::cerr<<"Audio settings ignored: "<<audio_config.status()<<'\n';
         movie.fade_flags=[&]()->std::uint32_t&{if(!events)throw std::runtime_error("movie fade without event world");return events->flags[10][0];};
@@ -761,7 +770,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 recvx::Scene screen;screen.background=scene.background;screen.triangles=stage_geometry;screen.ambient_writes=stage_ambient;screen.textures=scene.textures;
                 world->append(screen,nodes,rt->camera,{true,rt->cut}); /* bhAllEasyDrawModel: kein Spieler, keine Effekte */
                 if(!small_screen)small_screen.emplace(512,512); /* njSetTextureInfo(&sys->ren_info, ..., 512, 512) */
-                small_screen->set_texture_filtering(!args.nearest);small_screen->set_supersampling(args.supersampling);small_screen->set_render_threads(args.render_threads);
+                small_screen->set_texture_filtering(!args.nearest);small_screen->set_supersampling(args.supersampling);small_screen->set_fine_shadows(args.fine_shadows);small_screen->set_render_threads(args.render_threads);
                 small_screen->draw_screen(screen,rt->camera,rt->dist,rt->aspect_y);
                 world->commit_small_screen(small_screen->pixels(),512,512);}}
             if(world)world->append(scene,nodes,drawn_camera());};
@@ -789,7 +798,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         // Host-Rasterer der Bandstufe (gpu_raster.h). Der Umschalter entsteht erst mit dem Bild,
         // das Debugmenue und der Startpfad rufen denselben. Keine Spiellogik: nur, wer rastert.
         std::function<std::string(recvx::RenderBackend)> apply_renderer;
-        if(!args.video_explicit){args.nearest=!video.settings().filtering();args.supersampling=video.settings().supersampling();}frontend.video=&video;if(args.preview||args.in_game||args.inventory){frontend.hide();load();}
+        if(!args.video_explicit){args.nearest=!video.settings().filtering();args.supersampling=video.settings().supersampling();args.fine_shadows=video.settings().fine_shadows();}frontend.video=&video;if(args.preview||args.in_game||args.inventory){frontend.hide();load();}
         if(!frontend.active()&&args.camera_explicit){if(args.camera>=scene.cameras.size())throw std::runtime_error("camera index outside room");camera_index=args.camera;camera=scene.cameras[camera_index];}
         if(player)std::cout<<"Animated SYSTEM/"<<recvx::asset_number(args.player)<<".bin: "<<player->bones()<<" bones, motion "<<motion<<", "<<player->motion_frames(motion)<<" frames\n";
         std::map<unsigned,std::vector<std::string>> replay;
@@ -1210,13 +1219,17 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         debug.add({"snapshot_load","Load snapshot","OK: reload the room with the saved progress at the saved position.",snapshot_slots,[]{return 0;},[&](unsigned slot){auto status=load_snapshot(slot);debug.close();return status;}});
         debug.add({"video","Graphics quality","OK: host render quality; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Original"},{1,"Low"},{2,"High"},{3,"Ultra"}};},[&]{return unsigned(video.settings().quality);},[&](unsigned value){video.set(recvx::RenderQuality(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Graphics: "+video.describe();}});
         debug.add({"framerate","Frame rate","OK: presentations per game tick (the tick stays 30 Hz); unlimited without VSync; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"30 (game tick)"},{1,"60"},{2,"120"},{3,"Unlimited (no VSync)"}};},[&]{return unsigned(video.settings().frame_rate);},[&](unsigned value){video.set_frame_rate(recvx::FrameRate(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame rate: "+video.settings().describe_frame_rate();}});
-        debug.add({"upscaler","Upscaler","OK: upscaler of the final image (MetalFX on macOS/iOS, FSR 4 on Windows, FSR 1 on Android); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX spatial"},{2,"MetalFX temporal"},{3,"FSR 4 (FP8)"},{4,"FSR 4 (INT8)"},{5,"FSR 1 (spatial)"}};},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
-        debug.add({"framegen","Frame generation","OK: interpolated frame per game tick (MetalFX on macOS/iOS 26+, AMD FSR on Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"MetalFX frame interpolation"},{2,"FSR frame generation"}};},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame generation: "+video.describe_frame_generation();}});
-        debug.add({"sharpness","Sharpen","OK: contrast-adaptive sharpening of the display (macOS); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"Light"},{2,"Medium"},{3,"Strong"}};},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Sharpen: "+video.describe_sharpness();}});
-        debug.add({"postfx","CRT filter","OK: CRT light (scanlines) or CRT full (slot mask, bloom, gamma-correct); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off"},{1,"CRT light"},{2,"CRT full"}};},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT filter: "+video.describe_post_process();}});
+        debug.add({"upscaler","Upscaler","OK: upscaler of the final image; lists only what this presentation stage runs on this device (MetalFX on macOS/iOS, FSR 4/FSR 1 on Windows, FSR 1 on Android/Linux); saved in video.ini.",[&]{return presentation_choices(video.upscaler_choices(),[](recvx::Upscaler v){recvx::VideoSettings s;s.upscaler=v;return s.describe_upscaler();});},[&]{return unsigned(video.settings().upscaler);},[&](unsigned value){video.set_upscaler(recvx::Upscaler(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Upscaler: "+video.describe_upscaler();}});
+        debug.add({"framegen","Frame generation","OK: interpolated frame per game tick; lists only what this stage runs (MetalFX on macOS/iOS 26+, AMD FSR on Windows); saved in video.ini.",[&]{return presentation_choices(video.frame_generation_choices(),[](recvx::FrameGeneration v){recvx::VideoSettings s;s.frame_generation=v;return s.describe_frame_generation();});},[&]{return unsigned(video.settings().frame_generation);},[&](unsigned value){video.set_frame_generation(recvx::FrameGeneration(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Frame generation: "+video.describe_frame_generation();}});
+        debug.add({"sharpness","Sharpen","OK: contrast-adaptive sharpening of the display (presentation stage); saved in video.ini.",[&]{return presentation_choices(video.sharpness_choices(),[](recvx::Sharpness v){recvx::VideoSettings s;s.sharpness=v;return s.describe_sharpness();});},[&]{return unsigned(video.settings().sharpness);},[&](unsigned value){video.set_sharpness(recvx::Sharpness(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "Sharpen: "+video.describe_sharpness();}});
+        debug.add({"postfx","CRT filter","OK: CRT light (scanlines) or CRT full (slot mask, bloom, gamma-correct); saved in video.ini.",[&]{return presentation_choices(video.post_process_choices(),[](recvx::PostProcess v){recvx::VideoSettings s;s.post_process=v;return s.describe_post_process();});},[&]{return unsigned(video.settings().post_process);},[&](unsigned value){video.set_post_process(recvx::PostProcess(value));if(frontend.video_changed)frontend.video_changed(video.settings());return "CRT filter: "+video.describe_post_process();}});
         debug.add({"widescreen","Widescreen","OK: 16:9 widescreen mod like the GameCube/PS2 patches (wider 3D view, HUD stretched, movies 4:3); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Off (4:3)"},{1,"16:9"}};},[&]{return unsigned(video.settings().widescreen);},[&](unsigned value){video.set_widescreen(value!=0);if(frontend.video_changed)frontend.video_changed(video.settings());return "Widescreen: "+video.settings().describe_widescreen();}});
         debug.add({"fullscreen","Fullscreen","OK: borderless fullscreen on the current display or a resizable window; saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"Window"},{1,"Fullscreen"}};},[&]{return unsigned(video.settings().fullscreen);},[&](unsigned value){video.set_fullscreen(value!=0);if(frontend.video_changed)frontend.video_changed(video.settings());return std::string(value?"Fullscreen":"Window");}});
-        debug.add({"renderer","Renderer","OK: platform GPU, software, OpenGL, Vulkan or Direct3D 12 (Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (platform)"},{1,"Software"},{2,"OpenGL"},{3,"Vulkan"},{4,"Direct3D 12"}};},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
+        debug.add({"renderer","Renderer","OK: platform GPU, software, OpenGL, Vulkan or Direct3D 12 (Windows); saved in video.ini.",[]{return std::vector<recvx::DebugChoice>{{0,"GPU (platform)"},{1,"Software"},{2,"OpenGL"},{3,"Vulkan"}
+#if defined(_WIN32)
+            ,{4,"Direct3D 12"} // gpu_raster.h: nur Windows
+#endif
+            };},[&]{return unsigned(video.settings().renderer);},[&](unsigned value){
             const auto backend=value==4?recvx::RenderBackend::D3D12:value==3?recvx::RenderBackend::Vulkan:value==2?recvx::RenderBackend::OpenGL:value==1?recvx::RenderBackend::Software:recvx::RenderBackend::Gpu;
             if(!apply_renderer)return std::string("Renderer: not ready yet");
             const auto name=apply_renderer(backend);video.set_renderer(backend);
@@ -1924,7 +1937,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             }
             follow();
         };
-        recvx::SoftwareRenderer image(640,480);write_screenshot=[&](const fs::path& path){image.save_bmp(path);};image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);image.set_render_threads(args.render_threads);
+        recvx::SoftwareRenderer image(640,480);write_screenshot=[&](const fs::path& path){image.save_bmp(path);};image.set_texture_filtering(!args.nearest);image.set_supersampling(args.supersampling);image.set_fine_shadows(args.fine_shadows);image.set_render_threads(args.render_threads);
         std::unique_ptr<recvx::MetalFxPresenter> presenter; // Host-Praesentationsstufe (metalfx_present.h), erst mit dem Fenster erzeugt
         std::function<void(bool)> apply_vsync; // SDL_RenderSetVSync des Fensters (frame_rate unlimited = aus), erst mit dem Fenster gesetzt
         std::function<void(bool)> apply_widescreen; // logische 16:9-Flaeche des Fensters (widescreen.h), erst mit dem Fenster gesetzt
@@ -2061,7 +2074,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(mode0!=1u||(mode2>=14u&&mode2<=22u)||stairs.active||world->pushing()||world->turning())return false;
             return true;};
         auto third_person_tick=[&](){third_person.tick(actor,{third_person_free(),combat.aiming()},world.get()); /* Diagnose only: actual host-mod view after its tick, distinct from original CAM_WORK. */if(std::getenv("RECVX_CAM_TRACE")){const auto p=view_camera();std::fprintf(stderr,"CAMOUTPUT room=%s third_active=%d pos=%.2f,%.2f,%.2f ang=%d,%d,%d pers=%d\n",rooms.name(room_index).c_str(),int(third_person.active()),p.position.x,p.position.y,p.position.z,p.angles[0],p.angles[1],p.angles[2],p.perspective);}};
-        frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());if(apply_renderer)apply_renderer(settings.renderer);if(presenter)presenter->configure(settings);if(apply_vsync)apply_vsync(settings.vsync());recvx_set_widescreen(settings.widescreen);if(apply_widescreen)apply_widescreen(settings.widescreen);if(apply_fullscreen)apply_fullscreen(settings.fullscreen);};
+        frontend.video_changed=[&](const recvx::VideoSettings& settings){image.set_texture_filtering(settings.filtering());image.set_supersampling(settings.supersampling());image.set_fine_shadows(settings.fine_shadows());if(apply_renderer)apply_renderer(settings.renderer);if(presenter)presenter->configure(settings);if(apply_vsync)apply_vsync(settings.vsync());recvx_set_widescreen(settings.widescreen);if(apply_widescreen)apply_widescreen(settings.widescreen);if(apply_fullscreen)apply_fullscreen(settings.fullscreen);};
         bool pause_active=false;
         /* bhSysCallEvent (system.c:668) sperrt Pause mit st_flg 0x1C040208 (0x4 Cinematic, 0x40000 Kartentask)
            UND verlangt (ts_flg & 0x3DE00) == 0x3DE00. Darin steckt Bit 15 (0x8000): solange die

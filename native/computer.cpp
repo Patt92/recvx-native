@@ -127,9 +127,10 @@ void ComputerTerminal::draw_character(SoftwareRenderer& image)const{
 }
 void ComputerTerminal::draw(SoftwareRenderer& image,const GameUi& ui,const EventVm& events)const{
     if(!active_||!frame_)return;
-    if(textures_.empty()){
+    if(textures_.empty()||textures_mods_!=texture_mods_enabled()){
         // bhSetMemPvpTexture: SYSTEM entry 2 holds background, window/font/keyboard and icon pages.
-        textures_=decode_texture_bundle(read_asset_file(data_/"archives/SYSTEM/0002.bin",8*1024*1024));
+        textures_=load_texture_bundle_files(data_/"archives/SYSTEM/0002.bin",data_,mods_,"computer");
+        textures_mods_=texture_mods_enabled();
         if(textures_.size()<3)throw std::runtime_error("computer terminal textures missing");
     }
     std::vector<RECVX_COM_DRAW> draws(frame_->draw,frame_->draw+frame_->draw_count);

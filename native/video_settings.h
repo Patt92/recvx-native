@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <string>
+#include <vector>
 namespace recvx {
 // Host-only render quality (not original behaviour). The game itself always
 // renders 640x480 at the original 30-Hz tick; quality only changes how the
@@ -51,6 +52,8 @@ struct VideoSettings {
     bool fullscreen=true;
     bool filtering()const{return quality!=RenderQuality::Original;}
     int supersampling()const{return quality==RenderQuality::Ultra?3:quality==RenderQuality::High?2:1;}
+    // Ultra: Schattenmaske in Bildaufloesung mit weicher Kante (shadow_soft.h), Host-Verbesserung.
+    bool fine_shadows()const{return quality==RenderQuality::Ultra;}
     // true: the presentation stage has work to do (otherwise the plain SDL copy presents).
     bool presentation()const{return upscaler!=Upscaler::Off||frame_generation!=FrameGeneration::Off||post_process!=PostProcess::Off||sharpness!=Sharpness::Off;}
     float sharpness_amount()const{return sharpness==Sharpness::Strong?1.0f:sharpness==Sharpness::Medium?0.6f:sharpness==Sharpness::Light?0.3f:0.0f;}
@@ -97,6 +100,12 @@ public:
     // Runtime report: presentation stage (post-processing), the stage's upscalers and frame generation usable?
     // frame_generation_kind: welche Frame-Generation die Stufe dieser Plattform kann (MetalFX bzw. FSR).
     void set_availability(bool presentation,bool upscaler,bool frame_generation,FrameGeneration frame_generation_kind=FrameGeneration::MetalFx,std::uint32_t upscalers=~0u){presentation_available_=presentation;upscaler_available_=upscaler;frame_generation_available_=frame_generation;frame_generation_kind_=frame_generation_kind;upscaler_mask_=upscalers;}
+    // Werte, die diese Stufe auf diesem Geraet kann, Off zuerst; nur Off = Zeile "Not available".
+    // Zyklen im Einstellungsbildschirm und die Auswahl im Debugmenue laufen nur ueber diese Werte.
+    std::vector<Upscaler> upscaler_choices()const;
+    std::vector<FrameGeneration> frame_generation_choices()const;
+    std::vector<Sharpness> sharpness_choices()const;
+    std::vector<PostProcess> post_process_choices()const;
     bool presentation_available()const{return presentation_available_;}
     bool upscaler_available()const{return upscaler_available_;}
     bool frame_generation_available()const{return frame_generation_available_;}

@@ -4,6 +4,8 @@
 #include "weapon_asset.h"
 #include "ui.h"
 #include "binary_view.h"
+#include "inspection.h"
+#include <set>
 #include <iostream>
 
 // Offline catalogue only: reuse the native asset owners/decoders and their
@@ -33,6 +35,15 @@ static std::size_t export_catalog(const std::filesystem::path& data,const std::f
     recvx::GameUi ui(data);
     for(unsigned i=0;i<3;++i){recvx::write_tga(output/"textures/title"/(recvx::asset_number(i)+".tga"),ui.title_texture(i));++count;}
     save(recvx::decode_texture_bundle(recvx::read_asset_file(data/"archives/ITEM1/0144.bin",8*1024*1024)),"typewriter");
+    save(recvx::decode_texture_bundle(recvx::read_asset_file(data/"archives/SYSTEM/0002.bin",8*1024*1024)),"computer");
+    std::set<unsigned> wallpapers;
+    for(unsigned file=0;file<24;++file)wallpapers.insert(recvx::original_file_wallpaper(file));
+    for(const auto id:wallpapers)save(recvx::decode_texture_bundle(recvx::read_asset_file(data/"archives/ITEM1"/(recvx::asset_number(id)+".bin"),8*1024*1024)),std::filesystem::path("files")/recvx::asset_number(id));
+    const auto menus=recvx::decode_texture_bundle(recvx::read_asset_file(data/"archives/ITEM1/0145.bin",8*1024*1024));
+    for(const auto& [bank,pixels]:menus.at(0).palette_banks){
+        auto texture=menus.at(0);texture.pixels=pixels;texture.palette_banks.clear();
+        save(std::vector<recvx::SceneTexture>{std::move(texture)},std::filesystem::path("palettes/menu/0000")/recvx::asset_number(bank));
+    }
     return count;
 }
 static std::size_t export_effect_catalog(const std::filesystem::path& data,const std::filesystem::path& output){

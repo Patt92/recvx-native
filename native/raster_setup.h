@@ -50,6 +50,9 @@ struct Frame {
     std::uint32_t background,fog_pixel;bool wireframe,shadows;
     std::size_t before_modifiers=0,before_mirror_effects=0;
     std::array<bool,2> shadow_pass{}; // Schattenwerke ohne/mit Spiegelpass (shadow.mirror)
+    // Host-Ultra (shadow_soft.h, nicht Original): Maske in (640*shadow_scale)x(480*shadow_scale), bei
+    // soft_shadows weiche Kante. soft_shadows nur mit shadow_scale == supersampling (Maske = Bildraster).
+    unsigned shadow_scale=1;bool soft_shadows=false;
 };
 }
 }

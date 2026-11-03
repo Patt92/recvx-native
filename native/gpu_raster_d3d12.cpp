@@ -16,6 +16,7 @@
 // erfolgreicher Ausfuehrung dem Cache zugesprochen (pending_owner_, wie gpu_raster_vulkan.cpp): ein Bild,
 // das nach dem Aufzeichnen scheitert, hinterlaesst keine Kopie ohne ausgefuehrten Upload.
 #include "gpu_raster.h"
+#include "shadow_soft.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -55,10 +56,10 @@ struct alignas(16) GpuShadowTri{float v01[4],v2a[4];std::uint32_t depth[4];std::
 static_assert(sizeof(GpuShadowTri)==64,"shadow triangle layout");
 // Root-Konstanten je cbuffer des Shaders (b0..b3): 8+8+4+4 DWORDs.
 struct FrameCB{float W,H;std::uint32_t fog_pixel,wireframe,background,mask_w,mask_h,pad;};
-struct CompositeCB{float W,H,rx0,ry0,rx1,ry1;std::uint32_t fog,layer;};
+struct CompositeCB{float W,H,rx0,ry0,rx1,ry1;std::uint32_t fog,layer,scale,soft;float reach,pad;};
 struct ResolveCB{std::uint32_t size[4];};
 struct DrawCB{std::uint32_t first,pad[3];};
-static_assert(sizeof(FrameCB)==32&&sizeof(CompositeCB)==32&&sizeof(ResolveCB)==16&&sizeof(DrawCB)==16,"root constant layout");
+static_assert(sizeof(FrameCB)==32&&sizeof(CompositeCB)==48&&sizeof(ResolveCB)==16&&sizeof(DrawCB)==16,"root constant layout");
 enum RootParam{RootFrame=0,RootComposite=1,RootResolve=2,RootDraw=3,RootSrv=4,RootUav=5,RootSampler=6};
 enum Variant{Point=1,Straight=2,Premultiplied=3,Punch=4};
 struct Batch{std::size_t first,count;ID3D12Resource* texture;unsigned sampler;bool point;};
@@ -152,7 +153,9 @@ public:
          cmd_->ClearUnorderedAccessViewFloat(uav_gpu(1),uav_cpu(1),depth_.get(),zero,0,nullptr);
          cmd_->ClearUnorderedAccessViewFloat(uav_gpu(2),uav_cpu(2),transported_.get(),zero,0,nullptr);}
         uav_barrier();
-        const FrameCB fu{float(W),float(H),frame.fog_pixel,frame.wireframe?1u:0u,frame.background,std::uint32_t(W),std::uint32_t(H),0};
+        shadow_scale_=frame.shadow_scale;soft_shadows_=frame.soft_shadows;
+        if(soft_shadows_&&(int(640*shadow_scale_)!=W||int(480*shadow_scale_)!=H))throw std::runtime_error("soft shadows need the mask at the render resolution");
+        const FrameCB fu{float(W),float(H),frame.fog_pixel,frame.wireframe?1u:0u,frame.background,std::uint32_t(W),std::uint32_t(H),shadow_scale_};
         cmd_->SetGraphicsRoot32BitConstants(RootFrame,sizeof fu/4,&fu,0);
         cmd_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         const std::size_t ends[3]={frame.shadows?frame.before_modifiers:setups.size(),frame.shadows?frame.before_mirror_effects:setups.size(),setups.size()};
@@ -399,7 +402,7 @@ private:
         // ausgefuehrt: deshalb je Phase ein eigener Puffer (retired_ haelt den alten bis zum Zaun).
         if(shadow_buffer_)retired_.push_back(std::move(shadow_buffer_));shadow_capacity_=0;
         write_structured(shadow_buffer_,shadow_capacity_,triangles_.data(),triangles_.size(),sizeof(GpuShadowTri));
-        bind_targets(640,480);
+        bind_targets(int(640*shadow_scale_),int(480*shadow_scale_));
         cmd_->SetPipelineState(mask_pso_.get());
         srv_block(setup_buffer_.get(),setups_.size(),sizeof(GpuSetup),blank_float_.get(),blank_uint_.get());
         cmd_->DrawInstanced(UINT(triangles_.size()*6),1,0,0);++draw_calls_;uav_barrier();
@@ -407,18 +410,18 @@ private:
     }
     // true: neue Maske (groesser), Deskriptor u3 neu; der Aufrufer legt einen neuen UAV-Block an.
     bool mask_target(unsigned layers){
-        if(mask_&&mask_layers_>=layers)return false;
-        mask_layers_=layers;
+        if(mask_&&mask_layers_>=layers&&mask_scale_==shadow_scale_)return false;
+        mask_layers_=std::max(layers,mask_layers_);mask_scale_=shadow_scale_;layers=mask_layers_;
         if(mask_)retired_.push_back(std::move(mask_));
         // R32_UINT statt R8_UINT: typisierte UAV-Lesezugriffe sind fuer R32_UINT auf jedem D3D12-Geraet garantiert;
         // Werte 0..255 unveraendert (wie das Vulkan-Backend).
-        mask_=committed(D3D12_HEAP_TYPE_DEFAULT,texture_desc(640,480,UINT16(layers),1,DXGI_FORMAT_R32_UINT,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,"mask texture");
+        mask_=committed(D3D12_HEAP_TYPE_DEFAULT,texture_desc(640*shadow_scale_,480*shadow_scale_,UINT16(layers),1,DXGI_FORMAT_R32_UINT,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,"mask texture");
         D3D12_UNORDERED_ACCESS_VIEW_DESC ud{};ud.Format=DXGI_FORMAT_R32_UINT;ud.ViewDimension=D3D12_UAV_DIMENSION_TEXTURE2DARRAY;ud.Texture2DArray.ArraySize=layers;
         device_->CreateUnorderedAccessView(mask_.get(),nullptr,&ud,uav_cpu(3));
         return true;}
     void composite(const raster::ShadowWork& c,std::size_t index,int W,int H){
         if(c.fog_power>255u)throw std::runtime_error("shadow: invalid fog channel");
-        const CompositeCB u{float(W),float(H),c.rx0,c.ry0,c.rx1,c.ry1,c.fog_power,std::uint32_t(index)};
+        const CompositeCB u{float(W),float(H),c.rx0,c.ry0,c.rx1,c.ry1,c.fog_power,std::uint32_t(index),shadow_scale_,soft_shadows_?1u:0u,soft_shadows_?shadow_soft_reach(shadow_scale_):0.f,0};
         cmd_->SetGraphicsRoot32BitConstants(RootComposite,sizeof u/4,&u,0);
         bind_targets(W,H);
         cmd_->SetPipelineState(shadow_pso_.get());
@@ -441,7 +444,7 @@ private:
     // Schluessel fuer Kopien, deren Upload im laufenden Bild aufgezeichnet, aber noch nicht ausgefuehrt ist.
     const std::shared_ptr<const void> pending_owner_=std::make_shared<const char>(0);
     std::vector<std::string> unsupported_;Timings timings_;
-    std::size_t setup_capacity_=0,shadow_capacity_=0;unsigned draw_calls_=0,composites_=0,mask_layers_=0;int target_w_=0,target_h_=0;
+    std::size_t setup_capacity_=0,shadow_capacity_=0;unsigned draw_calls_=0,composites_=0,mask_layers_=0,mask_scale_=0,shadow_scale_=1;bool soft_shadows_=false;int target_w_=0,target_h_=0;
 };
 }
 std::shared_ptr<GpuRaster> create_d3d12_raster(std::string& reason){

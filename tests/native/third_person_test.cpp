@@ -100,29 +100,46 @@ int main(){try{
      front.input(MenuInput::Right);check(video.settings().frame_rate==FrameRate::Unlimited&&video.settings().presents_per_tick()==0&&!video.settings().vsync()&&video.settings().describe_frame_rate()=="Unlimited (no vsync)","frame rate unlimited");
      front.input(MenuInput::Right);check(video.settings().frame_rate==FrameRate::Hz30,"frame rate wrap");
      front.input(MenuInput::Down);check(front.selected()==Frontend::upscaler_row,"upscaler row not selectable");
+     // Ohne Praesentationsstufe bleibt jede Zeile auf Off und zeigt "Not available" (kein Durchschalten fremder Stufen).
+     const auto row_text=[&](unsigned row){return front.presentation_row_value(row);};
+     check(video.upscaler_choices().size()==1&&video.frame_generation_choices().size()==1&&video.sharpness_choices().size()==1&&video.post_process_choices().size()==1,"no stage: only Off");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Off&&row_text(Frontend::upscaler_row)=="Not available","no stage: upscaler stays off, row not available");
+     // MetalFX-Stufe (macOS/iOS): nur MetalFX spatial/temporal, keine FSR-Werte.
+     const std::uint32_t metal_upscalers=(1u<<unsigned(Upscaler::MetalFxSpatial))|(1u<<unsigned(Upscaler::MetalFxTemporal));
+     video.set_availability(true,true,true,FrameGeneration::MetalFx,metal_upscalers);
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::MetalFxSpatial&&VideoSettings::read(video_path).upscaler==Upscaler::MetalFxSpatial&&applied_presentation==1,"upscaler spatial");
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::MetalFxTemporal&&VideoSettings::read(video_path).upscaler==Upscaler::MetalFxTemporal,"upscaler temporal");
-     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr4&&VideoSettings::read(video_path).upscaler==Upscaler::Fsr4,"upscaler fsr4");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Off,"MetalFX stage: wrap after temporal, no FSR values");
+     front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::MetalFxTemporal,"MetalFX stage: left wrap");
+     // FSR-Stufe (Windows): FSR 4 (FP8/INT8, wenn die DLLs da sind) und FSR 1, nie MetalFX.
+     const std::uint32_t fsr_upscalers=(1u<<unsigned(Upscaler::Fsr1))|(1u<<unsigned(Upscaler::Fsr4))|(1u<<unsigned(Upscaler::Fsr4Int8));
+     video.set_availability(true,true,true,FrameGeneration::Fsr,fsr_upscalers);
+     check(video.describe_upscaler()=="MetalFX temporal (not available)","saved MetalFX value on the FSR stage must be marked");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Off,"FSR stage: unavailable saved value restarts at Off");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr4,"upscaler fsr4");
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr4Int8&&VideoSettings::read(video_path).upscaler==Upscaler::Fsr4Int8,"upscaler fsr4 int8");
      front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Fsr1&&VideoSettings::read(video_path).upscaler==Upscaler::Fsr1,"upscaler fsr1");
-     // Je Stufe nur ihre Skalierer: auf einer MetalFX-Stufe ist FSR 1 nicht verfuegbar, auf der GLES-Stufe schon.
-     video.set_availability(true,true,false,FrameGeneration::MetalFx,(1u<<unsigned(Upscaler::MetalFxSpatial))|(1u<<unsigned(Upscaler::MetalFxTemporal)));
-     check(video.describe_upscaler()=="FSR 1 (spatial) (not available)","FSR 1 must be unavailable on a MetalFX stage");
-     video.set_availability(true,true,false,FrameGeneration::MetalFx,1u<<unsigned(Upscaler::Fsr1));
-     check(video.describe_upscaler()=="FSR 1 (spatial)","FSR 1 available on the GLES stage");
-     video.set_availability(false,false,false);
-     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Off,"upscaler wrap");
-     front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::Fsr1,"upscaler left wrap");front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::Fsr4Int8,"upscaler left to fsr4 int8");
-     front.input(MenuInput::Left);front.input(MenuInput::Left);check(video.settings().upscaler==Upscaler::MetalFxTemporal,"upscaler left twice");
-     check(video.describe_upscaler()=="MetalFX temporal (not available)","upscaler availability note missing");
-     video.set_availability(true,true,false);check(video.describe_upscaler()=="MetalFX temporal","upscaler availability note stuck");
+     front.input(MenuInput::Right);check(video.settings().upscaler==Upscaler::Off,"FSR stage: wrap");
+     for(const auto u:video.upscaler_choices())check(u!=Upscaler::MetalFxSpatial&&u!=Upscaler::MetalFxTemporal,"MetalFX offered on the FSR stage");
+     // FSR-Stufe ohne FSR-4-DLLs: nur FSR 1.
+     video.set_availability(true,true,true,FrameGeneration::Fsr,1u<<unsigned(Upscaler::Fsr1));
+     check(video.upscaler_choices()==std::vector<Upscaler>{Upscaler::Off,Upscaler::Fsr1},"FSR stage without DLLs offers FSR 1 only");
+     // MetalFX-Stufe auf einem Geraet ohne Skalierer: Zeile nicht verfuegbar.
+     video.set_availability(true,false,false,FrameGeneration::MetalFx,metal_upscalers);
+     check(row_text(Frontend::upscaler_row)=="Not available"&&row_text(Frontend::frame_generation_row)=="Not available","stage without upscaler/interpolation must read Not available");
      front.input(MenuInput::Down);check(front.selected()==Frontend::frame_generation_row,"frame generation row not selectable");
+     // Windows: Frame Generation ist FSR, MetalFX erscheint nicht.
+     video.set_availability(true,true,true,FrameGeneration::Fsr,fsr_upscalers);
+     check(video.frame_generation_choices()==std::vector<FrameGeneration>{FrameGeneration::Off,FrameGeneration::Fsr},"FSR stage frame generation choices");
+     front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Fsr&&VideoSettings::read(video_path).frame_generation==FrameGeneration::Fsr&&video.describe_frame_generation()=="FSR frame generation","FSR frame generation on the FSR stage");
+     front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Off,"FSR stage frame generation wrap, no MetalFX");
+     // macOS/iOS 26+: MetalFX-Interpolation.
+     video.set_availability(true,true,true,FrameGeneration::MetalFx,metal_upscalers);
      front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::MetalFx&&VideoSettings::read(video_path).frame_generation==FrameGeneration::MetalFx,"frame generation on");
-     check(video.describe_frame_generation()=="MetalFX frame interpolation (not available)","frame generation availability note missing");
      video.set_frame_generation(FrameGeneration::MetalFx);check(video.settings().presents_per_tick()==2,"frame interpolation needs two presents per tick at 30");video.set_frame_rate(FrameRate::Hz120);check(video.settings().presents_per_tick()==4,"frame interpolation keeps 120");video.set_frame_rate(FrameRate::Hz30);
-     front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Fsr&&video.describe_frame_generation()=="FSR frame generation (not available)","FSR frame generation is the third value and not available on a MetalFX stage");
-     video.set_availability(true,true,true,FrameGeneration::Fsr);check(video.describe_frame_generation()=="FSR frame generation","FSR frame generation available on the FSR stage");video.set_availability(true,true,false);
-     front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Off,"frame generation wrap");
+     video.set_availability(true,true,false,FrameGeneration::MetalFx,metal_upscalers);
+     check(video.describe_frame_generation()=="MetalFX frame interpolation (not available)","frame generation availability note missing");
+     front.input(MenuInput::Right);check(video.settings().frame_generation==FrameGeneration::Off,"frame generation off when the device has none");
      front.input(MenuInput::Down);check(front.selected()==Frontend::sharpness_row,"sharpness row not selectable");
      check(video.settings().sharpness==Sharpness::Off&&video.settings().sharpness_amount()==0.0f,"sharpness default");
      front.input(MenuInput::Right);front.input(MenuInput::Right);check(video.settings().sharpness==Sharpness::Medium&&video.settings().sharpness_amount()==0.6f&&VideoSettings::read(video_path).sharpness==Sharpness::Medium&&video.settings().presentation(),"sharpness medium");
@@ -131,6 +148,8 @@ int main(){try{
      front.input(MenuInput::Right);front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::CrtFull&&VideoSettings::read(video_path).post_process==PostProcess::CrtFull,"post-process crt full");
      check(video.describe_post_process()=="CRT full (mask, bloom)","post-process label");
      front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::Off,"post-process wrap");
+     video.set_availability(false,false,false);
+     front.input(MenuInput::Right);check(video.settings().post_process==PostProcess::Off&&row_text(Frontend::post_process_row)=="Not available"&&row_text(Frontend::sharpness_row)=="Not available","no stage: CRT/sharpen not available");
      {std::ofstream old(video_path);old<<"quality = high\npost_process = sharpen\n";}check(VideoSettings::read(video_path).sharpness==Sharpness::Medium&&VideoSettings::read(video_path).post_process==PostProcess::Off,"old sharpen value not mapped");
      {std::ofstream old(video_path);old<<"quality = high\npost_process = crt\n";}check(VideoSettings::read(video_path).post_process==PostProcess::CrtLight,"old crt value not mapped");
      video.set_upscaler(Upscaler::MetalFxTemporal);video.set_renderer(RenderBackend::Vulkan);

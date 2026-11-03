@@ -21,6 +21,11 @@ void write_tga(const std::filesystem::path& path,const SceneTexture& texture);
 // HD-Schluessel einer gekochten TGA: MD5 der unkomprimierten Datei (auch fuer RLE-/Farbtabellen-Baeume).
 std::string cooked_tga_md5(const std::filesystem::path& path);
 void apply_texture_files(Scene& scene,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity);
+// Implemented in recvx_scene (scene.cpp), not recvx_data: bundle decoding owns
+// that dependency. Decode through the native owner, then apply shared mod policy.
+std::vector<SceneTexture> load_texture_bundle_files(const std::filesystem::path& packet,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity);
+// Independently sized palette replacements; original UI still selects the bank.
+std::map<unsigned,SceneTexture> load_texture_palette_files(const SceneTexture& original,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity,unsigned texture_index);
 // Herkunft der von apply_texture_files gesetzten Texturen seit Prozessstart: explizite Mod-Datei,
 // HD-Ersetzung (mods/textures/hd), gekochte Datei aus data/, decodiertes Original ohne Datei.
 struct TextureFileStats {std::size_t mod=0,hd=0,data=0,original=0;};

@@ -23,6 +23,31 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**Ultra shadows and per-platform presentation rows (2026-11-03, working tree):** `quality = ultra` rasters the
+bhDrawMdfEffect mask at render resolution and softens its edge depth-aware before the original darkening
+(`native/shadow_soft.h`, CPU + Metal/D3D11/D3D12/Vulkan/OpenGL; Original/Low/High unchanged bit for bit; test
+`shadow_soft_ultra` with counter-checks). Settings rows and debug menu list only the upscalers/frame generation/
+sharpen/CRT values the running presentation stage can do (no MetalFX on Windows), "Not available" when only Off is
+left; Direct3D 12 renderer only listed on Windows (`third_person_camera_mod`, counter-check with the old cycling red).
+GPU shadow variants not run here (no device in the sandbox): Metal/HLSL compile only on the target, GLSL/HLSL
+syntax checked with glslc. **No commit.**
+
+**GCD texture matching / native mod owners:** two further additive rounds in root
+`mods/` (manifest 4789 → 5005 → 5073; previous assignments preserved, backups
+`build/validation/gcd-alpha-install-backup/`, `gcd-claimed-install-backup/`).
+Round 1 `match_hd_textures.py --alpha-mask`: premultiplied search and visible-texel
+verification (216 targets: 97 rooms, 30 npcs, 27 effects, 18 objects, 14 room-items,
+14 file wallpapers, 11 items, 3 fonts, 2 computer). Round 2 `--claimed`: originals already
+taken by a better-fitting pack file no longer compete (68 targets, 3 held back at PSNR < 20,
+`eliminated` evidence in the manifest). Dihedral transforms (flip/rotate/transpose) were
+tested and give no real matches. All new images verified against source RGB and
+original alpha (`gcd-alpha-verify.py`); contact sheets in `build/validation/gcd-rest/`
+viewed. Starter: RM_1050 102 HD instead of 88, RM_0110 99 instead of 98. 958 DDS still
+unresolved (500 near-identical variants, 253 colour variants, 167 cross-size, 35 alpha
+evidence, 3 held back); no GameCube image on disk for exact identity. Computer/file/
+palette owner bindings remain in the working tree build, not in the starter app. No
+full-pack visual or gameplay acceptance; Windows/GPU unchecked.
+
 **Static script reach scan for game-blocking event gaps (2026-11-03, working tree):**
 `tools/scan_script_reach.py` walks every script of all 205 rooms (scd0, scd1, Event_init table; both
 IF branches, bhEvtOn targets, bhLoadWork work kinds, WHILE condition and body as event.c:9132) with the

@@ -44,6 +44,36 @@ class BuildHdTexturesTests(unittest.TestCase):
     def test_exact_error_evidence_does_not_bypass_colour_rejection(self):
         self.assertEqual(builder.tier(match(decisive_rgb=True, colour_ok=False)), None)
         self.assertEqual(builder.tier(match(decisive_rgb=True, colour_ok=True)), 'A')
+        self.assertIsNone(builder.tier(match(decisive_rgb=True, cross_size_ok=False)))
+        self.assertIsNone(builder.tier(match(decisive_rgb=True, alpha_ok=False)))
+        _, report = builder.select_matches({'faint.dds': match(decisive_rgb=True, alpha_ok=False)})
+        self.assertEqual(report['faint.dds']['status'], 'alpha-evidence-insufficient')
+
+    def test_explicit_only_existing_entry_can_be_reused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / 'textures/hd-manifest.json'
+            image = root / 'textures/doors/0001/0000.tga'
+            image.parent.mkdir(parents=True)
+            Image.new('RGB', (4, 4)).save(image)
+            entry = {'dds': 'source.dds', 'overrides': ['textures/doors/0001/0000.tga']}
+            self.assertEqual(builder.existing_image(manifest, 'key', entry), image)
+
+    def test_cross_size_rejection_is_reported_not_silently_selected(self):
+        chosen, report = builder.select_matches({'candidate.dds': match(decisive_rgb=True, cross_size_ok=False)})
+        self.assertEqual(chosen, {})
+        self.assertEqual(report['candidate.dds']['status'], 'cross-size-evidence-insufficient')
+
+    def test_builder_resizes_to_ps2_target_not_declared_gc_size(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            Image.new('RGBA', (16, 16), (40, 80, 120, 128)).save(root / 'original.tga')
+            Image.new('RGB', (256, 256), (50, 90, 130)).save(root / 'source.dds')
+            output = root / 'result.tga'
+            builder.convert(('key', str(root / 'source.dds'), str(root / 'original.tga'), 2, str(output), 4))
+            with Image.open(output) as image:
+                self.assertEqual(image.size, (32, 32))
+                self.assertEqual(image.convert('RGBA').getpixel((0, 0)), (50, 90, 130, 128))
 
     def test_cli_limit_manifest_only_lists_emitted_files(self):
         with tempfile.TemporaryDirectory() as directory:

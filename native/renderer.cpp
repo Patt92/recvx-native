@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "chunk_blend.h"
 #include "shadow_raster.h"
+#include "shadow_soft.h"
 #include "widescreen.h"
 #include <algorithm>
 #include <atomic>
@@ -351,6 +352,8 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
     raster::Frame frame{width_,height_,S,&setups,std::size_t(std::find_if(setups.begin(),setups.end(),[](const Setup& s){return s.blend!=SceneBlend::Opaque&&!s.general_water;})-setups.begin()),scene.background,fog_pixel,wireframe,bool(zc)};
     frame.before_modifiers=zc?setups_before_modifiers:setups.size();frame.before_mirror_effects=zc?setups_before_mirror_effects:setups.size();
     for(const auto& shadow:scene.shadows)frame.shadow_pass[shadow.mirror?1:0]=true;
+    // Weiche Kante nur, wenn die Maske genau das Bildraster ist (640x480-Ziel, Maske S-fach).
+    if(fine_shadows_&&S>1){frame.shadow_scale=unsigned(S);frame.soft_shadows=width_==640&&height_==480;}
     if(observer_)observer_(frame);
     const auto rasterize=[&](const Setup& s,int y0,int y1){
         const auto& p=s.p;const auto* texture=s.texture;
@@ -523,9 +526,10 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
             const auto projection=project_shadow(shadow,*(mirror?&mirror_view:&view),1.f,aspect_x,aspect_y);
             if(!projection.drawable)continue;
             raster::ShadowComposite c;
+            const unsigned M=frame.shadow_scale;const float MW=640.f*float(M),MH=480.f*float(M);
             c.mask=raster_shadow_mask(projection,*zc,[&](int x,int y,float modifier){
-                const int sx=std::min(W-1,int((float(x)+.5f)*float(W)/640.f)),sy=std::min(H-1,int((float(y)+.5f)*float(H)/480.f));
-                return shadow_depth_pass(std::uint32_t(modifier),std::uint32_t(transported_depth[std::size_t(sy)*W+sx]));});
+                const int sx=std::min(W-1,int((float(x)+.5f)*float(W)/MW)),sy=std::min(H-1,int((float(y)+.5f)*float(H)/MH));
+                return shadow_depth_pass(std::uint32_t(modifier),std::uint32_t(transported_depth[std::size_t(sy)*W+sx]));},M);
             const auto fog=fog_sample(scene.fog,projection.last_vertex_z);
             c.fog_power=unsigned(std::clamp(fog,0.f,255.f));
             const auto quantize=[](float v,float origin){return std::trunc(v*16.f)/16.f-origin;};
@@ -590,13 +594,19 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
         run(0,setups_before_modifiers,false);
         const auto modifiers=[&](bool mirror){
         // Die Masken lesen nur die transportierte Tiefe, nie die Farbe: erst alle Masken, dann die Komposite.
+        const unsigned M=frame.shadow_scale;const int MW=640*int(M),MH=480*int(M);const float Mf=float(M);
+        const float reach=frame.soft_shadows?shadow_soft_reach(M):0.f;
         for(const auto& c:shadow_pass(mirror,transported.data())){
-            for(int y=0;y<H;++y){const int my=std::min(479,int((float(y)+.5f)*480.f/float(H)));
-                if(float(my)+.5f<c.ry0||float(my)+.5f>=c.ry1)continue;
-                for(int x=0;x<W;++x){const int mx=std::min(639,int((float(x)+.5f)*640.f/float(W)));
-                    if(float(mx)+.5f<c.rx0||float(mx)+.5f>=c.rx1)continue;
-                    const unsigned value=c.mask[std::size_t(my)*640+mx];if(!value)continue;
-                    auto& pixel=color[std::size_t(y)*W+x];pixel=shadow_mask_composite(pixel,value,c.fog_power);}}
+            const auto mask=[&](int x,int y){return unsigned(c.mask[std::size_t(y)*MW+x]);};
+            const auto receiver=[&](int x,int y){return transported[std::size_t(y)*W+x];};
+            for(int y=0;y<H;++y){const int my=std::min(MH-1,int((float(y)+.5f)*float(MH)/float(H)));
+                if((float(my)+.5f)/Mf<c.ry0-reach||(float(my)+.5f)/Mf>=c.ry1+reach)continue;
+                for(int x=0;x<W;++x){const int mx=std::min(MW-1,int((float(x)+.5f)*float(MW)/float(W)));
+                    if((float(mx)+.5f)/Mf<c.rx0-reach||(float(mx)+.5f)/Mf>=c.rx1+reach)continue;
+                    auto& pixel=color[std::size_t(y)*W+x];
+                    if(frame.soft_shadows){const unsigned value=shadow_soft_value(mask,receiver,mx,my,MW,MH,M);if(value)pixel=shadow_mask_reduce(pixel,value,c.fog_power);continue;}
+                    const unsigned value=mask(mx,my);if(!value)continue;
+                    pixel=shadow_mask_composite(pixel,value,c.fog_power);}}
         }};
         modifiers(false);
         // game.c:417 Spiegelraum, :427 Spiegel-bhDrawEffect mit bhDrawMdfEffect unter cam.mtx*njMirror,

@@ -187,10 +187,28 @@ void apply_texture_files(Scene& scene,const std::filesystem::path& data,const st
     for(std::size_t i=0;i<scene.textures.size();++i){const auto relative=std::filesystem::path("textures")/identity/(asset_number(unsigned(i))+".tga");
         auto replace=[&](const std::filesystem::path& file){const bool u=scene.textures[i].clamp_u,v=scene.textures[i].clamp_v;scene.textures[i]=read_tga(file);scene.textures[i].clamp_u=u;scene.textures[i].clamp_v=v;};
         if(use_mods&&std::filesystem::is_regular_file(mods/relative)){replace(mods/relative);++stat_mod;continue;}
-        if(!std::filesystem::is_regular_file(data/relative)){++stat_original;continue;}
+        if(!std::filesystem::is_regular_file(data/relative)){
+            // Runtime-only bundles have no cooked pathname. The canonical
+            // decoded ORIGINAL gives the same identity as the offline exporter.
+            // No guessed slot, default texture or hardware representation.
+            if(use_hd&&scene.textures[i].width&&scene.textures[i].height){
+                const auto hd=mods/"textures"/"hd"/(md5_hex(encode_tga(scene.textures[i]))+".tga");
+                if(std::filesystem::is_regular_file(hd)){replace(hd);++stat_hd;continue;}
+            }
+            ++stat_original;continue;
+        }
         if(use_hd){const auto hd=mods/"textures"/"hd"/(md5_hex(cooked_tga_identity(data/relative))+".tga");
             if(std::filesystem::is_regular_file(hd)){replace(hd);++stat_hd;continue;}}
         replace(data/relative);++stat_data;
     }
+}
+std::map<unsigned,SceneTexture> load_texture_palette_files(const SceneTexture& original,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity,unsigned texture_index){
+    std::map<unsigned,SceneTexture> banks;
+    for(const auto& [bank,pixels]:original.palette_banks){
+        Scene scene;auto texture=original;texture.pixels=pixels;texture.palette_banks.clear();scene.textures.push_back(std::move(texture));
+        apply_texture_files(scene,data,mods,std::filesystem::path("palettes")/identity/asset_number(texture_index)/asset_number(bank));
+        banks.emplace(bank,std::move(scene.textures.front()));
+    }
+    return banks;
 }
 }

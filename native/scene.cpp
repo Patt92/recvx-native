@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "asset_io.h"
 #include "chunk_blend.h"
 #include "binary_view.h"
 #include "room.h"
@@ -444,6 +445,10 @@ void route_model_texture_cache(std::vector<SceneTriangle>& triangles,unsigned dr
         t.texture_cache_clamp=(flag&8u)&&(!simple||(flag&16u));t.single_sided=simple&&!(flag&16u);}
 }
 std::vector<SceneTexture> decode_texture_bundle(const std::vector<std::uint8_t>& data,std::size_t offset){return Decoder(data).decode_bundle(offset);}
+std::vector<SceneTexture> load_texture_bundle_files(const std::filesystem::path& packet,const std::filesystem::path& data,const std::filesystem::path& mods,const std::filesystem::path& identity){
+    Scene bundle;bundle.textures=decode_texture_bundle(read_asset_file(packet,8*1024*1024));
+    apply_texture_files(bundle,data,mods,identity);return std::move(bundle.textures);
+}
 Scene decode_memory_model(const std::uint8_t* memory,std::size_t size,std::uint32_t model,const NJS_MATRIX& world){return Decoder(memory,size).decode_memory_model(model,world);}
 Scene decode_model_asset(const std::vector<std::uint8_t>& data,std::size_t model_offset,
                          std::size_t texture_offset,const ModelGeometryOptions& options) {

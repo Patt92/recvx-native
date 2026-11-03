@@ -25,8 +25,8 @@ RasterizerOrderedTexture2D<uint> Color : register(u0);
 RasterizerOrderedTexture2D<float> DepthBuf : register(u1);
 RasterizerOrderedTexture2D<float> Transported : register(u2);
 RasterizerOrderedTexture2DArray<uint> Mask : register(u3);
-cbuffer FrameCB : register(b0) { float gW,gH; uint gFogPixel,gWireframe; uint gBackground,gMaskW,gMaskH,gPad; };
-cbuffer CompositeCB : register(b1) { float cW,cH,crx0,cry0,crx1,cry1; uint cFog,cLayer; };
+cbuffer FrameCB : register(b0) { float gW,gH; uint gFogPixel,gWireframe; uint gBackground,gMaskW,gMaskH,gMaskScale; };
+cbuffer CompositeCB : register(b1) { float cW,cH,crx0,cry0,crx1,cry1; uint cFog,cLayer; uint cScale,cSoft; float cReach,cPad; };
 // Erster Setup-Index des Zeichenaufrufs. Jeder Aufruf startet bei Vertex 0: ob SV_VertexID den
 // StartVertexLocation-Versatz enthaelt, legen Treiber verschieden aus (WARP und Parallels nicht).
 cbuffer DrawCB : register(b3) { uint dFirst,dPad0,dPad1,dPad2; };
@@ -141,7 +141,8 @@ MaskVOut vs_mask(uint vid : SV_VertexID) {
 }
 void ps_mask(MaskVOut input) {
     ShadowTri t=Tris[input.index];
-    float2 p0=t.v01.xy,p1=t.v01.zw,p2=t.v2a.xy; float X=input.pos.x,Y=input.pos.y;
+    // Host-Ultra (shadow_soft.h): Maske gMaskScale-fach, Abtastpunkt (x+.5)/scale im 640x480-Raum.
+    float2 p0=t.v01.xy,p1=t.v01.zw,p2=t.v2a.xy; precise float X=gMaskScale==1u?input.pos.x:input.pos.x/(float)gMaskScale; precise float Y=gMaskScale==1u?input.pos.y:input.pos.y/(float)gMaskScale;
     precise float a=(p2.x-p1.x)*(Y-p1.y)-(p2.y-p1.y)*(X-p1.x);
     precise float b=(p0.x-p2.x)*(Y-p2.y)-(p0.y-p2.y)*(X-p2.x);
     precise float c=(p1.x-p0.x)*(Y-p0.y)-(p1.y-p0.y)*(X-p0.x);
@@ -158,11 +159,27 @@ void ps_mask(MaskVOut input) {
 float4 vs_full(uint vid : SV_VertexID) : SV_Position {
     float2 p=float2((float)((vid<<1u)&2u),(float)(vid&2u)); return float4(p*2.0f-1.0f,0.0f,1.0f);
 }
+// Weiche Maskenkante (shadow_soft.h shadow_soft_value): gewichtetes Mittel der Nachbarmaske auf derselben
+// Empfaengerflaeche; die Maske ist dann das Bildraster (Maskenzelle = Bildpixel).
+static const uint soft_weights[4]={64u,51u,26u,9u};
+uint soft_value(int x,int y,int width,int height) {
+    float centre=Transported[uint2(x,y)];
+    if(!(centre>0.0f))return Mask[uint3((uint)x,(uint)y,cLayer)];
+    uint sum=0u,weight=0u; int step=(int)max(1u,2u*cScale/3u);
+    for(int j=-3;j<=3;++j){int py=y+j*step; if(py<0||py>=height)continue;
+        for(int i=-3;i<=3;++i){int px=x+i*step; if(px<0||px>=width)continue;
+            float other=Transported[uint2(px,py)];
+            if(!(other>0.0f&&abs(other-centre)<=centre*0.125f+1.0f))continue;
+            uint w=soft_weights[abs(i)]*soft_weights[abs(j)];
+            sum+=w*Mask[uint3((uint)px,(uint)py,cLayer)];weight+=w;}}
+    return (sum+weight/2u)/weight;
+}
 void ps_shadow(float4 pos : SV_Position) {
     uint2 at=uint2(pos.xy); float y=pos.y-0.5f,x=pos.x-0.5f;
-    int my=min(479,(int)((y+0.5f)*480.0f/cH)); if((float)my+0.5f<cry0||(float)my+0.5f>=cry1)return;
-    int mx=min(639,(int)((x+0.5f)*640.0f/cW)); if((float)mx+0.5f<crx0||(float)mx+0.5f>=crx1)return;
-    uint value=Mask[uint3((uint)mx,(uint)my,cLayer)]; if(value==0u)return;
+    float MW=640.0f*(float)cScale,MH=480.0f*(float)cScale,M=(float)cScale;
+    int my=min((int)MH-1,(int)((y+0.5f)*MH/cH)); float cy=cScale==1u?(float)my+0.5f:((float)my+0.5f)/M; if(cy<cry0-cReach||cy>=cry1+cReach)return;
+    int mx=min((int)MW-1,(int)((x+0.5f)*MW/cW)); float cx=cScale==1u?(float)mx+0.5f:((float)mx+0.5f)/M; if(cx<crx0-cReach||cx>=crx1+cReach)return;
+    uint value=cSoft!=0u?soft_value(mx,my,(int)MW,(int)MH):Mask[uint3((uint)mx,(uint)my,cLayer)]; if(value==0u)return;
     uint reduction=(value*((cFog*3u)/16u))/128u; // shadow_mask_composite
     uint below=Color[at]; uint result=below&0xff000000u;
     [unroll] for(uint shift=0u;shift<24u;shift+=8u){uint v=ch(below,shift);result|=(v>reduction?v-reduction:0u)<<shift;}

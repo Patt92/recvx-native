@@ -56,6 +56,9 @@ public:
     // NxN supersampling (1..4, default 2): the scene is rendered at N times the size and
     // box-filtered down, which steadies moving polygon edges. Overlay drawing is unaffected.
     void set_supersampling(int factor){ss_=factor;}
+    // Host-Ultra (shadow_soft.h): Schattenmaske in Bildaufloesung mit weicher Kante; aus = Original.
+    void set_fine_shadows(bool enabled){fine_shadows_=enabled;}
+    bool fine_shadows()const{return fine_shadows_;}
     int supersampling()const{return ss_;}
     // Diagnose (GPU-Machbarkeit): wird je Bild mit der sortierten Setup-Liste aufgerufen, bevor die
     // Bandstufe zeichnet. Die Liste lebt nur waehrend des Aufrufs; das Softwarebild bleibt unveraendert.
@@ -82,6 +85,7 @@ private:
     bool discard_=false;
     unsigned threads_=0;
     int ss_=2;
+    bool fine_shadows_=false;
     std::function<void(const raster::Frame&)> observer_;
     std::shared_ptr<GpuRaster> gpu_;
     bool last_gpu_frame_=false;std::string gpu_error_;

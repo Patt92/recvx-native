@@ -21,6 +21,7 @@
 // Division/Rundung bleibt Treibereigenschaft: Bitgleichheit zur Bandstufe belegt erst der Paritaetstest
 // auf genau diesem Treiber; keine Epsilons oder angenaeherten Korrekturformeln.
 #include "gpu_raster.h"
+#include "shadow_soft.h"
 #include <SDL.h>
 #include <algorithm>
 #include <array>
@@ -73,7 +74,7 @@ constexpr GLenum GL_NO_ERROR=0,GL_NONE=0,GL_TRIANGLES=0x0004,GL_CULL_FACE=0x0B44
     X(void,GetShaderiv,(GLuint,GLenum,GLint*)) X(void,GetShaderInfoLog,(GLuint,GLsizei,GLsizei*,GLchar*)) X(GLuint,CreateProgram,(void)) \
     X(void,AttachShader,(GLuint,GLuint)) X(void,LinkProgram,(GLuint)) X(void,GetProgramiv,(GLuint,GLenum,GLint*)) \
     X(void,GetProgramInfoLog,(GLuint,GLsizei,GLsizei*,GLchar*)) X(void,DeleteShader,(GLuint)) X(void,UseProgram,(GLuint)) \
-    X(GLint,GetUniformLocation,(GLuint,const GLchar*)) X(void,Uniform1i,(GLint,GLint)) X(void,Uniform1ui,(GLint,GLuint)) X(void,Uniform2ui,(GLint,GLuint,GLuint)) \
+    X(GLint,GetUniformLocation,(GLuint,const GLchar*)) X(void,Uniform1i,(GLint,GLint)) X(void,Uniform1ui,(GLint,GLuint)) X(void,Uniform1f,(GLint,GLfloat)) X(void,Uniform2ui,(GLint,GLuint,GLuint)) \
     X(void,Uniform2f,(GLint,GLfloat,GLfloat)) X(void,Uniform4f,(GLint,GLfloat,GLfloat,GLfloat,GLfloat)) \
     X(void,GenVertexArrays,(GLsizei,GLuint*)) X(void,BindVertexArray,(GLuint)) X(void,DrawArrays,(GLenum,GLint,GLsizei)) \
     X(void,GenSamplers,(GLsizei,GLuint*)) X(void,SamplerParameteri,(GLuint,GLenum,GLint)) X(void,SamplerParameterf,(GLuint,GLenum,GLfloat)) \
@@ -238,14 +239,15 @@ void main(){
     gl_Position=vec4(x/640.0*2.0-1.0,y/480.0*2.0-1.0,0.0,1.0);v_tri=index;}
 )GLSL";
 const char* mask_fs=R"GLSL(
-uniform usampler2D u_tris;uniform usampler2D u_below;uniform sampler2D u_transported;uniform uvec2 u_size;
+uniform usampler2D u_tris;uniform usampler2D u_below;uniform sampler2D u_transported;uniform uvec2 u_size;uniform uint u_mask_scale;
 flat in int v_tri;
 layout(location=0) out uint o_mask;
 uvec4 T(int k){return texelFetch(u_tris,ivec2((v_tri%1024)*4+k,v_tri/1024),0);}
 void main(){
     ivec2 at=ivec2(gl_FragCoord.xy);uint below=texelFetch(u_below,at,0).r;o_mask=below;
     vec4 v01=uintBitsToFloat(T(0)),v2a=uintBitsToFloat(T(1));uvec4 depth=T(2);
-    vec2 p0=v01.xy,p1=v01.zw,p2=v2a.xy;float X=gl_FragCoord.x,Y=gl_FragCoord.y;
+    // Host-Ultra (shadow_soft.h): Maske u_mask_scale-fach, Abtastpunkt (x+.5)/scale im 640x480-Raum.
+    vec2 p0=v01.xy,p1=v01.zw,p2=v2a.xy;precise float X=div_rn(gl_FragCoord.x,float(u_mask_scale));precise float Y=div_rn(gl_FragCoord.y,float(u_mask_scale));
     precise float a=edge(p1,p2,X,Y);precise float b=edge(p2,p0,X,Y);precise float c=edge(p0,p1,X,Y);
     if(a<0.0||b<0.0||c<0.0)discard;
     if((a==0.0&&!inclusive(p1,p2))||(b==0.0&&!inclusive(p2,p0))||(c==0.0&&!inclusive(p0,p1)))discard;
@@ -264,14 +266,33 @@ void main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Posit
 const char* composite_fs=R"GLSL(
 uniform usampler2D u_below_color;uniform sampler2D u_below_depth;uniform sampler2D u_below_transported;
 uniform usampler2DArray u_mask;uniform int u_layer;uniform vec2 u_size;uniform vec4 u_rect;uniform uint u_fog;
+uniform uint u_mask_scale;uniform uint u_soft;uniform float u_reach;
 layout(location=0) out uint o_pixel;layout(location=1) out float o_depth;layout(location=2) out float o_transported;
+// Weiche Maskenkante (shadow_soft.h shadow_soft_value): gewichtetes Mittel der Nachbarmaske auf derselben
+// Empfaengerflaeche; die Maske ist dann das Bildraster (Lesesatz: vollstaendige Kopie der Ziele).
+const uint soft_weights[4]=uint[4](64u,51u,26u,9u);
+uint soft_value(int x,int y,int width,int height){
+    float centre=texelFetch(u_below_transported,ivec2(x,y),0).r;
+    if(!(centre>0.0))return texelFetch(u_mask,ivec3(x,y,u_layer),0).r;
+    uint sum=0u,weight=0u;int step=int(max(1u,2u*u_mask_scale/3u));
+    for(int j=-3;j<=3;++j){int py=y+j*step;if(py<0||py>=height)continue;
+        for(int i=-3;i<=3;++i){int px=x+i*step;if(px<0||px>=width)continue;
+            float other=texelFetch(u_below_transported,ivec2(px,py),0).r;
+            precise float limit=centre*0.125+1.0;
+            if(!(other>0.0&&abs(other-centre)<=limit))continue;
+            uint w=soft_weights[abs(i)]*soft_weights[abs(j)];
+            sum+=w*texelFetch(u_mask,ivec3(px,py,u_layer),0).r;weight+=w;}}
+    return (sum+weight/2u)/weight;}
 void main(){
     ivec2 at=ivec2(gl_FragCoord.xy);uint below=texelFetch(u_below_color,at,0).r;
     o_pixel=below;o_depth=texelFetch(u_below_depth,at,0).r;o_transported=texelFetch(u_below_transported,at,0).r;
     float y=gl_FragCoord.y-0.5,x=gl_FragCoord.x-0.5;
-    precise float fy=div_rn((y+0.5)*480.0,u_size.y);int my=min(479,int(fy));if(float(my)+0.5<u_rect.y||float(my)+0.5>=u_rect.w)return;
-    precise float fx=div_rn((x+0.5)*640.0,u_size.x);int mx=min(639,int(fx));if(float(mx)+0.5<u_rect.x||float(mx)+0.5>=u_rect.z)return;
-    uint value=texelFetch(u_mask,ivec3(mx,my,u_layer),0).r;if(value==0u)return;
+    precise float MH=480.0*float(u_mask_scale);precise float MW=640.0*float(u_mask_scale);precise float M=float(u_mask_scale);
+    precise float fy=div_rn((y+0.5)*MH,u_size.y);int my=min(int(MH)-1,int(fy));precise float cy=div_rn(float(my)+0.5,M);
+    if(cy<u_rect.y-u_reach||cy>=u_rect.w+u_reach)return;
+    precise float fx=div_rn((x+0.5)*MW,u_size.x);int mx=min(int(MW)-1,int(fx));precise float cx=div_rn(float(mx)+0.5,M);
+    if(cx<u_rect.x-u_reach||cx>=u_rect.z+u_reach)return;
+    uint value=u_soft!=0u?soft_value(mx,my,int(MW),int(MH)):texelFetch(u_mask,ivec3(mx,my,u_layer),0).r;if(value==0u)return;
     uint reduction=(value*((u_fog*3u)/16u))/128u; // shadow_mask_composite
     uint result=below&0xff000000u;
     for(uint shift=0u;shift<24u;shift+=8u){uint v=ch(below,shift);result|=(v>reduction?v-reduction:0u)<<shift;}
@@ -406,7 +427,7 @@ public:
                 gl_.DrawArrays(GL_TRIANGLES,GLint(g.first*6),GLsizei(g.count*6));++draw_calls_;}
             if(phase<2&&frame.shadows&&frame.shadow_pass[phase]&&shadows){
                 const auto works=shadows(phase==1);
-                if(!works.empty()){masks(works,W,H);for(std::size_t i=0;i<works.size();++i)composite(works[i],i,W,H);}
+                if(!works.empty()){masks(works,W,H,frame);for(std::size_t i=0;i<works.size();++i)composite(works[i],i,W,H,frame);}
             }
         }
         // Aufloesung in das Grundbild: S = 1 behaelt das Pixelalpha, sonst gerundeter RGB-Mittelwert, Alpha FF,
@@ -557,14 +578,17 @@ private:
     }
     // bhDrawMdfEffect: je Werk eine 640x480-Maske, Flaechen in der Reihenfolge von raster_shadow_mask
     // (erst positive, dann negative), jede mit Saettigung und & 0xf8 auf den Stand aller frueheren.
-    void masks(const std::vector<raster::ShadowWork>& works,int W,int H){
+    void masks(const std::vector<raster::ShadowWork>& works,int W,int H,const raster::Frame& frame){
         if(int(works.size())>max_layers_)throw std::runtime_error("too many shadow works in one pass");
-        if(!mask_a_||int(works.size())>mask_layers_){
+        const int M=int(frame.shadow_scale),MW=640*M,MH=480*M;
+        if(frame.soft_shadows&&(MW!=W||MH!=H))throw std::runtime_error("soft shadows need the mask at the render resolution");
+        if(!mask_a_||int(works.size())>mask_layers_||mask_scale_!=M){
             mask_layers_=std::max<int>(int(works.size()),mask_layers_*2);mask_layers_=std::min(mask_layers_,max_layers_);
             if(!mask_a_)mask_a_=make_texture(GL_TEXTURE_2D_ARRAY);
             bind(7,GL_TEXTURE_2D_ARRAY,mask_a_);
-            gl_.TexImage3D(GL_TEXTURE_2D_ARRAY,0,GLint(GL_R8UI),640,480,mask_layers_,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,nullptr);}
-        if(!mask_r_){surface(mask_r_,GL_R8UI,GL_RED_INTEGER,GL_UNSIGNED_BYTE,640,480);fbo_mask_r_=framebuffer(&mask_r_,1);gl_.GenFramebuffers(1,&fbo_mask_a_);}
+            gl_.TexImage3D(GL_TEXTURE_2D_ARRAY,0,GLint(GL_R8UI),MW,MH,mask_layers_,0,GL_RED_INTEGER,GL_UNSIGNED_BYTE,nullptr);}
+        if(!mask_r_||mask_scale_!=M){surface(mask_r_,GL_R8UI,GL_RED_INTEGER,GL_UNSIGNED_BYTE,MW,MH);if(!fbo_mask_r_)fbo_mask_r_=framebuffer(&mask_r_,1);if(!fbo_mask_a_)gl_.GenFramebuffers(1,&fbo_mask_a_);}
+        mask_scale_=M;
         tris_.clear();std::vector<std::pair<std::size_t,std::size_t>> ranges;
         for(const auto& work:works){const std::size_t first=tris_.size();
             for(const auto& f:work.faces){GpuShadowTri t{};
@@ -574,8 +598,9 @@ private:
                 t.box[0]=f.minx;t.box[1]=f.miny;t.box[2]=f.maxx;t.box[3]=f.maxy;tris_.push_back(t);}
             ranges.emplace_back(first,tris_.size());}
         upload_rows(tris_texture_,tris_rows_,tris_.data(),tris_.size(),tris_per_row,4);
-        gl_.Viewport(0,0,640,480);gl_.UseProgram(mask_);
+        gl_.Viewport(0,0,MW,MH);gl_.UseProgram(mask_);
         gl_.Uniform2ui(gl_.GetUniformLocation(mask_,"u_size"),unsigned(W),unsigned(H));
+        gl_.Uniform1ui(gl_.GetUniformLocation(mask_,"u_mask_scale"),unsigned(M));
         bind(2,GL_TEXTURE_2D,tris_texture_);bind(3,GL_TEXTURE_2D,mask_r_);bind(4,GL_TEXTURE_2D,a_[2]);
         for(std::size_t layer=0;layer<works.size();++layer){
             gl_.BindFramebuffer(GL_FRAMEBUFFER,fbo_mask_a_);
@@ -587,9 +612,9 @@ private:
             std::size_t i=first;
             while(i<last){
                 // Gruppe paarweise disjunkter Flaechenrechtecke in Listenreihenfolge.
-                std::vector<Rect> boxes;Rect bounds{640,480,0,0};std::size_t end=i;
+                std::vector<Rect> boxes;Rect bounds{MW,MH,0,0};std::size_t end=i;
                 for(;end<last&&boxes.size()<64;++end){const auto& t=tris_[end];
-                    const Rect box{std::clamp(t.box[0],0,640),std::clamp(t.box[1],0,480),std::clamp(t.box[2]+1,0,640),std::clamp(t.box[3]+1,0,480)};
+                    const Rect box{std::clamp(t.box[0]*M,0,MW),std::clamp(t.box[1]*M,0,MH),std::clamp((t.box[2]+1)*M,0,MW),std::clamp((t.box[3]+1)*M,0,MH)};
                     bool clash=false;for(const auto& other:boxes)if(overlaps(other,box)){clash=true;break;}
                     if(clash)break;
                     boxes.push_back(box);bounds={std::min(bounds.x0,box.x0),std::min(bounds.y0,box.y0),std::max(bounds.x1,box.x1),std::max(bounds.y1,box.y1)};}
@@ -600,7 +625,7 @@ private:
         }
         gl_.Viewport(0,0,W,H);
     }
-    void composite(const raster::ShadowWork& c,std::size_t layer,int W,int H){
+    void composite(const raster::ShadowWork& c,std::size_t layer,int W,int H,const raster::Frame& frame){
         if(c.fog_power>255u)throw std::runtime_error("shadow: invalid fog channel");
         copy_targets({0,0,W,H});
         gl_.BindFramebuffer(GL_FRAMEBUFFER,fbo_a_);gl_.Viewport(0,0,W,H);gl_.UseProgram(composite_);
@@ -608,6 +633,9 @@ private:
         gl_.Uniform4f(gl_.GetUniformLocation(composite_,"u_rect"),c.rx0,c.ry0,c.rx1,c.ry1);
         gl_.Uniform1ui(gl_.GetUniformLocation(composite_,"u_fog"),c.fog_power);
         gl_.Uniform1i(gl_.GetUniformLocation(composite_,"u_layer"),GLint(layer));
+        gl_.Uniform1ui(gl_.GetUniformLocation(composite_,"u_mask_scale"),frame.shadow_scale);
+        gl_.Uniform1ui(gl_.GetUniformLocation(composite_,"u_soft"),frame.soft_shadows?1u:0u);
+        gl_.Uniform1f(gl_.GetUniformLocation(composite_,"u_reach"),frame.soft_shadows?shadow_soft_reach(frame.shadow_scale):0.f);
         bind(3,GL_TEXTURE_2D,read_[0]);bind(4,GL_TEXTURE_2D,read_[1]);bind(5,GL_TEXTURE_2D,read_[2]);bind(6,GL_TEXTURE_2D_ARRAY,mask_a_);
         gl_.DrawArrays(GL_TRIANGLES,0,3);++draw_calls_;++composites_;}
     using TextureBarrier=void(RECVX_GLAPI*)(void);
@@ -615,7 +643,7 @@ private:
     std::shared_ptr<Context> ctx_;Gl& gl_;std::string renderer_,version_;bool anisotropy_=false;GLint max_texture_=0,max_layers_=0;
     GLuint raster_=0,mask_=0,composite_=0,resolve_=0,vao_=0,samplers_[2][2][2]{},blank_=0,blank_point_=0;
     GLuint a_[3]{},read_[3]{},out_[2]{},fbo_a_=0,fbo_a1_[3]{},fbo_r1_[3]{},fbo_out_=0,setup_texture_=0,tris_texture_=0;
-    GLuint mask_a_=0,mask_r_=0,fbo_mask_a_=0,fbo_mask_r_=0;int mask_layers_=0;
+    GLuint mask_a_=0,mask_r_=0,fbo_mask_a_=0,fbo_mask_r_=0;int mask_layers_=0,mask_scale_=0;
     int width_=0,height_=0,out_width_=0,out_height_=0,setup_rows_=0,tris_rows_=0;
     std::vector<GpuSetup> setups_;std::vector<Group> groups_;std::vector<GpuShadowTri> tris_;std::vector<std::uint32_t> staging_;
     std::vector<std::string> unsupported_;unsigned draw_calls_=0,composites_=0;Timings timings_;

@@ -433,6 +433,7 @@ void GameUi::reload_textures(){
     // mods/textures/<menu|fonts>/<n>.tga, dann mods/textures/hd/<md5 der gekochten Datei>.tga, dann data/.
     // Ersetzt wird das ganze Bild samt Groesse; blit()/pulse_quad() adressieren in Atlasanteilen (u/256).
     menu_=decode_texture_bundle(read_asset_file(data_/"archives/ITEM1/0145.bin",8*1024*1024));menu_banks_=menu_.at(0);
+    menu_bank_textures_=load_texture_palette_files(menu_banks_,data_,mods_,"menu",0);
     Scene menu;menu.textures=menu_;apply_texture_files(menu,data_,mods_,"menu");menu_=std::move(menu.textures);
     Scene fonts;fonts.textures.resize(4);apply_texture_files(fonts,data_,mods_,"fonts");
     for(const auto& font:fonts.textures)if(!font.width)throw std::runtime_error("missing cooked font atlas under "+(data_/"textures/fonts").string());
@@ -442,7 +443,7 @@ void GameUi::reload_textures(){
     // Map that ramp to black/white for dialogue, retaining its antialiasing and alpha.
     for(auto& font:dialog_fonts_){unsigned low=255,high=0;for(auto c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});low=std::min(low,value);high=std::max(high,value);}
         if(high>low)for(auto& c:font.pixels)if(c>>24){const auto value=std::max({c&255,(c>>8)&255,(c>>16)&255});const auto shade=(value-low)*255/(high-low);c=(c&0xff000000)|shade*0x010101;}}
-    item_models_.clear();file_textures_.clear();
+    item_models_.clear();file_textures_.clear();title_.clear();typewriter_textures_.clear();
 }
 GameUi::GameUi(const std::filesystem::path& data,const std::filesystem::path& mods):data_(data),mods_(mods){
     reload_textures();
@@ -784,9 +785,9 @@ void GameUi::quantity(SoftwareRenderer& image,std::uint32_t packed,int x,int y,b
     }else if(itemdata[id].type&0x56){
         bank=id==16?9u:(id==17||id==36)?6u:id==37?7u:10u;
     }
-    auto texture=menu_banks_;const auto palette=texture.palette_banks.find(bank);
-    if(palette==texture.palette_banks.end())throw std::runtime_error("missing original UI palette bank");
-    texture.pixels=palette->second;
+    const auto palette=menu_bank_textures_.find(bank);
+    if(palette==menu_bank_textures_.end())throw std::runtime_error("missing original UI palette bank");
+    const auto& texture=palette->second;
     unsigned column=0;bool drawn=false;
     for(unsigned i=0;i<count;++i){
         const bool last=i+1==count;
@@ -869,7 +870,8 @@ void GameUi::draw(SoftwareRenderer& image,const Inventory& inv,const StatusMenu&
         // the wallpaper behind bhDispMessage; [0] is a captured framebuffer,
         // not the source wallpaper stretched across a host dialog.
         rectangle(image,0,0,640,480,0xff000000);
-        if(!file_textures_.count(menu.file_number)){const auto packet=read_asset_file(data_/"archives/ITEM1"/(asset_number(original_file_wallpaper(menu.file_number))+".bin"),8*1024*1024);file_textures_[menu.file_number]=decode_texture_bundle(packet);}
+        if(!file_textures_.count(menu.file_number)){const auto id=asset_number(original_file_wallpaper(menu.file_number));
+            file_textures_[menu.file_number]=load_texture_bundle_files(data_/"archives/ITEM1"/(id+".bin"),data_,mods_,std::filesystem::path("files")/id);}
         const auto& textures=file_textures_[menu.file_number];
         if(!textures.empty()){
             const auto& texture=textures[0];const int shift=menu.file_x-68;

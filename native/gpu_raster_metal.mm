@@ -16,8 +16,10 @@
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
 #include "gpu_raster.h"
+#include "shadow_soft.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <mutex>
 #include <cstring>
@@ -143,7 +145,7 @@ fragment FOut fs(VOut in [[stage_in]], uint below [[color(0)]], float below_dept
 // Rechteck seiner Pixelgrenzen, saettigende Akkumulation je Fragment ueber Framebuffer-Fetch,
 // Tiefenvergleich GEQUAL gegen die transportierte Empfaengertiefe (shadow_depth_pass).
 struct ShadowTri { float4 v01; float4 v2a; uint4 depth; int4 box; };
-struct MaskU { uint W,H,pad0,pad1; };
+struct MaskU { uint W,H,scale,pad1; };
 struct MaskVOut { float4 pos [[position]]; uint layer [[render_target_array_index]]; uint tri [[flat]]; };
 vertex MaskVOut vs_mask(uint vid [[vertex_id]], const device ShadowTri* tris [[buffer(0)]]) {
     const uint index=vid/6u,corner=vid%6u; const int4 b=tris[index].box;
@@ -156,7 +158,8 @@ fragment uint fs_mask(MaskVOut in [[stage_in]], uint below [[color(0)]],
                       const device ShadowTri* tris [[buffer(0)]], constant MaskU& m [[buffer(1)]],
                       texture2d<float> transported [[texture(0)]]) {
     const ShadowTri t=tris[in.tri];
-    const float2 p0=t.v01.xy,p1=t.v01.zw,p2=t.v2a.xy; const float X=in.pos.x,Y=in.pos.y;
+    // Host-Ultra (shadow_soft.h): Maske m.scale-fach, Abtastpunkt (x+.5)/scale im 640x480-Raum.
+    const float2 p0=t.v01.xy,p1=t.v01.zw,p2=t.v2a.xy; const float X=m.scale==1u?in.pos.x:in.pos.x/float(m.scale),Y=m.scale==1u?in.pos.y:in.pos.y/float(m.scale); // scale 1: Originalausdruck
     const float a=edge(p1,p2,X,Y),b=edge(p2,p0,X,Y),c=edge(p0,p1,X,Y);
     if(a<0.0f||b<0.0f||c<0.0f)discard_fragment();
     if((a==0.0f&&!inclusive(p1,p2))||(b==0.0f&&!inclusive(p2,p0))||(c==0.0f&&!inclusive(p0,p1)))discard_fragment();
@@ -166,14 +169,35 @@ fragment uint fs_mask(MaskVOut in [[stage_in]], uint below [[color(0)]],
     const int value=int(below)+((t.depth.w&1u)?-32:32); // shadow_mask_fragment
     return uint(clamp(value,0,255))&0xf8u;
 }
-struct CompositeU { float W,H,rx0,ry0,rx1,ry1; uint fog_power,layer; };
+struct CompositeU { float W,H,rx0,ry0,rx1,ry1; uint fog_power,layer; uint scale,pad0; float reach,pad1; };
+// Weiche Maskenkante (shadow_soft.h shadow_soft_value): gewichtetes Mittel der Nachbarmaske auf derselben
+// Empfaengerflaeche. Nach dem Maskenpass, vor den Kompositen; schreibt die weiche Maske je Ebene.
+constant uint soft_weights[4]={64u,51u,26u,9u};
+struct SoftU { uint W,H,scale,step; int x0,y0,x1,y1; uint layer,pad0,pad1,pad2; };
+kernel void soften(texture2d_array<uint,access::read> mask [[texture(0)]], texture2d<float,access::read> transported [[texture(1)]],
+                   texture2d_array<uint,access::write> soft [[texture(2)]], constant SoftU& u [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) {
+    const int x=u.x0+int(gid.x),y=u.y0+int(gid.y); if(x>u.x1||y>u.y1)return;
+    const float centre=transported.read(uint2(x,y)).r;
+    if(!(centre>0.0f)){soft.write(uint4(mask.read(uint2(x,y),u.layer).r),uint2(x,y),u.layer);return;}
+    uint sum=0u,weight=0u; const int step=int(u.step);
+    for(int j=-3;j<=3;++j){const int py=y+j*step; if(py<0||py>=int(u.H))continue;
+        for(int i=-3;i<=3;++i){const int px=x+i*step; if(px<0||px>=int(u.W))continue;
+            const float other=transported.read(uint2(px,py)).r;
+            if(!(other>0.0f&&fabs(other-centre)<=centre*0.125f+1.0f))continue;
+            const uint w=soft_weights[abs(i)]*soft_weights[abs(j)];
+            sum+=w*mask.read(uint2(px,py),u.layer).r;weight+=w;}}
+    soft.write(uint4((sum+weight/2u)/weight),uint2(x,y),u.layer);
+}
 vertex float4 vs_full(uint vid [[vertex_id]]) { const float2 p=float2(float((vid<<1)&2u),float(vid&2u)); return float4(p*2.0f-1.0f,0.0f,1.0f); }
 fragment FOut fs_shadow(float4 pos [[position]], uint below [[color(0)]], float below_depth [[color(1)]], float below_transported [[color(2)]],
                         constant CompositeU& c [[buffer(0)]], texture2d_array<uint> mask [[texture(0)]]) {
     FOut o; o.pixel=below; o.depth=below_depth; o.transported=below_transported;
     const float y=pos.y-0.5f,x=pos.x-0.5f;
-    const int my=min(479,int((y+0.5f)*480.0f/c.H)); if(float(my)+0.5f<c.ry0||float(my)+0.5f>=c.ry1)return o;
-    const int mx=min(639,int((x+0.5f)*640.0f/c.W)); if(float(mx)+0.5f<c.rx0||float(mx)+0.5f>=c.rx1)return o;
+    const float MW=640.0f*float(c.scale),MH=480.0f*float(c.scale),M=float(c.scale);
+    const int my=min(int(MH)-1,int((y+0.5f)*MH/c.H)); const float cy=c.scale==1u?float(my)+0.5f:(float(my)+0.5f)/M;
+    if(cy<c.ry0-c.reach||cy>=c.ry1+c.reach)return o;
+    const int mx=min(int(MW)-1,int((x+0.5f)*MW/c.W)); const float cx=c.scale==1u?float(mx)+0.5f:(float(mx)+0.5f)/M;
+    if(cx<c.rx0-c.reach||cx>=c.rx1+c.reach)return o;
     const uint value=mask.read(uint2(mx,my),c.layer).r; if(value==0u)return o;
     const uint reduction=(value*((c.fog_power*3u)/16u))/128u; // shadow_mask_composite
     uint result=below&0xff000000u;
@@ -194,10 +218,11 @@ kernel void resolve(texture2d<uint,access::read> color [[texture(0)]], texture2d
 struct alignas(16) GpuSetup{float p0[4],p1[4],p2[4],uv0[4],uv1[4],grad[4],l0[4],l1[4],l2[4],fog[4];std::uint32_t info[4],blend[4];std::int32_t box[4];};
 static_assert(sizeof(GpuSetup)==208,"setup layout");
 struct FrameU{float W,H;std::uint32_t fog_pixel,wireframe,background,pad[3];};
-struct CompositeU{float W,H,rx0,ry0,rx1,ry1;std::uint32_t fog_power,layer;};
+struct CompositeU{float W,H,rx0,ry0,rx1,ry1;std::uint32_t fog_power,layer,scale,pad0;float reach,pad1;};
+struct SoftU{std::uint32_t W,H,scale,step;std::int32_t x0,y0,x1,y1;std::uint32_t layer,pad[3];};
 struct alignas(16) GpuShadowTri{float v01[4],v2a[4];std::uint32_t depth[4];std::int32_t box[4];};
 static_assert(sizeof(GpuShadowTri)==64,"shadow triangle layout");
-struct MaskU{std::uint32_t W,H,pad[2];};
+struct MaskU{std::uint32_t W,H,scale,pad;};
 // Darstellungsart einer Textur: Stufe 0 (Punktabtastung), gerade Kette, praemultiplizierte Kette
 // (alpha-gewichtete Mittelung), Punch-Kette (RGB ungewichtet).
 enum Variant{Point=1,Straight=2,Premultiplied=3,Punch=4};
@@ -229,6 +254,8 @@ public:
          if(!mask_pipeline_)throw std::runtime_error(std::string("Metal mask pipeline: ")+e.localizedDescription.UTF8String);}
         resolve_=[device_ newComputePipelineStateWithFunction:[library newFunctionWithName:@"resolve"] error:&error];
         if(!resolve_)throw std::runtime_error("Metal resolve pipeline");
+        soften_=[device_ newComputePipelineStateWithFunction:[library newFunctionWithName:@"soften"] error:&error];
+        if(!soften_)throw std::runtime_error("Metal soften pipeline");
         for(int linear=0;linear<2;++linear)for(int cu=0;cu<2;++cu)for(int cv=0;cv<2;++cv){MTLSamplerDescriptor* d=[MTLSamplerDescriptor new];
             d.minFilter=MTLSamplerMinMagFilterLinear;d.magFilter=MTLSamplerMinMagFilterLinear;
             d.mipFilter=linear?MTLSamplerMipFilterNotMipmapped:MTLSamplerMipFilterLinear;d.maxAnisotropy=linear?1:4;
@@ -256,7 +283,7 @@ public:
         id<MTLCommandBuffer> cb=[queue_ commandBuffer];std::size_t batch=0;std::vector<raster::ShadowWork> pending;
         for(unsigned phase=0;phase<3;++phase){
             id<MTLRenderCommandEncoder> e=encoder(cb,phase==0,frame.background);
-            for(std::size_t i=0;i<pending.size();++i)composite(e,pending[i],i,W,H);pending.clear();
+            for(std::size_t i=0;i<pending.size();++i)composite(e,pending[i],i,W,H,frame);pending.clear();
             [e setRenderPipelineState:raster_];
             [e setVertexBuffer:setup_buffer_ offset:0 atIndex:0];[e setFragmentBuffer:setup_buffer_ offset:0 atIndex:0];
             [e setVertexBytes:&fu length:sizeof fu atIndex:1];[e setFragmentBytes:&fu length:sizeof fu atIndex:1];
@@ -267,7 +294,7 @@ public:
             if(phase<2&&frame.shadows&&frame.shadow_pass[phase]&&shadows){
                 // Die Masken zeichnet die GPU aus derselben transportierten Tiefe: eigener Renderpass
                 // im selben Befehlspuffer, deshalb kein Warten und kein Ruecklesen der Tiefe.
-                pending=shadows(phase==1);masks(cb,pending,W,H);
+                pending=shadows(phase==1);masks(cb,pending,W,H,frame);
             }
         }
         id<MTLComputeCommandEncoder> c=[cb computeCommandEncoder];[c setComputePipelineState:resolve_];
@@ -363,7 +390,7 @@ private:
     }
     // Ein Renderpass fuer alle Masken dieser Phase (eine Ebene je Werk): die Dreiecksreihenfolge je
     // Ebene ist die von raster_shadow_mask, die saettigende Akkumulation macht der Shader.
-    void masks(id<MTLCommandBuffer> cb,const std::vector<raster::ShadowWork>& works,int W,int H){
+    void masks(id<MTLCommandBuffer> cb,const std::vector<raster::ShadowWork>& works,int W,int H,const raster::Frame& frame){
         if(works.empty())return;
         if(works.size()>2048)throw std::runtime_error("too many shadow works in one pass");
         triangles_.clear();
@@ -375,7 +402,7 @@ private:
             t.depth[3]=(std::uint32_t(layer)<<1)|(f.subtract?1u:0u);
             t.box[0]=f.minx;t.box[1]=f.miny;t.box[2]=f.maxx;t.box[3]=f.maxy;
             triangles_.push_back(t);}
-        mask_targets(unsigned(works.size()));
+        const unsigned M=frame.shadow_scale;mask_targets(unsigned(works.size()),M,frame.soft_shadows);
         MTLRenderPassDescriptor* rp=[MTLRenderPassDescriptor renderPassDescriptor];
         rp.colorAttachments[0].texture=mask_;rp.colorAttachments[0].loadAction=MTLLoadActionClear;
         rp.colorAttachments[0].clearColor=MTLClearColorMake(0,0,0,0);rp.colorAttachments[0].storeAction=MTLStoreActionStore;
@@ -386,26 +413,41 @@ private:
             const std::size_t bytes=triangles_.size()*sizeof(GpuShadowTri);
             if(!shadow_buffer_||shadow_buffer_.length<bytes)shadow_buffer_=[device_ newBufferWithLength:bytes*2 options:MTLResourceStorageModeShared];
             std::memcpy(shadow_buffer_.contents,triangles_.data(),bytes);
-            const MaskU mu{std::uint32_t(W),std::uint32_t(H),{0,0}};
+            const MaskU mu{std::uint32_t(W),std::uint32_t(H),M,0};
             [e setRenderPipelineState:mask_pipeline_];
             [e setVertexBuffer:shadow_buffer_ offset:0 atIndex:0];[e setFragmentBuffer:shadow_buffer_ offset:0 atIndex:0];
             [e setFragmentBytes:&mu length:sizeof mu atIndex:1];[e setFragmentTexture:transported_ atIndex:0];
             [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:triangles_.size()*6];++draw_calls_;}
         [e endEncoding];
+        if(!frame.soft_shadows)return;
+        // Weiche Kante je Werk ueber dessen um die Reichweite erweitertes Rechteck (shadow_soft.h).
+        if(int(640*M)!=W||int(480*M)!=H)throw std::runtime_error("soft shadows need the mask at the render resolution");
+        id<MTLComputeCommandEncoder> c=[cb computeCommandEncoder];[c setComputePipelineState:soften_];
+        [c setTexture:mask_ atIndex:0];[c setTexture:transported_ atIndex:1];[c setTexture:soft_ atIndex:2];
+        const float reach=shadow_soft_reach(M);
+        for(std::size_t layer=0;layer<works.size();++layer){const auto& w=works[layer];
+            const int x0=std::max(0,int(std::floor((w.rx0-reach)*float(M)))),y0=std::max(0,int(std::floor((w.ry0-reach)*float(M))));
+            const int x1=std::min(W-1,int(std::ceil((w.rx1+reach)*float(M)))),y1=std::min(H-1,int(std::ceil((w.ry1+reach)*float(M))));
+            if(x1<x0||y1<y0)continue;
+            const SoftU u{std::uint32_t(W),std::uint32_t(H),M,shadow_soft_step(M),x0,y0,x1,y1,std::uint32_t(layer),{0,0,0}};
+            [c setBytes:&u length:sizeof u atIndex:0];
+            [c dispatchThreads:MTLSizeMake(NSUInteger(x1-x0+1),NSUInteger(y1-y0+1),1) threadsPerThreadgroup:MTLSizeMake(16,16,1)];}
+        [c endEncoding];
     }
-    void mask_targets(unsigned layers){
-        if(mask_&&mask_.arrayLength>=layers)return;
+    void mask_targets(unsigned layers,unsigned scale,bool soft){
+        if(mask_&&mask_.arrayLength>=layers&&mask_scale_==scale&&(!soft||soft_))return;
         MTLTextureDescriptor* d=[MTLTextureDescriptor new];d.textureType=MTLTextureType2DArray;d.pixelFormat=MTLPixelFormatR8Uint;
-        d.width=640;d.height=480;d.arrayLength=layers;d.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;d.storageMode=MTLStorageModePrivate;
-        mask_=[device_ newTextureWithDescriptor:d];
+        d.width=640*scale;d.height=480*scale;d.arrayLength=std::max(layers,mask_?unsigned(mask_.arrayLength):0u);d.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;d.storageMode=MTLStorageModePrivate;
+        mask_=[device_ newTextureWithDescriptor:d];mask_scale_=scale;soft_=nil;
+        if(soft){d.usage=MTLTextureUsageShaderWrite|MTLTextureUsageShaderRead;soft_=[device_ newTextureWithDescriptor:d];}
     }
-    void composite(id<MTLRenderCommandEncoder> e,const raster::ShadowWork& c,std::size_t index,int W,int H){
+    void composite(id<MTLRenderCommandEncoder> e,const raster::ShadowWork& c,std::size_t index,int W,int H,const raster::Frame& frame){
         if(c.fog_power>255u)throw std::runtime_error("shadow: invalid fog channel");
-        const CompositeU u{float(W),float(H),c.rx0,c.ry0,c.rx1,c.ry1,c.fog_power,std::uint32_t(index)};
-        [e setRenderPipelineState:composite_];[e setFragmentBytes:&u length:sizeof u atIndex:0];[e setFragmentTexture:mask_ atIndex:0];
+        const CompositeU u{float(W),float(H),c.rx0,c.ry0,c.rx1,c.ry1,c.fog_power,std::uint32_t(index),frame.shadow_scale,0,frame.soft_shadows?shadow_soft_reach(frame.shadow_scale):0.f,0};
+        [e setRenderPipelineState:composite_];[e setFragmentBytes:&u length:sizeof u atIndex:0];[e setFragmentTexture:frame.soft_shadows?soft_:mask_ atIndex:0];
         [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];++draw_calls_;++composites_;
     }
-    id<MTLDevice> device_;id<MTLCommandQueue> queue_;id<MTLRenderPipelineState> raster_,composite_,mask_pipeline_;id<MTLComputePipelineState> resolve_;
+    id<MTLDevice> device_;id<MTLCommandQueue> queue_;id<MTLRenderPipelineState> raster_,composite_,mask_pipeline_;id<MTLComputePipelineState> resolve_,soften_;id<MTLTexture> soft_;unsigned mask_scale_=0;
     id<MTLSamplerState> samplers_[2][2][2];id<MTLTexture> blank_,color_,depth_,transported_;id<MTLBuffer> out_color_,out_depth_,setup_buffer_,shadow_buffer_;id<MTLTexture> mask_;
     std::vector<GpuSetup> setups_;std::vector<Batch> batches_;std::vector<GpuShadowTri> triangles_;std::vector<std::string> unsupported_;unsigned draw_calls_=0,composites_=0;Timings timings_;
 };

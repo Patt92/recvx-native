@@ -1,4 +1,5 @@
 #include "frontend.h"
+#include <stdexcept>
 #include "back_color.h"
 #include <algorithm>
 #include <cmath>
@@ -238,6 +239,15 @@ void Frontend::draw_title(SoftwareRenderer& image,GameUi& ui)const{
     if(view_.fade)fill(image,0x000000,unsigned(255.f*view_.fade_rate)&0xffu);      // AdvDrawFadePolygon(0, FadeRate, 0)
     if(view_.saver>0)fill(image,0x00000f,unsigned(255.f*view_.saver)&0xffu);       // ExecuteAdvScreenSaver: AdvDrawFadePolygon(2, SaverRate, 0xF)
 }
+std::string Frontend::presentation_row_value(unsigned row)const{
+    if(!video)return "Not available";
+    const auto row_of=[](std::size_t n,std::string value){return n>1?value+"  left/right":std::string("Not available");};
+    if(row==upscaler_row)return row_of(video->upscaler_choices().size(),video->describe_upscaler());
+    if(row==frame_generation_row)return row_of(video->frame_generation_choices().size(),video->describe_frame_generation());
+    if(row==sharpness_row)return row_of(video->sharpness_choices().size(),video->describe_sharpness());
+    if(row==post_process_row)return row_of(video->post_process_choices().size(),video->describe_post_process());
+    throw std::runtime_error("not a presentation row");
+}
 void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
     if(screen_==Screen::Title){draw_title(image,ui);return;}
     if(screen_!=Screen::Controls)return;
@@ -252,10 +262,10 @@ void Frontend::draw(SoftwareRenderer& image,GameUi& ui,std::size_t controllers){
         else if(i==third_person_row){label="3rd-person camera (mod)";value=third_person?third_person->describe()+"  left/right":"Not available";}
         else if(i==video_row){label="Render quality";value=video?video->describe()+"  left/right":"Not available";}
         else if(i==frame_rate_row){label="Frame rate";value=video?video->settings().describe_frame_rate()+"  left/right":"Not available";}
-        else if(i==upscaler_row){label="Upscaling";value=video?video->describe_upscaler()+"  left/right":"Not available";}
-        else if(i==frame_generation_row){label="Frame generation";value=video?video->describe_frame_generation()+"  left/right":"Not available";}
-        else if(i==sharpness_row){label="Sharpening";value=video?video->describe_sharpness()+"  left/right":"Not available";}
-        else if(i==post_process_row){label="CRT filter";value=video?video->describe_post_process()+"  left/right":"Not available";}
+        else if(i==upscaler_row){label="Upscaling";value=presentation_row_value(upscaler_row);}
+        else if(i==frame_generation_row){label="Frame generation";value=presentation_row_value(frame_generation_row);}
+        else if(i==sharpness_row){label="Sharpening";value=presentation_row_value(sharpness_row);}
+        else if(i==post_process_row){label="CRT filter";value=presentation_row_value(post_process_row);}
         else if(i==widescreen_row){label="Widescreen (mod)";value=video?video->settings().describe_widescreen()+"  left/right":"Not available";}
         else if(i==audio_row){label="Sound mode";value=audio?audio->describe()+"  left/right":"Not available";}else label="Back to title";
         if(i==selected_)for(int yy=y+4;yy<y+11;++yy)for(int x=20;x<24;++x)image.canvas()[yy*640+x]=0xffffff70;ui.label(image,label,32,y,.48f,color,.48f);ui.label(image,value,245,y,.48f,color,.48f);

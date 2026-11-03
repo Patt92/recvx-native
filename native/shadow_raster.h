@@ -2,10 +2,14 @@
 #include "shadow_projection.h"
 #include "shadow_mask.h"
 #include "shadow_transport.h"
+#include <stdexcept>
 #include <vector>
 
 namespace recvx {
 // Native mask raster in original 640x480 screen coordinates.
+// scale > 1 (host Ultra quality, not original): the same triangles, edge rules and
+// saturation, sampled at (x+.5)/scale in a (640*scale)x(480*scale) mask; scale 1 is
+// the original raster bit for bit.
 // depth_pass receives screen-linear transported vertex depth, NOT reciprocal
 // Z. The receiver must use the same transport, and the final fragment integer
 // conversion remains the consumer's contract. Never infer it from depth().
@@ -13,9 +17,11 @@ namespace recvx {
 template<class DepthPass>
 std::vector<unsigned char> raster_shadow_mask(
     const ShadowProjection& projection,const ShadowDepthCoefficients& coefficients,
-    DepthPass depth_pass)
+    DepthPass depth_pass,unsigned scale=1)
 {
-    std::vector<unsigned char> mask(640*480,0);
+    if(scale<1||scale>4)throw std::runtime_error("shadow: mask scale outside 1..4");
+    const int MW=640*int(scale),MH=480*int(scale);const float M=float(scale);
+    std::vector<unsigned char> mask(std::size_t(MW)*MH,0);
     if(!projection.drawable)return mask;
     const auto edge=[](const ShadowTransportVertex& a,
                        const ShadowTransportVertex& b,float x,float y){
@@ -40,24 +46,25 @@ std::vector<unsigned char> raster_shadow_mask(
             if(!std::isfinite(area)||area==0)continue;
             if(area<0){std::swap(p[1],p[2]);area=-area;}
             const int left=int(std::max(0.f,std::floor(
-                std::min({p[0].x,p[1].x,p[2].x}))));
-            const int right=int(std::min(639.f,std::ceil(
-                std::max({p[0].x,p[1].x,p[2].x}))));
+                std::min({p[0].x,p[1].x,p[2].x})*M)));
+            const int right=int(std::min(float(MW-1),std::ceil(
+                std::max({p[0].x,p[1].x,p[2].x})*M)));
             const int top=int(std::max(0.f,std::floor(
-                std::min({p[0].y,p[1].y,p[2].y}))));
-            const int bottom=int(std::min(479.f,std::ceil(
-                std::max({p[0].y,p[1].y,p[2].y}))));
+                std::min({p[0].y,p[1].y,p[2].y})*M)));
+            const int bottom=int(std::min(float(MH-1),std::ceil(
+                std::max({p[0].y,p[1].y,p[2].y})*M)));
             for(int y=top;y<=bottom;++y)for(int x=left;x<=right;++x){
-                const float a=edge(p[1],p[2],x+.5f,y+.5f);
-                const float b=edge(p[2],p[0],x+.5f,y+.5f);
-                const float c=edge(p[0],p[1],x+.5f,y+.5f);
+                const float X=(float(x)+.5f)/M,Y=(float(y)+.5f)/M;
+                const float a=edge(p[1],p[2],X,Y);
+                const float b=edge(p[2],p[0],X,Y);
+                const float c=edge(p[0],p[1],X,Y);
                 if(a<0||b<0||c<0)continue;
                 if((a==0&&!inclusive(p[1],p[2]))||
                    (b==0&&!inclusive(p[2],p[0]))||
                    (c==0&&!inclusive(p[0],p[1])))continue;
                 const float depth=(a*p[0].depth+b*p[1].depth+c*p[2].depth)/area;
                 if(!depth_pass(x,y,depth))continue;
-                auto& pixel=mask[std::size_t(y)*640+x];
+                auto& pixel=mask[std::size_t(y)*MW+x];
                 pixel=static_cast<unsigned char>(
                     shadow_mask_fragment(pixel,pass==1));
             }
