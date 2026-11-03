@@ -16,7 +16,7 @@ struct Setup {
     bool clamp_u=false,clamp_v=false;
     bool gouraud=false;std::array<NJS_POINT3,3> light{};
     bool vertex_alpha=false;std::array<float,3> alpha{1,1,1};
-    float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true,punch_through=false;
+    float Ux,Uy,Vx,Vy,Wx,Wy;SceneBlend blend=SceneBlend::Opaque;bool depth_write=true,depth_only=false,punch_through=false;
     bool general_water=false,mirror_room=false,mirror_effect=false;
     bool fog_color_set=false;std::uint32_t fog_color=0;
     std::uint64_t blend_register=0x44;

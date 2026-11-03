@@ -202,6 +202,19 @@ int main(int argc,char** argv){try{
             state.slots()[0]=2;state.script_item_lost(95);check(state.slots()[0]==2&&state.slots()[2]==Inventory::pack(92,1)&&state.slots()[3]==Inventory::pack(94,1),"bhPlItemLost behind the equipped slot moved pip[0], owner "+std::to_string(owner));}
         // bhPlItemTamaSet verwirft vorhandene Flags.
         {Inventory state;state.items.fill(0);state.slots()[2]=Inventory::pack(12,3)|0x08000000u;state.script_item_amount(12,40);check(state.slots()[2]==Inventory::pack(12,40),"bhPlItemTamaSet kept packed flags");}
+        // event.c bhPlItemChangeM/bhPlItemTamaSet: Schleife itm[ply_id*16+2 .. ply_id*16+11], erster Treffer, dann return 1.
+        // pip[0..1], pip[12..15] und die Baenke anderer Spieler bleiben unberuehrt; ohne Treffer aendert sich nichts.
+        {Inventory state;state.items.fill(0);state.player=1;
+         state.slots()[1]=Inventory::pack(40,1);state.slots()[12]=Inventory::pack(40,2);state.slots()[5]=Inventory::pack(40,3);state.slots()[9]=Inventory::pack(40,4);
+         state.items[2]=Inventory::pack(40,7);const auto before=state.items;
+         state.script_item_change(77,41);check(state.items==before,"bhPlItemChangeM without a match changed the inventory");
+         state.script_item_amount(77,5);check(state.items==before,"bhPlItemTamaSet without a match changed the inventory");
+         state.script_item_change(40,41);
+         check(state.slots()[5]==Inventory::pack(41,0)&&state.slots()[9]==Inventory::pack(40,4),"bhPlItemChangeM must change only the first match in pip[2..11]");
+         check(state.slots()[1]==Inventory::pack(40,1)&&state.slots()[12]==Inventory::pack(40,2)&&state.items[2]==Inventory::pack(40,7),"bhPlItemChangeM touched pip[1], pip[12] or player 0");
+         state.script_item_amount(40,6);
+         check(state.slots()[9]==Inventory::pack(40,6)&&state.slots()[1]==Inventory::pack(40,1)&&state.slots()[12]==Inventory::pack(40,2)&&state.items[2]==Inventory::pack(40,7),
+               "bhPlItemTamaSet must set only the first match of the player's pip[2..11]");}
         // Besitzeroperand: das Original rechnet itm[owner*16 + k] ohne Prüfung.
         // 4..23 liegen damit in den Kisten-/Sonderbereichen von itm[384] und
         // wirken dort; ply_wno hat nur vier Einträge, die Partnerwaffe gilt also

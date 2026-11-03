@@ -23,6 +23,15 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**3rd-person face through the head; port evidence (2026-11-03, working tree):** the faded player (chase camera
+close) now gets a depth-only pre-pass of the same surfaces (`SceneTriangle::depth_only`, CPU + Metal/D3D11/D3D12/
+Vulkan/OpenGL, `ThirdPersonCamera::fade_actor`), so only the nearest surface blends over the room; test in
+`third_person_camera_mod` (counter-checks: old fade lets the face through, depth-only drawing colour red), GPU parity
+scene has a depth-only case. Port evidence: 0xc7/0xc9 bhPlItemChangeM/bhPlItemTamaSet and hitchk.c bhCheckWall2Box
+done with native evidence (first-hit tests; crate wall types 0/2/4/6/7 hand-computed from the original formulas,
+counter-check red); en02/njColorBlendingModeSys notes reworded (pure data tables), report 83.0 % fully evidenced
+(615/741). GPU variants not run here. **No commit.**
+
 **iOS bundles the game data by default (2026-11-03, working tree):** `./build.sh --platform ios [--compressed]
 --package` now writes a complete IPA; `--ios-no-bundle-data` builds the slim app that reads `Documents/data`
 (`--ios-bundle-data` still accepted, both together refused, tvOS refuses the slim variant). A rebuild replaces the

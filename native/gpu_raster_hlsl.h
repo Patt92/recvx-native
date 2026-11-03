@@ -33,6 +33,7 @@ cbuffer DrawCB : register(b3) { uint dFirst,dPad0,dPad1,dPad2; };
 // Flags: 1 gouraud, 2 vertex_alpha, 4 textured, 8 filtered, 16 punch, 32 fogged, 64 fog_color_set,
 // 128 clamp_u, 256 clamp_v, 512 cutout, 1024 uniform_alpha, 2048 linear_only, 4096 nonopaque,
 // 16384 general_water, 32768 premultiplied chain, 65536 depth_write.
+// 131072 depth_only: Tiefe ohne Farbe (Host-3rd-Person-Vorpass, scene.h SceneTriangle::depth_only).
 uint ch(uint c,uint s){return (c>>s)&255u;}
 bool inclusive(float2 from,float2 to){return to.y<from.y||(to.y==from.y&&to.x>from.x);}
 uint lit(uint base,float r,float g,float b){
@@ -123,6 +124,7 @@ void ps_raster(VOut input) {
         Color[at]=blend_gs(s.blend.x,s.blend.y,pixel,below,alpha);
         if(depth_write&&((flags&16384u)?alpha>0.0f:alpha>=0.5f))DepthBuf[at]=invz;
         return;}
+    if(flags&131072u){if(coverage>=0.5f)DepthBuf[at]=invz;return;}
     if(coverage<0.999f){
         uint mixed=0xff000000u;
         [unroll] for(uint shift=0u;shift<24u;shift+=8u)mixed|=((uint)((float)ch(below,shift)*(1.0f-coverage)+(float)ch(pixel,shift)*coverage+0.5f))<<shift;

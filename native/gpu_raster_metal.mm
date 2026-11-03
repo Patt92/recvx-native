@@ -47,6 +47,7 @@ struct FOut { uint pixel [[color(0)]]; float depth [[color(1)]]; float transport
 // Flags: 1 gouraud, 2 vertex_alpha, 4 textured, 8 filtered, 16 punch, 32 fogged, 64 fog_color_set,
 // 128 clamp_u, 256 clamp_v, 512 cutout, 1024 uniform_alpha, 2048 linear_only, 4096 nonopaque,
 // 16384 general_water, 32768 premultiplied chain, 65536 depth_write.
+// 131072 depth_only: Tiefe ohne Farbe (Host-3rd-Person-Vorpass, scene.h SceneTriangle::depth_only).
 vertex VOut vs(uint vid [[vertex_id]], const device Setup* setups [[buffer(0)]], constant FrameU& f [[buffer(1)]]) {
     const uint index=vid/6u,corner=vid%6u; const int4 b=setups[index].box;
     const bool right=corner==1u||corner==2u||corner==4u, bottom=corner==2u||corner==4u||corner==5u;
@@ -132,6 +133,7 @@ fragment FOut fs(VOut in [[stage_in]], uint below [[color(0)]], float below_dept
         o.pixel=blend_gs(s.blend.x,s.blend.y,pixel,below,alpha);
         if(depth_write&&((flags&16384u)?alpha>0.0f:alpha>=0.5f))o.depth=invz;
         return o;}
+    if(flags&131072u){if(coverage>=0.5f)o.depth=invz;return o;}
     if(coverage<0.999f){
         uint mixed=0xff000000u;
         for(uint shift=0u;shift<24u;shift+=8u)mixed|=uint(float(ch(below,shift))*(1.0f-coverage)+float(ch(pixel,shift))*coverage+0.5f)<<shift;
@@ -364,7 +366,7 @@ private:
         for(std::size_t i=0;i<setups.size();++i){const auto& s=setups[i];auto& g=setups_[i];
             std::uint32_t flags=0;unsigned max_alpha=255;Variant variant=Point;
             if(s.gouraud)flags|=1;if(s.vertex_alpha)flags|=2;if(s.fogged)flags|=32;if(s.fog_color_set)flags|=64;if(s.clamp_u)flags|=128;if(s.clamp_v)flags|=256;
-            if(s.punch_through)flags|=16;if(s.linear_only)flags|=2048;if(s.blend!=SceneBlend::Opaque)flags|=4096;if(s.general_water)flags|=16384;if(s.depth_write)flags|=65536;
+            if(s.punch_through)flags|=16;if(s.linear_only)flags|=2048;if(s.blend!=SceneBlend::Opaque)flags|=4096;if(s.general_water)flags|=16384;if(s.depth_write)flags|=65536;if(s.depth_only)flags|=131072;
             if(s.texture){flags|=4;
                 if(s.filtered){flags|=8;const auto& c=*s.texture->filter_cache;max_alpha=c.max_alpha;if(c.cutout)flags|=512;if(c.uniform_alpha)flags|=1024;
                     variant=s.punch_through?Punch:c.uniform_alpha?Straight:Premultiplied;if(variant==Premultiplied)flags|=32768;}}

@@ -60,6 +60,11 @@ static Scene synthetic(){
     quad(-2,1,7,2.5f,[](SceneTriangle& t){t.blend=SceneBlend::Additive;t.color=0x80ff4020;t.vertex_alpha=true;t.vertices[0].alpha=.2f;t.vertices[1].alpha=1;t.vertices[2].alpha=.6f;});
     quad(0,0,6.5f,2,[](SceneTriangle& t){t.blend=SceneBlend::Alpha;t.color=0xa0ffffff;t.general_purpose_water=true;t.textured=true;t.texture=0;});
     quad(1,-2,6,2,[](SceneTriangle& t){t.punch_through=true;t.textured=true;t.texture=0;});
+    // Host-3rd-Person-Vorpass (SceneTriangle::depth_only): Tiefe ohne Farbe, texturiert mit Ausschnitt, davor ein
+    // ausgeblendetes Alpha-Dreieck dahinter (verdeckt) und eines auf derselben Flaeche (sichtbar).
+    quad(2.5f,-2.5f,5.5f,2.2f,[](SceneTriangle& t){t.depth_only=true;t.textured=true;t.texture=0;});
+    quad(2.5f,-2.5f,6.2f,2.2f,[](SceneTriangle& t){t.blend=SceneBlend::Alpha;t.color=0x60ff2020;});
+    quad(2.5f,-2.5f,5.5f,2.2f,[](SceneTriangle& t){t.blend=SceneBlend::Alpha;t.color=0x6020ff20;t.textured=true;t.texture=0;});
     quad(2,-1,5.5f,2,[](SceneTriangle& t){t.fog_fixed=true;t.fog_fixed_value=128;t.fog_color_set=true;t.fog_color=0xff0000;t.depth_write=false;});
     // Rand: ueber die Nahebene, teilweise ausserhalb des Bildes.
     SceneTriangle edge;edge.vertices={vertex(-30,-4,0.5f),vertex(40,5,30),vertex(-8,30,12)};edge.color=0xff3070f0;edge.world_lit=true;edge.camera_mask=false;scene.triangles.push_back(edge);

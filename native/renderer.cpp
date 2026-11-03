@@ -306,7 +306,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
             // Screen-space gradients of the barycentric weights (constant per triangle),
             // used to derive perspective-correct texture derivatives per pixel.
             const float dax=-(p[2].y-p[1].y)/area,day=(p[2].x-p[1].x)/area,dbx=-(p[0].y-p[2].y)/area,dby=(p[0].x-p[2].x)/area,dcx=-(dax+dbx),dcy=-(day+dby);
-            Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.punch_through=triangle.punch_through;setup.texture_color_divisor=triangle.texture_color_divisor;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
+            Setup setup;setup.p=p;setup.area=area;setup.minx=minx;setup.maxx=maxx;setup.miny=miny;setup.maxy=maxy;setup.color=color;setup.blend=triangle.blend;setup.depth_write=triangle.depth_write;setup.depth_only=triangle.depth_only;setup.punch_through=triangle.punch_through;setup.texture_color_divisor=triangle.texture_color_divisor;setup.texture=texture&&!texture->pixels.empty()?texture:nullptr;
             if(setup.texture){setup.clamp_u=texture->clamp_u||triangle.texture_cache_clamp;
                 setup.clamp_v=texture->clamp_v||triangle.texture_cache_clamp;}
             setup.blend_register=triangle.blend_register;setup.post=triangle.after_modifiers;
@@ -478,6 +478,7 @@ void SoftwareRenderer::draw_view_projected(const Scene& scene,const NJS_MATRIX& 
                     // OT's Ps2ZbuffOff alpha >=128 / FB_ONLY (ps2_dummy.c:1980/2024).
                     if(s.depth_write&&(s.general_water?alpha>0.f:alpha>=.5f))depth[index]=invz;continue;
                 }
+                if(s.depth_only){if(coverage>=.5f)depth[index]=invz;continue;} // Host-3rd-Person-Vorpass (scene.h)
                 if(coverage<.999f){
                     const auto below=color[index];std::uint32_t mixed=0xff000000;
                     for(unsigned shift:{0u,8u,16u})mixed|=std::uint32_t(float((below>>shift)&255)*(1-coverage)+float((pixel>>shift)&255)*coverage+.5f)<<shift;

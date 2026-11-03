@@ -116,6 +116,20 @@ void ThirdPersonCamera::tick(const SceneSpawn& actor,ThirdPersonState state,cons
     fade_=valid_?mix(fade_,wanted_fade,per_tick(.25f)):wanted_fade;
     valid_=true;
 }
+void ThirdPersonCamera::fade_actor(std::vector<SceneTriangle>& triangles,std::size_t first,float alpha){
+    if(!(alpha<1.f)||first>=triangles.size())return;
+    const std::size_t end=triangles.size();
+    triangles.reserve(end+(end-first));
+    for(std::size_t i=first;i<end;++i){
+        auto& t=triangles[i];
+        if(t.depth_write&&t.blend!=SceneBlend::Additive){ // Vorpass: dieselbe Flaeche, nur Tiefe
+            SceneTriangle depth=t;depth.depth_only=true;depth.blend=SceneBlend::Opaque;depth.color|=0xff000000u;triangles.push_back(depth);}
+        auto& faded=triangles[i];
+        const auto a=faded.blend==SceneBlend::Opaque?255u:faded.color>>24;
+        if(faded.blend==SceneBlend::Opaque)faded.blend=SceneBlend::Alpha;
+        faded.color=(faded.color&0x00ffffffu)|(std::uint32_t(float(a)*alpha+.5f)<<24);
+    }
+}
 SceneCamera ThirdPersonCamera::view(const SceneCamera& original)const{
     if(!active())return original;
     SceneCamera camera=original;camera.position=eye_;camera.distance=0;camera.hidden_objects.fill(0);

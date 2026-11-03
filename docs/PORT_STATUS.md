@@ -2,22 +2,22 @@
 
 This report counts only native mechanisms with explicit evidence. The complete original decompilation is deliberately neither the denominator nor a list of missing work.
 
-Explicit evidence scope: **91.1 %** weighted, **82.8 %** fully evidenced (607/733 mechanisms; not overall game completion).
+Explicit evidence scope: **91.2 %** weighted, **83.0 %** fully evidenced (615/741 mechanisms; not overall game completion).
 
 Event commands (bhScenarioJmpT): 223/223 bound, 0 consumed only, 0 missing.
 
 | Area | Mechanisms | Evidence scope | Fully evidenced | Partial | Open |
 |---|---:|---:|---:|---:|---:|
-| Enemies/AI | 95/117 | 90.6 % | 81.2 % | 22 | 0 |
+| Enemies/AI | 95/118 | 90.3 % | 80.5 % | 23 | 0 |
 | Effects | 233/251 | 96.4 % | 92.8 % | 18 | 0 |
-| Events/script | 79/94 | 92.0 % | 84.0 % | 15 | 0 |
-| Player/combat | 59/78 | 87.8 % | 75.6 % | 19 | 0 |
-| Room/camera/door | 22/46 | 73.9 % | 47.8 % | 24 | 0 |
+| Events/script | 82/97 | 92.3 % | 84.5 % | 15 | 0 |
+| Player/combat | 60/79 | 88.0 % | 75.9 % | 19 | 0 |
+| Room/camera/door | 26/49 | 76.5 % | 53.1 % | 23 | 0 |
 | Menu/items/text | 48/62 | 85.5 % | 77.4 % | 10 | 4 |
 | Models/animation | 12/18 | 80.6 % | 66.7 % | 5 | 1 |
 | Audio | 29/32 | 95.3 % | 90.6 % | 3 | 0 |
 | Flow/saving | 30/35 | 92.9 % | 85.7 % | 5 | 0 |
-| Platform (host-replaced) | 23/39 | 79.5 % | 59.0 % | 16 | 0 |
+| Platform (host-replaced) | 23/40 | 78.8 % | 57.5 % | 17 | 0 |
 
 Only ledger entries with independent native evidence count. Matching names, original sources, and quarantined generators never count as port evidence.
 
@@ -36,17 +36,12 @@ Only ledger entries with independent native evidence count. Matching names, orig
 - `adxwrap.c` SetVolumeAdx2 (partial, See the detailed evidence and open bindings in docs/port_ledger.tsv.)
 - `camera.c` bhControlCamera (partial, The runtime owns cam.ofx/ofy/ofz across rooms, and RoomWorld::camera adds the offset to cam.px. Original writers EN02/EN13/EN17, event 0x5a, and bhEff30a are connected. Room load clears the offset as bhInitCamera does. Runtime observation of room-change reset and a separate bhGetCameraPosition check remain open.)
 - `cut.c` bhControlActiveCamera (partial, For stair state, the camera follows owP[0] from the last bhCalcModel rather than the player position. RM_3080 no longer stalls; camera_follow_target has a red control case. Free-control EXP_WORK interpolation, bhCheckCutAttribute floor input, and eye-camera return remain open.)
-- `cut.c` bhControlEventCamera (partial, RoomWorld::control_event_camera follows the mode0 0/1/2/3 state machine and 20 spline slots; the paused camera holds its pose. RM_0040 event 5 now holds key 1 as in RDT. A native owner for pt_flg 0x1 and proven CAM_WORK narrowing for cam.pers remain open.)
 - `cut.c` bhSetCut (partial, RoomWorld::cut_fog_handover carries cut fog and fog_ct rules through initialize_camera_clip. Other bhSetCut clip/hide portions remain as previously recorded.)
+- `cut.c` bhSetEventCamera (partial, Opcode 0x13 mode 0 now installs signed key position/angles, perspective, lock angles, and fog in both branches before event-camera initialization. Previous-key fields, cam.ln/flags, and bhSetEventHideObjLgt remain open.)
 
 ## Unconfirmed historical ledger entries
 
-- `en02.c` bhEne02: Historical extraction/generator evidence is invalid for the native port. A native Gulp Worm state machine on WorldEntity covers init, movement, underground pursuit, emergence/swallowing, rocks, retreat, damage, sand effects, player control, camera offset, audio, and hit marks; en02_world and RM_5830 headless checks are recorded. The uninitialized ang in SetSandEffectMain case 8 is evidenced by disassembly; three sprites are omitted while particles run. RM_3091/RM_7220 and visible window acceptance remain open.
-- `event.c` bhPlItemChangeM: Historical extraction/generator evidence is invalid. First hit, packed ID, and original quantity/flag removal were checked.
-- `event.c` bhPlItemTamaSet: Historical extraction/generator evidence is invalid. First hit and u16 little-endian quantity were checked.
-- `hitchk.c` bhCheckWall2Box: Historical extraction/generator evidence is invalid. Original query and geometry helpers were extracted; static/mobile ATR walls and prior object position were bound, with wall and second-crate tests.
 - `hitchk.c` bhGetGroundPosition: Historical extraction/generator evidence is invalid. The generated ground query kept room/mobile index and live ATR work. Player push/stair binding, linked casing effect, EE random state, and first-free eff[512] mapping were reported; other random consumers, exact EasyLight, full effect lifecycle, and general player work remain open.
-- `ps2_NaSystem.c` njColorBlendingModeSys: Historical extraction/generator evidence is invalid. Native chunk_blend.cpp models nj/GS saved state, ALPHA register selection, and RGB=(A-B)*C+D; FBA=0, PABE, GS packet quantization, and dc_alpha remain unmodeled. Blend, effect, weapon-flash, lighter, and runtime checks are recorded.
 - `sub1.c` GetItem: Historical extraction/generator evidence is invalid. GetItem including branch 153 and subsequent ItemSort were extracted; StatusCancel, sprite transitions, and full StatusMain were not completely bound.
 
 Generated with `python3 tools/port_check.py --markdown docs/PORT_STATUS.md`.

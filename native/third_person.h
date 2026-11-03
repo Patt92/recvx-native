@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <vector>
 namespace recvx {
 class RoomWorld;
 // Host-only camera mod, not original game behaviour. When enabled it replaces
@@ -46,6 +47,10 @@ public:
     bool active()const{return enabled()&&valid_&&state_.free;}
     // Opacity of the player model: fades out when walls push the eye into the body.
     float player_alpha()const{return active()?fade_:1.f;}
+    // Fades triangles[first..] (player, hair, weapon) to `alpha` and adds a depth-only pass of the same surfaces
+    // first, so only the nearest surface blends over the room: without it the alpha blend draws the faded model
+    // back to front and the face shows through the back of the head when the eye is close.
+    static void fade_actor(std::vector<SceneTriangle>& triangles,std::size_t first,float alpha);
     void reset(){valid_=false;}
     static ThirdPersonSettings read(const std::filesystem::path& path);
     static void save(const std::filesystem::path& path,const ThirdPersonSettings& settings);

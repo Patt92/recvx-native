@@ -828,6 +828,11 @@ void recvx_push_update_object(RECVX_PUSH_CORE* c,unsigned i,float x,float y,floa
     c->obj[i].px=x;c->obj[i].py=y;c->obj[i].pz=z;
 }
 
+void recvx_push_check_walls(RECVX_PUSH_CORE* c,unsigned i)
+{
+    if(c&&i<c->obj_n)push_box_walls(c,&c->obj[i]);
+}
+
 void recvx_push_object(RECVX_PUSH_CORE* c,unsigned i,float out[3])
 {
     out[0]=out[1]=out[2]=0.0f;

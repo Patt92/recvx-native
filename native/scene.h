@@ -81,6 +81,9 @@ struct SceneTriangle {
     bool gouraud=false; // color is the unlit base; vertices carry light factors (Ninja per-vertex lighting)
     bool vertex_alpha=false; // vertices carry their own alpha factor (Gouraud RGBA)
     SceneBlend blend=SceneBlend::Opaque;bool depth_write=true;
+    // Host-only (3rd-person mod, third_person.h fade_actor): opaque pass that writes depth and no colour, so a
+    // faded actor shows only its nearest surface instead of the face through the back of the head.
+    bool depth_only=false;
     // GS ohne ABE mit TEST ATST GREATER 0 (Punch-Through, ps2_dummy.c:510-516/543): Texel mit Alpha 0
     // fallen weg, alle anderen schreiben Farbe und Tiefe ganz - keine Teilabdeckung wie bei Ausschnittstexturen.
     bool punch_through=false;

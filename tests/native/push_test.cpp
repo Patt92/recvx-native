@@ -1,5 +1,7 @@
 #include "player_push.h"
+#include "ninja_math.h"
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 using namespace recvx;
@@ -9,7 +11,50 @@ using namespace recvx;
 // hier wird ihr Ergebnis (attr 0x20000, psh_idx) so eingespeist, wie
 // RoomWorld::resolve_player_motion es nach dem Wandpass tut.
 static void check(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
+// bhCheckWall2Box (hitchk.c:1276-1936) an einer Kiste aspd 0 (flg 0x101) in (0, 0, 0) nach bhObj001 case 0 (aw = ad = 4.5,
+// ah 7.99, flg |= 0x102000; eigene Wand attr 0x10000 mit prm3 = Index faellt heraus, eigener Deckel liegt auf Etage 1).
+// Erwartete Lagen von Hand aus den Originalformeln gerechnet, nicht aus dem nativen Code.
+static void check_crate_walls(){
+    _Make_SinTable(); // njSinCos-Tabelle (sonst stille Nullrotation)
+    const auto run=[](RECVX_STAIR_AREA wall,float& x,float& y,float& z,unsigned& stflg){
+        float grand[32]={};const RECVX_PUSH_OBJECT crate{5,0x101u,0,3,0,0,0,0}; /* flg 1 aktiv, 0x100 Bodenbindung */RECVX_PUSH_HOST host{};
+        auto* core=recvx_push_create(20.f,grand,&crate,1,&host);RECVX_PUSH_STATE plp{};
+        recvx_push_control(core,&plp,0,-1,0); // bhObj001 case 0
+        recvx_push_update_walls(core,&wall,1);recvx_push_check_walls(core,0);
+        float at[3];recvx_push_object(core,0,at);x=at[0];y=at[1];z=at[2];stflg=0;recvx_push_destroy(core);};
+    const auto near=[](float a,float b){return std::fabs(a-b)<1e-3f;};
+    float x,y,z;unsigned st;
+    // Typ 0: Block ab x = 3, 10 breit, z -20..20. Aufgeweitet px = -1.5, xn = 19; pz = -24.5, zn = 49; Mitte (8, 0).
+    // px < wpx, pz nicht < wpz: abx = |0 + 1.5| = 1.5, abz = |0 - 24.5| -> abx > abz falsch -> px = -1.5.
+    run({1,0,0,0,0,3,0,-20,10,20,40,0,0,0,0},x,y,z,st);check(near(x,-1.5f)&&near(z,0),"type 0: crate must leave the block on the near x side");
+    // Typ 0 mit attr 1 (nur gleiche Etage) und anderer Etage: kein Treffer.
+    run({1,0,0,1,1,3,0,-20,10,20,40,0,0,0,0},x,y,z,st);check(near(x,0)&&near(z,0),"type 0: attr 1 floor filter ignored");
+    // Typ 2: Kreis um (6, 0), r 2. px = -0.5, pz = -6.5, Seiten: hp->px < px? nein, hp->pz < pz? nein ->
+    // abx = 0.5 < abz = 6.5 und |hp->pz - pz| = 0 < ad -> px = -0.5; keine Ecke im Kreis.
+    run({1,2,0,0,0,6,0,0,2,20,0,0,0,0,0},x,y,z,st);check(near(x,-0.5f)&&near(z,0),"type 2: side contact");
+    // Typ 2 an der Ecke (+aw, +ad): Kreis um (5.5, 5.5), r 2. Seiten ohne Wirkung (abx = abz = 1, |hp->px - px| = 5.5 >= aw).
+    // Ecken (-,-), (+,-), (-,+) ausserhalb; (+,+): (1, 1), ln 1.414 < 2, r = 10430.381 * atan2f(1, 1) = 8192,
+    // njSinCos -> sin = cos = 0.70711: px = (5.5 - 1.41421) - 4.5, pz ebenso.
+    run({1,2,0,0,0,5.5f,0,5.5f,2,20,0,0,0,0,0},x,y,z,st);check(near(x,-0.41421f)&&near(z,-0.41421f),"type 2: corner (+aw, +ad) must be pushed along the radius");
+    // Typ 2 mit attr 0x40 faellt unter flg 0x2000 (gesetzt von bhObj001 case 0) heraus.
+    run({1,2,0,0,0x40,6,0,0,2,20,0,0,0,0,0},x,y,z,st);check(near(x,0)&&near(z,0),"type 2: attr 0x40 must filter under flg 0x2000");
+    // Typ 7: Deckel bei py 0..8 (h 8), Kiste steht darin (py 0, ah 7.99) unter flg 0x100: py < top und py + ah > top?
+    // 0 < 8, 7.99 > 8 falsch -> kein Treffer; ohne Treffer setzt flg 0x100 py = grand[2] = 0.
+    // (Ohne flg 0x100 gilt py + ah >= top und py < hp->py; das zeigt der Fall darunter mit Deckelunterkante -4 nicht.)
+    run({1,7,0,0,0,-10,0,-10,20,8,20,0,0,0,0},x,y,z,st);check(near(x,0)&&near(z,0)&&near(y,0),"type 7: lid below the crate top must not push");
+    // Typ 7 mit Deckel bei py -4, h 8 (top 4): 0 < 4 und 7.99 > 4 -> Treffer; Mitte (0, 0): px < wpx? nein (0 < 0),
+    // pz < wpz? nein: abx = |0 - (px + xn)| = |0 - 14.5| , abz = 14.5 -> abx > abz falsch -> px = px + xn = 14.5.
+    run({1,7,0,0,0,-10,-4,-10,20,8,20,0,0,0,0},x,y,z,st);check(near(x,14.5f)&&near(z,0),"type 7: lid inside the crate height pushes out");
+    // Typ 4, id 0: rechter Winkel in (-5, -5), Katheten 20. Kistenmitte innen -> Hypotenusenlinie ab (px + aw, pz + ad + d)
+    // = (-0.5, 19.5) mit Richtung (20, -20); Lot von (0, 0): t = 0.5 -> (9.5, 9.5).
+    run({1,4,0,0,0,-5,0,-5,20,20,20,0,0,0,0},x,y,z,st);check(near(x,9.5f)&&near(z,9.5f),"type 4 id 0: crate inside the triangle goes onto the shifted hypotenuse");
+    // Typ 6, id 0 (Rampe entlang x, flg 0x100): Linie ab (hp->px, hp->py, pw->pz) = (-10, 0, 0), Richtung (20, 10, 0);
+    // Lot von (0, 0, 0): t = 200 / 500 = 0.4 -> (-2, 4, 0). Etage aus grand (alle 0): j == 2 -> flr_no 0 = hp->flr_no,
+    // also px/pz vom Lot, py 4 bleibt (nicht unter grand[2]).
+    run({1,6,0,0,0,-10,0,-10,20,10,20,0,0,0,0},x,y,z,st);check(near(x,-2)&&near(y,4)&&near(z,0),"type 6 id 0: crate onto the ramp line");
+}
 int main(int argc,char** argv){try{
+    check_crate_walls();
     _Make_SinTable();check(argc==2,"data path required");
     const auto data=std::filesystem::path(argv[1]);auto asset=PlayerAsset::load(data);
     std::array<float,32> grand{};grand[2]=0;grand[3]=8; // Etage 0 auf 0, Etage 1 auf 8

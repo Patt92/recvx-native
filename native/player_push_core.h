@@ -55,6 +55,9 @@ void recvx_push_update_walls(RECVX_PUSH_CORE*,const RECVX_STAIR_AREA* prefix,uns
 /* op->px/py/pz, wie sie ein Raumskript gesetzt haben kann. */
 void recvx_push_update_object(RECVX_PUSH_CORE*,unsigned,float,float,float);
 void recvx_push_object(RECVX_PUSH_CORE*,unsigned,float[3]);
+/* bhCheckWall2Box (hitchk.c:1276, Aufrufer objitm.c:1100) fuer Kiste i gegen die aktuelle Wandliste:
+ * Raumpraefix und bewegliche Eintraege.  Fuer Komponentenpruefungen; die Laufzeit ruft es im Schiebeschritt. */
+void recvx_push_check_walls(RECVX_PUSH_CORE*,unsigned i);
 /* bhControlObjItm: bhObj001 fuer jede Kiste in Objektreihenfolge.  `plp` ist
  * der Spielerzustand (mode3/spd/ay; mode3 kann auf 6 gesetzt werden),
  * `psh_idx`/`stflg` sind plp->psh_idx/plp->stflg, `cb_flg` sys->cb_flg. */

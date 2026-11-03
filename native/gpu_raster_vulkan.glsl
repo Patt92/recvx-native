@@ -100,6 +100,7 @@ uint blend_gs(uint lo,uint hi,uint source,uint destination,float source_alpha){
 // Flags wie gpu_raster_metal.mm: 1 gouraud, 2 vertex_alpha, 4 textured, 8 filtered, 16 punch, 32 fogged,
 // 64 fog_color_set, 128 clamp_u, 256 clamp_v, 512 cutout, 1024 uniform_alpha, 2048 linear_only,
 // 4096 nonopaque, 16384 general_water, 32768 premultiplied chain, 65536 depth_write.
+// 131072 depth_only: Tiefe ohne Farbe (Host-3rd-Person-Vorpass, scene.h SceneTriangle::depth_only).
 void main(){
     Setup s=setups[v_index];
     vec4 p0=s.p0,p1=s.p1,p2=s.p2,uv0=s.uv0,uv1=s.uv1,grad=s.grad,l0=s.l0,l1=s.l1,l2=s.l2,fogv=s.fog;uvec4 info=s.info,blend=s.blend;
@@ -169,6 +170,8 @@ void main(){
             precise float alpha=coverage*material_alpha;
             imageStore(Color,at,uvec4(blend_gs(blend.x,blend.y,pixel,below,alpha)));
             if(depth_write&&((flags&16384u)!=0u?alpha>0.0:alpha>=0.5))imageStore(DepthBuf,at,vec4(invz));
+        }else if((flags&131072u)!=0u){
+            if(coverage>=0.5)imageStore(DepthBuf,at,vec4(invz));
         }else{
             bool partial=false;
             if(coverage<0.999){

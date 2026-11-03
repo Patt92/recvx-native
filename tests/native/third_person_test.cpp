@@ -1,6 +1,10 @@
 #define SDL_MAIN_HANDLED
 #include "frontend.h"
+#include "renderer.h"
+#include "third_person.h"
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -8,8 +12,36 @@
 using namespace recvx;
 static void check(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static float horizontal(NJS_POINT3 a,NJS_POINT3 b){return std::sqrt((a.x-b.x)*(a.x-b.x)+(a.z-b.z)*(a.z-b.z));}
+// Ausgeblendeter Spieler (fade_actor): zwei Flaechen hintereinander, die hintere (Gesicht) zuerst in der Szene.
+// Mit Tiefen-Vorpass zeigt das Bild nur die vordere Flaeche ueber dem Hintergrund; ohne ihn (bisheriges
+// Ausblenden) zeichnet die Alpha-Sortierung hinten nach vorn und das Gesicht scheint durch den Hinterkopf.
+static void check_fade_nearest_surface(){
+    _Make_SinTable();
+    const auto v=[](float x,float y,float z){SceneVertex s;s.position={x,y,z};return s;};
+    Scene scene;scene.background=0xff000000u;
+    auto quad=[&](float z,std::uint32_t color){
+        SceneTriangle a;a.vertices={v(-4,-4,z),v(4,-4,z),v(-4,4,z)};SceneTriangle b;b.vertices={v(4,-4,z),v(4,4,z),v(-4,4,z)};
+        for(auto* t:{&a,&b}){t->color=color;t->world_lit=true;t->camera_mask=false;t->after_modifiers=true;scene.triangles.push_back(*t);}};
+    quad(20,0xff00ff00u); // Gesicht (hinten), zuerst
+    quad(10,0xff0000ffu); // Hinterkopf (vorn)
+    NJS_MATRIX identity;njUnitMatrix(&identity);
+    const auto centre=[&](const Scene& s){SoftwareRenderer r(64,64);r.set_supersampling(1);r.set_texture_filtering(false);
+        r.draw_view(s,identity,32,32,false,{},1,100);return r.pixels()[32*64+32];};
+    auto with_prepass=scene;ThirdPersonCamera::fade_actor(with_prepass.triangles,0,.5f);
+    check(with_prepass.triangles.size()==8,"fade_actor must add one depth-only copy per surface triangle");
+    const auto shown=centre(with_prepass);
+    check(((shown>>8)&255)==0,"faded player: the far face shows through the near surface");
+    const unsigned near=std::max(shown&255u,(shown>>16)&255u);
+    check(near>100&&near<160,"faded player: near surface must be half transparent over the background (depth-only pass drew colour?)");
+    // Gegenprobe: das bisherige Ausblenden ohne Vorpass laesst das Gesicht durchscheinen.
+    auto old=scene;for(auto& t:old.triangles){t.blend=SceneBlend::Alpha;t.color=(t.color&0x00ffffffu)|(128u<<24);}
+    check(((centre(old)>>8)&255)>0,"counter-check: fade without depth pre-pass must let the far face through");
+    auto opaque=scene;ThirdPersonCamera::fade_actor(opaque.triangles,0,1.f);
+    check(opaque.triangles.size()==4&&centre(opaque)==centre(scene),"alpha 1 must leave the player unchanged");
+}
 int main(){try{
     _Make_SinTable();
+    check_fade_nearest_surface();
     const auto stamp=std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     const auto path=std::filesystem::temp_directory_path()/("recvx-third-person-"+stamp+".ini");
     struct Cleanup{std::filesystem::path p;~Cleanup(){std::error_code e;std::filesystem::remove(p,e);}}cleanup{path};
