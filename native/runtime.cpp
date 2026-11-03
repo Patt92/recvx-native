@@ -317,6 +317,13 @@ static int recvx_runtime_main(int argc,char** argv){
         auto args=options(argc,argv);
 #if defined(RECVX_IOS)
         apply_ios_locations(args);
+#if !defined(RECVX_TVOS)
+        // Host: eigene Spieldaten in Documents/data (mehrere GB) nicht ins iCloud-/Geraetebackup; Spielstaende unter
+        // Application Support bleiben im Backup. Ein im Bundle liegendes data/ betrifft das nicht.
+        {const char* home=std::getenv("HOME");const auto documents_data=home?fs::path(home)/"Documents"/"data":fs::path();
+         std::error_code ec;if(home&&args.data==documents_data&&fs::is_directory(documents_data,ec)){std::string reason;
+             if(!recvx::ios_exclude_from_backup(documents_data.u8string().c_str(),reason))std::cerr<<"Backup exclusion of "<<documents_data<<" failed: "<<reason<<'\n';}}
+#endif
 #endif
 #if defined(RECVX_ANDROID)
         apply_android_locations(args);
@@ -2171,6 +2178,13 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
              std::cout<<"Draw: content "<<1000.0*draw_content_seconds/n<<" (compose "<<1000.0*compose_seconds/n<<", ntx2d "<<1000.0*diag_2d[0]/n<<", trs2d "<<1000.0*diag_2d[1]/n<<", fnc "<<1000.0*diag_2d[2]/n<<"); setup "<<1000.0*t.setup/n<<", gpu "<<1000.0*t.gpu/n<<", bands "<<1000.0*t.bands/n<<", shadow "<<1000.0*t.shadow/n<<", lines "<<1000.0*t.lines/n<<" ms/frame\n";}
             report();return events&&!events->errors.empty()?1:0;
         }
+#if defined(RECVX_IOS)
+        // Host (iOS/iPadOS): Home-Indikator ausblenden und Randgesten erst beim zweiten Wischen ausfuehren ("2"),
+        // damit Wischen am Rand das Spiel nicht verlaesst. Audio-Kategorie "playback": SDL setzt sonst
+        // AVAudioSessionCategoryPlayback mit MixWithOthers (Ton trotz Stummschalter, gemischt mit fremder Musik);
+        // "ambient" folgt dem Stummschalter und mischt nicht hinein.
+        SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR,"2");SDL_SetHint(SDL_HINT_AUDIO_CATEGORY,"ambient");
+#endif
         SDL_SetMainReady();SDL_SetHint(SDL_HINT_XINPUT_ENABLED,"1");sdl_check(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMECONTROLLER|SDL_INIT_AUDIO)==0);
         if(!args.controller_mappings.empty())sdl_check(SDL_GameControllerAddMappingsFromFile(args.controller_mappings.u8string().c_str())>=0);
         recvx::InputManager devices(input_config);frontend.changed=[&](const recvx::InputConfig& config){devices.configure(config);};
@@ -2264,7 +2278,7 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
         audio_device=SDL_OpenAudioDevice(nullptr,0,&requested,&obtained,0);if(!audio_device)std::cerr<<"Audio output unavailable: "<<SDL_GetError()<<'\n';else SDL_PauseAudioDevice(audio_device,0);
         const double startup_cpu=process_cpu_seconds();const auto startup_wall=std::chrono::steady_clock::now();
         std::optional<SDL_Event> stashed;unsigned events_handled=0,waits=0,immediate_waits=0;double draw_seconds=0;
-        bool running=true,paused=false;bool render_dirty=true;unsigned presented_frames=0,presented_tick=0,represented_frames=0;int slot_index=0;bool shown_by_presenter=false;std::string window_title;unsigned rendered_frames=0;int frame=0;unsigned input_tick=0;double accumulator=0;auto previous=std::chrono::steady_clock::now();
+        bool running=true,paused=false,app_backgrounded=false;bool render_dirty=true;unsigned presented_frames=0,presented_tick=0,represented_frames=0;int slot_index=0;bool shown_by_presenter=false;std::string window_title;unsigned rendered_frames=0;int frame=0;unsigned input_tick=0;double accumulator=0;auto previous=std::chrono::steady_clock::now();
         while(running){
             // Ein beim Warten entnommenes Ereignis wird direkt verarbeitet, nicht zurueckgereiht.
             for(;;){
@@ -2272,6 +2286,14 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
             if(stashed){event=*stashed;stashed.reset();}
             else if(!SDL_PollEvent(&event))break;
             ++events_handled;
+                // Host-Lebenszyklus (iOS/iPadOS/tvOS, Android): im Hintergrund kein Takt, kein Ton, keine Praesentation.
+                // Reiner Halt wie pausiert; kein Spielzustand wird geschrieben. SDL meldet WILLENTERBACKGROUND vor dem
+                // Einfrieren durch das System und DIDENTERFOREGROUND nach der Rueckkehr.
+                if(event.type==SDL_APP_WILLENTERBACKGROUND||event.type==SDL_APP_DIDENTERBACKGROUND){
+                    if(!app_backgrounded){app_backgrounded=true;if(audio_device)SDL_PauseAudioDevice(audio_device,1);}continue;}
+                if(event.type==SDL_APP_WILLENTERFOREGROUND||event.type==SDL_APP_DIDENTERFOREGROUND){
+                    if(app_backgrounded){app_backgrounded=false;previous=std::chrono::steady_clock::now();accumulator=0;devices.suppress_held();render_dirty=true;
+                        if(audio_device&&!debug.active())SDL_PauseAudioDevice(audio_device,0);}continue;}
                 // game.c:357 zeichnet einmal je Takt (bhPutModel(plp) zaehlt pl_sleep_cnt im Zeichenpass ab).
                 // Reine Bewegungsereignisse (Maus, Stick-/Achsenrauschen) aendern ohne Takt kein Bild und
                 // duerfen keinen zusaetzlichen Zeichenpass ausloesen; nur die Titel-Tastenaufnahme liest Achsen.
@@ -2309,6 +2331,8 @@ if(!args.write_controls.empty()){recvx::InputConfig::write_defaults(args.write_c
                 }
             }
             if(!running)break;
+            // Im Hintergrund: auf das naechste Ereignis warten (Rueckkehr), ohne Takt und ohne Praesentation.
+            if(app_backgrounded){SDL_Event pending{};if(SDL_WaitEventTimeout(&pending,250)==1)stashed=pending;continue;}
             const auto now=std::chrono::steady_clock::now();const double dt=std::min(0.1,std::chrono::duration<double>(now-previous).count());previous=now;
             const auto* keys=SDL_GetKeyboardState(nullptr);const float speed=float((keys[SDL_SCANCODE_LSHIFT]?25.0:8.0)*dt);
             if(args.preview&&(keys[SDL_SCANCODE_D]||keys[SDL_SCANCODE_A]||keys[SDL_SCANCODE_S]||keys[SDL_SCANCODE_W]||keys[SDL_SCANCODE_E]||keys[SDL_SCANCODE_Q]))automatic_camera=false;

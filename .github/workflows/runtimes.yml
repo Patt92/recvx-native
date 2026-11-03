@@ -145,6 +145,40 @@ jobs:
           path: build/android-arm64/RECVX-Native.apk
           if-no-files-found: error
 
+  # iOS/iPadOS: device build without game data (the app reads Documents/data), the unsigned IPA as artifact,
+  # plus the simulator build. Checks: policy, packaging/version unit tests (tests/build_native_test.py) and the
+  # app/IPA structure (tools/check_ios_bundle.py). Needs Xcode with an iOS 27 SDK (UIScene lifecycle).
+  ios:
+    name: iOS/iPadOS
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # CFBundleVersion = git rev-list --count HEAD; must rise for in-place IPA updates
+      - name: Tools
+        run: brew install ninja
+      - name: Xcode
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+      - name: Policy check
+        run: python3 tools/check_no_original_core.py
+      - name: Packaging and version tests
+        run: python3 tests/build_native_test.py
+      - name: Build device app and unsigned IPA
+        run: ./build.sh --platform ios --package --output "$RUNNER_TEMP/ipa"
+      - name: Check app and IPA structure
+        run: python3 tools/check_ios_bundle.py --target ios --ipa "$RUNNER_TEMP/ipa/RECVX-Native-unsigned.ipa"
+      - name: Build simulator app
+        run: |
+          ./build.sh --platform ios-simulator
+          python3 tools/check_ios_bundle.py --target ios-simulator
+      - uses: actions/upload-artifact@v7
+        with:
+          name: recvx-ios-unsigned
+          path: ${{ runner.temp }}/ipa/RECVX-Native-unsigned.ipa
+          if-no-files-found: error
+
   # Publishes the four artifacts once every build job succeeded: a tag v* becomes a regular release,
   # every push to main its own prerelease build-<version> (the version the binaries carry). Nothing
   # is deleted; older builds stay listed.

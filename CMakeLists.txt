@@ -39,6 +39,12 @@ if(BUILD_TESTING)
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/app_icons_test.py")
   add_test(NAME development_app_packaging
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/build_native_test.py")
+  # Fertig gebaute iOS-App (build/ios-device) gegen Bundle-ID, Version, Scene, Dateifreigabe, ProMotion, Icons, MetalFX
+  # schwach gelinkt; ohne gebaute App uebersprungen (77). Ab iOS: tools/check_ios_bundle.py --ipa fuer das Paket.
+  if(APPLE AND NOT IOS AND NOT TVOS)
+    add_test(NAME ios_bundle_structure COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ios_bundle.py" --target ios)
+    set_tests_properties(ios_bundle_structure PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
   add_test(NAME native_port_policy_contracts
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/port_policy_test.py")
   add_test(NAME build_coverage
@@ -499,9 +505,19 @@ if(RECVX_BUILD_RUNTIME)
   endif()
   # No original engine or historical console audit target is permitted.
   target_link_libraries(recvx-runtime PRIVATE recvx_input)
+  # Host-Praesentationsstufe mit MetalFX (native/metalfx_present.h) auf macOS, iOS/iPadOS und tvOS: schwach
+  # gelinkt, Klassen hinter @available (MetalFX ab macOS 13 / iOS 16 / tvOS 16). Die Simulator-SDKs liefern kein
+  # MetalFX.framework; dort bleibt der SDL-Kopierpfad (Geraet und Simulator teilen sonst denselben Code).
+  set(recvx_metalfx OFF)
   if(APPLE)
-    # Host-Praesentationsstufe mit MetalFX (native/metalfx_present.h) auf macOS, iOS/iPadOS und tvOS:
-    # schwach gelinkt, Klassen hinter @available (MetalFX ab macOS 13 / iOS 16 / tvOS 16).
+    string(TOLOWER "${CMAKE_OSX_SYSROOT}" recvx_sysroot)
+    if(recvx_sysroot MATCHES "simulator")
+      message(STATUS "MetalFX presentation stage: off (simulator SDK has no MetalFX.framework)")
+    else()
+      set(recvx_metalfx ON)
+    endif()
+  endif()
+  if(recvx_metalfx)
     set_source_files_properties(native/metalfx_present.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-fobjc-arc")
     target_sources(recvx-runtime PRIVATE native/metalfx_present.mm)
     target_compile_definitions(recvx-runtime PRIVATE RECVX_HAVE_METALFX=1)

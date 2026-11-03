@@ -438,5 +438,95 @@ class IosTargetTests(unittest.TestCase):
         self.assertEqual(build_native.ios_build_directory('ios-simulator').name, 'ios-simulator')
 
 
+class IosPackagingTests(unittest.TestCase):
+    """package_ios_app/finish_ios_app on a fake bundle: no Xcode, lipo/otool/codesign are mocked."""
+
+    def fake_app(self, root: Path) -> Path:
+        app = root / 'recvx-runtime.app'
+        (app / 'Frameworks').mkdir(parents=True)
+        (app / 'recvx-runtime').write_bytes(b'\xcf\xfa\xed\xfe')
+        (app / 'recvx-runtime').chmod(0o755)
+        (app / 'Frameworks/libSDL2.dylib').write_bytes(b'lib')
+        (app / 'Frameworks/current').symlink_to('libSDL2.dylib')
+        with (app / 'Info.plist').open('wb') as handle:
+            plistlib.dump({'CFBundleIdentifier': 'org.recvx.native', 'CFBundleExecutable': 'recvx-runtime'}, handle)
+        return app
+
+    def test_ipa_layout_symlinks_and_permissions(self):
+        import stat
+        import zipfile
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = self.fake_app(root)
+            ipa = root / 'out/RECVX-Native-unsigned.ipa'
+            build_native.package_ios_app(app, ipa)
+            with zipfile.ZipFile(ipa) as archive:
+                names = archive.namelist()
+                self.assertTrue(all(name.startswith('Payload/recvx-runtime.app') for name in names), names)
+                self.assertFalse(any('__MACOSX' in name for name in names))
+                self.assertIsNone(archive.testzip())
+                link = archive.getinfo('Payload/recvx-runtime.app/Frameworks/current')
+                self.assertTrue(stat.S_ISLNK(link.external_attr >> 16))
+                self.assertEqual(archive.read(link), b'libSDL2.dylib')
+                runtime = archive.getinfo('Payload/recvx-runtime.app/recvx-runtime')
+                self.assertEqual(stat.S_IMODE(runtime.external_attr >> 16), 0o755)
+            self.assertFalse(ipa.with_name(ipa.name + '.partial').exists())
+            # Existing packages are never overwritten.
+            with self.assertRaises(RuntimeError):
+                build_native.package_ios_app(app, ipa)
+
+    def finish(self, app: Path, target: str, bundle_data: bool):
+        platform_id = build_native.APPLE_TARGETS[target][1]
+        outputs = {'lipo': 'arm64\n', 'otool': f'Load command 9\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform {platform_id}\n'}
+        check_output = lambda command, **_: outputs[Path(str(command[0])).name]
+        with patch.object(build_native.subprocess, 'check_output', side_effect=check_output), \
+             patch.object(build_native.subprocess, 'run'), patch.object(build_native, 'run'), \
+             patch.object(build_native, 'print'):
+            return build_native.finish_ios_app(app, target, None, bundle_data)
+
+    def test_finished_plist_carries_build_version_and_icons(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = self.fake_app(Path(temporary))
+            (app / 'data').mkdir()
+            self.assertFalse(self.finish(app, 'ios', bundle_data=False))  # unsigned device build
+            with (app / 'Info.plist').open('rb') as handle:
+                info = plistlib.load(handle)
+            self.assertEqual(info['CFBundleVersion'], build_native.FULL_VERSION)
+            self.assertEqual(info['CFBundleShortVersionString'], build_native.FULL_VERSION)
+            self.assertEqual(info['CFBundleSupportedPlatforms'], ['iPhoneOS'])
+            self.assertEqual(info['CFBundleIdentifier'], 'org.recvx.native')
+            self.assertIn('CFBundleIcons~ipad', info)
+            for name in build_native.IOS_ICONS:
+                self.assertTrue((app / name).is_file(), name)
+            # A stale bundled data/ would shadow Documents/data after an update.
+            self.assertFalse((app / 'data').exists())
+
+    def test_finish_rejects_wrong_platform(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = self.fake_app(Path(temporary))
+            with self.assertRaises(RuntimeError):
+                self.finish_with_platform(app, 'ios', '1')  # macOS binary in an iOS app
+
+    def finish_with_platform(self, app: Path, target: str, platform_id: str):
+        outputs = {'lipo': 'arm64\n', 'otool': f'cmd LC_BUILD_VERSION\n  cmdsize 32\n platform {platform_id}\n'}
+        with patch.object(build_native.subprocess, 'check_output', side_effect=lambda command, **_: outputs[Path(str(command[0])).name]), \
+             patch.object(build_native.subprocess, 'run'), patch.object(build_native, 'run'):
+            return build_native.finish_ios_app(app, target, None, False)
+
+
+class VersionTests(unittest.TestCase):
+    """In-place IPA updates need a CFBundleVersion that rises with every commit."""
+
+    def test_full_version_is_major_minor_commit_count(self):
+        self.assertRegex(build_native.FULL_VERSION, r'^\d+\.\d+\.\d+$')
+        self.assertTrue(build_native.FULL_VERSION.startswith(build_native.VERSION + '.'))
+        try:
+            count = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'], cwd=build_native.ROOT, text=True,
+                                            stderr=subprocess.DEVNULL).strip()
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest('no git repository')
+        self.assertEqual(build_native.FULL_VERSION.rsplit('.', 1)[1], count)
+
+
 if __name__ == '__main__':
     unittest.main()

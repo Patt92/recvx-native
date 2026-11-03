@@ -35,6 +35,10 @@
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<!-- ProMotion: ohne diesen Schluessel haelt iOS Metal-Praesentationen auf iPhones bei 60 Hz; die Runtime klemmt
+	     frame_rate 60/120 auf die gemeldete Bildwiederholrate (runtime.cpp, slots). iPads brauchen ihn nicht. -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UIStatusBarHidden</key>

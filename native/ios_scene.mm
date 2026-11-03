@@ -32,4 +32,11 @@ void ios_adopt_scene(SDL_Window* window){
     uiwindow.windowScene=recvx_window_scene;
     [uiwindow makeKeyAndVisible];
 }
+bool ios_exclude_from_backup(const char* path,std::string& reason){
+    NSURL* url=[NSURL fileURLWithPath:[NSString stringWithUTF8String:path] isDirectory:YES];
+    NSError* error=nil;
+    if([url setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&error])return true;
+    reason=error?error.localizedDescription.UTF8String:"NSURLIsExcludedFromBackupKey not set";
+    return false;
+}
 }

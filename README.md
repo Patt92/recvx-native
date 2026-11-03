@@ -40,7 +40,7 @@ brought up separately from the shared gameplay code.
 | **Windows x64** | Build support, the Direct3D 11 backend and optional Vulkan and Direct3D 12 backends are present; validated Windows releases are planned. |
 | **Windows ARM64** | Native build with Visual Studio 2026 Insiders (MSVC 19.52, Ninja) on Windows 11 ARM64, with Direct3D 11 on the Parallels Display Adapter (WDDM GPU) and software rendering verified. |
 | **Linux** | Native build with OpenGL selected by default and optional Vulkan; Linux driver/hardware validation remains open. |
-| **iOS/iPadOS** | Runs on iPhone (iOS 27) and iPad with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`); tested by hand by the project owner on both devices. No touch controls and no automated iOS tests yet. |
+| **iOS/iPadOS** | Runs on iPhone (iOS 27) and iPad with a Bluetooth game controller — the native build plays as it is, sideloaded as an IPA (`./build.sh --platform ios`); tested by hand by the project owner on both devices. CI builds the device and simulator apps and checks packaging and bundle structure; no automated gameplay run on iOS. No touch controls yet. |
 | **Android** | Native arm64 APK (`./build.sh --platform android`, API 26+) with optional Vulkan as GPU default and software fallback; game data loose on the device. Runs in the arm64 emulator; real devices, touch controls and release signing are open. |
 | **Web (Firefox, Chrome)** | The native engine as WebAssembly, served by a Docker container on port 8722 (`docker compose up -d`, or the prebuilt [`ghcr.io/patt92/recvx-native-web`](https://github.com/Patt92/recvx-native/pkgs/container/recvx-native-web) image); software rasterizer on worker threads, WebGL 2 presentation, saves in the browser. Verified in Firefox and Chromium on macOS from the title through free play and LOAD GAME. |
 | **Apple TV** | Native tvOS build sharing the iOS path (`./build.sh --platform tvos`): Metal, bundled compressed data, Bluetooth game controller. Builds and links; not yet started on a device (the iPhone/iPad tests do not cover tvOS). |
@@ -438,8 +438,12 @@ with its number of HD textures, and per room how many textures came from HD, mod
 
 The iOS build runs the game on iPhone (iOS 27) and iPad with a Bluetooth game
 controller; the project owner has tested both by hand. It is played through
-sideloading, not the App Store. There are no automated iOS tests yet (iOS
-builds configure with `BUILD_TESTING=OFF`, GitHub Actions has no iOS job).
+sideloading, not the App Store. GitHub Actions builds the device and simulator
+apps (job *iOS/iPadOS*, unsigned IPA as artifact `recvx-ios-unsigned`) and checks
+the IPA packaging, the version and the app structure (`tools/check_ios_bundle.py`:
+bundle id, rising `CFBundleVersion`, UIScene delegate, file sharing, ProMotion,
+icons, weakly linked MetalFX, no stale bundled `data/`). There is no automated
+gameplay run on iOS; the game itself is tested by hand.
 Needs a Mac with Xcode (iOS SDK) and prepared data (see macOS above).
 
 **Build an unsigned IPA** (the normal route; no Apple developer account needed
@@ -482,6 +486,21 @@ signed with a certificate tied to your Apple ID before it goes on the device:
 Neither route touches the game: the IPA is the same native build, only the
 signature differs. Input is a Bluetooth game controller (same bindings as the
 desktop controller page); touch controls do not exist yet.
+
+**Updates.** A newer IPA installs over the old one and keeps saves, snapshots,
+settings and `Documents/data`, as long as the bundle identifier and the signing
+team stay the same (same sideloader account or the same certificate). The build
+number (`CFBundleVersion`, `0.5.<commit count>`) rises with every commit on
+`main`; a build without git history gets `.0`, which the bundle check rejects.
+With `--ios-bundle-data` the game data is inside the app and is transferred again
+with every update; without it, `Documents/data` stays.
+
+**Host behaviour on iPhone and iPad:** the app halts in the background (no game
+tick, no sound, no presentation) and continues where it stopped; nothing is saved
+automatically. The home indicator is hidden and edge swipes need a second swipe.
+Sound follows the silent switch and does not mix into other apps' audio.
+`Documents/data` is excluded from the iCloud/device backup (saves are not).
+ProMotion iPhones can present at 120 Hz with the frame-rate setting.
 `./build.sh --platform ios-simulator --install` builds and installs an ad hoc
 signed simulator app (`build/ios-simulator`).
 
