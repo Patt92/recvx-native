@@ -101,6 +101,7 @@ struct CombatOriginal {
     std::function<int(const RECVX_CB_VEC*)> check_water;
     std::function<void(const RECVX_CB_VEC*,int,int,float,float,float)> water_splash4;
     std::function<void(uint32_t,int32_t,uint32_t,uint32_t,int32_t)> set_motion_pose;
+    std::function<int(const RECVX_CB_WEAPON_OBJECT*,uint32_t,float*)> weapon_node;
     explicit CombatOriginal(const PlayerAsset& player):asset(&player){
         tables.wpn=reinterpret_cast<const RECVX_CB_WPN_TAB*>(WpnTab);
         tables.eff=reinterpret_cast<RECVX_CB_EF_WORK(*)[4]>(WpnEffTab);
@@ -137,6 +138,7 @@ struct CombatOriginal {
         s.water_splash4=[](void* p,const RECVX_CB_VEC* pos,int32_t ang,int32_t type,float sx,float sy,float sz){auto* c=static_cast<CombatOriginal*>(p);if(c->water_splash4)c->water_splash4(pos,int(ang),int(type),sx,sy,sz);};
         // Motion.c:21 Knotenteil auf plp->mlwP->objP des Spielerbesitzers.
         s.set_motion_pose=[](void* p,uint32_t mtn,int32_t frm,uint32_t mode,uint32_t count,int32_t rate){auto* c=static_cast<CombatOriginal*>(p);if(c->set_motion_pose)c->set_motion_pose(mtn,frm,mode,count,rate);};
+        s.weapon_node=[](void* p,const RECVX_CB_WEAPON_OBJECT* w,uint32_t node,float* out){auto* c=static_cast<CombatOriginal*>(p);return int32_t(c->weapon_node?c->weapon_node(w,node,out):0);};
         // GetOneObjectMotion (playpch.c:185) über die vorhandene Motionquelle.
         s.motion_angle=[](void* p,uint32_t mtn,uint32_t node,uint32_t frame,int32_t* ang)->int32_t{
             auto* c=static_cast<CombatOriginal*>(p);
@@ -296,6 +298,15 @@ bool CombatController::tick(CombatControls input,bool blocked,Inventory& invento
         if(!world)return 0;NJS_POINT3 pt{};if(!world->l2_water({l->px,l->py,l->pz},{l->vx,l->vy,l->vz},pt))return 0;
         *hit={pt.x,pt.y,pt.z};return 1;};
     engine.set_motion_pose=[&](uint32_t mtn,int32_t frm,uint32_t mode,uint32_t count,int32_t rate){if(world)world->player_set_motion_pose(mtn,frm,mode,count,rate);};
+    // weapon.c:369 bhCalcModel(obwp[0]) im laufenden Pass: plp->owP[lkono] (Kampfkern, letzte bhCalcModel(plp)),
+    // Rxyz(ax, ay, az) aus bhObjWpn und objP[2] mit Schlitten/Trommel des Waffenobjekts.
+    engine.weapon_node=[this,&engine](const RECVX_CB_WEAPON_OBJECT* w,uint32_t node,float* out)->int{
+        if(!asset_||!w||w->lkono<0||w->lkono>=int(RECVX_CB_NODES))return 0;
+        NJS_MATRIX hand;std::copy_n(engine.player().owp_mtx[w->lkono],16,hand);
+        // Nur die Trommel ruft diesen Dienst (weapon.c:369); sie schreibt allein objP[2].ang[1], pos[0] bleibt die Modelllage
+        // (Granatwerfer 1.061, der Schlitten 0x80000/0x400000 laeuft auf diesen Waffen nie).
+        std::map<unsigned,ModelPose> parts;if(asset_->right_nodes.size()>2){auto p2=asset_->right_nodes[2].pose;p2.angles[1]=w->part_ang1;parts[2]=p2;}
+        const auto m=asset_->right_node_matrix(hand,w->ax,w->ay,w->az,node,parts);if(!m)return 0;std::copy(m->begin(),m->end(),out);return 1;};
     engine.check_water=[&](const RECVX_CB_VEC* pos)->int{float top;return world&&world->water_top({pos->x,pos->y,pos->z},top)?1:0;};
     engine.water_splash4=[&](const RECVX_CB_VEC* pos,int ang,int type,float sx,float sy,float sz){if(world)world->water_splash4({pos->x,pos->y,pos->z},ang,type,sx,sy,sz);};
     // Kampfsicht auf den einen Spielerwork: Lage/Winkel kommen je Pass vom

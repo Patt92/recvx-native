@@ -266,6 +266,9 @@ typedef struct {
        Motion.c:131-859) auf plp->mlwP->objP des Posenbesitzers: Stand VOR Vorschub und
        hokan_count-Abzug. Ohne Dienst bleibt die Mischung eine benannte Luecke. */
     void    (*set_motion_pose)(void* user, uint32_t mtn_no, int32_t frm_no, uint32_t mode, uint32_t hokan_count, int32_t hokan_rate);
+    /* weapon.c:369 bhCalcModel(obwp[0]) im Trommelzweig: owP[node].mtx des rechten Waffenmodells unter
+       plp->owP[lkono] * Rxyz(ax, ay, az), mit objP[2].ang[1] = part_ang1 (Trommel). 0 = kein Modell. */
+    int32_t (*weapon_node)(void* user, const RECVX_CB_WEAPON_OBJECT* weapon, uint32_t node, float mtx[16]);
 } RECVX_COMBAT_SERVICES;
 
 /* Eingabe/Ausgabe eines Passes. Zaehler laufen ueber die Lebensdauer des

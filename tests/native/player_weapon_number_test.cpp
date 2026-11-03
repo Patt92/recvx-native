@@ -16,8 +16,11 @@
 #include "binary_view.h"
 #include "snapshot.h"
 #include "combat.h"
+#include "weapon_asset.h"
 #include "ninja_math.h"
 #include <cstdint>
+#include <map>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -106,6 +109,23 @@ int main(int argc,char** argv){try{
         combat.set_weapon_models_hidden(true);
         check(run(inv,{0xAF,0,0,0}),"Feuerzeug-Parken ohne Feuerzeug");tick();
         check(combat.weapon_models_hidden(),"0xAF ohne mn_mode0 3 darf das Waffenwerk nicht neu initialisieren");
+    }
+    {   // weapon.c:369 bhCalcModel(obwp[0]) (MdlPut.c:240, flg 0x80 an plp): owP_plp[lkono] * Rxyz(WpnAngTab) und darunter
+        // bhCalcTree ueber den objP-Baum des echten Granatwerfermodells (Waffe 14, Claire): owP[2] = ... T(pos) Rxyz(ang)
+        // je Knoten 0 -> 1 -> 2, mit objP[2].ang[1] als Trommelwinkel. Erwartung aus den Modelldaten neu gerechnet.
+        const auto launcher=WeaponAsset::load(data,0,14);check(launcher.right_nodes.size()==3,"weapon 14: three right model objects expected");
+        check(launcher.right_nodes[0].child==1&&launcher.right_nodes[1].child==2&&launcher.right_nodes[2].child==-1&&launcher.right_nodes[0].sibling==-1,"weapon 14: object chain 0 -> 1 -> 2");
+        check(launcher.right_nodes[2].pose.position.x==1.061f||std::fabs(launcher.right_nodes[2].pose.position.x-1.061f)<1e-3f,"weapon 14: objP[2].pos[0] rest 1.061");
+        NJS_MATRIX hand;njUnitMatrix(&hand);njTranslate(&hand,3,4,5);njRotateY(&hand,4096);
+        for(int drum:{0,9100,18204}){
+            NJS_MATRIX m;std::copy_n(hand,16,m);njRotateXYZ(&m,0,60439,546);
+            for(unsigned n=0;n<3;++n){auto pose=launcher.right_nodes[n].pose;if(n==2)pose.angles[1]=drum;
+                njTranslate(&m,pose.position.x,pose.position.y,pose.position.z);njRotateXYZ(&m,pose.angles[0],pose.angles[1],pose.angles[2]);}
+            std::map<unsigned,ModelPose> parts;auto p2=launcher.right_nodes[2].pose;p2.angles[1]=drum;parts[2]=p2;
+            const auto got=launcher.right_node_matrix(hand,0,60439,546,2,parts);check(bool(got),"weapon 14: owP[2] unavailable");
+            for(unsigned i=0;i<16;++i)check(std::fabs((*got)[i]-m[i])<1e-5f,"weapon 14: owP[2] differs from bhCalcModel/bhCalcTree");}
+        check(!launcher.right_node_matrix(hand,0,0,0,3),"weapon 14: node outside the object table must be absent");
+        std::cout<<"weapon 14: bhCalcModel(obwp[0]) owP[2] for the drum effect\n";
     }
     std::cout<<"plp->wpnr_no PASS\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

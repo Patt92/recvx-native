@@ -1597,9 +1597,29 @@ static void cb_action_weapon(RECVX_COMBAT_CORE* c) {
         case 0: {
             const int32_t rr = (p->ply_id != 0) ? 21845 : 18204;
             if (o->part_ang1 < rr) {
+                int32_t ang;
+                float nn, mtx[16];
                 o->part_ang1 += (p->ply_id == 0) ? 1820 : 2730;
                 if (o->part_ang1 >= rr) o->part_ang1 = rr;
-                cb_gap(c, "bhActionWeapon Trommeleffekt (bhEff002, weapon.c:360)");
+                ang = o->part_ang1;
+                if (ang > 16384) ang = 16384;
+                nn = njSin(ang);
+                /* weapon.c:369-394: bhCalcModel(op), sys->ef.px = owP[2] * (-0.5, 0, 1), bhEff002 type 9. */
+                if (!c->services.weapon_node || !c->services.weapon_node(c->services.user, o, 2, mtx)) {
+                    cb_gap(c, "bhActionWeapon Trommeleffekt: obwp[0].mlwP->owP[2] (weapon.c:369)");
+                } else {
+                    RECVX_CB_EFFECT req;
+                    NJS_POINT3 at = {-0.5f, 0.0f, 1.0f}, pos;
+                    njCalcPoint((NJS_MATRIX*)mtx, &at, &pos);
+                    memset(&req, 0, sizeof req);
+                    req.ef.px = pos.x; req.ef.py = pos.y; req.ef.pz = pos.z;
+                    req.ef.id = 2; req.ef.flg = 0x4100001; req.ef.type = 9; req.ef.flr_no = 3; req.ef.mdlver = 1;
+                    req.ef.sy = req.ef.sx = 2.0f * nn;
+                    req.ef.sz = 0.4f * nn;
+                    req.ef.ax = 0; req.ef.ay = 0;
+                    req.sys_ef = 2; /* bhSetEffectTb(&sys->ef, NULL, NULL, 0): alle Felder in die Vorlage */
+                    cb_effect(c, &req);
+                }
             }
             break;
         }

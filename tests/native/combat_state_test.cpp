@@ -69,6 +69,7 @@ struct Fixture {
     bool water_hit = false; RECVX_CB_VEC water_at{}; unsigned water_calls = 0;
     RECVX_CB_LINE water_line{}; bool water_inside = true; unsigned water_checks = 0;
     std::vector<RECVX_CB_EFFECT> requests;
+    bool weapon_node_bound = true; std::vector<std::pair<std::uint32_t, std::int32_t>> weapon_node_calls;
     struct Splash { RECVX_CB_VEC pos; std::int32_t ang, type; float sx, sy, sz; };
     std::vector<Splash> splashes;
     std::uint32_t pt = ~0u;   /* sys->pt_flg (system.c: Startwert ~0) */
@@ -177,6 +178,14 @@ struct Fixture {
         s.motion_angle = [](void*, std::uint32_t, std::uint32_t, std::uint32_t,
                             std::int32_t* ang) -> std::int32_t {
             ang[0] = ang[1] = ang[2] = 0; return 1;
+        };
+        /* weapon.c:369 bhCalcModel(obwp[0]) -> owP[2]: hier eine reine Funktion der Trommeldrehung, damit der
+           Test die Anforderung aus objP[2].ang[1] nachrechnen kann. */
+        s.weapon_node = [](void* p, const RECVX_CB_WEAPON_OBJECT* w, std::uint32_t node, float* out) -> std::int32_t {
+            auto* f = static_cast<Fixture*>(p); if (!f->weapon_node_bound) return 0;
+            f->weapon_node_calls.push_back({node, w->part_ang1});
+            NJS_MATRIX m; njUnitMatrix(&m); njTranslate(&m, 1.0f, 2.0f, 3.0f); njRotateY(&m, w->part_ang1);
+            std::memcpy(out, m, sizeof m); return 1;
         };
         core = recvx_combat_create(&tables, &s);
         check(core != nullptr, "combat core allocation failed");
@@ -398,6 +407,50 @@ void test_reload() {
     for (int se : f.sounds) if (se == 260) empty_click = true;
     check(empty_click, "empty magazine did not play SE 260");
     check(f.res.mode2 != 69, "empty magazine still fired");
+}
+
+/* weapon.c:217 bhActionWeapon, flg 0x800000 (Trommel des Granatwerfers 14..17, WpnTab.flg 0x400): beim
+   Nachladen (player.c:5996) dreht objP[2].ang[1] je Pass um 1820 (Claire) bis 18204 (elf Schritte) und setzt je Schritt
+   bhEff002 type 9 an owP[2] * (-0.5, 0, 1) mit Groesse 2/2/0.4 * sin(min(ang, 16384)) (weapon.c:360-394). */
+void test_grenade_drum() {
+    check((WpnTab[14].flg & 0x400u) != 0, "WpnTab 14 lost the drum flag 0x400");
+    Fixture f;
+    f.equip(14);
+    f.ammo = 0; f.spare = 6;
+    f.tick(true, false);
+    check(f.run_until(65, 30), "grenade launcher never reached act_wpn");
+    f.requests.clear(); f.weapon_node_calls.clear();
+    f.tick(true, true);
+    check(f.res.mode2 == 70, "empty grenade launcher did not reach bhCPM2_act_rld");
+    std::vector<RECVX_CB_EFFECT> drum;
+    for (unsigned i = 0; i < 30; ++i) {
+        for (const auto& e : f.requests) if (e.ef.id == 2 && e.ef.type == 9) drum.push_back(e);
+        f.requests.clear();
+        f.tick(true, false);
+    }
+    for (const auto& e : f.requests) if (e.ef.id == 2 && e.ef.type == 9) drum.push_back(e);
+    check(drum.size() == 11, "drum: eleven bhEff002 steps (10 * 1820 = 18200 < 18204, the eleventh clamps to 18204) expected, got " + std::to_string(drum.size()));
+    check(f.weapon_node_calls.size() == drum.size(), "drum: one bhCalcModel(obwp[0]) per step");
+    for (std::size_t k = 0; k < drum.size(); ++k) {
+        const std::int32_t ang = std::min<std::int32_t>(std::int32_t(1820 * (k + 1)), 18204);
+        check(f.weapon_node_calls[k].first == 2 && f.weapon_node_calls[k].second == ang, "drum: owP[2] at the current objP[2].ang[1]");
+        const float nn = njSin(std::min<std::int32_t>(ang, 16384));
+        NJS_MATRIX m; njUnitMatrix(&m); njTranslate(&m, 1.0f, 2.0f, 3.0f); njRotateY(&m, ang);
+        NJS_POINT3 at{-0.5f, 0.0f, 1.0f}, pos; njCalcPoint(&m, &at, &pos);
+        const auto& e = drum[k];
+        check(e.ef.flg == 0x4100001u && e.ef.flr_no == 3 && e.ef.mdlver == 1 && e.ef.ax == 0 && e.ef.ay == 0 && !e.link_player && !e.has_offset && e.sys_ef == 2,
+              "drum: bhEff002 template fields (weapon.c:378-391)");
+        check(e.ef.sx == 2.0f * nn && e.ef.sy == 2.0f * nn && e.ef.sz == 0.4f * nn, "drum: size 2/2/0.4 * sin(min(ang, 16384))");
+        check(e.ef.px == pos.x && e.ef.py == pos.y && e.ef.pz == pos.z, "drum: position owP[2] * (-0.5, 0, 1)");
+    }
+    for (const auto& g : f.gaps) check(g.find("Trommeleffekt") == std::string::npos, "drum: gap still reported: " + g);
+    /* Ohne Waffenmodell meldet der Kern die Luecke benannt und setzt nichts ab. */
+    Fixture g; g.weapon_node_bound = false; g.equip(14); g.ammo = 0; g.spare = 6;
+    g.tick(true, false); check(g.run_until(65, 30), "grenade launcher (no model) never reached act_wpn");
+    g.requests.clear(); g.tick(true, true);
+    bool any = false; for (unsigned i = 0; i < 20; ++i) { g.tick(true, false); for (const auto& e : g.requests) if (e.ef.id == 2 && e.ef.type == 9) any = true; }
+    bool named = false; for (const auto& n : g.gaps) if (n.find("Trommeleffekt") != std::string::npos) named = true;
+    check(!any && named, "drum without obwp[0] model: no effect, named gap");
 }
 
 /* --- A01: Zielwahl, Zielwechsel, Wandverdeckung ------------------------- */
@@ -981,6 +1034,7 @@ int main() {
         test_tables();
         test_draw_fire_holster();
         test_reload();
+ test_grenade_drum();
         test_targeting();
         test_aim_elevation();
         test_knife();

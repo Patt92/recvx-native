@@ -23,6 +23,14 @@ current code, working tree and installed runtime.
 
 ## Working tree and delivery
 
+**Grenade launcher drum effect ported (2026-11-03, working tree):** weapon.c:360 bhActionWeapon drum (flg 0x800000)
+now runs bhCalcModel(obwp[0]) and requests bhEff002 type 9 at owP[2] * (-0.5, 0, 1) per step during the reload, as
+the original (was a named gap). The host supplies owP[2] from the right weapon model's object tree
+(WeaponAsset::right_node_matrix, bhCalcModel flg 0x80 + bhCalcTree). Tests combat_player_state test_grenade_drum and
+player_weapon_number (real weapon 14 model), both with counter-checks. The weapon-controller ledger note (weapons
+10/11/18/19/20 "locked") was stale: they are enabled and tested. Report 83.9 % fully evidenced (624/744). Not seen in
+the window. **No commit.**
+
 **Port evidence batch (2026-11-03, working tree):** done now with native evidence and counter-checks: sub1.c GetItem
 review (was unconfirmed; endless stack test), event.c bhWalAtariSet2 (RM_5630 field-exact), bhLoadWork2 cases 1/2,
 effsub4.c 362/370/371-373 (fade per step, child speed, world run in RM_0080), bhEff_Sub398 (RM_3130), effsub1.c bhEff000
